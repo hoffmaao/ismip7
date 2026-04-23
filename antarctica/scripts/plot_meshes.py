@@ -1,0 +1,86 @@
+#!/usr/bin/env python3
+"""
+Plot generated Antarctic meshes using Firedrake's triplot.
+
+Uses the same mesh visualization approach as the icepack tutorials.
+
+Usage:
+    python scripts/plot_meshes.py
+"""
+
+import os
+import glob
+import firedrake
+import matplotlib.pyplot as plt
+from icepack.plot import subplots
+
+_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+MESH_DIR = os.path.join(_ROOT, "mesh")
+FIG_DIR = os.path.join(_ROOT, "figs")
+
+
+def plot_single_mesh(mesh_fn, ax, title):
+    """Plot a single mesh on the given axes using firedrake.triplot."""
+    mesh = firedrake.Mesh(mesh_fn)
+    firedrake.triplot(
+        mesh, axes=ax, interior_kw={"linewidth": 0.1}, boundary_kw={"linewidth": 0.8}
+    )
+    ax.set_title(title)
+    ax.set_xlabel("x (m)")
+    ax.set_ylabel("y (m)")
+
+
+def main():
+    os.makedirs(FIG_DIR, exist_ok=True)
+
+    # Find all mesh files, sorted by resolution (coarsest first)
+    mesh_files = sorted(glob.glob(os.path.join(MESH_DIR, "antarctica_*.msh")))
+    if not mesh_files:
+        print("No mesh files found. Run mesh_antarctica.py first.")
+        return
+
+    n_meshes = len(mesh_files)
+    print(f"Found {n_meshes} mesh file(s)")
+
+    # Multi-panel figure with all resolutions
+    fig, axes = subplots(1, n_meshes, figsize=(5 * n_meshes, 5))
+    if n_meshes == 1:
+        axes = [axes]
+
+    for ax, mesh_fn in zip(axes, mesh_files):
+        basename = os.path.splitext(os.path.basename(mesh_fn))[0]
+        # Extract resolution from filename: antarctica_COARSE_FINE
+        parts = basename.split("_")
+        fine_km = int(parts[-1]) // 1000
+        coarse_km = int(parts[-2]) // 1000
+        title = f"{fine_km}–{coarse_km} km"
+
+        print(f"  Plotting {basename}...")
+        plot_single_mesh(mesh_fn, ax, title)
+
+    fig.suptitle("Antarctica Adaptive Meshes (EPSG:3031)", fontsize=14, y=1.02)
+    fig.tight_layout()
+
+    out_fn = os.path.join(FIG_DIR, "antarctica_meshes.png")
+    fig.savefig(out_fn, dpi=200, bbox_inches="tight")
+    print(f"Saved: {out_fn}")
+    plt.close(fig)
+
+    # Also make individual plots for each mesh (higher detail)
+    for mesh_fn in mesh_files:
+        basename = os.path.splitext(os.path.basename(mesh_fn))[0]
+        parts = basename.split("_")
+        fine_km = int(parts[-1]) // 1000
+        coarse_km = int(parts[-2]) // 1000
+
+        fig, ax = subplots(1, 1, figsize=(10, 10))
+        plot_single_mesh(mesh_fn, ax, f"Antarctica Mesh: {fine_km}–{coarse_km} km")
+
+        out_fn = os.path.join(FIG_DIR, f"{basename}.png")
+        fig.savefig(out_fn, dpi=200, bbox_inches="tight")
+        print(f"Saved: {out_fn}")
+        plt.close(fig)
+
+
+if __name__ == "__main__":
+    main()

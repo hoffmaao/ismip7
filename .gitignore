@@ -1,0 +1,37 @@
+# Data (downloaded separately)
+antarctica/data/
+
+# Generated meshes and checkpoints
+antarctica/mesh/
+
+# Results
+antarctica/results/
+
+# Archive of old code
+antarctica/archive/
+
+# Gmsh intermediates
+*.pos
+*.msh
+*.h5
+
+# Python
+*.pyc
+__pycache__/
+
+# Editor
+*.sw?
+*.un~
+
+# OS
+*.DS_Store
+.ipynb_checkpoints/
+
+# Ua source (reference, not part of repo)
+UaSource/
+# Stray files
+*.tar.gz
+download_log.txt
+.claude/
+antarctica/figs/*.png
+antarctica/figs/*.csv

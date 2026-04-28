@@ -104,9 +104,12 @@ def identify_grounding_line(H, b, rho_I=917.0, rho_W=1024.0, kH=1.0):
         CG1 function: ~1 at the GL, ~0 away from it.
     """
     Q = H.function_space()
-    h_f = (
-        Constant(rho_W / rho_I) * sqrt(Constant(0.0) - b) * sqrt(Constant(0.0) - b)
-    )  # avoid max_value in UFL
+
+    # Not computed since not currently used, but provides alternative approach
+    # h_f = (
+    #     Constant(rho_W / rho_I) * sqrt(Constant(0.0) - b) * sqrt(Constant(0.0) - b)
+    # )  # avoid max_value in UFL
+
     # Simpler: height above flotation
     haf = H - Constant(rho_W / rho_I) * Function(Q).interpolate(
         conditional(-b > Constant(0.0), -b, Constant(0.0))

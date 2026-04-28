@@ -14,11 +14,18 @@ ismip7/
 │   ├── mesh/               # Generated meshes
 │   ├── results/            # Inversion and sensitivity results
 │   └── figs/               # Figures
+├── greenland/              # Greenland ice sheet simulations
+│   ├── scripts/            # Files to get data, preprocess, run model
+│   ├── data/               # Downloaded datasets and mesh outlines
+│   ├── mesh/               # Generated meshes
+│   ├── results/            # Results
+│   └── figs/               # Figures
 ```
 
 ## Dependencies
 
 - [Firedrake](https://firedrakeproject.org)
-- [icepack2](https://github.com/icepack/icepack2)
-- [tlm_adjoint](https://github.com/jrmaddison/tlm_adjoint)
+- [icepack2](https://github.com/icepack/icepack2) (Antarctica only)
+- [tlm_adjoint](https://github.com/jrmaddison/tlm_adjoint) (Antarctica only)
 - gmsh, rasterio, icepack, geopandas, earthaccess
+- cartopy, rioxarray (Greenland only)

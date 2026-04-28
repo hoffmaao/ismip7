@@ -35,3 +35,11 @@ download_log.txt
 .claude/
 antarctica/figs/*.png
 antarctica/figs/*.csv
+
+greenland/figs/*.png
+
+greenland/scripts/test_logs
+
+greenland/data
+
+greenland/cleanup

@@ -158,10 +158,9 @@ def main():
         "ksp_type": "gmres",
         "pc_type": "lu",
         "pc_factor_mat_solver_type": "mumps",
-        "mat_mumps_icntl_14": 200,  # working memory increase
+        "mat_mumps_icntl_14": 400,  # working memory increase
         "mat_mumps_icntl_24": 1,  # detect null pivots
-        "mat_mumps_cntl_3": 1e-10,  # null pivot threshold (relaxed)
-        "mat_mumps_cntl_1": 0.01,  # relaxed pivoting threshold
+        "mat_mumps_cntl_3": 1e-12,  # null pivot threshold
     }
     fc_params = {"quadrature_degree": 4}
 
@@ -251,16 +250,12 @@ def main():
     stop_manager()
     prob = NonlinearVariationalProblem(F, z, form_compiler_parameters=fc_params)
     slvr = NonlinearVariationalSolver(prob, solver_parameters=sparams)
-    if warm_chk:
-        # Already have theta/phi from checkpoint — just do one solve at full n
-        PETSc.Sys.Print("Warm start (single solve from checkpoint)...")
-        n.assign(n_glen_val)
+    # Always use continuation — single solve at n=3 can fail with
+    # checkpoint parameters that create ill-conditioned systems
+    PETSc.Sys.Print("Warm start (continuation n=1→3)...")
+    for exponent in np.linspace(1.0, n_glen_val, 5):
+        n.assign(exponent)
         slvr.solve()
-    else:
-        PETSc.Sys.Print("Warm start (continuation n=1→3)...")
-        for exponent in np.linspace(1.0, n_glen_val, 5):
-            n.assign(exponent)
-            slvr.solve()
     PETSc.Sys.Print("  Done")
 
     u_init = z.subfunctions[0]
@@ -440,7 +435,7 @@ def main():
         x0,
         method="L-BFGS-B",
         jac=True,
-        options={"maxiter": max_iter, "ftol": 1e-15, "gtol": 1e-12, "disp": False},
+        options={"maxiter": max_iter, "ftol": 0, "gtol": 0, "disp": False},
     )
 
     PETSc.Sys.Print(f"\nOptimization finished: {result.message}")

@@ -1,35 +1,47 @@
-# Data (downloaded separately)
+# ── Data (downloaded separately, very large) ──
 antarctica/data/
+data
 
-# Generated meshes and checkpoints
+# ISMIP7 forcing data (mirrored from Globus)
+ISMIP7/
+
+# ── Generated artifacts ──
 antarctica/mesh/
-
-# Results
 antarctica/results/
-
-# Archive of old code
 antarctica/archive/
+antarctica/figs/*.png
+antarctica/figs/*.csv
 
 # Gmsh intermediates
 *.pos
-*.msh
+*_raw.msh
+
+# Firedrake checkpoints
 *.h5
 
-# Python
+# ── Protocol PDFs (keep in repo for reference) ──
+# protocol/
+
+# ── Credentials / tokens (never commit) ──
+.ismip7_globus_tokens.json
+.netrc
+.urs_cookies
+.dodsrc
+earthaccess_*.json
+
+# ── Python ──
 *.pyc
 __pycache__/
+*.egg-info/
 
-# Editor
+# ── Editor / OS ──
 *.sw?
 *.un~
-
-# OS
 *.DS_Store
 .ipynb_checkpoints/
 
-# Ua source (reference, not part of repo)
+# ── Other ──
 UaSource/
-# Stray files
 *.tar.gz
 download_log.txt
 .claude/

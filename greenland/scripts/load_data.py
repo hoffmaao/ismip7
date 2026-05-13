@@ -36,7 +36,7 @@ nps = ccrs.Stereographic(
 DEFAULT_DATA_DIR = Path(__file__).resolve().parent.parent / "data"
 DEFAULT_MESH_DIR = Path(__file__).resolve().parent.parent / "meshes"
 DEFAULT_FIG_DIR = Path(__file__).resolve().parent.parent / "figs" / "loading"
-OUTLINE_KINDS = ("promice", "simple", "detailed")
+OUTLINE_KINDS = ("promice", "simple", "detailed", "buffered")
 
 
 def parse_args():
@@ -187,25 +187,17 @@ def save_loading_plots(fields, mesh2d, outline_kind, lc, fig_dir, fd):
         "speed": (fields["speed"], 0, 2000, "viridis", "m yr$^{-1}$"),
         "sigma_u_x": (fields["sigma_u"].sub(0), 0, 100, "Reds", "m yr$^{-1}$"),
         "sigma_u_y": (fields["sigma_u"].sub(1), -0, 100, "Reds", "m yr$^{-1}$"),
-        "smb": (fields["smb"], 0, 200, "viridis", "mm yr$^{-1}$"),
+        "smb": (fields["smb"], -200, 200, "bwr_r", "mm yr$^{-1}$"),
         "H": (fields["H"], 0, 3000, "viridis", "m"),
         "b": (fields["b"], -1000, 1000, "PiYG", "m"),
     }
 
-    Q2 = fd.FunctionSpace(mesh2d, "CG", 1)
     for name, stuff in plot_fields.items():
         source, vmin, vmax, cmap, label = stuff
-        field = fd.Function(Q2)
-        if field.dat.data.shape != source.dat.data_ro.shape:
-            raise ValueError(
-                f"Cannot plot {name}: 2D and extruded data shapes differ "
-                f"({field.dat.data.shape} != {source.dat.data_ro.shape})"
-            )
-        field.dat.data[:] = source.dat.data_ro[:]
 
         fig, ax = plt.subplots(figsize=(6, 9), subplot_kw={"projection": nps})
         ax.coastlines()
-        colors = fd.tripcolor(field, axes=ax, vmin=vmin, vmax=vmax, cmap=cmap, transform=ccrs.epsg(3413))
+        colors = fd.tripcolor(source, axes=ax, vmin=vmin, vmax=vmax, cmap=cmap, transform=ccrs.epsg(3413))
         fig.colorbar(colors, ax=ax, shrink=0.8, label=label)
         ax.set_title(f"{outline_kind} lc={lc}: {name}")
         ax.set_extent([-6e5, 8e5, -3.5e6, -0.75e6], crs=nps)
@@ -249,55 +241,61 @@ def main():
 
         print(f"Doing {mesh_fn.name}...")
         mesh2d = fd.Mesh(str(mesh_fn))
-        mesh = fd.ExtrudedMesh(mesh2d, layers=1)
-        mesh.name = "greenland"
+        mesh2d.name = "greenland_2d"
+        mesh3d = fd.ExtrudedMesh(mesh2d, layers=1)
+        mesh3d.name = "greenland_3d"
 
-        V = fd.VectorFunctionSpace(mesh, "CG", 1, dim=2, vfamily="R", vdegree=0)
-        Q = fd.FunctionSpace(mesh, "CG", 1, vfamily="R", vdegree=0)
+        V3d = fd.VectorFunctionSpace(mesh3d, "CG", 1, dim=2, vfamily="R", vdegree=0)
+        Q3d = fd.FunctionSpace(mesh3d, "CG", 1, vfamily="R", vdegree=0)
 
-        smb = interpolate_racmo_smb(smb_data, Q, fd)
-        u = icepack.interpolate(
-            (vx, vy),
-            V,
-            fillvalue=0.0,
-        )
-        replace_velocity_nodata(u, 0.0)
-        sigma_u = icepack.interpolate(
-            (ex, ey),
-            V,
-            fillvalue=1.04,
-        )
-        replace_velocity_nodata(sigma_u, 1.0e4)
-        H = fd.Function(Q).interpolate(
-            fd.max_value(icepack.interpolate(thick_arr, Q), fd.Constant(10.0))
-        )
-        b = icepack.interpolate(bed_arr, Q)
-        speed = fd.Function(Q).interpolate(fd.sqrt(fd.inner(u, u)))
+        V2d = fd.VectorFunctionSpace(mesh2d, "CG", 1, dim=2, vfamily="R", vdegree=0)
+        Q2d = fd.FunctionSpace(mesh2d, "CG", 1, vfamily="R", vdegree=0)
 
-        if args.save_plots:
-            save_loading_plots(
-                {
-                    "u": u,
-                    "sigma_u": sigma_u,
-                    "speed": speed,
-                    "smb": smb,
-                    "H": H,
-                    "b": b,
-                },
-                mesh2d,
-                outline_kind,
-                lc,
-                fig_dir,
-                fd,
+        for mesh, V, Q, suffix in [(mesh2d, V2d, Q2d, "_2d"),
+                                   (mesh3d, V3d, Q3d, "_3d")]:
+            smb = interpolate_racmo_smb(smb_data, Q, fd)
+            u = icepack.interpolate(
+                (vx, vy),
+                V,
+                fillvalue=0.0,
             )
+            replace_velocity_nodata(u, 0.0)
+            sigma_u = icepack.interpolate(
+                (ex, ey),
+                V,
+                fillvalue=1.04,
+            )
+            replace_velocity_nodata(sigma_u, 1.0e4)
+            H = fd.Function(Q).interpolate(
+                fd.max_value(icepack.interpolate(thick_arr, Q), fd.Constant(10.0))
+            )
+            b = icepack.interpolate(bed_arr, Q)
+            speed = fd.Function(Q).interpolate(fd.sqrt(fd.inner(u, u)))
 
-        with fd.CheckpointFile(str(out_fn), "w") as chk:
-            chk.save_mesh(mesh)
-            chk.save_function(u, name="u")
-            chk.save_function(sigma_u, name="sigma_u")
-            chk.save_function(smb, name="smb")
-            chk.save_function(H, name="H")
-            chk.save_function(b, name="b")
+            if args.save_plots and suffix == "_2d":
+                save_loading_plots(
+                    {
+                        "u": u,
+                        "sigma_u": sigma_u,
+                        "speed": speed,
+                        "smb": smb,
+                        "H": H,
+                        "b": b,
+                    },
+                    mesh2d,
+                    outline_kind,
+                    lc,
+                    fig_dir,
+                    fd,
+                )
+
+            with fd.CheckpointFile(str(out_fn), "w") as chk:
+                chk.save_mesh(mesh)
+                chk.save_function(u, name="u" + suffix)
+                chk.save_function(sigma_u, name="sigma_u" + suffix)
+                chk.save_function(smb, name="smb" + suffix)
+                chk.save_function(H, name="H" + suffix)
+                chk.save_function(b, name="b" + suffix)
 
 
 if __name__ == "__main__":

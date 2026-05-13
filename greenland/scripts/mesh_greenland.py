@@ -24,19 +24,24 @@ from numpy.typing import NDArray
 import rioxarray as rxr
 import xarray as xr
 from shapely import simplify
-from shapely.geometry import LineString
+from shapely.geometry import LineString, MultiPolygon, Polygon
 
 
 EPSG_GREENLAND = "EPSG:3413"
 VX_FILENAME = "greenland_vel_mosaic250_vx_v1.tif"
 VY_FILENAME = "greenland_vel_mosaic250_vy_v1.tif"
 PROMICE_OUTLINE_FILENAME = "02-PROMICE-2022-IceMask-polygon-v3.gpkg"
+SIMPLE_OUTLINE_FILENAME = "simple_polygon_of_greenland.gpkg"
+BUFFERED_OUTLINE_FILENAME = "greenland_buffered_5km_simp.gpkg"
+DETAILED_OUTLINE_FILENAME = "greenland_outline_mod_from_IMBIE.gpkg"
 MULTIYEAR_VELOCITY_DIR = Path("velocity") / "multiyear"
 PROMICE_OUTLINE_DIR = "promice"
+CUSTOM_BOUNDARIES_DIR = "custom_boundaries"
 PROMICE_SIMPLIFY_TOLERANCE = 250.0
 DEFAULT_FIG_DIR = Path(__file__).resolve().parent.parent / "figs"
 
-OutlineKind = Literal["promice", "simple", "detailed"]
+OutlineKind = Literal["promice", "simple", "detailed", "buffered"]
+OUTLINE_KINDS: tuple[OutlineKind, ...] = ("promice", "simple", "detailed", "buffered")
 FloatArray = NDArray[np.float64]
 IntArray = NDArray[np.integer]
 
@@ -69,13 +74,32 @@ def parse_args() -> argparse.Namespace:
         default=Path("../data/"),
     )
     parser.add_argument(
+        "--outline-kind",
+        choices=OUTLINE_KINDS,
+        default="promice",
+        help=(
+            "Built-in outline to mesh. Choices map to the PROMICE geopackage, "
+            "custom_boundaries/simple_polygon_of_greenland.gpkg, "
+            "custom_boundaries/greenland_buffered_5km_simp.gpkg, and "
+            "custom_boundaries/greenland_outline_mod_from_IMBIE.gpkg."
+        ),
+    )
+    parser.add_argument(
         "--outline-file",
         type=Path,
         default=None,
-        help=(
-            "Outline geopackage to mesh. Defaults to the PROMICE geopackage "
-            "inside data_dir."
-        ),
+        help="Custom outline geopackage to mesh. Use with --outline-name.",
+    )
+    parser.add_argument(
+        "--outline-name",
+        default=None,
+        help="Custom outline name used in output filenames. Use with --outline-file.",
+    )
+    parser.add_argument(
+        "--mesh-kind",
+        choices=OUTLINE_KINDS,
+        default=None,
+        help=argparse.SUPPRESS,
     )
     parser.add_argument(
         "--stride",
@@ -148,30 +172,109 @@ def parse_args() -> argparse.Namespace:
     return parser.parse_args()
 
 
-def default_outline_file(data_dir: Path) -> Path:
+def candidate_outline_files(data_dir: Path, outline_kind: OutlineKind) -> tuple[Path, ...]:
     """
-    Determine the default outline file to use.
+    Return candidate files for a built-in outline kind.
 
     Parameters
     ----------
     data_dir : Path
         Path to the data directory.
+    outline_kind : {"promice", "simple", "detailed", "buffered"}
+        Built-in outline kind.
 
     Returns
     -------
-    Path
-        Path to the PROMICE outline file.
+    tuple[pathlib.Path, ...]
+        Candidate outline files in priority order.
     """
-    for outline_file in (
-        data_dir / PROMICE_OUTLINE_DIR / PROMICE_OUTLINE_FILENAME,
-        data_dir / PROMICE_OUTLINE_FILENAME,
-    ):
+    if outline_kind == "promice":
+        return (
+            data_dir / PROMICE_OUTLINE_DIR / PROMICE_OUTLINE_FILENAME,
+            data_dir / PROMICE_OUTLINE_FILENAME,
+        )
+    filenames = {
+        "simple": SIMPLE_OUTLINE_FILENAME,
+        "buffered": BUFFERED_OUTLINE_FILENAME,
+        "detailed": DETAILED_OUTLINE_FILENAME,
+    }
+    filename = filenames[outline_kind]
+    return (
+        data_dir / CUSTOM_BOUNDARIES_DIR / filename,
+        data_dir / filename,
+    )
+
+
+def outline_file_for_kind(data_dir: Path, outline_kind: OutlineKind) -> Path:
+    """
+    Determine the outline file for a built-in outline kind.
+
+    Parameters
+    ----------
+    data_dir : Path
+        Path to the data directory.
+    outline_kind : {"promice", "simple", "detailed", "buffered"}
+        Built-in outline kind.
+
+    Returns
+    -------
+    pathlib.Path
+        Path to the selected outline file.
+    """
+    candidates = candidate_outline_files(data_dir, outline_kind)
+    for outline_file in candidates:
         if outline_file.exists():
             return outline_file
-    raise FileNotFoundError(
-        f"No PROMICE outline file found in {data_dir / PROMICE_OUTLINE_DIR} "
-        f"or {data_dir}"
-    )
+    candidates_text = " or ".join(str(path) for path in candidates)
+    raise FileNotFoundError(f"No {outline_kind} outline file found at {candidates_text}")
+
+
+def validate_outline_name(outline_name: str) -> str:
+    """
+    Validate an outline name for use in output filenames.
+
+    Parameters
+    ----------
+    outline_name : str
+        Outline name to validate.
+
+    Returns
+    -------
+    str
+        Validated outline name.
+    """
+    if not outline_name or "/" in outline_name or "\\" in outline_name:
+        raise ValueError("outline name must be nonempty and cannot contain slashes")
+    return outline_name
+
+
+def resolve_outline(args: argparse.Namespace, data_dir: Path) -> tuple[Path, str]:
+    """
+    Resolve the outline file and output name from command-line arguments.
+
+    Parameters
+    ----------
+    args : argparse.Namespace
+        Parsed command-line arguments.
+    data_dir : Path
+        Path to the data directory.
+
+    Returns
+    -------
+    tuple[pathlib.Path, str]
+        Outline file and output name.
+    """
+    if args.outline_file is None and args.outline_name is None:
+        outline_kind_name = args.mesh_kind if args.mesh_kind is not None else args.outline_kind
+        return outline_file_for_kind(data_dir, outline_kind_name), outline_kind_name
+
+    if args.outline_file is None or (args.outline_name is None and args.mesh_kind is None):
+        raise ValueError(
+            "Use --outline-file together with --outline-name for custom outlines"
+        )
+
+    outline_name = args.outline_name if args.outline_name is not None else args.mesh_kind
+    return args.outline_file.expanduser(), validate_outline_name(outline_name)
 
 
 def outline_kind(outline_file: Path) -> OutlineKind:
@@ -187,7 +290,7 @@ def outline_kind(outline_file: Path) -> OutlineKind:
 
     Returns
     -------
-    {"promice", "simple", "detailed"}
+    {"promice", "simple", "detailed", "buffered"}
         Outline type inferred from the filename.
     """
     name = outline_file.name.lower()
@@ -195,6 +298,8 @@ def outline_kind(outline_file: Path) -> OutlineKind:
         return "promice"
     if "simple" in name:
         return "simple"
+    if "buffered" in name:
+        return "buffered"
     return "detailed"
 
 
@@ -320,6 +425,29 @@ def load_outline(
             outline.geometry.iloc[0], simplify_tolerance
         )
     return outline
+
+
+def outline_polygon(outline: gpd.GeoDataFrame) -> Polygon:
+    """
+    Extract the polygon to mesh from an outline GeoDataFrame.
+
+    Parameters
+    ----------
+    outline : geopandas.GeoDataFrame
+        Outline containing a polygon or multipolygon geometry.
+
+    Returns
+    -------
+    shapely.geometry.Polygon
+        Polygon geometry to mesh. If the outline is a multipolygon, the
+        largest polygon part is used.
+    """
+    geometry = outline.geometry.iloc[0]
+    if isinstance(geometry, Polygon):
+        return geometry
+    if isinstance(geometry, MultiPolygon):
+        return max(geometry.geoms, key=lambda polygon: polygon.area)
+    raise TypeError(f"Expected Polygon or MultiPolygon, got {geometry.geom_type}")
 
 
 def densify_closed_line(coords: FloatArray, stride: int) -> FloatArray:
@@ -485,21 +613,21 @@ def write_boundaries(
         df.to_file(boundaries_file, driver="GPKG")
 
 
-def outline_holes(outline: gpd.GeoDataFrame) -> list[FloatArray]:
+def outline_holes(polygon: Polygon) -> list[FloatArray]:
     """
-    Extract interior rings from the first outline polygon.
+    Extract interior rings from a polygon.
 
     Parameters
     ----------
-    outline : geopandas.GeoDataFrame
-        Outline containing polygon geometry.
+    polygon : shapely.geometry.Polygon
+        Polygon geometry.
 
     Returns
     -------
     list[numpy.ndarray]
         Interior rings with fewer than four points removed.
     """
-    cuts = [np.array(geom.xy).T[:-1, :] for geom in outline.geometry.iloc[0].interiors]
+    cuts = [np.array(geom.xy).T[:-1, :] for geom in polygon.interiors]
     return [cut for cut in cuts if cut.shape[0] > 3]
 
 
@@ -774,25 +902,22 @@ def main() -> None:
     args = parse_args()
     data_dir = args.data_dir.expanduser()
     boundaries_file = args.boundaries_file.expanduser()
-    outline_file = (
-        default_outline_file(data_dir)
-        if args.outline_file is None
-        else args.outline_file.expanduser()
-    )
-    stride = default_stride(outline_file) if args.stride is None else args.stride
+    outline_file, outline_name = resolve_outline(args, data_dir)
+    stride = default_stride(Path(outline_name)) if args.stride is None else args.stride
     output_dir = args.output_dir.expanduser()
     output_dir.mkdir(parents=True, exist_ok=True)
 
     vx, vy = load_velocity(data_dir)
     meps = compute_metric(vx, vy)
     simplify_tolerance = (
-        default_simplify_tolerance(outline_file)
+        default_simplify_tolerance(Path(outline_name))
         if args.outline_simplify is None
         else args.outline_simplify
     )
     outline = load_outline(outline_file, simplify_tolerance)
 
-    rough_coords = np.array(outline.geometry.iloc[0].exterior.xy).T[:, :]
+    polygon = outline_polygon(outline)
+    rough_coords = np.array(polygon.exterior.xy).T[:, :]
     coords = densify_closed_line(rough_coords, stride)
     eval_x, eval_y, normal_x, normal_y = segment_midpoints_and_normals(coords)
     nv = normal_velocity(vx, vy, eval_x, eval_y, normal_x, normal_y)
@@ -800,11 +925,9 @@ def main() -> None:
         coords, nv, args.cutoff_velocity
     )
     write_boundaries(boundaries_file, names, segments)
-    cuts = outline_holes(outline)
+    cuts = outline_holes(polygon)
 
-    fn_template = str(
-        output_dir / f"greenland_{outline_kind(outline_file)}_{{:d}}_{{:d}}"
-    )
+    fn_template = str(output_dir / f"greenland_{outline_name}_{{:d}}_{{:d}}")
     for lc in [args.min_lc * 2**i for i in range(args.num_levels)]:
         rough_targ, fine_targ = lc * 10, lc
         fn_base = fn_template.format(rough_targ, fine_targ)

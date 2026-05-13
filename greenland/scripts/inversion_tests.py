@@ -22,7 +22,7 @@ import pandas as pd
 
 DEFAULT_MESH_DIR = Path(__file__).resolve().parent.parent / "meshes"
 DEFAULT_LOG_DIR = Path("test_logs")
-MESH_KINDS = ("detailed", "promice", "simple")
+MESH_KINDS = ("detailed", "promice", "simple", "buffered")
 
 
 def parse_args() -> argparse.Namespace:
@@ -38,7 +38,7 @@ def parse_args() -> argparse.Namespace:
         "--mesh-kind",
         choices=MESH_KINDS,
         default="detailed",
-        help="Mesh type to use: detailed, promice, or simple.",
+        help="Mesh type to use: detailed, promice, simple, or buffered.",
     )
     parser.add_argument(
         "--log-dir",

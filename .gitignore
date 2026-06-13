@@ -6,7 +6,12 @@ data
 ISMIP7/
 
 # ── Generated artifacts ──
-antarctica/mesh/
+# Ignore mesh dir *contents* (huge .msh/.h5/.pos) but keep the tiny
+# boundary-id sidecars. NB: a negation under "antarctica/mesh/" (the dir
+# form) would be a no-op — git won't descend into an excluded directory to
+# reconsider files — so we must exclude the contents with "mesh/*" instead.
+antarctica/mesh/*
+!antarctica/mesh/boundary_ids*.json
 antarctica/results/
 antarctica/archive/
 antarctica/figs/*.png

@@ -115,14 +115,19 @@ def main():
     PETSc.Sys.Print("Loading data...")
     bm_fn = find_file(os.path.join(DATA_DIR, "bedmachine"), "*.nc")
     b = icepack.interpolate(rasterio.open(f"netcdf:{bm_fn}:bed"), Q)
-    h_clamp = float(os.environ.get("ISMIP7_H_CLAMP", "10.0"))
+    # h_clamp default 0.0: invert against the *true* BedMachine geometry,
+    # including h=0 over the buffered ocean region. Composite rheology
+    # (added below) keeps the SNES nonsingular where h=0.
+    h_clamp = float(os.environ.get("ISMIP7_H_CLAMP", "0.0"))
     H = Function(Q).interpolate(
         max_value(
             icepack.interpolate(rasterio.open(f"netcdf:{bm_fn}:thickness"), Q),
             Constant(h_clamp),
         )
     )
-    PETSc.Sys.Print(f"  H clamp: {h_clamp} m")
+    PETSc.Sys.Print(f"  H clamp: {h_clamp} m  "
+                    f"(nodes h<=1m: {int((H.dat.data_ro <= 1.0).sum())} / "
+                    f"{len(H.dat.data_ro)})")
     rho_ratio = Constant(917.0 / 1024.0)
 
     rho_ratio = Constant(917.0 / 1024.0)
@@ -138,10 +143,19 @@ def main():
     calving_ids = tuple(bnd_ids["calving"])
 
     # ── Rheology ──
+    # Goldsby-Kohlstedt-style composite: dislocation creep n_flow=4 main
+    # + linear (n=1) regularization. Sliding stays at Weertman m_slide=3.
     A0 = Constant(icepack.rate_factor(Constant(260.0)))
-    n = Constant(n_glen_val)
-    m = Constant(n_glen_val)
+    n_flow_val = float(os.environ.get("ISMIP7_N_FLOW", "4.0"))
+    m_slide_val = float(os.environ.get("ISMIP7_M_SLIDE", "3.0"))
+    a4_factor = float(os.environ.get("ISMIP7_A4_FACTOR", "10.0"))
+    n_flow = Constant(n_flow_val)
+    m_slide = Constant(m_slide_val)
     tau_c = Constant(0.1)
+    PETSc.Sys.Print(
+        f"  Rheology: flow n={n_flow_val:.1f}, sliding m={m_slide_val:.1f}, "
+        f"A4_factor={a4_factor:.1f}"
+    )
 
     u_speed = Function(Q).interpolate(
         max_value(sqrt(u_obs[0] ** 2 + u_obs[1] ** 2), Constant(1.0))
@@ -225,22 +239,73 @@ def main():
             Constant(0.01),
         )
     )
-    K_base = u_c / (phi_eff * tau_c) ** n
+    # Baseline sliding coefficient uses the Weertman m_slide=3 exponent.
+    K_base = u_c / (phi_eff * tau_c) ** m_slide
 
-    rheology = {
-        "flow_law_exponent": n,
-        "flow_law_coefficient": A0 * exp(phi),
-        "sliding_exponent": n,
-        "sliding_coefficient": K_base * exp(-n * theta),
-    }
-
-    L = (
-        model.minimization.viscous_power(**fields, **rheology)
-        + model.minimization.friction_power(**fields, **rheology)
-        + model.minimization.momentum_balance(**fields)
+    # Composite rheology following Goldsby-Kohlstedt 2001:
+    #   ψ_visc  =     2·h·A_4 /5 · |M_dev|^5            (dislocation creep, n=4)
+    #          + α · 2·H_ref·A_1/2 · |M_dev|^2          (diffusion regularizer)
+    #   ψ_fric  =     K_3 /4 · |τ|^4                    (Weertman, m=3)
+    #          + α · K_1 /2 · |τ|^2                     (linear regularizer)
+    # The α·(n=1, m=1) terms keep M and τ pinned where h→0 (calving front).
+    # H_ref is constant so the viscous regularizer stays positive-definite
+    # at h=0. α default 1e-2 because the inversion needs many forward
+    # solves and SNES robustness is worth the small bias in θ, φ.
+    # A_4 = a4_factor · A_3 chosen so the dislocation creep matches Glen
+    # at τ = τ_c. Inverted φ absorbs any residual offset.
+    alpha_reg = Constant(float(os.environ.get("ISMIP7_COMPOSITE_ALPHA", "1e-2")))
+    H_ref = Constant(float(os.environ.get("ISMIP7_H_REF", "100.0")))
+    PETSc.Sys.Print(
+        f"  Composite rheology: alpha={float(alpha_reg):.1e}, "
+        f"H_ref={float(H_ref):.0f} m"
     )
+
+    A4_base = A0 * Constant(a4_factor)
+
+    def _rheo_glen(theta_c, phi_c):
+        # Main dislocation-creep flow law (n=n_flow=4) + Weertman sliding (m=3)
+        return {
+            "flow_law_exponent": n_flow,
+            "flow_law_coefficient": A4_base * exp(phi_c),
+            "sliding_exponent": m_slide,
+            "sliding_coefficient": K_base * exp(-m_slide * theta_c),
+        }
+
+    def _rheo_linear(theta_c, phi_c):
+        # Linearize about τ = τ_c so the n=1 / m=1 powers agree with the
+        # n_flow / m_slide powers at the calibration stress; this gives a
+        # smooth crossover rather than a kink near τ_c.
+        A_lin = A4_base * exp(phi_c) * tau_c ** (n_flow_val - 1)
+        K_lin = u_c / (phi_eff * tau_c) * exp(-theta_c)
+        return {
+            "flow_law_exponent": Constant(1.0),
+            "flow_law_coefficient": A_lin,
+            "sliding_exponent": Constant(1.0),
+            "sliding_coefficient": K_lin,
+        }
+
+    def _build_action(theta_c, phi_c, fields_):
+        fields_reg = dict(fields_)
+        fields_reg["thickness"] = H_ref
+        rheo_glen = _rheo_glen(theta_c, phi_c)
+        rheo_lin = _rheo_linear(theta_c, phi_c)
+        L_ = (
+            model.minimization.viscous_power(**fields_, **rheo_glen)
+            + alpha_reg * model.minimization.viscous_power(
+                **fields_reg, **rheo_lin)
+            + model.minimization.friction_power(**fields_, **rheo_glen)
+            + alpha_reg * model.minimization.friction_power(
+                **fields_, **rheo_lin)
+            + model.minimization.momentum_balance(**fields_)
+        )
+        if use_calving_terminus:
+            L_ += model.minimization.calving_terminus(
+                **fields_, outflow_ids=calving_ids
+            )
+        return L_
+
+    L = _build_action(theta, phi, fields)
     if use_calving_terminus:
-        L += model.minimization.calving_terminus(**fields, outflow_ids=calving_ids)
         PETSc.Sys.Print("  Using calving_terminus BC")
     else:
         PETSc.Sys.Print("  NO calving_terminus BC (buffered mesh, h=0 at front)")
@@ -250,11 +315,16 @@ def main():
     stop_manager()
     prob = NonlinearVariationalProblem(F, z, form_compiler_parameters=fc_params)
     slvr = NonlinearVariationalSolver(prob, solver_parameters=sparams)
-    # Always use continuation — single solve at n=3 can fail with
-    # checkpoint parameters that create ill-conditioned systems
-    PETSc.Sys.Print("Warm start (continuation n=1→3)...")
-    for exponent in np.linspace(1.0, n_glen_val, 5):
-        n.assign(exponent)
+    # Always use continuation — single solve at full exponents can fail
+    # with checkpoint parameters that create ill-conditioned systems.
+    # Ramp n_flow (1 → n_flow_val) and m_slide (1 → m_slide_val) together.
+    PETSc.Sys.Print(
+        f"Warm start (continuation n_flow 1→{n_flow_val:.1f}, "
+        f"m_slide 1→{m_slide_val:.1f})..."
+    )
+    for t in np.linspace(0.0, 1.0, 5):
+        n_flow.assign(1.0 + t * (n_flow_val - 1.0))
+        m_slide.assign(1.0 + t * (m_slide_val - 1.0))
         slvr.solve()
     PETSc.Sys.Print("  Done")
 
@@ -267,25 +337,13 @@ def main():
 
     def forward(theta_ctrl, phi_ctrl):
         clear_caches()
-        rheology_ctrl = {
-            "flow_law_exponent": n,
-            "flow_law_coefficient": A0 * exp(phi_ctrl),
-            "sliding_exponent": n,
-            "sliding_coefficient": K_base * exp(-n * theta_ctrl),
-        }
-        L_ctrl = (
-            model.minimization.viscous_power(**fields, **rheology_ctrl)
-            + model.minimization.friction_power(**fields, **rheology_ctrl)
-            + model.minimization.momentum_balance(**fields)
-        )
-        if use_calving_terminus:
-            L_ctrl += model.minimization.calving_terminus(
-                **fields, outflow_ids=calving_ids
-            )
+        L_ctrl = _build_action(theta_ctrl, phi_ctrl, fields)
         F_ctrl = derivative(L_ctrl, z)
-        # Continuation inside annotation for robustness
-        for exponent in np.linspace(1.0, n_glen_val, 5):
-            n.assign(exponent)
+        # Continuation inside annotation for robustness — ramp both
+        # n_flow and m_slide on the same [0,1] parameter.
+        for t in np.linspace(0.0, 1.0, 5):
+            n_flow.assign(1.0 + t * (n_flow_val - 1.0))
+            m_slide.assign(1.0 + t * (m_slide_val - 1.0))
             EquationSolver(
                 F_ctrl == 0,
                 z,

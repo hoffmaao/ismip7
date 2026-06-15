@@ -7,6 +7,25 @@ _SEC_PER_YEAR = 31556926.0
 _RHO_ICE = 917.0
 _RHO_WATER = 1000.0
 
+# Constants for the Burgard et al. 2022 quadratic-mixed-slope melt
+# parameterization, taken verbatim from multimelt.constants
+# (https://github.com/ClimateClara/multimelt). The ISMIP7 ocean-forcing
+# pipeline calibrates K under exactly this decomposition.
+_RHO_SW = 1028.0       # seawater, kg/m^3
+_RHO_I = 917.0         # ice,      kg/m^3
+_C_PO = 3974.0         # seawater specific heat, J/(kg K)
+_L_I = 3.34e5          # latent heat of fusion of ice, J/kg
+_BETA_S = 7.86e-4      # haline contraction coefficient (Lazeroms), 1/PSU
+_G = 9.81              # gravity, m/s^2
+_F_CORIOLIS = 1.4e-4   # representative Antarctic Coriolis parameter, 1/s
+
+# melt_factor = (rho_sw * c_po) / (rho_i * L_i)   [1/K]
+_MELT_FACTOR = (_RHO_SW * _C_PO) / (_RHO_I * _L_I)
+
+# K50 median from Burgard 2022 calibration
+# (parameter_selection_quadratic_example.ipynb).
+_K_DEFAULT = 11.5e-5
+
 _DEFAULT_DATA_ROOT = os.path.join(
     os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
     "ISMIP7", "AIS",
@@ -213,7 +232,14 @@ class ISMIP7Ocean:
             tf_var = ds[list(ds.data_vars)[0]]
 
         if "time" in tf_var.dims:
-            tf_slice = tf_var.sel(time=year, method="nearest")
+            times = ds["time"].values
+            # Handle cftime calendars by matching on year
+            if hasattr(times[0], "year"):
+                yr = int(round(year))
+                idx = min(range(len(times)), key=lambda i: abs(times[i].year - yr))
+                tf_slice = tf_var.isel(time=idx)
+            else:
+                tf_slice = tf_var.sel(time=year, method="nearest")
         else:
             tf_slice = tf_var
 
@@ -225,7 +251,8 @@ class ISMIP7Ocean:
 
         if zdim is not None:
             if draft is not None:
-                draft_arr = xr.DataArray(np.abs(np.asarray(draft)), dims="node")
+                # z coords are negative (depth below sea level), draft is also negative
+                draft_arr = xr.DataArray(np.asarray(draft), dims="node")
                 tf_slice = tf_slice.interp({zdim: draft_arr}, method="nearest")
             else:
                 tf_slice = tf_slice.isel({zdim: 0})
@@ -241,6 +268,59 @@ class ISMIP7Ocean:
             return np.zeros(len(mesh_x))
 
         return np.nan_to_num(vals.values.flatten(), nan=0.0)
+
+    def get_salinity(self, year, mesh_x, mesh_y, draft=None, fill=34.5):
+        r"""Get ambient salinity at ice draft depth, interpolated to mesh."""
+        import xarray as xr
+
+        ds = self._load_variable("so")
+        if ds is None:
+            return np.full(len(mesh_x), fill)
+
+        so_var = None
+        for name in ds.data_vars:
+            if name.lower() in ("so", "salinity"):
+                so_var = ds[name]
+                break
+        if so_var is None:
+            so_var = ds[list(ds.data_vars)[0]]
+
+        if "time" in so_var.dims:
+            times = ds["time"].values
+            if hasattr(times[0], "year"):
+                yr = int(round(year))
+                idx = min(range(len(times)),
+                          key=lambda i: abs(times[i].year - yr))
+                so_slice = so_var.isel(time=idx)
+            else:
+                so_slice = so_var.sel(time=year, method="nearest")
+        else:
+            so_slice = so_var
+
+        zdim = None
+        for d in so_slice.dims:
+            if d.lower() in ("z", "depth", "lev"):
+                zdim = d
+                break
+
+        if zdim is not None:
+            if draft is not None:
+                draft_arr = xr.DataArray(np.asarray(draft), dims="node")
+                so_slice = so_slice.interp({zdim: draft_arr}, method="nearest")
+            else:
+                so_slice = so_slice.isel({zdim: 0})
+
+        mx = xr.DataArray(np.asarray(mesh_x), dims="node")
+        my = xr.DataArray(np.asarray(mesh_y), dims="node")
+
+        xdim = [d for d in so_slice.dims if d.lower() == "x"]
+        ydim = [d for d in so_slice.dims if d.lower() == "y"]
+        if xdim and ydim:
+            vals = so_slice.interp({xdim[0]: mx, ydim[0]: my}, method="nearest")
+        else:
+            return np.full(len(mesh_x), fill)
+
+        return np.nan_to_num(vals.values.flatten(), nan=fill)
 
     def close(self):
         for ds in self._ds_cache.values():
@@ -313,8 +393,117 @@ class ISMIP7Fracture:
             self._excess_melt.close()
 
 
-def make_forcing_callback(atm=None, ocean=None, fracture=None):
-    r"""Build a forcing callback for use with simulation.run_simulation()."""
+def quadratic_mixed_slope(tf, salinity, sin_alpha, K=_K_DEFAULT):
+    r"""ISMIP7 / Burgard et al. 2022 quadratic-mixed-slope local melt.
+
+    Matches multimelt.melt_functions.quadratic_mixed_slope with TF_avg = TF
+    (local-quadratic variant):
+
+        m = K * melt_factor * U_factor * TF * |TF| * sin(alpha)
+
+    where
+
+        melt_factor = (rho_sw * c_po) / (rho_i * L_i)             [1/K]
+        U_factor    = (c_po / L_i) * beta_S * g/(2|f|) * S0       [m/s/K]
+
+    Inputs:
+        tf        : thermal forcing T - T_f at ice base, K (numpy array)
+        salinity  : ambient salinity at ice draft, PSU (numpy array)
+        sin_alpha : sin of local ice-draft slope, dimensionless (numpy array)
+        K         : dimensionless tuning factor (scalar or per-node array).
+                    Burgard K50 = 1.15e-4.
+
+    Returns melt rate in m/yr ice equivalent (positive = melting).
+    """
+    U_factor = (_C_PO / _L_I) * _BETA_S * (_G / (2.0 * abs(_F_CORIOLIS))) \
+        * salinity
+    melt = K * _MELT_FACTOR * U_factor * tf * np.abs(tf) * sin_alpha
+    return melt * _SEC_PER_YEAR
+
+
+def load_K_per_basin(npz_path, mesh_x, mesh_y, fill=0.0):
+    r"""Load a per-basin calibrated K and return a per-node array.
+
+    `npz_path` should be the output of `antarctica/scripts/calibrate_melt.py`
+    and is expected to contain `basin_ids` (int) and `K_basin` (float) plus
+    the IMBIE2 basin file path (the IMBIE2 8 km grid is re-read here so
+    that the K-field can be remapped to *any* mesh, not just the one used
+    during calibration).
+
+    Returns an array of shape (len(mesh_x),) of per-node K values, with
+    `fill` outside the calibrated basin set or where K_basin is NaN.
+    """
+    import xarray as xr
+    from scipy.interpolate import RegularGridInterpolator
+
+    data = np.load(npz_path)
+    bids = np.asarray(data["basin_ids"]).astype(int)
+    Kbas = np.asarray(data["K_basin"]).astype(float)
+
+    imbie2 = os.path.join(
+        os.environ.get("ISMIP7_DATA_ROOT",
+                       os.path.join(os.path.dirname(
+                           os.path.dirname(os.path.abspath(__file__))),
+                           "ISMIP7", "AIS")),
+        "parameterisations", "ocean", "imbie2",
+        "basin_numbers_ismip8km_v2.nc",
+    )
+    ds = xr.open_dataset(imbie2)
+    xa = ds["x"].values; ya = ds["y"].values
+    bn = ds["basinNumber"].values
+    if ya[0] > ya[-1]:
+        ya = ya[::-1]; bn = bn[::-1, :]
+    if xa[0] > xa[-1]:
+        xa = xa[::-1]; bn = bn[:, ::-1]
+    interp = RegularGridInterpolator(
+        (ya, xa), bn.astype(np.float32),
+        method="nearest", bounds_error=False, fill_value=-1.0,
+    )
+    pts = np.column_stack([np.asarray(mesh_y), np.asarray(mesh_x)])
+    basin_node = np.round(interp(pts)).astype(int)
+    ds.close()
+
+    K_field = np.full(len(mesh_x), fill, dtype=float)
+    for bid, kb in zip(bids, Kbas):
+        if np.isfinite(kb):
+            K_field[basin_node == bid] = kb
+    return K_field
+
+
+def compute_sin_alpha(ctx):
+    r"""Return sin(alpha) of local ice-draft slope at CG1 nodes.
+
+    Computes draft = s - h, projects grad(draft) into the vector CG1
+    space, and returns sin(arctan(|grad|)) = |grad|/sqrt(1 + |grad|^2).
+    """
+    import firedrake as fd
+    Q = ctx["Q"]
+    V = ctx["V"]
+    h = ctx["h"]
+    s = ctx["s"]
+    draft = fd.Function(Q).interpolate(s - h)
+    grad_draft = fd.project(fd.grad(draft), V)
+    g = grad_draft.dat.data_ro
+    gmag = np.sqrt(g[:, 0] ** 2 + g[:, 1] ** 2)
+    return gmag / np.sqrt(1.0 + gmag * gmag)
+
+
+def make_forcing_callback(atm=None, ocean=None, fracture=None,
+                          K=_K_DEFAULT, K_per_basin_npz=None):
+    r"""Build a forcing callback for use with simulation.run_simulation().
+
+    Ocean melt uses the ISMIP7 Burgard quadratic_mixed_slope formula
+    (local-quadratic variant, TF_avg = TF).
+
+    K can be:
+      - a scalar (single dimensionless K applied everywhere), or
+      - a per-node numpy array (same length as mesh CG1 dofs), or
+      - left at default while `K_per_basin_npz` points to the output of
+        `calibrate_melt.py`; the per-basin K is then looked up on the mesh
+        on first call and reused for subsequent steps.
+    """
+    K_field_cache = {"arr": None}
+
     def callback(ctx, t_yr):
         mesh_x = ctx["mesh"].coordinates.dat.data_ro[:, 0]
         mesh_y = ctx["mesh"].coordinates.dat.data_ro[:, 1]
@@ -322,5 +511,33 @@ def make_forcing_callback(atm=None, ocean=None, fracture=None):
         if atm is not None:
             smb = atm.get_smb(t_yr, mesh_x, mesh_y, anomaly=True)
             ctx["accum"].dat.data[:] = smb
+
+        if ocean is not None and "ocean_melt" in ctx:
+            h = ctx["h"].dat.data_ro
+            b = ctx["b"].dat.data_ro
+            s = ctx["s"].dat.data_ro
+            # Ice shelf draft (negative depth below sea level)
+            draft = np.minimum(s - h, 0.0)
+
+            tf = ocean.get_thermal_forcing(t_yr, mesh_x, mesh_y, draft=draft)
+            sal = ocean.get_salinity(t_yr, mesh_x, mesh_y, draft=draft)
+            sin_alpha = compute_sin_alpha(ctx)
+
+            # Resolve K: per-basin npz takes precedence if supplied.
+            if K_per_basin_npz is not None:
+                if K_field_cache["arr"] is None:
+                    K_field_cache["arr"] = load_K_per_basin(
+                        K_per_basin_npz, mesh_x, mesh_y, fill=0.0
+                    )
+                K_use = K_field_cache["arr"]
+            else:
+                K_use = K
+
+            melt = quadratic_mixed_slope(tf, sal, sin_alpha, K=K_use)
+
+            # Only apply melt where ice is floating (haf <= 0)
+            haf = s - (b + (_RHO_WATER / _RHO_ICE) * np.maximum(-b, 0.0))
+            floating = haf <= 0
+            ctx["ocean_melt"].dat.data[:] = np.where(floating, melt, 0.0)
 
     return callback

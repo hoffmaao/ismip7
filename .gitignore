@@ -45,6 +45,10 @@ __pycache__/
 *.DS_Store
 .ipynb_checkpoints/
 
+# ── Claude Code (local working notes — do not commit) ──
+CLAUDE.md
+.claude/
+
 # ── Other ──
 UaSource/
 *.tar.gz

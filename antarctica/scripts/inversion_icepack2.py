@@ -14,7 +14,7 @@ Usage:
 """
 
 import numpy as np
-import os, glob, json
+import os, sys, glob, json
 from time import perf_counter
 
 import firedrake as fd
@@ -70,6 +70,10 @@ DATA_DIR = os.path.join(_ROOT, "data")
 MESH_DIR = os.path.join(_ROOT, "mesh")
 FIG_DIR = os.path.join(_ROOT, "figs")
 
+# Repo root on the path so we can import the shared dual-friction operator.
+sys.path.insert(0, os.path.dirname(_ROOT))
+from icepack2_tools.dual_friction import build_rc_residual, weertman_anchor
+
 lc = int(os.environ.get("ISMIP7_LC", "8000"))
 lc_coarse = int(os.environ.get("ISMIP7_LC_COARSE", str(lc * 10)))
 
@@ -77,6 +81,17 @@ lc_coarse = int(os.environ.get("ISMIP7_LC_COARSE", str(lc * 10)))
 GAMMA_THETA = 1.0
 GAMMA_PHI = 1.0
 L_REG = 7.5e3
+
+# Friction law: "budd" (power-law dual, default) or "regularized_coulomb"
+# (Joughin/Schoof RC residual: grounded-only inference, exact-zero shelves).
+FRICTION = os.environ.get("ISMIP7_FRICTION", "budd")
+USE_RC = FRICTION == "regularized_coulomb"
+C0_RC = float(os.environ.get("ISMIP7_RC_C0", "0.5"))
+# Buffer-node (h_clamp=0) coercivity controls; see dual_friction.build_rc_residual.
+# h_visc_floor (membrane-only thickness floor) is the primary, bias-free cure;
+# c_w0_floor is off by default (unnecessary once h_visc_floor is on).
+RC_HVISC_FLOOR = float(os.environ.get("ISMIP7_RC_HVISC_FLOOR", "10.0"))
+RC_CW0_FLOOR = float(os.environ.get("ISMIP7_RC_CW0_FLOOR", "0.0"))
 
 
 def find_file(d, p):
@@ -304,12 +319,37 @@ def main():
             )
         return L_
 
-    L = _build_action(theta, phi, fields)
+    # Regularized Coulomb needs a fixed Weertman anchor C_w0 (driving-stress
+    # balance); theta then inverts as an O(1) log-adjustment on top of it.
+    if USE_RC:
+        C_w0 = weertman_anchor(H, s, u_obs, m_slide_val, Q)
+        PETSc.Sys.Print(
+            f"  Friction: regularized Coulomb (c0={C0_RC}, h_visc_floor={RC_HVISC_FLOOR:.0f}m, "
+            f"cw0_floor={RC_CW0_FLOOR:.1e}); C_w0 in "
+            f"[{float(C_w0.dat.data_ro.min()):.2e}, {float(C_w0.dat.data_ro.max()):.2e}]"
+        )
+    else:
+        PETSc.Sys.Print("  Friction: Budd power-law dual")
+    map_tag = "_rc" if USE_RC else ""
+
+    def build_F(theta_c, phi_c):
+        # RC -> residual closure (tau linear, grounded-only theta via exp(theta*He),
+        # exact-zero shelves via the N-cap); Budd -> derivative of the action.
+        if USE_RC:
+            return build_rc_residual(
+                z, theta_c, phi_c, H=H, s=s, b=b, C_w0=C_w0,
+                A4_base=A4_base, n_flow=n_flow, n_flow_val=n_flow_val,
+                m_slide=m_slide_val, tau_c=tau_c, alpha=alpha_reg, H_ref=H_ref,
+                c0=C0_RC, c_w0_floor=RC_CW0_FLOOR, h_visc_floor=RC_HVISC_FLOOR,
+                calving_ids=calving_ids if use_calving_terminus else None,
+            )
+        return derivative(_build_action(theta_c, phi_c, fields), z)
+
     if use_calving_terminus:
         PETSc.Sys.Print("  Using calving_terminus BC")
     else:
         PETSc.Sys.Print("  NO calving_terminus BC (buffered mesh, h=0 at front)")
-    F = derivative(L, z)
+    F = build_F(theta, phi)
 
     # ── Warm start ──
     stop_manager()
@@ -337,8 +377,7 @@ def main():
 
     def forward(theta_ctrl, phi_ctrl):
         clear_caches()
-        L_ctrl = _build_action(theta_ctrl, phi_ctrl, fields)
-        F_ctrl = derivative(L_ctrl, z)
+        F_ctrl = build_F(theta_ctrl, phi_ctrl)
         # Continuation inside annotation for robustness — ramp both
         # n_flow and m_slide on the same [0,1] parameter.
         for t in np.linspace(0.0, 1.0, 5):
@@ -474,7 +513,7 @@ def main():
 
         # Periodic checkpoint every 20 iterations
         if iteration_count[0] % 20 == 0:
-            chk_fn = os.path.join(MESH_DIR, f"inversion_icepack2_{lc}.h5")
+            chk_fn = os.path.join(MESH_DIR, f"inversion_icepack2{map_tag}_{lc}.h5")
             with fd.CheckpointFile(chk_fn, "w") as chk:
                 chk.save_mesh(mesh)
                 chk.save_function(theta, name="log_friction")
@@ -508,7 +547,7 @@ def main():
     )
 
     # ── Save MAP immediately ──
-    chk_fn = os.path.join(MESH_DIR, f"inversion_icepack2_{lc}.h5")
+    chk_fn = os.path.join(MESH_DIR, f"inversion_icepack2{map_tag}_{lc}.h5")
     with fd.CheckpointFile(chk_fn, "w") as chk:
         chk.save_mesh(mesh)
         chk.save_function(theta, name="log_friction")

@@ -70,13 +70,13 @@ def find_file(directory, pattern):
 # ── Step 1: Extract Ice Outline ────────────────────────────────────────
 
 
-def load_bedmachine_mask():
+def load_bedmachine_mask(data_dir=DATA_DIR):
     """Load BedMachine mask and coordinates, subsampled for efficiency.
 
     Mask values: 0=ocean, 1=ice-free land, 2=grounded ice,
                  3=floating ice (shelf), 4=Lake Vostok
     """
-    fn = find_file(os.path.join(DATA_DIR, "bedmachine"), "*.nc")
+    fn = find_file(os.path.join(data_dir, "bedmachine"), "*.nc")
     print(f"Loading BedMachine mask from {fn}...")
 
     ds = xr.open_dataset(fn)
@@ -423,7 +423,7 @@ def load_grounding_zone_field():
     return gl_da
 
 
-def load_velocity_for_sizing():
+def load_velocity_for_sizing(data_dir=DATA_DIR):
     """Load velocity data and compute a strain-rate-based refinement field.
 
     The refinement indicator combines strain rate and speed to concentrate
@@ -432,7 +432,7 @@ def load_velocity_for_sizing():
     """
     print("Loading velocity data for mesh sizing...")
 
-    vel_fn = find_file(os.path.join(DATA_DIR, "velocity"), "*.nc")
+    vel_fn = find_file(os.path.join(data_dir, "velocity"), "*.nc")
     print(f"  Reading {vel_fn}...")
 
     ds = xr.open_dataset(vel_fn)

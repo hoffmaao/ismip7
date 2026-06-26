@@ -47,6 +47,12 @@ RESULTS_DIR = os.path.join(_ROOT, "results")
 lc = int(os.environ.get("ISMIP7_LC", "2500"))
 lc_coarse = int(os.environ.get("ISMIP7_LC_COARSE", "64000"))
 
+# SI ice density (kg/m^3) for VAF/mass diagnostics only. The dynamics use the
+# icepack rho_I (MPa-m-yr units); thickness fields are lengths (m) in both, so
+# the Gt/SLE conversion just needs the SI density.
+RHO_I_SI = 917.0
+GT_PER_MM_SLE = 362.5  # Gt of water per mm global-mean sea-level rise
+
 
 def find_file(d, p):
     m = glob.glob(os.path.join(d, p))
@@ -332,8 +338,8 @@ def run_simulation(
         t_elapsed = perf_counter() - t_step_start
 
         haf = Function(Q).interpolate(max_value(s - s_float, Constant(0.0)))
-        vaf = float(assemble(haf * dx)) * rho_I / 1e12 / 362.5
-        total_mass = float(assemble(h * dx)) * rho_I / 1e12
+        vaf = float(assemble(haf * dx)) * RHO_I_SI / 1e12 / GT_PER_MM_SLE
+        total_mass = float(assemble(h * dx)) * RHO_I_SI / 1e12
 
         results.append((t_yr, vaf, total_mass))
 

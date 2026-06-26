@@ -131,10 +131,10 @@ def main():
         os.environ["ISMIP7_BUFFER_M"] = "20000"
     print(f"Buffer: {buffer_m/1e3:.0f} km")
 
-    mask, x, y = load_bedmachine_mask()
+    mask, x, y = load_bedmachine_mask(DATA_DIR)
     outline = extract_ice_outline(mask, x, y)
     boundaries, names = classify_boundaries(outline, mask, x, y)
-    refinement = load_velocity_for_sizing()
+    refinement = load_velocity_for_sizing(DATA_DIR)
 
     gl_dist, ice_field, float_field = grounding_line_distance()
     cf_dist = calving_front_distance(boundaries, names)

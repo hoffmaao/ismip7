@@ -16,8 +16,11 @@ _PROJECT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(
 ))))
 sys.path.insert(0, _PROJECT)
 
+from firedrake import assemble, dx, Constant
 from simulation import setup_model, run_simulation, PETSc
-from icepack2_tools.forcing import ISMIP7Atmosphere, smb_kgm2s_to_myr
+from icepack2_tools.forcing import (
+    ISMIP7Atmosphere, smb_kgm2s_to_myr, load_racmo_smb_climatology,
+)
 
 T_START = 2015.0
 T_END = float(os.environ.get("ISMIP7_T_END", "2300"))
@@ -27,6 +30,11 @@ OUTPUT_INTERVAL = int(os.environ.get("ISMIP7_OUTPUT_INTERVAL", "10"))
 ESM = os.environ.get("ISMIP7_ESM", "CESM2-WACCM")
 CLIM_START = 2000
 CLIM_END = 2029
+
+
+def area_weighted_mean(field, mesh):
+    r"""Domain-area-weighted mean of a field (mesh refinement varies spatially)."""
+    return assemble(field * dx) / assemble(Constant(1.0) * dx(domain=mesh))
 
 
 def compute_climatology(atm, mesh_x, mesh_y):
@@ -60,13 +68,25 @@ def main():
     mesh_x = ctx["mesh"].coordinates.dat.data_ro[:, 0]
     mesh_y = ctx["mesh"].coordinates.dat.data_ro[:, 1]
 
-    clim_smb = compute_climatology(atm, mesh_x, mesh_y)
-    if clim_smb is not None:
-        ctx["accum"].dat.data[:] = clim_smb
-        PETSc.Sys.Print(f"  Climatological SMB: mean={clim_smb.mean():.4f} m/yr")
-    else:
-        PETSc.Sys.Print(f"  WARNING: no climatology data, using zero SMB")
-        ctx["accum"].assign(0.0)
+    try:
+        ctx["accum"].assign(
+            load_racmo_smb_climatology(ctx["Q"], CLIM_START, CLIM_END)
+        )
+        mean_smb = area_weighted_mean(ctx["accum"], ctx["mesh"])
+        PETSc.Sys.Print(
+            f"  Climatological SMB from RACMO2.4p1 ({CLIM_START}-{CLIM_END}): "
+            f"area-weighted mean={mean_smb:.4f} m/yr"
+        )
+    except FileNotFoundError:
+        PETSc.Sys.Print("  No RACMO data; falling back to ISMIP7 acabf climatology")
+        clim_smb = compute_climatology(atm, mesh_x, mesh_y)
+        if clim_smb is not None:
+            ctx["accum"].dat.data[:] = clim_smb
+            mean_smb = area_weighted_mean(ctx["accum"], ctx["mesh"])
+            PETSc.Sys.Print(f"  Climatological SMB: area-weighted mean={mean_smb:.4f} m/yr")
+        else:
+            PETSc.Sys.Print("  WARNING: no climatology data, using zero SMB")
+            ctx["accum"].assign(0.0)
 
     PETSc.Sys.Print(f"\nControl experiment: {ESM}")
     PETSc.Sys.Print(f"  Period: {T_START}-{T_END}")

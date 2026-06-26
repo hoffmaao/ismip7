@@ -18,6 +18,69 @@ def smb_kgm2s_to_myr(smb_kgm2s):
     return smb_kgm2s * _SEC_PER_YEAR / _RHO_ICE * (_RHO_WATER / _RHO_ICE)
 
 
+def load_racmo_smb_climatology(Q, clim_start=2000, clim_end=2029, data_dir=None,
+                               target_res=8000.0, rho_ice=_RHO_ICE):
+    r"""RACMO2.4p1 mean-annual SMB (m/yr ice equiv) as a Function on Q's mesh.
+
+    The RACMO ANT11 grid is rotated-pole, so this reprojects the climatology to
+    an intermediate EPSG:3031 raster with rasterio, then samples it onto the mesh
+    with icepack.interpolate -- the same path used for BedMachine -- avoiding any
+    scattered-point interpolation. ``smbgl`` is a monthly mass sum (kg/m^2), so the
+    annual SMB is the sum of the 12 months, averaged over the climatology window.
+    """
+    import xarray as xr
+    import pyproj
+    import icepack
+    from affine import Affine
+    from rasterio.io import MemoryFile
+    from rasterio.warp import reproject, Resampling
+
+    if data_dir is None:
+        base = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+        data_dir = os.path.join(base, "antarctica", "data", "racmo")
+    fn = os.path.join(
+        data_dir, "smbgl_monthlyS_ANT11_RACMO2.4p1_ERA5_197901_202312.nc"
+    )
+    ds = xr.open_dataset(fn)
+
+    smb = ds["smbgl"].squeeze("height")  # (time, rlat, rlon), kg/m^2 per month
+    yrs = smb["time"].dt.year.values
+    sel = (yrs >= clim_start) & (yrs <= clim_end)
+    n_years = len(np.unique(yrs[sel]))
+    src = (smb.isel(time=sel).sum("time").values / n_years / rho_ice).astype("float64")
+
+    rlon, rlat = ds["rlon"].values, ds["rlat"].values
+    d = float(rlon[1] - rlon[0])
+    src_crs = pyproj.CRS.from_cf(ds["rotated_pole"].attrs)
+    src_transform = Affine.translation(rlon[0] - d / 2, rlat[0] - d / 2) * Affine.scale(d, d)
+    ds.close()
+
+    # Reproject onto the standard ISMIP AIS grid (EPSG:3031, centers +/- 3040 km).
+    half = 3040000.0
+    N = int(round(2 * half / target_res)) + 1
+    dst_transform = (
+        Affine.translation(-half - target_res / 2, half + target_res / 2)
+        * Affine.scale(target_res, -target_res)
+    )
+    dst = np.full((N, N), np.nan, dtype="float64")
+    reproject(
+        src, dst,
+        src_transform=src_transform, src_crs=src_crs,
+        dst_transform=dst_transform, dst_crs="EPSG:3031",
+        src_nodata=np.nan, dst_nodata=np.nan, resampling=Resampling.bilinear,
+    )
+    dst[~np.isfinite(dst)] = 0.0  # zero SMB over ocean / outside RACMO coverage
+
+    with MemoryFile() as mf:
+        with mf.open(
+            driver="GTiff", height=N, width=N, count=1, dtype="float64",
+            crs="EPSG:3031", transform=dst_transform,
+        ) as out:
+            out.write(dst, 1)
+        with mf.open() as raster:
+            return icepack.interpolate(raster, Q)
+
+
 def _find_ismip7_data(data_root=None):
     if data_root is not None:
         return data_root

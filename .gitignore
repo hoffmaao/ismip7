@@ -6,7 +6,10 @@ data
 ISMIP7/
 
 # ── Generated artifacts ──
-antarctica/mesh/
+# Ignore the whole mesh dir: the .msh and its boundary_ids sidecar are both
+# regenerated locally (mesh_antarctica.py writes the matching sidecar), so a
+# committed sidecar would silently mismatch a mesh built from different inputs.
+antarctica/mesh/*
 antarctica/results/
 antarctica/archive/
 antarctica/figs/*.png
@@ -39,6 +42,10 @@ __pycache__/
 *.un~
 *.DS_Store
 .ipynb_checkpoints/
+
+# ── Claude Code (local working notes — do not commit) ──
+CLAUDE.md
+.claude/
 
 # ── Other ──
 UaSource/

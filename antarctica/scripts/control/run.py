@@ -32,7 +32,7 @@ from icepack2_tools.forcing import (
     compute_sin_alpha,
     quadratic_mixed_slope,
     load_K_per_basin,
-    _RHO_ICE, _RHO_WATER,
+    _RHO_ICE, _RHO_WATER, _K_DEFAULT,
 )
 
 T_START = 2015.0
@@ -145,6 +145,38 @@ def make_ctrl_ocean_callback(K_field):
     return callback
 
 
+def make_synthetic_ocean_callback(tf_max=1.5, depth_ref=1000.0, K=_K_DEFAULT):
+    r"""STOPGAP ocean-melt callback that needs no ocean data.
+
+    Prescribes a depth-dependent thermal forcing
+    TF(draft) = clip(tf_max * |draft| / depth_ref, 0, tf_max) and runs it
+    through the Burgard quadratic_mixed_slope melt with constant salinity and a
+    scalar K. Physically structured (deeper ice melts more) but NOT calibrated --
+    a development substitute for the OI-climatology + per-basin K path while the
+    meltMIP ocean data is unavailable. Enable with ISMIP7_SYNTHETIC_MELT=1.
+    """
+    PETSc.Sys.Print(
+        f"  SYNTHETIC ocean melt (uncalibrated stopgap): "
+        f"TF=clip({tf_max:.2f}K * |draft|/{depth_ref:.0f}m), "
+        f"K={K:.2e}, salinity=34.5 PSU"
+    )
+
+    def callback(ctx, t_yr):
+        h = ctx["h"].dat.data_ro
+        b = ctx["b"].dat.data_ro
+        s = ctx["s"].dat.data_ro
+        draft = np.minimum(s - h, 0.0)
+        tf = np.clip(tf_max * np.abs(draft) / depth_ref, 0.0, tf_max)
+        sal = np.full_like(tf, 34.5)
+        sin_a = compute_sin_alpha(ctx)
+        melt = quadratic_mixed_slope(tf, sal, sin_a, K=K)
+        haf = s - (b + (_RHO_WATER / _RHO_ICE) * np.maximum(-b, 0.0))
+        floating = haf <= 0
+        ctx["ocean_melt"].dat.data[:] = np.where(floating, melt, 0.0)
+
+    return callback
+
+
 def main():
     ctx = setup_model()
 
@@ -173,20 +205,26 @@ def main():
             PETSc.Sys.Print("  WARNING: no climatology data, using zero SMB")
             ctx["accum"].assign(0.0)
 
-    # Ocean: fixed climatology TF/so + per-basin calibrated K
-    if not os.path.exists(K_NPZ):
-        raise FileNotFoundError(
-            f"Per-basin K calibration not found at {K_NPZ}. "
-            f"Run antarctica/scripts/calibrate_melt.py first."
+    # Ocean melt: synthetic stopgap (no data) or the real per-basin path.
+    if os.environ.get("ISMIP7_SYNTHETIC_MELT"):
+        tf_max = float(os.environ.get("ISMIP7_SYNTH_TF_MAX", "1.5"))
+        depth_ref = float(os.environ.get("ISMIP7_SYNTH_DEPTH_REF", "1000.0"))
+        callback = make_synthetic_ocean_callback(tf_max, depth_ref)
+    else:
+        # Fixed OI climatology TF/so + per-basin calibrated K
+        if not os.path.exists(K_NPZ):
+            raise FileNotFoundError(
+                f"Per-basin K calibration not found at {K_NPZ}. "
+                f"Run antarctica/scripts/calibrate_melt.py first "
+                f"(or set ISMIP7_SYNTHETIC_MELT=1 for the uncalibrated stopgap)."
+            )
+        PETSc.Sys.Print(f"  Loading per-basin K from: {K_NPZ}")
+        K_field = load_K_per_basin(K_NPZ, mesh_x, mesh_y, fill=0.0)
+        PETSc.Sys.Print(
+            f"  K field: nonzero={int((K_field>0).sum())}/{len(K_field)}  "
+            f"med={np.median(K_field[K_field>0]) if (K_field>0).any() else 0:.2e}"
         )
-    PETSc.Sys.Print(f"  Loading per-basin K from: {K_NPZ}")
-    K_field = load_K_per_basin(K_NPZ, mesh_x, mesh_y, fill=0.0)
-    PETSc.Sys.Print(
-        f"  K field: nonzero={int((K_field>0).sum())}/{len(K_field)}  "
-        f"med={np.median(K_field[K_field>0]) if (K_field>0).any() else 0:.2e}"
-    )
-
-    callback = make_ctrl_ocean_callback(K_field)
+        callback = make_ctrl_ocean_callback(K_field)
 
     PETSc.Sys.Print(f"\nControl experiment: {ESM}")
     PETSc.Sys.Print(f"  Period: {T_START}-{T_END}")

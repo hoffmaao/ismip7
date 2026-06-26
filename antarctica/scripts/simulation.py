@@ -39,6 +39,10 @@ from icepack2.constants import (
     glen_flow_law as n_glen_val,
 )
 
+# SI densities for diagnostics (icepack2 constants are in MPa-m-yr units)
+_RHO_I_SI = 917.0
+_RHO_W_SI = 1024.0
+
 _ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 DATA_DIR = os.path.join(_ROOT, "data")
 MESH_DIR = os.path.join(_ROOT, "mesh")
@@ -46,12 +50,6 @@ RESULTS_DIR = os.path.join(_ROOT, "results")
 
 lc = int(os.environ.get("ISMIP7_LC", "2500"))
 lc_coarse = int(os.environ.get("ISMIP7_LC_COARSE", "64000"))
-
-# SI ice density (kg/m^3) for VAF/mass diagnostics only. The dynamics use the
-# icepack rho_I (MPa-m-yr units); thickness fields are lengths (m) in both, so
-# the Gt/SLE conversion just needs the SI density.
-RHO_I_SI = 917.0
-GT_PER_MM_SLE = 362.5  # Gt of water per mm global-mean sea-level rise
 
 
 def find_file(d, p):
@@ -90,11 +88,19 @@ def setup_model(restart_from=None):
     PETSc.Sys.Print("Loading data...")
     bm_fn = find_file(os.path.join(DATA_DIR, "bedmachine"), "*.nc")
     b = icepack.interpolate(rasterio.open(f"netcdf:{bm_fn}:bed"), Q)
-    h_clamp = float(os.environ.get("ISMIP7_H_CLAMP", "10.0"))
+    # Two clamps:
+    #   - h_clamp_init: floor on the *initial* thickness from BedMachine so
+    #     the initial diagnostic solve sees a well-posed problem everywhere
+    #     (default 10 m, matches the historical behavior).
+    #   - h_clamp: floor enforced in the advection step. Default 0 so melt
+    #     can drive cells to zero at the calving front; the composite
+    #     rheology keeps the diagnostic SNES nonsingular at h=0.
+    h_clamp_init = float(os.environ.get("ISMIP7_H_CLAMP_INIT", "10.0"))
+    h_clamp = float(os.environ.get("ISMIP7_H_CLAMP", "0.0"))
     H = Function(Q, name="thickness").interpolate(
         max_value(
             icepack.interpolate(rasterio.open(f"netcdf:{bm_fn}:thickness"), Q),
-            Constant(h_clamp),
+            Constant(h_clamp_init),
         )
     )
     rho_ratio = Constant(917.0 / 1024.0)
@@ -121,22 +127,43 @@ def setup_model(restart_from=None):
     phi_f.dat.data[:] = phi.dat.data_ro
 
     A0 = Constant(icepack.rate_factor(Constant(260.0)))
-    n = Constant(n_glen_val)
+    # Composite Goldsby-Kohlstedt-style exponents (must match the inversion
+    # that produced the MAP file we load above).
+    n_flow_val = float(os.environ.get("ISMIP7_N_FLOW", "4.0"))
+    m_slide_val = float(os.environ.get("ISMIP7_M_SLIDE", "3.0"))
+    a4_factor = float(os.environ.get("ISMIP7_A4_FACTOR", "10.0"))
+    n_flow = Constant(n_flow_val)
+    m_slide = Constant(m_slide_val)
     tau_c = Constant(0.1)
     u_c = Constant(float(Function(Q).interpolate(
         max_value(sqrt(u_obs[0] ** 2 + u_obs[1] ** 2), Constant(1.0))
     ).dat.data_ro.mean()))
 
+    # Phi_eff (effective-pressure fraction). Uses a small floor on H so it
+    # is well-defined where the original BedMachine thickness is 0.
+    _H_FLOOR_PHI = Constant(1.0)
     phi_eff = Function(Q).interpolate(
         max_value(
             Constant(1.0)
-            - rho_W * g * max_value(Constant(0.0), -b) / (rho_I * g * max_value(H, Constant(1.0))),
+            - rho_W * g * max_value(Constant(0.0), -b)
+              / (rho_I * g * max_value(H, _H_FLOOR_PHI)),
             Constant(0.01),
         )
     )
-    K_base = u_c / (phi_eff * tau_c) ** n
-    A_map = A0 * exp(phi_f)
-    K_map = K_base * exp(-n * theta_f)
+    A4_base = A0 * Constant(a4_factor)
+    A_map = A4_base * exp(phi_f)
+    K_base = u_c / (phi_eff * tau_c) ** m_slide
+    K_map = K_base * exp(-m_slide * theta_f)
+
+    # Composite rheology: Goldsby-Kohlstedt dislocation creep (n=n_flow=4)
+    # + α · linear regularizer (n=1) with a CONSTANT reference thickness
+    # H_ref. This pins M where h → 0 so the SNES Jacobian stays
+    # nonsingular at the calving front and h is allowed to reach zero.
+    # Mirrors icepack2 dome_test.py.
+    alpha_reg = Constant(float(os.environ.get("ISMIP7_COMPOSITE_ALPHA", "1e-4")))
+    H_ref = Constant(float(os.environ.get("ISMIP7_H_REF", "100.0")))
+    A_linear = A_map * tau_c ** (n_flow_val - 1)   # linearized at tau_c
+    K_linear = u_c / (phi_eff * tau_c) * exp(-theta_f)  # linearized at tau_c
 
     sparams = {
         "snes_type": "newtonls",
@@ -185,16 +212,28 @@ def setup_model(restart_from=None):
         "thickness": h,
         "surface": s,
     }
-    rheology = {
-        "flow_law_exponent": n,
+    rheo_glen = {
+        "flow_law_exponent": n_flow,
         "flow_law_coefficient": A_map,
-        "sliding_exponent": n,
+        "sliding_exponent": m_slide,
         "sliding_coefficient": K_map,
     }
+    rheo_linear = {
+        "flow_law_exponent": Constant(1.0),
+        "flow_law_coefficient": A_linear,
+        "sliding_exponent": Constant(1.0),
+        "sliding_coefficient": K_linear,
+    }
+    # Composite-rheology fields: use the constant reference thickness for the
+    # linear regularization terms so they stay positive-definite at h=0.
+    fields_reg = dict(fields)
+    fields_reg["thickness"] = H_ref
 
     L = (
-        model.minimization.viscous_power(**fields, **rheology)
-        + model.minimization.friction_power(**fields, **rheology)
+        model.minimization.viscous_power(**fields, **rheo_glen)
+        + alpha_reg * model.minimization.viscous_power(**fields_reg, **rheo_linear)
+        + model.minimization.friction_power(**fields, **rheo_glen)
+        + alpha_reg * model.minimization.friction_power(**fields, **rheo_linear)
         + model.minimization.momentum_balance(**fields)
     )
     if use_calving_terminus:
@@ -205,13 +244,18 @@ def setup_model(restart_from=None):
     )
     slvr = NonlinearVariationalSolver(prob, solver_parameters=sparams)
 
-    PETSc.Sys.Print("Initial diagnostic solve...")
-    for exponent in np.linspace(1.0, n_glen_val, 5):
-        n.assign(exponent)
+    PETSc.Sys.Print(
+        f"Initial diagnostic solve (continuation n_flow 1→{n_flow_val:.1f}, "
+        f"m_slide 1→{m_slide_val:.1f})..."
+    )
+    for t in np.linspace(0.0, 1.0, 5):
+        n_flow.assign(1.0 + t * (n_flow_val - 1.0))
+        m_slide.assign(1.0 + t * (m_slide_val - 1.0))
         slvr.solve()
     PETSc.Sys.Print("  Done")
 
     accum = Function(Q, name="accumulation").assign(0.0)
+    ocean_melt = Function(Q, name="ocean_melt").assign(0.0)
 
     return {
         "mesh": mesh,
@@ -223,8 +267,12 @@ def setup_model(restart_from=None):
         "s": s,
         "b": b,
         "slvr": slvr,
-        "n": n,
+        "n_flow": n_flow,
+        "n_flow_val": n_flow_val,
+        "m_slide": m_slide,
+        "m_slide_val": m_slide_val,
         "accum": accum,
+        "ocean_melt": ocean_melt,
         "phi_eff": phi_eff,
         "rho_ratio": rho_ratio,
         "h_clamp": h_clamp,
@@ -251,8 +299,12 @@ def run_simulation(
     s = ctx["s"]
     b = ctx["b"]
     slvr = ctx["slvr"]
-    n = ctx["n"]
+    n_flow = ctx["n_flow"]
+    n_flow_val = ctx["n_flow_val"]
+    m_slide = ctx["m_slide"]
+    m_slide_val = ctx["m_slide_val"]
     accum = ctx["accum"]
+    ocean_melt = ctx["ocean_melt"]
     phi_eff = ctx["phi_eff"]
     rho_ratio = ctx["rho_ratio"]
     h_clamp = ctx["h_clamp"]
@@ -288,9 +340,14 @@ def run_simulation(
             slvr.solve()
         except fd.ConvergenceError:
             PETSc.Sys.Print(f"  Step {k}: re-doing continuation...")
-            for exponent in np.linspace(1.0, n_glen_val, 5):
-                n.assign(exponent)
-                slvr.solve()
+            try:
+                for t in np.linspace(0.0, 1.0, 10):
+                    n_flow.assign(1.0 + t * (n_flow_val - 1.0))
+                    m_slide.assign(1.0 + t * (m_slide_val - 1.0))
+                    slvr.solve()
+            except fd.ConvergenceError:
+                PETSc.Sys.Print(f"  Step {k}: continuation failed, saving and stopping")
+                break
 
         u_vel = z.subfunctions[0]
 
@@ -308,7 +365,7 @@ def run_simulation(
             * fd.jump(phi_dg)
             * dS
             + un_plus * h_dg_trial * phi_dg * ds
-            - accum * phi_dg * dx
+            - (accum - ocean_melt) * phi_dg * dx
         )
         fd.solve(
             fd.lhs(F_prog) == fd.rhs(F_prog),
@@ -338,8 +395,8 @@ def run_simulation(
         t_elapsed = perf_counter() - t_step_start
 
         haf = Function(Q).interpolate(max_value(s - s_float, Constant(0.0)))
-        vaf = float(assemble(haf * dx)) * RHO_I_SI / 1e12 / GT_PER_MM_SLE
-        total_mass = float(assemble(h * dx)) * RHO_I_SI / 1e12
+        vaf = float(assemble(haf * dx)) * _RHO_I_SI / 1e12 / 362.5
+        total_mass = float(assemble(h * dx)) * _RHO_I_SI / 1e12
 
         results.append((t_yr, vaf, total_mass))
 

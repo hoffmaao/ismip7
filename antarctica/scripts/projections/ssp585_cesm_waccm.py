@@ -53,7 +53,10 @@ def main():
     fracture = ISMIP7Fracture(esm=ESM, scenario=SSP)
     fracture.load()
 
-    callback = make_forcing_callback(atm=atm, ocean=ocean, fracture=fracture)
+    K_melt = float(os.environ.get("ISMIP7_K_MELT", "1.15e-4"))
+    PETSc.Sys.Print(f"  Ocean melt K (Burgard quadratic_mixed_slope): {K_melt:.2e}")
+    callback = make_forcing_callback(atm=atm, ocean=ocean, fracture=fracture,
+                                     K=K_melt)
 
     PETSc.Sys.Print(f"\nCore Experiment 7: {SSP} / {ESM}")
     PETSc.Sys.Print(f"  Period: {T_START}-{T_END}")

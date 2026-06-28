@@ -12,7 +12,7 @@ Usage:
     ISMIP7_ESM=MRI-ESM2-0 mpiexec -n 12 python scripts/control/run.py
 """
 
-import os, sys, glob
+import os, sys, glob, argparse
 import numpy as np
 import xarray as xr
 from scipy.interpolate import RegularGridInterpolator
@@ -178,7 +178,20 @@ def make_synthetic_ocean_callback(tf_max=1.5, depth_ref=1000.0, K=_K_DEFAULT):
 
 
 def main():
-    ctx = setup_model()
+    parser = argparse.ArgumentParser(description="ISMIP7 CTRL2015 control run")
+    parser.add_argument("--snes-monitor", action="store_true",
+                        help="enable PETSc SNES/KSP convergence monitoring")
+    parser.add_argument("--snes-log", default=None,
+                        help="route SNES monitor output to this file (default: stdout)")
+    parser.add_argument("--restart", default=os.environ.get("ISMIP7_RESTART"),
+                        help="restart from a checkpoint .h5 (default: cold start)")
+    args, _ = parser.parse_known_args()
+    if args.snes_monitor or args.snes_log:
+        os.environ["ISMIP7_SNES_MONITOR"] = "1"
+    if args.snes_log:
+        os.environ["ISMIP7_SNES_LOG"] = args.snes_log
+
+    ctx = setup_model(restart_from=args.restart)
 
     mesh_x = ctx["mesh"].coordinates.dat.data_ro[:, 0]
     mesh_y = ctx["mesh"].coordinates.dat.data_ro[:, 1]

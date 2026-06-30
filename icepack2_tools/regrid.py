@@ -24,28 +24,56 @@ ISMIP_VARIABLES = {
     "sftflf":       {"long_name": "Floating ice area fraction", "units": "1"},
 }
 
-ISMIP7_NX = 761
-ISMIP7_NY = 761
-ISMIP7_X0 = -3_040_000.0
-ISMIP7_X1 = 3_040_000.0
-ISMIP7_Y0 = -3_040_000.0
-ISMIP7_Y1 = 3_040_000.0
-ISMIP7_DX = 8000.0
+ISMIP7_ANTARCTICA_NX = 761
+ISMIP7_ANTARCTICA_NY = 761
+ISMIP7_ANTARCTICA_X0 = -3_040_000.0
+ISMIP7_ANTARCTICA_X1 = 3_040_000.0
+ISMIP7_ANTARCTICA_Y0 = -3_040_000.0
+ISMIP7_ANTARCTICA_Y1 = 3_040_000.0
+ISMIP7_ANTARCTICA_DX = 8000.0
+
+ISMIP7_GREENLAND_X0 = -720_000.0
+ISMIP7_GREENLAND_X1 = 960_000.0
+ISMIP7_GREENLAND_Y0 = -3_450_000.0
+ISMIP7_GREENLAND_Y1 = -570_000.0
+ISMIP7_GREENLAND_DX = 1000.0
+ISMIP7_GREENLAND_NX = (ISMIP7_GREENLAND_X1 - ISMIP7_GREENLAND_X0) // ISMIP7_GREENLAND_DX + 1
+ISMIP7_GREENLAND_NY = (ISMIP7_GREENLAND_Y1 - ISMIP7_GREENLAND_Y0) // ISMIP7_GREENLAND_DX + 1
 
 
-def ismip7_grid_coords():
+def ismip7_grid_coords(domain="antarctica"):
     r"""Return ISMIP7 AIS grid cell center coordinates."""
-    x = np.linspace(ISMIP7_X0, ISMIP7_X1, ISMIP7_NX)
-    y = np.linspace(ISMIP7_Y0, ISMIP7_Y1, ISMIP7_NY)
+    if domain == "antarctica":
+        x0, x1, y0, y1, nx, ny = ISMIP7_ANTARCTICA_X0,ISMIP7_ANTARCTICA_X1, ISMIP7_ANTARCTICA_Y0, ISMIP7_ANTARCTICA_Y1, ISMIP7_ANTARCTICA_NX,  ISMIP7_ANTARCTICA_NY
+    elif domain == "greenland":
+        x0, x1, y0, y1, nx, ny = ISMIP7_GREENLAND_X0,ISMIP7_GREENLAND_X1, ISMIP7_GREENLAND_Y0, ISMIP7_GREENLAND_Y1, ISMIP7_GREENLAND_NX,  ISMIP7_GREENLAND_NY
+    else:
+        raise ValueError(f"Unknown domain name {domain}")
+    x = np.linspace(x0, x1, nx)
+    y = np.linspace(y0, y1, ny)
     return x, y
 
 
 class ISMIP7Regridder:
     r"""Regrid Firedrake fields to the ISMIP7 AIS standard 8km grid."""
 
-    def __init__(self, source_mesh):
+    def __init__(self, source_mesh, domain="antarctica"):
         import firedrake as fd
         from firedrake.petsc import PETSc
+        if domain == "antarctica":
+            self.dx = ISMIP7_ANTARCTICA_DX
+            self.nx = ISMIP7_ANTARCTICA_NX
+            self.ny = ISMIP7_ANTARCTICA_NY
+            self.proj = "epsg:3031"
+            self.grid = f"ISMIP7 AIS standard {int(self.dx // 1000)}km"
+        elif domain == "greenland":
+            self.dx = ISMIP7_GREENLAND_DX
+            self.nx = ISMIP7_ANTARCTICA_NX
+            self.ny = ISMIP7_ANTARCTICA_NY
+            self.proj = "epsg:3413"
+            self.grid = f"ISMIP7 GrIS standard {int(self.dx // 1000)}km"
+        else:
+            raise ValueError(f"Unknown domain name {domain}")
 
         PETSc.Sys.Print("Building ISMIP7 regridder (VertexOnlyMesh)...")
 
@@ -56,7 +84,7 @@ class ISMIP7Regridder:
         xmin, xmax = coords[:, 0].min(), coords[:, 0].max()
         ymin, ymax = coords[:, 1].min(), coords[:, 1].max()
 
-        pad = ISMIP7_DX
+        pad = self.dx
         self._ii = np.where(
             (self.x >= xmin - pad) & (self.x <= xmax + pad)
         )[0]
@@ -68,7 +96,7 @@ class ISMIP7Regridder:
         pts = np.column_stack([xx.ravel(), yy.ravel()])
 
         PETSc.Sys.Print(
-            f"  Grid: {ISMIP7_NX}x{ISMIP7_NY}, "
+            f"  Grid: {self.ny}x{self.nx}, "
             f"querying {len(self._ii)}x{len(self._jj)} = {len(pts)} points"
         )
 
@@ -94,7 +122,7 @@ class ISMIP7Regridder:
         crop = np.full(self._n_query, fill_value)
         crop[:len(vals)] = vals
 
-        grid = np.full((ISMIP7_NY, ISMIP7_NX), fill_value)
+        grid = np.full((self.ny, self.nx), fill_value)
         grid[np.ix_(self._jj, self._ii)] = crop.reshape(self._query_shape)
 
         return grid
@@ -153,10 +181,10 @@ class ISMIP7Regridder:
             coords["time"] = time
 
         ds_attrs = {
-            "Grid": "ISMIP7 AIS standard 8km",
-            "proj4": "epsg:3031",
+            "Grid": self.grid,
+            "proj4": self.proj,
             "Conventions": "CF-1.10",
-            "grid_resolution_m": ISMIP7_DX,
+            "grid_resolution_m": self.dx,
             "regridding_method": "Firedrake VertexOnlyMesh interpolation",
         }
         if attrs:

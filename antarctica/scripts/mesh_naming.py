@@ -36,9 +36,9 @@ def mesh_filename(lc_coarse, lc, buffer_m):
     return os.path.join(MESH_DIR, mesh_basename(lc_coarse, lc, buffer_m) + ".msh")
 
 
-def bndids_filename(buffer_m):
-    """Full path to the boundary_ids sidecar matching the given outline buffer."""
-    return os.path.join(MESH_DIR, f"boundary_ids{buffer_tag(buffer_m)}.json")
+def bndids_filename(lc_coarse, lc, buffer_m):
+    """Full path to the boundary_ids sidecar matching the given mesh/buffer."""
+    return os.path.join(MESH_DIR, f"boundary_ids_{mesh_basename(lc_coarse, lc, buffer_m)}.json")
 
 
 def get_buffer_m():

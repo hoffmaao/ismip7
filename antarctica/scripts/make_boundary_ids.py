@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
-Generate a mesh/boundary_ids_buffered<N>.json sidecar from a generated
-Antarctica .msh file.
+Generate a mesh/boundary_ids_antarctica_<COARSE>_<FINE>_buffered<N>.json
+sidecar from a generated Antarctica .msh file.
 
 The mesh pipeline (mesh_antarctica.py / icepack2_tools.mesh) tags each
 boundary segment as a gmsh physical group named "Calving_N" or "Other_N",
@@ -14,9 +14,9 @@ into calving-front vs. other (land/grounding) boundaries:
 
 The boundary topology (and thus the sidecar contents) depends on the
 outline buffer (`ISMIP7_BUFFER_M`) used to build the mesh, so the mesh and
-sidecar filenames are both tagged with that buffer size (see
-mesh_naming.py) — a sidecar built for one buffer is not valid for a mesh
-built with a different one.
+sidecar filenames are both tagged with the exact resolution and buffer size
+(see mesh_naming.py) — a sidecar built for one mesh/buffer is not valid for
+a different one.
 
 This file is read by diagnostic_solve, inversion_icepack2, simulation,
 run_control, lcurve_icepack2, gl_sensitivity and run_eigendec, but no
@@ -100,7 +100,7 @@ def main():
     mesh_fn = os.environ.get(
         "ISMIP7_MESH", mesh_filename(lc_coarse, lc, buffer_m)
     )
-    out_fn = os.environ.get("ISMIP7_BNDIDS", bndids_filename(buffer_m))
+    out_fn = os.environ.get("ISMIP7_BNDIDS", bndids_filename(lc_coarse, lc, buffer_m))
     write_boundary_ids(mesh_fn, out_fn)
 
 

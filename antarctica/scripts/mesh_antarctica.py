@@ -255,7 +255,9 @@ def main():
     # Emit a boundary-id sidecar that matches this exact mesh (and thus the
     # BedMachine input + SIMPLIFY_TOL/SUBSAMPLE + outline buffer used), so the
     # solvers never read a stale sidecar built for a different mesh/buffer.
-    write_boundary_ids(fn_base + ".msh", bndids_filename(buffer_m))
+    write_boundary_ids(
+        fn_base + ".msh", bndids_filename(COARSE, GL_BANDS[0][1], buffer_m)
+    )
 
 
 if __name__ == "__main__":

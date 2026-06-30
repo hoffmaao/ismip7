@@ -9,6 +9,7 @@ Usage:
 """
 
 import os
+import re
 import glob
 import firedrake
 import matplotlib.pyplot as plt
@@ -17,6 +18,23 @@ from icepack.plot import subplots
 _ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 MESH_DIR = os.path.join(_ROOT, "mesh")
 FIG_DIR = os.path.join(_ROOT, "figs")
+
+_BASENAME_RE = re.compile(r"antarctica_(\d+)_(\d+)_buffered(\d+)$")
+
+
+def parse_mesh_basename(basename):
+    """Split 'antarctica_<COARSE>_<FINE>_buffered<BUFFER_M>' into ints.
+
+    Returns (coarse_m, fine_m, buffer_m).
+    """
+    m = _BASENAME_RE.match(basename)
+    if not m:
+        raise ValueError(
+            f"Mesh filename '{basename}' doesn't match "
+            "antarctica_<COARSE>_<FINE>_buffered<BUFFER_M> (see mesh_naming.py)"
+        )
+    coarse_m, fine_m, buffer_m = (int(g) for g in m.groups())
+    return coarse_m, fine_m, buffer_m
 
 
 def plot_single_mesh(mesh_fn, ax, title):
@@ -49,11 +67,8 @@ def main():
 
     for ax, mesh_fn in zip(axes, mesh_files):
         basename = os.path.splitext(os.path.basename(mesh_fn))[0]
-        # Extract resolution from filename: antarctica_COARSE_FINE
-        parts = basename.split("_")
-        fine_km = int(parts[-1]) // 1000
-        coarse_km = int(parts[-2]) // 1000
-        title = f"{fine_km}–{coarse_km} km"
+        coarse_m, fine_m, buffer_m = parse_mesh_basename(basename)
+        title = f"{fine_m // 1000}–{coarse_m // 1000} km (buffer {buffer_m // 1000} km)"
 
         print(f"  Plotting {basename}...")
         plot_single_mesh(mesh_fn, ax, title)
@@ -69,12 +84,12 @@ def main():
     # Also make individual plots for each mesh (higher detail)
     for mesh_fn in mesh_files:
         basename = os.path.splitext(os.path.basename(mesh_fn))[0]
-        parts = basename.split("_")
-        fine_km = int(parts[-1]) // 1000
-        coarse_km = int(parts[-2]) // 1000
+        coarse_m, fine_m, buffer_m = parse_mesh_basename(basename)
+        fine_km, coarse_km = fine_m // 1000, coarse_m // 1000
 
         fig, ax = subplots(1, 1, figsize=(10, 10))
-        plot_single_mesh(mesh_fn, ax, f"Antarctica Mesh: {fine_km}–{coarse_km} km")
+        title = f"Antarctica Mesh: {fine_km}–{coarse_km} km (buffer {buffer_m // 1000} km)"
+        plot_single_mesh(mesh_fn, ax, title)
 
         out_fn = os.path.join(FIG_DIR, f"{basename}.png")
         fig.savefig(out_fn, dpi=200, bbox_inches="tight")

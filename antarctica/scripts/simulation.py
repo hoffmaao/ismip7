@@ -114,16 +114,23 @@ def setup_model(restart_from=None):
         fillvalue=0.0,
     )
 
-    inv_fn = os.path.join(MESH_DIR, f"inversion_icepack2_{lc}.h5")
+    inv_fn = os.environ.get(
+        "ISMIP7_INVERSION", os.path.join(MESH_DIR, f"inversion_icepack2_{lc}.h5")
+    )
     PETSc.Sys.Print(f"Loading MAP: {inv_fn}")
     with fd.CheckpointFile(inv_fn, "r") as chk:
         chk_mesh = chk.load_mesh()
         theta = chk.load_function(chk_mesh, name="log_friction")
         phi = chk.load_function(chk_mesh, name="log_fluidity")
-    theta_f = Function(Q, name="theta")
-    theta_f.dat.data[:] = theta.dat.data_ro
-    phi_f = Function(Q, name="phi")
-    phi_f.dat.data[:] = phi.dat.data_ro
+    # Cross-mesh-safe: identical result when inv_fn's mesh matches `mesh`
+    # (today's only case), and also works when warm-starting a different
+    # resolution from one shared inversion (the timing harness).
+    theta_f = Function(Q, name="theta").interpolate(
+        theta, allow_missing_dofs=True, default_missing_val=0.0
+    )
+    phi_f = Function(Q, name="phi").interpolate(
+        phi, allow_missing_dofs=True, default_missing_val=0.0
+    )
 
     A0 = Constant(icepack.rate_factor(Constant(260.0)))
     # Composite Goldsby-Kohlstedt-style exponents (must match the inversion

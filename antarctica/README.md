@@ -23,7 +23,7 @@ David Lilien's Greenland repo (https://github.com/dlilien/ISMIP7_Greenland_Icepa
   ```
 - Python packages used by the scripts (install into the Firedrake venv):
   ```bash
-  pip install globus-sdk earthaccess xarray netCDF4 scipy shapely gmsh
+  pip install globus-sdk earthaccess xarray netCDF4 scipy shapely gmsh colorcet
   ```
 - **gmsh** (the `gmsh` Python module above is sufficient for meshing).
 
@@ -276,6 +276,7 @@ in `scripts/historical/`; run one first to produce
 | `ISMIP7_BUFFER_M` | outline buffer (m) used to resolve the default mesh/boundary-id filenames (see §3) | `20000` |
 | `ISMIP7_MESH` | override mesh `.msh` path | `mesh/antarctica_<COARSE>_<LC>_buffered<BUFFER_M>.msh` |
 | `ISMIP7_BNDIDS` | override boundary-id JSON | `mesh/boundary_ids_antarctica_<COARSE>_<LC>_buffered<BUFFER_M>.json` |
+| `ISMIP7_INVERSION` | override inversion checkpoint (θ/φ MAP) | `mesh/inversion_icepack2_<LC>.h5` |
 | `ISMIP7_DATA_ROOT` | ISMIP7 forcing tree root | `<repo>/ISMIP7/AIS` |
 | `ISMIP7_T_END` / `ISMIP7_DT` | end year / timestep (yr) | `2300` / `1.0` |
 | `ISMIP7_OUTPUT_INTERVAL` | checkpoint every N steps | `10` |
@@ -289,6 +290,42 @@ in `scripts/historical/`; run one first to produce
 > **dt guidance** (from a dt-convergence sweep): use `ISMIP7_DT=0.1` for
 > production projections; `0.25` is acceptable if 10 steps/yr is too costly for a
 > 285-yr run. `dt=1.0` over/under-melts per step and resurrects clamped cells.
+
+---
+
+## 7. Timing benchmark (`make timing`)
+
+Resolution vs. core-count wall-clock benchmark for the transient solver. Run
+from `antarctica/` (needs §1 data, Firedrake, and Slurm on the cluster):
+
+```bash
+cd antarctica
+make timing
+# → TIMING_MATRIX.md
+# → results/timing/timing_<LC>_<LC_coarse>_<ncores>.json  (one per cell)
+```
+
+The pipeline has five idempotent stages (each skips work already done):
+
+1. **Meshes** — build 10 meshes at `buffer=20000 m`: LC ∈ {500, 1000, 2000,
+   2500, 5000} m with LC_coarse = 10×LC and 20×LC.
+2. **Inversion** — one inversion at LC=2500 / LC_coarse=25000 (via
+   `scripts/batch_runners/timing_inversion.script` on Slurm, or `mpiexec`
+   locally).
+3. **Redistribute** — rewrite `mesh/inversion_icepack2_2500.h5` on a single
+   core (`scripts/redistribute_checkpoint.py`) so any rank count can load it.
+4. **Transient** — 30 short runs (10 mesh combos × 16/32/64 cores): 5 years
+   (`2015`–`2020`, `dt=1.0`), zero SMB/melt forcing. Every resolution
+   warm-starts θ/φ from the single inversion via cross-mesh interpolation
+   (`ISMIP7_INVERSION=mesh/inversion_icepack2_2500.h5`).
+5. **Matrix** — aggregate JSON timing records into [`TIMING_MATRIX.md`](TIMING_MATRIX.md).
+
+Individual stages can be run separately: `make meshes`, `make inversion`,
+`make redistribute`, `make transient`, `make matrix`.
+
+Slurm scripts live in `scripts/batch_runners/` (`timing_inversion.script`,
+`timing_transient.script`), following the same module-load pattern as
+`inversion.script`.
 
 ---
 
@@ -328,6 +365,12 @@ VAF is reported in mm of sea-level equivalent; mass in Gt.
 - **`icepack2_tools/coupled.py`** is a WIP sketch of ice↔plume coupling and
   references a `PlumeModel` that does not yet exist in this tree — not wired into
   any run.
+- **`make timing` is not ready to run yet.** The benchmark in §7 should wait
+  until (1) inversion solver divergence is fixed (the forward/adjoint SNES can
+  fail during `inversion_icepack2.py`, so the shared LC=2500 checkpoint the
+  timing grid depends on may not be obtainable), and (2) finite-element order
+  is pinned down across the mesh pipeline and solvers — until then, wall-clock
+  numbers would not be comparable across resolutions or runs.
 
 ---
 

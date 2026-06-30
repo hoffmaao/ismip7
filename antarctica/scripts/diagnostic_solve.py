@@ -46,12 +46,16 @@ from icepack2.constants import (
 import colorcet as cc
 import matplotlib.pyplot as plt
 
+from mesh_naming import get_buffer_m, mesh_filename, bndids_filename
+
 _ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 DATA_DIR = os.path.join(_ROOT, "data")
 MESH_DIR = os.path.join(_ROOT, "mesh")
 FIG_DIR = os.path.join(_ROOT, "figs")
 
-lc = 8000
+lc = int(os.environ.get("ISMIP7_LC", "8000"))
+lc_coarse = int(os.environ.get("ISMIP7_LC_COARSE", str(lc * 10)))
+buffer_m = get_buffer_m()
 
 
 def find_file(directory, pattern):
@@ -65,13 +69,14 @@ def main():
     os.makedirs(FIG_DIR, exist_ok=True)
 
     # ── Load Mesh ──────────────────────────────────────────────────────
-    mesh_fn = os.path.join(MESH_DIR, f"antarctica_{lc * 10}_{lc}.msh")
+    mesh_fn = os.environ.get("ISMIP7_MESH", mesh_filename(lc_coarse, lc, buffer_m))
     PETSc.Sys.Print(f"Loading mesh: {mesh_fn}")
     mesh = firedrake.Mesh(mesh_fn)
     PETSc.Sys.Print(f"  {mesh.num_vertices()} vertices, {mesh.num_cells()} cells")
 
     # Load boundary classification
-    with open(os.path.join(MESH_DIR, "boundary_ids.json")) as f:
+    bndids_fn = os.environ.get("ISMIP7_BNDIDS", bndids_filename(buffer_m))
+    with open(bndids_fn) as f:
         bnd_ids = json.load(f)
     calving_ids = tuple(bnd_ids["calving"])
     other_ids = tuple(bnd_ids["other"])

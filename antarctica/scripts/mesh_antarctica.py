@@ -27,6 +27,7 @@ from icepack2_tools.mesh import (
     SUBSAMPLE,
 )
 from make_boundary_ids import write_boundary_ids
+from mesh_naming import mesh_basename, bndids_filename
 
 DATA_DIR = os.path.join(_ROOT, "data")
 MESH_DIR = os.path.join(_ROOT, "mesh")
@@ -128,8 +129,6 @@ def main():
     os.makedirs(MESH_DIR, exist_ok=True)
 
     buffer_m = float(os.environ.get("ISMIP7_BUFFER_M", "20000"))
-    if buffer_m == 0:
-        os.environ["ISMIP7_BUFFER_M"] = "20000"
     print(f"Buffer: {buffer_m/1e3:.0f} km")
 
     mask, x, y = load_bedmachine_mask(DATA_DIR)
@@ -140,7 +139,9 @@ def main():
     gl_dist, ice_field, float_field = grounding_line_distance()
     cf_dist = calving_front_distance(boundaries, names)
 
-    fn_base = os.path.join(MESH_DIR, f"antarctica_{COARSE}_{GL_BANDS[0][1]}")
+    fn_base = os.path.join(
+        MESH_DIR, mesh_basename(COARSE, GL_BANDS[0][1], buffer_m)
+    )
 
     # Pass 1: raw mesh
     print(f"\nPass 1: raw mesh...")
@@ -252,9 +253,9 @@ def main():
     print(f"\nSaved: {fn_base}.msh ({size_mb:.1f} MB)")
 
     # Emit a boundary-id sidecar that matches this exact mesh (and thus the
-    # BedMachine input + SIMPLIFY_TOL/SUBSAMPLE used), so the solvers never read
-    # a stale committed sidecar from a different mesh.
-    write_boundary_ids(fn_base + ".msh", os.path.join(MESH_DIR, "boundary_ids.json"))
+    # BedMachine input + SIMPLIFY_TOL/SUBSAMPLE + outline buffer used), so the
+    # solvers never read a stale sidecar built for a different mesh/buffer.
+    write_boundary_ids(fn_base + ".msh", bndids_filename(buffer_m))
 
 
 if __name__ == "__main__":

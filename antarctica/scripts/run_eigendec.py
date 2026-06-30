@@ -99,7 +99,7 @@ def main():
     PETSc.Sys.Print(f"Loading mesh: {mesh_fn}")
     mesh = Mesh(mesh_fn)
 
-    bndids_fn = os.environ.get("ISMIP7_BNDIDS", bndids_filename(buffer_m))
+    bndids_fn = os.environ.get("ISMIP7_BNDIDS", bndids_filename(lc_coarse, lc, buffer_m))
     with open(bndids_fn) as f:
         bnd_ids = json.load(f)
     calving_ids = tuple(bnd_ids["calving"])

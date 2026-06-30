@@ -97,7 +97,7 @@ def main():
     mesh = Mesh(mesh_fn)
     PETSc.Sys.Print(f"  {mesh.num_vertices()} vertices, {mesh.num_cells()} cells")
 
-    bndids_fn = os.environ.get("ISMIP7_BNDIDS", bndids_filename(buffer_m))
+    bndids_fn = os.environ.get("ISMIP7_BNDIDS", bndids_filename(lc_coarse, lc, buffer_m))
     with open(bndids_fn) as f:
         bnd_ids = json.load(f)
 

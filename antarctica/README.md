@@ -172,14 +172,24 @@ sized from BedMachine geometry and MEaSUREs strain rate (needs §1 data).
 
 ```bash
 cd antarctica
-ISMIP7_BUFFER_M=20000 python scripts/mesh_antarctica.py
+python scripts/mesh_antarctica.py --lc 2500 --lc-coarse 64000 --buffer-m 20000
+# or equivalently via env vars (defaults match the rest of the pipeline):
+ISMIP7_LC=2500 ISMIP7_LC_COARSE=64000 ISMIP7_BUFFER_M=20000 python scripts/mesh_antarctica.py
+# dev mesh used by inversion_icepack2.py / diagnostic_solve.py / run_eigendec.py:
+python scripts/mesh_antarctica.py --lc 8000 --lc-coarse 80000 --buffer-m 20000
 # → mesh/antarctica_<COARSE>_<FINE>_buffered<BUFFER_M>.msh
 #    (e.g. antarctica_64000_2500_buffered20000.msh)
 # → mesh/boundary_ids_antarctica_<COARSE>_<FINE>_buffered<BUFFER_M>.json
 #    (e.g. boundary_ids_antarctica_64000_2500_buffered20000.json)
 ```
 
-The mesh outline is pushed `ISMIP7_BUFFER_M` meters into the ocean before
+`--lc` / `--lc-coarse` select the fine (grounding-line/calving-front) and
+coarse (interior) element sizes in meters. The GL-band element sizes,
+`shelf_size`, `buffer_size`, and strain-rate floor all scale with `lc/2500`;
+calving-front decay lengthscales are floored at `lc` and `1.25*lc` so they
+never fall below the mesh's own fine resolution.
+
+The mesh outline is pushed `--buffer-m` / `ISMIP7_BUFFER_M` meters into the ocean before
 meshing (default `20000`; pass `0` for no buffer), which lets icepack2 handle
 `h=0` at the (now-interior) calving front instead of needing a
 `calving_terminus` BC. Because this changes the boundary topology, both the

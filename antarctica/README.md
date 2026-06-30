@@ -43,7 +43,7 @@ Personal** running locally and its endpoint UUID
 ```
 antarctica/
   data/            # observational inputs (BedMachine, velocity, RACMO)  [gitignored]
-  mesh/            # *.msh + boundary_ids*.json + inversion_*.h5         [gitignored except boundary_ids*.json]
+  mesh/            # *.msh + boundary_ids_buffered*.json + inversion_*.h5  [gitignored except boundary_ids*.json]
   results/         # checkpoints (*.h5), timeseries (*.csv), logs        [gitignored]
   scripts/         # all entry points (see §3–§6)
 ISMIP7/AIS/        # ISMIP7 forcing tree the *runtime* reads             [gitignored]
@@ -51,8 +51,8 @@ icepack2_tools/    # reusable library (mesh, forcing, eikonal, grounding, regrid
 ```
 
 Everything large is gitignored. The only tracked files under `antarctica/mesh/`
-are the tiny `boundary_ids*.json` (the gmsh physical-line → calving/other map; see
-§3).
+are the tiny `boundary_ids_buffered*.json` (the gmsh physical-line →
+calving/other map; see §3).
 
 ---
 
@@ -173,19 +173,28 @@ sized from BedMachine geometry and MEaSUREs strain rate (needs §1 data).
 ```bash
 cd antarctica
 ISMIP7_BUFFER_M=20000 python scripts/mesh_antarctica.py
-# → mesh/antarctica_<COARSE>_<FINE>.msh   (e.g. antarctica_64000_2500.msh)
+# → mesh/antarctica_<COARSE>_<FINE>_buffered<BUFFER_M>.msh
+#    (e.g. antarctica_64000_2500_buffered20000.msh)
 ```
+
+The mesh outline is pushed `ISMIP7_BUFFER_M` meters into the ocean before
+meshing (default `20000`; pass `0` for no buffer), which lets icepack2 handle
+`h=0` at the (now-interior) calving front instead of needing a
+`calving_terminus` BC. Because this changes the boundary topology, both the
+`.msh` and its sidecar are named after the exact `(COARSE, FINE, BUFFER_M)`
+combination used to build them — building a different resolution or buffer
+never collides with or silently invalidates a previous build.
 
 **Boundary IDs.** The gmsh physical groups come out alternating
 `Calving_0, Other_1, Calving_2, …`, auto-numbered `1,2,3,…`, so **odd tag =
-calving, even tag = other**. `boundary_ids.json` caches that split (read by every
-solver via `ISMIP7_BNDIDS`). These small JSONs are the *only* tracked files in
-`mesh/`. To regenerate one for a mesh, read its `$PhysicalNames` block:
-```bash
-awk '/\$PhysicalNames/{f=1} f; /\$EndPhysicalNames/{exit}' mesh/<file>.msh
-```
-and write `{"calving":[odd…], "other":[even…]}`. (A per-mesh emitter is a planned
-cleanup — see "Known issues".)
+calving, even tag = other**. `mesh_antarctica.py` automatically writes that
+split to `mesh/boundary_ids_buffered<BUFFER_M>.json` (read by every solver via
+`ISMIP7_BNDIDS`, which itself defaults using the same `ISMIP7_BUFFER_M`-based
+naming — see `scripts/mesh_naming.py`). These small JSONs are the *only*
+tracked files in `mesh/`. To regenerate one for an existing mesh without
+rebuilding it, run `ISMIP7_BUFFER_M=<N> python scripts/make_boundary_ids.py`
+(or pass explicit `ISMIP7_MESH`/`ISMIP7_BNDIDS` paths) — it parses the mesh's
+`$PhysicalNames` block and writes `{"calving":[odd…], "other":[even…]}`.
 
 ---
 
@@ -251,8 +260,9 @@ in `scripts/historical/`; run one first to produce
 |---------|---------|---------|
 | `ISMIP7_LC` | fine mesh resolution tag (selects mesh + inversion h5) | `2500` |
 | `ISMIP7_LC_COARSE` | coarse mesh tag | `64000` |
-| `ISMIP7_MESH` | override mesh `.msh` path | `mesh/antarctica_<COARSE>_<LC>.msh` |
-| `ISMIP7_BNDIDS` | override boundary-id JSON | `mesh/boundary_ids.json` |
+| `ISMIP7_BUFFER_M` | outline buffer (m) used to resolve the default mesh/boundary-id filenames (see §3) | `20000` |
+| `ISMIP7_MESH` | override mesh `.msh` path | `mesh/antarctica_<COARSE>_<LC>_buffered<BUFFER_M>.msh` |
+| `ISMIP7_BNDIDS` | override boundary-id JSON | `mesh/boundary_ids_buffered<BUFFER_M>.json` |
 | `ISMIP7_DATA_ROOT` | ISMIP7 forcing tree root | `<repo>/ISMIP7/AIS` |
 | `ISMIP7_T_END` / `ISMIP7_DT` | end year / timestep (yr) | `2300` / `1.0` |
 | `ISMIP7_OUTPUT_INTERVAL` | checkpoint every N steps | `10` |
@@ -295,9 +305,13 @@ VAF is reported in mm of sea-level equivalent; mass in Gt.
   trustworthy. See `COMPOSITE_RHEOLOGY.md` and `CLAUDE.md` for the full writeup.
 - **Forcing layout mismatch** between `download_forcing.py` (`data/forcing/`,
   `share_with_modellers` naming) and the runtime tree (`ISMIP7/AIS/`). See §2.
-- **`boundary_ids_buffered.json`** has 55 ids, valid only for the 4 km/8 km
-  buffered meshes; finer buffered meshes have 35 (use `boundary_ids.json`). A
-  per-mesh emitter would remove this footgun (§3).
+- **Mesh/boundary-id naming is now per-`(COARSE, FINE, BUFFER_M)`.** Mesh and
+  sidecar filenames are tagged with the exact outline buffer used to build
+  them (`antarctica_<COARSE>_<FINE>_buffered<BUFFER_M>.msh` /
+  `boundary_ids_buffered<BUFFER_M>.json`, see §3), so a sidecar can no longer
+  silently mismatch a mesh built with a different resolution or buffer. If you
+  have older meshes/sidecars built before this naming convention, rename them
+  to match or rebuild via `mesh_antarctica.py`.
 - **`icepack2_tools/coupled.py`** is a WIP sketch of ice↔plume coupling and
   references a `PlumeModel` that does not yet exist in this tree — not wired into
   any run.

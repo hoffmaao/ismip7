@@ -48,8 +48,11 @@ DATA_DIR = os.path.join(_ROOT, "data")
 MESH_DIR = os.path.join(_ROOT, "mesh")
 RESULTS_DIR = os.path.join(_ROOT, "results")
 
+from mesh_naming import get_buffer_m, mesh_filename, bndids_filename
+
 lc = int(os.environ.get("ISMIP7_LC", "2500"))
 lc_coarse = int(os.environ.get("ISMIP7_LC_COARSE", "64000"))
+buffer_m = get_buffer_m()
 
 
 def find_file(d, p):
@@ -63,16 +66,12 @@ def setup_model(restart_from=None):
     r"""Load mesh, data, inversion fields, and build diagnostic solver."""
     os.makedirs(RESULTS_DIR, exist_ok=True)
 
-    mesh_fn = os.environ.get(
-        "ISMIP7_MESH", os.path.join(MESH_DIR, f"antarctica_{lc_coarse}_{lc}.msh")
-    )
+    mesh_fn = os.environ.get("ISMIP7_MESH", mesh_filename(lc_coarse, lc, buffer_m))
     PETSc.Sys.Print(f"Loading mesh: {mesh_fn}")
     mesh = Mesh(mesh_fn)
     PETSc.Sys.Print(f"  {mesh.num_vertices()} vertices, {mesh.num_cells()} cells")
 
-    bndids_fn = os.environ.get(
-        "ISMIP7_BNDIDS", os.path.join(MESH_DIR, "boundary_ids.json")
-    )
+    bndids_fn = os.environ.get("ISMIP7_BNDIDS", bndids_filename(buffer_m))
     with open(bndids_fn) as f:
         bnd_ids = json.load(f)
     calving_ids = tuple(bnd_ids["calving"])

@@ -48,6 +48,9 @@ DATA_DIR = os.path.join(_ROOT, "data")
 MESH_DIR = os.path.join(_ROOT, "mesh")
 RESULTS_DIR = os.path.join(_ROOT, "results")
 
+# Repo root on the path for the shared dual-friction operator.
+sys.path.insert(0, os.path.dirname(_ROOT))
+
 lc = int(os.environ.get("ISMIP7_LC", "2500"))
 lc_coarse = int(os.environ.get("ISMIP7_LC_COARSE", "64000"))
 
@@ -78,6 +81,14 @@ def setup_model(restart_from=None):
     calving_ids = tuple(bnd_ids["calving"])
     use_calving_terminus = os.environ.get("ISMIP7_NO_CALVING_TERMINUS") is None
 
+    # Friction law: "budd" (power-law dual, default) or "regularized_coulomb"
+    # (RC residual driven by the inversion_icepack2_rc_<lc>.h5 MAP:
+    # grounded-only theta, exact-zero shelf drag via the Coulomb cap c0*N).
+    # Must mirror inversion_icepack2.py so theta/phi keep their meaning.
+    friction = os.environ.get("ISMIP7_FRICTION", "budd")
+    use_rc = friction == "regularized_coulomb"
+    map_tag = "_rc" if use_rc else ""
+
     Q = FunctionSpace(mesh, "CG", 1)
     V = VectorFunctionSpace(mesh, "CG", 1)
     dg0 = FiniteElement("DG", "triangle", 0)
@@ -95,7 +106,12 @@ def setup_model(restart_from=None):
     #   - h_clamp: floor enforced in the advection step. Default 0 so melt
     #     can drive cells to zero at the calving front; the composite
     #     rheology keeps the diagnostic SNES nonsingular at h=0.
-    h_clamp_init = float(os.environ.get("ISMIP7_H_CLAMP_INIT", "10.0"))
+    # In RC mode the MAP was inverted against the TRUE h=0 BedMachine
+    # geometry (h_visc_floor handles the ice-free buffer), so the initial
+    # clamp defaults to 0 and the initial state never touches a floor.
+    h_clamp_init = float(
+        os.environ.get("ISMIP7_H_CLAMP_INIT", "0.0" if use_rc else "10.0")
+    )
     h_clamp = float(os.environ.get("ISMIP7_H_CLAMP", "0.0"))
     H = Function(Q, name="thickness").interpolate(
         max_value(
@@ -115,16 +131,41 @@ def setup_model(restart_from=None):
         fillvalue=0.0,
     )
 
-    inv_fn = os.path.join(MESH_DIR, f"inversion_icepack2_{lc}.h5")
+    inv_fn = os.path.join(MESH_DIR, f"inversion_icepack2{map_tag}_{lc}.h5")
     PETSc.Sys.Print(f"Loading MAP: {inv_fn}")
     with fd.CheckpointFile(inv_fn, "r") as chk:
         chk_mesh = chk.load_mesh()
+        # The dof copies below require identical node ordering between the
+        # .msh mesh and the checkpoint mesh; verify via coordinates.
+        _co, _cc = mesh.coordinates.dat.data_ro, chk_mesh.coordinates.dat.data_ro
+        if _cc.shape != _co.shape or not np.allclose(_cc, _co):
+            raise RuntimeError(
+                f"{inv_fn}: checkpoint mesh nodes do not match {mesh_fn}; "
+                "set ISMIP7_MESH to the mesh the inversion ran on"
+            )
         theta = chk.load_function(chk_mesh, name="log_friction")
         phi = chk.load_function(chk_mesh, name="log_fluidity")
+        if use_rc:
+            H_chk = chk.load_function(chk_mesh, name="thickness")
+            b_chk = chk.load_function(chk_mesh, name="bed")
+            s_chk = chk.load_function(chk_mesh, name="surface")
+            u_obs_chk = chk.load_function(chk_mesh, name="velocity_obs")
     theta_f = Function(Q, name="theta")
     theta_f.dat.data[:] = theta.dat.data_ro
     phi_f = Function(Q, name="phi")
     phi_f.dat.data[:] = phi.dat.data_ro
+
+    if use_rc:
+        # Use the exact geometry/velocity the RC inversion saw, so the
+        # Weertman anchor C_w0 (and hence the meaning of theta) is
+        # reproduced bit-for-bit. h_clamp_init (default 0) may re-floor.
+        H.dat.data[:] = H_chk.dat.data_ro
+        b.dat.data[:] = b_chk.dat.data_ro
+        s.dat.data[:] = s_chk.dat.data_ro
+        u_obs.dat.data[:] = u_obs_chk.dat.data_ro
+        if h_clamp_init > 0.0:
+            H.interpolate(max_value(H, Constant(h_clamp_init)))
+            s.interpolate(max_value(b + H, (Constant(1.0) - rho_ratio) * H))
 
     A0 = Constant(icepack.rate_factor(Constant(260.0)))
     # Composite Goldsby-Kohlstedt-style exponents (must match the inversion
@@ -160,10 +201,31 @@ def setup_model(restart_from=None):
     # H_ref. This pins M where h → 0 so the SNES Jacobian stays
     # nonsingular at the calving front and h is allowed to reach zero.
     # Mirrors icepack2 dome_test.py.
-    alpha_reg = Constant(float(os.environ.get("ISMIP7_COMPOSITE_ALPHA", "1e-4")))
+    # RC MAP was inverted under alpha=1e-2 (SNES robustness across many
+    # forward solves); keep the forward diagnostic consistent with it.
+    alpha_reg = Constant(float(
+        os.environ.get("ISMIP7_COMPOSITE_ALPHA", "1e-2" if use_rc else "1e-4")
+    ))
     H_ref = Constant(float(os.environ.get("ISMIP7_H_REF", "100.0")))
     A_linear = A_map * tau_c ** (n_flow_val - 1)   # linearized at tau_c
     K_linear = u_c / (phi_eff * tau_c) * exp(-theta_f)  # linearized at tau_c
+
+    C_w0 = None
+    if use_rc:
+        from icepack2_tools.dual_friction import (
+            build_rc_residual, weertman_anchor,
+        )
+        c0_rc = float(os.environ.get("ISMIP7_RC_C0", "0.5"))
+        rc_hvisc_floor = float(os.environ.get("ISMIP7_RC_HVISC_FLOOR", "10.0"))
+        rc_cw0_floor = float(os.environ.get("ISMIP7_RC_CW0_FLOOR", "0.0"))
+        # Anchor from the inversion-time geometry/velocity, BEFORE any
+        # restart overwrites s: theta is a log-adjustment on this C_w0.
+        C_w0 = weertman_anchor(H, s, u_obs, m_slide_val, Q)
+        PETSc.Sys.Print(
+            f"  Friction: regularized Coulomb (c0={c0_rc}, "
+            f"h_visc_floor={rc_hvisc_floor:.0f}m, cw0_floor={rc_cw0_floor:.1e}, "
+            f"alpha={float(alpha_reg):.1e})"
+        )
 
     sparams = {
         "snes_type": "newtonls",
@@ -229,18 +291,31 @@ def setup_model(restart_from=None):
     fields_reg = dict(fields)
     fields_reg["thickness"] = H_ref
 
-    L = (
-        model.minimization.viscous_power(**fields, **rheo_glen)
-        + alpha_reg * model.minimization.viscous_power(**fields_reg, **rheo_linear)
-        + model.minimization.friction_power(**fields, **rheo_glen)
-        + alpha_reg * model.minimization.friction_power(**fields, **rheo_linear)
-        + model.minimization.momentum_balance(**fields)
-    )
-    if use_calving_terminus:
-        L += model.minimization.calving_terminus(**fields, outflow_ids=calving_ids)
+    if use_rc:
+        # Residual closure on the LIVE prognostic fields (h, s): the
+        # grounded gate, Coulomb cap, and driving stress all track the
+        # evolving geometry, so the grounding line migrates freely.
+        F = build_rc_residual(
+            z, theta_f, phi_f, H=h, s=s, b=b, C_w0=C_w0,
+            A4_base=A4_base, n_flow=n_flow, n_flow_val=n_flow_val,
+            m_slide=m_slide_val, tau_c=tau_c, alpha=alpha_reg, H_ref=H_ref,
+            c0=c0_rc, c_w0_floor=rc_cw0_floor, h_visc_floor=rc_hvisc_floor,
+            calving_ids=calving_ids if use_calving_terminus else None,
+        )
+    else:
+        L = (
+            model.minimization.viscous_power(**fields, **rheo_glen)
+            + alpha_reg * model.minimization.viscous_power(**fields_reg, **rheo_linear)
+            + model.minimization.friction_power(**fields, **rheo_glen)
+            + alpha_reg * model.minimization.friction_power(**fields, **rheo_linear)
+            + model.minimization.momentum_balance(**fields)
+        )
+        if use_calving_terminus:
+            L += model.minimization.calving_terminus(**fields, outflow_ids=calving_ids)
+        F = derivative(L, z)
 
     prob = NonlinearVariationalProblem(
-        derivative(L, z), z, form_compiler_parameters=fc_params
+        F, z, form_compiler_parameters=fc_params
     )
     slvr = NonlinearVariationalSolver(prob, solver_parameters=sparams)
 
@@ -253,6 +328,13 @@ def setup_model(restart_from=None):
         m_slide.assign(1.0 + t * (m_slide_val - 1.0))
         slvr.solve()
     PETSc.Sys.Print("  Done")
+
+    u0 = z.subfunctions[0]
+    area = assemble(Constant(1.0) * dx(mesh))
+    misfit0 = float(assemble(
+        0.5 / area * ((u0[0] - u_obs[0]) ** 2 + (u0[1] - u_obs[1]) ** 2) * dx
+    ))
+    PETSc.Sys.Print(f"  Initial velocity misfit vs obs: {misfit0:.6e}")
 
     accum = Function(Q, name="accumulation").assign(0.0)
     ocean_melt = Function(Q, name="ocean_melt").assign(0.0)
@@ -278,6 +360,7 @@ def setup_model(restart_from=None):
         "h_clamp": h_clamp,
         "calving_ids": calving_ids,
         "u_obs": u_obs,
+        "friction": friction,
     }
 
 

@@ -66,6 +66,10 @@ trap 'rm -f "$LOCK"' EXIT
 [ -f "$MESH" ]  || { log "ERROR: mesh not found: $MESH"; exit 1; }
 [ -x "$PY" ]    || { log "ERROR: python not found: $PY"; exit 1; }
 [ -f "$K_NPZ" ] || { log "ERROR: per-basin K npz not found: $K_NPZ"; exit 1; }
+# boundary_ids.json is untracked on drs/antarctica (generator-based); the RC
+# inversion ran with the odd/even 1..35 set, so the forward must too.
+BNDIDS="${ISMIP7_BNDIDS:-$REPO/antarctica/mesh/boundary_ids.json}"
+[ -f "$BNDIDS" ] || { log "ERROR: boundary ids not found: $BNDIDS (untracked on this branch — restore the local copy or run make_boundary_ids.py)"; exit 1; }
 [ -f "$REPO/antarctica/mesh/inversion_icepack2_rc_${LC}.h5" ] \
   || { log "ERROR: RC MAP not found: inversion_icepack2_rc_${LC}.h5"; exit 1; }
 log "ARMED: RC CTRL2015 lc=$LC dt=$DT t_end=$T_END ranks=$NRANKS mesh=$(basename "$MESH")"
@@ -83,7 +87,7 @@ while :; do
       export OMP_NUM_THREADS=1 ISMIP7_LC="$LC" ISMIP7_MESH="$MESH" \
              ISMIP7_FRICTION=regularized_coulomb \
              ISMIP7_DT="$DT" ISMIP7_T_END="$T_END" \
-             ISMIP7_K_PER_BASIN_NPZ="$K_NPZ"
+             ISMIP7_K_PER_BASIN_NPZ="$K_NPZ" ISMIP7_BNDIDS="$BNDIDS"
       nohup mpiexec -n "$NRANKS" "$PY" antarctica/scripts/control/run.py > "$LOG" 2>&1 &
       pid=$!
       echo "$pid" >> "$LOCK"

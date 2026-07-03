@@ -17,12 +17,14 @@ set -u
 # ---- configuration (all env-overridable) ----
 REPO="${REPO:-/home/andrew/projects/ismip7}"
 PY="${PY:-$HOME/venv-firedrake/bin/python}"
-# Which 1 km mesh to invert. The inversion's default path (antarctica_<lc*10>_<lc>.msh)
-# does NOT exist for lc=1000, so ISMIP7_MESH must point at a real file.
-MESH="${ISMIP7_MESH:-$REPO/antarctica/mesh/antarctica_200000_1000_aniso.msh}"
-LC="${ISMIP7_LC:-1000}"
+# Default target: the 604 K-vertex / 1.2 M-cell 500 m mesh behind
+# inversion_icepack2_500.h5 (the user's high-res precedent). Override ISMIP7_MESH
+# for a different resolution. The inversion's auto path (antarctica_<lc*10>_<lc>.msh)
+# may not match, so we pass ISMIP7_MESH explicitly.
+MESH="${ISMIP7_MESH:-$REPO/antarctica/mesh/antarctica_64000_500_aniso.msh}"
+LC="${ISMIP7_LC:-500}"
 NRANKS="${NRANKS:-24}"                     # MPI ranks for the inversion
-MIN_FREE_GB="${MIN_FREE_GB:-64}"           # require this much MemAvailable [GB]
+MIN_FREE_GB="${MIN_FREE_GB:-128}"          # require this much MemAvailable [GB] (~7M-DOF MUMPS, conservative)
 MIN_FREE_CORES="${MIN_FREE_CORES:-28}"     # require this many idle cores (>= NRANKS)
 STABLE="${STABLE:-3}"                      # consecutive passing checks before launch
 INTERVAL="${INTERVAL:-120}"               # seconds between checks

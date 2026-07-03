@@ -6,6 +6,7 @@ Usage:
 """
 
 import os, sys
+import numpy as np
 
 _PROJECT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(
     os.path.abspath(__file__)
@@ -18,6 +19,7 @@ from simulation import (
 )
 from icepack2_tools.forcing import (
     ISMIP7Atmosphere, ISMIP7Ocean, ISMIP7Fracture, make_forcing_callback,
+    load_racmo_smb_climatology,
 )
 
 T_START = 2015.0
@@ -29,6 +31,11 @@ OUTPUT_INTERVAL = int(os.environ.get("ISMIP7_OUTPUT_INTERVAL", "10"))
 
 ESM = "CESM2-WACCM"
 SSP = "ssp585"
+
+# Reference-climate window — must mirror control/run.py so that
+# projection minus CTRL is the forced signal.
+CLIM_START = int(os.environ.get("ISMIP7_CLIM_START", "2000"))
+CLIM_END = int(os.environ.get("ISMIP7_CLIM_END", "2029"))
 
 _RESULTS = os.path.join(_PROJECT, "antarctica", "results")
 
@@ -81,12 +88,41 @@ def main():
             f"  WARNING: no per-basin K calibration found; "
             f"scalar K={K_melt:.2e} everywhere"
         )
-    # Full acabf (not the 1960-1989-referenced anomaly): the CTRL uses the
-    # 2015-2029 acabf climatology, so projection minus CTRL is the forced
-    # signal relative to the 2015-centered climate with no re-referencing.
+    # SMB: RACMO climatology baseline + re-referenced ISMIP7 anomaly,
+    # mirroring the CTRL. aSMB is wrt the ESM's 1960-1989 climatology, so
+    # subtract its mean over the CTRL reference window and add RACMO:
+    #   SMB(t) = RACMO_clim + aSMB(t) - mean(aSMB | window)
+    # Fallback without RACMO: full acabf(t) — the same construction with
+    # the ESM's own acabf climatology as the baseline.
+    smb_anomaly, smb_baseline = False, None
+    if atm is not None:
+        mesh_x = ctx["mesh"].coordinates.dat.data_ro[:, 0]
+        mesh_y = ctx["mesh"].coordinates.dat.data_ro[:, 1]
+        ref_years = [y for y in atm.available_years("acabf-anomaly")
+                     if CLIM_START <= y <= CLIM_END]
+        try:
+            if not ref_years:
+                raise FileNotFoundError(
+                    f"no acabf-anomaly years in {CLIM_START}-{CLIM_END}"
+                )
+            racmo = load_racmo_smb_climatology(ctx["Q"], CLIM_START, CLIM_END)
+            ref = np.zeros(len(mesh_x))
+            for yr in ref_years:
+                ref += atm.get_smb(yr, mesh_x, mesh_y, anomaly=True)
+            ref /= len(ref_years)
+            smb_anomaly = True
+            smb_baseline = racmo.dat.data_ro - ref
+            PETSc.Sys.Print(
+                f"  SMB: RACMO2.4p1 baseline + aSMB re-referenced to "
+                f"{ref_years[0]}-{ref_years[-1]} ({len(ref_years)} yr)"
+            )
+        except FileNotFoundError as e:
+            PETSc.Sys.Print(f"  SMB: no RACMO baseline ({e}); "
+                            f"forcing with full acabf(t)")
     callback = make_forcing_callback(atm=atm, ocean=ocean, fracture=fracture,
                                      K=K_melt, K_per_basin_npz=K_npz,
-                                     smb_anomaly=False)
+                                     smb_anomaly=smb_anomaly,
+                                     smb_baseline=smb_baseline)
 
     PETSc.Sys.Print(f"\nCore Experiment 7: {SSP} / {ESM}")
     PETSc.Sys.Print(f"  Period: {T_START}-{T_END}")

@@ -405,7 +405,8 @@ def run_simulation(
     rho_ratio = ctx["rho_ratio"]
     h_clamp = ctx["h_clamp"]
 
-    nsteps = int((t_end - t_start) / dt)
+    # round, don't truncate: int((2300-2015)/0.1) = 2849 loses the last step
+    nsteps = int(round((t_end - t_start) / dt))
     dt_c = Constant(dt)
     PETSc.Sys.Print(
         f"\nTime-stepping: {t_start}->{t_end}, dt={dt}yr, {nsteps} steps"

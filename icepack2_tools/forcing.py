@@ -553,7 +553,7 @@ def compute_sin_alpha(ctx):
 
 def make_forcing_callback(atm=None, ocean=None, fracture=None,
                           K=_K_DEFAULT, K_per_basin_npz=None,
-                          smb_anomaly=True):
+                          smb_anomaly=True, smb_baseline=None):
     r"""Build a forcing callback for use with simulation.run_simulation().
 
     Ocean melt uses the ISMIP7 Burgard quadratic_mixed_slope formula
@@ -568,9 +568,11 @@ def make_forcing_callback(atm=None, ocean=None, fracture=None,
 
     smb_anomaly selects between `acabf-anomaly` (True) and the full
     `acabf` field (False). The anomaly files are referenced to the ESM's
-    1960-1989 climatology, so anomaly-only SMB is NOT a usable total —
-    pass False (full field) unless you are adding the matching baseline
-    to ctx["accum"] yourself.
+    1960-1989 climatology, so anomaly-only SMB is NOT a usable total:
+    either pass `smb_baseline` (a per-node array added to the anomaly
+    every step — e.g. RACMO climatology minus the anomaly's mean over
+    the control reference window) or set smb_anomaly=False to force
+    with the full field.
     """
     K_field_cache = {"arr": None}
 
@@ -580,6 +582,8 @@ def make_forcing_callback(atm=None, ocean=None, fracture=None,
 
         if atm is not None:
             smb = atm.get_smb(t_yr, mesh_x, mesh_y, anomaly=smb_anomaly)
+            if smb_baseline is not None:
+                smb = smb + smb_baseline
             ctx["accum"].dat.data[:] = smb
 
         if ocean is not None and "ocean_melt" in ctx:

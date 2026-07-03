@@ -489,7 +489,8 @@ def compute_sin_alpha(ctx):
 
 
 def make_forcing_callback(atm=None, ocean=None, fracture=None,
-                          K=_K_DEFAULT, K_per_basin_npz=None):
+                          K=_K_DEFAULT, K_per_basin_npz=None,
+                          smb_anomaly=True):
     r"""Build a forcing callback for use with simulation.run_simulation().
 
     Ocean melt uses the ISMIP7 Burgard quadratic_mixed_slope formula
@@ -501,6 +502,12 @@ def make_forcing_callback(atm=None, ocean=None, fracture=None,
       - left at default while `K_per_basin_npz` points to the output of
         `calibrate_melt.py`; the per-basin K is then looked up on the mesh
         on first call and reused for subsequent steps.
+
+    smb_anomaly selects between `acabf-anomaly` (True) and the full
+    `acabf` field (False). The anomaly files are referenced to the ESM's
+    1960-1989 climatology, so anomaly-only SMB is NOT a usable total —
+    pass False (full field) unless you are adding the matching baseline
+    to ctx["accum"] yourself.
     """
     K_field_cache = {"arr": None}
 
@@ -509,7 +516,7 @@ def make_forcing_callback(atm=None, ocean=None, fracture=None,
         mesh_y = ctx["mesh"].coordinates.dat.data_ro[:, 1]
 
         if atm is not None:
-            smb = atm.get_smb(t_yr, mesh_x, mesh_y, anomaly=True)
+            smb = atm.get_smb(t_yr, mesh_x, mesh_y, anomaly=smb_anomaly)
             ctx["accum"].dat.data[:] = smb
 
         if ocean is not None and "ocean_melt" in ctx:

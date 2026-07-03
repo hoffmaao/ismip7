@@ -39,43 +39,55 @@ DT = float(os.environ.get("ISMIP7_DT", "1.0"))
 OUTPUT_INTERVAL = int(os.environ.get("ISMIP7_OUTPUT_INTERVAL", "10"))
 
 ESM = os.environ.get("ISMIP7_ESM", "CESM2-WACCM")
-CLIM_START = 2000
-CLIM_END = 2029
+# Reference-climate window for the constant SMB. Default 2015-2029: the
+# local data tree only has the projection scenario (2015+), and the ssp585
+# acabf-anomaly is referenced to 1960-1989, so an anomaly-based baseline is
+# not constructible. Widen (e.g. 2000-2029) once historical acabf is
+# downloaded — compute_climatology pools historical + projection years.
+CLIM_START = int(os.environ.get("ISMIP7_CLIM_START", "2015"))
+CLIM_END = int(os.environ.get("ISMIP7_CLIM_END", "2029"))
+CLIM_SCENARIO = os.environ.get("ISMIP7_CLIM_SCENARIO", "ssp585")
 
 DATA_ROOT = os.environ.get(
     "ISMIP7_DATA_ROOT", os.path.join(_PROJECT, "ISMIP7", "AIS")
 )
 CLIM_TF = os.path.join(DATA_ROOT, "meltMIP", "OI_Climatology_ismip8km_60m_tf_extrap.nc")
 CLIM_SO = os.path.join(DATA_ROOT, "meltMIP", "OI_Climatology_ismip8km_60m_so_extrap.nc")
+# Per-basin K: prefer this mesh's calibration, else the 2500 m one (16
+# basin scalars remapped through the IMBIE2 8 km grid — mesh-independent).
+_K_LC_NPZ = os.path.join(_PROJECT, "antarctica", "results",
+                         f"calibrated_K_per_basin_{lc}.npz")
+_K_2500_NPZ = os.path.join(_PROJECT, "antarctica", "results",
+                           "calibrated_K_per_basin_2500.npz")
 K_NPZ = os.environ.get(
     "ISMIP7_K_PER_BASIN_NPZ",
-    os.path.join(_PROJECT, "antarctica", "results",
-                 f"calibrated_K_per_basin_{lc}.npz"),
+    _K_LC_NPZ if os.path.exists(_K_LC_NPZ) else _K_2500_NPZ,
 )
 
 
-def compute_climatology(atm, mesh_x, mesh_y):
-    r"""Compute 2000-2029 mean SMB from available acabf files."""
-    years = atm.available_years("acabf")
-    clim_years = [y for y in years if CLIM_START <= y <= CLIM_END]
+def compute_climatology(atms, mesh_x, mesh_y):
+    r"""Mean full-field (acabf) SMB over [CLIM_START, CLIM_END], pooling
+    years across the given atmospheres (historical + projection scenario).
 
-    if not clim_years:
-        PETSc.Sys.Print(f"  No acabf data for {CLIM_START}-{CLIM_END}")
-        years_anom = atm.available_years("acabf-anomaly")
-        clim_years_anom = [y for y in years_anom if CLIM_START <= y <= CLIM_END]
-        if clim_years_anom:
-            PETSc.Sys.Print(f"  Using acabf-anomaly mean over {clim_years_anom[0]}-{clim_years_anom[-1]}")
-            smb_sum = np.zeros(len(mesh_x))
-            for yr in clim_years_anom:
-                smb_sum += atm.get_smb(yr, mesh_x, mesh_y, anomaly=True)
-            return smb_sum / len(clim_years_anom)
-        return None
-
-    PETSc.Sys.Print(f"  Computing {CLIM_START}-{CLIM_END} climatology from {len(clim_years)} years")
+    Full field only: a mean of `acabf-anomaly` is an anomaly wrt the ESM's
+    1960-1989 climatology, not a baseline, so no anomaly fallback exists.
+    """
     smb_sum = np.zeros(len(mesh_x))
-    for yr in clim_years:
-        smb_sum += atm.get_smb(yr, mesh_x, mesh_y, anomaly=False)
-    return smb_sum / len(clim_years)
+    n = 0
+    for atm in atms:
+        years = [y for y in atm.available_years("acabf")
+                 if CLIM_START <= y <= CLIM_END]
+        for yr in years:
+            smb_sum += atm.get_smb(yr, mesh_x, mesh_y, anomaly=False)
+        n += len(years)
+        if years:
+            PETSc.Sys.Print(
+                f"  {atm.scenario}: {len(years)} acabf years "
+                f"({years[0]}-{years[-1]}) in climatology window"
+            )
+    if n == 0:
+        return None
+    return smb_sum / n
 
 
 def _build_climatology_interpolators():
@@ -144,15 +156,27 @@ def main():
     mesh_x = ctx["mesh"].coordinates.dat.data_ro[:, 0]
     mesh_y = ctx["mesh"].coordinates.dat.data_ro[:, 1]
 
-    # Atmosphere: fixed SMB climatology
-    atm = ISMIP7Atmosphere(esm=ESM, scenario="historical")
-    clim_smb = compute_climatology(atm, mesh_x, mesh_y)
-    if clim_smb is not None:
+    # Atmosphere: fixed SMB climatology, pooled over historical + the
+    # projection scenario (whichever years exist locally in the window).
+    atms = [
+        ISMIP7Atmosphere(esm=ESM, scenario="historical"),
+        ISMIP7Atmosphere(esm=ESM, scenario=CLIM_SCENARIO),
+    ]
+    clim_smb = compute_climatology(atms, mesh_x, mesh_y)
+    if clim_smb is None:
+        if os.environ.get("ISMIP7_ALLOW_ZERO_SMB"):
+            PETSc.Sys.Print("  WARNING: no climatology data, using zero SMB")
+            ctx["accum"].assign(0.0)
+        else:
+            raise FileNotFoundError(
+                f"No acabf data for {ESM} in {CLIM_START}-{CLIM_END} "
+                f"(historical or {CLIM_SCENARIO}). A zero-SMB control is "
+                f"almost certainly not what you want; set "
+                f"ISMIP7_ALLOW_ZERO_SMB=1 to force it."
+            )
+    else:
         ctx["accum"].dat.data[:] = clim_smb
         PETSc.Sys.Print(f"  Climatological SMB: mean={clim_smb.mean():.4f} m/yr")
-    else:
-        PETSc.Sys.Print(f"  WARNING: no climatology data, using zero SMB")
-        ctx["accum"].assign(0.0)
 
     # Ocean: fixed climatology TF/so + per-basin calibrated K
     if not os.path.exists(K_NPZ):

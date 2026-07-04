@@ -292,7 +292,7 @@ VAF is reported in mm of sea-level equivalent; mass in Gt.
   rheology then feeds ice back into the melted shelves (a positive feedback). The
   fix in progress is re-inverting `θ`/`φ` with `h_clamp = 0` so the initial state
   matches true BedMachine geometry. Until then, long projections are not physically
-  trustworthy. See `COMPOSITE_RHEOLOGY.md` and `CLAUDE.md` for the full writeup.
+  trustworthy. See `COMPOSITE_RHEOLOGY.md` for the full writeup.
 - **Forcing layout mismatch** between `download_forcing.py` (`data/forcing/`,
   `share_with_modellers` naming) and the runtime tree (`ISMIP7/AIS/`). See §2.
 - **`boundary_ids_buffered.json`** has 55 ids, valid only for the 4 km/8 km

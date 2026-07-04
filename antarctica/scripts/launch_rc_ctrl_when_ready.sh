@@ -30,6 +30,7 @@ MESH="${ISMIP7_MESH:-$REPO/antarctica/mesh/antarctica_64000_500_aniso.msh}"
 LC="${ISMIP7_LC:-500}"
 T_END="${ISMIP7_T_END:-2025}"              # 10-yr verification by default
 DT="${ISMIP7_DT:-0.1}"
+FIXED_FRONT="${ISMIP7_FIXED_FRONT:-1}"     # remove+tally ice past the initial extent
 K_NPZ="${ISMIP7_K_PER_BASIN_NPZ:-$REPO/antarctica/results/calibrated_K_per_basin_2500.npz}"
 NRANKS="${NRANKS:-24}"
 MIN_FREE_GB="${MIN_FREE_GB:-128}"          # ~7M-DOF MUMPS, conservative
@@ -88,6 +89,7 @@ while :; do
              ISMIP7_FRICTION=regularized_coulomb \
              ISMIP7_DT="$DT" ISMIP7_T_END="$T_END" \
              ISMIP7_K_PER_BASIN_NPZ="$K_NPZ" ISMIP7_BNDIDS="$BNDIDS"
+      [ "$FIXED_FRONT" = "1" ] && export ISMIP7_FIXED_FRONT=1
       nohup mpiexec -n "$NRANKS" "$PY" antarctica/scripts/control/run.py > "$LOG" 2>&1 &
       pid=$!
       echo "$pid" >> "$LOCK"

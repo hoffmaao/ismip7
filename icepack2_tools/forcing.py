@@ -250,6 +250,7 @@ class ISMIP7Ocean:
         self.scenario = scenario
         self.version = version
         self._ds_cache = {}
+        self._interp_cache = {}
 
     def _var_dir(self, variable):
         return ocean_path(
@@ -278,117 +279,123 @@ class ISMIP7Ocean:
         self._ds_cache[variable] = ds
         return ds
 
-    def get_thermal_forcing(self, year, mesh_x, mesh_y, draft=None):
-        r"""Get thermal forcing at ice shelf base, interpolated to mesh."""
+    def _year_field(self, variable, year, nan_fill):
+        r"""(RegularGridInterpolator, ascending z array) for one variable-year.
+
+        Loads the single year slice out of its decadal chunk file into an
+        in-memory nearest-neighbour interpolator over (z, y, x) — one year
+        of tf is ~66 MB and answers in milliseconds, where the previous
+        pointwise xarray .interp over the open_mfdataset dask graph cost
+        ~10 minutes per step even at 5k mesh nodes. Nearest-neighbour also
+        matches the OI-climatology CTRL path and the per-basin K
+        calibration. The last few (variable, year) fields stay cached, so
+        sub-yearly time steps re-read nothing.
+        """
+        import re
         import xarray as xr
+        from scipy.interpolate import RegularGridInterpolator
 
-        ds = self._load_variable("tf")
-        if ds is None:
-            return np.zeros(len(mesh_x))
+        yr = int(round(year))
+        key = (variable, yr)
+        if key in self._interp_cache:
+            return self._interp_cache[key]
 
-        tf_var = None
+        vdir = self._var_dir(variable)
+        if vdir is None or not os.path.isdir(vdir):
+            return None
+
+        # The chunk file whose YYYY-YYYY range contains the year (nearest
+        # range for years outside coverage).
+        best, best_d = None, None
+        for f in sorted(os.listdir(vdir)):
+            m = re.search(r"_(\d{4})-(\d{4})\.nc$", f)
+            if not m:
+                continue
+            y0, y1 = int(m.group(1)), int(m.group(2))
+            d = 0 if y0 <= yr <= y1 else min(abs(yr - y0), abs(yr - y1))
+            if best_d is None or d < best_d:
+                best, best_d = os.path.join(vdir, f), d
+        if best is None:
+            return None
+
+        ds = xr.open_dataset(best)
+        da = None
         for name in ds.data_vars:
-            if name.lower() in ("tf", "thermal_forcing", "thermalforcing"):
-                tf_var = ds[name]
+            if name.lower() in (variable.lower(), "thermal_forcing",
+                                "thermalforcing", "salinity"):
+                da = ds[name]
                 break
-        if tf_var is None:
-            tf_var = ds[list(ds.data_vars)[0]]
+        if da is None:
+            cands = [v for v in ds.data_vars
+                     if not v.endswith("_bnds") and v.lower() != "crs"]
+            da = ds[cands[0]]
 
-        if "time" in tf_var.dims:
+        if "time" in da.dims:
             times = ds["time"].values
-            # Handle cftime calendars by matching on year
-            if hasattr(times[0], "year"):
-                yr = int(round(year))
-                idx = min(range(len(times)), key=lambda i: abs(times[i].year - yr))
-                tf_slice = tf_var.isel(time=idx)
-            else:
-                tf_slice = tf_var.sel(time=year, method="nearest")
-        else:
-            tf_slice = tf_var
-
-        zdim = None
-        for d in tf_slice.dims:
-            if d.lower() in ("z", "depth", "lev"):
-                zdim = d
-                break
-
-        if zdim is not None:
-            if draft is not None:
-                # z coords are negative (depth below sea level), draft is also negative
-                draft_arr = xr.DataArray(np.asarray(draft), dims="node")
-                tf_slice = tf_slice.interp({zdim: draft_arr}, method="nearest")
-            else:
-                tf_slice = tf_slice.isel({zdim: 0})
-
-        mx = xr.DataArray(np.asarray(mesh_x), dims="node")
-        my = xr.DataArray(np.asarray(mesh_y), dims="node")
-
-        xdim = [d for d in tf_slice.dims if d.lower() == "x"]
-        ydim = [d for d in tf_slice.dims if d.lower() == "y"]
-        if xdim and ydim:
-            vals = tf_slice.interp({xdim[0]: mx, ydim[0]: my}, method="nearest")
-        else:
-            return np.zeros(len(mesh_x))
-
-        return np.nan_to_num(vals.values.flatten(), nan=0.0)
-
-    def get_salinity(self, year, mesh_x, mesh_y, draft=None, fill=34.5):
-        r"""Get ambient salinity at ice draft depth, interpolated to mesh."""
-        import xarray as xr
-
-        ds = self._load_variable("so")
-        if ds is None:
-            return np.full(len(mesh_x), fill)
-
-        so_var = None
-        for name in ds.data_vars:
-            if name.lower() in ("so", "salinity"):
-                so_var = ds[name]
-                break
-        if so_var is None:
-            so_var = ds[list(ds.data_vars)[0]]
-
-        if "time" in so_var.dims:
-            times = ds["time"].values
-            if hasattr(times[0], "year"):
-                yr = int(round(year))
+            if hasattr(times[0], "year"):  # cftime calendars
                 idx = min(range(len(times)),
                           key=lambda i: abs(times[i].year - yr))
-                so_slice = so_var.isel(time=idx)
             else:
-                so_slice = so_var.sel(time=year, method="nearest")
+                years = ds["time"].dt.year.values
+                idx = int(np.argmin(np.abs(years - yr)))
+            da = da.isel(time=idx)
+
+        zdim = [d for d in da.dims if d.lower() in ("z", "depth", "lev")][0]
+        za = ds[zdim].values.astype(float)
+        ya = ds["y"].values.astype(float)
+        xa = ds["x"].values.astype(float)
+        data = da.transpose(zdim, "y", "x").values.astype(np.float32)
+        ds.close()
+        if za[0] > za[-1]:
+            za = za[::-1]; data = data[::-1, :, :]
+        if ya[0] > ya[-1]:
+            ya = ya[::-1]; data = data[:, ::-1, :]
+        if xa[0] > xa[-1]:
+            xa = xa[::-1]; data = data[:, :, ::-1]
+        data = np.nan_to_num(data, nan=nan_fill)
+        interp = RegularGridInterpolator(
+            (za, ya, xa), data,
+            method="nearest", bounds_error=False, fill_value=float(nan_fill),
+        )
+        entry = (interp, za)
+        self._interp_cache[key] = entry
+        while len(self._interp_cache) > 4:
+            self._interp_cache.pop(next(iter(self._interp_cache)))
+        return entry
+
+    def _lookup(self, variable, year, mesh_x, mesh_y, draft, nan_fill):
+        entry = self._year_field(variable, year, nan_fill)
+        if entry is None:
+            return None
+        interp, za = entry
+        mx = np.asarray(mesh_x)
+        my = np.asarray(mesh_y)
+        if draft is None:
+            d = np.full(len(mx), za[-1])   # shallowest level
         else:
-            so_slice = so_var
+            # z and draft are both negative depths below sea level
+            d = np.clip(np.asarray(draft), za[0], za[-1])
+        return interp(np.column_stack([d, my, mx])).astype(float)
 
-        zdim = None
-        for d in so_slice.dims:
-            if d.lower() in ("z", "depth", "lev"):
-                zdim = d
-                break
+    def get_thermal_forcing(self, year, mesh_x, mesh_y, draft=None):
+        r"""Thermal forcing at the shelf base on mesh points [K]."""
+        vals = self._lookup("tf", year, mesh_x, mesh_y, draft, nan_fill=0.0)
+        if vals is None:
+            return np.zeros(len(mesh_x))
+        return vals
 
-        if zdim is not None:
-            if draft is not None:
-                draft_arr = xr.DataArray(np.asarray(draft), dims="node")
-                so_slice = so_slice.interp({zdim: draft_arr}, method="nearest")
-            else:
-                so_slice = so_slice.isel({zdim: 0})
-
-        mx = xr.DataArray(np.asarray(mesh_x), dims="node")
-        my = xr.DataArray(np.asarray(mesh_y), dims="node")
-
-        xdim = [d for d in so_slice.dims if d.lower() == "x"]
-        ydim = [d for d in so_slice.dims if d.lower() == "y"]
-        if xdim and ydim:
-            vals = so_slice.interp({xdim[0]: mx, ydim[0]: my}, method="nearest")
-        else:
+    def get_salinity(self, year, mesh_x, mesh_y, draft=None, fill=34.5):
+        r"""Ambient salinity at ice draft depth on mesh points [PSU]."""
+        vals = self._lookup("so", year, mesh_x, mesh_y, draft, nan_fill=fill)
+        if vals is None:
             return np.full(len(mesh_x), fill)
-
-        return np.nan_to_num(vals.values.flatten(), nan=fill)
+        return vals
 
     def close(self):
         for ds in self._ds_cache.values():
             ds.close()
         self._ds_cache.clear()
+        self._interp_cache.clear()
 
 
 class ISMIP7Fracture:
@@ -573,8 +580,13 @@ def make_forcing_callback(atm=None, ocean=None, fracture=None,
     every step — e.g. RACMO climatology minus the anomaly's mean over
     the control reference window) or set smb_anomaly=False to force
     with the full field.
+
+    ISMIP7_K_SCALE multiplies whichever K is in effect (the calibrated
+    per-basin K integrates 689 vs 865 Gt/yr observed on the 2500 m mesh,
+    so 1.26 matches the observed total).
     """
     K_field_cache = {"arr": None}
+    K_scale = float(os.environ.get("ISMIP7_K_SCALE", "1.0"))
 
     def callback(ctx, t_yr):
         mesh_x = ctx["mesh"].coordinates.dat.data_ro[:, 0]
@@ -607,7 +619,7 @@ def make_forcing_callback(atm=None, ocean=None, fracture=None,
             else:
                 K_use = K
 
-            melt = quadratic_mixed_slope(tf, sal, sin_alpha, K=K_use)
+            melt = quadratic_mixed_slope(tf, sal, sin_alpha, K=K_use * K_scale)
 
             # Only apply melt where ice is floating (haf <= 0)
             haf = s - (b + (_RHO_WATER / _RHO_ICE) * np.maximum(-b, 0.0))

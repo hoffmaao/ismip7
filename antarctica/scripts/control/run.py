@@ -261,6 +261,10 @@ def main():
             )
         PETSc.Sys.Print(f"  Loading per-basin K from: {K_NPZ}")
         K_field = load_K_per_basin(K_NPZ, mesh_x, mesh_y, fill=0.0)
+        K_scale = float(os.environ.get("ISMIP7_K_SCALE", "1.0"))
+        if K_scale != 1.0:
+            K_field = K_field * K_scale
+            PETSc.Sys.Print(f"  K scaled by ISMIP7_K_SCALE={K_scale:.3f}")
         PETSc.Sys.Print(
             f"  K field: nonzero={int((K_field>0).sum())}/{len(K_field)}  "
             f"med={np.median(K_field[K_field>0]) if (K_field>0).any() else 0:.2e}"

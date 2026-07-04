@@ -26,6 +26,7 @@ from icepack2_tools.mesh import (
     build_gmsh_geometry,
     SUBSAMPLE,
 )
+from make_boundary_ids import write_boundary_ids
 
 DATA_DIR = os.path.join(_ROOT, "data")
 MESH_DIR = os.path.join(_ROOT, "mesh")
@@ -131,10 +132,10 @@ def main():
         os.environ["ISMIP7_BUFFER_M"] = "20000"
     print(f"Buffer: {buffer_m/1e3:.0f} km")
 
-    mask, x, y = load_bedmachine_mask()
+    mask, x, y = load_bedmachine_mask(DATA_DIR)
     outline = extract_ice_outline(mask, x, y)
     boundaries, names = classify_boundaries(outline, mask, x, y)
-    refinement = load_velocity_for_sizing()
+    refinement = load_velocity_for_sizing(DATA_DIR)
 
     gl_dist, ice_field, float_field = grounding_line_distance()
     cf_dist = calving_front_distance(boundaries, names)
@@ -249,6 +250,11 @@ def main():
 
     size_mb = os.path.getsize(fn_base + ".msh") / 1e6
     print(f"\nSaved: {fn_base}.msh ({size_mb:.1f} MB)")
+
+    # Emit a boundary-id sidecar that matches this exact mesh (and thus the
+    # BedMachine input + SIMPLIFY_TOL/SUBSAMPLE used), so the solvers never read
+    # a stale committed sidecar from a different mesh.
+    write_boundary_ids(fn_base + ".msh", os.path.join(MESH_DIR, "boundary_ids.json"))
 
 
 if __name__ == "__main__":

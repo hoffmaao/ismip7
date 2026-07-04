@@ -240,6 +240,18 @@ def setup_model(restart_from=None):
         "mat_mumps_icntl_24": 1,
         "mat_mumps_cntl_3": 1e-12,
     }
+    # Optional SNES/KSP convergence monitoring (ISMIP7_SNES_MONITOR=1).
+    # ISMIP7_SNES_LOG routes the output to a file (per run, so concurrent
+    # debug runs don't interleave); otherwise it goes to stdout.
+    if os.environ.get("ISMIP7_SNES_MONITOR"):
+        _snes_log = os.environ.get("ISMIP7_SNES_LOG")
+        _viewer = f"ascii:{_snes_log}" if _snes_log else None
+        sparams.update({
+            "snes_monitor": _viewer,
+            "snes_converged_reason": _viewer,
+            "snes_linesearch_monitor": _viewer,
+            "ksp_converged_reason": _viewer,
+        })
     fc_params = {"quadrature_degree": 4}
 
     z = Function(Z)
@@ -255,6 +267,7 @@ def setup_model(restart_from=None):
             h_rst = chk.load_function(rst_mesh, name="thickness")
             u_rst = chk.load_function(rst_mesh, name="velocity")
         h.dat.data[:] = h_rst.dat.data_ro
+        h.interpolate(max_value(h, Constant(h_clamp)))  # don't restart below the floor
         z.sub(0).dat.data[:] = u_rst.dat.data_ro
         s.interpolate(max_value(b + h, (Constant(1.0) - rho_ratio) * h))
         phi_eff.interpolate(

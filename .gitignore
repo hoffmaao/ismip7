@@ -6,12 +6,10 @@ data
 ISMIP7/
 
 # ── Generated artifacts ──
-# Ignore mesh dir *contents* (huge .msh/.h5/.pos) but keep the tiny
-# boundary-id sidecars. NB: a negation under "antarctica/mesh/" (the dir
-# form) would be a no-op — git won't descend into an excluded directory to
-# reconsider files — so we must exclude the contents with "mesh/*" instead.
+# Ignore the whole mesh dir: the .msh and its boundary_ids sidecar are both
+# regenerated locally (mesh_antarctica.py writes the matching sidecar), so a
+# committed sidecar would silently mismatch a mesh built from different inputs.
 antarctica/mesh/*
-!antarctica/mesh/boundary_ids*.json
 antarctica/results/
 antarctica/archive/
 antarctica/figs/*.png

@@ -374,6 +374,10 @@ def setup_model(restart_from=None):
         "calving_ids": calving_ids,
         "u_obs": u_obs,
         "friction": friction,
+        # t=0 (BedMachine/inversion) thickness — NOT overwritten by
+        # restart_from, so the fixed calving front stays anchored to the
+        # observed extent across restarts.
+        "H_init": H,
     }
 
 
@@ -438,7 +442,10 @@ def run_simulation(
     beyond_front = None
     cell_area = assemble(fd.TestFunction(Q_dg) * dx).dat.data_ro.copy()
     if fixed_front:
-        h_dg.project(h)
+        # Mask from the t=0 observed extent (ctx["H_init"]), not the
+        # current h: a restarted run must not re-mask cells that
+        # legitimately retreated mid-run inside the observed extent.
+        h_dg.project(ctx.get("H_init", h))
         beyond_front = h_dg.dat.data_ro < front_hmin
         n_beyond = mesh.comm.allreduce(int(beyond_front.sum()))
         PETSc.Sys.Print(

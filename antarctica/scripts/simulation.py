@@ -424,6 +424,43 @@ def run_simulation(
         b + (rho_W / rho_I) * max_value(-b, Constant(0.0))
     )
 
+    rho_gt = _RHO_I_SI / 1e12  # m^3 ice -> Gt
+
+    # Fixed calving front (ISMIP7_FIXED_FRONT=1): cells that are ice-free
+    # in the initial state may not accumulate ice; whatever flows into
+    # them is removed each step and tallied as calving flux. Without this
+    # a buffered mesh has NO calving sink (~1300 Gt/yr in reality) and the
+    # sheet must gain mass. Only meaningful when the initial state is the
+    # true BedMachine geometry (RC mode / h_clamp_init=0) — with a clamped
+    # initial state every cell has ice and the mask is empty.
+    fixed_front = os.environ.get("ISMIP7_FIXED_FRONT") is not None
+    front_hmin = float(os.environ.get("ISMIP7_FRONT_HMIN", "1.0"))
+    beyond_front = None
+    cell_area = assemble(fd.TestFunction(Q_dg) * dx).dat.data_ro.copy()
+    if fixed_front:
+        h_dg.project(h)
+        beyond_front = h_dg.dat.data_ro < front_hmin
+        n_beyond = mesh.comm.allreduce(int(beyond_front.sum()))
+        PETSc.Sys.Print(
+            f"  Fixed calving front: {n_beyond} initially ice-free cells "
+            f"masked (h < {front_hmin} m)"
+        )
+
+    mass_prev = float(assemble(h * dx)) * rho_gt
+
+    # ISMIP7_LEGACY_TRANSPORT=1 restores the pre-Jul-2026 scheme: the
+    # -h*div(u*phi) volume term (non-conservative for DG0: it adds
+    # spurious h*div(u) mass at thickness jumps) and the L2 DG0->CG1
+    # projection (overshoots negative at fronts; the h floor then
+    # injects mass). The default is the exactly-conservative FV form
+    # plus a lumped-mass projection (convex combination of adjacent
+    # cell values: bounded and integral-preserving).
+    legacy_transport = os.environ.get("ISMIP7_LEGACY_TRANSPORT") is not None
+    if legacy_transport:
+        PETSc.Sys.Print("  LEGACY transport: non-conservative volume term + L2 projection")
+    m_lump = assemble(fd.TestFunction(Q) * dx)
+    proj_rhs = fd.Cofunction(Q.dual())
+
     results = []
 
     for k in range(1, nsteps + 1):
@@ -457,13 +494,14 @@ def run_simulation(
 
         F_prog = (
             (h_dg_trial - h_dg_old) / dt_c * phi_dg * dx
-            - h_dg_trial * fd.div(u_vel * phi_dg) * dx
             + (un_plus("+") * h_dg_trial("+") - un_plus("-") * h_dg_trial("-"))
             * fd.jump(phi_dg)
             * dS
             + un_plus * h_dg_trial * phi_dg * ds
             - (accum - ocean_melt) * phi_dg * dx
         )
+        if legacy_transport:
+            F_prog += -h_dg_trial * fd.div(u_vel * phi_dg) * dx
         fd.solve(
             fd.lhs(F_prog) == fd.rhs(F_prog),
             h_dg,
@@ -474,8 +512,33 @@ def run_simulation(
             },
         )
 
+        # Mass budget: attribute this step's dM to its sources so a drift
+        # is diagnosable (SMB - melt - boundary outflux - calving) and any
+        # non-conservative floor/projection mass shows up explicitly.
+        smb_rate = float(assemble(accum * dx)) * rho_gt          # Gt/yr
+        melt_rate = float(assemble(ocean_melt * dx)) * rho_gt    # Gt/yr
+        out_rate = float(assemble(un_plus * h_dg * ds)) * rho_gt # Gt/yr
+        m1 = float(assemble(h_dg * dx)) * rho_gt
+
         h_dg.interpolate(max_value(h_dg, Constant(h_clamp)))
-        h.project(h_dg)
+        m2 = float(assemble(h_dg * dx)) * rho_gt
+        clamp_gt = m2 - m1                                       # Gt added by DG floor
+
+        calv_gt = 0.0
+        if fixed_front:
+            data = h_dg.dat.data
+            calv_gt = mesh.comm.allreduce(
+                float((data[beyond_front] * cell_area[beyond_front]).sum())
+            ) * rho_gt
+            data[beyond_front] = 0.0
+
+        if legacy_transport:
+            h.project(h_dg)
+        else:
+            # Lumped-mass projection: h_i = ∫phi_i h_dg / ∫phi_i.
+            assemble(fd.TestFunction(Q) * h_dg * dx, tensor=proj_rhs)
+            h.dat.data[:] = proj_rhs.dat.data_ro / m_lump.dat.data_ro
+        m3 = m2 - calv_gt                                        # ∫h preserved by projection
         h.interpolate(max_value(h, Constant(h_clamp)))
 
         s.interpolate(max_value(b + h, (Constant(1.0) - rho_ratio) * h))
@@ -495,12 +558,25 @@ def run_simulation(
         vaf = float(assemble(haf * dx)) * _RHO_I_SI / 1e12 / 362.5
         total_mass = float(assemble(h * dx)) * _RHO_I_SI / 1e12
 
-        results.append((t_yr, vaf, total_mass))
+        clamp_cg_gt = total_mass - m3        # Gt added by the CG floor after projection
+        dm = total_mass - mass_prev
+        resid_gt = dm - (
+            (smb_rate - melt_rate - out_rate) * dt
+            + clamp_gt + clamp_cg_gt - calv_gt
+        )
+        mass_prev = total_mass
+
+        results.append((t_yr, vaf, total_mass, smb_rate, melt_rate,
+                        out_rate, calv_gt, clamp_gt + clamp_cg_gt, resid_gt))
 
         if k % output_interval == 0 or k == 1:
             PETSc.Sys.Print(
                 f"  t={t_yr:.1f}  VAF={vaf:.4f} mm SLE  "
-                f"mass={total_mass:.1f} Gt  [{t_elapsed:.1f}s]"
+                f"mass={total_mass:.1f} Gt  [{t_elapsed:.1f}s]\n"
+                f"      budget [Gt/yr]: SMB={smb_rate:+.0f} melt={-melt_rate:+.0f} "
+                f"outflux={-out_rate:+.0f} calv={-calv_gt/dt:+.0f} "
+                f"clamp={(clamp_gt+clamp_cg_gt)/dt:+.1f} "
+                f"dM/dt={dm/dt:+.0f} resid={resid_gt/dt:+.2f}"
             )
 
         if k % checkpoint_interval == 0:
@@ -524,10 +600,15 @@ def run_simulation(
     PETSc.Sys.Print(f"Saved: {chk_fn}")
 
     csv_fn = os.path.join(RESULTS_DIR, f"{experiment_name}_{lc}_timeseries.csv")
-    with open(csv_fn, "w") as f:
-        f.write("year,vaf_mm_sle,mass_gt\n")
-        for t, vaf, mass in results:
-            f.write(f"{t:.1f},{vaf:.6f},{mass:.2f}\n")
+    if mesh.comm.rank == 0:
+        with open(csv_fn, "w") as f:
+            f.write("year,vaf_mm_sle,mass_gt,smb_gtyr,melt_gtyr,"
+                    "outflux_gtyr,calv_gt,clamp_gt,resid_gt\n")
+            for row in results:
+                f.write(
+                    f"{row[0]:.1f},{row[1]:.6f},{row[2]:.2f},"
+                    + ",".join(f"{v:.4f}" for v in row[3:]) + "\n"
+                )
     PETSc.Sys.Print(f"Saved: {csv_fn}")
 
     return results

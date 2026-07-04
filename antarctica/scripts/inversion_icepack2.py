@@ -155,6 +155,29 @@ def main():
         fillvalue=0.0,
     )
 
+    # Velocity-observation mask. icepack.interpolate zero-fills NODATA, so
+    # without a mask unobserved regions read as "observed stationary" and
+    # the inversion prescribes friction/stiff ice where there is no
+    # constraint (0.7% of grounded area for MEaSUREs 450m v2). MEaSUREs
+    # reports errors only where a velocity was measured, so ERR > 0 marks
+    # real observations. ISMIP7_OBS_MASK=0 reverts to the unmasked misfit.
+    obs_mask = Function(Q, name="obs_mask").assign(1.0)
+    if os.environ.get("ISMIP7_OBS_MASK", "1") != "0":
+        err = icepack.interpolate(
+            (rasterio.open(f"netcdf:{vel_fn}:ERRX"),
+             rasterio.open(f"netcdf:{vel_fn}:ERRY")),
+            V,
+            fillvalue=0.0,
+        )
+        emag = Function(Q).interpolate(sqrt(err[0] ** 2 + err[1] ** 2))
+        obs_mask.dat.data[:] = (emag.dat.data_ro > 0.0).astype(float)
+        n_no = COMM_WORLD.allreduce(int((obs_mask.dat.data_ro == 0.0).sum()))
+        n_all = COMM_WORLD.allreduce(len(obs_mask.dat.data_ro))
+        PETSc.Sys.Print(
+            f"  Obs mask: {n_no}/{n_all} nodes without velocity obs "
+            f"excluded from the misfit (regularization fills them)"
+        )
+
     calving_ids = tuple(bnd_ids["calving"])
 
     # ── Rheology ──
@@ -373,7 +396,9 @@ def main():
     PETSc.Sys.Print(f"  u_max = {float(u_mag.dat.data_ro.max()):.0f} m/yr")
 
     # ── Forward function for tlm_adjoint ──
-    area_val = assemble(Constant(1.0) * dx(mesh))
+    # Normalize by the OBSERVED area so the misfit magnitude stays
+    # comparable between masked and unmasked runs.
+    area_val = assemble(obs_mask * dx(mesh))
 
     def forward(theta_ctrl, phi_ctrl):
         clear_caches()
@@ -395,6 +420,7 @@ def main():
         J.assign(
             0.5
             / area_val
+            * obs_mask
             * ((u_sol[0] - u_obs[0]) ** 2 + (u_sol[1] - u_obs[1]) ** 2)
             * dx
         )
@@ -519,6 +545,7 @@ def main():
                 chk.save_function(theta, name="log_friction")
                 chk.save_function(phi, name="log_fluidity")
                 chk.save_function(u_obs, name="velocity_obs")
+                chk.save_function(obs_mask, name="obs_mask")
                 chk.save_function(H, name="thickness")
                 chk.save_function(b, name="bed")
                 chk.save_function(s, name="surface")
@@ -553,6 +580,7 @@ def main():
         chk.save_function(theta, name="log_friction")
         chk.save_function(phi, name="log_fluidity")
         chk.save_function(u_obs, name="velocity_obs")
+        chk.save_function(obs_mask, name="obs_mask")
         chk.save_function(H, name="thickness")
         chk.save_function(b, name="bed")
         chk.save_function(s, name="surface")
@@ -572,11 +600,12 @@ def main():
         assemble(
             0.5
             / area_val
+            * obs_mask
             * ((u_sol[0] - u_obs[0]) ** 2 + (u_sol[1] - u_obs[1]) ** 2)
             * dx
         )
     )
-    PETSc.Sys.Print(f"  Final misfit: {misfit:.6e}")
+    PETSc.Sys.Print(f"  Final misfit (masked): {misfit:.6e}")
 
     # Update checkpoint with velocity
     with fd.CheckpointFile(chk_fn, "a") as chk:

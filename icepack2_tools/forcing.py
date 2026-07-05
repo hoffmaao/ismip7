@@ -510,14 +510,21 @@ def load_K_per_basin(npz_path, mesh_x, mesh_y, fill=0.0):
     bids = np.asarray(data["basin_ids"]).astype(int)
     Kbas = np.asarray(data["K_basin"]).astype(float)
 
-    imbie2 = os.path.join(
-        os.environ.get("ISMIP7_DATA_ROOT",
-                       os.path.join(os.path.dirname(
-                           os.path.dirname(os.path.abspath(__file__))),
-                           "ISMIP7", "AIS")),
-        "parameterisations", "ocean", "imbie2",
-        "basin_numbers_ismip8km_v2.nc",
+    root = os.environ.get(
+        "ISMIP7_DATA_ROOT",
+        os.path.join(os.path.dirname(
+            os.path.dirname(os.path.abspath(__file__))), "ISMIP7", "AIS"),
     )
+    # v2 (calibration-era) first; the v3 release from the reorganized share
+    # carries an IDENTICAL basinNumber field (verified Jul 2026), so it is a
+    # safe fallback for fresh clones that only ran the new downloader.
+    candidates = [
+        os.path.join(root, "parameterisations", "ocean", "imbie2",
+                     "basin_numbers_ismip8km_v2.nc"),
+        os.path.join(root, "obs", "ocean", "IMBIE-basins", "v3",
+                     "IMBIE-basins_AIS_obs_ocean_v3.nc"),
+    ]
+    imbie2 = next((p for p in candidates if os.path.exists(p)), candidates[0])
     ds = xr.open_dataset(imbie2)
     xa = ds["x"].values; ya = ds["y"].values
     bn = ds["basinNumber"].values
@@ -558,20 +565,50 @@ def compute_sin_alpha(ctx):
     return gmag / np.sqrt(1.0 + gmag * gmag)
 
 
-def build_oi_climatology_interpolators(data_root=None):
-    r"""Load the meltMIP OI climatology TF and so into (z, y, x)
+def _oi_climatology_path(root, var, version):
+    r"""Path of one OI-climatology variable for a given release.
+
+    `30_sep` is the 2025-09-30 release under meltMIP/ (the one the
+    per-basin K was calibrated against — the default for that reason);
+    `06_nov` is the 2026 re-release (1972-2024) mirrored from the
+    reorganized GHub share under obs/ocean/climatology/.
+    """
+    if version == "30_sep":
+        return os.path.join(
+            root, "meltMIP", f"OI_Climatology_ismip8km_60m_{var}_extrap.nc"
+        )
+    return os.path.join(
+        root, "obs", "ocean", "climatology", f"zhou_annual_{version}",
+        var, "v3",
+        f"{var}_AIS_obs_ocean_climatology_zhou_annual_{version}_v3_1972-2024.nc",
+    )
+
+
+def build_oi_climatology_interpolators(data_root=None, version=None):
+    r"""Load the OI climatology TF and so into (z, y, x)
     RegularGridInterpolators (nearest, fill 0). Shared by the CTRL and any
-    observationally-forced run (OCX)."""
+    observationally-forced run (OCX). ISMIP7_OI_VERSION selects the
+    release (default 30_sep, matching the per-basin K calibration;
+    switching to 06_nov without recalibrating K shifts the melt)."""
     import xarray as xr
     from scipy.interpolate import RegularGridInterpolator
 
     root = _find_ismip7_data(data_root)
+    version = version or os.environ.get("ISMIP7_OI_VERSION", "30_sep")
     interps = {}
     for var in ("tf", "so"):
-        path = os.path.join(
-            root, "meltMIP", f"OI_Climatology_ismip8km_60m_{var}_extrap.nc"
-        )
+        path = _oi_climatology_path(root, var, version)
         ds = xr.open_dataset(path)
+        if var not in ds.data_vars:
+            found = [v for v in ds.data_vars
+                     if not v.endswith("_bnds") and v.lower() != "crs"]
+            ds.close()
+            raise KeyError(
+                f"{path} has no '{var}' variable (found {found}). Known "
+                f"upstream packaging bug (Jul 2026): the 06_nov release "
+                f"ships the tf field inside the so/thetao files. Use "
+                f"ISMIP7_OI_VERSION=30_sep until it is fixed."
+            )
         da = ds[var]
         zdim = [d for d in da.dims if d.lower() in ("z", "depth", "lev")][0]
         za = ds[zdim].values

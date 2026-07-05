@@ -30,6 +30,7 @@ from simulation import setup_model, run_simulation, PETSc, lc
 from icepack2_tools.forcing import (
     ISMIP7Atmosphere,
     load_racmo_smb_climatology,
+    make_climatology_ocean_callback,
     compute_sin_alpha,
     quadratic_mixed_slope,
     load_K_per_basin,
@@ -99,64 +100,12 @@ def compute_climatology(atms, mesh_x, mesh_y):
     return smb_sum / n
 
 
-def _build_climatology_interpolators():
-    r"""Load OI climatology TF and so into RegularGridInterpolator (z, y, x)."""
-    interps = {}
-    for path, var in [(CLIM_TF, "tf"), (CLIM_SO, "so")]:
-        ds = xr.open_dataset(path)
-        da = ds[var]
-        zdim = [d for d in da.dims if d.lower() in ("z", "depth", "lev")][0]
-        za = ds[zdim].values
-        ya = ds["y"].values
-        xa = ds["x"].values
-        data = da.transpose(zdim, "y", "x").values.astype(np.float32)
-        if za[0] > za[-1]:
-            za = za[::-1]; data = data[::-1, :, :]
-        if ya[0] > ya[-1]:
-            ya = ya[::-1]; data = data[:, ::-1, :]
-        if xa[0] > xa[-1]:
-            xa = xa[::-1]; data = data[:, :, ::-1]
-        data = np.nan_to_num(data, nan=0.0)
-        interps[var] = (
-            RegularGridInterpolator(
-                (za, ya, xa), data,
-                method="nearest", bounds_error=False, fill_value=0.0,
-            ),
-            za,
-        )
-        ds.close()
-    return interps
-
-
 def make_ctrl_ocean_callback(K_field):
-    r"""Build a CTRL2015 ocean-melt callback: constant climatology TF/so,
-    evolving geometry, per-node K from calibration."""
+    r"""CTRL2015 ocean melt: constant OI-climatology TF/so, evolving
+    geometry, per-node calibrated K (shared implementation in
+    icepack2_tools.forcing)."""
     PETSc.Sys.Print("  Building OI-climatology interpolators...")
-    interps = _build_climatology_interpolators()
-
-    def callback(ctx, t_yr):
-        mesh_x = ctx["mesh"].coordinates.dat.data_ro[:, 0]
-        mesh_y = ctx["mesh"].coordinates.dat.data_ro[:, 1]
-        h = ctx["h"].dat.data_ro
-        b = ctx["b"].dat.data_ro
-        s = ctx["s"].dat.data_ro
-        draft = np.minimum(s - h, 0.0)
-
-        tf_interp, za_tf = interps["tf"]
-        so_interp, za_so = interps["so"]
-        d_tf = np.clip(draft, za_tf[0], za_tf[-1])
-        d_so = np.clip(draft, za_so[0], za_so[-1])
-        tf = tf_interp(np.column_stack([d_tf, mesh_y, mesh_x]))
-        sal = so_interp(np.column_stack([d_so, mesh_y, mesh_x]))
-        sin_a = compute_sin_alpha(ctx)
-
-        melt = quadratic_mixed_slope(tf, sal, sin_a, K=K_field)
-
-        haf = s - (b + (_RHO_WATER / _RHO_ICE) * np.maximum(-b, 0.0))
-        floating = haf <= 0
-        ctx["ocean_melt"].dat.data[:] = np.where(floating, melt, 0.0)
-
-    return callback
+    return make_climatology_ocean_callback(K_field)
 
 
 def make_synthetic_ocean_callback(tf_max=1.5, depth_ref=1000.0, K=_K_DEFAULT):

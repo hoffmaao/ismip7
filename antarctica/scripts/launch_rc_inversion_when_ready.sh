@@ -33,10 +33,14 @@ MAXITER="${MAXITER:-500}"
 # empty for non-buffered meshes (keeps the calving back-pressure term).
 NO_CALVING="${ISMIP7_NO_CALVING_TERMINUS:-}"
 
+# Logs under the repo so they survive reboots (the Jun 20 rc_500
+# inversion log died with /tmp).
+LOGDIR="$REPO/antarctica/results/logs"
+mkdir -p "$LOGDIR"
 STAMP="$(date +%Y%m%d_%H%M%S)"
-LOG="${LOG:-/tmp/rc_inv_1km_${STAMP}.log}"
-GATELOG="${GATELOG:-/tmp/rc_inv_1km_gate.log}"
-LOCK="${LOCK:-/tmp/rc_inv_1km.lock}"
+LOG="${LOG:-$LOGDIR/rc_inv_${LC}_${STAMP}.log}"
+GATELOG="${GATELOG:-$LOGDIR/rc_inv_${LC}_gate.log}"
+LOCK="${LOCK:-$LOGDIR/rc_inv_${LC}.lock}"
 
 log(){ echo "[$(date '+%F %T')] $*" | tee -a "$GATELOG"; }
 

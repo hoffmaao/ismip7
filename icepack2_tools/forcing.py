@@ -558,6 +558,75 @@ def compute_sin_alpha(ctx):
     return gmag / np.sqrt(1.0 + gmag * gmag)
 
 
+def build_oi_climatology_interpolators(data_root=None):
+    r"""Load the meltMIP OI climatology TF and so into (z, y, x)
+    RegularGridInterpolators (nearest, fill 0). Shared by the CTRL and any
+    observationally-forced run (OCX)."""
+    import xarray as xr
+    from scipy.interpolate import RegularGridInterpolator
+
+    root = _find_ismip7_data(data_root)
+    interps = {}
+    for var in ("tf", "so"):
+        path = os.path.join(
+            root, "meltMIP", f"OI_Climatology_ismip8km_60m_{var}_extrap.nc"
+        )
+        ds = xr.open_dataset(path)
+        da = ds[var]
+        zdim = [d for d in da.dims if d.lower() in ("z", "depth", "lev")][0]
+        za = ds[zdim].values
+        ya = ds["y"].values
+        xa = ds["x"].values
+        data = da.transpose(zdim, "y", "x").values.astype(np.float32)
+        if za[0] > za[-1]:
+            za = za[::-1]; data = data[::-1, :, :]
+        if ya[0] > ya[-1]:
+            ya = ya[::-1]; data = data[:, ::-1, :]
+        if xa[0] > xa[-1]:
+            xa = xa[::-1]; data = data[:, :, ::-1]
+        data = np.nan_to_num(data, nan=0.0)
+        interps[var] = (
+            RegularGridInterpolator(
+                (za, ya, xa), data,
+                method="nearest", bounds_error=False, fill_value=0.0,
+            ),
+            za,
+        )
+        ds.close()
+    return interps
+
+
+def make_climatology_ocean_callback(K_field, data_root=None):
+    r"""Ocean-melt callback with CONSTANT OI-climatology TF/so and evolving
+    geometry: the CTRL2015 / observationally-constrained ocean forcing.
+    K_field is a scalar or per-node array (calibrated per-basin K)."""
+    interps = build_oi_climatology_interpolators(data_root)
+
+    def callback(ctx, t_yr):
+        mesh_x = ctx["mesh"].coordinates.dat.data_ro[:, 0]
+        mesh_y = ctx["mesh"].coordinates.dat.data_ro[:, 1]
+        h = ctx["h"].dat.data_ro
+        b = ctx["b"].dat.data_ro
+        s = ctx["s"].dat.data_ro
+        draft = np.minimum(s - h, 0.0)
+
+        tf_interp, za_tf = interps["tf"]
+        so_interp, za_so = interps["so"]
+        d_tf = np.clip(draft, za_tf[0], za_tf[-1])
+        d_so = np.clip(draft, za_so[0], za_so[-1])
+        tf = tf_interp(np.column_stack([d_tf, mesh_y, mesh_x]))
+        sal = so_interp(np.column_stack([d_so, mesh_y, mesh_x]))
+        sin_a = compute_sin_alpha(ctx)
+
+        melt = quadratic_mixed_slope(tf, sal, sin_a, K=K_field)
+
+        haf = s - (b + (_RHO_WATER / _RHO_ICE) * np.maximum(-b, 0.0))
+        floating = haf <= 0
+        ctx["ocean_melt"].dat.data[:] = np.where(floating, melt, 0.0)
+
+    return callback
+
+
 def make_forcing_callback(atm=None, ocean=None, fracture=None,
                           K=_K_DEFAULT, K_per_basin_npz=None,
                           smb_anomaly=True, smb_baseline=None):

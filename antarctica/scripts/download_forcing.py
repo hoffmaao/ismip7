@@ -21,15 +21,26 @@ GHUB_COLLECTION_ID = os.environ.get(
     "ISMIP7_GLOBUS_COLLECTION", "ccc9bbd2-4091-4e35-addd-eeb639cf5332"
 )
 
-# The GHub share was reorganized (~Jul 2026): the old
-# AIS_ocean/share_with_modellers tree is gone; everything now lives under
-# CMIP6_test_protocol/AIS mirroring the runtime layout. As of Jul 2026 the
-# share carries ONLY what is listed below — the processed per-year forcing
-# (CESM2-WACCM ssp585 SDBN1-8000m + ocean v3 chunks, which we hold locally:
-# treat that local tree as irreplaceable), historical yearly forcing,
-# processed ssp126/ssp370, and all of MRI-ESM2-0 are NOT yet published.
-# Raw CMIP output sits in ../CMIPraw/CESM2-WACCM/{historical,ssp126,ssp370,
-# ssp534-over,ssp585}.
+# The GHub collection is being ACTIVELY reorganized. State as of 2026-07-08
+# (re-walked the whole tree — see scripts/preflight.py for the needs side):
+#   /ISMIP6/ISMIP7_Prep/CMIP6_test_protocol/{AIS, GrIS, Tools, test}
+# and under AIS/ only:
+#   CESM2-WACCM/{bias, climatology, historical/ocean/extras}  (climatologies
+#     + bias-correction ingredients ONLY — NO per-year forcing, no scenario dirs)
+#   grid, obs (mipkit / OI-climatology / IMBIE / topography)
+# Everything listed in OCEAN_FILES/CALIBRATION_FILES below is present and
+# ALREADY MIRRORED locally, so this script is currently a no-op.
+#
+# NOT on the collection right now (was here days ago; removed mid-reorg):
+#   * ../CMIPraw/  — the entire raw-CMIP tree is GONE.
+#   * processed per-year atmosphere (SDBN1-8000m) and ocean (tf/so/thetao)
+#     for ssp585 or any scenario — the CESM2-WACCM/ssp585 tree we hold in
+#     ISMIP7/AIS/ (133 GB, atmosphere+ocean+fracture) is NO LONGER on the
+#     share: treat the local copy as IRREPLACEABLE and back it up.
+#   * MRI-ESM2-0 anything (AIS/MRI-ESM2-0 does not exist).
+# => cores 1-6/8/10 cannot be sourced here; the processed forcing must be
+#    (re)published by the forcing group, or regenerated from raw CMIP with a
+#    processing pipeline not present here (Tools/ has only the GrIS pipeline).
 AIS_BASE = "/ISMIP6/ISMIP7_Prep/CMIP6_test_protocol/AIS"
 
 _LTM = "{var}_CESM2-WACCM_ltm_SDBN1_1960-1989.nc"

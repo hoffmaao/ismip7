@@ -239,13 +239,21 @@ def setup_model(restart_from=None):
         c0_rc = float(os.environ.get("ISMIP7_RC_C0", "0.5"))
         rc_hvisc_floor = float(os.environ.get("ISMIP7_RC_HVISC_FLOOR", "10.0"))
         rc_cw0_floor = float(os.environ.get("ISMIP7_RC_CW0_FLOOR", "0.0"))
+        # Minimum Coulomb yield [MPa] -> a small, nonzero drag even where
+        # N=0 (floating). RC's exact-zero shelf drag leaves floating ice
+        # with no friction to damp numerical noise in the driving stress,
+        # so the diagnostic↔transport coupling is unstable (velocity blows
+        # up ~2x/step); a few kPa restores the damping Budd gets for free
+        # from its phi_eff floor. 0 = bit-exact-zero shelves (unstable in
+        # prognostic use). See the multi-step blow-up diagnosis, Jul 2026.
+        rc_eps_tauc = float(os.environ.get("ISMIP7_RC_EPS_TAUC", "0.0"))
         # Anchor from the inversion-time geometry/velocity, BEFORE any
         # restart overwrites s: theta is a log-adjustment on this C_w0.
         C_w0 = weertman_anchor(H, s, u_obs, m_slide_val, Q)
         PETSc.Sys.Print(
             f"  Friction: regularized Coulomb (c0={c0_rc}, "
             f"h_visc_floor={rc_hvisc_floor:.0f}m, cw0_floor={rc_cw0_floor:.1e}, "
-            f"alpha={float(alpha_reg):.1e})"
+            f"eps_tauc={rc_eps_tauc:.1e} MPa, alpha={float(alpha_reg):.1e})"
         )
 
     sparams = {
@@ -333,7 +341,8 @@ def setup_model(restart_from=None):
             z, theta_f, phi_f, H=h, s=s, b=b, C_w0=C_w0,
             A4_base=A4_base, n_flow=n_flow, n_flow_val=n_flow_val,
             m_slide=m_slide_val, tau_c=tau_c, alpha=alpha_reg, H_ref=H_ref,
-            c0=c0_rc, c_w0_floor=rc_cw0_floor, h_visc_floor=rc_hvisc_floor,
+            c0=c0_rc, eps_tauc=rc_eps_tauc,
+            c_w0_floor=rc_cw0_floor, h_visc_floor=rc_hvisc_floor,
             calving_ids=calving_ids if use_calving_terminus else None,
         )
     else:

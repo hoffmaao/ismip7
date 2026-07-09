@@ -332,15 +332,38 @@ def setup_model(restart_from=None):
     )
     slvr = NonlinearVariationalSolver(prob, solver_parameters=sparams)
 
+    # Adaptive n/m continuation for the cold-start diagnostic solve. On a
+    # fine mesh with a rough (mid-optimization) MAP the n=1→n_flow_val jump
+    # can outrun Newton (DIVERGED_MAX_IT); restore the initial guess and
+    # re-ramp with more, smaller steps rather than crashing. Escalates
+    # ISMIP7_CONTINUATION_STEPS (default 8) → 2× → 4×.
+    base_steps = int(os.environ.get("ISMIP7_CONTINUATION_STEPS", "8"))
+    z_init = z.copy(deepcopy=True)
     PETSc.Sys.Print(
         f"Initial diagnostic solve (continuation n_flow 1→{n_flow_val:.1f}, "
         f"m_slide 1→{m_slide_val:.1f})..."
     )
-    for t in np.linspace(0.0, 1.0, 5):
-        n_flow.assign(1.0 + t * (n_flow_val - 1.0))
-        m_slide.assign(1.0 + t * (m_slide_val - 1.0))
-        slvr.solve()
-    PETSc.Sys.Print("  Done")
+    for attempt, steps in enumerate((base_steps, 2 * base_steps, 4 * base_steps)):
+        try:
+            for t in np.linspace(0.0, 1.0, steps):
+                n_flow.assign(1.0 + t * (n_flow_val - 1.0))
+                m_slide.assign(1.0 + t * (m_slide_val - 1.0))
+                slvr.solve()
+            PETSc.Sys.Print(f"  Done ({steps} continuation steps)")
+            break
+        except fd.ConvergenceError:
+            if attempt == 2:
+                PETSc.Sys.Print(
+                    f"  Continuation diverged at {steps} steps — giving up."
+                )
+                raise
+            PETSc.Sys.Print(
+                f"  Continuation diverged at {steps} steps; "
+                f"restarting with {2 * steps}..."
+            )
+            z.assign(z_init)
+            n_flow.assign(1.0)
+            m_slide.assign(1.0)
 
     u0 = z.subfunctions[0]
     area = assemble(Constant(1.0) * dx(mesh))

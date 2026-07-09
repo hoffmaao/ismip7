@@ -85,10 +85,14 @@ while :; do
     if [ "$ok" -ge "$STABLE" ]; then
       log "LAUNCHING RC CTRL -> $LOG"
       cd "$REPO" || { log "ERROR: cd $REPO failed"; exit 1; }
+      # Start the cold-start continuation fine (16 steps): on the 500 m
+      # mesh each diagnostic solve is expensive, so starting finer is
+      # cheaper in expectation than failing at 8 then re-ramping.
       export OMP_NUM_THREADS=1 ISMIP7_LC="$LC" ISMIP7_MESH="$MESH" \
              ISMIP7_FRICTION=regularized_coulomb \
              ISMIP7_DT="$DT" ISMIP7_T_END="$T_END" \
-             ISMIP7_K_PER_BASIN_NPZ="$K_NPZ" ISMIP7_BNDIDS="$BNDIDS"
+             ISMIP7_K_PER_BASIN_NPZ="$K_NPZ" ISMIP7_BNDIDS="$BNDIDS" \
+             ISMIP7_CONTINUATION_STEPS="${ISMIP7_CONTINUATION_STEPS:-16}"
       [ "$FIXED_FRONT" = "1" ] && export ISMIP7_FIXED_FRONT=1
       nohup mpiexec -n "$NRANKS" "$PY" antarctica/scripts/control/run.py > "$LOG" 2>&1 &
       pid=$!

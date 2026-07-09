@@ -155,6 +155,27 @@ def setup_model(restart_from=None):
     phi_f = Function(Q, name="phi")
     phi_f.dat.data[:] = phi.dat.data_ro
 
+    # Clip the log-adjustments to a sane band. theta/phi are O(1) in a
+    # converged MAP (the rc_32000 MAP maxes at 1.64), so anything beyond
+    # ISMIP7_MAP_CLIP (default 6) is optimization noise from an
+    # unconverged checkpoint — e.g. the rc_500 MAP (a 20-iter snapshot)
+    # carries ~700 nodes with |theta|,|phi| up to 23, i.e. exp() coeffs
+    # ~1e10 that are local singularities the diagnostic SNES cannot solve
+    # through. Clipping removes the pathology (0.1% of nodes) without
+    # touching legitimate structure. Set 0 to disable.
+    map_clip = float(os.environ.get("ISMIP7_MAP_CLIP", "6.0"))
+    if map_clip > 0.0:
+        n_clip = 0
+        for fld in (theta_f, phi_f):
+            d = fld.dat.data
+            n_clip += int((np.abs(d) > map_clip).sum())
+            np.clip(d, -map_clip, map_clip, out=d)
+        if n_clip:
+            PETSc.Sys.Print(
+                f"  MAP clip: bounded {n_clip} theta/phi node(s) to "
+                f"|.|<={map_clip:.0f} (unconverged-checkpoint outliers)"
+            )
+
     if use_rc:
         # Use the exact geometry/velocity the RC inversion saw, so the
         # Weertman anchor C_w0 (and hence the meaning of theta) is

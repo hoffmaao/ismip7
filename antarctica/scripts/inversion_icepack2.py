@@ -85,13 +85,22 @@ L_REG = 7.5e3
 # Friction law: "budd" (power-law dual, default) or "regularized_coulomb"
 # (Joughin/Schoof RC residual: grounded-only inference, exact-zero shelves).
 FRICTION = os.environ.get("ISMIP7_FRICTION", "budd")
-USE_RC = FRICTION == "regularized_coulomb"
+# Exact-zero-shelf residual laws share the C_w0/He/composite structure.
+USE_RESIDUAL = FRICTION in ("regularized_coulomb", "budd")
+USE_RC = USE_RESIDUAL  # geometry/anchor handling is shared
 C0_RC = float(os.environ.get("ISMIP7_RC_C0", "0.5"))
 # Buffer-node (h_clamp=0) coercivity controls; see dual_friction.build_rc_residual.
 # h_visc_floor (membrane-only thickness floor) is the primary, bias-free cure;
 # c_w0_floor is off by default (unnecessary once h_visc_floor is on).
 RC_HVISC_FLOOR = float(os.environ.get("ISMIP7_RC_HVISC_FLOOR", "10.0"))
 RC_CW0_FLOOR = float(os.environ.get("ISMIP7_RC_CW0_FLOOR", "0.0"))
+# Budd N_hat knobs (fric_law="budd"): at the reference/inversion geometry
+# N_hat=1 (with the PISM-delta grounded floor), so this inverts the exact-zero
+# shelf He-gated law; the effective-pressure feedback is purely prognostic.
+BUDD_DELTA = float(os.environ.get("ISMIP7_BUDD_DELTA", "0.02"))
+BUDD_NHAT_CAP = float(os.environ.get("ISMIP7_BUDD_NHAT_CAP", "3.0"))
+ALPHA_GL = (float(os.environ.get("ISMIP7_ALPHA_GL", "0.5"))
+            if FRICTION == "budd" else 0.0)
 
 
 def find_file(d, p):
@@ -342,27 +351,34 @@ def main():
             )
         return L_
 
-    # Regularized Coulomb needs a fixed Weertman anchor C_w0 (driving-stress
+    # The residual laws need a fixed Weertman anchor C_w0 (driving-stress
     # balance); theta then inverts as an O(1) log-adjustment on top of it.
-    if USE_RC:
+    if USE_RESIDUAL:
         C_w0 = weertman_anchor(H, s, u_obs, m_slide_val, Q)
+        law_name = ("Budd N_hat (exact-zero shelf, delta="
+                    f"{BUDD_DELTA:.3f}, alpha_gl={ALPHA_GL:.2f})"
+                    if FRICTION == "budd"
+                    else f"regularized Coulomb (c0={C0_RC})")
         PETSc.Sys.Print(
-            f"  Friction: regularized Coulomb (c0={C0_RC}, h_visc_floor={RC_HVISC_FLOOR:.0f}m, "
-            f"cw0_floor={RC_CW0_FLOOR:.1e}); C_w0 in "
-            f"[{float(C_w0.dat.data_ro.min()):.2e}, {float(C_w0.dat.data_ro.max()):.2e}]"
+            f"  Friction: {law_name}; h_visc_floor={RC_HVISC_FLOOR:.0f}m; "
+            f"C_w0 in [{float(C_w0.dat.data_ro.min()):.2e}, "
+            f"{float(C_w0.dat.data_ro.max()):.2e}]"
         )
     else:
-        PETSc.Sys.Print("  Friction: Budd power-law dual")
-    map_tag = "_rc" if USE_RC else ""
+        PETSc.Sys.Print("  Friction: Budd power-law dual (legacy action)")
+    map_tag = {"regularized_coulomb": "_rc", "budd": "_budd"}.get(FRICTION, "")
 
     def build_F(theta_c, phi_c):
-        # RC -> residual closure (tau linear, grounded-only theta via exp(theta*He),
-        # exact-zero shelves via the N-cap); Budd -> derivative of the action.
-        if USE_RC:
+        # Residual closure (tau linear, grounded-only theta via exp(theta*He),
+        # exact-zero shelves): budd -> N_hat=1 at the reference geometry;
+        # regularized_coulomb -> Coulomb cap. Legacy budd -> action derivative.
+        if USE_RESIDUAL:
             return build_rc_residual(
                 z, theta_c, phi_c, H=H, s=s, b=b, C_w0=C_w0,
                 A4_base=A4_base, n_flow=n_flow, n_flow_val=n_flow_val,
                 m_slide=m_slide_val, tau_c=tau_c, alpha=alpha_reg, H_ref=H_ref,
+                fric_law=FRICTION, N_ref=None,
+                nhat_floor=BUDD_DELTA, nhat_cap=BUDD_NHAT_CAP, alpha_gl=ALPHA_GL,
                 c0=C0_RC, c_w0_floor=RC_CW0_FLOOR, h_visc_floor=RC_HVISC_FLOOR,
                 calving_ids=calving_ids if use_calving_terminus else None,
             )

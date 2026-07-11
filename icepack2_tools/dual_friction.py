@@ -50,7 +50,9 @@ from firedrake import (
     inner,
     sqrt,
     max_value,
+    min_value,
     conditional,
+    gt,
     eq,
     exp,
     avg,
@@ -124,6 +126,11 @@ def build_rc_residual(
     tau_c,
     alpha,
     H_ref,
+    fric_law="regularized_coulomb",
+    N_ref=None,
+    nhat_floor=0.0,
+    nhat_cap=3.0,
+    alpha_gl=0.0,
     c0=0.5,
     u_min=1.0,
     eps_tauc=0.0,
@@ -224,11 +231,20 @@ def build_rc_residual(
     Mn = conditional(eq(n_flow, 1), Constant(1.0), M2 ** ((n_flow - 1) / 2))
     A_eff = A4_base * exp(phi)
     dev_MMt = inner(M, Mt) - tr(M) * tr(Mt) / (d + 1)
+    lin_reg = H_ref * A_eff * tau_c ** (n_flow_val - 1) * dev_MMt   # linear (n=1) @ H_ref
     F = (
         H_visc * A_eff * Mn * dev_MMt                              # dislocation creep (n_flow)
-        + alpha * H_ref * A_eff * tau_c ** (n_flow_val - 1) * dev_MMt  # linear regularizer @ H_ref
+        + alpha * lin_reg                                         # small global linear regularizer (h->0 PD)
         - H_visc * inner(eps, Mt)                                  # strain-rate coupling
     ) * dx
+    # GL-gated coercivity collar (Andrew/gia composite_viscosity_gated): a STRONG
+    # linear regularizer gated to the near-flotation / floating band via (1 - He),
+    # ~0 on the well-grounded trunk (so it keeps its true Glen rheology).  This is
+    # what buys back the velocity damping that EXACT-zero shelf drag removes -- the
+    # frictionless shelf otherwise has nothing to pin velocity noise (the RC-forward
+    # blow-up).  Purely viscous (membrane), so basal drag stays exactly zero afloat.
+    if alpha_gl > 0.0:
+        F += alpha_gl * (Constant(1.0) - He) * lin_reg * dx
 
     # ---- regularized-Coulomb friction (basal-stress) block ----
     # C_w0 floored only for solver coercivity in ice-free buffer nodes (see the
@@ -237,8 +253,36 @@ def build_rc_residual(
     u_reg = sqrt(inner(u, u) + Constant(u_min) ** 2)
     C_w0_eff = max_value(C_w0, Constant(c_w0_floor))
     tau_W = C_w0_eff * exp(theta * He) * u_reg ** (1.0 / m_slide)   # Weertman, theta grounded-gated
-    tau_cap = max_value(Constant(c0) * N, Constant(eps_tauc))       # Coulomb cap = c0 N -> 0 afloat
-    tau_b = tau_W * tau_cap / max_value(tau_W + tau_cap, Constant(1e-15))  # Weertman low-u, cap high-u; ->0 afloat (NaN-safe)
+
+    if fric_law == "budd":
+        # Budd: tau_b = tau_W * N_hat, with N_hat the NORMALIZED effective
+        # pressure N_eff/N_ref (=1 at the reference/inversion geometry, so the
+        # inverted friction is preserved at t=0 and the effective-pressure
+        # feedback is a RELATIVE change as the geometry evolves).  Exact-zero
+        # shelf via conditional(N>0, ., 0): N_eff=0 afloat -> tau_b=0 exactly.
+        # PISM-delta floor (Bueler & van Pelt 2015, till_effective_fraction_
+        # overburden, delta ~ 0.02): on GROUNDED ice N_hat >= delta*P_o/N_ref
+        # (P_o = local overburden, so the floor evolves and decays as ice
+        # thins), removing the near-flotation frictionless-GL degeneracy.  The
+        # Joughin cap (reduceNearGLBeta) bounds N_hat above.
+        # Floor the denominator ALWAYS (not just for exact-zero guarding): UFL
+        # evaluates both conditional branches, so an unguarded N/Nr = 0/0 on the
+        # shelf poisons the Jacobian with NaN even though the conditional selects
+        # 0.  1e-6 is tiny vs grounded N (~rho_I g H), so N/Nr = 1 stands on all
+        # grounded ice when N_ref=None (inversion); only the (conditional-zeroed)
+        # shelf sees the floor.
+        Nr = max_value(N if N_ref is None else N_ref, Constant(1e-6))
+        p_I = rho_I * g * max_value(H, Constant(1.0))
+        N_hat = min_value(N / Nr, Constant(nhat_cap))
+        if nhat_floor > 0.0:
+            novb = Constant(nhat_floor) * p_I / Nr                  # delta * local overburden (normalized)
+            N_hat = min_value(max_value(N_hat, novb), Constant(nhat_cap))
+        N_hat = conditional(gt(N, Constant(0.0)), N_hat, Constant(0.0))  # EXACT-zero shelf
+        tau_b = tau_W * N_hat
+    else:  # regularized_coulomb
+        tau_cap = max_value(Constant(c0) * N, Constant(eps_tauc))   # Coulomb cap = c0 N -> 0 afloat
+        tau_b = tau_W * tau_cap / max_value(tau_W + tau_cap, Constant(1e-15))  # Weertman low-u, cap high-u; ->0 afloat (NaN-safe)
+
     F += inner(tau + tau_b * u / u_reg, sig) * dx                   # tau = -tau_b u/|u| (identity tau-block)
 
     # ---- momentum balance (hand-written: H_visc on the membrane term, TRUE H on

@@ -86,8 +86,15 @@ def setup_model(restart_from=None):
     # grounded-only theta, exact-zero shelf drag via the Coulomb cap c0*N).
     # Must mirror inversion_icepack2.py so theta/phi keep their meaning.
     friction = os.environ.get("ISMIP7_FRICTION", "budd")
-    use_rc = friction == "regularized_coulomb"
-    map_tag = "_rc" if use_rc else ""
+    # Exact-zero-shelf residual laws (icepack2 dual, dual_friction.py):
+    #   regularized_coulomb -> Coulomb cap tau_c=c0*N
+    #   budd                -> tau_b ~ N_hat=N_eff/N_ref, PISM-delta grounded
+    #                          floor, exact-zero shelf (matches gia ASE ase_model)
+    # Both share the C_w0/He/composite structure and need a _rc/_budd MAP.
+    # "budd_legacy" keeps the old phi_eff action Budd (residual shelf drag).
+    use_residual = friction in ("regularized_coulomb", "budd")
+    use_rc = use_residual  # geometry/alpha/h_clamp handling is shared
+    map_tag = {"regularized_coulomb": "_rc", "budd": "_budd"}.get(friction, "")
 
     Q = FunctionSpace(mesh, "CG", 1)
     V = VectorFunctionSpace(mesh, "CG", 1)
@@ -232,29 +239,47 @@ def setup_model(restart_from=None):
     K_linear = u_c / (phi_eff * tau_c) * exp(-theta_f)  # linearized at tau_c
 
     C_w0 = None
-    if use_rc:
+    N_ref = None
+    if use_residual:
         from icepack2_tools.dual_friction import (
-            build_rc_residual, weertman_anchor,
+            build_rc_residual, weertman_anchor, effective_pressure,
         )
         c0_rc = float(os.environ.get("ISMIP7_RC_C0", "0.5"))
         rc_hvisc_floor = float(os.environ.get("ISMIP7_RC_HVISC_FLOOR", "10.0"))
         rc_cw0_floor = float(os.environ.get("ISMIP7_RC_CW0_FLOOR", "0.0"))
-        # Minimum Coulomb yield [MPa] -> a small, nonzero drag even where
-        # N=0 (floating). RC's exact-zero shelf drag leaves floating ice
-        # with no friction to damp numerical noise in the driving stress,
-        # so the diagnostic↔transport coupling is unstable (velocity blows
-        # up ~2x/step); a few kPa restores the damping Budd gets for free
-        # from its phi_eff floor. 0 = bit-exact-zero shelves (unstable in
-        # prognostic use). See the multi-step blow-up diagnosis, Jul 2026.
         rc_eps_tauc = float(os.environ.get("ISMIP7_RC_EPS_TAUC", "0.0"))
-        # Anchor from the inversion-time geometry/velocity, BEFORE any
-        # restart overwrites s: theta is a log-adjustment on this C_w0.
+        # Budd N_hat knobs (used only for fric_law="budd"):
+        #   PISM-delta grounded floor (Bueler & van Pelt 2015, ~0.02 of local
+        #   overburden) removes the frictionless-GL degeneracy; N_hat cap
+        #   (Joughin reduceNearGLBeta) bounds it; alpha_gl is the STRONG
+        #   GL-gated viscosity coercivity that buys back the damping the
+        #   exact-zero shelf removes (RC lacked it -> blew up). See Jul 2026
+        #   RC-forward blow-up diagnosis + gia ase_model.momentum_F.
+        budd_nhat_floor = float(os.environ.get("ISMIP7_BUDD_DELTA", "0.02"))
+        budd_nhat_cap = float(os.environ.get("ISMIP7_BUDD_NHAT_CAP", "3.0"))
+        # GL-gated coercivity only for Budd (RC keeps its established form).
+        alpha_gl = (float(os.environ.get("ISMIP7_ALPHA_GL", "0.5"))
+                    if friction == "budd" else 0.0)
+        # Anchor + reference effective pressure from the inversion-time
+        # geometry, BEFORE any restart overwrites s: theta is a log-adjustment
+        # on this C_w0, and N_ref pins N_hat=1 at the reference so the inverted
+        # friction is reproduced at t=0.
         C_w0 = weertman_anchor(H, s, u_obs, m_slide_val, Q)
-        PETSc.Sys.Print(
-            f"  Friction: regularized Coulomb (c0={c0_rc}, "
-            f"h_visc_floor={rc_hvisc_floor:.0f}m, cw0_floor={rc_cw0_floor:.1e}, "
-            f"eps_tauc={rc_eps_tauc:.1e} MPa, alpha={float(alpha_reg):.1e})"
-        )
+        if friction == "budd":
+            N_ref = Function(Q, name="N_ref").interpolate(
+                max_value(effective_pressure(H, s), Constant(0.0))
+            )
+            PETSc.Sys.Print(
+                f"  Friction: Budd N_hat (exact-zero shelf; delta="
+                f"{budd_nhat_floor:.3f}, N_hat_cap={budd_nhat_cap:.1f}, "
+                f"alpha_gl={alpha_gl:.2f}, h_visc_floor={rc_hvisc_floor:.0f}m)"
+            )
+        else:
+            PETSc.Sys.Print(
+                f"  Friction: regularized Coulomb (c0={c0_rc}, "
+                f"h_visc_floor={rc_hvisc_floor:.0f}m, cw0_floor={rc_cw0_floor:.1e}, "
+                f"eps_tauc={rc_eps_tauc:.1e} MPa, alpha={float(alpha_reg):.1e})"
+            )
 
     sparams = {
         "snes_type": "newtonls",
@@ -333,14 +358,18 @@ def setup_model(restart_from=None):
     fields_reg = dict(fields)
     fields_reg["thickness"] = H_ref
 
-    if use_rc:
-        # Residual closure on the LIVE prognostic fields (h, s): the
-        # grounded gate, Coulomb cap, and driving stress all track the
-        # evolving geometry, so the grounding line migrates freely.
+    if use_residual:
+        # Residual closure on the LIVE prognostic fields (h, s): the grounded
+        # gate, effective pressure, and driving stress all track the evolving
+        # geometry, so the grounding line migrates freely with exact-zero
+        # shelf drag. N_ref (Budd) is the fixed reference effective pressure.
         F = build_rc_residual(
             z, theta_f, phi_f, H=h, s=s, b=b, C_w0=C_w0,
             A4_base=A4_base, n_flow=n_flow, n_flow_val=n_flow_val,
             m_slide=m_slide_val, tau_c=tau_c, alpha=alpha_reg, H_ref=H_ref,
+            fric_law=friction, N_ref=N_ref,
+            nhat_floor=budd_nhat_floor, nhat_cap=budd_nhat_cap,
+            alpha_gl=alpha_gl,
             c0=c0_rc, eps_tauc=rc_eps_tauc,
             c_w0_floor=rc_cw0_floor, h_visc_floor=rc_hvisc_floor,
             calving_ids=calving_ids if use_calving_terminus else None,

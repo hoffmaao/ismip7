@@ -26,7 +26,7 @@ _PROJECT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(
 sys.path.insert(0, _PROJECT)
 
 from firedrake import assemble, dx, Constant
-from simulation import setup_model, run_simulation, PETSc, lc
+from simulation import setup_model, run_simulation, latest_checkpoint, PETSc, lc
 from icepack2_tools.forcing import (
     ISMIP7Atmosphere,
     load_racmo_smb_climatology,
@@ -154,7 +154,22 @@ def main():
     if args.snes_log:
         os.environ["ISMIP7_SNES_LOG"] = args.snes_log
 
-    ctx = setup_model(restart_from=args.restart)
+    esm_tag = ESM.lower().replace("-", "_")
+    experiment_name = f"ctrl2015_{esm_tag}"
+
+    # Unattended auto-resume (ISMIP7_AUTO_RESUME=1): with no explicit restart,
+    # continue from the newest self-contained checkpoint for this experiment.
+    # A rebooted long run picks up where it left off; the mesh + frozen anchors
+    # + timeline year all come from that checkpoint.
+    restart_from = args.restart
+    if restart_from is None and os.environ.get("ISMIP7_AUTO_RESUME"):
+        restart_from = latest_checkpoint(experiment_name)
+        PETSc.Sys.Print(
+            f"Auto-resume: {restart_from}" if restart_from
+            else "Auto-resume: no prior checkpoint; cold start"
+        )
+
+    ctx = setup_model(restart_from=restart_from)
 
     mesh_x = ctx["mesh"].coordinates.dat.data_ro[:, 0]
     mesh_y = ctx["mesh"].coordinates.dat.data_ro[:, 1]
@@ -225,10 +240,9 @@ def main():
     PETSc.Sys.Print(f"  Constant {CLIM_START}-{CLIM_END} SMB climatology")
     PETSc.Sys.Print(f"  Constant OI ocean climatology + per-basin K")
 
-    esm_tag = ESM.lower().replace("-", "_")
     run_simulation(
         ctx,
-        experiment_name=f"ctrl2015_{esm_tag}",
+        experiment_name=experiment_name,
         t_start=T_START,
         t_end=T_END,
         dt=DT,

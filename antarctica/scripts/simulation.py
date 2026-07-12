@@ -62,29 +62,48 @@ def find_file(d, p):
     return m[0]
 
 
+def latest_checkpoint(experiment_name, lc_val=None):
+    r"""Newest self-contained state checkpoint for an experiment, or None.
+
+    Scans RESULTS_DIR for `{experiment_name}_{lc}_final.h5` and the periodic
+    `{experiment_name}_{lc}_t<year>.h5` files and returns the path with the
+    largest saved `t_yr` (final wins ties). Enables unattended auto-resume:
+    a rebooted run continues from where it left off with no manual bookkeeping.
+    """
+    lc_val = lc if lc_val is None else lc_val
+    cands = []
+    final_fn = os.path.join(RESULTS_DIR, f"{experiment_name}_{lc_val}_final.h5")
+    if os.path.exists(final_fn):
+        cands.append(final_fn)
+    cands += glob.glob(
+        os.path.join(RESULTS_DIR, f"{experiment_name}_{lc_val}_t*.h5")
+    )
+    best, best_t = None, None
+    for fn in cands:
+        try:
+            with fd.CheckpointFile(fn, "r") as chk:
+                t = (float(chk.get_attr("/", "t_yr"))
+                     if chk.has_attr("/", "t_yr") else None)
+        except Exception:
+            t = None
+        if t is None:
+            continue
+        if (best_t is None or t > best_t
+                or (t == best_t and fn.endswith("_final.h5"))):
+            best, best_t = fn, t
+    return best
+
+
 def setup_model(restart_from=None):
     r"""Load mesh, data, inversion fields, and build diagnostic solver."""
     os.makedirs(RESULTS_DIR, exist_ok=True)
-
-    mesh_fn = os.environ.get(
-        "ISMIP7_MESH", os.path.join(MESH_DIR, f"antarctica_{lc_coarse}_{lc}.msh")
-    )
-    PETSc.Sys.Print(f"Loading mesh: {mesh_fn}")
-    mesh = Mesh(mesh_fn)
-    PETSc.Sys.Print(f"  {mesh.num_vertices()} vertices, {mesh.num_cells()} cells")
-
-    bndids_fn = os.environ.get(
-        "ISMIP7_BNDIDS", os.path.join(MESH_DIR, "boundary_ids.json")
-    )
-    with open(bndids_fn) as f:
-        bnd_ids = json.load(f)
-    calving_ids = tuple(bnd_ids["calving"])
-    use_calving_terminus = os.environ.get("ISMIP7_NO_CALVING_TERMINUS") is None
 
     # Friction law: "budd" (power-law dual, default) or "regularized_coulomb"
     # (RC residual driven by the inversion_icepack2_rc_<lc>.h5 MAP:
     # grounded-only theta, exact-zero shelf drag via the Coulomb cap c0*N).
     # Must mirror inversion_icepack2.py so theta/phi keep their meaning.
+    # Resolved first because the compute mesh is loaded FROM this friction's
+    # MAP checkpoint (below), not from a fresh Mesh(.msh).
     friction = os.environ.get("ISMIP7_FRICTION", "budd")
     # Exact-zero-shelf residual laws (icepack2 dual, dual_friction.py):
     #   regularized_coulomb -> Coulomb cap tau_c=c0*N
@@ -96,6 +115,29 @@ def setup_model(restart_from=None):
     use_rc = use_residual  # geometry/alpha/h_clamp handling is shared
     map_tag = {"regularized_coulomb": "_rc", "budd": "_budd"}.get(friction, "")
 
+    is_restart = restart_from is not None
+    inv_fn = os.path.join(MESH_DIR, f"inversion_icepack2{map_tag}_{lc}.h5")
+    # Take the mesh + reference fields from the checkpoint we start from: the
+    # MAP on a cold start, or the self-contained restart checkpoint on a warm
+    # start. A fresh Mesh(.msh) repartitions with a different dof ordering,
+    # so a raw copy of the saved theta/phi/geometry scrambles at any rank
+    # count != the one the checkpoint was written on (the -n4 tripwire crash).
+    # The checkpoint mesh carries the full boundary-marker set, so the
+    # calving BC is preserved.
+    source_chk = restart_from if is_restart else inv_fn
+    PETSc.Sys.Print(f"Loading mesh + reference state: {source_chk}")
+    with fd.CheckpointFile(source_chk, "r") as _chk:
+        mesh = _chk.load_mesh()
+    PETSc.Sys.Print(f"  {mesh.num_vertices()} vertices, {mesh.num_cells()} cells")
+
+    bndids_fn = os.environ.get(
+        "ISMIP7_BNDIDS", os.path.join(MESH_DIR, "boundary_ids.json")
+    )
+    with open(bndids_fn) as f:
+        bnd_ids = json.load(f)
+    calving_ids = tuple(bnd_ids["calving"])
+    use_calving_terminus = os.environ.get("ISMIP7_NO_CALVING_TERMINUS") is None
+
     Q = FunctionSpace(mesh, "CG", 1)
     V = VectorFunctionSpace(mesh, "CG", 1)
     dg0 = FiniteElement("DG", "triangle", 0)
@@ -104,33 +146,23 @@ def setup_model(restart_from=None):
     Z = V * Sigma * T
 
     PETSc.Sys.Print("Loading data...")
-    bm_fn = find_file(os.path.join(DATA_DIR, "bedmachine"), "*.nc")
-    b = icepack.interpolate(rasterio.open(f"netcdf:{bm_fn}:bed"), Q)
     # Two clamps:
-    #   - h_clamp_init: floor on the *initial* thickness from BedMachine so
-    #     the initial diagnostic solve sees a well-posed problem everywhere
-    #     (default 10 m, matches the historical behavior).
-    #   - h_clamp: floor enforced in the advection step. Default 0 so melt
-    #     can drive cells to zero at the calving front; the composite
-    #     rheology keeps the diagnostic SNES nonsingular at h=0.
-    # In RC mode the MAP was inverted against the TRUE h=0 BedMachine
-    # geometry (h_visc_floor handles the ice-free buffer), so the initial
-    # clamp defaults to 0 and the initial state never touches a floor.
+    #   - h_clamp_init: floor on the *initial* thickness so the first
+    #     diagnostic solve is well-posed everywhere (default 10 m; 0 in RC
+    #     mode, where the MAP was inverted against the true h=0 geometry and
+    #     h_visc_floor handles the ice-free buffer).
+    #   - h_clamp: floor in the advection step. Default 0 so melt can drive
+    #     cells to zero at the calving front; the composite rheology keeps the
+    #     diagnostic SNES nonsingular at h=0.
     h_clamp_init = float(
         os.environ.get("ISMIP7_H_CLAMP_INIT", "0.0" if use_rc else "10.0")
     )
     h_clamp = float(os.environ.get("ISMIP7_H_CLAMP", "0.0"))
-    H = Function(Q, name="thickness").interpolate(
-        max_value(
-            icepack.interpolate(rasterio.open(f"netcdf:{bm_fn}:thickness"), Q),
-            Constant(h_clamp_init),
-        )
-    )
     rho_ratio = Constant(917.0 / 1024.0)
-    s = Function(Q, name="surface").interpolate(
-        max_value(b + H, (Constant(1.0) - rho_ratio) * H)
-    )
 
+    # Velocity obs (raster; interpolation is mesh-agnostic, so it is valid on
+    # the checkpoint mesh). Needed for the sliding scale u_c and, on a cold
+    # start, the Weertman anchor + initial misfit; incidental on restart.
     vel_fn = find_file(os.path.join(DATA_DIR, "velocity"), "*.nc")
     u_obs = icepack.interpolate(
         (rasterio.open(f"netcdf:{vel_fn}:VX"), rasterio.open(f"netcdf:{vel_fn}:VY")),
@@ -138,38 +170,83 @@ def setup_model(restart_from=None):
         fillvalue=0.0,
     )
 
-    inv_fn = os.path.join(MESH_DIR, f"inversion_icepack2{map_tag}_{lc}.h5")
-    PETSc.Sys.Print(f"Loading MAP: {inv_fn}")
-    with fd.CheckpointFile(inv_fn, "r") as chk:
-        chk_mesh = chk.load_mesh()
-        # The dof copies below require identical node ordering between the
-        # .msh mesh and the checkpoint mesh; verify via coordinates.
-        _co, _cc = mesh.coordinates.dat.data_ro, chk_mesh.coordinates.dat.data_ro
-        if _cc.shape != _co.shape or not np.allclose(_cc, _co):
-            raise RuntimeError(
-                f"{inv_fn}: checkpoint mesh nodes do not match {mesh_fn}; "
-                "set ISMIP7_MESH to the mesh the inversion ran on"
+    if not is_restart:
+        # Cold start: geometry from BedMachine (RC/Budd overwrites it with the
+        # inversion-time geometry from the MAP in the reference-load block).
+        bm_fn = find_file(os.path.join(DATA_DIR, "bedmachine"), "*.nc")
+        b = icepack.interpolate(rasterio.open(f"netcdf:{bm_fn}:bed"), Q)
+        b.rename("bed")
+        H = Function(Q, name="thickness").interpolate(
+            max_value(
+                icepack.interpolate(rasterio.open(f"netcdf:{bm_fn}:thickness"), Q),
+                Constant(h_clamp_init),
             )
-        theta = chk.load_function(chk_mesh, name="log_friction")
-        phi = chk.load_function(chk_mesh, name="log_fluidity")
-        if use_rc:
-            H_chk = chk.load_function(chk_mesh, name="thickness")
-            b_chk = chk.load_function(chk_mesh, name="bed")
-            s_chk = chk.load_function(chk_mesh, name="surface")
-            u_obs_chk = chk.load_function(chk_mesh, name="velocity_obs")
-    theta_f = Function(Q, name="theta")
-    theta_f.dat.data[:] = theta.dat.data_ro
-    phi_f = Function(Q, name="phi")
-    phi_f.dat.data[:] = phi.dat.data_ro
+        )
+        s = Function(Q, name="surface").interpolate(
+            max_value(b + H, (Constant(1.0) - rho_ratio) * H)
+        )
+
+    # Reference log-adjustments (theta=log_friction, phi=log_fluidity) plus,
+    # for RC/Budd or any restart, the geometry and frozen anchors — all read
+    # onto the mesh we already took from THIS checkpoint, so the dof order
+    # matches by construction (no fragile .msh-vs-checkpoint node comparison).
+    C_w0 = None
+    N_ref = None
+    H_init = None
+    phi_eff = None
+    u_guess = None
+    t_restart = None
+    with fd.CheckpointFile(source_chk, "r") as chk:
+        _th = chk.load_function(mesh, name="log_friction")
+        _ph = chk.load_function(mesh, name="log_fluidity")
+        theta_f = Function(Q, name="theta"); theta_f.dat.data[:] = _th.dat.data_ro
+        phi_f = Function(Q, name="phi");     phi_f.dat.data[:] = _ph.dat.data_ro
+        if is_restart:
+            # Self-contained restart: evolved geometry, frozen anchors, time.
+            _b = chk.load_function(mesh, name="bed")
+            _H = chk.load_function(mesh, name="thickness")     # evolved thickness
+            _s = chk.load_function(mesh, name="surface")
+            _Hi = chk.load_function(mesh, name="H_init")       # t=0 fixed-front anchor
+            _pe = chk.load_function(mesh, name="phi_eff")
+            _u = chk.load_function(mesh, name="velocity")
+            b = Function(Q, name="bed");           b.dat.data[:] = _b.dat.data_ro
+            H = Function(Q, name="thickness");     H.dat.data[:] = _H.dat.data_ro
+            s = Function(Q, name="surface");       s.dat.data[:] = _s.dat.data_ro
+            H_init = Function(Q, name="H_init");   H_init.dat.data[:] = _Hi.dat.data_ro
+            phi_eff = Function(Q, name="phi_eff"); phi_eff.dat.data[:] = _pe.dat.data_ro
+            u_guess = Function(V);                 u_guess.dat.data[:] = _u.dat.data_ro
+            if use_residual:
+                _cw = chk.load_function(mesh, name="C_w0")
+                C_w0 = Function(Q, name="C_w0");   C_w0.dat.data[:] = _cw.dat.data_ro
+            if friction == "budd":
+                _nr = chk.load_function(mesh, name="N_ref")
+                N_ref = Function(Q, name="N_ref"); N_ref.dat.data[:] = _nr.dat.data_ro
+            if chk.has_attr("/", "t_yr"):
+                t_restart = float(chk.get_attr("/", "t_yr"))
+            PETSc.Sys.Print(
+                f"  Restart: evolved geometry + frozen anchors loaded "
+                f"(t_yr={t_restart}, friction={friction})"
+            )
+        elif use_rc:
+            # Cold RC/Budd: geometry + velocity_obs from the MAP so the
+            # Weertman anchor C_w0 (hence the meaning of theta) is reproduced.
+            _H = chk.load_function(mesh, name="thickness")
+            _b = chk.load_function(mesh, name="bed")
+            _s = chk.load_function(mesh, name="surface")
+            _uo = chk.load_function(mesh, name="velocity_obs")
+            H.dat.data[:] = _H.dat.data_ro
+            b.dat.data[:] = _b.dat.data_ro
+            s.dat.data[:] = _s.dat.data_ro
+            u_obs.dat.data[:] = _uo.dat.data_ro
+            if h_clamp_init > 0.0:
+                H.interpolate(max_value(H, Constant(h_clamp_init)))
+                s.interpolate(max_value(b + H, (Constant(1.0) - rho_ratio) * H))
 
     # Clip the log-adjustments to a sane band. theta/phi are O(1) in a
-    # converged MAP (the rc_32000 MAP maxes at 1.64), so anything beyond
-    # ISMIP7_MAP_CLIP (default 6) is optimization noise from an
-    # unconverged checkpoint — e.g. the rc_500 MAP (a 20-iter snapshot)
-    # carries ~700 nodes with |theta|,|phi| up to 23, i.e. exp() coeffs
-    # ~1e10 that are local singularities the diagnostic SNES cannot solve
-    # through. Clipping removes the pathology (0.1% of nodes) without
-    # touching legitimate structure. Set 0 to disable.
+    # converged MAP, so anything beyond ISMIP7_MAP_CLIP (default 6) is
+    # optimization noise from an unconverged checkpoint (e.g. the rc_500 MAP
+    # snapshot carries ~700 nodes with |.| up to 23 -> exp() ~1e10 local
+    # singularities the diagnostic SNES cannot solve through). Set 0 to disable.
     map_clip = float(os.environ.get("ISMIP7_MAP_CLIP", "6.0"))
     if map_clip > 0.0:
         n_clip = 0
@@ -182,18 +259,6 @@ def setup_model(restart_from=None):
                 f"  MAP clip: bounded {n_clip} theta/phi node(s) to "
                 f"|.|<={map_clip:.0f} (unconverged-checkpoint outliers)"
             )
-
-    if use_rc:
-        # Use the exact geometry/velocity the RC inversion saw, so the
-        # Weertman anchor C_w0 (and hence the meaning of theta) is
-        # reproduced bit-for-bit. h_clamp_init (default 0) may re-floor.
-        H.dat.data[:] = H_chk.dat.data_ro
-        b.dat.data[:] = b_chk.dat.data_ro
-        s.dat.data[:] = s_chk.dat.data_ro
-        u_obs.dat.data[:] = u_obs_chk.dat.data_ro
-        if h_clamp_init > 0.0:
-            H.interpolate(max_value(H, Constant(h_clamp_init)))
-            s.interpolate(max_value(b + H, (Constant(1.0) - rho_ratio) * H))
 
     A0 = Constant(icepack.rate_factor(Constant(260.0)))
     # Composite Goldsby-Kohlstedt-style exponents (must match the inversion
@@ -209,16 +274,18 @@ def setup_model(restart_from=None):
     ).dat.data_ro.mean()))
 
     # Phi_eff (effective-pressure fraction). Uses a small floor on H so it
-    # is well-defined where the original BedMachine thickness is 0.
+    # is well-defined where the original BedMachine thickness is 0. Loaded
+    # (frozen) from the checkpoint on a restart; computed here on a cold start.
     _H_FLOOR_PHI = Constant(1.0)
-    phi_eff = Function(Q).interpolate(
-        max_value(
-            Constant(1.0)
-            - rho_W * g * max_value(Constant(0.0), -b)
-              / (rho_I * g * max_value(H, _H_FLOOR_PHI)),
-            Constant(0.01),
+    if phi_eff is None:
+        phi_eff = Function(Q, name="phi_eff").interpolate(
+            max_value(
+                Constant(1.0)
+                - rho_W * g * max_value(Constant(0.0), -b)
+                  / (rho_I * g * max_value(H, _H_FLOOR_PHI)),
+                Constant(0.01),
+            )
         )
-    )
     A4_base = A0 * Constant(a4_factor)
     A_map = A4_base * exp(phi_f)
     K_base = u_c / (phi_eff * tau_c) ** m_slide
@@ -238,8 +305,9 @@ def setup_model(restart_from=None):
     A_linear = A_map * tau_c ** (n_flow_val - 1)   # linearized at tau_c
     K_linear = u_c / (phi_eff * tau_c) * exp(-theta_f)  # linearized at tau_c
 
-    C_w0 = None
-    N_ref = None
+    # C_w0/N_ref were initialized (and, on a restart, loaded frozen) in the
+    # reference-load block above; do NOT re-init to None here or a restart
+    # would clobber the loaded anchors and pass None into build_rc_residual.
     if use_residual:
         from icepack2_tools.dual_friction import (
             build_rc_residual, weertman_anchor, effective_pressure,
@@ -261,14 +329,19 @@ def setup_model(restart_from=None):
         alpha_gl = (float(os.environ.get("ISMIP7_ALPHA_GL", "0.5"))
                     if friction == "budd" else 0.0)
         # Anchor + reference effective pressure from the inversion-time
-        # geometry, BEFORE any restart overwrites s: theta is a log-adjustment
+        # geometry (BEFORE any restart overwrites s): theta is a log-adjustment
         # on this C_w0, and N_ref pins N_hat=1 at the reference so the inverted
-        # friction is reproduced at t=0.
-        C_w0 = weertman_anchor(H, s, u_obs, m_slide_val, Q)
-        if friction == "budd":
-            N_ref = Function(Q, name="N_ref").interpolate(
-                max_value(effective_pressure(H, s), Constant(0.0))
+        # friction is reproduced at t=0. On a restart these frozen anchors are
+        # loaded from the checkpoint above, never recomputed from evolved h.
+        if not is_restart:
+            C_w0 = Function(Q, name="C_w0").interpolate(
+                weertman_anchor(H, s, u_obs, m_slide_val, Q)
             )
+            if friction == "budd":
+                N_ref = Function(Q, name="N_ref").interpolate(
+                    max_value(effective_pressure(H, s), Constant(0.0))
+                )
+        if friction == "budd":
             PETSc.Sys.Print(
                 f"  Friction: Budd N_hat (exact-zero shelf; delta="
                 f"{budd_nhat_floor:.3f}, N_hat_cap={budd_nhat_cap:.1f}, "
@@ -310,28 +383,13 @@ def setup_model(restart_from=None):
 
     z = Function(Z)
     z.sub(0).interpolate(Constant(0.1) * u_obs)
+    if u_guess is not None:
+        # Warm start: seed the diagnostic solve with the checkpoint velocity
+        # (H/s/phi_eff/anchors were already restored in the reference block).
+        z.sub(0).dat.data[:] = u_guess.dat.data_ro
 
     h = H.copy(deepcopy=True)
     h.rename("thickness")
-
-    if restart_from is not None:
-        PETSc.Sys.Print(f"Restarting from: {restart_from}")
-        with fd.CheckpointFile(restart_from, "r") as chk:
-            rst_mesh = chk.load_mesh()
-            h_rst = chk.load_function(rst_mesh, name="thickness")
-            u_rst = chk.load_function(rst_mesh, name="velocity")
-        h.dat.data[:] = h_rst.dat.data_ro
-        h.interpolate(max_value(h, Constant(h_clamp)))  # don't restart below the floor
-        z.sub(0).dat.data[:] = u_rst.dat.data_ro
-        s.interpolate(max_value(b + h, (Constant(1.0) - rho_ratio) * h))
-        phi_eff.interpolate(
-            max_value(
-                Constant(1.0)
-                - rho_W * g * max_value(Constant(0.0), -b)
-                / (rho_I * g * max_value(h, Constant(1.0))),
-                Constant(0.01),
-            )
-        )
 
     u_s, M_s, tau_s = split(z)
     fields = {
@@ -434,6 +492,13 @@ def setup_model(restart_from=None):
     accum = Function(Q, name="accumulation").assign(0.0)
     ocean_melt = Function(Q, name="ocean_melt").assign(0.0)
 
+    # t=0 fixed-front anchor: on a cold start it is the initial (BedMachine/
+    # inversion) thickness; on a restart it was loaded from the checkpoint, so
+    # it stays the ORIGINAL observed extent rather than the evolved geometry.
+    if H_init is None:
+        H_init = Function(Q, name="H_init")
+        H_init.assign(H)
+
     return {
         "mesh": mesh,
         "Q": Q,
@@ -456,10 +521,16 @@ def setup_model(restart_from=None):
         "calving_ids": calving_ids,
         "u_obs": u_obs,
         "friction": friction,
-        # t=0 (BedMachine/inversion) thickness — NOT overwritten by
-        # restart_from, so the fixed calving front stays anchored to the
-        # observed extent across restarts.
-        "H_init": H,
+        # Reference/frozen fields persisted into every checkpoint so a restart
+        # is self-contained and rank-count-robust (no recompute from evolved h).
+        "theta": theta_f,
+        "phi": phi_f,
+        "C_w0": C_w0,
+        "N_ref": N_ref,
+        "H_init": H_init,
+        # Resume time (None on a cold start); run_simulation continues the
+        # timeline from here instead of the caller's t_start.
+        "t_restart": t_restart,
     }
 
 
@@ -490,6 +561,24 @@ def run_simulation(
     phi_eff = ctx["phi_eff"]
     rho_ratio = ctx["rho_ratio"]
     h_clamp = ctx["h_clamp"]
+    # Reference/frozen fields persisted into each checkpoint (self-contained
+    # restart). theta/phi always present; C_w0/N_ref only for residual laws.
+    theta = ctx.get("theta")
+    phi = ctx.get("phi")
+    C_w0 = ctx.get("C_w0")
+    N_ref = ctx.get("N_ref")
+    H_init_fn = ctx.get("H_init", h)
+    friction = ctx.get("friction", "budd")
+
+    # Warm restart: continue the timeline from the checkpoint's saved year so
+    # time-varying forcing (SSP projections) is applied at the correct year.
+    t_restart = ctx.get("t_restart")
+    if t_restart is not None:
+        PETSc.Sys.Print(
+            f"  Resuming timeline at t={t_restart:.2f} "
+            f"(caller t_start={t_start} overridden)"
+        )
+        t_start = t_restart
 
     # round, don't truncate: int((2300-2015)/0.1) = 2849 loses the last step
     nsteps = int(round((t_end - t_start) / dt))
@@ -497,6 +586,14 @@ def run_simulation(
     PETSc.Sys.Print(
         f"\nTime-stepping: {t_start}->{t_end}, dt={dt}yr, {nsteps} steps"
     )
+
+    # Checkpoint cadence in YEARS (default 5) so a reboot loses bounded wall
+    # time regardless of dt; keep only the last few (plus _final.h5) to bound
+    # disk. The step-count `checkpoint_interval` arg is the fallback.
+    ckpt_every_yr = float(os.environ.get("ISMIP7_CHECKPOINT_EVERY_YR", "5.0"))
+    ckpt_steps = (max(1, int(round(ckpt_every_yr / dt)))
+                  if ckpt_every_yr > 0 else checkpoint_interval)
+    keep_ckpts = int(os.environ.get("ISMIP7_KEEP_CHECKPOINTS", "3"))
 
     Q_dg = FunctionSpace(mesh, "DG", 0)
     h_dg = Function(Q_dg, name="h_dg")
@@ -550,7 +647,91 @@ def run_simulation(
     m_lump = assemble(fd.TestFunction(Q) * dx)
     proj_rhs = fd.Cofunction(Q.dual())
 
+    def _save_state(final_path, t_now):
+        r"""Atomic, self-contained state checkpoint: mesh + frozen reference
+        fields (theta/phi/bed/C_w0/N_ref/H_init/phi_eff) + evolving (h, s, u)
+        + the timeline year. Written to a temp file and renamed, so a reboot
+        mid-write cannot corrupt the target a restart would resume from."""
+        tmp = final_path + ".tmp"
+        with fd.CheckpointFile(tmp, "w") as chk:
+            chk.save_mesh(mesh)
+            chk.save_function(theta, name="log_friction")
+            chk.save_function(phi, name="log_fluidity")
+            chk.save_function(b, name="bed")
+            chk.save_function(h, name="thickness")
+            chk.save_function(s, name="surface")
+            chk.save_function(z.subfunctions[0], name="velocity")
+            chk.save_function(H_init_fn, name="H_init")
+            chk.save_function(phi_eff, name="phi_eff")
+            if C_w0 is not None:
+                chk.save_function(C_w0, name="C_w0")
+            if N_ref is not None:
+                chk.save_function(N_ref, name="N_ref")
+            chk.set_attr("/", "t_yr", float(t_now))
+            chk.set_attr("/", "friction", str(friction))
+            chk.set_attr("/", "lc", int(lc))
+        mesh.comm.barrier()
+        if mesh.comm.rank == 0:
+            os.replace(tmp, final_path)
+        mesh.comm.barrier()
+
+    def _prune_checkpoints():
+        r"""Keep only the newest `keep_ckpts` periodic state checkpoints."""
+        if mesh.comm.rank != 0 or keep_ckpts <= 0:
+            return
+        import re
+        pat = re.compile(re.escape(f"{experiment_name}_{lc}_t")
+                         + r"(-?\d+\.\d+)\.h5$")
+        found = []
+        for fn in glob.glob(
+            os.path.join(RESULTS_DIR, f"{experiment_name}_{lc}_t*.h5")
+        ):
+            m = pat.search(os.path.basename(fn))
+            if m:
+                found.append((float(m.group(1)), fn))
+        for _, fn in sorted(found)[:-keep_ckpts]:
+            try:
+                os.remove(fn)
+            except OSError:
+                pass
+
     results = []
+
+    # Crash-safe timeseries: append each row and flush, so a reboot keeps the
+    # budget-audit history (it used to be dumped only at completion). On a
+    # warm restart, drop any rows at/after the resume year, then append.
+    csv_fn = os.path.join(RESULTS_DIR, f"{experiment_name}_{lc}_timeseries.csv")
+    csv_header = ("year,vaf_mm_sle,mass_gt,smb_gtyr,melt_gtyr,"
+                  "outflux_gtyr,calv_gt,clamp_gt,resid_gt\n")
+    csv_f = None
+    if mesh.comm.rank == 0:
+        if t_restart is not None and os.path.exists(csv_fn):
+            with open(csv_fn) as _cf:
+                _lines = _cf.readlines()
+            kept = ([_lines[0]] if _lines and _lines[0].startswith("year")
+                    else [csv_header])
+            for _ln in _lines[1:]:
+                try:
+                    if float(_ln.split(",", 1)[0]) <= t_start + 0.5 * dt:
+                        kept.append(_ln)
+                except (ValueError, IndexError):
+                    pass
+            with open(csv_fn, "w") as _cf:
+                _cf.writelines(kept)
+            csv_f = open(csv_fn, "a")
+        else:
+            csv_f = open(csv_fn, "w")
+            csv_f.write(csv_header)
+            csv_f.flush()
+
+    def _write_csv_row(row):
+        if csv_f is None:
+            return
+        csv_f.write(
+            f"{row[0]:.1f},{row[1]:.6f},{row[2]:.2f},"
+            + ",".join(f"{v:.4f}" for v in row[3:]) + "\n"
+        )
+        csv_f.flush()
 
     for k in range(1, nsteps + 1):
         t_step_start = perf_counter()
@@ -657,6 +838,7 @@ def run_simulation(
 
         results.append((t_yr, vaf, total_mass, smb_rate, melt_rate,
                         out_rate, calv_gt, clamp_gt + clamp_cg_gt, resid_gt))
+        _write_csv_row(results[-1])
 
         if k % output_interval == 0 or k == 1:
             PETSc.Sys.Print(
@@ -668,36 +850,26 @@ def run_simulation(
                 f"dM/dt={dm/dt:+.0f} resid={resid_gt/dt:+.2f}"
             )
 
-        if k % checkpoint_interval == 0:
+        if k % ckpt_steps == 0:
             chk_fn = os.path.join(
-                RESULTS_DIR, f"{experiment_name}_{lc}_t{t_yr:.0f}.h5"
+                RESULTS_DIR, f"{experiment_name}_{lc}_t{t_yr:.1f}.h5"
             )
-            with fd.CheckpointFile(chk_fn, "w") as chk:
-                chk.save_mesh(mesh)
-                chk.save_function(h, name="thickness")
-                chk.save_function(z.subfunctions[0], name="velocity")
-            PETSc.Sys.Print(f"    [checkpoint: {chk_fn}]")
+            _save_state(chk_fn, t_yr)
+            _prune_checkpoints()
+            PETSc.Sys.Print(f"    [checkpoint: {os.path.basename(chk_fn)}]")
 
     PETSc.Sys.Print(f"\n{experiment_name} simulation complete.")
 
-    chk_fn = os.path.join(RESULTS_DIR, f"{experiment_name}_{lc}_final.h5")
-    with fd.CheckpointFile(chk_fn, "w") as chk:
-        chk.save_mesh(mesh)
-        chk.save_function(h, name="thickness")
-        chk.save_function(s, name="surface")
-        chk.save_function(z.subfunctions[0], name="velocity")
-    PETSc.Sys.Print(f"Saved: {chk_fn}")
+    # Final state is a self-contained checkpoint too (a valid restart source).
+    # Save the ACTUAL last year so a resume after an early stop continues from
+    # where it really stopped, not the nominal t_end.
+    final_fn = os.path.join(RESULTS_DIR, f"{experiment_name}_{lc}_final.h5")
+    last_t = results[-1][0] if results else t_start
+    _save_state(final_fn, last_t)
+    PETSc.Sys.Print(f"Saved: {final_fn}")
 
-    csv_fn = os.path.join(RESULTS_DIR, f"{experiment_name}_{lc}_timeseries.csv")
-    if mesh.comm.rank == 0:
-        with open(csv_fn, "w") as f:
-            f.write("year,vaf_mm_sle,mass_gt,smb_gtyr,melt_gtyr,"
-                    "outflux_gtyr,calv_gt,clamp_gt,resid_gt\n")
-            for row in results:
-                f.write(
-                    f"{row[0]:.1f},{row[1]:.6f},{row[2]:.2f},"
-                    + ",".join(f"{v:.4f}" for v in row[3:]) + "\n"
-                )
+    if csv_f is not None:
+        csv_f.close()
     PETSc.Sys.Print(f"Saved: {csv_fn}")
 
     return results

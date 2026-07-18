@@ -195,6 +195,8 @@ def setup_model(restart_from=None):
     H_init = None
     phi_eff = None
     u_guess = None
+    M_guess = None
+    tau_guess = None
     t_restart = None
     with fd.CheckpointFile(source_chk, "r") as chk:
         _th = chk.load_function(mesh, name="log_friction")
@@ -215,6 +217,15 @@ def setup_model(restart_from=None):
             H_init = Function(Q, name="H_init");   H_init.dat.data[:] = _Hi.dat.data_ro
             phi_eff = Function(Q, name="phi_eff"); phi_eff.dat.data[:] = _pe.dat.data_ro
             u_guess = Function(V);                 u_guess.dat.data[:] = _u.dat.data_ro
+            # Stress components (newer checkpoints): restoring them makes the
+            # resume Newton start from the full converged state instead of
+            # (u, 0, 0), which needed a fresh continuation ramp.
+            try:
+                _M = chk.load_function(mesh, name="membrane_stress")
+                _ta = chk.load_function(mesh, name="basal_stress")
+                M_guess, tau_guess = _M, _ta
+            except Exception:
+                M_guess = tau_guess = None
             if use_residual:
                 _cw = chk.load_function(mesh, name="C_w0")
                 C_w0 = Function(Q, name="C_w0");   C_w0.dat.data[:] = _cw.dat.data_ro
@@ -387,6 +398,9 @@ def setup_model(restart_from=None):
         # Warm start: seed the diagnostic solve with the checkpoint velocity
         # (H/s/phi_eff/anchors were already restored in the reference block).
         z.sub(0).dat.data[:] = u_guess.dat.data_ro
+        if M_guess is not None:
+            z.sub(1).dat.data[:] = M_guess.dat.data_ro
+            z.sub(2).dat.data[:] = tau_guess.dat.data_ro
 
     h = H.copy(deepcopy=True)
     h.rename("thickness")
@@ -467,6 +481,21 @@ def setup_model(restart_from=None):
                 m_slide.assign(1.0 + t * (m_slide_val - 1.0))
                 slvr.solve()
             PETSc.Sys.Print(f"  Done ({steps} continuation steps)")
+            # Self-scaled absolute tolerance: a solve that STARTS at the
+            # converged state (restart step 1: geometry unchanged since this
+            # continuation) has ||F|| at the rounding floor already, and the
+            # nleqerr linesearch then fails on a residual it cannot reduce.
+            # Accepting anything within 100x of the achieved converged norm
+            # makes such solves report converged at iteration 0. Geometry
+            # changes during stepping push ||F_0|| far above this, so the
+            # usual rtol path is untouched.
+            fnorm_conv = slvr.snes.getFunctionNorm()
+            if fnorm_conv > 0.0:
+                slvr.snes.setTolerances(atol=100.0 * fnorm_conv)
+                PETSc.Sys.Print(
+                    f"  snes_atol set to {100.0 * fnorm_conv:.2e} "
+                    f"(100x converged residual norm)"
+                )
             break
         except fd.ConvergenceError:
             if attempt == 2:
@@ -661,6 +690,11 @@ def run_simulation(
             chk.save_function(h, name="thickness")
             chk.save_function(s, name="surface")
             chk.save_function(z.subfunctions[0], name="velocity")
+            # Full solver state: with only u restored, a restarted step-1
+            # Newton starts from (u, 0, 0) and fails back into continuation;
+            # restoring M and tau makes the resume solve converge directly.
+            chk.save_function(z.subfunctions[1], name="membrane_stress")
+            chk.save_function(z.subfunctions[2], name="basal_stress")
             chk.save_function(H_init_fn, name="H_init")
             chk.save_function(phi_eff, name="phi_eff")
             if C_w0 is not None:

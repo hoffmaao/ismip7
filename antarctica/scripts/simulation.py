@@ -711,6 +711,8 @@ def run_simulation(
         PETSc.Sys.Print("  LEGACY transport: non-conservative volume term + L2 projection")
     m_lump = assemble(fd.TestFunction(Q) * dx)
     proj_rhs = fd.Cofunction(Q.dual())
+    src_dg = Function(Q_dg, name="mass_source")
+    src_cof = fd.Cofunction(Q_dg.dual())
 
     # h_dg is the PERSISTENT prognostic state (DG0). The old scheme
     # re-projected CG1 h -> DG0 every step; that roundtrip (L2 project +
@@ -954,13 +956,30 @@ def run_simulation(
         src = accum - ocean_melt
         if a_ref is not None:
             src = src + a_ref
+        # Cell-averaged DG0 source (exact for the DG0 test space) with a
+        # positivity limit (gia a_step clamp): the net sink may not draw a
+        # cell below h_clamp within one step. With the limited source the
+        # implicit upwind update is an M-matrix system with nonnegative RHS,
+        # so h stays >= h_clamp and the post-solve floor becomes a no-op.
+        # The withheld sink (limit_gt) is tallied into the clamp budget
+        # column, keeping resid closed. (At fine meshes a cell whose t=0
+        # divergence exceeds h/dt would see a slight balanced-mode
+        # fixed-point deviation here - tallied, not hidden.)
+        assemble(src * phi_dg * dx, tensor=src_cof)
+        src_dg.dat.data[:] = src_cof.dat.data_ro / cell_area
+        _src_want = src_dg.dat.data_ro.copy()
+        np.maximum(src_dg.dat.data, -(h_dg.dat.data_ro - h_clamp) / dt,
+                   out=src_dg.dat.data)
+        limit_gt = mesh.comm.allreduce(float(
+            ((src_dg.dat.data_ro - _src_want) * cell_area).sum()
+        )) * rho_gt * dt
         F_prog = (
             (h_dg_trial - h_dg_old) / dt_c * phi_dg * dx
             + (un_plus("+") * h_dg_trial("+") - un_plus("-") * h_dg_trial("-"))
             * fd.jump(phi_dg)
             * dS
             + un_plus * h_dg_trial * phi_dg * ds
-            - src * phi_dg * dx
+            - src_dg * phi_dg * dx
         )
         if legacy_transport:
             F_prog += -h_dg_trial * fd.div(u_vel * phi_dg) * dx
@@ -1026,12 +1045,13 @@ def run_simulation(
         dm = total_mass - mass_prev
         resid_gt = dm - (
             (smb_rate - melt_rate + amb_rate - out_rate) * dt
-            + clamp_gt + clamp_cg_gt - calv_gt
+            + clamp_gt + clamp_cg_gt + limit_gt - calv_gt
         )
         mass_prev = total_mass
 
         results.append((t_yr, vaf, total_mass, smb_rate, melt_rate,
-                        out_rate, calv_gt, clamp_gt + clamp_cg_gt, resid_gt,
+                        out_rate, calv_gt,
+                        clamp_gt + clamp_cg_gt + limit_gt, resid_gt,
                         amb_rate))
         _write_csv_row(results[-1])
 
@@ -1043,7 +1063,7 @@ def run_simulation(
                 f"      budget [Gt/yr]: SMB={smb_rate:+.0f} melt={-melt_rate:+.0f} "
                 f"{_amb_txt}"
                 f"outflux={-out_rate:+.0f} calv={-calv_gt/dt:+.0f} "
-                f"clamp={(clamp_gt+clamp_cg_gt)/dt:+.1f} "
+                f"clamp={(clamp_gt+clamp_cg_gt+limit_gt)/dt:+.1f} "
                 f"dM/dt={dm/dt:+.0f} resid={resid_gt/dt:+.2f}"
             )
 

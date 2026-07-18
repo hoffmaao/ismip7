@@ -32,15 +32,20 @@ MAXITER="${MAXITER:-500}"
 # Set to 1 for BUFFERED meshes (h=0 at front -> no calving-terminus BC); leave
 # empty for non-buffered meshes (keeps the calving back-pressure term).
 NO_CALVING="${ISMIP7_NO_CALVING_TERMINUS:-}"
+# Friction law for the inversion (budd -> inversion_icepack2_budd_<lc>.h5,
+# regularized_coulomb -> _rc). Historically hardcoded to RC; the Budd
+# production path (Jul 2026) needs per-resolution _budd MAPs.
+FRICTION="${ISMIP7_FRICTION:-regularized_coulomb}"
 
 # Logs under the repo so they survive reboots (the Jun 20 rc_500
 # inversion log died with /tmp).
 LOGDIR="$REPO/antarctica/results/logs"
 mkdir -p "$LOGDIR"
 STAMP="$(date +%Y%m%d_%H%M%S)"
-LOG="${LOG:-$LOGDIR/rc_inv_${LC}_${STAMP}.log}"
-GATELOG="${GATELOG:-$LOGDIR/rc_inv_${LC}_gate.log}"
-LOCK="${LOCK:-$LOGDIR/rc_inv_${LC}.lock}"
+FTAG="$([ "$FRICTION" = "budd" ] && echo budd_inv || echo rc_inv)"
+LOG="${LOG:-$LOGDIR/${FTAG}_${LC}_${STAMP}.log}"
+GATELOG="${GATELOG:-$LOGDIR/${FTAG}_${LC}_gate.log}"
+LOCK="${LOCK:-$LOGDIR/${FTAG}_${LC}.lock}"
 
 log(){ echo "[$(date '+%F %T')] $*" | tee -a "$GATELOG"; }
 
@@ -77,7 +82,7 @@ while :; do
       log "LAUNCHING RC inversion -> $LOG"
       cd "$REPO" || { log "ERROR: cd $REPO failed"; exit 1; }
       export OMP_NUM_THREADS=1 ISMIP7_LC="$LC" ISMIP7_MESH="$MESH" \
-             ISMIP7_FRICTION=regularized_coulomb ISMIP7_MAXITER="$MAXITER"
+             ISMIP7_FRICTION="$FRICTION" ISMIP7_MAXITER="$MAXITER"
       [ -n "$NO_CALVING" ] && export ISMIP7_NO_CALVING_TERMINUS="$NO_CALVING"
       nohup mpiexec -n "$NRANKS" "$PY" antarctica/scripts/inversion_icepack2.py > "$LOG" 2>&1 &
       pid=$!

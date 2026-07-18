@@ -398,9 +398,17 @@ def setup_model(restart_from=None):
                 f"eps_tauc={rc_eps_tauc:.1e} MPa, alpha={float(alpha_reg):.1e})"
             )
 
+    # ISMIP7_SNES_TYPE=newtontr switches the diagnostic Newton to trust
+    # region (gia COUPLED_SOLVER's choice: more robust than line search at
+    # stiff melt-driven GL-retreat geometries, where nleqerr hit walls
+    # ~9 yr into the 32 km ssp585 run). Line search stays the default.
     sparams = {
-        "snes_type": "newtonls",
-        "snes_max_it": 200,
+        "snes_type": os.environ.get("ISMIP7_SNES_TYPE", "newtonls"),
+        # gia: hard-era Budd steps converge LINEARLY (~2%/iter under active
+        # trust region) and were being executed by the cap while still
+        # descending - patience beats retries. 200 suffices for newtonls
+        # eras; raise via env for newtontr pushes through hard geometry.
+        "snes_max_it": int(os.environ.get("ISMIP7_SNES_MAXIT", "200")),
         "snes_linesearch_type": "nleqerr",
         "snes_divergence_tolerance": -1,
         "snes_stol": 0.0,

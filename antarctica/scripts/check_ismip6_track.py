@@ -64,11 +64,19 @@ def load(csv_fn):
 
 
 def main():
-    args = [a for a in sys.argv[1:] if not a.startswith("--")]
+    args = []
     dt_arg = None
+    skip_next = False
     for i, a in enumerate(sys.argv[1:]):
+        if skip_next:
+            skip_next = False
+            continue
         if a == "--dt":
             dt_arg = float(sys.argv[i + 2])
+            skip_next = True
+            continue
+        if not a.startswith("--"):
+            args.append(a)
     if args:
         csv_fn = args[0]
     else:
@@ -79,6 +87,13 @@ def main():
         csv_fn = cands[-1]
 
     c = load(csv_fn)
+    required = ("year", "mass_gt", "vaf_mm_sle", "smb_gtyr", "melt_gtyr",
+                "outflux_gtyr", "calv_gt", "resid_gt")
+    missing = [k for k in required if k not in c]
+    if missing:
+        print(f"{csv_fn}: missing budget column(s): {', '.join(missing)} "
+              f"(legacy timeseries format?)")
+        sys.exit(2)
     yr = c["year"]
     dt = dt_arg if dt_arg else (float(np.median(np.diff(yr))) if len(yr) > 1 else 1.0)
     n_yr1 = max(1, int(round(1.0 / dt)))          # steps in the init-transient year

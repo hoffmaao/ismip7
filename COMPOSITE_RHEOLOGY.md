@@ -135,17 +135,20 @@ dependence — `ψ_fric` doesn't carry an `h` factor in either form).
 | `ISMIP7_N_FLOW`          | `4.0`              | both                                    |
 | `ISMIP7_M_SLIDE`         | `3.0`              | both                                    |
 | `ISMIP7_A4_FACTOR`       | `10.0`             | both                                    |
-| `ISMIP7_COMPOSITE_ALPHA` | `1e-4` (forward)   | `simulation.py` / `control/run.py`      |
+| `ISMIP7_COMPOSITE_ALPHA` | `1e-2` (forward, `budd`/`regularized_coulomb`; `1e-4` legacy) | `simulation.py` / `control/run.py` |
 | `ISMIP7_COMPOSITE_ALPHA` | `1e-2` (inversion) | `inversion_icepack2.py`                 |
 | `ISMIP7_H_REF`           | `100.0` m          | both                                    |
-| `ISMIP7_H_CLAMP_INIT`    | `10.0` m           | `simulation.py` initial diagnostic only |
+| `ISMIP7_H_CLAMP_INIT`    | `0.0` m (`budd`/`regularized_coulomb`; `10.0` legacy) | `simulation.py` initial diagnostic only |
 | `ISMIP7_H_CLAMP`         | `0.0` m            | both, advection floor + inversion       |
 
-The inversion uses a 100× stronger `α` than forward runs because every
-L-BFGS-B step does a full diagnostic solve and the SNES robustness is
-worth a small bias in the recovered `θ` and `φ`. Forward runs only need
-the regularization to remain stable as `h` evolves toward zero, so a
-much smaller `α` suffices.
+With the residual friction laws (`ISMIP7_FRICTION=budd`, the default, or
+`regularized_coulomb`) the forward runs share the inversion's `α = 1e-2`
+and start from the true h=0 BedMachine geometry (`h_clamp_init = 0`),
+because the MAP was inverted against that geometry. The legacy action-form
+path keeps the original split: a 100× stronger `α` in the inversion (every
+L-BFGS-B step does a full diagnostic solve, so SNES robustness is worth a
+small bias in the recovered `θ` and `φ`) and a 10 m initial clamp in the
+forward run.
 
 ## Sanity checks
 
@@ -161,7 +164,7 @@ much smaller `α` suffices.
   this is *not* a clean drift test. See
   `antarctica/results/ctrl2015_cesm2_waccm_2500_timeseries.csv` (2026-05-15).
 
-- **Inversion with composite + `h_clamp = 0`:** the goal — produce `θ`
-  and `φ` consistent with the true BedMachine geometry (h=0 over the
-  buffered ocean region) so subsequent forward runs don't need any
-  initial-thickness clamp.
+- **Inversion with composite + `h_clamp = 0`:** done - the `_budd` / `_rc`
+  MAP checkpoints are inverted against the true BedMachine geometry (h=0
+  over the buffered ocean region), and the forward runs that load them
+  start with `h_clamp_init = 0` (no initial-thickness clamp).

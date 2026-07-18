@@ -136,6 +136,10 @@ def build_rc_residual(
     eps_tauc=0.0,
     c_w0_floor=0.0,
     h_visc_floor=0.0,
+    ocean_drag=0.0,
+    h_ocean=10.0,
+    u_lim=0.0,
+    k_lim=1e-3,
     gl_width=GL_WIDTH,
     calving_ids=None,
 ):
@@ -202,6 +206,22 @@ def build_rc_residual(
         the driving term instead fabricates ``rho g H_floor grad s`` and blows
         the buffer velocity up).  Real ice (``H >> floor``) is unaffected.  0
         disables it (correct when ``H`` is clamped > 0 upstream).
+    ocean_drag : float
+        Linear drag [MPa yr/m] applied ONLY where ``H < h_ocean`` (ice-free
+        buffer / freshly-calved floor cells), ramping linearly to EXACTLY zero
+        at ``H = h_ocean``.  Frictionless floor cells (``C_w0 ~ 0``, ``N ~ 0``)
+        have no velocity coercivity, and the thick front against them pumps
+        momentum through the ``dS`` jump term into the degenerate side - the
+        per-solve velocity-runaway equilibrium behind the Jul 2026 forward
+        blow-up (RC and Budd alike; dt-independent, collar-immune).  Ports
+        gia-icepack ``ase_model.momentum_F`` ocean_drag, which cured the same
+        runaway on ASE.  Real ice (incl. 10 m shelves) is untouched; 0 off.
+    u_lim, k_lim : float
+        Soft speed limiter (gia ``momentum_F`` u_lim/k_lim): supplemental drag
+        ``k_lim * max(0, |u| - u_lim)`` [MPa], EXACTLY zero below ``u_lim``
+        [m/yr].  ``u_lim ~ 2e4`` is ~5x the fastest observed Antarctic flow, so
+        physical flow never feels it; it bounds the retreat-cliff momentum
+        pumping wherever the floor-cell pathology sits.  ``u_lim = 0`` off.
     calving_ids : tuple or None
         Outflow boundary ids for the calving-front back-pressure (None to skip).
 
@@ -282,6 +302,15 @@ def build_rc_residual(
     else:  # regularized_coulomb
         tau_cap = max_value(Constant(c0) * N, Constant(eps_tauc))   # Coulomb cap = c0 N -> 0 afloat
         tau_b = tau_W * tau_cap / max_value(tau_W + tau_cap, Constant(1e-15))  # Weertman low-u, cap high-u; ->0 afloat (NaN-safe)
+
+    # Floor-cell coercivity drags (see docstring): both are EXACTLY zero on
+    # real ice / physical speeds, so genuine shelves keep tau_b = 0.
+    if ocean_drag > 0.0:
+        tau_b = tau_b + (Constant(ocean_drag)
+                         * max_value(Constant(0.0), Constant(1.0) - H / Constant(h_ocean))
+                         * u_reg)
+    if u_lim > 0.0:
+        tau_b = tau_b + Constant(k_lim) * max_value(Constant(0.0), u_reg - Constant(u_lim))
 
     F += inner(tau + tau_b * u / u_reg, sig) * dx                   # tau = -tau_b u/|u| (identity tau-block)
 

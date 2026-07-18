@@ -148,6 +148,11 @@ def main():
                         help="route SNES monitor output to this file (default: stdout)")
     parser.add_argument("--restart", default=os.environ.get("ISMIP7_RESTART"),
                         help="restart from a checkpoint .h5 (default: cold start)")
+    parser.add_argument("--tag", default=os.environ.get("ISMIP7_RUN_TAG", ""),
+                        help="suffix on experiment_name so output files are distinct")
+    parser.add_argument("--checkpoint-interval", type=int,
+                        default=int(os.environ.get("ISMIP7_CHECKPOINT_INTERVAL", "100")),
+                        help="save a thickness+velocity checkpoint every N steps")
     args, _ = parser.parse_known_args()
     if args.snes_monitor or args.snes_log:
         os.environ["ISMIP7_SNES_MONITOR"] = "1"
@@ -155,7 +160,9 @@ def main():
         os.environ["ISMIP7_SNES_LOG"] = args.snes_log
 
     esm_tag = ESM.lower().replace("-", "_")
-    experiment_name = f"ctrl2015_{esm_tag}"
+    # --tag lands in experiment_name BEFORE the auto-resume lookup so a tagged
+    # run resumes its own checkpoints, not the untagged experiment's.
+    experiment_name = f"ctrl2015_{esm_tag}" + (f"_{args.tag}" if args.tag else "")
 
     # Unattended auto-resume (ISMIP7_AUTO_RESUME=1): with no explicit restart,
     # continue from the newest self-contained checkpoint for this experiment.
@@ -247,6 +254,7 @@ def main():
         t_end=T_END,
         dt=DT,
         output_interval=OUTPUT_INTERVAL,
+        checkpoint_interval=args.checkpoint_interval,
         forcing_callback=callback,
     )
 

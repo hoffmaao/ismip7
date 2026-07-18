@@ -21,7 +21,14 @@ GHUB_COLLECTION_ID = os.environ.get(
     "ISMIP7_GLOBUS_COLLECTION", "ccc9bbd2-4091-4e35-addd-eeb639cf5332"
 )
 
-# The GHub collection is being ACTIVELY reorganized. State as of 2026-07-08
+# The GHub collection is being ACTIVELY reorganized. State as of 2026-07-08,
+# CONFIRMED UNCHANGED on a 2026-07-18 re-walk (full recursive listing, 32
+# files total; headless CLI-token auth still works; --status: all 8 sets
+# below fully mirrored). Still absent upstream: every scenario dir
+# (ssp126/370/585 for BOTH ESMs), MRI-ESM2-0 entirely, CMIPraw, per-year
+# atmosphere/ocean anything. Cores 1-6/8 remain unsourceable until the
+# forcing group republishes - ask them (and where the ssp585 SDBN1-8000m
+# atm + ocean we hold locally originally came from).
 # (re-walked the whole tree — see scripts/preflight.py for the needs side):
 #   /ISMIP6/ISMIP7_Prep/CMIP6_test_protocol/{AIS, GrIS, Tools, test}
 # and under AIS/ only:

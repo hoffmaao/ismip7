@@ -30,7 +30,7 @@ DATA_DIR = os.path.join(_ANT, "data")
 lc = int(os.environ.get("ISMIP7_LC", "2500"))
 lc_coarse = int(os.environ.get("ISMIP7_LC_COARSE", "64000"))
 friction = os.environ.get("ISMIP7_FRICTION", "budd")
-map_tag = "_rc" if friction == "regularized_coulomb" else ""
+map_tag = {"regularized_coulomb": "_rc", "budd": "_budd"}.get(friction, "")
 oi_version = os.environ.get("ISMIP7_OI_VERSION", "30_sep")
 root = _find_ismip7_data()
 

@@ -197,6 +197,8 @@ def setup_model(restart_from=None):
     u_guess = None
     M_guess = None
     tau_guess = None
+    a_ref_mb = None
+    h_dg_state = None
     t_restart = None
     with fd.CheckpointFile(source_chk, "r") as chk:
         _th = chk.load_function(mesh, name="log_friction")
@@ -226,6 +228,20 @@ def setup_model(restart_from=None):
                 M_guess, tau_guess = _M, _ta
             except Exception:
                 M_guess = tau_guess = None
+            # Frozen apparent-MB reference (present iff the run used
+            # ISMIP7_APPARENT_MB): restarts must reuse the ORIGINAL t=0
+            # correction, never recompute it from the evolved state.
+            try:
+                a_ref_mb = chk.load_function(mesh, name="a_ref_mb")
+            except Exception:
+                a_ref_mb = None
+            # DG0 prognostic thickness state (newer checkpoints): the CG h
+            # above is its lumped lift; restoring it avoids re-applying the
+            # CG->DG projection to an already-consistent state.
+            try:
+                h_dg_state = chk.load_function(mesh, name="thickness_dg")
+            except Exception:
+                h_dg_state = None
             if use_residual:
                 _cw = chk.load_function(mesh, name="C_w0")
                 C_w0 = Function(Q, name="C_w0");   C_w0.dat.data[:] = _cw.dat.data_ro
@@ -336,6 +352,21 @@ def setup_model(restart_from=None):
         #   RC-forward blow-up diagnosis + gia ase_model.momentum_F.
         budd_nhat_floor = float(os.environ.get("ISMIP7_BUDD_DELTA", "0.02"))
         budd_nhat_cap = float(os.environ.get("ISMIP7_BUDD_NHAT_CAP", "3.0"))
+        # Floor-cell coercivity drag (gia ase_model ocean_drag): frictionless
+        # ice-free buffer cells otherwise settle each diagnostic solve at a
+        # velocity-runaway equilibrium (the Jul 2026 blow-up: ~2x/step outflux
+        # growth, dt-independent, alpha_gl-immune). Linear drag ramping to
+        # zero at h_ocean; ON by default in the forward. The inversion
+        # operator (which never passes it) is unchanged, so existing MAPs
+        # stay consistent. The gia soft speed limiter (u_lim/k_lim) is OFF by
+        # default: its max() kink at u_lim breaks the nleqerr continuation
+        # (isolated Jul 18 2026); gia only tolerates it under newtontr with
+        # dt-retry. Enable via ISMIP7_U_LIM if a mid-run runaway ever needs a
+        # backstop.
+        ocean_drag = float(os.environ.get("ISMIP7_OCEAN_DRAG", "1e-2"))
+        h_ocean = float(os.environ.get("ISMIP7_H_OCEAN", "10.0"))
+        u_lim = float(os.environ.get("ISMIP7_U_LIM", "0.0"))
+        k_lim = float(os.environ.get("ISMIP7_K_LIM", "1e-3"))
         # GL-gated coercivity only for Budd (RC keeps its established form).
         alpha_gl = (float(os.environ.get("ISMIP7_ALPHA_GL", "0.5"))
                     if friction == "budd" else 0.0)
@@ -356,7 +387,9 @@ def setup_model(restart_from=None):
             PETSc.Sys.Print(
                 f"  Friction: Budd N_hat (exact-zero shelf; delta="
                 f"{budd_nhat_floor:.3f}, N_hat_cap={budd_nhat_cap:.1f}, "
-                f"alpha_gl={alpha_gl:.2f}, h_visc_floor={rc_hvisc_floor:.0f}m)"
+                f"alpha_gl={alpha_gl:.2f}, h_visc_floor={rc_hvisc_floor:.0f}m, "
+                f"ocean_drag={ocean_drag:.0e}@h<{h_ocean:.0f}m, "
+                f"u_lim={u_lim:.0e})"
             )
         else:
             PETSc.Sys.Print(
@@ -444,6 +477,7 @@ def setup_model(restart_from=None):
             alpha_gl=alpha_gl,
             c0=c0_rc, eps_tauc=rc_eps_tauc,
             c_w0_floor=rc_cw0_floor, h_visc_floor=rc_hvisc_floor,
+            ocean_drag=ocean_drag, h_ocean=h_ocean, u_lim=u_lim, k_lim=k_lim,
             calving_ids=calving_ids if use_calving_terminus else None,
         )
     else:
@@ -557,6 +591,10 @@ def setup_model(restart_from=None):
         "C_w0": C_w0,
         "N_ref": N_ref,
         "H_init": H_init,
+        # Frozen t=0 apparent-MB correction (restart only; else None).
+        "a_ref_mb": a_ref_mb,
+        # DG0 prognostic thickness state (restart only; else None).
+        "h_dg_state": h_dg_state,
         # Resume time (None on a cold start); run_simulation continues the
         # timeline from here instead of the caller's t_start.
         "t_restart": t_restart,
@@ -661,8 +699,6 @@ def run_simulation(
             f"masked (h < {front_hmin} m)"
         )
 
-    mass_prev = float(assemble(h * dx)) * rho_gt
-
     # ISMIP7_LEGACY_TRANSPORT=1 restores the pre-Jul-2026 scheme: the
     # -h*div(u*phi) volume term (non-conservative for DG0: it adds
     # spurious h*div(u) mass at thickness jumps) and the L2 DG0->CG1
@@ -675,6 +711,120 @@ def run_simulation(
         PETSc.Sys.Print("  LEGACY transport: non-conservative volume term + L2 projection")
     m_lump = assemble(fd.TestFunction(Q) * dx)
     proj_rhs = fd.Cofunction(Q.dual())
+
+    # h_dg is the PERSISTENT prognostic state (DG0). The old scheme
+    # re-projected CG1 h -> DG0 every step; that roundtrip (L2 project +
+    # lumped lift) is a per-step smoother, and its meter-scale perturbation
+    # at the steep PIG grounding-zone thickness gradient re-triggered the
+    # hypersensitive velocity response even from an exactly balanced (a_ref)
+    # state. Transport now evolves h_dg directly; the CG1 h is derived
+    # (lumped lift, for the diagnostic geometry / VAF), one-way. On a cold
+    # start the initial CG h is NOT the lift of its own DG projection, so we
+    # lift once here and re-solve the diagnostic on the lifted geometry -
+    # otherwise step 1 applies that perturbation mid-run. Restarts skip all
+    # of this: checkpoints carry h_dg (thickness_dg), and the stored CG h is
+    # its lift by construction.
+    if not legacy_transport:
+        if ctx.get("h_dg_state") is not None:
+            h_dg.dat.data[:] = ctx["h_dg_state"].dat.data_ro
+            PETSc.Sys.Print("  DG thickness state restored from checkpoint")
+        else:
+            h_dg.project(h)
+            _h_lift = proj_rhs  # reuse the cofunction as scratch
+            assemble(fd.TestFunction(Q) * h_dg * dx, tensor=_h_lift)
+            _new = _h_lift.dat.data_ro / m_lump.dat.data_ro
+            _dh = float(np.abs(_new - h.dat.data_ro).max()) if _new.size else 0.0
+            from mpi4py import MPI as _MPI4
+            _dh = mesh.comm.allreduce(_dh, op=_MPI4.MAX)
+            h.dat.data[:] = np.maximum(_new, 0.0)
+            s.interpolate(max_value(b + h, (Constant(1.0) - rho_ratio) * h))
+            phi_eff.interpolate(
+                max_value(
+                    Constant(1.0)
+                    - rho_W * g * max_value(Constant(0.0), -b)
+                    / (rho_I * g * max_value(h, Constant(1.0))),
+                    Constant(0.01),
+                )
+            )
+            PETSc.Sys.Print(
+                f"  DG-consistent thickness lift (one-time, max |dh|={_dh:.2f} m); "
+                f"re-solving diagnostic..."
+            )
+            try:
+                slvr.solve()
+            except fd.ConvergenceError:
+                PETSc.Sys.Print("    direct solve failed; re-ramping n...")
+                for _t in np.linspace(0.0, 1.0, 10):
+                    n_flow.assign(1.0 + _t * (n_flow_val - 1.0))
+                    m_slide.assign(1.0 + _t * (m_slide_val - 1.0))
+                    slvr.solve()
+
+    # Apparent-mass-balance reference (ISMIP7_APPARENT_MB=1): a frozen DG0
+    # correction equal to the DISCRETE FV flux divergence of the initial
+    # (h0, u0), added to the mass source. With it, the t=0 thickness tendency
+    # is EXACTLY the forcing (SMB - melt): the init-state flux-divergence
+    # spikes (inversion u not flux-consistent with BedMachine h; ~1000 m/yr
+    # locally at the PIG grounding zone at 32 km) otherwise dig a surface
+    # depression in one step whose driving-stress response runs away - the
+    # Jul 2026 forward blow-up, reproduced with NO forcing at all. Same cure
+    # as gia forward_monolithic's smoothed a_ref, but built with THIS
+    # scheme's own upwind operator so the cancellation is exact. Frozen in
+    # time (a fixed MB correction, initMIP-style), saved in checkpoints, and
+    # tallied as its own budget column. ISMIP7_AMB_CAP=<m/yr> optionally
+    # clips it to [-cap, 5*cap] (gia's asymmetric clip); default uncapped.
+    # Modes: "div" cancels only the flux divergence (t=0 tendency = SMB-melt,
+    # gia-style); any other value ("1"/"balance") also subtracts the initial
+    # forcing, so the t=0 tendency is EXACTLY ZERO - a balanced control in
+    # the ISMIP6 ctrl_proj sense, against which projections difference
+    # cleanly. Both freeze the correction at t=0.
+    amb_mode = os.environ.get("ISMIP7_APPARENT_MB")
+    apparent_mb = amb_mode is not None
+    a_ref = None
+    if apparent_mb:
+        a_ref = Function(Q_dg, name="a_ref_mb")
+        if ctx.get("a_ref_mb") is not None:
+            a_ref.dat.data[:] = ctx["a_ref_mb"].dat.data_ro
+            PETSc.Sys.Print("  Apparent MB: frozen a_ref loaded from checkpoint")
+        else:
+            # h_dg already holds the (lifted) state; u0 is the diagnostic
+            # velocity solved ON that state - the pair the loop will see.
+            u0 = z.subfunctions[0]
+            if legacy_transport:
+                h_dg.project(h)
+            un0 = fd.dot(u0, n_facet)
+            un0p = (un0 + abs(un0)) / 2
+            flux0 = assemble(
+                (un0p("+") * h_dg("+") - un0p("-") * h_dg("-"))
+                * fd.jump(phi_dg) * dS
+                + un0p * h_dg * phi_dg * ds
+            )
+            a_ref.dat.data[:] = flux0.dat.data_ro / cell_area
+            if amb_mode != "div":
+                # balanced control: evaluate the t=0 forcing and fold it in
+                if forcing_callback is not None:
+                    forcing_callback(ctx, t_start + dt)
+                b_smb = assemble((accum - ocean_melt) * phi_dg * dx)
+                a_ref.dat.data[:] -= b_smb.dat.data_ro / cell_area
+            if beyond_front is not None:
+                # the fixed-front tally stays the sink for flux into the
+                # initially ice-free cells; do not absorb it into a_ref
+                a_ref.dat.data[beyond_front] = 0.0
+            amb_cap = float(os.environ.get("ISMIP7_AMB_CAP", "0"))
+            if amb_cap > 0.0:
+                np.clip(a_ref.dat.data, -amb_cap, 5.0 * amb_cap,
+                        out=a_ref.dat.data)
+            from mpi4py import MPI as _MPI
+            _ad = a_ref.dat.data_ro
+            _lo = mesh.comm.allreduce(float(_ad.min() if _ad.size else 0), op=_MPI.MIN)
+            _hi = mesh.comm.allreduce(float(_ad.max() if _ad.size else 0), op=_MPI.MAX)
+            _net = float(assemble(a_ref * dx)) * rho_gt
+            PETSc.Sys.Print(
+                f"  Apparent MB: a_ref in [{_lo:+.1f}, {_hi:+.1f}] m/yr, "
+                f"net {_net:+.1f} Gt/yr"
+                + (f" (cap [-{amb_cap:.0f}, +{5*amb_cap:.0f}])" if amb_cap > 0 else "")
+            )
+
+    mass_prev = float(assemble(h * dx)) * rho_gt
 
     def _save_state(final_path, t_now):
         r"""Atomic, self-contained state checkpoint: mesh + frozen reference
@@ -701,6 +851,9 @@ def run_simulation(
                 chk.save_function(C_w0, name="C_w0")
             if N_ref is not None:
                 chk.save_function(N_ref, name="N_ref")
+            if a_ref is not None:
+                chk.save_function(a_ref, name="a_ref_mb")
+            chk.save_function(h_dg, name="thickness_dg")
             chk.set_attr("/", "t_yr", float(t_now))
             chk.set_attr("/", "friction", str(friction))
             chk.set_attr("/", "lc", int(lc))
@@ -736,7 +889,7 @@ def run_simulation(
     # warm restart, drop any rows at/after the resume year, then append.
     csv_fn = os.path.join(RESULTS_DIR, f"{experiment_name}_{lc}_timeseries.csv")
     csv_header = ("year,vaf_mm_sle,mass_gt,smb_gtyr,melt_gtyr,"
-                  "outflux_gtyr,calv_gt,clamp_gt,resid_gt\n")
+                  "outflux_gtyr,calv_gt,clamp_gt,resid_gt,amb_gtyr\n")
     csv_f = None
     if mesh.comm.rank == 0:
         if t_restart is not None and os.path.exists(csv_fn):
@@ -789,20 +942,25 @@ def run_simulation(
 
         u_vel = z.subfunctions[0]
 
-        # DG0 upwind implicit Euler for thickness
-        h_dg.project(h)
+        # DG0 upwind implicit Euler for thickness (h_dg = persistent state;
+        # the legacy scheme kept the CG->DG re-projection each step)
+        if legacy_transport:
+            h_dg.project(h)
         h_dg_old.assign(h_dg)
 
         un = fd.dot(u_vel, n_facet)
         un_plus = (un + abs(un)) / 2
 
+        src = accum - ocean_melt
+        if a_ref is not None:
+            src = src + a_ref
         F_prog = (
             (h_dg_trial - h_dg_old) / dt_c * phi_dg * dx
             + (un_plus("+") * h_dg_trial("+") - un_plus("-") * h_dg_trial("-"))
             * fd.jump(phi_dg)
             * dS
             + un_plus * h_dg_trial * phi_dg * ds
-            - (accum - ocean_melt) * phi_dg * dx
+            - src * phi_dg * dx
         )
         if legacy_transport:
             F_prog += -h_dg_trial * fd.div(u_vel * phi_dg) * dx
@@ -821,6 +979,8 @@ def run_simulation(
         # non-conservative floor/projection mass shows up explicitly.
         smb_rate = float(assemble(accum * dx)) * rho_gt          # Gt/yr
         melt_rate = float(assemble(ocean_melt * dx)) * rho_gt    # Gt/yr
+        amb_rate = (float(assemble(a_ref * dx)) * rho_gt
+                    if a_ref is not None else 0.0)               # Gt/yr
         out_rate = float(assemble(un_plus * h_dg * ds)) * rho_gt # Gt/yr
         m1 = float(assemble(h_dg * dx)) * rho_gt
 
@@ -865,20 +1025,23 @@ def run_simulation(
         clamp_cg_gt = total_mass - m3        # Gt added by the CG floor after projection
         dm = total_mass - mass_prev
         resid_gt = dm - (
-            (smb_rate - melt_rate - out_rate) * dt
+            (smb_rate - melt_rate + amb_rate - out_rate) * dt
             + clamp_gt + clamp_cg_gt - calv_gt
         )
         mass_prev = total_mass
 
         results.append((t_yr, vaf, total_mass, smb_rate, melt_rate,
-                        out_rate, calv_gt, clamp_gt + clamp_cg_gt, resid_gt))
+                        out_rate, calv_gt, clamp_gt + clamp_cg_gt, resid_gt,
+                        amb_rate))
         _write_csv_row(results[-1])
 
         if k % output_interval == 0 or k == 1:
+            _amb_txt = f"amb={amb_rate:+.0f} " if a_ref is not None else ""
             PETSc.Sys.Print(
                 f"  t={t_yr:.1f}  VAF={vaf:.4f} mm SLE  "
                 f"mass={total_mass:.1f} Gt  [{t_elapsed:.1f}s]\n"
                 f"      budget [Gt/yr]: SMB={smb_rate:+.0f} melt={-melt_rate:+.0f} "
+                f"{_amb_txt}"
                 f"outflux={-out_rate:+.0f} calv={-calv_gt/dt:+.0f} "
                 f"clamp={(clamp_gt+clamp_cg_gt)/dt:+.1f} "
                 f"dM/dt={dm/dt:+.0f} resid={resid_gt/dt:+.2f}"

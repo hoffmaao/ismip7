@@ -176,6 +176,10 @@ class ISMIP7Atmosphere:
     def _load_year(self, variable, year):
         import xarray as xr
 
+        key = (variable, int(year))
+        if key in self._cache:
+            return self._cache[key]
+
         vdir = self._var_dir(variable)
         if vdir is None or not os.path.isdir(vdir):
             return None
@@ -199,13 +203,27 @@ class ISMIP7Atmosphere:
                     self._grid_y = ds[yname].values
                     break
 
-        data_vars = [v for v in ds.data_vars if v not in ("x", "y", "time")]
-        if data_vars:
-            da = ds[data_vars[0]]
+        if variable in ds.data_vars:
+            da = ds[variable]
+        else:
+            # Skip grid-mapping/bounds variables (crs, *_bnds, mapping):
+            # this dataset family carries them and any of them ordered
+            # first would silently become the forcing field.
+            data_vars = [
+                v for v in ds.data_vars
+                if not v.endswith("_bnds")
+                and v.lower() not in ("x", "y", "time", "crs", "mapping",
+                                      "spatial_ref", "lat", "lon")
+            ]
+            da = ds[data_vars[0]] if data_vars else None
+        if da is not None:
             if "time" in da.dims:
                 da = da.isel(time=0)
             result = da.load()
             ds.close()
+            self._cache[key] = result
+            while len(self._cache) > 4:
+                self._cache.pop(next(iter(self._cache)))
             return result
         ds.close()
         return None

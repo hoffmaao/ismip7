@@ -111,6 +111,8 @@ def racmo_ok():
 
 
 def oi_ok():
+    if root is None:
+        return False
     return all(os.path.exists(_oi_climatology_path(root, v, oi_version))
                for v in ("tf", "so"))
 
@@ -142,11 +144,16 @@ def main():
                 miss.append(f"{esm} acabf (no RACMO and no ESM climatology)")
         else:
             yrs = atm_years(esm, scenario) or atm_years(esm, scenario, "acabf")
+            gaps = sorted(set(range(y0, y1 + 1)) - set(yrs))
             if not yrs:
                 miss.append(f"{esm}/{scenario} atmosphere")
-            elif yrs[0] > y0 or yrs[-1] < y1:
+            elif gaps:
+                # get_field silently returns zeros for a missing year, so
+                # interior gaps corrupt a run just like missing endpoints
                 miss.append(
-                    f"atmosphere covers {yrs[0]}-{yrs[-1]}, need {y0}-{y1}"
+                    f"atmosphere covers {yrs[0]}-{yrs[-1]} with "
+                    f"{len(gaps)} of {y0}-{y1} missing "
+                    f"({gaps[0]}..{gaps[-1]})"
                 )
             oc = ocean_cover(esm, scenario)
             if oc is None:

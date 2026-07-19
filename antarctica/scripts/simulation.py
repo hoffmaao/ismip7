@@ -250,6 +250,33 @@ def setup_model(restart_from=None):
                 N_ref = Function(Q, name="N_ref"); N_ref.dat.data[:] = _nr.dat.data_ro
             if chk.has_attr("/", "t_yr"):
                 t_restart = float(chk.get_attr("/", "t_yr"))
+            # Guard the resume environment against the checkpoint's recorded
+            # state: a silently mismatched friction law or dropped apparent-MB
+            # correction runs cleanly but produces wrong physics.
+            if chk.has_attr("/", "friction"):
+                chk_friction = str(chk.get_attr("/", "friction"))
+                if chk_friction != friction:
+                    raise RuntimeError(
+                        f"Restart checkpoint {source_chk} was written with "
+                        f"friction='{chk_friction}' but the environment "
+                        f"resolves friction='{friction}'; set "
+                        f"ISMIP7_FRICTION={chk_friction} to resume."
+                    )
+            amb_env = os.environ.get("ISMIP7_APPARENT_MB")
+            if a_ref_mb is not None and amb_env is None:
+                raise RuntimeError(
+                    f"Restart checkpoint {source_chk} carries a frozen "
+                    f"a_ref_mb (the run used ISMIP7_APPARENT_MB) but "
+                    f"ISMIP7_APPARENT_MB is unset; set it to resume with "
+                    f"the same mass-balance correction."
+                )
+            if a_ref_mb is None and amb_env is not None:
+                raise RuntimeError(
+                    f"ISMIP7_APPARENT_MB is set but restart checkpoint "
+                    f"{source_chk} has no a_ref_mb; a fresh a_ref cannot be "
+                    f"built from an evolved state. Unset ISMIP7_APPARENT_MB "
+                    f"or restart from a checkpoint that carries a_ref_mb."
+                )
             PETSc.Sys.Print(
                 f"  Restart: evolved geometry + frozen anchors loaded "
                 f"(t_yr={t_restart}, friction={friction})"

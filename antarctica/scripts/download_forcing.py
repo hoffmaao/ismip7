@@ -42,18 +42,8 @@ GHUB_COLLECTION_ID = os.environ.get(
 #     + bias-correction ingredients ONLY — NO per-year forcing, no scenario dirs)
 #   grid, obs (mipkit / OI-climatology / IMBIE / topography)
 # Everything listed in OCEAN_FILES/CALIBRATION_FILES below is present and
-# ALREADY MIRRORED locally, so this script is currently a no-op.
-#
-# NOT on the collection right now (was here days ago; removed mid-reorg):
-#   * ../CMIPraw/  — the entire raw-CMIP tree is GONE.
-#   * processed per-year atmosphere (SDBN1-8000m) and ocean (tf/so/thetao)
-#     for ssp585 or any scenario — the CESM2-WACCM/ssp585 tree we hold in
-#     ISMIP7/AIS/ (133 GB, atmosphere+ocean+fracture) is NO LONGER on the
-#     share: treat the local copy as IRREPLACEABLE and back it up.
-#   * MRI-ESM2-0 anything (AIS/MRI-ESM2-0 does not exist).
-# => cores 1-6/8/10 cannot be sourced here; the processed forcing must be
-#    (re)published by the forcing group, or regenerated from raw CMIP with a
-#    processing pipeline not present here (Tools/ has only the GrIS pipeline).
+# ALREADY MIRRORED locally, so the default --ocean/--calibration modes are
+# idempotent no-ops.
 AIS_BASE = "/ISMIP6/ISMIP7_Prep/CMIP6_test_protocol/AIS"
 
 # New top-level tree (see the 2026-07-19 note above): scenario forcing.
@@ -407,7 +397,8 @@ def download_scenarios(tc, esms=SCENARIO_ESMS, scenarios=SCENARIO_NAMES,
                 dst = FORCING_DIR / local_rel / ver
                 n_remote = len([e for e in list_remote_files(tc, src)
                                 if e["type"] == "file"])
-                n_local = len(list(dst.glob("*.nc"))) if dst.exists() else 0
+                n_local = (len([p for p in dst.iterdir() if p.is_file()])
+                           if dst.exists() else 0)
                 state = ("complete" if n_local >= n_remote and n_remote > 0
                          else f"{n_local}/{n_remote} local")
                 print(f"    {local_rel}{'/' + ver if ver else ''}: "

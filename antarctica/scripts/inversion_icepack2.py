@@ -498,7 +498,17 @@ def main():
         last_good_obj[0] = J_val
 
         t_adj = perf_counter()
-        dJ_dtheta, dJ_dphi = compute_gradient(J, [theta, phi])
+        try:
+            dJ_dtheta, dJ_dphi = compute_gradient(J, [theta, phi])
+        except fd.ConvergenceError:
+            # The adjoint jacobian solve can hit the SNES cap at rough
+            # mid-optimization controls just like the forward (killed the
+            # Jul 18 2500m Budd run at iter 60, ~11 hr in). Same recovery
+            # as the forward guard: inflated objective + zero gradient
+            # makes L-BFGS-B backtrack its line search.
+            z.assign(z_backup)
+            PETSc.Sys.Print("  [!] Adjoint solve failed, returning large objective")
+            return last_good_obj[0] * 10, np.zeros(2 * global_ndof)
         t_adj = perf_counter() - t_adj
 
         reg_theta = float(

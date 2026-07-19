@@ -392,8 +392,15 @@ def setup_model(restart_from=None):
         # backstop.
         ocean_drag = float(os.environ.get("ISMIP7_OCEAN_DRAG", "1e-2"))
         h_ocean = float(os.environ.get("ISMIP7_H_OCEAN", "10.0"))
-        u_lim = float(os.environ.get("ISMIP7_U_LIM", "0.0"))
-        k_lim = float(os.environ.get("ISMIP7_K_LIM", "1e-3"))
+        # Speed limiter: structurally present (threshold u_lim > 0) but INERT
+        # by default - k_lim is a live Constant at 0 (term vanishes
+        # identically; the cold continuation is unaffected, unlike a built-in
+        # limiter, which breaks it). The run loop's rescue ladder raises
+        # k_lim to ISMIP7_K_LIM for trust-region rescue solves at wall
+        # geometries (runaway front nodes), then zeroes it again.
+        u_lim = float(os.environ.get("ISMIP7_U_LIM", "2e4"))
+        k_lim = Constant(0.0)
+        k_lim_rescue = float(os.environ.get("ISMIP7_K_LIM", "1e-3"))
         # GL-gated coercivity only for Budd (RC keeps its established form).
         alpha_gl = (float(os.environ.get("ISMIP7_ALPHA_GL", "0.5"))
                     if friction == "budd" else 0.0)
@@ -539,11 +546,60 @@ def setup_model(restart_from=None):
     # ISMIP7_CONTINUATION_STEPS (default 8) → 2× → 4×.
     base_steps = int(os.environ.get("ISMIP7_CONTINUATION_STEPS", "8"))
     z_init = z.copy(deepcopy=True)
-    PETSc.Sys.Print(
-        f"Initial diagnostic solve (continuation n_flow 1→{n_flow_val:.1f}, "
-        f"m_slide 1→{m_slide_val:.1f})..."
-    )
-    for attempt, steps in enumerate((base_steps, 2 * base_steps, 4 * base_steps)):
+
+    # Restart fast path: the checkpoint holds the last CONVERGED (u, M, tau)
+    # at the saved (post-transport) geometry, so the setup solve is just an
+    # ordinary warm step-solve - do it directly at full n/m with the normal
+    # rtol machinery. Re-ramping n back to 1 from a converged n=4 state is
+    # not only wasteful, it can be FATAL at a hard-era geometry (both 1873
+    # historical walls: the resume's setup ramp diverged before the time
+    # loop's rescue ladder ever ran). If even the direct solve fails, ACCEPT
+    # the loaded state as-is (it is the last converged solution; the time
+    # loop's rescue ladder then fights the hard step properly) - but with a
+    # TIGHT run tolerance derived from the loaded-state residual (1e-6 x
+    # ||F(z_loaded)||, a proxy for the converged scale), never the loose
+    # acceptance value: a loose persistent atol lets every later step
+    # "converge" at iteration 0 and silently freezes the velocity (the bug
+    # that invalidated the first 1873->2014 resume).
+    restart_solved = False
+    if is_restart and u_guess is not None:
+        with assemble(F).dat.vec_ro as _rv:
+            fnorm0 = _rv.norm()
+        try:
+            n_flow.assign(n_flow_val)
+            m_slide.assign(m_slide_val)
+            slvr.solve()
+            restart_solved = True
+            fnorm_conv = slvr.snes.getFunctionNorm()
+            if fnorm_conv > 0.0:
+                slvr.snes.setTolerances(atol=100.0 * fnorm_conv)
+            PETSc.Sys.Print(
+                f"Restart diagnostic re-solved at loaded state "
+                f"(||F|| {fnorm0:.2e} -> {fnorm_conv:.2e})"
+            )
+        except fd.ConvergenceError:
+            z.assign(z_init)
+            restart_solved = True
+            if fnorm0 > 0.0:
+                slvr.snes.setTolerances(atol=1e-6 * fnorm0)
+            PETSc.Sys.Print(
+                f"Restart solve did not converge at loaded geometry "
+                f"(hard era); keeping the loaded converged state and "
+                f"handing the step to the run's rescue ladder "
+                f"(atol={1e-6 * fnorm0:.2e})"
+            )
+
+    if not restart_solved:
+        PETSc.Sys.Print(
+            f"Initial diagnostic solve (continuation n_flow 1→{n_flow_val:.1f}, "
+            f"m_slide 1→{m_slide_val:.1f})..."
+        )
+        _run_continuation = True
+    else:
+        _run_continuation = False
+    for attempt, steps in enumerate(
+        (base_steps, 2 * base_steps, 4 * base_steps) if _run_continuation else ()
+    ):
         try:
             for t in np.linspace(0.0, 1.0, steps):
                 n_flow.assign(1.0 + t * (n_flow_val - 1.0))
@@ -619,6 +675,9 @@ def setup_model(restart_from=None):
         "calving_ids": calving_ids,
         "u_obs": u_obs,
         "friction": friction,
+        # Rescue speed limiter (residual laws): live Constant, 0 = inert.
+        "k_lim": k_lim if use_residual else None,
+        "k_lim_rescue": k_lim_rescue if use_residual else 0.0,
         # Reference/frozen fields persisted into every checkpoint so a restart
         # is self-contained and rank-count-robust (no recompute from evolved h).
         "theta": theta_f,
@@ -982,21 +1041,32 @@ def run_simulation(
             return True
         except fd.ConvergenceError:
             pass
-        attempts = (
-            ("re-doing continuation", snes_type0, _ramp),
-            ("trust-region retry", "newtontr", slvr.solve),
-            ("trust-region continuation", "newtontr", _ramp),
-        )
+        k_lim_c = ctx.get("k_lim")
+        k_rescue = ctx.get("k_lim_rescue", 0.0)
+        attempts = [
+            ("re-doing continuation", snes_type0, _ramp, False),
+            ("trust-region retry", "newtontr", slvr.solve, False),
+            ("trust-region continuation", "newtontr", _ramp, False),
+        ]
+        if k_lim_c is not None and k_rescue > 0.0:
+            # Deepest rungs: pin the runaway front nodes with the soft speed
+            # limiter (only |u| > u_lim feels it) while trust region solves.
+            attempts += [
+                ("trust-region + speed limiter", "newtontr", slvr.solve, True),
+                ("trust-region + limiter continuation", "newtontr", _ramp, True),
+            ]
         try:
-            for label, stype, action in attempts:
+            for label, stype, action, use_lim in attempts:
                 PETSc.Sys.Print(f"  Step {k}: {label}...")
                 z.assign(z_entry)
                 n_flow.assign(n_flow_val)
                 m_slide.assign(m_slide_val)
                 slvr.snes.setType(stype)
+                if k_lim_c is not None:
+                    k_lim_c.assign(k_rescue if use_lim else 0.0)
                 try:
                     action()
-                    if stype != snes_type0:
+                    if stype != snes_type0 or use_lim:
                         PETSc.Sys.Print(f"  Step {k}: recovered via {label}")
                     return True
                 except fd.ConvergenceError:
@@ -1006,6 +1076,8 @@ def run_simulation(
             slvr.snes.setType(snes_type0)
             n_flow.assign(n_flow_val)
             m_slide.assign(m_slide_val)
+            if k_lim_c is not None:
+                k_lim_c.assign(0.0)
 
     for k in range(1, nsteps + 1):
         t_step_start = perf_counter()

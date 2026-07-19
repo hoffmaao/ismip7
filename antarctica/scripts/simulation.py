@@ -957,6 +957,56 @@ def run_simulation(
         )
         csv_f.flush()
 
+    # Rescue ladder state: the last CONVERGED mixed state, restored between
+    # attempts so each rescue starts from a valid warm point instead of a
+    # diverged Newton iterate.
+    z_entry = z.copy(deepcopy=True)
+    snes_type0 = slvr.snes.getType()
+
+    def _ramp():
+        for t in np.linspace(0.0, 1.0, 10):
+            n_flow.assign(1.0 + t * (n_flow_val - 1.0))
+            m_slide.assign(1.0 + t * (m_slide_val - 1.0))
+            slvr.solve()
+
+    def _solve_with_rescue(k):
+        r"""Diagnostic solve with an escalation ladder for hard eras
+        (evidence at the 32 km ssp585 2024.5 wall: nleqerr fails, a fresh
+        continuation fails, but trust region converges the same step in one
+        try). Sequence: direct -> re-continuation -> newtontr direct ->
+        newtontr continuation. Restores the entry state between attempts;
+        always restores the configured SNES type and full n/m on exit.
+        Returns True on success."""
+        try:
+            slvr.solve()
+            return True
+        except fd.ConvergenceError:
+            pass
+        attempts = (
+            ("re-doing continuation", snes_type0, _ramp),
+            ("trust-region retry", "newtontr", slvr.solve),
+            ("trust-region continuation", "newtontr", _ramp),
+        )
+        try:
+            for label, stype, action in attempts:
+                PETSc.Sys.Print(f"  Step {k}: {label}...")
+                z.assign(z_entry)
+                n_flow.assign(n_flow_val)
+                m_slide.assign(m_slide_val)
+                slvr.snes.setType(stype)
+                try:
+                    action()
+                    if stype != snes_type0:
+                        PETSc.Sys.Print(f"  Step {k}: recovered via {label}")
+                    return True
+                except fd.ConvergenceError:
+                    continue
+            return False
+        finally:
+            slvr.snes.setType(snes_type0)
+            n_flow.assign(n_flow_val)
+            m_slide.assign(m_slide_val)
+
     for k in range(1, nsteps + 1):
         t_step_start = perf_counter()
         t_yr = t_start + k * dt
@@ -964,18 +1014,11 @@ def run_simulation(
         if forcing_callback is not None:
             forcing_callback(ctx, t_yr)
 
-        try:
-            slvr.solve()
-        except fd.ConvergenceError:
-            PETSc.Sys.Print(f"  Step {k}: re-doing continuation...")
-            try:
-                for t in np.linspace(0.0, 1.0, 10):
-                    n_flow.assign(1.0 + t * (n_flow_val - 1.0))
-                    m_slide.assign(1.0 + t * (m_slide_val - 1.0))
-                    slvr.solve()
-            except fd.ConvergenceError:
-                PETSc.Sys.Print(f"  Step {k}: continuation failed, saving and stopping")
-                break
+        z_entry.assign(z)
+        if not _solve_with_rescue(k):
+            PETSc.Sys.Print(f"  Step {k}: rescue ladder exhausted, saving and stopping")
+            z.assign(z_entry)   # checkpoint the last converged state, not a diverged iterate
+            break
 
         u_vel = z.subfunctions[0]
 

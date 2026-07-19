@@ -111,13 +111,37 @@ def _find_ismip7_data(data_root=None):
     return None
 
 
+def _version_subdirs(parent_dir):
+    r"""(N, name) pairs for the v<N> subdirs of a directory, ascending."""
+    versions = []
+    if parent_dir is not None and os.path.isdir(parent_dir):
+        for name in os.listdir(parent_dir):
+            if name.startswith("v") and os.path.isdir(
+                    os.path.join(parent_dir, name)):
+                try:
+                    versions.append((int(name[1:]), name))
+                except ValueError:
+                    pass
+    return sorted(versions)
+
+
+def _resolve_version(parent_dir, pinned):
+    r"""The pinned version if that subdir exists, else the highest v<N>
+    subdir present, else the pinned name unchanged (so missing trees keep
+    producing the same non-existent path the callers already handle)."""
+    if parent_dir is None or os.path.isdir(os.path.join(parent_dir, pinned)):
+        return pinned
+    versions = _version_subdirs(parent_dir)
+    return versions[-1][1] if versions else pinned
+
+
 def atmosphere_path(scenario, esm="CESM2-WACCM", variable="acabf-anomaly",
                     resolution="8000m", version="v2", data_root=None):
     root = _find_ismip7_data(data_root)
     if root is None:
         return None
-    return os.path.join(root, esm, scenario, f"SDBN1-{resolution}",
-                        variable, version)
+    parent = os.path.join(root, esm, scenario, f"SDBN1-{resolution}", variable)
+    return os.path.join(parent, _resolve_version(parent, version))
 
 
 def ocean_path(scenario, esm="CESM2-WACCM", variable="tf",
@@ -125,7 +149,8 @@ def ocean_path(scenario, esm="CESM2-WACCM", variable="tf",
     root = _find_ismip7_data(data_root)
     if root is None:
         return None
-    return os.path.join(root, esm, scenario, "ocean", variable, version)
+    parent = os.path.join(root, esm, scenario, "ocean", variable)
+    return os.path.join(parent, _resolve_version(parent, version))
 
 
 class ISMIP7Atmosphere:
@@ -155,7 +180,8 @@ class ISMIP7Atmosphere:
         if vdir is None or not os.path.isdir(vdir):
             return None
 
-        pattern = f"{variable}_AIS_{self.esm}_{self.scenario}_SDBN1-{self.resolution}_{self.version}_{int(year)}.nc"
+        version = os.path.basename(vdir)
+        pattern = f"{variable}_AIS_{self.esm}_{self.scenario}_SDBN1-{self.resolution}_{version}_{int(year)}.nc"
         path = os.path.join(vdir, pattern)
 
         if not os.path.exists(path):
@@ -421,12 +447,26 @@ class ISMIP7Fracture:
         if fdir is None or not os.path.isdir(fdir):
             return self
 
-        for fn in os.listdir(fdir):
-            path = os.path.join(fdir, fn)
-            if "collapse_mask" in fn:
-                self._collapse_mask = xr.open_dataset(path)
-            elif "excess_melt" in fn:
-                self._excess_melt = xr.open_dataset(path)
+        # Masks may sit flat in fracture/ (legacy mirror) or inside a
+        # versioned fracture/v<N>/ subdir (the share's layout); the highest
+        # version wins when both are present.
+        scan_dirs = [fdir] + [
+            os.path.join(fdir, name) for _, name in _version_subdirs(fdir)
+        ]
+        found = {}
+        for d in scan_dirs:
+            for fn in sorted(os.listdir(d)):
+                path = os.path.join(d, fn)
+                if not os.path.isfile(path):
+                    continue
+                if "collapse_mask" in fn:
+                    found["collapse_mask"] = path
+                elif "excess_melt" in fn:
+                    found["excess_melt"] = path
+        if "collapse_mask" in found:
+            self._collapse_mask = xr.open_dataset(found["collapse_mask"])
+        if "excess_melt" in found:
+            self._excess_melt = xr.open_dataset(found["excess_melt"])
 
         return self
 

@@ -86,11 +86,13 @@ There are **two distinct things** here:
    reads at run time (via `icepack2_tools/forcing.py`). Its layout follows the
    official ISMIP7 protocol (see §2b). Point the code at it with
    `ISMIP7_DATA_ROOT` (defaults to `<repo>/ISMIP7/AIS`).
-2. **`download_forcing.py`** — a helper that mirrors the climatology/bias/
-   calibration files currently published on the ISMIP6/7 Globus collection
+2. **`download_forcing.py`** — a helper that mirrors the Globus collection
    straight into `ISMIP7/AIS/`, matching the runtime layout - no rename or
-   reorganization step. After downloading, `python scripts/preflight.py`
-   reports which core experiments the local tree can actually run.
+   reorganization step: climatology/bias/calibration files (`--ocean` /
+   `--calibration`) plus the per-(ESM, scenario) runtime forcing sets from
+   the top-level `/ISMIP7/AIS` tree (`--scenarios`). After downloading,
+   `python scripts/preflight.py` reports which core experiments the local
+   tree can actually run.
 
 ### 2a. Using `download_forcing.py`
 
@@ -110,6 +112,8 @@ export GLOBUS_LOCAL_ENDPOINT=<your-endpoint-uuid>
 # download (omit a flag to get everything; --dry-run to preview)
 python scripts/download_forcing.py --ocean        # CESM2-WACCM thetao/so/tf + climatology + bias
 python scripts/download_forcing.py --calibration  # meltMIP obs melt, IMBIE2 basins, grid, topography
+python scripts/download_forcing.py --scenarios    # per-(ESM, scenario) runtime forcing (cores 1-8)
+python scripts/download_forcing.py --scenarios --esm MRI-ESM2-0 --scenario historical,ssp585
 python scripts/download_forcing.py --status        # what's present locally
 ```
 
@@ -120,15 +124,18 @@ Knobs:
 | `ISMIP7_GLOBUS_COLLECTION` | source collection UUID | `ccc9bbd2-4091-4e35-addd-eeb639cf5332` |
 | `GLOBUS_LOCAL_ENDPOINT` | **your** local Globus Connect Personal endpoint UUID | _(required to transfer)_ |
 
-Remote base path on the collection:
-`/ISMIP6/ISMIP7_Prep/CMIP6_test_protocol/AIS`. The exact file sets (SDBN1
-climatologies, CMIP bias, OI climatology, meltMIP calibration, IMBIE2 basins,
-ISMIP grid, topography) are enumerated in the `OCEAN_FILES` and
-`CALIBRATION_FILES` dicts at the top of `scripts/download_forcing.py` — that file
-is the authoritative manifest, and its status comment records what the
-collection currently holds (the collection is being actively reorganized;
-per-year scenario forcing is absent upstream, so most core experiments cannot
-be sourced from it right now - see that comment before hunting for data).
+Remote base paths on the collection: the per-year scenario forcing lives in
+the top-level `/ISMIP7/AIS/<ESM>/<scenario>/` tree (both CESM2-WACCM and
+MRI-ESM2-0, scenarios historical/ssp126/ssp370/ssp585 and more - everything
+cores 1-8 need). `--scenarios` mirrors the minimal runtime sets from it
+(SDBN1-8000m acabf and acabf-anomaly, ocean tf and so, fracture) as
+recursive-directory transfers with version autodetection (highest `v<N>` on
+the share) and checksum-level sync, so re-runs are idempotent completeness
+checks. The climatology/bias/obs/calibration sets still come from
+`/ISMIP6/ISMIP7_Prep/CMIP6_test_protocol/AIS`; their exact file lists are the
+`OCEAN_FILES` and `CALIBRATION_FILES` dicts at the top of
+`scripts/download_forcing.py` — that file is the authoritative manifest, and
+its status comment records the collection layout.
 
 No `GLOBUS_LOCAL_ENDPOINT`? The script prints the remote/local paths so you can do
 the transfer by hand in the Globus web app instead.
@@ -143,15 +150,18 @@ ISMIP7/AIS/
   <ESM>/<scenario>/SDBN1-8000m/<var>/<version>/      # atmosphere (acabf, acabf-anomaly, ts, tas, pr, ...)
       <var>_AIS_<ESM>_<scenario>_SDBN1-8000m_<version>_<YEAR>.nc
   <ESM>/<scenario>/ocean/<tf|thetao|so>/<version>/   # ocean thermal forcing, salinity, temp
-  <ESM>/<scenario>/fracture/                          # ice-shelf collapse / lake masks
+  <ESM>/<scenario>/fracture/[v*/]                     # ice-shelf collapse / lake masks (flat or versioned)
   meltMIP/OI_Climatology_ismip8km_60m_<tf|so|thetao>_extrap.nc   # CTRL climatology
   parameterisations/ocean/imbie2/                     # IMBIE2 basin numbers (per-basin K)
   parameterisations/ocean/{bfrns,meltobs,shelfmask,floatingmasks,...}
   parameterisations/fracture/
 ```
 
-Defaults baked into the readers: atmosphere `version=v2` at `SDBN1-8000m`, ocean
-`version=v3`. The forcing API:
+Defaults baked into the readers: atmosphere pins `version=v2` at `SDBN1-8000m`,
+ocean pins `version=v3`; when the pinned version directory is absent the readers
+fall back to the highest `v<N>` subdir present, so MRI-ESM2-0 `v1` and future
+re-releases resolve without code changes. Fracture masks are found both flat in
+`fracture/` and inside `fracture/v*/` (highest version wins). The forcing API:
 
 - `ISMIP7Atmosphere(esm, scenario).get_smb(year, x, y, anomaly=…)`
 - `ISMIP7Ocean(esm, scenario).get_thermal_forcing(...)` / `.get_salinity(...)`
@@ -321,10 +331,11 @@ VAF is reported in mm of sea-level equivalent; mass in Gt.
   evolved projection geometries (first seen at the 2024.5 ssp585 state).
   `ISMIP7_SNES_TYPE` / `ISMIP7_SNES_MAXIT` are the knobs for experimenting;
   a robust fix is the next work item.
-- **Upstream forcing gaps.** Per-year scenario forcing is currently absent
-  from the Globus collection, so most core experiments cannot be sourced from
-  it - see the status comment in `scripts/download_forcing.py` (§2a) and
-  `scripts/preflight.py` for what can run locally.
+- **Upstream forcing moved (resolved 2026-07-19).** The per-year scenario
+  forcing was not withdrawn - it moved to the top-level `/ISMIP7/AIS` tree
+  during the collection reorganization. Mirror it with
+  `scripts/download_forcing.py --scenarios` (§2a) and run
+  `scripts/preflight.py` to see what can run locally.
 - **`icepack2_tools/coupled.py`** is a WIP sketch of ice↔plume coupling and
   references a `PlumeModel` that does not yet exist in this tree — not wired into
   any run.

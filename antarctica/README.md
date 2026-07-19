@@ -261,7 +261,11 @@ picks up the newest checkpoint for the experiment unattended; `--tag`
 and resumes - its own output files; `--checkpoint-interval` sets the
 step-count fallback cadence. Checkpoints are self-contained (mesh, geometry,
 inversion fields, and the full `(u, M, τ)` solver state), so restarts are
-seamless at any MPI rank count.
+seamless at any MPI rank count. Each checkpoint also records the friction law
+and whether an apparent-MB correction was active; a resume refuses to start
+(with a message naming the fix) if `ISMIP7_FRICTION` or `ISMIP7_APPARENT_MB`
+doesn't match the checkpoint, since a silent mismatch would run cleanly but
+produce wrong physics.
 
 **Is the run on track?** Audit any timeseries CSV against observed Antarctic
 budget envelopes (IMBIE dM/dt, Rignot melt/calving, RACMO SMB, ISMIP6-class

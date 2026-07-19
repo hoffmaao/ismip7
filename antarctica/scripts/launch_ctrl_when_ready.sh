@@ -1,10 +1,11 @@
 #!/usr/bin/env bash
 # Resource-gated launcher for the Budd CTRL2015 validation run.
 #
-# The RC forward is prognostically unstable (velocity blows up ~2x/step —
+# The RC forward is prognostically unstable (velocity blows up ~2x/step -
 # see the Jul 2026 diagnosis), so production forward runs use the proven-
-# stable Budd power-law friction (its phi_eff floor damps the coupling
-# that RC's exact-zero shelf drag leaves undamped). This runs the 2500 m
+# stable Budd residual friction (ISMIP7_FRICTION=budd: PISM-delta grounded
+# floor via N_hat, exact-zero shelf drag, driven by the
+# inversion_icepack2_budd MAP). This runs the 2500 m
 # Budd CTRL with all the conservation work: RACMO SMB, OI-climatology
 # ocean + per-basin K, exactly-conservative transport, fixed calving
 # front, h_clamp_init=0 (true geometry), dt=0.1, 2015->T_END.
@@ -51,19 +52,18 @@ if [ "${DRYRUN:-}" = "1" ]; then
   exit 0
 fi
 
-if [ -e "$LOCK" ]; then
+if ! (set -C; echo "$$" > "$LOCK") 2>/dev/null; then
   log "lockfile $LOCK present (gate running or run launched). Exiting. rm to re-arm."
   exit 0
 fi
-echo "$$" > "$LOCK"
 trap 'rm -f "$LOCK"' EXIT
 
 [ -f "$MESH" ]   || { log "ERROR: mesh not found: $MESH"; exit 1; }
 [ -x "$PY" ]     || { log "ERROR: python not found: $PY"; exit 1; }
 [ -f "$K_NPZ" ]  || { log "ERROR: per-basin K npz not found: $K_NPZ"; exit 1; }
 [ -f "$BNDIDS" ] || { log "ERROR: boundary ids not found: $BNDIDS"; exit 1; }
-[ -f "$REPO/antarctica/mesh/inversion_icepack2_${LC}.h5" ] \
-  || { log "ERROR: Budd MAP inversion_icepack2_${LC}.h5 not found"; exit 1; }
+[ -f "$REPO/antarctica/mesh/inversion_icepack2_budd_${LC}.h5" ] \
+  || { log "ERROR: Budd MAP inversion_icepack2_budd_${LC}.h5 not found"; exit 1; }
 log "ARMED: Budd CTRL2015 lc=$LC dt=$DT t_end=$T_END ranks=$NRANKS mesh=$(basename "$MESH")"
 log "  gate: RAM>=${MIN_FREE_GB}G AND idle>=${MIN_FREE_CORES} for ${STABLE}x${INTERVAL}s; run log -> $LOG"
 
@@ -77,6 +77,7 @@ while :; do
       log "LAUNCHING Budd CTRL -> $LOG"
       cd "$REPO" || { log "ERROR: cd $REPO failed"; exit 1; }
       export OMP_NUM_THREADS=1 ISMIP7_LC="$LC" ISMIP7_MESH="$MESH" \
+             ISMIP7_FRICTION=budd \
              ISMIP7_DT="$DT" ISMIP7_T_END="$T_END" \
              ISMIP7_K_PER_BASIN_NPZ="$K_NPZ" ISMIP7_BNDIDS="$BNDIDS" \
              ISMIP7_H_CLAMP_INIT=0 ISMIP7_FIXED_FRONT=1 \

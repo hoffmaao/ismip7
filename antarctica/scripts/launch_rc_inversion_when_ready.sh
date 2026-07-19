@@ -58,12 +58,11 @@ if [ "${DRYRUN:-}" = "1" ]; then
   exit 0
 fi
 
-# single-instance guard
-if [ -e "$LOCK" ]; then
+# single-instance guard (atomic: noclobber write fails if the lock exists)
+if ! (set -C; echo "$$" > "$LOCK") 2>/dev/null; then
   log "lockfile $LOCK present (gate already running or inversion already launched). Exiting. rm it to re-arm."
   exit 0
 fi
-echo "$$" > "$LOCK"
 trap 'rm -f "$LOCK"' EXIT
 
 [ -f "$MESH" ] || { log "ERROR: mesh not found: $MESH"; exit 1; }

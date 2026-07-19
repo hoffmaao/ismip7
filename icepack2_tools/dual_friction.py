@@ -310,7 +310,14 @@ def build_rc_residual(
                          * max_value(Constant(0.0), Constant(1.0) - H / Constant(h_ocean))
                          * u_reg)
     if u_lim > 0.0:
-        tau_b = tau_b + Constant(k_lim) * max_value(Constant(0.0), u_reg - Constant(u_lim))
+        # k_lim may be a live Constant: with k_lim = 0 the term (and its
+        # Jacobian) vanish identically - no kink, no effect - so a caller
+        # can keep the term structurally present and raise k_lim only for
+        # rescue solves at runaway-front geometries (the 1873/2024 walls:
+        # frozen-iterate speeds of 1e10 m/yr at floating h ~ 0-60 m front
+        # nodes; physical flow never reaches u_lim ~ 2e4).
+        k_lim_c = k_lim if isinstance(k_lim, Constant) else Constant(k_lim)
+        tau_b = tau_b + k_lim_c * max_value(Constant(0.0), u_reg - Constant(u_lim))
 
     F += inner(tau + tau_b * u / u_reg, sig) * dx                   # tau = -tau_b u/|u| (identity tau-block)
 

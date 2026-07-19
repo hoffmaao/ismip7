@@ -103,13 +103,14 @@ cd antarctica
 # Token is cached at ~/.ismip7_globus_tokens.json (chmod 600).
 python scripts/download_forcing.py --login
 
-# browse the remote tree to sanity-check paths
+# browse the legacy climatology subtree to sanity-check paths
+# (the /ISMIP7/AIS scenario tree is not listed here; use the Globus web app)
 python scripts/download_forcing.py --list
 
 # tell the script where to *put* the files (your Globus Connect Personal endpoint)
 export GLOBUS_LOCAL_ENDPOINT=<your-endpoint-uuid>
 
-# download (omit a flag to get everything; --dry-run to preview)
+# download (no mode flag runs --ocean + --calibration; --dry-run to preview)
 python scripts/download_forcing.py --ocean        # CESM2-WACCM thetao/so/tf + climatology + bias
 python scripts/download_forcing.py --calibration  # meltMIP obs melt, IMBIE2 basins, grid, topography
 python scripts/download_forcing.py --scenarios    # per-(ESM, scenario) runtime forcing (cores 1-8)

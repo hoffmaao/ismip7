@@ -7,6 +7,8 @@ Usage:
     python scripts/download_forcing.py --status
     python scripts/download_forcing.py --ocean
     python scripts/download_forcing.py --calibration
+    python scripts/download_forcing.py --scenarios [--esm MRI-ESM2-0]
+                                       [--scenario historical,ssp585]
     python scripts/download_forcing.py
 """
 
@@ -21,15 +23,19 @@ GHUB_COLLECTION_ID = os.environ.get(
     "ISMIP7_GLOBUS_COLLECTION", "ccc9bbd2-4091-4e35-addd-eeb639cf5332"
 )
 
-# The GHub collection is being ACTIVELY reorganized. State as of 2026-07-08,
-# CONFIRMED UNCHANGED on a 2026-07-18 re-walk (full recursive listing, 32
-# files total; headless CLI-token auth still works; --status: all 8 sets
-# below fully mirrored). Still absent upstream: every scenario dir
-# (ssp126/370/585 for BOTH ESMs), MRI-ESM2-0 entirely, CMIPraw, per-year
-# atmosphere/ocean anything. Cores 1-6/8 remain unsourceable until the
-# forcing group republishes - ask them (and where the ssp585 SDBN1-8000m
-# atm + ocean we hold locally originally came from).
-# (re-walked the whole tree — see scripts/preflight.py for the needs side):
+# RESOLVED 2026-07-19: the "shrinking collection" was the reorganization in
+# flight - the data MOVED to a new TOP-LEVEL /ISMIP7 tree (the Jul 8/18
+# walks started inside /ISMIP6/ISMIP7_Prep and never looked up). The new
+# authoritative layout is
+#   /ISMIP7/AIS/<ESM>/<scenario>/{SDBN1-8000m,SDBN1-2000m,ocean,fracture}/
+#     <var>/v*/  (per-year atm files; decadal-chunk ocean files)
+# with ESM in {CESM2-WACCM, MRI-ESM2-0} and scenario in {ctrl, ctrlclim,
+# historical, ssp126, ssp370, ssp534-over, ssp585} - i.e. EVERYTHING cores
+# 1-8 need, including all of MRI-ESM2-0; /ISMIP7/cmipraw is back too, and
+# /ISMIP7/{Output-Processing, Submission_Templates} hold submission tooling.
+# Use --scenarios below to mirror the per-scenario runtime sets.
+#
+# The OLD subtree (climatologies/bias/obs used by the sets below) is:
 #   /ISMIP6/ISMIP7_Prep/CMIP6_test_protocol/{AIS, GrIS, Tools, test}
 # and under AIS/ only:
 #   CESM2-WACCM/{bias, climatology, historical/ocean/extras}  (climatologies
@@ -49,6 +55,17 @@ GHUB_COLLECTION_ID = os.environ.get(
 #    (re)published by the forcing group, or regenerated from raw CMIP with a
 #    processing pipeline not present here (Tools/ has only the GrIS pipeline).
 AIS_BASE = "/ISMIP6/ISMIP7_Prep/CMIP6_test_protocol/AIS"
+
+# New top-level tree (see the 2026-07-19 note above): scenario forcing.
+ISMIP7_BASE = "/ISMIP7/AIS"
+SCENARIO_ESMS = ("CESM2-WACCM", "MRI-ESM2-0")
+SCENARIO_NAMES = ("historical", "ssp126", "ssp370", "ssp585")
+# Minimal runtime vars (what experiment.py actually reads): re-referenced
+# aSMB + full-acabf fallback, ocean tf/so at draft, fracture masks. The
+# rest (pr/tas/ts/gradients, thetao, SDBN1-2000m, ocean extras) stays
+# upstream until something consumes it.
+SCENARIO_ATM_VARS = ("acabf", "acabf-anomaly")
+SCENARIO_OCEAN_VARS = ("tf", "so")
 
 _LTM = "{var}_CESM2-WACCM_ltm_SDBN1_1960-1989.nc"
 OCEAN_FILES = {
@@ -340,6 +357,84 @@ def download_file_set(tc, file_set, dry_run=False):
     print(f"     {file_set['remote_dir']}")
 
 
+def _pick_version(tc, var_dir):
+    r"""Highest v<N> subdir of a remote var dir, or None if absent."""
+    vs = []
+    for e in list_remote_files(tc, var_dir):
+        if e["type"] == "dir" and e["name"].startswith("v"):
+            try:
+                vs.append((int(e["name"][1:]), e["name"]))
+            except ValueError:
+                pass
+    return max(vs)[1] if vs else None
+
+
+def download_scenarios(tc, esms=SCENARIO_ESMS, scenarios=SCENARIO_NAMES,
+                       dry_run=False):
+    r"""Mirror the minimal per-(ESM, scenario) runtime sets from the new
+    /ISMIP7/AIS tree: SDBN1-8000m {acabf, acabf-anomaly}, ocean {tf, so},
+    and the fracture masks. One recursive-dir Globus transfer per
+    (ESM, scenario); sync_level=checksum makes re-runs incremental, so an
+    already-complete local set costs one listing pass server-side."""
+    import globus_sdk
+
+    local_endpoint = None if dry_run else get_local_endpoint()
+    if not dry_run and not local_endpoint:
+        print("  No local Globus endpoint (start Globus Connect Personal "
+              "or set GLOBUS_LOCAL_ENDPOINT).")
+        return []
+
+    task_ids = []
+    for esm in esms:
+        for scen in scenarios:
+            base = f"{ISMIP7_BASE}/{esm}/{scen}"
+            groups = (
+                [(f"{base}/SDBN1-8000m/{v}", f"{esm}/{scen}/SDBN1-8000m/{v}")
+                 for v in SCENARIO_ATM_VARS]
+                + [(f"{base}/ocean/{v}", f"{esm}/{scen}/ocean/{v}")
+                   for v in SCENARIO_OCEAN_VARS]
+                + [(f"{base}/fracture", f"{esm}/{scen}/fracture")]
+            )
+            print(f"\n  [{esm} / {scen}]")
+            items = []
+            for remote_dir, local_rel in groups:
+                # every group (fracture included) is <dir>/v<N>/<files>
+                ver = _pick_version(tc, remote_dir)
+                if ver is None:
+                    print(f"    {local_rel}: not on the share, skipped")
+                    continue
+                src = f"{remote_dir}/{ver}"
+                dst = FORCING_DIR / local_rel / ver
+                n_remote = len([e for e in list_remote_files(tc, src)
+                                if e["type"] == "file"])
+                n_local = len(list(dst.glob("*.nc"))) if dst.exists() else 0
+                state = ("complete" if n_local >= n_remote and n_remote > 0
+                         else f"{n_local}/{n_remote} local")
+                print(f"    {local_rel}{'/' + ver if ver else ''}: "
+                      f"{n_remote} remote files [{state}]")
+                if n_local < n_remote:
+                    items.append((src, dst))
+            if not items:
+                print("    nothing to transfer")
+                continue
+            if dry_run:
+                print(f"    would submit {len(items)} recursive dir item(s)")
+                continue
+            td = globus_sdk.TransferData(
+                source_endpoint=GHUB_COLLECTION_ID,
+                destination_endpoint=local_endpoint,
+                label=f"ISMIP7 {esm} {scen}",
+                verify_checksum=True, sync_level="checksum",
+            )
+            for src, dst in items:
+                td.add_item(src, str(dst), recursive=True)
+            task_id = tc.submit_transfer(td)["task_id"]
+            task_ids.append(task_id)
+            print(f"    submitted: {task_id}  "
+                  f"https://app.globus.org/activity/{task_id}")
+    return task_ids
+
+
 def download_ocean(tc, dry_run=False):
     print("\n" + "=" * 60)
     print("Ocean Forcing (CESM2-WACCM, 8km x 60m grid)")
@@ -391,6 +486,13 @@ def main():
     parser.add_argument("--status", action="store_true", help="Show local download status")
     parser.add_argument("--ocean", action="store_true", help="Download ocean forcing only")
     parser.add_argument("--calibration", action="store_true", help="Download calibration data only")
+    parser.add_argument("--scenarios", action="store_true",
+                        help="Mirror per-(ESM, scenario) runtime sets from the "
+                             "new /ISMIP7/AIS tree (cores 1-8 forcing)")
+    parser.add_argument("--esm", default=",".join(SCENARIO_ESMS),
+                        help="comma list of ESMs for --scenarios")
+    parser.add_argument("--scenario", default=",".join(SCENARIO_NAMES),
+                        help="comma list of scenarios for --scenarios")
     parser.add_argument("--dry-run", action="store_true", help="Show what would be downloaded")
     args = parser.parse_args()
 
@@ -411,7 +513,14 @@ def main():
 
     dry = args.dry_run
 
-    if args.ocean:
+    if args.scenarios:
+        download_scenarios(
+            tc,
+            esms=tuple(e.strip() for e in args.esm.split(",") if e.strip()),
+            scenarios=tuple(s.strip() for s in args.scenario.split(",") if s.strip()),
+            dry_run=dry,
+        )
+    elif args.ocean:
         download_ocean(tc, dry_run=dry)
     elif args.calibration:
         download_calibration(tc, dry_run=dry)

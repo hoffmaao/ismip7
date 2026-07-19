@@ -1043,6 +1043,11 @@ def run_simulation(
             pass
         k_lim_c = ctx.get("k_lim")
         k_rescue = ctx.get("k_lim_rescue", 0.0)
+        # gia: hard-era steps under trust region converge LINEARLY and are
+        # executed by the iteration cap while still descending - rescue
+        # rungs get extra patience, restored afterwards.
+        rescue_maxit = int(os.environ.get("ISMIP7_RESCUE_MAXIT", "600"))
+        _rt, _at, _dt_, _mi = slvr.snes.getTolerances()
         attempts = [
             ("re-doing continuation", snes_type0, _ramp, False),
             ("trust-region retry", "newtontr", slvr.solve, False),
@@ -1062,6 +1067,7 @@ def run_simulation(
                 n_flow.assign(n_flow_val)
                 m_slide.assign(m_slide_val)
                 slvr.snes.setType(stype)
+                slvr.snes.setTolerances(max_it=rescue_maxit)
                 if k_lim_c is not None:
                     k_lim_c.assign(k_rescue if use_lim else 0.0)
                 try:
@@ -1074,28 +1080,39 @@ def run_simulation(
             return False
         finally:
             slvr.snes.setType(snes_type0)
+            slvr.snes.setTolerances(max_it=_mi)
             n_flow.assign(n_flow_val)
             m_slide.assign(m_slide_val)
             if k_lim_c is not None:
                 k_lim_c.assign(0.0)
 
-    for k in range(1, nsteps + 1):
-        t_step_start = perf_counter()
-        t_yr = t_start + k * dt
+    h_dg_entry = Function(Q_dg)
 
-        if forcing_callback is not None:
-            forcing_callback(ctx, t_yr)
+    def _lift_h():
+        r"""Derive the CG geometry (h, s, phi_eff) from the h_dg state."""
+        if legacy_transport:
+            h.project(h_dg)
+        else:
+            # Lumped-mass projection: h_i = ∫phi_i h_dg / ∫phi_i.
+            assemble(fd.TestFunction(Q) * h_dg * dx, tensor=proj_rhs)
+            h.dat.data[:] = proj_rhs.dat.data_ro / m_lump.dat.data_ro
+        h.interpolate(max_value(h, Constant(h_clamp)))
+        s.interpolate(max_value(b + h, (Constant(1.0) - rho_ratio) * h))
+        phi_eff.interpolate(
+            max_value(
+                Constant(1.0)
+                - rho_W * g * max_value(Constant(0.0), -b)
+                / (rho_I * g * max_value(h, Constant(1.0))),
+                Constant(0.01),
+            )
+        )
 
-        z_entry.assign(z)
-        if not _solve_with_rescue(k):
-            PETSc.Sys.Print(f"  Step {k}: rescue ladder exhausted, saving and stopping")
-            z.assign(z_entry)   # checkpoint the last converged state, not a diverged iterate
-            break
-
+    def _advance(dt_local):
+        r"""One transport advance of dt_local with the CURRENT velocity
+        (transport-first ordering: the velocity was solved at the current
+        geometry). Mutates h_dg and the derived CG fields; returns the
+        advance's mass tallies [Gt]."""
         u_vel = z.subfunctions[0]
-
-        # DG0 upwind implicit Euler for thickness (h_dg = persistent state;
-        # the legacy scheme kept the CG->DG re-projection each step)
         if legacy_transport:
             h_dg.project(h)
         h_dg_old.assign(h_dg)
@@ -1108,21 +1125,19 @@ def run_simulation(
             src = src + a_ref
         # Cell-averaged DG0 source (exact for the DG0 test space) with a
         # positivity limit (gia a_step clamp): the net sink may not draw a
-        # cell below h_clamp within one step. With the limited source the
-        # implicit upwind update is an M-matrix system with nonnegative RHS,
-        # so h stays >= h_clamp and the post-solve floor becomes a no-op.
-        # The withheld sink (limit_gt) is tallied into the clamp budget
-        # column, keeping resid closed. (At fine meshes a cell whose t=0
-        # divergence exceeds h/dt would see a slight balanced-mode
-        # fixed-point deviation here - tallied, not hidden.)
+        # cell below h_clamp within one advance. With the limited source
+        # the implicit upwind update is an M-matrix system with nonnegative
+        # RHS, so h stays >= h_clamp and the post-solve floor is a no-op.
+        # The withheld sink is tallied into the clamp budget column.
         assemble(src * phi_dg * dx, tensor=src_cof)
         src_dg.dat.data[:] = src_cof.dat.data_ro / cell_area
         _src_want = src_dg.dat.data_ro.copy()
-        np.maximum(src_dg.dat.data, -(h_dg.dat.data_ro - h_clamp) / dt,
+        np.maximum(src_dg.dat.data, -(h_dg.dat.data_ro - h_clamp) / dt_local,
                    out=src_dg.dat.data)
         limit_gt = mesh.comm.allreduce(float(
             ((src_dg.dat.data_ro - _src_want) * cell_area).sum()
-        )) * rho_gt * dt
+        )) * rho_gt * dt_local
+        dt_c.assign(dt_local)
         F_prog = (
             (h_dg_trial - h_dg_old) / dt_c * phi_dg * dx
             + (un_plus("+") * h_dg_trial("+") - un_plus("-") * h_dg_trial("-"))
@@ -1143,14 +1158,7 @@ def run_simulation(
             },
         )
 
-        # Mass budget: attribute this step's dM to its sources so a drift
-        # is diagnosable (SMB - melt - boundary outflux - calving) and any
-        # non-conservative floor/projection mass shows up explicitly.
-        smb_rate = float(assemble(accum * dx)) * rho_gt          # Gt/yr
-        melt_rate = float(assemble(ocean_melt * dx)) * rho_gt    # Gt/yr
-        amb_rate = (float(assemble(a_ref * dx)) * rho_gt
-                    if a_ref is not None else 0.0)               # Gt/yr
-        out_rate = float(assemble(un_plus * h_dg * ds)) * rho_gt # Gt/yr
+        out_gt = float(assemble(un_plus * h_dg * ds)) * rho_gt * dt_local
         m1 = float(assemble(h_dg * dx)) * rho_gt
 
         h_dg.interpolate(max_value(h_dg, Constant(h_clamp)))
@@ -1165,25 +1173,75 @@ def run_simulation(
             ) * rho_gt
             data[beyond_front] = 0.0
 
-        if legacy_transport:
-            h.project(h_dg)
-        else:
-            # Lumped-mass projection: h_i = ∫phi_i h_dg / ∫phi_i.
-            assemble(fd.TestFunction(Q) * h_dg * dx, tensor=proj_rhs)
-            h.dat.data[:] = proj_rhs.dat.data_ro / m_lump.dat.data_ro
+        _lift_h()
         m3 = m2 - calv_gt                                        # ∫h preserved by projection
-        h.interpolate(max_value(h, Constant(h_clamp)))
+        mass_now = float(assemble(h * dx)) * _RHO_I_SI / 1e12
+        clamp_cg_gt = mass_now - m3          # Gt added by the CG floor after projection
+        return {
+            "out_gt": out_gt,
+            "calv_gt": calv_gt,
+            "clamp_gt": clamp_gt + clamp_cg_gt + limit_gt,
+        }
 
-        s.interpolate(max_value(b + h, (Constant(1.0) - rho_ratio) * h))
+    # Time loop, transport-first: each step advances the geometry with the
+    # velocity SOLVED AT it (the previous solve), then solves at the new
+    # geometry - the same (G, u) sequence as the old solve-then-advance
+    # ordering, but a hard step can now rewind ITS OWN advance and retry it
+    # as dt/4 then dt/16 subcycles with rescue solves between (the 1873
+    # front-cell-emptying eras: the ladder alone fails at dt=0.1 but a
+    # dt=0.025 approach crosses them - smaller geometry increments let
+    # Newton track the branch through the event). Checkpoints improve too:
+    # saved (h, u) are now mutually consistent.
+    SUBCYCLES = tuple(int(s) for s in
+                      os.environ.get("ISMIP7_SUBCYCLES", "1,4,16").split(","))
 
-        phi_eff.interpolate(
-            max_value(
-                Constant(1.0)
-                - rho_W * g * max_value(Constant(0.0), -b)
-                / (rho_I * g * max_value(h, Constant(1.0))),
-                Constant(0.01),
+    for k in range(1, nsteps + 1):
+        t_step_start = perf_counter()
+        t_yr = t_start + k * dt
+
+        if forcing_callback is not None:
+            forcing_callback(ctx, t_yr)
+
+        # Forcing-field integrals are constant within the step.
+        smb_rate = float(assemble(accum * dx)) * rho_gt          # Gt/yr
+        melt_rate = float(assemble(ocean_melt * dx)) * rho_gt    # Gt/yr
+        amb_rate = (float(assemble(a_ref * dx)) * rho_gt
+                    if a_ref is not None else 0.0)               # Gt/yr
+
+        z_entry.assign(z)
+        h_dg_entry.assign(h_dg)
+        tallies = None
+        for m in SUBCYCLES:
+            if m > 1:
+                PETSc.Sys.Print(
+                    f"  Step {k}: subcycling x{m} (dt={dt / m:.4g})..."
+                )
+                h_dg.assign(h_dg_entry)
+                _lift_h()
+                z.assign(z_entry)
+            acc = {"out_gt": 0.0, "calv_gt": 0.0, "clamp_gt": 0.0}
+            ok = True
+            for _j in range(m):
+                sub = _advance(dt / m)
+                for key in acc:
+                    acc[key] += sub[key]
+                if not _solve_with_rescue(k):
+                    ok = False
+                    break
+            if ok:
+                if m > 1:
+                    PETSc.Sys.Print(f"  Step {k}: completed via x{m} subcycle")
+                tallies = acc
+                break
+        if tallies is None:
+            PETSc.Sys.Print(
+                f"  Step {k}: rescue ladder + subcycles exhausted, "
+                f"saving and stopping"
             )
-        )
+            h_dg.assign(h_dg_entry)
+            _lift_h()
+            z.assign(z_entry)   # checkpoint the last converged pair
+            break
 
         t_elapsed = perf_counter() - t_step_start
 
@@ -1191,17 +1249,18 @@ def run_simulation(
         vaf = float(assemble(haf * dx)) * _RHO_I_SI / 1e12 / 362.5
         total_mass = float(assemble(h * dx)) * _RHO_I_SI / 1e12
 
-        clamp_cg_gt = total_mass - m3        # Gt added by the CG floor after projection
+        out_rate = tallies["out_gt"] / dt                        # Gt/yr
+        calv_gt = tallies["calv_gt"]
+        clamp_all = tallies["clamp_gt"]
         dm = total_mass - mass_prev
         resid_gt = dm - (
             (smb_rate - melt_rate + amb_rate - out_rate) * dt
-            + clamp_gt + clamp_cg_gt + limit_gt - calv_gt
+            + clamp_all - calv_gt
         )
         mass_prev = total_mass
 
         results.append((t_yr, vaf, total_mass, smb_rate, melt_rate,
-                        out_rate, calv_gt,
-                        clamp_gt + clamp_cg_gt + limit_gt, resid_gt,
+                        out_rate, calv_gt, clamp_all, resid_gt,
                         amb_rate))
         _write_csv_row(results[-1])
 
@@ -1213,7 +1272,7 @@ def run_simulation(
                 f"      budget [Gt/yr]: SMB={smb_rate:+.0f} melt={-melt_rate:+.0f} "
                 f"{_amb_txt}"
                 f"outflux={-out_rate:+.0f} calv={-calv_gt/dt:+.0f} "
-                f"clamp={(clamp_gt+clamp_cg_gt+limit_gt)/dt:+.1f} "
+                f"clamp={clamp_all/dt:+.1f} "
                 f"dM/dt={dm/dt:+.0f} resid={resid_gt/dt:+.2f}"
             )
 

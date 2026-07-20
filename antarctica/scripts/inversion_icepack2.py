@@ -304,7 +304,7 @@ def main():
     K_base = u_c / (phi_eff * tau_c) ** m_slide
 
     # Composite rheology following Goldsby-Kohlstedt 2001:
-    #   ψ_visc  =     2·h·A_4 /5 · |M_dev|^5            (dislocation creep, n=4)
+    #   ψ_visc  =     2·h·A /(n+1) · |M_dev|^(n+1)      (dislocation creep, n=n_flow)
     #          + α · 2·H_ref·A_1/2 · |M_dev|^2          (diffusion regularizer)
     #   ψ_fric  =     K_3 /4 · |τ|^4                    (Weertman, m=3)
     #          + α · K_1 /2 · |τ|^2                     (linear regularizer)
@@ -324,7 +324,7 @@ def main():
     A4_base = A0 * Constant(a4_factor)
 
     def _rheo_glen(theta_c, phi_c):
-        # Main dislocation-creep flow law (n=n_flow=4) + Weertman sliding (m=3)
+        # Main dislocation-creep flow law (n=n_flow, this branch n=3) + Weertman sliding (m=3)
         return {
             "flow_law_exponent": n_flow,
             "flow_law_coefficient": A4_base * exp(phi_c),

@@ -201,13 +201,15 @@ MAP estimate of the bed friction `θ` and rheology `φ` from the diagnostic
 ```bash
 cd antarctica
 ISMIP7_LC=2500 mpiexec -n 12 python scripts/inversion_icepack2.py
-# → mesh/inversion_icepack2_budd_<LC>.h5   (the MAP checkpoint every forward run loads)
+# → mesh/inversion_icepack2_budd_n3_<LC>.h5   (the MAP checkpoint every forward run loads)
 ```
 
 The friction law is selected with `ISMIP7_FRICTION` (`budd`, the default, or
 `regularized_coulomb`); the MAP checkpoint name carries a matching `_budd` /
 `_rc` tag, and the forward runs load the checkpoint for whichever law they are
-started with. See the script header for the full set of regularization /
+started with. This `antarctica-n3` branch also appends an `_n3` flow-exponent
+tag (from `map_n_tag()`) so n=3 and n=4 MAPs coexist on disk; see
+`N3_FRAMEWORK.md`. See the script header for the full set of regularization /
 iteration options.
 
 ---

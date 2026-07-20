@@ -366,7 +366,7 @@ def setup_model(restart_from=None):
     K_base = u_c / (phi_eff * tau_c) ** m_slide
     K_map = K_base * exp(-m_slide * theta_f)
 
-    # Composite rheology: Goldsby-Kohlstedt dislocation creep (n=n_flow=4)
+    # Composite rheology: dislocation creep (n=n_flow, this branch n=3)
     # + α · linear regularizer (n=1) with a CONSTANT reference thickness
     # H_ref. This pins M where h → 0 so the SNES Jacobian stays
     # nonsingular at the calving front and h is allowed to reach zero.

@@ -37,9 +37,13 @@ INTERVAL="${INTERVAL:-180}"
 LOGDIR="$REPO/antarctica/results/logs"
 mkdir -p "$LOGDIR"
 STAMP="$(date +%Y%m%d_%H%M%S)"
-LOG="${LOG:-$LOGDIR/budd_ctrl${LC}_${STAMP}.log}"
-GATELOG="${GATELOG:-$LOGDIR/budd_ctrl${LC}_gate.log}"
-LOCK="${LOCK:-$LOGDIR/budd_ctrl${LC}.lock}"
+# n-tag so n=3 and n=4 CTRL logs/locks don't collide and the gated MAP name
+# matches setup_model (empty for n=4, matching legacy names; _n3 etc. otherwise).
+NFLOW="${ISMIP7_N_FLOW:-3.0}"
+NTAG="$(awk -v n="$NFLOW" 'BEGIN{ if ((n-4.0)^2 < 1e-12) print ""; else printf "_n%d", int(n+0.5) }')"
+LOG="${LOG:-$LOGDIR/budd_ctrl${LC}${NTAG}_${STAMP}.log}"
+GATELOG="${GATELOG:-$LOGDIR/budd_ctrl${LC}${NTAG}_gate.log}"
+LOCK="${LOCK:-$LOGDIR/budd_ctrl${LC}${NTAG}.lock}"
 BNDIDS="${ISMIP7_BNDIDS:-$REPO/antarctica/mesh/boundary_ids.json}"
 
 log(){ echo "[$(date '+%F %T')] $*" | tee -a "$GATELOG"; }
@@ -62,8 +66,8 @@ trap 'rm -f "$LOCK"' EXIT
 [ -x "$PY" ]     || { log "ERROR: python not found: $PY"; exit 1; }
 [ -f "$K_NPZ" ]  || { log "ERROR: per-basin K npz not found: $K_NPZ"; exit 1; }
 [ -f "$BNDIDS" ] || { log "ERROR: boundary ids not found: $BNDIDS"; exit 1; }
-[ -f "$REPO/antarctica/mesh/inversion_icepack2_budd_${LC}.h5" ] \
-  || { log "ERROR: Budd MAP inversion_icepack2_budd_${LC}.h5 not found"; exit 1; }
+[ -f "$REPO/antarctica/mesh/inversion_icepack2_budd${NTAG}_${LC}.h5" ] \
+  || { log "ERROR: Budd MAP inversion_icepack2_budd${NTAG}_${LC}.h5 not found"; exit 1; }
 log "ARMED: Budd CTRL2015 lc=$LC dt=$DT t_end=$T_END ranks=$NRANKS mesh=$(basename "$MESH")"
 log "  gate: RAM>=${MIN_FREE_GB}G AND idle>=${MIN_FREE_CORES} for ${STABLE}x${INTERVAL}s; run log -> $LOG"
 
@@ -77,7 +81,7 @@ while :; do
       log "LAUNCHING Budd CTRL -> $LOG"
       cd "$REPO" || { log "ERROR: cd $REPO failed"; exit 1; }
       export OMP_NUM_THREADS=1 ISMIP7_LC="$LC" ISMIP7_MESH="$MESH" \
-             ISMIP7_FRICTION=budd \
+             ISMIP7_FRICTION=budd ISMIP7_N_FLOW="$NFLOW" \
              ISMIP7_DT="$DT" ISMIP7_T_END="$T_END" \
              ISMIP7_K_PER_BASIN_NPZ="$K_NPZ" ISMIP7_BNDIDS="$BNDIDS" \
              ISMIP7_H_CLAMP_INIT=0 ISMIP7_FIXED_FRONT=1 \

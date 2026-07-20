@@ -54,6 +54,26 @@ sys.path.insert(0, os.path.dirname(_ROOT))
 lc = int(os.environ.get("ISMIP7_LC", "2500"))
 lc_coarse = int(os.environ.get("ISMIP7_LC_COARSE", "64000"))
 
+# Flow-law exponent for the composite viscous rheology. THIS BRANCH
+# (antarctica-n3) runs STANDARD GLEN n=3: A0 = rate_factor(260 K) is
+# already the n=3 fluidity, so the composite main term needs no prefactor
+# rescale (A4_FACTOR_DEFAULT = 1). The n=4 Goldsby-Kohlstedt composite
+# (a4_factor ~ 10, so A_4 tau_c^4 ~ A_3 tau_c^3 at tau_c) lives on the
+# `antarctica` branch. Override either per-run with ISMIP7_N_FLOW /
+# ISMIP7_A4_FACTOR; the two must match between an inversion and the forward
+# runs that load its MAP.
+N_FLOW_DEFAULT = "3.0"
+A4_FACTOR_DEFAULT = "1.0"
+
+
+def map_n_tag():
+    r"""Filename tag distinguishing MAPs inverted at different flow
+    exponents so n=3 and n=4 MAPs coexist on disk. n=4 keeps the legacy
+    untagged name (backward compatible with the `antarctica` MAPs); any
+    other n gets `_n<N>` (e.g. `_n3`)."""
+    n = float(os.environ.get("ISMIP7_N_FLOW", N_FLOW_DEFAULT))
+    return "" if abs(n - 4.0) < 1e-9 else f"_n{int(round(n))}"
+
 
 def find_file(d, p):
     m = glob.glob(os.path.join(d, p))
@@ -113,7 +133,8 @@ def setup_model(restart_from=None):
     # "budd_legacy" keeps the old phi_eff action Budd (residual shelf drag).
     use_residual = friction in ("regularized_coulomb", "budd")
     use_rc = use_residual  # geometry/alpha/h_clamp handling is shared
-    map_tag = {"regularized_coulomb": "_rc", "budd": "_budd"}.get(friction, "")
+    map_tag = ({"regularized_coulomb": "_rc", "budd": "_budd"}.get(friction, "")
+               + map_n_tag())
 
     is_restart = restart_from is not None
     inv_fn = os.path.join(MESH_DIR, f"inversion_icepack2{map_tag}_{lc}.h5")
@@ -315,11 +336,11 @@ def setup_model(restart_from=None):
             )
 
     A0 = Constant(icepack.rate_factor(Constant(260.0)))
-    # Composite Goldsby-Kohlstedt-style exponents (must match the inversion
-    # that produced the MAP file we load above).
-    n_flow_val = float(os.environ.get("ISMIP7_N_FLOW", "4.0"))
+    # Composite flow exponent (must match the inversion that produced the
+    # MAP file we load above). This branch: n=3 standard Glen (A4_FACTOR=1).
+    n_flow_val = float(os.environ.get("ISMIP7_N_FLOW", N_FLOW_DEFAULT))
     m_slide_val = float(os.environ.get("ISMIP7_M_SLIDE", "3.0"))
-    a4_factor = float(os.environ.get("ISMIP7_A4_FACTOR", "10.0"))
+    a4_factor = float(os.environ.get("ISMIP7_A4_FACTOR", A4_FACTOR_DEFAULT))
     n_flow = Constant(n_flow_val)
     m_slide = Constant(m_slide_val)
     tau_c = Constant(0.1)

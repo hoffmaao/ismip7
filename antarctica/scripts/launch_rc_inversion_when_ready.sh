@@ -42,7 +42,11 @@ FRICTION="${ISMIP7_FRICTION:-regularized_coulomb}"
 LOGDIR="$REPO/antarctica/results/logs"
 mkdir -p "$LOGDIR"
 STAMP="$(date +%Y%m%d_%H%M%S)"
-FTAG="$([ "$FRICTION" = "budd" ] && echo budd_inv || echo rc_inv)"
+# n-tag so n=3 and n=4 inversion logs/locks don't collide on one machine
+# (empty for n=4, matching the historical names; _n3 etc. otherwise).
+NFLOW="${ISMIP7_N_FLOW:-3.0}"
+NTAG="$(awk -v n="$NFLOW" 'BEGIN{ if ((n-4.0)^2 < 1e-12) print ""; else printf "_n%d", int(n+0.5) }')"
+FTAG="$([ "$FRICTION" = "budd" ] && echo budd_inv || echo rc_inv)${NTAG}"
 LOG="${LOG:-$LOGDIR/${FTAG}_${LC}_${STAMP}.log}"
 GATELOG="${GATELOG:-$LOGDIR/${FTAG}_${LC}_gate.log}"
 LOCK="${LOCK:-$LOGDIR/${FTAG}_${LC}.lock}"

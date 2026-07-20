@@ -1,5 +1,16 @@
 # Composite rheology for icepack2 dual-form SSA
 
+> **Branch `antarctica-n3`: standard Glen n=3.** This branch runs the flow
+> law at `n = 3` with `a4_factor = 1` (the composite "main" term is just
+> Glen, since `A0 = rate_factor(260 K)` is already the n=3 fluidity). The
+> n=4 Goldsby-Kohlstedt composite (`a4_factor ≈ 10`) is on the `antarctica`
+> branch. Everything below is written for the general exponent `n_flow`;
+> read `n_flow = 3`, `a4_factor = 1` here. MAPs inverted at n=3 carry an
+> `_n3` filename tag (`inversion_icepack2_budd_n3_<lc>.h5`) so they coexist
+> with the untagged n=4 MAPs; the forward and its inversion must use the
+> same `ISMIP7_N_FLOW` / `ISMIP7_A4_FACTOR`.
+
+
 The standard formulation lets the membrane stress and basal shear stress
 become unconstrained where the local ice thickness vanishes, so the SNES
 Jacobian goes singular at the calving front. To allow `h → 0` cleanly we
@@ -130,11 +141,11 @@ dependence — `ψ_fric` doesn't carry an `h` factor in either form).
 
 ## Defaults
 
-| env var                  | default            | used in                                 |
-|--------------------------|--------------------|-----------------------------------------|
-| `ISMIP7_N_FLOW`          | `4.0`              | both                                    |
-| `ISMIP7_M_SLIDE`         | `3.0`              | both                                    |
-| `ISMIP7_A4_FACTOR`       | `10.0`             | both                                    |
+| env var                  | default (this branch) | used in                              |
+|--------------------------|-----------------------|--------------------------------------|
+| `ISMIP7_N_FLOW`          | `3.0` (n=4 on `antarctica`) | both                           |
+| `ISMIP7_M_SLIDE`         | `3.0`                 | both                                 |
+| `ISMIP7_A4_FACTOR`       | `1.0` (10.0 on `antarctica`) | both                          |
 | `ISMIP7_COMPOSITE_ALPHA` | `1e-2` (forward, `budd`/`regularized_coulomb`; `1e-4` legacy) | `simulation.py` / `control/run.py` |
 | `ISMIP7_COMPOSITE_ALPHA` | `1e-2` (inversion) | `inversion_icepack2.py`                 |
 | `ISMIP7_H_REF`           | `100.0` m          | both                                    |

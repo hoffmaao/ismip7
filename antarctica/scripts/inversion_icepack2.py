@@ -77,6 +77,19 @@ from icepack2_tools.dual_friction import build_rc_residual, weertman_anchor
 lc = int(os.environ.get("ISMIP7_LC", "8000"))
 lc_coarse = int(os.environ.get("ISMIP7_LC_COARSE", str(lc * 10)))
 
+# Flow-law exponent default -- KEEP IN SYNC with simulation.py (the forward
+# that loads this MAP must use the same rheology). THIS BRANCH: n=3 standard
+# Glen, so no prefactor rescale (A4_FACTOR=1). See COMPOSITE_RHEOLOGY.md.
+N_FLOW_DEFAULT = "3.0"
+A4_FACTOR_DEFAULT = "1.0"
+
+
+def map_n_tag():
+    r"""`_n<N>` filename tag so MAPs at different flow exponents coexist;
+    n=4 keeps the legacy untagged name. Mirrors simulation.map_n_tag."""
+    n = float(os.environ.get("ISMIP7_N_FLOW", N_FLOW_DEFAULT))
+    return "" if abs(n - 4.0) < 1e-9 else f"_n{int(round(n))}"
+
 # Regularization
 GAMMA_THETA = 1.0
 GAMMA_PHI = 1.0
@@ -190,12 +203,13 @@ def main():
     calving_ids = tuple(bnd_ids["calving"])
 
     # ── Rheology ──
-    # Goldsby-Kohlstedt-style composite: dislocation creep n_flow=4 main
-    # + linear (n=1) regularization. Sliding stays at Weertman m_slide=3.
+    # Composite viscous rheology: flow exponent n_flow (this branch: n=3
+    # standard Glen) main term + linear (n=1) regularization. Sliding stays
+    # at Weertman m_slide=3.
     A0 = Constant(icepack.rate_factor(Constant(260.0)))
-    n_flow_val = float(os.environ.get("ISMIP7_N_FLOW", "4.0"))
+    n_flow_val = float(os.environ.get("ISMIP7_N_FLOW", N_FLOW_DEFAULT))
     m_slide_val = float(os.environ.get("ISMIP7_M_SLIDE", "3.0"))
-    a4_factor = float(os.environ.get("ISMIP7_A4_FACTOR", "10.0"))
+    a4_factor = float(os.environ.get("ISMIP7_A4_FACTOR", A4_FACTOR_DEFAULT))
     n_flow = Constant(n_flow_val)
     m_slide = Constant(m_slide_val)
     tau_c = Constant(0.1)
@@ -366,7 +380,8 @@ def main():
         )
     else:
         PETSc.Sys.Print("  Friction: Budd power-law dual (legacy action)")
-    map_tag = {"regularized_coulomb": "_rc", "budd": "_budd"}.get(FRICTION, "")
+    map_tag = ({"regularized_coulomb": "_rc", "budd": "_budd"}.get(FRICTION, "")
+               + map_n_tag())
 
     def build_F(theta_c, phi_c):
         # Residual closure (tau linear, grounded-only theta via exp(theta*He),

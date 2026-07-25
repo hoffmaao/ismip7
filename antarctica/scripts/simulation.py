@@ -226,6 +226,17 @@ def setup_model(restart_from=None):
         _ph = chk.load_function(mesh, name="log_fluidity")
         theta_f = Function(Q, name="theta"); theta_f.dat.data[:] = _th.dat.data_ro
         phi_f = Function(Q, name="phi");     phi_f.dat.data[:] = _ph.dat.data_ro
+        # Fluidity prior mean (physical thermomechanical field): the fluidity
+        # control is phi = log(A / A_prior), so the forward must reconstruct
+        # A = A_prior * exp(phi) with the SAME A_prior the inversion used. New
+        # MAPs and restart checkpoints carry it; older ones (constant-baseline
+        # MAPs) don't, and A4_base falls back to A0*a4_factor below.
+        try:
+            _ap = chk.load_function(mesh, name="fluidity_prior")
+            A_prior_f = Function(Q, name="fluidity_prior")
+            A_prior_f.dat.data[:] = _ap.dat.data_ro
+        except Exception:
+            A_prior_f = None
         if is_restart:
             # Self-contained restart: evolved geometry, frozen anchors, time.
             _b = chk.load_function(mesh, name="bed")
@@ -361,7 +372,18 @@ def setup_model(restart_from=None):
                 Constant(0.01),
             )
         )
-    A4_base = A0 * Constant(a4_factor)
+    # A4_base is the fluidity prior mean: the loaded thermomechanical A_prior
+    # (phi = log(A/A_prior)), or the legacy constant A0*a4_factor for MAPs that
+    # predate the physical prior. Must match the inversion that made the MAP.
+    if A_prior_f is not None:
+        A4_base = A_prior_f
+        PETSc.Sys.Print(
+            f"  Fluidity prior A_prior loaded [{float(A_prior_f.dat.data_ro.min()):.2f}, "
+            f"{float(A_prior_f.dat.data_ro.max()):.2f}]"
+        )
+    else:
+        A_prior_f = Function(Q, name="fluidity_prior").interpolate(A0 * Constant(a4_factor))
+        A4_base = A_prior_f
     A_map = A4_base * exp(phi_f)
     K_base = u_c / (phi_eff * tau_c) ** m_slide
     K_map = K_base * exp(-m_slide * theta_f)
@@ -705,6 +727,7 @@ def setup_model(restart_from=None):
         "phi": phi_f,
         "C_w0": C_w0,
         "N_ref": N_ref,
+        "A_prior": A_prior_f,
         "H_init": H_init,
         # Frozen t=0 apparent-MB correction (restart only; else None).
         "a_ref_mb": a_ref_mb,
@@ -749,6 +772,7 @@ def run_simulation(
     phi = ctx.get("phi")
     C_w0 = ctx.get("C_w0")
     N_ref = ctx.get("N_ref")
+    A_prior = ctx.get("A_prior")
     H_init_fn = ctx.get("H_init", h)
     friction = ctx.get("friction", "budd")
 
@@ -968,6 +992,8 @@ def run_simulation(
                 chk.save_function(C_w0, name="C_w0")
             if N_ref is not None:
                 chk.save_function(N_ref, name="N_ref")
+            if A_prior is not None:
+                chk.save_function(A_prior, name="fluidity_prior")
             if a_ref is not None:
                 chk.save_function(a_ref, name="a_ref_mb")
             chk.save_function(h_dg, name="thickness_dg")

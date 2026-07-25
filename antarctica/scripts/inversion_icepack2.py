@@ -536,6 +536,16 @@ def main():
         except fd.ConvergenceError:
             stop_manager()
             z.assign(z_backup)
+            if iteration_count[0] == 0:
+                # No successful evaluation yet: a large-obj + zero-grad return
+                # would make L-BFGS-B declare convergence at iteration 0 and
+                # write a theta=phi=0 garbage MAP. Fail loudly instead.
+                raise RuntimeError(
+                    "First forward solve failed - the inversion cannot start. "
+                    "For a small mesh (e.g. 32 km) try fewer MPI ranks (MUMPS "
+                    "is fragile at <~100 vertices/rank); also check the "
+                    "fluidity prior."
+                )
             PETSc.Sys.Print("  [!] Forward solve failed, returning large objective")
             return last_good_obj[0] * 10, np.zeros(2 * global_ndof)
         stop_manager()
@@ -555,6 +565,12 @@ def main():
             # as the forward guard: inflated objective + zero gradient
             # makes L-BFGS-B backtrack its line search.
             z.assign(z_backup)
+            if iteration_count[0] == 0:
+                raise RuntimeError(
+                    "First adjoint solve failed - the inversion cannot start. "
+                    "For a small mesh (e.g. 32 km) try fewer MPI ranks (MUMPS "
+                    "is fragile at <~100 vertices/rank)."
+                )
             PETSc.Sys.Print("  [!] Adjoint solve failed, returning large objective")
             return last_good_obj[0] * 10, np.zeros(2 * global_ndof)
         t_adj = perf_counter() - t_adj

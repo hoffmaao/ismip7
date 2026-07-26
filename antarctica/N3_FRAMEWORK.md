@@ -31,19 +31,42 @@ They carry an `_n3` filename tag so they coexist on disk with the n = 4 MAPs:
 - n = 3: `inversion_icepack2_budd_n3_<lc>.h5`
 
 The tag is produced by `map_n_tag()` (empty at n = 4 for backward
-compatibility). MAP h5 files are gitignored and regenerated per machine:
+compatibility). MAP h5 files are gitignored and regenerated per machine.
+
+## Physical fluidity prior (the n=3 inversion method)
+
+At n = 3 a constant fluidity baseline forces the control `phi = log(A/A0)` to
+carry all the spatial fluidity structure, which blows up (`phi` to ±36) since
+n = 3 lacks the n = 4 `a4×10` boost. So the n = 3 inversion follows the
+`mismip_time-dependent-da` (Recinos/fenics_ice) method: it regularizes the
+**deviation from a physical prior mean**, not amplitude.
+
+- **Fluidity**: `phi = log(A / A_prior)` where `A_prior(x)` is a
+  thermomechanical field from a fixed-velocity depth-averaged enthalpy solve
+  (`icepack2_tools/thermo_model.py`), driven by the observed geometry/velocity
+  and the ISMIP7 `tas` mean-annual surface temperature. Inspect it with
+  `antarctica/scripts/thermo_prior.py`.
+- **Friction**: `theta = log(C / C_w0)` on the balance anchor (already physical).
+- **Regularization**: Whittle-Matérn `gamma·(theta² + L²|∇theta|²)`
+  (`icepack2_tools/prior.py`) at physical `gamma≈1e4`. Env:
+  `ISMIP7_GAMMA_THETA`, `ISMIP7_GAMMA_PHI`, `ISMIP7_FLUIDITY_PRIOR` (thermo|legacy).
+
+The MAP stores `A_prior`; the forward loads it and rebuilds `A = A_prior·exp(phi)`.
+Result (32 km): controls physical (theta/phi p99 ≈ 3-4, was 14-17), misfit
+n=4-comparable, forward reproduces the inversion.
+
+**Run it** (small mesh → FEW ranks; MUMPS is fragile at ~90 vertices/rank, and
+a failed first solve now raises rather than writing a garbage theta=phi=0 MAP):
 
 ```
-# 32 km n=3 Budd MAP (gated launcher; logs -> results/logs/budd_inv_n3_*)
-ISMIP7_FRICTION=budd ISMIP7_LC=32000 ISMIP7_N_FLOW=3.0 \
-  ISMIP7_MESH=$PWD/antarctica/mesh/antarctica_320000_32000.msh \
-  NRANKS=16 MIN_FREE_GB=64 MIN_FREE_CORES=20 \
-  setsid nohup antarctica/scripts/launch_rc_inversion_when_ready.sh &
+# 32 km n=3 Budd MAP (-n 8; runs the thermo prior + Whittle-Matern by default)
+OMP_NUM_THREADS=1 ISMIP7_FRICTION=budd ISMIP7_LC=32000 ISMIP7_N_FLOW=3.0 \
+  ISMIP7_MESH=$PWD/antarctica/mesh/antarctica_320000_32000.msh ISMIP7_MAXITER=500 \
+  mpiexec -n 8 python antarctica/scripts/inversion_icepack2.py
 ```
 
-Once the MAP exists, the forward path (CTRL, projections, the core-experiment
-matrix) runs exactly as on `antarctica` - `ISMIP7_N_FLOW`/`ISMIP7_A4_FACTOR`
-carry through `setup_model`, and the launcher/log/lock names are n-tagged so
-n = 3 and n = 4 inversions can run on the same machine.
+The forward path (CTRL, projections, matrix) then runs as on `antarctica`;
+use `ISMIP7_MAP_CLIP=10` at n = 3 (the physical controls reach ~8; the default
+clip = 6 was tuned for garbage outliers).
 
 See `COMPOSITE_RHEOLOGY.md` for the full formulation.

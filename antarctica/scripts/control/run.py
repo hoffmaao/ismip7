@@ -26,7 +26,7 @@ _PROJECT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(
 sys.path.insert(0, _PROJECT)
 
 from firedrake import assemble, dx, Constant
-from simulation import setup_model, run_simulation, latest_checkpoint, PETSc, lc
+from simulation import setup_model, run_simulation, latest_checkpoint, RESULTS_DIR, PETSc, lc
 from icepack2_tools.forcing import (
     ISMIP7Atmosphere,
     load_racmo_smb_climatology,
@@ -175,6 +175,37 @@ def main():
             f"Auto-resume: {restart_from}" if restart_from
             else "Auto-resume: no prior checkpoint; cold start"
         )
+    # ISMIP6/ISMIP7 ctrl_proj convention: the control and the scenario
+    # projections MUST branch from the SAME initial state at the SAME time, so
+    # the frozen apparent-MB correction (a_ref, ISMIP7_APPARENT_MB) is identical
+    # in both and cancels EXACTLY in the projection-minus-control difference.
+    # experiment.py restarts every projection from hist_<esm>_<lc>_final.h5;
+    # the CTRL therefore does the same instead of cold-starting from the 2015
+    # inversion. A cold start balances a_ref to the pristine inversion geometry
+    # (net ~-95 Gt/yr here) while the projections balance to the drifted
+    # historical endpoint (~-777 Gt/yr): that ~680 Gt/yr baseline mismatch is
+    # frozen and leaks into proj-ctrl as a spurious ~160 mm SLE trend over
+    # 2015-2100 (it put our ssp126 well ABOVE the ISMIP6 envelope). Falls back
+    # to a cold start only when the historical endpoint is absent.
+    if restart_from is None:
+        tag_sfx = f"_{args.tag}" if args.tag else ""
+        hist = os.path.join(RESULTS_DIR, f"hist_{esm_tag}{tag_sfx}_{lc}_final.h5")
+        if os.path.exists(hist):
+            restart_from = hist
+            PETSc.Sys.Print(
+                f"  Branching CTRL from the historical endpoint (shared a_ref "
+                f"baseline with the projections): {os.path.basename(hist)}"
+            )
+        else:
+            PETSc.Sys.Print(
+                f"  WARNING: no historical endpoint {os.path.basename(hist)}; "
+                f"cold-starting from the inversion. The CTRL's apparent-MB "
+                f"baseline will NOT match hist-branched projections, so "
+                f"projection-minus-CTRL will carry a spurious trend. Run the "
+                f"historical first, or pass --restart, for a clean control."
+            )
+    if restart_from and not os.path.exists(restart_from):
+        raise FileNotFoundError(f"CTRL restart not found: {restart_from}")
 
     ctx = setup_model(restart_from=restart_from)
 

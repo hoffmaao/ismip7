@@ -65,8 +65,9 @@ OMP_NUM_THREADS=1 ISMIP7_FRICTION=budd ISMIP7_LC=32000 ISMIP7_N_FLOW=3.0 \
   mpiexec -n 8 python antarctica/scripts/inversion_icepack2.py
 ```
 
-The forward path (CTRL, projections, matrix) then runs as on `antarctica`;
-use `ISMIP7_MAP_CLIP=10` at n = 3 (the physical controls reach ~8; the default
-clip = 6 was tuned for garbage outliers).
+The forward path (CTRL, projections, matrix) then runs as on `antarctica`.
+The MAP clip default is n-aware: 10 when `ISMIP7_N_FLOW != 4` (the physical
+n = 3 controls reach ~8) and 6 at n = 4 (tuned for garbage outliers); set
+`ISMIP7_MAP_CLIP` explicitly to override.
 
 See `COMPOSITE_RHEOLOGY.md` for the full formulation.

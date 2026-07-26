@@ -383,8 +383,8 @@ def main():
 
     # The residual laws need a fixed Weertman anchor C_w0 (driving-stress
     # balance); theta then inverts as an O(1) log-adjustment on top of it.
+    C_w0 = weertman_anchor(H, s, u_obs, m_slide_val, Q)
     if USE_RESIDUAL:
-        C_w0 = weertman_anchor(H, s, u_obs, m_slide_val, Q)
         law_name = ("Budd N_hat (exact-zero shelf, delta="
                     f"{BUDD_DELTA:.3f}, alpha_gl={ALPHA_GL:.2f})"
                     if FRICTION == "budd"
@@ -395,7 +395,6 @@ def main():
             f"{float(C_w0.dat.data_ro.max()):.2e}]"
         )
     else:
-        C_w0 = weertman_anchor(H, s, u_obs, m_slide_val, Q)
         PETSc.Sys.Print("  Friction: Budd power-law dual (legacy action)")
 
     # Physical FLUIDITY PRIOR MEAN A_prior(x): a fixed-velocity thermomechanical

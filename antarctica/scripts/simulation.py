@@ -329,11 +329,14 @@ def setup_model(restart_from=None):
                 s.interpolate(max_value(b + H, (Constant(1.0) - rho_ratio) * H))
 
     # Clip the log-adjustments to a sane band. theta/phi are O(1) in a
-    # converged MAP, so anything beyond ISMIP7_MAP_CLIP (default 6) is
-    # optimization noise from an unconverged checkpoint (e.g. the rc_500 MAP
-    # snapshot carries ~700 nodes with |.| up to 23 -> exp() ~1e10 local
-    # singularities the diagnostic SNES cannot solve through). Set 0 to disable.
-    map_clip = float(os.environ.get("ISMIP7_MAP_CLIP", "6.0"))
+    # converged MAP, so anything far beyond that is optimization noise from an
+    # unconverged checkpoint (e.g. the rc_500 MAP snapshot carries ~700 nodes
+    # with |.| up to 23 -> exp() ~1e10 local singularities the diagnostic SNES
+    # cannot solve through). Default 6 for n=4 MAPs; the physical n=3 controls
+    # legitimately reach ~8, so default 10 otherwise. Set 0 to disable.
+    _n_flow_env = float(os.environ.get("ISMIP7_N_FLOW", N_FLOW_DEFAULT))
+    _map_clip_default = "6.0" if _n_flow_env == 4.0 else "10.0"
+    map_clip = float(os.environ.get("ISMIP7_MAP_CLIP", _map_clip_default))
     if map_clip > 0.0:
         n_clip = 0
         for fld in (theta_f, phi_f):
@@ -384,6 +387,10 @@ def setup_model(restart_from=None):
     else:
         A_prior_f = Function(Q, name="fluidity_prior").interpolate(A0 * Constant(a4_factor))
         A4_base = A_prior_f
+        PETSc.Sys.Print(
+            f"  Fluidity prior: checkpoint has no fluidity_prior; using LEGACY "
+            f"constant baseline A0*a4_factor = {float(A0) * a4_factor:.2f}"
+        )
     A_map = A4_base * exp(phi_f)
     K_base = u_c / (phi_eff * tau_c) ** m_slide
     K_map = K_base * exp(-m_slide * theta_f)

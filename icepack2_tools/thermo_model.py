@@ -205,5 +205,11 @@ def compute_fluidity_prior(u, h, s, bed, C, acc, T_srf, p=None, max_picard=60,
         if dA < rtol:
             _print("    thermo prior converged.")
             break
+    else:
+        PETSc.Sys.Print(
+            f"    WARNING: thermo fluidity prior did NOT converge after "
+            f"{max_picard} Picard iterations (last dA={dA:.2e} >= rtol={rtol:.1e}); "
+            f"using the partially-converged A_prior."
+        )
     return A_k
 

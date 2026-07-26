@@ -147,7 +147,8 @@ def main():
     parser.add_argument("--snes-log", default=None,
                         help="route SNES monitor output to this file (default: stdout)")
     parser.add_argument("--restart", default=os.environ.get("ISMIP7_RESTART"),
-                        help="restart from a checkpoint .h5 (default: cold start)")
+                        help="restart from a checkpoint .h5 (default: branch from "
+                             "the historical endpoint, else cold start)")
     parser.add_argument("--tag", default=os.environ.get("ISMIP7_RUN_TAG", ""),
                         help="suffix on experiment_name so output files are distinct")
     parser.add_argument("--checkpoint-interval", type=int,

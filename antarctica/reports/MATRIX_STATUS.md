@@ -59,8 +59,12 @@ front-emptying is continuous.
 ## Open items (carried in the per-core reports)
 
 1. **~9% aSMB unit inflation** (`forcing.py:smb_kgm2s_to_myr`) - a real
-   pending decision; inflates every ESM SMB anomaly. The 32 km ssp585 sitting
-   above the ISMIP6 envelope on the SMB-gain side is consistent with it.
+   pending decision; inflates every ESM SMB anomaly. (The matrix sitting
+   above the ISMIP6 envelope, originally attributed here, turned out to be
+   the CTRL cold-starting from the 2015 inversion with a mismatched frozen
+   apparent-MB baseline; `control/run.py` now branches the CTRL from the
+   historical endpoint. Cores 9/10 in this record predate that fix, so
+   their proj-CTRL differences carry the spurious trend.)
 2. **2014→2015 projection handoff** starts projections at the historical
    final's 2014.0 with a one-year zero-anomaly gap.
 3. **Runaway-detector peak clause** flags isolated one-step discharge spikes

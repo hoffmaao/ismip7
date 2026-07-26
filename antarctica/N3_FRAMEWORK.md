@@ -66,7 +66,11 @@ OMP_NUM_THREADS=1 ISMIP7_FRICTION=budd ISMIP7_LC=32000 ISMIP7_N_FLOW=3.0 \
   mpiexec -n 8 python antarctica/scripts/inversion_icepack2.py
 ```
 
-The forward path (CTRL, projections, matrix) then runs as on `antarctica`.
+The forward path (CTRL, projections, matrix) then runs as on `antarctica`,
+with `ISMIP7_RUN_TAG=n3` set so the n=3 outputs (`hist_<esm>_n3_...`,
+`ctrl2015_<esm>_n3_...`, ...) coexist with the n=4 results and the
+historical -> projection / CTRL restart chain stays within the n=3 line
+(see the run-management flags in `antarctica/README.md` §6).
 The MAP clip default is n-aware: 10 when `ISMIP7_N_FLOW != 4` (the physical
 n = 3 controls reach ~8) and 6 at n = 4 (tuned for garbage outliers); set
 `ISMIP7_MAP_CLIP` explicitly to override.

@@ -291,6 +291,8 @@ python scripts/check_ismip6_track.py results/<exp>_timeseries.csv
 # exit code 0 iff no FAIL rows, so launch gates can chain on it
 ```
 
+For the forced response, `scripts/compare_ismip6.py <proj.csv> <ctrl.csv>` overlays our projection-minus-CTRL sea-level contribution on the ISMIP6 ensemble to check broad consistency (auto-selects the scenario pool; `--exps` to override).
+
 ### Environment knobs (all forward runs)
 
 | Env var | Meaning | Default |

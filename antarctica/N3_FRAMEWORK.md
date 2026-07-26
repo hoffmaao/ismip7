@@ -49,7 +49,8 @@ n = 3 lacks the n = 4 `a4×10` boost. So the n = 3 inversion follows the
 - **Friction**: `theta = log(C / C_w0)` on the balance anchor (already physical).
 - **Regularization**: Whittle-Matérn `gamma·(theta² + L²|∇theta|²)`
   (`icepack2_tools/prior.py`) at physical `gamma≈1e4`. Env:
-  `ISMIP7_GAMMA_THETA`, `ISMIP7_GAMMA_PHI`, `ISMIP7_FLUIDITY_PRIOR` (thermo|legacy).
+  `ISMIP7_GAMMA_THETA`, `ISMIP7_GAMMA_PHI`, `ISMIP7_L_REG` (7.5 km),
+  `ISMIP7_FLUIDITY_PRIOR` (thermo|legacy).
 
 The MAP stores `A_prior`; the forward loads it and rebuilds `A = A_prior·exp(phi)`.
 Result (32 km): controls physical (theta/phi p99 ≈ 3-4, was 14-17), misfit

@@ -11,15 +11,12 @@ from firedrake import (
     Function,
     max_value,
     sqrt,
-    inner,
-    grad,
     derivative,
     dx,
     dS,
     ds,
     split,
     assemble,
-    Mesh,
     FunctionSpace,
     VectorFunctionSpace,
     TensorFunctionSpace,
@@ -36,7 +33,6 @@ from icepack2.constants import (
     ice_density as rho_I,
     water_density as rho_W,
     gravity as g,
-    glen_flow_law as n_glen_val,
 )
 
 # SI densities for diagnostics (icepack2 constants are in MPa-m-yr units)

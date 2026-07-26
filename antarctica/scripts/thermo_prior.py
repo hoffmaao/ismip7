@@ -22,9 +22,8 @@ import os
 import sys
 import argparse
 
-import numpy as np
 import firedrake as fd
-from firedrake import Constant, FunctionSpace, VectorFunctionSpace, Function, max_value, sqrt
+from firedrake import Constant, FunctionSpace, VectorFunctionSpace, Function, max_value
 from firedrake.petsc import PETSc
 import rasterio
 import icepack

@@ -32,7 +32,7 @@ This mirrors `icepack2/test/dome_test.py` and is used in
 | `h`     | ice thickness (CG1 control variable)                     | m         |
 | `s`     | upper surface elevation                                  | m         |
 | `b`     | bed elevation                                            | m         |
-| `A`     | depth-averaged ice fluidity = `A₀ · exp(φ)`              | MPa⁻ⁿ·yr⁻¹|
+| `A`     | depth-averaged ice fluidity = `A_prior · exp(φ)`         | MPa⁻ⁿ·yr⁻¹|
 | `K`     | sliding coefficient = `K_base · exp(−n·θ)`               | (yr/m)·MPa⁻ⁿ |
 | `K_base`| baseline sliding coefficient = `u_c / (φ_eff · τ_c)ⁿ`    | (yr/m)·MPa⁻ⁿ |
 | `φ_eff` | effective-pressure fraction in `[0.01, 1]`               | —         |
@@ -104,12 +104,19 @@ with `d = min(0, s − h)` the draft below sea level.
 The main (nonlinear) rheology uses the spatially-varying inverted controls:
 
 ```
-A      = A_4 · exp(φ)                          where A_4 = a4_factor · A₀
+A      = A_prior · exp(φ)                      A_prior(x) = fluidity prior mean
 K      = K_base · exp(−m_slide · θ)
 K_base = u_c / (φ_eff · τ_c)^{m_slide}
 φ_eff  = max(0.01, 1 − ρ_W g max(0, −b) / (ρ_I g max(H, 1)))
-a4_factor ≈ 10           # so A_4·τ_c^4 ≈ A_3·τ_c^3 at τ = τ_c (Glen ↔ GK crossover)
 ```
+
+`A_prior(x)` is the thermomechanical fluidity prior mean the inversion
+computes and stores in the MAP checkpoint, so the control
+`φ = log(A / A_prior)` is a deviation from a physical field (see
+`antarctica/N3_FRAMEWORK.md` for the prior method). MAPs that predate the
+physical prior carry no `fluidity_prior` and the forward falls back to the
+legacy constant baseline `a4_factor · A₀` (`a4_factor ≈ 10` on `antarctica`,
+so `A_4·τ_c⁴ ≈ A_3·τ_c³` at `τ = τ_c`; `1` on this branch).
 
 The linear rheology is obtained by linearizing the main forms about the
 reference stress `τ_c`:

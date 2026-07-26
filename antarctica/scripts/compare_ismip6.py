@@ -15,10 +15,11 @@ contribution in mm SLE (positive = sea-level rise). Both CSVs come from
 run_simulation's timeseries output (vaf_mm_sle is already mm SLE on the
 standard 3.625e14 m^2 ocean).
 
-The experiment mapping is deliberately loose: our ssp585-class forcing is
-compared against the RCP8.5-class ISMIP6 experiments by default (exp01-05).
-The point is magnitude and envelope membership, not exact forcing
-equivalence - pass --exps to narrow it.
+The experiment pool is auto-selected from the projection filename's scenario
+(ssp126 -> the RCP2.6 members; ssp370/ssp585 -> the SSP5-8.5 + RCP8.5
+members, per Seroussi et al. 2020). The mapping is deliberately best-effort:
+the point is magnitude and envelope membership, not exact forcing
+equivalence - pass --exps to override the pool explicitly.
 
 Usage:
     python compare_ismip6.py <proj.csv> <ctrl.csv> [--exps exp05,exp07]
@@ -192,17 +193,21 @@ def main():
 
     col = grid[:, -1]
     col = col[np.isfinite(col)]
+    if not col.size:
+        print(f"\n  no ensemble member covers year {yrs[-1]:.1f}; cannot "
+              f"evaluate envelope membership")
+        sys.exit(2)
     lo, hi = float(col.min()), float(col.max())
     med = float(np.median(col))
     spread = max(hi - lo, 1e-9)
     ov = float(ours[-1])
-    inside = col.size and (lo <= ov <= hi)
+    inside = lo <= ov <= hi
     print(f"\n  at {yrs[-1]:.1f}: ours {ov:+.2f} mm vs ensemble "
           f"[{lo:+.2f}, {hi:+.2f}] (median {med:+.2f}, {col.size} members) -> "
           f"{'INSIDE ensemble envelope' if inside else 'OUTSIDE ensemble envelope'}")
     # SLR here is the sea-level contribution (+ = ice loss). Give a directional
     # parametrization hint when outside, so 'check how we parametrize' is actionable.
-    if not inside and col.size:
+    if not inside:
         if ov < lo:
             gap = (lo - ov) / spread
             print(f"  BELOW the ensemble by {lo - ov:.2f} mm ({gap:.1f}x the "
@@ -216,7 +221,7 @@ def main():
                   f"ensemble spread): too much sea-level contribution -> too "
                   f"much loss. Check melt (K_melt too high), or numerical "
                   f"discharge/instability at the front.")
-    elif inside and col.size:
+    else:
         pctl = 100.0 * float((col < ov).sum()) / col.size
         print(f"  broadly consistent (~{pctl:.0f}th percentile of the ensemble).")
     sys.exit(0 if inside else 1)

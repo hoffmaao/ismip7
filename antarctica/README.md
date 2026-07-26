@@ -259,16 +259,22 @@ mpiexec -n 12 python scripts/projections/ssp585_cesm_waccm.py
 Other scenario drivers in `scripts/projections/` (ssp126/ssp370 × CESM2-WACCM /
 MRI-ESM2-0, plus `ocx.py`) are thin shims over `scripts/experiment.py` and
 follow the same pattern. Historical spin-up drivers are in `scripts/historical/`;
-run one first to produce `results/hist_<esm>_<lc>_final.h5`, which the
-projections pick up automatically via `ISMIP7_RESTART` (otherwise they
-cold-start from BedMachine).
+run one first to produce `results/hist_<esm>_<lc>_final.h5`: the projections
+AND the control both branch from it automatically, so they share the same t=0
+state and the frozen apparent-MB correction cancels exactly in
+projection-minus-control (the ISMIP6 ctrl_proj convention). Without it a
+projection cold-starts from BedMachine, and the control cold-starts with a
+loud warning that its apparent-MB baseline will not match hist-branched
+projections (a spurious trend in proj-CTRL).
 
 Restart / run-management flags on the control driver: `--restart <ckpt>`
 (or `ISMIP7_RESTART`) resumes from a checkpoint; `ISMIP7_AUTO_RESUME=1`
 picks up the newest checkpoint for the experiment unattended; `--tag`
-(or `ISMIP7_RUN_TAG`) suffixes the experiment name so a tagged run keeps -
-and resumes - its own output files; `--checkpoint-interval` sets the
-step-count fallback cadence. Checkpoints are self-contained (mesh, geometry,
+(or `ISMIP7_RUN_TAG`, honored by every forward driver, not just the control)
+suffixes the experiment name so a tagged method line (e.g. the n=3 matrix)
+keeps - and resumes - its own output files, with the historical → projection
+/ CTRL restart chain staying within that line; `--checkpoint-interval` sets
+the step-count fallback cadence. Checkpoints are self-contained (mesh, geometry,
 inversion fields, and the full `(u, M, τ)` solver state), so restarts are
 seamless at any MPI rank count. Each checkpoint also records the friction law
 and whether an apparent-MB correction was active; a resume refuses to start
@@ -299,8 +305,9 @@ python scripts/check_ismip6_track.py results/<exp>_timeseries.csv
 | `ISMIP7_OUTPUT_INTERVAL` | write a timeseries/log row every N steps | `10` |
 | `ISMIP7_CHECKPOINT_EVERY_YR` | checkpoint cadence in model years (`0` = use step count) | `5` |
 | `ISMIP7_KEEP_CHECKPOINTS` | periodic checkpoints kept on disk (plus `_final.h5`) | `3` |
-| `ISMIP7_RESTART` | restart checkpoint | `hist_<esm>_<lc>_final.h5` if present |
+| `ISMIP7_RESTART` | restart checkpoint | `hist_<esm>[_<tag>]_<lc>_final.h5` if present |
 | `ISMIP7_AUTO_RESUME` | set to resume from the newest own checkpoint unattended | _(unset)_ |
+| `ISMIP7_RUN_TAG` | experiment-name suffix for a parallel method line (see run-management flags above) | _(unset)_ |
 | `ISMIP7_APPARENT_MB` | apparent-mass-balance init: `1`/`balance` zeroes the t=0 thickness tendency (ISMIP6 ctrl_proj-style), `div` cancels only the flux divergence | _(unset)_ |
 | `ISMIP7_FIXED_FRONT` | set to hold the calving front at the t=0 extent (inflow beyond it tallied as calving) | _(unset)_ |
 | `ISMIP7_LEGACY_TRANSPORT` | set to restore the pre-Jul-2026 CG-projection transport scheme | _(unset)_ |

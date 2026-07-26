@@ -102,9 +102,16 @@ def run_core_experiment(*, core, title, name, esm, scenario,
     output_interval = int(os.environ.get("ISMIP7_OUTPUT_INTERVAL", "10"))
 
     esm_tag = esm.lower().replace("-", "_")
+    # Optional run tag (ISMIP7_RUN_TAG / --tag) suffixed on the experiment name
+    # so parallel method lines (e.g. n=3 vs n=4) write distinct output files
+    # instead of clobbering each other. It also selects the tagged historical
+    # to restart from, keeping the hist->projection chain within one line.
+    tag = os.environ.get("ISMIP7_RUN_TAG", "")
+    tag_sfx = f"_{tag}" if tag else ""
+    experiment_name = f"{name}{tag_sfx}"
     restart = os.environ.get("ISMIP7_RESTART")
     if restart is None and restart_from_hist:
-        cand = os.path.join(RESULTS_DIR, f"hist_{esm_tag}_{lc}_final.h5")
+        cand = os.path.join(RESULTS_DIR, f"hist_{esm_tag}{tag_sfx}_{lc}_final.h5")
         restart = cand if os.path.exists(cand) else None
     if restart and not os.path.exists(restart):
         raise FileNotFoundError(f"ISMIP7_RESTART not found: {restart}")
@@ -173,7 +180,7 @@ def run_core_experiment(*, core, title, name, esm, scenario,
 
     results = run_simulation(
         ctx,
-        experiment_name=name,
+        experiment_name=experiment_name,
         t_start=t_start,
         t_end=t_end,
         dt=dt,

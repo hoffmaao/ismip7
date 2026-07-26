@@ -8,6 +8,11 @@ Follows the Kangerd demo pattern from Shapero's dual-problems repo:
 - snes_divergence_tolerance = -1
 - Sliding coefficient includes exp(m*theta)
 
+Controls are log-deviations from PHYSICAL prior means - theta = log(C/C_w0)
+on the balance-friction anchor, phi = log(A/A_prior) on a thermomechanical
+fluidity prior - regularized with the fenics_ice Whittle-Matern prior
+(icepack2_tools/prior.py). See antarctica/N3_FRAMEWORK.md.
+
 Usage:
     python scripts/inversion_icepack2.py
     mpiexec -n 16 python scripts/inversion_icepack2.py
@@ -24,11 +29,8 @@ from firedrake import (
     max_value,
     sqrt,
     inner,
-    grad,
     derivative,
     dx,
-    ds,
-    dS,
     split,
     assemble,
     Mesh,
@@ -59,8 +61,6 @@ from icepack2.constants import (
     ice_density as rho_I,
     water_density as rho_W,
     gravity as g,
-    glen_flow_law as n_glen_val,
-    weertman_sliding_law as m_weertman,
 )
 import colorcet as cc
 import matplotlib.pyplot as plt

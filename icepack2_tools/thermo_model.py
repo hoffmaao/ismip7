@@ -28,7 +28,7 @@ All nonlinear couplings (A <-> u <-> heating) are Picard-lagged by the caller.
 """
 import numpy as np
 import firedrake as fd
-from firedrake import (Constant, Function, inner, grad, dx, dS, ds, sqrt, sym,
+from firedrake import (Constant, inner, grad, dx, dS, ds, sqrt, sym,
                        max_value, min_value, avg, jump)
 from icepack.constants import (ice_density as rho_I, heat_capacity as c_heat,
                                thermal_diffusivity as alpha_th, latent_heat as L_heat,

@@ -204,6 +204,13 @@ ISMIP7_LC=2500 mpiexec -n 12 python scripts/inversion_icepack2.py
 # → mesh/inversion_icepack2_budd_n3_<LC>.h5   (the MAP checkpoint every forward run loads)
 ```
 
+The controls are log-deviations from physical prior means: `θ = log(C/C_w0)`
+on the balance-friction anchor and `φ = log(A/A_prior)` on a thermomechanical
+fluidity prior the inversion computes at setup (and stores in the MAP). That
+prior solve reads the §1 RACMO SMB **and the §2 ISMIP7 `tas` climatology**, so
+download the §2 forcing before inverting; see `N3_FRAMEWORK.md` for the
+method (and `ISMIP7_FLUIDITY_PRIOR=legacy` to skip it).
+
 The friction law is selected with `ISMIP7_FRICTION` (`budd`, the default, or
 `regularized_coulomb`); the MAP checkpoint name carries a matching `_budd` /
 `_rc` tag, and the forward runs load the checkpoint for whichever law they are

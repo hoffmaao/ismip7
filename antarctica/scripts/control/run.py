@@ -173,7 +173,7 @@ def main():
         restart_from = latest_checkpoint(experiment_name)
         PETSc.Sys.Print(
             f"Auto-resume: {restart_from}" if restart_from
-            else "Auto-resume: no prior checkpoint; cold start"
+            else "Auto-resume: no prior checkpoint"
         )
     # ISMIP6/ISMIP7 ctrl_proj convention: the control and the scenario
     # projections MUST branch from the SAME initial state at the SAME time, so

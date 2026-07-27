@@ -87,9 +87,10 @@ def main():
     PETSc.Sys.Print("\nCore Experiment 11: OCX (observationally constrained)")
     PETSc.Sys.Print(f"  Period: {T_START}-{T_END}, dt={DT}")
 
+    _tag = os.environ.get("ISMIP7_RUN_TAG", "")
     run_simulation(
         ctx,
-        experiment_name="ocx",
+        experiment_name="ocx" + (f"_{_tag}" if _tag else ""),
         t_start=T_START,
         t_end=T_END,
         dt=DT,

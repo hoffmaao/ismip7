@@ -27,10 +27,21 @@ MESH_DIR = os.path.join(_ANT, "mesh")
 RESULTS_DIR = os.path.join(_ANT, "results")
 DATA_DIR = os.path.join(_ANT, "data")
 
+N_FLOW_DEFAULT = "3.0"
+
+
+def map_n_tag():
+    r"""`_n<N>` filename tag so MAPs at different flow exponents coexist;
+    n=4 keeps the legacy untagged name. Mirrors simulation.map_n_tag."""
+    n = float(os.environ.get("ISMIP7_N_FLOW", N_FLOW_DEFAULT))
+    return "" if abs(n - 4.0) < 1e-9 else f"_n{int(round(n))}"
+
+
 lc = int(os.environ.get("ISMIP7_LC", "2500"))
 lc_coarse = int(os.environ.get("ISMIP7_LC_COARSE", "64000"))
 friction = os.environ.get("ISMIP7_FRICTION", "budd")
-map_tag = {"regularized_coulomb": "_rc", "budd": "_budd"}.get(friction, "")
+map_tag = ({"regularized_coulomb": "_rc", "budd": "_budd"}.get(friction, "")
+           + map_n_tag())
 oi_version = os.environ.get("ISMIP7_OI_VERSION", "30_sep")
 root = _find_ismip7_data()
 

@@ -11,15 +11,12 @@ from firedrake import (
     Function,
     max_value,
     sqrt,
-    inner,
-    grad,
     derivative,
     dx,
     dS,
     ds,
     split,
     assemble,
-    Mesh,
     FunctionSpace,
     VectorFunctionSpace,
     TensorFunctionSpace,
@@ -36,7 +33,6 @@ from icepack2.constants import (
     ice_density as rho_I,
     water_density as rho_W,
     gravity as g,
-    glen_flow_law as n_glen_val,
 )
 
 # SI densities for diagnostics (icepack2 constants are in MPa-m-yr units)
@@ -53,6 +49,26 @@ sys.path.insert(0, os.path.dirname(_ROOT))
 
 lc = int(os.environ.get("ISMIP7_LC", "2500"))
 lc_coarse = int(os.environ.get("ISMIP7_LC_COARSE", "64000"))
+
+# Flow-law exponent for the composite viscous rheology. THIS BRANCH
+# (antarctica-n3) runs STANDARD GLEN n=3: A0 = rate_factor(260 K) is
+# already the n=3 fluidity, so the composite main term needs no prefactor
+# rescale (A4_FACTOR_DEFAULT = 1). The n=4 Goldsby-Kohlstedt composite
+# (a4_factor ~ 10, so A_4 tau_c^4 ~ A_3 tau_c^3 at tau_c) lives on the
+# `antarctica` branch. Override either per-run with ISMIP7_N_FLOW /
+# ISMIP7_A4_FACTOR; the two must match between an inversion and the forward
+# runs that load its MAP.
+N_FLOW_DEFAULT = "3.0"
+A4_FACTOR_DEFAULT = "1.0"
+
+
+def map_n_tag():
+    r"""Filename tag distinguishing MAPs inverted at different flow
+    exponents so n=3 and n=4 MAPs coexist on disk. n=4 keeps the legacy
+    untagged name (backward compatible with the `antarctica` MAPs); any
+    other n gets `_n<N>` (e.g. `_n3`)."""
+    n = float(os.environ.get("ISMIP7_N_FLOW", N_FLOW_DEFAULT))
+    return "" if abs(n - 4.0) < 1e-9 else f"_n{int(round(n))}"
 
 
 def find_file(d, p):
@@ -113,7 +129,8 @@ def setup_model(restart_from=None):
     # "budd_legacy" keeps the old phi_eff action Budd (residual shelf drag).
     use_residual = friction in ("regularized_coulomb", "budd")
     use_rc = use_residual  # geometry/alpha/h_clamp handling is shared
-    map_tag = {"regularized_coulomb": "_rc", "budd": "_budd"}.get(friction, "")
+    map_tag = ({"regularized_coulomb": "_rc", "budd": "_budd"}.get(friction, "")
+               + map_n_tag())
 
     is_restart = restart_from is not None
     inv_fn = os.path.join(MESH_DIR, f"inversion_icepack2{map_tag}_{lc}.h5")
@@ -205,6 +222,17 @@ def setup_model(restart_from=None):
         _ph = chk.load_function(mesh, name="log_fluidity")
         theta_f = Function(Q, name="theta"); theta_f.dat.data[:] = _th.dat.data_ro
         phi_f = Function(Q, name="phi");     phi_f.dat.data[:] = _ph.dat.data_ro
+        # Fluidity prior mean (physical thermomechanical field): the fluidity
+        # control is phi = log(A / A_prior), so the forward must reconstruct
+        # A = A_prior * exp(phi) with the SAME A_prior the inversion used. New
+        # MAPs and restart checkpoints carry it; older ones (constant-baseline
+        # MAPs) don't, and A4_base falls back to A0*a4_factor below.
+        try:
+            _ap = chk.load_function(mesh, name="fluidity_prior")
+            A_prior_f = Function(Q, name="fluidity_prior")
+            A_prior_f.dat.data[:] = _ap.dat.data_ro
+        except Exception:
+            A_prior_f = None
         if is_restart:
             # Self-contained restart: evolved geometry, frozen anchors, time.
             _b = chk.load_function(mesh, name="bed")
@@ -297,11 +325,14 @@ def setup_model(restart_from=None):
                 s.interpolate(max_value(b + H, (Constant(1.0) - rho_ratio) * H))
 
     # Clip the log-adjustments to a sane band. theta/phi are O(1) in a
-    # converged MAP, so anything beyond ISMIP7_MAP_CLIP (default 6) is
-    # optimization noise from an unconverged checkpoint (e.g. the rc_500 MAP
-    # snapshot carries ~700 nodes with |.| up to 23 -> exp() ~1e10 local
-    # singularities the diagnostic SNES cannot solve through). Set 0 to disable.
-    map_clip = float(os.environ.get("ISMIP7_MAP_CLIP", "6.0"))
+    # converged MAP, so anything far beyond that is optimization noise from an
+    # unconverged checkpoint (e.g. the rc_500 MAP snapshot carries ~700 nodes
+    # with |.| up to 23 -> exp() ~1e10 local singularities the diagnostic SNES
+    # cannot solve through). Default 6 for n=4 MAPs; the physical n=3 controls
+    # legitimately reach ~8, so default 10 otherwise. Set 0 to disable.
+    _n_flow_env = float(os.environ.get("ISMIP7_N_FLOW", N_FLOW_DEFAULT))
+    _map_clip_default = "6.0" if _n_flow_env == 4.0 else "10.0"
+    map_clip = float(os.environ.get("ISMIP7_MAP_CLIP", _map_clip_default))
     if map_clip > 0.0:
         n_clip = 0
         for fld in (theta_f, phi_f):
@@ -315,11 +346,11 @@ def setup_model(restart_from=None):
             )
 
     A0 = Constant(icepack.rate_factor(Constant(260.0)))
-    # Composite Goldsby-Kohlstedt-style exponents (must match the inversion
-    # that produced the MAP file we load above).
-    n_flow_val = float(os.environ.get("ISMIP7_N_FLOW", "4.0"))
+    # Composite flow exponent (must match the inversion that produced the
+    # MAP file we load above). This branch: n=3 standard Glen (A4_FACTOR=1).
+    n_flow_val = float(os.environ.get("ISMIP7_N_FLOW", N_FLOW_DEFAULT))
     m_slide_val = float(os.environ.get("ISMIP7_M_SLIDE", "3.0"))
-    a4_factor = float(os.environ.get("ISMIP7_A4_FACTOR", "10.0"))
+    a4_factor = float(os.environ.get("ISMIP7_A4_FACTOR", A4_FACTOR_DEFAULT))
     n_flow = Constant(n_flow_val)
     m_slide = Constant(m_slide_val)
     tau_c = Constant(0.1)
@@ -340,12 +371,27 @@ def setup_model(restart_from=None):
                 Constant(0.01),
             )
         )
-    A4_base = A0 * Constant(a4_factor)
+    # A4_base is the fluidity prior mean: the loaded thermomechanical A_prior
+    # (phi = log(A/A_prior)), or the legacy constant A0*a4_factor for MAPs that
+    # predate the physical prior. Must match the inversion that made the MAP.
+    if A_prior_f is not None:
+        A4_base = A_prior_f
+        PETSc.Sys.Print(
+            f"  Fluidity prior A_prior loaded [{float(A_prior_f.dat.data_ro.min()):.2f}, "
+            f"{float(A_prior_f.dat.data_ro.max()):.2f}]"
+        )
+    else:
+        A_prior_f = Function(Q, name="fluidity_prior").interpolate(A0 * Constant(a4_factor))
+        A4_base = A_prior_f
+        PETSc.Sys.Print(
+            f"  Fluidity prior: checkpoint has no fluidity_prior; using LEGACY "
+            f"constant baseline A0*a4_factor = {float(A0) * a4_factor:.2f}"
+        )
     A_map = A4_base * exp(phi_f)
     K_base = u_c / (phi_eff * tau_c) ** m_slide
     K_map = K_base * exp(-m_slide * theta_f)
 
-    # Composite rheology: Goldsby-Kohlstedt dislocation creep (n=n_flow=4)
+    # Composite rheology: dislocation creep (n=n_flow, this branch n=3)
     # + α · linear regularizer (n=1) with a CONSTANT reference thickness
     # H_ref. This pins M where h → 0 so the SNES Jacobian stays
     # nonsingular at the calving front and h is allowed to reach zero.
@@ -392,8 +438,15 @@ def setup_model(restart_from=None):
         # backstop.
         ocean_drag = float(os.environ.get("ISMIP7_OCEAN_DRAG", "1e-2"))
         h_ocean = float(os.environ.get("ISMIP7_H_OCEAN", "10.0"))
-        u_lim = float(os.environ.get("ISMIP7_U_LIM", "0.0"))
-        k_lim = float(os.environ.get("ISMIP7_K_LIM", "1e-3"))
+        # Speed limiter: structurally present (threshold u_lim > 0) but INERT
+        # by default - k_lim is a live Constant at 0 (term vanishes
+        # identically; the cold continuation is unaffected, unlike a built-in
+        # limiter, which breaks it). The run loop's rescue ladder raises
+        # k_lim to ISMIP7_K_LIM for trust-region rescue solves at wall
+        # geometries (runaway front nodes), then zeroes it again.
+        u_lim = float(os.environ.get("ISMIP7_U_LIM", "2e4"))
+        k_lim = Constant(0.0)
+        k_lim_rescue = float(os.environ.get("ISMIP7_K_LIM", "1e-3"))
         # GL-gated coercivity only for Budd (RC keeps its established form).
         alpha_gl = (float(os.environ.get("ISMIP7_ALPHA_GL", "0.5"))
                     if friction == "budd" else 0.0)
@@ -539,11 +592,60 @@ def setup_model(restart_from=None):
     # ISMIP7_CONTINUATION_STEPS (default 8) → 2× → 4×.
     base_steps = int(os.environ.get("ISMIP7_CONTINUATION_STEPS", "8"))
     z_init = z.copy(deepcopy=True)
-    PETSc.Sys.Print(
-        f"Initial diagnostic solve (continuation n_flow 1→{n_flow_val:.1f}, "
-        f"m_slide 1→{m_slide_val:.1f})..."
-    )
-    for attempt, steps in enumerate((base_steps, 2 * base_steps, 4 * base_steps)):
+
+    # Restart fast path: the checkpoint holds the last CONVERGED (u, M, tau)
+    # at the saved (post-transport) geometry, so the setup solve is just an
+    # ordinary warm step-solve - do it directly at full n/m with the normal
+    # rtol machinery. Re-ramping n back to 1 from a converged n=4 state is
+    # not only wasteful, it can be FATAL at a hard-era geometry (both 1873
+    # historical walls: the resume's setup ramp diverged before the time
+    # loop's rescue ladder ever ran). If even the direct solve fails, ACCEPT
+    # the loaded state as-is (it is the last converged solution; the time
+    # loop's rescue ladder then fights the hard step properly) - but with a
+    # TIGHT run tolerance derived from the loaded-state residual (1e-6 x
+    # ||F(z_loaded)||, a proxy for the converged scale), never the loose
+    # acceptance value: a loose persistent atol lets every later step
+    # "converge" at iteration 0 and silently freezes the velocity (the bug
+    # that invalidated the first 1873->2014 resume).
+    restart_solved = False
+    if is_restart and u_guess is not None:
+        with assemble(F).dat.vec_ro as _rv:
+            fnorm0 = _rv.norm()
+        try:
+            n_flow.assign(n_flow_val)
+            m_slide.assign(m_slide_val)
+            slvr.solve()
+            restart_solved = True
+            fnorm_conv = slvr.snes.getFunctionNorm()
+            if fnorm_conv > 0.0:
+                slvr.snes.setTolerances(atol=100.0 * fnorm_conv)
+            PETSc.Sys.Print(
+                f"Restart diagnostic re-solved at loaded state "
+                f"(||F|| {fnorm0:.2e} -> {fnorm_conv:.2e})"
+            )
+        except fd.ConvergenceError:
+            z.assign(z_init)
+            restart_solved = True
+            if fnorm0 > 0.0:
+                slvr.snes.setTolerances(atol=1e-6 * fnorm0)
+            PETSc.Sys.Print(
+                f"Restart solve did not converge at loaded geometry "
+                f"(hard era); keeping the loaded converged state and "
+                f"handing the step to the run's rescue ladder "
+                f"(atol={1e-6 * fnorm0:.2e})"
+            )
+
+    if not restart_solved:
+        PETSc.Sys.Print(
+            f"Initial diagnostic solve (continuation n_flow 1→{n_flow_val:.1f}, "
+            f"m_slide 1→{m_slide_val:.1f})..."
+        )
+        _run_continuation = True
+    else:
+        _run_continuation = False
+    for attempt, steps in enumerate(
+        (base_steps, 2 * base_steps, 4 * base_steps) if _run_continuation else ()
+    ):
         try:
             for t in np.linspace(0.0, 1.0, steps):
                 n_flow.assign(1.0 + t * (n_flow_val - 1.0))
@@ -619,12 +721,16 @@ def setup_model(restart_from=None):
         "calving_ids": calving_ids,
         "u_obs": u_obs,
         "friction": friction,
+        # Rescue speed limiter (residual laws): live Constant, 0 = inert.
+        "k_lim": k_lim if use_residual else None,
+        "k_lim_rescue": k_lim_rescue if use_residual else 0.0,
         # Reference/frozen fields persisted into every checkpoint so a restart
         # is self-contained and rank-count-robust (no recompute from evolved h).
         "theta": theta_f,
         "phi": phi_f,
         "C_w0": C_w0,
         "N_ref": N_ref,
+        "A_prior": A_prior_f,
         "H_init": H_init,
         # Frozen t=0 apparent-MB correction (restart only; else None).
         "a_ref_mb": a_ref_mb,
@@ -669,6 +775,7 @@ def run_simulation(
     phi = ctx.get("phi")
     C_w0 = ctx.get("C_w0")
     N_ref = ctx.get("N_ref")
+    A_prior = ctx.get("A_prior")
     H_init_fn = ctx.get("H_init", h)
     friction = ctx.get("friction", "budd")
 
@@ -888,6 +995,8 @@ def run_simulation(
                 chk.save_function(C_w0, name="C_w0")
             if N_ref is not None:
                 chk.save_function(N_ref, name="N_ref")
+            if A_prior is not None:
+                chk.save_function(A_prior, name="fluidity_prior")
             if a_ref is not None:
                 chk.save_function(a_ref, name="a_ref_mb")
             chk.save_function(h_dg, name="thickness_dg")
@@ -957,30 +1066,103 @@ def run_simulation(
         )
         csv_f.flush()
 
-    for k in range(1, nsteps + 1):
-        t_step_start = perf_counter()
-        t_yr = t_start + k * dt
+    # Rescue ladder state: the last CONVERGED mixed state, restored between
+    # attempts so each rescue starts from a valid warm point instead of a
+    # diverged Newton iterate.
+    z_entry = z.copy(deepcopy=True)
+    snes_type0 = slvr.snes.getType()
 
-        if forcing_callback is not None:
-            forcing_callback(ctx, t_yr)
+    def _ramp():
+        for t in np.linspace(0.0, 1.0, 10):
+            n_flow.assign(1.0 + t * (n_flow_val - 1.0))
+            m_slide.assign(1.0 + t * (m_slide_val - 1.0))
+            slvr.solve()
 
+    def _solve_with_rescue(k):
+        r"""Diagnostic solve with an escalation ladder for hard eras
+        (evidence at the 32 km ssp585 2024.5 wall: nleqerr fails, a fresh
+        continuation fails, but trust region converges the same step in one
+        try). Sequence: direct -> re-continuation -> newtontr direct ->
+        newtontr continuation. Restores the entry state between attempts;
+        always restores the configured SNES type and full n/m on exit.
+        Returns True on success."""
         try:
             slvr.solve()
+            return True
         except fd.ConvergenceError:
-            PETSc.Sys.Print(f"  Step {k}: re-doing continuation...")
-            try:
-                for t in np.linspace(0.0, 1.0, 10):
-                    n_flow.assign(1.0 + t * (n_flow_val - 1.0))
-                    m_slide.assign(1.0 + t * (m_slide_val - 1.0))
-                    slvr.solve()
-            except fd.ConvergenceError:
-                PETSc.Sys.Print(f"  Step {k}: continuation failed, saving and stopping")
-                break
+            pass
+        k_lim_c = ctx.get("k_lim")
+        k_rescue = ctx.get("k_lim_rescue", 0.0)
+        # gia: hard-era steps under trust region converge LINEARLY and are
+        # executed by the iteration cap while still descending - rescue
+        # rungs get extra patience, restored afterwards.
+        rescue_maxit = int(os.environ.get("ISMIP7_RESCUE_MAXIT", "600"))
+        _rt, _at, _dt_, _mi = slvr.snes.getTolerances()
+        attempts = [
+            ("re-doing continuation", snes_type0, _ramp, False),
+            ("trust-region retry", "newtontr", slvr.solve, False),
+            ("trust-region continuation", "newtontr", _ramp, False),
+        ]
+        if k_lim_c is not None and k_rescue > 0.0:
+            # Deepest rungs: pin the runaway front nodes with the soft speed
+            # limiter (only |u| > u_lim feels it) while trust region solves.
+            attempts += [
+                ("trust-region + speed limiter", "newtontr", slvr.solve, True),
+                ("trust-region + limiter continuation", "newtontr", _ramp, True),
+            ]
+        try:
+            for label, stype, action, use_lim in attempts:
+                PETSc.Sys.Print(f"  Step {k}: {label}...")
+                z.assign(z_entry)
+                n_flow.assign(n_flow_val)
+                m_slide.assign(m_slide_val)
+                slvr.snes.setType(stype)
+                slvr.snes.setTolerances(max_it=rescue_maxit)
+                if k_lim_c is not None:
+                    k_lim_c.assign(k_rescue if use_lim else 0.0)
+                try:
+                    action()
+                    if stype != snes_type0 or use_lim:
+                        PETSc.Sys.Print(f"  Step {k}: recovered via {label}")
+                    return True
+                except fd.ConvergenceError:
+                    continue
+            return False
+        finally:
+            slvr.snes.setType(snes_type0)
+            slvr.snes.setTolerances(max_it=_mi)
+            n_flow.assign(n_flow_val)
+            m_slide.assign(m_slide_val)
+            if k_lim_c is not None:
+                k_lim_c.assign(0.0)
 
+    h_dg_entry = Function(Q_dg)
+
+    def _lift_h():
+        r"""Derive the CG geometry (h, s, phi_eff) from the h_dg state."""
+        if legacy_transport:
+            h.project(h_dg)
+        else:
+            # Lumped-mass projection: h_i = ∫phi_i h_dg / ∫phi_i.
+            assemble(fd.TestFunction(Q) * h_dg * dx, tensor=proj_rhs)
+            h.dat.data[:] = proj_rhs.dat.data_ro / m_lump.dat.data_ro
+        h.interpolate(max_value(h, Constant(h_clamp)))
+        s.interpolate(max_value(b + h, (Constant(1.0) - rho_ratio) * h))
+        phi_eff.interpolate(
+            max_value(
+                Constant(1.0)
+                - rho_W * g * max_value(Constant(0.0), -b)
+                / (rho_I * g * max_value(h, Constant(1.0))),
+                Constant(0.01),
+            )
+        )
+
+    def _advance(dt_local):
+        r"""One transport advance of dt_local with the CURRENT velocity
+        (transport-first ordering: the velocity was solved at the current
+        geometry). Mutates h_dg and the derived CG fields; returns the
+        advance's mass tallies [Gt]."""
         u_vel = z.subfunctions[0]
-
-        # DG0 upwind implicit Euler for thickness (h_dg = persistent state;
-        # the legacy scheme kept the CG->DG re-projection each step)
         if legacy_transport:
             h_dg.project(h)
         h_dg_old.assign(h_dg)
@@ -993,21 +1175,19 @@ def run_simulation(
             src = src + a_ref
         # Cell-averaged DG0 source (exact for the DG0 test space) with a
         # positivity limit (gia a_step clamp): the net sink may not draw a
-        # cell below h_clamp within one step. With the limited source the
-        # implicit upwind update is an M-matrix system with nonnegative RHS,
-        # so h stays >= h_clamp and the post-solve floor becomes a no-op.
-        # The withheld sink (limit_gt) is tallied into the clamp budget
-        # column, keeping resid closed. (At fine meshes a cell whose t=0
-        # divergence exceeds h/dt would see a slight balanced-mode
-        # fixed-point deviation here - tallied, not hidden.)
+        # cell below h_clamp within one advance. With the limited source
+        # the implicit upwind update is an M-matrix system with nonnegative
+        # RHS, so h stays >= h_clamp and the post-solve floor is a no-op.
+        # The withheld sink is tallied into the clamp budget column.
         assemble(src * phi_dg * dx, tensor=src_cof)
         src_dg.dat.data[:] = src_cof.dat.data_ro / cell_area
         _src_want = src_dg.dat.data_ro.copy()
-        np.maximum(src_dg.dat.data, -(h_dg.dat.data_ro - h_clamp) / dt,
+        np.maximum(src_dg.dat.data, -(h_dg.dat.data_ro - h_clamp) / dt_local,
                    out=src_dg.dat.data)
         limit_gt = mesh.comm.allreduce(float(
             ((src_dg.dat.data_ro - _src_want) * cell_area).sum()
-        )) * rho_gt * dt
+        )) * rho_gt * dt_local
+        dt_c.assign(dt_local)
         F_prog = (
             (h_dg_trial - h_dg_old) / dt_c * phi_dg * dx
             + (un_plus("+") * h_dg_trial("+") - un_plus("-") * h_dg_trial("-"))
@@ -1028,14 +1208,7 @@ def run_simulation(
             },
         )
 
-        # Mass budget: attribute this step's dM to its sources so a drift
-        # is diagnosable (SMB - melt - boundary outflux - calving) and any
-        # non-conservative floor/projection mass shows up explicitly.
-        smb_rate = float(assemble(accum * dx)) * rho_gt          # Gt/yr
-        melt_rate = float(assemble(ocean_melt * dx)) * rho_gt    # Gt/yr
-        amb_rate = (float(assemble(a_ref * dx)) * rho_gt
-                    if a_ref is not None else 0.0)               # Gt/yr
-        out_rate = float(assemble(un_plus * h_dg * ds)) * rho_gt # Gt/yr
+        out_gt = float(assemble(un_plus * h_dg * ds)) * rho_gt * dt_local
         m1 = float(assemble(h_dg * dx)) * rho_gt
 
         h_dg.interpolate(max_value(h_dg, Constant(h_clamp)))
@@ -1050,25 +1223,75 @@ def run_simulation(
             ) * rho_gt
             data[beyond_front] = 0.0
 
-        if legacy_transport:
-            h.project(h_dg)
-        else:
-            # Lumped-mass projection: h_i = ∫phi_i h_dg / ∫phi_i.
-            assemble(fd.TestFunction(Q) * h_dg * dx, tensor=proj_rhs)
-            h.dat.data[:] = proj_rhs.dat.data_ro / m_lump.dat.data_ro
+        _lift_h()
         m3 = m2 - calv_gt                                        # ∫h preserved by projection
-        h.interpolate(max_value(h, Constant(h_clamp)))
+        mass_now = float(assemble(h * dx)) * _RHO_I_SI / 1e12
+        clamp_cg_gt = mass_now - m3          # Gt added by the CG floor after projection
+        return {
+            "out_gt": out_gt,
+            "calv_gt": calv_gt,
+            "clamp_gt": clamp_gt + clamp_cg_gt + limit_gt,
+        }
 
-        s.interpolate(max_value(b + h, (Constant(1.0) - rho_ratio) * h))
+    # Time loop, transport-first: each step advances the geometry with the
+    # velocity SOLVED AT it (the previous solve), then solves at the new
+    # geometry - the same (G, u) sequence as the old solve-then-advance
+    # ordering, but a hard step can now rewind ITS OWN advance and retry it
+    # as dt/4 then dt/16 subcycles with rescue solves between (the 1873
+    # front-cell-emptying eras: the ladder alone fails at dt=0.1 but a
+    # dt=0.025 approach crosses them - smaller geometry increments let
+    # Newton track the branch through the event). Checkpoints improve too:
+    # saved (h, u) are now mutually consistent.
+    SUBCYCLES = tuple(int(s) for s in
+                      os.environ.get("ISMIP7_SUBCYCLES", "1,4,16").split(","))
 
-        phi_eff.interpolate(
-            max_value(
-                Constant(1.0)
-                - rho_W * g * max_value(Constant(0.0), -b)
-                / (rho_I * g * max_value(h, Constant(1.0))),
-                Constant(0.01),
+    for k in range(1, nsteps + 1):
+        t_step_start = perf_counter()
+        t_yr = t_start + k * dt
+
+        if forcing_callback is not None:
+            forcing_callback(ctx, t_yr)
+
+        # Forcing-field integrals are constant within the step.
+        smb_rate = float(assemble(accum * dx)) * rho_gt          # Gt/yr
+        melt_rate = float(assemble(ocean_melt * dx)) * rho_gt    # Gt/yr
+        amb_rate = (float(assemble(a_ref * dx)) * rho_gt
+                    if a_ref is not None else 0.0)               # Gt/yr
+
+        z_entry.assign(z)
+        h_dg_entry.assign(h_dg)
+        tallies = None
+        for m in SUBCYCLES:
+            if m > 1:
+                PETSc.Sys.Print(
+                    f"  Step {k}: subcycling x{m} (dt={dt / m:.4g})..."
+                )
+                h_dg.assign(h_dg_entry)
+                _lift_h()
+                z.assign(z_entry)
+            acc = {"out_gt": 0.0, "calv_gt": 0.0, "clamp_gt": 0.0}
+            ok = True
+            for _j in range(m):
+                sub = _advance(dt / m)
+                for key in acc:
+                    acc[key] += sub[key]
+                if not _solve_with_rescue(k):
+                    ok = False
+                    break
+            if ok:
+                if m > 1:
+                    PETSc.Sys.Print(f"  Step {k}: completed via x{m} subcycle")
+                tallies = acc
+                break
+        if tallies is None:
+            PETSc.Sys.Print(
+                f"  Step {k}: rescue ladder + subcycles exhausted, "
+                f"saving and stopping"
             )
-        )
+            h_dg.assign(h_dg_entry)
+            _lift_h()
+            z.assign(z_entry)   # checkpoint the last converged pair
+            break
 
         t_elapsed = perf_counter() - t_step_start
 
@@ -1076,17 +1299,18 @@ def run_simulation(
         vaf = float(assemble(haf * dx)) * _RHO_I_SI / 1e12 / 362.5
         total_mass = float(assemble(h * dx)) * _RHO_I_SI / 1e12
 
-        clamp_cg_gt = total_mass - m3        # Gt added by the CG floor after projection
+        out_rate = tallies["out_gt"] / dt                        # Gt/yr
+        calv_gt = tallies["calv_gt"]
+        clamp_all = tallies["clamp_gt"]
         dm = total_mass - mass_prev
         resid_gt = dm - (
             (smb_rate - melt_rate + amb_rate - out_rate) * dt
-            + clamp_gt + clamp_cg_gt + limit_gt - calv_gt
+            + clamp_all - calv_gt
         )
         mass_prev = total_mass
 
         results.append((t_yr, vaf, total_mass, smb_rate, melt_rate,
-                        out_rate, calv_gt,
-                        clamp_gt + clamp_cg_gt + limit_gt, resid_gt,
+                        out_rate, calv_gt, clamp_all, resid_gt,
                         amb_rate))
         _write_csv_row(results[-1])
 
@@ -1098,7 +1322,7 @@ def run_simulation(
                 f"      budget [Gt/yr]: SMB={smb_rate:+.0f} melt={-melt_rate:+.0f} "
                 f"{_amb_txt}"
                 f"outflux={-out_rate:+.0f} calv={-calv_gt/dt:+.0f} "
-                f"clamp={(clamp_gt+clamp_cg_gt+limit_gt)/dt:+.1f} "
+                f"clamp={clamp_all/dt:+.1f} "
                 f"dM/dt={dm/dt:+.0f} resid={resid_gt/dt:+.2f}"
             )
 

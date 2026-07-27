@@ -111,6 +111,41 @@ def _find_ismip7_data(data_root=None):
     return None
 
 
+def load_mean_annual_surface_temperature(Q, var="tas", data_root=None,
+                                         fill_K=260.0):
+    r"""Mean-annual surface temperature [K] on ``Q``, from the ISMIP7
+    CESM2-WACCM SDBN1 climatology. ``var='tas'`` (near-surface air temp) is the
+    standard englacial upper boundary condition for a thermal model; ``'ts'``
+    (skin temp) is melt-capped at 273 K. Averages the 12 monthly slices and
+    samples with a nearest-neighbour ``RegularGridInterpolator`` (xarray.interp
+    blows up memory at mesh-node counts; same pattern as the OI ocean reader).
+    NODATA/ocean (~0 K) is masked and filled with ``fill_K``."""
+    import glob
+    import xarray as xr
+    import firedrake as fd
+    from scipy.interpolate import RegularGridInterpolator
+    root = _find_ismip7_data(data_root)
+    if root is None:
+        raise FileNotFoundError("ISMIP7 data root not found (set ISMIP7_DATA_ROOT)")
+    hits = glob.glob(os.path.join(root, "CESM2-WACCM", "climatology", "SDBN1",
+                                  var, "v1", f"{var}_*.nc"))
+    if not hits:
+        raise FileNotFoundError(f"no {var} climatology under {root}")
+    ds = xr.open_dataset(hits[0])
+    da = ds[var] if var in ds else ds[list(ds.data_vars)[0]]
+    T = np.asarray(da.mean(dim="month").values, dtype=float)     # (y, x)
+    x = np.asarray(ds["x"].values, dtype=float)
+    y = np.asarray(ds["y"].values, dtype=float)
+    T = np.where(T > 100.0, T, np.nan)                           # mask fill (~0 K)
+    T_filled = np.where(np.isfinite(T), T, fill_K)
+    interp = RegularGridInterpolator((y, x), T_filled, method="nearest",
+                                     bounds_error=False, fill_value=fill_K)
+    Tf = fd.Function(Q, name="T_srf")
+    xy = Q.mesh().coordinates.dat.data_ro
+    Tf.dat.data[:] = interp(np.column_stack([xy[:, 1], xy[:, 0]]))
+    return Tf
+
+
 def _version_subdirs(parent_dir):
     r"""(N, name) pairs for the v<N> subdirs of a directory, ascending."""
     versions = []

@@ -26,7 +26,7 @@ _PROJECT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(
 sys.path.insert(0, _PROJECT)
 
 from firedrake import assemble, dx, Constant
-from simulation import setup_model, run_simulation, latest_checkpoint, PETSc, lc
+from simulation import setup_model, run_simulation, latest_checkpoint, RESULTS_DIR, PETSc, lc
 from icepack2_tools.forcing import (
     ISMIP7Atmosphere,
     load_racmo_smb_climatology,
@@ -147,7 +147,8 @@ def main():
     parser.add_argument("--snes-log", default=None,
                         help="route SNES monitor output to this file (default: stdout)")
     parser.add_argument("--restart", default=os.environ.get("ISMIP7_RESTART"),
-                        help="restart from a checkpoint .h5 (default: cold start)")
+                        help="restart from a checkpoint .h5 (default: branch from "
+                             "the historical endpoint, else cold start)")
     parser.add_argument("--tag", default=os.environ.get("ISMIP7_RUN_TAG", ""),
                         help="suffix on experiment_name so output files are distinct")
     parser.add_argument("--checkpoint-interval", type=int,
@@ -173,8 +174,46 @@ def main():
         restart_from = latest_checkpoint(experiment_name)
         PETSc.Sys.Print(
             f"Auto-resume: {restart_from}" if restart_from
-            else "Auto-resume: no prior checkpoint; cold start"
+            else "Auto-resume: no prior checkpoint"
         )
+    # ISMIP6/ISMIP7 ctrl_proj convention: the control and the scenario
+    # projections MUST branch from the SAME initial state at the SAME time, so
+    # their shared spin-up/relaxation drift (and the identical frozen a_ref)
+    # cancels in the projection-minus-control difference and leaves only the
+    # forced response. experiment.py restarts every projection from
+    # hist_<esm>_<lc>_final.h5; the CTRL therefore does the same instead of
+    # cold-starting from the 2015 inversion. Cold-starting from the pristine
+    # inversion gives a DIFFERENT initial geometry than the projections, so the
+    # projection's own historical-endpoint relaxation does NOT cancel and the
+    # forced signal is mis-estimated. NB this is a correctness fix, not a
+    # magnitude fix: at 32 km the hist-branched control drifts +37 mm SLE over
+    # 2015-2100 vs the cold-start control's +8 mm, so the (correct) same-state
+    # difference is LARGER, not smaller (ssp126 +161 vs +132 mm at n=4). a_ref is
+    # a t=0 BALANCING correction (zeroes the initial tendency), not a net sink,
+    # so it does not add a standalone SLE trend; an earlier note claiming a
+    # ~160 mm spurious a_ref sink was wrong. The ISMIP6 overshoot is a real
+    # forced-response bias, not a differencing artifact. Falls back to a cold
+    # start (mis-matched control) only when the historical endpoint is absent.
+    if restart_from is None:
+        tag_sfx = f"_{args.tag}" if args.tag else ""
+        hist = os.path.join(RESULTS_DIR, f"hist_{esm_tag}{tag_sfx}_{lc}_final.h5")
+        if os.path.exists(hist):
+            restart_from = hist
+            PETSc.Sys.Print(
+                f"  Branching CTRL from the historical endpoint (same initial "
+                f"state as the projections; shared drift cancels in proj-CTRL): "
+                f"{os.path.basename(hist)}"
+            )
+        else:
+            PETSc.Sys.Print(
+                f"  WARNING: no historical endpoint {os.path.basename(hist)}; "
+                f"cold-starting from the inversion. The CTRL will start from a "
+                f"DIFFERENT geometry than the hist-branched projections, so "
+                f"projection-minus-CTRL will not cleanly isolate the forced "
+                f"response. Run the historical first, or pass --restart."
+            )
+    if restart_from and not os.path.exists(restart_from):
+        raise FileNotFoundError(f"CTRL restart not found: {restart_from}")
 
     ctx = setup_model(restart_from=restart_from)
 

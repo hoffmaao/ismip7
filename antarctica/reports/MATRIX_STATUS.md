@@ -70,7 +70,11 @@ front-emptying is continuous.
    (ssp126 +161 vs +132 mm): a_ref is a t=0 balancing correction that
    zeroes the initial tendency, not a net sink, so the earlier "spurious
    ~160 mm a_ref trend" attribution was wrong. n=3 rheology roughly halves
-   the overshoot (ssp126 +85 mm, still above the [-14,+50] mm envelope).)
+   the overshoot (ssp126 +85 mm, still above the [-14,+50] mm envelope).
+   Note the archived n=4 cores 9/10 CTRL records predate the hist-branch
+   fix: they are cold-start controls branched from the 2015 inversion, a
+   different initial state than the projections, so proj-CTRL differences
+   computed against them do not cleanly isolate the forced response.)
 2. **2014→2015 projection handoff** starts projections at the historical
    final's 2014.0 with a one-year zero-anomaly gap.
 3. **Runaway-detector peak clause** flags isolated one-step discharge spikes

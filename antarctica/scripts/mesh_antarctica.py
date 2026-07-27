@@ -1,10 +1,9 @@
 #!/usr/bin/env python3
 """
-Generate anisotropic Antarctic mesh with grounding zone refinement.
+Generate isotropic Antarctic mesh with Ua-style grounding zone refinement.
 
-Uses gmsh BAMG with a metric tensor field for anisotropic elements
-at the grounding line: fine perpendicular to the GL (resolves the
-grounded/floating transition), coarse along it.
+Refinement based on distance from the grounding line (Ua GLrange approach)
+and strain-rate based sizing for outlet glaciers.
 
 Usage:
     ISMIP7_BUFFER_M=20000 python scripts/mesh_antarctica.py
@@ -27,15 +26,20 @@ from icepack2_tools.mesh import (
     build_gmsh_geometry,
     SUBSAMPLE,
 )
+from make_boundary_ids import write_boundary_ids
 
 DATA_DIR = os.path.join(_ROOT, "data")
 MESH_DIR = os.path.join(_ROOT, "mesh")
 
-# Anisotropic targets
-GL_PERP = 500  # 500m perpendicular to GL
-GL_PAR = 15000  # 15km along GL
-GL_RANGE = 3e3  # anisotropy within 3km of GL
-COARSE = 64000  # 64km interior
+# Ua-style distance bands: (distance_m, element_size_m)
+GL_BANDS = [
+    (5e3, 2500),
+    (15e3, 5000),
+    (30e3, 8000),
+]
+SHELF_SIZE = 5000
+BUFFER_SIZE = 10000
+COARSE = 64000
 
 
 def find_file(d, p):
@@ -45,11 +49,11 @@ def find_file(d, p):
     return m[0]
 
 
-def compute_gl_distance_and_normal():
-    """Compute GL distance and normal direction from BedMachine."""
+def grounding_line_distance():
+    """Distance from the grounding line (HAF = 0 boundary)."""
     from scipy.ndimage import distance_transform_edt, binary_dilation
 
-    print("Computing GL distance + normal...")
+    print("Computing GL distance...")
     fn = find_file(os.path.join(DATA_DIR, "bedmachine"), "*.nc")
     ds = xr.open_dataset(fn)
     thick = ds["thickness"].values[::SUBSAMPLE, ::SUBSAMPLE]
@@ -70,72 +74,54 @@ def compute_gl_distance_and_normal():
     floating = ice & (haf <= 0)
 
     struct = np.ones((3, 3), dtype=bool)
-    gr_dil = binary_dilation(grounded, struct, iterations=2)
-    fl_dil = binary_dilation(floating, struct, iterations=2)
-    gl_region = gr_dil & fl_dil & ice
+    gl_region = binary_dilation(grounded, struct, 2) & binary_dilation(floating, struct, 2) & ice
 
     dist = distance_transform_edt(~gl_region) * dx
-
-    # GL normal: gradient of HAF (points from floating → grounded)
-    # Smooth HAF first
-    from scipy.ndimage import gaussian_filter
-
-    haf_smooth = gaussian_filter(haf.astype(float), sigma=3)
-    grad_y, grad_x = np.gradient(haf_smooth, dx)
-    mag = np.sqrt(grad_x**2 + grad_y**2) + 1e-10
-    nx = grad_x / mag  # normal x component
-    ny = grad_y / mag  # normal y component
-
     has_ice = (thick > 10) & ice
     is_float = mask_bm == 3
 
-    dist_da = xr.DataArray(
-        dist, dims=["y", "x"], coords={"x": x.astype(float), "y": y.astype(float)}
-    )
-    nx_da = xr.DataArray(
-        nx, dims=["y", "x"], coords={"x": x.astype(float), "y": y.astype(float)}
-    )
-    ny_da = xr.DataArray(
-        ny, dims=["y", "x"], coords={"x": x.astype(float), "y": y.astype(float)}
-    )
-    ice_da = xr.DataArray(
-        has_ice.astype(float),
-        dims=["y", "x"],
-        coords={"x": x.astype(float), "y": y.astype(float)},
-    )
-    float_da = xr.DataArray(
-        is_float.astype(float),
-        dims=["y", "x"],
-        coords={"x": x.astype(float), "y": y.astype(float)},
-    )
+    coords = {"x": x.astype(float), "y": y.astype(float)}
+    dist_da = xr.DataArray(dist, dims=["y", "x"], coords=coords)
+    ice_da = xr.DataArray(has_ice.astype(float), dims=["y", "x"], coords=coords)
+    float_da = xr.DataArray(is_float.astype(float), dims=["y", "x"], coords=coords)
 
-    print(f"  GL pixels: {gl_region.sum()}")
-    return dist_da, nx_da, ny_da, ice_da, float_da
+    print(f"  GL region: {gl_region.sum()} pixels")
+    return dist_da, ice_da, float_da
 
 
-def build_metric_tensor(h_perp, h_par, nx, ny):
-    """Build 2D metric tensor from perpendicular/parallel sizes and normal.
+def calving_front_distance(boundaries, names):
+    """Distance from calving boundary segments + BedMachine ice edge."""
+    from scipy.ndimage import distance_transform_edt
 
-    M = (1/h_perp²) n⊗n + (1/h_par²) t⊗t
-    where t = (-ny, nx) is the tangent.
+    print("Computing calving front distance...")
+    fn = find_file(os.path.join(DATA_DIR, "bedmachine"), "*.nc")
+    ds = xr.open_dataset(fn)
+    thick = ds["thickness"].values[::SUBSAMPLE, ::SUBSAMPLE]
+    mask_bm = ds["mask"].values[::SUBSAMPLE, ::SUBSAMPLE]
+    x = ds["x"].values[::SUBSAMPLE]
+    y = ds["y"].values[::SUBSAMPLE]
+    ds.close()
+    dx = abs(float(x[1] - x[0]))
 
-    Returns m11, m12, m22 (symmetric 2D tensor components).
-    """
-    # n⊗n
-    nn11 = nx * nx
-    nn12 = nx * ny
-    nn22 = ny * ny
+    has_ice = (thick > 10) & (mask_bm >= 2) & (mask_bm <= 4)
+    dist_into = distance_transform_edt(has_ice) * dx
+    ice_edge = has_ice & (dist_into < dx * 3)
 
-    # t⊗t (t = (-ny, nx))
-    tt11 = ny * ny
-    tt12 = -nx * ny
-    tt22 = nx * nx
+    for seg_coords, name in zip(boundaries, names):
+        if not name.startswith("Calving"):
+            continue
+        for pt in seg_coords:
+            ix = np.argmin(np.abs(x - pt[0]))
+            iy = np.argmin(np.abs(y - pt[1]))
+            for di in range(-3, 4):
+                for dj in range(-3, 4):
+                    ii, jj = iy + di, ix + dj
+                    if 0 <= ii < len(y) and 0 <= jj < len(x):
+                        ice_edge[ii, jj] = True
 
-    m11 = nn11 / h_perp**2 + tt11 / h_par**2
-    m12 = nn12 / h_perp**2 + tt12 / h_par**2
-    m22 = nn22 / h_perp**2 + tt22 / h_par**2
-
-    return m11, m12, m22
+    dist = distance_transform_edt(~ice_edge) * dx
+    return xr.DataArray(dist, dims=["y", "x"],
+                        coords={"x": x.astype(float), "y": y.astype(float)})
 
 
 def main():
@@ -146,18 +132,17 @@ def main():
         os.environ["ISMIP7_BUFFER_M"] = "20000"
     print(f"Buffer: {buffer_m/1e3:.0f} km")
 
-    mask, x, y = load_bedmachine_mask()
+    mask, x, y = load_bedmachine_mask(DATA_DIR)
     outline = extract_ice_outline(mask, x, y)
     boundaries, names = classify_boundaries(outline, mask, x, y)
-    refinement = load_velocity_for_sizing()
+    refinement = load_velocity_for_sizing(DATA_DIR)
 
-    gl_dist, nx_field, ny_field, ice_field, float_field = (
-        compute_gl_distance_and_normal()
-    )
+    gl_dist, ice_field, float_field = grounding_line_distance()
+    cf_dist = calving_front_distance(boundaries, names)
 
-    fn_base = os.path.join(MESH_DIR, f"antarctica_{COARSE}_{GL_PERP}_aniso")
+    fn_base = os.path.join(MESH_DIR, f"antarctica_{COARSE}_{GL_BANDS[0][1]}")
 
-    # ── Pass 1: raw isotropic mesh ──
+    # Pass 1: raw mesh
     print(f"\nPass 1: raw mesh...")
     gmsh.initialize(sys.argv)
     gmsh.option.setNumber("General.Verbosity", 2)
@@ -173,119 +158,79 @@ def main():
     tri_tags, tri_vtags = gmsh.model.mesh.getElementsByType(2)
     tri_vids = np.array([vmap[int(j)] for j in tri_vtags])
     triangles = tri_vids.reshape((tri_tags.shape[-1], -1))
-    n_tri = len(tri_tags)
+    tri_centers = vxyz[triangles].mean(axis=1)
 
-    print(f"  {len(vtags)} nodes, {n_tri} triangles")
+    print(f"  {len(vtags)} nodes, {len(tri_tags)} triangles")
 
-    # ── Interpolate fields at triangle vertices ──
-    # (BAMG needs nodal metric, not element-center)
-    print("  Interpolating fields at vertices...")
-    vx = xr.DataArray(vxyz[:, 0], dims="v")
-    vy = xr.DataArray(vxyz[:, 1], dims="v")
+    cx = xr.DataArray(tri_centers[:, 0], dims="tri")
+    cy = xr.DataArray(tri_centers[:, 1], dims="tri")
 
-    def interp_field(da):
+    def interp(da):
         fx = da.coords[da.dims[-1]]
         fy = da.coords[da.dims[-2]]
         return np.nan_to_num(
-            da.interp({fx.name: vx, fy.name: vy}, method="nearest").values.flatten(),
+            da.interp({fx.name: cx, fy.name: cy}, method="nearest").values.flatten(),
             nan=0.0,
         )
 
-    gl_d = interp_field(gl_dist)
-    gl_nx = interp_field(nx_field)
-    gl_ny = interp_field(ny_field)
-    on_ice = interp_field(ice_field) > 0.5
-    on_shelf = interp_field(float_field) > 0.5
+    ref_vals = np.maximum(interp(refinement), 1e-8)
+    gl_d = interp(gl_dist)
+    cf_d = interp(cf_dist)
+    on_ice = interp(ice_field) > 0.5
+    on_shelf = interp(float_field) > 0.5
 
-    ref_x = refinement.coords[refinement.dims[-1]]
-    ref_y = refinement.coords[refinement.dims[-2]]
-    ref_vals = np.maximum(
-        np.nan_to_num(
-            refinement.interp(
-                {ref_x.name: vx, ref_y.name: vy}, method="nearest"
-            ).values.flatten(),
-            nan=1e-8,
-        ),
-        1e-8,
+    # Build size field
+    # 1. Strain rate
+    sr_floor = 8000
+    size_sr = np.clip(sr_floor / ref_vals, sr_floor, COARSE)
+
+    # 2. GL distance bands (Ua GLrange style, isotropic)
+    size_gl = np.full(len(gl_d), float(COARSE))
+    for dist_m, elem_m in GL_BANDS:
+        size_gl = np.where(gl_d < dist_m, np.minimum(size_gl, elem_m), size_gl)
+    last_dist, last_size = GL_BANDS[-1]
+    gl_frac = np.clip((gl_d - last_dist) / last_dist, 0.0, 1.0)
+    size_gl = np.where(
+        gl_d >= last_dist,
+        last_size + (COARSE - last_size) * gl_frac,
+        size_gl,
     )
 
-    # ── Build metric at each vertex ──
-    print("  Building metric tensor field...")
+    # 3. Shelf / buffer / ice front
+    cf_frac = np.clip(cf_d / 15e3, 0.0, 1.0)
+    size_cf_shelf = SHELF_SIZE + (COARSE - SHELF_SIZE) * cf_frac
+    cf_frac_buf = np.clip(cf_d / 20e3, 0.0, 1.0)
+    size_cf_buf = 8000 + (BUFFER_SIZE - 8000) * cf_frac_buf
+    size_cf = np.where(on_shelf, size_cf_shelf,
+                       np.where(on_ice, size_cf_shelf, size_cf_buf))
 
-    # Isotropic base: strain-rate refinement + moderate shelf/buffer sizing
-    sr_floor = 8000
-    h_iso = np.clip(sr_floor / ref_vals, sr_floor, COARSE)
-    # Shelves get 2km at the front, buffer gets 10km
-    h_iso = np.where(on_shelf, np.minimum(h_iso, 5000), h_iso)
-    h_iso = np.where(~on_ice, np.minimum(h_iso, 10000), h_iso)
+    target_sizes = np.minimum(np.minimum(size_sr, size_gl), size_cf)
+    target_sizes = np.clip(target_sizes, GL_BANDS[0][1], COARSE)
 
-    # Anisotropic GL refinement: ONLY on grounded ice (not buffer/shelf)
-    on_grounded = on_ice & ~on_shelf
-    gl_frac = np.clip(gl_d / GL_RANGE, 0.0, 1.0)  # 0 at GL, 1 at GL_RANGE
+    n_1k = int((target_sizes <= 1000).sum())
+    n_2k = int((target_sizes <= 2000).sum())
+    print(f"  GL bands: <=1km: {n_1k}, <=2km: {n_2k}")
+    print(f"  Size range: [{target_sizes.min():.0f}, {target_sizes.max():.0f}] m")
 
-    # Perpendicular: GL_PERP near GL, ramp to h_iso far away
-    # Only apply on grounded ice; elsewhere stay isotropic
-    h_perp = np.where(on_grounded, GL_PERP + (h_iso - GL_PERP) * gl_frac, h_iso)
-    # Parallel: GL_PAR near GL, ramp to h_iso far away
-    h_par = np.where(on_grounded, GL_PAR + (h_iso - GL_PAR) * gl_frac, h_iso)
+    sf_view = gmsh.view.add("size field")
+    gmsh.view.addModelData(sf_view, 0, fn_base + "_raw", "ElementData",
+                           tri_tags, target_sizes[:, None])
+    gmsh.view.write(sf_view, fn_base + "_sf.pos")
 
-    # Ensure h_perp <= h_par (anisotropy only stretches, doesn't compress)
-    h_perp = np.minimum(h_perp, h_par)
-    # Ensure minimum sizes
-    h_perp = np.maximum(h_perp, GL_PERP)
-    h_par = np.maximum(h_par, GL_PERP)
-
-    # Build metric: M = (1/hp²) n⊗n + (1/hq²) t⊗t
-    m11, m12, m22 = build_metric_tensor(h_perp, h_par, gl_nx, gl_ny)
-
-    n_aniso = int((h_par / h_perp > 2).sum())
-    print(f"  Anisotropic nodes (ratio > 2): {n_aniso}")
-    print(f"  h_perp range: [{h_perp.min():.0f}, {h_perp.max():.0f}] m")
-    print(f"  h_par range:  [{h_par.min():.0f}, {h_par.max():.0f}] m")
-
-    # ── Write metric as TT .pos file ──
-    print("  Writing metric .pos file...")
-    pos_fn = fn_base + "_metric.pos"
-    with open(pos_fn, "w") as f:
-        f.write('View "nodalMetric" {\n')
-        for t_idx in range(n_tri):
-            v0, v1, v2 = triangles[t_idx]
-            # Coordinates
-            coords_str = ",".join(
-                f"{vxyz[v, 0]},{vxyz[v, 1]},{vxyz[v, 2]}" for v in [v0, v1, v2]
-            )
-            # Tensor values: m11,m12,0, m12,m22,0, 0,0,1 per node
-            tensors = []
-            for v in [v0, v1, v2]:
-                tensors.extend([m11[v], m12[v], 0, m12[v], m22[v], 0, 0, 0, 1])
-            tensor_str = ",".join(f"{t:.8e}" for t in tensors)
-            f.write(f"TT({coords_str}){{{tensor_str}}};\n")
-        f.write("};\n")
-
-    pos_size = os.path.getsize(pos_fn) / 1e6
-    print(f"  Metric file: {pos_fn} ({pos_size:.1f} MB)")
-
-    # ── Pass 2: anisotropic re-mesh with BAMG ──
-    print("\nPass 2: BAMG anisotropic mesh...")
+    # Pass 2: remesh with background field + Netgen
+    print("\nPass 2: remesh...")
     gmsh.model.add(fn_base)
-    build_gmsh_geometry(boundaries, names, 8000, COARSE)  # coarse boundary
+    build_gmsh_geometry(boundaries, names, GL_BANDS[0][1], COARSE)
 
-    # Load metric
-    gmsh.merge(pos_fn)
     bg = gmsh.model.mesh.field.add("PostView")
-    gmsh.model.mesh.field.setNumber(bg, "ViewIndex", 0)
+    gmsh.model.mesh.field.setNumber(bg, "ViewTag", sf_view)
     gmsh.model.mesh.field.setAsBackgroundMesh(bg)
 
     gmsh.option.setNumber("Mesh.MeshSizeExtendFromBoundary", 0)
     gmsh.option.setNumber("Mesh.MeshSizeFromPoints", 0)
     gmsh.option.setNumber("Mesh.MeshSizeFromCurvature", 0)
-    gmsh.option.setNumber("Mesh.Algorithm", 7)  # BAMG
-    gmsh.option.setNumber("Mesh.AnisoMax", 50)  # max anisotropy ratio
-    gmsh.option.setNumber("Mesh.SmoothRatio", 3)
 
     gmsh.model.mesh.generate(2)
-
-    # Netgen optimization
     print("  Netgen optimization...")
     gmsh.model.mesh.optimize("Netgen")
 
@@ -297,8 +242,7 @@ def main():
     gmsh.write(fn_base + ".msh")
     gmsh.finalize()
 
-    # Clean up
-    for ext in ["_raw.msh", "_metric.pos"]:
+    for ext in ["_raw.msh", "_sf.pos"]:
         try:
             os.remove(fn_base + ext)
         except FileNotFoundError:
@@ -306,6 +250,11 @@ def main():
 
     size_mb = os.path.getsize(fn_base + ".msh") / 1e6
     print(f"\nSaved: {fn_base}.msh ({size_mb:.1f} MB)")
+
+    # Emit a boundary-id sidecar that matches this exact mesh (and thus the
+    # BedMachine input + SIMPLIFY_TOL/SUBSAMPLE used), so the solvers never read
+    # a stale committed sidecar from a different mesh.
+    write_boundary_ids(fn_base + ".msh", os.path.join(MESH_DIR, "boundary_ids.json"))
 
 
 if __name__ == "__main__":

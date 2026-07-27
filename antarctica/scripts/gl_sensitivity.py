@@ -166,7 +166,7 @@ def main():
     # ── Data ──
     bm_fn = find_file(os.path.join(DATA_DIR, "bedmachine"), "*.nc")
     b = icepack.interpolate(rasterio.open(f"netcdf:{bm_fn}:bed"), Q)
-    h_clamp = float(os.environ.get("ISMIP7_H_CLAMP", "0.5"))
+    h_clamp = float(os.environ.get("ISMIP7_H_CLAMP", "10.0"))
     H = Function(Q).interpolate(
         max_value(
             icepack.interpolate(rasterio.open(f"netcdf:{bm_fn}:thickness"), Q),

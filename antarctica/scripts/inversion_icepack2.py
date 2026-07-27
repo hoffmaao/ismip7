@@ -14,7 +14,7 @@ Usage:
 """
 
 import numpy as np
-import os, glob, json
+import os, sys, glob, json
 from time import perf_counter
 
 import firedrake as fd
@@ -70,6 +70,10 @@ DATA_DIR = os.path.join(_ROOT, "data")
 MESH_DIR = os.path.join(_ROOT, "mesh")
 FIG_DIR = os.path.join(_ROOT, "figs")
 
+# Repo root on the path so we can import the shared dual-friction operator.
+sys.path.insert(0, os.path.dirname(_ROOT))
+from icepack2_tools.dual_friction import build_rc_residual, weertman_anchor
+
 lc = int(os.environ.get("ISMIP7_LC", "8000"))
 lc_coarse = int(os.environ.get("ISMIP7_LC_COARSE", str(lc * 10)))
 
@@ -77,6 +81,26 @@ lc_coarse = int(os.environ.get("ISMIP7_LC_COARSE", str(lc * 10)))
 GAMMA_THETA = 1.0
 GAMMA_PHI = 1.0
 L_REG = 7.5e3
+
+# Friction law: "budd" (power-law dual, default) or "regularized_coulomb"
+# (Joughin/Schoof RC residual: grounded-only inference, exact-zero shelves).
+FRICTION = os.environ.get("ISMIP7_FRICTION", "budd")
+# Exact-zero-shelf residual laws share the C_w0/He/composite structure.
+USE_RESIDUAL = FRICTION in ("regularized_coulomb", "budd")
+USE_RC = USE_RESIDUAL  # geometry/anchor handling is shared
+C0_RC = float(os.environ.get("ISMIP7_RC_C0", "0.5"))
+# Buffer-node (h_clamp=0) coercivity controls; see dual_friction.build_rc_residual.
+# h_visc_floor (membrane-only thickness floor) is the primary, bias-free cure;
+# c_w0_floor is off by default (unnecessary once h_visc_floor is on).
+RC_HVISC_FLOOR = float(os.environ.get("ISMIP7_RC_HVISC_FLOOR", "10.0"))
+RC_CW0_FLOOR = float(os.environ.get("ISMIP7_RC_CW0_FLOOR", "0.0"))
+# Budd N_hat knobs (fric_law="budd"): at the reference/inversion geometry
+# N_hat=1 (with the PISM-delta grounded floor), so this inverts the exact-zero
+# shelf He-gated law; the effective-pressure feedback is purely prognostic.
+BUDD_DELTA = float(os.environ.get("ISMIP7_BUDD_DELTA", "0.02"))
+BUDD_NHAT_CAP = float(os.environ.get("ISMIP7_BUDD_NHAT_CAP", "3.0"))
+ALPHA_GL = (float(os.environ.get("ISMIP7_ALPHA_GL", "0.5"))
+            if FRICTION == "budd" else 0.0)
 
 
 def find_file(d, p):
@@ -115,14 +139,19 @@ def main():
     PETSc.Sys.Print("Loading data...")
     bm_fn = find_file(os.path.join(DATA_DIR, "bedmachine"), "*.nc")
     b = icepack.interpolate(rasterio.open(f"netcdf:{bm_fn}:bed"), Q)
-    h_clamp = float(os.environ.get("ISMIP7_H_CLAMP", "10.0"))
+    # h_clamp default 0.0: invert against the *true* BedMachine geometry,
+    # including h=0 over the buffered ocean region. Composite rheology
+    # (added below) keeps the SNES nonsingular where h=0.
+    h_clamp = float(os.environ.get("ISMIP7_H_CLAMP", "0.0"))
     H = Function(Q).interpolate(
         max_value(
             icepack.interpolate(rasterio.open(f"netcdf:{bm_fn}:thickness"), Q),
             Constant(h_clamp),
         )
     )
-    PETSc.Sys.Print(f"  H clamp: {h_clamp} m")
+    PETSc.Sys.Print(f"  H clamp: {h_clamp} m  "
+                    f"(nodes h<=1m: {int((H.dat.data_ro <= 1.0).sum())} / "
+                    f"{len(H.dat.data_ro)})")
     rho_ratio = Constant(917.0 / 1024.0)
 
     rho_ratio = Constant(917.0 / 1024.0)
@@ -135,13 +164,45 @@ def main():
         fillvalue=0.0,
     )
 
+    # Velocity-observation mask. icepack.interpolate zero-fills NODATA, so
+    # without a mask unobserved regions read as "observed stationary" and
+    # the inversion prescribes friction/stiff ice where there is no
+    # constraint (0.7% of grounded area for MEaSUREs 450m v2). MEaSUREs
+    # reports errors only where a velocity was measured, so ERR > 0 marks
+    # real observations. ISMIP7_OBS_MASK=0 reverts to the unmasked misfit.
+    obs_mask = Function(Q, name="obs_mask").assign(1.0)
+    if os.environ.get("ISMIP7_OBS_MASK", "1") != "0":
+        err = icepack.interpolate(
+            (rasterio.open(f"netcdf:{vel_fn}:ERRX"),
+             rasterio.open(f"netcdf:{vel_fn}:ERRY")),
+            V,
+            fillvalue=0.0,
+        )
+        emag = Function(Q).interpolate(sqrt(err[0] ** 2 + err[1] ** 2))
+        obs_mask.dat.data[:] = (emag.dat.data_ro > 0.0).astype(float)
+        n_no = COMM_WORLD.allreduce(int((obs_mask.dat.data_ro == 0.0).sum()))
+        n_all = COMM_WORLD.allreduce(len(obs_mask.dat.data_ro))
+        PETSc.Sys.Print(
+            f"  Obs mask: {n_no}/{n_all} nodes without velocity obs "
+            f"excluded from the misfit (regularization fills them)"
+        )
+
     calving_ids = tuple(bnd_ids["calving"])
 
     # ── Rheology ──
+    # Goldsby-Kohlstedt-style composite: dislocation creep n_flow=4 main
+    # + linear (n=1) regularization. Sliding stays at Weertman m_slide=3.
     A0 = Constant(icepack.rate_factor(Constant(260.0)))
-    n = Constant(n_glen_val)
-    m = Constant(n_glen_val)
+    n_flow_val = float(os.environ.get("ISMIP7_N_FLOW", "4.0"))
+    m_slide_val = float(os.environ.get("ISMIP7_M_SLIDE", "3.0"))
+    a4_factor = float(os.environ.get("ISMIP7_A4_FACTOR", "10.0"))
+    n_flow = Constant(n_flow_val)
+    m_slide = Constant(m_slide_val)
     tau_c = Constant(0.1)
+    PETSc.Sys.Print(
+        f"  Rheology: flow n={n_flow_val:.1f}, sliding m={m_slide_val:.1f}, "
+        f"A4_factor={a4_factor:.1f}"
+    )
 
     u_speed = Function(Q).interpolate(
         max_value(sqrt(u_obs[0] ** 2 + u_obs[1] ** 2), Constant(1.0))
@@ -158,10 +219,9 @@ def main():
         "ksp_type": "gmres",
         "pc_type": "lu",
         "pc_factor_mat_solver_type": "mumps",
-        "mat_mumps_icntl_14": 200,  # working memory increase
+        "mat_mumps_icntl_14": 400,  # working memory increase
         "mat_mumps_icntl_24": 1,  # detect null pivots
-        "mat_mumps_cntl_3": 1e-10,  # null pivot threshold (relaxed)
-        "mat_mumps_cntl_1": 0.01,  # relaxed pivoting threshold
+        "mat_mumps_cntl_3": 1e-12,  # null pivot threshold
     }
     fc_params = {"quadrature_degree": 4}
 
@@ -226,41 +286,125 @@ def main():
             Constant(0.01),
         )
     )
-    K_base = u_c / (phi_eff * tau_c) ** n
+    # Baseline sliding coefficient uses the Weertman m_slide=3 exponent.
+    K_base = u_c / (phi_eff * tau_c) ** m_slide
 
-    rheology = {
-        "flow_law_exponent": n,
-        "flow_law_coefficient": A0 * exp(phi),
-        "sliding_exponent": n,
-        "sliding_coefficient": K_base * exp(-n * theta),
-    }
-
-    L = (
-        model.minimization.viscous_power(**fields, **rheology)
-        + model.minimization.friction_power(**fields, **rheology)
-        + model.minimization.momentum_balance(**fields)
+    # Composite rheology following Goldsby-Kohlstedt 2001:
+    #   ψ_visc  =     2·h·A_4 /5 · |M_dev|^5            (dislocation creep, n=4)
+    #          + α · 2·H_ref·A_1/2 · |M_dev|^2          (diffusion regularizer)
+    #   ψ_fric  =     K_3 /4 · |τ|^4                    (Weertman, m=3)
+    #          + α · K_1 /2 · |τ|^2                     (linear regularizer)
+    # The α·(n=1, m=1) terms keep M and τ pinned where h→0 (calving front).
+    # H_ref is constant so the viscous regularizer stays positive-definite
+    # at h=0. α default 1e-2 because the inversion needs many forward
+    # solves and SNES robustness is worth the small bias in θ, φ.
+    # A_4 = a4_factor · A_3 chosen so the dislocation creep matches Glen
+    # at τ = τ_c. Inverted φ absorbs any residual offset.
+    alpha_reg = Constant(float(os.environ.get("ISMIP7_COMPOSITE_ALPHA", "1e-2")))
+    H_ref = Constant(float(os.environ.get("ISMIP7_H_REF", "100.0")))
+    PETSc.Sys.Print(
+        f"  Composite rheology: alpha={float(alpha_reg):.1e}, "
+        f"H_ref={float(H_ref):.0f} m"
     )
+
+    A4_base = A0 * Constant(a4_factor)
+
+    def _rheo_glen(theta_c, phi_c):
+        # Main dislocation-creep flow law (n=n_flow=4) + Weertman sliding (m=3)
+        return {
+            "flow_law_exponent": n_flow,
+            "flow_law_coefficient": A4_base * exp(phi_c),
+            "sliding_exponent": m_slide,
+            "sliding_coefficient": K_base * exp(-m_slide * theta_c),
+        }
+
+    def _rheo_linear(theta_c, phi_c):
+        # Linearize about τ = τ_c so the n=1 / m=1 powers agree with the
+        # n_flow / m_slide powers at the calibration stress; this gives a
+        # smooth crossover rather than a kink near τ_c.
+        A_lin = A4_base * exp(phi_c) * tau_c ** (n_flow_val - 1)
+        K_lin = u_c / (phi_eff * tau_c) * exp(-theta_c)
+        return {
+            "flow_law_exponent": Constant(1.0),
+            "flow_law_coefficient": A_lin,
+            "sliding_exponent": Constant(1.0),
+            "sliding_coefficient": K_lin,
+        }
+
+    def _build_action(theta_c, phi_c, fields_):
+        fields_reg = dict(fields_)
+        fields_reg["thickness"] = H_ref
+        rheo_glen = _rheo_glen(theta_c, phi_c)
+        rheo_lin = _rheo_linear(theta_c, phi_c)
+        L_ = (
+            model.minimization.viscous_power(**fields_, **rheo_glen)
+            + alpha_reg * model.minimization.viscous_power(
+                **fields_reg, **rheo_lin)
+            + model.minimization.friction_power(**fields_, **rheo_glen)
+            + alpha_reg * model.minimization.friction_power(
+                **fields_, **rheo_lin)
+            + model.minimization.momentum_balance(**fields_)
+        )
+        if use_calving_terminus:
+            L_ += model.minimization.calving_terminus(
+                **fields_, outflow_ids=calving_ids
+            )
+        return L_
+
+    # The residual laws need a fixed Weertman anchor C_w0 (driving-stress
+    # balance); theta then inverts as an O(1) log-adjustment on top of it.
+    if USE_RESIDUAL:
+        C_w0 = weertman_anchor(H, s, u_obs, m_slide_val, Q)
+        law_name = ("Budd N_hat (exact-zero shelf, delta="
+                    f"{BUDD_DELTA:.3f}, alpha_gl={ALPHA_GL:.2f})"
+                    if FRICTION == "budd"
+                    else f"regularized Coulomb (c0={C0_RC})")
+        PETSc.Sys.Print(
+            f"  Friction: {law_name}; h_visc_floor={RC_HVISC_FLOOR:.0f}m; "
+            f"C_w0 in [{float(C_w0.dat.data_ro.min()):.2e}, "
+            f"{float(C_w0.dat.data_ro.max()):.2e}]"
+        )
+    else:
+        PETSc.Sys.Print("  Friction: Budd power-law dual (legacy action)")
+    map_tag = {"regularized_coulomb": "_rc", "budd": "_budd"}.get(FRICTION, "")
+
+    def build_F(theta_c, phi_c):
+        # Residual closure (tau linear, grounded-only theta via exp(theta*He),
+        # exact-zero shelves): budd -> N_hat=1 at the reference geometry;
+        # regularized_coulomb -> Coulomb cap. Legacy budd -> action derivative.
+        if USE_RESIDUAL:
+            return build_rc_residual(
+                z, theta_c, phi_c, H=H, s=s, b=b, C_w0=C_w0,
+                A4_base=A4_base, n_flow=n_flow, n_flow_val=n_flow_val,
+                m_slide=m_slide_val, tau_c=tau_c, alpha=alpha_reg, H_ref=H_ref,
+                fric_law=FRICTION, N_ref=None,
+                nhat_floor=BUDD_DELTA, nhat_cap=BUDD_NHAT_CAP, alpha_gl=ALPHA_GL,
+                c0=C0_RC, c_w0_floor=RC_CW0_FLOOR, h_visc_floor=RC_HVISC_FLOOR,
+                calving_ids=calving_ids if use_calving_terminus else None,
+            )
+        return derivative(_build_action(theta_c, phi_c, fields), z)
+
     if use_calving_terminus:
-        L += model.minimization.calving_terminus(**fields, outflow_ids=calving_ids)
         PETSc.Sys.Print("  Using calving_terminus BC")
     else:
         PETSc.Sys.Print("  NO calving_terminus BC (buffered mesh, h=0 at front)")
-    F = derivative(L, z)
+    F = build_F(theta, phi)
 
     # ── Warm start ──
     stop_manager()
     prob = NonlinearVariationalProblem(F, z, form_compiler_parameters=fc_params)
     slvr = NonlinearVariationalSolver(prob, solver_parameters=sparams)
-    if warm_chk:
-        # Already have theta/phi from checkpoint — just do one solve at full n
-        PETSc.Sys.Print("Warm start (single solve from checkpoint)...")
-        n.assign(n_glen_val)
+    # Always use continuation — single solve at full exponents can fail
+    # with checkpoint parameters that create ill-conditioned systems.
+    # Ramp n_flow (1 → n_flow_val) and m_slide (1 → m_slide_val) together.
+    PETSc.Sys.Print(
+        f"Warm start (continuation n_flow 1→{n_flow_val:.1f}, "
+        f"m_slide 1→{m_slide_val:.1f})..."
+    )
+    for t in np.linspace(0.0, 1.0, 5):
+        n_flow.assign(1.0 + t * (n_flow_val - 1.0))
+        m_slide.assign(1.0 + t * (m_slide_val - 1.0))
         slvr.solve()
-    else:
-        PETSc.Sys.Print("Warm start (continuation n=1→3)...")
-        for exponent in np.linspace(1.0, n_glen_val, 5):
-            n.assign(exponent)
-            slvr.solve()
     PETSc.Sys.Print("  Done")
 
     u_init = z.subfunctions[0]
@@ -268,29 +412,18 @@ def main():
     PETSc.Sys.Print(f"  u_max = {float(u_mag.dat.data_ro.max()):.0f} m/yr")
 
     # ── Forward function for tlm_adjoint ──
-    area_val = assemble(Constant(1.0) * dx(mesh))
+    # Normalize by the OBSERVED area so the misfit magnitude stays
+    # comparable between masked and unmasked runs.
+    area_val = assemble(obs_mask * dx(mesh))
 
     def forward(theta_ctrl, phi_ctrl):
         clear_caches()
-        rheology_ctrl = {
-            "flow_law_exponent": n,
-            "flow_law_coefficient": A0 * exp(phi_ctrl),
-            "sliding_exponent": n,
-            "sliding_coefficient": K_base * exp(-n * theta_ctrl),
-        }
-        L_ctrl = (
-            model.minimization.viscous_power(**fields, **rheology_ctrl)
-            + model.minimization.friction_power(**fields, **rheology_ctrl)
-            + model.minimization.momentum_balance(**fields)
-        )
-        if use_calving_terminus:
-            L_ctrl += model.minimization.calving_terminus(
-                **fields, outflow_ids=calving_ids
-            )
-        F_ctrl = derivative(L_ctrl, z)
-        # Continuation inside annotation for robustness
-        for exponent in np.linspace(1.0, n_glen_val, 5):
-            n.assign(exponent)
+        F_ctrl = build_F(theta_ctrl, phi_ctrl)
+        # Continuation inside annotation for robustness — ramp both
+        # n_flow and m_slide on the same [0,1] parameter.
+        for t in np.linspace(0.0, 1.0, 5):
+            n_flow.assign(1.0 + t * (n_flow_val - 1.0))
+            m_slide.assign(1.0 + t * (m_slide_val - 1.0))
             EquationSolver(
                 F_ctrl == 0,
                 z,
@@ -303,6 +436,7 @@ def main():
         J.assign(
             0.5
             / area_val
+            * obs_mask
             * ((u_sol[0] - u_obs[0]) ** 2 + (u_sol[1] - u_obs[1]) ** 2)
             * dx
         )
@@ -364,7 +498,17 @@ def main():
         last_good_obj[0] = J_val
 
         t_adj = perf_counter()
-        dJ_dtheta, dJ_dphi = compute_gradient(J, [theta, phi])
+        try:
+            dJ_dtheta, dJ_dphi = compute_gradient(J, [theta, phi])
+        except fd.ConvergenceError:
+            # The adjoint jacobian solve can hit the SNES cap at rough
+            # mid-optimization controls just like the forward (killed the
+            # Jul 18 2500m Budd run at iter 60, ~11 hr in). Same recovery
+            # as the forward guard: inflated objective + zero gradient
+            # makes L-BFGS-B backtrack its line search.
+            z.assign(z_backup)
+            PETSc.Sys.Print("  [!] Adjoint solve failed, returning large objective")
+            return last_good_obj[0] * 10, np.zeros(2 * global_ndof)
         t_adj = perf_counter() - t_adj
 
         reg_theta = float(
@@ -421,12 +565,13 @@ def main():
 
         # Periodic checkpoint every 20 iterations
         if iteration_count[0] % 20 == 0:
-            chk_fn = os.path.join(MESH_DIR, f"inversion_icepack2_{lc}.h5")
+            chk_fn = os.path.join(MESH_DIR, f"inversion_icepack2{map_tag}_{lc}.h5")
             with fd.CheckpointFile(chk_fn, "w") as chk:
                 chk.save_mesh(mesh)
                 chk.save_function(theta, name="log_friction")
                 chk.save_function(phi, name="log_fluidity")
                 chk.save_function(u_obs, name="velocity_obs")
+                chk.save_function(obs_mask, name="obs_mask")
                 chk.save_function(H, name="thickness")
                 chk.save_function(b, name="bed")
                 chk.save_function(s, name="surface")
@@ -440,7 +585,7 @@ def main():
         x0,
         method="L-BFGS-B",
         jac=True,
-        options={"maxiter": max_iter, "ftol": 1e-15, "gtol": 1e-12, "disp": False},
+        options={"maxiter": max_iter, "ftol": 0, "gtol": 0, "disp": False},
     )
 
     PETSc.Sys.Print(f"\nOptimization finished: {result.message}")
@@ -455,12 +600,13 @@ def main():
     )
 
     # ── Save MAP immediately ──
-    chk_fn = os.path.join(MESH_DIR, f"inversion_icepack2_{lc}.h5")
+    chk_fn = os.path.join(MESH_DIR, f"inversion_icepack2{map_tag}_{lc}.h5")
     with fd.CheckpointFile(chk_fn, "w") as chk:
         chk.save_mesh(mesh)
         chk.save_function(theta, name="log_friction")
         chk.save_function(phi, name="log_fluidity")
         chk.save_function(u_obs, name="velocity_obs")
+        chk.save_function(obs_mask, name="obs_mask")
         chk.save_function(H, name="thickness")
         chk.save_function(b, name="bed")
         chk.save_function(s, name="surface")
@@ -480,11 +626,12 @@ def main():
         assemble(
             0.5
             / area_val
+            * obs_mask
             * ((u_sol[0] - u_obs[0]) ** 2 + (u_sol[1] - u_obs[1]) ** 2)
             * dx
         )
     )
-    PETSc.Sys.Print(f"  Final misfit: {misfit:.6e}")
+    PETSc.Sys.Print(f"  Final misfit (masked): {misfit:.6e}")
 
     # Update checkpoint with velocity
     with fd.CheckpointFile(chk_fn, "a") as chk:

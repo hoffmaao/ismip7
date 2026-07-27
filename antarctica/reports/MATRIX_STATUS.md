@@ -60,11 +60,17 @@ front-emptying is continuous.
 
 1. **~9% aSMB unit inflation** (`forcing.py:smb_kgm2s_to_myr`) - a real
    pending decision; inflates every ESM SMB anomaly. (The matrix sitting
-   above the ISMIP6 envelope, originally attributed here, turned out to be
-   the CTRL cold-starting from the 2015 inversion with a mismatched frozen
-   apparent-MB baseline; `control/run.py` now branches the CTRL from the
-   historical endpoint. Cores 9/10 in this record predate that fix, so
-   their proj-CTRL differences carry the spurious trend.)
+   above the ISMIP6 envelope is a real forced-response bias - a
+   melt/dynamics parametrization target - not a differencing artifact.
+   `control/run.py` branches the CTRL from the historical endpoint because
+   that is the protocol-correct same-state differencing (the control and
+   projections must share the historical endpoint so their common
+   relaxation drift cancels in proj-CTRL), but an isolation test at fixed
+   n=4 shows this correct control makes proj-CTRL LARGER, not smaller
+   (ssp126 +161 vs +132 mm): a_ref is a t=0 balancing correction that
+   zeroes the initial tendency, not a net sink, so the earlier "spurious
+   ~160 mm a_ref trend" attribution was wrong. n=3 rheology roughly halves
+   the overshoot (ssp126 +85 mm, still above the [-14,+50] mm envelope).)
 2. **2014→2015 projection handoff** starts projections at the historical
    final's 2014.0 with a one-year zero-anomaly gap.
 3. **Runaway-detector peak clause** flags isolated one-step discharge spikes

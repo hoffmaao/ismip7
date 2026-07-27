@@ -261,11 +261,12 @@ MRI-ESM2-0, plus `ocx.py`) are thin shims over `scripts/experiment.py` and
 follow the same pattern. Historical spin-up drivers are in `scripts/historical/`;
 run one first to produce `results/hist_<esm>_<lc>_final.h5`: the projections
 AND the control both branch from it automatically, so they share the same t=0
-state and the frozen apparent-MB correction cancels exactly in
-projection-minus-control (the ISMIP6 ctrl_proj convention). Without it a
-projection cold-starts from BedMachine, and the control cold-starts with a
-loud warning that its apparent-MB baseline will not match hist-branched
-projections (a spurious trend in proj-CTRL).
+state and their shared relaxation drift (and the identical frozen apparent-MB
+correction) cancels in projection-minus-control (the ISMIP6 ctrl_proj
+convention). Without it a projection cold-starts from BedMachine, and the
+control cold-starts with a loud warning that it starts from a DIFFERENT
+geometry than the hist-branched projections, so projection-minus-CTRL will
+not cleanly isolate the forced response.
 
 Restart / run-management flags on the control driver: `--restart <ckpt>`
 (or `ISMIP7_RESTART`) resumes from a checkpoint; `ISMIP7_AUTO_RESUME=1`

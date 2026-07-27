@@ -178,32 +178,39 @@ def main():
         )
     # ISMIP6/ISMIP7 ctrl_proj convention: the control and the scenario
     # projections MUST branch from the SAME initial state at the SAME time, so
-    # the frozen apparent-MB correction (a_ref, ISMIP7_APPARENT_MB) is identical
-    # in both and cancels EXACTLY in the projection-minus-control difference.
-    # experiment.py restarts every projection from hist_<esm>_<lc>_final.h5;
-    # the CTRL therefore does the same instead of cold-starting from the 2015
-    # inversion. A cold start balances a_ref to the pristine inversion geometry
-    # (net ~-95 Gt/yr here) while the projections balance to the drifted
-    # historical endpoint (~-777 Gt/yr): that ~680 Gt/yr baseline mismatch is
-    # frozen and leaks into proj-ctrl as a spurious ~160 mm SLE trend over
-    # 2015-2100 (it put our ssp126 well ABOVE the ISMIP6 envelope). Falls back
-    # to a cold start only when the historical endpoint is absent.
+    # their shared spin-up/relaxation drift (and the identical frozen a_ref)
+    # cancels in the projection-minus-control difference and leaves only the
+    # forced response. experiment.py restarts every projection from
+    # hist_<esm>_<lc>_final.h5; the CTRL therefore does the same instead of
+    # cold-starting from the 2015 inversion. Cold-starting from the pristine
+    # inversion gives a DIFFERENT initial geometry than the projections, so the
+    # projection's own historical-endpoint relaxation does NOT cancel and the
+    # forced signal is mis-estimated. NB this is a correctness fix, not a
+    # magnitude fix: at 32 km the hist-branched control drifts +37 mm SLE over
+    # 2015-2100 vs the cold-start control's +8 mm, so the (correct) same-state
+    # difference is LARGER, not smaller (ssp126 +161 vs +132 mm at n=4). a_ref is
+    # a t=0 BALANCING correction (zeroes the initial tendency), not a net sink,
+    # so it does not add a standalone SLE trend; an earlier note claiming a
+    # ~160 mm spurious a_ref sink was wrong. The ISMIP6 overshoot is a real
+    # forced-response bias, not a differencing artifact. Falls back to a cold
+    # start (mis-matched control) only when the historical endpoint is absent.
     if restart_from is None:
         tag_sfx = f"_{args.tag}" if args.tag else ""
         hist = os.path.join(RESULTS_DIR, f"hist_{esm_tag}{tag_sfx}_{lc}_final.h5")
         if os.path.exists(hist):
             restart_from = hist
             PETSc.Sys.Print(
-                f"  Branching CTRL from the historical endpoint (shared a_ref "
-                f"baseline with the projections): {os.path.basename(hist)}"
+                f"  Branching CTRL from the historical endpoint (same initial "
+                f"state as the projections; shared drift cancels in proj-CTRL): "
+                f"{os.path.basename(hist)}"
             )
         else:
             PETSc.Sys.Print(
                 f"  WARNING: no historical endpoint {os.path.basename(hist)}; "
-                f"cold-starting from the inversion. The CTRL's apparent-MB "
-                f"baseline will NOT match hist-branched projections, so "
-                f"projection-minus-CTRL will carry a spurious trend. Run the "
-                f"historical first, or pass --restart, for a clean control."
+                f"cold-starting from the inversion. The CTRL will start from a "
+                f"DIFFERENT geometry than the hist-branched projections, so "
+                f"projection-minus-CTRL will not cleanly isolate the forced "
+                f"response. Run the historical first, or pass --restart."
             )
     if restart_from and not os.path.exists(restart_from):
         raise FileNotFoundError(f"CTRL restart not found: {restart_from}")

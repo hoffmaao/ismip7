@@ -52,7 +52,8 @@
 #      ISMIP7_FRICTION (budd), ISMIP7_FIXED_FRONT (1), ISMIP7_SUBCYCLES
 #      (1,4,16,64), NRANKS (8), MAX_LOAD (cores-8, floored at 1),
 #      MAX_ATTEMPTS (6), CORES (comma list, default all), FRESH, REUSE,
-#      PROV_REF (icepack2_tools/forcing.py), VENV (~/venv-firedrake-2026).
+#      PROV_REF (icepack2_tools/forcing.py), ENS_HORIZON (2101),
+#      VENV (~/venv-firedrake-2026).
 set -u
 
 REPO="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
@@ -70,6 +71,7 @@ CORES="${CORES:-1,2,9,10,3,4,5,6,7,8,11}"
 FRESH="${FRESH:-}"
 REUSE="${REUSE:-}"
 PROV_REF="${PROV_REF:-icepack2_tools/forcing.py}"
+ENS_HORIZON="${ENS_HORIZON:-2101}"   # ISMIP6 ensemble time base ends here
 
 export OMP_NUM_THREADS=1
 export ISMIP7_LC="${ISMIP7_LC:-32000}"
@@ -161,12 +163,25 @@ reusable () {  # core label csv year - true when the existing output is current
 }
 
 archive_stale () {  # core label stem - move superseded output out of the way
-  local core="$1" label="$2" stem="$3" f moved=()
+  local core="$1" label="$2" stem="$3" f moved=() failed=()
   for f in "$(csv_of "$stem")" "$(h5_of "$stem")"; do
     [ -e "$f" ] || continue
-    mkdir -p "$ARCHIVE"
-    mv "$f" "$ARCHIVE/" && moved+=("$(basename "$f")")
+    if mkdir -p "$ARCHIVE" && mv "$f" "$ARCHIVE/"; then
+      moved+=("$(basename "$f")")
+    else
+      failed+=("$f")
+    fi
   done
+  # The timeseries is what a later read would mistake for this run's result,
+  # so assert it is gone rather than trusting mv's exit status alone.
+  [ "${#failed[@]}" -eq 0 ] && [ -e "$(csv_of "$stem")" ] &&
+    failed+=("$(csv_of "$stem")")
+  if [ "${#failed[@]}" -gt 0 ]; then
+    echo "[core $core] $label: CANNOT ARCHIVE ${failed[*]} - refusing to run." \
+         "Superseded output left in place would be read back as this run's" \
+         "result. Check permissions and free space on $R, then re-run."
+    return 1
+  fi
   [ "${#moved[@]}" -gt 0 ] &&
     echo "[core $core] $label: archived ${moved[*]} under $ARCHIVE/"
   return 0
@@ -213,7 +228,7 @@ run_core () {  # core label driver esm stem target kind
 
   now=$(last_year "$csv" || echo "")
   if [ -n "$now" ] && ! reusable "$core" "$label" "$csv" "$now"; then
-    archive_stale "$core" "$label" "$stem"
+    archive_stale "$core" "$label" "$stem" || return 1
     now=$(last_year "$csv" || echo "")
   fi
   if [ -n "$now" ] && awk "BEGIN{exit !($now >= $target)}"; then
@@ -244,13 +259,21 @@ run_core () {  # core label driver esm stem target kind
     local rc=0
     env "${restart_env[@]}" ISMIP7_ESM="$esm" \
       mpiexec -n "$NRANKS" "$PY" "antarctica/scripts/$driver" > "$log" 2>&1 || rc=$?
-    # A graceful wall stop saves and returns 0; a non-zero exit means the
-    # driver died, so whatever is on disk is not this attempt's progress.
-    if [ "$rc" -ne 0 ]; then
-      echo "[core $core] $label driver exited $rc on attempt $attempt - see ${log##*/}"
-      return 1
-    fi
     now=$(last_year "$csv" || echo "")
+    # A graceful wall stop saves and returns 0. A non-zero exit is a crash
+    # (this machine is shared, so an OOM kill or MPI abort is plausible): it
+    # costs one attempt and is never counted as reaching the target, but the
+    # no-progress check below still ends a core that keeps dying in place.
+    if [ "$rc" -ne 0 ]; then
+      echo "[core $core] $label CRASHED (exit $rc) on attempt $attempt at" \
+           "${now:-nothing} - see ${log##*/}"
+      if [ -n "$prev" ] && [ -n "$now" ] &&
+         awk "BEGIN{exit !($now <= $prev + 0.001)}"; then
+        echo "[core $core] $label crashed without advancing past $prev - giving up"
+        return 1
+      fi
+      continue
+    fi
     echo "    -> reached ${now:-nothing}  (log ${log##*/})"
     [ -z "$now" ] && { echo "[core $core] produced no output - see log"; return 1; }
     awk "BEGIN{exit !($now >= $target)}" && { echo "[core $core] $label COMPLETE at $now"; return 0; }
@@ -350,9 +373,14 @@ for spec in "5|9" "6|10" "3|9" "4|10" "7|9" "8|10"; do
     echo "--- core $core: $p - skipped (CTRL core $ctrl_core timeseries predates $PROV_REF)"
     continue
   fi
+  # compare_ismip6.py clips to the projection-CTRL overlap and then to the
+  # ISMIP6 ensemble time base, so the CTRL only has to reach the end of the
+  # comparison window - a CTRL that stalled at 2268 still compares fine.
+  proj_y=$(last_year "$pc" || echo "")
   ctrl_y=$(last_year "$cc" || echo "")
-  if [ -z "$ctrl_y" ] || ! awk "BEGIN{exit !($ctrl_y >= ${TARGET_OF[$core]})}"; then
-    echo "--- core $core: $p - skipped (CTRL core $ctrl_core reaches ${ctrl_y:-nothing}, needs ${TARGET_OF[$core]})"
+  need=$(awk -v a="${proj_y:-0}" -v b="$ENS_HORIZON" 'BEGIN{print (a<b)?a:b}')
+  if [ -z "$ctrl_y" ] || ! awk "BEGIN{exit !($ctrl_y >= $need)}"; then
+    echo "--- core $core: $p - skipped (CTRL core $ctrl_core reaches ${ctrl_y:-nothing}, needs $need to cover the comparison window)"
     continue
   fi
   echo "--- core $core: $p ---"

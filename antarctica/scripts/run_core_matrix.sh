@@ -12,6 +12,18 @@
 #   7,8   ssp585       both ESMs                          ->2300
 #   11    OCX          obs-constrained, cold start     1990-2025
 #
+# A core that branches from the historical is only launched once that ESM's
+# historical has actually reached 2014. A missing or short historical would
+# otherwise cold-start the dependent from the inversion geometry (or resume
+# from a truncated endpoint), which breaks the projection-minus-CTRL
+# cancellation the whole matrix rests on - and the drivers only WARN about it.
+#
+# PROVENANCE: a completed timeseries is only reused when it postdates the
+# forcing implementation ($PROV_REF). Results produced before the annual-mean
+# atmosphere fix are invalid (January was applied as the whole year), so they
+# are treated as absent and re-run rather than silently skipped and fed to the
+# audit. FRESH=1 re-runs everything; REUSE=1 reuses any completed timeseries.
+#
 # WALL RETRY: the split-step diagnostic solve can exhaust its in-run rescue
 # ladder late in a long projection and save-and-stop short of the target year.
 # Relaunching from the saved state clears it - a fresh process re-runs the
@@ -19,16 +31,21 @@
 # (observed 3/3: ssp585-CESM 2096.7, CTRL-CESM 2268, CTRL-MRI 2250 all resumed
 # and two reached 2300). This script therefore relaunches a short run from its
 # own final.h5, and keeps doing so while each attempt makes progress, up to
-# MAX_ATTEMPTS. A run that stops advancing is left alone and reported.
+# MAX_ATTEMPTS. A run that stops advancing is left alone and reported. OCX is
+# the exception: its driver cold-starts unconditionally and ignores
+# ISMIP7_RESTART, so it runs at most once.
 #
 # Usage:
 #   antarctica/scripts/run_core_matrix.sh                # full matrix
 #   CORES=1,2,9 antarctica/scripts/run_core_matrix.sh    # a subset
 #   ISMIP7_RUN_TAG=n3 NRANKS=8 antarctica/scripts/run_core_matrix.sh
+#   FRESH=1 antarctica/scripts/run_core_matrix.sh        # ignore all prior output
 #
 # Env: ISMIP7_LC (32000), ISMIP7_N_FLOW (3), ISMIP7_RUN_TAG, ISMIP7_DT (0.1),
-#      ISMIP7_FRICTION (budd), NRANKS (8), MAX_LOAD (cores-8), MAX_ATTEMPTS (6),
-#      CORES (comma list, default all), VENV (~/venv-firedrake-2026).
+#      ISMIP7_FRICTION (budd), ISMIP7_FIXED_FRONT (1), ISMIP7_SUBCYCLES
+#      (1,4,16,64), NRANKS (8), MAX_LOAD (cores-8, floored at 1),
+#      MAX_ATTEMPTS (6), CORES (comma list, default all), FRESH, REUSE,
+#      PROV_REF (icepack2_tools/forcing.py), VENV (~/venv-firedrake-2026).
 set -u
 
 REPO="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
@@ -41,7 +58,11 @@ NRANKS="${NRANKS:-8}"          # 8 is MUMPS-safe at 32 km; raise for finer meshe
 MAX_ATTEMPTS="${MAX_ATTEMPTS:-6}"
 NCPU=$(python3 -c 'import os;print(os.cpu_count())')
 MAX_LOAD="${MAX_LOAD:-$((NCPU - 8))}"
+[ "$MAX_LOAD" -lt 1 ] && MAX_LOAD=1
 CORES="${CORES:-1,2,9,10,3,4,5,6,7,8,11}"
+FRESH="${FRESH:-}"
+REUSE="${REUSE:-}"
+PROV_REF="${PROV_REF:-icepack2_tools/forcing.py}"
 
 export OMP_NUM_THREADS=1
 export ISMIP7_LC="${ISMIP7_LC:-32000}"
@@ -50,6 +71,8 @@ export ISMIP7_FRICTION="${ISMIP7_FRICTION:-budd}"
 export ISMIP7_DT="${ISMIP7_DT:-0.1}"
 export ISMIP7_OUTPUT_INTERVAL="${ISMIP7_OUTPUT_INTERVAL:-10}"
 export ISMIP7_APPARENT_MB="${ISMIP7_APPARENT_MB:-1}"
+export ISMIP7_FIXED_FRONT="${ISMIP7_FIXED_FRONT:-1}"
+export ISMIP7_SUBCYCLES="${ISMIP7_SUBCYCLES:-1,4,16,64}"
 TAG="${ISMIP7_RUN_TAG:-}"
 [ -n "$TAG" ] && export ISMIP7_RUN_TAG="$TAG"
 SFX=${TAG:+_$TAG}
@@ -57,20 +80,35 @@ LC=$ISMIP7_LC
 TS=$(date +%Y%m%d_%H%M%S)
 PY="$VENV/bin/python"
 
-# core | label | driver | ESM | experiment-name stem | target year
+PROV_MTIME=""
+[ -e "$PROV_REF" ] && PROV_MTIME=$(stat -c %Y "$PROV_REF")
+
+# core | label | driver | ESM | experiment-name stem | target year | kind
+# kind: hist = historical, branch = branches from the historical endpoint,
+#       cold = cold start with no restart support.
 CORE_SPEC=(
-  "1|hist_cesm|historical/cesm_waccm.py|CESM2-WACCM|hist_cesm2_waccm|2014"
-  "2|hist_mri|historical/mri_esm2.py|MRI-ESM2-0|hist_mri_esm2_0|2014"
-  "9|ctrl_cesm|control/run.py|CESM2-WACCM|ctrl2015_cesm2_waccm|2300"
-  "10|ctrl_mri|control/run.py|MRI-ESM2-0|ctrl2015_mri_esm2_0|2300"
-  "3|ssp370_cesm|projections/ssp370_cesm_waccm.py|CESM2-WACCM|ssp370_cesm2_waccm|2100"
-  "4|ssp370_mri|projections/ssp370_mri_esm2.py|MRI-ESM2-0|ssp370_mri_esm2_0|2100"
-  "5|ssp126_cesm|projections/ssp126_cesm_waccm.py|CESM2-WACCM|ssp126_cesm2_waccm|2300"
-  "6|ssp126_mri|projections/ssp126_mri_esm2.py|MRI-ESM2-0|ssp126_mri_esm2_0|2300"
-  "7|ssp585_cesm|projections/ssp585_cesm_waccm.py|CESM2-WACCM|ssp585_cesm2_waccm|2300"
-  "8|ssp585_mri|projections/ssp585_mri_esm2.py|MRI-ESM2-0|ssp585_mri_esm2_0|2300"
-  "11|ocx|projections/ocx.py|CESM2-WACCM|ocx|2025"
+  "1|hist_cesm|historical/cesm_waccm.py|CESM2-WACCM|hist_cesm2_waccm|2014|hist"
+  "2|hist_mri|historical/mri_esm2.py|MRI-ESM2-0|hist_mri_esm2_0|2014|hist"
+  "9|ctrl_cesm|control/run.py|CESM2-WACCM|ctrl2015_cesm2_waccm|2300|branch"
+  "10|ctrl_mri|control/run.py|MRI-ESM2-0|ctrl2015_mri_esm2_0|2300|branch"
+  "3|ssp370_cesm|projections/ssp370_cesm_waccm.py|CESM2-WACCM|ssp370_cesm2_waccm|2100|branch"
+  "4|ssp370_mri|projections/ssp370_mri_esm2.py|MRI-ESM2-0|ssp370_mri_esm2_0|2100|branch"
+  "5|ssp126_cesm|projections/ssp126_cesm_waccm.py|CESM2-WACCM|ssp126_cesm2_waccm|2300|branch"
+  "6|ssp126_mri|projections/ssp126_mri_esm2.py|MRI-ESM2-0|ssp126_mri_esm2_0|2300|branch"
+  "7|ssp585_cesm|projections/ssp585_cesm_waccm.py|CESM2-WACCM|ssp585_cesm2_waccm|2300|branch"
+  "8|ssp585_mri|projections/ssp585_mri_esm2.py|MRI-ESM2-0|ssp585_mri_esm2_0|2300|branch"
+  "11|ocx|projections/ocx.py|CESM2-WACCM|ocx|2025|cold"
 )
+
+declare -A HIST_STEM=() HIST_TARGET=() HIST_STATUS=() STATUS=() STEM_OF=()
+for spec in "${CORE_SPEC[@]}"; do
+  IFS='|' read -r core label driver esm stem target kind <<< "$spec"
+  STEM_OF[$core]=$stem
+  if [ "$kind" = hist ]; then
+    HIST_STEM[$esm]=$stem
+    HIST_TARGET[$esm]=$target
+  fi
+done
 
 wanted () { [[ ",$CORES," == *",$1,"* ]]; }
 csv_of () { echo "$R/${1}${SFX}_${LC}_timeseries.csv"; }
@@ -82,6 +120,55 @@ last_year () {  # last simulated year of a timeseries, or empty
   awk -F, 'NR>1 && $1+0>0 {y=$1} END{if(y!="") print y}' "$c"
 }
 
+postdates_forcing () {  # file - true when it was written after $PROV_REF
+  [ -n "$REUSE" ] && return 0
+  [ -n "$FRESH" ] && return 1
+  [ -n "$PROV_MTIME" ] || return 1
+  [ "$(stat -c %Y "$1")" -ge "$PROV_MTIME" ]
+}
+
+reusable () {  # core label csv year - true when the existing output is current
+  local core="$1" label="$2" csv="$3" year="$4"
+  if [ -n "$FRESH" ]; then
+    echo "[core $core] $label: FRESH=1, discarding existing timeseries at $year - re-running"
+    return 1
+  fi
+  if [ -n "$REUSE" ]; then
+    echo "[core $core] $label: REUSE=1, accepting existing timeseries at $year unchecked"
+    return 0
+  fi
+  if [ -z "$PROV_MTIME" ]; then
+    echo "[core $core] $label: provenance reference '$PROV_REF' not found - treating timeseries at $year as stale, re-running"
+    return 1
+  fi
+  if postdates_forcing "$csv"; then
+    echo "[core $core] $label: timeseries at $year postdates $PROV_REF - current"
+    return 0
+  fi
+  echo "[core $core] $label: timeseries at $year PREDATES $PROV_REF (produced before the forcing fix) - re-running from scratch"
+  return 1
+}
+
+hist_ready () {  # esm - true when that ESM's historical endpoint is usable
+  local esm="$1" stem target y h5
+  if [ -n "${HIST_STATUS[$esm]:-}" ]; then
+    [ "${HIST_STATUS[$esm]}" = ok ]
+    return
+  fi
+  stem="${HIST_STEM[$esm]:-}"
+  [ -n "$stem" ] || { HIST_STATUS[$esm]=ok; return 0; }
+  target="${HIST_TARGET[$esm]}"
+  h5=$(h5_of "$stem")
+  y=$(last_year "$(csv_of "$stem")" || echo "")
+  if [ -f "$h5" ] && [ -n "$y" ] && awk "BEGIN{exit !($y >= $target)}" \
+     && postdates_forcing "$h5"; then
+    HIST_STATUS[$esm]=ok
+    return 0
+  fi
+  HIST_STATUS[$esm]=bad
+  return 1
+}
+
 wait_for_load () {
   for _ in $(seq 1 720); do
     local l; l=$(python3 -c 'import os;print(int(os.getloadavg()[0]))')
@@ -91,18 +178,26 @@ wait_for_load () {
   echo "    (load never dropped below $MAX_LOAD; proceeding anyway)"
 }
 
-run_core () {  # core label driver esm stem target
-  local core="$1" label="$2" driver="$3" esm="$4" stem="$5" target="$6"
-  local csv h5 prev now attempt log
+run_core () {  # core label driver esm stem target kind
+  local core="$1" label="$2" driver="$3" esm="$4" stem="$5" target="$6" kind="$7"
+  local csv h5 prev now attempt log attempts
   csv=$(csv_of "$stem"); h5=$(h5_of "$stem")
 
   now=$(last_year "$csv" || echo "")
+  if [ -n "$now" ] && ! reusable "$core" "$label" "$csv" "$now"; then
+    now=""
+  fi
   if [ -n "$now" ] && awk "BEGIN{exit !($now >= $target)}"; then
     echo "[core $core] $label already at $now (target $target) - skipping"
     return 0
   fi
 
-  for attempt in $(seq 1 "$MAX_ATTEMPTS"); do
+  # OCX cold-starts unconditionally, so a relaunch cannot resume it and would
+  # truncate the previous timeseries instead of extending it.
+  attempts="$MAX_ATTEMPTS"
+  [ "$kind" = cold ] && attempts=1
+
+  for attempt in $(seq 1 "$attempts"); do
     prev="$now"
     wait_for_load
     log="$R/logs/matrix_${TS}_core${core}_${label}_a${attempt}.log"
@@ -118,8 +213,7 @@ run_core () {  # core label driver esm stem target
       echo "[core $core] $label starting (target $target)"
     fi
     env "${restart_env[@]}" ISMIP7_ESM="$esm" \
-      mpiexec -n "$NRANKS" "$PY" "antarctica/scripts/$driver" \
-      ${TAG:+--tag "$TAG"} > "$log" 2>&1
+      mpiexec -n "$NRANKS" "$PY" "antarctica/scripts/$driver" > "$log" 2>&1
     now=$(last_year "$csv" || echo "")
     echo "    -> reached ${now:-nothing}  (log ${log##*/})"
     [ -z "$now" ] && { echo "[core $core] produced no output - see log"; return 1; }
@@ -130,46 +224,82 @@ run_core () {  # core label driver esm stem target
       return 1
     fi
   done
-  echo "[core $core] $label short of target after $MAX_ATTEMPTS attempts (at $now)"
+  if [ "$kind" = cold ]; then
+    echo "[core $core] $label short of target at $now - not retried (its driver ignores ISMIP7_RESTART)"
+  else
+    echo "[core $core] $label short of target after $attempts attempts (at $now)"
+  fi
   return 1
 }
 
 echo "ISMIP7 core matrix | lc=$LC n=$ISMIP7_N_FLOW tag='${TAG:-none}' dt=$ISMIP7_DT ranks=$NRANKS"
 echo "cores: $CORES | max load $MAX_LOAD/$NCPU | wall retries up to $MAX_ATTEMPTS"
+echo "fixed front=$ISMIP7_FIXED_FRONT subcycles=$ISMIP7_SUBCYCLES friction=$ISMIP7_FRICTION"
+if [ -n "$FRESH" ]; then
+  echo "reuse: FRESH=1, every selected core re-runs from scratch"
+elif [ -n "$REUSE" ]; then
+  echo "reuse: REUSE=1, any completed timeseries is accepted (provenance NOT checked)"
+elif [ -n "$PROV_MTIME" ]; then
+  echo "reuse: only output newer than $PROV_REF ($(date -d "@$PROV_MTIME" '+%Y-%m-%d %H:%M'))"
+else
+  echo "reuse: provenance reference '$PROV_REF' missing, all existing output treated as stale"
+fi
 echo
 
 for spec in "${CORE_SPEC[@]}"; do
-  IFS='|' read -r core label driver esm stem target <<< "$spec"
+  IFS='|' read -r core label driver esm stem target kind <<< "$spec"
   wanted "$core" || continue
-  run_core "$core" "$label" "$driver" "$esm" "$stem" "$target"
+  if [ "$kind" = branch ] && ! hist_ready "$esm"; then
+    echo "[core $core] $label BLOCKED: the $esm historical has not reached" \
+         "${HIST_TARGET[$esm]} with current forcing. Running it now would" \
+         "cold-start (or resume a truncated endpoint) and break the" \
+         "projection-minus-CTRL cancellation. Run core(s) for $esm first."
+    STATUS[$core]=blocked
+    continue
+  fi
+  if run_core "$core" "$label" "$driver" "$esm" "$stem" "$target" "$kind"; then
+    STATUS[$core]=ok
+    [ "$kind" = hist ] && HIST_STATUS[$esm]=ok
+  else
+    STATUS[$core]=failed
+    [ "$kind" = hist ] && HIST_STATUS[$esm]=bad
+  fi
 done
 
 echo
 echo "=== matrix summary ==="
 for spec in "${CORE_SPEC[@]}"; do
-  IFS='|' read -r core label driver esm stem target <<< "$spec"
+  IFS='|' read -r core label driver esm stem target kind <<< "$spec"
   wanted "$core" || continue
   c=$(csv_of "$stem"); y=$(last_year "$c" || echo "-")
-  printf "  core %-2s %-14s %8s / %s\n" "$core" "$label" "$y" "$target"
+  printf "  core %-2s %-14s %8s / %s   %s\n" \
+    "$core" "$label" "$y" "$target" "${STATUS[$core]:-not-run}"
 done
 
+# The audit and the ensemble comparison only read cores this run brought to
+# their target with current forcing; a blocked or failed core may still have a
+# pre-fix timeseries on disk, which must not be reported as a matrix result.
 echo
 echo "=== observational audit ==="
 for spec in "${CORE_SPEC[@]}"; do
-  IFS='|' read -r core label driver esm stem target <<< "$spec"
+  IFS='|' read -r core label driver esm stem target kind <<< "$spec"
   wanted "$core" || continue
+  [ "${STATUS[$core]:-}" = ok ] || { printf "  %-14s (skipped: %s)\n" "$label" "${STATUS[$core]:-not-run}"; continue; }
   c=$(csv_of "$stem"); [ -f "$c" ] || continue
   printf "  %-14s %s\n" "$label" "$("$PY" antarctica/scripts/check_ismip6_track.py "$c" 2>&1 | tail -1)"
 done
 
 echo
 echo "=== ISMIP6 ensemble comparison (projection - same-ESM CTRL) ==="
-for spec in "5|ssp126_cesm2_waccm|ctrl2015_cesm2_waccm" "6|ssp126_mri_esm2_0|ctrl2015_mri_esm2_0" \
-            "3|ssp370_cesm2_waccm|ctrl2015_cesm2_waccm" "4|ssp370_mri_esm2_0|ctrl2015_mri_esm2_0" \
-            "7|ssp585_cesm2_waccm|ctrl2015_cesm2_waccm" "8|ssp585_mri_esm2_0|ctrl2015_mri_esm2_0"; do
-  IFS='|' read -r core p c <<< "$spec"
+for spec in "5|9" "6|10" "3|9" "4|10" "7|9" "8|10"; do
+  IFS='|' read -r core ctrl_core <<< "$spec"
   wanted "$core" || continue
-  pc=$(csv_of "$p"); cc=$(csv_of "$c")
+  p="${STEM_OF[$core]}"
+  if [ "${STATUS[$core]:-}" != ok ] || [ "${STATUS[$ctrl_core]:-}" != ok ]; then
+    echo "--- core $core: $p - skipped (core $core ${STATUS[$core]:-not-run}, CTRL core $ctrl_core ${STATUS[$ctrl_core]:-not-run})"
+    continue
+  fi
+  pc=$(csv_of "$p"); cc=$(csv_of "${STEM_OF[$ctrl_core]}")
   [ -f "$pc" ] && [ -f "$cc" ] || continue
   echo "--- core $core: $p ---"
   "$PY" antarctica/scripts/compare_ismip6.py "$pc" "$cc" 2>&1 | tail -3

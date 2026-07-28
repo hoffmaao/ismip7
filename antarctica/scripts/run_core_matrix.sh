@@ -24,12 +24,15 @@
 # PROVENANCE: a completed timeseries is only reused when it postdates the
 # forcing implementation ($PROV_REF). Results produced before the annual-mean
 # atmosphere fix are invalid (January was applied as the whole year), so they
-# are ARCHIVED under $R/archive_stale_<TS>/ and re-run rather than silently
-# skipped and fed to the audit - moving them aside also stops a crashed
-# relaunch from reading the superseded file back as its own progress.
+# are ARCHIVED under $R/archive_stale_<TS>/ - the timeseries, the final.h5 and
+# the periodic checkpoints together - and re-run rather than silently skipped
+# and fed to the audit. Moving them aside also stops a crashed relaunch from
+# reading the superseded file back as its own progress, and a resume source is
+# additionally required to postdate $PROV_REF so no run can continue from
+# pre-fix geometry.
 # Reuse precedence: FRESH=1 (re-run every selected core) beats REUSE=1 (reuse
 # any completed timeseries unchecked) beats the provenance comparison. Neither
-# flag affects the dependency check above.
+# flag affects the dependency check above or the resume-source check.
 #
 # WALL RETRY: the split-step diagnostic solve can exhaust its in-run rescue
 # ladder late in a long projection and save-and-stop short of the target year.
@@ -89,6 +92,7 @@ TAG="${ISMIP7_RUN_TAG:-}"
 SFX=${TAG:+_$TAG}
 LC=$ISMIP7_LC
 TS=$(date +%Y%m%d_%H%M%S)
+START_EPOCH=$(date +%s)
 PY="$VENV/bin/python"
 
 PROV_MTIME=""
@@ -165,11 +169,17 @@ reusable () {  # core label csv year - true when the existing output is current
 }
 
 archive_stale () {  # core label stem - move superseded output out of the way
-  local core="$1" label="$2" stem="$3" f moved=() failed=()
-  for f in "$(csv_of "$stem")" "$(h5_of "$stem")"; do
+  local core="$1" label="$2" stem="$3" f moved=() failed=() ckpts=0
+  # The periodic checkpoints go too: pick_restart can resume from them, so a
+  # pre-fix one left behind would become the resume state of a clean re-run.
+  for f in "$(csv_of "$stem")" "$(h5_of "$stem")" \
+           "$R/${stem}${SFX}_${LC}"_t*.h5; do
     [ -e "$f" ] || continue
     if mkdir -p "$ARCHIVE" && mv "$f" "$ARCHIVE/"; then
-      moved+=("$(basename "$f")")
+      case "$f" in
+        *_"${LC}"_t*.h5) ckpts=$((ckpts + 1)) ;;
+        *) moved+=("$(basename "$f")") ;;
+      esac
     else
       failed+=("$f")
     fi
@@ -184,8 +194,11 @@ archive_stale () {  # core label stem - move superseded output out of the way
          "result. Check permissions and free space on $R, then re-run."
     return 1
   fi
-  [ "${#moved[@]}" -gt 0 ] &&
-    echo "[core $core] $label: archived ${moved[*]} under $ARCHIVE/"
+  if [ "${#moved[@]}" -gt 0 ] || [ "$ckpts" -gt 0 ]; then
+    local what="${moved[*]:-}"
+    [ "$ckpts" -gt 0 ] && what="${what:+$what + }$ckpts checkpoint(s)"
+    echo "[core $core] $label: archived $what under $ARCHIVE/"
+  fi
   return 0
 }
 
@@ -199,11 +212,17 @@ pick_restart () {  # stem csv_last_year - "<t_yr>|<path>" of the newest
                    # make run_simulation truncate the CSV at that later year
                    # and append from there, splicing two timelines together
                    # with a silent gap that reads back as progress.
+                   #
+                   # Candidates must also postdate $PROV_REF (or this run's
+                   # launch when no reference exists): a pre-fix checkpoint is
+                   # January-forcing geometry, and setup_model's restart guards
+                   # check friction and a_ref_mb, not provenance.
   local out
-  out=$("$PY" - "$R" "${1}${SFX}_${LC}" "${2:-0}" 2>/dev/null <<'PY'
+  out=$("$PY" - "$R" "${1}${SFX}_${LC}" "${2:-0}" "${PROV_MTIME:-$START_EPOCH}" 2>/dev/null <<'PY'
 import glob, os, sys
 import h5py
-d, base, want = sys.argv[1], sys.argv[2], float(sys.argv[3])
+d, base, want, floor = (sys.argv[1], sys.argv[2],
+                        float(sys.argv[3]), float(sys.argv[4]))
 cands = [os.path.join(d, base + "_final.h5")]
 cands += sorted(glob.glob(os.path.join(d, base + "_t*.h5")))
 best_t, best_fn = None, None
@@ -211,6 +230,8 @@ for fn in cands:
     if not os.path.exists(fn):
         continue
     try:
+        if os.path.getmtime(fn) < floor:
+            continue
         with h5py.File(fn, "r") as f:
             t = float(f["/"].attrs["t_yr"])
     except Exception:

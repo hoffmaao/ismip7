@@ -1020,7 +1020,11 @@ def run_simulation(
         mesh.comm.barrier()
 
     def _prune_checkpoints():
-        r"""Keep only the newest `keep_ckpts` periodic state checkpoints."""
+        r"""Keep only the `keep_ckpts` most recently WRITTEN periodic state
+        checkpoints. Recency, not the largest year: a re-run rewinds (every
+        projection branches from the historical endpoint), so ranking by year
+        would delete each checkpoint this run writes in favour of higher-year
+        ones left by a previous run - exactly the states a resume needs."""
         if mesh.comm.rank != 0 or keep_ckpts <= 0:
             return
         import re
@@ -1030,9 +1034,12 @@ def run_simulation(
         for fn in glob.glob(
             os.path.join(RESULTS_DIR, f"{experiment_name}_{lc}_t*.h5")
         ):
-            m = pat.search(os.path.basename(fn))
-            if m:
-                found.append((float(m.group(1)), fn))
+            if not pat.search(os.path.basename(fn)):
+                continue
+            try:
+                found.append((os.path.getmtime(fn), fn))
+            except OSError:
+                pass
         for _, fn in sorted(found)[:-keep_ckpts]:
             try:
                 os.remove(fn)

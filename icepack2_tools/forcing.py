@@ -188,6 +188,54 @@ def ocean_path(scenario, esm="CESM2-WACCM", variable="tf",
     return os.path.join(parent, _resolve_version(parent, version))
 
 
+def _annual_mean_over_time(da, ds=None):
+    r"""Collapse a per-year forcing file's time axis to the ANNUAL MEAN.
+
+    The ISMIP7 SDBN1 atmosphere files carry 12 MONTHLY slices per year
+    (``time`` = days since <year>-01-15, values 0, 31, 60, ...), so a single
+    slice is one month, not the year. Taking ``isel(time=0)`` grabs JANUARY -
+    peak austral summer, the maximum-ablation month - and applies it as the
+    whole year's forcing. For MRI-ESM2-0 ssp585 2108 that is -16583 Gt/yr
+    against an annual mean of -1271 Gt/yr: a 13x overestimate of ablation
+    that grows with warming (the summer melt trend is far steeper than the
+    annual one), which drove wildly negative post-2100 SMB, unphysical
+    +/-6000 Gt/yr year-to-year swings, and a sea-level contribution above the
+    ISMIP6 envelope.
+
+    Months are weighted by their length (from ``time_bnds`` when present, else
+    from the spacing of the time coordinate) so the result is a true annual
+    mean rather than a 12-month unweighted average. A length-1 time axis
+    collapses to that single value, so annual files are unaffected.
+    """
+    import numpy as _np
+
+    n = da.sizes["time"]
+    if n == 1:
+        return da.isel(time=0)
+
+    w = None
+    bnds_name = da.attrs.get("bounds") or (
+        ds["time"].attrs.get("bounds") if ds is not None and "time" in ds else None
+    )
+    if ds is not None and bnds_name and bnds_name in ds:
+        b = _np.asarray(ds[bnds_name].values, dtype=float)
+        if b.ndim == 2 and b.shape[0] == n:
+            w = b[:, 1] - b[:, 0]
+    if w is None and ds is not None and "time" in ds:
+        t = _np.asarray(ds["time"].values, dtype=float)
+        if t.size == n and n > 1:
+            # month length = spacing to the next slice; the last month reuses
+            # the previous spacing (the file ends at the year boundary).
+            d = _np.diff(t)
+            w = _np.concatenate([d, d[-1:]])
+    if w is None or not _np.all(_np.isfinite(w)) or _np.sum(w) <= 0:
+        return da.mean("time")   # equal weights: <=1% off a day-weighted mean
+
+    import xarray as _xr
+    weights = _xr.DataArray(w / _np.sum(w), dims="time")
+    return (da * weights).sum("time")
+
+
 class ISMIP7Atmosphere:
     r"""Read ISMIP7 downscaled atmosphere forcing for Antarctica."""
 
@@ -253,7 +301,7 @@ class ISMIP7Atmosphere:
             da = ds[data_vars[0]] if data_vars else None
         if da is not None:
             if "time" in da.dims:
-                da = da.isel(time=0)
+                da = _annual_mean_over_time(da, ds)
             result = da.load()
             ds.close()
             self._cache[key] = result

@@ -89,6 +89,7 @@ lc_coarse = int(os.environ.get("ISMIP7_LC_COARSE", str(lc * 10)))
 # Glen, so no prefactor rescale (A4_FACTOR=1). See COMPOSITE_RHEOLOGY.md.
 N_FLOW_DEFAULT = "3.0"
 A4_FACTOR_DEFAULT = "1.0"
+A4_FACTOR_N4 = "10.0"
 
 
 def map_n_tag():
@@ -96,6 +97,14 @@ def map_n_tag():
     n=4 keeps the legacy untagged name. Mirrors simulation.map_n_tag."""
     n = float(os.environ.get("ISMIP7_N_FLOW", N_FLOW_DEFAULT))
     return "" if abs(n - 4.0) < 1e-9 else f"_n{int(round(n))}"
+
+
+def a4_factor_default():
+    r"""Prefactor default derived from the flow exponent (10 at n=4, 1
+    otherwise) so ISMIP7_N_FLOW=4 alone still gets the n=4 rescale.
+    ISMIP7_A4_FACTOR still overrides. Mirrors simulation.a4_factor_default."""
+    n = float(os.environ.get("ISMIP7_N_FLOW", N_FLOW_DEFAULT))
+    return A4_FACTOR_N4 if abs(n - 4.0) < 1e-9 else A4_FACTOR_DEFAULT
 
 # Regularization -- fenics_ice Whittle-Matern prior (icepack2_tools/prior.py)
 # on the log-deviation controls theta=log(C/C_w0), phi=log(A/A_prior). The
@@ -222,7 +231,7 @@ def main():
     A0 = Constant(icepack.rate_factor(Constant(260.0)))
     n_flow_val = float(os.environ.get("ISMIP7_N_FLOW", N_FLOW_DEFAULT))
     m_slide_val = float(os.environ.get("ISMIP7_M_SLIDE", "3.0"))
-    a4_factor = float(os.environ.get("ISMIP7_A4_FACTOR", A4_FACTOR_DEFAULT))
+    a4_factor = float(os.environ.get("ISMIP7_A4_FACTOR", a4_factor_default()))
     n_flow = Constant(n_flow_val)
     m_slide = Constant(m_slide_val)
     tau_c = Constant(0.1)

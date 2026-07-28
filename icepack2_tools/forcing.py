@@ -1,6 +1,7 @@
 r"""ISMIP7 forcing data reader for Antarctic simulations."""
 
 import os
+import warnings
 import numpy as np
 
 _SEC_PER_YEAR = 31556926.0
@@ -132,10 +133,34 @@ def load_mean_annual_surface_temperature(Q, var="tas", data_root=None,
     if not hits:
         raise FileNotFoundError(f"no {var} climatology under {root}")
     ds = xr.open_dataset(hits[0])
-    da = ds[var] if var in ds else ds[list(ds.data_vars)[0]]
-    T = np.asarray(da.mean(dim="month").values, dtype=float)     # (y, x)
+    if var in ds:
+        da = ds[var]
+    else:
+        # Skip grid-mapping/bounds variables, as _load_year does: any of them
+        # ordered first would silently become the temperature field.
+        cands = [
+            v for v in ds.data_vars
+            if not v.endswith("_bnds")
+            and v.lower() not in ("x", "y", "time", "month", "crs", "mapping",
+                                  "spatial_ref", "lat", "lon")
+        ]
+        if not cands:
+            raise ValueError(f"no usable data variable in {hits[0]}")
+        da = ds[cands[0]]
+    da = da.mean(dim="month")
+    if "y" in da.dims and "x" in da.dims:
+        da = da.transpose("y", "x")
+    T = np.asarray(da.values, dtype=float)                       # (y, x)
     x = np.asarray(ds["x"].values, dtype=float)
     y = np.asarray(ds["y"].values, dtype=float)
+    # RegularGridInterpolator requires ascending axes (same flip as
+    # _year_field / build_oi_climatology_interpolators / load_K_per_basin).
+    if y[0] > y[-1]:
+        y = y[::-1]
+        T = T[::-1, :]
+    if x[0] > x[-1]:
+        x = x[::-1]
+        T = T[:, ::-1]
     T = np.where(T > 100.0, T, np.nan)                           # mask fill (~0 K)
     T_filled = np.where(np.isfinite(T), T, fill_K)
     interp = RegularGridInterpolator((y, x), T_filled, method="nearest",
@@ -186,6 +211,141 @@ def ocean_path(scenario, esm="CESM2-WACCM", variable="tf",
         return None
     parent = os.path.join(root, esm, scenario, "ocean", variable)
     return os.path.join(parent, _resolve_version(parent, version))
+
+
+def _time_axis_days(values):
+    r"""A time (or time-bounds) array as floating-point days.
+
+    Only differences matter to the callers, so the origin is arbitrary and no
+    calendar arithmetic is needed. Handles the three things xarray can hand
+    back for a decoded CF time axis: plain numerics (undecoded), ``datetime64``
+    (standard/proleptic_gregorian calendars) and object arrays of ``cftime``
+    datetimes (noleap, 360_day, all_leap, ...), which have no ``__float__``
+    and so cannot go through ``asarray(..., dtype=float)``.
+    """
+    arr = np.asarray(values)
+    if arr.dtype.kind in "fiub":
+        return arr.astype(float)
+    if arr.dtype.kind in "Mm":
+        unit = "datetime64[s]" if arr.dtype.kind == "M" else "timedelta64[s]"
+        # NaT casts to a huge finite negative, which would sail through the
+        # caller's finite/positive checks as a plausible weight; make it NaN.
+        return np.where(
+            np.isnat(arr), np.nan, arr.astype(unit).astype("float64") / 86400.0
+        )
+    flat = arr.reshape(-1)
+    origin = flat[0]
+    days = np.array(
+        [(t - origin).total_seconds() for t in flat], dtype=float
+    ) / 86400.0
+    return days.reshape(arr.shape)
+
+
+_WEIGHT_FALLBACK_WARNED = set()
+
+# Real month lengths span 28-31 days (ratio 1.11); 360_day is uniform. Anything
+# spanning more than 3x, or handing one month over half the annual weight, is a
+# corrupt weight vector, not a calendar - and would quietly reinstate the
+# single-month forcing this whole helper exists to eliminate.
+_MAX_WEIGHT_RATIO = 3.0
+_MAX_WEIGHT_SHARE = 0.5
+
+
+def _warn_unweighted(da, ds, reason):
+    r"""Warn once per (file, variable, reason) that month-length weighting was
+    unavailable, so the degradation is visible in run logs instead of silent."""
+    source = ds.encoding.get("source") if ds is not None else None
+    source = source or "<unknown file>"
+    name = getattr(da, "name", None) or "<unnamed variable>"
+    key = (source, name, reason)
+    if key in _WEIGHT_FALLBACK_WARNED:
+        return
+    _WEIGHT_FALLBACK_WARNED.add(key)
+    warnings.warn(
+        f"ISMIP7 forcing: {reason}; using the unweighted 12-month mean for "
+        f"'{name}' in {source} (<=1% off a day-weighted annual mean)",
+        RuntimeWarning,
+        stacklevel=3,
+    )
+
+
+def _annual_mean_over_time(da, ds=None):
+    r"""Collapse a per-year forcing file's time axis to the ANNUAL MEAN.
+
+    The ISMIP7 SDBN1 atmosphere files carry 12 MONTHLY slices per year
+    (``time`` = days since <year>-01-15, values 0, 31, 60, ...), so a single
+    slice is one month, not the year. Taking ``isel(time=0)`` grabs JANUARY -
+    peak austral summer, the maximum-ablation month - and applies it as the
+    whole year's forcing. For MRI-ESM2-0 ssp585 2108 that is -16583 Gt/yr
+    against an annual mean of -1276 Gt/yr: a 13x overestimate of ablation
+    that grows with warming (the summer melt trend is far steeper than the
+    annual one), which drove wildly negative post-2100 SMB, unphysical
+    +/-6000 Gt/yr year-to-year swings, and a sea-level contribution above the
+    ISMIP6 envelope.
+
+    Months are weighted by their length (from ``time_bnds`` when present, else
+    from the spacing of the time coordinate) so the result is a true annual
+    mean rather than a 12-month unweighted average. A length-1 time axis
+    collapses to that single value, so annual files are unaffected. Any
+    failure to derive usable weights - an exotic calendar, a malformed bounds
+    variable, an unmasked fill value - degrades to the unweighted mean (<=1%
+    off) with a one-time warning rather than raising: a forcing read must not
+    abort on a calendar variant, and must never let a degenerate weight vector
+    concentrate the year onto one month.
+    """
+    import xarray as xr
+
+    n = da.sizes["time"]
+    if n == 1:
+        return da.isel(time=0)
+
+    w = None
+    reason = None
+    try:
+        bnds_name = da.attrs.get("bounds") or (
+            ds["time"].attrs.get("bounds")
+            if ds is not None and "time" in ds else None
+        )
+        if ds is not None and bnds_name and bnds_name in ds:
+            b = _time_axis_days(ds[bnds_name].values)
+            if b.ndim == 2 and b.shape[0] == n:
+                w = b[:, 1] - b[:, 0]
+        if w is None and ds is not None and "time" in ds:
+            t = _time_axis_days(ds["time"].values)
+            if t.size == n:
+                # month length = spacing to the next slice; the last month
+                # reuses the previous spacing (the file ends at the year
+                # boundary).
+                d = np.diff(t)
+                w = np.concatenate([d, d[-1:]])
+    except Exception as exc:
+        w = None
+        reason = (f"month-length weights could not be read "
+                  f"({type(exc).__name__}: {exc})")
+
+    if w is None:
+        reason = reason or "no time bounds and no usable time coordinate"
+    else:
+        w = np.asarray(w, dtype=float)
+        if not np.all(np.isfinite(w)) or not np.all(w > 0):
+            reason = "month-length weights are non-finite or non-positive"
+        elif w.max() > _MAX_WEIGHT_RATIO * w.min():
+            reason = (f"month lengths span {w.min():.4g}-{w.max():.4g} days, "
+                      f"beyond any real calendar")
+        elif w.max() / w.sum() > _MAX_WEIGHT_SHARE:
+            reason = (f"one slice carries {100 * w.max() / w.sum():.1f}% of "
+                      f"the annual weight")
+        if reason is not None:
+            w = None
+
+    if w is None:
+        _warn_unweighted(da, ds, reason)
+        return da.mean("time")   # equal weights: <=1% off a day-weighted mean
+
+    # weighted().mean() renormalizes by the weights of the non-NaN months, so
+    # a partially masked node matches the unweighted mean instead of being
+    # biased low, and an all-NaN node stays NaN rather than collapsing to 0.
+    return da.weighted(xr.DataArray(w, dims="time")).mean("time")
 
 
 class ISMIP7Atmosphere:
@@ -253,7 +413,7 @@ class ISMIP7Atmosphere:
             da = ds[data_vars[0]] if data_vars else None
         if da is not None:
             if "time" in da.dims:
-                da = da.isel(time=0)
+                da = _annual_mean_over_time(da, ds)
             result = da.load()
             ds.close()
             self._cache[key] = result
@@ -279,7 +439,11 @@ class ISMIP7Atmosphere:
         return years
 
     def get_field(self, variable, year, mesh_x, mesh_y):
-        r"""Get a forcing field interpolated to mesh coordinates."""
+        r"""Get a forcing field interpolated to mesh coordinates.
+
+        The value is that year's ANNUAL MEAN, not a single slice: the SDBN1
+        files are monthly, so ``_load_year`` collapses the time axis via
+        ``_annual_mean_over_time`` (see that docstring for the weighting)."""
         import xarray as xr
 
         yr = int(round(year))

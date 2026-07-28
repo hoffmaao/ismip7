@@ -8,6 +8,11 @@ Follows the Kangerd demo pattern from Shapero's dual-problems repo:
 - snes_divergence_tolerance = -1
 - Sliding coefficient includes exp(m*theta)
 
+Controls are log-deviations from PHYSICAL prior means - theta = log(C/C_w0)
+on the balance-friction anchor, phi = log(A/A_prior) on a thermomechanical
+fluidity prior - regularized with the fenics_ice Whittle-Matern prior
+(icepack2_tools/prior.py). See antarctica/N3_FRAMEWORK.md.
+
 Usage:
     python scripts/inversion_icepack2.py
     mpiexec -n 16 python scripts/inversion_icepack2.py
@@ -24,11 +29,8 @@ from firedrake import (
     max_value,
     sqrt,
     inner,
-    grad,
     derivative,
     dx,
-    ds,
-    dS,
     split,
     assemble,
     Mesh,
@@ -59,8 +61,6 @@ from icepack2.constants import (
     ice_density as rho_I,
     water_density as rho_W,
     gravity as g,
-    glen_flow_law as n_glen_val,
-    weertman_sliding_law as m_weertman,
 )
 import colorcet as cc
 import matplotlib.pyplot as plt
@@ -73,14 +73,49 @@ FIG_DIR = os.path.join(_ROOT, "figs")
 # Repo root on the path so we can import the shared dual-friction operator.
 sys.path.insert(0, os.path.dirname(_ROOT))
 from icepack2_tools.dual_friction import build_rc_residual, weertman_anchor
+from icepack2_tools.prior import (
+    regularization_form as reg_form,
+    regularization_gradient_form as reg_grad_form,
+)
+from icepack2_tools.thermo_model import compute_fluidity_prior
+from icepack2_tools.forcing import (load_racmo_smb_climatology,
+                                    load_mean_annual_surface_temperature)
 
 lc = int(os.environ.get("ISMIP7_LC", "8000"))
 lc_coarse = int(os.environ.get("ISMIP7_LC_COARSE", str(lc * 10)))
 
-# Regularization
-GAMMA_THETA = 1.0
-GAMMA_PHI = 1.0
-L_REG = 7.5e3
+# Flow-law exponent default -- KEEP IN SYNC with simulation.py (the forward
+# that loads this MAP must use the same rheology). THIS BRANCH: n=3 standard
+# Glen, so no prefactor rescale (A4_FACTOR=1). See COMPOSITE_RHEOLOGY.md.
+N_FLOW_DEFAULT = "3.0"
+A4_FACTOR_DEFAULT = "1.0"
+A4_FACTOR_N4 = "10.0"
+
+
+def map_n_tag():
+    r"""`_n<N>` filename tag so MAPs at different flow exponents coexist;
+    n=4 keeps the legacy untagged name. Mirrors simulation.map_n_tag."""
+    n = float(os.environ.get("ISMIP7_N_FLOW", N_FLOW_DEFAULT))
+    return "" if abs(n - 4.0) < 1e-9 else f"_n{int(round(n))}"
+
+
+def a4_factor_default():
+    r"""Prefactor default derived from the flow exponent (10 at n=4, 1
+    otherwise) so ISMIP7_N_FLOW=4 alone still gets the n=4 rescale.
+    ISMIP7_A4_FACTOR still overrides. Mirrors simulation.a4_factor_default."""
+    n = float(os.environ.get("ISMIP7_N_FLOW", N_FLOW_DEFAULT))
+    return A4_FACTOR_N4 if abs(n - 4.0) < 1e-9 else A4_FACTOR_DEFAULT
+
+# Regularization -- fenics_ice Whittle-Matern prior (icepack2_tools/prior.py)
+# on the log-deviation controls theta=log(C/C_w0), phi=log(A/A_prior). The
+# controls sit on PHYSICAL prior means (balance friction, thermomechanical
+# fluidity), so gamma is a PHYSICAL strength: gamma ~ 1e4 gives a prior std
+# ~0.2-0.3 in log-units (the physical deviation scale; Recinos anchors
+# sigma_C~0.22, sigma_A~0.26). The old gradient-only gamma=1 was "no prior"
+# and let phi/theta blow up at n=3. Env-overridable.
+GAMMA_THETA = float(os.environ.get("ISMIP7_GAMMA_THETA", "1e4"))
+GAMMA_PHI = float(os.environ.get("ISMIP7_GAMMA_PHI", "1e4"))
+L_REG = float(os.environ.get("ISMIP7_L_REG", "7.5e3"))
 
 # Friction law: "budd" (power-law dual, default) or "regularized_coulomb"
 # (Joughin/Schoof RC residual: grounded-only inference, exact-zero shelves).
@@ -190,12 +225,13 @@ def main():
     calving_ids = tuple(bnd_ids["calving"])
 
     # ── Rheology ──
-    # Goldsby-Kohlstedt-style composite: dislocation creep n_flow=4 main
-    # + linear (n=1) regularization. Sliding stays at Weertman m_slide=3.
+    # Composite viscous rheology: flow exponent n_flow (this branch: n=3
+    # standard Glen) main term + linear (n=1) regularization. Sliding stays
+    # at Weertman m_slide=3.
     A0 = Constant(icepack.rate_factor(Constant(260.0)))
-    n_flow_val = float(os.environ.get("ISMIP7_N_FLOW", "4.0"))
+    n_flow_val = float(os.environ.get("ISMIP7_N_FLOW", N_FLOW_DEFAULT))
     m_slide_val = float(os.environ.get("ISMIP7_M_SLIDE", "3.0"))
-    a4_factor = float(os.environ.get("ISMIP7_A4_FACTOR", "10.0"))
+    a4_factor = float(os.environ.get("ISMIP7_A4_FACTOR", a4_factor_default()))
     n_flow = Constant(n_flow_val)
     m_slide = Constant(m_slide_val)
     tau_c = Constant(0.1)
@@ -290,7 +326,7 @@ def main():
     K_base = u_c / (phi_eff * tau_c) ** m_slide
 
     # Composite rheology following Goldsby-Kohlstedt 2001:
-    #   ψ_visc  =     2·h·A_4 /5 · |M_dev|^5            (dislocation creep, n=4)
+    #   ψ_visc  =     2·h·A /(n+1) · |M_dev|^(n+1)      (dislocation creep, n=n_flow)
     #          + α · 2·H_ref·A_1/2 · |M_dev|^2          (diffusion regularizer)
     #   ψ_fric  =     K_3 /4 · |τ|^4                    (Weertman, m=3)
     #          + α · K_1 /2 · |τ|^2                     (linear regularizer)
@@ -307,10 +343,13 @@ def main():
         f"H_ref={float(H_ref):.0f} m"
     )
 
-    A4_base = A0 * Constant(a4_factor)
+    # A4_base is the fluidity PRIOR MEAN, set below from the thermomechanical
+    # A_prior (a Function) once C_w0 is available, so the control is
+    # phi = log(A / A_prior). (Legacy constant baseline: A0 * a4_factor.)
+    A4_base = None
 
     def _rheo_glen(theta_c, phi_c):
-        # Main dislocation-creep flow law (n=n_flow=4) + Weertman sliding (m=3)
+        # Main dislocation-creep flow law (n=n_flow, this branch n=3) + Weertman sliding (m=3)
         return {
             "flow_law_exponent": n_flow,
             "flow_law_coefficient": A4_base * exp(phi_c),
@@ -353,8 +392,8 @@ def main():
 
     # The residual laws need a fixed Weertman anchor C_w0 (driving-stress
     # balance); theta then inverts as an O(1) log-adjustment on top of it.
+    C_w0 = weertman_anchor(H, s, u_obs, m_slide_val, Q)
     if USE_RESIDUAL:
-        C_w0 = weertman_anchor(H, s, u_obs, m_slide_val, Q)
         law_name = ("Budd N_hat (exact-zero shelf, delta="
                     f"{BUDD_DELTA:.3f}, alpha_gl={ALPHA_GL:.2f})"
                     if FRICTION == "budd"
@@ -366,7 +405,28 @@ def main():
         )
     else:
         PETSc.Sys.Print("  Friction: Budd power-law dual (legacy action)")
-    map_tag = {"regularized_coulomb": "_rc", "budd": "_budd"}.get(FRICTION, "")
+
+    # Physical FLUIDITY PRIOR MEAN A_prior(x): a fixed-velocity thermomechanical
+    # (Stefan enthalpy) solve at the observed geometry/velocity, so the control
+    # phi = log(A / A_prior) is a small deviation from a physically-motivated
+    # fluidity rather than log(A / const). This is the Recinos/fenics_ice fix
+    # for the n=3 blow-up (a constant A0 baseline forced phi to carry all the
+    # spatial fluidity structure). Frictional heating uses the balance C_w0.
+    if os.environ.get("ISMIP7_FLUIDITY_PRIOR", "thermo") == "thermo":
+        acc_prior = load_racmo_smb_climatology(Q)
+        T_srf = load_mean_annual_surface_temperature(Q)
+        A_prior = compute_fluidity_prior(u_obs, H, s, b, C_w0, acc_prior, T_srf)
+        A_prior.rename("fluidity_prior")
+        PETSc.Sys.Print(
+            f"  Fluidity prior A_prior in [{float(A_prior.dat.data_ro.min()):.2f}, "
+            f"{float(A_prior.dat.data_ro.max()):.2f}] (thermomechanical)"
+        )
+    else:
+        A_prior = Function(Q, name="fluidity_prior").interpolate(A0 * Constant(a4_factor))
+        PETSc.Sys.Print("  Fluidity prior: constant A0*a4_factor (legacy)")
+    A4_base = A_prior
+    map_tag = ({"regularized_coulomb": "_rc", "budd": "_budd"}.get(FRICTION, "")
+               + map_n_tag())
 
     def build_F(theta_c, phi_c):
         # Residual closure (tau linear, grounded-only theta via exp(theta*He),
@@ -471,10 +531,6 @@ def main():
     last_good_obj = [np.inf]
     iteration_count = [0]
 
-    gamma_theta = Constant(GAMMA_THETA)
-    gamma_phi = Constant(GAMMA_PHI)
-    L_reg_c = Constant(L_REG)
-
     def objective_and_gradient(x_vec):
         t_iter = perf_counter()
         global_to_func(x_vec[:global_ndof], theta)
@@ -488,6 +544,16 @@ def main():
         except fd.ConvergenceError:
             stop_manager()
             z.assign(z_backup)
+            if iteration_count[0] == 0:
+                # No successful evaluation yet: a large-obj + zero-grad return
+                # would make L-BFGS-B declare convergence at iteration 0 and
+                # write a theta=phi=0 garbage MAP. Fail loudly instead.
+                raise RuntimeError(
+                    "First forward solve failed - the inversion cannot start. "
+                    "For a small mesh (e.g. 32 km) try fewer MPI ranks (MUMPS "
+                    "is fragile at <~100 vertices/rank); also check the "
+                    "fluidity prior."
+                )
             PETSc.Sys.Print("  [!] Forward solve failed, returning large objective")
             return last_good_obj[0] * 10, np.zeros(2 * global_ndof)
         stop_manager()
@@ -507,46 +573,26 @@ def main():
             # as the forward guard: inflated objective + zero gradient
             # makes L-BFGS-B backtrack its line search.
             z.assign(z_backup)
+            if iteration_count[0] == 0:
+                raise RuntimeError(
+                    "First adjoint solve failed - the inversion cannot start. "
+                    "For a small mesh (e.g. 32 km) try fewer MPI ranks (MUMPS "
+                    "is fragile at <~100 vertices/rank)."
+                )
             PETSc.Sys.Print("  [!] Adjoint solve failed, returning large objective")
             return last_good_obj[0] * 10, np.zeros(2 * global_ndof)
         t_adj = perf_counter() - t_adj
 
-        reg_theta = float(
-            assemble(
-                0.5
-                / area_val
-                * gamma_theta
-                * L_reg_c**2
-                * inner(grad(theta), grad(theta))
-                * dx
-            )
-        )
-        reg_phi = float(
-            assemble(
-                0.5
-                / area_val
-                * gamma_phi
-                * L_reg_c**2
-                * inner(grad(phi), grad(phi))
-                * dx
-            )
-        )
-        dR_theta = assemble(
-            1.0
-            / area_val
-            * gamma_theta
-            * L_reg_c**2
-            * inner(grad(theta), grad(fd.TestFunction(Q)))
-            * dx
-        )
-        dR_phi = assemble(
-            1.0
-            / area_val
-            * gamma_phi
-            * L_reg_c**2
-            * inner(grad(phi), grad(fd.TestFunction(Q)))
-            * dx
-        )
+        # Whittle-Matern prior energy + gradient (icepack2_tools/prior.py):
+        # 0.5/area * gamma * (theta^2 + L^2 |grad theta|^2). The theta^2 mass
+        # term (absent from the old gradient-only form) removes the null space
+        # that let phi/theta drift to +-36 at n=3; combined with the physical
+        # prior means it constrains the DEVIATION, not the amplitude.
+        _psi = fd.TestFunction(Q)
+        reg_theta = float(assemble(reg_form(theta, GAMMA_THETA, area_val, L_reg=L_REG)))
+        reg_phi = float(assemble(reg_form(phi, GAMMA_PHI, area_val, L_reg=L_REG)))
+        dR_theta = assemble(reg_grad_form(theta, _psi, GAMMA_THETA, area_val, L_reg=L_REG))
+        dR_phi = assemble(reg_grad_form(phi, _psi, GAMMA_PHI, area_val, L_reg=L_REG))
 
         g_theta = func_to_global(dJ_dtheta) + func_to_global(dR_theta)
         g_phi = func_to_global(dJ_dphi) + func_to_global(dR_phi)
@@ -575,6 +621,7 @@ def main():
                 chk.save_function(H, name="thickness")
                 chk.save_function(b, name="bed")
                 chk.save_function(s, name="surface")
+                chk.save_function(A_prior, name="fluidity_prior")
             PETSc.Sys.Print(f"    [checkpoint saved: iter {iteration_count[0]}]")
 
         return total, total_grad
@@ -610,6 +657,7 @@ def main():
         chk.save_function(H, name="thickness")
         chk.save_function(b, name="bed")
         chk.save_function(s, name="surface")
+        chk.save_function(A_prior, name="fluidity_prior")
     PETSc.Sys.Print(f"Saved MAP: {chk_fn}")
 
     # ── Final forward solve ──

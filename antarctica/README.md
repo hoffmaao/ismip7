@@ -45,6 +45,7 @@ antarctica/
   data/            # observational inputs (BedMachine, velocity, RACMO)  [gitignored]
   mesh/            # *.msh + boundary_ids*.json + inversion_*.h5         [gitignored]
   results/         # checkpoints (*.h5), timeseries (*.csv), logs        [gitignored]
+  reports/         # tracked per-core run records + MATRIX_STATUS.md
   scripts/         # all entry points (see §3–§6)
 ISMIP7/AIS/        # ISMIP7 forcing tree the *runtime* reads             [gitignored]
 icepack2_tools/    # reusable library (mesh, forcing, eikonal, grounding, regrid)
@@ -162,7 +163,14 @@ Defaults baked into the readers: atmosphere pins `version=v2` at `SDBN1-8000m`,
 ocean pins `version=v3`; when the pinned version directory is absent the readers
 fall back to the highest `v<N>` subdir present, so MRI-ESM2-0 `v1` and future
 re-releases resolve without code changes. Fracture masks are found both flat in
-`fracture/` and inside `fracture/v*/` (highest version wins). The forcing API:
+`fracture/` and inside `fracture/v*/` (highest version wins).
+
+**Per-year atmosphere files are monthly.** Each `<var>_..._<YEAR>.nc` holds 12
+slices (`time` = days since `<YEAR>-01-15`), so the reader collapses the time
+axis to that year's **annual mean**, weighting months by length from
+`time_bnds` (falling back to the time-coordinate spacing, then to an unweighted
+mean with a warning). A length-1 time axis passes through unchanged, so annual
+files are unaffected. The forcing API:
 
 - `ISMIP7Atmosphere(esm, scenario).get_smb(year, x, y, anomaly=…)`
 - `ISMIP7Ocean(esm, scenario).get_thermal_forcing(...)` / `.get_salinity(...)`
@@ -201,13 +209,22 @@ MAP estimate of the bed friction `θ` and rheology `φ` from the diagnostic
 ```bash
 cd antarctica
 ISMIP7_LC=2500 mpiexec -n 12 python scripts/inversion_icepack2.py
-# → mesh/inversion_icepack2_budd_<LC>.h5   (the MAP checkpoint every forward run loads)
+# → mesh/inversion_icepack2_budd_n3_<LC>.h5   (the MAP checkpoint every forward run loads)
 ```
+
+The controls are log-deviations from physical prior means: `θ = log(C/C_w0)`
+on the balance-friction anchor and `φ = log(A/A_prior)` on a thermomechanical
+fluidity prior the inversion computes at setup (and stores in the MAP). That
+prior solve reads the §1 RACMO SMB **and the §2 ISMIP7 `tas` climatology**, so
+download the §2 forcing before inverting; see `N3_FRAMEWORK.md` for the
+method (and `ISMIP7_FLUIDITY_PRIOR=legacy` to skip it).
 
 The friction law is selected with `ISMIP7_FRICTION` (`budd`, the default, or
 `regularized_coulomb`); the MAP checkpoint name carries a matching `_budd` /
 `_rc` tag, and the forward runs load the checkpoint for whichever law they are
-started with. See the script header for the full set of regularization /
+started with. This `antarctica-n3` branch also appends an `_n3` flow-exponent
+tag (from `map_n_tag()`) so n=3 and n=4 MAPs coexist on disk; see
+`N3_FRAMEWORK.md`. See the script header for the full set of regularization /
 iteration options.
 
 ---
@@ -250,16 +267,23 @@ mpiexec -n 12 python scripts/projections/ssp585_cesm_waccm.py
 Other scenario drivers in `scripts/projections/` (ssp126/ssp370 × CESM2-WACCM /
 MRI-ESM2-0, plus `ocx.py`) are thin shims over `scripts/experiment.py` and
 follow the same pattern. Historical spin-up drivers are in `scripts/historical/`;
-run one first to produce `results/hist_<esm>_<lc>_final.h5`, which the
-projections pick up automatically via `ISMIP7_RESTART` (otherwise they
-cold-start from BedMachine).
+run one first to produce `results/hist_<esm>_<lc>_final.h5`: the projections
+AND the control both branch from it automatically, so they share the same t=0
+state and their shared relaxation drift (and the identical frozen apparent-MB
+correction) cancels in projection-minus-control (the ISMIP6 ctrl_proj
+convention). Without it a projection cold-starts from BedMachine, and the
+control cold-starts with a loud warning that it starts from a DIFFERENT
+geometry than the hist-branched projections, so projection-minus-CTRL will
+not cleanly isolate the forced response.
 
 Restart / run-management flags on the control driver: `--restart <ckpt>`
 (or `ISMIP7_RESTART`) resumes from a checkpoint; `ISMIP7_AUTO_RESUME=1`
 picks up the newest checkpoint for the experiment unattended; `--tag`
-(or `ISMIP7_RUN_TAG`) suffixes the experiment name so a tagged run keeps -
-and resumes - its own output files; `--checkpoint-interval` sets the
-step-count fallback cadence. Checkpoints are self-contained (mesh, geometry,
+(or `ISMIP7_RUN_TAG`, honored by every forward driver, not just the control)
+suffixes the experiment name so a tagged method line (e.g. the n=3 matrix)
+keeps - and resumes - its own output files, with the historical → projection
+/ CTRL restart chain staying within that line; `--checkpoint-interval` sets
+the step-count fallback cadence. Checkpoints are self-contained (mesh, geometry,
 inversion fields, and the full `(u, M, τ)` solver state), so restarts are
 seamless at any MPI rank count. Each checkpoint also records the friction law
 and whether an apparent-MB correction was active; a resume refuses to start
@@ -276,6 +300,39 @@ python scripts/check_ismip6_track.py results/<exp>_timeseries.csv
 # exit code 0 iff no FAIL rows, so launch gates can chain on it
 ```
 
+For the forced response, `scripts/compare_ismip6.py <proj.csv> <ctrl.csv>` overlays our projection-minus-CTRL sea-level contribution on the ISMIP6 ensemble to check broad consistency (auto-selects the scenario pool; `--exps` to override).
+
+### The whole matrix in one command (`run_core_matrix.sh`)
+
+`scripts/run_core_matrix.sh` runs core experiments 1-11 end to end in protocol
+dependency order (both historicals first, since the CTRLs and the projections
+branch from the historical endpoint, then the CTRLs, the projections, OCX) and
+finishes with the observational audit and the ensemble comparison above for
+each core it brought to its target year.
+
+```bash
+ISMIP7_RUN_TAG=n3 ISMIP7_LC=32000 antarctica/scripts/run_core_matrix.sh
+CORES=1,2,9 antarctica/scripts/run_core_matrix.sh    # a subset
+```
+
+Cores run **sequentially** and are load-gated (`MAX_LOAD`, default
+cores - 8), so the machine stays usable for other work. A core whose
+timeseries already reaches its target year is skipped; output that predates
+the annual-mean atmosphere-forcing fix is archived under
+`results/archive_stale_<stamp>/` and re-run rather than reused. Resolution,
+flow exponent, run tag, dt, friction and rank count come from the `ISMIP7_*`
+knobs below; the runner's own knobs (`CORES`, `MAX_LOAD`, `MAX_ATTEMPTS`,
+`FRESH`, `REUSE`, `NRANKS`, `PROV_REF`) and the exact reuse/dependency rules
+are documented in its header, which is their authoritative reference. Its one
+non-obvious behavior, wall retry, is described under "Known issues" below.
+
+Each completed core is recorded with
+`python scripts/core_report.py --core <N> --name <exp> --csv <timeseries.csv>
+--log <run.log>` (add `--ctrl-csv` for a projection), run **in the run's own
+shell** so it captures that run's `ISMIP7_*` environment. It writes the
+tracked markdown record under `reports/`; `reports/MATRIX_STATUS.md` carries
+the matrix-wide status.
+
 ### Environment knobs (all forward runs)
 
 | Env var | Meaning | Default |
@@ -290,12 +347,15 @@ python scripts/check_ismip6_track.py results/<exp>_timeseries.csv
 | `ISMIP7_OUTPUT_INTERVAL` | write a timeseries/log row every N steps | `10` |
 | `ISMIP7_CHECKPOINT_EVERY_YR` | checkpoint cadence in model years (`0` = use step count) | `5` |
 | `ISMIP7_KEEP_CHECKPOINTS` | periodic checkpoints kept on disk (plus `_final.h5`) | `3` |
-| `ISMIP7_RESTART` | restart checkpoint | `hist_<esm>_<lc>_final.h5` if present |
+| `ISMIP7_RESTART` | restart checkpoint | `hist_<esm>[_<tag>]_<lc>_final.h5` if present |
 | `ISMIP7_AUTO_RESUME` | set to resume from the newest own checkpoint unattended | _(unset)_ |
+| `ISMIP7_RUN_TAG` | experiment-name suffix for a parallel method line (see run-management flags above) | _(unset)_ |
 | `ISMIP7_APPARENT_MB` | apparent-mass-balance init: `1`/`balance` zeroes the t=0 thickness tendency (ISMIP6 ctrl_proj-style), `div` cancels only the flux divergence | _(unset)_ |
 | `ISMIP7_FIXED_FRONT` | set to hold the calving front at the t=0 extent (inflow beyond it tallied as calving) | _(unset)_ |
 | `ISMIP7_LEGACY_TRANSPORT` | set to restore the pre-Jul-2026 CG-projection transport scheme | _(unset)_ |
 | `ISMIP7_SNES_TYPE` / `ISMIP7_SNES_MAXIT` | diagnostic Newton type / max iterations | `newtonls` / `200` |
+| `ISMIP7_SUBCYCLES` | dt-subcycle rescue ladder: a step that fails the rescue solves rewinds its own advance and retries at `dt/m` for each `m` in this list | `1,4,16` |
+| `ISMIP7_RESCUE_MAXIT` | Newton iteration cap on the rescue rungs (hard-era steps converge linearly and need the extra patience) | `600` |
 | `ISMIP7_K_MELT` | scalar Burgard K (projections) | `1.15e-4` (Burgard K50) |
 | `ISMIP7_K_PER_BASIN_NPZ` | per-basin K file (control) | `results/calibrated_K_per_basin_<lc>.npz` |
 | `ISMIP7_ESM` | ESM for control (`CESM2-WACCM`, `MRI-ESM2-0`) | `CESM2-WACCM` |
@@ -316,7 +376,9 @@ Per experiment in `results/`:
   (`thickness_dg`, the prognostic state), the full `(u, M, τ)` solver state,
   and the frozen apparent-MB reference when one is active.
 - `<exp>_t<year>.h5` — periodic checkpoints (every `ISMIP7_CHECKPOINT_EVERY_YR`
-  model years, default 5; only the newest `ISMIP7_KEEP_CHECKPOINTS` are kept).
+  model years, default 5; only the `ISMIP7_KEEP_CHECKPOINTS` most recently
+  *written* are kept - by write time, not by highest year, so a re-run that
+  rewinds to the historical endpoint keeps its own states).
 - `<exp>_timeseries.csv` — one row per `OUTPUT_INTERVAL` steps with columns
   `year, vaf_mm_sle, mass_gt, smb_gtyr, melt_gtyr, outflux_gtyr, calv_gt,
   clamp_gt, resid_gt, amb_gtyr`: the mass-budget audit (SMB, shelf melt,
@@ -331,11 +393,21 @@ VAF is reported in mm of sea-level equivalent; mass in Gt.
 
 - **Diagnostic-Newton wall on hard projection geometries.** The earlier
   forward blow-ups are fixed (balanced apparent-MB init + persistent DG0
-  thickness state; the 32 km CTRL and ssp585 both audit ON TRACK via
+  thickness state; the 32 km CTRL audits ON TRACK via
   `check_ismip6_track.py`), but the diagnostic Newton can still stall on
-  evolved projection geometries (first seen at the 2024.5 ssp585 state).
-  `ISMIP7_SNES_TYPE` / `ISMIP7_SNES_MAXIT` are the knobs for experimenting;
-  a robust fix is the next work item.
+  evolved projection geometries. `ISMIP7_SNES_TYPE` / `ISMIP7_SNES_MAXIT` are
+  the knobs for experimenting; a robust fix is the next work item. The
+  aSMB-forced walls seen so far are suspect: they predate the annual-mean
+  atmosphere-forcing fix and may be forcing-induced rather than a solver
+  limit - see `reports/MATRIX_STATUS.md` for which runs still stand.
+  **Wall retry.** When the in-run rescue ladder is exhausted the run saves and
+  stops short of its target year, and simply relaunching from that saved state
+  clears the wall: a fresh process re-runs the n=1→n continuation at the
+  loaded geometry, which the in-run ladder cannot do (3 of 3 observed walls
+  resumed - ssp585-CESM at 2096.7, CTRL-CESM at 2268, CTRL-MRI at 2250 - and
+  both CTRLs then reached 2300). `run_core_matrix.sh` does this automatically,
+  relaunching from the newest checkpoint at or before the timeseries' last
+  year while each attempt keeps advancing, and giving up on a stall.
 - **Upstream forcing moved (resolved 2026-07-19).** The per-year scenario
   forcing was not withdrawn - it moved to the top-level `/ISMIP7/AIS` tree
   during the collection reorganization. Mirror it with

@@ -162,7 +162,14 @@ Defaults baked into the readers: atmosphere pins `version=v2` at `SDBN1-8000m`,
 ocean pins `version=v3`; when the pinned version directory is absent the readers
 fall back to the highest `v<N>` subdir present, so MRI-ESM2-0 `v1` and future
 re-releases resolve without code changes. Fracture masks are found both flat in
-`fracture/` and inside `fracture/v*/` (highest version wins). The forcing API:
+`fracture/` and inside `fracture/v*/` (highest version wins).
+
+**Per-year atmosphere files are monthly.** Each `<var>_..._<YEAR>.nc` holds 12
+slices (`time` = days since `<YEAR>-01-15`), so the reader collapses the time
+axis to that year's **annual mean**, weighting months by length from
+`time_bnds` (falling back to the time-coordinate spacing, then to an unweighted
+mean with a warning). A length-1 time axis passes through unchanged, so annual
+files are unaffected. The forcing API:
 
 - `ISMIP7Atmosphere(esm, scenario).get_smb(year, x, y, anomaly=…)`
 - `ISMIP7Ocean(esm, scenario).get_thermal_forcing(...)` / `.get_salinity(...)`
@@ -315,6 +322,8 @@ For the forced response, `scripts/compare_ismip6.py <proj.csv> <ctrl.csv>` overl
 | `ISMIP7_FIXED_FRONT` | set to hold the calving front at the t=0 extent (inflow beyond it tallied as calving) | _(unset)_ |
 | `ISMIP7_LEGACY_TRANSPORT` | set to restore the pre-Jul-2026 CG-projection transport scheme | _(unset)_ |
 | `ISMIP7_SNES_TYPE` / `ISMIP7_SNES_MAXIT` | diagnostic Newton type / max iterations | `newtonls` / `200` |
+| `ISMIP7_SUBCYCLES` | dt-subcycle rescue ladder: a step that fails the rescue solves rewinds its own advance and retries at `dt/m` for each `m` in this list | `1,4,16` |
+| `ISMIP7_RESCUE_MAXIT` | Newton iteration cap on the rescue rungs (hard-era steps converge linearly and need the extra patience) | `600` |
 | `ISMIP7_K_MELT` | scalar Burgard K (projections) | `1.15e-4` (Burgard K50) |
 | `ISMIP7_K_PER_BASIN_NPZ` | per-basin K file (control) | `results/calibrated_K_per_basin_<lc>.npz` |
 | `ISMIP7_ESM` | ESM for control (`CESM2-WACCM`, `MRI-ESM2-0`) | `CESM2-WACCM` |
@@ -350,11 +359,13 @@ VAF is reported in mm of sea-level equivalent; mass in Gt.
 
 - **Diagnostic-Newton wall on hard projection geometries.** The earlier
   forward blow-ups are fixed (balanced apparent-MB init + persistent DG0
-  thickness state; the 32 km CTRL and ssp585 both audit ON TRACK via
+  thickness state; the 32 km CTRL audits ON TRACK via
   `check_ismip6_track.py`), but the diagnostic Newton can still stall on
-  evolved projection geometries (first seen at the 2024.5 ssp585 state).
-  `ISMIP7_SNES_TYPE` / `ISMIP7_SNES_MAXIT` are the knobs for experimenting;
-  a robust fix is the next work item.
+  evolved projection geometries. `ISMIP7_SNES_TYPE` / `ISMIP7_SNES_MAXIT` are
+  the knobs for experimenting; a robust fix is the next work item. The
+  aSMB-forced walls seen so far are suspect: they predate the annual-mean
+  atmosphere-forcing fix and may be forcing-induced rather than a solver
+  limit - see `reports/MATRIX_STATUS.md` for which runs still stand.
 - **Upstream forcing moved (resolved 2026-07-19).** The per-year scenario
   forcing was not withdrawn - it moved to the top-level `/ISMIP7/AIS` tree
   during the collection reorganization. Mirror it with

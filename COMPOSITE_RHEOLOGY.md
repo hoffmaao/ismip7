@@ -8,7 +8,10 @@
 > read `n_flow = 3`, `a4_factor = 1` here. MAPs inverted at n=3 carry an
 > `_n3` filename tag (`inversion_icepack2_budd_n3_<lc>.h5`) so they coexist
 > with the untagged n=4 MAPs; the forward and its inversion must use the
-> same `ISMIP7_N_FLOW` / `ISMIP7_A4_FACTOR`.
+> same `ISMIP7_N_FLOW` / `ISMIP7_A4_FACTOR`. The `a4_factor` default is
+> derived from `ISMIP7_N_FLOW` (10.0 at n=4, 1.0 otherwise), so setting
+> `ISMIP7_N_FLOW=4` alone reproduces the `antarctica` rheology; an explicit
+> `ISMIP7_A4_FACTOR` still wins.
 
 
 The standard formulation lets the membrane stress and basal shear stress
@@ -152,7 +155,7 @@ dependence — `ψ_fric` doesn't carry an `h` factor in either form).
 |--------------------------|-----------------------|--------------------------------------|
 | `ISMIP7_N_FLOW`          | `3.0` (n=4 on `antarctica`) | both                           |
 | `ISMIP7_M_SLIDE`         | `3.0`                 | both                                 |
-| `ISMIP7_A4_FACTOR`       | `1.0` (10.0 on `antarctica`) | both                          |
+| `ISMIP7_A4_FACTOR`       | derived from `ISMIP7_N_FLOW`: `10.0` at n=4, else `1.0` | both |
 | `ISMIP7_COMPOSITE_ALPHA` | `1e-2` (forward, `budd`/`regularized_coulomb`; `1e-4` legacy) | `simulation.py` / `control/run.py` |
 | `ISMIP7_COMPOSITE_ALPHA` | `1e-2` (inversion) | `inversion_icepack2.py`                 |
 | `ISMIP7_H_REF`           | `100.0` m          | both                                    |

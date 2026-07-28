@@ -132,10 +132,34 @@ def load_mean_annual_surface_temperature(Q, var="tas", data_root=None,
     if not hits:
         raise FileNotFoundError(f"no {var} climatology under {root}")
     ds = xr.open_dataset(hits[0])
-    da = ds[var] if var in ds else ds[list(ds.data_vars)[0]]
-    T = np.asarray(da.mean(dim="month").values, dtype=float)     # (y, x)
+    if var in ds:
+        da = ds[var]
+    else:
+        # Skip grid-mapping/bounds variables, as _load_year does: any of them
+        # ordered first would silently become the temperature field.
+        cands = [
+            v for v in ds.data_vars
+            if not v.endswith("_bnds")
+            and v.lower() not in ("x", "y", "time", "month", "crs", "mapping",
+                                  "spatial_ref", "lat", "lon")
+        ]
+        if not cands:
+            raise ValueError(f"no usable data variable in {hits[0]}")
+        da = ds[cands[0]]
+    da = da.mean(dim="month")
+    if "y" in da.dims and "x" in da.dims:
+        da = da.transpose("y", "x")
+    T = np.asarray(da.values, dtype=float)                       # (y, x)
     x = np.asarray(ds["x"].values, dtype=float)
     y = np.asarray(ds["y"].values, dtype=float)
+    # RegularGridInterpolator requires ascending axes (same flip as
+    # _year_field / build_oi_climatology_interpolators / load_K_per_basin).
+    if y[0] > y[-1]:
+        y = y[::-1]
+        T = T[::-1, :]
+    if x[0] > x[-1]:
+        x = x[::-1]
+        T = T[:, ::-1]
     T = np.where(T > 100.0, T, np.nan)                           # mask fill (~0 K)
     T_filled = np.where(np.isfinite(T), T, fill_K)
     interp = RegularGridInterpolator((y, x), T_filled, method="nearest",
@@ -188,6 +212,31 @@ def ocean_path(scenario, esm="CESM2-WACCM", variable="tf",
     return os.path.join(parent, _resolve_version(parent, version))
 
 
+def _time_axis_days(values):
+    r"""A time (or time-bounds) array as floating-point days.
+
+    Only differences matter to the callers, so the origin is arbitrary and no
+    calendar arithmetic is needed. Handles the three things xarray can hand
+    back for a decoded CF time axis: plain numerics (undecoded), ``datetime64``
+    (standard/proleptic_gregorian calendars) and object arrays of ``cftime``
+    datetimes (noleap, 360_day, all_leap, ...), which have no ``__float__``
+    and so cannot go through ``asarray(..., dtype=float)``.
+    """
+    arr = np.asarray(values)
+    if arr.dtype.kind in "fiub":
+        return arr.astype(float)
+    if arr.dtype.kind == "M":
+        return arr.astype("datetime64[s]").astype("float64") / 86400.0
+    if arr.dtype.kind == "m":
+        return arr.astype("timedelta64[s]").astype("float64") / 86400.0
+    flat = arr.reshape(-1)
+    origin = flat[0]
+    days = np.array(
+        [(t - origin).total_seconds() for t in flat], dtype=float
+    ) / 86400.0
+    return days.reshape(arr.shape)
+
+
 def _annual_mean_over_time(da, ds=None):
     r"""Collapse a per-year forcing file's time axis to the ANNUAL MEAN.
 
@@ -205,35 +254,44 @@ def _annual_mean_over_time(da, ds=None):
     Months are weighted by their length (from ``time_bnds`` when present, else
     from the spacing of the time coordinate) so the result is a true annual
     mean rather than a 12-month unweighted average. A length-1 time axis
-    collapses to that single value, so annual files are unaffected.
+    collapses to that single value, so annual files are unaffected. Any
+    failure to derive usable weights - an exotic calendar, a malformed bounds
+    variable - degrades to the unweighted mean (<=1% off) rather than raising:
+    a forcing read must not abort on a calendar variant.
     """
-    import numpy as _np
+    import xarray as xr
 
     n = da.sizes["time"]
     if n == 1:
         return da.isel(time=0)
 
     w = None
-    bnds_name = da.attrs.get("bounds") or (
-        ds["time"].attrs.get("bounds") if ds is not None and "time" in ds else None
-    )
-    if ds is not None and bnds_name and bnds_name in ds:
-        b = _np.asarray(ds[bnds_name].values, dtype=float)
-        if b.ndim == 2 and b.shape[0] == n:
-            w = b[:, 1] - b[:, 0]
-    if w is None and ds is not None and "time" in ds:
-        t = _np.asarray(ds["time"].values, dtype=float)
-        if t.size == n and n > 1:
-            # month length = spacing to the next slice; the last month reuses
-            # the previous spacing (the file ends at the year boundary).
-            d = _np.diff(t)
-            w = _np.concatenate([d, d[-1:]])
-    if w is None or not _np.all(_np.isfinite(w)) or _np.sum(w) <= 0:
+    try:
+        bnds_name = da.attrs.get("bounds") or (
+            ds["time"].attrs.get("bounds")
+            if ds is not None and "time" in ds else None
+        )
+        if ds is not None and bnds_name and bnds_name in ds:
+            b = _time_axis_days(ds[bnds_name].values)
+            if b.ndim == 2 and b.shape[0] == n:
+                w = b[:, 1] - b[:, 0]
+        if w is None and ds is not None and "time" in ds:
+            t = _time_axis_days(ds["time"].values)
+            if t.size == n:
+                # month length = spacing to the next slice; the last month
+                # reuses the previous spacing (the file ends at the year
+                # boundary).
+                d = np.diff(t)
+                w = np.concatenate([d, d[-1:]])
+    except Exception:
+        w = None
+    if w is None or not np.all(np.isfinite(w)) or not np.all(w > 0):
         return da.mean("time")   # equal weights: <=1% off a day-weighted mean
 
-    import xarray as _xr
-    weights = _xr.DataArray(w / _np.sum(w), dims="time")
-    return (da * weights).sum("time")
+    # weighted().mean() renormalizes by the weights of the non-NaN months, so
+    # a partially masked node matches the unweighted mean instead of being
+    # biased low, and an all-NaN node stays NaN rather than collapsing to 0.
+    return da.weighted(xr.DataArray(w, dims="time")).mean("time")
 
 
 class ISMIP7Atmosphere:

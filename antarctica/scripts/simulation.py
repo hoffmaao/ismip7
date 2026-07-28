@@ -57,9 +57,20 @@ lc_coarse = int(os.environ.get("ISMIP7_LC_COARSE", "64000"))
 # (a4_factor ~ 10, so A_4 tau_c^4 ~ A_3 tau_c^3 at tau_c) lives on the
 # `antarctica` branch. Override either per-run with ISMIP7_N_FLOW /
 # ISMIP7_A4_FACTOR; the two must match between an inversion and the forward
-# runs that load its MAP.
+# runs that load its MAP. Setting ISMIP7_N_FLOW=4 alone therefore carries the
+# n=4 prefactor with it (a4_factor_default below), so the legacy untagged n=4
+# MAP is used with the factor it was inverted at.
 N_FLOW_DEFAULT = "3.0"
 A4_FACTOR_DEFAULT = "1.0"
+A4_FACTOR_N4 = "10.0"
+
+
+def a4_factor_default():
+    r"""Prefactor default derived from the flow exponent: the n=4 composite
+    needs A_4 = 10 A_3 so A_4 tau_c^4 ~ A_3 tau_c^3, while n=3 is plain Glen
+    and needs none. ISMIP7_A4_FACTOR still overrides."""
+    n = float(os.environ.get("ISMIP7_N_FLOW", N_FLOW_DEFAULT))
+    return A4_FACTOR_N4 if abs(n - 4.0) < 1e-9 else A4_FACTOR_DEFAULT
 
 
 def map_n_tag():
@@ -350,7 +361,7 @@ def setup_model(restart_from=None):
     # MAP file we load above). This branch: n=3 standard Glen (A4_FACTOR=1).
     n_flow_val = float(os.environ.get("ISMIP7_N_FLOW", N_FLOW_DEFAULT))
     m_slide_val = float(os.environ.get("ISMIP7_M_SLIDE", "3.0"))
-    a4_factor = float(os.environ.get("ISMIP7_A4_FACTOR", A4_FACTOR_DEFAULT))
+    a4_factor = float(os.environ.get("ISMIP7_A4_FACTOR", a4_factor_default()))
     n_flow = Constant(n_flow_val)
     m_slide = Constant(m_slide_val)
     tau_c = Constant(0.1)

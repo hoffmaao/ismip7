@@ -1,5 +1,17 @@
 # Core 8: ssp585_mri_esm2_0 (32 km)
 
+> **SUPERSEDED - the numbers below are INVALID.** This run predates the
+> annual-mean atmosphere-forcing fix (`fa7230c`): the ISMIP7 SDBN1 reader
+> collapsed each year's 12 monthly slices with `isel(time=0)`, so JANUARY
+> (peak austral summer, the maximum-ablation month) was applied as the whole
+> year's forcing for every aSMB/ts field read through `get_field`. Ablation is
+> overstated by a factor that grows with warming (MRI ssp585 continental aSMB
+> integral: 2050 -229 vs +562 Gt/yr, sign flipped; 2108 -16583 vs -1276; 2300
+> -82606 vs -15174), so the SMB, mass, VAF, sea-level and observational-audit
+> numbers here are all wrong, as are the ISMIP6-envelope comparisons and the
+> attribution of the late-century solver walls to the split scheme. Kept for
+> provenance only; this core is being re-run with the corrected reader.
+
 - date: 2026-07-20
 - git: 223537b
 - log: `antarctica/results/logs/core08_resume_20260720_013359.log`

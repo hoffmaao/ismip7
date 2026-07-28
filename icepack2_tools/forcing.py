@@ -277,7 +277,7 @@ def _annual_mean_over_time(da, ds=None):
     slice is one month, not the year. Taking ``isel(time=0)`` grabs JANUARY -
     peak austral summer, the maximum-ablation month - and applies it as the
     whole year's forcing. For MRI-ESM2-0 ssp585 2108 that is -16583 Gt/yr
-    against an annual mean of -1271 Gt/yr: a 13x overestimate of ablation
+    against an annual mean of -1276 Gt/yr: a 13x overestimate of ablation
     that grows with warming (the summer melt trend is far steeper than the
     annual one), which drove wildly negative post-2100 SMB, unphysical
     +/-6000 Gt/yr year-to-year swings, and a sea-level contribution above the
@@ -439,7 +439,11 @@ class ISMIP7Atmosphere:
         return years
 
     def get_field(self, variable, year, mesh_x, mesh_y):
-        r"""Get a forcing field interpolated to mesh coordinates."""
+        r"""Get a forcing field interpolated to mesh coordinates.
+
+        The value is that year's ANNUAL MEAN, not a single slice: the SDBN1
+        files are monthly, so ``_load_year`` collapses the time axis via
+        ``_annual_mean_over_time`` (see that docstring for the weighting)."""
         import xarray as xr
 
         yr = int(round(year))

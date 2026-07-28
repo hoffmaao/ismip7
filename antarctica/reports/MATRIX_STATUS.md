@@ -19,6 +19,10 @@
 apparent-MB init (`ISMIP7_APPARENT_MB=1`), fixed calving front, `dt=0.1`,
 transport-first stepping with the dt-subcycle rescue ladder
 (`ISMIP7_SUBCYCLES=1,4,16,64`). Budget residual closes to ~0 on every run.
+**Flow exponent n = 4** on the untagged legacy MAPs: every core here ran before
+this branch flipped the `ISMIP7_N_FLOW` default to 3, so the per-core run-env
+blocks record no `ISMIP7_N_FLOW` and the same env today would mean n = 3 (see
+`../N3_FRAMEWORK.md`).
 
 Results h5/CSV are gitignored; each core's `coreNN_<name>_32km.md` is the tracked
 record (run env, budget at marker years, observational audit, ensemble overlay).
@@ -116,6 +120,11 @@ values fed in.
    verdict is otherwise ON TRACK. Worth refining to sustained-growth only.
 4. **Monolithic forward** for cores 7 (and the 10 tail) beyond saturation.
 5. **500 m / 2500 m production resolution**: the 2500 m `_budd` MAP is ready
-   (`inversion_icepack2_budd_2500.h5`); this matrix is the 32 km demonstration.
+   (`inversion_icepack2_budd_2500.h5`, the untagged n=4 one); this matrix is
+   the 32 km demonstration. An n=3 production line needs its own
+   `inversion_icepack2_budd_n3_2500.h5`.
 
-See `MEMORY` and `CLAUDE.md` for the deeper solver/data history.
+For the pipeline and its knobs see `antarctica/README.md`; for the rheology see
+`COMPOSITE_RHEOLOGY.md` and `antarctica/N3_FRAMEWORK.md`. (The deeper
+solver/data history lives in the local, untracked `CLAUDE.md` working notes -
+gitignored, so it is not part of this repo.)

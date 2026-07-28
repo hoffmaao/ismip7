@@ -212,4 +212,3 @@ def compute_fluidity_prior(u, h, s, bed, C, acc, T_srf, p=None, max_picard=60,
             f"using the partially-converged A_prior."
         )
     return A_k
-

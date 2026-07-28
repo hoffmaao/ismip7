@@ -16,10 +16,14 @@ the branch difference is small and self-documenting:
 | `ISMIP7_N_FLOW` | `4.0` | `3.0` | the flow exponent |
 | `ISMIP7_A4_FACTOR` | `10.0` | `1.0` | `A0 = rate_factor(260 K)` **is** the n=3 fluidity, so the composite main term is plain Glen and needs no rescale. At n=4 the factor lifts `A_3` to `A_4` so `A_4·τc⁴ ≈ A_3·τc³` at `τc`. |
 
-Both defaults are module constants (`N_FLOW_DEFAULT`, `A4_FACTOR_DEFAULT`) in
-`simulation.py` and `inversion_icepack2.py`; a run still overrides them with
-the env vars. The inversion and the forward that loads its MAP **must** use
-the same pair.
+Both defaults are module constants (`N_FLOW_DEFAULT`, `A4_FACTOR_DEFAULT` /
+`A4_FACTOR_N4`) in `simulation.py` and `inversion_icepack2.py`; a run still
+overrides them with the env vars. The `a4_factor` default is **derived from**
+`ISMIP7_N_FLOW` (`a4_factor_default()`: 10.0 at n=4, 1.0 otherwise), so
+`ISMIP7_N_FLOW=4` alone is enough to reproduce the `antarctica` rheology and
+cannot silently pair the legacy untagged n=4 MAP with a 1.0 prefactor; an
+explicit `ISMIP7_A4_FACTOR` still wins. The inversion and the forward that
+loads its MAP **must** use the same pair.
 
 ## MAPs
 

@@ -41,9 +41,13 @@ INTERVAL="${INTERVAL:-180}"                # seconds between checks
 LOGDIR="$REPO/antarctica/results/logs"
 mkdir -p "$LOGDIR"
 STAMP="$(date +%Y%m%d_%H%M%S)"
-LOG="${LOG:-$LOGDIR/rc_ctrl500_${STAMP}.log}"
-GATELOG="${GATELOG:-$LOGDIR/rc_ctrl500_gate.log}"
-LOCK="${LOCK:-$LOGDIR/rc_ctrl500.lock}"
+# n-tag so n=3 and n=4 CTRL logs/locks don't collide and the gated MAP name
+# matches setup_model (empty for n=4, matching legacy names; _n3 etc. otherwise).
+NFLOW="${ISMIP7_N_FLOW:-3.0}"
+NTAG="$(awk -v n="$NFLOW" 'BEGIN{ if ((n-4.0)^2 < 1e-12) print ""; else printf "_n%d", int(n+0.5) }')"
+LOG="${LOG:-$LOGDIR/rc_ctrl500${NTAG}_${STAMP}.log}"
+GATELOG="${GATELOG:-$LOGDIR/rc_ctrl500${NTAG}_gate.log}"
+LOCK="${LOCK:-$LOGDIR/rc_ctrl500${NTAG}.lock}"
 
 log(){ echo "[$(date '+%F %T')] $*" | tee -a "$GATELOG"; }
 
@@ -70,8 +74,8 @@ trap 'rm -f "$LOCK"' EXIT
 # inversion ran with the odd/even 1..35 set, so the forward must too.
 BNDIDS="${ISMIP7_BNDIDS:-$REPO/antarctica/mesh/boundary_ids.json}"
 [ -f "$BNDIDS" ] || { log "ERROR: boundary ids not found: $BNDIDS (untracked on this branch — restore the local copy or run make_boundary_ids.py)"; exit 1; }
-[ -f "$REPO/antarctica/mesh/inversion_icepack2_rc_${LC}.h5" ] \
-  || { log "ERROR: RC MAP not found: inversion_icepack2_rc_${LC}.h5"; exit 1; }
+[ -f "$REPO/antarctica/mesh/inversion_icepack2_rc${NTAG}_${LC}.h5" ] \
+  || { log "ERROR: RC MAP not found: inversion_icepack2_rc${NTAG}_${LC}.h5"; exit 1; }
 log "ARMED: RC CTRL2015 lc=$LC dt=$DT t_end=$T_END ranks=$NRANKS mesh=$(basename "$MESH")"
 log "  gate: RAM>=${MIN_FREE_GB}G AND idle_cores>=${MIN_FREE_CORES} for ${STABLE} checks @ ${INTERVAL}s; run log -> $LOG"
 
@@ -88,7 +92,7 @@ while :; do
       # mesh each diagnostic solve is expensive, so starting finer is
       # cheaper in expectation than failing at 8 then re-ramping.
       export OMP_NUM_THREADS=1 ISMIP7_LC="$LC" ISMIP7_MESH="$MESH" \
-             ISMIP7_FRICTION=regularized_coulomb \
+             ISMIP7_FRICTION=regularized_coulomb ISMIP7_N_FLOW="$NFLOW" \
              ISMIP7_DT="$DT" ISMIP7_T_END="$T_END" \
              ISMIP7_K_PER_BASIN_NPZ="$K_NPZ" ISMIP7_BNDIDS="$BNDIDS" \
              ISMIP7_CONTINUATION_STEPS="${ISMIP7_CONTINUATION_STEPS:-16}"

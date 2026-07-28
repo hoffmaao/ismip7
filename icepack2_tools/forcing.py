@@ -1,6 +1,7 @@
 r"""ISMIP7 forcing data reader for Antarctic simulations."""
 
 import os
+import warnings
 import numpy as np
 
 _SEC_PER_YEAR = 31556926.0
@@ -225,16 +226,47 @@ def _time_axis_days(values):
     arr = np.asarray(values)
     if arr.dtype.kind in "fiub":
         return arr.astype(float)
-    if arr.dtype.kind == "M":
-        return arr.astype("datetime64[s]").astype("float64") / 86400.0
-    if arr.dtype.kind == "m":
-        return arr.astype("timedelta64[s]").astype("float64") / 86400.0
+    if arr.dtype.kind in "Mm":
+        unit = "datetime64[s]" if arr.dtype.kind == "M" else "timedelta64[s]"
+        # NaT casts to a huge finite negative, which would sail through the
+        # caller's finite/positive checks as a plausible weight; make it NaN.
+        return np.where(
+            np.isnat(arr), np.nan, arr.astype(unit).astype("float64") / 86400.0
+        )
     flat = arr.reshape(-1)
     origin = flat[0]
     days = np.array(
         [(t - origin).total_seconds() for t in flat], dtype=float
     ) / 86400.0
     return days.reshape(arr.shape)
+
+
+_WEIGHT_FALLBACK_WARNED = set()
+
+# Real month lengths span 28-31 days (ratio 1.11); 360_day is uniform. Anything
+# spanning more than 3x, or handing one month over half the annual weight, is a
+# corrupt weight vector, not a calendar - and would quietly reinstate the
+# single-month forcing this whole helper exists to eliminate.
+_MAX_WEIGHT_RATIO = 3.0
+_MAX_WEIGHT_SHARE = 0.5
+
+
+def _warn_unweighted(da, ds, reason):
+    r"""Warn once per (file, variable, reason) that month-length weighting was
+    unavailable, so the degradation is visible in run logs instead of silent."""
+    source = ds.encoding.get("source") if ds is not None else None
+    source = source or "<unknown file>"
+    name = getattr(da, "name", None) or "<unnamed variable>"
+    key = (source, name, reason)
+    if key in _WEIGHT_FALLBACK_WARNED:
+        return
+    _WEIGHT_FALLBACK_WARNED.add(key)
+    warnings.warn(
+        f"ISMIP7 forcing: {reason}; using the unweighted 12-month mean for "
+        f"'{name}' in {source} (<=1% off a day-weighted annual mean)",
+        RuntimeWarning,
+        stacklevel=3,
+    )
 
 
 def _annual_mean_over_time(da, ds=None):
@@ -256,8 +288,10 @@ def _annual_mean_over_time(da, ds=None):
     mean rather than a 12-month unweighted average. A length-1 time axis
     collapses to that single value, so annual files are unaffected. Any
     failure to derive usable weights - an exotic calendar, a malformed bounds
-    variable - degrades to the unweighted mean (<=1% off) rather than raising:
-    a forcing read must not abort on a calendar variant.
+    variable, an unmasked fill value - degrades to the unweighted mean (<=1%
+    off) with a one-time warning rather than raising: a forcing read must not
+    abort on a calendar variant, and must never let a degenerate weight vector
+    concentrate the year onto one month.
     """
     import xarray as xr
 
@@ -266,6 +300,7 @@ def _annual_mean_over_time(da, ds=None):
         return da.isel(time=0)
 
     w = None
+    reason = None
     try:
         bnds_name = da.attrs.get("bounds") or (
             ds["time"].attrs.get("bounds")
@@ -283,9 +318,28 @@ def _annual_mean_over_time(da, ds=None):
                 # boundary).
                 d = np.diff(t)
                 w = np.concatenate([d, d[-1:]])
-    except Exception:
+    except Exception as exc:
         w = None
-    if w is None or not np.all(np.isfinite(w)) or not np.all(w > 0):
+        reason = (f"month-length weights could not be read "
+                  f"({type(exc).__name__}: {exc})")
+
+    if w is None:
+        reason = reason or "no time bounds and no usable time coordinate"
+    else:
+        w = np.asarray(w, dtype=float)
+        if not np.all(np.isfinite(w)) or not np.all(w > 0):
+            reason = "month-length weights are non-finite or non-positive"
+        elif w.max() > _MAX_WEIGHT_RATIO * w.min():
+            reason = (f"month lengths span {w.min():.4g}-{w.max():.4g} days, "
+                      f"beyond any real calendar")
+        elif w.max() / w.sum() > _MAX_WEIGHT_SHARE:
+            reason = (f"one slice carries {100 * w.max() / w.sum():.1f}% of "
+                      f"the annual weight")
+        if reason is not None:
+            w = None
+
+    if w is None:
+        _warn_unweighted(da, ds, reason)
         return da.mean("time")   # equal weights: <=1% off a day-weighted mean
 
     # weighted().mean() renormalizes by the weights of the non-NaN months, so

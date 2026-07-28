@@ -13,16 +13,23 @@
 #   11    OCX          obs-constrained, cold start     1990-2025
 #
 # A core that branches from the historical is only launched once that ESM's
-# historical has actually reached 2014. A missing or short historical would
-# otherwise cold-start the dependent from the inversion geometry (or resume
-# from a truncated endpoint), which breaks the projection-minus-CTRL
-# cancellation the whole matrix rests on - and the drivers only WARN about it.
+# historical endpoint is on disk, complete and post-fix. A missing, short or
+# pre-fix historical would otherwise cold-start the dependent from the
+# inversion geometry (or resume from a truncated endpoint), which breaks the
+# projection-minus-CTRL cancellation the whole matrix rests on - and the
+# drivers only WARN about it. This dependency check is provenance-only: it
+# asks whether the endpoint is valid, never whether the caller asked to
+# re-run, so FRESH=1 CORES=3,4,... still branches from a good historical.
 #
 # PROVENANCE: a completed timeseries is only reused when it postdates the
 # forcing implementation ($PROV_REF). Results produced before the annual-mean
 # atmosphere fix are invalid (January was applied as the whole year), so they
-# are treated as absent and re-run rather than silently skipped and fed to the
-# audit. FRESH=1 re-runs everything; REUSE=1 reuses any completed timeseries.
+# are ARCHIVED under $R/archive_stale_<TS>/ and re-run rather than silently
+# skipped and fed to the audit - moving them aside also stops a crashed
+# relaunch from reading the superseded file back as its own progress.
+# Reuse precedence: FRESH=1 (re-run every selected core) beats REUSE=1 (reuse
+# any completed timeseries unchecked) beats the provenance comparison. Neither
+# flag affects the dependency check above.
 #
 # WALL RETRY: the split-step diagnostic solve can exhaust its in-run rescue
 # ladder late in a long projection and save-and-stop short of the target year.
@@ -82,6 +89,7 @@ PY="$VENV/bin/python"
 
 PROV_MTIME=""
 [ -e "$PROV_REF" ] && PROV_MTIME=$(stat -c %Y "$PROV_REF")
+ARCHIVE="$R/archive_stale_$TS"
 
 # core | label | driver | ESM | experiment-name stem | target year | kind
 # kind: hist = historical, branch = branches from the historical endpoint,
@@ -100,10 +108,12 @@ CORE_SPEC=(
   "11|ocx|projections/ocx.py|CESM2-WACCM|ocx|2025|cold"
 )
 
-declare -A HIST_STEM=() HIST_TARGET=() HIST_STATUS=() STATUS=() STEM_OF=()
+declare -A HIST_STEM=() HIST_TARGET=() HIST_STATUS=() HIST_WHY=() \
+           STATUS=() STEM_OF=() TARGET_OF=()
 for spec in "${CORE_SPEC[@]}"; do
   IFS='|' read -r core label driver esm stem target kind <<< "$spec"
   STEM_OF[$core]=$stem
+  TARGET_OF[$core]=$target
   if [ "$kind" = hist ]; then
     HIST_STEM[$esm]=$stem
     HIST_TARGET[$esm]=$target
@@ -120,10 +130,11 @@ last_year () {  # last simulated year of a timeseries, or empty
   awk -F, 'NR>1 && $1+0>0 {y=$1} END{if(y!="") print y}' "$c"
 }
 
-postdates_forcing () {  # file - true when it was written after $PROV_REF
-  [ -n "$REUSE" ] && return 0
-  [ -n "$FRESH" ] && return 1
+current_file () {  # file - true when it postdates $PROV_REF. A fact about the
+                   # file only: FRESH/REUSE are reuse policy and must not
+                   # change whether a dependency is judged valid.
   [ -n "$PROV_MTIME" ] || return 1
+  [ -e "$1" ] || return 1
   [ "$(stat -c %Y "$1")" -ge "$PROV_MTIME" ]
 }
 
@@ -141,12 +152,24 @@ reusable () {  # core label csv year - true when the existing output is current
     echo "[core $core] $label: provenance reference '$PROV_REF' not found - treating timeseries at $year as stale, re-running"
     return 1
   fi
-  if postdates_forcing "$csv"; then
+  if current_file "$csv"; then
     echo "[core $core] $label: timeseries at $year postdates $PROV_REF - current"
     return 0
   fi
   echo "[core $core] $label: timeseries at $year PREDATES $PROV_REF (produced before the forcing fix) - re-running from scratch"
   return 1
+}
+
+archive_stale () {  # core label stem - move superseded output out of the way
+  local core="$1" label="$2" stem="$3" f moved=()
+  for f in "$(csv_of "$stem")" "$(h5_of "$stem")"; do
+    [ -e "$f" ] || continue
+    mkdir -p "$ARCHIVE"
+    mv "$f" "$ARCHIVE/" && moved+=("$(basename "$f")")
+  done
+  [ "${#moved[@]}" -gt 0 ] &&
+    echo "[core $core] $label: archived ${moved[*]} under $ARCHIVE/"
+  return 0
 }
 
 hist_ready () {  # esm - true when that ESM's historical endpoint is usable
@@ -160,12 +183,17 @@ hist_ready () {  # esm - true when that ESM's historical endpoint is usable
   target="${HIST_TARGET[$esm]}"
   h5=$(h5_of "$stem")
   y=$(last_year "$(csv_of "$stem")" || echo "")
-  if [ -f "$h5" ] && [ -n "$y" ] && awk "BEGIN{exit !($y >= $target)}" \
-     && postdates_forcing "$h5"; then
+  HIST_STATUS[$esm]=bad
+  if [ ! -f "$h5" ]; then
+    HIST_WHY[$esm]="no endpoint $(basename "$h5")"
+  elif [ -z "$y" ] || ! awk "BEGIN{exit !($y >= $target)}"; then
+    HIST_WHY[$esm]="endpoint stops at ${y:-nothing}, target $target"
+  elif ! current_file "$h5"; then
+    HIST_WHY[$esm]="endpoint predates $PROV_REF (pre-fix)"
+  else
     HIST_STATUS[$esm]=ok
     return 0
   fi
-  HIST_STATUS[$esm]=bad
   return 1
 }
 
@@ -185,7 +213,8 @@ run_core () {  # core label driver esm stem target kind
 
   now=$(last_year "$csv" || echo "")
   if [ -n "$now" ] && ! reusable "$core" "$label" "$csv" "$now"; then
-    now=""
+    archive_stale "$core" "$label" "$stem"
+    now=$(last_year "$csv" || echo "")
   fi
   if [ -n "$now" ] && awk "BEGIN{exit !($now >= $target)}"; then
     echo "[core $core] $label already at $now (target $target) - skipping"
@@ -212,8 +241,15 @@ run_core () {  # core label driver esm stem target kind
     else
       echo "[core $core] $label starting (target $target)"
     fi
+    local rc=0
     env "${restart_env[@]}" ISMIP7_ESM="$esm" \
-      mpiexec -n "$NRANKS" "$PY" "antarctica/scripts/$driver" > "$log" 2>&1
+      mpiexec -n "$NRANKS" "$PY" "antarctica/scripts/$driver" > "$log" 2>&1 || rc=$?
+    # A graceful wall stop saves and returns 0; a non-zero exit means the
+    # driver died, so whatever is on disk is not this attempt's progress.
+    if [ "$rc" -ne 0 ]; then
+      echo "[core $core] $label driver exited $rc on attempt $attempt - see ${log##*/}"
+      return 1
+    fi
     now=$(last_year "$csv" || echo "")
     echo "    -> reached ${now:-nothing}  (log ${log##*/})"
     [ -z "$now" ] && { echo "[core $core] produced no output - see log"; return 1; }
@@ -250,10 +286,10 @@ for spec in "${CORE_SPEC[@]}"; do
   IFS='|' read -r core label driver esm stem target kind <<< "$spec"
   wanted "$core" || continue
   if [ "$kind" = branch ] && ! hist_ready "$esm"; then
-    echo "[core $core] $label BLOCKED: the $esm historical has not reached" \
-         "${HIST_TARGET[$esm]} with current forcing. Running it now would" \
-         "cold-start (or resume a truncated endpoint) and break the" \
-         "projection-minus-CTRL cancellation. Run core(s) for $esm first."
+    echo "[core $core] $label BLOCKED: unusable $esm historical endpoint" \
+         "(${HIST_WHY[$esm]:-unknown}). Running it now would cold-start (or" \
+         "resume a truncated endpoint) and break the projection-minus-CTRL" \
+         "cancellation. Run the $esm historical first."
     STATUS[$core]=blocked
     continue
   fi
@@ -262,7 +298,10 @@ for spec in "${CORE_SPEC[@]}"; do
     [ "$kind" = hist ] && HIST_STATUS[$esm]=ok
   else
     STATUS[$core]=failed
-    [ "$kind" = hist ] && HIST_STATUS[$esm]=bad
+    if [ "$kind" = hist ]; then
+      HIST_STATUS[$esm]=bad
+      HIST_WHY[$esm]="core $core did not reach $target in this run"
+    fi
   fi
 done
 
@@ -276,9 +315,9 @@ for spec in "${CORE_SPEC[@]}"; do
     "$core" "$label" "$y" "$target" "${STATUS[$core]:-not-run}"
 done
 
-# The audit and the ensemble comparison only read cores this run brought to
-# their target with current forcing; a blocked or failed core may still have a
-# pre-fix timeseries on disk, which must not be reported as a matrix result.
+# The audit only reads cores this run brought to their target; a blocked or
+# failed core may still have an older timeseries on disk, which must not be
+# reported as a matrix result.
 echo
 echo "=== observational audit ==="
 for spec in "${CORE_SPEC[@]}"; do
@@ -290,17 +329,32 @@ for spec in "${CORE_SPEC[@]}"; do
 done
 
 echo
+# The CTRL only has to be a valid partner on disk - present, post-fix and long
+# enough to cover the projection - not something this invocation re-ran, so a
+# subset run such as CORES=5,6,7,8 still gets its comparison.
 echo "=== ISMIP6 ensemble comparison (projection - same-ESM CTRL) ==="
 for spec in "5|9" "6|10" "3|9" "4|10" "7|9" "8|10"; do
   IFS='|' read -r core ctrl_core <<< "$spec"
   wanted "$core" || continue
-  p="${STEM_OF[$core]}"
-  if [ "${STATUS[$core]:-}" != ok ] || [ "${STATUS[$ctrl_core]:-}" != ok ]; then
-    echo "--- core $core: $p - skipped (core $core ${STATUS[$core]:-not-run}, CTRL core $ctrl_core ${STATUS[$ctrl_core]:-not-run})"
+  p="${STEM_OF[$core]}"; pc=$(csv_of "$p")
+  cc=$(csv_of "${STEM_OF[$ctrl_core]}")
+  if [ "${STATUS[$core]:-}" != ok ]; then
+    echo "--- core $core: $p - skipped (core $core ${STATUS[$core]:-not-run})"
     continue
   fi
-  pc=$(csv_of "$p"); cc=$(csv_of "${STEM_OF[$ctrl_core]}")
-  [ -f "$pc" ] && [ -f "$cc" ] || continue
+  if [ ! -f "$cc" ]; then
+    echo "--- core $core: $p - skipped (no CTRL timeseries $(basename "$cc"); run core $ctrl_core)"
+    continue
+  fi
+  if [ "${STATUS[$ctrl_core]:-}" != ok ] && ! current_file "$cc"; then
+    echo "--- core $core: $p - skipped (CTRL core $ctrl_core timeseries predates $PROV_REF)"
+    continue
+  fi
+  ctrl_y=$(last_year "$cc" || echo "")
+  if [ -z "$ctrl_y" ] || ! awk "BEGIN{exit !($ctrl_y >= ${TARGET_OF[$core]})}"; then
+    echo "--- core $core: $p - skipped (CTRL core $ctrl_core reaches ${ctrl_y:-nothing}, needs ${TARGET_OF[$core]})"
+    continue
+  fi
   echo "--- core $core: $p ---"
   "$PY" antarctica/scripts/compare_ismip6.py "$pc" "$cc" 2>&1 | tail -3
 done

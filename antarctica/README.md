@@ -45,6 +45,7 @@ antarctica/
   data/            # observational inputs (BedMachine, velocity, RACMO)  [gitignored]
   mesh/            # *.msh + boundary_ids*.json + inversion_*.h5         [gitignored]
   results/         # checkpoints (*.h5), timeseries (*.csv), logs        [gitignored]
+  reports/         # tracked per-core run records + MATRIX_STATUS.md
   scripts/         # all entry points (see §3–§6)
 ISMIP7/AIS/        # ISMIP7 forcing tree the *runtime* reads             [gitignored]
 icepack2_tools/    # reusable library (mesh, forcing, eikonal, grounding, regrid)
@@ -301,6 +302,37 @@ python scripts/check_ismip6_track.py results/<exp>_timeseries.csv
 
 For the forced response, `scripts/compare_ismip6.py <proj.csv> <ctrl.csv>` overlays our projection-minus-CTRL sea-level contribution on the ISMIP6 ensemble to check broad consistency (auto-selects the scenario pool; `--exps` to override).
 
+### The whole matrix in one command (`run_core_matrix.sh`)
+
+`scripts/run_core_matrix.sh` runs core experiments 1-11 end to end in protocol
+dependency order (both historicals first, since the CTRLs and the projections
+branch from the historical endpoint, then the CTRLs, the projections, OCX) and
+finishes with the observational audit and the ensemble comparison above for
+each core it brought to its target year.
+
+```bash
+ISMIP7_RUN_TAG=n3 ISMIP7_LC=32000 antarctica/scripts/run_core_matrix.sh
+CORES=1,2,9 antarctica/scripts/run_core_matrix.sh    # a subset
+```
+
+Cores run **sequentially** and are load-gated (`MAX_LOAD`, default
+cores - 8), so the machine stays usable for other work. A core whose
+timeseries already reaches its target year is skipped; output that predates
+the annual-mean atmosphere-forcing fix is archived under
+`results/archive_stale_<stamp>/` and re-run rather than reused. Resolution,
+flow exponent, run tag, dt, friction and rank count come from the `ISMIP7_*`
+knobs below; the runner's own knobs (`CORES`, `MAX_LOAD`, `MAX_ATTEMPTS`,
+`FRESH`, `REUSE`, `NRANKS`, `PROV_REF`) and the exact reuse/dependency rules
+are documented in its header, which is their authoritative reference. Its one
+non-obvious behavior, wall retry, is described under "Known issues" below.
+
+Each completed core is recorded with
+`python scripts/core_report.py --core <N> --name <exp> --csv <timeseries.csv>
+--log <run.log>` (add `--ctrl-csv` for a projection), run **in the run's own
+shell** so it captures that run's `ISMIP7_*` environment. It writes the
+tracked markdown record under `reports/`; `reports/MATRIX_STATUS.md` carries
+the matrix-wide status.
+
 ### Environment knobs (all forward runs)
 
 | Env var | Meaning | Default |
@@ -344,7 +376,9 @@ Per experiment in `results/`:
   (`thickness_dg`, the prognostic state), the full `(u, M, τ)` solver state,
   and the frozen apparent-MB reference when one is active.
 - `<exp>_t<year>.h5` — periodic checkpoints (every `ISMIP7_CHECKPOINT_EVERY_YR`
-  model years, default 5; only the newest `ISMIP7_KEEP_CHECKPOINTS` are kept).
+  model years, default 5; only the `ISMIP7_KEEP_CHECKPOINTS` most recently
+  *written* are kept - by write time, not by highest year, so a re-run that
+  rewinds to the historical endpoint keeps its own states).
 - `<exp>_timeseries.csv` — one row per `OUTPUT_INTERVAL` steps with columns
   `year, vaf_mm_sle, mass_gt, smb_gtyr, melt_gtyr, outflux_gtyr, calv_gt,
   clamp_gt, resid_gt, amb_gtyr`: the mass-budget audit (SMB, shelf melt,
@@ -366,6 +400,14 @@ VAF is reported in mm of sea-level equivalent; mass in Gt.
   aSMB-forced walls seen so far are suspect: they predate the annual-mean
   atmosphere-forcing fix and may be forcing-induced rather than a solver
   limit - see `reports/MATRIX_STATUS.md` for which runs still stand.
+  **Wall retry.** When the in-run rescue ladder is exhausted the run saves and
+  stops short of its target year, and simply relaunching from that saved state
+  clears the wall: a fresh process re-runs the n=1→n continuation at the
+  loaded geometry, which the in-run ladder cannot do (3 of 3 observed walls
+  resumed - ssp585-CESM at 2096.7, CTRL-CESM at 2268, CTRL-MRI at 2250 - and
+  both CTRLs then reached 2300). `run_core_matrix.sh` does this automatically,
+  relaunching from the newest checkpoint at or before the timeseries' last
+  year while each attempt keeps advancing, and giving up on a stall.
 - **Upstream forcing moved (resolved 2026-07-19).** The per-year scenario
   forcing was not withdrawn - it moved to the top-level `/ISMIP7/AIS` tree
   during the collection reorganization. Mirror it with

@@ -37,10 +37,12 @@
 # n=1->n continuation at the loaded geometry, which the in-run ladder cannot do
 # (observed 3/3: ssp585-CESM 2096.7, CTRL-CESM 2268, CTRL-MRI 2250 all resumed
 # and two reached 2300). This script therefore relaunches a short run from its
-# own final.h5, and keeps doing so while each attempt makes progress, up to
-# MAX_ATTEMPTS. A run that stops advancing is left alone and reported. OCX is
-# the exception: its driver cold-starts unconditionally and ignores
-# ISMIP7_RESTART, so it runs at most once.
+# own saved state, and keeps doing so while each attempt makes progress, up to
+# MAX_ATTEMPTS. A run that stops advancing is left alone and reported. The
+# resume source is the newest checkpoint whose recorded year is at or before
+# the timeseries' last row, so a run is never continued from a state ahead of
+# its own record. OCX is the exception: its driver cold-starts unconditionally
+# and ignores ISMIP7_RESTART, so it runs at most once.
 #
 # Usage:
 #   antarctica/scripts/run_core_matrix.sh                # full matrix
@@ -187,6 +189,40 @@ archive_stale () {  # core label stem - move superseded output out of the way
   return 0
 }
 
+pick_restart () {  # stem csv_last_year - "<t_yr>|<path>" of the newest
+                   # checkpoint at or before the timeseries' last year, "|"
+                   # when none qualifies, "?|" when the years cannot be read.
+                   #
+                   # final.h5 is only written when the time loop exits, so
+                   # after a crash it still holds an EARLIER run's state and
+                   # can sit ahead of the timeseries. Resuming from it would
+                   # make run_simulation truncate the CSV at that later year
+                   # and append from there, splicing two timelines together
+                   # with a silent gap that reads back as progress.
+  local out
+  out=$("$PY" - "$R" "${1}${SFX}_${LC}" "${2:-0}" 2>/dev/null <<'PY'
+import glob, os, sys
+import h5py
+d, base, want = sys.argv[1], sys.argv[2], float(sys.argv[3])
+cands = [os.path.join(d, base + "_final.h5")]
+cands += sorted(glob.glob(os.path.join(d, base + "_t*.h5")))
+best_t, best_fn = None, None
+for fn in cands:
+    if not os.path.exists(fn):
+        continue
+    try:
+        with h5py.File(fn, "r") as f:
+            t = float(f["/"].attrs["t_yr"])
+    except Exception:
+        continue
+    if t <= want + 0.05 and (best_t is None or t > best_t):
+        best_t, best_fn = t, fn
+print(f"{best_t:.4f}|{best_fn}" if best_fn else "|")
+PY
+) || out="?|"
+  echo "${out:-?|}"
+}
+
 hist_ready () {  # esm - true when that ESM's historical endpoint is usable
   local esm="$1" stem target y h5
   if [ -n "${HIST_STATUS[$esm]:-}" ]; then
@@ -248,11 +284,27 @@ run_core () {  # core label driver esm stem target kind
     # Attempt 1 uses the driver's own restart logic (projections and the CTRL
     # branch from the historical endpoint). Later attempts are wall retries and
     # must resume from this run's own saved state.
-    local restart_env=()
+    local restart_env=() pick pick_t pick_fn
     if [ "$attempt" -gt 1 ]; then
-      [ -f "$h5" ] || { echo "[core $core] no $h5 to retry from - stopping"; return 1; }
-      restart_env=(ISMIP7_RESTART="$REPO/$h5")
-      echo "[core $core] $label wall retry $((attempt-1)) from $now"
+      pick=$(pick_restart "$stem" "$now")
+      pick_t=${pick%%|*}; pick_fn=${pick#*|}
+      if [ "$pick_t" = "?" ]; then
+        if [ ! -f "$h5" ] || [ "$csv" -nt "$h5" ]; then
+          echo "[core $core] $label: cannot confirm a saved state consistent" \
+               "with the timeseries at ${now:-nothing} - stopping rather than" \
+               "resuming from a checkpoint that may be ahead of the record"
+          return 1
+        fi
+        pick_fn="$h5"; pick_t="$now"
+      elif [ -z "$pick_fn" ]; then
+        echo "[core $core] $label: no checkpoint at or before the timeseries'" \
+             "last year ${now:-nothing} - stopping rather than splicing two" \
+             "timelines into one record"
+        return 1
+      fi
+      restart_env=(ISMIP7_RESTART="$REPO/$pick_fn")
+      echo "[core $core] $label retry $((attempt-1)) from $now" \
+           "(resuming $(basename "$pick_fn") at t=$pick_t)"
     else
       echo "[core $core] $label starting (target $target)"
     fi

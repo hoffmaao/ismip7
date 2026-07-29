@@ -158,13 +158,60 @@ def setup_model(restart_from=None):
         mesh = _chk.load_mesh()
     PETSc.Sys.Print(f"  {mesh.num_vertices()} vertices, {mesh.num_cells()} cells")
 
-    bndids_fn = os.environ.get(
-        "ISMIP7_BNDIDS", os.path.join(MESH_DIR, "boundary_ids.json")
-    )
+    # Boundary-id sidecar. Prefer the per-mesh file
+    # (boundary_ids_<mesh basename>.json) over the generic one: the gmsh
+    # physical-line count depends on resolution AND on the outline buffer, so a
+    # sidecar built for one mesh is NOT valid for another.
+    bndids_fn = os.environ.get("ISMIP7_BNDIDS")
+    if bndids_fn is None:
+        _mesh_hint = os.environ.get("ISMIP7_MESH") or getattr(mesh, "name", "") or ""
+        _stem = os.path.splitext(os.path.basename(_mesh_hint))[0]
+        _per_mesh = os.path.join(MESH_DIR, f"boundary_ids_{_stem}.json")
+        bndids_fn = (
+            _per_mesh if _stem and os.path.exists(_per_mesh)
+            else os.path.join(MESH_DIR, "boundary_ids.json")
+        )
     with open(bndids_fn) as f:
         bnd_ids = json.load(f)
     calving_ids = tuple(bnd_ids["calving"])
     use_calving_terminus = os.environ.get("ISMIP7_NO_CALVING_TERMINUS") is None
+
+    # Every exterior marker on this mesh MUST be classified by the sidecar.
+    # A stale sidecar silently leaves most of the ice front with NO calving
+    # back-pressure: the 35-tag file paired with the 639-group 32 km mesh
+    # tagged 1596 km of a 32 000 km boundary (5%), so 95% of the front ran
+    # stress-free instead of carrying 1/2(rho_I g h^2 - rho_W g d^2). That was
+    # silent for an entire campaign, so it is a hard error now.
+    _mesh_markers = set(int(i) for i in mesh.exterior_facets.unique_markers)
+    _tagged = set(int(i) for i in calving_ids) | set(
+        int(i) for i in bnd_ids.get("other", [])
+    )
+    _unclassified = _mesh_markers - _tagged
+    _absent = _tagged - _mesh_markers
+    if _unclassified or _absent:
+        raise ValueError(
+            f"boundary_ids sidecar does not match this mesh.\n"
+            f"  sidecar : {bndids_fn}\n"
+            f"  mesh has {len(_mesh_markers)} exterior markers; sidecar names "
+            f"{len(_tagged)}\n"
+            f"  {len(_unclassified)} mesh marker(s) unclassified"
+            f"{' (e.g. ' + str(sorted(_unclassified)[:5]) + ')' if _unclassified else ''}\n"
+            f"  {len(_absent)} sidecar id(s) absent from the mesh"
+            f"{' (e.g. ' + str(sorted(_absent)[:5]) + ')' if _absent else ''}\n"
+            f"  Unclassified markers get NO calving-terminus back-pressure.\n"
+            f"  Regenerate with:  ISMIP7_MESH=<the .msh> python "
+            f"antarctica/scripts/make_boundary_ids.py\n"
+            f"  then save it as antarctica/mesh/boundary_ids_<mesh basename>.json"
+        )
+    if use_calving_terminus and calving_ids:
+        _len_all = float(assemble(Constant(1.0) * fd.ds(domain=mesh)))
+        _len_cal = float(assemble(Constant(1.0) * fd.ds(calving_ids, domain=mesh)))
+        PETSc.Sys.Print(
+            f"  Calving terminus BC on {_len_cal/1e3:.0f} km of "
+            f"{_len_all/1e3:.0f} km exterior boundary "
+            f"({100*_len_cal/max(_len_all, 1e-9):.0f}%), "
+            f"{len(calving_ids)}/{len(_mesh_markers)} markers ({bndids_fn.split('/')[-1]})"
+        )
 
     Q = FunctionSpace(mesh, "CG", 1)
     V = VectorFunctionSpace(mesh, "CG", 1)

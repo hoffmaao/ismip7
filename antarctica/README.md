@@ -192,12 +192,21 @@ ISMIP7_BUFFER_M=20000 python scripts/mesh_antarctica.py
 ```
 
 **Boundary IDs.** The gmsh physical groups are named `Calving_N` / `Other_N`;
-`boundary_ids.json` caches the calving/other split (read by every solver via
-`ISMIP7_BNDIDS`). `mesh_antarctica.py` writes the sidecar automatically next to
-the mesh; to regenerate one for an existing mesh:
+the sidecar caches the calving/other split, and every solver resolves it
+through `icepack2_tools/boundary.py`: `ISMIP7_BNDIDS` if set, else the
+**per-mesh** `mesh/boundary_ids_<mesh stem>.json`, else the shared
+`mesh/boundary_ids.json`. `mesh_antarctica.py` writes both names next to the
+mesh; to regenerate them for an existing mesh:
 ```bash
 ISMIP7_MESH=mesh/<file>.msh python scripts/make_boundary_ids.py
 ```
+The per-mesh name is what makes a stale sidecar impossible to pick up by
+accident: the shared file is overwritten by every mesh build, and a sidecar
+built for another mesh is not valid here (the physical-group count depends on
+resolution *and* on the outline buffer). Every reader **hard-errors** when an
+exterior marker on the mesh is unclassified or a sidecar id is absent from it -
+a mismatch used to be legal and silent, and left ~95% of the ice front with no
+calving back-pressure. Runs print the covered front length in km and percent.
 
 ---
 
@@ -209,7 +218,7 @@ MAP estimate of the bed friction `θ` and rheology `φ` from the diagnostic
 ```bash
 cd antarctica
 ISMIP7_LC=2500 mpiexec -n 12 python scripts/inversion_icepack2.py
-# → mesh/inversion_icepack2_budd_n3_<LC>.h5   (the MAP checkpoint every forward run loads)
+# → mesh/inversion_icepack2_budd_n3_dg0_<LC>.h5   (the MAP checkpoint every forward run loads)
 ```
 
 The controls are log-deviations from physical prior means: `θ = log(C/C_w0)`
@@ -223,9 +232,16 @@ The friction law is selected with `ISMIP7_FRICTION` (`budd`, the default, or
 `regularized_coulomb`); the MAP checkpoint name carries a matching `_budd` /
 `_rc` tag, and the forward runs load the checkpoint for whichever law they are
 started with. This `antarctica-n3` branch also appends an `_n3` flow-exponent
-tag (from `map_n_tag()`) so n=3 and n=4 MAPs coexist on disk; see
-`N3_FRAMEWORK.md`. See the script header for the full set of regularization /
-iteration options.
+tag so n=3 and n=4 MAPs coexist on disk; see `N3_FRAMEWORK.md`. Since Aug 2026
+the name additionally carries the **geometry space** it was inverted under
+(`_dg0` for the `ISMIP7_GEOMETRY_SPACE=dg0` default, untagged for `cg1`): the
+inversion absorbs the calving-front treatment into `θ`/`φ`, so a MAP is only
+valid for its own geometry space. The whole name is built by one helper
+(`icepack2_tools/naming.py`), which the forward, `preflight.py` and the launch
+gates all import. A forward that finds only the legacy untagged MAP loads it
+and warns loudly - runnable as a smoke test, not a result. See
+`../GEOMETRY_DISCRETIZATION.md`. See the script header for the full set of
+regularization / iteration options.
 
 ---
 
@@ -339,8 +355,9 @@ the matrix-wide status.
 |---------|---------|---------|
 | `ISMIP7_LC` | fine mesh resolution tag (selects mesh + inversion h5) | `2500` |
 | `ISMIP7_LC_COARSE` | coarse mesh tag | `64000` |
-| `ISMIP7_MESH` | override mesh `.msh` path | `mesh/antarctica_<COARSE>_<LC>.msh` |
-| `ISMIP7_BNDIDS` | override boundary-id JSON | `mesh/boundary_ids.json` |
+| `ISMIP7_MESH` | mesh `.msh` path (inversion and tools). A forward takes its mesh from the MAP/restart checkpoint, which records its own mesh basename, so here it only names the boundary sidecar for a legacy checkpoint that carries no such record | `mesh/antarctica_<COARSE>_<LC>.msh` |
+| `ISMIP7_BNDIDS` | override boundary-id JSON | `mesh/boundary_ids_<mesh stem>.json` if present, else `mesh/boundary_ids.json` |
+| `ISMIP7_GEOMETRY_SPACE` | space for `h`/`s`/`b` (`dg0`: one thickness for the terminus force and the mass flux; `cg1`: legacy, for A/B only) - also selects the MAP h5 (see `../GEOMETRY_DISCRETIZATION.md`) | `dg0` |
 | `ISMIP7_DATA_ROOT` | ISMIP7 forcing tree root | `<repo>/ISMIP7/AIS` |
 | `ISMIP7_T_END` / `ISMIP7_DT` | end year / timestep (yr) | `2300` / `1.0` |
 | `ISMIP7_FRICTION` | friction law (`budd`, `regularized_coulomb`) - selects the MAP h5 | `budd` |
@@ -352,7 +369,7 @@ the matrix-wide status.
 | `ISMIP7_RUN_TAG` | experiment-name suffix for a parallel method line (see run-management flags above) | _(unset)_ |
 | `ISMIP7_APPARENT_MB` | apparent-mass-balance init: `1`/`balance` zeroes the t=0 thickness tendency (ISMIP6 ctrl_proj-style), `div` cancels only the flux divergence | _(unset)_ |
 | `ISMIP7_FIXED_FRONT` | set to hold the calving front at the t=0 extent (inflow beyond it tallied as calving) | _(unset)_ |
-| `ISMIP7_LEGACY_TRANSPORT` | set to restore the pre-Jul-2026 CG-projection transport scheme | _(unset)_ |
+| `ISMIP7_LEGACY_TRANSPORT` | set to restore the pre-Jul-2026 CG-projection transport scheme (requires `ISMIP7_GEOMETRY_SPACE=cg1`) | _(unset)_ |
 | `ISMIP7_SNES_TYPE` / `ISMIP7_SNES_MAXIT` | diagnostic Newton type / max iterations | `newtonls` / `200` |
 | `ISMIP7_SUBCYCLES` | dt-subcycle rescue ladder: a step that fails the rescue solves rewinds its own advance and retries at `dt/m` for each `m` in this list | `1,4,16` |
 | `ISMIP7_RESCUE_MAXIT` | Newton iteration cap on the rescue rungs (hard-era steps converge linearly and need the extra patience) | `600` |
@@ -372,9 +389,15 @@ the matrix-wide status.
 
 Per experiment in `results/`:
 - `<exp>_final.h5` — final state checkpoint (Firedrake `CheckpointFile`),
-  self-contained for restart: mesh, geometry, inversion fields, DG0 thickness
-  (`thickness_dg`, the prognostic state), the full `(u, M, τ)` solver state,
-  and the frozen apparent-MB reference when one is active.
+  self-contained for restart: mesh, geometry, inversion fields, the full
+  `(u, M, τ)` solver state, and the frozen apparent-MB reference when one is
+  active. Under the `dg0` geometry default the saved `thickness` **is** the
+  prognostic transport state; a `cg1` run additionally saves the separate DG0
+  carrier as `thickness_dg`, since there the CG1 `thickness` is only its lift.
+  The `geometry_space` and `mesh_basename` attributes record the discretization
+  and the `.msh` the trajectory started on, so a restart resolves the same
+  boundary sidecar; restarting into a different geometry space projects and
+  warns loudly (see `../GEOMETRY_DISCRETIZATION.md`).
 - `<exp>_t<year>.h5` — periodic checkpoints (every `ISMIP7_CHECKPOINT_EVERY_YR`
   model years, default 5; only the `ISMIP7_KEEP_CHECKPOINTS` most recently
   *written* are kept - by write time, not by highest year, so a re-run that
@@ -393,8 +416,7 @@ VAF is reported in mm of sea-level equivalent; mass in Gt.
 
 - **Diagnostic-Newton wall on hard projection geometries.** The earlier
   forward blow-ups are fixed (balanced apparent-MB init + persistent DG0
-  thickness state; the 32 km CTRL audits ON TRACK via
-  `check_ismip6_track.py`), but the diagnostic Newton can still stall on
+  thickness state), but the diagnostic Newton can still stall on
   evolved projection geometries. `ISMIP7_SNES_TYPE` / `ISMIP7_SNES_MAXIT` are
   the knobs for experimenting; a robust fix is the next work item. The
   aSMB-forced walls seen so far are suspect: they predate the annual-mean

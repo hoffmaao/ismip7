@@ -69,7 +69,7 @@ from icepack2.constants import (
     gravity as g,
 )
 
-from .geometry import cg1_lift, surface_slope  # noqa: F401 (re-export)
+from .geometry import surface_slope
 from .grounding import height_above_flotation, smooth_heaviside
 
 # Grounding-zone Heaviside width [m height-above-flotation].  Wider => more

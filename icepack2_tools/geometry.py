@@ -15,6 +15,8 @@ and the forward cannot drift apart:
 * :func:`surface_slope` - ``grad(s)`` that works for CG1 or DG0 surfaces.
 """
 
+import weakref
+
 from firedrake import (
     Constant,
     Function,
@@ -25,6 +27,25 @@ from firedrake import (
     grad,
     max_value,
 )
+
+
+_LUMPED_MASS = weakref.WeakKeyDictionary()
+
+
+def _lumped_mass(Q_cg):
+    r"""Lumped CG1 mass vector for this space, assembled once.
+
+    It depends only on the mesh, and cg1_lift now runs once per forcing
+    callback (~1 per timestep), so re-assembling it every call is half the
+    per-call cost for nothing. The cache is keyed weakly on the space and
+    holds the plain array (not the assembled Cofunction, which would keep a
+    strong reference back to its own key and pin the mesh forever).
+    """
+    cached = _LUMPED_MASS.get(Q_cg)
+    if cached is None:
+        cached = assemble(TestFunction(Q_cg) * dx).dat.data_ro.copy()
+        _LUMPED_MASS[Q_cg] = cached
+    return cached
 
 
 def cg1_lift(f):
@@ -46,10 +67,10 @@ def cg1_lift(f):
     """
     mesh = f.function_space().mesh()
     Q_cg = FunctionSpace(mesh, "CG", 1)
-    lumped = assemble(TestFunction(Q_cg) * dx)
+    lumped = _lumped_mass(Q_cg)
     rhs = assemble(TestFunction(Q_cg) * f * dx)
     out = Function(Q_cg)
-    out.dat.data[:] = rhs.dat.data_ro / lumped.dat.data_ro
+    out.dat.data[:] = rhs.dat.data_ro / lumped
     return out
 
 

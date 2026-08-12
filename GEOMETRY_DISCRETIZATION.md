@@ -114,10 +114,14 @@ thickness (median 152 m), and reproduces the CG1 driving force to 1%.
 `geometry.sample_to_geometry` does this; do not replace it with a direct
 interpolate onto the DG0 space.
 
+The same rule applies to the RACMO SMB climatology, which sets the mass budget
+and the `a_ref` balance: `forcing.load_racmo_smb_climatology` cell-averages onto
+a DG0 space (`forcing._sample_raster`) and stays the nodal interpolant on CG1.
+
 ## Where a CG1 reconstruction is still used, and why that is legitimate
 
 A DG0 field has no pointwise gradient, so three places reconstruct one via
-`dual_friction.cg1_lift` (the same lumped lift, used deliberately and locally):
+`geometry.cg1_lift` (the same lumped lift, used deliberately and locally):
 
 - `dual_friction.surface_slope` -> `weertman_anchor`. `C_w0` is a fixed
   reference *scaling* that defines what `theta = 0` means. It is not a force.
@@ -164,6 +168,27 @@ OMP_NUM_THREADS=1 ISMIP7_FRICTION=budd ISMIP7_LC=32000 ISMIP7_N_FLOW=3.0 \
   ISMIP7_MESH=$PWD/antarctica/mesh/antarctica_320000_32000.msh ISMIP7_MAXITER=500 \
   mpiexec -n 8 python antarctica/scripts/inversion_icepack2.py
 ```
+
+## Open: the per-basin melt K was calibrated under CG1
+
+`antarctica/scripts/calibrate_melt.py` is CG1 throughout - it builds its own
+`FunctionSpace(mesh, "CG", 1)` and vertex-samples BedMachine, `sin_alpha` and
+the floating mask - and it is not affected by `ISMIP7_GEOMETRY_SPACE`. The DG0
+forward evaluates that same per-basin `K` with a cell-wise draft, a cell-wise
+`sin_alpha` (CG1 lift, then cell-sampled) and a cell-wise `haf <= 0` floating
+mask, so the melt-receiving area shifts by roughly a one-cell band at the
+grounding line and at the ice front. At 32 km, where shelves are only a few
+cells wide, that can move the integrated shelf melt by a non-trivial fraction
+of the 865 Gt/yr the `K_SCALE = 1.26` calibration targets.
+
+Nothing in this change compensates for that, deliberately: the integrated DG0
+melt total needs to be checked against the observational target and `K`
+recalibrated. The recalibration is tracked separately and belongs against the
+2026-07-31 re-release of the ISMIP7 AIS ocean-melt parameterisation toolbox
+(new observational constraint datasets, new cold/warm term-3 targets; the
+guidance is to re-run the calibration notebook rather than adjust the model),
+and the `sin(alpha)` treatment in the quadratic parameterisation is itself
+still unsettled upstream. Until then, treat DG0 melt totals as uncalibrated.
 
 ## Incompatibilities
 

@@ -19,7 +19,7 @@ Usage:
 """
 
 import numpy as np
-import os, sys, glob, json
+import os, sys, glob
 from time import perf_counter
 
 import firedrake as fd

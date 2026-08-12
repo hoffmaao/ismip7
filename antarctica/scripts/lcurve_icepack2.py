@@ -47,7 +47,7 @@ from firedrake.petsc import PETSc
 from scipy.optimize import minimize as scipy_minimize
 from time import perf_counter
 
-import rasterio, icepack, glob, os, json
+import rasterio, icepack, glob, os
 import matplotlib.pyplot as plt
 from icepack2 import model
 from icepack2.constants import (

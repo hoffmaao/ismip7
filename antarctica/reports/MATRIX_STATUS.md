@@ -11,8 +11,19 @@
 > SMB, mass, VAF, sea-level contribution, audit verdicts, envelope
 > comparisons, and where the runs stopped - reflects that bug. Cores 9-11
 > (CTRL2015 on the RACMO climatology, OCX) do not read the aSMB path and are
-> unaffected, but the CTRL differencing they support cannot be redone until
-> the projections are re-run.
+> unaffected by *that* bug, but the CTRL differencing they support cannot be
+> redone until the projections are re-run.
+>
+> **All 11 cores additionally predate the two ice-front fixes (Aug 2026), so
+> cores 9-11 are superseded as well.** Every core ran with the 2500 m
+> boundary-id sidecar on the 32 km mesh, which tagged ~5% of the ice front, so
+> the calving-terminus back-pressure was missing over the other ~95%; and with
+> CG1 geometry, whose lumped-mass lift biased the front thickness ~2x high and
+> the terminus force ~3.3x. Both defects enter the MAP as well as the forward -
+> the inversion absorbs a wrong front treatment into `θ`/`φ`, where the t=0
+> misfit cannot reveal it - so the matrix needs **re-inversion and re-running**,
+> not just re-running. Only the 32 km DG0 Budd MAP has been rebuilt so far. See
+> `../../GEOMETRY_DISCRETIZATION.md`.
 
 **Resolution:** 32 km (`lc=32000`), the validated demonstration resolution.
 **Configuration (all cores):** Budd N_hat friction (exact-zero shelf), balanced
@@ -39,12 +50,13 @@ record (run env, budget at marker years, observational audit, ensemble overlay).
 | 6 | ssp126 MRI-ESM2-0 | 2015-2300 | 2300.0 | **superseded** (ran full window) |
 | 7 | ssp585 CESM2-WACCM | 2015-2300 | 2124.5 | **superseded** (partial, saturation) |
 | 8 | ssp585 MRI-ESM2-0 | 2015-2300 | 2300.0 | **superseded** (ran full window) |
-| 9 | CTRL2015 CESM2-WACCM | 2015-2300 | 2300.0 | **complete** (the control) |
-| 10 | CTRL2015 MRI-ESM2-0 | 2015-2300 | 2040.5 | partial (edge; twin of core 9) |
-| 11 | OCX obs-constrained | 1990-2025 | 2025.0 | **complete** |
+| 9 | CTRL2015 CESM2-WACCM | 2015-2300 | 2300.0 | **superseded** (ran full window; the control) |
+| 10 | CTRL2015 MRI-ESM2-0 | 2015-2300 | 2040.5 | **superseded** (partial, edge; twin of core 9) |
+| 11 | OCX obs-constrained | 1990-2025 | 2025.0 | **superseded** (ran full window) |
 
-**Cores 1-8 are invalidated by the January-forcing bug (banner above) and are
-being re-run; the "Reached" column records only how far the buggy run got.**
+**Every core is invalidated by the defects in the banner above (cores 1-8 by
+the January-forcing bug as well) and the matrix is being re-inverted and
+re-run; the "Reached" column records only how far the superseded run got.**
 Of the runs as they stood, 9 of 11 covered their full windows. The two that
 did not:
 
@@ -119,10 +131,11 @@ values fed in.
    during emptying events as FAIL even though the budget closes; the audit
    verdict is otherwise ON TRACK. Worth refining to sustained-growth only.
 4. **Monolithic forward** for cores 7 (and the 10 tail) beyond saturation.
-5. **500 m / 2500 m production resolution**: the 2500 m `_budd` MAP is ready
-   (`inversion_icepack2_budd_2500.h5`, the untagged n=4 one); this matrix is
-   the 32 km demonstration. An n=3 production line needs its own
-   `inversion_icepack2_budd_n3_2500.h5`.
+5. **500 m / 2500 m production resolution**: the 2500 m `_budd` MAP on disk
+   (`inversion_icepack2_budd_2500.h5`) is the untagged n=4, CG1-geometry one;
+   this matrix is the 32 km demonstration. An n=3 production line needs its own
+   `inversion_icepack2_budd_n3_dg0_2500.h5` (see `../N3_FRAMEWORK.md` for the
+   naming rule), inverted with a 2500 m boundary-id sidecar.
 
 For the pipeline and its knobs see `antarctica/README.md`; for the rheology see
 `COMPOSITE_RHEOLOGY.md` and `antarctica/N3_FRAMEWORK.md`. (The deeper

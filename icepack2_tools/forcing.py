@@ -73,7 +73,6 @@ def load_racmo_smb_climatology(Q, clim_start=2000, clim_end=2029, data_dir=None,
     """
     import xarray as xr
     import pyproj
-    import icepack
     from affine import Affine
     from rasterio.io import MemoryFile
     from rasterio.warp import reproject, Resampling
@@ -855,7 +854,7 @@ def compute_sin_alpha(ctx):
 
     A DG0 draft has an identically zero cell gradient - its slope lives in the
     inter-cell jumps - so reconstruct a CG1 draft first and differentiate that.
-    Same device as the Weertman anchor in dual_friction.surface_slope, and
+    Same device as the Weertman anchor uses via geometry.surface_slope, and
     legitimate for the same reason: this feeds a melt PARAMETERIZATION, not a
     force in the momentum residual.
     """

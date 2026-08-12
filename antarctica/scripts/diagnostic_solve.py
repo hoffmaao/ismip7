@@ -18,7 +18,6 @@ Usage:
 import os
 import sys
 import glob
-import json
 import numpy as np
 
 import firedrake

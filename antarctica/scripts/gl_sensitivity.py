@@ -58,7 +58,7 @@ from tlm_adjoint.firedrake import (
 )
 from firedrake.petsc import PETSc
 
-import os, sys, glob, json
+import os, sys, glob
 
 _ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 _PROJECT = os.path.dirname(_ROOT)

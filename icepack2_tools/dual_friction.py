@@ -41,10 +41,8 @@ n_flow=4 / H_ref composite viscous block.  Companion to
 from firedrake import (
     Constant,
     Function,
-    FunctionSpace,
     TestFunction,
     FacetNormal,
-    assemble,
     split,
     sym,
     grad,

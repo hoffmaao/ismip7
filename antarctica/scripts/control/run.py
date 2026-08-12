@@ -13,10 +13,8 @@ Usage:
     ISMIP7_ESM=MRI-ESM2-0 mpiexec -n 12 python scripts/control/run.py
 """
 
-import os, sys, glob, argparse
+import os, sys, argparse
 import numpy as np
-import xarray as xr
-from scipy.interpolate import RegularGridInterpolator
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
@@ -34,6 +32,7 @@ from icepack2_tools.forcing import (
     compute_sin_alpha,
     quadratic_mixed_slope,
     load_K_per_basin,
+    forcing_coords,
     _RHO_ICE, _RHO_WATER, _K_DEFAULT,
 )
 
@@ -217,14 +216,16 @@ def main():
 
     ctx = setup_model(restart_from=restart_from)
 
-    mesh_x = ctx["mesh"].coordinates.dat.data_ro[:, 0]
-    mesh_y = ctx["mesh"].coordinates.dat.data_ro[:, 1]
+    # Forcing fields live on the GEOMETRY space (DG0 by default), whose
+    # dofs are cell centroids, not mesh vertices. Sampling climatologies
+    # at vertices would write a wrong-length array into ctx["accum"].
+    mesh_x, mesh_y = forcing_coords(ctx)
 
     # Atmosphere: RACMO climatology baseline; fall back to the pooled ISMIP7
     # acabf full-field climatology; refuse to run zero-SMB unless forced.
     try:
         ctx["accum"].assign(
-            load_racmo_smb_climatology(ctx["Q"], CLIM_START, CLIM_END)
+            load_racmo_smb_climatology(ctx["Q_g"], CLIM_START, CLIM_END)
         )
         mean_smb = area_weighted_mean(ctx["accum"], ctx["mesh"])
         PETSc.Sys.Print(

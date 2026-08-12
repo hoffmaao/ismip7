@@ -18,7 +18,6 @@ from firedrake import (
     Constant,
     Function,
     max_value,
-    sqrt,
     inner,
     grad,
     derivative,
@@ -32,7 +31,6 @@ from firedrake import (
     FiniteElement,
     NonlinearVariationalProblem,
     NonlinearVariationalSolver,
-    COMM_WORLD,
 )
 from tlm_adjoint.firedrake import (
     reset_manager,
@@ -45,9 +43,8 @@ from tlm_adjoint.firedrake import (
 )
 from firedrake.petsc import PETSc
 from scipy.optimize import minimize as scipy_minimize
-from time import perf_counter
 
-import rasterio, icepack, glob, os, json
+import rasterio, icepack, glob, os
 import matplotlib.pyplot as plt
 from icepack2 import model
 from icepack2.constants import (
@@ -61,6 +58,10 @@ _ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 DATA_DIR = os.path.join(_ROOT, "data")
 MESH_DIR = os.path.join(_ROOT, "mesh")
 FIG_DIR = os.path.join(_ROOT, "figs")
+
+import sys
+sys.path.insert(0, os.path.dirname(_ROOT))
+from icepack2_tools.boundary import load_boundary_ids
 
 lc = int(os.environ.get("ISMIP7_LC", "2500"))
 lc_coarse = int(os.environ.get("ISMIP7_LC_COARSE", "64000"))
@@ -88,13 +89,11 @@ def main():
     mesh = Mesh(mesh_fn)
     PETSc.Sys.Print(f"  {mesh.num_vertices()} vertices, {mesh.num_cells()} cells")
 
-    bndids_fn = os.environ.get(
-        "ISMIP7_BNDIDS", os.path.join(MESH_DIR, "boundary_ids.json")
-    )
-    with open(bndids_fn) as f:
-        bnd_ids = json.load(f)
-    calving_ids = tuple(bnd_ids["calving"])
     use_calving_terminus = os.environ.get("ISMIP7_NO_CALVING_TERMINUS") is None
+    bnd_ids, calving_ids, bndids_fn = load_boundary_ids(
+        mesh, MESH_DIR, mesh_hint=mesh_fn,
+        print_coverage=use_calving_terminus,
+    )
 
     Q = FunctionSpace(mesh, "CG", 1)
     V = VectorFunctionSpace(mesh, "CG", 1)

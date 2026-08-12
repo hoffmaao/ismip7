@@ -253,7 +253,13 @@ def main():
 
     # Emit a boundary-id sidecar that matches this exact mesh (and thus the
     # BedMachine input + SIMPLIFY_TOL/SUBSAMPLE used), so the solvers never read
-    # a stale committed sidecar from a different mesh.
+    # a stale committed sidecar from a different mesh. The per-mesh name is the
+    # one the solvers prefer; building a second mesh cannot invalidate it, which
+    # the shared boundary_ids.json (overwritten by every build) could and did.
+    stem = os.path.basename(fn_base)
+    write_boundary_ids(
+        fn_base + ".msh", os.path.join(MESH_DIR, f"boundary_ids_{stem}.json")
+    )
     write_boundary_ids(fn_base + ".msh", os.path.join(MESH_DIR, "boundary_ids.json"))
 
 

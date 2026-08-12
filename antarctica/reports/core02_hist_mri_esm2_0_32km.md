@@ -9,8 +9,13 @@
 > integral: 2050 -229 vs +562 Gt/yr, sign flipped; 2108 -16583 vs -1276; 2300
 > -82606 vs -15174), so the SMB, mass, VAF, sea-level and observational-audit
 > numbers here are all wrong, as are the ISMIP6-envelope comparisons and the
-> attribution of the late-century solver walls to the split scheme. Kept for
-> provenance only; this core is being re-run with the corrected reader.
+> attribution of the late-century solver walls to the split scheme. It also
+> predates the two Aug 2026 ice-front fixes - the calving terminus BC that
+> covered only ~5% of the ice front, and the CG1 lumped-lift front-thickness
+> bias now fixed by the `dg0` `ISMIP7_GEOMETRY_SPACE` default - which enter the
+> MAP as well as the forward, so this core needs re-inversion, not just
+> re-running with the corrected reader. Kept for provenance only; see
+> `MATRIX_STATUS.md`, the single owner of the invalidation detail.
 
 - date: 2026-07-19
 - git: ec86c51

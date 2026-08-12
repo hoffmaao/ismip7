@@ -44,7 +44,6 @@ from tlm_adjoint.firedrake import (
     start_manager,
     stop_manager,
     clear_caches,
-    compute_gradient,
     Functional,
     EquationSolver,
     CachedHessian,
@@ -52,7 +51,7 @@ from tlm_adjoint.firedrake import (
 from firedrake.petsc import PETSc
 from scipy.sparse.linalg import LinearOperator, eigsh
 
-import rasterio, icepack, glob, os, json, pathlib
+import rasterio, icepack, glob, os, json
 from icepack2 import model
 from icepack2.constants import (
     ice_density as rho_I,

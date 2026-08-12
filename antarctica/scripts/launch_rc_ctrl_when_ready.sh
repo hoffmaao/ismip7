@@ -49,7 +49,7 @@ NTAG="$(awk -v n="$NFLOW" 'BEGIN{ if ((n-4.0)^2 < 1e-12) print ""; else printf "
 # MAPs are _dg0, CG1 keeps the legacy untagged name. A MAP is only valid for
 # the geometry space it was inverted under, so the gate must check the exact
 # name the run will load.
-GEOM="${ISMIP7_GEOMETRY_SPACE:-dg0}"
+GEOM="$(printf '%s' "${ISMIP7_GEOMETRY_SPACE:-dg0}" | tr 'A-Z' 'a-z')"
 GTAG="$([ "$GEOM" = "cg1" ] && echo "" || echo "_dg0")"
 LOG="${LOG:-$LOGDIR/rc_ctrl500${NTAG}_${STAMP}.log}"
 GATELOG="${GATELOG:-$LOGDIR/rc_ctrl500${NTAG}_gate.log}"

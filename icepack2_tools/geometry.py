@@ -32,19 +32,21 @@ from firedrake import (
 _LUMPED_MASS = weakref.WeakKeyDictionary()
 
 
-def _lumped_mass(Q_cg):
-    r"""Lumped CG1 mass vector for this space, assembled once.
+def _lumped_mass(mesh, Q_cg):
+    r"""Lumped CG1 mass vector for this mesh, assembled once.
 
     It depends only on the mesh, and cg1_lift now runs once per forcing
     callback (~1 per timestep), so re-assembling it every call is half the
-    per-call cost for nothing. The cache is keyed weakly on the space and
-    holds the plain array (not the assembled Cofunction, which would keep a
-    strong reference back to its own key and pin the mesh forever).
+    per-call cost for nothing. Keyed on the MESH, which lives for the whole
+    run: the CG1 space object cg1_lift builds is transient (nothing outside
+    holds it), so keying on that would evict the entry on every call. The
+    value is the plain array, not the assembled Cofunction, which would keep
+    a strong reference back to its own key and pin the mesh forever.
     """
-    cached = _LUMPED_MASS.get(Q_cg)
+    cached = _LUMPED_MASS.get(mesh)
     if cached is None:
         cached = assemble(TestFunction(Q_cg) * dx).dat.data_ro.copy()
-        _LUMPED_MASS[Q_cg] = cached
+        _LUMPED_MASS[mesh] = cached
     return cached
 
 
@@ -67,7 +69,7 @@ def cg1_lift(f):
     """
     mesh = f.function_space().mesh()
     Q_cg = FunctionSpace(mesh, "CG", 1)
-    lumped = _lumped_mass(Q_cg)
+    lumped = _lumped_mass(mesh, Q_cg)
     rhs = assemble(TestFunction(Q_cg) * f * dx)
     out = Function(Q_cg)
     out.dat.data[:] = rhs.dat.data_ro / lumped

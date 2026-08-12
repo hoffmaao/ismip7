@@ -193,8 +193,19 @@ def setup_model(restart_from=None):
             if _chk.has_attr("/", "mesh_basename") else ""
         )
     PETSc.Sys.Print(f"  {mesh.num_vertices()} vertices, {mesh.num_cells()} cells")
-    _mesh_hint = os.environ.get("ISMIP7_MESH") or mesh_basename
-    mesh_basename = os.path.basename(_mesh_hint) if _mesh_hint else ""
+    # The recorded basename is the provenance and WINS. ISMIP7_MESH is only a
+    # fallback for legacy checkpoints that carry no attribute: it names the
+    # mesh the caller intends to build, which is not necessarily the one this
+    # checkpoint was written on, so it must not override the record - and only
+    # the recorded value is carried into the checkpoints this run writes.
+    if not mesh_basename:
+        _env_mesh = os.environ.get("ISMIP7_MESH", "")
+        mesh_basename = os.path.basename(_env_mesh) if _env_mesh else ""
+        if mesh_basename:
+            PETSc.Sys.Print(
+                f"  No mesh_basename in {os.path.basename(source_chk)}; using "
+                f"ISMIP7_MESH ({mesh_basename}) to resolve the boundary sidecar"
+            )
 
     # Boundary-id sidecar: resolved (per-mesh preferred) and hard-checked
     # against this mesh by the shared helper, so the inversion, the forward and
@@ -1348,11 +1359,18 @@ def run_simulation(
         # the implicit upwind update is an M-matrix system with nonnegative
         # RHS, so h stays >= h_clamp and the post-solve floor is a no-op.
         # The withheld sink is tallied into the clamp budget column.
+        # The bound is capped at zero so it can only ever CAP A SINK: for a
+        # cell already below h_clamp (an emptied fixed-front cell) the raw
+        # bound is positive and would make the limiter a mandatory SOURCE,
+        # injecting h_clamp of ice per step for the mask to re-calve.
         assemble(src * phi_dg * dx, tensor=src_cof)
         src_dg.dat.data[:] = src_cof.dat.data_ro / cell_area
         _src_want = src_dg.dat.data_ro.copy()
-        np.maximum(src_dg.dat.data, -(h_dg.dat.data_ro - h_clamp) / dt_local,
-                   out=src_dg.dat.data)
+        np.maximum(
+            src_dg.dat.data,
+            np.minimum(-(h_dg.dat.data_ro - h_clamp) / dt_local, 0.0),
+            out=src_dg.dat.data,
+        )
         limit_gt = mesh.comm.allreduce(float(
             ((src_dg.dat.data_ro - _src_want) * cell_area).sum()
         )) * rho_gt * dt_local
@@ -1380,7 +1398,15 @@ def run_simulation(
         out_gt = float(assemble(un_plus * h_dg * ds)) * rho_gt * dt_local
         m1 = float(assemble(h_dg * dx)) * rho_gt
 
-        h_dg.interpolate(max_value(h_dg, Constant(h_clamp)))
+        # Floor to h_clamp, EXCEPT beyond the fixed front: those cells are
+        # outside the ice domain, so flooring them would hand the mask below
+        # h_clamp of fresh ice to re-calve every step and report as terminus
+        # discharge. There the floor is zero and the front stays a pure sink.
+        data = h_dg.dat.data
+        floor = np.full_like(data, h_clamp)
+        if fixed_front:
+            floor[beyond_front] = 0.0
+        np.maximum(data, floor, out=data)
         m2 = float(assemble(h_dg * dx)) * rho_gt
         clamp_gt = m2 - m1                                       # Gt added by DG floor
 

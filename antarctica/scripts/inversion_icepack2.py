@@ -62,8 +62,10 @@ from icepack2.constants import (
     water_density as rho_W,
     gravity as g,
 )
-import colorcet as cc
-import matplotlib.pyplot as plt
+# colorcet/matplotlib are imported lazily at the plotting call below. They are
+# needed only for the summary figure, so a missing optional plotting dependency
+# must not abort a multi-hour inversion at import time (it did: colorcet is
+# absent from venv-firedrake-2026 and every rank died before loading data).
 
 _ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 DATA_DIR = os.path.join(_ROOT, "data")
@@ -73,6 +75,7 @@ FIG_DIR = os.path.join(_ROOT, "figs")
 # Repo root on the path so we can import the shared dual-friction operator.
 sys.path.insert(0, os.path.dirname(_ROOT))
 from icepack2_tools.dual_friction import build_rc_residual, weertman_anchor
+from icepack2_tools.geometry import cg1_lift, sample_to_geometry
 from icepack2_tools.prior import (
     regularization_form as reg_form,
     regularization_gradient_form as reg_grad_form,
@@ -97,6 +100,16 @@ def map_n_tag():
     n=4 keeps the legacy untagged name. Mirrors simulation.map_n_tag."""
     n = float(os.environ.get("ISMIP7_N_FLOW", N_FLOW_DEFAULT))
     return "" if abs(n - 4.0) < 1e-9 else f"_n{int(round(n))}"
+
+
+def map_geom_tag():
+    r"""`_dg0` tag for MAPs inverted under DG0 geometry; CG1 keeps the legacy
+    untagged name. Mirrors simulation.map_geom_tag -- the two MUST agree, or a
+    forward will load a MAP whose calving-front treatment differs from its own
+    and quietly inherit the other one's friction bias."""
+    return "" if os.environ.get(
+        "ISMIP7_GEOMETRY_SPACE", "dg0"
+    ).lower() == "cg1" else "_dg0"
 
 
 def a4_factor_default():
@@ -170,27 +183,43 @@ def main():
     T = VectorFunctionSpace(mesh, dg0)
     Z = V * Sigma * T
 
+    # Geometry space, matching simulation.py. This MUST agree with the forward
+    # that loads the MAP: the inversion absorbs whatever the front treatment
+    # gets wrong into theta/phi, so a MAP inverted under CG1 geometry silently
+    # carries the lumped lift's inflated calving-front thickness into the
+    # friction field, and the t=0 velocity misfit cannot reveal it.
+    geometry_space = os.environ.get("ISMIP7_GEOMETRY_SPACE", "dg0").lower()
+    if geometry_space not in ("dg0", "cg1"):
+        raise ValueError(
+            f"ISMIP7_GEOMETRY_SPACE must be 'dg0' or 'cg1', got {geometry_space!r}"
+        )
+    geom_dg = geometry_space == "dg0"
+    Q_g = FunctionSpace(mesh, "DG", 0) if geom_dg else Q
+    PETSc.Sys.Print(f"  Geometry space: {geometry_space.upper()}")
+
     # ── Load Data ──
     PETSc.Sys.Print("Loading data...")
     bm_fn = find_file(os.path.join(DATA_DIR, "bedmachine"), "*.nc")
-    b = icepack.interpolate(rasterio.open(f"netcdf:{bm_fn}:bed"), Q)
+    # Cell average onto the geometry space, NOT a centroid point sample --
+    # see geometry.sample_to_geometry for the measurements behind that.
+    b = sample_to_geometry(
+        lambda sp: icepack.interpolate(
+            rasterio.open(f"netcdf:{bm_fn}:bed"), sp), Q_g, Q)
     # h_clamp default 0.0: invert against the *true* BedMachine geometry,
     # including h=0 over the buffered ocean region. Composite rheology
     # (added below) keeps the SNES nonsingular where h=0.
     h_clamp = float(os.environ.get("ISMIP7_H_CLAMP", "0.0"))
-    H = Function(Q).interpolate(
-        max_value(
-            icepack.interpolate(rasterio.open(f"netcdf:{bm_fn}:thickness"), Q),
-            Constant(h_clamp),
-        )
-    )
+    H = sample_to_geometry(
+        lambda sp: icepack.interpolate(
+            rasterio.open(f"netcdf:{bm_fn}:thickness"), sp),
+        Q_g, Q, floor=h_clamp)
     PETSc.Sys.Print(f"  H clamp: {h_clamp} m  "
                     f"(nodes h<=1m: {int((H.dat.data_ro <= 1.0).sum())} / "
                     f"{len(H.dat.data_ro)})")
     rho_ratio = Constant(917.0 / 1024.0)
 
     rho_ratio = Constant(917.0 / 1024.0)
-    s = Function(Q).interpolate(max_value(b + H, (Constant(1.0) - rho_ratio) * H))
+    s = Function(Q_g).interpolate(max_value(b + H, (Constant(1.0) - rho_ratio) * H))
 
     vel_fn = find_file(os.path.join(DATA_DIR, "velocity"), "*.nc")
     u_obs = icepack.interpolate(
@@ -312,7 +341,7 @@ def main():
     # He ≈ 1 grounded, He ≈ 0 floating. We use 1/(He + floor) to make
     # K large on floating ice. Floor = 0.0001 → K is 10000x larger on
     # shelves than grounded → effectively zero shelf friction.
-    phi_eff = Function(Q).interpolate(
+    phi_eff = Function(Q_g).interpolate(
         max_value(
             Constant(1.0)
             - rho_W
@@ -392,7 +421,10 @@ def main():
 
     # The residual laws need a fixed Weertman anchor C_w0 (driving-stress
     # balance); theta then inverts as an O(1) log-adjustment on top of it.
-    C_w0 = weertman_anchor(H, s, u_obs, m_slide_val, Q)
+    # Under DG0 geometry the anchor's |grad s| comes from a CG1 reconstruction
+    # inside weertman_anchor (a cell-wise surface has no cell gradient); the
+    # anchor is a fixed reference scaling, not a force in the residual.
+    C_w0 = weertman_anchor(H, s, u_obs, m_slide_val, Q_g)
     if USE_RESIDUAL:
         law_name = ("Budd N_hat (exact-zero shelf, delta="
                     f"{BUDD_DELTA:.3f}, alpha_gl={ALPHA_GL:.2f})"
@@ -415,7 +447,29 @@ def main():
     if os.environ.get("ISMIP7_FLUIDITY_PRIOR", "thermo") == "thermo":
         acc_prior = load_racmo_smb_climatology(Q)
         T_srf = load_mean_annual_surface_temperature(Q)
-        A_prior = compute_fluidity_prior(u_obs, H, s, b, C_w0, acc_prior, T_srf)
+        # The thermal prior is a smooth englacial calculation and it is the
+        # prior MEAN of the CG1 control phi = log(A/A_prior), so it runs on CG1
+        # geometry whatever the prognostic geometry space is. Two reasons not
+        # to run it on DG0 and convert afterwards:
+        #   * an L2 DG0->CG1 projection overshoots at the front and produced a
+        #     NEGATIVE fluidity (A_prior min -9.88 against a DG0 range of
+        #     [1.0, 446.7]), which is unphysical and poisons log(A/A_prior);
+        #   * the Picard loop stalled on cell-wise inputs (dA plateaued at
+        #     4.6e-2, never reaching rtol=1e-3).
+        # cg1_lift is a convex combination of cell values, so it cannot
+        # overshoot and keeps a positive field positive.
+        if geom_dg:
+            H_th = cg1_lift(H)
+            b_th = cg1_lift(b)
+            C_th = cg1_lift(C_w0)
+            s_th = Function(Q).interpolate(
+                max_value(b_th + H_th, (Constant(1.0) - rho_ratio) * H_th)
+            )
+        else:
+            H_th, b_th, s_th, C_th = H, b, s, C_w0
+        A_prior = compute_fluidity_prior(
+            u_obs, H_th, s_th, b_th, C_th, acc_prior, T_srf
+        )
         A_prior.rename("fluidity_prior")
         PETSc.Sys.Print(
             f"  Fluidity prior A_prior in [{float(A_prior.dat.data_ro.min()):.2f}, "
@@ -425,8 +479,11 @@ def main():
         A_prior = Function(Q, name="fluidity_prior").interpolate(A0 * Constant(a4_factor))
         PETSc.Sys.Print("  Fluidity prior: constant A0*a4_factor (legacy)")
     A4_base = A_prior
+    # Tag the MAP with BOTH the flow exponent and the geometry space it was
+    # inverted under, so n=3/n=4 and DG0/CG1 MAPs coexist on disk and a forward
+    # cannot silently pair itself with a MAP whose front treatment differs.
     map_tag = ({"regularized_coulomb": "_rc", "budd": "_budd"}.get(FRICTION, "")
-               + map_n_tag())
+               + map_n_tag() + map_geom_tag())
 
     def build_F(theta_c, phi_c):
         # Residual closure (tau linear, grounded-only theta via exp(theta*He),
@@ -687,6 +744,17 @@ def main():
     PETSc.Sys.Print(f"Saved velocity: {chk_fn}")
 
     # ── Plot ──
+    # Optional: the MAP is already written and the velocity saved above, so a
+    # missing plotting dependency must not fail the run at this point.
+    try:
+        import colorcet as cc
+        import matplotlib
+        matplotlib.use("Agg")
+        import matplotlib.pyplot as plt
+    except ImportError as exc:
+        PETSc.Sys.Print(f"Skipping summary figure ({exc}); MAP is saved.")
+        return
+
     PETSc.Sys.Print("Plotting...")
     u_speed = Function(Q).interpolate(
         max_value(sqrt(u_obs[0] ** 2 + u_obs[1] ** 2), Constant(1.0))

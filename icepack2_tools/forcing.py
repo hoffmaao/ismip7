@@ -804,21 +804,56 @@ def load_K_per_basin(npz_path, mesh_x, mesh_y, fill=0.0):
     return K_field
 
 
-def compute_sin_alpha(ctx):
-    r"""Return sin(alpha) of local ice-draft slope at CG1 nodes.
+def forcing_coords(ctx):
+    r"""(x, y) of the dofs the forcing fields are written to.
 
-    Computes draft = s - h, projects grad(draft) into the vector CG1
-    space, and returns sin(arctan(|grad|)) = |grad|/sqrt(1 + |grad|^2).
+    Forcing callbacks assign straight into `ctx["accum"].dat.data` etc., so
+    they must sample the climatology at THOSE dofs. With CG1 geometry those
+    coincide with the mesh vertices, which is what the callbacks used to
+    assume; with DG0 geometry they are cell centroids and there are ~2x as
+    many, so the vertex assumption would mismatch length outright or - worse
+    on a mesh where the counts happened to be close - scramble the mapping.
+    `ctx["geom_xy"]` is supplied by the driver; fall back to vertices for
+    callers that predate it (all of which are CG1).
+    """
+    xy = ctx.get("geom_xy")
+    if xy is not None:
+        return xy
+    coords = ctx["mesh"].coordinates.dat.data_ro
+    return coords[:, 0], coords[:, 1]
+
+
+def compute_sin_alpha(ctx):
+    r"""Return sin(alpha) of the local ice-draft slope, on the geometry space.
+
+    Computes draft = s - h and returns sin(arctan(|grad draft|)) =
+    |grad|/sqrt(1 + |grad|^2), as a plain array aligned with the dofs of the
+    geometry space (so it matches `ocean_melt` elementwise).
+
+    A DG0 draft has an identically zero cell gradient - its slope lives in the
+    inter-cell jumps - so reconstruct a CG1 draft first and differentiate that.
+    Same device as the Weertman anchor in dual_friction.surface_slope, and
+    legitimate for the same reason: this feeds a melt PARAMETERIZATION, not a
+    force in the momentum residual.
     """
     import firedrake as fd
+    from .dual_friction import cg1_lift
     Q = ctx["Q"]
     V = ctx["V"]
     h = ctx["h"]
     s = ctx["s"]
-    draft = fd.Function(Q).interpolate(s - h)
-    grad_draft = fd.project(fd.grad(draft), V)
-    g = grad_draft.dat.data_ro
-    gmag = np.sqrt(g[:, 0] ** 2 + g[:, 1] ** 2)
+    Q_g = ctx.get("Q_g", Q)
+    if Q_g.ufl_element().degree() == 0:
+        draft = fd.Function(Q_g).interpolate(s - h)
+        gd = fd.grad(cg1_lift(draft))
+        gmag = fd.Function(Q_g).interpolate(
+            fd.sqrt(fd.inner(gd, gd))
+        ).dat.data_ro
+    else:
+        draft = fd.Function(Q).interpolate(s - h)
+        grad_draft = fd.project(fd.grad(draft), V)
+        g = grad_draft.dat.data_ro
+        gmag = np.sqrt(g[:, 0] ** 2 + g[:, 1] ** 2)
     return gmag / np.sqrt(1.0 + gmag * gmag)
 
 
@@ -897,8 +932,7 @@ def make_climatology_ocean_callback(K_field, data_root=None):
     interps = build_oi_climatology_interpolators(data_root)
 
     def callback(ctx, t_yr):
-        mesh_x = ctx["mesh"].coordinates.dat.data_ro[:, 0]
-        mesh_y = ctx["mesh"].coordinates.dat.data_ro[:, 1]
+        mesh_x, mesh_y = forcing_coords(ctx)
         h = ctx["h"].dat.data_ro
         b = ctx["b"].dat.data_ro
         s = ctx["s"].dat.data_ro
@@ -952,8 +986,7 @@ def make_forcing_callback(atm=None, ocean=None, fracture=None,
     K_scale = float(os.environ.get("ISMIP7_K_SCALE", "1.0"))
 
     def callback(ctx, t_yr):
-        mesh_x = ctx["mesh"].coordinates.dat.data_ro[:, 0]
-        mesh_y = ctx["mesh"].coordinates.dat.data_ro[:, 1]
+        mesh_x, mesh_y = forcing_coords(ctx)
 
         if atm is not None:
             smb = atm.get_smb(t_yr, mesh_x, mesh_y, anomaly=smb_anomaly)

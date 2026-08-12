@@ -22,26 +22,16 @@ sys.path.insert(0, _PROJECT)
 from icepack2_tools.forcing import (
     atmosphere_path, ocean_path, _oi_climatology_path, _find_ismip7_data,
 )
+from icepack2_tools.boundary import sidecar_path
+from icepack2_tools.naming import map_basename
 
 MESH_DIR = os.path.join(_ANT, "mesh")
 RESULTS_DIR = os.path.join(_ANT, "results")
 DATA_DIR = os.path.join(_ANT, "data")
 
-N_FLOW_DEFAULT = "3.0"
-
-
-def map_n_tag():
-    r"""`_n<N>` filename tag so MAPs at different flow exponents coexist;
-    n=4 keeps the legacy untagged name. Mirrors simulation.map_n_tag."""
-    n = float(os.environ.get("ISMIP7_N_FLOW", N_FLOW_DEFAULT))
-    return "" if abs(n - 4.0) < 1e-9 else f"_n{int(round(n))}"
-
-
 lc = int(os.environ.get("ISMIP7_LC", "2500"))
 lc_coarse = int(os.environ.get("ISMIP7_LC_COARSE", "64000"))
 friction = os.environ.get("ISMIP7_FRICTION", "budd")
-map_tag = ({"regularized_coulomb": "_rc", "budd": "_budd"}.get(friction, "")
-           + map_n_tag())
 oi_version = os.environ.get("ISMIP7_OI_VERSION", "30_sep")
 root = _find_ismip7_data()
 
@@ -86,22 +76,39 @@ def ocean_cover(esm, scenario):
     return min(s[0] for s in spans), max(s[1] for s in spans)
 
 
-def shared_missing():
+def shared_missing(warn=None):
+    r"""Missing shared inputs. Non-fatal caveats are appended to ``warn``."""
     miss = []
+    warn = warn if warn is not None else []
     mesh_fn = os.environ.get(
         "ISMIP7_MESH",
         os.path.join(MESH_DIR, f"antarctica_{lc_coarse}_{lc}.msh"),
     )
     if not os.path.exists(mesh_fn):
         miss.append(f"mesh ({os.path.basename(mesh_fn)})")
-    inv = os.path.join(MESH_DIR, f"inversion_icepack2{map_tag}_{lc}.h5")
+    # The MAP the forward will actually load: the one tagged with this
+    # geometry space, else the legacy untagged (CG1) MAP it falls back to with
+    # a warning. A legacy MAP runs, but its controls carry the CG1 front bias,
+    # so the run is a smoke test rather than a result.
+    inv = os.path.join(MESH_DIR, map_basename(friction, lc))
+    legacy = os.path.join(MESH_DIR, map_basename(friction, lc, geometry=False))
     if not os.path.exists(inv):
-        miss.append(f"MAP ({os.path.basename(inv)})")
-    bnd = os.environ.get(
-        "ISMIP7_BNDIDS", os.path.join(MESH_DIR, "boundary_ids.json")
-    )
+        if os.path.exists(legacy):
+            warn.append(
+                f"no {os.path.basename(inv)}; the forward would fall back to "
+                f"{os.path.basename(legacy)} (inverted under a different "
+                f"geometry space — smoke test only)"
+            )
+        else:
+            miss.append(f"MAP ({os.path.basename(inv)})")
+    # Same sidecar-name rule the solvers use: per-mesh preferred, shared file
+    # as the fallback.
+    bnd = sidecar_path(MESH_DIR, mesh_hint=mesh_fn)
     if not os.path.exists(bnd):
-        miss.append("boundary_ids.json (untracked — restore or regenerate)")
+        miss.append(
+            f"{os.path.basename(bnd)} (untracked — restore or regenerate "
+            f"with make_boundary_ids.py)"
+        )
     if not (glob.glob(os.path.join(RESULTS_DIR, f"calibrated_K_per_basin_{lc}.npz"))
             or glob.glob(os.path.join(RESULTS_DIR, "calibrated_K_per_basin_2500.npz"))):
         miss.append("per-basin K npz")
@@ -129,12 +136,17 @@ def oi_ok():
 
 
 def main():
-    print(f"Preflight: lc={lc}, friction={friction}, OI={oi_version}")
-    base_missing = shared_missing()
+    geom = os.environ.get("ISMIP7_GEOMETRY_SPACE", "dg0").lower()
+    print(f"Preflight: lc={lc}, friction={friction}, geometry={geom}, "
+          f"OI={oi_version}")
+    warn = []
+    base_missing = shared_missing(warn)
     if base_missing:
         print(f"  SHARED inputs missing: {', '.join(base_missing)}")
     else:
         print("  Shared inputs (mesh, MAP, bndids, K, BedMachine, velocity): OK")
+    for w in warn:
+        print(f"  WARNING: {w}")
     print(f"  RACMO baseline: {'OK' if racmo_ok() else 'MISSING (acabf fallback)'}")
     print()
 

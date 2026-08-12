@@ -51,6 +51,9 @@ DATA_DIR = os.path.join(_ROOT, "data")
 MESH_DIR = os.path.join(_ROOT, "mesh")
 FIG_DIR = os.path.join(_ROOT, "figs")
 
+sys.path.insert(0, os.path.dirname(_ROOT))
+from icepack2_tools.boundary import load_boundary_ids
+
 lc = 8000
 
 
@@ -70,10 +73,9 @@ def main():
     mesh = firedrake.Mesh(mesh_fn)
     PETSc.Sys.Print(f"  {mesh.num_vertices()} vertices, {mesh.num_cells()} cells")
 
-    # Load boundary classification
-    with open(os.path.join(MESH_DIR, "boundary_ids.json")) as f:
-        bnd_ids = json.load(f)
-    calving_ids = tuple(bnd_ids["calving"])
+    # Boundary classification, hard-checked against this mesh (a sidecar built
+    # for another mesh leaves most of the front without terminus back-pressure).
+    bnd_ids, calving_ids, _ = load_boundary_ids(mesh, MESH_DIR, mesh_hint=mesh_fn)
     other_ids = tuple(bnd_ids["other"])
     PETSc.Sys.Print(f"  {len(calving_ids)} calving + {len(other_ids)} other boundaries")
 

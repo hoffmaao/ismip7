@@ -38,15 +38,38 @@ def smb_kgm2s_to_myr(smb_kgm2s):
     return smb_kgm2s * _SEC_PER_YEAR / _RHO_ICE * (_RHO_WATER / _RHO_ICE)
 
 
+def _sample_raster(raster, Q):
+    r"""Put an open raster onto ``Q``, as a CELL AVERAGE when ``Q`` is DG0.
+
+    A DG0 dof sits at the cell centroid, so ``icepack.interpolate`` would take
+    a one-point sample of the raster per cell. SMB sets the mass budget and the
+    a_ref balance, so it goes through the same cell-averaging rule the geometry
+    uses (see geometry.sample_to_geometry). CG1 is the nodal interpolant, as
+    before.
+    """
+    import firedrake as fd
+    import icepack
+
+    if Q.ufl_element().degree() > 0:
+        return icepack.interpolate(raster, Q)
+    from .geometry import sample_to_geometry
+    Q_cg = fd.FunctionSpace(Q.mesh(), "CG", 1)
+    return sample_to_geometry(
+        lambda space: icepack.interpolate(raster, space), Q, Q_cg
+    )
+
+
 def load_racmo_smb_climatology(Q, clim_start=2000, clim_end=2029, data_dir=None,
                                target_res=8000.0, rho_ice=_RHO_ICE):
     r"""RACMO2.4p1 mean-annual SMB (m/yr ice equiv) as a Function on Q's mesh.
 
     The RACMO ANT11 grid is rotated-pole, so this reprojects the climatology to
     an intermediate EPSG:3031 raster with rasterio, then samples it onto the mesh
-    with icepack.interpolate -- the same path used for BedMachine -- avoiding any
-    scattered-point interpolation. ``smbgl`` is a monthly mass sum (kg/m^2), so the
-    annual SMB is the sum of the 12 months, averaged over the climatology window.
+    -- the same path used for BedMachine -- avoiding any scattered-point
+    interpolation. On a DG0 ``Q`` the sample is a cell average rather than a
+    centroid point sample (see :func:`_sample_raster`). ``smbgl`` is a monthly
+    mass sum (kg/m^2), so the annual SMB is the sum of the 12 months, averaged
+    over the climatology window.
     """
     import xarray as xr
     import pyproj
@@ -98,7 +121,7 @@ def load_racmo_smb_climatology(Q, clim_start=2000, clim_end=2029, data_dir=None,
         ) as out:
             out.write(dst, 1)
         with mf.open() as raster:
-            return icepack.interpolate(raster, Q)
+            return _sample_raster(raster, Q)
 
 
 def _find_ismip7_data(data_root=None):
@@ -837,7 +860,7 @@ def compute_sin_alpha(ctx):
     force in the momentum residual.
     """
     import firedrake as fd
-    from .dual_friction import cg1_lift
+    from .geometry import cg1_lift
     Q = ctx["Q"]
     V = ctx["V"]
     h = ctx["h"]
@@ -928,7 +951,21 @@ def build_oi_climatology_interpolators(data_root=None, version=None):
 def make_climatology_ocean_callback(K_field, data_root=None):
     r"""Ocean-melt callback with CONSTANT OI-climatology TF/so and evolving
     geometry: the CTRL2015 / observationally-constrained ocean forcing.
-    K_field is a scalar or per-node array (calibrated per-basin K)."""
+    K_field is a scalar or per-node array (calibrated per-basin K).
+
+    CALIBRATION MISMATCH (open, tracked separately): the per-basin K comes from
+    antarctica/scripts/calibrate_melt.py, which is CG1 throughout - it builds
+    its own CG1 space and vertex-samples BedMachine, sin_alpha and the floating
+    mask, and is not affected by ISMIP7_GEOMETRY_SPACE. Under DG0 geometry this
+    callback evaluates that same K with a cell-wise draft, a cell-wise
+    sin_alpha and a cell-wise `haf <= 0` floating mask, so the melt-receiving
+    area shifts by roughly a one-cell band at the grounding line and the ice
+    front - non-trivial at 32 km, where shelves are only a few cells wide. The
+    integrated DG0 melt total should be checked against the 865 Gt/yr
+    observational target and K recalibrated (against the 2026-07-31 ISMIP7 AIS
+    ocean-melt toolbox re-release, whose new constraint datasets and cold/warm
+    targets call for a re-run of the calibration notebook regardless). Nothing
+    here compensates for the shift; see GEOMETRY_DISCRETIZATION.md."""
     interps = build_oi_climatology_interpolators(data_root)
 
     def callback(ctx, t_yr):

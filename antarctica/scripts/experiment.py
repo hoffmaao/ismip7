@@ -34,7 +34,7 @@ sys.path.insert(0, _SCRIPTS)
 from simulation import setup_model, run_simulation, RESULTS_DIR, PETSc, lc
 from icepack2_tools.forcing import (
     ISMIP7Atmosphere, ISMIP7Ocean, ISMIP7Fracture,
-    make_forcing_callback, load_racmo_smb_climatology,
+    make_forcing_callback, load_racmo_smb_climatology, forcing_coords,
 )
 
 CLIM_START = int(os.environ.get("ISMIP7_CLIM_START", "2000"))
@@ -63,8 +63,9 @@ def smb_scheme(ctx, esm):
     RACMO climatology + aSMB re-referenced over the shared pool; falls back
     to the full acabf(t) field when RACMO (or the pool) is unavailable.
     """
-    mesh_x = ctx["mesh"].coordinates.dat.data_ro[:, 0]
-    mesh_y = ctx["mesh"].coordinates.dat.data_ro[:, 1]
+    # Sample forcing at the geometry dofs, not the mesh vertices: under
+    # DG0 geometry those are cell centroids (see forcing.forcing_coords).
+    mesh_x, mesh_y = forcing_coords(ctx)
     ref_atms = [
         ISMIP7Atmosphere(esm=esm, scenario="historical"),
         ISMIP7Atmosphere(esm=esm, scenario=CLIM_SCENARIO),
@@ -78,7 +79,7 @@ def smb_scheme(ctx, esm):
             raise FileNotFoundError(
                 f"no acabf-anomaly years in {CLIM_START}-{CLIM_END}"
             )
-        racmo = load_racmo_smb_climatology(ctx["Q"], CLIM_START, CLIM_END)
+        racmo = load_racmo_smb_climatology(ctx["Q_g"], CLIM_START, CLIM_END)
         ref = np.zeros(len(mesh_x))
         for a, y in pool:
             ref += a.get_smb(y, mesh_x, mesh_y, anomaly=True)

@@ -18,7 +18,6 @@ from firedrake import (
     Constant,
     Function,
     max_value,
-    sqrt,
     inner,
     grad,
     derivative,
@@ -32,7 +31,6 @@ from firedrake import (
     FiniteElement,
     NonlinearVariationalProblem,
     NonlinearVariationalSolver,
-    COMM_WORLD,
 )
 from tlm_adjoint.firedrake import (
     reset_manager,
@@ -45,7 +43,6 @@ from tlm_adjoint.firedrake import (
 )
 from firedrake.petsc import PETSc
 from scipy.optimize import minimize as scipy_minimize
-from time import perf_counter
 
 import rasterio, icepack, glob, os
 import matplotlib.pyplot as plt

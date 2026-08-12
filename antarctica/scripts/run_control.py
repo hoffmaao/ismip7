@@ -23,8 +23,6 @@ from firedrake import (
     Function,
     max_value,
     sqrt,
-    inner,
-    grad,
     derivative,
     dx,
     dS,

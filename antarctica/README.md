@@ -416,8 +416,7 @@ VAF is reported in mm of sea-level equivalent; mass in Gt.
 
 - **Diagnostic-Newton wall on hard projection geometries.** The earlier
   forward blow-ups are fixed (balanced apparent-MB init + persistent DG0
-  thickness state; the 32 km CTRL audits ON TRACK via
-  `check_ismip6_track.py`), but the diagnostic Newton can still stall on
+  thickness state), but the diagnostic Newton can still stall on
   evolved projection geometries. `ISMIP7_SNES_TYPE` / `ISMIP7_SNES_MAXIT` are
   the knobs for experimenting; a robust fix is the next work item. The
   aSMB-forced walls seen so far are suspect: they predate the annual-mean

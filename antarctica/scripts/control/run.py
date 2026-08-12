@@ -13,10 +13,8 @@ Usage:
     ISMIP7_ESM=MRI-ESM2-0 mpiexec -n 12 python scripts/control/run.py
 """
 
-import os, sys, glob, argparse
+import os, sys, argparse
 import numpy as np
-import xarray as xr
-from scipy.interpolate import RegularGridInterpolator
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 

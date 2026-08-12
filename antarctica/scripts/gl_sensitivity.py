@@ -45,7 +45,6 @@ from firedrake import (
     FiniteElement,
     NonlinearVariationalProblem,
     NonlinearVariationalSolver,
-    conditional,
 )
 from tlm_adjoint.firedrake import (
     reset_manager,

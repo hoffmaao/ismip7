@@ -15,7 +15,6 @@ Coupling interface:
     Ocean -> Plume: ambient T, S at ice draft depth (from ISMIP7 ocean data)
 """
 
-import numpy as np
 from firedrake import Constant, max_value
 
 

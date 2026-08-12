@@ -9,6 +9,13 @@ rows at marker years from the timeseries CSV, the observational audit
 (compare_ismip6.py), plus provenance (git SHA, log path, checkpoint files).
 Results h5/CSVs stay gitignored; the report is the reviewable record.
 
+Validity banners are NOT generated. Several reports in antarctica/reports/
+carry a hand-written "SUPERSEDED" blockquote under the title; regenerating
+such a report overwrites the file and drops that banner, so re-add it (or
+pass it as --notes) whenever you regenerate a run that is known invalid.
+antarctica/reports/MATRIX_STATUS.md owns the full invalidation detail - the
+per-core banner is only a short pointer to it.
+
 Usage (from the run shell, so the env is the run env):
     python core_report.py --core 1 --name hist_cesm2_waccm \
         --csv results/hist_cesm2_waccm_32000_timeseries.csv \

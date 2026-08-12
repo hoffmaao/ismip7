@@ -2,7 +2,8 @@
 
 `ISMIP7_GEOMETRY_SPACE` selects the finite-element space for the geometry
 (`h`, `s`, `b`, and everything derived from them: `phi_eff`, `N_ref`, `C_w0`,
-`H_init`, `a_ref_mb`, and the forcing fields `accum` / `ocean_melt`).
+`H_init`, and the forcing fields `accum` / `ocean_melt`). The apparent-MB
+reference `a_ref_mb` is a per-cell transport source and stays DG0 either way.
 
 - `dg0` (**default**) - cell-wise geometry. The momentum solve and the mass
   transport use **one** thickness field.
@@ -123,7 +124,7 @@ a DG0 space (`forcing._sample_raster`) and stays the nodal interpolant on CG1.
 A DG0 field has no pointwise gradient, so three places reconstruct one via
 `geometry.cg1_lift` (the same lumped lift, used deliberately and locally):
 
-- `dual_friction.surface_slope` -> `weertman_anchor`. `C_w0` is a fixed
+- `geometry.surface_slope`, used by `dual_friction.weertman_anchor`. `C_w0` is a fixed
   reference *scaling* that defines what `theta = 0` means. It is not a force.
 - `forcing.compute_sin_alpha`. Feeds the Burgard melt *parameterization*, not
   the momentum residual.

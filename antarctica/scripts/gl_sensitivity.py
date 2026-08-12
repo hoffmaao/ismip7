@@ -64,6 +64,7 @@ _ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 _PROJECT = os.path.dirname(_ROOT)
 sys.path.insert(0, _PROJECT)
 sys.path.insert(0, os.path.join(_ROOT, "scripts"))
+from icepack2_tools.boundary import load_boundary_ids
 from icepack2_tools.eikonal import identify_grounding_line, solve_eikonal_distance
 import rasterio, icepack
 from icepack2 import model
@@ -148,13 +149,11 @@ def main():
     mesh = Mesh(mesh_fn)
     PETSc.Sys.Print(f"  {mesh.num_vertices()} vertices, {mesh.num_cells()} cells")
 
-    bndids_fn = os.environ.get(
-        "ISMIP7_BNDIDS", os.path.join(MESH_DIR, "boundary_ids.json")
-    )
-    with open(bndids_fn) as f:
-        bnd_ids = json.load(f)
-    calving_ids = tuple(bnd_ids["calving"])
     use_calving_terminus = os.environ.get("ISMIP7_NO_CALVING_TERMINUS") is None
+    bnd_ids, calving_ids, bndids_fn = load_boundary_ids(
+        mesh, MESH_DIR, mesh_hint=mesh_fn,
+        print_coverage=use_calving_terminus,
+    )
 
     Q = FunctionSpace(mesh, "CG", 1)
     V = VectorFunctionSpace(mesh, "CG", 1)

@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Generate mesh/boundary_ids.json from a generated Antarctica .msh file.
+Generate the boundary-id sidecars from a generated Antarctica .msh file.
 
 The mesh pipeline (mesh_antarctica.py / icepack2_tools.mesh) tags each
 boundary segment as a gmsh physical group named "Calving_N" or "Other_N",
@@ -11,13 +11,16 @@ into calving-front vs. other (land/grounding) boundaries:
 
     {"calving": [<tags>], "other": [<tags>]}
 
-This file is read by diagnostic_solve, inversion_icepack2, simulation,
-run_control, lcurve_icepack2, gl_sensitivity and run_eigendec, but no
-script in the repo produced it — this generator fills that gap.
+Two files are written: the per-mesh boundary_ids_<mesh stem>.json that every
+solver prefers (icepack2_tools/boundary.py), and the shared boundary_ids.json
+fallback. The per-mesh name is what makes a stale sidecar impossible to pick up
+by accident - a second mesh build overwrites the shared file but not the one
+belonging to the mesh a run is actually using.
 
 Usage:
     python scripts/make_boundary_ids.py
     ISMIP7_MESH=path/to/mesh.msh python scripts/make_boundary_ids.py
+    ISMIP7_BNDIDS=out.json python scripts/make_boundary_ids.py   # single file
 """
 
 import json
@@ -92,10 +95,15 @@ def main():
     mesh_fn = os.environ.get(
         "ISMIP7_MESH", os.path.join(MESH_DIR, f"antarctica_{lc_coarse}_{lc}.msh")
     )
-    out_fn = os.environ.get(
-        "ISMIP7_BNDIDS", os.path.join(MESH_DIR, "boundary_ids.json")
-    )
-    write_boundary_ids(mesh_fn, out_fn)
+    out_fn = os.environ.get("ISMIP7_BNDIDS")
+    if out_fn:
+        write_boundary_ids(mesh_fn, out_fn)
+        return
+    # Both names: the per-mesh sidecar the solvers prefer (which the next mesh
+    # build cannot invalidate) and the shared fallback.
+    stem = os.path.splitext(os.path.basename(mesh_fn))[0]
+    write_boundary_ids(mesh_fn, os.path.join(MESH_DIR, f"boundary_ids_{stem}.json"))
+    write_boundary_ids(mesh_fn, os.path.join(MESH_DIR, "boundary_ids.json"))
 
 
 if __name__ == "__main__":

@@ -80,6 +80,14 @@ ENS_HORIZON="${ENS_HORIZON:-2101}"   # ISMIP6 ensemble time base ends here
 
 export OMP_NUM_THREADS=1
 export ISMIP7_LC="${ISMIP7_LC:-32000}"
+export ISMIP7_LC_COARSE="${ISMIP7_LC_COARSE:-$((ISMIP7_LC * 10))}"
+# Name the mesh the matrix runs on. The forward takes its mesh from the MAP
+# checkpoint, so this is not a mesh selector - it is how the run identifies
+# the per-mesh boundary-id sidecar (boundary_ids_<stem>.json) instead of
+# falling back to the shared boundary_ids.json that every mesh build
+# overwrites. Runs from a MAP that records its own mesh basename do not need
+# it, but legacy MAPs carry no such attribute.
+export ISMIP7_MESH="${ISMIP7_MESH:-$REPO/antarctica/mesh/antarctica_${ISMIP7_LC_COARSE}_${ISMIP7_LC}.msh}"
 export ISMIP7_N_FLOW="${ISMIP7_N_FLOW:-3}"
 export ISMIP7_FRICTION="${ISMIP7_FRICTION:-budd}"
 export ISMIP7_DT="${ISMIP7_DT:-0.1}"

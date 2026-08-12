@@ -74,8 +74,10 @@ FIG_DIR = os.path.join(_ROOT, "figs")
 
 # Repo root on the path so we can import the shared dual-friction operator.
 sys.path.insert(0, os.path.dirname(_ROOT))
+from icepack2_tools.boundary import load_boundary_ids
 from icepack2_tools.dual_friction import build_rc_residual, weertman_anchor
 from icepack2_tools.geometry import cg1_lift, sample_to_geometry
+from icepack2_tools.naming import map_basename
 from icepack2_tools.prior import (
     regularization_form as reg_form,
     regularization_gradient_form as reg_grad_form,
@@ -93,23 +95,6 @@ lc_coarse = int(os.environ.get("ISMIP7_LC_COARSE", str(lc * 10)))
 N_FLOW_DEFAULT = "3.0"
 A4_FACTOR_DEFAULT = "1.0"
 A4_FACTOR_N4 = "10.0"
-
-
-def map_n_tag():
-    r"""`_n<N>` filename tag so MAPs at different flow exponents coexist;
-    n=4 keeps the legacy untagged name. Mirrors simulation.map_n_tag."""
-    n = float(os.environ.get("ISMIP7_N_FLOW", N_FLOW_DEFAULT))
-    return "" if abs(n - 4.0) < 1e-9 else f"_n{int(round(n))}"
-
-
-def map_geom_tag():
-    r"""`_dg0` tag for MAPs inverted under DG0 geometry; CG1 keeps the legacy
-    untagged name. Mirrors simulation.map_geom_tag -- the two MUST agree, or a
-    forward will load a MAP whose calving-front treatment differs from its own
-    and quietly inherit the other one's friction bias."""
-    return "" if os.environ.get(
-        "ISMIP7_GEOMETRY_SPACE", "dg0"
-    ).lower() == "cg1" else "_dg0"
 
 
 def a4_factor_default():
@@ -168,13 +153,14 @@ def main():
     mesh = Mesh(mesh_fn)
     PETSc.Sys.Print(f"  {mesh.num_vertices()} vertices, {mesh.num_cells()} cells")
 
-    bndids_fn = os.environ.get(
-        "ISMIP7_BNDIDS", os.path.join(MESH_DIR, "boundary_ids.json")
-    )
-    with open(bndids_fn) as f:
-        bnd_ids = json.load(f)
-
     use_calving_terminus = os.environ.get("ISMIP7_NO_CALVING_TERMINUS") is None
+    # Per-mesh sidecar, hard-checked against this mesh: a stale sidecar leaves
+    # most of the front with no terminus back-pressure, and the inversion would
+    # absorb that into theta/phi where the t=0 misfit cannot reveal it.
+    bnd_ids, calving_ids, bndids_fn = load_boundary_ids(
+        mesh, MESH_DIR, mesh_hint=mesh_fn,
+        print_coverage=use_calving_terminus,
+    )
 
     Q = FunctionSpace(mesh, "CG", 1)
     V = VectorFunctionSpace(mesh, "CG", 1)
@@ -250,8 +236,6 @@ def main():
             f"  Obs mask: {n_no}/{n_all} nodes without velocity obs "
             f"excluded from the misfit (regularization fills them)"
         )
-
-    calving_ids = tuple(bnd_ids["calving"])
 
     # ── Rheology ──
     # Composite viscous rheology: flow exponent n_flow (this branch: n=3
@@ -479,11 +463,11 @@ def main():
         A_prior = Function(Q, name="fluidity_prior").interpolate(A0 * Constant(a4_factor))
         PETSc.Sys.Print("  Fluidity prior: constant A0*a4_factor (legacy)")
     A4_base = A_prior
-    # Tag the MAP with BOTH the flow exponent and the geometry space it was
+    # The MAP name carries BOTH the flow exponent and the geometry space it was
     # inverted under, so n=3/n=4 and DG0/CG1 MAPs coexist on disk and a forward
     # cannot silently pair itself with a MAP whose front treatment differs.
-    map_tag = ({"regularized_coulomb": "_rc", "budd": "_budd"}.get(FRICTION, "")
-               + map_n_tag() + map_geom_tag())
+    # Built by the shared helper the forward and the preflight gates use.
+    map_fn = map_basename(FRICTION, lc)
 
     def build_F(theta_c, phi_c):
         # Residual closure (tau linear, grounded-only theta via exp(theta*He),
@@ -668,7 +652,7 @@ def main():
 
         # Periodic checkpoint every 20 iterations
         if iteration_count[0] % 20 == 0:
-            chk_fn = os.path.join(MESH_DIR, f"inversion_icepack2{map_tag}_{lc}.h5")
+            chk_fn = os.path.join(MESH_DIR, map_fn)
             with fd.CheckpointFile(chk_fn, "w") as chk:
                 chk.save_mesh(mesh)
                 chk.save_function(theta, name="log_friction")
@@ -679,6 +663,7 @@ def main():
                 chk.save_function(b, name="bed")
                 chk.save_function(s, name="surface")
                 chk.save_function(A_prior, name="fluidity_prior")
+                chk.set_attr("/", "mesh_basename", os.path.basename(mesh_fn))
             PETSc.Sys.Print(f"    [checkpoint saved: iter {iteration_count[0]}]")
 
         return total, total_grad
@@ -704,7 +689,7 @@ def main():
     )
 
     # ── Save MAP immediately ──
-    chk_fn = os.path.join(MESH_DIR, f"inversion_icepack2{map_tag}_{lc}.h5")
+    chk_fn = os.path.join(MESH_DIR, map_fn)
     with fd.CheckpointFile(chk_fn, "w") as chk:
         chk.save_mesh(mesh)
         chk.save_function(theta, name="log_friction")
@@ -715,6 +700,10 @@ def main():
         chk.save_function(b, name="bed")
         chk.save_function(s, name="surface")
         chk.save_function(A_prior, name="fluidity_prior")
+        # The .msh this MAP was inverted on. A CheckpointFile mesh is named
+        # "firedrake_default", so this is how the forward names its own mesh
+        # and picks the matching per-mesh boundary-id sidecar.
+        chk.set_attr("/", "mesh_basename", os.path.basename(mesh_fn))
     PETSc.Sys.Print(f"Saved MAP: {chk_fn}")
 
     # ── Final forward solve ──

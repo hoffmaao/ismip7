@@ -47,7 +47,9 @@ RESULTS_DIR = os.path.join(_ROOT, "results")
 # Repo root on the path for the shared dual-friction operator.
 sys.path.insert(0, os.path.dirname(_ROOT))
 
+from icepack2_tools.boundary import load_boundary_ids
 from icepack2_tools.geometry import sample_to_geometry
+from icepack2_tools.naming import map_basename
 
 lc = int(os.environ.get("ISMIP7_LC", "2500"))
 lc_coarse = int(os.environ.get("ISMIP7_LC_COARSE", "64000"))
@@ -73,29 +75,6 @@ def a4_factor_default():
     and needs none. ISMIP7_A4_FACTOR still overrides."""
     n = float(os.environ.get("ISMIP7_N_FLOW", N_FLOW_DEFAULT))
     return A4_FACTOR_N4 if abs(n - 4.0) < 1e-9 else A4_FACTOR_DEFAULT
-
-
-def map_geom_tag():
-    r"""Filename tag for the geometry discretization a MAP was inverted under.
-
-    CG1 keeps the legacy untagged name (every MAP on disk before Aug 2026);
-    DG0 gets `_dg0`. They are NOT interchangeable: the inversion absorbs the
-    front treatment into theta/phi, so a CG1 MAP driven by a DG0 forward has
-    friction tuned to a calving front that the lumped lift made ~2x too thick.
-    Separate names stop that from happening by accident.
-    """
-    return "" if os.environ.get(
-        "ISMIP7_GEOMETRY_SPACE", "dg0"
-    ).lower() == "cg1" else "_dg0"
-
-
-def map_n_tag():
-    r"""Filename tag distinguishing MAPs inverted at different flow
-    exponents so n=3 and n=4 MAPs coexist on disk. n=4 keeps the legacy
-    untagged name (backward compatible with the `antarctica` MAPs); any
-    other n gets `_n<N>` (e.g. `_n3`)."""
-    n = float(os.environ.get("ISMIP7_N_FLOW", N_FLOW_DEFAULT))
-    return "" if abs(n - 4.0) < 1e-9 else f"_n{int(round(n))}"
 
 
 def find_file(d, p):
@@ -176,19 +155,17 @@ def setup_model(restart_from=None):
     # "budd_legacy" keeps the old phi_eff action Budd (residual shelf drag).
     use_residual = friction in ("regularized_coulomb", "budd")
     use_rc = use_residual  # geometry/alpha/h_clamp handling is shared
-    map_tag = ({"regularized_coulomb": "_rc", "budd": "_budd"}.get(friction, "")
-               + map_n_tag())
 
     is_restart = restart_from is not None
     # Prefer the MAP inverted under this geometry space. Falling back to the
     # untagged legacy (CG1) MAP keeps the transition runnable, but the load
     # then projects the geometry and warns loudly - the controls still carry
     # the CG1 front bias, so such a run is a smoke test, not a result.
-    inv_fn = os.path.join(
-        MESH_DIR, f"inversion_icepack2{map_tag}{map_geom_tag()}_{lc}.h5"
-    )
+    inv_fn = os.path.join(MESH_DIR, map_basename(friction, lc))
     if not is_restart and not os.path.exists(inv_fn):
-        legacy_fn = os.path.join(MESH_DIR, f"inversion_icepack2{map_tag}_{lc}.h5")
+        legacy_fn = os.path.join(
+            MESH_DIR, map_basename(friction, lc, geometry=False)
+        )
         if os.path.exists(legacy_fn):
             PETSc.Sys.Print(
                 f"  No {os.path.basename(inv_fn)}; falling back to "
@@ -207,62 +184,26 @@ def setup_model(restart_from=None):
     PETSc.Sys.Print(f"Loading mesh + reference state: {source_chk}")
     with fd.CheckpointFile(source_chk, "r") as _chk:
         mesh = _chk.load_mesh()
+        # The mesh this checkpoint was built on, recorded by the inversion and
+        # carried through every restart. A CheckpointFile mesh is named
+        # "firedrake_default", so this attribute is the only way the run can
+        # name its own .msh and pick the matching per-mesh sidecar.
+        mesh_basename = (
+            str(_chk.get_attr("/", "mesh_basename"))
+            if _chk.has_attr("/", "mesh_basename") else ""
+        )
     PETSc.Sys.Print(f"  {mesh.num_vertices()} vertices, {mesh.num_cells()} cells")
+    _mesh_hint = os.environ.get("ISMIP7_MESH") or mesh_basename
+    mesh_basename = os.path.basename(_mesh_hint) if _mesh_hint else ""
 
-    # Boundary-id sidecar. Prefer the per-mesh file
-    # (boundary_ids_<mesh basename>.json) over the generic one: the gmsh
-    # physical-line count depends on resolution AND on the outline buffer, so a
-    # sidecar built for one mesh is NOT valid for another.
-    bndids_fn = os.environ.get("ISMIP7_BNDIDS")
-    if bndids_fn is None:
-        _mesh_hint = os.environ.get("ISMIP7_MESH") or getattr(mesh, "name", "") or ""
-        _stem = os.path.splitext(os.path.basename(_mesh_hint))[0]
-        _per_mesh = os.path.join(MESH_DIR, f"boundary_ids_{_stem}.json")
-        bndids_fn = (
-            _per_mesh if _stem and os.path.exists(_per_mesh)
-            else os.path.join(MESH_DIR, "boundary_ids.json")
-        )
-    with open(bndids_fn) as f:
-        bnd_ids = json.load(f)
-    calving_ids = tuple(bnd_ids["calving"])
+    # Boundary-id sidecar: resolved (per-mesh preferred) and hard-checked
+    # against this mesh by the shared helper, so the inversion, the forward and
+    # every auxiliary solver cannot disagree about the ice front.
     use_calving_terminus = os.environ.get("ISMIP7_NO_CALVING_TERMINUS") is None
-
-    # Every exterior marker on this mesh MUST be classified by the sidecar.
-    # A stale sidecar silently leaves most of the ice front with NO calving
-    # back-pressure: the 35-tag file paired with the 639-group 32 km mesh
-    # tagged 1596 km of a 32 000 km boundary (5%), so 95% of the front ran
-    # stress-free instead of carrying 1/2(rho_I g h^2 - rho_W g d^2). That was
-    # silent for an entire campaign, so it is a hard error now.
-    _mesh_markers = set(int(i) for i in mesh.exterior_facets.unique_markers)
-    _tagged = set(int(i) for i in calving_ids) | set(
-        int(i) for i in bnd_ids.get("other", [])
+    bnd_ids, calving_ids, bndids_fn = load_boundary_ids(
+        mesh, MESH_DIR, mesh_hint=mesh_basename,
+        print_coverage=use_calving_terminus,
     )
-    _unclassified = _mesh_markers - _tagged
-    _absent = _tagged - _mesh_markers
-    if _unclassified or _absent:
-        raise ValueError(
-            f"boundary_ids sidecar does not match this mesh.\n"
-            f"  sidecar : {bndids_fn}\n"
-            f"  mesh has {len(_mesh_markers)} exterior markers; sidecar names "
-            f"{len(_tagged)}\n"
-            f"  {len(_unclassified)} mesh marker(s) unclassified"
-            f"{' (e.g. ' + str(sorted(_unclassified)[:5]) + ')' if _unclassified else ''}\n"
-            f"  {len(_absent)} sidecar id(s) absent from the mesh"
-            f"{' (e.g. ' + str(sorted(_absent)[:5]) + ')' if _absent else ''}\n"
-            f"  Unclassified markers get NO calving-terminus back-pressure.\n"
-            f"  Regenerate with:  ISMIP7_MESH=<the .msh> python "
-            f"antarctica/scripts/make_boundary_ids.py\n"
-            f"  then save it as antarctica/mesh/boundary_ids_<mesh basename>.json"
-        )
-    if use_calving_terminus and calving_ids:
-        _len_all = float(assemble(Constant(1.0) * fd.ds(domain=mesh)))
-        _len_cal = float(assemble(Constant(1.0) * fd.ds(calving_ids, domain=mesh)))
-        PETSc.Sys.Print(
-            f"  Calving terminus BC on {_len_cal/1e3:.0f} km of "
-            f"{_len_all/1e3:.0f} km exterior boundary "
-            f"({100*_len_cal/max(_len_all, 1e-9):.0f}%), "
-            f"{len(calving_ids)}/{len(_mesh_markers)} markers ({bndids_fn.split('/')[-1]})"
-        )
 
     Q = FunctionSpace(mesh, "CG", 1)
     V = VectorFunctionSpace(mesh, "CG", 1)
@@ -874,6 +815,7 @@ def setup_model(restart_from=None):
         "Q_g": Q_g,
         "geom_dg": geom_dg,
         "geom_xy": geom_xy,
+        "mesh_basename": mesh_basename,
         "V": V,
         "Z": Z,
         "z": z,
@@ -979,6 +921,7 @@ def run_simulation(
 
     Q_dg = FunctionSpace(mesh, "DG", 0)
     geom_dg = ctx.get("geom_dg", False)
+    mesh_basename = ctx.get("mesh_basename", "")
     # Under DG0 geometry the transport state IS the geometry - the same
     # Function object, not a copy. That is the whole point: the terminus
     # back-pressure and the boundary flux then integrate one thickness, so
@@ -1208,6 +1151,8 @@ def run_simulation(
             chk.set_attr("/", "friction", str(friction))
             chk.set_attr("/", "lc", int(lc))
             chk.set_attr("/", "geometry_space", "dg0" if geom_dg else "cg1")
+            if mesh_basename:
+                chk.set_attr("/", "mesh_basename", str(mesh_basename))
         mesh.comm.barrier()
         if mesh.comm.rank == 0:
             os.replace(tmp, final_path)
@@ -1358,14 +1303,19 @@ def run_simulation(
         lumped-mass lift that bridges the two representations.
         """
         if geom_dg:
-            pass                      # h is h_dg: same Function, already current
-        elif legacy_transport:
-            h.project(h_dg)
+            # h is h_dg: same Function, already current AND already floored by
+            # the transport advance. Re-applying the clamp here would refill
+            # the cells the fixed-front mask just emptied, turning the calving
+            # sink into an h_clamp source whenever ISMIP7_H_CLAMP > 0.
+            pass
         else:
-            # Lumped-mass projection: h_i = ∫phi_i h_dg / ∫phi_i.
-            assemble(fd.TestFunction(Q) * h_dg * dx, tensor=proj_rhs)
-            h.dat.data[:] = proj_rhs.dat.data_ro / m_lump.dat.data_ro
-        h.interpolate(max_value(h, Constant(h_clamp)))
+            if legacy_transport:
+                h.project(h_dg)
+            else:
+                # Lumped-mass projection: h_i = ∫phi_i h_dg / ∫phi_i.
+                assemble(fd.TestFunction(Q) * h_dg * dx, tensor=proj_rhs)
+                h.dat.data[:] = proj_rhs.dat.data_ro / m_lump.dat.data_ro
+            h.interpolate(max_value(h, Constant(h_clamp)))
         s.interpolate(max_value(b + h, (Constant(1.0) - rho_ratio) * h))
         phi_eff.interpolate(
             max_value(

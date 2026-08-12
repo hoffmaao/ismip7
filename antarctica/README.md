@@ -389,9 +389,15 @@ the matrix-wide status.
 
 Per experiment in `results/`:
 - `<exp>_final.h5` — final state checkpoint (Firedrake `CheckpointFile`),
-  self-contained for restart: mesh, geometry, inversion fields, DG0 thickness
-  (`thickness_dg`, the prognostic state), the full `(u, M, τ)` solver state,
-  and the frozen apparent-MB reference when one is active.
+  self-contained for restart: mesh, geometry, inversion fields, the full
+  `(u, M, τ)` solver state, and the frozen apparent-MB reference when one is
+  active. Under the `dg0` geometry default the saved `thickness` **is** the
+  prognostic transport state; a `cg1` run additionally saves the separate DG0
+  carrier as `thickness_dg`, since there the CG1 `thickness` is only its lift.
+  The `geometry_space` and `mesh_basename` attributes record the discretization
+  and the `.msh` the trajectory started on, so a restart resolves the same
+  boundary sidecar; restarting into a different geometry space projects and
+  warns loudly (see `../GEOMETRY_DISCRETIZATION.md`).
 - `<exp>_t<year>.h5` — periodic checkpoints (every `ISMIP7_CHECKPOINT_EVERY_YR`
   model years, default 5; only the `ISMIP7_KEEP_CHECKPOINTS` most recently
   *written* are kept - by write time, not by highest year, so a re-run that

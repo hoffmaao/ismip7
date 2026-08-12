@@ -2,7 +2,7 @@
 r"""Shared simulation engine for ISMIP7 Antarctic experiments."""
 
 import numpy as np
-import os, sys, glob, json
+import os, sys, glob
 from time import perf_counter
 
 import firedrake as fd
@@ -567,8 +567,8 @@ def setup_model(restart_from=None):
         # loaded from the checkpoint above, never recomputed from evolved h.
         if not is_restart:
             # weertman_anchor needs |grad s|; under DG0 geometry it takes that
-            # from a CG1 reconstruction internally (see dual_friction.
-            # surface_slope) since a cell-wise surface has no cell gradient.
+            # from a CG1 reconstruction internally (see geometry.surface_slope)
+            # since a cell-wise surface has no cell gradient.
             C_w0 = weertman_anchor(H, s, u_obs, m_slide_val, Q_g)
             if friction == "budd":
                 N_ref = Function(Q_g, name="N_ref").interpolate(

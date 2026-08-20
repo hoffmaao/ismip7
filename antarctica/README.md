@@ -267,6 +267,17 @@ python scripts/compare_dhdt.py vel=mesh/<velocity-only>.h5 tr=mesh/<transient>.h
 tell a velocity-only MAP from a transient one (both fit `u`), so the thickness
 tendency is the observable that can.
 
+Because the MAP filename encodes only friction, `LC`, geometry space and flow
+exponent, a velocity-only MAP and a transient one land on the **same path**.
+Give variants their own `ISMIP7_MAP_OUT`. Every MAP checkpoint also records the
+objective that produced it as root attributes - `misfit_norm`, `gamma_theta`,
+`gamma_phi`, `dhdt_weight`, alongside `mesh_basename` - so a MAP already on disk
+can be identified:
+
+```bash
+python -c "import h5py,sys; print(dict(h5py.File(sys.argv[1])['/'].attrs))" MAP.h5
+```
+
 ### Environment knobs (inversion)
 
 | Env var | Meaning | Default |

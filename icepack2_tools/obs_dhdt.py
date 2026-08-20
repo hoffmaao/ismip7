@@ -36,8 +36,12 @@ grounded ice integrates to **-85.6 Gt/yr** over 11 207 x10^3 km^2, which sits
 in the IMBIE-3 range for the era, so the field is usable as-is.  Floating ice
 integrates to +212 Gt/yr (mean +0.18 m/yr) -- altimetry over shelves is noisy
 and confounded by firn/tide/ocean signals, and floating thickness change does
-not affect VAF, which is why :func:`load_dhdt_obs` masks to grounded ice by
-default.
+not affect VAF, so the constraint should be restricted to GROUNDED ice.
+
+:func:`load_dhdt_obs` does NOT do that restriction itself: it returns a
+**coverage** mask only (where the raster has observations), and the caller must
+multiply that mask by its own grounded indicator.  A caller that skips this
+step ships a constraint fitted to the +212 Gt/yr shelf signal above.
 
 Sampling
 --------

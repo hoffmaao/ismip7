@@ -111,6 +111,17 @@ def a4_factor_default():
     n = float(os.environ.get("ISMIP7_N_FLOW", N_FLOW_DEFAULT))
     return A4_FACTOR_N4 if abs(n - 4.0) < 1e-9 else A4_FACTOR_DEFAULT
 
+# Misfit normalization: "sigma" (default) divides each residual by the squared
+# observational error of its own datum, so the misfit is a dimensionless chi^2
+# and terms with different units can be traded off; "none" is the legacy
+# dimensional functional. Read here (not only where the misfit is built)
+# because the regularization defaults below are tied to it.
+MISFIT_NORM = os.environ.get("ISMIP7_MISFIT_NORM", "sigma").lower()
+if MISFIT_NORM not in ("sigma", "none"):
+    raise ValueError(
+        f"ISMIP7_MISFIT_NORM must be 'sigma' or 'none', got {MISFIT_NORM!r}"
+    )
+
 # Regularization -- fenics_ice Whittle-Matern prior (icepack2_tools/prior.py)
 # on the log-deviation controls theta=log(C/C_w0), phi=log(A/A_prior). The
 # controls sit on PHYSICAL prior means (balance friction, thermomechanical
@@ -118,8 +129,18 @@ def a4_factor_default():
 # ~0.2-0.3 in log-units (the physical deviation scale; Recinos anchors
 # sigma_C~0.22, sigma_A~0.26). The old gradient-only gamma=1 was "no prior"
 # and let phi/theta blow up at n=3. Env-overridable.
-GAMMA_THETA = float(os.environ.get("ISMIP7_GAMMA_THETA", "1e4"))
-GAMMA_PHI = float(os.environ.get("ISMIP7_GAMMA_PHI", "1e4"))
+#
+# THE DEFAULT IS COUPLED TO ISMIP7_MISFIT_NORM. Normalizing by sigma divides
+# the misfit by ~sigma^2 (MEaSUREs per-component sigma is median 2.6 m/yr, p90
+# 6.6 m/yr, so roughly one order of magnitude), which weakens the prior by the
+# same factor if gamma is held fixed. Carrying the unnormalized 1e4 into the
+# chi^2 functional gave control ranges of +/-5 to 6 log-units; 1e5 under sigma
+# recovered the plausible +/-3 seen on two converged runs (32 km and 2500 m).
+# So the default tracks the norm rather than leaving the shipped configuration
+# knowingly mistuned. Setting ISMIP7_GAMMA_* explicitly overrides either way.
+GAMMA_DEFAULT = "1e5" if MISFIT_NORM == "sigma" else "1e4"
+GAMMA_THETA = float(os.environ.get("ISMIP7_GAMMA_THETA", GAMMA_DEFAULT))
+GAMMA_PHI = float(os.environ.get("ISMIP7_GAMMA_PHI", GAMMA_DEFAULT))
 L_REG = float(os.environ.get("ISMIP7_L_REG", "7.5e3"))
 
 # Friction law: "budd" (power-law dual, default) or "regularized_coulomb"
@@ -255,23 +276,35 @@ def main():
     # -- ERR goes to ~0 in places, and an unfloored 1/sigma^2 would let a
     # handful of nodes dominate the whole functional.
     #
-    # NOTE: normalizing changes the ABSOLUTE misfit scale, so GAMMA_THETA and
-    # GAMMA_PHI, which are tuned against the old unnormalized scale, are NOT
-    # transferable -- retune them, or set ISMIP7_MISFIT_NORM=none to recover the
-    # legacy functional. Measured at 32 km the MEaSUREs per-component sigma has
-    # median 2.6 m/yr and p90 6.6 m/yr, so the shift is roughly one order of
+    # NOTE: normalizing changes the ABSOLUTE misfit scale, so a GAMMA tuned
+    # against the other scale is NOT transferable. GAMMA_THETA/GAMMA_PHI
+    # therefore DEFAULT differently per norm (see GAMMA_DEFAULT above);
+    # ISMIP7_MISFIT_NORM=none recovers the legacy functional AND its 1e4
+    # gamma. Measured at 32 km the MEaSUREs per-component sigma has median
+    # 2.6 m/yr and p90 6.6 m/yr, so the shift is roughly one order of
     # magnitude, not two; the printout below reports the actual distribution.
-    misfit_norm = os.environ.get("ISMIP7_MISFIT_NORM", "sigma").lower()
-    if misfit_norm not in ("sigma", "none"):
-        raise ValueError(
-            f"ISMIP7_MISFIT_NORM must be 'sigma' or 'none', got {misfit_norm!r}"
-        )
     sigma_u_floor = float(os.environ.get("ISMIP7_SIGMA_U_FLOOR", "1.0"))  # m/yr
-    if misfit_norm == "sigma":
+    if MISFIT_NORM == "sigma":
+        # Where MEaSUREs reports no velocity, icepack.interpolate zero-fills
+        # BOTH u_obs and ERR. Flooring such a node at sigma_u_floor would give
+        # it the SMALLEST sigma in the field, i.e. the LARGEST 1/sigma^2
+        # weight, on a fabricated zero velocity -- unobserved nodes would then
+        # dominate the functional wherever the model flows fast. With the obs
+        # mask on they are excluded anyway; the mask-off escape hatch has to be
+        # made safe explicitly, by giving those nodes a sigma large enough that
+        # they carry no weight rather than maximal weight.
+        sigma_u_unobs = float(os.environ.get("ISMIP7_SIGMA_U_UNOBS", "1e4"))
+        _emag = Function(Q).interpolate(sqrt(err[0] ** 2 + err[1] ** 2))
+        _observed = Function(Q, name="err_observed")
+        _observed.dat.data[:] = (_emag.dat.data_ro > 0.0).astype(float)
         sig_ux = Function(Q, name="sigma_ux").interpolate(
             max_value(abs(err[0]), Constant(sigma_u_floor)))
         sig_uy = Function(Q, name="sigma_uy").interpolate(
             max_value(abs(err[1]), Constant(sigma_u_floor)))
+        _unobs = _observed.dat.data_ro == 0.0
+        sig_ux.dat.data[_unobs] = sigma_u_unobs
+        sig_uy.dat.data[_unobs] = sigma_u_unobs
+        _n_unobs = COMM_WORLD.allreduce(int(_unobs.sum()))
         _sx = sig_ux.dat.data_ro
         PETSc.Sys.Print(
             f"  Misfit normalization: chi^2 (per-datum sigma^2). "
@@ -280,8 +313,14 @@ def main():
             f"p90 {float(np.percentile(_sx, 90)):.2f} m/yr"
         )
         PETSc.Sys.Print(
-            "  NOTE: absolute misfit is now dimensionless; GAMMA_THETA/GAMMA_PHI "
-            "tuned on the unnormalized scale do not carry over."
+            f"  Unobserved nodes (ERR==0): {_n_unobs} given "
+            f"sigma={sigma_u_unobs:g} m/yr so the zero-filled velocity there "
+            f"carries no weight"
+        )
+        PETSc.Sys.Print(
+            f"  NOTE: absolute misfit is dimensionless; GAMMA_THETA="
+            f"{GAMMA_THETA:g} GAMMA_PHI={GAMMA_PHI:g} default to the "
+            f"sigma-normalized scale (see ISMIP7_MISFIT_NORM)."
         )
     else:
         sig_ux = Function(Q).assign(1.0)
@@ -526,9 +565,31 @@ def main():
     # rather than shadow the velocity-only MAP the forwards auto-load.
     map_out = os.environ.get("ISMIP7_MAP_OUT")
     map_fn = os.path.basename(map_out) if map_out else map_basename(FRICTION, lc)
-    _map_dir = os.path.dirname(map_out) if map_out else MESH_DIR
+    # A bare filename (ISMIP7_MAP_OUT=map.h5) has no dirname; resolve it under
+    # MESH_DIR like the non-override path rather than silently against the CWD.
+    _map_dir = (os.path.dirname(map_out) or MESH_DIR) if map_out else MESH_DIR
     if map_out:
         PETSc.Sys.Print(f"  MAP output override: {map_out}")
+    # Validate the destination NOW. The first write is the iteration-20
+    # checkpoint, or for a short run the very end, so a typo'd or absent
+    # directory would otherwise throw away hours of a multi-rank inversion --
+    # the exact opposite of what this knob exists to protect against.
+    if COMM_WORLD.rank == 0:
+        _probe_err = None
+        try:
+            os.makedirs(_map_dir, exist_ok=True)
+            _probe = os.path.join(_map_dir, f".map_write_probe.{os.getpid()}")
+            with open(_probe, "w") as _fh:
+                _fh.write("ok")
+            os.remove(_probe)
+        except OSError as exc:
+            _probe_err = f"MAP output directory {_map_dir!r} is unusable: {exc}"
+    else:
+        _probe_err = None
+    _probe_err = COMM_WORLD.bcast(_probe_err, root=0)
+    if _probe_err:
+        raise RuntimeError(_probe_err)
+    PETSc.Sys.Print(f"  MAP output: {os.path.join(_map_dir, map_fn)}")
 
     def build_F(theta_c, phi_c):
         # Residual closure (tau linear, grounded-only theta via exp(theta*He),
@@ -589,8 +650,16 @@ def main():
     # from altimetry is noisy and firn/tide/ocean confounded (the observed field
     # integrates to +212 Gt/yr over shelves against -85.6 Gt/yr grounded, which
     # matches IMBIE-3), floating thickness change does not move VAF, and on
-    # grounded ice ocean melt is identically zero -- so the term needs only SMB
-    # and pulls in no melt parameterisation.
+    # grounded ice ocean melt is identically zero.
+    #
+    # That last point is about the MISFIT, not the source term: the step still
+    # applies the shelf melt (below) so the single prognostic solve matches the
+    # forcing the forward experiment uses, but because the DG0 upwind operator
+    # couples a cell only to its UPWIND neighbours and the flow runs
+    # grounded->shelf, no grounded-cell equation ever sees a shelf value. The
+    # melt source therefore cannot move the grounded-only misfit -- which is
+    # why a missing per-basin K degrades to an SMB-only source rather than
+    # aborting the inversion.
     dhdt_w = float(os.environ.get("ISMIP7_DHDT_WEIGHT", "0.0"))
     use_dhdt = dhdt_w > 0.0
     if use_dhdt:
@@ -607,7 +676,7 @@ def main():
         clim0 = int(os.environ.get("ISMIP7_DHDT_CLIM_START", "2003"))
         clim1 = int(os.environ.get("ISMIP7_DHDT_CLIM_END", "2019"))
 
-        dhdt_obs, dhdt_cov = load_dhdt_obs(Q_g, Q)
+        dhdt_obs, dhdt_cov = load_dhdt_obs(Q_g)
         smb_obs = load_racmo_smb_climatology(Q_g, clim_start=clim0, clim_end=clim1)
 
         # Ocean melt for the prognostic step, from the SAME parameterisation
@@ -633,28 +702,39 @@ def main():
                 "ISMIP7_K_PER_BASIN_NPZ",
                 _k_lc if os.path.exists(_k_lc) else _k_2500)
             if not os.path.exists(k_npz):
-                raise FileNotFoundError(
-                    f"Per-basin K not found at {k_npz} (needed for the dH/dt "
-                    f"constraint's melt source; ISMIP7_DHDT_MELT=0 to run "
-                    f"with an SMB-only source).")
-            if geom_dg:
+                # Warn, do not abort: the melt source only touches shelf cells
+                # and the misfit is grounded-only, so an absent ocean
+                # calibration cannot change this objective. Making it a hard
+                # prerequisite would fail the whole inversion over an artifact
+                # the term provably does not use.
+                PETSc.Sys.Print(
+                    f"  [!] dH/dt melt source: per-basin K not found at "
+                    f"{k_npz}; falling back to an SMB-only source. The "
+                    f"grounded-only misfit is unaffected (melt is zero on "
+                    f"grounded ice and the DG0 upwind step never carries a "
+                    f"shelf value upstream); shelf cells of the single "
+                    f"prognostic step are no longer forcing-consistent with "
+                    f"the forward. Calibrate K, or set ISMIP7_DHDT_MELT=0 to "
+                    f"silence this."
+                )
+            else:
                 _W2 = VectorFunctionSpace(mesh, "DG", 0)
                 _xy = Function(_W2).interpolate(
                     fd.SpatialCoordinate(mesh)).dat.data_ro.reshape(-1, 2)
                 geom_xy = (_xy[:, 0].copy(), _xy[:, 1].copy())
-            else:
-                _c = mesh.coordinates.dat.data_ro
-                geom_xy = (_c[:, 0], _c[:, 1])
-            K_field = load_K_per_basin(k_npz, geom_xy[0], geom_xy[1], fill=0.0)
-            K_field = K_field * float(os.environ.get("ISMIP7_K_SCALE", "1.0"))
-            _ctx = {"mesh": mesh, "Q": Q, "V": V, "Q_g": Q_g,
-                    "geom_xy": geom_xy, "h": H, "b": b, "s": s,
-                    "ocean_melt": melt_ref}
-            make_climatology_ocean_callback(K_field)(_ctx, 0.0)
-            _melt_gt = float(assemble(melt_ref * dx)) * 917.0 / 1e12
-            PETSc.Sys.Print(
-                f"  dH/dt melt source: per-basin K ({os.path.basename(k_npz)}"
-                f"), integrated {_melt_gt:.0f} Gt/yr at reference geometry")
+                K_field = load_K_per_basin(
+                    k_npz, geom_xy[0], geom_xy[1], fill=0.0)
+                K_field = K_field * float(
+                    os.environ.get("ISMIP7_K_SCALE", "1.0"))
+                _ctx = {"mesh": mesh, "Q": Q, "V": V, "Q_g": Q_g,
+                        "geom_xy": geom_xy, "h": H, "b": b, "s": s,
+                        "ocean_melt": melt_ref}
+                make_climatology_ocean_callback(K_field)(_ctx, 0.0)
+                _melt_gt = float(assemble(melt_ref * dx)) * 917.0 / 1e12
+                PETSc.Sys.Print(
+                    f"  dH/dt melt source: per-basin K "
+                    f"({os.path.basename(k_npz)}), integrated "
+                    f"{_melt_gt:.0f} Gt/yr at reference geometry")
         else:
             PETSc.Sys.Print("  dH/dt melt source: DISABLED (SMB-only)")
 
@@ -672,7 +752,10 @@ def main():
                 "dH/dt constraint enabled but no cell is both grounded and "
                 "observation-covered; check ISMIP7_OBS_KIT and the mesh."
             )
-        _n_use = int((dhdt_mask.dat.data_ro > 0.5).sum())
+        # Global, not rank-local: this sits on the same line as dhdt_area,
+        # which is a global assemble, and a rank-local count beside it once
+        # read as the constraint having dropped 96% of its cells.
+        _n_use = COMM_WORLD.allreduce(int((dhdt_mask.dat.data_ro > 0.5).sum()))
         PETSc.Sys.Print(
             f"  dH/dt constraint: weight={dhdt_w:g} sigma={dhdt_sigma:g} m/yr "
             f"dt={dhdt_dt:g} yr, {_n_use} grounded+observed cells, "
@@ -795,10 +878,17 @@ def main():
                / Constant(dhdt_sigma)) ** 2
         ) * dx(mesh)
 
+    # Velocity chi^2 of the last accepted state, in ITS OWN accumulator. The
+    # optimizer's J_val is the COMBINED objective under use_dhdt, so it cannot
+    # serve as the reference for a velocity-only comparison: a large
+    # ISMIP7_DHDT_WEIGHT inflates it arbitrarily and would slacken the
+    # final-save guard below to the point of passing a corrupt velocity.
+    last_good_vel_chi2 = [np.inf]
+
     def term_report():
         r"""``' vel=... dhdt=...'`` for the iteration line, or '' if disabled."""
         try:
-            out = f" vel={float(assemble(_vel_chi2)):.4e}"
+            out = f" vel={last_good_vel_chi2[0]:.4e}"
             if use_dhdt:
                 out += f" dhdt={float(assemble(_dhdt_chi2)):.4e}"
             return out
@@ -846,6 +936,7 @@ def main():
 
         z_backup.assign(z)
         last_good_obj[0] = J_val
+        last_good_vel_chi2[0] = float(assemble(_vel_chi2))
 
         t_adj = perf_counter()
         try:
@@ -984,24 +1075,26 @@ def main():
     PETSc.Sys.Print(f"  Final misfit (masked): {misfit:.6e}")
 
     # Update checkpoint with velocity -- unless the state is inconsistent
-    # with the optimization it claims to represent. The comparison must be in
-    # the SAME metric as the optimizer's J_val: under ISMIP7_MISFIT_NORM=sigma
-    # J_val is a chi^2 while `misfit` above is dimensional, and the ratio
-    # between the two for a HEALTHY state is ~sigma^2 (~9-14 with the 3 m/yr
-    # floor) -- the first version of this guard compared across metrics and
-    # blocked a good velocity at 13.8x while a corrupt one sits >1000x off.
-    _guard = float(assemble(_vel_chi2)) if misfit_norm == "sigma" else misfit
-    _ref = max(float(last_good_obj[0]), 1e-30)
+    # with the optimization it claims to represent. BOTH sides of the test are
+    # the SAME form, `_vel_chi2`, assembled on the final state and on the last
+    # accepted optimization state: an earlier version compared the dimensional
+    # misfit against a chi^2 and blocked a good velocity at 13.8x (a corrupt
+    # one sits >1000x off). Comparing against last_good_obj would repeat that
+    # error in the other direction, since under use_dhdt that is the combined
+    # objective and its dH/dt part has nothing to do with velocity.
+    _guard = float(assemble(_vel_chi2))
+    _ref = max(float(last_good_vel_chi2[0]), 1e-30)
     if np.isfinite(_guard) and _guard <= 10.0 * _ref:
         with fd.CheckpointFile(chk_fn, "a") as chk:
             chk.save_function(u_sol, name="velocity")
         PETSc.Sys.Print(f"Saved velocity: {chk_fn}")
     else:
         PETSc.Sys.Print(
-            f"WARNING: NOT saving velocity -- final-state misfit {misfit:.3e} "
-            f"is inconsistent with the optimizer's {_ref:.3e} (>10x). The MAP "
-            f"controls are saved and valid; forwards re-solve the diagnostic "
-            f"from theta/phi and are unaffected."
+            f"WARNING: NOT saving velocity -- final-state velocity misfit "
+            f"{_guard:.3e} is inconsistent with the last accepted "
+            f"{_ref:.3e} (>10x, same metric). The MAP controls are saved and "
+            f"valid; forwards re-solve the diagnostic from theta/phi and are "
+            f"unaffected."
         )
 
     # ── Plot ──

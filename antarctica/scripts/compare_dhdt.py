@@ -64,13 +64,16 @@ def one_step_dhdt(path):
     Q = FunctionSpace(mesh, "CG", 1)
     V = VectorFunctionSpace(mesh, "CG", 1)
 
-    dhdt_obs, cov = load_dhdt_obs(Q_g, Q)
+    dhdt_obs, cov = load_dhdt_obs(Q_g)
     smb = load_racmo_smb_climatology(Q_g, clim_start=CLIM0, clim_end=CLIM1)
 
     melt = Function(Q_g, name="ocean_melt_ref")
     if os.environ.get("ISMIP7_DHDT_MELT", "1") != "0":
+        # Same ISMIP7_LC default as inversion_icepack2.py: a mismatch here
+        # picks a per-basin K calibrated at another resolution, which perturbs
+        # the melt source and hence the model tendency being scored.
         _k_lc = os.path.join(_ROOT, "results", "calibrated_K_per_basin_"
-                             f"{os.environ.get('ISMIP7_LC', '32000')}.npz")
+                             f"{os.environ.get('ISMIP7_LC', '8000')}.npz")
         _k_2500 = os.path.join(_ROOT, "results",
                                "calibrated_K_per_basin_2500.npz")
         k_npz = os.environ.get("ISMIP7_K_PER_BASIN_NPZ",
@@ -108,33 +111,51 @@ def one_step_dhdt(path):
     return mesh, dhdt_model, dhdt_obs, cov, area, haf, hv
 
 
-def score(label, dhdt_model, dhdt_obs, cov, area, haf, hv):
+def score(label, mesh, dhdt_model, dhdt_obs, cov, area, haf, hv):
+    r"""Scoreboard for one MAP.
+
+    Every reported number is a GLOBAL reduction. Each rank owns only its own
+    slice of the DG0 data, so a rank-local sum would print N different partial
+    ice sheets under ``mpiexec -n N`` -- and this is the diagnostic that
+    validation decisions are read off, so a plausible-looking partial integral
+    is worse than no number at all.
+    """
+    comm = mesh.comm
+
+    def gsum(a):
+        return float(comm.allreduce(float(np.sum(a))))
+
     m = dhdt_model.dat.data_ro
     o = dhdt_obs.dat.data_ro
     sel = (cov.dat.data_ro > 0.5) & (haf > 0.0) & (hv > 1.0)
     w = area[sel]
     mm, oo = m[sel], o[sel]
-    gt = lambda f: float((f * w).sum()) * RHO_GT
-    rms = float(np.sqrt((w * (mm - oo) ** 2).sum() / w.sum()))
+    n_sel = int(comm.allreduce(int(sel.sum())))
+    w_tot = gsum(w)
+    gt = lambda f: gsum(f * w) * RHO_GT
+    rms = float(np.sqrt(gsum(w * (mm - oo) ** 2) / w_tot))
     # area-weighted correlation
-    wm, wo = (w * mm).sum() / w.sum(), (w * oo).sum() / w.sum()
-    r = float((w * (mm - wm) * (oo - wo)).sum()
-              / np.sqrt((w * (mm - wm) ** 2).sum()
-                        * (w * (oo - wo) ** 2).sum()))
-    print(f"\n===== {label} (grounded+observed, n={int(sel.sum())}) =====")
-    print(f"  integrated dH/dt   model {gt(mm):+8.1f}  obs {gt(oo):+8.1f} Gt/yr")
-    print(f"  RMS(model - obs)   {rms:8.3f} m/yr")
-    print(f"  area-wtd corr      {r:8.3f}")
+    wm, wo = gsum(w * mm) / w_tot, gsum(w * oo) / w_tot
+    r = float(gsum(w * (mm - wm) * (oo - wo))
+              / np.sqrt(gsum(w * (mm - wm) ** 2)
+                        * gsum(w * (oo - wo) ** 2)))
+    PETSc.Sys.Print(f"\n===== {label} (grounded+observed, n={n_sel}) =====")
+    PETSc.Sys.Print(
+        f"  integrated dH/dt   model {gt(mm):+8.1f}  obs {gt(oo):+8.1f} Gt/yr")
+    PETSc.Sys.Print(f"  RMS(model - obs)   {rms:8.3f} m/yr")
+    PETSc.Sys.Print(f"  area-wtd corr      {r:8.3f}")
     for lo, hi, lab in [(0, 50, "GL band 0-50 m"), (50, 200, "50-200 m"),
                         (200, 1e9, "interior >200 m")]:
         s2 = sel & (haf > lo) & (haf <= hi)
-        if not s2.any():
-            continue
         w2 = area[s2]
-        rms2 = float(np.sqrt((w2 * (m[s2] - o[s2]) ** 2).sum() / w2.sum()))
-        print(f"    {lab:<18} model {float((m[s2]*w2).sum())*RHO_GT:+8.1f} "
-              f"obs {float((o[s2]*w2).sum())*RHO_GT:+8.1f} Gt/yr   "
-              f"RMS {rms2:6.3f} m/yr")
+        w2_tot = gsum(w2)
+        if w2_tot <= 0.0:
+            continue
+        rms2 = float(np.sqrt(gsum(w2 * (m[s2] - o[s2]) ** 2) / w2_tot))
+        PETSc.Sys.Print(
+            f"    {lab:<18} model {gsum(m[s2]*w2)*RHO_GT:+8.1f} "
+            f"obs {gsum(o[s2]*w2)*RHO_GT:+8.1f} Gt/yr   "
+            f"RMS {rms2:6.3f} m/yr")
     return dict(rms=rms, corr=r, model_gt=gt(mm), obs_gt=gt(oo))
 
 
@@ -151,7 +172,7 @@ def main():
     for label, path in runs:
         PETSc.Sys.Print(f"[{label}] {path}")
         mesh, dm, do, cov, area, haf, hv = one_step_dhdt(path)
-        score(label, dm, do, cov, area, haf, hv)
+        score(label, mesh, dm, do, cov, area, haf, hv)
         panels.append((label, mesh, dm, do, cov))
 
     try:
@@ -178,9 +199,9 @@ def main():
         out = os.path.join(_ROOT, "figs", "dhdt_compare.png")
         os.makedirs(os.path.dirname(out), exist_ok=True)
         fig.savefig(out, dpi=170, bbox_inches="tight")
-        print(f"\nSaved figure: {out}")
+        PETSc.Sys.Print(f"\nSaved figure: {out}")
     except Exception as e:
-        print(f"(figure skipped: {e})")
+        PETSc.Sys.Print(f"(figure skipped: {e})")
 
 
 if __name__ == "__main__":

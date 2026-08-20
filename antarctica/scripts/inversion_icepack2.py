@@ -943,7 +943,7 @@ def main():
 
     # ── L-BFGS-B Inversion ──
     max_iter = int(os.environ.get("ISMIP7_MAXITER", "500"))
-    PETSc.Sys.Print(f"\nStarting L-BFGS-B inversion (theta + phi)...")
+    PETSc.Sys.Print("\nStarting L-BFGS-B inversion (theta + phi)...")
     PETSc.Sys.Print(f"  maxiter={max_iter}, nranks={COMM_WORLD.size}")
 
     global_ndof = len(func_to_global(theta))

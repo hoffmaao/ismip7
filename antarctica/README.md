@@ -240,8 +240,8 @@ valid for its own geometry space. The whole name is built by one helper
 (`icepack2_tools/naming.py`), which the forward, `preflight.py` and the launch
 gates all import. A forward that finds only the legacy untagged MAP loads it
 and warns loudly - runnable as a smoke test, not a result. See
-`../GEOMETRY_DISCRETIZATION.md`. See the script header for the full set of
-regularization / iteration options.
+`../GEOMETRY_DISCRETIZATION.md`. The regularization, misfit-normalization and
+iteration knobs are tabulated under "Environment knobs (inversion)" below.
 
 ### Transient (dH/dt-constrained) inversion
 
@@ -265,7 +265,14 @@ python scripts/compare_dhdt.py vel=mesh/<velocity-only>.h5 tr=mesh/<transient>.h
 
 `compare_dhdt.py` is the payoff diagnostic: the t=0 *velocity* misfit cannot
 tell a velocity-only MAP from a transient one (both fit `u`), so the thickness
-tendency is the observable that can.
+tendency is the observable that can. It drives that step with the `velocity`
+stored in the MAP, so its score is only as good as that field. The inversion
+refuses to save a final-solve velocity whose misfit grossly disagrees with the
+last accepted optimization state - it warns and leaves the field out - so a MAP
+from a failed final solve has no `velocity` to score. MAPs written before that
+guard can still carry one, and a dH/dt score built on it is meaningless. The
+controls are unaffected either way: a forward re-solves the diagnostic from
+`θ`/`φ` and never reads the stored velocity.
 
 Because the MAP filename encodes only friction, `LC`, geometry space and flow
 exponent, a velocity-only MAP and a transient one land on the **same path**.
@@ -286,6 +293,7 @@ python -c "import h5py,sys; print(dict(h5py.File(sys.argv[1])['/'].attrs))" MAP.
 | `ISMIP7_MISFIT_NORM` | `sigma`: divide each residual by its own datum's squared error, making the misfit a dimensionless chi^2 so terms of different units can be traded off. `none`: legacy dimensional misfit. **Selects the `ISMIP7_GAMMA_*` defaults** (see below) | `sigma` |
 | `ISMIP7_GAMMA_THETA` / `ISMIP7_GAMMA_PHI` | Whittle-Matern prior strength on `θ` / `φ`. Default is coupled to `ISMIP7_MISFIT_NORM`, because normalizing divides the misfit by ~sigma^2 and would otherwise weaken the prior by the same factor | `1e5` under `sigma`, `1e4` under `none` |
 | `ISMIP7_L_REG` | prior correlation length (m) | `7.5e3` |
+| `ISMIP7_MAXITER` | L-BFGS-B iteration cap | `500` |
 | `ISMIP7_SIGMA_U_FLOOR` | floor on the per-component MEaSUREs velocity error (m/yr); without it the near-zero errors let a few nodes dominate the functional | `1.0` |
 | `ISMIP7_SIGMA_U_UNOBS` | sigma (m/yr) assigned where MEaSUREs reports no error at all. Those nodes also have a zero-filled `u_obs`, so they must be given a *large* sigma, not the floor, or they would carry maximal weight on a fabricated zero velocity when `ISMIP7_OBS_MASK=0` | `1e4` |
 | `ISMIP7_OBS_MASK` | `0` drops the velocity-observation mask (unobserved nodes re-enter the misfit) | `1` |
@@ -293,7 +301,7 @@ python -c "import h5py,sys; print(dict(h5py.File(sys.argv[1])['/'].attrs))" MAP.
 | `ISMIP7_DHDT_SIGMA` | assumed dH/dt uncertainty (m/yr). A hand-set scalar: the MIPkit ships **no** uncertainty field for either dH/dt product | `0.1` |
 | `ISMIP7_DHDT_DT` | timestep of the single prognostic step (yr) | `1.0` |
 | `ISMIP7_DHDT_VAR` | observed field: `dhdt_smith` (firn-corrected, 2003-2019 mean) or `dhdt_cpom` (**not** firn corrected, so not interchangeable) | `dhdt_smith` |
-| `ISMIP7_DHDT_MELT` | `0` drops ocean melt from the prognostic step's source (SMB only). On by default so the step matches the forward's forcing; a missing `results/calibrated_K_per_basin_*.npz` warns and falls back to SMB-only rather than aborting, since melt is zero on grounded ice and the misfit is grounded-only | `1` |
+| `ISMIP7_DHDT_MELT` | `0` drops ocean melt from the prognostic step's source (SMB only). On by default so the step matches the forward's forcing. The per-basin K comes from `ISMIP7_K_PER_BASIN_NPZ`, else `results/calibrated_K_per_basin_<lc>.npz`, else the 2500 m file; if none exists this warns and falls back to SMB-only rather than aborting, since melt is zero on grounded ice and the misfit is grounded-only | `1` |
 | `ISMIP7_DHDT_CLIM_START` / `_END` | RACMO SMB climatology window for that source | `2003` / `2019` |
 | `ISMIP7_DHDT_REACH` | pixel-to-cell reach as a multiple of the cell scale `sqrt(area)`; rejects raster pixels lying outside the mesh that nearest-centroid assignment would otherwise snap onto boundary cells | `0.75` |
 | `ISMIP7_OBS_KIT` | path to `AntarcticaObsISMIP7-v*.nc` | newest under `<DATA_ROOT>/obs/mipkit` |

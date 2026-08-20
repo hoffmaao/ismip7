@@ -59,13 +59,18 @@ n = 3 lacks the n = 4 `a4×10` boost. So the n = 3 inversion follows the
   `antarctica/scripts/thermo_prior.py`.
 - **Friction**: `theta = log(C / C_w0)` on the balance anchor (already physical).
 - **Regularization**: Whittle-Matérn `gamma·(theta² + L²|∇theta|²)`
-  (`icepack2_tools/prior.py`) at physical `gamma≈1e4`. Env:
-  `ISMIP7_GAMMA_THETA`, `ISMIP7_GAMMA_PHI`, `ISMIP7_L_REG` (7.5 km),
-  `ISMIP7_FLUIDITY_PRIOR` (thermo|legacy).
+  (`icepack2_tools/prior.py`) at a physical `gamma` whose default is coupled to
+  the misfit normalization `ISMIP7_MISFIT_NORM`, because normalizing the misfit
+  by the observational `sigma²` would otherwise weaken the prior by the same
+  factor. Env: `ISMIP7_GAMMA_THETA`, `ISMIP7_GAMMA_PHI`, `ISMIP7_L_REG`
+  (7.5 km), `ISMIP7_FLUIDITY_PRIOR` (thermo|legacy); the defaults are tabulated
+  in `README.md` §4 under "Environment knobs (inversion)".
 
 The MAP stores `A_prior`; the forward loads it and rebuilds `A = A_prior·exp(phi)`.
 Result (32 km): controls physical (theta/phi p99 ≈ 3-4, was 14-17), misfit
-n=4-comparable, forward reproduces the inversion.
+n=4-comparable, forward reproduces the inversion. Those misfit figures are on
+the legacy dimensional scale (`ISMIP7_MISFIT_NORM=none`); the default chi^2
+misfit is dimensionless and its values do not compare to them.
 
 **Run it** (small mesh → FEW ranks; MUMPS is fragile at ~90 vertices/rank, and
 a failed first solve now raises rather than writing a garbage theta=phi=0 MAP):

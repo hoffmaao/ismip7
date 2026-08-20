@@ -57,17 +57,16 @@ integral.
 
 Pixels are assigned to the nearest cell centroid rather than by exact
 point-in-triangle location. On these meshes that is a close approximation and
-it keeps the assignment a single vectorised KD-tree query instead of millions
-of ``locate_cell`` calls; it is adequate because this field is a misfit
-*target*, never a term in the momentum residual.
+it keeps the assignment a handful of vectorised KD-tree queries (walked in
+raster row blocks to bound memory) instead of millions of ``locate_cell``
+calls; it is adequate because this field is a misfit *target*, never a term in
+the momentum residual.
 """
 
 import os
 
 import numpy as np
 from firedrake import Function
-
-from .geometry import sample_to_geometry
 
 _VARIABLES = ("dhdt_smith", "dhdt_cpom")
 
@@ -163,8 +162,12 @@ def _cache_rasters(variable, data_root=None, cache_dir=None):
     return val_fn, cov_fn
 
 
-def load_dhdt_obs(Q_g, Q, variable=None, data_root=None, min_coverage=0.5):
+def load_dhdt_obs(Q_g, variable=None, data_root=None, min_coverage=0.5):
     r"""Observed mean dH/dt (m/yr ice equivalent) on the geometry space.
+
+    ``Q_g`` must be a **DG0** (cell-wise constant) space: the binning below
+    treats one dof as one cell, and ``assemble(TestFunction(Q_g)*dx)`` is the
+    per-cell area only at degree 0.
 
     Returns ``(dhdt, mask)``, both Functions on ``Q_g``. ``mask`` is 1 where the
     observed coverage of the cell is at least ``min_coverage`` and 0 elsewhere;
@@ -174,8 +177,15 @@ def load_dhdt_obs(Q_g, Q, variable=None, data_root=None, min_coverage=0.5):
     """
     import rasterio
     from firedrake import SpatialCoordinate, VectorFunctionSpace, assemble, dx
-    from firedrake import TestFunction, interpolate as fd_interpolate
+    from firedrake import TestFunction
     from scipy.spatial import cKDTree
+
+    if Q_g.ufl_element().degree() != 0:
+        raise ValueError(
+            "load_dhdt_obs requires a DG0 geometry space (one dof per cell); "
+            f"got degree {Q_g.ufl_element().degree()}. The pixel binning and "
+            "the cell-area weights are only meaningful cell-wise."
+        )
 
     variable = variable or os.environ.get("ISMIP7_DHDT_VAR", "dhdt_smith")
     if variable not in _VARIABLES:
@@ -193,45 +203,62 @@ def load_dhdt_obs(Q_g, Q, variable=None, data_root=None, min_coverage=0.5):
     px, py = abs(tr.a), abs(tr.e)
     xs = tr.c + px * (np.arange(nx) + 0.5)
     ys = tr.f - py * (np.arange(ny) + 0.5)
-    jj, ii = np.meshgrid(np.arange(nx), np.arange(ny))
-    sel = valid
-    pts = np.column_stack((xs[jj[sel]], ys[ii[sel]]))
-    vals = value[sel]
 
     # cell centroids of the geometry space
     W = VectorFunctionSpace(Q_g.mesh(), "DG", 0)
     cen = Function(W).interpolate(SpatialCoordinate(Q_g.mesh())).dat.data_ro
     cen = cen.reshape(-1, 2)
     ncell = cen.shape[0]
+    tree = cKDTree(cen)
 
-    dist, owner = cKDTree(cen).query(pts, k=1)
+    # Nearest-centroid alone would snap pixels lying OUTSIDE the mesh (open
+    # ocean beyond the domain) onto boundary cells, inflating the integral --
+    # measured at +145.9 Gt/yr against a raster truth of +127.0 before this
+    # guard. Reject a pixel beyond the local cell scale.
+    cell_area = assemble(TestFunction(Q_g) * dx).dat.data_ro
+    reach = _REACH * np.sqrt(np.maximum(cell_area, 1e-30))
 
-    # UNDER MPI each rank holds only its own cells, so `cen` is a PARTIAL set
-    # of centroids and the nearest LOCAL centroid is not the nearest global
-    # one: without this every rank would absorb pixels belonging to other
-    # ranks' cells, corrupting partition-boundary cells and -- worse -- making
-    # the field depend on the rank count. Keep a pixel only on the rank whose
-    # local nearest is also the global nearest.
     comm = Q_g.mesh().comm
     if comm.size > 1:
         from mpi4py import MPI as _MPI
-        gmin = np.empty_like(dist)
-        comm.Allreduce([dist, _MPI.DOUBLE], [gmin, _MPI.DOUBLE], op=_MPI.MIN)
-        owns = dist <= gmin + 1e-9
     else:
-        owns = np.ones(dist.shape, dtype=bool)
+        _MPI = None
 
-    # Nearest-centroid alone would also snap pixels lying OUTSIDE the mesh
-    # (open ocean beyond the domain) onto boundary cells, inflating the
-    # integral -- measured at +145.9 Gt/yr against a raster truth of +127.0
-    # before this guard. Reject a pixel beyond the local cell scale.
-    cell_area = assemble(TestFunction(Q_g) * dx).dat.data_ro
-    reach = _REACH * np.sqrt(np.maximum(cell_area, 1e-30))
-    keep = owns & (dist <= reach[owner])
-    owner, vals = owner[keep], vals[keep]
+    # The raster is ~13M valid pixels; materializing coordinates, distances and
+    # the MPI reduction buffer for all of them at once costs ~0.7 GB on EVERY
+    # rank. Walk it in row blocks instead and accumulate the bin counts, which
+    # bounds the footprint without changing the result. The blocks are cut on
+    # RASTER ROWS, which every rank reads identically, so the per-block reduce
+    # below is collective and aligned regardless of the mesh partition.
+    rows_per_block = max(1, int(1_000_000 // max(nx, 1)))
+    npix = np.zeros(ncell, dtype="f8")
+    ssum = np.zeros(ncell, dtype="f8")
+    for r0 in range(0, ny, rows_per_block):
+        r1 = min(r0 + rows_per_block, ny)
+        sel = valid[r0:r1]
+        ii, jj = np.nonzero(sel)
+        blk_vals = value[r0:r1][sel]
+        pts = np.column_stack((xs[jj], ys[r0 + ii]))
+        dist, owner = tree.query(pts, k=1)
 
-    npix = np.bincount(owner, minlength=ncell).astype("f8")
-    ssum = np.bincount(owner, weights=vals, minlength=ncell)
+        # UNDER MPI each rank holds only its own cells, so `cen` is a PARTIAL
+        # set of centroids and the nearest LOCAL centroid is not the nearest
+        # global one: without this every rank would absorb pixels belonging to
+        # other ranks' cells, corrupting partition-boundary cells and -- worse
+        # -- making the field depend on the rank count. Keep a pixel only on
+        # the rank whose local nearest is also the global nearest.
+        if _MPI is not None:
+            gmin = np.empty_like(dist)
+            comm.Allreduce([dist, _MPI.DOUBLE], [gmin, _MPI.DOUBLE],
+                           op=_MPI.MIN)
+            owns = dist <= gmin + 1e-9
+        else:
+            owns = np.ones(dist.shape, dtype=bool)
+
+        keep = owns & (dist <= reach[owner])
+        owner, blk_vals = owner[keep], blk_vals[keep]
+        npix += np.bincount(owner, minlength=ncell)
+        ssum += np.bincount(owner, weights=blk_vals, minlength=ncell)
 
     # coverage = observed pixel area / cell area
     cov_frac = npix * px * py / np.maximum(cell_area, 1e-30)

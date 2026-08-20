@@ -243,6 +243,50 @@ and warns loudly - runnable as a smoke test, not a result. See
 `../GEOMETRY_DISCRETIZATION.md`. See the script header for the full set of
 regularization / iteration options.
 
+### Transient (dH/dt-constrained) inversion
+
+A velocity-only inversion fits `u` but never constrains `div(h u)`, so the MAP
+can carry a flux divergence inconsistent with the observed geometry and the
+forward then drifts (which `ISMIP7_APPARENT_MB` has been masking).
+`ISMIP7_DHDT_WEIGHT > 0` adds **one implicit-Euler prognostic step** after the
+diagnostic solve - the model's own DG0 upwind FV operator, so the inversion is
+penalised for the divergence its *own* transport scheme produces - and scores
+the resulting tendency against an observed mean dH/dt map
+(`icepack2_tools/obs_dhdt.py`, from the ISMIP7 observations MIPkit). It
+requires `ISMIP7_GEOMETRY_SPACE=dg0` and is restricted to grounded ice; see the
+`obs_dhdt.py` module docstring for the target field, its 2003-2019 protocol
+asterisk, and why the pixels are binned rather than point-sampled.
+
+```bash
+ISMIP7_DHDT_WEIGHT=1.0 ISMIP7_MAP_OUT=mesh/inversion_transient_2500.h5 \
+  ISMIP7_LC=2500 mpiexec -n 12 python scripts/inversion_icepack2.py
+python scripts/compare_dhdt.py vel=mesh/<velocity-only>.h5 tr=mesh/<transient>.h5
+```
+
+`compare_dhdt.py` is the payoff diagnostic: the t=0 *velocity* misfit cannot
+tell a velocity-only MAP from a transient one (both fit `u`), so the thickness
+tendency is the observable that can.
+
+### Environment knobs (inversion)
+
+| Env var | Meaning | Default |
+|---------|---------|---------|
+| `ISMIP7_MAP_OUT` | full output path for the MAP h5, overriding the generated name. Use it for smoke tests and variant inversions so a short run cannot replace a converged production MAP. A bare filename resolves under `mesh/`; the directory is created and probed for writability at startup | _(generated name)_ |
+| `ISMIP7_MISFIT_NORM` | `sigma`: divide each residual by its own datum's squared error, making the misfit a dimensionless chi^2 so terms of different units can be traded off. `none`: legacy dimensional misfit. **Selects the `ISMIP7_GAMMA_*` defaults** (see below) | `sigma` |
+| `ISMIP7_GAMMA_THETA` / `ISMIP7_GAMMA_PHI` | Whittle-Matern prior strength on `θ` / `φ`. Default is coupled to `ISMIP7_MISFIT_NORM`, because normalizing divides the misfit by ~sigma^2 and would otherwise weaken the prior by the same factor | `1e5` under `sigma`, `1e4` under `none` |
+| `ISMIP7_L_REG` | prior correlation length (m) | `7.5e3` |
+| `ISMIP7_SIGMA_U_FLOOR` | floor on the per-component MEaSUREs velocity error (m/yr); without it the near-zero errors let a few nodes dominate the functional | `1.0` |
+| `ISMIP7_SIGMA_U_UNOBS` | sigma (m/yr) assigned where MEaSUREs reports no error at all. Those nodes also have a zero-filled `u_obs`, so they must be given a *large* sigma, not the floor, or they would carry maximal weight on a fabricated zero velocity when `ISMIP7_OBS_MASK=0` | `1e4` |
+| `ISMIP7_OBS_MASK` | `0` drops the velocity-observation mask (unobserved nodes re-enter the misfit) | `1` |
+| `ISMIP7_DHDT_WEIGHT` | weight on the dH/dt chi^2 term; `0` disables the transient constraint entirely (requires `ISMIP7_GEOMETRY_SPACE=dg0` when on) | `0` |
+| `ISMIP7_DHDT_SIGMA` | assumed dH/dt uncertainty (m/yr). A hand-set scalar: the MIPkit ships **no** uncertainty field for either dH/dt product | `0.1` |
+| `ISMIP7_DHDT_DT` | timestep of the single prognostic step (yr) | `1.0` |
+| `ISMIP7_DHDT_VAR` | observed field: `dhdt_smith` (firn-corrected, 2003-2019 mean) or `dhdt_cpom` (**not** firn corrected, so not interchangeable) | `dhdt_smith` |
+| `ISMIP7_DHDT_MELT` | `0` drops ocean melt from the prognostic step's source (SMB only). On by default so the step matches the forward's forcing; a missing `results/calibrated_K_per_basin_*.npz` warns and falls back to SMB-only rather than aborting, since melt is zero on grounded ice and the misfit is grounded-only | `1` |
+| `ISMIP7_DHDT_CLIM_START` / `_END` | RACMO SMB climatology window for that source | `2003` / `2019` |
+| `ISMIP7_DHDT_REACH` | pixel-to-cell reach as a multiple of the cell scale `sqrt(area)`; rejects raster pixels lying outside the mesh that nearest-centroid assignment would otherwise snap onto boundary cells | `0.75` |
+| `ISMIP7_OBS_KIT` | path to `AntarcticaObsISMIP7-v*.nc` | newest under `<DATA_ROOT>/obs/mipkit` |
+
 ---
 
 ## 5. Calibrate ocean melt (`calibrate_melt.py`)

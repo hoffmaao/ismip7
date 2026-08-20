@@ -42,6 +42,12 @@ from firedrake import (
     NonlinearVariationalSolver,
     COMM_WORLD,
     exp,
+    TestFunction,
+    FacetNormal,
+    dot,
+    jump,
+    ds,
+    dS,
 )
 from tlm_adjoint.firedrake import (
     reset_manager,
@@ -77,6 +83,7 @@ sys.path.insert(0, os.path.dirname(_ROOT))
 from icepack2_tools.boundary import load_boundary_ids
 from icepack2_tools.dual_friction import build_rc_residual, weertman_anchor
 from icepack2_tools.geometry import cg1_lift, sample_to_geometry
+from icepack2_tools.grounding import height_above_flotation
 from icepack2_tools.naming import map_basename
 from icepack2_tools.prior import (
     regularization_form as reg_form,
@@ -220,14 +227,14 @@ def main():
     # constraint (0.7% of grounded area for MEaSUREs 450m v2). MEaSUREs
     # reports errors only where a velocity was measured, so ERR > 0 marks
     # real observations. ISMIP7_OBS_MASK=0 reverts to the unmasked misfit.
+    err = icepack.interpolate(
+        (rasterio.open(f"netcdf:{vel_fn}:ERRX"),
+         rasterio.open(f"netcdf:{vel_fn}:ERRY")),
+        V,
+        fillvalue=0.0,
+    )
     obs_mask = Function(Q, name="obs_mask").assign(1.0)
     if os.environ.get("ISMIP7_OBS_MASK", "1") != "0":
-        err = icepack.interpolate(
-            (rasterio.open(f"netcdf:{vel_fn}:ERRX"),
-             rasterio.open(f"netcdf:{vel_fn}:ERRY")),
-            V,
-            fillvalue=0.0,
-        )
         emag = Function(Q).interpolate(sqrt(err[0] ** 2 + err[1] ** 2))
         obs_mask.dat.data[:] = (emag.dat.data_ro > 0.0).astype(float)
         n_no = COMM_WORLD.allreduce(int((obs_mask.dat.data_ro == 0.0).sum()))
@@ -236,6 +243,50 @@ def main():
             f"  Obs mask: {n_no}/{n_all} nodes without velocity obs "
             f"excluded from the misfit (regularization fills them)"
         )
+
+    # ── Observation-error normalization ──────────────────────────────────
+    # Each misfit term is divided by the SQUARED observational error of its own
+    # datum, so every term is dimensionless (a chi^2 density) and the relative
+    # weight between them is a pure number rather than an accident of units.
+    # Without this the velocity term carries (m/yr)^2 and cannot be traded off
+    # against a dH/dt term in any principled way.
+    #
+    # Velocity: per-component MEaSUREs formal error, floored. The floor matters
+    # -- ERR goes to ~0 in places, and an unfloored 1/sigma^2 would let a
+    # handful of nodes dominate the whole functional.
+    #
+    # NOTE: normalizing changes the ABSOLUTE misfit scale, so GAMMA_THETA and
+    # GAMMA_PHI, which are tuned against the old unnormalized scale, are NOT
+    # transferable -- retune them, or set ISMIP7_MISFIT_NORM=none to recover the
+    # legacy functional. Measured at 32 km the MEaSUREs per-component sigma has
+    # median 2.6 m/yr and p90 6.6 m/yr, so the shift is roughly one order of
+    # magnitude, not two; the printout below reports the actual distribution.
+    misfit_norm = os.environ.get("ISMIP7_MISFIT_NORM", "sigma").lower()
+    if misfit_norm not in ("sigma", "none"):
+        raise ValueError(
+            f"ISMIP7_MISFIT_NORM must be 'sigma' or 'none', got {misfit_norm!r}"
+        )
+    sigma_u_floor = float(os.environ.get("ISMIP7_SIGMA_U_FLOOR", "1.0"))  # m/yr
+    if misfit_norm == "sigma":
+        sig_ux = Function(Q, name="sigma_ux").interpolate(
+            max_value(abs(err[0]), Constant(sigma_u_floor)))
+        sig_uy = Function(Q, name="sigma_uy").interpolate(
+            max_value(abs(err[1]), Constant(sigma_u_floor)))
+        _sx = sig_ux.dat.data_ro
+        PETSc.Sys.Print(
+            f"  Misfit normalization: chi^2 (per-datum sigma^2). "
+            f"velocity sigma floor {sigma_u_floor:g} m/yr, "
+            f"sigma_x median {float(np.median(_sx)):.2f} "
+            f"p90 {float(np.percentile(_sx, 90)):.2f} m/yr"
+        )
+        PETSc.Sys.Print(
+            "  NOTE: absolute misfit is now dimensionless; GAMMA_THETA/GAMMA_PHI "
+            "tuned on the unnormalized scale do not carry over."
+        )
+    else:
+        sig_ux = Function(Q).assign(1.0)
+        sig_uy = Function(Q).assign(1.0)
+        PETSc.Sys.Print("  Misfit normalization: NONE (legacy, dimensional)")
 
     # ── Rheology ──
     # Composite viscous rheology: flow exponent n_flow (this branch: n=3
@@ -467,7 +518,17 @@ def main():
     # inverted under, so n=3/n=4 and DG0/CG1 MAPs coexist on disk and a forward
     # cannot silently pair itself with a MAP whose front treatment differs.
     # Built by the shared helper the forward and the preflight gates use.
-    map_fn = map_basename(FRICTION, lc)
+    # ISMIP7_MAP_OUT overrides the full output path: without it, EVERY run --
+    # including a short smoke test -- writes to the production filename, and a
+    # 3-iteration artifact silently replaces a converged MAP (this nearly
+    # happened twice in Aug 2026 validation). Variant MAPs (e.g. the transient
+    # dH/dt-constrained inversion) should also name themselves distinctly here
+    # rather than shadow the velocity-only MAP the forwards auto-load.
+    map_out = os.environ.get("ISMIP7_MAP_OUT")
+    map_fn = os.path.basename(map_out) if map_out else map_basename(FRICTION, lc)
+    _map_dir = os.path.dirname(map_out) if map_out else MESH_DIR
+    if map_out:
+        PETSc.Sys.Print(f"  MAP output override: {map_out}")
 
     def build_F(theta_c, phi_c):
         # Residual closure (tau linear, grounded-only theta via exp(theta*He),
@@ -517,6 +578,116 @@ def main():
     # comparable between masked and unmasked runs.
     area_val = assemble(obs_mask * dx(mesh))
 
+    # ── Transient (dH/dt) constraint ─────────────────────────────────────
+    # A velocity-only inversion never constrains div(h u), so the MAP can carry
+    # a flux divergence wildly inconsistent with the observed geometry; the
+    # forward then drifts or needs a large frozen apparent-MB term to stand in
+    # for it. Adding one prognostic step and matching the resulting thickness
+    # tendency to an observed mean dH/dt map closes that directly.
+    #
+    # Restricted to GROUNDED ice by default, for three reasons: floating dH/dt
+    # from altimetry is noisy and firn/tide/ocean confounded (the observed field
+    # integrates to +212 Gt/yr over shelves against -85.6 Gt/yr grounded, which
+    # matches IMBIE-3), floating thickness change does not move VAF, and on
+    # grounded ice ocean melt is identically zero -- so the term needs only SMB
+    # and pulls in no melt parameterisation.
+    dhdt_w = float(os.environ.get("ISMIP7_DHDT_WEIGHT", "0.0"))
+    use_dhdt = dhdt_w > 0.0
+    if use_dhdt:
+        if not geom_dg:
+            raise RuntimeError(
+                "ISMIP7_DHDT_WEIGHT requires ISMIP7_GEOMETRY_SPACE=dg0: the "
+                "prognostic step is the DG0 upwind FV operator and must act on "
+                "the same field the forward transports."
+            )
+        from icepack2_tools.obs_dhdt import load_dhdt_obs
+
+        dhdt_sigma = float(os.environ.get("ISMIP7_DHDT_SIGMA", "0.1"))   # m/yr
+        dhdt_dt = float(os.environ.get("ISMIP7_DHDT_DT", "1.0"))          # yr
+        clim0 = int(os.environ.get("ISMIP7_DHDT_CLIM_START", "2003"))
+        clim1 = int(os.environ.get("ISMIP7_DHDT_CLIM_END", "2019"))
+
+        dhdt_obs, dhdt_cov = load_dhdt_obs(Q_g, Q)
+        smb_obs = load_racmo_smb_climatology(Q_g, clim_start=clim0, clim_end=clim1)
+
+        # Ocean melt for the prognostic step, from the SAME parameterisation
+        # and forcing the experiments use: OI-climatology TF/so at draft depth
+        # + per-basin calibrated K through the Burgard quadratic-mixed-slope
+        # formula, via the shared make_climatology_ocean_callback -- not a
+        # reimplementation. Evaluated ONCE at the frozen reference geometry
+        # (the controls move; the reference geometry does not), so it is a
+        # constant field like smb_obs. It is zero on grounded ice by
+        # construction, so the grounded-only misfit is unchanged by it; what
+        # it fixes is the source term the implicit step sees on shelf cells,
+        # keeping the single prognostic step consistent with the forward
+        # experiment. ISMIP7_DHDT_MELT=0 drops it (SMB-only source).
+        melt_ref = Function(Q_g, name="ocean_melt_ref")
+        if os.environ.get("ISMIP7_DHDT_MELT", "1") != "0":
+            from icepack2_tools.forcing import (
+                load_K_per_basin, make_climatology_ocean_callback)
+            _k_lc = os.path.join(_ROOT, "results",
+                                 f"calibrated_K_per_basin_{lc}.npz")
+            _k_2500 = os.path.join(_ROOT, "results",
+                                   "calibrated_K_per_basin_2500.npz")
+            k_npz = os.environ.get(
+                "ISMIP7_K_PER_BASIN_NPZ",
+                _k_lc if os.path.exists(_k_lc) else _k_2500)
+            if not os.path.exists(k_npz):
+                raise FileNotFoundError(
+                    f"Per-basin K not found at {k_npz} (needed for the dH/dt "
+                    f"constraint's melt source; ISMIP7_DHDT_MELT=0 to run "
+                    f"with an SMB-only source).")
+            if geom_dg:
+                _W2 = VectorFunctionSpace(mesh, "DG", 0)
+                _xy = Function(_W2).interpolate(
+                    fd.SpatialCoordinate(mesh)).dat.data_ro.reshape(-1, 2)
+                geom_xy = (_xy[:, 0].copy(), _xy[:, 1].copy())
+            else:
+                _c = mesh.coordinates.dat.data_ro
+                geom_xy = (_c[:, 0], _c[:, 1])
+            K_field = load_K_per_basin(k_npz, geom_xy[0], geom_xy[1], fill=0.0)
+            K_field = K_field * float(os.environ.get("ISMIP7_K_SCALE", "1.0"))
+            _ctx = {"mesh": mesh, "Q": Q, "V": V, "Q_g": Q_g,
+                    "geom_xy": geom_xy, "h": H, "b": b, "s": s,
+                    "ocean_melt": melt_ref}
+            make_climatology_ocean_callback(K_field)(_ctx, 0.0)
+            _melt_gt = float(assemble(melt_ref * dx)) * 917.0 / 1e12
+            PETSc.Sys.Print(
+                f"  dH/dt melt source: per-basin K ({os.path.basename(k_npz)}"
+                f"), integrated {_melt_gt:.0f} Gt/yr at reference geometry")
+        else:
+            PETSc.Sys.Print("  dH/dt melt source: DISABLED (SMB-only)")
+
+        # grounded indicator on the reference geometry, frozen (the control
+        # fields move, the classification of where we trust dH/dt should not)
+        haf_ref = Function(Q_g).interpolate(height_above_flotation(H, b))
+        grounded = Function(Q_g)
+        grounded.dat.data[:] = np.where(
+            (haf_ref.dat.data_ro > 0.0) & (H.dat.data_ro > 1.0), 1.0, 0.0)
+        dhdt_mask = Function(Q_g, name="dhdt_mask")
+        dhdt_mask.dat.data[:] = dhdt_cov.dat.data_ro * grounded.dat.data_ro
+        dhdt_area = assemble(dhdt_mask * dx(mesh))
+        if dhdt_area <= 0.0:
+            raise RuntimeError(
+                "dH/dt constraint enabled but no cell is both grounded and "
+                "observation-covered; check ISMIP7_OBS_KIT and the mesh."
+            )
+        _n_use = int((dhdt_mask.dat.data_ro > 0.5).sum())
+        PETSc.Sys.Print(
+            f"  dH/dt constraint: weight={dhdt_w:g} sigma={dhdt_sigma:g} m/yr "
+            f"dt={dhdt_dt:g} yr, {_n_use} grounded+observed cells, "
+            f"{dhdt_area / 1e6 / 1e3:.0f} x10^3 km^2, "
+            f"SMB clim {clim0}-{clim1}"
+        )
+        if variable_note := os.environ.get("ISMIP7_DHDT_VAR", "dhdt_smith"):
+            if variable_note == "dhdt_smith":
+                PETSc.Sys.Print(
+                    "  dH/dt target: dhdt_smith 2003-2019 mean -- DECLARED "
+                    "overlap with the post-2015 projection era (protocol "
+                    "dates DA initial states before 2015; see obs_dhdt.py)"
+                )
+        h_next = Function(Q_g, name="h_next")
+
     def forward(theta_ctrl, phi_ctrl):
         clear_caches()
         F_ctrl = build_F(theta_ctrl, phi_ctrl)
@@ -533,14 +704,57 @@ def main():
             ).solve()
 
         u_sol, _, _ = split(z)
-        J = Functional(name="J")
-        J.assign(
+        # chi^2 density: each residual divided by the squared error of its own
+        # observation, so the term is dimensionless.
+        integrand = (
             0.5
             / area_val
             * obs_mask
-            * ((u_sol[0] - u_obs[0]) ** 2 + (u_sol[1] - u_obs[1]) ** 2)
-            * dx
+            * (
+                (u_sol[0] - u_obs[0]) ** 2 / sig_ux ** 2
+                + (u_sol[1] - u_obs[1]) ** 2 / sig_uy ** 2
+            )
         )
+
+        if use_dhdt:
+            # ONE prognostic step, using the SAME DG0 upwind FV operator the
+            # forward transports with -- that consistency is the point: the
+            # inversion must be penalised for the divergence its own transport
+            # scheme will produce, not an idealised one.
+            w = TestFunction(Q_g)
+            nrm = FacetNormal(mesh)
+            un = dot(u_sol, nrm)
+            unp = (un + abs(un)) / 2
+            dt_c = Constant(dhdt_dt)
+            F_h = (
+                (h_next - H) / dt_c * w * dx
+                + (unp("+") * h_next("+") - unp("-") * h_next("-")) * jump(w) * dS
+                + unp * h_next * w * ds
+                - (smb_obs - melt_ref) * w * dx
+            )
+            EquationSolver(
+                F_h == 0,
+                h_next,
+                solver_parameters={
+                    "snes_type": "ksponly",
+                    "ksp_type": "gmres",
+                    "pc_type": "bjacobi",
+                    "sub_pc_type": "ilu",
+                    "ksp_rtol": 1e-10,
+                },
+                form_compiler_parameters=fc_params,
+            ).solve()
+            dhdt_model = (h_next - H) / dt_c
+            integrand = integrand + (
+                0.5
+                * Constant(dhdt_w)
+                / dhdt_area
+                * dhdt_mask
+                * ((dhdt_model - dhdt_obs) / Constant(dhdt_sigma)) ** 2
+            )
+
+        J = Functional(name="J")
+        J.assign(integrand * dx)
         return J
 
     # ── MPI helpers ──
@@ -561,6 +775,35 @@ def main():
             scatter.scatter(x_seq, v, mode=PETSc.Scatter.Mode.REVERSE)
             scatter.destroy()
             x_seq.destroy()
+
+    # ── Per-term diagnostics ─────────────────────────────────────────────
+    # forward() returns ONE functional, so with two terms summed the reported
+    # misfit alone cannot say which is being fitted. These re-assemble each
+    # chi^2 contribution from the state left behind by the last forward solve
+    # (diagnostic only -- outside the annotated tape, so they do not enter the
+    # gradient). Both are dimensionless and directly comparable.
+    _u_now = z.subfunctions[0]
+    _vel_chi2 = (
+        0.5 / area_val * obs_mask
+        * ((_u_now[0] - u_obs[0]) ** 2 / sig_ux ** 2
+           + (_u_now[1] - u_obs[1]) ** 2 / sig_uy ** 2)
+    ) * dx(mesh)
+    if use_dhdt:
+        _dhdt_chi2 = (
+            0.5 / dhdt_area * dhdt_mask
+            * (((h_next - H) / Constant(dhdt_dt) - dhdt_obs)
+               / Constant(dhdt_sigma)) ** 2
+        ) * dx(mesh)
+
+    def term_report():
+        r"""``' vel=... dhdt=...'`` for the iteration line, or '' if disabled."""
+        try:
+            out = f" vel={float(assemble(_vel_chi2)):.4e}"
+            if use_dhdt:
+                out += f" dhdt={float(assemble(_dhdt_chi2)):.4e}"
+            return out
+        except Exception:
+            return ""
 
     # ── L-BFGS-B Inversion ──
     max_iter = int(os.environ.get("ISMIP7_MAXITER", "500"))
@@ -645,14 +888,15 @@ def main():
         iteration_count[0] += 1
         PETSc.Sys.Print(
             f"  iter {iteration_count[0]:3d}: "
-            f"misfit={J_val:.6e} reg_θ={reg_theta:.4e} reg_φ={reg_phi:.4e} "
+            f"misfit={J_val:.6e}{term_report()} "
+            f"reg_θ={reg_theta:.4e} reg_φ={reg_phi:.4e} "
             f"total={total:.6e} |grad|={np.linalg.norm(total_grad):.4e} "
             f"[fwd={t_fwd:.1f}s adj={t_adj:.1f}s total={t_iter:.1f}s]"
         )
 
         # Periodic checkpoint every 20 iterations
         if iteration_count[0] % 20 == 0:
-            chk_fn = os.path.join(MESH_DIR, map_fn)
+            chk_fn = os.path.join(_map_dir, map_fn)
             with fd.CheckpointFile(chk_fn, "w") as chk:
                 chk.save_mesh(mesh)
                 chk.save_function(theta, name="log_friction")
@@ -689,7 +933,7 @@ def main():
     )
 
     # ── Save MAP immediately ──
-    chk_fn = os.path.join(MESH_DIR, map_fn)
+    chk_fn = os.path.join(_map_dir, map_fn)
     with fd.CheckpointFile(chk_fn, "w") as chk:
         chk.save_mesh(mesh)
         chk.save_function(theta, name="log_friction")
@@ -707,12 +951,24 @@ def main():
     PETSc.Sys.Print(f"Saved MAP: {chk_fn}")
 
     # ── Final forward solve ──
+    # The single-shot solve at full exponents can fail, and the old code then
+    # SAVED the failed Newton state as "velocity" while claiming the last
+    # optimization state was used (the message said so, but z was never
+    # restored). The Aug 3 dg0 32 km MAP carries a 2745 m/yr-RMS velocity this
+    # way -- discovered only when compare_dhdt.py scored it against MEaSUREs.
+    # Now: restore the last good optimization state on failure, and refuse to
+    # save any velocity whose misfit grossly disagrees with the optimizer's
+    # (a forward re-solves the diagnostic from theta/phi anyway; a missing
+    # velocity is an inconvenience, a silently wrong one poisons everything
+    # downstream that trusts the checkpoint).
     PETSc.Sys.Print("\nFinal forward solve...")
     stop_manager()
     try:
         slvr.solve()
     except fd.ConvergenceError:
-        PETSc.Sys.Print("  Final solve failed, using last optimization state")
+        PETSc.Sys.Print("  Final solve failed; restoring last good "
+                        "optimization state")
+        z.assign(z_backup)
 
     u_sol = z.subfunctions[0]
     u_sol_mag = Function(Q).interpolate(sqrt(u_sol[0] ** 2 + u_sol[1] ** 2))
@@ -727,10 +983,26 @@ def main():
     )
     PETSc.Sys.Print(f"  Final misfit (masked): {misfit:.6e}")
 
-    # Update checkpoint with velocity
-    with fd.CheckpointFile(chk_fn, "a") as chk:
-        chk.save_function(u_sol, name="velocity")
-    PETSc.Sys.Print(f"Saved velocity: {chk_fn}")
+    # Update checkpoint with velocity -- unless the state is inconsistent
+    # with the optimization it claims to represent. The comparison must be in
+    # the SAME metric as the optimizer's J_val: under ISMIP7_MISFIT_NORM=sigma
+    # J_val is a chi^2 while `misfit` above is dimensional, and the ratio
+    # between the two for a HEALTHY state is ~sigma^2 (~9-14 with the 3 m/yr
+    # floor) -- the first version of this guard compared across metrics and
+    # blocked a good velocity at 13.8x while a corrupt one sits >1000x off.
+    _guard = float(assemble(_vel_chi2)) if misfit_norm == "sigma" else misfit
+    _ref = max(float(last_good_obj[0]), 1e-30)
+    if np.isfinite(_guard) and _guard <= 10.0 * _ref:
+        with fd.CheckpointFile(chk_fn, "a") as chk:
+            chk.save_function(u_sol, name="velocity")
+        PETSc.Sys.Print(f"Saved velocity: {chk_fn}")
+    else:
+        PETSc.Sys.Print(
+            f"WARNING: NOT saving velocity -- final-state misfit {misfit:.3e} "
+            f"is inconsistent with the optimizer's {_ref:.3e} (>10x). The MAP "
+            f"controls are saved and valid; forwards re-solve the diagnostic "
+            f"from theta/phi and are unaffected."
+        )
 
     # ── Plot ──
     # Optional: the MAP is already written and the velocity saved above, so a

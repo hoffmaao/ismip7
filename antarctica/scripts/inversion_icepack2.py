@@ -254,10 +254,16 @@ def main():
         V,
         fillvalue=0.0,
     )
+    # ONE definition of "this node carries a real velocity observation",
+    # consumed by both the mask below and the sigma normalization further down.
+    # The two used to derive it independently from `err` and could drift apart.
+    emag = Function(Q, name="obs_err_mag").interpolate(
+        sqrt(err[0] ** 2 + err[1] ** 2))
+    observed = np.asarray(emag.dat.data_ro > 0.0)
+
     obs_mask = Function(Q, name="obs_mask").assign(1.0)
     if os.environ.get("ISMIP7_OBS_MASK", "1") != "0":
-        emag = Function(Q).interpolate(sqrt(err[0] ** 2 + err[1] ** 2))
-        obs_mask.dat.data[:] = (emag.dat.data_ro > 0.0).astype(float)
+        obs_mask.dat.data[:] = observed.astype(float)
         n_no = COMM_WORLD.allreduce(int((obs_mask.dat.data_ro == 0.0).sum()))
         n_all = COMM_WORLD.allreduce(len(obs_mask.dat.data_ro))
         PETSc.Sys.Print(
@@ -294,23 +300,30 @@ def main():
         # made safe explicitly, by giving those nodes a sigma large enough that
         # they carry no weight rather than maximal weight.
         sigma_u_unobs = float(os.environ.get("ISMIP7_SIGMA_U_UNOBS", "1e4"))
-        _emag = Function(Q).interpolate(sqrt(err[0] ** 2 + err[1] ** 2))
-        _observed = Function(Q, name="err_observed")
-        _observed.dat.data[:] = (_emag.dat.data_ro > 0.0).astype(float)
         sig_ux = Function(Q, name="sigma_ux").interpolate(
             max_value(abs(err[0]), Constant(sigma_u_floor)))
         sig_uy = Function(Q, name="sigma_uy").interpolate(
             max_value(abs(err[1]), Constant(sigma_u_floor)))
-        _unobs = _observed.dat.data_ro == 0.0
+        _unobs = ~observed
         sig_ux.dat.data[_unobs] = sigma_u_unobs
         sig_uy.dat.data[_unobs] = sigma_u_unobs
         _n_unobs = COMM_WORLD.allreduce(int(_unobs.sum()))
-        _sx = sig_ux.dat.data_ro
+        # Order statistics have to be taken over the WHOLE field: .dat.data_ro
+        # is this rank's owned dofs, so a bare np.median would print rank 0's
+        # partition as if it were the ice-sheet-wide MEaSUREs distribution --
+        # and this printout is the evidence cited for the gamma rescale.
+        _parts = COMM_WORLD.gather(
+            np.asarray(sig_ux.dat.data_ro, dtype="f8"), root=0)
+        if COMM_WORLD.rank == 0:
+            _all = np.concatenate(_parts)
+            _stats = (float(np.median(_all)), float(np.percentile(_all, 90)))
+        else:
+            _stats = None
+        _sig_med, _sig_p90 = COMM_WORLD.bcast(_stats, root=0)
         PETSc.Sys.Print(
             f"  Misfit normalization: chi^2 (per-datum sigma^2). "
             f"velocity sigma floor {sigma_u_floor:g} m/yr, "
-            f"sigma_x median {float(np.median(_sx)):.2f} "
-            f"p90 {float(np.percentile(_sx, 90)):.2f} m/yr"
+            f"sigma_x median {_sig_med:.2f} p90 {_sig_p90:.2f} m/yr"
         )
         PETSc.Sys.Print(
             f"  Unobserved nodes (ERR==0): {_n_unobs} given "
@@ -895,6 +908,39 @@ def main():
         except Exception:
             return ""
 
+    # ── MAP checkpoint writer ────────────────────────────────────────────
+    # ONE writer for both the periodic checkpoint and the final save: the two
+    # used to be copy-pasted, so a field or attribute added to one silently
+    # missed the other.
+    #
+    # The attributes record which OBJECTIVE produced the controls. The filename
+    # (icepack2_tools/naming.py) encodes only friction, lc, geometry space and
+    # flow exponent, so a velocity-only MAP and a dH/dt-constrained one, or two
+    # runs under different normalizations/priors, land on the SAME path and
+    # overwrite each other with nothing on disk to tell them apart. This repo
+    # has been bitten by exactly that class of look-alike MAP before (see
+    # ../GEOMETRY_DISCRETIZATION.md on the geometry tag), and MAPs are
+    # gitignored, so the checkpoint is the only place this provenance can live.
+    def save_map(path):
+        with fd.CheckpointFile(path, "w") as chk:
+            chk.save_mesh(mesh)
+            chk.save_function(theta, name="log_friction")
+            chk.save_function(phi, name="log_fluidity")
+            chk.save_function(u_obs, name="velocity_obs")
+            chk.save_function(obs_mask, name="obs_mask")
+            chk.save_function(H, name="thickness")
+            chk.save_function(b, name="bed")
+            chk.save_function(s, name="surface")
+            chk.save_function(A_prior, name="fluidity_prior")
+            # The .msh this MAP was inverted on. A CheckpointFile mesh is named
+            # "firedrake_default", so this is how the forward names its own
+            # mesh and picks the matching per-mesh boundary-id sidecar.
+            chk.set_attr("/", "mesh_basename", os.path.basename(mesh_fn))
+            chk.set_attr("/", "misfit_norm", MISFIT_NORM)
+            chk.set_attr("/", "gamma_theta", float(GAMMA_THETA))
+            chk.set_attr("/", "gamma_phi", float(GAMMA_PHI))
+            chk.set_attr("/", "dhdt_weight", float(dhdt_w))
+
     # ── L-BFGS-B Inversion ──
     max_iter = int(os.environ.get("ISMIP7_MAXITER", "500"))
     PETSc.Sys.Print(f"\nStarting L-BFGS-B inversion (theta + phi)...")
@@ -987,18 +1033,7 @@ def main():
 
         # Periodic checkpoint every 20 iterations
         if iteration_count[0] % 20 == 0:
-            chk_fn = os.path.join(_map_dir, map_fn)
-            with fd.CheckpointFile(chk_fn, "w") as chk:
-                chk.save_mesh(mesh)
-                chk.save_function(theta, name="log_friction")
-                chk.save_function(phi, name="log_fluidity")
-                chk.save_function(u_obs, name="velocity_obs")
-                chk.save_function(obs_mask, name="obs_mask")
-                chk.save_function(H, name="thickness")
-                chk.save_function(b, name="bed")
-                chk.save_function(s, name="surface")
-                chk.save_function(A_prior, name="fluidity_prior")
-                chk.set_attr("/", "mesh_basename", os.path.basename(mesh_fn))
+            save_map(os.path.join(_map_dir, map_fn))
             PETSc.Sys.Print(f"    [checkpoint saved: iter {iteration_count[0]}]")
 
         return total, total_grad
@@ -1025,21 +1060,12 @@ def main():
 
     # ── Save MAP immediately ──
     chk_fn = os.path.join(_map_dir, map_fn)
-    with fd.CheckpointFile(chk_fn, "w") as chk:
-        chk.save_mesh(mesh)
-        chk.save_function(theta, name="log_friction")
-        chk.save_function(phi, name="log_fluidity")
-        chk.save_function(u_obs, name="velocity_obs")
-        chk.save_function(obs_mask, name="obs_mask")
-        chk.save_function(H, name="thickness")
-        chk.save_function(b, name="bed")
-        chk.save_function(s, name="surface")
-        chk.save_function(A_prior, name="fluidity_prior")
-        # The .msh this MAP was inverted on. A CheckpointFile mesh is named
-        # "firedrake_default", so this is how the forward names its own mesh
-        # and picks the matching per-mesh boundary-id sidecar.
-        chk.set_attr("/", "mesh_basename", os.path.basename(mesh_fn))
-    PETSc.Sys.Print(f"Saved MAP: {chk_fn}")
+    save_map(chk_fn)
+    PETSc.Sys.Print(
+        f"Saved MAP: {chk_fn} "
+        f"(misfit_norm={MISFIT_NORM} gamma_theta={GAMMA_THETA:g} "
+        f"gamma_phi={GAMMA_PHI:g} dhdt_weight={dhdt_w:g})"
+    )
 
     # ── Final forward solve ──
     # The single-shot solve at full exponents can fail, and the old code then

@@ -36,7 +36,9 @@ from icepack2_tools.forcing import (
     ISMIP7Atmosphere, ISMIP7Ocean, ISMIP7Fracture,
     make_forcing_callback, load_racmo_smb_climatology, forcing_coords,
 )
-from icepack2_tools.climatology import clim_start, clim_end, clim_scenario
+from icepack2_tools.climatology import (
+    clim_start, clim_end, clim_scenario, clim_pool_missing, describe_clim_pool,
+)
 
 # Owned by icepack2_tools.climatology: this pool must match the CONTROL's
 # climatology, or the projections are re-referenced against a different
@@ -89,6 +91,17 @@ def smb_scheme(ctx, esm):
             ref += a.get_smb(y, mesh_x, mesh_y, anomaly=True)
         ref /= len(pool)
         years = sorted(y for _, y in pool)
+        PETSc.Sys.Print(f"  {describe_clim_pool(years, 'acabf-anomaly')}")
+        missing = clim_pool_missing(years)
+        if missing:
+            PETSc.Sys.Print(
+                f"  WARNING: aSMB re-referenced over {len(set(years))} of the "
+                f"{CLIM_END - CLIM_START + 1} window years ({len(missing)} "
+                f"missing, {missing[0]}..{missing[-1]}). This core's baseline "
+                f"differs from a full-window sibling's while both are "
+                f"differenced against the same CTRL. Proceeding: the pool is "
+                f"recorded above and in the per-core report."
+            )
         return True, racmo.dat.data_ro - ref, (
             f"RACMO2.4p1 baseline + aSMB re-referenced to "
             f"{years[0]}-{years[-1]} ({len(pool)} yr pooled)"

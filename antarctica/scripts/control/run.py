@@ -35,7 +35,9 @@ from icepack2_tools.forcing import (
     forcing_coords,
     _RHO_ICE, _RHO_WATER, _K_DEFAULT,
 )
-from icepack2_tools.climatology import clim_start, clim_end, clim_scenario
+from icepack2_tools.climatology import (
+    clim_start, clim_end, clim_scenario, clim_pool_missing, describe_clim_pool,
+)
 
 T_START = 2015.0
 T_END = float(os.environ.get("ISMIP7_T_END", "2300"))
@@ -87,12 +89,14 @@ def compute_climatology(atms, mesh_x, mesh_y):
     """
     smb_sum = np.zeros(len(mesh_x))
     n = 0
+    pooled = []
     for atm in atms:
         years = [y for y in atm.available_years("acabf")
                  if CLIM_START <= y <= CLIM_END]
         for yr in years:
             smb_sum += atm.get_smb(yr, mesh_x, mesh_y, anomaly=False)
         n += len(years)
+        pooled += years
         if years:
             PETSc.Sys.Print(
                 f"  {atm.scenario}: {len(years)} acabf years "
@@ -100,6 +104,18 @@ def compute_climatology(atms, mesh_x, mesh_y):
             )
     if n == 0:
         return None
+    PETSc.Sys.Print(f"  {describe_clim_pool(pooled, 'acabf full field')}")
+    missing = clim_pool_missing(pooled)
+    if missing:
+        PETSc.Sys.Print(
+            f"  WARNING: the constant SMB climatology is a mean over "
+            f"{len(set(pooled))} of the {CLIM_END - CLIM_START + 1} window "
+            f"years ({len(missing)} missing, {missing[0]}..{missing[-1]}). "
+            f"This control's baseline is NOT the full-window one, so a "
+            f"projection re-referenced over the full window is differenced "
+            f"against a different baseline. Proceeding: the pool is recorded "
+            f"above and in the per-core report."
+        )
     return smb_sum / n
 
 

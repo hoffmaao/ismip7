@@ -37,7 +37,9 @@ _ANT = os.path.dirname(_SCRIPTS)
 _PROJECT = os.path.dirname(_ANT)
 sys.path.insert(0, _PROJECT)
 
-from icepack2_tools.climatology import clim_scenario, clim_start, clim_end
+from icepack2_tools.climatology import (
+    CLIM_POOL_MARKER, clim_scenario, clim_start, clim_end,
+)
 from icepack2_tools.runconfig import (
     N_FLOW_DEFAULT, friction, geometry_space, lc, lc_coarse,
 )
@@ -78,6 +80,28 @@ def effective_env():
         if k not in env:
             env[k] = f"{v}    # default (not exported)"
     return dict(sorted(env.items()))
+
+
+def climatology_pool(log_path):
+    r"""The reference-climate pool the run actually built, lifted out of its
+    log.
+
+    The env block records which WINDOW was requested; only the run knows how
+    much of it existed on disk. A core re-referenced over 15 of the 30 years
+    is a different baseline from one re-referenced over all 30, and the run
+    warns rather than refusing, so that fact has to reach the only committed
+    record of the run.
+    """
+    if not log_path or not os.path.isfile(log_path):
+        return []
+    lines = []
+    with open(log_path, errors="replace") as f:
+        for line in f:
+            if CLIM_POOL_MARKER in line:
+                stripped = line.strip()
+                if stripped not in lines:
+                    lines.append(stripped)
+    return lines
 
 
 def sh(cmd):
@@ -159,6 +183,8 @@ def main():
                 f"the tracked record)\n")
         f.write(f"- observational audit: "
                 f"{'ON TRACK' if audit_rc == 0 else 'OFF TRACK'}\n")
+        for line in climatology_pool(args.log):
+            f.write(f"- {line}\n")
         if ens_rc is not None:
             f.write(f"- ISMIP6 ensemble: "
                     f"{'inside envelope' if ens_rc == 0 else 'outside envelope'}"

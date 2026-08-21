@@ -97,14 +97,23 @@ def clim_pool_gaps(esm, var):
                   - set(clim_pool_years(esm, var)))
 
 
-def pool_detail(esm, var, what):
-    r"""Description of an incomplete climatology pool, or None if complete."""
+def pool_status(esm, var, what):
+    r"""``(bucket, detail)`` for the climatology pool: bucket is ``"ok"``,
+    ``"partial"`` or ``"empty"``.
+
+    The three are graded because the RUNTIME grades them: an empty pool makes
+    the run take a different code path (the control raises, a projection
+    silently falls back to full acabf(t)), while a partial pool runs and warns.
+    A gate that blocked what the runtime happily runs would train people to
+    ignore it, so a partial pool reports PARTIAL, not BLOCKED.
+    """
     gaps = clim_pool_gaps(esm, var)
     if not gaps:
-        return None
+        return "ok", None
     have = clim_pool_years(esm, var)
     span = f"covers {have[0]}-{have[-1]}" if have else "no years"
-    return (f"{esm} {var} climatology pool (historical+{CLIM_SCENARIO}) "
+    return ("partial" if have else "empty",
+            f"{esm} {var} climatology pool (historical+{CLIM_SCENARIO}) "
             f"{span}, {len(gaps)} of {CLIM_START}-{CLIM_END} missing "
             f"({gaps[0]}..{gaps[-1]}): {what}")
 
@@ -196,10 +205,13 @@ def main():
     for w in warn:
         print(f"  WARNING: {w}")
     print(f"  RACMO baseline: {'OK' if racmo_ok() else 'MISSING (acabf fallback)'}")
+    print("  Status: READY = every input present; PARTIAL = the run proceeds "
+          "but warns and its provenance is degraded; BLOCKED = missing input")
     print()
 
     for core, title, esm, scenario, y0, y1 in CORES:
         miss = list(base_missing)
+        degraded = []
         if core == 11:
             if not racmo_ok():
                 miss.append("RACMO (OCX SMB)")
@@ -209,12 +221,16 @@ def main():
             if not oi_ok():
                 miss.append(f"OI climatology ({oi_version})")
             if not racmo_ok():
-                detail = pool_detail(
+                bucket, detail = pool_status(
                     esm, "acabf",
-                    "the constant SMB climatology would be a mean over the "
-                    "wrong years")
-                if detail:
+                    "the control would refuse to run"
+                    if not clim_pool_years(esm, "acabf") else
+                    "the constant SMB climatology would be a mean over part "
+                    "of the window; the run warns and proceeds")
+                if bucket == "empty":
                     miss.append(detail)
+                elif bucket == "partial":
+                    degraded.append(detail)
         else:
             # experiment.py re-references aSMB against the historical +
             # CLIM_SCENARIO acabf-anomaly pool and, on FileNotFoundError,
@@ -223,12 +239,17 @@ def main():
             # uses. Only meaningful when RACMO is present: without it every
             # core degrades together, which the shared RACMO line reports.
             if racmo_ok():
-                detail = pool_detail(
+                bucket, detail = pool_status(
                     esm, "acabf-anomaly",
-                    "the aSMB re-reference baseline would differ from the "
-                    "CTRL this core is differenced against")
-                if detail:
+                    "the run would silently fall back to full acabf(t), a "
+                    "different SMB scheme than the CTRL"
+                    if not clim_pool_years(esm, "acabf-anomaly") else
+                    "the aSMB re-reference baseline would differ from a "
+                    "full-window sibling's; the run warns and proceeds")
+                if bucket == "empty":
                     miss.append(detail)
+                elif bucket == "partial":
+                    degraded.append(detail)
             yrs = atm_years(esm, scenario) or atm_years(esm, scenario, "acabf")
             gaps = sorted(set(range(y0, y1 + 1)) - set(yrs))
             if not yrs:
@@ -247,8 +268,9 @@ def main():
             elif oc[0] > y0 or oc[1] < y1 - 1:
                 miss.append(f"ocean covers {oc[0]}-{oc[1]}, need {y0}-{y1}")
 
-        status = "READY  " if not miss else "BLOCKED"
-        detail = "" if not miss else "  <- " + "; ".join(miss)
+        status = "BLOCKED" if miss else "PARTIAL" if degraded else "READY  "
+        notes = miss + degraded
+        detail = "" if not notes else "  <- " + "; ".join(notes)
         print(f"  core {core:2d}  {status}  {title}{detail}")
 
 

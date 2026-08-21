@@ -35,6 +35,7 @@ from icepack.constants import (ice_density as rho_I, heat_capacity as c_heat,
                                thermal_diffusivity as alpha_th, latent_heat as L_heat,
                                melting_temperature as Tm, glen_flow_law as n_glen)
 from icepack.models.viscosity import rate_factor
+from icepack2_tools.mpi_stats import global_range
 
 DEFAULTS = dict(kappa=4.0, T_srf=263.15, q_geo=50.0, shear_amp=30.0,
                 duval=181.25, w_max=0.01, friction_exp=3.0, melt_delta=50.0,
@@ -239,10 +240,7 @@ def compute_fluidity_prior(u, h, s, bed, C, acc, T_srf, p=None, max_picard=60,
         dA_rel = comm.allreduce(
             float(rel.max()) if _sz else 0.0, op=MPI.MAX)
         A_k.dat.data[:] = A_relaxed
-        lo = comm.allreduce(float(A_k.dat.data_ro.min() if _sz else 1e30),
-                            op=MPI.MIN)
-        hi = comm.allreduce(float(A_k.dat.data_ro.max() if _sz else -1e30),
-                            op=MPI.MAX)
+        lo, hi = global_range(A_k, comm)
         _print(f"    it {it:2d}: A [{lo:6.1f}, {hi:8.1f}]  "
                f"dA_l2={dA_l2:.2e} dA_max={dA:.2e} dA_rel={dA_rel:.2e} "
                f"moving={n_moving}/{_n_total}")

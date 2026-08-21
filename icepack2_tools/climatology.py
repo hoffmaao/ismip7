@@ -40,3 +40,31 @@ def clim_end():
 def clim_scenario():
     r"""Scenario pooled with ``historical`` to build the climatology."""
     return os.environ.get("ISMIP7_CLIM_SCENARIO", CLIM_SCENARIO_DEFAULT)
+
+
+CLIM_POOL_MARKER = "SMB climatology pool:"
+
+
+def clim_pool_missing(years):
+    r"""Years of the reference-climate window absent from ``years``."""
+    return sorted(set(range(clim_start(), clim_end() + 1)) - set(years))
+
+
+def describe_clim_pool(years, source):
+    r"""One greppable line describing the pool a run ACTUALLY built.
+
+    A run whose pool covers 15 of the window's 30 years re-references its
+    anomalies to a different mean than one with full coverage, while both are
+    differenced against the same control. A partial pool is a degraded run,
+    not necessarily an invalid one, so the runtimes warn rather than refuse -
+    which only works if the effective coverage survives into the record.
+    ``core_report.py`` lifts every line carrying CLIM_POOL_MARKER out of the
+    run log and into the report, so the two are afterwards distinguishable.
+    """
+    have = sorted(set(years))
+    want = clim_end() - clim_start() + 1
+    span = f"{have[0]}-{have[-1]}" if have else "no years"
+    status = "COMPLETE" if len(have) >= want else "PARTIAL"
+    return (f"{CLIM_POOL_MARKER} {status} {len(have)}/{want} yr, {span} "
+            f"(historical+{clim_scenario()}, window "
+            f"{clim_start()}-{clim_end()}, {source})")

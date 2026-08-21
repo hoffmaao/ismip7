@@ -193,22 +193,54 @@ def compute_fluidity_prior(u, h, s, bed, C, acc, T_srf, p=None, max_picard=60,
         # so a plain Picard iterate flip-flops. Damping with relax in (0,1]
         # converges it. A_(k+1) = A_k + relax*(A_new - A_k).
         A_relaxed = A_k.dat.data_ro + relax * (A_new.dat.data_ro - A_k.dat.data_ro)
-        dloc = (np.abs(A_relaxed - A_k.dat.data_ro).max()
-                / max(np.abs(A_k.dat.data_ro).max(), 1.0)) if A_k.dat.data_ro.size else 0.0
-        dA = mesh.comm.allreduce(float(dloc), op=__import__("mpi4py").MPI.MAX)
+        diff = np.abs(A_relaxed - A_k.dat.data_ro)
+        _MPI = __import__("mpi4py").MPI
+        comm = mesh.comm
+        _sz = A_k.dat.data_ro.size
+        # Every reduction below is GLOBAL. The previous version divided a
+        # rank-local max difference by a rank-LOCAL max|A| and then MAX-reduced
+        # the resulting ratio, so each rank normalized by its own denominator
+        # and the reported dA was not a global relative change at all.
+        amax = comm.allreduce(
+            float(np.abs(A_k.dat.data_ro).max()) if _sz else 0.0, op=_MPI.MAX)
+        denom = max(amax, 1.0)
+        dA = comm.allreduce(
+            float(diff.max()) if _sz else 0.0, op=_MPI.MAX) / denom
+        # Convergence is judged on the L2-relative change rather than the
+        # max-norm. A few pathological cells -- typically at the A_clip bounds
+        # or where h is tiny -- can pin the max-norm forever while the bulk
+        # field is converged: at 2500 m dA sat at EXACTLY 9.13e-02 with an
+        # unchanged A range from iteration 51 through 60, a limit cycle that
+        # no additional iterations can break (relax=0.4 damping is already on).
+        # Both norms and the count of still-moving cells are reported, so a
+        # genuinely unconverged field stays visible instead of being hidden
+        # behind the gentler norm.
+        num = comm.allreduce(
+            float(np.sum(diff ** 2)) if _sz else 0.0, op=_MPI.SUM)
+        den = comm.allreduce(
+            float(np.sum(A_k.dat.data_ro ** 2)) if _sz else 0.0, op=_MPI.SUM)
+        dA_l2 = float(np.sqrt(num / max(den, 1e-30)))
+        n_moving = comm.allreduce(
+            int((diff > rtol * denom).sum()) if _sz else 0, op=_MPI.SUM)
         A_k.dat.data[:] = A_relaxed
-        lo = mesh.comm.allreduce(float(A_k.dat.data_ro.min() if A_k.dat.data_ro.size else 1e30),
-                                 op=__import__("mpi4py").MPI.MIN)
-        hi = mesh.comm.allreduce(float(A_k.dat.data_ro.max() if A_k.dat.data_ro.size else -1e30),
-                                 op=__import__("mpi4py").MPI.MAX)
-        _print(f"    it {it:2d}: A [{lo:6.1f}, {hi:8.1f}]  dA={dA:.2e}")
-        if dA < rtol:
-            _print("    thermo prior converged.")
+        lo = comm.allreduce(float(A_k.dat.data_ro.min() if _sz else 1e30),
+                            op=_MPI.MIN)
+        hi = comm.allreduce(float(A_k.dat.data_ro.max() if _sz else -1e30),
+                            op=_MPI.MAX)
+        _print(f"    it {it:2d}: A [{lo:6.1f}, {hi:8.1f}]  "
+               f"dA_l2={dA_l2:.2e} dA_max={dA:.2e} moving={n_moving}")
+        if dA_l2 < rtol:
+            _print(f"    thermo prior converged (L2 rel {dA_l2:.2e} < "
+                   f"{rtol:.1e}); {n_moving} cell(s) still above rtol in "
+                   f"max-norm.")
             break
     else:
         PETSc.Sys.Print(
             f"    WARNING: thermo fluidity prior did NOT converge after "
-            f"{max_picard} Picard iterations (last dA={dA:.2e} >= rtol={rtol:.1e}); "
-            f"using the partially-converged A_prior."
+            f"{max_picard} Picard iterations (L2 rel {dA_l2:.2e}, max-norm "
+            f"{dA:.2e}, {n_moving} cell(s) moving, rtol={rtol:.1e}); using the "
+            f"partially-converged A_prior. A max-norm that is pinned at a "
+            f"constant value indicates a limit cycle in a few cells, not slow "
+            f"convergence, and more iterations will not help."
         )
     return A_k

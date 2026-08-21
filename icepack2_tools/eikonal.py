@@ -23,6 +23,8 @@ Usage:
 """
 
 import numpy as np
+
+from .mpi_stats import global_max_abs, global_range
 import firedrake as fd
 from firedrake import (
     Function,
@@ -157,10 +159,18 @@ def solve_eikonal_distance(mesh, front_mask, max_its=40, tol=1e-4):
     firedrake.Function
         Distance field d(x) on CG1 space, in meters.
     """
-    # Non-dimensionalize: scale coordinates to O(1)
+    # Non-dimensionalize: scale coordinates to O(1).
+    #
+    # L MUST be global. It was np.max(np.abs(coords.dat.data)), i.e. the
+    # rank-LOCAL owned slice, so under MPI every rank divided the mesh
+    # coordinates by a different factor before the FE solve and an element
+    # straddling a partition boundary was assembled from two different
+    # coordinate scalings. That corrupts the geometry itself, not merely a
+    # coefficient -- the most severe instance of the rank-local-statistic
+    # class described in icepack2_tools/mpi_stats.
     coords = mesh.coordinates
     coords_orig = coords.dat.data.copy()
-    L = float(np.max(np.abs(coords_orig)))
+    L = global_max_abs(coords_orig, mesh.comm)
     PETSc.Sys.Print(f"  Scaling coordinates by L = {L/1e3:.0f} km")
     coords.dat.data[:] /= L
 
@@ -172,7 +182,8 @@ def solve_eikonal_distance(mesh, front_mask, max_its=40, tol=1e-4):
         # Always restore original coordinates
         coords.dat.data[:] = coords_orig
 
-    PETSc.Sys.Print(f"  Distance field: max={d.dat.data_ro.max()/1e3:.1f} km")
+    _dmax = global_range(d, mesh.comm)[1]
+    PETSc.Sys.Print(f"  Distance field: max={_dmax/1e3:.1f} km")
     return d
 
 

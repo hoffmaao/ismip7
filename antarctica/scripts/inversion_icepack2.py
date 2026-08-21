@@ -84,6 +84,7 @@ from icepack2_tools.boundary import load_boundary_ids
 from icepack2_tools.dual_friction import build_rc_residual, weertman_anchor
 from icepack2_tools.geometry import cg1_lift, sample_to_geometry
 from icepack2_tools.grounding import height_above_flotation
+from icepack2_tools.mpi_stats import global_mean
 from icepack2_tools.naming import map_basename
 from icepack2_tools.prior import (
     regularization_form as reg_form,
@@ -359,7 +360,13 @@ def main():
     u_speed = Function(Q).interpolate(
         max_value(sqrt(u_obs[0] ** 2 + u_obs[1] ** 2), Constant(1.0))
     )
-    u_c = Constant(float(u_speed.dat.data_ro.mean()))
+    # global_mean, not .dat.data_ro.mean(): the latter is the OWNED slice, so
+    # under MPI each rank built the sliding coefficient from a different
+    # reference speed and the same physical location got a different friction
+    # depending on which rank owned it. Reaches only the legacy action path
+    # (K_base/K_lin -> _rheo_glen/_rheo_linear); build_rc_residual anchors on
+    # C_w0 and never sees u_c. See icepack2_tools/mpi_stats.
+    u_c = Constant(global_mean(u_speed))
     PETSc.Sys.Print(f"  tau_c={float(tau_c):.3f} MPa, u_c={float(u_c):.1f} m/yr")
 
     sparams = {

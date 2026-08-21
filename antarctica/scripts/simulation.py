@@ -47,6 +47,7 @@ RESULTS_DIR = os.path.join(_ROOT, "results")
 # Repo root on the path for the shared dual-friction operator.
 sys.path.insert(0, os.path.dirname(_ROOT))
 
+from icepack2_tools.mpi_stats import global_mean
 from icepack2_tools.boundary import load_boundary_ids
 from icepack2_tools.geometry import sample_to_geometry
 from icepack2_tools.naming import map_basename
@@ -464,9 +465,12 @@ def setup_model(restart_from=None):
     n_flow = Constant(n_flow_val)
     m_slide = Constant(m_slide_val)
     tau_c = Constant(0.1)
-    u_c = Constant(float(Function(Q).interpolate(
+    # global_mean: .dat.data_ro.mean() is the rank-local owned slice (see
+    # icepack2_tools/mpi_stats). Legacy action path only; build_rc_residual
+    # anchors on C_w0.
+    u_c = Constant(global_mean(Function(Q).interpolate(
         max_value(sqrt(u_obs[0] ** 2 + u_obs[1] ** 2), Constant(1.0))
-    ).dat.data_ro.mean()))
+    )))
 
     # Phi_eff (effective-pressure fraction). Uses a small floor on H so it
     # is well-defined where the original BedMachine thickness is 0. Loaded

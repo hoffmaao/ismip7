@@ -38,7 +38,9 @@ _PROJECT = os.path.dirname(_ANT)
 sys.path.insert(0, _PROJECT)
 
 from icepack2_tools.climatology import clim_scenario, clim_start, clim_end
-from icepack2_tools.naming import N_FLOW_DEFAULT
+from icepack2_tools.runconfig import (
+    N_FLOW_DEFAULT, friction, geometry_space, lc, lc_coarse,
+)
 
 
 def effective_env():
@@ -54,11 +56,20 @@ def effective_env():
     report is the only committed record of a run, so it has to state the value
     the run used. Defaulted entries are marked so the distinction between
     "exported" and "resolved" is not lost either.
+
+    ISMIP7_GEOMETRY_SPACE is the realized case: MATRIX_STATUS.md records that
+    every existing core ran under CG1 while the default is now DG0, and the
+    two are NOT interchangeable. So this resolves the whole set of run-shaping
+    knobs, not a sample of it.
     """
     env = {k: v for k, v in os.environ.items()
            if k.startswith("ISMIP7_") or k == "OMP_NUM_THREADS"}
     resolved = {
-        "ISMIP7_N_FLOW": os.environ.get("ISMIP7_N_FLOW", N_FLOW_DEFAULT),
+        "ISMIP7_LC": str(lc()),
+        "ISMIP7_LC_COARSE": str(lc_coarse()),
+        "ISMIP7_FRICTION": friction(),
+        "ISMIP7_GEOMETRY_SPACE": geometry_space(),
+        "ISMIP7_N_FLOW": N_FLOW_DEFAULT,
         "ISMIP7_CLIM_SCENARIO": clim_scenario(),
         "ISMIP7_CLIM_START": str(clim_start()),
         "ISMIP7_CLIM_END": str(clim_end()),

@@ -50,9 +50,13 @@ sys.path.insert(0, os.path.dirname(_ROOT))
 from icepack2_tools.boundary import load_boundary_ids
 from icepack2_tools.geometry import sample_to_geometry
 from icepack2_tools.naming import map_basename
+from icepack2_tools.runconfig import (
+    N_FLOW_DEFAULT, friction as _friction, geometry_space as _geometry_space,
+    lc as _lc, lc_coarse as _lc_coarse,
+)
 
-lc = int(os.environ.get("ISMIP7_LC", "2500"))
-lc_coarse = int(os.environ.get("ISMIP7_LC_COARSE", "64000"))
+lc = _lc()
+lc_coarse = _lc_coarse()
 
 # Flow-law exponent for the composite viscous rheology. THIS BRANCH
 # (antarctica-n3) runs STANDARD GLEN n=3: A0 = rate_factor(260 K) is
@@ -63,8 +67,8 @@ lc_coarse = int(os.environ.get("ISMIP7_LC_COARSE", "64000"))
 # ISMIP7_A4_FACTOR; the two must match between an inversion and the forward
 # runs that load its MAP. Setting ISMIP7_N_FLOW=4 alone therefore carries the
 # n=4 prefactor with it (a4_factor_default below), so the legacy untagged n=4
-# MAP is used with the factor it was inverted at.
-N_FLOW_DEFAULT = "3.0"
+# MAP is used with the factor it was inverted at. N_FLOW_DEFAULT itself is
+# owned by icepack2_tools.runconfig.
 A4_FACTOR_DEFAULT = "1.0"
 A4_FACTOR_N4 = "10.0"
 
@@ -146,7 +150,7 @@ def setup_model(restart_from=None):
     # Must mirror inversion_icepack2.py so theta/phi keep their meaning.
     # Resolved first because the compute mesh is loaded FROM this friction's
     # MAP checkpoint (below), not from a fresh Mesh(.msh).
-    friction = os.environ.get("ISMIP7_FRICTION", "budd")
+    friction = _friction()
     # Exact-zero-shelf residual laws (icepack2 dual, dual_friction.py):
     #   regularized_coulomb -> Coulomb cap tau_c=c0*N
     #   budd                -> tau_b ~ N_hat=N_eff/N_ref, PISM-delta grounded
@@ -246,11 +250,7 @@ def setup_model(restart_from=None):
     # data error at Antarctic resolutions, and it buys an unbiased front.
     #
     # ISMIP7_GEOMETRY_SPACE=cg1 restores the old behaviour for A/B comparison.
-    geometry_space = os.environ.get("ISMIP7_GEOMETRY_SPACE", "dg0").lower()
-    if geometry_space not in ("dg0", "cg1"):
-        raise ValueError(
-            f"ISMIP7_GEOMETRY_SPACE must be 'dg0' or 'cg1', got {geometry_space!r}"
-        )
+    geometry_space = _geometry_space()
     geom_dg = geometry_space == "dg0"
     Q_g = FunctionSpace(mesh, "DG", 0) if geom_dg else Q
     PETSc.Sys.Print(

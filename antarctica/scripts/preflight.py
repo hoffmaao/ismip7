@@ -24,6 +24,7 @@ from icepack2_tools.forcing import (
 )
 from icepack2_tools.boundary import sidecar_path
 from icepack2_tools.naming import map_basename
+from icepack2_tools.climatology import clim_start, clim_end, clim_scenario
 
 MESH_DIR = os.path.join(_ANT, "mesh")
 RESULTS_DIR = os.path.join(_ANT, "results")
@@ -33,6 +34,9 @@ lc = int(os.environ.get("ISMIP7_LC", "2500"))
 lc_coarse = int(os.environ.get("ISMIP7_LC_COARSE", "64000"))
 friction = os.environ.get("ISMIP7_FRICTION", "budd")
 oi_version = os.environ.get("ISMIP7_OI_VERSION", "30_sep")
+CLIM_START = clim_start()
+CLIM_END = clim_end()
+CLIM_SCENARIO = clim_scenario()
 root = _find_ismip7_data()
 
 CORES = [
@@ -60,6 +64,19 @@ def atm_years(esm, scenario, var="acabf-anomaly"):
         if m:
             yrs.append(int(m.group(1)))
     return sorted(yrs)
+
+
+def clim_pool_years(esm, var):
+    r"""Years the runs actually pool to build the reference climatology:
+    historical + CLIM_SCENARIO, restricted to the CLIM_START-CLIM_END window.
+
+    The window filter matters - both the control's ``compute_climatology`` and
+    the projections' ``smb_scheme`` keep only years inside it, so an ESM with
+    plenty of files outside the window still yields an empty pool.
+    """
+    return sorted(y for y in (atm_years(esm, "historical", var)
+                              + atm_years(esm, CLIM_SCENARIO, var))
+                  if CLIM_START <= y <= CLIM_END)
 
 
 def ocean_cover(esm, scenario):
@@ -138,7 +155,8 @@ def oi_ok():
 def main():
     geom = os.environ.get("ISMIP7_GEOMETRY_SPACE", "dg0").lower()
     print(f"Preflight: lc={lc}, friction={friction}, geometry={geom}, "
-          f"OI={oi_version}")
+          f"OI={oi_version}, climatology=historical+{CLIM_SCENARIO} "
+          f"{CLIM_START}-{CLIM_END}")
     warn = []
     base_missing = shared_missing(warn)
     if base_missing:
@@ -160,12 +178,22 @@ def main():
         elif scenario is None:  # CTRL
             if not oi_ok():
                 miss.append(f"OI climatology ({oi_version})")
-            clim_years = (atm_years(esm, "historical", "acabf")
-                          + atm_years(esm, os.environ.get(
-                              "ISMIP7_CLIM_SCENARIO", "ssp126"), "acabf"))
-            if not racmo_ok() and not clim_years:
+            if not racmo_ok() and not clim_pool_years(esm, "acabf"):
                 miss.append(f"{esm} acabf (no RACMO and no ESM climatology)")
         else:
+            # experiment.py re-references aSMB against the historical +
+            # CLIM_SCENARIO acabf-anomaly pool and, on FileNotFoundError,
+            # silently degrades to the full acabf(t) field - a different SMB
+            # scheme from the one the CTRL this core is differenced against
+            # uses. Only meaningful when RACMO is present: without it every
+            # core degrades together, which the shared RACMO line reports.
+            if racmo_ok() and not clim_pool_years(esm, "acabf-anomaly"):
+                miss.append(
+                    f"{esm} acabf-anomaly in {CLIM_START}-{CLIM_END} "
+                    f"(historical+{CLIM_SCENARIO}); the aSMB re-reference "
+                    f"pool would be empty and the run would fall back to "
+                    f"full acabf(t), a different baseline than CTRL"
+                )
             yrs = atm_years(esm, scenario) or atm_years(esm, scenario, "acabf")
             gaps = sorted(set(range(y0, y1 + 1)) - set(yrs))
             if not yrs:

@@ -20,7 +20,6 @@ Usage:
 
 import numpy as np
 import os, sys, glob
-from mpi4py import MPI
 from time import perf_counter
 
 import firedrake as fd
@@ -86,6 +85,13 @@ from icepack2_tools.dual_friction import build_rc_residual, weertman_anchor
 from icepack2_tools.geometry import cg1_lift, sample_to_geometry
 from icepack2_tools.grounding import height_above_flotation
 from icepack2_tools.naming import map_basename
+from icepack2_tools.runconfig import (
+    N_FLOW_DEFAULT, geometry_space as _geometry_space, lc as _lc,
+    lc_coarse as _lc_coarse,
+)
+from icepack2_tools.mpi_stats import (
+    global_range, global_max, global_mean, global_size, global_count,
+)
 from icepack2_tools.prior import (
     regularization_form as reg_form,
     regularization_gradient_form as reg_grad_form,
@@ -94,13 +100,12 @@ from icepack2_tools.thermo_model import compute_fluidity_prior
 from icepack2_tools.forcing import (load_racmo_smb_climatology,
                                     load_mean_annual_surface_temperature)
 
-lc = int(os.environ.get("ISMIP7_LC", "8000"))
-lc_coarse = int(os.environ.get("ISMIP7_LC_COARSE", str(lc * 10)))
+lc = _lc()
+lc_coarse = _lc_coarse()
 
-# Flow-law exponent default -- KEEP IN SYNC with simulation.py (the forward
+# Flow-law exponent default owned by icepack2_tools.runconfig (the forward
 # that loads this MAP must use the same rheology). THIS BRANCH: n=3 standard
 # Glen, so no prefactor rescale (A4_FACTOR=1). See COMPOSITE_RHEOLOGY.md.
-N_FLOW_DEFAULT = "3.0"
 A4_FACTOR_DEFAULT = "1.0"
 A4_FACTOR_N4 = "10.0"
 
@@ -203,11 +208,7 @@ def main():
     # gets wrong into theta/phi, so a MAP inverted under CG1 geometry silently
     # carries the lumped lift's inflated calving-front thickness into the
     # friction field, and the t=0 velocity misfit cannot reveal it.
-    geometry_space = os.environ.get("ISMIP7_GEOMETRY_SPACE", "dg0").lower()
-    if geometry_space not in ("dg0", "cg1"):
-        raise ValueError(
-            f"ISMIP7_GEOMETRY_SPACE must be 'dg0' or 'cg1', got {geometry_space!r}"
-        )
+    geometry_space = _geometry_space()
     geom_dg = geometry_space == "dg0"
     Q_g = FunctionSpace(mesh, "DG", 0) if geom_dg else Q
     PETSc.Sys.Print(f"  Geometry space: {geometry_space.upper()}")
@@ -229,8 +230,9 @@ def main():
             rasterio.open(f"netcdf:{bm_fn}:thickness"), sp),
         Q_g, Q, floor=h_clamp)
     PETSc.Sys.Print(f"  H clamp: {h_clamp} m  "
-                    f"(nodes h<=1m: {int((H.dat.data_ro <= 1.0).sum())} / "
-                    f"{len(H.dat.data_ro)})")
+                    f"(nodes h<=1m: "
+                    f"{global_count(H.dat.data_ro <= 1.0, mesh.comm)} / "
+                    f"{global_size(H)})")
     rho_ratio = Constant(917.0 / 1024.0)
 
     rho_ratio = Constant(917.0 / 1024.0)
@@ -367,10 +369,7 @@ def main():
     # Only the LEGACY action path reads u_c (_rheo_glen/_rheo_linear, taken
     # when USE_RESIDUAL is false); budd and regularized_coulomb go through
     # build_rc_residual, which anchors on the pointwise C_w0 and never sees it.
-    _u_local = u_speed.dat.data_ro
-    _u_sum = mesh.comm.allreduce(float(_u_local.sum()), op=MPI.SUM)
-    _u_n = mesh.comm.allreduce(int(_u_local.size), op=MPI.SUM)
-    u_c = Constant(_u_sum / max(_u_n, 1))
+    u_c = Constant(global_mean(u_speed))
     PETSc.Sys.Print(f"  tau_c={float(tau_c):.3f} MPa, u_c={float(u_c):.1f} m/yr")
 
     sparams = {
@@ -405,12 +404,10 @@ def main():
             phi_ws = chk.load_function(chk_mesh, name="log_fluidity")
         theta.dat.data[:] = theta_ws.dat.data_ro
         phi.dat.data[:] = phi_ws.dat.data_ro
-        PETSc.Sys.Print(
-            f"    theta: [{theta.dat.data_ro.min():.3f}, {theta.dat.data_ro.max():.3f}]"
-        )
-        PETSc.Sys.Print(
-            f"    phi:   [{phi.dat.data_ro.min():.3f}, {phi.dat.data_ro.max():.3f}]"
-        )
+        _ws_t_lo, _ws_t_hi = global_range(theta)
+        _ws_p_lo, _ws_p_hi = global_range(phi)
+        PETSc.Sys.Print(f"    theta: [{_ws_t_lo:.3f}, {_ws_t_hi:.3f}]")
+        PETSc.Sys.Print(f"    phi:   [{_ws_p_lo:.3f}, {_ws_p_hi:.3f}]")
 
     u_s, M_s, tau_s = split(z)
 
@@ -523,6 +520,7 @@ def main():
     # inside weertman_anchor (a cell-wise surface has no cell gradient); the
     # anchor is a fixed reference scaling, not a force in the residual.
     C_w0 = weertman_anchor(H, s, u_obs, m_slide_val, Q_g)
+    _c_lo, _c_hi = global_range(C_w0)
     if USE_RESIDUAL:
         law_name = ("Budd N_hat (exact-zero shelf, delta="
                     f"{BUDD_DELTA:.3f}, alpha_gl={ALPHA_GL:.2f})"
@@ -530,8 +528,7 @@ def main():
                     else f"regularized Coulomb (c0={C0_RC})")
         PETSc.Sys.Print(
             f"  Friction: {law_name}; h_visc_floor={RC_HVISC_FLOOR:.0f}m; "
-            f"C_w0 in [{float(C_w0.dat.data_ro.min()):.2e}, "
-            f"{float(C_w0.dat.data_ro.max()):.2e}]"
+            f"C_w0 in [{_c_lo:.2e}, {_c_hi:.2e}]"
         )
     else:
         PETSc.Sys.Print("  Friction: Budd power-law dual (legacy action)")
@@ -569,14 +566,7 @@ def main():
             u_obs, H_th, s_th, b_th, C_th, acc_prior, T_srf
         )
         A_prior.rename("fluidity_prior")
-        # Reduced across ranks: PETSc.Sys.Print emits from rank 0 only, so the
-        # unreduced range would report rank 0's local piece of the prior and
-        # read far narrower than the field actually is.
-        _a_local = A_prior.dat.data_ro
-        _a_lo = mesh.comm.allreduce(
-            float(_a_local.min()) if _a_local.size else 1e30, op=MPI.MIN)
-        _a_hi = mesh.comm.allreduce(
-            float(_a_local.max()) if _a_local.size else -1e30, op=MPI.MAX)
+        _a_lo, _a_hi = global_range(A_prior)
         PETSc.Sys.Print(
             f"  Fluidity prior A_prior in [{_a_lo:.2f}, {_a_hi:.2f}] "
             f"(thermomechanical)"
@@ -664,7 +654,7 @@ def main():
 
     u_init = z.subfunctions[0]
     u_mag = Function(Q).interpolate(sqrt(inner(u_init, u_init)))
-    PETSc.Sys.Print(f"  u_max = {float(u_mag.dat.data_ro.max()):.0f} m/yr")
+    PETSc.Sys.Print(f"  u_max = {global_max(u_mag):.0f} m/yr")
 
     # ── Forward function for tlm_adjoint ──
     # Normalize by the OBSERVED area so the misfit magnitude stays
@@ -1070,12 +1060,10 @@ def main():
     PETSc.Sys.Print(f"  {result.nit} iterations, {result.nfev} function evaluations")
     global_to_func(result.x[:global_ndof], theta)
     global_to_func(result.x[global_ndof:], phi)
-    PETSc.Sys.Print(
-        f"  theta range: [{float(theta.dat.data_ro.min()):.3f}, {float(theta.dat.data_ro.max()):.3f}]"
-    )
-    PETSc.Sys.Print(
-        f"  phi range:   [{float(phi.dat.data_ro.min()):.3f}, {float(phi.dat.data_ro.max()):.3f}]"
-    )
+    _t_lo, _t_hi = global_range(theta)
+    _p_lo, _p_hi = global_range(phi)
+    PETSc.Sys.Print(f"  theta range: [{_t_lo:.3f}, {_t_hi:.3f}]")
+    PETSc.Sys.Print(f"  phi range:   [{_p_lo:.3f}, {_p_hi:.3f}]")
 
     # ── Save MAP immediately ──
     chk_fn = os.path.join(_map_dir, map_fn)

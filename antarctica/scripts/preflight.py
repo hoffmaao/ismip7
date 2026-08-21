@@ -25,14 +25,17 @@ from icepack2_tools.forcing import (
 from icepack2_tools.boundary import sidecar_path
 from icepack2_tools.naming import map_basename
 from icepack2_tools.climatology import clim_start, clim_end, clim_scenario
+from icepack2_tools.runconfig import (
+    friction as _friction, lc as _lc, lc_coarse as _lc_coarse,
+)
 
 MESH_DIR = os.path.join(_ANT, "mesh")
 RESULTS_DIR = os.path.join(_ANT, "results")
 DATA_DIR = os.path.join(_ANT, "data")
 
-lc = int(os.environ.get("ISMIP7_LC", "2500"))
-lc_coarse = int(os.environ.get("ISMIP7_LC_COARSE", "64000"))
-friction = os.environ.get("ISMIP7_FRICTION", "budd")
+lc = _lc()
+lc_coarse = _lc_coarse()
+friction = _friction()
 oi_version = os.environ.get("ISMIP7_OI_VERSION", "30_sep")
 CLIM_START = clim_start()
 CLIM_END = clim_end()
@@ -72,11 +75,38 @@ def clim_pool_years(esm, var):
 
     The window filter matters - both the control's ``compute_climatology`` and
     the projections' ``smb_scheme`` keep only years inside it, so an ESM with
-    plenty of files outside the window still yields an empty pool.
+    plenty of files outside the window still yields an empty pool. Deduplicated
+    because a year present in both scenarios is one year of coverage.
     """
-    return sorted(y for y in (atm_years(esm, "historical", var)
-                              + atm_years(esm, CLIM_SCENARIO, var))
-                  if CLIM_START <= y <= CLIM_END)
+    return sorted({y for y in (atm_years(esm, "historical", var)
+                               + atm_years(esm, CLIM_SCENARIO, var))
+                   if CLIM_START <= y <= CLIM_END})
+
+
+def clim_pool_gaps(esm, var):
+    r"""Years of the climatology window the pool is MISSING.
+
+    A partial pool is a failure, not a warning: the pooled mean is the baseline
+    the aSMB anomalies are re-referenced to, so a core built from 15 of the 30
+    years is referenced to a different mean than a sibling core with full
+    coverage, while both are differenced against the same CTRL. That is the
+    baseline mismatch this gate exists to catch, so it is held to the same
+    standard as the run-scenario coverage check below.
+    """
+    return sorted(set(range(CLIM_START, CLIM_END + 1))
+                  - set(clim_pool_years(esm, var)))
+
+
+def pool_detail(esm, var, what):
+    r"""Description of an incomplete climatology pool, or None if complete."""
+    gaps = clim_pool_gaps(esm, var)
+    if not gaps:
+        return None
+    have = clim_pool_years(esm, var)
+    span = f"covers {have[0]}-{have[-1]}" if have else "no years"
+    return (f"{esm} {var} climatology pool (historical+{CLIM_SCENARIO}) "
+            f"{span}, {len(gaps)} of {CLIM_START}-{CLIM_END} missing "
+            f"({gaps[0]}..{gaps[-1]}): {what}")
 
 
 def ocean_cover(esm, scenario):
@@ -178,8 +208,13 @@ def main():
         elif scenario is None:  # CTRL
             if not oi_ok():
                 miss.append(f"OI climatology ({oi_version})")
-            if not racmo_ok() and not clim_pool_years(esm, "acabf"):
-                miss.append(f"{esm} acabf (no RACMO and no ESM climatology)")
+            if not racmo_ok():
+                detail = pool_detail(
+                    esm, "acabf",
+                    "the constant SMB climatology would be a mean over the "
+                    "wrong years")
+                if detail:
+                    miss.append(detail)
         else:
             # experiment.py re-references aSMB against the historical +
             # CLIM_SCENARIO acabf-anomaly pool and, on FileNotFoundError,
@@ -187,13 +222,13 @@ def main():
             # scheme from the one the CTRL this core is differenced against
             # uses. Only meaningful when RACMO is present: without it every
             # core degrades together, which the shared RACMO line reports.
-            if racmo_ok() and not clim_pool_years(esm, "acabf-anomaly"):
-                miss.append(
-                    f"{esm} acabf-anomaly in {CLIM_START}-{CLIM_END} "
-                    f"(historical+{CLIM_SCENARIO}); the aSMB re-reference "
-                    f"pool would be empty and the run would fall back to "
-                    f"full acabf(t), a different baseline than CTRL"
-                )
+            if racmo_ok():
+                detail = pool_detail(
+                    esm, "acabf-anomaly",
+                    "the aSMB re-reference baseline would differ from the "
+                    "CTRL this core is differenced against")
+                if detail:
+                    miss.append(detail)
             yrs = atm_years(esm, scenario) or atm_years(esm, scenario, "acabf")
             gaps = sorted(set(range(y0, y1 + 1)) - set(yrs))
             if not yrs:

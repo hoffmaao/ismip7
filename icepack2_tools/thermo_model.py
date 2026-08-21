@@ -184,6 +184,7 @@ def compute_fluidity_prior(u, h, s, bed, C, acc, T_srf, p=None, max_picard=60,
     E = None
     comm = mesh.comm if comm is None else comm
     _sz = A_k.dat.data_ro.size
+    _n_total = comm.allreduce(int(_sz), op=MPI.SUM)
     # Per-cell floor for the relative-change test below. A is clipped into
     # A_clip every iteration, so its lower bound is the natural floor; the
     # 1e-30 guard only matters if a caller passes A_clip[0] = 0, and it errs
@@ -244,18 +245,19 @@ def compute_fluidity_prior(u, h, s, bed, C, acc, T_srf, p=None, max_picard=60,
                             op=MPI.MAX)
         _print(f"    it {it:2d}: A [{lo:6.1f}, {hi:8.1f}]  "
                f"dA_l2={dA_l2:.2e} dA_max={dA:.2e} dA_rel={dA_rel:.2e} "
-               f"moving={n_moving}")
+               f"moving={n_moving}/{_n_total}")
         if dA_l2 < rtol:
             _print(f"    thermo prior converged (L2 rel {dA_l2:.2e} < "
-                   f"{rtol:.1e}); {n_moving} cell(s) still moving by more "
-                   f"than rtol of their own value (worst {dA_rel:.2e}).")
+                   f"{rtol:.1e}); {n_moving}/{_n_total} dof(s) still moving "
+                   f"by more than rtol of their own value "
+                   f"(worst {dA_rel:.2e}).")
             break
     else:
         PETSc.Sys.Print(
             f"    WARNING: thermo fluidity prior did NOT converge after "
             f"{max_picard} Picard iterations (L2 rel {dA_l2:.2e}, max-norm "
-            f"{dA:.2e}, worst per-cell relative change {dA_rel:.2e}, "
-            f"{n_moving} cell(s) moving, rtol={rtol:.1e}); using the "
+            f"{dA:.2e}, worst per-dof relative change {dA_rel:.2e}, "
+            f"{n_moving}/{_n_total} dof(s) moving, rtol={rtol:.1e}); using the "
             f"partially-converged A_prior. A max-norm that is pinned at a "
             f"constant value indicates a limit cycle in a few cells, not slow "
             f"convergence, and more iterations will not help."

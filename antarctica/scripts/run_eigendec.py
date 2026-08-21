@@ -68,6 +68,7 @@ RESULTS_DIR = os.path.join(_ROOT, "results")
 import sys
 sys.path.insert(0, os.path.dirname(_ROOT))
 from icepack2_tools.boundary import load_boundary_ids
+from icepack2_tools.mpi_stats import global_max
 
 lc = int(os.environ.get("ISMIP7_LC", "8000"))
 lc_coarse = int(os.environ.get("ISMIP7_LC_COARSE", str(lc * 10)))
@@ -208,7 +209,7 @@ def main():
     # u_MAP comes from the warm start (already converged via continuation)
     u_MAP = z.subfunctions[0].copy(deepcopy=True)
     u_MAP_mag = Function(Q).interpolate(sqrt(inner(u_MAP, u_MAP)))
-    PETSc.Sys.Print(f"  u_MAP: max={float(u_MAP_mag.dat.data_ro.max()):.0f} m/yr")
+    PETSc.Sys.Print(f"  u_MAP: max={global_max(u_MAP_mag):.0f} m/yr")
 
     area_val = assemble(Constant(1.0) * dx(mesh))
     invA = Constant(1.0 / area_val)

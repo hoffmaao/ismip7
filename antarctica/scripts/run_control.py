@@ -56,6 +56,7 @@ RESULTS_DIR = os.path.join(_ROOT, "results")
 
 sys.path.insert(0, os.path.dirname(_ROOT))
 from icepack2_tools.boundary import load_boundary_ids
+from icepack2_tools.mpi_stats import global_mean
 
 lc = int(os.environ.get("ISMIP7_LC", "2500"))
 lc_coarse = int(os.environ.get("ISMIP7_LC_COARSE", "64000"))
@@ -135,9 +136,9 @@ def main():
     A0 = Constant(icepack.rate_factor(Constant(260.0)))
     n = Constant(n_glen_val)
     tau_c = Constant(0.1)
-    u_c = Constant(float(Function(Q).interpolate(
+    u_c = Constant(global_mean(Function(Q).interpolate(
         max_value(sqrt(u_obs[0] ** 2 + u_obs[1] ** 2), Constant(1.0))
-    ).dat.data_ro.mean()))
+    )))
 
     phi_eff = Function(Q).interpolate(
         max_value(

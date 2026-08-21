@@ -83,7 +83,7 @@ def clim_pool_years(esm, var):
                    if CLIM_START <= y <= CLIM_END})
 
 
-def clim_pool_gaps(esm, var):
+def clim_pool_gaps(esm, var, years=None):
     r"""Years of the climatology window the pool is MISSING.
 
     A partial pool is a failure, not a warning: the pooled mean is the baseline
@@ -93,11 +93,11 @@ def clim_pool_gaps(esm, var):
     baseline mismatch this gate exists to catch, so it is held to the same
     standard as the run-scenario coverage check below.
     """
-    return sorted(set(range(CLIM_START, CLIM_END + 1))
-                  - set(clim_pool_years(esm, var)))
+    have = clim_pool_years(esm, var) if years is None else years
+    return sorted(set(range(CLIM_START, CLIM_END + 1)) - set(have))
 
 
-def pool_status(esm, var, what):
+def pool_status(esm, var, what_empty, what_partial):
     r"""``(bucket, detail)`` for the climatology pool: bucket is ``"ok"``,
     ``"partial"`` or ``"empty"``.
 
@@ -106,16 +106,21 @@ def pool_status(esm, var, what):
     silently falls back to full acabf(t)), while a partial pool runs and warns.
     A gate that blocked what the runtime happily runs would train people to
     ignore it, so a partial pool reports PARTIAL, not BLOCKED.
+
+    The caller passes both consequences and the bucket picks between them, so
+    the emptiness test lives in one place and the year list is read from disk
+    once per (esm, var) rather than once per caller condition.
     """
-    gaps = clim_pool_gaps(esm, var)
+    have = clim_pool_years(esm, var)
+    gaps = clim_pool_gaps(esm, var, have)
     if not gaps:
         return "ok", None
-    have = clim_pool_years(esm, var)
     span = f"covers {have[0]}-{have[-1]}" if have else "no years"
     return ("partial" if have else "empty",
             f"{esm} {var} climatology pool (historical+{CLIM_SCENARIO}) "
             f"{span}, {len(gaps)} of {CLIM_START}-{CLIM_END} missing "
-            f"({gaps[0]}..{gaps[-1]}): {what}")
+            f"({gaps[0]}..{gaps[-1]}): "
+            f"{what_partial if have else what_empty}")
 
 
 def ocean_cover(esm, scenario):
@@ -223,8 +228,7 @@ def main():
             if not racmo_ok():
                 bucket, detail = pool_status(
                     esm, "acabf",
-                    "the control would refuse to run"
-                    if not clim_pool_years(esm, "acabf") else
+                    "the control would refuse to run",
                     "the constant SMB climatology would be a mean over part "
                     "of the window; the run warns and proceeds")
                 if bucket == "empty":
@@ -242,8 +246,7 @@ def main():
                 bucket, detail = pool_status(
                     esm, "acabf-anomaly",
                     "the run would silently fall back to full acabf(t), a "
-                    "different SMB scheme than the CTRL"
-                    if not clim_pool_years(esm, "acabf-anomaly") else
+                    "different SMB scheme than the CTRL",
                     "the aSMB re-reference baseline would differ from a "
                     "full-window sibling's; the run warns and proceeds")
                 if bucket == "empty":

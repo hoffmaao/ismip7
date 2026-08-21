@@ -91,16 +91,30 @@ def climatology_pool(log_path):
     is a different baseline from one re-referenced over all 30, and the run
     warns rather than refusing, so that fact has to reach the only committed
     record of the run.
+
+    Always returns at least one line. Emitting nothing when the log is absent
+    would leave "full window", "half window" and "nobody passed --log"
+    indistinguishable in the report, which defeats the point of recording it.
     """
     if not log_path or not os.path.isfile(log_path):
-        return []
+        return [f"{CLIM_POOL_MARKER} NOT RECORDED (log `{log_path}` is not "
+                f"readable from here; re-run with --log pointing at the run "
+                f"log to capture it)"]
     lines = []
-    with open(log_path, errors="replace") as f:
-        for line in f:
-            if CLIM_POOL_MARKER in line:
-                stripped = line.strip()
-                if stripped not in lines:
-                    lines.append(stripped)
+    try:
+        with open(log_path, errors="replace") as f:
+            for line in f:
+                if CLIM_POOL_MARKER in line:
+                    stripped = line.strip()
+                    if stripped not in lines:
+                        lines.append(stripped)
+    except OSError as e:
+        return [f"{CLIM_POOL_MARKER} NOT RECORDED (log `{log_path}` could not "
+                f"be read: {e})"]
+    if not lines:
+        return [f"{CLIM_POOL_MARKER} none reported in `{log_path}` (expected "
+                f"for a CTRL running on the RACMO climatology, which builds "
+                f"no ESM pool)"]
     return lines
 
 

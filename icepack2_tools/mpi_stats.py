@@ -38,7 +38,12 @@ def global_max(f, comm=None):
 
 
 def global_mean(f, comm=None):
-    r"""Mean of a Function over the owned dofs of all ranks."""
+    r"""Mean of a Function over all ranks.
+
+    Averages over ARRAY ENTRIES, matching ``ndarray.mean()``: for a
+    vector-valued Function that is the mean over every component, not a mean
+    of magnitudes.
+    """
     d = np.asarray(f.dat.data_ro)
     comm = _comm_of(f, comm)
     total = comm.allreduce(float(d.sum()), op=MPI.SUM)
@@ -47,10 +52,26 @@ def global_mean(f, comm=None):
 
 
 def global_size(f, comm=None):
-    r"""Total number of owned dofs across all ranks."""
-    return _comm_of(f, comm).allreduce(int(f.dat.data_ro.size), op=MPI.SUM)
+    r"""Total number of owned dofs across all ranks.
+
+    Counts dofs, not array entries: a vector-valued Function stores
+    ``(ndofs, dim)``, so summing ``.size`` would report ``dim`` times too
+    many.
+    """
+    d = np.asarray(f.dat.data_ro)
+    return _comm_of(f, comm).allreduce(
+        int(d.shape[0]) if d.ndim else 0, op=MPI.SUM)
 
 
-def global_count(mask, comm):
-    r"""Number of True entries of a rank-local boolean array, over all ranks."""
+def global_count(mask, comm=None):
+    r"""Number of True entries of a rank-local boolean ARRAY, over all ranks.
+
+    Takes a plain array rather than a Function, so unlike its siblings it has
+    no mesh to take a communicator from and ``comm`` must be passed.
+    """
+    if comm is None:
+        raise TypeError(
+            "global_count needs an explicit comm: a plain array carries no "
+            "mesh to derive one from - e.g. global_count(mask, mesh.comm)"
+        )
     return comm.allreduce(int(np.count_nonzero(mask)), op=MPI.SUM)

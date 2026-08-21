@@ -54,6 +54,7 @@ from icepack2_tools.runconfig import (
     N_FLOW_DEFAULT, friction as _friction, geometry_space as _geometry_space,
     lc as _lc, lc_coarse as _lc_coarse,
 )
+from icepack2_tools.mpi_stats import global_mean, global_range
 
 lc = _lc()
 lc_coarse = _lc_coarse()
@@ -464,9 +465,16 @@ def setup_model(restart_from=None):
     n_flow = Constant(n_flow_val)
     m_slide = Constant(m_slide_val)
     tau_c = Constant(0.1)
-    u_c = Constant(float(Function(Q).interpolate(
+    # GLOBAL mean, not the rank-local one: u_c scales K_base and K_linear, so
+    # a per-rank value gives the same physical location a different friction
+    # coefficient depending on which rank owns it and the answer depends on
+    # the partition. Only the LEGACY action path reads u_c (rheo_glen /
+    # rheo_linear); budd and regularized_coulomb go through
+    # build_rc_residual, which anchors on the pointwise C_w0 and never sees
+    # it. Mirrors inversion_icepack2.py, which must agree.
+    u_c = Constant(global_mean(Function(Q).interpolate(
         max_value(sqrt(u_obs[0] ** 2 + u_obs[1] ** 2), Constant(1.0))
-    ).dat.data_ro.mean()))
+    )))
 
     # Phi_eff (effective-pressure fraction). Uses a small floor on H so it
     # is well-defined where the original BedMachine thickness is 0. Loaded
@@ -486,9 +494,9 @@ def setup_model(restart_from=None):
     # predate the physical prior. Must match the inversion that made the MAP.
     if A_prior_f is not None:
         A4_base = A_prior_f
+        _ap_lo, _ap_hi = global_range(A_prior_f)
         PETSc.Sys.Print(
-            f"  Fluidity prior A_prior loaded [{float(A_prior_f.dat.data_ro.min()):.2f}, "
-            f"{float(A_prior_f.dat.data_ro.max()):.2f}]"
+            f"  Fluidity prior A_prior loaded [{_ap_lo:.2f}, {_ap_hi:.2f}]"
         )
     else:
         A_prior_f = Function(Q, name="fluidity_prior").interpolate(A0 * Constant(a4_factor))

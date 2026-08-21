@@ -90,6 +90,20 @@ without reading the linked rationale and stating why.
   geometry space for this reason. Driving a DG0 forward with a CG1 MAP at
   32 km raises the initial misfit from 8.6e3 to 1.5e5.
 
+The inverse also holds - one line that looks fine and is always a bug:
+
+- **Any statistic taken from `.dat.data_ro` is RANK-LOCAL.** It covers only
+  the dofs that rank owns. Reduce it (`icepack2_tools.mpi_stats`:
+  `global_range`, `global_max`, `global_mean`, `global_size`, `global_count`)
+  before you print it through `PETSc.Sys.Print`, which emits from rank 0
+  alone, or before you use it as a scalar. Printing one reports rank 0's slice
+  and the number changes with the rank count. Using one as a scalar is worse:
+  `u_c = Constant(u_speed.dat.data_ro.mean())` gave every rank a different
+  friction coefficient for the same physical location, so the assembled
+  residual and Jacobian disagreed across ranks and the result depended on the
+  partition. Six instances of this have been fixed on this line of work; the
+  reductions are collective, so call them on all ranks or not at all.
+
 ## 4. How to tell whether a change is correct
 
 The test suite cannot catch a physics regression. Use these instead, in order

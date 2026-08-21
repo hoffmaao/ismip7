@@ -9,10 +9,11 @@ rows at marker years from the timeseries CSV, the observational audit
 (compare_ismip6.py), plus provenance (git SHA, log path, checkpoint files).
 Results h5/CSVs stay gitignored; the report is the reviewable record.
 
-Validity banners are NOT generated. Several reports in antarctica/reports/
-carry a hand-written "SUPERSEDED" blockquote under the title; regenerating
-such a report overwrites the file and drops that banner, so re-add it (or
-pass it as --notes) whenever you regenerate a run that is known invalid.
+Validity banners are written by --superseded REASON, which emits a blockquote
+directly under the title. Use it whenever regenerating a run that is known
+invalid: this report is the ONLY committed record (timeseries and checkpoints
+are gitignored), so regenerating without the banner silently reinstates an
+invalid result as the provenance.
 antarctica/reports/MATRIX_STATUS.md owns the full invalidation detail - the
 per-core banner is only a short pointer to it.
 
@@ -62,6 +63,15 @@ def main():
                     help="CTRL timeseries for the ISMIP6-ensemble overlay")
     ap.add_argument("--exps", default="exp01,exp02,exp03,exp04,exp05")
     ap.add_argument("--notes", default="")
+    ap.add_argument("--superseded", default=None, metavar="REASON",
+                    help="Write a SUPERSEDED banner directly under the title. "
+                         "Use whenever the run is known invalid: this report "
+                         "is the only committed record of the run (the "
+                         "timeseries and checkpoints are gitignored), so a "
+                         "regenerated report without the banner silently "
+                         "reinstates an invalid result as the provenance. "
+                         "Keep REASON short and point at "
+                         "reports/MATRIX_STATUS.md for the detail.")
     ap.add_argument("--out", default=None)
     args = ap.parse_args()
 
@@ -82,6 +92,14 @@ def main():
     os.makedirs(os.path.dirname(out), exist_ok=True)
     with open(out, "w") as f:
         f.write(f"# Core {args.core}: {args.name} (32 km)\n\n")
+        # Banner goes directly under the title so a reader cannot miss it.
+        # Deliberately a FLAG rather than a hard-coded string: runs made after
+        # the ice-front fixes are valid, and a baked-in banner would mislabel
+        # them (which is why the docs pass declined to emit one from code).
+        if args.superseded:
+            f.write(f"> **SUPERSEDED.** {args.superseded}\n>\n"
+                    f"> See `reports/MATRIX_STATUS.md` for which results are "
+                    f"currently valid.\n\n")
         f.write(f"- date: {date.today().isoformat()}\n")
         f.write(f"- git: {sha}\n")
         f.write(f"- log: `{args.log}`\n")

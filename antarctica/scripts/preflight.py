@@ -162,7 +162,7 @@ def main():
                 miss.append(f"OI climatology ({oi_version})")
             clim_years = (atm_years(esm, "historical", "acabf")
                           + atm_years(esm, os.environ.get(
-                              "ISMIP7_CLIM_SCENARIO", "ssp585"), "acabf"))
+                              "ISMIP7_CLIM_SCENARIO", "ssp126"), "acabf"))
             if not racmo_ok() and not clim_years:
                 miss.append(f"{esm} acabf (no RACMO and no ESM climatology)")
         else:

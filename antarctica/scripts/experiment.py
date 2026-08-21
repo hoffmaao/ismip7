@@ -12,7 +12,7 @@ so projection minus control is a clean forced signal:
               mixed-slope, calibrated per-basin K)
 
 The aSMB re-reference pool is historical + ISMIP7_CLIM_SCENARIO (default
-ssp585) over ISMIP7_CLIM_START..END (default 2000-2029) — the SAME pool
+ssp126, per protocol) over ISMIP7_CLIM_START..END (default 2000-2029) — the SAME pool
 for every experiment, so all cores share one baseline and the historical
 -> projection handoff at 2014/2015 is seamless. Without RACMO the run
 falls back to the full acabf(t) field; with no acabf data at all it
@@ -39,7 +39,12 @@ from icepack2_tools.forcing import (
 
 CLIM_START = int(os.environ.get("ISMIP7_CLIM_START", "2000"))
 CLIM_END = int(os.environ.get("ISMIP7_CLIM_END", "2029"))
-CLIM_SCENARIO = os.environ.get("ISMIP7_CLIM_SCENARIO", "ssp585")
+# ssp126, per the ISMIP7 protocol cheat sheet (April 2026): "The climatology
+# (2000-2029) should be created using a combination of the historical and the
+# SSP126 simulations." This pool must match the CONTROL's climatology, or the
+# projections are re-referenced against a different baseline than the control
+# they are differenced from. Was ssp585, which was never protocol-based.
+CLIM_SCENARIO = os.environ.get("ISMIP7_CLIM_SCENARIO", "ssp126")
 
 
 def find_k_npz():

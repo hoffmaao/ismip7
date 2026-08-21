@@ -36,15 +36,14 @@ from icepack2_tools.forcing import (
     ISMIP7Atmosphere, ISMIP7Ocean, ISMIP7Fracture,
     make_forcing_callback, load_racmo_smb_climatology, forcing_coords,
 )
+from icepack2_tools.climatology import clim_start, clim_end, clim_scenario
 
-CLIM_START = int(os.environ.get("ISMIP7_CLIM_START", "2000"))
-CLIM_END = int(os.environ.get("ISMIP7_CLIM_END", "2029"))
-# ssp126, per the ISMIP7 protocol cheat sheet (April 2026): "The climatology
-# (2000-2029) should be created using a combination of the historical and the
-# SSP126 simulations." This pool must match the CONTROL's climatology, or the
-# projections are re-referenced against a different baseline than the control
-# they are differenced from. Was ssp585, which was never protocol-based.
-CLIM_SCENARIO = os.environ.get("ISMIP7_CLIM_SCENARIO", "ssp126")
+# Owned by icepack2_tools.climatology: this pool must match the CONTROL's
+# climatology, or the projections are re-referenced against a different
+# baseline than the control they are differenced from.
+CLIM_START = clim_start()
+CLIM_END = clim_end()
+CLIM_SCENARIO = clim_scenario()
 
 
 def find_k_npz():

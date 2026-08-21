@@ -60,11 +60,17 @@ def describe_clim_pool(years, source):
     which only works if the effective coverage survives into the record.
     ``core_report.py`` lifts every line carrying CLIM_POOL_MARKER out of the
     run log and into the report, so the two are afterwards distinguishable.
+
+    The status and the numerator both come from ``clim_pool_missing``, so a
+    caller that passes unfiltered years cannot get a COMPLETE line printed
+    directly above the PARTIAL warning the same year list triggers.
     """
-    have = sorted(set(years))
     want = clim_end() - clim_start() + 1
+    missing = clim_pool_missing(years)
+    in_window = want - len(missing)
+    have = sorted(set(years))
     span = f"{have[0]}-{have[-1]}" if have else "no years"
-    status = "COMPLETE" if len(have) >= want else "PARTIAL"
-    return (f"{CLIM_POOL_MARKER} {status} {len(have)}/{want} yr, {span} "
+    status = "COMPLETE" if not missing else "EMPTY" if not in_window else "PARTIAL"
+    return (f"{CLIM_POOL_MARKER} {status} {in_window}/{want} yr, {span} "
             f"(historical+{clim_scenario()}, window "
             f"{clim_start()}-{clim_end()}, {source})")

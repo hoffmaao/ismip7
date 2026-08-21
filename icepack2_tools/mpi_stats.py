@@ -37,6 +37,23 @@ def global_max(f, comm=None):
         float(d.max()) if d.size else -np.inf, op=MPI.MAX)
 
 
+def global_absmax(f, comm=None):
+    r"""Largest magnitude of a Function over all ranks.
+
+    The extent of a coordinate field is the usual case: a rank-local extent
+    would non-dimensionalize each partition by a different factor.
+    """
+    d = np.asarray(f.dat.data_ro)
+    return _comm_of(f, comm).allreduce(
+        float(np.abs(d).max()) if d.size else 0.0, op=MPI.MAX)
+
+
+def global_sum(f, comm=None):
+    r"""Sum of a Function's entries over all ranks."""
+    d = np.asarray(f.dat.data_ro)
+    return _comm_of(f, comm).allreduce(float(d.sum()), op=MPI.SUM)
+
+
 def global_mean(f, comm=None):
     r"""Mean of a Function over all ranks.
 

@@ -50,7 +50,12 @@ ESM = os.environ.get("ISMIP7_ESM", "CESM2-WACCM")
 # an anomaly-based baseline is NOT constructible).
 CLIM_START = int(os.environ.get("ISMIP7_CLIM_START", "2000"))
 CLIM_END = int(os.environ.get("ISMIP7_CLIM_END", "2029"))
-CLIM_SCENARIO = os.environ.get("ISMIP7_CLIM_SCENARIO", "ssp585")
+# ssp126, per the ISMIP7 protocol cheat sheet (April 2026): the ctrlclim
+# climatology is "a combination of the historical and the SSP126 simulations"
+# (confirmed on discussion #28: last 15 yr historical + first 15 yr ssp126).
+# Only reached when RACMO is unavailable, but the fallback should still be
+# the protocol pool rather than ssp585.
+CLIM_SCENARIO = os.environ.get("ISMIP7_CLIM_SCENARIO", "ssp126")
 
 DATA_ROOT = os.environ.get(
     "ISMIP7_DATA_ROOT", os.path.join(_PROJECT, "ISMIP7", "AIS")

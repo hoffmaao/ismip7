@@ -3,7 +3,8 @@ r"""Generate the tracked per-core run report (antarctica/reports/).
 
 Each ISMIP7 core experiment lands in the repo as one commit whose payload is
 a small markdown report: run configuration (the ISMIP7_* environment as seen
-by this process - run it in the same shell/env as the run itself), budget
+by this process - run it in the same shell/env as the run itself - with the
+run-shaping knobs resolved to their effective values, see effective_env), budget
 rows at marker years from the timeseries CSV, the observational audit
 (check_ismip6_track.py) and, for projections, the ISMIP6-ensemble overlay
 (compare_ismip6.py), plus provenance (git SHA, log path, checkpoint files).
@@ -33,6 +34,39 @@ from datetime import date
 
 _SCRIPTS = os.path.dirname(os.path.abspath(__file__))
 _ANT = os.path.dirname(_SCRIPTS)
+_PROJECT = os.path.dirname(_ANT)
+sys.path.insert(0, _PROJECT)
+
+from icepack2_tools.climatology import clim_scenario, clim_start, clim_end
+from icepack2_tools.naming import N_FLOW_DEFAULT
+
+
+def effective_env():
+    r"""The ISMIP7_* environment as the run sees it, with the run-shaping
+    knobs resolved to their EFFECTIVE values rather than only the ones that
+    happen to be exported.
+
+    A knob left at its default is absent from ``os.environ``, so recording the
+    environment as-set makes two reports byte-identical even when a default
+    has since been flipped underneath them - which is exactly how the
+    ISMIP7_N_FLOW ambiguity documented in reports/MATRIX_STATUS.md arose, and
+    what flipping ISMIP7_CLIM_SCENARIO to ssp126 would otherwise repeat. The
+    report is the only committed record of a run, so it has to state the value
+    the run used. Defaulted entries are marked so the distinction between
+    "exported" and "resolved" is not lost either.
+    """
+    env = {k: v for k, v in os.environ.items()
+           if k.startswith("ISMIP7_") or k == "OMP_NUM_THREADS"}
+    resolved = {
+        "ISMIP7_N_FLOW": os.environ.get("ISMIP7_N_FLOW", N_FLOW_DEFAULT),
+        "ISMIP7_CLIM_SCENARIO": clim_scenario(),
+        "ISMIP7_CLIM_START": str(clim_start()),
+        "ISMIP7_CLIM_END": str(clim_end()),
+    }
+    for k, v in resolved.items():
+        if k not in env:
+            env[k] = f"{v}    # default (not exported)"
+    return dict(sorted(env.items()))
 
 
 def sh(cmd):
@@ -76,8 +110,7 @@ def main():
     args = ap.parse_args()
 
     sha, _ = sh(["git", "-C", _ANT, "rev-parse", "--short", "HEAD"])
-    env = {k: v for k, v in sorted(os.environ.items())
-           if k.startswith("ISMIP7_") or k == "OMP_NUM_THREADS"}
+    env = effective_env()
     audit, audit_rc = sh([sys.executable,
                           os.path.join(_SCRIPTS, "check_ismip6_track.py"),
                           args.csv])
@@ -97,9 +130,17 @@ def main():
         # the ice-front fixes are valid, and a baked-in banner would mislabel
         # them (which is why the docs pass declined to emit one from code).
         if args.superseded:
-            f.write(f"> **SUPERSEDED.** {args.superseded}\n>\n"
-                    f"> See `reports/MATRIX_STATUS.md` for which results are "
-                    f"currently valid.\n\n")
+            # Every line of REASON is quoted: a multi-line reason (the shape
+            # every hand-written banner in reports/ already has) would
+            # otherwise break out of the blockquote after the first line and
+            # render as ordinary body text, splitting the banner in two.
+            banner = args.superseded.strip().splitlines() or [""]
+            banner[0] = f"**SUPERSEDED.** {banner[0]}"
+            banner += ["", "See `reports/MATRIX_STATUS.md` for which results "
+                           "are currently valid."]
+            for line in banner:
+                f.write(("> " + line).rstrip() + "\n")
+            f.write("\n")
         f.write(f"- date: {date.today().isoformat()}\n")
         f.write(f"- git: {sha}\n")
         f.write(f"- log: `{args.log}`\n")

@@ -20,6 +20,7 @@ Usage:
 
 import numpy as np
 import os, sys, glob
+from mpi4py import MPI
 from time import perf_counter
 
 import firedrake as fd
@@ -359,7 +360,17 @@ def main():
     u_speed = Function(Q).interpolate(
         max_value(sqrt(u_obs[0] ** 2 + u_obs[1] ** 2), Constant(1.0))
     )
-    u_c = Constant(float(u_speed.dat.data_ro.mean()))
+    # GLOBAL mean, not the rank-local one. u_c scales K_base and K_lin, so a
+    # per-rank value gives the same physical location a different friction
+    # depending on which rank owns it, leaving the residual and Jacobian
+    # inconsistent across ranks and the answer dependent on the partition.
+    # Only the LEGACY action path reads u_c (_rheo_glen/_rheo_linear, taken
+    # when USE_RESIDUAL is false); budd and regularized_coulomb go through
+    # build_rc_residual, which anchors on the pointwise C_w0 and never sees it.
+    _u_local = u_speed.dat.data_ro
+    _u_sum = mesh.comm.allreduce(float(_u_local.sum()), op=MPI.SUM)
+    _u_n = mesh.comm.allreduce(int(_u_local.size), op=MPI.SUM)
+    u_c = Constant(_u_sum / max(_u_n, 1))
     PETSc.Sys.Print(f"  tau_c={float(tau_c):.3f} MPa, u_c={float(u_c):.1f} m/yr")
 
     sparams = {
@@ -558,9 +569,17 @@ def main():
             u_obs, H_th, s_th, b_th, C_th, acc_prior, T_srf
         )
         A_prior.rename("fluidity_prior")
+        # Reduced across ranks: PETSc.Sys.Print emits from rank 0 only, so the
+        # unreduced range would report rank 0's local piece of the prior and
+        # read far narrower than the field actually is.
+        _a_local = A_prior.dat.data_ro
+        _a_lo = mesh.comm.allreduce(
+            float(_a_local.min()) if _a_local.size else 1e30, op=MPI.MIN)
+        _a_hi = mesh.comm.allreduce(
+            float(_a_local.max()) if _a_local.size else -1e30, op=MPI.MAX)
         PETSc.Sys.Print(
-            f"  Fluidity prior A_prior in [{float(A_prior.dat.data_ro.min()):.2f}, "
-            f"{float(A_prior.dat.data_ro.max()):.2f}] (thermomechanical)"
+            f"  Fluidity prior A_prior in [{_a_lo:.2f}, {_a_hi:.2f}] "
+            f"(thermomechanical)"
         )
     else:
         A_prior = Function(Q, name="fluidity_prior").interpolate(A0 * Constant(a4_factor))

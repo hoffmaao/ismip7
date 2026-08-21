@@ -35,6 +35,7 @@ from icepack2_tools.forcing import (
     forcing_coords,
     _RHO_ICE, _RHO_WATER, _K_DEFAULT,
 )
+from icepack2_tools.climatology import clim_start, clim_end, clim_scenario
 
 T_START = 2015.0
 T_END = float(os.environ.get("ISMIP7_T_END", "2300"))
@@ -42,20 +43,18 @@ DT = float(os.environ.get("ISMIP7_DT", "1.0"))
 OUTPUT_INTERVAL = int(os.environ.get("ISMIP7_OUTPUT_INTERVAL", "10"))
 
 ESM = os.environ.get("ISMIP7_ESM", "CESM2-WACCM")
-# Reference-climate window for the constant SMB. RACMO2.4p1 (1979-2023)
-# is the primary baseline, so 2000-2029 yields its 2000-2023 mean. The
-# acabf fallback pools historical + projection scenarios and uses
-# whatever subset of the window exists locally (currently ssp585
-# 2015-2029 only; the acabf-anomaly files are referenced to 1960-1989 so
-# an anomaly-based baseline is NOT constructible).
-CLIM_START = int(os.environ.get("ISMIP7_CLIM_START", "2000"))
-CLIM_END = int(os.environ.get("ISMIP7_CLIM_END", "2029"))
-# ssp126, per the ISMIP7 protocol cheat sheet (April 2026): the ctrlclim
-# climatology is "a combination of the historical and the SSP126 simulations"
-# (confirmed on discussion #28: last 15 yr historical + first 15 yr ssp126).
-# Only reached when RACMO is unavailable, but the fallback should still be
-# the protocol pool rather than ssp585.
-CLIM_SCENARIO = os.environ.get("ISMIP7_CLIM_SCENARIO", "ssp126")
+# Reference-climate window and pool scenario for the constant SMB, owned by
+# icepack2_tools.climatology so the control, the projections, the preflight
+# and the report cannot drift apart. RACMO2.4p1 (1979-2023) is the primary
+# baseline, so 2000-2029 yields its 2000-2023 mean. The acabf fallback pools
+# historical + the protocol scenario (ssp126) and uses whatever subset of the
+# window exists locally; the acabf-anomaly files are referenced to 1960-1989,
+# so an anomaly-based baseline is NOT constructible. CLIM_SCENARIO is only
+# reached when RACMO is unavailable, but the fallback should still be the
+# protocol pool.
+CLIM_START = clim_start()
+CLIM_END = clim_end()
+CLIM_SCENARIO = clim_scenario()
 
 DATA_ROOT = os.environ.get(
     "ISMIP7_DATA_ROOT", os.path.join(_PROJECT, "ISMIP7", "AIS")

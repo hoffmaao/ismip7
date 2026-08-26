@@ -46,9 +46,9 @@ RESULTS_DIR = os.path.join(_ROOT, "results")
 
 # Repo root on the path for the shared dual-friction operator.
 sys.path.insert(0, os.path.dirname(_ROOT))
+from mesh_naming import bndids_filename
 
 lc = int(os.environ.get("ISMIP7_LC", "2500"))
-lc_coarse = int(os.environ.get("ISMIP7_LC_COARSE", "64000"))
 
 # Flow-law exponent for the composite viscous rheology. THIS BRANCH
 # (antarctica-n3) runs STANDARD GLEN n=3: A0 = rate_factor(260 K) is
@@ -145,10 +145,26 @@ def setup_model(restart_from=None):
     PETSc.Sys.Print(f"Loading mesh + reference state: {source_chk}")
     with fd.CheckpointFile(source_chk, "r") as _chk:
         mesh = _chk.load_mesh()
+        # The boundary_ids sidecar must match the buffer/resolution the mesh
+        # was BUILT with, which only the checkpoint knows -- the live
+        # ISMIP7_BUFFER_M / ISMIP7_LC_COARSE can drift from it, and a
+        # mismatched sidecar puts the calving BC on the wrong facets
+        # (ds(absent_id) integrates to zero: silently wrong physics, no
+        # crash). No legacy fallback; unstamped checkpoints must be re-run.
+        if not (_chk.has_attr("/", "lc_coarse")
+                and _chk.has_attr("/", "buffer_m")):
+            raise KeyError(
+                f"checkpoint {source_chk} has no lc_coarse/buffer_m "
+                "attributes, so the boundary_ids sidecar matching its mesh "
+                "cannot be determined. Re-run the inversion to stamp mesh "
+                "provenance."
+            )
+        chk_lc_coarse = int(_chk.get_attr("/", "lc_coarse"))
+        chk_buffer_m = float(_chk.get_attr("/", "buffer_m"))
     PETSc.Sys.Print(f"  {mesh.num_vertices()} vertices, {mesh.num_cells()} cells")
 
     bndids_fn = os.environ.get(
-        "ISMIP7_BNDIDS", os.path.join(MESH_DIR, "boundary_ids.json")
+        "ISMIP7_BNDIDS", bndids_filename(chk_lc_coarse, lc, chk_buffer_m)
     )
     with open(bndids_fn) as f:
         bnd_ids = json.load(f)
@@ -721,6 +737,10 @@ def setup_model(restart_from=None):
         "calving_ids": calving_ids,
         "u_obs": u_obs,
         "friction": friction,
+        # Mesh provenance from the source checkpoint (re-stamped into every
+        # state checkpoint so warm restarts stay self-describing).
+        "lc_coarse": chk_lc_coarse,
+        "buffer_m": chk_buffer_m,
         # Rescue speed limiter (residual laws): live Constant, 0 = inert.
         "k_lim": k_lim if use_residual else None,
         "k_lim_rescue": k_lim_rescue if use_residual else 0.0,
@@ -1003,6 +1023,8 @@ def run_simulation(
             chk.set_attr("/", "t_yr", float(t_now))
             chk.set_attr("/", "friction", str(friction))
             chk.set_attr("/", "lc", int(lc))
+            chk.set_attr("/", "lc_coarse", int(ctx["lc_coarse"]))
+            chk.set_attr("/", "buffer_m", float(ctx["buffer_m"]))
         mesh.comm.barrier()
         if mesh.comm.rank == 0:
             os.replace(tmp, final_path)

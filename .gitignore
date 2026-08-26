@@ -6,10 +6,14 @@ data
 ISMIP7/
 
 # ── Generated artifacts ──
-# Ignore the whole mesh dir: the .msh and its boundary_ids sidecar are both
-# regenerated locally (mesh_antarctica.py writes the matching sidecar), so a
-# committed sidecar would silently mismatch a mesh built from different inputs.
+# Ignore the whole mesh dir (the .msh files are large and regenerated
+# locally), but keep the tiny boundary_ids*.json sidecars: mesh_antarctica.py
+# now names them after the exact mesh they were built from
+# (boundary_ids_antarctica_<COARSE>_<FINE>_buffered<N>.json), so a committed
+# sidecar always matches the mesh it documents instead of silently
+# mismatching a different build.
 antarctica/mesh/*
+!antarctica/mesh/boundary_ids*.json
 antarctica/results/
 antarctica/archive/
 antarctica/figs/*.png

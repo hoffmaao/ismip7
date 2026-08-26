@@ -80,9 +80,11 @@ from icepack2_tools.prior import (
 from icepack2_tools.thermo_model import compute_fluidity_prior
 from icepack2_tools.forcing import (load_racmo_smb_climatology,
                                     load_mean_annual_surface_temperature)
+from mesh_naming import get_buffer_m, mesh_filename, bndids_filename
 
 lc = int(os.environ.get("ISMIP7_LC", "8000"))
 lc_coarse = int(os.environ.get("ISMIP7_LC_COARSE", str(lc * 10)))
+buffer_m = get_buffer_m()
 
 # Flow-law exponent default -- KEEP IN SYNC with simulation.py (the forward
 # that loads this MAP must use the same rheology). THIS BRANCH: n=3 standard
@@ -139,16 +141,12 @@ def find_file(d, p):
 def main():
     os.makedirs(FIG_DIR, exist_ok=True)
 
-    mesh_fn = os.environ.get(
-        "ISMIP7_MESH", os.path.join(MESH_DIR, f"antarctica_{lc_coarse}_{lc}.msh")
-    )
+    mesh_fn = os.environ.get("ISMIP7_MESH", mesh_filename(lc_coarse, lc, buffer_m))
     PETSc.Sys.Print(f"Loading mesh: {mesh_fn}")
     mesh = Mesh(mesh_fn)
     PETSc.Sys.Print(f"  {mesh.num_vertices()} vertices, {mesh.num_cells()} cells")
 
-    bndids_fn = os.environ.get(
-        "ISMIP7_BNDIDS", os.path.join(MESH_DIR, "boundary_ids.json")
-    )
+    bndids_fn = os.environ.get("ISMIP7_BNDIDS", bndids_filename(lc_coarse, lc, buffer_m))
     with open(bndids_fn) as f:
         bnd_ids = json.load(f)
 
@@ -613,6 +611,10 @@ def main():
                 chk.save_function(b, name="bed")
                 chk.save_function(s, name="surface")
                 chk.save_function(A_prior, name="fluidity_prior")
+                # Mesh provenance: the forward run derives the boundary_ids
+                # sidecar path from these, never from its own environment.
+                chk.set_attr("/", "lc_coarse", int(lc_coarse))
+                chk.set_attr("/", "buffer_m", float(buffer_m))
             PETSc.Sys.Print(f"    [checkpoint saved: iter {iteration_count[0]}]")
 
         return total, total_grad
@@ -649,6 +651,10 @@ def main():
         chk.save_function(b, name="bed")
         chk.save_function(s, name="surface")
         chk.save_function(A_prior, name="fluidity_prior")
+        # Mesh provenance: the forward run derives the boundary_ids sidecar
+        # path from these, never from its own environment.
+        chk.set_attr("/", "lc_coarse", int(lc_coarse))
+        chk.set_attr("/", "buffer_m", float(buffer_m))
     PETSc.Sys.Print(f"Saved MAP: {chk_fn}")
 
     # ── Final forward solve ──

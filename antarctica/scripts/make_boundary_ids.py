@@ -1,15 +1,22 @@
 #!/usr/bin/env python3
 """
-Generate mesh/boundary_ids.json from a generated Antarctica .msh file.
+Generate a mesh/boundary_ids_antarctica_<COARSE>_<FINE>_buffered<N>.json
+sidecar from a generated Antarctica .msh file.
 
 The mesh pipeline (mesh_antarctica.py / icepack2_tools.mesh) tags each
 boundary segment as a gmsh physical group named "Calving_N" or "Other_N",
 and the ice surface as "Ice". In gmsh's MSH 2.2 format the physical-group
 tag is exactly the integer boundary marker that Firedrake exposes, so the
-downstream solvers' boundary_ids.json is just that name->tag map binned
+downstream solvers' boundary_ids sidecar is just that name->tag map binned
 into calving-front vs. other (land/grounding) boundaries:
 
     {"calving": [<tags>], "other": [<tags>]}
+
+The boundary topology (and thus the sidecar contents) depends on the
+outline buffer (`ISMIP7_BUFFER_M`) used to build the mesh, so the mesh and
+sidecar filenames are both tagged with the exact resolution and buffer size
+(see mesh_naming.py) — a sidecar built for one mesh/buffer is not valid for
+a different one.
 
 This file is read by diagnostic_solve, inversion_icepack2, simulation,
 run_control, lcurve_icepack2, gl_sensitivity and run_eigendec, but no
@@ -17,15 +24,15 @@ script in the repo produced it — this generator fills that gap.
 
 Usage:
     python scripts/make_boundary_ids.py
-    ISMIP7_MESH=path/to/mesh.msh python scripts/make_boundary_ids.py
+    ISMIP7_BUFFER_M=0 python scripts/make_boundary_ids.py
+    ISMIP7_MESH=path/to/mesh.msh ISMIP7_BNDIDS=path/to/out.json python scripts/make_boundary_ids.py
 """
 
 import json
 import os
 import re
 
-_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-MESH_DIR = os.path.join(_ROOT, "mesh")
+from mesh_naming import get_buffer_m, mesh_filename, bndids_filename
 
 lc = int(os.environ.get("ISMIP7_LC", "2500"))
 lc_coarse = int(os.environ.get("ISMIP7_LC_COARSE", "64000"))
@@ -89,12 +96,11 @@ def write_boundary_ids(mesh_fn, out_fn):
 
 
 def main():
+    buffer_m = get_buffer_m()
     mesh_fn = os.environ.get(
-        "ISMIP7_MESH", os.path.join(MESH_DIR, f"antarctica_{lc_coarse}_{lc}.msh")
+        "ISMIP7_MESH", mesh_filename(lc_coarse, lc, buffer_m)
     )
-    out_fn = os.environ.get(
-        "ISMIP7_BNDIDS", os.path.join(MESH_DIR, "boundary_ids.json")
-    )
+    out_fn = os.environ.get("ISMIP7_BNDIDS", bndids_filename(lc_coarse, lc, buffer_m))
     write_boundary_ids(mesh_fn, out_fn)
 
 

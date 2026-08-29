@@ -36,6 +36,7 @@ MESH_DIR = os.path.join(_ROOT, "mesh")
 
 from icepack2_tools.thermo_model import compute_fluidity_prior, DEFAULTS
 from icepack2_tools.dual_friction import weertman_anchor
+from icepack2_tools.mpi_stats import global_range
 from icepack2_tools.forcing import (load_racmo_smb_climatology,
                                     load_mean_annual_surface_temperature)
 
@@ -89,9 +90,10 @@ def main():
     C = weertman_anchor(H, s, u_obs, m_slide, Q)                # balance friction
     acc = load_racmo_smb_climatology(Q)
     T_srf = load_mean_annual_surface_temperature(Q, var=args.tvar)
-    PETSc.Sys.Print(f"  T_srf ({args.tvar}) [{T_srf.dat.data_ro.min():.1f}, "
-                    f"{T_srf.dat.data_ro.max():.1f}] K; "
-                    f"acc [{acc.dat.data_ro.min():.2f}, {acc.dat.data_ro.max():.2f}] m/yr")
+    _t_lo, _t_hi = global_range(T_srf)
+    _a_lo, _a_hi = global_range(acc)
+    PETSc.Sys.Print(f"  T_srf ({args.tvar}) [{_t_lo:.1f}, {_t_hi:.1f}] K; "
+                    f"acc [{_a_lo:.2f}, {_a_hi:.2f}] m/yr")
 
     A_prior = compute_fluidity_prior(u_obs, H, s, b, C, acc, T_srf, p=P,
                                      max_picard=args.max_picard)

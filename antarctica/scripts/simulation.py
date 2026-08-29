@@ -48,7 +48,7 @@ RESULTS_DIR = os.path.join(_ROOT, "results")
 sys.path.insert(0, os.path.dirname(_ROOT))
 from mesh_naming import bndids_filename
 
-from icepack2_tools.mpi_stats import global_mean
+from icepack2_tools.mpi_stats import global_mean, global_range
 from icepack2_tools.boundary import load_boundary_ids
 from icepack2_tools.geometry import sample_to_geometry
 from icepack2_tools.naming import map_basename
@@ -509,8 +509,8 @@ def setup_model(restart_from=None):
     if A_prior_f is not None:
         A4_base = A_prior_f
         PETSc.Sys.Print(
-            f"  Fluidity prior A_prior loaded [{float(A_prior_f.dat.data_ro.min()):.2f}, "
-            f"{float(A_prior_f.dat.data_ro.max()):.2f}]"
+            f"  Fluidity prior A_prior loaded "
+            f"[{global_range(A_prior_f)[0]:.2f}, {global_range(A_prior_f)[1]:.2f}]"
         )
     else:
         A_prior_f = Function(Q, name="fluidity_prior").interpolate(A0 * Constant(a4_factor))

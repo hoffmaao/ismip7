@@ -46,6 +46,7 @@ RESULTS_DIR = os.path.join(_ROOT, "results")
 
 # Repo root on the path for the shared dual-friction operator.
 sys.path.insert(0, os.path.dirname(_ROOT))
+from mesh_naming import bndids_filename
 
 from icepack2_tools.mpi_stats import global_mean
 from icepack2_tools.boundary import load_boundary_ids
@@ -53,7 +54,6 @@ from icepack2_tools.geometry import sample_to_geometry
 from icepack2_tools.naming import map_basename
 
 lc = int(os.environ.get("ISMIP7_LC", "2500"))
-lc_coarse = int(os.environ.get("ISMIP7_LC_COARSE", "64000"))
 
 # Flow-law exponent for the composite viscous rheology. THIS BRANCH
 # (antarctica-n3) runs STANDARD GLEN n=3: A0 = rate_factor(260 K) is
@@ -193,6 +193,24 @@ def setup_model(restart_from=None):
             str(_chk.get_attr("/", "mesh_basename"))
             if _chk.has_attr("/", "mesh_basename") else ""
         )
+
+        # Dan/David additionally stamp the mesh PARAMETERS. Keep both: the
+        # basename is direct and also covers meshes outside the standard
+        # naming pattern (e.g. the 500 m aniso mesh), while lc_coarse/buffer_m
+        # let bndids_filename() reconstruct the name parametrically. They
+        # cross-check each other, and either alone is enough to resolve the
+        # sidecar from the CHECKPOINT rather than from the live environment --
+        # which is the point: ISMIP7_BUFFER_M/ISMIP7_LC_COARSE can drift, and
+        # a mismatched sidecar puts the calving BC on the wrong facets, where
+        # ds(absent_id) integrates to zero: silently wrong physics, no crash.
+        chk_lc_coarse = (int(_chk.get_attr("/", "lc_coarse"))
+                         if _chk.has_attr("/", "lc_coarse") else None)
+        chk_buffer_m = (float(_chk.get_attr("/", "buffer_m"))
+                        if _chk.has_attr("/", "buffer_m") else None)
+        if not mesh_basename and chk_lc_coarse is not None \
+                and chk_buffer_m is not None:
+            mesh_basename = os.path.basename(
+                mesh_filename(chk_lc_coarse, lc, chk_buffer_m))
     PETSc.Sys.Print(f"  {mesh.num_vertices()} vertices, {mesh.num_cells()} cells")
     # The recorded basename is the provenance and WINS. ISMIP7_MESH is only a
     # fallback for legacy checkpoints that carry no attribute: it names the
@@ -850,6 +868,10 @@ def setup_model(restart_from=None):
         "calving_ids": calving_ids,
         "u_obs": u_obs,
         "friction": friction,
+        # Mesh provenance from the source checkpoint (re-stamped into every
+        # state checkpoint so warm restarts stay self-describing).
+        "lc_coarse": chk_lc_coarse,
+        "buffer_m": chk_buffer_m,
         # Rescue speed limiter (residual laws): live Constant, 0 = inert.
         "k_lim": k_lim if use_residual else None,
         "k_lim_rescue": k_lim_rescue if use_residual else 0.0,
@@ -1168,6 +1190,10 @@ def run_simulation(
             chk.set_attr("/", "geometry_space", "dg0" if geom_dg else "cg1")
             if mesh_basename:
                 chk.set_attr("/", "mesh_basename", str(mesh_basename))
+            if ctx.get("lc_coarse") is not None:
+                chk.set_attr("/", "lc_coarse", int(ctx["lc_coarse"]))
+            if ctx.get("buffer_m") is not None:
+                chk.set_attr("/", "buffer_m", float(ctx["buffer_m"]))
         mesh.comm.barrier()
         if mesh.comm.rank == 0:
             os.replace(tmp, final_path)

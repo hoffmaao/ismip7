@@ -64,6 +64,7 @@ _PROJECT = os.path.dirname(_ROOT)
 sys.path.insert(0, _PROJECT)
 sys.path.insert(0, os.path.join(_ROOT, "scripts"))
 from icepack2_tools.boundary import load_boundary_ids
+from icepack2_tools.mpi_stats import global_max, global_range, global_sum
 from icepack2_tools.eikonal import identify_grounding_line, solve_eikonal_distance
 import rasterio, icepack
 from icepack2 import model
@@ -321,7 +322,7 @@ def main():
 
     u_ref = z_adj.subfunctions[0]
     PETSc.Sys.Print(
-        f"  u_max = {float(Function(Q).interpolate(sqrt(inner(u_ref, u_ref))).dat.data_ro.max()):.0f} m/yr"
+        f"  u_max = {global_max(Function(Q).interpolate(sqrt(inner(u_ref, u_ref)))):.0f} m/yr"
     )
 
     rho_ice = 917.0
@@ -385,10 +386,8 @@ def main():
     dJ_dH = compute_gradient(J, h_ctrl)
     dJ_dH_func = Function(Q, name="dJ_dH")
     dJ_dH_func.dat.data[:] = dJ_dH.dat.data_ro
-    PETSc.Sys.Print(
-        f"  dJ/dH range: [{dJ_dH_func.dat.data_ro.min():.4e}, "
-        f"{dJ_dH_func.dat.data_ro.max():.4e}]"
-    )
+    _dj_lo, _dj_hi = global_range(dJ_dH_func)
+    PETSc.Sys.Print(f"  dJ/dH range: [{_dj_lo:.4e}, {_dj_hi:.4e}]")
     dJ_arr = dJ_dH_func.dat.data_ro
 
     # ══════════════════════════════════════════════════════════════════════
@@ -414,7 +413,7 @@ def main():
 
         for shelf_name in sorted(
             shelf_mask_arrays,
-            key=lambda n: -shelf_mask_fns.get(n, Function(Q)).dat.data_ro.sum(),
+            key=lambda n: -global_sum(shelf_mask_fns.get(n, Function(Q))),
         ):
             in_shelf = shelf_mask_arrays[shelf_name]
             # Thinning on grounded ice near this shelf's GL

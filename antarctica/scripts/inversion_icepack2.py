@@ -791,6 +791,32 @@ def main():
                 )
         h_next = Function(Q_g, name="h_next")
 
+        # ── Net (integral) mass-balance term ─────────────────────────────
+        # The pointwise chi^2 above reduces VARIANCE; it barely feels a small
+        # systematic MEAN. Measured on the converged 2500 m transient MAP: the
+        # pointwise term reached its optimum with an RMS residual of 2.2 m/yr
+        # while the NET tendency was +604 Gt/yr against an observed -73 -- a
+        # mean bias of +0.06 m/yr/cell, 3% of the local noise, invisible to
+        # the L2 gradient. This term penalises that integral directly:
+        #   J_net = 1/2 [ (integral (dhdt_model - dhdt_obs) dA) / sigma_net ]^2
+        # with sigma_net in Gt/yr (IMBIE-scale). The squared integral is
+        # taped by projecting the masked residual onto the R (Real) space --
+        # a one-dof solve whose solution is the domain mean -- and then
+        # integrating a spatially-constant quadratic of it, so everything
+        # stays UFL and differentiates through the existing EquationSolver
+        # machinery with no functional algebra.
+        dhdt_net_sigma = float(os.environ.get("ISMIP7_DHDT_NET_SIGMA", "25"))
+        use_dhdt_net = dhdt_net_sigma > 0.0
+        if use_dhdt_net:
+            R_net = FunctionSpace(mesh, "R", 0)
+            A_tot_net = float(assemble(Constant(1.0) * dx(mesh)))
+            _rho_gt = 917.0 / 1e12
+            PETSc.Sys.Print(
+                f"  dH/dt NET constraint: sigma_net={dhdt_net_sigma:g} Gt/yr "
+                f"(0.5*(net/sigma)^2 on the grounded+observed integral; "
+                f"ISMIP7_DHDT_NET_SIGMA=0 disables)"
+            )
+
     def forward(theta_ctrl, phi_ctrl):
         clear_caches()
         F_ctrl = build_F(theta_ctrl, phi_ctrl)
@@ -856,6 +882,36 @@ def main():
                 * ((dhdt_model - dhdt_obs) / Constant(dhdt_sigma)) ** 2
             )
 
+            if use_dhdt_net:
+                # m_net = domain mean of the masked residual (R-space
+                # projection; the test function is the constant 1, so the
+                # 1x1 solve is exactly mean = integral/area).
+                m_net = Function(R_net, name="dhdt_net_mean")
+                r_net = TestFunction(R_net)
+                EquationSolver(
+                    (m_net - (dhdt_model - dhdt_obs) * dhdt_mask) * r_net * dx
+                    == 0,
+                    m_net,
+                    solver_parameters={
+                        "snes_type": "ksponly",
+                        "ksp_type": "preonly",
+                        "pc_type": "jacobi",
+                    },
+                    form_compiler_parameters=fc_params,
+                    # The R-space (Real) 1x1 matrix assembles as a
+                    # python-type PETSc Mat, which tlm_adjoint's linear-solver
+                    # cache cannot copy (MatAXPY: "no method getrow for Mat of
+                    # type python"). Caching a 1x1 solve buys nothing anyway.
+                    cache_jacobian=False,
+                    cache_adjoint_jacobian=False,
+                ).solve()
+                # net [Gt/yr] = mean * total area * rho; integrand constant
+                # over the mesh, so integrating /A_tot recovers the scalar.
+                _c_net = Constant(A_tot_net * _rho_gt / dhdt_net_sigma)
+                integrand = integrand + (
+                    Constant(0.5 / A_tot_net) * (m_net * _c_net) ** 2
+                )
+
         J = Functional(name="J")
         J.assign(integrand * dx)
         return J
@@ -892,6 +948,8 @@ def main():
            + (_u_now[1] - u_obs[1]) ** 2 / sig_uy ** 2)
     ) * dx(mesh)
     if use_dhdt:
+        _net_form = (((h_next - H) / Constant(dhdt_dt) - dhdt_obs)
+                     * dhdt_mask * dx(mesh))
         _dhdt_chi2 = (
             0.5 / dhdt_area * dhdt_mask
             * (((h_next - H) / Constant(dhdt_dt) - dhdt_obs)
@@ -911,6 +969,7 @@ def main():
             out = f" vel={last_good_vel_chi2[0]:.4e}"
             if use_dhdt:
                 out += f" dhdt={float(assemble(_dhdt_chi2)):.4e}"
+                out += (f" net={float(assemble(_net_form)) * 917.0 / 1e12:+.0f}Gt/yr")
             return out
         except Exception:
             return ""
@@ -957,6 +1016,7 @@ def main():
             chk.set_attr("/", "gamma_theta", float(GAMMA_THETA))
             chk.set_attr("/", "gamma_phi", float(GAMMA_PHI))
             chk.set_attr("/", "dhdt_weight", float(dhdt_w))
+            chk.set_attr("/", "dhdt_net_sigma", float(os.environ.get("ISMIP7_DHDT_NET_SIGMA", "25")))
 
     # ── L-BFGS-B Inversion ──
     max_iter = int(os.environ.get("ISMIP7_MAXITER", "500"))

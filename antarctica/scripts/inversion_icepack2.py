@@ -93,9 +93,11 @@ from icepack2_tools.prior import (
 from icepack2_tools.thermo_model import compute_fluidity_prior
 from icepack2_tools.forcing import (load_racmo_smb_climatology,
                                     load_mean_annual_surface_temperature)
+from mesh_naming import get_buffer_m, mesh_filename, bndids_filename
 
 lc = int(os.environ.get("ISMIP7_LC", "8000"))
 lc_coarse = int(os.environ.get("ISMIP7_LC_COARSE", str(lc * 10)))
+buffer_m = get_buffer_m()
 
 # Flow-law exponent default -- KEEP IN SYNC with simulation.py (the forward
 # that loads this MAP must use the same rheology). THIS BRANCH: n=3 standard
@@ -175,9 +177,7 @@ def find_file(d, p):
 def main():
     os.makedirs(FIG_DIR, exist_ok=True)
 
-    mesh_fn = os.environ.get(
-        "ISMIP7_MESH", os.path.join(MESH_DIR, f"antarctica_{lc_coarse}_{lc}.msh")
-    )
+    mesh_fn = os.environ.get("ISMIP7_MESH", mesh_filename(lc_coarse, lc, buffer_m))
     PETSc.Sys.Print(f"Loading mesh: {mesh_fn}")
     mesh = Mesh(mesh_fn)
     PETSc.Sys.Print(f"  {mesh.num_vertices()} vertices, {mesh.num_cells()} cells")
@@ -943,6 +943,16 @@ def main():
             # "firedrake_default", so this is how the forward names its own
             # mesh and picks the matching per-mesh boundary-id sidecar.
             chk.set_attr("/", "mesh_basename", os.path.basename(mesh_fn))
+            # Mesh PARAMETERS as well as the basename (Dan/David's scheme,
+            # merged from upstream/integration). The forward resolves its
+            # boundary_ids sidecar from these rather than from its own
+            # environment: ISMIP7_BUFFER_M / ISMIP7_LC_COARSE can drift, and a
+            # mismatched sidecar puts the calving BC on the wrong facets, where
+            # ds(absent_id) integrates to zero -- silently wrong physics with
+            # no crash. The basename covers meshes outside the standard naming
+            # pattern; the parameters let bndids_filename() rebuild the name.
+            chk.set_attr("/", "lc_coarse", int(lc_coarse))
+            chk.set_attr("/", "buffer_m", float(buffer_m))
             chk.set_attr("/", "misfit_norm", MISFIT_NORM)
             chk.set_attr("/", "gamma_theta", float(GAMMA_THETA))
             chk.set_attr("/", "gamma_phi", float(GAMMA_PHI))

@@ -62,9 +62,11 @@ FIG_DIR = os.path.join(_ROOT, "figs")
 import sys
 sys.path.insert(0, os.path.dirname(_ROOT))
 from icepack2_tools.boundary import load_boundary_ids
+from mesh_naming import get_buffer_m, mesh_filename, bndids_filename
 
 lc = int(os.environ.get("ISMIP7_LC", "2500"))
 lc_coarse = int(os.environ.get("ISMIP7_LC_COARSE", "64000"))
+buffer_m = get_buffer_m()
 
 # Gamma values to sweep
 GAMMAS = [1e-2, 3e-2, 1e-1, 3e-1, 1, 3, 1e1, 3e1, 1e2]
@@ -82,13 +84,15 @@ def find_file(d, p):
 def main():
     os.makedirs(FIG_DIR, exist_ok=True)
 
-    mesh_fn = os.environ.get(
-        "ISMIP7_MESH", os.path.join(MESH_DIR, f"antarctica_{lc_coarse}_{lc}.msh")
-    )
+    mesh_fn = os.environ.get("ISMIP7_MESH", mesh_filename(lc_coarse, lc, buffer_m))
     PETSc.Sys.Print(f"Loading mesh: {mesh_fn}")
     mesh = Mesh(mesh_fn)
     PETSc.Sys.Print(f"  {mesh.num_vertices()} vertices, {mesh.num_cells()} cells")
 
+    # Sidecar resolved (per-mesh preferred, parametric fallback) and
+    # HARD-CHECKED against this mesh: an id absent from the mesh makes
+    # ds(id) integrate to zero, i.e. silently wrong physics with no crash.
+    bnd_ids, calving_ids, _ = load_boundary_ids(mesh, MESH_DIR, mesh_hint=mesh_fn)
     use_calving_terminus = os.environ.get("ISMIP7_NO_CALVING_TERMINUS") is None
     bnd_ids, calving_ids, bndids_fn = load_boundary_ids(
         mesh, MESH_DIR, mesh_hint=mesh_fn,

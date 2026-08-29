@@ -84,7 +84,8 @@ from icepack2_tools.boundary import load_boundary_ids
 from icepack2_tools.dual_friction import build_rc_residual, weertman_anchor
 from icepack2_tools.geometry import cg1_lift, sample_to_geometry
 from icepack2_tools.grounding import height_above_flotation
-from icepack2_tools.mpi_stats import global_mean
+from icepack2_tools.mpi_stats import (global_mean, global_range,
+                                      global_max, global_size, global_count)
 from icepack2_tools.naming import map_basename
 from icepack2_tools.prior import (
     regularization_form as reg_form,
@@ -229,8 +230,9 @@ def main():
             rasterio.open(f"netcdf:{bm_fn}:thickness"), sp),
         Q_g, Q, floor=h_clamp)
     PETSc.Sys.Print(f"  H clamp: {h_clamp} m  "
-                    f"(nodes h<=1m: {int((H.dat.data_ro <= 1.0).sum())} / "
-                    f"{len(H.dat.data_ro)})")
+                    f"(nodes h<=1m: "
+                    f"{global_count(H.dat.data_ro <= 1.0, mesh.comm)} / "
+                    f"{global_size(H)})")
     rho_ratio = Constant(917.0 / 1024.0)
 
     rho_ratio = Constant(917.0 / 1024.0)
@@ -401,12 +403,10 @@ def main():
             phi_ws = chk.load_function(chk_mesh, name="log_fluidity")
         theta.dat.data[:] = theta_ws.dat.data_ro
         phi.dat.data[:] = phi_ws.dat.data_ro
-        PETSc.Sys.Print(
-            f"    theta: [{theta.dat.data_ro.min():.3f}, {theta.dat.data_ro.max():.3f}]"
-        )
-        PETSc.Sys.Print(
-            f"    phi:   [{phi.dat.data_ro.min():.3f}, {phi.dat.data_ro.max():.3f}]"
-        )
+        _ws_t_lo, _ws_t_hi = global_range(theta)
+        _ws_p_lo, _ws_p_hi = global_range(phi)
+        PETSc.Sys.Print(f"    theta: [{_ws_t_lo:.3f}, {_ws_t_hi:.3f}]")
+        PETSc.Sys.Print(f"    phi:   [{_ws_p_lo:.3f}, {_ws_p_hi:.3f}]")
 
     u_s, M_s, tau_s = split(z)
 
@@ -526,8 +526,8 @@ def main():
                     else f"regularized Coulomb (c0={C0_RC})")
         PETSc.Sys.Print(
             f"  Friction: {law_name}; h_visc_floor={RC_HVISC_FLOOR:.0f}m; "
-            f"C_w0 in [{float(C_w0.dat.data_ro.min()):.2e}, "
-            f"{float(C_w0.dat.data_ro.max()):.2e}]"
+            f"C_w0 in [{global_range(C_w0)[0]:.2e}, "
+            f"{global_range(C_w0)[1]:.2e}]"
         )
     else:
         PETSc.Sys.Print("  Friction: Budd power-law dual (legacy action)")
@@ -566,8 +566,8 @@ def main():
         )
         A_prior.rename("fluidity_prior")
         PETSc.Sys.Print(
-            f"  Fluidity prior A_prior in [{float(A_prior.dat.data_ro.min()):.2f}, "
-            f"{float(A_prior.dat.data_ro.max()):.2f}] (thermomechanical)"
+            f"  Fluidity prior A_prior in [{global_range(A_prior)[0]:.2f}, "
+            f"{global_range(A_prior)[1]:.2f}] (thermomechanical)"
         )
     else:
         A_prior = Function(Q, name="fluidity_prior").interpolate(A0 * Constant(a4_factor))
@@ -652,7 +652,7 @@ def main():
 
     u_init = z.subfunctions[0]
     u_mag = Function(Q).interpolate(sqrt(inner(u_init, u_init)))
-    PETSc.Sys.Print(f"  u_max = {float(u_mag.dat.data_ro.max()):.0f} m/yr")
+    PETSc.Sys.Print(f"  u_max = {global_max(u_mag):.0f} m/yr")
 
     # ── Forward function for tlm_adjoint ──
     # Normalize by the OBSERVED area so the misfit magnitude stays
@@ -1128,12 +1128,10 @@ def main():
     PETSc.Sys.Print(f"  {result.nit} iterations, {result.nfev} function evaluations")
     global_to_func(result.x[:global_ndof], theta)
     global_to_func(result.x[global_ndof:], phi)
-    PETSc.Sys.Print(
-        f"  theta range: [{float(theta.dat.data_ro.min()):.3f}, {float(theta.dat.data_ro.max()):.3f}]"
-    )
-    PETSc.Sys.Print(
-        f"  phi range:   [{float(phi.dat.data_ro.min()):.3f}, {float(phi.dat.data_ro.max()):.3f}]"
-    )
+    _t_lo, _t_hi = global_range(theta)
+    _p_lo, _p_hi = global_range(phi)
+    PETSc.Sys.Print(f"  theta range: [{_t_lo:.3f}, {_t_hi:.3f}]")
+    PETSc.Sys.Print(f"  phi range:   [{_p_lo:.3f}, {_p_hi:.3f}]")
 
     # ── Save MAP immediately ──
     chk_fn = os.path.join(_map_dir, map_fn)

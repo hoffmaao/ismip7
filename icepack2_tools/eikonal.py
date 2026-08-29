@@ -22,9 +22,6 @@ Usage:
     d = solve_eikonal_distance(mesh, front_mask)
 """
 
-import numpy as np
-
-from .mpi_stats import global_max_abs, global_range
 import firedrake as fd
 from firedrake import (
     Function,
@@ -45,6 +42,10 @@ from firedrake import (
     conditional,
 )
 from firedrake.petsc import PETSc
+
+from icepack2_tools.mpi_stats import (
+    global_absmax, global_count, global_max, global_size,
+)
 
 
 def identify_calving_front(H, h_threshold=10.0):
@@ -73,8 +74,8 @@ def identify_calving_front(H, h_threshold=10.0):
     front_mask.interpolate(
         conditional(H < Constant(h_threshold + 0.1), Constant(1.0), Constant(0.0))
     )
-    n_front = int((front_mask.dat.data_ro > 0.5).sum())
-    n_total = len(front_mask.dat.data_ro)
+    n_front = global_count(front_mask.dat.data_ro > 0.5, Q.mesh().comm)
+    n_total = global_size(front_mask)
     PETSc.Sys.Print(
         f"  Calving front mask: {n_front}/{n_total} nodes in buffer (H < {h_threshold} m)"
     )
@@ -120,12 +121,13 @@ def identify_grounding_line(H, b, rho_I=917.0, rho_W=1024.0, kH=1.0):
     gl_mask.interpolate(
         Constant(0.5) * kH_c / (fd.cosh(kH_c * haf) * fd.cosh(kH_c * haf))
     )
-    # Normalize to [0, 1]
-    gl_max = float(gl_mask.dat.data_ro.max())
+    # Normalize to [0, 1] by the GLOBAL peak, so the mask is uniformly scaled
+    # across ranks and a rank whose slice is all zero does not skip it.
+    gl_max = global_max(gl_mask)
     if gl_max > 0:
         gl_mask.dat.data[:] /= gl_max
 
-    n_gl = int((gl_mask.dat.data_ro > 0.1).sum())
+    n_gl = global_count(gl_mask.dat.data_ro > 0.1, Q.mesh().comm)
     PETSc.Sys.Print(f"  GL mask: {n_gl} nodes near grounding line (kH={kH})")
     return gl_mask
 
@@ -159,18 +161,19 @@ def solve_eikonal_distance(mesh, front_mask, max_its=40, tol=1e-4):
     firedrake.Function
         Distance field d(x) on CG1 space, in meters.
     """
-    # Non-dimensionalize: scale coordinates to O(1).
-    #
-    # L MUST be global. It was np.max(np.abs(coords.dat.data)), i.e. the
-    # rank-LOCAL owned slice, so under MPI every rank divided the mesh
-    # coordinates by a different factor before the FE solve and an element
-    # straddling a partition boundary was assembled from two different
-    # coordinate scalings. That corrupts the geometry itself, not merely a
-    # coefficient -- the most severe instance of the rank-local-statistic
-    # class described in icepack2_tools/mpi_stats.
+    # Non-dimensionalize: scale coordinates to O(1). The extent is reduced
+    # across ranks so every partition is scaled by the SAME factor; a
+    # rank-local extent deforms the mesh inconsistently and an element
+    # straddling a partition boundary is then assembled from two different
+    # coordinate scalings.
     coords = mesh.coordinates
     coords_orig = coords.dat.data.copy()
-    L = global_max_abs(coords_orig, mesh.comm)
+    L = global_absmax(coords, mesh.comm)
+    if not L > 0.0:
+        raise ValueError(
+            "degenerate mesh: all coordinates are zero, cannot "
+            "non-dimensionalize"
+        )
     PETSc.Sys.Print(f"  Scaling coordinates by L = {L/1e3:.0f} km")
     coords.dat.data[:] /= L
 
@@ -182,8 +185,7 @@ def solve_eikonal_distance(mesh, front_mask, max_its=40, tol=1e-4):
         # Always restore original coordinates
         coords.dat.data[:] = coords_orig
 
-    _dmax = global_range(d, mesh.comm)[1]
-    PETSc.Sys.Print(f"  Distance field: max={_dmax/1e3:.1f} km")
+    PETSc.Sys.Print(f"  Distance field: max={global_max(d)/1e3:.1f} km")
     return d
 
 

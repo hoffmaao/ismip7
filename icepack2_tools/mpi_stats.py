@@ -1,118 +1,111 @@
-r"""Global (MPI-collective) statistics over Firedrake Functions.
+r"""Global (cross-rank) statistics of distributed data.
 
-``f.dat.data_ro`` is the OWNED slice on the calling rank. Any statistic taken
-from it -- mean, min, max, sum, count -- is therefore rank-local, and under
-``mpiexec`` it silently becomes a partition-dependent number. That is easy to
-miss because it is correct on one rank, which is how most of this codebase was
-developed and tested.
+Anything read off ``Function.dat.data_ro`` covers only the dofs the calling
+rank OWNS. ``PETSc.Sys.Print`` emits from rank 0 alone, so printing such a
+statistic reports rank 0's slice: the number reads narrower than the field
+really is and changes with the rank count. Worse, using one as a scalar in a
+form (a normalization constant, say) gives each rank a different coefficient,
+so the assembled residual and Jacobian disagree across ranks and the answer
+depends on the partition -- ``u_c = Constant(u_speed.dat.data_ro.mean())`` did
+exactly that in three drivers, and the eikonal solver rescaled the MESH
+COORDINATES by a per-rank factor.
 
-The defect was found in nine-plus places on this project. Most were printed
-diagnostics (the theta/phi range after "Optimization finished", the C_w0 and
-A_prior ranges, the dH/dt constraint's cell count, the MEaSUREs sigma
-percentiles), but four were FUNCTIONAL:
+Reduce first, through these helpers. Every one is collective: call it on all
+ranks or not at all. And the second rule is not optional: a collective is only
+safe where the surrounding control flow is itself rank-invariant. Wrapping a
+rank-local statistic in an allreduce inside a loop whose length differs per
+rank converts a wrong number into a DEADLOCK -- which happened here, in a
+``sorted(..., key=lambda n: global_sum(...))`` over a dict whose keys came
+from rank-local masks. Agree the iteration set across ranks first, then
+reduce in a deterministic order.
 
-- ``u_c = Constant(float(u_speed.dat.data_ro.mean()))`` in three drivers, which
-  feeds the Weertman sliding coefficient. Each rank built friction from a
-  different reference speed, so the same physical location got a different
-  coefficient depending on which rank owned it.
-- ``L = float(np.max(np.abs(coords.dat.data)))`` in the eikonal solver, which
-  then divides the MESH COORDINATES by that factor. Each rank rescaled the
-  geometry differently, so an element straddling a partition boundary was
-  assembled from two different coordinate scalings.
-- the sensitivity ``dJ_deps`` in gl_sensitivity.py, a rank-local dot product
-  reported as the published Gt/yr-per-metre result.
-
-**Two rules, and the second is not optional.**
-
-1. Any statistic from ``.dat.data_ro`` is rank-local until reduced.
-2. A collective is only safe where the surrounding control flow is itself
-   rank-invariant. Wrapping a rank-local statistic in an allreduce inside a
-   loop whose length differs per rank converts a wrong number into a DEADLOCK
-   -- which happened here, in a ``sorted(..., key=lambda n: global_sum(...))``
-   over a dict whose keys were built from rank-local masks, so ranks issued
-   different numbers of collectives. Agree the iteration set across ranks
-   first, then reduce in a deterministic order.
+See AGENTS.md section 3.
 """
 
 import numpy as np
+from mpi4py import MPI
 
 
 def _comm_of(f, comm):
-    if comm is not None:
-        return comm
-    return f.function_space().mesh().comm
+    return f.function_space().mesh().comm if comm is None else comm
 
 
-def global_sum(f, comm=None):
-    r"""Sum over all owned dofs on every rank. Accepts a Function or an array
-    (an array requires an explicit ``comm``, having no mesh to ask)."""
-    data = f.dat.data_ro if hasattr(f, "dat") else np.asarray(f)
-    if comm is None:
-        if not hasattr(f, "dat"):
-            raise TypeError(
-                "global_sum on a bare array needs an explicit comm= "
-                "(an ndarray carries no mesh to derive one from)"
-            )
-        comm = _comm_of(f, None)
-    return float(comm.allreduce(float(np.sum(data))))
-
-
-def global_dof_count(f, comm=None):
-    r"""Number of owned SCALAR dofs across all ranks.
-
-    ``.dat.data_ro.size`` on a vector-valued Function is dofs x components, so
-    this divides by the block size -- passing a velocity to a naive ``.size``
-    sum overcounts by the geometric dimension.
-    """
-    comm = _comm_of(f, comm)
-    bs = getattr(f.function_space().dof_dset, "cdim", 1) or 1
-    return int(comm.allreduce(int(f.dat.data_ro.size // bs)))
-
-
-def global_mean(f, comm=None):
-    r"""Area-agnostic mean over all owned dofs on every rank.
-
-    This is the dof mean, not an area-weighted mean; use it where the old code
-    used ``.dat.data_ro.mean()`` so behaviour matches on one rank.
-    """
-    comm = _comm_of(f, comm)
-    data = f.dat.data_ro
-    total = float(comm.allreduce(float(np.sum(data))))
-    count = int(comm.allreduce(int(data.size)))
-    return total / max(count, 1)
+def _data(f):
+    return np.asarray(f.dat.data_ro) if hasattr(f, "dat") else np.asarray(f)
 
 
 def global_range(f, comm=None):
-    r"""``(min, max)`` over all owned dofs on every rank.
-
-    Ranks owning no dofs contribute the identity element rather than a magic
-    sentinel, so an empty partition cannot poison the result.
-    """
-    from mpi4py import MPI
-
+    r"""``(min, max)`` of a Function over all ranks."""
+    d = _data(f)
     comm = _comm_of(f, comm)
-    data = f.dat.data_ro if hasattr(f, "dat") else np.asarray(f)
-    lo = float(np.min(data)) if data.size else np.inf
-    hi = float(np.max(data)) if data.size else -np.inf
-    return (float(comm.allreduce(lo, op=MPI.MIN)),
-            float(comm.allreduce(hi, op=MPI.MAX)))
+    return (comm.allreduce(float(d.min()) if d.size else np.inf, op=MPI.MIN),
+            comm.allreduce(float(d.max()) if d.size else -np.inf, op=MPI.MAX))
 
 
-def global_max_abs(arr, comm):
-    r"""``max(|arr|)`` across ranks, for raw arrays such as mesh coordinates.
+def global_max(f, comm=None):
+    r"""Maximum of a Function over all ranks."""
+    d = _data(f)
+    return _comm_of(f, comm).allreduce(
+        float(d.max()) if d.size else -np.inf, op=MPI.MAX)
 
-    Takes an explicit comm: the caller is typically holding
-    ``mesh.coordinates.dat.data``, which is not a Function.
+
+def global_absmax(f, comm=None):
+    r"""Largest magnitude over all ranks.
+
+    The extent of a coordinate field is the usual case: a rank-local extent
+    would non-dimensionalize each partition by a different factor. Accepts a
+    Function, or a bare array with an explicit ``comm``.
     """
-    from mpi4py import MPI
+    d = _data(f)
+    if comm is None and not hasattr(f, "dat"):
+        raise TypeError("global_absmax on a bare array needs an explicit comm=")
+    return _comm_of(f, comm).allreduce(
+        float(np.abs(d).max()) if d.size else 0.0, op=MPI.MAX)
 
-    a = np.asarray(arr)
-    loc = float(np.max(np.abs(a))) if a.size else -np.inf
-    return float(comm.allreduce(loc, op=MPI.MAX))
+
+# Array-first alias kept for callers holding mesh.coordinates.dat.data.
+def global_max_abs(arr, comm):
+    r"""``max(|arr|)`` across ranks for a raw array (explicit comm required)."""
+    return global_absmax(arr, comm)
+
+
+def global_sum(f, comm=None):
+    r"""Sum of entries over all ranks. Accepts a Function, or a bare array
+    with an explicit ``comm`` (an ndarray carries no mesh to derive one)."""
+    d = _data(f)
+    if comm is None and not hasattr(f, "dat"):
+        raise TypeError("global_sum on a bare array needs an explicit comm=")
+    return _comm_of(f, comm).allreduce(float(d.sum()), op=MPI.SUM)
+
+
+def global_mean(f, comm=None):
+    r"""Mean over all ranks' ARRAY ENTRIES, matching ``ndarray.mean()`` on one
+    rank: for a vector-valued Function that is the mean over every component,
+    not a mean of magnitudes."""
+    d = _data(f)
+    comm = _comm_of(f, comm)
+    total = comm.allreduce(float(d.sum()), op=MPI.SUM)
+    n = comm.allreduce(int(d.size), op=MPI.SUM)
+    return total / max(n, 1)
+
+
+def global_size(f, comm=None):
+    r"""Total number of owned DOFS across all ranks.
+
+    Counts dofs, not array entries: a vector-valued Function stores
+    ``(ndofs, dim)``, so summing ``.size`` would report ``dim`` times too
+    many.
+    """
+    d = np.asarray(f.dat.data_ro)
+    n = d.shape[0] if d.ndim else int(d.size)
+    return int(_comm_of(f, comm).allreduce(int(n), op=MPI.SUM))
+
+
+# Older name for the same quantity.
+global_dof_count = global_size
 
 
 def global_count(mask, comm):
     r"""Number of True entries across ranks. Takes an explicit comm because a
     bare boolean ndarray has no mesh to derive one from."""
-    m = np.asarray(mask)
-    return int(comm.allreduce(int(np.count_nonzero(m))))
+    return int(comm.allreduce(int(np.count_nonzero(np.asarray(mask)))))

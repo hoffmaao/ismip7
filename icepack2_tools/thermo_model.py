@@ -27,6 +27,7 @@ operator is linear), amplify only the strain anomaly:
 All nonlinear couplings (A <-> u <-> heating) are Picard-lagged by the caller.
 """
 import numpy as np
+from mpi4py import MPI
 import firedrake as fd
 from firedrake import (Constant, inner, grad, dx, dS, ds, sqrt, sym,
                        max_value, min_value, avg, jump)
@@ -34,6 +35,7 @@ from icepack.constants import (ice_density as rho_I, heat_capacity as c_heat,
                                thermal_diffusivity as alpha_th, latent_heat as L_heat,
                                melting_temperature as Tm, glen_flow_law as n_glen)
 from icepack.models.viscosity import rate_factor
+from icepack2_tools.mpi_stats import global_range
 
 DEFAULTS = dict(kappa=4.0, T_srf=263.15, q_geo=50.0, shear_amp=30.0,
                 duval=181.25, w_max=0.01, friction_exp=3.0, melt_delta=50.0,
@@ -181,6 +183,14 @@ def compute_fluidity_prior(u, h, s, bed, C, acc, T_srf, p=None, max_picard=60,
 
     A_k = fd.Function(Q, name="fluidity").interpolate(Constant(A_init))  # cold uniform start
     E = None
+    comm = mesh.comm if comm is None else comm
+    _sz = A_k.dat.data_ro.size
+    _n_total = comm.allreduce(int(_sz), op=MPI.SUM)
+    # Per-cell floor for the relative-change test below. A is clipped into
+    # A_clip every iteration, so its lower bound is the natural floor; the
+    # 1e-30 guard only matters if a caller passes A_clip[0] = 0, and it errs
+    # towards counting a cell as moving rather than hiding it.
+    A_floor = max(float(A_clip[0]), 1e-30)
     _print(f"  Thermo fluidity prior (fixed u; kappa={P['kappa']}, q_geo={P['q_geo']} "
            f"mW/m2, shear_amp={P['shear_amp']}, duval={P['duval']}):")
     for it in range(1, max_picard + 1):
@@ -194,18 +204,15 @@ def compute_fluidity_prior(u, h, s, bed, C, acc, T_srf, p=None, max_picard=60,
         # converges it. A_(k+1) = A_k + relax*(A_new - A_k).
         A_relaxed = A_k.dat.data_ro + relax * (A_new.dat.data_ro - A_k.dat.data_ro)
         diff = np.abs(A_relaxed - A_k.dat.data_ro)
-        _MPI = __import__("mpi4py").MPI
-        comm = mesh.comm
-        _sz = A_k.dat.data_ro.size
         # Every reduction below is GLOBAL. The previous version divided a
         # rank-local max difference by a rank-LOCAL max|A| and then MAX-reduced
         # the resulting ratio, so each rank normalized by its own denominator
         # and the reported dA was not a global relative change at all.
         amax = comm.allreduce(
-            float(np.abs(A_k.dat.data_ro).max()) if _sz else 0.0, op=_MPI.MAX)
+            float(np.abs(A_k.dat.data_ro).max()) if _sz else 0.0, op=MPI.MAX)
         denom = max(amax, 1.0)
         dA = comm.allreduce(
-            float(diff.max()) if _sz else 0.0, op=_MPI.MAX) / denom
+            float(diff.max()) if _sz else 0.0, op=MPI.MAX) / denom
         # Convergence is judged on the L2-relative change rather than the
         # max-norm. A few pathological cells -- typically at the A_clip bounds
         # or where h is tiny -- can pin the max-norm forever while the bulk
@@ -216,29 +223,39 @@ def compute_fluidity_prior(u, h, s, bed, C, acc, T_srf, p=None, max_picard=60,
         # genuinely unconverged field stays visible instead of being hidden
         # behind the gentler norm.
         num = comm.allreduce(
-            float(np.sum(diff ** 2)) if _sz else 0.0, op=_MPI.SUM)
+            float(np.sum(diff ** 2)) if _sz else 0.0, op=MPI.SUM)
         den = comm.allreduce(
-            float(np.sum(A_k.dat.data_ro ** 2)) if _sz else 0.0, op=_MPI.SUM)
+            float(np.sum(A_k.dat.data_ro ** 2)) if _sz else 0.0, op=MPI.SUM)
         dA_l2 = float(np.sqrt(num / max(den, 1e-30)))
+        # The still-moving count is the safety net for the L2 criterion, so it
+        # is measured against each cell's OWN |A|, not against the global
+        # max|A|. Normalizing by the global max makes the threshold ~1-10 in
+        # absolute A units when the fast margins push max|A| to the 1e4 clip,
+        # so a cold-interior cell at A ~ 1-20 could move tens of percent of
+        # its own value and still be counted as converged - blind in exactly
+        # the low-A region where the fixed-velocity prior is least constrained.
+        rel = diff / np.maximum(np.abs(A_k.dat.data_ro), A_floor)
         n_moving = comm.allreduce(
-            int((diff > rtol * denom).sum()) if _sz else 0, op=_MPI.SUM)
+            int((rel > rtol).sum()) if _sz else 0, op=MPI.SUM)
+        dA_rel = comm.allreduce(
+            float(rel.max()) if _sz else 0.0, op=MPI.MAX)
         A_k.dat.data[:] = A_relaxed
-        lo = comm.allreduce(float(A_k.dat.data_ro.min() if _sz else 1e30),
-                            op=_MPI.MIN)
-        hi = comm.allreduce(float(A_k.dat.data_ro.max() if _sz else -1e30),
-                            op=_MPI.MAX)
+        lo, hi = global_range(A_k, comm)
         _print(f"    it {it:2d}: A [{lo:6.1f}, {hi:8.1f}]  "
-               f"dA_l2={dA_l2:.2e} dA_max={dA:.2e} moving={n_moving}")
+               f"dA_l2={dA_l2:.2e} dA_max={dA:.2e} dA_rel={dA_rel:.2e} "
+               f"moving={n_moving}/{_n_total}")
         if dA_l2 < rtol:
             _print(f"    thermo prior converged (L2 rel {dA_l2:.2e} < "
-                   f"{rtol:.1e}); {n_moving} cell(s) still above rtol in "
-                   f"max-norm.")
+                   f"{rtol:.1e}); {n_moving}/{_n_total} dof(s) still moving "
+                   f"by more than rtol of their own value "
+                   f"(worst {dA_rel:.2e}).")
             break
     else:
         PETSc.Sys.Print(
             f"    WARNING: thermo fluidity prior did NOT converge after "
             f"{max_picard} Picard iterations (L2 rel {dA_l2:.2e}, max-norm "
-            f"{dA:.2e}, {n_moving} cell(s) moving, rtol={rtol:.1e}); using the "
+            f"{dA:.2e}, worst per-dof relative change {dA_rel:.2e}, "
+            f"{n_moving}/{_n_total} dof(s) moving, rtol={rtol:.1e}); using the "
             f"partially-converged A_prior. A max-norm that is pinned at a "
             f"constant value indicates a limit cycle in a few cells, not slow "
             f"convergence, and more iterations will not help."

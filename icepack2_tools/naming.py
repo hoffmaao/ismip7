@@ -10,9 +10,7 @@ run will never write (or to bless a MAP the run will never load).
 Pure Python: importable without Firedrake so the preflight stays fast.
 """
 
-import os
-
-N_FLOW_DEFAULT = "3.0"
+from icepack2_tools.runconfig import geometry_space, n_flow
 
 _FRICTION_TAGS = {"regularized_coulomb": "_rc", "budd": "_budd"}
 
@@ -22,7 +20,7 @@ def map_n_tag():
     so n=3 and n=4 MAPs coexist on disk. n=4 keeps the legacy untagged name
     (backward compatible with the `antarctica` MAPs); any other n gets
     `_n<N>` (e.g. `_n3`)."""
-    n = float(os.environ.get("ISMIP7_N_FLOW", N_FLOW_DEFAULT))
+    n = n_flow()
     return "" if abs(n - 4.0) < 1e-9 else f"_n{int(round(n))}"
 
 
@@ -35,9 +33,7 @@ def map_geom_tag():
     friction tuned to a calving front that the lumped lift made ~2x too thick.
     Separate names stop that from happening by accident.
     """
-    return "" if os.environ.get(
-        "ISMIP7_GEOMETRY_SPACE", "dg0"
-    ).lower() == "cg1" else "_dg0"
+    return "" if geometry_space() == "cg1" else "_dg0"
 
 
 def map_tag(friction, geometry=True):

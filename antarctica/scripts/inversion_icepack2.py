@@ -791,21 +791,25 @@ def main():
                 )
         h_next = Function(Q_g, name="h_next")
 
-        # ── Net (integral) mass-balance term ─────────────────────────────
-        # The pointwise chi^2 above reduces VARIANCE; it barely feels a small
-        # systematic MEAN. Measured on the converged 2500 m transient MAP: the
-        # pointwise term reached its optimum with an RMS residual of 2.2 m/yr
-        # while the NET tendency was +604 Gt/yr against an observed -73 -- a
-        # mean bias of +0.06 m/yr/cell, 3% of the local noise, invisible to
-        # the L2 gradient. This term penalises that integral directly:
-        #   J_net = 1/2 [ (integral (dhdt_model - dhdt_obs) dA) / sigma_net ]^2
-        # with sigma_net in Gt/yr (IMBIE-scale). The squared integral is
-        # taped by projecting the masked residual onto the R (Real) space --
-        # a one-dof solve whose solution is the domain mean -- and then
-        # integrating a spatially-constant quadratic of it, so everything
-        # stays UFL and differentiates through the existing EquationSolver
-        # machinery with no functional algebra.
-        dhdt_net_sigma = float(os.environ.get("ISMIP7_DHDT_NET_SIGMA", "25"))
+        # ── Net (integral) mass-balance term -- OFF BY DEFAULT ──────────
+        # Explored Aug 2026 and mechanically validated (it moves the grounded
+        # net tendency from +604 to -54 Gt/yr against an observed -73 at
+        # 2500 m, at ~10% pointwise-RMS cost), then EXCLUDED from the
+        # production objective by decision (Andrew, Aug 30):
+        #   1. Assimilating the integrated mass trend forfeits it as
+        #      INDEPENDENT validation -- the observed trend is the one number
+        #      every downstream assessment (IMBIE/GRACE consistency) checks.
+        #   2. proj - CTRL differencing under ISMIP7_APPARENT_MB removes the
+        #      shared frozen drift by construction, so the bias this term
+        #      fixes largely cancels in the reported signal anyway.
+        #   3. The integral is bought with regionally structured adjustments
+        #      to a residual that is div(h u) DATA NOISE (interior response
+        #      times are 1e3-1e4 yr; a 16-yr window carries no dynamical
+        #      interior signal), i.e. aggregated noise-fitting.
+        # The machinery stays for experiments (set ISMIP7_DHDT_NET_SIGMA>0),
+        # and the per-iteration net= DIAGNOSTIC prints regardless, so the
+        # tendency bias is always visible without being penalised.
+        dhdt_net_sigma = float(os.environ.get("ISMIP7_DHDT_NET_SIGMA", "0"))
         use_dhdt_net = dhdt_net_sigma > 0.0
         if use_dhdt_net:
             R_net = FunctionSpace(mesh, "R", 0)
@@ -1016,7 +1020,7 @@ def main():
             chk.set_attr("/", "gamma_theta", float(GAMMA_THETA))
             chk.set_attr("/", "gamma_phi", float(GAMMA_PHI))
             chk.set_attr("/", "dhdt_weight", float(dhdt_w))
-            chk.set_attr("/", "dhdt_net_sigma", float(os.environ.get("ISMIP7_DHDT_NET_SIGMA", "25")))
+            chk.set_attr("/", "dhdt_net_sigma", float(os.environ.get("ISMIP7_DHDT_NET_SIGMA", "0")))
 
     # ── L-BFGS-B Inversion ──
     max_iter = int(os.environ.get("ISMIP7_MAXITER", "500"))
@@ -1115,7 +1119,36 @@ def main():
 
         return total, total_grad
 
+    # ── Optimization metric (ISMIP7_GRAD_PRECOND) ────────────────────────
+    # L-BFGS-B works in raw dof coordinates, i.e. the Euclidean l2 metric, and
+    # that metric is MESH-DEPENDENT: a gradient entry scales with the dof's
+    # cell area, so the fine grounding-line cells -- exactly where the controls
+    # must move -- get the smallest gradient entries and converge slowest.
+    # `mass` optimizes in u = M^(1/2) x (M = lumped mass), which is steepest
+    # descent in L2 and makes the rate mesh-independent; peers compensate for
+    # the same defect with brute iteration counts (ISSM/M1QN3 runs 1000+300 in
+    # cycles). The natural upgrade is the prior metric (delta*M+gamma*K)^-1
+    # (fenics_ice); the operator exists in icepack2_tools/prior.py. Default
+    # off so in-flight runs stay comparable; flip after the current A/B.
+    grad_precond = os.environ.get("ISMIP7_GRAD_PRECOND", "none").lower()
+    if grad_precond not in ("none", "mass"):
+        raise ValueError(f"ISMIP7_GRAD_PRECOND must be none|mass, got {grad_precond!r}")
+    if grad_precond == "mass":
+        _mv = assemble(TestFunction(Q) * dx).dat.data_ro
+        _mloc = Function(Q); _mloc.dat.data[:] = _mv
+        _sqrtm_one = np.sqrt(np.maximum(func_to_global(_mloc), 1e-30))
+        _sqrtm = np.concatenate([_sqrtm_one, _sqrtm_one])
+        PETSc.Sys.Print(
+            f"  Optimization metric: lumped-mass Riesz (u = sqrt(M) x); "
+            f"sqrt(m) range [{_sqrtm_one.min():.2e}, {_sqrtm_one.max():.2e}]"
+        )
+        _inner_og = objective_and_gradient
+        def objective_and_gradient(u_vec):  # noqa: F811 (deliberate wrap)
+            J, g_x = _inner_og(u_vec / _sqrtm)
+            return J, g_x / _sqrtm
     x0 = np.concatenate([func_to_global(theta), func_to_global(phi)])
+    if grad_precond == "mass":
+        x0 = x0 * _sqrtm
     result = scipy_minimize(
         objective_and_gradient,
         x0,
@@ -1126,8 +1159,9 @@ def main():
 
     PETSc.Sys.Print(f"\nOptimization finished: {result.message}")
     PETSc.Sys.Print(f"  {result.nit} iterations, {result.nfev} function evaluations")
-    global_to_func(result.x[:global_ndof], theta)
-    global_to_func(result.x[global_ndof:], phi)
+    _x_final = result.x / _sqrtm if grad_precond == "mass" else result.x
+    global_to_func(_x_final[:global_ndof], theta)
+    global_to_func(_x_final[global_ndof:], phi)
     _t_lo, _t_hi = global_range(theta)
     _p_lo, _p_hi = global_range(phi)
     PETSc.Sys.Print(f"  theta range: [{_t_lo:.3f}, {_t_hi:.3f}]")

@@ -1,5 +1,19 @@
 # DRAFT ISSUE — not yet posted
 
+**STATUS UPDATE (Aug 30): the net term was implemented, validated, and then
+EXCLUDED from the production objective by decision.** Validation held (net
++604 → −54 Gt/yr vs observed −73 at 2500 m, ~10% pointwise-RMS cost, stable
+10-yr forward), but three arguments removed it from the default: assimilating
+the integrated trend forfeits it as independent validation; proj − CTRL
+differencing under the apparent-MB scheme cancels the shared frozen drift in
+the reported signal anyway; and the integral is bought with regionally
+structured adjustments to what is demonstrably div(h·u) data noise (interior
+response times leave no room for real decadal interior signal). The term
+remains in-tree behind ISMIP7_DHDT_NET_SIGMA (default 0) as an experiment
+knob, and the per-iteration net= diagnostic always prints. If posted, this
+issue should be framed as a record of the investigation and the decision, not
+as a proposal.
+
 Target repo: `icepack/ismip7` (or `hoffmaao/ismip7` if we want it fork-local
 first). Delete this header when posting.
 

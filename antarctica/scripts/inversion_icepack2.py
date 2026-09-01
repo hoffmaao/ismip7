@@ -524,10 +524,10 @@ def main():
                     f"{BUDD_DELTA:.3f}, alpha_gl={ALPHA_GL:.2f})"
                     if FRICTION == "budd"
                     else f"regularized Coulomb (c0={C0_RC})")
+        C_w0_lo, C_w0_hi = global_range(C_w0)
         PETSc.Sys.Print(
             f"  Friction: {law_name}; h_visc_floor={RC_HVISC_FLOOR:.0f}m; "
-            f"C_w0 in [{global_range(C_w0)[0]:.2e}, "
-            f"{global_range(C_w0)[1]:.2e}]"
+            f"C_w0 in [{C_w0_lo:.2e}, {C_w0_hi:.2e}]"
         )
     else:
         PETSc.Sys.Print("  Friction: Budd power-law dual (legacy action)")
@@ -565,9 +565,10 @@ def main():
             u_obs, H_th, s_th, b_th, C_th, acc_prior, T_srf
         )
         A_prior.rename("fluidity_prior")
+        A_prior_lo, A_prior_hi = global_range(A_prior)
         PETSc.Sys.Print(
-            f"  Fluidity prior A_prior in [{global_range(A_prior)[0]:.2f}, "
-            f"{global_range(A_prior)[1]:.2f}] (thermomechanical)"
+            f"  Fluidity prior A_prior in [{A_prior_lo:.2f}, "
+            f"{A_prior_hi:.2f}] (thermomechanical)"
         )
     else:
         A_prior = Function(Q, name="fluidity_prior").interpolate(A0 * Constant(a4_factor))
@@ -682,6 +683,12 @@ def main():
     # aborting the inversion.
     dhdt_w = float(os.environ.get("ISMIP7_DHDT_WEIGHT", "0.0"))
     use_dhdt = dhdt_w > 0.0
+    # Resolved (not merely requested) net-term provenance: ISMIP7_DHDT_NET_SIGMA
+    # only reaches the objective when the dH/dt term itself is on, so these stay
+    # at their off values unless the term is actually built below. save_map
+    # stamps net_sigma_used, so a MAP can never claim a constraint it never saw.
+    use_dhdt_net = False
+    net_sigma_used = 0.0
     if use_dhdt:
         if not geom_dg:
             raise RuntimeError(
@@ -812,6 +819,7 @@ def main():
         dhdt_net_sigma = float(os.environ.get("ISMIP7_DHDT_NET_SIGMA", "0"))
         use_dhdt_net = dhdt_net_sigma > 0.0
         if use_dhdt_net:
+            net_sigma_used = dhdt_net_sigma
             R_net = FunctionSpace(mesh, "R", 0)
             A_tot_net = float(assemble(Constant(1.0) * dx(mesh)))
             _rho_gt = 917.0 / 1e12
@@ -1014,13 +1022,14 @@ def main():
             # ds(absent_id) integrates to zero -- silently wrong physics with
             # no crash. The basename covers meshes outside the standard naming
             # pattern; the parameters let bndids_filename() rebuild the name.
+            chk.set_attr("/", "lc", int(lc))
             chk.set_attr("/", "lc_coarse", int(lc_coarse))
             chk.set_attr("/", "buffer_m", float(buffer_m))
             chk.set_attr("/", "misfit_norm", MISFIT_NORM)
             chk.set_attr("/", "gamma_theta", float(GAMMA_THETA))
             chk.set_attr("/", "gamma_phi", float(GAMMA_PHI))
             chk.set_attr("/", "dhdt_weight", float(dhdt_w))
-            chk.set_attr("/", "dhdt_net_sigma", float(os.environ.get("ISMIP7_DHDT_NET_SIGMA", "0")))
+            chk.set_attr("/", "dhdt_net_sigma", net_sigma_used)
 
     # ── L-BFGS-B Inversion ──
     max_iter = int(os.environ.get("ISMIP7_MAXITER", "500"))

@@ -52,20 +52,24 @@ from icepack2_tools.mpi_stats import global_mean, global_range
 from icepack2_tools.boundary import load_boundary_ids
 from icepack2_tools.geometry import sample_to_geometry
 from icepack2_tools.naming import map_basename
+from icepack2_tools.runconfig import (
+    friction as _friction, geometry_space as _geometry_space, lc as _lc,
+    n_flow as _n_flow,
+)
 
-lc = int(os.environ.get("ISMIP7_LC", "2500"))
+lc = _lc()
 
-# Flow-law exponent for the composite viscous rheology. THIS BRANCH
-# (antarctica-n3) runs STANDARD GLEN n=3: A0 = rate_factor(260 K) is
-# already the n=3 fluidity, so the composite main term needs no prefactor
-# rescale (A4_FACTOR_DEFAULT = 1). The n=4 Goldsby-Kohlstedt composite
-# (a4_factor ~ 10, so A_4 tau_c^4 ~ A_3 tau_c^3 at tau_c) lives on the
-# `antarctica` branch. Override either per-run with ISMIP7_N_FLOW /
-# ISMIP7_A4_FACTOR; the two must match between an inversion and the forward
-# runs that load its MAP. Setting ISMIP7_N_FLOW=4 alone therefore carries the
-# n=4 prefactor with it (a4_factor_default below), so the legacy untagged n=4
-# MAP is used with the factor it was inverted at.
-N_FLOW_DEFAULT = "3.0"
+# Flow-law exponent for the composite viscous rheology: owned by
+# icepack2_tools.runconfig, which the inversion that produced the MAP reads
+# too. THIS BRANCH (antarctica-n3) runs STANDARD GLEN n=3: A0 =
+# rate_factor(260 K) is already the n=3 fluidity, so the composite main term
+# needs no prefactor rescale (A4_FACTOR_DEFAULT = 1). The n=4
+# Goldsby-Kohlstedt composite (a4_factor ~ 10, so A_4 tau_c^4 ~ A_3 tau_c^3 at
+# tau_c) lives on the `antarctica` branch. Override either per-run with
+# ISMIP7_N_FLOW / ISMIP7_A4_FACTOR; the two must match between an inversion
+# and the forward runs that load its MAP. Setting ISMIP7_N_FLOW=4 alone
+# therefore carries the n=4 prefactor with it (a4_factor_default below), so
+# the legacy untagged n=4 MAP is used with the factor it was inverted at.
 A4_FACTOR_DEFAULT = "1.0"
 A4_FACTOR_N4 = "10.0"
 
@@ -74,7 +78,7 @@ def a4_factor_default():
     r"""Prefactor default derived from the flow exponent: the n=4 composite
     needs A_4 = 10 A_3 so A_4 tau_c^4 ~ A_3 tau_c^3, while n=3 is plain Glen
     and needs none. ISMIP7_A4_FACTOR still overrides."""
-    n = float(os.environ.get("ISMIP7_N_FLOW", N_FLOW_DEFAULT))
+    n = _n_flow()
     return A4_FACTOR_N4 if abs(n - 4.0) < 1e-9 else A4_FACTOR_DEFAULT
 
 
@@ -147,7 +151,7 @@ def setup_model(restart_from=None):
     # Must mirror inversion_icepack2.py so theta/phi keep their meaning.
     # Resolved first because the compute mesh is loaded FROM this friction's
     # MAP checkpoint (below), not from a fresh Mesh(.msh).
-    friction = os.environ.get("ISMIP7_FRICTION", "budd")
+    friction = _friction()
     # Exact-zero-shelf residual laws (icepack2 dual, dual_friction.py):
     #   regularized_coulomb -> Coulomb cap tau_c=c0*N
     #   budd                -> tau_b ~ N_hat=N_eff/N_ref, PISM-delta grounded
@@ -274,11 +278,7 @@ def setup_model(restart_from=None):
     # data error at Antarctic resolutions, and it buys an unbiased front.
     #
     # ISMIP7_GEOMETRY_SPACE=cg1 restores the old behaviour for A/B comparison.
-    geometry_space = os.environ.get("ISMIP7_GEOMETRY_SPACE", "dg0").lower()
-    if geometry_space not in ("dg0", "cg1"):
-        raise ValueError(
-            f"ISMIP7_GEOMETRY_SPACE must be 'dg0' or 'cg1', got {geometry_space!r}"
-        )
+    geometry_space = _geometry_space()
     geom_dg = geometry_space == "dg0"
     Q_g = FunctionSpace(mesh, "DG", 0) if geom_dg else Q
     PETSc.Sys.Print(
@@ -468,7 +468,7 @@ def setup_model(restart_from=None):
     # with |.| up to 23 -> exp() ~1e10 local singularities the diagnostic SNES
     # cannot solve through). Default 6 for n=4 MAPs; the physical n=3 controls
     # legitimately reach ~8, so default 10 otherwise. Set 0 to disable.
-    _n_flow_env = float(os.environ.get("ISMIP7_N_FLOW", N_FLOW_DEFAULT))
+    _n_flow_env = _n_flow()
     _map_clip_default = "6.0" if _n_flow_env == 4.0 else "10.0"
     map_clip = float(os.environ.get("ISMIP7_MAP_CLIP", _map_clip_default))
     if map_clip > 0.0:
@@ -486,7 +486,7 @@ def setup_model(restart_from=None):
     A0 = Constant(icepack.rate_factor(Constant(260.0)))
     # Composite flow exponent (must match the inversion that produced the
     # MAP file we load above). This branch: n=3 standard Glen (A4_FACTOR=1).
-    n_flow_val = float(os.environ.get("ISMIP7_N_FLOW", N_FLOW_DEFAULT))
+    n_flow_val = _n_flow()
     m_slide_val = float(os.environ.get("ISMIP7_M_SLIDE", "3.0"))
     a4_factor = float(os.environ.get("ISMIP7_A4_FACTOR", a4_factor_default()))
     n_flow = Constant(n_flow_val)

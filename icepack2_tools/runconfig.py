@@ -1,14 +1,17 @@
 r"""Run-shaping knobs: the discretization and physics choices that decide
 which MAP a run writes, and which MAP a forward is allowed to load.
 
-The inversion, the forward, the preflight gate and the per-core report all
-need these. Each used to re-declare its own literal default, which is how
-ISMIP7_LC came to mean 2500 in ``simulation.py`` and ``preflight.py`` but 8000
-in ``inversion_icepack2.py``: with the variable unset, the gate blessed
+The inversion, the forward, the mesh pipeline, the probes, the preflight gate
+and the per-core report all need these. Each used to re-declare its own
+literal default, which is how ISMIP7_LC came to mean 2500 in ``simulation.py``
+and ``preflight.py``, 8000 in ``inversion_icepack2.py`` and 32000 in
+``thermo_prior.py``: with the variable unset, the gate blessed
 ``inversion_icepack2_budd_n3_dg0_2500.h5`` while the inversion would have
 built and written the 8000 MAP. That is exactly the mismatch ``naming.py``
-exists to prevent, so the values it builds names from are owned here instead
-of being copied per reader.
+exists to prevent, so the values it builds names from are owned here and every
+reader calls the accessors below rather than repeating a literal. A script
+that genuinely needs a different value passes it at the call site or exports
+the variable, so the divergence is visible instead of hiding in a default.
 
 A knob left at its default is also absent from ``os.environ``, so
 ``core_report.py`` resolves the run-env block through this module: the report
@@ -21,6 +24,11 @@ fast.
 
 import os
 
+# 2500 m / 64 km is the production pair: it is the mesh the campaign inverts
+# and runs on (``antarctica_64000_2500_buffered20000``), and the pair the
+# README documents. The old 8000 and 32000 module-level defaults were
+# dev-probe leftovers; a coarse probe now exports ISMIP7_LC / ISMIP7_LC_COARSE
+# instead of disagreeing with the gate about what "unset" means.
 LC_DEFAULT = "2500"
 LC_COARSE_DEFAULT = "64000"
 GEOMETRY_SPACE_DEFAULT = "dg0"

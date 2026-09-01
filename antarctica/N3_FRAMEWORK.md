@@ -77,7 +77,8 @@ a failed first solve now raises rather than writing a garbage theta=phi=0 MAP):
 
 ```
 # 32 km n=3 Budd MAP (-n 8; runs the thermo prior + Whittle-Matern by default)
-OMP_NUM_THREADS=1 ISMIP7_FRICTION=budd ISMIP7_LC=32000 ISMIP7_N_FLOW=3.0 \
+OMP_NUM_THREADS=1 ISMIP7_FRICTION=budd ISMIP7_LC=32000 ISMIP7_LC_COARSE=320000 \
+  ISMIP7_N_FLOW=3.0 \
   ISMIP7_MESH=$PWD/antarctica/mesh/antarctica_320000_32000.msh ISMIP7_MAXITER=500 \
   mpiexec -n 8 python antarctica/scripts/inversion_icepack2.py
 ```

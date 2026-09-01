@@ -69,10 +69,11 @@ import sys
 sys.path.insert(0, os.path.dirname(_ROOT))
 from icepack2_tools.boundary import load_boundary_ids
 from icepack2_tools.mpi_stats import global_max
+from icepack2_tools.runconfig import lc as _lc, lc_coarse as _lc_coarse
 from mesh_naming import get_buffer_m, mesh_filename
 
-lc = int(os.environ.get("ISMIP7_LC", "8000"))
-lc_coarse = int(os.environ.get("ISMIP7_LC_COARSE", str(lc * 10)))
+lc = _lc()
+lc_coarse = _lc_coarse()
 buffer_m = get_buffer_m()
 K_LEADING = 40
 
@@ -317,7 +318,7 @@ def main():
     gamma_theta_eff = Constant(GAMMA_THETA * ELL**2 / area_val)
     delta_phi = Constant(1.0 / area_val)
     gamma_phi_eff = Constant(GAMMA_PHI * ELL**2 / area_val)
-    PETSc.Sys.Print(f"Prior (fenics_ice convention):")
+    PETSc.Sys.Print("Prior (fenics_ice convention):")
     PETSc.Sys.Print(
         f"  delta_theta={float(delta_theta):.6e}, gamma_theta={float(gamma_theta_eff):.6e}"
     )

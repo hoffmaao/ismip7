@@ -451,6 +451,7 @@ cannot be read as current.
 | `ISMIP7_GAMMA_THETA` / `ISMIP7_GAMMA_PHI` | Whittle-Matern prior strength on `θ` / `φ`. Default is coupled to `ISMIP7_MISFIT_NORM`, because normalizing divides the misfit by ~sigma^2 and would otherwise weaken the prior by the same factor | `1e5` under `sigma`, `1e4` under `none` |
 | `ISMIP7_L_REG` | prior correlation length (m) | `7.5e3` |
 | `ISMIP7_MAXITER` | L-BFGS-B iteration cap | `500` |
+| `ISMIP7_GRAD_PRECOND` | optimization metric. `none` is the raw-dof Euclidean l2 metric, which is **mesh-dependent**: a gradient entry scales with its dof's cell area, so the fine grounding-line cells converge slowest. `mass` optimizes in `u = sqrt(M) x` (M = lumped mass), i.e. steepest descent in L2, which makes the convergence rate mesh-independent. Defaults to `none` **deliberately**, so runs stay comparable with everything measured so far; flip after the current A/B. Any other value aborts at startup | `none` |
 | `ISMIP7_SIGMA_U_FLOOR` | floor on the per-component MEaSUREs velocity error (m/yr); without it the near-zero errors let a few nodes dominate the functional | `1.0` |
 | `ISMIP7_SIGMA_U_UNOBS` | sigma (m/yr) assigned where MEaSUREs reports no error at all. Those nodes also have a zero-filled `u_obs`, so they must be given a *large* sigma, not the floor, or they would carry maximal weight on a fabricated zero velocity when `ISMIP7_OBS_MASK=0` | `1e4` |
 | `ISMIP7_OBS_MASK` | `0` drops the velocity-observation mask (unobserved nodes re-enter the misfit) | `1` |

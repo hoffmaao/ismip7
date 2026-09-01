@@ -92,7 +92,6 @@ def main():
     # Sidecar resolved (per-mesh preferred, parametric fallback) and
     # HARD-CHECKED against this mesh: an id absent from the mesh makes
     # ds(id) integrate to zero, i.e. silently wrong physics with no crash.
-    bnd_ids, calving_ids, _ = load_boundary_ids(mesh, MESH_DIR, mesh_hint=mesh_fn)
     use_calving_terminus = os.environ.get("ISMIP7_NO_CALVING_TERMINUS") is None
     bnd_ids, calving_ids, bndids_fn = load_boundary_ids(
         mesh, MESH_DIR, mesh_hint=mesh_fn,

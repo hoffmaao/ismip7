@@ -46,7 +46,7 @@ RESULTS_DIR = os.path.join(_ROOT, "results")
 
 # Repo root on the path for the shared dual-friction operator.
 sys.path.insert(0, os.path.dirname(_ROOT))
-from mesh_naming import bndids_filename
+from mesh_naming import bndids_filename, mesh_filename
 
 from icepack2_tools.mpi_stats import global_mean, global_range
 from icepack2_tools.boundary import load_boundary_ids
@@ -207,10 +207,19 @@ def setup_model(restart_from=None):
                          if _chk.has_attr("/", "lc_coarse") else None)
         chk_buffer_m = (float(_chk.get_attr("/", "buffer_m"))
                         if _chk.has_attr("/", "buffer_m") else None)
+        # The FINE resolution is stamped too, and every component of the
+        # reconstructed name must come from the checkpoint: falling back to the
+        # live ISMIP7_LC here would reintroduce exactly the environment drift
+        # the parametric scheme exists to remove. Older MAPs that predate the
+        # lc attribute have no recorded resolution, so they keep the live value.
+        chk_lc = (int(_chk.get_attr("/", "lc"))
+                  if _chk.has_attr("/", "lc") else None)
         if not mesh_basename and chk_lc_coarse is not None \
                 and chk_buffer_m is not None:
             mesh_basename = os.path.basename(
-                mesh_filename(chk_lc_coarse, lc, chk_buffer_m))
+                mesh_filename(chk_lc_coarse,
+                              chk_lc if chk_lc is not None else lc,
+                              chk_buffer_m))
     PETSc.Sys.Print(f"  {mesh.num_vertices()} vertices, {mesh.num_cells()} cells")
     # The recorded basename is the provenance and WINS. ISMIP7_MESH is only a
     # fallback for legacy checkpoints that carry no attribute: it names the
@@ -508,9 +517,10 @@ def setup_model(restart_from=None):
     # predate the physical prior. Must match the inversion that made the MAP.
     if A_prior_f is not None:
         A4_base = A_prior_f
+        A_prior_lo, A_prior_hi = global_range(A_prior_f)
         PETSc.Sys.Print(
             f"  Fluidity prior A_prior loaded "
-            f"[{global_range(A_prior_f)[0]:.2f}, {global_range(A_prior_f)[1]:.2f}]"
+            f"[{A_prior_lo:.2f}, {A_prior_hi:.2f}]"
         )
     else:
         A_prior_f = Function(Q, name="fluidity_prior").interpolate(A0 * Constant(a4_factor))

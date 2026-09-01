@@ -46,7 +46,7 @@ RESULTS_DIR = os.path.join(_ROOT, "results")
 
 # Repo root on the path for the shared dual-friction operator.
 sys.path.insert(0, os.path.dirname(_ROOT))
-from mesh_naming import bndids_filename, mesh_filename
+from mesh_naming import mesh_filename
 
 from icepack2_tools.mpi_stats import global_mean, global_range
 from icepack2_tools.boundary import load_boundary_ids

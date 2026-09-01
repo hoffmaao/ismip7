@@ -45,7 +45,7 @@ from icepack2.constants import (
 import colorcet as cc
 import matplotlib.pyplot as plt
 
-from mesh_naming import get_buffer_m, mesh_filename, bndids_filename
+from mesh_naming import get_buffer_m, mesh_filename
 
 _ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 DATA_DIR = os.path.join(_ROOT, "data")

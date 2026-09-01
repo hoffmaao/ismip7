@@ -82,7 +82,7 @@ FIG_DIR = os.path.join(_ROOT, "figs")
 RESULTS_DIR = os.path.join(_ROOT, "results")
 SHAPEFILE = os.path.expanduser("~/data/shapefiles/IceShelf_Antarctica_v02.shp")
 
-from mesh_naming import get_buffer_m, mesh_filename, bndids_filename
+from mesh_naming import get_buffer_m, mesh_filename
 
 lc = int(os.environ.get("ISMIP7_LC", "2500"))
 lc_coarse = int(os.environ.get("ISMIP7_LC_COARSE", "64000"))

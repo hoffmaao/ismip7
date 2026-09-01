@@ -69,7 +69,7 @@ import sys
 sys.path.insert(0, os.path.dirname(_ROOT))
 from icepack2_tools.boundary import load_boundary_ids
 from icepack2_tools.mpi_stats import global_max
-from mesh_naming import get_buffer_m, mesh_filename, bndids_filename
+from mesh_naming import get_buffer_m, mesh_filename
 
 lc = int(os.environ.get("ISMIP7_LC", "8000"))
 lc_coarse = int(os.environ.get("ISMIP7_LC_COARSE", str(lc * 10)))

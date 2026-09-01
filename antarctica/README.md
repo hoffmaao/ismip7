@@ -219,11 +219,10 @@ never collides with or silently invalidates a previous build.
 `Calving_0, Other_1, Calving_2, …`, auto-numbered `1,2,3,…`, so **odd tag =
 calving, even tag = other**. `mesh_antarctica.py` automatically writes that
 split to `mesh/boundary_ids_antarctica_<COARSE>_<FINE>_buffered<BUFFER_M>.json`
-(read by every solver via `ISMIP7_BNDIDS`, which itself defaults using the
-same `(COARSE, FINE, BUFFER_M)`-based naming — see `scripts/mesh_naming.py`).
-These small JSONs are the *only*
-tracked files in `mesh/`. To regenerate one for an existing mesh without
-rebuilding it, run `ISMIP7_BUFFER_M=<N> python scripts/make_boundary_ids.py`
+(the name is built by `scripts/mesh_naming.py`, the single owner of the mesh /
+sidecar filename convention). These small JSONs are the *only* tracked files
+in `mesh/`. To regenerate one for an existing mesh without rebuilding it, run
+`ISMIP7_BUFFER_M=<N> python scripts/make_boundary_ids.py`
 (or pass explicit `ISMIP7_MESH`/`ISMIP7_BNDIDS` paths) — it parses the mesh's
 `$PhysicalNames` block and writes `{"calving":[odd…], "other":[even…]}`.
 
@@ -493,6 +492,7 @@ cannot be read as current.
 | `ISMIP7_K_MELT` | scalar Burgard K (projections) | `1.15e-4` (Burgard K50) |
 | `ISMIP7_K_PER_BASIN_NPZ` | per-basin K file (control) | `results/calibrated_K_per_basin_<lc>.npz` |
 | `ISMIP7_ESM` | ESM for control (`CESM2-WACCM`, `MRI-ESM2-0`) | `CESM2-WACCM` |
+| `ISMIP7_CLIM_SCENARIO` / `ISMIP7_CLIM_START` / `_END` | reference-climate pool: the scenario pooled with `historical`, and the window, used both for the control's SMB climatology and for the projections' aSMB re-reference. `ssp126` is the protocol pool (cheat sheet, April 2026); the two uses share one owner (`icepack2_tools/climatology.py`) because a disagreement makes projection-minus-control difference two unrelated baselines. A partial pool warns rather than refusing, and the coverage line reaches the core report | `ssp126` / `2000` / `2029` |
 | `ISMIP7_H_CLAMP` | thickness floor (m) | `0` |
 | `ISMIP7_NO_CALVING_TERMINUS` | set to drop the calving-terminus BC | _(unset)_ |
 | `ISMIP7_SUBCYCLES` | dt-subcycle rescue ladder: a step that fails the rescue solves rewinds its own advance and retries at `dt/m` for each `m` in this list | `1,4,16` |

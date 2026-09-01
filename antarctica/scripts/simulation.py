@@ -880,6 +880,7 @@ def setup_model(restart_from=None):
         "friction": friction,
         # Mesh provenance from the source checkpoint (re-stamped into every
         # state checkpoint so warm restarts stay self-describing).
+        "lc": chk_lc,
         "lc_coarse": chk_lc_coarse,
         "buffer_m": chk_buffer_m,
         # Rescue speed limiter (residual laws): live Constant, 0 = inert.
@@ -1196,10 +1197,11 @@ def run_simulation(
                 chk.save_function(h_dg, name="thickness_dg")
             chk.set_attr("/", "t_yr", float(t_now))
             chk.set_attr("/", "friction", str(friction))
-            chk.set_attr("/", "lc", int(lc))
             chk.set_attr("/", "geometry_space", "dg0" if geom_dg else "cg1")
             if mesh_basename:
                 chk.set_attr("/", "mesh_basename", str(mesh_basename))
+            if ctx.get("lc") is not None:
+                chk.set_attr("/", "lc", int(ctx["lc"]))
             if ctx.get("lc_coarse") is not None:
                 chk.set_attr("/", "lc_coarse", int(ctx["lc_coarse"]))
             if ctx.get("buffer_m") is not None:

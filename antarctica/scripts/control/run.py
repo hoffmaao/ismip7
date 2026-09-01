@@ -305,7 +305,7 @@ def main():
     PETSc.Sys.Print(f"\nControl experiment: {ESM}")
     PETSc.Sys.Print(f"  Period: {T_START}-{T_END}")
     PETSc.Sys.Print(f"  Constant {CLIM_START}-{CLIM_END} SMB climatology")
-    PETSc.Sys.Print(f"  Constant OI ocean climatology + per-basin K")
+    PETSc.Sys.Print("  Constant OI ocean climatology + per-basin K")
 
     run_simulation(
         ctx,

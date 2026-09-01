@@ -31,6 +31,7 @@ from firedrake.petsc import PETSc
 _ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, os.path.dirname(_ROOT))
 from icepack2_tools.obs_dhdt import load_dhdt_obs
+from icepack2_tools.runconfig import lc as _lc
 from icepack2_tools.forcing import (
     load_racmo_smb_climatology, load_K_per_basin,
     make_climatology_ocean_callback,
@@ -69,11 +70,12 @@ def one_step_dhdt(path):
 
     melt = Function(Q_g, name="ocean_melt_ref")
     if os.environ.get("ISMIP7_DHDT_MELT", "1") != "0":
-        # Same ISMIP7_LC default as inversion_icepack2.py: a mismatch here
-        # picks a per-basin K calibrated at another resolution, which perturbs
-        # the melt source and hence the model tendency being scored.
-        _k_lc = os.path.join(_ROOT, "results", "calibrated_K_per_basin_"
-                             f"{os.environ.get('ISMIP7_LC', '8000')}.npz")
+        # Resolution comes from icepack2_tools.runconfig, the same owner the
+        # inversion reads: a mismatch here picks a per-basin K calibrated at
+        # another resolution, which perturbs the melt source and hence the
+        # model tendency being scored.
+        _k_lc = os.path.join(_ROOT, "results",
+                             f"calibrated_K_per_basin_{_lc()}.npz")
         _k_2500 = os.path.join(_ROOT, "results",
                                "calibrated_K_per_basin_2500.npz")
         k_npz = os.environ.get("ISMIP7_K_PER_BASIN_NPZ",

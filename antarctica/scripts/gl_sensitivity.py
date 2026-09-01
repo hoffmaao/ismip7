@@ -83,9 +83,10 @@ RESULTS_DIR = os.path.join(_ROOT, "results")
 SHAPEFILE = os.path.expanduser("~/data/shapefiles/IceShelf_Antarctica_v02.shp")
 
 from mesh_naming import get_buffer_m, mesh_filename
+from icepack2_tools.runconfig import lc as _lc, lc_coarse as _lc_coarse
 
-lc = int(os.environ.get("ISMIP7_LC", "2500"))
-lc_coarse = int(os.environ.get("ISMIP7_LC_COARSE", "64000"))
+lc = _lc()
+lc_coarse = _lc_coarse()
 buffer_m = get_buffer_m()
 
 # GL thinning profile widths (km) — how far inland the thinning extends
@@ -235,7 +236,7 @@ def main():
     A_map_expr = A0 * fd.exp(phi_map)
 
     # ── Shelf masks ──
-    PETSc.Sys.Print(f"Building shelf masks...")
+    PETSc.Sys.Print("Building shelf masks...")
     coords = mesh.coordinates.dat.data_ro
     shelf_mask_arrays = build_shelf_masks(SHAPEFILE, coords, MIN_SHELF_AREA)
     shelf_mask_fns = {}

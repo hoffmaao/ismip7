@@ -468,6 +468,14 @@ cannot be read as current.
 
 ### Environment knobs (all forward runs)
 
+The run-shaping knobs - `ISMIP7_LC`, `ISMIP7_LC_COARSE`, `ISMIP7_FRICTION`
+and `ISMIP7_GEOMETRY_SPACE` below, plus `ISMIP7_N_FLOW` (see
+`../COMPOSITE_RHEOLOGY.md`) - have exactly one owner in code,
+`icepack2_tools/runconfig.py`. Every driver, probe and gate reads them through
+it, so an unset knob cannot mean one resolution to the inversion and another
+to the preflight. A run that wants something else exports it, which is also
+how it reaches the core report.
+
 | Env var | Meaning | Default |
 |---------|---------|---------|
 | `ISMIP7_LC` | fine mesh resolution tag (selects mesh + inversion h5) | `2500` |

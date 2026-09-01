@@ -54,8 +54,10 @@ FIG_DIR = os.path.join(_ROOT, "figs")
 
 sys.path.insert(0, os.path.dirname(_ROOT))
 from icepack2_tools.boundary import load_boundary_ids
-lc = int(os.environ.get("ISMIP7_LC", "8000"))
-lc_coarse = int(os.environ.get("ISMIP7_LC_COARSE", str(lc * 10)))
+from icepack2_tools.runconfig import lc as _lc, lc_coarse as _lc_coarse
+
+lc = _lc()
+lc_coarse = _lc_coarse()
 buffer_m = get_buffer_m()
 
 

@@ -87,6 +87,10 @@ from icepack2_tools.grounding import height_above_flotation
 from icepack2_tools.mpi_stats import (global_mean, global_range,
                                       global_max, global_size, global_count)
 from icepack2_tools.naming import map_basename
+from icepack2_tools.runconfig import (
+    friction as _friction, geometry_space as _geometry_space,
+    lc as _lc, lc_coarse as _lc_coarse, n_flow as _n_flow,
+)
 from icepack2_tools.prior import (
     regularization_form as reg_form,
     regularization_gradient_form as reg_grad_form,
@@ -96,14 +100,14 @@ from icepack2_tools.forcing import (load_racmo_smb_climatology,
                                     load_mean_annual_surface_temperature)
 from mesh_naming import get_buffer_m, mesh_filename
 
-lc = int(os.environ.get("ISMIP7_LC", "8000"))
-lc_coarse = int(os.environ.get("ISMIP7_LC_COARSE", str(lc * 10)))
+lc = _lc()
+lc_coarse = _lc_coarse()
 buffer_m = get_buffer_m()
 
-# Flow-law exponent default -- KEEP IN SYNC with simulation.py (the forward
-# that loads this MAP must use the same rheology). THIS BRANCH: n=3 standard
-# Glen, so no prefactor rescale (A4_FACTOR=1). See COMPOSITE_RHEOLOGY.md.
-N_FLOW_DEFAULT = "3.0"
+# Flow-law exponent: owned by icepack2_tools.runconfig, which the forward that
+# loads this MAP reads too, so the two cannot drift apart. THIS BRANCH: n=3
+# standard Glen, so no prefactor rescale (A4_FACTOR=1). See
+# COMPOSITE_RHEOLOGY.md.
 A4_FACTOR_DEFAULT = "1.0"
 A4_FACTOR_N4 = "10.0"
 
@@ -112,7 +116,7 @@ def a4_factor_default():
     r"""Prefactor default derived from the flow exponent (10 at n=4, 1
     otherwise) so ISMIP7_N_FLOW=4 alone still gets the n=4 rescale.
     ISMIP7_A4_FACTOR still overrides. Mirrors simulation.a4_factor_default."""
-    n = float(os.environ.get("ISMIP7_N_FLOW", N_FLOW_DEFAULT))
+    n = _n_flow()
     return A4_FACTOR_N4 if abs(n - 4.0) < 1e-9 else A4_FACTOR_DEFAULT
 
 # Misfit normalization: "sigma" (default) divides each residual by the squared
@@ -149,7 +153,7 @@ L_REG = float(os.environ.get("ISMIP7_L_REG", "7.5e3"))
 
 # Friction law: "budd" (power-law dual, default) or "regularized_coulomb"
 # (Joughin/Schoof RC residual: grounded-only inference, exact-zero shelves).
-FRICTION = os.environ.get("ISMIP7_FRICTION", "budd")
+FRICTION = _friction()
 # Exact-zero-shelf residual laws share the C_w0/He/composite structure.
 USE_RESIDUAL = FRICTION in ("regularized_coulomb", "budd")
 USE_RC = USE_RESIDUAL  # geometry/anchor handling is shared
@@ -204,11 +208,7 @@ def main():
     # gets wrong into theta/phi, so a MAP inverted under CG1 geometry silently
     # carries the lumped lift's inflated calving-front thickness into the
     # friction field, and the t=0 velocity misfit cannot reveal it.
-    geometry_space = os.environ.get("ISMIP7_GEOMETRY_SPACE", "dg0").lower()
-    if geometry_space not in ("dg0", "cg1"):
-        raise ValueError(
-            f"ISMIP7_GEOMETRY_SPACE must be 'dg0' or 'cg1', got {geometry_space!r}"
-        )
+    geometry_space = _geometry_space()
     geom_dg = geometry_space == "dg0"
     Q_g = FunctionSpace(mesh, "DG", 0) if geom_dg else Q
     PETSc.Sys.Print(f"  Geometry space: {geometry_space.upper()}")
@@ -348,7 +348,7 @@ def main():
     # standard Glen) main term + linear (n=1) regularization. Sliding stays
     # at Weertman m_slide=3.
     A0 = Constant(icepack.rate_factor(Constant(260.0)))
-    n_flow_val = float(os.environ.get("ISMIP7_N_FLOW", N_FLOW_DEFAULT))
+    n_flow_val = _n_flow()
     m_slide_val = float(os.environ.get("ISMIP7_M_SLIDE", "3.0"))
     a4_factor = float(os.environ.get("ISMIP7_A4_FACTOR", a4_factor_default()))
     n_flow = Constant(n_flow_val)

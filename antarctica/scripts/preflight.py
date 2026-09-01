@@ -27,7 +27,8 @@ from icepack2_tools.boundary import sidecar_path
 from icepack2_tools.naming import map_basename
 from icepack2_tools.climatology import clim_start, clim_end, clim_scenario
 from icepack2_tools.runconfig import (
-    friction as _friction, lc as _lc, lc_coarse as _lc_coarse,
+    friction as _friction, geometry_space as _geometry_space, lc as _lc,
+    lc_coarse as _lc_coarse,
 )
 from mesh_naming import get_buffer_m, mesh_filename
 
@@ -198,7 +199,7 @@ def oi_ok():
 
 
 def main():
-    geom = os.environ.get("ISMIP7_GEOMETRY_SPACE", "dg0").lower()
+    geom = _geometry_space()
     print(f"Preflight: lc={lc}, friction={friction}, geometry={geom}, "
           f"OI={oi_version}, climatology=historical+{CLIM_SCENARIO} "
           f"{CLIM_START}-{CLIM_END}")

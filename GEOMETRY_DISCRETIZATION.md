@@ -164,7 +164,8 @@ initial misfit from 8.6e3 to 1.5e5, which is the size of the inconsistency.
 Run the DG0 inversion with:
 
 ```
-OMP_NUM_THREADS=1 ISMIP7_FRICTION=budd ISMIP7_LC=32000 ISMIP7_N_FLOW=3.0 \
+OMP_NUM_THREADS=1 ISMIP7_FRICTION=budd ISMIP7_LC=32000 ISMIP7_LC_COARSE=320000 \
+  ISMIP7_N_FLOW=3.0 \
   ISMIP7_GEOMETRY_SPACE=dg0 \
   ISMIP7_MESH=$PWD/antarctica/mesh/antarctica_320000_32000.msh ISMIP7_MAXITER=500 \
   mpiexec -n 8 python antarctica/scripts/inversion_icepack2.py

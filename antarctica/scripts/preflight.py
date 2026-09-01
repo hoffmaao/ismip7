@@ -18,6 +18,7 @@ _SCRIPTS = os.path.dirname(os.path.abspath(__file__))
 _ANT = os.path.dirname(_SCRIPTS)
 _PROJECT = os.path.dirname(_ANT)
 sys.path.insert(0, _PROJECT)
+sys.path.insert(0, _SCRIPTS)
 
 from icepack2_tools.forcing import (
     atmosphere_path, ocean_path, _oi_climatology_path, _find_ismip7_data,
@@ -28,6 +29,7 @@ from icepack2_tools.climatology import clim_start, clim_end, clim_scenario
 from icepack2_tools.runconfig import (
     friction as _friction, lc as _lc, lc_coarse as _lc_coarse,
 )
+from mesh_naming import get_buffer_m, mesh_filename
 
 MESH_DIR = os.path.join(_ANT, "mesh")
 RESULTS_DIR = os.path.join(_ANT, "results")
@@ -142,8 +144,7 @@ def shared_missing(warn=None):
     miss = []
     warn = warn if warn is not None else []
     mesh_fn = os.environ.get(
-        "ISMIP7_MESH",
-        os.path.join(MESH_DIR, f"antarctica_{lc_coarse}_{lc}.msh"),
+        "ISMIP7_MESH", mesh_filename(lc_coarse, lc, get_buffer_m())
     )
     if not os.path.exists(mesh_fn):
         miss.append(f"mesh ({os.path.basename(mesh_fn)})")

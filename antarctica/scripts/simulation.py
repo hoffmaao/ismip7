@@ -46,25 +46,30 @@ RESULTS_DIR = os.path.join(_ROOT, "results")
 
 # Repo root on the path for the shared dual-friction operator.
 sys.path.insert(0, os.path.dirname(_ROOT))
+from mesh_naming import mesh_filename
 
+from icepack2_tools.mpi_stats import global_mean, global_range
 from icepack2_tools.boundary import load_boundary_ids
 from icepack2_tools.geometry import sample_to_geometry
 from icepack2_tools.naming import map_basename
+from icepack2_tools.runconfig import (
+    friction as _friction, geometry_space as _geometry_space, lc as _lc,
+    n_flow as _n_flow,
+)
 
-lc = int(os.environ.get("ISMIP7_LC", "2500"))
-lc_coarse = int(os.environ.get("ISMIP7_LC_COARSE", "64000"))
+lc = _lc()
 
-# Flow-law exponent for the composite viscous rheology. THIS BRANCH
-# (antarctica-n3) runs STANDARD GLEN n=3: A0 = rate_factor(260 K) is
-# already the n=3 fluidity, so the composite main term needs no prefactor
-# rescale (A4_FACTOR_DEFAULT = 1). The n=4 Goldsby-Kohlstedt composite
-# (a4_factor ~ 10, so A_4 tau_c^4 ~ A_3 tau_c^3 at tau_c) lives on the
-# `antarctica` branch. Override either per-run with ISMIP7_N_FLOW /
-# ISMIP7_A4_FACTOR; the two must match between an inversion and the forward
-# runs that load its MAP. Setting ISMIP7_N_FLOW=4 alone therefore carries the
-# n=4 prefactor with it (a4_factor_default below), so the legacy untagged n=4
-# MAP is used with the factor it was inverted at.
-N_FLOW_DEFAULT = "3.0"
+# Flow-law exponent for the composite viscous rheology: owned by
+# icepack2_tools.runconfig, which the inversion that produced the MAP reads
+# too. THIS BRANCH (antarctica-n3) runs STANDARD GLEN n=3: A0 =
+# rate_factor(260 K) is already the n=3 fluidity, so the composite main term
+# needs no prefactor rescale (A4_FACTOR_DEFAULT = 1). The n=4
+# Goldsby-Kohlstedt composite (a4_factor ~ 10, so A_4 tau_c^4 ~ A_3 tau_c^3 at
+# tau_c) lives on the `antarctica` branch. Override either per-run with
+# ISMIP7_N_FLOW / ISMIP7_A4_FACTOR; the two must match between an inversion
+# and the forward runs that load its MAP. Setting ISMIP7_N_FLOW=4 alone
+# therefore carries the n=4 prefactor with it (a4_factor_default below), so
+# the legacy untagged n=4 MAP is used with the factor it was inverted at.
 A4_FACTOR_DEFAULT = "1.0"
 A4_FACTOR_N4 = "10.0"
 
@@ -73,7 +78,7 @@ def a4_factor_default():
     r"""Prefactor default derived from the flow exponent: the n=4 composite
     needs A_4 = 10 A_3 so A_4 tau_c^4 ~ A_3 tau_c^3, while n=3 is plain Glen
     and needs none. ISMIP7_A4_FACTOR still overrides."""
-    n = float(os.environ.get("ISMIP7_N_FLOW", N_FLOW_DEFAULT))
+    n = _n_flow()
     return A4_FACTOR_N4 if abs(n - 4.0) < 1e-9 else A4_FACTOR_DEFAULT
 
 
@@ -146,7 +151,7 @@ def setup_model(restart_from=None):
     # Must mirror inversion_icepack2.py so theta/phi keep their meaning.
     # Resolved first because the compute mesh is loaded FROM this friction's
     # MAP checkpoint (below), not from a fresh Mesh(.msh).
-    friction = os.environ.get("ISMIP7_FRICTION", "budd")
+    friction = _friction()
     # Exact-zero-shelf residual laws (icepack2 dual, dual_friction.py):
     #   regularized_coulomb -> Coulomb cap tau_c=c0*N
     #   budd                -> tau_b ~ N_hat=N_eff/N_ref, PISM-delta grounded
@@ -192,6 +197,33 @@ def setup_model(restart_from=None):
             str(_chk.get_attr("/", "mesh_basename"))
             if _chk.has_attr("/", "mesh_basename") else ""
         )
+
+        # Dan/David additionally stamp the mesh PARAMETERS. Keep both: the
+        # basename is direct and also covers meshes outside the standard
+        # naming pattern (e.g. the 500 m aniso mesh), while lc_coarse/buffer_m
+        # let bndids_filename() reconstruct the name parametrically. They
+        # cross-check each other, and either alone is enough to resolve the
+        # sidecar from the CHECKPOINT rather than from the live environment --
+        # which is the point: ISMIP7_BUFFER_M/ISMIP7_LC_COARSE can drift, and
+        # a mismatched sidecar puts the calving BC on the wrong facets, where
+        # ds(absent_id) integrates to zero: silently wrong physics, no crash.
+        chk_lc_coarse = (int(_chk.get_attr("/", "lc_coarse"))
+                         if _chk.has_attr("/", "lc_coarse") else None)
+        chk_buffer_m = (float(_chk.get_attr("/", "buffer_m"))
+                        if _chk.has_attr("/", "buffer_m") else None)
+        # The FINE resolution is stamped too, and every component of the
+        # reconstructed name must come from the checkpoint: falling back to the
+        # live ISMIP7_LC here would reintroduce exactly the environment drift
+        # the parametric scheme exists to remove. Older MAPs that predate the
+        # lc attribute have no recorded resolution, so they keep the live value.
+        chk_lc = (int(_chk.get_attr("/", "lc"))
+                  if _chk.has_attr("/", "lc") else None)
+        if not mesh_basename and chk_lc_coarse is not None \
+                and chk_buffer_m is not None:
+            mesh_basename = os.path.basename(
+                mesh_filename(chk_lc_coarse,
+                              chk_lc if chk_lc is not None else lc,
+                              chk_buffer_m))
     PETSc.Sys.Print(f"  {mesh.num_vertices()} vertices, {mesh.num_cells()} cells")
     # The recorded basename is the provenance and WINS. ISMIP7_MESH is only a
     # fallback for legacy checkpoints that carry no attribute: it names the
@@ -246,11 +278,7 @@ def setup_model(restart_from=None):
     # data error at Antarctic resolutions, and it buys an unbiased front.
     #
     # ISMIP7_GEOMETRY_SPACE=cg1 restores the old behaviour for A/B comparison.
-    geometry_space = os.environ.get("ISMIP7_GEOMETRY_SPACE", "dg0").lower()
-    if geometry_space not in ("dg0", "cg1"):
-        raise ValueError(
-            f"ISMIP7_GEOMETRY_SPACE must be 'dg0' or 'cg1', got {geometry_space!r}"
-        )
+    geometry_space = _geometry_space()
     geom_dg = geometry_space == "dg0"
     Q_g = FunctionSpace(mesh, "DG", 0) if geom_dg else Q
     PETSc.Sys.Print(
@@ -440,7 +468,7 @@ def setup_model(restart_from=None):
     # with |.| up to 23 -> exp() ~1e10 local singularities the diagnostic SNES
     # cannot solve through). Default 6 for n=4 MAPs; the physical n=3 controls
     # legitimately reach ~8, so default 10 otherwise. Set 0 to disable.
-    _n_flow_env = float(os.environ.get("ISMIP7_N_FLOW", N_FLOW_DEFAULT))
+    _n_flow_env = _n_flow()
     _map_clip_default = "6.0" if _n_flow_env == 4.0 else "10.0"
     map_clip = float(os.environ.get("ISMIP7_MAP_CLIP", _map_clip_default))
     if map_clip > 0.0:
@@ -458,15 +486,18 @@ def setup_model(restart_from=None):
     A0 = Constant(icepack.rate_factor(Constant(260.0)))
     # Composite flow exponent (must match the inversion that produced the
     # MAP file we load above). This branch: n=3 standard Glen (A4_FACTOR=1).
-    n_flow_val = float(os.environ.get("ISMIP7_N_FLOW", N_FLOW_DEFAULT))
+    n_flow_val = _n_flow()
     m_slide_val = float(os.environ.get("ISMIP7_M_SLIDE", "3.0"))
     a4_factor = float(os.environ.get("ISMIP7_A4_FACTOR", a4_factor_default()))
     n_flow = Constant(n_flow_val)
     m_slide = Constant(m_slide_val)
     tau_c = Constant(0.1)
-    u_c = Constant(float(Function(Q).interpolate(
+    # global_mean: .dat.data_ro.mean() is the rank-local owned slice (see
+    # icepack2_tools/mpi_stats). Legacy action path only; build_rc_residual
+    # anchors on C_w0.
+    u_c = Constant(global_mean(Function(Q).interpolate(
         max_value(sqrt(u_obs[0] ** 2 + u_obs[1] ** 2), Constant(1.0))
-    ).dat.data_ro.mean()))
+    )))
 
     # Phi_eff (effective-pressure fraction). Uses a small floor on H so it
     # is well-defined where the original BedMachine thickness is 0. Loaded
@@ -486,9 +517,10 @@ def setup_model(restart_from=None):
     # predate the physical prior. Must match the inversion that made the MAP.
     if A_prior_f is not None:
         A4_base = A_prior_f
+        A_prior_lo, A_prior_hi = global_range(A_prior_f)
         PETSc.Sys.Print(
-            f"  Fluidity prior A_prior loaded [{float(A_prior_f.dat.data_ro.min()):.2f}, "
-            f"{float(A_prior_f.dat.data_ro.max()):.2f}]"
+            f"  Fluidity prior A_prior loaded "
+            f"[{A_prior_lo:.2f}, {A_prior_hi:.2f}]"
         )
     else:
         A_prior_f = Function(Q, name="fluidity_prior").interpolate(A0 * Constant(a4_factor))
@@ -846,6 +878,11 @@ def setup_model(restart_from=None):
         "calving_ids": calving_ids,
         "u_obs": u_obs,
         "friction": friction,
+        # Mesh provenance from the source checkpoint (re-stamped into every
+        # state checkpoint so warm restarts stay self-describing).
+        "lc": chk_lc,
+        "lc_coarse": chk_lc_coarse,
+        "buffer_m": chk_buffer_m,
         # Rescue speed limiter (residual laws): live Constant, 0 = inert.
         "k_lim": k_lim if use_residual else None,
         "k_lim_rescue": k_lim_rescue if use_residual else 0.0,
@@ -1160,10 +1197,15 @@ def run_simulation(
                 chk.save_function(h_dg, name="thickness_dg")
             chk.set_attr("/", "t_yr", float(t_now))
             chk.set_attr("/", "friction", str(friction))
-            chk.set_attr("/", "lc", int(lc))
             chk.set_attr("/", "geometry_space", "dg0" if geom_dg else "cg1")
             if mesh_basename:
                 chk.set_attr("/", "mesh_basename", str(mesh_basename))
+            if ctx.get("lc") is not None:
+                chk.set_attr("/", "lc", int(ctx["lc"]))
+            if ctx.get("lc_coarse") is not None:
+                chk.set_attr("/", "lc_coarse", int(ctx["lc_coarse"]))
+            if ctx.get("buffer_m") is not None:
+                chk.set_attr("/", "buffer_m", float(ctx["buffer_m"]))
         mesh.comm.barrier()
         if mesh.comm.rank == 0:
             os.replace(tmp, final_path)

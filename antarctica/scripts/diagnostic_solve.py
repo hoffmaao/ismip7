@@ -45,6 +45,8 @@ from icepack2.constants import (
 import colorcet as cc
 import matplotlib.pyplot as plt
 
+from mesh_naming import get_buffer_m, mesh_filename
+
 _ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 DATA_DIR = os.path.join(_ROOT, "data")
 MESH_DIR = os.path.join(_ROOT, "mesh")
@@ -52,8 +54,11 @@ FIG_DIR = os.path.join(_ROOT, "figs")
 
 sys.path.insert(0, os.path.dirname(_ROOT))
 from icepack2_tools.boundary import load_boundary_ids
+from icepack2_tools.runconfig import lc as _lc, lc_coarse as _lc_coarse
 
-lc = 8000
+lc = _lc()
+lc_coarse = _lc_coarse()
+buffer_m = get_buffer_m()
 
 
 def find_file(directory, pattern):
@@ -67,7 +72,7 @@ def main():
     os.makedirs(FIG_DIR, exist_ok=True)
 
     # ── Load Mesh ──────────────────────────────────────────────────────
-    mesh_fn = os.path.join(MESH_DIR, f"antarctica_{lc * 10}_{lc}.msh")
+    mesh_fn = os.environ.get("ISMIP7_MESH", mesh_filename(lc_coarse, lc, buffer_m))
     PETSc.Sys.Print(f"Loading mesh: {mesh_fn}")
     mesh = firedrake.Mesh(mesh_fn)
     PETSc.Sys.Print(f"  {mesh.num_vertices()} vertices, {mesh.num_cells()} cells")

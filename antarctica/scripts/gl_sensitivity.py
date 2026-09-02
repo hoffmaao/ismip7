@@ -64,6 +64,7 @@ _PROJECT = os.path.dirname(_ROOT)
 sys.path.insert(0, _PROJECT)
 sys.path.insert(0, os.path.join(_ROOT, "scripts"))
 from icepack2_tools.boundary import load_boundary_ids
+from icepack2_tools.mpi_stats import global_max, global_range, global_sum
 from icepack2_tools.eikonal import identify_grounding_line, solve_eikonal_distance
 import rasterio, icepack
 from icepack2 import model
@@ -81,8 +82,12 @@ FIG_DIR = os.path.join(_ROOT, "figs")
 RESULTS_DIR = os.path.join(_ROOT, "results")
 SHAPEFILE = os.path.expanduser("~/data/shapefiles/IceShelf_Antarctica_v02.shp")
 
-lc = int(os.environ.get("ISMIP7_LC", "2500"))
-lc_coarse = int(os.environ.get("ISMIP7_LC_COARSE", "64000"))
+from mesh_naming import get_buffer_m, mesh_filename
+from icepack2_tools.runconfig import lc as _lc, lc_coarse as _lc_coarse
+
+lc = _lc()
+lc_coarse = _lc_coarse()
+buffer_m = get_buffer_m()
 
 # GL thinning profile widths (km) — how far inland the thinning extends
 THINNING_WIDTHS_KM = [5.0, 10.0, 20.0]
@@ -141,13 +146,14 @@ def main():
     os.makedirs(FIG_DIR, exist_ok=True)
     os.makedirs(RESULTS_DIR, exist_ok=True)
 
-    mesh_fn = os.environ.get(
-        "ISMIP7_MESH", os.path.join(MESH_DIR, f"antarctica_{lc_coarse}_{lc}.msh")
-    )
+    mesh_fn = os.environ.get("ISMIP7_MESH", mesh_filename(lc_coarse, lc, buffer_m))
     PETSc.Sys.Print(f"Loading mesh: {mesh_fn}")
     mesh = Mesh(mesh_fn)
     PETSc.Sys.Print(f"  {mesh.num_vertices()} vertices, {mesh.num_cells()} cells")
 
+    # Sidecar resolved (per-mesh preferred, parametric fallback) and
+    # HARD-CHECKED against this mesh: an id absent from the mesh makes
+    # ds(id) integrate to zero, i.e. silently wrong physics with no crash.
     use_calving_terminus = os.environ.get("ISMIP7_NO_CALVING_TERMINUS") is None
     bnd_ids, calving_ids, bndids_fn = load_boundary_ids(
         mesh, MESH_DIR, mesh_hint=mesh_fn,
@@ -230,7 +236,7 @@ def main():
     A_map_expr = A0 * fd.exp(phi_map)
 
     # ── Shelf masks ──
-    PETSc.Sys.Print(f"Building shelf masks...")
+    PETSc.Sys.Print("Building shelf masks...")
     coords = mesh.coordinates.dat.data_ro
     shelf_mask_arrays = build_shelf_masks(SHAPEFILE, coords, MIN_SHELF_AREA)
     shelf_mask_fns = {}
@@ -316,7 +322,7 @@ def main():
 
     u_ref = z_adj.subfunctions[0]
     PETSc.Sys.Print(
-        f"  u_max = {float(Function(Q).interpolate(sqrt(inner(u_ref, u_ref))).dat.data_ro.max()):.0f} m/yr"
+        f"  u_max = {global_max(Function(Q).interpolate(sqrt(inner(u_ref, u_ref)))):.0f} m/yr"
     )
 
     rho_ice = 917.0
@@ -380,10 +386,8 @@ def main():
     dJ_dH = compute_gradient(J, h_ctrl)
     dJ_dH_func = Function(Q, name="dJ_dH")
     dJ_dH_func.dat.data[:] = dJ_dH.dat.data_ro
-    PETSc.Sys.Print(
-        f"  dJ/dH range: [{dJ_dH_func.dat.data_ro.min():.4e}, "
-        f"{dJ_dH_func.dat.data_ro.max():.4e}]"
-    )
+    _dj_lo, _dj_hi = global_range(dJ_dH_func)
+    PETSc.Sys.Print(f"  dJ/dH range: [{_dj_lo:.4e}, {_dj_hi:.4e}]")
     dJ_arr = dJ_dH_func.dat.data_ro
 
     # ══════════════════════════════════════════════════════════════════════
@@ -409,7 +413,7 @@ def main():
 
         for shelf_name in sorted(
             shelf_mask_arrays,
-            key=lambda n: -shelf_mask_fns.get(n, Function(Q)).dat.data_ro.sum(),
+            key=lambda n: -global_sum(shelf_mask_fns.get(n, Function(Q))),
         ):
             in_shelf = shelf_mask_arrays[shelf_name]
             # Thinning on grounded ice near this shelf's GL

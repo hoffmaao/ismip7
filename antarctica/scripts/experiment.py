@@ -12,7 +12,7 @@ so projection minus control is a clean forced signal:
               mixed-slope, calibrated per-basin K)
 
 The aSMB re-reference pool is historical + ISMIP7_CLIM_SCENARIO (default
-ssp585) over ISMIP7_CLIM_START..END (default 2000-2029) — the SAME pool
+ssp126, per protocol) over ISMIP7_CLIM_START..END (default 2000-2029) — the SAME pool
 for every experiment, so all cores share one baseline and the historical
 -> projection handoff at 2014/2015 is seamless. Without RACMO the run
 falls back to the full acabf(t) field; with no acabf data at all it
@@ -36,10 +36,16 @@ from icepack2_tools.forcing import (
     ISMIP7Atmosphere, ISMIP7Ocean, ISMIP7Fracture,
     make_forcing_callback, load_racmo_smb_climatology, forcing_coords,
 )
+from icepack2_tools.climatology import (
+    clim_start, clim_end, clim_scenario, clim_pool_missing, describe_clim_pool,
+)
 
-CLIM_START = int(os.environ.get("ISMIP7_CLIM_START", "2000"))
-CLIM_END = int(os.environ.get("ISMIP7_CLIM_END", "2029"))
-CLIM_SCENARIO = os.environ.get("ISMIP7_CLIM_SCENARIO", "ssp585")
+# Owned by icepack2_tools.climatology: this pool must match the CONTROL's
+# climatology, or the projections are re-referenced against a different
+# baseline than the control they are differenced from.
+CLIM_START = clim_start()
+CLIM_END = clim_end()
+CLIM_SCENARIO = clim_scenario()
 
 
 def find_k_npz():
@@ -85,6 +91,17 @@ def smb_scheme(ctx, esm):
             ref += a.get_smb(y, mesh_x, mesh_y, anomaly=True)
         ref /= len(pool)
         years = sorted(y for _, y in pool)
+        PETSc.Sys.Print(f"  {describe_clim_pool(years, 'acabf-anomaly')}")
+        missing = clim_pool_missing(years)
+        if missing:
+            PETSc.Sys.Print(
+                f"  WARNING: aSMB re-referenced over {len(set(years))} of the "
+                f"{CLIM_END - CLIM_START + 1} window years ({len(missing)} "
+                f"missing, {missing[0]}..{missing[-1]}). This core's baseline "
+                f"differs from a full-window sibling's while both are "
+                f"differenced against the same CTRL. Proceeding: the pool is "
+                f"recorded above and in the per-core report."
+            )
         return True, racmo.dat.data_ro - ref, (
             f"RACMO2.4p1 baseline + aSMB re-referenced to "
             f"{years[0]}-{years[-1]} ({len(pool)} yr pooled)"

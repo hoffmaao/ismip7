@@ -84,7 +84,13 @@ from icepack2_tools.boundary import load_boundary_ids
 from icepack2_tools.dual_friction import build_rc_residual, weertman_anchor
 from icepack2_tools.geometry import cg1_lift, sample_to_geometry
 from icepack2_tools.grounding import height_above_flotation
+from icepack2_tools.mpi_stats import (global_mean, global_range,
+                                      global_max, global_size, global_count)
 from icepack2_tools.naming import map_basename
+from icepack2_tools.runconfig import (
+    friction as _friction, geometry_space as _geometry_space,
+    lc as _lc, lc_coarse as _lc_coarse, n_flow as _n_flow,
+)
 from icepack2_tools.prior import (
     regularization_form as reg_form,
     regularization_gradient_form as reg_grad_form,
@@ -92,14 +98,16 @@ from icepack2_tools.prior import (
 from icepack2_tools.thermo_model import compute_fluidity_prior
 from icepack2_tools.forcing import (load_racmo_smb_climatology,
                                     load_mean_annual_surface_temperature)
+from mesh_naming import get_buffer_m, mesh_filename
 
-lc = int(os.environ.get("ISMIP7_LC", "8000"))
-lc_coarse = int(os.environ.get("ISMIP7_LC_COARSE", str(lc * 10)))
+lc = _lc()
+lc_coarse = _lc_coarse()
+buffer_m = get_buffer_m()
 
-# Flow-law exponent default -- KEEP IN SYNC with simulation.py (the forward
-# that loads this MAP must use the same rheology). THIS BRANCH: n=3 standard
-# Glen, so no prefactor rescale (A4_FACTOR=1). See COMPOSITE_RHEOLOGY.md.
-N_FLOW_DEFAULT = "3.0"
+# Flow-law exponent: owned by icepack2_tools.runconfig, which the forward that
+# loads this MAP reads too, so the two cannot drift apart. THIS BRANCH: n=3
+# standard Glen, so no prefactor rescale (A4_FACTOR=1). See
+# COMPOSITE_RHEOLOGY.md.
 A4_FACTOR_DEFAULT = "1.0"
 A4_FACTOR_N4 = "10.0"
 
@@ -108,7 +116,7 @@ def a4_factor_default():
     r"""Prefactor default derived from the flow exponent (10 at n=4, 1
     otherwise) so ISMIP7_N_FLOW=4 alone still gets the n=4 rescale.
     ISMIP7_A4_FACTOR still overrides. Mirrors simulation.a4_factor_default."""
-    n = float(os.environ.get("ISMIP7_N_FLOW", N_FLOW_DEFAULT))
+    n = _n_flow()
     return A4_FACTOR_N4 if abs(n - 4.0) < 1e-9 else A4_FACTOR_DEFAULT
 
 # Misfit normalization: "sigma" (default) divides each residual by the squared
@@ -145,7 +153,7 @@ L_REG = float(os.environ.get("ISMIP7_L_REG", "7.5e3"))
 
 # Friction law: "budd" (power-law dual, default) or "regularized_coulomb"
 # (Joughin/Schoof RC residual: grounded-only inference, exact-zero shelves).
-FRICTION = os.environ.get("ISMIP7_FRICTION", "budd")
+FRICTION = _friction()
 # Exact-zero-shelf residual laws share the C_w0/He/composite structure.
 USE_RESIDUAL = FRICTION in ("regularized_coulomb", "budd")
 USE_RC = USE_RESIDUAL  # geometry/anchor handling is shared
@@ -174,9 +182,7 @@ def find_file(d, p):
 def main():
     os.makedirs(FIG_DIR, exist_ok=True)
 
-    mesh_fn = os.environ.get(
-        "ISMIP7_MESH", os.path.join(MESH_DIR, f"antarctica_{lc_coarse}_{lc}.msh")
-    )
+    mesh_fn = os.environ.get("ISMIP7_MESH", mesh_filename(lc_coarse, lc, buffer_m))
     PETSc.Sys.Print(f"Loading mesh: {mesh_fn}")
     mesh = Mesh(mesh_fn)
     PETSc.Sys.Print(f"  {mesh.num_vertices()} vertices, {mesh.num_cells()} cells")
@@ -202,11 +208,7 @@ def main():
     # gets wrong into theta/phi, so a MAP inverted under CG1 geometry silently
     # carries the lumped lift's inflated calving-front thickness into the
     # friction field, and the t=0 velocity misfit cannot reveal it.
-    geometry_space = os.environ.get("ISMIP7_GEOMETRY_SPACE", "dg0").lower()
-    if geometry_space not in ("dg0", "cg1"):
-        raise ValueError(
-            f"ISMIP7_GEOMETRY_SPACE must be 'dg0' or 'cg1', got {geometry_space!r}"
-        )
+    geometry_space = _geometry_space()
     geom_dg = geometry_space == "dg0"
     Q_g = FunctionSpace(mesh, "DG", 0) if geom_dg else Q
     PETSc.Sys.Print(f"  Geometry space: {geometry_space.upper()}")
@@ -228,8 +230,9 @@ def main():
             rasterio.open(f"netcdf:{bm_fn}:thickness"), sp),
         Q_g, Q, floor=h_clamp)
     PETSc.Sys.Print(f"  H clamp: {h_clamp} m  "
-                    f"(nodes h<=1m: {int((H.dat.data_ro <= 1.0).sum())} / "
-                    f"{len(H.dat.data_ro)})")
+                    f"(nodes h<=1m: "
+                    f"{global_count(H.dat.data_ro <= 1.0, mesh.comm)} / "
+                    f"{global_size(H)})")
     rho_ratio = Constant(917.0 / 1024.0)
 
     rho_ratio = Constant(917.0 / 1024.0)
@@ -345,7 +348,7 @@ def main():
     # standard Glen) main term + linear (n=1) regularization. Sliding stays
     # at Weertman m_slide=3.
     A0 = Constant(icepack.rate_factor(Constant(260.0)))
-    n_flow_val = float(os.environ.get("ISMIP7_N_FLOW", N_FLOW_DEFAULT))
+    n_flow_val = _n_flow()
     m_slide_val = float(os.environ.get("ISMIP7_M_SLIDE", "3.0"))
     a4_factor = float(os.environ.get("ISMIP7_A4_FACTOR", a4_factor_default()))
     n_flow = Constant(n_flow_val)
@@ -359,7 +362,13 @@ def main():
     u_speed = Function(Q).interpolate(
         max_value(sqrt(u_obs[0] ** 2 + u_obs[1] ** 2), Constant(1.0))
     )
-    u_c = Constant(float(u_speed.dat.data_ro.mean()))
+    # global_mean, not .dat.data_ro.mean(): the latter is the OWNED slice, so
+    # under MPI each rank built the sliding coefficient from a different
+    # reference speed and the same physical location got a different friction
+    # depending on which rank owned it. Reaches only the legacy action path
+    # (K_base/K_lin -> _rheo_glen/_rheo_linear); build_rc_residual anchors on
+    # C_w0 and never sees u_c. See icepack2_tools/mpi_stats.
+    u_c = Constant(global_mean(u_speed))
     PETSc.Sys.Print(f"  tau_c={float(tau_c):.3f} MPa, u_c={float(u_c):.1f} m/yr")
 
     sparams = {
@@ -394,12 +403,10 @@ def main():
             phi_ws = chk.load_function(chk_mesh, name="log_fluidity")
         theta.dat.data[:] = theta_ws.dat.data_ro
         phi.dat.data[:] = phi_ws.dat.data_ro
-        PETSc.Sys.Print(
-            f"    theta: [{theta.dat.data_ro.min():.3f}, {theta.dat.data_ro.max():.3f}]"
-        )
-        PETSc.Sys.Print(
-            f"    phi:   [{phi.dat.data_ro.min():.3f}, {phi.dat.data_ro.max():.3f}]"
-        )
+        _ws_t_lo, _ws_t_hi = global_range(theta)
+        _ws_p_lo, _ws_p_hi = global_range(phi)
+        PETSc.Sys.Print(f"    theta: [{_ws_t_lo:.3f}, {_ws_t_hi:.3f}]")
+        PETSc.Sys.Print(f"    phi:   [{_ws_p_lo:.3f}, {_ws_p_hi:.3f}]")
 
     u_s, M_s, tau_s = split(z)
 
@@ -517,10 +524,10 @@ def main():
                     f"{BUDD_DELTA:.3f}, alpha_gl={ALPHA_GL:.2f})"
                     if FRICTION == "budd"
                     else f"regularized Coulomb (c0={C0_RC})")
+        C_w0_lo, C_w0_hi = global_range(C_w0)
         PETSc.Sys.Print(
             f"  Friction: {law_name}; h_visc_floor={RC_HVISC_FLOOR:.0f}m; "
-            f"C_w0 in [{float(C_w0.dat.data_ro.min()):.2e}, "
-            f"{float(C_w0.dat.data_ro.max()):.2e}]"
+            f"C_w0 in [{C_w0_lo:.2e}, {C_w0_hi:.2e}]"
         )
     else:
         PETSc.Sys.Print("  Friction: Budd power-law dual (legacy action)")
@@ -558,9 +565,10 @@ def main():
             u_obs, H_th, s_th, b_th, C_th, acc_prior, T_srf
         )
         A_prior.rename("fluidity_prior")
+        A_prior_lo, A_prior_hi = global_range(A_prior)
         PETSc.Sys.Print(
-            f"  Fluidity prior A_prior in [{float(A_prior.dat.data_ro.min()):.2f}, "
-            f"{float(A_prior.dat.data_ro.max()):.2f}] (thermomechanical)"
+            f"  Fluidity prior A_prior in [{A_prior_lo:.2f}, "
+            f"{A_prior_hi:.2f}] (thermomechanical)"
         )
     else:
         A_prior = Function(Q, name="fluidity_prior").interpolate(A0 * Constant(a4_factor))
@@ -645,7 +653,7 @@ def main():
 
     u_init = z.subfunctions[0]
     u_mag = Function(Q).interpolate(sqrt(inner(u_init, u_init)))
-    PETSc.Sys.Print(f"  u_max = {float(u_mag.dat.data_ro.max()):.0f} m/yr")
+    PETSc.Sys.Print(f"  u_max = {global_max(u_mag):.0f} m/yr")
 
     # ── Forward function for tlm_adjoint ──
     # Normalize by the OBSERVED area so the misfit magnitude stays
@@ -675,6 +683,12 @@ def main():
     # aborting the inversion.
     dhdt_w = float(os.environ.get("ISMIP7_DHDT_WEIGHT", "0.0"))
     use_dhdt = dhdt_w > 0.0
+    # Resolved (not merely requested) net-term provenance: ISMIP7_DHDT_NET_SIGMA
+    # only reaches the objective when the dH/dt term itself is on, so these stay
+    # at their off values unless the term is actually built below. save_map
+    # stamps net_sigma_used, so a MAP can never claim a constraint it never saw.
+    use_dhdt_net = False
+    net_sigma_used = 0.0
     if use_dhdt:
         if not geom_dg:
             raise RuntimeError(
@@ -784,6 +798,37 @@ def main():
                 )
         h_next = Function(Q_g, name="h_next")
 
+        # ── Net (integral) mass-balance term -- OFF BY DEFAULT ──────────
+        # Explored Aug 2026 and mechanically validated (it moves the grounded
+        # net tendency from +604 to -54 Gt/yr against an observed -73 at
+        # 2500 m, at ~10% pointwise-RMS cost), then EXCLUDED from the
+        # production objective by decision (Andrew, Aug 30):
+        #   1. Assimilating the integrated mass trend forfeits it as
+        #      INDEPENDENT validation -- the observed trend is the one number
+        #      every downstream assessment (IMBIE/GRACE consistency) checks.
+        #   2. proj - CTRL differencing under ISMIP7_APPARENT_MB removes the
+        #      shared frozen drift by construction, so the bias this term
+        #      fixes largely cancels in the reported signal anyway.
+        #   3. The integral is bought with regionally structured adjustments
+        #      to a residual that is div(h u) DATA NOISE (interior response
+        #      times are 1e3-1e4 yr; a 16-yr window carries no dynamical
+        #      interior signal), i.e. aggregated noise-fitting.
+        # The machinery stays for experiments (set ISMIP7_DHDT_NET_SIGMA>0),
+        # and the per-iteration net= DIAGNOSTIC prints regardless, so the
+        # tendency bias is always visible without being penalised.
+        dhdt_net_sigma = float(os.environ.get("ISMIP7_DHDT_NET_SIGMA", "0"))
+        use_dhdt_net = dhdt_net_sigma > 0.0
+        if use_dhdt_net:
+            net_sigma_used = dhdt_net_sigma
+            R_net = FunctionSpace(mesh, "R", 0)
+            A_tot_net = float(assemble(Constant(1.0) * dx(mesh)))
+            _rho_gt = 917.0 / 1e12
+            PETSc.Sys.Print(
+                f"  dH/dt NET constraint: sigma_net={dhdt_net_sigma:g} Gt/yr "
+                f"(0.5*(net/sigma)^2 on the grounded+observed integral; "
+                f"ISMIP7_DHDT_NET_SIGMA=0 disables)"
+            )
+
     def forward(theta_ctrl, phi_ctrl):
         clear_caches()
         F_ctrl = build_F(theta_ctrl, phi_ctrl)
@@ -849,6 +894,36 @@ def main():
                 * ((dhdt_model - dhdt_obs) / Constant(dhdt_sigma)) ** 2
             )
 
+            if use_dhdt_net:
+                # m_net = domain mean of the masked residual (R-space
+                # projection; the test function is the constant 1, so the
+                # 1x1 solve is exactly mean = integral/area).
+                m_net = Function(R_net, name="dhdt_net_mean")
+                r_net = TestFunction(R_net)
+                EquationSolver(
+                    (m_net - (dhdt_model - dhdt_obs) * dhdt_mask) * r_net * dx
+                    == 0,
+                    m_net,
+                    solver_parameters={
+                        "snes_type": "ksponly",
+                        "ksp_type": "preonly",
+                        "pc_type": "jacobi",
+                    },
+                    form_compiler_parameters=fc_params,
+                    # The R-space (Real) 1x1 matrix assembles as a
+                    # python-type PETSc Mat, which tlm_adjoint's linear-solver
+                    # cache cannot copy (MatAXPY: "no method getrow for Mat of
+                    # type python"). Caching a 1x1 solve buys nothing anyway.
+                    cache_jacobian=False,
+                    cache_adjoint_jacobian=False,
+                ).solve()
+                # net [Gt/yr] = mean * total area * rho; integrand constant
+                # over the mesh, so integrating /A_tot recovers the scalar.
+                _c_net = Constant(A_tot_net * _rho_gt / dhdt_net_sigma)
+                integrand = integrand + (
+                    Constant(0.5 / A_tot_net) * (m_net * _c_net) ** 2
+                )
+
         J = Functional(name="J")
         J.assign(integrand * dx)
         return J
@@ -885,6 +960,8 @@ def main():
            + (_u_now[1] - u_obs[1]) ** 2 / sig_uy ** 2)
     ) * dx(mesh)
     if use_dhdt:
+        _net_form = (((h_next - H) / Constant(dhdt_dt) - dhdt_obs)
+                     * dhdt_mask * dx(mesh))
         _dhdt_chi2 = (
             0.5 / dhdt_area * dhdt_mask
             * (((h_next - H) / Constant(dhdt_dt) - dhdt_obs)
@@ -904,6 +981,7 @@ def main():
             out = f" vel={last_good_vel_chi2[0]:.4e}"
             if use_dhdt:
                 out += f" dhdt={float(assemble(_dhdt_chi2)):.4e}"
+                out += (f" net={float(assemble(_net_form)) * 917.0 / 1e12:+.0f}Gt/yr")
             return out
         except Exception:
             return ""
@@ -936,10 +1014,22 @@ def main():
             # "firedrake_default", so this is how the forward names its own
             # mesh and picks the matching per-mesh boundary-id sidecar.
             chk.set_attr("/", "mesh_basename", os.path.basename(mesh_fn))
+            # Mesh PARAMETERS as well as the basename (Dan/David's scheme,
+            # merged from upstream/integration). The forward resolves its
+            # boundary_ids sidecar from these rather than from its own
+            # environment: ISMIP7_BUFFER_M / ISMIP7_LC_COARSE can drift, and a
+            # mismatched sidecar puts the calving BC on the wrong facets, where
+            # ds(absent_id) integrates to zero -- silently wrong physics with
+            # no crash. The basename covers meshes outside the standard naming
+            # pattern; the parameters let bndids_filename() rebuild the name.
+            chk.set_attr("/", "lc", int(lc))
+            chk.set_attr("/", "lc_coarse", int(lc_coarse))
+            chk.set_attr("/", "buffer_m", float(buffer_m))
             chk.set_attr("/", "misfit_norm", MISFIT_NORM)
             chk.set_attr("/", "gamma_theta", float(GAMMA_THETA))
             chk.set_attr("/", "gamma_phi", float(GAMMA_PHI))
             chk.set_attr("/", "dhdt_weight", float(dhdt_w))
+            chk.set_attr("/", "dhdt_net_sigma", net_sigma_used)
 
     # ── L-BFGS-B Inversion ──
     max_iter = int(os.environ.get("ISMIP7_MAXITER", "500"))
@@ -1038,7 +1128,36 @@ def main():
 
         return total, total_grad
 
+    # ── Optimization metric (ISMIP7_GRAD_PRECOND) ────────────────────────
+    # L-BFGS-B works in raw dof coordinates, i.e. the Euclidean l2 metric, and
+    # that metric is MESH-DEPENDENT: a gradient entry scales with the dof's
+    # cell area, so the fine grounding-line cells -- exactly where the controls
+    # must move -- get the smallest gradient entries and converge slowest.
+    # `mass` optimizes in u = M^(1/2) x (M = lumped mass), which is steepest
+    # descent in L2 and makes the rate mesh-independent; peers compensate for
+    # the same defect with brute iteration counts (ISSM/M1QN3 runs 1000+300 in
+    # cycles). The natural upgrade is the prior metric (delta*M+gamma*K)^-1
+    # (fenics_ice); the operator exists in icepack2_tools/prior.py. Default
+    # off so in-flight runs stay comparable; flip after the current A/B.
+    grad_precond = os.environ.get("ISMIP7_GRAD_PRECOND", "none").lower()
+    if grad_precond not in ("none", "mass"):
+        raise ValueError(f"ISMIP7_GRAD_PRECOND must be none|mass, got {grad_precond!r}")
+    if grad_precond == "mass":
+        _mv = assemble(TestFunction(Q) * dx).dat.data_ro
+        _mloc = Function(Q); _mloc.dat.data[:] = _mv
+        _sqrtm_one = np.sqrt(np.maximum(func_to_global(_mloc), 1e-30))
+        _sqrtm = np.concatenate([_sqrtm_one, _sqrtm_one])
+        PETSc.Sys.Print(
+            f"  Optimization metric: lumped-mass Riesz (u = sqrt(M) x); "
+            f"sqrt(m) range [{_sqrtm_one.min():.2e}, {_sqrtm_one.max():.2e}]"
+        )
+        _inner_og = objective_and_gradient
+        def objective_and_gradient(u_vec):  # noqa: F811 (deliberate wrap)
+            J, g_x = _inner_og(u_vec / _sqrtm)
+            return J, g_x / _sqrtm
     x0 = np.concatenate([func_to_global(theta), func_to_global(phi)])
+    if grad_precond == "mass":
+        x0 = x0 * _sqrtm
     result = scipy_minimize(
         objective_and_gradient,
         x0,
@@ -1049,14 +1168,13 @@ def main():
 
     PETSc.Sys.Print(f"\nOptimization finished: {result.message}")
     PETSc.Sys.Print(f"  {result.nit} iterations, {result.nfev} function evaluations")
-    global_to_func(result.x[:global_ndof], theta)
-    global_to_func(result.x[global_ndof:], phi)
-    PETSc.Sys.Print(
-        f"  theta range: [{float(theta.dat.data_ro.min()):.3f}, {float(theta.dat.data_ro.max()):.3f}]"
-    )
-    PETSc.Sys.Print(
-        f"  phi range:   [{float(phi.dat.data_ro.min()):.3f}, {float(phi.dat.data_ro.max()):.3f}]"
-    )
+    _x_final = result.x / _sqrtm if grad_precond == "mass" else result.x
+    global_to_func(_x_final[:global_ndof], theta)
+    global_to_func(_x_final[global_ndof:], phi)
+    _t_lo, _t_hi = global_range(theta)
+    _p_lo, _p_hi = global_range(phi)
+    PETSc.Sys.Print(f"  theta range: [{_t_lo:.3f}, {_t_hi:.3f}]")
+    PETSc.Sys.Print(f"  phi range:   [{_p_lo:.3f}, {_p_hi:.3f}]")
 
     # ── Save MAP immediately ──
     chk_fn = os.path.join(_map_dir, map_fn)

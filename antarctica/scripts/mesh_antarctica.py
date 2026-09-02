@@ -6,9 +6,11 @@ Refinement based on distance from the grounding line (Ua GLrange approach)
 and strain-rate based sizing for outlet glaciers.
 
 Usage:
-    ISMIP7_BUFFER_M=20000 python scripts/mesh_antarctica.py
+    python scripts/mesh_antarctica.py --lc 2500 --lc-coarse 64000 --buffer-m 20000
+    ISMIP7_LC=8000 ISMIP7_LC_COARSE=80000 python scripts/mesh_antarctica.py
 """
 
+import argparse
 import os, sys, glob
 import numpy as np
 import xarray as xr
@@ -18,6 +20,7 @@ _ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 _PROJECT = os.path.dirname(_ROOT)
 sys.path.insert(0, _PROJECT)
 
+from icepack2_tools.runconfig import lc as _lc, lc_coarse as _lc_coarse
 from icepack2_tools.mesh import (
     load_bedmachine_mask,
     extract_ice_outline,
@@ -27,19 +30,36 @@ from icepack2_tools.mesh import (
     SUBSAMPLE,
 )
 from make_boundary_ids import write_boundary_ids
+from mesh_naming import mesh_basename, bndids_filename
 
 DATA_DIR = os.path.join(_ROOT, "data")
 MESH_DIR = os.path.join(_ROOT, "mesh")
 
-# Ua-style distance bands: (distance_m, element_size_m)
-GL_BANDS = [
-    (5e3, 2500),
-    (15e3, 5000),
-    (30e3, 8000),
-]
-SHELF_SIZE = 5000
-BUFFER_SIZE = 10000
-COARSE = 64000
+
+def parse_args():
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument(
+        "--lc",
+        type=int,
+        default=_lc(),
+        help="Fine element size near the grounding line/calving front, in meters",
+    )
+    parser.add_argument(
+        "--lc-coarse",
+        type=int,
+        default=_lc_coarse(),
+        help="Coarse/interior element size, in meters",
+    )
+    parser.add_argument(
+        "--buffer-m",
+        type=float,
+        default=float(os.environ.get("ISMIP7_BUFFER_M", "20000")),
+        help=(
+            "Outline buffer pushed into the ocean before meshing, in meters "
+            "(0 disables buffering)"
+        ),
+    )
+    return parser.parse_args()
 
 
 def find_file(d, p):
@@ -125,12 +145,27 @@ def calving_front_distance(boundaries, names):
 
 
 def main():
+    args = parse_args()
     os.makedirs(MESH_DIR, exist_ok=True)
 
-    buffer_m = float(os.environ.get("ISMIP7_BUFFER_M", "20000"))
-    if buffer_m == 0:
-        os.environ["ISMIP7_BUFFER_M"] = "20000"
-    print(f"Buffer: {buffer_m/1e3:.0f} km")
+    lc, lc_coarse, buffer_m = args.lc, args.lc_coarse, args.buffer_m
+
+    # icepack2_tools.mesh.extract_ice_outline() reads ISMIP7_BUFFER_M itself,
+    # so the CLI override must be mirrored into the environment for the
+    # actual buffering (not just the output filenames) to pick it up.
+    os.environ["ISMIP7_BUFFER_M"] = str(buffer_m)
+    print(f"Mesh: lc={lc} m, lc_coarse={lc_coarse} m, buffer={buffer_m/1e3:.0f} km")
+
+    scale = lc / 2500.0
+    gl_bands = [(5e3, lc), (15e3, 5000 * scale), (30e3, 8000 * scale)]
+    shelf_size = 5000 * scale
+    buffer_size = 10000 * scale
+    sr_floor = 8000 * scale
+
+    # Calving-front proximity decay lengthscales: never let the transition
+    # be narrower than the mesh's own fine resolution.
+    cf_decay_shelf = max(15e3, lc)
+    cf_decay_buf = max(20e3, 1.25 * lc)
 
     mask, x, y = load_bedmachine_mask(DATA_DIR)
     outline = extract_ice_outline(mask, x, y)
@@ -140,15 +175,15 @@ def main():
     gl_dist, ice_field, float_field = grounding_line_distance()
     cf_dist = calving_front_distance(boundaries, names)
 
-    fn_base = os.path.join(MESH_DIR, f"antarctica_{COARSE}_{GL_BANDS[0][1]}")
+    fn_base = os.path.join(MESH_DIR, mesh_basename(lc_coarse, lc, buffer_m))
 
     # Pass 1: raw mesh
-    print(f"\nPass 1: raw mesh...")
+    print("\nPass 1: raw mesh...")
     gmsh.initialize(sys.argv)
     gmsh.option.setNumber("General.Verbosity", 2)
     gmsh.model.add(fn_base + "_raw")
 
-    build_gmsh_geometry(boundaries, names, 4000, COARSE)
+    build_gmsh_geometry(boundaries, names, 4000, lc_coarse)
     gmsh.model.mesh.generate(2)
     gmsh.write(fn_base + "_raw.msh")
 
@@ -181,31 +216,30 @@ def main():
 
     # Build size field
     # 1. Strain rate
-    sr_floor = 8000
-    size_sr = np.clip(sr_floor / ref_vals, sr_floor, COARSE)
+    size_sr = np.clip(sr_floor / ref_vals, sr_floor, lc_coarse)
 
     # 2. GL distance bands (Ua GLrange style, isotropic)
-    size_gl = np.full(len(gl_d), float(COARSE))
-    for dist_m, elem_m in GL_BANDS:
+    size_gl = np.full(len(gl_d), float(lc_coarse))
+    for dist_m, elem_m in gl_bands:
         size_gl = np.where(gl_d < dist_m, np.minimum(size_gl, elem_m), size_gl)
-    last_dist, last_size = GL_BANDS[-1]
+    last_dist, last_size = gl_bands[-1]
     gl_frac = np.clip((gl_d - last_dist) / last_dist, 0.0, 1.0)
     size_gl = np.where(
         gl_d >= last_dist,
-        last_size + (COARSE - last_size) * gl_frac,
+        last_size + (lc_coarse - last_size) * gl_frac,
         size_gl,
     )
 
     # 3. Shelf / buffer / ice front
-    cf_frac = np.clip(cf_d / 15e3, 0.0, 1.0)
-    size_cf_shelf = SHELF_SIZE + (COARSE - SHELF_SIZE) * cf_frac
-    cf_frac_buf = np.clip(cf_d / 20e3, 0.0, 1.0)
-    size_cf_buf = 8000 + (BUFFER_SIZE - 8000) * cf_frac_buf
+    cf_frac = np.clip(cf_d / cf_decay_shelf, 0.0, 1.0)
+    size_cf_shelf = shelf_size + (lc_coarse - shelf_size) * cf_frac
+    cf_frac_buf = np.clip(cf_d / cf_decay_buf, 0.0, 1.0)
+    size_cf_buf = sr_floor + (buffer_size - sr_floor) * cf_frac_buf
     size_cf = np.where(on_shelf, size_cf_shelf,
                        np.where(on_ice, size_cf_shelf, size_cf_buf))
 
     target_sizes = np.minimum(np.minimum(size_sr, size_gl), size_cf)
-    target_sizes = np.clip(target_sizes, GL_BANDS[0][1], COARSE)
+    target_sizes = np.clip(target_sizes, lc, lc_coarse)
 
     n_1k = int((target_sizes <= 1000).sum())
     n_2k = int((target_sizes <= 2000).sum())
@@ -220,7 +254,7 @@ def main():
     # Pass 2: remesh with background field + Netgen
     print("\nPass 2: remesh...")
     gmsh.model.add(fn_base)
-    build_gmsh_geometry(boundaries, names, GL_BANDS[0][1], COARSE)
+    build_gmsh_geometry(boundaries, names, lc, lc_coarse)
 
     bg = gmsh.model.mesh.field.add("PostView")
     gmsh.model.mesh.field.setNumber(bg, "ViewTag", sf_view)
@@ -252,15 +286,11 @@ def main():
     print(f"\nSaved: {fn_base}.msh ({size_mb:.1f} MB)")
 
     # Emit a boundary-id sidecar that matches this exact mesh (and thus the
-    # BedMachine input + SIMPLIFY_TOL/SUBSAMPLE used), so the solvers never read
-    # a stale committed sidecar from a different mesh. The per-mesh name is the
-    # one the solvers prefer; building a second mesh cannot invalidate it, which
-    # the shared boundary_ids.json (overwritten by every build) could and did.
-    stem = os.path.basename(fn_base)
+    # BedMachine input + SIMPLIFY_TOL/SUBSAMPLE + outline buffer used), so the
+    # solvers never read a stale sidecar built for a different mesh/buffer.
     write_boundary_ids(
-        fn_base + ".msh", os.path.join(MESH_DIR, f"boundary_ids_{stem}.json")
+        fn_base + ".msh", bndids_filename(lc_coarse, lc, buffer_m)
     )
-    write_boundary_ids(fn_base + ".msh", os.path.join(MESH_DIR, "boundary_ids.json"))
 
 
 if __name__ == "__main__":

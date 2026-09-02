@@ -68,9 +68,13 @@ RESULTS_DIR = os.path.join(_ROOT, "results")
 import sys
 sys.path.insert(0, os.path.dirname(_ROOT))
 from icepack2_tools.boundary import load_boundary_ids
+from icepack2_tools.mpi_stats import global_max
+from icepack2_tools.runconfig import lc as _lc, lc_coarse as _lc_coarse
+from mesh_naming import get_buffer_m, mesh_filename
 
-lc = int(os.environ.get("ISMIP7_LC", "8000"))
-lc_coarse = int(os.environ.get("ISMIP7_LC_COARSE", str(lc * 10)))
+lc = _lc()
+lc_coarse = _lc_coarse()
+buffer_m = get_buffer_m()
 K_LEADING = 40
 
 # Prior hyperparameters (must match inversion regularization)
@@ -95,12 +99,13 @@ def main():
     os.makedirs(RESULTS_DIR, exist_ok=True)
 
     # ── Load mesh + data ──
-    mesh_fn = os.environ.get(
-        "ISMIP7_MESH", os.path.join(MESH_DIR, f"antarctica_{lc_coarse}_{lc}.msh")
-    )
+    mesh_fn = os.environ.get("ISMIP7_MESH", mesh_filename(lc_coarse, lc, buffer_m))
     PETSc.Sys.Print(f"Loading mesh: {mesh_fn}")
     mesh = Mesh(mesh_fn)
 
+    # Sidecar resolved (per-mesh preferred, parametric fallback) and
+    # HARD-CHECKED against this mesh: an id absent from the mesh makes
+    # ds(id) integrate to zero, i.e. silently wrong physics with no crash.
     use_calving_terminus = os.environ.get("ISMIP7_NO_CALVING_TERMINUS") is None
     bnd_ids, calving_ids, bndids_fn = load_boundary_ids(
         mesh, MESH_DIR, mesh_hint=mesh_fn,
@@ -208,7 +213,7 @@ def main():
     # u_MAP comes from the warm start (already converged via continuation)
     u_MAP = z.subfunctions[0].copy(deepcopy=True)
     u_MAP_mag = Function(Q).interpolate(sqrt(inner(u_MAP, u_MAP)))
-    PETSc.Sys.Print(f"  u_MAP: max={float(u_MAP_mag.dat.data_ro.max()):.0f} m/yr")
+    PETSc.Sys.Print(f"  u_MAP: max={global_max(u_MAP_mag):.0f} m/yr")
 
     area_val = assemble(Constant(1.0) * dx(mesh))
     invA = Constant(1.0 / area_val)
@@ -313,7 +318,7 @@ def main():
     gamma_theta_eff = Constant(GAMMA_THETA * ELL**2 / area_val)
     delta_phi = Constant(1.0 / area_val)
     gamma_phi_eff = Constant(GAMMA_PHI * ELL**2 / area_val)
-    PETSc.Sys.Print(f"Prior (fenics_ice convention):")
+    PETSc.Sys.Print("Prior (fenics_ice convention):")
     PETSc.Sys.Print(
         f"  delta_theta={float(delta_theta):.6e}, gamma_theta={float(gamma_theta_eff):.6e}"
     )

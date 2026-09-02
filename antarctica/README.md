@@ -43,7 +43,7 @@ Personal** running locally and its endpoint UUID
 ```
 antarctica/
   data/            # observational inputs (BedMachine, velocity, RACMO)  [gitignored]
-  mesh/            # *.msh + boundary_ids*.json + inversion_*.h5         [gitignored]
+  mesh/            # *.msh + boundary_ids_antarctica_*.json + inversion_*.h5  [gitignored except boundary_ids*.json]
   results/         # checkpoints (*.h5), timeseries (*.csv), logs        [gitignored]
   reports/         # tracked per-core run records + MATRIX_STATUS.md
   scripts/         # all entry points (see §3–§6)
@@ -51,10 +51,13 @@ ISMIP7/AIS/        # ISMIP7 forcing tree the *runtime* reads             [gitign
 icepack2_tools/    # reusable library (mesh, forcing, eikonal, grounding, regrid)
 ```
 
-Everything under `data/`, `mesh/`, `results/`, and `ISMIP7/` is gitignored -
-including the `boundary_ids*.json` sidecars, which are regenerated alongside
-each mesh (see §3) so a committed copy can never silently mismatch a locally
-built mesh.
+Everything large is gitignored. The only tracked files under `antarctica/mesh/`
+are the tiny per-mesh `boundary_ids_antarctica_*.json` (the gmsh physical-line →
+calving/other map; see §3). The legacy sidecars that carry no mesh stem
+(`boundary_ids.json`, `_2500`, `_aniso`, `_buffered`) are deliberately **not**
+tracked: they predate the per-mesh convention, and `boundary_ids.json` is the
+shared fallback that every mesh build overwrites - committing it would put one
+build's map on the fallback path for every clone.
 
 ---
 
@@ -187,19 +190,45 @@ sized from BedMachine geometry and MEaSUREs strain rate (needs §1 data).
 
 ```bash
 cd antarctica
-ISMIP7_BUFFER_M=20000 python scripts/mesh_antarctica.py
-# → mesh/antarctica_<COARSE>_<FINE>.msh   (e.g. antarctica_64000_2500.msh)
+python scripts/mesh_antarctica.py --lc 2500 --lc-coarse 64000 --buffer-m 20000
+# or equivalently via env vars (defaults match the rest of the pipeline):
+ISMIP7_LC=2500 ISMIP7_LC_COARSE=64000 ISMIP7_BUFFER_M=20000 python scripts/mesh_antarctica.py
+# dev mesh used by inversion_icepack2.py / diagnostic_solve.py / run_eigendec.py:
+python scripts/mesh_antarctica.py --lc 8000 --lc-coarse 80000 --buffer-m 20000
+# → mesh/antarctica_<COARSE>_<FINE>_buffered<BUFFER_M>.msh
+#    (e.g. antarctica_64000_2500_buffered20000.msh)
+# → mesh/boundary_ids_antarctica_<COARSE>_<FINE>_buffered<BUFFER_M>.json
+#    (e.g. boundary_ids_antarctica_64000_2500_buffered20000.json)
 ```
 
-**Boundary IDs.** The gmsh physical groups are named `Calving_N` / `Other_N`;
-the sidecar caches the calving/other split, and every solver resolves it
-through `icepack2_tools/boundary.py`: `ISMIP7_BNDIDS` if set, else the
-**per-mesh** `mesh/boundary_ids_<mesh stem>.json`, else the shared
-`mesh/boundary_ids.json`. `mesh_antarctica.py` writes both names next to the
-mesh; to regenerate them for an existing mesh:
-```bash
-ISMIP7_MESH=mesh/<file>.msh python scripts/make_boundary_ids.py
-```
+`--lc` / `--lc-coarse` select the fine (grounding-line/calving-front) and
+coarse (interior) element sizes in meters. The GL-band element sizes,
+`shelf_size`, `buffer_size`, and strain-rate floor all scale with `lc/2500`;
+calving-front decay lengthscales are floored at `lc` and `1.25*lc` so they
+never fall below the mesh's own fine resolution.
+
+The mesh outline is pushed `--buffer-m` / `ISMIP7_BUFFER_M` meters into the ocean before
+meshing (default `20000`; pass `0` for no buffer), which lets icepack2 handle
+`h=0` at the (now-interior) calving front instead of needing a
+`calving_terminus` BC. Because this changes the boundary topology, both the
+`.msh` and its sidecar are named after the exact `(COARSE, FINE, BUFFER_M)`
+combination used to build them — building a different resolution or buffer
+never collides with or silently invalidates a previous build.
+
+**Boundary IDs.** The gmsh physical groups come out alternating
+`Calving_0, Other_1, Calving_2, …`, auto-numbered `1,2,3,…`, so **odd tag =
+calving, even tag = other**. `mesh_antarctica.py` automatically writes that
+split to `mesh/boundary_ids_antarctica_<COARSE>_<FINE>_buffered<BUFFER_M>.json`
+(the name is built by `scripts/mesh_naming.py`, the single owner of the mesh /
+sidecar filename convention). These small JSONs are the *only* tracked files
+in `mesh/`. To regenerate one for an existing mesh without rebuilding it, run
+`ISMIP7_BUFFER_M=<N> python scripts/make_boundary_ids.py`
+(or pass explicit `ISMIP7_MESH`/`ISMIP7_BNDIDS` paths) — it parses the mesh's
+`$PhysicalNames` block and writes `{"calving":[odd…], "other":[even…]}`.
+
+Every solver resolves the sidecar through `icepack2_tools/boundary.py`, in
+order: `ISMIP7_BNDIDS` if set, else the **per-mesh**
+`mesh/boundary_ids_<mesh stem>.json`, else the shared `mesh/boundary_ids.json`.
 The per-mesh name is what makes a stale sidecar impossible to pick up by
 accident: the shared file is overwritten by every mesh build, and a sidecar
 built for another mesh is not valid here (the physical-group count depends on
@@ -207,6 +236,13 @@ resolution *and* on the outline buffer). Every reader **hard-errors** when an
 exterior marker on the mesh is unclassified or a sidecar id is absent from it -
 a mismatch used to be legal and silent, and left ~95% of the ice front with no
 calving back-pressure. Runs print the covered front length in km and percent.
+
+A forward run does not take this name from its environment: the MAP / restart
+checkpoint records the `.msh` it was written on (`mesh_basename`, plus the
+`lc` / `lc_coarse` / `buffer_m` parameters to rebuild the name), and that
+record wins, so `ISMIP7_LC` / `ISMIP7_LC_COARSE` / `ISMIP7_BUFFER_M` drifting
+between the inversion and the forward cannot swap the sidecar underneath a
+trajectory.
 
 ---
 
@@ -232,16 +268,17 @@ The friction law is selected with `ISMIP7_FRICTION` (`budd`, the default, or
 `regularized_coulomb`); the MAP checkpoint name carries a matching `_budd` /
 `_rc` tag, and the forward runs load the checkpoint for whichever law they are
 started with. This `antarctica-n3` branch also appends an `_n3` flow-exponent
-tag so n=3 and n=4 MAPs coexist on disk; see `N3_FRAMEWORK.md`. Since Aug 2026
-the name additionally carries the **geometry space** it was inverted under
-(`_dg0` for the `ISMIP7_GEOMETRY_SPACE=dg0` default, untagged for `cg1`): the
-inversion absorbs the calving-front treatment into `θ`/`φ`, so a MAP is only
-valid for its own geometry space. The whole name is built by one helper
-(`icepack2_tools/naming.py`), which the forward, `preflight.py` and the launch
-gates all import. A forward that finds only the legacy untagged MAP loads it
-and warns loudly - runnable as a smoke test, not a result. See
-`../GEOMETRY_DISCRETIZATION.md`. The regularization, misfit-normalization and
-iteration knobs are tabulated under "Environment knobs (inversion)" below.
+tag (from `map_n_tag()`) so n=3 and n=4 MAPs coexist on disk; see
+`N3_FRAMEWORK.md`. Since Aug 2026 the name additionally carries the **geometry
+space** it was inverted under (`_dg0` for the `ISMIP7_GEOMETRY_SPACE=dg0`
+default, untagged for `cg1`): the inversion absorbs the calving-front treatment
+into `θ`/`φ`, so a MAP is only valid for its own geometry space. The whole name
+is built by one helper (`icepack2_tools/naming.py`), which the forward,
+`preflight.py` and the launch gates all import. A forward that finds only the
+legacy untagged MAP loads it and warns loudly - runnable as a smoke test, not a
+result. See `../GEOMETRY_DISCRETIZATION.md`. The regularization,
+misfit-normalization and iteration knobs are tabulated under "Environment knobs
+(inversion)" below.
 
 ### Transient (dH/dt-constrained) inversion
 
@@ -274,37 +311,27 @@ guard can still carry one, and a dH/dt score built on it is meaningless. The
 controls are unaffected either way: a forward re-solves the diagnostic from
 `θ`/`φ` and never reads the stored velocity.
 
+The per-cell dH/dt term above still leaves the *integrated* mass trend free.
+`ISMIP7_DHDT_NET_SIGMA > 0` adds a second term penalising the net
+grounded+observed dH/dt integral directly. It is **off by default, on purpose**:
+the integrated trend is the one number every downstream assessment
+(IMBIE/GRACE consistency) checks, so assimilating it forfeits it as
+*independent* validation. The per-iteration `net=` diagnostic prints either
+way, so the bias stays visible without being penalised. See
+`reports/ISSUE_DRAFT_net_mass_balance_term.md`.
+
 Because the MAP filename encodes only friction, `LC`, geometry space and flow
 exponent, a velocity-only MAP and a transient one land on the **same path**.
 Give variants their own `ISMIP7_MAP_OUT`. Every MAP checkpoint also records the
 objective that produced it as root attributes - `misfit_norm`, `gamma_theta`,
-`gamma_phi`, `dhdt_weight`, alongside `mesh_basename` - so a MAP already on disk
-can be identified:
+`gamma_phi`, `dhdt_weight`, `dhdt_net_sigma` (the *resolved* value: 0 whenever
+the term was not actually built), alongside `mesh_basename` and the
+`lc`/`lc_coarse`/`buffer_m` mesh parameters - so a MAP already on disk can be
+identified:
 
 ```bash
 python -c "import h5py,sys; print(dict(h5py.File(sys.argv[1])['/'].attrs))" MAP.h5
 ```
-
-### Environment knobs (inversion)
-
-| Env var | Meaning | Default |
-|---------|---------|---------|
-| `ISMIP7_MAP_OUT` | full output path for the MAP h5, overriding the generated name. Use it for smoke tests and variant inversions so a short run cannot replace a converged production MAP. A bare filename resolves under `mesh/`; the directory is created and probed for writability at startup | _(generated name)_ |
-| `ISMIP7_MISFIT_NORM` | `sigma`: divide each residual by its own datum's squared error, making the misfit a dimensionless chi^2 so terms of different units can be traded off. `none`: legacy dimensional misfit. **Selects the `ISMIP7_GAMMA_*` defaults** (see below) | `sigma` |
-| `ISMIP7_GAMMA_THETA` / `ISMIP7_GAMMA_PHI` | Whittle-Matern prior strength on `θ` / `φ`. Default is coupled to `ISMIP7_MISFIT_NORM`, because normalizing divides the misfit by ~sigma^2 and would otherwise weaken the prior by the same factor | `1e5` under `sigma`, `1e4` under `none` |
-| `ISMIP7_L_REG` | prior correlation length (m) | `7.5e3` |
-| `ISMIP7_MAXITER` | L-BFGS-B iteration cap | `500` |
-| `ISMIP7_SIGMA_U_FLOOR` | floor on the per-component MEaSUREs velocity error (m/yr); without it the near-zero errors let a few nodes dominate the functional | `1.0` |
-| `ISMIP7_SIGMA_U_UNOBS` | sigma (m/yr) assigned where MEaSUREs reports no error at all. Those nodes also have a zero-filled `u_obs`, so they must be given a *large* sigma, not the floor, or they would carry maximal weight on a fabricated zero velocity when `ISMIP7_OBS_MASK=0` | `1e4` |
-| `ISMIP7_OBS_MASK` | `0` drops the velocity-observation mask (unobserved nodes re-enter the misfit) | `1` |
-| `ISMIP7_DHDT_WEIGHT` | weight on the dH/dt chi^2 term; `0` disables the transient constraint entirely (requires `ISMIP7_GEOMETRY_SPACE=dg0` when on) | `0` |
-| `ISMIP7_DHDT_SIGMA` | assumed dH/dt uncertainty (m/yr). A hand-set scalar: the MIPkit ships **no** uncertainty field for either dH/dt product | `0.1` |
-| `ISMIP7_DHDT_DT` | timestep of the single prognostic step (yr) | `1.0` |
-| `ISMIP7_DHDT_VAR` | observed field: `dhdt_smith` (firn-corrected, 2003-2019 mean) or `dhdt_cpom` (**not** firn corrected, so not interchangeable) | `dhdt_smith` |
-| `ISMIP7_DHDT_MELT` | `0` drops ocean melt from the prognostic step's source (SMB only). On by default so the step matches the forward's forcing. The per-basin K comes from `ISMIP7_K_PER_BASIN_NPZ`, else `results/calibrated_K_per_basin_<lc>.npz`, else the 2500 m file; if none exists this warns and falls back to SMB-only rather than aborting, since melt is zero on grounded ice and the misfit is grounded-only | `1` |
-| `ISMIP7_DHDT_CLIM_START` / `_END` | RACMO SMB climatology window for that source | `2003` / `2019` |
-| `ISMIP7_DHDT_REACH` | pixel-to-cell reach as a multiple of the cell scale `sqrt(area)`; rejects raster pixels lying outside the mesh that nearest-centroid assignment would otherwise snap onto boundary cells | `0.75` |
-| `ISMIP7_OBS_KIT` | path to `AntarcticaObsISMIP7-v*.nc` | newest under `<DATA_ROOT>/obs/mipkit` |
 
 ---
 
@@ -410,16 +437,52 @@ Each completed core is recorded with
 --log <run.log>` (add `--ctrl-csv` for a projection), run **in the run's own
 shell** so it captures that run's `ISMIP7_*` environment. It writes the
 tracked markdown record under `reports/`; `reports/MATRIX_STATUS.md` carries
-the matrix-wide status.
+the matrix-wide status. `--superseded "<reason>"` stamps an existing record
+with a validity banner when a later run replaces it, so a superseded result
+cannot be read as current.
+
+### Environment knobs (inversion)
+
+| Env var | Meaning | Default |
+|---------|---------|---------|
+| `ISMIP7_MAP_OUT` | full output path for the MAP h5, overriding the generated name. Use it for smoke tests and variant inversions so a short run cannot replace a converged production MAP. A bare filename resolves under `mesh/`; the directory is created and probed for writability at startup | _(generated name)_ |
+| `ISMIP7_MISFIT_NORM` | `sigma`: divide each residual by its own datum's squared error, making the misfit a dimensionless chi^2 so terms of different units can be traded off. `none`: legacy dimensional misfit. **Selects the `ISMIP7_GAMMA_*` defaults** (see below) | `sigma` |
+| `ISMIP7_GAMMA_THETA` / `ISMIP7_GAMMA_PHI` | Whittle-Matern prior strength on `θ` / `φ`. Default is coupled to `ISMIP7_MISFIT_NORM`, because normalizing divides the misfit by ~sigma^2 and would otherwise weaken the prior by the same factor | `1e5` under `sigma`, `1e4` under `none` |
+| `ISMIP7_L_REG` | prior correlation length (m) | `7.5e3` |
+| `ISMIP7_MAXITER` | L-BFGS-B iteration cap | `500` |
+| `ISMIP7_GRAD_PRECOND` | optimization metric. `none` is the raw-dof Euclidean l2 metric, which is **mesh-dependent**: a gradient entry scales with its dof's cell area, so the fine grounding-line cells converge slowest. `mass` optimizes in `u = sqrt(M) x` (M = lumped mass), i.e. steepest descent in L2, which makes the convergence rate mesh-independent. Defaults to `none` **deliberately**, so runs stay comparable with everything measured so far; flip after the current A/B. Any other value aborts at startup | `none` |
+| `ISMIP7_SIGMA_U_FLOOR` | floor on the per-component MEaSUREs velocity error (m/yr); without it the near-zero errors let a few nodes dominate the functional | `1.0` |
+| `ISMIP7_SIGMA_U_UNOBS` | sigma (m/yr) assigned where MEaSUREs reports no error at all. Those nodes also have a zero-filled `u_obs`, so they must be given a *large* sigma, not the floor, or they would carry maximal weight on a fabricated zero velocity when `ISMIP7_OBS_MASK=0` | `1e4` |
+| `ISMIP7_OBS_MASK` | `0` drops the velocity-observation mask (unobserved nodes re-enter the misfit) | `1` |
+| `ISMIP7_DHDT_WEIGHT` | weight on the dH/dt chi^2 term; `0` disables the transient constraint entirely (requires `ISMIP7_GEOMETRY_SPACE=dg0` when on) | `0` |
+| `ISMIP7_DHDT_SIGMA` | assumed dH/dt uncertainty (m/yr). A hand-set scalar: the MIPkit ships **no** uncertainty field for either dH/dt product | `0.1` |
+| `ISMIP7_DHDT_DT` | timestep of the single prognostic step (yr) | `1.0` |
+| `ISMIP7_DHDT_VAR` | observed field: `dhdt_smith` (firn-corrected, 2003-2019 mean) or `dhdt_cpom` (**not** firn corrected, so not interchangeable) | `dhdt_smith` |
+| `ISMIP7_DHDT_MELT` | `0` drops ocean melt from the prognostic step's source (SMB only). On by default so the step matches the forward's forcing. The per-basin K comes from `ISMIP7_K_PER_BASIN_NPZ`, else `results/calibrated_K_per_basin_<lc>.npz`, else the 2500 m file; if none exists this warns and falls back to SMB-only rather than aborting, since melt is zero on grounded ice and the misfit is grounded-only | `1` |
+| `ISMIP7_DHDT_CLIM_START` / `_END` | RACMO SMB climatology window for that source | `2003` / `2019` |
+| `ISMIP7_DHDT_REACH` | pixel-to-cell reach as a multiple of the cell scale `sqrt(area)`; rejects raster pixels lying outside the mesh that nearest-centroid assignment would otherwise snap onto boundary cells | `0.75` |
+| `ISMIP7_DHDT_NET_SIGMA` | sigma (Gt/yr) on the *integrated* grounded+observed dH/dt; `0` disables the net mass-balance term. Off by default on purpose - see §4 - and only ever active when `ISMIP7_DHDT_WEIGHT > 0` | `0` |
+| `ISMIP7_OBS_KIT` | path to `AntarcticaObsISMIP7-v*.nc` | newest under `<DATA_ROOT>/obs/mipkit` |
+
+---
 
 ### Environment knobs (all forward runs)
+
+The run-shaping knobs - `ISMIP7_LC`, `ISMIP7_LC_COARSE`, `ISMIP7_FRICTION`
+and `ISMIP7_GEOMETRY_SPACE` below, plus `ISMIP7_N_FLOW` (see
+`../COMPOSITE_RHEOLOGY.md`) - have exactly one owner in code,
+`icepack2_tools/runconfig.py`. Every driver, probe and gate reads them through
+it, so an unset knob cannot mean one resolution to the inversion and another
+to the preflight. A run that wants something else exports it, which is also
+how it reaches the core report.
 
 | Env var | Meaning | Default |
 |---------|---------|---------|
 | `ISMIP7_LC` | fine mesh resolution tag (selects mesh + inversion h5) | `2500` |
 | `ISMIP7_LC_COARSE` | coarse mesh tag | `64000` |
-| `ISMIP7_MESH` | mesh `.msh` path (inversion and tools). A forward takes its mesh from the MAP/restart checkpoint, which records its own mesh basename, so here it only names the boundary sidecar for a legacy checkpoint that carries no such record | `mesh/antarctica_<COARSE>_<LC>.msh` |
-| `ISMIP7_BNDIDS` | override boundary-id JSON | `mesh/boundary_ids_<mesh stem>.json` if present, else `mesh/boundary_ids.json` |
+| `ISMIP7_BUFFER_M` | outline buffer (m) used to resolve the default mesh/boundary-id filenames (see §3) | `20000` |
+| `ISMIP7_MESH` | mesh `.msh` path (inversion and tools). A forward takes its mesh from the MAP/restart checkpoint, which records its own mesh basename and parameters, so here it only names the boundary sidecar for a legacy checkpoint that carries no such record | `mesh/antarctica_<COARSE>_<LC>_buffered<BUFFER_M>.msh` |
+| `ISMIP7_BNDIDS` | override boundary-id JSON | `mesh/boundary_ids_antarctica_<COARSE>_<LC>_buffered<BUFFER_M>.json` if present, else `mesh/boundary_ids.json` |
 | `ISMIP7_GEOMETRY_SPACE` | space for `h`/`s`/`b` (`dg0`: one thickness for the terminus force and the mass flux; `cg1`: legacy, for A/B only) - also selects the MAP h5 (see `../GEOMETRY_DISCRETIZATION.md`) | `dg0` |
 | `ISMIP7_DATA_ROOT` | ISMIP7 forcing tree root | `<repo>/ISMIP7/AIS` |
 | `ISMIP7_T_END` / `ISMIP7_DT` | end year / timestep (yr) | `2300` / `1.0` |
@@ -434,13 +497,14 @@ the matrix-wide status.
 | `ISMIP7_FIXED_FRONT` | set to hold the calving front at the t=0 extent (inflow beyond it tallied as calving) | _(unset)_ |
 | `ISMIP7_LEGACY_TRANSPORT` | set to restore the pre-Jul-2026 CG-projection transport scheme (requires `ISMIP7_GEOMETRY_SPACE=cg1`) | _(unset)_ |
 | `ISMIP7_SNES_TYPE` / `ISMIP7_SNES_MAXIT` | diagnostic Newton type / max iterations | `newtonls` / `200` |
-| `ISMIP7_SUBCYCLES` | dt-subcycle rescue ladder: a step that fails the rescue solves rewinds its own advance and retries at `dt/m` for each `m` in this list | `1,4,16` |
-| `ISMIP7_RESCUE_MAXIT` | Newton iteration cap on the rescue rungs (hard-era steps converge linearly and need the extra patience) | `600` |
 | `ISMIP7_K_MELT` | scalar Burgard K (projections) | `1.15e-4` (Burgard K50) |
 | `ISMIP7_K_PER_BASIN_NPZ` | per-basin K file (control) | `results/calibrated_K_per_basin_<lc>.npz` |
 | `ISMIP7_ESM` | ESM for control (`CESM2-WACCM`, `MRI-ESM2-0`) | `CESM2-WACCM` |
+| `ISMIP7_CLIM_SCENARIO` / `ISMIP7_CLIM_START` / `_END` | reference-climate pool: the scenario pooled with `historical`, and the window, used both for the control's SMB climatology and for the projections' aSMB re-reference. `ssp126` is the protocol pool (cheat sheet, April 2026); the two uses share one owner (`icepack2_tools/climatology.py`) because a disagreement makes projection-minus-control difference two unrelated baselines. A partial pool warns rather than refusing, and the coverage line reaches the core report | `ssp126` / `2000` / `2029` |
 | `ISMIP7_H_CLAMP` | thickness floor (m) | `0` |
 | `ISMIP7_NO_CALVING_TERMINUS` | set to drop the calving-terminus BC | _(unset)_ |
+| `ISMIP7_SUBCYCLES` | dt-subcycle rescue ladder: a step that fails the rescue solves rewinds its own advance and retries at `dt/m` for each `m` in this list | `1,4,16` |
+| `ISMIP7_RESCUE_MAXIT` | Newton iteration cap on the rescue rungs (hard-era steps converge linearly and need the extra patience) | `600` |
 
 > **dt guidance** (from a dt-convergence sweep): use `ISMIP7_DT=0.1` for
 > production projections; `0.25` is acceptable if 10 steps/yr is too costly for a
@@ -498,6 +562,13 @@ VAF is reported in mm of sea-level equivalent; mass in Gt.
   during the collection reorganization. Mirror it with
   `scripts/download_forcing.py --scenarios` (§2a) and run
   `scripts/preflight.py` to see what can run locally.
+- **Mesh/boundary-id naming is now per-`(COARSE, FINE, BUFFER_M)`.** Mesh and
+  sidecar filenames are tagged with the exact resolution and outline buffer
+  used to build them (`antarctica_<COARSE>_<FINE>_buffered<BUFFER_M>.msh` /
+  `boundary_ids_antarctica_<COARSE>_<FINE>_buffered<BUFFER_M>.json`, see §3),
+  so a sidecar can no longer silently mismatch a mesh built with a different
+  resolution or buffer. If you have older meshes/sidecars built before this
+  naming convention, rename them to match or rebuild via `mesh_antarctica.py`.
 - **`icepack2_tools/coupled.py`** is a WIP sketch of ice↔plume coupling and
   references a `PlumeModel` that does not yet exist in this tree — not wired into
   any run.

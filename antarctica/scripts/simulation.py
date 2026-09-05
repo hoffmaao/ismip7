@@ -52,6 +52,7 @@ from icepack2_tools.mpi_stats import global_mean, global_range
 from icepack2_tools.boundary import load_boundary_ids
 from icepack2_tools.geometry import sample_to_geometry
 from icepack2_tools.naming import map_basename
+from icepack2_tools.front import retreat_slivers
 from icepack2_tools.runconfig import (
     friction as _friction, geometry_space as _geometry_space, lc as _lc,
     n_flow as _n_flow,
@@ -1619,8 +1620,7 @@ def run_simulation(
             # the composite rheology's h_visc_floor and the ocean drag applied
             # below h_ocean already govern cells this thin.
             data = h_dg.dat.data
-            sliver = ((data > 0.0) & (data <= front_hmin)
-                      & (h_dg_old.dat.data_ro > front_hmin))
+            sliver = retreat_slivers(data, h_dg_old.dat.data_ro, front_hmin)
             calv_gt += mesh.comm.allreduce(
                 float((data[sliver] * cell_area[sliver]).sum())) * rho_gt
             data[sliver] = 0.0

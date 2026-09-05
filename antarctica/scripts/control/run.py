@@ -13,10 +13,8 @@ Usage:
     ISMIP7_ESM=MRI-ESM2-0 mpiexec -n 12 python scripts/control/run.py
 """
 
-import os, sys, glob, argparse
+import os, sys, argparse
 import numpy as np
-import xarray as xr
-from scipy.interpolate import RegularGridInterpolator
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
@@ -34,7 +32,11 @@ from icepack2_tools.forcing import (
     compute_sin_alpha,
     quadratic_mixed_slope,
     load_K_per_basin,
+    forcing_coords,
     _RHO_ICE, _RHO_WATER, _K_DEFAULT,
+)
+from icepack2_tools.climatology import (
+    clim_start, clim_end, clim_scenario, clim_pool_missing, describe_clim_pool,
 )
 
 T_START = 2015.0
@@ -43,15 +45,18 @@ DT = float(os.environ.get("ISMIP7_DT", "1.0"))
 OUTPUT_INTERVAL = int(os.environ.get("ISMIP7_OUTPUT_INTERVAL", "10"))
 
 ESM = os.environ.get("ISMIP7_ESM", "CESM2-WACCM")
-# Reference-climate window for the constant SMB. RACMO2.4p1 (1979-2023)
-# is the primary baseline, so 2000-2029 yields its 2000-2023 mean. The
-# acabf fallback pools historical + projection scenarios and uses
-# whatever subset of the window exists locally (currently ssp585
-# 2015-2029 only; the acabf-anomaly files are referenced to 1960-1989 so
-# an anomaly-based baseline is NOT constructible).
-CLIM_START = int(os.environ.get("ISMIP7_CLIM_START", "2000"))
-CLIM_END = int(os.environ.get("ISMIP7_CLIM_END", "2029"))
-CLIM_SCENARIO = os.environ.get("ISMIP7_CLIM_SCENARIO", "ssp585")
+# Reference-climate window and pool scenario for the constant SMB, owned by
+# icepack2_tools.climatology so the control, the projections, the preflight
+# and the report cannot drift apart. RACMO2.4p1 (1979-2023) is the primary
+# baseline, so 2000-2029 yields its 2000-2023 mean. The acabf fallback pools
+# historical + the protocol scenario (ssp126) and uses whatever subset of the
+# window exists locally; the acabf-anomaly files are referenced to 1960-1989,
+# so an anomaly-based baseline is NOT constructible. CLIM_SCENARIO is only
+# reached when RACMO is unavailable, but the fallback should still be the
+# protocol pool.
+CLIM_START = clim_start()
+CLIM_END = clim_end()
+CLIM_SCENARIO = clim_scenario()
 
 DATA_ROOT = os.environ.get(
     "ISMIP7_DATA_ROOT", os.path.join(_PROJECT, "ISMIP7", "AIS")
@@ -84,12 +89,14 @@ def compute_climatology(atms, mesh_x, mesh_y):
     """
     smb_sum = np.zeros(len(mesh_x))
     n = 0
+    pooled = []
     for atm in atms:
         years = [y for y in atm.available_years("acabf")
                  if CLIM_START <= y <= CLIM_END]
         for yr in years:
             smb_sum += atm.get_smb(yr, mesh_x, mesh_y, anomaly=False)
         n += len(years)
+        pooled += years
         if years:
             PETSc.Sys.Print(
                 f"  {atm.scenario}: {len(years)} acabf years "
@@ -97,6 +104,18 @@ def compute_climatology(atms, mesh_x, mesh_y):
             )
     if n == 0:
         return None
+    PETSc.Sys.Print(f"  {describe_clim_pool(pooled, 'acabf full field')}")
+    missing = clim_pool_missing(pooled)
+    if missing:
+        PETSc.Sys.Print(
+            f"  WARNING: the constant SMB climatology is a mean over "
+            f"{len(set(pooled))} of the {CLIM_END - CLIM_START + 1} window "
+            f"years ({len(missing)} missing, {missing[0]}..{missing[-1]}). "
+            f"This control's baseline is NOT the full-window one, so a "
+            f"projection re-referenced over the full window is differenced "
+            f"against a different baseline. Proceeding: the pool is recorded "
+            f"above and in the per-core report."
+        )
     return smb_sum / n
 
 
@@ -217,14 +236,16 @@ def main():
 
     ctx = setup_model(restart_from=restart_from)
 
-    mesh_x = ctx["mesh"].coordinates.dat.data_ro[:, 0]
-    mesh_y = ctx["mesh"].coordinates.dat.data_ro[:, 1]
+    # Forcing fields live on the GEOMETRY space (DG0 by default), whose
+    # dofs are cell centroids, not mesh vertices. Sampling climatologies
+    # at vertices would write a wrong-length array into ctx["accum"].
+    mesh_x, mesh_y = forcing_coords(ctx)
 
     # Atmosphere: RACMO climatology baseline; fall back to the pooled ISMIP7
     # acabf full-field climatology; refuse to run zero-SMB unless forced.
     try:
         ctx["accum"].assign(
-            load_racmo_smb_climatology(ctx["Q"], CLIM_START, CLIM_END)
+            load_racmo_smb_climatology(ctx["Q_g"], CLIM_START, CLIM_END)
         )
         mean_smb = area_weighted_mean(ctx["accum"], ctx["mesh"])
         PETSc.Sys.Print(
@@ -284,7 +305,7 @@ def main():
     PETSc.Sys.Print(f"\nControl experiment: {ESM}")
     PETSc.Sys.Print(f"  Period: {T_START}-{T_END}")
     PETSc.Sys.Print(f"  Constant {CLIM_START}-{CLIM_END} SMB climatology")
-    PETSc.Sys.Print(f"  Constant OI ocean climatology + per-basin K")
+    PETSc.Sys.Print("  Constant OI ocean climatology + per-basin K")
 
     run_simulation(
         ctx,

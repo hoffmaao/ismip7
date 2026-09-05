@@ -6,8 +6,8 @@
 > n=4 Goldsby-Kohlstedt composite (`a4_factor ≈ 10`) is on the `antarctica`
 > branch. Everything below is written for the general exponent `n_flow`;
 > read `n_flow = 3`, `a4_factor = 1` here. MAPs inverted at n=3 carry an
-> `_n3` filename tag (`inversion_icepack2_budd_n3_<lc>.h5`) so they coexist
-> with the untagged n=4 MAPs; the forward and its inversion must use the
+> `_n3` filename tag so they coexist with the untagged n=4 MAPs (naming rule:
+> `antarctica/N3_FRAMEWORK.md`); the forward and its inversion must use the
 > same `ISMIP7_N_FLOW` / `ISMIP7_A4_FACTOR`. The `a4_factor` default is
 > derived from `ISMIP7_N_FLOW` (10.0 at n=4, 1.0 otherwise), so setting
 > `ISMIP7_N_FLOW=4` alone reproduces the `antarctica` rheology; an explicit
@@ -32,7 +32,7 @@ This mirrors `icepack2/test/dome_test.py` and is used in
 | `u`     | depth-averaged velocity                                  | m/yr      |
 | `M`     | depth-integrated membrane stress tensor                  | MPa       |
 | `τ`     | basal shear stress vector                                | MPa       |
-| `h`     | ice thickness (CG1 control variable)                     | m         |
+| `h`     | ice thickness (geometry space: DG0 by default)            | m         |
 | `s`     | upper surface elevation                                  | m         |
 | `b`     | bed elevation                                            | m         |
 | `A`     | depth-averaged ice fluidity = `A_prior · exp(φ)`         | MPa⁻ⁿ·yr⁻¹|

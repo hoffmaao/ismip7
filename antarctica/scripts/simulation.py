@@ -2,7 +2,7 @@
 r"""Shared simulation engine for ISMIP7 Antarctic experiments."""
 
 import numpy as np
-import os, sys, glob, json
+import os, sys, glob
 from time import perf_counter
 
 import firedrake as fd
@@ -46,21 +46,30 @@ RESULTS_DIR = os.path.join(_ROOT, "results")
 
 # Repo root on the path for the shared dual-friction operator.
 sys.path.insert(0, os.path.dirname(_ROOT))
+from mesh_naming import mesh_filename
 
-lc = int(os.environ.get("ISMIP7_LC", "2500"))
-lc_coarse = int(os.environ.get("ISMIP7_LC_COARSE", "64000"))
+from icepack2_tools.mpi_stats import global_mean, global_range
+from icepack2_tools.boundary import load_boundary_ids
+from icepack2_tools.geometry import sample_to_geometry
+from icepack2_tools.naming import map_basename
+from icepack2_tools.runconfig import (
+    friction as _friction, geometry_space as _geometry_space, lc as _lc,
+    n_flow as _n_flow,
+)
 
-# Flow-law exponent for the composite viscous rheology. THIS BRANCH
-# (antarctica-n3) runs STANDARD GLEN n=3: A0 = rate_factor(260 K) is
-# already the n=3 fluidity, so the composite main term needs no prefactor
-# rescale (A4_FACTOR_DEFAULT = 1). The n=4 Goldsby-Kohlstedt composite
-# (a4_factor ~ 10, so A_4 tau_c^4 ~ A_3 tau_c^3 at tau_c) lives on the
-# `antarctica` branch. Override either per-run with ISMIP7_N_FLOW /
-# ISMIP7_A4_FACTOR; the two must match between an inversion and the forward
-# runs that load its MAP. Setting ISMIP7_N_FLOW=4 alone therefore carries the
-# n=4 prefactor with it (a4_factor_default below), so the legacy untagged n=4
-# MAP is used with the factor it was inverted at.
-N_FLOW_DEFAULT = "3.0"
+lc = _lc()
+
+# Flow-law exponent for the composite viscous rheology: owned by
+# icepack2_tools.runconfig, which the inversion that produced the MAP reads
+# too. THIS BRANCH (antarctica-n3) runs STANDARD GLEN n=3: A0 =
+# rate_factor(260 K) is already the n=3 fluidity, so the composite main term
+# needs no prefactor rescale (A4_FACTOR_DEFAULT = 1). The n=4
+# Goldsby-Kohlstedt composite (a4_factor ~ 10, so A_4 tau_c^4 ~ A_3 tau_c^3 at
+# tau_c) lives on the `antarctica` branch. Override either per-run with
+# ISMIP7_N_FLOW / ISMIP7_A4_FACTOR; the two must match between an inversion
+# and the forward runs that load its MAP. Setting ISMIP7_N_FLOW=4 alone
+# therefore carries the n=4 prefactor with it (a4_factor_default below), so
+# the legacy untagged n=4 MAP is used with the factor it was inverted at.
 A4_FACTOR_DEFAULT = "1.0"
 A4_FACTOR_N4 = "10.0"
 
@@ -69,17 +78,8 @@ def a4_factor_default():
     r"""Prefactor default derived from the flow exponent: the n=4 composite
     needs A_4 = 10 A_3 so A_4 tau_c^4 ~ A_3 tau_c^3, while n=3 is plain Glen
     and needs none. ISMIP7_A4_FACTOR still overrides."""
-    n = float(os.environ.get("ISMIP7_N_FLOW", N_FLOW_DEFAULT))
+    n = _n_flow()
     return A4_FACTOR_N4 if abs(n - 4.0) < 1e-9 else A4_FACTOR_DEFAULT
-
-
-def map_n_tag():
-    r"""Filename tag distinguishing MAPs inverted at different flow
-    exponents so n=3 and n=4 MAPs coexist on disk. n=4 keeps the legacy
-    untagged name (backward compatible with the `antarctica` MAPs); any
-    other n gets `_n<N>` (e.g. `_n3`)."""
-    n = float(os.environ.get("ISMIP7_N_FLOW", N_FLOW_DEFAULT))
-    return "" if abs(n - 4.0) < 1e-9 else f"_n{int(round(n))}"
 
 
 def find_file(d, p):
@@ -87,6 +87,26 @@ def find_file(d, p):
     if not m:
         raise FileNotFoundError(f"No {p} in {d}")
     return m[0]
+
+
+def load_onto(chk, mesh, name, space):
+    r"""Load a checkpoint field onto `space`, converting representation if the
+    file stores it elsewhere. Returns ``(Function, converted)``.
+
+    Same space is the normal path and copies dofs directly (the mesh came from
+    this same checkpoint, so the ordering matches by construction). A different
+    space means the file predates the DG0-geometry change; project and let the
+    caller warn. Projection makes the run *executable*, not *consistent*: a
+    legacy MAP's theta/phi were inferred against CG1 geometry with the biased
+    calving front, so the controls still carry that bias and the MAP must be
+    re-inverted before the results mean anything.
+    """
+    f = chk.load_function(mesh, name=name)
+    if f.function_space().ufl_element() == space.ufl_element():
+        out = Function(space, name=name)
+        out.dat.data[:] = f.dat.data_ro
+        return out, False
+    return Function(space, name=name).project(f), True
 
 
 def latest_checkpoint(experiment_name, lc_val=None):
@@ -131,7 +151,7 @@ def setup_model(restart_from=None):
     # Must mirror inversion_icepack2.py so theta/phi keep their meaning.
     # Resolved first because the compute mesh is loaded FROM this friction's
     # MAP checkpoint (below), not from a fresh Mesh(.msh).
-    friction = os.environ.get("ISMIP7_FRICTION", "budd")
+    friction = _friction()
     # Exact-zero-shelf residual laws (icepack2 dual, dual_friction.py):
     #   regularized_coulomb -> Coulomb cap tau_c=c0*N
     #   budd                -> tau_b ~ N_hat=N_eff/N_ref, PISM-delta grounded
@@ -140,11 +160,24 @@ def setup_model(restart_from=None):
     # "budd_legacy" keeps the old phi_eff action Budd (residual shelf drag).
     use_residual = friction in ("regularized_coulomb", "budd")
     use_rc = use_residual  # geometry/alpha/h_clamp handling is shared
-    map_tag = ({"regularized_coulomb": "_rc", "budd": "_budd"}.get(friction, "")
-               + map_n_tag())
 
     is_restart = restart_from is not None
-    inv_fn = os.path.join(MESH_DIR, f"inversion_icepack2{map_tag}_{lc}.h5")
+    # Prefer the MAP inverted under this geometry space. Falling back to the
+    # untagged legacy (CG1) MAP keeps the transition runnable, but the load
+    # then projects the geometry and warns loudly - the controls still carry
+    # the CG1 front bias, so such a run is a smoke test, not a result.
+    inv_fn = os.path.join(MESH_DIR, map_basename(friction, lc))
+    if not is_restart and not os.path.exists(inv_fn):
+        legacy_fn = os.path.join(
+            MESH_DIR, map_basename(friction, lc, geometry=False)
+        )
+        if os.path.exists(legacy_fn):
+            PETSc.Sys.Print(
+                f"  No {os.path.basename(inv_fn)}; falling back to "
+                f"{os.path.basename(legacy_fn)} (inverted under a different "
+                f"geometry space)"
+            )
+            inv_fn = legacy_fn
     # Take the mesh + reference fields from the checkpoint we start from: the
     # MAP on a cold start, or the self-contained restart checkpoint on a warm
     # start. A fresh Mesh(.msh) repartitions with a different dof ordering,
@@ -156,15 +189,64 @@ def setup_model(restart_from=None):
     PETSc.Sys.Print(f"Loading mesh + reference state: {source_chk}")
     with fd.CheckpointFile(source_chk, "r") as _chk:
         mesh = _chk.load_mesh()
-    PETSc.Sys.Print(f"  {mesh.num_vertices()} vertices, {mesh.num_cells()} cells")
+        # The mesh this checkpoint was built on, recorded by the inversion and
+        # carried through every restart. A CheckpointFile mesh is named
+        # "firedrake_default", so this attribute is the only way the run can
+        # name its own .msh and pick the matching per-mesh sidecar.
+        mesh_basename = (
+            str(_chk.get_attr("/", "mesh_basename"))
+            if _chk.has_attr("/", "mesh_basename") else ""
+        )
 
-    bndids_fn = os.environ.get(
-        "ISMIP7_BNDIDS", os.path.join(MESH_DIR, "boundary_ids.json")
-    )
-    with open(bndids_fn) as f:
-        bnd_ids = json.load(f)
-    calving_ids = tuple(bnd_ids["calving"])
+        # Dan/David additionally stamp the mesh PARAMETERS. Keep both: the
+        # basename is direct and also covers meshes outside the standard
+        # naming pattern (e.g. the 500 m aniso mesh), while lc_coarse/buffer_m
+        # let bndids_filename() reconstruct the name parametrically. They
+        # cross-check each other, and either alone is enough to resolve the
+        # sidecar from the CHECKPOINT rather than from the live environment --
+        # which is the point: ISMIP7_BUFFER_M/ISMIP7_LC_COARSE can drift, and
+        # a mismatched sidecar puts the calving BC on the wrong facets, where
+        # ds(absent_id) integrates to zero: silently wrong physics, no crash.
+        chk_lc_coarse = (int(_chk.get_attr("/", "lc_coarse"))
+                         if _chk.has_attr("/", "lc_coarse") else None)
+        chk_buffer_m = (float(_chk.get_attr("/", "buffer_m"))
+                        if _chk.has_attr("/", "buffer_m") else None)
+        # The FINE resolution is stamped too, and every component of the
+        # reconstructed name must come from the checkpoint: falling back to the
+        # live ISMIP7_LC here would reintroduce exactly the environment drift
+        # the parametric scheme exists to remove. Older MAPs that predate the
+        # lc attribute have no recorded resolution, so they keep the live value.
+        chk_lc = (int(_chk.get_attr("/", "lc"))
+                  if _chk.has_attr("/", "lc") else None)
+        if not mesh_basename and chk_lc_coarse is not None \
+                and chk_buffer_m is not None:
+            mesh_basename = os.path.basename(
+                mesh_filename(chk_lc_coarse,
+                              chk_lc if chk_lc is not None else lc,
+                              chk_buffer_m))
+    PETSc.Sys.Print(f"  {mesh.num_vertices()} vertices, {mesh.num_cells()} cells")
+    # The recorded basename is the provenance and WINS. ISMIP7_MESH is only a
+    # fallback for legacy checkpoints that carry no attribute: it names the
+    # mesh the caller intends to build, which is not necessarily the one this
+    # checkpoint was written on, so it must not override the record - and only
+    # the recorded value is carried into the checkpoints this run writes.
+    if not mesh_basename:
+        _env_mesh = os.environ.get("ISMIP7_MESH", "")
+        mesh_basename = os.path.basename(_env_mesh) if _env_mesh else ""
+        if mesh_basename:
+            PETSc.Sys.Print(
+                f"  No mesh_basename in {os.path.basename(source_chk)}; using "
+                f"ISMIP7_MESH ({mesh_basename}) to resolve the boundary sidecar"
+            )
+
+    # Boundary-id sidecar: resolved (per-mesh preferred) and hard-checked
+    # against this mesh by the shared helper, so the inversion, the forward and
+    # every auxiliary solver cannot disagree about the ice front.
     use_calving_terminus = os.environ.get("ISMIP7_NO_CALVING_TERMINUS") is None
+    bnd_ids, calving_ids, bndids_fn = load_boundary_ids(
+        mesh, MESH_DIR, mesh_hint=mesh_basename,
+        print_coverage=use_calving_terminus,
+    )
 
     Q = FunctionSpace(mesh, "CG", 1)
     V = VectorFunctionSpace(mesh, "CG", 1)
@@ -172,6 +254,38 @@ def setup_model(restart_from=None):
     Sigma = TensorFunctionSpace(mesh, dg0, symmetry=True)
     T = VectorFunctionSpace(mesh, dg0)
     Z = V * Sigma * T
+
+    # GEOMETRY SPACE (h, s, b and everything derived from them), separate from
+    # the CONTROL space Q. Controls stay CG1: the Whittle-Matern prior
+    # regularizes |grad theta|, which needs a differentiable field.
+    #
+    # DG0 (default) makes the geometry the SAME field the mass transport
+    # evolves, which is the point. Under the old CG1 geometry the transport
+    # carried a DG0 thickness and the momentum solve a CG1 one, bridged by a
+    # lumped-mass lift. That lift conserves volume exactly but is one-sided at
+    # the domain boundary, so it pulled calving-front nodes up toward interior
+    # values: measured at 32 km it DOUBLED the front thickness (105 -> 200 m,
+    # against a BedMachine ice-front mean of 145 m), and since the terminus
+    # traction goes as h^2 that tripled the terminus force and multiplied the
+    # outflux by ~4.7. Force and mass also disagreed by ~22% because they
+    # integrated different fields. With DG0 geometry there is one thickness:
+    # the terminus back-pressure and the transport flux integrate the same
+    # cell value, and no lift exists to bias the front.
+    #
+    # The cost, measured on a smooth manufactured problem: the driving stress
+    # drops from 2nd-order (CG1 cell term) to 1st-order (DG0 facet-jump term),
+    # ~1.4% vs ~0.08% error at 32x32. That is well inside the bed/thickness
+    # data error at Antarctic resolutions, and it buys an unbiased front.
+    #
+    # ISMIP7_GEOMETRY_SPACE=cg1 restores the old behaviour for A/B comparison.
+    geometry_space = _geometry_space()
+    geom_dg = geometry_space == "dg0"
+    Q_g = FunctionSpace(mesh, "DG", 0) if geom_dg else Q
+    PETSc.Sys.Print(
+        f"  Geometry space: {geometry_space.upper()}"
+        + (" (h, s, b cell-wise; one thickness for force and mass)" if geom_dg
+           else " (LEGACY: CG1 geometry, lumped lift, front thickness biased high)")
+    )
 
     PETSc.Sys.Print("Loading data...")
     # Two clamps:
@@ -202,15 +316,18 @@ def setup_model(restart_from=None):
         # Cold start: geometry from BedMachine (RC/Budd overwrites it with the
         # inversion-time geometry from the MAP in the reference-load block).
         bm_fn = find_file(os.path.join(DATA_DIR, "bedmachine"), "*.nc")
-        b = icepack.interpolate(rasterio.open(f"netcdf:{bm_fn}:bed"), Q)
+        # Cell average onto the geometry space, NOT a centroid point sample --
+        # see geometry.sample_to_geometry for the measurements behind that.
+        b = sample_to_geometry(
+            lambda sp: icepack.interpolate(
+                rasterio.open(f"netcdf:{bm_fn}:bed"), sp), Q_g, Q)
         b.rename("bed")
-        H = Function(Q, name="thickness").interpolate(
-            max_value(
-                icepack.interpolate(rasterio.open(f"netcdf:{bm_fn}:thickness"), Q),
-                Constant(h_clamp_init),
-            )
-        )
-        s = Function(Q, name="surface").interpolate(
+        H = sample_to_geometry(
+            lambda sp: icepack.interpolate(
+                rasterio.open(f"netcdf:{bm_fn}:thickness"), sp),
+            Q_g, Q, floor=h_clamp_init)
+        H.rename("thickness")
+        s = Function(Q_g, name="surface").interpolate(
             max_value(b + H, (Constant(1.0) - rho_ratio) * H)
         )
 
@@ -246,17 +363,20 @@ def setup_model(restart_from=None):
             A_prior_f = None
         if is_restart:
             # Self-contained restart: evolved geometry, frozen anchors, time.
-            _b = chk.load_function(mesh, name="bed")
-            _H = chk.load_function(mesh, name="thickness")     # evolved thickness
-            _s = chk.load_function(mesh, name="surface")
-            _Hi = chk.load_function(mesh, name="H_init")       # t=0 fixed-front anchor
-            _pe = chk.load_function(mesh, name="phi_eff")
+            _conv = False
+            b, _c = load_onto(chk, mesh, "bed", Q_g);            _conv |= _c
+            H, _c = load_onto(chk, mesh, "thickness", Q_g);      _conv |= _c
+            s, _c = load_onto(chk, mesh, "surface", Q_g);        _conv |= _c
+            H_init, _c = load_onto(chk, mesh, "H_init", Q_g);    _conv |= _c
+            phi_eff, _c = load_onto(chk, mesh, "phi_eff", Q_g);  _conv |= _c
+            if _conv:
+                PETSc.Sys.Print(
+                    "  WARNING: restart checkpoint stores geometry in a "
+                    "different space than ISMIP7_GEOMETRY_SPACE; projected. "
+                    "A run must not change geometry space mid-trajectory - "
+                    "restart from a checkpoint written by the same setting."
+                )
             _u = chk.load_function(mesh, name="velocity")
-            b = Function(Q, name="bed");           b.dat.data[:] = _b.dat.data_ro
-            H = Function(Q, name="thickness");     H.dat.data[:] = _H.dat.data_ro
-            s = Function(Q, name="surface");       s.dat.data[:] = _s.dat.data_ro
-            H_init = Function(Q, name="H_init");   H_init.dat.data[:] = _Hi.dat.data_ro
-            phi_eff = Function(Q, name="phi_eff"); phi_eff.dat.data[:] = _pe.dat.data_ro
             u_guess = Function(V);                 u_guess.dat.data[:] = _u.dat.data_ro
             # Stress components (newer checkpoints): restoring them makes the
             # resume Newton start from the full converged state instead of
@@ -274,19 +394,18 @@ def setup_model(restart_from=None):
                 a_ref_mb = chk.load_function(mesh, name="a_ref_mb")
             except Exception:
                 a_ref_mb = None
-            # DG0 prognostic thickness state (newer checkpoints): the CG h
-            # above is its lumped lift; restoring it avoids re-applying the
-            # CG->DG projection to an already-consistent state.
-            try:
-                h_dg_state = chk.load_function(mesh, name="thickness_dg")
-            except Exception:
-                h_dg_state = None
+            # Separate DG0 prognostic thickness (CG1-geometry runs only, where
+            # the stored CG h was its lumped lift). Under DG0 geometry the
+            # thickness IS the transport state, so there is nothing to restore.
+            if not geom_dg:
+                try:
+                    h_dg_state = chk.load_function(mesh, name="thickness_dg")
+                except Exception:
+                    h_dg_state = None
             if use_residual:
-                _cw = chk.load_function(mesh, name="C_w0")
-                C_w0 = Function(Q, name="C_w0");   C_w0.dat.data[:] = _cw.dat.data_ro
+                C_w0, _ = load_onto(chk, mesh, "C_w0", Q_g)
             if friction == "budd":
-                _nr = chk.load_function(mesh, name="N_ref")
-                N_ref = Function(Q, name="N_ref"); N_ref.dat.data[:] = _nr.dat.data_ro
+                N_ref, _ = load_onto(chk, mesh, "N_ref", Q_g)
             if chk.has_attr("/", "t_yr"):
                 t_restart = float(chk.get_attr("/", "t_yr"))
             # Guard the resume environment against the checkpoint's recorded
@@ -323,14 +442,22 @@ def setup_model(restart_from=None):
         elif use_rc:
             # Cold RC/Budd: geometry + velocity_obs from the MAP so the
             # Weertman anchor C_w0 (hence the meaning of theta) is reproduced.
-            _H = chk.load_function(mesh, name="thickness")
-            _b = chk.load_function(mesh, name="bed")
-            _s = chk.load_function(mesh, name="surface")
+            H, _c1 = load_onto(chk, mesh, "thickness", Q_g)
+            b, _c2 = load_onto(chk, mesh, "bed", Q_g)
+            s, _c3 = load_onto(chk, mesh, "surface", Q_g)
             _uo = chk.load_function(mesh, name="velocity_obs")
-            H.dat.data[:] = _H.dat.data_ro
-            b.dat.data[:] = _b.dat.data_ro
-            s.dat.data[:] = _s.dat.data_ro
             u_obs.dat.data[:] = _uo.dat.data_ro
+            if _c1 or _c2 or _c3:
+                PETSc.Sys.Print(
+                    "  WARNING: this MAP stores geometry in a different space "
+                    "than ISMIP7_GEOMETRY_SPACE and has been PROJECTED.\n"
+                    "  The run will proceed, but theta/phi were inferred "
+                    "against the other representation - under CG1 geometry\n"
+                    "  the lumped lift biases the calving-front thickness "
+                    "high, and the inversion absorbs that into friction.\n"
+                    "  Re-invert with the same ISMIP7_GEOMETRY_SPACE before "
+                    "trusting any result from this MAP."
+                )
             if h_clamp_init > 0.0:
                 H.interpolate(max_value(H, Constant(h_clamp_init)))
                 s.interpolate(max_value(b + H, (Constant(1.0) - rho_ratio) * H))
@@ -341,7 +468,7 @@ def setup_model(restart_from=None):
     # with |.| up to 23 -> exp() ~1e10 local singularities the diagnostic SNES
     # cannot solve through). Default 6 for n=4 MAPs; the physical n=3 controls
     # legitimately reach ~8, so default 10 otherwise. Set 0 to disable.
-    _n_flow_env = float(os.environ.get("ISMIP7_N_FLOW", N_FLOW_DEFAULT))
+    _n_flow_env = _n_flow()
     _map_clip_default = "6.0" if _n_flow_env == 4.0 else "10.0"
     map_clip = float(os.environ.get("ISMIP7_MAP_CLIP", _map_clip_default))
     if map_clip > 0.0:
@@ -359,22 +486,25 @@ def setup_model(restart_from=None):
     A0 = Constant(icepack.rate_factor(Constant(260.0)))
     # Composite flow exponent (must match the inversion that produced the
     # MAP file we load above). This branch: n=3 standard Glen (A4_FACTOR=1).
-    n_flow_val = float(os.environ.get("ISMIP7_N_FLOW", N_FLOW_DEFAULT))
+    n_flow_val = _n_flow()
     m_slide_val = float(os.environ.get("ISMIP7_M_SLIDE", "3.0"))
     a4_factor = float(os.environ.get("ISMIP7_A4_FACTOR", a4_factor_default()))
     n_flow = Constant(n_flow_val)
     m_slide = Constant(m_slide_val)
     tau_c = Constant(0.1)
-    u_c = Constant(float(Function(Q).interpolate(
+    # global_mean: .dat.data_ro.mean() is the rank-local owned slice (see
+    # icepack2_tools/mpi_stats). Legacy action path only; build_rc_residual
+    # anchors on C_w0.
+    u_c = Constant(global_mean(Function(Q).interpolate(
         max_value(sqrt(u_obs[0] ** 2 + u_obs[1] ** 2), Constant(1.0))
-    ).dat.data_ro.mean()))
+    )))
 
     # Phi_eff (effective-pressure fraction). Uses a small floor on H so it
     # is well-defined where the original BedMachine thickness is 0. Loaded
     # (frozen) from the checkpoint on a restart; computed here on a cold start.
     _H_FLOOR_PHI = Constant(1.0)
     if phi_eff is None:
-        phi_eff = Function(Q, name="phi_eff").interpolate(
+        phi_eff = Function(Q_g, name="phi_eff").interpolate(
             max_value(
                 Constant(1.0)
                 - rho_W * g * max_value(Constant(0.0), -b)
@@ -387,9 +517,10 @@ def setup_model(restart_from=None):
     # predate the physical prior. Must match the inversion that made the MAP.
     if A_prior_f is not None:
         A4_base = A_prior_f
+        A_prior_lo, A_prior_hi = global_range(A_prior_f)
         PETSc.Sys.Print(
-            f"  Fluidity prior A_prior loaded [{float(A_prior_f.dat.data_ro.min()):.2f}, "
-            f"{float(A_prior_f.dat.data_ro.max()):.2f}]"
+            f"  Fluidity prior A_prior loaded "
+            f"[{A_prior_lo:.2f}, {A_prior_hi:.2f}]"
         )
     else:
         A_prior_f = Function(Q, name="fluidity_prior").interpolate(A0 * Constant(a4_factor))
@@ -467,11 +598,12 @@ def setup_model(restart_from=None):
         # friction is reproduced at t=0. On a restart these frozen anchors are
         # loaded from the checkpoint above, never recomputed from evolved h.
         if not is_restart:
-            C_w0 = Function(Q, name="C_w0").interpolate(
-                weertman_anchor(H, s, u_obs, m_slide_val, Q)
-            )
+            # weertman_anchor needs |grad s|; under DG0 geometry it takes that
+            # from a CG1 reconstruction internally (see geometry.surface_slope)
+            # since a cell-wise surface has no cell gradient.
+            C_w0 = weertman_anchor(H, s, u_obs, m_slide_val, Q_g)
             if friction == "budd":
-                N_ref = Function(Q, name="N_ref").interpolate(
+                N_ref = Function(Q_g, name="N_ref").interpolate(
                     max_value(effective_pressure(H, s), Constant(0.0))
                 )
         if friction == "budd":
@@ -700,19 +832,33 @@ def setup_model(restart_from=None):
     ))
     PETSc.Sys.Print(f"  Initial velocity misfit vs obs: {misfit0:.6e}")
 
-    accum = Function(Q, name="accumulation").assign(0.0)
-    ocean_melt = Function(Q, name="ocean_melt").assign(0.0)
+    # Forcing fields live on the GEOMETRY space: the melt parameterization is
+    # evaluated from the local draft (s - h) and must be cell-wise wherever the
+    # geometry is, and the transport cell-averages (accum - ocean_melt) anyway.
+    accum = Function(Q_g, name="accumulation").assign(0.0)
+    ocean_melt = Function(Q_g, name="ocean_melt").assign(0.0)
+
+    # Coordinates of the geometry dofs, for forcing callbacks that assign into
+    # .dat.data directly (they cannot assume mesh vertices any more).
+    _xy = Function(VectorFunctionSpace(mesh, Q_g.ufl_element())).interpolate(
+        fd.SpatialCoordinate(mesh)
+    ).dat.data_ro
+    geom_xy = (_xy[:, 0].copy(), _xy[:, 1].copy())
 
     # t=0 fixed-front anchor: on a cold start it is the initial (BedMachine/
     # inversion) thickness; on a restart it was loaded from the checkpoint, so
     # it stays the ORIGINAL observed extent rather than the evolved geometry.
     if H_init is None:
-        H_init = Function(Q, name="H_init")
+        H_init = Function(Q_g, name="H_init")
         H_init.assign(H)
 
     return {
         "mesh": mesh,
         "Q": Q,
+        "Q_g": Q_g,
+        "geom_dg": geom_dg,
+        "geom_xy": geom_xy,
+        "mesh_basename": mesh_basename,
         "V": V,
         "Z": Z,
         "z": z,
@@ -732,6 +878,11 @@ def setup_model(restart_from=None):
         "calving_ids": calving_ids,
         "u_obs": u_obs,
         "friction": friction,
+        # Mesh provenance from the source checkpoint (re-stamped into every
+        # state checkpoint so warm restarts stay self-describing).
+        "lc": chk_lc,
+        "lc_coarse": chk_lc_coarse,
+        "buffer_m": chk_buffer_m,
         # Rescue speed limiter (residual laws): live Constant, 0 = inert.
         "k_lim": k_lim if use_residual else None,
         "k_lim_rescue": k_lim_rescue if use_residual else 0.0,
@@ -766,6 +917,7 @@ def run_simulation(
     r"""Run the split diagnostic-prognostic time-stepping loop."""
     mesh = ctx["mesh"]
     Q = ctx["Q"]
+    Q_g = ctx.get("Q_g", Q)
     z = ctx["z"]
     h = ctx["h"]
     s = ctx["s"]
@@ -816,14 +968,21 @@ def run_simulation(
     keep_ckpts = int(os.environ.get("ISMIP7_KEEP_CHECKPOINTS", "3"))
 
     Q_dg = FunctionSpace(mesh, "DG", 0)
-    h_dg = Function(Q_dg, name="h_dg")
+    geom_dg = ctx.get("geom_dg", False)
+    mesh_basename = ctx.get("mesh_basename", "")
+    # Under DG0 geometry the transport state IS the geometry - the same
+    # Function object, not a copy. That is the whole point: the terminus
+    # back-pressure and the boundary flux then integrate one thickness, so
+    # they cannot disagree. Under CG1 geometry h_dg is a separate DG0 carrier
+    # bridged by the lumped lift below.
+    h_dg = h if geom_dg else Function(Q_dg, name="h_dg")
     h_dg_old = Function(Q_dg)
     phi_dg = fd.TestFunction(Q_dg)
     h_dg_trial = fd.TrialFunction(Q_dg)
 
     n_facet = fd.FacetNormal(mesh)
 
-    s_float = Function(Q).interpolate(
+    s_float = Function(Q_g).interpolate(
         b + (rho_W / rho_I) * max_value(-b, Constant(0.0))
     )
 
@@ -844,8 +1003,11 @@ def run_simulation(
         # Mask from the t=0 observed extent (ctx["H_init"]), not the
         # current h: a restarted run must not re-mask cells that
         # legitimately retreated mid-run inside the observed extent.
-        h_dg.project(ctx.get("H_init", h))
-        beyond_front = h_dg.dat.data_ro < front_hmin
+        # Use a scratch Function, NOT h_dg: under DG0 geometry h_dg IS the
+        # live thickness and borrowing it here would overwrite the geometry
+        # with H_init before the run even starts.
+        _extent = Function(Q_dg).project(ctx.get("H_init", h))
+        beyond_front = _extent.dat.data_ro < front_hmin
         n_beyond = mesh.comm.allreduce(int(beyond_front.sum()))
         PETSc.Sys.Print(
             f"  Fixed calving front: {n_beyond} initially ice-free cells "
@@ -860,6 +1022,14 @@ def run_simulation(
     # plus a lumped-mass projection (convex combination of adjacent
     # cell values: bounded and integral-preserving).
     legacy_transport = os.environ.get("ISMIP7_LEGACY_TRANSPORT") is not None
+    if legacy_transport and geom_dg:
+        raise ValueError(
+            "ISMIP7_LEGACY_TRANSPORT is incompatible with DG0 geometry: the "
+            "legacy scheme re-projects CG1 h <-> DG0 h_dg every step, but "
+            "under DG0 geometry they are the same Function and the projection "
+            "would be self-referential. Use ISMIP7_GEOMETRY_SPACE=cg1 to run "
+            "the legacy transport."
+        )
     if legacy_transport:
         PETSc.Sys.Print("  LEGACY transport: non-conservative volume term + L2 projection")
     m_lump = assemble(fd.TestFunction(Q) * dx)
@@ -879,7 +1049,17 @@ def run_simulation(
     # otherwise step 1 applies that perturbation mid-run. Restarts skip all
     # of this: checkpoints carry h_dg (thickness_dg), and the stored CG h is
     # its lift by construction.
-    if not legacy_transport:
+    #
+    # NONE of that applies under DG0 geometry: h_dg IS h, there is no second
+    # representation to reconcile, and the one-time lift is skipped entirely.
+    # Skipping it is not an optimization - applying it would be the bug. At
+    # 32 km it moved the calving front from 105 m to 200 m thick and, through
+    # the h^2 terminus traction, multiplied the outflux by ~4.7.
+    if geom_dg:
+        PETSc.Sys.Print(
+            "  DG0 geometry: transport state is the geometry (no lift)"
+        )
+    elif not legacy_transport:
         if ctx.get("h_dg_state") is not None:
             h_dg.dat.data[:] = ctx["h_dg_state"].dat.data_ro
             PETSc.Sys.Print("  DG thickness state restored from checkpoint")
@@ -1010,17 +1190,33 @@ def run_simulation(
                 chk.save_function(A_prior, name="fluidity_prior")
             if a_ref is not None:
                 chk.save_function(a_ref, name="a_ref_mb")
-            chk.save_function(h_dg, name="thickness_dg")
+            # Separate transport state only under CG1 geometry, where the
+            # saved CG1 `thickness` is a lift and cannot reconstruct it.
+            # Under DG0 geometry `thickness` IS the transport state.
+            if not geom_dg:
+                chk.save_function(h_dg, name="thickness_dg")
             chk.set_attr("/", "t_yr", float(t_now))
             chk.set_attr("/", "friction", str(friction))
-            chk.set_attr("/", "lc", int(lc))
+            chk.set_attr("/", "geometry_space", "dg0" if geom_dg else "cg1")
+            if mesh_basename:
+                chk.set_attr("/", "mesh_basename", str(mesh_basename))
+            if ctx.get("lc") is not None:
+                chk.set_attr("/", "lc", int(ctx["lc"]))
+            if ctx.get("lc_coarse") is not None:
+                chk.set_attr("/", "lc_coarse", int(ctx["lc_coarse"]))
+            if ctx.get("buffer_m") is not None:
+                chk.set_attr("/", "buffer_m", float(ctx["buffer_m"]))
         mesh.comm.barrier()
         if mesh.comm.rank == 0:
             os.replace(tmp, final_path)
         mesh.comm.barrier()
 
     def _prune_checkpoints():
-        r"""Keep only the newest `keep_ckpts` periodic state checkpoints."""
+        r"""Keep only the `keep_ckpts` most recently WRITTEN periodic state
+        checkpoints. Recency, not the largest year: a re-run rewinds (every
+        projection branches from the historical endpoint), so ranking by year
+        would delete each checkpoint this run writes in favour of higher-year
+        ones left by a previous run - exactly the states a resume needs."""
         if mesh.comm.rank != 0 or keep_ckpts <= 0:
             return
         import re
@@ -1030,9 +1226,12 @@ def run_simulation(
         for fn in glob.glob(
             os.path.join(RESULTS_DIR, f"{experiment_name}_{lc}_t*.h5")
         ):
-            m = pat.search(os.path.basename(fn))
-            if m:
-                found.append((float(m.group(1)), fn))
+            if not pat.search(os.path.basename(fn)):
+                continue
+            try:
+                found.append((os.path.getmtime(fn), fn))
+            except OSError:
+                pass
         for _, fn in sorted(found)[:-keep_ckpts]:
             try:
                 os.remove(fn)
@@ -1150,14 +1349,26 @@ def run_simulation(
     h_dg_entry = Function(Q_dg)
 
     def _lift_h():
-        r"""Derive the CG geometry (h, s, phi_eff) from the h_dg state."""
-        if legacy_transport:
-            h.project(h_dg)
+        r"""Refresh the geometry derived from the thickness state (s, phi_eff).
+
+        Under DG0 geometry h already IS h_dg, so there is nothing to lift and
+        only the derived fields are recomputed. Under CG1 geometry this is the
+        lumped-mass lift that bridges the two representations.
+        """
+        if geom_dg:
+            # h is h_dg: same Function, already current AND already floored by
+            # the transport advance. Re-applying the clamp here would refill
+            # the cells the fixed-front mask just emptied, turning the calving
+            # sink into an h_clamp source whenever ISMIP7_H_CLAMP > 0.
+            pass
         else:
-            # Lumped-mass projection: h_i = ∫phi_i h_dg / ∫phi_i.
-            assemble(fd.TestFunction(Q) * h_dg * dx, tensor=proj_rhs)
-            h.dat.data[:] = proj_rhs.dat.data_ro / m_lump.dat.data_ro
-        h.interpolate(max_value(h, Constant(h_clamp)))
+            if legacy_transport:
+                h.project(h_dg)
+            else:
+                # Lumped-mass projection: h_i = ∫phi_i h_dg / ∫phi_i.
+                assemble(fd.TestFunction(Q) * h_dg * dx, tensor=proj_rhs)
+                h.dat.data[:] = proj_rhs.dat.data_ro / m_lump.dat.data_ro
+            h.interpolate(max_value(h, Constant(h_clamp)))
         s.interpolate(max_value(b + h, (Constant(1.0) - rho_ratio) * h))
         phi_eff.interpolate(
             max_value(
@@ -1190,11 +1401,18 @@ def run_simulation(
         # the implicit upwind update is an M-matrix system with nonnegative
         # RHS, so h stays >= h_clamp and the post-solve floor is a no-op.
         # The withheld sink is tallied into the clamp budget column.
+        # The bound is capped at zero so it can only ever CAP A SINK: for a
+        # cell already below h_clamp (an emptied fixed-front cell) the raw
+        # bound is positive and would make the limiter a mandatory SOURCE,
+        # injecting h_clamp of ice per step for the mask to re-calve.
         assemble(src * phi_dg * dx, tensor=src_cof)
         src_dg.dat.data[:] = src_cof.dat.data_ro / cell_area
         _src_want = src_dg.dat.data_ro.copy()
-        np.maximum(src_dg.dat.data, -(h_dg.dat.data_ro - h_clamp) / dt_local,
-                   out=src_dg.dat.data)
+        np.maximum(
+            src_dg.dat.data,
+            np.minimum(-(h_dg.dat.data_ro - h_clamp) / dt_local, 0.0),
+            out=src_dg.dat.data,
+        )
         limit_gt = mesh.comm.allreduce(float(
             ((src_dg.dat.data_ro - _src_want) * cell_area).sum()
         )) * rho_gt * dt_local
@@ -1222,7 +1440,15 @@ def run_simulation(
         out_gt = float(assemble(un_plus * h_dg * ds)) * rho_gt * dt_local
         m1 = float(assemble(h_dg * dx)) * rho_gt
 
-        h_dg.interpolate(max_value(h_dg, Constant(h_clamp)))
+        # Floor to h_clamp, EXCEPT beyond the fixed front: those cells are
+        # outside the ice domain, so flooring them would hand the mask below
+        # h_clamp of fresh ice to re-calve every step and report as terminus
+        # discharge. There the floor is zero and the front stays a pure sink.
+        data = h_dg.dat.data
+        floor = np.full_like(data, h_clamp)
+        if fixed_front:
+            floor[beyond_front] = 0.0
+        np.maximum(data, floor, out=data)
         m2 = float(assemble(h_dg * dx)) * rho_gt
         clamp_gt = m2 - m1                                       # Gt added by DG floor
 
@@ -1306,7 +1532,7 @@ def run_simulation(
 
         t_elapsed = perf_counter() - t_step_start
 
-        haf = Function(Q).interpolate(max_value(s - s_float, Constant(0.0)))
+        haf = Function(Q_g).interpolate(max_value(s - s_float, Constant(0.0)))
         vaf = float(assemble(haf * dx)) * _RHO_I_SI / 1e12 / 362.5
         total_mass = float(assemble(h * dx)) * _RHO_I_SI / 1e12
 

@@ -14,7 +14,7 @@ Usage:
 """
 
 import numpy as np
-import os, sys, glob, json
+import os, sys, glob
 from time import perf_counter
 
 import firedrake as fd
@@ -23,8 +23,6 @@ from firedrake import (
     Function,
     max_value,
     sqrt,
-    inner,
-    grad,
     derivative,
     dx,
     dS,
@@ -56,8 +54,15 @@ DATA_DIR = os.path.join(_ROOT, "data")
 MESH_DIR = os.path.join(_ROOT, "mesh")
 RESULTS_DIR = os.path.join(_ROOT, "results")
 
-lc = int(os.environ.get("ISMIP7_LC", "2500"))
-lc_coarse = int(os.environ.get("ISMIP7_LC_COARSE", "64000"))
+sys.path.insert(0, os.path.dirname(_ROOT))
+from icepack2_tools.mpi_stats import global_mean
+from icepack2_tools.boundary import load_boundary_ids
+from icepack2_tools.runconfig import lc as _lc, lc_coarse as _lc_coarse
+from mesh_naming import get_buffer_m, mesh_filename
+
+lc = _lc()
+lc_coarse = _lc_coarse()
+buffer_m = get_buffer_m()
 
 # Simulation parameters
 T_START = 2015.0
@@ -76,20 +81,19 @@ def find_file(d, p):
 def main():
     os.makedirs(RESULTS_DIR, exist_ok=True)
 
-    mesh_fn = os.environ.get(
-        "ISMIP7_MESH", os.path.join(MESH_DIR, f"antarctica_{lc_coarse}_{lc}.msh")
-    )
+    mesh_fn = os.environ.get("ISMIP7_MESH", mesh_filename(lc_coarse, lc, buffer_m))
     PETSc.Sys.Print(f"Loading mesh: {mesh_fn}")
     mesh = Mesh(mesh_fn)
     PETSc.Sys.Print(f"  {mesh.num_vertices()} vertices, {mesh.num_cells()} cells")
 
-    bndids_fn = os.environ.get(
-        "ISMIP7_BNDIDS", os.path.join(MESH_DIR, "boundary_ids.json")
-    )
-    with open(bndids_fn) as f:
-        bnd_ids = json.load(f)
-    calving_ids = tuple(bnd_ids["calving"])
+    # Sidecar resolved (per-mesh preferred, parametric fallback) and
+    # HARD-CHECKED against this mesh: an id absent from the mesh makes
+    # ds(id) integrate to zero, i.e. silently wrong physics with no crash.
     use_calving_terminus = os.environ.get("ISMIP7_NO_CALVING_TERMINUS") is None
+    bnd_ids, calving_ids, bndids_fn = load_boundary_ids(
+        mesh, MESH_DIR, mesh_hint=mesh_fn,
+        print_coverage=use_calving_terminus,
+    )
 
     Q = FunctionSpace(mesh, "CG", 1)
     V = VectorFunctionSpace(mesh, "CG", 1)
@@ -136,9 +140,12 @@ def main():
     A0 = Constant(icepack.rate_factor(Constant(260.0)))
     n = Constant(n_glen_val)
     tau_c = Constant(0.1)
-    u_c = Constant(float(Function(Q).interpolate(
+    # global_mean: .dat.data_ro.mean() is the rank-local owned slice.
+    # NOTE this driver has no use_residual branch, so unlike the other two
+    # u_c feeds friction UNCONDITIONALLY. See icepack2_tools/mpi_stats.
+    u_c = Constant(global_mean(Function(Q).interpolate(
         max_value(sqrt(u_obs[0] ** 2 + u_obs[1] ** 2), Constant(1.0))
-    ).dat.data_ro.mean()))
+    )))
 
     phi_eff = Function(Q).interpolate(
         max_value(

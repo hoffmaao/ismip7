@@ -38,19 +38,41 @@ def smb_kgm2s_to_myr(smb_kgm2s):
     return smb_kgm2s * _SEC_PER_YEAR / _RHO_ICE * (_RHO_WATER / _RHO_ICE)
 
 
+def _sample_raster(raster, Q):
+    r"""Put an open raster onto ``Q``, as a CELL AVERAGE when ``Q`` is DG0.
+
+    A DG0 dof sits at the cell centroid, so ``icepack.interpolate`` would take
+    a one-point sample of the raster per cell. SMB sets the mass budget and the
+    a_ref balance, so it goes through the same cell-averaging rule the geometry
+    uses (see geometry.sample_to_geometry). CG1 is the nodal interpolant, as
+    before.
+    """
+    import firedrake as fd
+    import icepack
+
+    if Q.ufl_element().degree() > 0:
+        return icepack.interpolate(raster, Q)
+    from .geometry import sample_to_geometry
+    Q_cg = fd.FunctionSpace(Q.mesh(), "CG", 1)
+    return sample_to_geometry(
+        lambda space: icepack.interpolate(raster, space), Q, Q_cg
+    )
+
+
 def load_racmo_smb_climatology(Q, clim_start=2000, clim_end=2029, data_dir=None,
                                target_res=8000.0, rho_ice=_RHO_ICE):
     r"""RACMO2.4p1 mean-annual SMB (m/yr ice equiv) as a Function on Q's mesh.
 
     The RACMO ANT11 grid is rotated-pole, so this reprojects the climatology to
     an intermediate EPSG:3031 raster with rasterio, then samples it onto the mesh
-    with icepack.interpolate -- the same path used for BedMachine -- avoiding any
-    scattered-point interpolation. ``smbgl`` is a monthly mass sum (kg/m^2), so the
-    annual SMB is the sum of the 12 months, averaged over the climatology window.
+    -- the same path used for BedMachine -- avoiding any scattered-point
+    interpolation. On a DG0 ``Q`` the sample is a cell average rather than a
+    centroid point sample (see :func:`_sample_raster`). ``smbgl`` is a monthly
+    mass sum (kg/m^2), so the annual SMB is the sum of the 12 months, averaged
+    over the climatology window.
     """
     import xarray as xr
     import pyproj
-    import icepack
     from affine import Affine
     from rasterio.io import MemoryFile
     from rasterio.warp import reproject, Resampling
@@ -98,7 +120,7 @@ def load_racmo_smb_climatology(Q, clim_start=2000, clim_end=2029, data_dir=None,
         ) as out:
             out.write(dst, 1)
         with mf.open() as raster:
-            return icepack.interpolate(raster, Q)
+            return _sample_raster(raster, Q)
 
 
 def _find_ismip7_data(data_root=None):
@@ -804,21 +826,56 @@ def load_K_per_basin(npz_path, mesh_x, mesh_y, fill=0.0):
     return K_field
 
 
-def compute_sin_alpha(ctx):
-    r"""Return sin(alpha) of local ice-draft slope at CG1 nodes.
+def forcing_coords(ctx):
+    r"""(x, y) of the dofs the forcing fields are written to.
 
-    Computes draft = s - h, projects grad(draft) into the vector CG1
-    space, and returns sin(arctan(|grad|)) = |grad|/sqrt(1 + |grad|^2).
+    Forcing callbacks assign straight into `ctx["accum"].dat.data` etc., so
+    they must sample the climatology at THOSE dofs. With CG1 geometry those
+    coincide with the mesh vertices, which is what the callbacks used to
+    assume; with DG0 geometry they are cell centroids and there are ~2x as
+    many, so the vertex assumption would mismatch length outright or - worse
+    on a mesh where the counts happened to be close - scramble the mapping.
+    `ctx["geom_xy"]` is supplied by the driver; fall back to vertices for
+    callers that predate it (all of which are CG1).
+    """
+    xy = ctx.get("geom_xy")
+    if xy is not None:
+        return xy
+    coords = ctx["mesh"].coordinates.dat.data_ro
+    return coords[:, 0], coords[:, 1]
+
+
+def compute_sin_alpha(ctx):
+    r"""Return sin(alpha) of the local ice-draft slope, on the geometry space.
+
+    Computes draft = s - h and returns sin(arctan(|grad draft|)) =
+    |grad|/sqrt(1 + |grad|^2), as a plain array aligned with the dofs of the
+    geometry space (so it matches `ocean_melt` elementwise).
+
+    A DG0 draft has an identically zero cell gradient - its slope lives in the
+    inter-cell jumps - so reconstruct a CG1 draft first and differentiate that.
+    Same device as the Weertman anchor uses via geometry.surface_slope, and
+    legitimate for the same reason: this feeds a melt PARAMETERIZATION, not a
+    force in the momentum residual.
     """
     import firedrake as fd
+    from .geometry import cg1_lift
     Q = ctx["Q"]
     V = ctx["V"]
     h = ctx["h"]
     s = ctx["s"]
-    draft = fd.Function(Q).interpolate(s - h)
-    grad_draft = fd.project(fd.grad(draft), V)
-    g = grad_draft.dat.data_ro
-    gmag = np.sqrt(g[:, 0] ** 2 + g[:, 1] ** 2)
+    Q_g = ctx.get("Q_g", Q)
+    if Q_g.ufl_element().degree() == 0:
+        draft = fd.Function(Q_g).interpolate(s - h)
+        gd = fd.grad(cg1_lift(draft))
+        gmag = fd.Function(Q_g).interpolate(
+            fd.sqrt(fd.inner(gd, gd))
+        ).dat.data_ro
+    else:
+        draft = fd.Function(Q).interpolate(s - h)
+        grad_draft = fd.project(fd.grad(draft), V)
+        g = grad_draft.dat.data_ro
+        gmag = np.sqrt(g[:, 0] ** 2 + g[:, 1] ** 2)
     return gmag / np.sqrt(1.0 + gmag * gmag)
 
 
@@ -893,12 +950,25 @@ def build_oi_climatology_interpolators(data_root=None, version=None):
 def make_climatology_ocean_callback(K_field, data_root=None):
     r"""Ocean-melt callback with CONSTANT OI-climatology TF/so and evolving
     geometry: the CTRL2015 / observationally-constrained ocean forcing.
-    K_field is a scalar or per-node array (calibrated per-basin K)."""
+    K_field is a scalar or per-node array (calibrated per-basin K).
+
+    CALIBRATION MISMATCH (open, tracked separately): the per-basin K comes from
+    antarctica/scripts/calibrate_melt.py, which is CG1 throughout - it builds
+    its own CG1 space and vertex-samples BedMachine, sin_alpha and the floating
+    mask, and is not affected by ISMIP7_GEOMETRY_SPACE. Under DG0 geometry this
+    callback evaluates that same K with a cell-wise draft, a cell-wise
+    sin_alpha and a cell-wise `haf <= 0` floating mask, so the melt-receiving
+    area shifts by roughly a one-cell band at the grounding line and the ice
+    front - non-trivial at 32 km, where shelves are only a few cells wide. The
+    integrated DG0 melt total should be checked against the 865 Gt/yr
+    observational target and K recalibrated (against the 2026-07-31 ISMIP7 AIS
+    ocean-melt toolbox re-release, whose new constraint datasets and cold/warm
+    targets call for a re-run of the calibration notebook regardless). Nothing
+    here compensates for the shift; see GEOMETRY_DISCRETIZATION.md."""
     interps = build_oi_climatology_interpolators(data_root)
 
     def callback(ctx, t_yr):
-        mesh_x = ctx["mesh"].coordinates.dat.data_ro[:, 0]
-        mesh_y = ctx["mesh"].coordinates.dat.data_ro[:, 1]
+        mesh_x, mesh_y = forcing_coords(ctx)
         h = ctx["h"].dat.data_ro
         b = ctx["b"].dat.data_ro
         s = ctx["s"].dat.data_ro
@@ -952,8 +1022,7 @@ def make_forcing_callback(atm=None, ocean=None, fracture=None,
     K_scale = float(os.environ.get("ISMIP7_K_SCALE", "1.0"))
 
     def callback(ctx, t_yr):
-        mesh_x = ctx["mesh"].coordinates.dat.data_ro[:, 0]
-        mesh_y = ctx["mesh"].coordinates.dat.data_ro[:, 1]
+        mesh_x, mesh_y = forcing_coords(ctx)
 
         if atm is not None:
             smb = atm.get_smb(t_yr, mesh_x, mesh_y, anomaly=smb_anomaly)

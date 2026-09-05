@@ -91,6 +91,18 @@ def calving_law():
     return value
 
 
+def fixed_front():
+    r"""``ISMIP7_FIXED_FRONT``: the legacy pinned front, off unless truthy.
+
+    Parsed as a boolean, not by presence: ``run_core_matrix.sh`` exports the
+    variable unconditionally, so ``ISMIP7_FIXED_FRONT=0`` has to be the way to
+    turn it off from there.
+    """
+    return os.environ.get("ISMIP7_FIXED_FRONT", "").strip().lower() not in (
+        "", "0", "false", "off", "no",
+    )
+
+
 def calving_sigma_max():
     r"""Von Mises thresholds (grounded, floating) [MPa]."""
     return (

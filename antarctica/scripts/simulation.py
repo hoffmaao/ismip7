@@ -56,6 +56,7 @@ from icepack2_tools.runconfig import (
     friction as _friction, geometry_space as _geometry_space, lc as _lc,
     n_flow as _n_flow,
     calving_law as _calving_law, calving_sigma_max as _calving_sigma_max,
+    fixed_front as _fixed_front,
 )
 
 lc = _lc()
@@ -1052,7 +1053,7 @@ def run_simulation(
     # meaningful when the initial state is the true BedMachine geometry
     # (RC mode / h_clamp_init=0) - with a clamped initial state every cell has
     # ice and the mask is empty.
-    fixed_front = os.environ.get("ISMIP7_FIXED_FRONT") is not None
+    fixed_front = _fixed_front()
     front_hmin = float(os.environ.get("ISMIP7_FRONT_HMIN", "1.0"))
     calving = _calving_law()
     beyond_front = None
@@ -1072,24 +1073,23 @@ def run_simulation(
             f"masked (h < {front_hmin} m)"
         )
 
-    # Which mechanism owns the REMOVAL of ice past the t=0 extent. The ISMIP7
-    # control is an unforced run with calving held at end-of-2014 conditions,
-    # so a pinned front (ISMIP7_CALVING=fixed, or the legacy
-    # ISMIP7_FIXED_FRONT=1) removes and tallies everything that crosses that
-    # extent. A free law (vonmises) is a projection configuration: there the
-    # level set alone decides removal and nothing may be tallied off this mask,
-    # or the front would be silently pinned at its t=0 position. When both
-    # pinned options are set the level-set `fixed` law owns the front and the
-    # legacy flag must not remove the same ice a second time.
-    legacy_front_sink = fixed_front and calving != "fixed"
-    if calving == "fixed":
-        front_owner = "level-set fixed law (ISMIP7_CALVING=fixed)" + (
-            "; ISMIP7_FIXED_FRONT defers to it" if fixed_front else ""
+    # Which mechanism owns the REMOVAL of ice past the t=0 extent. A configured
+    # level-set law owns the front outright: the ISMIP7 control holds calving
+    # at end-of-2014 conditions and gets that from `fixed`, while a projection
+    # law (vonmises) must never be silently pinned, and the legacy mask would
+    # pin it - the front could retreat but never advance past the 2015 outline,
+    # with the inflow mis-tallied as calving. So the legacy sink applies only
+    # when no law is configured at all; run_core_matrix.sh exports
+    # ISMIP7_FIXED_FRONT=1 unconditionally, which is why the flag may not
+    # override an explicit ISMIP7_CALVING choice.
+    legacy_front_sink = fixed_front and calving == "none"
+    if calving != "none":
+        front_owner = f"level-set {calving} law (ISMIP7_CALVING={calving})" + (
+            "; ISMIP7_FIXED_FRONT is set but ignored for removal"
+            if fixed_front else ""
         )
     elif fixed_front:
-        front_owner = "legacy fixed-front mask (ISMIP7_FIXED_FRONT=1)"
-    elif calving != "none":
-        front_owner = f"level-set {calving} law (front free to advance)"
+        front_owner = "legacy fixed-front mask (ISMIP7_FIXED_FRONT)"
     else:
         front_owner = "none (no calving sink)"
     PETSc.Sys.Print(f"  Calving front owner: {front_owner}")
@@ -1503,11 +1503,11 @@ def run_simulation(
     A_map = ctx.get("A_map")
 
     def _advance(dt_local):
-        nonlocal last_c_mean
         r"""One transport advance of dt_local with the CURRENT velocity
         (transport-first ordering: the velocity was solved at the current
         geometry). Mutates h_dg and the derived CG fields; returns the
         advance's mass tallies [Gt]."""
+        nonlocal last_c_mean
         u_vel = z.subfunctions[0]
         if legacy_transport:
             h_dg.project(h)
@@ -1515,9 +1515,8 @@ def run_simulation(
 
         # Front first, with the same velocity the transport is about to
         # use, so the cells emptied below are the ones the front left.
-        # Only a PINNED front removes and tallies ice past the t=0 extent.
-        # Under a free law the level set below is the sole authority on
-        # removal, so the t=0 mask contributes nothing here.
+        # Whenever a level-set law is configured it is the sole authority on
+        # removal, so the legacy t=0 mask contributes nothing here.
         beyond = beyond_front if legacy_front_sink else None
         calv_frac = None
         if level_set is not None:

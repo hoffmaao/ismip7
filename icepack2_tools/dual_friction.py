@@ -142,6 +142,7 @@ def build_rc_residual(
     h_visc_floor=0.0,
     ocean_drag=0.0,
     h_ocean=10.0,
+    drag_mask=None,
     u_lim=0.0,
     k_lim=1e-3,
     gl_width=GL_WIDTH,
@@ -210,6 +211,9 @@ def build_rc_residual(
         the driving term instead fabricates ``rho g H_floor grad s`` and blows
         the buffer velocity up).  Real ice (``H >> floor``) is unaffected.  0
         disables it (correct when ``H`` is clamped > 0 upstream).
+    drag_mask : Function or None
+        DG0 gate on the ocean drag (1 = drag on). Written each step by the
+        level-set front; None keeps the drag everywhere below h_ocean.
     ocean_drag : float
         Linear drag [MPa yr/m] applied ONLY where ``H < h_ocean`` (ice-free
         buffer / freshly-calved floor cells), ramping linearly to EXACTLY zero
@@ -310,7 +314,13 @@ def build_rc_residual(
     # Floor-cell coercivity drags (see docstring): both are EXACTLY zero on
     # real ice / physical speeds, so genuine shelves keep tau_b = 0.
     if ocean_drag > 0.0:
-        tau_b = tau_b + (Constant(ocean_drag)
+        # drag_mask (optional DG0 Function, default 1 everywhere): a
+        # level-set front switches the drag OFF in the strip of water cells
+        # adjacent to the front so front nodes are not slowed by it
+        # (icepack2_tools.levelset). Elsewhere the mask is 1 and the term
+        # is exactly the gia ocean_drag.
+        gate = Constant(1.0) if drag_mask is None else drag_mask
+        tau_b = tau_b + (Constant(ocean_drag) * gate
                          * max_value(Constant(0.0), Constant(1.0) - H / Constant(h_ocean))
                          * u_reg)
     if u_lim > 0.0:

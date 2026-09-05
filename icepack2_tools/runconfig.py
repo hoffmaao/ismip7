@@ -70,3 +70,32 @@ def friction():
 def n_flow():
     r"""Glen flow-law exponent."""
     return float(os.environ.get("ISMIP7_N_FLOW", N_FLOW_DEFAULT))
+
+
+# Calving front (icepack2_tools.levelset). ``none`` is the pre-Sep-2026
+# behaviour: on a buffered mesh the front advances freely and never calves.
+CALVING_DEFAULT = "none"
+CALVING_LAWS = ("none", "fixed", "vonmises")
+# ISSM defaults for the von Mises thresholds (Morlighem et al. 2016).
+CALVING_SIGMA_MAX_GROUNDED_DEFAULT = "1.0"     # MPa
+CALVING_SIGMA_MAX_FLOATING_DEFAULT = "0.15"    # MPa
+
+
+def calving_law():
+    r"""``ISMIP7_CALVING``: ``none``, ``fixed`` or ``vonmises``."""
+    value = os.environ.get("ISMIP7_CALVING", CALVING_DEFAULT).lower()
+    if value not in CALVING_LAWS:
+        raise ValueError(
+            f"ISMIP7_CALVING must be one of {CALVING_LAWS}, got {value!r}"
+        )
+    return value
+
+
+def calving_sigma_max():
+    r"""Von Mises thresholds (grounded, floating) [MPa]."""
+    return (
+        float(os.environ.get("ISMIP7_CALVING_SIGMA_MAX_GROUNDED",
+                             CALVING_SIGMA_MAX_GROUNDED_DEFAULT)),
+        float(os.environ.get("ISMIP7_CALVING_SIGMA_MAX_FLOATING",
+                             CALVING_SIGMA_MAX_FLOATING_DEFAULT)),
+    )

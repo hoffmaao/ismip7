@@ -408,6 +408,58 @@ python scripts/check_ismip6_track.py results/<exp>_timeseries.csv
 
 For the forced response, `scripts/compare_ismip6.py <proj.csv> <ctrl.csv>` overlays our projection-minus-CTRL sea-level contribution on the ISMIP6 ensemble to check broad consistency (auto-selects the scenario pool; `--exps` to override).
 
+To see *where* and *when* two runs part ways, `scripts/compare_runs.py
+LABEL=results/<a> LABEL=results/<b> ...` overlays their budget timeseries
+(mass, VAF, dM/dt, melt, discharge, SMB + apparent MB), and
+`scripts/plot_movie.py results/<exp>` renders the yearly checkpoints
+(`ISMIP7_CHECKPOINT_EVERY_YR`) into thickness-change / speed / thickness
+frames and an mp4 under `figs/movie_<exp>/`. Both are read-only.
+
+### Calving front on a buffered mesh (`ISMIP7_CALVING`)
+
+A buffered mesh has no calving sink of its own: ice that reaches the 2015
+outline keeps flowing into the empty buffer cells, and the only way mass ever
+leaves is shelf melt, so every control run gains mass (the Sep 2026 David
+Lilien 32 km case: +1000 to +1500 Gt/yr with `ISMIP7_APPARENT_MB` unset).
+`ISMIP7_FIXED_FRONT` removes what crosses the outline but cannot move it.
+
+`ISMIP7_CALVING` replaces that with the shared level set
+(`icepack_tools.levelset`, wrapped by `icepack2_tools/levelset.py`, the same
+object the CalvingMIP project runs its fronts with)
+whose boundary condition sits INSIDE the mesh, at the ice-sheet extent: each
+step `phi` is the solution of the eikonal problem `|grad phi| = 1` with
+`phi = 0` on the facets between ice and ice-free cells of the transport's own
+thickness (negative in ice, positive in water; the exact signed distance,
+which is what that boundary-value problem means). The calving rate `c` then
+retreats the front by the normal-flow level-set equation
+`phi_t - c|grad phi| = 0` of Hahn, Mikula and Frolkovic 2025
+(arXiv:2504.05845), linearised with the previous unit gradient and solved by
+cell-centred finite volumes on the DG0 cells (least-squares gradients,
+linear-upwind faces, inflow cells implicit). Advance needs nothing: the
+upwind DG0 transport fills any cell the ice flows into and the next step's
+extent includes it. Removal conserves the calved mass in two parts: cells the
+front has passed entirely (`phi > 0`) are emptied, and every front cell sheds
+the fraction `min(1, c dt L/A)` of its thickness (`L` its front length), which
+is the mass `c h L dt` a front retreating at `c` loses and is what carries
+retreat smaller than a cell from one step to the next. Both go to the `calv`
+budget column. Outside the extent the thickness is exactly zero: a cell
+below the extent threshold (`ISMIP7_FRONT_HMIN`, 1 m) is zeroed after each
+step and the sliver tallied into the `clamp` column (negative), so the level
+set, the momentum solver and the melt all see the same ice domain. The
+momentum balance needs no front term: with DG0 geometry
+the facet term `rho g avg(h) jump(s)` at an ice/water face already IS the
+terminus water-pressure force. The one momentum-side change is that the
+buffer's floor-cell ocean drag is switched off in the strip of water cells
+next to the front, so front nodes are no longer slowed by it.
+
+`vonmises` is Morlighem et al. 2016 verbatim: `c = |u| sqrt(3) B eps~^(1/n) /
+sigma_max`, `eps~` from the tensile principal strain rates, `B = A^(-1/n)` from
+the run's fluidity, separate thresholds for grounded and floating ice. The
+thresholds are the tuning targets: a 2015 control should hold the observed
+front (the obs kit's 24 yearly Greene ice masks, 1997-2021) and discharge
+about 1300 Gt/yr. The level set is checkpointed (`levelset`) so restarts
+resume the front where it was. Tests: `pytest tests/test_levelset.py`.
+
 ### The whole matrix in one command (`run_core_matrix.sh`)
 
 `scripts/run_core_matrix.sh` runs core experiments 1-11 end to end in protocol
@@ -482,6 +534,9 @@ how it reaches the core report.
 | `ISMIP7_LC_COARSE` | coarse mesh tag | `64000` |
 | `ISMIP7_BUFFER_M` | outline buffer (m) used to resolve the default mesh/boundary-id filenames (see §3) | `20000` |
 | `ISMIP7_MESH` | mesh `.msh` path (inversion and tools). A forward takes its mesh from the MAP/restart checkpoint, which records its own mesh basename and parameters, so here it only names the boundary sidecar for a legacy checkpoint that carries no such record | `mesh/antarctica_<COARSE>_<LC>_buffered<BUFFER_M>.msh` |
+| `ISMIP7_INVERSION` | explicit MAP checkpoint path for a forward/preflight, replacing the `map_basename` lookup. It must be a MAP of the same friction/n/geometry (not checked). Use it to A/B differently regularised MAPs on one mesh (e.g. velocity-only vs transient dH/dt) instead of swapping files | derived from friction/n/geometry/lc |
+| `ISMIP7_CALVING` | calving-front law on a buffered mesh, via a level set (`icepack2_tools/levelset.py`, ISSM-style): `none` (front advances freely, never calves), `fixed` (front frozen at t=0, the level-set form of `ISMIP7_FIXED_FRONT`), `vonmises` (Morlighem et al. 2016 rate `|u| sigma~/sigma_max` from the run's own strain rates and fluidity). Removed ice is the `calv` budget column; the mean front rate over front cells prints as `c_front` | `none` |
+| `ISMIP7_CALVING_SIGMA_MAX_GROUNDED`, `ISMIP7_CALVING_SIGMA_MAX_FLOATING` | von Mises tensile-stress thresholds [MPa] (ISSM defaults) | `1.0`, `0.15` |
 | `ISMIP7_BNDIDS` | override boundary-id JSON | `mesh/boundary_ids_antarctica_<COARSE>_<LC>_buffered<BUFFER_M>.json` if present, else `mesh/boundary_ids.json` |
 | `ISMIP7_GEOMETRY_SPACE` | space for `h`/`s`/`b` (`dg0`: one thickness for the terminus force and the mass flux; `cg1`: legacy, for A/B only) - also selects the MAP h5 (see `../GEOMETRY_DISCRETIZATION.md`) | `dg0` |
 | `ISMIP7_DATA_ROOT` | ISMIP7 forcing tree root | `<repo>/ISMIP7/AIS` |

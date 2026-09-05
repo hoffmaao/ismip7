@@ -153,7 +153,8 @@ def shared_missing(warn=None):
     # geometry space, else the legacy untagged (CG1) MAP it falls back to with
     # a warning. A legacy MAP runs, but its controls carry the CG1 front bias,
     # so the run is a smoke test rather than a result.
-    inv = os.path.join(MESH_DIR, map_basename(friction, lc))
+    inv = os.environ.get("ISMIP7_INVERSION") or os.path.join(
+        MESH_DIR, map_basename(friction, lc))
     legacy = os.path.join(MESH_DIR, map_basename(friction, lc, geometry=False))
     if not os.path.exists(inv):
         if os.path.exists(legacy):

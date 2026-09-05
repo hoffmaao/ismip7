@@ -1523,7 +1523,7 @@ def run_simulation(
             last_c_mean = level_set.advance(
                 dt_local, u_vel, h_dg, b, A_map, n_flow_val)
             lsb, calv_frac = level_set.calving_masks()
-            beyond = lsb if beyond is None else (beyond | lsb)
+            beyond = lsb
 
         un = fd.dot(u_vel, n_facet)
         un_plus = (un + abs(un)) / 2
@@ -1603,27 +1603,33 @@ def run_simulation(
             calv_gt += mesh.comm.allreduce(
                 float((shed * cell_area).sum())) * rho_gt
             data -= shed
-        tidy_gt = 0.0
         if level_set is not None:
-            # Outside the ice domain the thickness is exactly zero: a cell
-            # below the extent threshold is ice-free for the level set, so
-            # it may not keep a sliver of mass that the momentum solver and
-            # the melt would otherwise act on. Tallied into the clamp column
-            # (negative) so the budget stays closed.
+            # Retreat slivers only: what the sub-cell shed and the melt leave
+            # behind in a cell that HELD ice when the advance began is the
+            # front's own loss, so it is removed and tallied as calving. A
+            # cell that was ice-free keeps whatever the transport just put
+            # there, however little: that sub-threshold inflow is how the
+            # front ADVANCES, and zeroing it would pin the front wherever the
+            # one-step influx is under front_hmin. So outside the level set's
+            # extent the thickness is NOT exactly zero - it may hold inflow
+            # accumulating toward the threshold. That is safe for the solves:
+            # the composite rheology's h_visc_floor and the ocean drag applied
+            # below h_ocean already govern cells this thin.
             data = h_dg.dat.data
-            tiny = (data > 0.0) & (data <= front_hmin)
-            tidy_gt = mesh.comm.allreduce(
-                float((data[tiny] * cell_area[tiny]).sum())) * rho_gt
-            data[tiny] = 0.0
+            sliver = ((data > 0.0) & (data <= front_hmin)
+                      & (h_dg_old.dat.data_ro > front_hmin))
+            calv_gt += mesh.comm.allreduce(
+                float((data[sliver] * cell_area[sliver]).sum())) * rho_gt
+            data[sliver] = 0.0
 
         _lift_h()
-        m3 = m2 - calv_gt - tidy_gt                              # ∫h preserved by projection
+        m3 = m2 - calv_gt                                        # ∫h preserved by projection
         mass_now = float(assemble(h * dx)) * _RHO_I_SI / 1e12
         clamp_cg_gt = mass_now - m3          # Gt added by the CG floor after projection
         return {
             "out_gt": out_gt,
             "calv_gt": calv_gt,
-            "clamp_gt": clamp_gt + clamp_cg_gt + limit_gt - tidy_gt,
+            "clamp_gt": clamp_gt + clamp_cg_gt + limit_gt,
         }
 
     # Time loop, transport-first: each step advances the geometry with the

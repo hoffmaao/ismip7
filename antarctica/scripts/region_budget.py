@@ -263,7 +263,7 @@ def report(states, csv_path=None):
     print("\n  grounded budget [Gt/yr]")
     print(f"    SMB_gr - discharge = {smb_gr:.0f} - {q_gl + q_gr_front:.0f} "
           f"= {smb_gr - q_gl - q_gr_front:+.0f}")
-    print(f"    that tendency is {(smb_gr - q_gl - q_gr_front) / 362.5 * RHO_I / 917.0:+.2f} "
+    print(f"    that tendency is {(smb_gr - q_gl - q_gr_front) / 362.5:+.2f} "
           f"mm SLE/yr of VAF if it all sits above flotation")
 
     if len(states) > 1:
@@ -314,8 +314,17 @@ def main():
         with fd.CheckpointFile(args.obs_velocity, "r") as chk:
             mesh_o = chk.load_mesh()
             u_obs = chk.load_function(mesh_o, name="velocity_obs")
-        if mesh_o.num_cells() != states[0]["mesh"].num_cells():
-            raise SystemExit("--obs-velocity is on a different mesh than the state")
+        # The dof copy below is raw and positional, so equal cell counts are
+        # not enough: the two meshes must be the same mesh, or the observed
+        # velocity lands on the wrong cells and every flux below is garbage.
+        coords_o = mesh_o.coordinates.dat.data_ro
+        coords_s = states[0]["mesh"].coordinates.dat.data_ro
+        if (coords_o.shape != coords_s.shape
+                or not np.allclose(coords_o, coords_s)):
+            raise SystemExit(
+                f"--obs-velocity {args.obs_velocity} is on a different mesh "
+                f"than the state {states[0]['path']}: coordinates differ"
+            )
         target = Function(states[0]["velocity"].function_space())
         target.dat.data[:] = u_obs.dat.data_ro
         states[0]["velocity_obs"] = target

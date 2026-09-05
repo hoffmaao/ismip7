@@ -450,8 +450,10 @@ was ice-free is the opposite case and keeps whatever the transport put there,
 however little: that is how the front advances, and zeroing it would pin the
 front wherever the one-step influx is under the threshold. So outside the
 extent the thickness is not necessarily zero - it may hold inflow accumulating
-toward the threshold, which the composite rheology's `h_visc_floor` and the
-ocean drag below `ISMIP7_H_OCEAN` already handle. The
+toward the threshold. Those are exactly the water cells next to the front,
+where the drag gate below has switched the ocean drag OFF, so the composite
+rheology's `h_visc_floor` and the basal friction law are the only
+stabilisation acting on them. The
 momentum balance needs no front term: with DG0 geometry
 the facet term `rho g avg(h) jump(s)` at an ice/water face already IS the
 terminus water-pressure force. The one momentum-side change is that the

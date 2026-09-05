@@ -92,15 +92,13 @@ def calving_law():
 
 
 def fixed_front():
-    r"""``ISMIP7_FIXED_FRONT``: the legacy pinned front, off unless truthy.
+    r"""``ISMIP7_FIXED_FRONT``: the legacy pinned front.
 
-    Parsed as a boolean, not by presence: ``run_core_matrix.sh`` exports the
-    variable unconditionally, so ``ISMIP7_FIXED_FRONT=0`` has to be the way to
-    turn it off from there.
+    On when the variable is set to anything but the exact string ``"0"``:
+    ``run_core_matrix.sh`` exports it unconditionally, so ``=0`` has to be the
+    way to turn it off from there.
     """
-    return os.environ.get("ISMIP7_FIXED_FRONT", "").strip().lower() not in (
-        "", "0", "false", "off", "no",
-    )
+    return os.environ.get("ISMIP7_FIXED_FRONT") not in (None, "0")
 
 
 def calving_sigma_max():

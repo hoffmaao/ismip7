@@ -583,7 +583,7 @@ how it reaches the core report.
 | `ISMIP7_AUTO_RESUME` | set to resume from the newest own checkpoint unattended | _(unset)_ |
 | `ISMIP7_RUN_TAG` | experiment-name suffix for a parallel method line (see run-management flags above) | _(unset)_ |
 | `ISMIP7_APPARENT_MB` | apparent-mass-balance init: `1`/`balance` zeroes the t=0 thickness tendency (ISMIP6 ctrl_proj-style), `div` cancels only the flux divergence | _(unset)_ |
-| `ISMIP7_FIXED_FRONT` | truthy to hold the calving front at the t=0 extent (inflow beyond it tallied as calving); `0`, `false`, `off` and empty mean off, since `run_core_matrix.sh` exports it unconditionally. The legacy form of `ISMIP7_CALVING=fixed`, and it removes nothing whenever any `ISMIP7_CALVING` law is configured - that law owns the front | _(unset, off)_ |
+| `ISMIP7_FIXED_FRONT` | set to hold the calving front at the t=0 extent (inflow beyond it tallied as calving). `=0` now disables it (it used to count as set), because `run_core_matrix.sh` exports it unconditionally. The legacy form of `ISMIP7_CALVING=fixed`, and it removes nothing whenever any `ISMIP7_CALVING` law is configured - that law owns the front | _(unset, off)_ |
 | `ISMIP7_LEGACY_TRANSPORT` | set to restore the pre-Jul-2026 CG-projection transport scheme (requires `ISMIP7_GEOMETRY_SPACE=cg1`) | _(unset)_ |
 | `ISMIP7_SNES_TYPE` / `ISMIP7_SNES_MAXIT` | diagnostic Newton type / max iterations | `newtonls` / `200` |
 | `ISMIP7_K_MELT` | scalar Burgard K (projections) | `1.15e-4` (Burgard K50) |

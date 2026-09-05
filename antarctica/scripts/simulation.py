@@ -744,19 +744,9 @@ def setup_model(restart_from=None):
                 calving_ids=calving_ids if use_calving_terminus else None,
             )
 
-        F = build_rc_residual(
-            z, theta_f, phi_f, H=h, s=s, b=b, C_w0=C_w0,
-            A4_base=A4_base, n_flow=n_flow, n_flow_val=n_flow_val,
-            m_slide=m_slide_val, tau_c=tau_c, alpha=alpha_reg, H_ref=H_ref,
-            fric_law=friction, N_ref=N_ref,
-            nhat_floor=budd_nhat_floor, nhat_cap=budd_nhat_cap,
-            alpha_gl=alpha_gl,
-            c0=c0_rc, eps_tauc=rc_eps_tauc,
-            c_w0_floor=rc_cw0_floor, h_visc_floor=rc_hvisc_floor,
-            ocean_drag=ocean_drag, h_ocean=h_ocean, u_lim=u_lim, k_lim=k_lim,
-            drag_mask=drag_mask,
-            calving_ids=calving_ids if use_calving_terminus else None,
-        )
+        # The closure above is the single definition of this residual: the
+        # forward solves exactly what a time-dependent assimilation rebuilds.
+        F = _build_F()
     else:
         L = (
             model.minimization.viscous_power(**fields, **rheo_glen)
@@ -1616,9 +1606,10 @@ def run_simulation(
             # front ADVANCES, and zeroing it would pin the front wherever the
             # one-step influx is under front_hmin. So outside the level set's
             # extent the thickness is NOT exactly zero - it may hold inflow
-            # accumulating toward the threshold. That is safe for the solves:
-            # the composite rheology's h_visc_floor and the ocean drag applied
-            # below h_ocean already govern cells this thin.
+            # accumulating toward the threshold. In that strip of water cells
+            # the level set's drag gate has switched the ocean drag OFF, so
+            # the only stabilisation those cells have is the composite
+            # rheology's h_visc_floor and the basal friction law.
             data = h_dg.dat.data
             sliver = retreat_slivers(data, h_dg_old.dat.data_ro, front_hmin)
             calv_gt += mesh.comm.allreduce(

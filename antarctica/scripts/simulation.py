@@ -931,6 +931,9 @@ def setup_model(restart_from=None):
         # Residual builder for a time-dependent assimilation (None for the
         # legacy action formulation, which has no residual to rebuild).
         "build_F": _build_F if use_residual else None,
+        # Solver options the time-dependent assimilation
+        # (antarctica/scripts/inversion_td, not yet committed) reuses so its
+        # forward solves match this one, alongside build_F and ISMIP7_INVERSION.
         "sparams": sparams,
         "fc_params": fc_params,
         "A_map": A_map,

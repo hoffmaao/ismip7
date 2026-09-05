@@ -170,12 +170,10 @@ GAMMA_DEFAULT = "1e5" if MISFIT_NORM == "sigma" else "1e4"
 # the ice is not moving. Elmer/Ice and Ua use relative errors to the same end.
 #
 # ISMIP7_LOG_VEL_WEIGHT: 0 (default, the pre-Sep-2026 objective), a number, or
-# "auto" -- scaled so that at the STARTING state the log term equals
-# ISMIP7_LOG_VEL_FRAC (default 1.0) times the velocity chi^2 term, which is
-# the only weight that means anything before the first iteration. The
-# resolved value is stamped in the MAP.
+# "auto" -- scaled so that at the STARTING state the log term equals the
+# velocity chi^2 term, which is the only weight that means anything before
+# the first iteration. The resolved value is stamped in the MAP.
 LOG_VEL_WEIGHT = os.environ.get("ISMIP7_LOG_VEL_WEIGHT", "0")
-LOG_VEL_FRAC = float(os.environ.get("ISMIP7_LOG_VEL_FRAC", "1.0"))
 LOG_VEL_EPS = float(os.environ.get("ISMIP7_LOG_VEL_EPS", "1.0"))   # m/yr
 GAMMA_THETA = float(os.environ.get("ISMIP7_GAMMA_THETA", GAMMA_DEFAULT))
 GAMMA_PHI = float(os.environ.get("ISMIP7_GAMMA_PHI", GAMMA_DEFAULT))
@@ -859,9 +857,7 @@ def main():
                 f"ISMIP7_DHDT_NET_SIGMA=0 disables)"
             )
 
-    # Log-velocity misfit (ISSM convention). `log_vel_w` is a one-element list
-    # so `forward` closes over the resolved value even when "auto" fixes it
-    # after the first assembly below.
+    # Log-velocity misfit (ISSM convention).
     _eps_v = Constant(LOG_VEL_EPS)
 
     def _log_ratio(u_expr):
@@ -869,9 +865,8 @@ def main():
         sp_obs = sqrt(u_obs[0] ** 2 + u_obs[1] ** 2 + Constant(1e-12))
         return ln((sp + _eps_v) / (sp_obs + _eps_v))
 
-    log_vel_w = [0.0 if LOG_VEL_WEIGHT.lower() in ("0", "", "none", "off")
-                 else (0.0 if LOG_VEL_WEIGHT.lower() == "auto"
-                       else float(LOG_VEL_WEIGHT))]
+    log_vel_w = (0.0 if LOG_VEL_WEIGHT.lower() == "auto"
+                 else float(LOG_VEL_WEIGHT))
     if LOG_VEL_WEIGHT.lower() == "auto":
         # Scale so the two velocity terms start out comparable: the ratio of
         # the chi^2 term to the unweighted log term at the warm-start state.
@@ -882,14 +877,14 @@ def main():
                 + (_u0[1] - u_obs[1]) ** 2 / sig_uy ** 2)) * dx(mesh)))
         _log_0 = float(assemble(
             (0.5 / area_val * obs_mask * _log_ratio(_u0) ** 2) * dx(mesh)))
-        log_vel_w[0] = (LOG_VEL_FRAC * _chi2_0 / _log_0) if _log_0 > 0 else 0.0
+        log_vel_w = (_chi2_0 / _log_0) if _log_0 > 0 else 0.0
         PETSc.Sys.Print(
-            f"  Log-velocity misfit (ISSM 103): auto weight {log_vel_w[0]:.4g} "
-            f"= {LOG_VEL_FRAC:g} x (chi2 {_chi2_0:.3e} / log {_log_0:.3e}) at "
+            f"  Log-velocity misfit (ISSM 103): auto weight {log_vel_w:.4g} "
+            f"= chi2 {_chi2_0:.3e} / log {_log_0:.3e} at "
             f"the start, eps={LOG_VEL_EPS:g} m/yr")
-    elif log_vel_w[0] > 0.0:
+    elif log_vel_w > 0.0:
         PETSc.Sys.Print(
-            f"  Log-velocity misfit (ISSM 103): weight {log_vel_w[0]:g}, "
+            f"  Log-velocity misfit (ISSM 103): weight {log_vel_w:g}, "
             f"eps={LOG_VEL_EPS:g} m/yr")
 
     def forward(theta_ctrl, phi_ctrl):
@@ -920,11 +915,11 @@ def main():
             )
         )
 
-        if log_vel_w[0] > 0.0:
+        if log_vel_w > 0.0:
             # ISSM SurfaceLogVelMisfit: a relative (scale-free) error, so the
             # fit is not bought entirely in the slow interior.
             integrand = integrand + (
-                Constant(0.5 * log_vel_w[0]) / area_val * obs_mask
+                Constant(0.5 * log_vel_w) / area_val * obs_mask
                 * _log_ratio(u_sol) ** 2
             )
 
@@ -1051,7 +1046,7 @@ def main():
         r"""``' vel=... dhdt=...'`` for the iteration line, or '' if disabled."""
         try:
             out = f" vel={last_good_vel_chi2[0]:.4e}"
-            if log_vel_w[0] > 0.0:
+            if log_vel_w > 0.0:
                 out += f" log={float(assemble(_log_chi2)):.4e}"
             if use_dhdt:
                 out += f" dhdt={float(assemble(_dhdt_chi2)):.4e}"
@@ -1100,7 +1095,7 @@ def main():
             chk.set_attr("/", "lc_coarse", int(lc_coarse))
             chk.set_attr("/", "buffer_m", float(buffer_m))
             chk.set_attr("/", "misfit_norm", MISFIT_NORM)
-            chk.set_attr("/", "log_vel_weight", float(log_vel_w[0]))
+            chk.set_attr("/", "log_vel_weight", float(log_vel_w))
             chk.set_attr("/", "log_vel_eps", float(LOG_VEL_EPS))
             chk.set_attr("/", "gamma_theta", float(GAMMA_THETA))
             chk.set_attr("/", "gamma_phi", float(GAMMA_PHI))

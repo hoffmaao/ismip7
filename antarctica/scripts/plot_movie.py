@@ -79,8 +79,9 @@ def main():
                     help="use every K-th checkpoint")
     args = ap.parse_args()
 
-    files = sorted(glob.glob(f"{args.prefix}_t*.h5"), key=_year_of)
-    files = [f for f in files if _year_of(f) is not None][:: args.stride]
+    files = [f for f in glob.glob(f"{args.prefix}_t*.h5")
+             if _year_of(f) is not None]
+    files = sorted(files, key=_year_of)[:: args.stride]
     if not files:
         sys.exit(f"no checkpoints match {args.prefix}_t*.h5")
 

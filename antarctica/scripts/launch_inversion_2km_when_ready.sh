@@ -26,7 +26,10 @@
 # rm the lock under antarctica/results/logs/ to re-arm.
 set -u
 
-REPO="${REPO:-/media/andrew/wd1/projects/ismip7}"
+# The checkout this script belongs to (antarctica/scripts/), so the mesh,
+# the MAP output and the logs below stay in the clone it was launched
+# from. Override with REPO= to drive a different one deliberately.
+REPO="${REPO:-$(cd "$(dirname "$0")/../.." && pwd -P)}"
 PY="${PY:-$HOME/venv-firedrake-2026/bin/python}"
 NRANKS="${NRANKS:-12}"          # matches the 2500 m memory measurement
 NEED_GB="${NEED_GB:-160}"       # ~110 GB for the factorisation + headroom

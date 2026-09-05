@@ -457,8 +457,14 @@ sigma_max`, `eps~` from the tensile principal strain rates, `B = A^(-1/n)` from
 the run's fluidity, separate thresholds for grounded and floating ice. The
 thresholds are the tuning targets: a 2015 control should hold the observed
 front (the obs kit's 24 yearly Greene ice masks, 1997-2021) and discharge
-about 1300 Gt/yr. The level set is checkpointed (`levelset`) so restarts
-resume the front where it was. Tests: `pytest tests/test_levelset.py`.
+about 1300 Gt/yr. The level set is checkpointed (`levelset`) for diagnostics; a
+restart does not need it, because the front is reconstructed from the current
+thickness every step and the retreat itself is carried in `h` by the sub-cell
+shed. The exception is `fixed`, which anchors on the t=0 thickness (`H_init`,
+reloaded from every checkpoint) so a resumed run does not re-freeze the front
+at the extent it restarted from. The shared implementation's tests are
+`icepack_tools/test/levelset_test.py`; the ISMIP7-side tests are to be
+rebuilt.
 
 ### The whole matrix in one command (`run_core_matrix.sh`)
 

@@ -92,9 +92,17 @@ def load_state(path):
 
 def regions(state):
     r"""Grounded / floating / ice indicators as DG0 functions, and the height
-    above flotation."""
-    h, b = state["thickness"], state["bed"]
-    Q0 = h.function_space()
+    above flotation.
+
+    The space is DG0 whatever the checkpoint's geometry space is
+    (``ISMIP7_GEOMETRY_SPACE=cg1`` stores h/s/b in CG1). The facet integrals in
+    :func:`crossing_flux` gate on ``source('+') * sink('-')``, which is
+    identically zero for a continuous indicator, so a CG1 indicator would
+    report every flux as exactly zero without an error."""
+    mesh = state["mesh"]
+    Q0 = fd.FunctionSpace(mesh, "DG", 0)
+    h = Function(Q0, name="h_dg0").project(state["thickness"])
+    b = Function(Q0, name="b_dg0").project(state["bed"])
     haf = Function(Q0, name="haf").interpolate(
         h - Constant(RHO_W / RHO_I) * max_value(-b, Constant(0.0)))
     ice = Function(Q0, name="ice")
@@ -229,11 +237,9 @@ def report(states, csv_path=None):
 
         # Where the deficit lives: the same fluxes binned by the observed
         # speed of the cell they leave.
-        Q0 = a["thickness"].function_space()
+        Q0 = reg["ice"].function_space()
         sp = Function(Q0)
         uo = a["velocity_obs"]
-        sp_cg = Function(uo.function_space().sub(0).collapse()) \
-            if False else None
         sp.interpolate(fd.sqrt(fd.dot(uo, uo) + Constant(1e-12)))
         bins = [0.0, 100.0, 500.0, 1500.0, 1e9]
         m_bins = crossing_flux_binned(a, reg, "grounded", "floating", sp, bins)

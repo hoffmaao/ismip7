@@ -352,7 +352,6 @@ def setup_model(restart_from=None):
     tau_guess = None
     a_ref_mb = None
     h_dg_state = None
-    levelset_f = None
     t_restart = None
     with fd.CheckpointFile(source_chk, "r") as chk:
         _th = chk.load_function(mesh, name="log_friction")
@@ -403,14 +402,6 @@ def setup_model(restart_from=None):
                 a_ref_mb = chk.load_function(mesh, name="a_ref_mb")
             except Exception:
                 a_ref_mb = None
-            # Level-set calving front (present iff the run used
-            # ISMIP7_CALVING != none): resume the front where it was, not
-            # from the thickness outline, which would forget any retreat
-            # smaller than one cell.
-            try:
-                levelset_f = chk.load_function(mesh, name="levelset")
-            except Exception:
-                levelset_f = None
             # Separate DG0 prognostic thickness (CG1-geometry runs only, where
             # the stored CG h was its lumped lift). Under DG0 geometry the
             # thickness IS the transport state, so there is nothing to restore.
@@ -932,8 +923,9 @@ def setup_model(restart_from=None):
         "u_obs": u_obs,
         "friction": friction,
         # Level-set calving front support: the drag gate the residual was
-        # built with, the fluidity expression the von Mises rate needs, and
-        # the checkpointed front (None on a cold start).
+        # built with. The front itself is not carried here: run_simulation
+        # rebuilds it from the current thickness every step, and the `fixed`
+        # law anchors on H_init below, so a restart needs no saved front.
         "drag_mask": drag_mask,
         # Residual builder for a time-dependent assimilation (None for the
         # legacy action formulation, which has no residual to rebuild).
@@ -941,7 +933,6 @@ def setup_model(restart_from=None):
         "sparams": sparams,
         "fc_params": fc_params,
         "A_map": A_map,
-        "levelset": levelset_f,
         # Mesh provenance from the source checkpoint (re-stamped into every
         # state checkpoint so warm restarts stay self-describing).
         "lc": chk_lc,
@@ -1450,7 +1441,9 @@ def run_simulation(
     # rate retreats it by normal flow, and the cells it leaves behind plus
     # the sub-cell mass the front cells shed go into the calving tally below
     # (icepack2_tools.levelset). The drag gate it writes is the Function the
-    # momentum residual holds. Restarts rebuild it from the thickness.
+    # momentum residual holds. Every law but `fixed` rebuilds the front from
+    # the current thickness each step, so a restart needs no saved front: the
+    # retreat is already carried in h by the sub-cell shed.
     calving = _calving_law()
     level_set = None
     phi_entry = None
@@ -1458,10 +1451,25 @@ def run_simulation(
     if calving != "none":
         from icepack2_tools.levelset import LevelSet
         sig_g, sig_f = _calving_sigma_max()
+        # `fixed` holds the front at phi0, which LevelSet captures at
+        # construction. On a warm restart h_dg is the RESTARTED extent, so
+        # anchor phi0 on the t=0 thickness (ctx["H_init"], reloaded from every
+        # checkpoint) instead: a resumed run must not re-freeze the front where
+        # it had already retreated to, permanently barring cells a continuous
+        # run of the same length would keep. The distance field comes from a
+        # throwaway level set built on that thickness, because the eikonal
+        # solve reads the thickness of the object it belongs to. Use a scratch
+        # Function, NOT h_dg: under DG0 geometry h_dg IS the live geometry.
+        phi_init = None
+        if calving == "fixed":
+            _h0 = Function(Q_dg).project(ctx.get("H_init", h))
+            phi_init = LevelSet(
+                mesh, _h0, law="none", h_min=front_hmin, drag_mask=None,
+            ).phi
         level_set = LevelSet(
             mesh, h_dg, law=calving, h_min=front_hmin,
             sigma_max_grounded=sig_g, sigma_max_floating=sig_f,
-            drag_mask=ctx.get("drag_mask"),
+            drag_mask=ctx.get("drag_mask"), phi_init=phi_init,
         )
         phi_entry = Function(level_set.Q0)
     A_map = ctx.get("A_map")

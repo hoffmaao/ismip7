@@ -15,6 +15,10 @@ Usage:
 PATH is a ``*_timeseries.csv`` or the run prefix it belongs to. Fluxes are
 box-smoothed over ``--smooth`` years (default 1) because the per-step values
 carry the dt=0.1 checkpoint jitter. Read-only.
+
+Units in the CSV are not uniform: the ``*_gtyr`` columns are rates [Gt/yr],
+while ``calv_gt``, ``clamp_gt`` and ``resid_gt`` are the mass moved by ONE
+step [Gt] and must be divided by dt before they can be added to a rate.
 """
 
 import argparse
@@ -84,7 +88,8 @@ def main():
         dmdt = np.gradient(d["mass_gt"], t)
         ax[2].plot(t, smooth(dmdt, n), label=label)
         ax[3].plot(t, smooth(d["melt_gtyr"], n), label=label)
-        ax[4].plot(t, smooth(d["outflux_gtyr"] + d["calv_gt"], n), label=label)
+        ax[4].plot(t, smooth(d["outflux_gtyr"] + d["calv_gt"] / dt, n),
+                   label=label)
         ax[5].plot(t, smooth(d["smb_gtyr"] + d["amb_gtyr"], n), label=label)
     titles = ["mass change [Gt]", "VAF change [mm SLE]", "dM/dt [Gt/yr]",
               "shelf melt [Gt/yr]", "front discharge + calving [Gt/yr]",

@@ -149,15 +149,18 @@ def shared_missing(warn=None):
     )
     if not os.path.exists(mesh_fn):
         miss.append(f"mesh ({os.path.basename(mesh_fn)})")
-    # The MAP the forward will actually load: the one tagged with this
-    # geometry space, else the legacy untagged (CG1) MAP it falls back to with
-    # a warning. A legacy MAP runs, but its controls carry the CG1 front bias,
-    # so the run is a smoke test rather than a result.
-    inv = os.environ.get("ISMIP7_INVERSION") or os.path.join(
-        MESH_DIR, map_basename(friction, lc))
+    # The MAP the forward will actually load: ISMIP7_INVERSION if it names one
+    # explicitly, else the one tagged with this geometry space, else the legacy
+    # untagged (CG1) MAP it falls back to with a warning. A legacy MAP runs, but
+    # its controls carry the CG1 front bias, so the run is a smoke test rather
+    # than a result. An explicit override deliberately bypasses that lookup, so
+    # setup_model raises on a missing file rather than falling back: report it
+    # as a hard miss, exactly as the forward would.
+    inv_override = os.environ.get("ISMIP7_INVERSION")
+    inv = inv_override or os.path.join(MESH_DIR, map_basename(friction, lc))
     legacy = os.path.join(MESH_DIR, map_basename(friction, lc, geometry=False))
     if not os.path.exists(inv):
-        if os.path.exists(legacy):
+        if not inv_override and os.path.exists(legacy):
             warn.append(
                 f"no {os.path.basename(inv)}; the forward would fall back to "
                 f"{os.path.basename(legacy)} (inverted under a different "

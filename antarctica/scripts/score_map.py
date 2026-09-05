@@ -57,7 +57,17 @@ BAND_LABELS = ["< 100", "100 - 500", "500 - 1500", "> 1500"]
 OBSERVED_DISCHARGE = (2050.0, 100.0)
 
 
-def indicators(h, b, Q0):
+def indicators(mesh, h, b):
+    r"""Height above flotation and the ice / grounded / floating indicators, in
+    DG0 whatever space the MAP's geometry lives in.
+
+    :func:`flux` gates its facet integrals on ``src('+') * sink('-')``, which is
+    identically zero for a continuous indicator: under
+    ``ISMIP7_GEOMETRY_SPACE=cg1`` a CG1 indicator would score every MAP at zero
+    discharge without an error."""
+    Q0 = fd.FunctionSpace(mesh, "DG", 0)
+    h = Function(Q0).project(h)
+    b = Function(Q0).project(b)
     haf = Function(Q0).interpolate(
         h - Constant(RHO_W / RHO_I) * max_value(-b, Constant(0.0)))
     ice = Function(Q0)
@@ -94,8 +104,8 @@ def score(path):
     mesh, h, b = ctx["mesh"], ctx["h"], ctx["b"]
     u = ctx["z"].subfunctions[0]
     u_obs = ctx["u_obs"]
-    Q0 = h.function_space()
-    _, ice, gr, fl = indicators(h, b, Q0)
+    _, ice, gr, fl = indicators(mesh, h, b)
+    Q0 = ice.function_space()
     open_water = Function(Q0)
     open_water.dat.data[:] = 1.0 - ice.dat.data_ro
 

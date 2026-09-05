@@ -442,10 +442,16 @@ front has passed entirely (`phi > 0`) are emptied, and every front cell sheds
 the fraction `min(1, c dt L/A)` of its thickness (`L` its front length), which
 is the mass `c h L dt` a front retreating at `c` loses and is what carries
 retreat smaller than a cell from one step to the next. Both go to the `calv`
-budget column. Outside the extent the thickness is exactly zero: a cell
-below the extent threshold (`ISMIP7_FRONT_HMIN`, 1 m) is zeroed after each
-step and the sliver tallied into the `clamp` column (negative), so the level
-set, the momentum solver and the melt all see the same ice domain. The
+budget column, and so does a third: the sliver the shed and the melt leave
+behind in a cell that HELD ice at the start of the step. A cell under the
+extent threshold (`ISMIP7_FRONT_HMIN`, 1 m) that already held ice is a
+retreating front cell, so it is emptied and tallied as calving. A cell that
+was ice-free is the opposite case and keeps whatever the transport put there,
+however little: that is how the front advances, and zeroing it would pin the
+front wherever the one-step influx is under the threshold. So outside the
+extent the thickness is not necessarily zero - it may hold inflow accumulating
+toward the threshold, which the composite rheology's `h_visc_floor` and the
+ocean drag below `ISMIP7_H_OCEAN` already handle. The
 momentum balance needs no front term: with DG0 geometry
 the facet term `rho g avg(h) jump(s)` at an ice/water face already IS the
 terminus water-pressure force. The one momentum-side change is that the

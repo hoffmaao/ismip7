@@ -466,6 +466,23 @@ at the extent it restarted from. The shared implementation's tests are
 `icepack_tools/test/levelset_test.py`; the ISMIP7-side tests are to be
 rebuilt.
 
+Control and projection configurations differ, and the code keeps them
+distinct. The protocol's CONTROL is an unforced constant-climate run with
+"fracture / ice shelf collapse / calving / GIA etc set constant to end of 2014
+conditions", so the control configuration here is `ISMIP7_APPARENT_MB` with a
+PINNED front: `ISMIP7_CALVING=fixed`, or the legacy `ISMIP7_FIXED_FRONT=1`.
+`vonmises` is for PROJECTIONS, which are encouraged to use a physically based
+law and must never be silently pinned. Only a pinned front removes and tallies
+the ice that crosses the t=0 extent; under `vonmises` the level set alone
+decides removal and nothing is tallied off that mask. The apparent-MB
+reference `a_ref` is defined only ON the t=0 ice extent for every law: no ice
+existed outside it, so no balancing reference belongs there, and a frozen sink
+there would re-empty every cell a free front advances into, pinning it with no
+error. If both `ISMIP7_CALVING=fixed` and `ISMIP7_FIXED_FRONT=1` are set the
+level-set law owns the front and the legacy flag does not remove the same ice
+a second time; the run log prints one `Calving front owner:` line naming the
+mechanism in force.
+
 ### The whole matrix in one command (`run_core_matrix.sh`)
 
 `scripts/run_core_matrix.sh` runs core experiments 1-11 end to end in protocol
@@ -505,6 +522,9 @@ cannot be read as current.
 |---------|---------|---------|
 | `ISMIP7_MAP_OUT` | full output path for the MAP h5, overriding the generated name. Use it for smoke tests and variant inversions so a short run cannot replace a converged production MAP. A bare filename resolves under `mesh/`; the directory is created and probed for writability at startup | _(generated name)_ |
 | `ISMIP7_MISFIT_NORM` | `sigma`: divide each residual by its own datum's squared error, making the misfit a dimensionless chi^2 so terms of different units can be traded off. `none`: legacy dimensional misfit. **Selects the `ISMIP7_GAMMA_*` defaults** (see below) | `sigma` |
+| `ISMIP7_LOG_VEL_WEIGHT` | weight on the ISSM-convention logarithmic velocity misfit `0.5 ln((\|u\|+eps)/(\|u_obs\|+eps))^2` (ISSM cost function 103), added to the term `ISMIP7_MISFIT_NORM` selects. The sigma-normalised chi^2 alone over-weights slow interior ice and leaves the discharge-carrying tributaries 40-50% too slow; the log term is scale-free and pulls them up. `0` is the pre-Sep-2026 objective; `auto` resolves the weight at the warm-start state so the log term starts out equal to the velocity chi^2 term. The resolved value is stamped into the MAP as the `log_vel_weight` attribute | `0` |
+| `ISMIP7_LOG_VEL_EPS` | regularisation speed (m/yr) inside the log, so stagnant ice cannot make the ratio singular. Stamped into the MAP as `log_vel_eps` | `1.0` |
+| `ISMIP7_LOG_VEL_FRAC` | under `auto` only: the target ratio of the log term to the chi^2 term at the warm-start state | `1.0` |
 | `ISMIP7_GAMMA_THETA` / `ISMIP7_GAMMA_PHI` | Whittle-Matern prior strength on `θ` / `φ`. Default is coupled to `ISMIP7_MISFIT_NORM`, because normalizing divides the misfit by ~sigma^2 and would otherwise weaken the prior by the same factor | `1e5` under `sigma`, `1e4` under `none` |
 | `ISMIP7_L_REG` | prior correlation length (m) | `7.5e3` |
 | `ISMIP7_MAXITER` | L-BFGS-B iteration cap | `500` |
@@ -541,7 +561,7 @@ how it reaches the core report.
 | `ISMIP7_BUFFER_M` | outline buffer (m) used to resolve the default mesh/boundary-id filenames (see §3) | `20000` |
 | `ISMIP7_MESH` | mesh `.msh` path (inversion and tools). A forward takes its mesh from the MAP/restart checkpoint, which records its own mesh basename and parameters, so here it only names the boundary sidecar for a legacy checkpoint that carries no such record | `mesh/antarctica_<COARSE>_<LC>_buffered<BUFFER_M>.msh` |
 | `ISMIP7_INVERSION` | explicit MAP checkpoint path for a forward/preflight, replacing the `map_basename` lookup. It must be a MAP of the same friction/n/geometry (not checked). Use it to A/B differently regularised MAPs on one mesh (e.g. velocity-only vs transient dH/dt) instead of swapping files | derived from friction/n/geometry/lc |
-| `ISMIP7_CALVING` | calving-front law on a buffered mesh, via a level set (`icepack2_tools/levelset.py`, ISSM-style): `none` (front advances freely, never calves), `fixed` (front frozen at t=0, the level-set form of `ISMIP7_FIXED_FRONT`), `vonmises` (Morlighem et al. 2016 rate `|u| sigma~/sigma_max` from the run's own strain rates and fluidity). Removed ice is the `calv` budget column; the mean front rate over front cells prints as `c_front` | `none` |
+| `ISMIP7_CALVING` | calving-front law on a buffered mesh, via a level set (`icepack2_tools/levelset.py`, ISSM-style): `none` (front advances freely, never calves), `fixed` (front frozen at t=0, the level-set form of `ISMIP7_FIXED_FRONT`), `vonmises` (Morlighem et al. 2016 rate `\|u\| sigma~/sigma_max` from the run's own strain rates and fluidity). Removed ice is the `calv` budget column; the mean front rate over front cells prints as `c_front`. The control configuration is `ISMIP7_APPARENT_MB` with a pinned front (`fixed`, or `ISMIP7_FIXED_FRONT=1`), per the protocol's "calving set constant to end-of-2014 conditions"; `vonmises` is for projections and is never pinned. Under every law the apparent-MB reference is defined only on the t=0 ice extent | `none` |
 | `ISMIP7_CALVING_SIGMA_MAX_GROUNDED`, `ISMIP7_CALVING_SIGMA_MAX_FLOATING` | von Mises tensile-stress thresholds [MPa] (ISSM defaults) | `1.0`, `0.15` |
 | `ISMIP7_BNDIDS` | override boundary-id JSON | `mesh/boundary_ids_antarctica_<COARSE>_<LC>_buffered<BUFFER_M>.json` if present, else `mesh/boundary_ids.json` |
 | `ISMIP7_GEOMETRY_SPACE` | space for `h`/`s`/`b` (`dg0`: one thickness for the terminus force and the mass flux; `cg1`: legacy, for A/B only) - also selects the MAP h5 (see `../GEOMETRY_DISCRETIZATION.md`) | `dg0` |
@@ -555,7 +575,7 @@ how it reaches the core report.
 | `ISMIP7_AUTO_RESUME` | set to resume from the newest own checkpoint unattended | _(unset)_ |
 | `ISMIP7_RUN_TAG` | experiment-name suffix for a parallel method line (see run-management flags above) | _(unset)_ |
 | `ISMIP7_APPARENT_MB` | apparent-mass-balance init: `1`/`balance` zeroes the t=0 thickness tendency (ISMIP6 ctrl_proj-style), `div` cancels only the flux divergence | _(unset)_ |
-| `ISMIP7_FIXED_FRONT` | set to hold the calving front at the t=0 extent (inflow beyond it tallied as calving) | _(unset)_ |
+| `ISMIP7_FIXED_FRONT` | set to hold the calving front at the t=0 extent (inflow beyond it tallied as calving). The legacy form of `ISMIP7_CALVING=fixed`; if both are set the level-set law owns the front and this flag removes nothing | _(unset)_ |
 | `ISMIP7_LEGACY_TRANSPORT` | set to restore the pre-Jul-2026 CG-projection transport scheme (requires `ISMIP7_GEOMETRY_SPACE=cg1`) | _(unset)_ |
 | `ISMIP7_SNES_TYPE` / `ISMIP7_SNES_MAXIT` | diagnostic Newton type / max iterations | `newtonls` / `200` |
 | `ISMIP7_K_MELT` | scalar Burgard K (projections) | `1.15e-4` (Burgard K50) |

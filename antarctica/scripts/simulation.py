@@ -1043,18 +1043,21 @@ def run_simulation(
 
     rho_gt = _RHO_I_SI / 1e12  # m^3 ice -> Gt
 
-    # Fixed calving front (ISMIP7_FIXED_FRONT=1): cells that are ice-free
-    # in the initial state may not accumulate ice; whatever flows into
-    # them is removed each step and tallied as calving flux. Without this
-    # a buffered mesh has NO calving sink (~1300 Gt/yr in reality) and the
-    # sheet must gain mass. Only meaningful when the initial state is the
-    # true BedMachine geometry (RC mode / h_clamp_init=0) — with a clamped
-    # initial state every cell has ice and the mask is empty.
+    # The t=0 ice extent, needed by EVERY front mechanism (the legacy
+    # ISMIP7_FIXED_FRONT flag and every ISMIP7_CALVING law): cells outside it
+    # held no ice at t=0, so no apparent-MB reference belongs there, and under
+    # a pinned front whatever flows into them is removed each step and tallied
+    # as calving flux. Without a front mechanism a buffered mesh has NO calving
+    # sink (~1300 Gt/yr in reality) and the sheet must gain mass. Only
+    # meaningful when the initial state is the true BedMachine geometry
+    # (RC mode / h_clamp_init=0) - with a clamped initial state every cell has
+    # ice and the mask is empty.
     fixed_front = os.environ.get("ISMIP7_FIXED_FRONT") is not None
     front_hmin = float(os.environ.get("ISMIP7_FRONT_HMIN", "1.0"))
+    calving = _calving_law()
     beyond_front = None
     cell_area = assemble(fd.TestFunction(Q_dg) * dx).dat.data_ro.copy()
-    if fixed_front:
+    if fixed_front or calving != "none":
         # Mask from the t=0 observed extent (ctx["H_init"]), not the
         # current h: a restarted run must not re-mask cells that
         # legitimately retreated mid-run inside the observed extent.
@@ -1065,9 +1068,31 @@ def run_simulation(
         beyond_front = _extent.dat.data_ro < front_hmin
         n_beyond = mesh.comm.allreduce(int(beyond_front.sum()))
         PETSc.Sys.Print(
-            f"  Fixed calving front: {n_beyond} initially ice-free cells "
+            f"  Initial ice extent: {n_beyond} initially ice-free cells "
             f"masked (h < {front_hmin} m)"
         )
+
+    # Which mechanism owns the REMOVAL of ice past the t=0 extent. The ISMIP7
+    # control is an unforced run with calving held at end-of-2014 conditions,
+    # so a pinned front (ISMIP7_CALVING=fixed, or the legacy
+    # ISMIP7_FIXED_FRONT=1) removes and tallies everything that crosses that
+    # extent. A free law (vonmises) is a projection configuration: there the
+    # level set alone decides removal and nothing may be tallied off this mask,
+    # or the front would be silently pinned at its t=0 position. When both
+    # pinned options are set the level-set `fixed` law owns the front and the
+    # legacy flag must not remove the same ice a second time.
+    legacy_front_sink = fixed_front and calving != "fixed"
+    if calving == "fixed":
+        front_owner = "level-set fixed law (ISMIP7_CALVING=fixed)" + (
+            "; ISMIP7_FIXED_FRONT defers to it" if fixed_front else ""
+        )
+    elif fixed_front:
+        front_owner = "legacy fixed-front mask (ISMIP7_FIXED_FRONT=1)"
+    elif calving != "none":
+        front_owner = f"level-set {calving} law (front free to advance)"
+    else:
+        front_owner = "none (no calving sink)"
+    PETSc.Sys.Print(f"  Calving front owner: {front_owner}")
 
     # ISMIP7_LEGACY_TRANSPORT=1 restores the pre-Jul-2026 scheme: the
     # -h*div(u*phi) volume term (non-conservative for DG0: it adds
@@ -1196,8 +1221,12 @@ def run_simulation(
                 b_smb = assemble((accum - ocean_melt) * phi_dg * dx)
                 a_ref.dat.data[:] -= b_smb.dat.data_ro / cell_area
             if beyond_front is not None:
-                # the fixed-front tally stays the sink for flux into the
-                # initially ice-free cells; do not absorb it into a_ref
+                # No ice existed outside the t=0 extent, so no balancing
+                # reference belongs there, for ANY front law. Under a pinned
+                # front the front tally stays the sink for flux into those
+                # cells and must not be absorbed into a_ref; under a free law
+                # (vonmises) a frozen sink here would re-empty every cell the
+                # front advances into, pinning it at t=0 with no error.
                 a_ref.dat.data[beyond_front] = 0.0
             amb_cap = float(os.environ.get("ISMIP7_AMB_CAP", "0"))
             if amb_cap > 0.0:
@@ -1444,7 +1473,6 @@ def run_simulation(
     # momentum residual holds. Every law but `fixed` rebuilds the front from
     # the current thickness each step, so a restart needs no saved front: the
     # retreat is already carried in h by the sub-cell shed.
-    calving = _calving_law()
     level_set = None
     phi_entry = None
     last_c_mean = 0.0
@@ -1487,7 +1515,10 @@ def run_simulation(
 
         # Front first, with the same velocity the transport is about to
         # use, so the cells emptied below are the ones the front left.
-        beyond = beyond_front
+        # Only a PINNED front removes and tallies ice past the t=0 extent.
+        # Under a free law the level set below is the sole authority on
+        # removal, so the t=0 mask contributes nothing here.
+        beyond = beyond_front if legacy_front_sink else None
         calv_frac = None
         if level_set is not None:
             last_c_mean = level_set.advance(

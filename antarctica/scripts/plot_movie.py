@@ -18,7 +18,7 @@ Usage:
 
 PREFIX is the checkpoint basename without the ``_t<year>.h5`` suffix, e.g.
 ``antarctica/results/ctrl2015_cesm2_waccm_movie_velonly_32000``. Frames go to
-``--out`` (default ``antarctica/figs/movie_<basename>/``) and the mp4/gif next
+``--out`` (default ``antarctica/figs/movie_<basename>/``) and the mp4 next
 to them. Needs ``ffmpeg`` on PATH for the video; frames are still written
 without it. Read-only with respect to the checkpoints; serial (one rank).
 """
@@ -194,10 +194,7 @@ def main():
            "-vf", "scale=trunc(iw/2)*2:trunc(ih/2)*2",
            "-c:v", "libx264", "-pix_fmt", "yuv420p", mp4]
     subprocess.run(cmd, check=True)
-    gif = os.path.join(out, f"{base}.gif")
-    subprocess.run(["ffmpeg", "-y", "-loglevel", "error", "-i", mp4,
-                    "-vf", "fps=2,scale=1200:-1", gif], check=True)
-    print(f"{len(frame_paths)} frames -> {mp4}\n                  {gif}")
+    print(f"{len(frame_paths)} frames -> {mp4}")
 
 
 if __name__ == "__main__":

@@ -115,45 +115,37 @@ def regions(state):
     return {"haf": haf, "ice": ice, "grounded": gr, "floating": fl}
 
 
-def crossing_flux(state, reg, source, sink):
+def crossing_flux(state, reg, source, sink, speed_cell=None, lo=None, hi=None,
+                  velocity=None):
     r"""Upwind volume flux [Gt/yr] across the facets from ``source`` cells to
     ``sink`` cells, with the transport's own operator: ``h u.n`` taken from
-    the upwind cell.  ``source``/``sink`` are DG0 indicator Functions."""
-    mesh = state["mesh"]
-    h, u = state["thickness"], state["velocity"]
-    n = fd.FacetNormal(mesh)
-    a, b = reg[source], reg[sink]
-    un = fd.dot(u, n)
-    # '+' side is the source: flux leaving it through this facet
-    f_p = conditional(gt(a('+') * b('-'), 0.0), 1.0, 0.0) \
-        * max_value(un('+'), 0.0) * h('+')
-    f_m = conditional(gt(a('-') * b('+'), 0.0), 1.0, 0.0) \
-        * max_value(un('-'), 0.0) * h('-')
-    return float(assemble((f_p + f_m) * dS)) * RHO_GT
+    the upwind cell.  ``source``/``sink`` name DG0 indicator Functions in
+    ``reg``.
 
-
-def crossing_flux_binned(state, reg, source, sink, speed_cell, bins,
-                         velocity=None):
-    r"""``crossing_flux`` split by the speed of the SOURCE cell, so a flux
+    Pass ``speed_cell`` (a DG0 speed field) with ``lo``/``hi`` [m/yr] to keep
+    only the facets whose SOURCE cell falls in that speed band, so a flux
     deficit can be attributed to the fast outlets or to the slow margins.
-    ``speed_cell`` is a DG0 speed field, ``bins`` its edges [m/yr]."""
+    ``velocity`` overrides the state's own velocity, which is how the same
+    facets are integrated with the observed velocity."""
     mesh = state["mesh"]
     h = state["thickness"]
     u = velocity if velocity is not None else state["velocity"]
     n = fd.FacetNormal(mesh)
     a, b = reg[source], reg[sink]
     un = fd.dot(u, n)
-    out = []
-    for lo, hi in zip(bins[:-1], bins[1:]):
-        def band(side):
-            return (conditional(gt(speed_cell(side), Constant(lo)), 1.0, 0.0)
-                    * conditional(lt(speed_cell(side), Constant(hi)), 1.0, 0.0))
-        f_p = conditional(gt(a('+') * b('-'), 0.0), 1.0, 0.0) * band('+') \
-            * max_value(un('+'), 0.0) * h('+')
-        f_m = conditional(gt(a('-') * b('+'), 0.0), 1.0, 0.0) * band('-') \
-            * max_value(un('-'), 0.0) * h('-')
-        out.append(float(assemble((f_p + f_m) * dS)) * RHO_GT)
-    return out
+
+    def band(side):
+        if speed_cell is None:
+            return Constant(1.0)
+        return (conditional(gt(speed_cell(side), Constant(lo)), 1.0, 0.0)
+                * conditional(lt(speed_cell(side), Constant(hi)), 1.0, 0.0))
+
+    # '+' side is the source: flux leaving it through this facet
+    f_p = conditional(gt(a('+') * b('-'), 0.0), 1.0, 0.0) * band('+') \
+        * max_value(un('+'), 0.0) * h('+')
+    f_m = conditional(gt(a('-') * b('+'), 0.0), 1.0, 0.0) * band('-') \
+        * max_value(un('-'), 0.0) * h('-')
+    return float(assemble((f_p + f_m) * dS)) * RHO_GT
 
 
 def boundary_flux(state, reg, source):
@@ -242,9 +234,11 @@ def report(states, csv_path=None):
         uo = a["velocity_obs"]
         sp.interpolate(fd.sqrt(fd.dot(uo, uo) + Constant(1e-12)))
         bins = [0.0, 100.0, 500.0, 1500.0, 1e9]
-        m_bins = crossing_flux_binned(a, reg, "grounded", "floating", sp, bins)
-        o_bins = crossing_flux_binned(a, reg, "grounded", "floating", sp, bins,
-                                      velocity=uo)
+        m_bins = [crossing_flux(a, reg, "grounded", "floating", sp, lo, hi)
+                  for lo, hi in zip(bins[:-1], bins[1:])]
+        o_bins = [crossing_flux(a, reg, "grounded", "floating", sp, lo, hi,
+                                velocity=uo)
+                  for lo, hi in zip(bins[:-1], bins[1:])]
         print("\n    grounding-line flux by observed speed of the source cell "
               "[Gt/yr]")
         print(f"      {'speed [m/yr]':>16s} {'model':>9s} {'observed':>9s} "

@@ -17,7 +17,6 @@ well under 1. A ratio near or above 1 means most of each rank's data is halo.
 import sys
 import numpy as np
 from firedrake import Mesh, FunctionSpace
-from firedrake.petsc import PETSc
 from mpi4py import MPI
 
 fn = sys.argv[1]

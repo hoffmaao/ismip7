@@ -1606,15 +1606,18 @@ def run_simulation(
             # front ADVANCES, and zeroing it would pin the front wherever the
             # one-step influx is under front_hmin. So outside the level set's
             # extent the thickness is NOT exactly zero - it may hold inflow
-            # accumulating toward the threshold. In that strip of water cells
-            # the level set's drag gate has switched the ocean drag OFF. What
-            # damps them is the composite rheology's h_visc_floor, the basal
-            # friction law - which IS active here: effective_pressure floors
-            # the overburden thickness at 1 m while the water pressure uses
-            # the true thickness, so N > 0 below front_hmin and both laws take
-            # their nonzero branch (the exact-zero shelf holds for real
-            # shelves, h well above 1 m, not for this strip) - and the
-            # alpha_gl GL-gated viscous collar, at full strength where He = 0.
+            # accumulating toward the threshold. The level set's drag gate has
+            # switched the ocean drag OFF in those cells, and what damps them
+            # splits by whether they lie inside the t=0 extent:
+            #   inside  - h_visc_floor, the basal friction law, and the
+            #     alpha_gl collar. N > 0 on a thin cell (effective_pressure
+            #     floors the overburden at 1 m while p_W uses the true
+            #     thickness), and C_w0 > 0, so tau_b is nonzero.
+            #   outside (the advance strip of a free law) - h_visc_floor and
+            #     the alpha_gl collar ONLY. N > 0 for the same reason, but
+            #     C_w0 is weertman_anchor at the t=0 geometry, where H = 0,
+            #     and c_w0_floor defaults to 0, so tau_W = 0 and tau_b = 0
+            #     under both laws whatever N is.
             data = h_dg.dat.data
             sliver = retreat_slivers(data, h_dg_old.dat.data_ro, front_hmin)
             calv_gt += mesh.comm.allreduce(

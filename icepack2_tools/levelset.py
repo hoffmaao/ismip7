@@ -24,11 +24,11 @@ come from :mod:`icepack2_tools.runconfig` (``ISMIP7_CALVING``,
 and on three ranks.
 """
 
-from icepack_tools.levelset import (
-    ANCHORS, LAWS, LevelSet as _LevelSet,
-)
+import sys
 
-__all__ = ["ANCHORS", "LAWS", "LevelSet"]
+from icepack_tools.levelset import LevelSet as _LevelSet
+
+__all__ = ["LevelSet", "initial_distance"]
 
 
 class LevelSet(_LevelSet):
@@ -43,3 +43,51 @@ class LevelSet(_LevelSet):
 
     def __init__(self, *args, anchor="extent", **kwargs):
         super().__init__(*args, anchor=anchor, **kwargs)
+
+
+class _DistanceOnly(LevelSet):
+    r"""Construction stops at the eikonal solve: no advection or extension
+    solvers, because a caller after the t=0 distance never advances this
+    object."""
+
+    def _build_solvers(self):
+        pass
+
+
+class _QuietPETSc:
+    r"""``PETSc`` with a silent ``Sys.Print``, everything else the real one."""
+
+    class Sys:
+        @staticmethod
+        def Print(*args, **kwargs):
+            pass
+
+    def __init__(self, petsc):
+        self._petsc = petsc
+
+    def __getattr__(self, name):
+        return getattr(self._petsc, name)
+
+
+def initial_distance(mesh, h_dg, h_min=1.0):
+    r"""The signed distance to the extent of ``h_dg``, as a DG0 Function.
+
+    Same field as ``LevelSet(mesh, h_dg, law="none", h_min=h_min).phi``, but
+    without building the advection/extension solvers and without the front
+    banner, so a run that only needs an anchor logs exactly one level-set
+    line: the one naming the law in force.
+
+    The shared class builds its solvers and prints unconditionally in
+    ``__init__``, so both are turned off here for the duration of the
+    construction.  A distance-only entry point belongs in the toolbox itself
+    (plan Phase 0); this shim is the interim.
+    """
+    module = sys.modules[_LevelSet.__module__]
+    real = module.PETSc
+    module.PETSc = _QuietPETSc(real)
+    try:
+        return _DistanceOnly(
+            mesh, h_dg, law="none", h_min=h_min, drag_mask=None,
+        ).phi
+    finally:
+        module.PETSc = real

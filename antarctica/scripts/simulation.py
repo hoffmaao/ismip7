@@ -1493,7 +1493,7 @@ def run_simulation(
     phi_entry = None
     last_c_mean = 0.0
     if calving != "none":
-        from icepack2_tools.levelset import LevelSet
+        from icepack2_tools.levelset import LevelSet, initial_distance
         sig_g, sig_f = _calving_sigma_max()
         # `fixed` holds the front at phi0, which LevelSet captures at
         # construction. On a warm restart h_dg is the RESTARTED extent, so
@@ -1501,15 +1501,13 @@ def run_simulation(
         # checkpoint) instead: a resumed run must not re-freeze the front where
         # it had already retreated to, permanently barring cells a continuous
         # run of the same length would keep. The distance field comes from a
-        # throwaway level set built on that thickness, because the eikonal
+        # distance-only construction on that thickness, because the eikonal
         # solve reads the thickness of the object it belongs to. Use a scratch
         # Function, NOT h_dg: under DG0 geometry h_dg IS the live geometry.
         phi_init = None
         if calving == "fixed":
             _h0 = Function(Q_dg).project(ctx.get("H_init", h))
-            phi_init = LevelSet(
-                mesh, _h0, law="none", h_min=front_hmin, drag_mask=None,
-            ).phi
+            phi_init = initial_distance(mesh, _h0, h_min=front_hmin)
         level_set = LevelSet(
             mesh, h_dg, law=calving, h_min=front_hmin,
             sigma_max_grounded=sig_g, sigma_max_floating=sig_f,

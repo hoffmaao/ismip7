@@ -61,3 +61,6 @@ __pycache__/
 UaSource/
 *.tar.gz
 download_log.txt
+
+# Rendered movie frames from scripts/plot_movie.py (regenerable outputs)
+antarctica/figs/movie_*/

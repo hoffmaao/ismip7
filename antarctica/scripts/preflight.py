@@ -27,6 +27,7 @@ from icepack2_tools.boundary import sidecar_path
 from icepack2_tools.naming import map_basename
 from icepack2_tools.climatology import clim_start, clim_end, clim_scenario
 from icepack2_tools.runconfig import (
+    calving_law as _calving_law, calving_sigma_max as _calving_sigma_max,
     friction as _friction, geometry_space as _geometry_space, lc as _lc,
     lc_coarse as _lc_coarse,
 )
@@ -144,19 +145,30 @@ def shared_missing(warn=None):
     r"""Missing shared inputs. Non-fatal caveats are appended to ``warn``."""
     miss = []
     warn = warn if warn is not None else []
+    # Front configuration: a mistyped law would otherwise surface only after
+    # the forward's MAP load and initial solve.
+    try:
+        _calving_law()
+        _calving_sigma_max()
+    except ValueError as e:
+        miss.append(str(e))
     mesh_fn = os.environ.get(
         "ISMIP7_MESH", mesh_filename(lc_coarse, lc, get_buffer_m())
     )
     if not os.path.exists(mesh_fn):
         miss.append(f"mesh ({os.path.basename(mesh_fn)})")
-    # The MAP the forward will actually load: the one tagged with this
-    # geometry space, else the legacy untagged (CG1) MAP it falls back to with
-    # a warning. A legacy MAP runs, but its controls carry the CG1 front bias,
-    # so the run is a smoke test rather than a result.
-    inv = os.path.join(MESH_DIR, map_basename(friction, lc))
+    # The MAP the forward will actually load: ISMIP7_INVERSION if it names one
+    # explicitly, else the one tagged with this geometry space, else the legacy
+    # untagged (CG1) MAP it falls back to with a warning. A legacy MAP runs, but
+    # its controls carry the CG1 front bias, so the run is a smoke test rather
+    # than a result. An explicit override deliberately bypasses that lookup, so
+    # setup_model raises on a missing file rather than falling back: report it
+    # as a hard miss, exactly as the forward would.
+    inv_override = os.environ.get("ISMIP7_INVERSION")
+    inv = inv_override or os.path.join(MESH_DIR, map_basename(friction, lc))
     legacy = os.path.join(MESH_DIR, map_basename(friction, lc, geometry=False))
     if not os.path.exists(inv):
-        if os.path.exists(legacy):
+        if not inv_override and os.path.exists(legacy):
             warn.append(
                 f"no {os.path.basename(inv)}; the forward would fall back to "
                 f"{os.path.basename(legacy)} (inverted under a different "

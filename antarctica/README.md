@@ -461,9 +461,14 @@ strip) - and the `ISMIP7_ALPHA_GL` grounding-line-gated viscous collar, at
 full strength where `He = 0`. The
 momentum balance needs no front term: with DG0 geometry
 the facet term `rho g avg(h) jump(s)` at an ice/water face already IS the
-terminus water-pressure force. The one momentum-side change is that the
-buffer's floor-cell ocean drag is switched off in the strip of water cells
-next to the front, so front nodes are no longer slowed by it.
+terminus water-pressure force. The one momentum-side change is the drag gate:
+the mask is 1 only where `phi` exceeds one cell diameter, so the buffer's
+floor-cell ocean drag is off in every ice cell and in the water within a cell
+diameter of the front, acting only in water further out - front nodes are no
+longer slowed by it. On a thin cell inside the extent the backstops that
+remain are then the complete set: the composite rheology's `h_visc_floor`,
+the basal friction law, the `ISMIP7_ALPHA_GL` collar, and `ISMIP7_K_LIM`
+when raised for a rescue solve.
 
 `vonmises` is Morlighem et al. 2016 verbatim: `c = |u| sqrt(3) B eps~^(1/n) /
 sigma_max`, `eps~` from the tensile principal strain rates, `B = A^(-1/n)` from

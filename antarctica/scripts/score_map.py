@@ -47,7 +47,7 @@ _ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, os.path.dirname(_ROOT))
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
-from region_budget import crossing_flux, regions
+from region_budget import discharge, regions
 
 BANDS = [0.0, 100.0, 500.0, 1500.0, 1e9]
 BAND_LABELS = ["< 100", "100 - 500", "500 - 1500", "> 1500"]
@@ -69,22 +69,14 @@ def score(path):
     open_water.dat.data[:] = 1.0 - reg["ice"].dat.data_ro
     reg["open"] = open_water
 
-    def discharge(velocity, speed=None, lo=None, hi=None):
-        """Grounding line plus grounded front: every facet grounded ice leaves
-        through, optionally restricted to one observed-speed band."""
-        return (crossing_flux(state, reg, "grounded", "floating",
-                              speed, lo, hi, velocity)
-                + crossing_flux(state, reg, "grounded", "open",
-                                speed, lo, hi, velocity))
-
-    q_m = discharge(u)
-    q_o = discharge(u_obs)
+    q_m = discharge(state, reg)
+    q_o = discharge(state, reg, u_obs)
     sp = Function(Q0).interpolate(
         fd.sqrt(fd.dot(u_obs, u_obs) + Constant(1e-12)))
     rows = []
     for lab, lo, hi in zip(BAND_LABELS, BANDS[:-1], BANDS[1:]):
-        m = discharge(u, sp, lo, hi)
-        o = discharge(u_obs, sp, lo, hi)
+        m = discharge(state, reg, None, sp, lo, hi)
+        o = discharge(state, reg, u_obs, sp, lo, hi)
         rows.append((lab, m, o, m / o if o > 1e-9 else float("nan")))
     return {"path": path, "q_model": q_m, "q_obs": q_o,
             "ratio": q_m / q_o if q_o > 1e-9 else float("nan"), "bands": rows}

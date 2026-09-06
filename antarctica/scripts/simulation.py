@@ -52,7 +52,9 @@ from icepack2_tools.mpi_stats import global_mean, global_range
 from icepack2_tools.boundary import load_boundary_ids
 from icepack2_tools.geometry import sample_to_geometry
 from icepack2_tools.naming import map_basename
-from icepack2_tools.front import retreat_slivers
+from icepack2_tools.front import (
+    clear_reference_where_ice_free, retreat_slivers,
+)
 from icepack2_tools.runconfig import (
     friction as _friction, geometry_space as _geometry_space, lc as _lc,
     n_flow as _n_flow,
@@ -155,6 +157,11 @@ def setup_model(restart_from=None):
     # Resolved first because the compute mesh is loaded FROM this friction's
     # MAP checkpoint (below), not from a fresh Mesh(.msh).
     friction = _friction()
+    # Reject a mistyped front configuration before the MAP load and the
+    # initial Newton solve, which cost minutes to tens of minutes at 2500 m
+    # on a detached launch.
+    _calving_law()
+    _calving_sigma_max()
     # Exact-zero-shelf residual laws (icepack2 dual, dual_friction.py):
     #   regularized_coulomb -> Coulomb cap tau_c=c0*N
     #   budd                -> tau_b ~ N_hat=N_eff/N_ref, PISM-delta grounded
@@ -1077,6 +1084,10 @@ def run_simulation(
     # ISMIP7_FIXED_FRONT=1 unconditionally, which is why the flag may not
     # override an explicit ISMIP7_CALVING choice.
     legacy_front_sink = fixed_front and calving == "none"
+    # A free law moves the front, so the frozen a_ref must follow the live
+    # extent; `fixed` and the legacy flag pin it on purpose and keep the
+    # t=0-only mask.
+    free_front = calving not in ("none", "fixed")
     if calving != "none":
         front_owner = f"level-set {calving} law (ISMIP7_CALVING={calving})" + (
             "; ISMIP7_FIXED_FRONT is set but ignored for removal"
@@ -1222,6 +1233,17 @@ def run_simulation(
                 # (vonmises) a frozen sink here would re-empty every cell the
                 # front advances into, pinning it at t=0 with no error.
                 a_ref.dat.data[beyond_front] = 0.0
+            # The same rule against the LIVE extent, both directions:
+            #   advance - a frozen SINK outside the extent re-empties the
+            #     cells a free front advances into (the t=0 mask above);
+            #   retreat - a frozen SOURCE inside the t=0 extent regrows the
+            #     cells a free front has calved, since a_ref at a t=0 front
+            #     cell is the terminus outflow and is large and positive.
+            # A free law therefore re-masks a_ref each step (below) against
+            # the cells the level set reports ice-free. This changes free-law
+            # projection numbers under ISMIP7_APPARENT_MB; they were wrong
+            # before. The pinned laws keep the t=0-only mask: there the front
+            # is meant to stay put.
             amb_cap = float(os.environ.get("ISMIP7_AMB_CAP", "0"))
             if amb_cap > 0.0:
                 np.clip(a_ref.dat.data, -amb_cap, 5.0 * amb_cap,
@@ -1513,11 +1535,15 @@ def run_simulation(
         # removal, so the legacy t=0 mask contributes nothing here.
         beyond = beyond_front if legacy_front_sink else None
         calv_frac = None
+        ls_ice_free = None
         if level_set is not None:
             last_c_mean = level_set.advance(
                 dt_local, u_vel, h_dg, b, A_map, n_flow_val)
             lsb, calv_frac = level_set.calving_masks()
             beyond = lsb
+            ls_ice_free = level_set.beyond_front()
+            if a_ref is not None and free_front:
+                clear_reference_where_ice_free(a_ref.dat.data, ls_ice_free)
 
         un = fd.dot(u_vel, n_facet)
         un_plus = (un + abs(un)) / 2
@@ -1570,12 +1596,18 @@ def run_simulation(
         out_gt = float(assemble(un_plus * h_dg * ds)) * rho_gt * dt_local
         m1 = float(assemble(h_dg * dx)) * rho_gt
 
-        # Floor to h_clamp, EXCEPT beyond the fixed front: those cells are
+        # Floor to h_clamp, EXCEPT where there is no ice: those cells are
         # outside the ice domain, so flooring them would hand the mask below
         # h_clamp of fresh ice to re-calve every step and report as terminus
         # discharge. There the floor is zero and the front stays a pure sink.
+        # With a level set the exemption is everything it reports ice-free,
+        # not just the cells calved this step: under a free law `beyond` is
+        # only the handful the front just passed, so flooring the rest of the
+        # buffer would fabricate ice across every never-glaciated cell.
         data = h_dg.dat.data
         floor = np.full_like(data, h_clamp)
+        if ls_ice_free is not None:
+            floor[ls_ice_free] = 0.0
         if beyond is not None:
             floor[beyond] = 0.0
         np.maximum(data, floor, out=data)

@@ -6,7 +6,32 @@ front has moved. They live here, as pure functions over the cell arrays, so
 they can be exercised without standing up a whole run.
 """
 
-__all__ = ["retreat_slivers"]
+__all__ = ["retreat_slivers", "clear_reference_where_ice_free"]
+
+
+def clear_reference_where_ice_free(a_ref, ice_free):
+    r"""Zero the frozen apparent-MB reference in the cells that hold no ice.
+
+    ``a_ref`` is the per-cell reference array, mutated in place; ``ice_free``
+    is the level set's ice-free mask for the CURRENT extent.
+
+    The reference is the t=0 flux divergence, so at a t=0 front cell it is the
+    terminus outflow: large and positive. Applied against the live extent it
+    closes both directions of the same rule - no balancing reference where
+    there is no ice:
+
+    * advance - a frozen SINK outside the extent re-empties the cells a free
+      front advances into;
+    * retreat - a frozen SOURCE inside the t=0 extent regrows the cells a free
+      front has just calved, so the front cannot retreat and its calving tally
+      counts the regrown ice again every step.
+
+    Zeroing in place is deliberate: a cell that later re-enters the ice keeps
+    ``a_ref = 0``, because the frozen reference was only ever defined on the
+    t=0 ice.
+    """
+    a_ref[ice_free] = 0.0
+    return a_ref
 
 
 def retreat_slivers(h_new, h_old, front_hmin):

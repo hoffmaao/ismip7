@@ -148,6 +148,21 @@ def crossing_flux(state, reg, source, sink, speed_cell=None, lo=None, hi=None,
     return float(assemble((f_p + f_m) * dS)) * RHO_GT
 
 
+def discharge(state, reg, velocity=None, speed_cell=None, lo=None, hi=None):
+    r"""Grounded discharge [Gt/yr]: every facet grounded ice leaves through,
+    the grounding line (``grounded -> floating``) plus the grounded front
+    (``grounded -> open``).
+
+    The one definition both this tool and ``score_map.py`` report, so their
+    numbers stay comparable. ``reg`` must carry an ``open`` indicator. The
+    band arguments are :func:`crossing_flux`'s, so summing over a set of
+    bands that covers the speed range reproduces the unbanded total."""
+    return (crossing_flux(state, reg, "grounded", "floating",
+                          speed_cell, lo, hi, velocity)
+            + crossing_flux(state, reg, "grounded", "open",
+                            speed_cell, lo, hi, velocity))
+
+
 def boundary_flux(state, reg, source):
     r"""Outflow [Gt/yr] across the mesh boundary from ``source`` cells."""
     mesh = state["mesh"]
@@ -234,15 +249,9 @@ def report(states, csv_path=None):
         uo = a["velocity_obs"]
         sp.interpolate(fd.sqrt(fd.dot(uo, uo) + Constant(1e-12)))
         bins = [0.0, 100.0, 500.0, 1500.0, 1e9]
-        def band_discharge(lo, hi, velocity=None):
-            return (crossing_flux(a, reg, "grounded", "floating",
-                                  sp, lo, hi, velocity)
-                    + crossing_flux(a, reg, "grounded", "open",
-                                    sp, lo, hi, velocity))
-
-        m_bins = [band_discharge(lo, hi)
+        m_bins = [discharge(a, reg, None, sp, lo, hi)
                   for lo, hi in zip(bins[:-1], bins[1:])]
-        o_bins = [band_discharge(lo, hi, velocity=uo)
+        o_bins = [discharge(a, reg, uo, sp, lo, hi)
                   for lo, hi in zip(bins[:-1], bins[1:])]
         print("\n    discharge (grounding line + grounded front) by observed "
               "speed of the source cell [Gt/yr]")

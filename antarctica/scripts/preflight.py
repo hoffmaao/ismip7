@@ -27,6 +27,7 @@ from icepack2_tools.boundary import sidecar_path
 from icepack2_tools.naming import map_basename
 from icepack2_tools.climatology import clim_start, clim_end, clim_scenario
 from icepack2_tools.runconfig import (
+    calving_law as _calving_law, calving_sigma_max as _calving_sigma_max,
     friction as _friction, geometry_space as _geometry_space, lc as _lc,
     lc_coarse as _lc_coarse,
 )
@@ -144,6 +145,13 @@ def shared_missing(warn=None):
     r"""Missing shared inputs. Non-fatal caveats are appended to ``warn``."""
     miss = []
     warn = warn if warn is not None else []
+    # Front configuration: a mistyped law would otherwise surface only after
+    # the forward's MAP load and initial solve.
+    try:
+        _calving_law()
+        _calving_sigma_max()
+    except ValueError as e:
+        miss.append(str(e))
     mesh_fn = os.environ.get(
         "ISMIP7_MESH", mesh_filename(lc_coarse, lc, get_buffer_m())
     )

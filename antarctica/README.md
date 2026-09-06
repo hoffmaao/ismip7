@@ -451,14 +451,16 @@ however little: that is how the front advances, and zeroing it would pin the
 front wherever the one-step influx is under the threshold. So outside the
 extent the thickness is not necessarily zero - it may hold inflow accumulating
 toward the threshold. Those are exactly the water cells next to the front,
-where the drag gate below has switched the ocean drag OFF. What damps them is
-the composite rheology's `h_visc_floor`, the basal friction law - which IS
-active there: `effective_pressure` floors the overburden thickness at 1 m
-while the water pressure uses the true thickness, so `N > 0` below
-`ISMIP7_FRONT_HMIN` and both friction laws take their nonzero branch (the
-exact-zero shelf holds for real shelves, `h` well above 1 m, not for this
-strip) - and the `ISMIP7_ALPHA_GL` grounding-line-gated viscous collar, at
-full strength where `He = 0`. The
+where the drag gate below has switched the ocean drag OFF. What damps them
+splits by whether they lie inside the t=0 extent. INSIDE it, a thin cell has
+`N > 0` (`effective_pressure` floors the overburden at 1 m while the water
+pressure uses the true thickness) and `C_w0 > 0`, so the damping is
+`h_visc_floor`, the basal friction law, and the `ISMIP7_ALPHA_GL` collar.
+OUTSIDE it - the strip a free law advances into - `N > 0` for the same reason,
+but `C_w0` is `weertman_anchor` evaluated at the t=0 geometry, where `H = 0`,
+and `ISMIP7_RC_CW0_FLOOR` defaults to 0, so `tau_W = 0` and `tau_b = 0` under
+both friction laws whatever `N` is; the damping there is `h_visc_floor` and
+the `ISMIP7_ALPHA_GL` collar only. The
 momentum balance needs no front term: with DG0 geometry
 the facet term `rho g avg(h) jump(s)` at an ice/water face already IS the
 terminus water-pressure force. The one momentum-side change is the drag gate:
@@ -488,7 +490,16 @@ Control and projection configurations differ, and the code keeps them
 distinct. The protocol's CONTROL is an unforced constant-climate run with
 "fracture / ice shelf collapse / calving / GIA etc set constant to end of 2014
 conditions", so the control configuration here is `ISMIP7_APPARENT_MB` with a
-PINNED front: `ISMIP7_CALVING=fixed`, or the legacy `ISMIP7_FIXED_FRONT=1`.
+PINNED front, and specifically `ISMIP7_FIXED_FRONT=1` with
+`ISMIP7_CALVING=none` (no level set): that is what `run_core_matrix.sh` runs
+and what every control result to date used. `ISMIP7_CALVING=fixed` also pins
+the front, but it is NOT the same run and the two are not interchangeable.
+Configuring any level-set law builds a `LevelSet`, whose `drag_mask` switches
+the floor-cell ocean drag off in every ice cell and in the near-front water,
+while the legacy flag leaves that drag on everywhere below `ISMIP7_H_OCEAN`;
+and `fixed` additionally runs the retreat-sliver rule inside the t=0 extent,
+which the legacy mask does not, so its `calv` column and its settled front
+position differ slightly. Both close the budget.
 `vonmises` is for PROJECTIONS, which are encouraged to use a physically based
 law and must never be silently pinned. A configured `ISMIP7_CALVING` law owns
 the front outright: whenever one is set the level set alone decides removal,
@@ -581,7 +592,7 @@ how it reaches the core report.
 | `ISMIP7_BUFFER_M` | outline buffer (m) used to resolve the default mesh/boundary-id filenames (see §3) | `20000` |
 | `ISMIP7_MESH` | mesh `.msh` path (inversion and tools). A forward takes its mesh from the MAP/restart checkpoint, which records its own mesh basename and parameters, so here it only names the boundary sidecar for a legacy checkpoint that carries no such record | `mesh/antarctica_<COARSE>_<LC>_buffered<BUFFER_M>.msh` |
 | `ISMIP7_INVERSION` | explicit MAP checkpoint path for a forward/preflight, replacing the `map_basename` lookup. It must be a MAP of the same friction/n/geometry (not checked). Use it to A/B differently regularised MAPs on one mesh (e.g. velocity-only vs transient dH/dt) instead of swapping files | derived from friction/n/geometry/lc |
-| `ISMIP7_CALVING` | calving-front law on a buffered mesh, via a level set (`icepack2_tools/levelset.py`, ISSM-style): `none` (front advances freely, never calves), `fixed` (front frozen at t=0, the level-set form of `ISMIP7_FIXED_FRONT`), `vonmises` (Morlighem et al. 2016 rate `\|u\| sigma~/sigma_max` from the run's own strain rates and fluidity). Removed ice is the `calv` budget column; the mean front rate over front cells prints as `c_front`. The control configuration is `ISMIP7_APPARENT_MB` with a pinned front (`fixed`, or `ISMIP7_FIXED_FRONT=1`), per the protocol's "calving set constant to end-of-2014 conditions"; `vonmises` is for projections and is never pinned, not even when `ISMIP7_FIXED_FRONT` is also set: a configured law owns removal and the legacy mask is ignored. Under every law the apparent-MB reference is defined only on the t=0 ice extent | `none` |
+| `ISMIP7_CALVING` | calving-front law on a buffered mesh, via a level set (`icepack2_tools/levelset.py`, ISSM-style): `none` (front advances freely, never calves), `fixed` (front frozen at t=0; pins the front like `ISMIP7_FIXED_FRONT` but is not the same run - it builds a level set, so the floor-cell ocean drag is gated off in every ice cell and in the near-front water, and it applies the retreat-sliver rule inside the t=0 extent), `vonmises` (Morlighem et al. 2016 rate `\|u\| sigma~/sigma_max` from the run's own strain rates and fluidity). Removed ice is the `calv` budget column; the mean front rate over front cells prints as `c_front`. The control configuration is `ISMIP7_APPARENT_MB` with `ISMIP7_FIXED_FRONT=1` and `ISMIP7_CALVING=none`, per the protocol's "calving set constant to end-of-2014 conditions"; `vonmises` is for projections and is never pinned, not even when `ISMIP7_FIXED_FRONT` is also set: a configured law owns removal and the legacy mask is ignored. Under every law the apparent-MB reference is defined only on the t=0 ice extent | `none` |
 | `ISMIP7_CALVING_SIGMA_MAX_GROUNDED`, `ISMIP7_CALVING_SIGMA_MAX_FLOATING` | von Mises tensile-stress thresholds [MPa] (ISSM defaults) | `1.0`, `0.15` |
 | `ISMIP7_BNDIDS` | override boundary-id JSON | `mesh/boundary_ids_antarctica_<COARSE>_<LC>_buffered<BUFFER_M>.json` if present, else `mesh/boundary_ids.json` |
 | `ISMIP7_GEOMETRY_SPACE` | space for `h`/`s`/`b` (`dg0`: one thickness for the terminus force and the mass flux; `cg1`: legacy, for A/B only) - also selects the MAP h5 (see `../GEOMETRY_DISCRETIZATION.md`) | `dg0` |

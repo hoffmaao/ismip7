@@ -234,13 +234,18 @@ def report(states, csv_path=None):
         uo = a["velocity_obs"]
         sp.interpolate(fd.sqrt(fd.dot(uo, uo) + Constant(1e-12)))
         bins = [0.0, 100.0, 500.0, 1500.0, 1e9]
-        m_bins = [crossing_flux(a, reg, "grounded", "floating", sp, lo, hi)
+        def band_discharge(lo, hi, velocity=None):
+            return (crossing_flux(a, reg, "grounded", "floating",
+                                  sp, lo, hi, velocity)
+                    + crossing_flux(a, reg, "grounded", "open",
+                                    sp, lo, hi, velocity))
+
+        m_bins = [band_discharge(lo, hi)
                   for lo, hi in zip(bins[:-1], bins[1:])]
-        o_bins = [crossing_flux(a, reg, "grounded", "floating", sp, lo, hi,
-                                velocity=uo)
+        o_bins = [band_discharge(lo, hi, velocity=uo)
                   for lo, hi in zip(bins[:-1], bins[1:])]
-        print("\n    grounding-line flux by observed speed of the source cell "
-              "[Gt/yr]")
+        print("\n    discharge (grounding line + grounded front) by observed "
+              "speed of the source cell [Gt/yr]")
         print(f"      {'speed [m/yr]':>16s} {'model':>9s} {'observed':>9s} "
               f"{'model/obs':>10s}")
         labels = ["< 100", "100 - 500", "500 - 1500", "> 1500"]

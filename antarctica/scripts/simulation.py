@@ -1607,11 +1607,14 @@ def run_simulation(
             # one-step influx is under front_hmin. So outside the level set's
             # extent the thickness is NOT exactly zero - it may hold inflow
             # accumulating toward the threshold. In that strip of water cells
-            # the level set's drag gate has switched the ocean drag OFF, and
-            # the basal friction is exactly zero as well (afloat, N = 0, so
-            # both friction laws give tau_b = 0). What damps them is the
-            # composite rheology's h_visc_floor and the alpha_gl GL-gated
-            # viscous collar, which is at full strength where He = 0.
+            # the level set's drag gate has switched the ocean drag OFF. What
+            # damps them is the composite rheology's h_visc_floor, the basal
+            # friction law - which IS active here: effective_pressure floors
+            # the overburden thickness at 1 m while the water pressure uses
+            # the true thickness, so N > 0 below front_hmin and both laws take
+            # their nonzero branch (the exact-zero shelf holds for real
+            # shelves, h well above 1 m, not for this strip) - and the
+            # alpha_gl GL-gated viscous collar, at full strength where He = 0.
             data = h_dg.dat.data
             sliver = retreat_slivers(data, h_dg_old.dat.data_ro, front_hmin)
             calv_gt += mesh.comm.allreduce(

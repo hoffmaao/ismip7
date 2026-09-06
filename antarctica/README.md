@@ -451,11 +451,14 @@ however little: that is how the front advances, and zeroing it would pin the
 front wherever the one-step influx is under the threshold. So outside the
 extent the thickness is not necessarily zero - it may hold inflow accumulating
 toward the threshold. Those are exactly the water cells next to the front,
-where the drag gate below has switched the ocean drag OFF and the basal
-friction is exactly zero (afloat, `N = 0`, so both friction laws give
-`tau_b = 0`); what damps them is the composite rheology's `h_visc_floor` and
-the `ISMIP7_ALPHA_GL` grounding-line-gated viscous collar, at full strength
-where `He = 0`. The
+where the drag gate below has switched the ocean drag OFF. What damps them is
+the composite rheology's `h_visc_floor`, the basal friction law - which IS
+active there: `effective_pressure` floors the overburden thickness at 1 m
+while the water pressure uses the true thickness, so `N > 0` below
+`ISMIP7_FRONT_HMIN` and both friction laws take their nonzero branch (the
+exact-zero shelf holds for real shelves, `h` well above 1 m, not for this
+strip) - and the `ISMIP7_ALPHA_GL` grounding-line-gated viscous collar, at
+full strength where `He = 0`. The
 momentum balance needs no front term: with DG0 geometry
 the facet term `rho g avg(h) jump(s)` at an ice/water face already IS the
 terminus water-pressure force. The one momentum-side change is that the

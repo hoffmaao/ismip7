@@ -324,10 +324,11 @@ Because the MAP filename encodes only friction, `LC`, geometry space and flow
 exponent, a velocity-only MAP and a transient one land on the **same path**.
 Give variants their own `ISMIP7_MAP_OUT`. Every MAP checkpoint also records the
 objective that produced it as root attributes - `misfit_norm`, `gamma_theta`,
-`gamma_phi`, `dhdt_weight`, `dhdt_net_sigma` (the *resolved* value: 0 whenever
-the term was not actually built), alongside `mesh_basename` and the
-`lc`/`lc_coarse`/`buffer_m` mesh parameters - so a MAP already on disk can be
-identified:
+`gamma_phi`, `log_vel_weight`, `log_vel_eps`, `dhdt_weight`, `dhdt_net_sigma`
+(`log_vel_weight` and `dhdt_net_sigma` are the *resolved* values: the weight
+`auto` picked, and 0 whenever the term was not actually built), alongside
+`mesh_basename` and the `lc`/`lc_coarse`/`buffer_m` mesh parameters - so a MAP
+already on disk can be identified:
 
 ```bash
 python -c "import h5py,sys; print(dict(h5py.File(sys.argv[1])['/'].attrs))" MAP.h5
@@ -415,6 +416,20 @@ LABEL=results/<a> LABEL=results/<b> ...` overlays their budget timeseries
 (`ISMIP7_CHECKPOINT_EVERY_YR`) into thickness-change / speed / thickness
 frames and an mp4 under `figs/movie_<exp>/`. Both are read-only.
 
+Two more read-only diagnostics answer *why* a run drifts rather than *when*.
+`scripts/region_budget.py <ckpt>.h5 [<later>.h5] [--csv <run>_timeseries.csv]`
+splits the budget into grounded and floating ice - grounded ice gains from SMB
+and loses only across the grounding line - so a control that gains volume
+above flotation is read directly against the observed ~2000-2200 Gt/yr of
+discharge; it uses the transport's own DG0 upwind operator, so the fluxes are
+the ones the run applied. `scripts/score_map.py MAP.h5 [MAP2.h5 ...]` scores an
+inversion by `Q(u_model) / Q(u_obs)` across its own grounding line, overall and
+per band of observed speed, which is the comparison `ISMIP7_LOG_VEL_WEIGHT`
+exists to move; it re-solves the diagnostic through `simulation.setup_model`,
+so it also works on periodic MAP checkpoints that carry no velocity. Both take
+the run's environment (`ISMIP7_LC`, `ISMIP7_FRICTION`, `ISMIP7_GEOMETRY_SPACE`
+and the rest), which must match the inversion's.
+
 ### Calving front on a buffered mesh (`ISMIP7_CALVING`)
 
 A buffered mesh has no calving sink of its own: ice that reaches the 2015
@@ -483,8 +498,12 @@ thickness every step and the retreat itself is carried in `h` by the sub-cell
 shed. The exception is `fixed`, which anchors on the t=0 thickness (`H_init`,
 reloaded from every checkpoint) so a resumed run does not re-freeze the front
 at the extent it restarted from. The shared implementation's tests are
-`icepack_tools/test/levelset_test.py`; the ISMIP7-side tests are to be
-rebuilt.
+`icepack_tools/test/levelset_test.py`. The ISMIP7-side rules the transport
+applies around it - the retreat-sliver mask, the apparent-MB extent masking
+and the `fixed` law's t=0 anchor - are covered by the repo-root suite
+(`tests/`, serial and seconds; see AGENTS.md §4). The level-set unit tests
+written against this integration in Sep 2026 were lost before they were
+committed and are still to be rebuilt.
 
 Control and projection configurations differ, and the code keeps them
 distinct. The protocol's CONTROL is an unforced constant-climate run with
@@ -640,10 +659,13 @@ how it reaches the core report.
 Per experiment in `results/`:
 - `<exp>_final.h5` — final state checkpoint (Firedrake `CheckpointFile`),
   self-contained for restart: mesh, geometry, inversion fields, the full
-  `(u, M, τ)` solver state, and the frozen apparent-MB reference when one is
-  active. Under the `dg0` geometry default the saved `thickness` **is** the
-  prognostic transport state; a `cg1` run additionally saves the separate DG0
-  carrier as `thickness_dg`, since there the CG1 `thickness` is only its lift.
+  `(u, M, τ)` solver state, the frozen apparent-MB reference when one is
+  active, and the level-set field (`levelset`) when an `ISMIP7_CALVING` law is
+  configured - diagnostic only, since a restart rebuilds the front from the
+  thickness (see "Calving front on a buffered mesh" above). Under the `dg0`
+  geometry default the saved `thickness` **is** the prognostic transport state;
+  a `cg1` run additionally saves the separate DG0 carrier as `thickness_dg`,
+  since there the CG1 `thickness` is only its lift.
   The `geometry_space` and `mesh_basename` attributes record the discretization
   and the `.msh` the trajectory started on, so a restart resolves the same
   boundary sidecar; restarting into a different geometry space projects and
@@ -655,8 +677,10 @@ Per experiment in `results/`:
 - `<exp>_timeseries.csv` — one row per `OUTPUT_INTERVAL` steps with columns
   `year, vaf_mm_sle, mass_gt, smb_gtyr, melt_gtyr, outflux_gtyr, calv_gt,
   clamp_gt, resid_gt, amb_gtyr`: the mass-budget audit (SMB, shelf melt,
-  boundary outflux, fixed-front calving, clamp/limiter corrections, the
-  apparent-MB source, and the budget residual, which must close to 0.00).
+  boundary outflux, calving removed by whichever front mechanism is in force
+  (an `ISMIP7_CALVING` law or the legacy fixed-front mask), clamp/limiter
+  corrections, the apparent-MB source as APPLIED, and the budget residual,
+  which must close to 0.00).
 
 VAF is reported in mm of sea-level equivalent; mass in Gt.
 

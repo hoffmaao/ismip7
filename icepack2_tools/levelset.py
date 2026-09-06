@@ -17,11 +17,13 @@ the front is described by one object everywhere:
 * advance is the thickness transport's job.
 
 Everything ISMIP7 adds is here: the ``extent`` anchor as the default (the
-sheet's thickness is the authority on where ice is) and the knob names, which
+sheet's thickness is the authority on where ice is), :func:`initial_distance`
+for the t=0 anchor the ``fixed`` law freezes on, and the knob names, which
 come from :mod:`icepack2_tools.runconfig` (``ISMIP7_CALVING``,
-``ISMIP7_CALVING_SIGMA_MAX_GROUNDED`` / ``_FLOATING``).  Their tests are
-``icepack_tools/test/levelset_test.py``, which cover both anchors serially
-and on three ranks.
+``ISMIP7_CALVING_SIGMA_MAX_GROUNDED`` / ``_FLOATING``).  The shared class's
+tests are ``icepack_tools/test/levelset_test.py``, which cover both anchors
+serially and on three ranks; what this module adds is tested in
+``tests/test_initial_distance.py``.
 """
 
 import sys

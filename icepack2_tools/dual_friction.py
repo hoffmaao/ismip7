@@ -315,10 +315,14 @@ def build_rc_residual(
     # real ice / physical speeds, so genuine shelves keep tau_b = 0.
     if ocean_drag > 0.0:
         # drag_mask (optional DG0 Function, default 1 everywhere): a
-        # level-set front switches the drag OFF in the strip of water cells
-        # adjacent to the front so front nodes are not slowed by it
-        # (icepack2_tools.levelset). Elsewhere the mask is 1 and the term
-        # is exactly the gia ocean_drag.
+        # level-set front (icepack2_tools.levelset) sets it to 1 only where
+        # phi > one cell diameter, so the drag is OFF in EVERY ice cell and
+        # in the water within a cell diameter of the front, and acts only in
+        # water further out. Once a calving law is configured the backstops
+        # on a thin cell inside the extent are therefore h_visc_floor, the
+        # basal friction law, the alpha_gl collar, and k_lim when raised.
+        # Without a level set the mask is 1 and the term is exactly the
+        # given ocean_drag.
         gate = Constant(1.0) if drag_mask is None else drag_mask
         tau_b = tau_b + (Constant(ocean_drag) * gate
                          * max_value(Constant(0.0), Constant(1.0) - H / Constant(h_ocean))

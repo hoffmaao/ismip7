@@ -189,8 +189,12 @@ def main():
         print(f"{len(frame_paths)} frames in {out}; ffmpeg not found, no video")
         return
     mp4 = os.path.join(out, f"{base}.mp4")
+    # -frames:v bounds the encode to the frames THIS run wrote: the image2
+    # sequence otherwise reads frame_0000 upward to the first gap, so a
+    # re-render with a larger stride would splice the tail of the old one.
     cmd = ["ffmpeg", "-y", "-loglevel", "error", "-framerate", str(args.fps),
            "-i", os.path.join(out, "frame_%04d.png"),
+           "-frames:v", str(len(frame_paths)),
            "-vf", "scale=trunc(iw/2)*2:trunc(ih/2)*2",
            "-c:v", "libx264", "-pix_fmt", "yuv420p", mp4]
     subprocess.run(cmd, check=True)

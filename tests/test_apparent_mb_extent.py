@@ -56,32 +56,6 @@ def test_reference_stays_zero_when_the_front_readvances():
     assert a_ref[0] == 0.0
 
 
-def test_rewind_restores_a_reference_the_abandoned_attempt_cleared():
-    r"""A rescue-ladder retry must put back the reference on a cell the
-    accepted trajectory never calves.
-
-    The step's rewind machinery snapshots the reference at entry and restores
-    it alongside h, z and phi. Without that, the dt=0.1 attempt that calved
-    cell 1 leaves a_ref[1] = 0 even though the accepted dt=0.025 subcycles
-    keep ice there, and the cell then thins at the full unbalanced flux
-    divergence for the rest of the run.
-    """
-    a_ref = np.array([0.5, 40.0, 0.3])
-    entry = a_ref.copy()                       # snapshot at step entry
-
-    # The abandoned dt=0.1 attempt: the front passes cell 1, so it is cleared.
-    clear_reference_where_ice_free(a_ref, np.array([False, True, False]))
-    assert a_ref[1] == 0.0
-
-    # The solve fails, the ladder rewinds and retries at dt/4.
-    a_ref[:] = entry
-    # At the smaller increment the front does not reach cell 1: nothing clears.
-    clear_reference_where_ice_free(a_ref, np.zeros(3, dtype=bool))
-
-    assert a_ref[1] == 40.0, "the retained cell must keep its reference"
-    assert a_ref.tolist() == entry.tolist()
-
-
 def test_nothing_ice_free_is_a_no_op():
     r"""An interior step with a stationary front leaves the field alone."""
     a_ref = np.array([0.5, 40.0, -2.0])

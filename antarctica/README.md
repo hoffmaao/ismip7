@@ -512,7 +512,18 @@ configured. The legacy mask is the pinning mechanism only when
 ON the t=0 ice extent for every law, legacy flag included: no ice existed
 outside it, so no balancing reference belongs there, and a frozen sink there
 would re-empty every cell a free front advances into, pinning it with no
-error. The run log prints one `Calving front owner:` line naming the mechanism
+error. Under a PINNED front (`ISMIP7_CALVING=fixed`, or the legacy
+`ISMIP7_FIXED_FRONT` with no law) that t=0 mask is the whole rule. Under a
+FREE law (`vonmises`) the same rule is additionally applied to the LIVE extent:
+every step, `a_ref` is cleared in every cell the level set reports ice-free, so
+a calved cell is not regrown by its own frozen terminus outflow and an
+advanced-into cell is not re-emptied. The clearing is irreversible - a cell
+that later re-enters the ice stays at `a_ref = 0`, because the frozen reference
+was only ever defined on the t=0 ice. This changes free-law projection numbers
+under `ISMIP7_APPARENT_MB`, which were wrong before: without it a free front
+could not retreat and its `calv` column double-counted the regrown ice. The
+control configuration is unaffected, since it pins the front.
+The run log prints one `Calving front owner:` line naming the mechanism
 in force, and says explicitly when `ISMIP7_FIXED_FRONT` is set but ignored.
 
 ### The whole matrix in one command (`run_core_matrix.sh`)
@@ -592,7 +603,7 @@ how it reaches the core report.
 | `ISMIP7_BUFFER_M` | outline buffer (m) used to resolve the default mesh/boundary-id filenames (see §3) | `20000` |
 | `ISMIP7_MESH` | mesh `.msh` path (inversion and tools). A forward takes its mesh from the MAP/restart checkpoint, which records its own mesh basename and parameters, so here it only names the boundary sidecar for a legacy checkpoint that carries no such record | `mesh/antarctica_<COARSE>_<LC>_buffered<BUFFER_M>.msh` |
 | `ISMIP7_INVERSION` | explicit MAP checkpoint path for a forward/preflight, replacing the `map_basename` lookup. It must be a MAP of the same friction/n/geometry (not checked). Use it to A/B differently regularised MAPs on one mesh (e.g. velocity-only vs transient dH/dt) instead of swapping files | derived from friction/n/geometry/lc |
-| `ISMIP7_CALVING` | calving-front law on a buffered mesh, via a level set (`icepack2_tools/levelset.py`, ISSM-style): `none` (front advances freely, never calves), `fixed` (front frozen at t=0; pins the front like `ISMIP7_FIXED_FRONT` but is not the same run - it builds a level set, so the floor-cell ocean drag is gated off in every ice cell and in the near-front water, and it applies the retreat-sliver rule inside the t=0 extent), `vonmises` (Morlighem et al. 2016 rate `\|u\| sigma~/sigma_max` from the run's own strain rates and fluidity). Removed ice is the `calv` budget column; the mean front rate over front cells prints as `c_front`. The control configuration is `ISMIP7_APPARENT_MB` with `ISMIP7_FIXED_FRONT=1` and `ISMIP7_CALVING=none`, per the protocol's "calving set constant to end-of-2014 conditions"; `vonmises` is for projections and is never pinned, not even when `ISMIP7_FIXED_FRONT` is also set: a configured law owns removal and the legacy mask is ignored. Under every law the apparent-MB reference is defined only on the t=0 ice extent | `none` |
+| `ISMIP7_CALVING` | calving-front law on a buffered mesh, via a level set (`icepack2_tools/levelset.py`, ISSM-style): `none` (front advances freely, never calves), `fixed` (front frozen at t=0; pins the front like `ISMIP7_FIXED_FRONT` but is not the same run - it builds a level set, so the floor-cell ocean drag is gated off in every ice cell and in the near-front water, and it applies the retreat-sliver rule inside the t=0 extent), `vonmises` (Morlighem et al. 2016 rate `\|u\| sigma~/sigma_max` from the run's own strain rates and fluidity). Removed ice is the `calv` budget column; the mean front rate over front cells prints as `c_front`. The control configuration is `ISMIP7_APPARENT_MB` with `ISMIP7_FIXED_FRONT=1` and `ISMIP7_CALVING=none`, per the protocol's "calving set constant to end-of-2014 conditions"; `vonmises` is for projections and is never pinned, not even when `ISMIP7_FIXED_FRONT` is also set: a configured law owns removal and the legacy mask is ignored. Under every law the apparent-MB reference is defined only on the t=0 ice extent; under a free law (`vonmises`) it is additionally cleared each step in every cell the level set reports ice-free, irreversibly, so a calved cell is not regrown - this changes free-law projection numbers under `ISMIP7_APPARENT_MB` and leaves the pinned control unaffected | `none` |
 | `ISMIP7_CALVING_SIGMA_MAX_GROUNDED`, `ISMIP7_CALVING_SIGMA_MAX_FLOATING` | von Mises tensile-stress thresholds [MPa] (ISSM defaults) | `1.0`, `0.15` |
 | `ISMIP7_BNDIDS` | override boundary-id JSON | `mesh/boundary_ids_antarctica_<COARSE>_<LC>_buffered<BUFFER_M>.json` if present, else `mesh/boundary_ids.json` |
 | `ISMIP7_GEOMETRY_SPACE` | space for `h`/`s`/`b` (`dg0`: one thickness for the terminus force and the mass flux; `cg1`: legacy, for A/B only) - also selects the MAP h5 (see `../GEOMETRY_DISCRETIZATION.md`) | `dg0` |

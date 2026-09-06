@@ -40,61 +40,19 @@ import argparse
 import os
 import sys
 
-import numpy as np
 import firedrake as fd
-from firedrake import Constant, Function, assemble, conditional, dS, gt, lt, max_value
+from firedrake import Constant, Function
 
 _ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, os.path.dirname(_ROOT))
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
-RHO_I = 917.0
-RHO_W = 1024.0
-RHO_GT = RHO_I / 1e12
+from region_budget import crossing_flux, regions
+
 BANDS = [0.0, 100.0, 500.0, 1500.0, 1e9]
 BAND_LABELS = ["< 100", "100 - 500", "500 - 1500", "> 1500"]
 #: Rignot et al. 2019 grounding-line discharge.
 OBSERVED_DISCHARGE = (2050.0, 100.0)
-
-
-def indicators(mesh, h, b):
-    r"""Height above flotation and the ice / grounded / floating indicators, in
-    DG0 whatever space the MAP's geometry lives in.
-
-    :func:`flux` gates its facet integrals on ``src('+') * sink('-')``, which is
-    identically zero for a continuous indicator: under
-    ``ISMIP7_GEOMETRY_SPACE=cg1`` a CG1 indicator would score every MAP at zero
-    discharge without an error."""
-    Q0 = fd.FunctionSpace(mesh, "DG", 0)
-    h = Function(Q0).project(h)
-    b = Function(Q0).project(b)
-    haf = Function(Q0).interpolate(
-        h - Constant(RHO_W / RHO_I) * max_value(-b, Constant(0.0)))
-    ice = Function(Q0)
-    ice.dat.data[:] = np.where(h.dat.data_ro > 1.0, 1.0, 0.0)
-    gr = Function(Q0)
-    gr.dat.data[:] = np.where((haf.dat.data_ro > 0.0)
-                              & (h.dat.data_ro > 1.0), 1.0, 0.0)
-    fl = Function(Q0)
-    fl.dat.data[:] = ice.dat.data_ro - gr.dat.data_ro
-    return haf, ice, gr, fl
-
-
-def flux(mesh, h, u, src, sink, speed=None, lo=None, hi=None):
-    n = fd.FacetNormal(mesh)
-    un = fd.dot(u, n)
-
-    def gate(side):
-        if speed is None:
-            return Constant(1.0)
-        return (conditional(gt(speed(side), Constant(lo)), 1.0, 0.0)
-                * conditional(lt(speed(side), Constant(hi)), 1.0, 0.0))
-
-    f_p = conditional(gt(src('+') * sink('-'), 0.0), 1.0, 0.0) * gate('+') \
-        * max_value(un('+'), 0.0) * h('+')
-    f_m = conditional(gt(src('-') * sink('+'), 0.0), 1.0, 0.0) * gate('-') \
-        * max_value(un('-'), 0.0) * h('-')
-    return float(assemble((f_p + f_m) * dS)) * RHO_GT
 
 
 def score(path):
@@ -104,19 +62,29 @@ def score(path):
     mesh, h, b = ctx["mesh"], ctx["h"], ctx["b"]
     u = ctx["z"].subfunctions[0]
     u_obs = ctx["u_obs"]
-    _, ice, gr, fl = indicators(mesh, h, b)
-    Q0 = ice.function_space()
+    state = {"mesh": mesh, "thickness": h, "bed": b, "velocity": u}
+    reg = regions(state)
+    Q0 = reg["ice"].function_space()
     open_water = Function(Q0)
-    open_water.dat.data[:] = 1.0 - ice.dat.data_ro
+    open_water.dat.data[:] = 1.0 - reg["ice"].dat.data_ro
+    reg["open"] = open_water
 
-    q_m = (flux(mesh, h, u, gr, fl) + flux(mesh, h, u, gr, open_water))
-    q_o = (flux(mesh, h, u_obs, gr, fl) + flux(mesh, h, u_obs, gr, open_water))
+    def discharge(velocity, speed=None, lo=None, hi=None):
+        """Grounding line plus grounded front: every facet grounded ice leaves
+        through, optionally restricted to one observed-speed band."""
+        return (crossing_flux(state, reg, "grounded", "floating",
+                              speed, lo, hi, velocity)
+                + crossing_flux(state, reg, "grounded", "open",
+                                speed, lo, hi, velocity))
+
+    q_m = discharge(u)
+    q_o = discharge(u_obs)
     sp = Function(Q0).interpolate(
         fd.sqrt(fd.dot(u_obs, u_obs) + Constant(1e-12)))
     rows = []
     for lab, lo, hi in zip(BAND_LABELS, BANDS[:-1], BANDS[1:]):
-        m = flux(mesh, h, u, gr, fl, sp, lo, hi)
-        o = flux(mesh, h, u_obs, gr, fl, sp, lo, hi)
+        m = discharge(u, sp, lo, hi)
+        o = discharge(u_obs, sp, lo, hi)
         rows.append((lab, m, o, m / o if o > 1e-9 else float("nan")))
     return {"path": path, "q_model": q_m, "q_obs": q_o,
             "ratio": q_m / q_o if q_o > 1e-9 else float("nan"), "bands": rows}
@@ -135,6 +103,7 @@ def main():
               f"{r['q_obs']:8.0f} Gt/yr   ratio {r['ratio']:.2f}"
               f"   (observed {OBSERVED_DISCHARGE[0]:.0f} +/- "
               f"{OBSERVED_DISCHARGE[1]:.0f})")
+        print("    discharge by observed speed of the source cell [Gt/yr]")
         print(f"    {'speed [m/yr]':>14s} {'model':>9s} {'u_obs':>9s} {'ratio':>7s}")
         for lab, m, o, ratio in r["bands"]:
             print(f"    {lab:>14s} {m:9.0f} {o:9.0f} {ratio:7.2f}")

@@ -52,9 +52,14 @@ from icepack2_tools.mpi_stats import global_mean, global_range
 from icepack2_tools.boundary import load_boundary_ids
 from icepack2_tools.geometry import sample_to_geometry
 from icepack2_tools.naming import map_basename
+from icepack2_tools.front import (
+    clear_reference_where_ice_free, retreat_slivers,
+)
 from icepack2_tools.runconfig import (
     friction as _friction, geometry_space as _geometry_space, lc as _lc,
     n_flow as _n_flow,
+    calving_law as _calving_law, calving_sigma_max as _calving_sigma_max,
+    fixed_front as _fixed_front,
 )
 
 lc = _lc()
@@ -152,6 +157,11 @@ def setup_model(restart_from=None):
     # Resolved first because the compute mesh is loaded FROM this friction's
     # MAP checkpoint (below), not from a fresh Mesh(.msh).
     friction = _friction()
+    # Reject a mistyped front configuration before the MAP load and the
+    # initial Newton solve, which cost minutes to tens of minutes at 2500 m
+    # on a detached launch.
+    _calving_law()
+    _calving_sigma_max()
     # Exact-zero-shelf residual laws (icepack2 dual, dual_friction.py):
     #   regularized_coulomb -> Coulomb cap tau_c=c0*N
     #   budd                -> tau_b ~ N_hat=N_eff/N_ref, PISM-delta grounded
@@ -160,14 +170,21 @@ def setup_model(restart_from=None):
     # "budd_legacy" keeps the old phi_eff action Budd (residual shelf drag).
     use_residual = friction in ("regularized_coulomb", "budd")
     use_rc = use_residual  # geometry/alpha/h_clamp handling is shared
+    drag_mask = None       # set in the residual branch below
 
     is_restart = restart_from is not None
     # Prefer the MAP inverted under this geometry space. Falling back to the
     # untagged legacy (CG1) MAP keeps the transition runnable, but the load
     # then projects the geometry and warns loudly - the controls still carry
     # the CG1 front bias, so such a run is a smoke test, not a result.
-    inv_fn = os.path.join(MESH_DIR, map_basename(friction, lc))
-    if not is_restart and not os.path.exists(inv_fn):
+    # ISMIP7_INVERSION names the MAP explicitly (David's timing matrix and
+    # A/B forwards of differently-regularised MAPs on one mesh). It must
+    # still be a MAP of THIS friction/n/geometry; the name is not checked.
+    inv_override = os.environ.get("ISMIP7_INVERSION")
+    inv_fn = inv_override or os.path.join(MESH_DIR, map_basename(friction, lc))
+    if inv_override and not is_restart and not os.path.exists(inv_fn):
+        raise FileNotFoundError(f"ISMIP7_INVERSION={inv_override} does not exist")
+    if not inv_override and not is_restart and not os.path.exists(inv_fn):
         legacy_fn = os.path.join(
             MESH_DIR, map_basename(friction, lc, geometry=False)
         )
@@ -580,6 +597,12 @@ def setup_model(restart_from=None):
         # backstop.
         ocean_drag = float(os.environ.get("ISMIP7_OCEAN_DRAG", "1e-2"))
         h_ocean = float(os.environ.get("ISMIP7_H_OCEAN", "10.0"))
+        # DG0 gate on the ocean drag, 1 everywhere unless a level-set front
+        # is running, which zeroes it in the water cells next to the front
+        # each step (icepack2_tools.levelset). A live Function in the
+        # residual, so the gate changes without re-assembly.
+        drag_mask = Function(FunctionSpace(mesh, "DG", 0), name="drag_mask")
+        drag_mask.assign(1.0)
         # Speed limiter: structurally present (threshold u_lim > 0) but INERT
         # by default - k_lim is a live Constant at 0 (term vanishes
         # identically; the cold continuation is unaffected, unlike a built-in
@@ -699,18 +722,38 @@ def setup_model(restart_from=None):
         # gate, effective pressure, and driving stress all track the evolving
         # geometry, so the grounding line migrates freely with exact-zero
         # shelf drag. N_ref (Budd) is the fixed reference effective pressure.
-        F = build_rc_residual(
-            z, theta_f, phi_f, H=h, s=s, b=b, C_w0=C_w0,
-            A4_base=A4_base, n_flow=n_flow, n_flow_val=n_flow_val,
-            m_slide=m_slide_val, tau_c=tau_c, alpha=alpha_reg, H_ref=H_ref,
-            fric_law=friction, N_ref=N_ref,
-            nhat_floor=budd_nhat_floor, nhat_cap=budd_nhat_cap,
-            alpha_gl=alpha_gl,
-            c0=c0_rc, eps_tauc=rc_eps_tauc,
-            c_w0_floor=rc_cw0_floor, h_visc_floor=rc_hvisc_floor,
-            ocean_drag=ocean_drag, h_ocean=h_ocean, u_lim=u_lim, k_lim=k_lim,
-            calving_ids=calving_ids if use_calving_terminus else None,
-        )
+        def _build_F(theta_c=None, phi_c=None, h_c=None, s_c=None, z_c=None):
+            r"""The dual residual for a given set of controls and geometry.
+
+            ``setup_model`` builds one residual on its own fields; a
+            time-dependent assimilation needs a residual per window step,
+            because each step has its own thickness and surface and an
+            adjoint has to see them as distinct variables rather than as one
+            mutated Function. Every argument defaults to this context's own
+            field, so ``_build_F()`` reproduces the solver's residual
+            exactly. Used by ``scripts/inversion_td``."""
+            return build_rc_residual(
+                z_c if z_c is not None else z,
+                theta_c if theta_c is not None else theta_f,
+                phi_c if phi_c is not None else phi_f,
+                H=h_c if h_c is not None else h,
+                s=s_c if s_c is not None else s,
+                b=b, C_w0=C_w0,
+                A4_base=A4_base, n_flow=n_flow, n_flow_val=n_flow_val,
+                m_slide=m_slide_val, tau_c=tau_c, alpha=alpha_reg, H_ref=H_ref,
+                fric_law=friction, N_ref=N_ref,
+                nhat_floor=budd_nhat_floor, nhat_cap=budd_nhat_cap,
+                alpha_gl=alpha_gl,
+                c0=c0_rc, eps_tauc=rc_eps_tauc,
+                c_w0_floor=rc_cw0_floor, h_visc_floor=rc_hvisc_floor,
+                ocean_drag=ocean_drag, h_ocean=h_ocean, u_lim=u_lim,
+                k_lim=k_lim, drag_mask=drag_mask,
+                calving_ids=calving_ids if use_calving_terminus else None,
+            )
+
+        # The closure above is the single definition of this residual: the
+        # forward solves exactly what a time-dependent assimilation rebuilds.
+        F = _build_F()
     else:
         L = (
             model.minimization.viscous_power(**fields, **rheo_glen)
@@ -878,6 +921,20 @@ def setup_model(restart_from=None):
         "calving_ids": calving_ids,
         "u_obs": u_obs,
         "friction": friction,
+        # Level-set calving front support: the drag gate the residual was
+        # built with. The front itself is not carried here: run_simulation
+        # rebuilds it from the current thickness every step, and the `fixed`
+        # law anchors on H_init below, so a restart needs no saved front.
+        "drag_mask": drag_mask,
+        # Residual builder for a time-dependent assimilation (None for the
+        # legacy action formulation, which has no residual to rebuild).
+        "build_F": _build_F if use_residual else None,
+        # Solver options the time-dependent assimilation
+        # (antarctica/scripts/inversion_td, not yet committed) reuses so its
+        # forward solves match this one, alongside build_F and ISMIP7_INVERSION.
+        "sparams": sparams,
+        "fc_params": fc_params,
+        "A_map": A_map,
         # Mesh provenance from the source checkpoint (re-stamped into every
         # state checkpoint so warm restarts stay self-describing).
         "lc": chk_lc,
@@ -988,18 +1045,21 @@ def run_simulation(
 
     rho_gt = _RHO_I_SI / 1e12  # m^3 ice -> Gt
 
-    # Fixed calving front (ISMIP7_FIXED_FRONT=1): cells that are ice-free
-    # in the initial state may not accumulate ice; whatever flows into
-    # them is removed each step and tallied as calving flux. Without this
-    # a buffered mesh has NO calving sink (~1300 Gt/yr in reality) and the
-    # sheet must gain mass. Only meaningful when the initial state is the
-    # true BedMachine geometry (RC mode / h_clamp_init=0) — with a clamped
-    # initial state every cell has ice and the mask is empty.
-    fixed_front = os.environ.get("ISMIP7_FIXED_FRONT") is not None
+    # The t=0 ice extent, needed by EVERY front mechanism (the legacy
+    # ISMIP7_FIXED_FRONT flag and every ISMIP7_CALVING law): cells outside it
+    # held no ice at t=0, so no apparent-MB reference belongs there, and under
+    # a pinned front whatever flows into them is removed each step and tallied
+    # as calving flux. Without a front mechanism a buffered mesh has NO calving
+    # sink (~1300 Gt/yr in reality) and the sheet must gain mass. Only
+    # meaningful when the initial state is the true BedMachine geometry
+    # (RC mode / h_clamp_init=0) - with a clamped initial state every cell has
+    # ice and the mask is empty.
+    fixed_front = _fixed_front()
     front_hmin = float(os.environ.get("ISMIP7_FRONT_HMIN", "1.0"))
+    calving = _calving_law()
     beyond_front = None
     cell_area = assemble(fd.TestFunction(Q_dg) * dx).dat.data_ro.copy()
-    if fixed_front:
+    if fixed_front or calving != "none":
         # Mask from the t=0 observed extent (ctx["H_init"]), not the
         # current h: a restarted run must not re-mask cells that
         # legitimately retreated mid-run inside the observed extent.
@@ -1010,9 +1070,34 @@ def run_simulation(
         beyond_front = _extent.dat.data_ro < front_hmin
         n_beyond = mesh.comm.allreduce(int(beyond_front.sum()))
         PETSc.Sys.Print(
-            f"  Fixed calving front: {n_beyond} initially ice-free cells "
+            f"  Initial ice extent: {n_beyond} initially ice-free cells "
             f"masked (h < {front_hmin} m)"
         )
+
+    # Which mechanism owns the REMOVAL of ice past the t=0 extent. A configured
+    # level-set law owns the front outright: the ISMIP7 control holds calving
+    # at end-of-2014 conditions and gets that from `fixed`, while a projection
+    # law (vonmises) must never be silently pinned, and the legacy mask would
+    # pin it - the front could retreat but never advance past the 2015 outline,
+    # with the inflow mis-tallied as calving. So the legacy sink applies only
+    # when no law is configured at all; run_core_matrix.sh exports
+    # ISMIP7_FIXED_FRONT=1 unconditionally, which is why the flag may not
+    # override an explicit ISMIP7_CALVING choice.
+    legacy_front_sink = fixed_front and calving == "none"
+    # A free law moves the front, so the frozen a_ref must follow the live
+    # extent; `fixed` and the legacy flag pin it on purpose and keep the
+    # t=0-only mask.
+    free_front = calving not in ("none", "fixed")
+    if calving != "none":
+        front_owner = f"level-set {calving} law (ISMIP7_CALVING={calving})" + (
+            "; ISMIP7_FIXED_FRONT is set but ignored for removal"
+            if fixed_front else ""
+        )
+    elif fixed_front:
+        front_owner = "legacy fixed-front mask (ISMIP7_FIXED_FRONT)"
+    else:
+        front_owner = "none (no calving sink)"
+    PETSc.Sys.Print(f"  Calving front owner: {front_owner}")
 
     # ISMIP7_LEGACY_TRANSPORT=1 restores the pre-Jul-2026 scheme: the
     # -h*div(u*phi) volume term (non-conservative for DG0: it adds
@@ -1141,9 +1226,24 @@ def run_simulation(
                 b_smb = assemble((accum - ocean_melt) * phi_dg * dx)
                 a_ref.dat.data[:] -= b_smb.dat.data_ro / cell_area
             if beyond_front is not None:
-                # the fixed-front tally stays the sink for flux into the
-                # initially ice-free cells; do not absorb it into a_ref
+                # No ice existed outside the t=0 extent, so no balancing
+                # reference belongs there, for ANY front law. Under a pinned
+                # front the front tally stays the sink for flux into those
+                # cells and must not be absorbed into a_ref; under a free law
+                # (vonmises) a frozen sink here would re-empty every cell the
+                # front advances into, pinning it at t=0 with no error.
                 a_ref.dat.data[beyond_front] = 0.0
+            # The same rule against the LIVE extent, both directions:
+            #   advance - a frozen SINK outside the extent re-empties the
+            #     cells a free front advances into (the t=0 mask above);
+            #   retreat - a frozen SOURCE inside the t=0 extent regrows the
+            #     cells a free front has calved, since a_ref at a t=0 front
+            #     cell is the terminus outflow and is large and positive.
+            # A free law therefore re-masks a_ref each step (below) against
+            # the cells the level set reports ice-free. This changes free-law
+            # projection numbers under ISMIP7_APPARENT_MB; they were wrong
+            # before. The pinned laws keep the t=0-only mask: there the front
+            # is meant to stay put.
             amb_cap = float(os.environ.get("ISMIP7_AMB_CAP", "0"))
             if amb_cap > 0.0:
                 np.clip(a_ref.dat.data, -amb_cap, 5.0 * amb_cap,
@@ -1190,6 +1290,8 @@ def run_simulation(
                 chk.save_function(A_prior, name="fluidity_prior")
             if a_ref is not None:
                 chk.save_function(a_ref, name="a_ref_mb")
+            if level_set is not None:
+                chk.save_function(level_set.phi, name="levelset")
             # Separate transport state only under CG1 geometry, where the
             # saved CG1 `thickness` is a lift and cannot reconstruct it.
             # Under DG0 geometry `thickness` IS the transport state.
@@ -1379,22 +1481,80 @@ def run_simulation(
             )
         )
 
+    # Level-set calving front (ISMIP7_CALVING != none): each step the level
+    # set is the eikonal distance to the current ice extent, the calving
+    # rate retreats it by normal flow, and the cells it leaves behind plus
+    # the sub-cell mass the front cells shed go into the calving tally below
+    # (icepack2_tools.levelset). The drag gate it writes is the Function the
+    # momentum residual holds. Every law but `fixed` rebuilds the front from
+    # the current thickness each step, so a restart needs no saved front: the
+    # retreat is already carried in h by the sub-cell shed.
+    level_set = None
+    phi_entry = None
+    last_c_mean = 0.0
+    if calving != "none":
+        from icepack2_tools.levelset import LevelSet, initial_distance
+        sig_g, sig_f = _calving_sigma_max()
+        # `fixed` holds the front at phi0, which LevelSet captures at
+        # construction. On a warm restart h_dg is the RESTARTED extent, so
+        # anchor phi0 on the t=0 thickness (ctx["H_init"], reloaded from every
+        # checkpoint) instead: a resumed run must not re-freeze the front where
+        # it had already retreated to, permanently barring cells a continuous
+        # run of the same length would keep. The distance field comes from a
+        # distance-only construction on that thickness, because the eikonal
+        # solve reads the thickness of the object it belongs to. Use a scratch
+        # Function, NOT h_dg: under DG0 geometry h_dg IS the live geometry.
+        phi_init = None
+        if calving == "fixed":
+            _h0 = Function(Q_dg).project(ctx.get("H_init", h))
+            phi_init = initial_distance(mesh, _h0, h_min=front_hmin)
+        level_set = LevelSet(
+            mesh, h_dg, law=calving, h_min=front_hmin,
+            sigma_max_grounded=sig_g, sigma_max_floating=sig_f,
+            drag_mask=ctx.get("drag_mask"), phi_init=phi_init,
+        )
+        phi_entry = Function(level_set.Q0)
+    a_ref_entry = Function(a_ref.function_space()) if a_ref is not None else None
+    A_map = ctx.get("A_map")
+
     def _advance(dt_local):
         r"""One transport advance of dt_local with the CURRENT velocity
         (transport-first ordering: the velocity was solved at the current
         geometry). Mutates h_dg and the derived CG fields; returns the
         advance's mass tallies [Gt]."""
+        nonlocal last_c_mean
         u_vel = z.subfunctions[0]
         if legacy_transport:
             h_dg.project(h)
         h_dg_old.assign(h_dg)
 
+        # Front first, with the same velocity the transport is about to
+        # use, so the cells emptied below are the ones the front left.
+        # Whenever a level-set law is configured it is the sole authority on
+        # removal, so the legacy t=0 mask contributes nothing here.
+        beyond = beyond_front if legacy_front_sink else None
+        calv_frac = None
+        ls_ice_free = None
+        if level_set is not None:
+            last_c_mean = level_set.advance(
+                dt_local, u_vel, h_dg, b, A_map, n_flow_val)
+            lsb, calv_frac = level_set.calving_masks()
+            beyond = lsb
+            ls_ice_free = level_set.beyond_front()
+            if a_ref is not None and free_front:
+                clear_reference_where_ice_free(a_ref.dat.data, ls_ice_free)
+
         un = fd.dot(u_vel, n_facet)
         un_plus = (un + abs(un)) / 2
 
         src = accum - ocean_melt
+        amb_gt = 0.0
         if a_ref is not None:
             src = src + a_ref
+            # The reference as APPLIED here: the live-extent mask above may
+            # have zeroed cells since the step's entry measurement, so the
+            # budget and the CSV must use this, not the entry value.
+            amb_gt = float(assemble(a_ref * dx)) * rho_gt * dt_local
         # Cell-averaged DG0 source (exact for the DG0 test space) with a
         # positivity limit (gia a_step clamp): the net sink may not draw a
         # cell below h_clamp within one advance. With the limited source
@@ -1440,25 +1600,65 @@ def run_simulation(
         out_gt = float(assemble(un_plus * h_dg * ds)) * rho_gt * dt_local
         m1 = float(assemble(h_dg * dx)) * rho_gt
 
-        # Floor to h_clamp, EXCEPT beyond the fixed front: those cells are
+        # Floor to h_clamp, EXCEPT where there is no ice: those cells are
         # outside the ice domain, so flooring them would hand the mask below
         # h_clamp of fresh ice to re-calve every step and report as terminus
         # discharge. There the floor is zero and the front stays a pure sink.
+        # With a level set the exemption is everything it reports ice-free,
+        # not just the cells calved this step: under a free law `beyond` is
+        # only the handful the front just passed, so flooring the rest of the
+        # buffer would fabricate ice across every never-glaciated cell.
         data = h_dg.dat.data
         floor = np.full_like(data, h_clamp)
-        if fixed_front:
-            floor[beyond_front] = 0.0
+        if ls_ice_free is not None:
+            floor[ls_ice_free] = 0.0
+        if beyond is not None:
+            floor[beyond] = 0.0
         np.maximum(data, floor, out=data)
         m2 = float(assemble(h_dg * dx)) * rho_gt
         clamp_gt = m2 - m1                                       # Gt added by DG floor
 
         calv_gt = 0.0
-        if fixed_front:
+        if beyond is not None:
             data = h_dg.dat.data
             calv_gt = mesh.comm.allreduce(
-                float((data[beyond_front] * cell_area[beyond_front]).sum())
+                float((data[beyond] * cell_area[beyond]).sum())
             ) * rho_gt
-            data[beyond_front] = 0.0
+            data[beyond] = 0.0
+        if calv_frac is not None:
+            # Sub-cell calving: the front cells shed the fraction of their
+            # thickness that a front retreating at rate c removes in dt.
+            data = h_dg.dat.data
+            shed = data * calv_frac
+            calv_gt += mesh.comm.allreduce(
+                float((shed * cell_area).sum())) * rho_gt
+            data -= shed
+        if level_set is not None:
+            # Retreat slivers only: what the sub-cell shed and the melt leave
+            # behind in a cell that HELD ice when the advance began is the
+            # front's own loss, so it is removed and tallied as calving. A
+            # cell that was ice-free keeps whatever the transport just put
+            # there, however little: that sub-threshold inflow is how the
+            # front ADVANCES, and zeroing it would pin the front wherever the
+            # one-step influx is under front_hmin. So outside the level set's
+            # extent the thickness is NOT exactly zero - it may hold inflow
+            # accumulating toward the threshold. The level set's drag gate has
+            # switched the ocean drag OFF in those cells, and what damps them
+            # splits by whether they lie inside the t=0 extent:
+            #   inside  - h_visc_floor, the basal friction law, and the
+            #     alpha_gl collar. N > 0 on a thin cell (effective_pressure
+            #     floors the overburden at 1 m while p_W uses the true
+            #     thickness), and C_w0 > 0, so tau_b is nonzero.
+            #   outside (the advance strip of a free law) - h_visc_floor and
+            #     the alpha_gl collar ONLY. N > 0 for the same reason, but
+            #     C_w0 is weertman_anchor at the t=0 geometry, where H = 0,
+            #     and c_w0_floor defaults to 0, so tau_W = 0 and tau_b = 0
+            #     under both laws whatever N is.
+            data = h_dg.dat.data
+            sliver = retreat_slivers(data, h_dg_old.dat.data_ro, front_hmin)
+            calv_gt += mesh.comm.allreduce(
+                float((data[sliver] * cell_area[sliver]).sum())) * rho_gt
+            data[sliver] = 0.0
 
         _lift_h()
         m3 = m2 - calv_gt                                        # ∫h preserved by projection
@@ -1468,6 +1668,7 @@ def run_simulation(
             "out_gt": out_gt,
             "calv_gt": calv_gt,
             "clamp_gt": clamp_gt + clamp_cg_gt + limit_gt,
+            "amb_gt": amb_gt,
         }
 
     # Time loop, transport-first: each step advances the geometry with the
@@ -1492,11 +1693,17 @@ def run_simulation(
         # Forcing-field integrals are constant within the step.
         smb_rate = float(assemble(accum * dx)) * rho_gt          # Gt/yr
         melt_rate = float(assemble(ocean_melt * dx)) * rho_gt    # Gt/yr
-        amb_rate = (float(assemble(a_ref * dx)) * rho_gt
-                    if a_ref is not None else 0.0)               # Gt/yr
 
         z_entry.assign(z)
         h_dg_entry.assign(h_dg)
+        if level_set is not None:
+            phi_entry.assign(level_set.phi)
+        # a_ref is mutated by the live-extent mask inside _advance, so it is
+        # step state and must rewind with the rest: an abandoned attempt that
+        # calved a cell the accepted trajectory keeps must not leave that
+        # cell without its balancing reference.
+        if a_ref_entry is not None:
+            a_ref_entry.assign(a_ref)
         tallies = None
         for m in SUBCYCLES:
             if m > 1:
@@ -1506,7 +1713,13 @@ def run_simulation(
                 h_dg.assign(h_dg_entry)
                 _lift_h()
                 z.assign(z_entry)
-            acc = {"out_gt": 0.0, "calv_gt": 0.0, "clamp_gt": 0.0}
+                if a_ref_entry is not None:
+                    a_ref.assign(a_ref_entry)
+                if level_set is not None:
+                    level_set.phi.assign(phi_entry)
+                    level_set.update_cell_fields()
+            acc = {"out_gt": 0.0, "calv_gt": 0.0, "clamp_gt": 0.0,
+                   "amb_gt": 0.0}
             ok = True
             for _j in range(m):
                 sub = _advance(dt / m)
@@ -1528,6 +1741,11 @@ def run_simulation(
             h_dg.assign(h_dg_entry)
             _lift_h()
             z.assign(z_entry)   # checkpoint the last converged pair
+            if a_ref_entry is not None:
+                a_ref.assign(a_ref_entry)
+            if level_set is not None:
+                level_set.phi.assign(phi_entry)
+                level_set.update_cell_fields()
             break
 
         t_elapsed = perf_counter() - t_step_start
@@ -1539,6 +1757,7 @@ def run_simulation(
         out_rate = tallies["out_gt"] / dt                        # Gt/yr
         calv_gt = tallies["calv_gt"]
         clamp_all = tallies["clamp_gt"]
+        amb_rate = tallies["amb_gt"] / dt                        # Gt/yr
         dm = total_mass - mass_prev
         resid_gt = dm - (
             (smb_rate - melt_rate + amb_rate - out_rate) * dt
@@ -1559,6 +1778,8 @@ def run_simulation(
                 f"      budget [Gt/yr]: SMB={smb_rate:+.0f} melt={-melt_rate:+.0f} "
                 f"{_amb_txt}"
                 f"outflux={-out_rate:+.0f} calv={-calv_gt/dt:+.0f} "
+                + (f"c_front={last_c_mean:.0f}m/yr " if level_set is not None else "")
+                +
                 f"clamp={clamp_all/dt:+.1f} "
                 f"dM/dt={dm/dt:+.0f} resid={resid_gt/dt:+.2f}"
             )

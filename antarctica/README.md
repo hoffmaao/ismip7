@@ -324,10 +324,11 @@ Because the MAP filename encodes only friction, `LC`, geometry space and flow
 exponent, a velocity-only MAP and a transient one land on the **same path**.
 Give variants their own `ISMIP7_MAP_OUT`. Every MAP checkpoint also records the
 objective that produced it as root attributes - `misfit_norm`, `gamma_theta`,
-`gamma_phi`, `dhdt_weight`, `dhdt_net_sigma` (the *resolved* value: 0 whenever
-the term was not actually built), alongside `mesh_basename` and the
-`lc`/`lc_coarse`/`buffer_m` mesh parameters - so a MAP already on disk can be
-identified:
+`gamma_phi`, `log_vel_weight`, `log_vel_eps`, `dhdt_weight`, `dhdt_net_sigma`
+(`log_vel_weight` and `dhdt_net_sigma` are the *resolved* values: the weight
+`auto` picked, and 0 whenever the term was not actually built), alongside
+`mesh_basename` and the `lc`/`lc_coarse`/`buffer_m` mesh parameters - so a MAP
+already on disk can be identified:
 
 ```bash
 python -c "import h5py,sys; print(dict(h5py.File(sys.argv[1])['/'].attrs))" MAP.h5
@@ -408,6 +409,142 @@ python scripts/check_ismip6_track.py results/<exp>_timeseries.csv
 
 For the forced response, `scripts/compare_ismip6.py <proj.csv> <ctrl.csv>` overlays our projection-minus-CTRL sea-level contribution on the ISMIP6 ensemble to check broad consistency (auto-selects the scenario pool; `--exps` to override).
 
+To see *where* and *when* two runs part ways, `scripts/compare_runs.py
+LABEL=results/<a> LABEL=results/<b> ...` overlays their budget timeseries
+(mass, VAF, dM/dt, melt, discharge, SMB + apparent MB), and
+`scripts/plot_movie.py results/<exp>` renders the yearly checkpoints
+(`ISMIP7_CHECKPOINT_EVERY_YR`) into thickness-change / speed / thickness
+frames and an mp4 under `figs/movie_<exp>/`. Both are read-only.
+
+Two more read-only diagnostics answer *why* a run drifts rather than *when*.
+`scripts/region_budget.py <ckpt>.h5 [<later>.h5] [--csv <run>_timeseries.csv]`
+splits the budget into grounded and floating ice - grounded ice gains from SMB
+and loses only across the grounding line - so a control that gains volume
+above flotation is read directly against the observed ~2000-2200 Gt/yr of
+discharge; it uses the transport's own DG0 upwind operator, so the fluxes are
+the ones the run applied. `scripts/score_map.py MAP.h5 [MAP2.h5 ...]` scores an
+inversion by `Q(u_model) / Q(u_obs)` across its own grounding line, overall and
+per band of observed speed, which is the comparison `ISMIP7_LOG_VEL_WEIGHT`
+exists to move; it re-solves the diagnostic through `simulation.setup_model`,
+so it also works on periodic MAP checkpoints that carry no velocity. Both take
+the run's environment (`ISMIP7_LC`, `ISMIP7_FRICTION`, `ISMIP7_GEOMETRY_SPACE`
+and the rest), which must match the inversion's.
+
+### Calving front on a buffered mesh (`ISMIP7_CALVING`)
+
+A buffered mesh has no calving sink of its own: ice that reaches the 2015
+outline keeps flowing into the empty buffer cells, and the only way mass ever
+leaves is shelf melt, so every control run gains mass (the Sep 2026 David
+Lilien 32 km case: +1000 to +1500 Gt/yr with `ISMIP7_APPARENT_MB` unset).
+`ISMIP7_FIXED_FRONT` removes what crosses the outline but cannot move it.
+
+`ISMIP7_CALVING` replaces that with the shared level set
+(`icepack_tools.levelset`, wrapped by `icepack2_tools/levelset.py`, the same
+object the CalvingMIP project runs its fronts with)
+whose boundary condition sits INSIDE the mesh, at the ice-sheet extent: each
+step `phi` is the solution of the eikonal problem `|grad phi| = 1` with
+`phi = 0` on the facets between ice and ice-free cells of the transport's own
+thickness (negative in ice, positive in water; the exact signed distance,
+which is what that boundary-value problem means). The calving rate `c` then
+retreats the front by the normal-flow level-set equation
+`phi_t - c|grad phi| = 0` of Hahn, Mikula and Frolkovic 2025
+(arXiv:2504.05845), linearised with the previous unit gradient and solved by
+cell-centred finite volumes on the DG0 cells (least-squares gradients,
+linear-upwind faces, inflow cells implicit). Advance needs nothing: the
+upwind DG0 transport fills any cell the ice flows into and the next step's
+extent includes it. Removal conserves the calved mass in two parts: cells the
+front has passed entirely (`phi > 0`) are emptied, and every front cell sheds
+the fraction `min(1, c dt L/A)` of its thickness (`L` its front length), which
+is the mass `c h L dt` a front retreating at `c` loses and is what carries
+retreat smaller than a cell from one step to the next. Both go to the `calv`
+budget column, and so does a third: the sliver the shed and the melt leave
+behind in a cell that HELD ice at the start of the step. A cell under the
+extent threshold (`ISMIP7_FRONT_HMIN`, 1 m) that already held ice is a
+retreating front cell, so it is emptied and tallied as calving. A cell that
+was ice-free is the opposite case and keeps whatever the transport put there,
+however little: that is how the front advances, and zeroing it would pin the
+front wherever the one-step influx is under the threshold. So outside the
+extent the thickness is not necessarily zero - it may hold inflow accumulating
+toward the threshold. Those are exactly the water cells next to the front,
+where the drag gate below has switched the ocean drag OFF. What damps them
+splits by whether they lie inside the t=0 extent. INSIDE it, a thin cell has
+`N > 0` (`effective_pressure` floors the overburden at 1 m while the water
+pressure uses the true thickness) and `C_w0 > 0`, so the damping is
+`h_visc_floor`, the basal friction law, and the `ISMIP7_ALPHA_GL` collar.
+OUTSIDE it - the strip a free law advances into - `N > 0` for the same reason,
+but `C_w0` is `weertman_anchor` evaluated at the t=0 geometry, where `H = 0`,
+and `ISMIP7_RC_CW0_FLOOR` defaults to 0, so `tau_W = 0` and `tau_b = 0` under
+both friction laws whatever `N` is; the damping there is `h_visc_floor` and
+the `ISMIP7_ALPHA_GL` collar only. The
+momentum balance needs no front term: with DG0 geometry
+the facet term `rho g avg(h) jump(s)` at an ice/water face already IS the
+terminus water-pressure force. The one momentum-side change is the drag gate:
+the mask is 1 only where `phi` exceeds one cell diameter, so the buffer's
+floor-cell ocean drag is off in every ice cell and in the water within a cell
+diameter of the front, acting only in water further out - front nodes are no
+longer slowed by it. On a thin cell inside the extent the backstops that
+remain are then the complete set: the composite rheology's `h_visc_floor`,
+the basal friction law, the `ISMIP7_ALPHA_GL` collar, and `ISMIP7_K_LIM`
+when raised for a rescue solve.
+
+`vonmises` is Morlighem et al. 2016 verbatim: `c = |u| sqrt(3) B eps~^(1/n) /
+sigma_max`, `eps~` from the tensile principal strain rates, `B = A^(-1/n)` from
+the run's fluidity, separate thresholds for grounded and floating ice. The
+thresholds are the tuning targets: a 2015 control should hold the observed
+front (the obs kit's 24 yearly Greene ice masks, 1997-2021) and discharge
+about 1300 Gt/yr. The level set is checkpointed (`levelset`) for diagnostics; a
+restart does not need it, because the front is reconstructed from the current
+thickness every step and the retreat itself is carried in `h` by the sub-cell
+shed. The exception is `fixed`, which anchors on the t=0 thickness (`H_init`,
+reloaded from every checkpoint) so a resumed run does not re-freeze the front
+at the extent it restarted from. The shared implementation's tests are
+`icepack_tools/test/levelset_test.py`. The ISMIP7-side rules the transport
+applies around it - the retreat-sliver mask, the apparent-MB extent masking
+and the `fixed` law's t=0 anchor - are covered by the repo-root suite
+(`tests/`, serial and seconds; see AGENTS.md §4). The level-set unit tests
+written against this integration in Sep 2026 were lost before they were
+committed and are still to be rebuilt.
+
+Control and projection configurations differ, and the code keeps them
+distinct. The protocol's CONTROL is an unforced constant-climate run with
+"fracture / ice shelf collapse / calving / GIA etc set constant to end of 2014
+conditions", so the control configuration here is `ISMIP7_APPARENT_MB` with a
+PINNED front, and specifically `ISMIP7_FIXED_FRONT=1` with
+`ISMIP7_CALVING=none` (no level set): that is what `run_core_matrix.sh` runs
+and what every control result to date used. `ISMIP7_CALVING=fixed` also pins
+the front, but it is NOT the same run and the two are not interchangeable.
+Configuring any level-set law builds a `LevelSet`, whose `drag_mask` switches
+the floor-cell ocean drag off in every ice cell and in the near-front water,
+while the legacy flag leaves that drag on everywhere below `ISMIP7_H_OCEAN`;
+and `fixed` additionally runs the retreat-sliver rule inside the t=0 extent,
+which the legacy mask does not, so its `calv` column and its settled front
+position differ slightly. Both close the budget.
+`vonmises` is for PROJECTIONS, which are encouraged to use a physically based
+law and must never be silently pinned. A configured `ISMIP7_CALVING` law owns
+the front outright: whenever one is set the level set alone decides removal,
+and the legacy `ISMIP7_FIXED_FRONT` mask removes and tallies nothing, so
+`vonmises` is never pinned even with the legacy flag also set. This matters
+because `run_core_matrix.sh` exports `ISMIP7_FIXED_FRONT=1` by default for
+every run it launches; after this change that export is harmless once a law is
+configured. The legacy mask is the pinning mechanism only when
+`ISMIP7_CALVING` is `none`. The apparent-MB reference `a_ref` is defined only
+ON the t=0 ice extent for every law, legacy flag included: no ice existed
+outside it, so no balancing reference belongs there, and a frozen sink there
+would re-empty every cell a free front advances into, pinning it with no
+error. Under a PINNED front (`ISMIP7_CALVING=fixed`, or the legacy
+`ISMIP7_FIXED_FRONT` with no law) that t=0 mask is the whole rule. Under a
+FREE law (`vonmises`) the same rule is additionally applied to the LIVE extent:
+every step, `a_ref` is cleared in every cell the level set reports ice-free, so
+a calved cell is not regrown by its own frozen terminus outflow and an
+advanced-into cell is not re-emptied. The clearing is irreversible - a cell
+that later re-enters the ice stays at `a_ref = 0`, because the frozen reference
+was only ever defined on the t=0 ice. This changes free-law projection numbers
+under `ISMIP7_APPARENT_MB`, which were wrong before: without it a free front
+could not retreat and its `calv` column double-counted the regrown ice. The
+control configuration is unaffected, since it pins the front.
+The run log prints one `Calving front owner:` line naming the mechanism
+in force, and says explicitly when `ISMIP7_FIXED_FRONT` is set but ignored.
+
 ### The whole matrix in one command (`run_core_matrix.sh`)
 
 `scripts/run_core_matrix.sh` runs core experiments 1-11 end to end in protocol
@@ -447,6 +584,8 @@ cannot be read as current.
 |---------|---------|---------|
 | `ISMIP7_MAP_OUT` | full output path for the MAP h5, overriding the generated name. Use it for smoke tests and variant inversions so a short run cannot replace a converged production MAP. A bare filename resolves under `mesh/`; the directory is created and probed for writability at startup | _(generated name)_ |
 | `ISMIP7_MISFIT_NORM` | `sigma`: divide each residual by its own datum's squared error, making the misfit a dimensionless chi^2 so terms of different units can be traded off. `none`: legacy dimensional misfit. **Selects the `ISMIP7_GAMMA_*` defaults** (see below) | `sigma` |
+| `ISMIP7_LOG_VEL_WEIGHT` | weight on the ISSM-convention logarithmic velocity misfit `0.5 ln((\|u\|+eps)/(\|u_obs\|+eps))^2` (ISSM cost function 103), added to the term `ISMIP7_MISFIT_NORM` selects. The sigma-normalised chi^2 alone over-weights slow interior ice and leaves the discharge-carrying tributaries 40-50% too slow; the log term is scale-free and pulls them up. `0` is the pre-Sep-2026 objective; `auto` resolves the weight at the warm-start state so the log term starts out equal to the velocity chi^2 term. The resolved value is stamped into the MAP as the `log_vel_weight` attribute | `0` |
+| `ISMIP7_LOG_VEL_EPS` | regularisation speed (m/yr) inside the log, so stagnant ice cannot make the ratio singular. Stamped into the MAP as `log_vel_eps` | `1.0` |
 | `ISMIP7_GAMMA_THETA` / `ISMIP7_GAMMA_PHI` | Whittle-Matern prior strength on `θ` / `φ`. Default is coupled to `ISMIP7_MISFIT_NORM`, because normalizing divides the misfit by ~sigma^2 and would otherwise weaken the prior by the same factor | `1e5` under `sigma`, `1e4` under `none` |
 | `ISMIP7_L_REG` | prior correlation length (m) | `7.5e3` |
 | `ISMIP7_MAXITER` | L-BFGS-B iteration cap | `500` |
@@ -482,6 +621,9 @@ how it reaches the core report.
 | `ISMIP7_LC_COARSE` | coarse mesh tag | `64000` |
 | `ISMIP7_BUFFER_M` | outline buffer (m) used to resolve the default mesh/boundary-id filenames (see §3) | `20000` |
 | `ISMIP7_MESH` | mesh `.msh` path (inversion and tools). A forward takes its mesh from the MAP/restart checkpoint, which records its own mesh basename and parameters, so here it only names the boundary sidecar for a legacy checkpoint that carries no such record | `mesh/antarctica_<COARSE>_<LC>_buffered<BUFFER_M>.msh` |
+| `ISMIP7_INVERSION` | explicit MAP checkpoint path for a forward/preflight, replacing the `map_basename` lookup. It must be a MAP of the same friction/n/geometry (not checked). Use it to A/B differently regularised MAPs on one mesh (e.g. velocity-only vs transient dH/dt) instead of swapping files | derived from friction/n/geometry/lc |
+| `ISMIP7_CALVING` | calving-front law on a buffered mesh, via a level set (`icepack2_tools/levelset.py`, ISSM-style): `none` (front advances freely, never calves), `fixed` (front frozen at t=0; pins the front like `ISMIP7_FIXED_FRONT` but is not the same run - it builds a level set, so the floor-cell ocean drag is gated off in every ice cell and in the near-front water, and it applies the retreat-sliver rule inside the t=0 extent), `vonmises` (Morlighem et al. 2016 rate `\|u\| sigma~/sigma_max` from the run's own strain rates and fluidity). Removed ice is the `calv` budget column; the mean front rate over front cells prints as `c_front`. The control configuration is `ISMIP7_APPARENT_MB` with `ISMIP7_FIXED_FRONT=1` and `ISMIP7_CALVING=none`, per the protocol's "calving set constant to end-of-2014 conditions"; `vonmises` is for projections and is never pinned, not even when `ISMIP7_FIXED_FRONT` is also set: a configured law owns removal and the legacy mask is ignored. Under every law the apparent-MB reference is defined only on the t=0 ice extent; under a free law (`vonmises`) it is additionally cleared each step in every cell the level set reports ice-free, irreversibly, so a calved cell is not regrown - this changes free-law projection numbers under `ISMIP7_APPARENT_MB` and leaves the pinned control unaffected | `none` |
+| `ISMIP7_CALVING_SIGMA_MAX_GROUNDED`, `ISMIP7_CALVING_SIGMA_MAX_FLOATING` | von Mises tensile-stress thresholds [MPa] (ISSM defaults) | `1.0`, `0.15` |
 | `ISMIP7_BNDIDS` | override boundary-id JSON | `mesh/boundary_ids_antarctica_<COARSE>_<LC>_buffered<BUFFER_M>.json` if present, else `mesh/boundary_ids.json` |
 | `ISMIP7_GEOMETRY_SPACE` | space for `h`/`s`/`b` (`dg0`: one thickness for the terminus force and the mass flux; `cg1`: legacy, for A/B only) - also selects the MAP h5 (see `../GEOMETRY_DISCRETIZATION.md`) | `dg0` |
 | `ISMIP7_DATA_ROOT` | ISMIP7 forcing tree root | `<repo>/ISMIP7/AIS` |
@@ -494,7 +636,7 @@ how it reaches the core report.
 | `ISMIP7_AUTO_RESUME` | set to resume from the newest own checkpoint unattended | _(unset)_ |
 | `ISMIP7_RUN_TAG` | experiment-name suffix for a parallel method line (see run-management flags above) | _(unset)_ |
 | `ISMIP7_APPARENT_MB` | apparent-mass-balance init: `1`/`balance` zeroes the t=0 thickness tendency (ISMIP6 ctrl_proj-style), `div` cancels only the flux divergence | _(unset)_ |
-| `ISMIP7_FIXED_FRONT` | set to hold the calving front at the t=0 extent (inflow beyond it tallied as calving) | _(unset)_ |
+| `ISMIP7_FIXED_FRONT` | set to hold the calving front at the t=0 extent (inflow beyond it tallied as calving). `=0` now disables it (it used to count as set), because `run_core_matrix.sh` exports it unconditionally. The legacy form of `ISMIP7_CALVING=fixed`, and it removes nothing whenever any `ISMIP7_CALVING` law is configured - that law owns the front | _(unset, off)_ |
 | `ISMIP7_LEGACY_TRANSPORT` | set to restore the pre-Jul-2026 CG-projection transport scheme (requires `ISMIP7_GEOMETRY_SPACE=cg1`) | _(unset)_ |
 | `ISMIP7_SNES_TYPE` / `ISMIP7_SNES_MAXIT` | diagnostic Newton type / max iterations | `newtonls` / `200` |
 | `ISMIP7_K_MELT` | scalar Burgard K (projections) | `1.15e-4` (Burgard K50) |
@@ -517,10 +659,13 @@ how it reaches the core report.
 Per experiment in `results/`:
 - `<exp>_final.h5` — final state checkpoint (Firedrake `CheckpointFile`),
   self-contained for restart: mesh, geometry, inversion fields, the full
-  `(u, M, τ)` solver state, and the frozen apparent-MB reference when one is
-  active. Under the `dg0` geometry default the saved `thickness` **is** the
-  prognostic transport state; a `cg1` run additionally saves the separate DG0
-  carrier as `thickness_dg`, since there the CG1 `thickness` is only its lift.
+  `(u, M, τ)` solver state, the frozen apparent-MB reference when one is
+  active, and the level-set field (`levelset`) when an `ISMIP7_CALVING` law is
+  configured - diagnostic only, since a restart rebuilds the front from the
+  thickness (see "Calving front on a buffered mesh" above). Under the `dg0`
+  geometry default the saved `thickness` **is** the prognostic transport state;
+  a `cg1` run additionally saves the separate DG0 carrier as `thickness_dg`,
+  since there the CG1 `thickness` is only its lift.
   The `geometry_space` and `mesh_basename` attributes record the discretization
   and the `.msh` the trajectory started on, so a restart resolves the same
   boundary sidecar; restarting into a different geometry space projects and
@@ -532,8 +677,10 @@ Per experiment in `results/`:
 - `<exp>_timeseries.csv` — one row per `OUTPUT_INTERVAL` steps with columns
   `year, vaf_mm_sle, mass_gt, smb_gtyr, melt_gtyr, outflux_gtyr, calv_gt,
   clamp_gt, resid_gt, amb_gtyr`: the mass-budget audit (SMB, shelf melt,
-  boundary outflux, fixed-front calving, clamp/limiter corrections, the
-  apparent-MB source, and the budget residual, which must close to 0.00).
+  boundary outflux, calving removed by whichever front mechanism is in force
+  (an `ISMIP7_CALVING` law or the legacy fixed-front mask), clamp/limiter
+  corrections, the apparent-MB source as APPLIED, and the budget residual,
+  which must close to 0.00).
 
 VAF is reported in mm of sea-level equivalent; mass in Gt.
 

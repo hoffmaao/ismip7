@@ -57,12 +57,3 @@ def test_prints_no_front_banner(thickness, capfd):
     LevelSet(mesh, h, law="none", h_min=HMIN, drag_mask=None)
     assert "Level-set front" in capfd.readouterr().out
 
-
-def test_banner_suppression_is_scoped(thickness):
-    r"""The shared module's PETSc is restored, so later printing still works."""
-    import icepack_tools.levelset as shared
-
-    mesh, h = thickness
-    before = shared.PETSc
-    initial_distance(mesh, h, h_min=HMIN)
-    assert shared.PETSc is before

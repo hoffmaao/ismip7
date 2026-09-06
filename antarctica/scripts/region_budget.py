@@ -233,13 +233,11 @@ def report(states, csv_path=None):
         # The same facets, the same thickness, the observed velocity: this
         # separates "the model flows too slowly" from "the grounding line or
         # the thickness is in the wrong place".
-        obs_state = dict(a, velocity=a["velocity_obs"])
-        q_gl_o = crossing_flux(obs_state, reg, "grounded", "floating")
-        q_fr_o = crossing_flux(obs_state, reg, "grounded", "open")
+        q_obs = discharge(a, reg, a["velocity_obs"])
         print(f"    the same facets with the OBSERVED velocity "
-              f"{q_gl_o + q_fr_o:8.0f}")
+              f"{q_obs:8.0f}")
         print(f"      -> the model carries "
-              f"{100 * (q_gl + q_gr_front) / max(q_gl_o + q_fr_o, 1e-9):.0f}% "
+              f"{100 * (q_gl + q_gr_front) / max(q_obs, 1e-9):.0f}% "
               f"of the observed-velocity flux across its own grounding line")
 
         # Where the deficit lives: the same fluxes binned by the observed

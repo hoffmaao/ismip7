@@ -1516,6 +1516,7 @@ def run_simulation(
             drag_mask=ctx.get("drag_mask"), phi_init=phi_init,
         )
         phi_entry = Function(level_set.Q0)
+    a_ref_entry = Function(a_ref.function_space()) if a_ref is not None else None
     A_map = ctx.get("A_map")
 
     def _advance(dt_local):
@@ -1549,8 +1550,13 @@ def run_simulation(
         un_plus = (un + abs(un)) / 2
 
         src = accum - ocean_melt
+        amb_gt = 0.0
         if a_ref is not None:
             src = src + a_ref
+            # The reference as APPLIED here: the live-extent mask above may
+            # have zeroed cells since the step's entry measurement, so the
+            # budget and the CSV must use this, not the entry value.
+            amb_gt = float(assemble(a_ref * dx)) * rho_gt * dt_local
         # Cell-averaged DG0 source (exact for the DG0 test space) with a
         # positivity limit (gia a_step clamp): the net sink may not draw a
         # cell below h_clamp within one advance. With the limited source
@@ -1664,6 +1670,7 @@ def run_simulation(
             "out_gt": out_gt,
             "calv_gt": calv_gt,
             "clamp_gt": clamp_gt + clamp_cg_gt + limit_gt,
+            "amb_gt": amb_gt,
         }
 
     # Time loop, transport-first: each step advances the geometry with the
@@ -1688,13 +1695,17 @@ def run_simulation(
         # Forcing-field integrals are constant within the step.
         smb_rate = float(assemble(accum * dx)) * rho_gt          # Gt/yr
         melt_rate = float(assemble(ocean_melt * dx)) * rho_gt    # Gt/yr
-        amb_rate = (float(assemble(a_ref * dx)) * rho_gt
-                    if a_ref is not None else 0.0)               # Gt/yr
 
         z_entry.assign(z)
         h_dg_entry.assign(h_dg)
         if level_set is not None:
             phi_entry.assign(level_set.phi)
+        # a_ref is mutated by the live-extent mask inside _advance, so it is
+        # step state and must rewind with the rest: an abandoned attempt that
+        # calved a cell the accepted trajectory keeps must not leave that
+        # cell without its balancing reference.
+        if a_ref_entry is not None:
+            a_ref_entry.assign(a_ref)
         tallies = None
         for m in SUBCYCLES:
             if m > 1:
@@ -1704,10 +1715,13 @@ def run_simulation(
                 h_dg.assign(h_dg_entry)
                 _lift_h()
                 z.assign(z_entry)
+                if a_ref_entry is not None:
+                    a_ref.assign(a_ref_entry)
                 if level_set is not None:
                     level_set.phi.assign(phi_entry)
                     level_set.update_cell_fields()
-            acc = {"out_gt": 0.0, "calv_gt": 0.0, "clamp_gt": 0.0}
+            acc = {"out_gt": 0.0, "calv_gt": 0.0, "clamp_gt": 0.0,
+                   "amb_gt": 0.0}
             ok = True
             for _j in range(m):
                 sub = _advance(dt / m)
@@ -1729,6 +1743,8 @@ def run_simulation(
             h_dg.assign(h_dg_entry)
             _lift_h()
             z.assign(z_entry)   # checkpoint the last converged pair
+            if a_ref_entry is not None:
+                a_ref.assign(a_ref_entry)
             if level_set is not None:
                 level_set.phi.assign(phi_entry)
                 level_set.update_cell_fields()
@@ -1743,6 +1759,7 @@ def run_simulation(
         out_rate = tallies["out_gt"] / dt                        # Gt/yr
         calv_gt = tallies["calv_gt"]
         clamp_all = tallies["clamp_gt"]
+        amb_rate = tallies["amb_gt"] / dt                        # Gt/yr
         dm = total_mass - mass_prev
         resid_gt = dm - (
             (smb_rate - melt_rate + amb_rate - out_rate) * dt

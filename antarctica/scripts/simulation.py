@@ -972,6 +972,7 @@ def setup_model(restart_from=None):
         "lc": chk_lc,
         "lc_coarse": chk_lc_coarse,
         "buffer_m": chk_buffer_m,
+        "raster_sample": chk_raster_sample,
         # Rescue speed limiter (residual laws): live Constant, 0 = inert.
         "k_lim": k_lim if use_residual else None,
         "k_lim_rescue": k_lim_rescue if use_residual else 0.0,
@@ -1347,6 +1348,8 @@ def run_simulation(
                 chk.set_attr("/", "lc_coarse", int(ctx["lc_coarse"]))
             if ctx.get("buffer_m") is not None:
                 chk.set_attr("/", "buffer_m", float(ctx["buffer_m"]))
+            if ctx.get("raster_sample"):
+                chk.set_attr("/", "raster_sample", str(ctx["raster_sample"]))
         mesh.comm.barrier()
         if mesh.comm.rank == 0:
             os.replace(tmp, final_path)

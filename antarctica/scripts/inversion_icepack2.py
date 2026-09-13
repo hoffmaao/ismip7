@@ -1110,6 +1110,13 @@ def main():
             chk.set_attr("/", "lc", int(lc))
             chk.set_attr("/", "lc_coarse", int(lc_coarse))
             chk.set_attr("/", "buffer_m", float(buffer_m))
+            # The configuration theta/phi only mean anything under. The
+            # derived MAP filename encodes all three, but ISMIP7_INVERSION
+            # bypasses the name, so the forward needs them recorded to check
+            # the MAP it was pointed at against the law it is about to run.
+            chk.set_attr("/", "friction", str(FRICTION))
+            chk.set_attr("/", "n_flow", float(n_flow_val))
+            chk.set_attr("/", "geometry_space", str(geometry_space))
             chk.set_attr("/", "misfit_norm", MISFIT_NORM)
             chk.set_attr("/", "log_vel_weight", float(log_vel_w))
             chk.set_attr("/", "log_vel_eps", float(LOG_VEL_EPS))

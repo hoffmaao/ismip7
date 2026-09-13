@@ -90,7 +90,11 @@ def census(map_path, nhat_floor, nhat_cap, gl_width):
 
 def forward_check(map_path):
     os.environ["ISMIP7_INVERSION"] = map_path
-    os.environ.setdefault("ISMIP7_FRICTION", "budd")
+    # Force the law, do not defer to the environment: this check exists to
+    # measure the Budd gate, and nots_env.sh exports regularized_coulomb by
+    # default, so an inherited value would re-solve the diagnostic under the
+    # wrong law and return a large rel L2 for an unrelated reason.
+    os.environ["ISMIP7_FRICTION"] = "budd"
     sys.path.insert(0, _ROOT)
     import simulation                                                     # noqa: E402
     ctx = simulation.setup_model()
@@ -137,7 +141,8 @@ def main():
     if a.forward:
         rel, umean = forward_check(a.map)
         if rank == 0:
-            print(f"  forward re-solve vs MAP velocity: rel L2 = {rel:.3e}  (mean |u| {umean:.1f} m/yr)")
+            print(f"  forward re-solve (friction={os.environ['ISMIP7_FRICTION']}) vs MAP "
+                  f"velocity: rel L2 = {rel:.3e}  (mean |u| {umean:.1f} m/yr)")
 
 
 if __name__ == "__main__":

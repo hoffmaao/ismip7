@@ -284,3 +284,18 @@ real negative number instead of a cancelling difference. Census script:
 `antarctica/scripts/check_budd_map.py MAP [--forward]` (old gate 418 cells at
 the cap, He-only 133, production 0; and the old MAP's saved velocity is not
 reproduced by the fixed law, rel L2 = 0.91, so Budd MAPs must be re-inverted).
+
+**Provenance of the He-multiplied interim form.** Between b930055 and 0cb378e
+the gate carried a multiplicative `He`, `He * conditional(HAF > 0, N_hat, 0)`,
+which scaled grounded friction inside the GL_WIDTH band as well as zeroing the
+shelf. The shipped law is HAF-only: `conditional(HAF > 0, N_hat, 0)`, with
+`He` entering the Budd branch solely through `tau_W`'s `exp(theta * He)`, as
+it does under regularized Coulomb. That form is what the re-inversions must
+match, because the inversion and the forward assemble the same expression.
+
+The Ua-mesh Budd MAP that was inverted under the interim form is kept on the
+workstation as `inversion_icepack2_budd_n3_dg0_logvelnet_ua2000_He.h5`. The
+production Budd re-inversion, NOTS job 1339328, is warm-started from it but
+runs the shipped HAF-only law. No MAP inverted with the He form is to be used
+for a result: a forward records only the law NAME (`budd`), not the gate form,
+so nothing detects the mismatch at load time.

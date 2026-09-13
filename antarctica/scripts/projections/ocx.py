@@ -26,7 +26,8 @@ _PROJECT = os.path.dirname(os.path.dirname(_SCRIPTS))
 sys.path.insert(0, _PROJECT)
 sys.path.insert(0, _SCRIPTS)
 
-from simulation import setup_model, run_simulation, latest_checkpoint, PETSc
+from simulation import (setup_model, run_simulation, latest_checkpoint,
+                        auto_resume, PETSc)
 from experiment import find_k_npz
 from icepack2_tools.forcing import (
     ISMIP7Atmosphere, ISMIP7Ocean, make_forcing_callback,
@@ -49,7 +50,7 @@ def main():
     # driver does. A chained batch job depends on it: without it every link
     # cold-starts and the chain never advances.
     restart = os.environ.get("ISMIP7_RESTART")
-    if restart is None and os.environ.get("ISMIP7_AUTO_RESUME"):
+    if restart is None and auto_resume():
         restart = latest_checkpoint(experiment_name)
         PETSc.Sys.Print(
             f"Auto-resume: {restart}" if restart

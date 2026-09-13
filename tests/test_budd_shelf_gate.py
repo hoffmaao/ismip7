@@ -138,10 +138,13 @@ def test_the_gate_does_not_scale_grounded_friction(three_regions):
         Q0, budd_nhat(N, None, H, b, nhat_floor=NHAT_FLOOR, nhat_cap=NHAT_CAP)
     )
     g = regions["grounded"]
-    assert np.allclose(nhat[g], ungated[g], rtol=0.0, atol=0.0)
-    # He is well below 1 there (50 m HAF over a 10 m band is not the issue;
-    # the band is what the interim form scaled), so this is a real distinction.
+    # EXACT equality on purpose. At HAF = 50 m over the 10 m band He is
+    # 0.99995, so the interim `He *` form differs here by only 5e-5: any
+    # ordinary tolerance would accept it and this test would stop catching
+    # the regression. The discrimination is the exact comparison, not the
+    # size of the difference.
     assert np.all(_dg0(Q0, grounded_mask(H, b))[g] < 1.0)
+    assert np.allclose(nhat[g], ungated[g], rtol=0.0, atol=0.0)
 
 
 def test_he_alone_would_not_have_closed_the_near_gl_band(three_regions):

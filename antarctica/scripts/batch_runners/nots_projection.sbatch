@@ -71,7 +71,13 @@ export ISMIP7_APPARENT_MB="${ISMIP7_APPARENT_MB:-1}"
 export ISMIP7_FIXED_FRONT="${ISMIP7_FIXED_FRONT:-1}"
 # Resume from this experiment's own newest checkpoint. This is what makes the
 # chain below safe to run unattended.
-export ISMIP7_AUTO_RESUME="${ISMIP7_AUTO_RESUME:-1}"
+# An integer flag: 0 turns it off. --export=ALL,VAR=... cannot unset a
+# variable, so 0 is the only way to ask a resubmission for a clean run.
+# Normalised here so the banner below reports what the drivers will do.
+case "${ISMIP7_AUTO_RESUME:-1}" in
+    ''|0|00) export ISMIP7_AUTO_RESUME=0 ;;
+    *)       export ISMIP7_AUTO_RESUME=1 ;;
+esac
 
 echo "    experiment $EXPERIMENT -> $DRIVER"
 echo "    map in  $ISMIP7_INVERSION"

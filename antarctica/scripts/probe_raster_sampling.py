@@ -81,7 +81,6 @@ def frac_of(pred):
         with mf.open() as d:
             return raster_cell_mean(d, Q)
 f_grounded = frac_of(lambda m: (m == 2) | (m == 4))
-f_ice = frac_of(lambda m: (m == 2) | (m == 3) | (m == 4))
 n_cells = int(mesh.comm.allreduce(float(one.dat.data_ro.size)))
 
 res = {}

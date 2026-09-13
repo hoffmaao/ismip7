@@ -206,8 +206,17 @@ def sample_to_geometry(raster, Q_g, Q_cg, floor=None, method="vertex"):
     projection of the CG1 interpolant IS the cell average, which is what a DG0
     field means, so use that.
 
-    ``floor`` optionally clamps the field from below (thickness >= h_clamp)
-    before averaging.
+    ``floor`` optionally clamps the field from below (thickness >= h_clamp).
+    The two paths apply it at opposite ends of the averaging and so disagree
+    when ``floor > 0``: ``"vertex"`` clamps the CG1 interpolant and then
+    projects (clamp, then average), while ``"cell_mean"`` averages the raster
+    over the cell and clamps that average (average, then clamp). Only the
+    second can return exactly ``floor``; the first returns it only where every
+    vertex is at or below the floor. They coincide wherever the raster already
+    exceeds the floor, which is why the inversion sees no difference
+    (``ISMIP7_H_CLAMP`` defaults to 0 and BedMachine thickness is
+    non-negative); the gap is reachable from the budd_legacy cold start, whose
+    ``h_clamp_init`` is 10 m.
     """
     if callable(raster):
         raster_fn, dataset = raster, None

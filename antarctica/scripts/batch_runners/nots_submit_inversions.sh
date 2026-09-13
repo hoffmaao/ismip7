@@ -11,12 +11,9 @@ set -euo pipefail
 cd "$(dirname "$0")/../../.."
 REPO=$PWD
 which=${1:-BC}
+. antarctica/scripts/ismip7_names.sh
 FRICTION="${ISMIP7_FRICTION:-regularized_coulomb}"
-case "$FRICTION" in
-  regularized_coulomb) FTAG=_rc ;;
-  budd)                FTAG=_budd ;;
-  *)                   FTAG= ;;
-esac
+FTAG="$(ismip7_friction_tag "$FRICTION")"
 COMMON="ISMIP7_LC=2000,ISMIP7_BUFFER_M=0,ISMIP7_DHDT_NET_SIGMA=10,ISMIP7_LOG_VEL_WEIGHT=auto,ISMIP7_FRICTION=$FRICTION"
 if [[ "$which" == *C* ]]; then
   sbatch -p long -C sapphirerapids --mem=240G -N1 -n32 --cpus-per-task=1 --time=3-00:00:00 -J inv2k_int5k \

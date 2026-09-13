@@ -65,6 +65,10 @@ def main():
     ap.add_argument("--experiment-name", required=True,
                     help="the driver's experiment_name (with --tag applied), e.g. ctrl2015_cesm2_waccm_adapt")
     ap.add_argument("--launcher", default="mpiexec -n 4")
+    ap.add_argument("--adapt-launcher", default="mpiexec -n 1",
+                    help="launcher for the adapt step only. Single-rank by default because "
+                         "ISMIP7_ADAPT_TRANSFER=project (the recommended transfer) refuses to "
+                         "run on more than one rank; raise it only for transfer=interpolate")
     ap.add_argument("--python", default=sys.executable)
     ap.add_argument("--t-start", type=float, required=True)
     ap.add_argument("--t-end", type=float, required=True)
@@ -99,7 +103,7 @@ def main():
     def adapt(chk, k, rebuild):
         out = chk.replace("_final.h5", f"_adapt{k}.h5")
         flag = " --rebuild-aref" if rebuild else ""
-        sh(f"{args.launcher} {shlex.quote(args.python)} -u {shlex.quote(os.path.join(HERE, 'adapt_mesh.py'))} "
+        sh(f"{args.adapt_launcher} {shlex.quote(args.python)} -u {shlex.quote(os.path.join(HERE, 'adapt_mesh.py'))} "
            f"{shlex.quote(chk)} --out-checkpoint {shlex.quote(out)}{flag}", env)
         return out
 

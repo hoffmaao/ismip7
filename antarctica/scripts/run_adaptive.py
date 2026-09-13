@@ -78,11 +78,12 @@ def main():
                     help="the driver's experiment_name (with --tag applied), e.g. ctrl2015_cesm2_waccm_adapt")
     ap.add_argument("--launcher", default="mpiexec -n 4")
     ap.add_argument("--adapt-launcher", default="mpiexec -n 1",
-                    help="launcher for the adapt step only. Single-rank by default because "
-                         "ISMIP7_ADAPT_TRANSFER=project (the recommended transfer) refuses to "
-                         "run on more than one rank, and the remesh is serial gmsh either way. "
-                         "Raise it to --launcher's rank count under the shipped default "
-                         "transfer (interpolate), which has no such restriction")
+                    help="launcher for the adapt step only. Single-rank by default because the "
+                         "remesh is serial gmsh on rank 0 either way, and because "
+                         "ISMIP7_ADAPT_TRANSFER=project, an option for the carried DG0 fields, "
+                         "refuses to run on more than one rank. Raise it to --launcher's rank "
+                         "count under the shipped default transfer (interpolate), which has no "
+                         "such restriction")
     ap.add_argument("--python", default=sys.executable)
     ap.add_argument("--t-start", type=float, required=True)
     ap.add_argument("--t-end", type=float, required=True)

@@ -195,7 +195,7 @@ RC_HVISC_FLOOR = float(os.environ.get("ISMIP7_RC_HVISC_FLOOR", "10.0"))
 RC_CW0_FLOOR = float(os.environ.get("ISMIP7_RC_CW0_FLOOR", "0.0"))
 # Budd N_hat knobs (fric_law="budd"): at the reference/inversion geometry
 # N_hat=1 (with the PISM-delta grounded floor), so this inverts the exact-zero
-# shelf He-gated law; the effective-pressure feedback is purely prognostic.
+# shelf HAF-gated law; the effective-pressure feedback is purely prognostic.
 BUDD_DELTA = float(os.environ.get("ISMIP7_BUDD_DELTA", "0.02"))
 BUDD_NHAT_CAP = float(os.environ.get("ISMIP7_BUDD_NHAT_CAP", "3.0"))
 ALPHA_GL = (float(os.environ.get("ISMIP7_ALPHA_GL", "0.5"))

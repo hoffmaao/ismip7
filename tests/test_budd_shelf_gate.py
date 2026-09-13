@@ -116,19 +116,38 @@ def test_production_gate_zeroes_both_shelf_regions(three_regions):
     r"""The fix: exactly zero on floating ice, grounded friction untouched."""
     Q0, H, b, s, regions = three_regions
     N = effective_pressure(H, s)
-    He = grounded_mask(H, b)
     nhat = _dg0(
-        Q0, budd_nhat(N, None, H, b, He, nhat_floor=NHAT_FLOOR, nhat_cap=NHAT_CAP)
+        Q0, budd_nhat(N, None, H, b, nhat_floor=NHAT_FLOOR, nhat_cap=NHAT_CAP)
     )
     assert np.all(nhat[regions["far"]] == 0.0)
     assert np.all(nhat[regions["near"]] == 0.0)
     assert np.all(nhat[regions["grounded"]] > 0.0)
 
 
+def test_the_gate_does_not_scale_grounded_friction(three_regions):
+    r"""The gate is exact, not a smooth ramp. Grounded ice gets the ungated
+    N_hat unchanged: an interim form multiplied through by ``He``, which cut
+    friction everywhere inside the He band, and the Weertman branch already
+    carries its own ``exp(theta * He)`` gate on theta."""
+    Q0, H, b, s, regions = three_regions
+    N = effective_pressure(H, s)
+    ungated = _dg0(
+        Q0, budd_nhat_ungated(N, None, H, nhat_floor=NHAT_FLOOR, nhat_cap=NHAT_CAP)
+    )
+    nhat = _dg0(
+        Q0, budd_nhat(N, None, H, b, nhat_floor=NHAT_FLOOR, nhat_cap=NHAT_CAP)
+    )
+    g = regions["grounded"]
+    assert np.allclose(nhat[g], ungated[g], rtol=0.0, atol=0.0)
+    # He is well below 1 there (50 m HAF over a 10 m band is not the issue;
+    # the band is what the interim form scaled), so this is a real distinction.
+    assert np.all(_dg0(Q0, grounded_mask(H, b))[g] < 1.0)
+
+
 def test_he_alone_would_not_have_closed_the_near_gl_band(three_regions):
-    r"""Why ``He`` is a factor and not the gate: 3 m of flotation leaves
-    ``He`` around 0.35, so the He-only form still puts a third of the capped
-    Weertman friction on floating ice."""
+    r"""Why ``He`` is not the gate either: 3 m of flotation leaves ``He``
+    around 0.35, so an He-only form still puts a third of the capped Weertman
+    friction on floating ice."""
     Q0, H, b, s, regions = three_regions
     N = effective_pressure(H, s)
     He = grounded_mask(H, b)

@@ -207,8 +207,11 @@ fi
 
 echo "chain: at ${LAST_YEAR} of ${T_END}, resubmitting"
 # Without the derived budget: the successor may land on a partition with a
-# different limit and must derive its own.
-unset ISMIP7_WALL_STOP_MIN
+# different limit and must derive its own. Without the restart either: an
+# explicit one-off ISMIP7_RESTART wins over auto-resume in every driver, so
+# inheriting it would send each link back to the same starting checkpoint and
+# the chain would never advance past the first job's end year.
+unset ISMIP7_WALL_STOP_MIN ISMIP7_RESTART
 sbatch --dependency=afterok:"${SLURM_JOB_ID}" \
        --export=ALL,ISMIP7_CHAIN_NOPROGRESS="$RETRY" \
        antarctica/scripts/batch_runners/nots_projection.sbatch

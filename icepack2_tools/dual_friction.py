@@ -135,9 +135,9 @@ def budd_nhat_ungated(N, N_ref, H, nhat_floor=0.02, nhat_cap=3.0):
     return N_hat
 
 
-def budd_nhat(N, N_ref, H, b, He, nhat_floor=0.02, nhat_cap=3.0):
+def budd_nhat(N, N_ref, H, b, nhat_floor=0.02, nhat_cap=3.0):
     r"""The production ``N_hat``: :func:`budd_nhat_ungated` gated to grounded
-    ice by height above flotation, times the smooth indicator ``He``.
+    ice by height above flotation.
 
     The gate is HAF > 0, not N > 0. For grounded ice the two are the same
     statement (``s = b + H`` gives ``N = rho_I g HAF`` exactly); on the shelf
@@ -147,14 +147,20 @@ def budd_nhat(N, N_ref, H, b, He, nhat_floor=0.02, nhat_cap=3.0):
     and with ``N_ref`` equally tiny the delta floor lifted it to ``nhat_cap``:
     triple Weertman friction on 418 of 3791 floating cells of the 32 km MAP,
     flipped wholesale by a 2e-13 m change in the surface (outflux 672 vs
-    1459 Gt/yr for the same year, Sep 13 2026). Gating on ``He`` alone (the
-    shared ``icepack_tools.friction`` form) still left 133 cells floating by
-    a few metres, inside the He band, with ``He * nhat_cap``. ``He`` stays as
-    the smooth factor the adjoint needs (``dJ/dtheta -> 0`` as ``He -> 0``).
+    1459 Gt/yr for the same year, Sep 13 2026). Gating on the smooth indicator
+    ``He`` alone (the shared ``icepack_tools.friction`` form) still left 133
+    cells floating by a few metres, inside the He band, with ``He * nhat_cap``.
+
+    The gate is EXACT, not smoothed. An interim form multiplied through by
+    ``He``, which cut grounded friction everywhere inside the He band (982
+    grounded cells at 32 km, 0.50x at the flotation line): a change to
+    grounding-line drag that the shelf fix never needed, and not the smooth
+    factor the adjoint needs either, since the Weertman branch already carries
+    its own ``exp(theta * He)`` gate on ``theta``.
     """
     haf = height_above_flotation(H, b)
     nh = budd_nhat_ungated(N, N_ref, H, nhat_floor=nhat_floor, nhat_cap=nhat_cap)
-    return He * conditional(gt(haf, Constant(0.0)), nh, Constant(0.0))
+    return conditional(gt(haf, Constant(0.0)), nh, Constant(0.0))
 
 
 def build_rc_residual(
@@ -350,7 +356,7 @@ def build_rc_residual(
         # gate selects 0.  1e-6 is tiny vs grounded N (~rho_I g H), so N/Nr = 1
         # stands on all grounded ice when N_ref=None (inversion); only the
         # (gated-to-zero) shelf sees the floor.
-        N_hat = budd_nhat(N, N_ref, H, b, He, nhat_floor=nhat_floor, nhat_cap=nhat_cap)
+        N_hat = budd_nhat(N, N_ref, H, b, nhat_floor=nhat_floor, nhat_cap=nhat_cap)
         tau_b = tau_W * N_hat
     else:  # regularized_coulomb
         tau_cap = max_value(Constant(c0) * N, Constant(eps_tauc))   # Coulomb cap = c0 N -> 0 afloat

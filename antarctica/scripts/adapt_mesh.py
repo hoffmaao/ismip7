@@ -39,10 +39,19 @@ DATA_DIR = os.path.join(HERE, "..", "data")
 
 def main():
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    ap.add_argument("checkpoint")
-    ap.add_argument("--out-checkpoint", required=True)
+    ap.add_argument("checkpoint", nargs="?", default=None,
+                    help="forward/MAP checkpoint; omit with --source-mesh --from-obs")
+    ap.add_argument("--source-mesh", default=None,
+                    help="with --mesh-only --from-obs: the .msh to evaluate the size field on (a scaffold only)")
+    ap.add_argument("--from-obs", action="store_true",
+                    help="size field from OBSERVATIONS: MEaSUReS velocity (masked where unobserved) and "
+                         "BedMachine thickness/bed, instead of the checkpoint's model fields")
+    ap.add_argument("--out-checkpoint", default=None)
     ap.add_argument("--out-mesh", default=None, help="default: <old basename>_adaptN.msh in antarctica/mesh")
     ap.add_argument("--rebuild-aref", action="store_true")
+    ap.add_argument("--mesh-only", action="store_true",
+                    help="build the size field and the new mesh (+ sidecar) from this checkpoint, no transfer: "
+                         "a mesh for a fresh inversion (--out-checkpoint is then ignored)")
     ap.add_argument("--no-remesh", action="store_true",
                     help="identity test: keep the old mesh (copied under the new name) and only run the transfer")
     args = ap.parse_args()
@@ -50,17 +59,45 @@ def main():
     cfg = AdaptMeshConfig.from_env()
     PETSc.Sys.Print(f"adapt: config {cfg}")
 
-    with fd.CheckpointFile(args.checkpoint, "r") as chk:
-        mesh = chk.load_mesh()
-        attrs = {k: chk.get_attr("/", k) for k in
-                 ("mesh_basename", "buffer_m", "geometry_space", "raster_sample", "adapt_count", "t_yr")
-                 if chk.has_attr("/", k)}
-        H = chk.load_function(mesh, name="thickness")
-        b = chk.load_function(mesh, name="bed")
-        try:
-            u = chk.load_function(mesh, name="velocity")
-        except Exception:
-            u = None
+    weight = None
+    if args.source_mesh:
+        if not (args.mesh_only and args.from_obs):
+            raise SystemExit("--source-mesh only makes sense with --mesh-only --from-obs")
+        mesh = fd.Mesh(args.source_mesh, name="firedrake_default")
+        attrs = {"mesh_basename": os.path.basename(args.source_mesh),
+                 "buffer_m": float(os.environ.get("ISMIP7_BUFFER_M", "0")), "geometry_space": "dg0"}
+        H = b = u = None
+    else:
+        with fd.CheckpointFile(args.checkpoint, "r") as chk:
+            mesh = chk.load_mesh()
+            attrs = {k: chk.get_attr("/", k) for k in
+                     ("mesh_basename", "buffer_m", "geometry_space", "raster_sample", "adapt_count", "t_yr")
+                     if chk.has_attr("/", k)}
+            H = chk.load_function(mesh, name="thickness")
+            b = chk.load_function(mesh, name="bed")
+            try:
+                u = chk.load_function(mesh, name="velocity")
+            except Exception:
+                u = None
+    if args.from_obs:
+        # Observations on the scaffold mesh: the inversion's own loaders.
+        import icepack
+        from firedrake import VectorFunctionSpace, conditional
+        from icepack2_tools.geometry import cg1_lift
+        Qc = FunctionSpace(mesh, "CG", 1)
+        Q0 = FunctionSpace(mesh, "DG", 0)
+        Vc = VectorFunctionSpace(mesh, "CG", 1)
+        bm = sorted(glob.glob(os.path.join(DATA_DIR, "bedmachine", "*.nc")))[0]
+        vel = sorted(glob.glob(os.path.join(DATA_DIR, "velocity", "*.nc")))[0]
+        H = sample_to_geometry(rasterio.open(f"netcdf:{bm}:thickness"), Q0, Qc, floor=0.0, method="vertex")
+        b = sample_to_geometry(rasterio.open(f"netcdf:{bm}:bed"), Q0, Qc, method="vertex")
+        u = icepack.interpolate((rasterio.open(f"netcdf:{vel}:VX"), rasterio.open(f"netcdf:{vel}:VY")), Vc, fillvalue=0.0)
+        err = icepack.interpolate((rasterio.open(f"netcdf:{vel}:ERRX"), rasterio.open(f"netcdf:{vel}:ERRY")), Vc, fillvalue=0.0)
+        weight = Function(Qc).interpolate(conditional(err[0] > 0.0, 1.0, 0.0))
+        n_obs = int(mesh.comm.allreduce(float(weight.dat.data_ro.sum())))
+        PETSc.Sys.Print(f"adapt: size field from OBSERVATIONS (MEaSUReS velocity on {n_obs} observed nodes, BedMachine geometry)")
+    if args.checkpoint is None and not args.source_mesh:
+        raise SystemExit("give a checkpoint, or --source-mesh with --mesh-only --from-obs")
     basename = str(attrs.get("mesh_basename", "")).replace(".msh", "")
     if not basename:
         raise RuntimeError("checkpoint has no mesh_basename attribute; cannot find its .msh/sidecar")
@@ -87,8 +124,15 @@ def main():
         n_ele = mesh.comm.allreduce(FunctionSpace(mesh, "DG", 0).dof_dset.size)
         PETSc.Sys.Print("adapt: --no-remesh, transferring onto a fresh load of the same mesh")
     else:
-        h_des, diag = desired_element_size(mesh, cfg, H, b, u=u)
+        h_des, diag = desired_element_size(mesh, cfg, H, b, u=u, weight=weight)
         n_ele = remesh_global(mesh, h_des, cfg, out_msh, old_msh, old_sidecar)
+    if args.mesh_only:
+        n_old = mesh.comm.allreduce(FunctionSpace(mesh, "DG", 0).dof_dset.size)
+        PETSc.Sys.Print(f"adapt: mesh only: {n_old} -> {n_ele} cells, wrote {out_msh} and its sidecar "
+                        f"in {time.time() - t0:.0f} s")
+        return
+    if not args.out_checkpoint:
+        raise SystemExit("--out-checkpoint is required unless --mesh-only")
     mesh_new = fd.Mesh(out_msh, name="firedrake_default")
 
     bm_fn = sorted(glob.glob(os.path.join(DATA_DIR, "bedmachine", "*.nc")))[0]

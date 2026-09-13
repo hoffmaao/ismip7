@@ -107,13 +107,25 @@ Two deliberate choices where Úa is nodal and this model is DG0:
   32 km cell-mean thicknesses onto a finely re-sampled bed floated over every
   trough (outflux 782 to 14,770 Gt/yr at the first step).
 
-  What `ISMIP7_ADAPT_TRANSFER` governs is the DG0 fields that ARE carried
-  across: the frozen anchors `a_ref_mb`, `H_init` and `thickness_dg`. Set it
-  to `project` for a conservative supermesh projection of those; everything
-  else, including the surface, the transferred physical divergence and the
-  `N_eff/N_ref` ratio, is interpolated unconditionally. It is an option for
-  those fields, not a general recommendation. Either way the transfer prints
-  the volume change and the mean front thickness before and after.
+  Besides the thickness on the non-default `bs-FROM-hBS` route above,
+  `transfer_state` consults `ISMIP7_ADAPT_TRANSFER` for exactly three field
+  names, and only under DG0 geometry: `a_ref_mb`, `thickness_dg` and
+  `H_init`. Two of the three are unreachable in the shipped workflow:
+
+  - `a_ref_mb` is transferred and then discarded whenever the checkpoint
+    carries a `velocity`, which every forward state checkpoint does, because
+    the physical divergence replaces it; `--rebuild-aref` skips it outright.
+  - `thickness_dg` is only written under CG1 geometry, and there the DG0
+    condition fails, so it is interpolated regardless.
+
+  So under the shipped DG0 route the one field the setting changes is
+  `H_init`, the t=0 extent anchor, and on an initial adaptation
+  (`--rebuild-aref`) not even that: `H_init` is assigned from the re-sampled
+  thickness. Everything else, including the surface, the transferred physical
+  divergence and the `N_eff/N_ref` ratio, is interpolated unconditionally.
+  `project` is a serial-only option for those carried fields, not a general
+  recommendation. Either way the transfer prints the volume change and the
+  mean front thickness before and after.
 
   `project` must run on ONE rank: `cross_mesh_transfer` raises for it when the
   new mesh's communicator has more than one rank. That is why `run_adaptive.py`
@@ -152,7 +164,7 @@ with a Úa run rather than with this repo's initial meshes. Provenance per value
 | `MeshSizeMax` (interior) | 180 km | Úa-FESOM pan-Antarctic mesh, GMD 18 (2025): "up to 180 km in the interior" |
 | `MeshSizeMin` (grounding line) | 2 km | same paper: "adaptive refinement down to 2 km at the grounding line" |
 | `MeshSize` (fallback) | 90 km | PIG-TWG example: `MeshSize = MeshSizeMax/2` |
-| ice-shelf size | 4 km | PIG-TWG: `MeshSizeIceShelves = MeshSizeMax/5`; pan-Antarctic "4 km" |
+| ice-shelf size | 10 km | INFERRED. Úa's PIG-TWG setup uses `MeshSizeIceShelves = MeshSizeMax/5` and its pan-Antarctic runs quote "4 km", but 4 km continent-wide is ~220,000 elements on the shelves alone, which would spend the whole 250,000 budget below. This preset chose 10 km deliberately to stay inside the 1.5 M-dof budget |
 | low ground (`s < 1500 m`) | 36 km | PIG-TWG: `EleSizeIndicator(s<1500) = MeshSizeMax/5`, scaled to the 180 km max |
 | `effective strain rates` criterion | Scale 0.001, floor 4 km | PIG-TWG Scale; pan-Antarctic "4 km in regions of high strain rate" |
 | `GLrange` | 10 km: 4 km, 5 km: 2 km | INFERRED pan-Antarctic form of MISMIP+'s `[20000 5000; 10000 2000; 5000 500]` and the "2 km at the GL" statement |

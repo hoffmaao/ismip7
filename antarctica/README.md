@@ -385,7 +385,11 @@ not cleanly isolate the forced response.
 
 Restart / run-management flags on the control driver: `--restart <ckpt>`
 (or `ISMIP7_RESTART`) resumes from a checkpoint; `ISMIP7_AUTO_RESUME=1`
-picks up the newest checkpoint for the experiment unattended; `--tag`
+picks up the newest checkpoint for the experiment unattended (honored by every
+forward driver, not just the control, which is what lets a chained batch job
+continue itself; with no explicit `ISMIP7_RESTART` it takes precedence over the
+historical endpoint a projection would otherwise branch from, so only the FIRST
+link of a chain starts there); `--tag`
 (or `ISMIP7_RUN_TAG`, honored by every forward driver, not just the control)
 suffixes the experiment name so a tagged method line (e.g. the n=3 matrix)
 keeps - and resumes - its own output files, with the historical → projection
@@ -601,7 +605,7 @@ cannot be read as current.
 | `ISMIP7_DHDT_CLIM_START` / `_END` | RACMO SMB climatology window for that source | `2003` / `2019` |
 | `ISMIP7_DHDT_REACH` | pixel-to-cell reach as a multiple of the cell scale `sqrt(area)`; rejects raster pixels lying outside the mesh that nearest-centroid assignment would otherwise snap onto boundary cells | `0.75` |
 | `ISMIP7_DHDT_NET_SIGMA` | sigma (Gt/yr) on the *integrated* grounded+observed dH/dt; `0` disables the net mass-balance term. Off by default on purpose - see §4 - and only ever active when `ISMIP7_DHDT_WEIGHT > 0` | `0` |
-| `ISMIP7_OBS_KIT` | path to `AntarcticaObsISMIP7-v*.nc` | newest under `<DATA_ROOT>/obs/mipkit` |
+| `ISMIP7_OBS_KIT` | path to `AntarcticaObsISMIP7-v*.nc`. The 11 GB kit is only needed to BUILD the two small dH/dt cache rasters (`antarctica/data/dhdt_cache/`); with those staged the kit may be absent and the newest cached version is used. Setting this variable to a path that does not exist is a hard error, not a fall-back to the cache | newest under `<DATA_ROOT>/obs/mipkit` |
 
 ---
 
@@ -637,7 +641,7 @@ how it reaches the core report.
 | `ISMIP7_AUTO_RESUME` | resume from this experiment's own newest checkpoint unattended, when no explicit `ISMIP7_RESTART` is given. An integer flag: `=0` disables it (it used to count as set), because the batch runners export it unconditionally and `sbatch --export=ALL` cannot unset a variable. A non-integer value is rejected at startup. `nots_projection.sbatch` also refuses to chain when it is off, since a successor would cold-start and repeat the same years | _(unset, off)_ |
 | `ISMIP7_RUN_TAG` | experiment-name suffix for a parallel method line (see run-management flags above) | _(unset)_ |
 | `ISMIP7_WALL_STOP_MIN` | wall-clock budget in minutes, counted from process start. Checked before each step against the longest step seen so far, so a run stops with the budget intact rather than overshooting by one hard step: it writes its final checkpoint and exits cleanly with `t_yr` short of `t_end`, which is what a chained batch job resumes from. Without it a job that hits its scheduler limit is killed mid-step and loses everything since the last periodic checkpoint. `nots_projection.sbatch` derives it from the job's own `TimeLimit`, holding back 25 minutes, and passes it to that run only, so each link in a chain derives its own. `0` disables the budget | `0` |
-| `ISMIP7_EXPERIMENT_NAME` | the run's identity, used by `adapt_mesh.py` to name the adapted meshes and sidecars it writes into the shared `mesh/` directory so parallel experiments cannot overwrite each other's. `run_adaptive.py` sets it from `--experiment-name`; the run tag is not a substitute, being a method-line suffix that parallel experiments share | _(unset: adapted meshes are named from the reference mesh alone)_ |
+| `ISMIP7_EXPERIMENT_NAME` | the run's identity, used by `adapt_mesh.py` to name the adapted meshes and sidecars it writes into the shared `mesh/` directory so parallel experiments cannot overwrite each other's. `run_adaptive.py` sets it from `--experiment-name`; the run tag is not a substitute, being a method-line suffix that parallel experiments share. The adaptive workflow itself, and what of it is validated, is `../UA_ADAPTIVE_MESH.md` | _(unset: adapted meshes are named from the reference mesh alone)_ |
 | `ISMIP7_APPARENT_MB` | apparent-mass-balance init: `1`/`balance` zeroes the t=0 thickness tendency (ISMIP6 ctrl_proj-style), `div` cancels only the flux divergence. `0`, `off`, `none` and the empty string disable it (`0` used to count as set), because the batch runners export it unconditionally and `sbatch --export=ALL` cannot unset a variable. Resolved in one place, `runconfig.apparent_mb_mode` | _(unset, off)_ |
 | `ISMIP7_FIXED_FRONT` | set to hold the calving front at the t=0 extent (inflow beyond it tallied as calving). `=0` now disables it (it used to count as set), because `run_core_matrix.sh` exports it unconditionally. The legacy form of `ISMIP7_CALVING=fixed`, and it removes nothing whenever any `ISMIP7_CALVING` law is configured - that law owns the front | _(unset, off)_ |
 | `ISMIP7_LEGACY_TRANSPORT` | set to restore the pre-Jul-2026 CG-projection transport scheme (requires `ISMIP7_GEOMETRY_SPACE=cg1`) | _(unset)_ |

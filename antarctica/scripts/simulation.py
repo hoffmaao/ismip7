@@ -64,7 +64,10 @@ from icepack2_tools.runconfig import (
     friction as _friction, geometry_space as _geometry_space, lc as _lc,
     n_flow as _n_flow,
     calving_law as _calving_law, calving_sigma_max as _calving_sigma_max,
-    fixed_front as _fixed_front, auto_resume, apparent_mb_mode,
+    # auto_resume is re-exported, not used here: every forward driver imports
+    # it from this module alongside latest_checkpoint, so they resolve the
+    # knob through one import rather than each reaching into runconfig.
+    fixed_front as _fixed_front, auto_resume, apparent_mb_mode,  # noqa: F401
 )
 
 lc = _lc()
@@ -525,6 +528,9 @@ def setup_model(restart_from=None):
                     f"built from an evolved state. Set ISMIP7_APPARENT_MB=0 "
                     f"or restart from a checkpoint that carries a_ref_mb."
                 )
+            # nots_projection.sbatch parses t_yr out of this line to learn
+            # the year the job STARTED at, which is how it tells a link that
+            # advanced from one that spent its whole wall budget on setup.
             PETSc.Sys.Print(
                 f"  Restart: evolved geometry + frozen anchors loaded "
                 f"(t_yr={t_restart}, friction={friction})"
@@ -1928,6 +1934,11 @@ def run_simulation(
     final_fn = os.path.join(RESULTS_DIR, f"{experiment_name}_{lc}_final.h5")
     last_t = results[-1][0] if results else t_start
     _save_state(final_fn, last_t, stalled=stalled)
+    # Printed on every exit, early stop included. nots_projection.sbatch reads
+    # this exact "Saved: <...>_final.h5" line out of its own Slurm log to find
+    # THIS job's checkpoint (the results directory is flat and shared, so the
+    # newest file does not identify the run); keep the prefix and the path on
+    # one line.
     PETSc.Sys.Print(f"Saved: {final_fn}")
 
     if csv_f is not None:

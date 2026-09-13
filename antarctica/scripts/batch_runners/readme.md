@@ -16,6 +16,10 @@ rather than at submission.
 | `NOTS_FIREDRAKE` | the Firedrake venv `activate` on NOTS | `nots_build_firedrake.sbatch` builds it to `/projects/ah301/sw/venv-firedrake` |
 | `NOTS_MODULES` | the module loads that venv was **built** against | the exact pinned set is printed at the end of a successful build |
 
+`nots_recon.sh`, run on a NOTS login node, prints what fills them: the Slurm
+associations, the partition limits, the node hardware and the queue depth. It
+only reads, submits nothing and changes nothing.
+
 `ISMIP7_REPO` now defaults to `/projects/ah301/ismip7`. That directory exists
 and is writable. The forcing tree is 316 GB and the input data 8 GB, and
 `/home` is a 10 TB NFS export shared by the whole cluster, so neither belongs
@@ -131,17 +135,27 @@ nodes (the script sets `TMPDIR`), and the `gmsh` wheel dlopens `libGLU.so.1`,
 which the nodes lack, so `libGLU/9.0.3` joined `NOTS_MODULES`. HDF5 versions
 agree (h5py 1.14.6 built against PETSc's, netCDF4 wheel 1.14.6).
 
+`nots_verify.sbatch` then proves the build works ACROSS RANKS: four tasks under
+`srun`, distributing a unit square with each partitioner in turn and then the
+real 2500 m mesh under `ptscotch` and `simple`. It exists because the build
+job's own check ran `srun -n 4` inside a one-task allocation, which fails for
+every type, `simple` included, and so says nothing about the build.
+
 `nots_smoke.sbatch` then runs the 32 km inversion for two iterates on four
 ranks, a few minutes on `scavenge`, so that a multi-day job cannot die on a
 missing file hours after it queued. Run it after any change to the stack.
 
 ### Toolchain for the Firedrake build
 
-Firedrake is not built on NOTS. EasyBuild modules are available and the newest
-coherent toolchain is `foss/2025b`. Confirmed present: GCC through 15.1.0,
-OpenMPI 4.1.6, Python 3.11.5, CMake 3.27.6. Whatever is chosen, `NOTS_MODULES`
-must name the *exact* set the venv was built against, or MPI mismatches at
-runtime rather than at submission.
+There is no Firedrake module on NOTS, so `nots_build_firedrake.sbatch` builds
+it against EasyBuild modules. The set it pins is `foss/2023b`, the toolchain
+that actually resolves here (GCC 13.2.0, OpenMPI 4.1.6, OpenBLAS, ScaLAPACK,
+FFTW) with Python 3.11.5 built against the same GCCcore so the ABI matches,
+plus CMake 3.27.6 and the M4 / flex / Bison / libevent / zstd / Szip / libaec
+set the compute-node gaps above make necessary. An earlier version of these
+notes named `foss/2025b`; the build does not use it. `NOTS_MODULES` must name
+the *exact* set the venv was built against, which the successful build prints
+at the end, or MPI mismatches at runtime rather than at submission.
 
 ## What deepsC actually is (measured, and it corrects an earlier claim)
 
@@ -245,7 +259,27 @@ sbatch --export=ALL,ISMIP7_EXPERIMENT=control \
 **The chain stops on a non-zero exit and does not retry.** That is deliberate.
 The July grounding-line blow-up looked exactly like a run that just needed more
 time, and chaining through it would have burned days producing nothing.
-`ISMIP7_CHAIN=0` disables resubmission entirely.
+
+Beyond that, each job asks its OWN final checkpoint what happened before it
+decides anything, and that verdict owns the exit code. A checkpoint written
+with `stalled=1` (the in-run rescue ladder and the subcycles were both
+exhausted) exits 1 and submits nothing, whether or not chaining was enabled, so
+a stall is never mailed out as a completed job. A clean exit that reached
+`ISMIP7_T_END` finishes. A clean exit short of it resubmits, except that
+`ISMIP7_CHAIN=0` disables resubmission entirely; auto-resume off
+(`ISMIP7_AUTO_RESUME=0`) stops the chain, because a successor inherits no
+`ISMIP7_RESTART` and would cold-start and repeat the same years; an unreadable
+final checkpoint stops it, since nothing then says where to resume; and a job
+that advanced no years at all stops with exit 1, since its setup alone spent
+the whole wall budget and a successor under the same budget would not advance
+either.
+
+That wall budget is derived per job, not inherited: each link reads its own
+partition's `TimeLimit`, holds back 25 minutes and passes the rest to the
+driver as `ISMIP7_WALL_STOP_MIN` (documented in the env table of
+`antarctica/README.md`). The model then stops a step early and writes its final
+checkpoint, so the successor resumes from a complete state rather than from
+whatever survived being killed at the limit.
 
 ## Measured costs
 

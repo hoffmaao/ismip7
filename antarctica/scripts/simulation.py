@@ -234,6 +234,11 @@ def setup_model(restart_from=None):
         # here would be silently inconsistent.
         chk_raster_sample = (str(_chk.get_attr("/", "raster_sample"))
                              if _chk.has_attr("/", "raster_sample") else "vertex")
+        # How many adaptations this lineage has been through. adapt_mesh.py
+        # names its output <root>_adapt<count+1>.msh, so a forward that drops
+        # the counter makes the next adaptation write over the mesh it read.
+        chk_adapt_count = (int(_chk.get_attr("/", "adapt_count"))
+                           if _chk.has_attr("/", "adapt_count") else None)
         _env_rs = os.environ.get("ISMIP7_RASTER_SAMPLE")
         if _env_rs and _env_rs.lower() != chk_raster_sample:
             PETSc.Sys.Print(
@@ -361,7 +366,7 @@ def setup_model(restart_from=None):
         )
 
     # Reference log-adjustments (theta=log_friction, phi=log_fluidity) plus,
-    # for RC/Budd or any restart, the geometry and frozen anchors — all read
+    # for RC/Budd or any restart, the geometry and frozen anchors - all read
     # onto the mesh we already took from THIS checkpoint, so the dof order
     # matches by construction (no fragile .msh-vs-checkpoint node comparison).
     C_w0 = None
@@ -889,7 +894,7 @@ def setup_model(restart_from=None):
         except fd.ConvergenceError:
             if attempt == 2:
                 PETSc.Sys.Print(
-                    f"  Continuation diverged at {steps} steps — giving up."
+                    f"  Continuation diverged at {steps} steps - giving up."
                 )
                 raise
             PETSc.Sys.Print(
@@ -973,6 +978,7 @@ def setup_model(restart_from=None):
         "lc_coarse": chk_lc_coarse,
         "buffer_m": chk_buffer_m,
         "raster_sample": chk_raster_sample,
+        "adapt_count": chk_adapt_count,
         # Rescue speed limiter (residual laws): live Constant, 0 = inert.
         "k_lim": k_lim if use_residual else None,
         "k_lim_rescue": k_lim_rescue if use_residual else 0.0,
@@ -1350,6 +1356,8 @@ def run_simulation(
                 chk.set_attr("/", "buffer_m", float(ctx["buffer_m"]))
             if ctx.get("raster_sample"):
                 chk.set_attr("/", "raster_sample", str(ctx["raster_sample"]))
+            if ctx.get("adapt_count") is not None:
+                chk.set_attr("/", "adapt_count", int(ctx["adapt_count"]))
         mesh.comm.barrier()
         if mesh.comm.rank == 0:
             os.replace(tmp, final_path)

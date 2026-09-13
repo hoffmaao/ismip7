@@ -182,7 +182,7 @@ throughout, so a dedicated node should beat them.
 
 ## The scripts
 
-### 1. `nots_partition_probe.sbatch` — run first, after the build
+### 1. `nots_partition_probe.sbatch` - run first, after the build
 
 Distributes the mesh at 1 to 32 ranks and reports the ghost-to-owned dof ratio.
 No solve, no data, half an hour of queue. It answers the only question that
@@ -192,7 +192,7 @@ partitioner? Hundredths mean yes. Tens or hundreds mean PETSc fell back to its
 model. The workstation build reports 2.97 at 2 ranks rising to 287 at 32, which
 is 284x to 6330x the ideal, and is why no scaling curve has been quoted from it.
 
-### 2. `nots_inversion.sbatch` — self-resuming
+### 2. `nots_inversion.sbatch` - self-resuming
 
 Defaults reproduce `inversion_icepack2_budd_n3_dg0_logvelnet_2500.h5`: the
 sigma-normalised velocity misfit with ISSM's logarithmic term, the pointwise
@@ -216,7 +216,7 @@ It writes to an explicit `ISMIP7_MAP_OUT`. Without that, any run, including a
 smoke test, writes the production filename and can silently replace a
 converged map.
 
-### 3. `nots_projection.sbatch` — self-chaining
+### 3. `nots_projection.sbatch` - self-chaining
 
 A 285-year projection is about five days at 2500 m and fits no ordinary queue,
 so this resubmits itself with `--dependency=afterok` until the run reaches

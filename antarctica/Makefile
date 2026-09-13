@@ -311,6 +311,7 @@ timing-scout:
 	python scripts/manage_timing_campaign.py scout \
 	  --inversion "$(TIMING_INVERSION)" --cache-dir "$(TIMING_CACHE_DIR)" \
 	  --partition "$(SLURM_PARTITION)" --walltime "$(SLURM_TIME)" \
+	  --maxiter "$(TIMING_INVERSION_MAXITER)" \
 	  $(if $(TIMING_ONLY_MESH),--only-mesh "$(TIMING_ONLY_MESH)",) \
 	  $(if $(TIMING_SCOUT_MONITOR),--monitor,) \
 	  $(if $(FORCE_TIMING),--force,)
@@ -319,6 +320,7 @@ timing-scale:
 	python scripts/manage_timing_campaign.py scale \
 	  --inversion "$(TIMING_INVERSION)" --cache-dir "$(TIMING_CACHE_DIR)" \
 	  --partition "$(SLURM_PARTITION)" --walltime "$(SLURM_TIME)" \
+	  --maxiter "$(TIMING_INVERSION_MAXITER)" \
 	  $(if $(TIMING_ONLY_MESH),--only-mesh "$(TIMING_ONLY_MESH)",) \
 	  $(if $(FORCE_TIMING),--force,)
 
@@ -335,11 +337,13 @@ timing-dry-run:
 	python scripts/manage_timing_campaign.py scout --dry-run --assume-valid-caches \
 	  --inversion "$(TIMING_INVERSION)" --cache-dir "$(TIMING_CACHE_DIR)" \
 	  --partition "$(SLURM_PARTITION)" --walltime "$(SLURM_TIME)" \
+	  --maxiter "$(TIMING_INVERSION_MAXITER)" \
 	  $(if $(TIMING_ONLY_MESH),--only-mesh "$(TIMING_ONLY_MESH)",) \
 	  $(if $(TIMING_SCOUT_MONITOR),--monitor,)
 	python scripts/manage_timing_campaign.py scale --dry-run --assume-valid-caches \
 	  --inversion "$(TIMING_INVERSION)" --cache-dir "$(TIMING_CACHE_DIR)" \
 	  --partition "$(SLURM_PARTITION)" --walltime "$(SLURM_TIME)" \
+	  --maxiter "$(TIMING_INVERSION_MAXITER)" \
 	  $(if $(TIMING_ONLY_MESH),--only-mesh "$(TIMING_ONLY_MESH)",)
 
 # Qualification is intentionally a single 2.5 km / 16-rank lane on the exact

@@ -111,7 +111,8 @@ def main():
     # old mesh's buffer, not whatever the environment says.
     os.environ["ISMIP7_BUFFER_M"] = str(float(attrs.get("buffer_m", 0.0)))
     out_msh = args.out_mesh or os.path.join(
-        MESH_DIR, next_adapted_mesh_name(basename) + ".msh")
+        MESH_DIR,
+        next_adapted_mesh_name(basename, os.environ.get("ISMIP7_RUN_TAG")) + ".msh")
     if os.path.realpath(out_msh) == os.path.realpath(old_msh):
         raise SystemExit(
             f"adapt: --out-mesh names the reference mesh ({out_msh}). Writing "

@@ -128,6 +128,11 @@ def _cache_rasters(variable, data_root=None, cache_dir=None):
     try:
         src = _obs_kit_path(data_root)
     except FileNotFoundError:
+        # An explicitly named kit that is missing is a configuration error, not
+        # a machine without the kit staged: report the bad path rather than
+        # silently pinning whatever version happens to be cached.
+        if os.environ.get("ISMIP7_OBS_KIT"):
+            raise
         # No 11 GB kit on this machine (a cluster staging only the two small
         # cache rasters). The cache is complete on its own, so use the newest
         # cached version rather than demanding the kit just to name the files.

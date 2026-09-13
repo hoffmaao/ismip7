@@ -97,23 +97,32 @@ Two deliberate choices where Úa is nodal and this model is DG0:
 - `EleSizeCurrent` is Úa's `sqrt(mean adjacent element area)`, kept even
   though it is 0.66 of an edge length, because Úa's relaxation and ratio
   limits are calibrated against it.
-- Thickness transfer: Úa moves its NODAL surface; for a DG0 thickness the
-  analogue that keeps mass is the conservative supermesh projection
-  (`ISMIP7_ADAPT_TRANSFER=project`, the recommended setting, though the
-  SHIPPED DEFAULT is `interpolate`: see the table below). The surface route
-  lost 3.8% of the volume on a 130 km interior; the projection kept it to
-  0.01%. Either way the transfer prints the volume change and the mean front
-  thickness before and after.
+- Thickness transfer: Úa moves its NODAL surface, and that is the shipped
+  route here too (`ISMIP7_ADAPT_GEOMETRY=bh-FROM-sBS`, the default). Under it
+  THE THICKNESS IS NOT TRANSFERRED AT ALL: `surface_route_thickness` moves the
+  surface and rebuilds `h` from it against the bed re-sampled on the new mesh,
+  so `ISMIP7_ADAPT_TRANSFER` does not reach the thickness and cannot change
+  the volume it lands on. The alternative route that does transfer `h`
+  directly, `bs-FROM-hBS`, is not the default for the reason measured below:
+  32 km cell-mean thicknesses onto a finely re-sampled bed floated over every
+  trough (outflux 782 to 14,770 Gt/yr at the first step).
+
+  What `ISMIP7_ADAPT_TRANSFER` governs is the DG0 fields that ARE carried
+  across: the frozen anchors `a_ref_mb`, `H_init` and `thickness_dg`. Set it
+  to `project` for a conservative supermesh projection of those; everything
+  else, including the surface, the transferred physical divergence and the
+  `N_eff/N_ref` ratio, is interpolated unconditionally. It is an option for
+  those fields, not a general recommendation. Either way the transfer prints
+  the volume change and the mean front thickness before and after.
 
   `project` must run on ONE rank: `cross_mesh_transfer` raises for it when the
   new mesh's communicator has more than one rank. That is why `run_adaptive.py`
   takes a separate `--adapt-launcher` from `--launcher`, which drives the
-  forward segments at full rank count. It defaults to `mpiexec -n 1`, the
-  setting that is correct for either transfer: it is required by the
-  recommended `project`, and it costs little under the default `interpolate`
-  because the remesh itself is serial gmsh on rank 0 either way. Raise it to
-  the forward's rank count to parallelise the transfer and the checkpoint load
-  while `ISMIP7_ADAPT_TRANSFER` is left at its default.
+  forward segments at full rank count. It defaults to `mpiexec -n 1`, which is
+  safe under either setting and costs little, because the remesh itself is
+  serial gmsh on rank 0 regardless. Raise it to the forward's rank count to
+  parallelise the transfer and the checkpoint load under the default
+  `interpolate`, which carries no such restriction.
 
 ## Configuration (`ISMIP7_ADAPT_*`, defaults = Úa's `Ua2D_DefaultParameters`)
 
@@ -223,9 +232,11 @@ the calving front is thin; a new front cell whose centroid lands in an old
 interior cell inherits a thick value, and the terminus traction goes as h^2
 (the geometry.py docstring measured a 4.7x outflux multiplier from the same
 effect in the CG1 lift). The transfer prints the mean front thickness before
-and after; `ISMIP7_ADAPT_TRANSFER=project` (supermesh) bounds it by overlap
-weighting; `ISMIP7_ADAPT_KEEP_CURRENT=1` remeshes at the current sizes to
-measure the transfer's own cost with no refinement.
+and after. Under the default geometry route the thickness is rebuilt from the
+interpolated surface, so `ISMIP7_ADAPT_TRANSFER` does not bear on this;
+`preserve_front` (`ISMIP7_ADAPT_FRONT_PRESERVE`, on by default) is what pins
+the boundary cells instead, and `ISMIP7_ADAPT_KEEP_CURRENT=1` remeshes at the
+current sizes to measure the transfer's own cost with no refinement.
 
 ## Found on the way: Budd shelf friction was a sign test on roundoff
 

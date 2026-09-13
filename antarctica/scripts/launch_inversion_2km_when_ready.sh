@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
-# Resource-gated launcher for the 2 km / 5 km-interior Budd inversion.
+# Resource-gated launcher for the 2 km / 5 km-interior regularized-Coulomb
+# inversion. ISMIP7_FRICTION=budd switches both the law and the output name.
 #
 # Mesh: antarctica_5000_2000_buffered0.msh, generated Sep 2026 with the
 # current mesh_antarctica.py sizing. 925,183 vertices, 1,835,718 cells,
@@ -70,19 +71,22 @@ while :; do
 done
 
 cd "$REPO"
-# Settings mirror the converged 2500 m log-velocity inversion
-# (inversion_icepack2_budd_n3_dg0_logvel_2500.h5): same misfit, same priors,
-# same friction. Only the mesh changes, so the two are comparable and
-# score_map.py can put them side by side.
+# Settings mirror the converged 2500 m log-velocity inversion: same misfit,
+# same priors. Only the mesh and the friction law change, so score_map.py can
+# still put them side by side. Every inversion now runs regularized Coulomb;
+# set ISMIP7_FRICTION=budd for a Budd re-inversion, which names its own file.
+. "$REPO/antarctica/scripts/ismip7_names.sh"
+FRICTION="${ISMIP7_FRICTION:-regularized_coulomb}"
+FTAG="$(ismip7_friction_tag "$FRICTION")"
 OMP_NUM_THREADS=1 \
 ISMIP7_LC=2000 ISMIP7_LC_COARSE=5000 ISMIP7_BUFFER_M=0 \
 ISMIP7_MESH="$REPO/antarctica/mesh/antarctica_5000_2000_buffered0.msh" \
-ISMIP7_FRICTION=budd ISMIP7_N_FLOW=3.0 ISMIP7_GEOMETRY_SPACE=dg0 \
+ISMIP7_FRICTION="$FRICTION" ISMIP7_N_FLOW=3.0 ISMIP7_GEOMETRY_SPACE=dg0 \
 ISMIP7_MISFIT_NORM=sigma ISMIP7_SIGMA_U_FLOOR=3 \
 ISMIP7_LOG_VEL_WEIGHT=auto \
 ISMIP7_DHDT_WEIGHT=1 ISMIP7_GAMMA_THETA=1e5 ISMIP7_GAMMA_PHI=1e5 \
 ISMIP7_MAXITER="${ISMIP7_MAXITER:-200}" \
-ISMIP7_MAP_OUT="$REPO/antarctica/mesh/inversion_icepack2_budd_n3_dg0_logvel_2000.h5" \
+ISMIP7_MAP_OUT="$REPO/antarctica/mesh/inversion_icepack2${FTAG}_n3_dg0_logvel_2000.h5" \
 nice -n 5 mpiexec --mca btl self,vader --mca btl_base_warn_component_unused 0 \
   -n "$NRANKS" "$PY" -u antarctica/scripts/inversion_icepack2.py >> "$LOG" 2>&1
 echo "INVERSION-2KM-DONE rc=$? $(date)" >> "$LOG"

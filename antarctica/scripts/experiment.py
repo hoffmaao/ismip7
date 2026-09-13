@@ -31,7 +31,8 @@ _PROJECT = os.path.dirname(os.path.dirname(_SCRIPTS))
 sys.path.insert(0, _PROJECT)
 sys.path.insert(0, _SCRIPTS)
 
-from simulation import setup_model, run_simulation, RESULTS_DIR, PETSc, lc
+from simulation import (setup_model, run_simulation, latest_checkpoint,
+                        auto_resume, RESULTS_DIR, PETSc, lc)
 from icepack2_tools.forcing import (
     ISMIP7Atmosphere, ISMIP7Ocean, ISMIP7Fracture,
     make_forcing_callback, load_racmo_smb_climatology, forcing_coords,
@@ -128,6 +129,17 @@ def run_core_experiment(*, core, title, name, esm, scenario,
     tag_sfx = f"_{tag}" if tag else ""
     experiment_name = f"{name}{tag_sfx}"
     restart = os.environ.get("ISMIP7_RESTART")
+    # Unattended auto-resume (ISMIP7_AUTO_RESUME=1), the same lookup the
+    # control driver does: with no explicit restart, continue from this
+    # experiment's own newest checkpoint. A chained batch job depends on it,
+    # and it takes precedence over the historical endpoint below, which is
+    # only where the FIRST link of a projection starts.
+    if restart is None and auto_resume():
+        restart = latest_checkpoint(experiment_name)
+        PETSc.Sys.Print(
+            f"Auto-resume: {restart}" if restart
+            else "Auto-resume: no prior checkpoint"
+        )
     if restart is None and restart_from_hist:
         cand = os.path.join(RESULTS_DIR, f"hist_{esm_tag}{tag_sfx}_{lc}_final.h5")
         restart = cand if os.path.exists(cand) else None

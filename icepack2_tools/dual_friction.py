@@ -114,6 +114,55 @@ def weertman_anchor(H, s, u_obs, m_slide, Q):
     return Function(Q, name="C_w0").interpolate(tau_d / u_speed ** (1.0 / m_slide))
 
 
+def budd_nhat_ungated(N, N_ref, H, nhat_floor=0.02, nhat_cap=3.0):
+    r"""Normalised Budd effective pressure ``N_hat`` BEFORE the shelf gate.
+
+    ``N / N_ref`` (=1 at the reference geometry), floored at the PISM delta
+    fraction of the local overburden and capped at ``nhat_cap``. The
+    denominator is floored ALWAYS, not just to guard the exact-zero branch:
+    UFL evaluates both sides of a conditional, so an unguarded 0/0 on the
+    shelf would poison the Jacobian with a NaN even though the conditional
+    selects 0. Shared by :func:`build_rc_residual` and the MAP census
+    (``antarctica/scripts/check_budd_map.py``) so the check evaluates the
+    production expression, not a copy of it.
+    """
+    Nr = max_value(N if N_ref is None else N_ref, Constant(1e-6))
+    p_I = rho_I * g * max_value(H, Constant(1.0))
+    N_hat = min_value(N / Nr, Constant(nhat_cap))
+    if nhat_floor > 0.0:
+        novb = Constant(nhat_floor) * p_I / Nr                  # delta * local overburden (normalized)
+        N_hat = min_value(max_value(N_hat, novb), Constant(nhat_cap))
+    return N_hat
+
+
+def budd_nhat(N, N_ref, H, b, nhat_floor=0.02, nhat_cap=3.0):
+    r"""The production ``N_hat``: :func:`budd_nhat_ungated` gated to grounded
+    ice by height above flotation.
+
+    The gate is HAF > 0, not N > 0. For grounded ice the two are the same
+    statement (``s = b + H`` gives ``N = rho_I g HAF`` exactly); on the shelf
+    they are not: the surface is the flotation branch, so ``N = max(p_I -
+    p_W, 0)`` cancels to a roundoff residue of either sign while HAF stays a
+    real negative number. The old sign test let a positive residue through,
+    and with ``N_ref`` equally tiny the delta floor lifted it to ``nhat_cap``:
+    triple Weertman friction on 418 of 3791 floating cells of the 32 km MAP,
+    flipped wholesale by a 2e-13 m change in the surface (outflux 672 vs
+    1459 Gt/yr for the same year, Sep 13 2026). Gating on the smooth indicator
+    ``He`` alone (the shared ``icepack_tools.friction`` form) still left 133
+    cells floating by a few metres, inside the He band, with ``He * nhat_cap``.
+
+    The gate is EXACT, not smoothed. An interim form multiplied through by
+    ``He``, which cut grounded friction everywhere inside the He band (982
+    grounded cells at 32 km, 0.50x at the flotation line): a change to
+    grounding-line drag that the shelf fix never needed, and not the smooth
+    factor the adjoint needs either, since the Weertman branch already carries
+    its own ``exp(theta * He)`` gate on ``theta``.
+    """
+    haf = height_above_flotation(H, b)
+    nh = budd_nhat_ungated(N, N_ref, H, nhat_floor=nhat_floor, nhat_cap=nhat_cap)
+    return conditional(gt(haf, Constant(0.0)), nh, Constant(0.0))
+
+
 def build_rc_residual(
     z,
     theta,
@@ -166,6 +215,14 @@ def build_rc_residual(
         tau_c = max(c0 N, eps_tauc)                     (Coulomb cap -> 0 afloat)
         tau_b = tau_W tau_c / (tau_W + tau_c)           (Weertman low-u, cap high-u)
         closes ``tau = -tau_b u / |u|_reg`` LINEARLY (identity tau-block).
+
+    Friction block (``fric_law="budd"``)
+        tau_b = tau_W N_hat, with ``N_hat`` from :func:`budd_nhat`: the
+        normalized effective pressure under an EXACT gate to grounded ice by
+        height above flotation, unscaled on grounded ice. See that docstring
+        for why the gate is HAF and not the sign of ``N``. ``He`` enters this
+        branch only through ``tau_W``'s ``exp(theta * He)``, as it does under
+        regularized Coulomb.
 
     Parameters
     ----------
@@ -287,25 +344,22 @@ def build_rc_residual(
         # pressure N_eff/N_ref (=1 at the reference/inversion geometry, so the
         # inverted friction is preserved at t=0 and the effective-pressure
         # feedback is a RELATIVE change as the geometry evolves).  Exact-zero
-        # shelf via conditional(N>0, ., 0): N_eff=0 afloat -> tau_b=0 exactly.
+        # shelf by GATING ON HEIGHT ABOVE FLOTATION.  The gate is exact, not a
+        # smooth ramp: grounded N_hat is unscaled, and He reaches this branch
+        # only through tau_W above.  See budd_nhat, which owns the gate and
+        # explains why the flotation branch makes N itself unusable as the test.
         # PISM-delta floor (Bueler & van Pelt 2015, till_effective_fraction_
         # overburden, delta ~ 0.02): on GROUNDED ice N_hat >= delta*P_o/N_ref
         # (P_o = local overburden, so the floor evolves and decays as ice
         # thins), removing the near-flotation frictionless-GL degeneracy.  The
         # Joughin cap (reduceNearGLBeta) bounds N_hat above.
-        # Floor the denominator ALWAYS (not just for exact-zero guarding): UFL
-        # evaluates both conditional branches, so an unguarded N/Nr = 0/0 on the
-        # shelf poisons the Jacobian with NaN even though the conditional selects
-        # 0.  1e-6 is tiny vs grounded N (~rho_I g H), so N/Nr = 1 stands on all
-        # grounded ice when N_ref=None (inversion); only the (conditional-zeroed)
-        # shelf sees the floor.
-        Nr = max_value(N if N_ref is None else N_ref, Constant(1e-6))
-        p_I = rho_I * g * max_value(H, Constant(1.0))
-        N_hat = min_value(N / Nr, Constant(nhat_cap))
-        if nhat_floor > 0.0:
-            novb = Constant(nhat_floor) * p_I / Nr                  # delta * local overburden (normalized)
-            N_hat = min_value(max_value(N_hat, novb), Constant(nhat_cap))
-        N_hat = conditional(gt(N, Constant(0.0)), N_hat, Constant(0.0))  # EXACT-zero shelf
+        # budd_nhat_ungated floors the denominator ALWAYS, not just to guard the
+        # zero branch: UFL evaluates both sides of a conditional, so an unguarded
+        # N/Nr = 0/0 on the shelf poisons the Jacobian with NaN even where the
+        # gate selects 0.  1e-6 is tiny vs grounded N (~rho_I g H), so N/Nr = 1
+        # stands on all grounded ice when N_ref=None (inversion); only the
+        # (gated-to-zero) shelf sees the floor.
+        N_hat = budd_nhat(N, N_ref, H, b, nhat_floor=nhat_floor, nhat_cap=nhat_cap)
         tau_b = tau_W * N_hat
     else:  # regularized_coulomb
         tau_cap = max_value(Constant(c0) * N, Constant(eps_tauc))   # Coulomb cap = c0 N -> 0 afloat

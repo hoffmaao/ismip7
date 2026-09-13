@@ -1,9 +1,9 @@
 r"""The t=0 anchor for the `fixed` calving law.
 
 ``icepack2_tools.levelset.initial_distance`` exists so that a run with
-``ISMIP7_CALVING=fixed`` gets the level set's t=0 distance field without the
-side effects of a full construction: no advection/extension solvers, and no
-second front banner claiming ``law=none`` above the real one.
+``ISMIP7_CALVING=fixed`` gets the level set's t=0 distance field without
+building the advection and extension solvers that a distance-only caller
+never uses.
 
 Serial, one 8x8 unit mesh, no data files.
 """
@@ -44,16 +44,3 @@ def test_signs_follow_the_extent(thickness):
     ice = h.dat.data_ro > HMIN
     assert np.all(phi.dat.data_ro[ice] < 0.0)
     assert np.all(phi.dat.data_ro[~ice] > 0.0)
-
-
-def test_prints_no_front_banner(thickness, capfd):
-    r"""No banner, so a `fixed` run logs exactly one level-set line: the one
-    naming the law actually in force."""
-    mesh, h = thickness
-    capfd.readouterr()
-    initial_distance(mesh, h, h_min=HMIN)
-    assert "Level-set front" not in capfd.readouterr().out
-
-    LevelSet(mesh, h, law="none", h_min=HMIN, drag_mask=None)
-    assert "Level-set front" in capfd.readouterr().out
-

@@ -5,6 +5,11 @@ import numpy as np
 import os, sys, glob
 from time import perf_counter
 
+# Wall clock from as close to process start as this module can observe, so
+# ISMIP7_WALL_STOP_MIN counts the setup (mesh + MAP load) it has to pay for
+# too, not just the time loop.
+_T_PROCESS_START = perf_counter()
+
 import firedrake as fd
 from firedrake import (
     Constant,
@@ -59,7 +64,10 @@ from icepack2_tools.runconfig import (
     friction as _friction, geometry_space as _geometry_space, lc as _lc,
     n_flow as _n_flow,
     calving_law as _calving_law, calving_sigma_max as _calving_sigma_max,
-    fixed_front as _fixed_front,
+    # auto_resume is re-exported, not used here: every forward driver imports
+    # it from this module alongside latest_checkpoint, so they resolve the
+    # knob through one import rather than each reaching into runconfig.
+    fixed_front as _fixed_front, auto_resume, apparent_mb_mode,  # noqa: F401
 )
 
 lc = _lc()
@@ -206,6 +214,37 @@ def setup_model(restart_from=None):
     PETSc.Sys.Print(f"Loading mesh + reference state: {source_chk}")
     with fd.CheckpointFile(source_chk, "r") as _chk:
         mesh = _chk.load_mesh()
+        # A cold start normally binds itself to a MAP of the right
+        # configuration through map_basename, which encodes friction, n and
+        # geometry space. ISMIP7_INVERSION bypasses the name, so check the
+        # MAP's own record instead: theta means a different thing under each
+        # friction law, and driving RC controls through the Budd block runs
+        # cleanly and returns wrong velocities.
+        if inv_override and not is_restart:
+            _want = {"friction": friction, "n_flow": float(_n_flow()),
+                     "geometry_space": _geometry_space()}
+            _missing = [k for k in _want if not _chk.has_attr("/", k)]
+            if _missing:
+                PETSc.Sys.Print(
+                    f"  WARNING: ISMIP7_INVERSION={inv_override} records no "
+                    f"{'/'.join(_missing)}; it predates the attribute and "
+                    f"cannot be checked against friction={friction}, "
+                    f"n={_n_flow():g}, geometry={_geometry_space()}. Confirm "
+                    f"it was inverted under those."
+                )
+            for _k, _v in _want.items():
+                if _k in _missing:
+                    continue
+                _got = _chk.get_attr("/", _k)
+                _got = float(_got) if _k == "n_flow" else str(_got)
+                if _got != _v:
+                    raise RuntimeError(
+                        f"ISMIP7_INVERSION={inv_override} was inverted with "
+                        f"{_k}={_got!r} but this run resolves {_k}={_v!r}. "
+                        f"The controls only mean anything under the "
+                        f"configuration they were inverted for; point at a "
+                        f"matching MAP or change the run's configuration."
+                    )
         # The mesh this checkpoint was built on, recorded by the inversion and
         # carried through every restart. A CheckpointFile mesh is named
         # "firedrake_default", so this attribute is the only way the run can
@@ -228,6 +267,18 @@ def setup_model(restart_from=None):
                          if _chk.has_attr("/", "lc_coarse") else None)
         chk_buffer_m = (float(_chk.get_attr("/", "buffer_m"))
                         if _chk.has_attr("/", "buffer_m") else None)
+        # Raster sampling the MAP was inverted with. MAPs older than the
+        # attribute were all vertex-sampled. The MAP wins over the
+        # environment: the controls absorbed that bed, so a different one
+        # here would be silently inconsistent.
+        chk_raster_sample = (str(_chk.get_attr("/", "raster_sample"))
+                             if _chk.has_attr("/", "raster_sample") else "vertex")
+        _env_rs = os.environ.get("ISMIP7_RASTER_SAMPLE")
+        if _env_rs and _env_rs.lower() != chk_raster_sample:
+            PETSc.Sys.Print(
+                f"  WARNING: ISMIP7_RASTER_SAMPLE={_env_rs} but the MAP was "
+                f"inverted with {chk_raster_sample}; using the MAP's."
+            )
         # The FINE resolution is stamped too, and every component of the
         # reconstructed name must come from the checkpoint: falling back to the
         # live ISMIP7_LC here would reintroduce exactly the environment drift
@@ -335,21 +386,21 @@ def setup_model(restart_from=None):
         bm_fn = find_file(os.path.join(DATA_DIR, "bedmachine"), "*.nc")
         # Cell average onto the geometry space, NOT a centroid point sample --
         # see geometry.sample_to_geometry for the measurements behind that.
+        PETSc.Sys.Print(f"  Raster sampling onto geometry cells: {chk_raster_sample}")
         b = sample_to_geometry(
-            lambda sp: icepack.interpolate(
-                rasterio.open(f"netcdf:{bm_fn}:bed"), sp), Q_g, Q)
+            rasterio.open(f"netcdf:{bm_fn}:bed"), Q_g, Q,
+            method=chk_raster_sample)
         b.rename("bed")
         H = sample_to_geometry(
-            lambda sp: icepack.interpolate(
-                rasterio.open(f"netcdf:{bm_fn}:thickness"), sp),
-            Q_g, Q, floor=h_clamp_init)
+            rasterio.open(f"netcdf:{bm_fn}:thickness"),
+            Q_g, Q, floor=h_clamp_init, method=chk_raster_sample)
         H.rename("thickness")
         s = Function(Q_g, name="surface").interpolate(
             max_value(b + H, (Constant(1.0) - rho_ratio) * H)
         )
 
     # Reference log-adjustments (theta=log_friction, phi=log_fluidity) plus,
-    # for RC/Budd or any restart, the geometry and frozen anchors — all read
+    # for RC/Budd or any restart, the geometry and frozen anchors - all read
     # onto the mesh we already took from THIS checkpoint, so the dof order
     # matches by construction (no fragile .msh-vs-checkpoint node comparison).
     C_w0 = None
@@ -360,6 +411,7 @@ def setup_model(restart_from=None):
     M_guess = None
     tau_guess = None
     a_ref_mb = None
+    phys_div = None
     h_dg_state = None
     t_restart = None
     with fd.CheckpointFile(source_chk, "r") as chk:
@@ -411,6 +463,13 @@ def setup_model(restart_from=None):
                 a_ref_mb = chk.load_function(mesh, name="a_ref_mb")
             except Exception:
                 a_ref_mb = None
+            # An adapted checkpoint carries the transferred PHYSICAL divergence
+            # instead of a_ref (icepack2_tools.adapt_mesh); a_ref is rebuilt
+            # below with this mesh's own operator.
+            try:
+                phys_div = chk.load_function(mesh, name="phys_div")
+            except Exception:
+                phys_div = None
             # Separate DG0 prognostic thickness (CG1-geometry runs only, where
             # the stored CG h was its lumped lift). Under DG0 geometry the
             # thickness IS the transport state, so there is nothing to restore.
@@ -437,21 +496,41 @@ def setup_model(restart_from=None):
                         f"resolves friction='{friction}'; set "
                         f"ISMIP7_FRICTION={chk_friction} to resume."
                     )
-            amb_env = os.environ.get("ISMIP7_APPARENT_MB")
-            if a_ref_mb is not None and amb_env is None:
+            amb_env = apparent_mb_mode()
+            if (a_ref_mb is not None or phys_div is not None) and amb_env is None:
+                # phys_div counts as the same evidence: adapt_mesh writes it
+                # only in place of an a_ref_mb it found on the source, so an
+                # adapted checkpoint that carries it came from an apparent-MB
+                # run even though the a_ref itself was replaced.
+                carried = "a_ref_mb" if a_ref_mb is not None else "phys_div"
                 raise RuntimeError(
                     f"Restart checkpoint {source_chk} carries a frozen "
-                    f"a_ref_mb (the run used ISMIP7_APPARENT_MB) but "
-                    f"ISMIP7_APPARENT_MB is unset; set it to resume with "
+                    f"{carried} (the run used ISMIP7_APPARENT_MB) but "
+                    f"ISMIP7_APPARENT_MB is off here; set it to resume with "
                     f"the same mass-balance correction."
                 )
-            if a_ref_mb is None and amb_env is not None:
+            _adapted_t0 = bool(chk.has_attr("/", "adapted_initial")
+                               and int(chk.get_attr("/", "adapted_initial")))
+            if a_ref_mb is None and amb_env is not None and phys_div is not None:
+                PETSc.Sys.Print("  Apparent MB: adapted checkpoint, a_ref will be "
+                                "rebuilt from the transferred physical divergence")
+            elif a_ref_mb is None and amb_env is not None and _adapted_t0:
+                # adapt_mesh.py --rebuild-aref: a t=0 state moved onto an
+                # adapted mesh. Building a fresh a_ref here is legitimate
+                # (nothing has evolved) and is the only way the correction can
+                # cancel the NEW mesh's discrete divergence exactly.
+                PETSc.Sys.Print("  Apparent MB: adapted t=0 state, a_ref will be "
+                                "rebuilt on this mesh")
+            elif a_ref_mb is None and amb_env is not None:
                 raise RuntimeError(
                     f"ISMIP7_APPARENT_MB is set but restart checkpoint "
                     f"{source_chk} has no a_ref_mb; a fresh a_ref cannot be "
-                    f"built from an evolved state. Unset ISMIP7_APPARENT_MB "
+                    f"built from an evolved state. Set ISMIP7_APPARENT_MB=0 "
                     f"or restart from a checkpoint that carries a_ref_mb."
                 )
+            # nots_projection.sbatch parses t_yr out of this line to learn
+            # the year the job STARTED at, which is how it tells a link that
+            # advanced from one that spent its whole wall budget on setup.
             PETSc.Sys.Print(
                 f"  Restart: evolved geometry + frozen anchors loaded "
                 f"(t_yr={t_restart}, friction={friction})"
@@ -857,7 +936,7 @@ def setup_model(restart_from=None):
         except fd.ConvergenceError:
             if attempt == 2:
                 PETSc.Sys.Print(
-                    f"  Continuation diverged at {steps} steps — giving up."
+                    f"  Continuation diverged at {steps} steps - giving up."
                 )
                 raise
             PETSc.Sys.Print(
@@ -940,6 +1019,7 @@ def setup_model(restart_from=None):
         "lc": chk_lc,
         "lc_coarse": chk_lc_coarse,
         "buffer_m": chk_buffer_m,
+        "raster_sample": chk_raster_sample,
         # Rescue speed limiter (residual laws): live Constant, 0 = inert.
         "k_lim": k_lim if use_residual else None,
         "k_lim_rescue": k_lim_rescue if use_residual else 0.0,
@@ -953,6 +1033,7 @@ def setup_model(restart_from=None):
         "H_init": H_init,
         # Frozen t=0 apparent-MB correction (restart only; else None).
         "a_ref_mb": a_ref_mb,
+        "phys_div": phys_div,
         # DG0 prognostic thickness state (restart only; else None).
         "h_dg_state": h_dg_state,
         # Resume time (None on a cold start); run_simulation continues the
@@ -1192,12 +1273,13 @@ def run_simulation(
     # time (a fixed MB correction, initMIP-style), saved in checkpoints, and
     # tallied as its own budget column. ISMIP7_AMB_CAP=<m/yr> optionally
     # clips it to [-cap, 5*cap] (gia's asymmetric clip); default uncapped.
-    # Modes: "div" cancels only the flux divergence (t=0 tendency = SMB-melt,
-    # gia-style); any other value ("1"/"balance") also subtracts the initial
-    # forcing, so the t=0 tendency is EXACTLY ZERO - a balanced control in
-    # the ISMIP6 ctrl_proj sense, against which projections difference
-    # cleanly. Both freeze the correction at t=0.
-    amb_mode = os.environ.get("ISMIP7_APPARENT_MB")
+    # Modes, resolved by runconfig.apparent_mb_mode: "div" cancels only the
+    # flux divergence (t=0 tendency = SMB-melt, gia-style); "balance" (from
+    # "1" or "balance") also subtracts the initial forcing, so the t=0
+    # tendency is EXACTLY ZERO - a balanced control in the ISMIP6 ctrl_proj
+    # sense, against which projections difference cleanly. Both freeze the
+    # correction at t=0. None is off.
+    amb_mode = apparent_mb_mode()
     apparent_mb = amb_mode is not None
     a_ref = None
     if apparent_mb:
@@ -1219,7 +1301,13 @@ def run_simulation(
                 + un0p * h_dg * phi_dg * ds
             )
             a_ref.dat.data[:] = flux0.dat.data_ro / cell_area
-            if amb_mode != "div":
+            if ctx.get("phys_div") is not None:
+                # Remesh: cancel this mesh's discrete divergence net of the
+                # physical divergence the run carried over (adapt_mesh.py).
+                a_ref.dat.data[:] -= ctx["phys_div"].dat.data_ro
+                PETSc.Sys.Print("  Apparent MB: a_ref rebuilt on the adapted mesh "
+                                "from the transferred physical divergence")
+            elif amb_mode != "div":
                 # balanced control: evaluate the t=0 forcing and fold it in
                 if forcing_callback is not None:
                     forcing_callback(ctx, t_start + dt)
@@ -1261,7 +1349,7 @@ def run_simulation(
 
     mass_prev = float(assemble(h * dx)) * rho_gt
 
-    def _save_state(final_path, t_now):
+    def _save_state(final_path, t_now, stalled=False):
         r"""Atomic, self-contained state checkpoint: mesh + frozen reference
         fields (theta/phi/bed/C_w0/N_ref/H_init/phi_eff) + evolving (h, s, u)
         + the timeline year. Written to a temp file and renamed, so a reboot
@@ -1308,6 +1396,13 @@ def run_simulation(
                 chk.set_attr("/", "lc_coarse", int(ctx["lc_coarse"]))
             if ctx.get("buffer_m") is not None:
                 chk.set_attr("/", "buffer_m", float(ctx["buffer_m"]))
+            if ctx.get("raster_sample"):
+                chk.set_attr("/", "raster_sample", str(ctx["raster_sample"]))
+            # The driver's own verdict on why it stopped here, so a batch
+            # chain does not have to infer it from log text or from the year
+            # alone: 1 means the solver gave up, and resuming would re-attempt
+            # the same years and give up again.
+            chk.set_attr("/", "stalled", int(bool(stalled)))
         mesh.comm.barrier()
         if mesh.comm.rank == 0:
             os.replace(tmp, final_path)
@@ -1683,7 +1778,42 @@ def run_simulation(
     SUBCYCLES = tuple(int(s) for s in
                       os.environ.get("ISMIP7_SUBCYCLES", "1,4,16").split(","))
 
+    # Wall-clock budget, in minutes from process start. A batch job that runs
+    # into its Slurm limit is killed mid-step and loses everything since the
+    # last periodic checkpoint, and its chained successor never starts. With a
+    # budget the run stops itself between steps, falls through to the final
+    # save below, and exits cleanly with t_yr short of t_end, which is exactly
+    # what the chain resubmits from. The runner derives the value from the
+    # partition's own limit; 0 (the default) is no budget.
+    wall_stop_min = float(os.environ.get("ISMIP7_WALL_STOP_MIN", "0"))
+    if wall_stop_min > 0:
+        PETSc.Sys.Print(
+            f"  Wall-clock budget: stopping after {wall_stop_min:g} min "
+            f"(ISMIP7_WALL_STOP_MIN)"
+        )
+    # Longest step so far, the estimate of what the NEXT one could cost. The
+    # budget is checked before entering a step rather than after finishing
+    # one: a step that goes through the rescue ladder and then 16 subcycles
+    # runs far longer than a normal one, and a run that starts such a step
+    # just under the budget overshoots it by that whole step and gets killed
+    # mid-write, which is the outcome the budget exists to avoid.
+    step_max_min = 0.0
+    stalled = False
+
     for k in range(1, nsteps + 1):
+        if wall_stop_min > 0:
+            mins = (perf_counter() - _T_PROCESS_START) / 60.0
+            # Every rank must leave the loop together: the final save is
+            # collective, so a rank-local decision would hang the job.
+            if mesh.comm.allreduce(
+                    int(mins + step_max_min >= wall_stop_min)) > 0:
+                PETSc.Sys.Print(
+                    f"  Wall-clock budget: {mins:.1f} min used of "
+                    f"{wall_stop_min:g}, and the longest step so far took "
+                    f"{step_max_min:.1f} min. Stopping at t_yr={t_start + (k - 1) * dt:.1f} "
+                    f"with the budget intact, for the next job in the chain"
+                )
+                break
         t_step_start = perf_counter()
         t_yr = t_start + k * dt
 
@@ -1738,6 +1868,7 @@ def run_simulation(
                 f"  Step {k}: rescue ladder + subcycles exhausted, "
                 f"saving and stopping"
             )
+            stalled = True
             h_dg.assign(h_dg_entry)
             _lift_h()
             z.assign(z_entry)   # checkpoint the last converged pair
@@ -1792,6 +1923,9 @@ def run_simulation(
             _prune_checkpoints()
             PETSc.Sys.Print(f"    [checkpoint: {os.path.basename(chk_fn)}]")
 
+        step_max_min = max(step_max_min,
+                           (perf_counter() - t_step_start) / 60.0)
+
     PETSc.Sys.Print(f"\n{experiment_name} simulation complete.")
 
     # Final state is a self-contained checkpoint too (a valid restart source).
@@ -1799,7 +1933,12 @@ def run_simulation(
     # where it really stopped, not the nominal t_end.
     final_fn = os.path.join(RESULTS_DIR, f"{experiment_name}_{lc}_final.h5")
     last_t = results[-1][0] if results else t_start
-    _save_state(final_fn, last_t)
+    _save_state(final_fn, last_t, stalled=stalled)
+    # Printed on every exit, early stop included. nots_projection.sbatch reads
+    # this exact "Saved: <...>_final.h5" line out of its own Slurm log to find
+    # THIS job's checkpoint (the results directory is flat and shared, so the
+    # newest file does not identify the run); keep the prefix and the path on
+    # one line.
     PETSc.Sys.Print(f"Saved: {final_fn}")
 
     if csv_f is not None:

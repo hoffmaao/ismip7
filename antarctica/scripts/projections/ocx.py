@@ -26,7 +26,8 @@ _PROJECT = os.path.dirname(os.path.dirname(_SCRIPTS))
 sys.path.insert(0, _PROJECT)
 sys.path.insert(0, _SCRIPTS)
 
-from simulation import setup_model, run_simulation, PETSc
+from simulation import (setup_model, run_simulation, latest_checkpoint,
+                        auto_resume, PETSc)
 from experiment import find_k_npz
 from icepack2_tools.forcing import (
     ISMIP7Atmosphere, ISMIP7Ocean, make_forcing_callback,
@@ -42,7 +43,20 @@ RACMO_LAST = 2023  # smbgl_monthlyS_ANT11_RACMO2.4p1_ERA5_197901_202312
 
 
 def main():
-    ctx = setup_model()
+    experiment_name = "ocx" + (f"_{os.environ.get('ISMIP7_RUN_TAG', '')}"
+                               if os.environ.get("ISMIP7_RUN_TAG") else "")
+    # Explicit restart, else unattended auto-resume from this experiment's own
+    # newest checkpoint (ISMIP7_AUTO_RESUME=1), the same lookup the control
+    # driver does. A chained batch job depends on it: without it every link
+    # cold-starts and the chain never advances.
+    restart = os.environ.get("ISMIP7_RESTART")
+    if restart is None and auto_resume():
+        restart = latest_checkpoint(experiment_name)
+        PETSc.Sys.Print(
+            f"Auto-resume: {restart}" if restart
+            else "Auto-resume: no prior checkpoint"
+        )
+    ctx = setup_model(restart_from=restart)
     # Sample forcing at the geometry dofs, not the mesh vertices: under
     # DG0 geometry those are cell centroids (see forcing.forcing_coords).
     mesh_x, mesh_y = forcing_coords(ctx)
@@ -88,10 +102,9 @@ def main():
     PETSc.Sys.Print("\nCore Experiment 11: OCX (observationally constrained)")
     PETSc.Sys.Print(f"  Period: {T_START}-{T_END}, dt={DT}")
 
-    _tag = os.environ.get("ISMIP7_RUN_TAG", "")
     run_simulation(
         ctx,
-        experiment_name="ocx" + (f"_{_tag}" if _tag else ""),
+        experiment_name=experiment_name,
         t_start=T_START,
         t_end=T_END,
         dt=DT,

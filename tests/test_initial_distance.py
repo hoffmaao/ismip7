@@ -1,9 +1,9 @@
 r"""The t=0 anchor for the `fixed` calving law.
 
 ``icepack2_tools.levelset.initial_distance`` exists so that a run with
-``ISMIP7_CALVING=fixed`` gets the level set's t=0 distance field without the
-side effects of a full construction: no advection/extension solvers, and no
-second front banner claiming ``law=none`` above the real one.
+``ISMIP7_CALVING=fixed`` gets the level set's t=0 distance field without
+building the advection and extension solvers that a distance-only caller
+never uses.
 
 Serial, one 8x8 unit mesh, no data files.
 """

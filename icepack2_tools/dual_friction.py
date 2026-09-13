@@ -218,9 +218,11 @@ def build_rc_residual(
 
     Friction block (``fric_law="budd"``)
         tau_b = tau_W N_hat, with ``N_hat`` from :func:`budd_nhat`: the
-        normalized effective pressure gated to grounded ice by height above
-        flotation and scaled by the smooth grounded indicator ``He``. See that
-        docstring for why the gate is HAF and not the sign of ``N``.
+        normalized effective pressure under an EXACT gate to grounded ice by
+        height above flotation, unscaled on grounded ice. See that docstring
+        for why the gate is HAF and not the sign of ``N``. ``He`` enters this
+        branch only through ``tau_W``'s ``exp(theta * He)``, as it does under
+        regularized Coulomb.
 
     Parameters
     ----------
@@ -342,8 +344,9 @@ def build_rc_residual(
         # pressure N_eff/N_ref (=1 at the reference/inversion geometry, so the
         # inverted friction is preserved at t=0 and the effective-pressure
         # feedback is a RELATIVE change as the geometry evolves).  Exact-zero
-        # shelf by GATING ON HEIGHT ABOVE FLOTATION, and the smooth grounded
-        # indicator He multiplies through: see budd_nhat, which owns both and
+        # shelf by GATING ON HEIGHT ABOVE FLOTATION.  The gate is exact, not a
+        # smooth ramp: grounded N_hat is unscaled, and He reaches this branch
+        # only through tau_W above.  See budd_nhat, which owns the gate and
         # explains why the flotation branch makes N itself unusable as the test.
         # PISM-delta floor (Bueler & van Pelt 2015, till_effective_fraction_
         # overburden, delta ~ 0.02): on GROUNDED ice N_hat >= delta*P_o/N_ref

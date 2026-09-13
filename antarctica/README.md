@@ -704,13 +704,19 @@ VAF is reported in mm of sea-level equivalent; mass in Gt.
   atmosphere-forcing fix and may be forcing-induced rather than a solver
   limit - see `reports/MATRIX_STATUS.md` for which runs still stand.
   **Wall retry.** When the in-run rescue ladder is exhausted the run saves and
-  stops short of its target year, and simply relaunching from that saved state
-  clears the wall: a fresh process re-runs the n=1→n continuation at the
+  stops short of its target year, and relaunching from that saved state has
+  cleared the wall: a fresh process re-runs the n=1→n continuation at the
   loaded geometry, which the in-run ladder cannot do (3 of 3 observed walls
   resumed - ssp585-CESM at 2096.7, CTRL-CESM at 2268, CTRL-MRI at 2250 - and
-  both CTRLs then reached 2300). `run_core_matrix.sh` does this automatically,
-  relaunching from the newest checkpoint at or before the timeseries' last
-  year while each attempt keeps advancing, and giving up on a stall.
+  both CTRLs then reached 2300). On the workstation `run_core_matrix.sh` does
+  this automatically, relaunching from the newest checkpoint at or before the
+  timeseries' last year while each attempt keeps advancing, and giving up on a
+  stall. The NOTS chain never retries a stalled run: a checkpoint written with
+  `stalled=1` makes `nots_projection.sbatch` report the stall and exit 1
+  without submitting a successor, so an unattended chain cannot spend days
+  re-attempting the same years. That relaunch is yours to make there: resubmit
+  the same sbatch, and `ISMIP7_AUTO_RESUME` picks the run up from its saved
+  state. `scripts/batch_runners/readme.md` owns what the chain decides and why.
 - **Upstream forcing moved (resolved 2026-07-19).** The per-year scenario
   forcing was not withdrawn - it moved to the top-level `/ISMIP7/AIS` tree
   during the collection reorganization. Mirror it with

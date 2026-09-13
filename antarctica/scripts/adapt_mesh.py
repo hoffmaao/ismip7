@@ -60,6 +60,8 @@ def main():
     PETSc.Sys.Print(f"adapt: config {cfg}")
 
     weight = None
+    if args.checkpoint is None and not args.source_mesh:
+        raise SystemExit("give a checkpoint, or --source-mesh with --mesh-only --from-obs")
     if args.source_mesh:
         if not (args.mesh_only and args.from_obs):
             raise SystemExit("--source-mesh only makes sense with --mesh-only --from-obs")
@@ -96,8 +98,6 @@ def main():
         weight = Function(Qc).interpolate(conditional(err[0] > 0.0, 1.0, 0.0))
         n_obs = int(mesh.comm.allreduce(float(weight.dat.data_ro.sum())))
         PETSc.Sys.Print(f"adapt: size field from OBSERVATIONS (MEaSUReS velocity on {n_obs} observed nodes, BedMachine geometry)")
-    if args.checkpoint is None and not args.source_mesh:
-        raise SystemExit("give a checkpoint, or --source-mesh with --mesh-only --from-obs")
     basename = str(attrs.get("mesh_basename", "")).replace(".msh", "")
     if not basename:
         raise RuntimeError("checkpoint has no mesh_basename attribute; cannot find its .msh/sidecar")

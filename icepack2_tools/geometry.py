@@ -18,6 +18,7 @@ and the forward cannot drift apart:
 import weakref
 
 import numpy as np
+from mpi4py import MPI
 
 from firedrake import (
     Constant,
@@ -222,7 +223,10 @@ def sample_to_geometry(raster, Q_g, Q_cg, floor=None, method="vertex"):
                             "not a closure")
         out = raster_cell_mean(dataset, Q_g, floor=floor)
         bad = np.isnan(out.dat.data_ro)
-        if bad.any():
+        # The fill is a collective L2 projection, so the branch must be taken
+        # by every rank or none: a rank-local `bad.any()` hangs under MPI when
+        # the nodata cells (or the owned cells) are not spread over all ranks.
+        if Q_g.mesh().comm.allreduce(bool(bad.any()), op=MPI.LOR):
             # No valid pixel under the cell (nodata): take the vertex value.
             fill = Function(Q_g).project(raster_fn(Q_cg))
             out.dat.data[bad] = fill.dat.data_ro[bad]

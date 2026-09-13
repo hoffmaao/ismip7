@@ -86,7 +86,6 @@ def main():
         # Observations on the scaffold mesh: the inversion's own loaders.
         import icepack
         from firedrake import VectorFunctionSpace, conditional
-        from icepack2_tools.geometry import cg1_lift
         Qc = FunctionSpace(mesh, "CG", 1)
         Q0 = FunctionSpace(mesh, "DG", 0)
         Vc = VectorFunctionSpace(mesh, "CG", 1)

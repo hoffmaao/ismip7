@@ -102,7 +102,18 @@ Timing knobs live in the orchestrator (`run_adaptive.py`): `--adapt-every`
 
 ## Pieces
 
-- `icepack2_tools/adapt_mesh.py` - the scheme.
+- `icepack_tools/adapt_mesh.py` (the shared package, next to the level set) -
+  the scheme itself: criteria, `Error2EleSize`, relaxation and ratio limits,
+  bands, the PIG-TWG rules, `remesh_global` with a project-supplied
+  `build_geometry()` and Úa's element-count control, and the transfer helpers
+  (`cross_mesh_transfer`, `preserve_front`, `physical_divergence`,
+  `surface_route_thickness`, `rebuild_reference_pressure`). Nothing in it
+  knows about Antarctica. Tests: `icepack_tools/test/adapt_mesh_test.py`.
+  Import it before assembling any form: it reaches `icepack2` through
+  `icepack_tools.constants`, and Irksome refuses to load afterwards.
+- `icepack2_tools/adapt_mesh.py` - what ISMIP7 adds: the Antarctic domain
+  builder for the remesh and `transfer_state`, which knows this model's
+  checkpoint (its fields, frozen references and restart attributes).
 - `antarctica/scripts/adapt_mesh.py CHK --out-checkpoint NEW [--rebuild-aref]`
   - one adaptation of a forward checkpoint; writes the new `.msh`, its
   boundary-id sidecar and a restartable checkpoint.

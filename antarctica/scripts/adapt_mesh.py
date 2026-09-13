@@ -31,6 +31,7 @@ from firedrake.petsc import PETSc  # noqa: E402
 from icepack2_tools.adapt_mesh import (AdaptMeshConfig, desired_element_size,  # noqa: E402
                                        remesh_global, transfer_state)
 from icepack2_tools.geometry import sample_to_geometry  # noqa: E402
+from mesh_naming import adapt_lineage  # noqa: E402
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 MESH_DIR = os.path.join(HERE, "..", "mesh")
@@ -109,16 +110,13 @@ def main():
     # extract_ice_outline() reads ISMIP7_BUFFER_M: the new mesh must use the
     # old mesh's buffer, not whatever the environment says.
     os.environ["ISMIP7_BUFFER_M"] = str(float(attrs.get("buffer_m", 0.0)))
-    k = int(attrs.get("adapt_count", 0)) + 1
-    root = basename.split("_adapt")[0]
-    out_msh = args.out_mesh or os.path.join(MESH_DIR, f"{root}_adapt{k}.msh")
+    root, k_prev = adapt_lineage(basename)
+    out_msh = args.out_mesh or os.path.join(MESH_DIR, f"{root}_adapt{k_prev + 1}.msh")
     if os.path.realpath(out_msh) == os.path.realpath(old_msh):
         raise SystemExit(
-            f"adapt: the output mesh is the reference mesh ({out_msh}). "
-            f"Writing it would destroy the mesh {basename} was built on and "
-            f"disable the physical-group check against it. The checkpoint's "
-            f"adapt_count ({attrs.get('adapt_count', 'absent')}) does not "
-            f"match its mesh_basename; pass --out-mesh with a fresh name."
+            f"adapt: --out-mesh names the reference mesh ({out_msh}). Writing "
+            f"it would destroy the mesh {basename} was built on and disable "
+            f"the physical-group check against it; give a fresh name."
         )
     new_basename = os.path.splitext(os.path.basename(out_msh))[0]
     PETSc.Sys.Print(f"adapt: {basename} (t={attrs.get('t_yr', '?')}) -> {new_basename}")

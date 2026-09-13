@@ -121,11 +121,31 @@ def _cache_rasters(variable, data_root=None, cache_dir=None):
     import rasterio
     from rasterio.transform import from_origin
 
-    src = _obs_kit_path(data_root)
     if cache_dir is None:
         here = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
         cache_dir = os.path.join(here, "antarctica", "data", "dhdt_cache")
     os.makedirs(cache_dir, exist_ok=True)
+    try:
+        src = _obs_kit_path(data_root)
+    except FileNotFoundError:
+        # No 11 GB kit on this machine (a cluster staging only the two small
+        # cache rasters). The cache is complete on its own, so use the newest
+        # cached version rather than demanding the kit just to name the files.
+        import glob
+        import re
+        cands = sorted(glob.glob(os.path.join(
+            cache_dir, f"{variable}_AntarcticaObsISMIP7-v*_value.tif")))
+        if not cands:
+            raise
+
+        def _ver(fn):
+            m = re.search(r"v(\d+)\.(\d+)", os.path.basename(fn))
+            return (int(m.group(1)), int(m.group(2))) if m else (0, 0)
+        val_fn = max(cands, key=_ver)
+        cov_fn = val_fn.replace("_value.tif", "_valid.tif")
+        if not os.path.exists(cov_fn):
+            raise
+        return val_fn, cov_fn
     tag = f"{variable}_{os.path.basename(src).replace('.nc', '')}"
     val_fn = os.path.join(cache_dir, f"{tag}_value.tif")
     cov_fn = os.path.join(cache_dir, f"{tag}_valid.tif")

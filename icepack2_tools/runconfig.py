@@ -39,6 +39,18 @@ N_FLOW_DEFAULT = "3.0"
 
 GEOMETRY_SPACES = ("dg0", "cg1")
 
+# How a raster (BedMachine) is put onto a DG0 geometry cell.
+#   vertex    - icepack's bilinear sample at the three CG1 vertices, then the
+#               L2 projection of that linear interpolant (= the mean of the
+#               3 vertex values). The pre-Sep-2026 behaviour. A 20 km interior
+#               cell sees 3 of its ~1600 BedMachine pixels.
+#   cell_mean - the mean of the raster over the cell itself, sampled on an
+#               equal-area sub-triangle lattice at pixel density
+#               (geometry.raster_cell_mean).
+# MAPs record the method used; the forward reads it back from the MAP.
+RASTER_SAMPLES = ("vertex", "cell_mean")
+RASTER_SAMPLE_DEFAULT = "vertex"
+
 
 def lc():
     r"""Target edge length [m] in the refined region of the mesh."""
@@ -58,6 +70,18 @@ def geometry_space():
     if value not in GEOMETRY_SPACES:
         raise ValueError(
             f"ISMIP7_GEOMETRY_SPACE must be 'dg0' or 'cg1', got {value!r}"
+        )
+    return value
+
+
+def raster_sample():
+    r"""How BedMachine is sampled onto a DG0 cell: ``'vertex'`` or
+    ``'cell_mean'``. See RASTER_SAMPLES."""
+    value = os.environ.get(
+        "ISMIP7_RASTER_SAMPLE", RASTER_SAMPLE_DEFAULT).lower()
+    if value not in RASTER_SAMPLES:
+        raise ValueError(
+            f"ISMIP7_RASTER_SAMPLE must be one of {RASTER_SAMPLES}, got {value!r}"
         )
     return value
 

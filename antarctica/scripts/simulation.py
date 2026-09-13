@@ -5,6 +5,11 @@ import numpy as np
 import os, sys, glob
 from time import perf_counter
 
+# Wall clock from as close to process start as this module can observe, so
+# ISMIP7_WALL_STOP_MIN counts the setup (mesh + MAP load) it has to pay for
+# too, not just the time loop.
+_T_PROCESS_START = perf_counter()
+
 import firedrake as fd
 from firedrake import (
     Constant,
@@ -206,6 +211,37 @@ def setup_model(restart_from=None):
     PETSc.Sys.Print(f"Loading mesh + reference state: {source_chk}")
     with fd.CheckpointFile(source_chk, "r") as _chk:
         mesh = _chk.load_mesh()
+        # A cold start normally binds itself to a MAP of the right
+        # configuration through map_basename, which encodes friction, n and
+        # geometry space. ISMIP7_INVERSION bypasses the name, so check the
+        # MAP's own record instead: theta means a different thing under each
+        # friction law, and driving RC controls through the Budd block runs
+        # cleanly and returns wrong velocities.
+        if inv_override and not is_restart:
+            _want = {"friction": friction, "n_flow": float(_n_flow()),
+                     "geometry_space": _geometry_space()}
+            _missing = [k for k in _want if not _chk.has_attr("/", k)]
+            if _missing:
+                PETSc.Sys.Print(
+                    f"  WARNING: ISMIP7_INVERSION={inv_override} records no "
+                    f"{'/'.join(_missing)}; it predates the attribute and "
+                    f"cannot be checked against friction={friction}, "
+                    f"n={_n_flow():g}, geometry={_geometry_space()}. Confirm "
+                    f"it was inverted under those."
+                )
+            for _k, _v in _want.items():
+                if _k in _missing:
+                    continue
+                _got = _chk.get_attr("/", _k)
+                _got = float(_got) if _k == "n_flow" else str(_got)
+                if _got != _v:
+                    raise RuntimeError(
+                        f"ISMIP7_INVERSION={inv_override} was inverted with "
+                        f"{_k}={_got!r} but this run resolves {_k}={_v!r}. "
+                        f"The controls only mean anything under the "
+                        f"configuration they were inverted for; point at a "
+                        f"matching MAP or change the run's configuration."
+                    )
         # The mesh this checkpoint was built on, recorded by the inversion and
         # carried through every restart. A CheckpointFile mesh is named
         # "firedrake_default", so this attribute is the only way the run can
@@ -1730,6 +1766,20 @@ def run_simulation(
     SUBCYCLES = tuple(int(s) for s in
                       os.environ.get("ISMIP7_SUBCYCLES", "1,4,16").split(","))
 
+    # Wall-clock budget, in minutes from process start. A batch job that runs
+    # into its Slurm limit is killed mid-step and loses everything since the
+    # last periodic checkpoint, and its chained successor never starts. With a
+    # budget the run stops itself between steps, falls through to the final
+    # save below, and exits cleanly with t_yr short of t_end, which is exactly
+    # what the chain resubmits from. The runner derives the value from the
+    # partition's own limit; 0 (the default) is no budget.
+    wall_stop_min = float(os.environ.get("ISMIP7_WALL_STOP_MIN", "0"))
+    if wall_stop_min > 0:
+        PETSc.Sys.Print(
+            f"  Wall-clock budget: stopping after {wall_stop_min:g} min "
+            f"(ISMIP7_WALL_STOP_MIN)"
+        )
+
     for k in range(1, nsteps + 1):
         t_step_start = perf_counter()
         t_yr = t_start + k * dt
@@ -1838,6 +1888,18 @@ def run_simulation(
             _save_state(chk_fn, t_yr)
             _prune_checkpoints()
             PETSc.Sys.Print(f"    [checkpoint: {os.path.basename(chk_fn)}]")
+
+        if wall_stop_min > 0:
+            mins = (perf_counter() - _T_PROCESS_START) / 60.0
+            # Every rank must leave the loop together: the final save is
+            # collective, so a rank-local decision would hang the job.
+            if mesh.comm.allreduce(int(mins >= wall_stop_min)) > 0:
+                PETSc.Sys.Print(
+                    f"  Wall-clock budget reached at t_yr={t_yr:.1f} "
+                    f"({mins:.1f} of {wall_stop_min:g} min), saving and "
+                    f"stopping for the next job in the chain"
+                )
+                break
 
     PETSc.Sys.Print(f"\n{experiment_name} simulation complete.")
 

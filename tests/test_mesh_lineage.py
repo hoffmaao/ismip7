@@ -60,35 +60,44 @@ def test_the_mesh_only_from_obs_name():
         "antarctica_ua_180000_2000_obs_adapt1"
 
 
+# Experiment names as run_adaptive.py is documented to be invoked: two
+# experiments on the SAME method line, so they carry the same --tag and are
+# told apart only by the experiment name.
+CTRL = "ctrl2015_cesm2_waccm_adapt"
+SSP = "ssp126_cesm2_waccm_adapt"
+
+
 @pytest.mark.parametrize("name", FRESH)
-def test_two_experiments_do_not_collide_in_the_shared_mesh_directory(name):
-    r"""Every adapted mesh and its sidecar land in one shared directory, so
-    two runs adapting the same starting mesh must not name the same file."""
-    ctrl = next_adapted_mesh_name(name, "ctrl")
-    ssp = next_adapted_mesh_name(name, "ssp126")
+def test_two_experiments_on_one_method_line_do_not_collide(name):
+    r"""Every adapted mesh and its sidecar land in one shared directory. A
+    control and a projection in the same method line share the run tag, so the
+    discriminator has to be the experiment name or the second run silently
+    replaces the first's triangulation."""
+    ctrl = next_adapted_mesh_name(name, CTRL)
+    ssp = next_adapted_mesh_name(name, SSP)
     assert ctrl != ssp
-    assert ctrl == f"{name}_ctrl_adapt1"
-    assert ssp == f"{name}_ssp126_adapt1"
+    assert ctrl == f"{name}_{CTRL}_adapt1"
+    assert ssp == f"{name}_{SSP}_adapt1"
     assert next_adapted_mesh_name(name) == f"{name}_adapt1"
 
 
-def test_the_tag_extends_the_lineage_rather_than_repeating():
-    r"""Adapting a tagged mesh again keeps one copy of the tag and advances
-    the counter, so a run's own meshes stay a single lineage."""
-    name = f"{FRESH[0]}_ctrl_adapt1"
-    assert next_adapted_mesh_name(name, "ctrl") == f"{FRESH[0]}_ctrl_adapt2"
-    assert next_adapted_mesh_name(name, "") == f"{FRESH[0]}_ctrl_adapt2"
-    assert next_adapted_mesh_name(name, None) == f"{FRESH[0]}_ctrl_adapt2"
+def test_the_experiment_extends_the_lineage_rather_than_repeating():
+    r"""Adapting a run's own mesh again keeps one copy of the identity and
+    advances the counter, so a run's meshes stay a single lineage."""
+    name = f"{FRESH[0]}_{CTRL}_adapt1"
+    assert next_adapted_mesh_name(name, CTRL) == f"{FRESH[0]}_{CTRL}_adapt2"
+    assert next_adapted_mesh_name(name, "") == f"{FRESH[0]}_{CTRL}_adapt2"
+    assert next_adapted_mesh_name(name, None) == f"{FRESH[0]}_{CTRL}_adapt2"
 
 
-def test_a_tagged_lineage_stays_strictly_increasing():
-    r"""The overwrite guard relies on this for tagged runs too."""
+def test_an_experiment_lineage_stays_strictly_increasing():
+    r"""The overwrite guard relies on this for named runs too."""
     seen = [FRESH[0]]
     for _ in range(4):
-        nxt = next_adapted_mesh_name(seen[-1], "ctrl")
+        nxt = next_adapted_mesh_name(seen[-1], CTRL)
         assert nxt not in seen
         seen.append(nxt)
-    assert seen[-1] == f"{FRESH[0]}_ctrl_adapt4"
+    assert seen[-1] == f"{FRESH[0]}_{CTRL}_adapt4"
 
 
 def test_the_lineage_never_revisits_a_name():

@@ -31,7 +31,7 @@ from firedrake.petsc import PETSc  # noqa: E402
 from icepack2_tools.adapt_mesh import (AdaptMeshConfig, desired_element_size,  # noqa: E402
                                        remesh_global, transfer_state)
 from icepack2_tools.geometry import sample_to_geometry  # noqa: E402
-from mesh_naming import adapt_lineage  # noqa: E402
+from mesh_naming import next_adapted_mesh_name  # noqa: E402
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 MESH_DIR = os.path.join(HERE, "..", "mesh")
@@ -110,8 +110,8 @@ def main():
     # extract_ice_outline() reads ISMIP7_BUFFER_M: the new mesh must use the
     # old mesh's buffer, not whatever the environment says.
     os.environ["ISMIP7_BUFFER_M"] = str(float(attrs.get("buffer_m", 0.0)))
-    root, k_prev = adapt_lineage(basename)
-    out_msh = args.out_mesh or os.path.join(MESH_DIR, f"{root}_adapt{k_prev + 1}.msh")
+    out_msh = args.out_mesh or os.path.join(
+        MESH_DIR, next_adapted_mesh_name(basename) + ".msh")
     if os.path.realpath(out_msh) == os.path.realpath(old_msh):
         raise SystemExit(
             f"adapt: --out-mesh names the reference mesh ({out_msh}). Writing "

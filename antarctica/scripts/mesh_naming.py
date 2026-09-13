@@ -42,14 +42,24 @@ def adapt_lineage(name):
     return (stem[: m.start()], int(m.group(1))) if m else (stem, 0)
 
 
-def next_adapted_mesh_name(reference):
+def next_adapted_mesh_name(reference, tag=None):
     """Basename (no extension) of the mesh one adaptation past `reference`.
 
     The counter comes from `reference`'s own name, so the result is always a
     name that mesh has not used: this is what keeps `adapt_mesh.py` from
     writing over the mesh it is reading.
+
+    `tag` is the run tag (`ISMIP7_RUN_TAG`). Every adapted mesh and its
+    boundary_ids sidecar land in the one shared mesh directory, so without it
+    two experiments adapting the same starting mesh write the same filenames
+    and the second silently replaces the first's triangulation. The tag is
+    folded into the root once, so the lineage keeps extending it rather than
+    repeating it.
     """
     root, count = adapt_lineage(reference)
+    tag = (tag or "").strip()
+    if tag and not root.endswith(f"_{tag}"):
+        root = f"{root}_{tag}"
     return f"{root}_adapt{count + 1}"
 
 

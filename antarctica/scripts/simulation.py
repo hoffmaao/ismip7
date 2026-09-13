@@ -458,10 +458,15 @@ def setup_model(restart_from=None):
                         f"ISMIP7_FRICTION={chk_friction} to resume."
                     )
             amb_env = os.environ.get("ISMIP7_APPARENT_MB")
-            if a_ref_mb is not None and amb_env is None:
+            if (a_ref_mb is not None or phys_div is not None) and amb_env is None:
+                # phys_div counts as the same evidence: adapt_mesh writes it
+                # only in place of an a_ref_mb it found on the source, so an
+                # adapted checkpoint that carries it came from an apparent-MB
+                # run even though the a_ref itself was replaced.
+                carried = "a_ref_mb" if a_ref_mb is not None else "phys_div"
                 raise RuntimeError(
                     f"Restart checkpoint {source_chk} carries a frozen "
-                    f"a_ref_mb (the run used ISMIP7_APPARENT_MB) but "
+                    f"{carried} (the run used ISMIP7_APPARENT_MB) but "
                     f"ISMIP7_APPARENT_MB is unset; set it to resume with "
                     f"the same mass-balance correction."
                 )

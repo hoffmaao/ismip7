@@ -44,15 +44,21 @@ def sh(cmd, env):
         raise SystemExit(f"command failed ({rc}): {cmd}")
 
 
-def checkpoint_year(chk):
-    r"""The model year the driver recorded in ``chk``, or None if it has none.
+def checkpoint_attr(chk, name):
+    r"""One root attribute of a Firedrake checkpoint, or None if it has none.
 
-    Firedrake writes ``t_yr`` as a plain HDF5 root attribute, so this reads it
+    Firedrake writes these as plain HDF5 root attributes, so this reads them
     without importing Firedrake and keeps this orchestrator dependency-free.
     """
     import h5py
     with h5py.File(chk, "r") as f:
-        t = f["/"].attrs.get("t_yr")
+        v = f["/"].attrs.get(name)
+    return v.decode() if isinstance(v, bytes) else v
+
+
+def checkpoint_year(chk):
+    r"""The model year the driver recorded in ``chk``, or None if it has none."""
+    t = checkpoint_attr(chk, "t_yr")
     return None if t is None else float(t)
 
 
@@ -147,9 +153,11 @@ def main():
             k += 1
             restart = adapt(chk, k, rebuild=True)
             chk = run_to(args.t_start, restart)      # zero years again on the new mesh
-            import glob
-            newest = max(glob.glob(os.path.join(HERE, "..", "mesh", "*_adapt*.msh")), key=os.path.getmtime)
-            n = n_cells(newest)
+            # The mesh THIS adaptation wrote, named by its own checkpoint. The
+            # mesh directory is shared, so the newest _adapt*.msh in it can
+            # belong to another experiment.
+            basename = checkpoint_attr(restart, "mesh_basename")
+            n = n_cells(os.path.join(HERE, "..", "mesh", f"{basename}.msh"))
             print(f"\n=== initial adaptation {it + 1}/{args.initial_iterations}: {n} cells ===", flush=True)
             if prev is not None and abs(n - prev) < args.until_change:
                 print("=== element count settled; stopping the initial iteration ===", flush=True)

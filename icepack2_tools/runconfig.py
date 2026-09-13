@@ -137,11 +137,23 @@ def apparent_mb_mode():
     export this unconditionally and ``sbatch --export=ALL,VAR=...`` cannot
     unset a variable, so there has to be an off value; without one a run asked
     to drop the correction would silently get the full balanced one.
+
+    The value set is closed, like ``calving_law`` and ``raster_sample``:
+    anything else raises. ``no`` and ``false`` are not off spellings, and
+    ``divergence`` is not ``div``, so accepting them would hand back the
+    balanced control, which differs from both by the whole t=0 forcing.
     """
     value = (os.environ.get("ISMIP7_APPARENT_MB") or "").strip().lower()
     if value in ("", "0", "off", "none"):
         return None
-    return "div" if value == "div" else "balance"
+    if value in ("1", "balance"):
+        return "balance"
+    if value == "div":
+        return "div"
+    raise ValueError(
+        f"ISMIP7_APPARENT_MB must be 1 or balance (balanced control), div "
+        f"(divergence only), or 0/off/none/empty to disable; got {value!r}"
+    )
 
 
 def auto_resume():

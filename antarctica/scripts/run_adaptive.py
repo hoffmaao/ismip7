@@ -68,7 +68,9 @@ def main():
     ap.add_argument("--adapt-launcher", default="mpiexec -n 1",
                     help="launcher for the adapt step only. Single-rank by default because "
                          "ISMIP7_ADAPT_TRANSFER=project (the recommended transfer) refuses to "
-                         "run on more than one rank; raise it only for transfer=interpolate")
+                         "run on more than one rank, and the remesh is serial gmsh either way. "
+                         "Raise it to --launcher's rank count under the shipped default "
+                         "transfer (interpolate), which has no such restriction")
     ap.add_argument("--python", default=sys.executable)
     ap.add_argument("--t-start", type=float, required=True)
     ap.add_argument("--t-end", type=float, required=True)

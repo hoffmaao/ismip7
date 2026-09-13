@@ -74,7 +74,7 @@ def main():
         with fd.CheckpointFile(args.checkpoint, "r") as chk:
             mesh = chk.load_mesh()
             attrs = {k: chk.get_attr("/", k) for k in
-                     ("mesh_basename", "buffer_m", "geometry_space", "raster_sample", "adapt_count", "t_yr")
+                     ("mesh_basename", "buffer_m", "geometry_space", "raster_sample", "t_yr")
                      if chk.has_attr("/", k)}
             H = chk.load_function(mesh, name="thickness")
             b = chk.load_function(mesh, name="bed")

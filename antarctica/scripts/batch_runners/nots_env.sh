@@ -124,6 +124,14 @@ export ISMIP7_DATA_ROOT="${ISMIP7_DATA_ROOT:-$ISMIP7_REPO/ISMIP7/AIS}"
 # set ISMIP7_FRICTION=budd explicitly for those re-inversions.
 export ISMIP7_GEOMETRY_SPACE="${ISMIP7_GEOMETRY_SPACE:-dg0}"
 export ISMIP7_FRICTION="${ISMIP7_FRICTION:-regularized_coulomb}"
+# Filename tag for the law, the same mapping icepack2_tools.naming._FRICTION_TAGS
+# uses. Every default MAP name interpolates it, so switching the law switches
+# the file the run writes and a Budd re-inversion cannot land on an RC MAP.
+case "$ISMIP7_FRICTION" in
+    regularized_coulomb) export ISMIP7_FRICTION_TAG=_rc ;;
+    budd)                export ISMIP7_FRICTION_TAG=_budd ;;
+    *)                   export ISMIP7_FRICTION_TAG= ;;
+esac
 export ISMIP7_N_FLOW="${ISMIP7_N_FLOW:-3.0}"
 export ISMIP7_LC="${ISMIP7_LC:-2500}"
 export ISMIP7_LC_COARSE="${ISMIP7_LC_COARSE:-64000}"

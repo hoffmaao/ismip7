@@ -204,6 +204,8 @@ The friction law is the one deliberate difference from that run.
 every inversion now runs that law. Budd's shelf gate was a sign test on the
 roundoff residue of the effective pressure, so the Budd MAPs that predate the
 fix have to be re-inverted; pass `ISMIP7_FRICTION=budd` explicitly for those.
+The law also picks the filename tag, so a Budd re-inversion writes its own
+`_budd` MAP instead of resuming from and then overwriting the RC one.
 
 `nots_submit_inversions.sh [B|C|BC]` submits the two 2 km
 strategies (B: cell-mean BedMachine sampling on the 20 km-interior mesh; C: the

@@ -28,11 +28,12 @@ def adapt_lineage(name):
     """Split a mesh name into its unadapted root and its adaptation count.
 
     `adapt_mesh.py` writes each adapted mesh as `<root>_adapt<N>.msh`, so the
-    filename itself records how many adaptations produced it. That makes the
-    mesh on disk the single source of truth for the count: every writer of a
-    checkpoint records `mesh_basename`, but not all of them record an
-    `adapt_count` attribute, and a name and an attribute that disagree would
-    let an adaptation overwrite the mesh it was built from.
+    filename itself records how many adaptations produced it, and the mesh on
+    disk is the single source of truth for the count. Every writer of a
+    checkpoint records `mesh_basename`, so the count is always recoverable;
+    a separate counter attribute would only add a second record to disagree
+    with, and a disagreement there lets an adaptation overwrite the mesh it
+    was built from.
 
     Returns `(root, count)`, with `count == 0` for an unadapted mesh.
     """

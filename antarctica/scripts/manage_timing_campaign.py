@@ -25,13 +25,21 @@ from timing_campaign import (
     BUFFER_M,
     CAMPAIGN_TAG,
     CACHE_TAG,
+    INVERSION_MAXITER,
+    INVERSION_TAG,
     MEMORY_BY_LC,
     SOLVER_MODE,
+    SOURCE_INVERSION_BASENAME,
     atomic_write_status,
     cache_paths,
     expected_dt,
     expected_t_end,
+    inversion_cores,
     mesh_basename,
+    mesh_inversion_basename,
+    mesh_inversion_map_path,
+    mesh_inversion_status_path,
+    mesh_inversion_timing_json_path,
     mesh_rows,
     scaling_lanes,
     scout_lanes,
@@ -289,7 +297,7 @@ class CampaignManager:
             self.timing_dir / f"status_{stem}.txt",
         )
 
-    def cache_validation(self, lc, lc_coarse):
+    def cache_validation(self, lc, lc_coarse, *, require_mesh_inversion=False):
         if self.dry_run and self.assume_valid_caches:
             return True, "assumed valid for dry-run command inspection"
         cache, manifest_path = cache_paths(
@@ -301,19 +309,196 @@ class CampaignManager:
         except (OSError, json.JSONDecodeError) as exc:
             return False, f"cache manifest unavailable: {exc}"
         try:
-            source_sha256 = self.source_checksum()
             mesh_sha256 = self.mesh_checksum(lc, lc_coarse)
         except FileNotFoundError as exc:
             return False, f"cache source unavailable: {exc}"
-        return validate_cache_manifest(
-            manifest,
-            lc=lc,
-            lc_coarse=lc_coarse,
-            cache_path=cache,
-            source_sha256=source_sha256,
-            mesh_sha256=mesh_sha256,
-            solver_fingerprint=self.solver_fingerprint,
+
+        mesh_map = mesh_inversion_map_path(self.root, lc, lc_coarse)
+        candidates = []
+        if mesh_map.is_file():
+            candidates.append(
+                (sha256_file(mesh_map), mesh_inversion_basename(lc, lc_coarse))
+            )
+        if not require_mesh_inversion:
+            try:
+                candidates.append(
+                    (self.source_checksum(), SOURCE_INVERSION_BASENAME)
+                )
+            except FileNotFoundError as exc:
+                if not candidates:
+                    return False, f"cache source unavailable: {exc}"
+
+        details = []
+        for source_sha256, _basename in candidates:
+            valid, detail = validate_cache_manifest(
+                manifest,
+                lc=lc,
+                lc_coarse=lc_coarse,
+                cache_path=cache,
+                source_sha256=source_sha256,
+                mesh_sha256=mesh_sha256,
+                solver_fingerprint=self.solver_fingerprint,
+            )
+            if valid:
+                return True, detail
+            details.append(detail)
+        if require_mesh_inversion and not mesh_map.is_file():
+            return False, f"mesh inversion MAP missing: {mesh_map}"
+        return False, details[0] if details else "cache provenance mismatch"
+
+    def inversion_map_path(self, lc, lc_coarse):
+        return mesh_inversion_map_path(self.root, lc, lc_coarse)
+
+    def inversion_paths(self, lc, lc_coarse):
+        ncores = inversion_cores(lc)
+        return (
+            self.inversion_map_path(lc, lc_coarse),
+            mesh_inversion_timing_json_path(
+                self.root, lc, lc_coarse, ncores
+            ),
+            mesh_inversion_status_path(self.root, lc, lc_coarse),
+            ncores,
         )
+
+    def inversion_result(self, lc, lc_coarse):
+        map_path, timing_json, status_path, ncores = self.inversion_paths(
+            lc, lc_coarse
+        )
+        if self.dry_run and self.assume_valid_caches:
+            return (
+                "passed",
+                "assumed valid for dry-run command inspection",
+                status_path,
+            )
+        status, active = self.reconcile_status(status_path)
+        if active:
+            return "active", status["state"], status_path
+        if map_path.is_file() and timing_json.is_file():
+            try:
+                with open(timing_json) as stream:
+                    record = json.load(stream)
+            except (OSError, json.JSONDecodeError) as exc:
+                return "failed", f"inversion timing JSON unreadable: {exc}", status_path
+            if (
+                int(record.get("lc", -1)) == int(lc)
+                and int(record.get("lc_coarse", -1)) == int(lc_coarse)
+                and int(record.get("maxiter", -1)) == INVERSION_MAXITER
+                and int(record.get("ncores", -1)) == int(ncores)
+                and os.path.realpath(str(record.get("map_path", "")))
+                == os.path.realpath(map_path)
+            ):
+                cache_ok, cache_detail = self.cache_validation(
+                    lc, lc_coarse, require_mesh_inversion=True
+                )
+                if cache_ok:
+                    return "passed", "inversion MAP and cache ready", status_path
+                return (
+                    "failed",
+                    f"inversion MAP present but cache not republished: "
+                    f"{cache_detail}",
+                    status_path,
+                )
+            return "failed", "inversion timing JSON does not match mesh", status_path
+        if status and status.get("state") in {
+            "failed", "finished", "submission_failed", "not_runnable"
+        }:
+            if status.get("state") == "finished" and not map_path.is_file():
+                return "failed", "status finished but MAP missing", status_path
+            return (
+                "failed",
+                status.get("category", status["state"]),
+                status_path,
+            )
+        return "missing", "no inversion record or active status", status_path
+
+    def invert(self):
+        for lc, lc_coarse in self.selected_rows():
+            state, detail, status_path = self.inversion_result(lc, lc_coarse)
+            # --assume-valid-caches makes inversion_result report "passed" so
+            # scout/scale dry-runs can print lanes; invert must still emit its
+            # own DRY RUN submit lines in that mode.
+            if (
+                state in {"passed", "active"}
+                and not self.force
+                and not (self.dry_run and self.assume_valid_caches)
+            ):
+                print(f"INVERSION {state.upper()} {lc}/{lc_coarse}: {detail}")
+                continue
+            if state == "failed" and not self.force:
+                print(
+                    f"INVERSION FAILED {lc}/{lc_coarse}: {detail}; retry with "
+                    "FORCE_TIMING=1 after inspection"
+                )
+                continue
+            # Prepare must have produced a usable imported-MAP cache first.
+            prep_ok, prep_detail = self.cache_validation(lc, lc_coarse)
+            if not prep_ok:
+                print(
+                    f"INVERSION WAITING CACHE {lc}/{lc_coarse}: {prep_detail}"
+                )
+                continue
+            mesh = self.mesh_path(lc, lc_coarse)
+            boundary = self.boundary_path(lc, lc_coarse)
+            missing = [path for path in (mesh, boundary) if not path.is_file()]
+            if missing and not (
+                self.dry_run and self.assume_valid_caches
+            ):
+                message = ",".join(os.fspath(path) for path in missing)
+                print(
+                    f"INVERSION NOT RUNNABLE {lc}/{lc_coarse}: missing "
+                    f"{message}"
+                )
+                if not self.dry_run:
+                    atomic_write_status(
+                        status_path,
+                        "not_runnable",
+                        reason="missing_input",
+                    )
+                continue
+            map_path, timing_json, _, ncores = self.inversion_paths(
+                lc, lc_coarse
+            )
+            cache, manifest = cache_paths(self.cache_dir, lc, lc_coarse)
+            raw = cache.with_suffix(".parallel.h5")
+            exports = {
+                "ISMIP7_LC": lc,
+                "ISMIP7_LC_COARSE": lc_coarse,
+                "ISMIP7_BUFFER_M": BUFFER_M,
+                "ISMIP7_MESH": mesh,
+                "ISMIP7_BNDIDS": boundary,
+                "ISMIP7_INVERSION": self.inversion,
+                "ISMIP7_MAP_OUT": map_path,
+                "ISMIP7_INVERSION_TIMING_JSON": timing_json,
+                "ISMIP7_MAXITER": INVERSION_MAXITER,
+                "ISMIP7_FRICTION": "budd",
+                "ISMIP7_GEOMETRY_SPACE": "dg0",
+                "ISMIP7_N_FLOW": "3.0",
+                "ISMIP7_A4_FACTOR": "1.0",
+                "ISMIP7_MISFIT_NORM": "sigma",
+                "ISMIP7_LOG_VEL_WEIGHT": "auto",
+                "ISMIP7_LOG_VEL_EPS": "1.0",
+                "ISMIP7_DHDT_WEIGHT": "1",
+                "ISMIP7_DHDT_NET_SIGMA": "10",
+                "ISMIP7_GAMMA_THETA": "1e5",
+                "ISMIP7_GAMMA_PHI": "1e5",
+                "ISMIP7_DIAGNOSTIC_LINEAR_SOLVER": SOLVER_MODE,
+                "ISMIP7_SNES_DIVERGENCE_TOL": SNES_DIVERGENCE_TOL_DEFAULT,
+                "ISMIP7_RESCUE_ENABLED": "1",
+                "ISMIP7_TIMING_CACHE_RAW": raw,
+                "ISMIP7_TIMING_CACHE": cache,
+                "ISMIP7_TIMING_CACHE_MANIFEST": manifest,
+                "ISMIP7_TIMING_INVERSION_STATUS": status_path,
+                "ISMIP7_TIMING_INVERSION_TAG": INVERSION_TAG,
+            }
+            self._submit(
+                f"timing_inv_{lc}_{lc_coarse}",
+                ncores,
+                MEMORY_BY_LC[lc],
+                exports,
+                self.root
+                / "scripts/batch_runners/timing_matrix_inversion.script",
+                status_path,
+            )
 
     def _submit(self, job_name, ncores, memory, exports, script, status_path):
         command = [
@@ -608,13 +793,34 @@ class CampaignManager:
         if state == "failed" and not self.force:
             print(f"LANE FAILED {lc}/{lc_coarse}/{ncores}: {detail}")
             return
-        valid, cache_detail = self.cache_validation(lc, lc_coarse)
+        inv_state, inv_detail, _ = self.inversion_result(lc, lc_coarse)
+        _, status_path = self._lane_paths(lc, lc_coarse, ncores)
+        if inv_state != "passed":
+            if inv_state == "failed":
+                print(
+                    f"BLOCKED BY INVERSION {lc}/{lc_coarse}/{ncores}: "
+                    f"{inv_detail}"
+                )
+                if not self.dry_run:
+                    atomic_write_status(
+                        status_path,
+                        "blocked_by_inversion",
+                        reason=inv_detail,
+                    )
+            else:
+                print(
+                    f"WAITING FOR INVERSION {lc}/{lc_coarse}/{ncores}: "
+                    f"{inv_state} ({inv_detail})"
+                )
+            return
+        valid, cache_detail = self.cache_validation(
+            lc, lc_coarse, require_mesh_inversion=True
+        )
         if not valid:
             print(f"LANE WAITING CACHE {lc}/{lc_coarse}/{ncores}: {cache_detail}")
             return
         cache, manifest = cache_paths(self.cache_dir, lc, lc_coarse)
         boundary = self.boundary_path(lc, lc_coarse)
-        _, status_path = self._lane_paths(lc, lc_coarse, ncores)
         if not boundary.is_file() and not (
             self.dry_run and self.assume_valid_caches
         ):
@@ -635,7 +841,7 @@ class CampaignManager:
             "ISMIP7_LC_COARSE": lc_coarse,
             "ISMIP7_BUFFER_M": BUFFER_M,
             "ISMIP7_BNDIDS": boundary,
-            "ISMIP7_INVERSION": self.inversion,
+            "ISMIP7_INVERSION": self.inversion_map_path(lc, lc_coarse),
             "ISMIP7_RESTART": cache,
             "ISMIP7_TIMING_CACHE_MANIFEST": manifest,
             "ISMIP7_FRICTION": "budd",
@@ -711,7 +917,8 @@ class CampaignManager:
 def parse_args():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument(
-        "stage", choices=("prepare", "audit", "probe", "scout", "scale")
+        "stage",
+        choices=("prepare", "audit", "probe", "invert", "scout", "scale"),
     )
     parser.add_argument("--root", default=_ROOT)
     parser.add_argument("--cache-dir", default=_ROOT / "results/timing/cache")

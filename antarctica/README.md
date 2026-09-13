@@ -455,6 +455,8 @@ policy, and requested-versus-canonical solver mode.
 |---------|---------|---------|
 | `ISMIP7_MAP_OUT` | full output path for the MAP h5, overriding the generated name. Use it for smoke tests and variant inversions so a short run cannot replace a converged production MAP. A bare filename resolves under `mesh/`; the directory is created and probed for writability at startup | _(generated name)_ |
 | `ISMIP7_MISFIT_NORM` | `sigma`: divide each residual by its own datum's squared error, making the misfit a dimensionless chi^2 so terms of different units can be traded off. `none`: legacy dimensional misfit. **Selects the `ISMIP7_GAMMA_*` defaults** (see below) | `sigma` |
+| `ISMIP7_LOG_VEL_WEIGHT` | weight on the ISSM-convention logarithmic velocity misfit `0.5 ln((|u|+eps)/(|u_obs|+eps))^2` (ISSM cost function 103), added to the term `ISMIP7_MISFIT_NORM` selects. The sigma-normalised chi^2 alone over-weights slow interior ice and leaves the discharge-carrying tributaries too slow; the log term is scale-free and pulls them up. `0` is the pre-Sep-2026 objective; `auto` resolves the weight at the warm-start state so the log term starts out equal to the velocity chi^2 term. The resolved value is stamped into the MAP as the `log_vel_weight` attribute | `0` |
+| `ISMIP7_LOG_VEL_EPS` | regularisation speed (m/yr) inside the log, so stagnant ice cannot make the ratio singular. Stamped into the MAP as `log_vel_eps` | `1.0` |
 | `ISMIP7_GAMMA_THETA` / `ISMIP7_GAMMA_PHI` | Whittle-Matern prior strength on `θ` / `φ`. Default is coupled to `ISMIP7_MISFIT_NORM`, because normalizing divides the misfit by ~sigma^2 and would otherwise weaken the prior by the same factor | `1e5` under `sigma`, `1e4` under `none` |
 | `ISMIP7_L_REG` | prior correlation length (m) | `7.5e3` |
 | `ISMIP7_MAXITER` | L-BFGS-B iteration cap | `500` |
@@ -588,6 +590,17 @@ The stages and contracts are:
    construction method. The job then repacks the cache on one rank and
    publishes the HDF5 file and JSON manifest atomically. Mesh, inversion,
    physics, solver, or cache-schema changes invalidate it.
+3. **Per-mesh short inversion (`make timing-inversion`)** — after a valid
+   prepared cache exists, one five-iteration L-BFGS job per mesh re-inverts
+   with the log-velocity + dH/dt + net-balance objective
+   (`ISMIP7_LOG_VEL_WEIGHT=auto`, `ISMIP7_DHDT_WEIGHT=1`,
+   `ISMIP7_DHDT_NET_SIGMA=10`). Ranks are 32 for LC &lt; 2500 m and 16 otherwise;
+   memory follows the forward `MEMORY_BY_LC` budgets. The job writes a
+   per-mesh MAP under `results/timing/inversion/`, a profiling JSON under
+   `results/timing/`, then republishes that mesh's timing cache from the new
+   MAP so scout provenance points at the short invert rather than the imported
+   source. Scouts wait on this stage.
+4. **Cache audit / AMB probe** — optional diagnostics on a prepared cache:
    ```console
    make timing-cache-audit TIMING_ONLY_MESH=2500/25000 \
      SLURM_PARTITION=debug SLURM_TIME=00:15:00
@@ -614,15 +627,15 @@ The stages and contracts are:
    positivity-limited initially ice-free cells, so a passing probe diagnoses
    the runaway but is not a representative timing measurement.
 
-3. **Scouts (`make timing-scout`)** — one lowest-retained-core lane per mesh:
+5. **Scouts (`make timing-scout`)** — one lowest-retained-core lane per mesh:
    32 ranks at 500 m and 16 ranks elsewhere. A scout passes only after five
    direct steps, the exact final year, no negative solve reason or rescue
-   label, matching cache provenance, and transport and complete-step mass
-   residuals no larger than `5e-5 Gt`.
-4. **Scaling (`make timing-scale`)** — higher-core lanes are submitted only
+   label, matching post-inversion cache provenance, and transport and
+   complete-step mass residuals no larger than `5e-5 Gt`.
+6. **Scaling (`make timing-scale`)** — higher-core lanes are submitted only
    for meshes whose scout passes. A failed scout stamps its scaling lanes
    `BLOCKED BY SCOUT`; the jobs are not submitted.
-5. **Strict transient timing** — all matrix lanes use `scpc_mumps`, disable
+7. **Strict transient timing** — all matrix lanes use `scpc_mumps`, disable
    rescue, and restrict subcycles to `1`. The first diagnostic, transport, or
    mass-budget failure ends the lane. The primary timer starts immediately
    before the five-step loop, after cache loading, solver construction, and
@@ -635,7 +648,7 @@ The stages and contracts are:
    solver reaches its real convergence or iteration-limit result; the legacy
    value `-1` means `PETSC_DETERMINE` and accidentally restores the default
    `1e4` growth cutoff.
-6. **Reporting and synchronization** — `make sync-results` uses
+8. **Reporting and synchronization** — `make sync-results` uses
    `quartz:/N/project/ice_rheology/ISMIP7/antarctica/results/` and the local
    canonical `results/` with trailing slashes so the directory contents merge
    at the correct level. Override `QUARTZ_RESULTS` if the remote checkout
@@ -665,12 +678,13 @@ fail.
 
 Individual stages can be run separately: `make meshes`, `make redistribute`,
 `make qualify`, `make timestep-probe`, `make timing-prepare`,
-`make timing-cache-audit`, `make timing-amb-probe`, `make timing-scout`,
+`make timing-inversion`, `make timing-cache-audit`, `make timing-amb-probe`,
+`make timing-scout`,
 `make timing-scale`, `make sync-results`, and `make matrix`.
 `make timing-dry-run` prints the staged commands without submitting jobs.
 `make transient` routes matrix work through the scout gate;
 qualification/debug calls still use its direct compatibility path.
-Use `TIMING_ONLY_MESH=2500/25000` to prepare, audit, probe, or scout one exact
+Use `TIMING_ONLY_MESH=2500/25000` to prepare, invert, audit, probe, or scout one exact
 mesh, and add `TIMING_SCOUT_MONITOR=1` to write the scout/probe SNES/KSP
 monitor under `results/logs/`. Before treating a live-looking status as active,
 the campaign

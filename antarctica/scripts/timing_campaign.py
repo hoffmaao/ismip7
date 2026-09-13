@@ -63,6 +63,8 @@ CAMPAIGN_TAG = (
 )
 AMB_PROBE_TAG = f"{CAMPAIGN_TAG}_ambdiv_probe"
 CACHE_TAG = "scpc_mumps_dg0_logvelnet_v3"
+INVERSION_TAG = f"{CACHE_TAG}_5step"
+INVERSION_MAXITER = 5
 
 MATRIX_T_START = 2015.0
 MATRIX_STEPS = 5
@@ -78,6 +80,51 @@ MEMORY_BY_LC = {
     2500: "64G",
     5000: "32G",
 }
+
+
+def inversion_cores(lc):
+    """Ranks for the per-mesh short logvelnet inversion."""
+    return 32 if int(lc) < 2500 else 16
+
+
+def mesh_inversion_basename(lc, lc_coarse):
+    return (
+        f"inversion_icepack2_budd_n3_dg0_logvelnet_"
+        f"{int(lc)}_{int(lc_coarse)}_5step.h5"
+    )
+
+
+def mesh_inversion_map_path(root, lc, lc_coarse):
+    return (
+        Path(root)
+        / "results"
+        / "timing"
+        / "inversion"
+        / mesh_inversion_basename(lc, lc_coarse)
+    )
+
+
+def mesh_inversion_timing_json_path(root, lc, lc_coarse, ncores=None):
+    if ncores is None:
+        ncores = inversion_cores(lc)
+    return (
+        Path(root)
+        / "results"
+        / "timing"
+        / (
+            f"inversion_timing_{INVERSION_TAG}_{int(lc)}_{int(lc_coarse)}"
+            f"_{int(ncores)}.json"
+        )
+    )
+
+
+def mesh_inversion_status_path(root, lc, lc_coarse):
+    return (
+        Path(root)
+        / "results"
+        / "timing"
+        / f"status_inversion_{INVERSION_TAG}_{int(lc)}_{int(lc_coarse)}.txt"
+    )
 
 
 def mesh_rows(lcs=LCS, ratios=RATIOS):
@@ -264,7 +311,6 @@ def validate_cache_manifest(
         "a4_factor": 1.0,
         "t_yr": MATRIX_T_START,
         "mesh_basename": mesh_basename(lc, lc_coarse),
-        "source_inversion_basename": SOURCE_INVERSION_BASENAME,
         "geometry_source_method": TARGET_MESH_GEOMETRY_METHOD,
     }
     for key, value in expected.items():
@@ -278,6 +324,16 @@ def validate_cache_manifest(
             matches = actual == value
         if not matches:
             return False, f"cache {key}={actual!r}; expected {value!r}"
+    allowed_sources = {
+        SOURCE_INVERSION_BASENAME,
+        mesh_inversion_basename(lc, lc_coarse),
+    }
+    source_basename = manifest.get("source_inversion_basename")
+    if source_basename not in allowed_sources:
+        return False, (
+            f"cache source_inversion_basename={source_basename!r}; "
+            f"expected one of {sorted(allowed_sources)}"
+        )
     for key in ("source_inversion_sha256", "source_mesh_sha256"):
         if not manifest.get(key):
             return False, f"cache {key} is missing"

@@ -8,6 +8,7 @@
 #   inversion     verify the imported improved DG0 logvelnet inversion
 #   redistribute  rewrite the complete inversion checkpoint on 1 core
 #   timing-prepare  prepare/repack one exact-mesh state for all 10 meshes
+#   timing-inversion  5-step logvelnet invert per mesh; republish cache
 #   timing-cache-audit  report the exact initial FV tendency of prepared caches
 #   timing-amb-probe  test exact div(h*u) cancellation on one prepared cache
 #   timing-scout    submit the lowest retained core count for each mesh
@@ -125,12 +126,13 @@ DEBUG_STAMP := $(shell date +%Y%m%d_%H%M%S)
 	qualify qualify-if-needed qualify-2step qualify-5step timestep-probe debug \
 	reference solver-smoke matrix matrix-legacy sync-results timing-prepare timing-scout \
 	timing-scale timing-dry-run timing-cache-smoke timing-cache-audit \
-	timing-amb-probe
+	timing-amb-probe timing-inversion
 
 timing: qualify-if-needed
 	@mkdir -p results/timing
 	@printf '%s\n' "$(TIMING_TAG)" > results/timing/latest_matrix_campaign.txt
 	$(MAKE) timing-prepare
+	$(MAKE) timing-inversion
 	$(MAKE) timing-scout
 	$(MAKE) timing-scale
 	$(MAKE) matrix
@@ -280,6 +282,13 @@ timing-prepare:
 	  $(if $(TIMING_ONLY_MESH),--only-mesh "$(TIMING_ONLY_MESH)",) \
 	  $(if $(FORCE_TIMING),--force,)
 
+timing-inversion:
+	python scripts/manage_timing_campaign.py invert \
+	  --inversion "$(TIMING_INVERSION)" --cache-dir "$(TIMING_CACHE_DIR)" \
+	  --partition "$(SLURM_PARTITION)" --walltime "$(SLURM_TIME)" \
+	  $(if $(TIMING_ONLY_MESH),--only-mesh "$(TIMING_ONLY_MESH)",) \
+	  $(if $(FORCE_TIMING),--force,)
+
 timing-cache-audit:
 	python scripts/manage_timing_campaign.py audit \
 	  --inversion "$(TIMING_INVERSION)" --cache-dir "$(TIMING_CACHE_DIR)" \
@@ -312,6 +321,10 @@ timing-scale:
 
 timing-dry-run:
 	python scripts/manage_timing_campaign.py prepare --dry-run \
+	  --inversion "$(TIMING_INVERSION)" --cache-dir "$(TIMING_CACHE_DIR)" \
+	  --partition "$(SLURM_PARTITION)" --walltime "$(SLURM_TIME)" \
+	  $(if $(TIMING_ONLY_MESH),--only-mesh "$(TIMING_ONLY_MESH)",)
+	python scripts/manage_timing_campaign.py invert --dry-run --assume-valid-caches \
 	  --inversion "$(TIMING_INVERSION)" --cache-dir "$(TIMING_CACHE_DIR)" \
 	  --partition "$(SLURM_PARTITION)" --walltime "$(SLURM_TIME)" \
 	  $(if $(TIMING_ONLY_MESH),--only-mesh "$(TIMING_ONLY_MESH)",)

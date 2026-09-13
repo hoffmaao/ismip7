@@ -19,13 +19,14 @@ Usage:
 """
 
 import numpy as np
-import os, sys, glob
+import os, sys, glob, json
 from time import perf_counter
 
 import firedrake as fd
 from firedrake import (
     Constant,
     Function,
+    ln,
     max_value,
     sqrt,
     inner,
@@ -147,6 +148,33 @@ if MISFIT_NORM not in ("sigma", "none"):
 # So the default tracks the norm rather than leaving the shipped configuration
 # knowingly mistuned. Setting ISMIP7_GAMMA_* explicitly overrides either way.
 GAMMA_DEFAULT = "1e5" if MISFIT_NORM == "sigma" else "1e4"
+
+# ── ISSM-convention logarithmic velocity misfit ──────────────────────────
+# An absolute (or sigma-normalized) velocity misfit is dominated by wherever
+# the observational error is smallest, which on MEaSUREs is the slow interior
+# (median sigma 2.6 m/yr): a 10 m/yr error on a 20 m/yr datum costs more than
+# a 200 m/yr error on a 600 m/yr tributary. Measured on the 2500 m MAP: the
+# grounding-line flux carried by the inverted velocity is 140% of observed
+# below 100 m/yr and 52-62% between 100 and 1500 m/yr, i.e. the tributaries
+# that deliver most of the discharge are systematically slow, and the ice
+# sheet then gains grounded mass.
+#
+# ISSM's remedy is standard practice: sum the absolute misfit with a
+# LOGARITHMIC one (cost functions 101 + 103, `SurfaceAbsVelMisfit` +
+# `SurfaceLogVelMisfit`), the latter being a RELATIVE error and therefore
+# scale-free:
+#
+#     J_log = 1/2 int [ ln( (|u| + eps) / (|u_obs| + eps) ) ]^2 dA / A
+#
+# with `eps` = ISSM's `epsvel`, a floor that keeps the logarithm finite where
+# the ice is not moving. Elmer/Ice and Ua use relative errors to the same end.
+#
+# ISMIP7_LOG_VEL_WEIGHT: 0 (default, the pre-Sep-2026 objective), a number, or
+# "auto" -- scaled so that at the STARTING state the log term equals the
+# velocity chi^2 term, which is the only weight that means anything before
+# the first iteration. The resolved value is stamped in the MAP.
+LOG_VEL_WEIGHT = os.environ.get("ISMIP7_LOG_VEL_WEIGHT", "0")
+LOG_VEL_EPS = float(os.environ.get("ISMIP7_LOG_VEL_EPS", "1.0"))   # m/yr
 GAMMA_THETA = float(os.environ.get("ISMIP7_GAMMA_THETA", GAMMA_DEFAULT))
 GAMMA_PHI = float(os.environ.get("ISMIP7_GAMMA_PHI", GAMMA_DEFAULT))
 L_REG = float(os.environ.get("ISMIP7_L_REG", "7.5e3"))
@@ -829,6 +857,36 @@ def main():
                 f"ISMIP7_DHDT_NET_SIGMA=0 disables)"
             )
 
+    # Log-velocity misfit (ISSM convention).
+    _eps_v = Constant(LOG_VEL_EPS)
+
+    def _log_ratio(u_expr):
+        sp = sqrt(u_expr[0] ** 2 + u_expr[1] ** 2 + Constant(1e-12))
+        sp_obs = sqrt(u_obs[0] ** 2 + u_obs[1] ** 2 + Constant(1e-12))
+        return ln((sp + _eps_v) / (sp_obs + _eps_v))
+
+    log_vel_w = (0.0 if LOG_VEL_WEIGHT.lower() == "auto"
+                 else float(LOG_VEL_WEIGHT))
+    if LOG_VEL_WEIGHT.lower() == "auto":
+        # Scale so the two velocity terms start out comparable: the ratio of
+        # the chi^2 term to the unweighted log term at the warm-start state.
+        _u0 = z.subfunctions[0]
+        _chi2_0 = float(assemble(
+            (0.5 / area_val * obs_mask
+             * ((_u0[0] - u_obs[0]) ** 2 / sig_ux ** 2
+                + (_u0[1] - u_obs[1]) ** 2 / sig_uy ** 2)) * dx(mesh)))
+        _log_0 = float(assemble(
+            (0.5 / area_val * obs_mask * _log_ratio(_u0) ** 2) * dx(mesh)))
+        log_vel_w = (_chi2_0 / _log_0) if _log_0 > 0 else 0.0
+        PETSc.Sys.Print(
+            f"  Log-velocity misfit (ISSM 103): auto weight {log_vel_w:.4g} "
+            f"= chi2 {_chi2_0:.3e} / log {_log_0:.3e} at "
+            f"the start, eps={LOG_VEL_EPS:g} m/yr")
+    elif log_vel_w > 0.0:
+        PETSc.Sys.Print(
+            f"  Log-velocity misfit (ISSM 103): weight {log_vel_w:g}, "
+            f"eps={LOG_VEL_EPS:g} m/yr")
+
     def forward(theta_ctrl, phi_ctrl):
         clear_caches()
         F_ctrl = build_F(theta_ctrl, phi_ctrl)
@@ -856,6 +914,14 @@ def main():
                 + (u_sol[1] - u_obs[1]) ** 2 / sig_uy ** 2
             )
         )
+
+        if log_vel_w > 0.0:
+            # ISSM SurfaceLogVelMisfit: a relative (scale-free) error, so the
+            # fit is not bought entirely in the slow interior.
+            integrand = integrand + (
+                Constant(0.5 * log_vel_w) / area_val * obs_mask
+                * _log_ratio(u_sol) ** 2
+            )
 
         if use_dhdt:
             # ONE prognostic step, using the SAME DG0 upwind FV operator the
@@ -959,6 +1025,7 @@ def main():
         * ((_u_now[0] - u_obs[0]) ** 2 / sig_ux ** 2
            + (_u_now[1] - u_obs[1]) ** 2 / sig_uy ** 2)
     ) * dx(mesh)
+    _log_chi2 = (0.5 / area_val * obs_mask * _log_ratio(_u_now) ** 2) * dx(mesh)
     if use_dhdt:
         _net_form = (((h_next - H) / Constant(dhdt_dt) - dhdt_obs)
                      * dhdt_mask * dx(mesh))
@@ -979,6 +1046,8 @@ def main():
         r"""``' vel=... dhdt=...'`` for the iteration line, or '' if disabled."""
         try:
             out = f" vel={last_good_vel_chi2[0]:.4e}"
+            if log_vel_w > 0.0:
+                out += f" log={float(assemble(_log_chi2)):.4e}"
             if use_dhdt:
                 out += f" dhdt={float(assemble(_dhdt_chi2)):.4e}"
                 out += (f" net={float(assemble(_net_form)) * 917.0 / 1e12:+.0f}Gt/yr")
@@ -1026,6 +1095,8 @@ def main():
             chk.set_attr("/", "lc_coarse", int(lc_coarse))
             chk.set_attr("/", "buffer_m", float(buffer_m))
             chk.set_attr("/", "misfit_norm", MISFIT_NORM)
+            chk.set_attr("/", "log_vel_weight", float(log_vel_w))
+            chk.set_attr("/", "log_vel_eps", float(LOG_VEL_EPS))
             chk.set_attr("/", "gamma_theta", float(GAMMA_THETA))
             chk.set_attr("/", "gamma_phi", float(GAMMA_PHI))
             chk.set_attr("/", "dhdt_weight", float(dhdt_w))
@@ -1040,6 +1111,55 @@ def main():
     z_backup = z.copy(deepcopy=True)
     last_good_obj = [np.inf]
     iteration_count = [0]
+    timing_history = []
+    timing_json = os.environ.get("ISMIP7_INVERSION_TIMING_JSON", "").strip()
+    t_opt0 = perf_counter()
+
+    def _eval_terms():
+        """Assemble diagnostic term values for the JSON / print line."""
+        terms = {"vel": float(last_good_vel_chi2[0])}
+        if log_vel_w > 0.0:
+            terms["log"] = float(assemble(_log_chi2))
+        if use_dhdt:
+            terms["dhdt"] = float(assemble(_dhdt_chi2))
+            terms["net_gt_per_yr"] = (
+                float(assemble(_net_form)) * 917.0 / 1e12
+            )
+        return terms
+
+    def _write_timing_json(*, phase, message="", nit=None, nfev=None):
+        if not timing_json or COMM_WORLD.rank != 0:
+            return
+        from timing_campaign import atomic_write_json
+        payload = {
+            "phase": phase,
+            "map_path": os.path.realpath(os.path.join(_map_dir, map_fn)),
+            "mesh_basename": os.path.basename(mesh_fn),
+            "lc": int(lc),
+            "lc_coarse": int(lc_coarse),
+            "buffer_m": float(buffer_m),
+            "ncores": int(COMM_WORLD.size),
+            "maxiter": int(max_iter),
+            "nit": int(nit if nit is not None else iteration_count[0]),
+            "nfev": int(nfev if nfev is not None else iteration_count[0]),
+            "message": str(message),
+            "optimize_seconds": perf_counter() - t_opt0,
+            "knobs": {
+                "misfit_norm": MISFIT_NORM,
+                "log_vel_weight_requested": LOG_VEL_WEIGHT,
+                "log_vel_weight": float(log_vel_w),
+                "log_vel_eps": float(LOG_VEL_EPS),
+                "gamma_theta": float(GAMMA_THETA),
+                "gamma_phi": float(GAMMA_PHI),
+                "dhdt_weight": float(dhdt_w),
+                "dhdt_net_sigma": float(net_sigma_used),
+                "grad_precond": os.environ.get(
+                    "ISMIP7_GRAD_PRECOND", "none"
+                ).lower(),
+            },
+            "evaluations": list(timing_history),
+        }
+        atomic_write_json(timing_json, payload)
 
     def objective_and_gradient(x_vec):
         t_iter = perf_counter()
@@ -1121,6 +1241,25 @@ def main():
             f"[fwd={t_fwd:.1f}s adj={t_adj:.1f}s total={t_iter:.1f}s]"
         )
 
+        if timing_json:
+            try:
+                terms = _eval_terms()
+            except Exception:
+                terms = {"vel": float(last_good_vel_chi2[0])}
+            timing_history.append({
+                "eval": iteration_count[0],
+                "misfit": J_val,
+                "reg_theta": reg_theta,
+                "reg_phi": reg_phi,
+                "total": total,
+                "grad_norm": float(np.linalg.norm(total_grad)),
+                "fwd_seconds": t_fwd,
+                "adj_seconds": t_adj,
+                "total_seconds": t_iter,
+                "terms": terms,
+            })
+            _write_timing_json(phase="running", message="in progress")
+
         # Periodic checkpoint every 20 iterations
         if iteration_count[0] % 20 == 0:
             save_map(os.path.join(_map_dir, map_fn))
@@ -1181,9 +1320,20 @@ def main():
     save_map(chk_fn)
     PETSc.Sys.Print(
         f"Saved MAP: {chk_fn} "
-        f"(misfit_norm={MISFIT_NORM} gamma_theta={GAMMA_THETA:g} "
-        f"gamma_phi={GAMMA_PHI:g} dhdt_weight={dhdt_w:g})"
+        f"(misfit_norm={MISFIT_NORM} log_vel_weight={log_vel_w:g} "
+        f"gamma_theta={GAMMA_THETA:g} gamma_phi={GAMMA_PHI:g} "
+        f"dhdt_weight={dhdt_w:g})"
     )
+
+    if timing_json:
+        _write_timing_json(
+            phase="finished",
+            message=str(result.message),
+            nit=result.nit,
+            nfev=result.nfev,
+        )
+        if COMM_WORLD.rank == 0:
+            PETSc.Sys.Print(f"Inversion timing record -> {timing_json}")
 
     # ── Final forward solve ──
     # The single-shot solve at full exponents can fail, and the old code then

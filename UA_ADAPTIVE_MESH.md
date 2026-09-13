@@ -187,3 +187,14 @@ Gt/yr and VAF 57638.204 vs 57638.212 mm SLE. The outflux numbers quoted above
 (782, and the identity test's 672) were measured with the old test in place,
 as was every Budd forward and Budd MAP to date; regularized Coulomb has a
 continuous `tau_cap` and never had the problem.
+
+**Correction (same day):** the He gate alone was not enough. `He` is a smooth
+function of height above flotation, so a cell floating by a few metres sits
+inside the He band and still received `He * nhat_cap` from a roundoff-positive
+`N` (133 of the 3791 floating cells of the 32 km MAP). The gate is now HAF > 0
+itself (`dual_friction.budd_nhat`), which for grounded ice is the same
+statement as N > 0 (`N = rho_I g HAF` when `s = b + H`) and on the shelf is a
+real negative number instead of a cancelling difference. Census script:
+`antarctica/scripts/check_budd_map.py MAP [--forward]` (old gate 418 cells at
+the cap, He-only 133, production 0; and the old MAP's saved velocity is not
+reproduced by the fixed law, rel L2 = 0.91, so Budd MAPs must be re-inverted).

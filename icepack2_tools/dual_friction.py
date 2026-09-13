@@ -210,6 +210,12 @@ def build_rc_residual(
         tau_b = tau_W tau_c / (tau_W + tau_c)           (Weertman low-u, cap high-u)
         closes ``tau = -tau_b u / |u|_reg`` LINEARLY (identity tau-block).
 
+    Friction block (``fric_law="budd"``)
+        tau_b = tau_W N_hat, with ``N_hat`` from :func:`budd_nhat`: the
+        normalized effective pressure gated to grounded ice by height above
+        flotation and scaled by the smooth grounded indicator ``He``. See that
+        docstring for why the gate is HAF and not the sign of ``N``.
+
     Parameters
     ----------
     z, theta, phi : Function
@@ -330,18 +336,20 @@ def build_rc_residual(
         # pressure N_eff/N_ref (=1 at the reference/inversion geometry, so the
         # inverted friction is preserved at t=0 and the effective-pressure
         # feedback is a RELATIVE change as the geometry evolves).  Exact-zero
-        # shelf via conditional(N>0, ., 0): N_eff=0 afloat -> tau_b=0 exactly.
+        # shelf by GATING ON HEIGHT ABOVE FLOTATION, and the smooth grounded
+        # indicator He multiplies through: see budd_nhat, which owns both and
+        # explains why the flotation branch makes N itself unusable as the test.
         # PISM-delta floor (Bueler & van Pelt 2015, till_effective_fraction_
         # overburden, delta ~ 0.02): on GROUNDED ice N_hat >= delta*P_o/N_ref
         # (P_o = local overburden, so the floor evolves and decays as ice
         # thins), removing the near-flotation frictionless-GL degeneracy.  The
         # Joughin cap (reduceNearGLBeta) bounds N_hat above.
-        # Floor the denominator ALWAYS (not just for exact-zero guarding): UFL
-        # evaluates both conditional branches, so an unguarded N/Nr = 0/0 on the
-        # shelf poisons the Jacobian with NaN even though the conditional selects
-        # 0.  1e-6 is tiny vs grounded N (~rho_I g H), so N/Nr = 1 stands on all
-        # grounded ice when N_ref=None (inversion); only the (conditional-zeroed)
-        # shelf sees the floor.
+        # budd_nhat_ungated floors the denominator ALWAYS, not just to guard the
+        # zero branch: UFL evaluates both sides of a conditional, so an unguarded
+        # N/Nr = 0/0 on the shelf poisons the Jacobian with NaN even where the
+        # gate selects 0.  1e-6 is tiny vs grounded N (~rho_I g H), so N/Nr = 1
+        # stands on all grounded ice when N_ref=None (inversion); only the
+        # (gated-to-zero) shelf sees the floor.
         N_hat = budd_nhat(N, N_ref, H, b, He, nhat_floor=nhat_floor, nhat_cap=nhat_cap)
         tau_b = tau_W * N_hat
     else:  # regularized_coulomb

@@ -14,14 +14,34 @@ This is a property of the DG0 geometry, not of a transfer rule that is still
 missing, so raising the resolution of a running model is not something this
 branch can do yet.
 
-**How the branch is meant to be used.** Build the mesh from observations
-first, invert on it, and run forward on that one mesh:
+**How the branch is meant to be used.** Build the mesh first, invert on it,
+and run forward on that one mesh:
 
-1. `adapt_mesh.py --mesh-only --from-obs --source-mesh <scaffold>.msh` sizes
-   the mesh from MEaSUReS velocity and BedMachine rather than from model
-   fields, giving a Ua-preset mesh (the committed sidecars
-   `boundary_ids_antarctica_ua_180000_2000{,_obs}.json` name the two built
-   this way; the `.msh` files are regenerated, not committed).
+1. Build a Ua-preset mesh. Two are committed as sidecars, both under
+   `ISMIP7_LC=2000 ISMIP7_LC_COARSE=180000 ISMIP7_BUFFER_M=20000` with the Ua
+   preset, and they differ in where the desired sizes come from:
+
+   - `antarctica_ua_180000_2000.msh`, sized from the MODEL fields of the
+     2500 m MAP:
+
+     ```
+     adapt_mesh.py --mesh-only <2500 m MAP checkpoint> \
+         --out-mesh antarctica/mesh/antarctica_ua_180000_2000.msh
+     ```
+
+   - `antarctica_ua_180000_2000_obs.msh`, sized from OBSERVATIONS, MEaSUReS
+     velocity and BedMachine, where the scaffold only supplies the points the
+     size field is evaluated on:
+
+     ```
+     adapt_mesh.py --mesh-only --from-obs --source-mesh <scaffold .msh> \
+         --out-mesh antarctica/mesh/antarctica_ua_180000_2000_obs.msh
+     ```
+
+   `--out-mesh` is what fixes the name: without it the output is
+   `<reference>_adapt1.msh`. The `.msh` files are regenerated with these
+   flags; the sidecars are committed. The `_obs` mesh is the one the NOTS
+   inversions and the committed MAP names refer to.
 2. Invert on that mesh.
 3. Run the forward on it, without adaptation.
 

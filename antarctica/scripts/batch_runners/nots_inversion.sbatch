@@ -54,7 +54,9 @@ export ISMIP7_MAXITER="${ISMIP7_MAXITER:-200}"
 export ISMIP7_RASTER_SAMPLE="${ISMIP7_RASTER_SAMPLE:-vertex}"
 # Name the output explicitly: without it every run, including a smoke test,
 # writes the production filename and can silently replace a converged map.
-export ISMIP7_MAP_OUT="${ISMIP7_MAP_OUT:-$ISMIP7_REPO/antarctica/mesh/inversion_icepack2_rc_n3_dg0_logvelnet_${ISMIP7_LC}.h5}"
+# The friction tag is interpolated like the resolution, so ISMIP7_FRICTION=budd
+# writes a _budd file rather than resuming from and then overwriting the RC one.
+export ISMIP7_MAP_OUT="${ISMIP7_MAP_OUT:-$ISMIP7_REPO/antarctica/mesh/inversion_icepack2${ISMIP7_FRICTION_TAG}_n3_dg0_logvelnet_${ISMIP7_LC}.h5}"
 DONE="${ISMIP7_MAP_OUT}.done"
 LOG="logs/ismip7_inv_${SLURM_JOB_ID}.out"
 

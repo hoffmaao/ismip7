@@ -101,7 +101,7 @@ from icepack2_tools.prior import (
 from icepack2_tools.thermo_model import compute_fluidity_prior
 from icepack2_tools.forcing import (load_racmo_smb_climatology,
                                     load_mean_annual_surface_temperature)
-from mesh_naming import adapt_lineage, get_buffer_m, mesh_filename
+from mesh_naming import get_buffer_m, mesh_filename
 
 lc = _lc()
 lc_coarse = _lc_coarse()
@@ -1099,11 +1099,6 @@ def main():
             # "firedrake_default", so this is how the forward names its own
             # mesh and picks the matching per-mesh boundary-id sidecar.
             chk.set_attr("/", "mesh_basename", os.path.basename(mesh_fn))
-            # An inversion on an adapted mesh inherits its lineage, so the MAP
-            # records the count the mesh name already carries.
-            _adapt_n = adapt_lineage(mesh_fn)[1]
-            if _adapt_n:
-                chk.set_attr("/", "adapt_count", _adapt_n)
             # Mesh PARAMETERS as well as the basename (Dan/David's scheme,
             # merged from upstream/integration). The forward resolves its
             # boundary_ids sidecar from these rather than from its own

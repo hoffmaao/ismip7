@@ -4,6 +4,34 @@ Port of the mesh adaptation Úa runs between run-steps, read from UaSource
 (`UaMain/AdaptMesh.m`, `NewDesiredEleSizesAndElementsToRefineOrCoarsen2.m`,
 `Error2EleSize.m`, `GlobalRemeshing.m`, `MapFbetweenMeshes.m`, Sep 2026).
 
+## Status: build the mesh first, do not refine mid-run
+
+**Mid-run refinement still blows up.** Refining an evolving 32 km state into
+8 km bands part-way through a run fails even with all three DG0 transfer
+rules below in force: the projected DG0 staircase reads as driving stress, and
+the thickness clamp goes from 119,000 to 256,000 Gt/yr within the first steps.
+This is a property of the DG0 geometry, not of a transfer rule that is still
+missing, so raising the resolution of a running model is not something this
+branch can do yet.
+
+**How the branch is meant to be used.** Build the mesh from observations
+first, invert on it, and run forward on that one mesh:
+
+1. `adapt_mesh.py --mesh-only --from-obs --source-mesh <scaffold>.msh` sizes
+   the mesh from MEaSUReS velocity and BedMachine rather than from model
+   fields, giving a Ua-preset mesh (the committed sidecars
+   `boundary_ids_antarctica_ua_180000_2000{,_obs}.json` name the two built
+   this way; the `.msh` files are regenerated, not committed).
+2. Invert on that mesh.
+3. Run the forward on it, without adaptation.
+
+**What is validated.** The identity transfer only: `adapt_mesh.py --no-remesh`
+moves the state onto a fresh load of the same mesh and reproduces the run
+(outflux 672 to 797 against 782 Gt/yr unadapted; VAF 57637.4 against 57637.3).
+That exercises the transfer rules, not remeshing. `run_adaptive.py` and the
+segment loop below are wired and correct as far as the identity test reaches;
+treat a real mid-run adaptation as unvalidated.
+
 ## What was ported, and what was not
 
 **Not ported: `GLmorphing`.** Úa's repository carries a mesh-deformation

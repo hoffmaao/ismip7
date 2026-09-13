@@ -64,7 +64,7 @@ from icepack2_tools.runconfig import (
     friction as _friction, geometry_space as _geometry_space, lc as _lc,
     n_flow as _n_flow,
     calving_law as _calving_law, calving_sigma_max as _calving_sigma_max,
-    fixed_front as _fixed_front, auto_resume,
+    fixed_front as _fixed_front, auto_resume, apparent_mb_mode,
 )
 
 lc = _lc()
@@ -493,7 +493,7 @@ def setup_model(restart_from=None):
                         f"resolves friction='{friction}'; set "
                         f"ISMIP7_FRICTION={chk_friction} to resume."
                     )
-            amb_env = os.environ.get("ISMIP7_APPARENT_MB")
+            amb_env = apparent_mb_mode()
             if (a_ref_mb is not None or phys_div is not None) and amb_env is None:
                 # phys_div counts as the same evidence: adapt_mesh writes it
                 # only in place of an a_ref_mb it found on the source, so an
@@ -503,7 +503,7 @@ def setup_model(restart_from=None):
                 raise RuntimeError(
                     f"Restart checkpoint {source_chk} carries a frozen "
                     f"{carried} (the run used ISMIP7_APPARENT_MB) but "
-                    f"ISMIP7_APPARENT_MB is unset; set it to resume with "
+                    f"ISMIP7_APPARENT_MB is off here; set it to resume with "
                     f"the same mass-balance correction."
                 )
             _adapted_t0 = bool(chk.has_attr("/", "adapted_initial")
@@ -522,7 +522,7 @@ def setup_model(restart_from=None):
                 raise RuntimeError(
                     f"ISMIP7_APPARENT_MB is set but restart checkpoint "
                     f"{source_chk} has no a_ref_mb; a fresh a_ref cannot be "
-                    f"built from an evolved state. Unset ISMIP7_APPARENT_MB "
+                    f"built from an evolved state. Set ISMIP7_APPARENT_MB=0 "
                     f"or restart from a checkpoint that carries a_ref_mb."
                 )
             PETSc.Sys.Print(
@@ -1267,12 +1267,13 @@ def run_simulation(
     # time (a fixed MB correction, initMIP-style), saved in checkpoints, and
     # tallied as its own budget column. ISMIP7_AMB_CAP=<m/yr> optionally
     # clips it to [-cap, 5*cap] (gia's asymmetric clip); default uncapped.
-    # Modes: "div" cancels only the flux divergence (t=0 tendency = SMB-melt,
-    # gia-style); any other value ("1"/"balance") also subtracts the initial
-    # forcing, so the t=0 tendency is EXACTLY ZERO - a balanced control in
-    # the ISMIP6 ctrl_proj sense, against which projections difference
-    # cleanly. Both freeze the correction at t=0.
-    amb_mode = os.environ.get("ISMIP7_APPARENT_MB")
+    # Modes, resolved by runconfig.apparent_mb_mode: "div" cancels only the
+    # flux divergence (t=0 tendency = SMB-melt, gia-style); "balance" (from
+    # "1" or "balance") also subtracts the initial forcing, so the t=0
+    # tendency is EXACTLY ZERO - a balanced control in the ISMIP6 ctrl_proj
+    # sense, against which projections difference cleanly. Both freeze the
+    # correction at t=0. None is off.
+    amb_mode = apparent_mb_mode()
     apparent_mb = amb_mode is not None
     a_ref = None
     if apparent_mb:

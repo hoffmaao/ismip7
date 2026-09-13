@@ -125,6 +125,25 @@ def fixed_front():
     return os.environ.get("ISMIP7_FIXED_FRONT") not in (None, "0")
 
 
+def apparent_mb_mode():
+    r"""``ISMIP7_APPARENT_MB``: the apparent-mass-balance init, or None for off.
+
+    ``"div"`` cancels only the flux divergence, so the t=0 tendency is
+    SMB minus melt (gia-style). ``"1"`` or ``"balance"`` also subtracts the
+    initial forcing, so the t=0 tendency is exactly zero: a balanced control
+    in the ISMIP6 ctrl_proj sense.
+
+    ``0``, ``off``, ``none`` and the empty string mean OFF. The batch runners
+    export this unconditionally and ``sbatch --export=ALL,VAR=...`` cannot
+    unset a variable, so there has to be an off value; without one a run asked
+    to drop the correction would silently get the full balanced one.
+    """
+    value = (os.environ.get("ISMIP7_APPARENT_MB") or "").strip().lower()
+    if value in ("", "0", "off", "none"):
+        return None
+    return "div" if value == "div" else "balance"
+
+
 def auto_resume():
     r"""``ISMIP7_AUTO_RESUME``: continue unattended from this experiment's own
     newest checkpoint when no explicit restart is given.

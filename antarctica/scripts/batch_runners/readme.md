@@ -274,6 +274,12 @@ that advanced no years at all stops with exit 1, since its setup alone spent
 the whole wall budget and a successor under the same budget would not advance
 either.
 
+A stall stops the chain, not the science: a relaunch from the saved state has
+cleared the diagnostic-Newton wall in every case observed so far (see "Known
+issues" in `antarctica/README.md`). The chain will not make that call for you,
+so resubmit this script by hand when you judge the wall worth another process;
+auto-resume picks the run up from its saved state.
+
 That wall budget is derived per job, not inherited: each link reads its own
 partition's `TimeLimit`, holds back 25 minutes and passes the rest to the
 driver as `ISMIP7_WALL_STOP_MIN` (documented in the env table of

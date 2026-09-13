@@ -19,6 +19,7 @@ Usage:
 """
 
 import numpy as np
+from mpi4py import MPI
 import os, sys, glob
 from time import perf_counter
 
@@ -90,6 +91,7 @@ from icepack2_tools.mpi_stats import (global_mean, global_range,
 from icepack2_tools.naming import map_basename
 from icepack2_tools.runconfig import (
     friction as _friction, geometry_space as _geometry_space,
+    raster_sample as _raster_sample,
     lc as _lc, lc_coarse as _lc_coarse, n_flow as _n_flow,
 )
 from icepack2_tools.prior import (
@@ -193,7 +195,7 @@ RC_HVISC_FLOOR = float(os.environ.get("ISMIP7_RC_HVISC_FLOOR", "10.0"))
 RC_CW0_FLOOR = float(os.environ.get("ISMIP7_RC_CW0_FLOOR", "0.0"))
 # Budd N_hat knobs (fric_law="budd"): at the reference/inversion geometry
 # N_hat=1 (with the PISM-delta grounded floor), so this inverts the exact-zero
-# shelf He-gated law; the effective-pressure feedback is purely prognostic.
+# shelf HAF-gated law; the effective-pressure feedback is purely prognostic.
 BUDD_DELTA = float(os.environ.get("ISMIP7_BUDD_DELTA", "0.02"))
 BUDD_NHAT_CAP = float(os.environ.get("ISMIP7_BUDD_NHAT_CAP", "3.0"))
 ALPHA_GL = (float(os.environ.get("ISMIP7_ALPHA_GL", "0.5"))
@@ -238,6 +240,7 @@ def main():
     # friction field, and the t=0 velocity misfit cannot reveal it.
     geometry_space = _geometry_space()
     geom_dg = geometry_space == "dg0"
+    raster_sample = _raster_sample()
     Q_g = FunctionSpace(mesh, "DG", 0) if geom_dg else Q
     PETSc.Sys.Print(f"  Geometry space: {geometry_space.upper()}")
 
@@ -246,17 +249,16 @@ def main():
     bm_fn = find_file(os.path.join(DATA_DIR, "bedmachine"), "*.nc")
     # Cell average onto the geometry space, NOT a centroid point sample --
     # see geometry.sample_to_geometry for the measurements behind that.
+    PETSc.Sys.Print(f"  Raster sampling onto geometry cells: {raster_sample}")
     b = sample_to_geometry(
-        lambda sp: icepack.interpolate(
-            rasterio.open(f"netcdf:{bm_fn}:bed"), sp), Q_g, Q)
+        rasterio.open(f"netcdf:{bm_fn}:bed"), Q_g, Q, method=raster_sample)
     # h_clamp default 0.0: invert against the *true* BedMachine geometry,
     # including h=0 over the buffered ocean region. Composite rheology
     # (added below) keeps the SNES nonsingular where h=0.
     h_clamp = float(os.environ.get("ISMIP7_H_CLAMP", "0.0"))
     H = sample_to_geometry(
-        lambda sp: icepack.interpolate(
-            rasterio.open(f"netcdf:{bm_fn}:thickness"), sp),
-        Q_g, Q, floor=h_clamp)
+        rasterio.open(f"netcdf:{bm_fn}:thickness"),
+        Q_g, Q, floor=h_clamp, method=raster_sample)
     PETSc.Sys.Print(f"  H clamp: {h_clamp} m  "
                     f"(nodes h<=1m: "
                     f"{global_count(H.dat.data_ro <= 1.0, mesh.comm)} / "
@@ -429,6 +431,20 @@ def main():
             chk_mesh = chk.load_mesh()
             theta_ws = chk.load_function(chk_mesh, name="log_friction")
             phi_ws = chk.load_function(chk_mesh, name="log_fluidity")
+        # Tripwire. The raw dof copy below assumes the checkpoint's mesh and
+        # this run's Mesh(.msh) share their dof ordering, which holds only for
+        # the same .msh, rank count and partitioner. Anything else scrambles
+        # theta/phi silently (the forward's -n4 crash, in slow motion). A
+        # chained Slurm resume is exactly where the rank count can drift.
+        _xc = chk_mesh.coordinates.dat.data_ro
+        _xm = mesh.coordinates.dat.data_ro
+        _ok = (_xc.shape == _xm.shape) and bool(np.allclose(_xc, _xm))
+        _ok = bool(mesh.comm.allreduce(_ok, op=MPI.LAND))
+        if not _ok:
+            raise RuntimeError(
+                f"ISMIP7_WARM_START={warm_chk}: its mesh dof ordering differs "
+                f"from this run's mesh (different .msh, rank count or "
+                f"partitioner); refusing the raw theta/phi copy")
         theta.dat.data[:] = theta_ws.dat.data_ro
         phi.dat.data[:] = phi_ws.dat.data_ro
         _ws_t_lo, _ws_t_hi = global_range(theta)
@@ -666,7 +682,7 @@ def main():
     stop_manager()
     prob = NonlinearVariationalProblem(F, z, form_compiler_parameters=fc_params)
     slvr = NonlinearVariationalSolver(prob, solver_parameters=sparams)
-    # Always use continuation — single solve at full exponents can fail
+    # Always use continuation - single solve at full exponents can fail
     # with checkpoint parameters that create ill-conditioned systems.
     # Ramp n_flow (1 → n_flow_val) and m_slide (1 → m_slide_val) together.
     PETSc.Sys.Print(
@@ -890,7 +906,7 @@ def main():
     def forward(theta_ctrl, phi_ctrl):
         clear_caches()
         F_ctrl = build_F(theta_ctrl, phi_ctrl)
-        # Continuation inside annotation for robustness — ramp both
+        # Continuation inside annotation for robustness - ramp both
         # n_flow and m_slide on the same [0,1] parameter.
         for t in np.linspace(0.0, 1.0, 5):
             n_flow.assign(1.0 + t * (n_flow_val - 1.0))
@@ -1094,6 +1110,13 @@ def main():
             chk.set_attr("/", "lc", int(lc))
             chk.set_attr("/", "lc_coarse", int(lc_coarse))
             chk.set_attr("/", "buffer_m", float(buffer_m))
+            # The configuration theta/phi only mean anything under. The
+            # derived MAP filename encodes all three, but ISMIP7_INVERSION
+            # bypasses the name, so the forward needs them recorded to check
+            # the MAP it was pointed at against the law it is about to run.
+            chk.set_attr("/", "friction", str(FRICTION))
+            chk.set_attr("/", "n_flow", float(n_flow_val))
+            chk.set_attr("/", "geometry_space", str(geometry_space))
             chk.set_attr("/", "misfit_norm", MISFIT_NORM)
             chk.set_attr("/", "log_vel_weight", float(log_vel_w))
             chk.set_attr("/", "log_vel_eps", float(LOG_VEL_EPS))
@@ -1101,6 +1124,10 @@ def main():
             chk.set_attr("/", "gamma_phi", float(GAMMA_PHI))
             chk.set_attr("/", "dhdt_weight", float(dhdt_w))
             chk.set_attr("/", "dhdt_net_sigma", net_sigma_used)
+            # How BedMachine was put onto the cells (runconfig.RASTER_SAMPLES).
+            # theta/phi absorb the bed representation just as they absorb the
+            # front treatment, so a forward must reproduce it.
+            chk.set_attr("/", "raster_sample", raster_sample)
 
     # ── L-BFGS-B Inversion ──
     max_iter = int(os.environ.get("ISMIP7_MAXITER", "500"))

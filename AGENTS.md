@@ -36,8 +36,12 @@ the relevant subsystem:
 - `GEOMETRY_DISCRETIZATION.md` - the geometry finite-element space, the calving
   front, and why several odd-looking constructions are deliberate.
 - `COMPOSITE_RHEOLOGY.md` - the composite viscous formulation.
+- `UA_ADAPTIVE_MESH.md` - the Ua-style adaptive remeshing port: how the branch
+  is meant to be used, the DG0 transfer rules, and what is validated.
 - `antarctica/N3_FRAMEWORK.md` - the n=3 rheology line.
 - `antarctica/README.md` - drivers, env knobs, how to run a core experiment.
+- `antarctica/scripts/batch_runners/readme.md` - running on Rice NOTS: the
+  Slurm runners, the Firedrake build recipe, and the measured costs.
 - `antarctica/reports/MATRIX_STATUS.md` - which results are currently valid.
 
 ## 2. What is in git, and what is not
@@ -85,11 +89,15 @@ without reading the linked rationale and stating why.
   driving stress is entirely the facet jump in `s`, that sampling noise is read
   as slope. The direct-interpolate version failed to converge in 200 Newton
   iterations.
-- **Exact-zero shelf friction.** The Budd `N_hat` law uses a residual closure
-  with `conditional(N_eff > 0, ., 0)` so floating ice carries exactly zero
-  basal drag. This is a physical requirement, not an oversight, and the
-  grounding-line-gated viscosity collar exists to restore coercivity that the
-  exact zero removes.
+- **Exact-zero shelf friction.** The Budd `N_hat` law gates on height above
+  flotation (`conditional(HAF > 0, ., 0)`, `dual_friction.budd_nhat`) so
+  floating ice carries exactly zero basal drag. This is a physical requirement,
+  not an oversight, and the grounding-line-gated viscosity collar exists to
+  restore coercivity that the exact zero removes. The gate is HAF, not
+  `N_eff > 0`: on a floating cell the surface IS the flotation branch, so
+  `N = max(p_I - p_W, 0)` is a roundoff residue of either sign and a sign test
+  passes whichever cells round positive. Regression test:
+  `tests/test_budd_shelf_gate.py`.
 - **MAPs are not interchangeable.** An inversion absorbs the front treatment
   and the friction law into its control fields, so **the t=0 velocity misfit
   cannot validate either one**. MAP filenames are tagged by friction law and

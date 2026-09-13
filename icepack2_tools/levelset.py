@@ -26,7 +26,6 @@ serially and on three ranks; what this module adds is tested in
 ``tests/test_initial_distance.py``.
 """
 
-import sys
 
 from icepack_tools.levelset import LevelSet as _LevelSet
 
@@ -56,40 +55,18 @@ class _DistanceOnly(LevelSet):
         pass
 
 
-class _QuietPETSc:
-    r"""``PETSc`` with a silent ``Sys.Print``, everything else the real one."""
-
-    class Sys:
-        @staticmethod
-        def Print(*args, **kwargs):
-            pass
-
-    def __init__(self, petsc):
-        self._petsc = petsc
-
-    def __getattr__(self, name):
-        return getattr(self._petsc, name)
-
-
 def initial_distance(mesh, h_dg, h_min=1.0):
     r"""The signed distance to the extent of ``h_dg``, as a DG0 Function.
 
     Same field as ``LevelSet(mesh, h_dg, law="none", h_min=h_min).phi``, but
-    without building the advection/extension solvers and without the front
-    banner, so a run that only needs an anchor logs exactly one level-set
-    line: the one naming the law in force.
+    without building the advection and extension solvers, which a caller that
+    only wants the t=0 distance never uses.
 
-    The shared class builds its solvers and prints unconditionally in
-    ``__init__``, so both are turned off here for the duration of the
-    construction.  A distance-only entry point belongs in the toolbox itself
-    (plan Phase 0); this shim is the interim.
+    The shared class also prints its front banner unconditionally in
+    ``__init__``, so a `fixed` run logs one naming ``law=none`` above the one
+    naming the law actually in force.  A distance-only entry point belongs in
+    the toolbox itself (plan Phase 0); until then the extra line stands.
     """
-    module = sys.modules[_LevelSet.__module__]
-    real = module.PETSc
-    module.PETSc = _QuietPETSc(real)
-    try:
-        return _DistanceOnly(
-            mesh, h_dg, law="none", h_min=h_min, drag_mask=None,
-        ).phi
-    finally:
-        module.PETSc = real
+    return _DistanceOnly(
+        mesh, h_dg, law="none", h_min=h_min, drag_mask=None,
+    ).phi

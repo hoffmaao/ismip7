@@ -39,6 +39,18 @@ N_FLOW_DEFAULT = "3.0"
 
 GEOMETRY_SPACES = ("dg0", "cg1")
 
+# How a raster (BedMachine) is put onto a DG0 geometry cell.
+#   vertex    - icepack's bilinear sample at the three CG1 vertices, then the
+#               L2 projection of that linear interpolant (= the mean of the
+#               3 vertex values). The pre-Sep-2026 behaviour. A 20 km interior
+#               cell sees 3 of its ~1600 BedMachine pixels.
+#   cell_mean - the mean of the raster over the cell itself, sampled on an
+#               equal-area sub-triangle lattice at pixel density
+#               (geometry.raster_cell_mean).
+# MAPs record the method used; the forward reads it back from the MAP.
+RASTER_SAMPLES = ("vertex", "cell_mean")
+RASTER_SAMPLE_DEFAULT = "vertex"
+
 
 def lc():
     r"""Target edge length [m] in the refined region of the mesh."""
@@ -58,6 +70,18 @@ def geometry_space():
     if value not in GEOMETRY_SPACES:
         raise ValueError(
             f"ISMIP7_GEOMETRY_SPACE must be 'dg0' or 'cg1', got {value!r}"
+        )
+    return value
+
+
+def raster_sample():
+    r"""How BedMachine is sampled onto a DG0 cell: ``'vertex'`` or
+    ``'cell_mean'``. See RASTER_SAMPLES."""
+    value = os.environ.get(
+        "ISMIP7_RASTER_SAMPLE", RASTER_SAMPLE_DEFAULT).lower()
+    if value not in RASTER_SAMPLES:
+        raise ValueError(
+            f"ISMIP7_RASTER_SAMPLE must be one of {RASTER_SAMPLES}, got {value!r}"
         )
     return value
 
@@ -99,6 +123,58 @@ def fixed_front():
     way to turn it off from there.
     """
     return os.environ.get("ISMIP7_FIXED_FRONT") not in (None, "0")
+
+
+def apparent_mb_mode():
+    r"""``ISMIP7_APPARENT_MB``: the apparent-mass-balance init, or None for off.
+
+    ``"div"`` cancels only the flux divergence, so the t=0 tendency is
+    SMB minus melt (gia-style). ``"1"`` or ``"balance"`` also subtracts the
+    initial forcing, so the t=0 tendency is exactly zero: a balanced control
+    in the ISMIP6 ctrl_proj sense.
+
+    ``0``, ``off``, ``none`` and the empty string mean OFF. The batch runners
+    export this unconditionally and ``sbatch --export=ALL,VAR=...`` cannot
+    unset a variable, so there has to be an off value; without one a run asked
+    to drop the correction would silently get the full balanced one.
+
+    The value set is closed, like ``calving_law`` and ``raster_sample``:
+    anything else raises. ``no`` and ``false`` are not off spellings, and
+    ``divergence`` is not ``div``, so accepting them would hand back the
+    balanced control, which differs from both by the whole t=0 forcing.
+    """
+    value = (os.environ.get("ISMIP7_APPARENT_MB") or "").strip().lower()
+    if value in ("", "0", "off", "none"):
+        return None
+    if value in ("1", "balance"):
+        return "balance"
+    if value == "div":
+        return "div"
+    raise ValueError(
+        f"ISMIP7_APPARENT_MB must be 1 or balance (balanced control), div "
+        f"(divergence only), or 0/off/none/empty to disable; got {value!r}"
+    )
+
+
+def auto_resume():
+    r"""``ISMIP7_AUTO_RESUME``: continue unattended from this experiment's own
+    newest checkpoint when no explicit restart is given.
+
+    An integer flag, so ``=0`` turns it OFF. The batch runners export it
+    unconditionally and ``sbatch --export=ALL,VAR=...`` gives no way to unset a
+    variable, so ``0`` has to be the off switch; testing the string for mere
+    presence would silently resume a run the user asked to start clean.
+    """
+    value = (os.environ.get("ISMIP7_AUTO_RESUME") or "").strip()
+    if not value:
+        return False
+    try:
+        return int(value) != 0
+    except ValueError:
+        raise ValueError(
+            f"ISMIP7_AUTO_RESUME must be an integer flag (0 to disable), "
+            f"got {value!r}"
+        ) from None
 
 
 def calving_sigma_max():

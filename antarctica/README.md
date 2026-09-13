@@ -385,7 +385,11 @@ not cleanly isolate the forced response.
 
 Restart / run-management flags on the control driver: `--restart <ckpt>`
 (or `ISMIP7_RESTART`) resumes from a checkpoint; `ISMIP7_AUTO_RESUME=1`
-picks up the newest checkpoint for the experiment unattended; `--tag`
+picks up the newest checkpoint for the experiment unattended (honored by every
+forward driver, not just the control, which is what lets a chained batch job
+continue itself; with no explicit `ISMIP7_RESTART` it takes precedence over the
+historical endpoint a projection would otherwise branch from, so only the FIRST
+link of a chain starts there); `--tag`
 (or `ISMIP7_RUN_TAG`, honored by every forward driver, not just the control)
 suffixes the experiment name so a tagged method line (e.g. the n=3 matrix)
 keeps - and resumes - its own output files, with the historical → projection
@@ -601,7 +605,7 @@ cannot be read as current.
 | `ISMIP7_DHDT_CLIM_START` / `_END` | RACMO SMB climatology window for that source | `2003` / `2019` |
 | `ISMIP7_DHDT_REACH` | pixel-to-cell reach as a multiple of the cell scale `sqrt(area)`; rejects raster pixels lying outside the mesh that nearest-centroid assignment would otherwise snap onto boundary cells | `0.75` |
 | `ISMIP7_DHDT_NET_SIGMA` | sigma (Gt/yr) on the *integrated* grounded+observed dH/dt; `0` disables the net mass-balance term. Off by default on purpose - see §4 - and only ever active when `ISMIP7_DHDT_WEIGHT > 0` | `0` |
-| `ISMIP7_OBS_KIT` | path to `AntarcticaObsISMIP7-v*.nc` | newest under `<DATA_ROOT>/obs/mipkit` |
+| `ISMIP7_OBS_KIT` | path to `AntarcticaObsISMIP7-v*.nc`. The 11 GB kit is only needed to BUILD the two small dH/dt cache rasters (`antarctica/data/dhdt_cache/`); with those staged the kit may be absent and the newest cached version is used. Setting this variable to a path that does not exist is a hard error, not a fall-back to the cache | newest under `<DATA_ROOT>/obs/mipkit` |
 
 ---
 
@@ -621,6 +625,7 @@ how it reaches the core report.
 | `ISMIP7_LC_COARSE` | coarse mesh tag | `64000` |
 | `ISMIP7_BUFFER_M` | outline buffer (m) used to resolve the default mesh/boundary-id filenames (see §3) | `20000` |
 | `ISMIP7_MESH` | mesh `.msh` path (inversion and tools). A forward takes its mesh from the MAP/restart checkpoint, which records its own mesh basename and parameters, so here it only names the boundary sidecar for a legacy checkpoint that carries no such record | `mesh/antarctica_<COARSE>_<LC>_buffered<BUFFER_M>.msh` |
+| `ISMIP7_RASTER_SAMPLE` | how BedMachine lands on a DG0 geometry cell. `vertex` projects the CG1 vertex interpolant (three pixels per cell); `cell_mean` is the raster's true mean over the cell, sampled on a sub-triangle lattice that tracks pixel density. **`cell_mean` measured rougher and is not recommended**: neighbouring cells share two of their three vertex samples, so `vertex` damps the jump between them by construction while two independent cell means do not. Against `vertex` the cell mean raised interior surface jumps by 6% and bed and thickness jumps by 35%, and at 2 km the momentum solve did not converge within 60 minutes. It does classify flotation better (32 km misclassified fraction 9.1% to 3.2%), so the knob is kept for the record. Stamped into the MAP as `raster_sample` and read back by the forward, which uses the MAP's value over the environment. Reproduce with `antarctica/scripts/probe_raster_sampling.py` | `vertex` |
 | `ISMIP7_INVERSION` | explicit MAP checkpoint path for a forward/preflight, replacing the `map_basename` lookup. It must be a MAP of the same friction/n/geometry (not checked). Use it to A/B differently regularised MAPs on one mesh (e.g. velocity-only vs transient dH/dt) instead of swapping files | derived from friction/n/geometry/lc |
 | `ISMIP7_CALVING` | calving-front law on a buffered mesh, via a level set (`icepack2_tools/levelset.py`, ISSM-style): `none` (front advances freely, never calves), `fixed` (front frozen at t=0; pins the front like `ISMIP7_FIXED_FRONT` but is not the same run - it builds a level set, so the floor-cell ocean drag is gated off in every ice cell and in the near-front water, and it applies the retreat-sliver rule inside the t=0 extent), `vonmises` (Morlighem et al. 2016 rate `\|u\| sigma~/sigma_max` from the run's own strain rates and fluidity). Removed ice is the `calv` budget column; the mean front rate over front cells prints as `c_front`. The control configuration is `ISMIP7_APPARENT_MB` with `ISMIP7_FIXED_FRONT=1` and `ISMIP7_CALVING=none`, per the protocol's "calving set constant to end-of-2014 conditions"; `vonmises` is for projections and is never pinned, not even when `ISMIP7_FIXED_FRONT` is also set: a configured law owns removal and the legacy mask is ignored. Under every law the apparent-MB reference is defined only on the t=0 ice extent; under a free law (`vonmises`) it is additionally cleared each step in every cell the level set reports ice-free, irreversibly, so a calved cell is not regrown - this changes free-law projection numbers under `ISMIP7_APPARENT_MB` and leaves the pinned control unaffected | `none` |
 | `ISMIP7_CALVING_SIGMA_MAX_GROUNDED`, `ISMIP7_CALVING_SIGMA_MAX_FLOATING` | von Mises tensile-stress thresholds [MPa] (ISSM defaults) | `1.0`, `0.15` |
@@ -633,9 +638,11 @@ how it reaches the core report.
 | `ISMIP7_CHECKPOINT_EVERY_YR` | checkpoint cadence in model years (`0` = use step count) | `5` |
 | `ISMIP7_KEEP_CHECKPOINTS` | periodic checkpoints kept on disk (plus `_final.h5`) | `3` |
 | `ISMIP7_RESTART` | restart checkpoint | `hist_<esm>[_<tag>]_<lc>_final.h5` if present |
-| `ISMIP7_AUTO_RESUME` | set to resume from the newest own checkpoint unattended | _(unset)_ |
+| `ISMIP7_AUTO_RESUME` | resume from this experiment's own newest checkpoint unattended, when no explicit `ISMIP7_RESTART` is given. An integer flag: `=0` disables it (it used to count as set), because the batch runners export it unconditionally and `sbatch --export=ALL` cannot unset a variable. A non-integer value is rejected at startup. `nots_projection.sbatch` also refuses to chain when it is off, since a successor would cold-start and repeat the same years | _(unset, off)_ |
 | `ISMIP7_RUN_TAG` | experiment-name suffix for a parallel method line (see run-management flags above) | _(unset)_ |
-| `ISMIP7_APPARENT_MB` | apparent-mass-balance init: `1`/`balance` zeroes the t=0 thickness tendency (ISMIP6 ctrl_proj-style), `div` cancels only the flux divergence | _(unset)_ |
+| `ISMIP7_WALL_STOP_MIN` | wall-clock budget in minutes, counted from process start. Checked before each step against the longest step seen so far, so a run stops with the budget intact rather than overshooting by one hard step: it writes its final checkpoint and exits cleanly with `t_yr` short of `t_end`, which is what a chained batch job resumes from. Without it a job that hits its scheduler limit is killed mid-step and loses everything since the last periodic checkpoint. `nots_projection.sbatch` derives it from the job's own `TimeLimit`, holding back 25 minutes, and passes it to that run only, so each link in a chain derives its own. `0` disables the budget | `0` |
+| `ISMIP7_EXPERIMENT_NAME` | the run's identity, used by `adapt_mesh.py` to name the adapted meshes and sidecars it writes into the shared `mesh/` directory so parallel experiments cannot overwrite each other's. `run_adaptive.py` sets it from `--experiment-name`; the run tag is not a substitute, being a method-line suffix that parallel experiments share. The adaptive workflow itself, and what of it is validated, is `../UA_ADAPTIVE_MESH.md` | _(unset: adapted meshes are named from the reference mesh alone)_ |
+| `ISMIP7_APPARENT_MB` | apparent-mass-balance init: `1`/`balance` zeroes the t=0 thickness tendency (ISMIP6 ctrl_proj-style), `div` cancels only the flux divergence. `0`, `off`, `none` and the empty string disable it (`0` used to count as set), because the batch runners export it unconditionally and `sbatch --export=ALL` cannot unset a variable. Resolved in one place, `runconfig.apparent_mb_mode` | _(unset, off)_ |
 | `ISMIP7_FIXED_FRONT` | set to hold the calving front at the t=0 extent (inflow beyond it tallied as calving). `=0` now disables it (it used to count as set), because `run_core_matrix.sh` exports it unconditionally. The legacy form of `ISMIP7_CALVING=fixed`, and it removes nothing whenever any `ISMIP7_CALVING` law is configured - that law owns the front | _(unset, off)_ |
 | `ISMIP7_LEGACY_TRANSPORT` | set to restore the pre-Jul-2026 CG-projection transport scheme (requires `ISMIP7_GEOMETRY_SPACE=cg1`) | _(unset)_ |
 | `ISMIP7_SNES_TYPE` / `ISMIP7_SNES_MAXIT` | diagnostic Newton type / max iterations | `newtonls` / `200` |
@@ -697,13 +704,19 @@ VAF is reported in mm of sea-level equivalent; mass in Gt.
   atmosphere-forcing fix and may be forcing-induced rather than a solver
   limit - see `reports/MATRIX_STATUS.md` for which runs still stand.
   **Wall retry.** When the in-run rescue ladder is exhausted the run saves and
-  stops short of its target year, and simply relaunching from that saved state
-  clears the wall: a fresh process re-runs the n=1→n continuation at the
+  stops short of its target year, and relaunching from that saved state has
+  cleared the wall: a fresh process re-runs the n=1→n continuation at the
   loaded geometry, which the in-run ladder cannot do (3 of 3 observed walls
   resumed - ssp585-CESM at 2096.7, CTRL-CESM at 2268, CTRL-MRI at 2250 - and
-  both CTRLs then reached 2300). `run_core_matrix.sh` does this automatically,
-  relaunching from the newest checkpoint at or before the timeseries' last
-  year while each attempt keeps advancing, and giving up on a stall.
+  both CTRLs then reached 2300). On the workstation `run_core_matrix.sh` does
+  this automatically, relaunching from the newest checkpoint at or before the
+  timeseries' last year while each attempt keeps advancing, and giving up on a
+  stall. The NOTS chain never retries a stalled run: a checkpoint written with
+  `stalled=1` makes `nots_projection.sbatch` report the stall and exit 1
+  without submitting a successor, so an unattended chain cannot spend days
+  re-attempting the same years. That relaunch is yours to make there: resubmit
+  the same sbatch, and `ISMIP7_AUTO_RESUME` picks the run up from its saved
+  state. `scripts/batch_runners/readme.md` owns what the chain decides and why.
 - **Upstream forcing moved (resolved 2026-07-19).** The per-year scenario
   forcing was not withdrawn - it moved to the top-level `/ISMIP7/AIS` tree
   during the collection reorganization. Mirror it with

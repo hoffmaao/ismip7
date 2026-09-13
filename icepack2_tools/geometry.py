@@ -17,6 +17,9 @@ and the forward cannot drift apart:
 
 import weakref
 
+import numpy as np
+from mpi4py import MPI
+
 from firedrake import (
     Constant,
     Function,
@@ -90,11 +93,105 @@ def surface_slope(s):
     return grad(s)
 
 
-def sample_to_geometry(raster_fn, Q_g, Q_cg, floor=None):
+def _lattice_bary(n):
+    r"""Barycentric centroids of the ``n**2`` equal-area sub-triangles of a
+    uniform n-fold split of a triangle, shape ``(n*n, 3)``."""
+    i, j = np.meshgrid(np.arange(n), np.arange(n), indexing="ij")
+    up = (i + j) <= n - 1                     # n(n+1)/2 upright sub-triangles
+    dn = (i + j) <= n - 2                     # n(n-1)/2 inverted ones
+    a = np.concatenate([(i[up] + 1.0 / 3.0) / n, (i[dn] + 2.0 / 3.0) / n])
+    b = np.concatenate([(j[up] + 1.0 / 3.0) / n, (j[dn] + 2.0 / 3.0) / n])
+    return np.column_stack([a, b, 1.0 - a - b])
+
+
+def raster_cell_mean(dataset, Q_dg, floor=None, nmax=64, chunk=2048):
+    r"""Mean of a rasterio raster over each cell of a DG0 space.
+
+    Each owned cell is split into ``n**2`` equal-area sub-triangles with
+    ``n = ceil(sqrt(cell_area / pixel_area))`` (capped at ``nmax``), the raster
+    is looked up at every sub-triangle centroid by *pixel containment*, and the
+    cell value is the mean. Sampling density therefore tracks pixel density: a
+    2 km cell on 500 m BedMachine gets 9 samples for its ~7 pixels, a 20 km
+    interior cell gets 729 for its ~1600. Contrast :func:`sample_to_geometry`
+    with ``method="vertex"``, which reads three pixels per cell whatever its
+    size.
+
+    Denser sampling was expected to give a smoother DG0 field. It does not:
+    measured, the cell mean is ROUGHER across the facet jumps that ARE the
+    driving stress. See :func:`sample_to_geometry` for the numbers and for why
+    ``"vertex"`` remains the default.
+
+    One raster window covering the rank's cells is read. With a locality-
+    preserving partition that window is small; with PETSc's ``simple``
+    partitioner every rank's cells are scattered continent-wide and the window
+    is the whole raster (711 MB float32 for BedMachine), which is tolerated
+    rather than fixed here.
+
+    Masked / nodata pixels are excluded from the mean; a cell with no valid
+    sample is left NaN for the caller to fill.
+    """
+    from rasterio.transform import rowcol
+    from rasterio.windows import from_bounds
+
+    mesh = Q_dg.mesh()
+    X = mesh.coordinates.dat.data_ro_with_halos[:, :2]
+    cells = mesh.coordinates.cell_node_map().values          # owned cells -> nodes
+    dofs = Q_dg.cell_node_map().values[:, 0]                 # owned cells -> dof
+    out = Function(Q_dg)
+    nc = cells.shape[0]
+    if nc == 0:
+        return out
+    tri = X[cells]                                           # (nc, 3, 2)
+    v0, v1, v2 = tri[:, 0], tri[:, 1], tri[:, 2]
+    area = 0.5 * np.abs((v1[:, 0] - v0[:, 0]) * (v2[:, 1] - v0[:, 1])
+                        - (v2[:, 0] - v0[:, 0]) * (v1[:, 1] - v0[:, 1]))
+    apix = abs(dataset.res[0] * dataset.res[1])
+    n = np.clip(np.ceil(np.sqrt(area / apix)).astype(int), 1, nmax)
+
+    flat = tri.reshape(-1, 2)
+    bnd = dataset.bounds
+    rx, ry = abs(dataset.res[0]), abs(dataset.res[1])
+    win = from_bounds(max(flat[:, 0].min() - 2 * rx, bnd.left),
+                      max(flat[:, 1].min() - 2 * ry, bnd.bottom),
+                      min(flat[:, 0].max() + 2 * rx, bnd.right),
+                      min(flat[:, 1].max() + 2 * ry, bnd.top),
+                      transform=dataset.transform)
+    win = win.round_lengths(op="ceil").round_offsets(op="floor")
+    arr = dataset.read(1, window=win, masked=True)
+    arr = np.ma.filled(arr.astype("f4"), np.nan)
+    row0, col0 = int(win.row_off), int(win.col_off)
+    H, W = arr.shape
+
+    means = np.full(nc, np.nan)
+    for nn in np.unique(n):
+        sel = np.flatnonzero(n == nn)
+        lam = _lattice_bary(int(nn))                         # (k, 3)
+        for s0 in range(0, sel.size, chunk):
+            idx = sel[s0:s0 + chunk]
+            P = np.einsum("kb,cbd->ckd", lam, tri[idx])      # (c, k, 2)
+            rows, cols = rowcol(dataset.transform,
+                                P[..., 0].ravel(), P[..., 1].ravel())
+            r = np.clip(np.asarray(rows) - row0, 0, H - 1)
+            c = np.clip(np.asarray(cols) - col0, 0, W - 1)
+            vals = arr[r, c].reshape(idx.size, -1)
+            with np.errstate(all="ignore"):
+                means[idx] = np.nanmean(vals, axis=1, dtype="f8")
+    if floor is not None:
+        means = np.maximum(means, floor)
+    out.dat.data[dofs] = means
+    return out
+
+
+def sample_to_geometry(raster, Q_g, Q_cg, floor=None, method="vertex"):
     r"""Sample a raster onto the geometry space ``Q_g`` as a cell average.
 
-    ``raster_fn(space)`` must return the raster interpolated onto ``space``
-    (i.e. a closure over ``icepack.interpolate`` and the file).
+    ``raster`` is either a rasterio dataset, or (legacy) a closure
+    ``raster_fn(space)`` returning the raster interpolated onto ``space``.
+
+    ``method`` selects the DG0 cell value (``runconfig.RASTER_SAMPLES``):
+    ``"vertex"`` projects the CG1 vertex interpolant (three pixels per cell);
+    ``"cell_mean"`` is :func:`raster_cell_mean`, the raster's mean over the
+    cell. Under CG1 geometry there is no cell, so ``method`` is ignored.
 
     For CG1 geometry this is just the nodal interpolant. For DG0 it is NOT the
     obvious ``icepack.interpolate(raster, Q_g)``: a DG0 dof sits at the cell
@@ -113,12 +210,60 @@ def sample_to_geometry(raster_fn, Q_g, Q_cg, floor=None):
     projection of the CG1 interpolant IS the cell average, which is what a DG0
     field means, so use that.
 
-    ``floor`` optionally clamps the field from below (thickness >= h_clamp)
-    before averaging.
+    MEASURED: ``"cell_mean"`` is rougher, and ``"vertex"`` stays the default.
+    The cell mean is the more faithful average of the raster, but faithfulness
+    is not what the DG0 driving stress wants. Neighbouring cells share two of
+    their three vertex samples, so ``"vertex"`` damps the jump between them by
+    construction, while two independent cell means do not. Against vertex
+    sampling the cell mean raised interior surface jumps by 6% and bed and
+    thickness jumps by 35%, and at 2 km the momentum solve did not converge
+    within 60 minutes. It does classify flotation better (at 32 km the
+    misclassified fraction falls from 9.1% to 3.2%), which is why the knob is
+    kept rather than removed. ``antarctica/scripts/probe_raster_sampling.py``
+    reproduces the comparison.
+
+    ``floor`` optionally clamps the field from below (thickness >= h_clamp).
+    The two paths apply it at opposite ends of the averaging and so disagree
+    when ``floor > 0``: ``"vertex"`` clamps the CG1 interpolant and then
+    projects (clamp, then average), while ``"cell_mean"`` averages the raster
+    over the cell and clamps that average (average, then clamp). Only the
+    second can return exactly ``floor``; the first returns it only where every
+    vertex is at or below the floor. They coincide wherever the raster already
+    exceeds the floor, which is why the inversion sees no difference
+    (``ISMIP7_H_CLAMP`` defaults to 0 and BedMachine thickness is
+    non-negative); the gap is reachable from the budd_legacy cold start, whose
+    ``h_clamp_init`` is 10 m.
     """
+    if callable(raster):
+        raster_fn, dataset = raster, None
+    else:
+        import icepack
+        dataset = raster
+        raster_fn = lambda sp: icepack.interpolate(dataset, sp)  # noqa: E731
+
+    is_dg0 = Q_g.ufl_element() != Q_cg.ufl_element()
+    if is_dg0 and method == "cell_mean":
+        if dataset is None:
+            raise TypeError("method='cell_mean' needs a rasterio dataset, "
+                            "not a closure")
+        out = raster_cell_mean(dataset, Q_g, floor=floor)
+        bad = np.isnan(out.dat.data_ro)
+        # The fill is a collective L2 projection, so the branch must be taken
+        # by every rank or none: a rank-local `bad.any()` hangs under MPI when
+        # the nodata cells (or the owned cells) are not spread over all ranks.
+        if Q_g.mesh().comm.allreduce(bool(bad.any()), op=MPI.LOR):
+            # No valid pixel under the cell (nodata): take the vertex value.
+            fill = Function(Q_g).project(raster_fn(Q_cg))
+            out.dat.data[bad] = fill.dat.data_ro[bad]
+            if floor is not None:
+                out.dat.data[bad] = np.maximum(out.dat.data_ro[bad], floor)
+        return out
+    if method not in ("vertex", "cell_mean"):
+        raise ValueError(f"unknown raster sampling method {method!r}")
+
     field = raster_fn(Q_cg)
     if floor is not None:
         field = Function(Q_cg).interpolate(max_value(field, Constant(floor)))
-    if Q_g.ufl_element() == Q_cg.ufl_element():
+    if not is_dg0:
         return field if isinstance(field, Function) else Function(Q_cg).interpolate(field)
     return Function(Q_g).project(field)

@@ -24,7 +24,8 @@ _PROJECT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(
 sys.path.insert(0, _PROJECT)
 
 from firedrake import assemble, dx, Constant
-from simulation import setup_model, run_simulation, latest_checkpoint, RESULTS_DIR, PETSc, lc
+from simulation import (setup_model, run_simulation, latest_checkpoint,
+                        auto_resume, RESULTS_DIR, PETSc, lc)
 from icepack2_tools.forcing import (
     ISMIP7Atmosphere,
     load_racmo_smb_climatology,
@@ -189,7 +190,7 @@ def main():
     # A rebooted long run picks up where it left off; the mesh + frozen anchors
     # + timeline year all come from that checkpoint.
     restart_from = args.restart
-    if restart_from is None and os.environ.get("ISMIP7_AUTO_RESUME"):
+    if restart_from is None and auto_resume():
         restart_from = latest_checkpoint(experiment_name)
         PETSc.Sys.Print(
             f"Auto-resume: {restart_from}" if restart_from

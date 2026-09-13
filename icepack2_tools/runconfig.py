@@ -125,6 +125,27 @@ def fixed_front():
     return os.environ.get("ISMIP7_FIXED_FRONT") not in (None, "0")
 
 
+def auto_resume():
+    r"""``ISMIP7_AUTO_RESUME``: continue unattended from this experiment's own
+    newest checkpoint when no explicit restart is given.
+
+    An integer flag, so ``=0`` turns it OFF. The batch runners export it
+    unconditionally and ``sbatch --export=ALL,VAR=...`` gives no way to unset a
+    variable, so ``0`` has to be the off switch; testing the string for mere
+    presence would silently resume a run the user asked to start clean.
+    """
+    value = (os.environ.get("ISMIP7_AUTO_RESUME") or "").strip()
+    if not value:
+        return False
+    try:
+        return int(value) != 0
+    except ValueError:
+        raise ValueError(
+            f"ISMIP7_AUTO_RESUME must be an integer flag (0 to disable), "
+            f"got {value!r}"
+        ) from None
+
+
 def calving_sigma_max():
     r"""Von Mises thresholds (grounded, floating) [MPa]."""
     return (

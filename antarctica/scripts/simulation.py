@@ -64,7 +64,7 @@ from icepack2_tools.runconfig import (
     friction as _friction, geometry_space as _geometry_space, lc as _lc,
     n_flow as _n_flow,
     calving_law as _calving_law, calving_sigma_max as _calving_sigma_max,
-    fixed_front as _fixed_front,
+    fixed_front as _fixed_front, auto_resume,
 )
 
 lc = _lc()

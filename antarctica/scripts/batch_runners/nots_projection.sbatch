@@ -67,14 +67,20 @@ export ISMIP7_KEEP_CHECKPOINTS="${ISMIP7_KEEP_CHECKPOINTS:-3}"
 # The control configuration the protocol asks for: calving held at end-of-2014
 # conditions, with the apparent mass-balance reference. Projections that should
 # calve freely must override ISMIP7_CALVING and unset ISMIP7_FIXED_FRONT.
-export ISMIP7_APPARENT_MB="${ISMIP7_APPARENT_MB:-1}"
+#
+# These two default only when UNSET (${VAR-default}, no colon). An explicitly
+# empty export is one of the documented off spellings, and --export=ALL,VAR=
+# is the only way to say "empty" through sbatch, so :- would substitute the
+# default and make the off switch unreachable.
+#   ISMIP7_APPARENT_MB  off: 0, off, none, empty. On: 1 or balance (balanced
+#                       control), div (divergence only).
+#   ISMIP7_AUTO_RESUME  off: 0, empty. On: any other integer.
+export ISMIP7_APPARENT_MB="${ISMIP7_APPARENT_MB-1}"
 export ISMIP7_FIXED_FRONT="${ISMIP7_FIXED_FRONT:-1}"
 # Resume from this experiment's own newest checkpoint. This is what makes the
-# chain below safe to run unattended.
-# An integer flag: 0 turns it off. --export=ALL,VAR=... cannot unset a
-# variable, so 0 is the only way to ask a resubmission for a clean run.
-# Normalised here so the banner below reports what the drivers will do.
-case "${ISMIP7_AUTO_RESUME:-1}" in
+# chain below safe to run unattended. Normalised here so the banner below
+# reports what the drivers will do.
+case "${ISMIP7_AUTO_RESUME-1}" in
     ''|0|00) export ISMIP7_AUTO_RESUME=0 ;;
     *)       export ISMIP7_AUTO_RESUME=1 ;;
 esac
@@ -125,28 +131,16 @@ rc=$?
 echo "=== $(date -Is)  forward exit ${rc} ==="
 
 # --- chain --------------------------------------------------------------
-# Resubmit only when the driver exited cleanly AND the run has not reached
-# t_end. A non-zero exit is a real failure and must not be retried blindly:
+# Two separate questions, in this order: what happened to this run, and should
+# a successor be submitted. The verdict comes first and owns the exit code, so
+# a stall is reported as a failure whether or not chaining was going to happen
+# at all. A non-zero exit is a real failure and must not be retried blindly:
 # the July grounding-line blow-up looked exactly like a run that "just needed
 # more time", and chaining through it would have burned days.
 CHAIN="${ISMIP7_CHAIN:-1}"
 if [ "$rc" -ne 0 ]; then
     echo "chain: stopping, driver exited ${rc}"
     exit $rc
-fi
-if [ "$CHAIN" != "1" ]; then
-    echo "chain: disabled (ISMIP7_CHAIN=$CHAIN)"
-    exit 0
-fi
-# The chain is built on auto-resume: a successor inherits the environment and
-# no ISMIP7_RESTART, so with resume off it would cold-start at t_start, end at
-# the same year, and do it again forever. One job, and say why.
-if [ "$ISMIP7_AUTO_RESUME" != "1" ]; then
-    echo "chain: auto-resume is off (ISMIP7_AUTO_RESUME=$ISMIP7_AUTO_RESUME)," \
-         "so a successor would cold-start and repeat these years. Not"
-    echo "chain: resubmitting. This run stops here; set ISMIP7_AUTO_RESUME=1" \
-         "to chain, or continue it by hand with ISMIP7_RESTART."
-    exit 0
 fi
 
 # Ask the driver's own final checkpoint, which is both the state the next job
@@ -199,6 +193,24 @@ fi
 done_yet=$(python -c "print(1 if float('$LAST_YEAR') >= float('$T_END') - 1e-6 else 0)")
 if [ "$done_yet" = "1" ]; then
     echo "chain: reached t_end ${T_END} at ${LAST_YEAR}, finished"
+    exit 0
+fi
+
+# The verdict is settled and this run stopped short. Everything below only
+# decides whether a successor is submitted.
+if [ "$CHAIN" != "1" ]; then
+    echo "chain: at ${LAST_YEAR} of ${T_END}, but chaining is disabled" \
+         "(ISMIP7_CHAIN=$CHAIN); not resubmitting"
+    exit 0
+fi
+# The chain is built on auto-resume: a successor inherits the environment and
+# no ISMIP7_RESTART, so with resume off it would cold-start at t_start, end at
+# the same year, and do it again forever. One job, and say why.
+if [ "$ISMIP7_AUTO_RESUME" != "1" ]; then
+    echo "chain: at ${LAST_YEAR} of ${T_END}, but auto-resume is off" \
+         "(ISMIP7_AUTO_RESUME=$ISMIP7_AUTO_RESUME), so a successor would"
+    echo "chain: cold-start and repeat these years. Not resubmitting; set" \
+         "ISMIP7_AUTO_RESUME=1 to chain, or continue by hand with ISMIP7_RESTART."
     exit 0
 fi
 # A clean exit short of t_end that also made no progress is not the wall-clock

@@ -138,6 +138,16 @@ if [ "$CHAIN" != "1" ]; then
     echo "chain: disabled (ISMIP7_CHAIN=$CHAIN)"
     exit 0
 fi
+# The chain is built on auto-resume: a successor inherits the environment and
+# no ISMIP7_RESTART, so with resume off it would cold-start at t_start, end at
+# the same year, and do it again forever. One job, and say why.
+if [ "$ISMIP7_AUTO_RESUME" != "1" ]; then
+    echo "chain: auto-resume is off (ISMIP7_AUTO_RESUME=$ISMIP7_AUTO_RESUME)," \
+         "so a successor would cold-start and repeat these years. Not"
+    echo "chain: resubmitting. This run stops here; set ISMIP7_AUTO_RESUME=1" \
+         "to chain, or continue it by hand with ISMIP7_RESTART."
+    exit 0
+fi
 
 # Ask the driver's own final checkpoint, which is both the state the next job
 # would resume from and the record of why this one stopped: `t_yr` is the year

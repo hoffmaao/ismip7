@@ -41,6 +41,17 @@ def adapt_lineage(name):
     return (stem[: m.start()], int(m.group(1))) if m else (stem, 0)
 
 
+def next_adapted_mesh_name(reference):
+    """Basename (no extension) of the mesh one adaptation past `reference`.
+
+    The counter comes from `reference`'s own name, so the result is always a
+    name that mesh has not used: this is what keeps `adapt_mesh.py` from
+    writing over the mesh it is reading.
+    """
+    root, count = adapt_lineage(reference)
+    return f"{root}_adapt{count + 1}"
+
+
 def buffer_tag(buffer_m):
     """Return the `_buffered<N>` suffix for a given outline buffer (meters)."""
     return f"_buffered{int(float(buffer_m))}"

@@ -99,7 +99,7 @@ def transfer_state(chk_in, mesh_new, cfg, chk_out, new_msh_basename, bed_sampler
         mesh_old = chk.load_mesh()
         attrs = {k: chk.get_attr("/", k) for k in
                  ("t_yr", "friction", "geometry_space", "mesh_basename", "lc", "lc_coarse",
-                  "buffer_m", "raster_sample", "adapt_count") if chk.has_attr("/", k)}
+                  "buffer_m", "raster_sample") if chk.has_attr("/", k)}
         old = {}
         for name in ("log_friction", "log_fluidity", "fluidity_prior", "thickness", "bed", "surface",
                      "velocity", "membrane_stress", "basal_stress", "H_init", "phi_eff", "C_w0",
@@ -178,7 +178,6 @@ def transfer_state(chk_in, mesh_new, cfg, chk_out, new_msh_basename, bed_sampler
             chk.set_attr("/", k, v)
         chk.set_attr("/", "mesh_basename", new_msh_basename)
         chk.set_attr("/", "adapted_from", os.path.basename(chk_in))
-        chk.set_attr("/", "adapt_count", int(attrs.get("adapt_count", 0)) + 1)
         if rebuild_aref:
             chk.set_attr("/", "adapted_initial", 1)
     return audit

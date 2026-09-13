@@ -99,14 +99,21 @@ Two deliberate choices where Úa is nodal and this model is DG0:
   limits are calibrated against it.
 - Thickness transfer: Úa moves its NODAL surface; for a DG0 thickness the
   analogue that keeps mass is the conservative supermesh projection
-  (`ISMIP7_ADAPT_TRANSFER=project`, the recommended setting). It must run on
-  ONE rank: `cross_mesh_transfer` raises for `project` when the new mesh's
-  communicator has more than one rank. That is why `run_adaptive.py` takes a
-  separate `--adapt-launcher`, defaulting to `mpiexec -n 1`, while `--launcher`
-  drives the forward segments at full rank count; raise the adapt launcher only
-  for `transfer=interpolate`. The surface route lost 3.8% of the volume on a 130 km
-  interior; the projection kept it to 0.01%. Either way the transfer prints
-  the volume change and the mean front thickness before and after.
+  (`ISMIP7_ADAPT_TRANSFER=project`, the recommended setting, though the
+  SHIPPED DEFAULT is `interpolate`: see the table below). The surface route
+  lost 3.8% of the volume on a 130 km interior; the projection kept it to
+  0.01%. Either way the transfer prints the volume change and the mean front
+  thickness before and after.
+
+  `project` must run on ONE rank: `cross_mesh_transfer` raises for it when the
+  new mesh's communicator has more than one rank. That is why `run_adaptive.py`
+  takes a separate `--adapt-launcher` from `--launcher`, which drives the
+  forward segments at full rank count. It defaults to `mpiexec -n 1`, the
+  setting that is correct for either transfer: it is required by the
+  recommended `project`, and it costs little under the default `interpolate`
+  because the remesh itself is serial gmsh on rank 0 either way. Raise it to
+  the forward's rank count to parallelise the transfer and the checkpoint load
+  while `ISMIP7_ADAPT_TRANSFER` is left at its default.
 
 ## Configuration (`ISMIP7_ADAPT_*`, defaults = Úa's `Ua2D_DefaultParameters`)
 

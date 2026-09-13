@@ -13,12 +13,13 @@ gates and count floating cells with ``N_hat > 0``:
               roundoff-positive shelf cell to the cap (Sep 13 2026 finding)
   He x sign   ``He * conditional(N > 0, N_hat, 0)`` -- the first fix; leaves
               cells floating by a few metres (inside the He band) with friction
-  production  ``dual_friction.budd_nhat``: ``He * conditional(HAF > 0, ...)``
+  production  ``dual_friction.budd_nhat``: ``conditional(HAF > 0, N_hat, 0)``,
+              an exact gate that leaves grounded friction unscaled
 
 The old count is the defect's footprint on that MAP; the production count
 must be 0 (floating is HAF < 0, the same test the gate uses).
 Also reports the grounded cells above 1 (the delta floor's footprint) and the
-He band (0 < He < 1).
+He band (0 < He < 1), which the He x sign row acts on.
 
 ``--forward``: run ``simulation.setup_model()`` on the MAP (the cold-start
 diagnostic re-solve under the current law) and print the relative L2
@@ -65,7 +66,7 @@ def census(map_path, nhat_floor, nhat_cap, gl_width):
     nh = budd_nhat_ungated(N, None, H, nhat_floor=nhat_floor, nhat_cap=nhat_cap)
     old = Function(Q).interpolate(conditional(gt(N, Constant(0.0)), nh, Constant(0.0)))       # sign test
     heo = Function(Q).interpolate(He * conditional(gt(N, Constant(0.0)), nh, Constant(0.0)))  # He x sign test
-    new = Function(Q).interpolate(budd_nhat(N, None, H, b, He, nhat_floor=nhat_floor, nhat_cap=nhat_cap))
+    new = Function(Q).interpolate(budd_nhat(N, None, H, b, nhat_floor=nhat_floor, nhat_cap=nhat_cap))
     haf = Function(Q).interpolate(height_above_flotation(H, b))
     he = Function(Q).interpolate(He)
     hq = Function(Q).interpolate(H)
@@ -80,9 +81,9 @@ def census(map_path, nhat_floor, nhat_cap, gl_width):
         "floating N_hat>0 (old gate)": gsum(comm, (floating & (o > 0.0)).sum()),
         "floating N_hat at cap (old gate)": gsum(comm, (floating & (o >= nhat_cap - 1e-9)).sum()),
         "floating N_hat>0 (He x sign test)": gsum(comm, (floating & (ho > 0.0)).sum()),
-        "floating N_hat>0 (production: He x HAF>0)": gsum(comm, (floating & (n > 0.0)).sum()),
+        "floating N_hat>0 (production: HAF>0)": gsum(comm, (floating & (n > 0.0)).sum()),
         "grounded N_hat>1 (delta floor)": gsum(comm, (grounded & (n > 1.0 + 1e-9)).sum()),
-        "grounded N_hat<1 (He band)": gsum(comm, (grounded & (n < 1.0 - 1e-9)).sum()),
+        "grounded N_hat<1": gsum(comm, (grounded & (n < 1.0 - 1e-9)).sum()),
         "He band 0<He<1": gsum(comm, band.sum()),
     }
     return attrs, out

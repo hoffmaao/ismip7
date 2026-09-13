@@ -112,6 +112,14 @@ def main():
     k = int(attrs.get("adapt_count", 0)) + 1
     root = basename.split("_adapt")[0]
     out_msh = args.out_mesh or os.path.join(MESH_DIR, f"{root}_adapt{k}.msh")
+    if os.path.realpath(out_msh) == os.path.realpath(old_msh):
+        raise SystemExit(
+            f"adapt: the output mesh is the reference mesh ({out_msh}). "
+            f"Writing it would destroy the mesh {basename} was built on and "
+            f"disable the physical-group check against it. The checkpoint's "
+            f"adapt_count ({attrs.get('adapt_count', 'absent')}) does not "
+            f"match its mesh_basename; pass --out-mesh with a fresh name."
+        )
     new_basename = os.path.splitext(os.path.basename(out_msh))[0]
     PETSc.Sys.Print(f"adapt: {basename} (t={attrs.get('t_yr', '?')}) -> {new_basename}")
 

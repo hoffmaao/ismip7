@@ -167,3 +167,23 @@ effect in the CG1 lift). The transfer prints the mean front thickness before
 and after; `ISMIP7_ADAPT_TRANSFER=project` (supermesh) bounds it by overlap
 weighting; `ISMIP7_ADAPT_KEEP_CURRENT=1` remeshes at the current sizes to
 measure the transfer's own cost with no refinement.
+
+## Found on the way: Budd shelf friction was a sign test on roundoff
+
+The identity transfer (`--no-remesh`) reproduced every checkpoint field to
+machine precision, yet two identity checkpoints whose `surface` differed by
+2e-13 m gave 672 and 1459 Gt/yr for the same year. Neither number was the
+transfer's fault. In `build_rc_residual(fric_law="budd")` the shelf test was
+`conditional(gt(N, 0), N_hat, 0)`: on a floating cell the surface *is* the
+flotation branch, so `N = max(p_I - p_W, 0)` is a roundoff residue of either
+sign, and a positive residue passed the test with `N_ref` equally tiny, where
+the delta floor `nhat_floor * p_I / N_ref` lifts it to the cap. Result: triple
+Weertman friction on whichever shelf cells happened to round positive (445 of
+3515 in the 32 km control; the 2e-13 change flipped all of them). The shared
+`icepack_tools.friction.basal_stress` already had the fix, an `He` gate
+(height above flotation, 0 well below flotation whatever the roundoff does);
+it is now ported here. Verified: the two checkpoints give outflux 1478 vs 1475
+Gt/yr and VAF 57638.204 vs 57638.212 mm SLE. The outflux numbers quoted above
+(782, and the identity test's 672) were measured with the old test in place,
+as was every Budd forward and Budd MAP to date; regularized Coulomb has a
+continuous `tau_cap` and never had the problem.

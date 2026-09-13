@@ -305,7 +305,19 @@ def build_rc_residual(
         if nhat_floor > 0.0:
             novb = Constant(nhat_floor) * p_I / Nr                  # delta * local overburden (normalized)
             N_hat = min_value(max_value(N_hat, novb), Constant(nhat_cap))
-        N_hat = conditional(gt(N, Constant(0.0)), N_hat, Constant(0.0))  # EXACT-zero shelf
+        # He, not the sign of N, enforces the zero afloat (ported from the
+        # shared icepack_tools.friction.basal_stress, which had this fix).
+        # On a floating cell the surface IS the flotation branch, so
+        # N = max(p_I - p_W, 0) is a roundoff residue of either sign (~1e-16
+        # MPa); gt(N, 0) let a positive residue through, and with N_ref
+        # equally tiny there the floor term nhat_floor * p_I / Nr amplified it
+        # to nhat_cap: triple Weertman friction on a shelf cell. Measured on
+        # the 32 km control (Sep 13 2026): 445 of 3515 floating cells, and a
+        # 1e-13 change in the surface moved the year's outflux from 672 to
+        # 1459 Gt/yr. He is a function of height above flotation, 0 well below
+        # flotation whatever N's roundoff does, and continuous where the
+        # conditional was not; the conditional stays as a guard on the sign.
+        N_hat = He * conditional(gt(N, Constant(0.0)), N_hat, Constant(0.0))
         tau_b = tau_W * N_hat
     else:  # regularized_coulomb
         tau_cap = max_value(Constant(c0) * N, Constant(eps_tauc))   # Coulomb cap = c0 N -> 0 afloat

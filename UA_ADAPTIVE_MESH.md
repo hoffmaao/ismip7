@@ -39,7 +39,11 @@ and run forward on that one mesh:
      ```
 
    `--out-mesh` is what fixes the name: without it the output is
-   `<reference>_adapt1.msh`. The `.msh` files are regenerated with these
+   `<reference>_adapt1.msh`, or `<reference>_<experiment>_adapt1.msh` when
+   `ISMIP7_EXPERIMENT_NAME` is set, which `run_adaptive.py` does from
+   `--experiment-name` so two experiments adapting the same starting mesh
+   cannot overwrite each other's mesh or boundary_ids sidecar in the shared
+   `antarctica/mesh/`. The `.msh` files are regenerated with these
    flags; the sidecars are committed. The `_obs` mesh is the one the NOTS
    inversions and the committed MAP names refer to.
 2. Invert on that mesh.

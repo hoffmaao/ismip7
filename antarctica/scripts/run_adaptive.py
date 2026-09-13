@@ -104,6 +104,11 @@ def main():
     env = dict(os.environ)
     if args.tag:
         env["ISMIP7_RUN_TAG"] = args.tag
+    # The adapted meshes and their sidecars share one directory with every
+    # other experiment's, so adapt_mesh.py names them after this run. The
+    # experiment name is the discriminator, not the run tag: the tag is a
+    # method-line suffix that parallel experiments share.
+    env["ISMIP7_EXPERIMENT_NAME"] = args.experiment_name
     env.pop("ISMIP7_AUTO_RESUME", None)          # segments are explicit here
     final = os.path.join(RESULTS, f"{args.experiment_name}_{args.lc}_final.h5")
     restart = args.restart

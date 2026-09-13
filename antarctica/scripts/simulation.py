@@ -1342,7 +1342,7 @@ def run_simulation(
 
     mass_prev = float(assemble(h * dx)) * rho_gt
 
-    def _save_state(final_path, t_now):
+    def _save_state(final_path, t_now, stalled=False):
         r"""Atomic, self-contained state checkpoint: mesh + frozen reference
         fields (theta/phi/bed/C_w0/N_ref/H_init/phi_eff) + evolving (h, s, u)
         + the timeline year. Written to a temp file and renamed, so a reboot
@@ -1391,6 +1391,11 @@ def run_simulation(
                 chk.set_attr("/", "buffer_m", float(ctx["buffer_m"]))
             if ctx.get("raster_sample"):
                 chk.set_attr("/", "raster_sample", str(ctx["raster_sample"]))
+            # The driver's own verdict on why it stopped here, so a batch
+            # chain does not have to infer it from log text or from the year
+            # alone: 1 means the solver gave up, and resuming would re-attempt
+            # the same years and give up again.
+            chk.set_attr("/", "stalled", int(bool(stalled)))
         mesh.comm.barrier()
         if mesh.comm.rank == 0:
             os.replace(tmp, final_path)
@@ -1779,8 +1784,29 @@ def run_simulation(
             f"  Wall-clock budget: stopping after {wall_stop_min:g} min "
             f"(ISMIP7_WALL_STOP_MIN)"
         )
+    # Longest step so far, the estimate of what the NEXT one could cost. The
+    # budget is checked before entering a step rather than after finishing
+    # one: a step that goes through the rescue ladder and then 16 subcycles
+    # runs far longer than a normal one, and a run that starts such a step
+    # just under the budget overshoots it by that whole step and gets killed
+    # mid-write, which is the outcome the budget exists to avoid.
+    step_max_min = 0.0
+    stalled = False
 
     for k in range(1, nsteps + 1):
+        if wall_stop_min > 0:
+            mins = (perf_counter() - _T_PROCESS_START) / 60.0
+            # Every rank must leave the loop together: the final save is
+            # collective, so a rank-local decision would hang the job.
+            if mesh.comm.allreduce(
+                    int(mins + step_max_min >= wall_stop_min)) > 0:
+                PETSc.Sys.Print(
+                    f"  Wall-clock budget: {mins:.1f} min used of "
+                    f"{wall_stop_min:g}, and the longest step so far took "
+                    f"{step_max_min:.1f} min. Stopping at t_yr={t_start + (k - 1) * dt:.1f} "
+                    f"with the budget intact, for the next job in the chain"
+                )
+                break
         t_step_start = perf_counter()
         t_yr = t_start + k * dt
 
@@ -1835,6 +1861,7 @@ def run_simulation(
                 f"  Step {k}: rescue ladder + subcycles exhausted, "
                 f"saving and stopping"
             )
+            stalled = True
             h_dg.assign(h_dg_entry)
             _lift_h()
             z.assign(z_entry)   # checkpoint the last converged pair
@@ -1889,17 +1916,8 @@ def run_simulation(
             _prune_checkpoints()
             PETSc.Sys.Print(f"    [checkpoint: {os.path.basename(chk_fn)}]")
 
-        if wall_stop_min > 0:
-            mins = (perf_counter() - _T_PROCESS_START) / 60.0
-            # Every rank must leave the loop together: the final save is
-            # collective, so a rank-local decision would hang the job.
-            if mesh.comm.allreduce(int(mins >= wall_stop_min)) > 0:
-                PETSc.Sys.Print(
-                    f"  Wall-clock budget reached at t_yr={t_yr:.1f} "
-                    f"({mins:.1f} of {wall_stop_min:g} min), saving and "
-                    f"stopping for the next job in the chain"
-                )
-                break
+        step_max_min = max(step_max_min,
+                           (perf_counter() - t_step_start) / 60.0)
 
     PETSc.Sys.Print(f"\n{experiment_name} simulation complete.")
 
@@ -1908,7 +1926,7 @@ def run_simulation(
     # where it really stopped, not the nominal t_end.
     final_fn = os.path.join(RESULTS_DIR, f"{experiment_name}_{lc}_final.h5")
     last_t = results[-1][0] if results else t_start
-    _save_state(final_fn, last_t)
+    _save_state(final_fn, last_t, stalled=stalled)
     PETSc.Sys.Print(f"Saved: {final_fn}")
 
     if csv_f is not None:

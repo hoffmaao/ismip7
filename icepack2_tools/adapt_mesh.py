@@ -171,8 +171,12 @@ class AdaptMeshConfig:
             # The GL bands below are the inferred pan-Antarctic form of that
             # ("down to 2 km at the grounding line"); every other value is
             # Úa's verbatim.
+            # shelf_size: PIG-TWG's 4 km is Max/5 for a REGIONAL 20 km box;
+            # continent-wide 4 km shelves alone (~1.5 M km^2) would be ~220k
+            # elements and swamp the 250k budget, so 10 km is used and marked
+            # inferred. Override with ISMIP7_ADAPT_SHELF_SIZE.
             base = dict(mesh_size_max=180e3, mesh_size=90e3, mesh_size_min=2e3,
-                        shelf_size=4e3, low_surface=(1500.0, 36e3),
+                        shelf_size=10e3, low_surface=(1500.0, 36e3),
                         gl_range=[(10e3, 4e3), (5e3, 2e3)],
                         max_number_of_elements=250_000,
                         criteria=[Criterion("effective strain rates", 0.001, ele_min=4e3)])
@@ -344,7 +348,7 @@ def nodal_distance_to(mesh, Qc, points):
 # Step 1: desired element size
 # ---------------------------------------------------------------------------
 
-def desired_element_size(mesh, cfg, H, b, u=None, dhdt=None, log=PETSc.Sys.Print):
+def desired_element_size(mesh, cfg, H, b, u=None, dhdt=None, weight=None, log=PETSc.Sys.Print):
     r"""Úa ``NewDesiredEleSizesAndElementsToRefineOrCoarsen2`` for the
     ``explicit:global`` method. Returns the CG1 field ``EleSizeDesired``
     on the current mesh and a dict of diagnostics."""
@@ -398,7 +402,11 @@ def desired_element_size(mesh, cfg, H, b, u=None, dhdt=None, log=PETSc.Sys.Print
                 continue
         else:
             raise ValueError(name)
-        h_c = error_to_ele_size(e.dat.data_ro, c.scale, h_min, h_max, c.p)
+        e_vals = e.dat.data_ro
+        if weight is not None:
+            # e.g. the velocity-observation mask: no data, no refinement
+            e_vals = e_vals * weight.dat.data_ro
+        h_c = error_to_ele_size(e_vals, c.scale, h_min, h_max, c.p)
         h_des.dat.data[:] = np.minimum(h_des.dat.data_ro, h_c)
         fired = True
         lo = comm.allreduce(float(h_c.min()) if n_nodes else np.inf, op=MPI.MIN)

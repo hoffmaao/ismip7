@@ -60,6 +60,37 @@ def test_the_mesh_only_from_obs_name():
         "antarctica_ua_180000_2000_obs_adapt1"
 
 
+@pytest.mark.parametrize("name", FRESH)
+def test_two_experiments_do_not_collide_in_the_shared_mesh_directory(name):
+    r"""Every adapted mesh and its sidecar land in one shared directory, so
+    two runs adapting the same starting mesh must not name the same file."""
+    ctrl = next_adapted_mesh_name(name, "ctrl")
+    ssp = next_adapted_mesh_name(name, "ssp126")
+    assert ctrl != ssp
+    assert ctrl == f"{name}_ctrl_adapt1"
+    assert ssp == f"{name}_ssp126_adapt1"
+    assert next_adapted_mesh_name(name) == f"{name}_adapt1"
+
+
+def test_the_tag_extends_the_lineage_rather_than_repeating():
+    r"""Adapting a tagged mesh again keeps one copy of the tag and advances
+    the counter, so a run's own meshes stay a single lineage."""
+    name = f"{FRESH[0]}_ctrl_adapt1"
+    assert next_adapted_mesh_name(name, "ctrl") == f"{FRESH[0]}_ctrl_adapt2"
+    assert next_adapted_mesh_name(name, "") == f"{FRESH[0]}_ctrl_adapt2"
+    assert next_adapted_mesh_name(name, None) == f"{FRESH[0]}_ctrl_adapt2"
+
+
+def test_a_tagged_lineage_stays_strictly_increasing():
+    r"""The overwrite guard relies on this for tagged runs too."""
+    seen = [FRESH[0]]
+    for _ in range(4):
+        nxt = next_adapted_mesh_name(seen[-1], "ctrl")
+        assert nxt not in seen
+        seen.append(nxt)
+    assert seen[-1] == f"{FRESH[0]}_ctrl_adapt4"
+
+
 def test_the_lineage_never_revisits_a_name():
     r"""What the overwrite guard in adapt_mesh.py relies on: repeated
     adaptation is strictly increasing, so the derived output is never the

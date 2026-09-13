@@ -104,20 +104,30 @@ if [ "$CHAIN" != "1" ]; then
 fi
 
 # The drivers print the reached year; ask the timeseries instead, which is the
-# state the next job would resume from.
-LAST_YEAR=$(python - <<'PY'
-import csv, glob, os, sys
-tag = os.environ.get("ISMIP7_RUN_TAG", "")
-pats = sorted(glob.glob("antarctica/results/*timeseries.csv"), key=os.path.getmtime)
-if not pats:
+# state the next job would resume from. It must be THIS job's timeseries: the
+# results directory is flat and shared, every driver flushes a row per step
+# into it, and the experiment name is built inside the driver, so neither the
+# newest file nor a name rebuilt in the shell identifies this run. The driver
+# prints "Saved: <csv>" on every exit, including an early stop, so take the
+# path from our own Slurm log.
+LAST_YEAR=$(NM_LOG="logs/ismip7_fwd_${SLURM_JOB_ID}.out" python - <<'PY'
+import csv, os, sys
+log = os.environ["NM_LOG"]
+csv_fn = None
+with open(log) as f:
+    for line in f:
+        if line.startswith("Saved: ") and line.rstrip().endswith("timeseries.csv"):
+            csv_fn = line[len("Saved: "):].strip()
+if not csv_fn or not os.path.exists(csv_fn):
     sys.exit(0)
-rows = list(csv.DictReader(open(pats[-1])))
+rows = list(csv.DictReader(open(csv_fn)))
 print(rows[-1]["year"] if rows else "")
 PY
 )
 T_END="${ISMIP7_T_END}"
 if [ -z "$LAST_YEAR" ]; then
-    echo "chain: no timeseries found, not resubmitting"
+    echo "chain: this job's timeseries not found in logs/ismip7_fwd_${SLURM_JOB_ID}.out," \
+         "not resubmitting"
     exit 0
 fi
 done_yet=$(python -c "print(1 if float('$LAST_YEAR') >= float('$T_END') - 1e-6 else 0)")

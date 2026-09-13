@@ -460,14 +460,20 @@ class CampaignManager:
             )
             cache, manifest = cache_paths(self.cache_dir, lc, lc_coarse)
             raw = cache.with_suffix(".parallel.h5")
+            map_raw = map_path.with_name(map_path.stem + ".parallel.h5")
             exports = {
                 "ISMIP7_LC": lc,
                 "ISMIP7_LC_COARSE": lc_coarse,
                 "ISMIP7_BUFFER_M": BUFFER_M,
                 "ISMIP7_MESH": mesh,
                 "ISMIP7_BNDIDS": boundary,
-                "ISMIP7_INVERSION": self.inversion,
+                # Prepare cache is the warm start; imported Hoffman MAP is not
+                # read by the invert (controls/geometry/mixed state come from
+                # the cache). The post-invert prepare uses the new 1-core MAP.
+                "ISMIP7_WARM_START": cache,
+                "ISMIP7_SKIP_CONTINUATION": "1",
                 "ISMIP7_MAP_OUT": map_path,
+                "ISMIP7_MAP_OUT_RAW": map_raw,
                 "ISMIP7_INVERSION_TIMING_JSON": timing_json,
                 "ISMIP7_MAXITER": INVERSION_MAXITER,
                 "ISMIP7_FRICTION": "budd",

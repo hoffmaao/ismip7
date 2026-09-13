@@ -421,16 +421,78 @@ def main():
     theta = Function(Q, name="theta")  # log friction adjustment
     phi = Function(Q, name="phi")  # log fluidity adjustment
 
-    # Warm-start theta/phi from a previous checkpoint if available
-    warm_chk = os.environ.get("ISMIP7_WARM_START")
+    # Warm-start from a previous MAP or timing-cache checkpoint. Prefer
+    # interpolate (not a raw .dat copy): the prepared timing caches are
+    # published on 1 rank and the invert runs on many, so dof ownership differs.
+    warm_chk = os.environ.get("ISMIP7_WARM_START", "").strip()
+    skip_continuation = (
+        os.environ.get("ISMIP7_SKIP_CONTINUATION", "0").strip() == "1"
+    )
+    warm_A_prior = None
+    warm_loaded_z = False
+
+    def _warm_load(chk, source_mesh, name, space):
+        source_field = chk.load_function(source_mesh, name=name)
+        target = Function(space, name=name)
+        target.interpolate(
+            source_field,
+            allow_missing_dofs=True,
+            default_missing_val=0.0,
+        )
+        return target
+
     if warm_chk:
         PETSc.Sys.Print(f"  Loading warm start from {warm_chk}")
         with fd.CheckpointFile(warm_chk, "r") as chk:
             chk_mesh = chk.load_mesh()
-            theta_ws = chk.load_function(chk_mesh, name="log_friction")
-            phi_ws = chk.load_function(chk_mesh, name="log_fluidity")
-        theta.dat.data[:] = theta_ws.dat.data_ro
-        phi.dat.data[:] = phi_ws.dat.data_ro
+            theta.assign(_warm_load(chk, chk_mesh, "log_friction", Q))
+            phi.assign(_warm_load(chk, chk_mesh, "log_fluidity", Q))
+            try:
+                H.assign(_warm_load(chk, chk_mesh, "thickness", Q_g))
+                b.assign(_warm_load(chk, chk_mesh, "bed", Q_g))
+                s.assign(_warm_load(chk, chk_mesh, "surface", Q_g))
+                PETSc.Sys.Print(
+                    "    geometry: thickness/bed/surface from warm start"
+                )
+            except (KeyError, RuntimeError, ValueError):
+                PETSc.Sys.Print(
+                    "    geometry: keeping BedMachine sample "
+                    "(warm start has no thickness/bed/surface)"
+                )
+            try:
+                u_obs.assign(_warm_load(chk, chk_mesh, "velocity_obs", V))
+                PETSc.Sys.Print("    velocity_obs from warm start")
+            except (KeyError, RuntimeError, ValueError):
+                pass
+            try:
+                warm_A_prior = _warm_load(
+                    chk, chk_mesh, "fluidity_prior", Q
+                )
+            except (KeyError, RuntimeError, ValueError):
+                warm_A_prior = None
+            try:
+                u_ws = _warm_load(chk, chk_mesh, "velocity", V)
+                M_ws = _warm_load(
+                    chk, chk_mesh, "membrane_stress",
+                    z.subfunctions[1].function_space(),
+                )
+                tau_ws = _warm_load(
+                    chk, chk_mesh, "basal_stress",
+                    z.subfunctions[2].function_space(),
+                )
+                z.subfunctions[0].assign(u_ws)
+                z.subfunctions[1].assign(M_ws)
+                z.subfunctions[2].assign(tau_ws)
+                warm_loaded_z = True
+                PETSc.Sys.Print(
+                    "    mixed state: velocity/membrane/basal from warm start"
+                )
+            except (KeyError, RuntimeError, ValueError):
+                warm_loaded_z = False
+        if warm_loaded_z:
+            # Full-n mixed state from prepare already sits at the physical
+            # exponents; ramping 1→n would only discard that work.
+            skip_continuation = True
         _ws_t_lo, _ws_t_hi = global_range(theta)
         _ws_p_lo, _ws_p_hi = global_range(phi)
         PETSc.Sys.Print(f"    theta: [{_ws_t_lo:.3f}, {_ws_t_hi:.3f}]")
@@ -566,7 +628,18 @@ def main():
     # fluidity rather than log(A / const). This is the Recinos/fenics_ice fix
     # for the n=3 blow-up (a constant A0 baseline forced phi to carry all the
     # spatial fluidity structure). Frictional heating uses the balance C_w0.
-    if os.environ.get("ISMIP7_FLUIDITY_PRIOR", "thermo") == "thermo":
+    # When warm-starting from a prepare cache / MAP that already carries
+    # fluidity_prior, reuse it: phi = log(A/A_prior) is meaningless against a
+    # freshly recomputed prior.
+    if warm_A_prior is not None:
+        A_prior = warm_A_prior
+        A_prior.rename("fluidity_prior")
+        A_prior_lo, A_prior_hi = global_range(A_prior)
+        PETSc.Sys.Print(
+            f"  Fluidity prior A_prior in [{A_prior_lo:.2f}, "
+            f"{A_prior_hi:.2f}] (from warm start)"
+        )
+    elif os.environ.get("ISMIP7_FLUIDITY_PRIOR", "thermo") == "thermo":
         acc_prior = load_racmo_smb_climatology(Q)
         T_srf = load_mean_annual_surface_temperature(Q)
         # The thermal prior is a smooth englacial calculation and it is the
@@ -666,18 +739,33 @@ def main():
     stop_manager()
     prob = NonlinearVariationalProblem(F, z, form_compiler_parameters=fc_params)
     slvr = NonlinearVariationalSolver(prob, solver_parameters=sparams)
-    # Always use continuation — single solve at full exponents can fail
-    # with checkpoint parameters that create ill-conditioned systems.
-    # Ramp n_flow (1 → n_flow_val) and m_slide (1 → m_slide_val) together.
-    PETSc.Sys.Print(
-        f"Warm start (continuation n_flow 1→{n_flow_val:.1f}, "
-        f"m_slide 1→{m_slide_val:.1f})..."
-    )
-    for t in np.linspace(0.0, 1.0, 5):
-        n_flow.assign(1.0 + t * (n_flow_val - 1.0))
-        m_slide.assign(1.0 + t * (m_slide_val - 1.0))
-        slvr.solve()
-    PETSc.Sys.Print("  Done")
+    n_flow.assign(n_flow_val)
+    m_slide.assign(m_slide_val)
+    if skip_continuation:
+        if warm_loaded_z:
+            PETSc.Sys.Print(
+                f"Warm start: accepting loaded mixed state at full "
+                f"n_flow={n_flow_val:.1f}, m_slide={m_slide_val:.1f} "
+                f"(no 1→n continuation)"
+            )
+        else:
+            PETSc.Sys.Print(
+                f"Warm start: single solve at full n_flow={n_flow_val:.1f}, "
+                f"m_slide={m_slide_val:.1f} (ISMIP7_SKIP_CONTINUATION=1)"
+            )
+            slvr.solve()
+    else:
+        # Ramp n_flow (1 → n_flow_val) and m_slide (1 → m_slide_val) together.
+        # Single solve at full exponents can fail from a cold (u≈0) guess.
+        PETSc.Sys.Print(
+            f"Warm start (continuation n_flow 1→{n_flow_val:.1f}, "
+            f"m_slide 1→{m_slide_val:.1f})..."
+        )
+        for t in np.linspace(0.0, 1.0, 5):
+            n_flow.assign(1.0 + t * (n_flow_val - 1.0))
+            m_slide.assign(1.0 + t * (m_slide_val - 1.0))
+            slvr.solve()
+        PETSc.Sys.Print("  Done")
 
     u_init = z.subfunctions[0]
     u_mag = Function(Q).interpolate(sqrt(inner(u_init, u_init)))
@@ -890,17 +978,29 @@ def main():
     def forward(theta_ctrl, phi_ctrl):
         clear_caches()
         F_ctrl = build_F(theta_ctrl, phi_ctrl)
-        # Continuation inside annotation for robustness — ramp both
-        # n_flow and m_slide on the same [0,1] parameter.
-        for t in np.linspace(0.0, 1.0, 5):
-            n_flow.assign(1.0 + t * (n_flow_val - 1.0))
-            m_slide.assign(1.0 + t * (m_slide_val - 1.0))
+        if skip_continuation:
+            # Timing-matrix short invert starts from a full-n prepare cache;
+            # stay at the physical exponents so each eval is one Newton solve.
+            n_flow.assign(n_flow_val)
+            m_slide.assign(m_slide_val)
             EquationSolver(
                 F_ctrl == 0,
                 z,
                 solver_parameters=sparams,
                 form_compiler_parameters=fc_params,
             ).solve()
+        else:
+            # Continuation inside annotation for robustness — ramp both
+            # n_flow and m_slide on the same [0,1] parameter.
+            for t in np.linspace(0.0, 1.0, 5):
+                n_flow.assign(1.0 + t * (n_flow_val - 1.0))
+                m_slide.assign(1.0 + t * (m_slide_val - 1.0))
+                EquationSolver(
+                    F_ctrl == 0,
+                    z,
+                    solver_parameters=sparams,
+                    form_compiler_parameters=fc_params,
+                ).solve()
 
         u_sol, _, _ = split(z)
         # chi^2 density: each residual divided by the squared error of its own
@@ -1131,9 +1231,12 @@ def main():
         if not timing_json or COMM_WORLD.rank != 0:
             return
         from timing_campaign import atomic_write_json
+        written = os.path.realpath(os.path.join(_map_dir, map_fn))
+        published = os.environ.get("ISMIP7_MAP_OUT_FINAL", "").strip()
         payload = {
             "phase": phase,
-            "map_path": os.path.realpath(os.path.join(_map_dir, map_fn)),
+            "map_path": os.path.realpath(published) if published else written,
+            "map_path_written": written,
             "mesh_basename": os.path.basename(mesh_fn),
             "lc": int(lc),
             "lc_coarse": int(lc_coarse),
@@ -1156,6 +1259,8 @@ def main():
                 "grad_precond": os.environ.get(
                     "ISMIP7_GRAD_PRECOND", "none"
                 ).lower(),
+                "warm_start": bool(warm_chk),
+                "skip_continuation": bool(skip_continuation),
             },
             "evaluations": list(timing_history),
         }

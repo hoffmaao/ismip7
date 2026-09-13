@@ -457,6 +457,8 @@ policy, and requested-versus-canonical solver mode.
 | `ISMIP7_MISFIT_NORM` | `sigma`: divide each residual by its own datum's squared error, making the misfit a dimensionless chi^2 so terms of different units can be traded off. `none`: legacy dimensional misfit. **Selects the `ISMIP7_GAMMA_*` defaults** (see below) | `sigma` |
 | `ISMIP7_LOG_VEL_WEIGHT` | weight on the ISSM-convention logarithmic velocity misfit `0.5 ln((|u|+eps)/(|u_obs|+eps))^2` (ISSM cost function 103), added to the term `ISMIP7_MISFIT_NORM` selects. The sigma-normalised chi^2 alone over-weights slow interior ice and leaves the discharge-carrying tributaries too slow; the log term is scale-free and pulls them up. `0` is the pre-Sep-2026 objective; `auto` resolves the weight at the warm-start state so the log term starts out equal to the velocity chi^2 term. The resolved value is stamped into the MAP as the `log_vel_weight` attribute | `0` |
 | `ISMIP7_LOG_VEL_EPS` | regularisation speed (m/yr) inside the log, so stagnant ice cannot make the ratio singular. Stamped into the MAP as `log_vel_eps` | `1.0` |
+| `ISMIP7_WARM_START` | path to a MAP or timing-cache checkpoint used to seed `theta`/`phi` (and, when present, geometry, `fluidity_prior`, and the mixed diagnostic state). Fields are interpolated onto the live mesh, so a 1-core cache can warm-start a multi-rank invert | unset |
+| `ISMIP7_SKIP_CONTINUATION` | `1` skips the cold `n,m: 1→n` ramp on the initial solve and inside each annotated forward eval (single solve at full exponents). Auto-enabled when the warm start supplies a full mixed state | `0` |
 | `ISMIP7_GAMMA_THETA` / `ISMIP7_GAMMA_PHI` | Whittle-Matern prior strength on `θ` / `φ`. Default is coupled to `ISMIP7_MISFIT_NORM`, because normalizing divides the misfit by ~sigma^2 and would otherwise weaken the prior by the same factor | `1e5` under `sigma`, `1e4` under `none` |
 | `ISMIP7_L_REG` | prior correlation length (m) | `7.5e3` |
 | `ISMIP7_MAXITER` | L-BFGS-B iteration cap | `500` |
@@ -594,12 +596,14 @@ The stages and contracts are:
    prepared cache exists, one five-iteration L-BFGS job per mesh re-inverts
    with the log-velocity + dH/dt + net-balance objective
    (`ISMIP7_LOG_VEL_WEIGHT=auto`, `ISMIP7_DHDT_WEIGHT=1`,
-   `ISMIP7_DHDT_NET_SIGMA=10`). Ranks are 32 for LC &lt; 2500 m and 16 otherwise;
-   memory follows the forward `MEMORY_BY_LC` budgets. The job writes a
-   per-mesh MAP under `results/timing/inversion/`, a profiling JSON under
-   `results/timing/`, then republishes that mesh's timing cache from the new
-   MAP so scout provenance points at the short invert rather than the imported
-   source. Scouts wait on this stage.
+   `ISMIP7_DHDT_NET_SIGMA=10`). The job warm-starts from that mesh's prepared
+   cache (controls, fluidity prior, geometry, and mixed diagnostic state) and
+   skips the cold `1→n` continuation. Ranks are 32 for LC &lt; 2500 m and 16
+   otherwise; memory follows the forward `MEMORY_BY_LC` budgets. The parallel
+   MAP is rewritten on one rank to
+   `results/timing/inversion/…_{lc}_{lc_coarse}_5step.h5`, a profiling JSON is
+   written under `results/timing/`, then the timing cache is republished from
+   that 1-core MAP so scout/scale provenance points at the short invert.
 4. **Cache audit / AMB probe** — optional diagnostics on a prepared cache:
    ```console
    make timing-cache-audit TIMING_ONLY_MESH=2500/25000 \

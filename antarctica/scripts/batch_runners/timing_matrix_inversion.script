@@ -1,7 +1,7 @@
 #!/bin/bash
 
-# Five-step logvelnet inversion on one exact timing mesh, then republish the
-# timing initial-state cache from the new per-mesh MAP.
+# Five-step logvelnet inversion warm-started from the prepared timing cache,
+# then 1-core MAP republish and cache republish from that MAP.
 
 #SBATCH -J ant_timing_inv
 #SBATCH -p general
@@ -33,7 +33,9 @@ export OPENBLAS_NUM_THREADS=1
 cd "${SLURM_SUBMIT_DIR:-.}"
 
 map_out="${ISMIP7_MAP_OUT:?ISMIP7_MAP_OUT is required}"
+map_raw="${ISMIP7_MAP_OUT_RAW:?ISMIP7_MAP_OUT_RAW is required}"
 timing_json="${ISMIP7_INVERSION_TIMING_JSON:?ISMIP7_INVERSION_TIMING_JSON is required}"
+warm_start="${ISMIP7_WARM_START:?ISMIP7_WARM_START is required}"
 raw="${ISMIP7_TIMING_CACHE_RAW:?ISMIP7_TIMING_CACHE_RAW is required}"
 final="${ISMIP7_TIMING_CACHE:?ISMIP7_TIMING_CACHE is required}"
 manifest="${ISMIP7_TIMING_CACHE_MANIFEST:?ISMIP7_TIMING_CACHE_MANIFEST is required}"
@@ -42,8 +44,16 @@ if [ "${raw}" = "${final}" ]; then
     echo "parallel cache path and published cache path must differ" >&2
     exit 2
 fi
+if [ "${map_raw}" = "${map_out}" ]; then
+    echo "parallel MAP path and published MAP path must differ" >&2
+    exit 2
+fi
+if [ ! -f "${warm_start}" ]; then
+    echo "warm-start cache missing: ${warm_start}" >&2
+    exit 2
+fi
 
-mkdir -p "$(dirname "${map_out}")" "$(dirname "${timing_json}")"
+mkdir -p "$(dirname "${map_out}")" "$(dirname "${map_raw}")" "$(dirname "${timing_json}")"
 
 write_status() {
     status_tmp="${status}.tmp.${SLURM_JOB_ID:-$$}"
@@ -52,6 +62,11 @@ write_status() {
         > "${status_tmp}"
     mv -f "${status_tmp}" "${status}"
 }
+
+# Invert writes the parallel MAP; L-BFGS starts from the prepare cache.
+export ISMIP7_MAP_OUT_FINAL="${map_out}"
+export ISMIP7_MAP_OUT="${map_raw}"
+export ISMIP7_SKIP_CONTINUATION="${ISMIP7_SKIP_CONTINUATION:-1}"
 
 write_status "running phase=invert"
 set +e
@@ -62,14 +77,29 @@ if [ "${invert_rc}" -ne 0 ]; then
     write_status "failed phase=invert exit_code=${invert_rc}"
     exit "${invert_rc}"
 fi
-if [ ! -f "${map_out}" ]; then
+if [ ! -f "${map_raw}" ]; then
     write_status "failed phase=invert reason=missing_map"
-    echo "inversion finished without writing ${map_out}" >&2
+    echo "inversion finished without writing ${map_raw}" >&2
     exit 2
 fi
 
-# Republish the timing cache from the new per-mesh MAP (not the imported source).
+write_status "running phase=map_repack"
+set +e
+srun -n 1 python -u scripts/redistribute_checkpoint.py \
+    --input "${map_raw}" --output "${map_out}"
+map_repack_rc=$?
+set -e
+if [ "${map_repack_rc}" -ne 0 ]; then
+    write_status "failed phase=map_repack exit_code=${map_repack_rc}"
+    exit "${map_repack_rc}"
+fi
+rm -f "${map_raw}"
+
+# Republish the timing cache from the new 1-core per-mesh MAP.
 export ISMIP7_INVERSION="${map_out}"
+unset ISMIP7_WARM_START
+unset ISMIP7_MAP_OUT
+unset ISMIP7_MAP_OUT_RAW
 
 write_status "running phase=prepare"
 set +e

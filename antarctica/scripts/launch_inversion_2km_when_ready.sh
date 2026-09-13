@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
-# Resource-gated launcher for the 2 km / 5 km-interior Budd inversion.
+# Resource-gated launcher for the 2 km / 5 km-interior regularized-Coulomb
+# inversion. ISMIP7_FRICTION=budd switches both the law and the output name.
 #
 # Mesh: antarctica_5000_2000_buffered0.msh, generated Sep 2026 with the
 # current mesh_antarctica.py sizing. 925,183 vertices, 1,835,718 cells,
@@ -74,12 +75,9 @@ cd "$REPO"
 # same priors. Only the mesh and the friction law change, so score_map.py can
 # still put them side by side. Every inversion now runs regularized Coulomb;
 # set ISMIP7_FRICTION=budd for a Budd re-inversion, which names its own file.
+. "$REPO/antarctica/scripts/ismip7_names.sh"
 FRICTION="${ISMIP7_FRICTION:-regularized_coulomb}"
-case "$FRICTION" in
-  regularized_coulomb) FTAG=_rc ;;
-  budd)                FTAG=_budd ;;
-  *)                   FTAG= ;;
-esac
+FTAG="$(ismip7_friction_tag "$FRICTION")"
 OMP_NUM_THREADS=1 \
 ISMIP7_LC=2000 ISMIP7_LC_COARSE=5000 ISMIP7_BUFFER_M=0 \
 ISMIP7_MESH="$REPO/antarctica/mesh/antarctica_5000_2000_buffered0.msh" \

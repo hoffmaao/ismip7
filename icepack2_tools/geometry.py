@@ -114,8 +114,12 @@ def raster_cell_mean(dataset, Q_dg, floor=None, nmax=64, chunk=2048):
     2 km cell on 500 m BedMachine gets 9 samples for its ~7 pixels, a 20 km
     interior cell gets 729 for its ~1600. Contrast :func:`sample_to_geometry`
     with ``method="vertex"``, which reads three pixels per cell whatever its
-    size, so the interior's sub-grid roughness aliases straight into the DG0
-    facet jumps that ARE the driving stress.
+    size.
+
+    Denser sampling was expected to give a smoother DG0 field. It does not:
+    measured, the cell mean is ROUGHER across the facet jumps that ARE the
+    driving stress. See :func:`sample_to_geometry` for the numbers and for why
+    ``"vertex"`` remains the default.
 
     One raster window covering the rank's cells is read. With a locality-
     preserving partition that window is small; with PETSc's ``simple``
@@ -205,6 +209,18 @@ def sample_to_geometry(raster, Q_g, Q_cg, floor=None, method="vertex"):
     and the rough version failed to converge in 200 Newton iterations. The L2
     projection of the CG1 interpolant IS the cell average, which is what a DG0
     field means, so use that.
+
+    MEASURED: ``"cell_mean"`` is rougher, and ``"vertex"`` stays the default.
+    The cell mean is the more faithful average of the raster, but faithfulness
+    is not what the DG0 driving stress wants. Neighbouring cells share two of
+    their three vertex samples, so ``"vertex"`` damps the jump between them by
+    construction, while two independent cell means do not. Against vertex
+    sampling the cell mean raised interior surface jumps by 6% and bed and
+    thickness jumps by 35%, and at 2 km the momentum solve did not converge
+    within 60 minutes. It does classify flotation better (at 32 km the
+    misclassified fraction falls from 9.1% to 3.2%), which is why the knob is
+    kept rather than removed. ``antarctica/scripts/probe_raster_sampling.py``
+    reproduces the comparison.
 
     ``floor`` optionally clamps the field from below (thickness >= h_clamp).
     The two paths apply it at opposite ends of the averaging and so disagree

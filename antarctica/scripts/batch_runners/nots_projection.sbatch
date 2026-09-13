@@ -56,6 +56,10 @@ case "$EXPERIMENT" in
 esac
 
 # --- forward configuration ---------------------------------------------
+# Point the forward at the MAP the inversion chain wrote. Without this it would
+# derive the name through icepack2_tools.naming.map_basename, which has no
+# `logvelnet` element, and abort on a missing file after the queue wait.
+export ISMIP7_INVERSION="${ISMIP7_INVERSION:-$ISMIP7_MAP_DEFAULT}"
 export ISMIP7_DT="${ISMIP7_DT:-0.1}"
 export ISMIP7_T_END="${ISMIP7_T_END:-2300}"
 export ISMIP7_CHECKPOINT_EVERY_YR="${ISMIP7_CHECKPOINT_EVERY_YR:-5}"
@@ -70,6 +74,10 @@ export ISMIP7_FIXED_FRONT="${ISMIP7_FIXED_FRONT:-1}"
 export ISMIP7_AUTO_RESUME="${ISMIP7_AUTO_RESUME:-1}"
 
 echo "    experiment $EXPERIMENT -> $DRIVER"
+echo "    map in  $ISMIP7_INVERSION"
+[ -f "$ISMIP7_INVERSION" ] \
+    || echo "    WARNING: that MAP does not exist; run nots_inversion.sbatch first" \
+            "or set ISMIP7_INVERSION"
 echo "    dt=$ISMIP7_DT t_end=$ISMIP7_T_END auto_resume=$ISMIP7_AUTO_RESUME" \
      "apparent_mb=$ISMIP7_APPARENT_MB fixed_front=$ISMIP7_FIXED_FRONT"
 

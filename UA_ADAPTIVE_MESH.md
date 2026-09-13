@@ -99,8 +99,12 @@ Two deliberate choices where Úa is nodal and this model is DG0:
   limits are calibrated against it.
 - Thickness transfer: Úa moves its NODAL surface; for a DG0 thickness the
   analogue that keeps mass is the conservative supermesh projection
-  (`ISMIP7_ADAPT_TRANSFER=project`, the recommended setting; it must run on
-  one rank, see below). The surface route lost 3.8% of the volume on a 130 km
+  (`ISMIP7_ADAPT_TRANSFER=project`, the recommended setting). It must run on
+  ONE rank: `cross_mesh_transfer` raises for `project` when the new mesh's
+  communicator has more than one rank. That is why `run_adaptive.py` takes a
+  separate `--adapt-launcher`, defaulting to `mpiexec -n 1`, while `--launcher`
+  drives the forward segments at full rank count; raise the adapt launcher only
+  for `transfer=interpolate`. The surface route lost 3.8% of the volume on a 130 km
   interior; the projection kept it to 0.01%. Either way the transfer prints
   the volume change and the mean front thickness before and after.
 

@@ -228,6 +228,18 @@ def setup_model(restart_from=None):
                          if _chk.has_attr("/", "lc_coarse") else None)
         chk_buffer_m = (float(_chk.get_attr("/", "buffer_m"))
                         if _chk.has_attr("/", "buffer_m") else None)
+        # Raster sampling the MAP was inverted with. MAPs older than the
+        # attribute were all vertex-sampled. The MAP wins over the
+        # environment: the controls absorbed that bed, so a different one
+        # here would be silently inconsistent.
+        chk_raster_sample = (str(_chk.get_attr("/", "raster_sample"))
+                             if _chk.has_attr("/", "raster_sample") else "vertex")
+        _env_rs = os.environ.get("ISMIP7_RASTER_SAMPLE")
+        if _env_rs and _env_rs.lower() != chk_raster_sample:
+            PETSc.Sys.Print(
+                f"  WARNING: ISMIP7_RASTER_SAMPLE={_env_rs} but the MAP was "
+                f"inverted with {chk_raster_sample}; using the MAP's."
+            )
         # The FINE resolution is stamped too, and every component of the
         # reconstructed name must come from the checkpoint: falling back to the
         # live ISMIP7_LC here would reintroduce exactly the environment drift
@@ -335,14 +347,14 @@ def setup_model(restart_from=None):
         bm_fn = find_file(os.path.join(DATA_DIR, "bedmachine"), "*.nc")
         # Cell average onto the geometry space, NOT a centroid point sample --
         # see geometry.sample_to_geometry for the measurements behind that.
+        PETSc.Sys.Print(f"  Raster sampling onto geometry cells: {chk_raster_sample}")
         b = sample_to_geometry(
-            lambda sp: icepack.interpolate(
-                rasterio.open(f"netcdf:{bm_fn}:bed"), sp), Q_g, Q)
+            rasterio.open(f"netcdf:{bm_fn}:bed"), Q_g, Q,
+            method=chk_raster_sample)
         b.rename("bed")
         H = sample_to_geometry(
-            lambda sp: icepack.interpolate(
-                rasterio.open(f"netcdf:{bm_fn}:thickness"), sp),
-            Q_g, Q, floor=h_clamp_init)
+            rasterio.open(f"netcdf:{bm_fn}:thickness"),
+            Q_g, Q, floor=h_clamp_init, method=chk_raster_sample)
         H.rename("thickness")
         s = Function(Q_g, name="surface").interpolate(
             max_value(b + H, (Constant(1.0) - rho_ratio) * H)
@@ -360,6 +372,7 @@ def setup_model(restart_from=None):
     M_guess = None
     tau_guess = None
     a_ref_mb = None
+    phys_div = None
     h_dg_state = None
     t_restart = None
     with fd.CheckpointFile(source_chk, "r") as chk:
@@ -411,6 +424,13 @@ def setup_model(restart_from=None):
                 a_ref_mb = chk.load_function(mesh, name="a_ref_mb")
             except Exception:
                 a_ref_mb = None
+            # An adapted checkpoint carries the transferred PHYSICAL divergence
+            # instead of a_ref (icepack2_tools.adapt_mesh); a_ref is rebuilt
+            # below with this mesh's own operator.
+            try:
+                phys_div = chk.load_function(mesh, name="phys_div")
+            except Exception:
+                phys_div = None
             # Separate DG0 prognostic thickness (CG1-geometry runs only, where
             # the stored CG h was its lumped lift). Under DG0 geometry the
             # thickness IS the transport state, so there is nothing to restore.
@@ -445,7 +465,19 @@ def setup_model(restart_from=None):
                     f"ISMIP7_APPARENT_MB is unset; set it to resume with "
                     f"the same mass-balance correction."
                 )
-            if a_ref_mb is None and amb_env is not None:
+            _adapted_t0 = bool(chk.has_attr("/", "adapted_initial")
+                               and int(chk.get_attr("/", "adapted_initial")))
+            if a_ref_mb is None and amb_env is not None and phys_div is not None:
+                PETSc.Sys.Print("  Apparent MB: adapted checkpoint, a_ref will be "
+                                "rebuilt from the transferred physical divergence")
+            elif a_ref_mb is None and amb_env is not None and _adapted_t0:
+                # adapt_mesh.py --rebuild-aref: a t=0 state moved onto an
+                # adapted mesh. Building a fresh a_ref here is legitimate
+                # (nothing has evolved) and is the only way the correction can
+                # cancel the NEW mesh's discrete divergence exactly.
+                PETSc.Sys.Print("  Apparent MB: adapted t=0 state, a_ref will be "
+                                "rebuilt on this mesh")
+            elif a_ref_mb is None and amb_env is not None:
                 raise RuntimeError(
                     f"ISMIP7_APPARENT_MB is set but restart checkpoint "
                     f"{source_chk} has no a_ref_mb; a fresh a_ref cannot be "
@@ -953,6 +985,7 @@ def setup_model(restart_from=None):
         "H_init": H_init,
         # Frozen t=0 apparent-MB correction (restart only; else None).
         "a_ref_mb": a_ref_mb,
+        "phys_div": phys_div,
         # DG0 prognostic thickness state (restart only; else None).
         "h_dg_state": h_dg_state,
         # Resume time (None on a cold start); run_simulation continues the
@@ -1219,7 +1252,13 @@ def run_simulation(
                 + un0p * h_dg * phi_dg * ds
             )
             a_ref.dat.data[:] = flux0.dat.data_ro / cell_area
-            if amb_mode != "div":
+            if ctx.get("phys_div") is not None:
+                # Remesh: cancel this mesh's discrete divergence net of the
+                # physical divergence the run carried over (adapt_mesh.py).
+                a_ref.dat.data[:] -= ctx["phys_div"].dat.data_ro
+                PETSc.Sys.Print("  Apparent MB: a_ref rebuilt on the adapted mesh "
+                                "from the transferred physical divergence")
+            elif amb_mode != "div":
                 # balanced control: evaluate the t=0 forcing and fold it in
                 if forcing_callback is not None:
                     forcing_callback(ctx, t_start + dt)

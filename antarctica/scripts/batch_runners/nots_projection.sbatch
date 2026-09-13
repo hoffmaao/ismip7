@@ -75,15 +75,16 @@ export ISMIP7_KEEP_CHECKPOINTS="${ISMIP7_KEEP_CHECKPOINTS:-3}"
 #   ISMIP7_APPARENT_MB  off: 0, off, none, empty. On: 1 or balance (balanced
 #                       control), div (divergence only).
 #   ISMIP7_AUTO_RESUME  off: 0, empty. On: any other integer.
+#
+# Both values go to the drivers exactly as given. runconfig owns each value
+# set and rejects anything else at startup, so normalising here would only
+# hide a typo: an ISMIP7_AUTO_RESUME=off meant to disable resume would become
+# a 1 and silently continue an old trajectory.
 export ISMIP7_APPARENT_MB="${ISMIP7_APPARENT_MB-1}"
 export ISMIP7_FIXED_FRONT="${ISMIP7_FIXED_FRONT:-1}"
 # Resume from this experiment's own newest checkpoint. This is what makes the
-# chain below safe to run unattended. Normalised here so the banner below
-# reports what the drivers will do.
-case "${ISMIP7_AUTO_RESUME-1}" in
-    ''|0|00) export ISMIP7_AUTO_RESUME=0 ;;
-    *)       export ISMIP7_AUTO_RESUME=1 ;;
-esac
+# chain below safe to run unattended.
+export ISMIP7_AUTO_RESUME="${ISMIP7_AUTO_RESUME-1}"
 
 echo "    experiment $EXPERIMENT -> $DRIVER"
 echo "    map in  $ISMIP7_INVERSION"
@@ -205,8 +206,11 @@ if [ "$CHAIN" != "1" ]; then
 fi
 # The chain is built on auto-resume: a successor inherits the environment and
 # no ISMIP7_RESTART, so with resume off it would cold-start at t_start, end at
-# the same year, and do it again forever. One job, and say why.
-if [ "$ISMIP7_AUTO_RESUME" != "1" ]; then
+# the same year, and do it again forever. Ask runconfig, which owns the value
+# set; the driver already ran, so the value is known good by now.
+resume_on=$(python -c \
+    "from icepack2_tools.runconfig import auto_resume; print(1 if auto_resume() else 0)")
+if [ "$resume_on" != "1" ]; then
     echo "chain: at ${LAST_YEAR} of ${T_END}, but auto-resume is off" \
          "(ISMIP7_AUTO_RESUME=$ISMIP7_AUTO_RESUME), so a successor would"
     echo "chain: cold-start and repeat these years. Not resubmitting; set" \
@@ -214,22 +218,16 @@ if [ "$ISMIP7_AUTO_RESUME" != "1" ]; then
     exit 0
 fi
 # A clean exit short of t_end that also made no progress is not the wall-clock
-# case the chain exists for. Allow exactly one retry, in case the job died for
-# a transient reason before its first step, then stop rather than loop.
-RETRY="${ISMIP7_CHAIN_NOPROGRESS:-0}"
+# case the chain exists for: a solver give-up already exited above on the
+# checkpoint's stalled attribute, and a job that died exited non-zero, so what
+# is left is a run whose setup alone spent the whole budget. Another job under
+# the same budget would do the same, so stop.
 if [ "$START_YEAR" != "-" ]; then
     progressed=$(python -c "print(1 if float('$LAST_YEAR') > float('$START_YEAR') + 1e-6 else 0)")
     if [ "$progressed" = "0" ]; then
-        if [ "$RETRY" != "0" ]; then
-            echo "chain: no progress again (resumed at ${START_YEAR}, ended at" \
-                 "${LAST_YEAR}) after a retry; stopping"
-            exit 1
-        fi
         echo "chain: no progress (resumed at ${START_YEAR}, ended at ${LAST_YEAR});" \
-             "retrying once"
-        RETRY=1
-    else
-        RETRY=0
+             "a successor under the same wall budget would not advance either. Stopping."
+        exit 1
     fi
 fi
 
@@ -240,6 +238,5 @@ echo "chain: at ${LAST_YEAR} of ${T_END}, resubmitting"
 # inheriting it would send each link back to the same starting checkpoint and
 # the chain would never advance past the first job's end year.
 unset ISMIP7_WALL_STOP_MIN ISMIP7_RESTART
-sbatch --dependency=afterok:"${SLURM_JOB_ID}" \
-       --export=ALL,ISMIP7_CHAIN_NOPROGRESS="$RETRY" \
+sbatch --dependency=afterok:"${SLURM_JOB_ID}" --export=ALL \
        antarctica/scripts/batch_runners/nots_projection.sbatch

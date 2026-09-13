@@ -44,6 +44,18 @@ def sh(cmd, env):
         raise SystemExit(f"command failed ({rc}): {cmd}")
 
 
+def checkpoint_year(chk):
+    r"""The model year the driver recorded in ``chk``, or None if it has none.
+
+    Firedrake writes ``t_yr`` as a plain HDF5 root attribute, so this reads it
+    without importing Firedrake and keeps this orchestrator dependency-free.
+    """
+    import h5py
+    with h5py.File(chk, "r") as f:
+        t = f["/"].attrs.get("t_yr")
+    return None if t is None else float(t)
+
+
 def n_cells(msh):
     r"""Element count of a gmsh 2.2 file, from its $Elements block."""
     n = 0
@@ -100,6 +112,22 @@ def main():
         sh(f"{args.launcher} {shlex.quote(args.python)} -u {shlex.quote(args.driver)}", e)
         if not os.path.exists(final):
             raise SystemExit(f"driver did not write {final}")
+        # `final` exists from the previous segment too, so its presence proves
+        # nothing. The driver exits 0 after a stall (simulation.py saves the
+        # last converged year and returns), and adapting a stalled state then
+        # re-attempting the same years loops silently to the end of the
+        # timeline. Compare the year it actually recorded against the one asked
+        # for; the segment counter is not evidence.
+        t_got = checkpoint_year(final)
+        if t_got is None:
+            print(f"WARNING: {final} has no t_yr attribute; cannot confirm the "
+                  f"segment reached {t_end:g}", flush=True)
+        elif t_got < t_end - 1e-6:
+            raise SystemExit(
+                f"segment stopped at t_yr={t_got:g}, short of {t_end:g}: the "
+                f"driver saved its last converged year and exited. Adapting "
+                f"this state would re-attempt the same years. See {final}."
+            )
         return final
 
     def adapt(chk, k, rebuild):

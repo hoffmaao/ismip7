@@ -194,10 +194,18 @@ is 284x to 6330x the ideal, and is why no scaling curve has been quoted from it.
 
 ### 2. `nots_inversion.sbatch` - self-resuming
 
-Defaults reproduce `inversion_icepack2_budd_n3_dg0_logvelnet_2500.h5`: the
-sigma-normalised velocity misfit with ISSM's logarithmic term, the pointwise
-dH/dt term, and the integrated net mass-balance constraint that is off by
-default in the repo. `nots_submit_inversions.sh [B|C|BC]` submits the two 2 km
+Defaults write `inversion_icepack2_rc_n3_dg0_logvelnet_2500.h5` under the
+settings the 2500 m result came from: the sigma-normalised velocity misfit
+with ISSM's logarithmic term, the pointwise dH/dt term, and the integrated
+net mass-balance constraint that is off by default in the repo.
+
+The friction law is the one deliberate difference from that run.
+`nots_env.sh` defaults `ISMIP7_FRICTION` to `regularized_coulomb`, because
+every inversion now runs that law. Budd's shelf gate was a sign test on the
+roundoff residue of the effective pressure, so the Budd MAPs that predate the
+fix have to be re-inverted; pass `ISMIP7_FRICTION=budd` explicitly for those.
+
+`nots_submit_inversions.sh [B|C|BC]` submits the two 2 km
 strategies (B: cell-mean BedMachine sampling on the 20 km-interior mesh; C: the
 5 km-interior mesh with vertex sampling) to `long` on Sapphire Rapids at 32
 ranks, each named so the converged 2500 m map is never touched.

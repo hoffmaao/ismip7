@@ -17,10 +17,12 @@
 # layout from scontrol, so a chain never changes rank count mid-run -- the
 # inversion now refuses a warm start whose dof ordering differs anyway.
 #
-# Defaults reproduce inversion_icepack2_budd_n3_dg0_logvelnet_2500.h5: the
-# sigma-normalised velocity chi^2 plus ISSM's logarithmic misfit, the pointwise
-# dH/dt term, and the integrated net mass-balance term (off by default in the
-# repo) that takes grounding-line discharge from 1628 to 2211 Gt/yr.
+# Defaults write inversion_icepack2_rc_n3_dg0_logvelnet_2500.h5 under the
+# settings the 2500 m result came from: the sigma-normalised velocity chi^2
+# plus ISSM's logarithmic misfit, the pointwise dH/dt term, and the integrated
+# net mass-balance term (off by default in the repo) that takes grounding-line
+# discharge from 1628 to 2211 Gt/yr. The friction law is the one deliberate
+# difference: nots_env.sh defaults ISMIP7_FRICTION to regularized_coulomb.
 
 #SBATCH -J ismip7_inv
 #SBATCH -p long
@@ -52,7 +54,7 @@ export ISMIP7_MAXITER="${ISMIP7_MAXITER:-200}"
 export ISMIP7_RASTER_SAMPLE="${ISMIP7_RASTER_SAMPLE:-vertex}"
 # Name the output explicitly: without it every run, including a smoke test,
 # writes the production filename and can silently replace a converged map.
-export ISMIP7_MAP_OUT="${ISMIP7_MAP_OUT:-$ISMIP7_REPO/antarctica/mesh/inversion_icepack2_budd_n3_dg0_logvelnet_${ISMIP7_LC}.h5}"
+export ISMIP7_MAP_OUT="${ISMIP7_MAP_OUT:-$ISMIP7_REPO/antarctica/mesh/inversion_icepack2_rc_n3_dg0_logvelnet_${ISMIP7_LC}.h5}"
 DONE="${ISMIP7_MAP_OUT}.done"
 LOG="logs/ismip7_inv_${SLURM_JOB_ID}.out"
 

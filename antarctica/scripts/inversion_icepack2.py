@@ -101,7 +101,7 @@ from icepack2_tools.prior import (
 from icepack2_tools.thermo_model import compute_fluidity_prior
 from icepack2_tools.forcing import (load_racmo_smb_climatology,
                                     load_mean_annual_surface_temperature)
-from mesh_naming import get_buffer_m, mesh_filename
+from mesh_naming import adapt_lineage, get_buffer_m, mesh_filename
 
 lc = _lc()
 lc_coarse = _lc_coarse()
@@ -682,7 +682,7 @@ def main():
     stop_manager()
     prob = NonlinearVariationalProblem(F, z, form_compiler_parameters=fc_params)
     slvr = NonlinearVariationalSolver(prob, solver_parameters=sparams)
-    # Always use continuation — single solve at full exponents can fail
+    # Always use continuation - single solve at full exponents can fail
     # with checkpoint parameters that create ill-conditioned systems.
     # Ramp n_flow (1 → n_flow_val) and m_slide (1 → m_slide_val) together.
     PETSc.Sys.Print(
@@ -906,7 +906,7 @@ def main():
     def forward(theta_ctrl, phi_ctrl):
         clear_caches()
         F_ctrl = build_F(theta_ctrl, phi_ctrl)
-        # Continuation inside annotation for robustness — ramp both
+        # Continuation inside annotation for robustness - ramp both
         # n_flow and m_slide on the same [0,1] parameter.
         for t in np.linspace(0.0, 1.0, 5):
             n_flow.assign(1.0 + t * (n_flow_val - 1.0))
@@ -1099,6 +1099,11 @@ def main():
             # "firedrake_default", so this is how the forward names its own
             # mesh and picks the matching per-mesh boundary-id sidecar.
             chk.set_attr("/", "mesh_basename", os.path.basename(mesh_fn))
+            # An inversion on an adapted mesh inherits its lineage, so the MAP
+            # records the count the mesh name already carries.
+            _adapt_n = adapt_lineage(mesh_fn)[1]
+            if _adapt_n:
+                chk.set_attr("/", "adapt_count", _adapt_n)
             # Mesh PARAMETERS as well as the basename (Dan/David's scheme,
             # merged from upstream/integration). The forward resolves its
             # boundary_ids sidecar from these rather than from its own

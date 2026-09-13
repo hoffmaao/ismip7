@@ -25,8 +25,6 @@ from timing_campaign import (
     BUFFER_M,
     CAMPAIGN_TAG,
     CACHE_TAG,
-    INVERSION_MAXITER,
-    INVERSION_TAG,
     MEMORY_BY_LC,
     SOLVER_MODE,
     SOURCE_INVERSION_BASENAME,
@@ -35,6 +33,8 @@ from timing_campaign import (
     expected_dt,
     expected_t_end,
     inversion_cores,
+    inversion_maxiter,
+    inversion_tag,
     mesh_basename,
     mesh_inversion_basename,
     mesh_inversion_map_path,
@@ -203,6 +203,7 @@ class CampaignManager:
         self.inversion = Path(args.inversion).resolve()
         self.partition = args.partition
         self.walltime = args.walltime
+        self.maxiter = inversion_maxiter(args.maxiter)
         self.dry_run = args.dry_run
         self.force = args.force
         self.assume_valid_caches = args.assume_valid_caches
@@ -215,6 +216,9 @@ class CampaignManager:
         self.solver_fingerprint = solver_configuration_fingerprint(
             self.solver_configuration
         )
+        # Keep path helpers and validate_cache_manifest in lockstep with the
+        # CLI/Makefile maxiter for this process.
+        os.environ["ISMIP7_TIMING_INVERSION_MAXITER"] = str(self.maxiter)
         self.cache_dir.mkdir(parents=True, exist_ok=True)
         self.timing_dir.mkdir(parents=True, exist_ok=True)
         self.logs_dir.mkdir(parents=True, exist_ok=True)
@@ -313,11 +317,18 @@ class CampaignManager:
         except FileNotFoundError as exc:
             return False, f"cache source unavailable: {exc}"
 
-        mesh_map = mesh_inversion_map_path(self.root, lc, lc_coarse)
+        mesh_map = mesh_inversion_map_path(
+            self.root, lc, lc_coarse, maxiter=self.maxiter
+        )
         candidates = []
         if mesh_map.is_file():
             candidates.append(
-                (sha256_file(mesh_map), mesh_inversion_basename(lc, lc_coarse))
+                (
+                    sha256_file(mesh_map),
+                    mesh_inversion_basename(
+                        lc, lc_coarse, maxiter=self.maxiter
+                    ),
+                )
             )
         if not require_mesh_inversion:
             try:
@@ -347,16 +358,20 @@ class CampaignManager:
         return False, details[0] if details else "cache provenance mismatch"
 
     def inversion_map_path(self, lc, lc_coarse):
-        return mesh_inversion_map_path(self.root, lc, lc_coarse)
+        return mesh_inversion_map_path(
+            self.root, lc, lc_coarse, maxiter=self.maxiter
+        )
 
     def inversion_paths(self, lc, lc_coarse):
         ncores = inversion_cores(lc)
         return (
             self.inversion_map_path(lc, lc_coarse),
             mesh_inversion_timing_json_path(
-                self.root, lc, lc_coarse, ncores
+                self.root, lc, lc_coarse, ncores, maxiter=self.maxiter
             ),
-            mesh_inversion_status_path(self.root, lc, lc_coarse),
+            mesh_inversion_status_path(
+                self.root, lc, lc_coarse, maxiter=self.maxiter
+            ),
             ncores,
         )
 
@@ -382,7 +397,7 @@ class CampaignManager:
             if (
                 int(record.get("lc", -1)) == int(lc)
                 and int(record.get("lc_coarse", -1)) == int(lc_coarse)
-                and int(record.get("maxiter", -1)) == INVERSION_MAXITER
+                and int(record.get("maxiter", -1)) == int(self.maxiter)
                 and int(record.get("ncores", -1)) == int(ncores)
                 and os.path.realpath(str(record.get("map_path", "")))
                 == os.path.realpath(map_path)
@@ -459,7 +474,6 @@ class CampaignManager:
                 lc, lc_coarse
             )
             cache, manifest = cache_paths(self.cache_dir, lc, lc_coarse)
-            raw = cache.with_suffix(".parallel.h5")
             map_raw = map_path.with_name(map_path.stem + ".parallel.h5")
             exports = {
                 "ISMIP7_LC": lc,
@@ -469,13 +483,14 @@ class CampaignManager:
                 "ISMIP7_BNDIDS": boundary,
                 # Prepare cache is the warm start; imported Hoffman MAP is not
                 # read by the invert (controls/geometry/mixed state come from
-                # the cache). The post-invert prepare uses the new 1-core MAP.
+                # the cache). After invert, the full-state MAP is published as
+                # the timing cache (no second cold prepare).
                 "ISMIP7_WARM_START": cache,
                 "ISMIP7_SKIP_CONTINUATION": "1",
                 "ISMIP7_MAP_OUT": map_path,
                 "ISMIP7_MAP_OUT_RAW": map_raw,
                 "ISMIP7_INVERSION_TIMING_JSON": timing_json,
-                "ISMIP7_MAXITER": INVERSION_MAXITER,
+                "ISMIP7_MAXITER": self.maxiter,
                 "ISMIP7_FRICTION": "budd",
                 "ISMIP7_GEOMETRY_SPACE": "dg0",
                 "ISMIP7_N_FLOW": "3.0",
@@ -490,11 +505,11 @@ class CampaignManager:
                 "ISMIP7_DIAGNOSTIC_LINEAR_SOLVER": SOLVER_MODE,
                 "ISMIP7_SNES_DIVERGENCE_TOL": SNES_DIVERGENCE_TOL_DEFAULT,
                 "ISMIP7_RESCUE_ENABLED": "1",
-                "ISMIP7_TIMING_CACHE_RAW": raw,
                 "ISMIP7_TIMING_CACHE": cache,
                 "ISMIP7_TIMING_CACHE_MANIFEST": manifest,
                 "ISMIP7_TIMING_INVERSION_STATUS": status_path,
-                "ISMIP7_TIMING_INVERSION_TAG": INVERSION_TAG,
+                "ISMIP7_TIMING_INVERSION_TAG": inversion_tag(self.maxiter),
+                "ISMIP7_TIMING_INVERSION_MAXITER": self.maxiter,
             }
             self._submit(
                 f"timing_inv_{lc}_{lc_coarse}",
@@ -938,6 +953,15 @@ def parse_args():
     )
     parser.add_argument("--partition", default="general")
     parser.add_argument("--walltime", default="12:00:00")
+    parser.add_argument(
+        "--maxiter",
+        type=int,
+        default=None,
+        help=(
+            "L-BFGS iterations for the timing-inversion stage "
+            f"(default {inversion_maxiter()})"
+        ),
+    )
     parser.add_argument("--dry-run", action="store_true")
     parser.add_argument(
         "--assume-valid-caches",

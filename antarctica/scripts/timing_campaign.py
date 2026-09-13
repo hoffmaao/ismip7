@@ -63,8 +63,29 @@ CAMPAIGN_TAG = (
 )
 AMB_PROBE_TAG = f"{CAMPAIGN_TAG}_ambdiv_probe"
 CACHE_TAG = "scpc_mumps_dg0_logvelnet_v3"
-INVERSION_TAG = f"{CACHE_TAG}_5step"
-INVERSION_MAXITER = 5
+# Per-mesh short invert length. Override with ISMIP7_TIMING_INVERSION_MAXITER
+# or `make timing-inversion TIMING_INVERSION_MAXITER=5` for a debug pass.
+INVERSION_MAXITER_DEFAULT = 250
+
+
+def inversion_maxiter(override=None):
+    if override is not None:
+        return int(override)
+    return int(
+        os.environ.get(
+            "ISMIP7_TIMING_INVERSION_MAXITER",
+            str(INVERSION_MAXITER_DEFAULT),
+        )
+    )
+
+
+def inversion_tag(maxiter=None):
+    return f"{CACHE_TAG}_{inversion_maxiter(maxiter)}iter"
+
+
+# Import-time defaults (env may still override via the helpers above).
+INVERSION_MAXITER = inversion_maxiter()
+INVERSION_TAG = inversion_tag(INVERSION_MAXITER)
 
 MATRIX_T_START = 2015.0
 MATRIX_STEPS = 5
@@ -87,24 +108,25 @@ def inversion_cores(lc):
     return 32 if int(lc) < 2500 else 16
 
 
-def mesh_inversion_basename(lc, lc_coarse):
+def mesh_inversion_basename(lc, lc_coarse, maxiter=None):
+    n = inversion_maxiter(maxiter)
     return (
         f"inversion_icepack2_budd_n3_dg0_logvelnet_"
-        f"{int(lc)}_{int(lc_coarse)}_5step.h5"
+        f"{int(lc)}_{int(lc_coarse)}_{n}iter.h5"
     )
 
 
-def mesh_inversion_map_path(root, lc, lc_coarse):
+def mesh_inversion_map_path(root, lc, lc_coarse, maxiter=None):
     return (
         Path(root)
         / "results"
         / "timing"
         / "inversion"
-        / mesh_inversion_basename(lc, lc_coarse)
+        / mesh_inversion_basename(lc, lc_coarse, maxiter=maxiter)
     )
 
 
-def mesh_inversion_timing_json_path(root, lc, lc_coarse, ncores=None):
+def mesh_inversion_timing_json_path(root, lc, lc_coarse, ncores=None, maxiter=None):
     if ncores is None:
         ncores = inversion_cores(lc)
     return (
@@ -112,18 +134,21 @@ def mesh_inversion_timing_json_path(root, lc, lc_coarse, ncores=None):
         / "results"
         / "timing"
         / (
-            f"inversion_timing_{INVERSION_TAG}_{int(lc)}_{int(lc_coarse)}"
-            f"_{int(ncores)}.json"
+            f"inversion_timing_{inversion_tag(maxiter)}"
+            f"_{int(lc)}_{int(lc_coarse)}_{int(ncores)}.json"
         )
     )
 
 
-def mesh_inversion_status_path(root, lc, lc_coarse):
+def mesh_inversion_status_path(root, lc, lc_coarse, maxiter=None):
     return (
         Path(root)
         / "results"
         / "timing"
-        / f"status_inversion_{INVERSION_TAG}_{int(lc)}_{int(lc_coarse)}.txt"
+        / (
+            f"status_inversion_{inversion_tag(maxiter)}"
+            f"_{int(lc)}_{int(lc_coarse)}.txt"
+        )
     )
 
 

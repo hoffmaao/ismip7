@@ -8,7 +8,7 @@
 #   inversion     verify the imported improved DG0 logvelnet inversion
 #   redistribute  rewrite the complete inversion checkpoint on 1 core
 #   timing-prepare  prepare/repack one exact-mesh state for all 10 meshes
-#   timing-inversion  5-step logvelnet invert per mesh; republish cache
+#   timing-inversion  per-mesh logvelnet invert (TIMING_INVERSION_MAXITER, default 250); republish cache
 #   timing-cache-audit  report the exact initial FV tendency of prepared caches
 #   timing-amb-probe  test exact div(h*u) cancellation on one prepared cache
 #   timing-scout    submit the lowest retained core count for each mesh
@@ -51,6 +51,8 @@ TIMING_CACHE_DIR ?= $(CURDIR)/results/timing/cache
 TIMING_RESTART ?=
 TIMING_ONLY_MESH ?=
 TIMING_SCOUT_MONITOR ?=
+TIMING_INVERSION_MAXITER ?= 250
+TIMING_INVERSION_TIME ?= 24:00:00
 SBATCH_WAIT ?=
 FORCE_TIMING ?=
 SLURM_PARTITION ?= general
@@ -285,7 +287,8 @@ timing-prepare:
 timing-inversion:
 	python scripts/manage_timing_campaign.py invert \
 	  --inversion "$(TIMING_INVERSION)" --cache-dir "$(TIMING_CACHE_DIR)" \
-	  --partition "$(SLURM_PARTITION)" --walltime "$(SLURM_TIME)" \
+	  --partition "$(SLURM_PARTITION)" --walltime "$(TIMING_INVERSION_TIME)" \
+	  --maxiter "$(TIMING_INVERSION_MAXITER)" \
 	  $(if $(TIMING_ONLY_MESH),--only-mesh "$(TIMING_ONLY_MESH)",) \
 	  $(if $(FORCE_TIMING),--force,)
 
@@ -326,7 +329,8 @@ timing-dry-run:
 	  $(if $(TIMING_ONLY_MESH),--only-mesh "$(TIMING_ONLY_MESH)",)
 	python scripts/manage_timing_campaign.py invert --dry-run --assume-valid-caches \
 	  --inversion "$(TIMING_INVERSION)" --cache-dir "$(TIMING_CACHE_DIR)" \
-	  --partition "$(SLURM_PARTITION)" --walltime "$(SLURM_TIME)" \
+	  --partition "$(SLURM_PARTITION)" --walltime "$(TIMING_INVERSION_TIME)" \
+	  --maxiter "$(TIMING_INVERSION_MAXITER)" \
 	  $(if $(TIMING_ONLY_MESH),--only-mesh "$(TIMING_ONLY_MESH)",)
 	python scripts/manage_timing_campaign.py scout --dry-run --assume-valid-caches \
 	  --inversion "$(TIMING_INVERSION)" --cache-dir "$(TIMING_CACHE_DIR)" \

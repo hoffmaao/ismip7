@@ -593,17 +593,21 @@ The stages and contracts are:
    publishes the HDF5 file and JSON manifest atomically. Mesh, inversion,
    physics, solver, or cache-schema changes invalidate it.
 3. **Per-mesh short inversion (`make timing-inversion`)** — after a valid
-   prepared cache exists, one five-iteration L-BFGS job per mesh re-inverts
-   with the log-velocity + dH/dt + net-balance objective
+   prepared cache exists, one L-BFGS job per mesh re-inverts with the
+   log-velocity + dH/dt + net-balance objective
    (`ISMIP7_LOG_VEL_WEIGHT=auto`, `ISMIP7_DHDT_WEIGHT=1`,
-   `ISMIP7_DHDT_NET_SIGMA=10`). The job warm-starts from that mesh's prepared
-   cache (controls, fluidity prior, geometry, and mixed diagnostic state) and
-   skips the cold `1→n` continuation. Ranks are 32 for LC &lt; 2500 m and 16
-   otherwise; memory follows the forward `MEMORY_BY_LC` budgets. The parallel
-   MAP is rewritten on one rank to
-   `results/timing/inversion/…_{lc}_{lc_coarse}_5step.h5`, a profiling JSON is
-   written under `results/timing/`, then the timing cache is republished from
-   that 1-core MAP so scout/scale provenance points at the short invert.
+   `ISMIP7_DHDT_NET_SIGMA=10`). Default length is
+   `TIMING_INVERSION_MAXITER=250` (override with e.g. `=5` for a debug pass);
+   walltime defaults to `TIMING_INVERSION_TIME=24:00:00`. The job warm-starts
+   from that mesh's prepared cache (controls, fluidity prior, geometry, and
+   mixed diagnostic state) and skips the cold `1→n` continuation. Ranks are 32
+   for LC &lt; 2500 m and 16 otherwise; memory follows the forward
+   `MEMORY_BY_LC` budgets. The parallel MAP is rewritten on one rank to
+   `results/timing/inversion/…_{lc}_{lc_coarse}_{N}iter.h5` with the full
+   mixed diagnostic state, a profiling JSON is written under
+   `results/timing/`, then that checkpoint is published as the timing cache
+   (no second cold prepare) so scout/scale provenance points at the short
+   invert.
 4. **Cache audit / AMB probe** — optional diagnostics on a prepared cache:
    ```console
    make timing-cache-audit TIMING_ONLY_MESH=2500/25000 \

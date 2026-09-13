@@ -82,7 +82,11 @@ FIG_DIR = os.path.join(_ROOT, "figs")
 # Repo root on the path so we can import the shared dual-friction operator.
 sys.path.insert(0, os.path.dirname(_ROOT))
 from icepack2_tools.boundary import load_boundary_ids
-from icepack2_tools.dual_friction import build_rc_residual, weertman_anchor
+from icepack2_tools.dual_friction import (
+    build_rc_residual,
+    effective_pressure,
+    weertman_anchor,
+)
 from icepack2_tools.geometry import cg1_lift, sample_to_geometry
 from icepack2_tools.grounding import height_above_flotation
 from icepack2_tools.mpi_stats import (global_mean, global_range,
@@ -609,6 +613,13 @@ def main():
     # inside weertman_anchor (a cell-wise surface has no cell gradient); the
     # anchor is a fixed reference scaling, not a force in the residual.
     C_w0 = weertman_anchor(H, s, u_obs, m_slide_val, Q_g)
+    # Budd pins N_hat=1 at the inversion geometry; freeze N_ref with the MAP /
+    # timing-cache so forwards reproduce the inverted friction at t=0.
+    N_ref = None
+    if FRICTION == "budd":
+        N_ref = Function(Q_g, name="N_ref").interpolate(
+            max_value(effective_pressure(H, s), Constant(0.0))
+        )
     if USE_RESIDUAL:
         law_name = ("Budd N_hat (exact-zero shelf, delta="
                     f"{BUDD_DELTA:.3f}, alpha_gl={ALPHA_GL:.2f})"
@@ -1168,7 +1179,7 @@ def main():
     # has been bitten by exactly that class of look-alike MAP before (see
     # ../GEOMETRY_DISCRETIZATION.md on the geometry tag), and MAPs are
     # gitignored, so the checkpoint is the only place this provenance can live.
-    def save_map(path):
+    def save_map(path, *, full_state=False):
         with fd.CheckpointFile(path, "w") as chk:
             chk.save_mesh(mesh)
             chk.save_function(theta, name="log_friction")
@@ -1179,6 +1190,15 @@ def main():
             chk.save_function(b, name="bed")
             chk.save_function(s, name="surface")
             chk.save_function(A_prior, name="fluidity_prior")
+            if full_state:
+                chk.save_function(z.subfunctions[0], name="velocity")
+                chk.save_function(z.subfunctions[1], name="membrane_stress")
+                chk.save_function(z.subfunctions[2], name="basal_stress")
+                chk.save_function(H, name="H_init")
+                chk.save_function(phi_eff, name="phi_eff")
+                chk.save_function(C_w0, name="C_w0")
+                if N_ref is not None:
+                    chk.save_function(N_ref, name="N_ref")
             # The .msh this MAP was inverted on. A CheckpointFile mesh is named
             # "firedrake_default", so this is how the forward names its own
             # mesh and picks the matching per-mesh boundary-id sidecar.
@@ -1201,6 +1221,24 @@ def main():
             chk.set_attr("/", "gamma_phi", float(GAMMA_PHI))
             chk.set_attr("/", "dhdt_weight", float(dhdt_w))
             chk.set_attr("/", "dhdt_net_sigma", net_sigma_used)
+            if full_state:
+                from icepack2_tools.runconfig import TARGET_MESH_GEOMETRY_METHOD
+                from icepack2_tools.solverconfig import diagnostic_solver_mode
+                from timing_campaign import MATRIX_T_START as _t0
+                chk.set_attr("/", "t_yr", float(_t0))
+                chk.set_attr("/", "friction", str(FRICTION))
+                chk.set_attr("/", "geometry_space", str(geometry_space))
+                chk.set_attr("/", "n_flow", float(n_flow_val))
+                chk.set_attr("/", "a4_factor", float(a4_factor))
+                chk.set_attr(
+                    "/", "diagnostic_solver_mode", diagnostic_solver_mode()
+                )
+                chk.set_attr(
+                    "/", "geometry_source", os.path.realpath(bm_fn)
+                )
+                chk.set_attr(
+                    "/", "geometry_source_method", TARGET_MESH_GEOMETRY_METHOD
+                )
 
     # ── L-BFGS-B Inversion ──
     max_iter = int(os.environ.get("ISMIP7_MAXITER", "500"))
@@ -1440,24 +1478,28 @@ def main():
         if COMM_WORLD.rank == 0:
             PETSc.Sys.Print(f"Inversion timing record -> {timing_json}")
 
-    # ── Final forward solve ──
-    # The single-shot solve at full exponents can fail, and the old code then
-    # SAVED the failed Newton state as "velocity" while claiming the last
-    # optimization state was used (the message said so, but z was never
-    # restored). The Aug 3 dg0 32 km MAP carries a 2745 m/yr-RMS velocity this
-    # way -- discovered only when compare_dhdt.py scored it against MEaSUREs.
-    # Now: restore the last good optimization state on failure, and refuse to
-    # save any velocity whose misfit grossly disagrees with the optimizer's
-    # (a forward re-solves the diagnostic from theta/phi anyway; a missing
-    # velocity is an inconvenience, a silently wrong one poisons everything
-    # downstream that trusts the checkpoint).
+    # ── Final diagnostic ──
+    # Use the same EquationSolver path as L-BFGS forwards, starting from
+    # z_backup. The setup-time NonlinearVariationalSolver (slvr) is a different
+    # object and, after line-search evals, can start from a z that no longer
+    # matches result.x -- that path burned ~30 min then ConvergenceError on the
+    # 2500/25000 timing invert while annotated forwards had been fine.
     PETSc.Sys.Print("\nFinal forward solve...")
     stop_manager()
+    z.assign(z_backup)
+    n_flow.assign(n_flow_val)
+    m_slide.assign(m_slide_val)
     try:
-        slvr.solve()
+        EquationSolver(
+            build_F(theta, phi) == 0,
+            z,
+            solver_parameters=sparams,
+            form_compiler_parameters=fc_params,
+        ).solve()
     except fd.ConvergenceError:
-        PETSc.Sys.Print("  Final solve failed; restoring last good "
-                        "optimization state")
+        PETSc.Sys.Print(
+            "  Final solve failed; restoring last good optimization state"
+        )
         z.assign(z_backup)
 
     u_sol = z.subfunctions[0]
@@ -1473,32 +1515,25 @@ def main():
     )
     PETSc.Sys.Print(f"  Final misfit (masked): {misfit:.6e}")
 
-    # Update checkpoint with velocity -- unless the state is inconsistent
-    # with the optimization it claims to represent. BOTH sides of the test are
-    # the SAME form, `_vel_chi2`, assembled on the final state and on the last
-    # accepted optimization state: an earlier version compared the dimensional
-    # misfit against a chi^2 and blocked a good velocity at 13.8x (a corrupt
-    # one sits >1000x off). Comparing against last_good_obj would repeat that
-    # error in the other direction, since under use_dhdt that is the combined
-    # objective and its dH/dt part has nothing to do with velocity.
+    # Rewrite the MAP with the full mixed state when the velocity agrees with
+    # the last accepted optimization eval (same _vel_chi2 metric). Timing
+    # caches are published from this checkpoint without a second prepare.
     _guard = float(assemble(_vel_chi2))
     _ref = max(float(last_good_vel_chi2[0]), 1e-30)
     if np.isfinite(_guard) and _guard <= 10.0 * _ref:
-        with fd.CheckpointFile(chk_fn, "a") as chk:
-            chk.save_function(u_sol, name="velocity")
-        PETSc.Sys.Print(f"Saved velocity: {chk_fn}")
+        save_map(chk_fn, full_state=True)
+        PETSc.Sys.Print(f"Saved full mixed-state MAP: {chk_fn}")
     else:
         PETSc.Sys.Print(
-            f"WARNING: NOT saving velocity -- final-state velocity misfit "
+            f"WARNING: NOT saving mixed state -- final-state velocity misfit "
             f"{_guard:.3e} is inconsistent with the last accepted "
-            f"{_ref:.3e} (>10x, same metric). The MAP controls are saved and "
-            f"valid; forwards re-solve the diagnostic from theta/phi and are "
-            f"unaffected."
+            f"{_ref:.3e} (>10x, same metric). Controls-only MAP remains; "
+            f"timing-cache publish from this file will fail until re-run."
         )
 
     # ── Plot ──
-    # Optional: the MAP is already written and the velocity saved above, so a
-    # missing plotting dependency must not fail the run at this point.
+    # Optional: the MAP is already written above, so a missing plotting
+    # dependency must not fail the run at this point.
     try:
         import colorcet as cc
         import matplotlib

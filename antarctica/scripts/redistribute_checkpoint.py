@@ -20,7 +20,15 @@ import firedrake as fd
 from firedrake import COMM_WORLD
 from firedrake.petsc import PETSc
 
-from timing_campaign import CACHE_REQUIRED_FIELDS, atomic_write_json
+from timing_campaign import (
+    CACHE_REQUIRED_FIELDS,
+    CACHE_ROLE,
+    CACHE_SCHEMA_VERSION,
+    MATRIX_T_START,
+    atomic_write_json,
+    sha256_file,
+    solver_configuration_fingerprint,
+)
 
 _ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 MESH_DIR = os.path.join(_ROOT, "mesh")
@@ -84,6 +92,15 @@ def parse_args():
         "--manifest",
         default=None,
         help="Atomically publish a timing-cache provenance JSON manifest",
+    )
+    parser.add_argument(
+        "--publish-timing-cache",
+        action="store_true",
+        help=(
+            "Stamp timing-cache provenance attrs onto the rewritten "
+            "checkpoint (source_inversion = this input MAP). Requires "
+            "--manifest and ISMIP7_MESH."
+        ),
     )
     return parser.parse_args()
 
@@ -199,13 +216,54 @@ def main():
             f"Checkpoint {in_fn} is missing log_friction/log_fluidity "
             "(was it produced by inversion_icepack2.py?)"
         )
-    if args.manifest and root_attrs.get("timing_cache_role"):
+    if args.manifest or args.publish_timing_cache:
         missing_fields = sorted(set(CACHE_REQUIRED_FIELDS) - set(loaded))
         if missing_fields:
             raise ValueError(
                 "Cannot publish incomplete timing cache; missing fields: "
                 + ", ".join(missing_fields)
             )
+
+    if args.publish_timing_cache:
+        if not args.manifest:
+            raise ValueError("--publish-timing-cache requires --manifest")
+        from icepack2_tools.solverconfig import (
+            diagnostic_solver_mode,
+            solver_provenance,
+        )
+        mesh_input = os.environ.get("ISMIP7_MESH", "").strip()
+        if not mesh_input or not os.path.isfile(mesh_input):
+            raise FileNotFoundError(
+                "ISMIP7_MESH must point at the timing mesh when publishing "
+                "a timing cache from an inversion MAP"
+            )
+        map_path = os.path.realpath(in_fn)
+        configuration = solver_provenance()
+        # Prefer attrs already stamped by the invert; fill required provenance.
+        root_attrs = dict(root_attrs)
+        root_attrs.update({
+            "timing_cache_schema_version": CACHE_SCHEMA_VERSION,
+            "timing_cache_role": CACHE_ROLE,
+            "source_inversion": map_path,
+            "source_inversion_sha256": sha256_file(map_path),
+            "source_mesh_sha256": sha256_file(os.path.realpath(mesh_input)),
+            "diagnostic_solver_mode": diagnostic_solver_mode(),
+            "solver_configuration": json.dumps(configuration, sort_keys=True),
+            "solver_configuration_fingerprint": (
+                solver_configuration_fingerprint(configuration)
+            ),
+            "t_yr": float(root_attrs.get("t_yr", MATRIX_T_START)),
+            "friction": str(root_attrs.get("friction", "budd")),
+            "geometry_space": str(root_attrs.get("geometry_space", "dg0")),
+            "n_flow": float(root_attrs.get("n_flow", 3.0)),
+            "a4_factor": float(root_attrs.get("a4_factor", 1.0)),
+        })
+        for key in ("geometry_source", "geometry_source_method",
+                    "mesh_basename", "lc", "lc_coarse", "buffer_m"):
+            if key not in root_attrs or root_attrs[key] in (None, ""):
+                raise ValueError(
+                    f"Cannot publish timing cache; MAP is missing attr {key!r}"
+                )
 
     tmp_fn = out_fn + ".tmp"
     PETSc.Sys.Print(f"Writing redistributed checkpoint: {out_fn}")

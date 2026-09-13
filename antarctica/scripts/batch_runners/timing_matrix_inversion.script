@@ -1,7 +1,8 @@
 #!/bin/bash
 
-# Five-step logvelnet inversion warm-started from the prepared timing cache,
-# then 1-core MAP republish and cache republish from that MAP.
+# Logvelnet inversion warm-started from the prepared timing cache, then
+# 1-core MAP republish and timing-cache publish from that full-state MAP
+# (no second cold prepare).
 
 #SBATCH -J ant_timing_inv
 #SBATCH -p general
@@ -11,7 +12,7 @@
 #SBATCH --mail-user=dlilien@iu.edu
 #SBATCH --nodes=1
 #SBATCH --ntasks-per-node=16
-#SBATCH --time=12:00:00
+#SBATCH --time=24:00:00
 #SBATCH --mem=240G
 #SBATCH -A r00905
 
@@ -36,16 +37,16 @@ map_out="${ISMIP7_MAP_OUT:?ISMIP7_MAP_OUT is required}"
 map_raw="${ISMIP7_MAP_OUT_RAW:?ISMIP7_MAP_OUT_RAW is required}"
 timing_json="${ISMIP7_INVERSION_TIMING_JSON:?ISMIP7_INVERSION_TIMING_JSON is required}"
 warm_start="${ISMIP7_WARM_START:?ISMIP7_WARM_START is required}"
-raw="${ISMIP7_TIMING_CACHE_RAW:?ISMIP7_TIMING_CACHE_RAW is required}"
 final="${ISMIP7_TIMING_CACHE:?ISMIP7_TIMING_CACHE is required}"
 manifest="${ISMIP7_TIMING_CACHE_MANIFEST:?ISMIP7_TIMING_CACHE_MANIFEST is required}"
 status="${ISMIP7_TIMING_INVERSION_STATUS:?ISMIP7_TIMING_INVERSION_STATUS is required}"
-if [ "${raw}" = "${final}" ]; then
-    echo "parallel cache path and published cache path must differ" >&2
-    exit 2
-fi
+mesh="${ISMIP7_MESH:?ISMIP7_MESH is required}"
 if [ "${map_raw}" = "${map_out}" ]; then
     echo "parallel MAP path and published MAP path must differ" >&2
+    exit 2
+fi
+if [ "${map_out}" = "${final}" ]; then
+    echo "MAP path and timing-cache path must differ" >&2
     exit 2
 fi
 if [ ! -f "${warm_start}" ]; then
@@ -53,7 +54,8 @@ if [ ! -f "${warm_start}" ]; then
     exit 2
 fi
 
-mkdir -p "$(dirname "${map_out}")" "$(dirname "${map_raw}")" "$(dirname "${timing_json}")"
+mkdir -p "$(dirname "${map_out}")" "$(dirname "${map_raw}")" \
+    "$(dirname "${timing_json}")" "$(dirname "${final}")"
 
 write_status() {
     status_tmp="${status}.tmp.${SLURM_JOB_ID:-$$}"
@@ -63,7 +65,7 @@ write_status() {
     mv -f "${status_tmp}" "${status}"
 }
 
-# Invert writes the parallel MAP; L-BFGS starts from the prepare cache.
+# Invert writes the parallel full-state MAP; L-BFGS starts from the prepare cache.
 export ISMIP7_MAP_OUT_FINAL="${map_out}"
 export ISMIP7_MAP_OUT="${map_raw}"
 export ISMIP7_SKIP_CONTINUATION="${ISMIP7_SKIP_CONTINUATION:-1}"
@@ -95,32 +97,18 @@ if [ "${map_repack_rc}" -ne 0 ]; then
 fi
 rm -f "${map_raw}"
 
-# Republish the timing cache from the new 1-core per-mesh MAP.
-export ISMIP7_INVERSION="${map_out}"
-unset ISMIP7_WARM_START
-unset ISMIP7_MAP_OUT
-unset ISMIP7_MAP_OUT_RAW
-
-write_status "running phase=prepare"
-set +e
-srun -n "${SLURM_NTASKS}" python -u scripts/prepare_timing_cache.py
-prepare_rc=$?
-set -e
-if [ "${prepare_rc}" -ne 0 ]; then
-    write_status "failed phase=prepare exit_code=${prepare_rc}"
-    exit "${prepare_rc}"
-fi
-
-write_status "running phase=repack"
+# Publish the invert's full mixed state as the timing cache (no cold prepare).
+export ISMIP7_MESH="${mesh}"
+write_status "running phase=cache_publish"
 set +e
 srun -n 1 python -u scripts/redistribute_checkpoint.py \
-    --input "${raw}" --output "${final}" --manifest "${manifest}"
-repack_rc=$?
+    --input "${map_out}" --output "${final}" --manifest "${manifest}" \
+    --publish-timing-cache
+publish_rc=$?
 set -e
-if [ "${repack_rc}" -ne 0 ]; then
-    write_status "failed phase=repack exit_code=${repack_rc}"
-    exit "${repack_rc}"
+if [ "${publish_rc}" -ne 0 ]; then
+    write_status "failed phase=cache_publish exit_code=${publish_rc}"
+    exit "${publish_rc}"
 fi
 
-rm -f "${raw}"
 write_status "finished phase=published exit_code=0"

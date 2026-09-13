@@ -85,30 +85,36 @@ echo "    dt=$ISMIP7_DT t_end=$ISMIP7_T_END auto_resume=$ISMIP7_AUTO_RESUME" \
 # Stop the model a little before the wall clock so the final checkpoint is
 # written and the next job in the chain starts from a complete state. Slurm
 # gives no warning at the limit, it just kills the step, so the budget has to
-# be handed to the driver: ISMIP7_WALL_STOP_MIN is minutes of run time, taken
-# from this job's own TimeLimit less ISMIP7_WALL_MARGIN_MIN for the final
-# checkpoint write and the resubmit below.
-export ISMIP7_WALL_MARGIN_MIN="${ISMIP7_WALL_MARGIN_MIN:-25}"
-if [ -z "${ISMIP7_WALL_STOP_MIN:-}" ]; then
-    tl=$(scontrol show job "$SLURM_JOB_ID" 2>/dev/null \
-         | grep -oE 'TimeLimit=[^ ]+' | cut -d= -f2)
-    export ISMIP7_WALL_STOP_MIN=$(python - "$tl" "$ISMIP7_WALL_MARGIN_MIN" <<'PY'
+# be handed to the driver: ISMIP7_WALL_STOP_MIN is minutes of run time.
+#
+# Derived from THIS job's own TimeLimit, and deliberately not exported: the
+# resubmit below uses --export=ALL, so an exported value would pin every later
+# link in the chain to the first job's limit even when it lands on a partition
+# with a shorter one.
+wall_stop_min="${ISMIP7_WALL_STOP_MIN:-}"
+tl=$(scontrol show job "$SLURM_JOB_ID" 2>/dev/null \
+     | grep -oE 'TimeLimit=[^ ]+' | cut -d= -f2)
+if [ -z "$wall_stop_min" ]; then
+    wall_stop_min=$(python - "$tl" <<'PY'
 import sys
-tl, margin = sys.argv[1], float(sys.argv[2])
-# Slurm renders the limit as [days-]HH:MM:SS, or UNLIMITED.
+tl = sys.argv[1]
+# Minutes held back for the final checkpoint write and the resubmit below.
+MARGIN_MIN = 25.0
+# Slurm renders a limit as [days-]HH:MM:SS or, under one hour, MM:SS.
+days, _, clock = tl.rpartition("-")
+parts = clock.split(":")
 try:
-    days, _, clock = tl.rpartition("-")
-    h, m, s = (float(x) for x in clock.split(":"))
+    h, m, s = ([0.0] * (3 - len(parts)) + [float(x) for x in parts])
     total = (float(days) if days else 0.0) * 1440.0 + h * 60.0 + m + s / 60.0
 except ValueError:
     print(0)                      # UNLIMITED or unparseable: no budget
 else:
-    print(f"{max(total - margin, 0.0):.1f}")
+    print(f"{max(total - MARGIN_MIN, 0.0):.1f}")
 PY
 )
 fi
-echo "    wall budget ${ISMIP7_WALL_STOP_MIN} min (limit ${tl:-?} less ${ISMIP7_WALL_MARGIN_MIN} min)"
-srun -n "${SLURM_NTASKS}" python -u "$DRIVER"
+echo "    wall budget ${wall_stop_min} min (limit ${tl:-?})"
+ISMIP7_WALL_STOP_MIN="$wall_stop_min" srun -n "${SLURM_NTASKS}" python -u "$DRIVER"
 rc=$?
 echo "=== $(date -Is)  forward exit ${rc} ==="
 
@@ -127,38 +133,34 @@ if [ "$CHAIN" != "1" ]; then
     exit 0
 fi
 
-# The drivers print the reached year; ask the timeseries instead, which is the
-# state the next job would resume from. It must be THIS job's timeseries: the
-# results directory is flat and shared, every driver flushes a row per step
-# into it, and the experiment name is built inside the driver, so neither the
+# Ask the driver's own final checkpoint, which is both the state the next job
+# would resume from and the record of why this one stopped: `t_yr` is the year
+# actually reached and `stalled` is the driver's verdict that the solver gave
+# up. It must be THIS job's checkpoint: the results directory is flat and
+# shared, and the experiment name is built inside the driver, so neither the
 # newest file nor a name rebuilt in the shell identifies this run. The driver
-# prints "Saved: <csv>" on every exit, including an early stop, so take the
-# path from our own Slurm log.
-#
-# The same pass reads two other things the driver prints, because a clean exit
-# is not by itself a reason to resubmit: the stall line, which means the solver
-# gave up rather than ran out of time, and the year this job resumed from, so a
-# successor that would re-attempt the same years is refused.
+# prints "Saved: <final.h5>" on every exit, including an early stop, so take
+# the path from our own Slurm log.
 read -r LAST_YEAR STALLED START_YEAR <<EOF
 $(NM_LOG="logs/ismip7_fwd_${SLURM_JOB_ID}.out" python - <<'PY'
-import csv, os, re
+import os, re
 log = os.environ["NM_LOG"]
-csv_fn, stalled, start_year = None, 0, ""
+chk_fn, start_year = None, ""
 with open(log, errors="replace") as f:
     for line in f:
-        if line.startswith("Saved: ") and line.rstrip().endswith("timeseries.csv"):
-            csv_fn = line[len("Saved: "):].strip()
-        elif "rescue ladder + subcycles exhausted" in line:
-            stalled = 1
+        if line.startswith("Saved: ") and line.rstrip().endswith("_final.h5"):
+            chk_fn = line[len("Saved: "):].strip()
         else:
             m = re.search(r"Restart: evolved geometry .*t_yr=([-\d.eE+]+)", line)
             if m:
                 start_year = m.group(1)
-last = ""
-if csv_fn and os.path.exists(csv_fn):
-    rows = list(csv.DictReader(open(csv_fn)))
-    if rows:
-        last = rows[-1]["year"]
+last, stalled = "", 0
+if chk_fn and os.path.exists(chk_fn):
+    import h5py
+    with h5py.File(chk_fn, "r") as h:
+        t = h["/"].attrs.get("t_yr")
+        last = "" if t is None else repr(float(t))
+        stalled = int(h["/"].attrs.get("stalled", 0))
 print(last or "-", stalled, start_year or "-")
 PY
 )
@@ -171,24 +173,42 @@ if [ "$STALLED" = "1" ]; then
     exit 1
 fi
 if [ "$LAST_YEAR" = "-" ] || [ -z "$LAST_YEAR" ]; then
-    echo "chain: could not read this job's last year from" \
+    echo "chain: could not read this job's final checkpoint from" \
          "logs/ismip7_fwd_${SLURM_JOB_ID}.out; not resubmitting"
     exit 0
 fi
-if [ "$START_YEAR" != "-" ]; then
-    progressed=$(python -c "print(1 if float('$LAST_YEAR') > float('$START_YEAR') + 1e-6 else 0)")
-    if [ "$progressed" = "0" ]; then
-        echo "chain: no progress (resumed at ${START_YEAR}, ended at ${LAST_YEAR});" \
-             "not resubmitting into an unbounded retry loop"
-        exit 1
-    fi
-fi
+# Finished before anything else: a completed run re-submitted under
+# ISMIP7_AUTO_RESUME resumes at t_end, runs zero steps and ends at t_end, and
+# that is success, not the no-progress case below.
 done_yet=$(python -c "print(1 if float('$LAST_YEAR') >= float('$T_END') - 1e-6 else 0)")
 if [ "$done_yet" = "1" ]; then
     echo "chain: reached t_end ${T_END} at ${LAST_YEAR}, finished"
     exit 0
 fi
+# A clean exit short of t_end that also made no progress is not the wall-clock
+# case the chain exists for. Allow exactly one retry, in case the job died for
+# a transient reason before its first step, then stop rather than loop.
+RETRY="${ISMIP7_CHAIN_NOPROGRESS:-0}"
+if [ "$START_YEAR" != "-" ]; then
+    progressed=$(python -c "print(1 if float('$LAST_YEAR') > float('$START_YEAR') + 1e-6 else 0)")
+    if [ "$progressed" = "0" ]; then
+        if [ "$RETRY" != "0" ]; then
+            echo "chain: no progress again (resumed at ${START_YEAR}, ended at" \
+                 "${LAST_YEAR}) after a retry; stopping"
+            exit 1
+        fi
+        echo "chain: no progress (resumed at ${START_YEAR}, ended at ${LAST_YEAR});" \
+             "retrying once"
+        RETRY=1
+    else
+        RETRY=0
+    fi
+fi
 
 echo "chain: at ${LAST_YEAR} of ${T_END}, resubmitting"
-sbatch --dependency=afterok:"${SLURM_JOB_ID}" --export=ALL \
+# Without the derived budget: the successor may land on a partition with a
+# different limit and must derive its own.
+unset ISMIP7_WALL_STOP_MIN
+sbatch --dependency=afterok:"${SLURM_JOB_ID}" \
+       --export=ALL,ISMIP7_CHAIN_NOPROGRESS="$RETRY" \
        antarctica/scripts/batch_runners/nots_projection.sbatch

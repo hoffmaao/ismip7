@@ -113,7 +113,11 @@ average - the L2 projection of the CG1 interpolant, which is what a DG0 field
 *means* - is 42% smoother, much less peaked, lands on BedMachine's true front
 thickness (median 152 m), and reproduces the CG1 driving force to 1%.
 `geometry.sample_to_geometry` does this; do not replace it with a direct
-interpolate onto the DG0 space.
+interpolate onto the DG0 space. "Cell average" here is that L2 projection of
+the vertex interpolant (`ISMIP7_RASTER_SAMPLE=vertex`, the default), not the
+raster's true mean over the cell: sampling the true mean is a separate option
+(`cell_mean`) and measures ROUGHER across exactly these facet jumps, so it is
+kept only for the record. See its row in `antarctica/README.md`.
 
 The same rule applies to the RACMO SMB climatology, which sets the mass budget
 and the `a_ref` balance: `forcing.load_racmo_smb_climatology` cell-averages onto

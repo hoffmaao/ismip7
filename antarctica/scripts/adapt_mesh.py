@@ -43,6 +43,8 @@ def main():
     ap.add_argument("--out-checkpoint", required=True)
     ap.add_argument("--out-mesh", default=None, help="default: <old basename>_adaptN.msh in antarctica/mesh")
     ap.add_argument("--rebuild-aref", action="store_true")
+    ap.add_argument("--no-remesh", action="store_true",
+                    help="identity test: keep the old mesh (copied under the new name) and only run the transfer")
     args = ap.parse_args()
     t0 = time.time()
     cfg = AdaptMeshConfig.from_env()
@@ -76,8 +78,17 @@ def main():
     new_basename = os.path.splitext(os.path.basename(out_msh))[0]
     PETSc.Sys.Print(f"adapt: {basename} (t={attrs.get('t_yr', '?')}) -> {new_basename}")
 
-    h_des, diag = desired_element_size(mesh, cfg, H, b, u=u)
-    n_ele = remesh_global(mesh, h_des, cfg, out_msh, old_msh, old_sidecar)
+    if args.no_remesh:
+        import shutil
+        if mesh.comm.rank == 0:
+            shutil.copy(old_msh, out_msh)
+            shutil.copy(old_sidecar, os.path.join(MESH_DIR, f"boundary_ids_{new_basename}.json"))
+        mesh.comm.barrier()
+        n_ele = mesh.comm.allreduce(FunctionSpace(mesh, "DG", 0).dof_dset.size)
+        PETSc.Sys.Print("adapt: --no-remesh, transferring onto a fresh load of the same mesh")
+    else:
+        h_des, diag = desired_element_size(mesh, cfg, H, b, u=u)
+        n_ele = remesh_global(mesh, h_des, cfg, out_msh, old_msh, old_sidecar)
     mesh_new = fd.Mesh(out_msh, name="firedrake_default")
 
     bm_fn = sorted(glob.glob(os.path.join(DATA_DIR, "bedmachine", "*.nc")))[0]

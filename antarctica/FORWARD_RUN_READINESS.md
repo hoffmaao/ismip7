@@ -75,7 +75,7 @@ mirror publishes for the two core ESMs against `ISMIP7/AIS` (313 GB on disk).
 | MRI-ESM2-0 ocean so, tf | v3 | v3 | current |
 | MRI-ESM2-0 fracture | v1 | v1 | current |
 | `ctrl` trees, both ESMs (atmosphere and ocean, 2015-2300) | v2, v3 | absent | download for cores 9 and 10 |
-| OCX atmosphere (1979-2025) and `OCX/ocean/{main,cold,warm,vary}` (1950-2025) | v1 | absent | download for core 11; `main` is the core variant |
+| OCX atmosphere `OCX/RACMO2.3p2-ERA/SDBN1-8000m` (acabf, tas, ts, pr, mrro, gradients, 1979-2025) and `OCX/ocean/{main,cold,warm,vary}` (1950-2025) | v1 | absent | download for core 11; `main` is the core variant |
 | ocean `extras` (ct/sa bias and climatology), `grid/ocean/ISMIP7/8km-60m` | v3 | present | fine |
 | `tas`, `ts`, `pr`, `mrro`, gradients for scenarios other than ssp585; 2 km atmosphere; `dEBM2` | v2, v1 | mostly absent | needed only for SMB-height feedback or a dEBM2 member |
 

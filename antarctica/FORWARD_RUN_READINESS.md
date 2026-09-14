@@ -177,11 +177,22 @@ the same Úa mesh, so the comparison isolates the observations:
 | Paolo, Adusumilli | 865.0 Gt/yr | 4.347e-5 | 677.0 Gt/yr |
 | Paolo, Davison, Adusumilli | 1067.4 Gt/yr | 4.700e-5 | 732.0 Gt/yr |
 
-K* rises 8%, and the total-match K rises with the target by 23%, 5.553e-5 to
-6.853e-5. The old table's K* on this mesh sits within 2% of the 2500 m result
-that predates it, so the mesh is not what moved. `calibrate_melt.py` takes the
-newer table by default, `ISMIP7_MELT_OBS_CSV` names either, and the saved npz
-records which one produced it.
+As summary statistics of the fit, K* rises 8% and the total-match K rises with
+the target by 23%, 5.553e-5 to 6.853e-5. The old table's K* on this mesh sits
+within 2% of the 2500 m result that predates it, so the mesh is not what moved.
+`calibrate_melt.py` takes the newer table by default, `ISMIP7_MELT_OBS_CSV`
+names either, and the saved npz records which one produced it.
+
+A forward reads the per-basin `K_basin`, each basin fitted to its own
+observation, so the melt it applies moves basin by basin. The ratio of new to
+old K_b spans 0.86 to 3.58 with a median near 1.15:
+
+| basin | old K_b | new K_b |
+|---|---|---|
+| 1, Antarctic Peninsula fringe | 2.100e-5 | 7.515e-5 |
+| 7 | 3.724e-5 | 6.314e-5 |
+| 9, Amundsen | 1.464e-4 | 1.935e-4 |
+| 13, the one that falls | 7.922e-5 | 6.850e-5 |
 
 **Still open:** nothing from the August list. Delivered here: the `ssp126`
 ctrlclim default (`icepack2_tools/climatology.py`), the collapse mask in the
@@ -205,7 +216,8 @@ forcing-version audit, the output writer, and the melt calibration above.
    cite it in the README.
 5. Re-check `libmassbffl` against the request's -0.008 kg m-2 s-1 bound under
    the new calibration. The 10-year Úa ssp585 of job 1368723 reached -0.0117 on
-   small grounding-zone cells and the new K is 8% higher, so this needs a
+   small grounding-zone cells, and the per-basin K it reads now rises by up to
+   70% in basin 7, 32% in basin 9 and 3.58 times in basin 1, so this needs a
    decision on whether the bound is about the melt rate or about the cell area
    it is booked over.
 6. Optional: read the provided `ctrl` trees in place of the `ssp126`

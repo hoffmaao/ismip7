@@ -82,24 +82,29 @@ class AnnualOutput:
     step tallies, and only a completed step is added to the year.
 
     A chained run resumes into the same files: when ``out_path`` already
-    exists it is opened in append mode, its ``years`` attribute seeds the
-    written years, and the next year is numbered from the end of that list.
-    Because a year is only ever written at an integer year, a resume must
-    land on a year boundary: ``first_year`` that is not an integer year
-    raises, rather than mislabelling a partial year as a whole one.
+    exists it is opened in append mode and its ``years`` attribute seeds the
+    written years. The partly accumulated year survives the link boundary
+    too: ``state_fields`` / ``state_attrs`` hand it to the run's own
+    checkpoint and ``resume`` takes it back, so a job that stops at 2021.4
+    goes on accumulating 2021 rather than losing four months of flux or
+    relabelling them. The resumed year is taken from that state and must be
+    exactly one past the last year written, so no year is ever renamed.
     """
 
+    #: the per-cell year sums carried across a chained resume
+    ACCUMULATORS = ("acabf", "acabf_correction", "libmassbffl", "licalvf",
+                    "ligroundf")
+    #: dataset names of the in-progress year inside the run's checkpoint
+    STATE_PREFIX = "ismip7_acc_"
+    STATE_THICKNESS = "ismip7_year_start_thickness"
+    STATE_YEAR = "ismip7_year"
+    STATE_YEAR_TIME = "ismip7_year_time"
+
     def __init__(self, mesh, Q_dg, V, out_path, scalars_path, first_year, rho_ratio,
-                 comm=None, log=None):
-        if abs(float(first_year) - round(float(first_year))) > 1e-6:
-            raise ValueError(
-                f"ISMIP7 output accumulates whole years and writes them at "
-                f"integer years, so a run must start (or resume) on a year "
-                f"boundary; got first_year={first_year!r}"
-            )
+                 comm=None, log=None, resume=None):
         self.mesh, self.Q_dg, self.V = mesh, Q_dg, V
         self.out_path, self.scalars_path = out_path, scalars_path
-        self.year = int(round(first_year))          # the year being accumulated (its Jan 1 has passed)
+        self.year = int(np.floor(float(first_year) + 1e-6))   # the year being accumulated (its Jan 1 has passed)
         self.rho_ratio = float(rho_ratio)
         self.comm = comm or mesh.comm
         self.log = log or (lambda s: None)
@@ -107,10 +112,22 @@ class AnnualOutput:
         # the halo too (5650 vs 3772 on one of two ranks of the 32 km mesh)
         self.cell_area = assemble(TestFunction(Q_dg) * dx).dat.data_ro.copy()
         n = len(self.cell_area)
-        self.year_acc = {k: np.zeros(n) for k in ("acabf", "acabf_correction", "libmassbffl", "licalvf", "ligroundf")}
+        self.year_acc = {k: np.zeros(n) for k in self.ACCUMULATORS}
         self.step_acc = {k: np.zeros(n) for k in self.year_acc}
         self.year_time = 0.0
         self.h_year_start = None
+        if resume is not None:
+            if int(resume["year"]) != self.year:
+                raise ValueError(
+                    f"the restart checkpoint was accumulating ISMIP7 year "
+                    f"{int(resume['year'])} but its timeline resumes at "
+                    f"t={float(first_year)!r}, which falls in year {self.year}; "
+                    f"the checkpoint's ISMIP7 state does not belong to it."
+                )
+            for k in self.ACCUMULATORS:
+                self.year_acc[k][:] = resume["acc"][k]
+            self.h_year_start = np.asarray(resume["h_year_start"]).copy()
+            self.year_time = float(resume["year_time"])
         self._phi = TestFunction(Q_dg)
         self._n = fd.FacetNormal(mesh)
         self._gl_cof = fd.Cofunction(Q_dg.dual())
@@ -127,17 +144,18 @@ class AnnualOutput:
             self._chk_mode = "a"
         if self._written_years:
             last = self._written_years[-1]
-            if not last <= self.year <= last + 1:
+            if self.year != last + 1:
                 raise ValueError(
                     f"{os.path.basename(out_path)} already holds years "
-                    f"{self._written_years[0]}-{last}, but this run starts at "
-                    f"{self.year}: resuming here would leave a gap in the "
-                    f"submitted series. Resume from a checkpoint at {last} or "
+                    f"{self._written_years[0]}-{last}, so the next year to "
+                    f"accumulate is {last + 1}, but this run resumes inside "
+                    f"year {self.year}: writing it would rename a year of the "
+                    f"submitted series. Resume from a checkpoint inside "
                     f"{last + 1}, or move the annual file aside."
                 )
-            self.year = last + 1
             self.log(f"  ISMIP7 output: appending to {os.path.basename(out_path)} "
-                     f"({len(self._written_years)} years through {last})")
+                     f"({len(self._written_years)} years through {last}; "
+                     f"{self.year_time:.2f} yr of {self.year} carried over)")
         if self.comm.rank == 0:
             os.makedirs(os.path.dirname(out_path), exist_ok=True)
             new = not os.path.exists(scalars_path)
@@ -185,6 +203,43 @@ class AnnualOutput:
         for k in self.year_acc:
             self.year_acc[k] += self.step_acc[k]
         self.year_time += self.step_time
+
+    # ---- carried across a chained resume ----------------------------------
+    def state_fields(self):
+        r"""The year in progress as DG0 Functions, for the run's checkpoint.
+
+        Firedrake redistributes these on load, so a chained link may run on a
+        different rank count than the one that wrote them."""
+        fields = {}
+        for k in self.ACCUMULATORS:
+            f = Function(self.Q_dg, name=self.STATE_PREFIX + k)
+            f.dat.data[:] = self.year_acc[k]
+            fields[f.name()] = f
+        h0 = Function(self.Q_dg, name=self.STATE_THICKNESS)
+        if self.h_year_start is not None:
+            h0.dat.data[:] = self.h_year_start
+        fields[h0.name()] = h0
+        return fields
+
+    def state_attrs(self):
+        r"""The year being accumulated and how much of it is in the sums."""
+        return {self.STATE_YEAR: int(self.year),
+                self.STATE_YEAR_TIME: float(self.year_time)}
+
+    @classmethod
+    def read_state(cls, chk, mesh):
+        r"""The counterpart of ``state_fields``/``state_attrs``: the resume
+        dict to hand back to the constructor, or None if the checkpoint was
+        written by a run without ISMIP7 output."""
+        if not chk.has_attr("/", cls.STATE_YEAR):
+            return None
+        return {
+            "year": int(chk.get_attr("/", cls.STATE_YEAR)),
+            "year_time": float(chk.get_attr("/", cls.STATE_YEAR_TIME)),
+            "acc": {k: chk.load_function(mesh, name=cls.STATE_PREFIX + k).dat.data_ro.copy()
+                    for k in cls.ACCUMULATORS},
+            "h_year_start": chk.load_function(mesh, name=cls.STATE_THICKNESS).dat.data_ro.copy(),
+        }
 
     # ---- year end ---------------------------------------------------------
     def start_year(self, h_dg):

@@ -105,22 +105,124 @@ def test_a_resume_appends_to_the_annual_file(two_cells, tmp_path):
         assert [int(r["year"]) for r in csv.DictReader(f)] == [2015, 2016, 2017]
 
 
-def test_a_resume_off_a_year_boundary_is_refused(two_cells, tmp_path):
+def test_a_midyear_resume_carries_the_partial_year(two_cells, tmp_path):
+    r"""The wall-clock budget stops a link between steps, so with the default
+    dt=0.1 a chained resume lands mid-year. The flux means of that year must
+    survive the link boundary and stay labelled with their own year."""
     mesh, Q, V = two_cells
-    with pytest.raises(ValueError, match="year boundary"):
+    h = [1500.0, 1500.0]
+    bed = [-500.0, -500.0]
+    out = str(tmp_path / "out" / "annual.h5")
+    scalars = str(tmp_path / "out" / "scalars.csv")
+
+    first = AnnualOutput(mesh, Q, V, out, scalars, first_year=2015, rho_ratio=RHO_RATIO)
+    first.start_year(_dg(Q, h))
+    _write_year(first, Q, V, h, bed)            # year 2015 written, now inside 2016
+    first.year_acc["acabf"][:] = [0.3, 0.3]     # 0.4 yr of accumulated sources
+    first.year_time = 0.4
+    state = (first.state_fields(), first.state_attrs())
+    first.close()
+    assert state[1]["ismip7_year"] == 2016
+    assert state[1]["ismip7_year_time"] == pytest.approx(0.4)
+
+    resume = {
+        "year": state[1]["ismip7_year"],
+        "year_time": state[1]["ismip7_year_time"],
+        "acc": {k: state[0][AnnualOutput.STATE_PREFIX + k].dat.data_ro.copy()
+                for k in AnnualOutput.ACCUMULATORS},
+        "h_year_start": state[0][AnnualOutput.STATE_THICKNESS].dat.data_ro.copy(),
+    }
+    # the next link picks up at t=2016.4, inside the year already in progress
+    second = AnnualOutput(mesh, Q, V, out, scalars, first_year=2016.4,
+                          rho_ratio=RHO_RATIO, resume=resume)
+    assert second.year == 2016
+    assert second.year_time == pytest.approx(0.4)
+    assert np.allclose(second.year_acc["acabf"], [0.3, 0.3])
+    assert second.h_year_start is not None       # the year is in progress, not restarted
+
+    second.begin_step()
+    second.step_acc["acabf"][:] = [0.3, 0.3]
+    second.step_time = 0.6
+    second.commit_step()
+    _write_year(second, Q, V, h, bed)             # year 2016, a whole year of it
+    second.close()
+
+    with fd.CheckpointFile(out, "r") as chk:
+        years = [int(y) for y in chk.get_attr("/", "years").split(",")]
+        loaded = chk.load_mesh()
+        acabf = chk.load_function(loaded, name="acabf", idx=1).dat.data_ro.copy()
+    assert years == [2015, 2016]
+    # mean over the whole year, both links pooled: 0.6 m over 1.0 yr
+    assert np.allclose(acabf, 0.6)
+
+
+def test_the_year_in_progress_round_trips_through_a_checkpoint(two_cells, tmp_path):
+    r"""state_fields/state_attrs and read_state are the two halves of what
+    _save_state writes into the run's own checkpoint."""
+    mesh, Q, V = two_cells
+    h = [1500.0, 1500.0]
+    annual = AnnualOutput(mesh, Q, V, str(tmp_path / "out" / "annual.h5"),
+                          str(tmp_path / "out" / "scalars.csv"),
+                          first_year=2015, rho_ratio=RHO_RATIO)
+    annual.start_year(_dg(Q, h))
+    annual.year_acc["licalvf"][:] = [-2.0, -5.0]
+    annual.year_time = 0.7
+    state_path = str(tmp_path / "state.h5")
+    with fd.CheckpointFile(state_path, "w") as chk:
+        chk.save_mesh(mesh)
+        for name, f in annual.state_fields().items():
+            chk.save_function(f, name=name)
+        for key, val in annual.state_attrs().items():
+            chk.set_attr("/", key, val)
+    annual.close()
+
+    with fd.CheckpointFile(state_path, "r") as chk:
+        loaded = chk.load_mesh()
+        resume = AnnualOutput.read_state(chk, loaded)
+    assert resume["year"] == 2015
+    assert resume["year_time"] == pytest.approx(0.7)
+    assert np.allclose(resume["acc"]["licalvf"], [-2.0, -5.0])
+    assert np.allclose(resume["h_year_start"], h)
+
+
+def test_a_checkpoint_without_output_has_no_state(two_cells, tmp_path):
+    r"""A run that had ISMIP7_OUTPUT off writes no such attrs, and the reader
+    says so rather than raising."""
+    mesh, Q, V = two_cells
+    path = str(tmp_path / "plain.h5")
+    with fd.CheckpointFile(path, "w") as chk:
+        chk.save_mesh(mesh)
+        chk.set_attr("/", "t_yr", 2020.0)
+    with fd.CheckpointFile(path, "r") as chk:
+        assert AnnualOutput.read_state(chk, chk.load_mesh()) is None
+
+
+def test_a_resume_state_from_another_year_is_refused(two_cells, tmp_path):
+    mesh, Q, V = two_cells
+    resume = {
+        "year": 2016, "year_time": 0.4,
+        "acc": {k: np.zeros(2) for k in AnnualOutput.ACCUMULATORS},
+        "h_year_start": np.zeros(2),
+    }
+    with pytest.raises(ValueError, match="does not belong to it"):
         AnnualOutput(mesh, Q, V, str(tmp_path / "out" / "annual.h5"),
                      str(tmp_path / "out" / "scalars.csv"),
-                     first_year=2047.6, rho_ratio=RHO_RATIO)
+                     first_year=2020.2, rho_ratio=RHO_RATIO, resume=resume)
 
 
-def test_a_resume_that_would_leave_a_gap_is_refused(two_cells, tmp_path):
+def test_a_resume_that_would_rename_a_year_is_refused(two_cells, tmp_path):
+    r"""Restarting from an older checkpoint must not write the re-simulated
+    year under the next year's label, shifting the whole submitted axis."""
     mesh, Q, V = two_cells
     h = [1500.0, 1500.0]
     out = str(tmp_path / "out" / "annual.h5")
     scalars = str(tmp_path / "out" / "scalars.csv")
     first = AnnualOutput(mesh, Q, V, out, scalars, first_year=2015, rho_ratio=RHO_RATIO)
     first.start_year(_dg(Q, h))
-    _write_year(first, Q, V, h, [-500.0, -500.0])
+    _write_year(first, Q, V, h, [-500.0, -500.0])     # year 2015 on disk
     first.close()
-    with pytest.raises(ValueError, match="gap in the submitted series"):
+    # a restart from the t=2015.0 checkpoint: year 2015 is already written
+    with pytest.raises(ValueError, match="rename a year"):
+        AnnualOutput(mesh, Q, V, out, scalars, first_year=2015, rho_ratio=RHO_RATIO)
+    with pytest.raises(ValueError, match="rename a year"):
         AnnualOutput(mesh, Q, V, out, scalars, first_year=2030, rho_ratio=RHO_RATIO)

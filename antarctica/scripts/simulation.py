@@ -415,6 +415,7 @@ def setup_model(restart_from=None):
     phys_div = None
     h_dg_state = None
     t_restart = None
+    ismip7_resume = None
     with fd.CheckpointFile(source_chk, "r") as chk:
         _th = chk.load_function(mesh, name="log_friction")
         _ph = chk.load_function(mesh, name="log_fluidity")
@@ -485,6 +486,10 @@ def setup_model(restart_from=None):
                 N_ref, _ = load_onto(chk, mesh, "N_ref", Q_g)
             if chk.has_attr("/", "t_yr"):
                 t_restart = float(chk.get_attr("/", "t_yr"))
+            # The ISMIP7 year in progress, so a link that stopped mid-year
+            # continues the same year's flux means instead of losing them.
+            from icepack2_tools.ismip7_output import AnnualOutput as _AnnualOutput
+            ismip7_resume = _AnnualOutput.read_state(chk, mesh)
             # Guard the resume environment against the checkpoint's recorded
             # state: a silently mismatched friction law or dropped apparent-MB
             # correction runs cleanly but produces wrong physics.
@@ -1040,6 +1045,8 @@ def setup_model(restart_from=None):
         # Resume time (None on a cold start); run_simulation continues the
         # timeline from here instead of the caller's t_start.
         "t_restart": t_restart,
+        # The partly accumulated ISMIP7 year carried by the restart (or None).
+        "ismip7_resume": ismip7_resume,
     }
 
 
@@ -1386,6 +1393,11 @@ def run_simulation(
             # Under DG0 geometry `thickness` IS the transport state.
             if not geom_dg:
                 chk.save_function(h_dg, name="thickness_dg")
+            if annual is not None:
+                for _name, _f in annual.state_fields().items():
+                    chk.save_function(_f, name=_name)
+                for _key, _val in annual.state_attrs().items():
+                    chk.set_attr("/", _key, _val)
             chk.set_attr("/", "t_yr", float(t_now))
             chk.set_attr("/", "friction", str(friction))
             chk.set_attr("/", "geometry_space", "dg0" if geom_dg else "cg1")
@@ -1475,8 +1487,10 @@ def run_simulation(
             mesh, Q_dg, ctx["V"],
             os.path.join(RESULTS_DIR, f"{experiment_name}_{lc}_ismip7_annual.h5"),
             os.path.join(RESULTS_DIR, f"{experiment_name}_{lc}_ismip7_scalars.csv"),
-            first_year=t_start, rho_ratio=float(rho_ratio), log=PETSc.Sys.Print)
-        annual.start_year(h_dg)
+            first_year=t_start, rho_ratio=float(rho_ratio), log=PETSc.Sys.Print,
+            resume=ctx.get("ismip7_resume"))
+        if annual.h_year_start is None:
+            annual.start_year(h_dg)
         PETSc.Sys.Print(f"  ISMIP7 output: yearly fields -> {annual.out_path}")
 
     def _grounded_cells():

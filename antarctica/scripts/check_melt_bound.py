@@ -1,5 +1,5 @@
 #!/usr/bin/env python
-r"""Where does the melt parameterisation exceed the variable request's bound?
+r"""How far does the draft-slope cap move melt past the variable request's bound?
 
     python antarctica/scripts/check_melt_bound.py [--npz results/calibrated_K_per_basin_2000.npz]
 
@@ -10,24 +10,42 @@ grounding-zone cells. Two readings fit that: the parameterisation is too strong
 somewhere, or the writer's ``no_floating_ice`` fill policy reports one hot cell
 as the whole 8 km pixel's value, which the request's own convention asks for.
 
-This separates them on the model side, before any regridding. It rebuilds the
-melt field the forward applies at the reference geometry, with the calibrated
-per-basin K, and reports how much floating AREA sits past the bound. A handful
-of small cells says the grid value is a fill-policy artefact of a nearly
-ice-free pixel; a broad region says the melt is too strong.
+This looks at the first on the model side, before any regridding. At the
+reference geometry, with the calibrated per-basin K, it evaluates the melt
+twice and reports how much floating AREA sits past the bound in each case:
+
+* capped: sin_alpha capped at ISMIP7_SIN_ALPHA_CAP (calibrate_melt's default
+  5e-3), the slope calibrate_melt fitted K against;
+* uncapped: the same slope with no cap, as in the forward, where
+  ``forcing.compute_sin_alpha`` applies none.
+
+The comparison is the point, and the two rows bracket the forward. Both take
+calibrate_melt's slope, grad(draft) projected onto CG1, while ``forcing.compute_sin_alpha`` lifts a DG0 draft with ``cg1_lift``,
+which is smoother. The 10-year run's own budget, 1860 Gt/yr or an area mean of
+1.34 m/yr, falls between the two rows.
+
+The bound is ``min_value_ais`` for ``libmassbffl`` in the same bundled request
+table the writer reads, converted with the writer's year and ice density, so it
+is the bound the compliance checker applies.
 
 Scope: the reference state, with the OI thermal-forcing climatology and the
 BedMachine geometry. A projection's thermal forcing warms above the
-climatology and its shelves thin, so a clean result here bounds the
-parameterisation itself rather than what any particular run reaches.
+climatology and its shelves thin.
 
 Serial. Reuses calibrate_melt's loaders, so it needs the same inputs: a MAP for
 the mesh, the OI climatology, the IMBIE2 basins and BedMachine.
 
 Measured on the Ua 2 km mesh, 14 September 2026, with the per-basin K
-calibrated against the re-released observation table: maximum 71.1 m/yr, 99th
-percentile 22.2 m/yr, area mean 0.77 m/yr over 1 512 899 km2 of floating ice,
-and nothing at all past the 275.3 m/yr bound.
+calibrated against the re-released observation table, over 1 512 899 km2 of
+floating ice:
+
+* capped at 5e-3: maximum 71.1 m/yr, 99th percentile 22.2 m/yr, area mean
+  0.77 m/yr, which is the 1067.4 Gt/yr target K was fitted to, and no nodes
+  past the bound;
+* uncapped: maximum 1804.9 m/yr, 99th percentile 256.3 m/yr, area mean
+  4.18 m/yr, and 421 nodes past the bound over 2920.6 km2 (0.193% of the
+  floating area), with a median node area of 6.33 km2 against 64 km2 for an
+  8 km pixel.
 """
 import argparse
 import os
@@ -47,9 +65,8 @@ from icepack2_tools.forcing import quadratic_mixed_slope              # noqa: E4
 # The same year and density the writer converts with, so the bound compared
 # here is the one the checker applies.
 from icepack2_tools.ismip7_output import RHO_I, SECONDS_PER_YEAR      # noqa: E402
-
-# ISMIP7_variable_request.csv, min_value_ais for libmassbffl, severity error.
-BOUND_KG_M2_S = -0.008
+from icepack2_tools.regrid import ISMIP7_DX                           # noqa: E402
+from write_ismip7_output import request_table                         # noqa: E402
 
 
 def m_per_yr(kg_m2_s):
@@ -64,12 +81,11 @@ def main():
     ap.add_argument("--npz", default=None,
                     help="calibrated_K_per_basin_<lc>.npz (default: the one "
                          "beside this run's lc)")
-    ap.add_argument("--bound", type=float, default=BOUND_KG_M2_S,
-                    help="the request's min_value_ais, kg m-2 s-1")
     a = ap.parse_args()
 
-    bound_m_yr = abs(m_per_yr(a.bound))
-    PETSc.Sys.Print(f"=== melt against the request bound {a.bound} kg m-2 s-1 "
+    bound = float(request_table()["libmassbffl"]["min_value_ais"])
+    bound_m_yr = abs(m_per_yr(bound))
+    PETSc.Sys.Print(f"=== melt against the request bound {bound} kg m-2 s-1 "
                     f"({bound_m_yr:.1f} m/yr ice) ===")
 
     npz_path = a.npz or os.path.join(
@@ -95,7 +111,7 @@ def main():
     draft = np.minimum(s_np - h_np, 0.0)
     tf = cm._grid_interp(cm.CLIM_TF, "tf", x, y, draft=draft)
     sal = cm._grid_interp(cm.CLIM_SO, "so", x, y, draft=draft)
-    sin_a = np.minimum(cm._compute_sin_alpha(mesh, thk, sur), cm.SIN_ALPHA_CAP)
+    sin_uncapped = cm._compute_sin_alpha(mesh, thk, sur)
     floating = (np.round(mask_np).astype(int) == 3)
 
     # The per-basin K field the forward stamps onto the mesh. K_field in the
@@ -107,42 +123,48 @@ def main():
         if np.isfinite(kb):
             K[basin == int(bid)] = kb
 
-    melt = np.where(floating, quadratic_mixed_slope(tf, sal, sin_a, K=K), 0.0)
-
     v = fd.TestFunction(Q)
     area = assemble(v * dx).dat.data_ro                 # nodal area weights, m^2
     afl = float(area[floating].sum())
 
-    over = floating & (melt > bound_m_yr)
-    a_over = float(area[over].sum())
-    PETSc.Sys.Print(
-        f"\n  floating area           {afl / 1e6:12.1f} km^2\n"
-        f"  melt max                {melt.max():12.1f} m/yr\n"
-        f"  melt p99 (floating)     {np.quantile(melt[floating], 0.99):12.1f} m/yr\n"
-        f"  melt area-mean          "
-        f"{float((melt * area)[floating].sum()) / afl:12.2f} m/yr\n"
-        f"  nodes past the bound    {int(over.sum()):12d} of {int(floating.sum())}\n"
-        f"  area past the bound     {a_over / 1e6:12.1f} km^2 "
-        f"({100 * a_over / afl:.3f}% of floating)")
+    cases = [
+        (f"capped at {cm.SIN_ALPHA_CAP:.0e}, the slope K was fitted against",
+         np.minimum(sin_uncapped, cm.SIN_ALPHA_CAP)),
+        ("uncapped, as in the forward", sin_uncapped),
+    ]
 
-    if over.any():
-        PETSc.Sys.Print("\n  worst nodes (x km, y km, melt m/yr, TF K, draft m, "
+    PETSc.Sys.Print(f"\n  floating area {afl / 1e6:.1f} km^2, "
+                    f"{int(floating.sum())} nodes")
+    for label, sin_a in cases:
+        melt = np.where(floating, quadratic_mixed_slope(tf, sal, sin_a, K=K), 0.0)
+        over = floating & (melt > bound_m_yr)
+        a_over = float(area[over].sum())
+        PETSc.Sys.Print(
+            f"\n  --- sin_alpha {label} ---\n"
+            f"  melt max                {melt.max():12.1f} m/yr\n"
+            f"  melt p99 (floating)     {np.quantile(melt[floating], 0.99):12.1f} m/yr\n"
+            f"  melt area-mean          "
+            f"{float((melt * area)[floating].sum()) / afl:12.2f} m/yr\n"
+            f"  nodes past the bound    {int(over.sum()):12d}\n"
+            f"  area past the bound     {a_over / 1e6:12.1f} km^2 "
+            f"({100 * a_over / afl:.3f}% of floating)")
+
+        if not over.any():
+            continue
+        PETSc.Sys.Print("  worst nodes (x km, y km, melt m/yr, TF K, draft m, "
                         "sin_alpha, area km^2):")
-        idx = np.argsort(-melt)[:10]
-        for i in idx:
+        for i in np.argsort(-melt)[:10]:
             PETSc.Sys.Print(
                 f"    {x[i] / 1e3:9.1f} {y[i] / 1e3:9.1f} {melt[i]:9.1f} "
                 f"{tf[i]:6.2f} {draft[i]:8.1f} {sin_a[i]:9.2e} "
                 f"{area[i] / 1e6:8.2f}")
-        # An 8 km pixel is 64 km^2. A node whose own area is a small fraction
-        # of that cannot fill a pixel on its own, so its value reaching the
-        # grid means the pixel carried little other floating ice.
+        # A node whose own area is a small fraction of an 8 km pixel cannot
+        # fill that pixel on its own, so its value reaching the grid means the
+        # pixel carried little other floating ice.
         PETSc.Sys.Print(
-            f"\n  median area of a node past the bound: "
-            f"{np.median(area[over]) / 1e6:.2f} km^2, against 64 km^2 for an "
-            f"8 km pixel")
-    else:
-        PETSc.Sys.Print("\n  nothing past the bound on this mesh")
+            f"  median area of a node past the bound: "
+            f"{np.median(area[over]) / 1e6:.2f} km^2, against "
+            f"{ISMIP7_DX ** 2 / 1e6:.0f} km^2 for an 8 km pixel")
 
 
 if __name__ == "__main__":

@@ -30,6 +30,7 @@ from icepack2_tools.forcing import (
     ISMIP7Atmosphere,
     load_racmo_smb_climatology,
     make_climatology_ocean_callback,
+    reject_collapse_mask,
     compute_sin_alpha,
     quadratic_mixed_slope,
     load_K_per_basin,
@@ -302,6 +303,8 @@ def main():
             f"med={np.median(K_field[K_field>0]) if (K_field>0).any() else 0:.2e}"
         )
         callback = make_ctrl_ocean_callback(K_field)
+
+    reject_collapse_mask("the control experiment")
 
     PETSc.Sys.Print(f"\nControl experiment: {ESM}")
     PETSc.Sys.Print(f"  Period: {T_START}-{T_END}")

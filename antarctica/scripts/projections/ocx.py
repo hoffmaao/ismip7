@@ -32,7 +32,7 @@ from experiment import find_k_npz
 from icepack2_tools.forcing import (
     ISMIP7Atmosphere, ISMIP7Ocean, make_forcing_callback,
     make_climatology_ocean_callback, load_racmo_smb_climatology,
-    load_K_per_basin, forcing_coords,
+    load_K_per_basin, forcing_coords, reject_collapse_mask,
 )
 
 T_START = float(os.environ.get("ISMIP7_T_START", "1990"))
@@ -74,6 +74,8 @@ def main():
         K_field = K_field * K_scale
         PETSc.Sys.Print(f"  K scaled by ISMIP7_K_SCALE={K_scale:.3f}")
     PETSc.Sys.Print(f"  Ocean melt: OI climatology + per-basin K ({K_npz})")
+
+    reject_collapse_mask("the OCX experiment")
 
     atm = ISMIP7Atmosphere(scenario="ocx")
     if atm.available_years():

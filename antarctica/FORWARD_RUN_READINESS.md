@@ -94,10 +94,27 @@ filename (`_v2_`, fracture `-v2.1.nc`).
 rows are behind. Everything the current forwards read (SMB, SMB anomaly,
 so, tf) is at the freeze version.
 
-## 3. Output and submission: the largest gap
+## 3. Output and submission
 
-Nothing in this repository writes ISMIP7 output yet. What a submission needs
-(#5, #16, #17, #18, #19, #20, #22, #23):
+**Status (13 September, this branch):** the writer exists and passes the
+compliance checker's content checks. `ISMIP7_OUTPUT=1` makes the forward
+accumulate the yearly flux means and snapshot the state each year
+(`icepack2_tools/ismip7_output.py`, one Firedrake checkpoint per run);
+`antarctica/scripts/write_ismip7_output.py` regrids conservatively to the
+8 km grid through a cached supermesh overlap operator, applies the request's
+fill policies and units, encodes time, and writes the 21 gridded and 10
+scalar files with the protocol names under `AIS/<source_id>/<ism_id>/CORE/<exp>/`.
+On a 2-year 32 km control the checker (`ismip7-compliance-checker`, a
+Python 3.13 venv wrapped in `~/.local/bin`) reports 0 naming, numerical,
+spatial, attribute and consistency errors; what remains is the experiment
+length. Conventions chosen: `acabf` is the forcing SMB and the apparent-MB
+correction travels separately as `acabf_correction` (not a request
+variable), `ligroundf` is booked into the first floating cell, `lithk` is
+zero where the ice mask is zero, and `base = orog - lithk` on the grid.
+Still to do: a full-length run through it, the README document, the scalar
+tool cross-check, and the submission email.
+
+What a submission needs (#5, #16, #17, #18, #19, #20, #22, #23):
 
 - **Variable request:** `isschecker/data/ISMIP7_variable_request.csv` in
   `ismip/ISM_SimulationChecker` (the old `conventions/` path is gone); the
@@ -152,9 +169,8 @@ Nothing in this repository writes ISMIP7 output yet. What a submission needs
 
 ## 5. Actions, in order
 
-1. Output writer (`write_ismip7_output.py`): regrid, time encoding, names,
-   checker pass on one existing control run. Nothing can be submitted
-   without it.
+1. Output writer: done for the content checks (section 3); next, run a
+   full-length experiment through it and fill in the README template.
 2. Re-download CESM2-WACCM fracture v2.1 (three files per SSP), the two
    `ctrl` trees and OCX from the mirror; make the reader accept
    `GEMB-SDBN1-8000m` for MRI; install `awscli` on NOTS and mirror the core

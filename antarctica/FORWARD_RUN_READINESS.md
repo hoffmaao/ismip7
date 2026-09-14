@@ -220,12 +220,18 @@ forcing-version audit, the output writer, and the melt calibration above.
    and cite it in the README. The `ctrl` pull for cores 9 and 10 is done, and
    the mirror is re-synced with Globus by hand every week or two, so the freeze
    versions can still move under a long campaign.
-5. Re-check `libmassbffl` against the request's -0.008 kg m-2 s-1 bound under
-   the new calibration. The 10-year Úa ssp585 of job 1368723 reached -0.0117 on
-   small grounding-zone cells, and the per-basin K it reads now rises by up to
-   70% in basin 7, 32% in basin 9 and 3.58 times in basin 1, so this needs a
-   decision on whether the bound is about the melt rate or about the cell area
-   it is booked over.
+5. Settle where the `libmassbffl` bound violation comes from. The request's AIS
+   minimum is -0.008 kg m-2 s-1, which is 275.3 m/yr of ice, and the 10-year Úa
+   ssp585 of job 1368723 reached -0.0117, or 402.6 m/yr. The parameterisation
+   itself is not the source: `check_melt_bound.py` on the Úa mesh with the new
+   per-basin K gives a maximum of 71.1 m/yr, a 99th percentile of 22.2 m/yr and
+   an area mean of 0.77 m/yr over 1 512 899 km2 of floating ice, with zero
+   nodes past the bound. Two candidates remain, and the full-length run
+   distinguishes them: the evolved geometry and its warmer projected thermal
+   forcing, or the bookkeeping, since `book_advance` books the melt REQUESTED
+   of a step while a nearly ice-free floating cell can only lose what it holds,
+   and the request's own `no_floating_ice` fill policy then reports that cell's
+   rate for a whole 8 km pixel.
 6. Optional: read the provided `ctrl` trees in place of the `ssp126`
    reference-climate pool.
 7. Optional: the stress criterion (Lai et al. 2020) alongside the collapse

@@ -236,8 +236,10 @@ top so there are two partitioners to cross-check.
 
 `install_deps.sh` (run once on a login node) pip-installs the data stack
 and the four editable packages the inversion imports: `icepack`, `icepack2`,
-`tlm_adjoint` and `icepack_tools`. They are rsynced from the workstation into
-`/projects/ah301/sw/src`, not cloned, because `icepack2` carries two
+`tlm_adjoint` and `icepack_tools`. It takes the venv and the work filesystem
+from the site file, and expects the four sources under `$ISMIP7_WORK/sw/src`
+(`FD_PREFIX` moves that; at Rice it is `/projects/ah301/sw/src`). They are
+rsynced from the workstation, not cloned, because `icepack2` carries two
 uncommitted edits the inversion depends on and `icepack_tools` has no remote.
 Two more compute-node gaps surfaced here: `/tmp` is not writable on the login
 nodes (the script sets `TMPDIR`), and the `gmsh` wheel dlopens `libGLU.so.1`,

@@ -34,10 +34,13 @@ here="$(cd "$(dirname "$0")" && pwd)"
 # --export=ALL below would carry them into the job and kill every ${VAR:-...}
 # fallback the job scripts resolve for themselves. A KEY=VALUE argument still
 # reaches the job, and so does anything the operator exported by hand.
+# The build job creates the venv, so it is not asked to name one.
+require_list=ISMIP7_REQUIRED
+[ "${1:-}" = build ] && require_list=ISMIP7_REQUIRED_BUILD
 site_fields=$(
     # shellcheck disable=SC1091
     . "$here/site_env.sh"
-    ismip7_site_require
+    ismip7_site_require "${!require_list}"
     declare -p ISMIP7_SITE_NAME ISMIP7_REPO ISMIP7_ACCOUNT \
                ISMIP7_PART_LONG ISMIP7_PART_SHORT ISMIP7_PART_DEBUG \
                ISMIP7_TASKS ISMIP7_TASKS_INV ISMIP7_TASKS_FWD \
@@ -86,6 +89,19 @@ done
 cpus_per_task=1
 if [ "$kind" = build ]; then cpus_per_task=16; fi
 
+# Submit the script out of the checkout it will run in. The job cds to
+# SLURM_SUBMIT_DIR and every path it then resolves, site_env.sh, the driver
+# and the chain resubmits, is relative to ISMIP7_REPO, so submitting this
+# checkout's copy instead would run link 1 from one tree and links 2..N from
+# another. A wrong ISMIP7_REPO now stops here.
+script_rel="antarctica/scripts/batch_runners/$script"
+if ! cd "$ISMIP7_REPO" 2>/dev/null || [ ! -f "$script_rel" ]; then
+    echo "ERROR: $ISMIP7_REPO/$script_rel does not exist." >&2
+    echo "       ISMIP7_REPO must name the checkout to run; set it in the site" >&2
+    echo "       file or export it for this submission." >&2
+    exit 2
+fi
+
 export_list="ALL,ISMIP7_SITE=$ISMIP7_SITE_NAME,ISMIP7_REPO=$ISMIP7_REPO"
 for kv in ${exports+"${exports[@]}"}; do export_list="$export_list,$kv"; done
 
@@ -96,12 +112,11 @@ cmd=(sbatch --parsable
      --hint=nomultithread
      --mem="$mem" --time="$time"
      --export="$export_list"
-     "$here/$script")
+     "$script_rel")
 [ -n "$constraint" ] && cmd=("${cmd[@]:0:1}" -C "$constraint" "${cmd[@]:1}")
 [ -n "$account" ] && cmd=("${cmd[@]:0:1}" -A "$account" "${cmd[@]:1}")
 
 printf 'site %s: ' "$ISMIP7_SITE_NAME"; printf '%q ' "${cmd[@]}"; echo
 [ "$dry" = 1 ] && exit 0
-cd "$ISMIP7_REPO"
 mkdir -p logs
 "${cmd[@]}"

@@ -36,11 +36,15 @@ configured (the knobs are in `antarctica/README.md`). `--tasks`, `--mem`,
 `--time`, `--partition`, `--constraint`, `--account` and `--name` override the
 site defaults for one submission.
 
-Inversions and forwards are sized separately: a site file may set
-`ISMIP7_TASKS_INV`/`ISMIP7_MEM_INV` and `ISMIP7_TASKS_FWD`/`ISMIP7_MEM_FWD`,
-each falling back to the single `ISMIP7_TASKS`/`ISMIP7_MEM`. At Rice the
-forward runs at the 12 ranks and 96 GB it was measured at while the inversion
-keeps 32 ranks and 240 GB.
+Inversions and everything else are sized separately: a site file may set
+`ISMIP7_TASKS_INV`/`ISMIP7_MEM_INV`/`ISMIP7_CONSTRAINT_INV` for `inversion` and
+`ISMIP7_TASKS_FWD`/`ISMIP7_MEM_FWD`/`ISMIP7_CONSTRAINT_FWD` for every other
+kind, each falling back to the single `ISMIP7_TASKS`/`ISMIP7_MEM`/
+`ISMIP7_CONSTRAINT`. At Rice the inversion takes 32 ranks, 240 GB and Sapphire
+Rapids, and the forward takes the 12 ranks, 96 GB and Cascade Lake it was
+measured on.
+
+Every option takes either spelling, `--mem 240G` or `--mem=240G`.
 
 ## Adding your cluster
 
@@ -93,8 +97,10 @@ partitions:
 142, and scavenge has plenty, so `--constraint cascadelake` reaches
 EEPS-generation hardware today. Do NOT pin that constraint on `long`: it has
 exactly ONE Cascade Lake node, so the job would queue behind a single machine.
-That is why `sites/rice_nots.sh` pins `sapphirerapids` instead, since `long` is
-the partition the 2 km inversions need.
+That is why `sites/rice_nots.sh` sets `ISMIP7_CONSTRAINT_INV=sapphirerapids`,
+since `long` is the partition the 2 km inversions need. Every other kind keeps
+`ISMIP7_CONSTRAINT_FWD=cascadelake`, which is the generation the timings below
+were measured on and the one the Firedrake build has to match.
 
 | partition | cascadelake nodes | wall limit |
 |---|---|---|
@@ -128,8 +134,8 @@ Cascade Lake numbers in this file.
 
 Switching once granted is three options on the wrapper, which override the site
 file for that submission. The constraint has to be cleared as well as the
-partition: `sites/rice_nots.sh` pins `sapphirerapids`, every deepsC node is
-Cascade Lake, and the two together can never be satisfied.
+partition, because an inversion carries `sapphirerapids` and every deepsC node
+is Cascade Lake, so the two together can never be satisfied.
 
 ```
 antarctica/scripts/batch_runners/submit.sh inversion \

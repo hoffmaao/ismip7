@@ -37,9 +37,10 @@ Two notes that cost time if missed:
   `pip install -e /path/to/icepack_tools`. `icepack2_tools/adapt_mesh.py` and
   `icepack2_tools/levelset.py` are thin Antarctic wrappers around it; without it
   they will not import, and everything else in the repository still works.
-- **The compliance checker needs Python >= 3.11**, which the Firedrake 2026.4
-  venv (3.10) is not. Give it its own venv and call it by absolute path; only
-  the submission step needs it.
+- **The compliance checker needs Python >= 3.11.** A Firedrake venv often
+  carries an older one (the workstation build here is 3.10), so check
+  `python -V` first. If it is older, give the checker its own venv and call it
+  by absolute path; only the submission step needs it.
 
 ### 0.2 Data
 

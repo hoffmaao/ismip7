@@ -1,11 +1,11 @@
-r"""What the forward records every year: the annual file survives a chained
+r"""What the forward records every year: the annual series survives a chained
 resume, and ``limnsw`` is the mass above flotation.
 
 ``nots_projection.sbatch`` self-chains, so ``run_simulation`` is entered once
-per Slurm link and rebuilds :class:`AnnualOutput` against the file the
-previous link left. The years attribute of that file is what the writer turns
-into the submitted time axis, so a link that truncated it would silently
-submit only its own segment.
+per Slurm link and rebuilds :class:`AnnualOutput` against the years the
+previous link left on disk. Those per-year files are what the writer turns
+into the submitted time axis, so a link that truncated or renamed them would
+silently submit the wrong series.
 
 ``limnsw`` is the request's "mass above floatation ... volume times density":
 the integrand is the THICKNESS above flotation, which on a marine bed is
@@ -92,13 +92,11 @@ def test_a_resume_appends_to_the_annual_file(two_cells, tmp_path):
     _write_year(second, Q, V, h, bed)    # year 2017
     second.close()
 
-    with fd.CheckpointFile(out, "r") as chk:
-        years = [int(y) for y in chk.get_attr("/", "years").split(",")]
-        loaded = chk.load_mesh()
-        thickness = [chk.load_function(loaded, name="lithk", idx=k).dat.data_ro.copy()
-                     for k in range(len(years))]
-    assert years == [2015, 2016, 2017]
-    assert all(np.allclose(t, h) for t in thickness)
+    assert AnnualOutput.years_on_disk(out) == [2015, 2016, 2017]
+    for yr in (2015, 2016, 2017):
+        with fd.CheckpointFile(AnnualOutput.year_path(out, yr), "r") as chk:
+            loaded = chk.load_mesh()
+            assert np.allclose(chk.load_function(loaded, name="lithk").dat.data_ro, h)
 
     import csv
     with open(scalars) as f:
@@ -147,11 +145,9 @@ def test_a_midyear_resume_carries_the_partial_year(two_cells, tmp_path):
     _write_year(second, Q, V, h, bed)             # year 2016, a whole year of it
     second.close()
 
-    with fd.CheckpointFile(out, "r") as chk:
-        years = [int(y) for y in chk.get_attr("/", "years").split(",")]
-        loaded = chk.load_mesh()
-        acabf = chk.load_function(loaded, name="acabf", idx=1).dat.data_ro.copy()
-    assert years == [2015, 2016]
+    assert AnnualOutput.years_on_disk(out) == [2015, 2016]
+    with fd.CheckpointFile(AnnualOutput.year_path(out, 2016), "r") as chk:
+        acabf = chk.load_function(chk.load_mesh(), name="acabf").dat.data_ro.copy()
     # mean over the whole year, both links pooled: 0.6 m over 1.0 yr
     assert np.allclose(acabf, 0.6)
 
@@ -195,6 +191,39 @@ def test_a_checkpoint_without_output_has_no_state(two_cells, tmp_path):
         chk.set_attr("/", "t_yr", 2020.0)
     with fd.CheckpointFile(path, "r") as chk:
         assert AnnualOutput.read_state(chk, chk.load_mesh()) is None
+
+
+def test_a_year_killed_mid_write_leaves_the_banked_years_intact(two_cells, tmp_path):
+    r"""Each year is written to <name>.tmp and renamed, so a kill during one
+    year cannot damage the years already on disk, and the next link simply
+    rewrites the missing one."""
+    mesh, Q, V = two_cells
+    h = [1500.0, 1500.0]
+    bed = [-500.0, -500.0]
+    out = str(tmp_path / "out" / "annual.h5")
+    scalars = str(tmp_path / "out" / "scalars.csv")
+
+    first = AnnualOutput(mesh, Q, V, out, scalars, first_year=2015, rho_ratio=RHO_RATIO)
+    first.start_year(_dg(Q, h))
+    _write_year(first, Q, V, h, bed)          # 2015 banked
+    first.close()
+
+    # a job killed part-way through writing 2016 leaves only the temp file
+    killed = AnnualOutput.year_path(out, 2016) + ".tmp"
+    with open(killed, "wb") as f:
+        f.write(b"\x89HDF\r\n\x1a\n truncated")
+
+    assert AnnualOutput.years_on_disk(out) == [2015]
+    with fd.CheckpointFile(AnnualOutput.year_path(out, 2015), "r") as chk:
+        assert np.allclose(chk.load_function(chk.load_mesh(), name="lithk").dat.data_ro, h)
+
+    # the next link picks up at 2016 and rewrites it
+    second = AnnualOutput(mesh, Q, V, out, scalars, first_year=2016, rho_ratio=RHO_RATIO)
+    assert second.year == 2016
+    second.start_year(_dg(Q, h))
+    _write_year(second, Q, V, h, bed)
+    second.close()
+    assert AnnualOutput.years_on_disk(out) == [2015, 2016]
 
 
 def test_a_resume_state_from_another_year_is_refused(two_cells, tmp_path):

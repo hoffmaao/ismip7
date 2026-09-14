@@ -125,19 +125,18 @@ def fracture():
 def ismip7_output():
     r"""``ISMIP7_OUTPUT``: record the ISMIP7 yearly fields and scalars.
 
-    ``1``/``on`` enables it; ``0``/``off`` and the empty string disable it.
-    The value set is closed, like ``fracture`` and ``apparent_mb_mode``:
-    ``false`` and ``no`` are not off spellings, and accepting them would
-    hand back an enabled run that writes a submission the operator asked
-    not to write.
+    ``1`` enables it; ``0`` and the empty string disable it. The value set is
+    closed, like ``fracture`` and ``apparent_mb_mode``: there is one spelling
+    each way, and anything else raises rather than silently deciding whether
+    a submission gets written.
     """
-    value = (os.environ.get("ISMIP7_OUTPUT") or "").strip().lower()
-    if value in ("", "0", "off"):
+    value = (os.environ.get("ISMIP7_OUTPUT") or "").strip()
+    if value in ("", "0"):
         return False
-    if value in ("1", "on"):
+    if value == "1":
         return True
     raise ValueError(
-        f"ISMIP7_OUTPUT must be 1/on to enable or 0/off/empty to disable, "
+        f"ISMIP7_OUTPUT must be 1 to enable or 0/empty to disable, "
         f"got {value!r}"
     )
 

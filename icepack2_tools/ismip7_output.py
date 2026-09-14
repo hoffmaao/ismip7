@@ -19,13 +19,25 @@ runs inside the parallel forward, gated by ``ISMIP7_OUTPUT=1``:
 * the scalars are the integrals of the same fields, written to a CSV as the
   run goes so an early stop loses nothing.
 
-Everything is kept on the model's own mesh in a Firedrake checkpoint,
-``<results>/<experiment>_<lc>_ismip7_annual.h5``, one entry per variable and
-year (0-based ``idx``, with the ``years`` attribute mapping position to
-year), in the model's units (m, m/yr, MPa); the writer converts to the
-request's SI units and applies the fill policies. A chained run appends to
-the file it finds, so the six links of a 285-year projection leave one
-continuous series.
+Everything is kept on the model's own mesh in Firedrake checkpoints, ONE PER
+YEAR: ``<results>/<experiment>_<lc>_ismip7_annual_<year>.h5``, each holding
+that year's 22 fields in the model's units (m, m/yr, MPa). The writer globs
+them, sorts by the year in the name, and converts to the request's SI units
+under the fill policies.
+
+One file per year rather than one growing file is what makes the series
+durable. This is the only copy of what gets submitted, and six chained links
+append ~285 years into it; a single file rewritten in place has no atomic
+swap (HDF5 does not journal), so a job killed mid-write by a node failure or
+a queue kill would take every earlier year with it, while re-copying a
+multi-GB file once per year to get an atomic rename costs O(N^2) I/O. Each
+year is instead written to ``<name>.tmp`` and renamed into place, the
+``_save_state`` pattern, so a kill can only ever lose the year in flight.
+The cost is one copy of the mesh per file, which is the price of never
+being able to lose the years already banked.
+
+The year in progress rides in the run's OWN checkpoint, not here: see
+``state_fields`` below.
 
 Conventions (from the request and discussions #16, #19, #22):
 
@@ -58,7 +70,10 @@ import numpy as np
 from firedrake import Function, TestFunction, assemble, dS, dx
 import firedrake as fd
 
-SECONDS_PER_YEAR = 31556926.0
+# icepack's year (365.25 days): the model's own time unit, so every
+# model-to-SI conversion the submission carries uses it. The time axis
+# in the files is the standard calendar regardless.
+SECONDS_PER_YEAR = 31557600.0
 RHO_I = 917.0
 
 #: request name -> (type, how this model produces it)
@@ -81,14 +96,15 @@ class AnnualOutput:
     (subcycled) attempt does not double-count: ``_advance`` books into the
     step tallies, and only a completed step is added to the year.
 
-    A chained run resumes into the same files: when ``out_path`` already
-    exists it is opened in append mode and its ``years`` attribute seeds the
-    written years. The partly accumulated year survives the link boundary
-    too: ``state_fields`` / ``state_attrs`` hand it to the run's own
-    checkpoint and ``resume`` takes it back, so a job that stops at 2021.4
-    goes on accumulating 2021 rather than losing four months of flux or
-    relabelling them. The resumed year is taken from that state and must be
-    exactly one past the last year written, so no year is ever renamed.
+    A chained run resumes into the same output: ``out_path`` names the stem
+    ``<...>_ismip7_annual.h5`` and the years already on disk are the files
+    ``<...>_ismip7_annual_<year>.h5`` beside it, so the written years are
+    found by globbing rather than carried in an attribute. The partly
+    accumulated year survives the link boundary too: ``state_fields`` /
+    ``state_attrs`` hand it to the run's own checkpoint and ``resume`` takes
+    it back, so a job that stops at 2021.4 goes on accumulating 2021 rather
+    than losing four months of flux or relabelling them. The resumed year
+    must be exactly one past the last year on disk, so no year is renamed.
     """
 
     #: the per-cell year sums carried across a chained resume
@@ -132,16 +148,8 @@ class AnnualOutput:
         self._n = fd.FacetNormal(mesh)
         self._gl_cof = fd.Cofunction(Q_dg.dual())
         # A chained job re-enters run_simulation and rebuilds this object, so
-        # an existing annual file is appended to: opening it "w" would
-        # truncate every year the earlier links wrote while the scalars CSV
-        # (opened "a") kept them, and the writer reads its year list here.
-        self._written_years = []
-        self._chk_mode = "w"
-        if os.path.exists(out_path):
-            with fd.CheckpointFile(out_path, "a") as chk:
-                years_attr = chk.get_attr("/", "years") if chk.has_attr("/", "years") else ""
-            self._written_years = [int(y) for y in str(years_attr).split(",") if y]
-            self._chk_mode = "a"
+        # the years the earlier links banked are read back off disk.
+        self._written_years = self.years_on_disk(out_path)
         if self._written_years:
             last = self._written_years[-1]
             if self.year != last + 1:
@@ -153,7 +161,7 @@ class AnnualOutput:
                     f"submitted series. Resume from a checkpoint inside "
                     f"{last + 1}, or move the annual file aside."
                 )
-            self.log(f"  ISMIP7 output: appending to {os.path.basename(out_path)} "
+            self.log(f"  ISMIP7 output: continuing {os.path.basename(out_path)} "
                      f"({len(self._written_years)} years through {last}; "
                      f"{self.year_time:.2f} yr of {self.year} carried over)")
         if self.comm.rank == 0:
@@ -203,6 +211,26 @@ class AnnualOutput:
         for k in self.year_acc:
             self.year_acc[k] += self.step_acc[k]
         self.year_time += self.step_time
+
+    # ---- where a year lives ------------------------------------------------
+    @staticmethod
+    def year_path(out_path, year):
+        r"""The checkpoint holding one year, derived from the stem."""
+        stem, ext = os.path.splitext(out_path)
+        return f"{stem}_{int(year)}{ext}"
+
+    @staticmethod
+    def years_on_disk(out_path):
+        r"""The years already written beside ``out_path``, in order. Partial
+        ``.tmp`` files are not matched, so a year killed mid-write is simply
+        absent and gets rewritten."""
+        import glob
+        import re
+        stem, ext = os.path.splitext(out_path)
+        pattern = re.compile(re.escape(stem) + r"_(\d+)" + re.escape(ext) + r"$")
+        years = [int(m.group(1)) for f in glob.glob(f"{stem}_*{ext}")
+                 for m in [pattern.match(f)] if m]
+        return sorted(years)
 
     # ---- carried across a chained resume ----------------------------------
     def state_fields(self):
@@ -278,17 +306,16 @@ class AnnualOutput:
         fields["lifmassbf"] = dg(np.zeros_like(self.cell_area))
         h0 = self.h_year_start if self.h_year_start is not None else h_dg.dat.data_ro
         fields["dlithkdt"] = dg((h_dg.dat.data_ro - h0) / T)                        # m/yr
-        # idx is a 0-based position, not the year: Firedrake sizes the
-        # timestepping dataset by the largest idx, so idx=2016 allocated 2017
-        # rows per field (2.5 GB for two years of a 7543-cell mesh); the
-        # years attribute maps position to year.
-        with fd.CheckpointFile(self.out_path, self._chk_mode) as chk:
-            if self._chk_mode == "w":
-                chk.save_mesh(self.mesh)
+        final_path = self.year_path(self.out_path, yr)
+        tmp = final_path + ".tmp"
+        with fd.CheckpointFile(tmp, "w") as chk:
+            chk.save_mesh(self.mesh)
             for name, f in fields.items():
-                chk.save_function(f, name=name, idx=len(self._written_years))
-            chk.set_attr("/", "years", ",".join(str(y) for y in self._written_years + [yr]))
-        self._chk_mode = "a"
+                chk.save_function(f, name=name)
+        self.comm.barrier()
+        if self.comm.rank == 0:
+            os.replace(tmp, final_path)
+        self.comm.barrier()
         self._written_years.append(yr)
         # scalars, from the same fields (kg, m2, kg/s)
         area = self.cell_area

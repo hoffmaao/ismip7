@@ -189,7 +189,16 @@ def run_core_experiment(*, core, title, name, esm, scenario,
 
     # ── Ocean + fracture ──
     ocean = ISMIP7Ocean(esm=esm, scenario=scenario)
-    fracture = ISMIP7Fracture(esm=esm, scenario=scenario).load()
+    fracture = ISMIP7Fracture(esm=esm, scenario=scenario)
+    try:
+        fracture.load()
+    except Exception as e:
+        # Under the default `none` the mask is never read, so an unreadable
+        # fracture tree must not abort a run that does not want it; under
+        # `mask` the run asked for exactly this file, so it sees the failure.
+        if fracture_mode() == "mask":
+            raise
+        PETSc.Sys.Print(f"  Fracture tree not readable, ignored: {e}")
     if fracture_mode() == "mask" and not fracture.has_collapse_mask():
         raise FileNotFoundError(
             f"ISMIP7_FRACTURE=mask but no ice-shelf collapse mask was found "

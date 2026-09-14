@@ -1093,6 +1093,19 @@ def make_forcing_callback(atm=None, ocean=None, fracture=None,
     per-basin K integrates 689 vs 865 Gt/yr observed on the 2500 m mesh,
     so 1.26 matches the observed total).
     """
+    from .runconfig import fracture as _fracture_mode
+    if _fracture_mode() == "mask" and fracture is None:
+        # run_simulation will create ctx["collapse"] and this callback is the
+        # only thing that ever fills it, so without a fracture reader the mask
+        # would be announced and silently never applied. The control and OCX
+        # drivers have none by protocol, which makes mask a wrong request
+        # there rather than a no-op.
+        raise ValueError(
+            "ISMIP7_FRACTURE=mask but this run's forcing callback was built "
+            "without a fracture reader, so no collapse mask can ever be "
+            "applied. The protocol defines no mask for the control or OCX "
+            "experiments; run them with ISMIP7_FRACTURE=none."
+        )
     K_field_cache = {"arr": None}
     K_scale = float(os.environ.get("ISMIP7_K_SCALE", "1.0"))
 

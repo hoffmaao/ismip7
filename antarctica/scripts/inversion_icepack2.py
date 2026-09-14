@@ -1299,8 +1299,10 @@ def main():
     # optimization state was used (the message said so, but z was never
     # restored). The Aug 3 dg0 32 km MAP carries a 2745 m/yr-RMS velocity this
     # way -- discovered only when compare_dhdt.py scored it against MEaSUREs.
-    # Now: restore the last good optimization state on failure, and refuse to
-    # save any velocity whose misfit grossly disagrees with the optimizer's
+    # Now: on failure the last good optimization state is restored for the
+    # misfit report only and NO velocity is saved (that state belongs to the
+    # last converged evaluation's controls, not to this MAP's), and a velocity
+    # whose misfit grossly disagrees with the optimizer's is refused too
     # (a forward re-solves the diagnostic from theta/phi anyway; a missing
     # velocity is an inconvenience, a silently wrong one poisons everything
     # downstream that trusts the checkpoint).
@@ -1318,6 +1320,7 @@ def main():
     # otherwise solve the way every iterate did. A failed evaluation never
     # records its controls, so the state z holds always belongs to last_x
     # (both are in the inner objective's unscaled space, hence _x_final).
+    final_state_ok = True
     if last_x[0] is not None and np.array_equal(last_x[0], _x_final):
         PETSc.Sys.Print("  Final controls are those of the last converged "
                         "evaluation; that state is reused (no re-solve)")
@@ -1331,8 +1334,9 @@ def main():
                                form_compiler_parameters=fc_params).solve()
         except fd.ConvergenceError:
             PETSc.Sys.Print("  Final solve failed; restoring last good "
-                            "optimization state")
+                            "optimization state for the misfit report only")
             z.assign(z_backup)
+            final_state_ok = False
 
     u_sol = z.subfunctions[0]
     u_sol_mag = Function(Q).interpolate(sqrt(u_sol[0] ** 2 + u_sol[1] ** 2))
@@ -1357,7 +1361,15 @@ def main():
     # objective and its dH/dt part has nothing to do with velocity.
     _guard = float(assemble(_vel_chi2))
     _ref = max(float(last_good_vel_chi2[0]), 1e-30)
-    if np.isfinite(_guard) and _guard <= 10.0 * _ref:
+    if not final_state_ok:
+        PETSc.Sys.Print(
+            "WARNING: NOT saving velocity -- the final solve did not converge, "
+            "so the state on hand is the one of the last converged evaluation "
+            "and belongs to different controls than this MAP. The MAP controls "
+            "are saved and valid; forwards re-solve the diagnostic from "
+            "theta/phi and are unaffected."
+        )
+    elif np.isfinite(_guard) and _guard <= 10.0 * _ref:
         with fd.CheckpointFile(chk_fn, "a") as chk:
             chk.save_function(u_sol, name="velocity")
         PETSc.Sys.Print(f"Saved velocity: {chk_fn}")

@@ -90,7 +90,7 @@ def census(map_path, nhat_floor, nhat_cap, gl_width):
 def forward_check(map_path):
     os.environ["ISMIP7_INVERSION"] = map_path
     # Force the law, do not defer to the environment: this check exists to
-    # measure the Budd gate, and nots_env.sh exports regularized_coulomb by
+    # measure the Budd gate, and site_env.sh exports regularized_coulomb by
     # default, so an inherited value would re-solve the diagnostic under the
     # wrong law and return a large rel L2 for an unrelated reason.
     os.environ["ISMIP7_FRICTION"] = "budd"

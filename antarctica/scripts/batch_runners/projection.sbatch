@@ -1,5 +1,5 @@
 #!/bin/bash
-# ISMIP7 forward run (control, historical or projection) on Rice NOTS deepsC.
+# ISMIP7 forward run (control, historical or projection) on any cluster deepsC.
 # SELF-CHAINING: a 285-year projection is about five days at 2500 m and will
 # not fit any ordinary queue, so this script resubmits itself until the run
 # reaches its driver's own end year, resuming from its own newest checkpoint
@@ -9,7 +9,7 @@
 # experiment, so leave it unset unless you mean to.
 #
 #   sbatch --export=ALL,ISMIP7_EXPERIMENT=control \
-#          antarctica/scripts/batch_runners/nots_projection.sbatch
+#          antarctica/scripts/batch_runners/projection.sbatch
 #
 # ISMIP7_EXPERIMENT selects the driver:
 #   control            antarctica/scripts/control/run.py
@@ -31,25 +31,31 @@
 # and `long` (3-day limit), and it is also the safety net that turns a node
 # failure into a resume rather than a lost week. Keep it on.
 
-#SBATCH -J ismip7_fwd
-#SBATCH -p commons
-#SBATCH -C cascadelake
+# Resources (partition, tasks, memory, wall time, account, constraint) come
+# from submit.sh and this cluster's sites/<name>.sh, never from directives
+# here: a directive cannot read a site file, and a header that disagrees
+# with the command line is rejected outright by Slurm.
 #SBATCH -o logs/ismip7_fwd_%j.out
 #SBATCH -e logs/ismip7_fwd_%j.err
-#SBATCH --nodes=1
-#SBATCH --ntasks-per-node=12
-#SBATCH --cpus-per-task=1
-#SBATCH --hint=nomultithread
-#SBATCH --mem=96G
-#SBATCH --time=1-00:00:00
 #SBATCH --mail-type=END,FAIL
 
 set -uo pipefail
 cd "${SLURM_SUBMIT_DIR:-.}"
 mkdir -p logs
-. antarctica/scripts/batch_runners/nots_env.sh
-nots_activate
-nots_banner
+
+# Resources are the wrapper's job (submit.sh reads sites/<cluster>.sh). A job
+# that arrives with one task was submitted by hand without them, and at 2 km
+# that dies on memory hours into the queue rather than at submission.
+if [ "${SLURM_NTASKS:-1}" = 1 ] && [ "${ISMIP7_ALLOW_SERIAL:-0}" != 1 ]; then
+    echo "ERROR: this job has SLURM_NTASKS=1, so no resources were requested." >&2
+    echo "       Submit with: antarctica/scripts/batch_runners/submit.sh projection [KEY=VALUE ...]" >&2
+    echo "       (ISMIP7_ALLOW_SERIAL=1 to override, e.g. a deliberate 1-rank probe.)" >&2
+    exit 2
+fi
+
+. antarctica/scripts/batch_runners/site_env.sh
+ismip7_activate
+ismip7_banner
 
 EXPERIMENT="${ISMIP7_EXPERIMENT:-control}"
 case "$EXPERIMENT" in
@@ -105,7 +111,7 @@ export ISMIP7_AUTO_RESUME="${ISMIP7_AUTO_RESUME-1}"
 echo "    experiment $EXPERIMENT -> $DRIVER"
 echo "    map in  $ISMIP7_INVERSION"
 [ -f "$ISMIP7_INVERSION" ] \
-    || echo "    WARNING: that MAP does not exist; run nots_inversion.sbatch first" \
+    || echo "    WARNING: that MAP does not exist; run inversion.sbatch first" \
             "or set ISMIP7_INVERSION"
 echo "    dt=$ISMIP7_DT" \
      "t_end=${ISMIP7_T_END:-driver default (2301 projections, 2101 ssp370, 2015 historical, 2026 OCX)}" \
@@ -268,4 +274,4 @@ echo "chain: at ${LAST_YEAR} of ${T_END}, resubmitting"
 # the chain would never advance past the first job's end year.
 unset ISMIP7_WALL_STOP_MIN ISMIP7_RESTART
 sbatch --dependency=afterok:"${SLURM_JOB_ID}" --export=ALL \
-       antarctica/scripts/batch_runners/nots_projection.sbatch
+       antarctica/scripts/batch_runners/projection.sbatch

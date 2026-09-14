@@ -3,22 +3,17 @@
 # parallel partitioners actually partition. The build job's own check ran
 # `srun -n 4` inside a 1-task allocation and so failed for every type,
 # `simple` included, which says nothing about the build. This job has 4 tasks.
-#SBATCH -J fd_verify
-#SBATCH -p scavenge
-#SBATCH -C cascadelake
+# Resources (partition, tasks, memory, wall time, account, constraint) come
+# from submit.sh and this cluster's sites/<name>.sh, never from directives
+# here: a directive cannot read a site file, and a header that disagrees
+# with the command line is rejected outright by Slurm.
 #SBATCH -o logs/fd_verify_%j.out
 #SBATCH -e logs/fd_verify_%j.err
-#SBATCH --nodes=1
-#SBATCH --ntasks-per-node=4
-#SBATCH --cpus-per-task=1
-#SBATCH --hint=nomultithread
-#SBATCH --mem=16G
-#SBATCH --time=00:15:00
 set -uo pipefail
 cd "${SLURM_SUBMIT_DIR:-.}"
-. antarctica/scripts/batch_runners/nots_env.sh
-nots_activate
-nots_banner
+. antarctica/scripts/batch_runners/site_env.sh
+ismip7_activate
+ismip7_banner
 export PYOP2_CACHE_DIR="${PYOP2_CACHE_DIR:-$HOME/.pyop2_cache_verify}"
 echo "firedrake: $(python -c 'import firedrake,sys; print(firedrake.__version__)' 2>/dev/null | tail -1)"
 cat > "$PYOP2_CACHE_DIR/_part.py" <<'PYEOF'

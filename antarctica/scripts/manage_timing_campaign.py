@@ -207,6 +207,8 @@ class CampaignManager:
         self.dry_run = args.dry_run
         self.force = args.force
         self.assume_valid_caches = args.assume_valid_caches
+        self.follow_prepare = bool(getattr(args, "follow_prepare", False))
+        self.follow_invert = bool(getattr(args, "follow_invert", False))
         self.only_mesh = args.only_mesh
         self.monitor = args.monitor
         self.submit_failures = 0
@@ -445,13 +447,48 @@ class CampaignManager:
                     "FORCE_TIMING=1 after inspection"
                 )
                 continue
-            # Prepare must have produced a usable imported-MAP cache first.
+            # Prepare must have produced a usable imported-MAP cache first,
+            # unless --follow-prepare queues the invert behind an active
+            # prepare allocation via Slurm afterok.
             prep_ok, prep_detail = self.cache_validation(lc, lc_coarse)
+            dependency = None
             if not prep_ok:
-                print(
-                    f"INVERSION WAITING CACHE {lc}/{lc_coarse}: {prep_detail}"
+                if not self.follow_prepare:
+                    print(
+                        f"INVERSION WAITING CACHE {lc}/{lc_coarse}: "
+                        f"{prep_detail}"
+                    )
+                    continue
+                prep_status, prep_active = self.reconcile_status(
+                    self.cache_status_path(lc, lc_coarse)
                 )
-                continue
+                prep_job = (
+                    prep_status.get("job_id") if prep_status else None
+                )
+                if prep_active and prep_job:
+                    dependency = f"afterok:{prep_job}"
+                    print(
+                        f"INVERSION FOLLOW PREPARE {lc}/{lc_coarse}: "
+                        f"dependency={dependency}"
+                    )
+                elif (
+                    prep_status
+                    and prep_status.get("state") == "finished"
+                    and prep_job
+                ):
+                    # Stamp says finished but cache validation failed - do not
+                    # afterok a dead success that left a bad cache.
+                    print(
+                        f"INVERSION WAITING CACHE {lc}/{lc_coarse}: "
+                        f"{prep_detail} (prepare stamped finished)"
+                    )
+                    continue
+                else:
+                    print(
+                        f"INVERSION WAITING CACHE {lc}/{lc_coarse}: "
+                        f"{prep_detail}; no active prepare job to follow"
+                    )
+                    continue
             mesh = self.mesh_path(lc, lc_coarse)
             boundary = self.boundary_path(lc, lc_coarse)
             missing = [path for path in (mesh, boundary) if not path.is_file()]
@@ -519,9 +556,19 @@ class CampaignManager:
                 self.root
                 / "scripts/batch_runners/timing_matrix_inversion.script",
                 status_path,
+                dependency=dependency,
             )
 
-    def _submit(self, job_name, ncores, memory, exports, script, status_path):
+    def _submit(
+        self,
+        job_name,
+        ncores,
+        memory,
+        exports,
+        script,
+        status_path,
+        dependency=None,
+    ):
         command = [
             "sbatch",
             "--parsable",
@@ -530,11 +577,15 @@ class CampaignManager:
             f"--partition={self.partition}",
             f"--time={self.walltime}",
             f"--mem={memory}",
+        ]
+        if dependency:
+            command.append(f"--dependency={dependency}")
+        command.extend([
             "--export=ALL," + ",".join(
                 f"{key}={value}" for key, value in exports.items()
             ),
             os.fspath(script),
-        ]
+        ])
         print("DRY RUN:" if self.dry_run else "SUBMIT:", shlex.join(command))
         if self.dry_run:
             return
@@ -814,8 +865,11 @@ class CampaignManager:
         if state == "failed" and not self.force:
             print(f"LANE FAILED {lc}/{lc_coarse}/{ncores}: {detail}")
             return
-        inv_state, inv_detail, _ = self.inversion_result(lc, lc_coarse)
+        inv_state, inv_detail, inv_status_path = self.inversion_result(
+            lc, lc_coarse
+        )
         _, status_path = self._lane_paths(lc, lc_coarse, ncores)
+        dependency = None
         if inv_state != "passed":
             if inv_state == "failed":
                 print(
@@ -828,18 +882,49 @@ class CampaignManager:
                         "blocked_by_inversion",
                         reason=inv_detail,
                     )
-            else:
+                return
+            # Scout/scale need the per-mesh invert MAP + republished cache,
+            # unless --follow-invert queues behind an active invert allocation.
+            if not self.follow_invert:
                 print(
                     f"WAITING FOR INVERSION {lc}/{lc_coarse}/{ncores}: "
                     f"{inv_state} ({inv_detail})"
                 )
-            return
-        valid, cache_detail = self.cache_validation(
-            lc, lc_coarse, require_mesh_inversion=True
-        )
-        if not valid:
-            print(f"LANE WAITING CACHE {lc}/{lc_coarse}/{ncores}: {cache_detail}")
-            return
+                return
+            inv_status, inv_active = self.reconcile_status(inv_status_path)
+            inv_job = inv_status.get("job_id") if inv_status else None
+            if inv_active and inv_job:
+                dependency = f"afterok:{inv_job}"
+                print(
+                    f"LANE FOLLOW INVERT {lc}/{lc_coarse}/{ncores}: "
+                    f"dependency={dependency}"
+                )
+            elif (
+                inv_status
+                and inv_status.get("state") == "finished"
+                and inv_job
+            ):
+                print(
+                    f"WAITING FOR INVERSION {lc}/{lc_coarse}/{ncores}: "
+                    f"{inv_detail} (invert stamped finished)"
+                )
+                return
+            else:
+                print(
+                    f"WAITING FOR INVERSION {lc}/{lc_coarse}/{ncores}: "
+                    f"{inv_state} ({inv_detail}); no active invert job to follow"
+                )
+                return
+        else:
+            valid, cache_detail = self.cache_validation(
+                lc, lc_coarse, require_mesh_inversion=True
+            )
+            if not valid:
+                print(
+                    f"LANE WAITING CACHE {lc}/{lc_coarse}/{ncores}: "
+                    f"{cache_detail}"
+                )
+                return
         cache, manifest = cache_paths(self.cache_dir, lc, lc_coarse)
         boundary = self.boundary_path(lc, lc_coarse)
         if not boundary.is_file() and not (
@@ -897,6 +982,7 @@ class CampaignManager:
             exports,
             self.root / "scripts/batch_runners/timing_transient.script",
             status_path,
+            dependency=dependency,
         )
 
     def scout(self):
@@ -969,6 +1055,22 @@ def parse_args():
         help="dry-run only: print downstream commands before caches exist",
     )
     parser.add_argument("--force", action="store_true")
+    parser.add_argument(
+        "--follow-prepare",
+        action="store_true",
+        help=(
+            "invert only: submit behind each mesh's active prepare job with "
+            "Slurm --dependency=afterok:<prepare_job_id>"
+        ),
+    )
+    parser.add_argument(
+        "--follow-invert",
+        action="store_true",
+        help=(
+            "scout/scale: submit behind each mesh's active invert job with "
+            "Slurm --dependency=afterok:<invert_job_id>"
+        ),
+    )
     parser.add_argument(
         "--only-mesh",
         type=_parse_mesh,

@@ -53,6 +53,7 @@ TIMING_ONLY_MESH ?=
 TIMING_SCOUT_MONITOR ?=
 TIMING_INVERSION_MAXITER ?= 250
 TIMING_INVERSION_TIME ?= 24:00:00
+FOLLOW_PREPARE ?=
 SBATCH_WAIT ?=
 FORCE_TIMING ?=
 SLURM_PARTITION ?= general
@@ -290,7 +291,8 @@ timing-inversion:
 	  --partition "$(SLURM_PARTITION)" --walltime "$(TIMING_INVERSION_TIME)" \
 	  --maxiter "$(TIMING_INVERSION_MAXITER)" \
 	  $(if $(TIMING_ONLY_MESH),--only-mesh "$(TIMING_ONLY_MESH)",) \
-	  $(if $(FORCE_TIMING),--force,)
+	  $(if $(FORCE_TIMING),--force,) \
+	  $(if $(FOLLOW_PREPARE),--follow-prepare,)
 
 timing-cache-audit:
 	python scripts/manage_timing_campaign.py audit \
@@ -314,7 +316,8 @@ timing-scout:
 	  --maxiter "$(TIMING_INVERSION_MAXITER)" \
 	  $(if $(TIMING_ONLY_MESH),--only-mesh "$(TIMING_ONLY_MESH)",) \
 	  $(if $(TIMING_SCOUT_MONITOR),--monitor,) \
-	  $(if $(FORCE_TIMING),--force,)
+	  $(if $(FORCE_TIMING),--force,) \
+	  $(if $(FOLLOW_INVERT),--follow-invert,)
 
 timing-scale:
 	python scripts/manage_timing_campaign.py scale \

@@ -163,7 +163,7 @@ Hahn, Mikula and Frolkovic 2025; Smith et al. 2020.
 | Year of initial condition | 2015 | no |
 | Densities, gravity | rho_i = 917, rho_o = 1024, rho_w = 1000 kg m-3; g = 9.81 m s-2 | no |
 | Variables not included | none of the mandatory set; no 3D or thermal variables (no thermal model); `hfgeoubed`, `litemp*`, `zvel*`, `thdrflf`, `deltag`, `refgeoid` absent | no |
-| Days per year | 365 (standard calendar in the files) | no |
+| Days per year | 365.25: the model's year is icepack's, 31557600 s, and every model-to-SI conversion in the submitted files uses it. The time axis in the files is the standard calendar | no |
 | Other | apparent-mass-balance correction frozen at the initial state; forcing versions cited per file in the submission | no |
 
 Forcing versions used (from `antarctica/scripts/audit_forcing_versions.py`,

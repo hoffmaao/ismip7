@@ -1478,8 +1478,9 @@ def run_simulation(
             csv_f.flush()
 
     # ISMIP7 output (ISMIP7_OUTPUT=1): yearly state snapshots and flux means
-    # on the model mesh, converted and regridded afterwards by
-    # antarctica/scripts/write_ismip7_output.py. Off by default.
+    # on the model mesh, one checkpoint per year beside this stem, converted
+    # and regridded afterwards by antarctica/scripts/write_ismip7_output.py.
+    # Off by default.
     annual = None
     if _ismip7_output():
         from icepack2_tools.ismip7_output import AnnualOutput
@@ -1491,7 +1492,9 @@ def run_simulation(
             resume=ctx.get("ismip7_resume"))
         if annual.h_year_start is None:
             annual.start_year(h_dg)
-        PETSc.Sys.Print(f"  ISMIP7 output: yearly fields -> {annual.out_path}")
+        _stem, _ext = os.path.splitext(annual.out_path)
+        PETSc.Sys.Print(
+            f"  ISMIP7 output: one checkpoint per year -> {_stem}_<year>{_ext}")
 
     def _grounded_cells():
         return Function(Q_dg).interpolate(s - s_float).dat.data_ro > 0.0
@@ -2018,6 +2021,10 @@ def run_simulation(
     PETSc.Sys.Print(f"Saved: {csv_fn}")
     if annual is not None:
         annual.close()
-        PETSc.Sys.Print(f"Saved: {annual.out_path}")
+        _yrs = annual.years_on_disk(annual.out_path)
+        PETSc.Sys.Print(
+            f"Saved: {len(_yrs)} ISMIP7 years"
+            + (f" ({_yrs[0]}-{_yrs[-1]})" if _yrs else "")
+            + f" beside {annual.out_path}")
 
     return results

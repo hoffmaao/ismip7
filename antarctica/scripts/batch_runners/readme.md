@@ -52,7 +52,8 @@ A missing value is reported at submission with the file and variable named.
 Job sizes come in pairs so inversions and forwards can differ:
 `ISMIP7_TASKS_INV` and `ISMIP7_MEM_INV`, `ISMIP7_TASKS_FWD` and
 `ISMIP7_MEM_FWD`, each falling back to `ISMIP7_TASKS` and `ISMIP7_MEM`. The
-node constraint splits the same way (`ISMIP7_CONSTRAINT_INV`, `_FWD`).
+node constraint splits the same way (`ISMIP7_CONSTRAINT_INV`, `_FWD`, both
+falling back to `ISMIP7_CONSTRAINT`).
 
 ### The sites that ship
 

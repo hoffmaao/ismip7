@@ -227,6 +227,9 @@ universities. Two rules, asked for directly by the author:
 - **No contrastive negation.** Avoid "not X, but Y" and "it is not A, it is B".
   State what is true.
 
+Name institutions rather than individuals in this repository's own prose, and
+leave authorship headers and citations intact.
+
 Beyond those, keep it concise: the commands, paths, knob names, defaults and
 measured numbers stay, narration goes (histories of what an earlier version got
 wrong, justifications of the prose itself, and a paragraph wherever a table

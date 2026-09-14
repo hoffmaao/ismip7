@@ -1464,6 +1464,23 @@ def run_simulation(
             csv_f.write(csv_header)
             csv_f.flush()
 
+    # ISMIP7 output (ISMIP7_OUTPUT=1): yearly state snapshots and flux means
+    # on the model mesh, converted and regridded afterwards by
+    # antarctica/scripts/write_ismip7_output.py. Off by default.
+    annual = None
+    if os.environ.get("ISMIP7_OUTPUT", "0") not in ("0", "", "off"):
+        from icepack2_tools.ismip7_output import AnnualOutput
+        annual = AnnualOutput(
+            mesh, Q_dg, ctx["V"],
+            os.path.join(RESULTS_DIR, f"{experiment_name}_{lc}_ismip7_annual.h5"),
+            os.path.join(RESULTS_DIR, f"{experiment_name}_{lc}_ismip7_scalars.csv"),
+            first_year=t_start, rho_ratio=float(rho_ratio), log=PETSc.Sys.Print)
+        annual.start_year(h_dg)
+        PETSc.Sys.Print(f"  ISMIP7 output: yearly fields -> {annual.out_path}")
+
+    def _grounded_cells():
+        return Function(Q_dg).interpolate(s - s_float).dat.data_ro > 0.0
+
     def _write_csv_row(row):
         if csv_f is None:
             return
@@ -1694,6 +1711,8 @@ def run_simulation(
 
         out_gt = float(assemble(un_plus * h_dg * ds)) * rho_gt * dt_local
         m1 = float(assemble(h_dg * dx)) * rho_gt
+        if annual is not None:
+            annual.book_advance(dt_local, accum, ocean_melt, a_ref, h_dg, u_vel, _grounded_cells())
 
         # Floor to h_clamp, EXCEPT where there is no ice: those cells are
         # outside the ice domain, so flooring them would hand the mask below
@@ -1719,6 +1738,8 @@ def run_simulation(
             calv_gt = mesh.comm.allreduce(
                 float((data[beyond] * cell_area[beyond]).sum())
             ) * rho_gt
+            if annual is not None:
+                annual.book_removal(beyond, data[beyond])
             data[beyond] = 0.0
         if calv_frac is not None:
             # Sub-cell calving: the front cells shed the fraction of their
@@ -1727,6 +1748,8 @@ def run_simulation(
             shed = data * calv_frac
             calv_gt += mesh.comm.allreduce(
                 float((shed * cell_area).sum())) * rho_gt
+            if annual is not None:
+                annual.book_removal(slice(None), shed)
             data -= shed
         if level_set is not None:
             # Retreat slivers only: what the sub-cell shed and the melt leave
@@ -1753,6 +1776,8 @@ def run_simulation(
             sliver = retreat_slivers(data, h_dg_old.dat.data_ro, front_hmin)
             calv_gt += mesh.comm.allreduce(
                 float((data[sliver] * cell_area[sliver]).sum())) * rho_gt
+            if annual is not None:
+                annual.book_removal(sliver, data[sliver])
             data[sliver] = 0.0
 
         _lift_h()
@@ -1836,6 +1861,8 @@ def run_simulation(
             a_ref_entry.assign(a_ref)
         tallies = None
         for m in SUBCYCLES:
+            if annual is not None:
+                annual.begin_step()          # a rewound attempt must not double-count
             if m > 1:
                 PETSc.Sys.Print(
                     f"  Step {k}: subcycling x{m} (dt={dt / m:.4g})..."
@@ -1862,6 +1889,8 @@ def run_simulation(
                 if m > 1:
                     PETSc.Sys.Print(f"  Step {k}: completed via x{m} subcycle")
                 tallies = acc
+                if annual is not None:
+                    annual.commit_step()
                 break
         if tallies is None:
             PETSc.Sys.Print(
@@ -1900,6 +1929,9 @@ def run_simulation(
                         out_rate, calv_gt, clamp_all, resid_gt,
                         amb_rate))
         _write_csv_row(results[-1])
+        if annual is not None and abs(t_yr - round(t_yr)) < 1e-6:
+            annual.year_end(h_dg, s, b, z.subfunctions[0], z.subfunctions[2],
+                            _grounded_cells(), h_dg.dat.data_ro > 1.0)
 
         if k % output_interval == 0 or k == 1:
             _amb_txt = f"amb={amb_rate:+.0f} " if a_ref is not None else ""
@@ -1944,5 +1976,8 @@ def run_simulation(
     if csv_f is not None:
         csv_f.close()
     PETSc.Sys.Print(f"Saved: {csv_fn}")
+    if annual is not None:
+        annual.close()
+        PETSc.Sys.Print(f"Saved: {annual.out_path}")
 
     return results

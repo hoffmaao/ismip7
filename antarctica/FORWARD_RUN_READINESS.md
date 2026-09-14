@@ -180,8 +180,10 @@ What a submission needs (#5, #16, #17, #18, #19, #20, #22, #23):
    its output in the README.
 3. End-of-series rule for 2300 in `forcing.py`; `GEMB-SDBN1` path for MRI.
 4. `ISMIP7_CLIM_SCENARIO=ssp126` default (or the provided `ctrl` trees).
-5. Fracture masks on floating ice in the thickness update, with the stress
-   criterion as an option.
+5. Fracture masks on floating ice in the thickness update: done as
+   `ISMIP7_FRACTURE=mask` (floating cells the mask flags are emptied and
+   booked as calving; CESM2-WACCM masks re-downloaded at v2.1); the stress
+   criterion (Lai et al. 2020) is not implemented and stays optional.
 6. Rerun the melt calibration notebook with the July toolbox.
 7. One forced projection on the Úa mesh end to end through the writer and
    the checker, then the matrix.

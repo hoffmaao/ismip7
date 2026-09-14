@@ -10,6 +10,8 @@
 # ISMIP7_EXPERIMENT selects the driver:
 #   control            antarctica/scripts/control/run.py
 #   ssp126_cesm_waccm  antarctica/scripts/projections/ssp126_cesm_waccm.py
+#   ssp126_mri_esm2, ssp370_cesm_waccm, ssp370_mri_esm2, ssp585_cesm_waccm,
+#   ssp585_mri_esm2    the other core projections, same layout
 #   ocx                antarctica/scripts/projections/ocx.py
 #   hist_cesm_waccm    antarctica/scripts/historical/cesm_waccm.py
 #   hist_mri_esm2      antarctica/scripts/historical/mri_esm2.py
@@ -49,6 +51,11 @@ EXPERIMENT="${ISMIP7_EXPERIMENT:-control}"
 case "$EXPERIMENT" in
     control)           DRIVER=antarctica/scripts/control/run.py ;;
     ssp126_cesm_waccm) DRIVER=antarctica/scripts/projections/ssp126_cesm_waccm.py ;;
+    ssp126_mri_esm2)   DRIVER=antarctica/scripts/projections/ssp126_mri_esm2.py ;;
+    ssp370_cesm_waccm) DRIVER=antarctica/scripts/projections/ssp370_cesm_waccm.py ;;
+    ssp370_mri_esm2)   DRIVER=antarctica/scripts/projections/ssp370_mri_esm2.py ;;
+    ssp585_cesm_waccm) DRIVER=antarctica/scripts/projections/ssp585_cesm_waccm.py ;;
+    ssp585_mri_esm2)   DRIVER=antarctica/scripts/projections/ssp585_mri_esm2.py ;;
     ocx)               DRIVER=antarctica/scripts/projections/ocx.py ;;
     hist_cesm_waccm)   DRIVER=antarctica/scripts/historical/cesm_waccm.py ;;
     hist_mri_esm2)     DRIVER=antarctica/scripts/historical/mri_esm2.py ;;

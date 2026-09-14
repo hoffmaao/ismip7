@@ -50,7 +50,8 @@ It only reads, and submits nothing. Add your hostname pattern to the file's
 `ISMIP7_SITE_MATCH` and `ISMIP7_SITE` stops being necessary.
 
 Required, because a job cannot start without them: `ISMIP7_FIREDRAKE`,
-`ISMIP7_PART_LONG`, `ISMIP7_PART_SHORT`, `ISMIP7_REPO`, `ISMIP7_WORK`.
+`ISMIP7_PART_LONG`, `ISMIP7_PART_SHORT`, `ISMIP7_PART_DEBUG`, `ISMIP7_REPO`,
+`ISMIP7_WORK`.
 Everything else has a working default. A missing value is reported at
 submission with the file and the variable named, never minutes into a queued
 job.
@@ -83,9 +84,11 @@ partitions:
 | scavenge | 1 hour | preemptible | 154 |
 
 **You already have Cascade Lake.** `commons` carries 72 Cascade Lake nodes of
-142, and scavenge has plenty, so the job scripts pin `-C cascadelake` and run on
-EEPS-generation hardware today. Do NOT pin the constraint on `long`: it has
+142, and scavenge has plenty, so `--constraint cascadelake` reaches
+EEPS-generation hardware today. Do NOT pin that constraint on `long`: it has
 exactly ONE Cascade Lake node, so the job would queue behind a single machine.
+That is why `sites/rice_nots.sh` pins `sapphirerapids` instead, since `long` is
+the partition the 2 km inversions need.
 
 | partition | cascadelake nodes | wall limit |
 |---|---|---|
@@ -117,11 +120,11 @@ than Cascade Lake (192 cpus), so they are better hardware for getting that run
 done; the only cost is that timings taken there are not comparable with the
 Cascade Lake numbers in this file.
 
-Switching once granted is one flag, since a command-line option beats the
-`#SBATCH` directive:
+Switching once granted is two options on the wrapper, which override the site
+file for that submission:
 
 ```
-sbatch -p deepsC --time=2-00:00:00 antarctica/scripts/batch_runners/inversion.sbatch
+antarctica/scripts/batch_runners/submit.sh inversion --partition deepsC --time 2-00:00:00
 ```
 
 ### What deepsC actually is (measured, and it corrects an earlier claim)
@@ -262,8 +265,8 @@ with ISSM's logarithmic term, the pointwise dH/dt term, and the integrated
 net mass-balance constraint that is off by default in the repo.
 
 The friction law is the one deliberate difference from that run.
-`sites/rice_nots.sh` defaults `ISMIP7_FRICTION` to `regularized_coulomb`, because
-every inversion now runs that law. Budd's shelf gate was a sign test on the
+`site_env.sh` defaults `ISMIP7_FRICTION` to `regularized_coulomb` at every
+site, because every inversion now runs that law. Budd's shelf gate was a sign test on the
 roundoff residue of the effective pressure, so the Budd MAPs that predate the
 fix have to be re-inverted; pass `ISMIP7_FRICTION=budd` explicitly for those.
 The law also picks the filename tag, so a Budd re-inversion writes its own
@@ -307,8 +310,7 @@ to. 24 h buys roughly 55 simulated years, so a full projection is about six
 chained jobs.
 
 ```
-sbatch --export=ALL,ISMIP7_EXPERIMENT=control \
-       antarctica/scripts/batch_runners/projection.sbatch
+antarctica/scripts/batch_runners/submit.sh projection ISMIP7_EXPERIMENT=control
 ```
 
 `ISMIP7_EXPERIMENT` selects the driver, one of the ten cores:

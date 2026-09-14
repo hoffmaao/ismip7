@@ -1,9 +1,10 @@
 #!/bin/bash
 # Smoke test: the 32 km inversion for 2 iterates on 4 ranks. Exercises the
-# whole stack on NOTS (firedrake, icepack, icepack2, tlm_adjoint, rasterio,
-# every data file) in a few minutes, so a multi-day job cannot die on a
-# missing file or module hours after it queued.
-#   sbatch antarctica/scripts/batch_runners/smoke.sbatch
+# whole stack (firedrake, icepack, icepack2, tlm_adjoint, rasterio, every data
+# file) in a few minutes, so a multi-day job cannot die on a missing file or
+# module hours after it queued. It is also the first thing to run at a new
+# site, once sites/<name>.sh is filled in.
+#   antarctica/scripts/batch_runners/submit.sh smoke
 # Resources (partition, tasks, memory, wall time, account, constraint) come
 # from submit.sh and this cluster's sites/<name>.sh, never from directives
 # here: a directive cannot read a site file, and a header that disagrees
@@ -19,7 +20,7 @@ cd "${SLURM_SUBMIT_DIR:-.}"
 # the 2500 m production defaults, after which a ${VAR:-...} fallback here never
 # fires (job 1300996 silently ran the 2500 m mesh on 4 ranks that way).
 export ISMIP7_LC="${ISMIP7_LC:-32000}" ISMIP7_LC_COARSE="${ISMIP7_LC_COARSE:-320000}" ISMIP7_BUFFER_M="${ISMIP7_BUFFER_M:-0}"
-export ISMIP7_MESH="${ISMIP7_MESH:-/projects/ah301/ismip7/antarctica/mesh/antarctica_320000_32000.msh}"
+export ISMIP7_MESH="${ISMIP7_MESH:-${ISMIP7_REPO:-.}/antarctica/mesh/antarctica_320000_32000.msh}"
 . antarctica/scripts/batch_runners/site_env.sh
 ismip7_activate
 ismip7_banner
@@ -28,7 +29,7 @@ export ISMIP7_DHDT_WEIGHT=1 ISMIP7_DHDT_NET_SIGMA=10 ISMIP7_GAMMA_THETA=1e5 ISMI
 export ISMIP7_MAXITER="${ISMIP7_MAXITER:-2}" ISMIP7_RASTER_SAMPLE="${ISMIP7_RASTER_SAMPLE:-vertex}"
 export ISMIP7_MAP_OUT="${ISMIP7_MAP_OUT:-$ISMIP7_REPO/antarctica/results/smoke_${ISMIP7_LC}_${ISMIP7_LC_COARSE}_${ISMIP7_RASTER_SAMPLE}.h5}"
 mkdir -p "$(dirname "$ISMIP7_MAP_OUT")"
-srun -n "$SLURM_NTASKS" python -u antarctica/scripts/inversion_icepack2.py
+srun -n "${SLURM_NTASKS:-1}" python -u antarctica/scripts/inversion_icepack2.py
 rc=$?
 echo "=== $(date -Is) smoke exit $rc ==="
 exit $rc

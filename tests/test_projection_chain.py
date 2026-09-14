@@ -83,7 +83,8 @@ STUBS = {
     "scontrol": (
         "#!/bin/bash\n"
         'case "$1 $2" in\n'
-        '  "show job") echo "JobId=%s TimeLimit=1-00:00:00 Partition=commons" ;;\n'
+        '  "show job") echo "JobId=%s TimeLimit=1-00:00:00 Partition=commons'
+        ' Features=cascadelake MinMemoryNode=240G" ;;\n'
         '  "show node") echo "CPUTot=40 RealMemory=187135 ActiveFeatures=cascadelake" ;;\n'
         "esac\n"
     ) % JOB_ID,
@@ -122,6 +123,8 @@ def run_job(sandbox, **env):
         "SCRATCH": str(sandbox),
         "SLURM_JOB_ID": JOB_ID,
         "SLURM_NTASKS": "12",
+        "SLURM_JOB_NUM_NODES": "1",
+        "SLURM_JOB_PARTITION": "commons",
         "SLURM_SUBMIT_DIR": str(sandbox),
         # sites/local.sh takes every setting from this environment, so the
         # runner logic is exercised without a scheduler or a site file.
@@ -153,6 +156,21 @@ def test_short_run_chains_once(sandbox):
     assert "--dependency=afterok:424242" in calls
     assert "ENV: ISMIP7_WALL_STOP_MIN" not in calls
     assert "ENV: ISMIP7_RESTART" not in calls
+
+
+def test_the_successor_is_given_this_job_s_allocation(sandbox):
+    r"""The job script carries no resource directives, so a successor
+    submitted from inside a job has to be told the running job's own
+    allocation. Without it the link lands on the cluster's defaults: wrong
+    partition, wrong wall limit, and a default of one task, which the runner
+    refuses outright - a 285-year projection would stop after its first link."""
+    rc, log, calls = run_job(sandbox, FAKE_T_YR="2050", FAKE_START_YEAR="2000")
+    assert rc == 0, log
+    argv = [line for line in calls.splitlines() if line.startswith("ARGV:")]
+    assert len(argv) == 1, calls
+    for flag in ("-p commons", "-C cascadelake", "--time=1-00:00:00",
+                 "--mem=240G", "-N 1", "-n 12", "--cpus-per-task=1"):
+        assert flag in argv[0], f"successor lost {flag}: {argv[0]}"
 
 
 def test_reaching_t_end_finishes(sandbox):

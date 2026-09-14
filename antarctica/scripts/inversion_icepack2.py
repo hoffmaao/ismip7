@@ -1137,11 +1137,10 @@ def main():
     global_ndof = len(func_to_global(theta))
     z_backup = z.copy(deepcopy=True)
     last_good_obj = [np.inf]
-    last_x = [None]                      # the control vector of the last evaluation
+    last_x = [None]                      # controls of the last CONVERGED evaluation
     iteration_count = [0]
 
     def objective_and_gradient(x_vec):
-        last_x[0] = np.array(x_vec, copy=True)
         t_iter = perf_counter()
         global_to_func(x_vec[:global_ndof], theta)
         global_to_func(x_vec[global_ndof:], phi)
@@ -1172,6 +1171,7 @@ def main():
 
         z_backup.assign(z)
         last_good_obj[0] = J_val
+        last_x[0] = np.array(x_vec, copy=True)
         last_good_vel_chi2[0] = float(assemble(_vel_chi2))
 
         t_adj = perf_counter()
@@ -1254,7 +1254,6 @@ def main():
         _inner_og = objective_and_gradient
         def objective_and_gradient(u_vec):  # noqa: F811 (deliberate wrap)
             J, g_x = _inner_og(u_vec / _sqrtm)
-            last_x[0] = np.array(u_vec, copy=True)   # in the optimizer's own (scaled) space
             return J, g_x / _sqrtm
     x0 = np.concatenate([func_to_global(theta), func_to_global(phi)])
     if grad_precond == "mass":
@@ -1285,6 +1284,14 @@ def main():
         f"(misfit_norm={MISFIT_NORM} gamma_theta={GAMMA_THETA:g} "
         f"gamma_phi={GAMMA_PHI:g} dhdt_weight={dhdt_w:g})"
     )
+    # The chain runner reads <ISMIP7_MAP_OUT>.done as "the optimizer returned,
+    # do not re-invert this MAP". Write it here, the moment the MAP is on disk:
+    # the tail below (final solve, summary figure) runs for long enough that
+    # the wall clock can kill the job inside it, and the runner's post-srun
+    # rule would then never get to write the marker.
+    if map_out and COMM_WORLD.rank == 0:
+        with open(map_out + ".done", "w"):
+            pass
 
     # ── Final forward solve ──
     # The single-shot solve at full exponents can fail, and the old code then
@@ -1306,12 +1313,14 @@ def main():
     # STATE of the last evaluation, where the residual is already at its
     # floor, rtol cannot be met and the nleqerr line search fails (the
     # forward's restart hit the same thing, simulation.py, Aug 2026). When
-    # the optimizer's final x is the last vector it evaluated, z already IS
-    # the solution at these controls and no solve is needed; otherwise solve
-    # the way every iterate did.
-    if last_x[0] is not None and np.array_equal(last_x[0], result.x):
-        PETSc.Sys.Print("  Final controls are the last evaluated ones; the "
-                        "converged state is reused (no re-solve)")
+    # the optimizer's final x is the last vector whose forward CONVERGED, z
+    # already IS the solution at these controls and no solve is needed;
+    # otherwise solve the way every iterate did. A failed evaluation never
+    # records its controls, so the state z holds always belongs to last_x
+    # (both are in the inner objective's unscaled space, hence _x_final).
+    if last_x[0] is not None and np.array_equal(last_x[0], _x_final):
+        PETSc.Sys.Print("  Final controls are those of the last converged "
+                        "evaluation; that state is reused (no re-solve)")
     else:
         try:
             F_fin = build_F(theta, phi)

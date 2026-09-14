@@ -103,7 +103,8 @@ echo "    map in  $ISMIP7_INVERSION"
 [ -f "$ISMIP7_INVERSION" ] \
     || echo "    WARNING: that MAP does not exist; run nots_inversion.sbatch first" \
             "or set ISMIP7_INVERSION"
-echo "    dt=$ISMIP7_DT t_end=${ISMIP7_T_END:-(driver default)}" \
+echo "    dt=$ISMIP7_DT" \
+     "t_end=${ISMIP7_T_END:-driver default (2301 projections, 2101 ssp370, 2015 historical, 2026 OCX)}" \
      "auto_resume=$ISMIP7_AUTO_RESUME" \
      "apparent_mb=$ISMIP7_APPARENT_MB fixed_front=$ISMIP7_FIXED_FRONT"
 

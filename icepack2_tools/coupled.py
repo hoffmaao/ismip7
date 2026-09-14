@@ -146,7 +146,7 @@ class CoupledModel:
 
         # Also apply atmosphere forcing if available
         if hasattr(self, 'atm') and self.atm is not None:
-            from icepack2_tools.forcing import forcing_coords
+            from icepack2_tools.forcing import forcing_coords, forcing_year
             mesh_x, mesh_y = forcing_coords(ctx)
-            smb = self.atm.get_smb(t_yr, mesh_x, mesh_y, anomaly=True)
+            smb = self.atm.get_smb(forcing_year(t_yr), mesh_x, mesh_y, anomaly=True)
             ctx["accum"].dat.data[:] = smb

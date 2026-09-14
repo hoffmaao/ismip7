@@ -45,7 +45,7 @@ def _comm_rank():
 
 
 def forcing_year(t_yr):
-    r"""The calendar year a step belongs to, from the time it ENDS at.
+    r"""The calendar year a MODEL TIME lies in, from the time a step ENDS at.
 
     ``run_simulation`` hands the forcing callback the END of the step, and
     ``t = Y.0`` is 1 January of year Y, so the step from 2300.9 to 2301.0 lies
@@ -57,6 +57,13 @@ def forcing_year(t_yr):
 
     This is also the year ``AnnualOutput`` is accumulating, so the forcing a
     step receives and the year its fluxes are booked into are the same.
+
+    It belongs at the boundary where model time is known, which is the forcing
+    callback. The readers below take a plain CALENDAR year: they are also
+    called with years straight out of ``available_years`` (the climatology
+    pools in ``smb_scheme`` and ``compute_climatology``), and shifting those
+    would re-reference every pooled year by one and make the first year of a
+    scenario read as preceding its own series.
     """
     import math
     return int(math.ceil(float(t_yr) - 1e-9)) - 1
@@ -559,7 +566,7 @@ class ISMIP7Atmosphere:
         ``_annual_mean_over_time`` (see that docstring for the weighting)."""
         import xarray as xr
 
-        yr = forcing_year(year)
+        yr = int(year)
         da = self._load_year(variable, yr)
         if da is None:
             return np.zeros(len(mesh_x))
@@ -651,7 +658,7 @@ class ISMIP7Ocean:
         import xarray as xr
         from scipy.interpolate import RegularGridInterpolator
 
-        yr = forcing_year(year)
+        yr = int(year)
         key = (variable, yr)
         if key in self._interp_cache:
             return self._interp_cache[key]
@@ -820,7 +827,7 @@ class ISMIP7Fracture:
         da = ds[var]
 
         if "time" in da.dims:
-            da = da.sel(time=forcing_year(year), method="nearest")
+            da = da.sel(time=int(year), method="nearest")
 
         mx = xr.DataArray(np.asarray(mesh_x), dims="node")
         my = xr.DataArray(np.asarray(mesh_y), dims="node")
@@ -1144,9 +1151,11 @@ def make_forcing_callback(atm=None, ocean=None, fracture=None,
 
     def callback(ctx, t_yr):
         mesh_x, mesh_y = forcing_coords(ctx)
+        # t_yr is the END of the step; the readers want a calendar year
+        yr = forcing_year(t_yr)
 
         if atm is not None:
-            smb = atm.get_smb(t_yr, mesh_x, mesh_y, anomaly=smb_anomaly)
+            smb = atm.get_smb(yr, mesh_x, mesh_y, anomaly=smb_anomaly)
             if smb_baseline is not None:
                 smb = smb + smb_baseline
             ctx["accum"].dat.data[:] = smb
@@ -1158,8 +1167,8 @@ def make_forcing_callback(atm=None, ocean=None, fracture=None,
             # Ice shelf draft (negative depth below sea level)
             draft = np.minimum(s - h, 0.0)
 
-            tf = ocean.get_thermal_forcing(t_yr, mesh_x, mesh_y, draft=draft)
-            sal = ocean.get_salinity(t_yr, mesh_x, mesh_y, draft=draft)
+            tf = ocean.get_thermal_forcing(yr, mesh_x, mesh_y, draft=draft)
+            sal = ocean.get_salinity(yr, mesh_x, mesh_y, draft=draft)
             sin_alpha = compute_sin_alpha(ctx)
 
             # Resolve K: per-basin npz takes precedence if supplied.
@@ -1183,5 +1192,5 @@ def make_forcing_callback(atm=None, ocean=None, fracture=None,
             # The year's ice-shelf collapse mask on the geometry cells; the
             # transport removes the floating cells it flags
             # (simulation.run_simulation, ISMIP7_FRACTURE=mask).
-            ctx["collapse"][:] = fracture.get_collapse_mask(t_yr, mesh_x, mesh_y) > 0.5
+            ctx["collapse"][:] = fracture.get_collapse_mask(yr, mesh_x, mesh_y) > 0.5
     return callback

@@ -58,7 +58,7 @@ from icepack2_tools.boundary import load_boundary_ids
 from icepack2_tools.geometry import sample_to_geometry
 from icepack2_tools.naming import map_basename
 from icepack2_tools.front import (
-    clear_reference_where_ice_free, retreat_slivers,
+    clamp_thickness, clear_reference_where_ice_free, retreat_slivers,
 )
 from icepack2_tools.runconfig import (
     friction as _friction, geometry_space as _geometry_space, lc as _lc,
@@ -1485,7 +1485,7 @@ def run_simulation(
     if _ismip7_output():
         from icepack2_tools.ismip7_output import AnnualOutput
         annual = AnnualOutput(
-            mesh, Q_dg, ctx["V"],
+            mesh, Q_dg,
             os.path.join(RESULTS_DIR, f"{experiment_name}_{lc}_ismip7_annual.h5"),
             os.path.join(RESULTS_DIR, f"{experiment_name}_{lc}_ismip7_scalars.csv"),
             first_year=t_start, rho_ratio=float(rho_ratio), log=PETSc.Sys.Print,
@@ -1749,21 +1749,11 @@ def run_simulation(
         if annual is not None:
             annual.book_advance(dt_local, accum, ocean_melt, a_ref, h_dg, u_vel, _grounded_cells())
 
-        # Floor to h_clamp, EXCEPT where there is no ice: those cells are
-        # outside the ice domain, so flooring them would hand the mask below
-        # h_clamp of fresh ice to re-calve every step and report as terminus
-        # discharge. There the floor is zero and the front stays a pure sink.
-        # With a level set the exemption is everything it reports ice-free,
-        # not just the cells calved this step: under a free law `beyond` is
-        # only the handful the front just passed, so flooring the rest of the
-        # buffer would fabricate ice across every never-glaciated cell.
-        data = h_dg.dat.data
-        floor = np.full_like(data, h_clamp)
-        if ls_ice_free is not None:
-            floor[ls_ice_free] = 0.0
-        if beyond is not None:
-            floor[beyond] = 0.0
-        np.maximum(data, floor, out=data)
+        # Floor to h_clamp, EXCEPT in the cells the front rules report as
+        # holding no ice: see clamp_thickness for why every such rule has to
+        # name its cells here.
+        collapsed = (collapse & ~_grounded_cells()) if collapse is not None else None
+        clamp_thickness(h_dg.dat.data, h_clamp, ls_ice_free, beyond, collapsed)
         m2 = float(assemble(h_dg * dx)) * rho_gt
         clamp_gt = m2 - m1                                       # Gt added by DG floor
 

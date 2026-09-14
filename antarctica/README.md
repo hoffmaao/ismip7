@@ -178,6 +178,7 @@ Three things:
 ```bash
 cd antarctica
 python scripts/download_forcing.py --login        # caches ~/.ismip7_globus_tokens.json
+python scripts/download_forcing.py --list         # legacy climatology subtree; /ISMIP7/AIS needs the Globus web app
 export GLOBUS_LOCAL_ENDPOINT=<your-endpoint-uuid>
 python scripts/download_forcing.py --ocean        # thetao/so/tf + climatology + bias
 python scripts/download_forcing.py --calibration  # meltMIP obs melt, IMBIE2 basins, grid, topography

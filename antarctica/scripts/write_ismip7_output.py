@@ -365,7 +365,7 @@ def main():
             pct = 100.0 * nfin / (len(years) * ISMIP7_NY * ISMIP7_NX)
             rng = f"[{lo:.3e}, {hi:.3e}]" if nfin else "[all fill]"
             print(f"  {var:12s} {req[var]['units']:11s} {rng} "
-                  f"{pct:5.1f}% filled  -> {os.path.basename(paths[var])}", flush=True)
+                  f"{pct:5.1f}% valid  -> {os.path.basename(paths[var])}", flush=True)
 
         for var in SCALARS:
             meta = req[var]

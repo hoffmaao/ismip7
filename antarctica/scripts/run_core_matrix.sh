@@ -315,30 +315,39 @@ run_core () {  # core label driver esm stem target kind
     prev="$now"
     wait_for_load
     log="$R/logs/matrix_${TS}_core${core}_${label}_a${attempt}.log"
-    # Attempt 1 uses the driver's own restart logic (projections and the CTRL
-    # branch from the historical endpoint). Later attempts are wall retries and
-    # must resume from this run's own saved state.
+    # A core that has its own saved state resumes from it on EVERY attempt,
+    # the first included. Cold-starting into a core's own partially complete
+    # run would restart a projection from the historical endpoint and rewrite
+    # years it has already banked, which AnnualOutput refuses outright under
+    # ISMIP7_OUTPUT=1, wedging the core. Only a core with no state of its own
+    # cold-starts, and then the driver's own logic applies (projections and
+    # the CTRL branch from the historical endpoint).
     local restart_env=() pick pick_t pick_fn
-    if [ "$attempt" -gt 1 ]; then
-      pick=$(pick_restart "$stem" "$now")
-      pick_t=${pick%%|*}; pick_fn=${pick#*|}
-      if [ "$pick_t" = "?" ]; then
-        if [ ! -f "$h5" ] || [ "$csv" -nt "$h5" ]; then
-          echo "[core $core] $label: cannot confirm a saved state consistent" \
-               "with the timeseries at ${now:-nothing} - stopping rather than" \
-               "resuming from a checkpoint that may be ahead of the record"
-          return 1
-        fi
-        pick_fn="$h5"; pick_t="$now"
-      elif [ -z "$pick_fn" ]; then
-        echo "[core $core] $label: no checkpoint at or before the timeseries'" \
-             "last year ${now:-nothing} - stopping rather than splicing two" \
-             "timelines into one record"
+    pick=$(pick_restart "$stem" "$now")
+    pick_t=${pick%%|*}; pick_fn=${pick#*|}
+    if [ "$pick_t" = "?" ] && [ -f "$h5" ]; then
+      if [ "$csv" -nt "$h5" ]; then
+        echo "[core $core] $label: cannot confirm a saved state consistent" \
+             "with the timeseries at ${now:-nothing} - stopping rather than" \
+             "resuming from a checkpoint that may be ahead of the record"
         return 1
       fi
+      pick_fn="$h5"; pick_t="$now"
+    fi
+    if [ -n "$pick_fn" ]; then
       restart_env=(ISMIP7_RESTART="$REPO/$pick_fn")
-      echo "[core $core] $label retry $((attempt-1)) from $now" \
-           "(resuming $(basename "$pick_fn") at t=$pick_t)"
+      if [ "$attempt" -gt 1 ]; then
+        echo "[core $core] $label retry $((attempt-1)) from $now" \
+             "(resuming $(basename "$pick_fn") at t=$pick_t)"
+      else
+        echo "[core $core] $label resuming $(basename "$pick_fn")" \
+             "at t=$pick_t (target $target)"
+      fi
+    elif [ "$attempt" -gt 1 ]; then
+      echo "[core $core] $label: no checkpoint at or before the timeseries'" \
+           "last year ${now:-nothing} - stopping rather than splicing two" \
+           "timelines into one record"
+      return 1
     else
       echo "[core $core] $label starting (target $target)"
     fi

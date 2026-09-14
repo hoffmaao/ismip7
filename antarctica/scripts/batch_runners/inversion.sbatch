@@ -1,12 +1,12 @@
 #!/bin/bash
-# ISMIP7 icepack2 inversion on Rice NOTS, with a self-resuming chain.
+# ISMIP7 icepack2 inversion on any cluster, with a self-resuming chain.
 #
-# Submit through nots_submit_inversions.sh, which sets the mesh, sampling and
-# output name; or directly:
-#   sbatch -p long -C sapphirerapids --mem=240G -N1 -n32 --time=3-00:00:00 \
-#     --export=ALL,ISMIP7_LC=2000,ISMIP7_LC_COARSE=5000,ISMIP7_BUFFER_M=0,\
-#ISMIP7_MESH=...,ISMIP7_RASTER_SAMPLE=vertex,ISMIP7_MAP_OUT=... \
-#     antarctica/scripts/batch_runners/nots_inversion.sbatch
+# Submit through submit_inversions.sh, which sets the mesh, sampling and
+# output name; or through submit.sh, which takes the resources from this
+# cluster's site file:
+#   antarctica/scripts/batch_runners/submit.sh inversion \
+#     ISMIP7_LC=2000 ISMIP7_LC_COARSE=5000 ISMIP7_BUFFER_M=0 \
+#     ISMIP7_MESH=... ISMIP7_RASTER_SAMPLE=vertex ISMIP7_MAP_OUT=...
 #
 # CHAIN. A 2 km inversion can outlast a wall limit. The inversion checkpoints
 # ISMIP7_MAP_OUT every 20 iterates and can warm-start from it, so this script
@@ -22,26 +22,33 @@
 # plus ISSM's logarithmic misfit, the pointwise dH/dt term, and the integrated
 # net mass-balance term (off by default in the repo) that takes grounding-line
 # discharge from 1628 to 2211 Gt/yr. The friction law is the one deliberate
-# difference: nots_env.sh defaults ISMIP7_FRICTION to regularized_coulomb.
+# difference: site_env.sh defaults ISMIP7_FRICTION to regularized_coulomb.
 
-#SBATCH -J ismip7_inv
-#SBATCH -p long
+# Resources (partition, tasks, memory, wall time, account, constraint) come
+# from submit.sh and this cluster's sites/<name>.sh, never from directives
+# here: a directive cannot read a site file, and a header that disagrees
+# with the command line is rejected outright by Slurm.
 #SBATCH -o logs/ismip7_inv_%j.out
 #SBATCH -e logs/ismip7_inv_%j.err
-#SBATCH --nodes=1
-#SBATCH --ntasks-per-node=32
-#SBATCH --cpus-per-task=1
-#SBATCH --hint=nomultithread
-#SBATCH --mem=240G
-#SBATCH --time=3-00:00:00
 #SBATCH --mail-type=END,FAIL
 
 set -uo pipefail
 cd "${SLURM_SUBMIT_DIR:-.}"
 mkdir -p logs
-. antarctica/scripts/batch_runners/nots_env.sh
-nots_activate
-nots_banner
+
+# Resources are the wrapper's job (submit.sh reads sites/<cluster>.sh). A job
+# that arrives from the scheduler with one task was submitted by hand without
+# them, and at 2 km that dies on memory hours into the queue rather than at
+# submission. Off a scheduler there is no allocation to judge, so no check.
+if [ -n "${SLURM_JOB_ID:-}" ] && [ "${SLURM_NTASKS:-1}" = 1 ]; then
+    echo "ERROR: this job has SLURM_NTASKS=1, so no resources were requested." >&2
+    echo "       Submit with: antarctica/scripts/batch_runners/submit.sh inversion [KEY=VALUE ...]" >&2
+    exit 2
+fi
+
+. antarctica/scripts/batch_runners/site_env.sh
+ismip7_activate
+ismip7_banner
 
 export ISMIP7_MISFIT_NORM="${ISMIP7_MISFIT_NORM:-sigma}"
 export ISMIP7_SIGMA_U_FLOOR="${ISMIP7_SIGMA_U_FLOOR:-3}"
@@ -56,10 +63,12 @@ export ISMIP7_RASTER_SAMPLE="${ISMIP7_RASTER_SAMPLE:-vertex}"
 # writes the production filename and can silently replace a converged map.
 # ISMIP7_MAP_DEFAULT is named from the law, so ISMIP7_FRICTION=budd writes a
 # _budd file rather than resuming from and then overwriting the RC one. It is
-# the same path nots_projection.sbatch loads.
+# the same path projection.sbatch loads.
 export ISMIP7_MAP_OUT="${ISMIP7_MAP_OUT:-$ISMIP7_MAP_DEFAULT}"
 DONE="${ISMIP7_MAP_OUT}.done"
-LOG="logs/ismip7_inv_${SLURM_JOB_ID}.out"
+# Off a scheduler (sites/local.sh, debugging on a workstation) there is no
+# job id, no allocation and nothing to chain to.
+LOG="logs/ismip7_inv_${SLURM_JOB_ID:-manual}.out"
 
 echo "    map out  $ISMIP7_MAP_OUT"
 echo "    sampling $ISMIP7_RASTER_SAMPLE  net sigma $ISMIP7_DHDT_NET_SIGMA  log-vel $ISMIP7_LOG_VEL_WEIGHT  maxiter $ISMIP7_MAXITER"
@@ -72,16 +81,14 @@ fi
 # --- queue the successor before doing anything slow -----------------------
 DEPTH="${ISMIP7_CHAIN_DEPTH:-0}"
 MAXD="${ISMIP7_CHAIN_MAX:-4}"
-if [ "$DEPTH" -lt "$MAXD" ]; then
-    INFO=$(scontrol show job "$SLURM_JOB_ID")
-    feat=$(echo "$INFO" | grep -oE 'Features=[^ ]+' | cut -d= -f2); [ "$feat" = "(null)" ] && feat=""
-    tlim=$(echo "$INFO" | grep -oE 'TimeLimit=[^ ]+' | cut -d= -f2)
-    memn=$(echo "$INFO" | grep -oE 'MinMemoryNode=[^ ]+' | cut -d= -f2)
+if [ -z "${SLURM_JOB_ID:-}" ]; then
+    echo "chain: no scheduler, so no successor to queue"
+elif [ "$DEPTH" -lt "$MAXD" ]; then
+    ismip7_chain_resources
     NEXT=$(sbatch --parsable --dependency=afterany:"$SLURM_JOB_ID" \
-        -p "$SLURM_JOB_PARTITION" ${feat:+-C "$feat"} --time="$tlim" --mem="$memn" \
-        -N "$SLURM_JOB_NUM_NODES" -n "$SLURM_NTASKS" --cpus-per-task="${SLURM_CPUS_PER_TASK:-1}" \
+        "${ISMIP7_CHAIN_RES[@]}" \
         --export=ALL,ISMIP7_CHAIN_DEPTH=$((DEPTH + 1)) \
-        antarctica/scripts/batch_runners/nots_inversion.sbatch) \
+        antarctica/scripts/batch_runners/inversion.sbatch) \
       && echo "chain: successor $NEXT queued (depth $((DEPTH + 1)) of $MAXD)" \
       || echo "chain: WARNING could not queue a successor"
 else
@@ -94,7 +101,7 @@ if [ -f "$ISMIP7_MAP_OUT" ]; then
     echo "chain: warm-starting theta/phi from the periodic checkpoint $ISMIP7_MAP_OUT"
 fi
 
-srun -n "$SLURM_NTASKS" python -u antarctica/scripts/inversion_icepack2.py
+srun -n "${SLURM_NTASKS:-1}" python -u antarctica/scripts/inversion_icepack2.py
 rc=$?
 echo "=== $(date -Is)  inversion exit ${rc} ==="
 

@@ -1,31 +1,88 @@
-# Slurm batch runners for Rice NOTS
+# Slurm batch runners
 
-Cascade Lake job scripts for the ISMIP7 icepack2 runs. Every wall time and
-memory figure below was measured, not estimated; the provenance is in the
-table at the end.
+Scheduler job scripts for the ISMIP7 icepack2 runs, on any cluster. Every wall
+time and memory figure below was measured, not estimated.
 
-## Before the first submission
+## How it works
 
-Three site-specific values must be filled into `nots_env.sh`. They are left
-empty on purpose, because a wrong module name fails minutes into a queued job
-rather than at submission.
+Three pieces, and the split matters:
 
-| variable | what it is | status as of 2026-09-09 |
-|---|---|---|
-| `NOTS_ACCOUNT` | Slurm account to charge | **BLOCKED, needs a CRC admin.** See below. |
-| `NOTS_FIREDRAKE` | the Firedrake venv `activate` on NOTS | `nots_build_firedrake.sbatch` builds it to `/projects/ah301/sw/venv-firedrake` |
-| `NOTS_MODULES` | the module loads that venv was **built** against | the exact pinned set is printed at the end of a successful build |
+| | |
+|---|---|
+| `sites/<cluster>.sh` | everything that differs between clusters: the Firedrake venv, the module loads it was built against, partitions by job length, the account to charge, a node constraint, and the paths that can hold a checkout and 300 GB of forcing. |
+| `site_env.sh` | picks the site file (from `ISMIP7_SITE`, else by hostname), refuses to run while a required field is empty, and turns it into an environment: `ismip7_activate`, `ismip7_banner`, and the model defaults every run shares. |
+| `submit.sh` | composes the scheduler command from the site file. `submit.sh inversion ISMIP7_LC=2000` is the same line at Rice and at IU. |
 
-`nots_recon.sh`, run on a NOTS login node, prints what fills them: the Slurm
-associations, the partition limits, the node hardware and the queue depth. It
-only reads, submits nothing and changes nothing.
+The job scripts themselves (`inversion.sbatch`, `projection.sbatch`,
+`smoke.sbatch`, `verify.sbatch`, `partition_probe.sbatch`,
+`build_firedrake_rice.sbatch`) carry **no resource directives at all**, only their
+log paths. That is deliberate: a `#SBATCH` line is parsed before any shell
+runs, so it cannot read a site file, and a header that disagrees with the
+command line is not overridden but rejected outright ("Requested node
+configuration is not available", which cost two submissions before the split).
+A job submitted by hand without resources stops immediately and says so.
 
-`ISMIP7_REPO` now defaults to `/projects/ah301/ismip7`. That directory exists
-and is writable. The forcing tree is 316 GB and the input data 8 GB, and
-`/home` is a 10 TB NFS export shared by the whole cluster, so neither belongs
-there. `/scratch` is 1.1 PB but 88% full and subject to purge.
+```bash
+# the usual calls
+submit.sh inversion  ISMIP7_LC=2000 ISMIP7_LC_COARSE=5000 ISMIP7_MESH=$PWD/antarctica/mesh/antarctica_5000_2000_buffered0.msh
+submit.sh projection ISMIP7_EXPERIMENT=ssp585_cesm_waccm ISMIP7_OUTPUT=1
+submit.sh smoke                                   # a few minutes, debug partition
+submit.sh inversion --dry-run                     # print the sbatch line, submit nothing
+submit.sh projection --partition debug --time 00:30:00 --tasks 8   # override anything
+```
 
-### Slurm access: resolved, except deepsC
+Any `KEY=VALUE` argument is exported into the job; that is how a run is
+configured (the knobs are in `antarctica/README.md`). `--tasks`, `--mem`,
+`--time`, `--partition`, `--constraint`, `--account` and `--name` override the
+site defaults for one submission.
+
+Inversions and everything else are sized separately: a site file may set
+`ISMIP7_TASKS_INV`/`ISMIP7_MEM_INV`/`ISMIP7_CONSTRAINT_INV` for `inversion` and
+`ISMIP7_TASKS_FWD`/`ISMIP7_MEM_FWD`/`ISMIP7_CONSTRAINT_FWD` for every other
+kind, each falling back to the single `ISMIP7_TASKS`/`ISMIP7_MEM`/
+`ISMIP7_CONSTRAINT`. At Rice the inversion takes 32 ranks, 240 GB and Sapphire
+Rapids, and the forward takes the 12 ranks, 96 GB and Cascade Lake it was
+measured on.
+
+Every option takes either spelling, `--mem 240G` or `--mem=240G`.
+
+## Adding your cluster
+
+```bash
+cp sites/template.sh sites/mycluster.sh
+$EDITOR sites/mycluster.sh          # the REQUIRED fields are marked
+ISMIP7_SITE=mycluster submit.sh smoke --dry-run
+```
+
+`site_recon.sh`, run on a login node, prints most of what the file needs: the
+Slurm associations and partition limits, the node hardware, the queue depth.
+It only reads, and submits nothing. Add your hostname pattern to the file's
+`ISMIP7_SITE_MATCH` and `ISMIP7_SITE` stops being necessary.
+
+Required, because a job cannot start without them: `ISMIP7_FIREDRAKE`,
+`ISMIP7_PART_LONG`, `ISMIP7_PART_SHORT`, `ISMIP7_PART_DEBUG`, `ISMIP7_REPO`,
+`ISMIP7_WORK`. The Firedrake build is the exception: it creates the venv, so
+`submit.sh build` asks for the other five and leaves `ISMIP7_FIREDRAKE` to the
+jobs that source it.
+Everything else has a working default. A missing value is reported at
+submission with the file and the variable named, never minutes into a queued
+job.
+
+### The sites that ship
+
+| file | state |
+|---|---|
+| `sites/rice_nots.sh` | complete and in production (the measured details below). |
+| `sites/iu_quartz.sh` | complete, taken from David Lilien's own Quartz runners on the upstream `timing_matrix` branch: partition `general` (`debug` for tests), account `r00905`, the IU module stack (`module use /N/u/dlilien/Quartz/modulefiles`, then gnu/openmpi/python/zlib/hdf5/openblas/patchelf/petsc/firedrake), 16 ranks per node. A second IU user changes `ISMIP7_FIREDRAKE` to their own build and `ISMIP7_ACCOUNT` to their own allocation. |
+| `sites/uchicago_midway.sh` | **a stub**: nobody has run this pipeline at RCC yet, so the required fields are empty rather than guessed and the first submission will refuse until they are filled from RCC's documentation and `sinfo -s`. |
+| `sites/local.sh` | no scheduler at all: takes every setting from the environment. For debugging a job script on a workstation, and what the chain tests use. |
+
+## Rice NOTS, in detail
+
+The reference site: everything in this section was measured on the login node
+in September 2026, and `sites/rice_nots.sh` is the file it produced.
+
+### Slurm access at Rice: resolved, except deepsC
 
 RESOLVED 2026-09-12. The association exists and the default account is
 `commons`, so `-A` is unnecessary. A `--test-only` submit succeeds on four
@@ -39,9 +96,13 @@ partitions:
 | scavenge | 1 hour | preemptible | 154 |
 
 **You already have Cascade Lake.** `commons` carries 72 Cascade Lake nodes of
-142, and scavenge has plenty, so the job scripts pin `-C cascadelake` and run on
-EEPS-generation hardware today. Do NOT pin the constraint on `long`: it has
+142, and scavenge has plenty, so `--constraint cascadelake` reaches
+EEPS-generation hardware today. Do NOT pin that constraint on `long`: it has
 exactly ONE Cascade Lake node, so the job would queue behind a single machine.
+That is why `sites/rice_nots.sh` sets `ISMIP7_CONSTRAINT_INV=sapphirerapids`,
+since `long` is the partition the 2 km inversions need. Every other kind keeps
+`ISMIP7_CONSTRAINT_FWD=cascadelake`, which is the generation the timings below
+were measured on and the one the Firedrake build has to match.
 
 | partition | cascadelake nodes | wall limit |
 |---|---|---|
@@ -73,16 +134,64 @@ than Cascade Lake (192 cpus), so they are better hardware for getting that run
 done; the only cost is that timings taken there are not comparable with the
 Cascade Lake numbers in this file.
 
-Switching once granted is one flag, since a command-line option beats the
-`#SBATCH` directive:
+Switching once granted is three options on the wrapper, which override the site
+file for that submission. The constraint has to be cleared as well as the
+partition, because an inversion carries `sapphirerapids` and every deepsC node
+is Cascade Lake, so the two together can never be satisfied.
 
 ```
-sbatch -p deepsC --time=2-00:00:00 antarctica/scripts/batch_runners/nots_inversion.sbatch
+antarctica/scripts/batch_runners/submit.sh inversion \
+    --partition deepsC --constraint '' --time 2-00:00:00
 ```
 
-### Building Firedrake here: what the compute nodes do NOT have
+### What deepsC actually is (measured, and it corrects an earlier claim)
 
-`nots_build_firedrake.sbatch` builds PETSc + Firedrake once into
+Every deepsC node is identical:
+
+| | value |
+|---|---|
+| nodes | 52 |
+| physical cores | 40 (2 sockets x 20) |
+| logical CPUs | 80 (`ThreadsPerCore=2`) |
+| memory | 187135 MB, about 182 GiB usable |
+| features | `cascadelake,opath` |
+| wall-time limit | **infinite** |
+
+**An earlier version of these notes claimed deepsC had 768 GB and 1.5 TB tiers.
+That was wrong.** Those nodes exist on NOTS, but in other partitions:
+
+| partition | nodes | memory | limit |
+|---|---|---|---|
+| deepsC | 52 | 187 GB, uniform | infinite |
+| commons | 142 | 187 GB and up, incl. 1.5 TB | 1 day |
+| long | 61 | 257 GB and up, incl. 1.5 TB | 3 days |
+| as143 | 8 | 748 GB | infinite |
+| scavenge | 154 | 187 GB and up | 1 hour |
+
+The consequence is concrete: **the 2 km / 5 km-interior inversion at ~255 GB
+cannot run on deepsC.** It needs `long`, which caps at 3 days. The 20 km-interior
+2 km inversion at ~120 GB does fit deepsC.
+
+The cores are hyperthreaded. 40 are physical; Slurm advertises 80. The solver is
+memory-bandwidth bound, so `submit.sh` passes `--hint=nomultithread` and places
+ranks on physical cores. Treating 80 as usable would halve per-rank bandwidth.
+
+The CPU is the same generation and clock as the workstation the timings were
+measured on (Xeon Gold 5218R, Cascade Lake, 2.10 GHz), so they transfer nearly
+one to one, and they are conservative: the workstation was oversubscribed
+throughout, so a dedicated node should beat them.
+
+## Building Firedrake on a cluster
+
+The lessons in this section generalise. The module names do not.
+`build_firedrake_rice.sbatch` is the worked example, and it runs at Rice only:
+every module name in it is Rice's EasyBuild stack. Another site copies it to
+`build_firedrake_<site>.sbatch`, substitutes its own stack and submits that;
+`submit.sh build` says so when the site is not `rice_nots`.
+
+### What compute nodes tend NOT to have
+
+`build_firedrake_rice.sbatch` builds PETSc + Firedrake once into
 `/projects/ah301/sw`. Five submissions were needed to get it running, and every
 failure was a gap between the login node and the compute nodes, or between a
 module name and what it actually resolves to. They are recorded here because
@@ -125,78 +234,43 @@ top so there are two partitioners to cross-check.
 
 ### After the build: the rest of the stack, and a smoke test
 
-`nots_install_deps.sh` (run once on a login node) pip-installs the data stack
+`install_deps.sh` (run once on a login node) pip-installs the data stack
 and the four editable packages the inversion imports: `icepack`, `icepack2`,
-`tlm_adjoint` and `icepack_tools`. They are rsynced from the workstation into
-`/projects/ah301/sw/src`, not cloned, because `icepack2` carries two
+`tlm_adjoint` and `icepack_tools`. It takes the venv and the work filesystem
+from the site file, and expects the four sources under `$ISMIP7_WORK/sw/src`
+(`FD_PREFIX` moves that; at Rice it is `/projects/ah301/sw/src`). They are
+rsynced from the workstation, not cloned, because `icepack2` carries two
 uncommitted edits the inversion depends on and `icepack_tools` has no remote.
 Two more compute-node gaps surfaced here: `/tmp` is not writable on the login
 nodes (the script sets `TMPDIR`), and the `gmsh` wheel dlopens `libGLU.so.1`,
-which the nodes lack, so `libGLU/9.0.3` joined `NOTS_MODULES`. HDF5 versions
+which the nodes lack, so `libGLU/9.0.3` joined `ISMIP7_MODULES`. HDF5 versions
 agree (h5py 1.14.6 built against PETSc's, netCDF4 wheel 1.14.6).
 
-`nots_verify.sbatch` then proves the build works ACROSS RANKS: four tasks under
+`verify.sbatch` then proves the build works ACROSS RANKS: four tasks under
 `srun`, distributing a unit square with each partitioner in turn and then the
 real 2500 m mesh under `ptscotch` and `simple`. It exists because the build
 job's own check ran `srun -n 4` inside a one-task allocation, which fails for
 every type, `simple` included, and so says nothing about the build.
 
-`nots_smoke.sbatch` then runs the 32 km inversion for two iterates on four
+`smoke.sbatch` then runs the 32 km inversion for two iterates on four
 ranks, a few minutes on `scavenge`, so that a multi-day job cannot die on a
 missing file hours after it queued. Run it after any change to the stack.
 
 ### Toolchain for the Firedrake build
 
-There is no Firedrake module on NOTS, so `nots_build_firedrake.sbatch` builds
+There is no Firedrake module on NOTS, so `build_firedrake_rice.sbatch` builds
 it against EasyBuild modules. The set it pins is `foss/2023b`, the toolchain
 that actually resolves here (GCC 13.2.0, OpenMPI 4.1.6, OpenBLAS, ScaLAPACK,
 FFTW) with Python 3.11.5 built against the same GCCcore so the ABI matches,
 plus CMake 3.27.6 and the M4 / flex / Bison / libevent / zstd / Szip / libaec
 set the compute-node gaps above make necessary. An earlier version of these
-notes named `foss/2025b`; the build does not use it. `NOTS_MODULES` must name
+notes named `foss/2025b`; the build does not use it. `ISMIP7_MODULES` must name
 the *exact* set the venv was built against, which the successful build prints
 at the end, or MPI mismatches at runtime rather than at submission.
 
-## What deepsC actually is (measured, and it corrects an earlier claim)
+## The job scripts
 
-Every deepsC node is identical:
-
-| | value |
-|---|---|
-| nodes | 52 |
-| physical cores | 40 (2 sockets x 20) |
-| logical CPUs | 80 (`ThreadsPerCore=2`) |
-| memory | 187135 MB, about 182 GiB usable |
-| features | `cascadelake,opath` |
-| wall-time limit | **infinite** |
-
-**An earlier version of these notes claimed deepsC had 768 GB and 1.5 TB tiers.
-That was wrong.** Those nodes exist on NOTS, but in other partitions:
-
-| partition | nodes | memory | limit |
-|---|---|---|---|
-| deepsC | 52 | 187 GB, uniform | infinite |
-| commons | 142 | 187 GB and up, incl. 1.5 TB | 1 day |
-| long | 61 | 257 GB and up, incl. 1.5 TB | 3 days |
-| as143 | 8 | 748 GB | infinite |
-| scavenge | 154 | 187 GB and up | 1 hour |
-
-The consequence is concrete: **the 2 km / 5 km-interior inversion at ~255 GB
-cannot run on deepsC.** It needs `long`, which caps at 3 days. The 20 km-interior
-2 km inversion at ~120 GB does fit deepsC.
-
-The cores are hyperthreaded. 40 are physical; Slurm advertises 80. The solver is
-memory-bandwidth bound, so the job scripts pass `--hint=nomultithread` and place
-ranks on physical cores. Treating 80 as usable would halve per-rank bandwidth.
-
-The CPU is the same generation and clock as the workstation the timings were
-measured on (Xeon Gold 5218R, Cascade Lake, 2.10 GHz), so they transfer nearly
-one to one, and they are conservative: the workstation was oversubscribed
-throughout, so a dedicated node should beat them.
-
-## The scripts
-
-### 1. `nots_partition_probe.sbatch` - run first, after the build
+### `partition_probe.sbatch` - run first, after a new build
 
 Distributes the mesh at 1 to 32 ranks and reports the ghost-to-owned dof ratio.
 No solve, no data, half an hour of queue. It answers the only question that
@@ -206,7 +280,7 @@ partitioner? Hundredths mean yes. Tens or hundreds mean PETSc fell back to its
 model. The workstation build reports 2.97 at 2 ranks rising to 287 at 32, which
 is 284x to 6330x the ideal, and is why no scaling curve has been quoted from it.
 
-### 2. `nots_inversion.sbatch` - self-resuming
+### `inversion.sbatch` - self-resuming
 
 Defaults write `inversion_icepack2_rc_n3_dg0_logvelnet_2500.h5` under the
 settings the 2500 m result came from: the sigma-normalised velocity misfit
@@ -214,17 +288,20 @@ with ISSM's logarithmic term, the pointwise dH/dt term, and the integrated
 net mass-balance constraint that is off by default in the repo.
 
 The friction law is the one deliberate difference from that run.
-`nots_env.sh` defaults `ISMIP7_FRICTION` to `regularized_coulomb`, because
-every inversion now runs that law. Budd's shelf gate was a sign test on the
+`site_env.sh` defaults `ISMIP7_FRICTION` to `regularized_coulomb` at every
+site, because every inversion now runs that law. Budd's shelf gate was a sign test on the
 roundoff residue of the effective pressure, so the Budd MAPs that predate the
 fix have to be re-inverted; pass `ISMIP7_FRICTION=budd` explicitly for those.
 The law also picks the filename tag, so a Budd re-inversion writes its own
 `_budd` MAP instead of resuming from and then overwriting the RC one.
 
-`nots_submit_inversions.sh [B|C|BC]` submits the two 2 km
+`submit_inversions.sh [B|C|BC]` submits the two 2 km
 strategies (B: cell-mean BedMachine sampling on the 20 km-interior mesh; C: the
-5 km-interior mesh with vertex sampling) to `long` on Sapphire Rapids at 32
-ranks, each named so the converged 2500 m map is never touched.
+5 km-interior mesh with vertex sampling), each named so the converged 2500 m
+map is never touched. Both take this cluster's inversion defaults through
+`submit.sh`, so the partition, constraint and rank count come from the site
+file. At Rice that is `long`, Sapphire Rapids and 32 ranks; at IU it is
+`general`, no constraint and 16 ranks.
 
 **The chain.** A 2 km inversion can outlast a wall limit, and the inversion
 checkpoints `ISMIP7_MAP_OUT` every 20 iterates and can warm-start from it. So
@@ -246,7 +323,7 @@ It writes to an explicit `ISMIP7_MAP_OUT`. Without that, any run, including a
 smoke test, writes the production filename and can silently replace a
 converged map.
 
-### 3. `nots_projection.sbatch` - self-chaining
+### `projection.sbatch` - self-chaining
 
 A 285-year projection is about five days at 2500 m and fits no ordinary queue,
 so this resubmits itself with `--dependency=afterok` until the run reaches its
@@ -259,8 +336,7 @@ to. 24 h buys roughly 55 simulated years, so a full projection is about six
 chained jobs.
 
 ```
-sbatch --export=ALL,ISMIP7_EXPERIMENT=control \
-       antarctica/scripts/batch_runners/nots_projection.sbatch
+antarctica/scripts/batch_runners/submit.sh projection ISMIP7_EXPERIMENT=control
 ```
 
 `ISMIP7_EXPERIMENT` selects the driver, one of the ten cores:

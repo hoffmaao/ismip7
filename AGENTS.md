@@ -40,8 +40,9 @@ the relevant subsystem:
   is meant to be used, the DG0 transfer rules, and what is validated.
 - `antarctica/N3_FRAMEWORK.md` - the n=3 rheology line.
 - `antarctica/README.md` - drivers, env knobs, how to run a core experiment.
-- `antarctica/scripts/batch_runners/readme.md` - running on Rice NOTS: the
-  Slurm runners, the Firedrake build recipe, and the measured costs.
+- `antarctica/scripts/batch_runners/readme.md` - running on a cluster: the
+  Slurm runners, one site file per cluster, the Firedrake build recipe, and
+  the measured costs at Rice as the worked example.
 - `antarctica/reports/MATRIX_STATUS.md` - which results are currently valid.
 
 ## 2. What is in git, and what is not

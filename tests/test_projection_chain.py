@@ -1,6 +1,6 @@
 r"""The self-chaining forward runner's verdict and resubmit decisions.
 
-``antarctica/scripts/batch_runners/nots_projection.sbatch`` is the only thing
+``antarctica/scripts/batch_runners/projection.sbatch`` is the only thing
 standing between a five-day projection and a chain that either loops forever
 or reports a stall as a success. Its logic cannot be exercised on NOTS without
 burning a queue slot, so it runs here against a Slurm shim: stub ``srun``,
@@ -22,7 +22,7 @@ from pathlib import Path
 import pytest
 
 REPO = Path(__file__).resolve().parent.parent
-SBATCH = REPO / "antarctica" / "scripts" / "batch_runners" / "nots_projection.sbatch"
+SBATCH = REPO / "antarctica" / "scripts" / "batch_runners" / "projection.sbatch"
 JOB_ID = "424242"
 
 # The stub driver: a real driver's externally visible behaviour, and nothing
@@ -83,7 +83,8 @@ STUBS = {
     "scontrol": (
         "#!/bin/bash\n"
         'case "$1 $2" in\n'
-        '  "show job") echo "JobId=%s TimeLimit=1-00:00:00 Partition=commons" ;;\n'
+        '  "show job") echo "JobId=%s TimeLimit=1-00:00:00 Partition=commons'
+        ' Features=cascadelake MinMemoryNode=240G" ;;\n'
         '  "show node") echo "CPUTot=40 RealMemory=187135 ActiveFeatures=cascadelake" ;;\n'
         "esac\n"
     ) % JOB_ID,
@@ -106,7 +107,7 @@ def sandbox(tmp_path):
     (bin_dir / "python").write_text(f'#!/bin/bash\nexec "{sys.executable}" "$@"\n')
     (bin_dir / "python").chmod(0o755)
     (tmp_path / "driver.py").write_text(DRIVER)
-    # nots_activate sources this and refuses to run if it is unreadable.
+    # ismip7_activate sources this and refuses to run if it is unreadable.
     (tmp_path / "activate").write_text("# stub venv\n")
     return tmp_path
 
@@ -122,8 +123,14 @@ def run_job(sandbox, **env):
         "SCRATCH": str(sandbox),
         "SLURM_JOB_ID": JOB_ID,
         "SLURM_NTASKS": "12",
+        "SLURM_JOB_NUM_NODES": "1",
+        "SLURM_JOB_PARTITION": "commons",
+        "SLURM_JOB_NAME": "ismip7_fwd",
         "SLURM_SUBMIT_DIR": str(sandbox),
-        "NOTS_FIREDRAKE": str(sandbox / "activate"),
+        # sites/local.sh takes every setting from this environment, so the
+        # runner logic is exercised without a scheduler or a site file.
+        "ISMIP7_SITE": "local",
+        "ISMIP7_FIREDRAKE": str(sandbox / "activate"),
         "ISMIP7_REPO": str(sandbox),
         "FAKE_PYTHON": sys.executable,
         "FAKE_DRIVER": str(sandbox / "driver.py"),
@@ -150,6 +157,27 @@ def test_short_run_chains_once(sandbox):
     assert "--dependency=afterok:424242" in calls
     assert "ENV: ISMIP7_WALL_STOP_MIN" not in calls
     assert "ENV: ISMIP7_RESTART" not in calls
+
+
+def test_the_successor_is_given_this_job_s_allocation(sandbox):
+    r"""The job script carries no resource directives, so a successor
+    submitted from inside a job has to be told the running job's own
+    allocation. Without it the link lands on the cluster's defaults: wrong
+    partition, wrong wall limit, and a default of one task, which the runner
+    refuses outright - a 285-year projection would stop after its first link.
+    --hint=nomultithread and -J are not readable back from scontrol, so they
+    have to be restated. Without the first, Slurm packs the ranks onto
+    hyperthreads and halves per-rank memory bandwidth for the rest of the
+    chain. Without the second, sbatch falls back to the script filename and
+    two concurrent chains become indistinguishable in squeue."""
+    rc, log, calls = run_job(sandbox, FAKE_T_YR="2050", FAKE_START_YEAR="2000")
+    assert rc == 0, log
+    argv = [line for line in calls.splitlines() if line.startswith("ARGV:")]
+    assert len(argv) == 1, calls
+    for flag in ("-p commons", "-C cascadelake", "--time=1-00:00:00",
+                 "--mem=240G", "-N 1", "-n 12", "--cpus-per-task=1",
+                 "--hint=nomultithread", "-J ismip7_fwd"):
+        assert flag in argv[0], f"successor lost {flag}: {argv[0]}"
 
 
 def test_reaching_t_end_finishes(sandbox):

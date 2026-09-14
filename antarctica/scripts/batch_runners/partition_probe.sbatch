@@ -1,12 +1,13 @@
 #!/bin/bash
-# Partition-quality probe on Rice NOTS deepsC (Cascade Lake). RUN THIS FIRST,
-# before spending queue time on a timing or production job.
+# Partition-quality probe. RUN THIS FIRST, before spending queue time on a
+# timing or production job.
 #
-#   sbatch --export=ALL antarctica/scripts/batch_runners/nots_partition_probe.sbatch
+#   antarctica/scripts/batch_runners/submit.sh probe
 #
-# Runs on `scavenge`: 1-hour limit, 154 nodes, preemptible. The probe is short
-# and idempotent, so preemption costs nothing and the queue there is far
-# shorter than commons (624 pending) or long (216 pending).
+# It goes to this cluster's ISMIP7_PART_DEBUG queue (at Rice that is
+# `scavenge`: 1-hour limit, preemptible). The probe is short and idempotent, so
+# preemption costs nothing and a debug queue is far shorter than a production
+# one.
 #
 # It only distributes the mesh: no solve, no data, about a minute per rank
 # count, and immune to whatever else is on the node. What it reports is the
@@ -29,32 +30,29 @@
 # partitioner rather than the model. Rebuild PETSc with --download-parmetis
 # --download-ptscotch before going further.
 
-#SBATCH -J ismip7_part
-#SBATCH -p scavenge
-#SBATCH -C cascadelake
+# Resources (partition, tasks, memory, wall time, account, constraint) come
+# from submit.sh and this cluster's sites/<name>.sh, never from directives
+# here: a directive cannot read a site file, and a header that disagrees
+# with the command line is rejected outright by Slurm.
 #SBATCH -o logs/ismip7_part_%j.out
 #SBATCH -e logs/ismip7_part_%j.err
-#SBATCH --nodes=1
-#SBATCH --ntasks-per-node=32
-# 40 physical cores per node (2x20, hyperthreaded to 80). 32 ranks stays on
-# physical cores with room for the mesh reader.
-#SBATCH --cpus-per-task=1
-#SBATCH --hint=nomultithread
-#SBATCH --mem=64G
-#SBATCH --time=01:00:00
 
 set -uo pipefail
 cd "${SLURM_SUBMIT_DIR:-.}"
 mkdir -p logs
-. antarctica/scripts/batch_runners/nots_env.sh
-nots_activate
-nots_banner
+. antarctica/scripts/batch_runners/site_env.sh
+ismip7_activate
+ismip7_banner
 
 MESH="${ISMIP7_MESH}"
 echo "    probing $MESH"
 echo
 
+# Only up to what this allocation actually holds: a step asking for more ranks
+# than the site's ISMIP7_TASKS cannot be created, and srun's lowercase "error:"
+# does not survive the filter below, so the row would silently vanish.
 for n in 1 2 4 8 16 32; do
+    [ "$n" -gt "${SLURM_NTASKS:-1}" ] && break
     srun --ntasks="$n" --cpus-per-task=1 \
         python -u antarctica/scripts/partition_probe.py "$MESH" 2>&1 \
         | grep -E "ranks=|Error|Traceback"

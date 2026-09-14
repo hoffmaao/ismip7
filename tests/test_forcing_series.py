@@ -50,7 +50,6 @@ def test_last_year_persists_past_the_series(mri_tree, capsys):
     f2300 = atm._load_year("acabf", 2300)
     f2299 = atm._load_year("acabf", 2299)
     assert f2300 is not None and np.allclose(np.asarray(f2300), np.asarray(f2299))
-    assert atm._load_year("acabf", 2200) is None            # a gap inside the series is still an error
     out = capsys.readouterr().out
     assert out.count("persisting 2299") == 1, out           # reported once per variable
 
@@ -59,5 +58,22 @@ def test_further_past_the_series_is_an_error(mri_tree):
     r"""The bridge is exactly one year: a tree that stopped short must fail
     rather than repeat its last year for decades."""
     atm = ISMIP7Atmosphere(data_root=str(mri_tree), esm="MRI-ESM2-0", scenario="ssp585", version="v1")
-    with pytest.raises(FileNotFoundError, match=r"acabf.*ends at 2299.*2305"):
+    with pytest.raises(FileNotFoundError, match=r"acabf.*no year 2305"):
         atm._load_year("acabf", 2305)
+
+
+def test_a_gap_inside_the_series_is_an_error(mri_tree):
+    r"""A hole in a series that exists must never reach get_field, which
+    would hand the run a field of zeros for that year."""
+    atm = ISMIP7Atmosphere(data_root=str(mri_tree), esm="MRI-ESM2-0", scenario="ssp585", version="v1")
+    with pytest.raises(FileNotFoundError, match=r"acabf.*no year 2200"):
+        atm._load_year("acabf", 2200)
+    with pytest.raises(FileNotFoundError):
+        atm.get_smb(2200, np.zeros(3), np.zeros(3), anomaly=False)
+
+
+def test_an_absent_variable_stays_optional(mri_tree):
+    r"""A variable with no files at all is an optional product (dacabfdz,
+    ts-anomaly), not a gap, so it still reads as absent."""
+    atm = ISMIP7Atmosphere(data_root=str(mri_tree), esm="MRI-ESM2-0", scenario="ssp585", version="v1")
+    assert atm._load_year("dacabfdz", 2299) is None

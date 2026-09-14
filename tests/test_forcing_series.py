@@ -17,7 +17,7 @@ import pytest
 xr = pytest.importorskip("xarray")
 
 from icepack2_tools.forcing import (ISMIP7Atmosphere, atmosphere_product,  # noqa: E402
-                                    forcing_year)
+                                    forcing_year, make_forcing_callback)
 
 
 def _write_year(vdir, esm, scenario, product, version, year, value):
@@ -34,6 +34,9 @@ def mri_tree(tmp_path):
     esm, scenario, product, version = "MRI-ESM2-0", "ssp585", "GEMB-SDBN1-8000m", "v1"
     vdir = tmp_path / esm / scenario / product / "acabf" / version
     vdir.mkdir(parents=True)
+    # 2296, then a HOLE at 2297, then 2298-2299: the span has an interior gap
+    # so the "missing from the series" branch can be probed for what it is
+    _write_year(str(vdir), esm, scenario, product, version, 2296, 0.5)
     _write_year(str(vdir), esm, scenario, product, version, 2298, 1.0)
     _write_year(str(vdir), esm, scenario, product, version, 2299, 2.0)
     return tmp_path
@@ -65,12 +68,14 @@ def test_further_past_the_series_is_an_error(mri_tree):
 
 def test_a_gap_inside_the_series_is_an_error(mri_tree):
     r"""A hole in a series that exists must never reach get_field, which
-    would hand the run a field of zeros for that year."""
+    would hand the run a field of zeros for that year. 2297 is INSIDE the
+    fixture's 2296-2299 span, so this is the missing-year branch and not the
+    precedes-the-series one."""
     atm = ISMIP7Atmosphere(data_root=str(mri_tree), esm="MRI-ESM2-0", scenario="ssp585", version="v1")
-    with pytest.raises(FileNotFoundError, match=r"acabf.*no year 2200"):
-        atm._load_year("acabf", 2200)
-    with pytest.raises(FileNotFoundError):
-        atm.get_smb(2200, np.zeros(3), np.zeros(3), anomaly=False)
+    with pytest.raises(FileNotFoundError, match=r"no year 2297.*missing from the series"):
+        atm._load_year("acabf", 2297)
+    with pytest.raises(FileNotFoundError, match="missing from the series"):
+        atm.get_smb(2297, np.zeros(3), np.zeros(3), anomaly=False)
 
 
 def test_a_year_before_the_series_is_reported_as_such(mri_tree):
@@ -120,10 +125,67 @@ def test_every_step_of_a_year_draws_the_same_forcing_year():
     assert {forcing_year(t) for t in steps} == {2015}
 
 
-def test_the_last_step_of_a_cesm_projection_reaches_the_bridge(mri_tree):
-    r"""A projection covering 2015-2300 ends at t=2301.0. Against a series
-    that stops at 2299 that has to land on year 2300, which the one-year
-    persistence covers; 2301 would be two past and would raise."""
+def test_the_reader_takes_a_plain_calendar_year(mri_tree):
+    r"""The readers are also called with years straight out of
+    ``available_years`` (the climatology pools in ``smb_scheme`` and
+    ``compute_climatology``). Shifting inside the reader re-referenced every
+    pooled year by one and made a scenario's first year read as preceding its
+    own series, which those callers swallow into a silent SMB fallback."""
     atm = ISMIP7Atmosphere(data_root=str(mri_tree), esm="MRI-ESM2-0", scenario="ssp585", version="v1")
-    field = atm.get_field("acabf", 2301.0, np.zeros(3), np.zeros(3))
+    assert np.allclose(atm.get_field("acabf", 2296, np.zeros(3), np.zeros(3)), 0.5)
+    assert np.allclose(atm.get_field("acabf", 2298, np.zeros(3), np.zeros(3)), 1.0)
+    assert np.allclose(atm.get_field("acabf", 2299, np.zeros(3), np.zeros(3)), 2.0)
+    # the first year of the series resolves to itself, not to the year before
+    assert np.allclose(atm.get_smb(2296, np.zeros(3), np.zeros(3), anomaly=False),
+                       atm.get_smb(2296.0, np.zeros(3), np.zeros(3), anomaly=False))
+
+
+def test_the_last_step_of_a_cesm_projection_reaches_the_bridge(mri_tree):
+    r"""A projection covering 2015-2300 ends at t=2301.0. Composed the way the
+    forcing callback composes them, that model time lands on year 2300, which
+    the one-year persistence covers; asking the reader for 2301 outright would
+    be two past the series and would raise."""
+    atm = ISMIP7Atmosphere(data_root=str(mri_tree), esm="MRI-ESM2-0", scenario="ssp585", version="v1")
+    field = atm.get_field("acabf", forcing_year(2301.0), np.zeros(3), np.zeros(3))
     assert np.allclose(field, 2.0)         # the 2299 file, persisted for 2300
+    with pytest.raises(FileNotFoundError):
+        atm.get_field("acabf", 2301, np.zeros(3), np.zeros(3))
+
+
+class _RecordingAtmosphere:
+    r"""Stands in for ISMIP7Atmosphere and records the year it was asked for."""
+
+    def __init__(self):
+        self.asked = []
+
+    def get_smb(self, year, mesh_x, mesh_y, anomaly=True):
+        self.asked.append(year)
+        return np.zeros(len(mesh_x))
+
+
+class _Accum:
+    class _Dat:
+        def __init__(self, n):
+            self.data = np.zeros(n)
+
+    def __init__(self, n):
+        self.dat = self._Dat(n)
+
+
+def test_the_callback_is_the_only_place_model_time_becomes_a_year():
+    r"""The conversion belongs at the boundary that knows it is holding model
+    time. Driving the real callback over one year of dt=0.1 steps, every step
+    asks for that one calendar year, and the last step of a 2015-2300 run asks
+    for 2300 rather than 2301."""
+    atm = _RecordingAtmosphere()
+    callback = make_forcing_callback(atm=atm)
+    ctx = {"geom_xy": (np.zeros(3), np.zeros(3)), "accum": _Accum(3)}
+
+    for k in range(1, 11):
+        callback(ctx, round(2015.0 + k * 0.1, 10))
+    assert atm.asked == [2015] * 10
+    assert all(isinstance(y, int) for y in atm.asked)
+
+    atm.asked.clear()
+    callback(ctx, 2301.0)
+    assert atm.asked == [2300]

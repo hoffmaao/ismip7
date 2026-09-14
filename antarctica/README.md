@@ -101,7 +101,9 @@ ship filled in; UChicago Midway is a stub to complete; `sites/template.sh` is
 the blank for anywhere else.
 
 ```bash
-antarctica/scripts/batch_runners/submit.sh inversion ISMIP7_LC=2000
+antarctica/scripts/batch_runners/submit.sh inversion ISMIP7_LC=2000 \
+    ISMIP7_LC_COARSE=5000 \
+    ISMIP7_MESH=$PWD/antarctica/mesh/antarctica_5000_2000_buffered0.msh
 ISMIP7_SITE=iu_quartz antarctica/scripts/batch_runners/submit.sh projection \
     ISMIP7_EXPERIMENT=ssp585_cesm_waccm ISMIP7_OUTPUT=1 --dry-run
 ```

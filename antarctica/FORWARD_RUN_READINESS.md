@@ -27,14 +27,15 @@ Items are ordered by what blocks a submission first.
   no version directories; the version is in the filename, see section 2).
   Anonymous HTTPS listing works with a browser-like User-Agent (Python's
   default one is refused). This is the practical route for NOTS, which has no
-  Globus endpoint: install `awscli` in the venv and `aws s3 sync
-  --no-sign-request` the scenario trees straight to `/projects`.
+  Globus endpoint; `antarctica/scripts/download_mirror.py` takes it over plain
+  HTTPS with no AWS tooling at all (see `README.md` section 2).
 - **Renamed MRI atmosphere directories (#37).** `SDBN1-*` became
   `GEMB-SDBN1-*` for MRI-ESM2-0 (a name change only, data unchanged: v2 users
   need not rerun). The core experiment uses `SDBN1` for CESM2-WACCM and
   `GEMB-SDBN1` for MRI-ESM2-0; `dEBM2` is the second downscaling for
-  perturbed ensembles. Our reader looks for `SDBN1-8000m`; it must accept the
-  new name for MRI.
+  perturbed ensembles. Done: `atmosphere_product` takes whichever of
+  `SDBN1-8000m` / `GEMB-SDBN1-8000m` exists, so a tree fetched either side of
+  the rename resolves.
 - **Control experiment (#28, #15).** ctrlclim is the 2000-2029 climatology of
   the last 15 years of `historical` and the first 15 of `ssp126`, per ESM;
   files are time-varying (repeated entries) so the setup is identical to a
@@ -55,18 +56,20 @@ Items are ordered by what blocks a submission first.
   v2 on 11 September, so check the version before using SMB-height feedback
   in OCX).
 - **Fracture masks (#29, #30, #33).** Available for both ESMs' SSPs (CESM
-  ssp585 at v2.1, ours is v2), none for historical/OCX. Apply to floating ice
-  only; the masks light up near the grounding line on Ross and FRIS, and the
-  focus group suggests combining them with a stress criterion (Lai et al.
-  2020). Still not applied in our thickness update.
+  ssp585 at v2.1), none for historical/OCX. Apply to floating ice only; the
+  masks light up near the grounding line on Ross and FRIS, and the focus
+  group suggests combining them with a stress criterion (Lai et al. 2020).
+  Applied in our thickness update as `ISMIP7_FRACTURE=mask` (section 5,
+  action 5).
 - **NaN forcing outside the downscaled mask (#39)** is intended; filling with
   zero, nearest or a large melt are all acceptable, to be stated in the
   README. Ours fills with zero (`forcing.py`, `nan_to_num(nan=0.0)`).
 - **CESM2-WACCM ends in 2299 (#8).** The year-2300 atmosphere files were
   removed and the ocean forcing stops at 2299. A 2015-2300 run needs the
-  2300 forcing year: our reader has no end-of-series rule and would fail
-  there. Persist the last available year (or the 2290-2299 mean; the
-  steering committee had not decided).
+  2300 forcing year: done, the reader persists the last year on disk exactly
+  one year past the end of the series and reports it once per variable, while
+  a gap inside the series stays an error. (The 2290-2299 mean was the other
+  option; the steering committee had not decided.)
 - **Melt toolbox re-release (#25)** is unchanged since August: rerun the
   calibration notebook with the new constraint datasets; no ice-model rerun.
 
@@ -94,10 +97,37 @@ filename (`_v2_`, fracture `-v2.1.nc`).
 rows are behind. Everything the current forwards read (SMB, SMB anomaly,
 so, tf) is at the freeze version.
 
-## 3. Output and submission: the largest gap
+**Staging since that audit** (the table above stays the 13 September
+point-in-time record): the CESM2-WACCM fracture v2.1 files and the OCX set
+were downloaded on 13 September, and the ssp585 CESM2-WACCM set was staged on
+NOTS on 14 September, all with `antarctica/scripts/download_mirror.py`. What
+is still open is in section 5, action 2.
 
-Nothing in this repository writes ISMIP7 output yet. What a submission needs
-(#5, #16, #17, #18, #19, #20, #22, #23):
+## 3. Output and submission
+
+**Status (13 September, this branch):** the writer exists and passes the
+compliance checker's content checks. `ISMIP7_OUTPUT=1` makes the forward
+accumulate the yearly flux means and snapshot the state each year
+(`icepack2_tools/ismip7_output.py`, one Firedrake checkpoint per year,
+written atomically so an interrupted run cannot damage the years already
+banked);
+`antarctica/scripts/write_ismip7_output.py` regrids conservatively to the
+8 km grid through a cached supermesh overlap operator, applies the request's
+fill policies and units, encodes time, and writes the 21 gridded and 10
+scalar files with the protocol names under `AIS/<source_id>/<ism_id>/CORE/<exp>/`.
+A 2-year control and a 10-year ssp585, both at 32 km, pass every content
+check of `ismip7-compliance-checker` (a Python 3.13 venv wrapped in
+`~/.local/bin`): 0 naming, numerical, spatial, attribute and consistency
+errors on each. What remains is the experiment-length checks.
+Conventions chosen: `acabf` is the forcing SMB and the apparent-MB
+correction travels separately as `acabf_correction` (not a request
+variable), `ligroundf` is booked into the first floating cell, `lithk` is
+zero where the ice mask is zero, and `base = orog - lithk` on the grid.
+Still to do: a full-length run through it, the scalar tool cross-check, the
+group's decisions on the `[confirm]` items in the submission README draft
+(`ISMIP7_README_AIS_RICE_icepack2.md`), and the submission email.
+
+What a submission needs (#5, #16, #17, #18, #19, #20, #22, #23):
 
 - **Variable request:** `isschecker/data/ISMIP7_variable_request.csv` in
   `ismip/ISM_SimulationChecker` (the old `conventions/` path is gone); the
@@ -111,7 +141,11 @@ Nothing in this repository writes ISMIP7 output yet. What a submission needs
   at 1 January of the following year (2015 output stamped 2016-01-01), flux
   variables are yearly means stamped 1 July; the initial state is not
   requested; the filename year range is the years actually run
-  (`..._C007_2015-2300.nc`, historical `..._C001_<start>-2014.nc`).
+  (`..._C007_2015-2300.nc`, historical `..._C001_<start>-2014.nc`). A run's
+  `t_end` is 1 January of the year AFTER the last one it covers, since `t=Y.0`
+  is 1 January of year Y: the projections run to 2301 and the historical to
+  2015, which is also what puts the handoff checkpoint at 2015.0 so the
+  projection's first forcing year is 2015.
 - **Names:** `<var>_AIS_<source_id>_<ism_id>_m001_<ESM>_f001_<scenario>_C0NN_<years>.nc`
   under `AIS/<source_id>/<ism_id>/<set_id>/<set_counter>/`; `ism_id` without
   dots or underscores.
@@ -125,12 +159,22 @@ Nothing in this repository writes ISMIP7 output yet. What a submission needs
   go in the same experiment folder.
 - **README:** the template is the Google document linked from
   discussion #6; it must record forcing versions, the NaN rule, the
-  historical start year and the spin-up.
+  historical start year and the spin-up. Drafted against it in
+  `ISMIP7_README_AIS_RICE_icepack2.md`, which is what gets submitted and is
+  the owner of those answers; everything still open there is marked
+  `[confirm]`.
 - **Upload:** email ismip6 at gmail.com with the Globus id, `AIS`, the
   group name and `ism_id` to receive an upload folder.
-- **Deadline:** the board refers to "the deadline at the end of the month"
-  (September 2026) for the next round; confirm the exact scope on the
-  ismip.org status spreadsheet.
+- **Experiment ids** (ismip.org/research/ismip7, read 13 September): C001
+  CESM2-WACCM historical, C002 MRI-ESM2-0 historical, C003/C004 ssp370,
+  C005/C006 ssp126, C007/C008 ssp585 (CESM first, MRI second), C009/C010
+  ctrl, C011 OCX. Output goes on "the standard ISMIP7 grid that is closest
+  to a model native grid" (8 km for us); 3D fields are only requested at a
+  few times and we have none.
+- **Deadline:** the page still describes the 30 June round (C007 and C001
+  through the checker); the board refers to "the deadline at the end of the
+  month" (September 2026) for the next round, scope to confirm on the status
+  spreadsheet.
 
 ## 4. Model-side state (this branch)
 
@@ -146,26 +190,31 @@ Nothing in this repository writes ISMIP7 output yet. What a submission needs
   2015-2300 projection is roughly 5 node-days; the `commons` 1-day limit
   means 5 chained links per experiment, the `long` 3-day limit 2. Eleven
   cores at that cost are about 55 node-days.
-- Protocol wiring still open: ctrlclim scenario (ssp126), fracture masks in
-  the thickness update, the 2300 forcing year, the `GEMB-SDBN1` path for
-  MRI, forcing-version audit, the ISMIP7 output writer (section 3).
+- Protocol wiring still open: ctrlclim scenario (ssp126), and the melt
+  calibration rerun. Delivered on this branch: the collapse mask in the
+  thickness update (`ISMIP7_FRACTURE=mask`), the 2300 forcing year, the
+  `GEMB-SDBN1` path for MRI, the forcing-version audit, and the ISMIP7
+  output writer (section 3).
 
 ## 5. Actions, in order
 
-1. Output writer (`write_ismip7_output.py`): regrid, time encoding, names,
-   checker pass on one existing control run. Nothing can be submitted
-   without it.
-2. Re-download CESM2-WACCM fracture v2.1 (three files per SSP), the two
-   `ctrl` trees and OCX from the mirror; make the reader accept
-   `GEMB-SDBN1-8000m` for MRI; install `awscli` on NOTS and mirror the core
-   trees there (`aws s3 sync --no-sign-request --endpoint-url
-   https://data.source.coop s3://ismip/ismip7-ais-forcing/data/<ESM>/<scenario>/ ...`).
-   Re-run `audit_forcing_versions.py` before the production matrix and cite
-   its output in the README.
-3. End-of-series rule for 2300 in `forcing.py`; `GEMB-SDBN1` path for MRI.
+1. Output writer: done for the content checks (section 3); the README is
+   drafted (`ISMIP7_README_AIS_RICE_icepack2.md`). Next, run a full-length
+   experiment through it and settle the draft's `[confirm]` items with the
+   group.
+2. Still to pull from the mirror with
+   `antarctica/scripts/download_mirror.py`: the two `ctrl` trees (cores 9 and
+   10). Everything else the matrix reads is staged, see the staging note under
+   section 2's table. Re-run `audit_forcing_versions.py` before the production
+   matrix and cite its output in the README.
+3. End-of-series rule for 2300 in `forcing.py` and the `GEMB-SDBN1` path for
+   MRI: both done (`_load_year` bridges exactly one year past the end;
+   `atmosphere_product` accepts either product name).
 4. `ISMIP7_CLIM_SCENARIO=ssp126` default (or the provided `ctrl` trees).
-5. Fracture masks on floating ice in the thickness update, with the stress
-   criterion as an option.
+5. Fracture masks on floating ice in the thickness update: done as
+   `ISMIP7_FRACTURE=mask` (floating cells the mask flags are emptied and
+   booked as calving; CESM2-WACCM masks re-downloaded at v2.1); the stress
+   criterion (Lai et al. 2020) is not implemented and stays optional.
 6. Rerun the melt calibration notebook with the July toolbox.
 7. One forced projection on the Úa mesh end to end through the writer and
    the checker, then the matrix.

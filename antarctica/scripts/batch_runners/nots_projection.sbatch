@@ -2,7 +2,11 @@
 # ISMIP7 forward run (control, historical or projection) on Rice NOTS deepsC.
 # SELF-CHAINING: a 285-year projection is about five days at 2500 m and will
 # not fit any ordinary queue, so this script resubmits itself until the run
-# reaches ISMIP7_T_END, resuming from its own newest checkpoint each time.
+# reaches its driver's own end year, resuming from its own newest checkpoint
+# each time. The driver owns that year and this script does not default
+# ISMIP7_T_END; the chain reads the end back out of the driver's
+# "Time-stepping: <start>-><end>" line. Setting ISMIP7_T_END overrides every
+# experiment, so leave it unset unless you mean to.
 #
 #   sbatch --export=ALL,ISMIP7_EXPERIMENT=control \
 #          antarctica/scripts/batch_runners/nots_projection.sbatch
@@ -10,6 +14,8 @@
 # ISMIP7_EXPERIMENT selects the driver:
 #   control            antarctica/scripts/control/run.py
 #   ssp126_cesm_waccm  antarctica/scripts/projections/ssp126_cesm_waccm.py
+#   ssp126_mri_esm2, ssp370_cesm_waccm, ssp370_mri_esm2, ssp585_cesm_waccm,
+#   ssp585_mri_esm2    the other core projections, same layout
 #   ocx                antarctica/scripts/projections/ocx.py
 #   hist_cesm_waccm    antarctica/scripts/historical/cesm_waccm.py
 #   hist_mri_esm2      antarctica/scripts/historical/mri_esm2.py
@@ -49,6 +55,11 @@ EXPERIMENT="${ISMIP7_EXPERIMENT:-control}"
 case "$EXPERIMENT" in
     control)           DRIVER=antarctica/scripts/control/run.py ;;
     ssp126_cesm_waccm) DRIVER=antarctica/scripts/projections/ssp126_cesm_waccm.py ;;
+    ssp126_mri_esm2)   DRIVER=antarctica/scripts/projections/ssp126_mri_esm2.py ;;
+    ssp370_cesm_waccm) DRIVER=antarctica/scripts/projections/ssp370_cesm_waccm.py ;;
+    ssp370_mri_esm2)   DRIVER=antarctica/scripts/projections/ssp370_mri_esm2.py ;;
+    ssp585_cesm_waccm) DRIVER=antarctica/scripts/projections/ssp585_cesm_waccm.py ;;
+    ssp585_mri_esm2)   DRIVER=antarctica/scripts/projections/ssp585_mri_esm2.py ;;
     ocx)               DRIVER=antarctica/scripts/projections/ocx.py ;;
     hist_cesm_waccm)   DRIVER=antarctica/scripts/historical/cesm_waccm.py ;;
     hist_mri_esm2)     DRIVER=antarctica/scripts/historical/mri_esm2.py ;;
@@ -61,7 +72,12 @@ esac
 # `logvelnet` element, and abort on a missing file after the queue wait.
 export ISMIP7_INVERSION="${ISMIP7_INVERSION:-$ISMIP7_MAP_DEFAULT}"
 export ISMIP7_DT="${ISMIP7_DT:-0.1}"
-export ISMIP7_T_END="${ISMIP7_T_END:-2300}"
+# ISMIP7_T_END is deliberately NOT defaulted here. Every experiment this
+# runner offers has its own end (historical 2015, the ssp370 pair 2101, the
+# other projections and the control 2301, OCX 2026), and the driver owns it;
+# one value exported over all of them ran ssp370 past its series and the
+# historical a year past its handoff. An explicit ISMIP7_T_END still wins,
+# and the chain reads the end the run actually used out of its own log.
 export ISMIP7_CHECKPOINT_EVERY_YR="${ISMIP7_CHECKPOINT_EVERY_YR:-5}"
 export ISMIP7_KEEP_CHECKPOINTS="${ISMIP7_KEEP_CHECKPOINTS:-3}"
 # The control configuration the protocol asks for: calving held at end-of-2014
@@ -91,7 +107,9 @@ echo "    map in  $ISMIP7_INVERSION"
 [ -f "$ISMIP7_INVERSION" ] \
     || echo "    WARNING: that MAP does not exist; run nots_inversion.sbatch first" \
             "or set ISMIP7_INVERSION"
-echo "    dt=$ISMIP7_DT t_end=$ISMIP7_T_END auto_resume=$ISMIP7_AUTO_RESUME" \
+echo "    dt=$ISMIP7_DT" \
+     "t_end=${ISMIP7_T_END:-driver default (2301 projections, 2101 ssp370, 2015 historical, 2026 OCX)}" \
+     "auto_resume=$ISMIP7_AUTO_RESUME" \
      "apparent_mb=$ISMIP7_APPARENT_MB fixed_front=$ISMIP7_FIXED_FRONT"
 
 # --- run, leaving time to resubmit cleanly ------------------------------
@@ -176,7 +194,6 @@ print(last or "-", stalled, start_year or "-")
 PY
 )
 EOF
-T_END="${ISMIP7_T_END}"
 if [ "$STALLED" = "1" ]; then
     echo "chain: the solver stalled (rescue ladder + subcycles exhausted) at ${LAST_YEAR}."
     echo "chain: NOT resubmitting. A stall is not a run that needs more time;"
@@ -186,6 +203,18 @@ fi
 if [ "$LAST_YEAR" = "-" ] || [ -z "$LAST_YEAR" ]; then
     echo "chain: could not read this job's final checkpoint from" \
          "logs/ismip7_fwd_${SLURM_JOB_ID}.out; not resubmitting"
+    exit 0
+fi
+# The end the run actually used, from the line run_simulation prints for
+# every driver ("Time-stepping: <start>-><end>, dt=..."). Reading it back
+# rather than re-declaring the per-experiment defaults here keeps the driver
+# the single owner of its period.
+T_END=$(sed -n 's/^Time-stepping: [^-]*->\([0-9.]*\),.*/\1/p' \
+        "logs/ismip7_fwd_${SLURM_JOB_ID}.out" | tail -1)
+if [ -z "$T_END" ]; then
+    echo "chain: no 'Time-stepping:' line in" \
+         "logs/ismip7_fwd_${SLURM_JOB_ID}.out, so the run's end year is" \
+         "unknown; not resubmitting"
     exit 0
 fi
 # Finished before anything else: a completed run re-submitted under

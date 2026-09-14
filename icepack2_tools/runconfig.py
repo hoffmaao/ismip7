@@ -105,6 +105,42 @@ CALVING_SIGMA_MAX_GROUNDED_DEFAULT = "1.0"     # MPa
 CALVING_SIGMA_MAX_FLOATING_DEFAULT = "0.15"    # MPa
 
 
+FRACTURE_MODES = ("none", "mask")
+FRACTURE_DEFAULT = "none"
+
+
+def fracture():
+    r"""``ISMIP7_FRACTURE``: how the ISMIP7 ice-shelf collapse forcing is
+    applied. ``none`` (default) loads nothing; ``mask`` removes the ice of
+    every FLOATING cell the year's collapse mask flags, booked as calving
+    (protocol path C, discussions #30 and #33: floating ice only; no mask
+    exists for historical or OCX, so those runs see nothing either way).
+    A stress-gated variant (Lai et al. 2020) is not implemented."""
+    value = os.environ.get("ISMIP7_FRACTURE", FRACTURE_DEFAULT).lower()
+    if value not in FRACTURE_MODES:
+        raise ValueError(f"ISMIP7_FRACTURE must be one of {FRACTURE_MODES}, got {value!r}")
+    return value
+
+
+def ismip7_output():
+    r"""``ISMIP7_OUTPUT``: record the ISMIP7 yearly fields and scalars.
+
+    ``1`` enables it; ``0`` and the empty string disable it. The value set is
+    closed, like ``fracture`` and ``apparent_mb_mode``: there is one spelling
+    each way, and anything else raises rather than silently deciding whether
+    a submission gets written.
+    """
+    value = (os.environ.get("ISMIP7_OUTPUT") or "").strip()
+    if value in ("", "0"):
+        return False
+    if value == "1":
+        return True
+    raise ValueError(
+        f"ISMIP7_OUTPUT must be 1 to enable or 0/empty to disable, "
+        f"got {value!r}"
+    )
+
+
 def calving_law():
     r"""``ISMIP7_CALVING``: ``none``, ``fixed`` or ``vonmises``."""
     value = os.environ.get("ISMIP7_CALVING", CALVING_DEFAULT).lower()

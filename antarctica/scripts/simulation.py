@@ -58,12 +58,13 @@ from icepack2_tools.boundary import load_boundary_ids
 from icepack2_tools.geometry import sample_to_geometry
 from icepack2_tools.naming import map_basename
 from icepack2_tools.front import (
-    clear_reference_where_ice_free, retreat_slivers,
+    clamp_thickness, clear_reference_where_ice_free, retreat_slivers,
 )
 from icepack2_tools.runconfig import (
     friction as _friction, geometry_space as _geometry_space, lc as _lc,
     n_flow as _n_flow,
     calving_law as _calving_law, calving_sigma_max as _calving_sigma_max,
+    fracture as _fracture_mode, ismip7_output as _ismip7_output,
     # auto_resume is re-exported, not used here: every forward driver imports
     # it from this module alongside latest_checkpoint, so they resolve the
     # knob through one import rather than each reaching into runconfig.
@@ -414,6 +415,7 @@ def setup_model(restart_from=None):
     phys_div = None
     h_dg_state = None
     t_restart = None
+    ismip7_resume = None
     with fd.CheckpointFile(source_chk, "r") as chk:
         _th = chk.load_function(mesh, name="log_friction")
         _ph = chk.load_function(mesh, name="log_fluidity")
@@ -484,6 +486,10 @@ def setup_model(restart_from=None):
                 N_ref, _ = load_onto(chk, mesh, "N_ref", Q_g)
             if chk.has_attr("/", "t_yr"):
                 t_restart = float(chk.get_attr("/", "t_yr"))
+            # The ISMIP7 year in progress, so a link that stopped mid-year
+            # continues the same year's flux means instead of losing them.
+            from icepack2_tools.ismip7_output import AnnualOutput as _AnnualOutput
+            ismip7_resume = _AnnualOutput.read_state(chk, mesh)
             # Guard the resume environment against the checkpoint's recorded
             # state: a silently mismatched friction law or dropped apparent-MB
             # correction runs cleanly but produces wrong physics.
@@ -1039,6 +1045,8 @@ def setup_model(restart_from=None):
         # Resume time (None on a cold start); run_simulation continues the
         # timeline from here instead of the caller's t_start.
         "t_restart": t_restart,
+        # The partly accumulated ISMIP7 year carried by the restart (or None).
+        "ismip7_resume": ismip7_resume,
     }
 
 
@@ -1385,6 +1393,11 @@ def run_simulation(
             # Under DG0 geometry `thickness` IS the transport state.
             if not geom_dg:
                 chk.save_function(h_dg, name="thickness_dg")
+            if annual is not None:
+                for _name, _f in annual.state_fields().items():
+                    chk.save_function(_f, name=_name)
+                for _key, _val in annual.state_attrs().items():
+                    chk.set_attr("/", _key, _val)
             chk.set_attr("/", "t_yr", float(t_now))
             chk.set_attr("/", "friction", str(friction))
             chk.set_attr("/", "geometry_space", "dg0" if geom_dg else "cg1")
@@ -1435,6 +1448,30 @@ def run_simulation(
             except OSError:
                 pass
 
+    # ISMIP7 output (ISMIP7_OUTPUT=1): yearly state snapshots and flux means
+    # on the model mesh, one checkpoint per year beside this stem, converted
+    # and regridded afterwards by antarctica/scripts/write_ismip7_output.py.
+    # Off by default.
+    #
+    # BEFORE the timeseries rewrite below: constructing this is what
+    # refuses a run that would overwrite a banked submission series, and
+    # that refusal has to happen while the run's own record is still
+    # intact, not after the rewrite has dropped the rows past t_start.
+    annual = None
+    if _ismip7_output():
+        from icepack2_tools.ismip7_output import AnnualOutput
+        annual = AnnualOutput(
+            mesh, Q_dg,
+            os.path.join(RESULTS_DIR, f"{experiment_name}_{lc}_ismip7_annual.h5"),
+            os.path.join(RESULTS_DIR, f"{experiment_name}_{lc}_ismip7_scalars.csv"),
+            first_year=t_start, rho_ratio=float(rho_ratio), log=PETSc.Sys.Print,
+            resume=ctx.get("ismip7_resume"))
+        if annual.h_year_start is None:
+            annual.start_year(h_dg)
+        _stem, _ext = os.path.splitext(annual.out_path)
+        PETSc.Sys.Print(
+            f"  ISMIP7 output: one checkpoint per year -> {_stem}_<year>{_ext}")
+
     results = []
 
     # Crash-safe timeseries: append each row and flush, so a reboot keeps the
@@ -1463,6 +1500,26 @@ def run_simulation(
             csv_f = open(csv_fn, "w")
             csv_f.write(csv_header)
             csv_f.flush()
+
+    def _grounded_cells():
+        return Function(Q_dg).interpolate(s - s_float).dat.data_ro > 0.0
+
+    def _any_rank(local):
+        from mpi4py import MPI as _MPI
+        return mesh.comm.allreduce(bool(local), op=_MPI.LOR)
+
+    # ISMIP7 ice-shelf collapse forcing (ISMIP7_FRACTURE=mask): the forcing
+    # callback fills ctx["collapse"] with the year's mask on the geometry
+    # cells, and every transport advance removes the FLOATING cells it
+    # flags, booked as calving. Grounded ice is never touched (protocol
+    # path C). Off by default.
+    collapse = None
+    if _fracture_mode() == "mask":
+        if not geom_dg:
+            raise RuntimeError("ISMIP7_FRACTURE=mask needs ISMIP7_GEOMETRY_SPACE=dg0 (cell-wise removal)")
+        collapse = np.zeros(len(cell_area), dtype=bool)
+        ctx["collapse"] = collapse
+        PETSc.Sys.Print("  Ice-shelf collapse forcing: ISMIP7_FRACTURE=mask (floating cells flagged by the mask are removed and booked as calving)")
 
     def _write_csv_row(row):
         if csv_f is None:
@@ -1694,31 +1751,38 @@ def run_simulation(
 
         out_gt = float(assemble(un_plus * h_dg * ds)) * rho_gt * dt_local
         m1 = float(assemble(h_dg * dx)) * rho_gt
+        # One mesh-wide interpolation for the whole advance: `s` is only
+        # refreshed by _lift_h() at the end, so the booking, the floor
+        # exemption and the collapse removal all mean the same grounding
+        # state and must see it.
+        grounded = _grounded_cells()
+        if annual is not None:
+            annual.book_advance(dt_local, accum, ocean_melt, a_ref, h_dg, u_vel, grounded)
 
-        # Floor to h_clamp, EXCEPT where there is no ice: those cells are
-        # outside the ice domain, so flooring them would hand the mask below
-        # h_clamp of fresh ice to re-calve every step and report as terminus
-        # discharge. There the floor is zero and the front stays a pure sink.
-        # With a level set the exemption is everything it reports ice-free,
-        # not just the cells calved this step: under a free law `beyond` is
-        # only the handful the front just passed, so flooring the rest of the
-        # buffer would fabricate ice across every never-glaciated cell.
-        data = h_dg.dat.data
-        floor = np.full_like(data, h_clamp)
-        if ls_ice_free is not None:
-            floor[ls_ice_free] = 0.0
-        if beyond is not None:
-            floor[beyond] = 0.0
-        np.maximum(data, floor, out=data)
+        # Floor to h_clamp, EXCEPT in the cells the front rules report as
+        # holding no ice: see clamp_thickness for why every such rule has to
+        # name its cells here.
+        collapsed = (collapse & ~grounded) if collapse is not None else None
+        clamp_thickness(h_dg.dat.data, h_clamp, ls_ice_free, beyond, collapsed)
         m2 = float(assemble(h_dg * dx)) * rho_gt
         clamp_gt = m2 - m1                                       # Gt added by DG floor
 
         calv_gt = 0.0
+        if collapse is not None and _any_rank(collapse.any()):
+            data = h_dg.dat.data
+            hit = collapse & ~grounded & (data > 0.0)
+            calv_gt += mesh.comm.allreduce(
+                float((data[hit] * cell_area[hit]).sum())) * rho_gt
+            if annual is not None:
+                annual.book_removal(hit, data[hit])
+            data[hit] = 0.0
         if beyond is not None:
             data = h_dg.dat.data
-            calv_gt = mesh.comm.allreduce(
+            calv_gt += mesh.comm.allreduce(
                 float((data[beyond] * cell_area[beyond]).sum())
             ) * rho_gt
+            if annual is not None:
+                annual.book_removal(beyond, data[beyond])
             data[beyond] = 0.0
         if calv_frac is not None:
             # Sub-cell calving: the front cells shed the fraction of their
@@ -1727,6 +1791,8 @@ def run_simulation(
             shed = data * calv_frac
             calv_gt += mesh.comm.allreduce(
                 float((shed * cell_area).sum())) * rho_gt
+            if annual is not None:
+                annual.book_removal(slice(None), shed)
             data -= shed
         if level_set is not None:
             # Retreat slivers only: what the sub-cell shed and the melt leave
@@ -1753,6 +1819,8 @@ def run_simulation(
             sliver = retreat_slivers(data, h_dg_old.dat.data_ro, front_hmin)
             calv_gt += mesh.comm.allreduce(
                 float((data[sliver] * cell_area[sliver]).sum())) * rho_gt
+            if annual is not None:
+                annual.book_removal(sliver, data[sliver])
             data[sliver] = 0.0
 
         _lift_h()
@@ -1836,6 +1904,8 @@ def run_simulation(
             a_ref_entry.assign(a_ref)
         tallies = None
         for m in SUBCYCLES:
+            if annual is not None:
+                annual.begin_step()          # a rewound attempt must not double-count
             if m > 1:
                 PETSc.Sys.Print(
                     f"  Step {k}: subcycling x{m} (dt={dt / m:.4g})..."
@@ -1862,6 +1932,8 @@ def run_simulation(
                 if m > 1:
                     PETSc.Sys.Print(f"  Step {k}: completed via x{m} subcycle")
                 tallies = acc
+                if annual is not None:
+                    annual.commit_step()
                 break
         if tallies is None:
             PETSc.Sys.Print(
@@ -1900,6 +1972,9 @@ def run_simulation(
                         out_rate, calv_gt, clamp_all, resid_gt,
                         amb_rate))
         _write_csv_row(results[-1])
+        if annual is not None and abs(t_yr - round(t_yr)) < 1e-6:
+            annual.year_end(h_dg, s, b, z.subfunctions[0], z.subfunctions[2],
+                            _grounded_cells(), h_dg.dat.data_ro > 1.0)
 
         if k % output_interval == 0 or k == 1:
             _amb_txt = f"amb={amb_rate:+.0f} " if a_ref is not None else ""
@@ -1944,5 +2019,12 @@ def run_simulation(
     if csv_f is not None:
         csv_f.close()
     PETSc.Sys.Print(f"Saved: {csv_fn}")
+    if annual is not None:
+        annual.close()
+        _yrs = annual.years_on_disk(annual.out_path)
+        PETSc.Sys.Print(
+            f"Saved: {len(_yrs)} ISMIP7 years"
+            + (f" ({_yrs[0]}-{_yrs[-1]})" if _yrs else "")
+            + f" beside {annual.out_path}")
 
     return results

@@ -57,7 +57,7 @@ CORES = [
     (8, "ssp585 MRI-ESM2-0", "MRI-ESM2-0", "ssp585", 2015, 2300),
     (9, "CTRL2015 (CESM2-WACCM clim)", "CESM2-WACCM", None, 2015, 2300),
     (10, "CTRL2015 (MRI-ESM2-0 clim)", "MRI-ESM2-0", None, 2015, 2300),
-    (11, "OCX obs-constrained", None, None, 1990, 2025),
+    (11, "OCX obs-constrained", None, None, 1979, 2025),
 ]
 
 
@@ -231,6 +231,7 @@ def main():
     for core, title, esm, scenario, y0, y1 in CORES:
         miss = list(base_missing)
         degraded = []
+        notes = []
         if core == 11:
             if not racmo_ok():
                 miss.append("RACMO (OCX SMB)")
@@ -269,11 +270,20 @@ def main():
                     degraded.append(detail)
             yrs = atm_years(esm, scenario) or atm_years(esm, scenario, "acabf")
             gaps = sorted(set(range(y0, y1 + 1)) - set(yrs))
+            # The last year of a series may be absent: the reader persists
+            # the last year on disk one year past the end (CESM2-WACCM stops
+            # at 2299 and the empty 2300 files were removed, discussion #8),
+            # so that is a note, not a missing input. Any other gap is an
+            # error the reader raises on, so it blocks.
+            bridged = gaps == [y1] and yrs and yrs[-1] == y1 - 1
             if not yrs:
                 miss.append(f"{esm}/{scenario} atmosphere")
+            elif bridged:
+                notes.append(
+                    f"atmosphere covers {yrs[0]}-{yrs[-1]}; {y1} is absent "
+                    f"and the reader persists {y1 - 1} for it"
+                )
             elif gaps:
-                # get_field silently returns zeros for a missing year, so
-                # interior gaps corrupt a run just like missing endpoints
                 miss.append(
                     f"atmosphere covers {yrs[0]}-{yrs[-1]} with "
                     f"{len(gaps)} of {y0}-{y1} missing "
@@ -286,8 +296,8 @@ def main():
                 miss.append(f"ocean covers {oc[0]}-{oc[1]}, need {y0}-{y1}")
 
         status = "BLOCKED" if miss else "PARTIAL" if degraded else "READY  "
-        notes = miss + degraded
-        detail = "" if not notes else "  <- " + "; ".join(notes)
+        shown = miss + degraded + notes
+        detail = "" if not shown else "  <- " + "; ".join(shown)
         print(f"  core {core:2d}  {status}  {title}{detail}")
 
 

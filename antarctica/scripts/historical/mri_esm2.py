@@ -12,6 +12,6 @@ if __name__ == "__main__":
     run_core_experiment(
         core=2, title="Historical with MRI-ESM2-0 (1850-2014)", name="hist_mri_esm2_0",
         esm="MRI-ESM2-0", scenario="historical",
-        t_start_default=1850.0, t_end_default=2014.0,
+        t_start_default=1850.0, t_end_default=2015.0,
         restart_from_hist=False,
     )

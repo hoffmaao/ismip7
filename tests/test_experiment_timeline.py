@@ -80,6 +80,16 @@ def test_a_historical_runs_through_the_last_submitted_year(monkeypatch, module_n
     assert t_end == float(last + 1)
 
 
+def test_the_ocx_driver_uses_the_same_end_year_convention():
+    r"""OCX does not go through run_core_experiment, so it carries its own
+    T_START/T_END. It has to follow the same rule or core 11 banks a year
+    fewer than its title claims."""
+    ocx = importlib.import_module("projections.ocx")
+    first, last = 1979, 2025          # the OCX forcing span
+    assert ocx.T_START == float(first)
+    assert ocx.T_END == float(last + 1)
+
+
 def test_the_historical_hands_off_where_the_projection_starts(monkeypatch):
     r"""run_simulation takes t_start from the restart checkpoint, so the
     historical's end IS the projection's first step. If they disagree the

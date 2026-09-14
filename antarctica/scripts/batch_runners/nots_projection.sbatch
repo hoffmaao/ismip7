@@ -68,7 +68,12 @@ esac
 # `logvelnet` element, and abort on a missing file after the queue wait.
 export ISMIP7_INVERSION="${ISMIP7_INVERSION:-$ISMIP7_MAP_DEFAULT}"
 export ISMIP7_DT="${ISMIP7_DT:-0.1}"
-export ISMIP7_T_END="${ISMIP7_T_END:-2301}"
+# ISMIP7_T_END is deliberately NOT defaulted here. Every experiment this
+# runner offers has its own end (historical 2015, the ssp370 pair 2101, the
+# other projections and the control 2301, OCX 2026), and the driver owns it;
+# one value exported over all of them ran ssp370 past its series and the
+# historical a year past its handoff. An explicit ISMIP7_T_END still wins,
+# and the chain reads the end the run actually used out of its own log.
 export ISMIP7_CHECKPOINT_EVERY_YR="${ISMIP7_CHECKPOINT_EVERY_YR:-5}"
 export ISMIP7_KEEP_CHECKPOINTS="${ISMIP7_KEEP_CHECKPOINTS:-3}"
 # The control configuration the protocol asks for: calving held at end-of-2014
@@ -98,7 +103,8 @@ echo "    map in  $ISMIP7_INVERSION"
 [ -f "$ISMIP7_INVERSION" ] \
     || echo "    WARNING: that MAP does not exist; run nots_inversion.sbatch first" \
             "or set ISMIP7_INVERSION"
-echo "    dt=$ISMIP7_DT t_end=$ISMIP7_T_END auto_resume=$ISMIP7_AUTO_RESUME" \
+echo "    dt=$ISMIP7_DT t_end=${ISMIP7_T_END:-(driver default)}" \
+     "auto_resume=$ISMIP7_AUTO_RESUME" \
      "apparent_mb=$ISMIP7_APPARENT_MB fixed_front=$ISMIP7_FIXED_FRONT"
 
 # --- run, leaving time to resubmit cleanly ------------------------------
@@ -183,7 +189,6 @@ print(last or "-", stalled, start_year or "-")
 PY
 )
 EOF
-T_END="${ISMIP7_T_END}"
 if [ "$STALLED" = "1" ]; then
     echo "chain: the solver stalled (rescue ladder + subcycles exhausted) at ${LAST_YEAR}."
     echo "chain: NOT resubmitting. A stall is not a run that needs more time;"
@@ -193,6 +198,18 @@ fi
 if [ "$LAST_YEAR" = "-" ] || [ -z "$LAST_YEAR" ]; then
     echo "chain: could not read this job's final checkpoint from" \
          "logs/ismip7_fwd_${SLURM_JOB_ID}.out; not resubmitting"
+    exit 0
+fi
+# The end the run actually used, from the line run_simulation prints for
+# every driver ("Time-stepping: <start>-><end>, dt=..."). Reading it back
+# rather than re-declaring the per-experiment defaults here keeps the driver
+# the single owner of its period.
+T_END=$(sed -n 's/^Time-stepping: [^-]*->\([0-9.]*\),.*/\1/p' \
+        "logs/ismip7_fwd_${SLURM_JOB_ID}.out" | tail -1)
+if [ -z "$T_END" ]; then
+    echo "chain: no 'Time-stepping:' line in" \
+         "logs/ismip7_fwd_${SLURM_JOB_ID}.out, so the run's end year is" \
+         "unknown; not resubmitting"
     exit 0
 fi
 # Finished before anything else: a completed run re-submitted under

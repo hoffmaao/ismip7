@@ -6,7 +6,7 @@
 #
 # What each field needs:
 #   ISMIP7_FIREDRAKE  the activate script of a Firedrake 2026.4 build there
-#                     (build_firedrake.sbatch is the Rice recipe; the module
+#                     (build_firedrake_rice.sbatch is the worked example; the module
 #                     names will differ, the sequence will not)
 #   ISMIP7_MODULES    the loads that build was made against
 #   ISMIP7_PART_*     partitions by job length (`sinfo -s`)

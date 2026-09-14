@@ -20,8 +20,9 @@ twice and reports how much floating AREA sits past the bound in each case:
   ``forcing.compute_sin_alpha`` applies none.
 
 The comparison is the point, and the two rows bracket the forward. Both take
-calibrate_melt's slope, grad(draft) projected onto CG1, while ``forcing.compute_sin_alpha`` lifts a DG0 draft with ``cg1_lift``,
-which is smoother. The 10-year run's own budget, 1860 Gt/yr or an area mean of
+calibrate_melt's slope, grad(draft) projected onto CG1, while
+``forcing.compute_sin_alpha`` lifts a DG0 draft with ``cg1_lift``, which is
+smoother. The 10-year run's own budget, 1860 Gt/yr or an area mean of
 1.34 m/yr, falls between the two rows.
 
 The bound is ``min_value_ais`` for ``libmassbffl`` in the same bundled request

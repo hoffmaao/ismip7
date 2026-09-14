@@ -130,7 +130,11 @@ What a submission needs (#5, #16, #17, #18, #19, #20, #22, #23):
   at 1 January of the following year (2015 output stamped 2016-01-01), flux
   variables are yearly means stamped 1 July; the initial state is not
   requested; the filename year range is the years actually run
-  (`..._C007_2015-2300.nc`, historical `..._C001_<start>-2014.nc`).
+  (`..._C007_2015-2300.nc`, historical `..._C001_<start>-2014.nc`). A run's
+  `t_end` is 1 January of the year AFTER the last one it covers, since `t=Y.0`
+  is 1 January of year Y: the projections run to 2301 and the historical to
+  2015, which is also what puts the handoff checkpoint at 2015.0 so the
+  projection's first forcing year is 2015.
 - **Names:** `<var>_AIS_<source_id>_<ism_id>_m001_<ESM>_f001_<scenario>_C0NN_<years>.nc`
   under `AIS/<source_id>/<ism_id>/<set_id>/<set_counter>/`; `ism_id` without
   dots or underscores.

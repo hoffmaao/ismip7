@@ -647,7 +647,7 @@ how it reaches the core report.
 | `ISMIP7_BNDIDS` | override boundary-id JSON | `mesh/boundary_ids_antarctica_<COARSE>_<LC>_buffered<BUFFER_M>.json` if present, else `mesh/boundary_ids.json` |
 | `ISMIP7_GEOMETRY_SPACE` | space for `h`/`s`/`b` (`dg0`: one thickness for the terminus force and the mass flux; `cg1`: legacy, for A/B only) - also selects the MAP h5 (see `../GEOMETRY_DISCRETIZATION.md`) | `dg0` |
 | `ISMIP7_DATA_ROOT` | ISMIP7 forcing tree root | `<repo>/ISMIP7/AIS` |
-| `ISMIP7_T_END` / `ISMIP7_DT` | end year / timestep (yr) | `2300` / `1.0` |
+| `ISMIP7_T_END` / `ISMIP7_DT` | end time / timestep (yr). The end time is 1 January of the year AFTER the last year to simulate, because `t=Y.0` is 1 January of year Y: a projection covering 2015-2300 runs to `2301`, and a historical covering 1850-2014 runs to `2015`. That is also what makes the handoff checkpoint land at 2015.0, so the projection's first forcing year is 2015 | `2301` / `1.0` |
 | `ISMIP7_FRICTION` | friction law (`budd`, `regularized_coulomb`) - selects the MAP h5 | `budd` |
 | `ISMIP7_OUTPUT_INTERVAL` | write a timeseries/log row every N steps | `10` |
 | `ISMIP7_CHECKPOINT_EVERY_YR` | checkpoint cadence in model years (`0` = use step count) | `5` |

@@ -12,6 +12,6 @@ if __name__ == "__main__":
     run_core_experiment(
         core=1, title="Historical with CESM2-WACCM (1850-2014)", name="hist_cesm2_waccm",
         esm="CESM2-WACCM", scenario="historical",
-        t_start_default=1850.0, t_end_default=2014.0,
+        t_start_default=1850.0, t_end_default=2015.0,
         restart_from_hist=False,
     )

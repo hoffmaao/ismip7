@@ -84,7 +84,8 @@ completes with the wrong melt.
 `ISMIP7_OUTPUT=1`, then `scripts/write_ismip7_output.py`. The two halves can
 sit on different machines. The writer reads the annual checkpoints, which for a
 286-year experiment come to roughly 14 GB, so it belongs where the run is; it
-needs only Firedrake, netCDF4 and scipy. The checker reads the written NetCDF,
+needs the forward's own environment plus netCDF4, since it reaches icepack2
+through `icepack2_tools.dual_friction` and dates its time axis with cftime. The checker reads the written NetCDF,
 a few GB after zlib, so it can stay wherever the newer Python is. Rice NOTS
 carries the writer's dependencies; the checker runs here on the workstation.
 

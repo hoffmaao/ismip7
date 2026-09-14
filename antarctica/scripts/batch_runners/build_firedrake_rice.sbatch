@@ -1,9 +1,13 @@
 #!/bin/bash
-# Build Firedrake + PETSc ONCE, into a shared prefix. This is the RICE recipe:
-# the prefix and the module names below are Rice's, so at another site copy it
-# and substitute that cluster's own module stack. The sequence does not change.
+# Build Firedrake + PETSc ONCE, into a shared prefix, AT RICE. Every module
+# name below is Rice's EasyBuild stack and the gcc check expects /opt/apps, so
+# this runs at rice_nots and nowhere else. It is kept as a worked example: the
+# lessons above the module block are the general ones, and another site copies
+# this file to build_firedrake_<site>.sbatch and substitutes its own module
+# stack. The sequence does not change. readme.md says the same under
+# "Building Firedrake on a cluster".
 #
-#   antarctica/scripts/batch_runners/submit.sh build
+#   ISMIP7_SITE=rice_nots antarctica/scripts/batch_runners/submit.sh build
 #
 # THE POINT OF BUILDING IT HERE RATHER THAN COPYING THE WORKSTATION BUILD:
 # the workstation PETSc has NO parallel graph partitioner. Verified 2026-09-12
@@ -229,4 +233,4 @@ echo
 echo "=== $(date -Is)  build done ==="
 echo "Set these in antarctica/scripts/batch_runners/sites/<your-site>.sh:"
 echo "    ISMIP7_FIREDRAKE=$VENV/bin/activate"
-echo "    ISMIP7_MODULES=\"foss/2023b Python/3.11.5 CMake/3.27.6 M4/1.4.19 flex/2.6.4 Bison/3.8.2 libevent/2.1.12 zstd/1.5.5 Szip/2.1.1 libaec/1.0.6\""
+echo "    ISMIP7_MODULES=\"foss/2023b Python/3.11.5 CMake/3.27.6 M4/1.4.19 flex/2.6.4 Bison/3.8.2 libevent/2.1.12 zstd/1.5.5 Szip/2.1.1 libaec/1.0.6 libGLU/9.0.3\""

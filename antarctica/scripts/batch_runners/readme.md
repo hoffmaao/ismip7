@@ -15,7 +15,7 @@ Three pieces, and the split matters:
 
 The job scripts themselves (`inversion.sbatch`, `projection.sbatch`,
 `smoke.sbatch`, `verify.sbatch`, `partition_probe.sbatch`,
-`build_firedrake.sbatch`) carry **no resource directives at all**, only their
+`build_firedrake_rice.sbatch`) carry **no resource directives at all**, only their
 log paths. That is deliberate: a `#SBATCH` line is parsed before any shell
 runs, so it cannot read a site file, and a header that disagrees with the
 command line is not overridden but rejected outright ("Requested node
@@ -61,7 +61,9 @@ It only reads, and submits nothing. Add your hostname pattern to the file's
 
 Required, because a job cannot start without them: `ISMIP7_FIREDRAKE`,
 `ISMIP7_PART_LONG`, `ISMIP7_PART_SHORT`, `ISMIP7_PART_DEBUG`, `ISMIP7_REPO`,
-`ISMIP7_WORK`.
+`ISMIP7_WORK`. The Firedrake build is the exception: it creates the venv, so
+`submit.sh build` asks for the other five and leaves `ISMIP7_FIREDRAKE` to the
+jobs that source it.
 Everything else has a working default. A missing value is reported at
 submission with the file and the variable named, never minutes into a queued
 job.
@@ -181,11 +183,15 @@ throughout, so a dedicated node should beat them.
 
 ## Building Firedrake on a cluster
 
-The lessons generalise; the module names do not. Worked example: Rice NOTS.
+The lessons in this section generalise. The module names do not.
+`build_firedrake_rice.sbatch` is the worked example, and it runs at Rice only:
+every module name in it is Rice's EasyBuild stack. Another site copies it to
+`build_firedrake_<site>.sbatch`, substitutes its own stack and submits that;
+`submit.sh build` says so when the site is not `rice_nots`.
 
 ### What compute nodes tend NOT to have
 
-`build_firedrake.sbatch` builds PETSc + Firedrake once into
+`build_firedrake_rice.sbatch` builds PETSc + Firedrake once into
 `/projects/ah301/sw`. Five submissions were needed to get it running, and every
 failure was a gap between the login node and the compute nodes, or between a
 module name and what it actually resolves to. They are recorded here because
@@ -250,7 +256,7 @@ missing file hours after it queued. Run it after any change to the stack.
 
 ### Toolchain for the Firedrake build
 
-There is no Firedrake module on NOTS, so `build_firedrake.sbatch` builds
+There is no Firedrake module on NOTS, so `build_firedrake_rice.sbatch` builds
 it against EasyBuild modules. The set it pins is `foss/2023b`, the toolchain
 that actually resolves here (GCC 13.2.0, OpenMPI 4.1.6, OpenBLAS, ScaLAPACK,
 FFTW) with Python 3.11.5 built against the same GCCcore so the ABI matches,

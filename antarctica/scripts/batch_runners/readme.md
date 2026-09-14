@@ -286,9 +286,11 @@ Beyond that, each job asks its OWN final checkpoint what happened before it
 decides anything, and that verdict owns the exit code. A checkpoint written
 with `stalled=1` (the in-run rescue ladder and the subcycles were both
 exhausted) exits 1 and submits nothing, whether or not chaining was enabled, so
-a stall is never mailed out as a completed job. A clean exit that reached
-`ISMIP7_T_END` finishes. A clean exit short of it resubmits, except that
-`ISMIP7_CHAIN=0` disables resubmission entirely; auto-resume off
+a stall is never mailed out as a completed job. A clean exit that reached the
+end year read back from the driver's `Time-stepping:` line finishes; if that
+line is missing the job cannot tell, and stops without resubmitting. A clean
+exit short of the end year resubmits, except that `ISMIP7_CHAIN=0` disables
+resubmission entirely; auto-resume off
 (`ISMIP7_AUTO_RESUME=0`) stops the chain, because a successor inherits no
 `ISMIP7_RESTART` and would cold-start and repeat the same years; an unreadable
 final checkpoint stops it, since nothing then says where to resume; and a job

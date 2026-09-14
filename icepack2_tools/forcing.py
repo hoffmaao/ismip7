@@ -220,8 +220,26 @@ def atmosphere_path(scenario, esm="CESM2-WACCM", variable="acabf-anomaly",
     root = _find_ismip7_data(data_root)
     if root is None:
         return None
-    parent = os.path.join(root, esm, scenario, f"SDBN1-{resolution}", variable)
+    parent = os.path.join(root, esm, scenario, atmosphere_product(root, esm, scenario, resolution), variable)
     return os.path.join(parent, _resolve_version(parent, version))
+
+
+ATMOSPHERE_PRODUCTS = ("SDBN1", "GEMB-SDBN1")
+
+
+def atmosphere_product(root, esm, scenario, resolution="8000m"):
+    r"""The downscaled-atmosphere directory name for this ESM and scenario.
+
+    The core experiment uses ``SDBN1`` for CESM2-WACCM and ``GEMB-SDBN1`` for
+    MRI-ESM2-0 (MRI's runoff needed an energy-balance step before the
+    statistical downscaling; the directories were renamed in August 2026,
+    discussion #37, data unchanged). Whichever exists on disk wins, ``SDBN1``
+    first, so a tree fetched before the rename keeps working.
+    """
+    for product in ATMOSPHERE_PRODUCTS:
+        if os.path.isdir(os.path.join(root, esm, scenario, f"{product}-{resolution}")):
+            return f"{product}-{resolution}"
+    return f"SDBN1-{resolution}"
 
 
 def ocean_path(scenario, esm="CESM2-WACCM", variable="tf",
@@ -379,6 +397,7 @@ class ISMIP7Atmosphere:
         self.resolution = resolution
         self.version = version
         self._cache = {}
+        self._persisted = set()          # variables already reported as persisted past the series end
         self._grid_x = None
         self._grid_y = None
 
@@ -387,6 +406,14 @@ class ISMIP7Atmosphere:
             self.scenario, self.esm, variable,
             self.resolution, self.version, self.data_root,
         )
+
+    def _last_year(self, vdir, variable, product, version):
+        r"""Last year for which ``vdir`` holds a file, or None."""
+        import re
+        head = f"{variable}_AIS_{self.esm}_{self.scenario}_{product}_{version}_"
+        years = [int(m.group(1)) for f in os.listdir(vdir)
+                 for m in [re.fullmatch(re.escape(head) + r"(\d{4})\.nc", f)] if m]
+        return max(years) if years else None
 
     def _load_year(self, variable, year):
         import xarray as xr
@@ -400,10 +427,23 @@ class ISMIP7Atmosphere:
             return None
 
         version = os.path.basename(vdir)
-        pattern = f"{variable}_AIS_{self.esm}_{self.scenario}_SDBN1-{self.resolution}_{version}_{int(year)}.nc"
+        product = os.path.basename(os.path.dirname(os.path.dirname(vdir)))   # SDBN1-8000m or GEMB-SDBN1-8000m
+        pattern = f"{variable}_AIS_{self.esm}_{self.scenario}_{product}_{version}_{int(year)}.nc"
         path = os.path.join(vdir, pattern)
 
         if not os.path.exists(path):
+            # End of the series: CESM2-WACCM stops at 2299 and the empty 2300
+            # files were removed (discussion #8), while a 2015-2300 run needs
+            # the 2300 forcing year. Persist the last available year, once
+            # per variable in the log, rather than failing at the last step.
+            last = self._last_year(vdir, variable, product, version)
+            if last is not None and int(year) > last:
+                if variable not in self._persisted:
+                    self._persisted.add(variable)
+                    print(f"  ISMIP7Atmosphere: {variable} has no year {int(year)}; "
+                          f"persisting {last}, the last year on disk", flush=True)
+                self._cache[key] = self._load_year(variable, last)
+                return self._cache[key]
             return None
 
         ds = xr.open_dataset(path)

@@ -71,8 +71,6 @@ import numpy as np
 from firedrake import Function, TestFunction, assemble, dS, dx
 import firedrake as fd
 
-from .runconfig import ismip7_output_overwrite
-
 # icepack's year (365.25 days): the model's own time unit, so every
 # model-to-SI conversion the submission carries uses it. The time axis
 # in the files is the standard calendar regardless.
@@ -124,9 +122,10 @@ class AnnualOutput:
     On this series' own resume, years at or after the resumed one are stale,
     left behind by an unclean kill that ran past the last state checkpoint,
     so they are discarded and re-simulated. Any other run refuses to touch a
-    banked series unless ``ISMIP7_OUTPUT_OVERWRITE=1`` says so. A year is
-    never renamed, and a resume that would leave a HOLE in the series
-    (further than one past the last kept year) is an error.
+    banked series: it names the files and stops, and removing them is the
+    operator's own call. A year is never renamed, and a resume that would
+    leave a HOLE in the series (further than one past the last kept year) is
+    an error.
     """
 
     #: the per-cell year sums carried across a chained resume
@@ -192,18 +191,21 @@ class AnnualOutput:
         # series, so they are discarded and re-simulated. Anything else is a
         # cold start for this output: nothing says the years on disk are
         # wrong, and this is the only copy of what gets submitted, so it
-        # refuses rather than deleting a banked series.
-        # ISMIP7_OUTPUT_OVERWRITE=1 is how an operator asks for them to go.
+        # refuses rather than deleting a banked series. Removing them is the
+        # operator's own deliberate act, which leaves an audit trail that an
+        # in-process discard would not.
         self._written_years = self.years_on_disk(out_path)
         stale = [y for y in self._written_years if y >= self.year]
-        if stale and resume is None and not ismip7_output_overwrite():
+        if stale and resume is None:
+            stem, ext = os.path.splitext(out_path)
             raise ValueError(
                 f"{os.path.basename(out_path)} already holds ISMIP7 years "
                 f"{stale[0]}-{stale[-1]}, but this run starts at {self.year} "
                 f"without resuming THIS series' accumulation state, so it "
                 f"would rewrite a banked submission series. Resume from a "
-                f"checkpoint of this experiment, move the series aside, or "
-                f"set ISMIP7_OUTPUT_OVERWRITE=1 to discard it."
+                f"checkpoint of this experiment, or move the series aside: "
+                f"{stem}_{{{stale[0]}..{stale[-1]}}}{ext} and "
+                f"{os.path.basename(scalars_path)}."
             )
         if stale:
             self._written_years = [y for y in self._written_years if y < self.year]

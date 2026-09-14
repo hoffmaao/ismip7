@@ -126,6 +126,10 @@ ISMIP7/AIS/        # forcing tree the runtime reads                     [gitigno
 icepack2_tools/    # this repository's library
 ```
 
+`FORWARD_RUN_READINESS.md` in this directory carries the data freeze, the
+forcing-version audit, the OCX and control definitions, and the submission
+checklist; read it before planning the core matrix.
+
 The tracked files under `antarctica/mesh/` are the per-mesh
 `boundary_ids_antarctica_*.json` sidecars (section 3). Legacy sidecars with no
 mesh stem stay untracked: `boundary_ids.json` is the shared fallback that every
@@ -573,7 +577,10 @@ and another to the preflight.
 | `ISMIP7_H_CLAMP` | thickness floor (m) | `0` |
 | `ISMIP7_NO_CALVING_TERMINUS` | drop the calving-terminus BC | unset |
 | `ISMIP7_SUBCYCLES` / `ISMIP7_RESCUE_MAXIT` | dt-subcycle rescue ladder, and the Newton cap on its rungs | `1,4,16` / `600` |
-| `ISMIP7_H_OCEAN`, `ISMIP7_K_LIM`, `ISMIP7_ALPHA_GL`, `ISMIP7_RC_CW0_FLOOR`, `ISMIP7_RC_HVISC_FLOOR`, `ISMIP7_M_SLIDE` | solver backstops near the front and the grounding line, documented where they are read (`icepack2_tools/runconfig.py`, `dual_friction.py`) | see those files |
+| `ISMIP7_H_OCEAN` / `ISMIP7_K_LIM` | front backstops read by `scripts/simulation.py`: the thickness (m) at which the ice-free ocean drag ramps to zero, and the speed-limiter coefficient the rescue ladder raises for a rescue solve | `10.0` / `1e-3` |
+| `ISMIP7_ALPHA_GL` | grounding-line coercivity, Budd only, read by `scripts/simulation.py` and `scripts/inversion_icepack2.py` | `0.5` (`0` for RC) |
+| `ISMIP7_RC_HVISC_FLOOR` / `ISMIP7_RC_CW0_FLOOR` | RC viscous-thickness and `C_w0` floors, read by `scripts/simulation.py` and `scripts/inversion_icepack2.py` | `10.0` / `0.0` |
+| `ISMIP7_M_SLIDE` | sliding exponent, read by `scripts/inversion_icepack2.py`, `scripts/simulation.py`, `scripts/thermo_prior.py`, `scripts/plot_map.py` | `3.0` |
 
 > **dt guidance.** Use `ISMIP7_DT=0.1` for production projections. `0.25` is
 > acceptable when 10 steps per year is too costly. `dt=1.0` mis-melts per step

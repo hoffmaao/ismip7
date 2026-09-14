@@ -227,6 +227,7 @@ universities. Two rules, asked for directly by the author:
 - **No contrastive negation.** Avoid "not X, but Y" and "it is not A, it is B".
   State what is true.
 
-Beyond those: cut rather than soften, keep the measured numbers, and delete
-sentences that justify the prose itself. A table beats a paragraph whenever the
-content is a list of cases.
+Beyond those, keep it concise: the commands, paths, knob names, defaults and
+measured numbers stay, narration goes (histories of what an earlier version got
+wrong, justifications of the prose itself, and a paragraph wherever a table
+would do).

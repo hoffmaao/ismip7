@@ -1,7 +1,9 @@
 #!/bin/bash
-# Build Firedrake + PETSc on any cluster, ONCE, into /projects/ah301.
+# Build Firedrake + PETSc ONCE, into a shared prefix. This is the RICE recipe:
+# the prefix and the module names below are Rice's, so at another site copy it
+# and substitute that cluster's own module stack. The sequence does not change.
 #
-#   sbatch antarctica/scripts/batch_runners/build_firedrake.sbatch
+#   antarctica/scripts/batch_runners/submit.sh build
 #
 # THE POINT OF BUILDING IT HERE RATHER THAN COPYING THE WORKSTATION BUILD:
 # the workstation PETSc has NO parallel graph partitioner. Verified 2026-09-12

@@ -52,7 +52,8 @@ _ISMIP7_SITE_FILE="$(ismip7_site_file)" || exit 2
 ismip7_site_require() {
     local missing=""
     local v
-    for v in ISMIP7_FIREDRAKE ISMIP7_PART_LONG ISMIP7_PART_SHORT ISMIP7_REPO ISMIP7_WORK; do
+    for v in ISMIP7_FIREDRAKE ISMIP7_PART_LONG ISMIP7_PART_SHORT ISMIP7_PART_DEBUG \
+             ISMIP7_REPO ISMIP7_WORK; do
         [ -z "${!v:-}" ] && missing="$missing $v"
     done
     if [ -n "$missing" ]; then
@@ -60,6 +61,29 @@ ismip7_site_require() {
         echo "       Fill them in there, or export them for this submission." >&2
         exit 2
     fi
+}
+
+# The resource request of the running job, as sbatch flags, for a chain link
+# that resubmits its own script. The job scripts carry no resource directives
+# (submit.sh composes them from the site file), so a successor submitted from
+# inside a job would otherwise land on the cluster's defaults: wrong partition,
+# wrong wall limit, and often one task, which the runners refuse outright.
+# Both chains call this, so the rule lives here once.
+ismip7_chain_resources() {
+    local info feat tlim memn
+    info="$(scontrol show job "${SLURM_JOB_ID:-}" 2>/dev/null)"
+    feat="$(echo "$info" | grep -oE 'Features=[^ ]+' | cut -d= -f2)"
+    [ "$feat" = "(null)" ] && feat=""
+    tlim="$(echo "$info" | grep -oE 'TimeLimit=[^ ]+' | cut -d= -f2)"
+    memn="$(echo "$info" | grep -oE 'MinMemoryNode=[^ ]+' | cut -d= -f2)"
+    ISMIP7_CHAIN_RES=(-N "${SLURM_JOB_NUM_NODES:-1}" -n "${SLURM_NTASKS:-1}"
+                      --cpus-per-task="${SLURM_CPUS_PER_TASK:-1}")
+    [ -n "${SLURM_JOB_PARTITION:-}" ] && ISMIP7_CHAIN_RES+=(-p "$SLURM_JOB_PARTITION")
+    [ -n "$feat" ] && ISMIP7_CHAIN_RES+=(-C "$feat")
+    [ -n "$tlim" ] && ISMIP7_CHAIN_RES+=(--time="$tlim")
+    [ -n "$memn" ] && ISMIP7_CHAIN_RES+=(--mem="$memn")
+    [ -n "${SLURM_JOB_ACCOUNT:-}" ] && ISMIP7_CHAIN_RES+=(-A "$SLURM_JOB_ACCOUNT")
+    return 0
 }
 
 ismip7_load_modules() {

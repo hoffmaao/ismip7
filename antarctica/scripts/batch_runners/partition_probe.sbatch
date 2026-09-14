@@ -1,12 +1,13 @@
 #!/bin/bash
-# Partition-quality probe on any cluster deepsC (Cascade Lake). RUN THIS FIRST,
-# before spending queue time on a timing or production job.
+# Partition-quality probe. RUN THIS FIRST, before spending queue time on a
+# timing or production job.
 #
-#   sbatch --export=ALL antarctica/scripts/batch_runners/partition_probe.sbatch
+#   antarctica/scripts/batch_runners/submit.sh probe
 #
-# Runs on `scavenge`: 1-hour limit, 154 nodes, preemptible. The probe is short
-# and idempotent, so preemption costs nothing and the queue there is far
-# shorter than commons (624 pending) or long (216 pending).
+# It goes to this cluster's ISMIP7_PART_DEBUG queue (at Rice that is
+# `scavenge`: 1-hour limit, preemptible). The probe is short and idempotent, so
+# preemption costs nothing and a debug queue is far shorter than a production
+# one.
 #
 # It only distributes the mesh: no solve, no data, about a minute per rank
 # count, and immune to whatever else is on the node. What it reports is the
@@ -35,8 +36,6 @@
 # with the command line is rejected outright by Slurm.
 #SBATCH -o logs/ismip7_part_%j.out
 #SBATCH -e logs/ismip7_part_%j.err
-# 40 physical cores per node (2x20, hyperthreaded to 80). 32 ranks stays on
-# physical cores with room for the mesh reader.
 
 set -uo pipefail
 cd "${SLURM_SUBMIT_DIR:-.}"
@@ -49,7 +48,11 @@ MESH="${ISMIP7_MESH}"
 echo "    probing $MESH"
 echo
 
+# Only up to what this allocation actually holds: a step asking for more ranks
+# than the site's ISMIP7_TASKS cannot be created, and srun's lowercase "error:"
+# does not survive the filter below, so the row would silently vanish.
 for n in 1 2 4 8 16 32; do
+    [ "$n" -gt "${SLURM_NTASKS:-1}" ] && break
     srun --ntasks="$n" --cpus-per-task=1 \
         python -u antarctica/scripts/partition_probe.py "$MESH" 2>&1 \
         | grep -E "ranks=|Error|Traceback"

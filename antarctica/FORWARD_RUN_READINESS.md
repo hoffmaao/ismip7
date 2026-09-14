@@ -107,15 +107,16 @@ banked);
 8 km grid through a cached supermesh overlap operator, applies the request's
 fill policies and units, encodes time, and writes the 21 gridded and 10
 scalar files with the protocol names under `AIS/<source_id>/<ism_id>/CORE/<exp>/`.
-On a 2-year 32 km control the checker (`ismip7-compliance-checker`, a
+On a 10-year ssp585 at 32 km the checker (`ismip7-compliance-checker`, a
 Python 3.13 venv wrapped in `~/.local/bin`) reports 0 naming, numerical,
 spatial, attribute and consistency errors; what remains is the experiment
 length. Conventions chosen: `acabf` is the forcing SMB and the apparent-MB
 correction travels separately as `acabf_correction` (not a request
 variable), `ligroundf` is booked into the first floating cell, `lithk` is
 zero where the ice mask is zero, and `base = orog - lithk` on the grid.
-Still to do: a full-length run through it, the README document, the scalar
-tool cross-check, and the submission email.
+Still to do: a full-length run through it, the scalar tool cross-check, the
+group's decisions on the `[confirm]` items in the submission README draft
+(`ISMIP7_README_AIS_RICE_icepack2.md`), and the submission email.
 
 What a submission needs (#5, #16, #17, #18, #19, #20, #22, #23):
 
@@ -149,7 +150,10 @@ What a submission needs (#5, #16, #17, #18, #19, #20, #22, #23):
   go in the same experiment folder.
 - **README:** the template is the Google document linked from
   discussion #6; it must record forcing versions, the NaN rule, the
-  historical start year and the spin-up.
+  historical start year and the spin-up. Drafted against it in
+  `ISMIP7_README_AIS_RICE_icepack2.md`, which is what gets submitted and is
+  the owner of those answers; everything still open there is marked
+  `[confirm]`.
 - **Upload:** email ismip6 at gmail.com with the Globus id, `AIS`, the
   group name and `ism_id` to receive an upload folder.
 - **Experiment ids** (ismip.org/research/ismip7, read 13 September): C001
@@ -185,8 +189,10 @@ What a submission needs (#5, #16, #17, #18, #19, #20, #22, #23):
 
 ## 5. Actions, in order
 
-1. Output writer: done for the content checks (section 3); next, run a
-   full-length experiment through it and fill in the README template.
+1. Output writer: done for the content checks (section 3); the README is
+   drafted (`ISMIP7_README_AIS_RICE_icepack2.md`). Next, run a full-length
+   experiment through it and settle the draft's `[confirm]` items with the
+   group.
 2. Still to pull from the mirror with
    `antarctica/scripts/download_mirror.py`: the two `ctrl` trees and the
    remainder of OCX. (CESM2-WACCM fracture v2.1 and the OCX set are staged

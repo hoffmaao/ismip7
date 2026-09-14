@@ -24,12 +24,13 @@
 # PROVENANCE: a completed timeseries is only reused when it postdates the
 # forcing implementation ($PROV_REF). Results produced before the annual-mean
 # atmosphere fix are invalid (January was applied as the whole year), so they
-# are ARCHIVED under $R/archive_stale_<TS>/ - the timeseries, the final.h5 and
-# the periodic checkpoints together - and re-run rather than silently skipped
-# and fed to the audit. Moving them aside also stops a crashed relaunch from
-# reading the superseded file back as its own progress, and a resume source is
-# additionally required to postdate $PROV_REF so no run can continue from
-# pre-fix geometry.
+# are ARCHIVED under $R/archive_stale_<TS>/ - the timeseries, the final.h5,
+# the periodic checkpoints and any banked ISMIP7 annual series (the per-year
+# h5 files and the scalars csv) together - and re-run rather than silently
+# skipped and fed to the audit. Moving them aside also stops a crashed
+# relaunch from reading the superseded file back as its own progress, and a
+# resume source is additionally required to postdate $PROV_REF so no run can
+# continue from pre-fix geometry.
 # Reuse precedence: FRESH=1 (re-run every selected core) beats REUSE=1 (reuse
 # any completed timeseries unchecked) beats the provenance comparison. Neither
 # flag affects the dependency check above or the resume-source check.
@@ -45,6 +46,13 @@
 # resume source is the newest checkpoint whose recorded year is at or before
 # the timeseries' last row, so a run is never continued from a state ahead of
 # its own record.
+# That resume is not limited to the retries: a core that already has saved
+# state of its own is resumed on EVERY attempt, the first included. Only a
+# core with nothing of its own cold-starts, and then its driver's own restart
+# logic applies (projections and the CTRL branch from the historical
+# endpoint). Cold-starting into a core's own partial run would rewind a
+# projection to the historical endpoint and re-simulate years it has already
+# banked, which under ISMIP7_OUTPUT=1 is a hard error rather than a rewrite.
 #
 # Usage:
 #   antarctica/scripts/run_core_matrix.sh                # full matrix

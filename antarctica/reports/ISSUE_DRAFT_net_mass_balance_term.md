@@ -108,7 +108,7 @@ already testable.
   iterations): the adjoint descends through the R-space projection at
   unchanged cost (~1.3 s vs an ~80 s forward), and the net moves an order of
   magnitude toward the observed value while the velocity and pointwise terms
-  also fall -- no term is traded away:
+  also fall, so every term improves:
 
   | iter | vel chi^2 | dhdt chi^2 | net (Gt/yr) |
   |---|---|---|---|
@@ -119,7 +119,7 @@ already testable.
 
   One implementation note: tlm_adjoint's linear-solver cache cannot copy the
   R-space python-type PETSc Mat, so the one-dof solve opts out of caching
-  (`cache_jacobian=False, cache_adjoint_jacobian=False`) -- free, since a 1x1
+  (`cache_jacobian=False, cache_adjoint_jacobian=False`), which is free, since a 1x1
   solve gains nothing from a cache.
 - The protocol note on the Smith 2003–2019 observation window overlapping the
   post-2015 projection era (declared in `icepack2_tools/obs_dhdt.py`) applies

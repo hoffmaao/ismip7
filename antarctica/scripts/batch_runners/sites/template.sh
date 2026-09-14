@@ -26,9 +26,9 @@ ISMIP7_ACCOUNT="${ISMIP7_ACCOUNT:-}"
 ISMIP7_CONSTRAINT="${ISMIP7_CONSTRAINT:-}"
 
 # --- REQUIRED: paths ---------------------------------------------------
-# The checkout, and the filesystem that can hold the forcing tree (~40 GB per
-# ESM and scenario set, 316 GB for everything). Home directories usually
-# cannot; a projects or scratch share can.
+# The checkout, and the filesystem that can hold the forcing tree (about 25 GB
+# per ESM and scenario, 313 GB for the whole AIS tree). Home directories
+# usually cannot; a projects or scratch share can.
 ISMIP7_REPO="${ISMIP7_REPO:-}"
 ISMIP7_WORK="${ISMIP7_WORK:-}"
 

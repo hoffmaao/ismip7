@@ -11,8 +11,9 @@
 #   ISMIP7_MODULES    the loads that build was made against
 #   ISMIP7_PART_*     partitions by job length (`sinfo -s`)
 #   ISMIP7_ACCOUNT    the allocation to charge, usually pi-<name>
-#   ISMIP7_REPO       the checkout; ISMIP7_WORK a share that can hold ~40 GB
-#                     of forcing per ESM and scenario (home usually cannot)
+#   ISMIP7_REPO       the checkout; ISMIP7_WORK a share that can hold about
+#                     25 GB of forcing per ESM and scenario, 313 GB for the
+#                     whole AIS tree (home usually cannot)
 
 ISMIP7_SITE_NAME="uchicago_midway"
 ISMIP7_SITE_MATCH="midway* login*.rcc.uchicago.edu"

@@ -66,10 +66,32 @@ IMBIE2_NC = os.path.join(
     DATA_ROOT, "parameterisations", "ocean", "imbie2",
     "basin_numbers_ismip8km_v2.nc",
 )
-OBS_CSV = os.path.join(
-    DATA_ROOT, "parameterisations", "ocean", "meltobs",
-    "Melt_Paolo_Err_Adusumilli_imbie2_v3.csv",
+# Observed basal melt per IMBIE2 basin. The melt-calibration product re-released
+# in July 2026 combines Paolo (2023), Davison (2023) and Adusumilli (2020) and
+# raises the integrated target from 865 to 1067 Gt/yr, so a K calibrated against
+# the older Paolo+Adusumilli table is 23% low. Prefer the new table, fall back to
+# the old one so a tree that predates the re-release still runs, and let
+# ISMIP7_MELT_OBS_CSV name either explicitly.
+_OBS_CSV_CANDIDATES = (
+    os.path.join(DATA_ROOT, "meltobs",
+                 "Melt_Paolo_Davison_Adusumilli_imbie2.csv"),
+    os.path.join(DATA_ROOT, "parameterisations", "ocean", "meltobs",
+                 "Melt_Paolo_Err_Adusumilli_imbie2_v3.csv"),
 )
+
+
+def _obs_csv():
+    r"""Path to the per-basin melt observations, newest available first."""
+    named = os.environ.get("ISMIP7_MELT_OBS_CSV")
+    if named:
+        return named
+    for path in _OBS_CSV_CANDIDATES:
+        if os.path.exists(path):
+            return path
+    return _OBS_CSV_CANDIDATES[-1]
+
+
+OBS_CSV = _obs_csv()
 
 SIN_ALPHA_CAP = float(os.environ.get("ISMIP7_SIN_ALPHA_CAP", "5e-3"))
 
@@ -175,14 +197,33 @@ def _compute_sin_alpha(mesh, h, s):
 
 
 def _load_obs():
+    r"""Basin ids, observed melt and its uncertainty, both in Gt/yr.
+
+    The two published tables differ in width: the Paolo+Adusumilli one carries
+    area and per-area columns between melt and its uncertainty, the combined
+    Paolo+Davison+Adusumilli one carries melt and uncertainty alone. Columns are
+    located by header name so the reader takes either.
+    """
     bids, mobs, sobs = [], [], []
     with open(OBS_CSV) as f:
-        r = csv.reader(f); next(r)
+        r = csv.reader(f)
+        header = next(r)
+
+        def column(want):
+            for i, name in enumerate(header):
+                if name.strip().lower() == want:
+                    return i
+            raise ValueError(
+                f"{OBS_CSV}: no {want!r} column in header {header}")
+
+        i_m = column("bmr (gt/yr)")
+        i_s = column("bmr uncert (gt/yr)")
         for row in r:
-            if not row or not row[1]: continue
+            if not row or not row[i_m]:
+                continue
             bids.append(int(row[0]))
-            mobs.append(float(row[1]))
-            sobs.append(float(row[3]))
+            mobs.append(float(row[i_m]))
+            sobs.append(float(row[i_s]))
     return np.array(bids), np.array(mobs), np.array(sobs)
 
 
@@ -308,12 +349,19 @@ def main():
     out_dir = os.path.join(_PROJECT, "antarctica", "results")
     os.makedirs(out_dir, exist_ok=True)
     K_out = os.path.join(out_dir, f"calibrated_K_per_basin_{LC}.npz")
+    # Provenance travels with the numbers. Two published observation tables are
+    # in circulation and their integrated targets differ by 23%, so a K file
+    # that does not name its own source cannot be told apart from the other
+    # calibration once it is on disk. The forward reads only K_field and
+    # K_basin, so the extra entries cost nothing.
     np.savez(
         K_out,
         basin_ids=bids_obs, K_basin=K_basin,
         M_obs=M_obs, M_1=M_1, sigma_obs=sigma_obs,
         K_star=K_star, K_total=K_total,
         basin_on_mesh=basin, K_field=K_field,
+        obs_csv=os.path.basename(OBS_CSV), obs_total_gtyr=float(M_obs.sum()),
+        mesh_source=os.path.basename(INV_H5), sin_alpha_cap=SIN_ALPHA_CAP,
     )
     PETSc.Sys.Print(f"  Saved: {K_out}")
 

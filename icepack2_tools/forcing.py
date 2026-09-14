@@ -1065,12 +1065,9 @@ def make_climatology_ocean_callback(K_field, data_root=None):
     callback evaluates that same K with a cell-wise draft, a cell-wise
     sin_alpha and a cell-wise `haf <= 0` floating mask, so the melt-receiving
     area shifts by roughly a one-cell band at the grounding line and the ice
-    front - non-trivial at 32 km, where shelves are only a few cells wide. The
-    integrated DG0 melt total should be checked against the 865 Gt/yr
-    observational target and K recalibrated (against the 2026-07-31 ISMIP7 AIS
-    ocean-melt toolbox re-release, whose new constraint datasets and cold/warm
-    targets call for a re-run of the calibration notebook regardless). Nothing
-    here compensates for the shift; see GEOMETRY_DISCRETIZATION.md."""
+    front, non-trivial at 32 km, where shelves are only a few cells wide.
+    Nothing here compensates for the shift; GEOMETRY_DISCRETIZATION.md tracks
+    the check of the DG0 melt total against the observational target."""
     interps = build_oi_climatology_interpolators(data_root)
 
     def callback(ctx, t_yr):
@@ -1140,9 +1137,10 @@ def make_forcing_callback(atm=None, ocean=None, fracture=None,
     the control reference window) or set smb_anomaly=False to force
     with the full field.
 
-    ISMIP7_K_SCALE multiplies whichever K is in effect (the calibrated
-    per-basin K integrates 689 vs 865 Gt/yr observed on the 2500 m mesh,
-    so 1.26 matches the observed total).
+    ISMIP7_K_SCALE multiplies whichever K is in effect (the per-basin K
+    calibrated against the older Paolo/Adusumilli table integrates 689 vs
+    865 Gt/yr observed on the 2500 m mesh, so 1.26 matched that table's
+    total; the factor belongs to that calibration).
     """
     if fracture is None:
         reject_collapse_mask("this run's forcing callback")

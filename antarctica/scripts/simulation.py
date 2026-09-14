@@ -1448,6 +1448,30 @@ def run_simulation(
             except OSError:
                 pass
 
+    # ISMIP7 output (ISMIP7_OUTPUT=1): yearly state snapshots and flux means
+    # on the model mesh, one checkpoint per year beside this stem, converted
+    # and regridded afterwards by antarctica/scripts/write_ismip7_output.py.
+    # Off by default.
+    #
+    # BEFORE the timeseries rewrite below: constructing this is what
+    # refuses a run that would overwrite a banked submission series, and
+    # that refusal has to happen while the run's own record is still
+    # intact, not after the rewrite has dropped the rows past t_start.
+    annual = None
+    if _ismip7_output():
+        from icepack2_tools.ismip7_output import AnnualOutput
+        annual = AnnualOutput(
+            mesh, Q_dg,
+            os.path.join(RESULTS_DIR, f"{experiment_name}_{lc}_ismip7_annual.h5"),
+            os.path.join(RESULTS_DIR, f"{experiment_name}_{lc}_ismip7_scalars.csv"),
+            first_year=t_start, rho_ratio=float(rho_ratio), log=PETSc.Sys.Print,
+            resume=ctx.get("ismip7_resume"))
+        if annual.h_year_start is None:
+            annual.start_year(h_dg)
+        _stem, _ext = os.path.splitext(annual.out_path)
+        PETSc.Sys.Print(
+            f"  ISMIP7 output: one checkpoint per year -> {_stem}_<year>{_ext}")
+
     results = []
 
     # Crash-safe timeseries: append each row and flush, so a reboot keeps the
@@ -1476,25 +1500,6 @@ def run_simulation(
             csv_f = open(csv_fn, "w")
             csv_f.write(csv_header)
             csv_f.flush()
-
-    # ISMIP7 output (ISMIP7_OUTPUT=1): yearly state snapshots and flux means
-    # on the model mesh, one checkpoint per year beside this stem, converted
-    # and regridded afterwards by antarctica/scripts/write_ismip7_output.py.
-    # Off by default.
-    annual = None
-    if _ismip7_output():
-        from icepack2_tools.ismip7_output import AnnualOutput
-        annual = AnnualOutput(
-            mesh, Q_dg,
-            os.path.join(RESULTS_DIR, f"{experiment_name}_{lc}_ismip7_annual.h5"),
-            os.path.join(RESULTS_DIR, f"{experiment_name}_{lc}_ismip7_scalars.csv"),
-            first_year=t_start, rho_ratio=float(rho_ratio), log=PETSc.Sys.Print,
-            resume=ctx.get("ismip7_resume"))
-        if annual.h_year_start is None:
-            annual.start_year(h_dg)
-        _stem, _ext = os.path.splitext(annual.out_path)
-        PETSc.Sys.Print(
-            f"  ISMIP7 output: one checkpoint per year -> {_stem}_<year>{_ext}")
 
     def _grounded_cells():
         return Function(Q_dg).interpolate(s - s_float).dat.data_ro > 0.0

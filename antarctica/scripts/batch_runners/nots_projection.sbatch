@@ -2,7 +2,11 @@
 # ISMIP7 forward run (control, historical or projection) on Rice NOTS deepsC.
 # SELF-CHAINING: a 285-year projection is about five days at 2500 m and will
 # not fit any ordinary queue, so this script resubmits itself until the run
-# reaches ISMIP7_T_END, resuming from its own newest checkpoint each time.
+# reaches its driver's own end year, resuming from its own newest checkpoint
+# each time. The driver owns that year and this script does not default
+# ISMIP7_T_END; the chain reads the end back out of the driver's
+# "Time-stepping: <start>-><end>" line. Setting ISMIP7_T_END overrides every
+# experiment, so leave it unset unless you mean to.
 #
 #   sbatch --export=ALL,ISMIP7_EXPERIMENT=control \
 #          antarctica/scripts/batch_runners/nots_projection.sbatch

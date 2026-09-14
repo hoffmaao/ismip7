@@ -178,15 +178,21 @@ reusable () {  # core label csv year - true when the existing output is current
 }
 
 archive_stale () {  # core label stem - move superseded output out of the way
-  local core="$1" label="$2" stem="$3" f moved=() failed=() ckpts=0
+  local core="$1" label="$2" stem="$3" f moved=() failed=() ckpts=0 years=0
   # The periodic checkpoints go too: pick_restart can resume from them, so a
   # pre-fix one left behind would become the resume state of a clean re-run.
+  # So does the ISMIP7 annual series: a cold start into a populated one is a
+  # hard error (AnnualOutput refuses rather than overwrite a banked
+  # submission), so leaving it behind would make the re-run impossible.
   for f in "$(csv_of "$stem")" "$(h5_of "$stem")" \
-           "$R/${stem}${SFX}_${LC}"_t*.h5; do
+           "$R/${stem}${SFX}_${LC}"_t*.h5 \
+           "$R/${stem}${SFX}_${LC}"_ismip7_annual_*.h5 \
+           "$R/${stem}${SFX}_${LC}_ismip7_scalars.csv"; do
     [ -e "$f" ] || continue
     if mkdir -p "$ARCHIVE" && mv "$f" "$ARCHIVE/"; then
       case "$f" in
         *_"${LC}"_t*.h5) ckpts=$((ckpts + 1)) ;;
+        *_ismip7_annual_*.h5) years=$((years + 1)) ;;
         *) moved+=("$(basename "$f")") ;;
       esac
     else
@@ -203,9 +209,10 @@ archive_stale () {  # core label stem - move superseded output out of the way
          "result. Check permissions and free space on $R, then re-run."
     return 1
   fi
-  if [ "${#moved[@]}" -gt 0 ] || [ "$ckpts" -gt 0 ]; then
+  if [ "${#moved[@]}" -gt 0 ] || [ "$ckpts" -gt 0 ] || [ "$years" -gt 0 ]; then
     local what="${moved[*]:-}"
     [ "$ckpts" -gt 0 ] && what="${what:+$what + }$ckpts checkpoint(s)"
+    [ "$years" -gt 0 ] && what="${what:+$what + }$years ISMIP7 year(s)"
     echo "[core $core] $label: archived $what under $ARCHIVE/"
   fi
   return 0

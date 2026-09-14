@@ -7,6 +7,11 @@ cold-started unconditionally; it now reads ``ISMIP7_RESTART`` and auto-resumes
 like every other core, so a wall stop must be retried rather than reported as
 unretryable.
 
+``archive_stale`` moves superseded output aside before a re-run. It has to
+take the ISMIP7 annual series with the rest: a cold start into a populated
+series is a hard refusal (``AnnualOutput`` will not overwrite a banked
+submission), so a series left behind makes the re-run impossible.
+
 The script resolves its repository root from ``BASH_SOURCE``, so it runs here
 against a sandbox laid out like the repo: the shipped script is copied in
 unmodified, ``mpiexec`` is a PATH stub, and the driver is a stub that writes
@@ -113,6 +118,18 @@ def _attempts(sandbox):
     return log.read_text().split() if log.exists() else []
 
 
+def _results(sandbox):
+    return sandbox / "antarctica" / "results"
+
+
+def _bank_a_series(sandbox, stem, years):
+    r"""What a prior ISMIP7_OUTPUT=1 pass leaves beside the run's own files."""
+    R = _results(sandbox)
+    for y in years:
+        (R / f"{stem}_ismip7_annual_{y}.h5").write_bytes(b"")
+    (R / f"{stem}_ismip7_scalars.csv").write_text("year,lim\n")
+
+
 def test_ocx_is_retried_from_its_own_saved_state(sandbox):
     r"""A wall stop at 2011 is resumed and reaches the 2026 target. Under the
     old `cold` classification the matrix stopped after one attempt and said
@@ -131,3 +148,26 @@ def test_a_core_that_stops_advancing_is_still_left_alone(sandbox):
                FAKE_STOP_YEAR="2011", FAKE_TARGET="2011")
     assert "no progress" in out, out
     assert _attempts(sandbox) == ["cold", "restart"], out
+
+
+def test_a_fresh_rerun_archives_the_ismip7_series_too(sandbox):
+    r"""FRESH=1 over a core that banked an ISMIP7 series must leave nothing
+    behind that blocks the cold start. The series is moved, not deleted, so
+    the operator keeps the audit trail."""
+    stem = "ocx_32000"
+    _bank_a_series(sandbox, stem, [2015, 2016, 2017])
+    # a prior pass' own run products, which archive_stale already handled
+    (_results(sandbox) / f"{stem}_timeseries.csv").write_text("year,vaf\n1979.0,0.0\n")
+    (_results(sandbox) / f"{stem}_final.h5").write_bytes(b"")
+
+    out = _run(sandbox, FAKE_STEM=stem, FAKE_START_YEAR="1979",
+               FAKE_STOP_YEAR="2026", FAKE_TARGET="2026")
+
+    R = _results(sandbox)
+    assert list(R.glob(f"{stem}_ismip7_annual_*.h5")) == [], out
+    assert not (R / f"{stem}_ismip7_scalars.csv").exists(), out
+    archived = sorted(p.name for d in R.glob("archive_stale_*") for p in d.iterdir())
+    assert f"{stem}_ismip7_scalars.csv" in archived, archived
+    assert sum(1 for n in archived if "_ismip7_annual_" in n) == 3, archived
+    assert "3 ISMIP7 year(s)" in out, out
+    assert "COMPLETE at 2026" in out, out

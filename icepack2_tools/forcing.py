@@ -883,22 +883,19 @@ def _warn_slope_cap(npz_path, cap):
     r"""Say once that the K on disk was fitted against a capped draft slope
     while the forward applies an uncapped one."""
     global _SLOPE_CAP_WARNED
+    if _SLOPE_CAP_WARNED:
+        return
     _SLOPE_CAP_WARNED = True
-    try:
-        from firedrake.petsc import PETSc
-        emit = PETSc.Sys.Print
-    except ImportError:
-        import sys
-
-        def emit(msg):
-            print(msg, file=sys.stderr)
-    emit(
-        f"  WARNING: {os.path.basename(npz_path)} was calibrated with the draft "
-        f"slope capped at sin(alpha) = {cap:g}, and this forward applies no "
-        f"cap, so it melts with a field the K was not fitted against. Measured "
-        f"on the Ua 2 km mesh the gap is 1860 Gt/yr against 1067.4 Gt/yr. See "
-        f"antarctica/FORWARD_RUN_READINESS.md action 5."
-    )
+    if _comm_rank() == 0:
+        print(
+            f"  WARNING: {os.path.basename(npz_path)} was calibrated with the "
+            f"draft slope capped at sin(alpha) = {cap:g}, and this forward "
+            f"applies no cap, so it melts with a field the K was not fitted "
+            f"against. Measured on the Ua 2 km mesh the gap is 1860 Gt/yr "
+            f"against 1067.4 Gt/yr. See antarctica/FORWARD_RUN_READINESS.md "
+            f"action 5.",
+            flush=True,
+        )
 
 
 def load_K_per_basin(npz_path, mesh_x, mesh_y, fill=0.0):
@@ -932,7 +929,7 @@ def load_K_per_basin(npz_path, mesh_x, mesh_y, fill=0.0):
     # See antarctica/FORWARD_RUN_READINESS.md action 5 and check_melt_bound.py.
     if "sin_alpha_cap" in data:
         cap = float(data["sin_alpha_cap"])
-        if np.isfinite(cap) and cap > 0.0 and not _SLOPE_CAP_WARNED:
+        if np.isfinite(cap) and cap > 0.0:
             _warn_slope_cap(npz_path, cap)
 
     root = os.environ.get(

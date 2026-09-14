@@ -46,6 +46,8 @@ It only reads. Add your hostname pattern to `ISMIP7_SITE_MATCH` and
 Required: `ISMIP7_FIREDRAKE`, `ISMIP7_PART_LONG`, `ISMIP7_PART_SHORT`,
 `ISMIP7_PART_DEBUG`, `ISMIP7_REPO`, `ISMIP7_WORK`. Everything else defaults.
 A missing value is reported at submission with the file and variable named.
+`submit.sh build` asks for the other five only, since it creates the venv that
+`ISMIP7_FIREDRAKE` names.
 
 Job sizes come in pairs so inversions and forwards can differ:
 `ISMIP7_TASKS_INV` and `ISMIP7_MEM_INV`, `ISMIP7_TASKS_FWD` and
@@ -150,8 +152,9 @@ the end.
 `install_deps.sh` (once, on a login node) pip-installs the data stack and the
 four editable packages: `icepack`, `icepack2`, `tlm_adjoint`, `icepack_tools`.
 It takes the venv and work filesystem from the site file and expects the
-sources under `$ISMIP7_WORK/sw/src`. They are rsynced from a workstation rather
-than cloned, since `icepack2` carries uncommitted edits the inversion needs and
+sources under `$ISMIP7_WORK/sw/src` (`FD_PREFIX` moves that; at Rice it is
+`/projects/ah301/sw/src`). They are rsynced from a workstation rather than
+cloned, since `icepack2` carries uncommitted edits the inversion needs and
 `icepack_tools` is private. Two more gaps surfaced here: `/tmp` is not writable
 on the login nodes (the script sets `TMPDIR`), and the `gmsh` wheel dlopens
 `libGLU.so.1`.

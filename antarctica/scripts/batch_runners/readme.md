@@ -142,10 +142,10 @@ The build adds `--download-parmetis` so two partitioners can be cross-checked.
 
 Rice has no Firedrake module, so the build uses EasyBuild `foss/2023b` (GCC
 13.2.0, OpenMPI 4.1.6, OpenBLAS, ScaLAPACK, FFTW) with Python 3.11.5 on the
-same GCCcore, CMake 3.27.6, and the M4, flex, Bison, libevent, zstd, Szip,
-libaec and libGLU modules the gaps above require. `ISMIP7_MODULES` must name
-the exact set the venv was built against, which a successful build prints at
-the end.
+same GCCcore, CMake 3.27.6, and the M4, flex, Bison, libevent, zstd, Szip and
+libaec modules the gaps above require. `ISMIP7_MODULES` must name that build
+set and `libGLU/9.0.3` on top of it, which the `gmsh` wheel dlopens at import.
+A successful build prints the whole list at the end.
 
 ### After the build
 

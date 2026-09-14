@@ -153,9 +153,10 @@ older than 13 September carries the shelf-friction defect and is unusable.
 32 Sapphire Rapids ranks, 6 s per 0.1-year step, so a 2015-2300 projection is
 about 5 node-hours and eleven cores about 2.5 node-days.
 
-**Still open:** the ctrlclim scenario default and the melt calibration rerun.
-Delivered here: the collapse mask in the thickness update, the 2300 forcing
-year, the `GEMB-SDBN1` path, the forcing-version audit, and the output writer.
+**Still open:** the melt calibration rerun. Delivered here: the `ssp126`
+ctrlclim default (`icepack2_tools/climatology.py`), the collapse mask in the
+thickness update, the 2300 forcing year, the `GEMB-SDBN1` path, the
+forcing-version audit, and the output writer.
 
 ## 5. Actions, in order
 
@@ -164,7 +165,8 @@ year, the `GEMB-SDBN1` path, the forcing-version audit, and the output writer.
 2. Pull the two `ctrl` trees from the mirror for cores 9 and 10. Re-run
    `audit_forcing_versions.py` before the production matrix and cite it in the
    README.
-3. Set `ISMIP7_CLIM_SCENARIO=ssp126`, or read the provided `ctrl` trees.
+3. Optional: read the provided `ctrl` trees in place of the `ssp126`
+   reference-climate pool.
 4. Rerun the melt calibration notebook with the July toolbox. The Úa-mesh
    ssp585 of job 1368723 hit `libmassbffl` of -0.0117 kg m-2 s-1 on small
    grounding-zone cells, past the request's -0.008 bound, which makes this

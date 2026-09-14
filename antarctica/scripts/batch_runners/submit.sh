@@ -34,7 +34,8 @@ here="$(cd "$(dirname "$0")" && pwd)"
 # --export=ALL below would carry them into the job and kill every ${VAR:-...}
 # fallback the job scripts resolve for themselves. A KEY=VALUE argument still
 # reaches the job, and so does anything the operator exported by hand.
-# The build job creates the venv, so it is not asked to name one.
+# The build job creates the venv, so it is not asked to name one. It is also
+# the one Rice-specific script left, kept as a worked example.
 require_list=ISMIP7_REQUIRED
 [ "${1:-}" = build ] && require_list=ISMIP7_REQUIRED_BUILD
 site_fields=$(
@@ -57,7 +58,7 @@ case "$kind" in
     smoke)      script=smoke.sbatch;           part="$ISMIP7_PART_DEBUG"; time=00:45:00;           tasks=4;              mem=24G;           cons="$ISMIP7_CONSTRAINT_FWD"; name=ismip7_smoke ;;
     verify)     script=verify.sbatch;          part="$ISMIP7_PART_DEBUG"; time=00:15:00;           tasks=4;              mem=16G;           cons="$ISMIP7_CONSTRAINT_FWD"; name=fd_verify ;;
     probe)      script=partition_probe.sbatch; part="$ISMIP7_PART_DEBUG"; time=01:00:00;           tasks="$ISMIP7_TASKS"; mem=64G;          cons="$ISMIP7_CONSTRAINT_FWD"; name=ismip7_part ;;
-    build)      script=build_firedrake.sbatch; part="$ISMIP7_PART_SHORT"; time=12:00:00;           tasks=1;              mem=48G;           cons="$ISMIP7_CONSTRAINT_FWD"; name=fd_build ;;
+    build)      script=build_firedrake_rice.sbatch; part="$ISMIP7_PART_SHORT"; time=12:00:00;           tasks=1;              mem=48G;           cons="$ISMIP7_CONSTRAINT_FWD"; name=fd_build ;;
     *) sed -n '2,${/^#/!q;s/^# \{0,1\}//p;}' "$0"; exit 2 ;;
 esac
 
@@ -116,6 +117,12 @@ cmd=(sbatch --parsable
 [ -n "$constraint" ] && cmd=("${cmd[@]:0:1}" -C "$constraint" "${cmd[@]:1}")
 [ -n "$account" ] && cmd=("${cmd[@]:0:1}" -A "$account" "${cmd[@]:1}")
 
+if [ "$kind" = build ] && [ "$ISMIP7_SITE_NAME" != rice_nots ]; then
+    echo "WARNING: $script is the Rice recipe. Its module names are Rice's," >&2
+    echo "         so at site '$ISMIP7_SITE_NAME' the job will fail on" >&2
+    echo "         'module load'. Copy it to build_firedrake_$ISMIP7_SITE_NAME.sbatch," >&2
+    echo "         substitute this cluster's module stack, and submit that." >&2
+fi
 printf 'site %s: ' "$ISMIP7_SITE_NAME"; printf '%q ' "${cmd[@]}"; echo
 [ "$dry" = 1 ] && exit 0
 mkdir -p logs

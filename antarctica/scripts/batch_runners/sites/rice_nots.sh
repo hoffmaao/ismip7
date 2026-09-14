@@ -4,7 +4,7 @@
 ISMIP7_SITE_NAME="rice_nots"
 ISMIP7_SITE_MATCH="nots* login*.nots.rice.edu bb*"
 
-# Built by build_firedrake.sbatch (job 1288484). libGLU is in the list because
+# Built by build_firedrake_rice.sbatch (job 1288484). libGLU is in the list because
 # the gmsh wheel dlopens libGLU.so.1 at import and the compute nodes lack it.
 ISMIP7_FIREDRAKE="${ISMIP7_FIREDRAKE:-/projects/ah301/sw/venv-firedrake/bin/activate}"
 ISMIP7_MODULES="${ISMIP7_MODULES:-foss/2023b Python/3.11.5 CMake/3.27.6 M4/1.4.19 flex/2.6.4 Bison/3.8.2 libevent/2.1.12 zstd/1.5.5 Szip/2.1.1 libaec/1.0.6 libGLU/9.0.3}"
@@ -21,7 +21,7 @@ ISMIP7_ACCOUNT="${ISMIP7_ACCOUNT:-}"
 # Sapphire Rapids (192 threads, 257-515 GB) is what the 2 km inversions need,
 # because `long` holds exactly one Cascade Lake node. Everything else stays on
 # cascadelake (80 threads, 187 GB): the measured timings and the chain depth
-# come from that generation, and build_firedrake.sbatch configures with
+# come from that generation, and build_firedrake_rice.sbatch configures with
 # -march=native, so a build has to land where the runs do.
 ISMIP7_CONSTRAINT_INV="${ISMIP7_CONSTRAINT_INV:-sapphirerapids}"
 ISMIP7_CONSTRAINT_FWD="${ISMIP7_CONSTRAINT_FWD:-cascadelake}"

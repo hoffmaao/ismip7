@@ -163,13 +163,17 @@ def test_the_successor_is_given_this_job_s_allocation(sandbox):
     submitted from inside a job has to be told the running job's own
     allocation. Without it the link lands on the cluster's defaults: wrong
     partition, wrong wall limit, and a default of one task, which the runner
-    refuses outright - a 285-year projection would stop after its first link."""
+    refuses outright - a 285-year projection would stop after its first link.
+    --hint=nomultithread is not readable back from scontrol, so it has to be
+    restated: without it Slurm packs the ranks onto hyperthreads and halves
+    per-rank memory bandwidth for the rest of the chain."""
     rc, log, calls = run_job(sandbox, FAKE_T_YR="2050", FAKE_START_YEAR="2000")
     assert rc == 0, log
     argv = [line for line in calls.splitlines() if line.startswith("ARGV:")]
     assert len(argv) == 1, calls
     for flag in ("-p commons", "-C cascadelake", "--time=1-00:00:00",
-                 "--mem=240G", "-N 1", "-n 12", "--cpus-per-task=1"):
+                 "--mem=240G", "-N 1", "-n 12", "--cpus-per-task=1",
+                 "--hint=nomultithread"):
         assert flag in argv[0], f"successor lost {flag}: {argv[0]}"
 
 

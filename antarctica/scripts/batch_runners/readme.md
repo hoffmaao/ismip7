@@ -32,9 +32,15 @@ submit.sh projection --partition debug --time 00:30:00 --tasks 8   # override an
 ```
 
 Any `KEY=VALUE` argument is exported into the job; that is how a run is
-configured (the knobs are in `antarctica/README.md`). `--tasks`, `--nodes`,
-`--mem`, `--time`, `--partition`, `--constraint`, `--account` and `--name`
-override the site defaults for one submission.
+configured (the knobs are in `antarctica/README.md`). `--tasks`, `--mem`,
+`--time`, `--partition`, `--constraint`, `--account` and `--name` override the
+site defaults for one submission.
+
+Inversions and forwards are sized separately: a site file may set
+`ISMIP7_TASKS_INV`/`ISMIP7_MEM_INV` and `ISMIP7_TASKS_FWD`/`ISMIP7_MEM_FWD`,
+each falling back to the single `ISMIP7_TASKS`/`ISMIP7_MEM`. At Rice the
+forward runs at the 12 ranks and 96 GB it was measured at while the inversion
+keeps 32 ranks and 240 GB.
 
 ## Adding your cluster
 
@@ -120,11 +126,14 @@ than Cascade Lake (192 cpus), so they are better hardware for getting that run
 done; the only cost is that timings taken there are not comparable with the
 Cascade Lake numbers in this file.
 
-Switching once granted is two options on the wrapper, which override the site
-file for that submission:
+Switching once granted is three options on the wrapper, which override the site
+file for that submission. The constraint has to be cleared as well as the
+partition: `sites/rice_nots.sh` pins `sapphirerapids`, every deepsC node is
+Cascade Lake, and the two together can never be satisfied.
 
 ```
-antarctica/scripts/batch_runners/submit.sh inversion --partition deepsC --time 2-00:00:00
+antarctica/scripts/batch_runners/submit.sh inversion \
+    --partition deepsC --constraint '' --time 2-00:00:00
 ```
 
 ### What deepsC actually is (measured, and it corrects an earlier claim)
@@ -156,7 +165,7 @@ cannot run on deepsC.** It needs `long`, which caps at 3 days. The 20 km-interio
 2 km inversion at ~120 GB does fit deepsC.
 
 The cores are hyperthreaded. 40 are physical; Slurm advertises 80. The solver is
-memory-bandwidth bound, so the job scripts pass `--hint=nomultithread` and place
+memory-bandwidth bound, so `submit.sh` passes `--hint=nomultithread` and places
 ranks on physical cores. Treating 80 as usable would halve per-rank bandwidth.
 
 The CPU is the same generation and clock as the workstation the timings were

@@ -68,6 +68,8 @@ ismip7_site_require() {
 # (submit.sh composes them from the site file), so a successor submitted from
 # inside a job would otherwise land on the cluster's defaults: wrong partition,
 # wrong wall limit, and often one task, which the runners refuse outright.
+# --hint=nomultithread is not readable back from scontrol and is not in the
+# job environment, so it is restated here; submit.sh always passes it.
 # Both chains call this, so the rule lives here once.
 ismip7_chain_resources() {
     local info feat tlim memn
@@ -77,7 +79,8 @@ ismip7_chain_resources() {
     tlim="$(echo "$info" | grep -oE 'TimeLimit=[^ ]+' | cut -d= -f2)"
     memn="$(echo "$info" | grep -oE 'MinMemoryNode=[^ ]+' | cut -d= -f2)"
     ISMIP7_CHAIN_RES=(-N "${SLURM_JOB_NUM_NODES:-1}" -n "${SLURM_NTASKS:-1}"
-                      --cpus-per-task="${SLURM_CPUS_PER_TASK:-1}")
+                      --cpus-per-task="${SLURM_CPUS_PER_TASK:-1}"
+                      --hint=nomultithread)
     [ -n "${SLURM_JOB_PARTITION:-}" ] && ISMIP7_CHAIN_RES+=(-p "$SLURM_JOB_PARTITION")
     [ -n "$feat" ] && ISMIP7_CHAIN_RES+=(-C "$feat")
     [ -n "$tlim" ] && ISMIP7_CHAIN_RES+=(--time="$tlim")
@@ -116,6 +119,17 @@ ismip7_activate() {
     export PYOP2_CACHE_DIR="${PYOP2_CACHE_DIR:-${SCRATCH:-$HOME}/.pyop2_cache/${SLURM_JOB_ID:-manual}}"
     mkdir -p "$PYOP2_CACHE_DIR"
 }
+
+# --- job size by kind ---------------------------------------------------
+# A site that needs one number sets ISMIP7_TASKS/ISMIP7_MEM and both kinds take
+# it. A site with measured per-kind values sets the pair: at Rice the forward
+# was measured at 12 ranks and the inversion at 32, and running the forward at
+# the inversion's size would be an unvalidated rank count on a narrower set of
+# nodes.
+ISMIP7_TASKS_INV="${ISMIP7_TASKS_INV:-$ISMIP7_TASKS}"
+ISMIP7_MEM_INV="${ISMIP7_MEM_INV:-$ISMIP7_MEM}"
+ISMIP7_TASKS_FWD="${ISMIP7_TASKS_FWD:-$ISMIP7_TASKS}"
+ISMIP7_MEM_FWD="${ISMIP7_MEM_FWD:-$ISMIP7_MEM}"
 
 # --- repository and data ------------------------------------------------
 export ISMIP7_DATA_ROOT="${ISMIP7_DATA_ROOT:-$ISMIP7_REPO/ISMIP7/AIS}"

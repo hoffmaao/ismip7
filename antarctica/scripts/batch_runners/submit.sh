@@ -15,7 +15,7 @@
 #   ISMIP7_SITE=iu_quartz submit.sh inversion --dry-run
 #
 # Options (each overrides the site default):
-#   --tasks N --nodes N --mem 240G --time 1-00:00:00
+#   --tasks N --mem 240G --time 1-00:00:00
 #   --partition P --constraint C --account A --name JOBNAME
 #   --dry-run    print the sbatch command and stop
 #
@@ -34,8 +34,8 @@ ismip7_site_require
 
 kind="${1:-}"; shift || true
 case "$kind" in
-    inversion)  script=inversion.sbatch;       part="$ISMIP7_PART_LONG";  time="$ISMIP7_TIME_INV"; tasks="$ISMIP7_TASKS"; mem="$ISMIP7_MEM";  name=ismip7_inv ;;
-    projection) script=projection.sbatch;      part="$ISMIP7_PART_SHORT"; time="$ISMIP7_TIME_FWD"; tasks="$ISMIP7_TASKS"; mem="$ISMIP7_MEM";  name=ismip7_fwd ;;
+    inversion)  script=inversion.sbatch;       part="$ISMIP7_PART_LONG";  time="$ISMIP7_TIME_INV"; tasks="$ISMIP7_TASKS_INV"; mem="$ISMIP7_MEM_INV"; name=ismip7_inv ;;
+    projection) script=projection.sbatch;      part="$ISMIP7_PART_SHORT"; time="$ISMIP7_TIME_FWD"; tasks="$ISMIP7_TASKS_FWD"; mem="$ISMIP7_MEM_FWD"; name=ismip7_fwd ;;
     smoke)      script=smoke.sbatch;           part="$ISMIP7_PART_DEBUG"; time=00:45:00;           tasks=4;              mem=24G;           name=ismip7_smoke ;;
     verify)     script=verify.sbatch;          part="$ISMIP7_PART_DEBUG"; time=00:15:00;           tasks=4;              mem=16G;           name=fd_verify ;;
     probe)      script=partition_probe.sbatch; part="$ISMIP7_PART_DEBUG"; time=01:00:00;           tasks="$ISMIP7_TASKS"; mem=64G;          name=ismip7_part ;;
@@ -43,7 +43,6 @@ case "$kind" in
     *) sed -n '2,28p' "$0" | sed 's/^# \{0,1\}//'; exit 2 ;;
 esac
 
-nodes=1
 constraint="${ISMIP7_CONSTRAINT:-}"
 account="${ISMIP7_ACCOUNT:-}"
 dry=0
@@ -51,7 +50,6 @@ exports=()
 while [ $# -gt 0 ]; do
     case "$1" in
         --tasks)      tasks="$2"; shift 2 ;;
-        --nodes)      nodes="$2"; shift 2 ;;
         --mem)        mem="$2"; shift 2 ;;
         --time)       time="$2"; shift 2 ;;
         --partition)  part="$2"; shift 2 ;;
@@ -74,7 +72,7 @@ for kv in ${exports+"${exports[@]}"}; do export_list="$export_list,$kv"; done
 cmd=(sbatch --parsable
      -J "$name"
      -p "$part"
-     --nodes="$nodes" --ntasks-per-node="$tasks" --cpus-per-task="$cpus_per_task"
+     --nodes=1 --ntasks-per-node="$tasks" --cpus-per-task="$cpus_per_task"
      --hint=nomultithread
      --mem="$mem" --time="$time"
      --export="$export_list"

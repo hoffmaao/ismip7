@@ -39,3 +39,9 @@ ISMIP7_TASKS="${ISMIP7_TASKS:-16}"
 ISMIP7_MEM="${ISMIP7_MEM:-120G}"
 ISMIP7_TIME_INV="${ISMIP7_TIME_INV:-2-00:00:00}"
 ISMIP7_TIME_FWD="${ISMIP7_TIME_FWD:-1-00:00:00}"
+
+# Inversions and forwards have different measured sizes. Leave these unset and
+# both kinds use the single pair above; set them once this cluster's own
+# numbers are known.
+#   ISMIP7_TASKS_INV / ISMIP7_MEM_INV    submit.sh inversion
+#   ISMIP7_TASKS_FWD / ISMIP7_MEM_FWD    submit.sh projection

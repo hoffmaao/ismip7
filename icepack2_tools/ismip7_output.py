@@ -145,6 +145,15 @@ class AnnualOutput:
         self.mesh, self.Q_dg = mesh, Q_dg
         self.out_path, self.scalars_path = out_path, scalars_path
         self.year = int(np.floor(float(first_year) + 1e-6))   # the year being accumulated (its Jan 1 has passed)
+        # A cold start part-way through a year has no record of that year's
+        # earlier months, so banking it would submit a fraction of a year as
+        # the year's mean. Accumulation begins at the next 1 January instead,
+        # and the partial year is dropped rather than reported. A resume is
+        # different: it carries the months already accumulated.
+        self._skip_first_year_end = False
+        if resume is None and abs(float(first_year) - self.year) > 1e-6:
+            self.year += 1
+            self._skip_first_year_end = True
         self.rho_ratio = float(rho_ratio)
         self.comm = comm or mesh.comm
         self.log = log or (lambda s: None)
@@ -227,6 +236,12 @@ class AnnualOutput:
                     f"year {self.year}: the submitted series would have a "
                     f"hole in it. Resume from a checkpoint inside {last + 1}."
                 )
+        if self._skip_first_year_end:
+            self.log(f"  ISMIP7 output: started at t={float(first_year)!r}, "
+                     f"part-way through {self.year - 1}. That year is "
+                     f"incomplete here and is NOT banked; accumulation begins "
+                     f"at {self.year}-01-01.")
+        if self._written_years:
             self.log(f"  ISMIP7 output: continuing {os.path.basename(out_path)} "
                      f"({len(self._written_years)} years through {last}; "
                      f"{self.year_time:.2f} yr of {self.year} carried over)")
@@ -366,6 +381,10 @@ class AnnualOutput:
 
     def year_end(self, h_dg, s, b, u, tau, grounded_cells, ice_cells):
         r"""Write this year's state snapshot and flux means, then start the next."""
+        if self._skip_first_year_end:
+            self._skip_first_year_end = False
+            self.start_year(h_dg)
+            return
         yr = self.year
         T = self.year_time if self.year_time > 0 else 1.0
         fields = {}

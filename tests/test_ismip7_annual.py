@@ -424,3 +424,73 @@ def test_a_cold_start_beside_earlier_years_is_untouched(two_cells, tmp_path):
     assert AnnualOutput.years_on_disk(out) == [2015]
     assert second.year == 2016
     second.close()
+
+
+def test_a_midyear_cold_start_does_not_bank_the_partial_year(two_cells, tmp_path):
+    r"""Enabling ISMIP7_OUTPUT on a link whose predecessor ran without it lands
+    part-way through a year with no record of its earlier months. Banking that
+    fraction as the year's mean would submit a wrong annual value, so the
+    partial year is dropped and accumulation begins at the next 1 January."""
+    mesh, Q, V = two_cells
+    h = [1500.0, 1500.0]
+    bed = [-500.0, -500.0]
+    out = str(tmp_path / "out" / "annual.h5")
+    scalars = str(tmp_path / "out" / "scalars.csv")
+
+    annual = AnnualOutput(mesh, Q, out, scalars, first_year=2050.4, rho_ratio=RHO_RATIO)
+    assert annual.year == 2051                  # the next whole year, not 2050
+    annual.start_year(_dg(Q, h))
+
+    # the 0.6 yr remaining in 2050
+    annual.begin_step()
+    annual.step_acc["acabf"][:] = [6.0, 6.0]
+    annual.step_time = 0.6
+    annual.commit_step()
+    _write_year(annual, Q, V, h, bed)           # the year end at t=2051.0
+    assert AnnualOutput.years_on_disk(out) == []        # 2050 is not banked
+    assert annual.year == 2051
+    assert np.allclose(annual.year_acc["acabf"], 0.0)   # the partial year is dropped
+
+    # a whole year of 2051 follows and IS banked, as a full-year mean
+    annual.begin_step()
+    annual.step_acc["acabf"][:] = [2.0, 2.0]
+    annual.step_time = 1.0
+    annual.commit_step()
+    _write_year(annual, Q, V, h, bed)
+    annual.close()
+
+    assert AnnualOutput.years_on_disk(out) == [2051]
+    with fd.CheckpointFile(AnnualOutput.year_path(out, 2051), "r") as chk:
+        acabf = chk.load_function(chk.load_mesh(), name="acabf").dat.data_ro.copy()
+    assert np.allclose(acabf, 2.0)
+
+
+def test_a_whole_year_cold_start_banks_its_first_year(two_cells, tmp_path):
+    r"""The ordinary cold start begins on 1 January, so nothing is skipped."""
+    mesh, Q, V = two_cells
+    h = [1500.0, 1500.0]
+    out = str(tmp_path / "out" / "annual.h5")
+    annual = AnnualOutput(mesh, Q, out, str(tmp_path / "out" / "scalars.csv"),
+                          first_year=2015.0, rho_ratio=RHO_RATIO)
+    assert annual.year == 2015
+    annual.start_year(_dg(Q, h))
+    _write_year(annual, Q, V, h, [-500.0, -500.0])
+    annual.close()
+    assert AnnualOutput.years_on_disk(out) == [2015]
+
+
+def test_a_midyear_resume_still_carries_its_months(two_cells, tmp_path):
+    r"""The skip is for a COLD start only: a resume carries the months already
+    accumulated, so its year must not be pushed forward."""
+    mesh, Q, V = two_cells
+    resume = {
+        "year": 2050, "year_time": 0.4, "series": "annual.h5",
+        "acc": {k: np.zeros(2) for k in AnnualOutput.ACCUMULATORS},
+        "h_year_start": np.full(2, 1500.0),
+    }
+    annual = AnnualOutput(mesh, Q, str(tmp_path / "out" / "annual.h5"),
+                          str(tmp_path / "out" / "scalars.csv"),
+                          first_year=2050.4, rho_ratio=RHO_RATIO, resume=resume)
+    assert annual.year == 2050
+    assert annual.year_time == pytest.approx(0.4)
+    annual.close()

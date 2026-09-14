@@ -5,7 +5,8 @@ Joint inversion for basal friction and fluidity using icepack2 + tlm_adjoint.
 Follows the Kangerd demo pattern from Shapero's dual-problems repo:
 - 3-field Z = V * Sigma * T (no DG thickness in mixed space)
 - Regularized Jacobian: J = J_r + α * J_1
-- snes_divergence_tolerance = -1
+- snes_divergence_tolerance = -3 (PETSC_UNLIMITED; the Kangerd demo's -1 is
+  PETSC_DETERMINE, which reinstates the default 1e4 growth cutoff)
 - Sliding coefficient includes exp(m*theta)
 
 Controls are log-deviations from PHYSICAL prior means - theta = log(C/C_w0)
@@ -407,7 +408,16 @@ def main():
         "snes_type": "newtonls",
         "snes_max_it": 200,
         "snes_linesearch_type": "nleqerr",
-        "snes_divergence_tolerance": -1,
+        # PETSC_UNLIMITED (-3), not the legacy -1. -1 is PETSC_DETERMINE,
+        # which restores PETSc's default 1e4 growth cutoff and reports
+        # DIVERGED_DTOL on solves that would otherwise reach their real
+        # convergence or iteration-limit result. The timing campaign pins
+        # -3 for exactly this reason (see README "Timing benchmark" §7).
+        # These sparams are shared by every annotated L-BFGS forward AND
+        # by the final save solve, where a spurious DIVERGED_DTOL is
+        # silently downgraded to "large objective" or to a published state
+        # that does not match the controls written beside it.
+        "snes_divergence_tolerance": -3,
         "snes_stol": 0.0,
         "ksp_type": "gmres",
         "pc_type": "lu",
@@ -1153,6 +1163,14 @@ def main():
     # final-save guard below to the point of passing a corrupt velocity.
     last_good_vel_chi2 = [np.inf]
 
+    # Residual norm of the state written by save_map(full_state=True),
+    # evaluated under the controls saved in the SAME file. Recorded as a
+    # checkpoint attribute because it is the quantity every consumer
+    # silently depends on: the timing-cache restart fast path in
+    # simulation.py accepts a published mixed state as converged and
+    # derives its whole run atol from this norm.
+    full_state_fnorm = [float("nan")]
+
     def term_report():
         r"""``' vel=... dhdt=...'`` for the iteration line, or '' if disabled."""
         try:
@@ -1238,6 +1256,9 @@ def main():
                 )
                 chk.set_attr(
                     "/", "geometry_source_method", TARGET_MESH_GEOMETRY_METHOD
+                )
+                chk.set_attr(
+                    "/", "full_state_residual", float(full_state_fnorm[0])
                 )
 
     # ── L-BFGS-B Inversion ──
@@ -1489,18 +1510,51 @@ def main():
     z.assign(z_backup)
     n_flow.assign(n_flow_val)
     m_slide.assign(m_slide_val)
-    try:
+
+    def _final_residual():
+        """||F(z)|| under the FINAL controls -- the consumer's quantity."""
+        with assemble(build_F(theta, phi)).dat.vec_ro as _rv:
+            return _rv.norm()
+
+    def _solve_final():
         EquationSolver(
             build_F(theta, phi) == 0,
             z,
             solver_parameters=sparams,
             form_compiler_parameters=fc_params,
         ).solve()
-    except fd.ConvergenceError:
-        PETSc.Sys.Print(
-            "  Final solve failed; restoring last good optimization state"
-        )
+
+    final_solve_ok = False
+    try:
+        _solve_final()
+        final_solve_ok = True
+    except fd.ConvergenceError as exc:
+        # Do NOT swallow the reason. This path used to print one line and
+        # fall through to the save guard, so four consecutive timing
+        # inversions published a mixed state belonging to different
+        # controls with nothing in the log naming the cause.
+        PETSc.Sys.Print(f"  Final solve failed at full n/m: {exc}")
+        # z_backup was solved at the last EVALUATED control vector, which
+        # is not result.x. Re-ramping 1->n from it is the same recovery
+        # the cold-start diagnostic uses when a jump to full exponents
+        # outruns Newton.
         z.assign(z_backup)
+        try:
+            PETSc.Sys.Print(
+                f"  Retrying with continuation n_flow 1->{n_flow_val:.1f}, "
+                f"m_slide 1->{m_slide_val:.1f}..."
+            )
+            for _t in np.linspace(0.0, 1.0, 5):
+                n_flow.assign(1.0 + _t * (n_flow_val - 1.0))
+                m_slide.assign(1.0 + _t * (m_slide_val - 1.0))
+                _solve_final()
+            final_solve_ok = True
+            PETSc.Sys.Print("  Continuation retry converged")
+        except fd.ConvergenceError as exc2:
+            PETSc.Sys.Print(f"  Continuation retry also failed: {exc2}")
+            n_flow.assign(n_flow_val)
+            m_slide.assign(m_slide_val)
+            z.assign(z_backup)
 
     u_sol = z.subfunctions[0]
     u_sol_mag = Function(Q).interpolate(sqrt(u_sol[0] ** 2 + u_sol[1] ** 2))
@@ -1515,20 +1569,35 @@ def main():
     )
     PETSc.Sys.Print(f"  Final misfit (masked): {misfit:.6e}")
 
-    # Rewrite the MAP with the full mixed state when the velocity agrees with
-    # the last accepted optimization eval (same _vel_chi2 metric). Timing
-    # caches are published from this checkpoint without a second prepare.
-    _guard = float(assemble(_vel_chi2))
-    _ref = max(float(last_good_vel_chi2[0]), 1e-30)
-    if np.isfinite(_guard) and _guard <= 10.0 * _ref:
+    # Rewrite the MAP with the full mixed state only when that state solves
+    # the residual at the controls saved beside it. Timing caches are
+    # published from this checkpoint without a second prepare.
+    # The gate is whether the final solve CONVERGED at the saved controls,
+    # not whether the state resembles the last optimizer eval. The old
+    # guard compared assemble(_vel_chi2) against last_good_vel_chi2, but
+    # the failure path had just done z.assign(z_backup) and
+    # last_good_vel_chi2 is that same state's own metric -- so it compared
+    # z_backup with itself and passed unconditionally. Every full-state MAP
+    # written between then and 2026-09-14 carries controls from result.x
+    # and a velocity solved for a different control vector; ||F|| at the
+    # published state reached 1.5e10 and the forward blew up in 4 steps.
+    full_state_fnorm[0] = _final_residual()
+    _fnorm = full_state_fnorm[0]
+    PETSc.Sys.Print(
+        f"  Published-state residual ||F(z; theta, phi)|| = {_fnorm:.6e} "
+        f"(final solve {'converged' if final_solve_ok else 'FAILED'})"
+    )
+    if final_solve_ok and np.isfinite(_fnorm):
         save_map(chk_fn, full_state=True)
         PETSc.Sys.Print(f"Saved full mixed-state MAP: {chk_fn}")
     else:
         PETSc.Sys.Print(
-            f"WARNING: NOT saving mixed state -- final-state velocity misfit "
-            f"{_guard:.3e} is inconsistent with the last accepted "
-            f"{_ref:.3e} (>10x, same metric). Controls-only MAP remains; "
-            f"timing-cache publish from this file will fail until re-run."
+            f"WARNING: NOT saving mixed state -- the final forward solve at "
+            f"the saved controls did not converge (||F||={_fnorm:.3e}). "
+            f"A mixed state from a different control vector would be "
+            f"accepted by the restart fast path and never re-solved. "
+            f"Controls-only MAP remains; timing-cache publish from this "
+            f"file will fail until re-run."
         )
 
     # ── Plot ──

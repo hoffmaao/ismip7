@@ -355,8 +355,19 @@ python -c "import h5py,sys; print(dict(h5py.File(sys.argv[1])['/'].attrs))" MAP.
 ## 5. Calibrate ocean melt (`calibrate_melt.py`)
 
 Solves for the Burgard quadratic-mixed-slope coefficient K, global and per
-IMBIE2 basin, against integrated observed shelf melt (Paolo and Adusumilli,
-about 865 Gt/yr). Needs section 2 forcing and a section 4 mesh.
+IMBIE2 basin, against integrated observed shelf melt. The target is the July
+2026 table combining Paolo, Davison and Adusumilli, 1067.4 Gt/yr, read from
+`<DATA_ROOT>/meltobs/Melt_Paolo_Davison_Adusumilli_imbie2.csv`. With that file
+absent it falls back to the older Paolo and Adusumilli table (865.0 Gt/yr) under
+`<DATA_ROOT>/parameterisations/ocean/meltobs/`; `ISMIP7_MELT_OBS_CSV` names
+either. Needs section 2 forcing and a section 4 mesh.
+
+The newer table comes from the Source Cooperative melt-calibration product:
+
+```bash
+python antarctica/scripts/download_mirror.py \
+    --product ismip7-ais-melt-calibration data/meltobs/
+```
 
 ```bash
 cd antarctica
@@ -584,6 +595,7 @@ and another to the preflight.
 | `ISMIP7_LEGACY_TRANSPORT` | restore the pre-July-2026 CG-projection transport (needs `cg1`) | unset |
 | `ISMIP7_SNES_TYPE` / `ISMIP7_SNES_MAXIT` | diagnostic Newton type and iteration cap | `newtonls` / `200` |
 | `ISMIP7_K_MELT` / `ISMIP7_K_PER_BASIN_NPZ` | scalar Burgard K (projections), per-basin K file (control) | `1.15e-4` / `results/calibrated_K_per_basin_<lc>.npz` |
+| `ISMIP7_MELT_OBS_CSV` | per-basin melt observation table read by `scripts/calibrate_melt.py`; columns are located by header name, so either published table serves | `<DATA_ROOT>/meltobs/Melt_Paolo_Davison_Adusumilli_imbie2.csv`, else the older Paolo and Adusumilli table |
 | `ISMIP7_ESM` | ESM for the control | `CESM2-WACCM` |
 | `ISMIP7_CLIM_SCENARIO` / `_START` / `_END` | reference-climate pool: the scenario pooled with `historical`, and the window, shared by the control's SMB climatology and the projections' aSMB re-reference through `icepack2_tools/climatology.py`. A partial pool warns | `ssp126` / `2000` / `2029` |
 | `ISMIP7_H_CLAMP` | thickness floor (m) | `0` |

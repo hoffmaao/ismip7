@@ -1,5 +1,5 @@
 #!/bin/bash
-# Finish the Firedrake venv: the data stack and the three editable ice
+# Finish the Firedrake venv: the data stack and the four editable ice
 # packages. Run ONCE on a login node after the Firedrake build:
 #
 #   bash antarctica/scripts/batch_runners/install_deps.sh

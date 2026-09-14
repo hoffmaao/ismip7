@@ -26,7 +26,7 @@ ticks. Sizes are measured, not estimated.
 | **icepack** (raster interpolation onto meshes) | github.com/icepack/icepack | x | x | x | x |
 | **icepack_tools** (shared building blocks: `adapt_mesh`, `levelset`, `friction`, `grounding`) | github.com/hoffmaao/icepack_tools, private: ask for access | | for a level-set front | x | |
 | **tlm_adjoint** | github.com/jrmaddison/tlm_adjoint | x | | | |
-| `xarray netCDF4 scipy rasterio shapely gmsh matplotlib` | pip, into the Firedrake venv | x | x | x | x |
+| `xarray netCDF4 scipy rasterio pyproj shapely gmsh matplotlib` (add `geopandas` only to build a mesh from scratch, section 3) | pip, into the Firedrake venv | x | x | x | x |
 | `earthaccess` (NSIDC downloads), `globus-sdk` (only if you use Globus rather than the mirror) | pip | x | x | x | |
 | **isschecker** (`ismip7-compliance-checker`) | github.com/ismip/ISM_SimulationChecker | | | | x |
 
@@ -723,7 +723,7 @@ cannot be read as current.
 | `ISMIP7_DHDT_CLIM_START` / `_END` | RACMO SMB climatology window for that source | `2003` / `2019` |
 | `ISMIP7_DHDT_REACH` | pixel-to-cell reach as a multiple of the cell scale `sqrt(area)`; rejects raster pixels lying outside the mesh that nearest-centroid assignment would otherwise snap onto boundary cells | `0.75` |
 | `ISMIP7_DHDT_NET_SIGMA` | sigma (Gt/yr) on the *integrated* grounded+observed dH/dt; `0` disables the net mass-balance term. Off by default on purpose - see §4 - and only ever active when `ISMIP7_DHDT_WEIGHT > 0` | `0` |
-| `ISMIP7_OBS_KIT` | path to `AntarcticaObsISMIP7-v*.nc`. The 11 GB kit is only needed to BUILD the two small dH/dt cache rasters (`antarctica/data/dhdt_cache/`); with those staged the kit may be absent and the newest cached version is used. Setting this variable to a path that does not exist is a hard error, not a fall-back to the cache | newest under `<DATA_ROOT>/obs/mipkit` |
+| `ISMIP7_OBS_KIT` | path to `AntarcticaObsISMIP7-v*.nc`. The kit itself (section 0.2) is only needed to BUILD the two small dH/dt cache rasters (`antarctica/data/dhdt_cache/`); with those staged the kit may be absent and the newest cached version is used. Setting this variable to a path that does not exist is a hard error, not a fall-back to the cache | newest under `<DATA_ROOT>/obs/mipkit` |
 
 ---
 

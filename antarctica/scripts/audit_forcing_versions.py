@@ -6,8 +6,8 @@ mirror, the data-freeze copy of record (discussions #37 and #40, Sep 2026).
         [--esm CESM2-WACCM --esm MRI-ESM2-0] [--scenario ssp585 ...]
 
 For every <ESM>/<scenario>/<product>/<variable> the mirror publishes, print
-the mirror's version directories next to the ones under --root, and flag the
-rows where the local copy is missing or behind. The mirror keeps only the
+the mirror's versions next to the ones under --root, and flag the rows where
+the local copy is missing or behind. The mirror keeps only the
 current version of each product, so "behind" means "must re-sync before the
 production runs" (and the README must cite the version used).
 

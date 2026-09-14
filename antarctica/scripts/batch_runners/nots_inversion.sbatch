@@ -98,18 +98,19 @@ srun -n "$SLURM_NTASKS" python -u antarctica/scripts/inversion_icepack2.py
 rc=$?
 echo "=== $(date -Is)  inversion exit ${rc} ==="
 
-# Finished for good whenever L-BFGS-B returned at all: ISMIP7_MAXITER is the
-# budget of a run, so ITERATIONS REACHED LIMIT is the normal way a production
-# inversion ends. The successor exists for the other case, a job the wall
-# clock killed before the optimizer returned (no "Optimization finished" in
-# the log); it warm-starts from the periodic checkpoint and finishes the
+# Finished for good whenever L-BFGS-B returned AND the MAP reached disk:
+# ISMIP7_MAXITER is the budget of a run, so ITERATIONS REACHED LIMIT is the
+# normal way a production inversion ends. The successor exists for the other
+# case, a job the wall clock killed before the MAP was written (no "Saved MAP:"
+# in the log, which the driver prints only once the checkpoint write has
+# returned); it warm-starts from the periodic checkpoint and finishes the
 # budget. (The previous rule kept chaining after a completed budget: job
 # 1339328 finished its 200 iterations and 1339342 started re-inverting the
 # finished MAP, Sep 13 2026.) The driver writes this marker itself as soon as
 # it has saved the MAP, so the rule below is the fallback for a driver that
 # could not write it; touch is idempotent.
-if grep -q 'Optimization finished' "$LOG"; then
+if grep -q 'Saved MAP:' "$LOG"; then
     touch "$DONE"
-    echo "chain: finished ($(grep -o 'Optimization finished.*' "$LOG" | tail -1)); marker $DONE"
+    echo "chain: finished ($(grep -o 'Saved MAP:.*' "$LOG" | tail -1)); marker $DONE"
 fi
 exit $rc

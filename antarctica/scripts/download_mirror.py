@@ -14,8 +14,11 @@ readers expect (the mirror itself keeps no version directories).
 
 Partial files resume with a Range request; a file whose size matches the
 mirror is skipped. Every transfer is checked against the size the listing
-gave: a short one is deleted and reported FAILED rather than left on disk as
-a truncated NetCDF. The mirror refuses Python's default User-Agent.
+gave, so a truncated NetCDF is never reported as fetched: a short one is left
+in place for the next run to resume and reported FAILED, and one longer than
+the listing (a server that ignored the Range header) is deleted and refetched.
+Either way the exit status is non-zero. The mirror refuses Python's default
+User-Agent.
 """
 import argparse
 import concurrent.futures as cf
@@ -79,11 +82,18 @@ def fetch(key, size, dest):
     # An empty chunk from a dropped stream is indistinguishable from the end
     # of the body, so a truncated NetCDF would otherwise land on disk and be
     # reported as fetched; the readers only discover it years of forcing
-    # later. Compare against the size the listing gave and fail loudly.
+    # later. Compare against the size the listing gave.
     got = os.path.getsize(dest)
-    if got != size:
+    if got < size:
+        # A dropped stream: the bytes on disk are a valid prefix, so they stay
+        # for the next run's Range request. The transfer is still a failure,
+        # which is what carries it into the exit status.
+        raise IOError(f"short transfer: {got} of {size} bytes, kept for the next resume")
+    if got > size:
+        # The server ignored the Range header and appended a second copy of
+        # the body, so what is on disk is unusable and cannot be resumed.
         os.remove(dest)
-        raise IOError(f"short transfer: got {got} of {size} bytes; removed the partial file")
+        raise IOError(f"over-long transfer: {got} of {size} bytes; removed, it will be refetched")
     return "resumed" if have else "fetched"
 
 

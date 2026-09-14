@@ -21,9 +21,10 @@ runs inside the parallel forward, gated by ``ISMIP7_OUTPUT=1``:
 
 Everything is kept on the model's own mesh in Firedrake checkpoints, ONE PER
 YEAR: ``<results>/<experiment>_<lc>_ismip7_annual_<year>.h5``, each holding
-that year's 22 fields in the model's units (m, m/yr, MPa). The writer globs
+that year's fields in the model's units (m, m/yr, MPa). The writer globs
 them, sorts by the year in the name, and converts to the request's SI units
-under the fill policies.
+under the fill policies. ``base`` is not among them: it is the one submitted
+variable the writer rebuilds on the 8 km grid (see ``GRID_DERIVED``).
 
 One file per year rather than one growing file is what makes the series
 durable. This is the only copy of what gets submitted, and six chained links
@@ -89,6 +90,15 @@ VARIABLES_2D = {
 }
 SCALARS = ("lim", "limnsw", "iareagr", "iareafl", "tendacabf", "tendlibmassbfgr",
            "tendlibmassbffl", "tendlicalvf", "tendlifmassbf", "tendligroundf")
+
+#: submitted variables the writer REBUILDS on the 8 km grid rather than
+#: regridding from the model mesh, so the forward never banks them: the
+#: checker requires orog == base + lithk pixel by pixel, and the elevations
+#: are covered-part means while lithk is a whole-pixel mean, so only
+#: base := orog - lithk taken on the grid satisfies it.
+GRID_DERIVED = ("base",)
+#: what year_end writes, and what the writer reads back per year
+VARIABLES_BANKED = tuple(v for v in VARIABLES_2D if v not in GRID_DERIVED)
 
 
 class AnnualOutput:
@@ -366,7 +376,6 @@ class AnnualOutput:
         fields["lithk"] = dg(h_dg.dat.data_ro * ice_cells)
         fields["orog"] = Function(Q).interpolate(s)
         fields["topg"] = Function(Q).interpolate(b)
-        fields["base"] = dg(fields["orog"].dat.data_ro - h_dg.dat.data_ro)
         fields["sftgif"] = dg(ice_cells.astype(float))
         fields["sftgrf"] = dg((ice_cells & grounded_cells).astype(float))
         fields["sftflf"] = dg((ice_cells & ~grounded_cells).astype(float))

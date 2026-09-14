@@ -42,7 +42,7 @@ from icepack2_tools.climatology import (
 )
 
 T_START = 2015.0
-T_END = float(os.environ.get("ISMIP7_T_END", "2300"))
+T_END = float(os.environ.get("ISMIP7_T_END", "2301"))
 DT = float(os.environ.get("ISMIP7_DT", "1.0"))
 OUTPUT_INTERVAL = int(os.environ.get("ISMIP7_OUTPUT_INTERVAL", "10"))
 

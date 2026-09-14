@@ -12,6 +12,6 @@ if __name__ == "__main__":
     run_core_experiment(
         core=4, title="SSP3-7.0 with MRI-ESM2-0 (2015-2100)", name="ssp370_mri_esm2_0",
         esm="MRI-ESM2-0", scenario="ssp370",
-        t_start_default=2015.0, t_end_default=2100.0,
+        t_start_default=2015.0, t_end_default=2101.0,
         restart_from_hist=True,
     )

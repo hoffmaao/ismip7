@@ -15,8 +15,8 @@ Slope sin(alpha): grad(s - h) projected to CG1 on the fine mesh, capped
 at ISMIP7_SIN_ALPHA_CAP (default 5e-3) to suppress unstructured-mesh noise.
 
 Aggregation: per-node melt is integrated to IMBIE2 basins (8 km labels,
-nearest-neighbour onto the mesh), then compared against the
-Paolo/Adusumilli per-basin observations.
+nearest-neighbour onto the mesh), then compared against the per-basin
+observation table that `_obs_csv` resolves (ISMIP7_MELT_OBS_CSV names one).
 
 Since melt is linear in K, the Term-1 optimum is closed form:
 
@@ -69,10 +69,10 @@ IMBIE2_NC = os.path.join(
 # Observed basal melt per IMBIE2 basin. The melt-calibration product re-released
 # in July 2026 (Source Cooperative, ismip7-ais-melt-calibration) combines Paolo
 # (2023), Davison (2023) and Adusumilli (2020) and raises the integrated target
-# from 865 to 1067 Gt/yr, so a K calibrated against the older Paolo+Adusumilli
-# table is 23% low. Prefer the new table, fall back to the old one so a tree
-# that predates the re-release still runs, and let ISMIP7_MELT_OBS_CSV name
-# either explicitly.
+# from 865 to 1067 Gt/yr, so the total-match K calibrated against the older
+# Paolo+Adusumilli table is 23% low. Prefer the new table, fall back to the old
+# one so a tree that predates the re-release still runs, and let
+# ISMIP7_MELT_OBS_CSV name either explicitly.
 _OBS_CSV_CANDIDATES = (
     os.path.join(DATA_ROOT, "meltobs",
                  "Melt_Paolo_Davison_Adusumilli_imbie2.csv"),
@@ -243,7 +243,6 @@ def main():
 
     bed, thk, sur, msk = _interp_bedmachine(mesh, Q)
     h_np = thk.dat.data_ro
-    b_np = bed.dat.data_ro
     s_np = sur.dat.data_ro
     mask_np = msk.dat.data_ro
 

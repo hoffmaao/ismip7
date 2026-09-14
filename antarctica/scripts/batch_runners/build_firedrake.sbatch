@@ -67,7 +67,8 @@ echo "    build cpus $NPROC"
 # foss/2023b is the toolchain that actually resolves here (GCC 13.2.0,
 # OpenMPI 4.1.6, OpenBLAS, ScaLAPACK, FFTW). Python 3.11.5 is built against the
 # same GCCcore/13.2.0, so the ABI matches. Whatever loads here MUST be recorded
-# in site_env.sh as ISMIP7_MODULES, or the runtime will mismatch this build.
+# in sites/<your-site>.sh as ISMIP7_MODULES, or the runtime will mismatch this
+# build.
 module purge
 # flex/Bison/M4 are NOT on the compute nodes at all (verified 2026-09-12:
 # flex, lex, bison and m4 are all MISSING on bb2u12c1), and PETSc's
@@ -218,6 +219,6 @@ done
 
 echo
 echo "=== $(date -Is)  build done ==="
-echo "Set these in site_env.sh:"
+echo "Set these in antarctica/scripts/batch_runners/sites/<your-site>.sh:"
 echo "    ISMIP7_FIREDRAKE=$VENV/bin/activate"
 echo "    ISMIP7_MODULES=\"foss/2023b Python/3.11.5 CMake/3.27.6 M4/1.4.19 flex/2.6.4 Bison/3.8.2 libevent/2.1.12 zstd/1.5.5 Szip/2.1.1 libaec/1.0.6\""

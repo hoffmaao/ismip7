@@ -818,7 +818,7 @@ VAF is reported in mm of sea-level equivalent; mass in Gt.
   both CTRLs then reached 2300). On the workstation `run_core_matrix.sh` does
   this automatically, relaunching from the newest checkpoint at or before the
   timeseries' last year while each attempt keeps advancing, and giving up on a
-  stall. The NOTS chain never retries a stalled run: a checkpoint written with
+  stall. The runner chain never retries a stalled run: a checkpoint written with
   `stalled=1` makes `projection.sbatch` report the stall and exit 1
   without submitting a successor, so an unattended chain cannot spend days
   re-attempting the same years. That relaunch is yours to make there: resubmit

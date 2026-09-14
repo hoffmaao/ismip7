@@ -1,6 +1,6 @@
 #!/bin/bash
-# Prove the NOTS Firedrake build works ACROSS RANKS under srun, and that the
-# parallel partitioners actually partition. The build job's own check ran
+# Prove this cluster's Firedrake build works ACROSS RANKS under srun, and that
+# the parallel partitioners actually partition. The build job's own check ran
 # `srun -n 4` inside a 1-task allocation and so failed for every type,
 # `simple` included, which says nothing about the build. This job has 4 tasks.
 # Resources (partition, tasks, memory, wall time, account, constraint) come

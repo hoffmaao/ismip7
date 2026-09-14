@@ -152,7 +152,11 @@ def transfer_state(chk_in, mesh_new, cfg, chk_out, new_msh_basename, bed_sampler
             # quantised to the old cell size by DG0-to-DG0 point evaluation.
             # Outside the old mesh is water (positive distance); the forward's
             # extent anchor re-solves the eikonal problem from the transferred
-            # extent, as the calving project reinitialises after a remesh.
+            # extent, as the calving project reinitialises after a remesh. No
+            # run loads this field back yet: a calving forward rebuilds its
+            # level set from the transferred thickness and H_init, so carrying
+            # it here future-proofs the checkpoint contents rather than
+            # changing a result today.
             new[name] = cross_mesh_transfer(cg1_lift(f), mesh_new, "interpolate", default=1e6,
                                             element=f.function_space().ufl_element())
             continue

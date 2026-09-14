@@ -57,7 +57,7 @@ CORES = [
     (8, "ssp585 MRI-ESM2-0", "MRI-ESM2-0", "ssp585", 2015, 2300),
     (9, "CTRL2015 (CESM2-WACCM clim)", "CESM2-WACCM", None, 2015, 2300),
     (10, "CTRL2015 (MRI-ESM2-0 clim)", "MRI-ESM2-0", None, 2015, 2300),
-    (11, "OCX obs-constrained", None, None, 1990, 2025),
+    (11, "OCX obs-constrained", None, None, 1979, 2025),
 ]
 
 

@@ -10,7 +10,7 @@
 #   3,4   ssp370       both ESMs                          ->2100
 #   5,6   ssp126       both ESMs                          ->2300
 #   7,8   ssp585       both ESMs                          ->2300
-#   11    OCX          obs-constrained, cold start     1990-2025
+#   11    OCX          obs-constrained, cold start     1979-2025
 #
 # A core that branches from the historical is only launched once that ESM's
 # historical endpoint is on disk, complete and post-fix. A missing, short or
@@ -104,21 +104,25 @@ PROV_MTIME=""
 [ -e "$PROV_REF" ] && PROV_MTIME=$(stat -c %Y "$PROV_REF")
 ARCHIVE="$R/archive_stale_$TS"
 
-# core | label | driver | ESM | experiment-name stem | target year | kind
+# core | label | driver | ESM | experiment-name stem | target t_yr | kind
+#
+# The target is the model TIME a complete run ends at, compared against the
+# checkpoint's t_yr, so it is 1 January of the year after the last one the
+# core covers: a historical covering 1850-2014 finishes at 2015.
 # kind: hist = historical, branch = branches from the historical endpoint,
 #       cold = cold start with no restart support.
 CORE_SPEC=(
-  "1|hist_cesm|historical/cesm_waccm.py|CESM2-WACCM|hist_cesm2_waccm|2014|hist"
-  "2|hist_mri|historical/mri_esm2.py|MRI-ESM2-0|hist_mri_esm2_0|2014|hist"
-  "9|ctrl_cesm|control/run.py|CESM2-WACCM|ctrl2015_cesm2_waccm|2300|branch"
-  "10|ctrl_mri|control/run.py|MRI-ESM2-0|ctrl2015_mri_esm2_0|2300|branch"
-  "3|ssp370_cesm|projections/ssp370_cesm_waccm.py|CESM2-WACCM|ssp370_cesm2_waccm|2100|branch"
-  "4|ssp370_mri|projections/ssp370_mri_esm2.py|MRI-ESM2-0|ssp370_mri_esm2_0|2100|branch"
-  "5|ssp126_cesm|projections/ssp126_cesm_waccm.py|CESM2-WACCM|ssp126_cesm2_waccm|2300|branch"
-  "6|ssp126_mri|projections/ssp126_mri_esm2.py|MRI-ESM2-0|ssp126_mri_esm2_0|2300|branch"
-  "7|ssp585_cesm|projections/ssp585_cesm_waccm.py|CESM2-WACCM|ssp585_cesm2_waccm|2300|branch"
-  "8|ssp585_mri|projections/ssp585_mri_esm2.py|MRI-ESM2-0|ssp585_mri_esm2_0|2300|branch"
-  "11|ocx|projections/ocx.py|CESM2-WACCM|ocx|2025|cold"
+  "1|hist_cesm|historical/cesm_waccm.py|CESM2-WACCM|hist_cesm2_waccm|2015|hist"
+  "2|hist_mri|historical/mri_esm2.py|MRI-ESM2-0|hist_mri_esm2_0|2015|hist"
+  "9|ctrl_cesm|control/run.py|CESM2-WACCM|ctrl2015_cesm2_waccm|2301|branch"
+  "10|ctrl_mri|control/run.py|MRI-ESM2-0|ctrl2015_mri_esm2_0|2301|branch"
+  "3|ssp370_cesm|projections/ssp370_cesm_waccm.py|CESM2-WACCM|ssp370_cesm2_waccm|2101|branch"
+  "4|ssp370_mri|projections/ssp370_mri_esm2.py|MRI-ESM2-0|ssp370_mri_esm2_0|2101|branch"
+  "5|ssp126_cesm|projections/ssp126_cesm_waccm.py|CESM2-WACCM|ssp126_cesm2_waccm|2301|branch"
+  "6|ssp126_mri|projections/ssp126_mri_esm2.py|MRI-ESM2-0|ssp126_mri_esm2_0|2301|branch"
+  "7|ssp585_cesm|projections/ssp585_cesm_waccm.py|CESM2-WACCM|ssp585_cesm2_waccm|2301|branch"
+  "8|ssp585_mri|projections/ssp585_mri_esm2.py|MRI-ESM2-0|ssp585_mri_esm2_0|2301|branch"
+  "11|ocx|projections/ocx.py|CESM2-WACCM|ocx|2026|cold"
 )
 
 declare -A HIST_STEM=() HIST_TARGET=() HIST_STATUS=() HIST_WHY=() \

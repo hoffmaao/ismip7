@@ -14,7 +14,7 @@ REPO=$PWD
 which=${1:-BC}
 . antarctica/scripts/ismip7_names.sh
 FRICTION="${ISMIP7_FRICTION:-regularized_coulomb}"
-FTAG="$(ismip7_friction_tag "$FRICTION")"
+MESH_DIR="$REPO/antarctica/mesh"
 COMMON=(ISMIP7_LC=2000 ISMIP7_BUFFER_M=0 ISMIP7_DHDT_NET_SIGMA=10
         ISMIP7_LOG_VEL_WEIGHT=auto "ISMIP7_FRICTION=$FRICTION")
 if [[ "$which" == *C* ]]; then
@@ -22,12 +22,12 @@ if [[ "$which" == *C* ]]; then
     ISMIP7_LC_COARSE=5000 \
     "ISMIP7_MESH=$REPO/antarctica/mesh/antarctica_5000_2000_buffered0.msh" \
     ISMIP7_RASTER_SAMPLE=vertex \
-    "ISMIP7_MAP_OUT=$REPO/antarctica/mesh/inversion_icepack2_${FTAG}_logvelnet_2000_int5000.h5"
+    "ISMIP7_MAP_OUT=$MESH_DIR/$(ismip7_map_basename "$FRICTION" 2000_int5000)"
 fi
 if [[ "$which" == *B* ]]; then
   "$here/submit.sh" inversion --name inv2k_cellmean --mem 200G "${COMMON[@]}" \
     ISMIP7_LC_COARSE=20000 \
     "ISMIP7_MESH=$REPO/antarctica/mesh/antarctica_20000_2000_buffered0.msh" \
     ISMIP7_RASTER_SAMPLE=cell_mean \
-    "ISMIP7_MAP_OUT=$REPO/antarctica/mesh/inversion_icepack2_${FTAG}_logvelnet_2000_cellmean.h5"
+    "ISMIP7_MAP_OUT=$MESH_DIR/$(ismip7_map_basename "$FRICTION" 2000_cellmean)"
 fi

@@ -48,7 +48,7 @@ Two notes that cost time if missed:
 |---|---|---|:--:|:--:|:--:|:--:|
 | BedMachine Antarctica v4.1, MEaSUREs velocity v2 | 8 GB | `scripts/download_data.py` (NASA Earthdata login) | x | x | x | |
 | RACMO2.4p1 SMB climatology | 2 GB | same script | | x | | |
-| ISMIP7 observations MIPkit (Smith dH/dt) | 11 GB | `scripts/download_mirror.py --product ismip7-ais-observations` | for `ISMIP7_DHDT_WEIGHT` | | x (`--from-obs`) | |
+| ISMIP7 observations MIPkit (Smith dH/dt) | 9 GB | `scripts/download_mirror.py --product ismip7-ais-observations data/mipkit/`, which lands it at `ISMIP7/AIS/obs/mipkit/AntarcticaObsISMIP7-v1.2.nc` where the readers look (`ISMIP7_OBS_KIT` overrides the path) | for `ISMIP7_DHDT_WEIGHT` | | x (`--from-obs`) | |
 | ISMIP7 forcing, per ESM and scenario: SMB anomaly 7.5 GB + ocean `tf` 11 GB + `so` 6.9 GB (ssp585; historical 4.3 GB) | ~25 GB each | `scripts/download_mirror.py` | | x | | |
 | ISMIP7 fracture (collapse mask, lake properties, excess melt) | ~3 GB per scenario | same, `data/<ESM>/<scenario>/fracture/` | | only `ISMIP7_FRACTURE=mask` | | |
 | Ocean OI climatology (TF, so) and the IMBIE basin numbers | 3 GB | `scripts/download_forcing.py --ocean --calibration` (Globus) | | x | | |
@@ -64,9 +64,9 @@ data-freeze copy and needs no account, no Globus endpoint and no client.
 python antarctica/scripts/download_mirror.py \
     data/CESM2-WACCM/ssp585/SDBN1-8000m/acabf-anomaly/ \
     data/CESM2-WACCM/ssp585/ocean/tf/ data/CESM2-WACCM/ssp585/ocean/so/
-# the observations MIPkit, from the other product
+# the observations MIPkit, from the other product (about 9 GB)
 python antarctica/scripts/download_mirror.py \
-    --product ismip7-ais-observations data/
+    --product ismip7-ais-observations data/mipkit/
 # what a tree holds, and whether yours is current
 python antarctica/scripts/audit_forcing_versions.py --scenario ssp585
 ```

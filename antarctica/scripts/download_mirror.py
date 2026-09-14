@@ -10,11 +10,11 @@ HTTPS (anonymous, resumable), no AWS tooling needed.
 observations MIPkit lives in ``ismip7-ais-observations``.
 
 PREFIX is product-relative, e.g. ``data/CESM2-WACCM/ctrl/ocean/tf/`` or
-``data/OCX/ocean/main/``. Files land under ``--root`` with the mirror's
-layout minus the leading ``data/`` (so ``data/CESM2-WACCM/ctrl/...`` becomes
-``<root>/CESM2-WACCM/ctrl/...``), and versioned files are placed in a
-``<version>/`` directory the way the Globus tree and this repository's
-readers expect (the mirror itself keeps no version directories).
+``data/OCX/ocean/main/``. Files land under ``--root`` where this repository's
+readers look for them: the mirror's layout minus the leading ``data/``, under
+the product's own root (the observations product lives in ``obs/``), with
+versioned files placed in a ``<version>/`` directory the way the Globus tree
+expects. The mirror itself keeps no version directories.
 
 Partial files resume with a Range request; a file whose size matches the
 mirror is skipped. Every transfer is checked against the size the listing
@@ -38,6 +38,15 @@ DEFAULT_PRODUCT = "ismip7-ais-forcing"
 HEADERS = {"User-Agent": "curl/8"}
 VERSION = re.compile(r"[_-](v\d+(?:\.\d+)*)(?:_|\.nc$)")
 
+# Where a product's tree sits under --root. The forcing is the root itself;
+# the observations product is the obs/ subtree the readers search.
+DEST_ROOT = {"ismip7-ais-observations/": "obs"}
+
+# Destinations the Globus tree keeps flat, so no <version>/ directory is
+# inserted. obs_dhdt._obs_kit_path lists obs/mipkit non-recursively and picks
+# the newest MIPkit by the version in its filename.
+FLAT_DESTS = ("obs/mipkit",)
+
 
 def list_keys(prefix, endpoint, product):
     keys, token = [], None
@@ -59,13 +68,16 @@ def list_keys(prefix, endpoint, product):
         token = nxt.text
 
 
-def local_path(root, key):
+def local_path(root, key, dest_root=""):
     r"""``data/<esm>/<scenario>/<product>/<variable>/<file>`` ->
-    ``<root>/<esm>/<scenario>/<product>/<variable>/<version>/<file>``."""
+    ``<root>/<esm>/<scenario>/<product>/<variable>/<version>/<file>``, and for
+    the observations product ``data/mipkit/<file>`` -> ``<root>/obs/mipkit/<file>``."""
     rel = key[len("data/"):] if key.startswith("data/") else key
+    if dest_root:
+        rel = os.path.join(dest_root, rel)
     d, f = os.path.split(rel)
     m = VERSION.search(f)
-    if m and os.path.basename(d) != m.group(1):
+    if m and os.path.basename(d) != m.group(1) and d not in FLAT_DESTS:
         d = os.path.join(d, m.group(1))
     return os.path.join(root, d, f)
 
@@ -117,12 +129,13 @@ def main():
     a = ap.parse_args()
     product = a.product.strip("/") + "/"
     endpoint = MIRROR + product
+    dest_root = DEST_ROOT.get(product, "")
     todo = []
     for p in a.prefix:
         for key, size in list_keys(p, endpoint, product):
             if a.include and not re.search(a.include, key):
                 continue
-            todo.append((key, size, local_path(a.root, key)))
+            todo.append((key, size, local_path(a.root, key, dest_root)))
     total = sum(s for _, s, _ in todo)
     print(f"{len(todo)} files, {total / 1e9:.2f} GB  {product} -> {a.root}", flush=True)
     if a.dry_run:

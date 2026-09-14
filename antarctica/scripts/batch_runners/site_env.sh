@@ -55,7 +55,7 @@ _ISMIP7_SITE_FILE="$(ismip7_site_file)" || exit 2
 
 # The site file must supply these six. Everything else defaults below.
 ISMIP7_REQUIRED="ISMIP7_FIREDRAKE ISMIP7_PART_LONG ISMIP7_PART_SHORT ISMIP7_PART_DEBUG ISMIP7_REPO ISMIP7_WORK"
-# build_firedrake.sbatch creates the venv, so it runs where ISMIP7_FIREDRAKE
+# build_firedrake_rice.sbatch creates the venv, so it runs where ISMIP7_FIREDRAKE
 # has nothing to name yet. It asks for the rest.
 ISMIP7_REQUIRED_BUILD="ISMIP7_PART_LONG ISMIP7_PART_SHORT ISMIP7_PART_DEBUG ISMIP7_REPO ISMIP7_WORK"
 

@@ -26,7 +26,7 @@ for d in "$HOME" "${SCRATCH:-}" "${WORK:-}" "${PROJECT:-}" /projects /scratch /w
     [ -n "$d" ] && [ -d "$d" ] || continue
     find "$d" -maxdepth 5 -name activate -path '*firedrake*' 2>/dev/null | head -10
 done
-echo "(empty means Firedrake is not built here yet; see build_firedrake.sbatch)"
+echo "(empty means Firedrake is not built here yet; see build_firedrake_rice.sbatch)"
 
 echo; echo "===== 6. toolchain modules available (fills ISMIP7_MODULES) ====="
 module -t avail 2>&1 | grep -iE '^(gcc|gnu|foss|openmpi|mpich|intel|python|cmake|petsc|hdf5|firedrake)' | head -40

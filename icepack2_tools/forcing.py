@@ -1,6 +1,7 @@
 r"""ISMIP7 forcing data reader for Antarctic simulations."""
 
 import os
+import re
 import warnings
 import numpy as np
 
@@ -192,17 +193,18 @@ def load_mean_annual_surface_temperature(Q, var="tas", data_root=None,
 
 
 def _version_subdirs(parent_dir):
-    r"""(N, name) pairs for the v<N> subdirs of a directory, ascending."""
+    r"""``[(key, name)]`` of the ``v<N>`` and ``v<N>.<M>`` subdirectories of
+    ``parent_dir``, ascending. Dotted versions are real (the fracture forcing
+    went v2 -> v2.1 in September 2026), so the key is a tuple of integers,
+    not ``int(name[1:])``, which raised on them and hid the directory."""
     versions = []
-    if parent_dir is not None and os.path.isdir(parent_dir):
-        for name in os.listdir(parent_dir):
-            if name.startswith("v") and os.path.isdir(
-                    os.path.join(parent_dir, name)):
-                try:
-                    versions.append((int(name[1:]), name))
-                except ValueError:
-                    pass
-    return sorted(versions)
+    if not os.path.isdir(parent_dir):
+        return versions
+    for name in os.listdir(parent_dir):
+        if re.fullmatch(r"v\d+(\.\d+)*", name) and os.path.isdir(os.path.join(parent_dir, name)):
+            versions.append((tuple(int(x) for x in name[1:].split(".")), name))
+    versions.sort()
+    return versions
 
 
 def _resolve_version(parent_dir, pinned):
@@ -1096,4 +1098,9 @@ def make_forcing_callback(atm=None, ocean=None, fracture=None,
             floating = haf <= 0
             ctx["ocean_melt"].dat.data[:] = np.where(floating, melt, 0.0)
 
+        if fracture is not None and ctx.get("collapse") is not None:
+            # The year's ice-shelf collapse mask on the geometry cells; the
+            # transport removes the floating cells it flags
+            # (simulation.run_simulation, ISMIP7_FRACTURE=mask).
+            ctx["collapse"][:] = fracture.get_collapse_mask(t_yr, mesh_x, mesh_y) > 0.5
     return callback

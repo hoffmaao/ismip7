@@ -34,8 +34,8 @@ They carry an `_n3` filename tag so they coexist on disk with the n = 4 MAPs:
 - n = 4: `inversion_icepack2_budd<geom>_<lc>.h5` (flow exponent untagged, legacy)
 - n = 3: `inversion_icepack2_budd_n3<geom>_<lc>.h5`
 
-`<geom>` is the geometry-space tag that follows the n tag - `_dg0` under the
-`ISMIP7_GEOMETRY_SPACE` default, empty for `cg1` - so the n = 3 Budd MAP is
+`<geom>` is the geometry-space tag that follows the n tag (`_dg0` under the
+`ISMIP7_GEOMETRY_SPACE` default, empty for `cg1`), so the n = 3 Budd MAP is
 `inversion_icepack2_budd_n3_dg0_<lc>.h5` unless the geometry space is
 overridden; see `../GEOMETRY_DISCRETIZATION.md` for why a MAP is only valid for
 the geometry space it was inverted under. Both tags are produced by

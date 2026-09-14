@@ -1,16 +1,14 @@
 # AGENTS.md
 
-Working agreement for AI coding agents (Claude Code, Codex, Cursor, Copilot,
-and any others) contributing to this repository. Humans are welcome to read it
-too; it is deliberately written as the shared, portable context that is NOT
-carried in any one tool's private config.
+Working agreement for AI coding agents contributing to this repository, and
+the shared portable context that no tool's private config carries. Humans are
+welcome to read it.
 
-This is an ISMIP7 Antarctica submission built on icepack2 / Firedrake. It
-solves ice-sheet flow with the finite element method and runs multi-century
-projections. Mistakes here are expensive: a single core experiment is hours to
-days of compute, and a silent physics error can invalidate an entire campaign
-without failing a single test. Two such errors have already happened; both are
-described below, because knowing them is the fastest way to avoid the third.
+This is an ISMIP7 Antarctica submission on icepack2 and Firedrake, solving
+ice-sheet flow by finite elements over multi-century projections. Mistakes are
+expensive: one core experiment is hours to days of compute, and a silent
+physics error can invalidate a campaign without failing a test. Two such errors
+have happened, and both are described below.
 
 ## 1. Read before you write
 
@@ -33,29 +31,26 @@ set `OMP_NUM_THREADS=1`. Run in parallel with `mpiexec -n N python script.py`.
 Repo-local documents that are authoritative and worth reading before touching
 the relevant subsystem:
 
-- `GEOMETRY_DISCRETIZATION.md` - the geometry finite-element space, the calving
-  front, and why several odd-looking constructions are deliberate.
-- `COMPOSITE_RHEOLOGY.md` - the composite viscous formulation.
-- `UA_ADAPTIVE_MESH.md` - the Ua-style adaptive remeshing port: how the branch
-  is meant to be used, the DG0 transfer rules, and what is validated.
-- `antarctica/N3_FRAMEWORK.md` - the n=3 rheology line.
-- `antarctica/README.md` - drivers, env knobs, how to run a core experiment.
-- `antarctica/scripts/batch_runners/readme.md` - running on a cluster: the
-  Slurm runners, one site file per cluster, the Firedrake build recipe, and
-  the measured costs at Rice as the worked example.
-- `antarctica/reports/MATRIX_STATUS.md` - which results are currently valid.
+| document | covers |
+|---|---|
+| `GEOMETRY_DISCRETIZATION.md` | the geometry finite-element space, the calving front, and why several odd-looking constructions are deliberate |
+| `COMPOSITE_RHEOLOGY.md` | the composite viscous formulation |
+| `UA_ADAPTIVE_MESH.md` | the Úa-style adaptive remeshing port, the DG0 transfer rules, and what is validated |
+| `antarctica/N3_FRAMEWORK.md` | the n=3 rheology line |
+| `antarctica/README.md` | what to install and download, drivers, env knobs, how to run a core experiment |
+| `antarctica/scripts/batch_runners/readme.md` | running on a cluster: site files, the runners, the build recipe, measured costs |
+| `antarctica/FORWARD_RUN_READINESS.md` | the protocol sweep and what still blocks a submission |
+| `antarctica/reports/MATRIX_STATUS.md` | which results are currently valid |
 
 ## 2. What is in git, and what is not
 
 This trips up every new agent. Most of the scientifically important artifacts
 are NOT version controlled:
 
-- **Gitignored:** `antarctica/mesh/*` (meshes and all MAP/inversion `.h5`) -
-  except the tiny per-mesh `boundary_ids_antarctica_*.json` sidecars, which
-  are tracked because their names pin them to one exact mesh build (see
-  `antarctica/README.md` §3); `antarctica/results/` (timeseries CSVs,
-  checkpoints, logs), `ISMIP7/` and `antarctica/data/` (forcing and
-  observational data), all `*.h5`.
+- **Gitignored:** `antarctica/mesh/*` (meshes and all MAP `.h5`) apart from the
+  per-mesh `boundary_ids_antarctica_*.json` sidecars, which are tracked because
+  their names pin them to one exact mesh build; `antarctica/results/`;
+  `ISMIP7/` and `antarctica/data/`; all `*.h5`.
 - **Therefore:** `antarctica/reports/coreNN_*.md` is the ONLY committed record
   of a run. It carries the env knobs at their EFFECTIVE values (defaults
   resolved, not only what happened to be exported), the mass budget at marker
@@ -105,7 +100,7 @@ without reading the linked rationale and stating why.
   geometry space for this reason. Driving a DG0 forward with a CG1 MAP at
   32 km raises the initial misfit from 8.6e3 to 1.5e5.
 
-The inverse also holds - one line that looks fine and is always a bug:
+One line that looks fine and is always a bug:
 
 - **Any statistic taken from `.dat.data_ro` is RANK-LOCAL.** It covers only
   the dofs that rank owns. Reduce it (`icepack2_tools.mpi_stats`:
@@ -116,18 +111,17 @@ The inverse also holds - one line that looks fine and is always a bug:
   `u_c = Constant(u_speed.dat.data_ro.mean())` gave every rank a different
   friction coefficient for the same physical location, so the assembled
   residual and Jacobian disagreed across ranks and the result depended on the
-  partition. Six instances of this have been fixed on this line of work; the
-  reductions are collective, so call them on all ranks or not at all.
+  partition. Six instances have been fixed on this line of work. The reductions
+  are collective, so call them on all ranks or not at all.
 
 ## 4. How to tell whether a change is correct
 
-There is a unit suite at the repo root - `python -m pytest tests/ -q` from
-there, in the activated Firedrake environment (§1), serial and a few seconds -
-and it is the command the gate runs. It covers rules rather than results (the
-front bookkeeping the transport applies, the apparent-MB extent masking, the
+The unit suite at the repo root (`python -m pytest tests/ -q` in the activated
+Firedrake environment, serial, a few seconds) is what the gate runs. It covers
+rules rather than results: front bookkeeping, apparent-MB extent masking, the
 `fixed` law's t=0 anchor, the Budd shelf gate, adapted-mesh naming, and the two
-self-chaining Slurm runners driven under a shim); it cannot catch a physics
-regression. Use these instead, in order of cost:
+self-chaining Slurm runners under a shim. A physics regression needs these
+instead, in order of cost:
 
 1. **The mass budget audit.** Every timestep logs
    `SMB / melt / amb / outflux / calv / clamp / dM/dt / resid` in Gt/yr, and
@@ -147,22 +141,20 @@ regression. Use these instead, in order of cost:
    behaviour before committing to a production resolution. Prefer this over
    reasoning about the discretization in the abstract.
 
-When a change alters a discretization, probe the specific risks it introduces
-rather than only checking that it still runs. The DG0 change is the model:
-it plausibly removed an incidental noise filter and made the grounding line a
-staircase, so both were measured directly (grid-scale checkerboard amplitude
-and GL-band cell count, before and after) rather than assumed benign.
+When a change alters a discretization, probe the specific risks it introduces.
+The DG0 change is the model: it plausibly removed an incidental noise filter
+and made the grounding line a staircase, so both were measured directly
+(grid-scale checkerboard amplitude and GL-band cell count, before and after).
 
 ## 5. Debugging protocol
 
-Reproduce end to end before theorizing. The one time this project skipped
-that step, the diagnosis was wrong in a way that cost weeks: a forward
-blow-up was attributed to split-step coupling, and the real cause turned out
-to be a flux-divergence spike in the initial state at a single grounding-zone
-cell, compounded by a thickness roundtrip that smoothed `h` by up to ~1.4 km.
-Things that were falsified along the way, and should not be re-proposed
-without new evidence: smaller `dt` (it blows up faster), a larger
-grounding-line collar, and shelf drag alone.
+Reproduce end to end before theorizing. The one time this project skipped that
+step the diagnosis was wrong and cost weeks: a forward blow-up was attributed
+to split-step coupling, while the cause was a flux-divergence spike in the
+initial state at a single grounding-zone cell, compounded by a thickness
+roundtrip that smoothed `h` by up to 1.4 km. Falsified along the way, and not
+to be re-proposed without new evidence: smaller `dt` (it blows up faster), a
+larger grounding-line collar, and shelf drag alone.
 
 Useful habits specific to this codebase:
 
@@ -210,11 +202,10 @@ checkouts of the same clone. To keep handoffs clean:
 - **State what you verified and what you assumed.** Distinguish a number you
   measured this session from one you read in a document. If you did not run
   it, say so.
-- **Leave the reasoning, not just the change.** The topic docs in this repo
-  record why a formulation was chosen, including the alternatives that were
-  measured and rejected with their numbers. Match that standard: a future
-  agent's main failure mode is re-litigating a settled decision because the
-  rationale was never written down.
+- **Leave the reasoning with the change.** The topic docs record why a
+  formulation was chosen, including the alternatives measured and rejected with
+  their numbers. Match that standard. A future agent's main failure mode is
+  re-litigating a settled decision whose rationale was never written down.
 - **Prefer a tracked doc over a private note.** If a finding matters beyond
   the current session, it belongs in this file or a topic doc, not in a
   tool-specific memory that other platforms cannot see.
@@ -224,3 +215,18 @@ checkouts of the same clone. To keep handoffs clean:
   introduced by a previous fix in the same session.
 - **Do not add yourself as a commit co-author**, and do not manually edit
   auto-generated files.
+
+## 8. Writing
+
+The documentation in this repository is read by collaborators at three
+universities. Two rules, asked for directly by the author:
+
+- **No dash punctuation.** No em dashes, and no ` - ` or ` -- ` standing in for
+  one. Use a comma, a colon, a semicolon, or two sentences. Hyphenated
+  compounds and minus signs are fine.
+- **No contrastive negation.** Avoid "not X, but Y" and "it is not A, it is B".
+  State what is true.
+
+Beyond those: cut rather than soften, keep the measured numbers, and delete
+sentences that justify the prose itself. A table beats a paragraph whenever the
+content is a list of cases.

@@ -1,6 +1,6 @@
 r"""The self-chaining forward runner's verdict and resubmit decisions.
 
-``antarctica/scripts/batch_runners/nots_projection.sbatch`` is the only thing
+``antarctica/scripts/batch_runners/projection.sbatch`` is the only thing
 standing between a five-day projection and a chain that either loops forever
 or reports a stall as a success. Its logic cannot be exercised on NOTS without
 burning a queue slot, so it runs here against a Slurm shim: stub ``srun``,
@@ -22,7 +22,7 @@ from pathlib import Path
 import pytest
 
 REPO = Path(__file__).resolve().parent.parent
-SBATCH = REPO / "antarctica" / "scripts" / "batch_runners" / "nots_projection.sbatch"
+SBATCH = REPO / "antarctica" / "scripts" / "batch_runners" / "projection.sbatch"
 JOB_ID = "424242"
 
 # The stub driver: a real driver's externally visible behaviour, and nothing
@@ -106,7 +106,7 @@ def sandbox(tmp_path):
     (bin_dir / "python").write_text(f'#!/bin/bash\nexec "{sys.executable}" "$@"\n')
     (bin_dir / "python").chmod(0o755)
     (tmp_path / "driver.py").write_text(DRIVER)
-    # nots_activate sources this and refuses to run if it is unreadable.
+    # ismip7_activate sources this and refuses to run if it is unreadable.
     (tmp_path / "activate").write_text("# stub venv\n")
     return tmp_path
 
@@ -123,7 +123,10 @@ def run_job(sandbox, **env):
         "SLURM_JOB_ID": JOB_ID,
         "SLURM_NTASKS": "12",
         "SLURM_SUBMIT_DIR": str(sandbox),
-        "NOTS_FIREDRAKE": str(sandbox / "activate"),
+        # sites/local.sh takes every setting from this environment, so the
+        # runner logic is exercised without a scheduler or a site file.
+        "ISMIP7_SITE": "local",
+        "ISMIP7_FIREDRAKE": str(sandbox / "activate"),
         "ISMIP7_REPO": str(sandbox),
         "FAKE_PYTHON": sys.executable,
         "FAKE_DRIVER": str(sandbox / "driver.py"),

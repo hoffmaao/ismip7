@@ -1,8 +1,8 @@
 #!/bin/bash
-# Partition-quality probe on Rice NOTS deepsC (Cascade Lake). RUN THIS FIRST,
+# Partition-quality probe on any cluster deepsC (Cascade Lake). RUN THIS FIRST,
 # before spending queue time on a timing or production job.
 #
-#   sbatch --export=ALL antarctica/scripts/batch_runners/nots_partition_probe.sbatch
+#   sbatch --export=ALL antarctica/scripts/batch_runners/partition_probe.sbatch
 #
 # Runs on `scavenge`: 1-hour limit, 154 nodes, preemptible. The probe is short
 # and idempotent, so preemption costs nothing and the queue there is far
@@ -29,26 +29,21 @@
 # partitioner rather than the model. Rebuild PETSc with --download-parmetis
 # --download-ptscotch before going further.
 
-#SBATCH -J ismip7_part
-#SBATCH -p scavenge
-#SBATCH -C cascadelake
+# Resources (partition, tasks, memory, wall time, account, constraint) come
+# from submit.sh and this cluster's sites/<name>.sh, never from directives
+# here: a directive cannot read a site file, and a header that disagrees
+# with the command line is rejected outright by Slurm.
 #SBATCH -o logs/ismip7_part_%j.out
 #SBATCH -e logs/ismip7_part_%j.err
-#SBATCH --nodes=1
-#SBATCH --ntasks-per-node=32
 # 40 physical cores per node (2x20, hyperthreaded to 80). 32 ranks stays on
 # physical cores with room for the mesh reader.
-#SBATCH --cpus-per-task=1
-#SBATCH --hint=nomultithread
-#SBATCH --mem=64G
-#SBATCH --time=01:00:00
 
 set -uo pipefail
 cd "${SLURM_SUBMIT_DIR:-.}"
 mkdir -p logs
-. antarctica/scripts/batch_runners/nots_env.sh
-nots_activate
-nots_banner
+. antarctica/scripts/batch_runners/site_env.sh
+ismip7_activate
+ismip7_banner
 
 MESH="${ISMIP7_MESH}"
 echo "    probing $MESH"

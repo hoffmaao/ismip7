@@ -1,7 +1,7 @@
 r"""What the forward records every year: the annual series survives a chained
 resume, and ``limnsw`` is the mass above flotation.
 
-``nots_projection.sbatch`` self-chains, so ``run_simulation`` is entered once
+``projection.sbatch`` self-chains, so ``run_simulation`` is entered once
 per Slurm link and rebuilds :class:`AnnualOutput` against the years the
 previous link left on disk. Those per-year files are what the writer turns
 into the submitted time axis, so a link that truncated or renamed them would

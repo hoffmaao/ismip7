@@ -11,34 +11,104 @@ David Lilien's Greenland repo (https://github.com/dlilien/ISMIP7_Greenland_Icepa
 
 ---
 
-## 0. Prerequisites
+## 0. What you need, by what you want to run
 
-### Software
+Nothing here needs all of it. The four columns below are the four things people
+actually do with this repository; install and download the rows your column
+ticks. Sizes are measured, not estimated.
 
-- **Firedrake** with **icepack2** (the mixed/3-field formulation) and
-  `tlm_adjoint` for the inversions. Firedrake brings its own PETSc/petsc4py/MPI.
-  Activate that environment before anything else, e.g.:
-  ```bash
-  source ~/venv-firedrake/bin/activate
-  ```
-- Python packages used by the scripts (install into the Firedrake venv):
-  ```bash
-  pip install globus-sdk earthaccess xarray netCDF4 scipy shapely gmsh
-  ```
-- **gmsh** (the `gmsh` Python module above is sufficient for meshing).
+### 0.1 Software
 
-### Accounts / credentials
+| | Where from | Invert | Forward run | Adapt the mesh | Submit to ISMIP7 |
+|---|---|:--:|:--:|:--:|:--:|
+| **Firedrake 2026.4** (brings PETSc, MUMPS, mpi4py) | firedrakeproject.org | x | x | x | x |
+| **icepack2** | github.com/icepack/icepack2 | x | x | x | x |
+| **icepack** (raster interpolation onto meshes) | github.com/icepack/icepack | x | x | x | x |
+| **icepack_tools** (shared building blocks: `adapt_mesh`, `levelset`, `friction`, `grounding`) | github.com/hoffmaao/icepack_tools, private: ask for access | | for a level-set front | x | |
+| **tlm_adjoint** | github.com/jrmaddison/tlm_adjoint | x | | | |
+| `xarray netCDF4 scipy rasterio shapely gmsh matplotlib` | pip, into the Firedrake venv | x | x | x | x |
+| `earthaccess` (NSIDC downloads), `globus-sdk` (only if you use Globus rather than the mirror) | pip | x | x | x | |
+| **isschecker** (`ismip7-compliance-checker`) | github.com/ismip/ISM_SimulationChecker | | | | x |
+
+Two notes that cost time if missed:
+
+- **`icepack_tools` is a separate repository**, not part of this one, and it is
+  the only dependency that is private. Install it editable into the same venv:
+  `pip install -e /path/to/icepack_tools`. `icepack2_tools/adapt_mesh.py` and
+  `icepack2_tools/levelset.py` are thin Antarctic wrappers around it; without it
+  they will not import, and everything else in the repository still works.
+- **The compliance checker needs Python >= 3.11**, which the Firedrake 2026.4
+  venv (3.10) is not. Give it its own venv and call it by absolute path; only
+  the submission step needs it.
+
+### 0.2 Data
+
+| | Size | How | Invert | Forward run | Adapt the mesh | Submit |
+|---|---|---|:--:|:--:|:--:|:--:|
+| BedMachine Antarctica v4.1, MEaSUREs velocity v2 | 8 GB | `scripts/download_data.py` (NASA Earthdata login) | x | x | x | |
+| RACMO2.4p1 SMB climatology | 2 GB | same script | | x | | |
+| ISMIP7 observations MIPkit (Smith dH/dt) | 11 GB | mirror, `ismip7-ais-observations` | for `ISMIP7_DHDT_WEIGHT` | | x (`--from-obs`) | |
+| ISMIP7 forcing, per ESM and scenario: SMB anomaly 7.5 GB + ocean `tf` 11 GB + `so` 6.9 GB (ssp585; historical 4.3 GB) | ~25 GB each | `scripts/download_mirror.py` | | x | | |
+| ISMIP7 fracture (collapse mask, lake properties, excess melt) | ~3 GB per scenario | same, `data/<ESM>/<scenario>/fracture/` | | only `ISMIP7_FRACTURE=mask` | | |
+| The whole AIS tree (all ESMs, all scenarios, `ctrl`, OCX, calibration) | 313 GB | same | | | | |
+| Meshes and MAP checkpoints | 15 MB, 80 MB | built here (sections 3 and 4), or copied from a colleague | | x | x | |
+
+The forcing is a **mirror-first** download now: Source Cooperative carries the
+data-freeze copy and needs no account, no Globus endpoint and no client.
+
+```bash
+# one scenario for one ESM, the usual case (about 25 GB)
+python antarctica/scripts/download_mirror.py \
+    data/CESM2-WACCM/ssp585/SDBN1-8000m/acabf-anomaly/ \
+    data/CESM2-WACCM/ssp585/ocean/tf/ data/CESM2-WACCM/ssp585/ocean/so/
+# what a tree holds, and whether yours is current
+python antarctica/scripts/audit_forcing_versions.py --scenario ssp585
+```
+
+Globus still works and `download_forcing.py` still drives it (section 2a); it is
+the archive of record. Use it when you need something the mirror has not synced.
+
+### 0.3 The short paths
+
+- **Just run a forward from someone else's MAP:** Firedrake + icepack2 + icepack,
+  BedMachine and MEaSUReS, one scenario of forcing, their `.msh` and
+  `inversion_*.h5`. No `icepack_tools`, no `tlm_adjoint`, no checker.
+- **Reproduce an inversion:** add `tlm_adjoint` and (for the dH/dt term) the
+  observations MIPkit.
+- **Work on mesh adaptation:** add `icepack_tools`; the observation-driven size
+  field (`adapt_mesh.py --from-obs`) needs the MIPkit and MEaSUReS.
+- **Prepare a submission:** add the checker in its own Python 3.11+ venv;
+  `ISMIP7_OUTPUT=1` on the run and `scripts/write_ismip7_output.py` afterwards.
+
+### 0.4 Accounts
 
 | For | Account | Where |
 |-----|---------|-------|
 | BedMachine, MEaSUREs velocity (NSIDC) | NASA Earthdata (free) | https://urs.earthdata.nasa.gov/users/new |
-| ISMIP7 ocean/atmosphere forcing | Globus + access to the ISMIP6/7 collection | https://app.globus.org |
+| ISMIP7 forcing over Globus (optional; the mirror needs none) | Globus + the ISMIP7 collection | https://app.globus.org |
+| `icepack_tools` | GitHub access to the private repository | ask Andrew |
+| Submitting results | an upload folder from the ISMIP7 team | email ismip6 at gmail.com with your Globus id, `AIS`, group name and `ism_id` |
 
-To pull data **to this machine** over Globus you also need **Globus Connect
-Personal** running locally and its endpoint UUID
-(https://www.globus.org/globus-connect-personal).
+Pulling Globus data **to this machine** also needs Globus Connect Personal
+running locally and its endpoint UUID.
 
-### Repo layout (what lives where)
+### 0.5 Running on a cluster
+
+`antarctica/scripts/batch_runners/` is site-neutral: one file per cluster in
+`sites/` holds the venv path, module loads, partitions, account and paths, and
+`submit.sh` composes the scheduler command from it. Rice NOTS and IU Quartz
+ship filled in; UChicago Midway is a stub to complete; `sites/template.sh` is
+the blank for anywhere else.
+
+```bash
+antarctica/scripts/batch_runners/submit.sh inversion ISMIP7_LC=2000
+ISMIP7_SITE=iu_quartz antarctica/scripts/batch_runners/submit.sh projection \
+    ISMIP7_EXPERIMENT=ssp585_cesm_waccm ISMIP7_OUTPUT=1 --dry-run
+```
+
+See `antarctica/scripts/batch_runners/readme.md`.
+
+### 0.6 Repo layout (what lives where)
 
 ```
 antarctica/
@@ -46,14 +116,15 @@ antarctica/
   mesh/            # *.msh + boundary_ids_antarctica_*.json + inversion_*.h5  [gitignored except boundary_ids*.json]
   results/         # checkpoints (*.h5), timeseries (*.csv), logs        [gitignored]
   reports/         # tracked per-core run records + MATRIX_STATUS.md
-  scripts/         # all entry points (see §3–§6)
+  scripts/         # all entry points (see sections 3 to 6)
+    batch_runners/ # scheduler job scripts + sites/<cluster>.sh
 ISMIP7/AIS/        # ISMIP7 forcing tree the *runtime* reads             [gitignored]
-icepack2_tools/    # reusable library (mesh, forcing, eikonal, grounding, regrid)
+icepack2_tools/    # this repository's library (mesh, forcing, eikonal, grounding, regrid, ismip7_output)
 ```
 
 Everything large is gitignored. The only tracked files under `antarctica/mesh/`
-are the tiny per-mesh `boundary_ids_antarctica_*.json` (the gmsh physical-line →
-calving/other map; see §3). The legacy sidecars that carry no mesh stem
+are the tiny per-mesh `boundary_ids_antarctica_*.json` (the gmsh physical-line to
+calving/other map; see section 3). The legacy sidecars that carry no mesh stem
 (`boundary_ids.json`, `_2500`, `_aniso`, `_buffered`) are deliberately **not**
 tracked: they predate the per-mesh convention, and `boundary_ids.json` is the
 shared fallback that every mesh build overwrites - committing it would put one
@@ -666,15 +737,15 @@ how it reaches the core report.
 | `ISMIP7_BNDIDS` | override boundary-id JSON | `mesh/boundary_ids_antarctica_<COARSE>_<LC>_buffered<BUFFER_M>.json` if present, else `mesh/boundary_ids.json` |
 | `ISMIP7_GEOMETRY_SPACE` | space for `h`/`s`/`b` (`dg0`: one thickness for the terminus force and the mass flux; `cg1`: legacy, for A/B only) - also selects the MAP h5 (see `../GEOMETRY_DISCRETIZATION.md`) | `dg0` |
 | `ISMIP7_DATA_ROOT` | ISMIP7 forcing tree root | `<repo>/ISMIP7/AIS` |
-| `ISMIP7_T_END` / `ISMIP7_DT` | end time / timestep (yr). The end time is 1 January of the year AFTER the last year to simulate, because `t=Y.0` is 1 January of year Y: a projection covering 2015-2300 runs to `2301`, and a historical covering 1850-2014 runs to `2015`. That is also what makes the handoff checkpoint land at 2015.0, so the projection's first forcing year is 2015. Each driver owns its own end (historical `2015`, ssp370 `2101`, the other projections and the control `2301`, OCX `2026`); setting this overrides all of them, so `nots_projection.sbatch` does not default it | _(driver's own)_ / `1.0` |
+| `ISMIP7_T_END` / `ISMIP7_DT` | end time / timestep (yr). The end time is 1 January of the year AFTER the last year to simulate, because `t=Y.0` is 1 January of year Y: a projection covering 2015-2300 runs to `2301`, and a historical covering 1850-2014 runs to `2015`. That is also what makes the handoff checkpoint land at 2015.0, so the projection's first forcing year is 2015. Each driver owns its own end (historical `2015`, ssp370 `2101`, the other projections and the control `2301`, OCX `2026`); setting this overrides all of them, so `projection.sbatch` does not default it | _(driver's own)_ / `1.0` |
 | `ISMIP7_FRICTION` | friction law (`budd`, `regularized_coulomb`) - selects the MAP h5 | `budd` |
 | `ISMIP7_OUTPUT_INTERVAL` | write a timeseries/log row every N steps | `10` |
 | `ISMIP7_CHECKPOINT_EVERY_YR` | checkpoint cadence in model years (`0` = use step count) | `5` |
 | `ISMIP7_KEEP_CHECKPOINTS` | periodic checkpoints kept on disk (plus `_final.h5`) | `3` |
 | `ISMIP7_RESTART` | restart checkpoint | `hist_<esm>[_<tag>]_<lc>_final.h5` if present |
-| `ISMIP7_AUTO_RESUME` | resume from this experiment's own newest checkpoint unattended, when no explicit `ISMIP7_RESTART` is given. An integer flag: `=0` disables it (it used to count as set), because the batch runners export it unconditionally and `sbatch --export=ALL` cannot unset a variable. A non-integer value is rejected at startup. `nots_projection.sbatch` also refuses to chain when it is off, since a successor would cold-start and repeat the same years | _(unset, off)_ |
+| `ISMIP7_AUTO_RESUME` | resume from this experiment's own newest checkpoint unattended, when no explicit `ISMIP7_RESTART` is given. An integer flag: `=0` disables it (it used to count as set), because the batch runners export it unconditionally and `sbatch --export=ALL` cannot unset a variable. A non-integer value is rejected at startup. `projection.sbatch` also refuses to chain when it is off, since a successor would cold-start and repeat the same years | _(unset, off)_ |
 | `ISMIP7_RUN_TAG` | experiment-name suffix for a parallel method line (see run-management flags above) | _(unset)_ |
-| `ISMIP7_WALL_STOP_MIN` | wall-clock budget in minutes, counted from process start. Checked before each step against the longest step seen so far, so a run stops with the budget intact rather than overshooting by one hard step: it writes its final checkpoint and exits cleanly with `t_yr` short of `t_end`, which is what a chained batch job resumes from. Without it a job that hits its scheduler limit is killed mid-step and loses everything since the last periodic checkpoint. `nots_projection.sbatch` derives it from the job's own `TimeLimit`, holding back 25 minutes, and passes it to that run only, so each link in a chain derives its own. `0` disables the budget | `0` |
+| `ISMIP7_WALL_STOP_MIN` | wall-clock budget in minutes, counted from process start. Checked before each step against the longest step seen so far, so a run stops with the budget intact rather than overshooting by one hard step: it writes its final checkpoint and exits cleanly with `t_yr` short of `t_end`, which is what a chained batch job resumes from. Without it a job that hits its scheduler limit is killed mid-step and loses everything since the last periodic checkpoint. `projection.sbatch` derives it from the job's own `TimeLimit`, holding back 25 minutes, and passes it to that run only, so each link in a chain derives its own. `0` disables the budget | `0` |
 | `ISMIP7_EXPERIMENT_NAME` | the run's identity, used by `adapt_mesh.py` to name the adapted meshes and sidecars it writes into the shared `mesh/` directory so parallel experiments cannot overwrite each other's. `run_adaptive.py` sets it from `--experiment-name`; the run tag is not a substitute, being a method-line suffix that parallel experiments share. The adaptive workflow itself, and what of it is validated, is `../UA_ADAPTIVE_MESH.md` | _(unset: adapted meshes are named from the reference mesh alone)_ |
 | `ISMIP7_APPARENT_MB` | apparent-mass-balance init: `1`/`balance` zeroes the t=0 thickness tendency (ISMIP6 ctrl_proj-style), `div` cancels only the flux divergence. `0`, `off`, `none` and the empty string disable it (`0` used to count as set), because the batch runners export it unconditionally and `sbatch --export=ALL` cannot unset a variable. Resolved in one place, `runconfig.apparent_mb_mode` | _(unset, off)_ |
 | `ISMIP7_FIXED_FRONT` | set to hold the calving front at the t=0 extent (inflow beyond it tallied as calving). `=0` now disables it (it used to count as set), because `run_core_matrix.sh` exports it unconditionally. The legacy form of `ISMIP7_CALVING=fixed`, and it removes nothing whenever any `ISMIP7_CALVING` law is configured - that law owns the front | _(unset, off)_ |
@@ -746,7 +817,7 @@ VAF is reported in mm of sea-level equivalent; mass in Gt.
   this automatically, relaunching from the newest checkpoint at or before the
   timeseries' last year while each attempt keeps advancing, and giving up on a
   stall. The NOTS chain never retries a stalled run: a checkpoint written with
-  `stalled=1` makes `nots_projection.sbatch` report the stall and exit 1
+  `stalled=1` makes `projection.sbatch` report the stall and exit 1
   without submitting a successor, so an unattended chain cannot spend days
   re-attempting the same years. That relaunch is yours to make there: resubmit
   the same sbatch, and `ISMIP7_AUTO_RESUME` picks the run up from its saved

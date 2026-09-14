@@ -1,6 +1,6 @@
 r"""The self-chaining inversion runner's done-marker and warm-start decisions.
 
-``antarctica/scripts/batch_runners/nots_inversion.sbatch`` decides, after every
+``antarctica/scripts/batch_runners/inversion.sbatch`` decides, after every
 link of a multi-day chain, whether the MAP on disk is finished or whether the
 successor should warm-start and spend another budget on it. Getting that wrong
 costs a queue slot either way: job 1339342 re-inverted the MAP job 1339328 had
@@ -23,7 +23,7 @@ from pathlib import Path
 import pytest
 
 REPO = Path(__file__).resolve().parent.parent
-SBATCH = REPO / "antarctica" / "scripts" / "batch_runners" / "nots_inversion.sbatch"
+SBATCH = REPO / "antarctica" / "scripts" / "batch_runners" / "inversion.sbatch"
 JOB_ID = "424243"
 
 # The stub driver, in the real driver's order: the checkpoint write first, then
@@ -110,7 +110,10 @@ def run_job(sandbox, job_id=JOB_ID, **env):
         "SLURM_JOB_NUM_NODES": "1",
         "SLURM_JOB_PARTITION": "long",
         "SLURM_SUBMIT_DIR": str(sandbox),
-        "NOTS_FIREDRAKE": str(sandbox / "activate"),
+        # sites/local.sh takes every setting from this environment, so the
+        # runner logic is exercised without a scheduler or a site file.
+        "ISMIP7_SITE": "local",
+        "ISMIP7_FIREDRAKE": str(sandbox / "activate"),
         "ISMIP7_REPO": str(sandbox),
         "ISMIP7_MAP_OUT": str(map_out(sandbox)),
         "FAKE_PYTHON": sys.executable,

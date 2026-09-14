@@ -149,9 +149,9 @@ What a submission needs (#5, #16, #17, #18, #19, #20, #22, #23):
 older than 13 September carries the shelf-friction defect and is unusable.
 
 **Forward.** The RC control on the Úa mesh runs and holds (1 yr, resid 0). A
-10-year ssp585 on that mesh took 10.5 minutes on 32 Sapphire Rapids ranks, 6 s
-per 0.1-year step, so a 2015-2300 projection is about 5 node-hours and eleven
-cores about 2.5 node-days.
+10-year CESM2-WACCM ssp585 on that mesh (NOTS job 1368723) took 10.5 minutes on
+32 Sapphire Rapids ranks, 6 s per 0.1-year step, so a 2015-2300 projection is
+about 5 node-hours and eleven cores about 2.5 node-days.
 
 **Still open:** the ctrlclim scenario default and the melt calibration rerun.
 Delivered here: the collapse mask in the thickness update, the 2300 forcing
@@ -166,8 +166,9 @@ year, the `GEMB-SDBN1` path, the forcing-version audit, and the output writer.
    README.
 3. Set `ISMIP7_CLIM_SCENARIO=ssp126`, or read the provided `ctrl` trees.
 4. Rerun the melt calibration notebook with the July toolbox. The Úa-mesh
-   ssp585 hit `libmassbffl` of -0.0117 kg m-2 s-1 on small grounding-zone
-   cells, past the request's -0.008 bound, which makes this concrete.
+   ssp585 of job 1368723 hit `libmassbffl` of -0.0117 kg m-2 s-1 on small
+   grounding-zone cells, past the request's -0.008 bound, which makes this
+   concrete.
 5. Optional: the stress criterion (Lai et al. 2020) alongside the collapse
    mask.
 6. One forced projection end to end through the writer and the checker, then

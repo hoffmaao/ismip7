@@ -185,8 +185,7 @@ def raster_cell_mean(dataset, Q_dg, floor=None, nmax=64, chunk=2048):
 def sample_to_geometry(raster, Q_g, Q_cg, floor=None, method="vertex"):
     r"""Sample a raster onto the geometry space ``Q_g`` as a cell average.
 
-    ``raster`` is either a rasterio dataset, or (legacy) a closure
-    ``raster_fn(space)`` returning the raster interpolated onto ``space``.
+    ``raster`` is a rasterio dataset (a ``netcdf:file:variable`` handle).
 
     ``method`` selects the DG0 cell value (``runconfig.RASTER_SAMPLES``):
     ``"vertex"`` projects the CG1 vertex interpolant (three pixels per cell);
@@ -234,18 +233,12 @@ def sample_to_geometry(raster, Q_g, Q_cg, floor=None, method="vertex"):
     non-negative); the gap is reachable from the budd_legacy cold start, whose
     ``h_clamp_init`` is 10 m.
     """
-    if callable(raster):
-        raster_fn, dataset = raster, None
-    else:
-        import icepack
-        dataset = raster
-        raster_fn = lambda sp: icepack.interpolate(dataset, sp)  # noqa: E731
+    import icepack
+    dataset = raster
+    raster_fn = lambda sp: icepack.interpolate(dataset, sp)  # noqa: E731
 
     is_dg0 = Q_g.ufl_element() != Q_cg.ufl_element()
     if is_dg0 and method == "cell_mean":
-        if dataset is None:
-            raise TypeError("method='cell_mean' needs a rasterio dataset, "
-                            "not a closure")
         out = raster_cell_mean(dataset, Q_g, floor=floor)
         bad = np.isnan(out.dat.data_ro)
         # The fill is a collective L2 projection, so the branch must be taken

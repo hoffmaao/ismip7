@@ -25,6 +25,8 @@ from firedrake import Constant, Function, FunctionSpace, assemble, conditional, 
 from firedrake.petsc import PETSc
 from mpi4py import MPI
 
+from icepack_tools.geometry import cg1_lift
+
 from icepack_tools.adapt_mesh import (  # noqa: F401  (re-exported for the scripts)
     CRITERIA,
     AdaptMeshConfig,
@@ -142,6 +144,17 @@ def transfer_state(chk_in, mesh_new, cfg, chk_out, new_msh_basename, bed_sampler
             continue
         if name == "H_init" and rebuild_aref:
             new[name] = Function(Q_g).assign(H)                # the t=0 extent anchor IS the initial thickness
+            continue
+        if name == "levelset":
+            # The shared contract (icepack_tools.adapt_mesh.cross_mesh_transfer):
+            # a level set is carried as its P1 lift and lands back in DG0, so
+            # the front position keeps its sub-cell accuracy instead of being
+            # quantised to the old cell size by DG0-to-DG0 point evaluation.
+            # Outside the old mesh is water (positive distance); the forward's
+            # extent anchor re-solves the eikonal problem from the transferred
+            # extent, as the calving project reinitialises after a remesh.
+            new[name] = cross_mesh_transfer(cg1_lift(f), mesh_new, "interpolate", default=1e6,
+                                            element=f.function_space().ufl_element())
             continue
         how = cfg.transfer if (name in ("a_ref_mb", "thickness_dg", "H_init") and geom == "dg0") else "interpolate"
         new[name] = cross_mesh_transfer(f, mesh_new, how, default=cfg.thick_min if name in ("H_init", "thickness_dg") else 0.0)

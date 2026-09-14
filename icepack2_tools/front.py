@@ -6,7 +6,41 @@ front has moved. They live here, as pure functions over the cell arrays, so
 they can be exercised without standing up a whole run.
 """
 
-__all__ = ["retreat_slivers", "clear_reference_where_ice_free"]
+import numpy as np
+
+__all__ = ["retreat_slivers", "clear_reference_where_ice_free", "clamp_thickness"]
+
+
+def clamp_thickness(h, h_clamp, *ice_free):
+    r"""Floor the cell thicknesses to ``h_clamp``, except where there is no ice.
+
+    ``h`` is the per-cell thickness array, mutated in place and returned; each
+    ``ice_free`` argument is a boolean mask (or ``None``) naming cells that
+    hold no ice. The caller measures the mass the floor added by integrating
+    before and after.
+
+    The exemption is the whole point. A cell outside the ice domain floored to
+    ``h_clamp`` is handed that much fresh ice out of nothing, and whatever rule
+    empties it takes it away again on the very next advance, so the run
+    fabricates a steady ``h_clamp / dt`` of both clamp mass and calving flux
+    there forever. Every rule that empties a cell therefore has to name it
+    here:
+
+    * the level set's ice-free extent, not only the cells calved this step:
+      under a free law the cells the front just passed are a handful, so
+      flooring the rest of the buffer would fabricate ice across every
+      never-glaciated cell;
+    * the cells beyond a pinned or fixed front;
+    * the FLOATING cells the ISMIP7 collapse mask empties, which is the same
+      case: the shelf is gone there, and a floored cell would be re-calved
+      into ``licalvf`` on every advance for the rest of the run.
+    """
+    floor = np.full_like(h, h_clamp)
+    for mask in ice_free:
+        if mask is not None:
+            floor[mask] = 0.0
+    np.maximum(h, floor, out=h)
+    return h
 
 
 def clear_reference_where_ice_free(a_ref, ice_free):

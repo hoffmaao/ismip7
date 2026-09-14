@@ -12,15 +12,19 @@ so projection minus control is a clean forced signal:
               mixed-slope, calibrated per-basin K)
 
 The aSMB re-reference pool is historical + ISMIP7_CLIM_SCENARIO (default
-ssp126, per protocol) over ISMIP7_CLIM_START..END (default 2000-2029) — the SAME pool
-for every experiment, so all cores share one baseline and the historical
--> projection handoff at 2014/2015 is seamless. Without RACMO the run
+ssp126, per protocol) over ISMIP7_CLIM_START..END (default 2000-2029), the
+SAME pool for every experiment, so all cores share one baseline and the
+historical -> projection handoff at 2014/2015 is seamless. Without RACMO the run
 falls back to the full acabf(t) field; with no acabf data at all it
 refuses to run (ISMIP7_ALLOW_ZERO_SMB=1 to override).
 
-Fracture / shelf-collapse masks are loaded when present but NOT yet
-applied by make_forcing_callback — wiring the collapse mask into the
-thickness update is an open protocol item.
+Fracture / shelf-collapse masks are loaded when present, and
+make_forcing_callback publishes the year's mask as ctx["collapse"].
+Whether the run acts on it is ISMIP7_FRACTURE: under `mask` the transport
+empties every FLOATING cell the mask flags and books it as calving
+(protocol path C); grounded ice is never touched, and under the default
+`none` the mask is loaded but unused. No mask exists for historical or OCX.
+The stress-gated variant (Lai et al. 2020) is not implemented.
 """
 
 import os, sys
@@ -40,6 +44,7 @@ from icepack2_tools.forcing import (
 from icepack2_tools.climatology import (
     clim_start, clim_end, clim_scenario, clim_pool_missing, describe_clim_pool,
 )
+from icepack2_tools.runconfig import fracture as fracture_mode
 
 # Owned by icepack2_tools.climatology: this pool must match the CONTROL's
 # climatology, or the projections are re-referenced against a different
@@ -51,7 +56,7 @@ CLIM_SCENARIO = clim_scenario()
 
 def find_k_npz():
     r"""Calibrated per-basin K npz: this mesh's calibration, else the 2500 m
-    one (16 basin scalars remapped through the IMBIE2 8 km grid —
+    one (16 basin scalars remapped through the IMBIE2 8 km grid,
     mesh-independent), else None (scalar ISMIP7_K_MELT)."""
     override = os.environ.get("ISMIP7_K_PER_BASIN_NPZ")
     candidates = [override] if override else [
@@ -108,7 +113,7 @@ def smb_scheme(ctx, esm):
             f"{years[0]}-{years[-1]} ({len(pool)} yr pooled)"
         )
     except FileNotFoundError as e:
-        return False, None, f"full acabf(t) — no RACMO baseline ({e})"
+        return False, None, f"full acabf(t), no RACMO baseline ({e})"
 
 
 def run_core_experiment(*, core, title, name, esm, scenario,
@@ -187,8 +192,21 @@ def run_core_experiment(*, core, title, name, esm, scenario,
     fracture = ISMIP7Fracture(esm=esm, scenario=scenario)
     try:
         fracture.load()
-    except Exception:
-        fracture = None
+    except Exception as e:
+        # Under the default `none` the mask is never read, so an unreadable
+        # fracture tree must not abort a run that does not want it; under
+        # `mask` the run asked for exactly this file, so it sees the failure.
+        if fracture_mode() == "mask":
+            raise
+        PETSc.Sys.Print(f"  Fracture tree not readable, ignored: {e}")
+    if fracture_mode() == "mask" and not fracture.has_collapse_mask():
+        raise FileNotFoundError(
+            f"ISMIP7_FRACTURE=mask but no ice-shelf collapse mask was found "
+            f"for {esm}/{scenario} under {fracture.fracture_dir()}. The masks "
+            f"exist for the SSP scenarios only, so this is a configuration "
+            f"error: download the fracture tree, or run with "
+            f"ISMIP7_FRACTURE=none."
+        )
 
     K_npz = find_k_npz()
     K_melt = float(os.environ.get("ISMIP7_K_MELT", "1.15e-4"))

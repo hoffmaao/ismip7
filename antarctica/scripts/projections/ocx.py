@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-r"""ISMIP7 Core Experiment 11: OCX observationally constrained (1990-2025).
+r"""ISMIP7 Core Experiment 11: OCX observationally constrained (1979-2025).
 
 Fully observation-forced run over the satellite era, for validating the
 initialized model against the observed record:
@@ -11,15 +11,15 @@ initialized model against the observed record:
 
 If an `ocx` scenario tree exists under ISMIP7/AIS (protocol-provided
 time-varying obs forcing), the atmosphere/ocean readers pick it up
-instead. Note the initial state is the ~2015 BedMachine/MAP geometry, so
-a 1990 start is anachronistic by construction — treat the early years as
+instead. The period is the OCX forcing span (the OCX atmosphere tree runs
+1979-2025). Note the initial state is the ~2015 BedMachine/MAP geometry, so
+a 1979 start is anachronistic by construction: treat the early years as
 relaxation and the 2000s-2025 as the validation window.
 
 Usage:
     mpiexec -n 24 python scripts/projections/ocx.py
 """
 import os, sys
-import numpy as np
 
 _SCRIPTS = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 _PROJECT = os.path.dirname(os.path.dirname(_SCRIPTS))
@@ -32,11 +32,13 @@ from experiment import find_k_npz
 from icepack2_tools.forcing import (
     ISMIP7Atmosphere, ISMIP7Ocean, make_forcing_callback,
     make_climatology_ocean_callback, load_racmo_smb_climatology,
-    load_K_per_basin, forcing_coords,
+    load_K_per_basin, forcing_coords, reject_collapse_mask, forcing_year,
 )
 
-T_START = float(os.environ.get("ISMIP7_T_START", "1990"))
-T_END = float(os.environ.get("ISMIP7_T_END", "2025"))
+T_START = float(os.environ.get("ISMIP7_T_START", "1979"))
+# 1 January of the year AFTER the last one covered, the convention every core
+# driver uses: years 1979 through 2025 run and 2025 is the last banked year.
+T_END = float(os.environ.get("ISMIP7_T_END", "2026"))
 DT = float(os.environ.get("ISMIP7_DT", "0.1"))
 OUTPUT_INTERVAL = int(os.environ.get("ISMIP7_OUTPUT_INTERVAL", "10"))
 RACMO_LAST = 2023  # smbgl_monthlyS_ANT11_RACMO2.4p1_ERA5_197901_202312
@@ -75,6 +77,8 @@ def main():
         PETSc.Sys.Print(f"  K scaled by ISMIP7_K_SCALE={K_scale:.3f}")
     PETSc.Sys.Print(f"  Ocean melt: OI climatology + per-basin K ({K_npz})")
 
+    reject_collapse_mask("the OCX experiment")
+
     atm = ISMIP7Atmosphere(scenario="ocx")
     if atm.available_years():
         PETSc.Sys.Print("  Atmosphere: protocol ocx tree")
@@ -89,7 +93,7 @@ def main():
         racmo_cache = {}
 
         def callback(ctx_, t_yr):
-            yr = min(int(np.floor(t_yr - 1e-9)), RACMO_LAST)
+            yr = min(forcing_year(t_yr), RACMO_LAST)
             if yr not in racmo_cache:
                 racmo_cache[yr] = load_racmo_smb_climatology(
                     ctx_["Q_g"], yr, yr

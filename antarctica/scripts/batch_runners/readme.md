@@ -249,18 +249,34 @@ converged map.
 ### 3. `nots_projection.sbatch` - self-chaining
 
 A 285-year projection is about five days at 2500 m and fits no ordinary queue,
-so this resubmits itself with `--dependency=afterok` until the run reaches
-`ISMIP7_T_END`, resuming through `ISMIP7_AUTO_RESUME=1` from its own newest
-checkpoint. 24 h buys roughly 55 simulated years, so a full projection is about
-six chained jobs.
+so this resubmits itself with `--dependency=afterok` until the run reaches its
+end year, resuming through `ISMIP7_AUTO_RESUME=1` from its own newest
+checkpoint. Each driver owns that end year and the runner does not default
+`ISMIP7_T_END`; the chain reads the value the run actually used back out of
+the `Time-stepping: <start>-><end>` line the driver prints. Setting
+`ISMIP7_T_END` overrides every experiment, so leave it unset unless you mean
+to. 24 h buys roughly 55 simulated years, so a full projection is about six
+chained jobs.
 
 ```
 sbatch --export=ALL,ISMIP7_EXPERIMENT=control \
        antarctica/scripts/batch_runners/nots_projection.sbatch
 ```
 
-`ISMIP7_EXPERIMENT` selects the driver: `control`, `ssp126_cesm_waccm`, `ocx`,
-`hist_cesm_waccm`, `hist_mri_esm2`.
+`ISMIP7_EXPERIMENT` selects the driver, one of the ten cores:
+
+| value | core | period covered |
+|-------|------|----------------|
+| `control` | 9 / 10 (by `ISMIP7_ESM`) | 2015-2300 |
+| `ssp126_cesm_waccm` | 5 | 2015-2300 |
+| `ssp126_mri_esm2` | 6 | 2015-2300 |
+| `ssp370_cesm_waccm` | 3 | 2015-2100 |
+| `ssp370_mri_esm2` | 4 | 2015-2100 |
+| `ssp585_cesm_waccm` | 7 | 2015-2300 |
+| `ssp585_mri_esm2` | 8 | 2015-2300 |
+| `ocx` | 11 | 1979-2025 |
+| `hist_cesm_waccm` | 1 | 1850-2014 |
+| `hist_mri_esm2` | 2 | 1850-2014 |
 
 **The chain stops on a non-zero exit and does not retry.** That is deliberate.
 The July grounding-line blow-up looked exactly like a run that just needed more
@@ -270,9 +286,11 @@ Beyond that, each job asks its OWN final checkpoint what happened before it
 decides anything, and that verdict owns the exit code. A checkpoint written
 with `stalled=1` (the in-run rescue ladder and the subcycles were both
 exhausted) exits 1 and submits nothing, whether or not chaining was enabled, so
-a stall is never mailed out as a completed job. A clean exit that reached
-`ISMIP7_T_END` finishes. A clean exit short of it resubmits, except that
-`ISMIP7_CHAIN=0` disables resubmission entirely; auto-resume off
+a stall is never mailed out as a completed job. A clean exit that reached the
+end year read back from the driver's `Time-stepping:` line finishes; if that
+line is missing the job cannot tell, and stops without resubmitting. A clean
+exit short of the end year resubmits, except that `ISMIP7_CHAIN=0` disables
+resubmission entirely; auto-resume off
 (`ISMIP7_AUTO_RESUME=0`) stops the chain, because a successor inherits no
 `ISMIP7_RESTART` and would cold-start and repeat the same years; an unreadable
 final checkpoint stops it, since nothing then says where to resume; and a job

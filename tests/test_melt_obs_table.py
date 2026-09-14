@@ -3,17 +3,20 @@ r"""The per-basin melt observation table: two published widths, one reader.
 The ISMIP7 melt-calibration product ships ``Melt_Paolo_Davison_Adusumilli
 _imbie2.csv`` with three columns (basin, melt, uncertainty). The table it
 replaces, ``Melt_Paolo_Err_Adusumilli_imbie2_v3.csv``, carries area and two
-per-area columns between the melt and its uncertainty, so a reader keyed on
-column position silently reads AREA as the uncertainty of every basin: values
-near 1e5 km^2 where the uncertainty is tens of Gt/yr, which reweights the
-whole calibration without failing. Columns are located by header name instead,
-and this pins that.
+per-area columns between the melt and its uncertainty. The replaced reader took
+``row[3]``, which is the uncertainty in the old six-column table and past the
+end of the new three-column one, where it raises IndexError. Any index chosen
+for one width reads the wrong quantity or nothing at the other: ``row[2]``,
+right for the new table, reads AREA as the uncertainty of every old-table basin,
+values near 1e5 km^2 where the uncertainty is tens of Gt/yr. Columns are located
+by header name instead, and this pins that.
 
 The integrated targets differ by 23% (865.0 against 1067.4 Gt/yr), so which
 table a calibration used is part of its provenance and belongs in the saved
 npz.
 
-Serial, no data files, no Firedrake.
+Serial and needs no data files. Importing ``calibrate_melt`` loads Firedrake,
+rasterio and icepack, so the tests skip where that stack is absent.
 """
 
 import csv
@@ -23,6 +26,10 @@ import sys
 import numpy as np
 import pytest
 
+pytest.importorskip("firedrake")
+pytest.importorskip("rasterio")
+pytest.importorskip("icepack")
+
 _ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 _SCRIPTS = os.path.join(_ROOT, "antarctica", "scripts")
 
@@ -30,8 +37,9 @@ OLD_HEADER = ("", "BMR (Gt/yr)", "Area (km^2)", "BMR uncert (Gt/yr)",
               "Average BMR (kg/m2/a)", "Average BMR uncert (kg/m2/a)")
 NEW_HEADER = ("", "BMR (Gt/yr)", "BMR uncert (Gt/yr)")
 
-# basin, melt, uncertainty; the area column exists only in the old layout and
-# is deliberately far from the uncertainty so a positional read stands out.
+# basin, melt, uncertainty, area; the area column exists only in the old layout
+# and is deliberately far from the uncertainty, so reading it as the
+# uncertainty fails the bound below.
 ROWS = ((0, 39.85, 51.75, 124527.1), (1, 3.30, 3.50, 5455.0))
 
 

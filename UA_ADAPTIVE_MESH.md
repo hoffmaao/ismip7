@@ -305,3 +305,7 @@ way the shared package documents it (`cross_mesh_transfer` docstring): as its
 P1 lift, landing back in DG0, with water (+1e6 m) outside the old mesh. The
 forward's extent anchor then re-solves the eikonal problem on the new mesh,
 the same order of operations the calving project uses after its remeshes.
+No run reads the transferred field back yet: a calving forward builds its level
+set from the current thickness and `H_init`, so the front's sub-cell position
+does not survive a remesh today. The transfer keeps the checkpoint's contents
+correct for when a forward does load it.

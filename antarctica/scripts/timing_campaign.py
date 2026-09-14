@@ -238,14 +238,17 @@ def cache_paths(cache_dir, lc, lc_coarse, buffer_m=BUFFER_M):
     return root / f"{stem}.h5", root / f"{stem}.json"
 
 
-def pristine_cache_path(cache_dir, lc, lc_coarse, buffer_m=BUFFER_M):
-    """Untouched copy of the prepared cache.
+def pristine_cache_paths(cache_dir, lc, lc_coarse, buffer_m=BUFFER_M):
+    """``(checkpoint, manifest)`` of the untouched copy of the prepared cache.
 
     The per-mesh invert warm-starts from it and then republishes the cache
     path above from its own MAP, so a re-run must never warm-start from that
-    output.
+    output; the copied manifest keeps naming the imported source MAP so the
+    warm start can still be validated after the published one has moved on.
     """
-    return Path(cache_dir) / f"{cache_stem(lc, lc_coarse, buffer_m)}.prepare.h5"
+    stem = f"{cache_stem(lc, lc_coarse, buffer_m)}.prepare"
+    root = Path(cache_dir)
+    return root / f"{stem}.h5", root / f"{stem}.json"
 
 
 def timing_record_basename(tag, lc, lc_coarse, ncores):

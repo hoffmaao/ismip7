@@ -42,7 +42,7 @@ from timing_campaign import (
     mesh_inversion_status_path,
     mesh_inversion_timing_json_path,
     mesh_rows,
-    pristine_cache_path,
+    pristine_cache_paths,
     scaling_lanes,
     scout_lanes,
     sha256_file,
@@ -361,6 +361,51 @@ class CampaignManager:
             return False, f"mesh inversion MAP missing: {mesh_map}"
         return False, details[0] if details else "cache provenance mismatch"
 
+    def warm_start_validation(self, lc, lc_coarse):
+        """Validate the invert's warm start.
+
+        Prefer the pristine prepare copy: its manifest still names the
+        imported source MAP after an earlier invert (say a maxiter=2 smoke)
+        has republished the cache path, so a production invert never waits
+        on a re-prepare merely because a smoke invert published first.
+        """
+        pristine, pristine_manifest = pristine_cache_paths(
+            self.cache_dir, lc, lc_coarse
+        )
+        if not pristine.is_file() or (
+            self.dry_run and self.assume_valid_caches
+        ):
+            return self.cache_validation(lc, lc_coarse)
+        if not pristine_manifest.is_file():
+            valid, detail = self.cache_validation(lc, lc_coarse)
+            if valid:
+                return True, detail
+            return False, (
+                f"{detail}; pristine copy {pristine.name} has no manifest "
+                "(prepared before manifests were copied) -- re-run "
+                "make timing-prepare FORCE_TIMING=1"
+            )
+        try:
+            with open(pristine_manifest) as stream:
+                manifest = json.load(stream)
+        except (OSError, json.JSONDecodeError) as exc:
+            return False, f"pristine manifest unavailable: {exc}"
+        try:
+            mesh_sha256 = self.mesh_checksum(lc, lc_coarse)
+            source_sha256 = self.source_checksum()
+        except FileNotFoundError as exc:
+            return False, f"cache source unavailable: {exc}"
+        valid, detail = validate_cache_manifest(
+            manifest,
+            lc=lc,
+            lc_coarse=lc_coarse,
+            cache_path=None,
+            source_sha256=source_sha256,
+            mesh_sha256=mesh_sha256,
+            solver_fingerprint=self.solver_fingerprint,
+        )
+        return valid, f"pristine prepare copy: {detail}"
+
     def inversion_map_path(self, lc, lc_coarse):
         return mesh_inversion_map_path(
             self.root, lc, lc_coarse, maxiter=self.maxiter
@@ -493,7 +538,7 @@ class CampaignManager:
             # Prepare must have produced a usable imported-MAP cache first,
             # unless --follow-prepare queues the invert behind an active
             # prepare allocation via Slurm afterok.
-            prep_ok, prep_detail = self.cache_validation(lc, lc_coarse)
+            prep_ok, prep_detail = self.warm_start_validation(lc, lc_coarse)
             dependency = None
             if not prep_ok:
                 if not self.follow_prepare:
@@ -561,7 +606,7 @@ class CampaignManager:
             # timing cache (no second cold prepare), so warm-start from the
             # pristine copy the prepare job keeps beside it, never from a
             # cache this stage itself published.
-            pristine = pristine_cache_path(self.cache_dir, lc, lc_coarse)
+            pristine, _ = pristine_cache_paths(self.cache_dir, lc, lc_coarse)
             if pristine.is_file():
                 warm_start = pristine
             else:
@@ -727,9 +772,9 @@ class CampaignManager:
                 "ISMIP7_TIMING_CACHE_RAW": raw,
                 "ISMIP7_TIMING_CACHE": cache,
                 "ISMIP7_TIMING_CACHE_MANIFEST": manifest,
-                "ISMIP7_TIMING_CACHE_PRISTINE": pristine_cache_path(
+                "ISMIP7_TIMING_CACHE_PRISTINE": pristine_cache_paths(
                     self.cache_dir, lc, lc_coarse
-                ),
+                )[0],
                 "ISMIP7_TIMING_CACHE_STATUS": status_path,
             }
             self._submit(

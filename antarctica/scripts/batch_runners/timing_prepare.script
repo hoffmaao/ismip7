@@ -76,7 +76,9 @@ rm -f "${raw}"
 # from it and later replaces ${final} with a cache published from its own MAP
 # (redistribute writes a new inode, so a hard link keeps this one intact).
 if [ -n "${pristine}" ]; then
-    rm -f "${pristine}"
+    pristine_manifest="${pristine%.h5}.json"
+    rm -f "${pristine}" "${pristine_manifest}"
     ln "${final}" "${pristine}" 2>/dev/null || cp "${final}" "${pristine}"
+    ln "${manifest}" "${pristine_manifest}" 2>/dev/null || cp "${manifest}" "${pristine_manifest}"
 fi
 write_status "finished phase=published exit_code=0"

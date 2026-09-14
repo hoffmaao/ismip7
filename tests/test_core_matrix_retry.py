@@ -1,0 +1,133 @@
+r"""The core matrix's wall-retry policy, per experiment kind.
+
+``run_core_matrix.sh`` relaunches a run that stopped short of its target from
+its own saved state, up to MAX_ATTEMPTS, passing ``ISMIP7_RESTART`` on every
+attempt after the first. Core 11 (OCX) used to be exempt because its driver
+cold-started unconditionally; it now reads ``ISMIP7_RESTART`` and auto-resumes
+like every other core, so a wall stop must be retried rather than reported as
+unretryable.
+
+The script resolves its repository root from ``BASH_SOURCE``, so it runs here
+against a sandbox laid out like the repo: the shipped script is copied in
+unmodified, ``mpiexec`` is a PATH stub, and the driver is a stub that writes
+the timeseries row and the checkpoint attribute the matrix reads back. Every
+decision under test is the shipped script's.
+"""
+import os
+import shutil
+import subprocess
+import sys
+from pathlib import Path
+
+import pytest
+
+REPO = Path(__file__).resolve().parent.parent
+MATRIX = REPO / "antarctica" / "scripts" / "run_core_matrix.sh"
+
+pytest.importorskip("h5py")
+
+# Advances to FAKE_STOP_YEAR on a cold start and to FAKE_TARGET once the matrix
+# hands it ISMIP7_RESTART, which is what a wall-stopped core does on retry.
+DRIVER = r'''
+import os, sys
+import h5py
+
+# the matrix cd's to its repo root before launching the driver
+R = os.path.join(os.getcwd(), "antarctica", "results")
+os.makedirs(R, exist_ok=True)
+stem = os.environ["FAKE_STEM"]
+csv = os.path.join(R, stem + "_timeseries.csv")
+h5 = os.path.join(R, stem + "_final.h5")
+
+restart = os.environ.get("ISMIP7_RESTART")
+with open(os.path.join(R, "attempts.log"), "a") as f:
+    f.write(("restart" if restart else "cold") + "\n")
+
+end = float(os.environ["FAKE_TARGET"] if restart
+            else os.environ["FAKE_STOP_YEAR"])
+start = float(os.environ["FAKE_START_YEAR"])
+new = not os.path.exists(csv)
+with open(csv, "a") as f:
+    if new:
+        f.write("year,vaf\n")
+    y = start
+    while y <= end + 1e-9:
+        f.write(f"{y:.1f},0.0\n")
+        y += 1.0
+with h5py.File(h5, "w") as h:
+    h["/"].attrs["t_yr"] = end
+    h["/"].attrs["stalled"] = 0
+print(f"Saved: {h5}")
+'''
+
+MPIEXEC = '#!/bin/bash\nexec "$FAKE_PYTHON" "$FAKE_DRIVER"\n'
+
+
+@pytest.fixture
+def sandbox(tmp_path):
+    r"""A repo-shaped tree holding the shipped matrix script and the stubs."""
+    scripts = tmp_path / "antarctica" / "scripts"
+    (scripts / "projections").mkdir(parents=True)
+    (tmp_path / "antarctica" / "results").mkdir(parents=True)
+    (tmp_path / "icepack2_tools").mkdir()
+    # PROV_REF: results must postdate it, and the stub writes them after this
+    (tmp_path / "icepack2_tools" / "forcing.py").write_text("")
+
+    shutil.copy(MATRIX, scripts / "run_core_matrix.sh")
+    (scripts / "projections" / "ocx.py").write_text(DRIVER)
+
+    bin_dir = tmp_path / "bin"
+    bin_dir.mkdir()
+    (bin_dir / "mpiexec").write_text(MPIEXEC)
+    (bin_dir / "mpiexec").chmod(0o755)
+    venv_bin = tmp_path / "venv" / "bin"
+    venv_bin.mkdir(parents=True)
+    (venv_bin / "python").symlink_to(sys.executable)
+    return tmp_path
+
+
+def _run(sandbox, **env):
+    e = dict(os.environ)
+    e.update({
+        "PATH": f"{sandbox / 'bin'}:{e['PATH']}",
+        "VENV": str(sandbox / "venv"),
+        "FAKE_PYTHON": sys.executable,
+        "FAKE_DRIVER": str(sandbox / "antarctica" / "scripts" / "projections" / "ocx.py"),
+        "MAX_LOAD": "100000",          # never gate on load in a test
+        "NRANKS": "1",
+        "CORES": "11",
+        "FRESH": "1",
+        "ISMIP7_LC": "32000",
+    })
+    e.pop("ISMIP7_RUN_TAG", None)
+    e.update(env)
+    p = subprocess.run(
+        ["bash", str(sandbox / "antarctica" / "scripts" / "run_core_matrix.sh")],
+        env=e, cwd=str(sandbox), capture_output=True, text=True, timeout=300,
+    )
+    return p.stdout + p.stderr
+
+
+def _attempts(sandbox):
+    log = sandbox / "antarctica" / "results" / "attempts.log"
+    return log.read_text().split() if log.exists() else []
+
+
+def test_ocx_is_retried_from_its_own_saved_state(sandbox):
+    r"""A wall stop at 2011 is resumed and reaches the 2026 target. Under the
+    old `cold` classification the matrix stopped after one attempt and said
+    the driver ignores ISMIP7_RESTART, which it no longer does."""
+    out = _run(sandbox, FAKE_STEM="ocx_32000", FAKE_START_YEAR="1979",
+               FAKE_STOP_YEAR="2011", FAKE_TARGET="2026")
+    assert "COMPLETE at 2026" in out, out
+    assert "not retried" not in out
+    assert _attempts(sandbox) == ["cold", "restart"], out
+
+
+def test_a_core_that_stops_advancing_is_still_left_alone(sandbox):
+    r"""Retrying is gated on progress, not on the kind: a resumed attempt that
+    reaches the same year as before gives up rather than looping."""
+    out = _run(sandbox, FAKE_STEM="ocx_32000", FAKE_START_YEAR="1979",
+               FAKE_STOP_YEAR="2011", FAKE_TARGET="2011")
+    assert "no progress" in out, out
+    assert _attempts(sandbox) == ["cold", "restart"], out

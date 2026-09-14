@@ -70,6 +70,8 @@ import numpy as np
 from firedrake import Function, TestFunction, assemble, dS, dx
 import firedrake as fd
 
+from .runconfig import ismip7_output_overwrite
+
 # icepack's year (365.25 days): the model's own time unit, so every
 # model-to-SI conversion the submission carries uses it. The time axis
 # in the files is the standard calendar regardless.
@@ -103,10 +105,12 @@ class AnnualOutput:
     accumulated year survives the link boundary too: ``state_fields`` /
     ``state_attrs`` hand it to the run's own checkpoint and ``resume`` takes
     it back, so a job that stops at 2021.4 goes on accumulating 2021 rather
-    than losing four months of flux or relabelling them. Years at or after
-    the resumed one are stale, left behind by an unclean kill that ran past
-    the last state checkpoint, so they are discarded and re-simulated; a year
-    is never renamed, and a resume that would leave a HOLE in the series
+    than losing four months of flux or relabelling them. On a resume, years
+    at or after the resumed one are stale, left behind by an unclean kill
+    that ran past the last state checkpoint, so they are discarded and
+    re-simulated. A run that is NOT resuming that state refuses to touch a
+    banked series unless ``ISMIP7_OUTPUT_OVERWRITE=1`` says so. A year is
+    never renamed, and a resume that would leave a HOLE in the series
     (further than one past the last kept year) is an error.
     """
 
@@ -151,24 +155,37 @@ class AnnualOutput:
         self._n = fd.FacetNormal(mesh)
         self._gl_cof = fd.Cofunction(Q_dg.dual())
         # A chained job re-enters run_simulation and rebuilds this object, so
-        # the years the earlier links banked are read back off disk. Years at
-        # or after the one being resumed belong to a trajectory the restart
-        # abandons: an unclean kill banks years past the last state
-        # checkpoint (the cadences differ, 5 yr vs 1 yr by default), and
-        # keeping them would splice two different runs into one series. They
-        # are discarded and re-simulated from the checkpoint instead.
+        # the years the earlier links banked are read back off disk. On a
+        # RESUME, years at or after the one the checkpoint was accumulating
+        # belong to a trajectory the restart abandons: an unclean kill banks
+        # years past the last state checkpoint (the cadences differ, 5 yr vs
+        # 1 yr by default), and keeping them would splice two runs into one
+        # series, so they are discarded and re-simulated. A cold start is not
+        # that case: nothing says the years on disk are wrong, and this is
+        # the only copy of what gets submitted, so it refuses rather than
+        # deleting a banked series. ISMIP7_OUTPUT_OVERWRITE=1 is how an
+        # operator asks for them to go.
         self._written_years = self.years_on_disk(out_path)
         stale = [y for y in self._written_years if y >= self.year]
-        self._written_years = [y for y in self._written_years if y < self.year]
-        if stale and self.comm.rank == 0:
-            for y in stale:
-                os.remove(self.year_path(out_path, y))
-            self._trim_scalars(scalars_path, self.year)
-        self.comm.barrier()
+        if stale and resume is None and not ismip7_output_overwrite():
+            raise ValueError(
+                f"{os.path.basename(out_path)} already holds ISMIP7 years "
+                f"{stale[0]}-{stale[-1]}, but this run starts at {self.year} "
+                f"without resuming their accumulation state, so it would "
+                f"rewrite a banked submission series. Resume from a "
+                f"checkpoint that carries the ISMIP7 state, move the series "
+                f"aside, or set ISMIP7_OUTPUT_OVERWRITE=1 to discard it."
+            )
         if stale:
+            self._written_years = [y for y in self._written_years if y < self.year]
+            if self.comm.rank == 0:
+                for y in stale:
+                    os.remove(self.year_path(out_path, y))
+                self._trim_scalars(scalars_path, self.year)
+            self.comm.barrier()
             self.log(f"  ISMIP7 output: discarded {len(stale)} year(s) "
-                     f"({stale[0]}-{stale[-1]}) simulated past the restart "
-                     f"checkpoint; they will be re-simulated")
+                     f"({stale[0]}-{stale[-1]}) that the restart abandons; "
+                     f"they will be re-simulated")
         if self._written_years:
             last = self._written_years[-1]
             if self.year > last + 1:
@@ -241,10 +258,12 @@ class AnnualOutput:
             reader = _csv.DictReader(f)
             header = reader.fieldnames
             kept = [r for r in reader if int(r["year"]) < first_stale_year]
-        with open(scalars_path, "w") as f:
+        tmp = scalars_path + ".tmp"
+        with open(tmp, "w") as f:
             writer = _csv.DictWriter(f, fieldnames=header)
             writer.writeheader()
             writer.writerows(kept)
+        os.replace(tmp, scalars_path)
 
     # ---- where a year lives ------------------------------------------------
     @staticmethod

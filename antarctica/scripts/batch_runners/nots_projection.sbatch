@@ -68,7 +68,7 @@ esac
 # `logvelnet` element, and abort on a missing file after the queue wait.
 export ISMIP7_INVERSION="${ISMIP7_INVERSION:-$ISMIP7_MAP_DEFAULT}"
 export ISMIP7_DT="${ISMIP7_DT:-0.1}"
-export ISMIP7_T_END="${ISMIP7_T_END:-2300}"
+export ISMIP7_T_END="${ISMIP7_T_END:-2301}"
 export ISMIP7_CHECKPOINT_EVERY_YR="${ISMIP7_CHECKPOINT_EVERY_YR:-5}"
 export ISMIP7_KEEP_CHECKPOINTS="${ISMIP7_KEEP_CHECKPOINTS:-3}"
 # The control configuration the protocol asks for: calving held at end-of-2014

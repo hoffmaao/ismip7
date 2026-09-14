@@ -72,6 +72,15 @@ def test_a_gap_inside_the_series_is_an_error(mri_tree):
         atm.get_smb(2200, np.zeros(3), np.zeros(3), anomaly=False)
 
 
+def test_a_year_before_the_series_is_reported_as_such(mri_tree):
+    r"""A projection asking its scenario tree for a year the scenario does not
+    start until is a timeline error, not a short download, and the message
+    has to say which so the operator fixes the right thing."""
+    atm = ISMIP7Atmosphere(data_root=str(mri_tree), esm="MRI-ESM2-0", scenario="ssp585", version="v1")
+    with pytest.raises(FileNotFoundError, match=r"no year 2014.*precedes the series"):
+        atm._load_year("acabf", 2014)
+
+
 def test_an_absent_variable_stays_optional(mri_tree):
     r"""A variable with no files at all is an optional product (dacabfdz,
     ts-anomaly), not a gap, so it still reads as absent."""

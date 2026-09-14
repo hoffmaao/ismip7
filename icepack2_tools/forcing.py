@@ -419,13 +419,13 @@ class ISMIP7Atmosphere:
             self.resolution, self.version, self.data_root,
         )
 
-    def _last_year(self, vdir, variable, product, version):
-        r"""Last year for which ``vdir`` holds a file, or None."""
+    def _year_span(self, vdir, variable, product, version):
+        r"""``(first, last)`` year for which ``vdir`` holds a file, or None."""
         import re
         head = f"{variable}_AIS_{self.esm}_{self.scenario}_{product}_{version}_"
         years = [int(m.group(1)) for f in os.listdir(vdir)
                  for m in [re.fullmatch(re.escape(head) + r"(\d{4})\.nc", f)] if m]
-        return max(years) if years else None
+        return (min(years), max(years)) if years else None
 
     def _load_year(self, variable, year):
         import xarray as xr
@@ -451,12 +451,14 @@ class ISMIP7Atmosphere:
             # Anything further past the end is a short tree, not the end of
             # the series, and repeating one year of SMB for decades would be a
             # scientifically wrong run reported as a success, so it raises.
-            last = self._last_year(vdir, variable, product, version)
-            if last is None:
+            span = self._year_span(vdir, variable, product, version)
+            if span is None:
                 # The variable has no files at all here: an optional product
                 # (dacabfdz, ts-anomaly) the callers may legitimately run
-                # without. Only a hole in a series that exists is an error.
+                # without. Only a year missing from a series that exists is
+                # an error.
                 return None
+            first, last = span
             if int(year) - last == 1:
                 if variable not in self._persisted:
                     self._persisted.add(variable)
@@ -465,14 +467,18 @@ class ISMIP7Atmosphere:
                               f"persisting {last}, the last year on disk", flush=True)
                 self._cache[key] = self._load_year(variable, last)
                 return self._cache[key]
-            # A hole in the series: get_field would turn a None into a field
-            # of zeros and the run would report a whole year of zero anomaly
-            # as a success, so the reader refuses instead.
+            # get_field would turn a None into a field of zeros and the run
+            # would report a whole year of zero anomaly as a success, so the
+            # reader refuses instead. A year BEFORE the series is its own
+            # case: a projection asking for one means its timeline starts
+            # earlier than the scenario does, not that the tree is short.
+            where = ("precedes the series there" if int(year) < first
+                     else "is missing from the series there")
             raise FileNotFoundError(
                 f"ISMIP7Atmosphere: {variable} for {self.esm} {self.scenario} "
-                f"has no year {int(year)} in {vdir} (the series there runs to "
-                f"{last}; only the single year after the end is bridged, "
-                f"2300 after 2299). Finish the download for this variable."
+                f"has no year {int(year)} in {vdir}: it {where} "
+                f"({first}-{last}; only the single year after the end is "
+                f"bridged, 2300 after 2299)."
             )
 
         ds = xr.open_dataset(path)

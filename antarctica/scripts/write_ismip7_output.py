@@ -54,7 +54,8 @@ _ROOT = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, os.path.dirname(os.path.dirname(_ROOT)))
 
 import icepack2_tools.dual_friction  # noqa: F401,E402  (icepack2 -> irksome import order)
-from icepack2_tools.ismip7_output import AnnualOutput, RHO_I, SCALARS, SECONDS_PER_YEAR, VARIABLES_2D  # noqa: E402
+from icepack2_tools.ismip7_output import (AnnualOutput, RHO_I, SCALARS, SECONDS_PER_YEAR,  # noqa: E402
+                                          VARIABLES_2D, VARIABLES_BANKED)
 from icepack2_tools.regrid import ISMIP7_DX, ISMIP7_NX, ISMIP7_NY, ISMIP7_X0, ISMIP7_Y0  # noqa: E402
 import firedrake as fd  # noqa: E402
 
@@ -319,7 +320,7 @@ def main():
             with fd.CheckpointFile(AnnualOutput.year_path(a.annual, yr), "r") as chk:
                 ymesh = chk.load_mesh()
                 cells = {var: chk.load_function(ymesh, name=var).dat.data_ro.copy()
-                         for var in VARIABLES_2D}
+                         for var in VARIABLES_BANKED}
             # the overlap operator is built once from the first year's mesh;
             # a series whose links remeshed cannot be regridded through it
             if len(cells["lithk"]) != W.shape[1]:

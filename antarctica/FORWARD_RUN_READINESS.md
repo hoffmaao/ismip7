@@ -187,13 +187,13 @@ What a submission needs (#5, #16, #17, #18, #19, #20, #22, #23):
 
 1. Output writer: done for the content checks (section 3); next, run a
    full-length experiment through it and fill in the README template.
-2. Re-download CESM2-WACCM fracture v2.1 (three files per SSP), the two
-   `ctrl` trees and OCX from the mirror; make the reader accept
-   `GEMB-SDBN1-8000m` for MRI; install `awscli` on NOTS and mirror the core
-   trees there (`aws s3 sync --no-sign-request --endpoint-url
-   https://data.source.coop s3://ismip/ismip7-ais-forcing/data/<ESM>/<scenario>/ ...`).
-   Re-run `audit_forcing_versions.py` before the production matrix and cite
-   its output in the README.
+2. Still to pull from the mirror with
+   `antarctica/scripts/download_mirror.py`: the two `ctrl` trees and the
+   remainder of OCX. (CESM2-WACCM fracture v2.1 and the OCX set are staged
+   locally, and 39 GB of ssp585 forcing is staged on NOTS; the downloader
+   replaces the `awscli` route, needs no AWS tooling, and resumes.) Re-run
+   `audit_forcing_versions.py` before the production matrix and cite its
+   output in the README.
 3. End-of-series rule for 2300 in `forcing.py` and the `GEMB-SDBN1` path for
    MRI: both done (`_load_year` bridges exactly one year past the end;
    `atmosphere_product` accepts either product name).

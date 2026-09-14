@@ -184,14 +184,14 @@ forward evaluates that same per-basin `K` with a cell-wise draft, a cell-wise
 mask, so the melt-receiving area shifts by roughly a one-cell band at the
 grounding line and at the ice front. At 32 km, where shelves are only a few
 cells wide, that can move the integrated shelf melt by a non-trivial fraction
-of the 865 Gt/yr the `K_SCALE = 1.26` calibration targets.
+of the observed total the calibration targets.
 
-Nothing compensates for that by design. The integrated DG0 melt total needs
-checking against the observational target and `K` recalibrating, against the
-2026-07-31 re-release of the ISMIP7 AIS ocean-melt toolbox (new constraint
-datasets, new cold and warm term-3 targets, with the guidance to re-run the
-notebook). The `sin(alpha)` treatment in the quadratic parameterisation is
-still unsettled upstream. Treat DG0 melt totals as uncalibrated until then.
+Nothing compensates for that by design. The recalibration against the July
+2026 observation table (`antarctica/FORWARD_RUN_READINESS.md`, section 4) ran
+through the same CG1 script, so the integrated DG0 melt total still needs
+checking against that target. The `sin(alpha)` treatment in the quadratic
+parameterisation is still unsettled upstream. Treat DG0 melt totals as
+uncalibrated until then.
 
 ## Incompatibilities
 

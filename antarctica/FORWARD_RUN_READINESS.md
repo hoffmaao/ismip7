@@ -21,7 +21,8 @@ Items are ordered by what blocks a submission first.
   `ismip7-ais-forcing`, `ismip7-ais-observations`, `ismip7-ais-melt-calibration`.
   Re-synced with Globus on 11 September; the maintainer syncs by hand every
   week or two. The layout inside the forcing product is
-  `data/<ESM>/<scenario>/<product>/<variable>/<version>/` (no `AIS/` level).
+  `data/<ESM>/<scenario>/<product>/<variable>/<file>` (no `AIS/` level and
+  no version directories; the version is in the filename, see section 2).
   Anonymous HTTPS listing works with a browser-like User-Agent (Python's
   default one is refused). This is the practical route for NOTS, which has no
   Globus endpoint: install `awscli` in the venv and `aws s3 sync

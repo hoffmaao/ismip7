@@ -105,7 +105,9 @@ echo "=== $(date -Is)  inversion exit ${rc} ==="
 # the log); it warm-starts from the periodic checkpoint and finishes the
 # budget. (The previous rule kept chaining after a completed budget: job
 # 1339328 finished its 200 iterations and 1339342 started re-inverting the
-# finished MAP, Sep 13 2026.)
+# finished MAP, Sep 13 2026.) The driver writes this marker itself as soon as
+# it has saved the MAP, so the rule below is the fallback for a driver that
+# could not write it; touch is idempotent.
 if grep -q 'Optimization finished' "$LOG"; then
     touch "$DONE"
     echo "chain: finished ($(grep -o 'Optimization finished.*' "$LOG" | tail -1)); marker $DONE"

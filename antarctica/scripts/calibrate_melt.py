@@ -1,8 +1,9 @@
 #!/usr/bin/env python3
 r"""ISMIP7 ocean-melt calibration (Burgard quadratic_mixed_slope, local TF).
 
-Geometry: the highest-resolution icepack simulation mesh
-(`inversion_icepack2_<lc>.h5`, default lc=2500), with bed / thickness /
+Geometry: the mesh of the section 4 MAP for the configured ISMIP7_FRICTION,
+named by `icepack2_tools/naming.py` (default lc=2500; ISMIP7_INV_H5 names a
+different MAP), with bed / thickness /
 surface / floating-mask **reinterpolated directly from BedMachine v4.1**
 so thicknesses are not h_clamp'd and the floating mask comes from
 BedMachine's authoritative `mask == 3`.

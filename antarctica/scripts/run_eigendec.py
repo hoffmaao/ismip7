@@ -69,7 +69,8 @@ import sys
 sys.path.insert(0, os.path.dirname(_ROOT))
 from icepack2_tools.boundary import load_boundary_ids
 from icepack2_tools.mpi_stats import global_max
-from icepack2_tools.runconfig import lc as _lc, lc_coarse as _lc_coarse
+from icepack2_tools.naming import map_basename
+from icepack2_tools.runconfig import friction as _friction, lc as _lc, lc_coarse as _lc_coarse
 from mesh_naming import get_buffer_m, mesh_filename
 
 lc = _lc()
@@ -161,7 +162,7 @@ def main():
     fc_params = {"quadrature_degree": 4}
 
     # ── Load MAP ──
-    chk_fn = os.path.join(MESH_DIR, f"inversion_icepack2_{lc}.h5")
+    chk_fn = os.path.join(MESH_DIR, map_basename(_friction(), lc))
     PETSc.Sys.Print(f"Loading MAP: {chk_fn}")
     with fd.CheckpointFile(chk_fn, "r") as chk:
         chk_mesh = chk.load_mesh()

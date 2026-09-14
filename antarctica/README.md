@@ -82,9 +82,9 @@ The scripts skip files that already exist, so re-running is cheap.
 
 ---
 
-## 2. ISMIP7 forcing via Globus
+## 2. ISMIP7 forcing (Globus, or the Source Cooperative mirror)
 
-There are **two distinct things** here:
+There are **three distinct things** here:
 
 1. **The runtime tree `ISMIP7/AIS/`** — this is what the simulation actually
    reads at run time (via `icepack2_tools/forcing.py`). Its layout follows the
@@ -97,6 +97,14 @@ There are **two distinct things** here:
    the top-level `/ISMIP7/AIS` tree (`--scenarios`). After downloading,
    `python scripts/preflight.py` reports which core experiments the local
    tree can actually run.
+3. **`download_mirror.py`** - the same forcing from the Source Cooperative
+   mirror over plain HTTPS instead of Globus: anonymous, resumable, no AWS or
+   Globus tooling, and the only route on a machine with no Globus endpoint
+   (this is how NOTS is staged). It takes product-relative prefixes
+   (`python antarctica/scripts/download_mirror.py data/OCX/ocean/main/`) and
+   lands files under `--root` (default `ISMIP7/AIS`) in the versioned layout
+   `forcing.py` expects. Its module docstring is the authoritative reference
+   for the prefixes, the resume rule and the size check.
 
 ### 2a. Using `download_forcing.py`
 
@@ -152,8 +160,8 @@ the transfer by hand in the Globus web app instead.
 
 ```
 ISMIP7/AIS/
-  <ESM>/<scenario>/SDBN1-8000m/<var>/<version>/      # atmosphere (acabf, acabf-anomaly, ts, tas, pr, ...)
-      <var>_AIS_<ESM>_<scenario>_SDBN1-8000m_<version>_<YEAR>.nc
+  <ESM>/<scenario>/<SDBN1|GEMB-SDBN1>-8000m/<var>/<version>/   # atmosphere (acabf, acabf-anomaly, ts, tas, pr, ...)
+      <var>_AIS_<ESM>_<scenario>_<product>_<version>_<YEAR>.nc
   <ESM>/<scenario>/ocean/<tf|thetao|so>/<version>/   # ocean thermal forcing, salinity, temp
   <ESM>/<scenario>/fracture/[v*/]                     # ice-shelf collapse / lake masks (flat or versioned)
   meltMIP/OI_Climatology_ismip8km_60m_<tf|so|thetao>_extrap.nc   # CTRL climatology
@@ -162,11 +170,23 @@ ISMIP7/AIS/
   parameterisations/fracture/
 ```
 
-Defaults baked into the readers: atmosphere pins `version=v2` at `SDBN1-8000m`,
-ocean pins `version=v3`; when the pinned version directory is absent the readers
-fall back to the highest `v<N>` subdir present, so MRI-ESM2-0 `v1` and future
-re-releases resolve without code changes. Fracture masks are found both flat in
-`fracture/` and inside `fracture/v*/` (highest version wins).
+Defaults baked into the readers: atmosphere pins `version=v2`, ocean pins
+`version=v3`; when the pinned version directory is absent the readers fall back
+to the highest `v<N>` subdir present (dotted versions included, so the `v2.1`
+fracture release resolves), so MRI-ESM2-0 `v1` and future re-releases need no
+code change. The downscaled-atmosphere directory is whichever of
+`SDBN1-8000m` / `GEMB-SDBN1-8000m` exists, `SDBN1` first: MRI-ESM2-0's was
+renamed to `GEMB-SDBN1` in August 2026 (discussion #37, data unchanged) and a
+tree fetched before the rename still resolves. Fracture masks are found both
+flat in `fracture/` and inside `fracture/v*/` (highest version wins).
+
+**The end of a series is bridged by exactly one year.** CESM2-WACCM's
+atmosphere stops at 2299 and the empty 2300 files were withdrawn (discussion
+#8), while a 2015-2300 run needs the 2300 forcing year, so a request for the
+single year after the last one on disk reuses that last year and says so once
+per variable in the log. Anything further past the end, or a year missing from
+inside the series, is a short or broken tree and raises - repeating one year of
+SMB for decades would be a wrong run reported as a success.
 
 **Per-year atmosphere files are monthly.** Each `<var>_..._<YEAR>.nc` holds 12
 slices (`time` = days since `<YEAR>-01-15`), so the reader collapses the time
@@ -640,8 +660,8 @@ how it reaches the core report.
 | `ISMIP7_RASTER_SAMPLE` | how BedMachine lands on a DG0 geometry cell. `vertex` projects the CG1 vertex interpolant (three pixels per cell); `cell_mean` is the raster's true mean over the cell, sampled on a sub-triangle lattice that tracks pixel density. **`cell_mean` measured rougher and is not recommended**: neighbouring cells share two of their three vertex samples, so `vertex` damps the jump between them by construction while two independent cell means do not. Against `vertex` the cell mean raised interior surface jumps by 6% and bed and thickness jumps by 35%, and at 2 km the momentum solve did not converge within 60 minutes. It does classify flotation better (32 km misclassified fraction 9.1% to 3.2%), so the knob is kept for the record. Stamped into the MAP as `raster_sample` and read back by the forward, which uses the MAP's value over the environment. Reproduce with `antarctica/scripts/probe_raster_sampling.py` | `vertex` |
 | `ISMIP7_INVERSION` | explicit MAP checkpoint path for a forward/preflight, replacing the `map_basename` lookup. It must be a MAP of the same friction/n/geometry (not checked). Use it to A/B differently regularised MAPs on one mesh (e.g. velocity-only vs transient dH/dt) instead of swapping files | derived from friction/n/geometry/lc |
 | `ISMIP7_CALVING` | calving-front law on a buffered mesh, via a level set (`icepack2_tools/levelset.py`, ISSM-style): `none` (front advances freely, never calves), `fixed` (front frozen at t=0; pins the front like `ISMIP7_FIXED_FRONT` but is not the same run - it builds a level set, so the floor-cell ocean drag is gated off in every ice cell and in the near-front water, and it applies the retreat-sliver rule inside the t=0 extent), `vonmises` (Morlighem et al. 2016 rate `\|u\| sigma~/sigma_max` from the run's own strain rates and fluidity). Removed ice is the `calv` budget column; the mean front rate over front cells prints as `c_front`. The control configuration is `ISMIP7_APPARENT_MB` with `ISMIP7_FIXED_FRONT=1` and `ISMIP7_CALVING=none`, per the protocol's "calving set constant to end-of-2014 conditions"; `vonmises` is for projections and is never pinned, not even when `ISMIP7_FIXED_FRONT` is also set: a configured law owns removal and the legacy mask is ignored. Under every law the apparent-MB reference is defined only on the t=0 ice extent; under a free law (`vonmises`) it is additionally cleared each step in every cell the level set reports ice-free, irreversibly, so a calved cell is not regrown - this changes free-law projection numbers under `ISMIP7_APPARENT_MB` and leaves the pinned control unaffected | `none` |
-| `ISMIP7_FRACTURE` | `none` (default) or `mask`: apply the ISMIP7 ice-shelf collapse forcing (protocol path C). With `mask`, every floating cell the year's collapse mask flags is emptied by the transport and booked as calving; grounded ice is never touched. Masks exist for the SSP scenarios only (none for historical or OCX). Needs DG0 geometry | `none` |
-| `ISMIP7_OUTPUT` | `1` to record the ISMIP7 yearly fields and scalars alongside the run (one checkpoint per year, `<exp>_<lc>_ismip7_annual_<year>.h5`, plus `<exp>_<lc>_ismip7_scalars.csv`, regridded afterwards by `scripts/write_ismip7_output.py`); `0` or unset disables it. The value set is closed, so a typo is rejected at startup rather than silently deciding whether a submission gets written. A chained projection that is to be submitted must export it on every link | _(unset, off)_ |
+| `ISMIP7_FRACTURE` | `none` (default) or `mask`: apply the ISMIP7 ice-shelf collapse forcing (protocol path C). With `mask`, every floating cell the year's collapse mask flags is emptied by the transport and booked as calving; grounded ice is never touched. Masks exist for the SSP scenarios only, so the control, the historicals and OCX abort at startup on `mask` rather than printing the banner and applying nothing. Needs DG0 geometry | `none` |
+| `ISMIP7_OUTPUT` | `1` to record the ISMIP7 yearly fields and scalars alongside the run (one checkpoint per year, `<exp>_<lc>_ismip7_annual_<year>.h5`, plus `<exp>_<lc>_ismip7_scalars.csv`, regridded afterwards by `scripts/write_ismip7_output.py`); `0` or unset disables it. The value set is closed, so a typo is rejected at startup rather than silently deciding whether a submission gets written. A chained projection that is to be submitted must export it on every link: a link that cold-starts part-way through a year with no record of that year's earlier months does NOT bank that year - it logs the gap and begins accumulating at the next 1 January, rather than submitting a fraction of a year as the year's mean. Resuming a run that already banked years continues its series; a cold start into a populated series is refused outright (`icepack2_tools/ismip7_output.py` owns those rules) | _(unset, off)_ |
 | `ISMIP7_CALVING_SIGMA_MAX_GROUNDED`, `ISMIP7_CALVING_SIGMA_MAX_FLOATING` | von Mises tensile-stress thresholds [MPa] (ISSM defaults) | `1.0`, `0.15` |
 | `ISMIP7_BNDIDS` | override boundary-id JSON | `mesh/boundary_ids_antarctica_<COARSE>_<LC>_buffered<BUFFER_M>.json` if present, else `mesh/boundary_ids.json` |
 | `ISMIP7_GEOMETRY_SPACE` | space for `h`/`s`/`b` (`dg0`: one thickness for the terminus force and the mass flux; `cg1`: legacy, for A/B only) - also selects the MAP h5 (see `../GEOMETRY_DISCRETIZATION.md`) | `dg0` |

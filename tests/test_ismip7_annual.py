@@ -257,16 +257,22 @@ def test_an_unclean_kill_past_the_checkpoint_discards_the_stale_years(two_cells,
     first.close()
     assert AnnualOutput.years_on_disk(out) == [2015, 2016, 2017, 2018]
 
-    # the newest state checkpoint is at t=2017.0, i.e. inside year 2017:
-    # 2017 and 2018 were simulated after it and are stale
-    second = AnnualOutput(mesh, Q, V, out, scalars, first_year=2017, rho_ratio=RHO_RATIO)
+    # the newest state checkpoint is at t=2017.0, i.e. inside year 2017, and
+    # carries that year's (empty) accumulation state: 2017 and 2018 were
+    # simulated after it and are stale
+    resume = {
+        "year": 2017, "year_time": 0.0,
+        "acc": {k: np.zeros(2) for k in AnnualOutput.ACCUMULATORS},
+        "h_year_start": np.asarray(h),
+    }
+    second = AnnualOutput(mesh, Q, V, out, scalars, first_year=2017,
+                          rho_ratio=RHO_RATIO, resume=resume)
     assert AnnualOutput.years_on_disk(out) == [2015, 2016]
     assert second.year == 2017
     import csv
     with open(scalars) as f:
         assert [int(r["year"]) for r in csv.DictReader(f)] == [2015, 2016]
 
-    second.start_year(_dg(Q, h))
     _write_year(second, Q, V, h, bed)                 # 2017 re-simulated
     second.close()
     assert AnnualOutput.years_on_disk(out) == [2015, 2016, 2017]
@@ -285,5 +291,64 @@ def test_a_resume_that_would_leave_a_hole_is_refused(two_cells, tmp_path):
     first.start_year(_dg(Q, h))
     _write_year(first, Q, V, h, [-500.0, -500.0])     # year 2015 on disk
     first.close()
+    resume = {
+        "year": 2030, "year_time": 0.0,
+        "acc": {k: np.zeros(2) for k in AnnualOutput.ACCUMULATORS},
+        "h_year_start": np.asarray(h),
+    }
     with pytest.raises(ValueError, match="hole in it"):
-        AnnualOutput(mesh, Q, V, out, scalars, first_year=2030, rho_ratio=RHO_RATIO)
+        AnnualOutput(mesh, Q, V, out, scalars, first_year=2030,
+                     rho_ratio=RHO_RATIO, resume=resume)
+
+
+def test_a_cold_start_refuses_to_rewrite_a_banked_series(two_cells, tmp_path, monkeypatch):
+    r"""Without the ISMIP7 accumulation state there is no evidence the years
+    on disk are wrong, and they are the only copy of what gets submitted, so
+    a run that would rewrite them stops instead of deleting them."""
+    mesh, Q, V = two_cells
+    h = [1500.0, 1500.0]
+    bed = [-500.0, -500.0]
+    out = str(tmp_path / "out" / "annual.h5")
+    scalars = str(tmp_path / "out" / "scalars.csv")
+
+    first = AnnualOutput(mesh, Q, V, out, scalars, first_year=2015, rho_ratio=RHO_RATIO)
+    first.start_year(_dg(Q, h))
+    for _ in range(3):
+        _write_year(first, Q, V, h, bed)              # 2015-2017 banked
+    first.close()
+
+    monkeypatch.delenv("ISMIP7_OUTPUT_OVERWRITE", raising=False)
+    with pytest.raises(ValueError, match="ISMIP7_OUTPUT_OVERWRITE"):
+        AnnualOutput(mesh, Q, V, out, scalars, first_year=2015, rho_ratio=RHO_RATIO)
+    assert AnnualOutput.years_on_disk(out) == [2015, 2016, 2017]
+    import csv
+    with open(scalars) as f:
+        assert [int(r["year"]) for r in csv.DictReader(f)] == [2015, 2016, 2017]
+
+    # the operator asks for the series to be redone
+    monkeypatch.setenv("ISMIP7_OUTPUT_OVERWRITE", "1")
+    again = AnnualOutput(mesh, Q, V, out, scalars, first_year=2015, rho_ratio=RHO_RATIO)
+    assert AnnualOutput.years_on_disk(out) == []
+    assert again.year == 2015
+    again.close()
+    with open(scalars) as f:
+        assert [int(r["year"]) for r in csv.DictReader(f)] == []
+
+
+def test_a_cold_start_beside_earlier_years_is_untouched(two_cells, tmp_path, monkeypatch):
+    r"""Only years the run would rewrite are in question: a cold start that
+    appends after what is on disk is an ordinary continuation."""
+    mesh, Q, V = two_cells
+    h = [1500.0, 1500.0]
+    out = str(tmp_path / "out" / "annual.h5")
+    scalars = str(tmp_path / "out" / "scalars.csv")
+    first = AnnualOutput(mesh, Q, V, out, scalars, first_year=2015, rho_ratio=RHO_RATIO)
+    first.start_year(_dg(Q, h))
+    _write_year(first, Q, V, h, [-500.0, -500.0])     # 2015 banked
+    first.close()
+
+    monkeypatch.delenv("ISMIP7_OUTPUT_OVERWRITE", raising=False)
+    second = AnnualOutput(mesh, Q, V, out, scalars, first_year=2016, rho_ratio=RHO_RATIO)
+    assert AnnualOutput.years_on_disk(out) == [2015]
+    assert second.year == 2016
+    second.close()

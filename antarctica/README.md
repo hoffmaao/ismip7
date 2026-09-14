@@ -364,6 +364,10 @@ ISMIP7_LC=2500 python scripts/calibrate_melt.py
 # results/calibrated_K_per_basin_<LC>.npz
 ```
 
+Only the mesh is read from the MAP, so any MAP built on it serves. The default
+is the section 4 name for the configured `ISMIP7_FRICTION`; `ISMIP7_INV_H5`
+names a different one.
+
 The control requires this npz. Projections take it (`K_per_basin_npz=`) or a
 scalar `ISMIP7_K_MELT`.
 
@@ -558,7 +562,7 @@ and another to the preflight.
 | `ISMIP7_BUFFER_M` | outline buffer (m) in the default mesh and sidecar names | `20000` |
 | `ISMIP7_MESH` | mesh path for the inversion and tools. A forward takes its mesh from the checkpoint | `mesh/antarctica_<COARSE>_<LC>_buffered<BUFFER_M>.msh` |
 | `ISMIP7_RASTER_SAMPLE` | how BedMachine lands on a DG0 cell. `vertex` projects the CG1 vertex interpolant; `cell_mean` takes the raster's true cell mean. `cell_mean` measured rougher: neighbouring cells share two of three vertex samples, so `vertex` damps jumps by construction. Cell means raised interior surface jumps 6% and bed and thickness jumps 35%, and at 2 km the momentum solve did not converge within 60 minutes. It does classify flotation better (32 km misclassification 9.1% to 3.2%), so the knob stays. Stamped into the MAP and read back by the forward. Reproduce with `probe_raster_sampling.py` | `vertex` |
-| `ISMIP7_INVERSION` | explicit MAP path for a forward or preflight. Must match the run's friction, n and geometry (unchecked). Use it to A/B MAPs on one mesh | derived |
+| `ISMIP7_INVERSION` | explicit MAP path for a forward or preflight. The forward checks the MAP's recorded `friction`, `n_flow` and `geometry_space` against the run and aborts on a mismatch, warning only when the MAP predates those attributes; `preflight.py` checks that the file exists. Use it to A/B MAPs on one mesh | derived |
 | `ISMIP7_CALVING` | `none`, `fixed` or `vonmises` (see above) | `none` |
 | `ISMIP7_CALVING_SIGMA_MAX_GROUNDED` / `_FLOATING` | von Mises thresholds (MPa) | `1.0` / `0.15` |
 | `ISMIP7_FRACTURE` | `mask` applies the ISMIP7 collapse forcing to floating cells, booked as calving. Masks exist for the SSPs only, so the control, historicals and OCX abort on `mask`. Needs DG0 | `none` |

@@ -1321,7 +1321,8 @@ def main():
     # records its controls, so the state z holds always belongs to last_x
     # (both are in the inner objective's unscaled space, hence _x_final).
     final_state_ok = True
-    if last_x[0] is not None and np.array_equal(last_x[0], _x_final):
+    _reuse = last_x[0] is not None and bool(np.array_equal(last_x[0], _x_final))
+    if mesh.comm.allreduce(_reuse, op=MPI.LAND):
         PETSc.Sys.Print("  Final controls are those of the last converged "
                         "evaluation; that state is reused (no re-solve)")
     else:
@@ -1385,6 +1386,13 @@ def main():
     # ── Plot ──
     # Optional: the MAP is already written and the velocity saved above, so a
     # missing plotting dependency must not fail the run at this point.
+    if not final_state_ok:
+        PETSc.Sys.Print(
+            "Skipping summary figure: the final solve did not converge, so the "
+            "only state on hand is the last converged evaluation's, which "
+            "belongs to different controls than this MAP. The MAP is saved."
+        )
+        return
     try:
         import colorcet as cc
         import matplotlib

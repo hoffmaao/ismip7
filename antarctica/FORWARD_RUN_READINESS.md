@@ -27,14 +27,15 @@ Items are ordered by what blocks a submission first.
   no version directories; the version is in the filename, see section 2).
   Anonymous HTTPS listing works with a browser-like User-Agent (Python's
   default one is refused). This is the practical route for NOTS, which has no
-  Globus endpoint: install `awscli` in the venv and `aws s3 sync
-  --no-sign-request` the scenario trees straight to `/projects`.
+  Globus endpoint; `antarctica/scripts/download_mirror.py` takes it over plain
+  HTTPS with no AWS tooling at all (see `README.md` section 2).
 - **Renamed MRI atmosphere directories (#37).** `SDBN1-*` became
   `GEMB-SDBN1-*` for MRI-ESM2-0 (a name change only, data unchanged: v2 users
   need not rerun). The core experiment uses `SDBN1` for CESM2-WACCM and
   `GEMB-SDBN1` for MRI-ESM2-0; `dEBM2` is the second downscaling for
-  perturbed ensembles. Our reader looks for `SDBN1-8000m`; it must accept the
-  new name for MRI.
+  perturbed ensembles. Done: `atmosphere_product` takes whichever of
+  `SDBN1-8000m` / `GEMB-SDBN1-8000m` exists, so a tree fetched either side of
+  the rename resolves.
 - **Control experiment (#28, #15).** ctrlclim is the 2000-2029 climatology of
   the last 15 years of `historical` and the first 15 of `ssp126`, per ESM;
   files are time-varying (repeated entries) so the setup is identical to a
@@ -55,10 +56,11 @@ Items are ordered by what blocks a submission first.
   v2 on 11 September, so check the version before using SMB-height feedback
   in OCX).
 - **Fracture masks (#29, #30, #33).** Available for both ESMs' SSPs (CESM
-  ssp585 at v2.1, ours is v2), none for historical/OCX. Apply to floating ice
-  only; the masks light up near the grounding line on Ross and FRIS, and the
-  focus group suggests combining them with a stress criterion (Lai et al.
-  2020). Still not applied in our thickness update.
+  ssp585 at v2.1), none for historical/OCX. Apply to floating ice only; the
+  masks light up near the grounding line on Ross and FRIS, and the focus
+  group suggests combining them with a stress criterion (Lai et al. 2020).
+  Applied in our thickness update as `ISMIP7_FRACTURE=mask` (section 5,
+  action 5).
 - **NaN forcing outside the downscaled mask (#39)** is intended; filling with
   zero, nearest or a large melt are all acceptable, to be stated in the
   README. Ours fills with zero (`forcing.py`, `nan_to_num(nan=0.0)`).
@@ -95,6 +97,12 @@ filename (`_v2_`, fracture `-v2.1.nc`).
 rows are behind. Everything the current forwards read (SMB, SMB anomaly,
 so, tf) is at the freeze version.
 
+**Staging since that audit** (the table above stays the 13 September
+point-in-time record): the CESM2-WACCM fracture v2.1 files and the OCX set
+were downloaded on 13 September, and the ssp585 CESM2-WACCM set was staged on
+NOTS on 14 September, all with `antarctica/scripts/download_mirror.py`. What
+is still open is in section 5, action 2.
+
 ## 3. Output and submission
 
 **Status (13 September, this branch):** the writer exists and passes the
@@ -107,10 +115,11 @@ banked);
 8 km grid through a cached supermesh overlap operator, applies the request's
 fill policies and units, encodes time, and writes the 21 gridded and 10
 scalar files with the protocol names under `AIS/<source_id>/<ism_id>/CORE/<exp>/`.
-On a 10-year ssp585 at 32 km the checker (`ismip7-compliance-checker`, a
-Python 3.13 venv wrapped in `~/.local/bin`) reports 0 naming, numerical,
-spatial, attribute and consistency errors; what remains is the experiment
-length. Conventions chosen: `acabf` is the forcing SMB and the apparent-MB
+A 2-year control and a 10-year ssp585, both at 32 km, pass every content
+check of `ismip7-compliance-checker` (a Python 3.13 venv wrapped in
+`~/.local/bin`): 0 naming, numerical, spatial, attribute and consistency
+errors on each. What remains is the experiment-length checks.
+Conventions chosen: `acabf` is the forcing SMB and the apparent-MB
 correction travels separately as `acabf_correction` (not a request
 variable), `ligroundf` is booked into the first floating cell, `lithk` is
 zero where the ice mask is zero, and `base = orog - lithk` on the grid.
@@ -194,12 +203,10 @@ What a submission needs (#5, #16, #17, #18, #19, #20, #22, #23):
    experiment through it and settle the draft's `[confirm]` items with the
    group.
 2. Still to pull from the mirror with
-   `antarctica/scripts/download_mirror.py`: the two `ctrl` trees and the
-   remainder of OCX. (CESM2-WACCM fracture v2.1 and the OCX set are staged
-   locally, and 39 GB of ssp585 forcing is staged on NOTS; the downloader
-   replaces the `awscli` route, needs no AWS tooling, and resumes.) Re-run
-   `audit_forcing_versions.py` before the production matrix and cite its
-   output in the README.
+   `antarctica/scripts/download_mirror.py`: the two `ctrl` trees (cores 9 and
+   10). Everything else the matrix reads is staged, see the staging note under
+   section 2's table. Re-run `audit_forcing_versions.py` before the production
+   matrix and cite its output in the README.
 3. End-of-series rule for 2300 in `forcing.py` and the `GEMB-SDBN1` path for
    MRI: both done (`_load_year` bridges exactly one year past the end;
    `atmosphere_product` accepts either product name).

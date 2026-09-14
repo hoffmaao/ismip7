@@ -1,28 +1,38 @@
 r"""ISMIP7 output, part one: what the forward records every year.
 
 The data request (``isschecker/data/ISMIP7_variable_request.csv`` in
-``ismip/ISM_SimulationChecker``, bundled here as ``icepack2_tools/ismip7_variable_request.csv``) asks for yearly 2D fields on the 8 km AIS
-grid and yearly scalars. Regridding is a serial post-processing step
+``ismip/ISM_SimulationChecker``, bundled here as
+``icepack2_tools/ismip7_variable_request.csv``) asks for yearly 2D fields on
+the 8 km AIS grid and yearly scalars. Regridding is a serial post-processing step
 (``antarctica/scripts/write_ismip7_output.py``); this module is the part that
 runs inside the parallel forward, gated by ``ISMIP7_OUTPUT=1``:
 
 * state variables (``ST``) are snapshots at the end of each year, stamped
   1 January of the following year by the writer;
 * flux variables (``FL``) are the year's means, accumulated every transport
-  advance from the fields the model actually applied, stamped 1 July;
+  advance from the sources REQUESTED of the transport, stamped 1 July. That
+  is the forcing SMB as handed to the transport, BEFORE the positivity
+  limiter clips a net sink that would draw a cell below ``h_clamp``, plus the
+  ocean melt. The withheld part is the run's ``clamp`` budget column and is
+  not any ISMIP7 variable, so in the thin front cells where the limiter fires
+  the grid budget does not close against ``dlithkdt``;
 * the scalars are the integrals of the same fields, written to a CSV as the
   run goes so an early stop loses nothing.
 
 Everything is kept on the model's own mesh in a Firedrake checkpoint,
 ``<results>/<experiment>_<lc>_ismip7_annual.h5``, one entry per variable and
-year (``idx=year``), in the model's units (m, m/yr, MPa); the writer converts
-to the request's SI units and applies the fill policies.
+year (0-based ``idx``, with the ``years`` attribute mapping position to
+year), in the model's units (m, m/yr, MPa); the writer converts to the
+request's SI units and applies the fill policies. A chained run appends to
+the file it finds, so the six links of a 285-year projection leave one
+continuous series.
 
 Conventions (from the request and discussions #16, #19, #22):
 
-* ``acabf`` is the forcing surface mass balance the model applied (RACMO
-  climatology plus the re-referenced anomaly). The apparent-mass-balance
-  reference ``a_ref`` is NOT part of it: it cancels the discrete flux
+* ``acabf`` is the forcing surface mass balance REQUESTED of the transport
+  (RACMO climatology plus the re-referenced anomaly), not what survived the
+  positivity limiter. The apparent-mass-balance reference ``a_ref`` is NOT
+  part of it: it cancels the discrete flux
   divergence spike by spike (up to ~1000 m/yr at the Pine Island grounding
   zone) and reported as SMB it would sit two orders of magnitude outside the
   request's range. It is recorded separately as ``acabf_correction`` (m/yr
@@ -42,12 +52,10 @@ Conventions (from the request and discussions #16, #19, #22):
 * the three area fractions are cell indicators here (0 or 1 per DG0 cell);
   the conservative regridding to 8 km turns them into fractions.
 """
-import csv
 import os
 
 import numpy as np
-from firedrake import (Constant, Function, FunctionSpace, TestFunction, assemble,
-                       conditional, dS, dx, gt)
+from firedrake import Function, TestFunction, assemble, dS, dx
 import firedrake as fd
 
 SECONDS_PER_YEAR = 31556926.0
@@ -72,10 +80,23 @@ class AnnualOutput:
     ``begin_step`` / ``commit_step`` bracket one time step so a rewound
     (subcycled) attempt does not double-count: ``_advance`` books into the
     step tallies, and only a completed step is added to the year.
+
+    A chained run resumes into the same files: when ``out_path`` already
+    exists it is opened in append mode, its ``years`` attribute seeds the
+    written years, and the next year is numbered from the end of that list.
+    Because a year is only ever written at an integer year, a resume must
+    land on a year boundary: ``first_year`` that is not an integer year
+    raises, rather than mislabelling a partial year as a whole one.
     """
 
     def __init__(self, mesh, Q_dg, V, out_path, scalars_path, first_year, rho_ratio,
                  comm=None, log=None):
+        if abs(float(first_year) - round(float(first_year))) > 1e-6:
+            raise ValueError(
+                f"ISMIP7 output accumulates whole years and writes them at "
+                f"integer years, so a run must start (or resume) on a year "
+                f"boundary; got first_year={first_year!r}"
+            )
         self.mesh, self.Q_dg, self.V = mesh, Q_dg, V
         self.out_path, self.scalars_path = out_path, scalars_path
         self.year = int(round(first_year))          # the year being accumulated (its Jan 1 has passed)
@@ -93,8 +114,30 @@ class AnnualOutput:
         self._phi = TestFunction(Q_dg)
         self._n = fd.FacetNormal(mesh)
         self._gl_cof = fd.Cofunction(Q_dg.dual())
+        # A chained job re-enters run_simulation and rebuilds this object, so
+        # an existing annual file is appended to: opening it "w" would
+        # truncate every year the earlier links wrote while the scalars CSV
+        # (opened "a") kept them, and the writer reads its year list here.
         self._written_years = []
         self._chk_mode = "w"
+        if os.path.exists(out_path):
+            with fd.CheckpointFile(out_path, "a") as chk:
+                years_attr = chk.get_attr("/", "years") if chk.has_attr("/", "years") else ""
+            self._written_years = [int(y) for y in str(years_attr).split(",") if y]
+            self._chk_mode = "a"
+        if self._written_years:
+            last = self._written_years[-1]
+            if not last <= self.year <= last + 1:
+                raise ValueError(
+                    f"{os.path.basename(out_path)} already holds years "
+                    f"{self._written_years[0]}-{last}, but this run starts at "
+                    f"{self.year}: resuming here would leave a gap in the "
+                    f"submitted series. Resume from a checkpoint at {last} or "
+                    f"{last + 1}, or move the annual file aside."
+                )
+            self.year = last + 1
+            self.log(f"  ISMIP7 output: appending to {os.path.basename(out_path)} "
+                     f"({len(self._written_years)} years through {last})")
         if self.comm.rank == 0:
             os.makedirs(os.path.dirname(out_path), exist_ok=True)
             new = not os.path.exists(scalars_path)
@@ -112,8 +155,9 @@ class AnnualOutput:
 
     def book_advance(self, dt, accum, ocean_melt, a_ref, h_dg, u, grounded_cells):
         r"""Called by ``_advance`` after the transport solve, BEFORE removal:
-        books the applied sources of this advance and the grounding-line
-        flux with the velocity the transport used."""
+        books the sources REQUESTED of this advance (the forcing SMB before
+        the positivity limiter, and the melt) and the grounding-line flux
+        with the velocity the transport used."""
         smb = assemble(accum * self._phi * dx).dat.data_ro / self.cell_area        # m/yr, cell mean
         melt = assemble(ocean_melt * self._phi * dx).dat.data_ro / self.cell_area
         self.step_acc["acabf"] += smb * dt
@@ -195,10 +239,17 @@ class AnnualOutput:
         area = self.cell_area
         def integ(arr):
             return self.comm.allreduce(float((arr * area).sum()))
-        haf_mass = np.maximum(fields["orog"].dat.data_ro - (1.0 - self.rho_ratio) * h_dg.dat.data_ro, 0.0)  # m above flotation
+        # limnsw is the mass of the ice ABOVE FLOTATION: the request defines it
+        # as that volume times the ice density, so the integrand is the
+        # thickness above flotation, h - h_f with h_f = max(-b, 0) / rho_ratio,
+        # not the height above flotation s - s_float (which is rho_ratio times
+        # smaller on marine beds and wrong outright where the bed is dry).
+        topg = fields["topg"].dat.data_ro
+        haf_thickness = np.maximum(
+            h_dg.dat.data_ro - np.maximum(-topg, 0.0) / self.rho_ratio, 0.0)
         row = {
             "lim": integ(h_dg.dat.data_ro) * RHO_I,
-            "limnsw": integ(haf_mass * grounded_cells) * RHO_I,
+            "limnsw": integ(haf_thickness * grounded_cells) * RHO_I,
             "iareagr": integ((ice_cells & grounded_cells).astype(float)),
             "iareafl": integ((ice_cells & ~grounded_cells).astype(float)),
             "tendacabf": integ(fields["acabf"].dat.data_ro) * RHO_I / SECONDS_PER_YEAR,

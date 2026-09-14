@@ -24,6 +24,13 @@ the model does not cover; ``no_ice`` and friends mean over the ice part and
 fill pixels without it. The overlap operator is cached next to the input
 (``<annual>.overlap.npz``) because it depends on the mesh only.
 
+``acabf`` is written as the forcing surface mass balance, always. The
+apparent-mass-balance reference stays where the forward put it, as
+``acabf_correction`` in the annual file: it is not a request variable, and
+folded into the SMB it would sit two orders of magnitude outside the
+request's range. A reader who wants a grid budget that closes adds the two
+from the annual file; the submission files never carry the sum.
+
 Time follows ismip/ismip7-time-encoding: ``days since 1850-01-01`` on the
 standard calendar; state variables are stamped 1 January of the following
 year, fluxes 1 July with bounds over the year; the initial state is not
@@ -206,8 +213,6 @@ def main():
     ap.add_argument("--scalars", default=None, help="the *_ismip7_scalars.csv (default: next to the annual file)")
     ap.add_argument("--variables", default=None, help="comma-separated subset")
     ap.add_argument("--no-cache", action="store_true")
-    ap.add_argument("--acabf", choices=("forcing", "applied"), default="forcing",
-                    help="acabf as the forcing SMB (default) or with the apparent-MB correction folded in")
     a = ap.parse_args()
     req = request_table()
     with fd.CheckpointFile(a.annual, "r") as chk:
@@ -218,11 +223,6 @@ def main():
             if a.variables and var not in a.variables.split(","):
                 continue
             fields[var] = [chk.load_function(mesh, name=var, idx=k).dat.data_ro.copy() for k in range(len(years))]
-        if a.acabf == "applied" and "acabf" in fields:
-            # the apparent-mass-balance correction folded into the SMB, for a
-            # budget that closes on the grid; not the default (see the module)
-            for k in range(len(years)):
-                fields["acabf"][k] += chk.load_function(mesh, name="acabf_correction", idx=k).dat.data_ro
         ice = [chk.load_function(mesh, name="sftgif", idx=k).dat.data_ro > 0.5 for k in range(len(years))]
         gr = [chk.load_function(mesh, name="sftgrf", idx=k).dat.data_ro > 0.5 for k in range(len(years))]
         fl = [chk.load_function(mesh, name="sftflf", idx=k).dat.data_ro > 0.5 for k in range(len(years))]

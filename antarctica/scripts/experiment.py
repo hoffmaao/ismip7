@@ -12,15 +12,19 @@ so projection minus control is a clean forced signal:
               mixed-slope, calibrated per-basin K)
 
 The aSMB re-reference pool is historical + ISMIP7_CLIM_SCENARIO (default
-ssp126, per protocol) over ISMIP7_CLIM_START..END (default 2000-2029) — the SAME pool
-for every experiment, so all cores share one baseline and the historical
--> projection handoff at 2014/2015 is seamless. Without RACMO the run
+ssp126, per protocol) over ISMIP7_CLIM_START..END (default 2000-2029), the
+SAME pool for every experiment, so all cores share one baseline and the
+historical -> projection handoff at 2014/2015 is seamless. Without RACMO the run
 falls back to the full acabf(t) field; with no acabf data at all it
 refuses to run (ISMIP7_ALLOW_ZERO_SMB=1 to override).
 
-Fracture / shelf-collapse masks are loaded when present but NOT yet
-applied by make_forcing_callback — wiring the collapse mask into the
-thickness update is an open protocol item.
+Fracture / shelf-collapse masks are loaded when present, and
+make_forcing_callback publishes the year's mask as ctx["collapse"].
+Whether the run acts on it is ISMIP7_FRACTURE: under `mask` the transport
+empties every FLOATING cell the mask flags and books it as calving
+(protocol path C); grounded ice is never touched, and under the default
+`none` the mask is loaded but unused. No mask exists for historical or OCX.
+The stress-gated variant (Lai et al. 2020) is not implemented.
 """
 
 import os, sys

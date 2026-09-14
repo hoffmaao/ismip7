@@ -13,7 +13,9 @@ layout minus the leading ``data/`` (so ``data/CESM2-WACCM/ctrl/...`` becomes
 readers expect (the mirror itself keeps no version directories).
 
 Partial files resume with a Range request; a file whose size matches the
-mirror is skipped. The mirror refuses Python's default User-Agent.
+mirror is skipped. Every transfer is checked against the size the listing
+gave: a short one is deleted and reported FAILED rather than left on disk as
+a truncated NetCDF. The mirror refuses Python's default User-Agent.
 """
 import argparse
 import concurrent.futures as cf
@@ -74,6 +76,14 @@ def fetch(key, size, dest):
             if not chunk:
                 break
             out.write(chunk)
+    # An empty chunk from a dropped stream is indistinguishable from the end
+    # of the body, so a truncated NetCDF would otherwise land on disk and be
+    # reported as fetched; the readers only discover it years of forcing
+    # later. Compare against the size the listing gave and fail loudly.
+    got = os.path.getsize(dest)
+    if got != size:
+        os.remove(dest)
+        raise IOError(f"short transfer: got {got} of {size} bytes; removed the partial file")
     return "resumed" if have else "fetched"
 
 

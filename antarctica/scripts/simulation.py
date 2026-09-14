@@ -64,7 +64,7 @@ from icepack2_tools.runconfig import (
     friction as _friction, geometry_space as _geometry_space, lc as _lc,
     n_flow as _n_flow,
     calving_law as _calving_law, calving_sigma_max as _calving_sigma_max,
-    fracture as _fracture_mode,
+    fracture as _fracture_mode, ismip7_output as _ismip7_output,
     # auto_resume is re-exported, not used here: every forward driver imports
     # it from this module alongside latest_checkpoint, so they resolve the
     # knob through one import rather than each reaching into runconfig.
@@ -1469,7 +1469,7 @@ def run_simulation(
     # on the model mesh, converted and regridded afterwards by
     # antarctica/scripts/write_ismip7_output.py. Off by default.
     annual = None
-    if os.environ.get("ISMIP7_OUTPUT", "0") not in ("0", "", "off"):
+    if _ismip7_output():
         from icepack2_tools.ismip7_output import AnnualOutput
         annual = AnnualOutput(
             mesh, Q_dg, ctx["V"],
@@ -1481,6 +1481,10 @@ def run_simulation(
 
     def _grounded_cells():
         return Function(Q_dg).interpolate(s - s_float).dat.data_ro > 0.0
+
+    def _any_rank(local):
+        from mpi4py import MPI as _MPI
+        return mesh.comm.allreduce(bool(local), op=_MPI.LOR)
 
     # ISMIP7 ice-shelf collapse forcing (ISMIP7_FRACTURE=mask): the forcing
     # callback fills ctx["collapse"] with the year's mask on the geometry
@@ -1747,7 +1751,7 @@ def run_simulation(
         clamp_gt = m2 - m1                                       # Gt added by DG floor
 
         calv_gt = 0.0
-        if collapse is not None and collapse.any():
+        if collapse is not None and _any_rank(collapse.any()):
             data = h_dg.dat.data
             hit = collapse & ~_grounded_cells() & (data > 0.0)
             calv_gt += mesh.comm.allreduce(

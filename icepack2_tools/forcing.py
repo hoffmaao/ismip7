@@ -34,6 +34,16 @@ _DEFAULT_DATA_ROOT = os.path.join(
 )
 
 
+def _comm_rank():
+    r"""World rank, or 0 without mpi4py: notices meant to be logged once must
+    not repeat per rank."""
+    try:
+        from mpi4py import MPI
+    except ImportError:
+        return 0
+    return MPI.COMM_WORLD.rank
+
+
 def smb_kgm2s_to_myr(smb_kgm2s):
     r"""Convert SMB from kg/m^2/s to m/yr ice equivalent."""
     return smb_kgm2s * _SEC_PER_YEAR / _RHO_ICE * (_RHO_WATER / _RHO_ICE)
@@ -436,14 +446,26 @@ class ISMIP7Atmosphere:
         if not os.path.exists(path):
             # End of the series: CESM2-WACCM stops at 2299 and the empty 2300
             # files were removed (discussion #8), while a 2015-2300 run needs
-            # the 2300 forcing year. Persist the last available year, once
-            # per variable in the log, rather than failing at the last step.
+            # the 2300 forcing year. Bridge exactly that one year, once per
+            # variable in the log, rather than failing at the last step.
+            # Anything further past the end is a short tree, not the end of
+            # the series, and repeating one year of SMB for decades would be a
+            # scientifically wrong run reported as a success, so it raises.
             last = self._last_year(vdir, variable, product, version)
             if last is not None and int(year) > last:
+                if int(year) - last > 1:
+                    raise FileNotFoundError(
+                        f"ISMIP7Atmosphere: {variable} for {self.esm} "
+                        f"{self.scenario} ends at {last} on disk, but year "
+                        f"{int(year)} was requested. Only one year past the "
+                        f"end of the series is bridged (2300 after 2299); this "
+                        f"tree is incomplete, so finish the download instead."
+                    )
                 if variable not in self._persisted:
                     self._persisted.add(variable)
-                    print(f"  ISMIP7Atmosphere: {variable} has no year {int(year)}; "
-                          f"persisting {last}, the last year on disk", flush=True)
+                    if _comm_rank() == 0:
+                        print(f"  ISMIP7Atmosphere: {variable} has no year {int(year)}; "
+                              f"persisting {last}, the last year on disk", flush=True)
                 self._cache[key] = self._load_year(variable, last)
                 return self._cache[key]
             return None

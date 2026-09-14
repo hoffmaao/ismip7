@@ -28,9 +28,24 @@
 set -euo pipefail
 
 here="$(cd "$(dirname "$0")" && pwd)"
-# shellcheck disable=SC1091
-. "$here/site_env.sh"
-ismip7_site_require
+# Read the site file in a subshell and import only the scheduler fields. The
+# model defaults site_env.sh exports (ISMIP7_LC, ISMIP7_MESH, ISMIP7_FRICTION,
+# ISMIP7_MAP_DEFAULT and the rest) must stay out of this shell, because
+# --export=ALL below would carry them into the job and kill every ${VAR:-...}
+# fallback the job scripts resolve for themselves. A KEY=VALUE argument still
+# reaches the job, and so does anything the operator exported by hand.
+site_fields=$(
+    # shellcheck disable=SC1091
+    . "$here/site_env.sh"
+    ismip7_site_require
+    declare -p ISMIP7_SITE_NAME ISMIP7_REPO ISMIP7_ACCOUNT \
+               ISMIP7_PART_LONG ISMIP7_PART_SHORT ISMIP7_PART_DEBUG \
+               ISMIP7_TASKS ISMIP7_TASKS_INV ISMIP7_TASKS_FWD \
+               ISMIP7_MEM_INV ISMIP7_MEM_FWD \
+               ISMIP7_TIME_INV ISMIP7_TIME_FWD \
+               ISMIP7_CONSTRAINT_INV ISMIP7_CONSTRAINT_FWD
+) || exit 2
+eval "$site_fields"
 
 kind="${1:-}"; shift || true
 case "$kind" in
@@ -44,7 +59,7 @@ case "$kind" in
 esac
 
 constraint="$cons"
-account="${ISMIP7_ACCOUNT:-}"
+account="$ISMIP7_ACCOUNT"
 dry=0
 exports=()
 while [ $# -gt 0 ]; do

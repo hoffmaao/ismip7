@@ -905,7 +905,8 @@ def load_K_per_basin(npz_path, mesh_x, mesh_y, fill=0.0):
     and is expected to contain `basin_ids` (int) and `K_basin` (float) plus
     the IMBIE2 basin file path (the IMBIE2 8 km grid is re-read here so
     that the K-field can be remapped to *any* mesh, not just the one used
-    during calibration).
+    during calibration). An optional `sin_alpha_cap` records the draft slope
+    cap the K was fitted against and triggers a once-per-run warning.
 
     Returns an array of shape (len(mesh_x),) of per-node K values, with
     `fill` outside the calibrated basin set or where K_basin is NaN.

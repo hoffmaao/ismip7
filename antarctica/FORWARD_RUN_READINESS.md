@@ -212,7 +212,9 @@ forcing-version audit, the output writer, and the melt calibration above.
    `ISMIP7_OUTPUT=1`) through the writer and the compliance checker. It is the
    first run at experiment length, so it is what clears the checker's remaining
    length checks. Record which K calibration it read: a run picks up whichever
-   `calibrated_K_per_basin_*.npz` is staged when it starts.
+   `calibrated_K_per_basin_*.npz` is staged when it starts. The job is held in
+   the queue while the slope decision of action 5 is open, and
+   `scontrol release 1390452` starts it.
 2. Settle the `[confirm]` items in the submission README draft with the group.
 3. Carry the Budd re-inversion to a MAP that passes `check_budd_map.py
    --forward`, then run that check on every MAP the matrix will use.
@@ -249,7 +251,8 @@ forcing-version audit, the output writer, and the melt calibration above.
 
    Closing the gap between calibration and forward is the next step. Which side
    moves is a science decision, since the cap is tied to the unsettled upstream
-   local-slope question.
+   local-slope question. Until it is made, `load_K_per_basin` warns once per
+   run when the K file it reads records the cap it was fitted against.
 6. Optional: read the provided `ctrl` trees in place of the `ssp126`
    reference-climate pool.
 7. Optional: the stress criterion (Lai et al. 2020) alongside the collapse

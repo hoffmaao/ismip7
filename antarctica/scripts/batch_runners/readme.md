@@ -283,8 +283,11 @@ The law also picks the filename tag, so a Budd re-inversion writes its own
 
 `submit_inversions.sh [B|C|BC]` submits the two 2 km
 strategies (B: cell-mean BedMachine sampling on the 20 km-interior mesh; C: the
-5 km-interior mesh with vertex sampling) to `long` on Sapphire Rapids at 32
-ranks, each named so the converged 2500 m map is never touched.
+5 km-interior mesh with vertex sampling), each named so the converged 2500 m
+map is never touched. Both take this cluster's inversion defaults through
+`submit.sh`, so the partition, constraint and rank count come from the site
+file. At Rice that is `long`, Sapphire Rapids and 32 ranks; at IU it is
+`general`, no constraint and 16 ranks.
 
 **The chain.** A 2 km inversion can outlast a wall limit, and the inversion
 checkpoints `ISMIP7_MAP_OUT` every 20 iterates and can warm-start from it. So

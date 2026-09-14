@@ -64,6 +64,7 @@ from icepack2_tools.runconfig import (
     friction as _friction, geometry_space as _geometry_space, lc as _lc,
     n_flow as _n_flow,
     calving_law as _calving_law, calving_sigma_max as _calving_sigma_max,
+    fracture as _fracture_mode,
     # auto_resume is re-exported, not used here: every forward driver imports
     # it from this module alongside latest_checkpoint, so they resolve the
     # knob through one import rather than each reaching into runconfig.
@@ -1481,6 +1482,19 @@ def run_simulation(
     def _grounded_cells():
         return Function(Q_dg).interpolate(s - s_float).dat.data_ro > 0.0
 
+    # ISMIP7 ice-shelf collapse forcing (ISMIP7_FRACTURE=mask): the forcing
+    # callback fills ctx["collapse"] with the year's mask on the geometry
+    # cells, and every transport advance removes the FLOATING cells it
+    # flags, booked as calving. Grounded ice is never touched (protocol
+    # path C). Off by default.
+    collapse = None
+    if _fracture_mode() == "mask":
+        if not geom_dg:
+            raise RuntimeError("ISMIP7_FRACTURE=mask needs ISMIP7_GEOMETRY_SPACE=dg0 (cell-wise removal)")
+        collapse = np.zeros(len(cell_area), dtype=bool)
+        ctx["collapse"] = collapse
+        PETSc.Sys.Print("  Ice-shelf collapse forcing: ISMIP7_FRACTURE=mask (floating cells flagged by the mask are removed and booked as calving)")
+
     def _write_csv_row(row):
         if csv_f is None:
             return
@@ -1733,9 +1747,17 @@ def run_simulation(
         clamp_gt = m2 - m1                                       # Gt added by DG floor
 
         calv_gt = 0.0
+        if collapse is not None and collapse.any():
+            data = h_dg.dat.data
+            hit = collapse & ~_grounded_cells() & (data > 0.0)
+            calv_gt += mesh.comm.allreduce(
+                float((data[hit] * cell_area[hit]).sum())) * rho_gt
+            if annual is not None:
+                annual.book_removal(hit, data[hit])
+            data[hit] = 0.0
         if beyond is not None:
             data = h_dg.dat.data
-            calv_gt = mesh.comm.allreduce(
+            calv_gt += mesh.comm.allreduce(
                 float((data[beyond] * cell_area[beyond]).sum())
             ) * rho_gt
             if annual is not None:

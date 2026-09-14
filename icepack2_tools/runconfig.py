@@ -105,6 +105,23 @@ CALVING_SIGMA_MAX_GROUNDED_DEFAULT = "1.0"     # MPa
 CALVING_SIGMA_MAX_FLOATING_DEFAULT = "0.15"    # MPa
 
 
+FRACTURE_MODES = ("none", "mask")
+FRACTURE_DEFAULT = "none"
+
+
+def fracture():
+    r"""``ISMIP7_FRACTURE``: how the ISMIP7 ice-shelf collapse forcing is
+    applied. ``none`` (default) loads nothing; ``mask`` removes the ice of
+    every FLOATING cell the year's collapse mask flags, booked as calving
+    (protocol path C, discussions #30 and #33: floating ice only; no mask
+    exists for historical or OCX, so those runs see nothing either way).
+    A stress-gated variant (Lai et al. 2020) is not implemented."""
+    value = os.environ.get("ISMIP7_FRACTURE", FRACTURE_DEFAULT).lower()
+    if value not in FRACTURE_MODES:
+        raise ValueError(f"ISMIP7_FRACTURE must be one of {FRACTURE_MODES}, got {value!r}")
+    return value
+
+
 def calving_law():
     r"""``ISMIP7_CALVING``: ``none``, ``fixed`` or ``vonmises``."""
     value = os.environ.get("ISMIP7_CALVING", CALVING_DEFAULT).lower()

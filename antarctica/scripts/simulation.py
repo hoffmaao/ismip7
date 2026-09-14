@@ -255,8 +255,8 @@ def setup_model(restart_from=None):
             if _chk.has_attr("/", "mesh_basename") else ""
         )
 
-        # The collaborators additionally stamp the mesh PARAMETERS. Keep both: the
-        # basename is direct and also covers meshes outside the standard
+        # The collaborators additionally stamp the mesh PARAMETERS. Keep both:
+        # the basename is direct and also covers meshes outside the standard
         # naming pattern (e.g. the 500 m aniso mesh), while lc_coarse/buffer_m
         # let bndids_filename() reconstruct the name parametrically. They
         # cross-check each other, and either alone is enough to resolve the

@@ -57,7 +57,6 @@ from icepack2.constants import (
     ice_density as rho_I,
     water_density as rho_W,
     gravity as g,
-    glen_flow_law,
 )
 
 _ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -69,8 +68,13 @@ import sys
 sys.path.insert(0, os.path.dirname(_ROOT))
 from icepack2_tools.boundary import load_boundary_ids
 from icepack2_tools.mpi_stats import global_max
+from icepack2_tools.geometry import sample_to_geometry
 from icepack2_tools.naming import map_basename
-from icepack2_tools.runconfig import friction as _friction, lc as _lc, lc_coarse as _lc_coarse
+from icepack2_tools.runconfig import (
+    friction as _friction, geometry_space as _geometry_space,
+    raster_sample as _raster_sample,
+    lc as _lc, lc_coarse as _lc_coarse, n_flow as _n_flow,
+)
 from mesh_naming import get_buffer_m, mesh_filename
 
 lc = _lc()
@@ -99,6 +103,18 @@ def find_file(d, p):
 def main():
     os.makedirs(RESULTS_DIR, exist_ok=True)
 
+    friction = _friction()
+    chk_fn = os.path.join(MESH_DIR, map_basename(friction, lc))
+    if friction != "budd":
+        raise RuntimeError(
+            f"run_eigendec.py implements only the Budd sliding form, but "
+            f"ISMIP7_FRICTION={friction!r}; it would have opened {chk_fn}. "
+            f"Set ISMIP7_FRICTION=budd and point at a Budd MAP."
+        )
+    geometry_space = _geometry_space()
+    raster_sample = _raster_sample()
+    n_flow_val = _n_flow()
+
     # ── Load mesh + data ──
     mesh_fn = os.environ.get("ISMIP7_MESH", mesh_filename(lc_coarse, lc, buffer_m))
     PETSc.Sys.Print(f"Loading mesh: {mesh_fn}")
@@ -114,6 +130,9 @@ def main():
     )
 
     Q = FunctionSpace(mesh, "CG", 1)
+    Q_g = FunctionSpace(mesh, "DG", 0) if geometry_space == "dg0" else Q
+    PETSc.Sys.Print(f"  Geometry space: {geometry_space.upper()}, "
+                    f"raster sampling: {raster_sample}, n={n_flow_val:g}")
     V = VectorFunctionSpace(mesh, "CG", 1)
     dg0 = FiniteElement("DG", "triangle", 0)
     Sigma = TensorFunctionSpace(mesh, dg0, symmetry=True)
@@ -121,22 +140,20 @@ def main():
     Z = V * Sigma * T
 
     bm_fn = find_file(os.path.join(DATA_DIR, "bedmachine"), "*.nc")
-    b = icepack.interpolate(rasterio.open(f"netcdf:{bm_fn}:bed"), Q)
-    H = Function(Q).interpolate(
-        max_value(
-            icepack.interpolate(rasterio.open(f"netcdf:{bm_fn}:thickness"), Q),
-            Constant(10.0),
-        )
-    )
+    b = sample_to_geometry(
+        rasterio.open(f"netcdf:{bm_fn}:bed"), Q_g, Q, method=raster_sample)
+    H = sample_to_geometry(
+        rasterio.open(f"netcdf:{bm_fn}:thickness"),
+        Q_g, Q, floor=10.0, method=raster_sample)
     rho_ratio = Constant(917.0 / 1024.0)
-    s = Function(Q).interpolate(max_value(b + H, (Constant(1.0) - rho_ratio) * H))
+    s = Function(Q_g).interpolate(max_value(b + H, (Constant(1.0) - rho_ratio) * H))
     vel_fn = find_file(os.path.join(DATA_DIR, "velocity"), "*.nc")
     u_obs = icepack.interpolate(
         (rasterio.open(f"netcdf:{vel_fn}:VX"), rasterio.open(f"netcdf:{vel_fn}:VY")),
         V,
         fillvalue=0.0,
     )
-    phi_eff = Function(Q).interpolate(
+    phi_eff = Function(Q_g).interpolate(
         max_value(
             Constant(1.0) - rho_W * g * max_value(Constant(0.0), -b) / (rho_I * g * H),
             Constant(0.01),
@@ -144,7 +161,7 @@ def main():
     )
     A0 = Function(Q).interpolate(Constant(icepack.rate_factor(Constant(260.0))))
 
-    n_glen = Constant(glen_flow_law)
+    n_glen = Constant(n_flow_val)
     tau_c = Constant(0.1)
     u_c = Constant(100.0)
     K_base = u_c / (phi_eff * tau_c) ** n_glen
@@ -162,7 +179,6 @@ def main():
     fc_params = {"quadrature_degree": 4}
 
     # ── Load MAP ──
-    chk_fn = os.path.join(MESH_DIR, map_basename(_friction(), lc))
     PETSc.Sys.Print(f"Loading MAP: {chk_fn}")
     with fd.CheckpointFile(chk_fn, "r") as chk:
         chk_mesh = chk.load_mesh()
@@ -206,7 +222,7 @@ def main():
         derivative(L_map, z), z, form_compiler_parameters=fc_params
     )
     slvr = NonlinearVariationalSolver(prob, solver_parameters=sparams)
-    for exp in np.linspace(1.0, glen_flow_law, 5):
+    for exp in np.linspace(1.0, n_flow_val, 5):
         n_glen.assign(exp)
         slvr.solve()
     PETSc.Sys.Print("  Done")
@@ -250,7 +266,7 @@ def main():
             L += model.minimization.calving_terminus(**flds, outflow_ids=calving_ids)
         F = derivative(L, z)
         # Continuation INSIDE annotation — each step recorded on tape
-        for exp in np.linspace(1.0, glen_flow_law, 5):
+        for exp in np.linspace(1.0, n_flow_val, 5):
             n_glen.assign(exp)
             EquationSolver(
                 F == 0, z, solver_parameters=sparams, form_compiler_parameters=fc_params
@@ -295,7 +311,7 @@ def main():
         derivative(L_pre, z), z, form_compiler_parameters=fc_params
     )
     slvr_pre = NonlinearVariationalSolver(prob_pre, solver_parameters=sparams)
-    for exp in np.linspace(1.0, glen_flow_law, 5):
+    for exp in np.linspace(1.0, n_flow_val, 5):
         n_glen.assign(exp)
         slvr_pre.solve()
     PETSc.Sys.Print("  Done (z is at MAP with UFL expressions)")

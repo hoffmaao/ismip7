@@ -54,9 +54,7 @@ def _sample_raster(raster, Q):
         return icepack.interpolate(raster, Q)
     from .geometry import sample_to_geometry
     Q_cg = fd.FunctionSpace(Q.mesh(), "CG", 1)
-    return sample_to_geometry(
-        lambda space: icepack.interpolate(raster, space), Q, Q_cg
-    )
+    return sample_to_geometry(raster, Q, Q_cg)
 
 
 def load_racmo_smb_climatology(Q, clim_start=2000, clim_end=2029, data_dir=None,

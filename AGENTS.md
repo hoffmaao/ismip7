@@ -122,10 +122,11 @@ The inverse also holds - one line that looks fine and is always a bug:
 
 There is a unit suite at the repo root - `python -m pytest tests/ -q` from
 there, in the activated Firedrake environment (§1), serial and a few seconds -
-and it is the command the gate runs. It covers pure rules only (the front
-bookkeeping the transport applies, the apparent-MB extent masking, the `fixed`
-law's t=0 anchor); it cannot catch a physics regression. Use these instead, in
-order of cost:
+and it is the command the gate runs. It covers rules rather than results (the
+front bookkeeping the transport applies, the apparent-MB extent masking, the
+`fixed` law's t=0 anchor, the Budd shelf gate, adapted-mesh naming, and the two
+self-chaining Slurm runners driven under a shim); it cannot catch a physics
+regression. Use these instead, in order of cost:
 
 1. **The mass budget audit.** Every timestep logs
    `SMB / melt / amb / outflux / calv / clamp / dM/dt / resid` in Gt/yr, and

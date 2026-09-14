@@ -9,9 +9,10 @@ masked where no observation), their difference, the log friction adjustment
 theta, the effective Weertman coefficient C = C_w0 exp(theta) on grounded
 ice (C_w0 is the driving-stress anchor, rebuilt from the saved geometry and
 observed velocity exactly as the forward does), and the log fluidity
-adjustment phi (A = A_prior exp(phi)). With --diff, a second figure shows
-B minus A for speed, theta and phi (same mesh required). A periodic
-checkpoint carries no velocity: the speed panels are then left out.
+adjustment phi (A = A_prior exp(phi)). With --diff, B gets its own panels
+too and a third figure shows B minus A for speed, theta and phi (same mesh
+required). A periodic checkpoint carries no velocity: the speed panels are
+then left out.
 """
 import argparse
 import os

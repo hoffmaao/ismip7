@@ -440,8 +440,9 @@ B.h5]` writes `figs/maps/map_<label>.png`: model and observed speed and their
 difference, the log friction adjustment `θ`, the effective Weertman
 coefficient `C = C_w0 exp(θ)` on grounded ice (the anchor `C_w0` rebuilt from
 the saved geometry and observed velocity exactly as the forward does), and the
-log fluidity adjustment `φ`. `--diff B.h5` adds a second figure of B minus A
-for speed, `θ` and `φ` on the same mesh. It reads the checkpoint alone - no
+log fluidity adjustment `φ`. `--diff B.h5` adds B's own panels as
+`map_<label-b>.png` and a `diff_<label-b>_minus_<label>.png` of B minus A for
+speed, `θ` and `φ` on the same mesh. It reads the checkpoint alone - no
 solve, no run environment beyond `ISMIP7_M_SLIDE` - and leaves the speed panels
 out for a MAP that carries no velocity.
 

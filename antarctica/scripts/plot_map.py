@@ -49,7 +49,6 @@ def load(map_path, m_slide=3.0):
     xy = mesh.coordinates.dat.data_ro
     tri = mesh.coordinates.cell_node_map().values
     Q_g = f["thickness"].function_space()
-    Q = f["log_friction"].function_space()
     H, s, b = f["thickness"], f["surface"], f["bed"]
     out = {"xy": xy / 1e3, "tri": tri, "attrs": attrs, "n_cells": tri.shape[0]}
     # cell-wise geometry (DG0 or CG1: interpolate to DG0 either way)
@@ -103,7 +102,6 @@ def figure_map(d, label):
     fig, axes = plt.subplots(nrow, ncol, figsize=(4.6 * ncol, 4.3 * nrow + 0.4), dpi=110)
     axes = np.atleast_2d(axes)
     nodal = d["nodal_controls"]
-    ice_nodes = None
     if have_u:
         sp = np.maximum(d["speed"], 0.1)
         so = np.maximum(d["speed_obs"], 0.1)
@@ -147,7 +145,7 @@ def slug(label):
 
 
 def stats(d, label):
-    ice = d["ice"]; grounded = ice & (d["haf"] > 0); floating = ice & (d["haf"] < 0)
+    ice = d["ice"]; grounded = ice & (d["haf"] > 0)
     line = [f"{label}: {d['n_cells']} cells"]
     line.append(f"theta [{np.percentile(d['theta'], 1):+.2f}, {np.percentile(d['theta'], 99):+.2f}] (1-99%)")
     line.append(f"phi [{np.percentile(d['phi'], 1):+.2f}, {np.percentile(d['phi'], 99):+.2f}]")

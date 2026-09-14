@@ -2,8 +2,10 @@
 
 Checked against the ISMIP discussion board (https://github.com/orgs/ismip/discussions,
 45 threads, all read) on 13 September 2026. The previous sweep is the "Upstream
-ISMIP7 protocol status (checked Aug 12)" section of `CLAUDE.md`; this file
-supersedes it for anything about running and submitting the forward matrix.
+ISMIP7 protocol status (checked Aug 12)" section of the local `CLAUDE.md`
+working notes, which this repository does not track; this file supersedes it
+for anything about running and submitting the forward matrix, and is the
+tracked home of the sweep from here on.
 Items are ordered by what blocks a submission first.
 
 ## 1. What the protocol now says (new or changed since 12 August)

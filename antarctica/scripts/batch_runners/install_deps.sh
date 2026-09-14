@@ -6,7 +6,9 @@
 #
 # The venv, the modules and the work filesystem come from this cluster's
 # sites/<name>.sh, the same as every other runner. Set FD_PREFIX if the build
-# went somewhere other than $ISMIP7_WORK/sw.
+# went somewhere other than $ISMIP7_WORK/sw. TMPDIR is forced under
+# ISMIP7_WORK because /tmp is unwritable on many login nodes, which pip only
+# discovers part way through an install.
 #
 # The four sources are rsynced into $FD_PREFIX/src. A clone would miss both of
 # the reasons they live there: icepack2 carries two uncommitted functional
@@ -20,7 +22,7 @@ ismip7_site_require
 
 PREFIX="${FD_PREFIX:-$ISMIP7_WORK/sw}"
 SRC="$PREFIX/src"
-export TMPDIR="${TMPDIR:-$ISMIP7_WORK/tmp}"; mkdir -p "$TMPDIR"
+export TMPDIR="$ISMIP7_WORK/tmp"; mkdir -p "$TMPDIR"
 ismip7_activate
 echo "venv: $VIRTUAL_ENV   python: $(python -V 2>&1)"
 echo "src:  $SRC"

@@ -45,3 +45,8 @@ ISMIP7_TIME_FWD="${ISMIP7_TIME_FWD:-1-00:00:00}"
 # numbers are known.
 #   ISMIP7_TASKS_INV / ISMIP7_MEM_INV    submit.sh inversion
 #   ISMIP7_TASKS_FWD / ISMIP7_MEM_FWD    submit.sh projection
+#
+# ISMIP7_CONSTRAINT splits the same way when the inversions need a different
+# node generation from everything else:
+#   ISMIP7_CONSTRAINT_INV                submit.sh inversion
+#   ISMIP7_CONSTRAINT_FWD                every other kind

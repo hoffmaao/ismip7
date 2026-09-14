@@ -54,7 +54,13 @@
 
 set -uo pipefail
 
-PREFIX="${FD_PREFIX:-/projects/ah301/sw}"
+cd "${SLURM_SUBMIT_DIR:-.}"
+# The venv does not exist yet, so take ISMIP7_WORK from the site file without
+# calling ismip7_activate. install_deps.sh derives the same prefix.
+. antarctica/scripts/batch_runners/site_env.sh
+ismip7_site_require
+
+PREFIX="${FD_PREFIX:-$ISMIP7_WORK/sw}"
 PETSC_SRC="$PREFIX/petsc"
 VENV="$PREFIX/venv-firedrake"
 NPROC="${SLURM_CPUS_PER_TASK:-8}"

@@ -18,9 +18,13 @@ ISMIP7_PART_LONG="${ISMIP7_PART_LONG:-long}"
 ISMIP7_PART_SHORT="${ISMIP7_PART_SHORT:-commons}"
 ISMIP7_PART_DEBUG="${ISMIP7_PART_DEBUG:-scavenge}"
 ISMIP7_ACCOUNT="${ISMIP7_ACCOUNT:-}"
-# Sapphire Rapids: 192 threads, 257-515 GB. The alternative is cascadelake
-# (80 threads, 187 GB). Empty would take whatever starts first.
-ISMIP7_CONSTRAINT="${ISMIP7_CONSTRAINT:-sapphirerapids}"
+# Sapphire Rapids (192 threads, 257-515 GB) is what the 2 km inversions need,
+# because `long` holds exactly one Cascade Lake node. Everything else stays on
+# cascadelake (80 threads, 187 GB): the measured timings and the chain depth
+# come from that generation, and build_firedrake.sbatch configures with
+# -march=native, so a build has to land where the runs do.
+ISMIP7_CONSTRAINT_INV="${ISMIP7_CONSTRAINT_INV:-sapphirerapids}"
+ISMIP7_CONSTRAINT_FWD="${ISMIP7_CONSTRAINT_FWD:-cascadelake}"
 
 # /projects is a 20 TB share; /home is a 10 TB NFS export and /scratch is
 # purged, so the forcing tree lives on /projects.

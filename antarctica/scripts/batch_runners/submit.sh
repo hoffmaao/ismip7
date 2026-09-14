@@ -14,7 +14,8 @@
 #   submit.sh projection ISMIP7_EXPERIMENT=ssp585_cesm_waccm ISMIP7_OUTPUT=1
 #   ISMIP7_SITE=iu_quartz submit.sh inversion --dry-run
 #
-# Options (each overrides the site default):
+# Options (each overrides the site default, in either spelling, --mem 240G or
+# --mem=240G):
 #   --tasks N --mem 240G --time 1-00:00:00
 #   --partition P --constraint C --account A --name JOBNAME
 #   --dry-run    print the sbatch command and stop
@@ -33,20 +34,25 @@ ismip7_site_require
 
 kind="${1:-}"; shift || true
 case "$kind" in
-    inversion)  script=inversion.sbatch;       part="$ISMIP7_PART_LONG";  time="$ISMIP7_TIME_INV"; tasks="$ISMIP7_TASKS_INV"; mem="$ISMIP7_MEM_INV"; name=ismip7_inv ;;
-    projection) script=projection.sbatch;      part="$ISMIP7_PART_SHORT"; time="$ISMIP7_TIME_FWD"; tasks="$ISMIP7_TASKS_FWD"; mem="$ISMIP7_MEM_FWD"; name=ismip7_fwd ;;
-    smoke)      script=smoke.sbatch;           part="$ISMIP7_PART_DEBUG"; time=00:45:00;           tasks=4;              mem=24G;           name=ismip7_smoke ;;
-    verify)     script=verify.sbatch;          part="$ISMIP7_PART_DEBUG"; time=00:15:00;           tasks=4;              mem=16G;           name=fd_verify ;;
-    probe)      script=partition_probe.sbatch; part="$ISMIP7_PART_DEBUG"; time=01:00:00;           tasks="$ISMIP7_TASKS"; mem=64G;          name=ismip7_part ;;
-    build)      script=build_firedrake.sbatch; part="$ISMIP7_PART_SHORT"; time=12:00:00;           tasks=1;              mem=48G;           name=fd_build ;;
+    inversion)  script=inversion.sbatch;       part="$ISMIP7_PART_LONG";  time="$ISMIP7_TIME_INV"; tasks="$ISMIP7_TASKS_INV"; mem="$ISMIP7_MEM_INV"; cons="$ISMIP7_CONSTRAINT_INV"; name=ismip7_inv ;;
+    projection) script=projection.sbatch;      part="$ISMIP7_PART_SHORT"; time="$ISMIP7_TIME_FWD"; tasks="$ISMIP7_TASKS_FWD"; mem="$ISMIP7_MEM_FWD"; cons="$ISMIP7_CONSTRAINT_FWD"; name=ismip7_fwd ;;
+    smoke)      script=smoke.sbatch;           part="$ISMIP7_PART_DEBUG"; time=00:45:00;           tasks=4;              mem=24G;           cons="$ISMIP7_CONSTRAINT_FWD"; name=ismip7_smoke ;;
+    verify)     script=verify.sbatch;          part="$ISMIP7_PART_DEBUG"; time=00:15:00;           tasks=4;              mem=16G;           cons="$ISMIP7_CONSTRAINT_FWD"; name=fd_verify ;;
+    probe)      script=partition_probe.sbatch; part="$ISMIP7_PART_DEBUG"; time=01:00:00;           tasks="$ISMIP7_TASKS"; mem=64G;          cons="$ISMIP7_CONSTRAINT_FWD"; name=ismip7_part ;;
+    build)      script=build_firedrake.sbatch; part="$ISMIP7_PART_SHORT"; time=12:00:00;           tasks=1;              mem=48G;           cons="$ISMIP7_CONSTRAINT_FWD"; name=fd_build ;;
     *) sed -n '2,${/^#/!q;s/^# \{0,1\}//p;}' "$0"; exit 2 ;;
 esac
 
-constraint="${ISMIP7_CONSTRAINT:-}"
+constraint="$cons"
 account="${ISMIP7_ACCOUNT:-}"
 dry=0
 exports=()
 while [ $# -gt 0 ]; do
+    # --opt=value is the spelling sbatch itself takes, so split it and let the
+    # same branches handle both forms.
+    case "$1" in
+        --*=*) set -- "${1%%=*}" "${1#*=}" "${@:2}" ;;
+    esac
     case "$1" in
         --tasks)      tasks="$2"; shift 2 ;;
         --mem)        mem="$2"; shift 2 ;;

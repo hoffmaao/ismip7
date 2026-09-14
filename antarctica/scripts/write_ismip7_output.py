@@ -301,60 +301,86 @@ def main():
 
     # One open file per gridded variable, one year of grid in memory at a
     # time: the cubes for a 286-year submission on the production mesh would
-    # otherwise be tens of GB in a serial script.
+    # otherwise be tens of GB in a serial script. Everything is written to
+    # <name>.nc.tmp and renamed into place only once the last year and the
+    # scalars are through, so a failure part-way leaves no half-filled file
+    # that looks like a finished submission, and any previous files stand.
     paths = {var: os.path.join(outdir, f"{var}_{tag}.nc") for var in VARIABLES_2D}
-    handles = {var: create_2d(paths[var], var, req[var], years,
-                              req[var]["Type"] == "FL")
-               for var in VARIABLES_2D}
-    stats = {var: [np.inf, -np.inf, 0] for var in VARIABLES_2D}
-    for k, yr in enumerate(years):
-        with fd.CheckpointFile(AnnualOutput.year_path(a.annual, yr), "r") as chk:
-            ymesh = chk.load_mesh()
-            cells = {var: chk.load_function(ymesh, name=var).dat.data_ro.copy()
-                     for var in VARIABLES_2D}
-        masks = {"no_ice": cells["sftgif"] > 0.5,
-                 "no_grounded_ice": cells["sftgrf"] > 0.5,
-                 "no_floating_ice": cells["sftflf"] > 0.5}
-
-        def plane(var):
-            meta = req[var]; policy = meta["fill_policy"]
-            m = masks[policy] if policy in masks else None
-            return (regrid(W, cells[var], policy, m)
-                    * CONVERT[meta["units"]]).reshape(ISMIP7_NY, ISMIP7_NX).astype("f4")
-
-        # the checker requires orog == base + lithk pixel by pixel and
-        # orog >= 0; the elevations are covered-part means while lithk is a
-        # whole-pixel mean (diluted where the pixel is partly covered), so
-        # the base absorbs the dilution: base := orog - lithk on the grid.
-        # Rebuilding orog instead put negative surfaces on partly covered
-        # floating pixels (base < 0 plus a diluted thickness).
-        done = {"orog": plane("orog"), "lithk": plane("lithk")}
-        done["base"] = done["orog"] - done["lithk"]
-        for var in VARIABLES_2D:
-            p_yr = done.get(var)
-            if p_yr is None:
-                p_yr = plane(var)
-            write_slice(handles[var][1], k, p_yr)
-            finite = np.isfinite(p_yr)
-            st = stats[var]
-            if finite.any():
-                st[0] = min(st[0], float(np.min(p_yr[finite])))
-                st[1] = max(st[1], float(np.max(p_yr[finite])))
-            st[2] += int(finite.sum())
-    for var in VARIABLES_2D:
-        handles[var][0].close()
-        lo, hi, nfin = stats[var]
-        pct = 100.0 * nfin / (len(years) * ISMIP7_NY * ISMIP7_NX)
-        rng = f"[{lo:.3e}, {hi:.3e}]" if nfin else "[all fill]"
-        print(f"  {var:12s} {req[var]['units']:11s} {rng} "
-              f"{pct:5.1f}% filled  -> {os.path.basename(paths[var])}", flush=True)
-
     for var in SCALARS:
-        meta = req[var]
-        values = [float(rows[yr][var]) for yr in years]
-        write_scalar(os.path.join(outdir, f"{var}_{tag}.nc"), var, meta, years,
-                     values, meta["Type"] == "FL")
-    print(f"  {len(SCALARS)} scalars from {os.path.basename(scal)}")
+        paths[var] = os.path.join(outdir, f"{var}_{tag}.nc")
+    tmps = {var: path + ".tmp" for var, path in paths.items()}
+    handles = {}
+    try:
+        for var in VARIABLES_2D:
+            handles[var] = create_2d(tmps[var], var, req[var], years,
+                                     req[var]["Type"] == "FL")
+        stats = {var: [np.inf, -np.inf, 0] for var in VARIABLES_2D}
+        for k, yr in enumerate(years):
+            with fd.CheckpointFile(AnnualOutput.year_path(a.annual, yr), "r") as chk:
+                ymesh = chk.load_mesh()
+                cells = {var: chk.load_function(ymesh, name=var).dat.data_ro.copy()
+                         for var in VARIABLES_2D}
+            # the overlap operator is built once from the first year's mesh;
+            # a series whose links remeshed cannot be regridded through it
+            if len(cells["lithk"]) != W.shape[1]:
+                raise ValueError(
+                    f"year {yr} has {len(cells['lithk'])} cells but the overlap "
+                    f"operator was built from year {years[0]}'s {W.shape[1]}: "
+                    f"the mesh changed inside the series, so one conservative "
+                    f"operator cannot cover it."
+                )
+            masks = {"no_ice": cells["sftgif"] > 0.5,
+                     "no_grounded_ice": cells["sftgrf"] > 0.5,
+                     "no_floating_ice": cells["sftflf"] > 0.5}
+
+            def plane(var):
+                meta = req[var]; policy = meta["fill_policy"]
+                m = masks[policy] if policy in masks else None
+                return (regrid(W, cells[var], policy, m)
+                        * CONVERT[meta["units"]]).reshape(ISMIP7_NY, ISMIP7_NX).astype("f4")
+
+            # the checker requires orog == base + lithk pixel by pixel and
+            # orog >= 0; the elevations are covered-part means while lithk is a
+            # whole-pixel mean (diluted where the pixel is partly covered), so
+            # the base absorbs the dilution: base := orog - lithk on the grid.
+            # Rebuilding orog instead put negative surfaces on partly covered
+            # floating pixels (base < 0 plus a diluted thickness).
+            done = {"orog": plane("orog"), "lithk": plane("lithk")}
+            done["base"] = done["orog"] - done["lithk"]
+            for var in VARIABLES_2D:
+                p_yr = done.get(var)
+                if p_yr is None:
+                    p_yr = plane(var)
+                write_slice(handles[var][1], k, p_yr)
+                finite = np.isfinite(p_yr)
+                st = stats[var]
+                if finite.any():
+                    st[0] = min(st[0], float(np.min(p_yr[finite])))
+                    st[1] = max(st[1], float(np.max(p_yr[finite])))
+                st[2] += int(finite.sum())
+        for var in VARIABLES_2D:
+            handles.pop(var)[0].close()
+            lo, hi, nfin = stats[var]
+            pct = 100.0 * nfin / (len(years) * ISMIP7_NY * ISMIP7_NX)
+            rng = f"[{lo:.3e}, {hi:.3e}]" if nfin else "[all fill]"
+            print(f"  {var:12s} {req[var]['units']:11s} {rng} "
+                  f"{pct:5.1f}% filled  -> {os.path.basename(paths[var])}", flush=True)
+
+        for var in SCALARS:
+            meta = req[var]
+            values = [float(rows[yr][var]) for yr in years]
+            write_scalar(tmps[var], var, meta, years, values, meta["Type"] == "FL")
+        print(f"  {len(SCALARS)} scalars from {os.path.basename(scal)}")
+
+        for var, tmp in tmps.items():
+            os.replace(tmp, paths[var])
+    except BaseException:
+        for ds, _ in handles.values():
+            ds.close()
+        for tmp in tmps.values():
+            if os.path.exists(tmp):
+                os.remove(tmp)
+        raise
     print(f"wrote {outdir}")
 
 

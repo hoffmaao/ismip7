@@ -16,7 +16,8 @@ import pytest
 
 xr = pytest.importorskip("xarray")
 
-from icepack2_tools.forcing import ISMIP7Atmosphere, atmosphere_product  # noqa: E402
+from icepack2_tools.forcing import (ISMIP7Atmosphere, atmosphere_product,  # noqa: E402
+                                    forcing_year)
 
 
 def _write_year(vdir, esm, scenario, product, version, year, value):
@@ -86,3 +87,43 @@ def test_an_absent_variable_stays_optional(mri_tree):
     ts-anomaly), not a gap, so it still reads as absent."""
     atm = ISMIP7Atmosphere(data_root=str(mri_tree), esm="MRI-ESM2-0", scenario="ssp585", version="v1")
     assert atm._load_year("dacabfdz", 2299) is None
+
+
+# ---- which year a step's forcing comes from ------------------------------
+#
+# run_simulation hands the callback the END of the step, so the step from
+# 2300.9 to 2301.0 lies in 2300. Rounding instead pushed every step past the
+# half-year mark into the next year, which made a 2015-2300 projection end by
+# requesting 2301: two past CESM2-WACCM's 2299, so the one-year end-of-series
+# bridge could not cover it and the run died on its last step.
+
+
+@pytest.mark.parametrize("t_yr,expected", [
+    (2015.1, 2015),          # the first step of a run starting at 2015.0
+    (2015.5, 2015),
+    (2015.9, 2015),
+    (2016.0, 2015),          # a step ENDING on 1 January belongs to the year before
+    (2016.1, 2016),
+    (2300.6, 2300),          # used to round up to 2301
+    (2301.0, 2300),          # the last step of a 2015-2300 projection
+])
+def test_the_forcing_year_is_the_year_the_step_lies_in(t_yr, expected):
+    assert forcing_year(t_yr) == expected
+
+
+def test_every_step_of_a_year_draws_the_same_forcing_year():
+    r"""run_simulation steps t_yr = t_start + k*dt for k >= 1, so a year's ten
+    dt=0.1 steps end at Y.1 .. Y+1.0 and all ten belong to year Y. Rounding
+    split them five and five across two forcing years."""
+    steps = [round(2015.0 + k * 0.1, 10) for k in range(1, 11)]
+    assert steps[-1] == 2016.0
+    assert {forcing_year(t) for t in steps} == {2015}
+
+
+def test_the_last_step_of_a_cesm_projection_reaches_the_bridge(mri_tree):
+    r"""A projection covering 2015-2300 ends at t=2301.0. Against a series
+    that stops at 2299 that has to land on year 2300, which the one-year
+    persistence covers; 2301 would be two past and would raise."""
+    atm = ISMIP7Atmosphere(data_root=str(mri_tree), esm="MRI-ESM2-0", scenario="ssp585", version="v1")
+    field = atm.get_field("acabf", 2301.0, np.zeros(3), np.zeros(3))
+    assert np.allclose(field, 2.0)         # the 2299 file, persisted for 2300

@@ -47,6 +47,11 @@ start = os.environ.get("FAKE_START_YEAR", "")
 if start:
     print(f"Restart: evolved geometry from checkpoint, t_yr={start}")
 
+# run_simulation prints this for every driver, and the chain reads the run's
+# end year back out of it rather than re-declaring the per-experiment default
+t_end = float(os.environ.get("ISMIP7_T_END", "2301"))
+print(f"Time-stepping: {start or 2015.0}->{t_end}, dt=0.1yr, 10 steps")
+
 rc = int(os.environ.get("FAKE_RC", "0"))
 if rc:
     sys.exit(rc)

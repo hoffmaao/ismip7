@@ -55,10 +55,12 @@
 set -uo pipefail
 
 cd "${SLURM_SUBMIT_DIR:-.}"
-# The venv does not exist yet, so take ISMIP7_WORK from the site file without
-# calling ismip7_activate. install_deps.sh derives the same prefix.
+# This job creates the venv, so it takes ISMIP7_WORK from the site file and
+# asks for neither ISMIP7_FIREDRAKE nor ismip7_activate. The modules below are
+# loaded directly, because a build needs flex, Bison and M4 that the runtime
+# list omits. install_deps.sh derives the same prefix.
 . antarctica/scripts/batch_runners/site_env.sh
-ismip7_site_require
+ismip7_site_require "$ISMIP7_REQUIRED_BUILD"
 
 PREFIX="${FD_PREFIX:-$ISMIP7_WORK/sw}"
 PETSC_SRC="$PREFIX/petsc"

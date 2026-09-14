@@ -57,12 +57,17 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(_ROOT)))
 sys.path.insert(0, _ROOT)
 
 import numpy as np                                                    # noqa: E402
+import rasterio                                                       # noqa: E402
 import firedrake as fd                                                # noqa: E402
-from firedrake import FunctionSpace, assemble, dx                     # noqa: E402
+from firedrake import (FunctionSpace, VectorFunctionSpace,            # noqa: E402
+                       assemble, dx)
 from firedrake.petsc import PETSc                                     # noqa: E402
 
 import calibrate_melt as cm                                           # noqa: E402
-from icepack2_tools.forcing import quadratic_mixed_slope              # noqa: E402
+from icepack2_tools.forcing import (quadratic_mixed_slope,            # noqa: E402
+                                    compute_sin_alpha)
+from icepack2_tools.geometry import cg1_lift, sample_to_geometry      # noqa: E402
+from icepack2_tools.runconfig import raster_sample                    # noqa: E402
 # The same year and density the writer converts with, so the bound compared
 # here is the one the checker applies.
 from icepack2_tools.ismip7_output import RHO_I, SECONDS_PER_YEAR      # noqa: E402
@@ -115,6 +120,25 @@ def main():
     sin_uncapped = cm._compute_sin_alpha(mesh, thk, sur)
     floating = (np.round(mask_np).astype(int) == 3)
 
+    # The forward's own slope operator, so the rows below answer what capping
+    # the forward would do rather than only bracketing it. calibrate_melt
+    # interpolates a CG1 geometry and projects grad(draft);
+    # forcing.compute_sin_alpha samples a DG0 geometry and differentiates a
+    # cg1_lift of the draft, which is the smoother of the two. Lift the result
+    # back to the CG1 nodes the melt inputs live on so every row compares like
+    # for like; cg1_lift is a convex combination, so it cannot overshoot.
+    Q_g = FunctionSpace(mesh, "DG", 0)
+    bm = cm._bedmachine_path()
+    h_dg = sample_to_geometry(rasterio.open(f"netcdf:{bm}:thickness"), Q_g, Q,
+                              method=raster_sample())
+    s_dg = sample_to_geometry(rasterio.open(f"netcdf:{bm}:surface"), Q_g, Q,
+                              method=raster_sample())
+    sin_fwd_dg = fd.Function(Q_g)
+    sin_fwd_dg.dat.data[:] = compute_sin_alpha(
+        {"Q": Q, "V": VectorFunctionSpace(mesh, "CG", 1), "Q_g": Q_g,
+         "h": h_dg, "s": s_dg})
+    sin_fwd = cg1_lift(sin_fwd_dg).dat.data_ro.copy()
+
     # The per-basin K field the forward stamps onto the mesh. K_field in the
     # npz was built on the calibration mesh; rebuild it here from K_basin so
     # this runs against any mesh.
@@ -129,11 +153,16 @@ def main():
     afl = float(area[floating].sum())
 
     cases = [
-        (f"capped at {cm.SIN_ALPHA_CAP:.0e}, the slope K was fitted against",
+        (f"calibration operator, capped at {cm.SIN_ALPHA_CAP:.0e}, "
+         f"the slope K was fitted against",
          np.minimum(sin_uncapped, cm.SIN_ALPHA_CAP)),
-        ("uncapped, as in the forward", sin_uncapped),
+        ("calibration operator, uncapped", sin_uncapped),
+        ("forward operator, uncapped, as the forward runs today", sin_fwd),
+        (f"forward operator, capped at {cm.SIN_ALPHA_CAP:.0e}",
+         np.minimum(sin_fwd, cm.SIN_ALPHA_CAP)),
     ]
 
+    obs_total = float(d["obs_total_gtyr"]) if "obs_total_gtyr" in d else float("nan")
     PETSc.Sys.Print(f"\n  floating area {afl / 1e6:.1f} km^2, "
                     f"{int(floating.sum())} nodes")
     for label, sin_a in cases:
@@ -146,6 +175,9 @@ def main():
             f"  melt p99 (floating)     {np.quantile(melt[floating], 0.99):12.1f} m/yr\n"
             f"  melt area-mean          "
             f"{float((melt * area)[floating].sum()) / afl:12.2f} m/yr\n"
+            f"  integrated              "
+            f"{float((melt * area)[floating].sum()) * RHO_I / 1e12:12.0f} Gt/yr "
+            f"(K was fitted to {obs_total:.0f})\n"
             f"  nodes past the bound    {int(over.sum()):12d}\n"
             f"  area past the bound     {a_over / 1e6:12.1f} km^2 "
             f"({100 * a_over / afl:.3f}% of floating)")

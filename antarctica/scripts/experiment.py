@@ -44,6 +44,7 @@ from icepack2_tools.forcing import (
 from icepack2_tools.climatology import (
     clim_start, clim_end, clim_scenario, clim_pool_missing, describe_clim_pool,
 )
+from icepack2_tools.runconfig import fracture as fracture_mode
 
 # Owned by icepack2_tools.climatology: this pool must match the CONTROL's
 # climatology, or the projections are re-referenced against a different
@@ -55,7 +56,7 @@ CLIM_SCENARIO = clim_scenario()
 
 def find_k_npz():
     r"""Calibrated per-basin K npz: this mesh's calibration, else the 2500 m
-    one (16 basin scalars remapped through the IMBIE2 8 km grid —
+    one (16 basin scalars remapped through the IMBIE2 8 km grid,
     mesh-independent), else None (scalar ISMIP7_K_MELT)."""
     override = os.environ.get("ISMIP7_K_PER_BASIN_NPZ")
     candidates = [override] if override else [
@@ -112,7 +113,7 @@ def smb_scheme(ctx, esm):
             f"{years[0]}-{years[-1]} ({len(pool)} yr pooled)"
         )
     except FileNotFoundError as e:
-        return False, None, f"full acabf(t) — no RACMO baseline ({e})"
+        return False, None, f"full acabf(t), no RACMO baseline ({e})"
 
 
 def run_core_experiment(*, core, title, name, esm, scenario,
@@ -188,11 +189,15 @@ def run_core_experiment(*, core, title, name, esm, scenario,
 
     # ── Ocean + fracture ──
     ocean = ISMIP7Ocean(esm=esm, scenario=scenario)
-    fracture = ISMIP7Fracture(esm=esm, scenario=scenario)
-    try:
-        fracture.load()
-    except Exception:
-        fracture = None
+    fracture = ISMIP7Fracture(esm=esm, scenario=scenario).load()
+    if fracture_mode() == "mask" and not fracture.has_collapse_mask():
+        raise FileNotFoundError(
+            f"ISMIP7_FRACTURE=mask but no ice-shelf collapse mask was found "
+            f"for {esm}/{scenario} under {fracture.fracture_dir()}. The masks "
+            f"exist for the SSP scenarios only, so this is a configuration "
+            f"error: download the fracture tree, or run with "
+            f"ISMIP7_FRACTURE=none."
+        )
 
     K_npz = find_k_npz()
     K_melt = float(os.environ.get("ISMIP7_K_MELT", "1.15e-4"))

@@ -109,7 +109,7 @@ def main():
         if len(todo) > 20:
             print(f"  ... {len(todo) - 20} more")
         return 0
-    done = 0
+    done, failed = 0, []
     with cf.ThreadPoolExecutor(max_workers=a.jobs) as ex:
         futs = {ex.submit(fetch, key, size, dest): (key, size) for key, size, dest in todo}
         for fut in cf.as_completed(futs):
@@ -117,9 +117,17 @@ def main():
             try:
                 status = fut.result()
             except Exception as e:
+                failed.append((key, e))
                 print(f"  FAILED {key}: {e}", flush=True); continue
             done += size
             print(f"  {status:8s} {size / 1e6:9.1f} MB  {key}   [{done / 1e9:.2f} of {total / 1e9:.2f} GB]", flush=True)
+    if failed:
+        # A caller that chains on success must not go on to submit a run
+        # against a tree with holes in it, so the exit status carries this.
+        print(f"{len(failed)} of {len(todo)} transfers FAILED:", flush=True)
+        for key, e in failed:
+            print(f"  {key}: {e}", flush=True)
+        return 1
     return 0
 
 

@@ -39,6 +39,7 @@ written.
 import argparse
 import csv
 import os
+import re
 import sys
 
 import numpy as np
@@ -56,6 +57,23 @@ FILL = _nc4.default_fillvals["f4"]          # the checker wants the netCDF4 defa
 TIME_UNITS = "days since 1850-01-01"        # the checker's exact spelling
 PIXEL_AREA = ISMIP7_DX * ISMIP7_DX
 REQUEST = os.path.join(os.path.dirname(os.path.dirname(_ROOT)), "icepack2_tools", "ismip7_variable_request.csv")   # not under a data/ dir: .gitignore ignores those
+
+
+#: the request csv leaves standard_name blank for a handful of variables and
+#: names the intended one in the Comment as "standard name: <x>". An empty
+#: standard_name is not a valid CF attribute, so take the comment's name when
+#: it spells one out and omit the attribute otherwise (two comments only say a
+#: name is wanted, and one names a temperature for an altitude).
+_COMMENT_STANDARD_NAME = re.compile(r"standard name:\s*([a-z][a-z0-9_]+)", re.I)
+
+
+def standard_name(meta):
+    r"""The CF standard name to write, or "" to omit the attribute."""
+    declared = (meta.get("standard_name") or "").strip()
+    if declared:
+        return declared
+    m = _COMMENT_STANDARD_NAME.search(meta.get("Comment") or "")
+    return m.group(1) if m else ""
 
 
 def request_table():
@@ -173,7 +191,10 @@ def write_2d(path, var, meta, years, data, is_flux):
         v = ds.createVariable(var, "f4", ("time", "y", "x"), zlib=True, complevel=4, fill_value=np.float32(FILL))
         arr = np.array(data, dtype="f4"); arr[~np.isfinite(arr)] = FILL
         v[:] = arr
-        v.standard_name = meta["standard_name"]; v.long_name = meta["long_name"]; v.units = meta["units"]
+        _sn = standard_name(meta)
+        if _sn:
+            v.standard_name = _sn
+        v.long_name = meta["long_name"]; v.units = meta["units"]
         v.grid_mapping = "crs"; v.coordinates = "y x"
         if is_flux:
             v.cell_methods = "time: mean"
@@ -196,8 +217,12 @@ def write_scalar(path, var, meta, years, values, is_flux):
         else:
             vt[:] = [days_since_1850(yr + 1, 1, 1) for yr in years]
         v = ds.createVariable(var, "f4", ("time",), fill_value=FILL)
-        v[:] = np.array(values, dtype="f4")
-        v.standard_name = meta["standard_name"]; v.long_name = meta["long_name"]; v.units = meta["units"]
+        arr = np.array(values, dtype="f4"); arr[~np.isfinite(arr)] = FILL
+        v[:] = arr
+        _sn = standard_name(meta)
+        if _sn:
+            v.standard_name = _sn
+        v.long_name = meta["long_name"]; v.units = meta["units"]
         v.cell_methods = "time: mean" if is_flux else "time: point"
         _global_attrs(ds, meta)
 
@@ -209,10 +234,9 @@ def main():
     ap.add_argument("--source-id", default=os.environ.get("ISMIP7_SOURCE_ID", "RICE"))
     ap.add_argument("--ism-id", default=os.environ.get("ISMIP7_ISM_ID", "icepack2"))
     ap.add_argument("--set-id", default="CORE")
-    ap.add_argument("--contact-name", default="Andrew Hoffman"); ap.add_argument("--contact-email", default="ah301@rice.edu")
+    ap.add_argument("--contact-name", default=os.environ.get("ISMIP7_CONTACT_NAME", "Andrew Hoffman"))
+    ap.add_argument("--contact-email", default=os.environ.get("ISMIP7_CONTACT_EMAIL", "ah301@rice.edu"))
     ap.add_argument("--scalars", default=None, help="the *_ismip7_scalars.csv (default: next to the annual file)")
-    ap.add_argument("--variables", default=None, help="comma-separated subset")
-    ap.add_argument("--no-cache", action="store_true")
     a = ap.parse_args()
     req = request_table()
     with fd.CheckpointFile(a.annual, "r") as chk:
@@ -220,22 +244,20 @@ def main():
         years = [int(y) for y in chk.get_attr("/", "years").split(",")]
         fields = {}
         for var in VARIABLES_2D:
-            if a.variables and var not in a.variables.split(","):
-                continue
             fields[var] = [chk.load_function(mesh, name=var, idx=k).dat.data_ro.copy() for k in range(len(years))]
         ice = [chk.load_function(mesh, name="sftgif", idx=k).dat.data_ro > 0.5 for k in range(len(years))]
         gr = [chk.load_function(mesh, name="sftgrf", idx=k).dat.data_ro > 0.5 for k in range(len(years))]
         fl = [chk.load_function(mesh, name="sftflf", idx=k).dat.data_ro > 0.5 for k in range(len(years))]
     print(f"{os.path.basename(a.annual)}: years {years[0]}-{years[-1]}, {len(fields)} variables", flush=True)
-    W = overlap_operator(mesh, None if a.no_cache else a.annual + ".overlap.npz")
+    W = overlap_operator(mesh, a.annual + ".overlap.npz")
     print(f"  overlap operator {W.shape}, {W.nnz} entries, pixels covered {int((W.sum(axis=1) > 0).sum())}", flush=True)
     outdir = os.path.join(a.out_dir, "AIS", a.source_id, a.ism_id, a.set_id, a.exp)
     os.makedirs(outdir, exist_ok=True)
     tag = f"AIS_{a.source_id}_{a.ism_id}_m001_{a.esm}_f001_{a.scenario}_{a.exp}_{years[0]}-{years[-1]}"
     masks = {"no_ice": ice, "no_grounded_ice": gr, "no_floating_ice": fl}
     GLOBAL.update({"model": a.ism_id, "group": a.source_id, "crs": "EPSG:3031",
-                   "contact_name": os.environ.get("ISMIP7_CONTACT_NAME", a.contact_name),
-                   "contact_email": os.environ.get("ISMIP7_CONTACT_EMAIL", a.contact_email),
+                   "contact_name": a.contact_name,
+                   "contact_email": a.contact_email,
                    "source_id": a.source_id, "ism_id": a.ism_id, "experiment_id": a.exp,
                    "forcing": f"{a.esm} {a.scenario}",
                    "title": f"ISMIP7 AIS {a.exp} {a.esm} {a.scenario}, {a.source_id} {a.ism_id}"})

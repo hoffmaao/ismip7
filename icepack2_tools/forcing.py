@@ -452,15 +452,12 @@ class ISMIP7Atmosphere:
             # the series, and repeating one year of SMB for decades would be a
             # scientifically wrong run reported as a success, so it raises.
             last = self._last_year(vdir, variable, product, version)
-            if last is not None and int(year) > last:
-                if int(year) - last > 1:
-                    raise FileNotFoundError(
-                        f"ISMIP7Atmosphere: {variable} for {self.esm} "
-                        f"{self.scenario} ends at {last} on disk, but year "
-                        f"{int(year)} was requested. Only one year past the "
-                        f"end of the series is bridged (2300 after 2299); this "
-                        f"tree is incomplete, so finish the download instead."
-                    )
+            if last is None:
+                # The variable has no files at all here: an optional product
+                # (dacabfdz, ts-anomaly) the callers may legitimately run
+                # without. Only a hole in a series that exists is an error.
+                return None
+            if int(year) - last == 1:
                 if variable not in self._persisted:
                     self._persisted.add(variable)
                     if _comm_rank() == 0:
@@ -468,7 +465,15 @@ class ISMIP7Atmosphere:
                               f"persisting {last}, the last year on disk", flush=True)
                 self._cache[key] = self._load_year(variable, last)
                 return self._cache[key]
-            return None
+            # A hole in the series: get_field would turn a None into a field
+            # of zeros and the run would report a whole year of zero anomaly
+            # as a success, so the reader refuses instead.
+            raise FileNotFoundError(
+                f"ISMIP7Atmosphere: {variable} for {self.esm} {self.scenario} "
+                f"has no year {int(year)} in {vdir} (the series there runs to "
+                f"{last}; only the single year after the end is bridged, "
+                f"2300 after 2299). Finish the download for this variable."
+            )
 
         ds = xr.open_dataset(path)
 
@@ -740,6 +745,14 @@ class ISMIP7Fracture:
         if root is None:
             return None
         return os.path.join(root, self.esm, self.scenario, "fracture")
+
+    def fracture_dir(self):
+        r"""Where the collapse mask is looked for, for error messages."""
+        return self._fracture_dir() or f"<no ISMIP7 data root under {self.data_root}>"
+
+    def has_collapse_mask(self):
+        r"""True once ``load`` has found an ice-shelf collapse mask."""
+        return self._collapse_mask is not None
 
     def load(self):
         import xarray as xr

@@ -60,12 +60,17 @@ shallow-shelf formulation on Firedrake 2026.4.1)
    et al. (2022), local-quadratic variant (TF_avg = TF), with the slope
    `sin(alpha)` from the model's own draft (capped at 5e-3), constants from
    `multimelt.constants`. K is dimensionless and per IMBIE basin,
-   calibrated with `antarctica/scripts/calibrate_melt.py` against the
-   Paolo/Adusumilli melt observations on the 2500 m mesh (K* = 4.26e-5
-   overall; per basin 1.7e-5 to 1.5e-4); `ISMIP7_K_SCALE` multiplies it.
-   **[confirm]** whether the July 2026 toolbox re-release is used to refresh
-   the calibration before submission (not yet done). Thermal forcing and
-   salinity are read at the cell's draft from the ISMIP7 ocean forcing.
+   calibrated with `antarctica/scripts/calibrate_melt.py` on the Úa 2 km
+   mesh against the July 2026 re-released observation table combining
+   Paolo (2023), Davison (2023) and Adusumilli (2020), integrated target
+   1067.4 Gt/yr; per basin 2.4e-5 to 1.9e-4. The forward applies this
+   per-basin field. K* = 4.700e-5 and the total-match K = 6.853e-5 are
+   summary statistics of the fit, and the forward uses neither scalar.
+   `ISMIP7_K_SCALE` multiplies the field. The previous draft quoted the
+   2500 m fit against the older Paolo and Adusumilli table (865.0 Gt/yr).
+   **[confirm]** that every submitted run read this calibration. Thermal
+   forcing and salinity are read at the cell's draft from the ISMIP7 ocean
+   forcing.
    Partially floating cells: the geometry is cell-wise (DG0); a cell is
    floating when its height above flotation is negative and then receives
    the full melt, grounded cells none. No melt on vertical ice fronts.

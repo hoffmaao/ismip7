@@ -222,16 +222,24 @@ forcing-version audit, the output writer, and the melt calibration above.
    versions can still move under a long campaign.
 5. Settle where the `libmassbffl` bound violation comes from. The request's AIS
    minimum is -0.008 kg m-2 s-1, which is 275.3 m/yr of ice, and the 10-year Úa
-   ssp585 of job 1368723 reached -0.0117, or 402.6 m/yr. The parameterisation
-   itself is not the source: `check_melt_bound.py` on the Úa mesh with the new
-   per-basin K gives a maximum of 71.1 m/yr, a 99th percentile of 22.2 m/yr and
-   an area mean of 0.77 m/yr over 1 512 899 km2 of floating ice, with zero
-   nodes past the bound. Two candidates remain, and the full-length run
-   distinguishes them: the evolved geometry and its warmer projected thermal
-   forcing, or the bookkeeping, since `book_advance` books the melt REQUESTED
-   of a step while a nearly ice-free floating cell can only lose what it holds,
-   and the request's own `no_floating_ice` fill policy then reports that cell's
-   rate for a whole 8 km pixel.
+   ssp585 of job 1368723 reached -0.0117, or 402.6 m/yr. `check_melt_bound.py`
+   found that the calibration caps the draft slope `sin(alpha)` at 5e-3 and the
+   forward applies no cap, so the melt the forward applies is a different field
+   from the melt the per-basin K was fitted against. The 10-year run integrated
+   1860 Gt/yr of melt against the 1067.4 Gt/yr K was fitted to produce, and
+   that is the size of the gap. On the Úa mesh at the reference geometry, over
+   1 512 899 km2 of floating ice, the capped slope gives a maximum of 71.1 m/yr,
+   a 99th percentile of 22.2 m/yr, an area mean of 0.77 m/yr and zero nodes
+   past the bound. The uncapped slope gives a maximum of 1804.9 m/yr, a 99th
+   percentile of 256.3 m/yr, an area mean of 4.18 m/yr and 421 nodes past the
+   bound over 2920.6 km2, 0.193% of the floating area. The forward's own area
+   mean of 1.34 m/yr sits between the two, as expected, since the forward lifts
+   a DG0 draft to CG1 and the calibration projects its gradient, which is
+   rougher. The bound is reachable in the uncapped case on cells whose median
+   area, 6.33 km2, is a tenth of an 8 km pixel. Closing the gap between
+   calibration and forward is the next step. Which side moves is a science
+   decision, since the cap is tied to the unsettled upstream local-slope
+   question.
 6. Optional: read the provided `ctrl` trees in place of the `ssp126`
    reference-climate pool.
 7. Optional: the stress criterion (Lai et al. 2020) alongside the collapse

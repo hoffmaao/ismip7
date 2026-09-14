@@ -12,6 +12,11 @@ take the ISMIP7 annual series with the rest: a cold start into a populated
 series is a hard refusal (``AnnualOutput`` will not overwrite a banked
 submission), so a series left behind makes the re-run impossible.
 
+A core that KEEPS its output (the reusable path, where archive_stale never
+runs) must resume from its own state on the first attempt too, for the same
+reason: cold-starting a partially complete projection would rewrite the years
+it already banked.
+
 The script resolves its repository root from ``BASH_SOURCE``, so it runs here
 against a sandbox laid out like the repo: the shipped script is copied in
 unmodified, ``mpiexec`` is a PATH stub, and the driver is a stub that writes
@@ -171,3 +176,37 @@ def test_a_fresh_rerun_archives_the_ismip7_series_too(sandbox):
     assert sum(1 for n in archived if "_ismip7_annual_" in n) == 3, archived
     assert "3 ISMIP7 year(s)" in out, out
     assert "COMPLETE at 2026" in out, out
+
+
+def test_a_partially_complete_core_resumes_on_the_first_attempt(sandbox):
+    r"""A core left short by a previous invocation keeps its output (nothing
+    is stale), so attempt 1 must resume from its own checkpoint rather than
+    cold-start, which would rewrite the years it banked."""
+    import h5py
+
+    stem = "ocx_32000"
+    R = _results(sandbox)
+    (R / f"{stem}_timeseries.csv").write_text("year,vaf\n1979.0,0.0\n2011.0,0.0\n")
+    with h5py.File(R / f"{stem}_final.h5", "w") as h:
+        h["/"].attrs["t_yr"] = 2011.0
+        h["/"].attrs["stalled"] = 0
+    _bank_a_series(sandbox, stem, [1979, 1980])
+
+    out = _run(sandbox, FRESH="", FAKE_STEM=stem, FAKE_START_YEAR="1979",
+               FAKE_STOP_YEAR="2011", FAKE_TARGET="2026")
+
+    assert _attempts(sandbox) == ["restart"], out
+    assert "resuming ocx_32000_final.h5 at t=2011" in out, out
+    assert "COMPLETE at 2026" in out, out
+    # nothing was archived: the output was current, so it is still in place
+    assert list(R.glob("archive_stale_*")) == [], out
+    assert len(list(R.glob(f"{stem}_ismip7_annual_*.h5"))) == 2, out
+
+
+def test_a_core_with_no_state_of_its_own_still_cold_starts(sandbox):
+    r"""The first ever run of a core has nothing to resume, and a branch core
+    must reach its driver's own restart logic rather than be handed one."""
+    out = _run(sandbox, FRESH="", FAKE_STEM="ocx_32000", FAKE_START_YEAR="1979",
+               FAKE_STOP_YEAR="2026", FAKE_TARGET="2026")
+    assert _attempts(sandbox) == ["cold"], out
+    assert "starting (target 2026)" in out, out

@@ -1751,13 +1751,18 @@ def run_simulation(
 
         out_gt = float(assemble(un_plus * h_dg * ds)) * rho_gt * dt_local
         m1 = float(assemble(h_dg * dx)) * rho_gt
+        # One mesh-wide interpolation for the whole advance: `s` is only
+        # refreshed by _lift_h() at the end, so the booking, the floor
+        # exemption and the collapse removal all mean the same grounding
+        # state and must see it.
+        grounded = _grounded_cells()
         if annual is not None:
-            annual.book_advance(dt_local, accum, ocean_melt, a_ref, h_dg, u_vel, _grounded_cells())
+            annual.book_advance(dt_local, accum, ocean_melt, a_ref, h_dg, u_vel, grounded)
 
         # Floor to h_clamp, EXCEPT in the cells the front rules report as
         # holding no ice: see clamp_thickness for why every such rule has to
         # name its cells here.
-        collapsed = (collapse & ~_grounded_cells()) if collapse is not None else None
+        collapsed = (collapse & ~grounded) if collapse is not None else None
         clamp_thickness(h_dg.dat.data, h_clamp, ls_ice_free, beyond, collapsed)
         m2 = float(assemble(h_dg * dx)) * rho_gt
         clamp_gt = m2 - m1                                       # Gt added by DG floor
@@ -1765,7 +1770,7 @@ def run_simulation(
         calv_gt = 0.0
         if collapse is not None and _any_rank(collapse.any()):
             data = h_dg.dat.data
-            hit = collapse & ~_grounded_cells() & (data > 0.0)
+            hit = collapse & ~grounded & (data > 0.0)
             calv_gt += mesh.comm.allreduce(
                 float((data[hit] * cell_area[hit]).sum())) * rho_gt
             if annual is not None:

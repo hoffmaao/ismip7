@@ -49,6 +49,7 @@ _ISMIP7_SITE_FILE="$(ismip7_site_file)" || exit 2
 # shellcheck disable=SC1090
 . "$_ISMIP7_SITE_FILE"
 
+# The site file must supply these six. Everything else defaults below.
 ismip7_site_require() {
     local missing=""
     local v
@@ -120,10 +121,18 @@ ismip7_activate() {
     mkdir -p "$PYOP2_CACHE_DIR"
 }
 
-# --- job size by kind ---------------------------------------------------
+# --- job size ------------------------------------------------------------
+# Only the fields ismip7_site_require checks have to come from the site file.
+# Everything below carries a working default, so a site file written from that
+# list alone still composes a complete submission.
+ISMIP7_TASKS="${ISMIP7_TASKS:-16}"
+ISMIP7_MEM="${ISMIP7_MEM:-120G}"
+ISMIP7_TIME_INV="${ISMIP7_TIME_INV:-2-00:00:00}"
+ISMIP7_TIME_FWD="${ISMIP7_TIME_FWD:-1-00:00:00}"
+
 # A site that needs one number sets ISMIP7_TASKS/ISMIP7_MEM and both kinds take
-# it. A site with measured per-kind values sets the pair: at Rice the forward
-# was measured at 12 ranks and the inversion at 32, and running the forward at
+# it. A site with measured per-kind values sets the pair. At Rice the forward
+# was measured at 12 ranks and the inversion at 32, so running the forward at
 # the inversion's size would be an unvalidated rank count on a narrower set of
 # nodes.
 ISMIP7_TASKS_INV="${ISMIP7_TASKS_INV:-$ISMIP7_TASKS}"

@@ -19,12 +19,11 @@
 #   --partition P --constraint C --account A --name JOBNAME
 #   --dry-run    print the sbatch command and stop
 #
-# Why a wrapper rather than #SBATCH lines in each script: a directive in the
-# script wins over nothing and loses to nothing, but it is parsed before any
-# shell runs, so it cannot read a site file, and a mismatched pair (a header
-# asking for 12 tasks per node while the command line asks for 32 in total)
-# is rejected with "Requested node configuration is not available". The job
-# scripts therefore carry no resource directives at all; this composes them.
+# Why a wrapper rather than #SBATCH lines in each script: a directive is parsed
+# before any shell runs, so it cannot read a site file, and a mismatched pair (a
+# header asking for 12 tasks per node while the command line asks for 32 in
+# total) is rejected with "Requested node configuration is not available". The
+# job scripts therefore carry no resource directives at all; this composes them.
 set -euo pipefail
 
 here="$(cd "$(dirname "$0")" && pwd)"
@@ -40,7 +39,7 @@ case "$kind" in
     verify)     script=verify.sbatch;          part="$ISMIP7_PART_DEBUG"; time=00:15:00;           tasks=4;              mem=16G;           name=fd_verify ;;
     probe)      script=partition_probe.sbatch; part="$ISMIP7_PART_DEBUG"; time=01:00:00;           tasks="$ISMIP7_TASKS"; mem=64G;          name=ismip7_part ;;
     build)      script=build_firedrake.sbatch; part="$ISMIP7_PART_SHORT"; time=12:00:00;           tasks=1;              mem=48G;           name=fd_build ;;
-    *) sed -n '2,28p' "$0" | sed 's/^# \{0,1\}//'; exit 2 ;;
+    *) sed -n '2,${/^#/!q;s/^# \{0,1\}//p;}' "$0"; exit 2 ;;
 esac
 
 constraint="${ISMIP7_CONSTRAINT:-}"

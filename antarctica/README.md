@@ -304,10 +304,11 @@ python scripts/compare_dhdt.py vel=mesh/<velocity-only>.h5 tr=mesh/<transient>.h
 tell a velocity-only MAP from a transient one (both fit `u`), so the thickness
 tendency is the observable that can. It drives that step with the `velocity`
 stored in the MAP, so its score is only as good as that field. The inversion
-refuses to save a final-solve velocity whose misfit grossly disagrees with the
-last accepted optimization state - it warns and leaves the field out - so a MAP
-from a failed final solve has no `velocity` to score. MAPs written before that
-guard can still carry one, and a dH/dt score built on it is meaningless. The
+saves a final-solve velocity only when that solve converged at the MAP's own
+controls, and then only if its misfit does not grossly disagree with the last
+accepted optimization state; otherwise it warns and leaves the field out, so a
+MAP from a failed final solve has no `velocity` to score. MAPs written before
+that guard can still carry one, and a dH/dt score built on it is meaningless. The
 controls are unaffected either way: a forward re-solves the diagnostic from
 `θ`/`φ` and never reads the stored velocity.
 
@@ -433,6 +434,16 @@ exists to move; it re-solves the diagnostic through `simulation.setup_model`,
 so it also works on periodic MAP checkpoints that carry no velocity. Both take
 the run's environment (`ISMIP7_LC`, `ISMIP7_FRICTION`, `ISMIP7_GEOMETRY_SPACE`
 and the rest), which must match the inversion's.
+
+To *look at* a MAP rather than score it, `scripts/plot_map.py MAP.h5 [--diff
+B.h5]` writes `figs/maps/map_<label>.png`: model and observed speed and their
+difference, the log friction adjustment `θ`, the effective Weertman
+coefficient `C = C_w0 exp(θ)` on grounded ice (the anchor `C_w0` rebuilt from
+the saved geometry and observed velocity exactly as the forward does), and the
+log fluidity adjustment `φ`. `--diff B.h5` adds a second figure of B minus A
+for speed, `θ` and `φ` on the same mesh. It reads the checkpoint alone - no
+solve, no run environment beyond `ISMIP7_M_SLIDE` - and leaves the speed panels
+out for a MAP that carries no velocity.
 
 ### Calving front on a buffered mesh (`ISMIP7_CALVING`)
 

@@ -15,8 +15,8 @@ Slope sin(alpha): grad(s - h) projected to CG1 on the fine mesh, capped
 at ISMIP7_SIN_ALPHA_CAP (default 5e-3) to suppress unstructured-mesh noise.
 
 Aggregation: per-node melt is integrated to IMBIE2 basins (8 km labels,
-nearest-neighbour onto the mesh), then compared against the
-Paolo/Adusumilli per-basin observations.
+nearest-neighbour onto the mesh), then compared against the per-basin
+observation table that `_obs_csv` resolves (ISMIP7_MELT_OBS_CSV names one).
 
 Since melt is linear in K, the Term-1 optimum is closed form:
 
@@ -67,10 +67,11 @@ IMBIE2_NC = os.path.join(
     "basin_numbers_ismip8km_v2.nc",
 )
 # Observed basal melt per IMBIE2 basin. The melt-calibration product re-released
-# in July 2026 combines Paolo (2023), Davison (2023) and Adusumilli (2020) and
-# raises the integrated target from 865 to 1067 Gt/yr, so a K calibrated against
-# the older Paolo+Adusumilli table is 23% low. Prefer the new table, fall back to
-# the old one so a tree that predates the re-release still runs, and let
+# in July 2026 (Source Cooperative, ismip7-ais-melt-calibration) combines Paolo
+# (2023), Davison (2023) and Adusumilli (2020) and raises the integrated target
+# from 865 to 1067 Gt/yr, so the total-match K calibrated against the older
+# Paolo+Adusumilli table is 23% low. Prefer the new table, fall back to the old
+# one so a tree that predates the re-release still runs, and let
 # ISMIP7_MELT_OBS_CSV name either explicitly.
 _OBS_CSV_CANDIDATES = (
     os.path.join(DATA_ROOT, "meltobs",
@@ -201,8 +202,10 @@ def _load_obs():
 
     The two published tables differ in width: the Paolo+Adusumilli one carries
     area and per-area columns between melt and its uncertainty, the combined
-    Paolo+Davison+Adusumilli one carries melt and uncertainty alone. Columns are
-    located by header name so the reader takes either.
+    Paolo+Davison+Adusumilli one carries melt and uncertainty alone. Index 3 is
+    the uncertainty in the first and past the end of the second, and any index
+    chosen for one width reads the wrong quantity or nothing at the other.
+    Columns are located by header name so the reader takes either.
     """
     bids, mobs, sobs = [], [], []
     with open(OBS_CSV) as f:
@@ -240,7 +243,6 @@ def main():
 
     bed, thk, sur, msk = _interp_bedmachine(mesh, Q)
     h_np = thk.dat.data_ro
-    b_np = bed.dat.data_ro
     s_np = sur.dat.data_ro
     mask_np = msk.dat.data_ro
 
@@ -352,7 +354,7 @@ def main():
     # Provenance travels with the numbers. Two published observation tables are
     # in circulation and their integrated targets differ by 23%, so a K file
     # that does not name its own source cannot be told apart from the other
-    # calibration once it is on disk. The forward reads only K_field and
+    # calibration once it is on disk. The forward reads only basin_ids and
     # K_basin, so the extra entries cost nothing.
     np.savez(
         K_out,

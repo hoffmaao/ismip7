@@ -145,9 +145,16 @@ What a submission needs (#5, #16, #17, #18, #19, #20, #22, #23):
   historical start year and the spin-up.
 - **Upload:** email ismip6 at gmail.com with the Globus id, `AIS`, the
   group name and `ism_id` to receive an upload folder.
-- **Deadline:** the board refers to "the deadline at the end of the month"
-  (September 2026) for the next round; confirm the exact scope on the
-  ismip.org status spreadsheet.
+- **Experiment ids** (ismip.org/research/ismip7, read 13 September): C001
+  CESM2-WACCM historical, C002 MRI-ESM2-0 historical, C003/C004 ssp370,
+  C005/C006 ssp126, C007/C008 ssp585 (CESM first, MRI second), C009/C010
+  ctrl, C011 OCX. Output goes on "the standard ISMIP7 grid that is closest
+  to a model native grid" (8 km for us); 3D fields are only requested at a
+  few times and we have none.
+- **Deadline:** the page still describes the 30 June round (C007 and C001
+  through the checker); the board refers to "the deadline at the end of the
+  month" (September 2026) for the next round, scope to confirm on the status
+  spreadsheet.
 
 ## 4. Model-side state (this branch)
 

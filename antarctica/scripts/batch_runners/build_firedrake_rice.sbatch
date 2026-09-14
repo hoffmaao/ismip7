@@ -1,7 +1,13 @@
 #!/bin/bash
-# Build Firedrake + PETSc on Rice NOTS, ONCE, into /projects/ah301.
+# Build Firedrake + PETSc ONCE, into a shared prefix, AT RICE. Every module
+# name below is Rice's EasyBuild stack and the gcc check expects /opt/apps, so
+# this runs at rice_nots and nowhere else. It is kept as a worked example: the
+# lessons above the module block are the general ones, and another site copies
+# this file to build_firedrake_<site>.sbatch and substitutes its own module
+# stack. The sequence does not change. readme.md says the same under
+# "Building Firedrake on a cluster".
 #
-#   sbatch antarctica/scripts/batch_runners/nots_build_firedrake.sbatch
+#   ISMIP7_SITE=rice_nots antarctica/scripts/batch_runners/submit.sh build
 #
 # THE POINT OF BUILDING IT HERE RATHER THAN COPYING THE WORKSTATION BUILD:
 # the workstation PETSc has NO parallel graph partitioner. Verified 2026-09-12
@@ -35,26 +41,32 @@
 # source rather than expecting distro packages, which is what you want inside a
 # module environment anyway.
 #
-# Runs on a COMPUTE node, constrained to cascadelake, deliberately: the configure
-# uses -march=native, so the build must happen on the same generation it will run
-# on. Building on the login node would bake in whatever that node happens to be.
+# Runs on a COMPUTE node, and the node GENERATION matters: the configure uses
+# -march=native, so the build must happen on the same generation the runs land
+# on, or the venv dies with an illegal instruction. That is now pinned through
+# submit.sh, from this cluster's ISMIP7_CONSTRAINT or an explicit
+# `--constraint <feature>`; a site that leaves the constraint empty should pass
+# one here. Building on the login node would bake in whatever that node is.
 
-#SBATCH -J fd_build
-#SBATCH -p commons
-#SBATCH -C cascadelake
+# Resources (partition, tasks, memory, wall time, account, constraint) come
+# from submit.sh and this cluster's sites/<name>.sh, never from directives
+# here: a directive cannot read a site file, and a header that disagrees
+# with the command line is rejected outright by Slurm.
 #SBATCH -o logs/fd_build_%j.out
 #SBATCH -e logs/fd_build_%j.err
-#SBATCH --nodes=1
-#SBATCH --ntasks-per-node=1
-#SBATCH --cpus-per-task=16
-#SBATCH --hint=nomultithread
-#SBATCH --mem=48G
-#SBATCH --time=12:00:00
 #SBATCH --mail-type=END,FAIL
 
 set -uo pipefail
 
-PREFIX="${FD_PREFIX:-/projects/ah301/sw}"
+cd "${SLURM_SUBMIT_DIR:-.}"
+# This job creates the venv, so it takes ISMIP7_WORK from the site file and
+# asks for neither ISMIP7_FIREDRAKE nor ismip7_activate. The modules below are
+# loaded directly, because a build needs flex, Bison and M4 that the runtime
+# list omits. install_deps.sh derives the same prefix.
+. antarctica/scripts/batch_runners/site_env.sh
+ismip7_site_require "$ISMIP7_REQUIRED_BUILD"
+
+PREFIX="${FD_PREFIX:-$ISMIP7_WORK/sw}"
 PETSC_SRC="$PREFIX/petsc"
 VENV="$PREFIX/venv-firedrake"
 NPROC="${SLURM_CPUS_PER_TASK:-8}"
@@ -67,7 +79,8 @@ echo "    build cpus $NPROC"
 # foss/2023b is the toolchain that actually resolves here (GCC 13.2.0,
 # OpenMPI 4.1.6, OpenBLAS, ScaLAPACK, FFTW). Python 3.11.5 is built against the
 # same GCCcore/13.2.0, so the ABI matches. Whatever loads here MUST be recorded
-# in nots_env.sh as NOTS_MODULES, or the runtime will mismatch this build.
+# in sites/<your-site>.sh as ISMIP7_MODULES, or the runtime will mismatch this
+# build.
 module purge
 # flex/Bison/M4 are NOT on the compute nodes at all (verified 2026-09-12:
 # flex, lex, bison and m4 are all MISSING on bb2u12c1), and PETSc's
@@ -218,6 +231,6 @@ done
 
 echo
 echo "=== $(date -Is)  build done ==="
-echo "Set these in nots_env.sh:"
-echo "    NOTS_FIREDRAKE=$VENV/bin/activate"
-echo "    NOTS_MODULES=\"foss/2023b Python/3.11.5 CMake/3.27.6 M4/1.4.19 flex/2.6.4 Bison/3.8.2 libevent/2.1.12 zstd/1.5.5 Szip/2.1.1 libaec/1.0.6\""
+echo "Set these in antarctica/scripts/batch_runners/sites/<your-site>.sh:"
+echo "    ISMIP7_FIREDRAKE=$VENV/bin/activate"
+echo "    ISMIP7_MODULES=\"foss/2023b Python/3.11.5 CMake/3.27.6 M4/1.4.19 flex/2.6.4 Bison/3.8.2 libevent/2.1.12 zstd/1.5.5 Szip/2.1.1 libaec/1.0.6 libGLU/9.0.3\""

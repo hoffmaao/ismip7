@@ -1,5 +1,5 @@
 #!/bin/bash
-# ISMIP7 forward run (control, historical or projection) on Rice NOTS deepsC.
+# ISMIP7 forward run (control, historical or projection) on any cluster.
 # SELF-CHAINING: a 285-year projection is about five days at 2500 m and will
 # not fit any ordinary queue, so this script resubmits itself until the run
 # reaches its driver's own end year, resuming from its own newest checkpoint
@@ -8,8 +8,8 @@
 # "Time-stepping: <start>-><end>" line. Setting ISMIP7_T_END overrides every
 # experiment, so leave it unset unless you mean to.
 #
-#   sbatch --export=ALL,ISMIP7_EXPERIMENT=control \
-#          antarctica/scripts/batch_runners/nots_projection.sbatch
+#   antarctica/scripts/batch_runners/submit.sh projection \
+#          ISMIP7_EXPERIMENT=control
 #
 # ISMIP7_EXPERIMENT selects the driver:
 #   control            antarctica/scripts/control/run.py
@@ -31,25 +31,36 @@
 # and `long` (3-day limit), and it is also the safety net that turns a node
 # failure into a resume rather than a lost week. Keep it on.
 
-#SBATCH -J ismip7_fwd
-#SBATCH -p commons
-#SBATCH -C cascadelake
+# Resources (partition, tasks, memory, wall time, account, constraint) come
+# from submit.sh and this cluster's sites/<name>.sh, never from directives
+# here: a directive cannot read a site file, and a header that disagrees
+# with the command line is rejected outright by Slurm.
 #SBATCH -o logs/ismip7_fwd_%j.out
 #SBATCH -e logs/ismip7_fwd_%j.err
-#SBATCH --nodes=1
-#SBATCH --ntasks-per-node=12
-#SBATCH --cpus-per-task=1
-#SBATCH --hint=nomultithread
-#SBATCH --mem=96G
-#SBATCH --time=1-00:00:00
 #SBATCH --mail-type=END,FAIL
 
 set -uo pipefail
 cd "${SLURM_SUBMIT_DIR:-.}"
 mkdir -p logs
-. antarctica/scripts/batch_runners/nots_env.sh
-nots_activate
-nots_banner
+
+# Resources are the wrapper's job (submit.sh reads sites/<cluster>.sh). A job
+# that arrives from the scheduler with one task was submitted by hand without
+# them, and at 2 km that dies on memory hours into the queue rather than at
+# submission. Off a scheduler there is no allocation to judge, so no check.
+if [ -n "${SLURM_JOB_ID:-}" ] && [ "${SLURM_NTASKS:-1}" = 1 ]; then
+    echo "ERROR: this job has SLURM_NTASKS=1, so no resources were requested." >&2
+    echo "       Submit with: antarctica/scripts/batch_runners/submit.sh projection [KEY=VALUE ...]" >&2
+    exit 2
+fi
+
+. antarctica/scripts/batch_runners/site_env.sh
+ismip7_activate
+ismip7_banner
+
+# Off a scheduler (sites/local.sh, debugging a job script on a workstation)
+# there is no job id, no allocation and nothing to chain to.
+JOB="${SLURM_JOB_ID:-manual}"
+LOG="logs/ismip7_fwd_${JOB}.out"
 
 EXPERIMENT="${ISMIP7_EXPERIMENT:-control}"
 case "$EXPERIMENT" in
@@ -105,7 +116,7 @@ export ISMIP7_AUTO_RESUME="${ISMIP7_AUTO_RESUME-1}"
 echo "    experiment $EXPERIMENT -> $DRIVER"
 echo "    map in  $ISMIP7_INVERSION"
 [ -f "$ISMIP7_INVERSION" ] \
-    || echo "    WARNING: that MAP does not exist; run nots_inversion.sbatch first" \
+    || echo "    WARNING: that MAP does not exist; run inversion.sbatch first" \
             "or set ISMIP7_INVERSION"
 echo "    dt=$ISMIP7_DT" \
      "t_end=${ISMIP7_T_END:-driver default (2301 projections, 2101 ssp370, 2015 historical, 2026 OCX)}" \
@@ -123,7 +134,7 @@ echo "    dt=$ISMIP7_DT" \
 # link in the chain to the first job's limit even when it lands on a partition
 # with a shorter one.
 wall_stop_min="${ISMIP7_WALL_STOP_MIN:-}"
-tl=$(scontrol show job "$SLURM_JOB_ID" 2>/dev/null \
+tl=$(scontrol show job "$JOB" 2>/dev/null \
      | grep -oE 'TimeLimit=[^ ]+' | cut -d= -f2)
 if [ -z "$wall_stop_min" ]; then
     wall_stop_min=$(python - "$tl" <<'PY'
@@ -145,7 +156,7 @@ PY
 )
 fi
 echo "    wall budget ${wall_stop_min} min (limit ${tl:-?})"
-ISMIP7_WALL_STOP_MIN="$wall_stop_min" srun -n "${SLURM_NTASKS}" python -u "$DRIVER"
+ISMIP7_WALL_STOP_MIN="$wall_stop_min" srun -n "${SLURM_NTASKS:-1}" python -u "$DRIVER"
 rc=$?
 echo "=== $(date -Is)  forward exit ${rc} ==="
 
@@ -171,7 +182,7 @@ fi
 # prints "Saved: <final.h5>" on every exit, including an early stop, so take
 # the path from our own Slurm log.
 read -r LAST_YEAR STALLED START_YEAR <<EOF
-$(NM_LOG="logs/ismip7_fwd_${SLURM_JOB_ID}.out" python - <<'PY'
+$(NM_LOG="$LOG" python - <<'PY'
 import os, re
 log = os.environ["NM_LOG"]
 chk_fn, start_year = None, ""
@@ -201,20 +212,18 @@ if [ "$STALLED" = "1" ]; then
     exit 1
 fi
 if [ "$LAST_YEAR" = "-" ] || [ -z "$LAST_YEAR" ]; then
-    echo "chain: could not read this job's final checkpoint from" \
-         "logs/ismip7_fwd_${SLURM_JOB_ID}.out; not resubmitting"
+    echo "chain: could not read this job's final checkpoint from $LOG;" \
+         "not resubmitting"
     exit 0
 fi
 # The end the run actually used, from the line run_simulation prints for
 # every driver ("Time-stepping: <start>-><end>, dt=..."). Reading it back
 # rather than re-declaring the per-experiment defaults here keeps the driver
 # the single owner of its period.
-T_END=$(sed -n 's/^Time-stepping: [^-]*->\([0-9.]*\),.*/\1/p' \
-        "logs/ismip7_fwd_${SLURM_JOB_ID}.out" | tail -1)
+T_END=$(sed -n 's/^Time-stepping: [^-]*->\([0-9.]*\),.*/\1/p' "$LOG" | tail -1)
 if [ -z "$T_END" ]; then
-    echo "chain: no 'Time-stepping:' line in" \
-         "logs/ismip7_fwd_${SLURM_JOB_ID}.out, so the run's end year is" \
-         "unknown; not resubmitting"
+    echo "chain: no 'Time-stepping:' line in $LOG, so the run's end year" \
+         "is unknown; not resubmitting"
     exit 0
 fi
 # Finished before anything else: a completed run re-submitted under
@@ -267,5 +276,15 @@ echo "chain: at ${LAST_YEAR} of ${T_END}, resubmitting"
 # inheriting it would send each link back to the same starting checkpoint and
 # the chain would never advance past the first job's end year.
 unset ISMIP7_WALL_STOP_MIN ISMIP7_RESTART
+if [ -z "${SLURM_JOB_ID:-}" ]; then
+    echo "chain: no scheduler, so no successor to queue; resume by hand"
+    exit 0
+fi
+# The successor also has to be told what to run on: this script carries no
+# resource directives, so without the running job's own partition, constraint,
+# wall limit, memory and task layout the link would land on the cluster's
+# defaults, and a default of one task is refused by the guard above.
+ismip7_chain_resources
 sbatch --dependency=afterok:"${SLURM_JOB_ID}" --export=ALL \
-       antarctica/scripts/batch_runners/nots_projection.sbatch
+       "${ISMIP7_CHAIN_RES[@]}" \
+       antarctica/scripts/batch_runners/projection.sbatch

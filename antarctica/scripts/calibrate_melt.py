@@ -354,8 +354,9 @@ def main():
     # Provenance travels with the numbers. Two published observation tables are
     # in circulation and their integrated targets differ by 23%, so a K file
     # that does not name its own source cannot be told apart from the other
-    # calibration once it is on disk. The forward reads only basin_ids and
-    # K_basin, so the extra entries cost nothing.
+    # calibration once it is on disk. The forward reads basin_ids and K_basin,
+    # plus sin_alpha_cap, which load_K_per_basin compares against its own
+    # uncapped slope and warns about; the other entries cost nothing.
     np.savez(
         K_out,
         basin_ids=bids_obs, K_basin=K_basin,

@@ -299,3 +299,9 @@ production Budd re-inversion, NOTS job 1339328, is warm-started from it but
 runs the shipped HAF-only law. No MAP inverted with the He form is to be used
 for a result: a forward records only the law NAME (`budd`), not the gate form,
 so nothing detects the mismatch at load time.
+
+**Level set across a remesh:** `transfer_state` moves the `levelset` field the
+way the shared package documents it (`cross_mesh_transfer` docstring): as its
+P1 lift, landing back in DG0, with water (+1e6 m) outside the old mesh. The
+forward's extent anchor then re-solves the eikonal problem on the new mesh,
+the same order of operations the calving project uses after its remeshes.

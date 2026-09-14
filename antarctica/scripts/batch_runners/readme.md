@@ -230,8 +230,10 @@ ranks, each named so the converged 2500 m map is never touched.
 checkpoints `ISMIP7_MAP_OUT` every 20 iterates and can warm-start from it. So
 each job queues its own successor FIRST with `--dependency=afterany`, copying
 its partition, constraint, memory, time and task layout from `scontrol`; every
-link exits immediately if `<map>.done` exists, which is written only when
-L-BFGS-B returns for a reason other than its iteration cap. Depth is capped by
+link exits immediately if `<map>.done` exists, which is written whenever
+L-BFGS-B returned at all (`ISMIP7_MAXITER` is the run's budget, so reaching
+the iteration cap is the normal end; the successor is for a job the wall
+clock killed before the optimizer returned). Depth is capped by
 `ISMIP7_CHAIN_MAX` (4). The inversion itself now refuses a warm start whose
 mesh dof ordering differs from its own (a rank-count change mid-chain would
 otherwise scramble theta/phi silently).

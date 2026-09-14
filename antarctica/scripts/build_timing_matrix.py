@@ -8,6 +8,7 @@ import glob
 import json
 import math
 import os
+import re
 import sys
 from datetime import datetime, timezone
 from pathlib import Path
@@ -22,7 +23,9 @@ from timing_campaign import (
     MATRIX_REFERENCE_LC,
     MATRIX_STEPS,
     MATRIX_T_START,
+    SOURCE_INVERSION_BASENAME,
     diverged_reasons,
+    inversion_required,
     mesh_rows,
     planned_lanes,
     timing_status_basename,
@@ -227,6 +230,48 @@ def _status_table(rows, classifications):
     return lines
 
 
+def _initial_state_label(source):
+    if source == SOURCE_INVERSION_BASENAME:
+        return "transferred 2.5 km MAP"
+    match = re.search(r"_(\d+)iter\.h5$", source or "")
+    if match:
+        return f"re-inverted on this mesh ({match.group(1)} iter)"
+    return f"`{source}`"
+
+
+def _initial_state_table(rows, records):
+    """One line per mesh naming the MAP its lanes' initial state came from.
+
+    500 m meshes are not re-inverted (see timing_campaign.inversion_required);
+    the report must never let a transferred and a re-inverted initial state
+    read as the same experiment.
+    """
+    lines = ["| LC (m) | LC_coarse (m) | Initial state |", "|---|---|---|"]
+    for lc, lc_coarse in rows:
+        sources = {
+            record.get("initial_state_source")
+            or (record.get("cache_validation") or {}).get(
+                "source_inversion_basename"
+            )
+            for record in records
+            if record.get("lc") == lc and record.get("lc_coarse") == lc_coarse
+        }
+        sources.discard(None)
+        sources.discard("")
+        if sources:
+            label = "; ".join(
+                _initial_state_label(source) for source in sorted(sources)
+            )
+            if len(sources) > 1:
+                label = f"**MIXED** — {label}"
+        elif inversion_required(lc):
+            label = "re-inverted on this mesh (no record yet)"
+        else:
+            label = "transferred 2.5 km MAP (policy: not re-inverted)"
+        lines.append(f"| {lc} | {lc_coarse} | {label} |")
+    return lines
+
+
 def _timing_table(rows, record_index, per_step=False):
     key = "seconds_per_step" if per_step else "run_seconds"
     unit = "s/step" if per_step else "s"
@@ -305,7 +350,9 @@ def render(tag, timing_dir, output, legacy_full_matrix=False):
         "The primary timing covers only the five-step transient loop; setup "
         "and checkpoint loading are recorded separately. The timestep is "
         "`0.25 × LC / 2500` years. Strict lanes use `scpc_mumps`, an "
-        "exact-mesh prepared cache, and no rescue or subcycle recovery."
+        "exact-mesh prepared cache, and no rescue or subcycle recovery. "
+        "The initial state is re-inverted on each mesh except at 500 m, "
+        "where it is the transferred 2.5 km MAP (see Initial states)."
     )
     lines = [
         "# Antarctica timing matrix",
@@ -321,6 +368,12 @@ def render(tag, timing_dir, output, legacy_full_matrix=False):
         "",
     ]
     lines.extend(_status_table(rows, classifications))
+    if not legacy_full_matrix:
+        lines.extend(["", "### Initial states", ""])
+        lines.extend(_initial_state_table(
+            rows,
+            [record for record in records if record.get("timing_tag") == tag],
+        ))
     non_ok = [
         (lane, classifications[lane])
         for lane in sorted(configured)

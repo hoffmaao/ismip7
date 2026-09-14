@@ -9,10 +9,13 @@
 #   redistribute  rewrite the complete inversion checkpoint on 1 core
 #   timing-prepare  prepare/repack one exact-mesh state for all 10 meshes
 #   timing-inversion  per-mesh logvelnet invert (TIMING_INVERSION_MAXITER, default 250); republish cache
+#                     (FOLLOW_PREPARE=1 queues each invert behind its active prepare job;
+#                     500 m meshes are not re-inverted -- their lanes use the prepared cache)
 #   timing-cache-audit  report the exact initial FV tendency of prepared caches
 #   timing-amb-probe  test exact div(h*u) cancellation on one prepared cache
 #   timing-scout    submit the lowest retained core count for each mesh
 #   timing-scale    submit only scaling lanes whose exact scout passed
+#                   (both: FOLLOW_INVERT=1 queues lanes behind an active invert job)
 #   transient       direct qualification/debug compatibility entry point
 #   qualify       gate one solver through 2-step and 5-step 2.5 km probes
 #   timestep-probe restart at 2.5 km for 5 steps at a selectable coarser dt
@@ -54,6 +57,7 @@ TIMING_SCOUT_MONITOR ?=
 TIMING_INVERSION_MAXITER ?= 250
 TIMING_INVERSION_TIME ?= 24:00:00
 FOLLOW_PREPARE ?=
+FOLLOW_INVERT ?=
 SBATCH_WAIT ?=
 FORCE_TIMING ?=
 SLURM_PARTITION ?= general
@@ -325,7 +329,8 @@ timing-scale:
 	  --partition "$(SLURM_PARTITION)" --walltime "$(SLURM_TIME)" \
 	  --maxiter "$(TIMING_INVERSION_MAXITER)" \
 	  $(if $(TIMING_ONLY_MESH),--only-mesh "$(TIMING_ONLY_MESH)",) \
-	  $(if $(FORCE_TIMING),--force,)
+	  $(if $(FORCE_TIMING),--force,) \
+	  $(if $(FOLLOW_INVERT),--follow-invert,)
 
 timing-dry-run:
 	python scripts/manage_timing_campaign.py prepare --dry-run \

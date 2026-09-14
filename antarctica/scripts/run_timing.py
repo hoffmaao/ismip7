@@ -167,6 +167,7 @@ def _load_and_validate_cache(current_solver_configuration):
         "manifest_path": str(Path(CACHE_MANIFEST).resolve()),
         "cache_schema_version": manifest["cache_schema_version"],
         "source_inversion": manifest["source_inversion"],
+        "source_inversion_basename": manifest["source_inversion_basename"],
         "source_inversion_sha256": manifest["source_inversion_sha256"],
         "source_mesh_sha256": manifest["source_mesh_sha256"],
         "geometry_source": manifest["geometry_source"],
@@ -412,6 +413,12 @@ def main():
         "boundary_ids_input": os.environ.get("ISMIP7_BNDIDS", ""),
         "inversion_input": os.environ.get("ISMIP7_INVERSION", ""),
         "restart_input": RESTART_FROM or "",
+        # Which MAP the cache's mixed state descends from: the per-mesh
+        # short invert, or the transferred 2.5 km source for meshes that are
+        # not re-inverted. The matrix report keeps the two apart.
+        "initial_state_source": cache_validation.get(
+            "source_inversion_basename", ""
+        ),
         "cache_validation": {
             key: value
             for key, value in cache_validation.items()

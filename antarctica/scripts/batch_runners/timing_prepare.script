@@ -35,6 +35,7 @@ raw="${ISMIP7_TIMING_CACHE_RAW:?ISMIP7_TIMING_CACHE_RAW is required}"
 final="${ISMIP7_TIMING_CACHE:?ISMIP7_TIMING_CACHE is required}"
 manifest="${ISMIP7_TIMING_CACHE_MANIFEST:?ISMIP7_TIMING_CACHE_MANIFEST is required}"
 status="${ISMIP7_TIMING_CACHE_STATUS:?ISMIP7_TIMING_CACHE_STATUS is required}"
+pristine="${ISMIP7_TIMING_CACHE_PRISTINE:-}"
 if [ "${raw}" = "${final}" ]; then
     echo "parallel cache path and published cache path must differ" >&2
     exit 2
@@ -70,4 +71,12 @@ if [ "${repack_rc}" -ne 0 ]; then
 fi
 
 rm -f "${raw}"
+
+# Keep an untouched copy of the prepared state. The per-mesh invert warm-starts
+# from it and later replaces ${final} with a cache published from its own MAP
+# (redistribute writes a new inode, so a hard link keeps this one intact).
+if [ -n "${pristine}" ]; then
+    rm -f "${pristine}"
+    ln "${final}" "${pristine}" 2>/dev/null || cp "${final}" "${pristine}"
+fi
 write_status "finished phase=published exit_code=0"

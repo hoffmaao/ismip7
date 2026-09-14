@@ -108,6 +108,36 @@ def inversion_cores(lc):
     return 32 if int(lc) < 2500 else 16
 
 
+# The per-mesh invert factors the complete mixed (u, M, tau) Jacobian with
+# MUMPS and holds the tlm_adjoint tape, so its footprint is not the scpc_mumps
+# transient's (MEMORY_BY_LC). Measured on Quartz: 2500/25000 on 16 ranks peaks
+# near 2 GB/rank; both 500 m meshes exceeded 13 GB/rank on 32 ranks and were
+# OOM-killed at 240G before their first evaluation, so 500 m is not inverted.
+INVERSION_MEMORY_BY_LC = {
+    1000: "192G",
+    2000: "160G",
+    2500: "64G",
+    5000: "32G",
+}
+INVERSION_SKIP_LCS = (500,)
+
+
+def inversion_required(lc):
+    """Whether the campaign re-inverts on this mesh.
+
+    Meshes in INVERSION_SKIP_LCS start their lanes from the prepared cache,
+    i.e. the transferred 2.5 km MAP; TIMING_MATRIX.md records which initial
+    state each mesh used so the two are never mixed silently.
+    """
+    return int(lc) not in INVERSION_SKIP_LCS
+
+
+def inversion_memory(lc):
+    if not inversion_required(lc):
+        raise ValueError(f"no per-mesh inversion is run at LC={int(lc)}")
+    return INVERSION_MEMORY_BY_LC[int(lc)]
+
+
 def mesh_inversion_basename(lc, lc_coarse, maxiter=None):
     n = inversion_maxiter(maxiter)
     return (
@@ -206,6 +236,16 @@ def cache_paths(cache_dir, lc, lc_coarse, buffer_m=BUFFER_M):
     stem = cache_stem(lc, lc_coarse, buffer_m)
     root = Path(cache_dir)
     return root / f"{stem}.h5", root / f"{stem}.json"
+
+
+def pristine_cache_path(cache_dir, lc, lc_coarse, buffer_m=BUFFER_M):
+    """Untouched copy of the prepared cache.
+
+    The per-mesh invert warm-starts from it and then republishes the cache
+    path above from its own MAP, so a re-run must never warm-start from that
+    output.
+    """
+    return Path(cache_dir) / f"{cache_stem(lc, lc_coarse, buffer_m)}.prepare.h5"
 
 
 def timing_record_basename(tag, lc, lc_coarse, ncores):

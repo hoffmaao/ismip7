@@ -104,7 +104,29 @@ from icepack2_tools.prior import (
 from icepack2_tools.thermo_model import compute_fluidity_prior
 from icepack2_tools.forcing import (load_racmo_smb_climatology,
                                     load_mean_annual_surface_temperature)
+from icepack2_tools.runconfig import TARGET_MESH_GEOMETRY_METHOD
+from icepack2_tools.solverconfig import (
+    diagnostic_solver_mode,
+    final_solve_parameters,
+    nonlinear_solver_options,
+    snes_monitor_enabled,
+)
 from mesh_naming import get_buffer_m, mesh_filename
+from timing_campaign import MATRIX_T_START, atomic_write_json
+
+# petsc4py returns SNES converged reasons as plain ints on most builds.
+_SNES_REASON_NAMES = {
+    value: name
+    for name, value in vars(PETSc.SNES.ConvergedReason).items()
+    if isinstance(value, int) and not name.startswith("_")
+}
+
+
+def _snes_reason_name(reason):
+    name = getattr(reason, "name", None)
+    if name:
+        return str(name)
+    return _SNES_REASON_NAMES.get(int(reason), str(int(reason)))
 
 lc = _lc()
 lc_coarse = _lc_coarse()
@@ -404,28 +426,43 @@ def main():
     u_c = Constant(global_mean(u_speed))
     PETSc.Sys.Print(f"  tau_c={float(tau_c):.3f} MPa, u_c={float(u_c):.1f} m/yr")
 
-    sparams = {
-        "snes_type": "newtonls",
-        "snes_max_it": 200,
-        "snes_linesearch_type": "nleqerr",
-        # PETSC_UNLIMITED (-3), not the legacy -1. -1 is PETSC_DETERMINE,
-        # which restores PETSc's default 1e4 growth cutoff and reports
-        # DIVERGED_DTOL on solves that would otherwise reach their real
-        # convergence or iteration-limit result. The timing campaign pins
-        # -3 for exactly this reason (see README "Timing benchmark" §7).
-        # These sparams are shared by every annotated L-BFGS forward AND
-        # by the final save solve, where a spurious DIVERGED_DTOL is
-        # silently downgraded to "large objective" or to a published state
-        # that does not match the controls written beside it.
-        "snes_divergence_tolerance": -3,
-        "snes_stol": 0.0,
+    # Newton/line-search settings come from icepack2_tools.solverconfig so the
+    # ISMIP7_SNES_* knobs the campaign exports mean the same thing here as in
+    # the transient: newtonls, nleqerr, max_it 200, stol 0, and divergence
+    # tolerance -3 (PETSC_UNLIMITED; the legacy -1 is PETSC_DETERMINE, which
+    # restores PETSc's 1e4 growth cutoff and reports DIVERGED_DTOL on solves
+    # that would otherwise reach their real result -- README "Timing
+    # benchmark" §7). The linear solve is the full mixed-Jacobian MUMPS LU:
+    # tlm_adjoint differentiates through it, so this is deliberately NOT the
+    # transient's condensed scpc_mumps mode, and the MAP records that as
+    # state_solver_mode beside the lane contract diagnostic_solver_mode.
+    sparams = nonlinear_solver_options()
+    sparams.update({
         "ksp_type": "gmres",
         "pc_type": "lu",
         "pc_factor_mat_solver_type": "mumps",
         "mat_mumps_icntl_14": 400,  # working memory increase
         "mat_mumps_icntl_24": 1,  # detect null pivots
         "mat_mumps_cntl_3": 1e-12,  # null pivot threshold
-    }
+    })
+    state_solver_mode = "full_mumps"
+    state_solver_parameters = json.dumps(sparams, sort_keys=True)
+    # Optional SNES monitoring (ISMIP7_SNES_MONITOR=1, ISMIP7_SNES_LOG=file),
+    # the transient runner's convention. Applies to every annotated forward
+    # and, through tlm_adjoint, the adjoint linear solves.
+    _solver_log = os.environ.get("ISMIP7_SNES_LOG") if snes_monitor_enabled() else None
+    if _solver_log:
+        os.makedirs(os.path.dirname(os.path.abspath(_solver_log)), exist_ok=True)
+    _viewer = f"ascii:{_solver_log}::append" if _solver_log else None
+    if snes_monitor_enabled():
+        sparams.update({
+            "snes_monitor": _viewer,
+            "snes_converged_reason": _viewer,
+        })
+    # The mode consumers of the published state must run (validate_cache_manifest
+    # asserts it). Resolved now so an invalid environment fails here, not
+    # inside the final save after hours of work.
+    lane_solver_mode = diagnostic_solver_mode()
     fc_params = {"quadrature_degree": 4}
 
     # ── Build form (Kangerd pattern: controls baked into sliding coefficient) ──
@@ -1163,13 +1200,29 @@ def main():
     # final-save guard below to the point of passing a corrupt velocity.
     last_good_vel_chi2 = [np.inf]
 
-    # Residual norm of the state written by save_map(full_state=True),
-    # evaluated under the controls saved in the SAME file. Recorded as a
-    # checkpoint attribute because it is the quantity every consumer
-    # silently depends on: the timing-cache restart fast path in
-    # simulation.py accepts a published mixed state as converged and
-    # derives its whole run atol from this norm.
-    full_state_fnorm = [float("nan")]
+    def _residual_norm():
+        """||F(z; theta, phi)|| at full n/m -- what every consumer recomputes."""
+        with assemble(F, form_compiler_parameters=fc_params).dat.vec_ro as _rv:
+            return float(_rv.norm())
+
+    # Residual level the last accepted forward actually reached, and the
+    # controls it was solved at. The publishing solve below is judged against
+    # these: a state already at that level needs no Newton iterations.
+    last_good_fnorm = [float("nan")]
+    last_good_x = [None]
+
+    # Provenance of the mixed state written by save_map(full_state=True):
+    # its residual under the controls saved in the SAME file, and how the
+    # publishing solve ended. The timing-cache restart fast path
+    # (simulation.py) recomputes ||F|| itself; these attributes are the
+    # audit trail for what it will find.
+    full_state_solve = {
+        "residual": float("nan"),
+        "solve_reason": "",
+        "solve_iterations": -1,
+        "atol": float("nan"),
+        "fnorm_ref": float("nan"),
+    }
 
     def term_report():
         r"""``' vel=... dhdt=...'`` for the iteration line, or '' if disabled."""
@@ -1240,16 +1293,18 @@ def main():
             chk.set_attr("/", "dhdt_weight", float(dhdt_w))
             chk.set_attr("/", "dhdt_net_sigma", net_sigma_used)
             if full_state:
-                from icepack2_tools.runconfig import TARGET_MESH_GEOMETRY_METHOD
-                from icepack2_tools.solverconfig import diagnostic_solver_mode
-                from timing_campaign import MATRIX_T_START as _t0
-                chk.set_attr("/", "t_yr", float(_t0))
+                chk.set_attr("/", "t_yr", float(MATRIX_T_START))
                 chk.set_attr("/", "friction", str(FRICTION))
                 chk.set_attr("/", "geometry_space", str(geometry_space))
                 chk.set_attr("/", "n_flow", float(n_flow_val))
                 chk.set_attr("/", "a4_factor", float(a4_factor))
+                # Two solver facts, kept apart: the mode the lanes consuming
+                # this state must run (the cache contract), and the solver
+                # that actually produced the state.
+                chk.set_attr("/", "diagnostic_solver_mode", lane_solver_mode)
+                chk.set_attr("/", "state_solver_mode", state_solver_mode)
                 chk.set_attr(
-                    "/", "diagnostic_solver_mode", diagnostic_solver_mode()
+                    "/", "state_solver_parameters", state_solver_parameters
                 )
                 chk.set_attr(
                     "/", "geometry_source", os.path.realpath(bm_fn)
@@ -1257,9 +1312,8 @@ def main():
                 chk.set_attr(
                     "/", "geometry_source_method", TARGET_MESH_GEOMETRY_METHOD
                 )
-                chk.set_attr(
-                    "/", "full_state_residual", float(full_state_fnorm[0])
-                )
+                for key, value in full_state_solve.items():
+                    chk.set_attr("/", f"full_state_{key}", value)
 
     # ── L-BFGS-B Inversion ──
     max_iter = int(os.environ.get("ISMIP7_MAXITER", "500"))
@@ -1286,10 +1340,11 @@ def main():
             )
         return terms
 
-    def _write_timing_json(*, phase, message="", nit=None, nfev=None):
+    def _write_timing_json(
+        *, phase, message="", nit=None, nfev=None, final_solve=None
+    ):
         if not timing_json or COMM_WORLD.rank != 0:
             return
-        from timing_campaign import atomic_write_json
         written = os.path.realpath(os.path.join(_map_dir, map_fn))
         published = os.environ.get("ISMIP7_MAP_OUT_FINAL", "").strip()
         payload = {
@@ -1322,6 +1377,9 @@ def main():
                 "skip_continuation": bool(skip_continuation),
             },
             "evaluations": list(timing_history),
+            # Set only by the "finished" record: how the publishing solve
+            # ended and whether the full mixed state was written.
+            "final_solve": final_solve,
         }
         atomic_write_json(timing_json, payload)
 
@@ -1357,6 +1415,8 @@ def main():
         z_backup.assign(z)
         last_good_obj[0] = J_val
         last_good_vel_chi2[0] = float(assemble(_vel_chi2))
+        last_good_fnorm[0] = _residual_norm()
+        last_good_x[0] = np.array(x_vec, copy=True)
 
         t_adj = perf_counter()
         try:
@@ -1466,7 +1526,7 @@ def main():
         x0,
         method="L-BFGS-B",
         jac=True,
-        options={"maxiter": max_iter, "ftol": 0, "gtol": 0, "disp": False},
+        options={"maxiter": max_iter, "ftol": 0, "gtol": 0},
     )
 
     PETSc.Sys.Print(f"\nOptimization finished: {result.message}")
@@ -1491,70 +1551,83 @@ def main():
 
     if timing_json:
         _write_timing_json(
-            phase="finished",
+            phase="final_solve",
             message=str(result.message),
             nit=result.nit,
             nfev=result.nfev,
         )
-        if COMM_WORLD.rank == 0:
-            PETSc.Sys.Print(f"Inversion timing record -> {timing_json}")
 
     # ── Final diagnostic ──
-    # Use the same EquationSolver path as L-BFGS forwards, starting from
-    # z_backup. The setup-time NonlinearVariationalSolver (slvr) is a different
-    # object and, after line-search evals, can start from a z that no longer
-    # matches result.x -- that path burned ~30 min then ConvergenceError on the
-    # 2500/25000 timing invert while annotated forwards had been fine.
+    # Publish the mixed state at the returned controls. When result.x is the
+    # last evaluated point (the usual L-BFGS-B ending) z_backup already solves
+    # F(z; result.x) = 0 to the level the annotated forwards reached, and a
+    # fresh Newton solve from there sits at the rounding floor: the relative
+    # test cannot pass, snes_stol=0 disables the step exit, and each
+    # iteration is another full MUMPS factorisation. That ran the 2500/25000
+    # timing invert silently to snes_max_it (200 iterations, ~30 min) and
+    # then into a five-stage n-continuation retry -- which starts from a
+    # full-n state and ramps m_slide, a float inside build_rc_residual, so it
+    # only walked away from the solution. The transient runner solved the
+    # same problem with a self-scaled absolute tolerance (simulation.py,
+    # restart fast path); final_solve_parameters applies it here, bounds the
+    # iteration counts, and always prints the converged reason, so this is
+    # either a 0-iteration confirmation or a short, visible Newton solve from
+    # a line-search neighbour. A plain NonlinearVariationalSolver (not
+    # tlm_adjoint's EquationSolver, which discards its SNES) keeps the reason,
+    # iteration count and function norm readable after a failure.
     PETSc.Sys.Print("\nFinal forward solve...")
     stop_manager()
-    z.assign(z_backup)
+    reset_manager()
+    clear_caches()
     n_flow.assign(n_flow_val)
     m_slide.assign(m_slide_val)
-
-    def _final_residual():
-        """||F(z)|| under the FINAL controls -- the consumer's quantity."""
-        with assemble(build_F(theta, phi)).dat.vec_ro as _rv:
-            return _rv.norm()
-
-    def _solve_final():
-        EquationSolver(
-            build_F(theta, phi) == 0,
-            z,
-            solver_parameters=sparams,
-            form_compiler_parameters=fc_params,
-        ).solve()
-
+    z.assign(z_backup)
+    f_ref = float(last_good_fnorm[0])
+    f0 = _residual_norm()
+    x_same = bool(
+        last_good_x[0] is not None
+        and np.array_equal(last_good_x[0], _x_final)
+    )
+    final_sparams = final_solve_parameters(sparams, f_ref, viewer=_viewer)
+    atol_final = float(final_sparams.get("snes_atol", float("nan")))
+    PETSc.Sys.Print(
+        f"  ||F(z_backup; result.x)|| = {f0:.3e}; last accepted forward "
+        f"reached {f_ref:.3e}; result.x {'==' if x_same else '!='} last "
+        f"accepted controls; snes_atol={atol_final:.3e} "
+        f"snes_max_it={final_sparams['snes_max_it']}"
+    )
+    if "snes_atol" not in final_sparams:
+        PETSc.Sys.Print(
+            "  WARNING: no converged forward residual on record; the final "
+            "solve falls back to the relative test alone"
+        )
+    final_solver = NonlinearVariationalSolver(
+        NonlinearVariationalProblem(F, z, form_compiler_parameters=fc_params),
+        solver_parameters=final_sparams,
+    )
     final_solve_ok = False
     try:
-        _solve_final()
+        final_solver.solve()
         final_solve_ok = True
-    except fd.ConvergenceError as exc:
-        # Do NOT swallow the reason. This path used to print one line and
-        # fall through to the save guard, so four consecutive timing
-        # inversions published a mixed state belonging to different
-        # controls with nothing in the log naming the cause.
-        PETSc.Sys.Print(f"  Final solve failed at full n/m: {exc}")
-        # z_backup was solved at the last EVALUATED control vector, which
-        # is not result.x. Re-ramping 1->n from it is the same recovery
-        # the cold-start diagnostic uses when a jump to full exponents
-        # outruns Newton.
+    except (fd.ConvergenceError, PETSc.Error) as exc:
+        PETSc.Sys.Print(f"  Final solve raised {type(exc).__name__}: {exc}")
+    final_reason = _snes_reason_name(final_solver.snes.getConvergedReason())
+    final_its = int(final_solver.snes.getIterationNumber())
+    if not final_solve_ok:
+        # Never publish a half-converged Newton iterate.
         z.assign(z_backup)
-        try:
-            PETSc.Sys.Print(
-                f"  Retrying with continuation n_flow 1->{n_flow_val:.1f}, "
-                f"m_slide 1->{m_slide_val:.1f}..."
-            )
-            for _t in np.linspace(0.0, 1.0, 5):
-                n_flow.assign(1.0 + _t * (n_flow_val - 1.0))
-                m_slide.assign(1.0 + _t * (m_slide_val - 1.0))
-                _solve_final()
-            final_solve_ok = True
-            PETSc.Sys.Print("  Continuation retry converged")
-        except fd.ConvergenceError as exc2:
-            PETSc.Sys.Print(f"  Continuation retry also failed: {exc2}")
-            n_flow.assign(n_flow_val)
-            m_slide.assign(m_slide_val)
-            z.assign(z_backup)
+    f_end = _residual_norm()
+    PETSc.Sys.Print(
+        f"  Final solve: {final_reason} after {final_its} Newton iterations, "
+        f"||F|| {f0:.3e} -> {f_end:.3e}"
+    )
+    full_state_solve.update({
+        "residual": f_end,
+        "solve_reason": final_reason,
+        "solve_iterations": final_its,
+        "atol": atol_final,
+        "fnorm_ref": f_ref,
+    })
 
     u_sol = z.subfunctions[0]
     u_sol_mag = Function(Q).interpolate(sqrt(u_sol[0] ** 2 + u_sol[1] ** 2))
@@ -1581,24 +1654,46 @@ def main():
     # written between then and 2026-09-14 carries controls from result.x
     # and a velocity solved for a different control vector; ||F|| at the
     # published state reached 1.5e10 and the forward blew up in 4 steps.
-    full_state_fnorm[0] = _final_residual()
-    _fnorm = full_state_fnorm[0]
+    _fnorm = f_end
     PETSc.Sys.Print(
         f"  Published-state residual ||F(z; theta, phi)|| = {_fnorm:.6e} "
-        f"(final solve {'converged' if final_solve_ok else 'FAILED'})"
+        f"(final solve {'converged' if final_solve_ok else 'FAILED'}: "
+        f"{final_reason})"
     )
-    if final_solve_ok and np.isfinite(_fnorm):
+    published = bool(final_solve_ok and np.isfinite(_fnorm))
+    if published:
         save_map(chk_fn, full_state=True)
         PETSc.Sys.Print(f"Saved full mixed-state MAP: {chk_fn}")
     else:
         PETSc.Sys.Print(
             f"WARNING: NOT saving mixed state -- the final forward solve at "
-            f"the saved controls did not converge (||F||={_fnorm:.3e}). "
-            f"A mixed state from a different control vector would be "
-            f"accepted by the restart fast path and never re-solved. "
-            f"Controls-only MAP remains; timing-cache publish from this "
-            f"file will fail until re-run."
+            f"the saved controls did not converge ({final_reason} after "
+            f"{final_its} iterations, ||F||={_fnorm:.3e}, result.x "
+            f"{'==' if x_same else '!='} last accepted controls). A mixed "
+            f"state from a different control vector would be accepted by "
+            f"the restart fast path and never re-solved. Controls-only MAP "
+            f"remains; timing-cache publish from this file will fail until "
+            f"re-run."
         )
+
+    if timing_json:
+        _write_timing_json(
+            phase="finished",
+            message=str(result.message),
+            nit=result.nit,
+            nfev=result.nfev,
+            final_solve={
+                "reason": final_reason,
+                "iterations": final_its,
+                "fnorm_start": f0,
+                "fnorm_end": f_end,
+                "fnorm_ref": f_ref,
+                "atol": atol_final,
+                "result_x_is_last_accepted": x_same,
+                "published": published,
+            },
+        )
+        PETSc.Sys.Print(f"Inversion timing record -> {timing_json}")
 
     # ── Plot ──
     # Optional: the MAP is already written above, so a missing plotting

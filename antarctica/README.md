@@ -599,15 +599,31 @@ The stages and contracts are:
    `ISMIP7_DHDT_NET_SIGMA=10`). Default length is
    `TIMING_INVERSION_MAXITER=250` (override with e.g. `=5` for a debug pass);
    walltime defaults to `TIMING_INVERSION_TIME=24:00:00`. The job warm-starts
-   from that mesh's prepared cache (controls, fluidity prior, geometry, and
+   from the pristine copy of that mesh's prepared cache
+   (`…_buffered20000.prepare.h5`: controls, fluidity prior, geometry, and
    mixed diagnostic state) and skips the cold `1→n` continuation. Ranks are 32
-   for LC &lt; 2500 m and 16 otherwise; memory follows the forward
-   `MEMORY_BY_LC` budgets. The parallel MAP is rewritten on one rank to
+   for LC &lt; 2500 m and 16 otherwise; memory follows `INVERSION_MEMORY_BY_LC`,
+   sized for the full mixed-Jacobian MUMPS factorisation plus the adjoint
+   tape rather than the condensed transient. **The 500 m meshes are not
+   re-inverted** (their invert needs ≈430 GB on one node); their lanes start
+   from the prepared cache, i.e. the transferred 2.5 km MAP, and
+   `TIMING_MATRIX.md` says so per mesh under "Initial states". After L-BFGS
+   the job publishes the mixed state at the returned controls with a
+   self-scaled absolute tolerance (`snes_atol = ISMIP7_SNES_ATOL_SCALE ×` the
+   residual the last accepted forward reached, bounded at
+   `ISMIP7_FINAL_SNES_MAXIT=50` iterations, reason always printed): when the
+   returned controls are the last evaluated point that solve confirms the
+   state at iteration 0 instead of grinding a converged residual against a
+   relative test. The parallel MAP is rewritten on one rank to
    `results/timing/inversion/…_{lc}_{lc_coarse}_{N}iter.h5` with the full
-   mixed diagnostic state, a profiling JSON is written under
-   `results/timing/`, then that checkpoint is published as the timing cache
-   (no second cold prepare) so scout/scale provenance points at the short
-   invert.
+   mixed diagnostic state, a profiling JSON (including the final-solve
+   outcome) is written under `results/timing/`, then that checkpoint is
+   published as the timing cache (no second cold prepare) so scout/scale
+   provenance points at the short invert. The cache manifest keeps two
+   solver facts apart: `diagnostic_solver_mode` (`scpc_mumps`, the mode lanes
+   must run) and `state_solver` (`full_mumps`, what actually produced the
+   state). `FOLLOW_PREPARE=1` queues each invert behind its active prepare
+   job; a running invert is never resubmitted, even with `FORCE_TIMING=1`.
 4. **Cache audit / AMB probe** — optional diagnostics on a prepared cache:
    ```console
    make timing-cache-audit TIMING_ONLY_MESH=2500/25000 \
@@ -638,11 +654,14 @@ The stages and contracts are:
 5. **Scouts (`make timing-scout`)** — one lowest-retained-core lane per mesh:
    32 ranks at 500 m and 16 ranks elsewhere. A scout passes only after five
    direct steps, the exact final year, no negative solve reason or rescue
-   label, matching post-inversion cache provenance, and transport and
-   complete-step mass residuals no larger than `5e-5 Gt`.
+   label, matching cache provenance (the per-mesh invert MAP, or the
+   transferred source MAP at 500 m), and transport and complete-step mass
+   residuals no larger than `5e-5 Gt`.
 6. **Scaling (`make timing-scale`)** — higher-core lanes are submitted only
    for meshes whose scout passes. A failed scout stamps its scaling lanes
-   `BLOCKED BY SCOUT`; the jobs are not submitted.
+   `BLOCKED BY SCOUT`; the jobs are not submitted. `FOLLOW_INVERT=1` lets
+   scouts and scaling lanes queue behind an active invert job
+   (`--dependency=afterok`).
 7. **Strict transient timing** — all matrix lanes use `scpc_mumps`, disable
    rescue, and restrict subcycles to `1`. The first diagnostic, transport, or
    mass-budget failure ends the lane. The primary timer starts immediately

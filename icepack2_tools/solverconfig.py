@@ -18,6 +18,7 @@ by GAMG or MUMPS.  These modes avoid relying on the block size inferred for an
 AIJ submatrix, which is the unresolved weakness in PETSc ``selfp`` here.
 """
 
+import math
 import os
 
 
@@ -56,6 +57,12 @@ SNES_KSP_EW_DEFAULT = "0"
 SNES_MONITOR_DEFAULT = "0"
 SNES_LOG_DEFAULT = "stdout"
 SOLVER_VIEW_DEFAULT = "0"
+# The inversion's publishing solve (final_solve_parameters): a solve that
+# starts at an already-converged state must exit at iteration 0, and one that
+# does not must stay short and loud rather than grind to the shared 200.
+FINAL_SNES_STOL_DEFAULT = "1e-8"
+FINAL_SNES_MAXIT_DEFAULT = "50"
+FINAL_KSP_MAXIT_DEFAULT = "50"
 
 KSP_RTOL_DEFAULT = "1e-6"
 KSP_MAXIT_DEFAULT = "1000"
@@ -291,6 +298,51 @@ def snes_restart_failure_atol_scale():
         "ISMIP7_SNES_RESTART_FAILURE_ATOL_SCALE",
         SNES_RESTART_FAILURE_ATOL_SCALE_DEFAULT,
     ))
+
+
+def nonlinear_solver_options():
+    r"""Shared SNES options (type, tolerances, line search) for any momentum solve.
+
+    The inversion layers its full-Jacobian MUMPS options on top of these so the
+    ``ISMIP7_SNES_*`` knobs the campaign exports mean one thing everywhere.
+    """
+    return _nonlinear_options()
+
+
+def final_solve_parameters(base, fnorm_ref, *, viewer=None):
+    r"""Options for the solve that publishes an already-converged mixed state.
+
+    ``fnorm_ref`` is the residual norm the preceding converged forward solve
+    reached.  Restarting Newton from that state leaves ``||F||`` at the
+    rounding floor, where the relative test can never pass, ``snes_stol=0``
+    disables the step-size exit, and every iteration is another full
+    factorisation.  ``snes_atol = snes_atol_scale() * fnorm_ref`` makes such a
+    solve report ``CONVERGED_FNORM_ABS`` at iteration 0 (the transient restart
+    fast path uses the same rule), while a solve from a neighbouring state
+    still converges through the normal relative path.  Iteration counts are
+    bounded and the converged reason is always printed: this solve decides
+    what gets published and must never be silent.  ``base`` is not modified.
+    """
+    params = dict(base)
+    params.update({
+        "snes_stol": float(_env("ISMIP7_FINAL_SNES_STOL", FINAL_SNES_STOL_DEFAULT)),
+        "snes_max_it": int(_env("ISMIP7_FINAL_SNES_MAXIT", FINAL_SNES_MAXIT_DEFAULT)),
+        "ksp_max_it": int(_env("ISMIP7_FINAL_KSP_MAXIT", FINAL_KSP_MAXIT_DEFAULT)),
+        # An LU with perturbed null pivots is not an exact inverse; GMRES must
+        # error out rather than iterate to PETSc's default 10000.
+        "ksp_error_if_not_converged": None,
+        "snes_monitor": viewer,
+        "snes_converged_reason": viewer,
+    })
+    try:
+        fnorm_ref = float(fnorm_ref)
+    except (TypeError, ValueError):
+        fnorm_ref = float("nan")
+    if math.isfinite(fnorm_ref) and fnorm_ref > 0.0:
+        params["snes_atol"] = snes_atol_scale() * fnorm_ref
+    else:
+        params.pop("snes_atol", None)
+    return params
 
 
 def effective_solver_env():

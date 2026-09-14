@@ -146,7 +146,7 @@ def _cache_manifest(root_attrs, out_fn, mesh, checkpoint_fields):
         configuration = json.loads(attrs["solver_configuration"])
     except (TypeError, json.JSONDecodeError) as exc:
         raise ValueError("cache solver_configuration is not valid JSON") from exc
-    return {
+    manifest = {
         "cache_schema_version": int(attrs["timing_cache_schema_version"]),
         "cache_role": attrs["timing_cache_role"],
         "cache_path": os.path.realpath(out_fn),
@@ -180,6 +180,26 @@ def _cache_manifest(root_attrs, out_fn, mesh, checkpoint_fields):
         "published_on_ranks": 1,
         "checkpoint_fields": sorted(checkpoint_fields),
     }
+    # Provenance of the mixed state itself, distinct from the lane contract
+    # above: the solver that produced it and how its publishing solve ended.
+    # Present only on caches published from a per-mesh invert MAP.
+    if attrs.get("state_solver_mode"):
+        try:
+            state_parameters = json.loads(attrs.get("state_solver_parameters", "null"))
+        except (TypeError, json.JSONDecodeError):
+            state_parameters = None
+        manifest["state_solver"] = {
+            "mode": attrs["state_solver_mode"],
+            "parameters": state_parameters,
+        }
+    published_state = {
+        key[len("full_state_"):]: value
+        for key, value in attrs.items()
+        if key.startswith("full_state_")
+    }
+    if published_state:
+        manifest["published_state"] = published_state
+    return manifest
 
 
 def main():
@@ -227,6 +247,15 @@ def main():
     if args.publish_timing_cache:
         if not args.manifest:
             raise ValueError("--publish-timing-cache requires --manifest")
+        if "a_ref_mb" in loaded:
+            # The strict lanes run without ISMIP7_APPARENT_MB and refuse a
+            # checkpoint that carries a frozen correction; the AMB probe
+            # builds its own from the pristine state. Neither may inherit
+            # one computed for a different velocity.
+            raise ValueError(
+                "Cannot publish a timing initial state that carries a frozen "
+                "a_ref_mb (apparent-MB correction from another state)"
+            )
         from icepack2_tools.solverconfig import (
             diagnostic_solver_mode,
             solver_provenance,

@@ -34,13 +34,15 @@ from timing_campaign import (
     expected_t_end,
     inversion_cores,
     inversion_maxiter,
-    inversion_tag,
+    inversion_memory,
+    inversion_required,
     mesh_basename,
     mesh_inversion_basename,
     mesh_inversion_map_path,
     mesh_inversion_status_path,
     mesh_inversion_timing_json_path,
     mesh_rows,
+    pristine_cache_path,
     scaling_lanes,
     scout_lanes,
     sha256_file,
@@ -387,6 +389,12 @@ class CampaignManager:
                 "assumed valid for dry-run command inspection",
                 status_path,
             )
+        if not inversion_required(lc):
+            return (
+                "passed",
+                "skipped by policy: lanes use the transferred prepare cache",
+                status_path,
+            )
         status, active = self.reconcile_status(status_path)
         if active:
             return "active", status["state"], status_path
@@ -404,6 +412,26 @@ class CampaignManager:
                 and os.path.realpath(str(record.get("map_path", "")))
                 == os.path.realpath(map_path)
             ):
+                # The invert's own verdict on its publishing solve comes
+                # first: a controls-only MAP fails the cache check below too,
+                # but "cache not republished" hides the cause.
+                phase = record.get("phase")
+                if phase != "finished":
+                    return (
+                        "failed",
+                        f"inversion record stopped at phase={phase!r} "
+                        "(job ended before the mixed state was published)",
+                        status_path,
+                    )
+                final_solve = record.get("final_solve") or {}
+                if final_solve and not final_solve.get("published", False):
+                    return (
+                        "failed",
+                        "inversion final solve did not publish a mixed state: "
+                        f"{final_solve.get('reason')} after "
+                        f"{final_solve.get('iterations')} Newton iterations",
+                        status_path,
+                    )
                 cache_ok, cache_detail = self.cache_validation(
                     lc, lc_coarse, require_mesh_inversion=True
                 )
@@ -430,16 +458,31 @@ class CampaignManager:
 
     def invert(self):
         for lc, lc_coarse in self.selected_rows():
+            if not inversion_required(lc):
+                print(
+                    f"INVERSION SKIPPED {lc}/{lc_coarse}: policy -- lanes use "
+                    "the transferred prepare cache"
+                )
+                continue
             state, detail, status_path = self.inversion_result(lc, lc_coarse)
+            # A live allocation owns the MAP, cache and status paths; --force
+            # retries a failed invert or replaces a passed one, it must not
+            # race a running one.
+            if state == "active":
+                print(
+                    f"INVERSION ACTIVE {lc}/{lc_coarse}: {detail}"
+                    + ("; scancel it before FORCE_TIMING=1" if self.force else "")
+                )
+                continue
             # --assume-valid-caches makes inversion_result report "passed" so
             # scout/scale dry-runs can print lanes; invert must still emit its
             # own DRY RUN submit lines in that mode.
             if (
-                state in {"passed", "active"}
+                state == "passed"
                 and not self.force
                 and not (self.dry_run and self.assume_valid_caches)
             ):
-                print(f"INVERSION {state.upper()} {lc}/{lc_coarse}: {detail}")
+                print(f"INVERSION PASSED {lc}/{lc_coarse}: {detail}")
                 continue
             if state == "failed" and not self.force:
                 print(
@@ -512,17 +555,31 @@ class CampaignManager:
             )
             cache, manifest = cache_paths(self.cache_dir, lc, lc_coarse)
             map_raw = map_path.with_name(map_path.stem + ".parallel.h5")
+            # The prepare cache is the warm start; the imported MAP is not
+            # read by the invert (controls/geometry/mixed state come from the
+            # cache). After the invert, its full-state MAP is published AS the
+            # timing cache (no second cold prepare), so warm-start from the
+            # pristine copy the prepare job keeps beside it, never from a
+            # cache this stage itself published.
+            pristine = pristine_cache_path(self.cache_dir, lc, lc_coarse)
+            if pristine.is_file():
+                warm_start = pristine
+            else:
+                warm_start = cache
+                if not (self.dry_run and self.assume_valid_caches):
+                    print(
+                        f"INVERSION WARM START {lc}/{lc_coarse}: no pristine "
+                        f"prepare copy at {pristine}; using {cache} (if that "
+                        "cache was published by an earlier invert, re-run "
+                        "make timing-prepare FORCE_TIMING=1 first)"
+                    )
             exports = {
                 "ISMIP7_LC": lc,
                 "ISMIP7_LC_COARSE": lc_coarse,
                 "ISMIP7_BUFFER_M": BUFFER_M,
                 "ISMIP7_MESH": mesh,
                 "ISMIP7_BNDIDS": boundary,
-                # Prepare cache is the warm start; imported Hoffman MAP is not
-                # read by the invert (controls/geometry/mixed state come from
-                # the cache). After invert, the full-state MAP is published as
-                # the timing cache (no second cold prepare).
-                "ISMIP7_WARM_START": cache,
+                "ISMIP7_WARM_START": warm_start,
                 "ISMIP7_SKIP_CONTINUATION": "1",
                 "ISMIP7_MAP_OUT": map_path,
                 "ISMIP7_MAP_OUT_RAW": map_raw,
@@ -545,13 +602,20 @@ class CampaignManager:
                 "ISMIP7_TIMING_CACHE": cache,
                 "ISMIP7_TIMING_CACHE_MANIFEST": manifest,
                 "ISMIP7_TIMING_INVERSION_STATUS": status_path,
-                "ISMIP7_TIMING_INVERSION_TAG": inversion_tag(self.maxiter),
                 "ISMIP7_TIMING_INVERSION_MAXITER": self.maxiter,
             }
+            if self.monitor:
+                exports.update({
+                    "ISMIP7_SNES_MONITOR": "1",
+                    "ISMIP7_SNES_LOG": self.logs_dir / (
+                        f"inversion_snes_{CACHE_TAG}_{lc}_{lc_coarse}"
+                        f"_{ncores}.log"
+                    ),
+                })
             self._submit(
                 f"timing_inv_{lc}_{lc_coarse}",
                 ncores,
-                MEMORY_BY_LC[lc],
+                inversion_memory(lc),
                 exports,
                 self.root
                 / "scripts/batch_runners/timing_matrix_inversion.script",
@@ -663,6 +727,9 @@ class CampaignManager:
                 "ISMIP7_TIMING_CACHE_RAW": raw,
                 "ISMIP7_TIMING_CACHE": cache,
                 "ISMIP7_TIMING_CACHE_MANIFEST": manifest,
+                "ISMIP7_TIMING_CACHE_PRISTINE": pristine_cache_path(
+                    self.cache_dir, lc, lc_coarse
+                ),
                 "ISMIP7_TIMING_CACHE_STATUS": status_path,
             }
             self._submit(
@@ -820,6 +887,9 @@ class CampaignManager:
             "ISMIP7_INVERSION": self.inversion,
             "ISMIP7_RESTART": cache,
             "ISMIP7_TIMING_CACHE_MANIFEST": manifest,
+            # validate_cache_manifest derives the accepted per-mesh MAP name
+            # from this; export it rather than rely on --export=ALL.
+            "ISMIP7_TIMING_INVERSION_MAXITER": self.maxiter,
             "ISMIP7_FRICTION": "budd",
             "ISMIP7_GEOMETRY_SPACE": "dg0",
             "ISMIP7_N_FLOW": "3.0",
@@ -916,8 +986,10 @@ class CampaignManager:
                 )
                 return
         else:
+            # Meshes that are not re-inverted run from the pristine prepare
+            # cache, whose provenance points at the imported source MAP.
             valid, cache_detail = self.cache_validation(
-                lc, lc_coarse, require_mesh_inversion=True
+                lc, lc_coarse, require_mesh_inversion=inversion_required(lc)
             )
             if not valid:
                 print(
@@ -947,9 +1019,14 @@ class CampaignManager:
             "ISMIP7_LC_COARSE": lc_coarse,
             "ISMIP7_BUFFER_M": BUFFER_M,
             "ISMIP7_BNDIDS": boundary,
-            "ISMIP7_INVERSION": self.inversion_map_path(lc, lc_coarse),
+            "ISMIP7_INVERSION": (
+                self.inversion_map_path(lc, lc_coarse)
+                if inversion_required(lc)
+                else self.inversion
+            ),
             "ISMIP7_RESTART": cache,
             "ISMIP7_TIMING_CACHE_MANIFEST": manifest,
+            "ISMIP7_TIMING_INVERSION_MAXITER": self.maxiter,
             "ISMIP7_FRICTION": "budd",
             "ISMIP7_GEOMETRY_SPACE": "dg0",
             "ISMIP7_N_FLOW": "3.0",

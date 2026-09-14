@@ -461,7 +461,7 @@ def load_velocity_for_sizing(data_dir=DATA_DIR):
     speed = np.sqrt(vx**2 + vy**2)
     mag_eps = np.abs(dudx) + np.abs(dvdy) + 0.5 * (np.abs(dudy) + np.abs(dvdx))
 
-    # Combined refinement indicator (following David Lilien's approach)
+    # Combined refinement indicator (following a collaborator's approach)
     refinement = (mag_eps * 20 + speed / 2000) ** 0.75
     refinement = refinement.fillna(1e-8)
     refinement = refinement.where(refinement > 1e-8, 1e-8)

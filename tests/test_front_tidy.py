@@ -12,7 +12,7 @@ Serial, no data files, no run setup.
 import numpy as np
 import pytest
 
-from icepack2_tools.front import retreat_slivers
+from icepack2_tools.front import clamp_thickness, retreat_slivers
 
 HMIN = 1.0
 
@@ -117,3 +117,55 @@ def test_on_a_dg0_unit_mesh():
     assert after[1] == 0.0
     assert after[0] == pytest.approx(90.0)
     assert float(fd.assemble(h_new * fd.dx)) == pytest.approx(m_before - calved)
+
+
+# ---- the h_clamp floor ---------------------------------------------------
+#
+# Exercises :func:`icepack2_tools.front.clamp_thickness`. Every rule that
+# empties a cell has to name those cells as ice-free here; miss one and the
+# floor refills the cell out of nothing on the next advance and the emptying
+# rule removes it again, fabricating h_clamp per step of clamp mass and of
+# the calving flux the submission reports.
+
+CLAMP = 10.0
+
+
+def test_the_floor_lifts_a_thin_ice_cell():
+    h = np.array([0.0, 3.0, 40.0])
+    clamp_thickness(h, CLAMP)
+    assert np.allclose(h, [CLAMP, CLAMP, 40.0])
+
+
+def test_an_ice_free_cell_keeps_its_zero_floor():
+    h = np.array([0.0, 0.0])
+    clamp_thickness(h, CLAMP, np.array([True, False]))
+    assert np.allclose(h, [0.0, CLAMP])
+
+
+def test_a_collapsed_shelf_cell_stays_empty_across_advances():
+    r"""The ISMIP7 collapse mask empties floating cells. Without the
+    exemption the floor refills each one every advance and the collapse
+    removal re-calves it, so licalvf carries CLAMP metres per step forever."""
+    collapse = np.array([True, True, False])
+    grounded = np.array([False, True, False])
+    collapsed = collapse & ~grounded          # floating and flagged: cell 0
+    recalved = 0.0
+    h = np.array([0.0, 0.0, 0.0])
+    for _ in range(5):
+        clamp_thickness(h, CLAMP, None, None, collapsed)
+        hit = collapsed & (h > 0.0)
+        recalved += float(h[hit].sum())
+        h[hit] = 0.0
+    assert recalved == 0.0                    # nothing fabricated to re-calve
+    assert h[0] == 0.0                        # the collapsed cell stays empty
+    assert h[1] == CLAMP                      # grounded: the floor still applies
+    assert h[2] == CLAMP                      # untouched by the mask
+
+
+def test_the_exempt_masks_are_a_union():
+    h = np.zeros(4)
+    clamp_thickness(h, CLAMP,
+                    np.array([True, False, False, False]),
+                    np.array([False, True, False, False]),
+                    np.array([False, False, True, False]))
+    assert np.allclose(h, [0.0, 0.0, 0.0, CLAMP])

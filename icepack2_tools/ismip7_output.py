@@ -131,9 +131,9 @@ class AnnualOutput:
     #: which is <experiment>_<lc>_ismip7_annual.h5 and so names the run
     STATE_SERIES = "ismip7_series"
 
-    def __init__(self, mesh, Q_dg, V, out_path, scalars_path, first_year, rho_ratio,
+    def __init__(self, mesh, Q_dg, out_path, scalars_path, first_year, rho_ratio,
                  comm=None, log=None, resume=None):
-        self.mesh, self.Q_dg, self.V = mesh, Q_dg, V
+        self.mesh, self.Q_dg = mesh, Q_dg
         self.out_path, self.scalars_path = out_path, scalars_path
         self.year = int(np.floor(float(first_year) + 1e-6))   # the year being accumulated (its Jan 1 has passed)
         self.rho_ratio = float(rho_ratio)

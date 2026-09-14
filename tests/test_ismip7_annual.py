@@ -52,7 +52,7 @@ def test_limnsw_is_the_thickness_above_flotation(two_cells, tmp_path):
     mesh, Q, V = two_cells
     h = [2000.0, 2000.0]
     bed = [-1000.0, 1000.0]          # one marine cell, one above sea level
-    annual = AnnualOutput(mesh, Q, V, str(tmp_path / "out" / "annual.h5"),
+    annual = AnnualOutput(mesh, Q, str(tmp_path / "out" / "annual.h5"),
                           str(tmp_path / "out" / "scalars.csv"),
                           first_year=2015, rho_ratio=RHO_RATIO)
     annual.start_year(_dg(Q, h))
@@ -79,14 +79,14 @@ def test_a_resume_appends_to_the_annual_file(two_cells, tmp_path):
     out = str(tmp_path / "out" / "annual.h5")
     scalars = str(tmp_path / "out" / "scalars.csv")
 
-    first = AnnualOutput(mesh, Q, V, out, scalars, first_year=2015, rho_ratio=RHO_RATIO)
+    first = AnnualOutput(mesh, Q, out, scalars, first_year=2015, rho_ratio=RHO_RATIO)
     first.start_year(_dg(Q, h))
     _write_year(first, Q, V, h, bed)     # year 2015
     _write_year(first, Q, V, h, bed)     # year 2016
     first.close()
 
     # the next link of the chain resumes from the checkpoint at 2017
-    second = AnnualOutput(mesh, Q, V, out, scalars, first_year=2017, rho_ratio=RHO_RATIO)
+    second = AnnualOutput(mesh, Q, out, scalars, first_year=2017, rho_ratio=RHO_RATIO)
     assert second.year == 2017
     second.start_year(_dg(Q, h))
     _write_year(second, Q, V, h, bed)    # year 2017
@@ -113,7 +113,7 @@ def test_a_midyear_resume_carries_the_partial_year(two_cells, tmp_path):
     out = str(tmp_path / "out" / "annual.h5")
     scalars = str(tmp_path / "out" / "scalars.csv")
 
-    first = AnnualOutput(mesh, Q, V, out, scalars, first_year=2015, rho_ratio=RHO_RATIO)
+    first = AnnualOutput(mesh, Q, out, scalars, first_year=2015, rho_ratio=RHO_RATIO)
     first.start_year(_dg(Q, h))
     _write_year(first, Q, V, h, bed)            # year 2015 written, now inside 2016
     first.year_acc["acabf"][:] = [0.3, 0.3]     # 0.4 yr of accumulated sources
@@ -132,7 +132,7 @@ def test_a_midyear_resume_carries_the_partial_year(two_cells, tmp_path):
         "h_year_start": state[0][AnnualOutput.STATE_THICKNESS].dat.data_ro.copy(),
     }
     # the next link picks up at t=2016.4, inside the year already in progress
-    second = AnnualOutput(mesh, Q, V, out, scalars, first_year=2016.4,
+    second = AnnualOutput(mesh, Q, out, scalars, first_year=2016.4,
                           rho_ratio=RHO_RATIO, resume=resume)
     assert second.year == 2016
     assert second.year_time == pytest.approx(0.4)
@@ -158,7 +158,7 @@ def test_the_year_in_progress_round_trips_through_a_checkpoint(two_cells, tmp_pa
     _save_state writes into the run's own checkpoint."""
     mesh, Q, V = two_cells
     h = [1500.0, 1500.0]
-    annual = AnnualOutput(mesh, Q, V, str(tmp_path / "out" / "annual.h5"),
+    annual = AnnualOutput(mesh, Q, str(tmp_path / "out" / "annual.h5"),
                           str(tmp_path / "out" / "scalars.csv"),
                           first_year=2015, rho_ratio=RHO_RATIO)
     annual.start_year(_dg(Q, h))
@@ -205,7 +205,7 @@ def test_a_year_killed_mid_write_leaves_the_banked_years_intact(two_cells, tmp_p
     out = str(tmp_path / "out" / "annual.h5")
     scalars = str(tmp_path / "out" / "scalars.csv")
 
-    first = AnnualOutput(mesh, Q, V, out, scalars, first_year=2015, rho_ratio=RHO_RATIO)
+    first = AnnualOutput(mesh, Q, out, scalars, first_year=2015, rho_ratio=RHO_RATIO)
     first.start_year(_dg(Q, h))
     _write_year(first, Q, V, h, bed)          # 2015 banked
     first.close()
@@ -220,7 +220,7 @@ def test_a_year_killed_mid_write_leaves_the_banked_years_intact(two_cells, tmp_p
         assert np.allclose(chk.load_function(chk.load_mesh(), name="lithk").dat.data_ro, h)
 
     # the next link picks up at 2016 and rewrites it
-    second = AnnualOutput(mesh, Q, V, out, scalars, first_year=2016, rho_ratio=RHO_RATIO)
+    second = AnnualOutput(mesh, Q, out, scalars, first_year=2016, rho_ratio=RHO_RATIO)
     assert second.year == 2016
     second.start_year(_dg(Q, h))
     _write_year(second, Q, V, h, bed)
@@ -236,7 +236,7 @@ def test_a_resume_state_from_another_year_is_refused(two_cells, tmp_path):
         "h_year_start": np.zeros(2),
     }
     with pytest.raises(ValueError, match="does not belong to it"):
-        AnnualOutput(mesh, Q, V, str(tmp_path / "out" / "annual.h5"),
+        AnnualOutput(mesh, Q, str(tmp_path / "out" / "annual.h5"),
                      str(tmp_path / "out" / "scalars.csv"),
                      first_year=2020.2, rho_ratio=RHO_RATIO, resume=resume)
 
@@ -252,7 +252,7 @@ def test_an_unclean_kill_past_the_checkpoint_discards_the_stale_years(two_cells,
     out = str(tmp_path / "out" / "annual.h5")
     scalars = str(tmp_path / "out" / "scalars.csv")
 
-    first = AnnualOutput(mesh, Q, V, out, scalars, first_year=2015, rho_ratio=RHO_RATIO)
+    first = AnnualOutput(mesh, Q, out, scalars, first_year=2015, rho_ratio=RHO_RATIO)
     first.start_year(_dg(Q, h))
     for _ in range(4):
         _write_year(first, Q, V, h, bed)              # 2015-2018 banked
@@ -267,7 +267,7 @@ def test_an_unclean_kill_past_the_checkpoint_discards_the_stale_years(two_cells,
         "acc": {k: np.zeros(2) for k in AnnualOutput.ACCUMULATORS},
         "h_year_start": np.asarray(h),
     }
-    second = AnnualOutput(mesh, Q, V, out, scalars, first_year=2017,
+    second = AnnualOutput(mesh, Q, out, scalars, first_year=2017,
                           rho_ratio=RHO_RATIO, resume=resume)
     assert AnnualOutput.years_on_disk(out) == [2015, 2016]
     assert second.year == 2017
@@ -289,7 +289,7 @@ def test_a_resume_that_would_leave_a_hole_is_refused(two_cells, tmp_path):
     h = [1500.0, 1500.0]
     out = str(tmp_path / "out" / "annual.h5")
     scalars = str(tmp_path / "out" / "scalars.csv")
-    first = AnnualOutput(mesh, Q, V, out, scalars, first_year=2015, rho_ratio=RHO_RATIO)
+    first = AnnualOutput(mesh, Q, out, scalars, first_year=2015, rho_ratio=RHO_RATIO)
     first.start_year(_dg(Q, h))
     _write_year(first, Q, V, h, [-500.0, -500.0])     # year 2015 on disk
     first.close()
@@ -299,7 +299,7 @@ def test_a_resume_that_would_leave_a_hole_is_refused(two_cells, tmp_path):
         "h_year_start": np.asarray(h),
     }
     with pytest.raises(ValueError, match="hole in it"):
-        AnnualOutput(mesh, Q, V, out, scalars, first_year=2030,
+        AnnualOutput(mesh, Q, out, scalars, first_year=2030,
                      rho_ratio=RHO_RATIO, resume=resume)
 
 
@@ -314,14 +314,14 @@ def test_a_foreign_resume_refuses_to_rewrite_a_banked_series(two_cells, tmp_path
     proj = str(tmp_path / "out" / "ssp126_2500_ismip7_annual.h5")
     proj_scalars = str(tmp_path / "out" / "ssp126_2500_ismip7_scalars.csv")
 
-    banked = AnnualOutput(mesh, Q, V, proj, proj_scalars, first_year=2015, rho_ratio=RHO_RATIO)
+    banked = AnnualOutput(mesh, Q, proj, proj_scalars, first_year=2015, rho_ratio=RHO_RATIO)
     banked.start_year(_dg(Q, h))
     for _ in range(3):
         _write_year(banked, Q, V, h, bed)             # 2015-2017 banked
     banked.close()
 
     # the historical run's own state, stamped with ITS series
-    hist = AnnualOutput(mesh, Q, V, str(tmp_path / "out" / "hist_2500_ismip7_annual.h5"),
+    hist = AnnualOutput(mesh, Q, str(tmp_path / "out" / "hist_2500_ismip7_annual.h5"),
                         str(tmp_path / "out" / "hist_2500_ismip7_scalars.csv"),
                         first_year=2015, rho_ratio=RHO_RATIO)
     hist.start_year(_dg(Q, h))
@@ -340,7 +340,7 @@ def test_a_foreign_resume_refuses_to_rewrite_a_banked_series(two_cells, tmp_path
     }
     monkeypatch.delenv("ISMIP7_OUTPUT_OVERWRITE", raising=False)
     with pytest.raises(ValueError, match="ISMIP7_OUTPUT_OVERWRITE"):
-        AnnualOutput(mesh, Q, V, proj, proj_scalars, first_year=2015,
+        AnnualOutput(mesh, Q, proj, proj_scalars, first_year=2015,
                      rho_ratio=RHO_RATIO, resume=foreign)
     assert AnnualOutput.years_on_disk(proj) == [2015, 2016, 2017]
     import csv
@@ -361,7 +361,7 @@ def test_a_foreign_resume_starts_a_new_series_where_none_is_banked(two_cells, tm
         "acc": {k: np.full(2, 7.0) for k in AnnualOutput.ACCUMULATORS},
         "h_year_start": np.full(2, 999.0),
     }
-    started = AnnualOutput(mesh, Q, V, proj,
+    started = AnnualOutput(mesh, Q, proj,
                            str(tmp_path / "out" / "ssp126_2500_ismip7_scalars.csv"),
                            first_year=2015, rho_ratio=RHO_RATIO, resume=foreign)
     assert started.year == 2015
@@ -384,7 +384,7 @@ def test_a_cold_start_refuses_to_rewrite_a_banked_series(two_cells, tmp_path, mo
     out = str(tmp_path / "out" / "annual.h5")
     scalars = str(tmp_path / "out" / "scalars.csv")
 
-    first = AnnualOutput(mesh, Q, V, out, scalars, first_year=2015, rho_ratio=RHO_RATIO)
+    first = AnnualOutput(mesh, Q, out, scalars, first_year=2015, rho_ratio=RHO_RATIO)
     first.start_year(_dg(Q, h))
     for _ in range(3):
         _write_year(first, Q, V, h, bed)              # 2015-2017 banked
@@ -392,7 +392,7 @@ def test_a_cold_start_refuses_to_rewrite_a_banked_series(two_cells, tmp_path, mo
 
     monkeypatch.delenv("ISMIP7_OUTPUT_OVERWRITE", raising=False)
     with pytest.raises(ValueError, match="ISMIP7_OUTPUT_OVERWRITE"):
-        AnnualOutput(mesh, Q, V, out, scalars, first_year=2015, rho_ratio=RHO_RATIO)
+        AnnualOutput(mesh, Q, out, scalars, first_year=2015, rho_ratio=RHO_RATIO)
     assert AnnualOutput.years_on_disk(out) == [2015, 2016, 2017]
     import csv
     with open(scalars) as f:
@@ -400,7 +400,7 @@ def test_a_cold_start_refuses_to_rewrite_a_banked_series(two_cells, tmp_path, mo
 
     # the operator asks for the series to be redone
     monkeypatch.setenv("ISMIP7_OUTPUT_OVERWRITE", "1")
-    again = AnnualOutput(mesh, Q, V, out, scalars, first_year=2015, rho_ratio=RHO_RATIO)
+    again = AnnualOutput(mesh, Q, out, scalars, first_year=2015, rho_ratio=RHO_RATIO)
     assert AnnualOutput.years_on_disk(out) == []
     assert again.year == 2015
     again.close()
@@ -415,13 +415,13 @@ def test_a_cold_start_beside_earlier_years_is_untouched(two_cells, tmp_path, mon
     h = [1500.0, 1500.0]
     out = str(tmp_path / "out" / "annual.h5")
     scalars = str(tmp_path / "out" / "scalars.csv")
-    first = AnnualOutput(mesh, Q, V, out, scalars, first_year=2015, rho_ratio=RHO_RATIO)
+    first = AnnualOutput(mesh, Q, out, scalars, first_year=2015, rho_ratio=RHO_RATIO)
     first.start_year(_dg(Q, h))
     _write_year(first, Q, V, h, [-500.0, -500.0])     # 2015 banked
     first.close()
 
     monkeypatch.delenv("ISMIP7_OUTPUT_OVERWRITE", raising=False)
-    second = AnnualOutput(mesh, Q, V, out, scalars, first_year=2016, rho_ratio=RHO_RATIO)
+    second = AnnualOutput(mesh, Q, out, scalars, first_year=2016, rho_ratio=RHO_RATIO)
     assert AnnualOutput.years_on_disk(out) == [2015]
     assert second.year == 2016
     second.close()

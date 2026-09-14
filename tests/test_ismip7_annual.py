@@ -239,9 +239,44 @@ def test_a_resume_state_from_another_year_is_refused(two_cells, tmp_path):
                      first_year=2020.2, rho_ratio=RHO_RATIO, resume=resume)
 
 
-def test_a_resume_that_would_rename_a_year_is_refused(two_cells, tmp_path):
-    r"""Restarting from an older checkpoint must not write the re-simulated
-    year under the next year's label, shifting the whole submitted axis."""
+def test_an_unclean_kill_past_the_checkpoint_discards_the_stale_years(two_cells, tmp_path):
+    r"""State checkpoints are written every 5 model years while years are
+    banked every 1, so a node failure leaves years on disk that the restart's
+    trajectory never simulated. They belong to an abandoned run and are
+    discarded and re-simulated rather than spliced into the series."""
+    mesh, Q, V = two_cells
+    h = [1500.0, 1500.0]
+    bed = [-500.0, -500.0]
+    out = str(tmp_path / "out" / "annual.h5")
+    scalars = str(tmp_path / "out" / "scalars.csv")
+
+    first = AnnualOutput(mesh, Q, V, out, scalars, first_year=2015, rho_ratio=RHO_RATIO)
+    first.start_year(_dg(Q, h))
+    for _ in range(4):
+        _write_year(first, Q, V, h, bed)              # 2015-2018 banked
+    first.close()
+    assert AnnualOutput.years_on_disk(out) == [2015, 2016, 2017, 2018]
+
+    # the newest state checkpoint is at t=2017.0, i.e. inside year 2017:
+    # 2017 and 2018 were simulated after it and are stale
+    second = AnnualOutput(mesh, Q, V, out, scalars, first_year=2017, rho_ratio=RHO_RATIO)
+    assert AnnualOutput.years_on_disk(out) == [2015, 2016]
+    assert second.year == 2017
+    import csv
+    with open(scalars) as f:
+        assert [int(r["year"]) for r in csv.DictReader(f)] == [2015, 2016]
+
+    second.start_year(_dg(Q, h))
+    _write_year(second, Q, V, h, bed)                 # 2017 re-simulated
+    second.close()
+    assert AnnualOutput.years_on_disk(out) == [2015, 2016, 2017]
+    with open(scalars) as f:
+        assert [int(r["year"]) for r in csv.DictReader(f)] == [2015, 2016, 2017]
+
+
+def test_a_resume_that_would_leave_a_hole_is_refused(two_cells, tmp_path):
+    r"""Discarding stale years is recovery; skipping forward past unwritten
+    years would submit a series with a gap, so it stays an error."""
     mesh, Q, V = two_cells
     h = [1500.0, 1500.0]
     out = str(tmp_path / "out" / "annual.h5")
@@ -250,8 +285,5 @@ def test_a_resume_that_would_rename_a_year_is_refused(two_cells, tmp_path):
     first.start_year(_dg(Q, h))
     _write_year(first, Q, V, h, [-500.0, -500.0])     # year 2015 on disk
     first.close()
-    # a restart from the t=2015.0 checkpoint: year 2015 is already written
-    with pytest.raises(ValueError, match="rename a year"):
-        AnnualOutput(mesh, Q, V, out, scalars, first_year=2015, rho_ratio=RHO_RATIO)
-    with pytest.raises(ValueError, match="rename a year"):
+    with pytest.raises(ValueError, match="hole in it"):
         AnnualOutput(mesh, Q, V, out, scalars, first_year=2030, rho_ratio=RHO_RATIO)

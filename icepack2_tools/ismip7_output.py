@@ -103,8 +103,11 @@ class AnnualOutput:
     accumulated year survives the link boundary too: ``state_fields`` /
     ``state_attrs`` hand it to the run's own checkpoint and ``resume`` takes
     it back, so a job that stops at 2021.4 goes on accumulating 2021 rather
-    than losing four months of flux or relabelling them. The resumed year
-    must be exactly one past the last year on disk, so no year is renamed.
+    than losing four months of flux or relabelling them. Years at or after
+    the resumed one are stale, left behind by an unclean kill that ran past
+    the last state checkpoint, so they are discarded and re-simulated; a year
+    is never renamed, and a resume that would leave a HOLE in the series
+    (further than one past the last kept year) is an error.
     """
 
     #: the per-cell year sums carried across a chained resume
@@ -148,18 +151,33 @@ class AnnualOutput:
         self._n = fd.FacetNormal(mesh)
         self._gl_cof = fd.Cofunction(Q_dg.dual())
         # A chained job re-enters run_simulation and rebuilds this object, so
-        # the years the earlier links banked are read back off disk.
+        # the years the earlier links banked are read back off disk. Years at
+        # or after the one being resumed belong to a trajectory the restart
+        # abandons: an unclean kill banks years past the last state
+        # checkpoint (the cadences differ, 5 yr vs 1 yr by default), and
+        # keeping them would splice two different runs into one series. They
+        # are discarded and re-simulated from the checkpoint instead.
         self._written_years = self.years_on_disk(out_path)
+        stale = [y for y in self._written_years if y >= self.year]
+        self._written_years = [y for y in self._written_years if y < self.year]
+        if stale and self.comm.rank == 0:
+            for y in stale:
+                os.remove(self.year_path(out_path, y))
+            self._trim_scalars(scalars_path, self.year)
+        self.comm.barrier()
+        if stale:
+            self.log(f"  ISMIP7 output: discarded {len(stale)} year(s) "
+                     f"({stale[0]}-{stale[-1]}) simulated past the restart "
+                     f"checkpoint; they will be re-simulated")
         if self._written_years:
             last = self._written_years[-1]
-            if self.year != last + 1:
+            if self.year > last + 1:
                 raise ValueError(
-                    f"{os.path.basename(out_path)} already holds years "
+                    f"{os.path.basename(out_path)} holds years "
                     f"{self._written_years[0]}-{last}, so the next year to "
                     f"accumulate is {last + 1}, but this run resumes inside "
-                    f"year {self.year}: writing it would rename a year of the "
-                    f"submitted series. Resume from a checkpoint inside "
-                    f"{last + 1}, or move the annual file aside."
+                    f"year {self.year}: the submitted series would have a "
+                    f"hole in it. Resume from a checkpoint inside {last + 1}."
                 )
             self.log(f"  ISMIP7 output: continuing {os.path.basename(out_path)} "
                      f"({len(self._written_years)} years through {last}; "
@@ -211,6 +229,22 @@ class AnnualOutput:
         for k in self.year_acc:
             self.year_acc[k] += self.step_acc[k]
         self.year_time += self.step_time
+
+    @staticmethod
+    def _trim_scalars(scalars_path, first_stale_year):
+        r"""Drop the rows of the discarded years, so the CSV and the year
+        files describe the same trajectory."""
+        import csv as _csv
+        if not os.path.exists(scalars_path):
+            return
+        with open(scalars_path) as f:
+            reader = _csv.DictReader(f)
+            header = reader.fieldnames
+            kept = [r for r in reader if int(r["year"]) < first_stale_year]
+        with open(scalars_path, "w") as f:
+            writer = _csv.DictWriter(f, fieldnames=header)
+            writer.writeheader()
+            writer.writerows(kept)
 
     # ---- where a year lives ------------------------------------------------
     @staticmethod

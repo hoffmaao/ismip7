@@ -22,8 +22,8 @@ ismip7/
 - [icepack2](https://github.com/icepack/icepack2) and [icepack](https://github.com/icepack/icepack)
 - [icepack_tools](https://github.com/hoffmaao/icepack_tools) (private; mesh adaptation and the level-set front)
 - [tlm_adjoint](https://github.com/jrmaddison/tlm_adjoint) (inversions)
-- `xarray netCDF4 scipy rasterio shapely gmsh matplotlib`, plus `earthaccess`
-  and `globus-sdk` for downloads
+- `xarray netCDF4 scipy rasterio pyproj shapely gmsh matplotlib`, `geopandas`
+  for mesh generation, plus `earthaccess` and `globus-sdk` for downloads
 - [isschecker](https://github.com/ismip/ISM_SimulationChecker) for submissions
   (needs Python >= 3.11, so it wants its own venv)
 

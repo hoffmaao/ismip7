@@ -126,6 +126,7 @@ def test_a_midyear_resume_carries_the_partial_year(two_cells, tmp_path):
     resume = {
         "year": state[1]["ismip7_year"],
         "year_time": state[1]["ismip7_year_time"],
+        "series": state[1][AnnualOutput.STATE_SERIES],
         "acc": {k: state[0][AnnualOutput.STATE_PREFIX + k].dat.data_ro.copy()
                 for k in AnnualOutput.ACCUMULATORS},
         "h_year_start": state[0][AnnualOutput.STATE_THICKNESS].dat.data_ro.copy(),
@@ -177,6 +178,7 @@ def test_the_year_in_progress_round_trips_through_a_checkpoint(two_cells, tmp_pa
         resume = AnnualOutput.read_state(chk, loaded)
     assert resume["year"] == 2015
     assert resume["year_time"] == pytest.approx(0.7)
+    assert resume["series"] == "annual.h5"
     assert np.allclose(resume["acc"]["licalvf"], [-2.0, -5.0])
     assert np.allclose(resume["h_year_start"], h)
 
@@ -229,7 +231,7 @@ def test_a_year_killed_mid_write_leaves_the_banked_years_intact(two_cells, tmp_p
 def test_a_resume_state_from_another_year_is_refused(two_cells, tmp_path):
     mesh, Q, V = two_cells
     resume = {
-        "year": 2016, "year_time": 0.4,
+        "year": 2016, "year_time": 0.4, "series": "annual.h5",
         "acc": {k: np.zeros(2) for k in AnnualOutput.ACCUMULATORS},
         "h_year_start": np.zeros(2),
     }
@@ -261,7 +263,7 @@ def test_an_unclean_kill_past_the_checkpoint_discards_the_stale_years(two_cells,
     # carries that year's (empty) accumulation state: 2017 and 2018 were
     # simulated after it and are stale
     resume = {
-        "year": 2017, "year_time": 0.0,
+        "year": 2017, "year_time": 0.0, "series": "annual.h5",
         "acc": {k: np.zeros(2) for k in AnnualOutput.ACCUMULATORS},
         "h_year_start": np.asarray(h),
     }
@@ -292,13 +294,84 @@ def test_a_resume_that_would_leave_a_hole_is_refused(two_cells, tmp_path):
     _write_year(first, Q, V, h, [-500.0, -500.0])     # year 2015 on disk
     first.close()
     resume = {
-        "year": 2030, "year_time": 0.0,
+        "year": 2030, "year_time": 0.0, "series": "annual.h5",
         "acc": {k: np.zeros(2) for k in AnnualOutput.ACCUMULATORS},
         "h_year_start": np.asarray(h),
     }
     with pytest.raises(ValueError, match="hole in it"):
         AnnualOutput(mesh, Q, V, out, scalars, first_year=2030,
                      rho_ratio=RHO_RATIO, resume=resume)
+
+
+def test_a_foreign_resume_refuses_to_rewrite_a_banked_series(two_cells, tmp_path, monkeypatch):
+    r"""A projection restarting from the historical endpoint carries the
+    HISTORICAL run's accumulation state, which belongs to another submitted
+    series. That is a cold start for this output, not its resume, so the
+    banked years stand."""
+    mesh, Q, V = two_cells
+    h = [1500.0, 1500.0]
+    bed = [-500.0, -500.0]
+    proj = str(tmp_path / "out" / "ssp126_2500_ismip7_annual.h5")
+    proj_scalars = str(tmp_path / "out" / "ssp126_2500_ismip7_scalars.csv")
+
+    banked = AnnualOutput(mesh, Q, V, proj, proj_scalars, first_year=2015, rho_ratio=RHO_RATIO)
+    banked.start_year(_dg(Q, h))
+    for _ in range(3):
+        _write_year(banked, Q, V, h, bed)             # 2015-2017 banked
+    banked.close()
+
+    # the historical run's own state, stamped with ITS series
+    hist = AnnualOutput(mesh, Q, V, str(tmp_path / "out" / "hist_2500_ismip7_annual.h5"),
+                        str(tmp_path / "out" / "hist_2500_ismip7_scalars.csv"),
+                        first_year=2015, rho_ratio=RHO_RATIO)
+    hist.start_year(_dg(Q, h))
+    hist_attrs = hist.state_attrs()
+    hist_fields = hist.state_fields()
+    hist.close()
+    assert hist_attrs[AnnualOutput.STATE_SERIES] == "hist_2500_ismip7_annual.h5"
+
+    foreign = {
+        "year": hist_attrs[AnnualOutput.STATE_YEAR],
+        "year_time": hist_attrs[AnnualOutput.STATE_YEAR_TIME],
+        "series": hist_attrs[AnnualOutput.STATE_SERIES],
+        "acc": {k: hist_fields[AnnualOutput.STATE_PREFIX + k].dat.data_ro.copy()
+                for k in AnnualOutput.ACCUMULATORS},
+        "h_year_start": hist_fields[AnnualOutput.STATE_THICKNESS].dat.data_ro.copy(),
+    }
+    monkeypatch.delenv("ISMIP7_OUTPUT_OVERWRITE", raising=False)
+    with pytest.raises(ValueError, match="ISMIP7_OUTPUT_OVERWRITE"):
+        AnnualOutput(mesh, Q, V, proj, proj_scalars, first_year=2015,
+                     rho_ratio=RHO_RATIO, resume=foreign)
+    assert AnnualOutput.years_on_disk(proj) == [2015, 2016, 2017]
+    import csv
+    with open(proj_scalars) as f:
+        assert [int(r["year"]) for r in csv.DictReader(f)] == [2015, 2016, 2017]
+
+
+def test_a_foreign_resume_starts_a_new_series_where_none_is_banked(two_cells, tmp_path):
+    r"""The ordinary first link of a projection: it restarts from the
+    historical endpoint, and its own series does not exist yet, so it starts
+    clean rather than carrying the historical accumulators into year 2015."""
+    mesh, Q, V = two_cells
+    h = [1500.0, 1500.0]
+    proj = str(tmp_path / "out" / "ssp126_2500_ismip7_annual.h5")
+    foreign = {
+        "year": 2015, "year_time": 0.4,
+        "series": "hist_2500_ismip7_annual.h5",
+        "acc": {k: np.full(2, 7.0) for k in AnnualOutput.ACCUMULATORS},
+        "h_year_start": np.full(2, 999.0),
+    }
+    started = AnnualOutput(mesh, Q, V, proj,
+                           str(tmp_path / "out" / "ssp126_2500_ismip7_scalars.csv"),
+                           first_year=2015, rho_ratio=RHO_RATIO, resume=foreign)
+    assert started.year == 2015
+    assert started.h_year_start is None              # not mid-year: a fresh series
+    assert started.year_time == 0.0
+    assert np.allclose(started.year_acc["acabf"], 0.0)
+    started.start_year(_dg(Q, h))
+    _write_year(started, Q, V, h, [-500.0, -500.0])
+    started.close()
+    assert AnnualOutput.years_on_disk(proj) == [2015]
 
 
 def test_a_cold_start_refuses_to_rewrite_a_banked_series(two_cells, tmp_path, monkeypatch):

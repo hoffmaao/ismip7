@@ -105,10 +105,15 @@ class AnnualOutput:
     accumulated year survives the link boundary too: ``state_fields`` /
     ``state_attrs`` hand it to the run's own checkpoint and ``resume`` takes
     it back, so a job that stops at 2021.4 goes on accumulating 2021 rather
-    than losing four months of flux or relabelling them. On a resume, years
-    at or after the resumed one are stale, left behind by an unclean kill
-    that ran past the last state checkpoint, so they are discarded and
-    re-simulated. A run that is NOT resuming that state refuses to touch a
+    than losing four months of flux or relabelling them. That state is
+    stamped with the series it belongs to, so a restart from another
+    experiment's checkpoint (a projection starting from the historical
+    endpoint carries the historical run's state) counts as a cold start here
+    rather than as this series' resume.
+
+    On this series' own resume, years at or after the resumed one are stale,
+    left behind by an unclean kill that ran past the last state checkpoint,
+    so they are discarded and re-simulated. Any other run refuses to touch a
     banked series unless ``ISMIP7_OUTPUT_OVERWRITE=1`` says so. A year is
     never renamed, and a resume that would leave a HOLE in the series
     (further than one past the last kept year) is an error.
@@ -122,6 +127,9 @@ class AnnualOutput:
     STATE_THICKNESS = "ismip7_year_start_thickness"
     STATE_YEAR = "ismip7_year"
     STATE_YEAR_TIME = "ismip7_year_time"
+    #: which series the carried state belongs to: the annual stem's basename,
+    #: which is <experiment>_<lc>_ismip7_annual.h5 and so names the run
+    STATE_SERIES = "ismip7_series"
 
     def __init__(self, mesh, Q_dg, V, out_path, scalars_path, first_year, rho_ratio,
                  comm=None, log=None, resume=None):
@@ -139,6 +147,17 @@ class AnnualOutput:
         self.step_acc = {k: np.zeros(n) for k in self.year_acc}
         self.year_time = 0.0
         self.h_year_start = None
+        # A restart checkpoint carrying ISMIP7 attributes is only THIS
+        # series' resume when it names this series. A projection restarting
+        # from the historical endpoint carries the historical run's
+        # accumulation state, which belongs to a different submitted series,
+        # so for this output it is a cold start.
+        if resume is not None and resume.get("series") != os.path.basename(out_path):
+            self.log(f"  ISMIP7 output: the restart checkpoint carries the "
+                     f"{resume.get('series') or 'unnamed'} series' accumulation "
+                     f"state, not {os.path.basename(out_path)}; starting a new "
+                     f"series here")
+            resume = None
         if resume is not None:
             if int(resume["year"]) != self.year:
                 raise ValueError(
@@ -160,21 +179,21 @@ class AnnualOutput:
         # belong to a trajectory the restart abandons: an unclean kill banks
         # years past the last state checkpoint (the cadences differ, 5 yr vs
         # 1 yr by default), and keeping them would splice two runs into one
-        # series, so they are discarded and re-simulated. A cold start is not
-        # that case: nothing says the years on disk are wrong, and this is
-        # the only copy of what gets submitted, so it refuses rather than
-        # deleting a banked series. ISMIP7_OUTPUT_OVERWRITE=1 is how an
-        # operator asks for them to go.
+        # series, so they are discarded and re-simulated. Anything else is a
+        # cold start for this output: nothing says the years on disk are
+        # wrong, and this is the only copy of what gets submitted, so it
+        # refuses rather than deleting a banked series.
+        # ISMIP7_OUTPUT_OVERWRITE=1 is how an operator asks for them to go.
         self._written_years = self.years_on_disk(out_path)
         stale = [y for y in self._written_years if y >= self.year]
         if stale and resume is None and not ismip7_output_overwrite():
             raise ValueError(
                 f"{os.path.basename(out_path)} already holds ISMIP7 years "
                 f"{stale[0]}-{stale[-1]}, but this run starts at {self.year} "
-                f"without resuming their accumulation state, so it would "
-                f"rewrite a banked submission series. Resume from a "
-                f"checkpoint that carries the ISMIP7 state, move the series "
-                f"aside, or set ISMIP7_OUTPUT_OVERWRITE=1 to discard it."
+                f"without resuming THIS series' accumulation state, so it "
+                f"would rewrite a banked submission series. Resume from a "
+                f"checkpoint of this experiment, move the series aside, or "
+                f"set ISMIP7_OUTPUT_OVERWRITE=1 to discard it."
             )
         if stale:
             self._written_years = [y for y in self._written_years if y < self.year]
@@ -303,9 +322,11 @@ class AnnualOutput:
         return fields
 
     def state_attrs(self):
-        r"""The year being accumulated and how much of it is in the sums."""
+        r"""The year being accumulated, how much of it is in the sums, and
+        which series it belongs to."""
         return {self.STATE_YEAR: int(self.year),
-                self.STATE_YEAR_TIME: float(self.year_time)}
+                self.STATE_YEAR_TIME: float(self.year_time),
+                self.STATE_SERIES: os.path.basename(self.out_path)}
 
     @classmethod
     def read_state(cls, chk, mesh):
@@ -317,6 +338,8 @@ class AnnualOutput:
         return {
             "year": int(chk.get_attr("/", cls.STATE_YEAR)),
             "year_time": float(chk.get_attr("/", cls.STATE_YEAR_TIME)),
+            "series": (str(chk.get_attr("/", cls.STATE_SERIES))
+                       if chk.has_attr("/", cls.STATE_SERIES) else ""),
             "acc": {k: chk.load_function(mesh, name=cls.STATE_PREFIX + k).dat.data_ro.copy()
                     for k in cls.ACCUMULATORS},
             "h_year_start": chk.load_function(mesh, name=cls.STATE_THICKNESS).dat.data_ro.copy(),

@@ -303,7 +303,7 @@ def test_a_resume_that_would_leave_a_hole_is_refused(two_cells, tmp_path):
                      rho_ratio=RHO_RATIO, resume=resume)
 
 
-def test_a_foreign_resume_refuses_to_rewrite_a_banked_series(two_cells, tmp_path, monkeypatch):
+def test_a_foreign_resume_refuses_to_rewrite_a_banked_series(two_cells, tmp_path):
     r"""A projection restarting from the historical endpoint carries the
     HISTORICAL run's accumulation state, which belongs to another submitted
     series. That is a cold start for this output, not its resume, so the
@@ -338,8 +338,7 @@ def test_a_foreign_resume_refuses_to_rewrite_a_banked_series(two_cells, tmp_path
                 for k in AnnualOutput.ACCUMULATORS},
         "h_year_start": hist_fields[AnnualOutput.STATE_THICKNESS].dat.data_ro.copy(),
     }
-    monkeypatch.delenv("ISMIP7_OUTPUT_OVERWRITE", raising=False)
-    with pytest.raises(ValueError, match="ISMIP7_OUTPUT_OVERWRITE"):
+    with pytest.raises(ValueError, match="move the series aside"):
         AnnualOutput(mesh, Q, proj, proj_scalars, first_year=2015,
                      rho_ratio=RHO_RATIO, resume=foreign)
     assert AnnualOutput.years_on_disk(proj) == [2015, 2016, 2017]
@@ -374,10 +373,11 @@ def test_a_foreign_resume_starts_a_new_series_where_none_is_banked(two_cells, tm
     assert AnnualOutput.years_on_disk(proj) == [2015]
 
 
-def test_a_cold_start_refuses_to_rewrite_a_banked_series(two_cells, tmp_path, monkeypatch):
+def test_a_cold_start_refuses_to_rewrite_a_banked_series(two_cells, tmp_path):
     r"""Without the ISMIP7 accumulation state there is no evidence the years
     on disk are wrong, and they are the only copy of what gets submitted, so
-    a run that would rewrite them stops instead of deleting them."""
+    a run that would rewrite them stops instead of deleting them, and names
+    the files so the operator can move them aside deliberately."""
     mesh, Q, V = two_cells
     h = [1500.0, 1500.0]
     bed = [-500.0, -500.0]
@@ -390,25 +390,25 @@ def test_a_cold_start_refuses_to_rewrite_a_banked_series(two_cells, tmp_path, mo
         _write_year(first, Q, V, h, bed)              # 2015-2017 banked
     first.close()
 
-    monkeypatch.delenv("ISMIP7_OUTPUT_OVERWRITE", raising=False)
-    with pytest.raises(ValueError, match="ISMIP7_OUTPUT_OVERWRITE"):
+    with pytest.raises(ValueError, match=r"2015-2017.*move the series aside"):
         AnnualOutput(mesh, Q, out, scalars, first_year=2015, rho_ratio=RHO_RATIO)
     assert AnnualOutput.years_on_disk(out) == [2015, 2016, 2017]
     import csv
     with open(scalars) as f:
         assert [int(r["year"]) for r in csv.DictReader(f)] == [2015, 2016, 2017]
 
-    # the operator asks for the series to be redone
-    monkeypatch.setenv("ISMIP7_OUTPUT_OVERWRITE", "1")
+    # the operator moves them aside; the run then starts clean
+    import os
+    for yr in (2015, 2016, 2017):
+        os.remove(AnnualOutput.year_path(out, yr))
+    os.remove(scalars)
     again = AnnualOutput(mesh, Q, out, scalars, first_year=2015, rho_ratio=RHO_RATIO)
     assert AnnualOutput.years_on_disk(out) == []
     assert again.year == 2015
     again.close()
-    with open(scalars) as f:
-        assert [int(r["year"]) for r in csv.DictReader(f)] == []
 
 
-def test_a_cold_start_beside_earlier_years_is_untouched(two_cells, tmp_path, monkeypatch):
+def test_a_cold_start_beside_earlier_years_is_untouched(two_cells, tmp_path):
     r"""Only years the run would rewrite are in question: a cold start that
     appends after what is on disk is an ordinary continuation."""
     mesh, Q, V = two_cells
@@ -420,7 +420,6 @@ def test_a_cold_start_beside_earlier_years_is_untouched(two_cells, tmp_path, mon
     _write_year(first, Q, V, h, [-500.0, -500.0])     # 2015 banked
     first.close()
 
-    monkeypatch.delenv("ISMIP7_OUTPUT_OVERWRITE", raising=False)
     second = AnnualOutput(mesh, Q, out, scalars, first_year=2016, rho_ratio=RHO_RATIO)
     assert AnnualOutput.years_on_disk(out) == [2015]
     assert second.year == 2016

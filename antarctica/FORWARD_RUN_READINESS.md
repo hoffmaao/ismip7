@@ -64,9 +64,10 @@ Items are ordered by what blocks a submission first.
   README. Ours fills with zero (`forcing.py`, `nan_to_num(nan=0.0)`).
 - **CESM2-WACCM ends in 2299 (#8).** The year-2300 atmosphere files were
   removed and the ocean forcing stops at 2299. A 2015-2300 run needs the
-  2300 forcing year: our reader has no end-of-series rule and would fail
-  there. Persist the last available year (or the 2290-2299 mean; the
-  steering committee had not decided).
+  2300 forcing year: done, the reader persists the last year on disk exactly
+  one year past the end of the series and reports it once per variable, while
+  a gap inside the series stays an error. (The 2290-2299 mean was the other
+  option; the steering committee had not decided.)
 - **Melt toolbox re-release (#25)** is unchanged since August: rerun the
   calibration notebook with the new constraint datasets; no ice-model rerun.
 
@@ -176,9 +177,11 @@ What a submission needs (#5, #16, #17, #18, #19, #20, #22, #23):
   2015-2300 projection is roughly 5 node-days; the `commons` 1-day limit
   means 5 chained links per experiment, the `long` 3-day limit 2. Eleven
   cores at that cost are about 55 node-days.
-- Protocol wiring still open: ctrlclim scenario (ssp126), fracture masks in
-  the thickness update, the 2300 forcing year, the `GEMB-SDBN1` path for
-  MRI, forcing-version audit, the ISMIP7 output writer (section 3).
+- Protocol wiring still open: ctrlclim scenario (ssp126), and the melt
+  calibration rerun. Delivered on this branch: the collapse mask in the
+  thickness update (`ISMIP7_FRACTURE=mask`), the 2300 forcing year, the
+  `GEMB-SDBN1` path for MRI, the forcing-version audit, and the ISMIP7
+  output writer (section 3).
 
 ## 5. Actions, in order
 
@@ -191,7 +194,9 @@ What a submission needs (#5, #16, #17, #18, #19, #20, #22, #23):
    https://data.source.coop s3://ismip/ismip7-ais-forcing/data/<ESM>/<scenario>/ ...`).
    Re-run `audit_forcing_versions.py` before the production matrix and cite
    its output in the README.
-3. End-of-series rule for 2300 in `forcing.py`; `GEMB-SDBN1` path for MRI.
+3. End-of-series rule for 2300 in `forcing.py` and the `GEMB-SDBN1` path for
+   MRI: both done (`_load_year` bridges exactly one year past the end;
+   `atmosphere_product` accepts either product name).
 4. `ISMIP7_CLIM_SCENARIO=ssp126` default (or the provided `ctrl` trees).
 5. Fracture masks on floating ice in the thickness update: done as
    `ISMIP7_FRACTURE=mask` (floating cells the mask flags are emptied and

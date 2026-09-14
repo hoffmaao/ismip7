@@ -6,9 +6,12 @@ in the request's files.
         --esm CESM2-WACCM --scenario ssp585 --exp C007
         [--source-id RICE] [--ism-id icepack2] [--set-id CORE] [--scalars CSV]
 
-Serial. Reads ``<experiment>_<lc>_ismip7_annual.h5`` written by
-``icepack2_tools.ismip7_output`` (one Firedrake Function per variable and
-year on the model mesh) and writes one NetCDF per variable under
+Serial. ANNUAL.h5 is the STEM ``<experiment>_<lc>_ismip7_annual.h5`` that
+``icepack2_tools.ismip7_output`` names its output after; the years themselves
+are the files ``<experiment>_<lc>_ismip7_annual_<year>.h5`` beside it (one per
+year, each written atomically, so an interrupted run cannot damage the years
+already banked) and this globs them in year order. It writes one NetCDF per
+variable under
 ``DIR/AIS/<source_id>/<ism_id>/<set_id>/<exp>/``, named
 ``<var>_AIS_<source_id>_<ism_id>_m001_<ESM>_f001_<scenario>_<exp>_<y0>-<y1>.nc``.
 
@@ -23,6 +26,10 @@ part counting as zero, so sums over the grid are the model's sums;
 the model does not cover; ``no_ice`` and friends mean over the ice part and
 fill pixels without it. The overlap operator is cached next to the input
 (``<annual>.overlap.npz``) because it depends on the mesh only.
+
+Model-to-SI conversions use icepack's year, 365.25 days (31557600 s), which
+is the model's own time unit; the time axis in the files is the standard
+calendar regardless.
 
 ``acabf`` is written as the forcing surface mass balance, always. The
 apparent-mass-balance reference stays where the forward put it, as
@@ -48,7 +55,7 @@ _ROOT = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, os.path.dirname(os.path.dirname(_ROOT)))
 
 import icepack2_tools.dual_friction  # noqa: F401,E402  (icepack2 -> irksome import order)
-from icepack2_tools.ismip7_output import RHO_I, SCALARS, SECONDS_PER_YEAR, VARIABLES_2D  # noqa: E402
+from icepack2_tools.ismip7_output import AnnualOutput, RHO_I, SCALARS, SECONDS_PER_YEAR, VARIABLES_2D  # noqa: E402
 from icepack2_tools.regrid import ISMIP7_DX, ISMIP7_NX, ISMIP7_NY, ISMIP7_X0, ISMIP7_Y0  # noqa: E402
 import firedrake as fd  # noqa: E402
 
@@ -239,15 +246,29 @@ def main():
     ap.add_argument("--scalars", default=None, help="the *_ismip7_scalars.csv (default: next to the annual file)")
     a = ap.parse_args()
     req = request_table()
-    with fd.CheckpointFile(a.annual, "r") as chk:
-        mesh = chk.load_mesh()
-        years = [int(y) for y in chk.get_attr("/", "years").split(",")]
-        fields = {}
-        for var in VARIABLES_2D:
-            fields[var] = [chk.load_function(mesh, name=var, idx=k).dat.data_ro.copy() for k in range(len(years))]
-        ice = [chk.load_function(mesh, name="sftgif", idx=k).dat.data_ro > 0.5 for k in range(len(years))]
-        gr = [chk.load_function(mesh, name="sftgrf", idx=k).dat.data_ro > 0.5 for k in range(len(years))]
-        fl = [chk.load_function(mesh, name="sftflf", idx=k).dat.data_ro > 0.5 for k in range(len(years))]
+    years = AnnualOutput.years_on_disk(a.annual)
+    if not years:
+        raise FileNotFoundError(
+            f"no yearly checkpoints {os.path.basename(a.annual)[:-3]}_<year>.h5 "
+            f"beside {a.annual}; pass the stem the run was named after."
+        )
+    if years != list(range(years[0], years[-1] + 1)):
+        missing = sorted(set(range(years[0], years[-1] + 1)) - set(years))
+        raise FileNotFoundError(
+            f"the yearly checkpoints beside {a.annual} run {years[0]}-{years[-1]} "
+            f"with {len(missing)} missing ({missing[0]}..{missing[-1]}); a "
+            f"submission needs a contiguous series."
+        )
+    mesh, fields, ice, gr, fl = None, {var: [] for var in VARIABLES_2D}, [], [], []
+    for yr in years:
+        with fd.CheckpointFile(AnnualOutput.year_path(a.annual, yr), "r") as chk:
+            ymesh = chk.load_mesh()
+            mesh = mesh or ymesh
+            for var in VARIABLES_2D:
+                fields[var].append(chk.load_function(ymesh, name=var).dat.data_ro.copy())
+            ice.append(chk.load_function(ymesh, name="sftgif").dat.data_ro > 0.5)
+            gr.append(chk.load_function(ymesh, name="sftgrf").dat.data_ro > 0.5)
+            fl.append(chk.load_function(ymesh, name="sftflf").dat.data_ro > 0.5)
     print(f"{os.path.basename(a.annual)}: years {years[0]}-{years[-1]}, {len(fields)} variables", flush=True)
     W = overlap_operator(mesh, a.annual + ".overlap.npz")
     print(f"  overlap operator {W.shape}, {W.nnz} entries, pixels covered {int((W.sum(axis=1) > 0).sum())}", flush=True)

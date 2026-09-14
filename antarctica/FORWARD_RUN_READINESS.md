@@ -99,7 +99,9 @@ so, tf) is at the freeze version.
 **Status (13 September, this branch):** the writer exists and passes the
 compliance checker's content checks. `ISMIP7_OUTPUT=1` makes the forward
 accumulate the yearly flux means and snapshot the state each year
-(`icepack2_tools/ismip7_output.py`, one Firedrake checkpoint per run);
+(`icepack2_tools/ismip7_output.py`, one Firedrake checkpoint per year,
+written atomically so an interrupted run cannot damage the years already
+banked);
 `antarctica/scripts/write_ismip7_output.py` regrids conservatively to the
 8 km grid through a cached supermesh overlap operator, applies the request's
 fill policies and units, encodes time, and writes the 21 gridded and 10

@@ -33,10 +33,14 @@ ismip7_site_file() {
         name="$(basename "$f" .sh)"
         [ "$name" = "template" ] && continue
         match="$(sed -nE 's/^ISMIP7_SITE_MATCH="([^"]*)".*/\1/p' "$f" | head -1)"
+        # The patterns are globs for `case` to match the hostname against, so
+        # keep the shell from expanding them against the invoking directory.
+        set -f
         for pat in $match; do
             # shellcheck disable=SC2254
-            case "$host" in $pat) echo "$f"; return 0 ;; esac
+            case "$host" in $pat) set +f; echo "$f"; return 0 ;; esac
         done
+        set +f
     done
     echo "ERROR: no site definition matches host '$host'." >&2
     echo "       Copy $_ISMIP7_BR_DIR/sites/template.sh to sites/<name>.sh, fill it in," >&2
@@ -139,6 +143,12 @@ ISMIP7_TASKS_INV="${ISMIP7_TASKS_INV:-$ISMIP7_TASKS}"
 ISMIP7_MEM_INV="${ISMIP7_MEM_INV:-$ISMIP7_MEM}"
 ISMIP7_TASKS_FWD="${ISMIP7_TASKS_FWD:-$ISMIP7_TASKS}"
 ISMIP7_MEM_FWD="${ISMIP7_MEM_FWD:-$ISMIP7_MEM}"
+
+# The node feature splits the same way. An inversion needs the partition with
+# the memory, and the rest of the kinds go wherever the measured timings and
+# the -march=native build came from.
+ISMIP7_CONSTRAINT_INV="${ISMIP7_CONSTRAINT_INV:-${ISMIP7_CONSTRAINT:-}}"
+ISMIP7_CONSTRAINT_FWD="${ISMIP7_CONSTRAINT_FWD:-${ISMIP7_CONSTRAINT:-}}"
 
 # --- repository and data ------------------------------------------------
 export ISMIP7_DATA_ROOT="${ISMIP7_DATA_ROOT:-$ISMIP7_REPO/ISMIP7/AIS}"

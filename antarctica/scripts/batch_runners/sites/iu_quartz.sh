@@ -1,9 +1,9 @@
-# Indiana University Quartz. Taken from David Lilien's own runners on the
-# upstream `timing_matrix` branch (antarctica/scripts/batch_runners/timing_*.script),
+# Indiana University Quartz. Taken from the IU runners on the upstream
+# `timing_matrix` branch (antarctica/scripts/batch_runners/timing_*.script),
 # which is where these module names, the account and the venv path come from.
-# A second IU user keeps the module stack and points ISMIP7_FIREDRAKE at their
-# own build (or at David's, if it is readable to them) and ISMIP7_ACCOUNT at
-# their own allocation.
+# The defaults below point at an existing IU build. A second IU user keeps the
+# module stack and points ISMIP7_FIREDRAKE at their own build (or at that one,
+# if it is readable to them) and ISMIP7_ACCOUNT at their own allocation.
 
 ISMIP7_SITE_NAME="iu_quartz"
 ISMIP7_SITE_MATCH="quartz* h2.quartz* login*.quartz.uits.iu.edu"
@@ -23,7 +23,7 @@ ISMIP7_CONSTRAINT="${ISMIP7_CONSTRAINT:-}"
 ISMIP7_REPO="${ISMIP7_REPO:-$HOME/ismip7}"
 ISMIP7_WORK="${ISMIP7_WORK:-$HOME}"
 
-# David's timing runs use 12 to 16 ranks per node, 128 to 240 GB, up to 48 h.
+# The IU timing runs use 12 to 16 ranks per node, 128 to 240 GB, up to 48 h.
 ISMIP7_TASKS="${ISMIP7_TASKS:-16}"
 ISMIP7_MEM="${ISMIP7_MEM:-240G}"
 ISMIP7_TIME_INV="${ISMIP7_TIME_INV:-48:00:00}"

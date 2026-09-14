@@ -60,7 +60,7 @@ falling back to `ISMIP7_CONSTRAINT`).
 | file | state |
 |---|---|
 | `sites/rice_nots.sh` | complete, in production. Details below. |
-| `sites/iu_quartz.sh` | complete, from David Lilien's Quartz runners on the upstream `timing_matrix` branch: partition `general` (`debug` for tests), account `r00905`, the IU module stack (`module use /N/u/dlilien/Quartz/modulefiles`, then gnu, openmpi, python, zlib, hdf5, openblas, patchelf, petsc, firedrake), 16 ranks per node. A second IU user points `ISMIP7_FIREDRAKE` at their own build and `ISMIP7_ACCOUNT` at their own allocation. |
+| `sites/iu_quartz.sh` | complete, from the IU Quartz runners on the upstream `timing_matrix` branch: partition `general` (`debug` for tests), account `r00905`, the IU module stack (`module use /N/u/dlilien/Quartz/modulefiles`, then gnu, openmpi, python, zlib, hdf5, openblas, patchelf, petsc, firedrake), 16 ranks per node. A second IU user points `ISMIP7_FIREDRAKE` at their own build and `ISMIP7_ACCOUNT` at their own allocation. |
 | `sites/uchicago_midway.sh` | a stub. Nobody has run this pipeline at RCC, so the required fields are empty and the first submission refuses until they are filled from RCC's documentation and `sinfo -s`. |
 | `sites/local.sh` | no scheduler: every setting comes from the environment. For debugging a job script on a workstation, and what the chain tests use. |
 

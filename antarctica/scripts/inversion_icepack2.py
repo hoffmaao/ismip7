@@ -1099,7 +1099,7 @@ def main():
             # "firedrake_default", so this is how the forward names its own
             # mesh and picks the matching per-mesh boundary-id sidecar.
             chk.set_attr("/", "mesh_basename", os.path.basename(mesh_fn))
-            # Mesh PARAMETERS as well as the basename (Dan/David's scheme,
+            # Mesh PARAMETERS as well as the basename (the collaborators' scheme,
             # merged from upstream/integration). The forward resolves its
             # boundary_ids sidecar from these rather than from its own
             # environment: ISMIP7_BUFFER_M / ISMIP7_LC_COARSE can drift, and a

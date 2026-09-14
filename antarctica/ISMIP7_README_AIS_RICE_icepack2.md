@@ -7,7 +7,8 @@ decision or a name from the group before submission; everything else is
 what the code on this branch does today.
 
 Contributor names, affiliations and emails: **[confirm]** Andrew Hoffman
-(Rice University, ah301@rice.edu), David Lilien, Meghana ..., Daniel Shapero.
+(Rice University, ah301@rice.edu) and collaborators at Indiana University and
+the University of Chicago.
 
 Date of submission: **[confirm]**
 

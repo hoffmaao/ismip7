@@ -248,6 +248,8 @@ refinement, sized from BedMachine geometry and MEaSUREs strain rate.
 cd antarctica
 python scripts/mesh_antarctica.py --lc 2500 --lc-coarse 64000 --buffer-m 20000
 ISMIP7_LC=2500 ISMIP7_LC_COARSE=64000 ISMIP7_BUFFER_M=20000 python scripts/mesh_antarctica.py
+# dev mesh for inversion_icepack2.py, diagnostic_solve.py and run_eigendec.py:
+python scripts/mesh_antarctica.py --lc 8000 --lc-coarse 80000 --buffer-m 20000
 # mesh/antarctica_<COARSE>_<FINE>_buffered<BUFFER_M>.msh
 # mesh/boundary_ids_antarctica_<COARSE>_<FINE>_buffered<BUFFER_M>.json
 ```
@@ -473,7 +475,11 @@ the observed front (the obs kit's 24 yearly Greene masks, 1997 to 2021) and
 discharge about 1300 Gt/yr. The level set is checkpointed as `levelset` for
 diagnostics; a restart rebuilds the front from the thickness. The exception is
 `fixed`, which anchors on `H_init` so a resumed run does not re-freeze the
-front where it restarted.
+front where it restarted. The shared implementation's tests are
+`icepack_tools/test/levelset_test.py`; the ISMIP7-side rules (retreat-sliver
+mask, apparent-MB extent masking, the `fixed` law's t=0 anchor) are covered by
+`tests/`. The level-set unit tests written against this integration in Sep 2026
+were lost before they were committed and are still to be rebuilt.
 
 **Control and projection configurations differ.** The protocol's control is an
 unforced constant-climate run with calving set to end-of-2014 conditions, so

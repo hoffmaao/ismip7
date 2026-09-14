@@ -37,9 +37,12 @@
 # source rather than expecting distro packages, which is what you want inside a
 # module environment anyway.
 #
-# Runs on a COMPUTE node, constrained to cascadelake, deliberately: the configure
-# uses -march=native, so the build must happen on the same generation it will run
-# on. Building on the login node would bake in whatever that node happens to be.
+# Runs on a COMPUTE node, and the node GENERATION matters: the configure uses
+# -march=native, so the build must happen on the same generation the runs land
+# on, or the venv dies with an illegal instruction. That is now pinned through
+# submit.sh, from this cluster's ISMIP7_CONSTRAINT or an explicit
+# `--constraint <feature>`; a site that leaves the constraint empty should pass
+# one here. Building on the login node would bake in whatever that node is.
 
 # Resources (partition, tasks, memory, wall time, account, constraint) come
 # from submit.sh and this cluster's sites/<name>.sh, never from directives

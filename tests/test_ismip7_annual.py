@@ -179,6 +179,7 @@ def test_the_year_in_progress_round_trips_through_a_checkpoint(two_cells, tmp_pa
     assert resume["year"] == 2015
     assert resume["year_time"] == pytest.approx(0.7)
     assert resume["series"] == "annual.h5"
+    assert resume["skipping"] is False
     assert np.allclose(resume["acc"]["licalvf"], [-2.0, -5.0])
     assert np.allclose(resume["h_year_start"], h)
 
@@ -494,3 +495,94 @@ def test_a_midyear_resume_still_carries_its_months(two_cells, tmp_path):
     assert annual.year == 2050
     assert annual.year_time == pytest.approx(0.4)
     annual.close()
+
+
+def _round_trip_state(annual, mesh, path):
+    r"""Write the run's ISMIP7 state the way _save_state does, read it back the
+    way setup_model does."""
+    with fd.CheckpointFile(path, "w") as chk:
+        chk.save_mesh(mesh)
+        for name, f in annual.state_fields().items():
+            chk.save_function(f, name=name)
+        for key, val in annual.state_attrs().items():
+            chk.set_attr("/", key, val)
+    with fd.CheckpointFile(path, "r") as chk:
+        return AnnualOutput.read_state(chk, chk.load_mesh())
+
+
+def test_a_checkpoint_inside_a_skipped_year_resumes_the_skip(two_cells, tmp_path):
+    r"""A run can stop (wall clock, stall, crash) inside the partial year it
+    is not banking. The checkpoint records the year the MODEL is in plus the
+    skip flag, so the resume re-enters the skip; stamping the first bankable
+    year instead would not match the timeline written beside it and the resume
+    would refuse its own state."""
+    mesh, Q, V = two_cells
+    h = [1500.0, 1500.0]
+    bed = [-500.0, -500.0]
+    out = str(tmp_path / "out" / "annual.h5")
+    scalars = str(tmp_path / "out" / "scalars.csv")
+
+    first = AnnualOutput(mesh, Q, out, scalars, first_year=2050.4, rho_ratio=RHO_RATIO)
+    assert first.year == 2051                      # the first year it will bank
+    first.start_year(_dg(Q, h))
+    first.begin_step()
+    first.step_acc["acabf"][:] = [9.0, 9.0]
+    first.step_time = 0.3
+    first.commit_step()
+
+    # the run stops at t=2050.7, still inside the skipped year
+    state = _round_trip_state(first, mesh, str(tmp_path / "state.h5"))
+    first.close()
+
+    # the resume must accept its own state: stamping the first bankable year
+    # made this raise "does not belong to it" on every retry
+    second = AnnualOutput(mesh, Q, out, scalars, first_year=2050.7,
+                          rho_ratio=RHO_RATIO, resume=state)
+    assert state["year"] == 2050                   # the model's own year
+    assert state["skipping"] is True
+    assert second.year == 2051                     # still the first full year
+    assert np.allclose(second.year_acc["acabf"], 0.0)   # the partial window is dropped
+
+    # the year end at t=2051.0 is still skipped, and 2051 is banked in full
+    second.start_year(_dg(Q, h))
+    _write_year(second, Q, V, h, bed)
+    assert AnnualOutput.years_on_disk(out) == []
+    second.begin_step()
+    second.step_acc["acabf"][:] = [4.0, 4.0]
+    second.step_time = 1.0
+    second.commit_step()
+    _write_year(second, Q, V, h, bed)
+    second.close()
+
+    assert AnnualOutput.years_on_disk(out) == [2051]
+    with fd.CheckpointFile(AnnualOutput.year_path(out, 2051), "r") as chk:
+        acabf = chk.load_function(chk.load_mesh(), name="acabf").dat.data_ro.copy()
+    assert np.allclose(acabf, 4.0)
+
+
+def test_a_checkpoint_past_the_skipped_year_resumes_normally(two_cells, tmp_path):
+    r"""Once the skip is over the state is an ordinary accumulation again: the
+    flag is clear and the year is the one being banked."""
+    mesh, Q, V = two_cells
+    h = [1500.0, 1500.0]
+    out = str(tmp_path / "out" / "annual.h5")
+    scalars = str(tmp_path / "out" / "scalars.csv")
+
+    annual = AnnualOutput(mesh, Q, out, scalars, first_year=2050.4, rho_ratio=RHO_RATIO)
+    annual.start_year(_dg(Q, h))
+    _write_year(annual, Q, V, h, [-500.0, -500.0])     # the skipped year end
+    annual.begin_step()
+    annual.step_acc["acabf"][:] = [1.0, 1.0]
+    annual.step_time = 0.5
+    annual.commit_step()
+
+    state = _round_trip_state(annual, mesh, str(tmp_path / "state.h5"))
+    annual.close()
+    assert state["year"] == 2051 and state["skipping"] is False
+
+    resumed = AnnualOutput(mesh, Q, out, scalars, first_year=2051.5,
+                           rho_ratio=RHO_RATIO, resume=state)
+    assert resumed.year == 2051
+    assert resumed.year_time == pytest.approx(0.5)
+    assert np.allclose(resumed.year_acc["acabf"], [1.0, 1.0])
+    resumed.close()

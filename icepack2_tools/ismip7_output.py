@@ -126,6 +126,12 @@ class AnnualOutput:
     operator's own call. A year is never renamed, and a resume that would
     leave a HOLE in the series (further than one past the last kept year) is
     an error.
+
+    A run that starts part-way through a year with no record of its earlier
+    months does not bank that year at all: accumulation begins at the next
+    1 January. The state carries the model's own year plus a skip flag, so a
+    checkpoint taken inside that window resumes the skip rather than reading
+    the year back as an accumulation in progress.
     """
 
     #: the per-cell year sums carried across a chained resume
@@ -139,21 +145,17 @@ class AnnualOutput:
     #: which series the carried state belongs to: the annual stem's basename,
     #: which is <experiment>_<lc>_ismip7_annual.h5 and so names the run
     STATE_SERIES = "ismip7_series"
+    #: set while the run is inside a partial year it will not bank, so a
+    #: checkpoint taken in that window resumes the skip instead of reading
+    #: the year back as an accumulation in progress
+    STATE_SKIPPING = "ismip7_skipping"
 
     def __init__(self, mesh, Q_dg, out_path, scalars_path, first_year, rho_ratio,
                  comm=None, log=None, resume=None):
         self.mesh, self.Q_dg = mesh, Q_dg
         self.out_path, self.scalars_path = out_path, scalars_path
-        self.year = int(np.floor(float(first_year) + 1e-6))   # the year being accumulated (its Jan 1 has passed)
-        # A cold start part-way through a year has no record of that year's
-        # earlier months, so banking it would submit a fraction of a year as
-        # the year's mean. Accumulation begins at the next 1 January instead,
-        # and the partial year is dropped rather than reported. A resume is
-        # different: it carries the months already accumulated.
+        self.year = int(np.floor(float(first_year) + 1e-6))   # the year the model time lies in
         self._skip_first_year_end = False
-        if resume is None and abs(float(first_year) - self.year) > 1e-6:
-            self.year += 1
-            self._skip_first_year_end = True
         self.rho_ratio = float(rho_ratio)
         self.comm = comm or mesh.comm
         self.log = log or (lambda s: None)
@@ -176,14 +178,27 @@ class AnnualOutput:
                      f"state, not {os.path.basename(out_path)}; starting a new "
                      f"series here")
             resume = None
+        if resume is not None and int(resume["year"]) != self.year:
+            raise ValueError(
+                f"the restart checkpoint was accumulating ISMIP7 year "
+                f"{int(resume['year'])} but its timeline resumes at "
+                f"t={float(first_year)!r}, which falls in year {self.year}; "
+                f"the checkpoint's ISMIP7 state does not belong to it."
+            )
+        # A run part-way through a year it has no record of cannot bank that
+        # year: a fraction of a year reported as the year's mean is a wrong
+        # submitted value. Accumulation begins at the next 1 January instead
+        # and the partial year is dropped. Both entries to that state land
+        # here: a cold start at a non-integer time, and a resume from a
+        # checkpoint taken while the skip was already in progress, which
+        # carries the model's own year plus the skip flag so the window is
+        # re-entered rather than read back as an accumulation.
+        skipping = resume is not None and resume.get("skipping")
+        if skipping or (resume is None and abs(float(first_year) - self.year) > 1e-6):
+            self.year += 1
+            self._skip_first_year_end = True
+            resume = None
         if resume is not None:
-            if int(resume["year"]) != self.year:
-                raise ValueError(
-                    f"the restart checkpoint was accumulating ISMIP7 year "
-                    f"{int(resume['year'])} but its timeline resumes at "
-                    f"t={float(first_year)!r}, which falls in year {self.year}; "
-                    f"the checkpoint's ISMIP7 state does not belong to it."
-                )
             for k in self.ACCUMULATORS:
                 self.year_acc[k][:] = resume["acc"][k]
             self.h_year_start = np.asarray(resume["h_year_start"]).copy()
@@ -237,10 +252,10 @@ class AnnualOutput:
                     f"hole in it. Resume from a checkpoint inside {last + 1}."
                 )
         if self._skip_first_year_end:
-            self.log(f"  ISMIP7 output: started at t={float(first_year)!r}, "
-                     f"part-way through {self.year - 1}. That year is "
-                     f"incomplete here and is NOT banked; accumulation begins "
-                     f"at {self.year}-01-01.")
+            self.log(f"  ISMIP7 output: inside {self.year - 1} at "
+                     f"t={float(first_year)!r} with no record of its earlier "
+                     f"months, so that year is NOT banked; accumulation "
+                     f"begins at {self.year}-01-01.")
         if self._written_years:
             self.log(f"  ISMIP7 output: continuing {os.path.basename(out_path)} "
                      f"({len(self._written_years)} years through {last}; "
@@ -349,10 +364,17 @@ class AnnualOutput:
         return fields
 
     def state_attrs(self):
-        r"""The year being accumulated, how much of it is in the sums, and
-        which series it belongs to."""
-        return {self.STATE_YEAR: int(self.year),
+        r"""The year the model is IN, how much of it is in the sums, whether
+        that year is being skipped, and which series it belongs to.
+
+        The year recorded is the model's own, not the first year that will be
+        banked: while a partial year is being skipped those differ by one, and
+        a checkpoint stamped with the banked year would not match the timeline
+        it was written alongside, so the resume would refuse its own state."""
+        return {self.STATE_YEAR: int(self.year - 1 if self._skip_first_year_end
+                                     else self.year),
                 self.STATE_YEAR_TIME: float(self.year_time),
+                self.STATE_SKIPPING: int(self._skip_first_year_end),
                 self.STATE_SERIES: os.path.basename(self.out_path)}
 
     @classmethod
@@ -365,6 +387,8 @@ class AnnualOutput:
         return {
             "year": int(chk.get_attr("/", cls.STATE_YEAR)),
             "year_time": float(chk.get_attr("/", cls.STATE_YEAR_TIME)),
+            "skipping": bool(int(chk.get_attr("/", cls.STATE_SKIPPING))
+                             if chk.has_attr("/", cls.STATE_SKIPPING) else 0),
             "series": (str(chk.get_attr("/", cls.STATE_SERIES))
                        if chk.has_attr("/", cls.STATE_SERIES) else ""),
             "acc": {k: chk.load_function(mesh, name=cls.STATE_PREFIX + k).dat.data_ro.copy()

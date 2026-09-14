@@ -1137,9 +1137,11 @@ def main():
     global_ndof = len(func_to_global(theta))
     z_backup = z.copy(deepcopy=True)
     last_good_obj = [np.inf]
+    last_x = [None]                      # the control vector of the last evaluation
     iteration_count = [0]
 
     def objective_and_gradient(x_vec):
+        last_x[0] = np.array(x_vec, copy=True)
         t_iter = perf_counter()
         global_to_func(x_vec[:global_ndof], theta)
         global_to_func(x_vec[global_ndof:], phi)
@@ -1252,6 +1254,7 @@ def main():
         _inner_og = objective_and_gradient
         def objective_and_gradient(u_vec):  # noqa: F811 (deliberate wrap)
             J, g_x = _inner_og(u_vec / _sqrtm)
+            last_x[0] = np.array(u_vec, copy=True)   # in the optimizer's own (scaled) space
             return J, g_x / _sqrtm
     x0 = np.concatenate([func_to_global(theta), func_to_global(phi)])
     if grad_precond == "mass":
@@ -1296,12 +1299,31 @@ def main():
     # downstream that trusts the checkpoint).
     PETSc.Sys.Print("\nFinal forward solve...")
     stop_manager()
-    try:
-        slvr.solve()
-    except fd.ConvergenceError:
-        PETSc.Sys.Print("  Final solve failed; restoring last good "
-                        "optimization state")
-        z.assign(z_backup)
+    # Two runs on the Ua mesh (Sep 13 2026, RC and Budd alike) had every one
+    # of their ~200 per-iterate solves converge and only this call fail. The
+    # per-iterate forward() ramps the exponents from 1 in five steps; this
+    # was a single-shot Newton at full exponents STARTED FROM THE CONVERGED
+    # STATE of the last evaluation, where the residual is already at its
+    # floor, rtol cannot be met and the nleqerr line search fails (the
+    # forward's restart hit the same thing, simulation.py, Aug 2026). When
+    # the optimizer's final x is the last vector it evaluated, z already IS
+    # the solution at these controls and no solve is needed; otherwise solve
+    # the way every iterate did.
+    if last_x[0] is not None and np.array_equal(last_x[0], result.x):
+        PETSc.Sys.Print("  Final controls are the last evaluated ones; the "
+                        "converged state is reused (no re-solve)")
+    else:
+        try:
+            F_fin = build_F(theta, phi)
+            for _t in np.linspace(0.0, 1.0, 5):
+                n_flow.assign(1.0 + _t * (n_flow_val - 1.0))
+                m_slide.assign(1.0 + _t * (m_slide_val - 1.0))
+                EquationSolver(F_fin == 0, z, solver_parameters=sparams,
+                               form_compiler_parameters=fc_params).solve()
+        except fd.ConvergenceError:
+            PETSc.Sys.Print("  Final solve failed; restoring last good "
+                            "optimization state")
+            z.assign(z_backup)
 
     u_sol = z.subfunctions[0]
     u_sol_mag = Function(Q).interpolate(sqrt(u_sol[0] ** 2 + u_sol[1] ** 2))

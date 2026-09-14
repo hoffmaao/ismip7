@@ -1137,6 +1137,7 @@ def main():
     global_ndof = len(func_to_global(theta))
     z_backup = z.copy(deepcopy=True)
     last_good_obj = [np.inf]
+    last_x = [None]                      # controls of the last CONVERGED evaluation
     iteration_count = [0]
 
     def objective_and_gradient(x_vec):
@@ -1170,6 +1171,7 @@ def main():
 
         z_backup.assign(z)
         last_good_obj[0] = J_val
+        last_x[0] = np.array(x_vec, copy=True)
         last_good_vel_chi2[0] = float(assemble(_vel_chi2))
 
         t_adj = perf_counter()
@@ -1282,6 +1284,14 @@ def main():
         f"(misfit_norm={MISFIT_NORM} gamma_theta={GAMMA_THETA:g} "
         f"gamma_phi={GAMMA_PHI:g} dhdt_weight={dhdt_w:g})"
     )
+    # The chain runner reads <ISMIP7_MAP_OUT>.done as "the MAP is on disk, do
+    # not re-invert it". Write it here, the moment the checkpoint write returns:
+    # the tail below (final solve, summary figure) runs for long enough that
+    # the wall clock can kill the job inside it, and the runner's post-srun
+    # rule would then never get to write the marker.
+    if map_out and COMM_WORLD.rank == 0:
+        with open(map_out + ".done", "w"):
+            pass
 
     # ── Final forward solve ──
     # The single-shot solve at full exponents can fail, and the old code then
@@ -1289,19 +1299,45 @@ def main():
     # optimization state was used (the message said so, but z was never
     # restored). The Aug 3 dg0 32 km MAP carries a 2745 m/yr-RMS velocity this
     # way -- discovered only when compare_dhdt.py scored it against MEaSUREs.
-    # Now: restore the last good optimization state on failure, and refuse to
-    # save any velocity whose misfit grossly disagrees with the optimizer's
+    # Now: on failure the last good optimization state is restored for the
+    # misfit report only and NO velocity is saved (that state belongs to the
+    # last converged evaluation's controls, not to this MAP's), and a velocity
+    # whose misfit grossly disagrees with the optimizer's is refused too
     # (a forward re-solves the diagnostic from theta/phi anyway; a missing
     # velocity is an inconvenience, a silently wrong one poisons everything
     # downstream that trusts the checkpoint).
     PETSc.Sys.Print("\nFinal forward solve...")
     stop_manager()
-    try:
-        slvr.solve()
-    except fd.ConvergenceError:
-        PETSc.Sys.Print("  Final solve failed; restoring last good "
-                        "optimization state")
-        z.assign(z_backup)
+    # Two runs on the Ua mesh (Sep 13 2026, RC and Budd alike) had every one
+    # of their ~200 per-iterate solves converge and only this call fail. The
+    # per-iterate forward() ramps the exponents from 1 in five steps; this
+    # was a single-shot Newton at full exponents STARTED FROM THE CONVERGED
+    # STATE of the last evaluation, where the residual is already at its
+    # floor, rtol cannot be met and the nleqerr line search fails (the
+    # forward's restart hit the same thing, simulation.py, Aug 2026). When
+    # the optimizer's final x is the last vector whose forward CONVERGED, z
+    # already IS the solution at these controls and no solve is needed;
+    # otherwise solve the way every iterate did. A failed evaluation never
+    # records its controls, so the state z holds always belongs to last_x
+    # (both are in the inner objective's unscaled space, hence _x_final).
+    final_state_ok = True
+    _reuse = last_x[0] is not None and bool(np.array_equal(last_x[0], _x_final))
+    if mesh.comm.allreduce(_reuse, op=MPI.LAND):
+        PETSc.Sys.Print("  Final controls are those of the last converged "
+                        "evaluation; that state is reused (no re-solve)")
+    else:
+        try:
+            F_fin = build_F(theta, phi)
+            for _t in np.linspace(0.0, 1.0, 5):
+                n_flow.assign(1.0 + _t * (n_flow_val - 1.0))
+                m_slide.assign(1.0 + _t * (m_slide_val - 1.0))
+                EquationSolver(F_fin == 0, z, solver_parameters=sparams,
+                               form_compiler_parameters=fc_params).solve()
+        except fd.ConvergenceError:
+            PETSc.Sys.Print("  Final solve failed; restoring last good "
+                            "optimization state for the misfit report only")
+            z.assign(z_backup)
+            final_state_ok = False
 
     u_sol = z.subfunctions[0]
     u_sol_mag = Function(Q).interpolate(sqrt(u_sol[0] ** 2 + u_sol[1] ** 2))
@@ -1326,7 +1362,15 @@ def main():
     # objective and its dH/dt part has nothing to do with velocity.
     _guard = float(assemble(_vel_chi2))
     _ref = max(float(last_good_vel_chi2[0]), 1e-30)
-    if np.isfinite(_guard) and _guard <= 10.0 * _ref:
+    if not final_state_ok:
+        PETSc.Sys.Print(
+            "WARNING: NOT saving velocity -- the final solve did not converge, "
+            "so the state on hand is the one of the last converged evaluation "
+            "and belongs to different controls than this MAP. The MAP controls "
+            "are saved and valid; forwards re-solve the diagnostic from "
+            "theta/phi and are unaffected."
+        )
+    elif np.isfinite(_guard) and _guard <= 10.0 * _ref:
         with fd.CheckpointFile(chk_fn, "a") as chk:
             chk.save_function(u_sol, name="velocity")
         PETSc.Sys.Print(f"Saved velocity: {chk_fn}")
@@ -1342,6 +1386,13 @@ def main():
     # ── Plot ──
     # Optional: the MAP is already written and the velocity saved above, so a
     # missing plotting dependency must not fail the run at this point.
+    if not final_state_ok:
+        PETSc.Sys.Print(
+            "Skipping summary figure: the final solve did not converge, so the "
+            "only state on hand is the last converged evaluation's, which "
+            "belongs to different controls than this MAP. The MAP is saved."
+        )
+        return
     try:
         import colorcet as cc
         import matplotlib

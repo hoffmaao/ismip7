@@ -105,7 +105,9 @@ def _obs_kit_path(data_root=None):
     raise FileNotFoundError(
         f"ISMIP7 observations MIPkit not found under {obs_dir}. Set "
         f"ISMIP7_OBS_KIT to the AntarcticaObsISMIP7-v*.nc path, or pull it "
-        f"with antarctica/scripts/download_forcing.py."
+        f"with 'antarctica/scripts/download_mirror.py --product "
+        f"ismip7-ais-observations data/mipkit/' (Globus alternative: "
+        f"antarctica/scripts/download_forcing.py --calibration)."
     )
 
 

@@ -85,7 +85,14 @@ behind. Everything the current forwards read is at the freeze version.
 **Staging since that audit** (the table stays the point-in-time record): the
 CESM2-WACCM fracture v2.1 files and the OCX set were downloaded on 13
 September, and the ssp585 CESM2-WACCM set was staged on NOTS on 14 September.
-What remains open is action 2.
+On 14 September the two `ctrl` trees came down as well, 8 km atmosphere and
+ocean for both ESMs, 77 GB, every transfer size-checked. A re-run of the audit
+that afternoon reads 440 mirror entries, 64 of them present locally at the
+mirror's own version and none behind. Every `ctrl` row for
+`SDBN1-8000m`, `GEMB-SDBN1-8000m` and `ocean` (so, tf, thetao) is current, so
+cores 9 and 10 have their forcing. The 376 absent entries are the 2 km
+atmospheres, `dEBM2`, and the per-scenario fields that only an SMB-height
+feedback or a perturbed member reads.
 
 ## 3. Output and submission
 
@@ -209,11 +216,10 @@ forcing-version audit, the output writer, and the melt calibration above.
 2. Settle the `[confirm]` items in the submission README draft with the group.
 3. Carry the Budd re-inversion to a MAP that passes `check_budd_map.py
    --forward`, then run that check on every MAP the matrix will use.
-4. Finish the `ctrl` pull for cores 9 and 10. The 8 km atmosphere and the ocean
-   for both ESMs come to 81.6 GB and were fetched on 14 September; the 2 km
-   atmosphere is a further 247 GB and is needed only for a 2 km SMB-height
-   member. Re-run `audit_forcing_versions.py` before the production matrix and
-   cite it in the README.
+4. Re-run `audit_forcing_versions.py` immediately before the production matrix
+   and cite it in the README. The `ctrl` pull for cores 9 and 10 is done, and
+   the mirror is re-synced with Globus by hand every week or two, so the freeze
+   versions can still move under a long campaign.
 5. Re-check `libmassbffl` against the request's -0.008 kg m-2 s-1 bound under
    the new calibration. The 10-year Úa ssp585 of job 1368723 reached -0.0117 on
    small grounding-zone cells, and the per-basin K it reads now rises by up to

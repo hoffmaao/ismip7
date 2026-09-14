@@ -10,7 +10,7 @@
 #   3,4   ssp370       both ESMs                          ->2100
 #   5,6   ssp126       both ESMs                          ->2300
 #   7,8   ssp585       both ESMs                          ->2300
-#   11    OCX          obs-constrained, cold start     1979-2025
+#   11    OCX          obs-constrained, independent    1979-2025
 #
 # A core that branches from the historical is only launched once that ESM's
 # historical endpoint is on disk, complete and post-fix. A missing, short or
@@ -44,8 +44,7 @@
 # MAX_ATTEMPTS. A run that stops advancing is left alone and reported. The
 # resume source is the newest checkpoint whose recorded year is at or before
 # the timeseries' last row, so a run is never continued from a state ahead of
-# its own record. OCX is the exception: its driver cold-starts unconditionally
-# and ignores ISMIP7_RESTART, so it runs at most once.
+# its own record.
 #
 # Usage:
 #   antarctica/scripts/run_core_matrix.sh                # full matrix
@@ -110,7 +109,8 @@ ARCHIVE="$R/archive_stale_$TS"
 # checkpoint's t_yr, so it is 1 January of the year after the last one the
 # core covers: a historical covering 1850-2014 finishes at 2015.
 # kind: hist = historical, branch = branches from the historical endpoint,
-#       cold = cold start with no restart support.
+#       solo = starts from the inversion rather than a historical endpoint.
+# Every kind resumes from its own saved state, so every one is retried.
 CORE_SPEC=(
   "1|hist_cesm|historical/cesm_waccm.py|CESM2-WACCM|hist_cesm2_waccm|2015|hist"
   "2|hist_mri|historical/mri_esm2.py|MRI-ESM2-0|hist_mri_esm2_0|2015|hist"
@@ -122,7 +122,7 @@ CORE_SPEC=(
   "6|ssp126_mri|projections/ssp126_mri_esm2.py|MRI-ESM2-0|ssp126_mri_esm2_0|2301|branch"
   "7|ssp585_cesm|projections/ssp585_cesm_waccm.py|CESM2-WACCM|ssp585_cesm2_waccm|2301|branch"
   "8|ssp585_mri|projections/ssp585_mri_esm2.py|MRI-ESM2-0|ssp585_mri_esm2_0|2301|branch"
-  "11|ocx|projections/ocx.py|CESM2-WACCM|ocx|2026|cold"
+  "11|ocx|projections/ocx.py|CESM2-WACCM|ocx|2026|solo"
 )
 
 declare -A HIST_STEM=() HIST_TARGET=() HIST_STATUS=() HIST_WHY=() \
@@ -302,10 +302,7 @@ run_core () {  # core label driver esm stem target kind
     return 0
   fi
 
-  # OCX cold-starts unconditionally, so a relaunch cannot resume it and would
-  # truncate the previous timeseries instead of extending it.
   attempts="$MAX_ATTEMPTS"
-  [ "$kind" = cold ] && attempts=1
 
   for attempt in $(seq 1 "$attempts"); do
     prev="$now"
@@ -365,11 +362,7 @@ run_core () {  # core label driver esm stem target kind
       return 1
     fi
   done
-  if [ "$kind" = cold ]; then
-    echo "[core $core] $label short of target at $now - not retried (its driver ignores ISMIP7_RESTART)"
-  else
-    echo "[core $core] $label short of target after $attempts attempts (at $now)"
-  fi
+  echo "[core $core] $label short of target after $attempts attempts (at $now)"
   return 1
 }
 

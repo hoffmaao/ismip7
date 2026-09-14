@@ -141,26 +141,6 @@ def ismip7_output():
     )
 
 
-def ismip7_output_overwrite():
-    r"""``ISMIP7_OUTPUT_OVERWRITE``: allow a run that is not resuming its own
-    ISMIP7 accumulation state to discard a banked annual series.
-
-    The per-year checkpoints are the only copy of what gets submitted, so a
-    cold start into a populated series refuses by default; this is how an
-    operator says the series is meant to be redone. Same closed value set as
-    ``ismip7_output``: ``1`` on, ``0`` or empty off, anything else raises.
-    """
-    value = (os.environ.get("ISMIP7_OUTPUT_OVERWRITE") or "").strip()
-    if value in ("", "0"):
-        return False
-    if value == "1":
-        return True
-    raise ValueError(
-        f"ISMIP7_OUTPUT_OVERWRITE must be 1 to enable or 0/empty to disable, "
-        f"got {value!r}"
-    )
-
-
 def calving_law():
     r"""``ISMIP7_CALVING``: ``none``, ``fixed`` or ``vonmises``."""
     value = os.environ.get("ISMIP7_CALVING", CALVING_DEFAULT).lower()

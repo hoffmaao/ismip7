@@ -40,7 +40,7 @@ own venv and call it by absolute path.
 |---|---|---|:--:|:--:|:--:|:--:|
 | BedMachine Antarctica v4.1, MEaSUREs velocity v2 | 8 GB | `scripts/download_data.py` (Earthdata login) | x | x | x | |
 | RACMO2.4p1 SMB climatology | 2 GB | same script | | x | | |
-| ISMIP7 observations MIPkit v1.2 (Smith dH/dt) | 9 GB | `scripts/download_mirror.py --product ismip7-ais-observations data/mipkit/`, landing at `ISMIP7/AIS/obs/mipkit/AntarcticaObsISMIP7-v1.2.nc` (`ISMIP7_OBS_KIT` overrides) | `ISMIP7_DHDT_WEIGHT` | | `--from-obs` | |
+| ISMIP7 observations MIPkit v1.2 (Smith dH/dt) | 9 GB | `scripts/download_mirror.py --product ismip7-ais-observations data/mipkit/`, landing at `ISMIP7/AIS/obs/mipkit/AntarcticaObsISMIP7-v1.2.nc` (`ISMIP7_OBS_KIT` overrides). `scripts/download_forcing.py --calibration` stages the same v1.2 file in the same place over Globus | `ISMIP7_DHDT_WEIGHT` | | `--from-obs` | |
 | ISMIP7 forcing per ESM and scenario: SMB anomaly 7.5 GB, ocean `tf` 11 GB, `so` 6.9 GB (ssp585; historical 4.3 GB) | 25 GB each | `scripts/download_mirror.py` | | x | | |
 | ISMIP7 fracture (collapse mask, lake properties, excess melt) | 3 GB per scenario | same, `data/<ESM>/<scenario>/fracture/` | | `ISMIP7_FRACTURE=mask` | | |
 | Ocean OI climatology and IMBIE basin numbers | 3 GB | `scripts/download_forcing.py --ocean --calibration` | | x | | |
@@ -290,7 +290,7 @@ MAP estimate of bed friction `θ` and rheology `φ` from the diagnostic 3-field
 ```bash
 cd antarctica
 ISMIP7_LC=2500 mpiexec -n 12 python scripts/inversion_icepack2.py
-# mesh/inversion_icepack2_<friction>_n3_dg0_<LC>.h5
+# mesh/inversion_icepack2_<budd|rc>_n3_dg0_<LC>.h5
 ```
 
 The controls are log deviations from physical priors: `θ = log(C/C_w0)` on the
@@ -299,12 +299,13 @@ prior computed at setup and stored in the MAP. That prior reads the section 1
 RACMO SMB and the section 2 `tas` climatology, so download the forcing first.
 See `N3_FRAMEWORK.md`, and `ISMIP7_FLUIDITY_PRIOR=legacy` to skip it.
 
-`ISMIP7_FRICTION` selects the law (`budd` or `regularized_coulomb`). The MAP
-name carries the law, the flow exponent and the geometry space, built by
-`icepack2_tools/naming.py`, which the forward, `preflight.py` and the gates all
-import. A MAP is valid only for its own geometry space, since the inversion
-absorbs the calving-front treatment into `θ` and `φ`. A forward that finds only
-a legacy untagged MAP loads it with a loud warning. See
+`ISMIP7_FRICTION` selects the law (`budd` or `regularized_coulomb`, tagged
+`_budd` and `_rc` in the filename). The MAP name carries the law, the flow
+exponent and the geometry space, built by `icepack2_tools/naming.py`, which the
+forward, `preflight.py` and the gates all import. A MAP is valid only for its
+own geometry space, since the inversion absorbs the calving-front treatment into
+`θ` and `φ`. A forward that finds only a legacy untagged MAP loads it with a
+loud warning. See
 `../GEOMETRY_DISCRETIZATION.md`.
 
 ### Transient (dH/dt-constrained) inversion

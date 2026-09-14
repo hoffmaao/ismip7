@@ -741,3 +741,12 @@ VAF is reported in mm of sea-level equivalent; mass in Gt.
 - multimelt (the reference implementation): https://github.com/ClimateClara/multimelt
 - ISMIP7 ocean forcing pipeline: https://github.com/ismip/ismip7-antarctic-ocean-forcing
 - Greenland companion: https://github.com/dlilien/ISMIP7_Greenland_Icepack
+
+## Forward-run readiness (September 2026)
+
+`FORWARD_RUN_READINESS.md` in this directory is the sweep of the ISMIP
+discussion board of 13 September 2026: the data freeze and the Source
+Cooperative mirror, the forcing-version audit
+(`scripts/audit_forcing_versions.py`), the control and OCX definitions,
+fracture guidance, the 2300 forcing year, and what a submission needs. Read it
+before planning the projection matrix.

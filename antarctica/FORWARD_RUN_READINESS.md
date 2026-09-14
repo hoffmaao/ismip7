@@ -229,18 +229,29 @@ forcing-version audit, the output writer, and the melt calibration above.
    The leading explanation, now measured by `check_melt_bound.py`: the
    calibration caps the draft slope `sin(alpha)` at 5e-3 and the forward
    applies no cap, so the melt the forward applies is a different field from
-   the melt the per-basin K was fitted against. The 10-year run integrated
-   1860 Gt/yr of melt against the calibration's 1067.4 Gt/yr, and that is the
-   size of the gap. The forward's area mean of 1.34 m/yr sits between the
-   script's capped row (0.77 m/yr) and uncapped row (4.18 m/yr), as expected,
-   since the forward lifts a DG0 draft to CG1 and the calibration projects its
-   gradient, which is rougher.
+   the melt the per-basin K was fitted against. The script runs both slope
+   operators, capped and uncapped, on the Úa mesh at the reference geometry
+   over 1 512 899 km2 of floating ice, with the per-basin K on disk:
 
-   The bound is reachable from that gap alone. On the Úa mesh at the reference
-   geometry, over 1 512 899 km2 of floating ice, the capped slope gives a
-   maximum of 71.1 m/yr and zero nodes past the bound. Uncapped, the maximum is
-   1804.9 m/yr and 421 nodes sit past the bound over 2920.6 km2, with a median
-   node area of 6.33 km2 against 64 km2 for an 8 km pixel.
+   | slope | max, m/yr | area mean, m/yr | integrated, Gt/yr | nodes past the bound |
+   |---|---|---|---|---|
+   | calibration operator, capped, what K was fitted to | 71.1 | 0.77 | 1067 | 0 |
+   | calibration operator, uncapped | 1804.9 | 4.18 | 5803 | 421 |
+   | forward operator, uncapped, as the forward runs today | 1364.8 | 3.09 | 4293 | 298 |
+   | forward operator, capped | 71.1 | 0.74 | 1028 | 0 |
+
+   The last row is the one that settles it. Capping the forward's own operator
+   integrates to 1028 Gt/yr against the 1067.4 Gt/yr the K was fitted to
+   reproduce, within 4%, and leaves nothing past the bound. Running uncapped
+   integrates four times the target. The two operators differ because the
+   calibration projects `grad(draft)` from a CG1 geometry while the forward
+   differentiates a `cg1_lift` of a DG0 draft, which is smoother; the cap
+   removes that difference, since both then sit at 5e-3 almost everywhere.
+
+   The 10-year run's own budget, 1860 Gt/yr, sits below the uncapped reference
+   value, so its melt-receiving mask and its evolved geometry account for part
+   of the difference as well. A node past the bound has a median area of
+   6.33 km2 against 64 km2 for an 8 km pixel.
 
    The slope gap leaves two candidates open, and the full-length run still has
    to settle them: the evolved geometry with its warmer projected thermal

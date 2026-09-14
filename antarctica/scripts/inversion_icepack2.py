@@ -1284,8 +1284,8 @@ def main():
         f"(misfit_norm={MISFIT_NORM} gamma_theta={GAMMA_THETA:g} "
         f"gamma_phi={GAMMA_PHI:g} dhdt_weight={dhdt_w:g})"
     )
-    # The chain runner reads <ISMIP7_MAP_OUT>.done as "the optimizer returned,
-    # do not re-invert this MAP". Write it here, the moment the MAP is on disk:
+    # The chain runner reads <ISMIP7_MAP_OUT>.done as "the MAP is on disk, do
+    # not re-invert it". Write it here, the moment the checkpoint write returns:
     # the tail below (final solve, summary figure) runs for long enough that
     # the wall clock can kill the job inside it, and the runner's post-srun
     # rule would then never get to write the marker.

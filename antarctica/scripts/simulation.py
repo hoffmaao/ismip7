@@ -186,7 +186,7 @@ def setup_model(restart_from=None):
     # untagged legacy (CG1) MAP keeps the transition runnable, but the load
     # then projects the geometry and warns loudly - the controls still carry
     # the CG1 front bias, so such a run is a smoke test, not a result.
-    # ISMIP7_INVERSION names the MAP explicitly (David's timing matrix and
+    # ISMIP7_INVERSION names the MAP explicitly (the IU timing matrix and
     # A/B forwards of differently-regularised MAPs on one mesh). It must
     # still be a MAP of THIS friction/n/geometry; the name is not checked.
     inv_override = os.environ.get("ISMIP7_INVERSION")
@@ -255,7 +255,7 @@ def setup_model(restart_from=None):
             if _chk.has_attr("/", "mesh_basename") else ""
         )
 
-        # Dan/David additionally stamp the mesh PARAMETERS. Keep both: the
+        # The collaborators additionally stamp the mesh PARAMETERS. Keep both: the
         # basename is direct and also covers meshes outside the standard
         # naming pattern (e.g. the 500 m aniso mesh), while lc_coarse/buffer_m
         # let bndids_filename() reconstruct the name parametrically. They

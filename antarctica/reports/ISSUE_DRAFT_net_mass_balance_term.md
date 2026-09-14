@@ -132,4 +132,4 @@ already testable.
   signed initial tendency, the frozen `a_ref` correction becomes genuinely
   small instead of masking a bias of hundreds of Gt/yr.
 - Orthogonal to the mesh/sidecar convention merge from
-  `upstream/integration` (Dan/David).
+  `upstream/integration` (collaborators).

@@ -1,7 +1,7 @@
 # ISMIP7 Antarctica
 
-Antarctic ISMIP7 submission on icepack2 and Firedrake. Companion to David
-Lilien's Greenland repo (https://github.com/dlilien/ISMIP7_Greenland_Icepack).
+Antarctic ISMIP7 submission on icepack2 and Firedrake. Companion to the
+Greenland repository (https://github.com/dlilien/ISMIP7_Greenland_Icepack).
 
 The pipeline is a dependency chain: data, mesh, inversion, melt calibration,
 control and projections.
@@ -46,7 +46,7 @@ own venv and call it by absolute path.
 | Ocean OI climatology and IMBIE basin numbers | 3 GB | `scripts/download_forcing.py --ocean --calibration` | | x | | |
 | Whole AIS tree (all ESMs, scenarios, `ctrl`, OCX, calibration) | 313 GB | same | | | | |
 | Meshes and MAP checkpoints | 15 MB, 80 MB | sections 3 and 4, or from a colleague | | x | x | |
-| Per-basin melt calibration `results/calibrated_K_per_basin_<lc>.npz` | 2 KB | `scripts/calibrate_melt.py` (section 5), or from a colleague | | x | | |
+| Per-basin melt calibration `results/calibrated_K_per_basin_<lc>.npz` | 2 to 5 MB | `scripts/calibrate_melt.py` (section 5), or from a colleague | | x | | |
 
 Source Cooperative carries the data-freeze copy and needs no account.
 
@@ -81,7 +81,12 @@ completes with the wrong melt.
 (`adapt_mesh.py --from-obs`) needs the MIPkit and MEaSUReS.
 
 **Submission.** Add the checker in its own Python 3.11+ venv, run with
-`ISMIP7_OUTPUT=1`, then `scripts/write_ismip7_output.py`.
+`ISMIP7_OUTPUT=1`, then `scripts/write_ismip7_output.py`. The two halves can
+sit on different machines. The writer reads the annual checkpoints, which for a
+286-year experiment come to roughly 14 GB, so it belongs where the run is; it
+needs only Firedrake, netCDF4 and scipy. The checker reads the written NetCDF,
+a few GB after zlib, so it can stay wherever the newer Python is. Rice NOTS
+carries the writer's dependencies; the checker runs here on the workstation.
 
 ### 0.4 Accounts
 

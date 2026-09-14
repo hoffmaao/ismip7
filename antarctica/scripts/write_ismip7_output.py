@@ -254,9 +254,16 @@ def main():
     req = request_table()
     years = AnnualOutput.years_on_disk(a.annual)
     if not years:
+        hint = ("; pass the stem the run was named after."
+                if not os.path.exists(a.annual) else
+                ". The stem file itself holds the accumulation state a chained "
+                "resume reads, and the years live beside it. A run from before "
+                "14 September 2026 banked the years INSIDE that file, a layout "
+                "this writer does not read: re-run the forward with "
+                "ISMIP7_OUTPUT=1 on current code.")
         raise FileNotFoundError(
             f"no yearly checkpoints {os.path.basename(a.annual)[:-3]}_<year>.h5 "
-            f"beside {a.annual}; pass the stem the run was named after."
+            f"beside {a.annual}{hint}"
         )
     if years != list(range(years[0], years[-1] + 1)):
         missing = sorted(set(range(years[0], years[-1] + 1)) - set(years))

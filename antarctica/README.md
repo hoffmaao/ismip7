@@ -48,11 +48,13 @@ Two notes that cost time if missed:
 |---|---|---|:--:|:--:|:--:|:--:|
 | BedMachine Antarctica v4.1, MEaSUREs velocity v2 | 8 GB | `scripts/download_data.py` (NASA Earthdata login) | x | x | x | |
 | RACMO2.4p1 SMB climatology | 2 GB | same script | | x | | |
-| ISMIP7 observations MIPkit (Smith dH/dt) | 11 GB | mirror, `ismip7-ais-observations` | for `ISMIP7_DHDT_WEIGHT` | | x (`--from-obs`) | |
+| ISMIP7 observations MIPkit (Smith dH/dt) | 11 GB | `scripts/download_mirror.py --product ismip7-ais-observations` | for `ISMIP7_DHDT_WEIGHT` | | x (`--from-obs`) | |
 | ISMIP7 forcing, per ESM and scenario: SMB anomaly 7.5 GB + ocean `tf` 11 GB + `so` 6.9 GB (ssp585; historical 4.3 GB) | ~25 GB each | `scripts/download_mirror.py` | | x | | |
 | ISMIP7 fracture (collapse mask, lake properties, excess melt) | ~3 GB per scenario | same, `data/<ESM>/<scenario>/fracture/` | | only `ISMIP7_FRACTURE=mask` | | |
+| Ocean OI climatology (TF, so) and the IMBIE basin numbers | 3 GB | `scripts/download_forcing.py --ocean --calibration` (Globus) | | x | | |
 | The whole AIS tree (all ESMs, all scenarios, `ctrl`, OCX, calibration) | 313 GB | same | | | | |
 | Meshes and MAP checkpoints | 15 MB, 80 MB | built here (sections 3 and 4), or copied from a colleague | | x | x | |
+| Per-basin melt calibration `results/calibrated_K_per_basin_<lc>.npz` | 2 KB | `scripts/calibrate_melt.py` (section 5), or copied from a colleague | | x | | |
 
 The forcing is a **mirror-first** download now: Source Cooperative carries the
 data-freeze copy and needs no account, no Globus endpoint and no client.
@@ -62,6 +64,9 @@ data-freeze copy and needs no account, no Globus endpoint and no client.
 python antarctica/scripts/download_mirror.py \
     data/CESM2-WACCM/ssp585/SDBN1-8000m/acabf-anomaly/ \
     data/CESM2-WACCM/ssp585/ocean/tf/ data/CESM2-WACCM/ssp585/ocean/so/
+# the observations MIPkit, from the other product
+python antarctica/scripts/download_mirror.py \
+    --product ismip7-ais-observations data/
 # what a tree holds, and whether yours is current
 python antarctica/scripts/audit_forcing_versions.py --scenario ssp585
 ```
@@ -72,8 +77,15 @@ the archive of record. Use it when you need something the mirror has not synced.
 ### 0.3 The short paths
 
 - **Just run a forward from someone else's MAP:** Firedrake + icepack2 + icepack,
-  BedMachine and MEaSUReS, one scenario of forcing, their `.msh` and
-  `inversion_*.h5`. No `icepack_tools`, no `tlm_adjoint`, no checker.
+  BedMachine and MEaSUReS, RACMO, one scenario of forcing, their `.msh` and
+  `inversion_*.h5`, plus the ocean set every driver opens on a cold start: the
+  OI climatology, the IMBIE basin numbers, and
+  `results/calibrated_K_per_basin_<lc>.npz`. The npz comes from
+  `calibrate_melt.py` or from a colleague; the 2500 m one is mesh-independent
+  and is used as the fallback for any `lc`. `control/run.py` and
+  `projections/ocx.py` abort without it, and the ssp drivers warn and
+  substitute a scalar `K`, which completes and gives the wrong melt. No
+  `icepack_tools`, no `tlm_adjoint`, no checker.
 - **Reproduce an inversion:** add `tlm_adjoint` and (for the dH/dt term) the
   observations MIPkit.
 - **Work on mesh adaptation:** add `icepack_tools`; the observation-driven size

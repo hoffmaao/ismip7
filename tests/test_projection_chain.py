@@ -125,6 +125,7 @@ def run_job(sandbox, **env):
         "SLURM_NTASKS": "12",
         "SLURM_JOB_NUM_NODES": "1",
         "SLURM_JOB_PARTITION": "commons",
+        "SLURM_JOB_NAME": "ismip7_fwd",
         "SLURM_SUBMIT_DIR": str(sandbox),
         # sites/local.sh takes every setting from this environment, so the
         # runner logic is exercised without a scheduler or a site file.
@@ -164,16 +165,18 @@ def test_the_successor_is_given_this_job_s_allocation(sandbox):
     allocation. Without it the link lands on the cluster's defaults: wrong
     partition, wrong wall limit, and a default of one task, which the runner
     refuses outright - a 285-year projection would stop after its first link.
-    --hint=nomultithread is not readable back from scontrol, so it has to be
-    restated: without it Slurm packs the ranks onto hyperthreads and halves
-    per-rank memory bandwidth for the rest of the chain."""
+    --hint=nomultithread and -J are not readable back from scontrol, so they
+    have to be restated. Without the first, Slurm packs the ranks onto
+    hyperthreads and halves per-rank memory bandwidth for the rest of the
+    chain. Without the second, sbatch falls back to the script filename and
+    two concurrent chains become indistinguishable in squeue."""
     rc, log, calls = run_job(sandbox, FAKE_T_YR="2050", FAKE_START_YEAR="2000")
     assert rc == 0, log
     argv = [line for line in calls.splitlines() if line.startswith("ARGV:")]
     assert len(argv) == 1, calls
     for flag in ("-p commons", "-C cascadelake", "--time=1-00:00:00",
                  "--mem=240G", "-N 1", "-n 12", "--cpus-per-task=1",
-                 "--hint=nomultithread"):
+                 "--hint=nomultithread", "-J ismip7_fwd"):
         assert flag in argv[0], f"successor lost {flag}: {argv[0]}"
 
 

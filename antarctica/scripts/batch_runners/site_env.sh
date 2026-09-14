@@ -73,8 +73,10 @@ ismip7_site_require() {
 # (submit.sh composes them from the site file), so a successor submitted from
 # inside a job would otherwise land on the cluster's defaults: wrong partition,
 # wrong wall limit, and often one task, which the runners refuse outright.
-# --hint=nomultithread is not readable back from scontrol and is not in the
-# job environment, so it is restated here; submit.sh always passes it.
+# --hint=nomultithread and the job name are not readable back from scontrol.
+# sbatch takes its name default from SBATCH_JOB_NAME, which --export=ALL does
+# not carry, so a successor would show up in squeue as the script filename.
+# Both are restated here; submit.sh passes them for the first link.
 # Both chains call this, so the rule lives here once.
 ismip7_chain_resources() {
     local info feat tlim memn
@@ -86,6 +88,7 @@ ismip7_chain_resources() {
     ISMIP7_CHAIN_RES=(-N "${SLURM_JOB_NUM_NODES:-1}" -n "${SLURM_NTASKS:-1}"
                       --cpus-per-task="${SLURM_CPUS_PER_TASK:-1}"
                       --hint=nomultithread)
+    [ -n "${SLURM_JOB_NAME:-}" ] && ISMIP7_CHAIN_RES+=(-J "$SLURM_JOB_NAME")
     [ -n "${SLURM_JOB_PARTITION:-}" ] && ISMIP7_CHAIN_RES+=(-p "$SLURM_JOB_PARTITION")
     [ -n "$feat" ] && ISMIP7_CHAIN_RES+=(-C "$feat")
     [ -n "$tlim" ] && ISMIP7_CHAIN_RES+=(--time="$tlim")
@@ -120,8 +123,10 @@ ismip7_activate() {
     export OMP_NUM_THREADS=1          # one thread per rank; the solver is MPI-parallel
     # Each rank compiles UFL kernels; a shared cache on a networked filesystem
     # corrupts under concurrent writes (seen locally: "undefined symbol:
-    # wrap_form0_cell_integral"). Give every job its own.
-    export PYOP2_CACHE_DIR="${PYOP2_CACHE_DIR:-${SCRATCH:-$HOME}/.pyop2_cache/${SLURM_JOB_ID:-manual}}"
+    # wrap_form0_cell_integral"). Every job gets its own, keyed on the job id,
+    # so a chain link killed mid compile cannot hand its successor a truncated
+    # object through --export=ALL.
+    export PYOP2_CACHE_DIR="${SCRATCH:-$HOME}/.pyop2_cache/${SLURM_JOB_ID:-manual}"
     mkdir -p "$PYOP2_CACHE_DIR"
 }
 
@@ -133,6 +138,7 @@ ISMIP7_TASKS="${ISMIP7_TASKS:-16}"
 ISMIP7_MEM="${ISMIP7_MEM:-120G}"
 ISMIP7_TIME_INV="${ISMIP7_TIME_INV:-2-00:00:00}"
 ISMIP7_TIME_FWD="${ISMIP7_TIME_FWD:-1-00:00:00}"
+ISMIP7_ACCOUNT="${ISMIP7_ACCOUNT:-}"
 
 # A site that needs one number sets ISMIP7_TASKS/ISMIP7_MEM and both kinds take
 # it. A site with measured per-kind values sets the pair. At Rice the forward

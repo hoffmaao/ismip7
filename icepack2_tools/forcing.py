@@ -44,6 +44,24 @@ def _comm_rank():
     return MPI.COMM_WORLD.rank
 
 
+def forcing_year(t_yr):
+    r"""The calendar year a step belongs to, from the time it ENDS at.
+
+    ``run_simulation`` hands the forcing callback the END of the step, and
+    ``t = Y.0`` is 1 January of year Y, so the step from 2300.9 to 2301.0 lies
+    in 2300 and the step from 2015.0 to 2015.1 lies in 2015. Rounding instead
+    asks for the wrong year on every step past the half-year mark: a run that
+    covers 2015-2300 would end by requesting 2301, two past CESM2-WACCM's
+    2299, which the one-year end-of-series bridge cannot cover, so the run
+    dies on its last step instead of banking 2300.
+
+    This is also the year ``AnnualOutput`` is accumulating, so the forcing a
+    step receives and the year its fluxes are booked into are the same.
+    """
+    import math
+    return int(math.ceil(float(t_yr) - 1e-9)) - 1
+
+
 def smb_kgm2s_to_myr(smb_kgm2s):
     r"""Convert SMB from kg/m^2/s to m/yr ice equivalent."""
     return smb_kgm2s * _SEC_PER_YEAR / _RHO_ICE * (_RHO_WATER / _RHO_ICE)
@@ -541,7 +559,7 @@ class ISMIP7Atmosphere:
         ``_annual_mean_over_time`` (see that docstring for the weighting)."""
         import xarray as xr
 
-        yr = int(round(year))
+        yr = forcing_year(year)
         da = self._load_year(variable, yr)
         if da is None:
             return np.zeros(len(mesh_x))
@@ -633,7 +651,7 @@ class ISMIP7Ocean:
         import xarray as xr
         from scipy.interpolate import RegularGridInterpolator
 
-        yr = int(round(year))
+        yr = forcing_year(year)
         key = (variable, yr)
         if key in self._interp_cache:
             return self._interp_cache[key]
@@ -802,7 +820,7 @@ class ISMIP7Fracture:
         da = ds[var]
 
         if "time" in da.dims:
-            da = da.sel(time=year, method="nearest")
+            da = da.sel(time=forcing_year(year), method="nearest")
 
         mx = xr.DataArray(np.asarray(mesh_x), dims="node")
         my = xr.DataArray(np.asarray(mesh_y), dims="node")

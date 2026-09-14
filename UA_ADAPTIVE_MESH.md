@@ -239,7 +239,9 @@ The gate is now HAF > 0 itself (`dual_friction.budd_nhat`), which for grounded
 ice is the same statement as N > 0 (`N = rho_I g HAF` when `s = b + H`) and on
 the shelf is a real negative number. An intermediate form gated on `He` alone
 left 133 of the 3791 floating cells of the 32 km MAP receiving `He * nhat_cap`,
-since `He` is smooth in height above flotation. Census script:
+since `He` is smooth in height above flotation. Under the fixed law the two
+identity checkpoints give outflux 1478 against 1475 Gt/yr and VAF 57638.204
+against 57638.212 mm SLE. Census script:
 `antarctica/scripts/check_budd_map.py MAP [--forward]` (old gate 418 cells at
 the cap, He-only 133, production 0). The old MAP's saved velocity is not
 reproduced by the fixed law, rel L2 = 0.91, so Budd MAPs must be re-inverted.

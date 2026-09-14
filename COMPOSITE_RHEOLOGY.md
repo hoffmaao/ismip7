@@ -147,7 +147,7 @@ viscous term is multiplied by `h`, so it vanishes at the calving front;
 the linear regularization is the only thing pinning `M` there.
 
 The linear friction term uses the same `K_lin` everywhere (no thickness
-dependence — `ψ_fric` doesn't carry an `h` factor in either form).
+dependence; `ψ_fric` doesn't carry an `h` factor in either form).
 
 ## Defaults
 

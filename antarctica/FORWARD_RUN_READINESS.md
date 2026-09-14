@@ -148,30 +148,67 @@ What a submission needs (#5, #16, #17, #18, #19, #20, #22, #23):
 (`inversion_icepack2_{rc,budd}_n3_dg0_logvelnet_ua2000.h5`). Every Budd MAP
 older than 13 September carries the shelf-friction defect and is unusable.
 
+The 13 September Budd MAP is unusable as well, for a narrower reason. It was
+inverted while the shelf gate still multiplied through by the grounded
+indicator `He`, and the shipped gate is height above flotation alone. Measured
+with `check_budd_map.py --forward` on 14 September, a diagnostic re-solve under
+the shipped law reproduces that MAP's own velocity to a relative L2 distance of
+0.678, where a self-consistent MAP reproduces itself to about 1e-9. The census
+on the same MAP puts the old sign gate at 13 647 of 103 233 floating cells
+carrying friction at the cap, the `He` form at 8 781 and the shipped gate at 0,
+with 141 549 of 213 525 cells inside the `He` band. Re-inversion under the
+shipped law runs as NOTS 1390416; the superseded file is kept as
+`inversion_icepack2_budd_n3_dg0_logvelnet_ua2000_hegate.h5`. The RC MAP is
+unaffected, since regularized Coulomb never carried the gate.
+
 **Forward.** The RC control on the Úa mesh runs and holds (1 yr, resid 0). A
 10-year CESM2-WACCM ssp585 on that mesh (NOTS job 1368723) took 10.5 minutes on
 32 Sapphire Rapids ranks, 6 s per 0.1-year step, so a 2015-2300 projection is
 about 5 node-hours and eleven cores about 2.5 node-days.
 
-**Still open:** the melt calibration rerun. Delivered here: the `ssp126`
+**Melt calibration, rerun 14 September.** The re-released calibration product
+combines Paolo (2023), Davison (2023) and Adusumilli (2020), and its integrated
+target is 1067.4 Gt/yr against the 865.0 Gt/yr of the Paolo plus Adusumilli
+table the old calibration used. Both tables went through `calibrate_melt.py` on
+the same Úa mesh, so the comparison isolates the observations:
+
+| observations | integrated target | K* | melt at K* |
+|---|---|---|---|
+| Paolo, Adusumilli | 865.0 Gt/yr | 4.347e-5 | 677.0 Gt/yr |
+| Paolo, Davison, Adusumilli | 1067.4 Gt/yr | 4.700e-5 | 732.0 Gt/yr |
+
+K* rises 8%, and the total-match K rises with the target by 23%, 5.553e-5 to
+6.853e-5. The old table's K* on this mesh sits within 2% of the 2500 m result
+that predates it, so the mesh is not what moved. `calibrate_melt.py` takes the
+newer table by default, `ISMIP7_MELT_OBS_CSV` names either, and the saved npz
+records which one produced it.
+
+**Still open:** nothing from the August list. Delivered here: the `ssp126`
 ctrlclim default (`icepack2_tools/climatology.py`), the collapse mask in the
 thickness update, the 2300 forcing year, the `GEMB-SDBN1` path, the
-forcing-version audit, and the output writer.
+forcing-version audit, the output writer, and the melt calibration above.
 
 ## 5. Actions, in order
 
-1. Run a full-length experiment through the writer, and settle the `[confirm]`
-   items in the submission README draft with the group.
-2. Pull the two `ctrl` trees from the mirror for cores 9 and 10. Re-run
-   `audit_forcing_versions.py` before the production matrix and cite it in the
-   README.
-3. Optional: read the provided `ctrl` trees in place of the `ssp126`
+1. Drive the full-length ssp585 (NOTS 1390452, 2015 to 2301 on the Úa mesh with
+   `ISMIP7_OUTPUT=1`) through the writer and the compliance checker. It is the
+   first run at experiment length, so it is what clears the checker's remaining
+   length checks. Record which K calibration it read: a run picks up whichever
+   `calibrated_K_per_basin_*.npz` is staged when it starts.
+2. Settle the `[confirm]` items in the submission README draft with the group.
+3. Carry the Budd re-inversion to a MAP that passes `check_budd_map.py
+   --forward`, then run that check on every MAP the matrix will use.
+4. Finish the `ctrl` pull for cores 9 and 10. The 8 km atmosphere and the ocean
+   for both ESMs come to 81.6 GB and were fetched on 14 September; the 2 km
+   atmosphere is a further 247 GB and is needed only for a 2 km SMB-height
+   member. Re-run `audit_forcing_versions.py` before the production matrix and
+   cite it in the README.
+5. Re-check `libmassbffl` against the request's -0.008 kg m-2 s-1 bound under
+   the new calibration. The 10-year Úa ssp585 of job 1368723 reached -0.0117 on
+   small grounding-zone cells and the new K is 8% higher, so this needs a
+   decision on whether the bound is about the melt rate or about the cell area
+   it is booked over.
+6. Optional: read the provided `ctrl` trees in place of the `ssp126`
    reference-climate pool.
-4. Rerun the melt calibration notebook with the July toolbox. The Úa-mesh
-   ssp585 of job 1368723 hit `libmassbffl` of -0.0117 kg m-2 s-1 on small
-   grounding-zone cells, past the request's -0.008 bound, which makes this
-   concrete.
-5. Optional: the stress criterion (Lai et al. 2020) alongside the collapse
+7. Optional: the stress criterion (Lai et al. 2020) alongside the collapse
    mask.
-6. One forced projection end to end through the writer and the checker, then
-   the matrix.

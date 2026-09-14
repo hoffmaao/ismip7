@@ -14,7 +14,6 @@ cd "${SLURM_SUBMIT_DIR:-.}"
 . antarctica/scripts/batch_runners/site_env.sh
 ismip7_activate
 ismip7_banner
-export PYOP2_CACHE_DIR="${PYOP2_CACHE_DIR:-$HOME/.pyop2_cache_verify}"
 echo "firedrake: $(python -c 'import firedrake,sys; print(firedrake.__version__)' 2>/dev/null | tail -1)"
 cat > "$PYOP2_CACHE_DIR/_part.py" <<'PYEOF'
 from firedrake import *

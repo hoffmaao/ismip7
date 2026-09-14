@@ -185,7 +185,7 @@ forward run.
   this is *not* a clean drift test. See
   `antarctica/results/ctrl2015_cesm2_waccm_2500_timeseries.csv` (2026-05-15).
 
-- **Inversion with composite + `h_clamp = 0`:** done - the `_budd` / `_rc`
+- **Inversion with composite and `h_clamp = 0`:** done. The `_budd` and `_rc`
   MAP checkpoints are inverted against the true BedMachine geometry (h=0
   over the buffered ocean region), and the forward runs that load them
   start with `h_clamp_init = 0` (no initial-thickness clamp).

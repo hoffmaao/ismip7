@@ -883,6 +883,16 @@ def main():
             f"{sparams['snes_stol']:g}"
         )
     state_solver_parameters = json.dumps(sparams, sort_keys=True)
+    # The adjoint solves are LINEAR (one Newton step to rtol) and inherit the
+    # forward's parameters by default. An absolute tolerance sized for the
+    # forward residual lets them exit at iteration 0 whenever ||dJ/du|| is
+    # small -- it is ~1e-3 here -- returning a zero adjoint, so the gradient
+    # is the prior's alone and L-BFGS pulls the controls toward the prior
+    # means while the misfit rises (job 10432790, 2026-09-14: adjoint time
+    # 25 s -> 0.7 s, |grad| 47 -> 12, misfit +7% in four evaluations).
+    adjoint_sparams = {
+        key: value for key, value in sparams.items() if key != "snes_atol"
+    }
 
     u_init = z.subfunctions[0]
     u_mag = Function(Q).interpolate(sqrt(inner(u_init, u_init)))
@@ -1104,6 +1114,7 @@ def main():
                 F_ctrl == 0,
                 z,
                 solver_parameters=sparams,
+                adjoint_solver_parameters=adjoint_sparams,
                 form_compiler_parameters=fc_params,
             ).solve()
         else:
@@ -1116,6 +1127,7 @@ def main():
                     F_ctrl == 0,
                     z,
                     solver_parameters=sparams,
+                    adjoint_solver_parameters=adjoint_sparams,
                     form_compiler_parameters=fc_params,
                 ).solve()
 

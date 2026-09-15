@@ -285,13 +285,13 @@ forcing-version audit, the output writer, and the melt calibration above.
 
    Both mechanisms for the bound violation are visible at the reference state.
    Uncapped, 97 forward cells melt past the bound over 388.2 km2, so the
-   parameterisation itself exceeds it there. Their median area is 3.61 km2 against 64 km2 for an 8 km pixel, so
-   the gridded value comes from a small hot cell filling its pixel under the
-   request's `no_floating_ice` fill policy. The full-length run still has to
-   settle two further contributions: the evolved geometry with its warmer
-   projected thermal forcing, and the bookkeeping, since `book_advance` books
-   the melt REQUESTED of a step while a nearly ice-free floating cell can only
-   lose what it holds.
+   parameterisation itself exceeds it there. Their median area is 3.61 km2
+   against 64 km2 for an 8 km pixel, so the gridded value comes from a small
+   hot cell filling its pixel under the request's `no_floating_ice` fill
+   policy. The full-length run still has to settle two further contributions:
+   the evolved geometry with its warmer projected thermal forcing, and the
+   bookkeeping, since `book_advance` books the melt REQUESTED of a step while a
+   nearly ice-free floating cell can only lose what it holds.
 
    Closing the gap between calibration and forward is the next step. The clean
    route is to recalibrate K through the forward's own melt path, cell by cell

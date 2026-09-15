@@ -194,16 +194,24 @@ builds against the one the MAP saved, on the RC MAP under regularized Coulomb:
 | log_fluidity | 3.19e-17 |
 
 So the forward rebuilds the inversion's geometry exactly and loads its controls
-to machine precision, and the disagreement is in the solve rather than in what
-is solved. What remains to separate: whether the two assemble the same residual,
-and whether the forward's solve is converged. The forward's own banner lists
-terms the inversion's does not, `ocean_drag=1e-02@h<10m` and `u_lim=2e+04`,
-though both should be inert at these speeds and thicknesses, and it sets
-`snes_atol` to 100 times whatever the continuation achieved, which is a loose
-target if the last continuation step stopped early. The next probe is to
-tighten the forward's tolerance and see whether the solution moves toward the
-saved velocity, which separates a solver tolerance from a difference in the
-form.
+to machine precision.
+
+The solver tolerance is ruled out too. NOTS 1435598 re-solved the same system
+from the state `setup_model` leaves, keeping the model's own line search and
+asking for four orders below the residual the continuation reached. Newton went
+from 70.2 to 8.6e-5 in two steps and converged, and the velocity moved by a
+relative L2 of 7.4e-9. The distance to the saved velocity did not change at all,
+0.6854 before and after, and the mean speed stayed at 68.4 m/yr against the
+MAP's 137.1. A first attempt that swapped the line search for `bt` diverged and
+says nothing, so it is superseded by this one.
+
+Identical geometry, identical controls, and both states converged, yet they
+differ by a factor of two in mean speed. The two therefore assemble DIFFERENT
+residuals, and the next step is a term-by-term comparison of
+`inversion_icepack2.py`'s action against `simulation.build_F`. The forward's own
+banner already lists terms the inversion's does not, `ocean_drag=1e-02@h<10m`
+and `u_lim=2e+04`, and both are expected to be inert at these speeds and
+thicknesses, which makes them worth checking first rather than assuming.
 
 Until this is understood, a forward run does not start from the inverted state,
 so the 10-year result of job 1368723 should be read as a pipeline exercise

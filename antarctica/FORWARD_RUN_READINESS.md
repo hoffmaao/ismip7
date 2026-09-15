@@ -206,8 +206,9 @@ saved velocity, which separates a solver tolerance from a difference in the
 form.
 
 Until this is understood, a forward run does not start from the inverted state,
-so the full-length ssp585 (NOTS 1390452) is held and the 10-year result of job
-1368723 should be read as a pipeline exercise rather than a science result.
+so the 10-year result of job 1368723 should be read as a pipeline exercise
+rather than a science result. This question is one of the two that hold the
+full-length ssp585 (NOTS 1390452), and action 1 of section 5 names both.
 
 **Forward.** The RC control on the Úa mesh runs and holds (1 yr, resid 0). A
 10-year CESM2-WACCM ssp585 on that mesh (NOTS job 1368723) took 10.5 minutes on
@@ -254,11 +255,19 @@ forcing-version audit, the output writer, and the melt calibration above.
    first run at experiment length, so it is what clears the checker's remaining
    length checks. Record which K calibration it read: a run picks up whichever
    `calibrated_K_per_basin_*.npz` is staged when it starts. The job is held in
-   the queue while the slope decision of action 5 is open, and
-   `scontrol release 1390452` starts it.
+   the queue until two questions are settled. The first is the MAP
+   self-consistency question of section 4, taken up in action 3, since until a
+   MAP reproduces its own velocity the run does not start from the inverted
+   state. The second is the slope convention shared by calibration and forward,
+   taken up in action 5, since it decides which K the run should read. Once
+   both are settled, `scontrol release 1390452` starts it.
 2. Settle the `[confirm]` items in the submission README draft with the group.
-3. Carry the Budd re-inversion to a MAP that passes `check_budd_map.py
-   --forward`, then run that check on every MAP the matrix will use.
+3. Find why neither the RC nor the Budd MAP on the Úa mesh reproduces its own
+   velocity (section 4). Start with the tolerance probe: tighten the forward's
+   `snes_atol` and see whether the solution moves toward the saved velocity. If
+   the solution stays put, compare the residual the forward assembles with the
+   inversion's at the same state. Once a MAP passes `check_budd_map.py
+   --forward`, run that check on every MAP the matrix will use.
 4. Re-run `audit_forcing_versions.py` immediately before the production matrix
    and cite it in the README. The `ctrl` pull for cores 9 and 10 is done, and
    the mirror is re-synced with Globus by hand every week or two, so the freeze

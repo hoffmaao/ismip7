@@ -16,22 +16,28 @@ times, as two pairs, and for each row reports the maximum, the 99th percentile,
 the area mean, the integrated total against the ``obs_total_gtyr`` the K was
 fitted to, and how much floating AREA sits past the bound.
 
-The calibration pair reproduces calibrate_melt: a CG1 geometry interpolated
-from BedMachine with its raster ``surface``, and grad(draft) projected onto
-CG1.
+The calibration pair reproduces calibrate_melt on CG1 nodes: BedMachine
+interpolated with its raster ``surface`` and ``mask``, and grad(draft)
+projected onto CG1.
 
-* capped: sin_alpha capped on CG1 at ISMIP7_SIN_ALPHA_CAP (calibrate_melt's
-  default 5e-3), the slope K was fitted against;
+* capped: sin_alpha capped at ISMIP7_SIN_ALPHA_CAP (calibrate_melt's default
+  5e-3), the slope K was fitted against;
 * uncapped: the same slope with no cap.
 
-The forward pair reproduces the forward: ``forcing.compute_sin_alpha`` on a
-DG0 geometry whose surface comes from flotation, s = max(b + H,
-(1 - 917/1024) H), as simulation.py builds it, lifted to the CG1 melt nodes
-with ``cg1_lift``.
+The forward pair reproduces the forward on DG0 cells, the field the forward
+melts with under DG0 geometry: bed and thickness sampled onto the cells, the
+surface from flotation, s = max(b + H, (1 - 917/1024) H), as simulation.py
+builds it, ``forcing.compute_sin_alpha``'s cell slope, thermal forcing and
+salinity at each cell centroid and its own draft, and the forward callback's
+``haf <= 0`` floating test.
 
 * uncapped: as the forward runs today;
-* capped: the DG0 slope capped at the same value before the lift, which is
-  where a cap inside ``forcing.compute_sin_alpha`` would act.
+* capped: the cell slope capped at the same value, which is where a cap inside
+  ``forcing.compute_sin_alpha`` would act.
+
+The two pairs use different floating masks and different quadrature, nodal
+area weights against cell areas, so their totals compare in magnitude and
+differ in detail.
 
 The bound is ``min_value_ais`` for ``libmassbffl`` in the same bundled request
 table the writer reads, converted with the writer's year and ice density, so it
@@ -51,15 +57,13 @@ floating ice:
 * calibration, capped at 5e-3: area mean 0.77 m/yr, 1067 Gt/yr, which is the
   1067.4 Gt/yr target K was fitted to, and no nodes past the bound;
 * calibration, uncapped: area mean 4.18 m/yr, 5803 Gt/yr, and 421 nodes past
-  the bound;
-* forward, uncapped: area mean 3.09 m/yr, 4293 Gt/yr, and 298 nodes past the
-  bound;
-* forward, capped: area mean 0.74 m/yr, 1028 Gt/yr, and no nodes past the
-  bound.
+  the bound.
 
-The forward rows were measured before the forward pair took its surface from
-flotation and capped ahead of the lift, and they await a re-run on the Ua mesh.
-Both changes shift them slightly. The calibration rows are unaffected.
+The forward rows of that run are superseded. They came from an earlier form
+of this script that took the raster surface, lifted the cell slope onto CG1
+nodes and melted on the calibration's nodes and mask, where it measured
+4293 Gt/yr and 298 nodes past the bound uncapped, and 1028 Gt/yr capped. The
+cell by cell forward pair awaits its first run on the Ua mesh.
 """
 import argparse
 import os
@@ -78,8 +82,9 @@ from firedrake.petsc import PETSc                                     # noqa: E4
 
 import calibrate_melt as cm                                           # noqa: E402
 from icepack2_tools.forcing import (quadratic_mixed_slope,            # noqa: E402
-                                    compute_sin_alpha)
-from icepack2_tools.geometry import cg1_lift, sample_to_geometry      # noqa: E402
+                                    compute_sin_alpha,
+                                    _RHO_ICE, _RHO_WATER)
+from icepack2_tools.geometry import sample_to_geometry                # noqa: E402
 from icepack2_tools.runconfig import raster_sample                    # noqa: E402
 # The same year and density the writer converts with, so the bound compared
 # here is the one the checker applies.
@@ -120,29 +125,47 @@ def main():
 
     mesh = cm._load_mesh()
     Q = FunctionSpace(mesh, "CG", 1)
+    Q_g = FunctionSpace(mesh, "DG", 0)
     PETSc.Sys.Print(f"  Mesh: {mesh.num_vertices()} vertices, "
                     f"{mesh.num_cells()} cells")
 
+    def k_at(xs, ys):
+        r"""The per-basin K the forward stamps onto the mesh. K_field in the
+        npz was built on the calibration mesh; rebuild it here from K_basin
+        so this runs against any mesh."""
+        basin = np.round(
+            cm._grid_interp(cm.IMBIE2_NC, "basinNumber", xs, ys)).astype(int)
+        K = np.zeros(len(xs))
+        for bid, kb in zip(d["basin_ids"], d["K_basin"]):
+            if np.isfinite(kb):
+                K[basin == int(bid)] = kb
+        return K
+
+    def half(xs, ys, draft, sin_a, floating, area):
+        r"""One half's melt inputs, all aligned with its own dofs."""
+        return {"x": xs, "y": ys, "draft": draft, "sin_a": sin_a,
+                "floating": floating, "area": area,
+                "tf": cm._grid_interp(cm.CLIM_TF, "tf", xs, ys, draft=draft),
+                "sal": cm._grid_interp(cm.CLIM_SO, "so", xs, ys, draft=draft),
+                "K": k_at(xs, ys)}
+
+    # The calibration half, as calibrate_melt builds it: BedMachine
+    # interpolated onto CG1 nodes with its raster surface and mask, and
+    # grad(draft) projected onto CG1.
     bed, thk, sur, msk = cm._interp_bedmachine(mesh, Q)
-    h_np = thk.dat.data_ro
-    s_np = sur.dat.data_ro
-    mask_np = msk.dat.data_ro
     x = mesh.coordinates.dat.data_ro[:, 0]
     y = mesh.coordinates.dat.data_ro[:, 1]
+    calibration = half(
+        x, y, np.minimum(sur.dat.data_ro - thk.dat.data_ro, 0.0),
+        cm._compute_sin_alpha(mesh, thk, sur),
+        np.round(msk.dat.data_ro).astype(int) == 3,
+        assemble(fd.TestFunction(Q) * dx).dat.data_ro)
 
-    draft = np.minimum(s_np - h_np, 0.0)
-    tf = cm._grid_interp(cm.CLIM_TF, "tf", x, y, draft=draft)
-    sal = cm._grid_interp(cm.CLIM_SO, "so", x, y, draft=draft)
-    sin_uncapped = cm._compute_sin_alpha(mesh, thk, sur)
-    floating = (np.round(mask_np).astype(int) == 3)
-
-    # The forward's own slope operator. calibrate_melt interpolates a CG1
-    # geometry and projects grad(draft); forcing.compute_sin_alpha samples a
-    # DG0 bed and thickness, takes the surface from flotation as simulation.py
-    # does, and differentiates a cg1_lift of the draft. Lift the result back to
-    # the CG1 nodes the melt inputs live on so every row compares like for
-    # like; cg1_lift is a convex combination, so it cannot overshoot.
-    Q_g = FunctionSpace(mesh, "DG", 0)
+    # The forward half, as the forward melts cell by cell under DG0 geometry:
+    # bed and thickness sampled onto the cells, the surface from flotation as
+    # simulation.py builds it, forcing.compute_sin_alpha's DG0 slope, forcing
+    # at each cell centroid and its own draft, and the callback's haf <= 0
+    # floating test.
     bm = cm._bedmachine_path()
     b_dg = sample_to_geometry(rasterio.open(f"netcdf:{bm}:bed"), Q_g, Q,
                               method=raster_sample())
@@ -150,51 +173,45 @@ def main():
                               method=raster_sample())
     s_dg = fd.Function(Q_g).interpolate(
         fd.max_value(b_dg + h_dg, (1.0 - RHO_RATIO) * h_dg))
-    sin_fwd_dg = fd.Function(Q_g)
-    sin_fwd_dg.dat.data[:] = compute_sin_alpha(
-        {"Q": Q, "V": VectorFunctionSpace(mesh, "CG", 1), "Q_g": Q_g,
-         "h": h_dg, "s": s_dg})
-    sin_fwd = cg1_lift(sin_fwd_dg).dat.data_ro.copy()
-    # A cap inside forcing.compute_sin_alpha acts on the DG0 slope, so cap
-    # here before the lift. Capping after a smoothing lift caps a different
-    # field: every node beside a cell below the cap would keep more slope.
-    sin_fwd_capped_dg = fd.Function(Q_g)
-    sin_fwd_capped_dg.dat.data[:] = np.minimum(sin_fwd_dg.dat.data_ro,
-                                               cm.SIN_ALPHA_CAP)
-    sin_fwd_capped = cg1_lift(sin_fwd_capped_dg).dat.data_ro.copy()
+    xy_dg = fd.Function(VectorFunctionSpace(mesh, "DG", 0)).interpolate(
+        fd.SpatialCoordinate(mesh)).dat.data_ro
+    b_np, h_np, s_np = b_dg.dat.data_ro, h_dg.dat.data_ro, s_dg.dat.data_ro
+    haf = s_np - (b_np + (_RHO_WATER / _RHO_ICE) * np.maximum(-b_np, 0.0))
+    forward = half(
+        xy_dg[:, 0], xy_dg[:, 1], np.minimum(s_np - h_np, 0.0),
+        compute_sin_alpha({"Q": Q, "V": VectorFunctionSpace(mesh, "CG", 1),
+                           "Q_g": Q_g, "h": h_dg, "s": s_dg}),
+        haf <= 0,
+        assemble(fd.TestFunction(Q_g) * dx).dat.data_ro)
 
-    # The per-basin K field the forward stamps onto the mesh. K_field in the
-    # npz was built on the calibration mesh; rebuild it here from K_basin so
-    # this runs against any mesh.
-    basin = np.round(cm._grid_interp(cm.IMBIE2_NC, "basinNumber", x, y)).astype(int)
-    K = np.zeros_like(tf)
-    for bid, kb in zip(d["basin_ids"], d["K_basin"]):
-        if np.isfinite(kb):
-            K[basin == int(bid)] = kb
-
-    v = fd.TestFunction(Q)
-    area = assemble(v * dx).dat.data_ro                 # nodal area weights, m^2
-    afl = float(area[floating].sum())
-
+    cap = cm.SIN_ALPHA_CAP
     cases = [
-        (f"calibration pair, capped at {cm.SIN_ALPHA_CAP:.0e} on CG1, "
-         f"the slope K was fitted against",
-         np.minimum(sin_uncapped, cm.SIN_ALPHA_CAP)),
-        ("calibration pair, uncapped", sin_uncapped),
-        ("forward pair, uncapped, as the forward runs today", sin_fwd),
-        (f"forward pair, capped at {cm.SIN_ALPHA_CAP:.0e} on DG0 before the "
-         f"lift", sin_fwd_capped),
+        (f"calibration half, capped at {cap:.0e} on CG1 nodes, the slope K "
+         f"was fitted against", calibration,
+         np.minimum(calibration["sin_a"], cap), "nodes"),
+        ("calibration half, uncapped", calibration, calibration["sin_a"],
+         "nodes"),
+        ("forward half, uncapped, as the forward runs today", forward,
+         forward["sin_a"], "cells"),
+        # A cap inside forcing.compute_sin_alpha would act on this DG0 slope,
+        # so the capped forward row caps it here.
+        (f"forward half, capped at {cap:.0e} on DG0 cells", forward,
+         np.minimum(forward["sin_a"], cap), "cells"),
     ]
 
     obs_total = float(d["obs_total_gtyr"]) if "obs_total_gtyr" in d else float("nan")
-    PETSc.Sys.Print(f"\n  floating area {afl / 1e6:.1f} km^2, "
-                    f"{int(floating.sum())} nodes")
-    for label, sin_a in cases:
-        melt = np.where(floating, quadratic_mixed_slope(tf, sal, sin_a, K=K), 0.0)
+    for label, g, sin_a, dofs in cases:
+        floating, area = g["floating"], g["area"]
+        afl = float(area[floating].sum())
+        melt = np.where(floating,
+                        quadratic_mixed_slope(g["tf"], g["sal"], sin_a, K=g["K"]),
+                        0.0)
         over = floating & (melt > bound_m_yr)
         a_over = float(area[over].sum())
         PETSc.Sys.Print(
             f"\n  --- sin_alpha {label} ---\n"
+            f"  floating                {afl / 1e6:12.1f} km^2 over "
+            f"{int(floating.sum())} {dofs}\n"
             f"  melt max                {melt.max():12.1f} m/yr\n"
             f"  melt p99 (floating)     {np.quantile(melt[floating], 0.99):12.1f} m/yr\n"
             f"  melt area-mean          "
@@ -202,24 +219,24 @@ def main():
             f"  integrated              "
             f"{float((melt * area)[floating].sum()) * RHO_I / 1e12:12.0f} Gt/yr "
             f"(K was fitted to {obs_total:.0f})\n"
-            f"  nodes past the bound    {int(over.sum()):12d}\n"
+            f"  {dofs} past the bound    {int(over.sum()):12d}\n"
             f"  area past the bound     {a_over / 1e6:12.1f} km^2 "
             f"({100 * a_over / afl:.3f}% of floating)")
 
         if not over.any():
             continue
-        PETSc.Sys.Print("  worst nodes (x km, y km, melt m/yr, TF K, draft m, "
-                        "sin_alpha, area km^2):")
+        PETSc.Sys.Print(f"  worst {dofs} (x km, y km, melt m/yr, TF K, "
+                        f"draft m, sin_alpha, area km^2):")
         for i in np.argsort(-melt)[:10]:
             PETSc.Sys.Print(
-                f"    {x[i] / 1e3:9.1f} {y[i] / 1e3:9.1f} {melt[i]:9.1f} "
-                f"{tf[i]:6.2f} {draft[i]:8.1f} {sin_a[i]:9.2e} "
-                f"{area[i] / 1e6:8.2f}")
-        # A node whose own area is a small fraction of an 8 km pixel cannot
+                f"    {g['x'][i] / 1e3:9.1f} {g['y'][i] / 1e3:9.1f} "
+                f"{melt[i]:9.1f} {g['tf'][i]:6.2f} {g['draft'][i]:8.1f} "
+                f"{sin_a[i]:9.2e} {area[i] / 1e6:8.2f}")
+        # A dof whose own area is a small fraction of an 8 km pixel cannot
         # fill that pixel on its own, so its value reaching the grid means the
         # pixel carried little other floating ice.
         PETSc.Sys.Print(
-            f"  median area of a node past the bound: "
+            f"  median area of the {dofs} past the bound: "
             f"{np.median(area[over]) / 1e6:.2f} km^2, against "
             f"{ISMIP7_DX ** 2 / 1e6:.0f} km^2 for an 8 km pixel")
 

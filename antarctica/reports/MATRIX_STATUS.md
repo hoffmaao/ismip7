@@ -139,5 +139,5 @@ values fed in.
 
 For the pipeline and its knobs see `antarctica/README.md`; for the rheology see
 `COMPOSITE_RHEOLOGY.md` and `antarctica/N3_FRAMEWORK.md`. (The deeper
-solver/data history lives in the local, untracked `CLAUDE.md` working notes -
-gitignored, so it is not part of this repo.)
+solver/data history lives in a local, untracked working-notes file, excluded
+from the repository, so it is not part of this record.)

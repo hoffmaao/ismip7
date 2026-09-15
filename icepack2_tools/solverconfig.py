@@ -309,6 +309,16 @@ def nonlinear_solver_options():
     return _nonlinear_options()
 
 
+def final_solve_bounds():
+    r"""``snes_stol``/``snes_max_it`` for a solve that may start at a converged
+    state: the step-size exit must be live (a floor-level residual cannot pass
+    the relative test) and the iteration count bounded."""
+    return {
+        "snes_stol": float(_env("ISMIP7_FINAL_SNES_STOL", FINAL_SNES_STOL_DEFAULT)),
+        "snes_max_it": int(_env("ISMIP7_FINAL_SNES_MAXIT", FINAL_SNES_MAXIT_DEFAULT)),
+    }
+
+
 def final_solve_parameters(base, fnorm_ref, *, viewer=None):
     r"""Options for the solve that publishes an already-converged mixed state.
 
@@ -324,9 +334,8 @@ def final_solve_parameters(base, fnorm_ref, *, viewer=None):
     what gets published and must never be silent.  ``base`` is not modified.
     """
     params = dict(base)
+    params.update(final_solve_bounds())
     params.update({
-        "snes_stol": float(_env("ISMIP7_FINAL_SNES_STOL", FINAL_SNES_STOL_DEFAULT)),
-        "snes_max_it": int(_env("ISMIP7_FINAL_SNES_MAXIT", FINAL_SNES_MAXIT_DEFAULT)),
         "ksp_max_it": int(_env("ISMIP7_FINAL_KSP_MAXIT", FINAL_KSP_MAXIT_DEFAULT)),
         # An LU with perturbed null pivots is not an exact inverse; GMRES must
         # error out rather than iterate to PETSc's default 10000.

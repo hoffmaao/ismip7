@@ -64,11 +64,13 @@ from icepack2_tools.boundary import load_boundary_ids
 from icepack2_tools.geometry import sample_to_geometry
 from icepack2_tools.naming import map_basename
 from icepack2_tools.runconfig import (
+    residual_stabilizers,
     friction as _friction, geometry_space as _geometry_space,
     lc as _lc, lc_coarse as _lc_coarse, n_flow as _n_flow,
     TARGET_MESH_GEOMETRY_METHOD,
 )
 from icepack2_tools.solverconfig import (
+    final_solve_bounds,
     continuation_steps,
     diagnostic_solver_label,
     diagnostic_solver_mode,
@@ -243,6 +245,9 @@ def setup_model(restart_from=None, *, allow_timing_cache_a_ref=False):
             "a4_factor",
             "geometry_source",
             "geometry_source_method",
+            # Residual of the saved mixed state under its writer's F; the
+            # restart fast path trusts the state only within a factor of it.
+            "full_state_residual",
         ):
             if _chk.has_attr("/", _key):
                 checkpoint_metadata[_key] = _chk.get_attr("/", _key)
@@ -708,22 +713,24 @@ def setup_model(restart_from=None, *, allow_timing_cache_a_ref=False):
         # ice-free buffer cells otherwise settle each diagnostic solve at a
         # velocity-runaway equilibrium (the Jul 2026 blow-up: ~2x/step outflux
         # growth, dt-independent, alpha_gl-immune). Linear drag ramping to
-        # zero at h_ocean; ON by default in the forward. The inversion
-        # operator (which never passes it) is unchanged, so existing MAPs
-        # stay consistent. The gia soft speed limiter (u_lim/k_lim) is OFF by
-        # default: its max() kink at u_lim breaks the nleqerr continuation
-        # (isolated Jul 18 2026); gia only tolerates it under newtontr with
-        # dt-retry. Enable via ISMIP7_U_LIM if a mid-run runaway ever needs a
-        # backstop.
-        ocean_drag = float(os.environ.get("ISMIP7_OCEAN_DRAG", "1e-2"))
-        h_ocean = float(os.environ.get("ISMIP7_H_OCEAN", "10.0"))
+        # zero at h_ocean; ON by default. The knobs are owned by
+        # runconfig.residual_stabilizers and the inversion passes the SAME
+        # ones, so an inverted mixed state is a solution of this F too --
+        # until 2026-09-14 it was not (||F|| 1e1 there vs 1e10 here), and
+        # the restart fast path below trusted it anyway. The gia soft speed
+        # limiter (u_lim/k_lim) is OFF by default: its max() kink at u_lim
+        # breaks the nleqerr continuation (isolated Jul 18 2026); gia only
+        # tolerates it under newtontr with dt-retry.
+        _stabilizers = residual_stabilizers()
+        ocean_drag = _stabilizers["ocean_drag"]
+        h_ocean = _stabilizers["h_ocean"]
         # Speed limiter: structurally present (threshold u_lim > 0) but INERT
         # by default - k_lim is a live Constant at 0 (term vanishes
         # identically; the cold continuation is unaffected, unlike a built-in
         # limiter, which breaks it). The run loop's rescue ladder raises
         # k_lim to ISMIP7_K_LIM for trust-region rescue solves at wall
         # geometries (runaway front nodes), then zeroes it again.
-        u_lim = float(os.environ.get("ISMIP7_U_LIM", "2e4"))
+        u_lim = _stabilizers["u_lim"]
         k_lim = Constant(0.0)
         k_lim_rescue = float(os.environ.get("ISMIP7_K_LIM", "1e-3"))
         # GL-gated coercivity only for Budd (RC keeps its established form).
@@ -977,26 +984,35 @@ def setup_model(restart_from=None, *, allow_timing_cache_a_ref=False):
     base_steps = continuation_steps()
     z_init = z.copy(deepcopy=True)
 
-    # Restart fast path: a current checkpoint holds the last CONVERGED full
-    # mixed state (u, M, tau) at its saved post-transport geometry. Trust that
-    # cache after checking that its residual at FULL n/m is finite; solving the
-    # unchanged state again is both redundant and pathological at the residual
-    # floor. The 2015.2 qualification cache drove such a solve for 200 Newton
-    # iterations even though it reached ||F||=4e-5, wasting eight minutes and
-    # recording DIVERGED_MAX_IT before five otherwise-clean steps.
+    # Restart fast path: a checkpoint carrying the full mixed state (u, M,
+    # tau) is trusted WITHOUT a setup solve only when its residual under THIS
+    # F is at the level its writer recorded (full_state_residual, stamped by
+    # the inversion and by save_model_state):
+    #     ||F(z_loaded)|| <= snes_atol_scale x recorded.
+    # Solving an unchanged converged state again is redundant and pathological
+    # at the residual floor (the 2015.2 qualification cache ran 200 Newton
+    # iterations at ||F||=4e-5), which is why the fast path exists. Until
+    # 2026-09-14 it accepted ANY finite residual and scaled the run atol to
+    # it: the forward's own reloaded prepare caches (||F||~1e7-1e8) and
+    # inversion MAPs solved without the ocean_drag term (1.5e10) were
+    # "accepted" with run atol 1e1-1e4, and every strict scout ran away
+    # within four steps. A state above the limit, or without a record, is
+    # re-solved from the loaded guess with the step-size exit live and the
+    # iteration count bounded (final_solve_bounds: a floor-level start exits
+    # at iteration 0-1, a far one is an ordinary Newton solve), and the run
+    # atol then follows the achieved norm exactly as after a cold
+    # continuation. Velocity-only checkpoints take the same re-solve path
+    # because (u, 0, 0) is not a cached mixed solution.
     #
-    # Install a TIGHT run tolerance derived from the loaded-state residual
-    # (1e-6 x ||F(z_loaded)||); geometry changes then use the normal relative
-    # convergence path. Never use the cache-acceptance residual itself as a
-    # loose persistent atol: that can let later steps "converge" at iteration
-    # zero and silently freeze the velocity (the bug that invalidated the first
-    # 1873->2014 resume). Older velocity-only checkpoints still take the direct
-    # solve path because (u, 0, 0) is not a cached mixed solution.
+    # The accepted-state run tolerance stays TIGHT (1e-6 x ||F(z_loaded)||);
+    # never use the acceptance residual itself as a loose persistent atol:
+    # that let later steps "converge" at iteration zero and silently freeze
+    # the velocity (the bug that invalidated the first 1873->2014 resume).
     restart_solved = False
     if is_restart and u_guess is not None:
         n_flow.assign(n_flow_val)
         m_slide.assign(m_slide_val)
-        with assemble(F).dat.vec_ro as _rv:
+        with assemble(F, form_compiler_parameters=fc_params).dat.vec_ro as _rv:
             fnorm0 = _rv.norm()
         if not np.isfinite(fnorm0):
             raise RuntimeError(
@@ -1004,35 +1020,72 @@ def setup_model(restart_from=None, *, allow_timing_cache_a_ref=False):
             )
         restart_atol_scale = snes_restart_failure_atol_scale()
         restart_atol = restart_atol_scale * fnorm0
-        if fnorm0 > 0.0:
-            slvr.snes.setTolerances(atol=restart_atol)
+        recorded = checkpoint_metadata.get("full_state_residual")
+        try:
+            recorded = float(recorded) if recorded is not None else None
+        except (TypeError, ValueError):
+            recorded = None
+        if recorded is not None and not (np.isfinite(recorded) and recorded > 0.0):
+            recorded = None
+        accept_scale = snes_atol_scale()
+        accept_limit = accept_scale * recorded if recorded is not None else None
+        have_mixed = M_guess is not None and tau_guess is not None
 
-        if M_guess is not None and tau_guess is not None:
+        if have_mixed and accept_limit is not None and fnorm0 <= accept_limit:
             restart_solved = True
+            if fnorm0 > 0.0:
+                slvr.snes.setTolerances(atol=restart_atol)
             PETSc.Sys.Print(
                 "Restart full mixed state accepted without a setup solve "
-                f"(||F||={fnorm0:.2e}, run atol={restart_atol:.2e})"
+                f"(||F||={fnorm0:.2e} <= {accept_limit:.2e} = {accept_scale:g} x "
+                f"recorded {recorded:.2e}; run atol={restart_atol:.2e})"
             )
         else:
+            if not have_mixed:
+                why = "velocity-only checkpoint"
+            elif accept_limit is None:
+                why = "checkpoint records no full_state_residual"
+            else:
+                why = (
+                    f"||F||={fnorm0:.2e} exceeds {accept_limit:.2e} = "
+                    f"{accept_scale:g} x recorded {recorded:.2e}"
+                )
+            PETSc.Sys.Print(f"Restart state must be re-solved: {why}")
+            _rtol0, _atol0, _stol0, _max_it0 = slvr.snes.getTolerances()
+            _bounds = final_solve_bounds()
+            slvr.snes.setTolerances(
+                atol=accept_limit if accept_limit is not None else _atol0,
+                stol=_bounds["snes_stol"],
+                max_it=_bounds["snes_max_it"],
+            )
             try:
-                solve_diagnostic("restart-loaded-velocity")
+                solve_diagnostic(
+                    "restart-loaded-state",
+                    loaded_fnorm=f"{fnorm0:.3e}",
+                    recorded=("none" if recorded is None else f"{recorded:.3e}"),
+                )
                 restart_solved = True
                 fnorm_conv = slvr.snes.getFunctionNorm()
-                if fnorm_conv > 0.0:
-                    slvr.snes.setTolerances(
-                        atol=snes_atol_scale() * fnorm_conv
-                    )
+                run_atol = (
+                    snes_atol_scale() * fnorm_conv if fnorm_conv > 0.0 else _atol0
+                )
+                slvr.snes.setTolerances(atol=run_atol, stol=_stol0, max_it=_max_it0)
                 PETSc.Sys.Print(
-                    "Restart velocity-only state re-solved "
-                    f"(||F|| {fnorm0:.2e} -> {fnorm_conv:.2e})"
+                    f"Restart state re-solved (||F|| {fnorm0:.2e} -> "
+                    f"{fnorm_conv:.2e}; run atol={run_atol:.2e})"
                 )
             except fd.ConvergenceError:
                 z.assign(z_init)
                 restart_solved = True
+                slvr.snes.setTolerances(
+                    atol=restart_atol if fnorm0 > 0.0 else _atol0,
+                    stol=_stol0,
+                    max_it=_max_it0,
+                )
                 PETSc.Sys.Print(
-                    "Restart velocity-only solve did not converge; keeping "
-                    "the loaded state and handing the step to the rescue "
-                    f"ladder (atol={restart_atol:.2e})"
+                    "Restart state re-solve did not converge; keeping the "
+                    "loaded state and handing the step to the rescue ladder "
+                    f"(atol={restart_atol:.2e})"
                 )
 
     if not restart_solved:
@@ -1131,6 +1184,10 @@ def setup_model(restart_from=None, *, allow_timing_cache_a_ref=False):
         "s": s,
         "b": b,
         "slvr": slvr,
+        # The momentum residual and its form-compiler parameters, so a state
+        # checkpoint can record ||F|| under the F its readers will assemble.
+        "F": F,
+        "fc_params": fc_params,
         "solve_diagnostic": solve_diagnostic,
         "solver_stats": solver_stats,
         "n_flow": n_flow,
@@ -1183,6 +1240,17 @@ def save_model_state(ctx, final_path, t_now, extra_attrs=None):
     mesh = ctx["mesh"]
     z = ctx["z"]
     h = ctx["h"]
+    # Residual of the state being written, under the same F a restart will
+    # assemble: the restart fast path accepts the mixed state without a solve
+    # only within snes_atol_scale x this value. Measured at full n/m, which
+    # is where every writer calls this (after the cold continuation, or after
+    # a step's converged diagnostic solve).
+    full_state_residual = None
+    if ctx.get("F") is not None:
+        with assemble(
+            ctx["F"], form_compiler_parameters=ctx.get("fc_params")
+        ).dat.vec_ro as _rv:
+            full_state_residual = float(_rv.norm())
     tmp = final_path + ".tmp"
     with fd.CheckpointFile(tmp, "w") as chk:
         chk.save_mesh(mesh)
@@ -1228,6 +1296,8 @@ def save_model_state(ctx, final_path, t_now, extra_attrs=None):
                 chk.set_attr("/", name, int(ctx[name]))
         if ctx.get("buffer_m") is not None:
             chk.set_attr("/", "buffer_m", float(ctx["buffer_m"]))
+        if full_state_residual is not None:
+            chk.set_attr("/", "full_state_residual", full_state_residual)
         for name, value in (extra_attrs or {}).items():
             if value is not None:
                 chk.set_attr("/", name, value)

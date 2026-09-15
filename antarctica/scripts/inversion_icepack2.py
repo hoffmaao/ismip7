@@ -104,7 +104,10 @@ from icepack2_tools.prior import (
 from icepack2_tools.thermo_model import compute_fluidity_prior
 from icepack2_tools.forcing import (load_racmo_smb_climatology,
                                     load_mean_annual_surface_temperature)
-from icepack2_tools.runconfig import TARGET_MESH_GEOMETRY_METHOD
+from icepack2_tools.runconfig import (
+    TARGET_MESH_GEOMETRY_METHOD,
+    residual_stabilizers,
+)
 from icepack2_tools.solverconfig import (
     diagnostic_solver_mode,
     final_solve_parameters,
@@ -771,6 +774,17 @@ def main():
         raise RuntimeError(_probe_err)
     PETSc.Sys.Print(f"  MAP output: {os.path.join(_map_dir, map_fn)}")
 
+    # Floor-cell stabilizers shared with the forward (runconfig): without
+    # them the inverted mixed state solved a DIFFERENT F from the one the
+    # forward assembles at restart -- ||F||=1.3e1 here, 1.5e10 there, on the
+    # same 2500/25000 state (2026-09-14) -- and the forward's fast path then
+    # trusted that state. k_lim stays 0: the term is a rescue-only gain.
+    stabilizers = residual_stabilizers()
+    PETSc.Sys.Print(
+        "  Residual stabilizers (shared with the forward): "
+        + ", ".join(f"{key}={value:g}" for key, value in stabilizers.items())
+    )
+
     def build_F(theta_c, phi_c):
         # Residual closure (tau linear, grounded-only theta via exp(theta*He),
         # exact-zero shelves): budd -> N_hat=1 at the reference geometry;
@@ -783,6 +797,7 @@ def main():
                 fric_law=FRICTION, N_ref=None,
                 nhat_floor=BUDD_DELTA, nhat_cap=BUDD_NHAT_CAP, alpha_gl=ALPHA_GL,
                 c0=C0_RC, c_w0_floor=RC_CW0_FLOOR, h_visc_floor=RC_HVISC_FLOOR,
+                k_lim=0.0, **stabilizers,
                 calving_ids=calving_ids if use_calving_terminus else None,
             )
         return derivative(_build_action(theta_c, phi_c, fields), z)

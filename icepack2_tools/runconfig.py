@@ -46,6 +46,29 @@ TARGET_MESH_GEOMETRY_METHOD = "target-native-bedmachine-cell-average-v1"
 
 GEOMETRY_SPACES = ("dg0", "cg1")
 
+# Floor-cell coercivity drags of the dual-friction residual (dual_friction.py
+# ``ocean_drag`` / ``u_lim``). The forward has applied them since Jul 2026; the
+# inversion never passed them, so a MAP that solved the inversion's F was not
+# a solution of the forward's F in the ice-free buffer cells: the same mixed
+# state measured ||F||=1.3e1 in the inversion and 1.5e10 in the forward
+# (2026-09-14), and every strict scout that trusted it ran away within four
+# steps. Both now read the knobs here. ``u_lim`` is only the threshold of the
+# soft speed limiter; its gain ``k_lim`` stays a live Constant at 0 in the
+# forward (raised for rescue solves only) and is passed as 0 by the inversion.
+OCEAN_DRAG_DEFAULT = "1e-2"   # MPa yr/m, linear drag ramping to zero at H_OCEAN
+H_OCEAN_DEFAULT = "10.0"      # m
+U_LIM_DEFAULT = "2e4"         # m/yr, ~5x the fastest observed Antarctic flow
+
+
+def residual_stabilizers():
+    r"""``ocean_drag``, ``h_ocean`` and ``u_lim`` keyword arguments for
+    ``build_rc_residual``; identical in the inversion and the forward."""
+    return {
+        "ocean_drag": float(os.environ.get("ISMIP7_OCEAN_DRAG", OCEAN_DRAG_DEFAULT)),
+        "h_ocean": float(os.environ.get("ISMIP7_H_OCEAN", H_OCEAN_DEFAULT)),
+        "u_lim": float(os.environ.get("ISMIP7_U_LIM", U_LIM_DEFAULT)),
+    }
+
 
 def lc():
     r"""Target edge length [m] in the refined region of the mesh."""

@@ -622,8 +622,18 @@ The stages and contracts are:
    provenance points at the short invert. The cache manifest keeps two
    solver facts apart: `diagnostic_solver_mode` (`scpc_mumps`, the mode lanes
    must run) and `state_solver` (`full_mumps`, what actually produced the
-   state). `FOLLOW_PREPARE=1` queues each invert behind its active prepare
-   job; a running invert is never resubmitted, even with `FORCE_TIMING=1`.
+   state). The inversion applies the forward's floor-cell stabilizers
+   (`ISMIP7_OCEAN_DRAG`, `ISMIP7_H_OCEAN`, `ISMIP7_U_LIM`, owned by
+   `runconfig.residual_stabilizers`), so its mixed state is a solution of the
+   residual the forward assembles at restart — before 2026‑09‑14 it was not
+   (`||F||` 1e1 in the inversion vs 1e10 in the forward on the same state).
+   Every state checkpoint, prepared cache or inversion MAP, records
+   `full_state_residual`; a restart accepts a mixed state without a solve
+   only when its residual is within `ISMIP7_SNES_ATOL_SCALE ×` that record,
+   and otherwise re-solves from the loaded guess (bounded, step-size exit
+   live) before the first step. `FOLLOW_PREPARE=1` queues each invert behind
+   its active prepare job; a running invert is never resubmitted, even with
+   `FORCE_TIMING=1`.
 4. **Cache audit / AMB probe** — optional diagnostics on a prepared cache:
    ```console
    make timing-cache-audit TIMING_ONLY_MESH=2500/25000 \

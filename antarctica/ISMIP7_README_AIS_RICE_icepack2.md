@@ -59,7 +59,9 @@ shallow-shelf formulation on Firedrake 2026.4.1)
 
 6. Ocean melt: the ISMIP7 quadratic mixed-slope parameterisation of Burgard
    et al. (2022), local-quadratic variant (TF_avg = TF), with the slope
-   `sin(alpha)` from the model's own draft (capped at 5e-3), constants from
+   `sin(alpha)` from the model's own draft (uncapped in the forward, capped
+   at 5e-3 in the calibration; **[confirm]** which side moves, see
+   `FORWARD_RUN_READINESS.md` action 5), constants from
    `multimelt.constants`. K is dimensionless and per IMBIE basin,
    calibrated with `antarctica/scripts/calibrate_melt.py` on the Úa 2 km
    mesh against the July 2026 re-released observation table combining

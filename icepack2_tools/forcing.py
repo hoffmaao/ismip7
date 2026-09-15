@@ -876,6 +876,28 @@ def quadratic_mixed_slope(tf, salinity, sin_alpha, K=_K_DEFAULT):
     return melt * _SEC_PER_YEAR
 
 
+_SLOPE_CAP_WARNED = False
+
+
+def _warn_slope_cap(npz_path, cap):
+    r"""Say once that the K on disk was fitted against a capped draft slope
+    while the forward applies an uncapped one."""
+    global _SLOPE_CAP_WARNED
+    if _SLOPE_CAP_WARNED:
+        return
+    _SLOPE_CAP_WARNED = True
+    if _comm_rank() == 0:
+        print(
+            f"  WARNING: {os.path.basename(npz_path)} was calibrated with the "
+            f"draft slope capped at sin(alpha) = {cap:g}, and this forward "
+            f"applies no cap, so it melts with a field the K was not fitted "
+            f"against. Measured on the Ua 2 km mesh the gap is 1860 Gt/yr "
+            f"against 1067.4 Gt/yr. See antarctica/FORWARD_RUN_READINESS.md "
+            f"action 5.",
+            flush=True,
+        )
+
+
 def load_K_per_basin(npz_path, mesh_x, mesh_y, fill=0.0):
     r"""Load a per-basin calibrated K and return a per-node array.
 
@@ -883,7 +905,8 @@ def load_K_per_basin(npz_path, mesh_x, mesh_y, fill=0.0):
     and is expected to contain `basin_ids` (int) and `K_basin` (float) plus
     the IMBIE2 basin file path (the IMBIE2 8 km grid is re-read here so
     that the K-field can be remapped to *any* mesh, not just the one used
-    during calibration).
+    during calibration). An optional `sin_alpha_cap` records the draft slope
+    cap the K was fitted against and triggers a once-per-run warning.
 
     Returns an array of shape (len(mesh_x),) of per-node K values, with
     `fill` outside the calibrated basin set or where K_basin is NaN.
@@ -894,6 +917,21 @@ def load_K_per_basin(npz_path, mesh_x, mesh_y, fill=0.0):
     data = np.load(npz_path)
     bids = np.asarray(data["basin_ids"]).astype(int)
     Kbas = np.asarray(data["K_basin"]).astype(float)
+
+    # A K is only valid for the draft slope it was fitted against, because melt
+    # is linear in sin(alpha). calibrate_melt.py caps the slope at
+    # ISMIP7_SIN_ALPHA_CAP and records the value it used; compute_sin_alpha
+    # below applies no cap at all. On the Ua 2 km mesh that gap is a factor of
+    # about 1.7 in integrated melt, 1860 Gt/yr against the 1067.4 Gt/yr the
+    # calibration fitted, and it is what puts grounding-zone cells past the
+    # variable request's libmassbffl bound. Which side should move is a science
+    # decision (the cap is tied to the unsettled upstream local-slope
+    # question), so this says the two disagree rather than silently choosing.
+    # See antarctica/FORWARD_RUN_READINESS.md action 5 and check_melt_bound.py.
+    if "sin_alpha_cap" in data:
+        cap = float(data["sin_alpha_cap"])
+        if np.isfinite(cap) and cap > 0.0:
+            _warn_slope_cap(npz_path, cap)
 
     root = os.environ.get(
         "ISMIP7_DATA_ROOT",

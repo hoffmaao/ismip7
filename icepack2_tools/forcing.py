@@ -891,9 +891,10 @@ def _warn_slope_cap(npz_path, cap):
             f"  WARNING: {os.path.basename(npz_path)} was calibrated with the "
             f"draft slope capped at sin(alpha) = {cap:g}, and this forward "
             f"applies no cap, so it melts with a field the K was not fitted "
-            f"against. Measured on the Ua 2 km mesh the gap is 1860 Gt/yr "
-            f"against 1067.4 Gt/yr. See antarctica/FORWARD_RUN_READINESS.md "
-            f"action 5.",
+            f"against. At the reference state on the Ua 2 km mesh the "
+            f"forward's uncapped operator integrates about 4293 Gt/yr against "
+            f"the 1067.4 Gt/yr the K was fitted to, and capping it lands near "
+            f"1028. See antarctica/FORWARD_RUN_READINESS.md action 5.",
             flush=True,
         )
 
@@ -921,12 +922,12 @@ def load_K_per_basin(npz_path, mesh_x, mesh_y, fill=0.0):
     # A K is only valid for the draft slope it was fitted against, because melt
     # is linear in sin(alpha). calibrate_melt.py caps the slope at
     # ISMIP7_SIN_ALPHA_CAP and records the value it used; compute_sin_alpha
-    # below applies no cap at all. On the Ua 2 km mesh that gap is a factor of
-    # about 1.7 in integrated melt, 1860 Gt/yr against the 1067.4 Gt/yr the
-    # calibration fitted, and it is what puts grounding-zone cells past the
-    # variable request's libmassbffl bound. Which side should move is a science
-    # decision (the cap is tied to the unsettled upstream local-slope
-    # question), so this says the two disagree rather than silently choosing.
+    # below applies no cap at all. At the reference state on the Ua 2 km mesh
+    # the forward's own uncapped operator integrates about 4293 Gt/yr against
+    # the 1067.4 Gt/yr the K was fitted to, and capping that operator lands
+    # near 1028. Which side should move is a science decision (the cap is tied
+    # to the unsettled upstream local-slope question), so this reports the
+    # disagreement and leaves the choice open.
     # See antarctica/FORWARD_RUN_READINESS.md action 5 and check_melt_bound.py.
     if "sin_alpha_cap" in data:
         cap = float(data["sin_alpha_cap"])

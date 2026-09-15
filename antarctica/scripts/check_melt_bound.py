@@ -11,19 +11,27 @@ somewhere, or the writer's ``no_floating_ice`` fill policy reports one hot cell
 as the whole 8 km pixel's value, which the request's own convention asks for.
 
 This looks at the first on the model side, before any regridding. At the
-reference geometry, with the calibrated per-basin K, it evaluates the melt
-twice and reports how much floating AREA sits past the bound in each case:
+reference geometry, with the calibrated per-basin K, it evaluates the melt four
+times, as two pairs, and for each row reports the maximum, the 99th percentile,
+the area mean, the integrated total against the ``obs_total_gtyr`` the K was
+fitted to, and how much floating AREA sits past the bound.
 
-* capped: sin_alpha capped at ISMIP7_SIN_ALPHA_CAP (calibrate_melt's default
-  5e-3), the slope calibrate_melt fitted K against;
-* uncapped: the same slope with no cap, as in the forward, where
-  ``forcing.compute_sin_alpha`` applies none.
+The calibration pair reproduces calibrate_melt: a CG1 geometry interpolated
+from BedMachine with its raster ``surface``, and grad(draft) projected onto
+CG1.
 
-The comparison is the point, and the two rows bracket the forward. Both take
-calibrate_melt's slope, grad(draft) projected onto CG1, while
-``forcing.compute_sin_alpha`` lifts a DG0 draft with ``cg1_lift``, which is
-smoother. The 10-year run's own budget, 1860 Gt/yr or an area mean of
-1.34 m/yr, falls between the two rows.
+* capped: sin_alpha capped on CG1 at ISMIP7_SIN_ALPHA_CAP (calibrate_melt's
+  default 5e-3), the slope K was fitted against;
+* uncapped: the same slope with no cap.
+
+The forward pair reproduces the forward: ``forcing.compute_sin_alpha`` on a
+DG0 geometry whose surface comes from flotation, s = max(b + H,
+(1 - 917/1024) H), as simulation.py builds it, lifted to the CG1 melt nodes
+with ``cg1_lift``.
+
+* uncapped: as the forward runs today;
+* capped: the DG0 slope capped at the same value before the lift, which is
+  where a cap inside ``forcing.compute_sin_alpha`` would act.
 
 The bound is ``min_value_ais`` for ``libmassbffl`` in the same bundled request
 table the writer reads, converted with the writer's year and ice density, so it
@@ -40,13 +48,18 @@ Measured on the Ua 2 km mesh, 14 September 2026, with the per-basin K
 calibrated against the re-released observation table, over 1 512 899 km2 of
 floating ice:
 
-* capped at 5e-3: maximum 71.1 m/yr, 99th percentile 22.2 m/yr, area mean
-  0.77 m/yr, which is the 1067.4 Gt/yr target K was fitted to, and no nodes
-  past the bound;
-* uncapped: maximum 1804.9 m/yr, 99th percentile 256.3 m/yr, area mean
-  4.18 m/yr, and 421 nodes past the bound over 2920.6 km2 (0.193% of the
-  floating area), with a median node area of 6.33 km2 against 64 km2 for an
-  8 km pixel.
+* calibration, capped at 5e-3: area mean 0.77 m/yr, 1067 Gt/yr, which is the
+  1067.4 Gt/yr target K was fitted to, and no nodes past the bound;
+* calibration, uncapped: area mean 4.18 m/yr, 5803 Gt/yr, and 421 nodes past
+  the bound;
+* forward, uncapped: area mean 3.09 m/yr, 4293 Gt/yr, and 298 nodes past the
+  bound;
+* forward, capped: area mean 0.74 m/yr, 1028 Gt/yr, and no nodes past the
+  bound.
+
+The forward rows were measured before the forward pair took its surface from
+flotation and capped ahead of the lift, and they await a re-run on the Ua mesh.
+Both changes shift them slightly. The calibration rows are unaffected.
 """
 import argparse
 import os
@@ -73,6 +86,9 @@ from icepack2_tools.runconfig import raster_sample                    # noqa: E4
 from icepack2_tools.ismip7_output import RHO_I, SECONDS_PER_YEAR      # noqa: E402
 from icepack2_tools.regrid import ISMIP7_DX                           # noqa: E402
 from write_ismip7_output import request_table                         # noqa: E402
+
+# The ice to seawater density ratio simulation.py builds the surface with.
+RHO_RATIO = 917.0 / 1024.0
 
 
 def m_per_yr(kg_m2_s):
@@ -120,24 +136,32 @@ def main():
     sin_uncapped = cm._compute_sin_alpha(mesh, thk, sur)
     floating = (np.round(mask_np).astype(int) == 3)
 
-    # The forward's own slope operator, so the rows below answer what capping
-    # the forward would do rather than only bracketing it. calibrate_melt
-    # interpolates a CG1 geometry and projects grad(draft);
-    # forcing.compute_sin_alpha samples a DG0 geometry and differentiates a
-    # cg1_lift of the draft, which is the smoother of the two. Lift the result
-    # back to the CG1 nodes the melt inputs live on so every row compares like
-    # for like; cg1_lift is a convex combination, so it cannot overshoot.
+    # The forward's own slope operator. calibrate_melt interpolates a CG1
+    # geometry and projects grad(draft); forcing.compute_sin_alpha samples a
+    # DG0 bed and thickness, takes the surface from flotation as simulation.py
+    # does, and differentiates a cg1_lift of the draft. Lift the result back to
+    # the CG1 nodes the melt inputs live on so every row compares like for
+    # like; cg1_lift is a convex combination, so it cannot overshoot.
     Q_g = FunctionSpace(mesh, "DG", 0)
     bm = cm._bedmachine_path()
+    b_dg = sample_to_geometry(rasterio.open(f"netcdf:{bm}:bed"), Q_g, Q,
+                              method=raster_sample())
     h_dg = sample_to_geometry(rasterio.open(f"netcdf:{bm}:thickness"), Q_g, Q,
                               method=raster_sample())
-    s_dg = sample_to_geometry(rasterio.open(f"netcdf:{bm}:surface"), Q_g, Q,
-                              method=raster_sample())
+    s_dg = fd.Function(Q_g).interpolate(
+        fd.max_value(b_dg + h_dg, (1.0 - RHO_RATIO) * h_dg))
     sin_fwd_dg = fd.Function(Q_g)
     sin_fwd_dg.dat.data[:] = compute_sin_alpha(
         {"Q": Q, "V": VectorFunctionSpace(mesh, "CG", 1), "Q_g": Q_g,
          "h": h_dg, "s": s_dg})
     sin_fwd = cg1_lift(sin_fwd_dg).dat.data_ro.copy()
+    # A cap inside forcing.compute_sin_alpha acts on the DG0 slope, so cap
+    # here before the lift. Capping after a smoothing lift caps a different
+    # field: every node beside a cell below the cap would keep more slope.
+    sin_fwd_capped_dg = fd.Function(Q_g)
+    sin_fwd_capped_dg.dat.data[:] = np.minimum(sin_fwd_dg.dat.data_ro,
+                                               cm.SIN_ALPHA_CAP)
+    sin_fwd_capped = cg1_lift(sin_fwd_capped_dg).dat.data_ro.copy()
 
     # The per-basin K field the forward stamps onto the mesh. K_field in the
     # npz was built on the calibration mesh; rebuild it here from K_basin so
@@ -153,13 +177,13 @@ def main():
     afl = float(area[floating].sum())
 
     cases = [
-        (f"calibration operator, capped at {cm.SIN_ALPHA_CAP:.0e}, "
+        (f"calibration pair, capped at {cm.SIN_ALPHA_CAP:.0e} on CG1, "
          f"the slope K was fitted against",
          np.minimum(sin_uncapped, cm.SIN_ALPHA_CAP)),
-        ("calibration operator, uncapped", sin_uncapped),
-        ("forward operator, uncapped, as the forward runs today", sin_fwd),
-        (f"forward operator, capped at {cm.SIN_ALPHA_CAP:.0e}",
-         np.minimum(sin_fwd, cm.SIN_ALPHA_CAP)),
+        ("calibration pair, uncapped", sin_uncapped),
+        ("forward pair, uncapped, as the forward runs today", sin_fwd),
+        (f"forward pair, capped at {cm.SIN_ALPHA_CAP:.0e} on DG0 before the "
+         f"lift", sin_fwd_capped),
     ]
 
     obs_total = float(d["obs_total_gtyr"]) if "obs_total_gtyr" in d else float("nan")

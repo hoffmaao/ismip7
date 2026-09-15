@@ -5,14 +5,14 @@ Melt is linear in ``sin(alpha)``, so a per-basin K is only valid for the slope
 field it was calibrated on. ``calibrate_melt.py`` caps the slope at
 ``ISMIP7_SIN_ALPHA_CAP`` and stamps that value into the npz;
 ``forcing.compute_sin_alpha``, which the forward calls every step, applies no
-cap. On the Úa 2 km mesh the two differ by about a factor of 1.7 in integrated
-melt, and that is what puts grounding-zone cells past the variable request's
-``libmassbffl`` bound. The mismatch used to be invisible: both halves ran, and
-nothing said they disagreed.
+cap. At the reference state on the Úa 2 km mesh the forward's own uncapped
+operator integrates about 4293 Gt/yr against the 1067.4 Gt/yr the K was fitted
+to, and capping that operator lands near 1028. The mismatch used to be
+invisible: both halves ran, and nothing said they disagreed.
 
-This pins the warning rather than the physics. Which side should move is a
-science decision tied to the unsettled upstream local-slope question, so the
-forward's numbers are deliberately unchanged.
+These tests pin the warning, and the physics stays as it is. Which side should
+move is a science decision tied to the unsettled upstream local-slope
+question, so the forward's numbers are deliberately unchanged.
 
 Every test goes through ``forcing.load_K_per_basin``, the loader the forward
 calls, over a synthetic IMBIE2 basin file in the layout it resolves under

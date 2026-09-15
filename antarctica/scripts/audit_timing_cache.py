@@ -37,6 +37,7 @@ from timing_campaign import (  # noqa: E402
     CACHE_ROLE,
     CACHE_SCHEMA_VERSION,
     atomic_write_json,
+    expected_dt,
     validate_cache_manifest,
 )
 
@@ -44,7 +45,7 @@ from timing_campaign import (  # noqa: E402
 RHO_I = 917.0
 RHO_W = 1024.0
 RHO_GT = RHO_I / 1.0e12
-AUDIT_SCHEMA_VERSION = 1
+AUDIT_SCHEMA_VERSION = 2
 
 
 def _normal(value):
@@ -216,7 +217,50 @@ def _field_audit(field, supporting, coordinates):
     }
 
 
-def audit_cache(cache_path, manifest_path=None, front_hmin=1.0):
+def _hotspots(field, supporting, coordinates, dt, hmin, top):
+    """Top-``top`` cells by ``|a_ref| * dt / max(h, hmin)`` -- the fraction of
+    a cell's thickness the no-forcing tendency would move in one step. The
+    single global extrema above miss neighbouring seeds (the 2500/25000
+    runaway ignited 9 km from the recorded maximum); a ranked list names
+    every candidate, with grounded/floating/buffer flags."""
+    values = np.asarray(field.dat.data_ro)
+    xy = np.asarray(coordinates.dat.data_ro)
+    if values.ndim == 2 and values.shape[1] == 1:
+        values = values[:, 0]
+    thickness = np.asarray(supporting["thickness_m"])
+    extent = np.asarray(supporting["initial_extent_thickness_m"])
+    haf = np.asarray(supporting["height_above_flotation_m"])
+    score = np.abs(values) * dt / np.maximum(thickness, hmin)
+    comm = field.function_space().mesh().comm
+    count = min(int(top), values.size)
+    if count > 0:
+        order = np.argpartition(-score, count - 1)[:count]
+    else:
+        order = np.array([], dtype=int)
+    local = []
+    for index in order:
+        row = {
+            "score_dh_over_h_per_step": float(score[index]),
+            "a_ref_equivalent_m_per_yr": float(values[index]),
+            "no_forcing_dhdt_m_per_yr": -float(values[index]),
+            "dh_per_step_m": -float(values[index]) * dt,
+            "xy_m": [float(value) for value in xy[index]],
+            "rank": int(comm.rank),
+        }
+        for name, values_support in supporting.items():
+            row[name] = float(values_support[index])
+        row["grounded"] = bool(haf[index] > 0.0)
+        row["floating"] = bool(thickness[index] >= hmin and haf[index] <= 0.0)
+        row["buffer"] = bool(extent[index] < hmin)
+        local.append(row)
+    gathered = [row for rows in comm.allgather(local) for row in rows]
+    gathered.sort(
+        key=lambda row: (-row["score_dh_over_h_per_step"], row["rank"])
+    )
+    return gathered[:int(top)]
+
+
+def audit_cache(cache_path, manifest_path=None, front_hmin=1.0, top=20):
     cache_path = os.path.realpath(cache_path)
     manifest_path = (
         os.path.realpath(manifest_path) if manifest_path is not None else None
@@ -287,8 +331,13 @@ def audit_cache(cache_path, manifest_path=None, front_hmin=1.0):
         "cell_area_m2": np.asarray(area.dat.data_ro),
     }
 
+    lc = int(attrs.get("lc", manifest["lc"] if manifest else 2500))
+    dt = expected_dt(lc)
     raw_audit = _field_audit(raw, supporting, coordinates)
     raw_audit["net_gt_per_yr"] = float(fd.assemble(raw * fd.dx)) * RHO_GT
+    raw_audit["hotspots"] = _hotspots(
+        raw, supporting, coordinates, dt, front_hmin, top
+    )
 
     initial_extent = np.asarray(fields["H_init"].dat.data_ro)
     beyond_front = initial_extent < front_hmin
@@ -303,6 +352,9 @@ def audit_cache(cache_path, manifest_path=None, front_hmin=1.0):
     effective_audit["masked_cell_count"] = global_count(
         beyond_front, mesh.comm
     )
+    effective_audit["hotspots"] = _hotspots(
+        effective, supporting, coordinates, dt, front_hmin, top
+    )
 
     metadata = {
         name: _normal(value) for name, value in attrs.items()
@@ -313,6 +365,8 @@ def audit_cache(cache_path, manifest_path=None, front_hmin=1.0):
         "manifest_path": manifest_path,
         "cells": global_size(thickness),
         "metadata": metadata,
+        "dt_yr": float(dt),
+        "hotspot_score": "|a_ref| * dt / max(h, front_hmin) per step",
         "sign_convention": (
             "a_ref_equivalent=FV div(h*u); no_forcing_dhdt=-a_ref_equivalent"
         ),
@@ -368,6 +422,28 @@ def print_audit(record):
     _print_payload(
         "fixed-front largest magnitude", masked["absmax"]
     )
+    hotspots = record["raw"].get("hotspots") or []
+    if hotspots:
+        PETSc.Sys.Print(
+            f"  hotspots (dt={record['dt_yr']:g} yr; score = fraction of the "
+            "cell's thickness moved in one step):"
+        )
+        PETSc.Sys.Print(
+            "    rank  score   dh/step[m]   a_ref[m/yr]   h[m]    HAF[m]  "
+            "speed[m/yr]  flags                x        y"
+        )
+        for row in hotspots:
+            flags = ",".join(
+                name for name in ("grounded", "floating", "buffer") if row[name]
+            ) or "-"
+            PETSc.Sys.Print(
+                f"    {row['rank']:4d}  {row['score_dh_over_h_per_step']:6.3f} "
+                f"{row['dh_per_step_m']:+11.1f} "
+                f"{row['a_ref_equivalent_m_per_yr']:+13.1f} "
+                f"{row['thickness_m']:7.1f} {row['height_above_flotation_m']:+8.1f} "
+                f"{row['cell_center_speed_m_per_yr']:11.1f}  {flags:18s} "
+                f"{row['xy_m'][0]:9.0f} {row['xy_m'][1]:9.0f}"
+            )
 
 
 def parse_args():
@@ -387,6 +463,12 @@ def parse_args():
         default=1.0,
         help="initial thickness threshold for the fixed-front equivalent",
     )
+    parser.add_argument(
+        "--top",
+        type=int,
+        default=20,
+        help="number of ranked hotspot cells to report",
+    )
     return parser.parse_args()
 
 
@@ -396,6 +478,7 @@ def main():
         args.cache,
         manifest_path=args.manifest,
         front_hmin=args.front_hmin,
+        top=args.top,
     )
     print_audit(record)
     if args.output and COMM_WORLD.rank == 0:

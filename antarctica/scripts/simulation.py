@@ -70,6 +70,7 @@ from icepack2_tools.runconfig import (
     TARGET_MESH_GEOMETRY_METHOD,
 )
 from icepack2_tools.solverconfig import (
+    fixed_front_enabled,
     final_solve_bounds,
     continuation_steps,
     diagnostic_solver_label,
@@ -1390,10 +1391,21 @@ def run_simulation(
     # sheet must gain mass. Only meaningful when the initial state is the
     # true BedMachine geometry (RC mode / h_clamp_init=0) — with a clamped
     # initial state every cell has ice and the mask is empty.
-    fixed_front = os.environ.get("ISMIP7_FIXED_FRONT") is not None
+    fixed_front = fixed_front_enabled()
     front_hmin = float(os.environ.get("ISMIP7_FRONT_HMIN", "1.0"))
     beyond_front = None
+    n_beyond = 0
     cell_area = assemble(fd.TestFunction(Q_dg) * dx).dat.data_ro.copy()
+    # Runaway tripwire (ISMIP7_TRIPWIRE_U_MAX / _DH_FRAC / _HMIN; off unless
+    # set). A lane that is running away used to be reported only when the
+    # transport budget or Newton finally failed, three steps and half an
+    # hour after the fact; failing at the first step that exceeds either
+    # bound, naming the cell, lets the ladder experiments answer in minutes.
+    _trip = os.environ.get("ISMIP7_TRIPWIRE_U_MAX", "").strip()
+    tripwire_u_max = float(_trip) if _trip else None
+    _trip = os.environ.get("ISMIP7_TRIPWIRE_DH_FRAC", "").strip()
+    tripwire_dh_frac = float(_trip) if _trip else None
+    tripwire_hmin = float(os.environ.get("ISMIP7_TRIPWIRE_HMIN", "10.0"))
     if fixed_front:
         # Mask from the t=0 observed extent (ctx["H_init"]), not the
         # current h: a restarted run must not re-mask cells that
@@ -1408,6 +1420,9 @@ def run_simulation(
             f"  Fixed calving front: {n_beyond} initially ice-free cells "
             f"masked (h < {front_hmin} m)"
         )
+    ctx["fixed_front"] = fixed_front
+    ctx["front_hmin"] = front_hmin
+    ctx["fixed_front_cells"] = n_beyond
 
     # ISMIP7_LEGACY_TRANSPORT=1 restores the pre-Jul-2026 scheme: the
     # -h*div(u*phi) volume term (non-conservative for DG0: it adds
@@ -2017,7 +2032,12 @@ def run_simulation(
         return {
             "out_gt": out_gt,
             "calv_gt": calv_gt,
+            # clamp_gt keeps the full sum (the step budget identity below
+            # depends on it); limit_gt is ALSO reported alone because it is
+            # exactly the error the positivity limiter introduces into an
+            # apparent-MB cancellation in thin converging cells.
             "clamp_gt": clamp_gt + clamp_cg_gt + limit_gt,
+            "limit_gt": limit_gt,
         }
 
     # Time loop, transport-first: each step advances the geometry with the
@@ -2059,7 +2079,8 @@ def run_simulation(
                 h_dg.assign(h_dg_entry)
                 _lift_h()
                 z.assign(z_entry)
-            acc = {"out_gt": 0.0, "calv_gt": 0.0, "clamp_gt": 0.0}
+            acc = {"out_gt": 0.0, "calv_gt": 0.0, "clamp_gt": 0.0,
+                   "limit_gt": 0.0}
             ok = True
             for _j in range(m):
                 sub = _advance(
@@ -2111,8 +2132,62 @@ def run_simulation(
                         out_rate, calv_gt, clamp_all, resid_gt,
                         amb_rate))
         _write_csv_row(results[-1])
+        ctx.setdefault("step_budget", []).append({
+            "step": k,
+            "t_yr": float(t_yr),
+            "out_gt": float(tallies["out_gt"]),
+            "calv_gt": float(calv_gt),
+            "clamp_gt": float(clamp_all),
+            "limit_gt": float(tallies.get("limit_gt", 0.0)),
+            "amb_gt_per_yr": float(amb_rate),
+            "dm_gt": float(dm),
+            "resid_gt": float(resid_gt),
+        })
 
-        _field_diagnostics(f"step-{k}-t={t_yr:.6g}")
+        step_stat = _field_diagnostics(f"step-{k}-t={t_yr:.6g}")
+
+        if tripwire_u_max is not None or tripwire_dh_frac is not None:
+            _h_now = np.asarray(h_dg.dat.data_ro)
+            _h_was = np.asarray(h_dg_entry.dat.data_ro)
+            growth = (_h_now - _h_was) / np.maximum(_h_was, tripwire_hmin)
+            growth_max, growth_xy = global_extreme_location(
+                growth, h_diag_xy, mode="max", comm=mesh.comm
+            )
+            speed_max = float(step_stat["speed_max"])
+            speed_xy = step_stat["speed_max_xy"]
+            ctx.setdefault("tripwire", {
+                "u_max": tripwire_u_max,
+                "dh_frac": tripwire_dh_frac,
+                "hmin": tripwire_hmin,
+                "steps": [],
+            })["steps"].append({
+                "step": k,
+                "speed_max": speed_max,
+                "speed_max_xy": list(speed_xy),
+                "growth_max": float(growth_max),
+                "growth_max_xy": list(growth_xy),
+            })
+            tripped = []
+            if tripwire_u_max is not None and speed_max > tripwire_u_max:
+                tripped.append(
+                    f"speed_max={speed_max:.3e} m/yr at "
+                    f"({speed_xy[0]:.0f}, {speed_xy[1]:.0f}) > {tripwire_u_max:g}"
+                )
+            if tripwire_dh_frac is not None and growth_max > tripwire_dh_frac:
+                tripped.append(
+                    f"dh/h={growth_max:.3f} in one step at "
+                    f"({growth_xy[0]:.0f}, {growth_xy[1]:.0f}) > {tripwire_dh_frac:g}"
+                )
+            if tripped:
+                message = "; ".join(tripped)
+                ctx["failure"] = {
+                    "category": "runaway_tripwire",
+                    "phase": f"step-{k}",
+                    "exception_type": "RuntimeError",
+                    "message": message,
+                }
+                PETSc.Sys.Print(f"RUNAWAY TRIPWIRE step-{k}: {message}")
+                raise RuntimeError(f"runaway tripwire at step {k}: {message}")
 
         if k % output_interval == 0 or k == 1:
             _amb_txt = f"amb={amb_rate:+.0f} " if a_ref is not None else ""

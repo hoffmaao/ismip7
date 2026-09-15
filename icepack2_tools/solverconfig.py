@@ -278,6 +278,13 @@ def rescue_enabled():
     return _enabled("ISMIP7_RESCUE_ENABLED", RESCUE_ENABLED_DEFAULT)
 
 
+def fixed_front_enabled():
+    r"""Whether ice advected beyond the t=0 extent is removed as calving
+    (``ISMIP7_FIXED_FRONT``). Boolean-parsed like every other switch here:
+    ``0``/``false``/``off`` disable it (it used to be presence-based)."""
+    return _enabled("ISMIP7_FIXED_FRONT", "0")
+
+
 def subcycles():
     values = tuple(
         int(value) for value in _env(

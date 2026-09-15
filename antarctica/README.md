@@ -513,6 +513,8 @@ redeclare those literals.
 | `ISMIP7_AUTO_RESUME` | set to resume from the newest own checkpoint unattended | _(unset)_ |
 | `ISMIP7_RUN_TAG` | experiment-name suffix for a parallel method line (see run-management flags above) | _(unset)_ |
 | `ISMIP7_APPARENT_MB` | apparent-mass-balance init: `1`/`balance` zeroes the t=0 thickness tendency (ISMIP6 ctrl_proj-style), `div` cancels only the flux divergence | _(unset)_ |
+| `ISMIP7_FIXED_FRONT` | boolean; remove ice advected beyond the t=0 extent each step and tally it as calving (`ISMIP7_FRONT_HMIN`, default 1 m, defines the extent) | `0` |
+| `ISMIP7_TRIPWIRE_U_MAX` / `ISMIP7_TRIPWIRE_DH_FRAC` / `ISMIP7_TRIPWIRE_HMIN` | runaway tripwire: fail the step when max speed exceeds `U_MAX` [m/yr] or a cell thickens by more than `DH_FRAC` of `max(h, HMIN)`; unset = off (timing lanes export 2e4 / 0.5 / 10) | _(unset)_ |
 | `ISMIP7_FIXED_FRONT` | set to hold the calving front at the t=0 extent (inflow beyond it tallied as calving) | _(unset)_ |
 | `ISMIP7_LEGACY_TRANSPORT` | set to restore the pre-Jul-2026 CG-projection transport scheme (requires `ISMIP7_GEOMETRY_SPACE=cg1`) | _(unset)_ |
 | `ISMIP7_SNES_TYPE` / `ISMIP7_SNES_MAXIT` | diagnostic Newton type / max iterations | `newtonls` / `200` |
@@ -592,8 +594,16 @@ The stages and contracts are:
    construction method. The job then repacks the cache on one rank and
    publishes the HDF5 file and JSON manifest atomically. Mesh, inversion,
    physics, solver, or cache-schema changes invalidate it.
-3. **Per-mesh short inversion (`make timing-inversion`)** — after a valid
-   prepared cache exists, one L-BFGS job per mesh re-inverts with the
+3. **Per-mesh short inversion (`make timing-inversion`, optional)** — off by
+   default since 2026‑09‑15: `make timing` runs lanes from the transferred
+   prepare state (`TIMING_INITIAL_STATE=prepare`); `TIMING_INVERT=1` or
+   `TIMING_INITIAL_STATE=invert` re-inverts each mesh first and records those
+   lanes under the `…_reinverted` tag. Evidence for the default: every
+   strict-lane runaway sits in a floating margin cell, which the
+   grounded-only dH/dt misfit never sees, so 5- and 250-iteration inverts
+   moved the runaway (Amundsen → Pine Island) without curing it. When it
+   runs: after a valid prepared cache exists, one L-BFGS job per mesh
+   re-inverts with the
    log-velocity + dH/dt + net-balance objective
    (`ISMIP7_LOG_VEL_WEIGHT=auto`, `ISMIP7_DHDT_WEIGHT=1`,
    `ISMIP7_DHDT_NET_SIGMA=10`). Default length is
@@ -634,30 +644,36 @@ The stages and contracts are:
    live) before the first step. `FOLLOW_PREPARE=1` queues each invert behind
    its active prepare job; a running invert is never resubmitted, even with
    `FORCE_TIMING=1`.
-4. **Cache audit / AMB probe** — optional diagnostics on a prepared cache:
+4. **Cache audit / contract probe** — optional diagnostics on a prepared cache:
    ```console
    make timing-cache-audit TIMING_ONLY_MESH=2500/25000 \
      SLURM_PARTITION=debug SLURM_TIME=00:15:00
    ```
 
    This submits a read-only assembly of the exact initial DG0 upwind
-   `div(h*u)` in one cache. It writes a small JSON record under
-   `results/timing/` with global extrema, hotspot coordinates, local thickness
-   and height above flotation, and the fixed-front-masked equivalent; it
-   performs no diagnostic or transport solve.
+   `div(h*u)` in one cache. It writes a JSON record under `results/timing/`
+   with global extrema, the fixed-front-masked equivalent, and a ranked
+   **hotspot table** (`--top`, default 20) scored by `|a_ref|·dt/h` — the
+   fraction of a cell's thickness the no-forcing tendency would move in one
+   step — with grounded/floating/buffer flags; it performs no diagnostic or
+   transport solve. On 2500/25000 the top rows are the cells where every
+   strict lane has run away.
 
-   To test whether that initial flux divergence triggers a scout failure:
+   To run one mesh under a different physics contract without touching the
+   campaign records (the experiment ladder):
 
    ```console
-   make timing-amb-probe TIMING_ONLY_MESH=2500/25000 \
+   make timing-probe TIMING_ONLY_MESH=2500/25000 TIMING_CONTRACT=divfront \
      TIMING_SCOUT_MONITOR=1 SLURM_PARTITION=debug SLURM_TIME=01:00:00
    ```
 
-   This is a separately tagged causality probe. It validates the cache, builds
-   the exact uncapped `ISMIP7_APPARENT_MB=div` correction from the pristine
-   cached state, and repeats the strict five-step lane. Ordinary evolved
-   restarts remain forbidden from constructing a fresh correction. With no
-   forcing the corrected state should be stationary away from any
+   Contracts: `strict` (no apparent MB, no calving sink — the campaign
+   default), `div` (the exact uncapped `ISMIP7_APPARENT_MB=div` correction
+   built from the pristine cached state; `make timing-amb-probe` is its
+   alias), `front` (`ISMIP7_FIXED_FRONT=1`: ice advected beyond the 2015
+   extent is removed each step and tallied as calving), `divfront` (both —
+   the production closure). Probe records carry the `…_probe` suffix. Under
+   `div` and no forcing the corrected state is stationary away from
    positivity-limited initially ice-free cells, so a passing probe diagnoses
    the runaway but is not a representative timing measurement.
 
@@ -679,7 +695,18 @@ The stages and contracts are:
    renders them separately. Inversion records written before the publish
    gate (2026‑09‑14) are rejected; re-run the invert with `FORCE_TIMING=1`.
 7. **Strict transient timing** — all matrix lanes use `scpc_mumps`, disable
-   rescue, and restrict subcycles to `1`. The first diagnostic, transport, or
+   rescue, and restrict subcycles to `1`. The interval is
+   `MATRIX_STEPS` steps of `MATRIX_DT_2500 × LC / 2500` years (defaults 5 and
+   0.25; both are written into the campaign tag, e.g.
+   `scpc_mumps_10step_dt0p125at2500_…`, so a dt-ladder rung never mixes with
+   another) and the physics contract is `TIMING_CONTRACT` (default `strict`;
+   a non-strict contract suffixes the tag). Every lane runs the runaway
+   **tripwire**: the first step whose maximum speed exceeds
+   `ISMIP7_TRIPWIRE_U_MAX` (2e4 m/yr) or whose thickness grows by more than
+   `ISMIP7_TRIPWIRE_DH_FRAC` (0.5) of a cell's thickness fails at once with
+   the cell's coordinates (`RUNAWAY TRIPWIRE step-k: …`, category
+   `runaway_tripwire`), instead of three steps later when the transport
+   budget finally breaks. The first diagnostic, transport, tripwire or
    mass-budget failure ends the lane. The primary timer starts immediately
    before the five-step loop, after cache loading, solver construction, and
    transport setup; `setup_seconds` is reported separately. JSON records are

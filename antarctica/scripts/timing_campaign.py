@@ -13,13 +13,14 @@ import hashlib
 import json
 import math
 import os
+import re
 import sys
 import tempfile
 from pathlib import Path
 
 sys.path.insert(0, os.fspath(Path(__file__).resolve().parents[2]))
 
-from icepack2_tools.runconfig import TARGET_MESH_GEOMETRY_METHOD
+from icepack2_tools.runconfig import TARGET_MESH_GEOMETRY_METHOD, U_LIM_DEFAULT
 
 
 RECORD_SCHEMA_VERSION = 3
@@ -58,24 +59,162 @@ SOURCE_TAG = "dg0_logvelnet"
 SOURCE_INVERSION_BASENAME = (
     "inversion_icepack2_budd_n3_dg0_logvelnet_2500_1core.h5"
 )
-CAMPAIGN_TAG = (
-    "scpc_mumps_5step_dt0p25at2500_dg0_logvelnet_cached_strict_v3"
-)
-AMB_PROBE_TAG = f"{CAMPAIGN_TAG}_ambdiv_probe"
-# Control lanes run from the transferred prepare cache on a mesh the policy
-# would re-invert (TIMING_INITIAL_STATE=prepare). They answer "is the per-mesh
-# invert needed?" and must never be mistaken for campaign lanes, so their
-# records and stamps carry their own tag.
-TRANSFERRED_TAG = f"{CAMPAIGN_TAG}_transferred"
-LANE_INITIAL_STATES = ("invert", "prepare")
+# Matrix interval. Step count and the 2.5 km timestep are PARAMETERS (the dt
+# ladder of 2026-09-15): both are written into the campaign tag, so records
+# from different rungs can never mix, and validate_timing_record derives the
+# expected interval from a record's own tag rather than from these constants.
+MATRIX_T_START = 2015.0
+MATRIX_STEPS_DEFAULT = 5
+MATRIX_DT_2500_DEFAULT = 0.25
+MATRIX_REFERENCE_LC = 2500.0
 
 
-def lane_tag(initial_state="invert"):
+def matrix_steps(override=None):
+    if override is not None:
+        return int(override)
+    return int(os.environ.get("ISMIP7_MATRIX_STEPS", str(MATRIX_STEPS_DEFAULT)))
+
+
+def matrix_dt_2500(override=None):
+    if override is not None:
+        return float(override)
+    return float(
+        os.environ.get("ISMIP7_MATRIX_DT_2500", str(MATRIX_DT_2500_DEFAULT))
+    )
+
+
+def dt_tag(dt_2500):
+    """``0.25 -> '0p25'``: the Makefile's ``$(subst .,p,$(MATRIX_DT_2500))``."""
+    return f"{float(dt_2500):g}".replace(".", "p")
+
+
+# Lane physics contracts. ``strict`` is the original v3 contract (no apparent
+# mass balance, no calving sink at the 2015 front). The others add the
+# production closure (``ISMIP7_APPARENT_MB=div``, uncapped) and/or the fixed
+# calving front (``ISMIP7_FIXED_FRONT``); a non-strict contract suffixes the
+# campaign tag so its records never masquerade as strict ones. Rescue stays
+# off and subcycles stay [1] under every contract: the benchmark times the
+# bare solver.
+CONTRACTS = {
+    "strict": {
+        "apparent_mb_mode": None,
+        "apparent_mb_cap_m_per_yr": 0.0,
+        "fixed_front": False,
+    },
+    "divfront": {
+        "apparent_mb_mode": "div",
+        "apparent_mb_cap_m_per_yr": 0.0,
+        "fixed_front": True,
+    },
+    "front": {
+        "apparent_mb_mode": None,
+        "apparent_mb_cap_m_per_yr": 0.0,
+        "fixed_front": True,
+    },
+    "div": {
+        "apparent_mb_mode": "div",
+        "apparent_mb_cap_m_per_yr": 0.0,
+        "fixed_front": False,
+    },
+}
+CONTRACT_DEFAULT = "strict"
+
+
+def contract_name(override=None):
+    name = (
+        override
+        if override is not None
+        else os.environ.get("ISMIP7_TIMING_CONTRACT", CONTRACT_DEFAULT)
+    )
+    if name not in CONTRACTS:
+        raise ValueError(
+            f"timing contract must be one of {tuple(CONTRACTS)}, not {name!r}"
+        )
+    return name
+
+
+def contract_exports(name=None):
+    """Environment a lane needs to run under ``name``'s contract."""
+    contract = CONTRACTS[contract_name(name)]
+    exports = {"ISMIP7_AMB_CAP": f"{contract['apparent_mb_cap_m_per_yr']:g}"}
+    if contract["apparent_mb_mode"]:
+        exports["ISMIP7_APPARENT_MB"] = contract["apparent_mb_mode"]
+    if contract["fixed_front"]:
+        exports["ISMIP7_FIXED_FRONT"] = "1"
+    return exports
+
+
+# Runaway tripwire (simulation.run_simulation): fail a lane at the first step
+# whose speed or per-step thickness growth exceeds these, naming the cell.
+TRIPWIRE_DEFAULTS = {
+    "ISMIP7_TRIPWIRE_U_MAX": U_LIM_DEFAULT,
+    "ISMIP7_TRIPWIRE_DH_FRAC": "0.5",
+    "ISMIP7_TRIPWIRE_HMIN": "10.0",
+}
+
+
+def campaign_tag(steps=None, dt_2500=None, contract=None):
+    name = contract_name(contract)
+    tag = (
+        f"scpc_mumps_{matrix_steps(steps)}step_"
+        f"dt{dt_tag(matrix_dt_2500(dt_2500))}at2500"
+        "_dg0_logvelnet_cached_strict_v3"
+    )
+    if name != "strict":
+        tag += f"_{name}"
+    return tag
+
+
+# Lanes from the transferred prepare state are THE campaign (TIMING_INITIAL_STATE
+# =prepare, the default); lanes from a per-mesh invert-published cache carry
+# their own suffix so the two initial states never mix in one report.
+LANE_INITIAL_STATES = ("prepare", "invert")
+LANE_INITIAL_STATE_DEFAULT = "prepare"
+
+
+def lane_tag(initial_state=LANE_INITIAL_STATE_DEFAULT, campaign=None):
     if initial_state not in LANE_INITIAL_STATES:
         raise ValueError(
             f"initial state must be one of {LANE_INITIAL_STATES}, not {initial_state!r}"
         )
-    return TRANSFERRED_TAG if initial_state == "prepare" else CAMPAIGN_TAG
+    campaign = campaign_tag() if campaign is None else campaign
+    return f"{campaign}_reinverted" if initial_state == "invert" else campaign
+
+
+def probe_tag(steps=None, dt_2500=None, contract=None):
+    """Probe lanes (``cache_probe`` kind) run one contract on one mesh without
+    touching campaign records; they are the experiment ladder."""
+    return f"{campaign_tag(steps, dt_2500, contract)}_probe"
+
+
+_NONSTRICT_CONTRACTS = "|".join(
+    sorted((name for name in CONTRACTS if name != "strict"), key=len, reverse=True)
+)
+_CAMPAIGN_TAG_RE = re.compile(
+    r"^scpc_mumps_(?P<steps>\d+)step_dt(?P<dt>\d+(?:p\d+)?)at2500"
+    r"_dg0_logvelnet_cached_strict_v3"
+    rf"(?:_(?P<contract>{_NONSTRICT_CONTRACTS}))?"
+    r"(?:_(?P<lane>reinverted|probe))?$"
+)
+
+
+def parse_campaign_tag(tag):
+    """``{steps, dt_2500, contract, lane}`` encoded in a lane tag."""
+    match = _CAMPAIGN_TAG_RE.match(str(tag))
+    if match is None:
+        raise ValueError(f"tag {tag!r} does not name a cached-strict lane")
+    return {
+        "steps": int(match["steps"]),
+        "dt_2500": float(match["dt"].replace("p", ".")),
+        "contract": match["contract"] or "strict",
+        "lane": match["lane"],
+    }
+
+
+# Import-time defaults (env may still override via the helpers above).
+CAMPAIGN_TAG = campaign_tag()
+REINVERTED_TAG = lane_tag("invert")
+PROBE_TAG = probe_tag()
 CACHE_TAG = "scpc_mumps_dg0_logvelnet_v3"
 # Per-mesh short invert length. Override with ISMIP7_TIMING_INVERSION_MAXITER
 # or `make timing-inversion TIMING_INVERSION_MAXITER=5` for a debug pass.
@@ -101,10 +240,9 @@ def inversion_tag(maxiter=None):
 INVERSION_MAXITER = inversion_maxiter()
 INVERSION_TAG = inversion_tag(INVERSION_MAXITER)
 
-MATRIX_T_START = 2015.0
-MATRIX_STEPS = 5
-MATRIX_DT_2500 = 0.25
-MATRIX_REFERENCE_LC = 2500.0
+# Import-time snapshots for the legacy (cold-start, 30-lane) matrix code.
+MATRIX_STEPS = matrix_steps()
+MATRIX_DT_2500 = matrix_dt_2500()
 BUFFER_M = 20000
 MASS_RESIDUAL_TOL_GT = 5.0e-5
 
@@ -227,12 +365,12 @@ def scaling_lanes():
     return tuple(lane for lane in planned_lanes() if lane not in scouts)
 
 
-def expected_dt(lc):
-    return MATRIX_DT_2500 * float(lc) / MATRIX_REFERENCE_LC
+def expected_dt(lc, dt_2500=None):
+    return matrix_dt_2500(dt_2500) * float(lc) / MATRIX_REFERENCE_LC
 
 
-def expected_t_end(lc):
-    return MATRIX_T_START + MATRIX_STEPS * expected_dt(lc)
+def expected_t_end(lc, steps=None, dt_2500=None):
+    return MATRIX_T_START + matrix_steps(steps) * expected_dt(lc, dt_2500)
 
 
 def mesh_basename(lc, lc_coarse, buffer_m=BUFFER_M):
@@ -263,6 +401,14 @@ def pristine_cache_paths(cache_dir, lc, lc_coarse, buffer_m=BUFFER_M):
     stem = f"{cache_stem(lc, lc_coarse, buffer_m)}.prepare"
     root = Path(cache_dir)
     return root / f"{stem}.h5", root / f"{stem}.json"
+
+
+def pristine_sibling(cache_path):
+    """The pristine copy's path for a published cache path (same stem)."""
+    text = os.fspath(cache_path)
+    if text.endswith(".prepare.h5"):
+        return text
+    return text[:-3] + ".prepare.h5" if text.endswith(".h5") else text
 
 
 def timing_record_basename(tag, lc, lc_coarse, ncores):
@@ -440,7 +586,9 @@ def validate_cache_manifest(
     if cache_path is not None:
         actual = os.path.realpath(os.fspath(manifest.get("cache_path", "")))
         expected_path = os.path.realpath(os.fspath(cache_path))
-        if actual != expected_path:
+        # A lane may restart from the pristine prepare copy, whose manifest
+        # (a hard link of the original) still names the published path.
+        if actual != expected_path and pristine_sibling(actual) != expected_path:
             return False, f"cache path={actual!r}; expected {expected_path!r}"
         if not os.path.isfile(expected_path):
             return False, f"cache file is missing: {expected_path}"
@@ -465,10 +613,17 @@ def validate_timing_record(
     ncores=None,
     require_success=True,
     timing_kind="matrix",
-    timing_tag=CAMPAIGN_TAG,
-    apparent_mb_mode=None,
+    timing_tag=None,
 ):
-    """Validate the strict five-step contract and return ``(valid, detail)``."""
+    """Validate one lane record against the contract its tag names.
+
+    Step count, the 2.5 km timestep and the physics contract are all read
+    from ``timing_tag`` (default: this process's campaign tag), never from
+    module constants, so a report built for one ladder rung cannot accept
+    records from another. Returns ``(valid, detail)``.
+    """
+    if timing_tag is None:
+        timing_tag = campaign_tag()
     if record.get("record_schema_version") != RECORD_SCHEMA_VERSION:
         return False, "record schema is not the cached-strict schema"
     if require_success and record.get("run_status") != "success":
@@ -480,24 +635,46 @@ def validate_timing_record(
         return False, f"timing_kind={record.get('timing_kind')!r}"
     if record.get("timing_tag") != timing_tag:
         return False, f"timing_tag={record.get('timing_tag')!r}"
-    if apparent_mb_mode is not None:
-        if record.get("apparent_mb_mode") != apparent_mb_mode:
-            return False, (
-                "apparent_mb_mode="
-                f"{record.get('apparent_mb_mode')!r}"
-            )
+    try:
+        spec = parse_campaign_tag(timing_tag)
+    except ValueError as exc:
+        return False, str(exc)
+    expected_kind = "cache_probe" if spec["lane"] == "probe" else "matrix"
+    if timing_kind != expected_kind:
+        return False, (
+            f"tag {timing_tag!r} names a {expected_kind} lane, not {timing_kind}"
+        )
+    contract = CONTRACTS[spec["contract"]]
+    if record.get("apparent_mb_mode") != contract["apparent_mb_mode"]:
+        return False, (
+            f"apparent_mb_mode={record.get('apparent_mb_mode')!r}; contract "
+            f"{spec['contract']!r} expects {contract['apparent_mb_mode']!r}"
+        )
+    try:
+        cap = float(record.get("apparent_mb_cap_m_per_yr", 0.0))
+    except (TypeError, ValueError):
+        cap = math.nan
+    if not math.isclose(
+        cap, contract["apparent_mb_cap_m_per_yr"], abs_tol=1e-12
+    ):
+        return False, (
+            f"apparent MB cap={cap!r}; contract expects "
+            f"{contract['apparent_mb_cap_m_per_yr']!r}"
+        )
+    fixed = bool(record.get("fixed_front", False))
+    if fixed != contract["fixed_front"]:
+        return False, (
+            "lane fixed the calving front but the contract does not"
+            if fixed
+            else "contract fixes the calving front but the lane did not"
+        )
+    if fixed:
         try:
-            uncapped = math.isclose(
-                float(record["apparent_mb_cap_m_per_yr"]),
-                0.0,
-                abs_tol=1e-12,
-            )
-        except (KeyError, TypeError, ValueError):
-            uncapped = False
-        if not uncapped:
-            return False, "apparent-MB probe was capped"
-    elif timing_kind == "matrix" and record.get("apparent_mb_mode") is not None:
-        return False, "matrix timing unexpectedly used apparent MB"
+            masked = int(record.get("fixed_front_cells") or 0)
+        except (TypeError, ValueError):
+            masked = 0
+        if masked <= 0:
+            return False, "fixed front masked no cells (clamped initial state?)"
     if record.get("diagnostic_solver_mode") != SOLVER_MODE:
         return False, (
             "diagnostic_solver_mode="
@@ -509,32 +686,35 @@ def validate_timing_record(
         if expected is not None and record.get(key) != int(expected):
             return False, f"record {key}={record.get(key)!r}; expected {expected}"
 
+    steps = spec["steps"]
     try:
         record_lc = int(record["lc"])
+        dt = expected_dt(record_lc, spec["dt_2500"])
+        t_end = expected_t_end(record_lc, steps, spec["dt_2500"])
         interval_ok = (
             math.isclose(float(record["t_start"]), MATRIX_T_START,
                          abs_tol=1e-12)
-            and math.isclose(float(record["dt"]), expected_dt(record_lc),
-                             abs_tol=1e-12)
-            and int(record["nsteps"]) == MATRIX_STEPS
-            and int(record["completed_steps"]) == MATRIX_STEPS
-            and math.isclose(float(record["t_end"]), expected_t_end(record_lc),
-                             abs_tol=1e-12)
-            and math.isclose(float(record["t_final"]), expected_t_end(record_lc),
-                             abs_tol=1e-12)
+            and math.isclose(float(record["dt"]), dt, abs_tol=1e-12)
+            and int(record["nsteps"]) == steps
+            and int(record["completed_steps"]) == steps
+            and math.isclose(float(record["t_end"]), t_end, abs_tol=1e-12)
+            and math.isclose(float(record["t_final"]), t_end, abs_tol=1e-12)
         )
     except (KeyError, TypeError, ValueError):
         interval_ok = False
     if not interval_ok:
-        return False, "record did not complete the required five-step interval"
+        return False, (
+            f"record did not complete the required {steps}-step interval "
+            f"(dt {expected_dt(int(record.get('lc', 2500)), spec['dt_2500']):g} yr)"
+        )
 
     diagnostic = diverged_reasons(record, "diagnostic_solve_summary")
     if diagnostic:
         return False, f"diagnostic divergence: {diagnostic}"
     labels = [stat.get("label", "")
               for stat in record.get("diagnostic_solves", [])]
-    if len(labels) < MATRIX_STEPS:
-        return False, "record has fewer than five diagnostic solves"
+    if len(labels) < steps:
+        return False, f"record has fewer than {steps} diagnostic solves"
     if any("rescue" in label or "trust-region" in label for label in labels):
         return False, "record used the rescue ladder"
     if any(label != f"step-{index}-direct"
@@ -545,14 +725,14 @@ def validate_timing_record(
     if transport:
         return False, f"transport divergence: {transport}"
     transport_summary = record.get("transport_solve_summary", {})
-    if int(transport_summary.get("count", 0)) != MATRIX_STEPS:
-        return False, "record does not contain exactly five transport solves"
+    if int(transport_summary.get("count", 0)) != steps:
+        return False, f"record does not contain exactly {steps} transport solves"
     transport_labels = [
         stat.get("label", "") for stat in record.get("transport_solves", [])
     ]
     expected_transport_labels = [
         f"step-{index}-substep-1/1"
-        for index in range(1, MATRIX_STEPS + 1)
+        for index in range(1, steps + 1)
     ]
     if transport_labels != expected_transport_labels:
         return False, f"unexpected transport solve sequence: {transport_labels}"
@@ -588,9 +768,113 @@ def validate_timing_record(
         return False, "strict timing record did not restrict subcycles to [1]"
     if record.get("timing_scope") != "transient_loop_only":
         return False, f"timing_scope={record.get('timing_scope')!r}"
-    if timing_kind == "matrix":
-        return True, "completed strict cached five-step timing run"
-    return True, "completed strict cached five-step run"
+    what = "timing run" if timing_kind == "matrix" else "probe"
+    return True, (
+        f"completed strict cached {steps}-step {what} "
+        f"({spec['contract']} contract)"
+    )
+
+
+def synthetic_record(lc, lc_coarse, ncores, timing_tag=None, timing_kind="matrix"):
+    """A minimal PASSING record for ``timing_tag`` (self-tests, dry runs)."""
+    timing_tag = campaign_tag() if timing_tag is None else timing_tag
+    spec = parse_campaign_tag(timing_tag)
+    contract = CONTRACTS[spec["contract"]]
+    steps = spec["steps"]
+    dt = expected_dt(lc, spec["dt_2500"])
+    t_end = expected_t_end(lc, steps, spec["dt_2500"])
+    return {
+        "record_schema_version": RECORD_SCHEMA_VERSION,
+        "run_status": "success",
+        "failure": None,
+        "lc": int(lc),
+        "lc_coarse": int(lc_coarse),
+        "ncores": int(ncores),
+        "timing_kind": timing_kind,
+        "timing_tag": timing_tag,
+        "apparent_mb_mode": contract["apparent_mb_mode"],
+        "apparent_mb_cap_m_per_yr": contract["apparent_mb_cap_m_per_yr"],
+        "fixed_front": contract["fixed_front"],
+        "fixed_front_cells": 48843 if contract["fixed_front"] else 0,
+        "diagnostic_solver_mode": SOLVER_MODE,
+        "t_start": MATRIX_T_START,
+        "dt": dt,
+        "nsteps": steps,
+        "completed_steps": steps,
+        "t_end": t_end,
+        "t_final": t_end,
+        "diagnostic_solve_summary": {"reason_counts": {"2": steps}},
+        "diagnostic_solves": [
+            {"label": f"step-{index}-direct"} for index in range(1, steps + 1)
+        ],
+        "transport_solve_summary": {
+            "count": steps,
+            "reason_counts": {"2": steps},
+            "mass_residual_gt_max": 1e-8,
+        },
+        "transport_solves": [
+            {"label": f"step-{index}-substep-1/1"}
+            for index in range(1, steps + 1)
+        ],
+        "step_mass_residual_gt_max": 1e-8,
+        "cache_validation": {"status": "valid"},
+        "rescue_enabled": False,
+        "solver_configuration": {"subcycles": [1]},
+        "timing_scope": "transient_loop_only",
+    }
+
+
+def selftest():
+    """Pure-Python checks of the tag/contract/record machinery."""
+    for steps, dt in ((5, 0.25), (10, 0.125), (20, 0.0625)):
+        for contract in CONTRACTS:
+            tag = campaign_tag(steps, dt, contract)
+            spec = parse_campaign_tag(tag)
+            assert spec == {
+                "steps": steps, "dt_2500": dt, "contract": contract, "lane": None
+            }, (tag, spec)
+            assert parse_campaign_tag(lane_tag("invert", tag))["lane"] == "reinverted"
+            assert parse_campaign_tag(probe_tag(steps, dt, contract))["lane"] == "probe"
+    assert campaign_tag(5, 0.25, "strict") == (
+        "scpc_mumps_5step_dt0p25at2500_dg0_logvelnet_cached_strict_v3"
+    )
+    assert campaign_tag(10, 0.125, "divfront").endswith("dt0p125at2500_dg0_logvelnet_cached_strict_v3_divfront")
+    assert contract_exports("strict") == {"ISMIP7_AMB_CAP": "0"}
+    assert contract_exports("divfront") == {
+        "ISMIP7_AMB_CAP": "0", "ISMIP7_APPARENT_MB": "div", "ISMIP7_FIXED_FRONT": "1"
+    }
+    assert contract_exports("front") == {"ISMIP7_AMB_CAP": "0", "ISMIP7_FIXED_FRONT": "1"}
+
+    def check(record, expected_valid, fragment=None, **kwargs):
+        valid, detail = validate_timing_record(record, **kwargs)
+        assert valid is expected_valid, (expected_valid, detail, kwargs)
+        if fragment is not None:
+            assert fragment in detail, (fragment, detail)
+
+    tag10 = campaign_tag(10, 0.125, "strict")
+    good = synthetic_record(2500, 25000, 16, tag10)
+    check(good, True, "10-step", lc=2500, lc_coarse=25000, ncores=16, timing_tag=tag10)
+    check(good, False, "timing_tag=", timing_tag=campaign_tag(5, 0.25))
+    short = dict(good, completed_steps=9, t_final=good["t_end"] - 0.125)
+    check(short, False, "10-step interval", timing_tag=tag10)
+    check(dict(good, apparent_mb_mode="div"), False, "apparent_mb_mode", timing_tag=tag10)
+    check(dict(good, fixed_front=True), False, "contract does not", timing_tag=tag10)
+    tagdf = campaign_tag(10, 0.125, "divfront")
+    gooddf = synthetic_record(2500, 25000, 16, tagdf)
+    check(gooddf, True, "divfront", timing_tag=tagdf)
+    check(dict(gooddf, fixed_front=False), False, "lane did not", timing_tag=tagdf)
+    check(dict(gooddf, fixed_front_cells=0), False, "masked no cells", timing_tag=tagdf)
+    check(dict(gooddf, apparent_mb_cap_m_per_yr=5.0), False, "cap=", timing_tag=tagdf)
+    ptag = probe_tag(10, 0.125, "div")
+    probe = synthetic_record(2500, 25000, 16, ptag, timing_kind="cache_probe")
+    check(probe, True, "probe", timing_kind="cache_probe", timing_tag=ptag)
+    check(dict(probe, timing_kind="matrix"), False, "names a cache_probe lane",
+          timing_tag=ptag)
+    old = dict(good, record_schema_version=RECORD_SCHEMA_VERSION - 1)
+    check(old, False, "schema", timing_tag=tag10)
+    assert pristine_sibling("/x/initial_state_a.h5") == "/x/initial_state_a.prepare.h5"
+    assert pristine_sibling("/x/initial_state_a.prepare.h5") == "/x/initial_state_a.prepare.h5"
+    print("timing_campaign selftest OK")
 
 
 assert len(mesh_rows()) == 10
@@ -607,7 +891,7 @@ def _print_lanes(lanes):
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     subparsers = parser.add_subparsers(dest="command", required=True)
-    for command in ("rows", "planned", "scout", "scale"):
+    for command in ("rows", "planned", "scout", "scale", "selftest", "tag"):
         subparsers.add_parser(command)
     validate = subparsers.add_parser("validate-cache")
     validate.add_argument("--manifest", required=True)
@@ -627,6 +911,10 @@ def main():
         _print_lanes(scout_lanes())
     elif args.command == "scale":
         _print_lanes(scaling_lanes())
+    elif args.command == "selftest":
+        selftest()
+    elif args.command == "tag":
+        print(campaign_tag())
     elif args.command == "validate-cache":
         try:
             with open(args.manifest) as stream:

@@ -26,13 +26,15 @@ from mpi4py import MPI
 from icepack2_tools.solverconfig import (
     diagnostic_solver_label,
     diagnostic_solver_mode,
+    fixed_front_enabled,
     rescue_enabled,
     solver_provenance,
 )
 from simulation import lc, run_simulation, setup_model
 from timing_campaign import (
-    AMB_PROBE_TAG,
+    CONTRACTS,
     RECORD_SCHEMA_VERSION,
+    parse_campaign_tag,
     atomic_write_json,
     atomic_write_status,
     solver_configuration_fingerprint,
@@ -51,6 +53,9 @@ LINEAR_SOLVER_LABEL = diagnostic_solver_label(DIAGNOSTIC_LINEAR_SOLVER)
 TIMING_KIND = os.environ.get("ISMIP7_TIMING_KIND", "matrix")
 APPARENT_MB_MODE = os.environ.get("ISMIP7_APPARENT_MB")
 APPARENT_MB_CAP = float(os.environ.get("ISMIP7_AMB_CAP", "0"))
+FIXED_FRONT = fixed_front_enabled()
+# Filled by _validate_lane_contract() for matrix/probe kinds.
+LANE_CONTRACT = {}
 
 
 def _safe_tag(env_name, default):
@@ -68,19 +73,59 @@ CACHE_MANIFEST = os.environ.get("ISMIP7_TIMING_CACHE_MANIFEST") or None
 STATUS_PATH = os.environ.get("ISMIP7_TIMING_STATUS") or None
 
 
-def _validate_probe_contract():
-    if TIMING_KIND != "cache_probe":
-        return
-    if TIMING_TAG != AMB_PROBE_TAG:
+def _validate_lane_contract():
+    """The tag names the contract; the environment must match it exactly."""
+    if TIMING_KIND not in {"matrix", "cache_probe"}:
+        return None
+    try:
+        spec = parse_campaign_tag(TIMING_TAG)
+    except ValueError as exc:
         raise RuntimeError(
-            f"cache probe tag {TIMING_TAG!r}; expected {AMB_PROBE_TAG!r}"
-        )
-    if APPARENT_MB_MODE != "div":
+            f"timing tag {TIMING_TAG!r} does not name a lane contract: {exc}"
+        ) from exc
+    is_probe = spec["lane"] == "probe"
+    if is_probe != (TIMING_KIND == "cache_probe"):
         raise RuntimeError(
-            "cache probe requires ISMIP7_APPARENT_MB=div"
+            f"timing tag {TIMING_TAG!r} is a "
+            f"{'probe' if is_probe else 'matrix'} tag but ISMIP7_TIMING_KIND="
+            f"{TIMING_KIND!r}"
         )
-    if APPARENT_MB_CAP != 0.0:
-        raise RuntimeError("cache probe requires uncapped apparent MB")
+    contract = CONTRACTS[spec["contract"]]
+    if APPARENT_MB_MODE != contract["apparent_mb_mode"]:
+        raise RuntimeError(
+            f"contract {spec['contract']!r} requires ISMIP7_APPARENT_MB="
+            f"{contract['apparent_mb_mode']!r}, got {APPARENT_MB_MODE!r}"
+        )
+    if abs(APPARENT_MB_CAP - contract["apparent_mb_cap_m_per_yr"]) > 1e-12:
+        raise RuntimeError(
+            f"contract {spec['contract']!r} requires ISMIP7_AMB_CAP="
+            f"{contract['apparent_mb_cap_m_per_yr']:g}, got {APPARENT_MB_CAP:g}"
+        )
+    if FIXED_FRONT != contract["fixed_front"]:
+        raise RuntimeError(
+            f"contract {spec['contract']!r} requires ISMIP7_FIXED_FRONT="
+            f"{'1' if contract['fixed_front'] else '0/unset'}"
+        )
+    LANE_CONTRACT.update(contract, name=spec["contract"], steps=spec["steps"],
+                         dt_2500=spec["dt_2500"])
+    return contract
+
+
+def _budget_summary(steps):
+    """Totals over the per-step mass budget published by run_simulation."""
+    if not steps:
+        return None
+    def total(key):
+        return float(sum(float(step.get(key, 0.0) or 0.0) for step in steps))
+    return {
+        "steps": steps,
+        "calving_gt_total": total("calv_gt"),
+        "clamp_gt_total": total("clamp_gt"),
+        "limit_gt_total": total("limit_gt"),
+        "outflux_gt_total": total("out_gt"),
+        "apparent_mb_gt_per_yr": float(steps[0].get("amb_gt_per_yr", 0.0) or 0.0),
+        "resid_gt_max": max(abs(float(step.get("resid_gt", 0.0) or 0.0)) for step in steps),
+    }
 
 
 def _summary(stats, reason_key, iteration_key, residual_key=None):
@@ -271,7 +316,7 @@ def _write_record(record, target_lc_coarse, ncores):
 
 
 def main():
-    _validate_probe_contract()
+    _validate_lane_contract()
     TIMING_DIR.mkdir(parents=True, exist_ok=True)
     ncores = COMM_WORLD.size
     target_lc_coarse = int(os.environ.get("ISMIP7_LC_COARSE", "0"))
@@ -298,7 +343,11 @@ def main():
         activity = "setup"
         ctx = setup_model(
             restart_from=RESTART_FROM,
-            allow_timing_cache_a_ref=(TIMING_KIND == "cache_probe"),
+            # A validated pristine cache may build its apparent-MB reference
+            # under any contract that asks for one (production closure).
+            allow_timing_cache_a_ref=(
+                LANE_CONTRACT.get("apparent_mb_mode") == "div"
+            ),
         )
         activity = "loaded_cache_validation"
         try:
@@ -438,6 +487,14 @@ def main():
         "experiment_name": EXPERIMENT_NAME,
         "apparent_mb_mode": APPARENT_MB_MODE,
         "apparent_mb_cap_m_per_yr": APPARENT_MB_CAP,
+        "fixed_front": FIXED_FRONT,
+        "front_hmin_m": ctx.get("front_hmin") if ctx else None,
+        "fixed_front_cells": ctx.get("fixed_front_cells") if ctx else None,
+        "contract": LANE_CONTRACT.get("name"),
+        "matrix_steps": LANE_CONTRACT.get("steps"),
+        "matrix_dt_2500": LANE_CONTRACT.get("dt_2500"),
+        "tripwire": ctx.get("tripwire") if ctx else None,
+        "budget": _budget_summary(ctx.get("step_budget", []) if ctx else []),
         "diagnostic_solver_mode": DIAGNOSTIC_LINEAR_SOLVER,
         "linear_solver": LINEAR_SOLVER_LABEL,
         "transport_solver": "gmres-bjacobi-ilu",

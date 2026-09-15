@@ -21,10 +21,11 @@ from icepack2_tools.solverconfig import (
     solver_provenance,
 )
 from timing_campaign import (
-    AMB_PROBE_TAG,
     BUFFER_M,
-    CAMPAIGN_TAG,
     CACHE_TAG,
+    CONTRACTS,
+    LANE_INITIAL_STATE_DEFAULT,
+    TRIPWIRE_DEFAULTS,
     MEMORY_BY_LC,
     SOLVER_MODE,
     SOURCE_INVERSION_BASENAME,
@@ -37,6 +38,12 @@ from timing_campaign import (
     inversion_memory,
     inversion_required,
     lane_tag,
+    campaign_tag,
+    contract_exports,
+    contract_name,
+    matrix_dt_2500,
+    matrix_steps,
+    probe_tag,
     mesh_basename,
     mesh_inversion_basename,
     mesh_inversion_map_path,
@@ -214,8 +221,28 @@ class CampaignManager:
         self.follow_invert = bool(getattr(args, "follow_invert", False))
         self.only_mesh = args.only_mesh
         self.monitor = args.monitor
-        self.initial_state = getattr(args, "initial_state", "invert")
-        self.lane_tag = lane_tag(self.initial_state)
+        # The interval (steps, 2.5 km dt) and the physics contract are
+        # campaign parameters: they name the tag, so records from different
+        # ladder rungs never mix, and they are pinned into this process's
+        # environment so every path helper and validator agrees.
+        self.matrix_steps = matrix_steps(getattr(args, "matrix_steps", None))
+        self.matrix_dt_2500 = matrix_dt_2500(
+            getattr(args, "matrix_dt_2500", None)
+        )
+        self.contract = contract_name(getattr(args, "contract", None))
+        os.environ["ISMIP7_MATRIX_STEPS"] = str(self.matrix_steps)
+        os.environ["ISMIP7_MATRIX_DT_2500"] = f"{self.matrix_dt_2500:g}"
+        os.environ["ISMIP7_TIMING_CONTRACT"] = self.contract
+        self.campaign_tag = campaign_tag(
+            self.matrix_steps, self.matrix_dt_2500, self.contract
+        )
+        self.probe_tag = probe_tag(
+            self.matrix_steps, self.matrix_dt_2500, self.contract
+        )
+        self.initial_state = getattr(
+            args, "initial_state", LANE_INITIAL_STATE_DEFAULT
+        )
+        self.lane_tag = lane_tag(self.initial_state, self.campaign_tag)
         self.submit_failures = 0
         self.source_sha256 = None
         self.mesh_checksums = {}
@@ -423,6 +450,46 @@ class CampaignManager:
             solver_fingerprint=self.solver_fingerprint,
         )
         return valid, f"pristine prepare copy: {detail}"
+
+    def lane_cache(self, lc, lc_coarse):
+        """``(cache, manifest, detail)`` for a lane from the transferred state.
+
+        Prefer the pristine prepare copy (its manifest keeps naming the
+        source MAP after an invert has republished the cache path); fall
+        back to the published cache, which must then descend from the
+        source MAP itself. ``cache`` is None when neither validates.
+        """
+        pristine, pristine_manifest = pristine_cache_paths(
+            self.cache_dir, lc, lc_coarse
+        )
+        if (
+            pristine.is_file()
+            and pristine_manifest.is_file()
+            and not (self.dry_run and self.assume_valid_caches)
+        ):
+            valid, detail = self.warm_start_validation(lc, lc_coarse)
+            if valid:
+                return pristine, pristine_manifest, detail
+        valid, detail = self.cache_validation(
+            lc, lc_coarse, require_source=True
+        )
+        cache, manifest = cache_paths(self.cache_dir, lc, lc_coarse)
+        if not valid:
+            return None, None, detail
+        return cache, manifest, detail
+
+    def lane_exports(self, ncores_unused=None):
+        """Interval, contract and tripwire environment shared by every lane."""
+        exports = {
+            "ISMIP7_MATRIX_STEPS": self.matrix_steps,
+            "ISMIP7_MATRIX_DT_2500": f"{self.matrix_dt_2500:g}",
+            "ISMIP7_TIMING_CONTRACT": self.contract,
+            # Print the budget line every step, not only at steps 1 and 5.
+            "ISMIP7_OUTPUT_INTERVAL": "1",
+        }
+        exports.update(contract_exports(self.contract))
+        exports.update(TRIPWIRE_DEFAULTS)
+        return exports
 
     def inversion_map_path(self, lc, lc_coarse):
         return mesh_inversion_map_path(
@@ -884,10 +951,10 @@ class CampaignManager:
 
     def probe_result(self, lc, lc_coarse, ncores):
         record_path = self.timing_dir / timing_record_basename(
-            AMB_PROBE_TAG, lc, lc_coarse, ncores
+            self.probe_tag, lc, lc_coarse, ncores
         )
         status_path = self.timing_dir / timing_status_basename(
-            AMB_PROBE_TAG, lc, lc_coarse, ncores
+            self.probe_tag, lc, lc_coarse, ncores
         )
         record, error = read_record(record_path)
         if error:
@@ -899,8 +966,7 @@ class CampaignManager:
                 lc_coarse=lc_coarse,
                 ncores=ncores,
                 timing_kind="cache_probe",
-                timing_tag=AMB_PROBE_TAG,
-                apparent_mb_mode="div",
+                timing_tag=self.probe_tag,
             )
             return ("passed" if valid else "failed"), detail, status_path
         status, active = self.reconcile_status(status_path)
@@ -919,7 +985,7 @@ class CampaignManager:
     def probe(self):
         if self.only_mesh is None:
             raise SystemExit(
-                "The apparent-MB cache probe requires --only-mesh LC/LC_coarse"
+                "The contract probe requires --only-mesh LC/LC_coarse"
             )
         lc, lc_coarse = self.only_mesh
         ncores = 32 if lc == 500 else 16
@@ -935,11 +1001,10 @@ class CampaignManager:
                 "FORCE_TIMING=1 after inspection"
             )
             return
-        valid, cache_detail = self.cache_validation(lc, lc_coarse)
-        if not valid:
+        cache, manifest, cache_detail = self.lane_cache(lc, lc_coarse)
+        if cache is None:
             print(f"PROBE WAITING CACHE {lc}/{lc_coarse}: {cache_detail}")
             return
-        cache, manifest = cache_paths(self.cache_dir, lc, lc_coarse)
         boundary = self.boundary_path(lc, lc_coarse)
         if not boundary.is_file() and not (
             self.dry_run and self.assume_valid_caches
@@ -954,7 +1019,7 @@ class CampaignManager:
                     reason="missing_boundary_ids",
                 )
             return
-        dt = expected_dt(lc)
+        dt = expected_dt(lc, self.matrix_dt_2500)
         exports = {
             "ISMIP7_LC": lc,
             "ISMIP7_LC_COARSE": lc_coarse,
@@ -974,27 +1039,28 @@ class CampaignManager:
             "ISMIP7_SNES_DIVERGENCE_TOL": SNES_DIVERGENCE_TOL_DEFAULT,
             "ISMIP7_RESCUE_ENABLED": "0",
             "ISMIP7_SUBCYCLES": "1",
-            "ISMIP7_APPARENT_MB": "div",
-            "ISMIP7_AMB_CAP": "0",
-            "ISMIP7_T_END": f"{expected_t_end(lc):.12g}",
+            "ISMIP7_T_END": (
+                f"{expected_t_end(lc, self.matrix_steps, self.matrix_dt_2500):.12g}"
+            ),
             "ISMIP7_DT": f"{dt:.12g}",
             "ISMIP7_TIMING_KIND": "cache_probe",
-            "ISMIP7_TIMING_TAG": AMB_PROBE_TAG,
+            "ISMIP7_TIMING_TAG": self.probe_tag,
             "ISMIP7_TIMING_EXPERIMENT": (
-                f"timing_{AMB_PROBE_TAG}_lcc{lc_coarse}_n{ncores}"
+                f"timing_{self.probe_tag}_lcc{lc_coarse}_n{ncores}"
             ),
             "ISMIP7_TIMING_STATUS": status_path,
         }
+        exports.update(self.lane_exports())
         if self.monitor:
             exports.update({
                 "ISMIP7_SNES_MONITOR": "1",
                 "ISMIP7_SNES_LOG": self.logs_dir / (
-                    f"timing_snes_{AMB_PROBE_TAG}_{lc}_{lc_coarse}"
+                    f"timing_snes_{self.probe_tag}_{lc}_{lc_coarse}"
                     f"_{ncores}.log"
                 ),
             })
         self._submit(
-            f"timing_ambdiv_probe_{lc}_{lc_coarse}_{ncores}",
+            f"timing_probe_{self.contract}_{lc}_{lc_coarse}_{ncores}",
             ncores,
             MEMORY_BY_LC[lc],
             exports,
@@ -1065,18 +1131,23 @@ class CampaignManager:
                     f"{inv_state} ({inv_detail}); no active invert job to follow"
                 )
                 return
+        # Campaign lanes (and re-inverted lanes on meshes that are not
+        # re-inverted) run from the transferred prepare state; re-inverted
+        # lanes on inverted meshes need that mesh's invert-published cache.
+        from_prepare = (
+            self.initial_state == "prepare" or not inversion_required(lc)
+        )
+        if from_prepare:
+            cache, manifest, cache_detail = self.lane_cache(lc, lc_coarse)
+            if cache is None:
+                print(
+                    f"LANE WAITING CACHE {lc}/{lc_coarse}/{ncores}: "
+                    f"{cache_detail}"
+                )
+                return
         else:
-            # Meshes that are not re-inverted, and control lanes, run from the
-            # prepare cache, whose provenance points at the imported source
-            # MAP; campaign lanes on inverted meshes need the invert's cache.
-            from_prepare = (
-                self.initial_state == "prepare" or not inversion_required(lc)
-            )
             valid, cache_detail = self.cache_validation(
-                lc,
-                lc_coarse,
-                require_mesh_inversion=not from_prepare,
-                require_source=from_prepare,
+                lc, lc_coarse, require_mesh_inversion=True
             )
             if not valid:
                 print(
@@ -1084,7 +1155,7 @@ class CampaignManager:
                     f"{cache_detail}"
                 )
                 return
-        cache, manifest = cache_paths(self.cache_dir, lc, lc_coarse)
+            cache, manifest = cache_paths(self.cache_dir, lc, lc_coarse)
         boundary = self.boundary_path(lc, lc_coarse)
         if not boundary.is_file() and not (
             self.dry_run and self.assume_valid_caches
@@ -1100,16 +1171,15 @@ class CampaignManager:
                     reason="missing_boundary_ids",
                 )
             return
-        dt = expected_dt(lc)
+        dt = expected_dt(lc, self.matrix_dt_2500)
         exports = {
             "ISMIP7_LC": lc,
             "ISMIP7_LC_COARSE": lc_coarse,
             "ISMIP7_BUFFER_M": BUFFER_M,
             "ISMIP7_BNDIDS": boundary,
             "ISMIP7_INVERSION": (
-                self.inversion_map_path(lc, lc_coarse)
-                if inversion_required(lc) and self.initial_state != "prepare"
-                else self.inversion
+                self.inversion if from_prepare
+                else self.inversion_map_path(lc, lc_coarse)
             ),
             "ISMIP7_RESTART": cache,
             "ISMIP7_TIMING_CACHE_MANIFEST": manifest,
@@ -1122,7 +1192,9 @@ class CampaignManager:
             "ISMIP7_SNES_DIVERGENCE_TOL": SNES_DIVERGENCE_TOL_DEFAULT,
             "ISMIP7_RESCUE_ENABLED": "0",
             "ISMIP7_SUBCYCLES": "1",
-            "ISMIP7_T_END": f"{expected_t_end(lc):.12g}",
+            "ISMIP7_T_END": (
+                f"{expected_t_end(lc, self.matrix_steps, self.matrix_dt_2500):.12g}"
+            ),
             "ISMIP7_DT": f"{dt:.12g}",
             "ISMIP7_TIMING_KIND": "matrix",
             "ISMIP7_TIMING_TAG": self.lane_tag,
@@ -1131,6 +1203,7 @@ class CampaignManager:
             ),
             "ISMIP7_TIMING_STATUS": status_path,
         }
+        exports.update(self.lane_exports())
         if self.monitor:
             exports.update({
                 "ISMIP7_SNES_MONITOR": "1",
@@ -1247,12 +1320,37 @@ def parse_args():
     )
     parser.add_argument(
         "--initial-state",
-        choices=("invert", "prepare"),
-        default="invert",
+        choices=("prepare", "invert"),
+        default=LANE_INITIAL_STATE_DEFAULT,
         help=(
-            "scout/scale: 'invert' (campaign lanes; inverted meshes need "
-            "their per-mesh invert) or 'prepare' (control lanes from the "
-            "transferred prepare cache, recorded under the _transferred tag)"
+            "scout/scale: 'prepare' (campaign lanes from the transferred "
+            "prepare cache) or 'invert' (lanes from each mesh's per-mesh "
+            "invert-published cache, recorded under the _reinverted tag)"
+        ),
+    )
+    parser.add_argument(
+        "--matrix-steps",
+        type=int,
+        default=None,
+        help=f"steps per lane (default {matrix_steps()}; encoded in the tag)",
+    )
+    parser.add_argument(
+        "--matrix-dt-2500",
+        type=float,
+        default=None,
+        help=(
+            f"timestep at 2.5 km in years, scaled by LC/2500 for other meshes "
+            f"(default {matrix_dt_2500():g}; encoded in the tag)"
+        ),
+    )
+    parser.add_argument(
+        "--contract",
+        choices=tuple(CONTRACTS),
+        default=None,
+        help=(
+            f"lane physics contract (default {contract_name()}): strict = no "
+            "apparent MB and no calving sink; divfront/front/div add the "
+            "production closure and/or the fixed 2015 calving front"
         ),
     )
     return parser.parse_args()

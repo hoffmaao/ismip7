@@ -8,16 +8,19 @@
 #   inversion     verify the imported improved DG0 logvelnet inversion
 #   redistribute  rewrite the complete inversion checkpoint on 1 core
 #   timing-prepare  prepare/repack one exact-mesh state for all 10 meshes
-#   timing-inversion  per-mesh logvelnet invert (TIMING_INVERSION_MAXITER, default 250); republish cache
+#   timing-inversion  OPTIONAL per-mesh logvelnet invert (TIMING_INVERT=1 to include it in
+#                     `make timing`; TIMING_INVERSION_MAXITER, default 250); republish cache
 #                     (FOLLOW_PREPARE=1 queues each invert behind its active prepare job;
-#                     500 m meshes are not re-inverted -- their lanes use the prepared cache)
+#                     500 m meshes are never re-inverted)
 #   timing-cache-audit  report the exact initial FV tendency of prepared caches
-#   timing-amb-probe  test exact div(h*u) cancellation on one prepared cache
+#   timing-probe    one-mesh contract probe (TIMING_CONTRACT=strict|divfront|front|div);
+#                   timing-amb-probe is the legacy alias for TIMING_CONTRACT=div
 #   timing-scout    submit the lowest retained core count for each mesh
 #   timing-scale    submit only scaling lanes whose exact scout passed
-#                   (both: FOLLOW_INVERT=1 queues lanes behind an active invert job;
-#                   TIMING_INITIAL_STATE=prepare runs control lanes from the
-#                   transferred prepare cache, recorded under the _transferred tag)
+#                   (MATRIX_STEPS / MATRIX_DT_2500 set the interval and are part of the tag;
+#                   TIMING_INITIAL_STATE=invert runs lanes from invert-published caches
+#                   under the _reinverted tag; FOLLOW_INVERT=1 queues them behind an
+#                   active invert job)
 #   transient       direct qualification/debug compatibility entry point
 #   qualify       gate one solver through 2-step and 5-step 2.5 km probes
 #   timestep-probe restart at 2.5 km for 5 steps at a selectable coarser dt
@@ -43,7 +46,12 @@ MATRIX_STEPS ?= 5
 MATRIX_DT_2500 ?= 0.25
 MATRIX_DT_2500_TAG := $(subst .,p,$(MATRIX_DT_2500))
 TIMING_KIND ?= matrix
-TIMING_TAG ?= scpc_mumps_5step_dt0p25at2500_dg0_logvelnet_cached_strict_v3
+# Lane physics contract: strict (no apparent MB, no calving sink) or
+# divfront / front / div (production closure and/or fixed 2015 calving front).
+# Steps, the 2.5 km dt and a non-strict contract are all encoded in the tag
+# (scripts/timing_campaign.py campaign_tag builds the identical string).
+TIMING_CONTRACT ?= strict
+TIMING_TAG ?= scpc_mumps_$(MATRIX_STEPS)step_dt$(MATRIX_DT_2500_TAG)at2500_dg0_logvelnet_cached_strict_v3$(if $(filter-out strict,$(TIMING_CONTRACT)),_$(TIMING_CONTRACT),)
 TIMING_EXPERIMENT ?= timing
 # Optional exact-input overrides for a single transient lane.  The resolution
 # matrix leaves these empty and constructs each target mesh parametrically.
@@ -60,7 +68,11 @@ TIMING_INVERSION_MAXITER ?= 250
 TIMING_INVERSION_TIME ?= 24:00:00
 FOLLOW_PREPARE ?=
 FOLLOW_INVERT ?=
-TIMING_INITIAL_STATE ?= invert
+# prepare: campaign lanes from the transferred prepare cache (default).
+# invert: lanes from each mesh's invert-published cache (_reinverted tag).
+TIMING_INITIAL_STATE ?= prepare
+# The per-mesh invert stage is optional; TIMING_INVERT=1 runs it in `make timing`.
+TIMING_INVERT ?=
 SBATCH_WAIT ?=
 FORCE_TIMING ?=
 SLURM_PARTITION ?= general
@@ -136,13 +148,13 @@ DEBUG_STAMP := $(shell date +%Y%m%d_%H%M%S)
 	qualify qualify-if-needed qualify-2step qualify-5step timestep-probe debug \
 	reference solver-smoke matrix matrix-legacy sync-results timing-prepare timing-scout \
 	timing-scale timing-dry-run timing-cache-smoke timing-cache-audit \
-	timing-amb-probe timing-inversion
+	timing-probe timing-amb-probe timing-inversion
 
 timing: qualify-if-needed
 	@mkdir -p results/timing
 	@printf '%s\n' "$(TIMING_TAG)" > results/timing/latest_matrix_campaign.txt
 	$(MAKE) timing-prepare
-	$(MAKE) timing-inversion
+	$(if $(or $(TIMING_INVERT),$(filter invert,$(TIMING_INITIAL_STATE))),$(MAKE) timing-inversion,@echo "per-mesh invert stage skipped (TIMING_INVERT=1 runs it)")
 	$(MAKE) timing-scout
 	$(MAKE) timing-scale
 	$(MAKE) matrix
@@ -308,13 +320,21 @@ timing-cache-audit:
 	  $(if $(TIMING_ONLY_MESH),--only-mesh "$(TIMING_ONLY_MESH)",) \
 	  $(if $(FORCE_TIMING),--force,)
 
-timing-amb-probe:
+# One-mesh contract probe (kind cache_probe, tag <campaign>_probe): the
+# experiment ladder. TIMING_CONTRACT selects strict/divfront/front/div.
+timing-probe:
 	python scripts/manage_timing_campaign.py probe \
 	  --inversion "$(TIMING_INVERSION)" --cache-dir "$(TIMING_CACHE_DIR)" \
 	  --partition "$(SLURM_PARTITION)" --walltime "$(SLURM_TIME)" \
+	  --matrix-steps "$(MATRIX_STEPS)" --matrix-dt-2500 "$(MATRIX_DT_2500)" \
+	  --contract "$(TIMING_CONTRACT)" \
 	  $(if $(TIMING_ONLY_MESH),--only-mesh "$(TIMING_ONLY_MESH)",) \
 	  $(if $(TIMING_SCOUT_MONITOR),--monitor,) \
 	  $(if $(FORCE_TIMING),--force,)
+
+# Legacy alias: the apparent-MB probe is the `div` contract probe.
+timing-amb-probe:
+	$(MAKE) timing-probe TIMING_CONTRACT=div
 
 timing-scout:
 	python scripts/manage_timing_campaign.py scout \
@@ -325,7 +345,9 @@ timing-scout:
 	  $(if $(TIMING_SCOUT_MONITOR),--monitor,) \
 	  $(if $(FORCE_TIMING),--force,) \
 	  $(if $(FOLLOW_INVERT),--follow-invert,) \
-	  --initial-state "$(TIMING_INITIAL_STATE)"
+	  --initial-state "$(TIMING_INITIAL_STATE)" \
+	  --matrix-steps "$(MATRIX_STEPS)" --matrix-dt-2500 "$(MATRIX_DT_2500)" \
+	  --contract "$(TIMING_CONTRACT)"
 
 timing-scale:
 	python scripts/manage_timing_campaign.py scale \
@@ -335,7 +357,9 @@ timing-scale:
 	  $(if $(TIMING_ONLY_MESH),--only-mesh "$(TIMING_ONLY_MESH)",) \
 	  $(if $(FORCE_TIMING),--force,) \
 	  $(if $(FOLLOW_INVERT),--follow-invert,) \
-	  --initial-state "$(TIMING_INITIAL_STATE)"
+	  --initial-state "$(TIMING_INITIAL_STATE)" \
+	  --matrix-steps "$(MATRIX_STEPS)" --matrix-dt-2500 "$(MATRIX_DT_2500)" \
+	  --contract "$(TIMING_CONTRACT)"
 
 timing-dry-run:
 	python scripts/manage_timing_campaign.py prepare --dry-run \
@@ -352,12 +376,18 @@ timing-dry-run:
 	  --partition "$(SLURM_PARTITION)" --walltime "$(SLURM_TIME)" \
 	  --maxiter "$(TIMING_INVERSION_MAXITER)" \
 	  $(if $(TIMING_ONLY_MESH),--only-mesh "$(TIMING_ONLY_MESH)",) \
-	  $(if $(TIMING_SCOUT_MONITOR),--monitor,)
+	  $(if $(TIMING_SCOUT_MONITOR),--monitor,) \
+	  --initial-state "$(TIMING_INITIAL_STATE)" \
+	  --matrix-steps "$(MATRIX_STEPS)" --matrix-dt-2500 "$(MATRIX_DT_2500)" \
+	  --contract "$(TIMING_CONTRACT)"
 	python scripts/manage_timing_campaign.py scale --dry-run --assume-valid-caches \
 	  --inversion "$(TIMING_INVERSION)" --cache-dir "$(TIMING_CACHE_DIR)" \
 	  --partition "$(SLURM_PARTITION)" --walltime "$(SLURM_TIME)" \
 	  --maxiter "$(TIMING_INVERSION_MAXITER)" \
-	  $(if $(TIMING_ONLY_MESH),--only-mesh "$(TIMING_ONLY_MESH)",)
+	  $(if $(TIMING_ONLY_MESH),--only-mesh "$(TIMING_ONLY_MESH)",) \
+	  --initial-state "$(TIMING_INITIAL_STATE)" \
+	  --matrix-steps "$(MATRIX_STEPS)" --matrix-dt-2500 "$(MATRIX_DT_2500)" \
+	  --contract "$(TIMING_CONTRACT)"
 
 # Qualification is intentionally a single 2.5 km / 16-rank lane on the exact
 # 64 km-coarse mesh used by the imported DG0 logvelnet MAP.  The checker gates

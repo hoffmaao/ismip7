@@ -24,10 +24,10 @@ from timing_campaign import (
     MATRIX_STEPS,
     MATRIX_T_START,
     SOURCE_INVERSION_BASENAME,
-    TRANSFERRED_TAG,
     diverged_reasons,
     inversion_required,
     mesh_rows,
+    parse_campaign_tag,
     planned_lanes,
     timing_status_basename,
     validate_timing_record,
@@ -93,6 +93,8 @@ def _failure_class(category):
         "transport_mass_budget",
         "step_mass_budget",
     }:
+        return "NUMERICAL FAILURE"
+    if category == "runaway_tripwire":
         return "NUMERICAL FAILURE"
     if category in {"external_termination", "oom", "slurm_oom"}:
         return "OOM / EXTERNAL"
@@ -214,7 +216,7 @@ def _classify(record, status, lane, strict, tag=CAMPAIGN_TAG):
     return "UNKNOWN", state
 
 
-def _status_table(rows, classifications):
+def _status_table(rows, classifications, dt_2500=MATRIX_DT_2500):
     header = (
         "| LC (m) | LC_coarse (m) | dt (yr) | "
         + " | ".join(f"{cores} cores" for cores in DISPLAY_CORES)
@@ -226,7 +228,7 @@ def _status_table(rows, classifications):
             classifications[(lc, lc_coarse, cores)][0]
             for cores in DISPLAY_CORES
         ]
-        dt = MATRIX_DT_2500 * lc / MATRIX_REFERENCE_LC
+        dt = dt_2500 * lc / MATRIX_REFERENCE_LC
         lines.append(
             f"| {lc} | {lc_coarse} | {dt:.3g} | "
             + " | ".join(labels)
@@ -244,7 +246,7 @@ def _initial_state_label(source):
     return f"`{source}`"
 
 
-def _initial_state_table(rows, records):
+def _initial_state_table(rows, records, reinverted=False):
     """One line per mesh naming the MAP its lanes' initial state came from.
 
     500 m meshes are not re-inverted (see timing_campaign.inversion_required);
@@ -269,10 +271,10 @@ def _initial_state_table(rows, records):
             )
             if len(sources) > 1:
                 label = f"**MIXED** — {label}"
-        elif inversion_required(lc):
+        elif reinverted and inversion_required(lc):
             label = "re-inverted on this mesh (no record yet)"
         else:
-            label = "transferred 2.5 km MAP (policy: not re-inverted)"
+            label = "transferred 2.5 km MAP (policy)"
         lines.append(f"| {lc} | {lc_coarse} | {label} |")
     return lines
 
@@ -328,7 +330,15 @@ def render(tag, timing_dir, output, legacy_full_matrix=False):
     }
     classifications = {}
     accepted = {}
-    strict = not legacy_full_matrix and tag in (CAMPAIGN_TAG, TRANSFERRED_TAG)
+    try:
+        spec = parse_campaign_tag(tag)
+    except ValueError:
+        spec = None
+    strict = not legacy_full_matrix and spec is not None and spec["lane"] != "probe"
+    dt_2500 = spec["dt_2500"] if spec else MATRIX_DT_2500
+    steps = spec["steps"] if spec else MATRIX_STEPS
+    contract = spec["contract"] if spec else "strict"
+    reinverted = bool(spec and spec["lane"] == "reinverted")
     for lane in sorted(displayed):
         if lane not in configured:
             classifications[lane] = (
@@ -354,16 +364,23 @@ def render(tag, timing_dir, output, legacy_full_matrix=False):
         "failures remain distinguishable from incomplete output."
         if legacy_full_matrix
         else
-        "The primary timing covers only the five-step transient loop; setup "
-        "and checkpoint loading are recorded separately. The timestep is "
-        "`0.25 × LC / 2500` years. Strict lanes use `scpc_mumps`, an "
-        "exact-mesh prepared cache, and no rescue or subcycle recovery. "
-        "The initial state is re-inverted on each mesh except at 500 m, "
-        "where it is the transferred 2.5 km MAP (see Initial states)."
+        f"The primary timing covers only the {steps}-step transient loop; "
+        "setup and checkpoint loading are recorded separately. The timestep "
+        f"is `{dt_2500:g} × LC / 2500` years. Lanes use `scpc_mumps`, an "
+        "exact-mesh prepared cache, and no rescue or subcycle recovery; the "
+        f"physics contract is `{contract}` "
         + (
-            " THIS IS THE CONTROL MATRIX: every lane ran from the transferred "
-            "prepare state with no per-mesh invert (TIMING_INITIAL_STATE=prepare)."
-            if tag == TRANSFERRED_TAG else ""
+            "(no apparent mass balance, no calving sink at the 2015 front). "
+            if contract == "strict" else
+            "(see README §7: apparent-MB closure and/or fixed 2015 calving "
+            "front). "
+        )
+        + (
+            "Every lane ran from a cache re-inverted on its own mesh "
+            "(TIMING_INITIAL_STATE=invert; 500 m meshes excepted)."
+            if reinverted else
+            "The initial state is the transferred 2.5 km MAP on every mesh "
+            "(see Initial states)."
         )
     )
     lines = [
@@ -379,12 +396,13 @@ def render(tag, timing_dir, output, legacy_full_matrix=False):
         "## Run status",
         "",
     ]
-    lines.extend(_status_table(rows, classifications))
+    lines.extend(_status_table(rows, classifications, dt_2500))
     if not legacy_full_matrix:
         lines.extend(["", "### Initial states", ""])
         lines.extend(_initial_state_table(
             rows,
             [record for record in records if record.get("timing_tag") == tag],
+            reinverted=reinverted,
         ))
     non_ok = [
         (lane, classifications[lane])

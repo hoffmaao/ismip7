@@ -67,13 +67,33 @@ table:
 * forward half, capped at 5e-3: maximum 57.8 m/yr, 99th percentile 13.0, area
   mean 0.43, 646 Gt/yr, and nothing past the bound.
 
-The uncapped forward half integrates within 7% of the 1860 Gt/yr the 10-year
-run booked, which validates it against a real run. As the two halves stand, the
-forward melts 1.62 times what K was fitted to. Capping the forward's slope
-undershoots the target by 39%, so neither convention on its own reconciles the
-halves, which also differ in floating area, mask and quadrature. Recalibrating
-K through the forward's own cell by cell melt path, under whichever slope
-convention is chosen, reconciles them by construction.
+With calibrated_K_per_basin_2500.npz, the coefficient file the 10-year ssp585
+run read, everything else unchanged:
+
+* calibration half, capped: maximum 54.0 m/yr, area mean 0.61, 841 Gt/yr, and
+  nothing past the bound;
+* calibration half, uncapped: maximum 1522.7 m/yr, area mean 3.34, 4634 Gt/yr,
+  and 320 nodes past the bound over 2193.7 km2;
+* forward half, uncapped: maximum 869.8 m/yr, area mean 0.92, 1380 Gt/yr, and
+  63 cells past the bound over 248.6 km2 with a median cell area of 3.54 km2;
+* forward half, capped: maximum 43.9 m/yr, area mean 0.34, 510 Gt/yr, and
+  nothing past the bound.
+
+The calibration half reproduces the target its own K was fitted to, 841
+against 865 Gt/yr for the 2500 file, which is the internal consistency check.
+The ratio of forward to calibration is the durable result, stable across both
+coefficient files: 1.62 with the 2000 file and 1.64 with the 2500 file. The
+10-year run booked 1860 Gt/yr with the 2500 file, above the 1380 Gt/yr its
+forward half applies at the reference state, since that run carries warmer
+ssp585 thermal forcing over evolving geometry; the gap is a consistent
+residual. An earlier claim that the forward half lands within 7% of that run
+compared two different coefficient files and does not hold.
+
+Capping the forward's slope undershoots the target by 39% with the 2000 file,
+so neither convention on its own reconciles the halves, which also differ in
+floating area, mask and quadrature. Recalibrating K through the forward's own
+cell by cell melt path, under whichever slope convention is chosen, reconciles
+them by construction.
 
 An earlier form of this script lifted the forward's slope onto CG1 nodes and
 melted it with CG1 forcing and the raster mask, so its forward rows,
@@ -137,6 +157,12 @@ def main():
     PETSc.Sys.Print(f"  K from {os.path.basename(npz_path)}"
                     + (f", calibrated against {d['obs_csv']}"
                        if "obs_csv" in d else ""))
+    if "obs_total_gtyr" in d:
+        target = f" (K was fitted to {float(d['obs_total_gtyr']):.0f})"
+    else:
+        target = ""
+        PETSc.Sys.Print(f"  {os.path.basename(npz_path)} records no "
+                        f"obs_total_gtyr, so the rows print no target")
 
     mesh = cm._load_mesh()
     Q = FunctionSpace(mesh, "CG", 1)
@@ -214,7 +240,6 @@ def main():
          np.minimum(forward["sin_a"], cap), "cells"),
     ]
 
-    obs_total = float(d["obs_total_gtyr"]) if "obs_total_gtyr" in d else float("nan")
     for label, g, sin_a, dofs in cases:
         floating, area = g["floating"], g["area"]
         afl = float(area[floating].sum())
@@ -232,8 +257,8 @@ def main():
             f"  melt area-mean          "
             f"{float((melt * area)[floating].sum()) / afl:12.2f} m/yr\n"
             f"  integrated              "
-            f"{float((melt * area)[floating].sum()) * RHO_I / 1e12:12.0f} Gt/yr "
-            f"(K was fitted to {obs_total:.0f})\n"
+            f"{float((melt * area)[floating].sum()) * RHO_I / 1e12:12.0f} Gt/yr"
+            f"{target}\n"
             f"  {dofs} past the bound    {int(over.sum()):12d}\n"
             f"  area past the bound     {a_over / 1e6:12.1f} km^2 "
             f"({100 * a_over / afl:.3f}% of floating)")

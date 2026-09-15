@@ -243,8 +243,14 @@ since `He` is smooth in height above flotation. Under the fixed law the two
 identity checkpoints give outflux 1478 against 1475 Gt/yr and VAF 57638.204
 against 57638.212 mm SLE. Census script:
 `antarctica/scripts/check_budd_map.py MAP [--forward]` (old gate 418 cells at
-the cap, He-only 133, production 0). The old MAP's saved velocity is not
-reproduced by the fixed law, rel L2 = 0.91, so Budd MAPs must be re-inverted.
+the cap, He-only 133, production 0). The census is what calls for re-inverting
+Budd MAPs. Re-solved under the fixed law, the old MAP lands at rel L2 = 0.91
+from its saved velocity. A re-solve distance of this size is now known to
+appear under both friction laws and for a MAP inverted under the shipped gate
+(on the Úa 2 km mesh, 0.665 for the re-inverted Budd MAP and 0.685 for the
+regularized Coulomb MAP), so it does not by itself identify the shelf gate as
+the cause. Section 4 of `antarctica/FORWARD_RUN_READINESS.md` holds that open
+question.
 The outflux numbers quoted above (782, and the identity test's 672) were
 measured with the old test in place, as was every Budd forward and Budd MAP to
 date. Regularized Coulomb has a continuous `tau_cap` and never had the problem.

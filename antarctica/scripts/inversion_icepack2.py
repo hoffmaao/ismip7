@@ -110,8 +110,10 @@ from icepack2_tools.runconfig import (
 )
 from icepack2_tools.solverconfig import (
     diagnostic_solver_mode,
+    final_solve_bounds,
     final_solve_parameters,
     nonlinear_solver_options,
+    snes_atol_scale,
     snes_monitor_enabled,
 )
 from mesh_naming import get_buffer_m, mesh_filename
@@ -484,6 +486,9 @@ def main():
     )
     warm_A_prior = None
     warm_loaded_z = False
+    # Residual the warm start's writer reached under the shared F (stamped by
+    # save_model_state and by save_map): the forwards' absolute tolerance.
+    warm_recorded = None
 
     def _warm_load(chk, source_mesh, name, space):
         source_field = chk.load_function(source_mesh, name=name)
@@ -499,6 +504,11 @@ def main():
         PETSc.Sys.Print(f"  Loading warm start from {warm_chk}")
         with fd.CheckpointFile(warm_chk, "r") as chk:
             chk_mesh = chk.load_mesh()
+            if chk.has_attr("/", "full_state_residual"):
+                try:
+                    warm_recorded = float(chk.get_attr("/", "full_state_residual"))
+                except (TypeError, ValueError):
+                    warm_recorded = None
             theta.assign(_warm_load(chk, chk_mesh, "log_friction", Q))
             phi.assign(_warm_load(chk, chk_mesh, "log_fluidity", Q))
             try:
@@ -839,6 +849,40 @@ def main():
             m_slide.assign(1.0 + t * (m_slide_val - 1.0))
             slvr.solve()
         PETSc.Sys.Print("  Done")
+
+    # Forward-solve tolerance. Now that the stabilizers are shared, a
+    # prepared warm start is already a converged solution of THIS F, so the
+    # first annotated forward starts at the residual floor, where the
+    # relative test can never pass and stol=0 disables the step exit: 200
+    # silent MUMPS factorisations (the 2026-09-14 hang, moved one stage
+    # earlier by the fix). Solve every forward to snes_atol_scale x the
+    # residual the warm start's writer recorded -- the transient's own run
+    # rule -- so a floor-level start confirms at iteration 0 and a moved
+    # control vector gets an ordinary Newton solve to the same absolute
+    # level the forward runs at. Without a record, keep the relative test
+    # but enable the step-size exit so a floor-level start cannot grind.
+    with assemble(F, form_compiler_parameters=fc_params).dat.vec_ro as _rv:
+        f_warm = float(_rv.norm())
+    if (
+        warm_recorded is not None
+        and np.isfinite(warm_recorded)
+        and warm_recorded > 0.0
+    ):
+        forward_atol = snes_atol_scale() * warm_recorded
+        sparams["snes_atol"] = forward_atol
+        PETSc.Sys.Print(
+            f"  Warm-start residual ||F||={f_warm:.3e} (writer recorded "
+            f"{warm_recorded:.3e}); forward snes_atol={forward_atol:.3e} "
+            f"({snes_atol_scale():g}x recorded)"
+        )
+    else:
+        sparams["snes_stol"] = final_solve_bounds()["snes_stol"]
+        PETSc.Sys.Print(
+            f"  Warm-start residual ||F||={f_warm:.3e}; no recorded residual, "
+            f"forwards use the relative test with snes_stol="
+            f"{sparams['snes_stol']:g}"
+        )
+    state_solver_parameters = json.dumps(sparams, sort_keys=True)
 
     u_init = z.subfunctions[0]
     u_mag = Function(Q).interpolate(sqrt(inner(u_init, u_init)))

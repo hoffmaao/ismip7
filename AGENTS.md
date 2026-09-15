@@ -60,9 +60,10 @@ are NOT version controlled:
   Treat these reports as scientific provenance, not as scratch notes: if a run
   is later invalidated, its report must say so, or the invalid result survives
   as the record.
-- Some contributors keep a local `CLAUDE.md` that is excluded via
-  `.git/info/exclude`. It is machine-specific and NOT shared. Anything another
-  agent or human needs belongs here, in `AGENTS.md`, or in the topic docs.
+- Some contributors keep a local working-notes file at the repository root,
+  excluded via `.git/info/exclude`. It is machine-specific and NOT shared.
+  Anything another agent or human needs belongs here, in `AGENTS.md`, or in the
+  topic docs.
 
 ## 3. Invariants: code that looks like a bug and is not
 

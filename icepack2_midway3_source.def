@@ -6,27 +6,8 @@ From: ubuntu:24.04
 # ===========================================================================
 # Builds Firedrake 2026.4.1 / PETSc 3.25.5 from source (NOT the prebuilt
 # firedrake-vanilla image) so PETSc's configure can add --download-parmetis.
-# hypre, ptscotch, mumps, metis, scalapack, superlu_dist are ALREADY in
+# hypre, ptscotch, mumps, metis, scalapack, superlu_dist are already in
 # firedrake-configure's default PETSc options; parmetis is the one addition.
-#
-# !! UNTESTED build (a from-source Firedrake+PETSc compile is ~1-2 h and could
-#    not be built/verified off-cluster). Treat the versions and the PETSc<->
-#    Firedrake pairing as things to CONFIRM on the first build, and expect to
-#    iterate. Notes inline. See ismip7/MIDWAY3_HANDOFF.md.
-#
-# !! VERSION CAVEAT: 2026.4.1 / PETSc 3.25.x is the stack whose inversion
-#    diagnostic Newton DIVERGED earlier (DIVERGED_DTOL); only build this if a
-#    collaborator has confirmed it converges (with the new iterative/hypre
-#    solver options). The 2025.10 pin remains the known-converging fallback
-#    (icepack2_midway3_pinned.def).
-#
-# BUILD ON MIDWAY3 (x86_64, internet needed for the clones/pip in %post):
-#   sinteractive --account=pi-<group> --partition=caslake --ntasks=8 --time=06:00:00
-#   module load apptainer
-#   export APPTAINER_CACHEDIR=/scratch/midway3/$USER/.apptainer_cache
-#   export APPTAINER_TMPDIR=/scratch/midway3/$USER/.apptainer_tmp
-#   mkdir -p "$APPTAINER_CACHEDIR" "$APPTAINER_TMPDIR"
-#   apptainer build --fakeroot icepack2_midway3.sif icepack2_midway3_source.def
 # ===========================================================================
 
 %files

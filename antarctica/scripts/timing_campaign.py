@@ -62,6 +62,20 @@ CAMPAIGN_TAG = (
     "scpc_mumps_5step_dt0p25at2500_dg0_logvelnet_cached_strict_v3"
 )
 AMB_PROBE_TAG = f"{CAMPAIGN_TAG}_ambdiv_probe"
+# Control lanes run from the transferred prepare cache on a mesh the policy
+# would re-invert (TIMING_INITIAL_STATE=prepare). They answer "is the per-mesh
+# invert needed?" and must never be mistaken for campaign lanes, so their
+# records and stamps carry their own tag.
+TRANSFERRED_TAG = f"{CAMPAIGN_TAG}_transferred"
+LANE_INITIAL_STATES = ("invert", "prepare")
+
+
+def lane_tag(initial_state="invert"):
+    if initial_state not in LANE_INITIAL_STATES:
+        raise ValueError(
+            f"initial state must be one of {LANE_INITIAL_STATES}, not {initial_state!r}"
+        )
+    return TRANSFERRED_TAG if initial_state == "prepare" else CAMPAIGN_TAG
 CACHE_TAG = "scpc_mumps_dg0_logvelnet_v3"
 # Per-mesh short invert length. Override with ISMIP7_TIMING_INVERSION_MAXITER
 # or `make timing-inversion TIMING_INVERSION_MAXITER=5` for a debug pass.

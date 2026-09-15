@@ -15,7 +15,9 @@
 #   timing-amb-probe  test exact div(h*u) cancellation on one prepared cache
 #   timing-scout    submit the lowest retained core count for each mesh
 #   timing-scale    submit only scaling lanes whose exact scout passed
-#                   (both: FOLLOW_INVERT=1 queues lanes behind an active invert job)
+#                   (both: FOLLOW_INVERT=1 queues lanes behind an active invert job;
+#                   TIMING_INITIAL_STATE=prepare runs control lanes from the
+#                   transferred prepare cache, recorded under the _transferred tag)
 #   transient       direct qualification/debug compatibility entry point
 #   qualify       gate one solver through 2-step and 5-step 2.5 km probes
 #   timestep-probe restart at 2.5 km for 5 steps at a selectable coarser dt
@@ -58,6 +60,7 @@ TIMING_INVERSION_MAXITER ?= 250
 TIMING_INVERSION_TIME ?= 24:00:00
 FOLLOW_PREPARE ?=
 FOLLOW_INVERT ?=
+TIMING_INITIAL_STATE ?= invert
 SBATCH_WAIT ?=
 FORCE_TIMING ?=
 SLURM_PARTITION ?= general
@@ -321,7 +324,8 @@ timing-scout:
 	  $(if $(TIMING_ONLY_MESH),--only-mesh "$(TIMING_ONLY_MESH)",) \
 	  $(if $(TIMING_SCOUT_MONITOR),--monitor,) \
 	  $(if $(FORCE_TIMING),--force,) \
-	  $(if $(FOLLOW_INVERT),--follow-invert,)
+	  $(if $(FOLLOW_INVERT),--follow-invert,) \
+	  --initial-state "$(TIMING_INITIAL_STATE)"
 
 timing-scale:
 	python scripts/manage_timing_campaign.py scale \
@@ -330,7 +334,8 @@ timing-scale:
 	  --maxiter "$(TIMING_INVERSION_MAXITER)" \
 	  $(if $(TIMING_ONLY_MESH),--only-mesh "$(TIMING_ONLY_MESH)",) \
 	  $(if $(FORCE_TIMING),--force,) \
-	  $(if $(FOLLOW_INVERT),--follow-invert,)
+	  $(if $(FOLLOW_INVERT),--follow-invert,) \
+	  --initial-state "$(TIMING_INITIAL_STATE)"
 
 timing-dry-run:
 	python scripts/manage_timing_campaign.py prepare --dry-run \

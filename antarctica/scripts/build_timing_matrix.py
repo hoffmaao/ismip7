@@ -24,6 +24,7 @@ from timing_campaign import (
     MATRIX_STEPS,
     MATRIX_T_START,
     SOURCE_INVERSION_BASENAME,
+    TRANSFERRED_TAG,
     diverged_reasons,
     inversion_required,
     mesh_rows,
@@ -134,11 +135,15 @@ def _legacy_log_evidence(status):
     return None
 
 
-def _classify(record, status, lane, strict):
+def _classify(record, status, lane, strict, tag=CAMPAIGN_TAG):
     if record is not None:
         if strict:
             valid, detail = validate_timing_record(
-                record, lc=lane[0], lc_coarse=lane[1], ncores=lane[2]
+                record,
+                lc=lane[0],
+                lc_coarse=lane[1],
+                ncores=lane[2],
+                timing_tag=tag,
             )
         else:
             valid = _legacy_valid(record)
@@ -323,7 +328,7 @@ def render(tag, timing_dir, output, legacy_full_matrix=False):
     }
     classifications = {}
     accepted = {}
-    strict = not legacy_full_matrix and tag == CAMPAIGN_TAG
+    strict = not legacy_full_matrix and tag in (CAMPAIGN_TAG, TRANSFERRED_TAG)
     for lane in sorted(displayed):
         if lane not in configured:
             classifications[lane] = (
@@ -332,7 +337,9 @@ def render(tag, timing_dir, output, legacy_full_matrix=False):
             )
             continue
         status = _read_status(timing_dir, tag, lane)
-        classification = _classify(all_index.get(lane), status, lane, strict)
+        classification = _classify(
+            all_index.get(lane), status, lane, strict, tag
+        )
         classifications[lane] = classification
         if classification[0] == "OK":
             accepted[lane] = all_index[lane]
@@ -353,6 +360,11 @@ def render(tag, timing_dir, output, legacy_full_matrix=False):
         "exact-mesh prepared cache, and no rescue or subcycle recovery. "
         "The initial state is re-inverted on each mesh except at 500 m, "
         "where it is the transferred 2.5 km MAP (see Initial states)."
+        + (
+            " THIS IS THE CONTROL MATRIX: every lane ran from the transferred "
+            "prepare state with no per-mesh invert (TIMING_INITIAL_STATE=prepare)."
+            if tag == TRANSFERRED_TAG else ""
+        )
     )
     lines = [
         "# Antarctica timing matrix",

@@ -36,6 +36,7 @@ from timing_campaign import (
     inversion_maxiter,
     inversion_memory,
     inversion_required,
+    lane_tag,
     mesh_basename,
     mesh_inversion_basename,
     mesh_inversion_map_path,
@@ -213,6 +214,8 @@ class CampaignManager:
         self.follow_invert = bool(getattr(args, "follow_invert", False))
         self.only_mesh = args.only_mesh
         self.monitor = args.monitor
+        self.initial_state = getattr(args, "initial_state", "invert")
+        self.lane_tag = lane_tag(self.initial_state)
         self.submit_failures = 0
         self.source_sha256 = None
         self.mesh_checksums = {}
@@ -305,7 +308,17 @@ class CampaignManager:
             self.timing_dir / f"status_{stem}.txt",
         )
 
-    def cache_validation(self, lc, lc_coarse, *, require_mesh_inversion=False):
+    def cache_validation(
+        self,
+        lc,
+        lc_coarse,
+        *,
+        require_mesh_inversion=False,
+        require_source=False,
+    ):
+        """``require_mesh_inversion``: only the per-mesh invert MAP may be the
+        cache's source; ``require_source``: only the imported source MAP may
+        (a control lane must not quietly run from an invert-published cache)."""
         if self.dry_run and self.assume_valid_caches:
             return True, "assumed valid for dry-run command inspection"
         cache, manifest_path = cache_paths(
@@ -325,7 +338,7 @@ class CampaignManager:
             self.root, lc, lc_coarse, maxiter=self.maxiter
         )
         candidates = []
-        if mesh_map.is_file():
+        if mesh_map.is_file() and not require_source:
             candidates.append(
                 (
                     sha256_file(mesh_map),
@@ -359,6 +372,11 @@ class CampaignManager:
             details.append(detail)
         if require_mesh_inversion and not mesh_map.is_file():
             return False, f"mesh inversion MAP missing: {mesh_map}"
+        if require_source and details:
+            return False, (
+                f"{details[0]} (control lanes need the cache published by "
+                "make timing-prepare, not by an invert)"
+            )
         return False, details[0] if details else "cache provenance mismatch"
 
     def warm_start_validation(self, lc, lc_coarse):
@@ -460,6 +478,15 @@ class CampaignManager:
                 # The invert's own verdict on its publishing solve comes
                 # first: a controls-only MAP fails the cache check below too,
                 # but "cache not republished" hides the cause.
+                if "final_solve" not in record:
+                    return (
+                        "failed",
+                        "inversion record predates the publish gate "
+                        "(2026-09-14); its MAP may carry a mixed state from "
+                        "other controls -- re-run make timing-inversion "
+                        "FORCE_TIMING=1",
+                        status_path,
+                    )
                 phase = record.get("phase")
                 if phase != "finished":
                     return (
@@ -827,9 +854,9 @@ class CampaignManager:
     def _lane_paths(self, lc, lc_coarse, ncores):
         return (
             self.timing_dir
-            / timing_record_basename(CAMPAIGN_TAG, lc, lc_coarse, ncores),
+            / timing_record_basename(self.lane_tag, lc, lc_coarse, ncores),
             self.timing_dir
-            / timing_status_basename(CAMPAIGN_TAG, lc, lc_coarse, ncores),
+            / timing_status_basename(self.lane_tag, lc, lc_coarse, ncores),
         )
 
     def lane_result(self, lc, lc_coarse, ncores):
@@ -839,7 +866,11 @@ class CampaignManager:
             return "invalid", error
         if record is not None:
             valid, detail = validate_timing_record(
-                record, lc=lc, lc_coarse=lc_coarse, ncores=ncores
+                record,
+                lc=lc,
+                lc_coarse=lc_coarse,
+                ncores=ncores,
+                timing_tag=self.lane_tag,
             )
             return ("passed" if valid else "failed"), detail
         status, active = self.reconcile_status(status_path)
@@ -980,11 +1011,15 @@ class CampaignManager:
         if state == "failed" and not self.force:
             print(f"LANE FAILED {lc}/{lc_coarse}/{ncores}: {detail}")
             return
-        inv_state, inv_detail, inv_status_path = self.inversion_result(
-            lc, lc_coarse
-        )
         _, status_path = self._lane_paths(lc, lc_coarse, ncores)
         dependency = None
+        if self.initial_state == "prepare":
+            # Control lane: the transferred prepare state, no invert gate.
+            inv_state, inv_detail, inv_status_path = "passed", "control", None
+        else:
+            inv_state, inv_detail, inv_status_path = self.inversion_result(
+                lc, lc_coarse
+            )
         if inv_state != "passed":
             if inv_state == "failed":
                 print(
@@ -1031,10 +1066,17 @@ class CampaignManager:
                 )
                 return
         else:
-            # Meshes that are not re-inverted run from the pristine prepare
-            # cache, whose provenance points at the imported source MAP.
+            # Meshes that are not re-inverted, and control lanes, run from the
+            # prepare cache, whose provenance points at the imported source
+            # MAP; campaign lanes on inverted meshes need the invert's cache.
+            from_prepare = (
+                self.initial_state == "prepare" or not inversion_required(lc)
+            )
             valid, cache_detail = self.cache_validation(
-                lc, lc_coarse, require_mesh_inversion=inversion_required(lc)
+                lc,
+                lc_coarse,
+                require_mesh_inversion=not from_prepare,
+                require_source=from_prepare,
             )
             if not valid:
                 print(
@@ -1066,7 +1108,7 @@ class CampaignManager:
             "ISMIP7_BNDIDS": boundary,
             "ISMIP7_INVERSION": (
                 self.inversion_map_path(lc, lc_coarse)
-                if inversion_required(lc)
+                if inversion_required(lc) and self.initial_state != "prepare"
                 else self.inversion
             ),
             "ISMIP7_RESTART": cache,
@@ -1083,9 +1125,9 @@ class CampaignManager:
             "ISMIP7_T_END": f"{expected_t_end(lc):.12g}",
             "ISMIP7_DT": f"{dt:.12g}",
             "ISMIP7_TIMING_KIND": "matrix",
-            "ISMIP7_TIMING_TAG": CAMPAIGN_TAG,
+            "ISMIP7_TIMING_TAG": self.lane_tag,
             "ISMIP7_TIMING_EXPERIMENT": (
-                f"timing_{CAMPAIGN_TAG}_lcc{lc_coarse}_n{ncores}"
+                f"timing_{self.lane_tag}_lcc{lc_coarse}_n{ncores}"
             ),
             "ISMIP7_TIMING_STATUS": status_path,
         }
@@ -1093,7 +1135,7 @@ class CampaignManager:
             exports.update({
                 "ISMIP7_SNES_MONITOR": "1",
                 "ISMIP7_SNES_LOG": self.logs_dir / (
-                    f"timing_snes_{CAMPAIGN_TAG}_{lc}_{lc_coarse}"
+                    f"timing_snes_{self.lane_tag}_{lc}_{lc_coarse}"
                     f"_{ncores}.log"
                 ),
             })
@@ -1202,6 +1244,16 @@ def parse_args():
         "--monitor",
         action="store_true",
         help="enable per-lane SNES/KSP logs under results/logs",
+    )
+    parser.add_argument(
+        "--initial-state",
+        choices=("invert", "prepare"),
+        default="invert",
+        help=(
+            "scout/scale: 'invert' (campaign lanes; inverted meshes need "
+            "their per-mesh invert) or 'prepare' (control lanes from the "
+            "transferred prepare cache, recorded under the _transferred tag)"
+        ),
     )
     return parser.parse_args()
 

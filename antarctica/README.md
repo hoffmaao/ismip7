@@ -671,7 +671,13 @@ The stages and contracts are:
    for meshes whose scout passes. A failed scout stamps its scaling lanes
    `BLOCKED BY SCOUT`; the jobs are not submitted. `FOLLOW_INVERT=1` lets
    scouts and scaling lanes queue behind an active invert job
-   (`--dependency=afterok`).
+   (`--dependency=afterok`). `TIMING_INITIAL_STATE=prepare` runs **control
+   lanes** from the transferred prepare cache with no invert gate (the cache
+   must have been published by `make timing-prepare`, not by an invert);
+   their records and stamps carry the `…_transferred` tag, so they never
+   count as campaign lanes, and `make matrix TIMING_TAG=<campaign tag>_transferred`
+   renders them separately. Inversion records written before the publish
+   gate (2026‑09‑14) are rejected; re-run the invert with `FORCE_TIMING=1`.
 7. **Strict transient timing** — all matrix lanes use `scpc_mumps`, disable
    rescue, and restrict subcycles to `1`. The first diagnostic, transport, or
    mass-budget failure ends the lane. The primary timer starts immediately

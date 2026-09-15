@@ -12,11 +12,12 @@ as the whole 8 km pixel's value, which the request's own convention asks for.
 
 This looks at the first on the model side, before any regridding. At the
 reference geometry, with the calibrated per-basin K, it evaluates the melt four
-times, as two pairs, and for each row reports the maximum, the 99th percentile,
-the area mean, the integrated total against the ``obs_total_gtyr`` the K was
-fitted to, and how much floating AREA sits past the bound.
+times, capped and uncapped for each of two halves, and for each row reports
+the maximum, the 99th percentile, the area mean, the integrated total against
+the ``obs_total_gtyr`` the K was fitted to, and how much floating AREA sits
+past the bound.
 
-The calibration pair reproduces calibrate_melt on CG1 nodes: BedMachine
+The calibration half reproduces calibrate_melt on CG1 nodes: BedMachine
 interpolated with its raster ``surface`` and ``mask``, and grad(draft)
 projected onto CG1.
 
@@ -24,7 +25,7 @@ projected onto CG1.
   5e-3), the slope K was fitted against;
 * uncapped: the same slope with no cap.
 
-The forward pair reproduces the forward on DG0 cells, the field the forward
+The forward half reproduces the forward on DG0 cells, the field the forward
 melts with under DG0 geometry: bed and thickness sampled onto the cells, the
 surface from flotation, s = max(b + H, (1 - 917/1024) H), as simulation.py
 builds it, ``forcing.compute_sin_alpha``'s cell slope, thermal forcing and
@@ -35,7 +36,7 @@ salinity at each cell centroid and its own draft, and the forward callback's
 * capped: the cell slope capped at the same value, which is where a cap inside
   ``forcing.compute_sin_alpha`` would act.
 
-The two pairs use different floating masks and different quadrature, nodal
+The two halves use different floating masks and different quadrature, nodal
 area weights against cell areas, so their totals compare in magnitude and
 differ in detail.
 
@@ -50,20 +51,34 @@ climatology and its shelves thin.
 Serial. Reuses calibrate_melt's loaders, so it needs the same inputs: a MAP for
 the mesh, the OI climatology, the IMBIE2 basins and BedMachine.
 
-Measured on the Ua 2 km mesh, 14 September 2026, with the per-basin K
-calibrated against the re-released observation table, over 1 512 899 km2 of
-floating ice:
+Measured on the Ua 2 km mesh, September 2026, with
+calibrated_K_per_basin_2000.npz calibrated against the re-released observation
+table:
 
-* calibration, capped at 5e-3: area mean 0.77 m/yr, 1067 Gt/yr, which is the
-  1067.4 Gt/yr target K was fitted to, and no nodes past the bound;
-* calibration, uncapped: area mean 4.18 m/yr, 5803 Gt/yr, and 421 nodes past
-  the bound.
+* calibration half, capped at 5e-3, over 1 512 899 km2 and 47 288 nodes:
+  maximum 71.1 m/yr, 99th percentile 22.2, area mean 0.77, 1067 Gt/yr, which
+  is the 1067.4 Gt/yr target K was fitted to, and nothing past the bound;
+* calibration half, uncapped: maximum 1804.9 m/yr, 99th percentile 256.3, area
+  mean 4.18, 5803 Gt/yr, and 421 nodes past the bound over 2920.6 km2 with a
+  median node area of 6.33 km2;
+* forward half, uncapped, over 1 631 466 km2 and 85 820 cells: maximum
+  1144.1 m/yr, 99th percentile 59.0, area mean 1.16, 1732 Gt/yr, and 97 cells
+  past the bound over 388.2 km2 with a median cell area of 3.61 km2;
+* forward half, capped at 5e-3: maximum 57.8 m/yr, 99th percentile 13.0, area
+  mean 0.43, 646 Gt/yr, and nothing past the bound.
 
-The forward rows of that run are superseded. They came from an earlier form
-of this script that took the raster surface, lifted the cell slope onto CG1
-nodes and melted on the calibration's nodes and mask, where it measured
-4293 Gt/yr and 298 nodes past the bound uncapped, and 1028 Gt/yr capped. The
-cell by cell forward pair awaits its first run on the Ua mesh.
+The uncapped forward half integrates within 7% of the 1860 Gt/yr the 10-year
+run booked, which validates it against a real run. As the two halves stand, the
+forward melts 1.62 times what K was fitted to. Capping the forward's slope
+undershoots the target by 39%, so neither convention on its own reconciles the
+halves, which also differ in floating area, mask and quadrature. Recalibrating
+K through the forward's own cell by cell melt path, under whichever slope
+convention is chosen, reconciles them by construction.
+
+An earlier form of this script lifted the forward's slope onto CG1 nodes and
+melted it with CG1 forcing and the raster mask, so its forward rows,
+4293 Gt/yr uncapped and 1028 Gt/yr capped, reproduced neither half and are
+superseded.
 """
 import argparse
 import os

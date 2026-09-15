@@ -230,34 +230,41 @@ forcing-version audit, the output writer, and the melt calibration above.
    calibration caps the draft slope `sin(alpha)` at 5e-3 and the forward
    applies no cap, so the melt the forward applies is a different field from
    the melt the per-basin K was fitted against. The script runs two pairs of
-   slope rows on the Úa mesh at the reference geometry over 1 512 899 km2 of
-   floating ice, with the per-basin K on disk. The calibration pair reproduces
-   `calibrate_melt.py`, on BedMachine's raster surface with the cap on CG1. The
-   forward pair reproduces the forward, `forcing.compute_sin_alpha` on a DG0
-   geometry whose surface comes from flotation, with the cap on the DG0 slope
-   before the lift:
+   rows at the reference geometry with the per-basin K on disk. The calibration
+   pair reproduces `calibrate_melt.py` on CG1 nodes, with BedMachine's raster
+   surface and mask and the cap on the nodal slope. The forward pair reproduces
+   the forward on DG0 cells, with the surface from flotation,
+   `forcing.compute_sin_alpha`'s cell slope, forcing at each cell's own draft,
+   the callback's `haf <= 0` floating test and the cap on the cell slope. The
+   pairs differ in floating mask and quadrature, so their totals compare in
+   magnitude. On the Úa mesh over 1 512 899 km2 of floating ice:
 
-   | slope | max, m/yr | area mean, m/yr | integrated, Gt/yr | nodes past the bound |
+   | slope | max, m/yr | area mean, m/yr | integrated, Gt/yr | past the bound |
    |---|---|---|---|---|
-   | calibration pair, capped, what K was fitted to | 71.1 | 0.77 | 1067 | 0 |
-   | calibration pair, uncapped | 1804.9 | 4.18 | 5803 | 421 |
-   | forward pair, uncapped, as the forward runs today | 1364.8 | 3.09 | 4293 | 298 |
-   | forward pair, capped | 71.1 | 0.74 | 1028 | 0 |
+   | calibration pair, capped, what K was fitted to | 71.1 | 0.77 | 1067 | 0 nodes |
+   | calibration pair, uncapped | 1804.9 | 4.18 | 5803 | 421 nodes |
+   | forward pair, uncapped, as the forward runs today | pending | pending | pending | pending |
+   | forward pair, capped | pending | pending | pending | pending |
 
-   The two forward rows were measured before the forward pair took its surface
-   from flotation and moved its cap ahead of the lift. On those rows the
-   forward pair still sampled the raster surface and capped after the lift, so
-   they await a re-run of the script on the Úa mesh, and both changes shift
-   them slightly.
+   The forward rows are pending a run of the cell by cell forward pair on the
+   Úa mesh, which is absent from the machine this revision was prepared on. An
+   earlier form of the script, superseded, took the raster surface, lifted the
+   cell slope onto CG1 nodes and melted on the calibration's nodes and mask. It
+   measured 1364.8 m/yr maximum, 3.09 m/yr area mean, 4293 Gt/yr and 298 nodes
+   past the bound uncapped, and 0.74 m/yr and 1028 Gt/yr with nothing past the
+   bound capped. The lift averages a steep grounding-zone cell with its flatter
+   neighbours, so those peak and bound figures understate the forward's cells.
+   The integrated totals are less sensitive, since the lift preserves the
+   integral.
 
-   The last row is the one that settles it. Capping the forward's own operator
-   integrates to 1028 Gt/yr against the 1067.4 Gt/yr the K was fitted to
-   reproduce, within 4%, and leaves nothing past the bound. Running uncapped
-   integrates four times the target. The two operators differ because the
-   calibration projects `grad(draft)` from a CG1 geometry on the raster surface
-   while the forward differentiates a `cg1_lift` of a DG0 draft from the
-   flotation surface, which is smoother; the cap removes that difference,
-   since both then sit at 5e-3 almost everywhere.
+   If the cell by cell rows confirm those totals, capping the forward's own
+   operator lands within a few percent of the 1067.4 Gt/yr the K was fitted
+   to, and running uncapped integrates about four times the target. The two
+   operators differ because the calibration projects `grad(draft)` from a CG1
+   geometry on the raster surface while the forward differentiates a
+   `cg1_lift` of a DG0 draft from the flotation surface, which is smoother; the
+   cap removes most of that difference, since both then sit at 5e-3 almost
+   everywhere.
 
    The 10-year run's own budget, 1860 Gt/yr, sits below the uncapped reference
    value, so its melt-receiving mask and its evolved geometry account for part

@@ -5,9 +5,10 @@ Melt is linear in ``sin(alpha)``, so a per-basin K is only valid for the slope
 field it was calibrated on. ``calibrate_melt.py`` caps the slope at
 ``ISMIP7_SIN_ALPHA_CAP`` and stamps that value into the npz;
 ``forcing.compute_sin_alpha``, which the forward calls every step, applies no
-cap. At the reference state on the Úa 2 km mesh the forward's own uncapped
-operator integrates about 4293 Gt/yr against the 1067.4 Gt/yr the K was fitted
-to, and capping that operator lands near 1028. The mismatch used to be
+cap. A superseded measurement at the reference state on the Úa 2 km mesh put
+the forward's own uncapped operator at about 4293 Gt/yr against the
+1067.4 Gt/yr the K was fitted to, and capping that operator near 1028; the
+cell by cell re-measurement is pending. The mismatch used to be
 invisible: both halves ran, and nothing said they disagreed.
 
 These tests pin the warning, and the physics stays as it is. Which side should

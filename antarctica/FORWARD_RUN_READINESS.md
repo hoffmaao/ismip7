@@ -200,18 +200,26 @@ The solver tolerance is ruled out too. NOTS 1435598 re-solved the same system
 from the state `setup_model` leaves, keeping the model's own line search and
 asking for four orders below the residual the continuation reached. Newton went
 from 70.2 to 8.6e-5 in two steps and converged, and the velocity moved by a
-relative L2 of 7.4e-9. The distance to the saved velocity did not change at all,
-0.6854 before and after, and the mean speed stayed at 68.4 m/yr against the
-MAP's 137.1. A first attempt that swapped the line search for `bt` diverged and
-says nothing, so it is superseded by this one.
+relative L2 of 7.4e-9. That movement carries the result: the distance to the
+saved velocity is unchanged to four figures at 0.6854, and the mean speed stayed
+at 68.4 m/yr against the MAP's 137.1. A first attempt swapped the line search
+for `bt` and diverged after nine iterations. It changed the line search along
+with the tolerance, so it is superseded by this one and carries no evidence.
 
-Identical geometry, identical controls, and both states converged, yet they
-differ by a factor of two in mean speed. The two therefore assemble DIFFERENT
-residuals, and the next step is a term-by-term comparison of
-`inversion_icepack2.py`'s action against `simulation.build_F`. The forward's own
-banner already lists terms the inversion's does not, `ocean_drag=1e-02@h<10m`
-and `u_lim=2e+04`, and both are expected to be inert at these speeds and
-thicknesses, which makes them worth checking first rather than assuming.
+Identical geometry, identical controls, and both states converged roots, with a
+factor of two in mean speed between them. The two codes therefore assemble
+different residuals. Both build theirs through
+`icepack2_tools.dual_friction.build_rc_residual` for regularized Coulomb and for
+Budd: `inversion_icepack2.py` selects it for both laws with `USE_RESIDUAL`
+(line 188) and calls it inside `build_F` (line 664), and `simulation.py` calls
+it inside `_build_F` (line 820), which the model context exposes as `build_F`.
+Only the `budd_legacy` path assembles an action, and neither MAP here uses it.
+The next step is a term-by-term comparison of those two calls and the arguments
+each passes. The forward alone passes `ocean_drag`, `h_ocean`, `u_lim`, `k_lim`,
+`eps_tauc` and `drag_mask`, and it passes its own `N_ref` where the inversion
+passes `None`. Its banner already shows two of these, `ocean_drag=1e-02@h<10m`
+and `u_lim=2e+04`. Both are expected to be inert at these speeds and
+thicknesses, and they are the first to check.
 
 Until this is understood, a forward run does not start from the inverted state,
 so the 10-year result of job 1368723 should be read as a pipeline exercise
@@ -271,11 +279,12 @@ forcing-version audit, the output writer, and the melt calibration above.
    both are settled, `scontrol release 1390452` starts it.
 2. Settle the `[confirm]` items in the submission README draft with the group.
 3. Find why neither the RC nor the Budd MAP on the Úa mesh reproduces its own
-   velocity (section 4). Start with the tolerance probe: tighten the forward's
-   `snes_atol` and see whether the solution moves toward the saved velocity. If
-   the solution stays put, compare the residual the forward assembles with the
-   inversion's at the same state. Once a MAP passes `check_budd_map.py
-   --forward`, run that check on every MAP the matrix will use.
+   velocity (section 4). The tolerance probe is done and negative (NOTS
+   1435598), so start from the residual comparison: the inversion's
+   `build_rc_residual` call in `inversion_icepack2.py` `build_F` against the
+   forward's in `simulation.py` `_build_F`, checking `ocean_drag` and `u_lim`
+   first. Once a MAP passes `check_budd_map.py --forward`, run that check on
+   every MAP the matrix will use.
 4. Re-run `audit_forcing_versions.py` immediately before the production matrix
    and cite it in the README. The `ctrl` pull for cores 9 and 10 is done, and
    the mirror is re-synced with Globus by hand every week or two, so the freeze

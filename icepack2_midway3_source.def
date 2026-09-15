@@ -1,0 +1,156 @@
+Bootstrap: docker
+From: ubuntu:24.04
+
+# ===========================================================================
+# icepack2 for Midway3 -- FROM-SOURCE Firedrake/PETSc with --download-parmetis
+# ===========================================================================
+# Builds Firedrake 2026.4.1 / PETSc 3.25.5 from source (NOT the prebuilt
+# firedrake-vanilla image) so PETSc's configure can add --download-parmetis.
+# hypre, ptscotch, mumps, metis, scalapack, superlu_dist are ALREADY in
+# firedrake-configure's default PETSc options; parmetis is the one addition.
+#
+# !! UNTESTED build (a from-source Firedrake+PETSc compile is ~1-2 h and could
+#    not be built/verified off-cluster). Treat the versions and the PETSc<->
+#    Firedrake pairing as things to CONFIRM on the first build, and expect to
+#    iterate. Notes inline. See ismip7/MIDWAY3_HANDOFF.md.
+#
+# !! VERSION CAVEAT: 2026.4.1 / PETSc 3.25.x is the stack whose inversion
+#    diagnostic Newton DIVERGED earlier (DIVERGED_DTOL); only build this if a
+#    collaborator has confirmed it converges (with the new iterative/hypre
+#    solver options). The 2025.10 pin remains the known-converging fallback
+#    (icepack2_midway3_pinned.def).
+#
+# BUILD ON MIDWAY3 (x86_64, internet needed for the clones/pip in %post):
+#   sinteractive --account=pi-<group> --partition=caslake --ntasks=8 --time=06:00:00
+#   module load apptainer
+#   export APPTAINER_CACHEDIR=/scratch/midway3/$USER/.apptainer_cache
+#   export APPTAINER_TMPDIR=/scratch/midway3/$USER/.apptainer_tmp
+#   mkdir -p "$APPTAINER_CACHEDIR" "$APPTAINER_TMPDIR"
+#   apptainer build --fakeroot icepack2_midway3.sif icepack2_midway3_source.def
+# ===========================================================================
+
+%files
+    # (nothing; all sources are cloned in %post)
+
+%post
+    set -eux
+    export DEBIAN_FRONTEND=noninteractive
+
+    FIREDRAKE_VERSION=2026.4.1
+    PETSC_VERSION=v3.25.5                 # confirm this is the PETSc Firedrake 2026.4.1 expects
+    export PETSC_DIR=/opt/petsc
+    export PETSC_ARCH=arch-firedrake-default
+
+    # -- minimal bootstrap so we can fetch firedrake-configure ----------------
+    apt-get update
+    apt-get install -y --no-install-recommends \
+        python3 python3-venv python3-pip python3-dev curl git ca-certificates \
+        build-essential gfortran cmake ninja-build pkg-config libtool autoconf \
+        automake bison flex libboost-dev patchelf python3-gmsh \
+        libglu1-mesa libxft2 libxinerama1 libxcursor1 libxrender1 libgomp1
+
+    # -- firedrake-configure for the target release ---------------------------
+    curl -fL -o /firedrake-configure \
+        "https://raw.githubusercontent.com/firedrakeproject/firedrake/${FIREDRAKE_VERSION}/scripts/firedrake-configure"
+
+    # -- system packages firedrake wants (MPI, BLAS headers, etc.) ------------
+    apt-get install -y --no-install-recommends \
+        $(python3 /firedrake-configure --arch default --show-system-packages)
+    rm -rf /var/lib/apt/lists/*
+
+    # -- build PETSc from source with the default options + parmetis ----------
+    #    --show-petsc-configure-options emits the version-matched default set
+    #    (hypre, ptscotch, mumps, metis, scalapack, superlu_dist, hdf5, ...).
+    git clone --depth 1 --branch "${PETSC_VERSION}" \
+        https://gitlab.com/petsc/petsc.git "$PETSC_DIR"
+    cd "$PETSC_DIR"
+    PETSC_OPTS="$(python3 /firedrake-configure --arch default --show-petsc-configure-options)"
+    ./configure ${PETSC_OPTS} --download-parmetis
+    make PETSC_DIR="$PETSC_DIR" PETSC_ARCH="$PETSC_ARCH" all
+    # sanity: parmetis + the defaults are in the build
+    grep -qi parmetis "$PETSC_DIR/$PETSC_ARCH/include/petscconf.h" \
+        && echo "OK: parmetis in PETSc" || (echo "PARMETIS MISSING"; exit 1)
+
+    # -- Firedrake env (CC/CXX = MPI wrappers, HDF5_MPI, etc.) ----------------
+    export $(python3 /firedrake-configure --show-env)
+
+    # -- Firedrake itself (pinned), h5py compiled against PETSc's HDF5 --------
+    python3 -m pip install --break-system-packages --no-cache-dir \
+        --no-binary h5py "firedrake[check,vtk,netgen]==${FIREDRAKE_VERSION}"
+
+    # -- Python deps for the ISMIP7 scripts -----------------------------------
+    python3 -m pip install --break-system-packages --no-cache-dir \
+        rasterio rioxarray geopandas shapely xarray netCDF4 h5netcdf scipy \
+        pandas matplotlib colorcet cmocean earthaccess geojson pooch meshpy \
+        tqdm siphash24 pyyaml globus-cli
+
+    # -- ice-flow models. On 2026.4.1 use versions COMPATIBLE with the new
+    #    Firedrake (the Oct-2025 pins used elsewhere target 2025.10 and will
+    #    break here, e.g. the geometric_dimension() API change). @main/@master
+    #    track the current API; PIN THESE to your collaborator's working
+    #    2026.4.1 SHAs once you know them.
+    python3 -m pip install --break-system-packages --no-cache-dir --no-deps \
+        git+https://github.com/firedrakeproject/Irksome.git@master \
+        git+https://github.com/icepack/icepack.git@master \
+        git+https://github.com/icepack/icepack2.git@main \
+        git+https://github.com/tlm-adjoint/tlm_adjoint.git@main
+
+    # -- icepack v1 ROL backend (Trilinos + pyrol) is only needed for
+    #    icepack.statistics (Greenland). The Antarctica inversion is
+    #    tlm_adjoint-based and does not use it, so it is intentionally SKIPPED
+    #    here to keep this already-heavy build tractable. Add it back the same
+    #    way as icepack2_midway3_pinned.def if you need MaximumProbabilityEstimator.
+
+    python3 -m pip install --break-system-packages --no-cache-dir \
+        jupyter jupyterlab ipykernel
+    python3 -m ipykernel install --name icepack2 --display-name "Firedrake (icepack2)"
+
+    # -- Midway3 persistent kernel cache on /scratch --------------------------
+    cat << 'EOF' > /opt/set_persistent_dir.sh
+#!/bin/sh
+if [ -d "/scratch/midway3" ]; then
+    PERSISTENT_DIR="/scratch/midway3/$USER/icepack_cache"
+else
+    PERSISTENT_DIR="/tmp/$USER/icepack_cache"
+fi
+mkdir -p "$PERSISTENT_DIR/pyop2" "$PERSISTENT_DIR/tsfc" "$PERSISTENT_DIR/xdg"
+export PYOP2_CACHE_DIR="$PERSISTENT_DIR/pyop2"
+export FIREDRAKE_TSFC_KERNEL_CACHE_DIR="$PERSISTENT_DIR/tsfc"
+export XDG_CACHE_HOME="$PERSISTENT_DIR/xdg"
+EOF
+    chmod +x /opt/set_persistent_dir.sh
+    mkdir -p /work /data /scratch
+
+    # -- build-time sanity check ---------------------------------------------
+    python3 -c "import firedrake, icepack, icepack2, irksome, tlm_adjoint, \
+rasterio, geopandas, gmsh, colorcet, cmocean; \
+from tlm_adjoint.firedrake import (reset_manager, start_manager, stop_manager, \
+clear_caches, compute_gradient, Functional, EquationSolver); \
+from firedrake.petsc import PETSc; import icepack2.model as m; \
+print('OK | PETSc', PETSc.Sys.getVersion()); \
+print('OK | parmetis in configure:', any('parmetis' in a for a in PETSc.Sys().getConfigureArgs())); \
+print('OK | inversion API + icepack2 forms:', [f for f in dir(m) if not f.startswith('_')])"
+
+%environment
+    export PETSC_DIR=/opt/petsc
+    export PETSC_ARCH=arch-firedrake-default
+    export OMP_NUM_THREADS=1
+    export OPENBLAS_NUM_THREADS=1
+
+%runscript
+    #!/bin/bash
+    . /opt/set_persistent_dir.sh
+    if [ "$#" -eq 0 ]; then exec /bin/bash; else exec "$@"; fi
+
+%labels
+    Version icepack2-ismip7-source-2026.4.1
+    Firedrake 2026.4.1
+    PETSc v3.25.5 (+parmetis)
+    Target Midway3
+
+%help
+    icepack2 (ISMIP7 Antarctica) for Midway3, Firedrake 2026.4.1 / PETSc 3.25.5
+    built from source with --download-parmetis (hypre + ptscotch + mumps are in
+    Firedrake's default PETSc already). See ismip7/MIDWAY3_HANDOFF.md.
+    NOTE: this is the newer stack that diverged the inversion earlier; confirm
+    convergence, and pin the icepack/icepack2 SHAs to a working 2026.4.1 combo.

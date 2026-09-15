@@ -155,18 +155,59 @@ What a submission needs (#5, #16, #17, #18, #19, #20, #22, #23):
 (`inversion_icepack2_{rc,budd}_n3_dg0_logvelnet_ua2000.h5`). Every Budd MAP
 older than 13 September carries the shelf-friction defect and is unusable.
 
-The 13 September Budd MAP is unusable as well, for a narrower reason. It was
-inverted while the shelf gate still multiplied through by the grounded
-indicator `He`, and the shipped gate is height above flotation alone. Measured
-with `check_budd_map.py --forward` on 14 September, a diagnostic re-solve under
-the shipped law reproduces that MAP's own velocity to a relative L2 distance of
-0.678, where a self-consistent MAP reproduces itself to about 1e-9. The census
-on the same MAP puts the old sign gate at 13 647 of 103 233 floating cells
-carrying friction at the cap, the `He` form at 8 781 and the shipped gate at 0,
-with 141 549 of 213 525 cells inside the `He` band. Re-inversion under the
-shipped law runs as NOTS 1390416; the superseded file is kept as
-`inversion_icepack2_budd_n3_dg0_logvelnet_ua2000_hegate.h5`. The RC MAP is
-unaffected, since regularized Coulomb never carried the gate.
+The 13 September Budd MAP was inverted while the shelf gate still multiplied
+through by the grounded indicator `He`, and the shipped gate is height above
+flotation alone, so it was re-inverted under the shipped law as NOTS 1390416
+(200 iterations, final masked misfit 1.041e4, 14 September). The census
+justifies that on its own: on the Úa mesh the old sign gate puts 13 647 of
+103 233 floating cells at the friction cap, the `He` form 8 781, and the
+shipped gate 0. The superseded file is kept as
+`inversion_icepack2_budd_n3_dg0_logvelnet_ua2000_hegate.h5`. The RC MAP never
+carried the gate.
+
+**⚠️ OPEN, and it blocks the forward matrix: no MAP on the Úa mesh reproduces
+its own velocity.** `check_budd_map.py --forward` re-solves the diagnostic at a
+MAP's controls and compares against the velocity that MAP saved. A MAP the
+forward agrees with returns about 1e-9. Measured 15 September on the Úa 2 km
+mesh at 32 ranks, both laws fail by the same amount:
+
+| MAP | law | relative L2 | solved mean speed | saved mean speed |
+|---|---|---|---|---|
+| `inversion_icepack2_rc_n3_dg0_logvelnet_ua2000.h5` | regularized Coulomb | 0.685 | 68.4 m/yr | 137.1 m/yr |
+| `inversion_icepack2_budd_n3_dg0_logvelnet_ua2000.h5` | Budd | 0.665 | 56.3 m/yr | 105.3 m/yr |
+
+The re-inverted Budd MAP scores the same as the retired one (0.665 against
+0.678), so the shelf gate is not what this measures. The failure is common to
+both laws and the forward runs roughly half as fast as the state the inversion
+converged to, which points at something shared between the two setups rather
+than at either friction law. `velocity` in a MAP is the model's own solution,
+saved by `inversion_icepack2.py` beside `velocity_obs`, so this compares model
+to model.
+
+The inputs are not the cause. NOTS 1428624 compared every field the forward
+builds against the one the MAP saved, on the RC MAP under regularized Coulomb:
+
+| field | relative L2 |
+|---|---|
+| thickness, bed, surface | 0.000e+00 |
+| log_friction | 3.68e-17 |
+| log_fluidity | 3.19e-17 |
+
+So the forward rebuilds the inversion's geometry exactly and loads its controls
+to machine precision, and the disagreement is in the solve rather than in what
+is solved. What remains to separate: whether the two assemble the same residual,
+and whether the forward's solve is converged. The forward's own banner lists
+terms the inversion's does not, `ocean_drag=1e-02@h<10m` and `u_lim=2e+04`,
+though both should be inert at these speeds and thicknesses, and it sets
+`snes_atol` to 100 times whatever the continuation achieved, which is a loose
+target if the last continuation step stopped early. The next probe is to
+tighten the forward's tolerance and see whether the solution moves toward the
+saved velocity, which separates a solver tolerance from a difference in the
+form.
+
+Until this is understood, a forward run does not start from the inverted state,
+so the full-length ssp585 (NOTS 1390452) is held and the 10-year result of job
+1368723 should be read as a pipeline exercise rather than a science result.
 
 **Forward.** The RC control on the Úa mesh runs and holds (1 yr, resid 0). A
 10-year CESM2-WACCM ssp585 on that mesh (NOTS job 1368723) took 10.5 minutes on

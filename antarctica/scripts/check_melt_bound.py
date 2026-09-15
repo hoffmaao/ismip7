@@ -1,7 +1,7 @@
 #!/usr/bin/env python
 r"""How far does the draft-slope cap move melt past the variable request's bound?
 
-    python antarctica/scripts/check_melt_bound.py [--npz results/calibrated_K_per_basin_2000.npz]
+    python antarctica/scripts/check_melt_bound.py [--npz antarctica/results/calibrated_K_per_basin_2000.npz]
 
 The ISMIP7 variable request gives ``libmassbffl`` an AIS minimum of
 -0.008 kg m-2 s-1 with severity ``error``. In ice-equivalent thickness that is

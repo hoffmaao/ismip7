@@ -132,6 +132,4 @@ print('OK | inversion API + icepack2 forms:', [f for f in dir(m) if not f.starts
 %help
     icepack2 (ISMIP7 Antarctica) for Midway3, Firedrake 2026.4.1 / PETSc 3.25.5
     built from source with --download-parmetis (hypre + ptscotch + mumps are in
-    Firedrake's default PETSc already). See ismip7/MIDWAY3_HANDOFF.md.
-    NOTE: this is the newer stack that diverged the inversion earlier; confirm
-    convergence, and pin the icepack/icepack2 SHAs to a working 2026.4.1 combo.
+    Firedrake's default PETSc already). 

@@ -247,12 +247,35 @@ forcing-version audit, the output writer, and the melt calibration above.
    | forward half, uncapped, as the forward runs today | 1144.1 | 59.0 | 1.16 | 1732 | 97 cells, 388.2 km2 |
    | forward half, capped | 57.8 | 13.0 | 0.43 | 646 | 0 |
 
-   The uncapped forward half integrates 1732 Gt/yr at the reference state, within
-   7% of the 1860 Gt/yr the 10-year run booked, so it reproduces the forward as
-   it runs. As the two halves stand, the forward melts 1.62 times the
-   1067.4 Gt/yr the K was fitted to. Capping the forward's own slope gives
-   646 Gt/yr, 39% under the target. Neither convention on its own reconciles the
-   halves, which also differ in floating area, mask and quadrature.
+   The same script with `calibrated_K_per_basin_2500.npz`, the coefficient file
+   the 10-year run of job 1368723 read, everything else unchanged, gives the
+   like-for-like comparison against that run:
+
+   | slope, 2500 file | max, m/yr | area mean, m/yr | integrated, Gt/yr | past the bound |
+   |---|---|---|---|---|
+   | calibration half, capped, what K was fitted to | 54.0 | 0.61 | 841 | 0 |
+   | calibration half, uncapped | 1522.7 | 3.34 | 4634 | 320 nodes, 2193.7 km2 |
+   | forward half, uncapped, as the forward runs today | 869.8 | 0.92 | 1380 | 63 cells, 248.6 km2 |
+   | forward half, capped | 43.9 | 0.34 | 510 | 0 |
+
+   The calibration half reproduces the target its own K was fitted to: 1067
+   against 1067.4 Gt/yr for the 2000 file, and 841 against 865 Gt/yr for the
+   2500 file, within 3%. That is the internal consistency check. With the same
+   K, the forward applies 1.62 times the target with the 2000 file, 1732
+   against 1067, and 1.64 times with the 2500 file, 1380 against 841. The ratio
+   is the durable result, stable across both coefficient files.
+
+   The 10-year run booked 1860 Gt/yr with the 2500 file, above the 1380 Gt/yr
+   its forward half applies at the reference state, since that run carries
+   warmer ssp585 thermal forcing over evolving geometry where the script holds
+   the OI climatology at the initial state. That gap is a consistent residual.
+   An earlier reading of this section put the uncapped forward half within 7%
+   of the run; it compared the 2000 file's 1732 Gt/yr with a run on the 2500
+   file and does not hold.
+
+   Capping the forward's own slope gives 646 Gt/yr with the 2000 file, 39%
+   under the target. Neither convention on its own reconciles the halves,
+   which also differ in floating area, mask and quadrature.
 
    An earlier form of the script lifted the forward's slope onto CG1 nodes and
    melted it with CG1 forcing and the raster mask. Its forward rows, 4293 Gt/yr

@@ -5,15 +5,17 @@ Melt is linear in ``sin(alpha)``, so a per-basin K is only valid for the slope
 field it was calibrated on. ``calibrate_melt.py`` caps the slope at
 ``ISMIP7_SIN_ALPHA_CAP`` and stamps that value into the npz;
 ``forcing.compute_sin_alpha``, which the forward calls every step, applies no
-cap. A superseded measurement at the reference state on the Úa 2 km mesh put
-the forward's own uncapped operator at about 4293 Gt/yr against the
-1067.4 Gt/yr the K was fitted to, and capping that operator near 1028; the
-cell by cell re-measurement is pending. The mismatch used to be
-invisible: both halves ran, and nothing said they disagreed.
+cap. At the reference state on the Úa 2 km mesh the forward's own cell by
+cell melt path integrates 1732 Gt/yr against the 1067.4 Gt/yr the K was fitted
+to, and capping its slope gives 646 Gt/yr; an earlier 4293 and 1028 from a
+lifted slope are superseded. The mismatch used to be invisible: both halves
+ran, and nothing said they disagreed.
 
-These tests pin the warning, and the physics stays as it is. Which side should
-move is a science decision tied to the unsettled upstream local-slope
-question, so the forward's numbers are deliberately unchanged.
+These tests pin the warning, and the physics stays as it is. Recalibrating K
+through the forward's melt path under a chosen slope convention is the clean
+route, and choosing that convention is a science decision tied to the
+unsettled upstream local-slope question, so the forward's numbers are
+deliberately unchanged.
 
 Every test goes through ``forcing.load_K_per_basin``, the loader the forward
 calls, over a synthetic IMBIE2 basin file in the layout it resolves under

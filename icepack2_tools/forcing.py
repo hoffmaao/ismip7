@@ -891,11 +891,13 @@ def _warn_slope_cap(npz_path, cap):
             f"  WARNING: {os.path.basename(npz_path)} was calibrated with the "
             f"draft slope capped at sin(alpha) = {cap:g}, and this forward "
             f"applies no cap, so it melts with a field the K was not fitted "
-            f"against. A superseded measurement at the reference state on the "
-            f"Ua 2 km mesh put the forward's uncapped operator at about "
-            f"4293 Gt/yr against the 1067.4 Gt/yr the K was fitted to, and "
-            f"the capped operator near 1028; its cell by cell re-measurement "
-            f"is pending. See antarctica/FORWARD_RUN_READINESS.md action 5.",
+            f"against. Measured at the reference state on the Ua 2 km mesh, "
+            f"the forward's own melt path integrates 1732 Gt/yr against the "
+            f"1067.4 Gt/yr the K was fitted to, and capping its slope gives "
+            f"646 Gt/yr; these supersede an earlier 4293 and 1028 from a "
+            f"lifted slope. Recalibrating K through the forward's melt path "
+            f"reconciles the two. See antarctica/FORWARD_RUN_READINESS.md "
+            f"action 5.",
             flush=True,
         )
 
@@ -923,13 +925,16 @@ def load_K_per_basin(npz_path, mesh_x, mesh_y, fill=0.0):
     # A K is only valid for the draft slope it was fitted against, because melt
     # is linear in sin(alpha). calibrate_melt.py caps the slope at
     # ISMIP7_SIN_ALPHA_CAP and records the value it used; compute_sin_alpha
-    # below applies no cap at all. A superseded measurement at the reference
-    # state on the Ua 2 km mesh, taken before check_melt_bound.py melted the
-    # forward cell by cell, put the forward's own uncapped operator at about
-    # 4293 Gt/yr against the 1067.4 Gt/yr the K was fitted to, and capping that
-    # operator near 1028. Which side should move is a science decision (the cap is tied
-    # to the unsettled upstream local-slope question), so this reports the
-    # disagreement and leaves the choice open.
+    # below applies no cap at all. Measured by check_melt_bound.py at the
+    # reference state on the Ua 2 km mesh, the forward's own cell by cell melt
+    # path integrates 1732 Gt/yr against the 1067.4 Gt/yr the K was fitted to,
+    # and capping its slope gives 646 Gt/yr, so neither convention on its own
+    # reconciles the two. An earlier 4293 and 1028 from a lifted slope are
+    # superseded. Recalibrating K through the forward's melt path under the
+    # chosen slope convention is the clean route, and choosing that convention
+    # is a science decision (the cap is tied to the unsettled upstream
+    # local-slope question), so this reports the disagreement and leaves the
+    # choice open.
     # See antarctica/FORWARD_RUN_READINESS.md action 5 and check_melt_bound.py.
     if "sin_alpha_cap" in data:
         cap = float(data["sin_alpha_cap"])

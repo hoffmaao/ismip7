@@ -1,0 +1,13 @@
+# Repository configuration for the no-mistakes gate. Read from the trusted
+# default branch, not from the pushed branch, so it takes effect once merged.
+allow_repo_commands: true
+commands:
+  # The unit suite: serial, tiny Firedrake meshes, a few seconds. Without a
+  # configured command the test step's agent improvises an end-to-end harness
+  # that twice exceeded the step's 30-minute limit.
+  #
+  # `python` is the icepack2/Firedrake environment's interpreter, assumed
+  # already active, exactly as every script in this repository assumes (see
+  # AGENTS.md). Which environment that is, and how it is entered, is a
+  # machine-local concern and deliberately stays outside this shared file.
+  test: "python -m pytest tests/ -q"

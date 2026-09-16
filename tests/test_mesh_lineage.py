@@ -1,0 +1,134 @@
+r"""The adaptation counter lives in the mesh filename.
+
+``adapt_mesh.py`` names each adapted mesh ``<root>_adapt<N>.msh``, and with no
+``--out-mesh`` it takes that name from
+``mesh_naming.next_adapted_mesh_name(basename)`` - the function exercised
+here, so a change to the naming rule fails these tests rather than only the
+next multi-hour run.
+
+The counter used to come from a checkpoint ``adapt_count`` attribute instead,
+which only some writers stamp: with the attribute absent the count restarted
+at 0 while ``root`` had already lost its suffix, so ``X_adapt1`` regenerated
+its own name and the run either overwrote the mesh it was reading or aborted
+on ``adapt_mesh.py``'s overwrite guard.
+
+Serial, no firedrake, no data files.
+"""
+
+import os
+import sys
+
+import pytest
+
+sys.path.insert(0, os.path.join(
+    os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+    "antarctica", "scripts"))
+
+from mesh_naming import adapt_lineage, next_adapted_mesh_name  # noqa: E402
+
+# The two Ua-preset meshes and one parametric mesh actually in antarctica/mesh.
+FRESH = [
+    "antarctica_ua_180000_2000",
+    "antarctica_ua_180000_2000_obs",
+    "antarctica_64000_2500_buffered",
+]
+
+
+@pytest.mark.parametrize("name", FRESH)
+def test_an_unadapted_mesh_starts_the_lineage(name):
+    assert adapt_lineage(name) == (name, 0)
+    assert next_adapted_mesh_name(name) == f"{name}_adapt1"
+
+
+@pytest.mark.parametrize("name", FRESH)
+def test_an_adapted_mesh_advances_instead_of_repeating(name):
+    r"""The regression: a checkpoint carrying only mesh_basename (the MAP the
+    inversion writes, and the forward's final.h5) must still advance."""
+    adapted = f"{name}_adapt1"
+    assert adapt_lineage(adapted) == (name, 1)
+    assert next_adapted_mesh_name(adapted) == f"{name}_adapt2"
+    assert next_adapted_mesh_name(adapted) != adapted
+
+
+def test_the_mesh_only_from_obs_name():
+    r"""``--mesh-only --from-obs --source-mesh <path>`` records the source
+    mesh's filename as mesh_basename, so the scaffold's first adaptation is
+    named from a path with an extension."""
+    src = "antarctica/mesh/antarctica_ua_180000_2000.msh"
+    assert next_adapted_mesh_name(src) == "antarctica_ua_180000_2000_adapt1"
+    assert next_adapted_mesh_name("antarctica_ua_180000_2000_obs.msh") == \
+        "antarctica_ua_180000_2000_obs_adapt1"
+
+
+# Experiment names as run_adaptive.py is documented to be invoked: two
+# experiments on the SAME method line, so they carry the same --tag and are
+# told apart only by the experiment name.
+CTRL = "ctrl2015_cesm2_waccm_adapt"
+SSP = "ssp126_cesm2_waccm_adapt"
+
+
+@pytest.mark.parametrize("name", FRESH)
+def test_two_experiments_on_one_method_line_do_not_collide(name):
+    r"""Every adapted mesh and its sidecar land in one shared directory. A
+    control and a projection in the same method line share the run tag, so the
+    discriminator has to be the experiment name or the second run silently
+    replaces the first's triangulation."""
+    ctrl = next_adapted_mesh_name(name, CTRL)
+    ssp = next_adapted_mesh_name(name, SSP)
+    assert ctrl != ssp
+    assert ctrl == f"{name}_{CTRL}_adapt1"
+    assert ssp == f"{name}_{SSP}_adapt1"
+    assert next_adapted_mesh_name(name) == f"{name}_adapt1"
+
+
+def test_the_experiment_extends_the_lineage_rather_than_repeating():
+    r"""Adapting a run's own mesh again keeps one copy of the identity and
+    advances the counter, so a run's meshes stay a single lineage."""
+    name = f"{FRESH[0]}_{CTRL}_adapt1"
+    assert next_adapted_mesh_name(name, CTRL) == f"{FRESH[0]}_{CTRL}_adapt2"
+    assert next_adapted_mesh_name(name, "") == f"{FRESH[0]}_{CTRL}_adapt2"
+    assert next_adapted_mesh_name(name, None) == f"{FRESH[0]}_{CTRL}_adapt2"
+
+
+def test_an_experiment_lineage_stays_strictly_increasing():
+    r"""The overwrite guard relies on this for named runs too."""
+    seen = [FRESH[0]]
+    for _ in range(4):
+        nxt = next_adapted_mesh_name(seen[-1], CTRL)
+        assert nxt not in seen
+        seen.append(nxt)
+    assert seen[-1] == f"{FRESH[0]}_{CTRL}_adapt4"
+
+
+def test_the_lineage_never_revisits_a_name():
+    r"""What the overwrite guard in adapt_mesh.py relies on: repeated
+    adaptation is strictly increasing, so the derived output is never the
+    reference mesh."""
+    name = FRESH[0]
+    seen = [name]
+    for _ in range(5):
+        nxt = next_adapted_mesh_name(seen[-1])
+        assert nxt not in seen
+        seen.append(nxt)
+    assert seen[-1] == f"{name}_adapt5"
+
+
+def test_accepts_a_path_or_a_msh_filename():
+    r"""adapt_mesh.py passes a bare basename; the inversion passes the full
+    ISMIP7_MESH path it loaded."""
+    name = FRESH[0]
+    for spelling in (f"{name}_adapt3.msh",
+                     f"/some/where/antarctica/mesh/{name}_adapt3.msh"):
+        assert adapt_lineage(spelling) == (name, 3)
+        assert next_adapted_mesh_name(spelling) == f"{name}_adapt4"
+
+
+def test_only_a_trailing_counter_is_a_lineage_suffix():
+    r"""`_adapt` inside a name is not a counter, and neither is a
+    non-numeric suffix: both belong to the root."""
+    assert adapt_lineage("antarctica_adapted_test_2000") == (
+        "antarctica_adapted_test_2000", 0)
+    assert adapt_lineage("antarctica_2000_adapt") == (
+        "antarctica_2000_adapt", 0)
+    assert adapt_lineage("antarctica_adapt2_2000") == (
+        "antarctica_adapt2_2000", 0)

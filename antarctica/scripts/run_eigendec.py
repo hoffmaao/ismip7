@@ -13,6 +13,10 @@ Follows Recinos et al. (2023) / fenics_ice UQ framework:
 
 Modes are stored as MixedFunctions on [Q, Q] (theta, phi components).
 
+The forward is the legacy dual-action Budd law, so the script needs
+ISMIP7_FRICTION=budd_legacy and its MAP: budd and regularized_coulomb MAPs come
+from the residual closure, whose theta and phi sit on other baselines.
+
 Usage:
     python scripts/run_eigendec.py
 """
@@ -44,7 +48,6 @@ from tlm_adjoint.firedrake import (
     start_manager,
     stop_manager,
     clear_caches,
-    compute_gradient,
     Functional,
     EquationSolver,
     CachedHessian,
@@ -52,13 +55,12 @@ from tlm_adjoint.firedrake import (
 from firedrake.petsc import PETSc
 from scipy.sparse.linalg import LinearOperator, eigsh
 
-import rasterio, icepack, glob, os, json, pathlib
+import rasterio, icepack, glob, os, json
 from icepack2 import model
 from icepack2.constants import (
     ice_density as rho_I,
     water_density as rho_W,
     gravity as g,
-    glen_flow_law,
 )
 
 _ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -66,8 +68,22 @@ DATA_DIR = os.path.join(_ROOT, "data")
 MESH_DIR = os.path.join(_ROOT, "mesh")
 RESULTS_DIR = os.path.join(_ROOT, "results")
 
-lc = int(os.environ.get("ISMIP7_LC", "8000"))
-lc_coarse = int(os.environ.get("ISMIP7_LC_COARSE", str(lc * 10)))
+import sys
+sys.path.insert(0, os.path.dirname(_ROOT))
+from icepack2_tools.boundary import load_boundary_ids
+from icepack2_tools.mpi_stats import global_max
+from icepack2_tools.geometry import sample_to_geometry
+from icepack2_tools.naming import map_basename
+from icepack2_tools.runconfig import (
+    friction as _friction, geometry_space as _geometry_space,
+    raster_sample as _raster_sample,
+    lc as _lc, lc_coarse as _lc_coarse, n_flow as _n_flow,
+)
+from mesh_naming import get_buffer_m, mesh_filename
+
+lc = _lc()
+lc_coarse = _lc_coarse()
+buffer_m = get_buffer_m()
 K_LEADING = 40
 
 # Prior hyperparameters (must match inversion regularization)
@@ -91,22 +107,43 @@ def find_file(d, p):
 def main():
     os.makedirs(RESULTS_DIR, exist_ok=True)
 
+    friction = _friction()
+    chk_fn = os.path.join(MESH_DIR, map_basename("budd_legacy", lc))
+    if friction != "budd_legacy":
+        raise RuntimeError(
+            f"run_eigendec.py implements the legacy dual-action Budd law and "
+            f"needs ISMIP7_FRICTION=budd_legacy, but ISMIP7_FRICTION="
+            f"{friction!r} names {map_basename(friction, lc)}. budd and "
+            f"regularized_coulomb MAPs come from the residual closure, where "
+            f"theta is log(C/C_w0) on a Weertman anchor gated to grounded ice "
+            f"and phi is log(A/A_prior) on the thermomechanical prior, so this "
+            f"action would read their controls against the wrong baselines. "
+            f"The MAP this script reads is {chk_fn}."
+        )
+    geometry_space = _geometry_space()
+    raster_sample = _raster_sample()
+    n_flow_val = _n_flow()
+    m_slide_val = float(os.environ.get("ISMIP7_M_SLIDE", "3.0"))
+
     # ── Load mesh + data ──
-    mesh_fn = os.environ.get(
-        "ISMIP7_MESH", os.path.join(MESH_DIR, f"antarctica_{lc_coarse}_{lc}.msh")
-    )
+    mesh_fn = os.environ.get("ISMIP7_MESH", mesh_filename(lc_coarse, lc, buffer_m))
     PETSc.Sys.Print(f"Loading mesh: {mesh_fn}")
     mesh = Mesh(mesh_fn)
 
-    bndids_fn = os.environ.get(
-        "ISMIP7_BNDIDS", os.path.join(MESH_DIR, "boundary_ids.json")
-    )
-    with open(bndids_fn) as f:
-        bnd_ids = json.load(f)
-    calving_ids = tuple(bnd_ids["calving"])
+    # Sidecar resolved (per-mesh preferred, parametric fallback) and
+    # HARD-CHECKED against this mesh: an id absent from the mesh makes
+    # ds(id) integrate to zero, i.e. silently wrong physics with no crash.
     use_calving_terminus = os.environ.get("ISMIP7_NO_CALVING_TERMINUS") is None
+    bnd_ids, calving_ids, bndids_fn = load_boundary_ids(
+        mesh, MESH_DIR, mesh_hint=mesh_fn,
+        print_coverage=use_calving_terminus,
+    )
 
     Q = FunctionSpace(mesh, "CG", 1)
+    Q_g = FunctionSpace(mesh, "DG", 0) if geometry_space == "dg0" else Q
+    PETSc.Sys.Print(f"  Geometry space: {geometry_space.upper()}, "
+                    f"raster sampling: {raster_sample}, n={n_flow_val:g}, "
+                    f"m_slide={m_slide_val:g}")
     V = VectorFunctionSpace(mesh, "CG", 1)
     dg0 = FiniteElement("DG", "triangle", 0)
     Sigma = TensorFunctionSpace(mesh, dg0, symmetry=True)
@@ -114,22 +151,20 @@ def main():
     Z = V * Sigma * T
 
     bm_fn = find_file(os.path.join(DATA_DIR, "bedmachine"), "*.nc")
-    b = icepack.interpolate(rasterio.open(f"netcdf:{bm_fn}:bed"), Q)
-    H = Function(Q).interpolate(
-        max_value(
-            icepack.interpolate(rasterio.open(f"netcdf:{bm_fn}:thickness"), Q),
-            Constant(10.0),
-        )
-    )
+    b = sample_to_geometry(
+        rasterio.open(f"netcdf:{bm_fn}:bed"), Q_g, Q, method=raster_sample)
+    H = sample_to_geometry(
+        rasterio.open(f"netcdf:{bm_fn}:thickness"),
+        Q_g, Q, floor=10.0, method=raster_sample)
     rho_ratio = Constant(917.0 / 1024.0)
-    s = Function(Q).interpolate(max_value(b + H, (Constant(1.0) - rho_ratio) * H))
+    s = Function(Q_g).interpolate(max_value(b + H, (Constant(1.0) - rho_ratio) * H))
     vel_fn = find_file(os.path.join(DATA_DIR, "velocity"), "*.nc")
     u_obs = icepack.interpolate(
         (rasterio.open(f"netcdf:{vel_fn}:VX"), rasterio.open(f"netcdf:{vel_fn}:VY")),
         V,
         fillvalue=0.0,
     )
-    phi_eff = Function(Q).interpolate(
+    phi_eff = Function(Q_g).interpolate(
         max_value(
             Constant(1.0) - rho_W * g * max_value(Constant(0.0), -b) / (rho_I * g * H),
             Constant(0.01),
@@ -137,10 +172,11 @@ def main():
     )
     A0 = Function(Q).interpolate(Constant(icepack.rate_factor(Constant(260.0))))
 
-    n_glen = Constant(glen_flow_law)
+    n_glen = Constant(n_flow_val)
+    m_slide = Constant(m_slide_val)
     tau_c = Constant(0.1)
     u_c = Constant(100.0)
-    K_base = u_c / (phi_eff * tau_c) ** n_glen
+    K_base = u_c / (phi_eff * tau_c) ** m_slide
 
     sparams = {
         "snes_type": "newtonls",
@@ -155,7 +191,6 @@ def main():
     fc_params = {"quadrature_degree": 4}
 
     # ── Load MAP ──
-    chk_fn = os.path.join(MESH_DIR, f"inversion_icepack2_{lc}.h5")
     PETSc.Sys.Print(f"Loading MAP: {chk_fn}")
     with fd.CheckpointFile(chk_fn, "r") as chk:
         chk_mesh = chk.load_mesh()
@@ -185,8 +220,8 @@ def main():
     rh = {
         "flow_law_exponent": n_glen,
         "flow_law_coefficient": A0 * fd.exp(phi_map),
-        "sliding_exponent": n_glen,
-        "sliding_coefficient": K_base * fd.exp(-n_glen * theta_map),
+        "sliding_exponent": m_slide,
+        "sliding_coefficient": K_base * fd.exp(-m_slide * theta_map),
     }
     L_map = (
         model.minimization.viscous_power(**flds, **rh)
@@ -199,15 +234,16 @@ def main():
         derivative(L_map, z), z, form_compiler_parameters=fc_params
     )
     slvr = NonlinearVariationalSolver(prob, solver_parameters=sparams)
-    for exp in np.linspace(1.0, glen_flow_law, 5):
-        n_glen.assign(exp)
+    for t in np.linspace(0.0, 1.0, 5):
+        n_glen.assign(1.0 + t * (n_flow_val - 1.0))
+        m_slide.assign(1.0 + t * (m_slide_val - 1.0))
         slvr.solve()
     PETSc.Sys.Print("  Done")
 
     # u_MAP comes from the warm start (already converged via continuation)
     u_MAP = z.subfunctions[0].copy(deepcopy=True)
     u_MAP_mag = Function(Q).interpolate(sqrt(inner(u_MAP, u_MAP)))
-    PETSc.Sys.Print(f"  u_MAP: max={float(u_MAP_mag.dat.data_ro.max()):.0f} m/yr")
+    PETSc.Sys.Print(f"  u_MAP: max={global_max(u_MAP_mag):.0f} m/yr")
 
     area_val = assemble(Constant(1.0) * dx(mesh))
     invA = Constant(1.0 / area_val)
@@ -218,7 +254,7 @@ def main():
     # BEFORE the annotated solve. The EquationSolver then converges in ~0 steps.
     def forward_gn(theta, phi):
         clear_caches()
-        K = K_base * fd.exp(-n_glen * theta)
+        K = K_base * fd.exp(-m_slide * theta)
         A = A0 * fd.exp(phi)
         u_s, M_s, tau_s = split(z)
         flds = {
@@ -231,7 +267,7 @@ def main():
         rh = {
             "flow_law_exponent": n_glen,
             "flow_law_coefficient": A,
-            "sliding_exponent": n_glen,
+            "sliding_exponent": m_slide,
             "sliding_coefficient": K,
         }
         L = (
@@ -243,8 +279,9 @@ def main():
             L += model.minimization.calving_terminus(**flds, outflow_ids=calving_ids)
         F = derivative(L, z)
         # Continuation INSIDE annotation — each step recorded on tape
-        for exp in np.linspace(1.0, glen_flow_law, 5):
-            n_glen.assign(exp)
+        for t in np.linspace(0.0, 1.0, 5):
+            n_glen.assign(1.0 + t * (n_flow_val - 1.0))
+            m_slide.assign(1.0 + t * (m_slide_val - 1.0))
             EquationSolver(
                 F == 0, z, solver_parameters=sparams, form_compiler_parameters=fc_params
             ).solve()
@@ -259,7 +296,7 @@ def main():
     # (warm start already did this, but re-confirm with the UFL expression form)
     PETSc.Sys.Print("Pre-solving with continuation for EquationSolver...")
     stop_manager()
-    K_pre = K_base * fd.exp(-n_glen * theta_map)
+    K_pre = K_base * fd.exp(-m_slide * theta_map)
     A_pre = A0 * fd.exp(phi_map)
     u_s, M_s, tau_s = split(z)
     flds_pre = {
@@ -272,7 +309,7 @@ def main():
     rh_pre = {
         "flow_law_exponent": n_glen,
         "flow_law_coefficient": A_pre,
-        "sliding_exponent": n_glen,
+        "sliding_exponent": m_slide,
         "sliding_coefficient": K_pre,
     }
     L_pre = (
@@ -288,8 +325,9 @@ def main():
         derivative(L_pre, z), z, form_compiler_parameters=fc_params
     )
     slvr_pre = NonlinearVariationalSolver(prob_pre, solver_parameters=sparams)
-    for exp in np.linspace(1.0, glen_flow_law, 5):
-        n_glen.assign(exp)
+    for t in np.linspace(0.0, 1.0, 5):
+        n_glen.assign(1.0 + t * (n_flow_val - 1.0))
+        m_slide.assign(1.0 + t * (m_slide_val - 1.0))
         slvr_pre.solve()
     PETSc.Sys.Print("  Done (z is at MAP with UFL expressions)")
 
@@ -312,7 +350,7 @@ def main():
     gamma_theta_eff = Constant(GAMMA_THETA * ELL**2 / area_val)
     delta_phi = Constant(1.0 / area_val)
     gamma_phi_eff = Constant(GAMMA_PHI * ELL**2 / area_val)
-    PETSc.Sys.Print(f"Prior (fenics_ice convention):")
+    PETSc.Sys.Print("Prior (fenics_ice convention):")
     PETSc.Sys.Print(
         f"  delta_theta={float(delta_theta):.6e}, gamma_theta={float(gamma_theta_eff):.6e}"
     )

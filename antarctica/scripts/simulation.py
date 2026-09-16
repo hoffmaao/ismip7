@@ -64,6 +64,7 @@ from icepack2_tools.boundary import load_boundary_ids
 from icepack2_tools.geometry import sample_to_geometry
 from icepack2_tools.naming import map_basename
 from icepack2_tools.runconfig import (
+    BUDD_SHELF_GATE as _BUDD_SHELF_GATE,
     residual_stabilizers,
     friction as _friction, geometry_space as _geometry_space,
     lc as _lc, lc_coarse as _lc_coarse, n_flow as _n_flow,
@@ -246,6 +247,9 @@ def setup_model(restart_from=None, *, allow_timing_cache_a_ref=False):
             "a4_factor",
             "geometry_source",
             "geometry_source_method",
+            # Shelf gate the Budd state was solved under (runconfig
+            # .BUDD_SHELF_GATE); the timing lane checks it against the manifest.
+            "friction_gate",
             # Residual of the saved mixed state under its writer's F; the
             # restart fast path trusts the state only within a factor of it.
             "full_state_residual",
@@ -1284,6 +1288,10 @@ def save_model_state(ctx, final_path, t_now, extra_attrs=None):
 
         chk.set_attr("/", "t_yr", float(t_now))
         chk.set_attr("/", "friction", str(ctx.get("friction", "budd")))
+        if str(ctx.get("friction", "budd")) == "budd":
+            # Provenance of the shelf gate this state was solved under
+            # (runconfig.BUDD_SHELF_GATE); timing-cache manifests require it.
+            chk.set_attr("/", "friction_gate", _BUDD_SHELF_GATE)
         chk.set_attr(
             "/", "geometry_space", "dg0" if ctx.get("geom_dg") else "cg1"
         )

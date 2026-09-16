@@ -20,11 +20,20 @@ from pathlib import Path
 
 sys.path.insert(0, os.fspath(Path(__file__).resolve().parents[2]))
 
-from icepack2_tools.runconfig import TARGET_MESH_GEOMETRY_METHOD, U_LIM_DEFAULT
+from icepack2_tools.runconfig import (
+    BUDD_SHELF_GATE, TARGET_MESH_GEOMETRY_METHOD, U_LIM_DEFAULT,
+)
 
 
 RECORD_SCHEMA_VERSION = 3
 CACHE_SCHEMA_VERSION = 3
+# Physics generation of the caches and lanes, spelled into CACHE_TAG and every
+# campaign tag. v3: the 09-14 caches (explicit field inventory, shared residual
+# stabilizers). v4 (2026-09-16): the Budd shelf gate tests height above
+# flotation instead of the sign of roundoff N (runconfig.BUDD_SHELF_GATE,
+# ported from hoffmaao/antarctica e602705); nothing solved under the old gate
+# is reused. Bump it whenever the physics behind a prepared state changes.
+CAMPAIGN_VERSION = 4
 CACHE_ROLE = "timing-initial-state"
 CACHE_REQUIRED_FIELDS = (
     "log_friction",
@@ -178,7 +187,7 @@ def campaign_tag(steps=None, dt_2500=None, contract=None):
     tag = (
         f"scpc_mumps_{matrix_steps(steps)}step_"
         f"dt{dt_tag(matrix_dt_2500(dt_2500))}at2500"
-        "_dg0_logvelnet_cached_strict_v3"
+        f"_dg0_logvelnet_cached_strict_v{CAMPAIGN_VERSION}"
     )
     if name != "strict":
         tag += f"_{name}"
@@ -212,14 +221,17 @@ _NONSTRICT_CONTRACTS = "|".join(
 )
 _CAMPAIGN_TAG_RE = re.compile(
     r"^scpc_mumps_(?P<steps>\d+)step_dt(?P<dt>\d+(?:p\d+)?)at2500"
-    r"_dg0_logvelnet_cached_strict_v3"
+    r"_dg0_logvelnet_cached_strict_v(?P<version>\d+)"
     rf"(?:_(?P<contract>{_NONSTRICT_CONTRACTS}))?"
     r"(?:_(?P<lane>reinverted|probe))?$"
 )
 
 
 def parse_campaign_tag(tag):
-    """``{steps, dt_2500, contract, lane}`` encoded in a lane tag."""
+    """``{steps, dt_2500, contract, lane, version}`` encoded in a lane tag.
+
+    Older versions still parse (``make matrix TIMING_TAG=<v3 tag>`` renders
+    the archive); only the current CAMPAIGN_VERSION is ever submitted."""
     match = _CAMPAIGN_TAG_RE.match(str(tag))
     if match is None:
         raise ValueError(f"tag {tag!r} does not name a cached-strict lane")
@@ -228,6 +240,7 @@ def parse_campaign_tag(tag):
         "dt_2500": float(match["dt"].replace("p", ".")),
         "contract": match["contract"] or "strict",
         "lane": match["lane"],
+        "version": int(match["version"]),
     }
 
 
@@ -235,7 +248,7 @@ def parse_campaign_tag(tag):
 CAMPAIGN_TAG = campaign_tag()
 REINVERTED_TAG = lane_tag("invert")
 PROBE_TAG = probe_tag()
-CACHE_TAG = "scpc_mumps_dg0_logvelnet_v3"
+CACHE_TAG = f"scpc_mumps_dg0_logvelnet_v{CAMPAIGN_VERSION}"
 # Per-mesh short invert length. Override with ISMIP7_TIMING_INVERSION_MAXITER
 # or `make timing-inversion TIMING_INVERSION_MAXITER=5` for a debug pass.
 INVERSION_MAXITER_DEFAULT = 250
@@ -554,6 +567,7 @@ def validate_cache_manifest(
         "buffer_m": BUFFER_M,
         "diagnostic_solver_mode": SOLVER_MODE,
         "friction": "budd",
+        "friction_gate": BUDD_SHELF_GATE,
         "geometry_space": "dg0",
         "n_flow": 3.0,
         "a4_factor": 1.0,
@@ -851,14 +865,21 @@ def selftest():
             tag = campaign_tag(steps, dt, contract)
             spec = parse_campaign_tag(tag)
             assert spec == {
-                "steps": steps, "dt_2500": dt, "contract": contract, "lane": None
+                "steps": steps, "dt_2500": dt, "contract": contract,
+                "lane": None, "version": CAMPAIGN_VERSION,
             }, (tag, spec)
             assert parse_campaign_tag(lane_tag("invert", tag))["lane"] == "reinverted"
             assert parse_campaign_tag(probe_tag(steps, dt, contract))["lane"] == "probe"
     assert campaign_tag(5, 0.25, "strict") == (
-        "scpc_mumps_5step_dt0p25at2500_dg0_logvelnet_cached_strict_v3"
+        "scpc_mumps_5step_dt0p25at2500_dg0_logvelnet_cached_strict_v4"
     )
-    assert campaign_tag(10, 0.125, "divfront").endswith("dt0p125at2500_dg0_logvelnet_cached_strict_v3_divfront")
+    assert campaign_tag(10, 0.125, "divfront").endswith("dt0p125at2500_dg0_logvelnet_cached_strict_v4_divfront")
+    # The old-law archive still parses, and is never the current campaign.
+    archived = parse_campaign_tag(
+        "scpc_mumps_10step_dt0p125at2500_dg0_logvelnet_cached_strict_v3"
+    )
+    assert archived["version"] == 3 and archived["version"] != CAMPAIGN_VERSION
+    assert CACHE_TAG.endswith(f"_v{CAMPAIGN_VERSION}")
     assert contract_exports("strict") == {"ISMIP7_AMB_CAP": "0"}
     assert contract_exports("divfront") == {
         "ISMIP7_AMB_CAP": "0", "ISMIP7_APPARENT_MB": "div", "ISMIP7_FIXED_FRONT": "1"

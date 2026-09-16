@@ -53,8 +53,11 @@ TIMING_KIND ?= matrix
 # divfront / front / div (production closure and/or fixed 2015 calving front).
 # Steps, the 2.5 km dt and a non-strict contract are all encoded in the tag
 # (scripts/timing_campaign.py campaign_tag builds the identical string).
+# v4 (2026-09-16): the Budd shelf gate tests height above flotation, not the
+# sign of roundoff N (ported from hoffmaao/antarctica e602705). v3 caches and
+# records are the old-law archive; the manager never reuses them.
 TIMING_CONTRACT ?= strict
-TIMING_TAG ?= scpc_mumps_$(MATRIX_STEPS)step_dt$(MATRIX_DT_2500_TAG)at2500_dg0_logvelnet_cached_strict_v3$(if $(filter-out strict,$(TIMING_CONTRACT)),_$(TIMING_CONTRACT),)
+TIMING_TAG ?= scpc_mumps_$(MATRIX_STEPS)step_dt$(MATRIX_DT_2500_TAG)at2500_dg0_logvelnet_cached_strict_v4$(if $(filter-out strict,$(TIMING_CONTRACT)),_$(TIMING_CONTRACT),)
 TIMING_EXPERIMENT ?= timing
 # Optional exact-input overrides for a single transient lane.  The resolution
 # matrix leaves these empty and constructs each target mesh parametrically.

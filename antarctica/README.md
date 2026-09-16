@@ -593,7 +593,12 @@ The stages and contracts are:
    fields, including `velocity_obs`, plus the target-geometry source and
    construction method. The job then repacks the cache on one rank and
    publishes the HDF5 file and JSON manifest atomically. Mesh, inversion,
-   physics, solver, or cache-schema changes invalidate it.
+   physics, solver, or cache-schema changes invalidate it. The cache tag and
+   the campaign tag moved from `v3` to `v4` on 2026‑09‑16 when the Budd shelf
+   gate was fixed (height above flotation instead of the sign of roundoff
+   `N`, ported from hoffmaao/antarctica e602705): the manifest records
+   `friction_gate: haf` and validation requires it, so a v3 cache is never
+   reused, and v3 records are the old-law archive.
 3. **Per-mesh short inversion (`make timing-inversion`, optional)** — off by
    default since 2026‑09‑15: `make timing` runs lanes from the transferred
    prepare state (`TIMING_INITIAL_STATE=prepare`); `TIMING_INVERT=1` or

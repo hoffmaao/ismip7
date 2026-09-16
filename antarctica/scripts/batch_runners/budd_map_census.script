@@ -1,0 +1,59 @@
+#!/bin/bash
+
+# Census of a Budd MAP under the shelf gates (scripts/check_budd_map.py), then
+# a diagnostic re-solve at the MAP's controls under the current law.
+#
+#   sbatch --export=ALL,ISMIP7_MAP=$PWD/mesh/inversion_icepack2_budd_n3_dg0_logvelnet_2500_1core.h5 \
+#       scripts/batch_runners/budd_map_census.script
+#
+# Decision gate for a fixed-law campaign: "floating N_hat at cap (old gate)"
+# is the old defect's footprint on this MAP, "production" must be 0, and the
+# forward rel L2 says whether the MAP's own velocity survives the fixed law
+# (a MAP inverted under it reproduces itself to ~1e-9).
+
+#SBATCH -J ant_budd_census
+#SBATCH -p debug
+#SBATCH -o ant_budd_census_%j.txt
+#SBATCH -e ant_budd_census_%j.err
+#SBATCH --mail-type=ALL
+#SBATCH --mail-user=dlilien@iu.edu
+#SBATCH --nodes=1
+#SBATCH --ntasks-per-node=16
+#SBATCH --time=00:45:00
+#SBATCH --mem=64G
+#SBATCH -A r00905
+
+module use /N/u/dlilien/Quartz/modulefiles
+module load gnu/9.3.0
+module load openmpi/4.0.5
+module load python/3.14.5
+module load zlib/1.2.13
+module load hdf5/1.12
+module load openblas/0.3.13
+module load patchelf/0.18.0
+module load petsc/3.25.5
+module load firedrake/2026.04
+. /N/u/dlilien/Quartz/sw/firedrake/2026.04/firedrake/bin/activate
+
+export OMP_NUM_THREADS=1
+export OPENBLAS_NUM_THREADS=1
+
+cd "${SLURM_SUBMIT_DIR:-.}"
+
+map="${ISMIP7_MAP:?ISMIP7_MAP is required (the Budd MAP checkpoint)}"
+[ -f "${map}" ] || { echo "MAP not found: ${map}" >&2; exit 2; }
+
+# The forward re-solve runs simulation.setup_model() on the MAP: same physics
+# env as the 2.5 km qualification lane (Makefile debug target). The mesh is
+# loaded from the MAP itself; the census script forces ISMIP7_FRICTION=budd.
+export ISMIP7_LC="${ISMIP7_LC:-2500}"
+export ISMIP7_LC_COARSE="${ISMIP7_LC_COARSE:-64000}"
+export ISMIP7_BUFFER_M="${ISMIP7_BUFFER_M:-20000}"
+export ISMIP7_N_FLOW="${ISMIP7_N_FLOW:-3.0}"
+export ISMIP7_A4_FACTOR="${ISMIP7_A4_FACTOR:-1.0}"
+export ISMIP7_GEOMETRY_SPACE="${ISMIP7_GEOMETRY_SPACE:-dg0}"
+export ISMIP7_DIAGNOSTIC_LINEAR_SOLVER="${ISMIP7_DIAGNOSTIC_LINEAR_SOLVER:-scpc_mumps}"
+export ISMIP7_RESCUE_ENABLED="${ISMIP7_RESCUE_ENABLED:-0}"
+unset ISMIP7_MESH ISMIP7_RESTART
+
+srun -n "${SLURM_NTASKS}" python -u scripts/check_budd_map.py "${map}" --forward

@@ -127,6 +127,7 @@ def _cache_manifest(root_attrs, out_fn, mesh, checkpoint_fields):
         "a4_factor",
         "t_yr",
         "friction",
+        "friction_gate",
         "geometry_space",
         "mesh_basename",
         "lc",
@@ -170,6 +171,10 @@ def _cache_manifest(root_attrs, out_fn, mesh, checkpoint_fields):
         "a4_factor": float(attrs["a4_factor"]),
         "t_yr": float(attrs["t_yr"]),
         "friction": attrs["friction"],
+        # Which shelf gate the Budd law had when this state was solved
+        # (runconfig.BUDD_SHELF_GATE); stamped by the state writer, never
+        # defaulted here, so a pre-fix state cannot be published as a cache.
+        "friction_gate": attrs["friction_gate"],
         "geometry_space": attrs["geometry_space"],
         "mesh_basename": attrs["mesh_basename"],
         "lc": int(attrs["lc"]),

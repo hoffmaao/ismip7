@@ -218,6 +218,7 @@ def _load_and_validate_cache(current_solver_configuration):
         "geometry_source": manifest["geometry_source"],
         "geometry_source_basename": manifest["geometry_source_basename"],
         "geometry_source_method": manifest["geometry_source_method"],
+        "friction_gate": manifest["friction_gate"],
         "solver_configuration_fingerprint": fingerprint,
         "manifest": manifest,
     }
@@ -246,6 +247,7 @@ def _validate_loaded_cache(ctx, cache_validation):
         "geometry_space": manifest["geometry_space"],
         "n_flow": manifest["n_flow"],
         "a4_factor": manifest["a4_factor"],
+        "friction_gate": manifest["friction_gate"],
     }
     for key, expected_value in expected.items():
         actual = attrs.get(key)

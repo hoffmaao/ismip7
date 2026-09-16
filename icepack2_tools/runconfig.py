@@ -36,6 +36,14 @@ FRICTION_DEFAULT = "budd"
 # THIS BRANCH (antarctica-n3) runs standard Glen n=3. An inversion and every
 # forward that loads its MAP must agree on this.
 N_FLOW_DEFAULT = "3.0"
+# How the Budd law (dual_friction.budd_nhat) zeroes shelf friction. Before
+# 2026-09-13 it tested the sign of N = max(p_I - p_W, 0), a roundoff residue
+# on floating ice, and the delta floor lifted every roundoff-positive shelf
+# cell to the friction cap (hoffmaao/antarctica e602705). "haf" gates on
+# height above flotation. Stamped into every Budd state checkpoint and required
+# by the timing-cache manifest, so a state solved under the old gate can never
+# seed a fixed-law lane.
+BUDD_SHELF_GATE = "haf"
 
 # Exact-mesh timing caches initialize DG0 geometry from BedMachine on the
 # TARGET mesh. The raster is first sampled into CG1 and then L2-projected to

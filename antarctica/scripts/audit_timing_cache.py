@@ -109,6 +109,7 @@ def _load_cache(path, manifest):
             "buffer_m",
             "t_yr",
             "friction",
+            "friction_gate",
             "geometry_space",
             "n_flow",
         )
@@ -147,6 +148,7 @@ def _load_cache(path, manifest):
             "buffer_m": "buffer_m",
             "t_yr": "t_yr",
             "friction": "friction",
+            "friction_gate": "friction_gate",
             "geometry_space": "geometry_space",
             "n_flow": "n_flow",
         }

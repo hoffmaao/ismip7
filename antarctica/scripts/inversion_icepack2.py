@@ -94,6 +94,7 @@ from icepack2_tools.mpi_stats import (global_mean, global_range,
                                       global_max, global_size, global_count)
 from icepack2_tools.naming import map_basename
 from icepack2_tools.runconfig import (
+    BUDD_SHELF_GATE,
     friction as _friction, geometry_space as _geometry_space,
     lc as _lc, lc_coarse as _lc_coarse, n_flow as _n_flow,
 )
@@ -225,7 +226,7 @@ RC_HVISC_FLOOR = float(os.environ.get("ISMIP7_RC_HVISC_FLOOR", "10.0"))
 RC_CW0_FLOOR = float(os.environ.get("ISMIP7_RC_CW0_FLOOR", "0.0"))
 # Budd N_hat knobs (fric_law="budd"): at the reference/inversion geometry
 # N_hat=1 (with the PISM-delta grounded floor), so this inverts the exact-zero
-# shelf He-gated law; the effective-pressure feedback is purely prognostic.
+# shelf HAF-gated law; the effective-pressure feedback is purely prognostic.
 BUDD_DELTA = float(os.environ.get("ISMIP7_BUDD_DELTA", "0.02"))
 BUDD_NHAT_CAP = float(os.environ.get("ISMIP7_BUDD_NHAT_CAP", "3.0"))
 ALPHA_GL = (float(os.environ.get("ISMIP7_ALPHA_GL", "0.5"))
@@ -1366,6 +1367,8 @@ def main():
             if full_state:
                 chk.set_attr("/", "t_yr", float(MATRIX_T_START))
                 chk.set_attr("/", "friction", str(FRICTION))
+                if str(FRICTION) == "budd":
+                    chk.set_attr("/", "friction_gate", BUDD_SHELF_GATE)
                 chk.set_attr("/", "geometry_space", str(geometry_space))
                 chk.set_attr("/", "n_flow", float(n_flow_val))
                 chk.set_attr("/", "a4_factor", float(a4_factor))

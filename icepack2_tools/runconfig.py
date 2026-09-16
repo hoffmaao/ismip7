@@ -54,6 +54,19 @@ TARGET_MESH_GEOMETRY_METHOD = "target-native-bedmachine-cell-average-v1"
 
 GEOMETRY_SPACES = ("dg0", "cg1")
 
+# How a raster (BedMachine) is put onto a DG0 geometry cell.
+#   vertex    - icepack's bilinear sample at the three CG1 vertices, then the
+#               L2 projection of that linear interpolant (= the mean of the
+#               3 vertex values). The pre-Sep-2026 behaviour. A 20 km interior
+#               cell sees 3 of its ~1600 BedMachine pixels.
+#   cell_mean - the mean of the raster over the cell itself, sampled on an
+#               equal-area sub-triangle lattice at pixel density
+#               (geometry.raster_cell_mean).
+# MAPs record the method used; the forward reads it back from the MAP.
+RASTER_SAMPLES = ("vertex", "cell_mean")
+RASTER_SAMPLE_DEFAULT = "vertex"
+
+
 # Floor-cell coercivity drags of the dual-friction residual (dual_friction.py
 # ``ocean_drag`` / ``u_lim``). The forward has applied them since Jul 2026; the
 # inversion never passed them, so a MAP that solved the inversion's F was not
@@ -100,6 +113,18 @@ def geometry_space():
     return value
 
 
+def raster_sample():
+    r"""How BedMachine is sampled onto a DG0 cell: ``'vertex'`` or
+    ``'cell_mean'``. See RASTER_SAMPLES."""
+    value = os.environ.get(
+        "ISMIP7_RASTER_SAMPLE", RASTER_SAMPLE_DEFAULT).lower()
+    if value not in RASTER_SAMPLES:
+        raise ValueError(
+            f"ISMIP7_RASTER_SAMPLE must be one of {RASTER_SAMPLES}, got {value!r}"
+        )
+    return value
+
+
 def friction():
     r"""Friction law: ``budd``, ``regularized_coulomb`` or ``budd_legacy``."""
     return os.environ.get("ISMIP7_FRICTION", FRICTION_DEFAULT)
@@ -108,3 +133,130 @@ def friction():
 def n_flow():
     r"""Glen flow-law exponent."""
     return float(os.environ.get("ISMIP7_N_FLOW", N_FLOW_DEFAULT))
+
+
+# Calving front (icepack2_tools.levelset). ``none`` is the pre-Sep-2026
+# behaviour: on a buffered mesh the front advances freely and never calves.
+CALVING_DEFAULT = "none"
+CALVING_LAWS = ("none", "fixed", "vonmises")
+# ISSM defaults for the von Mises thresholds (Morlighem et al. 2016).
+CALVING_SIGMA_MAX_GROUNDED_DEFAULT = "1.0"     # MPa
+CALVING_SIGMA_MAX_FLOATING_DEFAULT = "0.15"    # MPa
+
+
+FRACTURE_MODES = ("none", "mask")
+FRACTURE_DEFAULT = "none"
+
+
+def fracture():
+    r"""``ISMIP7_FRACTURE``: how the ISMIP7 ice-shelf collapse forcing is
+    applied. ``none`` (default) loads nothing; ``mask`` removes the ice of
+    every FLOATING cell the year's collapse mask flags, booked as calving
+    (protocol path C, discussions #30 and #33: floating ice only; no mask
+    exists for historical or OCX, so those runs see nothing either way).
+    A stress-gated variant (Lai et al. 2020) is not implemented."""
+    value = os.environ.get("ISMIP7_FRACTURE", FRACTURE_DEFAULT).lower()
+    if value not in FRACTURE_MODES:
+        raise ValueError(f"ISMIP7_FRACTURE must be one of {FRACTURE_MODES}, got {value!r}")
+    return value
+
+
+def ismip7_output():
+    r"""``ISMIP7_OUTPUT``: record the ISMIP7 yearly fields and scalars.
+
+    ``1`` enables it; ``0`` and the empty string disable it. The value set is
+    closed, like ``fracture`` and ``apparent_mb_mode``: there is one spelling
+    each way, and anything else raises rather than silently deciding whether
+    a submission gets written.
+    """
+    value = (os.environ.get("ISMIP7_OUTPUT") or "").strip()
+    if value in ("", "0"):
+        return False
+    if value == "1":
+        return True
+    raise ValueError(
+        f"ISMIP7_OUTPUT must be 1 to enable or 0/empty to disable, "
+        f"got {value!r}"
+    )
+
+
+def calving_law():
+    r"""``ISMIP7_CALVING``: ``none``, ``fixed`` or ``vonmises``."""
+    value = os.environ.get("ISMIP7_CALVING", CALVING_DEFAULT).lower()
+    if value not in CALVING_LAWS:
+        raise ValueError(
+            f"ISMIP7_CALVING must be one of {CALVING_LAWS}, got {value!r}"
+        )
+    return value
+
+
+def fixed_front():
+    r"""``ISMIP7_FIXED_FRONT``: the legacy pinned front.
+
+    On when the variable is set to anything but the exact string ``"0"``:
+    ``run_core_matrix.sh`` exports it unconditionally, so ``=0`` has to be the
+    way to turn it off from there.
+    """
+    return os.environ.get("ISMIP7_FIXED_FRONT") not in (None, "0")
+
+
+def apparent_mb_mode():
+    r"""``ISMIP7_APPARENT_MB``: the apparent-mass-balance init, or None for off.
+
+    ``"div"`` cancels only the flux divergence, so the t=0 tendency is
+    SMB minus melt (gia-style). ``"1"`` or ``"balance"`` also subtracts the
+    initial forcing, so the t=0 tendency is exactly zero: a balanced control
+    in the ISMIP6 ctrl_proj sense.
+
+    ``0``, ``off``, ``none`` and the empty string mean OFF. The batch runners
+    export this unconditionally and ``sbatch --export=ALL,VAR=...`` cannot
+    unset a variable, so there has to be an off value; without one a run asked
+    to drop the correction would silently get the full balanced one.
+
+    The value set is closed, like ``calving_law`` and ``raster_sample``:
+    anything else raises. ``no`` and ``false`` are not off spellings, and
+    ``divergence`` is not ``div``, so accepting them would hand back the
+    balanced control, which differs from both by the whole t=0 forcing.
+    """
+    value = (os.environ.get("ISMIP7_APPARENT_MB") or "").strip().lower()
+    if value in ("", "0", "off", "none"):
+        return None
+    if value in ("1", "balance"):
+        return "balance"
+    if value == "div":
+        return "div"
+    raise ValueError(
+        f"ISMIP7_APPARENT_MB must be 1 or balance (balanced control), div "
+        f"(divergence only), or 0/off/none/empty to disable; got {value!r}"
+    )
+
+
+def auto_resume():
+    r"""``ISMIP7_AUTO_RESUME``: continue unattended from this experiment's own
+    newest checkpoint when no explicit restart is given.
+
+    An integer flag, so ``=0`` turns it OFF. The batch runners export it
+    unconditionally and ``sbatch --export=ALL,VAR=...`` gives no way to unset a
+    variable, so ``0`` has to be the off switch; testing the string for mere
+    presence would silently resume a run the user asked to start clean.
+    """
+    value = (os.environ.get("ISMIP7_AUTO_RESUME") or "").strip()
+    if not value:
+        return False
+    try:
+        return int(value) != 0
+    except ValueError:
+        raise ValueError(
+            f"ISMIP7_AUTO_RESUME must be an integer flag (0 to disable), "
+            f"got {value!r}"
+        ) from None
+
+
+def calving_sigma_max():
+    r"""Von Mises thresholds (grounded, floating) [MPa]."""
+    return (
+        float(os.environ.get("ISMIP7_CALVING_SIGMA_MAX_GROUNDED",
+                             CALVING_SIGMA_MAX_GROUNDED_DEFAULT)),
+        float(os.environ.get("ISMIP7_CALVING_SIGMA_MAX_FLOATING",
+                             CALVING_SIGMA_MAX_FLOATING_DEFAULT)),
+    )

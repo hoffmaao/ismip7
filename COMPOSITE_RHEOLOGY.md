@@ -38,14 +38,14 @@ This mirrors `icepack2/test/dome_test.py` and is used in
 | `A`     | depth-averaged ice fluidity = `A_prior · exp(φ)`         | MPa⁻ⁿ·yr⁻¹|
 | `K`     | sliding coefficient = `K_base · exp(−n·θ)`               | (yr/m)·MPa⁻ⁿ |
 | `K_base`| baseline sliding coefficient = `u_c / (φ_eff · τ_c)ⁿ`    | (yr/m)·MPa⁻ⁿ |
-| `φ_eff` | effective-pressure fraction in `[0.01, 1]`               | —         |
-| `θ`     | log-friction control field                                | —         |
-| `φ`     | log-fluidity control field                                | —         |
-| `n_flow`| dislocation-creep flow exponent (= 4, Goldsby-Kohlstedt) | —         |
-| `m_slide`| Weertman sliding exponent (= 3)                          | —         |
+| `φ_eff` | effective-pressure fraction in `[0.01, 1]`               | dimensionless |
+| `θ`     | log-friction control field                                | dimensionless |
+| `φ`     | log-fluidity control field                                | dimensionless |
+| `n_flow`| dislocation-creep flow exponent (= 4, Goldsby-Kohlstedt) | dimensionless |
+| `m_slide`| Weertman sliding exponent (= 3)                          | dimensionless |
 | `τ_c`   | reference stress for normalization (= 0.1 MPa)            | MPa       |
 | `u_c`   | reference speed = mean of `|u_obs|`                       | m/yr      |
-| `α`     | composite regularization weight                           | —         |
+| `α`     | composite regularization weight                           | dimensionless |
 | `H_ref` | constant reference thickness for the linear viscous term  | m         |
 
 The Glen rate factor `A₀ = A(260 K)` follows `icepack.rate_factor`.
@@ -147,7 +147,7 @@ viscous term is multiplied by `h`, so it vanishes at the calving front;
 the linear regularization is the only thing pinning `M` there.
 
 The linear friction term uses the same `K_lin` everywhere (no thickness
-dependence — `ψ_fric` doesn't carry an `h` factor in either form).
+dependence; `ψ_fric` doesn't carry an `h` factor in either form).
 
 ## Defaults
 
@@ -185,7 +185,7 @@ forward run.
   this is *not* a clean drift test. See
   `antarctica/results/ctrl2015_cesm2_waccm_2500_timeseries.csv` (2026-05-15).
 
-- **Inversion with composite + `h_clamp = 0`:** done - the `_budd` / `_rc`
+- **Inversion with composite and `h_clamp = 0`:** done. The `_budd` and `_rc`
   MAP checkpoints are inverted against the true BedMachine geometry (h=0
   over the buffered ocean region), and the forward runs that load them
   start with `h_clamp_init = 0` (no initial-thickness clamp).

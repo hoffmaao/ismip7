@@ -27,6 +27,7 @@ from icepack2_tools.boundary import sidecar_path
 from icepack2_tools.naming import map_basename
 from icepack2_tools.climatology import clim_start, clim_end, clim_scenario
 from icepack2_tools.runconfig import (
+    calving_law as _calving_law, calving_sigma_max as _calving_sigma_max,
     friction as _friction, geometry_space as _geometry_space, lc as _lc,
     lc_coarse as _lc_coarse,
 )
@@ -58,7 +59,7 @@ CORES = [
     (8, "ssp585 MRI-ESM2-0", "MRI-ESM2-0", "ssp585", 2015, 2300),
     (9, "CTRL2015 (CESM2-WACCM clim)", "CESM2-WACCM", None, 2015, 2300),
     (10, "CTRL2015 (MRI-ESM2-0 clim)", "MRI-ESM2-0", None, 2015, 2300),
-    (11, "OCX obs-constrained", None, None, 1990, 2025),
+    (11, "OCX obs-constrained", None, None, 1979, 2025),
 ]
 
 
@@ -146,19 +147,30 @@ def shared_missing(warn=None):
     r"""Missing shared inputs. Non-fatal caveats are appended to ``warn``."""
     miss = []
     warn = warn if warn is not None else []
+    # Front configuration: a mistyped law would otherwise surface only after
+    # the forward's MAP load and initial solve.
+    try:
+        _calving_law()
+        _calving_sigma_max()
+    except ValueError as e:
+        miss.append(str(e))
     mesh_fn = os.environ.get(
         "ISMIP7_MESH", mesh_filename(lc_coarse, lc, get_buffer_m())
     )
     if not os.path.exists(mesh_fn):
         miss.append(f"mesh ({os.path.basename(mesh_fn)})")
-    # The MAP the forward will actually load: the one tagged with this
-    # geometry space, else the legacy untagged (CG1) MAP it falls back to with
-    # a warning. A legacy MAP runs, but its controls carry the CG1 front bias,
-    # so the run is a smoke test rather than a result.
-    inv = os.path.join(MESH_DIR, map_basename(friction, lc))
+    # The MAP the forward will actually load: ISMIP7_INVERSION if it names one
+    # explicitly, else the one tagged with this geometry space, else the legacy
+    # untagged (CG1) MAP it falls back to with a warning. A legacy MAP runs, but
+    # its controls carry the CG1 front bias, so the run is a smoke test rather
+    # than a result. An explicit override deliberately bypasses that lookup, so
+    # setup_model raises on a missing file rather than falling back: report it
+    # as a hard miss, exactly as the forward would.
+    inv_override = os.environ.get("ISMIP7_INVERSION")
+    inv = inv_override or os.path.join(MESH_DIR, map_basename(friction, lc))
     legacy = os.path.join(MESH_DIR, map_basename(friction, lc, geometry=False))
     if not os.path.exists(inv):
-        if os.path.exists(legacy):
+        if not inv_override and os.path.exists(legacy):
             warn.append(
                 f"no {os.path.basename(inv)}; the forward would fall back to "
                 f"{os.path.basename(legacy)} (inverted under a different "
@@ -221,6 +233,7 @@ def main():
     for core, title, esm, scenario, y0, y1 in CORES:
         miss = list(base_missing)
         degraded = []
+        notes = []
         if core == 11:
             if not racmo_ok():
                 miss.append("RACMO (OCX SMB)")
@@ -259,11 +272,20 @@ def main():
                     degraded.append(detail)
             yrs = atm_years(esm, scenario) or atm_years(esm, scenario, "acabf")
             gaps = sorted(set(range(y0, y1 + 1)) - set(yrs))
+            # The last year of a series may be absent: the reader persists
+            # the last year on disk one year past the end (CESM2-WACCM stops
+            # at 2299 and the empty 2300 files were removed, discussion #8),
+            # so that is a note, not a missing input. Any other gap is an
+            # error the reader raises on, so it blocks.
+            bridged = gaps == [y1] and yrs and yrs[-1] == y1 - 1
             if not yrs:
                 miss.append(f"{esm}/{scenario} atmosphere")
+            elif bridged:
+                notes.append(
+                    f"atmosphere covers {yrs[0]}-{yrs[-1]}; {y1} is absent "
+                    f"and the reader persists {y1 - 1} for it"
+                )
             elif gaps:
-                # get_field silently returns zeros for a missing year, so
-                # interior gaps corrupt a run just like missing endpoints
                 miss.append(
                     f"atmosphere covers {yrs[0]}-{yrs[-1]} with "
                     f"{len(gaps)} of {y0}-{y1} missing "
@@ -276,8 +298,8 @@ def main():
                 miss.append(f"ocean covers {oc[0]}-{oc[1]}, need {y0}-{y1}")
 
         status = "BLOCKED" if miss else "PARTIAL" if degraded else "READY  "
-        notes = miss + degraded
-        detail = "" if not notes else "  <- " + "; ".join(notes)
+        shown = miss + degraded + notes
+        detail = "" if not shown else "  <- " + "; ".join(shown)
         print(f"  core {core:2d}  {status}  {title}{detail}")
 
 

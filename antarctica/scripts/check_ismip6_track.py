@@ -12,8 +12,9 @@ vibe. Reference numbers:
   1992-2017 = -109 +/- 56 Gt/yr; 2012-2017 = -219 +/- 43 Gt/yr. A control
   may also legitimately drift positive after init, so the envelope is wide.
 - Ice-shelf basal melt: Rignot et al. 2013 = 1325 +/- 235 Gt/yr;
-  Adusumilli et al. 2020 steady-state = ~1100 Gt/yr; the Paolo/Adusumilli
-  IMBIE2 target used for our K calibration integrates 865 Gt/yr.
+  Adusumilli et al. 2020 steady-state = ~1100 Gt/yr; the IMBIE2 target our
+  K calibration uses integrates 1067.4 Gt/yr (Paolo/Davison/Adusumilli; the
+  older Paolo/Adusumilli table integrates 865 Gt/yr).
 - Calving flux: Rignot et al. 2013 = 1265 +/- 140 Gt/yr (front discharge
   on a buffered mesh = outflux + fixed-front calving tally).
 - SMB (grounded+shelves): RACMO2 ~2300-2740 Gt/yr (van Wessem et al. 2018).

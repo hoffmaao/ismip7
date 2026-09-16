@@ -1,8 +1,9 @@
 #!/usr/bin/env python3
 r"""ISMIP7 ocean-melt calibration (Burgard quadratic_mixed_slope, local TF).
 
-Geometry: the highest-resolution icepack simulation mesh
-(`inversion_icepack2_<lc>.h5`, default lc=2500), with bed / thickness /
+Geometry: the mesh of the section 4 MAP for the configured ISMIP7_FRICTION,
+named by `icepack2_tools/naming.py` (default lc=2500; ISMIP7_INV_H5 names a
+different MAP), with bed / thickness /
 surface / floating-mask **reinterpolated directly from BedMachine v4.1**
 so thicknesses are not h_clamp'd and the floating mask comes from
 BedMachine's authoritative `mask == 3`.
@@ -14,8 +15,8 @@ Slope sin(alpha): grad(s - h) projected to CG1 on the fine mesh, capped
 at ISMIP7_SIN_ALPHA_CAP (default 5e-3) to suppress unstructured-mesh noise.
 
 Aggregation: per-node melt is integrated to IMBIE2 basins (8 km labels,
-nearest-neighbour onto the mesh), then compared against the
-Paolo/Adusumilli per-basin observations.
+nearest-neighbour onto the mesh), then compared against the per-basin
+observation table that `_obs_csv` resolves (ISMIP7_MELT_OBS_CSV names one).
 
 Since melt is linear in K, the Term-1 optimum is closed form:
 
@@ -45,7 +46,8 @@ import rasterio
 import icepack
 
 from icepack2_tools.forcing import quadratic_mixed_slope, _RHO_I
-from icepack2_tools.runconfig import lc as _lc
+from icepack2_tools.naming import map_basename
+from icepack2_tools.runconfig import friction as _friction, lc as _lc
 
 DATA_ROOT = os.environ.get(
     "ISMIP7_DATA_ROOT", os.path.join(_PROJECT, "ISMIP7", "AIS")
@@ -55,7 +57,7 @@ BEDMACHINE_DIR = os.path.join(_PROJECT, "antarctica", "data", "bedmachine")
 
 LC = _lc()
 INV_H5 = os.environ.get(
-    "ISMIP7_INV_H5", os.path.join(MESH_DIR, f"inversion_icepack2_{LC}.h5")
+    "ISMIP7_INV_H5", os.path.join(MESH_DIR, map_basename(_friction(), LC))
 )
 
 CLIM_TF = os.path.join(DATA_ROOT, "meltMIP", "OI_Climatology_ismip8km_60m_tf_extrap.nc")
@@ -64,10 +66,33 @@ IMBIE2_NC = os.path.join(
     DATA_ROOT, "parameterisations", "ocean", "imbie2",
     "basin_numbers_ismip8km_v2.nc",
 )
-OBS_CSV = os.path.join(
-    DATA_ROOT, "parameterisations", "ocean", "meltobs",
-    "Melt_Paolo_Err_Adusumilli_imbie2_v3.csv",
+# Observed basal melt per IMBIE2 basin. The melt-calibration product re-released
+# in July 2026 (Source Cooperative, ismip7-ais-melt-calibration) combines Paolo
+# (2023), Davison (2023) and Adusumilli (2020) and raises the integrated target
+# from 865 to 1067 Gt/yr, so the total-match K calibrated against the older
+# Paolo+Adusumilli table is 23% low. Prefer the new table, fall back to the old
+# one so a tree that predates the re-release still runs, and let
+# ISMIP7_MELT_OBS_CSV name either explicitly.
+_OBS_CSV_CANDIDATES = (
+    os.path.join(DATA_ROOT, "meltobs",
+                 "Melt_Paolo_Davison_Adusumilli_imbie2.csv"),
+    os.path.join(DATA_ROOT, "parameterisations", "ocean", "meltobs",
+                 "Melt_Paolo_Err_Adusumilli_imbie2_v3.csv"),
 )
+
+
+def _obs_csv():
+    r"""Path to the per-basin melt observations, newest available first."""
+    named = os.environ.get("ISMIP7_MELT_OBS_CSV")
+    if named:
+        return named
+    for path in _OBS_CSV_CANDIDATES:
+        if os.path.exists(path):
+            return path
+    return _OBS_CSV_CANDIDATES[-1]
+
+
+OBS_CSV = _obs_csv()
 
 SIN_ALPHA_CAP = float(os.environ.get("ISMIP7_SIN_ALPHA_CAP", "5e-3"))
 
@@ -173,14 +198,35 @@ def _compute_sin_alpha(mesh, h, s):
 
 
 def _load_obs():
+    r"""Basin ids, observed melt and its uncertainty, both in Gt/yr.
+
+    The two published tables differ in width: the Paolo+Adusumilli one carries
+    area and per-area columns between melt and its uncertainty, the combined
+    Paolo+Davison+Adusumilli one carries melt and uncertainty alone. Index 3 is
+    the uncertainty in the first and past the end of the second, and any index
+    chosen for one width reads the wrong quantity or nothing at the other.
+    Columns are located by header name so the reader takes either.
+    """
     bids, mobs, sobs = [], [], []
     with open(OBS_CSV) as f:
-        r = csv.reader(f); next(r)
+        r = csv.reader(f)
+        header = next(r)
+
+        def column(want):
+            for i, name in enumerate(header):
+                if name.strip().lower() == want:
+                    return i
+            raise ValueError(
+                f"{OBS_CSV}: no {want!r} column in header {header}")
+
+        i_m = column("bmr (gt/yr)")
+        i_s = column("bmr uncert (gt/yr)")
         for row in r:
-            if not row or not row[1]: continue
+            if not row or not row[i_m]:
+                continue
             bids.append(int(row[0]))
-            mobs.append(float(row[1]))
-            sobs.append(float(row[3]))
+            mobs.append(float(row[i_m]))
+            sobs.append(float(row[i_s]))
     return np.array(bids), np.array(mobs), np.array(sobs)
 
 
@@ -197,7 +243,6 @@ def main():
 
     bed, thk, sur, msk = _interp_bedmachine(mesh, Q)
     h_np = thk.dat.data_ro
-    b_np = bed.dat.data_ro
     s_np = sur.dat.data_ro
     mask_np = msk.dat.data_ro
 
@@ -306,12 +351,20 @@ def main():
     out_dir = os.path.join(_PROJECT, "antarctica", "results")
     os.makedirs(out_dir, exist_ok=True)
     K_out = os.path.join(out_dir, f"calibrated_K_per_basin_{LC}.npz")
+    # Provenance travels with the numbers. Two published observation tables are
+    # in circulation and their integrated targets differ by 23%, so a K file
+    # that does not name its own source cannot be told apart from the other
+    # calibration once it is on disk. The forward reads basin_ids and K_basin,
+    # plus sin_alpha_cap, which load_K_per_basin compares against its own
+    # uncapped slope and warns about; the other entries cost nothing.
     np.savez(
         K_out,
         basin_ids=bids_obs, K_basin=K_basin,
         M_obs=M_obs, M_1=M_1, sigma_obs=sigma_obs,
         K_star=K_star, K_total=K_total,
         basin_on_mesh=basin, K_field=K_field,
+        obs_csv=os.path.basename(OBS_CSV), obs_total_gtyr=float(M_obs.sum()),
+        mesh_source=os.path.basename(INV_H5), sin_alpha_cap=SIN_ALPHA_CAP,
     )
     PETSc.Sys.Print(f"  Saved: {K_out}")
 

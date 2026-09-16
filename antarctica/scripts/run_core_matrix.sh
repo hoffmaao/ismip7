@@ -10,7 +10,7 @@
 #   3,4   ssp370       both ESMs                          ->2100
 #   5,6   ssp126       both ESMs                          ->2300
 #   7,8   ssp585       both ESMs                          ->2300
-#   11    OCX          obs-constrained, cold start     1990-2025
+#   11    OCX          obs-constrained, independent    1979-2025
 #
 # A core that branches from the historical is only launched once that ESM's
 # historical endpoint is on disk, complete and post-fix. A missing, short or
@@ -24,12 +24,13 @@
 # PROVENANCE: a completed timeseries is only reused when it postdates the
 # forcing implementation ($PROV_REF). Results produced before the annual-mean
 # atmosphere fix are invalid (January was applied as the whole year), so they
-# are ARCHIVED under $R/archive_stale_<TS>/ - the timeseries, the final.h5 and
-# the periodic checkpoints together - and re-run rather than silently skipped
-# and fed to the audit. Moving them aside also stops a crashed relaunch from
-# reading the superseded file back as its own progress, and a resume source is
-# additionally required to postdate $PROV_REF so no run can continue from
-# pre-fix geometry.
+# are ARCHIVED under $R/archive_stale_<TS>/ - the timeseries, the final.h5,
+# the periodic checkpoints and any banked ISMIP7 annual series (the per-year
+# h5 files and the scalars csv) together - and re-run rather than silently
+# skipped and fed to the audit. Moving them aside also stops a crashed
+# relaunch from reading the superseded file back as its own progress, and a
+# resume source is additionally required to postdate $PROV_REF so no run can
+# continue from pre-fix geometry.
 # Reuse precedence: FRESH=1 (re-run every selected core) beats REUSE=1 (reuse
 # any completed timeseries unchecked) beats the provenance comparison. Neither
 # flag affects the dependency check above or the resume-source check.
@@ -44,8 +45,14 @@
 # MAX_ATTEMPTS. A run that stops advancing is left alone and reported. The
 # resume source is the newest checkpoint whose recorded year is at or before
 # the timeseries' last row, so a run is never continued from a state ahead of
-# its own record. OCX is the exception: its driver cold-starts unconditionally
-# and ignores ISMIP7_RESTART, so it runs at most once.
+# its own record.
+# That resume is not limited to the retries: a core that already has saved
+# state of its own is resumed on EVERY attempt, the first included. Only a
+# core with nothing of its own cold-starts, and then its driver's own restart
+# logic applies (projections and the CTRL branch from the historical
+# endpoint). Cold-starting into a core's own partial run would rewind a
+# projection to the historical endpoint and re-simulate years it has already
+# banked, which under ISMIP7_OUTPUT=1 is a hard error rather than a rewrite.
 #
 # Usage:
 #   antarctica/scripts/run_core_matrix.sh                # full matrix
@@ -94,7 +101,7 @@ export ISMIP7_FRICTION="${ISMIP7_FRICTION:-budd}"
 export ISMIP7_DIAGNOSTIC_LINEAR_SOLVER="${ISMIP7_DIAGNOSTIC_LINEAR_SOLVER:-full_mumps}"
 export ISMIP7_DT="${ISMIP7_DT:-0.1}"
 export ISMIP7_OUTPUT_INTERVAL="${ISMIP7_OUTPUT_INTERVAL:-10}"
-export ISMIP7_APPARENT_MB="${ISMIP7_APPARENT_MB:-1}"
+export ISMIP7_APPARENT_MB="${ISMIP7_APPARENT_MB-1}"
 export ISMIP7_FIXED_FRONT="${ISMIP7_FIXED_FRONT:-1}"
 export ISMIP7_SUBCYCLES="${ISMIP7_SUBCYCLES:-1,4,16,64}"
 TAG="${ISMIP7_RUN_TAG:-}"
@@ -109,21 +116,26 @@ PROV_MTIME=""
 [ -e "$PROV_REF" ] && PROV_MTIME=$(stat -c %Y "$PROV_REF")
 ARCHIVE="$R/archive_stale_$TS"
 
-# core | label | driver | ESM | experiment-name stem | target year | kind
+# core | label | driver | ESM | experiment-name stem | target t_yr | kind
+#
+# The target is the model TIME a complete run ends at, compared against the
+# checkpoint's t_yr, so it is 1 January of the year after the last one the
+# core covers: a historical covering 1850-2014 finishes at 2015.
 # kind: hist = historical, branch = branches from the historical endpoint,
-#       cold = cold start with no restart support.
+#       solo = starts from the inversion rather than a historical endpoint.
+# Every kind resumes from its own saved state, so every one is retried.
 CORE_SPEC=(
-  "1|hist_cesm|historical/cesm_waccm.py|CESM2-WACCM|hist_cesm2_waccm|2014|hist"
-  "2|hist_mri|historical/mri_esm2.py|MRI-ESM2-0|hist_mri_esm2_0|2014|hist"
-  "9|ctrl_cesm|control/run.py|CESM2-WACCM|ctrl2015_cesm2_waccm|2300|branch"
-  "10|ctrl_mri|control/run.py|MRI-ESM2-0|ctrl2015_mri_esm2_0|2300|branch"
-  "3|ssp370_cesm|projections/ssp370_cesm_waccm.py|CESM2-WACCM|ssp370_cesm2_waccm|2100|branch"
-  "4|ssp370_mri|projections/ssp370_mri_esm2.py|MRI-ESM2-0|ssp370_mri_esm2_0|2100|branch"
-  "5|ssp126_cesm|projections/ssp126_cesm_waccm.py|CESM2-WACCM|ssp126_cesm2_waccm|2300|branch"
-  "6|ssp126_mri|projections/ssp126_mri_esm2.py|MRI-ESM2-0|ssp126_mri_esm2_0|2300|branch"
-  "7|ssp585_cesm|projections/ssp585_cesm_waccm.py|CESM2-WACCM|ssp585_cesm2_waccm|2300|branch"
-  "8|ssp585_mri|projections/ssp585_mri_esm2.py|MRI-ESM2-0|ssp585_mri_esm2_0|2300|branch"
-  "11|ocx|projections/ocx.py|CESM2-WACCM|ocx|2025|cold"
+  "1|hist_cesm|historical/cesm_waccm.py|CESM2-WACCM|hist_cesm2_waccm|2015|hist"
+  "2|hist_mri|historical/mri_esm2.py|MRI-ESM2-0|hist_mri_esm2_0|2015|hist"
+  "9|ctrl_cesm|control/run.py|CESM2-WACCM|ctrl2015_cesm2_waccm|2301|branch"
+  "10|ctrl_mri|control/run.py|MRI-ESM2-0|ctrl2015_mri_esm2_0|2301|branch"
+  "3|ssp370_cesm|projections/ssp370_cesm_waccm.py|CESM2-WACCM|ssp370_cesm2_waccm|2101|branch"
+  "4|ssp370_mri|projections/ssp370_mri_esm2.py|MRI-ESM2-0|ssp370_mri_esm2_0|2101|branch"
+  "5|ssp126_cesm|projections/ssp126_cesm_waccm.py|CESM2-WACCM|ssp126_cesm2_waccm|2301|branch"
+  "6|ssp126_mri|projections/ssp126_mri_esm2.py|MRI-ESM2-0|ssp126_mri_esm2_0|2301|branch"
+  "7|ssp585_cesm|projections/ssp585_cesm_waccm.py|CESM2-WACCM|ssp585_cesm2_waccm|2301|branch"
+  "8|ssp585_mri|projections/ssp585_mri_esm2.py|MRI-ESM2-0|ssp585_mri_esm2_0|2301|branch"
+  "11|ocx|projections/ocx.py|CESM2-WACCM|ocx|2026|solo"
 )
 
 declare -A HIST_STEM=() HIST_TARGET=() HIST_STATUS=() HIST_WHY=() \
@@ -179,15 +191,21 @@ reusable () {  # core label csv year - true when the existing output is current
 }
 
 archive_stale () {  # core label stem - move superseded output out of the way
-  local core="$1" label="$2" stem="$3" f moved=() failed=() ckpts=0
+  local core="$1" label="$2" stem="$3" f moved=() failed=() ckpts=0 years=0
   # The periodic checkpoints go too: pick_restart can resume from them, so a
   # pre-fix one left behind would become the resume state of a clean re-run.
+  # So does the ISMIP7 annual series: a cold start into a populated one is a
+  # hard error (AnnualOutput refuses rather than overwrite a banked
+  # submission), so leaving it behind would make the re-run impossible.
   for f in "$(csv_of "$stem")" "$(h5_of "$stem")" \
-           "$R/${stem}${SFX}_${LC}"_t*.h5; do
+           "$R/${stem}${SFX}_${LC}"_t*.h5 \
+           "$R/${stem}${SFX}_${LC}"_ismip7_annual_*.h5 \
+           "$R/${stem}${SFX}_${LC}_ismip7_scalars.csv"; do
     [ -e "$f" ] || continue
     if mkdir -p "$ARCHIVE" && mv "$f" "$ARCHIVE/"; then
       case "$f" in
         *_"${LC}"_t*.h5) ckpts=$((ckpts + 1)) ;;
+        *_ismip7_annual_*.h5) years=$((years + 1)) ;;
         *) moved+=("$(basename "$f")") ;;
       esac
     else
@@ -204,9 +222,10 @@ archive_stale () {  # core label stem - move superseded output out of the way
          "result. Check permissions and free space on $R, then re-run."
     return 1
   fi
-  if [ "${#moved[@]}" -gt 0 ] || [ "$ckpts" -gt 0 ]; then
+  if [ "${#moved[@]}" -gt 0 ] || [ "$ckpts" -gt 0 ] || [ "$years" -gt 0 ]; then
     local what="${moved[*]:-}"
     [ "$ckpts" -gt 0 ] && what="${what:+$what + }$ckpts checkpoint(s)"
+    [ "$years" -gt 0 ] && what="${what:+$what + }$years ISMIP7 year(s)"
     echo "[core $core] $label: archived $what under $ARCHIVE/"
   fi
   return 0
@@ -303,39 +322,45 @@ run_core () {  # core label driver esm stem target kind
     return 0
   fi
 
-  # OCX cold-starts unconditionally, so a relaunch cannot resume it and would
-  # truncate the previous timeseries instead of extending it.
   attempts="$MAX_ATTEMPTS"
-  [ "$kind" = cold ] && attempts=1
 
   for attempt in $(seq 1 "$attempts"); do
     prev="$now"
     wait_for_load
     log="$R/logs/matrix_${TS}_core${core}_${label}_a${attempt}.log"
-    # Attempt 1 uses the driver's own restart logic (projections and the CTRL
-    # branch from the historical endpoint). Later attempts are wall retries and
-    # must resume from this run's own saved state.
+    # A core that has its own saved state resumes from it on EVERY attempt,
+    # the first included. Cold-starting into a core's own partially complete
+    # run would restart a projection from the historical endpoint and rewrite
+    # years it has already banked, which AnnualOutput refuses outright under
+    # ISMIP7_OUTPUT=1, wedging the core. Only a core with no state of its own
+    # cold-starts, and then the driver's own logic applies (projections and
+    # the CTRL branch from the historical endpoint).
     local restart_env=() pick pick_t pick_fn
-    if [ "$attempt" -gt 1 ]; then
-      pick=$(pick_restart "$stem" "$now")
-      pick_t=${pick%%|*}; pick_fn=${pick#*|}
-      if [ "$pick_t" = "?" ]; then
-        if [ ! -f "$h5" ] || [ "$csv" -nt "$h5" ]; then
-          echo "[core $core] $label: cannot confirm a saved state consistent" \
-               "with the timeseries at ${now:-nothing} - stopping rather than" \
-               "resuming from a checkpoint that may be ahead of the record"
-          return 1
-        fi
-        pick_fn="$h5"; pick_t="$now"
-      elif [ -z "$pick_fn" ]; then
-        echo "[core $core] $label: no checkpoint at or before the timeseries'" \
-             "last year ${now:-nothing} - stopping rather than splicing two" \
-             "timelines into one record"
+    pick=$(pick_restart "$stem" "$now")
+    pick_t=${pick%%|*}; pick_fn=${pick#*|}
+    if [ "$pick_t" = "?" ] && [ -f "$h5" ]; then
+      if [ "$csv" -nt "$h5" ]; then
+        echo "[core $core] $label: cannot confirm a saved state consistent" \
+             "with the timeseries at ${now:-nothing} - stopping rather than" \
+             "resuming from a checkpoint that may be ahead of the record"
         return 1
       fi
+      pick_fn="$h5"; pick_t="$now"
+    fi
+    if [ -n "$pick_fn" ]; then
       restart_env=(ISMIP7_RESTART="$REPO/$pick_fn")
-      echo "[core $core] $label retry $((attempt-1)) from $now" \
-           "(resuming $(basename "$pick_fn") at t=$pick_t)"
+      if [ "$attempt" -gt 1 ]; then
+        echo "[core $core] $label retry $((attempt-1)) from $now" \
+             "(resuming $(basename "$pick_fn") at t=$pick_t)"
+      else
+        echo "[core $core] $label resuming $(basename "$pick_fn")" \
+             "at t=$pick_t (target $target)"
+      fi
+    elif [ "$attempt" -gt 1 ]; then
+      echo "[core $core] $label: no checkpoint at or before the timeseries'" \
+           "last year ${now:-nothing} - stopping rather than splicing two" \
+           "timelines into one record"
+      return 1
     else
       echo "[core $core] $label starting (target $target)"
     fi
@@ -366,11 +391,7 @@ run_core () {  # core label driver esm stem target kind
       return 1
     fi
   done
-  if [ "$kind" = cold ]; then
-    echo "[core $core] $label short of target at $now - not retried (its driver ignores ISMIP7_RESTART)"
-  else
-    echo "[core $core] $label short of target after $attempts attempts (at $now)"
-  fi
+  echo "[core $core] $label short of target after $attempts attempts (at $now)"
   return 1
 }
 

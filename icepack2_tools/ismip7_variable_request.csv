@@ -1,0 +1,43 @@
+long_name,Dim,Type,Variable Name,standard_name,units,Mandatory (yes/no),Comment,min_value_ais,max_value_ais,min_value_gris,max_value_gris,range_severity,fill_policy,margin_severity
+Ice thickness,"x,y,t",ST,lithk,land_ice_thickness,m,yes,Ice thickness of the ice sheet,0,5500,0,5000,error,forbidden,warning
+Surface elevation,"x,y,t",ST,orog,surface_altitude,m,yes,Surface elevation of the ice sheet,0,5500,0,4500,error,outside_domain,
+Bedrock elevation,"x,y,t",ST,topg,bedrock_altitude,m,yes,The bedrock topography (may change during the projections),-7000,5500,-4000,4000,error,outside_domain,
+Ice base elevation,"x,y,t",ST,base,,m,yes,Should get standard name land_ice_temperature,-4000,4000,-4000,4000,error,outside_domain,
+Geothermal heat flux,"x,y,t",FL,hfgeoubed,upward_geothermal_heat_flux_in_land_ice,W m-2,no,Geothermal Heat flux at the ice interface,0,0.3,0,0.3,error,outside_domain,
+Surface mass balance flux,"x,y,t",FL,acabf,land_ice_surface_specific_mass_balance_flux,kg m-2 s-1,yes,Surface Mass Balance flux,-0.0006,0.001,-0.0006,0.001,error,outside_domain,
+Basal mass balance flux beneath grounded ice,"x,y,t",FL,libmassbfgr,land_ice_basal_specific_mass_balance_flux,kg m-2 s-1,yes,Basal mass balance flux (only beneath grounded ice),-0.0003,0.0001,-0.0003,0.0001,error,no_grounded_ice,warning
+Basal mass balance flux beneath floating ice,"x,y,t",FL,libmassbffl,land_ice_basal_specific_mass_balance_flux,kg m-2 s-1,yes,Basal mass balance flux (only beneath floating ice),-0.008,0.001,-0.008,0.001,error,no_floating_ice,warning
+Ice thickness imbalance,"x,y,t",FL,dlithkdt,tendency_of_land_ice_thickness,m s-1,yes,dHdt,-0.0001,0.0001,-0.0001,0.0001,error,forbidden,
+Surface velocity in x,"x,y,t",ST,xvelsurf,land_ice_surface_x_velocity,m s-1,no,u-velocity at land ice surface,-0.0004,0.0004,-0.0008,0.0008,error,no_ice,warning
+Surface velocity in y,"x,y,t",ST,yvelsurf,land_ice_surface_y_velocity,m s-1,no,v-velocity at land ice surface,-0.0004,0.0004,-0.0008,0.0008,error,no_ice,warning
+Surface velocity in z,"x,y,t",ST,zvelsurf,land_ice_surface_upward_velocity,m s-1,no,w-velocity at land ice surface,-4.00E-06,4.00E-06,-8.00E-06,8.00E-06,error,no_ice,warning
+Basal velocity in x,"x,y,t",ST,xvelbase,land_ice_basal_x_velocity,m s-1,no,u-velocity at land ice base,-0.0004,0.0004,-0.0008,0.0008,error,no_ice,warning
+Basal velocity in y,"x,y,t",ST,yvelbase,land_ice_basal_y_velocity,m s-1,no,v-velocity at land ice base,-0.0004,0.0004,-0.0008,0.0008,error,no_ice,warning
+Basal velocity in z,"x,y,t",ST,zvelbase,land_ice_basal_upward_velocity,m s-1,no,w-velocity at land ice base,-5.00E-06,5.00E-06,-8.00E-06,8.00E-06,error,no_ice,warning
+Mean velocity in x,"x,y,t",ST,xvelmean,land_ice_vertical_mean_x_velocity,m s-1,yes,Vertical mean land ice velocity ,-0.0008,0.0008,-0.0008,0.0008,error,no_ice,warning
+Mean velocity in y,"x,y,t",ST,yvelmean,land_ice_vertical_mean_y_velocity,m s-1,yes,The vertical mean land ice velocity is the average from the bedrock to the surface of the ice,-0.0008,0.0008,-0.0008,0.0008,error,no_ice,warning
+Surface temperature,"x,y,t",ST,litemptop,temperature_at_top_of_ice_sheet_model,K,no,Ice temperature at surface,183,290,183,290,error,no_ice,warning
+Depth average temperature,"x,y,t",ST,litempavg,,K,no,Should get standard name land_ice_temperature,183,290,183,290,error,no_ice,warning
+Basal temperature beneath grounded ice sheet,"x,y,t",ST,litempbotgr,temperature_at_base_of_ice_sheet_model,K,no,Ice temperature at base of grounded ice sheet,183,290,183,290,error,no_grounded_ice,warning
+Basal temperature beneath floating ice shelf,"x,y,t",ST,litempbotfl,temperature_at_base_of_ice_sheet_model,K,no,Ice temperature at base of floating ice shelf,183,290,183,290,error,no_floating_ice,warning
+Basal drag,"x,y,t",ST,strbasemag,land_ice_basal_drag,Pa,yes,Basal drag,0,1.00E+06,0,1.00E+06,error,no_ice,warning
+Calving flux,"x,y,t",FL,licalvf,land_ice_specific_mass_flux_due_to_calving,kg m-2 s-1,yes,Ice mass change resulting from iceberg calving. Only for grid cells in contact with ocean,-1.00E+11,0,-1.00E+11,0,error,forbidden,
+Grounding line flux,"x,y,t",FL,ligroundf,,kg m-2 s-1,yes,Flux of ice mass across the grounding line. Only for grounding line grid cells. Should get standard name: land_ice_specific_grounding_line_flux,-1.00E+09,1.00E+11,-1.00E+09,1.00E+11,error,forbidden,
+Ice front melt flux,"x,y,t",FL,lifmassbf,,kg m-2 s-1,yes,Ice mass change resulting from ice front melting. Only for grid cells in contact with ocean. Should get standard name: land_ice_specific_mass_flux_due_to_ice_front_melting,-1.00E+11,0,-1.00E+11,0,error,forbidden,
+Land ice area fraction,"x,y,t",ST,sftgif,land_ice_area_fraction,1,yes,"Fraction of grid cell covered by land ice (ice sheet, ice shelf, ice cap, glacier)",0,1,0,1,error,forbidden,
+Grounded ice sheet area fraction,"x,y,t",ST,sftgrf,grounded_ice_sheet_area_fraction,1,yes,"Fraction of grid cell covered by grounded ice sheet, where grounded indicates that the quantity correspond to the ice sheet that flows over bedrock",0,1,0,1,error,forbidden,
+Floating ice sheet area fraction,"x,y,t",ST,sftflf,floating_ice_shelf_area_fraction,1,yes,Fraction of grid cell covered by ice sheet flowing over seawater,0,1,0,1,error,forbidden,
+Thermal forcing at the ice base under floating ice shelves,"x,y,t",ST,thdrflf,,K,no,Thermal forcing (thermal driving) interpolated to the ice draft under floating ice shelves (fill value for purely grounded ice or not ice),-1,30,-1,30,error,outside_domain,
+Anomaly in geopotential height from reference geoid,"x,y,t",ST,deltag,geopotential_height_anomaly,m,no,The change in geoid height should be relative to the reference geoid,-4000,4000,-4000,4000,error,outside_domain,
+Reference geoid,"x,y",ST,refgeoid,geoid_height_above_reference_ellipsoid,m,no,This field is calculated with respect to the WGS84 reference ellipsoid,-500,500,-500,500,error,outside_domain,
+Ice temperature,"x,y,z,t",ST,litemp,land_ice_temperature,K,no,"3D temperature snapshots at (1900 if in historical), initial state, 2014, 2100, 2200, and 2300. Output on the model native vertical coordinate. Only for models that have 3D temperature calculation",183,274,183,274,error,no_ice,warning
+Total ice mass,t,ST,lim,land_ice_mass,kg,yes,"spatial integration, volume times density",0,1.00E+25,0,1.00E+25,error,forbidden,
+Mass above floatation,t,ST,limnsw,land_ice_mass_not_displacing_sea_water,kg,yes,"spatial integration, volume times density",0,1.00E+25,0,1.00E+25,error,forbidden,
+Grounded ice area,t,ST,iareagr,grounded_ice_sheet_area,m^2,yes,spatial integration,0,1.00E+25,0,1.00E+25,error,forbidden,
+Floating ice area,t,ST,iareafl,floating_ice_shelf_area,m^2,yes,spatial integration,0,1.00E+25,0,1.00E+25,error,forbidden,
+Total SMB flux,t,FL,tendacabf,tendency_of_land_ice_mass_due_to_surface_mass_balance,kg s-1,yes,spatial integration,0,1.00E+25,0,1.00E+25,error,forbidden,
+Total BMB flux beneath grounded ice,t,FL,tendlibmassbfgr,tendency_of_land_ice_mass_due_to_basal_mass_balance,kg s-1,yes,spatial integration,0,1.00E+25,0,1.00E+25,error,forbidden,
+Total BMB flux beneath floating ice,t,FL,tendlibmassbffl,tendency_of_land_ice_mass_due_to_basal_mass_balance,kg s-1,yes,spatial integration (computed beneath floating ice only),0,1.00E+25,0,1.00E+25,error,forbidden,
+Total calving flux,t,FL,tendlicalvf,tendency_of_land_ice_mass_due_to_calving,kg s-1,yes,spatial integration,0,1.00E+25,0,1.00E+25,error,forbidden,
+Total ice front melting flux,t,FL,tendlifmassbf,,kg s-1,yes,"spatial integration, should get standard name: tendency_of_land_ice_mass_due_to_ice_front_melting",0,1.00E+25,0,1.00E+25,error,forbidden,
+Total grounding line flux,t,FL,tendligroundf,,kg s-1,yes,"spatial integration, should get a standard name",0,1.00E+25,0,1.00E+25,error,forbidden,

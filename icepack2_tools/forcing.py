@@ -1,6 +1,7 @@
 r"""ISMIP7 forcing data reader for Antarctic simulations."""
 
 import os
+import re
 import warnings
 import numpy as np
 
@@ -33,6 +34,41 @@ _DEFAULT_DATA_ROOT = os.path.join(
 )
 
 
+def _comm_rank():
+    r"""World rank, or 0 without mpi4py: notices meant to be logged once must
+    not repeat per rank."""
+    try:
+        from mpi4py import MPI
+    except ImportError:
+        return 0
+    return MPI.COMM_WORLD.rank
+
+
+def forcing_year(t_yr):
+    r"""The calendar year a MODEL TIME lies in, from the time a step ENDS at.
+
+    ``run_simulation`` hands the forcing callback the END of the step, and
+    ``t = Y.0`` is 1 January of year Y, so the step from 2300.9 to 2301.0 lies
+    in 2300 and the step from 2015.0 to 2015.1 lies in 2015. Rounding instead
+    asks for the wrong year on every step past the half-year mark: a run that
+    covers 2015-2300 would end by requesting 2301, two past CESM2-WACCM's
+    2299, which the one-year end-of-series bridge cannot cover, so the run
+    dies on its last step instead of banking 2300.
+
+    This is also the year ``AnnualOutput`` is accumulating, so the forcing a
+    step receives and the year its fluxes are booked into are the same.
+
+    It belongs at the boundary where model time is known, which is the forcing
+    callback. The readers below take a plain CALENDAR year: they are also
+    called with years straight out of ``available_years`` (the climatology
+    pools in ``smb_scheme`` and ``compute_climatology``), and shifting those
+    would re-reference every pooled year by one and make the first year of a
+    scenario read as preceding its own series.
+    """
+    import math
+    return int(math.ceil(float(t_yr) - 1e-9)) - 1
+
+
 def smb_kgm2s_to_myr(smb_kgm2s):
     r"""Convert SMB from kg/m^2/s to m/yr ice equivalent."""
     return smb_kgm2s * _SEC_PER_YEAR / _RHO_ICE * (_RHO_WATER / _RHO_ICE)
@@ -54,9 +90,7 @@ def _sample_raster(raster, Q):
         return icepack.interpolate(raster, Q)
     from .geometry import sample_to_geometry
     Q_cg = fd.FunctionSpace(Q.mesh(), "CG", 1)
-    return sample_to_geometry(
-        lambda space: icepack.interpolate(raster, space), Q, Q_cg
-    )
+    return sample_to_geometry(raster, Q, Q_cg)
 
 
 def load_racmo_smb_climatology(Q, clim_start=2000, clim_end=2029, data_dir=None,
@@ -194,17 +228,18 @@ def load_mean_annual_surface_temperature(Q, var="tas", data_root=None,
 
 
 def _version_subdirs(parent_dir):
-    r"""(N, name) pairs for the v<N> subdirs of a directory, ascending."""
+    r"""``[(key, name)]`` of the ``v<N>`` and ``v<N>.<M>`` subdirectories of
+    ``parent_dir``, ascending. Dotted versions are real (the fracture forcing
+    went v2 -> v2.1 in September 2026), so the key is a tuple of integers,
+    not ``int(name[1:])``, which raised on them and hid the directory."""
     versions = []
-    if parent_dir is not None and os.path.isdir(parent_dir):
-        for name in os.listdir(parent_dir):
-            if name.startswith("v") and os.path.isdir(
-                    os.path.join(parent_dir, name)):
-                try:
-                    versions.append((int(name[1:]), name))
-                except ValueError:
-                    pass
-    return sorted(versions)
+    if not os.path.isdir(parent_dir):
+        return versions
+    for name in os.listdir(parent_dir):
+        if re.fullmatch(r"v\d+(\.\d+)*", name) and os.path.isdir(os.path.join(parent_dir, name)):
+            versions.append((tuple(int(x) for x in name[1:].split(".")), name))
+    versions.sort()
+    return versions
 
 
 def _resolve_version(parent_dir, pinned):
@@ -222,8 +257,26 @@ def atmosphere_path(scenario, esm="CESM2-WACCM", variable="acabf-anomaly",
     root = _find_ismip7_data(data_root)
     if root is None:
         return None
-    parent = os.path.join(root, esm, scenario, f"SDBN1-{resolution}", variable)
+    parent = os.path.join(root, esm, scenario, atmosphere_product(root, esm, scenario, resolution), variable)
     return os.path.join(parent, _resolve_version(parent, version))
+
+
+ATMOSPHERE_PRODUCTS = ("SDBN1", "GEMB-SDBN1")
+
+
+def atmosphere_product(root, esm, scenario, resolution="8000m"):
+    r"""The downscaled-atmosphere directory name for this ESM and scenario.
+
+    The core experiment uses ``SDBN1`` for CESM2-WACCM and ``GEMB-SDBN1`` for
+    MRI-ESM2-0 (MRI's runoff needed an energy-balance step before the
+    statistical downscaling; the directories were renamed in August 2026,
+    discussion #37, data unchanged). Whichever exists on disk wins, ``SDBN1``
+    first, so a tree fetched before the rename keeps working.
+    """
+    for product in ATMOSPHERE_PRODUCTS:
+        if os.path.isdir(os.path.join(root, esm, scenario, f"{product}-{resolution}")):
+            return f"{product}-{resolution}"
+    return f"SDBN1-{resolution}"
 
 
 def ocean_path(scenario, esm="CESM2-WACCM", variable="tf",
@@ -381,6 +434,7 @@ class ISMIP7Atmosphere:
         self.resolution = resolution
         self.version = version
         self._cache = {}
+        self._persisted = set()          # variables already reported as persisted past the series end
         self._grid_x = None
         self._grid_y = None
 
@@ -389,6 +443,14 @@ class ISMIP7Atmosphere:
             self.scenario, self.esm, variable,
             self.resolution, self.version, self.data_root,
         )
+
+    def _year_span(self, vdir, variable, product, version):
+        r"""``(first, last)`` year for which ``vdir`` holds a file, or None."""
+        import re
+        head = f"{variable}_AIS_{self.esm}_{self.scenario}_{product}_{version}_"
+        years = [int(m.group(1)) for f in os.listdir(vdir)
+                 for m in [re.fullmatch(re.escape(head) + r"(\d{4})\.nc", f)] if m]
+        return (min(years), max(years)) if years else None
 
     def _load_year(self, variable, year):
         import xarray as xr
@@ -402,11 +464,47 @@ class ISMIP7Atmosphere:
             return None
 
         version = os.path.basename(vdir)
-        pattern = f"{variable}_AIS_{self.esm}_{self.scenario}_SDBN1-{self.resolution}_{version}_{int(year)}.nc"
+        product = os.path.basename(os.path.dirname(os.path.dirname(vdir)))   # SDBN1-8000m or GEMB-SDBN1-8000m
+        pattern = f"{variable}_AIS_{self.esm}_{self.scenario}_{product}_{version}_{int(year)}.nc"
         path = os.path.join(vdir, pattern)
 
         if not os.path.exists(path):
-            return None
+            # End of the series: CESM2-WACCM stops at 2299 and the empty 2300
+            # files were removed (discussion #8), while a 2015-2300 run needs
+            # the 2300 forcing year. Bridge exactly that one year, once per
+            # variable in the log, rather than failing at the last step.
+            # Anything further past the end is a short tree, not the end of
+            # the series, and repeating one year of SMB for decades would be a
+            # scientifically wrong run reported as a success, so it raises.
+            span = self._year_span(vdir, variable, product, version)
+            if span is None:
+                # The variable has no files at all here: an optional product
+                # (dacabfdz, ts-anomaly) the callers may legitimately run
+                # without. Only a year missing from a series that exists is
+                # an error.
+                return None
+            first, last = span
+            if int(year) - last == 1:
+                if variable not in self._persisted:
+                    self._persisted.add(variable)
+                    if _comm_rank() == 0:
+                        print(f"  ISMIP7Atmosphere: {variable} has no year {int(year)}; "
+                              f"persisting {last}, the last year on disk", flush=True)
+                self._cache[key] = self._load_year(variable, last)
+                return self._cache[key]
+            # get_field would turn a None into a field of zeros and the run
+            # would report a whole year of zero anomaly as a success, so the
+            # reader refuses instead. A year BEFORE the series is its own
+            # case: a projection asking for one means its timeline starts
+            # earlier than the scenario does, not that the tree is short.
+            where = ("precedes the series there" if int(year) < first
+                     else "is missing from the series there")
+            raise FileNotFoundError(
+                f"ISMIP7Atmosphere: {variable} for {self.esm} {self.scenario} "
+                f"has no year {int(year)} in {vdir}: it {where} "
+                f"({first}-{last}; only the single year after the end is "
+                f"bridged, 2300 after 2299)."
+            )
 
         ds = xr.open_dataset(path)
 
@@ -468,7 +566,7 @@ class ISMIP7Atmosphere:
         ``_annual_mean_over_time`` (see that docstring for the weighting)."""
         import xarray as xr
 
-        yr = int(round(year))
+        yr = int(year)
         da = self._load_year(variable, yr)
         if da is None:
             return np.zeros(len(mesh_x))
@@ -560,7 +658,7 @@ class ISMIP7Ocean:
         import xarray as xr
         from scipy.interpolate import RegularGridInterpolator
 
-        yr = int(round(year))
+        yr = int(year)
         key = (variable, yr)
         if key in self._interp_cache:
             return self._interp_cache[key]
@@ -679,6 +777,14 @@ class ISMIP7Fracture:
             return None
         return os.path.join(root, self.esm, self.scenario, "fracture")
 
+    def fracture_dir(self):
+        r"""Where the collapse mask is looked for, for error messages."""
+        return self._fracture_dir() or f"<no ISMIP7 data root under {self.data_root}>"
+
+    def has_collapse_mask(self):
+        r"""True once ``load`` has found an ice-shelf collapse mask."""
+        return self._collapse_mask is not None
+
     def load(self):
         import xarray as xr
 
@@ -721,7 +827,7 @@ class ISMIP7Fracture:
         da = ds[var]
 
         if "time" in da.dims:
-            da = da.sel(time=year, method="nearest")
+            da = da.sel(time=int(year), method="nearest")
 
         mx = xr.DataArray(np.asarray(mesh_x), dims="node")
         my = xr.DataArray(np.asarray(mesh_y), dims="node")
@@ -770,6 +876,32 @@ def quadratic_mixed_slope(tf, salinity, sin_alpha, K=_K_DEFAULT):
     return melt * _SEC_PER_YEAR
 
 
+_SLOPE_CAP_WARNED = False
+
+
+def _warn_slope_cap(npz_path, cap):
+    r"""Say once that the K on disk was fitted against a capped draft slope
+    while the forward applies an uncapped one."""
+    global _SLOPE_CAP_WARNED
+    if _SLOPE_CAP_WARNED:
+        return
+    _SLOPE_CAP_WARNED = True
+    if _comm_rank() == 0:
+        print(
+            f"  WARNING: {os.path.basename(npz_path)} was calibrated with the "
+            f"draft slope capped at sin(alpha) = {cap:g}, and this forward "
+            f"applies no cap, so it melts with a field the K was not fitted "
+            f"against. Measured at the reference state on the Ua 2 km mesh, "
+            f"the forward's own melt path integrates 1732 Gt/yr against the "
+            f"1067.4 Gt/yr the K was fitted to, and capping its slope gives "
+            f"646 Gt/yr; these supersede an earlier 4293 and 1028 from a "
+            f"lifted slope. Recalibrating K through the forward's melt path "
+            f"reconciles the two. See antarctica/FORWARD_RUN_READINESS.md "
+            f"action 5.",
+            flush=True,
+        )
+
+
 def load_K_per_basin(npz_path, mesh_x, mesh_y, fill=0.0):
     r"""Load a per-basin calibrated K and return a per-node array.
 
@@ -777,7 +909,8 @@ def load_K_per_basin(npz_path, mesh_x, mesh_y, fill=0.0):
     and is expected to contain `basin_ids` (int) and `K_basin` (float) plus
     the IMBIE2 basin file path (the IMBIE2 8 km grid is re-read here so
     that the K-field can be remapped to *any* mesh, not just the one used
-    during calibration).
+    during calibration). An optional `sin_alpha_cap` records the draft slope
+    cap the K was fitted against and triggers a once-per-run warning.
 
     Returns an array of shape (len(mesh_x),) of per-node K values, with
     `fill` outside the calibrated basin set or where K_basin is NaN.
@@ -788,6 +921,25 @@ def load_K_per_basin(npz_path, mesh_x, mesh_y, fill=0.0):
     data = np.load(npz_path)
     bids = np.asarray(data["basin_ids"]).astype(int)
     Kbas = np.asarray(data["K_basin"]).astype(float)
+
+    # A K is only valid for the draft slope it was fitted against, because melt
+    # is linear in sin(alpha). calibrate_melt.py caps the slope at
+    # ISMIP7_SIN_ALPHA_CAP and records the value it used; compute_sin_alpha
+    # below applies no cap at all. Measured by check_melt_bound.py at the
+    # reference state on the Ua 2 km mesh, the forward's own cell by cell melt
+    # path integrates 1732 Gt/yr against the 1067.4 Gt/yr the K was fitted to,
+    # and capping its slope gives 646 Gt/yr, so neither convention on its own
+    # reconciles the two. An earlier 4293 and 1028 from a lifted slope are
+    # superseded. Recalibrating K through the forward's melt path under the
+    # chosen slope convention is the clean route, and choosing that convention
+    # is a science decision (the cap is tied to the unsettled upstream
+    # local-slope question), so this reports the disagreement and leaves the
+    # choice open.
+    # See antarctica/FORWARD_RUN_READINESS.md action 5 and check_melt_bound.py.
+    if "sin_alpha_cap" in data:
+        cap = float(data["sin_alpha_cap"])
+        if np.isfinite(cap) and cap > 0.0:
+            _warn_slope_cap(npz_path, cap)
 
     root = os.environ.get(
         "ISMIP7_DATA_ROOT",
@@ -959,12 +1111,9 @@ def make_climatology_ocean_callback(K_field, data_root=None):
     callback evaluates that same K with a cell-wise draft, a cell-wise
     sin_alpha and a cell-wise `haf <= 0` floating mask, so the melt-receiving
     area shifts by roughly a one-cell band at the grounding line and the ice
-    front - non-trivial at 32 km, where shelves are only a few cells wide. The
-    integrated DG0 melt total should be checked against the 865 Gt/yr
-    observational target and K recalibrated (against the 2026-07-31 ISMIP7 AIS
-    ocean-melt toolbox re-release, whose new constraint datasets and cold/warm
-    targets call for a re-run of the calibration notebook regardless). Nothing
-    here compensates for the shift; see GEOMETRY_DISCRETIZATION.md."""
+    front, non-trivial at 32 km, where shelves are only a few cells wide.
+    Nothing here compensates for the shift; GEOMETRY_DISCRETIZATION.md tracks
+    the check of the DG0 melt total against the observational target."""
     interps = build_oi_climatology_interpolators(data_root)
 
     def callback(ctx, t_yr):
@@ -991,6 +1140,26 @@ def make_climatology_ocean_callback(K_field, data_root=None):
     return callback
 
 
+def reject_collapse_mask(what):
+    r"""Refuse ``ISMIP7_FRACTURE=mask`` where no collapse mask can be applied.
+
+    ``run_simulation`` allocates ``ctx["collapse"]`` from the knob alone and
+    announces the forcing, but only a forcing callback carrying an
+    :class:`ISMIP7Fracture` ever fills it. A driver that has none would print
+    the banner and apply nothing, so it says so at startup instead. The
+    protocol defines no collapse mask for the control or the OCX experiment,
+    which makes ``mask`` a wrong request there rather than a no-op.
+    """
+    from .runconfig import fracture as _fracture_mode
+    if _fracture_mode() == "mask":
+        raise ValueError(
+            f"ISMIP7_FRACTURE=mask but {what} carries no ice-shelf collapse "
+            f"forcing, so no mask can ever be applied. The protocol defines "
+            f"no collapse mask for the control or the OCX experiment; run "
+            f"them with ISMIP7_FRACTURE=none."
+        )
+
+
 def make_forcing_callback(atm=None, ocean=None, fracture=None,
                           K=_K_DEFAULT, K_per_basin_npz=None,
                           smb_anomaly=True, smb_baseline=None):
@@ -1014,18 +1183,23 @@ def make_forcing_callback(atm=None, ocean=None, fracture=None,
     the control reference window) or set smb_anomaly=False to force
     with the full field.
 
-    ISMIP7_K_SCALE multiplies whichever K is in effect (the calibrated
-    per-basin K integrates 689 vs 865 Gt/yr observed on the 2500 m mesh,
-    so 1.26 matches the observed total).
+    ISMIP7_K_SCALE multiplies whichever K is in effect (the per-basin K
+    calibrated against the older Paolo/Adusumilli table integrates 689 vs
+    865 Gt/yr observed on the 2500 m mesh, so 1.26 matched that table's
+    total; the factor belongs to that calibration).
     """
+    if fracture is None:
+        reject_collapse_mask("this run's forcing callback")
     K_field_cache = {"arr": None}
     K_scale = float(os.environ.get("ISMIP7_K_SCALE", "1.0"))
 
     def callback(ctx, t_yr):
         mesh_x, mesh_y = forcing_coords(ctx)
+        # t_yr is the END of the step; the readers want a calendar year
+        yr = forcing_year(t_yr)
 
         if atm is not None:
-            smb = atm.get_smb(t_yr, mesh_x, mesh_y, anomaly=smb_anomaly)
+            smb = atm.get_smb(yr, mesh_x, mesh_y, anomaly=smb_anomaly)
             if smb_baseline is not None:
                 smb = smb + smb_baseline
             ctx["accum"].dat.data[:] = smb
@@ -1037,8 +1211,8 @@ def make_forcing_callback(atm=None, ocean=None, fracture=None,
             # Ice shelf draft (negative depth below sea level)
             draft = np.minimum(s - h, 0.0)
 
-            tf = ocean.get_thermal_forcing(t_yr, mesh_x, mesh_y, draft=draft)
-            sal = ocean.get_salinity(t_yr, mesh_x, mesh_y, draft=draft)
+            tf = ocean.get_thermal_forcing(yr, mesh_x, mesh_y, draft=draft)
+            sal = ocean.get_salinity(yr, mesh_x, mesh_y, draft=draft)
             sin_alpha = compute_sin_alpha(ctx)
 
             # Resolve K: per-basin npz takes precedence if supplied.
@@ -1058,4 +1232,9 @@ def make_forcing_callback(atm=None, ocean=None, fracture=None,
             floating = haf <= 0
             ctx["ocean_melt"].dat.data[:] = np.where(floating, melt, 0.0)
 
+        if fracture is not None and ctx.get("collapse") is not None:
+            # The year's ice-shelf collapse mask on the geometry cells; the
+            # transport removes the floating cells it flags
+            # (simulation.run_simulation, ISMIP7_FRACTURE=mask).
+            ctx["collapse"][:] = fracture.get_collapse_mask(yr, mesh_x, mesh_y) > 0.5
     return callback

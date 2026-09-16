@@ -103,7 +103,9 @@ OCEAN_FILES = {
 CALIBRATION_FILES = {
     "obs_mipkit": {
         "remote_dir": f"{AIS_BASE}/obs/mipkit",
-        "files": ["AntarcticaObsISMIP7-v1.1.nc"],
+        # Same version the Source Cooperative mirror carries, so the two
+        # download routes deliver one file that obs_dhdt._obs_kit_path reads.
+        "files": ["AntarcticaObsISMIP7-v1.2.nc"],
         "local_dir": "obs/mipkit",
     },
     "imbie_basins_v3": {

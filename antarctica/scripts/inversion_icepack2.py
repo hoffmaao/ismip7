@@ -96,6 +96,7 @@ from icepack2_tools.naming import map_basename
 from icepack2_tools.runconfig import (
     BUDD_SHELF_GATE,
     friction as _friction, geometry_space as _geometry_space,
+    raster_sample as _raster_sample,
     lc as _lc, lc_coarse as _lc_coarse, n_flow as _n_flow,
 )
 from icepack2_tools.prior import (
@@ -186,11 +187,11 @@ GAMMA_DEFAULT = "1e5" if MISFIT_NORM == "sigma" else "1e4"
 # An absolute (or sigma-normalized) velocity misfit is dominated by wherever
 # the observational error is smallest, which on MEaSUREs is the slow interior
 # (median sigma 2.6 m/yr): a 10 m/yr error on a 20 m/yr datum costs more than
-# a 200 m/yr error on a 600 m/yr tributary. Measured on the 2500 m MAP: the
-# grounding-line flux carried by the inverted velocity is 140% of observed
-# below 100 m/yr and 52-62% between 100 and 1500 m/yr, i.e. the tributaries
-# that deliver most of the discharge are systematically slow, and the ice
-# sheet then gains grounded mass.
+# a 200 m/yr error on a 600 m/yr tributary. Measured on the 2500 m MAP
+# (antarctica/scripts/region_budget.py): the grounding-line flux carried by
+# the inverted velocity is 140% of observed below 100 m/yr and 52-62% between
+# 100 and 1500 m/yr, i.e. the tributaries that deliver most of the discharge
+# are systematically slow, and the ice sheet then gains grounded mass.
 #
 # ISSM's remedy is standard practice: sum the absolute misfit with a
 # LOGARITHMIC one (cost functions 101 + 103, `SurfaceAbsVelMisfit` +
@@ -271,6 +272,7 @@ def main():
     # friction field, and the t=0 velocity misfit cannot reveal it.
     geometry_space = _geometry_space()
     geom_dg = geometry_space == "dg0"
+    raster_sample = _raster_sample()
     Q_g = FunctionSpace(mesh, "DG", 0) if geom_dg else Q
     PETSc.Sys.Print(f"  Geometry space: {geometry_space.upper()}")
 
@@ -279,17 +281,16 @@ def main():
     bm_fn = find_file(os.path.join(DATA_DIR, "bedmachine"), "*.nc")
     # Cell average onto the geometry space, NOT a centroid point sample --
     # see geometry.sample_to_geometry for the measurements behind that.
+    PETSc.Sys.Print(f"  Raster sampling onto geometry cells: {raster_sample}")
     b = sample_to_geometry(
-        lambda sp: icepack.interpolate(
-            rasterio.open(f"netcdf:{bm_fn}:bed"), sp), Q_g, Q)
+        rasterio.open(f"netcdf:{bm_fn}:bed"), Q_g, Q, method=raster_sample)
     # h_clamp default 0.0: invert against the *true* BedMachine geometry,
     # including h=0 over the buffered ocean region. Composite rheology
     # (added below) keeps the SNES nonsingular where h=0.
     h_clamp = float(os.environ.get("ISMIP7_H_CLAMP", "0.0"))
     H = sample_to_geometry(
-        lambda sp: icepack.interpolate(
-            rasterio.open(f"netcdf:{bm_fn}:thickness"), sp),
-        Q_g, Q, floor=h_clamp)
+        rasterio.open(f"netcdf:{bm_fn}:thickness"),
+        Q_g, Q, floor=h_clamp, method=raster_sample)
     PETSc.Sys.Print(f"  H clamp: {h_clamp} m  "
                     f"(nodes h<=1m: "
                     f"{global_count(H.dat.data_ro <= 1.0, mesh.comm)} / "
@@ -1346,8 +1347,8 @@ def main():
             # "firedrake_default", so this is how the forward names its own
             # mesh and picks the matching per-mesh boundary-id sidecar.
             chk.set_attr("/", "mesh_basename", os.path.basename(mesh_fn))
-            # Mesh PARAMETERS as well as the basename (Dan/David's scheme,
-            # merged from upstream/integration). The forward resolves its
+            # Mesh PARAMETERS as well as the basename (the collaborators'
+            # scheme, merged from upstream/integration). The forward resolves its
             # boundary_ids sidecar from these rather than from its own
             # environment: ISMIP7_BUFFER_M / ISMIP7_LC_COARSE can drift, and a
             # mismatched sidecar puts the calving BC on the wrong facets, where
@@ -1357,6 +1358,13 @@ def main():
             chk.set_attr("/", "lc", int(lc))
             chk.set_attr("/", "lc_coarse", int(lc_coarse))
             chk.set_attr("/", "buffer_m", float(buffer_m))
+            # The configuration theta/phi only mean anything under. The
+            # derived MAP filename encodes all three, but ISMIP7_INVERSION
+            # bypasses the name, so the forward needs them recorded to check
+            # the MAP it was pointed at against the law it is about to run.
+            chk.set_attr("/", "friction", str(FRICTION))
+            chk.set_attr("/", "n_flow", float(n_flow_val))
+            chk.set_attr("/", "geometry_space", str(geometry_space))
             chk.set_attr("/", "misfit_norm", MISFIT_NORM)
             chk.set_attr("/", "log_vel_weight", float(log_vel_w))
             chk.set_attr("/", "log_vel_eps", float(LOG_VEL_EPS))
@@ -1364,6 +1372,10 @@ def main():
             chk.set_attr("/", "gamma_phi", float(GAMMA_PHI))
             chk.set_attr("/", "dhdt_weight", float(dhdt_w))
             chk.set_attr("/", "dhdt_net_sigma", net_sigma_used)
+            # How BedMachine was put onto the cells (runconfig.RASTER_SAMPLES).
+            # theta/phi absorb the bed representation just as they absorb the
+            # front treatment, so a forward must reproduce it.
+            chk.set_attr("/", "raster_sample", raster_sample)
             if full_state:
                 chk.set_attr("/", "t_yr", float(MATRIX_T_START))
                 chk.set_attr("/", "friction", str(FRICTION))
@@ -1397,6 +1409,7 @@ def main():
     global_ndof = len(func_to_global(theta))
     z_backup = z.copy(deepcopy=True)
     last_good_obj = [np.inf]
+    last_x = [None]                      # controls of the last CONVERGED evaluation
     iteration_count = [0]
     timing_history = []
     timing_json = os.environ.get("ISMIP7_INVERSION_TIMING_JSON", "").strip()
@@ -1488,6 +1501,7 @@ def main():
 
         z_backup.assign(z)
         last_good_obj[0] = J_val
+        last_x[0] = np.array(x_vec, copy=True)
         last_good_vel_chi2[0] = float(assemble(_vel_chi2))
         last_good_fnorm[0] = _residual_norm()
         last_good_x[0] = np.array(x_vec, copy=True)
@@ -1622,6 +1636,14 @@ def main():
         f"gamma_theta={GAMMA_THETA:g} gamma_phi={GAMMA_PHI:g} "
         f"dhdt_weight={dhdt_w:g})"
     )
+    # The chain runner reads <ISMIP7_MAP_OUT>.done as "the MAP is on disk, do
+    # not re-invert it". Write it here, the moment the checkpoint write returns:
+    # the tail below (final solve, summary figure) runs for long enough that
+    # the wall clock can kill the job inside it, and the runner's post-srun
+    # rule would then never get to write the marker.
+    if map_out and COMM_WORLD.rank == 0:
+        with open(map_out + ".done", "w"):
+            pass
 
     if timing_json:
         _write_timing_json(
@@ -1702,6 +1724,9 @@ def main():
         "atol": atol_final,
         "fnorm_ref": f_ref,
     })
+    # Whether the state on hand belongs to THIS MAP's controls; the figure
+    # step below reads it under this name.
+    final_state_ok = final_solve_ok
 
     u_sol = z.subfunctions[0]
     u_sol_mag = Function(Q).interpolate(sqrt(u_sol[0] ** 2 + u_sol[1] ** 2))
@@ -1770,8 +1795,15 @@ def main():
         PETSc.Sys.Print(f"Inversion timing record -> {timing_json}")
 
     # ── Plot ──
-    # Optional: the MAP is already written above, so a missing plotting
-    # dependency must not fail the run at this point.
+    # Optional: the MAP is already written and the velocity saved above, so a
+    # missing plotting dependency must not fail the run at this point.
+    if not final_state_ok:
+        PETSc.Sys.Print(
+            "Skipping summary figure: the final solve did not converge, so the "
+            "only state on hand is the last converged evaluation's, which "
+            "belongs to different controls than this MAP. The MAP is saved."
+        )
+        return
     try:
         import colorcet as cc
         import matplotlib

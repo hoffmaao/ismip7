@@ -1,4 +1,4 @@
-# DRAFT ISSUE — not yet posted
+# DRAFT ISSUE, not yet posted
 
 **STATUS UPDATE (Aug 30): the net term was implemented, validated, and then
 EXCLUDED from the production objective by decision.** Validation held (net
@@ -49,8 +49,8 @@ objective ever asks the initial state to lose mass at the observed rate**.
 
 The transient inversion (`ISMIP7_DHDT_WEIGHT`) penalises
 `(dh/dt_model − dh/dt_obs)²` cell-by-cell, and at 32 km it did fix the net
-(−518 → −26 Gt/yr). At 2500 m it converged properly — final pointwise RMS
-2.2 m/yr, consistent with its χ² — **and still left +604 Gt/yr of net bias**.
+(−518 → −26 Gt/yr). At 2500 m it converged properly, final pointwise RMS
+2.2 m/yr, consistent with its χ², **and still left +604 Gt/yr of net bias**.
 The arithmetic explains it: +604 Gt/yr over 11.2 M km² is a mean of
 **+0.06 m/yr per cell, i.e. ~3 % of the 2.2 m/yr local residual**. A pointwise
 L2 misfit reduces variance; its gradient barely feels a mean that small
@@ -71,7 +71,7 @@ J_net = 1/2 · [ ( ∫_grounded,observed (dh/dt_model − dh/dt_obs) dA ) / σ_n
 ```
 
 with `σ_net` of order 25 Gt/yr (IMBIE-scale uncertainty on the integrated
-balance). This penalises exactly the quantity that is wrong — the net — with
+balance). This penalises exactly the quantity that is wrong, the net, with
 a gradient that does not vanish into the pointwise noise.
 
 Implementation notes (already prototyped on `antarctica-n3`):
@@ -81,8 +81,8 @@ Implementation notes (already prototyped on `antarctica-n3`):
   is charged for the divergence its own scheme will produce), so `J_net`
   costs **no additional solve**.
 - The squared integral is taped by projecting the masked residual onto the
-  `R` (Real) function space — a one-dof solve whose solution is the domain
-  mean — and integrating a spatially-constant quadratic of it. Everything
+  `R` (Real) function space, a one-dof solve whose solution is the domain
+  mean, and integrating a spatially-constant quadratic of it. Everything
   stays in UFL and differentiates through tlm_adjoint's existing
   `EquationSolver` machinery; no functional algebra is required.
 - Knob: `ISMIP7_DHDT_NET_SIGMA` (Gt/yr; `0` disables). Recorded in the MAP
@@ -96,7 +96,7 @@ Implementation notes (already prototyped on `antarctica-n3`):
 
 ## Natural refinement (follow-up, not this change)
 
-A per-IMBIE-basin version — 16 scalars instead of 1 — would prevent
+A per-IMBIE-basin version, 16 scalars in place of 1, would prevent
 compensating errors between basins (e.g. a spurious East Antarctic gain
 cancelling a real Amundsen loss inside a single net). The single-integral
 version is the minimal change that addresses the observed artifact and is
@@ -108,7 +108,7 @@ already testable.
   iterations): the adjoint descends through the R-space projection at
   unchanged cost (~1.3 s vs an ~80 s forward), and the net moves an order of
   magnitude toward the observed value while the velocity and pointwise terms
-  also fall -- no term is traded away:
+  also fall, so every term improves:
 
   | iter | vel chi^2 | dhdt chi^2 | net (Gt/yr) |
   |---|---|---|---|
@@ -119,7 +119,7 @@ already testable.
 
   One implementation note: tlm_adjoint's linear-solver cache cannot copy the
   R-space python-type PETSc Mat, so the one-dof solve opts out of caching
-  (`cache_jacobian=False, cache_adjoint_jacobian=False`) -- free, since a 1x1
+  (`cache_jacobian=False, cache_adjoint_jacobian=False`), which is free, since a 1x1
   solve gains nothing from a cache.
 - The protocol note on the Smith 2003–2019 observation window overlapping the
   post-2015 projection era (declared in `icepack2_tools/obs_dhdt.py`) applies
@@ -128,8 +128,8 @@ already testable.
 ## Relation to other work
 
 - Builds on the transient (dH/dt) inversion merged in hoffmaao/ismip7#6.
-- Complements — does not replace — `ISMIP7_APPARENT_MB`: with a correctly
+- Complements `ISMIP7_APPARENT_MB`, leaving it in place: with a correctly
   signed initial tendency, the frozen `a_ref` correction becomes genuinely
   small instead of masking a bias of hundreds of Gt/yr.
 - Orthogonal to the mesh/sidecar convention merge from
-  `upstream/integration` (Dan/David).
+  `upstream/integration` (collaborators).

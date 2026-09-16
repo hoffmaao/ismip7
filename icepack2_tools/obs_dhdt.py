@@ -105,27 +105,54 @@ def _obs_kit_path(data_root=None):
     raise FileNotFoundError(
         f"ISMIP7 observations MIPkit not found under {obs_dir}. Set "
         f"ISMIP7_OBS_KIT to the AntarcticaObsISMIP7-v*.nc path, or pull it "
-        f"with antarctica/scripts/download_forcing.py."
+        f"with 'antarctica/scripts/download_mirror.py --product "
+        f"ismip7-ais-observations data/mipkit/' (Globus alternative: "
+        f"antarctica/scripts/download_forcing.py --calibration)."
     )
 
 
 def _cache_rasters(variable, data_root=None, cache_dir=None):
     r"""Write NaN-free value and 0/1 coverage GeoTIFFs for ``variable``.
 
-    The MIPkit is ~11 GB and carries NaN, which ``icepack.interpolate`` cannot
-    distinguish from a real value. Rewriting the single 1 km slice we need as
-    two small EPSG:3031 rasters costs a one-time pass and makes the sampling
-    path identical to BedMachine's.
+    The MIPkit is a single multi-gigabyte file and carries NaN, which
+    ``icepack.interpolate`` cannot distinguish from a real value. Rewriting
+    the single 1 km slice we need as two small EPSG:3031 rasters costs a
+    one-time pass and makes the sampling path identical to BedMachine's.
     """
     import netCDF4 as nc
     import rasterio
     from rasterio.transform import from_origin
 
-    src = _obs_kit_path(data_root)
     if cache_dir is None:
         here = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
         cache_dir = os.path.join(here, "antarctica", "data", "dhdt_cache")
     os.makedirs(cache_dir, exist_ok=True)
+    try:
+        src = _obs_kit_path(data_root)
+    except FileNotFoundError:
+        # An explicitly named kit that is missing is a configuration error, not
+        # a machine without the kit staged: report the bad path rather than
+        # silently pinning whatever version happens to be cached.
+        if os.environ.get("ISMIP7_OBS_KIT"):
+            raise
+        # No kit on this machine (a cluster staging only the two small
+        # cache rasters). The cache is complete on its own, so use the newest
+        # cached version rather than demanding the kit just to name the files.
+        import glob
+        import re
+        cands = sorted(glob.glob(os.path.join(
+            cache_dir, f"{variable}_AntarcticaObsISMIP7-v*_value.tif")))
+        if not cands:
+            raise
+
+        def _ver(fn):
+            m = re.search(r"v(\d+)\.(\d+)", os.path.basename(fn))
+            return (int(m.group(1)), int(m.group(2))) if m else (0, 0)
+        val_fn = max(cands, key=_ver)
+        cov_fn = val_fn.replace("_value.tif", "_valid.tif")
+        if not os.path.exists(cov_fn):
+            raise
+        return val_fn, cov_fn
     tag = f"{variable}_{os.path.basename(src).replace('.nc', '')}"
     val_fn = os.path.join(cache_dir, f"{tag}_value.tif")
     cov_fn = os.path.join(cache_dir, f"{tag}_valid.tif")

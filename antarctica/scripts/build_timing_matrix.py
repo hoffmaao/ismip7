@@ -18,10 +18,10 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from timing_campaign import (
     CAMPAIGN_TAG,
     DISPLAY_CORES,
+    LEGACY_MATRIX_DT_2500,
+    LEGACY_MATRIX_STEPS,
     MASS_RESIDUAL_TOL_GT,
-    MATRIX_DT_2500,
     MATRIX_REFERENCE_LC,
-    MATRIX_STEPS,
     MATRIX_T_START,
     SOURCE_INVERSION_BASENAME,
     diverged_reasons,
@@ -69,14 +69,14 @@ def _read_status(timing_dir, tag, lane):
 def _legacy_valid(record):
     try:
         lc = int(record["lc"])
-        dt = MATRIX_DT_2500 * lc / MATRIX_REFERENCE_LC
-        t_end = MATRIX_T_START + MATRIX_STEPS * dt
+        dt = LEGACY_MATRIX_DT_2500 * lc / MATRIX_REFERENCE_LC
+        t_end = MATRIX_T_START + LEGACY_MATRIX_STEPS * dt
         return (
             record.get("timing_kind", "matrix") == "matrix"
             and math.isclose(float(record["t_start"]), MATRIX_T_START)
             and math.isclose(float(record["dt"]), dt)
-            and int(record["nsteps"]) == MATRIX_STEPS
-            and int(record["completed_steps"]) == MATRIX_STEPS
+            and int(record["nsteps"]) == LEGACY_MATRIX_STEPS
+            and int(record["completed_steps"]) == LEGACY_MATRIX_STEPS
             and math.isclose(float(record["t_end"]), t_end)
             and math.isclose(float(record["t_final"]), t_end)
             and not diverged_reasons(record, "diagnostic_solve_summary")
@@ -216,7 +216,7 @@ def _classify(record, status, lane, strict, tag=CAMPAIGN_TAG):
     return "UNKNOWN", state
 
 
-def _status_table(rows, classifications, dt_2500=MATRIX_DT_2500):
+def _status_table(rows, classifications, dt_2500=LEGACY_MATRIX_DT_2500):
     header = (
         "| LC (m) | LC_coarse (m) | dt (yr) | "
         + " | ".join(f"{cores} cores" for cores in DISPLAY_CORES)
@@ -335,8 +335,9 @@ def render(tag, timing_dir, output, legacy_full_matrix=False):
     except ValueError:
         spec = None
     strict = not legacy_full_matrix and spec is not None and spec["lane"] != "probe"
-    dt_2500 = spec["dt_2500"] if spec else MATRIX_DT_2500
-    steps = spec["steps"] if spec else MATRIX_STEPS
+    # A tag without a parseable interval is the archived legacy campaign.
+    dt_2500 = spec["dt_2500"] if spec else LEGACY_MATRIX_DT_2500
+    steps = spec["steps"] if spec else LEGACY_MATRIX_STEPS
     contract = spec["contract"] if spec else "strict"
     reinverted = bool(spec and spec["lane"] == "reinverted")
     for lane in sorted(displayed):

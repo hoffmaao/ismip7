@@ -64,8 +64,16 @@ SOURCE_INVERSION_BASENAME = (
 # from different rungs can never mix, and validate_timing_record derives the
 # expected interval from a record's own tag rather than from these constants.
 MATRIX_T_START = 2015.0
-MATRIX_STEPS_DEFAULT = 5
-MATRIX_DT_2500_DEFAULT = 0.25
+# 2026-09-16 dt ladder on 2500/25000 (strict contract, pristine prepare state):
+# 5 x 0.25 ran away at step 2, 10 x 0.125 and 20 x 0.0625 completed 1.25 yr
+# with flat speed and thickness; 10 x 0.125 is the cheapest rung that passes.
+# Must match the Makefile's MATRIX_STEPS / MATRIX_DT_2500 defaults.
+MATRIX_STEPS_DEFAULT = 10
+MATRIX_DT_2500_DEFAULT = 0.125
+# The archived legacy campaign (tag scpc_mumps_5step_dt0p25at2500, no
+# parseable interval) was always 5 x 0.25; judge its records by that.
+LEGACY_MATRIX_STEPS = 5
+LEGACY_MATRIX_DT_2500 = 0.25
 MATRIX_REFERENCE_LC = 2500.0
 
 

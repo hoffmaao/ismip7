@@ -42,8 +42,11 @@ ISMIP7_SOLVER_VIEW ?=
 ISMIP7_RESCUE_ENABLED ?= 0
 T_END ?= 2020
 DT ?= 1.0
-MATRIX_STEPS ?= 5
-MATRIX_DT_2500 ?= 0.25
+# 2026-09-16 dt ladder on 2500/25000 (strict contract, pristine prepare state):
+# 5 x 0.25 ran away at step 2, 10 x 0.125 and 20 x 0.0625 completed 1.25 yr with
+# flat speed and thickness. 10 x 0.125 is the cheapest rung that passes.
+MATRIX_STEPS ?= 10
+MATRIX_DT_2500 ?= 0.125
 MATRIX_DT_2500_TAG := $(subst .,p,$(MATRIX_DT_2500))
 TIMING_KIND ?= matrix
 # Lane physics contract: strict (no apparent MB, no calving sink) or

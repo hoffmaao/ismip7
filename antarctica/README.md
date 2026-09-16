@@ -696,8 +696,10 @@ The stages and contracts are:
    gate (2026‑09‑14) are rejected; re-run the invert with `FORCE_TIMING=1`.
 7. **Strict transient timing** — all matrix lanes use `scpc_mumps`, disable
    rescue, and restrict subcycles to `1`. The interval is
-   `MATRIX_STEPS` steps of `MATRIX_DT_2500 × LC / 2500` years (defaults 5 and
-   0.25; both are written into the campaign tag, e.g.
+   `MATRIX_STEPS` steps of `MATRIX_DT_2500 × LC / 2500` years (defaults 10 and
+   0.125 since the 2026-09-16 dt ladder: 5 × 0.25 runs away at step 2 while
+   10 × 0.125 and 20 × 0.0625 complete the 1.25 yr window with flat speed and
+   thickness; both are written into the campaign tag, e.g.
    `scpc_mumps_10step_dt0p125at2500_…`, so a dt-ladder rung never mixes with
    another) and the physics contract is `TIMING_CONTRACT` (default `strict`;
    a non-strict contract suffixes the tag). Every lane runs the runaway
@@ -716,7 +718,7 @@ The stages and contracts are:
    relative and absolute thickness change so a seed is visible before it
    trips. The first diagnostic, transport, tripwire or
    mass-budget failure ends the lane. The primary timer starts immediately
-   before the five-step loop, after cache loading, solver construction, and
+   before the step loop, after cache loading, solver construction, and
    transport setup; `setup_seconds` is reported separately. JSON records are
    atomically written on catchable success or failure and include solver
    histories, global mesh counts, extrema, residuals, phase, and completed

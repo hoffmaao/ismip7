@@ -64,6 +64,11 @@ are NOT version controlled:
   excluded via `.git/info/exclude`. It is machine-specific and NOT shared.
   Anything another agent or human needs belongs here, in `AGENTS.md`, or in the
   topic docs.
+- **Upstream is `icepack/ismip7` `main`.** Every branch starts from it and
+  merges from it at least weekly; personal forks are mirrors, not integration
+  points. Never rebase a branch that has been pushed: a rewritten history hides
+  the real fork point from git, and the September 2026 sync of a rewritten fork
+  cost a hand merge of four files that should have been a fast-forward.
 
 ## 3. Invariants: code that looks like a bug and is not
 

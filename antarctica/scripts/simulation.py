@@ -1422,29 +1422,34 @@ def run_simulation(
     beyond_front = None
     n_beyond = 0
     cell_area = assemble(fd.TestFunction(Q_dg) * dx).dat.data_ro.copy()
-    # Runaway tripwire (ISMIP7_TRIPWIRE_U_MAX / _H_MAX / _DH_FRAC / _HMIN; off
+    # Runaway tripwire (ISMIP7_TRIPWIRE_U_MAX / _H_MAX / _DH_RATE / _HMIN; off
     # unless set). A lane that is running away used to be reported only when
     # the transport budget or Newton finally failed, three steps and half an
     # hour after the fact; failing at the first step that exceeds a bound,
     # naming the cell, lets the ladder experiments answer in minutes.
     # U_MAX and H_MAX are absolute bounds (no Antarctic cell moves faster
-    # than 2e4 m/yr or is thicker than 5 km). DH_FRAC is a relative per-step
-    # growth bound and applies only to cells that entered the step at least
-    # HMIN thick: the 2026-09-15 dt ladder was stopped at step 1 by a 0.3 m
-    # buffer cell at the Beardmore outlet filling at ~70 m/yr (dh/h = 1.6
-    # under the old max(h, 10 m) floor) while the shelf seeds that actually
-    # ignite the runaway (h ~ 900 m, |div(h u)| ~ 1.5e3 m/yr) never exceed
-    # 0.42 even at dt = 0.25. Thin-cell filling is not a runaway.
+    # than 2e4 m/yr or is thicker than 5 km). DH_RATE bounds the relative
+    # thickening rate (dh/h)/dt [1/yr] of cells that entered the step at
+    # least HMIN thick. It is a rate, not a per-step fraction, so the same
+    # physics scores the same on every rung of a dt ladder: the 2026-09-15
+    # ladder was first stopped by a 0.3 m buffer cell filling at 70 m/yr
+    # (dh/h = 1.6 under a max(h, 10 m) floor) and then, with a 0.5 per-step
+    # bound, by a 168 m floating Amundsen cell fed at ~700 m/yr that scored
+    # 0.51 at dt = 0.125 and 0.27 at dt = 0.0625 -- the run at 0.0625 went
+    # on to complete 1.25 yr with flat speed and thickness. The passing
+    # run's largest relative rate was 6.8/yr (a 107 m buffer cell); the
+    # dt = 0.25 pile-up thickened 500 -> 3000 m within 0.25 yr (>= 20/yr at
+    # onset, ~100/yr later) with speed_max already at 3e4 m/yr.
     _trip = os.environ.get("ISMIP7_TRIPWIRE_U_MAX", "").strip()
     tripwire_u_max = float(_trip) if _trip else None
     _trip = os.environ.get("ISMIP7_TRIPWIRE_H_MAX", "").strip()
     tripwire_h_max = float(_trip) if _trip else None
-    _trip = os.environ.get("ISMIP7_TRIPWIRE_DH_FRAC", "").strip()
-    tripwire_dh_frac = float(_trip) if _trip else None
+    _trip = os.environ.get("ISMIP7_TRIPWIRE_DH_RATE", "").strip()
+    tripwire_dh_rate = float(_trip) if _trip else None
     tripwire_hmin = float(os.environ.get("ISMIP7_TRIPWIRE_HMIN", "100.0"))
     tripwire_on = any(
         bound is not None
-        for bound in (tripwire_u_max, tripwire_h_max, tripwire_dh_frac)
+        for bound in (tripwire_u_max, tripwire_h_max, tripwire_dh_rate)
     )
     tripwire_cells = None
     if tripwire_on:
@@ -2216,6 +2221,7 @@ def run_simulation(
             growth_max, growth_xy, growth_cell = _global_argmax_with_payload(
                 growth, _xy, _payload, mesh.comm
             )
+            growth_rate_max = growth_max / dt          # (dh/h)/dt [1/yr]
             dh_abs_max, dh_xy, dh_cell = _global_argmax_with_payload(
                 np.abs(_dh), _xy, _payload, mesh.comm
             )
@@ -2245,10 +2251,11 @@ def run_simulation(
                 return "(" + ", ".join(f"{v:.0f}" for v in location) + ")"
 
             _growth_txt = (
-                f"{growth_max:+.3f}" if np.isfinite(growth_max) else "n/a"
+                f"{growth_rate_max:+.2f}/yr (dh/h={growth_max:+.3f})"
+                if np.isfinite(growth_max) else "n/a"
             )
             PETSc.Sys.Print(
-                f"  tripwire step-{k}: max dh/h={_growth_txt} "
+                f"  tripwire step-{k}: max (dh/h)/dt={_growth_txt} "
                 f"(cells h>={tripwire_hmin:g} m) at {_xy_txt(growth_xy)} "
                 f"[{_cell_txt(growth_cell)}]; max |dh|="
                 f"{dh_cell.get('dh', dh_abs_max):+.1f} m at {_xy_txt(dh_xy)} "
@@ -2258,7 +2265,7 @@ def run_simulation(
             ctx.setdefault("tripwire", {
                 "u_max": tripwire_u_max,
                 "h_max": tripwire_h_max,
-                "dh_frac": tripwire_dh_frac,
+                "dh_rate": tripwire_dh_rate,
                 "hmin": tripwire_hmin,
                 "steps": [],
             })["steps"].append({
@@ -2269,6 +2276,10 @@ def run_simulation(
                 "thickness_max_xy": list(h_max_xy),
                 "growth_max": (
                     float(growth_max) if np.isfinite(growth_max) else None
+                ),
+                "growth_rate_max": (
+                    float(growth_rate_max)
+                    if np.isfinite(growth_rate_max) else None
                 ),
                 "growth_max_xy": list(growth_xy),
                 "growth_max_cell": growth_cell,
@@ -2288,14 +2299,15 @@ def run_simulation(
                     f"> {tripwire_h_max:g}"
                 )
             if (
-                tripwire_dh_frac is not None
-                and np.isfinite(growth_max)
-                and growth_max > tripwire_dh_frac
+                tripwire_dh_rate is not None
+                and np.isfinite(growth_rate_max)
+                and growth_rate_max > tripwire_dh_rate
             ):
                 tripped.append(
-                    f"dh/h={growth_max:.3f} in one step at "
+                    f"(dh/h)/dt={growth_rate_max:.2f}/yr "
+                    f"(dh/h={growth_max:.3f} in one step of {dt:g} yr) at "
                     f"{_xy_txt(growth_xy)} [{_cell_txt(growth_cell)}] "
-                    f"> {tripwire_dh_frac:g}"
+                    f"> {tripwire_dh_rate:g}/yr"
                 )
             if tripped:
                 message = "; ".join(tripped)

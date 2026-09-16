@@ -151,13 +151,16 @@ TRIPWIRE_DEFAULTS = {
     # Absolute thickness cap: no Antarctic cell is 5 km thick (the 2500 m
     # mesh's maximum is 4.25 km); a runaway pile-up reaches 1e4-3e4 m.
     "ISMIP7_TRIPWIRE_H_MAX": "5000",
-    # Relative per-step growth, tested only on cells that entered the step
-    # at least HMIN thick: thin buffer/margin cells legitimately fill by
-    # more than their own thickness in one step (a 0.3 m Beardmore cell
-    # stopped the whole dt ladder), while the shelf seeds that ignite the
-    # runaway (h ~ 900 m, |div(h u)| ~ 1.5e3 m/yr) stay below 0.42 at
-    # dt = 0.25.
-    "ISMIP7_TRIPWIRE_DH_FRAC": "0.5",
+    # Relative thickening rate (dh/h)/dt [1/yr], tested only on cells that
+    # entered the step at least HMIN thick. A rate, not a per-step fraction,
+    # so every rung of a dt ladder is judged by the same physics: the lane
+    # that completed 1.25 yr at dt = 0.0625 peaked at 6.8/yr (a 107 m
+    # buffer cell being fed), the dt = 0.125 rung scored 4.1/yr in the same
+    # Amundsen cell that a 0.5 per-step bound had tripped on, and the
+    # dt = 0.25 pile-up thickened 500 -> 3000 m within 0.25 yr (>= 20/yr at
+    # onset) with speed_max already past 2e4. Thin cells (a 0.3 m Beardmore
+    # buffer cell filling at 70 m/yr) are reported, never tripped.
+    "ISMIP7_TRIPWIRE_DH_RATE": "20",
     "ISMIP7_TRIPWIRE_HMIN": "100.0",
 }
 

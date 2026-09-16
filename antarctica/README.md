@@ -514,7 +514,7 @@ redeclare those literals.
 | `ISMIP7_RUN_TAG` | experiment-name suffix for a parallel method line (see run-management flags above) | _(unset)_ |
 | `ISMIP7_APPARENT_MB` | apparent-mass-balance init: `1`/`balance` zeroes the t=0 thickness tendency (ISMIP6 ctrl_proj-style), `div` cancels only the flux divergence | _(unset)_ |
 | `ISMIP7_FIXED_FRONT` | boolean; remove ice advected beyond the t=0 extent each step and tally it as calving (`ISMIP7_FRONT_HMIN`, default 1 m, defines the extent) | `0` |
-| `ISMIP7_TRIPWIRE_U_MAX` / `ISMIP7_TRIPWIRE_H_MAX` / `ISMIP7_TRIPWIRE_DH_FRAC` / `ISMIP7_TRIPWIRE_HMIN` | runaway tripwire: fail the step when max speed exceeds `U_MAX` [m/yr], max thickness exceeds `H_MAX` [m], or a cell that entered the step at least `HMIN` thick grows by more than `DH_FRAC` of its thickness (thinner cells are reported, never tripped: buffer cells fill by more than their own thickness); every step prints a `tripwire step-k:` line with the worst cells; unset = off (timing lanes export 2e4 / 5000 / 0.5 / 100) | _(unset)_ |
+| `ISMIP7_TRIPWIRE_U_MAX` / `ISMIP7_TRIPWIRE_H_MAX` / `ISMIP7_TRIPWIRE_DH_RATE` / `ISMIP7_TRIPWIRE_HMIN` | runaway tripwire: fail the step when max speed exceeds `U_MAX` [m/yr], max thickness exceeds `H_MAX` [m], or a cell that entered the step at least `HMIN` thick thickens at a relative rate `(dh/h)/dt` above `DH_RATE` [1/yr] (a rate so every dt scores the same physics alike; thinner cells are reported, never tripped: buffer cells fill by more than their own thickness); every step prints a `tripwire step-k:` line with the worst cells; unset = off (timing lanes export 2e4 / 5000 / 20 / 100) | _(unset)_ |
 | `ISMIP7_FIXED_FRONT` | set to hold the calving front at the t=0 extent (inflow beyond it tallied as calving) | _(unset)_ |
 | `ISMIP7_LEGACY_TRANSPORT` | set to restore the pre-Jul-2026 CG-projection transport scheme (requires `ISMIP7_GEOMETRY_SPACE=cg1`) | _(unset)_ |
 | `ISMIP7_SNES_TYPE` / `ISMIP7_SNES_MAXIT` | diagnostic Newton type / max iterations | `newtonls` / `200` |
@@ -704,11 +704,13 @@ The stages and contracts are:
    **tripwire**: the first step whose maximum speed exceeds
    `ISMIP7_TRIPWIRE_U_MAX` (2e4 m/yr), whose maximum thickness exceeds
    `ISMIP7_TRIPWIRE_H_MAX` (5000 m), or in which a cell at least
-   `ISMIP7_TRIPWIRE_HMIN` (100 m) thick grows by more than
-   `ISMIP7_TRIPWIRE_DH_FRAC` (0.5) of its thickness fails at once with the
-   cell's coordinates, entry/exit thickness and grounded/floating/buffer
-   flags (`RUNAWAY TRIPWIRE step-k: …`, category `runaway_tripwire`),
-   instead of three steps later when the transport budget finally breaks.
+   `ISMIP7_TRIPWIRE_HMIN` (100 m) thick thickens at a relative rate
+   `(dh/h)/dt` above `ISMIP7_TRIPWIRE_DH_RATE` (20/yr; a rate rather than a
+   per-step fraction, so each rung of a dt ladder is judged alike) fails at
+   once with the cell's coordinates, entry/exit thickness and
+   grounded/floating/buffer flags (`RUNAWAY TRIPWIRE step-k: …`, category
+   `runaway_tripwire`), instead of three steps later when the transport
+   budget finally breaks.
    Thinner cells never trip (a 0.3 m buffer cell filling at 70 m/yr is not
    a runaway) but every step's `tripwire step-k:` line names the worst
    relative and absolute thickness change so a seed is visible before it

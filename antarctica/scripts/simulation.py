@@ -1309,6 +1309,32 @@ def save_model_state(ctx, final_path, t_now, extra_attrs=None):
     mesh.comm.barrier()
 
 
+def _global_argmax_with_payload(values, xy, payload, comm):
+    r"""Global argmax of ``values`` over the owned cells of every rank, with
+    the cell centre and the ``payload`` columns (name -> per-cell array) at
+    that cell. Non-finite values are ignored, one candidate per rank is
+    communicated and ties resolve by rank, so every rank sees the same
+    answer. Returns ``(value, (x, y), {name: value})``; the location and
+    fields are empty when no rank holds a finite value."""
+    values = np.asarray(values, dtype=float)
+    finite = np.isfinite(values)
+    if finite.any():
+        index = int(np.argmax(np.where(finite, values, -np.inf)))
+        candidate = (
+            float(values[index]),
+            int(comm.rank),
+            tuple(float(v) for v in np.asarray(xy)[index]),
+            {name: float(np.asarray(col)[index]) for name, col in payload.items()},
+        )
+    else:
+        candidate = (-np.inf, int(comm.rank), (), {})
+    candidates = comm.allgather(candidate)
+    value, _rank, location, fields = max(
+        candidates, key=lambda item: (item[0], -item[1])
+    )
+    return value, location, fields
+
+
 def run_simulation(
     ctx,
     experiment_name,
@@ -1396,16 +1422,40 @@ def run_simulation(
     beyond_front = None
     n_beyond = 0
     cell_area = assemble(fd.TestFunction(Q_dg) * dx).dat.data_ro.copy()
-    # Runaway tripwire (ISMIP7_TRIPWIRE_U_MAX / _DH_FRAC / _HMIN; off unless
-    # set). A lane that is running away used to be reported only when the
-    # transport budget or Newton finally failed, three steps and half an
-    # hour after the fact; failing at the first step that exceeds either
-    # bound, naming the cell, lets the ladder experiments answer in minutes.
+    # Runaway tripwire (ISMIP7_TRIPWIRE_U_MAX / _H_MAX / _DH_FRAC / _HMIN; off
+    # unless set). A lane that is running away used to be reported only when
+    # the transport budget or Newton finally failed, three steps and half an
+    # hour after the fact; failing at the first step that exceeds a bound,
+    # naming the cell, lets the ladder experiments answer in minutes.
+    # U_MAX and H_MAX are absolute bounds (no Antarctic cell moves faster
+    # than 2e4 m/yr or is thicker than 5 km). DH_FRAC is a relative per-step
+    # growth bound and applies only to cells that entered the step at least
+    # HMIN thick: the 2026-09-15 dt ladder was stopped at step 1 by a 0.3 m
+    # buffer cell at the Beardmore outlet filling at ~70 m/yr (dh/h = 1.6
+    # under the old max(h, 10 m) floor) while the shelf seeds that actually
+    # ignite the runaway (h ~ 900 m, |div(h u)| ~ 1.5e3 m/yr) never exceed
+    # 0.42 even at dt = 0.25. Thin-cell filling is not a runaway.
     _trip = os.environ.get("ISMIP7_TRIPWIRE_U_MAX", "").strip()
     tripwire_u_max = float(_trip) if _trip else None
+    _trip = os.environ.get("ISMIP7_TRIPWIRE_H_MAX", "").strip()
+    tripwire_h_max = float(_trip) if _trip else None
     _trip = os.environ.get("ISMIP7_TRIPWIRE_DH_FRAC", "").strip()
     tripwire_dh_frac = float(_trip) if _trip else None
-    tripwire_hmin = float(os.environ.get("ISMIP7_TRIPWIRE_HMIN", "10.0"))
+    tripwire_hmin = float(os.environ.get("ISMIP7_TRIPWIRE_HMIN", "100.0"))
+    tripwire_on = any(
+        bound is not None
+        for bound in (tripwire_u_max, tripwire_h_max, tripwire_dh_frac)
+    )
+    tripwire_cells = None
+    if tripwire_on:
+        # Per-cell context for the step report: the t=0 extent (buffer flag,
+        # same definition as the fixed front) and the bed (flotation flag).
+        tripwire_cells = {
+            "extent": Function(Q_dg).project(
+                ctx.get("H_init", h)
+            ).dat.data_ro.copy(),
+            "bed": Function(Q_dg).project(b).dat.data_ro.copy(),
+        }
     if fixed_front:
         # Mask from the t=0 observed extent (ctx["H_init"]), not the
         # current h: a restarted run must not re-mask cells that
@@ -2146,17 +2196,68 @@ def run_simulation(
 
         step_stat = _field_diagnostics(f"step-{k}-t={t_yr:.6g}")
 
-        if tripwire_u_max is not None or tripwire_dh_frac is not None:
+        if tripwire_on:
             _h_now = np.asarray(h_dg.dat.data_ro)
             _h_was = np.asarray(h_dg_entry.dat.data_ro)
-            growth = (_h_now - _h_was) / np.maximum(_h_was, tripwire_hmin)
-            growth_max, growth_xy = global_extreme_location(
-                growth, h_diag_xy, mode="max", comm=mesh.comm
+            _dh = _h_now - _h_was
+            _eligible = _h_was >= tripwire_hmin
+            growth = np.divide(
+                _dh, _h_was,
+                out=np.full(_dh.shape, -np.inf), where=_eligible,
+            )
+            _payload = {
+                "h_entry": _h_was,
+                "h_now": _h_now,
+                "dh": _dh,
+                "extent": tripwire_cells["extent"],
+                "bed": tripwire_cells["bed"],
+            }
+            _xy = np.asarray(h_diag_xy.dat.data_ro)
+            growth_max, growth_xy, growth_cell = _global_argmax_with_payload(
+                growth, _xy, _payload, mesh.comm
+            )
+            dh_abs_max, dh_xy, dh_cell = _global_argmax_with_payload(
+                np.abs(_dh), _xy, _payload, mesh.comm
             )
             speed_max = float(step_stat["speed_max"])
             speed_xy = step_stat["speed_max_xy"]
+            h_max = float(step_stat["thickness_max"])
+            h_max_xy = step_stat["thickness_max_xy"]
+
+            def _cell_txt(cell):
+                if not cell:
+                    return "-"
+                flags = []
+                if cell["extent"] < front_hmin:
+                    flags.append("buffer")
+                afloat = cell["h_now"] < (
+                    max(0.0, -cell["bed"]) * _RHO_W_SI / _RHO_I_SI
+                )
+                flags.append("floating" if afloat else "grounded")
+                return (
+                    f"h {cell['h_entry']:.1f}->{cell['h_now']:.1f} m, "
+                    + "/".join(flags)
+                )
+
+            def _xy_txt(location):
+                if not location:
+                    return "(-)"
+                return "(" + ", ".join(f"{v:.0f}" for v in location) + ")"
+
+            _growth_txt = (
+                f"{growth_max:+.3f}" if np.isfinite(growth_max) else "n/a"
+            )
+            PETSc.Sys.Print(
+                f"  tripwire step-{k}: max dh/h={_growth_txt} "
+                f"(cells h>={tripwire_hmin:g} m) at {_xy_txt(growth_xy)} "
+                f"[{_cell_txt(growth_cell)}]; max |dh|="
+                f"{dh_cell.get('dh', dh_abs_max):+.1f} m at {_xy_txt(dh_xy)} "
+                f"[{_cell_txt(dh_cell)}]; speed_max={speed_max:.3e} m/yr; "
+                f"h_max={h_max:.1f} m"
+            )
             ctx.setdefault("tripwire", {
                 "u_max": tripwire_u_max,
+                "h_max": tripwire_h_max,
                 "dh_frac": tripwire_dh_frac,
                 "hmin": tripwire_hmin,
                 "steps": [],
@@ -2164,19 +2265,37 @@ def run_simulation(
                 "step": k,
                 "speed_max": speed_max,
                 "speed_max_xy": list(speed_xy),
-                "growth_max": float(growth_max),
+                "thickness_max": h_max,
+                "thickness_max_xy": list(h_max_xy),
+                "growth_max": (
+                    float(growth_max) if np.isfinite(growth_max) else None
+                ),
                 "growth_max_xy": list(growth_xy),
+                "growth_max_cell": growth_cell,
+                "dh_abs_max": float(dh_abs_max),
+                "dh_abs_max_xy": list(dh_xy),
+                "dh_abs_max_cell": dh_cell,
             })
             tripped = []
             if tripwire_u_max is not None and speed_max > tripwire_u_max:
                 tripped.append(
                     f"speed_max={speed_max:.3e} m/yr at "
-                    f"({speed_xy[0]:.0f}, {speed_xy[1]:.0f}) > {tripwire_u_max:g}"
+                    f"{_xy_txt(speed_xy)} > {tripwire_u_max:g}"
                 )
-            if tripwire_dh_frac is not None and growth_max > tripwire_dh_frac:
+            if tripwire_h_max is not None and h_max > tripwire_h_max:
+                tripped.append(
+                    f"thickness_max={h_max:.1f} m at {_xy_txt(h_max_xy)} "
+                    f"> {tripwire_h_max:g}"
+                )
+            if (
+                tripwire_dh_frac is not None
+                and np.isfinite(growth_max)
+                and growth_max > tripwire_dh_frac
+            ):
                 tripped.append(
                     f"dh/h={growth_max:.3f} in one step at "
-                    f"({growth_xy[0]:.0f}, {growth_xy[1]:.0f}) > {tripwire_dh_frac:g}"
+                    f"{_xy_txt(growth_xy)} [{_cell_txt(growth_cell)}] "
+                    f"> {tripwire_dh_frac:g}"
                 )
             if tripped:
                 message = "; ".join(tripped)

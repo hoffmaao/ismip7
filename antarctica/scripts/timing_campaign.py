@@ -148,8 +148,17 @@ def contract_exports(name=None):
 # whose speed or per-step thickness growth exceeds these, naming the cell.
 TRIPWIRE_DEFAULTS = {
     "ISMIP7_TRIPWIRE_U_MAX": U_LIM_DEFAULT,
+    # Absolute thickness cap: no Antarctic cell is 5 km thick (the 2500 m
+    # mesh's maximum is 4.25 km); a runaway pile-up reaches 1e4-3e4 m.
+    "ISMIP7_TRIPWIRE_H_MAX": "5000",
+    # Relative per-step growth, tested only on cells that entered the step
+    # at least HMIN thick: thin buffer/margin cells legitimately fill by
+    # more than their own thickness in one step (a 0.3 m Beardmore cell
+    # stopped the whole dt ladder), while the shelf seeds that ignite the
+    # runaway (h ~ 900 m, |div(h u)| ~ 1.5e3 m/yr) stay below 0.42 at
+    # dt = 0.25.
     "ISMIP7_TRIPWIRE_DH_FRAC": "0.5",
-    "ISMIP7_TRIPWIRE_HMIN": "10.0",
+    "ISMIP7_TRIPWIRE_HMIN": "100.0",
 }
 
 

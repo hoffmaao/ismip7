@@ -514,7 +514,7 @@ redeclare those literals.
 | `ISMIP7_RUN_TAG` | experiment-name suffix for a parallel method line (see run-management flags above) | _(unset)_ |
 | `ISMIP7_APPARENT_MB` | apparent-mass-balance init: `1`/`balance` zeroes the t=0 thickness tendency (ISMIP6 ctrl_proj-style), `div` cancels only the flux divergence | _(unset)_ |
 | `ISMIP7_FIXED_FRONT` | boolean; remove ice advected beyond the t=0 extent each step and tally it as calving (`ISMIP7_FRONT_HMIN`, default 1 m, defines the extent) | `0` |
-| `ISMIP7_TRIPWIRE_U_MAX` / `ISMIP7_TRIPWIRE_DH_FRAC` / `ISMIP7_TRIPWIRE_HMIN` | runaway tripwire: fail the step when max speed exceeds `U_MAX` [m/yr] or a cell thickens by more than `DH_FRAC` of `max(h, HMIN)`; unset = off (timing lanes export 2e4 / 0.5 / 10) | _(unset)_ |
+| `ISMIP7_TRIPWIRE_U_MAX` / `ISMIP7_TRIPWIRE_H_MAX` / `ISMIP7_TRIPWIRE_DH_FRAC` / `ISMIP7_TRIPWIRE_HMIN` | runaway tripwire: fail the step when max speed exceeds `U_MAX` [m/yr], max thickness exceeds `H_MAX` [m], or a cell that entered the step at least `HMIN` thick grows by more than `DH_FRAC` of its thickness (thinner cells are reported, never tripped: buffer cells fill by more than their own thickness); every step prints a `tripwire step-k:` line with the worst cells; unset = off (timing lanes export 2e4 / 5000 / 0.5 / 100) | _(unset)_ |
 | `ISMIP7_FIXED_FRONT` | set to hold the calving front at the t=0 extent (inflow beyond it tallied as calving) | _(unset)_ |
 | `ISMIP7_LEGACY_TRANSPORT` | set to restore the pre-Jul-2026 CG-projection transport scheme (requires `ISMIP7_GEOMETRY_SPACE=cg1`) | _(unset)_ |
 | `ISMIP7_SNES_TYPE` / `ISMIP7_SNES_MAXIT` | diagnostic Newton type / max iterations | `newtonls` / `200` |
@@ -702,11 +702,17 @@ The stages and contracts are:
    another) and the physics contract is `TIMING_CONTRACT` (default `strict`;
    a non-strict contract suffixes the tag). Every lane runs the runaway
    **tripwire**: the first step whose maximum speed exceeds
-   `ISMIP7_TRIPWIRE_U_MAX` (2e4 m/yr) or whose thickness grows by more than
-   `ISMIP7_TRIPWIRE_DH_FRAC` (0.5) of a cell's thickness fails at once with
-   the cell's coordinates (`RUNAWAY TRIPWIRE step-k: …`, category
-   `runaway_tripwire`), instead of three steps later when the transport
-   budget finally breaks. The first diagnostic, transport, tripwire or
+   `ISMIP7_TRIPWIRE_U_MAX` (2e4 m/yr), whose maximum thickness exceeds
+   `ISMIP7_TRIPWIRE_H_MAX` (5000 m), or in which a cell at least
+   `ISMIP7_TRIPWIRE_HMIN` (100 m) thick grows by more than
+   `ISMIP7_TRIPWIRE_DH_FRAC` (0.5) of its thickness fails at once with the
+   cell's coordinates, entry/exit thickness and grounded/floating/buffer
+   flags (`RUNAWAY TRIPWIRE step-k: …`, category `runaway_tripwire`),
+   instead of three steps later when the transport budget finally breaks.
+   Thinner cells never trip (a 0.3 m buffer cell filling at 70 m/yr is not
+   a runaway) but every step's `tripwire step-k:` line names the worst
+   relative and absolute thickness change so a seed is visible before it
+   trips. The first diagnostic, transport, tripwire or
    mass-budget failure ends the lane. The primary timer starts immediately
    before the five-step loop, after cache loading, solver construction, and
    transport setup; `setup_seconds` is reported separately. JSON records are

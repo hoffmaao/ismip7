@@ -45,7 +45,7 @@ from timing_campaign import (  # noqa: E402
 RHO_I = 917.0
 RHO_W = 1024.0
 RHO_GT = RHO_I / 1.0e12
-AUDIT_SCHEMA_VERSION = 2
+AUDIT_SCHEMA_VERSION = 3
 
 
 def _normal(value):
@@ -217,12 +217,17 @@ def _field_audit(field, supporting, coordinates):
     }
 
 
-def _hotspots(field, supporting, coordinates, dt, hmin, top):
-    """Top-``top`` cells by ``|a_ref| * dt / max(h, hmin)`` -- the fraction of
-    a cell's thickness the no-forcing tendency would move in one step. The
-    single global extrema above miss neighbouring seeds (the 2500/25000
-    runaway ignited 9 km from the recorded maximum); a ranked list names
-    every candidate, with grounded/floating/buffer flags."""
+def _hotspots(field, supporting, coordinates, dt, front_hmin, hotspot_hmin, top):
+    """Top-``top`` cells at least ``hotspot_hmin`` thick, ranked by
+    ``|a_ref| * dt / h`` -- the fraction of the cell's thickness the
+    no-forcing tendency would move in one step. The single global extrema
+    above miss neighbouring seeds (the 2500/25000 runaway ignited 9 km from
+    the recorded maximum); a ranked list names every candidate, with
+    grounded/floating/buffer flags. Cells thinner than ``hotspot_hmin`` are
+    excluded rather than floored: ranked against ``max(h, 1 m)`` the table
+    was twenty sub-metre buffer cells filling at tens of m/yr (score 17 for
+    a 0.3 m cell) and never showed the 900 m shelf cells with |div| of
+    1.5e3 m/yr that actually ignite the runaway."""
     values = np.asarray(field.dat.data_ro)
     xy = np.asarray(coordinates.dat.data_ro)
     if values.ndim == 2 and values.shape[1] == 1:
@@ -230,15 +235,21 @@ def _hotspots(field, supporting, coordinates, dt, hmin, top):
     thickness = np.asarray(supporting["thickness_m"])
     extent = np.asarray(supporting["initial_extent_thickness_m"])
     haf = np.asarray(supporting["height_above_flotation_m"])
-    score = np.abs(values) * dt / np.maximum(thickness, hmin)
+    eligible = thickness >= hotspot_hmin
+    score = np.divide(
+        np.abs(values) * dt, thickness,
+        out=np.full(values.shape, -np.inf), where=eligible,
+    )
     comm = field.function_space().mesh().comm
-    count = min(int(top), values.size)
+    count = min(int(top), int(eligible.sum()))
     if count > 0:
         order = np.argpartition(-score, count - 1)[:count]
     else:
         order = np.array([], dtype=int)
     local = []
     for index in order:
+        if not np.isfinite(score[index]):
+            continue
         row = {
             "score_dh_over_h_per_step": float(score[index]),
             "a_ref_equivalent_m_per_yr": float(values[index]),
@@ -250,8 +261,10 @@ def _hotspots(field, supporting, coordinates, dt, hmin, top):
         for name, values_support in supporting.items():
             row[name] = float(values_support[index])
         row["grounded"] = bool(haf[index] > 0.0)
-        row["floating"] = bool(thickness[index] >= hmin and haf[index] <= 0.0)
-        row["buffer"] = bool(extent[index] < hmin)
+        row["floating"] = bool(
+            thickness[index] >= front_hmin and haf[index] <= 0.0
+        )
+        row["buffer"] = bool(extent[index] < front_hmin)
         local.append(row)
     gathered = [row for rows in comm.allgather(local) for row in rows]
     gathered.sort(
@@ -260,7 +273,9 @@ def _hotspots(field, supporting, coordinates, dt, hmin, top):
     return gathered[:int(top)]
 
 
-def audit_cache(cache_path, manifest_path=None, front_hmin=1.0, top=20):
+def audit_cache(
+    cache_path, manifest_path=None, front_hmin=1.0, hotspot_hmin=100.0, top=20
+):
     cache_path = os.path.realpath(cache_path)
     manifest_path = (
         os.path.realpath(manifest_path) if manifest_path is not None else None
@@ -336,7 +351,7 @@ def audit_cache(cache_path, manifest_path=None, front_hmin=1.0, top=20):
     raw_audit = _field_audit(raw, supporting, coordinates)
     raw_audit["net_gt_per_yr"] = float(fd.assemble(raw * fd.dx)) * RHO_GT
     raw_audit["hotspots"] = _hotspots(
-        raw, supporting, coordinates, dt, front_hmin, top
+        raw, supporting, coordinates, dt, front_hmin, hotspot_hmin, top
     )
 
     initial_extent = np.asarray(fields["H_init"].dat.data_ro)
@@ -353,7 +368,7 @@ def audit_cache(cache_path, manifest_path=None, front_hmin=1.0, top=20):
         beyond_front, mesh.comm
     )
     effective_audit["hotspots"] = _hotspots(
-        effective, supporting, coordinates, dt, front_hmin, top
+        effective, supporting, coordinates, dt, front_hmin, hotspot_hmin, top
     )
 
     metadata = {
@@ -366,7 +381,10 @@ def audit_cache(cache_path, manifest_path=None, front_hmin=1.0, top=20):
         "cells": global_size(thickness),
         "metadata": metadata,
         "dt_yr": float(dt),
-        "hotspot_score": "|a_ref| * dt / max(h, front_hmin) per step",
+        "hotspot_hmin_m": float(hotspot_hmin),
+        "hotspot_score": (
+            "|a_ref| * dt / h per step over cells with h >= hotspot_hmin_m"
+        ),
         "sign_convention": (
             "a_ref_equivalent=FV div(h*u); no_forcing_dhdt=-a_ref_equivalent"
         ),
@@ -425,7 +443,8 @@ def print_audit(record):
     hotspots = record["raw"].get("hotspots") or []
     if hotspots:
         PETSc.Sys.Print(
-            f"  hotspots (dt={record['dt_yr']:g} yr; score = fraction of the "
+            f"  hotspots (dt={record['dt_yr']:g} yr; cells with "
+            f"h >= {record['hotspot_hmin_m']:g} m; score = fraction of the "
             "cell's thickness moved in one step):"
         )
         PETSc.Sys.Print(
@@ -464,6 +483,16 @@ def parse_args():
         help="initial thickness threshold for the fixed-front equivalent",
     )
     parser.add_argument(
+        "--hotspot-hmin",
+        type=float,
+        default=100.0,
+        help=(
+            "thickness [m] a cell must have to be ranked as a hotspot "
+            "(thin buffer/margin cells filling by more than their own "
+            "thickness in a step are expected, not seeds)"
+        ),
+    )
+    parser.add_argument(
         "--top",
         type=int,
         default=20,
@@ -478,6 +507,7 @@ def main():
         args.cache,
         manifest_path=args.manifest,
         front_hmin=args.front_hmin,
+        hotspot_hmin=args.hotspot_hmin,
         top=args.top,
     )
     print_audit(record)

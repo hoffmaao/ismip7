@@ -1,5 +1,9 @@
 # Site definition template. Copy to sites/<your-site>.sh, fill in, and either
-# name it in ISMIP7_SITE or let site_env.sh match it by hostname.
+# name it in ISMIP7_SITE or let site_core.sh match it by hostname.
+#
+# A site file describes a CLUSTER and is tracked. What is yours alone on that
+# cluster (account, a private build, a mail address) goes in sites/local.env,
+# which git ignores; sites/local.env.example is its blank.
 #
 # Nothing here submits anything: these are the answers to "where is Firedrake,
 # what does the scheduler want, and where does the data live" for one cluster.
@@ -28,8 +32,9 @@ ISMIP7_CONSTRAINT="${ISMIP7_CONSTRAINT:-}"
 # --- REQUIRED: paths ---------------------------------------------------
 # The checkout, and the filesystem that can hold the forcing tree (about 25 GB
 # per ESM and scenario, 313 GB for the whole AIS tree). Home directories
-# usually cannot; a projects or scratch share can.
-ISMIP7_REPO="${ISMIP7_REPO:-}"
+# usually cannot; a projects or scratch share can. ISMIP7_REPO_SELF is the
+# checkout the submission came from, which is nearly always the right one.
+ISMIP7_REPO="${ISMIP7_REPO:-$ISMIP7_REPO_SELF}"
 ISMIP7_WORK="${ISMIP7_WORK:-}"
 
 # --- optional: default job size ----------------------------------------
@@ -50,3 +55,23 @@ ISMIP7_TIME_FWD="${ISMIP7_TIME_FWD:-1-00:00:00}"
 # node generation from everything else:
 #   ISMIP7_CONSTRAINT_INV                submit.sh inversion
 #   ISMIP7_CONSTRAINT_FWD                every other kind
+
+# --- optional: every submission ------------------------------------------
+# Extra sbatch flags, split on spaces: a QOS the partition insists on. (Your
+# own --mail-type/--mail-user belong in sites/local.env, not here.)
+#   ISMIP7_SBATCH_EXTRA="${ISMIP7_SBATCH_EXTRA:---qos=normal}"
+
+# --- optional: the timing campaign ---------------------------------------
+# `submit.sh script`, which antarctica/Makefile and manage_timing_campaign.py
+# submit through, takes its node feature from ISMIP7_CONSTRAINT_TIMING (default:
+# ISMIP7_CONSTRAINT_FWD) and refuses a lane one such node cannot hold, which the
+# campaign records as not runnable: the lanes are single-node at every site so
+# that the matrices compare. Physical cores, and memory as sbatch spells it;
+# `sinfo -N -o "%c %m %f"` prints both. Empty means no limit is known.
+#   ISMIP7_CORES_PER_NODE="${ISMIP7_CORES_PER_NODE:-}"
+#   ISMIP7_MEM_PER_NODE="${ISMIP7_MEM_PER_NODE:-}"
+# A timing lane's step time has no warm-up excluded, so its kernel cache must
+# persist between jobs. Unset, that is whatever cache this site's modules or
+# venv already name (IU's modulefile does), else Firedrake's own default; name a
+# directory here if that one is not writable or not shared by the compute nodes.
+#   ISMIP7_TIMING_JIT_CACHE="${ISMIP7_TIMING_JIT_CACHE:-$ISMIP7_WORK/.ismip7_timing_jit}"

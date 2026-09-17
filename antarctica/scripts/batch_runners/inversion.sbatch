@@ -101,7 +101,7 @@ if [ -f "$ISMIP7_MAP_OUT" ]; then
     echo "chain: warm-starting theta/phi from the periodic checkpoint $ISMIP7_MAP_OUT"
 fi
 
-srun -n "${SLURM_NTASKS:-1}" python -u antarctica/scripts/inversion_icepack2.py
+ismip7_mpirun "${SLURM_NTASKS:-1}" python -u antarctica/scripts/inversion_icepack2.py
 rc=$?
 echo "=== $(date -Is)  inversion exit ${rc} ==="
 

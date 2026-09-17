@@ -113,6 +113,9 @@ def run_job(sandbox, job_id=JOB_ID, **env):
         # sites/local.sh takes every setting from this environment, so the
         # runner logic is exercised without a scheduler or a site file.
         "ISMIP7_SITE": "local",
+        # The sandbox reaches the real batch_runners through a symlink, so keep
+        # this checkout's own sites/local.env out of the test.
+        "ISMIP7_LOCAL_ENV": os.devnull,
         "ISMIP7_FIREDRAKE": str(sandbox / "activate"),
         "ISMIP7_REPO": str(sandbox),
         "ISMIP7_MAP_OUT": str(map_out(sandbox)),

@@ -1,0 +1,58 @@
+#!/bin/bash
+
+#SBATCH -o ant_timing_%j.txt
+#SBATCH -e ant_timing_%j.err
+
+# Resources, the account and the partition come from submit.sh, which reads
+# this cluster's sites/<name>.sh; nothing here names a cluster. Submit with
+#   scripts/batch_runners/submit.sh script scripts/batch_runners/timing_transient.script --cd antarctica ...
+# as antarctica/Makefile and manage_timing_campaign.py do.
+cd "${SLURM_SUBMIT_DIR:-.}"
+# The site half only: every model setting arrives through --export, and
+# site_env.sh's defaults (ISMIP7_MESH, ISMIP7_FRICTION) are not this job's.
+. scripts/batch_runners/site_core.sh
+ismip7_activate
+ismip7_persistent_jit_cache
+ismip7_banner
+
+# ISMIP7_LC, ISMIP7_LC_COARSE, ISMIP7_BUFFER_M, ISMIP7_INVERSION,
+# ISMIP7_T_END, ISMIP7_DT, and ISMIP7_TIMING_STATUS are forwarded via
+# sbatch --export=ALL,... . The
+# Makefile overrides --mem per resolution; 240G is the one-node retry request
+# for the finest 500 m timing case after every 128G lane was OOM-killed.
+write_status() {
+    if [ -n "${ISMIP7_TIMING_STATUS:-}" ]; then
+        status_tmp="${ISMIP7_TIMING_STATUS}.tmp.${SLURM_JOB_ID:-$$}"
+        printf '%s job_id=%s timestamp=%s\n' \
+            "$1" "${SLURM_JOB_ID:-unknown}" "$2" > "${status_tmp}"
+        mv -f "${status_tmp}" "${ISMIP7_TIMING_STATUS}"
+    fi
+}
+
+write_status running "$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+set +e
+ismip7_mpirun "${SLURM_NTASKS}" python -u scripts/run_timing.py
+run_rc=$?
+set -e
+if [ ${run_rc} -eq 0 ]; then
+    current_state=""
+    if [ -n "${ISMIP7_TIMING_STATUS:-}" ] && [ -f "${ISMIP7_TIMING_STATUS}" ]; then
+        read -r current_state _ < "${ISMIP7_TIMING_STATUS}"
+    fi
+    if [ "${current_state}" != "finished" ]; then
+        write_status "finished exit_code=0" "$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+    fi
+else
+    # run_timing writes a more specific failure category and phase whenever
+    # Python can catch the failure. Preserve it; only synthesize a generic
+    # external-termination record for OOM/SIGKILL-style exits.
+    current_state=""
+    if [ -n "${ISMIP7_TIMING_STATUS:-}" ] && [ -f "${ISMIP7_TIMING_STATUS}" ]; then
+        read -r current_state _ < "${ISMIP7_TIMING_STATUS}"
+    fi
+    if [ "${current_state}" != "failed" ]; then
+        write_status "failed category=external_termination exit_code=${run_rc}" \
+            "$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+    fi
+fi
+exit ${run_rc}

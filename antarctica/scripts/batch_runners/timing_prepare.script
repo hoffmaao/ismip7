@@ -1,0 +1,70 @@
+#!/bin/bash
+
+# Prepare one exact-mesh mixed state in parallel, then publish it from rank 1.
+
+#SBATCH -o ant_timing_prepare_%j.txt
+#SBATCH -e ant_timing_prepare_%j.err
+
+# Resources, the account and the partition come from submit.sh, which reads
+# this cluster's sites/<name>.sh; nothing here names a cluster. Submit with
+#   scripts/batch_runners/submit.sh script scripts/batch_runners/timing_prepare.script --cd antarctica ...
+# as antarctica/Makefile and manage_timing_campaign.py do.
+cd "${SLURM_SUBMIT_DIR:-.}"
+# The site half only: every model setting arrives through --export, and
+# site_env.sh's defaults (ISMIP7_MESH, ISMIP7_FRICTION) are not this job's.
+. scripts/batch_runners/site_core.sh
+ismip7_activate
+ismip7_persistent_jit_cache
+ismip7_banner
+
+raw="${ISMIP7_TIMING_CACHE_RAW:?ISMIP7_TIMING_CACHE_RAW is required}"
+final="${ISMIP7_TIMING_CACHE:?ISMIP7_TIMING_CACHE is required}"
+manifest="${ISMIP7_TIMING_CACHE_MANIFEST:?ISMIP7_TIMING_CACHE_MANIFEST is required}"
+status="${ISMIP7_TIMING_CACHE_STATUS:?ISMIP7_TIMING_CACHE_STATUS is required}"
+pristine="${ISMIP7_TIMING_CACHE_PRISTINE:-}"
+if [ "${raw}" = "${final}" ]; then
+    echo "parallel cache path and published cache path must differ" >&2
+    exit 2
+fi
+
+write_status() {
+    status_tmp="${status}.tmp.${SLURM_JOB_ID:-$$}"
+    printf '%s job_id=%s timestamp=%s\n' \
+        "$1" "${SLURM_JOB_ID:-unknown}" "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
+        > "${status_tmp}"
+    mv -f "${status_tmp}" "${status}"
+}
+
+write_status "running phase=prepare"
+set +e
+ismip7_mpirun "${SLURM_NTASKS}" python -u scripts/prepare_timing_cache.py
+prepare_rc=$?
+set -e
+if [ "${prepare_rc}" -ne 0 ]; then
+    write_status "failed phase=prepare exit_code=${prepare_rc}"
+    exit "${prepare_rc}"
+fi
+
+write_status "running phase=repack"
+set +e
+ismip7_mpirun 1 python -u scripts/redistribute_checkpoint.py \
+    --input "${raw}" --output "${final}" --manifest "${manifest}"
+repack_rc=$?
+set -e
+if [ "${repack_rc}" -ne 0 ]; then
+    write_status "failed phase=repack exit_code=${repack_rc}"
+    exit "${repack_rc}"
+fi
+
+rm -f "${raw}"
+
+# Keep an untouched copy of the prepared state. The per-mesh invert warm-starts
+# from it and later replaces ${final} with a cache published from its own MAP
+# (redistribute writes a new inode, so a hard link keeps this one intact).
+if [ -n "${pristine}" ]; then
+    pristine_manifest="${pristine%.h5}.json"
+    rm -f "${pristine}" "${pristine_manifest}"
+    ln "${final}" "${pristine}" 2>/dev/null || cp "${final}" "${pristine}"
+    ln "${manifest}" "${pristine_manifest}" 2>/dev/null || cp "${manifest}" "${pristine_manifest}"
+fi
+write_status "finished phase=published exit_code=0"

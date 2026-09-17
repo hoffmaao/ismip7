@@ -1,0 +1,100 @@
+#!/bin/bash
+
+# Logvelnet inversion warm-started from the prepared timing cache, then
+# 1-core MAP republish and timing-cache publish from that full-state MAP
+# (no second cold prepare).
+
+#SBATCH -o ant_timing_inv_%j.txt
+#SBATCH -e ant_timing_inv_%j.err
+
+# Resources, the account and the partition come from submit.sh, which reads
+# this cluster's sites/<name>.sh; nothing here names a cluster. Submit with
+#   scripts/batch_runners/submit.sh script scripts/batch_runners/timing_matrix_inversion.script --cd antarctica ...
+# as antarctica/Makefile and manage_timing_campaign.py do.
+cd "${SLURM_SUBMIT_DIR:-.}"
+# The site half only: every model setting arrives through --export, and
+# site_env.sh's defaults (ISMIP7_MESH, ISMIP7_FRICTION) are not this job's.
+. scripts/batch_runners/site_core.sh
+ismip7_activate
+ismip7_persistent_jit_cache
+ismip7_banner
+
+map_out="${ISMIP7_MAP_OUT:?ISMIP7_MAP_OUT is required}"
+map_raw="${ISMIP7_MAP_OUT_RAW:?ISMIP7_MAP_OUT_RAW is required}"
+timing_json="${ISMIP7_INVERSION_TIMING_JSON:?ISMIP7_INVERSION_TIMING_JSON is required}"
+warm_start="${ISMIP7_WARM_START:?ISMIP7_WARM_START is required}"
+final="${ISMIP7_TIMING_CACHE:?ISMIP7_TIMING_CACHE is required}"
+manifest="${ISMIP7_TIMING_CACHE_MANIFEST:?ISMIP7_TIMING_CACHE_MANIFEST is required}"
+status="${ISMIP7_TIMING_INVERSION_STATUS:?ISMIP7_TIMING_INVERSION_STATUS is required}"
+mesh="${ISMIP7_MESH:?ISMIP7_MESH is required}"
+if [ "${map_raw}" = "${map_out}" ]; then
+    echo "parallel MAP path and published MAP path must differ" >&2
+    exit 2
+fi
+if [ "${map_out}" = "${final}" ]; then
+    echo "MAP path and timing-cache path must differ" >&2
+    exit 2
+fi
+if [ ! -f "${warm_start}" ]; then
+    echo "warm-start cache missing: ${warm_start}" >&2
+    exit 2
+fi
+
+mkdir -p "$(dirname "${map_out}")" "$(dirname "${map_raw}")" \
+    "$(dirname "${timing_json}")" "$(dirname "${final}")"
+
+write_status() {
+    status_tmp="${status}.tmp.${SLURM_JOB_ID:-$$}"
+    printf '%s job_id=%s timestamp=%s\n' \
+        "$1" "${SLURM_JOB_ID:-unknown}" "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
+        > "${status_tmp}"
+    mv -f "${status_tmp}" "${status}"
+}
+
+# Invert writes the parallel full-state MAP; L-BFGS starts from the prepare cache.
+export ISMIP7_MAP_OUT_FINAL="${map_out}"
+export ISMIP7_MAP_OUT="${map_raw}"
+export ISMIP7_SKIP_CONTINUATION="${ISMIP7_SKIP_CONTINUATION:-1}"
+
+write_status "running phase=invert"
+set +e
+ismip7_mpirun "${SLURM_NTASKS}" python -u scripts/inversion_icepack2.py
+invert_rc=$?
+set -e
+if [ "${invert_rc}" -ne 0 ]; then
+    write_status "failed phase=invert exit_code=${invert_rc}"
+    exit "${invert_rc}"
+fi
+if [ ! -f "${map_raw}" ]; then
+    write_status "failed phase=invert reason=missing_map"
+    echo "inversion finished without writing ${map_raw}" >&2
+    exit 2
+fi
+
+write_status "running phase=map_repack"
+set +e
+ismip7_mpirun 1 python -u scripts/redistribute_checkpoint.py \
+    --input "${map_raw}" --output "${map_out}"
+map_repack_rc=$?
+set -e
+if [ "${map_repack_rc}" -ne 0 ]; then
+    write_status "failed phase=map_repack exit_code=${map_repack_rc}"
+    exit "${map_repack_rc}"
+fi
+rm -f "${map_raw}"
+
+# Publish the invert's full mixed state as the timing cache (no cold prepare).
+export ISMIP7_MESH="${mesh}"
+write_status "running phase=cache_publish"
+set +e
+ismip7_mpirun 1 python -u scripts/redistribute_checkpoint.py \
+    --input "${map_out}" --output "${final}" --manifest "${manifest}" \
+    --publish-timing-cache
+publish_rc=$?
+set -e
+if [ "${publish_rc}" -ne 0 ]; then
+    write_status "failed phase=cache_publish exit_code=${publish_rc}"
+    exit "${publish_rc}"
+fi
+
+write_status "finished phase=published exit_code=0"

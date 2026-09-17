@@ -27,6 +27,13 @@ antarctica/results/
 antarctica/archive/
 antarctica/figs/*.png
 antarctica/figs/*.csv
+antarctica/*.err
+antarctica/*.txt
+
+# Batch runners: per-user site settings (sites/local.env.example is the
+# tracked blank) and the job logs submit.sh collects at the repo root.
+antarctica/scripts/batch_runners/sites/local.env
+/logs/
 
 # Gmsh intermediates
 *.pos

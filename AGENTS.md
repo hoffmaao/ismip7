@@ -35,7 +35,7 @@ the relevant subsystem:
 |---|---|
 | `GEOMETRY_DISCRETIZATION.md` | the geometry finite-element space, the calving front, and why several odd-looking constructions are deliberate |
 | `COMPOSITE_RHEOLOGY.md` | the composite viscous formulation |
-| `ADAPTIVE_MESH.md` | the adaptive remeshing scheme, the DG0 transfer rules, and what is validated |
+| `ADAPTIVE_MESH.md` | the Úa-style adaptive remeshing port, the DG0 transfer rules, and what is validated |
 | `antarctica/N3_FRAMEWORK.md` | the n=3 rheology line |
 | `antarctica/README.md` | what to install and download, drivers, env knobs, how to run a core experiment |
 | `antarctica/scripts/batch_runners/readme.md` | running on a cluster: site files, the runners, the build recipe, measured costs |
@@ -64,6 +64,11 @@ are NOT version controlled:
   excluded via `.git/info/exclude`. It is machine-specific and NOT shared.
   Anything another agent or human needs belongs here, in `AGENTS.md`, or in the
   topic docs.
+- **Upstream is `icepack/ismip7` `main`.** Every branch starts from it and
+  merges from it at least weekly; personal forks are mirrors, not integration
+  points. Never rebase a branch that has been pushed: a rewritten history hides
+  the real fork point from git, and the September 2026 sync of a rewritten fork
+  cost a hand merge of four files that should have been a fast-forward.
 
 ## 3. Invariants: code that looks like a bug and is not
 
@@ -100,6 +105,14 @@ without reading the linked rationale and stating why.
   cannot validate either one**. MAP filenames are tagged by friction law and
   geometry space for this reason. Driving a DG0 forward with a CG1 MAP at
   32 km raises the initial misfit from 8.6e3 to 1.5e5.
+- **The zero-valued `M_s[0,0] * tau_s[0]` term in the SCPC path is structural.**
+  Membrane and basal stress are physically uncoupled local fields, so UFL
+  normally omits their two zero Jacobian blocks. Firedrake's three-field SCPC
+  requires those block keys to exist, and its stock helper also misindexes
+  eliminated fields 1,2 after slicing. The runtime-zero `Constant` preserves
+  the block structure without changing the residual; `ISMIP7SCPC` fixes the
+  retained-first indexing. Deleting the term or replacing the `Constant` with
+  literal zero makes UFL simplify it away and SCPC fails during setup.
 
 One line that looks fine and is always a bug:
 
@@ -181,8 +194,17 @@ Useful habits specific to this codebase:
 
 ## 6. Shared machine etiquette
 
-This workstation runs long unattended jobs, frequently for other projects.
-Before launching anything heavy:
+On a cluster, nothing heavy runs on a login node and nothing is submitted with
+a bare `sbatch`: `antarctica/scripts/batch_runners/submit.sh` (and `make -C
+antarctica timing`, which goes through it) composes the request from this
+cluster's site file, so the same command is right at IU, Rice and UChicago.
+Per-user settings live in the git-ignored `sites/local.env`; do not put an
+account, a mail address or a home-directory path in a tracked file. See
+`antarctica/scripts/batch_runners/readme.md`.
+
+The rest of this section is about the shared workstation, which runs long
+unattended jobs, frequently for other projects. Before launching anything
+heavy there:
 
 - Check `uptime` and `free -g`. The box has 80 cores; treat a load average
   above ~70 as saturated and do not add to it.

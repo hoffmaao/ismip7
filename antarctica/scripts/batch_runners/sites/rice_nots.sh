@@ -26,10 +26,23 @@ ISMIP7_ACCOUNT="${ISMIP7_ACCOUNT:-}"
 ISMIP7_CONSTRAINT_INV="${ISMIP7_CONSTRAINT_INV:-sapphirerapids}"
 ISMIP7_CONSTRAINT_FWD="${ISMIP7_CONSTRAINT_FWD:-cascadelake}"
 
-# /projects is a 20 TB share; /home is a 10 TB NFS export and /scratch is
-# purged, so the forcing tree lives on /projects.
-ISMIP7_REPO="${ISMIP7_REPO:-/projects/ah301/ismip7}"
+# /home is a 10 TB NFS export and /scratch is purged, so the 20 TB /projects
+# share is what ISMIP7_WORK names. ISMIP7_REPO follows the checkout the command
+# was run from rather than naming one, as every other site file here does:
+# submit.sh cds to ISMIP7_REPO, so a pinned path makes the same command, run
+# from a second checkout, submit the FIRST tree's code -- silently, once both
+# trees carry the same script names.
+ISMIP7_REPO="${ISMIP7_REPO:-$ISMIP7_REPO_SELF}"
 ISMIP7_WORK="${ISMIP7_WORK:-/projects/ah301}"
+
+# The code root moves with the invocation; the data roots cannot. site_env.sh
+# hangs the forcing tree, the mesh and the MAP off ISMIP7_REPO, which is right
+# for a site holding one checkout, but here all three are shared artifacts a
+# second checkout has none of: the AIS forcing tree is ~313 GB, the 2 km meshes
+# and the budd/RC MAPs are hundreds of MB, and all of them are gitignored
+# rather than copied per checkout. Pin them to the tree that has them.
+ISMIP7_DATA_ROOT="${ISMIP7_DATA_ROOT:-$ISMIP7_WORK/ismip7/ISMIP7/AIS}"
+ISMIP7_MESH="${ISMIP7_MESH:-$ISMIP7_WORK/ismip7/antarctica/mesh/antarctica_64000_2500.msh}"
 
 ISMIP7_TASKS="${ISMIP7_TASKS:-32}"
 ISMIP7_MEM="${ISMIP7_MEM:-240G}"

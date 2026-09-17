@@ -84,12 +84,39 @@ def test_the_banner_prints_the_model_lines_only_with_site_env(runners):
     ]
 
 
-def test_repo_self_is_the_checkout_the_file_was_sourced_from(runners):
+@pytest.mark.parametrize("site", ["iu_quartz", "rice_nots", "uchicago_midway"])
+def test_repo_self_is_the_checkout_the_file_was_sourced_from(runners, site):
+    r"""Every cluster site, not just one. submit.sh cds to ISMIP7_REPO, so a
+    site that pins it submits that tree's code from any other checkout -- which
+    is how rice_nots kept pointing at one September checkout while this test
+    covered only Quartz."""
     rc, out, err = source(runners, "site_core.sh", show("ISMIP7_REPO_SELF", "ISMIP7_REPO"),
-                          ISMIP7_SITE="iu_quartz")
+                          ISMIP7_SITE=site)
     assert rc == 0, err
     repo = str(runners.parents[2])
     assert out.splitlines() == [f"ISMIP7_REPO_SELF={repo}", f"ISMIP7_REPO={repo}"]
+
+
+def test_rice_keeps_the_shared_data_roots_off_the_checkout(runners):
+    r"""The converse of the test above: the code root follows the invocation,
+    but the ~313 GB forcing tree and the shared meshes do not exist in a second
+    checkout, so they must stay on the tree that holds them."""
+    rc, out, err = source(runners, "site_env.sh",
+                          show("ISMIP7_DATA_ROOT", "ISMIP7_MESH"),
+                          ISMIP7_SITE="rice_nots")
+    assert rc == 0, err
+    data_root, mesh = (line.split("=", 1)[1] for line in out.splitlines())
+    assert not data_root.startswith(str(runners.parents[2]))
+    assert not mesh.startswith(str(runners.parents[2]))
+    assert data_root.startswith("/projects/ah301/")
+    assert mesh.startswith("/projects/ah301/")
+
+
+def test_a_data_root_given_for_one_submission_still_wins(runners):
+    rc, out, err = source(runners, "site_env.sh", show("ISMIP7_DATA_ROOT"),
+                          ISMIP7_SITE="rice_nots", ISMIP7_DATA_ROOT="/tmp/elsewhere")
+    assert rc == 0, err
+    assert out == "ISMIP7_DATA_ROOT=/tmp/elsewhere"
 
 
 def test_repo_self_stays_inside_a_symlinked_sandbox(runners, tmp_path):

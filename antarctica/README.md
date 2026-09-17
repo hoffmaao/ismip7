@@ -19,13 +19,13 @@ Install and download the rows your column ticks. Sizes are measured.
 | **Firedrake 2026.4** (brings PETSc, MUMPS, mpi4py) | firedrakeproject.org | x | x | x | x |
 | **icepack2** | github.com/icepack/icepack2 | x | x | x | x |
 | **icepack** (raster interpolation onto meshes) | github.com/icepack/icepack | x | x | x | x |
-| **icepack_tools** (`adapt_mesh`, `levelset`, `friction`, `grounding`) | github.com/hoffmaao/icepack_tools, private | | level-set front | x | |
+| **icepack_tools** (`adapt_mesh`, `levelset`, `friction`, `grounding`) | github.com/hoffmaao/icepack_tools | | level-set front | x | |
 | **tlm_adjoint** | github.com/jrmaddison/tlm_adjoint | x | | | |
 | `xarray netCDF4 scipy rasterio pyproj shapely gmsh matplotlib` (`geopandas` only to build a mesh, section 3) | pip, into the Firedrake venv | x | x | x | x |
 | `earthaccess` (NSIDC), `globus-sdk` (Globus route only) | pip | x | x | x | |
 | **isschecker** (`ismip7-compliance-checker`) | github.com/ismip/ISM_SimulationChecker | | | | x |
 
-`icepack_tools` is a separate private repository. Install it editable into the
+`icepack_tools` is a separate repository. Install it editable into the
 same venv: `pip install -e /path/to/icepack_tools`.
 `icepack2_tools/adapt_mesh.py` and `icepack2_tools/levelset.py` wrap it; the
 rest of the repository runs without it.
@@ -96,7 +96,6 @@ checker runs here on the workstation.
 |-----|---------|-------|
 | BedMachine, MEaSUREs (NSIDC) | NASA Earthdata (free) | https://urs.earthdata.nasa.gov/users/new |
 | ISMIP7 forcing over Globus (the mirror needs none) | Globus + the ISMIP7 collection | https://app.globus.org |
-| `icepack_tools` | access to the private repository | ask Andrew |
 | Submitting results | an upload folder from the ISMIP7 team | email ismip6 at gmail.com with your Globus id, `AIS`, group name and `ism_id` |
 
 Globus transfers to this machine also need Globus Connect Personal running

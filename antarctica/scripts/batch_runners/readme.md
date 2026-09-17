@@ -84,7 +84,12 @@ It only reads. Add your hostname pattern to `ISMIP7_SITE_MATCH` and
 Required: `ISMIP7_FIREDRAKE`, `ISMIP7_PART_LONG`, `ISMIP7_PART_SHORT`,
 `ISMIP7_PART_DEBUG`, `ISMIP7_REPO`, `ISMIP7_WORK`. Everything else defaults.
 `ISMIP7_REPO` defaults to `ISMIP7_REPO_SELF`, the checkout the command was run
-from, in every site file but Rice's. A site that sets `ISMIP7_CONTAINER` is not
+from, in every site file. A site whose gitignored artifacts (the forcing tree,
+the meshes, the MAPs, the observational rasters) do not live beside the code --
+because the cluster holds more than one checkout, as Rice does -- names the
+tree holding them in `ISMIP7_SHARE`, and `ISMIP7_DATA_ROOT`,
+`ISMIP7_OBS_DATA_ROOT`, `ISMIP7_MESH` and `ISMIP7_MAP_DEFAULT` follow it.
+It defaults to `ISMIP7_REPO`. A site that sets `ISMIP7_CONTAINER` is not
 asked for `ISMIP7_FIREDRAKE`, and neither is any `--dry-run`.
 A missing value is reported at submission with the file and variable named.
 `submit.sh build` asks for the other five only, since it creates the venv that
@@ -233,9 +238,8 @@ It takes the venv and work filesystem from the site file and expects the
 sources under `$ISMIP7_WORK/sw/src` (`FD_PREFIX` moves that; at Rice it is
 `/projects/ah301/sw/src`). They are rsynced from a workstation rather than
 cloned, since `icepack2` carries uncommitted edits the inversion needs. Two
-more gaps surfaced here: `/tmp` is not writable
-on the login nodes (the script sets `TMPDIR`), and the `gmsh` wheel dlopens
-`libGLU.so.1`.
+more gaps surfaced here: `/tmp` is not writable on the login nodes (the script
+sets `TMPDIR`), and the `gmsh` wheel dlopens `libGLU.so.1`.
 
 `verify.sbatch` proves the build works across ranks: four tasks under `srun`,
 each partitioner on a unit square, then the real 2500 m mesh under `ptscotch`

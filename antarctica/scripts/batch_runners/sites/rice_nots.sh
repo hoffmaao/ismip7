@@ -35,14 +35,15 @@ ISMIP7_CONSTRAINT_FWD="${ISMIP7_CONSTRAINT_FWD:-cascadelake}"
 ISMIP7_REPO="${ISMIP7_REPO:-$ISMIP7_REPO_SELF}"
 ISMIP7_WORK="${ISMIP7_WORK:-/projects/ah301}"
 
-# The code root moves with the invocation; the data roots cannot. site_env.sh
-# hangs the forcing tree, the mesh and the MAP off ISMIP7_REPO, which is right
-# for a site holding one checkout, but here all three are shared artifacts a
-# second checkout has none of: the AIS forcing tree is ~313 GB, the 2 km meshes
-# and the budd/RC MAPs are hundreds of MB, and all of them are gitignored
-# rather than copied per checkout. Pin them to the tree that has them.
-ISMIP7_DATA_ROOT="${ISMIP7_DATA_ROOT:-$ISMIP7_WORK/ismip7/ISMIP7/AIS}"
-ISMIP7_MESH="${ISMIP7_MESH:-$ISMIP7_WORK/ismip7/antarctica/mesh/antarctica_64000_2500.msh}"
+# The code root moves with the invocation; the shared artifacts cannot. Here
+# they are one tree a second checkout has none of: the AIS forcing tree is
+# ~313 GB, the 2 km meshes, the budd/RC MAPs and the observational rasters are
+# hundreds of MB, and all of them are gitignored rather than copied per
+# checkout. site_env.sh hangs ISMIP7_DATA_ROOT, ISMIP7_MESH, ISMIP7_MAP_DEFAULT
+# and ISMIP7_OBS_DATA_ROOT off this one root. Spelled out rather than taken
+# from ISMIP7_WORK, which sites/local.env lets each user point at their own
+# project space: that would move the data with it, into a tree holding none.
+ISMIP7_SHARE="${ISMIP7_SHARE:-/projects/ah301/ismip7}"
 
 ISMIP7_TASKS="${ISMIP7_TASKS:-32}"
 ISMIP7_MEM="${ISMIP7_MEM:-240G}"

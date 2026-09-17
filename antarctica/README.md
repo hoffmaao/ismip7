@@ -608,8 +608,9 @@ redeclare those literals.
 | `ISMIP7_OUTPUT` | `1` records the ISMIP7 yearly fields and scalars (`<exp>_<lc>_ismip7_annual_<year>.h5`, `<exp>_<lc>_ismip7_scalars.csv`), regridded afterwards by `write_ismip7_output.py`. The value set is closed, so a typo is rejected at startup. A chained projection must export it on every link; a link that cold-starts mid-year logs the gap and begins at the next 1 January. Resuming continues a series, and a cold start into a populated series is refused | unset |
 | `ISMIP7_BNDIDS` | boundary-id JSON override | per-mesh sidecar, else `mesh/boundary_ids.json` |
 | `ISMIP7_GEOMETRY_SPACE` | `dg0` (one thickness for terminus force and mass flux) or `cg1` (legacy, A/B only). Selects the MAP. See `../GEOMETRY_DISCRETIZATION.md` | `dg0` |
-| `ISMIP7_DATA_ROOT` | forcing tree root | `<repo>/ISMIP7/AIS` |
-| `ISMIP7_OBS_DATA_ROOT` | BedMachine, MEaSUREs velocity, and RACMO observational-data root; useful when these files live on an external volume | `<repo>/antarctica/data` |
+| `ISMIP7_SHARE` | root of the gitignored artifacts the batch runners derive `ISMIP7_DATA_ROOT`, `ISMIP7_OBS_DATA_ROOT`, `ISMIP7_MESH` and `ISMIP7_MAP_DEFAULT` from; set it in a site file when a cluster holds more than one checkout | `<repo>` |
+| `ISMIP7_DATA_ROOT` | forcing tree root | `<share>/ISMIP7/AIS` |
+| `ISMIP7_OBS_DATA_ROOT` | BedMachine, MEaSUREs velocity, and RACMO observational-data root; useful when these files live on an external volume | `<share>/antarctica/data` |
 | `ISMIP7_T_END` / `ISMIP7_DT` | end time and timestep (yr). `t=Y.0` is 1 January of year Y, so a run covering 2015 to 2300 ends at `2301` and a historical covering 1850 to 2014 ends at `2015`. Each driver owns its end (historical `2015`, ssp370 `2101`, other projections and control `2301`, OCX `2026`) | driver's own / `1.0` |
 | `ISMIP7_FRICTION` | `budd` or `regularized_coulomb`; selects the MAP | `budd` |
 | `ISMIP7_OUTPUT_INTERVAL` | timeseries row every N steps | `10` |

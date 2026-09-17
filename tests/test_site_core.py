@@ -22,7 +22,13 @@ BR = REPO / "antarctica" / "scripts" / "batch_runners"
 MODEL_VARS = (
     "ISMIP7_FRICTION", "ISMIP7_MESH", "ISMIP7_LC", "ISMIP7_LC_COARSE",
     "ISMIP7_GEOMETRY_SPACE", "ISMIP7_N_FLOW", "ISMIP7_MAP_DEFAULT",
-    "ISMIP7_DATA_ROOT",
+    "ISMIP7_DATA_ROOT", "ISMIP7_OBS_DATA_ROOT",
+)
+
+# What site_env.sh hangs off ISMIP7_SHARE: the artifacts a checkout does not
+# carry, as opposed to ISMIP7_REPO's code.
+SHARED_VARS = (
+    "ISMIP7_DATA_ROOT", "ISMIP7_OBS_DATA_ROOT", "ISMIP7_MESH", "ISMIP7_MAP_DEFAULT",
 )
 
 
@@ -51,9 +57,13 @@ def show(*names):
     return "; ".join(f'echo "{n}=${{{n}-<unset>}}"' for n in names)
 
 
-def test_the_core_file_chooses_no_model_configuration(runners):
+@pytest.mark.parametrize("site", ["local", "iu_quartz", "rice_nots", "uchicago_midway"])
+def test_the_core_file_chooses_no_model_configuration(runners, site):
+    r"""Every site, not just the no-scheduler one: a site file that named a mesh
+    would defeat the timing lanes' `ISMIP7_MESH is required` guard, since they
+    source this file alone and bring their own model configuration."""
     rc, out, err = source(runners, "site_core.sh", show(*MODEL_VARS),
-                          ISMIP7_SITE="local")
+                          ISMIP7_SITE=site)
     assert rc == 0, err
     assert out.splitlines() == [f"{n}=<unset>" for n in MODEL_VARS]
 
@@ -67,6 +77,7 @@ def test_site_env_still_supplies_the_runners_model_defaults(runners):
     assert values["ISMIP7_LC"] == "2500"
     assert values["ISMIP7_MESH"] == "/repo/antarctica/mesh/antarctica_64000_2500.msh"
     assert values["ISMIP7_DATA_ROOT"] == "/repo/ISMIP7/AIS"
+    assert values["ISMIP7_OBS_DATA_ROOT"] == "/repo/antarctica/data"
     assert "<unset>" not in out
 
 
@@ -97,26 +108,50 @@ def test_repo_self_is_the_checkout_the_file_was_sourced_from(runners, site):
     assert out.splitlines() == [f"ISMIP7_REPO_SELF={repo}", f"ISMIP7_REPO={repo}"]
 
 
-def test_rice_keeps_the_shared_data_roots_off_the_checkout(runners):
+def test_a_site_that_states_no_share_keeps_the_artifacts_beside_its_code(runners):
+    r"""ISMIP7_SHARE defaults to ISMIP7_REPO, so a cluster holding one checkout
+    is unaffected by the split."""
+    rc, out, err = source(runners, "site_env.sh", show("ISMIP7_SHARE", *SHARED_VARS),
+                          ISMIP7_SITE="local", ISMIP7_REPO="/repo")
+    assert rc == 0, err
+    values = dict(line.split("=", 1) for line in out.splitlines())
+    assert values["ISMIP7_SHARE"] == "/repo"
+    assert all(values[n].startswith("/repo/") for n in SHARED_VARS), values
+
+
+def test_rice_keeps_the_shared_artifacts_off_the_checkout(runners):
     r"""The converse of the test above: the code root follows the invocation,
-    but the ~313 GB forcing tree and the shared meshes do not exist in a second
-    checkout, so they must stay on the tree that holds them."""
+    but the ~313 GB forcing tree, the shared meshes, the MAPs and the
+    observational rasters do not exist in a second checkout, so they must stay
+    on the tree that holds them."""
     rc, out, err = source(runners, "site_env.sh",
-                          show("ISMIP7_DATA_ROOT", "ISMIP7_MESH"),
+                          show("ISMIP7_REPO", "ISMIP7_SHARE", *SHARED_VARS),
                           ISMIP7_SITE="rice_nots")
     assert rc == 0, err
-    data_root, mesh = (line.split("=", 1)[1] for line in out.splitlines())
-    assert not data_root.startswith(str(runners.parents[2]))
-    assert not mesh.startswith(str(runners.parents[2]))
-    assert data_root.startswith("/projects/ah301/")
-    assert mesh.startswith("/projects/ah301/")
+    values = dict(line.split("=", 1) for line in out.splitlines())
+    checkout = str(runners.parents[2])
+    assert values["ISMIP7_REPO"] == checkout
+    assert values["ISMIP7_SHARE"] == "/projects/ah301/ismip7"
+    for name in SHARED_VARS:
+        assert not values[name].startswith(checkout), name
+        assert values[name].startswith("/projects/ah301/ismip7/"), name
 
 
-def test_a_data_root_given_for_one_submission_still_wins(runners):
-    rc, out, err = source(runners, "site_env.sh", show("ISMIP7_DATA_ROOT"),
-                          ISMIP7_SITE="rice_nots", ISMIP7_DATA_ROOT="/tmp/elsewhere")
+def test_a_share_given_for_one_submission_moves_every_artifact(runners):
+    r"""One variable answers for all four, so a second share needs one word."""
+    rc, out, err = source(runners, "site_env.sh", show(*SHARED_VARS),
+                          ISMIP7_SITE="rice_nots", ISMIP7_SHARE="/tmp/share")
     assert rc == 0, err
-    assert out == "ISMIP7_DATA_ROOT=/tmp/elsewhere"
+    values = dict(line.split("=", 1) for line in out.splitlines())
+    assert all(values[n].startswith("/tmp/share/") for n in SHARED_VARS), values
+
+
+@pytest.mark.parametrize("name", SHARED_VARS)
+def test_a_shared_path_given_for_one_submission_still_wins(runners, name):
+    rc, out, err = source(runners, "site_env.sh", show(name),
+                          ISMIP7_SITE="rice_nots", **{name: "/tmp/elsewhere"})
+    assert rc == 0, err
+    assert out == f"{name}=/tmp/elsewhere"
 
 
 def test_repo_self_stays_inside_a_symlinked_sandbox(runners, tmp_path):

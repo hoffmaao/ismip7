@@ -16,7 +16,18 @@
 . "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/site_core.sh"
 
 # --- repository and data ------------------------------------------------
-export ISMIP7_DATA_ROOT="${ISMIP7_DATA_ROOT:-$ISMIP7_REPO/ISMIP7/AIS}"
+# Two roots, because a cluster can hold more than one checkout. ISMIP7_REPO is
+# the code, and follows the checkout the command was run from. ISMIP7_SHARE is
+# the tree holding the large artifacts no checkout carries -- the forcing tree,
+# the meshes, the MAPs and the observational rasters, all gitignored -- which a
+# site file names when they do not live beside the code. It defaults to
+# ISMIP7_REPO, so a site holding one checkout behaves as it always has.
+export ISMIP7_SHARE="${ISMIP7_SHARE:-$ISMIP7_REPO}"
+export ISMIP7_DATA_ROOT="${ISMIP7_DATA_ROOT:-$ISMIP7_SHARE/ISMIP7/AIS}"
+# simulation.py and preflight.py default this to the running checkout's
+# antarctica/data, which is gitignored and empty in a fresh clone, so state it
+# here too: the shell layer and the Python layer then name the same rasters.
+export ISMIP7_OBS_DATA_ROOT="${ISMIP7_OBS_DATA_ROOT:-$ISMIP7_SHARE/antarctica/data}"
 
 # --- model configuration shared by every run ----------------------------
 # The 2500 m configuration, except for the friction law: every inversion now
@@ -28,14 +39,14 @@ export ISMIP7_FRICTION="${ISMIP7_FRICTION:-regularized_coulomb}"
 export ISMIP7_N_FLOW="${ISMIP7_N_FLOW:-3.0}"
 export ISMIP7_LC="${ISMIP7_LC:-2500}"
 export ISMIP7_LC_COARSE="${ISMIP7_LC_COARSE:-64000}"
-export ISMIP7_MESH="${ISMIP7_MESH:-$ISMIP7_REPO/antarctica/mesh/antarctica_64000_2500.msh}"
+export ISMIP7_MESH="${ISMIP7_MESH:-$ISMIP7_SHARE/antarctica/mesh/antarctica_64000_2500.msh}"
 # The MAP this configuration writes and reads: named from the law, so switching
 # ISMIP7_FRICTION switches the file and a Budd re-inversion cannot land on the
 # RC MAP. One variable for both halves of the workflow - inversion.sbatch
 # writes it, projection.sbatch loads it - because the runners' `logvelnet`
 # name is not one a forward can derive for itself.
 . "$_ISMIP7_BR_DIR/../ismip7_names.sh"
-export ISMIP7_MAP_DEFAULT="${ISMIP7_MAP_DEFAULT:-$ISMIP7_REPO/antarctica/mesh/$(ismip7_map_basename "$ISMIP7_FRICTION" "$ISMIP7_LC")}"
+export ISMIP7_MAP_DEFAULT="${ISMIP7_MAP_DEFAULT:-$ISMIP7_SHARE/antarctica/mesh/$(ismip7_map_basename "$ISMIP7_FRICTION" "$ISMIP7_LC")}"
 
 ismip7_banner_model() {
     echo "    mesh    $ISMIP7_MESH"

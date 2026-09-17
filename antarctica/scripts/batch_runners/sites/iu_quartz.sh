@@ -7,7 +7,9 @@
 # their own allocation.
 
 ISMIP7_SITE_NAME="iu_quartz"
-ISMIP7_SITE_MATCH="quartz* h2.quartz* login*.quartz.uits.iu.edu"
+# The login nodes are h1 and h2 and the compute nodes c<N>, all under
+# quartz.uits.iu.edu (`hostname -f`); the bare forms cover a short hostname.
+ISMIP7_SITE_MATCH="*.quartz.uits.iu.edu quartz* h[0-9]*.quartz*"
 
 ISMIP7_FIREDRAKE="${ISMIP7_FIREDRAKE:-/N/u/dlilien/Quartz/sw/firedrake/2026.04/firedrake/bin/activate}"
 # `module use` first: the firedrake and petsc modulefiles are in a personal

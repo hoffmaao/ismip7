@@ -170,3 +170,21 @@ def test_the_per_node_limits_describe_the_timing_node_class(runners, env, expect
     rc, out, err = source(runners, "site_core.sh", show(*names), **env)
     assert rc == 0, err
     assert [line.split("=", 1)[1] for line in out.splitlines()] == expected
+
+
+@pytest.mark.parametrize("host,site", [
+    ("h1.quartz.uits.iu.edu", "iu_quartz"),     # the login node the pattern used to miss
+    ("h2.quartz.uits.iu.edu", "iu_quartz"),
+    ("c42.quartz.uits.iu.edu", "iu_quartz"),
+    ("login3.nots.rice.edu", "rice_nots"),
+    ("midway3-login4.rcc.uchicago.edu", "uchicago_midway"),
+])
+def test_each_cluster_s_own_hostnames_choose_its_site(runners, tmp_path, host, site):
+    bin_dir = tmp_path / "bin"
+    bin_dir.mkdir()
+    (bin_dir / "hostname").write_text(f"#!/bin/bash\necho {host}\n")
+    (bin_dir / "hostname").chmod(0o755)
+    rc, out, err = source(runners, "site_core.sh", show("ISMIP7_SITE_NAME"),
+                          PATH=f"{bin_dir}:{os.environ['PATH']}")
+    assert rc == 0, err
+    assert out == f"ISMIP7_SITE_NAME={site}"

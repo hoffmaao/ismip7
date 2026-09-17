@@ -164,3 +164,14 @@ def test_no_map_at_all_names_both_files(sandbox):
                       f"TIMING_INVERSION={packed}", ISMIP7_SITE="iu_quartz")
     assert proc.returncode != 0 and seen == []
     assert str(raw) in proc.stderr and str(packed) in proc.stderr
+
+
+@pytest.mark.parametrize("lc, dt, t_end", [("2000", "0.1", "2016"), ("5000", "0.125", "2016.25")])
+def test_a_matrix_lane_s_step_scales_with_the_mesh_only_up_to_the_cap(sandbox, lc, dt, t_end):
+    variables = [v for v in lane(sandbox) if not v.startswith(("LCS=", "TIMING_KIND="))]
+    proc, seen = make(sandbox, "transient-direct", f"LCS={lc}", "TIMING_KIND=matrix",
+                      *variables, ISMIP7_SITE="iu_quartz")
+    assert proc.returncode == 0, proc.stderr
+    export = next(line for line in seen if line.startswith("ARG: --export="))
+    assert f"ISMIP7_DT={dt}," in export + ",", export
+    assert f"ISMIP7_T_END={t_end}," in export + ",", export

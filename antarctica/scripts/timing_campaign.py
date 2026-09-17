@@ -97,6 +97,19 @@ MATRIX_DT_2500_DEFAULT = 0.125
 LEGACY_MATRIX_STEPS = 5
 LEGACY_MATRIX_DT_2500 = 0.25
 MATRIX_REFERENCE_LC = 2500.0
+# The timestep scales with LC only up to an absolute cap. 2026-09-17: both
+# 5000 m scouts (dt 0.25 by the LC/2500 rule) ran away exactly like the
+# 5 x 0.25 probe on 2500/25000 -- a cell within ~15 m of flotation flips
+# grounded <-> floating every step with growing dh -- while 2500/50000
+# (dt 0.125) and 2000/40000 (dt 0.1) passed from the same source MAP. The
+# lagged thickness/velocity coupling through the HAF friction gate sets a
+# stable dt that does not grow with the mesh size. A constant, not a campaign
+# parameter (it is not in the tag); campaigns before v4 were never capped and
+# are still judged by the plain LC/2500 rule. A rung whose own 2.5 km step
+# exceeds the cap runs what its tag says. Must match the Makefile's
+# MATRIX_DT_MAX.
+MATRIX_DT_MAX = 0.125
+MATRIX_DT_MAX_SINCE_VERSION = 4
 
 
 def matrix_steps(override=None):
@@ -430,12 +443,20 @@ def scaling_lanes():
     return tuple(lane for lane in planned_lanes() if lane not in scouts)
 
 
-def expected_dt(lc, dt_2500=None):
-    return matrix_dt_2500(dt_2500) * float(lc) / MATRIX_REFERENCE_LC
+def expected_dt(lc, dt_2500=None, version=None):
+    """A lane's timestep: the 2.5 km step scaled by LC/2500, capped at
+    MATRIX_DT_MAX for campaigns that have the cap (``version`` defaults to
+    the current one)."""
+    base = matrix_dt_2500(dt_2500)
+    dt = base * float(lc) / MATRIX_REFERENCE_LC
+    version = CAMPAIGN_VERSION if version is None else int(version)
+    if version < MATRIX_DT_MAX_SINCE_VERSION:
+        return dt
+    return min(dt, max(MATRIX_DT_MAX, base))
 
 
-def expected_t_end(lc, steps=None, dt_2500=None):
-    return MATRIX_T_START + matrix_steps(steps) * expected_dt(lc, dt_2500)
+def expected_t_end(lc, steps=None, dt_2500=None, version=None):
+    return MATRIX_T_START + matrix_steps(steps) * expected_dt(lc, dt_2500, version)
 
 
 def mesh_basename(lc, lc_coarse, buffer_m=BUFFER_M):
@@ -807,8 +828,8 @@ def validate_timing_record(
     steps = spec["steps"]
     try:
         record_lc = int(record["lc"])
-        dt = expected_dt(record_lc, spec["dt_2500"])
-        t_end = expected_t_end(record_lc, steps, spec["dt_2500"])
+        dt = expected_dt(record_lc, spec["dt_2500"], spec["version"])
+        t_end = expected_t_end(record_lc, steps, spec["dt_2500"], spec["version"])
         interval_ok = (
             math.isclose(float(record["t_start"]), MATRIX_T_START,
                          abs_tol=1e-12)
@@ -823,7 +844,7 @@ def validate_timing_record(
     if not interval_ok:
         return False, (
             f"record did not complete the required {steps}-step interval "
-            f"(dt {expected_dt(int(record.get('lc', 2500)), spec['dt_2500']):g} yr)"
+            f"(dt {expected_dt(int(record.get('lc', 2500)), spec['dt_2500'], spec['version']):g} yr)"
         )
 
     diagnostic = diverged_reasons(record, "diagnostic_solve_summary")
@@ -899,8 +920,8 @@ def synthetic_record(lc, lc_coarse, ncores, timing_tag=None, timing_kind="matrix
     spec = parse_campaign_tag(timing_tag)
     contract = CONTRACTS[spec["contract"]]
     steps = spec["steps"]
-    dt = expected_dt(lc, spec["dt_2500"])
-    t_end = expected_t_end(lc, steps, spec["dt_2500"])
+    dt = expected_dt(lc, spec["dt_2500"], spec["version"])
+    t_end = expected_t_end(lc, steps, spec["dt_2500"], spec["version"])
     return {
         "record_schema_version": RECORD_SCHEMA_VERSION,
         "run_status": "success",
@@ -980,6 +1001,14 @@ def selftest():
     }
     assert contract_exports("front") == {"ISMIP7_AMB_CAP": "0", "ISMIP7_FIXED_FRONT": "1"}
 
+    # The LC-scaled step stops at MATRIX_DT_MAX from v4 on; a rung above the
+    # cap keeps its own step, and archived campaigns keep the plain rule.
+    assert [expected_dt(lc, 0.125) for lc in LCS] == [0.025, 0.05, 0.1, 0.125, 0.125]
+    assert expected_t_end(5000, 10, 0.125) == MATRIX_T_START + 1.25
+    assert expected_dt(5000, 0.0625) == 0.125 and expected_dt(2500, 0.25) == 0.25
+    assert expected_dt(5000, 0.25) == 0.25
+    assert expected_dt(5000, 0.125, version=3) == 0.25
+
     def check(record, expected_valid, fragment=None, **kwargs):
         valid, detail = validate_timing_record(record, **kwargs)
         assert valid is expected_valid, (expected_valid, detail, kwargs)
@@ -1000,6 +1029,12 @@ def selftest():
     check(dict(good, initial_state_source=(
         "inversion_icepack2_budd_n3_dg0_logvelnet_2500_1core.h5")),
           False, "descends from", timing_tag=tag10)
+    good5000 = synthetic_record(5000, 50000, 16, tag10)
+    assert good5000["dt"] == 0.125
+    check(good5000, True, "10-step", lc=5000, timing_tag=tag10)
+    uncapped = dict(good5000, dt=0.25, t_end=MATRIX_T_START + 2.5,
+                    t_final=MATRIX_T_START + 2.5)
+    check(uncapped, False, "(dt 0.125 yr)", timing_tag=tag10)
     check(good, False, "timing_tag=", timing_tag=campaign_tag(5, 0.25))
     short = dict(good, completed_steps=9, t_final=good["t_end"] - 0.125)
     check(short, False, "10-step interval", timing_tag=tag10)

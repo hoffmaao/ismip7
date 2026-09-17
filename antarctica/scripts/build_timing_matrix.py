@@ -25,6 +25,7 @@ from timing_campaign import (
     MATRIX_T_START,
     SOURCE_INVERSION_BASENAME,
     diverged_reasons,
+    expected_dt,
     inversion_required,
     mesh_rows,
     parse_campaign_tag,
@@ -216,7 +217,7 @@ def _classify(record, status, lane, strict, tag=CAMPAIGN_TAG):
     return "UNKNOWN", state
 
 
-def _status_table(rows, classifications, dt_2500=LEGACY_MATRIX_DT_2500):
+def _status_table(rows, classifications, dt_2500=LEGACY_MATRIX_DT_2500, version=0):
     header = (
         "| LC (m) | LC_coarse (m) | dt (yr) | "
         + " | ".join(f"{cores} cores" for cores in DISPLAY_CORES)
@@ -228,7 +229,7 @@ def _status_table(rows, classifications, dt_2500=LEGACY_MATRIX_DT_2500):
             classifications[(lc, lc_coarse, cores)][0]
             for cores in DISPLAY_CORES
         ]
-        dt = dt_2500 * lc / MATRIX_REFERENCE_LC
+        dt = expected_dt(lc, dt_2500, version)
         lines.append(
             f"| {lc} | {lc_coarse} | {dt:.3g} | "
             + " | ".join(labels)
@@ -399,7 +400,8 @@ def render(tag, timing_dir, output, legacy_full_matrix=False):
         "## Run status",
         "",
     ]
-    lines.extend(_status_table(rows, classifications, dt_2500))
+    lines.extend(_status_table(rows, classifications, dt_2500,
+                               spec["version"] if spec else 0))
     if not legacy_full_matrix:
         lines.extend(["", "### Initial states", ""])
         lines.extend(_initial_state_table(

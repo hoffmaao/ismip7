@@ -835,7 +835,12 @@ The stages and contracts are:
    thickness; both are written into the campaign tag, e.g.
    `scpc_mumps_10step_dt0p125at2500_…`, so a dt-ladder rung never mixes with
    another) and the physics contract is `TIMING_CONTRACT` (default `strict`;
-   a non-strict contract suffixes the tag). Every lane runs the runaway
+   a non-strict contract suffixes the tag). The scaled step is capped at an
+   absolute `MATRIX_DT_MAX` = 0.125 yr (2026-09-17: both 5000 m scouts ran
+   away at dt 0.25 just as 2500/25000 does, a near-flotation cell flipping
+   between grounded and floating every step, so the stable step does not grow
+   with the mesh); the 5000 m lanes therefore cover 1.25 yr, not 2.5. The cap
+   is a constant, not part of the tag, and applies from campaign v4 on. Every lane runs the runaway
    **tripwire**: the first step whose maximum speed exceeds
    `ISMIP7_TRIPWIRE_U_MAX` (2e4 m/yr), whose maximum thickness exceeds
    `ISMIP7_TRIPWIRE_H_MAX` (5000 m), or in which a cell at least

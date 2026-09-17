@@ -25,6 +25,7 @@ from timing_campaign import (
     CACHE_TAG,
     CONTRACTS,
     LANE_INITIAL_STATE_DEFAULT,
+    MATRIX_DT_MAX,
     TRIPWIRE_DEFAULTS,
     MEMORY_BY_LC,
     SOLVER_MODE,
@@ -1465,7 +1466,8 @@ def parse_args():
         default=None,
         help=(
             f"timestep at 2.5 km in years, scaled by LC/2500 for other meshes "
-            f"(default {matrix_dt_2500():g}; encoded in the tag)"
+            f"up to {MATRIX_DT_MAX:g} yr (default {matrix_dt_2500():g}; encoded "
+            f"in the tag)"
         ),
     )
     parser.add_argument(

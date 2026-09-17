@@ -48,6 +48,11 @@ DT ?= 1.0
 MATRIX_STEPS ?= 10
 MATRIX_DT_2500 ?= 0.125
 MATRIX_DT_2500_TAG := $(subst .,p,$(MATRIX_DT_2500))
+# Absolute cap on the LC-scaled step (2026-09-17: the 5000 m scouts ran away at
+# dt 0.25 exactly as 2500/25000 does; the stable dt does not grow with LC).
+# Not a campaign parameter -- it is not in the tag -- and it never undercuts
+# MATRIX_DT_2500 itself. Must match timing_campaign.MATRIX_DT_MAX.
+MATRIX_DT_MAX := 0.125
 TIMING_KIND ?= matrix
 # Lane physics contract: strict (no apparent MB, no calving sink) or
 # divfront / front / div (production closure and/or fixed 2015 calving front).
@@ -254,7 +259,7 @@ transient-direct:
 	  if [ -n "$(TIMING_LC_COARSE)" ]; then lcc=$(TIMING_LC_COARSE); fi; \
 	  run_dt="$(DT)"; run_t_end="$(T_END)"; \
 	  if [ "$(TIMING_KIND)" = matrix ]; then \
-	    run_dt=$$(awk -v lc="$$lc" -v base="$(MATRIX_DT_2500)" 'BEGIN { printf "%.12g", base * lc / 2500 }'); \
+	    run_dt=$$(awk -v lc="$$lc" -v base="$(MATRIX_DT_2500)" -v cap="$(MATRIX_DT_MAX)" 'BEGIN { dt = base * lc / 2500; if (base + 0 > cap + 0) cap = base; if (dt > cap + 0) dt = cap; printf "%.12g", dt }'); \
 	    run_t_end=$$(awk -v dt="$$run_dt" -v steps="$(MATRIX_STEPS)" 'BEGIN { printf "%.12g", 2015 + steps * dt }'); \
 	  fi; \
 	  run_experiment="$(TIMING_EXPERIMENT)"; \

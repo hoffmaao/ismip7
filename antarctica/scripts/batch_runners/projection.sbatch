@@ -156,7 +156,7 @@ PY
 )
 fi
 echo "    wall budget ${wall_stop_min} min (limit ${tl:-?})"
-ISMIP7_WALL_STOP_MIN="$wall_stop_min" srun -n "${SLURM_NTASKS:-1}" python -u "$DRIVER"
+ISMIP7_WALL_STOP_MIN="$wall_stop_min" ismip7_mpirun "${SLURM_NTASKS:-1}" python -u "$DRIVER"
 rc=$?
 echo "=== $(date -Is)  forward exit ${rc} ==="
 

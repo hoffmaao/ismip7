@@ -183,6 +183,19 @@ def test_the_successor_is_given_this_job_s_allocation(sandbox):
         assert flag in argv[0], f"successor lost {flag}: {argv[0]}"
 
 
+def test_the_successor_is_given_the_site_s_extra_flags(sandbox):
+    r"""ISMIP7_SBATCH_EXTRA carries what a site insists on for every
+    submission, a QOS for instance. scontrol does not hand it back in a form
+    the chain reads, so a successor without it would be refused by exactly the
+    partition the first link was accepted on."""
+    rc, log, calls = run_job(sandbox, FAKE_T_YR="2050", FAKE_START_YEAR="2000",
+                             ISMIP7_SBATCH_EXTRA="--qos=long --mail-type=FAIL")
+    assert rc == 0, log
+    argv = [line for line in calls.splitlines() if line.startswith("ARGV:")]
+    assert len(argv) == 1, calls
+    assert "--qos=long --mail-type=FAIL" in argv[0], argv[0]
+
+
 def test_reaching_t_end_finishes(sandbox):
     r"""At t_end there is nothing left to chain."""
     rc, log, calls = run_job(

@@ -28,12 +28,12 @@ if m.comm.rank == 0:
     print(f"    {sys.argv[1]:9s} ranks={m.comm.size} ghost/owned = {g:.4f}")
 PYEOF
 for p in parmetis ptscotch simple; do
-    srun -n 4 python "$PYOP2_CACHE_DIR/_part.py" "$p" 2>"$PYOP2_CACHE_DIR/_err_$p.txt" | grep ghost \
+    ismip7_mpirun 4 python "$PYOP2_CACHE_DIR/_part.py" "$p" 2>"$PYOP2_CACHE_DIR/_err_$p.txt" | grep ghost \
         || { echo "    $p FAILED:"; grep -iE 'error|Traceback' "$PYOP2_CACHE_DIR/_err_$p.txt" | head -3; }
 done
 echo; echo "=== real mesh: antarctica_64000_2500.msh at 4 ranks, ptscotch vs simple ==="
 for p in ptscotch simple; do
-    srun -n 4 python -u antarctica/scripts/partition_probe.py antarctica/mesh/antarctica_64000_2500.msh \
+    ismip7_mpirun 4 python -u antarctica/scripts/partition_probe.py antarctica/mesh/antarctica_64000_2500.msh \
         -petscpartitioner_type "$p" 2>/dev/null | grep -E 'ranks=' | sed "s/^/    $p: /"
 done
 echo "=== $(date -Is) verify done ==="

@@ -125,6 +125,12 @@ ismip7_chain_resources() {
     [ -n "$tlim" ] && ISMIP7_CHAIN_RES+=(--time="$tlim")
     [ -n "$memn" ] && ISMIP7_CHAIN_RES+=(--mem="$memn")
     [ -n "${SLURM_JOB_ACCOUNT:-}" ] && ISMIP7_CHAIN_RES+=(-A "$SLURM_JOB_ACCOUNT")
+    # A flag the site needs on every submission (a QOS, say) is not something
+    # scontrol hands back either, so the successor is given it again.
+    if [ -n "${ISMIP7_SBATCH_EXTRA:-}" ]; then
+        # shellcheck disable=SC2206
+        ISMIP7_CHAIN_RES+=(${ISMIP7_SBATCH_EXTRA})
+    fi
     return 0
 }
 
@@ -161,6 +167,15 @@ ismip7_activate() {
     mkdir -p "$PYOP2_CACHE_DIR"
 }
 
+# Launch an MPI program on N ranks inside the running allocation:
+#   ismip7_mpirun N python -u script.py [args...]
+# Every job script starts its ranks through this, so how a site launches MPI
+# is decided here once rather than in each script.
+ismip7_mpirun() {
+    local n="$1"; shift
+    srun -n "$n" "$@"
+}
+
 # --- job size ------------------------------------------------------------
 # Only the fields ismip7_site_require checks have to come from the site file.
 # Everything below carries a working default, so a site file written from that
@@ -170,6 +185,9 @@ ISMIP7_MEM="${ISMIP7_MEM:-120G}"
 ISMIP7_TIME_INV="${ISMIP7_TIME_INV:-2-00:00:00}"
 ISMIP7_TIME_FWD="${ISMIP7_TIME_FWD:-1-00:00:00}"
 ISMIP7_ACCOUNT="${ISMIP7_ACCOUNT:-}"
+# Extra sbatch flags for every submission from this site or this user, split
+# on spaces: a QOS the partition insists on, or --mail-type/--mail-user.
+ISMIP7_SBATCH_EXTRA="${ISMIP7_SBATCH_EXTRA:-}"
 
 # A site that needs one number sets ISMIP7_TASKS/ISMIP7_MEM and both kinds take
 # it. A site with measured per-kind values sets the pair. At Rice the forward

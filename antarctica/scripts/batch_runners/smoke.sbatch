@@ -29,7 +29,7 @@ export ISMIP7_DHDT_WEIGHT=1 ISMIP7_DHDT_NET_SIGMA=10 ISMIP7_GAMMA_THETA=1e5 ISMI
 export ISMIP7_MAXITER="${ISMIP7_MAXITER:-2}" ISMIP7_RASTER_SAMPLE="${ISMIP7_RASTER_SAMPLE:-vertex}"
 export ISMIP7_MAP_OUT="${ISMIP7_MAP_OUT:-$ISMIP7_REPO/antarctica/results/smoke_${ISMIP7_LC}_${ISMIP7_LC_COARSE}_${ISMIP7_RASTER_SAMPLE}.h5}"
 mkdir -p "$(dirname "$ISMIP7_MAP_OUT")"
-srun -n "${SLURM_NTASKS:-1}" python -u antarctica/scripts/inversion_icepack2.py
+ismip7_mpirun "${SLURM_NTASKS:-1}" python -u antarctica/scripts/inversion_icepack2.py
 rc=$?
 echo "=== $(date -Is) smoke exit $rc ==="
 exit $rc

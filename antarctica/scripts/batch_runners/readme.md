@@ -244,7 +244,11 @@ allocation, which fails for every type and proves nothing.
 
 `smoke.sbatch` runs the 32 km inversion for two iterates on four ranks, a few
 minutes on `scavenge`, so a multi-day job cannot die on a missing file hours
-after queueing. Run it after any change to the stack.
+after queueing. Run it after any change to the stack. No mesh is tracked, so
+at a site that has none the job first builds `antarctica_320000_32000_buffered0.msh`
+and its boundary-id sidecar (a minute of serial gmsh, once per checkout); the
+unsuffixed `antarctica_320000_32000.msh` an older generator left is used where
+it exists. A mesh named through `ISMIP7_MESH` is never built.
 
 ## The job scripts
 

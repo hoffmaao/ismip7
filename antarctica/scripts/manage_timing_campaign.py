@@ -106,6 +106,18 @@ def read_status(path):
     return parsed
 
 
+# submit.sh's exit status for a request one node of the site cannot hold.
+_SUBMIT_NOT_RUNNABLE = 3
+
+
+def _not_runnable_reason(message):
+    """The single-token ``reason=`` submit.sh printed, for the status file."""
+    for token in message.split():
+        if token.startswith("reason="):
+            return token.split("=", 1)[1]
+    return "exceeds_site_node"
+
+
 def read_record(path):
     try:
         with open(path) as stream:
@@ -212,7 +224,9 @@ class CampaignManager:
         self.timing_dir = Path(args.timing_dir).resolve()
         self.logs_dir = self.root / "results" / "logs"
         self.inversion = Path(args.inversion).resolve()
+        self.queue = args.queue
         self.partition = args.partition
+        self.constraint = args.constraint
         self.walltime = args.walltime
         self.maxiter = inversion_maxiter(args.maxiter)
         self.dry_run = args.dry_run
@@ -796,32 +810,84 @@ class CampaignManager:
         status_path,
         dependency=None,
     ):
+        # submit.sh composes the sbatch line from this cluster's site file
+        # (account, node feature, extra flags, per-node limits), so a lane is
+        # the same request here at every site. It submits from the checkout
+        # this manager runs in, whatever the site file would default to.
+        submit = self.root / "scripts/batch_runners/submit.sh"
         command = [
-            "sbatch",
-            "--parsable",
-            f"--job-name={job_name}",
-            f"--ntasks-per-node={ncores}",
-            f"--partition={self.partition}",
-            f"--time={self.walltime}",
-            f"--mem={memory}",
+            "bash",
+            os.fspath(submit),
+            "script",
+            os.fspath(Path(script).relative_to(self.root)),
+            "--cd",
+            self.root.name,
+            "--name",
+            job_name,
+            "--tasks",
+            str(ncores),
+            "--mem",
+            memory,
+            "--time",
+            self.walltime,
         ]
+        if self.partition:
+            command.extend(["--partition", self.partition])
+        else:
+            command.extend(["--queue", self.queue])
+        if self.constraint:
+            command.extend(["--constraint", self.constraint])
         if dependency:
-            command.append(f"--dependency={dependency}")
-        command.extend([
-            "--export=ALL," + ",".join(
-                f"{key}={value}" for key, value in exports.items()
-            ),
-            os.fspath(script),
-        ])
-        print("DRY RUN:" if self.dry_run else "SUBMIT:", shlex.join(command))
+            command.extend(["--dependency", dependency])
         if self.dry_run:
-            return
-        if shutil.which("sbatch") is None:
-            raise RuntimeError("sbatch is unavailable; use --dry-run off-cluster")
-        atomic_write_status(status_path, "submitting", timestamp=_timestamp())
+            command.append("--dry-run")
+        command.extend(f"{key}={value}" for key, value in exports.items())
+        env = dict(os.environ, ISMIP7_REPO=os.fspath(self.root.parent))
+        if not self.dry_run:
+            print("SUBMIT:", shlex.join(command))
+            if shutil.which("sbatch") is None:
+                raise RuntimeError(
+                    "sbatch is unavailable; use --dry-run off-cluster"
+                )
+            atomic_write_status(
+                status_path, "submitting", timestamp=_timestamp()
+            )
         result = subprocess.run(
-            command, check=False, capture_output=True, text=True
+            command, check=False, capture_output=True, text=True, env=env
         )
+        if (
+            self.dry_run
+            and result.returncode == 2
+            and "no site definition matches" in result.stderr
+        ):
+            # Off-cluster there is no site to name. A dry run starts nothing,
+            # so show the request as the no-scheduler site would compose it.
+            env["ISMIP7_SITE"] = "local"
+            result = subprocess.run(
+                command, check=False, capture_output=True, text=True, env=env
+            )
+        composed = result.stderr.strip()
+        if result.returncode == _SUBMIT_NOT_RUNNABLE:
+            # One node of this site cannot hold the request. The lanes stay
+            # single-node and comparable between sites, so this is an outcome
+            # to record, not a failure to retry; --force does not change it.
+            reason = _not_runnable_reason(composed)
+            print("DRY RUN:" if self.dry_run else "NOT RUNNABLE:", composed)
+            if not self.dry_run:
+                atomic_write_status(
+                    status_path,
+                    "not_runnable",
+                    reason=reason,
+                    timestamp=_timestamp(),
+                )
+            return
+        if self.dry_run:
+            print("DRY RUN:", composed)
+            if result.returncode != 0:
+                self.submit_failures += 1
+            return
+        if composed:
+            print(composed)
         if result.returncode != 0:
             atomic_write_status(
                 status_path,
@@ -830,7 +896,6 @@ class CampaignManager:
                 timestamp=_timestamp(),
             )
             self.submit_failures += 1
-            print(result.stderr.strip(), file=sys.stderr)
             return
         job_id = result.stdout.strip().split(";", 1)[0]
         atomic_write_status(
@@ -1318,7 +1383,23 @@ def parse_args():
         ),
         help="campaign source MAP (the Makefile's TIMING_INVERSION)",
     )
-    parser.add_argument("--partition", default="general")
+    parser.add_argument(
+        "--queue",
+        choices=("short", "long", "debug"),
+        default="short",
+        help="the site's partition of this class (batch_runners/sites/)",
+    )
+    parser.add_argument(
+        "--partition",
+        default=None,
+        help="a partition by name, instead of the site's --queue class",
+    )
+    parser.add_argument(
+        "--constraint",
+        default=None,
+        help="a node feature by name, instead of the site's "
+        "ISMIP7_CONSTRAINT_TIMING; also skips the site's per-node limits",
+    )
     parser.add_argument("--walltime", default="12:00:00")
     parser.add_argument(
         "--maxiter",

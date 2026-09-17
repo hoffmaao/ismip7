@@ -14,6 +14,7 @@ import json
 import math
 import os
 import re
+import socket
 import sys
 import tempfile
 from pathlib import Path
@@ -534,6 +535,39 @@ def atomic_write_json(path, payload):
         except FileNotFoundError:
             pass
         raise
+
+
+def host_provenance(environ=None):
+    """Where a timing record was measured, for the record only.
+
+    The matrix is run at several sites, and ``seconds_per_step`` has no
+    warm-up excluded, so a record says which site and node measured it and
+    whether the kernel cache it started from was empty (a cold first step is
+    then the compiler, not the solver).  ``jit_cache_dir`` is None when the
+    job left the cache at Firedrake's default location, whose state is not
+    inspected.  Call this before anything compiles.
+
+    None of this enters a cache manifest or a solver fingerprint: the same
+    cache is valid wherever it is read.
+    """
+    environ = os.environ if environ is None else environ
+    cache_dir = environ.get("PYOP2_CACHE_DIR") or None
+    was_empty = None
+    if cache_dir is not None:
+        try:
+            was_empty = not any(os.scandir(cache_dir))
+        except OSError:
+            was_empty = True
+    return {
+        "site": environ.get("ISMIP7_SITE") or None,
+        "hostname": socket.gethostname(),
+        "slurm_job_id": environ.get("SLURM_JOB_ID") or None,
+        "slurm_partition": environ.get("SLURM_JOB_PARTITION") or None,
+        "slurm_nodelist": environ.get("SLURM_JOB_NODELIST") or None,
+        "container": environ.get("ISMIP7_CONTAINER") or None,
+        "jit_cache_dir": cache_dir,
+        "jit_cache_was_empty": was_empty,
+    }
 
 
 def atomic_write_status(path, state, **fields):

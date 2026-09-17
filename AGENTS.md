@@ -194,8 +194,17 @@ Useful habits specific to this codebase:
 
 ## 6. Shared machine etiquette
 
-This workstation runs long unattended jobs, frequently for other projects.
-Before launching anything heavy:
+On a cluster, nothing heavy runs on a login node and nothing is submitted with
+a bare `sbatch`: `antarctica/scripts/batch_runners/submit.sh` (and `make -C
+antarctica timing`, which goes through it) composes the request from this
+cluster's site file, so the same command is right at IU, Rice and UChicago.
+Per-user settings live in the git-ignored `sites/local.env`; do not put an
+account, a mail address or a home-directory path in a tracked file. See
+`antarctica/scripts/batch_runners/readme.md`.
+
+The rest of this section is about the shared workstation, which runs long
+unattended jobs, frequently for other projects. Before launching anything
+heavy there:
 
 - Check `uptime` and `free -g`. The box has 80 cores; treat a load average
   above ~70 as saturated and do not add to it.

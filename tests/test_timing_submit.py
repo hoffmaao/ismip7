@@ -131,3 +131,22 @@ def test_a_real_submission_never_guesses_a_site(manager):
     status = submit(manager)
     assert status["state"] == "submission_failed"
     assert calls(manager) == []
+
+
+def test_a_record_says_where_it_was_measured_and_from_what_cache(tmp_path):
+    r"""seconds_per_step has no warm-up excluded, and the matrix is run at
+    several sites. The record carries the site and whether the kernel cache
+    the lane started from was empty; none of it reaches a cache manifest."""
+    import timing_campaign as tc
+    cache = tmp_path / "pyop2"
+    cache.mkdir()
+    cold = tc.host_provenance({"ISMIP7_SITE": "rice_nots", "SLURM_JOB_ID": "12",
+                               "PYOP2_CACHE_DIR": str(cache)})
+    assert cold["site"] == "rice_nots" and cold["slurm_job_id"] == "12"
+    assert cold["jit_cache_dir"] == str(cache) and cold["jit_cache_was_empty"] is True
+    (cache / "kernel.so").write_text("x")
+    assert tc.host_provenance({"PYOP2_CACHE_DIR": str(cache)})["jit_cache_was_empty"] is False
+    default = tc.host_provenance({})
+    assert default["jit_cache_dir"] is None and default["jit_cache_was_empty"] is None
+    assert default["site"] is None and default["container"] is None
+    assert tc.CAMPAIGN_VERSION == 4

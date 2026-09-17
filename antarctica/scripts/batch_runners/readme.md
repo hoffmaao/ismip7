@@ -7,9 +7,11 @@ time and memory figure here was measured.
 
 | | |
 |---|---|
-| `sites/<cluster>.sh` | everything that differs between clusters: Firedrake venv, module loads, partitions by job length, account, node constraint, and paths that hold a checkout and 300 GB of forcing. |
-| `site_env.sh` | picks the site file (`ISMIP7_SITE`, else hostname), refuses to run while a required field is empty, and provides `ismip7_activate`, `ismip7_banner` and the shared model defaults. |
-| `submit.sh` | composes the scheduler command from the site file, so `submit.sh inversion ISMIP7_LC=2000` is the same line everywhere. |
+| `sites/<cluster>.sh` | everything that differs between clusters: Firedrake venv (or container image), module loads, partitions by job length, account, node constraint, per-node limits, and paths that hold a checkout and 300 GB of forcing. Tracked. |
+| `sites/local.env` | everything that differs between two people on one cluster: the account to charge, a private build or image, the work filesystem, mail flags. Ignored by git; `sites/local.env.example` is the blank. Read before the site file, so it wins. |
+| `site_core.sh` | picks the site file (`ISMIP7_SITE`, else hostname), refuses to run while a required field is empty, and provides `ismip7_activate`, `ismip7_mpirun`, `ismip7_chain_resources` and `ismip7_banner`. Chooses no model configuration. |
+| `site_env.sh` | `site_core.sh` plus the model defaults the inversion and projection runners share (`ISMIP7_LC`, `ISMIP7_MESH`, `ISMIP7_FRICTION`, ...). The timing campaign's scripts source `site_core.sh` alone, because a lane's model settings are its exports and nothing else. |
+| `submit.sh` | composes the scheduler command from the site file, so `submit.sh inversion ISMIP7_LC=2000` and `make -C antarctica timing` are the same line everywhere. |
 
 The job scripts carry log paths and nothing else. A `#SBATCH` line is parsed
 before any shell runs, so it cannot read a site file, and a header that
@@ -30,6 +32,42 @@ configured (knobs in `antarctica/README.md`). `--tasks`, `--mem`, `--time`,
 `--partition`, `--constraint`, `--account` and `--name` override site defaults
 for one submission, in either `--opt value` or `--opt=value` form.
 
+`submit.sh script PATH` submits any job script that sources `site_core.sh`. It
+is how `antarctica/Makefile` and `manage_timing_campaign.py` submit, and how to
+run `budd_map_census.script` by hand:
+
+```bash
+submit.sh script scripts/batch_runners/budd_map_census.script --cd antarctica \
+    --queue debug --tasks 16 --mem 64G --time 00:45:00 ISMIP7_MAP=$PWD/mesh/<map>.h5
+```
+
+`--queue short|long|debug` names the site's partition by class, `--cd DIR`
+submits from `ISMIP7_REPO/DIR` (the timing scripts run from `antarctica/`),
+`--dependency` and `--wait` pass through. Standard output is sbatch's alone, so
+a caller can read the job id; the composed command goes to standard error.
+
+## Your first day on a cluster
+
+The same six steps for everyone. Nothing tracked is edited unless the cluster
+itself is new.
+
+1. `antarctica/scripts/batch_runners/site_recon.sh` on a login node. It only
+   reads, and prints accounts, partitions and their limits, node features and
+   memory.
+2. If `submit.sh smoke --dry-run` says no site matches this host, the cluster
+   is new: see the next section. Otherwise the site file already exists.
+3. `cp sites/local.env.example sites/local.env` and keep the lines that are
+   yours: `ISMIP7_ACCOUNT`, `ISMIP7_WORK`, a private `ISMIP7_FIREDRAKE` or
+   `ISMIP7_CONTAINER`, and `ISMIP7_SBATCH_EXTRA` for mail. Write each as
+   `VAR="${VAR:-value}"` so a value given for one submission still wins.
+4. `submit.sh verify`: four ranks, minutes. Firedrake imports, MPI works across
+   ranks, the partitioners partition; on a container site, the image starts in
+   the checkout and sees the job's environment.
+5. `submit.sh smoke`: a short real inversion on the debug partition.
+6. `make -C antarctica timing-dry-run`: every line the timing campaign would
+   submit here, with `NOT RUNNABLE` for lanes this site's nodes cannot hold.
+   Then `make -C antarctica timing`.
+
 ## Adding your cluster
 
 ```bash
@@ -45,6 +83,9 @@ It only reads. Add your hostname pattern to `ISMIP7_SITE_MATCH` and
 
 Required: `ISMIP7_FIREDRAKE`, `ISMIP7_PART_LONG`, `ISMIP7_PART_SHORT`,
 `ISMIP7_PART_DEBUG`, `ISMIP7_REPO`, `ISMIP7_WORK`. Everything else defaults.
+`ISMIP7_REPO` defaults to `ISMIP7_REPO_SELF`, the checkout the command was run
+from, in every site file but Rice's. A site that sets `ISMIP7_CONTAINER` is not
+asked for `ISMIP7_FIREDRAKE`, and neither is any `--dry-run`.
 A missing value is reported at submission with the file and variable named.
 `submit.sh build` asks for the other five only, since it creates the venv that
 `ISMIP7_FIREDRAKE` names.
@@ -55,13 +96,48 @@ Job sizes come in pairs so inversions and forwards can differ:
 node constraint splits the same way (`ISMIP7_CONSTRAINT_INV`, `_FWD`, both
 falling back to `ISMIP7_CONSTRAINT`).
 
+Optional, for every submission: `ISMIP7_SBATCH_EXTRA`, extra sbatch flags split
+on spaces (a QOS the partition insists on; your own `--mail-type`/`--mail-user`
+in `sites/local.env`). Chain successors are given it again.
+
+Optional, for the timing campaign: `ISMIP7_CONSTRAINT_TIMING` (the node feature
+`submit.sh script` asks for; defaults to `ISMIP7_CONSTRAINT_FWD`),
+`ISMIP7_CORES_PER_NODE` and `ISMIP7_MEM_PER_NODE` (one such node; physical
+cores, and memory as sbatch spells it), and `ISMIP7_TIMING_JIT_CACHE`. The
+matrix's lanes are single-node at every site so that the matrices compare. A
+lane one node cannot hold is refused by `submit.sh` with exit status 3 and
+recorded `not_runnable reason=exceeds_site_cores|exceeds_site_mem`; it shows as
+such in `TIMING_MATRIX.md`. A `--constraint` given by hand (`SLURM_CONSTRAINT=`
+in the Makefile) skips the check, since the limits describe
+`ISMIP7_CONSTRAINT_TIMING`'s nodes and not the ones you named. A lane's
+`seconds_per_step` has no warm-up excluded, so the timing scripts keep a kernel
+cache that persists between jobs (Firedrake's default location, or
+`ISMIP7_TIMING_JIT_CACHE`) rather than the private per-job one
+`ismip7_activate` gives the runners. Each record's `host` block says which site
+and node measured it and whether that cache started empty.
+
+### A container site
+
+Set `ISMIP7_CONTAINER` to an Apptainer or Singularity image and that is the
+whole difference. `ismip7_activate` puts `container_bin/` first on `PATH`; its
+`python` runs `apptainer exec <binds> <image> python3 "$@"`, so every `python`
+line in the job scripts runs in the image unchanged. `ismip7_mpirun` starts the
+ranks with the image's own `mpiexec` inside one `exec`: every job here is one
+node, so the MPI in the image never has to agree with the host's Slurm about
+PMI. The checkout, `ISMIP7_WORK`, the data roots and the kernel cache are bound
+already. `ISMIP7_CONTAINER_ARGS` adds binds, `ISMIP7_CONTAINER_MPIEXEC` gives
+that launcher flags (`mpiexec --mca plm isolated` if it objects to the Slurm
+allocation around it), `ISMIP7_CONTAINER_RUNTIME` names `singularity` where
+that is what is installed. `--cleanenv` must never be passed: a job's
+configuration is its `ISMIP7_*` environment.
+
 ### The sites that ship
 
 | file | state |
 |---|---|
 | `sites/rice_nots.sh` | complete, in production. Details below. |
-| `sites/iu_quartz.sh` | complete, from the IU Quartz runners on the upstream `timing_matrix` branch: partition `general` (`debug` for tests), account `r00905`, the IU module stack (`module use /N/u/dlilien/Quartz/modulefiles`, then gnu, openmpi, python, zlib, hdf5, openblas, patchelf, petsc, firedrake), 16 ranks per node. A second IU user points `ISMIP7_FIREDRAKE` at their own build and `ISMIP7_ACCOUNT` at their own allocation. |
-| `sites/uchicago_midway.sh` | a stub. Nobody has run this pipeline at RCC, so the required fields are empty and the first submission refuses until they are filled from RCC's documentation and `sinfo -s`. |
+| `sites/iu_quartz.sh` | complete, from the IU Quartz runners on the upstream `timing_matrix` branch: partition `general` (`debug` for tests), account `r00905`, the IU module stack (`module use /N/u/dlilien/Quartz/modulefiles`, then gnu, openmpi, python, zlib, hdf5, openblas, patchelf, petsc, firedrake), 16 ranks per node, 128 cores and 515700 MB per node. A second IU user points `ISMIP7_FIREDRAKE` at their own build and `ISMIP7_ACCOUNT` at their own allocation in `sites/local.env`. |
+| `sites/uchicago_midway.sh` | a container site, not yet run end to end. It describes the image `icepack2_midway3_source.def` builds and names a persistent kernel cache; the image path, partitions, account and per-node limits are empty, so the first submission refuses until they are filled (the file's header says where to read each). |
 | `sites/local.sh` | no scheduler: every setting comes from the environment. For debugging a job script on a workstation, and what the chain tests use. |
 
 ## Rice NOTS, in detail

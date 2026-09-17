@@ -105,9 +105,12 @@ locally and its endpoint UUID.
 ### 0.5 Running on a cluster
 
 `antarctica/scripts/batch_runners/` is site neutral. One file per cluster in
-`sites/` holds the venv path, module loads, partitions, account and paths, and
-`submit.sh` composes the scheduler command from it. Rice NOTS and IU Quartz
-ship filled in, UChicago Midway is a stub, `sites/template.sh` is the blank.
+`sites/` holds the venv path (or container image), module loads, partitions,
+account, per-node limits and paths, and `submit.sh` composes the scheduler
+command from it. What is yours alone on a cluster (account, a private build,
+mail flags) goes in the git-ignored `sites/local.env`. Rice NOTS and IU Quartz
+ship filled in, UChicago Midway is a container site waiting for its partitions
+and account, `sites/template.sh` is the blank.
 
 ```bash
 antarctica/scripts/batch_runners/submit.sh inversion ISMIP7_LC=2000 \
@@ -117,11 +120,12 @@ ISMIP7_SITE=iu_quartz antarctica/scripts/batch_runners/submit.sh projection \
     ISMIP7_EXPERIMENT=ssp585_cesm_waccm ISMIP7_OUTPUT=1 --dry-run
 ```
 
-Details in `antarctica/scripts/batch_runners/readme.md`.
+The timing benchmark (section 7) goes through the same layer: `make timing`
+and `manage_timing_campaign.py` submit `batch_runners/timing_*.script` with
+`submit.sh script`, so they are the same commands at every site too.
 
-The timing benchmark (section 7) predates the site model: its Slurm wrappers
-are `batch_runners/timing_*.script`, driven by `antarctica/Makefile`, and are
-written for IU Quartz.
+Details, and the six steps for a first day on a cluster, in
+`antarctica/scripts/batch_runners/readme.md`.
 
 ### 0.6 Repo layout
 
@@ -656,14 +660,23 @@ redeclare those literals.
 Resolution vs. core-count wall-clock benchmark for the transient solver. The
 campaign is a staged state machine: it prepares an exact-mesh state, runs one
 strict scout per mesh, and submits scaling lanes only after the corresponding
-scout passes. Run from `antarctica/` (needs §1 data, Firedrake, and Slurm):
+scout passes. Every job is submitted through `batch_runners/submit.sh`, so the
+commands below are the same on any cluster with a site file (§0.5): the site
+supplies the account and partitions, `SLURM_QUEUE=short|long|debug` picks a
+partition by class, and `SLURM_PARTITION=` / `SLURM_CONSTRAINT=` name one
+outright. Lanes are single-node everywhere; one that this site's nodes cannot
+hold is recorded `not_runnable` (`exceeds_site_cores`, `exceeds_site_mem`) and
+shown as such in the matrix, so matrices from different sites stay comparable.
+Each record's `host` block names the site and node that measured it. Run from
+`antarctica/` (needs §1 data, Firedrake, and Slurm):
 
 ```bash
 cd antarctica
 make timing
 # after the currently active stage settles, run the same command again
 make timing
-# synchronize from Quartz with trailing-slash source and destination paths
+# synchronize from the cluster with a trailing-slash rsync source
+# (REMOTE_RESULTS=host:path/to/antarctica/results/; defaults to IU Quartz)
 make sync-results
 make matrix
 # → TIMING_MATRIX.md, showing 20 configured lanes plus NOT PLANNED cells
@@ -767,7 +780,7 @@ The stages and contracts are:
 4. **Cache audit / contract probe** — optional diagnostics on a prepared cache:
    ```console
    make timing-cache-audit TIMING_ONLY_MESH=2500/25000 \
-     SLURM_PARTITION=debug SLURM_TIME=00:15:00
+     SLURM_QUEUE=debug SLURM_TIME=00:15:00
    ```
 
    This submits a read-only assembly of the exact initial DG0 upwind
@@ -784,7 +797,7 @@ The stages and contracts are:
 
    ```console
    make timing-probe TIMING_ONLY_MESH=2500/25000 TIMING_CONTRACT=divfront \
-     TIMING_SCOUT_MONITOR=1 SLURM_PARTITION=debug SLURM_TIME=01:00:00
+     TIMING_SCOUT_MONITOR=1 SLURM_QUEUE=debug SLURM_TIME=01:00:00
    ```
 
    Contracts: `strict` (no apparent MB, no calving sink — the campaign

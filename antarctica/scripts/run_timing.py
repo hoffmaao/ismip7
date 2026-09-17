@@ -34,6 +34,7 @@ from simulation import lc, run_simulation, setup_model
 from timing_campaign import (
     CONTRACTS,
     RECORD_SCHEMA_VERSION,
+    host_provenance,
     parse_campaign_tag,
     atomic_write_json,
     atomic_write_status,
@@ -50,6 +51,9 @@ DT = float(os.environ.get("ISMIP7_DT", "1.0"))
 OUTPUT_INTERVAL = int(os.environ.get("ISMIP7_OUTPUT_INTERVAL", "5"))
 DIAGNOSTIC_LINEAR_SOLVER = diagnostic_solver_mode()
 LINEAR_SOLVER_LABEL = diagnostic_solver_label(DIAGNOSTIC_LINEAR_SOLVER)
+# Taken at import, before anything compiles: whether this lane starts from an
+# empty kernel cache is part of how its step time should be read.
+HOST_PROVENANCE = host_provenance()
 TIMING_KIND = os.environ.get("ISMIP7_TIMING_KIND", "matrix")
 APPARENT_MB_MODE = os.environ.get("ISMIP7_APPARENT_MB")
 APPARENT_MB_CAP = float(os.environ.get("ISMIP7_AMB_CAP", "0"))
@@ -476,6 +480,7 @@ def main():
             if key != "manifest"
         },
         "ncores": ncores,
+        "host": HOST_PROVENANCE,
         "vertices": global_vertices,
         "cells": global_cells,
         "t_start": effective_t_start,

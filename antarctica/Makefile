@@ -69,7 +69,9 @@ TIMING_BNDIDS ?=
 # HAF-gated Budd law (quartz job 10489636), i.e. the invert stage's own output
 # for that mesh; the manager never re-inverts or re-prepares it. The
 # .parallel.h5 is the 16-rank original, the .h5 its one-rank repack written
-# by the same job (so `redistribute` skips). Must agree with
+# by the same job, which then deletes the original: the repack on its own is
+# a complete source (`inversion` passes, `redistribute` skips), and the
+# original is asked for only where there is no repack yet. Must agree with
 # timing_campaign.SOURCE_INVERSION_BASENAME. The imported old-gate MAP stays
 # the solver-qualification input (SOLVER_TEST_INVERSION) and census control.
 SOURCE_TIMING_INVERSION ?= $(CURDIR)/results/timing/inversion/inversion_icepack2_budd_n3_dg0_logvelnet_2500_25000_250iter.parallel.h5
@@ -207,15 +209,22 @@ meshes:
 	fi
 
 inversion:
-	@test -f "$(SOURCE_TIMING_INVERSION)" || { \
-	  echo "missing imported timing inversion: $(SOURCE_TIMING_INVERSION)" >&2; \
+	@if [ -f "$(SOURCE_TIMING_INVERSION)" ]; then \
+	  echo "Using imported DG0 logvelnet inversion: $(SOURCE_TIMING_INVERSION)"; \
+	elif [ -f "$(TIMING_INVERSION)" ]; then \
+	  echo "Using one-rank timing inversion: $(TIMING_INVERSION) (its parallel original is gone)"; \
+	else \
+	  echo "missing timing inversion: neither $(TIMING_INVERSION)" >&2; \
+	  echo "  nor its parallel original $(SOURCE_TIMING_INVERSION)" >&2; \
 	  exit 2; \
-	}
-	@echo "Using imported DG0 logvelnet inversion: $(SOURCE_TIMING_INVERSION)"
+	fi
 
+# A repack whose original was deleted is up to date. Said outright rather than
+# left to `-nt`, which bash calls true and dash false when the right-hand file
+# does not exist.
 redistribute: inversion
-	@if [ -f "$(TIMING_INVERSION)" ] && \
-	    [ "$(TIMING_INVERSION)" -nt "$(SOURCE_TIMING_INVERSION)" ]; then \
+	@if [ -f "$(TIMING_INVERSION)" ] && { [ ! -f "$(SOURCE_TIMING_INVERSION)" ] || \
+	    [ "$(TIMING_INVERSION)" -nt "$(SOURCE_TIMING_INVERSION)" ]; }; then \
 	  echo "skip $(TIMING_INVERSION) (up to date)"; \
 	elif command -v sbatch >/dev/null 2>&1; then \
 	  $(SUBMIT) scripts/batch_runners/timing_redistribute.script $(SUBMIT_CD) --wait \

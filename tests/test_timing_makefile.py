@@ -125,3 +125,42 @@ def test_meshes_and_redistribute_wait_on_a_one_rank_job(sandbox):
         assert f"ARG: {arg}" in seen, seen
     export = next(line for line in seen if line.startswith("ARG: --export="))
     assert "TIMING_LCS=500:1000:2000:2500:5000" in export and "TIMING_BUFFER=20000" in export
+
+
+def source_maps(sandbox):
+    inv = sandbox / "inv"
+    inv.mkdir(exist_ok=True)
+    return inv / "map.parallel.h5", inv / "map.h5"
+
+
+def test_a_repacked_map_whose_parallel_original_is_gone_is_a_complete_source(sandbox):
+    r"""The invert job repacks its 16-rank MAP to one rank and deletes the
+    original, so in production only the repack exists. `inversion` demanded the
+    original, and `make timing` stopped there before any stage."""
+    raw, packed = source_maps(sandbox)
+    packed.write_text("one-rank repack\n")
+    proc, seen = make(sandbox, "redistribute", f"SOURCE_TIMING_INVERSION={raw}",
+                      f"TIMING_INVERSION={packed}", ISMIP7_SITE="iu_quartz")
+    assert proc.returncode == 0, proc.stderr
+    assert seen == []
+    assert "its parallel original is gone" in proc.stdout and "up to date" in proc.stdout
+
+
+def test_a_parallel_original_with_no_repack_is_still_redistributed(sandbox):
+    raw, packed = source_maps(sandbox)
+    raw.write_text("sixteen-rank original\n")
+    proc, seen = make(sandbox, "redistribute", f"SOURCE_TIMING_INVERSION={raw}",
+                      f"TIMING_INVERSION={packed}", ISMIP7_SITE="iu_quartz")
+    assert proc.returncode == 0, proc.stderr
+    assert seen[-1] == "ARG: scripts/batch_runners/timing_redistribute.script"
+    export = next(line for line in seen if line.startswith("ARG: --export="))
+    assert f"TIMING_REDISTRIBUTE_INPUT={raw}" in export
+    assert f"TIMING_REDISTRIBUTE_OUTPUT={packed}" in export
+
+
+def test_no_map_at_all_names_both_files(sandbox):
+    raw, packed = source_maps(sandbox)
+    proc, seen = make(sandbox, "redistribute", f"SOURCE_TIMING_INVERSION={raw}",
+                      f"TIMING_INVERSION={packed}", ISMIP7_SITE="iu_quartz")
+    assert proc.returncode != 0 and seen == []
+    assert str(raw) in proc.stderr and str(packed) in proc.stderr

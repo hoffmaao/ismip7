@@ -205,6 +205,17 @@ ISMIP7_MEM_FWD="${ISMIP7_MEM_FWD:-$ISMIP7_MEM}"
 ISMIP7_CONSTRAINT_INV="${ISMIP7_CONSTRAINT_INV:-${ISMIP7_CONSTRAINT:-}}"
 ISMIP7_CONSTRAINT_FWD="${ISMIP7_CONSTRAINT_FWD:-${ISMIP7_CONSTRAINT:-}}"
 
+# `submit.sh script`, which is how the timing campaign submits, takes its node
+# feature from ISMIP7_CONSTRAINT_TIMING and refuses a job that cannot fit one
+# node of that kind: ISMIP7_CORES_PER_NODE physical cores, ISMIP7_MEM_PER_NODE
+# of requestable memory (240G, 187000M, ...). Empty means no limit is known,
+# and nothing is refused. The campaign's lanes are single-node by design, so a
+# lane this site's nodes cannot hold is recorded as not runnable here rather
+# than sized differently and compared with the other sites' as if it were not.
+ISMIP7_CONSTRAINT_TIMING="${ISMIP7_CONSTRAINT_TIMING:-$ISMIP7_CONSTRAINT_FWD}"
+ISMIP7_CORES_PER_NODE="${ISMIP7_CORES_PER_NODE:-}"
+ISMIP7_MEM_PER_NODE="${ISMIP7_MEM_PER_NODE:-}"
+
 # The scheduler half of the job banner. site_env.sh defines
 # ismip7_banner_model for the runners that carry a model configuration; a job
 # that sourced this file alone prints the lines below and nothing else.

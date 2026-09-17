@@ -678,12 +678,21 @@ inspection; use `FORCE_TIMING=1` only for an intentional retry.
 
 The stages and contracts are:
 
-1. **Inversion provenance** — the only timing input is
-   `inversion_icepack2_budd_n3_dg0_logvelnet_2500_1core.h5`, a serial repack of
-   the imported improved `dg0_logvelnet` MAP. The redistribution launcher has
-   distinct input/output arguments; it never rewrites the source in place.
-   The campaign tag contains `dg0_logvelnet_cached_strict`, so an old-MAP
-   record cannot satisfy this campaign.
+1. **Inversion provenance** — the only timing input is the campaign source
+   MAP (`TIMING_INVERSION`). Since 2026‑09‑17 that is
+   `results/timing/inversion/inversion_icepack2_budd_n3_dg0_logvelnet_2500_25000_250iter.h5`,
+   the 250‑iteration re‑inversion of the imported `dg0_logvelnet` MAP on the
+   2500/25000 campaign mesh under the HAF‑gated Budd law: the invert stage's
+   own output for that mesh, so the manager never re‑inverts or re‑prepares
+   the source mesh (its cache is the MAP itself, as the invert job published
+   it). The imported old‑gate MAP
+   (`mesh/inversion_icepack2_budd_n3_dg0_logvelnet_2500_1core.h5`) remains
+   the solver‑qualification input only: under the fixed law its transferred
+   controls run away at step 3 on every mesh. Cache manifests record the
+   source checksum and lane records its basename (`initial_state_source`),
+   so a cache or a current‑campaign record from any other source is never
+   reused. The redistribution launcher has distinct input/output arguments;
+   it never rewrites the source in place.
 2. **Prepared caches (`make timing-prepare`)** — one job for each of the ten
    `(LC, LC_coarse)` meshes constructs `bed` and `thickness` as cell averages
    of BedMachine on that exact target mesh, recomputes the hydrostatic surface,

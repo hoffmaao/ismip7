@@ -46,6 +46,7 @@ from timing_campaign import (
     probe_tag,
     mesh_basename,
     mesh_inversion_basename,
+    mesh_inversion_source_mesh,
     mesh_inversion_map_path,
     mesh_inversion_status_path,
     mesh_inversion_timing_json_path,
@@ -317,6 +318,21 @@ class CampaignManager:
                 raise FileNotFoundError(path)
             self.mesh_checksums[key] = sha256_file(path)
         return self.mesh_checksums[key]
+
+    def is_campaign_source_mesh(self, lc, lc_coarse):
+        """Whether the campaign source MAP is this mesh's own invert output.
+
+        Since the 2026-09-17 promotion the source is the 2500/25000
+        re-inversion: an invert on that mesh (at any --maxiter) would
+        republish the source cache, and a prepare there is a same-mesh DG0
+        transfer simulation.py refuses. Its cache is the one the invert job
+        published from the MAP itself. Recognised by basename, so an
+        overridden TIMING_INVERSION that is not a per-mesh MAP has no
+        source mesh.
+        """
+        return mesh_inversion_source_mesh(self.inversion.name) == (
+            int(lc), int(lc_coarse)
+        )
 
     def boundary_path(self, lc, lc_coarse):
         return self.mesh_dir / (
@@ -603,6 +619,14 @@ class CampaignManager:
                     "the transferred prepare cache"
                 )
                 continue
+            if self.is_campaign_source_mesh(lc, lc_coarse):
+                print(
+                    f"INVERSION IS SOURCE {lc}/{lc_coarse}: its invert output "
+                    f"{self.inversion_map_path(lc, lc_coarse).name} is the "
+                    "campaign source MAP and is never overwritten (promote "
+                    "another MAP by changing TIMING_INVERSION)"
+                )
+                continue
             state, detail, status_path = self.inversion_result(lc, lc_coarse)
             # A live allocation owns the MAP, cache and status paths; --force
             # retries a failed invert or replaces a passed one, it must not
@@ -821,6 +845,26 @@ class CampaignManager:
         print(f"Source inversion sha256: {source_sha256}")
         for lc, lc_coarse in self.selected_rows():
             valid, detail = self.cache_validation(lc, lc_coarse)
+            if self.is_campaign_source_mesh(lc, lc_coarse):
+                # The source mesh's cache is the MAP itself, published by
+                # the invert job; a prepare here would be a same-mesh DG0
+                # transfer, which simulation.py refuses. --force cannot
+                # rebuild it, only a republish from the MAP can.
+                if valid:
+                    print(f"CACHE OK {lc}/{lc_coarse}: {detail} (source mesh)")
+                else:
+                    cache, manifest = cache_paths(
+                        self.cache_dir, lc, lc_coarse
+                    )
+                    print(
+                        f"CACHE NOT RUNNABLE {lc}/{lc_coarse}: {detail}; "
+                        "this is the campaign source MAP's own mesh, so "
+                        "republish its cache from the MAP instead of "
+                        "preparing: python scripts/redistribute_checkpoint.py "
+                        f"--input {self.inversion} --output {cache} "
+                        f"--manifest {manifest} --publish-timing-cache"
+                    )
+                continue
             if valid and not self.force:
                 print(f"CACHE OK {lc}/{lc_coarse}: {detail}")
                 continue
@@ -1270,9 +1314,9 @@ def parse_args():
     parser.add_argument(
         "--inversion",
         default=(
-            _ROOT / "mesh/"
-            "inversion_icepack2_budd_n3_dg0_logvelnet_2500_1core.h5"
+            _ROOT / "results/timing/inversion" / SOURCE_INVERSION_BASENAME
         ),
+        help="campaign source MAP (the Makefile's TIMING_INVERSION)",
     )
     parser.add_argument("--partition", default="general")
     parser.add_argument("--walltime", default="12:00:00")

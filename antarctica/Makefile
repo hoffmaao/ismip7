@@ -64,8 +64,16 @@ TIMING_EXPERIMENT ?= timing
 TIMING_LC_COARSE ?=
 TIMING_MESH ?=
 TIMING_BNDIDS ?=
-SOURCE_TIMING_INVERSION ?= $(CURDIR)/mesh/inversion_icepack2_budd_n3_dg0_logvelnet_2500.h5
-TIMING_INVERSION ?= $(CURDIR)/mesh/inversion_icepack2_budd_n3_dg0_logvelnet_2500_1core.h5
+# Campaign source MAP (promoted 2026-09-17): the 250-iteration re-inversion
+# of the imported dg0_logvelnet MAP on the 2500/25000 campaign mesh under the
+# HAF-gated Budd law (quartz job 10489636), i.e. the invert stage's own output
+# for that mesh; the manager never re-inverts or re-prepares it. The
+# .parallel.h5 is the 16-rank original, the .h5 its one-rank repack written
+# by the same job (so `redistribute` skips). Must agree with
+# timing_campaign.SOURCE_INVERSION_BASENAME. The imported old-gate MAP stays
+# the solver-qualification input (SOLVER_TEST_INVERSION) and census control.
+SOURCE_TIMING_INVERSION ?= $(CURDIR)/results/timing/inversion/inversion_icepack2_budd_n3_dg0_logvelnet_2500_25000_250iter.parallel.h5
+TIMING_INVERSION ?= $(CURDIR)/results/timing/inversion/inversion_icepack2_budd_n3_dg0_logvelnet_2500_25000_250iter.h5
 TIMING_CACHE_DIR ?= $(CURDIR)/results/timing/cache
 TIMING_RESTART ?=
 TIMING_ONLY_MESH ?=
@@ -96,7 +104,9 @@ SOLVER_TEST_BUFFER ?= 20000
 SOLVER_TEST_TAG ?= dg0_logvelnet
 SOLVER_TEST_MESH ?= $(CURDIR)/mesh/antarctica_64000_2500.msh
 SOLVER_TEST_BNDIDS ?= $(CURDIR)/mesh/boundary_ids_antarctica_64000_2500.json
-SOLVER_TEST_INVERSION ?= $(TIMING_INVERSION)
+# Pinned to the imported MAP on its own 64000/2500 mesh: these lanes pair
+# mesh and MAP exactly, and the campaign source now lives on 25000/2500.
+SOLVER_TEST_INVERSION ?= $(CURDIR)/mesh/inversion_icepack2_budd_n3_dg0_logvelnet_2500_1core.h5
 SOLVER_TEST_RESTART ?= $(CURDIR)/results/qualification_2step_$(ISMIP7_DIAGNOSTIC_LINEAR_SOLVER)_$(SOLVER_TEST_TAG)_$(SOLVER_TEST_LC)_final.h5
 TIMESTEP_PROBE_SOLVER ?= scpc_mumps
 TIMESTEP_PROBE_DT ?= 0.25

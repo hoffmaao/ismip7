@@ -239,7 +239,9 @@ def _status_table(rows, classifications, dt_2500=LEGACY_MATRIX_DT_2500):
 
 def _initial_state_label(source):
     if source == SOURCE_INVERSION_BASENAME:
-        return "transferred 2.5 km MAP"
+        # The 2500/25000 HAF re-inversion (promoted 2026-09-17): transferred
+        # to every other mesh, and its own mesh's cache as published.
+        return f"campaign source MAP `{SOURCE_INVERSION_BASENAME}`"
     match = re.search(r"_(\d+)iter\.h5$", source or "")
     if match:
         return f"re-inverted on this mesh ({match.group(1)} iter)"

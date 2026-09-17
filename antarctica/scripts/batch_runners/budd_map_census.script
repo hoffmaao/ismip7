@@ -6,6 +6,12 @@
 #   sbatch --export=ALL,ISMIP7_MAP=$PWD/mesh/inversion_icepack2_budd_n3_dg0_logvelnet_2500_1core.h5 \
 #       scripts/batch_runners/budd_map_census.script
 #
+# A MAP on a campaign mesh (e.g. the promoted 2500/25000 source) needs its
+# LC_COARSE so the boundary sidecar resolves:
+#
+#   sbatch --export=ALL,ISMIP7_MAP=$PWD/results/timing/inversion/inversion_icepack2_budd_n3_dg0_logvelnet_2500_25000_250iter.h5,ISMIP7_LC_COARSE=25000 \
+#       scripts/batch_runners/budd_map_census.script
+#
 # Decision gate for a fixed-law campaign: "floating N_hat at cap (old gate)"
 # is the old defect's footprint on this MAP, "production" must be 0, and the
 # forward rel L2 says whether the MAP's own velocity survives the fixed law

@@ -65,8 +65,20 @@ CORES_BY_LC = {
 
 SOLVER_MODE = "scpc_mumps"
 SOURCE_TAG = "dg0_logvelnet"
+# Campaign source MAP. Promoted on 2026-09-17 from the imported old-gate MAP
+# (inversion_icepack2_budd_n3_dg0_logvelnet_2500_1core.h5, 64000/2500 mesh) to
+# its 250-iteration re-inversion on the 2500/25000 campaign mesh under the
+# HAF-gated Budd law (quartz job 10489636: L-BFGS converged at 219 iterations,
+# velocity chi2 2.29e4 -> 695, published ||F|| 2.46e3, friction_gate=haf).
+# The old-gate controls run away at step 3 on every fixed-law lane (13.3 % of
+# floating cells had sat at the friction cap), so lanes must descend from a
+# fixed-law MAP; one source for all meshes keeps the 500 m meshes, which are
+# never re-inverted, consistent with the rest. By construction this equals
+# mesh_inversion_basename(2500, 25000): that mesh's invert-published cache IS
+# the source-published cache, and the manager never re-inverts or re-prepares
+# the source mesh. Must agree with the Makefile's TIMING_INVERSION.
 SOURCE_INVERSION_BASENAME = (
-    "inversion_icepack2_budd_n3_dg0_logvelnet_2500_1core.h5"
+    "inversion_icepack2_budd_n3_dg0_logvelnet_2500_25000_250iter.h5"
 )
 # Matrix interval. Step count and the 2.5 km timestep are PARAMETERS (the dt
 # ladder of 2026-09-15): both are written into the campaign tag, so records
@@ -329,6 +341,25 @@ def mesh_inversion_basename(lc, lc_coarse, maxiter=None):
         f"inversion_icepack2_budd_n3_dg0_logvelnet_"
         f"{int(lc)}_{int(lc_coarse)}_{n}iter.h5"
     )
+
+
+_MESH_INVERSION_RE = re.compile(
+    r"^inversion_icepack2_budd_n3_dg0_logvelnet_"
+    r"(?P<lc>\d+)_(?P<lc_coarse>\d+)_(?P<maxiter>\d+)iter\.h5$"
+)
+
+
+def mesh_inversion_source_mesh(basename):
+    """``(lc, lc_coarse)`` when ``basename`` is a per-mesh invert MAP, else None.
+
+    The campaign source is such a MAP since 2026-09-17; the manager uses this
+    to recognise the source mesh at any --maxiter (its cache path does not
+    depend on maxiter, so any invert there would republish the source cache).
+    """
+    match = _MESH_INVERSION_RE.match(os.path.basename(os.fspath(basename)))
+    if not match:
+        return None
+    return int(match["lc"]), int(match["lc_coarse"])
 
 
 def mesh_inversion_map_path(root, lc, lc_coarse, maxiter=None):
@@ -720,6 +751,25 @@ def validate_timing_record(
         if expected is not None and record.get(key) != int(expected):
             return False, f"record {key}={record.get(key)!r}; expected {expected}"
 
+    # A current-campaign lane must descend from the campaign source MAP or
+    # from its own mesh's invert (the _reinverted lanes). A record left by an
+    # earlier source (the old-gate MAP before the 2026-09-17 promotion) is
+    # never a pass; archived campaigns are judged by their own tag only.
+    source = record.get("initial_state_source")
+    if source and spec["version"] == CAMPAIGN_VERSION:
+        allowed = {SOURCE_INVERSION_BASENAME}
+        try:
+            allowed.add(
+                mesh_inversion_basename(record["lc"], record["lc_coarse"])
+            )
+        except (KeyError, TypeError, ValueError):
+            pass
+        if source not in allowed:
+            return False, (
+                f"record initial state descends from {source!r}; expected "
+                f"one of {sorted(allowed)}"
+            )
+
     steps = spec["steps"]
     try:
         record_lc = int(record["lc"])
@@ -880,6 +930,16 @@ def selftest():
     )
     assert archived["version"] == 3 and archived["version"] != CAMPAIGN_VERSION
     assert CACHE_TAG.endswith(f"_v{CAMPAIGN_VERSION}")
+    # The promoted source is the 2500/25000 invert MAP; the manager must
+    # recognise that mesh from the basename alone, at any maxiter.
+    assert SOURCE_INVERSION_BASENAME == mesh_inversion_basename(2500, 25000, 250)
+    assert mesh_inversion_source_mesh(SOURCE_INVERSION_BASENAME) == (2500, 25000)
+    assert mesh_inversion_source_mesh(
+        "/x/inversion_icepack2_budd_n3_dg0_logvelnet_2000_20000_5iter.h5"
+    ) == (2000, 20000)
+    assert mesh_inversion_source_mesh(
+        "inversion_icepack2_budd_n3_dg0_logvelnet_2500_1core.h5"
+    ) is None
     assert contract_exports("strict") == {"ISMIP7_AMB_CAP": "0"}
     assert contract_exports("divfront") == {
         "ISMIP7_AMB_CAP": "0", "ISMIP7_APPARENT_MB": "div", "ISMIP7_FIXED_FRONT": "1"
@@ -895,6 +955,17 @@ def selftest():
     tag10 = campaign_tag(10, 0.125, "strict")
     good = synthetic_record(2500, 25000, 16, tag10)
     check(good, True, "10-step", lc=2500, lc_coarse=25000, ncores=16, timing_tag=tag10)
+    # Initial-state provenance: the campaign source, or the mesh's own invert.
+    check(dict(good, initial_state_source=SOURCE_INVERSION_BASENAME), True,
+          timing_tag=tag10)
+    good2000 = synthetic_record(2000, 20000, 16, tag10)
+    check(dict(good2000, initial_state_source=mesh_inversion_basename(2000, 20000)),
+          True, timing_tag=tag10, lc=2000, lc_coarse=20000)
+    check(dict(good2000, initial_state_source=mesh_inversion_basename(2500, 50000)),
+          False, "descends from", timing_tag=tag10)
+    check(dict(good, initial_state_source=(
+        "inversion_icepack2_budd_n3_dg0_logvelnet_2500_1core.h5")),
+          False, "descends from", timing_tag=tag10)
     check(good, False, "timing_tag=", timing_tag=campaign_tag(5, 0.25))
     short = dict(good, completed_steps=9, t_final=good["t_end"] - 0.125)
     check(short, False, "10-step interval", timing_tag=tag10)

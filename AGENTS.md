@@ -35,7 +35,7 @@ the relevant subsystem:
 |---|---|
 | `GEOMETRY_DISCRETIZATION.md` | the geometry finite-element space, the calving front, and why several odd-looking constructions are deliberate |
 | `COMPOSITE_RHEOLOGY.md` | the composite viscous formulation |
-| `UA_ADAPTIVE_MESH.md` | the Úa-style adaptive remeshing port, the DG0 transfer rules, and what is validated |
+| `ADAPTIVE_MESH.md` | the Úa-style adaptive remeshing port, the DG0 transfer rules, and what is validated |
 | `antarctica/N3_FRAMEWORK.md` | the n=3 rheology line |
 | `antarctica/README.md` | what to install and download, drivers, env knobs, how to run a core experiment |
 | `antarctica/scripts/batch_runners/readme.md` | running on a cluster: site files, the runners, the build recipe, measured costs |

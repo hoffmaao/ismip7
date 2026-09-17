@@ -1,10 +1,10 @@
-# Úa-style adaptive remeshing
+# Adaptive remeshing
 
-Port of the mesh adaptation Úa runs between run-steps, read from UaSource
+Implementation of adaptive mesh scheme implemented in Úa 
 (`UaMain/AdaptMesh.m`, `NewDesiredEleSizesAndElementsToRefineOrCoarsen2.m`,
 `Error2EleSize.m`, `GlobalRemeshing.m`, `MapFbetweenMeshes.m`, Sep 2026).
 
-## Status: build the mesh first, do not refine mid-run
+## Build the mesh first, do not refine mid-run
 
 **Mid-run refinement blows up.** Refining an evolving 32 km state into 8 km
 bands part-way through a run fails with all three DG0 transfer rules below in

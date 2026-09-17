@@ -89,9 +89,26 @@ TIMING_INITIAL_STATE ?= prepare
 TIMING_INVERT ?=
 SBATCH_WAIT ?=
 FORCE_TIMING ?=
-SLURM_PARTITION ?= general
+# Every job goes through scripts/batch_runners/submit.sh, which reads this
+# cluster's site file (scripts/batch_runners/sites/, chosen by hostname or
+# ISMIP7_SITE, with per-user settings in sites/local.env), so these targets are
+# the same command at every site. SLURM_QUEUE is the site's partition by class
+# (short, long or debug); SLURM_PARTITION and SLURM_CONSTRAINT name one
+# outright and are empty unless you set them.
+SLURM_QUEUE ?= short
+SLURM_PARTITION ?=
+SLURM_CONSTRAINT ?=
 SLURM_TIME ?= 12:00:00
+SLURM_SELECT = --queue "$(SLURM_QUEUE)" \
+  $(if $(SLURM_PARTITION),--partition "$(SLURM_PARTITION)",) \
+  $(if $(SLURM_CONSTRAINT),--constraint "$(SLURM_CONSTRAINT)",)
+# submit.sh submits the checkout this Makefile is in, from this directory.
+SUBMIT = ISMIP7_REPO="$(abspath $(CURDIR)/..)" scripts/batch_runners/submit.sh script
+SUBMIT_CD = --cd "$(notdir $(CURDIR))"
+# `make sync-results` pulls a cluster's results/ into this checkout's:
+# REMOTE_RESULTS is an rsync source, host:path/ with the trailing slash.
 QUARTZ_RESULTS ?= quartz:/N/project/ice_rheology/ISMIP7/antarctica/results/
+REMOTE_RESULTS ?= $(QUARTZ_RESULTS)
 LEGACY_TIMING_TAG ?= scpc_mumps_5step_dt0p25at2500
 
 # The active solver qualification/reference lane uses the improved DG0
@@ -178,9 +195,9 @@ timing: qualify-if-needed
 
 meshes:
 	@if command -v sbatch >/dev/null 2>&1; then \
-	  sbatch --wait --job-name=ant_timing_mesh \
-	    --export=ALL,TIMING_LCS=$(TIMING_LCS),TIMING_RATIOS=$(TIMING_RATIOS),TIMING_BUFFER=$(BUFFER) \
-	    scripts/batch_runners/timing_meshes.script; \
+	  $(SUBMIT) scripts/batch_runners/timing_meshes.script $(SUBMIT_CD) --wait \
+	    --name ant_timing_mesh --tasks 1 --mem 32G --time 08:00:00 $(SLURM_SELECT) \
+	    TIMING_LCS=$(TIMING_LCS) TIMING_RATIOS=$(TIMING_RATIOS) TIMING_BUFFER=$(BUFFER); \
 	else \
 	  for lc in $(LCS); do for r in $(RATIOS); do \
 	    lcc=$$((lc * r)); fn=mesh/antarctica_$${lcc}_$${lc}_buffered$(BUFFER).msh; bnd=mesh/boundary_ids_antarctica_$${lcc}_$${lc}_buffered$(BUFFER).json; \
@@ -201,9 +218,10 @@ redistribute: inversion
 	    [ "$(TIMING_INVERSION)" -nt "$(SOURCE_TIMING_INVERSION)" ]; then \
 	  echo "skip $(TIMING_INVERSION) (up to date)"; \
 	elif command -v sbatch >/dev/null 2>&1; then \
-	  sbatch --wait --job-name=ant_timing_redist \
-	    --export=ALL,TIMING_REDISTRIBUTE_INPUT=$(SOURCE_TIMING_INVERSION),TIMING_REDISTRIBUTE_OUTPUT=$(TIMING_INVERSION) \
-	    scripts/batch_runners/timing_redistribute.script; \
+	  $(SUBMIT) scripts/batch_runners/timing_redistribute.script $(SUBMIT_CD) --wait \
+	    --name ant_timing_redist --tasks 1 --mem 16G --time 01:00:00 $(SLURM_SELECT) \
+	    TIMING_REDISTRIBUTE_INPUT="$(SOURCE_TIMING_INVERSION)" \
+	    TIMING_REDISTRIBUTE_OUTPUT="$(TIMING_INVERSION)"; \
 	else \
 	  python scripts/redistribute_checkpoint.py \
 	    --input "$(SOURCE_TIMING_INVERSION)" --output "$(TIMING_INVERSION)"; \
@@ -234,8 +252,8 @@ transient-direct:
 	  if [ "$(TIMING_KIND)" = matrix ]; then \
 	    run_experiment="$${run_experiment}_$(TIMING_TAG)_lcc$${lcc}_n$${nc}"; \
 	  fi; \
-	  out=results/timing/timing_$(TIMING_TAG)_$${lc}_$${lcc}_$${nc}.json; \
-	  status=results/timing/status_$(TIMING_TAG)_$${lc}_$${lcc}_$${nc}.txt; \
+	  out=$(CURDIR)/results/timing/timing_$(TIMING_TAG)_$${lc}_$${lcc}_$${nc}.json; \
+	  status=$(CURDIR)/results/timing/status_$(TIMING_TAG)_$${lc}_$${lcc}_$${nc}.txt; \
 	  status_state=; \
 	  if [ -f "$$status" ]; then read -r status_state _ < "$$status"; fi; \
 	  [ -z "$(FORCE_TIMING)" ] && { [ "$$status_state" = submitted ] || [ "$$status_state" = running ]; } && { echo "skip $$out ($$status_state stamp)"; continue; }; \
@@ -268,16 +286,27 @@ transient-direct:
 	  fi; \
 	  if command -v sbatch >/dev/null 2>&1; then \
 	    printf 'submitted timestamp=%s\n' "$$(date -u +%Y-%m-%dT%H:%M:%SZ)" > "$$status"; \
-	    if job_id=$$(sbatch $(SBATCH_WAIT) --parsable --job-name=timing_$${lc}_$${lcc}_$${nc} --ntasks-per-node=$$nc \
-	      --partition=$(SLURM_PARTITION) --time=$(SLURM_TIME) --mem=$$mem \
-	      --export=ALL,ISMIP7_LC=$$lc,ISMIP7_LC_COARSE=$$lcc,ISMIP7_BUFFER_M=$(BUFFER),ISMIP7_MESH=$$mesh,ISMIP7_BNDIDS=$$bndids,ISMIP7_INVERSION=$$inversion,ISMIP7_RESTART=$$restart,ISMIP7_FRICTION=$(FRICTION),ISMIP7_N_FLOW=$(N_FLOW),ISMIP7_A4_FACTOR=$(A4_FACTOR),ISMIP7_T_END=$$run_t_end,ISMIP7_DT=$$run_dt,ISMIP7_DIAGNOSTIC_LINEAR_SOLVER=$(ISMIP7_DIAGNOSTIC_LINEAR_SOLVER),ISMIP7_RESCUE_ENABLED=$(ISMIP7_RESCUE_ENABLED),ISMIP7_TIMING_KIND=$(TIMING_KIND),ISMIP7_TIMING_TAG=$(TIMING_TAG),ISMIP7_TIMING_EXPERIMENT=$$run_experiment,ISMIP7_TIMING_STATUS=$$status,ISMIP7_SNES_MONITOR=$(ISMIP7_SNES_MONITOR),ISMIP7_SNES_LOG=$(ISMIP7_SNES_LOG),ISMIP7_SOLVER_VIEW=$(ISMIP7_SOLVER_VIEW) \
-	      scripts/batch_runners/timing_transient.script); then \
+	    submit_err=$$(mktemp); \
+	    job_id=$$($(SUBMIT) scripts/batch_runners/timing_transient.script $(SUBMIT_CD) $(SBATCH_WAIT) \
+	      --name timing_$${lc}_$${lcc}_$${nc} --tasks $$nc --mem $$mem --time $(SLURM_TIME) $(SLURM_SELECT) \
+	      ISMIP7_LC=$$lc ISMIP7_LC_COARSE=$$lcc ISMIP7_BUFFER_M=$(BUFFER) "ISMIP7_MESH=$$mesh" "ISMIP7_BNDIDS=$$bndids" \
+	      "ISMIP7_INVERSION=$$inversion" "ISMIP7_RESTART=$$restart" ISMIP7_FRICTION=$(FRICTION) ISMIP7_N_FLOW=$(N_FLOW) \
+	      ISMIP7_A4_FACTOR=$(A4_FACTOR) ISMIP7_T_END=$$run_t_end ISMIP7_DT=$$run_dt \
+	      ISMIP7_DIAGNOSTIC_LINEAR_SOLVER=$(ISMIP7_DIAGNOSTIC_LINEAR_SOLVER) ISMIP7_RESCUE_ENABLED=$(ISMIP7_RESCUE_ENABLED) \
+	      ISMIP7_TIMING_KIND=$(TIMING_KIND) ISMIP7_TIMING_TAG=$(TIMING_TAG) ISMIP7_TIMING_EXPERIMENT=$$run_experiment \
+	      "ISMIP7_TIMING_STATUS=$$status" ISMIP7_SNES_MONITOR=$(ISMIP7_SNES_MONITOR) "ISMIP7_SNES_LOG=$(ISMIP7_SNES_LOG)" \
+	      ISMIP7_SOLVER_VIEW=$(ISMIP7_SOLVER_VIEW) 2> "$$submit_err"); \
+	    submit_rc=$$?; cat "$$submit_err" >&2; \
+	    if [ $$submit_rc -eq 0 ]; then \
 	      job_id=$${job_id%%;*}; \
 	      read -r status_state _ < "$$status"; \
 	      if [ "$$status_state" = submitted ]; then \
 	        printf 'submitted job_id=%s timestamp=%s\n' "$$job_id" "$$(date -u +%Y-%m-%dT%H:%M:%SZ)" > "$$status"; \
 	      fi; \
 	      echo "submitted timing_$${lc}_$${lcc}_$${nc} as job $$job_id"; \
+	    elif [ $$submit_rc -eq 3 ]; then \
+	      reason=$$(sed -n 's/.* reason=\([^ ]*\).*/\1/p' "$$submit_err" | head -1); \
+	      printf 'not_runnable reason=%s timestamp=%s\n' "$${reason:-exceeds_site_node}" "$$(date -u +%Y-%m-%dT%H:%M:%SZ)" > "$$status"; \
 	    else \
 	      read -r status_state _ < "$$status"; \
 	      if [ "$$status_state" = submitted ]; then \
@@ -285,6 +314,7 @@ transient-direct:
 	      fi; \
 	      submit_fail=1; \
 	    fi; \
+	    rm -f "$$submit_err"; \
 	  else \
 	    printf 'running timestamp=%s\n' "$$(date -u +%Y-%m-%dT%H:%M:%SZ)" > "$$status"; \
 	    if OMP_NUM_THREADS=1 OPENBLAS_NUM_THREADS=1 ISMIP7_LC=$$lc ISMIP7_LC_COARSE=$$lcc ISMIP7_BUFFER_M=$(BUFFER) ISMIP7_MESH=$$mesh ISMIP7_BNDIDS=$$bndids ISMIP7_INVERSION=$$inversion ISMIP7_RESTART=$$restart ISMIP7_DIAGNOSTIC_LINEAR_SOLVER=$(ISMIP7_DIAGNOSTIC_LINEAR_SOLVER) ISMIP7_RESCUE_ENABLED=$(ISMIP7_RESCUE_ENABLED) ISMIP7_TIMING_KIND=$(TIMING_KIND) ISMIP7_TIMING_TAG=$(TIMING_TAG) ISMIP7_TIMING_EXPERIMENT=$$run_experiment ISMIP7_SNES_MONITOR=$(ISMIP7_SNES_MONITOR) ISMIP7_SNES_LOG=$(ISMIP7_SNES_LOG) ISMIP7_SOLVER_VIEW=$(ISMIP7_SOLVER_VIEW) \
@@ -316,14 +346,14 @@ qualify-if-needed: redistribute
 timing-prepare:
 	python scripts/manage_timing_campaign.py prepare \
 	  --inversion "$(TIMING_INVERSION)" --cache-dir "$(TIMING_CACHE_DIR)" \
-	  --partition "$(SLURM_PARTITION)" --walltime "$(SLURM_TIME)" \
+	  $(SLURM_SELECT) --walltime "$(SLURM_TIME)" \
 	  $(if $(TIMING_ONLY_MESH),--only-mesh "$(TIMING_ONLY_MESH)",) \
 	  $(if $(FORCE_TIMING),--force,)
 
 timing-inversion:
 	python scripts/manage_timing_campaign.py invert \
 	  --inversion "$(TIMING_INVERSION)" --cache-dir "$(TIMING_CACHE_DIR)" \
-	  --partition "$(SLURM_PARTITION)" --walltime "$(TIMING_INVERSION_TIME)" \
+	  $(SLURM_SELECT) --walltime "$(TIMING_INVERSION_TIME)" \
 	  --maxiter "$(TIMING_INVERSION_MAXITER)" \
 	  $(if $(TIMING_ONLY_MESH),--only-mesh "$(TIMING_ONLY_MESH)",) \
 	  $(if $(FORCE_TIMING),--force,) \
@@ -332,7 +362,7 @@ timing-inversion:
 timing-cache-audit:
 	python scripts/manage_timing_campaign.py audit \
 	  --inversion "$(TIMING_INVERSION)" --cache-dir "$(TIMING_CACHE_DIR)" \
-	  --partition "$(SLURM_PARTITION)" --walltime "$(SLURM_TIME)" \
+	  $(SLURM_SELECT) --walltime "$(SLURM_TIME)" \
 	  $(if $(TIMING_ONLY_MESH),--only-mesh "$(TIMING_ONLY_MESH)",) \
 	  $(if $(FORCE_TIMING),--force,)
 
@@ -341,7 +371,7 @@ timing-cache-audit:
 timing-probe:
 	python scripts/manage_timing_campaign.py probe \
 	  --inversion "$(TIMING_INVERSION)" --cache-dir "$(TIMING_CACHE_DIR)" \
-	  --partition "$(SLURM_PARTITION)" --walltime "$(SLURM_TIME)" \
+	  $(SLURM_SELECT) --walltime "$(SLURM_TIME)" \
 	  --matrix-steps "$(MATRIX_STEPS)" --matrix-dt-2500 "$(MATRIX_DT_2500)" \
 	  --contract "$(TIMING_CONTRACT)" \
 	  $(if $(TIMING_ONLY_MESH),--only-mesh "$(TIMING_ONLY_MESH)",) \
@@ -355,7 +385,7 @@ timing-amb-probe:
 timing-scout:
 	python scripts/manage_timing_campaign.py scout \
 	  --inversion "$(TIMING_INVERSION)" --cache-dir "$(TIMING_CACHE_DIR)" \
-	  --partition "$(SLURM_PARTITION)" --walltime "$(SLURM_TIME)" \
+	  $(SLURM_SELECT) --walltime "$(SLURM_TIME)" \
 	  --maxiter "$(TIMING_INVERSION_MAXITER)" \
 	  $(if $(TIMING_ONLY_MESH),--only-mesh "$(TIMING_ONLY_MESH)",) \
 	  $(if $(TIMING_SCOUT_MONITOR),--monitor,) \
@@ -368,7 +398,7 @@ timing-scout:
 timing-scale:
 	python scripts/manage_timing_campaign.py scale \
 	  --inversion "$(TIMING_INVERSION)" --cache-dir "$(TIMING_CACHE_DIR)" \
-	  --partition "$(SLURM_PARTITION)" --walltime "$(SLURM_TIME)" \
+	  $(SLURM_SELECT) --walltime "$(SLURM_TIME)" \
 	  --maxiter "$(TIMING_INVERSION_MAXITER)" \
 	  $(if $(TIMING_ONLY_MESH),--only-mesh "$(TIMING_ONLY_MESH)",) \
 	  $(if $(FORCE_TIMING),--force,) \
@@ -380,16 +410,16 @@ timing-scale:
 timing-dry-run:
 	python scripts/manage_timing_campaign.py prepare --dry-run \
 	  --inversion "$(TIMING_INVERSION)" --cache-dir "$(TIMING_CACHE_DIR)" \
-	  --partition "$(SLURM_PARTITION)" --walltime "$(SLURM_TIME)" \
+	  $(SLURM_SELECT) --walltime "$(SLURM_TIME)" \
 	  $(if $(TIMING_ONLY_MESH),--only-mesh "$(TIMING_ONLY_MESH)",)
 	python scripts/manage_timing_campaign.py invert --dry-run --assume-valid-caches \
 	  --inversion "$(TIMING_INVERSION)" --cache-dir "$(TIMING_CACHE_DIR)" \
-	  --partition "$(SLURM_PARTITION)" --walltime "$(TIMING_INVERSION_TIME)" \
+	  $(SLURM_SELECT) --walltime "$(TIMING_INVERSION_TIME)" \
 	  --maxiter "$(TIMING_INVERSION_MAXITER)" \
 	  $(if $(TIMING_ONLY_MESH),--only-mesh "$(TIMING_ONLY_MESH)",)
 	python scripts/manage_timing_campaign.py scout --dry-run --assume-valid-caches \
 	  --inversion "$(TIMING_INVERSION)" --cache-dir "$(TIMING_CACHE_DIR)" \
-	  --partition "$(SLURM_PARTITION)" --walltime "$(SLURM_TIME)" \
+	  $(SLURM_SELECT) --walltime "$(SLURM_TIME)" \
 	  --maxiter "$(TIMING_INVERSION_MAXITER)" \
 	  $(if $(TIMING_ONLY_MESH),--only-mesh "$(TIMING_ONLY_MESH)",) \
 	  $(if $(TIMING_SCOUT_MONITOR),--monitor,) \
@@ -398,7 +428,7 @@ timing-dry-run:
 	  --contract "$(TIMING_CONTRACT)"
 	python scripts/manage_timing_campaign.py scale --dry-run --assume-valid-caches \
 	  --inversion "$(TIMING_INVERSION)" --cache-dir "$(TIMING_CACHE_DIR)" \
-	  --partition "$(SLURM_PARTITION)" --walltime "$(SLURM_TIME)" \
+	  $(SLURM_SELECT) --walltime "$(SLURM_TIME)" \
 	  --maxiter "$(TIMING_INVERSION_MAXITER)" \
 	  $(if $(TIMING_ONLY_MESH),--only-mesh "$(TIMING_ONLY_MESH)",) \
 	  --initial-state "$(TIMING_INITIAL_STATE)" \
@@ -457,7 +487,7 @@ timestep-probe:
 	  T_END=$(TIMESTEP_PROBE_END) DT=$(TIMESTEP_PROBE_DT) \
 	  TIMING_KIND=qualification TIMING_TAG=$(TIMESTEP_PROBE_TAG) \
 	  TIMING_EXPERIMENT=$(TIMESTEP_PROBE_TAG) \
-	  SLURM_PARTITION=debug SLURM_TIME=01:00:00 \
+	  SLURM_QUEUE=debug SLURM_TIME=01:00:00 \
 	  SBATCH_WAIT=--wait FORCE_TIMING=1
 	python scripts/check_solver_qualification.py \
 	  --record results/timing/timing_$(TIMESTEP_PROBE_TAG)_$(SOLVER_TEST_LC)_$(SOLVER_TEST_LC_COARSE)_16.json \
@@ -479,7 +509,7 @@ debug: override ISMIP7_DIAGNOSTIC_LINEAR_SOLVER := scpc_mumps
 debug: override ISMIP7_SNES_MONITOR := 1
 debug: override ISMIP7_SOLVER_VIEW := 1
 debug: override ISMIP7_SNES_LOG = $(CURDIR)/results/logs/timing_scpc_mumps_debug_lc$(SOLVER_TEST_LC)_lcc$(SOLVER_TEST_LC_COARSE)_n$(CORES)_$(DEBUG_STAMP).log
-debug: override SLURM_PARTITION = debug
+debug: override SLURM_QUEUE = debug
 debug: override SLURM_TIME = 01:00:00
 debug: transient-direct
 
@@ -498,7 +528,7 @@ reference: override ISMIP7_DIAGNOSTIC_LINEAR_SOLVER := full_mumps
 reference: override ISMIP7_SNES_MONITOR := 1
 reference: override ISMIP7_SOLVER_VIEW := 1
 reference: override ISMIP7_SNES_LOG = $(CURDIR)/results/logs/timing_full_mumps_reference_lc$(SOLVER_TEST_LC)_lcc$(SOLVER_TEST_LC_COARSE)_n$(CORES)_$(DEBUG_STAMP).log
-reference: override SLURM_PARTITION = debug
+reference: override SLURM_QUEUE = debug
 reference: override SLURM_TIME = 01:00:00
 reference: transient-direct
 
@@ -529,8 +559,8 @@ timing-cache-smoke:
 
 sync-results:
 	@mkdir -p "$(CURDIR)/results/"
-	rsync -a "$(QUARTZ_RESULTS)" "$(CURDIR)/results/"
-	@echo "Synced Quartz results/ into canonical $(CURDIR)/results/"
+	rsync -a "$(REMOTE_RESULTS)" "$(CURDIR)/results/"
+	@echo "Synced $(REMOTE_RESULTS) into canonical $(CURDIR)/results/"
 
 matrix:
 	@test ! -d "$(CURDIR)/antarctica/results" || { \

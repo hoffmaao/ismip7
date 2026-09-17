@@ -1,0 +1,27 @@
+#!/bin/bash
+
+#SBATCH -o ant_timing_inv%j.txt
+#SBATCH -e ant_timing_inv%j.err
+
+# Resources, the account and the partition come from submit.sh, which reads
+# this cluster's sites/<name>.sh; nothing here names a cluster. Submit with
+#   scripts/batch_runners/submit.sh script scripts/batch_runners/timing_inversion.script --cd antarctica ...
+# as antarctica/Makefile and manage_timing_campaign.py do.
+cd "${SLURM_SUBMIT_DIR:-.}"
+# The site half only: every model setting arrives through --export, and
+# site_env.sh's defaults (ISMIP7_MESH, ISMIP7_FRICTION) are not this job's.
+. scripts/batch_runners/site_core.sh
+ismip7_activate
+ismip7_persistent_jit_cache
+ismip7_banner
+
+# The submission supplies these as KEY=VALUE. Keep defaults here too so the
+# script runs with none given.
+export ISMIP7_LC="${ISMIP7_LC:-2500}"
+export ISMIP7_LC_COARSE="${ISMIP7_LC_COARSE:-25000}"
+export ISMIP7_BUFFER_M="${ISMIP7_BUFFER_M:-20000}"
+export ISMIP7_FRICTION="${ISMIP7_FRICTION:-budd}"
+export ISMIP7_N_FLOW="${ISMIP7_N_FLOW:-3.0}"
+export ISMIP7_A4_FACTOR="${ISMIP7_A4_FACTOR:-1.0}"
+
+ismip7_mpirun "${SLURM_NTASKS}" python -u scripts/inversion_icepack2.py

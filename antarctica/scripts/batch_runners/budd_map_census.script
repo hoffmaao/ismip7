@@ -1,0 +1,56 @@
+#!/bin/bash
+
+# Census of a Budd MAP under the shelf gates (scripts/check_budd_map.py), then
+# a diagnostic re-solve at the MAP's controls under the current law.
+#
+# From antarctica/ (16 ranks and 64G is what the 2.5 km MAPs have needed):
+#
+#   scripts/batch_runners/submit.sh script scripts/batch_runners/budd_map_census.script \
+#       --cd antarctica --queue debug --tasks 16 --mem 64G --time 00:45:00 \
+#       ISMIP7_MAP=$PWD/mesh/inversion_icepack2_budd_n3_dg0_logvelnet_2500_1core.h5
+#
+# A MAP on a campaign mesh (e.g. the promoted 2500/25000 source) needs its
+# LC_COARSE so the boundary sidecar resolves:
+#
+#   scripts/batch_runners/submit.sh script scripts/batch_runners/budd_map_census.script \
+#       --cd antarctica --queue debug --tasks 16 --mem 64G --time 00:45:00 \
+#       ISMIP7_MAP=$PWD/results/timing/inversion/inversion_icepack2_budd_n3_dg0_logvelnet_2500_25000_250iter.h5 \
+#       ISMIP7_LC_COARSE=25000
+#
+# Decision gate for a fixed-law campaign: "floating N_hat at cap (old gate)"
+# is the old defect's footprint on this MAP, "production" must be 0, and the
+# forward rel L2 says whether the MAP's own velocity survives the fixed law
+# (a MAP inverted under it reproduces itself to ~1e-9).
+
+#SBATCH -o ant_budd_census_%j.txt
+#SBATCH -e ant_budd_census_%j.err
+
+# Resources, the account and the partition come from submit.sh, which reads
+# this cluster's sites/<name>.sh; nothing here names a cluster. Submit with
+#   scripts/batch_runners/submit.sh script scripts/batch_runners/budd_map_census.script --cd antarctica ...
+# as antarctica/Makefile and manage_timing_campaign.py do.
+cd "${SLURM_SUBMIT_DIR:-.}"
+# The site half only: every model setting arrives through --export, and
+# site_env.sh's defaults (ISMIP7_MESH, ISMIP7_FRICTION) are not this job's.
+. scripts/batch_runners/site_core.sh
+ismip7_activate
+ismip7_persistent_jit_cache
+ismip7_banner
+
+map="${ISMIP7_MAP:?ISMIP7_MAP is required (the Budd MAP checkpoint)}"
+[ -f "${map}" ] || { echo "MAP not found: ${map}" >&2; exit 2; }
+
+# The forward re-solve runs simulation.setup_model() on the MAP: same physics
+# env as the 2.5 km qualification lane (Makefile debug target). The mesh is
+# loaded from the MAP itself; the census script forces ISMIP7_FRICTION=budd.
+export ISMIP7_LC="${ISMIP7_LC:-2500}"
+export ISMIP7_LC_COARSE="${ISMIP7_LC_COARSE:-64000}"
+export ISMIP7_BUFFER_M="${ISMIP7_BUFFER_M:-20000}"
+export ISMIP7_N_FLOW="${ISMIP7_N_FLOW:-3.0}"
+export ISMIP7_A4_FACTOR="${ISMIP7_A4_FACTOR:-1.0}"
+export ISMIP7_GEOMETRY_SPACE="${ISMIP7_GEOMETRY_SPACE:-dg0}"
+export ISMIP7_DIAGNOSTIC_LINEAR_SOLVER="${ISMIP7_DIAGNOSTIC_LINEAR_SOLVER:-scpc_mumps}"
+export ISMIP7_RESCUE_ENABLED="${ISMIP7_RESCUE_ENABLED:-0}"
+unset ISMIP7_MESH ISMIP7_RESTART
+
+ismip7_mpirun "${SLURM_NTASKS}" python -u scripts/check_budd_map.py "${map}" --forward

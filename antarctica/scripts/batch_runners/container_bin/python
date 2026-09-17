@@ -1,0 +1,23 @@
+#!/bin/bash
+# `python`, for a site whose Firedrake is a container image (ISMIP7_CONTAINER).
+# ismip7_activate puts this directory first on PATH there, so every `python ...`
+# line in the job scripts, the inline `python - <<PY` ones included, runs in the
+# image without the scripts knowing. The image has python3 and no python.
+# Never --cleanenv: a job's whole configuration is its ISMIP7_* environment.
+if [ -z "${ISMIP7_CONTAINER:-}" ]; then
+    echo "container_bin/python: ISMIP7_CONTAINER is not set; this shim is only" >&2
+    echo "for container sites and should not be on PATH otherwise." >&2
+    exit 2
+fi
+# An image normally brings its own PATH. One that inherits the host's would
+# find this file again as `python` and start a container per call, forever.
+if [ -n "${ISMIP7_IN_CONTAINER:-}" ]; then
+    echo "container_bin/python: reached from inside the image; PATH there must" >&2
+    echo "not start with $(dirname "$0")." >&2
+    exit 2
+fi
+export ISMIP7_IN_CONTAINER=1
+# shellcheck disable=SC2086
+exec "${ISMIP7_CONTAINER_RUNTIME:-apptainer}" exec \
+    ${ISMIP7_CONTAINER_BINDS:-} ${ISMIP7_CONTAINER_ARGS:-} \
+    "$ISMIP7_CONTAINER" python3 "$@"

@@ -5,7 +5,8 @@ Joint inversion for basal friction and fluidity using icepack2 + tlm_adjoint.
 Follows the Kangerd demo pattern from Shapero's dual-problems repo:
 - 3-field Z = V * Sigma * T (no DG thickness in mixed space)
 - Regularized Jacobian: J = J_r + α * J_1
-- snes_divergence_tolerance = -1
+- snes_divergence_tolerance = -3 (PETSC_UNLIMITED; the Kangerd demo's -1 is
+  PETSC_DETERMINE, which reinstates the default 1e4 growth cutoff)
 - Sliding coefficient includes exp(m*theta)
 
 Controls are log-deviations from PHYSICAL prior means - theta = log(C/C_w0)
@@ -19,8 +20,7 @@ Usage:
 """
 
 import numpy as np
-from mpi4py import MPI
-import os, sys, glob
+import os, sys, glob, json
 from time import perf_counter
 
 import firedrake as fd
@@ -83,13 +83,18 @@ FIG_DIR = os.path.join(_ROOT, "figs")
 # Repo root on the path so we can import the shared dual-friction operator.
 sys.path.insert(0, os.path.dirname(_ROOT))
 from icepack2_tools.boundary import load_boundary_ids
-from icepack2_tools.dual_friction import build_rc_residual, weertman_anchor
+from icepack2_tools.dual_friction import (
+    build_rc_residual,
+    effective_pressure,
+    weertman_anchor,
+)
 from icepack2_tools.geometry import cg1_lift, sample_to_geometry
 from icepack2_tools.grounding import height_above_flotation
 from icepack2_tools.mpi_stats import (global_mean, global_range,
                                       global_max, global_size, global_count)
 from icepack2_tools.naming import map_basename
 from icepack2_tools.runconfig import (
+    BUDD_SHELF_GATE,
     friction as _friction, geometry_space as _geometry_space,
     raster_sample as _raster_sample,
     lc as _lc, lc_coarse as _lc_coarse, n_flow as _n_flow,
@@ -101,7 +106,34 @@ from icepack2_tools.prior import (
 from icepack2_tools.thermo_model import compute_fluidity_prior
 from icepack2_tools.forcing import (load_racmo_smb_climatology,
                                     load_mean_annual_surface_temperature)
+from icepack2_tools.runconfig import (
+    TARGET_MESH_GEOMETRY_METHOD,
+    residual_stabilizers,
+)
+from icepack2_tools.solverconfig import (
+    diagnostic_solver_mode,
+    final_solve_bounds,
+    final_solve_parameters,
+    nonlinear_solver_options,
+    snes_atol_scale,
+    snes_monitor_enabled,
+)
 from mesh_naming import get_buffer_m, mesh_filename
+from timing_campaign import MATRIX_T_START, atomic_write_json
+
+# petsc4py returns SNES converged reasons as plain ints on most builds.
+_SNES_REASON_NAMES = {
+    value: name
+    for name, value in vars(PETSc.SNES.ConvergedReason).items()
+    if isinstance(value, int) and not name.startswith("_")
+}
+
+
+def _snes_reason_name(reason):
+    name = getattr(reason, "name", None)
+    if name:
+        return str(name)
+    return _SNES_REASON_NAMES.get(int(reason), str(int(reason)))
 
 lc = _lc()
 lc_coarse = _lc_coarse()
@@ -401,19 +433,43 @@ def main():
     u_c = Constant(global_mean(u_speed))
     PETSc.Sys.Print(f"  tau_c={float(tau_c):.3f} MPa, u_c={float(u_c):.1f} m/yr")
 
-    sparams = {
-        "snes_type": "newtonls",
-        "snes_max_it": 200,
-        "snes_linesearch_type": "nleqerr",
-        "snes_divergence_tolerance": -1,
-        "snes_stol": 0.0,
+    # Newton/line-search settings come from icepack2_tools.solverconfig so the
+    # ISMIP7_SNES_* knobs the campaign exports mean the same thing here as in
+    # the transient: newtonls, nleqerr, max_it 200, stol 0, and divergence
+    # tolerance -3 (PETSC_UNLIMITED; the legacy -1 is PETSC_DETERMINE, which
+    # restores PETSc's 1e4 growth cutoff and reports DIVERGED_DTOL on solves
+    # that would otherwise reach their real result -- README "Timing
+    # benchmark" §7). The linear solve is the full mixed-Jacobian MUMPS LU:
+    # tlm_adjoint differentiates through it, so this is deliberately NOT the
+    # transient's condensed scpc_mumps mode, and the MAP records that as
+    # state_solver_mode beside the lane contract diagnostic_solver_mode.
+    sparams = nonlinear_solver_options()
+    sparams.update({
         "ksp_type": "gmres",
         "pc_type": "lu",
         "pc_factor_mat_solver_type": "mumps",
         "mat_mumps_icntl_14": 400,  # working memory increase
         "mat_mumps_icntl_24": 1,  # detect null pivots
         "mat_mumps_cntl_3": 1e-12,  # null pivot threshold
-    }
+    })
+    state_solver_mode = "full_mumps"
+    state_solver_parameters = json.dumps(sparams, sort_keys=True)
+    # Optional SNES monitoring (ISMIP7_SNES_MONITOR=1, ISMIP7_SNES_LOG=file),
+    # the transient runner's convention. Applies to every annotated forward
+    # and, through tlm_adjoint, the adjoint linear solves.
+    _solver_log = os.environ.get("ISMIP7_SNES_LOG") if snes_monitor_enabled() else None
+    if _solver_log:
+        os.makedirs(os.path.dirname(os.path.abspath(_solver_log)), exist_ok=True)
+    _viewer = f"ascii:{_solver_log}::append" if _solver_log else None
+    if snes_monitor_enabled():
+        sparams.update({
+            "snes_monitor": _viewer,
+            "snes_converged_reason": _viewer,
+        })
+    # The mode consumers of the published state must run (validate_cache_manifest
+    # asserts it). Resolved now so an invalid environment fails here, not
+    # inside the final save after hours of work.
+    lane_solver_mode = diagnostic_solver_mode()
     fc_params = {"quadrature_degree": 4}
 
     # ── Build form (Kangerd pattern: controls baked into sliding coefficient) ──
@@ -423,30 +479,86 @@ def main():
     theta = Function(Q, name="theta")  # log friction adjustment
     phi = Function(Q, name="phi")  # log fluidity adjustment
 
-    # Warm-start theta/phi from a previous checkpoint if available
-    warm_chk = os.environ.get("ISMIP7_WARM_START")
+    # Warm-start from a previous MAP or timing-cache checkpoint. Prefer
+    # interpolate (not a raw .dat copy): the prepared timing caches are
+    # published on 1 rank and the invert runs on many, so dof ownership differs.
+    warm_chk = os.environ.get("ISMIP7_WARM_START", "").strip()
+    skip_continuation = (
+        os.environ.get("ISMIP7_SKIP_CONTINUATION", "0").strip() == "1"
+    )
+    warm_A_prior = None
+    warm_loaded_z = False
+    # Residual the warm start's writer reached under the shared F (stamped by
+    # save_model_state and by save_map): the forwards' absolute tolerance.
+    warm_recorded = None
+
+    def _warm_load(chk, source_mesh, name, space):
+        source_field = chk.load_function(source_mesh, name=name)
+        target = Function(space, name=name)
+        target.interpolate(
+            source_field,
+            allow_missing_dofs=True,
+            default_missing_val=0.0,
+        )
+        return target
+
     if warm_chk:
         PETSc.Sys.Print(f"  Loading warm start from {warm_chk}")
         with fd.CheckpointFile(warm_chk, "r") as chk:
             chk_mesh = chk.load_mesh()
-            theta_ws = chk.load_function(chk_mesh, name="log_friction")
-            phi_ws = chk.load_function(chk_mesh, name="log_fluidity")
-        # Tripwire. The raw dof copy below assumes the checkpoint's mesh and
-        # this run's Mesh(.msh) share their dof ordering, which holds only for
-        # the same .msh, rank count and partitioner. Anything else scrambles
-        # theta/phi silently (the forward's -n4 crash, in slow motion). A
-        # chained Slurm resume is exactly where the rank count can drift.
-        _xc = chk_mesh.coordinates.dat.data_ro
-        _xm = mesh.coordinates.dat.data_ro
-        _ok = (_xc.shape == _xm.shape) and bool(np.allclose(_xc, _xm))
-        _ok = bool(mesh.comm.allreduce(_ok, op=MPI.LAND))
-        if not _ok:
-            raise RuntimeError(
-                f"ISMIP7_WARM_START={warm_chk}: its mesh dof ordering differs "
-                f"from this run's mesh (different .msh, rank count or "
-                f"partitioner); refusing the raw theta/phi copy")
-        theta.dat.data[:] = theta_ws.dat.data_ro
-        phi.dat.data[:] = phi_ws.dat.data_ro
+            if chk.has_attr("/", "full_state_residual"):
+                try:
+                    warm_recorded = float(chk.get_attr("/", "full_state_residual"))
+                except (TypeError, ValueError):
+                    warm_recorded = None
+            theta.assign(_warm_load(chk, chk_mesh, "log_friction", Q))
+            phi.assign(_warm_load(chk, chk_mesh, "log_fluidity", Q))
+            try:
+                H.assign(_warm_load(chk, chk_mesh, "thickness", Q_g))
+                b.assign(_warm_load(chk, chk_mesh, "bed", Q_g))
+                s.assign(_warm_load(chk, chk_mesh, "surface", Q_g))
+                PETSc.Sys.Print(
+                    "    geometry: thickness/bed/surface from warm start"
+                )
+            except (KeyError, RuntimeError, ValueError):
+                PETSc.Sys.Print(
+                    "    geometry: keeping BedMachine sample "
+                    "(warm start has no thickness/bed/surface)"
+                )
+            try:
+                u_obs.assign(_warm_load(chk, chk_mesh, "velocity_obs", V))
+                PETSc.Sys.Print("    velocity_obs from warm start")
+            except (KeyError, RuntimeError, ValueError):
+                pass
+            try:
+                warm_A_prior = _warm_load(
+                    chk, chk_mesh, "fluidity_prior", Q
+                )
+            except (KeyError, RuntimeError, ValueError):
+                warm_A_prior = None
+            try:
+                u_ws = _warm_load(chk, chk_mesh, "velocity", V)
+                M_ws = _warm_load(
+                    chk, chk_mesh, "membrane_stress",
+                    z.subfunctions[1].function_space(),
+                )
+                tau_ws = _warm_load(
+                    chk, chk_mesh, "basal_stress",
+                    z.subfunctions[2].function_space(),
+                )
+                z.subfunctions[0].assign(u_ws)
+                z.subfunctions[1].assign(M_ws)
+                z.subfunctions[2].assign(tau_ws)
+                warm_loaded_z = True
+                PETSc.Sys.Print(
+                    "    mixed state: velocity/membrane/basal from warm start"
+                )
+            except (KeyError, RuntimeError, ValueError):
+                warm_loaded_z = False
+        if warm_loaded_z:
+            # Full-n mixed state from prepare already sits at the physical
+            # exponents; ramping 1→n would only discard that work.
+            skip_continuation = True
         _ws_t_lo, _ws_t_hi = global_range(theta)
         _ws_p_lo, _ws_p_hi = global_range(phi)
         PETSc.Sys.Print(f"    theta: [{_ws_t_lo:.3f}, {_ws_t_hi:.3f}]")
@@ -563,6 +675,13 @@ def main():
     # inside weertman_anchor (a cell-wise surface has no cell gradient); the
     # anchor is a fixed reference scaling, not a force in the residual.
     C_w0 = weertman_anchor(H, s, u_obs, m_slide_val, Q_g)
+    # Budd pins N_hat=1 at the inversion geometry; freeze N_ref with the MAP /
+    # timing-cache so forwards reproduce the inverted friction at t=0.
+    N_ref = None
+    if FRICTION == "budd":
+        N_ref = Function(Q_g, name="N_ref").interpolate(
+            max_value(effective_pressure(H, s), Constant(0.0))
+        )
     if USE_RESIDUAL:
         law_name = ("Budd N_hat (exact-zero shelf, delta="
                     f"{BUDD_DELTA:.3f}, alpha_gl={ALPHA_GL:.2f})"
@@ -582,7 +701,18 @@ def main():
     # fluidity rather than log(A / const). This is the Recinos/fenics_ice fix
     # for the n=3 blow-up (a constant A0 baseline forced phi to carry all the
     # spatial fluidity structure). Frictional heating uses the balance C_w0.
-    if os.environ.get("ISMIP7_FLUIDITY_PRIOR", "thermo") == "thermo":
+    # When warm-starting from a prepare cache / MAP that already carries
+    # fluidity_prior, reuse it: phi = log(A/A_prior) is meaningless against a
+    # freshly recomputed prior.
+    if warm_A_prior is not None:
+        A_prior = warm_A_prior
+        A_prior.rename("fluidity_prior")
+        A_prior_lo, A_prior_hi = global_range(A_prior)
+        PETSc.Sys.Print(
+            f"  Fluidity prior A_prior in [{A_prior_lo:.2f}, "
+            f"{A_prior_hi:.2f}] (from warm start)"
+        )
+    elif os.environ.get("ISMIP7_FLUIDITY_PRIOR", "thermo") == "thermo":
         acc_prior = load_racmo_smb_climatology(Q)
         T_srf = load_mean_annual_surface_temperature(Q)
         # The thermal prior is a smooth englacial calculation and it is the
@@ -656,6 +786,17 @@ def main():
         raise RuntimeError(_probe_err)
     PETSc.Sys.Print(f"  MAP output: {os.path.join(_map_dir, map_fn)}")
 
+    # Floor-cell stabilizers shared with the forward (runconfig): without
+    # them the inverted mixed state solved a DIFFERENT F from the one the
+    # forward assembles at restart -- ||F||=1.3e1 here, 1.5e10 there, on the
+    # same 2500/25000 state (2026-09-14) -- and the forward's fast path then
+    # trusted that state. k_lim stays 0: the term is a rescue-only gain.
+    stabilizers = residual_stabilizers()
+    PETSc.Sys.Print(
+        "  Residual stabilizers (shared with the forward): "
+        + ", ".join(f"{key}={value:g}" for key, value in stabilizers.items())
+    )
+
     def build_F(theta_c, phi_c):
         # Residual closure (tau linear, grounded-only theta via exp(theta*He),
         # exact-zero shelves): budd -> N_hat=1 at the reference geometry;
@@ -668,6 +809,7 @@ def main():
                 fric_law=FRICTION, N_ref=None,
                 nhat_floor=BUDD_DELTA, nhat_cap=BUDD_NHAT_CAP, alpha_gl=ALPHA_GL,
                 c0=C0_RC, c_w0_floor=RC_CW0_FLOOR, h_visc_floor=RC_HVISC_FLOOR,
+                k_lim=0.0, **stabilizers,
                 calving_ids=calving_ids if use_calving_terminus else None,
             )
         return derivative(_build_action(theta_c, phi_c, fields), z)
@@ -682,18 +824,77 @@ def main():
     stop_manager()
     prob = NonlinearVariationalProblem(F, z, form_compiler_parameters=fc_params)
     slvr = NonlinearVariationalSolver(prob, solver_parameters=sparams)
-    # Always use continuation - single solve at full exponents can fail
-    # with checkpoint parameters that create ill-conditioned systems.
-    # Ramp n_flow (1 → n_flow_val) and m_slide (1 → m_slide_val) together.
-    PETSc.Sys.Print(
-        f"Warm start (continuation n_flow 1→{n_flow_val:.1f}, "
-        f"m_slide 1→{m_slide_val:.1f})..."
-    )
-    for t in np.linspace(0.0, 1.0, 5):
-        n_flow.assign(1.0 + t * (n_flow_val - 1.0))
-        m_slide.assign(1.0 + t * (m_slide_val - 1.0))
-        slvr.solve()
-    PETSc.Sys.Print("  Done")
+    n_flow.assign(n_flow_val)
+    m_slide.assign(m_slide_val)
+    if skip_continuation:
+        if warm_loaded_z:
+            PETSc.Sys.Print(
+                f"Warm start: accepting loaded mixed state at full "
+                f"n_flow={n_flow_val:.1f}, m_slide={m_slide_val:.1f} "
+                f"(no 1→n continuation)"
+            )
+        else:
+            PETSc.Sys.Print(
+                f"Warm start: single solve at full n_flow={n_flow_val:.1f}, "
+                f"m_slide={m_slide_val:.1f} (ISMIP7_SKIP_CONTINUATION=1)"
+            )
+            slvr.solve()
+    else:
+        # Ramp n_flow (1 → n_flow_val) and m_slide (1 → m_slide_val) together.
+        # Single solve at full exponents can fail from a cold (u≈0) guess.
+        PETSc.Sys.Print(
+            f"Warm start (continuation n_flow 1→{n_flow_val:.1f}, "
+            f"m_slide 1→{m_slide_val:.1f})..."
+        )
+        for t in np.linspace(0.0, 1.0, 5):
+            n_flow.assign(1.0 + t * (n_flow_val - 1.0))
+            m_slide.assign(1.0 + t * (m_slide_val - 1.0))
+            slvr.solve()
+        PETSc.Sys.Print("  Done")
+
+    # Forward-solve tolerance. Now that the stabilizers are shared, a
+    # prepared warm start is already a converged solution of THIS F, so the
+    # first annotated forward starts at the residual floor, where the
+    # relative test can never pass and stol=0 disables the step exit: 200
+    # silent MUMPS factorisations (the 2026-09-14 hang, moved one stage
+    # earlier by the fix). Solve every forward to snes_atol_scale x the
+    # residual the warm start's writer recorded -- the transient's own run
+    # rule -- so a floor-level start confirms at iteration 0 and a moved
+    # control vector gets an ordinary Newton solve to the same absolute
+    # level the forward runs at. Without a record, keep the relative test
+    # but enable the step-size exit so a floor-level start cannot grind.
+    with assemble(F, form_compiler_parameters=fc_params).dat.vec_ro as _rv:
+        f_warm = float(_rv.norm())
+    if (
+        warm_recorded is not None
+        and np.isfinite(warm_recorded)
+        and warm_recorded > 0.0
+    ):
+        forward_atol = snes_atol_scale() * warm_recorded
+        sparams["snes_atol"] = forward_atol
+        PETSc.Sys.Print(
+            f"  Warm-start residual ||F||={f_warm:.3e} (writer recorded "
+            f"{warm_recorded:.3e}); forward snes_atol={forward_atol:.3e} "
+            f"({snes_atol_scale():g}x recorded)"
+        )
+    else:
+        sparams["snes_stol"] = final_solve_bounds()["snes_stol"]
+        PETSc.Sys.Print(
+            f"  Warm-start residual ||F||={f_warm:.3e}; no recorded residual, "
+            f"forwards use the relative test with snes_stol="
+            f"{sparams['snes_stol']:g}"
+        )
+    state_solver_parameters = json.dumps(sparams, sort_keys=True)
+    # The adjoint solves are LINEAR (one Newton step to rtol) and inherit the
+    # forward's parameters by default. An absolute tolerance sized for the
+    # forward residual lets them exit at iteration 0 whenever ||dJ/du|| is
+    # small -- it is ~1e-3 here -- returning a zero adjoint, so the gradient
+    # is the prior's alone and L-BFGS pulls the controls toward the prior
+    # means while the misfit rises (job 10432790, 2026-09-14: adjoint time
+    # 25 s -> 0.7 s, |grad| 47 -> 12, misfit +7% in four evaluations).
+    adjoint_sparams = {
+        key: value for key, value in sparams.items() if key != "snes_atol"
+    }
 
     u_init = z.subfunctions[0]
     u_mag = Function(Q).interpolate(sqrt(inner(u_init, u_init)))
@@ -906,17 +1107,31 @@ def main():
     def forward(theta_ctrl, phi_ctrl):
         clear_caches()
         F_ctrl = build_F(theta_ctrl, phi_ctrl)
-        # Continuation inside annotation for robustness - ramp both
-        # n_flow and m_slide on the same [0,1] parameter.
-        for t in np.linspace(0.0, 1.0, 5):
-            n_flow.assign(1.0 + t * (n_flow_val - 1.0))
-            m_slide.assign(1.0 + t * (m_slide_val - 1.0))
+        if skip_continuation:
+            # Timing-matrix short invert starts from a full-n prepare cache;
+            # stay at the physical exponents so each eval is one Newton solve.
+            n_flow.assign(n_flow_val)
+            m_slide.assign(m_slide_val)
             EquationSolver(
                 F_ctrl == 0,
                 z,
                 solver_parameters=sparams,
+                adjoint_solver_parameters=adjoint_sparams,
                 form_compiler_parameters=fc_params,
             ).solve()
+        else:
+            # Continuation inside annotation for robustness — ramp both
+            # n_flow and m_slide on the same [0,1] parameter.
+            for t in np.linspace(0.0, 1.0, 5):
+                n_flow.assign(1.0 + t * (n_flow_val - 1.0))
+                m_slide.assign(1.0 + t * (m_slide_val - 1.0))
+                EquationSolver(
+                    F_ctrl == 0,
+                    z,
+                    solver_parameters=sparams,
+                    adjoint_solver_parameters=adjoint_sparams,
+                    form_compiler_parameters=fc_params,
+                ).solve()
 
         u_sol, _, _ = split(z)
         # chi^2 density: each residual divided by the squared error of its own
@@ -1058,6 +1273,30 @@ def main():
     # final-save guard below to the point of passing a corrupt velocity.
     last_good_vel_chi2 = [np.inf]
 
+    def _residual_norm():
+        """||F(z; theta, phi)|| at full n/m -- what every consumer recomputes."""
+        with assemble(F, form_compiler_parameters=fc_params).dat.vec_ro as _rv:
+            return float(_rv.norm())
+
+    # Residual level the last accepted forward actually reached, and the
+    # controls it was solved at. The publishing solve below is judged against
+    # these: a state already at that level needs no Newton iterations.
+    last_good_fnorm = [float("nan")]
+    last_good_x = [None]
+
+    # Provenance of the mixed state written by save_map(full_state=True):
+    # its residual under the controls saved in the SAME file, and how the
+    # publishing solve ended. The timing-cache restart fast path
+    # (simulation.py) recomputes ||F|| itself; these attributes are the
+    # audit trail for what it will find.
+    full_state_solve = {
+        "residual": float("nan"),
+        "solve_reason": "",
+        "solve_iterations": -1,
+        "atol": float("nan"),
+        "fnorm_ref": float("nan"),
+    }
+
     def term_report():
         r"""``' vel=... dhdt=...'`` for the iteration line, or '' if disabled."""
         try:
@@ -1084,7 +1323,7 @@ def main():
     # has been bitten by exactly that class of look-alike MAP before (see
     # ../GEOMETRY_DISCRETIZATION.md on the geometry tag), and MAPs are
     # gitignored, so the checkpoint is the only place this provenance can live.
-    def save_map(path):
+    def save_map(path, *, full_state=False):
         with fd.CheckpointFile(path, "w") as chk:
             chk.save_mesh(mesh)
             chk.save_function(theta, name="log_friction")
@@ -1095,6 +1334,15 @@ def main():
             chk.save_function(b, name="bed")
             chk.save_function(s, name="surface")
             chk.save_function(A_prior, name="fluidity_prior")
+            if full_state:
+                chk.save_function(z.subfunctions[0], name="velocity")
+                chk.save_function(z.subfunctions[1], name="membrane_stress")
+                chk.save_function(z.subfunctions[2], name="basal_stress")
+                chk.save_function(H, name="H_init")
+                chk.save_function(phi_eff, name="phi_eff")
+                chk.save_function(C_w0, name="C_w0")
+                if N_ref is not None:
+                    chk.save_function(N_ref, name="N_ref")
             # The .msh this MAP was inverted on. A CheckpointFile mesh is named
             # "firedrake_default", so this is how the forward names its own
             # mesh and picks the matching per-mesh boundary-id sidecar.
@@ -1128,6 +1376,30 @@ def main():
             # theta/phi absorb the bed representation just as they absorb the
             # front treatment, so a forward must reproduce it.
             chk.set_attr("/", "raster_sample", raster_sample)
+            if full_state:
+                chk.set_attr("/", "t_yr", float(MATRIX_T_START))
+                chk.set_attr("/", "friction", str(FRICTION))
+                if str(FRICTION) == "budd":
+                    chk.set_attr("/", "friction_gate", BUDD_SHELF_GATE)
+                chk.set_attr("/", "geometry_space", str(geometry_space))
+                chk.set_attr("/", "n_flow", float(n_flow_val))
+                chk.set_attr("/", "a4_factor", float(a4_factor))
+                # Two solver facts, kept apart: the mode the lanes consuming
+                # this state must run (the cache contract), and the solver
+                # that actually produced the state.
+                chk.set_attr("/", "diagnostic_solver_mode", lane_solver_mode)
+                chk.set_attr("/", "state_solver_mode", state_solver_mode)
+                chk.set_attr(
+                    "/", "state_solver_parameters", state_solver_parameters
+                )
+                chk.set_attr(
+                    "/", "geometry_source", os.path.realpath(bm_fn)
+                )
+                chk.set_attr(
+                    "/", "geometry_source_method", TARGET_MESH_GEOMETRY_METHOD
+                )
+                for key, value in full_state_solve.items():
+                    chk.set_attr("/", f"full_state_{key}", value)
 
     # ── L-BFGS-B Inversion ──
     max_iter = int(os.environ.get("ISMIP7_MAXITER", "500"))
@@ -1139,6 +1411,64 @@ def main():
     last_good_obj = [np.inf]
     last_x = [None]                      # controls of the last CONVERGED evaluation
     iteration_count = [0]
+    timing_history = []
+    timing_json = os.environ.get("ISMIP7_INVERSION_TIMING_JSON", "").strip()
+    t_opt0 = perf_counter()
+
+    def _eval_terms():
+        """Assemble diagnostic term values for the JSON / print line."""
+        terms = {"vel": float(last_good_vel_chi2[0])}
+        if log_vel_w > 0.0:
+            terms["log"] = float(assemble(_log_chi2))
+        if use_dhdt:
+            terms["dhdt"] = float(assemble(_dhdt_chi2))
+            terms["net_gt_per_yr"] = (
+                float(assemble(_net_form)) * 917.0 / 1e12
+            )
+        return terms
+
+    def _write_timing_json(
+        *, phase, message="", nit=None, nfev=None, final_solve=None
+    ):
+        if not timing_json or COMM_WORLD.rank != 0:
+            return
+        written = os.path.realpath(os.path.join(_map_dir, map_fn))
+        published = os.environ.get("ISMIP7_MAP_OUT_FINAL", "").strip()
+        payload = {
+            "phase": phase,
+            "map_path": os.path.realpath(published) if published else written,
+            "map_path_written": written,
+            "mesh_basename": os.path.basename(mesh_fn),
+            "lc": int(lc),
+            "lc_coarse": int(lc_coarse),
+            "buffer_m": float(buffer_m),
+            "ncores": int(COMM_WORLD.size),
+            "maxiter": int(max_iter),
+            "nit": int(nit if nit is not None else iteration_count[0]),
+            "nfev": int(nfev if nfev is not None else iteration_count[0]),
+            "message": str(message),
+            "optimize_seconds": perf_counter() - t_opt0,
+            "knobs": {
+                "misfit_norm": MISFIT_NORM,
+                "log_vel_weight_requested": LOG_VEL_WEIGHT,
+                "log_vel_weight": float(log_vel_w),
+                "log_vel_eps": float(LOG_VEL_EPS),
+                "gamma_theta": float(GAMMA_THETA),
+                "gamma_phi": float(GAMMA_PHI),
+                "dhdt_weight": float(dhdt_w),
+                "dhdt_net_sigma": float(net_sigma_used),
+                "grad_precond": os.environ.get(
+                    "ISMIP7_GRAD_PRECOND", "none"
+                ).lower(),
+                "warm_start": bool(warm_chk),
+                "skip_continuation": bool(skip_continuation),
+            },
+            "evaluations": list(timing_history),
+            # Set only by the "finished" record: how the publishing solve
+            # ended and whether the full mixed state was written.
+            "final_solve": final_solve,
+        }
+        atomic_write_json(timing_json, payload)
 
     def objective_and_gradient(x_vec):
         t_iter = perf_counter()
@@ -1173,6 +1503,8 @@ def main():
         last_good_obj[0] = J_val
         last_x[0] = np.array(x_vec, copy=True)
         last_good_vel_chi2[0] = float(assemble(_vel_chi2))
+        last_good_fnorm[0] = _residual_norm()
+        last_good_x[0] = np.array(x_vec, copy=True)
 
         t_adj = perf_counter()
         try:
@@ -1221,6 +1553,25 @@ def main():
             f"[fwd={t_fwd:.1f}s adj={t_adj:.1f}s total={t_iter:.1f}s]"
         )
 
+        if timing_json:
+            try:
+                terms = _eval_terms()
+            except Exception:
+                terms = {"vel": float(last_good_vel_chi2[0])}
+            timing_history.append({
+                "eval": iteration_count[0],
+                "misfit": J_val,
+                "reg_theta": reg_theta,
+                "reg_phi": reg_phi,
+                "total": total,
+                "grad_norm": float(np.linalg.norm(total_grad)),
+                "fwd_seconds": t_fwd,
+                "adj_seconds": t_adj,
+                "total_seconds": t_iter,
+                "terms": terms,
+            })
+            _write_timing_json(phase="running", message="in progress")
+
         # Periodic checkpoint every 20 iterations
         if iteration_count[0] % 20 == 0:
             save_map(os.path.join(_map_dir, map_fn))
@@ -1263,7 +1614,7 @@ def main():
         x0,
         method="L-BFGS-B",
         jac=True,
-        options={"maxiter": max_iter, "ftol": 0, "gtol": 0, "disp": False},
+        options={"maxiter": max_iter, "ftol": 0, "gtol": 0},
     )
 
     PETSc.Sys.Print(f"\nOptimization finished: {result.message}")
@@ -1281,8 +1632,9 @@ def main():
     save_map(chk_fn)
     PETSc.Sys.Print(
         f"Saved MAP: {chk_fn} "
-        f"(misfit_norm={MISFIT_NORM} gamma_theta={GAMMA_THETA:g} "
-        f"gamma_phi={GAMMA_PHI:g} dhdt_weight={dhdt_w:g})"
+        f"(misfit_norm={MISFIT_NORM} log_vel_weight={log_vel_w:g} "
+        f"gamma_theta={GAMMA_THETA:g} gamma_phi={GAMMA_PHI:g} "
+        f"dhdt_weight={dhdt_w:g})"
     )
     # The chain runner reads <ISMIP7_MAP_OUT>.done as "the MAP is on disk, do
     # not re-invert it". Write it here, the moment the checkpoint write returns:
@@ -1293,51 +1645,88 @@ def main():
         with open(map_out + ".done", "w"):
             pass
 
-    # ── Final forward solve ──
-    # The single-shot solve at full exponents can fail, and the old code then
-    # SAVED the failed Newton state as "velocity" while claiming the last
-    # optimization state was used (the message said so, but z was never
-    # restored). The Aug 3 dg0 32 km MAP carries a 2745 m/yr-RMS velocity this
-    # way -- discovered only when compare_dhdt.py scored it against MEaSUREs.
-    # Now: on failure the last good optimization state is restored for the
-    # misfit report only and NO velocity is saved (that state belongs to the
-    # last converged evaluation's controls, not to this MAP's), and a velocity
-    # whose misfit grossly disagrees with the optimizer's is refused too
-    # (a forward re-solves the diagnostic from theta/phi anyway; a missing
-    # velocity is an inconvenience, a silently wrong one poisons everything
-    # downstream that trusts the checkpoint).
+    if timing_json:
+        _write_timing_json(
+            phase="final_solve",
+            message=str(result.message),
+            nit=result.nit,
+            nfev=result.nfev,
+        )
+
+    # ── Final diagnostic ──
+    # Publish the mixed state at the returned controls. When result.x is the
+    # last evaluated point (the usual L-BFGS-B ending) z_backup already solves
+    # F(z; result.x) = 0 to the level the annotated forwards reached, and a
+    # fresh Newton solve from there sits at the rounding floor: the relative
+    # test cannot pass, snes_stol=0 disables the step exit, and each
+    # iteration is another full MUMPS factorisation. That ran the 2500/25000
+    # timing invert silently to snes_max_it (200 iterations, ~30 min) and
+    # then into a five-stage n-continuation retry -- which starts from a
+    # full-n state and ramps m_slide, a float inside build_rc_residual, so it
+    # only walked away from the solution. The transient runner solved the
+    # same problem with a self-scaled absolute tolerance (simulation.py,
+    # restart fast path); final_solve_parameters applies it here, bounds the
+    # iteration counts, and always prints the converged reason, so this is
+    # either a 0-iteration confirmation or a short, visible Newton solve from
+    # a line-search neighbour. A plain NonlinearVariationalSolver (not
+    # tlm_adjoint's EquationSolver, which discards its SNES) keeps the reason,
+    # iteration count and function norm readable after a failure.
     PETSc.Sys.Print("\nFinal forward solve...")
     stop_manager()
-    # Two runs on the Ua mesh (Sep 13 2026, RC and Budd alike) had every one
-    # of their ~200 per-iterate solves converge and only this call fail. The
-    # per-iterate forward() ramps the exponents from 1 in five steps; this
-    # was a single-shot Newton at full exponents STARTED FROM THE CONVERGED
-    # STATE of the last evaluation, where the residual is already at its
-    # floor, rtol cannot be met and the nleqerr line search fails (the
-    # forward's restart hit the same thing, simulation.py, Aug 2026). When
-    # the optimizer's final x is the last vector whose forward CONVERGED, z
-    # already IS the solution at these controls and no solve is needed;
-    # otherwise solve the way every iterate did. A failed evaluation never
-    # records its controls, so the state z holds always belongs to last_x
-    # (both are in the inner objective's unscaled space, hence _x_final).
-    final_state_ok = True
-    _reuse = last_x[0] is not None and bool(np.array_equal(last_x[0], _x_final))
-    if mesh.comm.allreduce(_reuse, op=MPI.LAND):
-        PETSc.Sys.Print("  Final controls are those of the last converged "
-                        "evaluation; that state is reused (no re-solve)")
-    else:
-        try:
-            F_fin = build_F(theta, phi)
-            for _t in np.linspace(0.0, 1.0, 5):
-                n_flow.assign(1.0 + _t * (n_flow_val - 1.0))
-                m_slide.assign(1.0 + _t * (m_slide_val - 1.0))
-                EquationSolver(F_fin == 0, z, solver_parameters=sparams,
-                               form_compiler_parameters=fc_params).solve()
-        except fd.ConvergenceError:
-            PETSc.Sys.Print("  Final solve failed; restoring last good "
-                            "optimization state for the misfit report only")
-            z.assign(z_backup)
-            final_state_ok = False
+    reset_manager()
+    clear_caches()
+    n_flow.assign(n_flow_val)
+    m_slide.assign(m_slide_val)
+    z.assign(z_backup)
+    f_ref = float(last_good_fnorm[0])
+    f0 = _residual_norm()
+    x_same = bool(
+        last_good_x[0] is not None
+        and np.array_equal(last_good_x[0], _x_final)
+    )
+    final_sparams = final_solve_parameters(sparams, f_ref, viewer=_viewer)
+    atol_final = float(final_sparams.get("snes_atol", float("nan")))
+    PETSc.Sys.Print(
+        f"  ||F(z_backup; result.x)|| = {f0:.3e}; last accepted forward "
+        f"reached {f_ref:.3e}; result.x {'==' if x_same else '!='} last "
+        f"accepted controls; snes_atol={atol_final:.3e} "
+        f"snes_max_it={final_sparams['snes_max_it']}"
+    )
+    if "snes_atol" not in final_sparams:
+        PETSc.Sys.Print(
+            "  WARNING: no converged forward residual on record; the final "
+            "solve falls back to the relative test alone"
+        )
+    final_solver = NonlinearVariationalSolver(
+        NonlinearVariationalProblem(F, z, form_compiler_parameters=fc_params),
+        solver_parameters=final_sparams,
+    )
+    final_solve_ok = False
+    try:
+        final_solver.solve()
+        final_solve_ok = True
+    except (fd.ConvergenceError, PETSc.Error) as exc:
+        PETSc.Sys.Print(f"  Final solve raised {type(exc).__name__}: {exc}")
+    final_reason = _snes_reason_name(final_solver.snes.getConvergedReason())
+    final_its = int(final_solver.snes.getIterationNumber())
+    if not final_solve_ok:
+        # Never publish a half-converged Newton iterate.
+        z.assign(z_backup)
+    f_end = _residual_norm()
+    PETSc.Sys.Print(
+        f"  Final solve: {final_reason} after {final_its} Newton iterations, "
+        f"||F|| {f0:.3e} -> {f_end:.3e}"
+    )
+    full_state_solve.update({
+        "residual": f_end,
+        "solve_reason": final_reason,
+        "solve_iterations": final_its,
+        "atol": atol_final,
+        "fnorm_ref": f_ref,
+    })
+    # Whether the state on hand belongs to THIS MAP's controls; the figure
+    # step below reads it under this name.
+    final_state_ok = final_solve_ok
 
     u_sol = z.subfunctions[0]
     u_sol_mag = Function(Q).interpolate(sqrt(u_sol[0] ** 2 + u_sol[1] ** 2))
@@ -1352,36 +1741,58 @@ def main():
     )
     PETSc.Sys.Print(f"  Final misfit (masked): {misfit:.6e}")
 
-    # Update checkpoint with velocity -- unless the state is inconsistent
-    # with the optimization it claims to represent. BOTH sides of the test are
-    # the SAME form, `_vel_chi2`, assembled on the final state and on the last
-    # accepted optimization state: an earlier version compared the dimensional
-    # misfit against a chi^2 and blocked a good velocity at 13.8x (a corrupt
-    # one sits >1000x off). Comparing against last_good_obj would repeat that
-    # error in the other direction, since under use_dhdt that is the combined
-    # objective and its dH/dt part has nothing to do with velocity.
-    _guard = float(assemble(_vel_chi2))
-    _ref = max(float(last_good_vel_chi2[0]), 1e-30)
-    if not final_state_ok:
-        PETSc.Sys.Print(
-            "WARNING: NOT saving velocity -- the final solve did not converge, "
-            "so the state on hand is the one of the last converged evaluation "
-            "and belongs to different controls than this MAP. The MAP controls "
-            "are saved and valid; forwards re-solve the diagnostic from "
-            "theta/phi and are unaffected."
-        )
-    elif np.isfinite(_guard) and _guard <= 10.0 * _ref:
-        with fd.CheckpointFile(chk_fn, "a") as chk:
-            chk.save_function(u_sol, name="velocity")
-        PETSc.Sys.Print(f"Saved velocity: {chk_fn}")
+    # Rewrite the MAP with the full mixed state only when that state solves
+    # the residual at the controls saved beside it. Timing caches are
+    # published from this checkpoint without a second prepare.
+    # The gate is whether the final solve CONVERGED at the saved controls,
+    # not whether the state resembles the last optimizer eval. The old
+    # guard compared assemble(_vel_chi2) against last_good_vel_chi2, but
+    # the failure path had just done z.assign(z_backup) and
+    # last_good_vel_chi2 is that same state's own metric -- so it compared
+    # z_backup with itself and passed unconditionally. Every full-state MAP
+    # written between then and 2026-09-14 carries controls from result.x
+    # and a velocity solved for a different control vector; ||F|| at the
+    # published state reached 1.5e10 and the forward blew up in 4 steps.
+    _fnorm = f_end
+    PETSc.Sys.Print(
+        f"  Published-state residual ||F(z; theta, phi)|| = {_fnorm:.6e} "
+        f"(final solve {'converged' if final_solve_ok else 'FAILED'}: "
+        f"{final_reason})"
+    )
+    published = bool(final_solve_ok and np.isfinite(_fnorm))
+    if published:
+        save_map(chk_fn, full_state=True)
+        PETSc.Sys.Print(f"Saved full mixed-state MAP: {chk_fn}")
     else:
         PETSc.Sys.Print(
-            f"WARNING: NOT saving velocity -- final-state velocity misfit "
-            f"{_guard:.3e} is inconsistent with the last accepted "
-            f"{_ref:.3e} (>10x, same metric). The MAP controls are saved and "
-            f"valid; forwards re-solve the diagnostic from theta/phi and are "
-            f"unaffected."
+            f"WARNING: NOT saving mixed state -- the final forward solve at "
+            f"the saved controls did not converge ({final_reason} after "
+            f"{final_its} iterations, ||F||={_fnorm:.3e}, result.x "
+            f"{'==' if x_same else '!='} last accepted controls). A mixed "
+            f"state from a different control vector would be accepted by "
+            f"the restart fast path and never re-solved. Controls-only MAP "
+            f"remains; timing-cache publish from this file will fail until "
+            f"re-run."
         )
+
+    if timing_json:
+        _write_timing_json(
+            phase="finished",
+            message=str(result.message),
+            nit=result.nit,
+            nfev=result.nfev,
+            final_solve={
+                "reason": final_reason,
+                "iterations": final_its,
+                "fnorm_start": f0,
+                "fnorm_end": f_end,
+                "fnorm_ref": f_ref,
+                "atol": atol_final,
+                "result_x_is_last_accepted": x_same,
+                "published": published,
+            },
+        )
+        PETSc.Sys.Print(f"Inversion timing record -> {timing_json}")
 
     # ── Plot ──
     # Optional: the MAP is already written and the velocity saved above, so a

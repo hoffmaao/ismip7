@@ -36,6 +36,21 @@ FRICTION_DEFAULT = "budd"
 # THIS BRANCH (antarctica-n3) runs standard Glen n=3. An inversion and every
 # forward that loads its MAP must agree on this.
 N_FLOW_DEFAULT = "3.0"
+# How the Budd law (dual_friction.budd_nhat) zeroes shelf friction. Before
+# 2026-09-13 it tested the sign of N = max(p_I - p_W, 0), a roundoff residue
+# on floating ice, and the delta floor lifted every roundoff-positive shelf
+# cell to the friction cap (hoffmaao/antarctica e602705). "haf" gates on
+# height above flotation. Stamped into every Budd state checkpoint and required
+# by the timing-cache manifest, so a state solved under the old gate can never
+# seed a fixed-law lane.
+BUDD_SHELF_GATE = "haf"
+
+# Exact-mesh timing caches initialize DG0 geometry from BedMachine on the
+# TARGET mesh. The raster is first sampled into CG1 and then L2-projected to
+# DG0, so each cell stores an average rather than one centroid pixel. Keep the
+# method name stable: it is stamped into cache provenance and changing the
+# construction must invalidate old caches.
+TARGET_MESH_GEOMETRY_METHOD = "target-native-bedmachine-cell-average-v1"
 
 GEOMETRY_SPACES = ("dg0", "cg1")
 
@@ -50,6 +65,30 @@ GEOMETRY_SPACES = ("dg0", "cg1")
 # MAPs record the method used; the forward reads it back from the MAP.
 RASTER_SAMPLES = ("vertex", "cell_mean")
 RASTER_SAMPLE_DEFAULT = "vertex"
+
+
+# Floor-cell coercivity drags of the dual-friction residual (dual_friction.py
+# ``ocean_drag`` / ``u_lim``). The forward has applied them since Jul 2026; the
+# inversion never passed them, so a MAP that solved the inversion's F was not
+# a solution of the forward's F in the ice-free buffer cells: the same mixed
+# state measured ||F||=1.3e1 in the inversion and 1.5e10 in the forward
+# (2026-09-14), and every strict scout that trusted it ran away within four
+# steps. Both now read the knobs here. ``u_lim`` is only the threshold of the
+# soft speed limiter; its gain ``k_lim`` stays a live Constant at 0 in the
+# forward (raised for rescue solves only) and is passed as 0 by the inversion.
+OCEAN_DRAG_DEFAULT = "1e-2"   # MPa yr/m, linear drag ramping to zero at H_OCEAN
+H_OCEAN_DEFAULT = "10.0"      # m
+U_LIM_DEFAULT = "2e4"         # m/yr, ~5x the fastest observed Antarctic flow
+
+
+def residual_stabilizers():
+    r"""``ocean_drag``, ``h_ocean`` and ``u_lim`` keyword arguments for
+    ``build_rc_residual``; identical in the inversion and the forward."""
+    return {
+        "ocean_drag": float(os.environ.get("ISMIP7_OCEAN_DRAG", OCEAN_DRAG_DEFAULT)),
+        "h_ocean": float(os.environ.get("ISMIP7_H_OCEAN", H_OCEAN_DEFAULT)),
+        "u_lim": float(os.environ.get("ISMIP7_U_LIM", U_LIM_DEFAULT)),
+    }
 
 
 def lc():

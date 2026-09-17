@@ -2,11 +2,14 @@
 # `timing_matrix` branch (antarctica/scripts/batch_runners/timing_*.script),
 # which is where these module names, the account and the venv path come from.
 # The defaults below point at an existing IU build. A second IU user keeps the
-# module stack and points ISMIP7_FIREDRAKE at their own build (or at that one,
-# if it is readable to them) and ISMIP7_ACCOUNT at their own allocation.
+# module stack and, in sites/local.env, points ISMIP7_FIREDRAKE at their own
+# build (or at that one, if it is readable to them) and ISMIP7_ACCOUNT at
+# their own allocation.
 
 ISMIP7_SITE_NAME="iu_quartz"
-ISMIP7_SITE_MATCH="quartz* h2.quartz* login*.quartz.uits.iu.edu"
+# The login nodes are h1 and h2 and the compute nodes c<N>, all under
+# quartz.uits.iu.edu (`hostname -f`); the bare forms cover a short hostname.
+ISMIP7_SITE_MATCH="*.quartz.uits.iu.edu quartz* h[0-9]*.quartz*"
 
 ISMIP7_FIREDRAKE="${ISMIP7_FIREDRAKE:-/N/u/dlilien/Quartz/sw/firedrake/2026.04/firedrake/bin/activate}"
 # `module use` first: the firedrake and petsc modulefiles are in a personal
@@ -20,7 +23,9 @@ ISMIP7_PART_DEBUG="${ISMIP7_PART_DEBUG:-debug}"
 ISMIP7_ACCOUNT="${ISMIP7_ACCOUNT:-r00905}"
 ISMIP7_CONSTRAINT="${ISMIP7_CONSTRAINT:-}"
 
-ISMIP7_REPO="${ISMIP7_REPO:-$HOME/ismip7}"
+# The checkout the submission came from (site_core.sh works it out), so a
+# second worktree runs its own tree without anything being edited.
+ISMIP7_REPO="${ISMIP7_REPO:-$ISMIP7_REPO_SELF}"
 ISMIP7_WORK="${ISMIP7_WORK:-$HOME}"
 
 # The IU timing runs use 12 to 16 ranks per node, 128 to 240 GB, up to 48 h.
@@ -28,3 +33,9 @@ ISMIP7_TASKS="${ISMIP7_TASKS:-16}"
 ISMIP7_MEM="${ISMIP7_MEM:-240G}"
 ISMIP7_TIME_INV="${ISMIP7_TIME_INV:-48:00:00}"
 ISMIP7_TIME_FWD="${ISMIP7_TIME_FWD:-24:00:00}"
+
+# One node, from `sinfo -p general,debug -N -o "%c %m"` (September 2026): all 90
+# are 128 cores and 515700 MB, with no feature to choose between. `submit.sh
+# script` refuses a timing lane that asks for more than this.
+ISMIP7_CORES_PER_NODE="${ISMIP7_CORES_PER_NODE:-128}"
+ISMIP7_MEM_PER_NODE="${ISMIP7_MEM_PER_NODE:-515700M}"

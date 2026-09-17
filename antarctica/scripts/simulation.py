@@ -22,10 +22,13 @@ from firedrake import (
     ds,
     split,
     assemble,
+    Mesh,
     FunctionSpace,
     VectorFunctionSpace,
     TensorFunctionSpace,
     FiniteElement,
+    LinearVariationalProblem,
+    LinearVariationalSolver,
     NonlinearVariationalProblem,
     NonlinearVariationalSolver,
     exp,
@@ -45,7 +48,11 @@ _RHO_I_SI = 917.0
 _RHO_W_SI = 1024.0
 
 _ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-DATA_DIR = os.path.join(_ROOT, "data")
+# BedMachine, MEaSUREs velocity, and RACMO may live outside the checkout on a
+# workstation with a local data volume. Keep the repository layout as the
+# default, but make the observational root explicit rather than requiring
+# large files to be copied or symlinked into the tree.
+DATA_DIR = os.environ.get("ISMIP7_OBS_DATA_ROOT", os.path.join(_ROOT, "data"))
 MESH_DIR = os.path.join(_ROOT, "mesh")
 RESULTS_DIR = os.path.join(_ROOT, "results")
 
@@ -53,7 +60,11 @@ RESULTS_DIR = os.path.join(_ROOT, "results")
 sys.path.insert(0, os.path.dirname(_ROOT))
 from mesh_naming import mesh_filename
 
-from icepack2_tools.mpi_stats import global_mean, global_range
+from icepack2_tools.mpi_stats import (
+    global_extreme_location,
+    global_mean,
+    global_range,
+)
 from icepack2_tools.boundary import load_boundary_ids
 from icepack2_tools.geometry import sample_to_geometry
 from icepack2_tools.naming import map_basename
@@ -61,8 +72,11 @@ from icepack2_tools.front import (
     clamp_thickness, clear_reference_where_ice_free, retreat_slivers,
 )
 from icepack2_tools.runconfig import (
-    friction as _friction, geometry_space as _geometry_space, lc as _lc,
-    n_flow as _n_flow,
+    BUDD_SHELF_GATE as _BUDD_SHELF_GATE,
+    residual_stabilizers,
+    friction as _friction, geometry_space as _geometry_space,
+    lc as _lc, lc_coarse as _lc_coarse, n_flow as _n_flow,
+    TARGET_MESH_GEOMETRY_METHOD,
     calving_law as _calving_law, calving_sigma_max as _calving_sigma_max,
     fracture as _fracture_mode, ismip7_output as _ismip7_output,
     # auto_resume is re-exported, not used here: every forward driver imports
@@ -70,8 +84,26 @@ from icepack2_tools.runconfig import (
     # knob through one import rather than each reaching into runconfig.
     fixed_front as _fixed_front, auto_resume, apparent_mb_mode,  # noqa: F401
 )
+from icepack2_tools.solverconfig import (
+    final_solve_bounds,
+    continuation_steps,
+    diagnostic_solver_label,
+    diagnostic_solver_mode,
+    diagnostic_solver_parameters,
+    mass_residual_tol_gt,
+    rescue_enabled,
+    rescue_max_it,
+    snes_atol_scale,
+    snes_monitor_enabled,
+    snes_restart_failure_atol_scale,
+    solver_view_enabled,
+    subcycles,
+    transport_solver_parameters,
+)
 
 lc = _lc()
+lc_coarse = _lc_coarse()
+buffer_m = float(os.environ.get("ISMIP7_BUFFER_M", "20000"))
 
 # Flow-law exponent for the composite viscous rheology: owned by
 # icepack2_tools.runconfig, which the inversion that produced the MAP reads
@@ -155,8 +187,14 @@ def latest_checkpoint(experiment_name, lc_val=None):
     return best
 
 
-def setup_model(restart_from=None):
-    r"""Load mesh, data, inversion fields, and build diagnostic solver."""
+def setup_model(restart_from=None, *, allow_timing_cache_a_ref=False):
+    r"""Load mesh, data, inversion fields, and build diagnostic solver.
+
+    ``allow_timing_cache_a_ref`` is the narrow exception used after a timing
+    manifest has been validated: it permits ``APPARENT_MB=div`` to be built
+    from that pristine initial state. Evolved restarts must carry their frozen
+    correction and cannot use this escape hatch.
+    """
     os.makedirs(RESULTS_DIR, exist_ok=True)
 
     # Friction law: "budd" (power-law dual, default) or "regularized_coulomb"
@@ -214,7 +252,7 @@ def setup_model(restart_from=None):
     source_chk = restart_from if is_restart else inv_fn
     PETSc.Sys.Print(f"Loading mesh + reference state: {source_chk}")
     with fd.CheckpointFile(source_chk, "r") as _chk:
-        mesh = _chk.load_mesh()
+        source_mesh = _chk.load_mesh()
         # A cold start normally binds itself to a MAP of the right
         # configuration through map_basename, which encodes friction, n and
         # geometry space. ISMIP7_INVERSION bypasses the name, so check the
@@ -246,6 +284,30 @@ def setup_model(restart_from=None):
                         f"configuration they were inverted for; point at a "
                         f"matching MAP or change the run's configuration."
                     )
+        checkpoint_metadata = {}
+        for _key in (
+            "timing_cache_schema_version",
+            "timing_cache_role",
+            "source_inversion",
+            "source_inversion_sha256",
+            "source_mesh_sha256",
+            "diagnostic_solver_mode",
+            "solver_configuration",
+            "solver_configuration_fingerprint",
+            "geometry_space",
+            "n_flow",
+            "a4_factor",
+            "geometry_source",
+            "geometry_source_method",
+            # Shelf gate the Budd state was solved under (runconfig
+            # .BUDD_SHELF_GATE); the timing lane checks it against the manifest.
+            "friction_gate",
+            # Residual of the saved mixed state under its writer's F; the
+            # restart fast path trusts the state only within a factor of it.
+            "full_state_residual",
+        ):
+            if _chk.has_attr("/", _key):
+                checkpoint_metadata[_key] = _chk.get_attr("/", _key)
         # The mesh this checkpoint was built on, recorded by the inversion and
         # carried through every restart. A CheckpointFile mesh is named
         # "firedrake_default", so this attribute is the only way the run can
@@ -293,6 +355,28 @@ def setup_model(restart_from=None):
                 mesh_filename(chk_lc_coarse,
                               chk_lc if chk_lc is not None else lc,
                               chk_buffer_m))
+
+    source_mesh_basename = mesh_basename
+    mesh_fn = os.environ.get("ISMIP7_MESH")
+    if mesh_fn:
+        # The timing matrix deliberately solves on a mesh different from the
+        # MAP mesh. Keep the checkpoint mesh as the interpolation source and
+        # use the requested mesh only for the target finite-element spaces.
+        mesh = Mesh(mesh_fn)
+        target_lc_coarse = lc_coarse
+        target_buffer_m = buffer_m
+        mesh_basename = os.path.basename(mesh_fn)
+        chk_lc = lc
+        chk_lc_coarse = target_lc_coarse
+        chk_buffer_m = target_buffer_m
+        PETSc.Sys.Print(
+            f"  Compute mesh override: {mesh_fn} "
+            f"({mesh.num_vertices()} vertices, {mesh.num_cells()} cells)"
+        )
+    else:
+        mesh = source_mesh
+        target_lc_coarse = chk_lc_coarse
+        target_buffer_m = chk_buffer_m
     PETSc.Sys.Print(f"  {mesh.num_vertices()} vertices, {mesh.num_cells()} cells")
     # The recorded basename is the provenance and WINS. ISMIP7_MESH is only a
     # fallback for legacy checkpoints that carry no attribute: it names the
@@ -319,6 +403,7 @@ def setup_model(restart_from=None):
 
     Q = FunctionSpace(mesh, "CG", 1)
     V = VectorFunctionSpace(mesh, "CG", 1)
+    Q_dg = FunctionSpace(mesh, "DG", 0)
     dg0 = FiniteElement("DG", "triangle", 0)
     Sigma = TensorFunctionSpace(mesh, dg0, symmetry=True)
     T = VectorFunctionSpace(mesh, dg0)
@@ -381,10 +466,20 @@ def setup_model(restart_from=None):
         fillvalue=0.0,
     )
 
+    geometry_source = checkpoint_metadata.get("geometry_source")
+    geometry_source_method = checkpoint_metadata.get(
+        "geometry_source_method"
+    )
     if not is_restart:
         # Cold start: geometry from BedMachine (RC/Budd overwrites it with the
-        # inversion-time geometry from the MAP in the reference-load block).
+        # inversion-time geometry from the MAP only when no target-mesh
+        # override is active; target timing meshes retain this cell average).
         bm_fn = find_file(os.path.join(DATA_DIR, "bedmachine"), "*.nc")
+        geometry_source = os.path.realpath(bm_fn)
+        geometry_source_method = (
+            TARGET_MESH_GEOMETRY_METHOD if geom_dg
+            else "target-native-bedmachine-nodal-v1"
+        )
         # Cell average onto the geometry space, NOT a centroid point sample --
         # see geometry.sample_to_geometry for the measurements behind that.
         PETSc.Sys.Print(f"  Raster sampling onto geometry cells: {chk_raster_sample}")
@@ -415,75 +510,95 @@ def setup_model(restart_from=None):
     phys_div = None
     h_dg_state = None
     t_restart = None
+    A_prior_f = None
     ismip7_resume = None
+    def load_checkpoint_field(chk, name, space, optional=False):
+        """Load a checkpoint field, interpolating it for a timing mesh."""
+        try:
+            source_field = chk.load_function(source_mesh, name=name)
+        except (KeyError, RuntimeError, ValueError):
+            if optional:
+                return None
+            raise
+        target_field = Function(space, name=name)
+        target_field.interpolate(
+            source_field,
+            allow_missing_dofs=True,
+            default_missing_val=0.0,
+        )
+        return target_field
+
     with fd.CheckpointFile(source_chk, "r") as chk:
-        _th = chk.load_function(mesh, name="log_friction")
-        _ph = chk.load_function(mesh, name="log_fluidity")
-        theta_f = Function(Q, name="theta"); theta_f.dat.data[:] = _th.dat.data_ro
-        phi_f = Function(Q, name="phi");     phi_f.dat.data[:] = _ph.dat.data_ro
+        theta_f = load_checkpoint_field(chk, "log_friction", Q)
+        theta_f.rename("theta")
+        phi_f = load_checkpoint_field(chk, "log_fluidity", Q)
+        phi_f.rename("phi")
         # Fluidity prior mean (physical thermomechanical field): the fluidity
         # control is phi = log(A / A_prior), so the forward must reconstruct
         # A = A_prior * exp(phi) with the SAME A_prior the inversion used. New
         # MAPs and restart checkpoints carry it; older ones (constant-baseline
         # MAPs) don't, and A4_base falls back to A0*a4_factor below.
-        try:
-            _ap = chk.load_function(mesh, name="fluidity_prior")
-            A_prior_f = Function(Q, name="fluidity_prior")
-            A_prior_f.dat.data[:] = _ap.dat.data_ro
-        except Exception:
-            A_prior_f = None
+        A_prior_f = load_checkpoint_field(
+            chk, "fluidity_prior", Q, optional=True
+        )
         if is_restart:
             # Self-contained restart: evolved geometry, frozen anchors, time.
-            _conv = False
-            b, _c = load_onto(chk, mesh, "bed", Q_g);            _conv |= _c
-            H, _c = load_onto(chk, mesh, "thickness", Q_g);      _conv |= _c
-            s, _c = load_onto(chk, mesh, "surface", Q_g);        _conv |= _c
-            H_init, _c = load_onto(chk, mesh, "H_init", Q_g);    _conv |= _c
-            phi_eff, _c = load_onto(chk, mesh, "phi_eff", Q_g);  _conv |= _c
-            if _conv:
-                PETSc.Sys.Print(
-                    "  WARNING: restart checkpoint stores geometry in a "
-                    "different space than ISMIP7_GEOMETRY_SPACE; projected. "
-                    "A run must not change geometry space mid-trajectory - "
-                    "restart from a checkpoint written by the same setting."
+            b = load_checkpoint_field(chk, "bed", Q_g)
+            H = load_checkpoint_field(chk, "thickness", Q_g)
+            s = load_checkpoint_field(chk, "surface", Q_g)
+            H_init = load_checkpoint_field(chk, "H_init", Q_g)
+            phi_eff = load_checkpoint_field(chk, "phi_eff", Q_g)
+            u_guess = load_checkpoint_field(chk, "velocity", V)
+            # Preserve the exact observation field used to construct the
+            # inversion-time friction anchor and report its initial misfit.
+            # A fresh raster interpolation is only a compatibility fallback
+            # for ordinary checkpoints written before this field was saved;
+            # current timing caches require velocity_obs and fail loudly if it
+            # is absent.
+            cached_u_obs = load_checkpoint_field(
+                chk, "velocity_obs", V, optional=True
+            )
+            if cached_u_obs is not None:
+                u_obs.assign(cached_u_obs)
+            elif checkpoint_metadata.get("timing_cache_role") == \
+                    "timing-initial-state":
+                raise RuntimeError(
+                    "Timing cache is missing required velocity_obs"
                 )
-            _u = chk.load_function(mesh, name="velocity")
-            u_guess = Function(V);                 u_guess.dat.data[:] = _u.dat.data_ro
             # Stress components (newer checkpoints): restoring them makes the
             # resume Newton start from the full converged state instead of
             # (u, 0, 0), which needed a fresh continuation ramp.
             try:
-                _M = chk.load_function(mesh, name="membrane_stress")
-                _ta = chk.load_function(mesh, name="basal_stress")
-                M_guess, tau_guess = _M, _ta
-            except Exception:
+                M_guess = load_checkpoint_field(chk, "membrane_stress", Sigma)
+                tau_guess = load_checkpoint_field(chk, "basal_stress", T)
+            except (KeyError, RuntimeError, ValueError):
                 M_guess = tau_guess = None
             # Frozen apparent-MB reference (present iff the run used
             # ISMIP7_APPARENT_MB): restarts must reuse the ORIGINAL t=0
             # correction, never recompute it from the evolved state.
-            try:
-                a_ref_mb = chk.load_function(mesh, name="a_ref_mb")
-            except Exception:
-                a_ref_mb = None
+            a_ref_mb = load_checkpoint_field(
+                chk, "a_ref_mb", Q_dg, optional=True
+            )
             # An adapted checkpoint carries the transferred PHYSICAL divergence
             # instead of a_ref (icepack2_tools.adapt_mesh); a_ref is rebuilt
             # below with this mesh's own operator.
-            try:
-                phys_div = chk.load_function(mesh, name="phys_div")
-            except Exception:
-                phys_div = None
+            phys_div = load_checkpoint_field(
+                chk, "phys_div", Q_dg, optional=True
+            )
             # Separate DG0 prognostic thickness (CG1-geometry runs only, where
             # the stored CG h was its lumped lift). Under DG0 geometry the
             # thickness IS the transport state, so there is nothing to restore.
             if not geom_dg:
                 try:
-                    h_dg_state = chk.load_function(mesh, name="thickness_dg")
-                except Exception:
+                    h_dg_state = load_checkpoint_field(
+                        chk, "thickness_dg", Q_dg
+                    )
+                except (KeyError, RuntimeError, ValueError):
                     h_dg_state = None
             if use_residual:
-                C_w0, _ = load_onto(chk, mesh, "C_w0", Q_g)
+                C_w0 = load_checkpoint_field(chk, "C_w0", Q_g)
             if friction == "budd":
-                N_ref, _ = load_onto(chk, mesh, "N_ref", Q_g)
+                N_ref = load_checkpoint_field(chk, "N_ref", Q_g)
             if chk.has_attr("/", "t_yr"):
                 t_restart = float(chk.get_attr("/", "t_yr"))
             # The ISMIP7 year in progress, so a link that stopped mid-year
@@ -528,11 +643,25 @@ def setup_model(restart_from=None):
                 PETSc.Sys.Print("  Apparent MB: adapted t=0 state, a_ref will be "
                                 "rebuilt on this mesh")
             elif a_ref_mb is None and amb_env is not None:
-                raise RuntimeError(
-                    f"ISMIP7_APPARENT_MB is set but restart checkpoint "
-                    f"{source_chk} has no a_ref_mb; a fresh a_ref cannot be "
-                    f"built from an evolved state. Set ISMIP7_APPARENT_MB=0 "
-                    f"or restart from a checkpoint that carries a_ref_mb."
+                is_timing_initial_state = (
+                    checkpoint_metadata.get("timing_cache_role")
+                    == "timing-initial-state"
+                )
+                if not (
+                    allow_timing_cache_a_ref
+                    and is_timing_initial_state
+                    and amb_env == "div"
+                ):
+                    raise RuntimeError(
+                        f"ISMIP7_APPARENT_MB is set but restart checkpoint "
+                        f"{source_chk} has no a_ref_mb; a fresh a_ref cannot "
+                        f"be built from an evolved state. Unset "
+                        f"ISMIP7_APPARENT_MB or restart from a checkpoint "
+                        f"that carries a_ref_mb."
+                    )
+                PETSc.Sys.Print(
+                    "  Validated timing initial state: fresh div(h*u) "
+                    "apparent-MB construction permitted"
                 )
             # projection.sbatch parses t_yr out of this line to learn
             # the year the job STARTED at, which is how it tells a link that
@@ -542,24 +671,36 @@ def setup_model(restart_from=None):
                 f"(t_yr={t_restart}, friction={friction})"
             )
         elif use_rc:
-            # Cold RC/Budd: geometry + velocity_obs from the MAP so the
-            # Weertman anchor C_w0 (hence the meaning of theta) is reproduced.
-            H, _c1 = load_onto(chk, mesh, "thickness", Q_g)
-            b, _c2 = load_onto(chk, mesh, "bed", Q_g)
-            s, _c3 = load_onto(chk, mesh, "surface", Q_g)
-            _uo = chk.load_function(mesh, name="velocity_obs")
-            u_obs.dat.data[:] = _uo.dat.data_ro
-            if _c1 or _c2 or _c3:
-                PETSc.Sys.Print(
-                    "  WARNING: this MAP stores geometry in a different space "
-                    "than ISMIP7_GEOMETRY_SPACE and has been PROJECTED.\n"
-                    "  The run will proceed, but theta/phi were inferred "
-                    "against the other representation - under CG1 geometry\n"
-                    "  the lumped lift biases the calving-front thickness "
-                    "high, and the inversion absorbs that into friction.\n"
-                    "  Re-invert with the same ISMIP7_GEOMETRY_SPACE before "
-                    "trusting any result from this MAP."
+            # Cold RC/Budd normally uses the inversion-time MAP geometry. A
+            # timing mesh override is different: interpolating a discontinuous
+            # source DG0 field directly onto target DG0 samples one source cell
+            # at each target centroid. The resulting aliasing is read as
+            # driving stress because DG0 surface slope lives in facet jumps.
+            # Retain the target-native BedMachine cell averages constructed
+            # above; C_w0, N_ref, phi_eff, and H_init are then built from this
+            # exact target geometry below. Continuous controls and u_obs still
+            # come from the imported inversion.
+            target_mesh_differs = (
+                mesh_fn
+                and geom_dg
+                and (
+                    not source_mesh_basename
+                    or os.path.basename(mesh_fn) != source_mesh_basename
                 )
+            )
+            if target_mesh_differs:
+                PETSc.Sys.Print(
+                    "  Target-mesh geometry: cell-averaged BedMachine "
+                    f"({os.path.basename(geometry_source)})"
+                )
+            else:
+                H = load_checkpoint_field(chk, "thickness", Q_g)
+                b = load_checkpoint_field(chk, "bed", Q_g)
+                s = load_checkpoint_field(chk, "surface", Q_g)
+                geometry_source = os.path.realpath(source_chk)
+                geometry_source_method = "checkpoint-native-v1"
+            _uo = load_checkpoint_field(chk, "velocity_obs", V)
+            u_obs.dat.data[:] = _uo.dat.data_ro
             if h_clamp_init > 0.0:
                 H.interpolate(max_value(H, Constant(h_clamp_init)))
                 s.interpolate(max_value(b + H, (Constant(1.0) - rho_ratio) * H))
@@ -673,15 +814,17 @@ def setup_model(restart_from=None):
         # ice-free buffer cells otherwise settle each diagnostic solve at a
         # velocity-runaway equilibrium (the Jul 2026 blow-up: ~2x/step outflux
         # growth, dt-independent, alpha_gl-immune). Linear drag ramping to
-        # zero at h_ocean; ON by default in the forward. The inversion
-        # operator (which never passes it) is unchanged, so existing MAPs
-        # stay consistent. The gia soft speed limiter (u_lim/k_lim) is OFF by
-        # default: its max() kink at u_lim breaks the nleqerr continuation
-        # (isolated Jul 18 2026); gia only tolerates it under newtontr with
-        # dt-retry. Enable via ISMIP7_U_LIM if a mid-run runaway ever needs a
-        # backstop.
-        ocean_drag = float(os.environ.get("ISMIP7_OCEAN_DRAG", "1e-2"))
-        h_ocean = float(os.environ.get("ISMIP7_H_OCEAN", "10.0"))
+        # zero at h_ocean; ON by default. The knobs are owned by
+        # runconfig.residual_stabilizers and the inversion passes the SAME
+        # ones, so an inverted mixed state is a solution of this F too --
+        # until 2026-09-14 it was not (||F|| 1e1 there vs 1e10 here), and
+        # the restart fast path below trusted it anyway. The gia soft speed
+        # limiter (u_lim/k_lim) is OFF by default: its max() kink at u_lim
+        # breaks the nleqerr continuation (isolated Jul 18 2026); gia only
+        # tolerates it under newtontr with dt-retry.
+        _stabilizers = residual_stabilizers()
+        ocean_drag = _stabilizers["ocean_drag"]
+        h_ocean = _stabilizers["h_ocean"]
         # DG0 gate on the ocean drag, 1 everywhere unless a level-set front
         # is running, which zeroes it in the water cells next to the front
         # each step (icepack2_tools.levelset). A live Function in the
@@ -694,7 +837,7 @@ def setup_model(restart_from=None):
         # limiter, which breaks it). The run loop's rescue ladder raises
         # k_lim to ISMIP7_K_LIM for trust-region rescue solves at wall
         # geometries (runaway front nodes), then zeroes it again.
-        u_lim = float(os.environ.get("ISMIP7_U_LIM", "2e4"))
+        u_lim = _stabilizers["u_lim"]
         k_lim = Constant(0.0)
         k_lim_rescue = float(os.environ.get("ISMIP7_K_LIM", "1e-3"))
         # GL-gated coercivity only for Budd (RC keeps its established form).
@@ -733,35 +876,60 @@ def setup_model(restart_from=None):
     # region (gia COUPLED_SOLVER's choice: more robust than line search at
     # stiff melt-driven GL-retreat geometries, where nleqerr hit walls
     # ~9 yr into the 32 km ssp585 run). Line search stays the default.
-    sparams = {
-        "snes_type": os.environ.get("ISMIP7_SNES_TYPE", "newtonls"),
-        # gia: hard-era Budd steps converge LINEARLY (~2%/iter under active
-        # trust region) and were being executed by the cap while still
-        # descending - patience beats retries. 200 suffices for newtonls
-        # eras; raise via env for newtontr pushes through hard geometry.
-        "snes_max_it": int(os.environ.get("ISMIP7_SNES_MAXIT", "200")),
-        "snes_linesearch_type": "nleqerr",
-        "snes_divergence_tolerance": -1,
-        "snes_stol": 0.0,
-        "ksp_type": "gmres",
-        "pc_type": "lu",
-        "pc_factor_mat_solver_type": "mumps",
-        "mat_mumps_icntl_14": 400,
-        "mat_mumps_icntl_24": 1,
-        "mat_mumps_cntl_3": 1e-12,
-    }
+    # gia: hard-era Budd steps converge LINEARLY (~2%/iter under active trust
+    # region) and were being executed by the cap while still descending -
+    # patience beats retries. 200 suffices for newtonls eras; raise via env for
+    # newtontr pushes through hard geometry.
+    sparams = diagnostic_solver_parameters()
+    linear_solver = diagnostic_solver_mode()
+    PETSc.Sys.Print(
+        f"  Linear solver: {linear_solver} "
+        f"({diagnostic_solver_label(linear_solver)})"
+    )
     # Optional SNES/KSP convergence monitoring (ISMIP7_SNES_MONITOR=1).
     # ISMIP7_SNES_LOG routes the output to a file (per run, so concurrent
     # debug runs don't interleave); otherwise it goes to stdout.
-    if os.environ.get("ISMIP7_SNES_MONITOR"):
-        _snes_log = os.environ.get("ISMIP7_SNES_LOG")
-        _viewer = f"ascii:{_snes_log}" if _snes_log else None
-        sparams.update({
-            "snes_monitor": _viewer,
-            "snes_converged_reason": _viewer,
-            "snes_linesearch_monitor": _viewer,
-            "ksp_converged_reason": _viewer,
-        })
+    _solver_log = None
+    _solver_monitor = snes_monitor_enabled()
+    _solver_view = solver_view_enabled()
+    if _solver_monitor or _solver_view:
+        _solver_log = os.environ.get("ISMIP7_SNES_LOG")
+        if _solver_log:
+            os.makedirs(
+                os.path.dirname(os.path.abspath(_solver_log)), exist_ok=True
+            )
+        # The fourth ASCII-viewer field is the PETSc file mode.  Append mode
+        # keeps our per-solve headers when a monitor opens the same file.
+        _viewer = f"ascii:{_solver_log}::append" if _solver_log else None
+        if _solver_monitor:
+            sparams.update({
+                "snes_monitor": _viewer,
+                "snes_converged_reason": _viewer,
+                "snes_linesearch_monitor": _viewer,
+                "ksp_monitor_short": _viewer,
+                "ksp_monitor_true_residual": _viewer,
+                "ksp_converged_reason": _viewer,
+            })
+        if _solver_monitor and linear_solver.startswith("scpc_"):
+            # The top-level FGMRES is still useful, but SCPC's condensed KSP
+            # identifies whether the velocity solve or the exact local
+            # elimination is responsible for a failure.
+            sparams.update({
+                "condensed_field_ksp_monitor_short": _viewer,
+                "condensed_field_ksp_monitor_true_residual": _viewer,
+                "condensed_field_ksp_converged_reason": _viewer,
+            })
+        if _solver_view:
+            sparams.update({
+                "snes_view": _viewer,
+                "ksp_view": _viewer,
+            })
+            if linear_solver.startswith("scpc_"):
+                sparams["condensed_field_ksp_view"] = _viewer
+        PETSc.Sys.Print(
+            f"  Solver diagnostics log: {_solver_log}" if _solver_log
+            else "  Solver diagnostics: stdout"
+        )
     fc_params = {"quadrature_degree": 4}
 
     z = Function(Z)
@@ -851,60 +1019,201 @@ def setup_model(restart_from=None):
             L += model.minimization.calving_terminus(**fields, outflow_ids=calving_ids)
         F = derivative(L, z)
 
+    if linear_solver.startswith("scpc_"):
+        # Firedrake's three-field SCPC expects both off-diagonal entries of the
+        # eliminated (M, tau) block to be present in split_form.  These fields
+        # are physically uncoupled, so UFL otherwise omits both structural-zero
+        # blocks and SCPC raises KeyError before assembly.  A runtime Constant
+        # preserves the block metadata while contributing exactly zero to the
+        # residual and Jacobian.  Do not replace it with the literal 0: UFL
+        # simplifies that away and recreates the missing-block failure.
+        scpc_structural_zero = Constant(0.0)
+        F += derivative(
+            scpc_structural_zero * M_s[0, 0] * tau_s[0] * dx, z
+        )
+
     prob = NonlinearVariationalProblem(
         F, z, form_compiler_parameters=fc_params
     )
-    slvr = NonlinearVariationalSolver(prob, solver_parameters=sparams)
+    slvr = NonlinearVariationalSolver(
+        prob,
+        solver_parameters=sparams,
+        options_prefix="ismip7_diagnostic_",
+    )
+
+    _solve_count = 0
+    solver_stats = []
+    _header_viewer = None
+    if _solver_log and mesh.comm.rank == 0:
+        _header_viewer = PETSc.Viewer().createASCII(
+            _solver_log,
+            mode=PETSc.Viewer.FileMode.APPEND,
+            comm=PETSc.COMM_SELF,
+        )
+
+    def _write_solve_header(label, **metadata):
+        nonlocal _solve_count
+        _solve_count += 1
+        details = " ".join(
+            f"{key}={value}" for key, value in metadata.items()
+        )
+        header = (
+            f"\n=== DIAGNOSTIC SOLVE {_solve_count:04d} | {label} | "
+            f"n_flow={float(n_flow):.6g} m_slide={float(m_slide):.6g} "
+            f"linear={linear_solver} snes={slvr.snes.getType()} "
+            f"ksp={sparams['ksp_type']} "
+            f"ksp_rtol={sparams.get('ksp_rtol', 'direct')} "
+            f"ksp_max_it={sparams.get('ksp_max_it', 'direct')}"
+            f"{(' ' + details) if details else ''} ===\n"
+        )
+        if _solver_log:
+            if mesh.comm.rank == 0:
+                _header_viewer.printfASCII(header)
+                _header_viewer.flush()
+            mesh.comm.barrier()
+        else:
+            PETSc.Sys.Print(header.rstrip())
+
+    def solve_diagnostic(label, **metadata):
+        """Execute one solve and always emit one compact convergence record."""
+        _write_solve_header(label, **metadata)
+        t0_solve = perf_counter()
+        try:
+            return slvr.solve()
+        finally:
+            elapsed = perf_counter() - t0_solve
+            reason = slvr.snes.getConvergedReason()
+            reason_name = getattr(reason, "name", str(int(reason)))
+            stat = {
+                "solve": _solve_count,
+                "label": label,
+                "snes_reason": reason_name,
+                "snes_iterations": slvr.snes.getIterationNumber(),
+                "linear_iterations": slvr.snes.getLinearSolveIterations(),
+                "function_norm": slvr.snes.getFunctionNorm(),
+                "seconds": elapsed,
+            }
+            solver_stats.append(stat)
+            PETSc.Sys.Print(
+                "=== DIAGNOSTIC RESULT "
+                f"{_solve_count:04d} | {label} | reason={reason_name} "
+                f"snes_its={stat['snes_iterations']} "
+                f"linear_its={stat['linear_iterations']} "
+                f"fnorm={stat['function_norm']:.6e} "
+                f"seconds={elapsed:.3f} ==="
+            )
 
     # Adaptive n/m continuation for the cold-start diagnostic solve. On a
     # fine mesh with a rough (mid-optimization) MAP the n=1→n_flow_val jump
     # can outrun Newton (DIVERGED_MAX_IT); restore the initial guess and
     # re-ramp with more, smaller steps rather than crashing. Escalates
     # ISMIP7_CONTINUATION_STEPS (default 8) → 2× → 4×.
-    base_steps = int(os.environ.get("ISMIP7_CONTINUATION_STEPS", "8"))
+    base_steps = continuation_steps()
     z_init = z.copy(deepcopy=True)
 
-    # Restart fast path: the checkpoint holds the last CONVERGED (u, M, tau)
-    # at the saved (post-transport) geometry, so the setup solve is just an
-    # ordinary warm step-solve - do it directly at full n/m with the normal
-    # rtol machinery. Re-ramping n back to 1 from a converged n=4 state is
-    # not only wasteful, it can be FATAL at a hard-era geometry (both 1873
-    # historical walls: the resume's setup ramp diverged before the time
-    # loop's rescue ladder ever ran). If even the direct solve fails, ACCEPT
-    # the loaded state as-is (it is the last converged solution; the time
-    # loop's rescue ladder then fights the hard step properly) - but with a
-    # TIGHT run tolerance derived from the loaded-state residual (1e-6 x
-    # ||F(z_loaded)||, a proxy for the converged scale), never the loose
-    # acceptance value: a loose persistent atol lets every later step
-    # "converge" at iteration 0 and silently freezes the velocity (the bug
-    # that invalidated the first 1873->2014 resume).
+    # Restart fast path: a checkpoint carrying the full mixed state (u, M,
+    # tau) is trusted WITHOUT a setup solve only when its residual under THIS
+    # F is at the level its writer recorded (full_state_residual, stamped by
+    # the inversion and by save_model_state):
+    #     ||F(z_loaded)|| <= snes_atol_scale x recorded.
+    # Solving an unchanged converged state again is redundant and pathological
+    # at the residual floor (the 2015.2 qualification cache ran 200 Newton
+    # iterations at ||F||=4e-5), which is why the fast path exists. Until
+    # 2026-09-14 it accepted ANY finite residual and scaled the run atol to
+    # it: the forward's own reloaded prepare caches (||F||~1e7-1e8) and
+    # inversion MAPs solved without the ocean_drag term (1.5e10) were
+    # "accepted" with run atol 1e1-1e4, and every strict scout ran away
+    # within four steps. A state above the limit, or without a record, is
+    # re-solved from the loaded guess with the step-size exit live and the
+    # iteration count bounded (final_solve_bounds: a floor-level start exits
+    # at iteration 0-1, a far one is an ordinary Newton solve), and the run
+    # atol then follows the achieved norm exactly as after a cold
+    # continuation. Velocity-only checkpoints take the same re-solve path
+    # because (u, 0, 0) is not a cached mixed solution.
+    #
+    # The accepted-state run tolerance stays TIGHT (1e-6 x ||F(z_loaded)||);
+    # never use the acceptance residual itself as a loose persistent atol:
+    # that let later steps "converge" at iteration zero and silently freeze
+    # the velocity (the bug that invalidated the first 1873->2014 resume).
     restart_solved = False
     if is_restart and u_guess is not None:
-        with assemble(F).dat.vec_ro as _rv:
+        n_flow.assign(n_flow_val)
+        m_slide.assign(m_slide_val)
+        with assemble(F, form_compiler_parameters=fc_params).dat.vec_ro as _rv:
             fnorm0 = _rv.norm()
-        try:
-            n_flow.assign(n_flow_val)
-            m_slide.assign(m_slide_val)
-            slvr.solve()
-            restart_solved = True
-            fnorm_conv = slvr.snes.getFunctionNorm()
-            if fnorm_conv > 0.0:
-                slvr.snes.setTolerances(atol=100.0 * fnorm_conv)
-            PETSc.Sys.Print(
-                f"Restart diagnostic re-solved at loaded state "
-                f"(||F|| {fnorm0:.2e} -> {fnorm_conv:.2e})"
+        if not np.isfinite(fnorm0):
+            raise RuntimeError(
+                "Restart checkpoint has a non-finite full-state residual"
             )
-        except fd.ConvergenceError:
-            z.assign(z_init)
+        restart_atol_scale = snes_restart_failure_atol_scale()
+        restart_atol = restart_atol_scale * fnorm0
+        recorded = checkpoint_metadata.get("full_state_residual")
+        try:
+            recorded = float(recorded) if recorded is not None else None
+        except (TypeError, ValueError):
+            recorded = None
+        if recorded is not None and not (np.isfinite(recorded) and recorded > 0.0):
+            recorded = None
+        accept_scale = snes_atol_scale()
+        accept_limit = accept_scale * recorded if recorded is not None else None
+        have_mixed = M_guess is not None and tau_guess is not None
+
+        if have_mixed and accept_limit is not None and fnorm0 <= accept_limit:
             restart_solved = True
             if fnorm0 > 0.0:
-                slvr.snes.setTolerances(atol=1e-6 * fnorm0)
+                slvr.snes.setTolerances(atol=restart_atol)
             PETSc.Sys.Print(
-                f"Restart solve did not converge at loaded geometry "
-                f"(hard era); keeping the loaded converged state and "
-                f"handing the step to the run's rescue ladder "
-                f"(atol={1e-6 * fnorm0:.2e})"
+                "Restart full mixed state accepted without a setup solve "
+                f"(||F||={fnorm0:.2e} <= {accept_limit:.2e} = {accept_scale:g} x "
+                f"recorded {recorded:.2e}; run atol={restart_atol:.2e})"
             )
+        else:
+            if not have_mixed:
+                why = "velocity-only checkpoint"
+            elif accept_limit is None:
+                why = "checkpoint records no full_state_residual"
+            else:
+                why = (
+                    f"||F||={fnorm0:.2e} exceeds {accept_limit:.2e} = "
+                    f"{accept_scale:g} x recorded {recorded:.2e}"
+                )
+            PETSc.Sys.Print(f"Restart state must be re-solved: {why}")
+            _rtol0, _atol0, _stol0, _max_it0 = slvr.snes.getTolerances()
+            _bounds = final_solve_bounds()
+            slvr.snes.setTolerances(
+                atol=accept_limit if accept_limit is not None else _atol0,
+                stol=_bounds["snes_stol"],
+                max_it=_bounds["snes_max_it"],
+            )
+            try:
+                solve_diagnostic(
+                    "restart-loaded-state",
+                    loaded_fnorm=f"{fnorm0:.3e}",
+                    recorded=("none" if recorded is None else f"{recorded:.3e}"),
+                )
+                restart_solved = True
+                fnorm_conv = slvr.snes.getFunctionNorm()
+                run_atol = (
+                    snes_atol_scale() * fnorm_conv if fnorm_conv > 0.0 else _atol0
+                )
+                slvr.snes.setTolerances(atol=run_atol, stol=_stol0, max_it=_max_it0)
+                PETSc.Sys.Print(
+                    f"Restart state re-solved (||F|| {fnorm0:.2e} -> "
+                    f"{fnorm_conv:.2e}; run atol={run_atol:.2e})"
+                )
+            except fd.ConvergenceError:
+                z.assign(z_init)
+                restart_solved = True
+                slvr.snes.setTolerances(
+                    atol=restart_atol if fnorm0 > 0.0 else _atol0,
+                    stol=_stol0,
+                    max_it=_max_it0,
+                )
+                PETSc.Sys.Print(
+                    "Restart state re-solve did not converge; keeping the "
+                    "loaded state and handing the step to the rescue ladder "
+                    f"(atol={restart_atol:.2e})"
+                )
 
     if not restart_solved:
         PETSc.Sys.Print(
@@ -918,10 +1227,15 @@ def setup_model(restart_from=None):
         (base_steps, 2 * base_steps, 4 * base_steps) if _run_continuation else ()
     ):
         try:
-            for t in np.linspace(0.0, 1.0, steps):
+            for step, t in enumerate(np.linspace(0.0, 1.0, steps), 1):
                 n_flow.assign(1.0 + t * (n_flow_val - 1.0))
                 m_slide.assign(1.0 + t * (m_slide_val - 1.0))
-                slvr.solve()
+                solve_diagnostic(
+                    "initial-continuation",
+                    attempt=attempt + 1,
+                    step=f"{step}/{steps}",
+                    t=f"{t:.6g}",
+                )
             PETSc.Sys.Print(f"  Done ({steps} continuation steps)")
             # Self-scaled absolute tolerance: a solve that STARTS at the
             # converged state (restart step 1: geometry unchanged since this
@@ -933,10 +1247,11 @@ def setup_model(restart_from=None):
             # usual rtol path is untouched.
             fnorm_conv = slvr.snes.getFunctionNorm()
             if fnorm_conv > 0.0:
-                slvr.snes.setTolerances(atol=100.0 * fnorm_conv)
+                atol_scale = snes_atol_scale()
+                slvr.snes.setTolerances(atol=atol_scale * fnorm_conv)
                 PETSc.Sys.Print(
-                    f"  snes_atol set to {100.0 * fnorm_conv:.2e} "
-                    f"(100x converged residual norm)"
+                    f"  snes_atol set to {atol_scale * fnorm_conv:.2e} "
+                    f"({atol_scale:g}x converged residual norm)"
                 )
             break
         except fd.ConvergenceError:
@@ -987,6 +1302,8 @@ def setup_model(restart_from=None):
         "geom_dg": geom_dg,
         "geom_xy": geom_xy,
         "mesh_basename": mesh_basename,
+        "geometry_source": geometry_source,
+        "geometry_source_method": geometry_source_method,
         "V": V,
         "Z": Z,
         "z": z,
@@ -994,6 +1311,12 @@ def setup_model(restart_from=None):
         "s": s,
         "b": b,
         "slvr": slvr,
+        # The momentum residual and its form-compiler parameters, so a state
+        # checkpoint can record ||F|| under the F its readers will assemble.
+        "F": F,
+        "fc_params": fc_params,
+        "solve_diagnostic": solve_diagnostic,
+        "solver_stats": solver_stats,
         "n_flow": n_flow,
         "n_flow_val": n_flow_val,
         "m_slide": m_slide,
@@ -1018,7 +1341,6 @@ def setup_model(restart_from=None):
         # (antarctica/scripts/inversion_td, not yet committed) reuses so its
         # forward solves match this one, alongside build_F and ISMIP7_INVERSION.
         "sparams": sparams,
-        "fc_params": fc_params,
         "A_map": A_map,
         # Mesh provenance from the source checkpoint (re-stamped into every
         # state checkpoint so warm restarts stay self-describing).
@@ -1045,9 +1367,131 @@ def setup_model(restart_from=None):
         # Resume time (None on a cold start); run_simulation continues the
         # timeline from here instead of the caller's t_start.
         "t_restart": t_restart,
+        # Timing-cache identity, if this is a prepared timing restart.
+        # Ordinary production checkpoints legitimately omit these fields.
+        "checkpoint_metadata": checkpoint_metadata,
         # The partly accumulated ISMIP7 year carried by the restart (or None).
         "ismip7_resume": ismip7_resume,
     }
+
+
+def save_model_state(ctx, final_path, t_now, extra_attrs=None):
+    r"""Atomically save one self-contained mixed state.
+
+    Ordinary simulation checkpoints and timing caches share this writer so a
+    cache cannot silently omit one of the frozen fields required on restart.
+    """
+    mesh = ctx["mesh"]
+    z = ctx["z"]
+    h = ctx["h"]
+    # Residual of the state being written, under the same F a restart will
+    # assemble: the restart fast path accepts the mixed state without a solve
+    # only within snes_atol_scale x this value. Measured at full n/m, which
+    # is where every writer calls this (after the cold continuation, or after
+    # a step's converged diagnostic solve).
+    full_state_residual = None
+    if ctx.get("F") is not None:
+        with assemble(
+            ctx["F"], form_compiler_parameters=ctx.get("fc_params")
+        ).dat.vec_ro as _rv:
+            full_state_residual = float(_rv.norm())
+    tmp = final_path + ".tmp"
+    with fd.CheckpointFile(tmp, "w") as chk:
+        chk.save_mesh(mesh)
+        chk.save_function(ctx["theta"], name="log_friction")
+        chk.save_function(ctx["phi"], name="log_fluidity")
+        chk.save_function(ctx["u_obs"], name="velocity_obs")
+        chk.save_function(ctx["b"], name="bed")
+        chk.save_function(h, name="thickness")
+        chk.save_function(ctx["s"], name="surface")
+        chk.save_function(z.subfunctions[0], name="velocity")
+        chk.save_function(z.subfunctions[1], name="membrane_stress")
+        chk.save_function(z.subfunctions[2], name="basal_stress")
+        chk.save_function(ctx.get("H_init", h), name="H_init")
+        chk.save_function(ctx["phi_eff"], name="phi_eff")
+        if ctx.get("C_w0") is not None:
+            chk.save_function(ctx["C_w0"], name="C_w0")
+        if ctx.get("N_ref") is not None:
+            chk.save_function(ctx["N_ref"], name="N_ref")
+        if ctx.get("A_prior") is not None:
+            chk.save_function(ctx["A_prior"], name="fluidity_prior")
+        if ctx.get("a_ref_mb") is not None:
+            chk.save_function(ctx["a_ref_mb"], name="a_ref_mb")
+        if ctx.get("level_set") is not None:
+            chk.save_function(ctx["level_set"].phi, name="levelset")
+        if not ctx.get("geom_dg", False):
+            h_dg = ctx.get("h_dg_state")
+            if h_dg is None:
+                raise RuntimeError(
+                    "CG1 state checkpoint requested before h_dg was prepared"
+                )
+            chk.save_function(h_dg, name="thickness_dg")
+        # The ISMIP7 year in progress (ismip7_output.AnnualOutput), so a
+        # chained resume continues the same year instead of losing it.
+        annual = ctx.get("annual")
+        if annual is not None:
+            for _name, _f in annual.state_fields().items():
+                chk.save_function(_f, name=_name)
+            for _key, _val in annual.state_attrs().items():
+                chk.set_attr("/", _key, _val)
+
+        chk.set_attr("/", "t_yr", float(t_now))
+        chk.set_attr("/", "friction", str(ctx.get("friction", "budd")))
+        if str(ctx.get("friction", "budd")) == "budd":
+            # Provenance of the shelf gate this state was solved under
+            # (runconfig.BUDD_SHELF_GATE); timing-cache manifests require it.
+            chk.set_attr("/", "friction_gate", _BUDD_SHELF_GATE)
+        chk.set_attr(
+            "/", "geometry_space", "dg0" if ctx.get("geom_dg") else "cg1"
+        )
+        if ctx.get("mesh_basename"):
+            chk.set_attr("/", "mesh_basename", str(ctx["mesh_basename"]))
+        for name in ("geometry_source", "geometry_source_method"):
+            if ctx.get(name):
+                chk.set_attr("/", name, str(ctx[name]))
+        for name in ("lc", "lc_coarse"):
+            if ctx.get(name) is not None:
+                chk.set_attr("/", name, int(ctx[name]))
+        if ctx.get("buffer_m") is not None:
+            chk.set_attr("/", "buffer_m", float(ctx["buffer_m"]))
+        if ctx.get("raster_sample"):
+            chk.set_attr("/", "raster_sample", str(ctx["raster_sample"]))
+        if full_state_residual is not None:
+            chk.set_attr("/", "full_state_residual", full_state_residual)
+        for name, value in (extra_attrs or {}).items():
+            if value is not None:
+                chk.set_attr("/", name, value)
+
+    mesh.comm.barrier()
+    if mesh.comm.rank == 0:
+        os.replace(tmp, final_path)
+    mesh.comm.barrier()
+
+
+def _global_argmax_with_payload(values, xy, payload, comm):
+    r"""Global argmax of ``values`` over the owned cells of every rank, with
+    the cell centre and the ``payload`` columns (name -> per-cell array) at
+    that cell. Non-finite values are ignored, one candidate per rank is
+    communicated and ties resolve by rank, so every rank sees the same
+    answer. Returns ``(value, (x, y), {name: value})``; the location and
+    fields are empty when no rank holds a finite value."""
+    values = np.asarray(values, dtype=float)
+    finite = np.isfinite(values)
+    if finite.any():
+        index = int(np.argmax(np.where(finite, values, -np.inf)))
+        candidate = (
+            float(values[index]),
+            int(comm.rank),
+            tuple(float(v) for v in np.asarray(xy)[index]),
+            {name: float(np.asarray(col)[index]) for name, col in payload.items()},
+        )
+    else:
+        candidate = (-np.inf, int(comm.rank), (), {})
+    candidates = comm.allgather(candidate)
+    value, _rank, location, fields = max(
+        candidates, key=lambda item: (item[0], -item[1])
+    )
+    return value, location, fields
 
 
 def run_simulation(
@@ -1069,6 +1513,7 @@ def run_simulation(
     s = ctx["s"]
     b = ctx["b"]
     slvr = ctx["slvr"]
+    solve_diagnostic = ctx["solve_diagnostic"]
     n_flow = ctx["n_flow"]
     n_flow_val = ctx["n_flow_val"]
     m_slide = ctx["m_slide"]
@@ -1078,16 +1523,6 @@ def run_simulation(
     phi_eff = ctx["phi_eff"]
     rho_ratio = ctx["rho_ratio"]
     h_clamp = ctx["h_clamp"]
-    # Reference/frozen fields persisted into each checkpoint (self-contained
-    # restart). theta/phi always present; C_w0/N_ref only for residual laws.
-    theta = ctx.get("theta")
-    phi = ctx.get("phi")
-    C_w0 = ctx.get("C_w0")
-    N_ref = ctx.get("N_ref")
-    A_prior = ctx.get("A_prior")
-    H_init_fn = ctx.get("H_init", h)
-    friction = ctx.get("friction", "budd")
-
     # Warm restart: continue the timeline from the checkpoint's saved year so
     # time-varying forcing (SSP projections) is applied at the correct year.
     t_restart = ctx.get("t_restart")
@@ -1115,13 +1550,13 @@ def run_simulation(
 
     Q_dg = FunctionSpace(mesh, "DG", 0)
     geom_dg = ctx.get("geom_dg", False)
-    mesh_basename = ctx.get("mesh_basename", "")
     # Under DG0 geometry the transport state IS the geometry - the same
     # Function object, not a copy. That is the whole point: the terminus
     # back-pressure and the boundary flux then integrate one thickness, so
     # they cannot disagree. Under CG1 geometry h_dg is a separate DG0 carrier
     # bridged by the lumped lift below.
     h_dg = h if geom_dg else Function(Q_dg, name="h_dg")
+    ctx["h_dg_state"] = h_dg
     h_dg_old = Function(Q_dg)
     phi_dg = fd.TestFunction(Q_dg)
     h_dg_trial = fd.TrialFunction(Q_dg)
@@ -1147,7 +1582,47 @@ def run_simulation(
     front_hmin = float(os.environ.get("ISMIP7_FRONT_HMIN", "1.0"))
     calving = _calving_law()
     beyond_front = None
+    n_beyond = 0
     cell_area = assemble(fd.TestFunction(Q_dg) * dx).dat.data_ro.copy()
+    # Runaway tripwire (ISMIP7_TRIPWIRE_U_MAX / _H_MAX / _DH_RATE / _HMIN; off
+    # unless set). A lane that is running away used to be reported only when
+    # the transport budget or Newton finally failed, three steps and half an
+    # hour after the fact; failing at the first step that exceeds a bound,
+    # naming the cell, lets the ladder experiments answer in minutes.
+    # U_MAX and H_MAX are absolute bounds (no Antarctic cell moves faster
+    # than 2e4 m/yr or is thicker than 5 km). DH_RATE bounds the relative
+    # thickening rate (dh/h)/dt [1/yr] of cells that entered the step at
+    # least HMIN thick. It is a rate, not a per-step fraction, so the same
+    # physics scores the same on every rung of a dt ladder: the 2026-09-15
+    # ladder was first stopped by a 0.3 m buffer cell filling at 70 m/yr
+    # (dh/h = 1.6 under a max(h, 10 m) floor) and then, with a 0.5 per-step
+    # bound, by a 168 m floating Amundsen cell fed at ~700 m/yr that scored
+    # 0.51 at dt = 0.125 and 0.27 at dt = 0.0625 -- the run at 0.0625 went
+    # on to complete 1.25 yr with flat speed and thickness. The passing
+    # run's largest relative rate was 6.8/yr (a 107 m buffer cell); the
+    # dt = 0.25 pile-up thickened 500 -> 3000 m within 0.25 yr (>= 20/yr at
+    # onset, ~100/yr later) with speed_max already at 3e4 m/yr.
+    _trip = os.environ.get("ISMIP7_TRIPWIRE_U_MAX", "").strip()
+    tripwire_u_max = float(_trip) if _trip else None
+    _trip = os.environ.get("ISMIP7_TRIPWIRE_H_MAX", "").strip()
+    tripwire_h_max = float(_trip) if _trip else None
+    _trip = os.environ.get("ISMIP7_TRIPWIRE_DH_RATE", "").strip()
+    tripwire_dh_rate = float(_trip) if _trip else None
+    tripwire_hmin = float(os.environ.get("ISMIP7_TRIPWIRE_HMIN", "100.0"))
+    tripwire_on = any(
+        bound is not None
+        for bound in (tripwire_u_max, tripwire_h_max, tripwire_dh_rate)
+    )
+    tripwire_cells = None
+    if tripwire_on:
+        # Per-cell context for the step report: the t=0 extent (buffer flag,
+        # same definition as the fixed front) and the bed (flotation flag).
+        tripwire_cells = {
+            "extent": Function(Q_dg).project(
+                ctx.get("H_init", h)
+            ).dat.data_ro.copy(),
+            "bed": Function(Q_dg).project(b).dat.data_ro.copy(),
+        }
     if fixed_front or calving != "none":
         # Mask from the t=0 observed extent (ctx["H_init"]), not the
         # current h: a restarted run must not re-mask cells that
@@ -1162,6 +1637,9 @@ def run_simulation(
             f"  Initial ice extent: {n_beyond} initially ice-free cells "
             f"masked (h < {front_hmin} m)"
         )
+    ctx["fixed_front"] = fixed_front
+    ctx["front_hmin"] = front_hmin
+    ctx["fixed_front_cells"] = n_beyond
 
     # Which mechanism owns the REMOVAL of ice past the t=0 extent. A configured
     # level-set law owns the front outright: the ISMIP7 control holds calving
@@ -1260,13 +1738,17 @@ def run_simulation(
                 f"re-solving diagnostic..."
             )
             try:
-                slvr.solve()
+                solve_diagnostic("geometry-lift")
             except fd.ConvergenceError:
-                PETSc.Sys.Print("    direct solve failed; re-ramping n...")
-                for _t in np.linspace(0.0, 1.0, 10):
+                PETSc.Sys.Print("    warm-start solve failed; re-ramping n...")
+                for step, _t in enumerate(np.linspace(0.0, 1.0, 10), 1):
                     n_flow.assign(1.0 + _t * (n_flow_val - 1.0))
                     m_slide.assign(1.0 + _t * (m_slide_val - 1.0))
-                    slvr.solve()
+                    solve_diagnostic(
+                        "geometry-lift-continuation",
+                        step=f"{step}/10",
+                        t=f"{_t:.6g}",
+                    )
 
     # Apparent-mass-balance reference (ISMIP7_APPARENT_MB=1): a frozen DG0
     # correction equal to the DISCRETE FV flux divergence of the initial
@@ -1354,72 +1836,128 @@ def run_simulation(
                 f"net {_net:+.1f} Gt/yr"
                 + (f" (cap [-{amb_cap:.0f}, +{5*amb_cap:.0f}])" if amb_cap > 0 else "")
             )
+        ctx["a_ref_mb"] = a_ref
+
+    # The transport operator has fixed topology; only its Function/Constant
+    # coefficients change.  Reuse one solver so every substep does not rebuild
+    # the variational problem and PETSc objects.  The stable prefix also makes
+    # transport-only PETSc inspection possible without touching the diagnostic
+    # solve.
+    u_transport = z.subfunctions[0]
+    un_transport = fd.dot(u_transport, n_facet)
+    un_transport_plus = (un_transport + abs(un_transport)) / 2
+    F_transport = (
+        (h_dg_trial - h_dg_old) / dt_c * phi_dg * dx
+        + (
+            un_transport_plus("+") * h_dg_trial("+")
+            - un_transport_plus("-") * h_dg_trial("-")
+        )
+        * fd.jump(phi_dg)
+        * dS
+        + un_transport_plus * h_dg_trial * phi_dg * ds
+        - src_dg * phi_dg * dx
+    )
+    if legacy_transport:
+        F_transport += -h_dg_trial * fd.div(
+            u_transport * phi_dg
+        ) * dx
+    transport_problem = LinearVariationalProblem(
+        fd.lhs(F_transport), fd.rhs(F_transport), h_dg
+    )
+    transport_solver = LinearVariationalSolver(
+        transport_problem,
+        solver_parameters=transport_solver_parameters(),
+        options_prefix="ismip7_transport_",
+    )
+
+    # Transport and field telemetry is retained in ctx so timing jobs can
+    # persist it beside the diagnostic-solver summary.  The extrema use owned
+    # dofs plus collective reductions; a rank-0 .dat statistic would depend on
+    # the mesh partition and can miss the cell where a runaway starts.
+    transport_stats = []
+    field_stats = []
+    ctx["transport_stats"] = transport_stats
+    ctx["field_stats"] = field_stats
+    transport_solve_count = 0
+    mass_tol_gt = mass_residual_tol_gt()
+    h_diag_xy = Function(
+        VectorFunctionSpace(mesh, Q_dg.ufl_element())
+    ).interpolate(fd.SpatialCoordinate(mesh))
+    speed_diag = Function(Q, name="speed_diagnostic")
+    speed_diag_xy = Function(
+        VectorFunctionSpace(mesh, Q.ufl_element())
+    ).interpolate(fd.SpatialCoordinate(mesh))
+
+    def _field_diagnostics(label):
+        r"""Log global h and |u| extrema, including their locations."""
+        speed_diag.interpolate(sqrt(fd.dot(u_transport, u_transport)))
+        h_min, h_min_xy = global_extreme_location(
+            h_dg, h_diag_xy, mode="min"
+        )
+        h_max, h_max_xy = global_extreme_location(
+            h_dg, h_diag_xy, mode="max"
+        )
+        u_min, u_min_xy = global_extreme_location(
+            speed_diag, speed_diag_xy, mode="min"
+        )
+        u_max, u_max_xy = global_extreme_location(
+            speed_diag, speed_diag_xy, mode="max"
+        )
+        stat = {
+            "label": label,
+            "thickness_min": h_min,
+            "thickness_min_xy": h_min_xy,
+            "thickness_max": h_max,
+            "thickness_max_xy": h_max_xy,
+            "speed_min": u_min,
+            "speed_min_xy": u_min_xy,
+            "speed_max": u_max,
+            "speed_max_xy": u_max_xy,
+        }
+        field_stats.append(stat)
+
+        def _xy(location):
+            return "(" + ", ".join(f"{value:.0f}" for value in location) + ")"
+
+        PETSc.Sys.Print(
+            f"=== FIELD RANGE | {label} | "
+            f"h=[{h_min:.6e} at {_xy(h_min_xy)}, "
+            f"{h_max:.6e} at {_xy(h_max_xy)}] m "
+            f"speed=[{u_min:.6e} at {_xy(u_min_xy)}, "
+            f"{u_max:.6e} at {_xy(u_max_xy)}] m/yr ==="
+        )
+        return stat
+
+    def _record_transport(label, elapsed, mass_residual_gt=None):
+        nonlocal transport_solve_count
+        transport_solve_count += 1
+        ksp = transport_solver.snes.getKSP()
+        reason = ksp.getConvergedReason()
+        reason_name = getattr(reason, "name", str(int(reason)))
+        stat = {
+            "solve": transport_solve_count,
+            "label": label,
+            "ksp_reason": reason_name,
+            "ksp_iterations": ksp.getIterationNumber(),
+            "residual_norm": ksp.getResidualNorm(),
+            "mass_residual_gt": mass_residual_gt,
+            "seconds": elapsed,
+        }
+        transport_stats.append(stat)
+        mass_text = (
+            "unavailable" if mass_residual_gt is None
+            else f"{mass_residual_gt:+.6e}"
+        )
+        PETSc.Sys.Print(
+            "=== TRANSPORT RESULT "
+            f"{transport_solve_count:04d} | {label} | reason={reason_name} "
+            f"ksp_its={stat['ksp_iterations']} "
+            f"rnorm={stat['residual_norm']:.6e} "
+            f"mass_resid_gt={mass_text} seconds={elapsed:.3f} ==="
+        )
+        return stat, int(reason)
 
     mass_prev = float(assemble(h * dx)) * rho_gt
-
-    def _save_state(final_path, t_now, stalled=False):
-        r"""Atomic, self-contained state checkpoint: mesh + frozen reference
-        fields (theta/phi/bed/C_w0/N_ref/H_init/phi_eff) + evolving (h, s, u)
-        + the timeline year. Written to a temp file and renamed, so a reboot
-        mid-write cannot corrupt the target a restart would resume from."""
-        tmp = final_path + ".tmp"
-        with fd.CheckpointFile(tmp, "w") as chk:
-            chk.save_mesh(mesh)
-            chk.save_function(theta, name="log_friction")
-            chk.save_function(phi, name="log_fluidity")
-            chk.save_function(b, name="bed")
-            chk.save_function(h, name="thickness")
-            chk.save_function(s, name="surface")
-            chk.save_function(z.subfunctions[0], name="velocity")
-            # Full solver state: with only u restored, a restarted step-1
-            # Newton starts from (u, 0, 0) and fails back into continuation;
-            # restoring M and tau makes the resume solve converge directly.
-            chk.save_function(z.subfunctions[1], name="membrane_stress")
-            chk.save_function(z.subfunctions[2], name="basal_stress")
-            chk.save_function(H_init_fn, name="H_init")
-            chk.save_function(phi_eff, name="phi_eff")
-            if C_w0 is not None:
-                chk.save_function(C_w0, name="C_w0")
-            if N_ref is not None:
-                chk.save_function(N_ref, name="N_ref")
-            if A_prior is not None:
-                chk.save_function(A_prior, name="fluidity_prior")
-            if a_ref is not None:
-                chk.save_function(a_ref, name="a_ref_mb")
-            if level_set is not None:
-                chk.save_function(level_set.phi, name="levelset")
-            # Separate transport state only under CG1 geometry, where the
-            # saved CG1 `thickness` is a lift and cannot reconstruct it.
-            # Under DG0 geometry `thickness` IS the transport state.
-            if not geom_dg:
-                chk.save_function(h_dg, name="thickness_dg")
-            if annual is not None:
-                for _name, _f in annual.state_fields().items():
-                    chk.save_function(_f, name=_name)
-                for _key, _val in annual.state_attrs().items():
-                    chk.set_attr("/", _key, _val)
-            chk.set_attr("/", "t_yr", float(t_now))
-            chk.set_attr("/", "friction", str(friction))
-            chk.set_attr("/", "geometry_space", "dg0" if geom_dg else "cg1")
-            if mesh_basename:
-                chk.set_attr("/", "mesh_basename", str(mesh_basename))
-            if ctx.get("lc") is not None:
-                chk.set_attr("/", "lc", int(ctx["lc"]))
-            if ctx.get("lc_coarse") is not None:
-                chk.set_attr("/", "lc_coarse", int(ctx["lc_coarse"]))
-            if ctx.get("buffer_m") is not None:
-                chk.set_attr("/", "buffer_m", float(ctx["buffer_m"]))
-            if ctx.get("raster_sample"):
-                chk.set_attr("/", "raster_sample", str(ctx["raster_sample"]))
-            # The driver's own verdict on why it stopped here, so a batch
-            # chain does not have to infer it from log text or from the year
-            # alone: 1 means the solver gave up, and resuming would re-attempt
-            # the same years and give up again.
-            chk.set_attr("/", "stalled", int(bool(stalled)))
-        mesh.comm.barrier()
-        if mesh.comm.rank == 0:
-            os.replace(tmp, final_path)
-        mesh.comm.barrier()
 
     def _prune_checkpoints():
         r"""Keep only the `keep_ckpts` most recently WRITTEN periodic state
@@ -1473,6 +2011,8 @@ def run_simulation(
             f"  ISMIP7 output: one checkpoint per year -> {_stem}_<year>{_ext}")
 
     results = []
+    ctx["results"] = results
+    ctx["failure"] = None
 
     # Crash-safe timeseries: append each row and flush, so a reboot keeps the
     # budget-audit history (it used to be dumped only at completion). On a
@@ -1535,12 +2075,17 @@ def run_simulation(
     # diverged Newton iterate.
     z_entry = z.copy(deepcopy=True)
     snes_type0 = slvr.snes.getType()
+    allow_rescue = rescue_enabled()
 
-    def _ramp():
-        for t in np.linspace(0.0, 1.0, 10):
+    def _ramp(label):
+        for step, t in enumerate(np.linspace(0.0, 1.0, 10), 1):
             n_flow.assign(1.0 + t * (n_flow_val - 1.0))
             m_slide.assign(1.0 + t * (m_slide_val - 1.0))
-            slvr.solve()
+            solve_diagnostic(
+                label,
+                step=f"{step}/10",
+                t=f"{t:.6g}",
+            )
 
     def _solve_with_rescue(k):
         r"""Diagnostic solve with an escalation ladder for hard eras
@@ -1551,28 +2096,69 @@ def run_simulation(
         always restores the configured SNES type and full n/m on exit.
         Returns True on success."""
         try:
-            slvr.solve()
+            solve_diagnostic(f"step-{k}-direct")
             return True
-        except fd.ConvergenceError:
-            pass
+        except fd.ConvergenceError as exc:
+            if not allow_rescue:
+                _field_diagnostics(f"step-{k}-diagnostic-failed")
+                PETSc.Sys.Print(
+                    f"  Step {k}: direct diagnostic solve failed; "
+                    "rescue disabled"
+                )
+                ctx["failure"] = {
+                    "category": "diagnostic_convergence",
+                    "phase": f"step-{k}-direct",
+                    "exception_type": type(exc).__name__,
+                    "message": str(exc),
+                }
+                raise
         k_lim_c = ctx.get("k_lim")
         k_rescue = ctx.get("k_lim_rescue", 0.0)
         # gia: hard-era steps under trust region converge LINEARLY and are
         # executed by the iteration cap while still descending - rescue
         # rungs get extra patience, restored afterwards.
-        rescue_maxit = int(os.environ.get("ISMIP7_RESCUE_MAXIT", "600"))
+        rescue_maxit = rescue_max_it()
         _rt, _at, _dt_, _mi = slvr.snes.getTolerances()
         attempts = [
-            ("re-doing continuation", snes_type0, _ramp, False),
-            ("trust-region retry", "newtontr", slvr.solve, False),
-            ("trust-region continuation", "newtontr", _ramp, False),
+            (
+                "re-doing continuation",
+                snes_type0,
+                lambda: _ramp(f"step-{k}-rescue-continuation"),
+                False,
+            ),
+            (
+                "trust-region retry",
+                "newtontr",
+                lambda: solve_diagnostic(f"step-{k}-trust-region"),
+                False,
+            ),
+            (
+                "trust-region continuation",
+                "newtontr",
+                lambda: _ramp(f"step-{k}-trust-region-continuation"),
+                False,
+            ),
         ]
         if k_lim_c is not None and k_rescue > 0.0:
             # Deepest rungs: pin the runaway front nodes with the soft speed
             # limiter (only |u| > u_lim feels it) while trust region solves.
             attempts += [
-                ("trust-region + speed limiter", "newtontr", slvr.solve, True),
-                ("trust-region + limiter continuation", "newtontr", _ramp, True),
+                (
+                    "trust-region + speed limiter",
+                    "newtontr",
+                    lambda: solve_diagnostic(
+                        f"step-{k}-trust-region-speed-limiter"
+                    ),
+                    True,
+                ),
+                (
+                    "trust-region + limiter continuation",
+                    "newtontr",
+                    lambda: _ramp(
+                        f"step-{k}-trust-region-limiter-continuation"
+                    ),
+                    True,
+                ),
             ]
         try:
             for label, stype, action, use_lim in attempts:
@@ -1666,10 +2252,13 @@ def run_simulation(
             drag_mask=ctx.get("drag_mask"), phi_init=phi_init,
         )
         phi_entry = Function(level_set.Q0)
+    # save_model_state writes the front and the ISMIP7 year in progress.
+    ctx["level_set"] = level_set
+    ctx["annual"] = annual
     a_ref_entry = Function(a_ref.function_space()) if a_ref is not None else None
     A_map = ctx.get("A_map")
 
-    def _advance(dt_local):
+    def _advance(dt_local, label):
         r"""One transport advance of dt_local with the CURRENT velocity
         (transport-first ordering: the velocity was solved at the current
         geometry). Mutates h_dg and the derived CG fields; returns the
@@ -1695,9 +2284,6 @@ def run_simulation(
             ls_ice_free = level_set.beyond_front()
             if a_ref is not None and free_front:
                 clear_reference_where_ice_free(a_ref.dat.data, ls_ice_free)
-
-        un = fd.dot(u_vel, n_facet)
-        un_plus = (un + abs(un)) / 2
 
         src = accum - ocean_melt
         amb_gt = 0.0
@@ -1728,29 +2314,66 @@ def run_simulation(
         limit_gt = mesh.comm.allreduce(float(
             ((src_dg.dat.data_ro - _src_want) * cell_area).sum()
         )) * rho_gt * dt_local
+        m0 = float(assemble(h_dg_old * dx)) * rho_gt
+        source_gt = float(assemble(src_dg * dx)) * rho_gt * dt_local
         dt_c.assign(dt_local)
-        F_prog = (
-            (h_dg_trial - h_dg_old) / dt_c * phi_dg * dx
-            + (un_plus("+") * h_dg_trial("+") - un_plus("-") * h_dg_trial("-"))
-            * fd.jump(phi_dg)
-            * dS
-            + un_plus * h_dg_trial * phi_dg * ds
-            - src_dg * phi_dg * dx
-        )
-        if legacy_transport:
-            F_prog += -h_dg_trial * fd.div(u_vel * phi_dg) * dx
-        fd.solve(
-            fd.lhs(F_prog) == fd.rhs(F_prog),
-            h_dg,
-            solver_parameters={
-                "ksp_type": "preonly",
-                "pc_type": "lu",
-                "pc_factor_mat_solver_type": "mumps",
-            },
-        )
+        transport_t0 = perf_counter()
+        try:
+            transport_solver.solve()
+        except Exception as exc:
+            elapsed = perf_counter() - transport_t0
+            _record_transport(label, elapsed)
+            _field_diagnostics(f"{label}-transport-failed")
+            ctx["failure"] = {
+                "category": "transport_convergence",
+                "phase": label,
+                "exception_type": type(exc).__name__,
+                "message": str(exc),
+            }
+            raise
 
-        out_gt = float(assemble(un_plus * h_dg * ds)) * rho_gt * dt_local
+        out_gt = float(assemble(
+            un_transport_plus * h_dg * ds
+        )) * rho_gt * dt_local
         m1 = float(assemble(h_dg * dx)) * rho_gt
+        transport_resid_gt = None
+        if not legacy_transport:
+            transport_resid_gt = (m1 - m0) - (source_gt - out_gt)
+        elapsed = perf_counter() - transport_t0
+        _transport_stat, transport_reason = _record_transport(
+            label, elapsed, transport_resid_gt
+        )
+        if transport_reason <= 0:
+            _field_diagnostics(f"{label}-transport-diverged")
+            ctx["failure"] = {
+                "category": "transport_convergence",
+                "phase": label,
+                "exception_type": "RuntimeError",
+                "message": (
+                    f"Transport KSP diverged in {label}: "
+                    f"reason={_transport_stat['ksp_reason']}"
+                ),
+            }
+            raise RuntimeError(
+                ctx["failure"]["message"]
+            )
+        if transport_resid_gt is not None and (
+            not np.isfinite(transport_resid_gt)
+            or abs(transport_resid_gt) > mass_tol_gt
+        ):
+            _field_diagnostics(f"{label}-transport-budget-failed")
+            message = (
+                f"Transport mass residual {transport_resid_gt:+.6e} Gt "
+                f"exceeds {mass_tol_gt:.6e} Gt in {label}"
+            )
+            PETSc.Sys.Print(f"ERROR: {message}")
+            ctx["failure"] = {
+                "category": "transport_mass_budget",
+                "phase": label,
+                "exception_type": "RuntimeError",
+                "message": message,
+            }
+            raise RuntimeError(message)
         # One mesh-wide interpolation for the whole advance: `s` is only
         # refreshed by _lift_h() at the end, so the booking, the floor
         # exemption and the collapse removal all mean the same grounding
@@ -1830,7 +2453,12 @@ def run_simulation(
         return {
             "out_gt": out_gt,
             "calv_gt": calv_gt,
+            # clamp_gt keeps the full sum (the step budget identity below
+            # depends on it); limit_gt is ALSO reported alone because it is
+            # exactly the error the positivity limiter introduces into an
+            # apparent-MB cancellation in thin converging cells.
             "clamp_gt": clamp_gt + clamp_cg_gt + limit_gt,
+            "limit_gt": limit_gt,
             "amb_gt": amb_gt,
         }
 
@@ -1843,8 +2471,12 @@ def run_simulation(
     # dt=0.025 approach crosses them - smaller geometry increments let
     # Newton track the branch through the event). Checkpoints improve too:
     # saved (h, u) are now mutually consistent.
-    SUBCYCLES = tuple(int(s) for s in
-                      os.environ.get("ISMIP7_SUBCYCLES", "1,4,16").split(","))
+    SUBCYCLES = subcycles()
+
+    # Timing drivers use this marker rather than timing setup_model or the
+    # transport-operator construction above.  It is also available after an
+    # exception, so a partial failure record retains the useful elapsed time.
+    ctx["transient_t0"] = perf_counter()
 
     # Wall-clock budget, in minutes from process start. A batch job that runs
     # into its Slurm limit is killed mid-step and loses everything since the
@@ -1919,10 +2551,12 @@ def run_simulation(
                     level_set.phi.assign(phi_entry)
                     level_set.update_cell_fields()
             acc = {"out_gt": 0.0, "calv_gt": 0.0, "clamp_gt": 0.0,
-                   "amb_gt": 0.0}
+                   "limit_gt": 0.0, "amb_gt": 0.0}
             ok = True
             for _j in range(m):
-                sub = _advance(dt / m)
+                sub = _advance(
+                    dt / m, f"step-{k}-substep-{_j + 1}/{m}"
+                )
                 for key in acc:
                     acc[key] += sub[key]
                 if not _solve_with_rescue(k):
@@ -1936,6 +2570,12 @@ def run_simulation(
                     annual.commit_step()
                 break
         if tallies is None:
+            ctx["failure"] = {
+                "category": "diagnostic_convergence",
+                "phase": f"step-{k}-rescue-exhausted",
+                "exception_type": "ConvergenceError",
+                "message": "diagnostic rescue ladder and subcycles exhausted",
+            }
             PETSc.Sys.Print(
                 f"  Step {k}: rescue ladder + subcycles exhausted, "
                 f"saving and stopping"
@@ -1972,6 +2612,138 @@ def run_simulation(
                         out_rate, calv_gt, clamp_all, resid_gt,
                         amb_rate))
         _write_csv_row(results[-1])
+        ctx.setdefault("step_budget", []).append({
+            "step": k,
+            "t_yr": float(t_yr),
+            "out_gt": float(tallies["out_gt"]),
+            "calv_gt": float(calv_gt),
+            "clamp_gt": float(clamp_all),
+            "limit_gt": float(tallies.get("limit_gt", 0.0)),
+            "amb_gt_per_yr": float(amb_rate),
+            "dm_gt": float(dm),
+            "resid_gt": float(resid_gt),
+        })
+
+        step_stat = _field_diagnostics(f"step-{k}-t={t_yr:.6g}")
+
+        if tripwire_on:
+            _h_now = np.asarray(h_dg.dat.data_ro)
+            _h_was = np.asarray(h_dg_entry.dat.data_ro)
+            _dh = _h_now - _h_was
+            _eligible = _h_was >= tripwire_hmin
+            growth = np.divide(
+                _dh, _h_was,
+                out=np.full(_dh.shape, -np.inf), where=_eligible,
+            )
+            _payload = {
+                "h_entry": _h_was,
+                "h_now": _h_now,
+                "dh": _dh,
+                "extent": tripwire_cells["extent"],
+                "bed": tripwire_cells["bed"],
+            }
+            _xy = np.asarray(h_diag_xy.dat.data_ro)
+            growth_max, growth_xy, growth_cell = _global_argmax_with_payload(
+                growth, _xy, _payload, mesh.comm
+            )
+            growth_rate_max = growth_max / dt          # (dh/h)/dt [1/yr]
+            dh_abs_max, dh_xy, dh_cell = _global_argmax_with_payload(
+                np.abs(_dh), _xy, _payload, mesh.comm
+            )
+            speed_max = float(step_stat["speed_max"])
+            speed_xy = step_stat["speed_max_xy"]
+            h_max = float(step_stat["thickness_max"])
+            h_max_xy = step_stat["thickness_max_xy"]
+
+            def _cell_txt(cell):
+                if not cell:
+                    return "-"
+                flags = []
+                if cell["extent"] < front_hmin:
+                    flags.append("buffer")
+                afloat = cell["h_now"] < (
+                    max(0.0, -cell["bed"]) * _RHO_W_SI / _RHO_I_SI
+                )
+                flags.append("floating" if afloat else "grounded")
+                return (
+                    f"h {cell['h_entry']:.1f}->{cell['h_now']:.1f} m, "
+                    + "/".join(flags)
+                )
+
+            def _xy_txt(location):
+                if not location:
+                    return "(-)"
+                return "(" + ", ".join(f"{v:.0f}" for v in location) + ")"
+
+            _growth_txt = (
+                f"{growth_rate_max:+.2f}/yr (dh/h={growth_max:+.3f})"
+                if np.isfinite(growth_max) else "n/a"
+            )
+            PETSc.Sys.Print(
+                f"  tripwire step-{k}: max (dh/h)/dt={_growth_txt} "
+                f"(cells h>={tripwire_hmin:g} m) at {_xy_txt(growth_xy)} "
+                f"[{_cell_txt(growth_cell)}]; max |dh|="
+                f"{dh_cell.get('dh', dh_abs_max):+.1f} m at {_xy_txt(dh_xy)} "
+                f"[{_cell_txt(dh_cell)}]; speed_max={speed_max:.3e} m/yr; "
+                f"h_max={h_max:.1f} m"
+            )
+            ctx.setdefault("tripwire", {
+                "u_max": tripwire_u_max,
+                "h_max": tripwire_h_max,
+                "dh_rate": tripwire_dh_rate,
+                "hmin": tripwire_hmin,
+                "steps": [],
+            })["steps"].append({
+                "step": k,
+                "speed_max": speed_max,
+                "speed_max_xy": list(speed_xy),
+                "thickness_max": h_max,
+                "thickness_max_xy": list(h_max_xy),
+                "growth_max": (
+                    float(growth_max) if np.isfinite(growth_max) else None
+                ),
+                "growth_rate_max": (
+                    float(growth_rate_max)
+                    if np.isfinite(growth_rate_max) else None
+                ),
+                "growth_max_xy": list(growth_xy),
+                "growth_max_cell": growth_cell,
+                "dh_abs_max": float(dh_abs_max),
+                "dh_abs_max_xy": list(dh_xy),
+                "dh_abs_max_cell": dh_cell,
+            })
+            tripped = []
+            if tripwire_u_max is not None and speed_max > tripwire_u_max:
+                tripped.append(
+                    f"speed_max={speed_max:.3e} m/yr at "
+                    f"{_xy_txt(speed_xy)} > {tripwire_u_max:g}"
+                )
+            if tripwire_h_max is not None and h_max > tripwire_h_max:
+                tripped.append(
+                    f"thickness_max={h_max:.1f} m at {_xy_txt(h_max_xy)} "
+                    f"> {tripwire_h_max:g}"
+                )
+            if (
+                tripwire_dh_rate is not None
+                and np.isfinite(growth_rate_max)
+                and growth_rate_max > tripwire_dh_rate
+            ):
+                tripped.append(
+                    f"(dh/h)/dt={growth_rate_max:.2f}/yr "
+                    f"(dh/h={growth_max:.3f} in one step of {dt:g} yr) at "
+                    f"{_xy_txt(growth_xy)} [{_cell_txt(growth_cell)}] "
+                    f"> {tripwire_dh_rate:g}/yr"
+                )
+            if tripped:
+                message = "; ".join(tripped)
+                ctx["failure"] = {
+                    "category": "runaway_tripwire",
+                    "phase": f"step-{k}",
+                    "exception_type": "RuntimeError",
+                    "message": message,
+                }
+                PETSc.Sys.Print(f"RUNAWAY TRIPWIRE step-{k}: {message}")
+                raise RuntimeError(f"runaway tripwire at step {k}: {message}")
         if annual is not None and abs(t_yr - round(t_yr)) < 1e-6:
             annual.year_end(h_dg, s, b, z.subfunctions[0], z.subfunctions[2],
                             _grounded_cells(), h_dg.dat.data_ro > 1.0)
@@ -1990,17 +2762,32 @@ def run_simulation(
                 f"dM/dt={dm/dt:+.0f} resid={resid_gt/dt:+.2f}"
             )
 
+        if not np.isfinite(resid_gt) or abs(resid_gt) > mass_tol_gt:
+            message = (
+                f"Step {k} mass residual {resid_gt:+.6e} Gt exceeds "
+                f"{mass_tol_gt:.6e} Gt"
+            )
+            PETSc.Sys.Print(f"ERROR: {message}")
+            ctx["failure"] = {
+                "category": "step_mass_budget",
+                "phase": f"step-{k}",
+                "exception_type": "RuntimeError",
+                "message": message,
+            }
+            raise RuntimeError(message)
+
         if k % ckpt_steps == 0:
             chk_fn = os.path.join(
                 RESULTS_DIR, f"{experiment_name}_{lc}_t{t_yr:.1f}.h5"
             )
-            _save_state(chk_fn, t_yr)
+            save_model_state(ctx, chk_fn, t_yr)
             _prune_checkpoints()
             PETSc.Sys.Print(f"    [checkpoint: {os.path.basename(chk_fn)}]")
 
         step_max_min = max(step_max_min,
                            (perf_counter() - t_step_start) / 60.0)
 
+    ctx["transient_seconds"] = perf_counter() - ctx["transient_t0"]
     PETSc.Sys.Print(f"\n{experiment_name} simulation complete.")
 
     # Final state is a self-contained checkpoint too (a valid restart source).
@@ -2008,7 +2795,14 @@ def run_simulation(
     # where it really stopped, not the nominal t_end.
     final_fn = os.path.join(RESULTS_DIR, f"{experiment_name}_{lc}_final.h5")
     last_t = results[-1][0] if results else t_start
-    _save_state(final_fn, last_t, stalled=stalled)
+    save_model_state(
+        ctx, final_fn, last_t,
+        # The driver's own verdict on why it stopped here, so a batch
+        # chain does not have to infer it from log text or from the year
+        # alone: 1 means the solver gave up, and resuming would re-attempt
+        # the same years and give up again.
+        extra_attrs={"stalled": int(bool(stalled))},
+    )
     # Printed on every exit, early stop included. projection.sbatch reads
     # this exact "Saved: <...>_final.h5" line out of its own Slurm log to find
     # THIS job's checkpoint (the results directory is flat and shared, so the

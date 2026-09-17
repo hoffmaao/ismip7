@@ -53,7 +53,7 @@ echo
 # does not survive the filter below, so the row would silently vanish.
 for n in 1 2 4 8 16 32; do
     [ "$n" -gt "${SLURM_NTASKS:-1}" ] && break
-    srun --ntasks="$n" --cpus-per-task=1 \
+    ismip7_mpirun "$n" \
         python -u antarctica/scripts/partition_probe.py "$MESH" 2>&1 \
         | grep -E "ranks=|Error|Traceback"
 done

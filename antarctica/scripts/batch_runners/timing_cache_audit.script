@@ -1,0 +1,44 @@
+#!/bin/bash
+
+# Read-only audit of one prepared timing cache's initial FV tendency.
+
+#SBATCH -o ant_timing_audit_%j.txt
+#SBATCH -e ant_timing_audit_%j.err
+
+# Resources, the account and the partition come from submit.sh, which reads
+# this cluster's sites/<name>.sh; nothing here names a cluster. Submit with
+#   scripts/batch_runners/submit.sh script scripts/batch_runners/timing_cache_audit.script --cd antarctica ...
+# as antarctica/Makefile and manage_timing_campaign.py do.
+cd "${SLURM_SUBMIT_DIR:-.}"
+# The site half only: every model setting arrives through --export, and
+# site_env.sh's defaults (ISMIP7_MESH, ISMIP7_FRICTION) are not this job's.
+. scripts/batch_runners/site_core.sh
+ismip7_activate
+ismip7_persistent_jit_cache
+ismip7_banner
+
+cache="${ISMIP7_TIMING_CACHE:?ISMIP7_TIMING_CACHE is required}"
+manifest="${ISMIP7_TIMING_CACHE_MANIFEST:?ISMIP7_TIMING_CACHE_MANIFEST is required}"
+output="${ISMIP7_TIMING_CACHE_AUDIT_OUTPUT:?ISMIP7_TIMING_CACHE_AUDIT_OUTPUT is required}"
+status="${ISMIP7_TIMING_CACHE_AUDIT_STATUS:?ISMIP7_TIMING_CACHE_AUDIT_STATUS is required}"
+
+write_status() {
+    status_tmp="${status}.tmp.${SLURM_JOB_ID:-$$}"
+    printf '%s job_id=%s timestamp=%s\n' \
+        "$1" "${SLURM_JOB_ID:-unknown}" "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
+        > "${status_tmp}"
+    mv -f "${status_tmp}" "${status}"
+}
+
+write_status "running phase=audit"
+set +e
+ismip7_mpirun "${SLURM_NTASKS}" python -u scripts/audit_timing_cache.py \
+    --cache "${cache}" --manifest "${manifest}" --output "${output}"
+audit_rc=$?
+set -e
+if [ "${audit_rc}" -ne 0 ]; then
+    write_status "failed phase=audit exit_code=${audit_rc}"
+    exit "${audit_rc}"
+fi
+
+write_status "finished phase=audit exit_code=0"

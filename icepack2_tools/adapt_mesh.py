@@ -15,7 +15,7 @@ icepack2 projects. Everything ISMIP7 adds is here:
   the geometry route, and the attributes a restart needs.
 
 The config comes from ``ISMIP7_ADAPT_*`` (``ISMIP7_ADAPT_PRESET=ua`` for Úa's
-Antarctic sizes); see ``UA_ADAPTIVE_MESH.md``.
+Antarctic sizes); see ``ADAPTIVE_MESH.md``.
 """
 
 import os

@@ -105,9 +105,12 @@ locally and its endpoint UUID.
 ### 0.5 Running on a cluster
 
 `antarctica/scripts/batch_runners/` is site neutral. One file per cluster in
-`sites/` holds the venv path, module loads, partitions, account and paths, and
-`submit.sh` composes the scheduler command from it. Rice NOTS and IU Quartz
-ship filled in, UChicago Midway is a stub, `sites/template.sh` is the blank.
+`sites/` holds the venv path (or container image), module loads, partitions,
+account, per-node limits and paths, and `submit.sh` composes the scheduler
+command from it. What is yours alone on a cluster (account, a private build,
+mail flags) goes in the git-ignored `sites/local.env`. Rice NOTS and IU Quartz
+ship filled in, UChicago Midway is a container site waiting for its partitions
+and account, `sites/template.sh` is the blank.
 
 ```bash
 antarctica/scripts/batch_runners/submit.sh inversion ISMIP7_LC=2000 \
@@ -117,7 +120,12 @@ ISMIP7_SITE=iu_quartz antarctica/scripts/batch_runners/submit.sh projection \
     ISMIP7_EXPERIMENT=ssp585_cesm_waccm ISMIP7_OUTPUT=1 --dry-run
 ```
 
-Details in `antarctica/scripts/batch_runners/readme.md`.
+The timing benchmark (section 7) goes through the same layer: `make timing`
+and `manage_timing_campaign.py` submit `batch_runners/timing_*.script` with
+`submit.sh script`, so they are the same commands at every site too.
+
+Details, and the six steps for a first day on a cluster, in
+`antarctica/scripts/batch_runners/readme.md`.
 
 ### 0.6 Repo layout
 
@@ -184,7 +192,11 @@ Three things:
 
 ```bash
 cd antarctica
-python scripts/download_forcing.py --login        # caches ~/.ismip7_globus_tokens.json
+# one-time: authenticate through the Globus CLI. It prints a URL to open in a
+# browser and takes the resulting code back, so it works from a headless
+# cluster login node; tokens are cached under ~/.globus/cli/.
+python -m pip install --user globus-cli   # if `globus` is not installed
+python scripts/download_forcing.py --login
 python scripts/download_forcing.py --list         # legacy climatology subtree; /ISMIP7/AIS needs the Globus web app
 export GLOBUS_LOCAL_ENDPOINT=<your-endpoint-uuid>
 python scripts/download_forcing.py --ocean        # thetao/so/tf + climatology + bias
@@ -536,6 +548,9 @@ core already at its target year is skipped. Output predating the annual-mean
 forcing fix is archived under `results/archive_stale_<stamp>/` and re-run.
 The runner's own knobs (`CORES`, `MAX_LOAD`, `MAX_ATTEMPTS`, `FRESH`, `REUSE`,
 `NRANKS`, `PROV_REF`) and the reuse rules are documented in its header.
+The runner pins `ISMIP7_DIAGNOSTIC_LINEAR_SOLVER=full_mumps` rather than
+inheriting the development default; override it only with a solver mode that
+has passed `make qualify` at the target configuration.
 
 Record each completed core with `python scripts/core_report.py --core <N>
 --name <exp> --csv <timeseries.csv> --log <run.log>` (add `--ctrl-csv` for a
@@ -550,6 +565,8 @@ projection), run in that run's own shell so it captures the environment.
 | `ISMIP7_MISFIT_NORM` | `sigma` divides each residual by its datum's squared error, giving a dimensionless chi^2; `none` is the legacy dimensional misfit. Selects the `ISMIP7_GAMMA_*` defaults | `sigma` |
 | `ISMIP7_LOG_VEL_WEIGHT` | weight on the ISSM logarithmic velocity misfit (cost function 103). The chi^2 alone over-weights slow interior ice and leaves discharge-carrying tributaries 40 to 50% too slow; the log term is scale free. `auto` equalises it with the chi^2 term at the warm-start state. Stamped into the MAP | `0` |
 | `ISMIP7_LOG_VEL_EPS` | regularisation speed (m/yr) inside the log | `1.0` |
+| `ISMIP7_WARM_START` | path to a MAP or timing-cache checkpoint used to seed `theta`/`phi` (and, when present, geometry, `fluidity_prior`, and the mixed diagnostic state). Fields are interpolated onto the live mesh, so a 1-core cache can warm-start a multi-rank invert | unset |
+| `ISMIP7_SKIP_CONTINUATION` | `1` skips the cold `n,m: 1→n` ramp on the initial solve and inside each annotated forward eval (single solve at full exponents). Auto-enabled when the warm start supplies a full mixed state | `0` |
 | `ISMIP7_GAMMA_THETA` / `ISMIP7_GAMMA_PHI` | Whittle-Matern prior strength on `θ` and `φ`, coupled to `ISMIP7_MISFIT_NORM` since normalising divides the misfit by about sigma^2 | `1e5` under `sigma`, `1e4` under `none` |
 | `ISMIP7_L_REG` | prior correlation length (m) | `7.5e3` |
 | `ISMIP7_MAXITER` | L-BFGS-B iteration cap | `500` |
@@ -574,13 +591,18 @@ projection), run in that run's own shell so it captures the environment.
 `ISMIP7_N_FLOW`), so an unset knob cannot mean one resolution to the inversion
 and another to the preflight.
 
+PETSc and recovery defaults have the same single-owner rule:
+`icepack2_tools/solverconfig.py` supplies the runtime dictionaries, the timing
+metadata, and the core-report provenance block. `simulation.py` must not
+redeclare those literals.
+
 | Env var | Meaning | Default |
 |---------|---------|---------|
 | `ISMIP7_LC` / `ISMIP7_LC_COARSE` | fine and coarse mesh resolution tags, selecting mesh and MAP | `2500` / `64000` |
 | `ISMIP7_BUFFER_M` | outline buffer (m) in the default mesh and sidecar names | `20000` |
 | `ISMIP7_MESH` | mesh path for the inversion and tools. A forward takes its mesh from the checkpoint | `mesh/antarctica_<COARSE>_<LC>_buffered<BUFFER_M>.msh` |
 | `ISMIP7_RASTER_SAMPLE` | how BedMachine lands on a DG0 cell. `vertex` projects the CG1 vertex interpolant; `cell_mean` takes the raster's true cell mean. `cell_mean` measured rougher: neighbouring cells share two of three vertex samples, so `vertex` damps jumps by construction. Cell means raised interior surface jumps 6% and bed and thickness jumps 35%, and at 2 km the momentum solve did not converge within 60 minutes. It does classify flotation better (32 km misclassification 9.1% to 3.2%), so the knob stays. Stamped into the MAP and read back by the forward. Reproduce with `probe_raster_sampling.py` | `vertex` |
-| `ISMIP7_INVERSION` | explicit MAP path for a forward or preflight. The forward checks the MAP's recorded `friction`, `n_flow` and `geometry_space` against the run and aborts on a mismatch, warning only when the MAP predates those attributes; `preflight.py` checks that the file exists. Use it to A/B MAPs on one mesh | derived |
+| `ISMIP7_INVERSION` | explicit MAP path for a forward or preflight. The forward checks the MAP's recorded `friction`, `n_flow` and `geometry_space` against the run and aborts on a mismatch, warning only when the MAP predates those attributes; `preflight.py` checks that the file exists. Use it to A/B MAPs on one mesh, or, with `ISMIP7_MESH` also set (the timing matrix), to run a MAP on a different mesh: its fields are then interpolated onto `ISMIP7_MESH` | derived |
 | `ISMIP7_CALVING` | `none`, `fixed` or `vonmises` (see above) | `none` |
 | `ISMIP7_CALVING_SIGMA_MAX_GROUNDED` / `_FLOATING` | von Mises thresholds (MPa) | `1.0` / `0.15` |
 | `ISMIP7_FRACTURE` | `mask` applies the ISMIP7 collapse forcing to floating cells, booked as calving. Masks exist for the SSPs only, so the control, historicals and OCX abort on `mask`. Needs DG0 | `none` |
@@ -588,6 +610,7 @@ and another to the preflight.
 | `ISMIP7_BNDIDS` | boundary-id JSON override | per-mesh sidecar, else `mesh/boundary_ids.json` |
 | `ISMIP7_GEOMETRY_SPACE` | `dg0` (one thickness for terminus force and mass flux) or `cg1` (legacy, A/B only). Selects the MAP. See `../GEOMETRY_DISCRETIZATION.md` | `dg0` |
 | `ISMIP7_DATA_ROOT` | forcing tree root | `<repo>/ISMIP7/AIS` |
+| `ISMIP7_OBS_DATA_ROOT` | BedMachine, MEaSUREs velocity, and RACMO observational-data root; useful when these files live on an external volume | `<repo>/antarctica/data` |
 | `ISMIP7_T_END` / `ISMIP7_DT` | end time and timestep (yr). `t=Y.0` is 1 January of year Y, so a run covering 2015 to 2300 ends at `2301` and a historical covering 1850 to 2014 ends at `2015`. Each driver owns its end (historical `2015`, ssp370 `2101`, other projections and control `2301`, OCX `2026`) | driver's own / `1.0` |
 | `ISMIP7_FRICTION` | `budd` or `regularized_coulomb`; selects the MAP | `budd` |
 | `ISMIP7_OUTPUT_INTERVAL` | timeseries row every N steps | `10` |
@@ -596,11 +619,24 @@ and another to the preflight.
 | `ISMIP7_AUTO_RESUME` | resume from this experiment's newest checkpoint when no `ISMIP7_RESTART` is given. An integer flag, `=0` disables it, since the runners export it unconditionally and `--export=ALL` cannot unset. `projection.sbatch` refuses to chain when it is off | unset |
 | `ISMIP7_RUN_TAG` | experiment-name suffix for a parallel method line | unset |
 | `ISMIP7_WALL_STOP_MIN` | wall-clock budget in minutes from process start, checked before each step against the longest step so far, so the run writes its final checkpoint and exits with `t_yr` short of `t_end` for a chained job to resume. `projection.sbatch` derives it from the job's own TimeLimit, holding back 25 minutes. `0` disables | `0` |
-| `ISMIP7_EXPERIMENT_NAME` | the run's identity, used by `adapt_mesh.py` to name adapted meshes and sidecars so parallel experiments cannot overwrite each other. Set by `run_adaptive.py --experiment-name`. See `../UA_ADAPTIVE_MESH.md` | unset |
+| `ISMIP7_EXPERIMENT_NAME` | the run's identity, used by `adapt_mesh.py` to name adapted meshes and sidecars so parallel experiments cannot overwrite each other. Set by `run_adaptive.py --experiment-name`. See `../ADAPTIVE_MESH.md` | unset |
 | `ISMIP7_APPARENT_MB` | `1` or `balance` zeroes the t=0 thickness tendency (ISMIP6 ctrl_proj style); `div` cancels only the flux divergence; `0`, `off`, `none` and empty disable it | unset |
 | `ISMIP7_FIXED_FRONT` | hold the calving front at the t=0 extent, tallying inflow beyond it as calving. `=0` disables. Ignored whenever an `ISMIP7_CALVING` law is configured | unset |
+| `ISMIP7_TRIPWIRE_U_MAX` / `ISMIP7_TRIPWIRE_H_MAX` / `ISMIP7_TRIPWIRE_DH_RATE` / `ISMIP7_TRIPWIRE_HMIN` | runaway tripwire: fail the step when max speed exceeds `U_MAX` [m/yr], max thickness exceeds `H_MAX` [m], or a cell that entered the step at least `HMIN` thick thickens at a relative rate `(dh/h)/dt` above `DH_RATE` [1/yr] (a rate so every dt scores the same physics alike; thinner cells are reported, never tripped: buffer cells fill by more than their own thickness); every step prints a `tripwire step-k:` line with the worst cells; unset = off (timing lanes export 2e4 / 5000 / 20 / 100) | _(unset)_ |
 | `ISMIP7_LEGACY_TRANSPORT` | restore the pre-July-2026 CG-projection transport (needs `cg1`) | unset |
 | `ISMIP7_SNES_TYPE` / `ISMIP7_SNES_MAXIT` | diagnostic Newton type and iteration cap | `newtonls` / `200` |
+| `ISMIP7_SNES_LINESEARCH` | line search used by `newtonls` | `nleqerr` |
+| `ISMIP7_SNES_RTOL` / `ISMIP7_SNES_ATOL` / `ISMIP7_SNES_STOL` | initial nonlinear relative, absolute and step tolerances. After the initial/restart solve, the absolute tolerance follows the self-scaled policy below | `1e-8` / `1e-50` / `0` |
+| `ISMIP7_SNES_DIVERGENCE_TOL` | residual-growth divergence threshold; PETSc's `-3` (`PETSC_UNLIMITED`) disables this test (`-1` means `PETSC_DETERMINE`, restoring the default `1e4`) | `-3` |
+| `ISMIP7_SNES_ATOL_SCALE` / `ISMIP7_SNES_RESTART_FAILURE_ATOL_SCALE` | persistent absolute tolerance after a converged setup solve (`scale * achieved norm`) / after accepting a loaded hard-era state (`scale * loaded-state norm`) | `100` / `1e-6` |
+| `ISMIP7_SNES_KSP_EW` | enable PETSc Eisenstat-Walker variable inner tolerance for an A/B test | `0` |
+| `ISMIP7_DIAGNOSTIC_LINEAR_SOLVER` | `schur_gamg` or `schur_mumps`: legacy PETSc `selfp` approximation; `scpc_gamg` or `scpc_mumps`: exact cell-local Slate elimination and an assembled velocity solve; `full_mumps`: complete mixed-Jacobian reference. Legacy `iterative`/`mumps` aliases mean `schur_gamg`/`schur_mumps` | `full_mumps` for forward drivers and the core runner; `scpc_mumps` in the timing Makefile |
+| `ISMIP7_KSP_RTOL` / `ISMIP7_KSP_MAXIT` | outer FGMRES relative tolerance / iteration limit for the iterative diagnostic mode | `1e-6` / `1000` |
+| `ISMIP7_SNES_MONITOR` / `ISMIP7_SNES_LOG` | enable diagnostic SNES/KSP monitors and optionally route them to a file; KSP output includes short and true residual lines per iteration, with a header before each mixed solve | `0` / stdout |
+| `ISMIP7_SOLVER_VIEW` | emit `snes_view`, outer `ksp_view`, and the SCPC condensed `ksp_view`; enabled by `make debug` and `make reference` to expose the actual block sizes and hierarchy | `0` |
+| `ISMIP7_TRANSPORT_KSP_RTOL` / `ISMIP7_TRANSPORT_KSP_MAXIT` | GMRES relative tolerance / iteration limit for the persistent DG0 transport solver (`ismip7_transport_` PETSc prefix) | `1e-10` / `500` |
+| `ISMIP7_MASS_RESIDUAL_TOL_GT` | fail-loud absolute tolerance for both the discrete transport identity and the complete step mass budget | `5e-5` Gt |
+| `ISMIP7_RESCUE_ENABLED` | permit a failed direct transient diagnostic solve to enter the continuation/trust-region/subcycle rescue ladder; set to `0` for strict timestep qualification | `1` |
 | `ISMIP7_K_MELT` / `ISMIP7_K_PER_BASIN_NPZ` | scalar Burgard K (projections), per-basin K file (control) | `1.15e-4` / `results/calibrated_K_per_basin_<lc>.npz` |
 | `ISMIP7_MELT_OBS_CSV` | per-basin melt observation table read by `scripts/calibrate_melt.py`; columns are located by header name, so either published table serves | `<DATA_ROOT>/meltobs/Melt_Paolo_Davison_Adusumilli_imbie2.csv`, else the older Paolo and Adusumilli table |
 | `ISMIP7_ESM` | ESM for the control | `CESM2-WACCM` |
@@ -616,6 +652,284 @@ and another to the preflight.
 > **dt guidance.** Use `ISMIP7_DT=0.1` for production projections. `0.25` is
 > acceptable when 10 steps per year is too costly. `dt=1.0` mis-melts per step
 > and resurrects clamped cells.
+
+---
+
+## 7. Timing benchmark (`make timing`)
+
+Resolution vs. core-count wall-clock benchmark for the transient solver. The
+campaign is a staged state machine: it prepares an exact-mesh state, runs one
+strict scout per mesh, and submits scaling lanes only after the corresponding
+scout passes. Every job is submitted through `batch_runners/submit.sh`, so the
+commands below are the same on any cluster with a site file (§0.5): the site
+supplies the account and partitions, `SLURM_QUEUE=short|long|debug` picks a
+partition by class, and `SLURM_PARTITION=` / `SLURM_CONSTRAINT=` name one
+outright. Lanes are single-node everywhere; one that this site's nodes cannot
+hold is recorded `not_runnable` (`exceeds_site_cores`, `exceeds_site_mem`) and
+shown as such in the matrix, so matrices from different sites stay comparable.
+Each record's `host` block names the site and node that measured it. Run from
+`antarctica/` (needs §1 data, Firedrake, and Slurm):
+
+```bash
+cd antarctica
+make timing
+# after the currently active stage settles, run the same command again
+make timing
+# synchronize from the cluster with a trailing-slash rsync source
+# (REMOTE_RESULTS=host:path/to/antarctica/results/; defaults to IU Quartz)
+make sync-results
+make matrix
+# → TIMING_MATRIX.md, showing 20 configured lanes plus NOT PLANNED cells
+# → results/timing/timing_<tag>_<LC>_<LC_coarse>_<ncores>.json
+```
+
+`make timing` first reuses a valid five-step `scpc_mumps` qualification (or
+runs it once), creates the rank-independent improved inversion if needed, and
+then advances only stages whose prerequisites already exist. It never
+resubmits an active job or an accepted result. Failed lanes remain failed for
+inspection; use `FORCE_TIMING=1` only for an intentional retry.
+
+The stages and contracts are:
+
+1. **Inversion provenance** — the only timing input is the campaign source
+   MAP (`TIMING_INVERSION`). Since 2026‑09‑17 that is
+   `results/timing/inversion/inversion_icepack2_budd_n3_dg0_logvelnet_2500_25000_250iter.h5`,
+   the 250‑iteration re‑inversion of the imported `dg0_logvelnet` MAP on the
+   2500/25000 campaign mesh under the HAF‑gated Budd law: the invert stage's
+   own output for that mesh, so the manager never re‑inverts or re‑prepares
+   the source mesh (its cache is the MAP itself, as the invert job published
+   it). The imported old‑gate MAP
+   (`mesh/inversion_icepack2_budd_n3_dg0_logvelnet_2500_1core.h5`) remains
+   the solver‑qualification input only: under the fixed law its transferred
+   controls run away at step 3 on every mesh. Cache manifests record the
+   source checksum and lane records its basename (`initial_state_source`),
+   so a cache or a current‑campaign record from any other source is never
+   reused. The redistribution launcher has distinct input/output arguments;
+   it never rewrites the source in place.
+2. **Prepared caches (`make timing-prepare`)** — one job for each of the ten
+   `(LC, LC_coarse)` meshes constructs `bed` and `thickness` as cell averages
+   of BedMachine on that exact target mesh, recomputes the hydrostatic surface,
+   performs the adaptive cold continuation, and saves the complete mixed state
+   at 2015.0 without a transport step. Only continuous inversion products
+   (controls, fluidity prior, and observed velocity) are transferred from the
+   imported MAP; direct DG0-to-DG0 interpolation is forbidden because it
+   aliases source cells at target centroids into artificial surface jumps. It
+   includes geometry, velocity, membrane and basal stress, controls, the exact
+   velocity observation field, physical priors,
+   frozen reference fields, mesh identity, solver configuration, and source
+   inversion checksum. Cache schema v3 requires an explicit inventory of these
+   fields, including `velocity_obs`, plus the target-geometry source and
+   construction method. The job then repacks the cache on one rank and
+   publishes the HDF5 file and JSON manifest atomically. Mesh, inversion,
+   physics, solver, or cache-schema changes invalidate it. The cache tag and
+   the campaign tag moved from `v3` to `v4` on 2026‑09‑16 when the Budd shelf
+   gate was fixed (height above flotation instead of the sign of roundoff
+   `N`, ported from hoffmaao/antarctica e602705): the manifest records
+   `friction_gate: haf` and validation requires it, so a v3 cache is never
+   reused, and v3 records are the old-law archive.
+3. **Per-mesh short inversion (`make timing-inversion`, optional)** — off by
+   default since 2026‑09‑15: `make timing` runs lanes from the transferred
+   prepare state (`TIMING_INITIAL_STATE=prepare`); `TIMING_INVERT=1` or
+   `TIMING_INITIAL_STATE=invert` re-inverts each mesh first and records those
+   lanes under the `…_reinverted` tag. Evidence for the default: every
+   strict-lane runaway sits in a floating margin cell, which the
+   grounded-only dH/dt misfit never sees, so 5- and 250-iteration inverts
+   moved the runaway (Amundsen → Pine Island) without curing it. When it
+   runs: after a valid prepared cache exists, one L-BFGS job per mesh
+   re-inverts with the
+   log-velocity + dH/dt + net-balance objective
+   (`ISMIP7_LOG_VEL_WEIGHT=auto`, `ISMIP7_DHDT_WEIGHT=1`,
+   `ISMIP7_DHDT_NET_SIGMA=10`). Default length is
+   `TIMING_INVERSION_MAXITER=250` (override with e.g. `=5` for a debug pass);
+   walltime defaults to `TIMING_INVERSION_TIME=24:00:00`. The job warm-starts
+   from the pristine copy of that mesh's prepared cache
+   (`…_buffered20000.prepare.h5`: controls, fluidity prior, geometry, and
+   mixed diagnostic state) and skips the cold `1→n` continuation. Ranks are 32
+   for LC &lt; 2500 m and 16 otherwise; memory follows `INVERSION_MEMORY_BY_LC`,
+   sized for the full mixed-Jacobian MUMPS factorisation plus the adjoint
+   tape rather than the condensed transient. **The 500 m meshes are not
+   re-inverted** (their invert needs ≈430 GB on one node); their lanes start
+   from the prepared cache, i.e. the transferred 2.5 km MAP, and
+   `TIMING_MATRIX.md` says so per mesh under "Initial states". After L-BFGS
+   the job publishes the mixed state at the returned controls with a
+   self-scaled absolute tolerance (`snes_atol = ISMIP7_SNES_ATOL_SCALE ×` the
+   residual the last accepted forward reached, bounded at
+   `ISMIP7_FINAL_SNES_MAXIT=50` iterations, reason always printed): when the
+   returned controls are the last evaluated point that solve confirms the
+   state at iteration 0 instead of grinding a converged residual against a
+   relative test. The parallel MAP is rewritten on one rank to
+   `results/timing/inversion/…_{lc}_{lc_coarse}_{N}iter.h5` with the full
+   mixed diagnostic state, a profiling JSON (including the final-solve
+   outcome) is written under `results/timing/`, then that checkpoint is
+   published as the timing cache (no second cold prepare) so scout/scale
+   provenance points at the short invert. The cache manifest keeps two
+   solver facts apart: `diagnostic_solver_mode` (`scpc_mumps`, the mode lanes
+   must run) and `state_solver` (`full_mumps`, what actually produced the
+   state). The inversion applies the forward's floor-cell stabilizers
+   (`ISMIP7_OCEAN_DRAG`, `ISMIP7_H_OCEAN`, `ISMIP7_U_LIM`, owned by
+   `runconfig.residual_stabilizers`), so its mixed state is a solution of the
+   residual the forward assembles at restart — before 2026‑09‑14 it was not
+   (`||F||` 1e1 in the inversion vs 1e10 in the forward on the same state).
+   Every state checkpoint, prepared cache or inversion MAP, records
+   `full_state_residual`; a restart accepts a mixed state without a solve
+   only when its residual is within `ISMIP7_SNES_ATOL_SCALE ×` that record,
+   and otherwise re-solves from the loaded guess (bounded, step-size exit
+   live) before the first step. `FOLLOW_PREPARE=1` queues each invert behind
+   its active prepare job; a running invert is never resubmitted, even with
+   `FORCE_TIMING=1`.
+4. **Cache audit / contract probe** — optional diagnostics on a prepared cache:
+   ```console
+   make timing-cache-audit TIMING_ONLY_MESH=2500/25000 \
+     SLURM_QUEUE=debug SLURM_TIME=00:15:00
+   ```
+
+   This submits a read-only assembly of the exact initial DG0 upwind
+   `div(h*u)` in one cache. It writes a JSON record under `results/timing/`
+   with global extrema, the fixed-front-masked equivalent, and a ranked
+   **hotspot table** (`--top`, default 20) scored by `|a_ref|·dt/h` — the
+   fraction of a cell's thickness the no-forcing tendency would move in one
+   step — with grounded/floating/buffer flags; it performs no diagnostic or
+   transport solve. On 2500/25000 the top rows are the cells where every
+   strict lane has run away.
+
+   To run one mesh under a different physics contract without touching the
+   campaign records (the experiment ladder):
+
+   ```console
+   make timing-probe TIMING_ONLY_MESH=2500/25000 TIMING_CONTRACT=divfront \
+     TIMING_SCOUT_MONITOR=1 SLURM_QUEUE=debug SLURM_TIME=01:00:00
+   ```
+
+   Contracts: `strict` (no apparent MB, no calving sink — the campaign
+   default), `div` (the exact uncapped `ISMIP7_APPARENT_MB=div` correction
+   built from the pristine cached state; `make timing-amb-probe` is its
+   alias), `front` (`ISMIP7_FIXED_FRONT=1`: ice advected beyond the 2015
+   extent is removed each step and tallied as calving), `divfront` (both —
+   the production closure). Probe records carry the `…_probe` suffix. Under
+   `div` and no forcing the corrected state is stationary away from
+   positivity-limited initially ice-free cells, so a passing probe diagnoses
+   the runaway but is not a representative timing measurement.
+
+5. **Scouts (`make timing-scout`)** — one lowest-retained-core lane per mesh:
+   32 ranks at 500 m and 16 ranks elsewhere. A scout passes only after five
+   direct steps, the exact final year, no negative solve reason or rescue
+   label, matching cache provenance (the per-mesh invert MAP, or the
+   transferred source MAP at 500 m), and transport and complete-step mass
+   residuals no larger than `5e-5 Gt`.
+6. **Scaling (`make timing-scale`)** — higher-core lanes are submitted only
+   for meshes whose scout passes. A failed scout stamps its scaling lanes
+   `BLOCKED BY SCOUT`; the jobs are not submitted. `FOLLOW_INVERT=1` lets
+   scouts and scaling lanes queue behind an active invert job
+   (`--dependency=afterok`). `TIMING_INITIAL_STATE=prepare` runs **control
+   lanes** from the transferred prepare cache with no invert gate (the cache
+   must have been published by `make timing-prepare`, not by an invert);
+   their records and stamps carry the `…_transferred` tag, so they never
+   count as campaign lanes, and `make matrix TIMING_TAG=<campaign tag>_transferred`
+   renders them separately. Inversion records written before the publish
+   gate (2026‑09‑14) are rejected; re-run the invert with `FORCE_TIMING=1`.
+7. **Strict transient timing** — all matrix lanes use `scpc_mumps`, disable
+   rescue, and restrict subcycles to `1`. The interval is
+   `MATRIX_STEPS` steps of `MATRIX_DT_2500 × LC / 2500` years (defaults 10 and
+   0.125 since the 2026-09-16 dt ladder: 5 × 0.25 runs away at step 2 while
+   10 × 0.125 and 20 × 0.0625 complete the 1.25 yr window with flat speed and
+   thickness; both are written into the campaign tag, e.g.
+   `scpc_mumps_10step_dt0p125at2500_…`, so a dt-ladder rung never mixes with
+   another) and the physics contract is `TIMING_CONTRACT` (default `strict`;
+   a non-strict contract suffixes the tag). The scaled step is capped at an
+   absolute `MATRIX_DT_MAX` = 0.125 yr (2026-09-17: both 5000 m scouts ran
+   away at dt 0.25 just as 2500/25000 does, a near-flotation cell flipping
+   between grounded and floating every step, so the stable step does not grow
+   with the mesh); the 5000 m lanes therefore cover 1.25 yr, not 2.5. The cap
+   is a constant, not part of the tag, and applies from campaign v4 on. Every lane runs the runaway
+   **tripwire**: the first step whose maximum speed exceeds
+   `ISMIP7_TRIPWIRE_U_MAX` (2e4 m/yr), whose maximum thickness exceeds
+   `ISMIP7_TRIPWIRE_H_MAX` (5000 m), or in which a cell at least
+   `ISMIP7_TRIPWIRE_HMIN` (100 m) thick thickens at a relative rate
+   `(dh/h)/dt` above `ISMIP7_TRIPWIRE_DH_RATE` (20/yr; a rate rather than a
+   per-step fraction, so each rung of a dt ladder is judged alike) fails at
+   once with the cell's coordinates, entry/exit thickness and
+   grounded/floating/buffer flags (`RUNAWAY TRIPWIRE step-k: …`, category
+   `runaway_tripwire`), instead of three steps later when the transport
+   budget finally breaks.
+   Thinner cells never trip (a 0.3 m buffer cell filling at 70 m/yr is not
+   a runaway) but every step's `tripwire step-k:` line names the worst
+   relative and absolute thickness change so a seed is visible before it
+   trips. The first diagnostic, transport, tripwire or
+   mass-budget failure ends the lane. The primary timer starts immediately
+   before the step loop, after cache loading, solver construction, and
+   transport setup; `setup_seconds` is reported separately. JSON records are
+   atomically written on catchable success or failure and include solver
+   histories, global mesh counts, extrema, residuals, phase, and completed
+   steps. Slurm-only termination (including exit 137) remains distinct from a
+   recorded numerical failure. The manager pins
+   `ISMIP7_SNES_DIVERGENCE_TOL=-3`, PETSc's `PETSC_UNLIMITED` sentinel, so the
+   solver reaches its real convergence or iteration-limit result; the legacy
+   value `-1` means `PETSC_DETERMINE` and accidentally restores the default
+   `1e4` growth cutoff.
+8. **Reporting and synchronization** — `make sync-results` uses
+   `quartz:/N/project/ice_rheology/ISMIP7/antarctica/results/` and the local
+   canonical `results/` with trailing slashes so the directory contents merge
+   at the correct level. Override `QUARTZ_RESULTS` if the remote checkout
+   moves. `make matrix` refuses to run if `antarctica/results/` is nested
+   beneath this directory. It labels numerical failures, OOM/external exits,
+   incomplete output, scout-blocked lanes, and `NOT PLANNED` separately.
+
+The selected matrix retains both coarse-mesh ratios and contains 20 lanes:
+
+| Fine LC | Retained ranks per mesh |
+|---:|---|
+| 500 m | 32, 64 |
+| 1000 m | 16, 32, 64 |
+| 2000 m | 16, 32 |
+| 2500 m | 16, 32 |
+| 5000 m | 16 |
+
+This is intentionally aggressive. Preliminary runs showed that 64 ranks gave
+only about 7–20% improvement over 32 on 2000–5000 m meshes; the
+5000/100000 case showed none, while 16→32 remained useful at 2000–2500 m.
+The slow/OOM-prone 500 m 16-rank lanes and both 5000 m higher-rank lanes are
+therefore omitted. Both coarse ratios remain because their observed scaling
+differs. Timesteps remain resolution-scaled from the measured safe 2.5 km
+value: 0.05, 0.10, 0.20, 0.25, and 0.50 yr for 500–5000 m, respectively.
+Revisit them only if strict scouts using the corrected inversion and caches
+fail.
+
+Individual stages can be run separately: `make meshes`, `make redistribute`,
+`make qualify`, `make timestep-probe`, `make timing-prepare`,
+`make timing-inversion`, `make timing-cache-audit`, `make timing-amb-probe`,
+`make timing-scout`,
+`make timing-scale`, `make sync-results`, and `make matrix`.
+`make timing-dry-run` prints the staged commands without submitting jobs.
+`make transient` routes matrix work through the scout gate;
+qualification/debug calls still use its direct compatibility path.
+Use `TIMING_ONLY_MESH=2500/25000` to prepare, invert, audit, probe, or scout one exact
+mesh, and add `TIMING_SCOUT_MONITOR=1` to write the scout/probe SNES/KSP
+monitor under `results/logs/`. Before treating a live-looking status as active,
+the campaign
+manager checks both `squeue` and `sacct`; a cancelled, timed-out, OOM, or
+otherwise terminated allocation is recorded as an external failure instead of
+being silently resubmitted.
+`make matrix-legacy` regenerates the archived 30-lane report at
+`TIMING_MATRIX_scpc_mumps_5step_dt0p25at2500.md`, using the copied Slurm logs
+to retain the distinction between numerical failures and incomplete output.
+`make solver-smoke` is the cheap setup check: on a 2×2 mesh and two MPI ranks
+it exercises the real mixed field shapes, all new condensation/MUMPS modes,
+and two coefficient updates through the persistent transport solver. It does
+not replace the Antarctic qualification probes.
+
+For a one-hour probe on the Slurm debug queue, use `make debug`. It submits one
+transient job on the same `antarctica_64000_2500.msh` / DG0-logvelnet MAP pair
+with `CORES=16`, using `--partition=debug --time=01:00:00 --mem=64G`. It uses
+exact Slate local condensation plus MUMPS/PT-Scotch on the velocity system,
+enables diagnostic SNES/KSP monitoring, and writes
+`results/logs/timing_scpc_mumps_debug_lc2500_lcc64000_n<cores>_<stamp>.log`.
+`make reference` uses that same input pair with the memory-heavy full
+mixed-Jacobian MUMPS baseline. Both are diagnostic probes, not substitutes for
+`make qualify`. Set `CORES=8` for an 8-core local probe.
+
+Slurm scripts live in `scripts/batch_runners/` (`timing_prepare.script`,
+`timing_redistribute.script`, and `timing_transient.script`), following the
+Quartz module-load pattern used by the other batch scripts.
 
 ---
 
@@ -663,6 +977,12 @@ built before this convention need renaming or rebuilding.
 
 **`icepack2_tools/coupled.py`** sketches ice-plume coupling against a
 `PlumeModel` that does not exist in this tree. Nothing runs it.
+
+**Timing runs are deliberately strict.** A matrix lane does not enter the
+diagnostic rescue ladder or retry with transport subcycles. The first failure
+is written to its timing JSON and status stamp, and a failed scout blocks that
+mesh's scaling lanes. Inspect the recorded category and the Slurm log before
+using `FORCE_TIMING=1` for an intentional retry.
 
 ---
 

@@ -15,6 +15,19 @@ cd "${SLURM_SUBMIT_DIR:-.}"
 ismip7_activate
 ismip7_banner
 echo "firedrake: $(python -c 'import firedrake,sys; print(firedrake.__version__)' 2>/dev/null | tail -1)"
+# A container site: the image must start in this directory and see this job's
+# environment. A checkout on a filesystem the runtime did not bind makes it
+# start in $HOME instead, and every relative path below then misses.
+if [ -n "${ISMIP7_CONTAINER:-}" ]; then
+    echo "container: $ISMIP7_CONTAINER ($ISMIP7_CONTAINER_RUNTIME)"
+    inside="$(ISMIP7_VERIFY_TOKEN=seen python -c 'import os; print(os.getcwd(), os.environ.get("ISMIP7_VERIFY_TOKEN"))' 2>&1 | tail -1)"
+    if [ "$inside" = "$(pwd -P) seen" ]; then
+        echo "    cwd and environment reach the image"
+    else
+        echo "    FAILED: inside the image cwd/env is '$inside', expected '$(pwd -P) seen'."
+        echo "    Bind the checkout's filesystem with ISMIP7_CONTAINER_ARGS='--bind /path'."
+    fi
+fi
 cat > "$PYOP2_CACHE_DIR/_part.py" <<'PYEOF'
 from firedrake import *
 from firedrake.petsc import PETSc
@@ -28,12 +41,12 @@ if m.comm.rank == 0:
     print(f"    {sys.argv[1]:9s} ranks={m.comm.size} ghost/owned = {g:.4f}")
 PYEOF
 for p in parmetis ptscotch simple; do
-    srun -n 4 python "$PYOP2_CACHE_DIR/_part.py" "$p" 2>"$PYOP2_CACHE_DIR/_err_$p.txt" | grep ghost \
+    ismip7_mpirun 4 python "$PYOP2_CACHE_DIR/_part.py" "$p" 2>"$PYOP2_CACHE_DIR/_err_$p.txt" | grep ghost \
         || { echo "    $p FAILED:"; grep -iE 'error|Traceback' "$PYOP2_CACHE_DIR/_err_$p.txt" | head -3; }
 done
 echo; echo "=== real mesh: antarctica_64000_2500.msh at 4 ranks, ptscotch vs simple ==="
 for p in ptscotch simple; do
-    srun -n 4 python -u antarctica/scripts/partition_probe.py antarctica/mesh/antarctica_64000_2500.msh \
+    ismip7_mpirun 4 python -u antarctica/scripts/partition_probe.py antarctica/mesh/antarctica_64000_2500.msh \
         -petscpartitioner_type "$p" 2>/dev/null | grep -E 'ranks=' | sed "s/^/    $p: /"
 done
 echo "=== $(date -Is) verify done ==="

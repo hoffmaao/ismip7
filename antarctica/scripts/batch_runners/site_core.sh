@@ -191,8 +191,9 @@ ismip7_activate_container() {
 ismip7_container_binds() {
     local d seen=" "
     ISMIP7_CONTAINER_BINDS=""
-    for d in "$ISMIP7_REPO" "$ISMIP7_WORK" "${ISMIP7_DATA_ROOT:-}" \
-             "${ISMIP7_OBS_DATA_ROOT:-}" "${PYOP2_CACHE_DIR:-}" "${ISMIP7_TIMING_JIT_CACHE:-}"; do
+    for d in "$ISMIP7_REPO" "$ISMIP7_WORK" "${ISMIP7_SHARE:-}" \
+             "${ISMIP7_DATA_ROOT:-}" "${ISMIP7_OBS_DATA_ROOT:-}" \
+             "${PYOP2_CACHE_DIR:-}" "${ISMIP7_TIMING_JIT_CACHE:-}"; do
         [ -n "$d" ] && [ -d "$d" ] || continue
         case "$seen" in *" $d "*) continue ;; esac
         seen="$seen$d "

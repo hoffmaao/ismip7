@@ -76,7 +76,6 @@ from icepack2.constants import (
 # absent from venv-firedrake-2026 and every rank died before loading data).
 
 _ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-DATA_DIR = os.path.join(_ROOT, "data")
 MESH_DIR = os.path.join(_ROOT, "mesh")
 FIG_DIR = os.path.join(_ROOT, "figs")
 
@@ -94,11 +93,14 @@ from icepack2_tools.mpi_stats import (global_mean, global_range,
                                       global_max, global_size, global_count)
 from icepack2_tools.naming import map_basename
 from icepack2_tools.runconfig import (
+    k_per_basin_candidates,
+    obs_data_root,
     BUDD_SHELF_GATE,
     friction as _friction, geometry_space as _geometry_space,
     raster_sample as _raster_sample,
     lc as _lc, lc_coarse as _lc_coarse, n_flow as _n_flow,
 )
+DATA_DIR = obs_data_root()
 from icepack2_tools.prior import (
     regularization_form as reg_form,
     regularization_gradient_form as reg_grad_form,
@@ -934,6 +936,10 @@ def main():
     # stamps net_sigma_used, so a MAP can never claim a constraint it never saw.
     use_dhdt_net = False
     net_sigma_used = 0.0
+    # The per-basin K the dH/dt melt source actually used, stamped into
+    # the MAP: the fallback below is quiet by design, so the artifact has
+    # to carry the answer.
+    k_npz_used = "none"
     if use_dhdt:
         if not geom_dg:
             raise RuntimeError(
@@ -966,13 +972,12 @@ def main():
         if os.environ.get("ISMIP7_DHDT_MELT", "1") != "0":
             from icepack2_tools.forcing import (
                 load_K_per_basin, make_climatology_ocean_callback)
-            _k_lc = os.path.join(_ROOT, "results",
-                                 f"calibrated_K_per_basin_{lc}.npz")
-            _k_2500 = os.path.join(_ROOT, "results",
-                                   "calibrated_K_per_basin_2500.npz")
-            k_npz = os.environ.get(
-                "ISMIP7_K_PER_BASIN_NPZ",
-                _k_lc if os.path.exists(_k_lc) else _k_2500)
+            _k_cands = k_per_basin_candidates(
+                os.path.join(_ROOT, "results"), lc)
+            k_npz = next((c for c in _k_cands if os.path.exists(c)),
+                         _k_cands[-1])
+            if os.path.exists(k_npz):
+                k_npz_used = k_npz
             if not os.path.exists(k_npz):
                 # Warn, do not abort: the melt source only touches shelf cells
                 # and the misfit is grounded-only, so an absent ocean
@@ -1372,6 +1377,11 @@ def main():
             chk.set_attr("/", "gamma_phi", float(GAMMA_PHI))
             chk.set_attr("/", "dhdt_weight", float(dhdt_w))
             chk.set_attr("/", "dhdt_net_sigma", net_sigma_used)
+            # Which per-basin K the dH/dt melt source used, or "none". The
+            # fallback is deliberately non-fatal (the misfit is grounded-only
+            # and melt is zero there), but a MAP that cannot say whether it
+            # had the calibration cannot be told apart from one that did.
+            chk.set_attr("/", "dhdt_melt_k_npz", str(k_npz_used))
             # How BedMachine was put onto the cells (runconfig.RASTER_SAMPLES).
             # theta/phi absorb the bed representation just as they absorb the
             # front treatment, so a forward must reproduce it.

@@ -158,6 +158,7 @@ ismip7_activate() {
     # shellcheck disable=SC1090
     . "$ISMIP7_FIREDRAKE"
     export OMP_NUM_THREADS=1          # one thread per rank; the solver is MPI-parallel
+    export OPENBLAS_NUM_THREADS=1     # likewise for the BLAS under PETSc and numpy
     # Each rank compiles UFL kernels; a shared cache on a networked filesystem
     # corrupts under concurrent writes (seen locally: "undefined symbol:
     # wrap_form0_cell_integral"). Every job gets its own, keyed on the job id,
@@ -165,6 +166,24 @@ ismip7_activate() {
     # object through --export=ALL.
     export PYOP2_CACHE_DIR="${SCRATCH:-$HOME}/.pyop2_cache/${SLURM_JOB_ID:-manual}"
     mkdir -p "$PYOP2_CACHE_DIR"
+}
+
+# For a job whose wall time is the measurement. ismip7_activate gives every job
+# a private, empty kernel cache, which is right for a chain link and wrong for a
+# timing lane: seconds_per_step is the whole transient loop over its steps with
+# no warm-up excluded, so a cold cache times the compiler. Call this after
+# ismip7_activate to go back to a cache that persists between jobs:
+# ISMIP7_TIMING_JIT_CACHE when the site or sites/local.env names one, otherwise
+# Firedrake's own default location, which is what the IU lanes have always used.
+ismip7_persistent_jit_cache() {
+    if [ -n "${ISMIP7_TIMING_JIT_CACHE:-}" ]; then
+        export PYOP2_CACHE_DIR="$ISMIP7_TIMING_JIT_CACHE/pyop2"
+        export FIREDRAKE_TSFC_KERNEL_CACHE_DIR="$ISMIP7_TIMING_JIT_CACHE/tsfc"
+        mkdir -p "$PYOP2_CACHE_DIR" "$FIREDRAKE_TSFC_KERNEL_CACHE_DIR"
+    else
+        rmdir "$PYOP2_CACHE_DIR" 2>/dev/null || true
+        unset PYOP2_CACHE_DIR
+    fi
 }
 
 # Launch an MPI program on N ranks inside the running allocation:

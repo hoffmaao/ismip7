@@ -111,7 +111,8 @@ such in `TIMING_MATRIX.md`. A `--constraint` given by hand (`SLURM_CONSTRAINT=`
 in the Makefile) skips the check, since the limits describe
 `ISMIP7_CONSTRAINT_TIMING`'s nodes and not the ones you named. A lane's
 `seconds_per_step` has no warm-up excluded, so the timing scripts keep a kernel
-cache that persists between jobs (Firedrake's default location, or
+cache that persists between jobs (the one the site's modules or venv already
+name, as IU's firedrake modulefile does; else Firedrake's default location; or
 `ISMIP7_TIMING_JIT_CACHE`) rather than the private per-job one
 `ismip7_activate` gives the runners. Each record's `host` block says which site
 and node measured it and whether that cache started empty.

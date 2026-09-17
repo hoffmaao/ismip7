@@ -215,6 +215,12 @@ ismip7_activate() {
         # shellcheck disable=SC1090
         . "$ISMIP7_FIREDRAKE"
     fi
+    # What the site's own modules or venv say about kernel caches, before the
+    # per-job one below replaces it: ismip7_persistent_jit_cache puts it back.
+    # IU's firedrake modulefile points both at a scratch directory, and that
+    # is the warm cache every IU timing lane has been measured with.
+    _ISMIP7_SITE_PYOP2_CACHE_DIR="${PYOP2_CACHE_DIR:-}"
+    _ISMIP7_SITE_TSFC_CACHE_DIR="${FIREDRAKE_TSFC_KERNEL_CACHE_DIR:-}"
     export OMP_NUM_THREADS=1          # one thread per rank; the solver is MPI-parallel
     export OPENBLAS_NUM_THREADS=1     # likewise for the BLAS under PETSc and numpy
     # Each rank compiles UFL kernels; a shared cache on a networked filesystem
@@ -232,16 +238,22 @@ ismip7_activate() {
 # a private, empty kernel cache, which is right for a chain link and wrong for a
 # timing lane: seconds_per_step is the whole transient loop over its steps with
 # no warm-up excluded, so a cold cache times the compiler. Call this after
-# ismip7_activate to go back to a cache that persists between jobs:
-# ISMIP7_TIMING_JIT_CACHE when the site or sites/local.env names one, otherwise
-# Firedrake's own default location, which is what the IU lanes have always used.
+# ismip7_activate to go back to a cache that persists between jobs, in order:
+# ISMIP7_TIMING_JIT_CACHE when the site or sites/local.env names one; else
+# whatever the site's modules or venv had set before ismip7_activate replaced
+# it (IU's modulefile names a scratch directory); else Firedrake's own default.
 ismip7_persistent_jit_cache() {
+    rmdir "$PYOP2_CACHE_DIR" 2>/dev/null || true
     if [ -n "${ISMIP7_TIMING_JIT_CACHE:-}" ]; then
         export PYOP2_CACHE_DIR="$ISMIP7_TIMING_JIT_CACHE/pyop2"
         export FIREDRAKE_TSFC_KERNEL_CACHE_DIR="$ISMIP7_TIMING_JIT_CACHE/tsfc"
         mkdir -p "$PYOP2_CACHE_DIR" "$FIREDRAKE_TSFC_KERNEL_CACHE_DIR"
+    elif [ -n "${_ISMIP7_SITE_PYOP2_CACHE_DIR:-}" ]; then
+        export PYOP2_CACHE_DIR="$_ISMIP7_SITE_PYOP2_CACHE_DIR"
+        if [ -n "${_ISMIP7_SITE_TSFC_CACHE_DIR:-}" ]; then
+            export FIREDRAKE_TSFC_KERNEL_CACHE_DIR="$_ISMIP7_SITE_TSFC_CACHE_DIR"
+        fi
     else
-        rmdir "$PYOP2_CACHE_DIR" 2>/dev/null || true
         unset PYOP2_CACHE_DIR
     fi
     [ -n "$ISMIP7_CONTAINER" ] && ismip7_container_binds

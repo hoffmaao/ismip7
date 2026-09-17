@@ -71,6 +71,7 @@ ISMIP7_TIME_FWD="${ISMIP7_TIME_FWD:-1-00:00:00}"
 #   ISMIP7_CORES_PER_NODE="${ISMIP7_CORES_PER_NODE:-}"
 #   ISMIP7_MEM_PER_NODE="${ISMIP7_MEM_PER_NODE:-}"
 # A timing lane's step time has no warm-up excluded, so its kernel cache must
-# persist between jobs. Unset, that is Firedrake's own default location; name a
+# persist between jobs. Unset, that is whatever cache this site's modules or
+# venv already name (IU's modulefile does), else Firedrake's own default; name a
 # directory here if that one is not writable or not shared by the compute nodes.
 #   ISMIP7_TIMING_JIT_CACHE="${ISMIP7_TIMING_JIT_CACHE:-$ISMIP7_WORK/.ismip7_timing_jit}"

@@ -118,6 +118,30 @@ def test_the_kernel_cache_persists_between_lanes(sandbox):
     assert (jit / "pyop2").is_dir()
 
 
+def test_a_cache_the_site_s_own_environment_names_is_the_one_kept(sandbox):
+    r"""Found on Quartz: IU's firedrake modulefile sets PYOP2_CACHE_DIR and the
+    TSFC cache to a scratch directory, and that is the warm cache every lane
+    there was measured with. ismip7_activate replaces it with a per-job one, so
+    simply unsetting that afterwards sent the first ported scout to an empty
+    default cache: 17 s of compilation inside step 1 and 37.2 s/step against a
+    32.8 reference. What the modules or venv set has to come back."""
+    site_cache = sandbox / "scratch" / "firedrake.cache"
+    (sandbox / "activate").write_text(
+        "export FAKE_VENV_ACTIVE=1\n"
+        f"export PYOP2_CACHE_DIR={site_cache}\n"
+        f"export FIREDRAKE_TSFC_KERNEL_CACHE_DIR={site_cache}\n")
+    proc, seen = run_script(sandbox, "timing_transient.script")
+    assert proc.returncode == 0, proc.stderr
+    assert f"PYOP2_CACHE_DIR={site_cache}" in seen
+    assert f"FIREDRAKE_TSFC_KERNEL_CACHE_DIR={site_cache}" in seen
+    assert not (sandbox / ".pyop2_cache" / "777").exists()
+    # A cache named for the timing lanes still wins over the site's.
+    jit = sandbox / "jit"
+    proc, seen = run_script(sandbox, "timing_transient.script",
+                            ISMIP7_TIMING_JIT_CACHE=str(jit))
+    assert f"PYOP2_CACHE_DIR={jit}/pyop2" in seen[len(seen) // 2:]
+
+
 def test_a_killed_lane_is_stamped_failed_and_a_specific_stamp_is_kept(sandbox):
     status = sandbox / "status.txt"
     proc, _ = run_script(sandbox, "timing_transient.script",

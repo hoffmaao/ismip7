@@ -153,3 +153,20 @@ def test_a_site_with_an_empty_required_field_names_it(runners):
     assert rc == 2
     assert "is missing:" in err and "ISMIP7_PART_LONG" in err and "ISMIP7_WORK" in err
     assert "ISMIP7_REPO" not in err.split("is missing:")[1].splitlines()[0]
+
+
+@pytest.mark.parametrize("env,expected", [
+    (dict(ISMIP7_SITE="iu_quartz"), ["", "128", "515700M"]),
+    (dict(ISMIP7_SITE="rice_nots"), ["cascadelake", "40", "187G"]),
+    (dict(ISMIP7_SITE="rice_nots", ISMIP7_CONSTRAINT_TIMING="sapphirerapids"),
+     ["sapphirerapids", "96", ""]),
+    (dict(ISMIP7_SITE="local"), ["", "", ""]),
+])
+def test_the_per_node_limits_describe_the_timing_node_class(runners, env, expected):
+    r"""`submit.sh script` refuses what one node cannot hold, so the limits have
+    to be those of the nodes ISMIP7_CONSTRAINT_TIMING selects, and a site that
+    states none (the no-scheduler one) refuses nothing."""
+    names = ("ISMIP7_CONSTRAINT_TIMING", "ISMIP7_CORES_PER_NODE", "ISMIP7_MEM_PER_NODE")
+    rc, out, err = source(runners, "site_core.sh", show(*names), **env)
+    assert rc == 0, err
+    assert [line.split("=", 1)[1] for line in out.splitlines()] == expected

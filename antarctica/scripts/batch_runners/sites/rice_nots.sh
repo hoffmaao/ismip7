@@ -40,3 +40,20 @@ ISMIP7_TASKS_FWD="${ISMIP7_TASKS_FWD:-12}"
 ISMIP7_MEM_FWD="${ISMIP7_MEM_FWD:-96G}"
 ISMIP7_TIME_INV="${ISMIP7_TIME_INV:-3-00:00:00}"
 ISMIP7_TIME_FWD="${ISMIP7_TIME_FWD:-1-00:00:00}"
+
+# The timing campaign (`submit.sh script`, antarctica/Makefile) runs where the
+# forwards do unless told otherwise, and a lane that one such node cannot hold
+# is recorded not runnable rather than resized. The figures are the ones above:
+# Cascade Lake is 80 threads, so 40 physical cores under --hint=nomultithread,
+# and 187 GB; Sapphire Rapids is 192 threads and 257 to 515 GB depending on the
+# node, so it gets a core limit and no single memory limit. On cascadelake the
+# 64-rank lanes and the 240G (500 m) and 192G (1 km inversion) requests do not
+# fit; ISMIP7_CONSTRAINT_TIMING=sapphirerapids in sites/local.env runs them.
+ISMIP7_CONSTRAINT_TIMING="${ISMIP7_CONSTRAINT_TIMING:-$ISMIP7_CONSTRAINT_FWD}"
+case "$ISMIP7_CONSTRAINT_TIMING" in
+    cascadelake)
+        ISMIP7_CORES_PER_NODE="${ISMIP7_CORES_PER_NODE:-40}"
+        ISMIP7_MEM_PER_NODE="${ISMIP7_MEM_PER_NODE:-187G}" ;;
+    sapphirerapids)
+        ISMIP7_CORES_PER_NODE="${ISMIP7_CORES_PER_NODE:-96}" ;;
+esac

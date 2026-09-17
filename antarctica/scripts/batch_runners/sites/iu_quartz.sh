@@ -31,3 +31,9 @@ ISMIP7_TASKS="${ISMIP7_TASKS:-16}"
 ISMIP7_MEM="${ISMIP7_MEM:-240G}"
 ISMIP7_TIME_INV="${ISMIP7_TIME_INV:-48:00:00}"
 ISMIP7_TIME_FWD="${ISMIP7_TIME_FWD:-24:00:00}"
+
+# One node, from `sinfo -p general,debug -N -o "%c %m"` (September 2026): all 90
+# are 128 cores and 515700 MB, with no feature to choose between. `submit.sh
+# script` refuses a timing lane that asks for more than this.
+ISMIP7_CORES_PER_NODE="${ISMIP7_CORES_PER_NODE:-128}"
+ISMIP7_MEM_PER_NODE="${ISMIP7_MEM_PER_NODE:-515700M}"

@@ -2,8 +2,9 @@
 # `timing_matrix` branch (antarctica/scripts/batch_runners/timing_*.script),
 # which is where these module names, the account and the venv path come from.
 # The defaults below point at an existing IU build. A second IU user keeps the
-# module stack and points ISMIP7_FIREDRAKE at their own build (or at that one,
-# if it is readable to them) and ISMIP7_ACCOUNT at their own allocation.
+# module stack and, in sites/local.env, points ISMIP7_FIREDRAKE at their own
+# build (or at that one, if it is readable to them) and ISMIP7_ACCOUNT at
+# their own allocation.
 
 ISMIP7_SITE_NAME="iu_quartz"
 ISMIP7_SITE_MATCH="quartz* h2.quartz* login*.quartz.uits.iu.edu"
@@ -20,7 +21,9 @@ ISMIP7_PART_DEBUG="${ISMIP7_PART_DEBUG:-debug}"
 ISMIP7_ACCOUNT="${ISMIP7_ACCOUNT:-r00905}"
 ISMIP7_CONSTRAINT="${ISMIP7_CONSTRAINT:-}"
 
-ISMIP7_REPO="${ISMIP7_REPO:-$HOME/ismip7}"
+# The checkout the submission came from (site_core.sh works it out), so a
+# second worktree runs its own tree without anything being edited.
+ISMIP7_REPO="${ISMIP7_REPO:-$ISMIP7_REPO_SELF}"
 ISMIP7_WORK="${ISMIP7_WORK:-$HOME}"
 
 # The IU timing runs use 12 to 16 ranks per node, 128 to 240 GB, up to 48 h.

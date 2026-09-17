@@ -1,5 +1,9 @@
 # Site definition template. Copy to sites/<your-site>.sh, fill in, and either
-# name it in ISMIP7_SITE or let site_env.sh match it by hostname.
+# name it in ISMIP7_SITE or let site_core.sh match it by hostname.
+#
+# A site file describes a CLUSTER and is tracked. What is yours alone on that
+# cluster (account, a private build, a mail address) goes in sites/local.env,
+# which git ignores; sites/local.env.example is its blank.
 #
 # Nothing here submits anything: these are the answers to "where is Firedrake,
 # what does the scheduler want, and where does the data live" for one cluster.
@@ -28,8 +32,9 @@ ISMIP7_CONSTRAINT="${ISMIP7_CONSTRAINT:-}"
 # --- REQUIRED: paths ---------------------------------------------------
 # The checkout, and the filesystem that can hold the forcing tree (about 25 GB
 # per ESM and scenario, 313 GB for the whole AIS tree). Home directories
-# usually cannot; a projects or scratch share can.
-ISMIP7_REPO="${ISMIP7_REPO:-}"
+# usually cannot; a projects or scratch share can. ISMIP7_REPO_SELF is the
+# checkout the submission came from, which is nearly always the right one.
+ISMIP7_REPO="${ISMIP7_REPO:-$ISMIP7_REPO_SELF}"
 ISMIP7_WORK="${ISMIP7_WORK:-}"
 
 # --- optional: default job size ----------------------------------------

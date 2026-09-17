@@ -86,6 +86,22 @@ ISMIP7_REQUIRED="ISMIP7_FIREDRAKE ISMIP7_PART_LONG ISMIP7_PART_SHORT ISMIP7_PART
 # has nothing to name yet. It asks for the rest.
 ISMIP7_REQUIRED_BUILD="ISMIP7_PART_LONG ISMIP7_PART_SHORT ISMIP7_PART_DEBUG ISMIP7_REPO ISMIP7_WORK"
 
+# A site can run Firedrake from a container image instead of a venv: set
+# ISMIP7_CONTAINER to the image (.sif) and ISMIP7_FIREDRAKE is not asked for.
+#   ISMIP7_CONTAINER_RUNTIME   apptainer (default) or singularity
+#   ISMIP7_CONTAINER_ARGS      extra `exec` flags, e.g. more --bind pairs. The
+#                              checkout, ISMIP7_WORK, ISMIP7_DATA_ROOT and the
+#                              kernel cache are bound already. Never --cleanenv:
+#                              a job's configuration is its ISMIP7_* environment.
+#   ISMIP7_CONTAINER_MPIEXEC   the launcher INSIDE the image (default mpiexec),
+#                              with any flags it needs there
+# ISMIP7_MODULES is still loaded first, for whatever provides the runtime.
+ISMIP7_CONTAINER="${ISMIP7_CONTAINER:-}"
+ISMIP7_CONTAINER_RUNTIME="${ISMIP7_CONTAINER_RUNTIME:-apptainer}"
+ISMIP7_CONTAINER_ARGS="${ISMIP7_CONTAINER_ARGS:-}"
+ISMIP7_CONTAINER_MPIEXEC="${ISMIP7_CONTAINER_MPIEXEC:-mpiexec}"
+[ -n "$ISMIP7_CONTAINER" ] && ISMIP7_REQUIRED="$ISMIP7_REQUIRED_BUILD"
+
 ismip7_site_require() {
     local missing=""
     local v
@@ -147,16 +163,58 @@ ismip7_load_modules() {
     fi
 }
 
+# Container sites: check the image and the runtime, and put container_bin/
+# (a `python` that runs in the image) first on PATH. Once only, because a chain
+# successor inherits this PATH through --export=ALL.
+ismip7_activate_container() {
+    if [ ! -r "$ISMIP7_CONTAINER" ]; then
+        echo "ERROR: ISMIP7_CONTAINER is unreadable: '$ISMIP7_CONTAINER'" >&2
+        echo "       Set it in $_ISMIP7_SITE_FILE or sites/local.env." >&2
+        exit 2
+    fi
+    if ! command -v "$ISMIP7_CONTAINER_RUNTIME" >/dev/null 2>&1; then
+        echo "ERROR: '$ISMIP7_CONTAINER_RUNTIME' is not on PATH after loading" >&2
+        echo "       ISMIP7_MODULES='${ISMIP7_MODULES:-}'. Add the module that provides it." >&2
+        exit 2
+    fi
+    case ":$PATH:" in
+        *":$_ISMIP7_BR_DIR/container_bin:"*) ;;
+        *) PATH="$_ISMIP7_BR_DIR/container_bin:$PATH" ;;
+    esac
+    export PATH ISMIP7_CONTAINER ISMIP7_CONTAINER_RUNTIME ISMIP7_CONTAINER_ARGS
+}
+
+# What the image has to see besides $HOME, /tmp and the working directory,
+# which the runtime binds itself: a checkout, forcing tree or kernel cache on
+# a project or scratch filesystem is invisible inside it otherwise, and the
+# runtime then quietly starts in $HOME instead.
+ismip7_container_binds() {
+    local d seen=" "
+    ISMIP7_CONTAINER_BINDS=""
+    for d in "$ISMIP7_REPO" "$ISMIP7_WORK" "${ISMIP7_DATA_ROOT:-}" \
+             "${ISMIP7_OBS_DATA_ROOT:-}" "${PYOP2_CACHE_DIR:-}" "${ISMIP7_TIMING_JIT_CACHE:-}"; do
+        [ -n "$d" ] && [ -d "$d" ] || continue
+        case "$seen" in *" $d "*) continue ;; esac
+        seen="$seen$d "
+        ISMIP7_CONTAINER_BINDS="$ISMIP7_CONTAINER_BINDS --bind $d"
+    done
+    export ISMIP7_CONTAINER_BINDS
+}
+
 ismip7_activate() {
     ismip7_site_require
     ismip7_load_modules
-    if [ ! -r "$ISMIP7_FIREDRAKE" ]; then
-        echo "ERROR: ISMIP7_FIREDRAKE is unreadable: '$ISMIP7_FIREDRAKE'" >&2
-        echo "       Set it in $_ISMIP7_SITE_FILE, or export it before submitting." >&2
-        exit 2
+    if [ -n "$ISMIP7_CONTAINER" ]; then
+        ismip7_activate_container
+    else
+        if [ ! -r "$ISMIP7_FIREDRAKE" ]; then
+            echo "ERROR: ISMIP7_FIREDRAKE is unreadable: '$ISMIP7_FIREDRAKE'" >&2
+            echo "       Set it in $_ISMIP7_SITE_FILE, or export it before submitting." >&2
+            exit 2
+        fi
+        # shellcheck disable=SC1090
+        . "$ISMIP7_FIREDRAKE"
     fi
-    # shellcheck disable=SC1090
-    . "$ISMIP7_FIREDRAKE"
     export OMP_NUM_THREADS=1          # one thread per rank; the solver is MPI-parallel
     export OPENBLAS_NUM_THREADS=1     # likewise for the BLAS under PETSc and numpy
     # Each rank compiles UFL kernels; a shared cache on a networked filesystem
@@ -166,6 +224,8 @@ ismip7_activate() {
     # object through --export=ALL.
     export PYOP2_CACHE_DIR="${SCRATCH:-$HOME}/.pyop2_cache/${SLURM_JOB_ID:-manual}"
     mkdir -p "$PYOP2_CACHE_DIR"
+    [ -n "$ISMIP7_CONTAINER" ] && ismip7_container_binds
+    return 0
 }
 
 # For a job whose wall time is the measurement. ismip7_activate gives every job
@@ -184,15 +244,31 @@ ismip7_persistent_jit_cache() {
         rmdir "$PYOP2_CACHE_DIR" 2>/dev/null || true
         unset PYOP2_CACHE_DIR
     fi
+    [ -n "$ISMIP7_CONTAINER" ] && ismip7_container_binds
+    return 0
 }
 
 # Launch an MPI program on N ranks inside the running allocation:
 #   ismip7_mpirun N python -u script.py [args...]
 # Every job script starts its ranks through this, so how a site launches MPI
 # is decided here once rather than in each script.
+#
+# A venv site starts the ranks with srun. A container site starts them with the
+# image's own mpiexec, inside one `exec`: every job here is a single node, and
+# that way the MPI in the image never has to agree with the host's Slurm about
+# PMI. The image has python3 and no python, so that one word is translated.
 ismip7_mpirun() {
     local n="$1"; shift
-    srun -n "$n" "$@"
+    if [ -z "$ISMIP7_CONTAINER" ]; then
+        srun -n "$n" "$@"
+        return
+    fi
+    if [ "${1:-}" = python ]; then
+        shift; set -- python3 "$@"
+    fi
+    # shellcheck disable=SC2086
+    "$ISMIP7_CONTAINER_RUNTIME" exec ${ISMIP7_CONTAINER_BINDS:-} $ISMIP7_CONTAINER_ARGS \
+        "$ISMIP7_CONTAINER" $ISMIP7_CONTAINER_MPIEXEC -n "$n" "$@"
 }
 
 # --- job size ------------------------------------------------------------

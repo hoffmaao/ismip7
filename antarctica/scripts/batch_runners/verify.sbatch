@@ -15,6 +15,19 @@ cd "${SLURM_SUBMIT_DIR:-.}"
 ismip7_activate
 ismip7_banner
 echo "firedrake: $(python -c 'import firedrake,sys; print(firedrake.__version__)' 2>/dev/null | tail -1)"
+# A container site: the image must start in this directory and see this job's
+# environment. A checkout on a filesystem the runtime did not bind makes it
+# start in $HOME instead, and every relative path below then misses.
+if [ -n "${ISMIP7_CONTAINER:-}" ]; then
+    echo "container: $ISMIP7_CONTAINER ($ISMIP7_CONTAINER_RUNTIME)"
+    inside="$(ISMIP7_VERIFY_TOKEN=seen python -c 'import os; print(os.getcwd(), os.environ.get("ISMIP7_VERIFY_TOKEN"))' 2>&1 | tail -1)"
+    if [ "$inside" = "$(pwd -P) seen" ]; then
+        echo "    cwd and environment reach the image"
+    else
+        echo "    FAILED: inside the image cwd/env is '$inside', expected '$(pwd -P) seen'."
+        echo "    Bind the checkout's filesystem with ISMIP7_CONTAINER_ARGS='--bind /path'."
+    fi
+fi
 cat > "$PYOP2_CACHE_DIR/_part.py" <<'PYEOF'
 from firedrake import *
 from firedrake.petsc import PETSc

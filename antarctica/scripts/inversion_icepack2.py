@@ -1008,7 +1008,7 @@ def main():
         src = ctrl if PRIOR_FORM == "laplacian" else _prior_aux[which]
         return assemble(prior_operator_form(src, _prior_test, d, g))
 
-    def _prior_metric_solvers():
+    def _prior_metric_solvers(metric):
         """Per-control solvers for the prior COVARIANCE, the metric
         ISMIP7_GRAD_PRECOND=prior descends in: ``A^-1`` for the Laplacian,
         ``A^-1 M A^-1`` for the bi-Laplacian (fenics_ice's
@@ -1029,21 +1029,64 @@ def main():
             )
             for which in ("theta", "phi")
         }
+        # The consistent mass Riesz map, for metric == "mass": the same
+        # preconditioner fenics_ice ships, reached through the same code path
+        # so the two options differ only in the operator.
+        _mass_solver = fd.LinearSolver(
+            assemble(inner(_tr, _prior_test) * dx), solver_parameters=_fac
+        )
+
+        # First-step scaling, per control BLOCK. Following fenics_ice's
+        # minimize_l_bfgs call (solver.py): it passes block_theta_scale for a
+        # dual inversion, because "alpha & beta tend to have very different
+        # magnitudes. Theta scaling both alpha & beta by their combined mean is
+        # a bad idea". theta (friction) and phi (fluidity) are exactly that
+        # pair here, and a single combined scalar is what a 32 km probe took
+        # theta to [-883, +14165] with -- it is a log deviation, so order 1.
+        #
+        # The scaling exists because L-BFGS's first step is -H_0 g at unit
+        # length, with no curvature pair yet to rescale it, and on this path a
+        # line search cannot recover: one evaluation outside the region where
+        # the forward has a solution returns NaN and every later trial point
+        # inherits it. fenics_ice bounds the same thing with the line search's
+        # amax; TAO's lmvm gives no equivalent once H_0 is supplied, so the
+        # bound goes on H_0 instead. ISMIP7_PRECOND_STEP0 is the largest change
+        # the first step may make to a control, in that control's own units.
+        _step0 = float(os.environ.get("ISMIP7_PRECOND_STEP0", "0.15"))
+        _scale = {}
 
         def action(g_theta, g_phi):
             out = []
             for which, rhs in (("theta", g_theta), ("phi", g_phi)):
                 x = Function(Q)
-                solvers[which].solve(x, rhs)
-                if PRIOR_FORM == "bilaplacian":
-                    # M x, assembled against the test function: that IS the
-                    # mass action and it lands in the dual space the second
-                    # A-solve wants, with no vector juggling.
-                    y = Function(Q)
-                    solvers[which].solve(
-                        y, assemble(inner(x, _prior_test) * dx)
+                if metric == "mass_consistent":
+                    # What fenics_ice actually ships (config.mass_precon,
+                    # H_M_0): the Riesz map of the L2 inner product. It removes
+                    # the cell-size dependency and nothing else, which is why
+                    # it is robust where the prior metric is delicate.
+                    _mass_solver.solve(x, rhs)
+                else:
+                    solvers[which].solve(x, rhs)
+                    if PRIOR_FORM == "bilaplacian":
+                        # M x assembled against the test function IS the mass
+                        # action, and it lands in the dual space the second
+                        # A-solve wants, with no vector juggling.
+                        y = Function(Q)
+                        solvers[which].solve(
+                            y, assemble(inner(x, _prior_test) * dx)
+                        )
+                        x = y
+                if which not in _scale:
+                    with x.dat.vec_ro as _x:
+                        _n = _x.norm(PETSc.NormType.NORM_INFINITY)  # collective
+                    _scale[which] = (_step0 / _n) if _n > 0.0 else 1.0
+                    PETSc.Sys.Print(
+                        f"  Metric scale [{which}]: alpha={_scale[which]:.4e} "
+                        f"(unscaled first step |d{which}|_max={_n:.4e}, "
+                        f"bounded to {_step0:g})"
                     )
-                    x = y
+                if _scale[which] != 1.0:
+                    x.dat.data[:] *= _scale[which]
                 out.append(x)
             return tuple(out)
 
@@ -1772,7 +1815,7 @@ def main():
 
         # The prior COVARIANCE action, from the same operator the objective
         # pays for: A^-1, or A^-1 M A^-1 under `bilaplacian`.
-        _A_inv = _prior_metric_solvers()
+        _A_inv = _prior_metric_solvers(grad_precond)
 
         _nfev = [0]
 
@@ -1798,10 +1841,19 @@ def main():
             return J
 
         gtol = float(os.environ.get("ISMIP7_GTOL", "0.0"))
+        _step0_env = float(os.environ.get("ISMIP7_PRECOND_STEP0", "0.15"))
+        if grad_precond == "mass_consistent":
+            _desc = "consistent mass Riesz map (M^-1), as fenics_ice ships it"
+        else:
+            _desc = (
+                f"{PRIOR_FORM} prior covariance "
+                f"({'A^-1 M A^-1' if PRIOR_FORM == 'bilaplacian' else 'A^-1'})"
+                " -- EXPERIMENTAL: fenics_ice ships M^-1 and leaves its two "
+                "prior-preconditioned H_0 attempts commented out as not working"
+            )
         PETSc.Sys.Print(
-            f"  Optimization metric: {PRIOR_FORM} prior covariance "
-            f"({'A^-1 M A^-1' if PRIOR_FORM == 'bilaplacian' else 'A^-1'}) "
-            f"via TAO lmvm; gatol={gtol:g} max_it={max_iter}"
+            f"  Optimization metric: {_desc}; via TAO lmvm; "
+            f"gatol={gtol:g} max_it={max_iter} step0={_step0_env:g}"
         )
         solver = TAOSolver(
             forward_total, [Q, Q],
@@ -1913,9 +1965,11 @@ def main():
     # (tlm_adjoint's TAOSolver, whose H_0_action is exactly this seed). See
     # _minimize_prior_metric below for what that costs us.
     grad_precond = os.environ.get("ISMIP7_GRAD_PRECOND", "none").lower()
-    if grad_precond not in ("none", "mass", "prior"):
+    _METRICS = ("none", "mass", "mass_consistent", "prior")
+    if grad_precond not in _METRICS:
         raise ValueError(
-            f"ISMIP7_GRAD_PRECOND must be none|mass|prior, got {grad_precond!r}"
+            f"ISMIP7_GRAD_PRECOND must be one of {_METRICS}, "
+            f"got {grad_precond!r}"
         )
     if grad_precond == "mass":
         _mv = assemble(TestFunction(Q) * dx).dat.data_ro
@@ -1930,7 +1984,7 @@ def main():
         def objective_and_gradient(u_vec):  # noqa: F811 (deliberate wrap)
             J, g_x = _inner_og(u_vec / _sqrtm)
             return J, g_x / _sqrtm
-    if grad_precond == "prior":
+    if grad_precond in ("mass_consistent", "prior"):
         result = _minimize_prior_metric()
     else:
         x0 = np.concatenate([func_to_global(theta), func_to_global(phi)])

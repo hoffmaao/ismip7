@@ -99,8 +99,11 @@ def solver_view_enabled():
     return _enabled("ISMIP7_SOLVER_VIEW", SOLVER_VIEW_DEFAULT)
 
 
-def diagnostic_solver_mode():
-    requested = requested_diagnostic_solver()
+def diagnostic_solver_mode(requested=None):
+    r"""Canonical mode for ``requested`` (default: the environment's)."""
+    if requested is None:
+        requested = requested_diagnostic_solver()
+    requested = str(requested).strip().lower()
     mode = DIAGNOSTIC_SOLVER_ALIASES.get(requested, requested)
     if mode not in DIAGNOSTIC_SOLVER_MODES:
         choices = ", ".join(DIAGNOSTIC_SOLVER_MODES)
@@ -174,9 +177,12 @@ def _mumps_options(prefix=""):
     }
 
 
-def diagnostic_solver_parameters():
-    r"""Return the exact PETSc options used by the mixed diagnostic solve."""
-    mode = diagnostic_solver_mode()
+def diagnostic_solver_parameters(mode=None):
+    r"""Return the exact PETSc options used by the mixed diagnostic solve.
+
+    ``mode`` names a solver other than the environment's; every other knob is
+    still read from the environment."""
+    mode = diagnostic_solver_mode(mode)
     params = _nonlinear_options()
 
     if mode == "full_mumps":
@@ -393,13 +399,19 @@ def effective_solver_env():
     }
 
 
-def solver_provenance():
-    r"""JSON-serializable complete effective solver configuration."""
+def solver_provenance(mode=None):
+    r"""JSON-serializable complete effective solver configuration.
+
+    ``mode`` gives the configuration this environment would have under another
+    diagnostic solver: a timing lane under one solver uses it to fingerprint
+    the solver its initial-state cache was prepared with."""
+    requested = requested_diagnostic_solver() if mode is None else mode
+    mode = diagnostic_solver_mode(requested)
     return {
-        "diagnostic_mode_requested": requested_diagnostic_solver(),
-        "diagnostic_mode": diagnostic_solver_mode(),
-        "diagnostic_label": diagnostic_solver_label(),
-        "diagnostic_petsc_options": diagnostic_solver_parameters(),
+        "diagnostic_mode_requested": requested,
+        "diagnostic_mode": mode,
+        "diagnostic_label": diagnostic_solver_label(mode),
+        "diagnostic_petsc_options": diagnostic_solver_parameters(mode),
         "transport_petsc_options": transport_solver_parameters(),
         "mass_residual_tolerance_gt": mass_residual_tol_gt(),
         "continuation_steps": continuation_steps(),

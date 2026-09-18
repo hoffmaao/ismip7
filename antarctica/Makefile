@@ -17,7 +17,8 @@
 #                   timing-amb-probe is the legacy alias for TIMING_CONTRACT=div
 #   timing-scout    submit the lowest retained core count for each mesh
 #   timing-scale    submit only scaling lanes whose exact scout passed
-#                   (MATRIX_STEPS / MATRIX_DT_2500 set the interval and are part of the tag;
+#                   (TIMING_SOLVER=scpc_mumps|scpc_gamg names the solver the lanes time,
+#                   MATRIX_STEPS / MATRIX_DT_2500 the interval; all are part of the tag;
 #                   TIMING_INITIAL_STATE=invert runs lanes from invert-published caches
 #                   under the _reinverted tag; FOLLOW_INVERT=1 queues them behind an
 #                   active invert job)
@@ -39,7 +40,18 @@ INV_LC ?= 2500
 INV_LC_COARSE ?= 25000
 FRICTION ?= budd
 N_FLOW ?= 3.0
-ISMIP7_DIAGNOSTIC_LINEAR_SOLVER ?= scpc_mumps
+# The solver a campaign's lanes time: scpc_mumps (condensed MUMPS, the
+# default) or scpc_gamg (the same condensation under GAMG). It leads the tag,
+# so the two campaigns' records never mix, and it is the solver `make timing`
+# wants qualified. The initial-state caches are scpc_mumps's under either
+# (timing_campaign.CACHE_SOLVER_MODE): a GAMG campaign needs no prepare of its
+# own and starts every lane where the MUMPS lane started. Must be one of
+# timing_campaign.LANE_SOLVER_MODES.
+TIMING_SOLVER ?= scpc_mumps
+# The solver of the direct lanes (qualify, timestep-probe, transient-direct),
+# which may be any mode solverconfig knows; it follows TIMING_SOLVER, so
+# `make qualify TIMING_SOLVER=scpc_gamg` gates the solver the campaign times.
+ISMIP7_DIAGNOSTIC_LINEAR_SOLVER ?= $(TIMING_SOLVER)
 ISMIP7_SOLVER_VIEW ?=
 ISMIP7_RESCUE_ENABLED ?= 0
 T_END ?= 2020
@@ -58,13 +70,14 @@ MATRIX_DT_MAX := 0.125
 TIMING_KIND ?= matrix
 # Lane physics contract: strict (no apparent MB, no calving sink) or
 # divfront / front / div (production closure and/or fixed 2015 calving front).
-# Steps, the 2.5 km dt and a non-strict contract are all encoded in the tag
-# (scripts/timing_campaign.py campaign_tag builds the identical string).
+# The solver, steps, the 2.5 km dt and a non-strict contract are all encoded
+# in the tag (scripts/timing_campaign.py campaign_tag builds the identical
+# string).
 # v4 (2026-09-16): the Budd shelf gate tests height above flotation, not the
 # sign of roundoff N (ported from hoffmaao/antarctica e602705). v3 caches and
 # records are the old-law archive; the manager never reuses them.
 TIMING_CONTRACT ?= strict
-TIMING_TAG ?= scpc_mumps_$(MATRIX_STEPS)step_dt$(MATRIX_DT_2500_TAG)at2500_dg0_logvelnet_cached_strict_v4$(if $(filter-out strict,$(TIMING_CONTRACT)),_$(TIMING_CONTRACT),)
+TIMING_TAG ?= $(TIMING_SOLVER)_$(MATRIX_STEPS)step_dt$(MATRIX_DT_2500_TAG)at2500_dg0_logvelnet_cached_strict_v4$(if $(filter-out strict,$(TIMING_CONTRACT)),_$(TIMING_CONTRACT),)
 TIMING_EXPERIMENT ?= timing
 # Optional exact-input overrides for a single transient lane.  The resolution
 # matrix leaves these empty and constructs each target mesh parametrically.
@@ -120,6 +133,10 @@ QUARTZ_RESULTS ?= quartz:/N/project/ice_rheology/ISMIP7/antarctica/results/
 REMOTE_RESULTS ?= $(QUARTZ_RESULTS)
 LEGACY_TIMING_TAG ?= scpc_mumps_5step_dt0p25at2500
 MATRIX_OUTPUT ?= TIMING_MATRIX.md
+# `make matrix` renders the campaign `make timing` last launched, unless the
+# command line (or environment) names one: the tag itself or any parameter of
+# it, e.g. `make matrix TIMING_SOLVER=scpc_gamg` after a scouts-only start.
+MATRIX_TAG_NAMED := $(filter-out file,$(foreach v,TIMING_TAG TIMING_SOLVER MATRIX_STEPS MATRIX_DT_2500 TIMING_CONTRACT,$(origin $(v))))
 
 # The active solver qualification/reference lane uses the improved DG0
 # log-velocity/net-balance MAP imported from the other branch and its exact
@@ -352,12 +369,12 @@ transient-direct:
 
 qualify-if-needed: redistribute
 	@if python scripts/check_solver_qualification.py \
-	    --record results/timing/timing_qualification_5step_scpc_mumps_$(SOLVER_TEST_TAG)_$(SOLVER_TEST_LC)_$(SOLVER_TEST_LC_COARSE)_16.json \
-	    --csv results/qualification_5step_scpc_mumps_$(SOLVER_TEST_TAG)_$(SOLVER_TEST_LC)_timeseries.csv \
+	    --record results/timing/timing_qualification_5step_$(TIMING_SOLVER)_$(SOLVER_TEST_TAG)_$(SOLVER_TEST_LC)_$(SOLVER_TEST_LC_COARSE)_16.json \
+	    --csv results/qualification_5step_$(TIMING_SOLVER)_$(SOLVER_TEST_TAG)_$(SOLVER_TEST_LC)_timeseries.csv \
 	    --min-steps 5 >/dev/null 2>&1; then \
-	  echo "solver qualification already passes; skip"; \
+	  echo "$(TIMING_SOLVER) qualification already passes; skip"; \
 	else \
-	  $(MAKE) qualify; \
+	  $(MAKE) qualify ISMIP7_DIAGNOSTIC_LINEAR_SOLVER=$(TIMING_SOLVER); \
 	fi
 
 timing-prepare:
@@ -390,7 +407,7 @@ timing-probe:
 	  --inversion "$(TIMING_INVERSION)" --cache-dir "$(TIMING_CACHE_DIR)" \
 	  $(SLURM_SELECT) --walltime "$(SLURM_TIME)" \
 	  --matrix-steps "$(MATRIX_STEPS)" --matrix-dt-2500 "$(MATRIX_DT_2500)" \
-	  --contract "$(TIMING_CONTRACT)" \
+	  --solver "$(TIMING_SOLVER)" --contract "$(TIMING_CONTRACT)" \
 	  $(if $(TIMING_ONLY_MESH),--only-mesh "$(TIMING_ONLY_MESH)",) \
 	  $(if $(TIMING_SCOUT_MONITOR),--monitor,) \
 	  $(if $(FORCE_TIMING),--force,)
@@ -410,7 +427,7 @@ timing-scout:
 	  $(if $(FOLLOW_INVERT),--follow-invert,) \
 	  --initial-state "$(TIMING_INITIAL_STATE)" \
 	  --matrix-steps "$(MATRIX_STEPS)" --matrix-dt-2500 "$(MATRIX_DT_2500)" \
-	  --contract "$(TIMING_CONTRACT)"
+	  --solver "$(TIMING_SOLVER)" --contract "$(TIMING_CONTRACT)"
 
 timing-scale:
 	python scripts/manage_timing_campaign.py scale \
@@ -422,7 +439,7 @@ timing-scale:
 	  $(if $(FOLLOW_INVERT),--follow-invert,) \
 	  --initial-state "$(TIMING_INITIAL_STATE)" \
 	  --matrix-steps "$(MATRIX_STEPS)" --matrix-dt-2500 "$(MATRIX_DT_2500)" \
-	  --contract "$(TIMING_CONTRACT)"
+	  --solver "$(TIMING_SOLVER)" --contract "$(TIMING_CONTRACT)"
 
 timing-dry-run:
 	python scripts/manage_timing_campaign.py prepare --dry-run \
@@ -442,7 +459,7 @@ timing-dry-run:
 	  $(if $(TIMING_SCOUT_MONITOR),--monitor,) \
 	  --initial-state "$(TIMING_INITIAL_STATE)" \
 	  --matrix-steps "$(MATRIX_STEPS)" --matrix-dt-2500 "$(MATRIX_DT_2500)" \
-	  --contract "$(TIMING_CONTRACT)"
+	  --solver "$(TIMING_SOLVER)" --contract "$(TIMING_CONTRACT)"
 	python scripts/manage_timing_campaign.py scale --dry-run --assume-valid-caches \
 	  --inversion "$(TIMING_INVERSION)" --cache-dir "$(TIMING_CACHE_DIR)" \
 	  $(SLURM_SELECT) --walltime "$(SLURM_TIME)" \
@@ -450,7 +467,7 @@ timing-dry-run:
 	  $(if $(TIMING_ONLY_MESH),--only-mesh "$(TIMING_ONLY_MESH)",) \
 	  --initial-state "$(TIMING_INITIAL_STATE)" \
 	  --matrix-steps "$(MATRIX_STEPS)" --matrix-dt-2500 "$(MATRIX_DT_2500)" \
-	  --contract "$(TIMING_CONTRACT)"
+	  --solver "$(TIMING_SOLVER)" --contract "$(TIMING_CONTRACT)"
 
 # Qualification is intentionally a single 2.5 km / 16-rank lane on the exact
 # 64 km-coarse mesh used by the imported DG0 logvelnet MAP.  The checker gates
@@ -586,7 +603,7 @@ matrix:
 	  exit 2; \
 	}
 	@tag="$(TIMING_TAG)"; \
-	if [ "$(origin TIMING_TAG)" = file ] && [ -f results/timing/latest_matrix_campaign.txt ]; then \
+	if [ -z "$(MATRIX_TAG_NAMED)" ] && [ -f results/timing/latest_matrix_campaign.txt ]; then \
 	  read -r tag < results/timing/latest_matrix_campaign.txt; \
 	fi; \
 	python scripts/build_timing_matrix.py --tag "$$tag" --output "$(MATRIX_OUTPUT)"

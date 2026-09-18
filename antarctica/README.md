@@ -630,7 +630,7 @@ redeclare those literals.
 | `ISMIP7_SNES_DIVERGENCE_TOL` | residual-growth divergence threshold; PETSc's `-3` (`PETSC_UNLIMITED`) disables this test (`-1` means `PETSC_DETERMINE`, restoring the default `1e4`) | `-3` |
 | `ISMIP7_SNES_ATOL_SCALE` / `ISMIP7_SNES_RESTART_FAILURE_ATOL_SCALE` | persistent absolute tolerance after a converged setup solve (`scale * achieved norm`) / after accepting a loaded hard-era state (`scale * loaded-state norm`) | `100` / `1e-6` |
 | `ISMIP7_SNES_KSP_EW` | enable PETSc Eisenstat-Walker variable inner tolerance for an A/B test | `0` |
-| `ISMIP7_DIAGNOSTIC_LINEAR_SOLVER` | `schur_gamg` or `schur_mumps`: legacy PETSc `selfp` approximation; `scpc_gamg` or `scpc_mumps`: exact cell-local Slate elimination and an assembled velocity solve; `full_mumps`: complete mixed-Jacobian reference. Legacy `iterative`/`mumps` aliases mean `schur_gamg`/`schur_mumps` | `full_mumps` for forward drivers and the core runner; `scpc_mumps` in the timing Makefile |
+| `ISMIP7_DIAGNOSTIC_LINEAR_SOLVER` | `schur_gamg` or `schur_mumps`: legacy PETSc `selfp` approximation; `scpc_gamg` or `scpc_mumps`: exact cell-local Slate elimination and an assembled velocity solve; `full_mumps`: complete mixed-Jacobian reference. Legacy `iterative`/`mumps` aliases mean `schur_gamg`/`schur_mumps` | `full_mumps` for forward drivers and the core runner; the timing Makefile's `TIMING_SOLVER` (`scpc_mumps`) |
 | `ISMIP7_KSP_RTOL` / `ISMIP7_KSP_MAXIT` | outer FGMRES relative tolerance / iteration limit for the iterative diagnostic mode | `1e-6` / `1000` |
 | `ISMIP7_SNES_MONITOR` / `ISMIP7_SNES_LOG` | enable diagnostic SNES/KSP monitors and optionally route them to a file; KSP output includes short and true residual lines per iteration, with a header before each mixed solve | `0` / stdout |
 | `ISMIP7_SOLVER_VIEW` | emit `snes_view`, outer `ksp_view`, and the SCPC condensed `ksp_view`; enabled by `make debug` and `make reference` to expose the actual block sizes and hierarchy | `0` |
@@ -685,11 +685,39 @@ make matrix
 # → results/timing/timing_<tag>_<LC>_<LC_coarse>_<ncores>.json
 ```
 
-`make timing` first reuses a valid five-step `scpc_mumps` qualification (or
-runs it once), creates the rank-independent improved inversion if needed, and
+`make timing` first reuses a valid five-step qualification of the campaign's
+solver (`TIMING_SOLVER`, default `scpc_mumps`; or runs it once), creates the
+rank-independent improved inversion if needed, and
 then advances only stages whose prerequisites already exist. It never
 resubmits an active job or an accepted result. Failed lanes remain failed for
 inspection; use `FORCE_TIMING=1` only for an intentional retry.
+
+**The solver is a campaign parameter.** `TIMING_SOLVER=scpc_mumps|scpc_gamg`
+names the diagnostic solver the lanes time: the same exact cell-local
+condensation, with the condensed velocity system factored by MUMPS or
+preconditioned by GAMG. It leads the campaign tag
+(`scpc_gamg_10step_dt0p125at2500_…`), so the two campaigns keep separate
+records, status stamps and matrices and neither report accepts the other's
+lanes. The prepared caches are **not** per solver: they are always
+`scpc_mumps` states (`timing_campaign.CACHE_SOLVER_MODE`, spelled into the
+cache filenames), a lane checks its cache against the fingerprint of the
+solver that *prepared* it rather than its own, and a GAMG lane therefore
+starts from exactly the state the MUMPS lane of the same mesh started from
+— the linear solver is the only difference between the two matrices. A GAMG
+campaign on a site that already holds the caches needs no prepare or invert:
+
+```bash
+make qualify TIMING_SOLVER=scpc_gamg        # 2-step then 5-step gate, 2.5 km, 16 ranks
+make timing-scout TIMING_SOLVER=scpc_gamg   # one scout per mesh, from the existing caches
+make timing-scale TIMING_SOLVER=scpc_gamg   # once scouts have passed
+make matrix TIMING_SOLVER=scpc_gamg MATRIX_OUTPUT=TIMING_MATRIX_QUARTZ_GAMG.md
+```
+
+(`make timing TIMING_SOLVER=scpc_gamg` is the same thing as one re-runnable
+command.) `make matrix` renders the campaign `make timing` last launched
+unless the command line names one — the tag, or any parameter of it such as
+`TIMING_SOLVER`. The matrix's *Solver work* table gives Newton iterations per
+step × outer Krylov iterations per Newton iteration for every accepted lane.
 
 The stages and contracts are:
 
@@ -765,8 +793,8 @@ The stages and contracts are:
    outcome) is written under `results/timing/`, then that checkpoint is
    published as the timing cache (no second cold prepare) so scout/scale
    provenance points at the short invert. The cache manifest keeps two
-   solver facts apart: `diagnostic_solver_mode` (`scpc_mumps`, the mode lanes
-   must run) and `state_solver` (`full_mumps`, what actually produced the
+   solver facts apart: `diagnostic_solver_mode` (`scpc_mumps`, the mode every
+   campaign cache is held to, whatever solver the lanes time) and `state_solver` (`full_mumps`, what actually produced the
    state). The inversion applies the forward's floor-cell stabilizers
    (`ISMIP7_OCEAN_DRAG`, `ISMIP7_H_OCEAN`, `ISMIP7_U_LIM`, owned by
    `runconfig.residual_stabilizers`), so its mixed state is a solution of the
@@ -829,12 +857,13 @@ The stages and contracts are:
    count as campaign lanes, and `make matrix TIMING_TAG=<campaign tag>_transferred`
    renders them separately. Inversion records written before the publish
    gate (2026‑09‑14) are rejected; re-run the invert with `FORCE_TIMING=1`.
-7. **Strict transient timing** — all matrix lanes use `scpc_mumps`, disable
-   rescue, and restrict subcycles to `1`. The interval is
+7. **Strict transient timing** — all matrix lanes use the campaign's
+   `TIMING_SOLVER` (a lane whose tag and solver disagree refuses to start),
+   disable rescue, and restrict subcycles to `1`. The interval is
    `MATRIX_STEPS` steps of `MATRIX_DT_2500 × LC / 2500` years (defaults 10 and
    0.125 since the 2026-09-16 dt ladder: 5 × 0.25 runs away at step 2 while
    10 × 0.125 and 20 × 0.0625 complete the 1.25 yr window with flat speed and
-   thickness; both are written into the campaign tag, e.g.
+   thickness; both are written into the campaign tag after the solver, e.g.
    `scpc_mumps_10step_dt0p125at2500_…`, so a dt-ladder rung never mixes with
    another) and the physics contract is `TIMING_CONTRACT` (default `strict`;
    a non-strict contract suffixes the tag). The scaled step is capped at an

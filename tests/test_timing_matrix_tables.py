@@ -16,6 +16,7 @@ sys.path.insert(0, str(REPO / "antarctica" / "scripts"))
 from build_timing_matrix import (  # noqa: E402
     _full_simulation,
     _minutes_per_year,
+    _solver_work,
     _timing_table,
 )
 
@@ -49,3 +50,16 @@ def test_the_unit_is_in_the_header_only_when_every_cell_shares_it():
     assert "16 cores (min/yr)" in shared[0]
     assert "| 16 cores |" in mixed[0]
     assert shared[2].startswith("| 2500 | 25000 | 10 | 20 | 0.8 | — |")
+
+
+def test_solver_work_is_newton_per_step_by_krylov_per_newton():
+    r"""Under GAMG a step's cost is its Krylov count; the matrix shows it beside
+    the direct solve's one-per-Newton so the two campaigns can be read together."""
+    def summary(newton, krylov):
+        return {"diagnostic_solve_summary": {
+            "count": 10, "snes_iterations_total": newton, "linear_iterations_total": krylov}}
+    assert _solver_work(summary(42, 42)) == "4.2 × 1.0"
+    assert _solver_work(summary(42, 1512)) == "4.2 × 36.0"
+    assert _solver_work(summary(0, 0)) == "—"
+    assert _solver_work({"diagnostic_solve_summary": {"reason_counts": {"2": 10}}}) == "—"
+    assert _solver_work({}) == "—"

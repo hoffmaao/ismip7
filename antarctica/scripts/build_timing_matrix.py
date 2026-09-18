@@ -16,8 +16,10 @@ from pathlib import Path
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 from timing_campaign import (
+    CACHE_SOLVER_MODE,
     CAMPAIGN_TAG,
     DISPLAY_CORES,
+    LANE_SOLVER_DEFAULT,
     LEGACY_MATRIX_DT_2500,
     LEGACY_MATRIX_STEPS,
     MASS_RESIDUAL_TOL_GT,
@@ -309,6 +311,24 @@ def _full_simulation(record):
     return f"{hours:.1f} h" if hours < 48 else f"{hours / 24:.1f} d"
 
 
+def _solver_work(record):
+    """``Newton iterations per step x outer Krylov iterations per Newton
+    iteration``: what a step costs under an iterative solver. A direct
+    condensed solve is one Krylov iteration per Newton iteration, give or take
+    a refinement; GAMG's count is the number to watch as the mesh is refined
+    and the ranks go up."""
+    summary = record.get("diagnostic_solve_summary") or {}
+    try:
+        solves = int(summary["count"])
+        newton = int(summary["snes_iterations_total"])
+        krylov = int(summary["linear_iterations_total"])
+    except (KeyError, TypeError, ValueError):
+        return "—"
+    if solves <= 0 or newton <= 0:
+        return "—"
+    return f"{newton / solves:.1f} × {krylov / newton:.1f}"
+
+
 def _timing_table(rows, record_index, cell, unit=None):
     suffix = f" ({unit})" if unit else ""
     header = (
@@ -367,6 +387,7 @@ def render(tag, timing_dir, output, legacy_full_matrix=False):
     dt_2500 = spec["dt_2500"] if spec else LEGACY_MATRIX_DT_2500
     steps = spec["steps"] if spec else LEGACY_MATRIX_STEPS
     contract = spec["contract"] if spec else "strict"
+    solver = spec["solver"] if spec else LANE_SOLVER_DEFAULT
     reinverted = bool(spec and spec["lane"] == "reinverted")
     dt_cap_text = (
         f", capped at {max(MATRIX_DT_MAX, dt_2500):g}"
@@ -400,8 +421,14 @@ def render(tag, timing_dir, output, legacy_full_matrix=False):
         f"The primary timing covers only the {steps}-step transient loop; "
         "setup and checkpoint loading are recorded separately. The timestep "
         f"is `{dt_2500:g} × LC / 2500` years{dt_cap_text}. Lanes use "
-        "`scpc_mumps`, an "
-        "exact-mesh prepared cache, and no rescue or subcycle recovery; the "
+        f"`{solver}`, an "
+        "exact-mesh prepared cache"
+        + (
+            "" if solver == CACHE_SOLVER_MODE else
+            f" (prepared under `{CACHE_SOLVER_MODE}`: the same initial state "
+            f"as the `{CACHE_SOLVER_MODE}` campaign's lanes)"
+        )
+        + ", and no rescue or subcycle recovery; the "
         f"physics contract is `{contract}` "
         + (
             "(no apparent mass balance, no calving sink at the 2015 front). "
@@ -483,6 +510,15 @@ def render(tag, timing_dir, output, legacy_full_matrix=False):
             rows, accepted,
             lambda record: f"{record['seconds_per_step']:.2f}", "s/step",
         ))
+        lines.extend([
+            "",
+            "### Solver work",
+            "",
+            "Newton iterations per step × outer Krylov iterations per Newton "
+            "iteration, averaged over the lane's diagnostic solves.",
+            "",
+        ])
+        lines.extend(_timing_table(rows, accepted, _solver_work))
     else:
         lines.append("No accepted timing records are available yet.")
     lines.extend([

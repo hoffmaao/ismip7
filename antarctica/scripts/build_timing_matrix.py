@@ -21,6 +21,8 @@ from timing_campaign import (
     LEGACY_MATRIX_DT_2500,
     LEGACY_MATRIX_STEPS,
     MASS_RESIDUAL_TOL_GT,
+    MATRIX_DT_MAX,
+    MATRIX_DT_MAX_SINCE_VERSION,
     MATRIX_REFERENCE_LC,
     MATRIX_T_START,
     SOURCE_INVERSION_BASENAME,
@@ -35,6 +37,8 @@ from timing_campaign import (
 )
 
 _ROOT = Path(__file__).resolve().parents[1]
+# The ISMIP7 projection interval, 2015-2300, that the matrix extrapolates to.
+SIMULATION_YEARS = 285
 
 
 def _load_records(timing_dir, tag):
@@ -282,13 +286,34 @@ def _initial_state_table(rows, records, reinverted=False):
     return lines
 
 
-def _timing_table(rows, record_index, per_step=False):
-    key = "seconds_per_step" if per_step else "run_seconds"
-    unit = "s/step" if per_step else "s"
-    digits = 2 if per_step else 1
+def _seconds_per_year(record):
+    """Transient-loop wall time per simulated year at the lane's own dt."""
+    dt = record.get("dt")
+    if not dt:
+        return None
+    return record["seconds_per_step"] / dt
+
+
+def _minutes_per_year(record):
+    seconds = _seconds_per_year(record)
+    return "—" if seconds is None else f"{seconds / 60:.1f}"
+
+
+def _full_simulation(record):
+    """The per-year cost extrapolated to SIMULATION_YEARS, in hours up to two
+    days and in days beyond."""
+    seconds = _seconds_per_year(record)
+    if seconds is None:
+        return "—"
+    hours = seconds * SIMULATION_YEARS / 3600
+    return f"{hours:.1f} h" if hours < 48 else f"{hours / 24:.1f} d"
+
+
+def _timing_table(rows, record_index, cell, unit=None):
+    suffix = f" ({unit})" if unit else ""
     header = (
         "| LC (m) | LC_coarse (m) | Vertices | Cells | "
-        + " | ".join(f"{cores} cores ({unit})" for cores in DISPLAY_CORES)
+        + " | ".join(f"{cores} cores{suffix}" for cores in DISPLAY_CORES)
         + " |"
     )
     lines = [header, "|" + "|".join(["---"] * 7) + "|"]
@@ -301,7 +326,7 @@ def _timing_table(rows, record_index, per_step=False):
         vertices = sample.get("vertices", "—") if sample else "—"
         cells = sample.get("cells", "—") if sample else "—"
         values = [
-            f"{record[key]:.{digits}f}" if record is not None else "—"
+            cell(record) if record is not None else "—"
             for record in candidates
         ]
         lines.append(
@@ -343,6 +368,10 @@ def render(tag, timing_dir, output, legacy_full_matrix=False):
     steps = spec["steps"] if spec else LEGACY_MATRIX_STEPS
     contract = spec["contract"] if spec else "strict"
     reinverted = bool(spec and spec["lane"] == "reinverted")
+    dt_cap_text = (
+        f", capped at {max(MATRIX_DT_MAX, dt_2500):g}"
+        if spec and spec["version"] >= MATRIX_DT_MAX_SINCE_VERSION else ""
+    )
     for lane in sorted(displayed):
         if lane not in configured:
             classifications[lane] = (
@@ -370,7 +399,8 @@ def render(tag, timing_dir, output, legacy_full_matrix=False):
         else
         f"The primary timing covers only the {steps}-step transient loop; "
         "setup and checkpoint loading are recorded separately. The timestep "
-        f"is `{dt_2500:g} × LC / 2500` years. Lanes use `scpc_mumps`, an "
+        f"is `{dt_2500:g} × LC / 2500` years{dt_cap_text}. Lanes use "
+        "`scpc_mumps`, an "
         "exact-mesh prepared cache, and no rescue or subcycle recovery; the "
         f"physics contract is `{contract}` "
         + (
@@ -397,9 +427,29 @@ def render(tag, timing_dir, output, legacy_full_matrix=False):
         "",
         policy_text,
         "",
-        "## Run status",
-        "",
     ]
+    if accepted:
+        lines.extend([
+            "## Time per year of simulation",
+            "",
+            "Transient-loop wall time per simulated year, each lane at its "
+            "own timestep (see Run status).",
+            "",
+        ])
+        lines.extend(_timing_table(rows, accepted, _minutes_per_year, "min/yr"))
+        lines.extend([
+            "",
+            f"### Time per {SIMULATION_YEARS}-year simulation",
+            "",
+            f"The per-year cost extrapolated to {SIMULATION_YEARS} years, in "
+            "hours (h) or days (d). It assumes the matrix timestep and the "
+            "measured cost per step hold for the whole run, and leaves out "
+            "setup, forcing updates and output.",
+            "",
+        ])
+        lines.extend(_timing_table(rows, accepted, _full_simulation))
+        lines.append("")
+    lines.extend(["## Run status", ""])
     lines.extend(_status_table(rows, classifications, dt_2500,
                                spec["version"] if spec else 0))
     if not legacy_full_matrix:
@@ -425,9 +475,14 @@ def render(tag, timing_dir, output, legacy_full_matrix=False):
             lines.append(f"- Unreadable timing record: `{error}`")
     lines.extend(["", "## Successful timings", ""])
     if accepted:
-        lines.extend(_timing_table(rows, accepted))
+        lines.extend(_timing_table(
+            rows, accepted, lambda record: f"{record['run_seconds']:.1f}", "s"
+        ))
         lines.extend(["", "### Per-step timing", ""])
-        lines.extend(_timing_table(rows, accepted, per_step=True))
+        lines.extend(_timing_table(
+            rows, accepted,
+            lambda record: f"{record['seconds_per_step']:.2f}", "s/step",
+        ))
     else:
         lines.append("No accepted timing records are available yet.")
     lines.extend([

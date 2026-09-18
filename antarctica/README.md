@@ -679,7 +679,9 @@ make timing
 # (REMOTE_RESULTS=host:path/to/antarctica/results/; defaults to IU Quartz)
 make sync-results
 make matrix
-# → TIMING_MATRIX.md, showing 20 configured lanes plus NOT PLANNED cells
+# → TIMING_MATRIX.md, leading with wall time per simulated year and per
+#   285-year projection, then 20 configured lanes plus NOT PLANNED cells
+#   (MATRIX_OUTPUT=TIMING_MATRIX_QUARTZ.md keeps one committed file per site)
 # → results/timing/timing_<tag>_<LC>_<LC_coarse>_<ncores>.json
 ```
 

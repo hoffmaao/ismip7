@@ -28,6 +28,8 @@
 #   reference     one full-Jacobian MUMPS reference job
 #   solver-smoke  tiny two-rank setup test; no Antarctic data or time steps
 #   matrix        write TIMING_MATRIX.md from results/timing/*.json
+#                   (MATRIX_OUTPUT names another file, e.g. one per site:
+#                   TIMING_MATRIX_QUARTZ.md)
 
 LCS ?= 500 1000 2000 2500 5000
 RATIOS ?= 20 10
@@ -117,6 +119,7 @@ SUBMIT_CD = --cd "$(notdir $(CURDIR))"
 QUARTZ_RESULTS ?= quartz:/N/project/ice_rheology/ISMIP7/antarctica/results/
 REMOTE_RESULTS ?= $(QUARTZ_RESULTS)
 LEGACY_TIMING_TAG ?= scpc_mumps_5step_dt0p25at2500
+MATRIX_OUTPUT ?= TIMING_MATRIX.md
 
 # The active solver qualification/reference lane uses the improved DG0
 # log-velocity/net-balance MAP imported from the other branch and its exact
@@ -586,7 +589,7 @@ matrix:
 	if [ "$(origin TIMING_TAG)" = file ] && [ -f results/timing/latest_matrix_campaign.txt ]; then \
 	  read -r tag < results/timing/latest_matrix_campaign.txt; \
 	fi; \
-	python scripts/build_timing_matrix.py --tag "$$tag"
+	python scripts/build_timing_matrix.py --tag "$$tag" --output "$(MATRIX_OUTPUT)"
 
 matrix-legacy:
 	@test ! -d "$(CURDIR)/antarctica/results" || { \

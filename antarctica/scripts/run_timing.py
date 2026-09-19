@@ -168,6 +168,11 @@ def _diagnostic_summary(stats):
             (int(stat["linear_iterations"]) for stat in stats), default=0
         ),
     })
+    # SCPC's own count of the work on the condensed system. It includes the
+    # line search's solves, which ``linear_iterations`` (SNES's) does not.
+    for key in ("condensed_solves", "condensed_iterations"):
+        if stats and all(key in stat for stat in stats):
+            summary[f"{key}_total"] = sum(int(stat[key]) for stat in stats)
     return summary
 
 

@@ -66,6 +66,27 @@ FINAL_KSP_MAXIT_DEFAULT = "50"
 
 KSP_RTOL_DEFAULT = "1e-6"
 KSP_MAXIT_DEFAULT = "1000"
+# scpc_gamg iterates on the assembled condensed velocity system, not on the
+# matrix-free mixed one. The elimination is exact, so with one V-cycle per
+# outer FGMRES iteration (the first configuration; quartz job 10517922,
+# 2500/25000 x 16) every Krylov iteration paid a mixed-Jacobian action and
+# three Slate sweeps over the mesh around its V-cycle: 0.257 s each, 4894 of
+# them, 126 s/step against condensed MUMPS's 33. An inner solve a decade
+# tighter than the outer tolerance leaves the outer FGMRES one iteration, as
+# it has under MUMPS, and a Krylov iteration costs an AIJ product and a
+# V-cycle. Flexible because the coarse solve is itself GMRES. ``preonly``
+# restores the single V-cycle.
+CONDENSED_KSP_TYPE_DEFAULT = "fgmres"
+CONDENSED_KSP_RTOL_DEFAULT = "1e-7"
+# Solves ran to 85 iterations at the first configuration's convergence rate;
+# a restart inside that range stalls them.
+CONDENSED_KSP_RESTART_DEFAULT = "100"
+# Near-nullspace handed to GAMG for the condensed operator: ``rigid_body``
+# (two translations and the in-plane rotation, which the membrane operator
+# does not see on a floating shelf) or ``none`` (GAMG's default: the
+# translations alone).
+CONDENSED_NEAR_NULLSPACES = ("rigid_body", "none")
+CONDENSED_NEAR_NULLSPACE_DEFAULT = "rigid_body"
 TRANSPORT_KSP_RTOL_DEFAULT = "1e-10"
 TRANSPORT_KSP_MAXIT_DEFAULT = "500"
 MASS_RESIDUAL_TOL_GT_DEFAULT = "5e-5"
@@ -167,6 +188,63 @@ def _gamg_options(prefix=""):
     }
 
 
+def condensed_near_nullspace():
+    name = _env(
+        "ISMIP7_CONDENSED_NEAR_NULLSPACE", CONDENSED_NEAR_NULLSPACE_DEFAULT
+    ).strip().lower()
+    if name not in CONDENSED_NEAR_NULLSPACES:
+        raise ValueError(
+            "ISMIP7_CONDENSED_NEAR_NULLSPACE must be one of "
+            f"{CONDENSED_NEAR_NULLSPACES}, not {name!r}"
+        )
+    return name
+
+
+def _extra_condensed_options(prefix):
+    r"""``ISMIP7_CONDENSED_PETSC_OPTIONS="pc_gamg_threshold=0.02 mg_levels_ksp_max_it=4"``:
+    further options of the condensed GAMG solve, for a tuning rung. They are
+    applied last and, like every other entry, land in the record's
+    ``diagnostic_petsc_options``."""
+    options = {}
+    for token in _env("ISMIP7_CONDENSED_PETSC_OPTIONS", "").split():
+        name, sep, value = token.lstrip("-").partition("=")
+        if not name or name.startswith(prefix):
+            raise ValueError(
+                "ISMIP7_CONDENSED_PETSC_OPTIONS takes unprefixed name=value "
+                f"entries (or a bare flag), not {token!r}"
+            )
+        options[f"{prefix}{name}"] = value if sep else None
+    return options
+
+
+def _condensed_gamg_options(prefix):
+    r"""GAMG on SCPC's condensed velocity system: the Krylov method that
+    iterates on it (see CONDENSED_KSP_TYPE_DEFAULT), the near-nullspace
+    ``ISMIP7SCPC`` attaches to it, and a rung's extra options."""
+    params = _gamg_options(prefix)
+    ksp_type = _env(
+        "ISMIP7_CONDENSED_KSP_TYPE", CONDENSED_KSP_TYPE_DEFAULT
+    ).strip().lower()
+    params[f"{prefix}ksp_type"] = ksp_type
+    if ksp_type != "preonly":
+        params.update({
+            f"{prefix}ksp_rtol": float(_env(
+                "ISMIP7_CONDENSED_KSP_RTOL", CONDENSED_KSP_RTOL_DEFAULT
+            )),
+            f"{prefix}ksp_max_it": int(_env(
+                "ISMIP7_KSP_MAXIT", KSP_MAXIT_DEFAULT
+            )),
+        })
+        if ksp_type.endswith("gmres"):
+            params[f"{prefix}ksp_gmres_restart"] = int(_env(
+                "ISMIP7_CONDENSED_KSP_RESTART", CONDENSED_KSP_RESTART_DEFAULT
+            ))
+    # Not a PETSc option: ISMIP7SCPC reads it from the options database.
+    params[f"{prefix}near_nullspace"] = condensed_near_nullspace()
+    params.update(_extra_condensed_options(prefix))
+    return params
+
+
 def _mumps_options(prefix=""):
     return {
         f"{prefix}pc_type": "lu",
@@ -237,7 +315,7 @@ def diagnostic_solver_parameters(mode=None):
         "condensed_field_ksp_type": "preonly",
     })
     if mode == "scpc_gamg":
-        params.update(_gamg_options("condensed_field_"))
+        params.update(_condensed_gamg_options("condensed_field_"))
     else:
         params.update(_mumps_options("condensed_field_"))
     return params

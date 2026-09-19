@@ -311,22 +311,32 @@ def _full_simulation(record):
     return f"{hours:.1f} h" if hours < 48 else f"{hours / 24:.1f} d"
 
 
+SNES_COUNT_MARK = "†"
+
+
 def _solver_work(record):
-    """``Newton iterations per step x outer Krylov iterations per Newton
-    iteration``: what a step costs under an iterative solver. A direct
-    condensed solve is one Krylov iteration per Newton iteration, give or take
-    a refinement; GAMG's count is the number to watch as the mesh is refined
-    and the ranks go up."""
+    """``Newton iterations per step x condensed-system iterations per Newton
+    iteration``: what a step costs under an iterative solver. The second
+    factor is SCPC's own count (back-substitutions under MUMPS, V-cycles under
+    GAMG), which includes the solves the NLEQ-ERR line search makes for its
+    simplified Newton step: about two solves per Newton iteration under
+    either solver, and GAMG's iterations per solve are the number to watch as
+    the mesh is refined and the ranks go up. A record from before SCPC kept
+    that count has only SNES's, which leaves the line search's solves out --
+    most of a GAMG lane's Krylov work -- and is marked."""
     summary = record.get("diagnostic_solve_summary") or {}
     try:
         solves = int(summary["count"])
         newton = int(summary["snes_iterations_total"])
-        krylov = int(summary["linear_iterations_total"])
+        if "condensed_iterations_total" in summary:
+            krylov, mark = int(summary["condensed_iterations_total"]), ""
+        else:
+            krylov, mark = int(summary["linear_iterations_total"]), SNES_COUNT_MARK
     except (KeyError, TypeError, ValueError):
         return "—"
     if solves <= 0 or newton <= 0:
         return "—"
-    return f"{newton / solves:.1f} × {krylov / newton:.1f}"
+    return f"{newton / solves:.1f} × {krylov / newton:.1f}{mark}"
 
 
 def _timing_table(rows, record_index, cell, unit=None):
@@ -514,8 +524,12 @@ def render(tag, timing_dir, output, legacy_full_matrix=False):
             "",
             "### Solver work",
             "",
-            "Newton iterations per step × outer Krylov iterations per Newton "
-            "iteration, averaged over the lane's diagnostic solves.",
+            "Newton iterations per step × iterations on the condensed velocity "
+            "system per Newton iteration (back-substitutions under MUMPS, "
+            "V-cycles under GAMG), averaged over the lane's diagnostic solves "
+            "and counting the line search's solves. "
+            f"{SNES_COUNT_MARK} marks an older record that holds only SNES's "
+            "count, which leaves those solves out.",
             "",
         ])
         lines.extend(_timing_table(rows, accepted, _solver_work))

@@ -64,9 +64,31 @@ def test_mode(mesh, mode):
     reason = solver.snes.getConvergedReason()
     if reason <= 0:
         raise RuntimeError(f"{mode} diverged with SNES reason {reason}")
+    condensed = ""
+    if mode.startswith("scpc_"):
+        scpc = solver.snes.ksp.pc.getPythonContext()
+        if scpc.condensed_solves < 1 or (
+            scpc.condensed_iterations < scpc.condensed_solves
+        ):
+            raise RuntimeError(f"{mode} did not count its condensed solves")
+        _, pmat = scpc.condensed_ksp.getOperators()
+        near = pmat.getNearNullSpace()
+        # An unset near-nullspace is a null handle; getVecs() on it segfaults.
+        modes = near.getVecs() if near.handle else []
+        expected = 3 if mode == "scpc_gamg" else 0
+        if len(modes) != expected:
+            raise RuntimeError(
+                f"{mode} condensed operator has {len(modes)} near-nullspace "
+                f"vectors, expected {expected}"
+            )
+        condensed = (
+            f" condensed_solves={scpc.condensed_solves}"
+            f" condensed_its={scpc.condensed_iterations}"
+            f" near_nullspace={len(modes)}"
+        )
     PETSc.Sys.Print(
         f"PASS {mode}: snes_its={solver.snes.getIterationNumber()} "
-        f"linear_its={solver.snes.getLinearSolveIterations()}"
+        f"linear_its={solver.snes.getLinearSolveIterations()}{condensed}"
     )
     return state
 

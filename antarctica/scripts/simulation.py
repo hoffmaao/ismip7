@@ -886,6 +886,14 @@ def setup_model(restart_from=None, *, allow_timing_cache_a_ref=False):
         f"  Linear solver: {linear_solver} "
         f"({diagnostic_solver_label(linear_solver)})"
     )
+    if linear_solver == "scpc_gamg":
+        # A tuning rung differs from the next only in these; name them in
+        # the job's own log, which outlives an overwritten record.
+        PETSc.Sys.Print("  Condensed solve: " + " ".join(
+            f"{key[len('condensed_field_'):]}={value}"
+            for key, value in sparams.items()
+            if key.startswith("condensed_field_") and value is not None
+        ))
     # Optional SNES/KSP convergence monitoring (ISMIP7_SNES_MONITOR=1).
     # ISMIP7_SNES_LOG routes the output to a file (per run, so concurrent
     # debug runs don't interleave); otherwise it goes to stdout.
@@ -1074,9 +1082,24 @@ def setup_model(restart_from=None, *, allow_timing_cache_a_ref=False):
         else:
             PETSc.Sys.Print(header.rstrip())
 
+    def _condensed_work():
+        """``(solves, iterations)`` SCPC has made on the condensed system so
+        far, or None under a solver without one. Unlike SNES's
+        ``linear_iterations`` it includes the line search's solves."""
+        if not linear_solver.startswith("scpc_"):
+            return None
+        pc = slvr.snes.ksp.pc
+        context = pc.getPythonContext() if pc.getType() == "python" else None
+        # Zero until the first solve has built the PC.
+        return (
+            getattr(context, "condensed_solves", 0),
+            getattr(context, "condensed_iterations", 0),
+        )
+
     def solve_diagnostic(label, **metadata):
         """Execute one solve and always emit one compact convergence record."""
         _write_solve_header(label, **metadata)
+        work_before = _condensed_work()
         t0_solve = perf_counter()
         try:
             return slvr.solve()
@@ -1093,12 +1116,22 @@ def setup_model(restart_from=None, *, allow_timing_cache_a_ref=False):
                 "function_norm": slvr.snes.getFunctionNorm(),
                 "seconds": elapsed,
             }
+            condensed = ""
+            if work_before is not None:
+                solves, iterations = _condensed_work()
+                stat["condensed_solves"] = solves - work_before[0]
+                stat["condensed_iterations"] = iterations - work_before[1]
+                condensed = (
+                    f"condensed_solves={stat['condensed_solves']} "
+                    f"condensed_its={stat['condensed_iterations']} "
+                )
             solver_stats.append(stat)
             PETSc.Sys.Print(
                 "=== DIAGNOSTIC RESULT "
                 f"{_solve_count:04d} | {label} | reason={reason_name} "
                 f"snes_its={stat['snes_iterations']} "
                 f"linear_its={stat['linear_iterations']} "
+                f"{condensed}"
                 f"fnorm={stat['function_norm']:.6e} "
                 f"seconds={elapsed:.3f} ==="
             )

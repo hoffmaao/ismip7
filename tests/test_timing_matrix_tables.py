@@ -58,8 +58,9 @@ def test_solver_work_is_newton_per_step_by_krylov_per_newton():
     def summary(newton, krylov):
         return {"diagnostic_solve_summary": {
             "count": 10, "snes_iterations_total": newton, "linear_iterations_total": krylov}}
-    assert _solver_work(summary(42, 42)) == "4.2 × 1.0"
-    assert _solver_work(summary(42, 1512)) == "4.2 × 36.0"
+    # Records from before SCPC counted its own solves hold SNES's count only.
+    assert _solver_work(summary(42, 42)) == "4.2 × 1.0†"
+    assert _solver_work(summary(42, 1512)) == "4.2 × 36.0†"
     assert _solver_work(summary(0, 0)) == "—"
     assert _solver_work({"diagnostic_solve_summary": {"reason_counts": {"2": 10}}}) == "—"
     assert _solver_work({}) == "—"

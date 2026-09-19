@@ -633,8 +633,8 @@ redeclare those literals.
 | `ISMIP7_DIAGNOSTIC_LINEAR_SOLVER` | `schur_gamg` or `schur_mumps`: legacy PETSc `selfp` approximation; `scpc_gamg` or `scpc_mumps`: exact cell-local Slate elimination and an assembled velocity solve; `full_mumps`: complete mixed-Jacobian reference. Legacy `iterative`/`mumps` aliases mean `schur_gamg`/`schur_mumps` | `full_mumps` for forward drivers and the core runner; the timing Makefile's `TIMING_SOLVER` (`scpc_mumps`) |
 | `ISMIP7_FREEZE_LINEARIZATION` | `scpc_*` only (their Jacobian is matrix-free): build it on a copy of the state that is refreshed only when SNES re-forms the Jacobian, so the NLEQ-ERR line search's simplified-Newton solve sees the Jacobian SCPC condensed instead of one that has followed the state to the trial point. `0` restores the live state every lane before 2026-09-19 ran with; records carry `solver_configuration.linearization_state` (`frozen`/`live`/`assembled`) | `1` |
 | `ISMIP7_KSP_RTOL` / `ISMIP7_KSP_MAXIT` | outer FGMRES relative tolerance / iteration limit for the iterative diagnostic mode | `1e-6` / `1000` |
-| `ISMIP7_CONDENSED_KSP_TYPE` / `ISMIP7_CONDENSED_KSP_RTOL` / `ISMIP7_CONDENSED_KSP_RESTART` | `scpc_gamg` only: the Krylov method that iterates on SCPC's assembled condensed velocity system around GAMG, its relative tolerance (kept below `ISMIP7_KSP_RTOL` so the outer FGMRES needs one iteration) and GMRES restart. `preonly` restores one V-cycle per outer iteration | `fgmres` / `1e-7` / `100` |
-| `ISMIP7_CONDENSED_NEAR_NULLSPACE` | `scpc_gamg` only: `rigid_body` hands GAMG the two translations and the in-plane rotation of the condensed velocity space; `none` leaves PETSc's default (translations) | `rigid_body` |
+| `ISMIP7_CONDENSED_KSP_TYPE` / `ISMIP7_CONDENSED_KSP_ATOL_FACTOR` / `ISMIP7_CONDENSED_KSP_RTOL` / `ISMIP7_CONDENSED_KSP_RESTART` | `scpc_gamg` only: the Krylov method that iterates on SCPC's assembled condensed velocity system around GAMG; its **absolute** tolerance as a fraction of `ISMIP7_KSP_RTOL` (FGMRES hands the preconditioner unit vectors and the elimination is exact, so the outer relative residual after one iteration is the inner absolute residual: this is the loosest inner solve that leaves the outer FGMRES one iteration); its relative tolerance, parked out of reach; and the GMRES restart. `preonly` restores one V-cycle per outer iteration | `fgmres` / `0.5` / `1e-12` / `100` |
+| `ISMIP7_CONDENSED_NEAR_NULLSPACE` | `scpc_gamg` only: `none` leaves PETSc's default (the two translations); `rigid_body` adds the in-plane rotation of the condensed velocity space. Measured on 2500/25000 × 16: 2 % fewer V-cycles, each 14 % dearer | `none` |
 | `ISMIP7_CONDENSED_PETSC_OPTIONS` | `scpc_gamg` only: further unprefixed `name=value` options (or bare flags) of the condensed solve for a tuning rung, e.g. `"pc_gamg_threshold=0.02 mg_levels_ksp_max_it=4"`; applied last, recorded in the lane's `diagnostic_petsc_options` and printed in its log | empty |
 | `ISMIP7_SNES_MONITOR` / `ISMIP7_SNES_LOG` | enable diagnostic SNES/KSP monitors and optionally route them to a file; KSP output includes short and true residual lines per iteration, with a header before each mixed solve | `0` / stdout |
 | `ISMIP7_SOLVER_VIEW` | emit `snes_view`, outer `ksp_view`, and the SCPC condensed `ksp_view`; enabled by `make debug` and `make reference` to expose the actual block sizes and hierarchy | `0` |
@@ -745,12 +745,16 @@ reproduces them.
 
 `scpc_gamg` iterates where iterations are cheap. The first configuration ran
 one V-cycle per outer FGMRES iteration on the matrix-free mixed system, so each
-iteration paid a mixed-Jacobian action and three Slate sweeps: 0.257 s × 4894
-iterations = 126 s/step on 2500/25000 × 16, against 33 for `scpc_mumps` on the
-identical Newton path (quartz job 10517922). The mode now solves the assembled
-condensed system with FGMRES + GAMG to a tolerance below the outer one, which
-leaves the outer FGMRES the single iteration it has under MUMPS, and hands GAMG
-the rigid-body modes. The knobs (`ISMIP7_CONDENSED_*`, table above) touch only
+iteration paid a mixed-Jacobian action and three Slate sweeps (0.19 s against
+0.03 s on the assembled system). The mode now solves the assembled condensed
+system with FGMRES + GAMG to an absolute tolerance just under the outer
+relative one, which is exactly what leaves the outer FGMRES the single
+iteration it has under MUMPS. Quartz, 2500/25000 × 16, frozen linearization,
+identical 107-iteration Newton path and final state in every lane: single
+V-cycle 79.0 s/step, inner solve to a relative 1e-7 27.6, to the absolute
+tolerance 19.3 (19 V-cycles a solve), `scpc_mumps` 13.2. An exact coarse solve
+changes nothing (19.1); point-block Jacobi smoothing and the rigid-body
+near-nullspace lose. The knobs (`ISMIP7_CONDENSED_*`, table above) touch only
 `scpc_gamg`'s options, never the `scpc_mumps` fingerprint the caches are held
 to. Tune on one mesh with probe lanes, which leave the campaign's records
 alone; each job's log names its condensed options and per-solve

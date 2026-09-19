@@ -77,25 +77,34 @@ KSP_RTOL_DEFAULT = "1e-6"
 KSP_MAXIT_DEFAULT = "1000"
 # scpc_gamg iterates on the assembled condensed velocity system, not on the
 # matrix-free mixed one. The elimination is exact, so with one V-cycle per
-# outer FGMRES iteration (the first configuration; quartz job 10517922,
-# 2500/25000 x 16) every Krylov iteration paid a mixed-Jacobian action and
-# three Slate sweeps over the mesh around its V-cycle: 0.257 s each, 4894 of
-# them, 126 s/step against condensed MUMPS's 33. An inner solve a decade
-# tighter than the outer tolerance leaves the outer FGMRES one iteration, as
-# it has under MUMPS, and a Krylov iteration costs an AIJ product and a
-# V-cycle. Flexible because the coarse solve is itself GMRES. ``preonly``
-# restores the single V-cycle.
+# outer FGMRES iteration (the first configuration) every Krylov iteration pays
+# a mixed-Jacobian action and three Slate sweeps over the mesh around its
+# V-cycle: 0.19 s against 0.03 s for an iteration on the AIJ system. Flexible
+# because the coarse solve is itself GMRES. ``preonly`` restores the single
+# V-cycle. Quartz, 2500/25000 x 16, frozen linearization, s/step: single
+# V-cycle 79.0; inner solve to rtol 1e-7 27.6; to the absolute tolerance below
+# 19.3; condensed MUMPS 13.2.
 CONDENSED_KSP_TYPE_DEFAULT = "fgmres"
-CONDENSED_KSP_RTOL_DEFAULT = "1e-7"
+# The inner solve stops on an ABSOLUTE residual, a fraction of the outer
+# relative tolerance. FGMRES hands the preconditioner unit vectors and the
+# elimination is exact, so the outer relative residual after one iteration IS
+# the inner absolute residual (both 0.01527 after the first V-cycle of job
+# 10517922): this is the loosest inner solve that still leaves the outer
+# FGMRES one iteration. A relative 1e-7 spent 36 V-cycles a solve where the
+# outer tolerance is met after 19. The relative test is parked out of reach.
+CONDENSED_KSP_ATOL_FACTOR_DEFAULT = "0.5"
+CONDENSED_KSP_RTOL_DEFAULT = "1e-12"
 # Solves ran to 85 iterations at the first configuration's convergence rate;
 # a restart inside that range stalls them.
 CONDENSED_KSP_RESTART_DEFAULT = "100"
-# Near-nullspace handed to GAMG for the condensed operator: ``rigid_body``
-# (two translations and the in-plane rotation, which the membrane operator
-# does not see on a floating shelf) or ``none`` (GAMG's default: the
-# translations alone).
+# Near-nullspace handed to GAMG for the condensed operator: ``none`` (GAMG's
+# default, the two translations) or ``rigid_body`` (adds the in-plane
+# rotation, which the membrane operator does not see on a floating shelf).
+# The rotation halved the V-cycles of a synthetic shelf problem and did
+# nothing for Antarctica, most of which is held by drag: 2 % fewer V-cycles,
+# each 14 % dearer on the denser coarse grids (jobs 10520141 / 10520247).
 CONDENSED_NEAR_NULLSPACES = ("rigid_body", "none")
-CONDENSED_NEAR_NULLSPACE_DEFAULT = "rigid_body"
+CONDENSED_NEAR_NULLSPACE_DEFAULT = "none"
 TRANSPORT_KSP_RTOL_DEFAULT = "1e-10"
 TRANSPORT_KSP_MAXIT_DEFAULT = "500"
 MASS_RESIDUAL_TOL_GT_DEFAULT = "5e-5"
@@ -248,7 +257,12 @@ def _condensed_gamg_options(prefix):
     ).strip().lower()
     params[f"{prefix}ksp_type"] = ksp_type
     if ksp_type != "preonly":
+        outer_rtol = float(_env("ISMIP7_KSP_RTOL", KSP_RTOL_DEFAULT))
         params.update({
+            f"{prefix}ksp_atol": outer_rtol * float(_env(
+                "ISMIP7_CONDENSED_KSP_ATOL_FACTOR",
+                CONDENSED_KSP_ATOL_FACTOR_DEFAULT,
+            )),
             f"{prefix}ksp_rtol": float(_env(
                 "ISMIP7_CONDENSED_KSP_RTOL", CONDENSED_KSP_RTOL_DEFAULT
             )),

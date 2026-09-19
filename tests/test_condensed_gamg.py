@@ -25,6 +25,7 @@ from icepack2_tools.solverconfig import (  # noqa: E402
 
 KNOBS = (
     "ISMIP7_CONDENSED_KSP_TYPE",
+    "ISMIP7_CONDENSED_KSP_ATOL_FACTOR",
     "ISMIP7_CONDENSED_KSP_RTOL",
     "ISMIP7_CONDENSED_KSP_RESTART",
     "ISMIP7_CONDENSED_NEAR_NULLSPACE",
@@ -50,22 +51,39 @@ def condensed(mode="scpc_gamg"):
 def test_the_krylov_method_is_on_the_condensed_system():
     options = condensed()
     assert options["ksp_type"] == "fgmres"  # the coarse solve is GMRES
-    # Tighter than the outer tolerance, so the outer FGMRES needs one iteration.
-    outer = diagnostic_solver_parameters("scpc_gamg")
-    assert options["ksp_rtol"] < outer["ksp_rtol"]
-    assert outer["ksp_type"] == "fgmres"
+    assert diagnostic_solver_parameters("scpc_gamg")["ksp_type"] == "fgmres"
     assert options["ksp_gmres_restart"] == 100
     assert options["pc_type"] == "gamg"
-    assert options["near_nullspace"] == "rigid_body"
+    # Antarctica is held by drag: the rotation bought 2 % of the V-cycles and
+    # made each 14 % dearer.
+    assert options["near_nullspace"] == "none"
+
+
+def test_the_inner_solve_stops_where_the_outer_tolerance_is_met(monkeypatch):
+    r"""FGMRES hands the preconditioner unit vectors and the elimination is
+    exact, so the outer relative residual after one iteration is the inner
+    absolute residual. An absolute inner tolerance just under the outer
+    relative one is the loosest that leaves the outer solve one iteration
+    (19 V-cycles a solve on quartz where a relative 1e-7 spent 36)."""
+    outer = diagnostic_solver_parameters("scpc_gamg")["ksp_rtol"]
+    options = condensed()
+    assert options["ksp_atol"] == pytest.approx(0.5 * outer)
+    assert options["ksp_atol"] < outer
+    assert options["ksp_rtol"] <= 1e-10  # the relative test never decides
+    # It follows the outer tolerance rather than standing beside it.
+    monkeypatch.setenv("ISMIP7_KSP_RTOL", "1e-4")
+    assert condensed()["ksp_atol"] == pytest.approx(5e-5)
+    monkeypatch.setenv("ISMIP7_CONDENSED_KSP_ATOL_FACTOR", "0.1")
+    assert condensed()["ksp_atol"] == pytest.approx(1e-5)
 
 
 def test_the_single_v_cycle_configuration_is_one_knob_away(monkeypatch):
     monkeypatch.setenv("ISMIP7_CONDENSED_KSP_TYPE", "preonly")
-    monkeypatch.setenv("ISMIP7_CONDENSED_NEAR_NULLSPACE", "none")
     options = condensed()
     assert options["ksp_type"] == "preonly"
     assert not any(key.startswith("ksp_") and key != "ksp_type" for key in options)
-    assert options["near_nullspace"] == "none"
+    monkeypatch.setenv("ISMIP7_CONDENSED_NEAR_NULLSPACE", "rigid_body")
+    assert condensed()["near_nullspace"] == "rigid_body"
 
 
 def test_a_rung_s_extra_options_are_applied_last_and_recorded(monkeypatch):

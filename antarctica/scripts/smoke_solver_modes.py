@@ -75,6 +75,11 @@ def mixed_solver(mesh, mode, prefix, cubic_drag=0.0):
     return solver, state
 
 
+def condensed_near_nullspace_for(mode):
+    options = diagnostic_solver_parameters(mode)
+    return options.get("condensed_field_near_nullspace", "none")
+
+
 def test_mode(mesh, mode):
     os.environ["ISMIP7_DIAGNOSTIC_LINEAR_SOLVER"] = mode
     solver, state = mixed_solver(mesh, mode, f"ismip7_smoke_{mode}_")
@@ -93,7 +98,7 @@ def test_mode(mesh, mode):
         near = pmat.getNearNullSpace()
         # An unset near-nullspace is a null handle; getVecs() on it segfaults.
         modes = near.getVecs() if near.handle else []
-        expected = 3 if mode == "scpc_gamg" else 0
+        expected = 3 if condensed_near_nullspace_for(mode) == "rigid_body" else 0
         if len(modes) != expected:
             raise RuntimeError(
                 f"{mode} condensed operator has {len(modes)} near-nullspace "
@@ -238,6 +243,11 @@ def main():
     mesh = fd.UnitSquareMesh(2, 2)
     for mode in args.modes:
         test_mode(mesh, mode)
+    if "scpc_gamg" in args.modes:
+        # The rotation is off by default; keep the path that attaches it alive.
+        os.environ["ISMIP7_CONDENSED_NEAR_NULLSPACE"] = "rigid_body"
+        test_mode(mesh, "scpc_gamg")
+        del os.environ["ISMIP7_CONDENSED_NEAR_NULLSPACE"]
     test_frozen_linearization(fd.UnitSquareMesh(8, 8))
     test_persistent_transport(mesh)
     test_global_extrema(mesh)

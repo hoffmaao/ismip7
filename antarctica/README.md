@@ -631,6 +631,7 @@ redeclare those literals.
 | `ISMIP7_SNES_ATOL_SCALE` / `ISMIP7_SNES_RESTART_FAILURE_ATOL_SCALE` | persistent absolute tolerance after a converged setup solve (`scale * achieved norm`) / after accepting a loaded hard-era state (`scale * loaded-state norm`) | `100` / `1e-6` |
 | `ISMIP7_SNES_KSP_EW` | enable PETSc Eisenstat-Walker variable inner tolerance for an A/B test | `0` |
 | `ISMIP7_DIAGNOSTIC_LINEAR_SOLVER` | `schur_gamg` or `schur_mumps`: legacy PETSc `selfp` approximation; `scpc_gamg` or `scpc_mumps`: exact cell-local Slate elimination and an assembled velocity solve; `full_mumps`: complete mixed-Jacobian reference. Legacy `iterative`/`mumps` aliases mean `schur_gamg`/`schur_mumps` | `full_mumps` for forward drivers and the core runner; the timing Makefile's `TIMING_SOLVER` (`scpc_mumps`) |
+| `ISMIP7_FREEZE_LINEARIZATION` | `scpc_*` only (their Jacobian is matrix-free): build it on a copy of the state that is refreshed only when SNES re-forms the Jacobian, so the NLEQ-ERR line search's simplified-Newton solve sees the Jacobian SCPC condensed instead of one that has followed the state to the trial point. `0` restores the live state every lane before 2026-09-19 ran with; records carry `solver_configuration.linearization_state` (`frozen`/`live`/`assembled`) | `1` |
 | `ISMIP7_KSP_RTOL` / `ISMIP7_KSP_MAXIT` | outer FGMRES relative tolerance / iteration limit for the iterative diagnostic mode | `1e-6` / `1000` |
 | `ISMIP7_CONDENSED_KSP_TYPE` / `ISMIP7_CONDENSED_KSP_RTOL` / `ISMIP7_CONDENSED_KSP_RESTART` | `scpc_gamg` only: the Krylov method that iterates on SCPC's assembled condensed velocity system around GAMG, its relative tolerance (kept below `ISMIP7_KSP_RTOL` so the outer FGMRES needs one iteration) and GMRES restart. `preonly` restores one V-cycle per outer iteration | `fgmres` / `1e-7` / `100` |
 | `ISMIP7_CONDENSED_NEAR_NULLSPACE` | `scpc_gamg` only: `rigid_body` hands GAMG the two translations and the in-plane rotation of the condensed velocity space; `none` leaves PETSc's default (translations) | `rigid_body` |
@@ -724,6 +725,23 @@ step × iterations on the condensed system per Newton iteration for every
 accepted lane, from SCPC's own count: SNES's `linear_iterations` leaves out the
 solve the NLEQ-ERR line search makes for its simplified Newton step, which is a
 back-substitution under MUMPS and most of the Krylov work under GAMG.
+
+**The line search must see the Jacobian that was condensed.** A matrix-free
+Jacobian is the form's action at whatever the state Function holds, and
+Firedrake writes every point the residual is evaluated at into it. NLEQ-ERR
+evaluates the residual at its trial point and then solves, with the same KSP,
+for the simplified Newton step `J(x_k)⁻¹F(x_trial)`: the operator had become
+`J(x_trial)` while SCPC's condensed system was still `x_k`'s. Under exact
+condensed MUMPS the Newton-step solves took one outer iteration and the
+line-search solves 7–36 (1134 of a 2500/25000 × 16 lane's 1246 outer
+iterations, each a mixed-Jacobian action and three Slate sweeps), and the step
+the line search judged was not the one the method defines. Since 2026-09-19 the
+`scpc_*` Jacobian is built on a copy of the state refreshed only when SNES
+re-forms it (`preconditioners.frozen_linearization`; `make solver-smoke` holds
+an exact condensed solve to one outer iteration per solve and checks the root
+against the live one). `full_mumps` assembles its Jacobian and was always
+frozen. Lanes accepted before that date ran live; `ISMIP7_FREEZE_LINEARIZATION=0`
+reproduces them.
 
 `scpc_gamg` iterates where iterations are cheap. The first configuration ran
 one V-cycle per outer FGMRES iteration on the matrix-free mixed system, so each

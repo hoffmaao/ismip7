@@ -90,6 +90,7 @@ from icepack2_tools.solverconfig import (
     diagnostic_solver_label,
     diagnostic_solver_mode,
     diagnostic_solver_parameters,
+    linearization_state,
     mass_residual_tol_gt,
     rescue_enabled,
     rescue_max_it,
@@ -1040,13 +1041,24 @@ def setup_model(restart_from=None, *, allow_timing_cache_a_ref=False):
             scpc_structural_zero * M_s[0, 0] * tau_s[0] * dx, z
         )
 
+    # A matrix-free Jacobian follows the state Function, which the line
+    # search's residual evaluations overwrite with its trial point; hold it at
+    # the Newton iterate SCPC assembled its condensed system at.
+    jacobian, pre_jacobian = None, None
+    linearization = linearization_state(linear_solver)
+    if linearization == "frozen":
+        from icepack2_tools.preconditioners import frozen_linearization
+        jacobian, pre_jacobian = frozen_linearization(F, z)
+    PETSc.Sys.Print(f"  Jacobian linearization state: {linearization}")
+
     prob = NonlinearVariationalProblem(
-        F, z, form_compiler_parameters=fc_params
+        F, z, J=jacobian, form_compiler_parameters=fc_params
     )
     slvr = NonlinearVariationalSolver(
         prob,
         solver_parameters=sparams,
         options_prefix="ismip7_diagnostic_",
+        pre_jacobian_callback=pre_jacobian,
     )
 
     _solve_count = 0

@@ -57,6 +57,15 @@ SNES_KSP_EW_DEFAULT = "0"
 SNES_MONITOR_DEFAULT = "0"
 SNES_LOG_DEFAULT = "stdout"
 SOLVER_VIEW_DEFAULT = "0"
+# scpc_* apply a matrix-free Jacobian, which is the form's action at whatever
+# the state Function holds. The NLEQ-ERR line search evaluates the residual at
+# its trial point, which Firedrake writes into that Function, and then solves
+# for its simplified Newton step: against J(x_trial), with a condensed system
+# assembled at x_k. Frozen (the default), the Jacobian is built on a copy of
+# the state that is refreshed only when SNES re-forms it
+# (preconditioners.frozen_linearization). ``0`` restores the live state every
+# lane before 2026-09-19 ran with.
+FREEZE_LINEARIZATION_DEFAULT = "1"
 # The inversion's publishing solve (final_solve_parameters): a solve that
 # starts at an already-converged state must exit at iteration 0, and one that
 # does not must stay short and loud rather than grind to the shared 200.
@@ -118,6 +127,18 @@ def snes_monitor_enabled():
 
 def solver_view_enabled():
     return _enabled("ISMIP7_SOLVER_VIEW", SOLVER_VIEW_DEFAULT)
+
+
+def linearization_state(mode=None):
+    r"""Where a mode's Jacobian is linearized while the line search runs:
+    ``assembled`` (an AIJ matrix, fixed at the Newton iterate by construction),
+    or for the matrix-free scpc_* modes ``frozen`` at the iterate or ``live``
+    (following the state Function to the line search's trial point)."""
+    mode = diagnostic_solver_mode(mode)
+    if not mode.startswith("scpc_"):
+        return "assembled"
+    frozen = _enabled("ISMIP7_FREEZE_LINEARIZATION", FREEZE_LINEARIZATION_DEFAULT)
+    return "frozen" if frozen else "live"
 
 
 def diagnostic_solver_mode(requested=None):
@@ -490,6 +511,9 @@ def solver_provenance(mode=None):
         "diagnostic_mode": mode,
         "diagnostic_label": diagnostic_solver_label(mode),
         "diagnostic_petsc_options": diagnostic_solver_parameters(mode),
+        # Not in the cache fingerprint: it changes how a solve gets to F = 0,
+        # not the state it converges to.
+        "linearization_state": linearization_state(mode),
         "transport_petsc_options": transport_solver_parameters(),
         "mass_residual_tolerance_gt": mass_residual_tol_gt(),
         "continuation_steps": continuation_steps(),

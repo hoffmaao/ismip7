@@ -119,3 +119,27 @@ def test_solver_work_counts_the_line_search_s_solves_when_the_record_has_them():
     assert _solver_work({"diagnostic_solve_summary": summary}) == f"11.2 × 16.7{SNES_COUNT_MARK}"
     summary["condensed_iterations_total"] = 4894
     assert _solver_work({"diagnostic_solve_summary": summary}) == "11.2 × 43.7"
+
+
+def test_a_matrix_free_jacobian_is_frozen_at_the_newton_iterate_by_default(monkeypatch):
+    r"""scpc_* apply the Jacobian matrix-free, at whatever the state Function
+    holds; the line search had moved it to its trial point before solving for
+    the simplified Newton step (1134 of a MUMPS lane's 1246 outer iterations).
+    The smoke script (`make solver-smoke`) holds the solver itself to this."""
+    from icepack2_tools.solverconfig import linearization_state
+
+    monkeypatch.delenv("ISMIP7_FREEZE_LINEARIZATION", raising=False)
+    assert linearization_state("scpc_mumps") == "frozen"
+    assert linearization_state("scpc_gamg") == "frozen"
+    # An assembled Jacobian never followed the state.
+    assert linearization_state("full_mumps") == "assembled"
+    assert linearization_state("schur_gamg") == "assembled"
+    assert solver_provenance("scpc_gamg")["linearization_state"] == "frozen"
+    before = tc.solver_configuration_fingerprint(solver_provenance("scpc_mumps"))
+
+    monkeypatch.setenv("ISMIP7_FREEZE_LINEARIZATION", "0")
+    assert linearization_state("scpc_mumps") == "live"
+    assert linearization_state("full_mumps") == "assembled"
+    assert solver_provenance("scpc_mumps")["linearization_state"] == "live"
+    # The record says which; the caches, which are converged states, do not care.
+    assert tc.solver_configuration_fingerprint(solver_provenance("scpc_mumps")) == before

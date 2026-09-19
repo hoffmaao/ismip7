@@ -13,6 +13,41 @@ from firedrake.slate.static_condensation.la_utils import (
 from firedrake.slate.static_condensation.scpc import SCPC
 
 
+def frozen_linearization(F, z):
+    r"""``(J, pre_jacobian_callback)``: a Jacobian of ``F`` that stays at the
+    Newton iterate it was formed at, for a matrix-free operator.
+
+    A matrix-free Jacobian is the form's action at whatever the state Function
+    holds when it is applied, and Firedrake's residual callback writes every
+    point it evaluates into that Function. The NLEQ-ERR line search evaluates
+    the residual at a trial point and then solves with the *same* KSP for its
+    simplified Newton step, ``J(x_k)^{-1} F(x_trial)``: by then the operator
+    has silently become ``J(x_trial)``, while everything SCPC assembled (the
+    condensed matrix and its factorization or hierarchy) is still ``x_k``'s.
+    An exact condensed MUMPS solve then needs 7-36 outer iterations where it
+    should need one (quartz, 2500/25000 x 16: 1134 of a lane's 1246 outer
+    iterations), each a mixed-Jacobian action and three Slate sweeps, and the
+    step the line search judges is not the one NLEQ-ERR defines. An assembled
+    Jacobian (``full_mumps``) has always been frozen by construction.
+
+    The Jacobian is built on a copy of the state that only
+    ``pre_jacobian_callback`` refreshes, which Firedrake calls with the
+    iterate each time SNES re-forms the Jacobian."""
+    from firedrake import Function, derivative
+    from ufl import replace
+
+    z_lin = Function(z.function_space(), name="linearization_state")
+    # replace() expands the derivative first, so this is J(z_lin), not the
+    # derivative of F(z_lin) with respect to a z that is no longer in it.
+    J = replace(derivative(F, z), {z: z_lin})
+
+    def pre_jacobian_callback(X):
+        with z_lin.dat.vec_wo as v:
+            X.copy(v)
+
+    return J, pre_jacobian_callback
+
+
 def rigid_body_modes(V):
     r"""Orthonormal translations and in-plane rotation of a 2-D vector space:
     the modes a membrane-stress operator without basal drag does not see."""

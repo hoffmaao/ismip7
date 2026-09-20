@@ -752,7 +752,20 @@ class ISMIP7Atmosphere:
         return smb_kgm2s_to_myr(raw)
 
     def get_smb_gradient(self, year, mesh_x, mesh_y):
-        r"""Get SMB elevation gradient (dacabfdz) for ice-elevation feedback."""
+        r"""Get SMB elevation gradient (dacabfdz) for ice-elevation feedback.
+
+        Nothing calls this: the model has no SMB-height feedback, and the
+        submission README says so. Before anything does, three things from the
+        forum. The protocol prefers the RUNOFF gradient ``dmrrodz``, since
+        ``dacabfdz`` is dominated in places by precipitation patterns that
+        have nothing to do with elevation; either is accepted if the README
+        names it (discussion #36). Runoff is counted positive for mass LOSS,
+        so the SMB correction is MINUS ``dmrrodz`` times the elevation change
+        (#35), which a group found out from its results. And the AIS OCX
+        ``dacabfdz`` was spatially shifted until it was replaced in place
+        around 8 September 2026 (#45), so a copy fetched before then is wrong
+        under the right name: ``download_mirror.py`` will say REPLACED.
+        """
         return self.get_field("dacabfdz", year, mesh_x, mesh_y)
 
     def get_temperature(self, year, mesh_x, mesh_y, anomaly=True):

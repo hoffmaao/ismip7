@@ -1,8 +1,11 @@
 # Forward-run readiness for the ISMIP7 submission
 
 Swept from the ISMIP discussion board (https://github.com/orgs/ismip/discussions,
-45 threads) on 13 September 2026. This file is the tracked home of that sweep.
-Ordered by what blocks a submission first.
+45 threads) on 13 September 2026, and again on 19 September (48 threads, plus
+the two in `ismip7-antarctic-ocean-forcing`). This file is the tracked home of
+both sweeps. Sections 1 to 5 are the first, corrected where the second found
+them out of date; section 6 is the second, with the thread-by-thread
+checklist. Ordered by what blocks a submission first.
 
 ## 1. Protocol changes since 12 August
 
@@ -38,17 +41,21 @@ hold at 2015 conditions; SMB-height feedback, calving and GIA stay free.
 1960 or 1975 rather than 1850, with the 1960-1989 anomaly reference driving
 changes from there. This closes the 1 K cooling question at an 1850 start.
 
-**OCX (#32, #33, #45).** Independent of CMIP by design, spin-up method is the
-group's choice, no fracture forcing for historical or OCX (use the observed
-front positions in `obs/`), ice mask ends 2021. Open: the AIS OCX `dacabfdz`
-regression coefficients look spatially shifted (#45); the OCX gradient fields
-went to v2 on 11 September, so check the version before using SMB-height
-feedback there.
+**OCX (#32, #33, #45, #48).** Independent of CMIP by design, spin-up method is
+the group's choice, no fracture forcing for historical or OCX (use the observed
+front positions in `obs/`), ice mask ends 2021. The spatially shifted AIS OCX
+`dacabfdz` of #45 was replaced IN PLACE around 8 September, confirmed on the
+17th to be OCX only; the OCX gradients are v2 on the mirror. Nothing here reads
+them (no SMB-height feedback), but it is the case that showed a re-sync could
+not see a replaced file, see section 6. Open since 17 September: the OCX `main`
+thermal forcing departs from the Zhou climatology around Mertz (#48).
 
 **Fracture masks (#29, #30, #33).** Both ESMs' SSPs (CESM ssp585 at v2.1), none
 for historical or OCX. Floating ice only. The masks light up near the grounding
 line on Ross and FRIS, and the focus group suggests pairing them with a stress
-criterion (Lai et al. 2020). Applied as `ISMIP7_FRACTURE=mask`.
+criterion (Lai et al. 2020). Available as `ISMIP7_FRACTURE=mask` and, since the
+second sweep, `mask_front`; the default and the core matrix are `none`. Which
+the submission uses is a decision, section 6.
 
 **NaN forcing outside the downscaled mask (#39)** is intended. Zero, nearest or
 a large melt are all acceptable, stated in the README. Ours fills with zero.
@@ -134,8 +141,11 @@ What a submission needs (#5, #16, #17, #18, #19, #20, #22, #23):
   or first floating cell, small negatives allowed. `topg` and `lithk` must not
   be masked to the evolving ice sheet, or the scalar tool's sea-level numbers
   break.
-- **Scalars:** `ismip/ismip7-scalar-processing` produces the integrated scalars
-  and sea-level estimates; 2D fields and scalars share the experiment folder.
+- **Scalars:** the model integrates the ten scalars itself on the native mesh.
+  `ismip/ismip7-scalar-processing` also produces them, and the sea-level
+  estimates (`sla20`, `slg20`, `slvaf`) which nothing here computes, so it
+  still has to be run on the gridded files; 2D fields and scalars share the
+  experiment folder.
 - **README:** the template is the Google document from discussion #6, recording
   forcing versions, the NaN rule, the historical start year and the spin-up.
   Drafted in `ISMIP7_README_AIS_RICE_icepack2.md`, which owns those answers;
@@ -371,3 +381,129 @@ forcing-version audit, the output writer, and the melt calibration above.
    reference-climate pool.
 7. Optional: the stress criterion (Lai et al. 2020) alongside the collapse
    mask.
+
+## 6. Second sweep, 19 September
+
+### What moved on the board since the 13th
+
+- **#30, 16 to 18 September.** Groups compared how they apply the collapse
+  mask. Emptying every flagged floating cell opens holes behind the Ross and
+  Filchner-Ronne fronts, the holes act as open ocean, and the inflowing
+  glaciers lose their buttressing: 3.5 m to nearly 5 m of sea level by 2300 in
+  one model, a doubling in another. The other end-member removes flagged ice
+  only at the front. Ours was the first, with no connectivity test.
+- **#46, 16 and 17 September.** isschecker 0.3.0 to 0.5.0: a range finding is a
+  warning below 1 % of the values and an error above, units go through UDUNITS,
+  `hfgeoubed` is soft. The record of section 3 ("pass every content check")
+  predates all three and names no version.
+- **#48, 17 September, open.** The OCX `main` thermal forcing against the Zhou
+  climatology around Mertz: 50 % less melt there than the calibration, possibly
+  an older extrapolated climatology underneath OCX.
+- **#22, 18 September, open.** Whether `ligroundf` should carry the sign of the
+  other fluxes. Ours is positive for ice leaving the grounded sheet.
+- **#45, 17 September.** Closed as OCX only. **#36, 18 September.** Either
+  elevation gradient is accepted if the README says which.
+
+### Every Antarctic thread
+
+`[x]` handled or not applicable, `[ ]` still owed (see the actions),
+`[~]` open upstream.
+
+Forcing data:
+
+- [x] #2 size, 8 km product: only `*-8000m` is read.
+- [x] #3 Globus authentication: the mirror route needs none.
+- [x] #7 `pr-anomaly` withdrawn: precipitation is never read.
+- [x] #8 CESM2-WACCM ends in 2299, empty 2300 gradient files: one year is held
+      past the end of a series, atmosphere and now ocean alike, logged, and
+      anything further raises. A file with no time slices is named, with the
+      cause.
+- [x] #9, #24 time stamps and calendars differ between products: the year comes
+      from the filename and only the year of a time value is ever read.
+- [x] #10, #39 NaN fill and NaN outside the downscaled mask: zero-filled, in the
+      README.
+- [x] #37 MRI `GEMB-SDBN1` rename: the reader, the audit and now the Globus
+      downloader, which used to skip all of MRI-ESM2-0.
+- [x] #37, #40 data freeze, version directories dropped on the mirror: handled;
+      each run now logs the product and version it opened and
+      `core_report.py` carries that into the committed report.
+- [x] #45, #41 files replaced in place under the same name and version: the
+      mirror downloader keeps ETags in `.mirror_manifest.json` and refetches a
+      moved one, the audit reports `REPLACED` and `PINNED` and fails on them,
+      the Globus route has `--resync`.
+- [x] #41 item 9, dotted fracture versions: the Globus downloader no longer
+      passes over `v2.1` for `v2`.
+- [x] #41 items 1, 3, 4, 5, 7, 8, 10 to 14: none in a tree that is read. The
+      misfiled-scenario case (item 3) is what made `available_years` strict.
+- [~] #37 CESM2-WACCM ssp585 fracture may be re-cut: re-audit before production.
+- [x] #29, #33 no fracture forcing for historical, control or OCX: refused.
+- [x] #15, #28 control definition: window and pool centralised. Reading the
+      provided `ctrl` trees stays optional (action 6).
+- [x] #34 1960-1989 anomaly reference: the anomaly is re-referenced to the
+      2000-2029 pool and there is no temperature forcing, so no jump at the
+      start of a historical. The README now says the historical starts in 1850
+      from the 2015 state.
+- [x] #35, #36 runoff-gradient sign, which gradient: no SMB-height feedback, and
+      the README names both gradients as unused.
+- [x] #32, #33, #41 item 6 OCX: the readers open the real tree and core 11 runs
+      on it by default (`ISMIP7_OCX_FORCING`).
+- [~] #48 Mertz: `check_melt_bound.py --ocx` is the tripwire. [ ] Run it.
+- [~] #11 Ross warm stripe: a feature of the climatology. Thermal forcing is
+      used unsmoothed, in the README. A perturbed member, not a fix.
+- [x] #25 melt toolbox re-release: recalibrated on 14 September, section 4.
+      [ ] Whether the `06_nov` climatology's packaging fault is fixed is still
+      to check; `calibrate_melt.py` reads `30_sep` whatever `ISMIP7_OI_VERSION`
+      says.
+- [x] ocean-forcing #61, #84, issue #124: `tf` and `so` are read one chunk file
+      at a time; nothing to do.
+
+Ice-shelf collapse:
+
+- [x] #30 `ISMIP7_FRACTURE=mask_front` is the second end-member.
+      [ ] Which mode the submission uses is a decision; the README's item 9
+      had said the mask is applied while the core matrix runs `none`.
+- [x] #41 item 2 wrong MRI ssp126 `lake_properties`: never opened.
+
+Output and submission:
+
+- [x] #14, #16, #20 time encoding, no initial state, filename years.
+- [x] #16 `licalvf` negative for loss. [~] #22 `ligroundf` sign, in the README
+      with a `[confirm]`.
+- [x] #23 bounds. [x] #46 the bundled request is 0.5.0's and records its tag;
+      `audit_variable_request.py` finds drift. [ ] Re-run the checker at 0.5.0.
+      Scalars are not range-checked upstream, so the negative `tendlicalvf`
+      against the table's `[0, 1e25]` is a quirk of the table.
+- [x] #19 scalar-tool pitfalls. [ ] Run the tool for the sea-level estimates.
+- [x] #17 names: the core counter follows from the forcing and the ids are
+      validated. [~] What goes in the forcing field of an OCX filename is
+      unsettled: isschecker checks it against CMIP model names and has no `ocx`
+      experiment row.
+- [x] #5, #13, #21, #6, #18, #1, #12, #38.
+
+### Actions added, continuing section 5
+
+8. **Decide the collapse mode for the submission** (`none`, `mask`,
+   `mask_front`) and settle README item 9. A 32 km ssp585 under each of the two
+   mask modes is the evidence: the log prints the mode, and
+   `ctx["collapse_held_cells"]` counts the flagged floating cells `mask_front`
+   is holding back. `mask_front` has unit tests for the rule and a 1-against-3
+   rank check of the facet sweep, and has not yet run inside a forward.
+9. **Run `check_melt_bound.py --ocx` on the production mesh** before core 11
+   runs on the OCX product, and hold that run until #48 is answered if the
+   Mertz block is flagged. `ISMIP7_OCX_FORCING=stopgap` reproduces the old
+   core 11 meanwhile.
+10. **Re-run isschecker at 0.5.0** on the 32 km control and ssp585 outputs,
+    record the version in the README, and re-read action 5 in its light: below
+    1 % of values the `libmassbffl` excursion is now a warning.
+11. **Run `ismip7-scalar-processing`** on the same outputs, for `sla20`,
+    `slg20` and `slvaf`, and compare its scalars with the native ones.
+12. **Adopt or refetch the forcing that predates the manifest.** The first
+    `audit_forcing_versions.py` run after this lands will count most of the
+    Globus-era tree as `older`. `download_mirror.py --older adopt` vouches for
+    it, `--older refetch` replaces it; either way do it once, before action 4.
+13. **Three facts to read off real files**, none of which could be checked
+    without the forcing tree: that `time` in an `ice_shelf_collapse_mask_*.nc`
+    is what the reader now handles either way (plain years or dates); that `z`
+    in `OI_Climatology_*_tf_extrap.nc` is negative downwards, as
+    `forcing.py` assumes when it clips the draft into the file's range; and
+    whether the `06_nov` climatology still ships `tf` inside the `so` file.

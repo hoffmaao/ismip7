@@ -177,6 +177,35 @@ def fracture():
     return value
 
 
+OCX_FORCING_MODES = ("protocol", "stopgap")
+OCX_FORCING_DEFAULT = "protocol"
+
+
+def ocx_forcing():
+    r"""``ISMIP7_OCX_FORCING``: what core 11 runs on. ``protocol`` (default)
+    is the ISMIP7 OCX product, RACMO2.3p2-ERA downscaled SMB and the
+    expert-judgment ocean, and the run refuses to start without it.
+    ``stopgap`` is what the core ran on before the product was readable here:
+    RACMO2.4p1 actual-year SMB and the constant OI ocean climatology. It used
+    to be the silent fallback, which is how a core ran on it for weeks with
+    the real product on disk; it is now something a run has to ask for."""
+    value = os.environ.get("ISMIP7_OCX_FORCING", OCX_FORCING_DEFAULT).lower()
+    if value not in OCX_FORCING_MODES:
+        raise ValueError(f"ISMIP7_OCX_FORCING must be one of {OCX_FORCING_MODES}, got {value!r}")
+    return value
+
+
+def ocx_ocean():
+    r"""``ISMIP7_OCX_OCEAN``: which of the four expert-judgment OCX ocean
+    scenarios to read. ``main`` (default) is the core experiment's; ``cold``,
+    ``warm`` and ``vary`` are its sensitivity members."""
+    from .forcing import OCX_OCEAN_VARIANTS
+    value = os.environ.get("ISMIP7_OCX_OCEAN", "main").lower()
+    if value not in OCX_OCEAN_VARIANTS:
+        raise ValueError(f"ISMIP7_OCX_OCEAN must be one of {OCX_OCEAN_VARIANTS}, got {value!r}")
+    return value
+
+
 def ismip7_output():
     r"""``ISMIP7_OUTPUT``: record the ISMIP7 yearly fields and scalars.
 

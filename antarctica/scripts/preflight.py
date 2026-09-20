@@ -21,7 +21,7 @@ sys.path.insert(0, _PROJECT)
 sys.path.insert(0, _SCRIPTS)
 
 from icepack2_tools.forcing import (
-    ISMIP7Atmosphere, ISMIP7Ocean,
+    ISMIP7Atmosphere, ISMIP7Ocean, OCX, OCX_ATMOSPHERE_SOURCE,
     _oi_climatology_path, _find_ismip7_data,
 )
 from icepack2_tools.boundary import sidecar_path
@@ -30,7 +30,7 @@ from icepack2_tools.climatology import clim_start, clim_end, clim_scenario
 from icepack2_tools.runconfig import (
     calving_law as _calving_law, calving_sigma_max as _calving_sigma_max,
     friction as _friction, geometry_space as _geometry_space, lc as _lc,
-    lc_coarse as _lc_coarse,
+    lc_coarse as _lc_coarse, ocx_forcing as _ocx_forcing, ocx_ocean as _ocx_ocean,
 )
 from mesh_naming import get_buffer_m, mesh_filename
 
@@ -122,6 +122,19 @@ def pool_status(esm, var, what_empty, what_partial):
             f"{span}, {len(gaps)} of {CLIM_START}-{CLIM_END} missing "
             f"({gaps[0]}..{gaps[-1]}): "
             f"{what_partial if have else what_empty}")
+
+
+def ocx_atm_years():
+    return ISMIP7Atmosphere(esm=OCX_ATMOSPHERE_SOURCE, scenario=OCX).available_years("acabf")
+
+
+def ocx_ocean_cover():
+    r"""The years both OCX ocean variables cover, or None."""
+    ocean = ISMIP7Ocean(scenario=OCX, variant=_ocx_ocean())
+    covers = [ocean.coverage(v) for v in ("tf", "so")]
+    if None in covers:
+        return None
+    return max(c[0] for c in covers), min(c[1] for c in covers)
 
 
 def ocean_cover(esm, scenario):
@@ -220,7 +233,23 @@ def main():
         miss = list(base_missing)
         degraded = []
         notes = []
-        if core == 11:
+        if core == 11 and _ocx_forcing() == "protocol":
+            # projections/ocx.py refuses to start on anything less, so this
+            # gate asks the same readers the same question.
+            yrs = ocx_atm_years()
+            gaps = sorted(set(range(y0, y1 + 1)) - set(yrs))
+            if gaps:
+                miss.append(f"OCX atmosphere acabf ({OCX_ATMOSPHERE_SOURCE}): "
+                            + (f"{len(gaps)} of {y0}-{y1} missing" if yrs else "absent"))
+            oc = ocx_ocean_cover()
+            if oc is None or oc[0] > y0 or oc[1] < y1:
+                miss.append(f"OCX ocean '{_ocx_ocean()}' tf/so"
+                            + (f" covers {oc[0]}-{oc[1]}, need {y0}-{y1}" if oc else ": absent"))
+            notes.append("K is fitted to the OI climatology, not to the OCX ocean: "
+                         "read check_melt_bound.py --ocx first (discussion #48)")
+        elif core == 11:
+            notes.append("ISMIP7_OCX_FORCING=stopgap: RACMO2.4p1 + OI climatology, "
+                         "not the ISMIP7 OCX product")
             if not racmo_ok():
                 miss.append("RACMO (OCX SMB)")
             if not oi_ok():

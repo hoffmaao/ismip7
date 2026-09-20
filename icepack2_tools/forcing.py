@@ -322,12 +322,36 @@ ATMOSPHERE_VERSION = "v2"
 OCEAN_VERSION = "v3"
 
 
+# The observation-constrained experiment. It has no ESM and no scenario, and
+# the focus groups decided it need not follow the ESM ordering, only be
+# consistent with itself (discussion #41, item 6). So its tree is scenario
+# first, ``OCX/<source>/<product>/<variable>/<version>/``, where every other
+# tree is ``<ESM>/<scenario>/...``, while its FILENAMES keep source before
+# OCX, which is the ``<esm>_<scenario>`` order the readers already build.
+# Reading it as ``esm=OCX_ATMOSPHERE_SOURCE, scenario=OCX`` therefore needs
+# the directory swapped and nothing else.
+OCX = "OCX"
+OCX_ATMOSPHERE_SOURCE = "RACMO2.3p2-ERA"
+# The Antarctic OCX ocean cites no source: it is four expert-judgment
+# scenarios (discussion #41), of which ``main`` is the core one.
+OCX_OCEAN_VARIANTS = ("main", "cold", "warm", "vary")
+OCX_OCEAN_SOURCE = "expert-judgment"
+
+
+def _scenario_dir(root, esm, scenario):
+    r"""``<root>/<esm>/<scenario>``, or ``<root>/OCX/<source>`` for OCX."""
+    if scenario == OCX:
+        return os.path.join(root, OCX, esm)
+    return os.path.join(root, esm, scenario)
+
+
 def atmosphere_path(scenario, esm="CESM2-WACCM", variable="acabf-anomaly",
                     resolution="8000m", version=ATMOSPHERE_VERSION, data_root=None):
     root = _find_ismip7_data(data_root)
     if root is None:
         return None
-    parent = os.path.join(root, esm, scenario, atmosphere_product(root, esm, scenario, resolution), variable)
+    parent = os.path.join(_scenario_dir(root, esm, scenario),
+                          atmosphere_product(root, esm, scenario, resolution), variable)
     return os.path.join(parent, _resolve_version(parent, version))
 
 
@@ -344,17 +368,24 @@ def atmosphere_product(root, esm, scenario, resolution="8000m"):
     first, so a tree fetched before the rename keeps working.
     """
     for product in ATMOSPHERE_PRODUCTS:
-        if os.path.isdir(os.path.join(root, esm, scenario, f"{product}-{resolution}")):
+        if os.path.isdir(os.path.join(_scenario_dir(root, esm, scenario), f"{product}-{resolution}")):
             return f"{product}-{resolution}"
     return f"SDBN1-{resolution}"
 
 
 def ocean_path(scenario, esm="CESM2-WACCM", variable="tf",
-               version=OCEAN_VERSION, data_root=None):
+               version=OCEAN_VERSION, data_root=None, variant="main"):
+    r"""``<root>/<esm>/<scenario>/ocean/<variable>/<version>``. The OCX ocean
+    is ``<root>/OCX/ocean/<variant>/<version>`` instead: no source, one
+    directory per expert-judgment scenario, and ``so``, ``tf`` and ``thetao``
+    side by side in it with no directory of their own."""
     root = _find_ismip7_data(data_root)
     if root is None:
         return None
-    parent = os.path.join(root, esm, scenario, "ocean", variable)
+    if scenario == OCX:
+        parent = os.path.join(root, OCX, "ocean", variant)
+    else:
+        parent = os.path.join(root, esm, scenario, "ocean", variable)
     return os.path.join(parent, _resolve_version(parent, version))
 
 
@@ -734,10 +765,15 @@ class ISMIP7Ocean:
     r"""Read ISMIP7 ocean forcing for Antarctica."""
 
     def __init__(self, data_root=None, esm="CESM2-WACCM", scenario="ssp585",
-                 version=OCEAN_VERSION):
+                 version=OCEAN_VERSION, variant="main"):
         self.data_root = _find_ismip7_data(data_root)
+        if scenario == OCX:
+            if variant not in OCX_OCEAN_VARIANTS:
+                raise ValueError(f"the OCX ocean is one of {OCX_OCEAN_VARIANTS}, got {variant!r}")
+            esm = OCX_OCEAN_SOURCE
         self.esm = esm
         self.scenario = scenario
+        self.variant = variant
         self.version = version
         self._ds_cache = {}
         self._interp_cache = {}
@@ -748,7 +784,7 @@ class ISMIP7Ocean:
     def _var_dir(self, variable):
         return ocean_path(
             self.scenario, self.esm, variable,
-            self.version, self.data_root,
+            self.version, self.data_root, self.variant,
         )
 
     def provenance(self, variables=("tf", "so")):
@@ -757,10 +793,11 @@ class ISMIP7Ocean:
         rows = []
         for variable in variables:
             vdir = self._var_dir(variable)
-            if vdir is None or not os.path.isdir(vdir):
+            if vdir is None or not os.path.isdir(vdir) or not self.spans(variable):
                 continue
             rows.append({
-                "variable": variable, "product": "ocean",
+                "variable": variable,
+                "product": f"ocean/{self.variant}" if self.scenario == OCX else "ocean",
                 "version": os.path.basename(vdir), "dir": vdir,
                 "newer": _newer_versions(os.path.dirname(vdir), os.path.basename(vdir)),
             })
@@ -771,8 +808,10 @@ class ISMIP7Ocean:
         vdir = self._var_dir(variable)
         if vdir is None or not os.path.isdir(vdir):
             return []
+        # by the variable's own name: the OCX ocean keeps so, tf and thetao
+        # in one directory, and thetao's chunks are not tf's
         return sorted((int(m.group(1)), int(m.group(2)), os.path.join(vdir, f))
-                      for f in os.listdir(vdir)
+                      for f in os.listdir(vdir) if f.startswith(variable + "_")
                       for m in [re.search(r"_(\d{4})-(\d{4})\.nc$", f)] if m)
 
     def coverage(self, variable="tf"):

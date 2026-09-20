@@ -1,20 +1,37 @@
 #!/usr/bin/env python3
 r"""ISMIP7 Core Experiment 11: OCX observationally constrained (1979-2025).
 
-Fully observation-forced run over the satellite era, for validating the
-initialized model against the observed record:
+Observation-forced run over the satellite era, for validating the initialized
+model against the observed record, and independent of CMIP by design
+(discussion #32). ``ISMIP7_OCX_FORCING`` says what it runs on:
 
+``protocol`` (default), the ISMIP7 OCX product:
+    SMB:   RACMO2.3p2-ERA, statistically downscaled (SDBN1, 8 km), the full
+           ``acabf`` field year by year, 1979-2025.
+    Ocean: the expert-judgment thermal forcing and salinity at draft,
+           1950-2025, with the calibrated per-basin K. ``ISMIP7_OCX_OCEAN``
+           picks the scenario: ``main`` (the core one), ``cold``, ``warm`` or
+           ``vary``. The Antarctic OCX ocean cites no observational source
+           (discussion #41).
+    The run refuses to start if the product is not on disk.
+
+``stopgap``, what this core ran on before the product was readable here:
     SMB:   RACMO2.4p1 actual-year fields (1979-2023; end years held at the
-           last available RACMO year), NOT an ESM.
+           last available RACMO year).
     Ocean: constant OI-climatology TF/so at draft with the calibrated
            per-basin K (the same forcing the CTRL uses).
 
-If an `ocx` scenario tree exists under ISMIP7/AIS (protocol-provided
-time-varying obs forcing), the atmosphere/ocean readers pick it up
-instead. The period is the OCX forcing span (the OCX atmosphere tree runs
-1979-2025). Note the initial state is the ~2015 BedMachine/MAP geometry, so
-a 1979 start is anachronistic by construction: treat the early years as
-relaxation and the 2000s-2025 as the validation window.
+OPEN, discussion #48 (17 September 2026): the OCX ``main`` thermal forcing
+differs strongly from the Zhou climatology around Mertz, halving that
+region's melt against a calibration made on the climatology, and may have
+been built from an older extrapolated climatology. Every K here is fitted to
+the climatology, so run ``check_melt_bound.py --ocx`` and read its per-basin
+table before trusting a protocol-forced core 11.
+
+No fracture forcing exists for OCX (discussion #33). The initial state is the
+~2015 BedMachine/MAP geometry, so a 1979 start is anachronistic by
+construction: treat the early years as relaxation and the 2000s-2025 as the
+validation window.
 
 Usage:
     mpiexec -n 24 python scripts/projections/ocx.py
@@ -29,7 +46,11 @@ sys.path.insert(0, _SCRIPTS)
 from simulation import (setup_model, run_simulation, latest_checkpoint,
                         auto_resume, PETSc)
 from experiment import find_k_npz
+import math
+
+from icepack2_tools.runconfig import ocx_forcing, ocx_ocean
 from icepack2_tools.forcing import (
+    OCX, OCX_ATMOSPHERE_SOURCE,
     ISMIP7Atmosphere, ISMIP7Ocean, make_forcing_callback,
     make_climatology_ocean_callback, load_racmo_smb_climatology,
     load_K_per_basin, forcing_coords, reject_collapse_mask, forcing_year,
@@ -45,9 +66,49 @@ OUTPUT_INTERVAL = int(os.environ.get("ISMIP7_OUTPUT_INTERVAL", "10"))
 RACMO_LAST = 2023  # smbgl_monthlyS_ANT11_RACMO2.4p1_ERA5_197901_202312
 
 
+def protocol_forcing(t_start, t_end):
+    r"""The OCX atmosphere and ocean readers, once both cover the run.
+
+    Checked before the model is set up, and refused rather than degraded: the
+    readers raise on a year they do not hold, and a core that quietly ran on
+    something else is what this replaces.
+    """
+    atm = ISMIP7Atmosphere(esm=OCX_ATMOSPHERE_SOURCE, scenario=OCX)
+    ocean = ISMIP7Ocean(scenario=OCX, variant=ocx_ocean())
+    first, last = int(math.floor(t_start + 1e-9)), forcing_year(t_end)
+    have = atm.available_years("acabf")
+    # the reader holds the last year on disk for one year past it, no more
+    short = sorted(set(range(first, last)) - set(have))
+    if not have or short or last > have[-1] + 1:
+        problem = (f"atmosphere acabf covers {have[0]}-{have[-1]} with {len(short)} of "
+                   f"{first}-{last} missing" if have else "no atmosphere acabf")
+    else:
+        problem = None
+        for var in ("tf", "so"):
+            cover = ocean.coverage(var)
+            if cover is None or cover[0] > first or cover[1] + 1 < last:
+                problem = (f"ocean {var} covers {cover[0]}-{cover[1]}, need {first}-{last}"
+                           if cover else f"no ocean {var} ({ocean.variant})")
+                break
+    if problem:
+        raise FileNotFoundError(
+            f"The ISMIP7 OCX product does not cover this run: {problem}. Fetch it with\n"
+            f"  python antarctica/scripts/download_mirror.py "
+            f"data/OCX/{OCX_ATMOSPHERE_SOURCE}/SDBN1-8000m/acabf/ data/OCX/ocean/{ocean.variant}/\n"
+            f"or run the pre-product forcing on purpose with ISMIP7_OCX_FORCING=stopgap."
+        )
+    return atm, ocean
+
+
 def main():
-    experiment_name = "ocx" + (f"_{os.environ.get('ISMIP7_RUN_TAG', '')}"
-                               if os.environ.get("ISMIP7_RUN_TAG") else "")
+    forcing = ocx_forcing()
+    experiment_name = "ocx"
+    if forcing == "protocol" and ocx_ocean() != "main":
+        experiment_name += f"_{ocx_ocean()}"          # a sensitivity member is not core 11
+    if os.environ.get("ISMIP7_RUN_TAG"):
+        experiment_name += f"_{os.environ['ISMIP7_RUN_TAG']}"
+    reject_collapse_mask("the OCX experiment")
+    readers = protocol_forcing(T_START, T_END) if forcing == "protocol" else None
     # Explicit restart, else unattended auto-resume from this experiment's own
     # newest checkpoint (ISMIP7_AUTO_RESUME=1), the same lookup the control
     # driver does. A chained batch job depends on it: without it every link
@@ -76,21 +137,18 @@ def main():
     if K_scale != 1.0:
         K_field = K_field * K_scale
         PETSc.Sys.Print(f"  K scaled by ISMIP7_K_SCALE={K_scale:.3f}")
-    PETSc.Sys.Print(f"  Ocean melt: OI climatology + per-basin K ({K_npz})")
-
-    reject_collapse_mask("the OCX experiment")
-
-    atm = ISMIP7Atmosphere(scenario="ocx")
-    if atm.available_years():
-        PETSc.Sys.Print("  Atmosphere: protocol ocx tree")
-        ocean = ISMIP7Ocean(scenario="ocx")
+    if readers is not None:
+        atm, ocean = readers
+        PETSc.Sys.Print(f"  Atmosphere: ISMIP7 OCX, {OCX_ATMOSPHERE_SOURCE} SDBN1 acabf")
+        PETSc.Sys.Print(f"  Ocean melt: ISMIP7 OCX '{ocean.variant}' tf/so + per-basin K ({K_npz})")
         callback = make_forcing_callback(
             atm=atm, ocean=ocean, K_per_basin_npz=K_npz, smb_anomaly=False,
         )
         provenance = describe_forcing_provenance(
             atm, ocean, variables={"atmosphere": ("acabf",)})
     else:
-        PETSc.Sys.Print("  Atmosphere: RACMO2.4p1 actual-year SMB (no ocx tree)")
+        PETSc.Sys.Print(f"  Ocean melt: OI climatology + per-basin K ({K_npz})")
+        PETSc.Sys.Print("  Atmosphere: RACMO2.4p1 actual-year SMB (ISMIP7_OCX_FORCING=stopgap)")
         provenance = describe_observational_forcing(
             smb=f"RACMO2.4p1 actual-year SMB, {RACMO_LAST} held after it",
             ocean=True)

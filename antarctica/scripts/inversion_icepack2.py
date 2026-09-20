@@ -110,6 +110,7 @@ from icepack2_tools.prior import (
     prior_operator_form,
 )
 from icepack2_tools.thermo_model import compute_fluidity_prior
+from icepack2_tools.optimization import FunctionalDecreaseStop
 from icepack2_tools.forcing import (load_racmo_smb_climatology,
                                     load_mean_annual_surface_temperature)
 from icepack2_tools.runconfig import (
@@ -1606,8 +1607,12 @@ def main():
 
     # ── L-BFGS-B Inversion ──
     max_iter = int(os.environ.get("ISMIP7_MAXITER", "500"))
+    # Relative-decrease stopping rule; 0 disables it and the budget above decides.
+    ftol = float(os.environ.get("ISMIP7_FTOL", "1e-10"))
+    min_iter = int(os.environ.get("ISMIP7_MIN_ITER", "3"))
     PETSc.Sys.Print("\nStarting L-BFGS-B inversion (theta + phi)...")
-    PETSc.Sys.Print(f"  maxiter={max_iter}, nranks={COMM_WORLD.size}")
+    PETSc.Sys.Print(f"  maxiter={max_iter} ftol={ftol:g} min_iter={min_iter}, "
+                    f"nranks={COMM_WORLD.size}")
 
     global_ndof = len(func_to_global(theta))
     z_backup = z.copy(deepcopy=True)
@@ -1658,6 +1663,8 @@ def main():
                 "log_vel_eps": float(LOG_VEL_EPS),
                 "gamma_theta": float(GAMMA_THETA),
                 "gamma_phi": float(GAMMA_PHI),
+                "ftol": float(ftol),
+                "min_iter": int(min_iter),
                 "dhdt_weight": float(dhdt_w),
                 "dhdt_net_sigma": float(net_sigma_used),
                 "grad_precond": os.environ.get(
@@ -1872,10 +1879,13 @@ def main():
         )
 
         _t_last = [perf_counter()]
+        _ftol_stop = FunctionalDecreaseStop(ftol, min_iter)
 
         def _monitor(tao):
             its, f_val, gnorm, _cnorm, _xdiff, _reason = tao.getSolutionStatus()
             iteration_count[0] = int(its)
+            if _ftol_stop.update(iteration_count[0], f_val):
+                tao.setConvergedReason(PETSc.TAO.ConvergedReason.CONVERGED_USER)
             now = perf_counter()
             t_iter = now - _t_last[0]
             _t_last[0] = now
@@ -1893,6 +1903,7 @@ def main():
                 f"misfit={f_val - reg_theta - reg_phi:.6e} "
                 f"reg_θ={reg_theta:.4e} reg_φ={reg_phi:.4e} "
                 f"total={f_val:.6e} |grad|_A={gnorm:.4e} "
+                f"dJ/J={_ftol_stop.criterion if _ftol_stop.criterion is not None else 0.0:.1e} "
                 f"[total={t_iter:.1f}s]"
             )
             if timing_json:
@@ -1923,7 +1934,9 @@ def main():
             pass
         reason = int(solver.tao.getConvergedReason())
         message = (
-            "CONVERGED: gradient tolerance reached" if reason > 0
+            f"CONVERGED: relative functional decrease <= ftol={ftol:g}"
+            if reason == int(PETSc.TAO.ConvergedReason.CONVERGED_USER)
+            else "CONVERGED: gradient tolerance reached" if reason > 0
             else f"STOP: TAO reason {reason} (iteration limit is {max_iter})"
         )
         return SimpleNamespace(
@@ -1995,7 +2008,7 @@ def main():
             x0,
             method="L-BFGS-B",
             jac=True,
-            options={"maxiter": max_iter, "ftol": 0, "gtol": 0},
+            options={"maxiter": max_iter, "ftol": ftol, "gtol": 0},
         )
 
     PETSc.Sys.Print(f"\nOptimization finished: {result.message}")

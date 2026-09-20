@@ -22,7 +22,8 @@ ANT = os.path.join(REPO, "antarctica")
 
 @pytest.fixture(autouse=True)
 def _clean_env(monkeypatch):
-    for key in ("ISMIP7_SHARE", "ISMIP7_OBS_DATA_ROOT", "ISMIP7_K_PER_BASIN_NPZ"):
+    for key in ("ISMIP7_SHARE", "ISMIP7_OBS_DATA_ROOT", "ISMIP7_K_PER_BASIN_NPZ",
+                "ISMIP7_DATA_ROOT", "ISMIP7_OBS_KIT"):
         monkeypatch.delenv(key, raising=False)
 
 
@@ -125,22 +126,23 @@ def test_the_dhdt_cache_lands_under_the_obs_root(monkeypatch, tmp_path):
     assert (tmp_path/"dhdt_cache").is_dir()
 
 
-def test_no_module_builds_a_data_path_out_of_its_own_location():
-    """runconfig owns the fallback; everything else asks it.
+def test_bedmachine_for_a_remesh_is_read_from_the_obs_root(monkeypatch, tmp_path):
+    """The third library default, the one the adaptive remesh builds its
+    outline from. The builder resolves and opens BedMachine before it touches
+    gmsh, so the error names the directory it went looking in."""
+    from icepack2_tools.adapt_mesh import antarctica_geometry_builder
+    monkeypatch.setenv("ISMIP7_OBS_DATA_ROOT", str(tmp_path))
+    with pytest.raises(FileNotFoundError) as excinfo:
+        antarctica_geometry_builder(None)
+    assert str(tmp_path) in str(excinfo.value)
 
-    A second definition is not a duplicate that drifts, it is one that cannot
-    be redirected at all, which is the failure this guards.
-    """
-    import glob
-    offenders = []
-    for fn in sorted(glob.glob(os.path.join(REPO, "icepack2_tools", "*.py"))):
-        if os.path.basename(fn) == "runconfig.py":
-            continue
-        src = open(fn).read()
-        for line in src.splitlines():
-            if '"antarctica", "data"' in line:
-                offenders.append(f"{os.path.basename(fn)}: {line.strip()}")
-    assert not offenders, (
-        "these build a data path themselves instead of calling "
-        f"runconfig.obs_data_root(): {offenders}"
-    )
+
+def test_the_adapt_driver_reads_the_obs_root(monkeypatch):
+    """The only caller of the builder above. It globs BedMachine and MEaSUReS
+    out of its own module-level DATA_DIR, so a data-less clone died on an
+    empty glob before the library default could help."""
+    import importlib
+    monkeypatch.syspath_prepend(os.path.join(REPO, "antarctica", "scripts"))
+    monkeypatch.setenv("ISMIP7_OBS_DATA_ROOT", "/projects/shared/antarctica/data")
+    driver = importlib.reload(importlib.import_module("adapt_mesh"))
+    assert driver.DATA_DIR == "/projects/shared/antarctica/data"

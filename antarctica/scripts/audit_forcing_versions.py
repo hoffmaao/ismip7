@@ -1,15 +1,27 @@
 #!/usr/bin/env python3
-r"""Compare the forcing versions on disk with the ISMIP7 Source Cooperative
-mirror, the data-freeze copy of record (discussions #37 and #40, Sep 2026).
+r"""Compare the forcing on disk with the ISMIP7 Source Cooperative mirror, the
+data-freeze copy of record (discussions #37 and #40, Sep 2026).
 
     python antarctica/scripts/audit_forcing_versions.py [--root ISMIP7/AIS]
         [--esm CESM2-WACCM --esm MRI-ESM2-0] [--scenario ssp585 ...]
 
 For every <ESM>/<scenario>/<product>/<variable> the mirror publishes, print
-the mirror's versions next to the ones under --root, and flag the rows where
-the local copy is missing or behind. The mirror keeps only the
-current version of each product, so "behind" means "must re-sync before the
-production runs" (and the README must cite the version used).
+the mirror's versions next to the ones under --root and the one a run would
+open, and flag the rows that need attention before the production runs:
+
+    MISSING    nothing local
+    BEHIND     the mirror's version is not on disk
+    PINNED     it is on disk, but the reader resolves another one (it asks for
+               ``forcing.ATMOSPHERE_VERSION`` / ``OCEAN_VERSION`` first, and
+               takes the highest fracture version)
+    REPLACED   right version, but the mirror's object has changed since it was
+               fetched: same name, new content (discussions #45 and #41)
+
+The mirror keeps only the current version of each product, so BEHIND, PINNED
+and REPLACED all mean "re-sync before the production runs", and they set the
+exit status. The README must cite the versions a run used. A file the
+download manifest has never seen and which is older than the mirror's object
+is counted as ``older``: unproven either way, see ``download_mirror.py --older``.
 
 The mirror is anonymous S3 over HTTPS. Two things the endpoint insists on:
 prefixes are relative to the product (``data/<ESM>/...``, no ``AIS/`` level,
@@ -19,50 +31,41 @@ listing per ESM; the two core ESMs take well under a minute.
 """
 import argparse
 import os
-import re
 import sys
-import urllib.parse
-import urllib.request
-import xml.etree.ElementTree as ET
 
-ENDPOINT = "https://data.source.coop/ismip/ismip7-ais-forcing/"
-PRODUCT = "ismip7-ais-forcing/"
-HEADERS = {"User-Agent": "curl/8"}
+_SCRIPTS = os.path.dirname(os.path.abspath(__file__))
+_PROJECT = os.path.dirname(os.path.dirname(_SCRIPTS))
+sys.path.insert(0, _PROJECT)
+sys.path.insert(0, _SCRIPTS)
 
+from download_mirror import (                                   # noqa: E402
+    DEFAULT_PRODUCT, MIRROR, VERSION, list_keys, load_manifest, local_path, plan,
+)
+from icepack2_tools.forcing import (                            # noqa: E402
+    ATMOSPHERE_PRODUCTS, ATMOSPHERE_VERSION, OCEAN_VERSION,
+    _resolve_version, _version_subdirs,
+)
 
-def list_keys(prefix):
-    r"""Every key under ``prefix`` (flat listing, paginated)."""
-    keys, token = [], None
-    while True:
-        url = ENDPOINT + "?list-type=2&max-keys=1000&prefix=" + urllib.parse.quote(prefix)
-        if token:
-            url += "&continuation-token=" + urllib.parse.quote(token)
-        with urllib.request.urlopen(urllib.request.Request(url, headers=HEADERS), timeout=60) as r:
-            root = ET.fromstring(r.read())
-        ns = {"s3": root.tag.split("}")[0].strip("{")}
-        keys += [k.find("s3:Key", ns).text[len(PRODUCT):] for k in root.findall("s3:Contents", ns)]
-        nxt = root.find("s3:NextContinuationToken", ns)
-        if nxt is None:
-            return keys
-        token = nxt.text
+PRODUCT = DEFAULT_PRODUCT + "/"
+ENDPOINT = MIRROR + PRODUCT
 
 
-VERSION = re.compile(r"[_-](v\d+(?:\.\d+)*)(?:_|\.nc$)")   # _v2_ in most names, -v2.1.nc in fracture names
-
-
-def mirror_versions(esms, scenarios):
-    r"""{(esm, scenario, product, variable): {versions}} from the mirror.
+def mirror_entries(esms, scenarios, listing=None):
+    r"""{(esm, scenario, product, variable): [(key, size, etag, stamp), ...]}.
 
     The mirror keeps no version directories: only the current version of
     each product is published and the version lives in the filename
     (``acabf_AIS_CESM2-WACCM_ssp585_SDBN1-8000m_v2_2015.nc``, fracture
-    ``..._v2.1.nc``), so it is read from there.
+    ``..._v2.1.nc``), so it is read from there. Anything that is not NetCDF
+    (the ``Atmospheric forcing README.docx`` of discussion #41) is no forcing
+    product and carries no version, so it is no row.
     """
+    listing = listing or (lambda prefix: list_keys(prefix, ENDPOINT, PRODUCT))
     out = {}
     for esm in esms:
-        for key in list_keys(f"data/{esm}/"):
-            parts = key.split("/")            # data, esm, scenario, [product], [variable], file
-            if len(parts) < 4:
+        for entry in listing(f"data/{esm}/"):
+            parts = entry[0].split("/")       # data, esm, scenario, [product], [variable], file
+            if len(parts) < 4 or not parts[-1].endswith(".nc"):
                 continue
             sc = parts[2]
             if scenarios and sc not in scenarios:
@@ -73,16 +76,39 @@ def mirror_versions(esms, scenarios):
                 pr, var = parts[3], ""
             else:                             # data/esm/scenario/product/variable/file
                 pr, var = parts[3], parts[4]
-            m = VERSION.search(parts[-1])
-            out.setdefault((esm, sc, pr, var), set()).add(m.group(1) if m else "?")
+            out.setdefault((esm, sc, pr, var), []).append(entry)
     return out
+
+
+def versions_of(entries):
+    found = set()
+    for key, *_ in entries:
+        m = VERSION.search(os.path.basename(key))
+        found.add(m.group(1) if m else "?")
+    return sorted(found)
+
+
+def local_product(root, esm, scenario, product):
+    r"""The directory on disk that holds ``product``. MRI-ESM2-0's ``SDBN1-*``
+    became ``GEMB-SDBN1-*`` in August 2026 with the data unchanged (#37), and
+    the reader takes whichever is there, so a tree fetched before the rename
+    is current under its old name."""
+    if os.path.isdir(os.path.join(root, esm, scenario, product)):
+        return product
+    for name in ATMOSPHERE_PRODUCTS:
+        if product.startswith(name + "-"):
+            for other in ATMOSPHERE_PRODUCTS:
+                alias = other + product[len(name):]
+                if os.path.isdir(os.path.join(root, esm, scenario, alias)):
+                    return alias
+    return product
 
 
 def local_versions(root, esm, scenario, product, variable):
     d = os.path.join(root, esm, scenario, product, variable) if variable else os.path.join(root, esm, scenario, product)
     if not os.path.isdir(d):
         return []
-    vers = sorted(x for x in os.listdir(d) if os.path.isdir(os.path.join(d, x)) and x.startswith("v"))
+    vers = [name for _, name in _version_subdirs(d)]
     if vers:
         return vers
     found = set()
@@ -93,28 +119,74 @@ def local_versions(root, esm, scenario, product, variable):
     return sorted(found)
 
 
+def resolved_version(root, esm, scenario, product, variable):
+    r"""The version a run opens, by the readers' own rules, or None where no
+    reader pins one (loose files, a flat fracture directory)."""
+    d = os.path.join(root, esm, scenario, product, variable) if variable else os.path.join(root, esm, scenario, product)
+    subdirs = _version_subdirs(d)
+    if not subdirs:
+        return None
+    if product == "ocean":
+        return _resolve_version(d, OCEAN_VERSION)
+    if any(product.startswith(name + "-") for name in ATMOSPHERE_PRODUCTS):
+        return _resolve_version(d, ATMOSPHERE_VERSION)
+    return subdirs[-1][1]                     # fracture, and anything unpinned: the highest
+
+
+def audit(root, entries, manifest):
+    r"""``[(row, mirror versions, local versions, resolved, status, n_older)]``."""
+    rows = []
+    for (esm, sc, pr, v), keys in sorted(entries.items()):
+        vers = versions_of(keys)
+        on_disk = local_product(root, esm, sc, pr)
+        loc = local_versions(root, esm, sc, on_disk, v)
+        resolved = resolved_version(root, esm, sc, on_disk, v)
+        verdicts = []
+        for key, size, etag, stamp in keys:
+            dest = local_path(root, key)
+            if on_disk != pr:
+                dest = dest.replace(os.sep + pr + os.sep, os.sep + on_disk + os.sep, 1)
+            verdicts.append(plan(size, etag, stamp, dest, manifest.get(PRODUCT + key)))
+        if not loc:
+            status = "MISSING"
+        elif not set(vers) & set(loc):
+            status = "BEHIND"
+        elif resolved is not None and resolved not in vers:
+            status = "PINNED"
+        elif "REPLACED" in verdicts:
+            status = "REPLACED"
+        else:
+            status = "ok"
+        if status == "ok" and on_disk != pr:
+            status = f"ok (as {on_disk})"
+        rows.append(((esm, sc, pr, v), vers, loc, resolved, status, verdicts.count("OLDER")))
+    return rows
+
+
 def main():
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    ap.add_argument("--root", default=os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))), "ISMIP7", "AIS"))
+    ap.add_argument("--root", default=os.path.join(_PROJECT, "ISMIP7", "AIS"))
     ap.add_argument("--esm", action="append", default=None)
     ap.add_argument("--scenario", action="append", default=None)
     a = ap.parse_args()
     esms = a.esm or ["CESM2-WACCM", "MRI-ESM2-0"]
-    mv = mirror_versions(esms, set(a.scenario) if a.scenario else None)
-    behind = missing = 0
-    print(f"{'ESM':12s} {'scenario':11s} {'product':18s} {'variable':16s} {'mirror':12s} {'local':12s} status")
-    for (esm, sc, pr, v), vers in sorted(mv.items()):
-        vers = sorted(vers)
-        loc = local_versions(a.root, esm, sc, pr, v)
-        if not loc:
-            status = "MISSING"; missing += 1
-        elif set(vers) & set(loc):
-            status = "ok"
-        else:
-            status = "BEHIND"; behind += 1
-        print(f"{esm:12s} {sc:11s} {pr:18s} {v:16s} {' '.join(vers):12s} {' '.join(loc) or '-':12s} {status}")
-    print(f"\n{len(mv)} mirror entries: {missing} missing locally, {behind} behind (local version no longer on the mirror)")
-    return 1 if behind else 0
+    entries = mirror_entries(esms, set(a.scenario) if a.scenario else None)
+    rows = audit(a.root, entries, load_manifest(a.root))
+    print(f"{'ESM':12s} {'scenario':11s} {'product':18s} {'variable':16s} {'mirror':10s} {'local':10s} {'reads':6s} status")
+    for (esm, sc, pr, v), vers, loc, resolved, status, older in rows:
+        note = f"  ({older} older than the mirror's object)" if older else ""
+        print(f"{esm:12s} {sc:11s} {pr:18s} {v:16s} {' '.join(vers):10s} {' '.join(loc) or '-':10s} "
+              f"{resolved or '-':6s} {status}{note}")
+    count = {s: sum(1 for r in rows if r[4] == s) for s in ("MISSING", "BEHIND", "PINNED", "REPLACED")}
+    older = sum(r[5] for r in rows)
+    print(f"\n{len(rows)} mirror entries: {count['MISSING']} missing locally, "
+          f"{count['BEHIND']} behind (local version no longer on the mirror), "
+          f"{count['PINNED']} pinned (the reader opens a version the mirror dropped), "
+          f"{count['REPLACED']} replaced (same name, new content)")
+    if older:
+        print(f"{older} file(s) predate the download manifest and are older than the mirror's "
+              f"object: unproven, see download_mirror.py --older")
+    return 1 if count["BEHIND"] or count["PINNED"] or count["REPLACED"] else 0
 
 
 if __name__ == "__main__":

@@ -227,17 +227,25 @@ def load_mean_annual_surface_temperature(Q, var="tas", data_root=None,
     return Tf
 
 
+def version_key(name):
+    r"""Sort key of a ``v<N>`` or ``v<N>.<M>`` directory name, or None if
+    ``name`` is not one. Dotted versions are real (the fracture forcing went
+    v2 -> v2.1 in September 2026), so the key is a tuple of integers, not
+    ``int(name[1:])``, which raised on them and hid the directory."""
+    if not re.fullmatch(r"v\d+(\.\d+)*", name):
+        return None
+    return tuple(int(x) for x in name[1:].split("."))
+
+
 def _version_subdirs(parent_dir):
     r"""``[(key, name)]`` of the ``v<N>`` and ``v<N>.<M>`` subdirectories of
-    ``parent_dir``, ascending. Dotted versions are real (the fracture forcing
-    went v2 -> v2.1 in September 2026), so the key is a tuple of integers,
-    not ``int(name[1:])``, which raised on them and hid the directory."""
+    ``parent_dir``, ascending."""
     versions = []
     if not os.path.isdir(parent_dir):
         return versions
     for name in os.listdir(parent_dir):
-        if re.fullmatch(r"v\d+(\.\d+)*", name) and os.path.isdir(os.path.join(parent_dir, name)):
-            versions.append((tuple(int(x) for x in name[1:].split(".")), name))
+        if version_key(name) is not None and os.path.isdir(os.path.join(parent_dir, name)):
+            versions.append((version_key(name), name))
     versions.sort()
     return versions
 
@@ -252,8 +260,15 @@ def _resolve_version(parent_dir, pinned):
     return versions[-1][1] if versions else pinned
 
 
+# The versions the readers ask for first. audit_forcing_versions.py reads
+# these, so that "current" means what a run would open and not merely what is
+# somewhere on disk.
+ATMOSPHERE_VERSION = "v2"
+OCEAN_VERSION = "v3"
+
+
 def atmosphere_path(scenario, esm="CESM2-WACCM", variable="acabf-anomaly",
-                    resolution="8000m", version="v2", data_root=None):
+                    resolution="8000m", version=ATMOSPHERE_VERSION, data_root=None):
     root = _find_ismip7_data(data_root)
     if root is None:
         return None
@@ -280,7 +295,7 @@ def atmosphere_product(root, esm, scenario, resolution="8000m"):
 
 
 def ocean_path(scenario, esm="CESM2-WACCM", variable="tf",
-               version="v3", data_root=None):
+               version=OCEAN_VERSION, data_root=None):
     root = _find_ismip7_data(data_root)
     if root is None:
         return None
@@ -427,7 +442,7 @@ class ISMIP7Atmosphere:
     r"""Read ISMIP7 downscaled atmosphere forcing for Antarctica."""
 
     def __init__(self, data_root=None, esm="CESM2-WACCM", scenario="ssp585",
-                 resolution="8000m", version="v2"):
+                 resolution="8000m", version=ATMOSPHERE_VERSION):
         self.data_root = _find_ismip7_data(data_root)
         self.esm = esm
         self.scenario = scenario
@@ -607,7 +622,7 @@ class ISMIP7Ocean:
     r"""Read ISMIP7 ocean forcing for Antarctica."""
 
     def __init__(self, data_root=None, esm="CESM2-WACCM", scenario="ssp585",
-                 version="v3"):
+                 version=OCEAN_VERSION):
         self.data_root = _find_ismip7_data(data_root)
         self.esm = esm
         self.scenario = scenario

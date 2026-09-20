@@ -591,7 +591,7 @@ projection), run in that run's own shell so it captures the environment.
 | `ISMIP7_DHDT_CLIM_START` / `_END` | RACMO climatology window for that source | `2003` / `2019` |
 | `ISMIP7_DHDT_REACH` | pixel-to-cell reach as a multiple of `sqrt(area)`, rejecting pixels outside the mesh that nearest-centroid assignment would snap onto boundary cells | `0.75` |
 | `ISMIP7_DHDT_NET_SIGMA` | sigma (Gt/yr) on the integrated grounded dH/dt; `0` disables the net term. Active only with `ISMIP7_DHDT_WEIGHT > 0` | `0` |
-| `ISMIP7_OBS_KIT` | path to `AntarcticaObsISMIP7-v*.nc`. The kit is needed only to build the dH/dt cache rasters in `antarctica/data/dhdt_cache/`; with those staged it may be absent. A path that does not exist is a hard error | newest under `<DATA_ROOT>/obs/mipkit` |
+| `ISMIP7_OBS_KIT` | path to `AntarcticaObsISMIP7-v*.nc`. The kit is needed only to build the dH/dt cache rasters in `<ISMIP7_OBS_DATA_ROOT>/dhdt_cache/`; with those staged it may be absent. A path that does not exist is a hard error | newest under `<DATA_ROOT>/obs/mipkit` |
 
 ### Environment knobs (forward runs)
 
@@ -619,7 +619,7 @@ redeclare those literals.
 | `ISMIP7_BNDIDS` | boundary-id JSON override | per-mesh sidecar, else `mesh/boundary_ids.json` |
 | `ISMIP7_GEOMETRY_SPACE` | `dg0` (one thickness for terminus force and mass flux) or `cg1` (legacy, A/B only). Selects the MAP. See `../GEOMETRY_DISCRETIZATION.md` | `dg0` |
 | `ISMIP7_DATA_ROOT` | forcing tree root | `<repo>/ISMIP7/AIS` |
-| `ISMIP7_OBS_DATA_ROOT` | BedMachine, MEaSUREs velocity, and RACMO observational-data root, and the dH/dt cache; name it in a site file when these files do not live beside the code | `<repo>/antarctica/data` |
+| `ISMIP7_OBS_DATA_ROOT` | BedMachine, MEaSUREs velocity, RACMO and the dH/dt cache observational-data root; name it in a site file when these files do not live beside the code. Also a write target: with the MIPkit present `obs_dhdt` builds `<root>/dhdt_cache/` here, so staged cache tifs belong under this root, wherever it points | `<repo>/antarctica/data` |
 | `ISMIP7_T_END` / `ISMIP7_DT` | end time and timestep (yr). `t=Y.0` is 1 January of year Y, so a run covering 2015 to 2300 ends at `2301` and a historical covering 1850 to 2014 ends at `2015`. Each driver owns its end (historical `2015`, ssp370 `2101`, other projections and control `2301`, OCX `2026`) | driver's own / `1.0` |
 | `ISMIP7_FRICTION` | `budd` or `regularized_coulomb`; selects the MAP | `budd` |
 | `ISMIP7_OUTPUT_INTERVAL` | timeseries row every N steps | `10` |

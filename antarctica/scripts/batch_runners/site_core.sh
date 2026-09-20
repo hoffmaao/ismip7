@@ -222,6 +222,7 @@ ismip7_activate() {
     # is the warm cache every IU timing lane has been measured with.
     _ISMIP7_SITE_PYOP2_CACHE_DIR="${PYOP2_CACHE_DIR:-}"
     _ISMIP7_SITE_TSFC_CACHE_DIR="${FIREDRAKE_TSFC_KERNEL_CACHE_DIR:-}"
+    _ISMIP7_SITE_XDG_CACHE_HOME="${XDG_CACHE_HOME:-}"
     export OMP_NUM_THREADS=1          # one thread per rank; the solver is MPI-parallel
     export OPENBLAS_NUM_THREADS=1     # likewise for the BLAS under PETSc and numpy
     # Each rank compiles UFL kernels; a shared cache on a networked filesystem
@@ -230,7 +231,11 @@ ismip7_activate() {
     # so a chain link killed mid compile cannot hand its successor a truncated
     # object through --export=ALL.
     export PYOP2_CACHE_DIR="${SCRATCH:-$HOME}/.pyop2_cache/${SLURM_JOB_ID:-manual}"
-    mkdir -p "$PYOP2_CACHE_DIR"
+    # loopy keeps its own persistent dict under XDG_CACHE_HOME (pytools/), not
+    # under PYOP2_CACHE_DIR; two jobs compiling the same kernel seconds apart
+    # raced on it (Rice 1559476, NoSuchEntryError in preprocess_program).
+    export XDG_CACHE_HOME="$PYOP2_CACHE_DIR/xdg"
+    mkdir -p "$PYOP2_CACHE_DIR" "$XDG_CACHE_HOME"
     [ -n "$ISMIP7_CONTAINER" ] && ismip7_container_binds
     return 0
 }
@@ -244,11 +249,19 @@ ismip7_activate() {
 # whatever the site's modules or venv had set before ismip7_activate replaced
 # it (IU's modulefile names a scratch directory); else Firedrake's own default.
 ismip7_persistent_jit_cache() {
-    rmdir "$PYOP2_CACHE_DIR" 2>/dev/null || true
+    rmdir "$XDG_CACHE_HOME" "$PYOP2_CACHE_DIR" 2>/dev/null || true
+    # loopy's cache goes back with PyOP2's: to the named tree, else to what the
+    # site had, else to its default.
+    if [ -n "${_ISMIP7_SITE_XDG_CACHE_HOME:-}" ]; then
+        export XDG_CACHE_HOME="$_ISMIP7_SITE_XDG_CACHE_HOME"
+    else
+        unset XDG_CACHE_HOME
+    fi
     if [ -n "${ISMIP7_TIMING_JIT_CACHE:-}" ]; then
         export PYOP2_CACHE_DIR="$ISMIP7_TIMING_JIT_CACHE/pyop2"
         export FIREDRAKE_TSFC_KERNEL_CACHE_DIR="$ISMIP7_TIMING_JIT_CACHE/tsfc"
-        mkdir -p "$PYOP2_CACHE_DIR" "$FIREDRAKE_TSFC_KERNEL_CACHE_DIR"
+        export XDG_CACHE_HOME="$ISMIP7_TIMING_JIT_CACHE/xdg"
+        mkdir -p "$PYOP2_CACHE_DIR" "$FIREDRAKE_TSFC_KERNEL_CACHE_DIR" "$XDG_CACHE_HOME"
     elif [ -n "${_ISMIP7_SITE_PYOP2_CACHE_DIR:-}" ]; then
         export PYOP2_CACHE_DIR="$_ISMIP7_SITE_PYOP2_CACHE_DIR"
         if [ -n "${_ISMIP7_SITE_TSFC_CACHE_DIR:-}" ]; then

@@ -168,6 +168,25 @@ def test_the_renamed_mri_product_and_the_dotted_fracture_version(tmp_path):
     assert ("ssp585", "", "") not in got                          # a .docx is no forcing product
 
 
+def test_the_ocx_tree_is_audited_in_its_own_layout(tmp_path):
+    r"""Seen on a cluster tree in September 2026: the OCX ``dacabfdz`` still at
+    v1, the spatially shifted file of discussion #45, with v2 on the mirror."""
+    src = "RACMO2.3p2-ERA"
+    grad = f"data/OCX/{src}/SDBN1-8000m/dacabfdz/dacabfdz_AIS_{src}_OCX_SDBN1-8000m_v2_1979.nc"
+    smb = f"data/OCX/{src}/SDBN1-8000m/acabf/acabf_AIS_{src}_OCX_SDBN1-8000m_v1_1979.nc"
+    tf = "data/OCX/ocean/main/tf_AIS_OCX_ocean_main_v1_1950-2025.nc"
+    entries = [_entry(tmp_path, grad, on_disk=False), _entry(tmp_path, smb), _entry(tmp_path, tf)]
+    _file(tmp_path / "OCX" / src / "SDBN1-8000m" / "dacabfdz" / "v1" / f"dacabfdz_AIS_{src}_OCX_SDBN1-8000m_v1_1979.nc")
+    listing = lambda prefix: [e for e in entries if e[0].startswith(prefix)]   # noqa: E731
+    rows = audit.audit(str(tmp_path), audit.mirror_entries(["OCX"], None, listing), {})
+    got = {row[0][1:]: (row[4], row[3]) for row in rows}
+    assert got[(src, "SDBN1-8000m", "dacabfdz")] == ("BEHIND", "v1")
+    assert got[(src, "SDBN1-8000m", "acabf")] == ("ok", "v1")       # pinned v2 absent, so v1 is what is read
+    assert got[("ocean", "main", "")] == ("ok", "v1")
+    # and the file lands where the readers look for it
+    assert mirror.local_path("R", tf) == os.path.join("R", "OCX", "ocean", "main", "v1", os.path.basename(tf))
+
+
 # --- the Globus route -------------------------------------------------------
 
 def _share(tree):

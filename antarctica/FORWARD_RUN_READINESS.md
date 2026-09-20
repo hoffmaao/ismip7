@@ -451,9 +451,10 @@ Forcing data:
 - [~] #11 Ross warm stripe: a feature of the climatology. Thermal forcing is
       used unsmoothed, in the README. A perturbed member, not a fix.
 - [x] #25 melt toolbox re-release: recalibrated on 14 September, section 4.
-      [ ] Whether the `06_nov` climatology's packaging fault is fixed is still
-      to check; `calibrate_melt.py` reads `30_sep` whatever `ISMIP7_OI_VERSION`
-      says.
+      The `06_nov` climatology's packaging fault is fixed upstream (`so` and
+      `thetao` at `v4`) and the reader now finds it; `calibrate_melt.py` still
+      reads `30_sep` whatever `ISMIP7_OI_VERSION` says, so `30_sep` stays the
+      default.
 - [x] ocean-forcing #61, #84, issue #124: `tf` and `so` are read one chunk file
       at a time; nothing to do.
 
@@ -501,9 +502,38 @@ Output and submission:
     `audit_forcing_versions.py` run after this lands will count most of the
     Globus-era tree as `older`. `download_mirror.py --older adopt` vouches for
     it, `--older refetch` replaces it; either way do it once, before action 4.
-13. **Three facts to read off real files**, none of which could be checked
-    without the forcing tree: that `time` in an `ice_shelf_collapse_mask_*.nc`
-    is what the reader now handles either way (plain years or dates); that `z`
-    in `OI_Climatology_*_tf_extrap.nc` is negative downwards, as
-    `forcing.py` assumes when it clips the draft into the file's range; and
-    whether the `06_nov` climatology still ships `tf` inside the `so` file.
+13. **Bring the Quartz forcing tree up to the mirror.** Read there on 19
+    September (listing and NetCDF headers only, nothing run): the OCX
+    `dacabfdz` is still at `v1`, which is the spatially shifted file of #45,
+    with `v2` on the mirror; CESM2-WACCM ssp585 fracture is at `v2` with `v2.1`
+    on the mirror; and there is no download manifest yet. Nothing reads the
+    gradients and the core matrix runs without fracture, so no result is
+    affected, and `audit_forcing_versions.py` now lists the OCX tree by default
+    and reports both as BEHIND. The OCX `acabf` (47 years, 1979-2025) and the
+    four OCX oceans are there in the layout the readers expect, so core 11
+    passes its coverage gate on Quartz.
+
+### Read off the real files on 19 September
+
+Three assumptions nothing here could check without the forcing tree, all
+settled from NetCDF headers on Quartz:
+
+- **Collapse mask time axis.** `time` is `int32` with `units = "year"`, 1950 to
+  2299, so xarray leaves it as plain years: the reader handled it before and
+  handles it now, and 2300 reads the 2299 slice. The variable is `mask`
+  (`standard_name = ice_shelf_collapse_mask`), beside a scalar `mapping` and
+  2-D `lon`/`lat` that are coordinates only because `mask` names them. The
+  reader took the first data variable, which worked by position; it now goes
+  by name. The files say the shelves "should collapse on January 1st", which
+  is when the first advance of a year applies the year's mask.
+- **Depth axis of the ocean climatology.** `z` is height relative to the sea
+  surface, positive up, -30 to -1770 m in 30 levels, in the OI climatology and
+  in the Zhou re-release alike. `forcing.py` clips the draft into that range
+  assuming exactly this.
+- **The Zhou `06_nov` re-release.** `tf` is at `v3`, `so` and `thetao` at `v4`,
+  and the `v4` files hold their own variables: the July fault (the tf field
+  shipped inside the so file) is fixed upstream. The path builder said `v3` for
+  all three and could not have opened the fix; it now takes each variable's
+  highest version. `30_sep` stays the default, since every K is fitted to it
+  and `calibrate_melt.py` reads it whatever `ISMIP7_OI_VERSION` says. Moving
+  the forward to `06_nov` without recalibrating shifts the melt.

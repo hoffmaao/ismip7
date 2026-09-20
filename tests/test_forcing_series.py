@@ -292,3 +292,20 @@ def test_a_misfiled_year_is_not_an_available_year(mri_tree):
     (vdir / "acabf_AIS_MRI-ESM2-0_historical_GEMB-SDBN1-8000m_v1_2297.nc").write_bytes(b"")
     atm = ISMIP7Atmosphere(data_root=str(mri_tree), esm="MRI-ESM2-0", scenario="ssp585", version="v1")
     assert atm.available_years("acabf") == [2296, 2298, 2299]
+
+
+def test_the_zhou_climatology_is_found_at_whatever_version_each_variable_is(tmp_path):
+    r"""Read on the cluster in September 2026: ``tf`` at v3, ``so`` and
+    ``thetao`` at v4, the v4 being the fix for the July fault that shipped tf
+    inside the so file. The path builder said v3 for all three."""
+    from icepack2_tools.forcing import _oi_climatology_path
+    base = tmp_path / "obs" / "ocean" / "climatology" / "zhou_annual_06_nov"
+    (base / "tf" / "v3").mkdir(parents=True)
+    (base / "so" / "v3").mkdir(parents=True)
+    (base / "so" / "v4").mkdir(parents=True)
+    tail = "_AIS_obs_ocean_climatology_zhou_annual_06_nov_"
+    assert _oi_climatology_path(str(tmp_path), "tf", "06_nov").endswith(f"tf/v3/tf{tail}v3_1972-2024.nc")
+    assert _oi_climatology_path(str(tmp_path), "so", "06_nov").endswith(f"so/v4/so{tail}v4_1972-2024.nc")
+    # nothing on disk: the same missing path the callers already report
+    assert _oi_climatology_path(str(tmp_path), "thetao", "06_nov").endswith(f"thetao/v3/thetao{tail}v3_1972-2024.nc")
+    assert _oi_climatology_path(str(tmp_path), "tf", "30_sep").endswith("meltMIP/OI_Climatology_ismip8km_60m_tf_extrap.nc")

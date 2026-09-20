@@ -1065,7 +1065,18 @@ class ISMIP7Fracture:
             return np.zeros(len(mesh_x))
 
         ds = self._collapse_mask
-        var = list(ds.data_vars)[0]
+        # By name, then by shape, never by position: the files also carry the
+        # scalar grid-mapping variable ``mapping`` as a data variable, and
+        # 2-D ``lon``/``lat`` that are coordinates only because ``mask`` has
+        # a ``coordinates`` attribute naming them.
+        named = [v for v in ds.data_vars
+                 if v == "mask" or ds[v].attrs.get("standard_name") == "ice_shelf_collapse_mask"]
+        gridded = [v for v in ds.data_vars
+                   if {d.lower() for d in ds[v].dims} >= {"x", "y"} and v.lower() not in ("lon", "lat")]
+        if not (named or gridded):
+            raise KeyError(f"{self._collapse_mask_path} has no gridded variable to read a "
+                           f"collapse mask from (found {list(ds.data_vars)})")
+        var = (named or gridded)[0]
         da = ds[var]
 
         if "time" in da.dims:
@@ -1287,10 +1298,17 @@ def _oi_climatology_path(root, var, version):
         return os.path.join(
             root, "meltMIP", f"OI_Climatology_ismip8km_60m_{var}_extrap.nc"
         )
+    # Versions are per variable here as everywhere (discussion #37): in
+    # September 2026 the share holds tf at v3 and so and thetao at v4, the v4
+    # being the fix for the July fault below. Take the highest on disk; v3 is
+    # only the name of the path that is reported missing when there is none.
+    parent = os.path.join(root, "obs", "ocean", "climatology",
+                          f"zhou_annual_{version}", var)
+    found = _version_subdirs(parent)
+    v = found[-1][1] if found else "v3"
     return os.path.join(
-        root, "obs", "ocean", "climatology", f"zhou_annual_{version}",
-        var, "v3",
-        f"{var}_AIS_obs_ocean_climatology_zhou_annual_{version}_v3_1972-2024.nc",
+        parent, v,
+        f"{var}_AIS_obs_ocean_climatology_zhou_annual_{version}_{v}_1972-2024.nc",
     )
 
 
@@ -1315,9 +1333,10 @@ def build_oi_climatology_interpolators(data_root=None, version=None):
             ds.close()
             raise KeyError(
                 f"{path} has no '{var}' variable (found {found}). Known "
-                f"upstream packaging bug (Jul 2026): the 06_nov release "
-                f"ships the tf field inside the so/thetao files. Use "
-                f"ISMIP7_OI_VERSION=30_sep until it is fixed."
+                f"upstream packaging fault (Jul 2026): the 06_nov release "
+                f"shipped the tf field inside its v3 so/thetao files. The "
+                f"share's v4 of those holds the right variable; fetch it, or "
+                f"use ISMIP7_OI_VERSION=30_sep."
             )
         da = ds[var]
         zdim = [d for d in da.dims if d.lower() in ("z", "depth", "lev")][0]

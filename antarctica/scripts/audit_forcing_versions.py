@@ -3,7 +3,12 @@ r"""Compare the forcing on disk with the ISMIP7 Source Cooperative mirror, the
 data-freeze copy of record (discussions #37 and #40, Sep 2026).
 
     python antarctica/scripts/audit_forcing_versions.py [--root ISMIP7/AIS]
-        [--esm CESM2-WACCM --esm MRI-ESM2-0] [--scenario ssp585 ...]
+        [--esm CESM2-WACCM --esm MRI-ESM2-0 --esm OCX] [--scenario ssp585 ...]
+
+The default is the two core ESMs and the OCX tree, which core 11 reads and
+which is laid out the other way round (``OCX/<source>/<product>/<variable>``
+and ``OCX/ocean/<scenario>``): it is the tree discussion #45's shifted
+``dacabfdz`` lives in, so an audit that skips it cannot see that case.
 
 For every <ESM>/<scenario>/<product>/<variable> the mirror publishes, print
 the mirror's versions next to the ones under --root and the one a run would
@@ -169,7 +174,7 @@ def main():
     ap.add_argument("--esm", action="append", default=None)
     ap.add_argument("--scenario", action="append", default=None)
     a = ap.parse_args()
-    esms = a.esm or ["CESM2-WACCM", "MRI-ESM2-0"]
+    esms = a.esm or ["CESM2-WACCM", "MRI-ESM2-0", "OCX"]
     entries = mirror_entries(esms, set(a.scenario) if a.scenario else None)
     rows = audit(a.root, entries, load_manifest(a.root))
     print(f"{'ESM':12s} {'scenario':11s} {'product':18s} {'variable':16s} {'mirror':10s} {'local':10s} {'reads':6s} status")

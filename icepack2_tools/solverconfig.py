@@ -24,7 +24,12 @@ import os
 
 # A forward driver invoked outside the managed launchers must fall back to the
 # established full-Jacobian reference, never to an unqualified development PC.
-# The timing Makefile explicitly exports scpc_mumps for the qualified campaign.
+# The launchers name their own: the timing Makefile exports its campaign's
+# solver, and the cluster forward runner (batch_runners/projection.sbatch)
+# exports scpc_gamg for production. This default does not follow them, because
+# it is not only the forward's: the inversion, whose linear solve is
+# full-Jacobian MUMPS whatever is set here, stamps the mode it resolves on its
+# MAP, and redistribute_checkpoint.py fingerprints a published cache with it.
 DIAGNOSTIC_SOLVER_DEFAULT = "full_mumps"
 DIAGNOSTIC_SOLVER_MODES = (
     "schur_gamg",

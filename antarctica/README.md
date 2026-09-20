@@ -265,8 +265,8 @@ refinement, sized from BedMachine geometry and MEaSUREs strain rate.
 
 ```bash
 cd antarctica
-python scripts/mesh_antarctica.py --lc 2500 --lc-coarse 64000 --buffer-m 20000
-ISMIP7_LC=2500 ISMIP7_LC_COARSE=64000 ISMIP7_BUFFER_M=20000 python scripts/mesh_antarctica.py
+python scripts/mesh_antarctica.py --lc 1000 --lc-coarse 10000 --buffer-m 20000   # the production pair
+ISMIP7_LC=1000 ISMIP7_LC_COARSE=10000 ISMIP7_BUFFER_M=20000 python scripts/mesh_antarctica.py
 # dev mesh for inversion_icepack2.py, diagnostic_solve.py and run_eigendec.py:
 python scripts/mesh_antarctica.py --lc 8000 --lc-coarse 80000 --buffer-m 20000
 # mesh/antarctica_<COARSE>_<FINE>_buffered<BUFFER_M>.msh
@@ -310,8 +310,11 @@ MAP estimate of bed friction `θ` and rheology `φ` from the diagnostic 3-field
 
 ```bash
 cd antarctica
-ISMIP7_LC=2500 mpiexec -n 12 python scripts/inversion_icepack2.py
+ISMIP7_LC=2500 ISMIP7_LC_COARSE=64000 \
+  mpiexec -n 12 python scripts/inversion_icepack2.py
 # mesh/inversion_icepack2_<budd|rc>_n3_dg0_<LC>.h5
+# name BOTH: the defaults are the 1000/10000 production pair, and an LC on its
+# own would ask for a 2500/10000 mesh that nothing builds
 ```
 
 The controls are log deviations from physical priors: `θ = log(C/C_w0)` on the
@@ -341,7 +344,8 @@ resulting tendency against the observed mean dH/dt
 
 ```bash
 ISMIP7_DHDT_WEIGHT=1.0 ISMIP7_MAP_OUT=mesh/inversion_transient_2500.h5 \
-  ISMIP7_LC=2500 mpiexec -n 12 python scripts/inversion_icepack2.py
+  ISMIP7_LC=2500 ISMIP7_LC_COARSE=64000 \
+  mpiexec -n 12 python scripts/inversion_icepack2.py
 python scripts/compare_dhdt.py vel=mesh/<velocity-only>.h5 tr=mesh/<transient>.h5
 ```
 
@@ -550,7 +554,9 @@ The runner's own knobs (`CORES`, `MAX_LOAD`, `MAX_ATTEMPTS`, `FRESH`, `REUSE`,
 `NRANKS`, `PROV_REF`) and the reuse rules are documented in its header.
 The runner pins `ISMIP7_DIAGNOSTIC_LINEAR_SOLVER=full_mumps` rather than
 inheriting the development default; override it only with a solver mode that
-has passed `make qualify` at the target configuration.
+has passed `make qualify` at the target configuration. Cluster forwards
+(`batch_runners/projection.sbatch`) name their own solver, `scpc_gamg`: see
+"Production configuration" in section 7.
 
 Record each completed core with `python scripts/core_report.py --core <N>
 --name <exp> --csv <timeseries.csv> --log <run.log>` (add `--ctrl-csv` for a
@@ -598,7 +604,7 @@ redeclare those literals.
 
 | Env var | Meaning | Default |
 |---------|---------|---------|
-| `ISMIP7_LC` / `ISMIP7_LC_COARSE` | fine and coarse mesh resolution tags, selecting mesh and MAP | `2500` / `64000` |
+| `ISMIP7_LC` / `ISMIP7_LC_COARSE` | fine and coarse mesh resolution tags, selecting mesh and MAP | `1000` / `10000`, the production pair (`2500` / `64000` until 2026-09-19) |
 | `ISMIP7_BUFFER_M` | outline buffer (m) in the default mesh and sidecar names | `20000` |
 | `ISMIP7_MESH` | mesh path for the inversion and tools. A forward takes its mesh from the checkpoint | `mesh/antarctica_<COARSE>_<LC>_buffered<BUFFER_M>.msh` |
 | `ISMIP7_RASTER_SAMPLE` | how BedMachine lands on a DG0 cell. `vertex` projects the CG1 vertex interpolant; `cell_mean` takes the raster's true cell mean. `cell_mean` measured rougher: neighbouring cells share two of three vertex samples, so `vertex` damps jumps by construction. Cell means raised interior surface jumps 6% and bed and thickness jumps 35%, and at 2 km the momentum solve did not converge within 60 minutes. It does classify flotation better (32 km misclassification 9.1% to 3.2%), so the knob stays. Stamped into the MAP and read back by the forward. Reproduce with `probe_raster_sampling.py` | `vertex` |
@@ -630,7 +636,7 @@ redeclare those literals.
 | `ISMIP7_SNES_DIVERGENCE_TOL` | residual-growth divergence threshold; PETSc's `-3` (`PETSC_UNLIMITED`) disables this test (`-1` means `PETSC_DETERMINE`, restoring the default `1e4`) | `-3` |
 | `ISMIP7_SNES_ATOL_SCALE` / `ISMIP7_SNES_RESTART_FAILURE_ATOL_SCALE` | persistent absolute tolerance after a converged setup solve (`scale * achieved norm`) / after accepting a loaded hard-era state (`scale * loaded-state norm`) | `100` / `1e-6` |
 | `ISMIP7_SNES_KSP_EW` | enable PETSc Eisenstat-Walker variable inner tolerance for an A/B test | `0` |
-| `ISMIP7_DIAGNOSTIC_LINEAR_SOLVER` | `schur_gamg` or `schur_mumps`: legacy PETSc `selfp` approximation; `scpc_gamg` or `scpc_mumps`: exact cell-local Slate elimination and an assembled velocity solve; `full_mumps`: complete mixed-Jacobian reference. Legacy `iterative`/`mumps` aliases mean `schur_gamg`/`schur_mumps` | `full_mumps` for forward drivers and the core runner; the timing Makefile's `TIMING_SOLVER` (`scpc_mumps`) |
+| `ISMIP7_DIAGNOSTIC_LINEAR_SOLVER` | `schur_gamg` or `schur_mumps`: legacy PETSc `selfp` approximation; `scpc_gamg` or `scpc_mumps`: exact cell-local Slate elimination and an assembled velocity solve; `full_mumps`: complete mixed-Jacobian reference. Legacy `iterative`/`mumps` aliases mean `schur_gamg`/`schur_mumps` | `scpc_gamg` for cluster forwards (`batch_runners/projection.sbatch`); `full_mumps` for a forward driver run by hand, the core runner and the workstation launchers, and the inversion's own linear solve whatever is set; the timing Makefile's `TIMING_SOLVER` (`scpc_mumps`) |
 | `ISMIP7_FREEZE_LINEARIZATION` | `scpc_*` only (their Jacobian is matrix-free): build it on a copy of the state that is refreshed only when SNES re-forms the Jacobian, so the NLEQ-ERR line search's simplified-Newton solve sees the Jacobian SCPC condensed instead of one that has followed the state to the trial point. `0` restores the live state every lane before 2026-09-19 ran with; records carry `solver_configuration.linearization_state` (`frozen`/`live`/`assembled`) | `1` |
 | `ISMIP7_KSP_RTOL` / `ISMIP7_KSP_MAXIT` | outer FGMRES relative tolerance / iteration limit for the iterative diagnostic mode | `1e-6` / `1000` |
 | `ISMIP7_CONDENSED_KSP_TYPE` / `ISMIP7_CONDENSED_KSP_ATOL_FACTOR` / `ISMIP7_CONDENSED_KSP_RTOL` / `ISMIP7_CONDENSED_KSP_RESTART` | `scpc_gamg` only: the Krylov method that iterates on SCPC's assembled condensed velocity system around GAMG; its **absolute** tolerance as a fraction of `ISMIP7_KSP_RTOL` (FGMRES hands the preconditioner unit vectors and the elimination is exact, so the outer relative residual after one iteration is the inner absolute residual: this is the loosest inner solve that leaves the outer FGMRES one iteration); its relative tolerance, parked out of reach; and the GMRES restart. `preonly` restores one V-cycle per outer iteration | `fgmres` / `0.5` / `1e-12` / `100` |
@@ -653,9 +659,13 @@ redeclare those literals.
 | `ISMIP7_RC_HVISC_FLOOR` / `ISMIP7_RC_CW0_FLOOR` | RC viscous-thickness and `C_w0` floors, read by `scripts/simulation.py` and `scripts/inversion_icepack2.py` | `10.0` / `0.0` |
 | `ISMIP7_M_SLIDE` | sliding exponent, read by `scripts/inversion_icepack2.py`, `scripts/simulation.py`, `scripts/thermo_prior.py`, `scripts/plot_map.py`, `scripts/run_eigendec.py` | `3.0` |
 
-> **dt guidance.** Use `ISMIP7_DT=0.1` for production projections. `0.25` is
-> acceptable when 10 steps per year is too costly. `dt=1.0` mis-melts per step
-> and resurrects clamped cells.
+> **dt guidance.** Production projections on the 1000 m mesh run
+> `ISMIP7_DT=0.05`, the step the timing matrix ran there and the one
+> `projection.sbatch` defaults to. At 2500 m and coarser use `0.1`; `0.25` is
+> acceptable there when 10 steps per year is too costly, under the production
+> closure only: under the matrix's strict contract `0.125` passed and `0.25`
+> ran away at both 2500 m and 5000 m, so the stable step does not grow with
+> the mesh. `dt=1.0` mis-melts per step and resurrects clamped cells.
 
 ---
 
@@ -766,6 +776,64 @@ ISMIP7_CONDENSED_PETSC_OPTIONS="pc_gamg_threshold=0.02" \
   make timing-probe TIMING_SOLVER=scpc_gamg TIMING_ONLY_MESH=2500/25000 \
   SLURM_QUEUE=debug SLURM_TIME=01:00:00 FORCE_TIMING=1
 ```
+
+**Production configuration.** The two Quartz matrices of 2026-09-19,
+[`TIMING_MATRIX_QUARTZ_SCPC_MUMPS.md`](TIMING_MATRIX_QUARTZ_SCPC_MUMPS.md) and
+[`TIMING_MATRIX_QUARTZ_SCPC_GAMG.md`](TIMING_MATRIX_QUARTZ_SCPC_GAMG.md), are
+the same campaign from the same caches with every accepted lane under the
+frozen linearization, so they differ in the linear solver alone. They set the
+production forward configuration: the **1000 m / 10 km mesh, `scpc_gamg`, up to
+64 ranks, `dt = 0.05` yr**. Minutes of transient loop per simulated year on
+that mesh (and the 285-year extrapolation):
+
+| 1000/10000 | 16 ranks | 32 ranks | 64 ranks |
+|---|---|---|---|
+| `scpc_mumps` | 34.0 (6.7 d) | 23.4 (4.6 d) | 23.2 (4.6 d) |
+| `scpc_gamg` | 32.3 (6.4 d) | 15.7 (3.1 d) | 10.0 (47.5 h) |
+
+The factorization stops scaling past 32 ranks and the V-cycles do not. The two
+64-rank lanes take the same nonlinear path (129 Newton iterations and 286
+condensed solves over the ten steps) and agree on the total outflux to 9e-13
+relative, and the GAMG lane peaks at 1.0 GiB a rank against 1.5. At 2000 m
+and coarser `scpc_mumps` is still the faster on 16 ranks, by 15 to 33 %, and
+on 32 it is never faster: level at 2000/20000 and 2500/25000, 6 % slower at
+2000/40000 and 16 % at 2500/50000. A coarse run on 16 ranks is the one case
+for naming it.
+
+Neither matrix has a 500 m timing, and that is not for want of trying: under
+`scpc_mumps` both 32-rank lanes ran at dt 0.025 and tripped the runaway
+tripwire at step 1, while the 64-rank pair was either not run or blocked by its
+scout; under `scpc_gamg` none were run. 500 m is an open stability question,
+not merely an untried one.
+
+`batch_runners/site_env.sh` names the mesh, `projection.sbatch` the solver and
+the step, and each `sites/<name>.sh` the rank count (64 on Quartz).
+**Inversions are not part of this:** `inversion_icepack2.py` factors the
+complete mixed Jacobian with MUMPS, because `tlm_adjoint` differentiates
+through that solve, and no setting changes it. That is also why the switch is
+made in the forward runner and not in `solverconfig`'s default, which the
+inversion reads to stamp its MAP.
+
+**Starting state, unsettled.** No MAP has been inverted on the 1000 m mesh, and
+the plan for now is not to invert one: transfer the coarse MAP instead, the way
+the matrix's own lanes do. Name the MAP and let the forward interpolate it onto
+the mesh `site_env.sh` exports — `simulation.py` keeps the MAP's own mesh as the
+interpolation source and uses `ISMIP7_MESH` only for the target spaces, which is
+the same path the 500 m lanes take from the 2.5 km MAP.
+
+```bash
+MAP=$ISMIP7_REPO/antarctica/results/timing/inversion
+MAP=$MAP/inversion_icepack2_budd_n3_dg0_logvelnet_2500_25000_250iter.h5
+submit.sh projection ISMIP7_EXPERIMENT=control \
+  ISMIP7_FRICTION=budd ISMIP7_INVERSION=$MAP
+```
+
+`ISMIP7_FRICTION` has to come with it: the campaign source is a Budd MAP, this
+section's default is regularized Coulomb, and the forward aborts on a MAP whose
+recorded law disagrees with the run. Without `ISMIP7_INVERSION` the runner falls
+back to `ISMIP7_MAP_DEFAULT`, which names an RC MAP at the run's own resolution
+that has never been inverted, and warns at submission that the file is absent.
+Re-inverting on the production mesh, and closing the Budd/RC gap, are both open.
 
 The stages and contracts are:
 

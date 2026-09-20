@@ -95,9 +95,12 @@ export ISMIP7_LC="${ISMIP7_LC:-32000}"
 # legacy MAP that predates the recorded attribute.
 export ISMIP7_N_FLOW="${ISMIP7_N_FLOW:-3}"
 export ISMIP7_FRICTION="${ISMIP7_FRICTION:-budd}"
-# Production is pinned to the complete mixed-Jacobian reference until a
-# condensed scalable mode passes the qualification target.  Never inherit the
-# simulation module's development default for a scientific campaign.
+# This runner, the 32 km matrix on a workstation, stays on the complete
+# mixed-Jacobian reference: its committed reports were made under it, and at
+# this size there is nothing to gain from another.  Cluster production runs
+# scpc_gamg, which batch_runners/projection.sbatch names for itself.  Pinned
+# here rather than left to the simulation module's default, which a
+# scientific campaign must never inherit by accident.
 export ISMIP7_DIAGNOSTIC_LINEAR_SOLVER="${ISMIP7_DIAGNOSTIC_LINEAR_SOLVER:-full_mumps}"
 export ISMIP7_DT="${ISMIP7_DT:-0.1}"
 export ISMIP7_OUTPUT_INTERVAL="${ISMIP7_OUTPUT_INTERVAL:-10}"

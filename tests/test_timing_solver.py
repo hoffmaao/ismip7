@@ -194,3 +194,16 @@ def test_cache_work_stays_under_the_prepare_solver_whatever_the_campaign(tmp_pat
     for line in submitted:
         assert "ISMIP7_DIAGNOSTIC_LINEAR_SOLVER=scpc_mumps" in line
         assert "scpc_gamg" not in line
+
+
+def test_an_unnamed_solver_is_still_the_full_jacobian_reference(monkeypatch):
+    r"""Production forwards run scpc_gamg because projection.sbatch says so, not
+    because the default moved. The inversion resolves the same default to stamp
+    `diagnostic_solver_mode` on its MAP, and `redistribute_checkpoint.py`
+    fingerprints a published cache with it, so moving it would relabel every
+    inversion run outside the campaign manager."""
+    from icepack2_tools import solverconfig
+
+    monkeypatch.delenv("ISMIP7_DIAGNOSTIC_LINEAR_SOLVER", raising=False)
+    assert solverconfig.DIAGNOSTIC_SOLVER_DEFAULT == "full_mumps"
+    assert solverconfig.diagnostic_solver_mode() == "full_mumps"

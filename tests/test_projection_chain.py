@@ -34,6 +34,7 @@ import sys
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from icepack2_tools.runconfig import apparent_mb_mode, auto_resume
+from icepack2_tools.solverconfig import diagnostic_solver_mode
 
 try:
     resume = auto_resume()
@@ -42,6 +43,7 @@ except ValueError as exc:
     print(f"driver: {exc}")
     sys.exit(2)
 print(f"driver: auto_resume={resume} apparent_mb={amb}")
+print(f"driver: solver={diagnostic_solver_mode()} dt={os.environ.get('ISMIP7_DT')}")
 
 start = os.environ.get("FAKE_START_YEAR", "")
 if start:
@@ -298,3 +300,25 @@ def test_no_reported_checkpoint_does_not_chain(sandbox):
     assert rc == 0, log
     assert "could not read this job's final checkpoint" in log
     assert calls == ""
+
+
+def test_the_runner_names_the_production_solver_and_step(sandbox):
+    r"""The forward runner is where production leaves the full-Jacobian
+    reference: solverconfig's own default has to stay full_mumps, because the
+    inversion reads it too. The successor inherits the choice with the rest of
+    the environment, so a chain cannot change solver between links."""
+    rc, log, calls = run_job(sandbox, FAKE_T_YR="2050", FAKE_START_YEAR="2000")
+    assert rc == 0, log
+    assert "driver: solver=scpc_gamg dt=0.05" in log
+    assert "    solver=scpc_gamg dt=0.05 " in log
+    assert "ENV: ISMIP7_DIAGNOSTIC_LINEAR_SOLVER=scpc_gamg" in calls
+    assert "ENV: ISMIP7_DT=0.05" in calls
+
+
+def test_a_named_solver_and_step_win(sandbox):
+    r"""The reference stays one variable away."""
+    rc, log, _ = run_job(
+        sandbox, FAKE_T_YR="2050", FAKE_START_YEAR="2000",
+        ISMIP7_DIAGNOSTIC_LINEAR_SOLVER="full_mumps", ISMIP7_DT="0.1")
+    assert rc == 0, log
+    assert "driver: solver=full_mumps dt=0.1" in log

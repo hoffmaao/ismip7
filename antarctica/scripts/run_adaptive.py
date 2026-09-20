@@ -36,6 +36,9 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 REPO = os.path.abspath(os.path.join(HERE, "..", ".."))
 RESULTS = os.path.join(HERE, "..", "results")
 
+sys.path.insert(0, REPO)
+from icepack2_tools.runconfig import lc as _runconfig_lc  # noqa: E402
+
 
 def sh(cmd, env):
     print(f"\n$ {cmd}\n", flush=True)
@@ -98,10 +101,16 @@ def main():
     ap.add_argument("--until-change", type=int, default=0, help="Úa AdaptMeshUntilChangeInNumberOfElementsLessThan")
     ap.add_argument("--tag", default=None, help="forwarded as ISMIP7_RUN_TAG")
     ap.add_argument("--restart", default=os.environ.get("ISMIP7_RESTART"), help="start from this checkpoint instead of a cold start")
-    ap.add_argument("--lc", default=os.environ.get("ISMIP7_LC", "2500"))
+    # Only used to predict the checkpoint the driver writes, so it has to be
+    # the value the DRIVER will resolve, not a literal repeated here: runconfig
+    # owns the default, and when they disagreed every segment died on "driver
+    # did not write ..." below. Exported into the child too, so that an
+    # explicit --lc means what it looks like rather than being ignored.
+    ap.add_argument("--lc", default=str(_runconfig_lc()))
     args = ap.parse_args()
 
     env = dict(os.environ)
+    env["ISMIP7_LC"] = str(args.lc)
     if args.tag:
         env["ISMIP7_RUN_TAG"] = args.tag
     # The adapted meshes and their sidecars share one directory with every

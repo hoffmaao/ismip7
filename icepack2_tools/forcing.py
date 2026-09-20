@@ -260,6 +260,61 @@ def _resolve_version(parent_dir, pinned):
     return versions[-1][1] if versions else pinned
 
 
+def _newer_versions(parent_dir, version):
+    r"""Version subdirs of ``parent_dir`` above ``version``: the reader stays
+    on its pin so that a campaign does not change forcing under itself, and
+    the run has to say so when something newer has landed beside it."""
+    key = version_key(version)
+    if key is None:
+        return []
+    return [name for k, name in _version_subdirs(parent_dir) if k > key]
+
+
+# core_report.py lifts every line carrying this marker out of the run log, the
+# way it lifts the climatology pool, so the committed report states which
+# forcing a run opened. The focus groups ask for exactly that in the
+# submission README (discussion #37), and an audit date is not it.
+FORCING_PROVENANCE_MARKER = "Forcing provenance:"
+
+
+def describe_forcing_provenance(*readers, variables=None):
+    r"""One marker line per forcing variable the given readers resolve, plus
+    one for every reader that resolves nothing, so an absent tree is a
+    statement in the log and not a silence. ``variables`` narrows a reader
+    kind to what the caller reads, ``{"atmosphere": ("acabf",)}``."""
+    lines = []
+    for reader in readers:
+        if reader is None:
+            continue
+        wanted = (variables or {}).get(reader.kind)
+        rows = reader.provenance(wanted) if wanted else reader.provenance()
+        if not rows:
+            lines.append(f"{FORCING_PROVENANCE_MARKER} {reader.kind} "
+                         f"{reader.esm} {reader.scenario}: nothing on disk")
+        for row in rows:
+            newer = (f"  NEWER ON DISK, NOT READ: {' '.join(row['newer'])}"
+                     if row["newer"] else "")
+            lines.append(f"{FORCING_PROVENANCE_MARKER} {reader.kind} {row['variable']} "
+                         f"{reader.esm} {reader.scenario} {row['product']} "
+                         f"{row['version']}{newer}")
+    return lines
+
+
+def describe_observational_forcing(smb=None, ocean=False):
+    r"""Marker lines for forcing that is not an ISMIP7 scenario tree: the
+    RACMO SMB a control or the OCX stopgap runs on (``smb`` says which, in
+    words) and the OI ocean climatology, whose release is
+    ``ISMIP7_OI_VERSION``."""
+    lines = []
+    if smb:
+        lines.append(f"{FORCING_PROVENANCE_MARKER} atmosphere {smb}")
+    if ocean:
+        release = os.environ.get("ISMIP7_OI_VERSION", "30_sep")
+        lines.append(f"{FORCING_PROVENANCE_MARKER} ocean OI climatology tf+so, "
+                     f"release {release}, constant in time")
+    return lines
+
+
 # The versions the readers ask for first. audit_forcing_versions.py reads
 # these, so that "current" means what a run would open and not merely what is
 # somewhere on disk.
@@ -453,11 +508,29 @@ class ISMIP7Atmosphere:
         self._grid_x = None
         self._grid_y = None
 
+    kind = "atmosphere"
+
     def _var_dir(self, variable):
         return atmosphere_path(
             self.scenario, self.esm, variable,
             self.resolution, self.version, self.data_root,
         )
+
+    def provenance(self, variables=("acabf-anomaly", "acabf")):
+        r"""``[{variable, product, version, dir, newer}]`` for the variables
+        that are on disk: what ``_load_year`` would open, by its own rules."""
+        rows = []
+        for variable in variables:
+            vdir = self._var_dir(variable)
+            if vdir is None or not os.path.isdir(vdir):
+                continue
+            rows.append({
+                "variable": variable,
+                "product": os.path.basename(os.path.dirname(os.path.dirname(vdir))),
+                "version": os.path.basename(vdir), "dir": vdir,
+                "newer": _newer_versions(os.path.dirname(vdir), os.path.basename(vdir)),
+            })
+        return rows
 
     def _year_span(self, vdir, variable, product, version):
         r"""``(first, last)`` year for which ``vdir`` holds a file, or None."""
@@ -630,11 +703,28 @@ class ISMIP7Ocean:
         self._ds_cache = {}
         self._interp_cache = {}
 
+    kind = "ocean"
+
     def _var_dir(self, variable):
         return ocean_path(
             self.scenario, self.esm, variable,
             self.version, self.data_root,
         )
+
+    def provenance(self, variables=("tf", "so")):
+        r"""``[{variable, product, version, dir, newer}]`` for the variables
+        that are on disk: what ``_year_field`` would open."""
+        rows = []
+        for variable in variables:
+            vdir = self._var_dir(variable)
+            if vdir is None or not os.path.isdir(vdir):
+                continue
+            rows.append({
+                "variable": variable, "product": "ocean",
+                "version": os.path.basename(vdir), "dir": vdir,
+                "newer": _newer_versions(os.path.dirname(vdir), os.path.basename(vdir)),
+            })
+        return rows
 
     def _load_variable(self, variable):
         import xarray as xr
@@ -779,12 +869,15 @@ class ISMIP7Ocean:
 class ISMIP7Fracture:
     r"""Read ISMIP7 fracture / ice shelf collapse forcing."""
 
+    kind = "fracture"
+
     def __init__(self, data_root=None, esm="CESM2-WACCM", scenario="ssp585"):
         self.data_root = _find_ismip7_data(data_root)
         self.esm = esm
         self.scenario = scenario
         self._collapse_mask = None
         self._excess_melt = None
+        self._collapse_mask_path = None
 
     def _fracture_dir(self):
         root = _find_ismip7_data(self.data_root)
@@ -825,10 +918,23 @@ class ISMIP7Fracture:
                     found["excess_melt"] = path
         if "collapse_mask" in found:
             self._collapse_mask = xr.open_dataset(found["collapse_mask"])
+            self._collapse_mask_path = found["collapse_mask"]
         if "excess_melt" in found:
             self._excess_melt = xr.open_dataset(found["excess_melt"])
 
         return self
+
+    def provenance(self):
+        r"""The collapse mask ``load`` opened, the only fracture product that
+        is read: its version is in the filename (``..._8km-v2.1.nc``), and the
+        highest version on disk is the one taken, so nothing newer is unread."""
+        if self._collapse_mask_path is None:
+            return []
+        name = os.path.basename(self._collapse_mask_path)
+        m = re.search(r"[_-](v\d+(?:\.\d+)*)\.nc$", name)
+        return [{"variable": "collapse_mask", "product": name,
+                 "version": m.group(1) if m else "unversioned",
+                 "dir": os.path.dirname(self._collapse_mask_path), "newer": []}]
 
     def get_collapse_mask(self, year, mesh_x, mesh_y):
         r"""Get ice shelf collapse mask (0/1) at given year."""

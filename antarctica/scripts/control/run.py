@@ -28,6 +28,8 @@ from simulation import (setup_model, run_simulation, latest_checkpoint,
                         auto_resume, RESULTS_DIR, PETSc, lc)
 from icepack2_tools.forcing import (
     ISMIP7Atmosphere,
+    describe_forcing_provenance,
+    describe_observational_forcing,
     load_racmo_smb_climatology,
     make_climatology_ocean_callback,
     reject_collapse_mask,
@@ -254,6 +256,9 @@ def main():
             f"  Climatological SMB from RACMO2.4p1 ({CLIM_START}-{CLIM_END}): "
             f"area-weighted mean={mean_smb:.4f} m/yr"
         )
+        for line in describe_observational_forcing(
+                smb=f"RACMO2.4p1 SMB climatology {CLIM_START}-{CLIM_END}"):
+            PETSc.Sys.Print(f"  {line}")
     except FileNotFoundError:
         PETSc.Sys.Print("  No RACMO data; falling back to ISMIP7 acabf climatology")
         atms = [
@@ -261,6 +266,10 @@ def main():
             ISMIP7Atmosphere(esm=ESM, scenario=CLIM_SCENARIO),
         ]
         clim_smb = compute_climatology(atms, mesh_x, mesh_y)
+        # the pool is a mean of the FULL field, so that is all it opens
+        for line in describe_forcing_provenance(
+                *atms, variables={"atmosphere": ("acabf",)}):
+            PETSc.Sys.Print(f"  {line}")
         if clim_smb is None:
             if os.environ.get("ISMIP7_ALLOW_ZERO_SMB"):
                 PETSc.Sys.Print("  WARNING: no climatology data, using zero SMB")
@@ -293,6 +302,8 @@ def main():
                 f"(or set ISMIP7_SYNTHETIC_MELT=1 for the uncalibrated stopgap)."
             )
         PETSc.Sys.Print(f"  Loading per-basin K from: {K_NPZ}")
+        for line in describe_observational_forcing(ocean=True):
+            PETSc.Sys.Print(f"  {line}")
         K_field = load_K_per_basin(K_NPZ, mesh_x, mesh_y, fill=0.0)
         K_scale = float(os.environ.get("ISMIP7_K_SCALE", "1.0"))
         if K_scale != 1.0:

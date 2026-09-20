@@ -189,3 +189,35 @@ def test_the_callback_is_the_only_place_model_time_becomes_a_year():
     atm.asked.clear()
     callback(ctx, 2301.0)
     assert atm.asked == [2300]
+
+
+# --- what a run opened, for the committed report ---------------------------
+
+def test_provenance_names_what_the_reader_would_open(mri_tree):
+    from icepack2_tools.forcing import FORCING_PROVENANCE_MARKER, describe_forcing_provenance
+    atm = ISMIP7Atmosphere(data_root=str(mri_tree), esm="MRI-ESM2-0", scenario="ssp585")
+    # the reader asks for v2 first; only v1 is on disk, so v1 is what it opens
+    (row,) = atm.provenance(("acabf", "acabf-anomaly"))
+    assert (row["variable"], row["product"], row["version"], row["newer"]) == ("acabf", "GEMB-SDBN1-8000m", "v1", [])
+    (line,) = describe_forcing_provenance(atm, None, variables={"atmosphere": ("acabf",)})
+    assert line == f"{FORCING_PROVENANCE_MARKER} atmosphere acabf MRI-ESM2-0 ssp585 GEMB-SDBN1-8000m v1"
+
+
+def test_a_newer_version_beside_the_pin_is_said_out_loud(mri_tree):
+    from icepack2_tools.forcing import describe_forcing_provenance
+    parent = mri_tree / "MRI-ESM2-0" / "ssp585" / "GEMB-SDBN1-8000m" / "acabf"
+    (parent / "v2").mkdir()
+    (parent / "v3").mkdir()
+    atm = ISMIP7Atmosphere(data_root=str(mri_tree), esm="MRI-ESM2-0", scenario="ssp585")
+    # the pin holds, so a campaign does not change forcing under itself...
+    (row,) = atm.provenance(("acabf",))
+    assert row["version"] == "v2" and row["newer"] == ["v3"]
+    # ...and the log says what it passed over
+    (line,) = describe_forcing_provenance(atm, variables={"atmosphere": ("acabf",)})
+    assert line.endswith("v2  NEWER ON DISK, NOT READ: v3")
+
+
+def test_an_absent_tree_is_a_statement_not_a_silence(tmp_path):
+    from icepack2_tools.forcing import ISMIP7Ocean, describe_forcing_provenance
+    (line,) = describe_forcing_provenance(ISMIP7Ocean(data_root=str(tmp_path), scenario="ssp585"))
+    assert line.endswith("ocean CESM2-WACCM ssp585: nothing on disk")

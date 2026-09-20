@@ -40,6 +40,7 @@ from simulation import (setup_model, run_simulation, latest_checkpoint,
 from icepack2_tools.forcing import (
     ISMIP7Atmosphere, ISMIP7Ocean, ISMIP7Fracture,
     make_forcing_callback, load_racmo_smb_climatology, forcing_coords,
+    describe_forcing_provenance,
 )
 from icepack2_tools.climatology import (
     clim_start, clim_end, clim_scenario, clim_pool_missing, describe_clim_pool,
@@ -207,6 +208,12 @@ def run_core_experiment(*, core, title, name, esm, scenario,
             f"error: download the fracture tree, or run with "
             f"ISMIP7_FRACTURE=none."
         )
+
+    # What this run opens, for the committed report: a collapse mask only
+    # counts when the run reads it.
+    for line in describe_forcing_provenance(
+            atm, ocean, fracture if fracture_mode() != "none" else None):
+        PETSc.Sys.Print(f"  {line}")
 
     K_npz = find_k_npz()
     K_melt = float(os.environ.get("ISMIP7_K_MELT", "1.15e-4"))

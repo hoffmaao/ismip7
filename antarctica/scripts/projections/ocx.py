@@ -33,6 +33,7 @@ from icepack2_tools.forcing import (
     ISMIP7Atmosphere, ISMIP7Ocean, make_forcing_callback,
     make_climatology_ocean_callback, load_racmo_smb_climatology,
     load_K_per_basin, forcing_coords, reject_collapse_mask, forcing_year,
+    describe_forcing_provenance, describe_observational_forcing,
 )
 
 T_START = float(os.environ.get("ISMIP7_T_START", "1979"))
@@ -86,8 +87,13 @@ def main():
         callback = make_forcing_callback(
             atm=atm, ocean=ocean, K_per_basin_npz=K_npz, smb_anomaly=False,
         )
+        provenance = describe_forcing_provenance(
+            atm, ocean, variables={"atmosphere": ("acabf",)})
     else:
         PETSc.Sys.Print("  Atmosphere: RACMO2.4p1 actual-year SMB (no ocx tree)")
+        provenance = describe_observational_forcing(
+            smb=f"RACMO2.4p1 actual-year SMB, {RACMO_LAST} held after it",
+            ocean=True)
         ocean = None
         oi_melt = make_climatology_ocean_callback(K_field)
         racmo_cache = {}
@@ -102,6 +108,9 @@ def main():
                     racmo_cache.pop(next(iter(racmo_cache)))
             ctx_["accum"].dat.data[:] = racmo_cache[yr]
             oi_melt(ctx_, t_yr)
+
+    for line in provenance:
+        PETSc.Sys.Print(f"  {line}")
 
     PETSc.Sys.Print("\nCore Experiment 11: OCX (observationally constrained)")
     PETSc.Sys.Print(f"  Period: {T_START}-{T_END}, dt={DT}")

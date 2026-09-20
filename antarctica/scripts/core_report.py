@@ -41,6 +41,7 @@ sys.path.insert(0, _PROJECT)
 from icepack2_tools.climatology import (
     CLIM_POOL_MARKER, clim_scenario, clim_start, clim_end,
 )
+from icepack2_tools.forcing import FORCING_PROVENANCE_MARKER
 from icepack2_tools.runconfig import (
     N_FLOW_DEFAULT, friction, geometry_space, lc, lc_coarse,
 )
@@ -89,6 +90,31 @@ def effective_env():
     return dict(sorted(env.items()))
 
 
+def lifted(log_path, marker, none_note):
+    r"""Every distinct line of the run log that carries ``marker``.
+
+    Always returns at least one line. Emitting nothing when the log is absent
+    would leave "recorded", "nothing to record" and "nobody passed --log"
+    indistinguishable in the report, which defeats the point of recording it.
+    """
+    if not log_path or not os.path.isfile(log_path):
+        return [f"{marker} NOT RECORDED (log `{log_path}` is not "
+                f"readable from here; re-run with --log pointing at the run "
+                f"log to capture it)"]
+    lines = []
+    try:
+        with open(log_path, errors="replace") as f:
+            for line in f:
+                if marker in line:
+                    stripped = line.strip()
+                    if stripped not in lines:
+                        lines.append(stripped)
+    except OSError as e:
+        return [f"{marker} NOT RECORDED (log `{log_path}` could not "
+                f"be read: {e})"]
+    return lines or [f"{marker} none reported in `{log_path}` ({none_note})"]
+
+
 def climatology_pool(log_path):
     r"""The reference-climate pool the run actually built, lifted out of its
     log.
@@ -98,31 +124,19 @@ def climatology_pool(log_path):
     is a different baseline from one re-referenced over all 30, and the run
     warns rather than refusing, so that fact has to reach the only committed
     record of the run.
-
-    Always returns at least one line. Emitting nothing when the log is absent
-    would leave "full window", "half window" and "nobody passed --log"
-    indistinguishable in the report, which defeats the point of recording it.
     """
-    if not log_path or not os.path.isfile(log_path):
-        return [f"{CLIM_POOL_MARKER} NOT RECORDED (log `{log_path}` is not "
-                f"readable from here; re-run with --log pointing at the run "
-                f"log to capture it)"]
-    lines = []
-    try:
-        with open(log_path, errors="replace") as f:
-            for line in f:
-                if CLIM_POOL_MARKER in line:
-                    stripped = line.strip()
-                    if stripped not in lines:
-                        lines.append(stripped)
-    except OSError as e:
-        return [f"{CLIM_POOL_MARKER} NOT RECORDED (log `{log_path}` could not "
-                f"be read: {e})"]
-    if not lines:
-        return [f"{CLIM_POOL_MARKER} none reported in `{log_path}` (expected "
-                f"for a CTRL running on the RACMO climatology, which builds "
-                f"no ESM pool)"]
-    return lines
+    return lifted(log_path, CLIM_POOL_MARKER,
+                  "expected for a CTRL running on the RACMO climatology, "
+                  "which builds no ESM pool")
+
+
+def forcing_provenance(log_path):
+    r"""Which forcing product and version the run opened, lifted out of its
+    log. The submission README has to cite the versions a run used
+    (discussion #37), and the freeze copy still moves under a long campaign,
+    so the record is the run's own statement and not the date of an audit."""
+    return lifted(log_path, FORCING_PROVENANCE_MARKER,
+                  "the run predates the provenance banner")
 
 
 def sh(cmd):
@@ -204,7 +218,7 @@ def main():
                 f"the tracked record)\n")
         f.write(f"- observational audit: "
                 f"{'ON TRACK' if audit_rc == 0 else 'OFF TRACK'}\n")
-        for line in climatology_pool(args.log):
+        for line in climatology_pool(args.log) + forcing_provenance(args.log):
             f.write(f"- {line}\n")
         if ens_rc is not None:
             f.write(f"- ISMIP6 ensemble: "

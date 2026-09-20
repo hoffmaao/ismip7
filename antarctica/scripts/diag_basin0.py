@@ -20,6 +20,7 @@ from scipy.interpolate import RegularGridInterpolator
 
 _HERE = os.path.dirname(os.path.abspath(__file__))
 _PROJECT = os.path.dirname(os.path.dirname(_HERE))
+sys.path.insert(0, _PROJECT)
 
 DATA = os.path.join(_PROJECT, "ISMIP7", "AIS")
 IMBIE2 = os.path.join(DATA, "parameterisations", "ocean", "imbie2",

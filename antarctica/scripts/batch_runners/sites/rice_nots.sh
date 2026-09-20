@@ -39,11 +39,14 @@ ISMIP7_WORK="${ISMIP7_WORK:-/projects/ah301}"
 # they are one tree a second checkout has none of: the AIS forcing tree is
 # ~313 GB, the 2 km meshes, the budd/RC MAPs and the observational rasters are
 # hundreds of MB, and all of them are gitignored rather than copied per
-# checkout. site_env.sh hangs ISMIP7_DATA_ROOT, ISMIP7_MESH, ISMIP7_MAP_DEFAULT
-# and ISMIP7_OBS_DATA_ROOT off this one root. Spelled out rather than taken
-# from ISMIP7_WORK, which sites/local.env lets each user point at their own
-# project space: that would move the data with it, into a tree holding none.
-ISMIP7_SHARE="${ISMIP7_SHARE:-/projects/ah301/ismip7}"
+# checkout. Spelled out rather than taken from ISMIP7_WORK, which
+# sites/local.env lets each user point at their own project space: that would
+# move the data with it, into a tree holding none. The meshes and MAPs sit
+# beside them; a run from a second checkout names ISMIP7_MESH on the submit
+# line, as the 2 km inversions do, with ISMIP7_MAP_OUT for an inversion (where
+# the MAP is written) or ISMIP7_INVERSION for a forward (which MAP to read).
+ISMIP7_DATA_ROOT="${ISMIP7_DATA_ROOT:-/projects/ah301/ismip7/ISMIP7/AIS}"
+ISMIP7_OBS_DATA_ROOT="${ISMIP7_OBS_DATA_ROOT:-/projects/ah301/ismip7/antarctica/data}"
 
 ISMIP7_TASKS="${ISMIP7_TASKS:-32}"
 ISMIP7_MEM="${ISMIP7_MEM:-240G}"

@@ -31,13 +31,14 @@ import icepack
 _ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, os.path.dirname(_ROOT))          # repo root
 sys.path.insert(0, os.path.join(_ROOT, "scripts"))  # for simulation helpers if needed
-DATA_DIR = os.path.join(_ROOT, "data")
 MESH_DIR = os.path.join(_ROOT, "mesh")
 
 from icepack2_tools.thermo_model import compute_fluidity_prior, DEFAULTS
 from icepack2_tools.dual_friction import weertman_anchor
 from icepack2_tools.mpi_stats import global_range
-from icepack2_tools.runconfig import lc as _lc, lc_coarse as _lc_coarse
+from icepack2_tools.runconfig import obs_data_root, lc as _lc, lc_coarse as _lc_coarse
+
+DATA_DIR = obs_data_root()
 from icepack2_tools.forcing import (load_racmo_smb_climatology,
                                     load_mean_annual_surface_temperature)
 

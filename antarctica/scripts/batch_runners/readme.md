@@ -86,11 +86,13 @@ Required: `ISMIP7_FIREDRAKE`, `ISMIP7_PART_LONG`, `ISMIP7_PART_SHORT`,
 `ISMIP7_REPO` defaults to `ISMIP7_REPO_SELF`, the checkout the command was run
 from, in every site file. A site whose gitignored artifacts (the forcing tree,
 the meshes, the MAPs, the observational rasters) do not live beside the code --
-because the cluster holds more than one checkout, as Rice does -- names the
-tree holding them in `ISMIP7_SHARE`, and `ISMIP7_DATA_ROOT`,
-`ISMIP7_OBS_DATA_ROOT`, `ISMIP7_MESH` and `ISMIP7_MAP_DEFAULT` follow it.
-It defaults to `ISMIP7_REPO`. A site that sets `ISMIP7_CONTAINER` is not
-asked for `ISMIP7_FIREDRAKE`, and neither is any `--dry-run`.
+because the cluster holds more than one checkout, as Rice does -- names
+`ISMIP7_DATA_ROOT` and `ISMIP7_OBS_DATA_ROOT` in its site file; the mesh and
+the MAP follow `ISMIP7_REPO`, so a run from a second checkout states
+`ISMIP7_MESH` on the submit line, with `ISMIP7_MAP_OUT` for an inversion (where
+the MAP is written) or `ISMIP7_INVERSION` for a forward (which MAP to read).
+A site that sets `ISMIP7_CONTAINER` is not asked for `ISMIP7_FIREDRAKE`, and
+neither is any `--dry-run`.
 A missing value is reported at submission with the file and variable named.
 `submit.sh build` asks for the other five only, since it creates the venv that
 `ISMIP7_FIREDRAKE` names.
@@ -119,8 +121,11 @@ in the Makefile) skips the check, since the limits describe
 cache that persists between jobs (the one the site's modules or venv already
 name, as IU's firedrake modulefile does; else Firedrake's default location; or
 `ISMIP7_TIMING_JIT_CACHE`) rather than the private per-job one
-`ismip7_activate` gives the runners. Each record's `host` block says which site
-and node measured it and whether that cache started empty.
+`ismip7_activate` gives the runners. Only the kernel cache goes back that way:
+loopy's persistent dict stays per job, because two jobs compiling the same
+kernel seconds apart race on a shared one, which is what `make timing-scout`
+launches (`site_core.sh` has the incident). Each record's `host` block says
+which site and node measured it and whether that cache started empty.
 
 ### A container site
 
@@ -142,7 +147,7 @@ configuration is its `ISMIP7_*` environment.
 | file | state |
 |---|---|
 | `sites/rice_nots.sh` | complete, in production. Details below. |
-| `sites/iu_quartz.sh` | complete, from the IU Quartz runners on the upstream `timing_matrix` branch: partition `general` (`debug` for tests), account `r00905`, the IU module stack (`module use /N/u/dlilien/Quartz/modulefiles`, then gnu, openmpi, python, zlib, hdf5, openblas, patchelf, petsc, firedrake), 16 ranks per node, 128 cores and 515700 MB per node. A second IU user points `ISMIP7_FIREDRAKE` at their own build and `ISMIP7_ACCOUNT` at their own allocation in `sites/local.env`. |
+| `sites/iu_quartz.sh` | complete, from the IU Quartz runners on the upstream `timing_matrix` branch: partition `general` (`debug` for tests), account `r00905`, the IU module stack (`module use /N/u/dlilien/Quartz/modulefiles`, then gnu, openmpi, python, zlib, hdf5, openblas, patchelf, petsc, firedrake), 16 ranks for an inversion and 64 for a forward (the fastest production lane of `antarctica/TIMING_MATRIX_QUARTZ_SCPC_GAMG.md`), 128 cores and 515700 MB per node. A second IU user points `ISMIP7_FIREDRAKE` at their own build and `ISMIP7_ACCOUNT` at their own allocation in `sites/local.env`. |
 | `sites/uchicago_midway.sh` | a container site, not yet run end to end. It describes the image `icepack2_midway3_source.def` builds and names a persistent kernel cache; the image path, partitions, account and per-node limits are empty, so the first submission refuses until they are filled (the file's header says where to read each). |
 | `sites/local.sh` | no scheduler: every setting comes from the environment. For debugging a job script on a workstation, and what the chain tests use. |
 
@@ -266,10 +271,11 @@ scaling curve is quoted from it.
 
 ### `inversion.sbatch`, self-resuming
 
-Defaults write `inversion_icepack2_rc_n3_dg0_logvelnet_2500.h5` under the
-settings the 2500 m result came from: sigma-normalised velocity misfit with
-ISSM's logarithmic term, the pointwise dH/dt term, and the integrated net
-mass-balance constraint that is off by default in the repo.
+Defaults write `inversion_icepack2_rc_n3_dg0_logvelnet_<ISMIP7_LC>.h5` (1000
+on the production mesh) under the settings the 2500 m result came from:
+sigma-normalised velocity misfit with ISSM's logarithmic term, the pointwise
+dH/dt term, and the integrated net mass-balance constraint that is off by
+default in the repo.
 
 `site_env.sh` defaults `ISMIP7_FRICTION` to `regularized_coulomb` everywhere.
 Budd's shelf gate was a sign test on the roundoff residue of the effective
@@ -296,12 +302,14 @@ and phi silently. Regression test: `tests/test_inversion_chain.py`.
 
 ### `projection.sbatch`, self-chaining
 
-A 285-year projection is about five days at 2500 m, so this resubmits itself
-with `--dependency=afterok` until the run reaches its end year, resuming
-through `ISMIP7_AUTO_RESUME=1`. Each driver owns its end year and the runner
-does not default `ISMIP7_T_END`; the chain reads the value the run used from
-the driver's `Time-stepping: <start>-><end>` line. 24 h buys roughly 55
-simulated years, so a full projection is about six links.
+A 285-year projection is about two days on the production mesh, so this
+resubmits itself with `--dependency=afterok` until the run reaches its end
+year, resuming through `ISMIP7_AUTO_RESUME=1`. Each driver owns its end year
+and the runner does not default `ISMIP7_T_END`; the chain reads the value the
+run used from the driver's `Time-stepping: <start>-><end>` line. At 1000 m /
+10 km on 64 ranks under `scpc_gamg`, 24 h buys at most 140 simulated years, so
+a full projection is about three links; the older 2500 m Cascade Lake
+configuration ran 26 min a year, i.e. 55 years a link and about six.
 
 ```bash
 submit.sh projection ISMIP7_EXPERIMENT=control
@@ -348,6 +356,15 @@ final checkpoint for the successor.
 | 2 km / 20 km interior inversion | 12 | 120 GB | 1.5 days | 450 |
 | 2 km / 5 km interior inversion | 12 | 255 GB | 2-3 days | 800 |
 | full 11-experiment set at 2500 m | | | | 15,000 |
+| 1000 m / 10 km forward, per simulated year (Quartz, `scpc_gamg`) | 64 | under 70 GB | 10 min | 11 |
+| 1000 m / 10 km projection, 285 years (Quartz, `scpc_gamg`) | 64 | under 70 GB | 2 days | 3,040 |
+
+The two 1000 m rows are the production configuration, from
+`antarctica/TIMING_MATRIX_QUARTZ_SCPC_GAMG.md`: the transient loop of a
+ten-step lane at `dt = 0.05` under the matrix's strict contract, extrapolated.
+Setup, forcing updates and output are not in them, and the memory is 64 times
+the largest rank's peak. The rows above them are whole runs on Cascade Lake
+under `full_mumps`.
 
 Per iterate at 2500 m on 12 ranks: forward median 1081 s (p10 932, p90 1365),
 adjoint 92 s, iterate 1174 s. The adjoint is 8% of the iterate, so the cost
@@ -359,9 +376,13 @@ independent, so a handful of nodes finishes it inside a week.
 
 ## Open items
 
-- Rank count is fixed at 12 because that is what was measured. Going higher is
+- Rice forwards are fixed at 12 ranks because that is what was measured there.
+  Quartz forwards take 64, the fastest production-mesh lane of
+  `antarctica/TIMING_MATRIX_QUARTZ_SCPC_GAMG.md`. Going higher at Rice is
   meaningful once the partition probe comes back clean.
-- Every solve is a direct MUMPS factorisation, which sets the memory. The fix
-  if large-memory nodes get scarce is a field split that eliminates the
-  cell-wise stress and traction blocks and puts multigrid on the velocity
-  operator.
+- An inversion factors the complete mixed Jacobian with MUMPS, which sets its
+  memory; `tlm_adjoint` differentiates through that solve, so no setting
+  changes it. Cluster forwards took the field split this item asked for:
+  `projection.sbatch` defaults to `scpc_gamg`, which eliminates the cell-wise
+  stress and traction blocks exactly and puts multigrid on the condensed
+  velocity operator (section 7 of `antarctica/README.md`).

@@ -22,13 +22,14 @@ from icepack2_tools.solverconfig import (
 )
 from timing_campaign import (
     BUFFER_M,
+    CACHE_SOLVER_MODE,
     CACHE_TAG,
     CONTRACTS,
     LANE_INITIAL_STATE_DEFAULT,
+    LANE_SOLVER_MODES,
     MATRIX_DT_MAX,
     TRIPWIRE_DEFAULTS,
     MEMORY_BY_LC,
-    SOLVER_MODE,
     SOURCE_INVERSION_BASENAME,
     atomic_write_status,
     cache_paths,
@@ -38,6 +39,7 @@ from timing_campaign import (
     inversion_maxiter,
     inversion_memory,
     inversion_required,
+    lane_solver,
     lane_tag,
     campaign_tag,
     contract_exports,
@@ -237,23 +239,26 @@ class CampaignManager:
         self.follow_invert = bool(getattr(args, "follow_invert", False))
         self.only_mesh = args.only_mesh
         self.monitor = args.monitor
-        # The interval (steps, 2.5 km dt) and the physics contract are
-        # campaign parameters: they name the tag, so records from different
-        # ladder rungs never mix, and they are pinned into this process's
-        # environment so every path helper and validator agrees.
+        # The lane solver, the interval (steps, 2.5 km dt) and the physics
+        # contract are campaign parameters: they name the tag, so records from
+        # different solvers or ladder rungs never mix, and they are pinned
+        # into this process's environment so every path helper and validator
+        # agrees.
+        self.solver = lane_solver(getattr(args, "solver", None))
         self.matrix_steps = matrix_steps(getattr(args, "matrix_steps", None))
         self.matrix_dt_2500 = matrix_dt_2500(
             getattr(args, "matrix_dt_2500", None)
         )
         self.contract = contract_name(getattr(args, "contract", None))
+        os.environ["ISMIP7_TIMING_SOLVER"] = self.solver
         os.environ["ISMIP7_MATRIX_STEPS"] = str(self.matrix_steps)
         os.environ["ISMIP7_MATRIX_DT_2500"] = f"{self.matrix_dt_2500:g}"
         os.environ["ISMIP7_TIMING_CONTRACT"] = self.contract
         self.campaign_tag = campaign_tag(
-            self.matrix_steps, self.matrix_dt_2500, self.contract
+            self.matrix_steps, self.matrix_dt_2500, self.contract, self.solver
         )
         self.probe_tag = probe_tag(
-            self.matrix_steps, self.matrix_dt_2500, self.contract
+            self.matrix_steps, self.matrix_dt_2500, self.contract, self.solver
         )
         self.initial_state = getattr(
             args, "initial_state", LANE_INITIAL_STATE_DEFAULT
@@ -262,7 +267,9 @@ class CampaignManager:
         self.submit_failures = 0
         self.source_sha256 = None
         self.mesh_checksums = {}
-        self.solver_configuration = solver_provenance()
+        # The caches' solver, whatever the lanes time: a cache is valid for
+        # every campaign solver as long as it was prepared under this one.
+        self.solver_configuration = solver_provenance(CACHE_SOLVER_MODE)
         self.solver_fingerprint = solver_configuration_fingerprint(
             self.solver_configuration
         )
@@ -512,6 +519,7 @@ class CampaignManager:
     def lane_exports(self, ncores_unused=None):
         """Interval, contract and tripwire environment shared by every lane."""
         exports = {
+            "ISMIP7_TIMING_SOLVER": self.solver,
             "ISMIP7_MATRIX_STEPS": self.matrix_steps,
             "ISMIP7_MATRIX_DT_2500": f"{self.matrix_dt_2500:g}",
             "ISMIP7_TIMING_CONTRACT": self.contract,
@@ -774,7 +782,7 @@ class CampaignManager:
                 "ISMIP7_DHDT_NET_SIGMA": "10",
                 "ISMIP7_GAMMA_THETA": "1e5",
                 "ISMIP7_GAMMA_PHI": "1e5",
-                "ISMIP7_DIAGNOSTIC_LINEAR_SOLVER": SOLVER_MODE,
+                "ISMIP7_DIAGNOSTIC_LINEAR_SOLVER": CACHE_SOLVER_MODE,
                 "ISMIP7_SNES_DIVERGENCE_TOL": SNES_DIVERGENCE_TOL_DEFAULT,
                 "ISMIP7_RESCUE_ENABLED": "1",
                 "ISMIP7_TIMING_CACHE": cache,
@@ -970,7 +978,7 @@ class CampaignManager:
                 "ISMIP7_GEOMETRY_SPACE": "dg0",
                 "ISMIP7_N_FLOW": "3.0",
                 "ISMIP7_A4_FACTOR": "1.0",
-                "ISMIP7_DIAGNOSTIC_LINEAR_SOLVER": SOLVER_MODE,
+                "ISMIP7_DIAGNOSTIC_LINEAR_SOLVER": CACHE_SOLVER_MODE,
                 "ISMIP7_SNES_DIVERGENCE_TOL": SNES_DIVERGENCE_TOL_DEFAULT,
                 "ISMIP7_RESCUE_ENABLED": "1",
                 "ISMIP7_TIMING_CACHE_RAW": raw,
@@ -1145,7 +1153,7 @@ class CampaignManager:
             "ISMIP7_GEOMETRY_SPACE": "dg0",
             "ISMIP7_N_FLOW": "3.0",
             "ISMIP7_A4_FACTOR": "1.0",
-            "ISMIP7_DIAGNOSTIC_LINEAR_SOLVER": SOLVER_MODE,
+            "ISMIP7_DIAGNOSTIC_LINEAR_SOLVER": self.solver,
             "ISMIP7_SNES_DIVERGENCE_TOL": SNES_DIVERGENCE_TOL_DEFAULT,
             "ISMIP7_RESCUE_ENABLED": "0",
             "ISMIP7_SUBCYCLES": "1",
@@ -1298,7 +1306,7 @@ class CampaignManager:
             "ISMIP7_GEOMETRY_SPACE": "dg0",
             "ISMIP7_N_FLOW": "3.0",
             "ISMIP7_A4_FACTOR": "1.0",
-            "ISMIP7_DIAGNOSTIC_LINEAR_SOLVER": SOLVER_MODE,
+            "ISMIP7_DIAGNOSTIC_LINEAR_SOLVER": self.solver,
             "ISMIP7_SNES_DIVERGENCE_TOL": SNES_DIVERGENCE_TOL_DEFAULT,
             "ISMIP7_RESCUE_ENABLED": "0",
             "ISMIP7_SUBCYCLES": "1",
@@ -1455,6 +1463,16 @@ def parse_args():
         ),
     )
     parser.add_argument(
+        "--solver",
+        choices=LANE_SOLVER_MODES,
+        default=None,
+        help=(
+            f"diagnostic solver the lanes time (default {lane_solver()}; "
+            f"leads the tag). Caches are always {CACHE_SOLVER_MODE}'s, so every "
+            "solver's lanes start from the same prepared state"
+        ),
+    )
+    parser.add_argument(
         "--matrix-steps",
         type=int,
         default=None,
@@ -1487,7 +1505,9 @@ def main():
     args = parse_args()
     if args.assume_valid_caches and not args.dry_run:
         raise SystemExit("--assume-valid-caches is allowed only with --dry-run")
-    os.environ["ISMIP7_DIAGNOSTIC_LINEAR_SOLVER"] = SOLVER_MODE
+    # This process only ever fingerprints and submits cache work under the
+    # caches' solver; a lane's solver is --solver, exported lane by lane.
+    os.environ["ISMIP7_DIAGNOSTIC_LINEAR_SOLVER"] = CACHE_SOLVER_MODE
     # A timing campaign is a fixed solver configuration, not an ambient-shell
     # experiment.  Pin PETSc's actual PETSC_UNLIMITED sentinel so an exported
     # legacy -1 cannot silently restore the 1e4 DIVERGED_DTOL cutoff.

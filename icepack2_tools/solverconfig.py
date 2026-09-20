@@ -24,7 +24,12 @@ import os
 
 # A forward driver invoked outside the managed launchers must fall back to the
 # established full-Jacobian reference, never to an unqualified development PC.
-# The timing Makefile explicitly exports scpc_mumps for the qualified campaign.
+# The launchers name their own: the timing Makefile exports its campaign's
+# solver, and the cluster forward runner (batch_runners/projection.sbatch)
+# exports scpc_gamg for production. This default does not follow them, because
+# it is not only the forward's: the inversion, whose linear solve is
+# full-Jacobian MUMPS whatever is set here, stamps the mode it resolves on its
+# MAP, and redistribute_checkpoint.py fingerprints a published cache with it.
 DIAGNOSTIC_SOLVER_DEFAULT = "full_mumps"
 DIAGNOSTIC_SOLVER_MODES = (
     "schur_gamg",
@@ -57,6 +62,15 @@ SNES_KSP_EW_DEFAULT = "0"
 SNES_MONITOR_DEFAULT = "0"
 SNES_LOG_DEFAULT = "stdout"
 SOLVER_VIEW_DEFAULT = "0"
+# scpc_* apply a matrix-free Jacobian, which is the form's action at whatever
+# the state Function holds. The NLEQ-ERR line search evaluates the residual at
+# its trial point, which Firedrake writes into that Function, and then solves
+# for its simplified Newton step: against J(x_trial), with a condensed system
+# assembled at x_k. Frozen (the default), the Jacobian is built on a copy of
+# the state that is refreshed only when SNES re-forms it
+# (preconditioners.frozen_linearization). ``0`` restores the live state every
+# lane before 2026-09-19 ran with.
+FREEZE_LINEARIZATION_DEFAULT = "1"
 # The inversion's publishing solve (final_solve_parameters): a solve that
 # starts at an already-converged state must exit at iteration 0, and one that
 # does not must stay short and loud rather than grind to the shared 200.
@@ -66,6 +80,36 @@ FINAL_KSP_MAXIT_DEFAULT = "50"
 
 KSP_RTOL_DEFAULT = "1e-6"
 KSP_MAXIT_DEFAULT = "1000"
+# scpc_gamg iterates on the assembled condensed velocity system, not on the
+# matrix-free mixed one. The elimination is exact, so with one V-cycle per
+# outer FGMRES iteration (the first configuration) every Krylov iteration pays
+# a mixed-Jacobian action and three Slate sweeps over the mesh around its
+# V-cycle: 0.19 s against 0.03 s for an iteration on the AIJ system. Flexible
+# because the coarse solve is itself GMRES. ``preonly`` restores the single
+# V-cycle. Quartz, 2500/25000 x 16, frozen linearization, s/step: single
+# V-cycle 79.0; inner solve to rtol 1e-7 27.6; to the absolute tolerance below
+# 19.3; condensed MUMPS 13.2.
+CONDENSED_KSP_TYPE_DEFAULT = "fgmres"
+# The inner solve stops on an ABSOLUTE residual, a fraction of the outer
+# relative tolerance. FGMRES hands the preconditioner unit vectors and the
+# elimination is exact, so the outer relative residual after one iteration IS
+# the inner absolute residual (both 0.01527 after the first V-cycle of job
+# 10517922): this is the loosest inner solve that still leaves the outer
+# FGMRES one iteration. A relative 1e-7 spent 36 V-cycles a solve where the
+# outer tolerance is met after 19. The relative test is parked out of reach.
+CONDENSED_KSP_ATOL_FACTOR_DEFAULT = "0.5"
+CONDENSED_KSP_RTOL_DEFAULT = "1e-12"
+# Solves ran to 85 iterations at the first configuration's convergence rate;
+# a restart inside that range stalls them.
+CONDENSED_KSP_RESTART_DEFAULT = "100"
+# Near-nullspace handed to GAMG for the condensed operator: ``none`` (GAMG's
+# default, the two translations) or ``rigid_body`` (adds the in-plane
+# rotation, which the membrane operator does not see on a floating shelf).
+# The rotation halved the V-cycles of a synthetic shelf problem and did
+# nothing for Antarctica, most of which is held by drag: 2 % fewer V-cycles,
+# each 14 % dearer on the denser coarse grids (jobs 10520141 / 10520247).
+CONDENSED_NEAR_NULLSPACES = ("rigid_body", "none")
+CONDENSED_NEAR_NULLSPACE_DEFAULT = "none"
 TRANSPORT_KSP_RTOL_DEFAULT = "1e-10"
 TRANSPORT_KSP_MAXIT_DEFAULT = "500"
 MASS_RESIDUAL_TOL_GT_DEFAULT = "5e-5"
@@ -99,8 +143,23 @@ def solver_view_enabled():
     return _enabled("ISMIP7_SOLVER_VIEW", SOLVER_VIEW_DEFAULT)
 
 
-def diagnostic_solver_mode():
-    requested = requested_diagnostic_solver()
+def linearization_state(mode=None):
+    r"""Where a mode's Jacobian is linearized while the line search runs:
+    ``assembled`` (an AIJ matrix, fixed at the Newton iterate by construction),
+    or for the matrix-free scpc_* modes ``frozen`` at the iterate or ``live``
+    (following the state Function to the line search's trial point)."""
+    mode = diagnostic_solver_mode(mode)
+    if not mode.startswith("scpc_"):
+        return "assembled"
+    frozen = _enabled("ISMIP7_FREEZE_LINEARIZATION", FREEZE_LINEARIZATION_DEFAULT)
+    return "frozen" if frozen else "live"
+
+
+def diagnostic_solver_mode(requested=None):
+    r"""Canonical mode for ``requested`` (default: the environment's)."""
+    if requested is None:
+        requested = requested_diagnostic_solver()
+    requested = str(requested).strip().lower()
     mode = DIAGNOSTIC_SOLVER_ALIASES.get(requested, requested)
     if mode not in DIAGNOSTIC_SOLVER_MODES:
         choices = ", ".join(DIAGNOSTIC_SOLVER_MODES)
@@ -164,6 +223,68 @@ def _gamg_options(prefix=""):
     }
 
 
+def condensed_near_nullspace():
+    name = _env(
+        "ISMIP7_CONDENSED_NEAR_NULLSPACE", CONDENSED_NEAR_NULLSPACE_DEFAULT
+    ).strip().lower()
+    if name not in CONDENSED_NEAR_NULLSPACES:
+        raise ValueError(
+            "ISMIP7_CONDENSED_NEAR_NULLSPACE must be one of "
+            f"{CONDENSED_NEAR_NULLSPACES}, not {name!r}"
+        )
+    return name
+
+
+def _extra_condensed_options(prefix):
+    r"""``ISMIP7_CONDENSED_PETSC_OPTIONS="pc_gamg_threshold=0.02 mg_levels_ksp_max_it=4"``:
+    further options of the condensed GAMG solve, for a tuning rung. They are
+    applied last and, like every other entry, land in the record's
+    ``diagnostic_petsc_options``."""
+    options = {}
+    for token in _env("ISMIP7_CONDENSED_PETSC_OPTIONS", "").split():
+        name, sep, value = token.lstrip("-").partition("=")
+        if not name or name.startswith(prefix):
+            raise ValueError(
+                "ISMIP7_CONDENSED_PETSC_OPTIONS takes unprefixed name=value "
+                f"entries (or a bare flag), not {token!r}"
+            )
+        options[f"{prefix}{name}"] = value if sep else None
+    return options
+
+
+def _condensed_gamg_options(prefix):
+    r"""GAMG on SCPC's condensed velocity system: the Krylov method that
+    iterates on it (see CONDENSED_KSP_TYPE_DEFAULT), the near-nullspace
+    ``ISMIP7SCPC`` attaches to it, and a rung's extra options."""
+    params = _gamg_options(prefix)
+    ksp_type = _env(
+        "ISMIP7_CONDENSED_KSP_TYPE", CONDENSED_KSP_TYPE_DEFAULT
+    ).strip().lower()
+    params[f"{prefix}ksp_type"] = ksp_type
+    if ksp_type != "preonly":
+        outer_rtol = float(_env("ISMIP7_KSP_RTOL", KSP_RTOL_DEFAULT))
+        params.update({
+            f"{prefix}ksp_atol": outer_rtol * float(_env(
+                "ISMIP7_CONDENSED_KSP_ATOL_FACTOR",
+                CONDENSED_KSP_ATOL_FACTOR_DEFAULT,
+            )),
+            f"{prefix}ksp_rtol": float(_env(
+                "ISMIP7_CONDENSED_KSP_RTOL", CONDENSED_KSP_RTOL_DEFAULT
+            )),
+            f"{prefix}ksp_max_it": int(_env(
+                "ISMIP7_KSP_MAXIT", KSP_MAXIT_DEFAULT
+            )),
+        })
+        if ksp_type.endswith("gmres"):
+            params[f"{prefix}ksp_gmres_restart"] = int(_env(
+                "ISMIP7_CONDENSED_KSP_RESTART", CONDENSED_KSP_RESTART_DEFAULT
+            ))
+    # Not a PETSc option: ISMIP7SCPC reads it from the options database.
+    params[f"{prefix}near_nullspace"] = condensed_near_nullspace()
+    params.update(_extra_condensed_options(prefix))
+    return params
+
+
 def _mumps_options(prefix=""):
     return {
         f"{prefix}pc_type": "lu",
@@ -174,9 +295,12 @@ def _mumps_options(prefix=""):
     }
 
 
-def diagnostic_solver_parameters():
-    r"""Return the exact PETSc options used by the mixed diagnostic solve."""
-    mode = diagnostic_solver_mode()
+def diagnostic_solver_parameters(mode=None):
+    r"""Return the exact PETSc options used by the mixed diagnostic solve.
+
+    ``mode`` names a solver other than the environment's; every other knob is
+    still read from the environment."""
+    mode = diagnostic_solver_mode(mode)
     params = _nonlinear_options()
 
     if mode == "full_mumps":
@@ -231,7 +355,7 @@ def diagnostic_solver_parameters():
         "condensed_field_ksp_type": "preonly",
     })
     if mode == "scpc_gamg":
-        params.update(_gamg_options("condensed_field_"))
+        params.update(_condensed_gamg_options("condensed_field_"))
     else:
         params.update(_mumps_options("condensed_field_"))
     return params
@@ -393,13 +517,22 @@ def effective_solver_env():
     }
 
 
-def solver_provenance():
-    r"""JSON-serializable complete effective solver configuration."""
+def solver_provenance(mode=None):
+    r"""JSON-serializable complete effective solver configuration.
+
+    ``mode`` gives the configuration this environment would have under another
+    diagnostic solver: a timing lane under one solver uses it to fingerprint
+    the solver its initial-state cache was prepared with."""
+    requested = requested_diagnostic_solver() if mode is None else mode
+    mode = diagnostic_solver_mode(requested)
     return {
-        "diagnostic_mode_requested": requested_diagnostic_solver(),
-        "diagnostic_mode": diagnostic_solver_mode(),
-        "diagnostic_label": diagnostic_solver_label(),
-        "diagnostic_petsc_options": diagnostic_solver_parameters(),
+        "diagnostic_mode_requested": requested,
+        "diagnostic_mode": mode,
+        "diagnostic_label": diagnostic_solver_label(mode),
+        "diagnostic_petsc_options": diagnostic_solver_parameters(mode),
+        # Not in the cache fingerprint: it changes how a solve gets to F = 0,
+        # not the state it converges to.
+        "linearization_state": linearization_state(mode),
         "transport_petsc_options": transport_solver_parameters(),
         "mass_residual_tolerance_gt": mass_residual_tol_gt(),
         "continuation_steps": continuation_steps(),

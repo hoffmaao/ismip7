@@ -1,6 +1,9 @@
 # Repository configuration for the no-mistakes gate. Read from the trusted
 # default branch, not from the pushed branch, so it takes effect once merged.
 allow_repo_commands: true
+# No CI runs on this repository (no .github/workflows). Without this the
+# gate's CI step waits up to ci_timeout for checks that never register.
+no_ci: true
 commands:
   # The unit suite: serial, tiny Firedrake meshes, a few seconds. Without a
   # configured command the test step's agent improvises an end-to-end harness

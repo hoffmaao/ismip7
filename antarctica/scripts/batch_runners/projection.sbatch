@@ -1,10 +1,10 @@
 #!/bin/bash
 # ISMIP7 forward run (control, historical or projection) on any cluster.
-# SELF-CHAINING: a 285-year projection is about five days at 2500 m and will
-# not fit any ordinary queue, so this script resubmits itself until the run
-# reaches its driver's own end year, resuming from its own newest checkpoint
-# each time. The driver owns that year and this script does not default
-# ISMIP7_T_END; the chain reads the end back out of the driver's
+# SELF-CHAINING: a 285-year projection is about two days on the production
+# mesh and will not fit an ordinary queue, so this script resubmits itself
+# until the run reaches its driver's own end year, resuming from its own
+# newest checkpoint each time. The driver owns that year and this script does
+# not default ISMIP7_T_END; the chain reads the end back out of the driver's
 # "Time-stepping: <start>-><end>" line. Setting ISMIP7_T_END overrides every
 # experiment, so leave it unset unless you mean to.
 #
@@ -20,10 +20,18 @@
 #   hist_cesm_waccm    antarctica/scripts/historical/cesm_waccm.py
 #   hist_mri_esm2      antarctica/scripts/historical/mri_esm2.py
 #
-# Sizing, measured on Cascade Lake at the same clock: 155 s per 0.1 yr step at
-# 2500 m on 12 ranks, i.e. ~26 min per simulated year, ~5 core-hours per year.
-# 24 h of wall time therefore buys roughly 55 simulated years, so a 285-year
-# projection is about six chained jobs.
+# Sizing, from the timing matrix on Quartz (TIMING_MATRIX_QUARTZ_SCPC_GAMG.md):
+# 30 s per 0.05 yr step at 1000 m / 10 km on 64 ranks under scpc_gamg, i.e.
+# 10.0 min per simulated year, ~11 core-hours per year. That is the transient
+# loop alone, under the matrix's strict contract: setup, forcing updates and
+# output come on top. 24 h of wall time therefore buys at most 140 simulated
+# years, so a 285-year projection is about three chained jobs. On 32 ranks the
+# year costs 15.7 min and on 16, 32.3; scpc_mumps does not get below 23 min on
+# any rank count (TIMING_MATRIX_QUARTZ_SCPC_MUMPS.md).
+#
+# The older measurement, on Cascade Lake under full_mumps: 155 s per 0.1 yr
+# step at 2500 m / 64 km on 12 ranks, ~26 min per simulated year, ~5
+# core-hours per year, about six chained 24 h jobs for 285 years.
 #
 # NOTE (measured 2026-09-09): deepsC has NO wall-time limit, so on deepsC the
 # 24 h below is a self-imposed courtesy on a shared condo and the chaining is
@@ -82,7 +90,19 @@ esac
 # derive the name through icepack2_tools.naming.map_basename, which has no
 # `logvelnet` element, and abort on a missing file after the queue wait.
 export ISMIP7_INVERSION="${ISMIP7_INVERSION:-$ISMIP7_MAP_DEFAULT}"
-export ISMIP7_DT="${ISMIP7_DT:-0.1}"
+# The production solver: the stress fields eliminated exactly cell by cell and
+# GAMG on the condensed velocity system. On the production mesh it takes the
+# Newton path scpc_mumps takes (129 iterations over the matrix's ten steps on
+# 64 ranks, outflux equal to 9e-13) in 43 % of the time. Named here and
+# nowhere more general: site_env.sh and solverconfig's own default are read by
+# the inversion too, whose linear solve is the full mixed-Jacobian MUMPS by
+# construction and which stamps the solver it finds in the environment on its
+# MAP. ISMIP7_DIAGNOSTIC_LINEAR_SOLVER=full_mumps restores the reference.
+export ISMIP7_DIAGNOSTIC_LINEAR_SOLVER="${ISMIP7_DIAGNOSTIC_LINEAR_SOLVER:-scpc_gamg}"
+# The step the matrix timed at 1000 m (0.125 yr x lc / 2500). The stable step
+# does not grow with the mesh (0.25 yr ran away at 2500 m and at 5000 m), so a
+# coarser ISMIP7_LC wants at most 0.125, not a step scaled up from this one.
+export ISMIP7_DT="${ISMIP7_DT:-0.05}"
 # ISMIP7_T_END is deliberately NOT defaulted here. Every experiment this
 # runner offers has its own end (historical 2015, the ssp370 pair 2101, the
 # other projections and the control 2301, OCX 2026), and the driver owns it;
@@ -118,7 +138,7 @@ echo "    map in  $ISMIP7_INVERSION"
 [ -f "$ISMIP7_INVERSION" ] \
     || echo "    WARNING: that MAP does not exist; run inversion.sbatch first" \
             "or set ISMIP7_INVERSION"
-echo "    dt=$ISMIP7_DT" \
+echo "    solver=$ISMIP7_DIAGNOSTIC_LINEAR_SOLVER dt=$ISMIP7_DT" \
      "t_end=${ISMIP7_T_END:-driver default (2301 projections, 2101 ssp370, 2015 historical, 2026 OCX)}" \
      "auto_resume=$ISMIP7_AUTO_RESUME" \
      "apparent_mb=$ISMIP7_APPARENT_MB fixed_front=$ISMIP7_FIXED_FRONT"

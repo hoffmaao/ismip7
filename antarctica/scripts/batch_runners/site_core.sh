@@ -191,9 +191,10 @@ ismip7_activate_container() {
 ismip7_container_binds() {
     local d seen=" "
     ISMIP7_CONTAINER_BINDS=""
-    for d in "$ISMIP7_REPO" "$ISMIP7_WORK" "${ISMIP7_SHARE:-}" \
+    for d in "$ISMIP7_REPO" "$ISMIP7_WORK" \
              "${ISMIP7_DATA_ROOT:-}" "${ISMIP7_OBS_DATA_ROOT:-}" \
-             "${PYOP2_CACHE_DIR:-}" "${ISMIP7_TIMING_JIT_CACHE:-}"; do
+             "${PYOP2_CACHE_DIR:-}" "${XDG_CACHE_HOME:-}" \
+             "${ISMIP7_TIMING_JIT_CACHE:-}"; do
         [ -n "$d" ] && [ -d "$d" ] || continue
         case "$seen" in *" $d "*) continue ;; esac
         seen="$seen$d "
@@ -217,11 +218,13 @@ ismip7_activate() {
         . "$ISMIP7_FIREDRAKE"
     fi
     # What the site's own modules or venv say about kernel caches, before the
-    # per-job one below replaces it: ismip7_persistent_jit_cache puts it back.
-    # IU's firedrake modulefile points both at a scratch directory, and that
-    # is the warm cache every IU timing lane has been measured with.
+    # per-job one below replaces it: ismip7_persistent_jit_cache puts the two
+    # kernel caches back. IU's firedrake modulefile points both at a scratch
+    # directory, and that is the warm cache every IU timing lane has been
+    # measured with.
     _ISMIP7_SITE_PYOP2_CACHE_DIR="${PYOP2_CACHE_DIR:-}"
     _ISMIP7_SITE_TSFC_CACHE_DIR="${FIREDRAKE_TSFC_KERNEL_CACHE_DIR:-}"
+    _ISMIP7_SITE_XDG_CACHE_HOME="${XDG_CACHE_HOME:-}"
     export OMP_NUM_THREADS=1          # one thread per rank; the solver is MPI-parallel
     export OPENBLAS_NUM_THREADS=1     # likewise for the BLAS under PETSc and numpy
     # Each rank compiles UFL kernels; a shared cache on a networked filesystem
@@ -230,7 +233,17 @@ ismip7_activate() {
     # so a chain link killed mid compile cannot hand its successor a truncated
     # object through --export=ALL.
     export PYOP2_CACHE_DIR="${SCRATCH:-$HOME}/.pyop2_cache/${SLURM_JOB_ID:-manual}"
-    mkdir -p "$PYOP2_CACHE_DIR"
+    # XDG_CACHE_HOME is loopy's knob and also matplotlib's, so pin the font
+    # cache where it is already warm and move only loopy.
+    export MPLCONFIGDIR="${MPLCONFIGDIR:-${_ISMIP7_SITE_XDG_CACHE_HOME:-$HOME/.cache}/matplotlib}"
+    # loopy keeps its own persistent dict under XDG_CACHE_HOME (pytools/), not
+    # under PYOP2_CACHE_DIR; two jobs compiling the same kernel seconds apart
+    # raced on it (Rice 1559476, NoSuchEntryError in preprocess_program). It
+    # sits beside the per-job kernel cache rather than inside it, so that
+    # ismip7_persistent_jit_cache can retire an unused kernel cache while this
+    # one stays in use for the whole job.
+    export XDG_CACHE_HOME="${SCRATCH:-$HOME}/.pyop2_cache/xdg/${SLURM_JOB_ID:-manual}"
+    mkdir -p "$PYOP2_CACHE_DIR" "$XDG_CACHE_HOME" "$MPLCONFIGDIR"
     [ -n "$ISMIP7_CONTAINER" ] && ismip7_container_binds
     return 0
 }
@@ -243,6 +256,13 @@ ismip7_activate() {
 # ISMIP7_TIMING_JIT_CACHE when the site or sites/local.env names one; else
 # whatever the site's modules or venv had set before ismip7_activate replaced
 # it (IU's modulefile names a scratch directory); else Firedrake's own default.
+#
+# loopy's persistent dict stays where ismip7_activate put it, one per job. The
+# race that killed Rice 1559476 is between lanes launched together, and
+# `make timing-scout` submits one lane per mesh at once, so sharing that dict
+# back is the exact condition that failed. A cold pytools dict costs seconds of
+# loopy preprocessing per lane; the kernel compile the shared cache protects is
+# the expensive part, and it comes back below.
 ismip7_persistent_jit_cache() {
     rmdir "$PYOP2_CACHE_DIR" 2>/dev/null || true
     if [ -n "${ISMIP7_TIMING_JIT_CACHE:-}" ]; then

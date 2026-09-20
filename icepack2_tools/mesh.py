@@ -37,7 +37,10 @@ import matplotlib.pyplot as plt
 # ── Configuration ──────────────────────────────────────────────────────
 
 _ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-DATA_DIR = os.path.join(_ROOT, "data")
+# <repo>/data is a gitignored symlink to antarctica/data that a fresh clone does
+# not have, so name the observational root the rest of the code uses.
+from .runconfig import obs_data_root
+DATA_DIR = obs_data_root()
 MESH_DIR = os.path.join(_ROOT, "mesh")
 
 # Outline extraction parameters

@@ -90,9 +90,11 @@ def log(sandbox):
 
 def test_a_timing_lane_runs_in_the_image_with_no_venv_and_no_srun(sandbox):
     status = sandbox / "status.txt"
+    scratch = sandbox / "scratch"
     proc = subprocess.run(
         ["bash", str(sandbox / "repo/antarctica/scripts/batch_runners/timing_transient.script")],
-        env=env_for(sandbox, ISMIP7_TIMING_STATUS=str(status), ISMIP7_LC="500"),
+        env=env_for(sandbox, ISMIP7_TIMING_STATUS=str(status), ISMIP7_LC="500",
+                    SCRATCH=str(scratch)),
         cwd=str(sandbox), capture_output=True, text=True)
     assert proc.returncode == 0, proc.stderr
     seen = log(sandbox)
@@ -100,7 +102,10 @@ def test_a_timing_lane_runs_in_the_image_with_no_venv_and_no_srun(sandbox):
     launch = next(line for line in seen if line.startswith("APPTAINER"))
     image = sandbox / "image.sif"
     assert launch.endswith(f"{image} mpiexec -n 16 python3 -u scripts/run_timing.py")
-    for bound in (sandbox / "repo", sandbox / "work", sandbox / "work" / "jit"):
+    # The per-job loopy cache is on SCRATCH, outside the $HOME the runtime binds
+    # itself, so it needs a bind of its own exactly as PyOP2's shared one does.
+    for bound in (sandbox / "repo", sandbox / "work", sandbox / "work" / "jit",
+                  scratch / ".pyop2_cache" / "xdg" / "888"):
         assert f"--bind {bound}" in launch, launch
     assert "--cleanenv" not in launch
     assert "MPIEXEC -n 16 python3 -u scripts/run_timing.py" in seen

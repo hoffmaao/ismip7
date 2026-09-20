@@ -22,7 +22,8 @@ Fracture / shelf-collapse masks are loaded when present, and
 make_forcing_callback publishes the year's mask as ctx["collapse"].
 Whether the run acts on it is ISMIP7_FRACTURE: under `mask` the transport
 empties every FLOATING cell the mask flags and books it as calving
-(protocol path C); grounded ice is never touched, and under the default
+(protocol path C), under `mask_front` only those open water has reached
+(discussion #30); grounded ice is never touched, and under the default
 `none` the mask is loaded but unused. No mask exists for historical or OCX.
 The stress-gated variant (Lai et al. 2020) is not implemented.
 """
@@ -45,7 +46,7 @@ from icepack2_tools.forcing import (
 from icepack2_tools.climatology import (
     clim_start, clim_end, clim_scenario, clim_pool_missing, describe_clim_pool,
 )
-from icepack2_tools.runconfig import fracture as fracture_mode
+from icepack2_tools.runconfig import FRACTURE_MASK_MODES, fracture as fracture_mode
 
 # Owned by icepack2_tools.climatology: this pool must match the CONTROL's
 # climatology, or the projections are re-referenced against a different
@@ -208,14 +209,14 @@ def run_core_experiment(*, core, title, name, esm, scenario,
         fracture.load()
     except Exception as e:
         # Under the default `none` the mask is never read, so an unreadable
-        # fracture tree must not abort a run that does not want it; under
-        # `mask` the run asked for exactly this file, so it sees the failure.
-        if fracture_mode() == "mask":
+        # fracture tree must not abort a run that does not want it; under a
+        # mask mode the run asked for exactly this file, so it sees the failure.
+        if fracture_mode() in FRACTURE_MASK_MODES:
             raise
         PETSc.Sys.Print(f"  Fracture tree not readable, ignored: {e}")
-    if fracture_mode() == "mask" and not fracture.has_collapse_mask():
+    if fracture_mode() in FRACTURE_MASK_MODES and not fracture.has_collapse_mask():
         raise FileNotFoundError(
-            f"ISMIP7_FRACTURE=mask but no ice-shelf collapse mask was found "
+            f"ISMIP7_FRACTURE={fracture_mode()} but no ice-shelf collapse mask was found "
             f"for {esm}/{scenario} under {fracture.fracture_dir()}. The masks "
             f"exist for the SSP scenarios only, so this is a configuration "
             f"error: download the fracture tree, or run with "

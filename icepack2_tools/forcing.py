@@ -1333,19 +1333,20 @@ def make_climatology_ocean_callback(K_field, data_root=None):
 
 
 def reject_collapse_mask(what):
-    r"""Refuse ``ISMIP7_FRACTURE=mask`` where no collapse mask can be applied.
+    r"""Refuse a mask mode of ``ISMIP7_FRACTURE`` where no collapse mask can
+    be applied.
 
     ``run_simulation`` allocates ``ctx["collapse"]`` from the knob alone and
     announces the forcing, but only a forcing callback carrying an
     :class:`ISMIP7Fracture` ever fills it. A driver that has none would print
     the banner and apply nothing, so it says so at startup instead. The
     protocol defines no collapse mask for the control or the OCX experiment,
-    which makes ``mask`` a wrong request there rather than a no-op.
+    which makes a mask mode a wrong request there rather than a no-op.
     """
-    from .runconfig import fracture as _fracture_mode
-    if _fracture_mode() == "mask":
+    from .runconfig import FRACTURE_MASK_MODES, fracture as _fracture_mode
+    if _fracture_mode() in FRACTURE_MASK_MODES:
         raise ValueError(
-            f"ISMIP7_FRACTURE=mask but {what} carries no ice-shelf collapse "
+            f"ISMIP7_FRACTURE={_fracture_mode()} but {what} carries no ice-shelf collapse "
             f"forcing, so no mask can ever be applied. The protocol defines "
             f"no collapse mask for the control or the OCX experiment; run "
             f"them with ISMIP7_FRACTURE=none."
@@ -1426,7 +1427,7 @@ def make_forcing_callback(atm=None, ocean=None, fracture=None,
 
         if fracture is not None and ctx.get("collapse") is not None:
             # The year's ice-shelf collapse mask on the geometry cells; the
-            # transport removes the floating cells it flags
-            # (simulation.run_simulation, ISMIP7_FRACTURE=mask).
+            # transport removes floating cells it flags
+            # (simulation.run_simulation, ISMIP7_FRACTURE=mask or mask_front).
             ctx["collapse"][:] = fracture.get_collapse_mask(yr, mesh_x, mesh_y) > 0.5
     return callback

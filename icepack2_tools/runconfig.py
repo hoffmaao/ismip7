@@ -147,16 +147,29 @@ CALVING_SIGMA_MAX_GROUNDED_DEFAULT = "1.0"     # MPa
 CALVING_SIGMA_MAX_FLOATING_DEFAULT = "0.15"    # MPa
 
 
-FRACTURE_MODES = ("none", "mask")
+FRACTURE_MODES = ("none", "mask", "mask_front")
+FRACTURE_MASK_MODES = ("mask", "mask_front")     # the modes that read the collapse mask
 FRACTURE_DEFAULT = "none"
 
 
 def fracture():
     r"""``ISMIP7_FRACTURE``: how the ISMIP7 ice-shelf collapse forcing is
-    applied. ``none`` (default) loads nothing; ``mask`` removes the ice of
-    every FLOATING cell the year's collapse mask flags, booked as calving
-    (protocol path C, discussions #30 and #33: floating ice only; no mask
-    exists for historical or OCX, so those runs see nothing either way).
+    applied. ``none`` (default) loads nothing. Both mask modes act on FLOATING
+    ice only and book what they remove as calving (protocol path C,
+    discussions #30 and #33; no mask exists for historical or OCX, so those
+    runs see nothing either way), and they are the two end-members the
+    modelling groups arrived at in discussion #30:
+
+    ``mask`` empties every floating cell the year's mask flags, wherever it
+    is. The masks flag the Ross and Filchner-Ronne shelves near their
+    grounding lines first, so this opens holes far behind the front which the
+    momentum balance treats as open ocean.
+
+    ``mask_front`` empties a flagged floating cell only once open water has
+    reached it through other flagged cells, so a shelf collapses from its
+    front and nothing happens until the flagged region touches it (see
+    ``icepack2_tools.front.front_connected``).
+
     A stress-gated variant (Lai et al. 2020) is not implemented."""
     value = os.environ.get("ISMIP7_FRACTURE", FRACTURE_DEFAULT).lower()
     if value not in FRACTURE_MODES:

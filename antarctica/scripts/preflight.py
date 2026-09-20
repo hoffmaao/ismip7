@@ -12,7 +12,7 @@ Usage:
     python scripts/preflight.py
     ISMIP7_LC=500 ISMIP7_FRICTION=regularized_coulomb python scripts/preflight.py
 """
-import os, sys, glob, re
+import os, sys, glob
 
 _SCRIPTS = os.path.dirname(os.path.abspath(__file__))
 _ANT = os.path.dirname(_SCRIPTS)
@@ -21,7 +21,8 @@ sys.path.insert(0, _PROJECT)
 sys.path.insert(0, _SCRIPTS)
 
 from icepack2_tools.forcing import (
-    atmosphere_path, ocean_path, _oi_climatology_path, _find_ismip7_data,
+    ISMIP7Atmosphere, ISMIP7Ocean,
+    _oi_climatology_path, _find_ismip7_data,
 )
 from icepack2_tools.boundary import sidecar_path
 from icepack2_tools.naming import map_basename
@@ -64,15 +65,9 @@ CORES = [
 
 
 def atm_years(esm, scenario, var="acabf-anomaly"):
-    d = atmosphere_path(scenario, esm, var)
-    if d is None or not os.path.isdir(d):
-        return []
-    yrs = []
-    for fn in os.listdir(d):
-        m = re.search(r"_(\d{4})\.nc$", fn)
-        if m:
-            yrs.append(int(m.group(1)))
-    return sorted(yrs)
+    r"""The years the reader can open, by the reader's own match: a gate that
+    counts files the loader would not find clears a run that then fails."""
+    return ISMIP7Atmosphere(esm=esm, scenario=scenario).available_years(var)
 
 
 def clim_pool_years(esm, var):
@@ -130,17 +125,8 @@ def pool_status(esm, var, what_empty, what_partial):
 
 
 def ocean_cover(esm, scenario):
-    d = ocean_path(scenario, esm, "tf")
-    if d is None or not os.path.isdir(d):
-        return None
-    spans = []
-    for fn in os.listdir(d):
-        m = re.search(r"_(\d{4})-(\d{4})\.nc$", fn)
-        if m:
-            spans.append((int(m.group(1)), int(m.group(2))))
-    if not spans:
-        return None
-    return min(s[0] for s in spans), max(s[1] for s in spans)
+    r"""``(first, last)`` ocean forcing year on disk, as the reader sees it."""
+    return ISMIP7Ocean(esm=esm, scenario=scenario).coverage("tf")
 
 
 def shared_missing(warn=None):

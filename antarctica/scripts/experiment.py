@@ -27,7 +27,7 @@ empties every FLOATING cell the mask flags and books it as calving
 The stress-gated variant (Lai et al. 2020) is not implemented.
 """
 
-import os, sys
+import math, os, sys
 import numpy as np
 
 _SCRIPTS = os.path.dirname(os.path.abspath(__file__))
@@ -40,7 +40,7 @@ from simulation import (setup_model, run_simulation, latest_checkpoint,
 from icepack2_tools.forcing import (
     ISMIP7Atmosphere, ISMIP7Ocean, ISMIP7Fracture,
     make_forcing_callback, load_racmo_smb_climatology, forcing_coords,
-    describe_forcing_provenance,
+    describe_forcing_provenance, forcing_year,
 )
 from icepack2_tools.climatology import (
     clim_start, clim_end, clim_scenario, clim_pool_missing, describe_clim_pool,
@@ -169,12 +169,25 @@ def run_core_experiment(*, core, title, name, esm, scenario,
         PETSc.Sys.Print(
             f"  Atmosphere forcing: {len(yrs)} years ({yrs[0]}-{yrs[-1]})"
         )
-    if not (ISMIP7Ocean(esm=esm, scenario=scenario)
-            ._year_field("tf", t_start, nan_fill=0.0)):
-        raise FileNotFoundError(
-            f"No ocean tf data for {esm}/{scenario} covering {t_start:.0f}. "
-            f"Download the ocean tree first."
-        )
+    # The reader serves the years its chunk files hold and the single year
+    # after them, and raises on anything else, so ask before the model setup
+    # rather than find out at the first step, or at the last one.
+    first, last = int(math.floor(t_start + 1e-9)), forcing_year(t_end)
+    for var in ("tf", "so"):
+        cover = ISMIP7Ocean(esm=esm, scenario=scenario).coverage(var)
+        if cover is None:
+            raise FileNotFoundError(
+                f"No ocean {var} data for {esm}/{scenario}. Download the "
+                f"ocean tree first."
+            )
+        if cover[0] > first or cover[1] + 1 < last:
+            raise FileNotFoundError(
+                f"Ocean {var} for {esm}/{scenario} covers {cover[0]}-{cover[1]}, "
+                f"and this run needs {first}-{last} (one year past the end is "
+                f"held, no more). Download the rest of the ocean tree, or move "
+                f"ISMIP7_T_START / ISMIP7_T_END inside it."
+            )
+    PETSc.Sys.Print(f"  Ocean forcing: tf, so cover {cover[0]}-{cover[1]}")
 
     if restart:
         PETSc.Sys.Print(f"  Restart: {restart}")

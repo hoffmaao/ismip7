@@ -221,3 +221,74 @@ def test_an_absent_tree_is_a_statement_not_a_silence(tmp_path):
     from icepack2_tools.forcing import ISMIP7Ocean, describe_forcing_provenance
     (line,) = describe_forcing_provenance(ISMIP7Ocean(data_root=str(tmp_path), scenario="ssp585"))
     assert line.endswith("ocean CESM2-WACCM ssp585: nothing on disk")
+
+
+# --- guards on what the readers will and will not serve --------------------
+
+def _write_ocean_chunk(vdir, esm, scenario, first, last, value, calendar=None):
+    import cftime
+    years = range(first, last + 1)
+    time = ([cftime.DatetimeNoLeap(y, 1, 1) for y in years] if calendar == "noleap"
+            else np.array([np.datetime64(f"{y}-01-01") for y in years]))
+    ds = xr.Dataset(
+        {"tf": (("time", "z", "y", "x"),
+                np.stack([np.full((2, 3, 3), value + (y - first), dtype="float32") for y in years]))},
+        coords={"time": time, "z": np.array([-30.0, -90.0]),
+                "y": np.array([0.0, 8000.0, 16000.0]), "x": np.array([0.0, 8000.0, 16000.0])},
+    )
+    ds.to_netcdf(os.path.join(vdir, f"tf_AIS_{esm}_{scenario}_ocean_v3_{first}-{last}.nc"))
+
+
+@pytest.fixture
+def ocean_tree(tmp_path):
+    esm, scenario = "CESM2-WACCM", "ssp585"
+    vdir = tmp_path / esm / scenario / "ocean" / "tf" / "v3"
+    vdir.mkdir(parents=True)
+    _write_ocean_chunk(str(vdir), esm, scenario, 2280, 2289, 1.0)
+    # 2290-2294 is the missing chunk; the last one is on a noleap calendar
+    _write_ocean_chunk(str(vdir), esm, scenario, 2295, 2299, 5.0, calendar="noleap")
+    return tmp_path
+
+
+def test_the_ocean_holds_one_year_past_its_end_and_says_so(ocean_tree, capsys):
+    from icepack2_tools.forcing import ISMIP7Ocean
+    ocean = ISMIP7Ocean(data_root=str(ocean_tree))
+    assert ocean.coverage("tf") == (2280, 2299)
+    at = (np.array([8000.0]), np.array([8000.0]))
+    assert ocean.get_thermal_forcing(2299, *at)[0] == pytest.approx(9.0)
+    assert ocean.get_thermal_forcing(2300, *at)[0] == pytest.approx(9.0)
+    ocean.get_thermal_forcing(2300, *at)
+    assert capsys.readouterr().out.count("holding 2299, the last year on disk") == 1
+
+
+@pytest.mark.parametrize("year, where", [(2279, "precedes the series"),
+                                         (2292, "falls between the chunk files"),
+                                         (2301, "past the end of the series")])
+def test_the_ocean_refuses_a_year_it_does_not_hold(ocean_tree, year, where):
+    r"""It used to serve the nearest chunk without a word, so a historical
+    run starting before its ocean ran on the wrong decade and succeeded."""
+    from icepack2_tools.forcing import ISMIP7Ocean
+    with pytest.raises(FileNotFoundError, match=where):
+        ISMIP7Ocean(data_root=str(ocean_tree)).get_thermal_forcing(year, np.array([0.0]), np.array([0.0]))
+
+
+def test_a_file_with_no_time_slices_is_named(mri_tree):
+    r"""The 2300 gradient files on the share were empty until May 2026 (#8)."""
+    vdir = mri_tree / "MRI-ESM2-0" / "ssp585" / "GEMB-SDBN1-8000m" / "acabf" / "v1"
+    empty = vdir / "acabf_AIS_MRI-ESM2-0_ssp585_GEMB-SDBN1-8000m_v1_2300.nc"
+    xr.Dataset({"acabf": (("time", "y", "x"), np.zeros((0, 3, 3), dtype="float32"))},
+               coords={"time": np.array([], dtype="datetime64[ns]"),
+                       "y": np.arange(3.0), "x": np.arange(3.0)}).to_netcdf(empty)
+    atm = ISMIP7Atmosphere(data_root=str(mri_tree), esm="MRI-ESM2-0", scenario="ssp585", version="v1")
+    with pytest.raises(ValueError, match=r"_2300\.nc has an empty time axis.*discussion #8"):
+        atm._load_year("acabf", 2300)
+
+
+def test_a_misfiled_year_is_not_an_available_year(mri_tree):
+    r"""#41: ssp585 anomalies sat on the share named ``historical``. The
+    loader builds the full name and would not find one, so neither may the
+    availability gate that runs before it."""
+    vdir = mri_tree / "MRI-ESM2-0" / "ssp585" / "GEMB-SDBN1-8000m" / "acabf" / "v1"
+    (vdir / "acabf_AIS_MRI-ESM2-0_historical_GEMB-SDBN1-8000m_v1_2297.nc").write_bytes(b"")
+    atm = ISMIP7Atmosphere(data_root=str(mri_tree), esm="MRI-ESM2-0", scenario="ssp585", version="v1")
+    assert atm.available_years("acabf") == [2296, 2298, 2299]

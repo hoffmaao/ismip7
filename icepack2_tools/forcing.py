@@ -414,6 +414,41 @@ def _warn_unweighted(da, ds, reason):
     )
 
 
+def _refuse_empty_time_axis(n, ds, what):
+    r"""A forcing file with no time slices is a failed upload, not an empty
+    year. The 2300 ``dacabfdz``/``dtsdz``/``dmrrodz`` files on the share were
+    exactly that until 27 May 2026 (discussion #8), and a tree fetched before
+    then still holds them. Left alone it surfaces as numpy's "zero-size array
+    to reduction operation", which names neither the file nor the cause."""
+    if n == 0:
+        source = (ds.encoding.get("source") if ds is not None else None) or "<unknown file>"
+        raise ValueError(
+            f"ISMIP7 forcing: {what} in {source} has an empty time axis (0 "
+            f"slices). The share held empty 2300 files until 2026-05-27 "
+            f"(discussion #8); delete it and fetch it again."
+        )
+
+
+def _nearest_year_index(time, year, ds=None, what="time"):
+    r"""Index of the slice of ``time`` (a DataArray) nearest to ``year``.
+
+    The axis may be decoded to ``datetime64`` (standard calendars), to
+    ``cftime`` objects (noleap, or dates past 2262) or, where a file carries
+    plain years and no CF units, left numeric. Only the year is ever read, so
+    the calendars the ISMIP7 products disagree on (discussions #9 and #24)
+    cannot shift a slice.
+    """
+    values = time.values
+    _refuse_empty_time_axis(len(values), ds, what)
+    if np.issubdtype(values.dtype, np.number):
+        years = values
+    elif hasattr(values[0], "year"):
+        years = [t.year for t in values]
+    else:
+        years = time.dt.year.values
+    return int(np.argmin(np.abs(np.asarray(years, dtype=float) - int(year))))
+
+
 def _annual_mean_over_time(da, ds=None):
     r"""Collapse a per-year forcing file's time axis to the ANNUAL MEAN.
 
@@ -441,6 +476,7 @@ def _annual_mean_over_time(da, ds=None):
     import xarray as xr
 
     n = da.sizes["time"]
+    _refuse_empty_time_axis(n, ds, f"'{da.name}'")
     if n == 1:
         return da.isel(time=0)
 
@@ -532,13 +568,19 @@ class ISMIP7Atmosphere:
             })
         return rows
 
+    def _years_on_disk(self, vdir, variable, product, version):
+        r"""Sorted years for which ``vdir`` holds a file ``_load_year`` would
+        open: the full name is matched, so a file filed under the wrong
+        scenario (the ssp585 anomalies named ``historical``, discussion #41)
+        is not a year of this series."""
+        head = f"{variable}_AIS_{self.esm}_{self.scenario}_{product}_{version}_"
+        return sorted(int(m.group(1)) for f in os.listdir(vdir)
+                      for m in [re.fullmatch(re.escape(head) + r"(\d{4})\.nc", f)] if m)
+
     def _year_span(self, vdir, variable, product, version):
         r"""``(first, last)`` year for which ``vdir`` holds a file, or None."""
-        import re
-        head = f"{variable}_AIS_{self.esm}_{self.scenario}_{product}_{version}_"
-        years = [int(m.group(1)) for f in os.listdir(vdir)
-                 for m in [re.fullmatch(re.escape(head) + r"(\d{4})\.nc", f)] if m]
-        return (min(years), max(years)) if years else None
+        years = self._years_on_disk(vdir, variable, product, version)
+        return (years[0], years[-1]) if years else None
 
     def _load_year(self, variable, year):
         import xarray as xr
@@ -632,19 +674,16 @@ class ISMIP7Atmosphere:
         return None
 
     def available_years(self, variable="acabf-anomaly"):
-        r"""List available years for a variable."""
+        r"""Years ``_load_year`` can open for a variable. The same strict
+        match as the loader: a looser one let a misnamed file pass the
+        availability gate, after which ``get_field`` found nothing under the
+        name it builds and returned a year of zeros."""
         vdir = self._var_dir(variable)
         if vdir is None or not os.path.isdir(vdir):
             return []
-        years = []
-        for fn in sorted(os.listdir(vdir)):
-            if fn.endswith(".nc"):
-                try:
-                    yr = int(fn.rstrip(".nc").split("_")[-1])
-                    years.append(yr)
-                except ValueError:
-                    pass
-        return years
+        version = os.path.basename(vdir)
+        product = os.path.basename(os.path.dirname(os.path.dirname(vdir)))
+        return self._years_on_disk(vdir, variable, product, version)
 
     def get_field(self, variable, year, mesh_x, mesh_y):
         r"""Get a forcing field interpolated to mesh coordinates.
@@ -702,6 +741,7 @@ class ISMIP7Ocean:
         self.version = version
         self._ds_cache = {}
         self._interp_cache = {}
+        self._persisted = set()          # variables already reported as held past the series end
 
     kind = "ocean"
 
@@ -725,6 +765,57 @@ class ISMIP7Ocean:
                 "newer": _newer_versions(os.path.dirname(vdir), os.path.basename(vdir)),
             })
         return rows
+
+    def spans(self, variable="tf"):
+        r"""Sorted ``[(first, last, path)]`` of the chunk files on disk."""
+        vdir = self._var_dir(variable)
+        if vdir is None or not os.path.isdir(vdir):
+            return []
+        return sorted((int(m.group(1)), int(m.group(2)), os.path.join(vdir, f))
+                      for f in os.listdir(vdir)
+                      for m in [re.search(r"_(\d{4})-(\d{4})\.nc$", f)] if m)
+
+    def coverage(self, variable="tf"):
+        r"""``(first, last)`` forcing year on disk, or None. The run gate and
+        preflight both read this, so they agree with what ``_year_field``
+        will serve."""
+        spans = self.spans(variable)
+        return (spans[0][0], max(sp[1] for sp in spans)) if spans else None
+
+    def _chunk_for(self, variable, yr):
+        r"""The chunk file holding year ``yr``, or the last one for the single
+        year after the series ends; None when the variable has no files.
+
+        CESM2-WACCM stops at 2299 while a 2015-2300 run needs 2300 (discussion
+        #8), so exactly that one year is held, and said once per variable in
+        the log, the same rule as the atmosphere. Any other year outside the
+        files used to be served from the nearest chunk without a word: a
+        historical run starting before its ocean, or a tree with a chunk
+        missing, ran on the wrong decade and reported success.
+        """
+        spans = self.spans(variable)
+        if not spans:
+            return None
+        for first, last, path in spans:
+            if first <= yr <= last:
+                return path
+        end = max(sp[1] for sp in spans)
+        if yr == end + 1:
+            if variable not in self._persisted:
+                self._persisted.add(variable)
+                if _comm_rank() == 0:
+                    print(f"  ISMIP7Ocean: {variable} has no year {yr}; "
+                          f"holding {end}, the last year on disk", flush=True)
+            return max(spans, key=lambda sp: sp[1])[2]
+        where = ("precedes the series there" if yr < spans[0][0]
+                 else "is past the end of the series there" if yr > end
+                 else "falls between the chunk files there")
+        raise FileNotFoundError(
+            f"ISMIP7Ocean: {variable} for {self.esm} {self.scenario} has no "
+            f"year {yr} in {self._var_dir(variable)}: it {where} "
+            f"({', '.join(f'{a}-{b}' for a, b, _ in spans)}; only the single "
+            f"year after the end is held, 2300 after 2299)."
+        )
 
     def _load_variable(self, variable):
         import xarray as xr
@@ -759,7 +850,6 @@ class ISMIP7Ocean:
         calibration. The last few (variable, year) fields stay cached, so
         sub-yearly time steps re-read nothing.
         """
-        import re
         import xarray as xr
         from scipy.interpolate import RegularGridInterpolator
 
@@ -768,21 +858,7 @@ class ISMIP7Ocean:
         if key in self._interp_cache:
             return self._interp_cache[key]
 
-        vdir = self._var_dir(variable)
-        if vdir is None or not os.path.isdir(vdir):
-            return None
-
-        # The chunk file whose YYYY-YYYY range contains the year (nearest
-        # range for years outside coverage).
-        best, best_d = None, None
-        for f in sorted(os.listdir(vdir)):
-            m = re.search(r"_(\d{4})-(\d{4})\.nc$", f)
-            if not m:
-                continue
-            y0, y1 = int(m.group(1)), int(m.group(2))
-            d = 0 if y0 <= yr <= y1 else min(abs(yr - y0), abs(yr - y1))
-            if best_d is None or d < best_d:
-                best, best_d = os.path.join(vdir, f), d
+        best = self._chunk_for(variable, yr)
         if best is None:
             return None
 
@@ -799,14 +875,7 @@ class ISMIP7Ocean:
             da = ds[cands[0]]
 
         if "time" in da.dims:
-            times = ds["time"].values
-            if hasattr(times[0], "year"):  # cftime calendars
-                idx = min(range(len(times)),
-                          key=lambda i: abs(times[i].year - yr))
-            else:
-                years = ds["time"].dt.year.values
-                idx = int(np.argmin(np.abs(years - yr)))
-            da = da.isel(time=idx)
+            da = da.isel(time=_nearest_year_index(ds["time"], yr, ds, f"'{variable}'"))
 
         zdim = [d for d in da.dims if d.lower() in ("z", "depth", "lev")][0]
         za = ds[zdim].values.astype(float)
@@ -948,7 +1017,9 @@ class ISMIP7Fracture:
         da = ds[var]
 
         if "time" in da.dims:
-            da = da.sel(time=int(year), method="nearest")
+            # not sel(time=year): that only works on an axis of plain years,
+            # and raises on one xarray has decoded to dates
+            da = da.isel(time=_nearest_year_index(ds["time"], year, ds, f"'{var}'"))
 
         mx = xr.DataArray(np.asarray(mesh_x), dims="node")
         my = xr.DataArray(np.asarray(mesh_y), dims="node")

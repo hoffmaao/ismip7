@@ -19,16 +19,30 @@
 export ISMIP7_DATA_ROOT="${ISMIP7_DATA_ROOT:-$ISMIP7_REPO/ISMIP7/AIS}"
 
 # --- model configuration shared by every run ----------------------------
-# The 2500 m configuration, except for the friction law: every inversion now
-# runs regularized Coulomb. Budd's shelf gate was a sign test on the roundoff
-# residue of N, so every Budd MAP predating that fix has to be re-inverted;
-# set ISMIP7_FRICTION=budd explicitly for those re-inversions.
+# The production mesh is 1000 m / 10 km: the finest pair the timing matrix
+# carries through a 285-year run in two days (TIMING_MATRIX_QUARTZ_SCPC_GAMG.md,
+# 10.0 min per simulated year on 64 ranks). The mesh name follows
+# mesh_naming.mesh_basename, so naming another pair names its mesh too. The
+# 2500 m configuration this replaces had a mesh outside that rule and is
+# ISMIP7_LC=2500 ISMIP7_LC_COARSE=64000
+# ISMIP7_MESH=$ISMIP7_REPO/antarctica/mesh/antarctica_64000_2500.msh.
+#
+# No solver is chosen here. The inversion sources this file as well, its
+# linear solve is the full mixed-Jacobian MUMPS by construction, and the solver
+# it finds in the environment is stamped on the MAP it writes; the forward
+# runner (projection.sbatch) names its own.
+#
+# Every inversion runs regularized Coulomb. Budd's shelf gate was a sign test
+# on the roundoff residue of N, so every Budd MAP predating that fix has to be
+# re-inverted; set ISMIP7_FRICTION=budd explicitly for those re-inversions.
 export ISMIP7_GEOMETRY_SPACE="${ISMIP7_GEOMETRY_SPACE:-dg0}"
 export ISMIP7_FRICTION="${ISMIP7_FRICTION:-regularized_coulomb}"
 export ISMIP7_N_FLOW="${ISMIP7_N_FLOW:-3.0}"
-export ISMIP7_LC="${ISMIP7_LC:-2500}"
-export ISMIP7_LC_COARSE="${ISMIP7_LC_COARSE:-64000}"
-export ISMIP7_MESH="${ISMIP7_MESH:-$ISMIP7_REPO/antarctica/mesh/antarctica_64000_2500.msh}"
+export ISMIP7_LC="${ISMIP7_LC:-1000}"
+export ISMIP7_LC_COARSE="${ISMIP7_LC_COARSE:-10000}"
+# int(float(buffer)), as mesh_naming.buffer_tag writes it.
+_ismip7_buffer="${ISMIP7_BUFFER_M:-20000}"
+export ISMIP7_MESH="${ISMIP7_MESH:-$ISMIP7_REPO/antarctica/mesh/antarctica_${ISMIP7_LC_COARSE}_${ISMIP7_LC}_buffered${_ismip7_buffer%%.*}.msh}"
 # The MAP this configuration writes and reads: named from the law, so switching
 # ISMIP7_FRICTION switches the file and a Budd re-inversion cannot land on the
 # RC MAP. One variable for both halves of the workflow - inversion.sbatch

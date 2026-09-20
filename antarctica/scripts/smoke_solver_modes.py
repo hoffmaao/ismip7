@@ -18,14 +18,16 @@ sys.path.insert(0, _PROJECT)
 import firedrake as fd  # noqa: E402
 from firedrake.petsc import PETSc  # noqa: E402
 
+from icepack2_tools.preconditioners import frozen_linearization  # noqa: E402
 from icepack2_tools.solverconfig import (  # noqa: E402
     diagnostic_solver_parameters,
+    linearization_state,
     transport_solver_parameters,
 )
 from icepack2_tools.mpi_stats import global_extreme_location  # noqa: E402
 
 
-def mixed_problem(mesh):
+def mixed_problem(mesh, cubic_drag=0.0):
     velocity = fd.VectorFunctionSpace(mesh, "CG", 1)
     dg0 = fd.FiniteElement("DG", "triangle", 0)
     stress = fd.TensorFunctionSpace(mesh, dg0, symmetry=True)
@@ -34,41 +36,138 @@ def mixed_problem(mesh):
     state = fd.Function(mixed)
     u, membrane, basal = fd.split(state)
     v, q, r = fd.TestFunctions(mixed)
+    forcing = fd.as_vector((1.0, 1.0))
+    if cubic_drag:
+        # A uniform load has a uniform solution, on which every Krylov space
+        # is one-dimensional: no solve could tell one Jacobian from another.
+        x, y = fd.SpatialCoordinate(mesh)
+        forcing = fd.as_vector((1.0 + 4.0 * fd.sin(6.0 * x), 1.0 - 3.0 * x * y))
     residual = (
         fd.inner(fd.grad(u), fd.grad(v))
-        + fd.inner(u, v)
+        + (1.0 + cubic_drag * fd.inner(u, u)) * fd.inner(u, v)
         + fd.inner(
             membrane - fd.sym(fd.grad(u)),
             q - fd.sym(fd.grad(v)),
         )
         + fd.inner(basal - u, r - v)
-        - fd.inner(fd.as_vector((1.0, 1.0)), v)
+        - fd.inner(forcing, v)
     ) * fd.dx
     # Match simulation.py's structural-zero blocks for retained-first SCPC.
     zero = fd.Constant(0.0)
     residual += fd.derivative(
         zero * membrane[0, 0] * basal[0] * fd.dx, state
     )
-    return fd.NonlinearVariationalProblem(residual, state), state
+    return residual, state
+
+
+def mixed_solver(mesh, mode, prefix, cubic_drag=0.0):
+    """The solver simulation.py builds for ``mode``, on the toy residual."""
+    residual, state = mixed_problem(mesh, cubic_drag)
+    jacobian, pre_jacobian = None, None
+    if linearization_state(mode) == "frozen":
+        jacobian, pre_jacobian = frozen_linearization(residual, state)
+    solver = fd.NonlinearVariationalSolver(
+        fd.NonlinearVariationalProblem(residual, state, J=jacobian),
+        solver_parameters=diagnostic_solver_parameters(mode),
+        options_prefix=prefix,
+        pre_jacobian_callback=pre_jacobian,
+    )
+    return solver, state
+
+
+def condensed_near_nullspace_for(mode):
+    options = diagnostic_solver_parameters(mode)
+    return options.get("condensed_field_near_nullspace", "none")
 
 
 def test_mode(mesh, mode):
     os.environ["ISMIP7_DIAGNOSTIC_LINEAR_SOLVER"] = mode
-    problem, state = mixed_problem(mesh)
-    solver = fd.NonlinearVariationalSolver(
-        problem,
-        solver_parameters=diagnostic_solver_parameters(),
-        options_prefix=f"ismip7_smoke_{mode}_",
-    )
+    solver, state = mixed_solver(mesh, mode, f"ismip7_smoke_{mode}_")
     solver.solve()
     reason = solver.snes.getConvergedReason()
     if reason <= 0:
         raise RuntimeError(f"{mode} diverged with SNES reason {reason}")
+    condensed = ""
+    if mode.startswith("scpc_"):
+        scpc = solver.snes.ksp.pc.getPythonContext()
+        if scpc.condensed_solves < 1 or (
+            scpc.condensed_iterations < scpc.condensed_solves
+        ):
+            raise RuntimeError(f"{mode} did not count its condensed solves")
+        _, pmat = scpc.condensed_ksp.getOperators()
+        near = pmat.getNearNullSpace()
+        # An unset near-nullspace is a null handle; getVecs() on it segfaults.
+        modes = near.getVecs() if near.handle else []
+        expected = 3 if condensed_near_nullspace_for(mode) == "rigid_body" else 0
+        if len(modes) != expected:
+            raise RuntimeError(
+                f"{mode} condensed operator has {len(modes)} near-nullspace "
+                f"vectors, expected {expected}"
+            )
+        condensed = (
+            f" condensed_solves={scpc.condensed_solves}"
+            f" condensed_its={scpc.condensed_iterations}"
+            f" near_nullspace={len(modes)}"
+        )
     PETSc.Sys.Print(
         f"PASS {mode}: snes_its={solver.snes.getIterationNumber()} "
-        f"linear_its={solver.snes.getLinearSolveIterations()}"
+        f"linear_its={solver.snes.getLinearSolveIterations()}{condensed}"
     )
     return state
+
+
+def test_frozen_linearization(mesh):
+    r"""The line search's solve must see the Jacobian SCPC condensed.
+
+    On a nonlinear residual the NLEQ-ERR line search solves for its simplified
+    Newton step after evaluating the residual at a trial point. Condensed MUMPS
+    is an exact inverse of the Jacobian at the Newton iterate, so with the
+    linearization frozen there every outer solve takes one iteration; left
+    live, the matrix-free operator has moved to the trial point and it cannot.
+    Both must still reach the same root."""
+    outcomes = {}
+    for setting in ("1", "0"):
+        os.environ["ISMIP7_FREEZE_LINEARIZATION"] = setting
+        state_name = linearization_state("scpc_mumps")
+        solver, state = mixed_solver(
+            mesh, "scpc_mumps", f"ismip7_smoke_{state_name}_", cubic_drag=50.0
+        )
+        outer = []
+
+        def monitor(ksp, its, rnorm, outer=outer):
+            if its == 0:
+                outer.append(0)
+            else:
+                outer[-1] = its
+
+        solver.snes.ksp.setMonitor(monitor)
+        solver.solve()
+        newton = solver.snes.getIterationNumber()
+        if newton < 3 or len(outer) <= newton:
+            raise RuntimeError(
+                f"{state_name}: not a nonlinear test ({newton} Newton "
+                f"iterations, {len(outer)} linear solves)"
+            )
+        outcomes[state_name] = (state, newton, len(outer), max(outer), sum(outer))
+    del os.environ["ISMIP7_FREEZE_LINEARIZATION"]
+
+    frozen, live = outcomes["frozen"], outcomes["live"]
+    if frozen[3] != 1:
+        raise RuntimeError(
+            f"frozen linearization: an exact condensed solve took {frozen[3]} "
+            "outer iterations; the operator is not the one SCPC condensed"
+        )
+    if live[3] <= 1:
+        raise RuntimeError("live linearization converged in one iteration: no test")
+    difference = fd.errornorm(frozen[0], live[0]) / fd.norm(live[0])
+    if difference > 1e-7:
+        raise RuntimeError(f"frozen and live roots differ by {difference:.2e}")
+    for name, (_, newton, solves, worst, total) in outcomes.items():
+        PETSc.Sys.Print(
+            f"PASS {name} linearization: snes_its={newton} linear_solves={solves} "
+            f"outer_its_total={total} outer_its_max={worst}"
+        )
+    PETSc.Sys.Print(f"PASS frozen and live roots agree: rel diff {difference:.1e}")
 
 
 def test_persistent_transport(mesh):
@@ -144,6 +243,12 @@ def main():
     mesh = fd.UnitSquareMesh(2, 2)
     for mode in args.modes:
         test_mode(mesh, mode)
+    if "scpc_gamg" in args.modes:
+        # The rotation is off by default; keep the path that attaches it alive.
+        os.environ["ISMIP7_CONDENSED_NEAR_NULLSPACE"] = "rigid_body"
+        test_mode(mesh, "scpc_gamg")
+        del os.environ["ISMIP7_CONDENSED_NEAR_NULLSPACE"]
+    test_frozen_linearization(fd.UnitSquareMesh(8, 8))
     test_persistent_transport(mesh)
     test_global_extrema(mesh)
 

@@ -17,8 +17,9 @@
 # layout from scontrol, so a chain never changes rank count mid-run -- the
 # inversion now refuses a warm start whose dof ordering differs anyway.
 #
-# Defaults write inversion_icepack2_rc_n3_dg0_logvelnet_2500.h5 under the
-# settings the 2500 m result came from: the sigma-normalised velocity chi^2
+# Defaults write inversion_icepack2_rc_n3_dg0_logvelnet_<ISMIP7_LC>.h5 (1000
+# on the production mesh site_env.sh names) under the settings the 2500 m
+# result came from: the sigma-normalised velocity chi^2
 # plus ISSM's logarithmic misfit, the pointwise dH/dt term, and the integrated
 # net mass-balance term (off by default in the repo) that takes grounding-line
 # discharge from 1628 to 2211 Gt/yr. The friction law is the one deliberate

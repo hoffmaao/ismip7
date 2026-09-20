@@ -64,7 +64,16 @@ CORES_BY_LC = {
     5000: (16,),
 }
 
-SOLVER_MODE = "scpc_mumps"
+# Two solvers, deliberately separate. Every initial-state cache is prepared
+# (and every per-mesh invert publishes) under CACHE_SOLVER_MODE; it is spelled
+# into CACHE_TAG and so into the cache filenames. The solver a lane TIMES is a
+# campaign parameter like the interval: it leads the campaign tag, so records
+# under different solvers never mix, and a lane under any of them starts from
+# the same prepared state -- the linear solver is the only thing that differs
+# between two campaigns' lanes.
+CACHE_SOLVER_MODE = "scpc_mumps"
+LANE_SOLVER_MODES = ("scpc_mumps", "scpc_gamg")
+LANE_SOLVER_DEFAULT = CACHE_SOLVER_MODE
 SOURCE_TAG = "dg0_logvelnet"
 # Campaign source MAP. Promoted on 2026-09-17 from the imported old-gate MAP
 # (inversion_icepack2_budd_n3_dg0_logvelnet_2500_1core.h5, 64000/2500 mesh) to
@@ -129,6 +138,20 @@ def matrix_dt_2500(override=None):
 def dt_tag(dt_2500):
     """``0.25 -> '0p25'``: the Makefile's ``$(subst .,p,$(MATRIX_DT_2500))``."""
     return f"{float(dt_2500):g}".replace(".", "p")
+
+
+def lane_solver(override=None):
+    """The diagnostic solver a campaign's lanes time (not the caches')."""
+    name = (
+        override
+        if override is not None
+        else os.environ.get("ISMIP7_TIMING_SOLVER", LANE_SOLVER_DEFAULT)
+    )
+    if name not in LANE_SOLVER_MODES:
+        raise ValueError(
+            f"timing solver must be one of {LANE_SOLVER_MODES}, not {name!r}"
+        )
+    return name
 
 
 # Lane physics contracts. ``strict`` is the original v3 contract (no apparent
@@ -208,10 +231,10 @@ TRIPWIRE_DEFAULTS = {
 }
 
 
-def campaign_tag(steps=None, dt_2500=None, contract=None):
+def campaign_tag(steps=None, dt_2500=None, contract=None, solver=None):
     name = contract_name(contract)
     tag = (
-        f"scpc_mumps_{matrix_steps(steps)}step_"
+        f"{lane_solver(solver)}_{matrix_steps(steps)}step_"
         f"dt{dt_tag(matrix_dt_2500(dt_2500))}at2500"
         f"_dg0_logvelnet_cached_strict_v{CAMPAIGN_VERSION}"
     )
@@ -236,17 +259,18 @@ def lane_tag(initial_state=LANE_INITIAL_STATE_DEFAULT, campaign=None):
     return f"{campaign}_reinverted" if initial_state == "invert" else campaign
 
 
-def probe_tag(steps=None, dt_2500=None, contract=None):
+def probe_tag(steps=None, dt_2500=None, contract=None, solver=None):
     """Probe lanes (``cache_probe`` kind) run one contract on one mesh without
     touching campaign records; they are the experiment ladder."""
-    return f"{campaign_tag(steps, dt_2500, contract)}_probe"
+    return f"{campaign_tag(steps, dt_2500, contract, solver)}_probe"
 
 
 _NONSTRICT_CONTRACTS = "|".join(
     sorted((name for name in CONTRACTS if name != "strict"), key=len, reverse=True)
 )
 _CAMPAIGN_TAG_RE = re.compile(
-    r"^scpc_mumps_(?P<steps>\d+)step_dt(?P<dt>\d+(?:p\d+)?)at2500"
+    rf"^(?P<solver>{'|'.join(LANE_SOLVER_MODES)})"
+    r"_(?P<steps>\d+)step_dt(?P<dt>\d+(?:p\d+)?)at2500"
     r"_dg0_logvelnet_cached_strict_v(?P<version>\d+)"
     rf"(?:_(?P<contract>{_NONSTRICT_CONTRACTS}))?"
     r"(?:_(?P<lane>reinverted|probe))?$"
@@ -254,7 +278,7 @@ _CAMPAIGN_TAG_RE = re.compile(
 
 
 def parse_campaign_tag(tag):
-    """``{steps, dt_2500, contract, lane, version}`` encoded in a lane tag.
+    """``{solver, steps, dt_2500, contract, lane, version}`` encoded in a lane tag.
 
     Older versions still parse (``make matrix TIMING_TAG=<v3 tag>`` renders
     the archive); only the current CAMPAIGN_VERSION is ever submitted."""
@@ -262,6 +286,7 @@ def parse_campaign_tag(tag):
     if match is None:
         raise ValueError(f"tag {tag!r} does not name a cached-strict lane")
     return {
+        "solver": match["solver"],
         "steps": int(match["steps"]),
         "dt_2500": float(match["dt"].replace("p", ".")),
         "contract": match["contract"] or "strict",
@@ -274,7 +299,7 @@ def parse_campaign_tag(tag):
 CAMPAIGN_TAG = campaign_tag()
 REINVERTED_TAG = lane_tag("invert")
 PROBE_TAG = probe_tag()
-CACHE_TAG = f"scpc_mumps_dg0_logvelnet_v{CAMPAIGN_VERSION}"
+CACHE_TAG = f"{CACHE_SOLVER_MODE}_dg0_logvelnet_v{CAMPAIGN_VERSION}"
 # Per-mesh short invert length. Override with ISMIP7_TIMING_INVERSION_MAXITER
 # or `make timing-inversion TIMING_INVERSION_MAXITER=5` for a debug pass.
 INVERSION_MAXITER_DEFAULT = 250
@@ -651,7 +676,7 @@ def validate_cache_manifest(
         "lc": int(lc),
         "lc_coarse": int(lc_coarse),
         "buffer_m": BUFFER_M,
-        "diagnostic_solver_mode": SOLVER_MODE,
+        "diagnostic_solver_mode": CACHE_SOLVER_MODE,
         "friction": "budd",
         "friction_gate": BUDD_SHELF_GATE,
         "geometry_space": "dg0",
@@ -795,10 +820,11 @@ def validate_timing_record(
             masked = 0
         if masked <= 0:
             return False, "fixed front masked no cells (clamped initial state?)"
-    if record.get("diagnostic_solver_mode") != SOLVER_MODE:
+    if record.get("diagnostic_solver_mode") != spec["solver"]:
         return False, (
             "diagnostic_solver_mode="
-            f"{record.get('diagnostic_solver_mode')!r}"
+            f"{record.get('diagnostic_solver_mode')!r}; tag names "
+            f"{spec['solver']!r}"
         )
 
     checks = (("lc", lc), ("lc_coarse", lc_coarse), ("ncores", ncores))
@@ -935,7 +961,7 @@ def synthetic_record(lc, lc_coarse, ncores, timing_tag=None, timing_kind="matrix
         "apparent_mb_cap_m_per_yr": contract["apparent_mb_cap_m_per_yr"],
         "fixed_front": contract["fixed_front"],
         "fixed_front_cells": 48843 if contract["fixed_front"] else 0,
-        "diagnostic_solver_mode": SOLVER_MODE,
+        "diagnostic_solver_mode": spec["solver"],
         "t_start": MATRIX_T_START,
         "dt": dt,
         "nsteps": steps,
@@ -965,16 +991,20 @@ def synthetic_record(lc, lc_coarse, ncores, timing_tag=None, timing_kind="matrix
 
 def selftest():
     """Pure-Python checks of the tag/contract/record machinery."""
-    for steps, dt in ((5, 0.25), (10, 0.125), (20, 0.0625)):
-        for contract in CONTRACTS:
-            tag = campaign_tag(steps, dt, contract)
-            spec = parse_campaign_tag(tag)
-            assert spec == {
-                "steps": steps, "dt_2500": dt, "contract": contract,
-                "lane": None, "version": CAMPAIGN_VERSION,
-            }, (tag, spec)
-            assert parse_campaign_tag(lane_tag("invert", tag))["lane"] == "reinverted"
-            assert parse_campaign_tag(probe_tag(steps, dt, contract))["lane"] == "probe"
+    for solver in LANE_SOLVER_MODES:
+        for steps, dt in ((5, 0.25), (10, 0.125), (20, 0.0625)):
+            for contract in CONTRACTS:
+                tag = campaign_tag(steps, dt, contract, solver)
+                spec = parse_campaign_tag(tag)
+                assert spec == {
+                    "solver": solver, "steps": steps, "dt_2500": dt,
+                    "contract": contract, "lane": None,
+                    "version": CAMPAIGN_VERSION,
+                }, (tag, spec)
+                assert parse_campaign_tag(lane_tag("invert", tag))["lane"] == "reinverted"
+                assert parse_campaign_tag(
+                    probe_tag(steps, dt, contract, solver)
+                ) == dict(spec, lane="probe")
     assert campaign_tag(5, 0.25, "strict") == (
         "scpc_mumps_5step_dt0p25at2500_dg0_logvelnet_cached_strict_v4"
     )
@@ -985,6 +1015,20 @@ def selftest():
     )
     assert archived["version"] == 3 and archived["version"] != CAMPAIGN_VERSION
     assert CACHE_TAG.endswith(f"_v{CAMPAIGN_VERSION}")
+    # The lane solver leads the tag; the caches stay the prepare solver's, so
+    # a GAMG campaign reads the cache files the MUMPS campaign prepared.
+    assert campaign_tag(10, 0.125, "strict", "scpc_gamg") == (
+        "scpc_gamg_10step_dt0p125at2500_dg0_logvelnet_cached_strict_v4"
+    )
+    assert CACHE_TAG == f"scpc_mumps_dg0_logvelnet_v{CAMPAIGN_VERSION}"
+    assert cache_stem(2500, 25000).startswith("initial_state_scpc_mumps_")
+    for unqualified in ("full_mumps", "schur_gamg", "iterative"):
+        try:
+            campaign_tag(10, 0.125, "strict", unqualified)
+        except ValueError:
+            pass
+        else:
+            raise AssertionError(f"{unqualified} must not name a campaign")
     # The promoted source is the 2500/25000 invert MAP; the manager must
     # recognise that mesh from the basename alone, at any maxiter.
     assert SOURCE_INVERSION_BASENAME == mesh_inversion_basename(2500, 25000, 250)
@@ -1051,6 +1095,16 @@ def selftest():
     check(probe, True, "probe", timing_kind="cache_probe", timing_tag=ptag)
     check(dict(probe, timing_kind="matrix"), False, "names a cache_probe lane",
           timing_tag=ptag)
+    # A record passes only under the solver its own tag names.
+    gtag = campaign_tag(10, 0.125, "strict", "scpc_gamg")
+    goodg = synthetic_record(2500, 25000, 16, gtag)
+    assert goodg["diagnostic_solver_mode"] == "scpc_gamg"
+    check(goodg, True, "10-step", lc=2500, lc_coarse=25000, ncores=16, timing_tag=gtag)
+    check(dict(goodg, diagnostic_solver_mode="scpc_mumps"), False,
+          "tag names 'scpc_gamg'", timing_tag=gtag)
+    check(dict(good, diagnostic_solver_mode="scpc_gamg"), False,
+          "tag names 'scpc_mumps'", timing_tag=tag10)
+    check(goodg, False, "timing_tag=", timing_tag=tag10)
     old = dict(good, record_schema_version=RECORD_SCHEMA_VERSION - 1)
     check(old, False, "schema", timing_tag=tag10)
     assert pristine_sibling("/x/initial_state_a.h5") == "/x/initial_state_a.prepare.h5"

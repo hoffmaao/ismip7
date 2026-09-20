@@ -24,13 +24,16 @@ fast.
 
 import os
 
-# 2500 m / 64 km is the production pair: it is the mesh the campaign inverts
-# and runs on (``antarctica_64000_2500_buffered20000``), and the pair the
-# README documents. The old 8000 and 32000 module-level defaults were
-# dev-probe leftovers; a coarse probe now exports ISMIP7_LC / ISMIP7_LC_COARSE
-# instead of disagreeing with the gate about what "unset" means.
-LC_DEFAULT = "2500"
-LC_COARSE_DEFAULT = "64000"
+# 1000 m / 10 km is the production pair (``antarctica_10000_1000_buffered20000``):
+# the finest mesh the Quartz timing matrix carries through a 285-year run in
+# two days, under scpc_gamg on 64 ranks
+# (antarctica/TIMING_MATRIX_QUARTZ_SCPC_GAMG.md). It is the pair the batch
+# runners export (batch_runners/site_env.sh) and the README documents; until
+# 2026-09-19 that was 2500 m / 64 km. The old 8000 and 32000 module-level
+# defaults were dev-probe leftovers; a coarse probe exports ISMIP7_LC /
+# ISMIP7_LC_COARSE instead of disagreeing with the gate about what "unset" means.
+LC_DEFAULT = "1000"
+LC_COARSE_DEFAULT = "10000"
 GEOMETRY_SPACE_DEFAULT = "dg0"
 FRICTION_DEFAULT = "budd"
 # THIS BRANCH (antarctica-n3) runs standard Glen n=3. An inversion and every

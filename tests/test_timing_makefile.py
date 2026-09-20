@@ -175,3 +175,45 @@ def test_a_matrix_lane_s_step_scales_with_the_mesh_only_up_to_the_cap(sandbox, l
     export = next(line for line in seen if line.startswith("ARG: --export="))
     assert f"ISMIP7_DT={dt}," in export + ",", export
     assert f"ISMIP7_T_END={t_end}," in export + ",", export
+
+
+def dry(sandbox, target, *variables):
+    return subprocess.run(["make", "-n", target, *variables], capture_output=True, text=True,
+                          cwd=str(sandbox / "repo" / "antarctica")).stdout
+
+
+def test_the_campaign_solver_reaches_the_manager_and_the_qualification_gate(sandbox):
+    r"""One variable names the solver for the whole path to a scout: the gate
+    that qualifies it, the tag its records carry, and the manager's lanes."""
+    assert '--solver "scpc_mumps"' in dry(sandbox, "timing-scout")
+    for target in ("timing-scout", "timing-scale", "timing-probe"):
+        assert '--solver "scpc_gamg"' in dry(sandbox, target, "TIMING_SOLVER=scpc_gamg"), target
+    gate = dry(sandbox, "qualify-2step", "TIMING_SOLVER=scpc_gamg")
+    assert "ISMIP7_DIAGNOSTIC_LINEAR_SOLVER=scpc_gamg" in gate
+    assert "timing_qualification_2step_scpc_gamg_dg0_logvelnet_2500_64000_16.json" in gate
+    assert "scpc_mumps" not in gate
+    # Any mode solverconfig knows can still be put through the gate by name.
+    assert "timing_qualification_2step_schur_gamg_" in dry(
+        sandbox, "qualify-2step", "ISMIP7_DIAGNOSTIC_LINEAR_SOLVER=schur_gamg")
+
+
+def test_make_matrix_renders_the_campaign_the_command_line_names(sandbox):
+    r"""`make matrix` falls back to the campaign `make timing` last launched.
+    A GAMG campaign started from `make timing-scout` never writes that file,
+    so naming the solver has to win over it or the MUMPS matrix is rendered."""
+    import sys
+    (sandbox / "bin" / "python").write_text(f'#!/bin/bash\nexec "{sys.executable}" "$@"\n')
+    (sandbox / "bin" / "python").chmod(0o755)
+    timing = sandbox / "repo/antarctica/results/timing"
+    timing.mkdir(parents=True)
+    mumps = "scpc_mumps_10step_dt0p125at2500_dg0_logvelnet_cached_strict_v4"
+    (timing / "latest_matrix_campaign.txt").write_text(mumps + "\n")
+    out = sandbox / "matrix.md"
+    proc, _ = make(sandbox, "matrix", f"MATRIX_OUTPUT={out}")
+    assert proc.returncode == 0, proc.stderr
+    assert f"Campaign tag: `{mumps}`" in out.read_text()
+    proc, _ = make(sandbox, "matrix", f"MATRIX_OUTPUT={out}", "TIMING_SOLVER=scpc_gamg")
+    assert proc.returncode == 0, proc.stderr
+    text = out.read_text()
+    assert f"Campaign tag: `{mumps.replace('mumps', 'gamg')}`" in text
+    assert "Lanes use `scpc_gamg`, an exact-mesh prepared cache (prepared under `scpc_mumps`" in text

@@ -685,7 +685,8 @@ make sync-results
 make matrix
 # → TIMING_MATRIX.md, leading with wall time per simulated year and per
 #   285-year projection, then 20 configured lanes plus NOT PLANNED cells
-#   (MATRIX_OUTPUT=TIMING_MATRIX_QUARTZ.md keeps one committed file per site)
+#   (MATRIX_OUTPUT=TIMING_MATRIX_QUARTZ_SCPC_MUMPS.md keeps one committed
+#   file per site and solver)
 # → results/timing/timing_<tag>_<LC>_<LC_coarse>_<ncores>.json
 ```
 
@@ -714,7 +715,7 @@ campaign on a site that already holds the caches needs no prepare or invert:
 make qualify TIMING_SOLVER=scpc_gamg        # 2-step then 5-step gate, 2.5 km, 16 ranks
 make timing-scout TIMING_SOLVER=scpc_gamg   # one scout per mesh, from the existing caches
 make timing-scale TIMING_SOLVER=scpc_gamg   # once scouts have passed
-make matrix TIMING_SOLVER=scpc_gamg MATRIX_OUTPUT=TIMING_MATRIX_QUARTZ_GAMG.md
+make matrix TIMING_SOLVER=scpc_gamg MATRIX_OUTPUT=TIMING_MATRIX_QUARTZ_SCPC_GAMG.md
 ```
 
 (`make timing TIMING_SOLVER=scpc_gamg` is the same thing as one re-runnable

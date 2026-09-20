@@ -29,8 +29,8 @@
 #   reference     one full-Jacobian MUMPS reference job
 #   solver-smoke  tiny two-rank setup test; no Antarctic data or time steps
 #   matrix        write TIMING_MATRIX.md from results/timing/*.json
-#                   (MATRIX_OUTPUT names another file, e.g. one per site:
-#                   TIMING_MATRIX_QUARTZ.md)
+#                   (MATRIX_OUTPUT names another file, e.g. one per site and
+#                   solver: TIMING_MATRIX_QUARTZ_SCPC_GAMG.md)
 
 LCS ?= 500 1000 2000 2500 5000
 RATIOS ?= 20 10

@@ -124,8 +124,8 @@ def _cache_rasters(variable, data_root=None, cache_dir=None):
     from rasterio.transform import from_origin
 
     if cache_dir is None:
-        here = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-        cache_dir = os.path.join(here, "antarctica", "data", "dhdt_cache")
+        from .runconfig import obs_data_root
+        cache_dir = os.path.join(obs_data_root(), "dhdt_cache")
     os.makedirs(cache_dir, exist_ok=True)
     try:
         src = _obs_kit_path(data_root)

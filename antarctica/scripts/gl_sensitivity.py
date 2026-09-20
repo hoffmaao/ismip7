@@ -76,14 +76,15 @@ from icepack2.constants import (
 )
 
 _ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-DATA_DIR = os.path.join(_ROOT, "data")
 MESH_DIR = os.path.join(_ROOT, "mesh")
 FIG_DIR = os.path.join(_ROOT, "figs")
 RESULTS_DIR = os.path.join(_ROOT, "results")
 SHAPEFILE = os.path.expanduser("~/data/shapefiles/IceShelf_Antarctica_v02.shp")
 
 from mesh_naming import get_buffer_m, mesh_filename
-from icepack2_tools.runconfig import lc as _lc, lc_coarse as _lc_coarse
+from icepack2_tools.runconfig import obs_data_root, lc as _lc, lc_coarse as _lc_coarse
+
+DATA_DIR = obs_data_root()
 
 lc = _lc()
 lc_coarse = _lc_coarse()

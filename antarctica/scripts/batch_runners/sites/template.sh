@@ -37,6 +37,14 @@ ISMIP7_CONSTRAINT="${ISMIP7_CONSTRAINT:-}"
 ISMIP7_REPO="${ISMIP7_REPO:-$ISMIP7_REPO_SELF}"
 ISMIP7_WORK="${ISMIP7_WORK:-}"
 
+# --- optional: data that does not live beside the code -----------------
+# A cluster holding more than one checkout keeps the forcing tree and the
+# observational rasters in one place; name it here (sites/rice_nots.sh does).
+# The mesh and the MAP follow ISMIP7_REPO, so a run from a second checkout
+# states ISMIP7_MESH and ISMIP7_MAP_OUT on its submit line.
+# ISMIP7_DATA_ROOT="${ISMIP7_DATA_ROOT:-/projects/<group>/ismip7/ISMIP7/AIS}"
+# ISMIP7_OBS_DATA_ROOT="${ISMIP7_OBS_DATA_ROOT:-/projects/<group>/ismip7/antarctica/data}"
+
 # --- optional: default job size ----------------------------------------
 # Ranks per node on PHYSICAL cores (the solver is memory-bandwidth bound, so
 # hyperthreads halve per-rank bandwidth), memory per node, wall limits.

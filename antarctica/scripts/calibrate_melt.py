@@ -47,13 +47,13 @@ import icepack
 
 from icepack2_tools.forcing import quadratic_mixed_slope, _RHO_I
 from icepack2_tools.naming import map_basename
-from icepack2_tools.runconfig import friction as _friction, lc as _lc
+from icepack2_tools.runconfig import friction as _friction, lc as _lc, obs_data_root
 
 DATA_ROOT = os.environ.get(
     "ISMIP7_DATA_ROOT", os.path.join(_PROJECT, "ISMIP7", "AIS")
 )
 MESH_DIR = os.path.join(_PROJECT, "antarctica", "mesh")
-BEDMACHINE_DIR = os.path.join(_PROJECT, "antarctica", "data", "bedmachine")
+BEDMACHINE_DIR = os.path.join(obs_data_root(), "bedmachine")
 
 LC = _lc()
 INV_H5 = os.environ.get(

@@ -32,6 +32,7 @@ from icepack2_tools.solverconfig import (
 )
 from simulation import lc, run_simulation, setup_model
 from timing_campaign import (
+    CACHE_SOLVER_MODE,
     CONTRACTS,
     RECORD_SCHEMA_VERSION,
     host_provenance,
@@ -93,6 +94,11 @@ def _validate_lane_contract():
             f"timing tag {TIMING_TAG!r} is a "
             f"{'probe' if is_probe else 'matrix'} tag but ISMIP7_TIMING_KIND="
             f"{TIMING_KIND!r}"
+        )
+    if spec["solver"] != DIAGNOSTIC_LINEAR_SOLVER:
+        raise RuntimeError(
+            f"timing tag {TIMING_TAG!r} names solver {spec['solver']!r} but "
+            f"ISMIP7_DIAGNOSTIC_LINEAR_SOLVER={DIAGNOSTIC_LINEAR_SOLVER!r}"
         )
     contract = CONTRACTS[spec["contract"]]
     if APPARENT_MB_MODE != contract["apparent_mb_mode"]:
@@ -162,6 +168,11 @@ def _diagnostic_summary(stats):
             (int(stat["linear_iterations"]) for stat in stats), default=0
         ),
     })
+    # SCPC's own count of the work on the condensed system. It includes the
+    # line search's solves, which ``linear_iterations`` (SNES's) does not.
+    for key in ("condensed_solves", "condensed_iterations"):
+        if stats and all(key in stat for stat in stats):
+            summary[f"{key}_total"] = sum(int(stat[key]) for stat in stats)
     return summary
 
 
@@ -183,7 +194,7 @@ def _normal(value):
     return value
 
 
-def _load_and_validate_cache(current_solver_configuration):
+def _load_and_validate_cache():
     if TIMING_KIND not in {"matrix", "cache_probe"}:
         return {"status": "not_required"}
     if os.environ.get("ISMIP7_MESH"):
@@ -199,7 +210,12 @@ def _load_and_validate_cache(current_solver_configuration):
     with open(CACHE_MANIFEST) as stream:
         manifest = json.load(stream)
     lc_coarse = int(os.environ["ISMIP7_LC_COARSE"])
-    fingerprint = solver_configuration_fingerprint(current_solver_configuration)
+    # The cache is judged against the solver it was PREPARED under, in this
+    # lane's environment; the solver the lane times is its tag's, and every
+    # campaign solver starts from the same prepared state.
+    fingerprint = solver_configuration_fingerprint(
+        solver_provenance(CACHE_SOLVER_MODE)
+    )
     valid, detail = validate_cache_manifest(
         manifest,
         lc=lc,
@@ -345,7 +361,7 @@ def main():
     )
 
     try:
-        cache_validation = _load_and_validate_cache(configuration)
+        cache_validation = _load_and_validate_cache()
         activity = "setup"
         ctx = setup_model(
             restart_from=RESTART_FROM,

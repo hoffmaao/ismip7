@@ -25,8 +25,8 @@ DATA = os.path.join(_PROJECT, "ISMIP7", "AIS")
 IMBIE2 = os.path.join(DATA, "parameterisations", "ocean", "imbie2",
                       "basin_numbers_ismip8km_v2.nc")
 import glob
-BM = glob.glob(os.path.join(_PROJECT, "antarctica", "data",
-                            "bedmachine", "*.nc"))[0]
+from icepack2_tools.runconfig import obs_data_root
+BM = glob.glob(os.path.join(obs_data_root(), "bedmachine", "*.nc"))[0]
 OUT = os.path.join(_PROJECT, "antarctica", "results", "diag_basin0.png")
 os.makedirs(os.path.dirname(OUT), exist_ok=True)
 

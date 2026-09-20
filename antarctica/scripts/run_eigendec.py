@@ -64,7 +64,6 @@ from icepack2.constants import (
 )
 
 _ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-DATA_DIR = os.path.join(_ROOT, "data")
 MESH_DIR = os.path.join(_ROOT, "mesh")
 RESULTS_DIR = os.path.join(_ROOT, "results")
 
@@ -76,9 +75,11 @@ from icepack2_tools.geometry import sample_to_geometry
 from icepack2_tools.naming import map_basename
 from icepack2_tools.runconfig import (
     friction as _friction, geometry_space as _geometry_space,
-    raster_sample as _raster_sample,
+    obs_data_root, raster_sample as _raster_sample,
     lc as _lc, lc_coarse as _lc_coarse, n_flow as _n_flow,
 )
+
+DATA_DIR = obs_data_root()
 from mesh_naming import get_buffer_m, mesh_filename
 
 lc = _lc()

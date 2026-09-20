@@ -19,14 +19,18 @@ import pytest
 REPO = Path(__file__).resolve().parents[1]
 BR = REPO / "antarctica" / "scripts" / "batch_runners"
 
+# What a run chooses: which mesh, which law, which resolution. A site file
+# states none of it. The data roots are not here -- where a cluster keeps the
+# forcing tree and the rasters is a fact about the site, not about the run, and
+# the timing lanes require ISMIP7_INVERSION, ISMIP7_MESH and
+# ISMIP7_TIMING_CACHE_RAW of their caller, never a data root.
 MODEL_VARS = (
     "ISMIP7_FRICTION", "ISMIP7_MESH", "ISMIP7_LC", "ISMIP7_LC_COARSE",
     "ISMIP7_GEOMETRY_SPACE", "ISMIP7_N_FLOW", "ISMIP7_MAP_DEFAULT",
-    "ISMIP7_DATA_ROOT", "ISMIP7_OBS_DATA_ROOT",
 )
 
-# What site_env.sh hangs off ISMIP7_SHARE: the artifacts a checkout does not
-# carry, as opposed to ISMIP7_REPO's code.
+# The artifacts a checkout does not carry, as opposed to ISMIP7_REPO's code.
+# A site names the two data roots; the mesh and the MAP follow ISMIP7_REPO.
 SHARED_VARS = (
     "ISMIP7_DATA_ROOT", "ISMIP7_OBS_DATA_ROOT", "ISMIP7_MESH", "ISMIP7_MAP_DEFAULT",
 )
@@ -69,16 +73,56 @@ def test_the_core_file_chooses_no_model_configuration(runners, site):
 
 
 def test_site_env_still_supplies_the_runners_model_defaults(runners):
-    rc, out, err = source(runners, "site_env.sh", show(*MODEL_VARS),
+    rc, out, err = source(runners, "site_env.sh",
+                          show(*MODEL_VARS, "ISMIP7_DATA_ROOT",
+                               "ISMIP7_OBS_DATA_ROOT"),
                           ISMIP7_SITE="local", ISMIP7_REPO="/repo")
     assert rc == 0, err
     values = dict(line.split("=", 1) for line in out.splitlines())
     assert values["ISMIP7_FRICTION"] == "regularized_coulomb"
-    assert values["ISMIP7_LC"] == "2500"
-    assert values["ISMIP7_MESH"] == "/repo/antarctica/mesh/antarctica_64000_2500.msh"
+    assert values["ISMIP7_LC"] == "1000"
+    assert values["ISMIP7_LC_COARSE"] == "10000"
+    assert values["ISMIP7_MESH"] == (
+        "/repo/antarctica/mesh/antarctica_10000_1000_buffered20000.msh")
+    assert values["ISMIP7_MAP_DEFAULT"].endswith("_logvelnet_1000.h5")
     assert values["ISMIP7_DATA_ROOT"] == "/repo/ISMIP7/AIS"
     assert values["ISMIP7_OBS_DATA_ROOT"] == "/repo/antarctica/data"
     assert "<unset>" not in out
+
+
+def test_naming_another_pair_names_its_mesh(runners):
+    r"""The default mesh follows mesh_naming.mesh_basename, buffer included, so
+    a run that names only its resolution cannot be handed the production mesh
+    with another pair's MAP."""
+    rc, out, err = source(runners, "site_env.sh", show("ISMIP7_MESH"),
+                          ISMIP7_SITE="local", ISMIP7_REPO="/repo",
+                          ISMIP7_LC="2500", ISMIP7_LC_COARSE="25000",
+                          ISMIP7_BUFFER_M="20000.0")
+    assert rc == 0, err
+    assert out == ("ISMIP7_MESH=/repo/antarctica/mesh/"
+                   "antarctica_25000_2500_buffered20000.msh")
+
+
+def test_site_env_chooses_no_solver(runners):
+    r"""The inversion sources site_env.sh too. Its linear solve is the full
+    mixed-Jacobian MUMPS by construction, and it stamps the solver it finds in
+    the environment on the MAP it writes, so the production forward solver is
+    projection.sbatch's to name and must not be exported from here."""
+    rc, out, err = source(runners, "site_env.sh",
+                          show("ISMIP7_DIAGNOSTIC_LINEAR_SOLVER"),
+                          ISMIP7_SITE="local", ISMIP7_REPO="/repo")
+    assert rc == 0, err
+    assert out == "ISMIP7_DIAGNOSTIC_LINEAR_SOLVER=<unset>"
+
+
+def test_quartz_sizes_the_forward_apart_from_the_inversion(runners):
+    r"""64 ranks is the matrix's fastest production lane on Quartz; the
+    inversion keeps the site's 16."""
+    rc, out, err = source(runners, "site_core.sh",
+                          show("ISMIP7_TASKS_FWD", "ISMIP7_TASKS_INV"),
+                          ISMIP7_SITE="iu_quartz")
+    assert rc == 0, err
+    assert out.splitlines() == ["ISMIP7_TASKS_FWD=64", "ISMIP7_TASKS_INV=16"]
 
 
 def test_the_banner_prints_the_model_lines_only_with_site_env(runners):
@@ -90,8 +134,8 @@ def test_the_banner_prints_the_model_lines_only_with_site_env(runners):
     rc, full, err = source(runners, "site_env.sh", "ismip7_banner", **env)
     assert rc == 0, err
     assert full.splitlines()[-2:] == [
-        "    mesh    /repo/antarctica/mesh/antarctica_64000_2500.msh",
-        "    lc=2500 lc_coarse=64000 geometry=dg0 friction=regularized_coulomb n=3.0",
+        "    mesh    /repo/antarctica/mesh/antarctica_10000_1000_buffered20000.msh",
+        "    lc=1000 lc_coarse=10000 geometry=dg0 friction=regularized_coulomb n=3.0",
     ]
 
 
@@ -108,42 +152,40 @@ def test_repo_self_is_the_checkout_the_file_was_sourced_from(runners, site):
     assert out.splitlines() == [f"ISMIP7_REPO_SELF={repo}", f"ISMIP7_REPO={repo}"]
 
 
-def test_a_site_that_states_no_share_keeps_the_artifacts_beside_its_code(runners):
-    r"""ISMIP7_SHARE defaults to ISMIP7_REPO, so a cluster holding one checkout
-    is unaffected by the split."""
-    rc, out, err = source(runners, "site_env.sh", show("ISMIP7_SHARE", *SHARED_VARS),
+def test_a_site_that_names_no_root_keeps_the_artifacts_beside_its_code(runners):
+    r"""A cluster holding one checkout resolves everything inside it."""
+    rc, out, err = source(runners, "site_env.sh", show(*SHARED_VARS),
                           ISMIP7_SITE="local", ISMIP7_REPO="/repo")
     assert rc == 0, err
     values = dict(line.split("=", 1) for line in out.splitlines())
-    assert values["ISMIP7_SHARE"] == "/repo"
     assert all(values[n].startswith("/repo/") for n in SHARED_VARS), values
 
 
-def test_rice_keeps_the_shared_artifacts_off_the_checkout(runners):
-    r"""The converse of the test above: the code root follows the invocation,
-    but the ~313 GB forcing tree, the shared meshes, the MAPs and the
-    observational rasters do not exist in a second checkout, so they must stay
-    on the tree that holds them."""
+def test_rice_keeps_the_data_roots_off_the_checkout(runners):
+    r"""The converse: the code root follows the invocation, but the ~313 GB
+    forcing tree and the observational rasters do not exist in a second
+    checkout, so the site names the tree that holds them."""
     rc, out, err = source(runners, "site_env.sh",
-                          show("ISMIP7_REPO", "ISMIP7_SHARE", *SHARED_VARS),
+                          show("ISMIP7_REPO", "ISMIP7_DATA_ROOT",
+                               "ISMIP7_OBS_DATA_ROOT"),
                           ISMIP7_SITE="rice_nots")
     assert rc == 0, err
     values = dict(line.split("=", 1) for line in out.splitlines())
     checkout = str(runners.parents[2])
     assert values["ISMIP7_REPO"] == checkout
-    assert values["ISMIP7_SHARE"] == "/projects/ah301/ismip7"
-    for name in SHARED_VARS:
+    for name in ("ISMIP7_DATA_ROOT", "ISMIP7_OBS_DATA_ROOT"):
         assert not values[name].startswith(checkout), name
         assert values[name].startswith("/projects/ah301/ismip7/"), name
 
 
-def test_a_share_given_for_one_submission_moves_every_artifact(runners):
-    r"""One variable answers for all four, so a second share needs one word."""
-    rc, out, err = source(runners, "site_env.sh", show(*SHARED_VARS),
-                          ISMIP7_SITE="rice_nots", ISMIP7_SHARE="/tmp/share")
+def test_a_root_given_for_one_submission_wins(runners):
+    r"""A site default never beats what the submission states."""
+    rc, out, err = source(runners, "site_env.sh", show("ISMIP7_OBS_DATA_ROOT"),
+                          ISMIP7_SITE="rice_nots",
+                          ISMIP7_OBS_DATA_ROOT="/tmp/obs")
     assert rc == 0, err
     values = dict(line.split("=", 1) for line in out.splitlines())
-    assert all(values[n].startswith("/tmp/share/") for n in SHARED_VARS), values
+    assert values["ISMIP7_OBS_DATA_ROOT"] == "/tmp/obs"
 
 
 @pytest.mark.parametrize("name", SHARED_VARS)

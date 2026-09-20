@@ -29,6 +29,9 @@ antarctica/figs/*.png
 antarctica/figs/*.csv
 antarctica/*.err
 antarctica/*.txt
+# `make matrix` writes here unless MATRIX_OUTPUT names a file; the committed
+# matrices are the named ones (TIMING_MATRIX_<SITE>_<SOLVER>.md).
+antarctica/TIMING_MATRIX.md
 
 # Batch runners: per-user site settings (sites/local.env.example is the
 # tracked blank) and the job logs submit.sh collects at the repo root.

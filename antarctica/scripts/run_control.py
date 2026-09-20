@@ -50,14 +50,15 @@ from icepack2.constants import (
 )
 
 _ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-DATA_DIR = os.path.join(_ROOT, "data")
 MESH_DIR = os.path.join(_ROOT, "mesh")
 RESULTS_DIR = os.path.join(_ROOT, "results")
 
 sys.path.insert(0, os.path.dirname(_ROOT))
 from icepack2_tools.mpi_stats import global_mean
 from icepack2_tools.boundary import load_boundary_ids
-from icepack2_tools.runconfig import lc as _lc, lc_coarse as _lc_coarse
+from icepack2_tools.runconfig import obs_data_root, lc as _lc, lc_coarse as _lc_coarse
+
+DATA_DIR = obs_data_root()
 from mesh_naming import get_buffer_m, mesh_filename
 
 lc = _lc()

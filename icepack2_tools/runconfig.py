@@ -24,13 +24,16 @@ fast.
 
 import os
 
-# 2500 m / 64 km is the production pair: it is the mesh the campaign inverts
-# and runs on (``antarctica_64000_2500_buffered20000``), and the pair the
-# README documents. The old 8000 and 32000 module-level defaults were
-# dev-probe leftovers; a coarse probe now exports ISMIP7_LC / ISMIP7_LC_COARSE
-# instead of disagreeing with the gate about what "unset" means.
-LC_DEFAULT = "2500"
-LC_COARSE_DEFAULT = "64000"
+# 1000 m / 10 km is the production pair (``antarctica_10000_1000_buffered20000``):
+# the finest mesh the Quartz timing matrix carries through a 285-year run in
+# two days, under scpc_gamg on 64 ranks
+# (antarctica/TIMING_MATRIX_QUARTZ_SCPC_GAMG.md). It is the pair the batch
+# runners export (batch_runners/site_env.sh) and the README documents; until
+# 2026-09-19 that was 2500 m / 64 km. The old 8000 and 32000 module-level
+# defaults were dev-probe leftovers; a coarse probe exports ISMIP7_LC /
+# ISMIP7_LC_COARSE instead of disagreeing with the gate about what "unset" means.
+LC_DEFAULT = "1000"
+LC_COARSE_DEFAULT = "10000"
 GEOMETRY_SPACE_DEFAULT = "dg0"
 FRICTION_DEFAULT = "budd"
 # THIS BRANCH (antarctica-n3) runs standard Glen n=3. An inversion and every
@@ -264,8 +267,8 @@ def calving_sigma_max():
 
 # ── Roots a second checkout does not carry ──────────────────────────────
 # The code moves with the invocation; the large gitignored artifacts do not.
-# site_env.sh names them from ISMIP7_SHARE for the shell half of a run; these
-# are the Python half, so a driver started by hand resolves the same paths.
+# site_env.sh names them for the shell half of a run; these are the Python
+# half, so a driver started by hand resolves the same paths.
 _ANTARCTICA = os.path.join(
     os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "antarctica"
 )
@@ -279,40 +282,24 @@ def obs_data_root():
                           os.path.join(_ANTARCTICA, "data"))
 
 
-def shared_results_root():
-    r"""``ISMIP7_SHARE``'s ``antarctica/results``, or None when unset.
-
-    Only for calibration INPUTS a run reads, never for the outputs it writes:
-    those stay in the invoking checkout so two checkouts cannot overwrite each
-    other's timeseries.
-    """
-    share = os.environ.get("ISMIP7_SHARE")
-    return os.path.join(share, "antarctica", "results") if share else None
-
-
 def k_per_basin_candidates(results_dir, lc_value):
     r"""Where to look for the calibrated per-basin K, in order.
 
     ``ISMIP7_K_PER_BASIN_NPZ`` wins; then this mesh's calibration and the
     2500 m fallback (16 basin scalars remapped through the IMBIE2 8 km grid, so
-    mesh-independent), in the invoking checkout and then under ISMIP7_SHARE.
-    The shared root matters because the file is gitignored: a second checkout
-    has none, and a run that silently misses it publishes a MAP whose dH/dt
-    term fell back to an SMB-only source.
+    mesh-independent). The file is gitignored, so a checkout that does not carry
+    it warns and falls back to an SMB-only melt source; name it with the
+    override when it lives elsewhere.
     """
     override = os.environ.get("ISMIP7_K_PER_BASIN_NPZ")
     if override:
         return [override]
     names = [f"calibrated_K_per_basin_{lc_value}.npz",
              "calibrated_K_per_basin_2500.npz"]
-    roots = [results_dir]
-    shared = shared_results_root()
-    if shared:
-        roots.append(shared)
-    # Order-preserving dedup: at lc=2500 the two names coincide, and a site
-    # whose ISMIP7_SHARE is this checkout repeats the root.
+    # At lc=2500 the two names coincide.
     seen, out = set(), []
-    for path in (os.path.join(r, n) for r in roots for n in names):
+    for name in names:
+        path = os.path.join(results_dir, name)
         if path not in seen:
             seen.add(path)
             out.append(path)

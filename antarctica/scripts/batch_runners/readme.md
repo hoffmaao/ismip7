@@ -87,10 +87,12 @@ Required: `ISMIP7_FIREDRAKE`, `ISMIP7_PART_LONG`, `ISMIP7_PART_SHORT`,
 from, in every site file. A site whose gitignored artifacts (the forcing tree,
 the meshes, the MAPs, the observational rasters) do not live beside the code --
 because the cluster holds more than one checkout, as Rice does -- names
-`ISMIP7_DATA_ROOT` and `ISMIP7_OBS_DATA_ROOT` in its site file; `ISMIP7_MESH`
-and `ISMIP7_MAP_DEFAULT` follow `ISMIP7_REPO`, so a run from a second checkout
-states them on the submit line. A site that sets `ISMIP7_CONTAINER` is not
-asked for `ISMIP7_FIREDRAKE`, and neither is any `--dry-run`.
+`ISMIP7_DATA_ROOT` and `ISMIP7_OBS_DATA_ROOT` in its site file; the mesh and
+the MAP follow `ISMIP7_REPO`, so a run from a second checkout states
+`ISMIP7_MESH` on the submit line, with `ISMIP7_MAP_OUT` for an inversion (where
+the MAP is written) or `ISMIP7_INVERSION` for a forward (which MAP to read).
+A site that sets `ISMIP7_CONTAINER` is not asked for `ISMIP7_FIREDRAKE`, and
+neither is any `--dry-run`.
 A missing value is reported at submission with the file and variable named.
 `submit.sh build` asks for the other five only, since it creates the venv that
 `ISMIP7_FIREDRAKE` names.
@@ -119,8 +121,11 @@ in the Makefile) skips the check, since the limits describe
 cache that persists between jobs (the one the site's modules or venv already
 name, as IU's firedrake modulefile does; else Firedrake's default location; or
 `ISMIP7_TIMING_JIT_CACHE`) rather than the private per-job one
-`ismip7_activate` gives the runners. Each record's `host` block says which site
-and node measured it and whether that cache started empty.
+`ismip7_activate` gives the runners. Only the kernel cache goes back that way:
+loopy's persistent dict stays per job, because two jobs compiling the same
+kernel seconds apart race on a shared one, which is what `make timing-scout`
+launches (`site_core.sh` has the incident). Each record's `host` block says
+which site and node measured it and whether that cache started empty.
 
 ### A container site
 
@@ -371,9 +376,13 @@ independent, so a handful of nodes finishes it inside a week.
 
 ## Open items
 
-- Rank count is fixed at 12 because that is what was measured. Going higher is
+- Rice forwards are fixed at 12 ranks because that is what was measured there.
+  Quartz forwards take 64, the fastest production-mesh lane of
+  `antarctica/TIMING_MATRIX_QUARTZ_SCPC_GAMG.md`. Going higher at Rice is
   meaningful once the partition probe comes back clean.
-- Every solve is a direct MUMPS factorisation, which sets the memory. The fix
-  if large-memory nodes get scarce is a field split that eliminates the
-  cell-wise stress and traction blocks and puts multigrid on the velocity
-  operator.
+- An inversion factors the complete mixed Jacobian with MUMPS, which sets its
+  memory; `tlm_adjoint` differentiates through that solve, so no setting
+  changes it. Cluster forwards took the field split this item asked for:
+  `projection.sbatch` defaults to `scpc_gamg`, which eliminates the cell-wise
+  stress and traction blocks exactly and puts multigrid on the condensed
+  velocity operator (section 7 of `antarctica/README.md`).

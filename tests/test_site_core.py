@@ -292,3 +292,23 @@ def test_each_cluster_s_own_hostnames_choose_its_site(runners, tmp_path, host, s
                           PATH=f"{bin_dir}:{os.environ['PATH']}")
     assert rc == 0, err
     assert out == f"ISMIP7_SITE_NAME={site}"
+
+
+def test_activation_moves_loopys_cache_per_job_and_leaves_matplotlibs_alone(runners, tmp_path):
+    r"""XDG_CACHE_HOME is loopy's knob and also matplotlib's. Giving each job
+    its own is for loopy's persistent dict; matplotlib rebuilding a font cache
+    on every rank of a fresh directory is not wanted, so MPLCONFIGDIR is pinned
+    to the stable location instead of following the per-job move."""
+    activate = tmp_path / "activate"
+    activate.write_text("")
+    rc, out, err = source(runners, "site_core.sh",
+                          f"ismip7_activate >/dev/null; {show('XDG_CACHE_HOME', 'MPLCONFIGDIR')}",
+                          ISMIP7_SITE="local", ISMIP7_FIREDRAKE=str(activate),
+                          SLURM_JOB_ID="4242")
+    assert rc == 0, err
+    values = dict(line.split("=", 1) for line in out.splitlines())
+    xdg = Path(values["XDG_CACHE_HOME"])
+    mpl = Path(values["MPLCONFIGDIR"])
+    assert xdg.name == "4242" and xdg.is_dir()
+    assert not mpl.is_relative_to(xdg)
+    assert mpl == Path(runners) / ".cache" / "matplotlib" and mpl.is_dir()

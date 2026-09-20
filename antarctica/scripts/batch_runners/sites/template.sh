@@ -41,7 +41,9 @@ ISMIP7_WORK="${ISMIP7_WORK:-}"
 # A cluster holding more than one checkout keeps the forcing tree and the
 # observational rasters in one place; name it here (sites/rice_nots.sh does).
 # The mesh and the MAP follow ISMIP7_REPO, so a run from a second checkout
-# states ISMIP7_MESH and ISMIP7_MAP_OUT on its submit line.
+# states ISMIP7_MESH on its submit line, with ISMIP7_MAP_OUT for an inversion
+# (where the MAP is written) or ISMIP7_INVERSION for a forward (which MAP to
+# read).
 # ISMIP7_DATA_ROOT="${ISMIP7_DATA_ROOT:-/projects/<group>/ismip7/ISMIP7/AIS}"
 # ISMIP7_OBS_DATA_ROOT="${ISMIP7_OBS_DATA_ROOT:-/projects/<group>/ismip7/antarctica/data}"
 

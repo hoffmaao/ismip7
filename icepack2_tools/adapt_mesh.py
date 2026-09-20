@@ -62,8 +62,9 @@ def antarctica_geometry_builder(cfg, data_dir=None):
     from .mesh import build_gmsh_geometry, classify_boundaries, extract_ice_outline, load_bedmachine_mask
     if data_dir is None:
         # mesh.py's own DATA_DIR points at <repo>/data; every other script
-        # keeps BedMachine under antarctica/data.
-        data_dir = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "antarctica", "data")
+        # keeps BedMachine under ISMIP7_OBS_DATA_ROOT.
+        from .runconfig import obs_data_root
+        data_dir = obs_data_root()
     mask, x, y = load_bedmachine_mask(data_dir)
     outline = extract_ice_outline(mask, x, y)
     boundaries, names = classify_boundaries(outline, mask, x, y)

@@ -31,11 +31,12 @@ from firedrake.petsc import PETSc  # noqa: E402
 from icepack2_tools.adapt_mesh import (AdaptMeshConfig, desired_element_size,  # noqa: E402
                                        remesh_global, transfer_state)
 from icepack2_tools.geometry import sample_to_geometry  # noqa: E402
+from icepack2_tools.runconfig import obs_data_root  # noqa: E402
 from mesh_naming import next_adapted_mesh_name  # noqa: E402
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 MESH_DIR = os.path.join(HERE, "..", "mesh")
-DATA_DIR = os.path.join(HERE, "..", "data")
+DATA_DIR = obs_data_root()
 
 
 def main():

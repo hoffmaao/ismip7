@@ -193,15 +193,18 @@ OMP_NUM_THREADS=1 ISMIP7_FRICTION=budd ISMIP7_LC=32000 ISMIP7_LC_COARSE=320000 \
 `antarctica/scripts/calibrate_melt.py` melts on the same `ISMIP7_GEOMETRY_SPACE`
 as the forward. Under `dg0` it evaluates the forward's own cell by cell melt
 path: bed and thickness sampled onto the cells, the surface from flotation, the
-cell slope of `forcing.compute_sin_alpha` uncapped, forcing at each centroid and
-its own draft, the callbacks' seawater floating test `forcing.is_floating` on
+slope of `forcing.compute_sin_alpha` (the constant under the default
+`ISMIP7_MELT_SLOPE=ant`, the uncapped cell slope under `local`), forcing at
+each centroid and its own draft, the callbacks' seawater floating test `forcing.is_floating` on
 cells holding ice (`h > 0`) and cell areas. A K fitted there is the K the forward applies, by
 construction.
 
 The earlier K files were fitted under `cg1`: BedMachine on CG1 nodes with its
 raster mask, the nodal slope capped at 5e-3, lumped-mass areas. The K file
-records `geometry_space` and `sin_alpha_cap`, and `load_K_per_basin` warns
-once when a run melts on a geometry other than the one its K was fitted on, and
+records `geometry_space`, `melt_slope`, `sin_alpha_ant` and `sin_alpha_cap`,
+and `load_K_per_basin` warns once when a run melts on a geometry other than the
+one its K was fitted on, once when its slope convention or constant differs
+from the file's (an untagged file reads as `local`), and, under `local` only,
 once when the file was fitted against a capped slope while the run applies none.
 
 Two things were found by fitting through the forward's path, both measured on
@@ -244,7 +247,8 @@ vertex-sampled, the 865.0 Gt/yr table, 21 September 2026):
    `local`, capped in the calibration and uncapped in the forward as before.
 
 3. **Under the constant slope the geometry space is immaterial and K lands
-   between the toolbox's K05 and K50 once scaled to the July table.** Same mesh, same table, seawater flotation:
+   between the toolbox's K05 and K50 once scaled to the July table.** Same
+   mesh, same table, seawater flotation:
 
 | slope | geometry | K* | K total-match | melt at K* | basins in K05..K95 |
 |---|---|---|---|---|---|

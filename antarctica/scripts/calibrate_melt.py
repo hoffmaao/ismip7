@@ -9,8 +9,8 @@ Geometry: the same ISMIP7_GEOMETRY_SPACE the forward reads (default dg0).
 
 * `dg0` melts the cells the forward melts, through the forward's own path:
   bed and thickness sampled onto the cells (ISMIP7_RASTER_SAMPLE), the
-  surface from flotation, the cell slope of `forcing.compute_sin_alpha`
-  uncapped, thermal forcing and salinity at each centroid and its own draft,
+  surface from flotation, the slope of `forcing.compute_sin_alpha`,
+  thermal forcing and salinity at each centroid and its own draft,
   the callback's `haf <= 0` floating test on cells holding ice (`h > 0`),
   cell areas. A K fitted here is the K the forward applies, by construction.
   Ice-free cells with `haf <= 0` are left out: the forward cannot melt ice
@@ -23,13 +23,16 @@ Geometry: the same ISMIP7_GEOMETRY_SPACE the forward reads (default dg0).
   (GEOMETRY_DISCRETIZATION.md, issue #30); the slope convention is what
   separates them (issue #26).
 
-The K file records the geometry it was fitted on, and `load_K_per_basin`
-warns once when a run melts on the other.
+The K file records the geometry and the slope convention it was fitted
+under, and `load_K_per_basin` warns once when a run melts under another.
 
 Forcing: OI climatology TF + so (8 km, 60 m vertical) from the ISMIP7
 meltMIP folder, sampled at the local ice-shelf draft.
 
-Slope sin(alpha): capped at ISMIP7_SIN_ALPHA_CAP when one is named; the
+Slope sin(alpha): the same ISMIP7_MELT_SLOPE the forward reads. `ant` (the
+default, the ISMIP7 reference) is the constant ISMIP7_SIN_ALPHA_ANT on every
+shelf, the slope the toolbox's K05, K50 and K95 were sampled with. `local` is
+this mesh's draft slope, capped at ISMIP7_SIN_ALPHA_CAP when one is named; the
 default is no cap under dg0, the forward's convention, and 5e-3 under cg1 to
 suppress unstructured-mesh noise on the nodal slope.
 

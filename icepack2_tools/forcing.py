@@ -32,7 +32,6 @@ _F_CORIOLIS = 1.4e-4   # representative Antarctic Coriolis parameter, 1/s
 # melt_factor = (rho_sw * c_po) / (rho_i * L_i)   [1/K]
 _MELT_FACTOR = (_RHO_SW * _C_PO) / (_RHO_I * _L_I)
 
-# K50 median from Burgard 2022 calibration
 # K50 of the ISMIP7 toolbox's standard sampling (parameter_selection_quadratic
 # _example.ipynb, July 2026 update: K05 4.75e-5, K50 8.5e-5, K95 1.375e-4),
 # sampled with the constant slope SIN_ALPHA_ANT_DEFAULT below. The earlier
@@ -1234,8 +1233,10 @@ def load_K_per_basin(npz_path, mesh_x, mesh_y, fill=0.0):
     and is expected to contain `basin_ids` (int) and `K_basin` (float) plus
     the IMBIE2 basin file path (the IMBIE2 8 km grid is re-read here so
     that the K-field can be remapped to *any* mesh, not just the one used
-    during calibration). An optional `sin_alpha_cap` records the draft slope
-    cap the K was fitted against and triggers a once-per-run warning.
+    during calibration). Optional `melt_slope` and `sin_alpha_ant` record the
+    slope convention the K was fitted under, `sin_alpha_cap` the cap on the
+    local slope, and `geometry_space` the geometry; a mismatch with this run
+    triggers a once-per-run warning.
 
     Returns an array of shape (len(mesh_x),) of per-node K values, with
     `fill` outside the calibrated basin set or where K_basin is NaN.
@@ -1248,15 +1249,13 @@ def load_K_per_basin(npz_path, mesh_x, mesh_y, fill=0.0):
     Kbas = np.asarray(data["K_basin"]).astype(float)
 
     # A K is only valid for the draft slope it was fitted against, because melt
-    # is linear in sin(alpha). calibrate_melt.py records the cap it applied
-    # (none under dg0 by default, 5e-3 under cg1); compute_sin_alpha below
-    # applies none. Which convention the forward should use is a science
-    # decision (issue #26), so a mismatch is reported once and left to it.
-    # See GEOMETRY_DISCRETIZATION.md.
-    # The slope convention the K was fitted under. A file without the entry
-    # predates the knob and was fitted on the local slope.
-    # Under ant the constant is part of the convention, so a K fitted with
-    # another constant does not transfer either.
+    # is linear in sin(alpha). A file without `melt_slope` predates the knob
+    # and was fitted on the local slope. Under ant the constant is part of the
+    # convention, so a K fitted with another constant does not transfer
+    # either. Under local, calibrate_melt.py records the cap it applied (none
+    # under dg0 by default, 5e-3 under cg1) and compute_sin_alpha applies
+    # none. A mismatch is reported once (issue #26,
+    # GEOMETRY_DISCRETIZATION.md).
     fitted_slope = str(data["melt_slope"]) if "melt_slope" in data else "local"
     if fitted_slope != melt_slope():
         _warn_melt_slope(npz_path, fitted_slope, melt_slope())

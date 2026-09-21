@@ -405,15 +405,15 @@ is the section 4 name for the configured `ISMIP7_FRICTION`; `ISMIP7_INV_H5`
 names a different one.
 
 The calibration melts on the same `ISMIP7_GEOMETRY_SPACE` as the forward
-(default `dg0`): the cells the forward melts, through the forward's own path,
-with the cell slope uncapped as the forward applies it, so the K it writes is
-the K the forward applies. `ISMIP7_GEOMETRY_SPACE=cg1` is the nodal
+(default `dg0`) and with the same `ISMIP7_MELT_SLOPE` (default `ant`, the
+constant `ISMIP7_SIN_ALPHA_ANT` on every shelf): the cells the forward melts,
+through the forward's own path, so the K it writes is the K the forward
+applies. Its per-basin flags compare against the toolbox's July 2026 K05, K50
+and K95. `ISMIP7_GEOMETRY_SPACE=cg1 ISMIP7_MELT_SLOPE=local` is the nodal
 calibration the earlier K files came from, with the slope capped at 5e-3;
-with the same cap the DG0 fit reproduces it within about 10 percent per basin,
-22 percent in basin 7, and the uncapped cell slope the forward applies today
-integrates 3.7 times as much melt at K = 1 (`GEOMETRY_DISCRETIZATION.md`).
-`ISMIP7_SIN_ALPHA_CAP` names a cap on either geometry. The file records the
-geometry it was fitted on, and a run that melts on the other is told once at
+`ISMIP7_SIN_ALPHA_CAP` names a cap on the local slope on either geometry
+(`GEOMETRY_DISCRETIZATION.md`). The file records the geometry and the slope
+convention it was fitted under, and a run under another is told once at
 startup.
 
 The control requires this npz. Projections take it (`K_per_basin_npz=`) or a

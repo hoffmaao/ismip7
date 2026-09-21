@@ -10,7 +10,7 @@ is an index.
 **Claim the card before you start a run or an inversion.** A card in
 Claimed for more than 24 hours with no comment reads as unclaimed.
 
-Generated: 2026-09-21 01:14 UTC. 23 blocking, 11 owed, 4 after the deadline, 9 unverified.
+Generated: 2026-09-21 11:16 UTC. 22 blocking, 10 owed, 4 after the deadline, 9 unverified.
 
 ## Blocking the submission
 
@@ -28,7 +28,6 @@ Decisions first: they have the longest lead time and they gate the runs.
 | [11](https://github.com/icepack/ismip7/issues/11) | melt: run check_melt_bound.py --ocx before core 11 runs on the OCX product | needs-run | group | quartz, nots, midway | fresh, unverified by design |
 | [12](https://github.com/icepack/ismip7/issues/12) | output: re-run isschecker at 0.5.0 and record the version in the README | needs-run | group | local | fresh, unverified by design |
 | [13](https://github.com/icepack/ismip7/issues/13) | output: run ismip7-scalar-processing for sla20, slg20 and slvaf | needs-run | group | local | fresh, unverified by design |
-| [14](https://github.com/icepack/ismip7/issues/14) | forcing: adopt or refetch the forcing that predates the manifest | needs-run | group | quartz, nots, midway | fresh, unverified by design |
 | [21](https://github.com/icepack/ismip7/issues/21) | MAP: re-invert on the production mesh and close the Budd/RC gap | needs-run | rice | nots | fresh, unverified by design |
 | [24](https://github.com/icepack/ismip7/issues/24) | MAP: 2 km RC and Budd inversions running at Rice under the new prior metric | needs-run | rice | nots | fresh, unverified by design |
 | [27](https://github.com/icepack/ismip7/issues/27) | matrix: the full-length ssp585 is held in the NOTS queue | needs-run | rice | nots | unverifiable-nots |
@@ -46,7 +45,6 @@ Decisions first: they have the longest lead time and they gate the runs.
 
 | # | item | unblocked by | owner | sites | state |
 |---|---|---|---|---|---|
-| [15](https://github.com/icepack/ismip7/issues/15) | forcing: bring the Quartz tree up to the mirror | needs-run | iu | quartz | fresh, unverified by design |
 | [32](https://github.com/icepack/ismip7/issues/32) | solver: the monolithic forward for core 7 and the core 10 tail is not implemented | needs-run | group | local | verified open |
 | [35](https://github.com/icepack/ismip7/issues/35) | mesh: the level-set unit tests were lost and are still to be rebuilt | needs-run | group | local | verified open |
 | [36](https://github.com/icepack/ismip7/issues/36) | calving: the von Mises level-set front is not calibrated | needs-run | group | local | verified open |
@@ -88,7 +86,7 @@ production run or a group decision.
 
 | source | items |
 |---|---|
-| `src:readiness` | 17 |
+| `src:readiness` | 15 |
 | `src:submission-readme` | 11 |
 | `src:matrix-status` | 6 |
 | `src:topic-doc` | 8 |

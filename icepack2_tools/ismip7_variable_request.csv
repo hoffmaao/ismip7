@@ -3,7 +3,7 @@ Ice thickness,"x,y,t",ST,lithk,land_ice_thickness,m,yes,Ice thickness of the ice
 Surface elevation,"x,y,t",ST,orog,surface_altitude,m,yes,Surface elevation of the ice sheet,0,5500,0,4500,error,outside_domain,
 Bedrock elevation,"x,y,t",ST,topg,bedrock_altitude,m,yes,The bedrock topography (may change during the projections),-7000,5500,-4000,4000,error,outside_domain,
 Ice base elevation,"x,y,t",ST,base,,m,yes,Should get standard name land_ice_temperature,-4000,4000,-4000,4000,error,outside_domain,
-Geothermal heat flux,"x,y,t",FL,hfgeoubed,upward_geothermal_heat_flux_in_land_ice,W m-2,no,Geothermal Heat flux at the ice interface,0,0.3,0,0.3,error,outside_domain,
+Geothermal heat flux,"x,y,t",FL,hfgeoubed,upward_geothermal_heat_flux_in_land_ice,W m-2,no,Geothermal Heat flux at the ice interface,0,0.3,0,0.3,warning,outside_domain,
 Surface mass balance flux,"x,y,t",FL,acabf,land_ice_surface_specific_mass_balance_flux,kg m-2 s-1,yes,Surface Mass Balance flux,-0.0006,0.001,-0.0006,0.001,error,outside_domain,
 Basal mass balance flux beneath grounded ice,"x,y,t",FL,libmassbfgr,land_ice_basal_specific_mass_balance_flux,kg m-2 s-1,yes,Basal mass balance flux (only beneath grounded ice),-0.0003,0.0001,-0.0003,0.0001,error,no_grounded_ice,warning
 Basal mass balance flux beneath floating ice,"x,y,t",FL,libmassbffl,land_ice_basal_specific_mass_balance_flux,kg m-2 s-1,yes,Basal mass balance flux (only beneath floating ice),-0.008,0.001,-0.008,0.001,error,no_floating_ice,warning

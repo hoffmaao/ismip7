@@ -1,0 +1,76 @@
+name: Blocker or owed item
+description: Something that has to change state before the submission ships
+title: "<area>: <imperative or question>"
+labels: []
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Status and the claim live on the board. This issue holds the evidence.
+        Add the label set after filing: one severity (`blocks-submission`,
+        `owed`, `after-deadline`), one unblocker (`needs-decision`,
+        `needs-run`, `needs-check`, `needs-upstream`), and one or more `src:`
+        labels. Then put `(issue #NN)` on the line in the document that states
+        it (a bare `#NN` here means an ISMIP7 forum thread),
+        or the suite will fail.
+
+        House style: no dash punctuation, no contrastive negation, institutions
+        rather than individuals. This repository is public, so do not paste
+        addresses or home-directory paths.
+  - type: textarea
+    id: what
+    attributes:
+      label: What
+      description: One or two sentences, the claim as the source states it.
+    validations:
+      required: true
+  - type: textarea
+    id: recorded
+    attributes:
+      label: Recorded in
+      description: >
+        Every place it is written down, permalinked at a commit SHA rather than
+        a branch name.
+      placeholder: "- `antarctica/FORWARD_RUN_READINESS.md` L486-L491\n  https://github.com/icepack/ismip7/blob/<sha>/..."
+    validations:
+      required: true
+  - type: textarea
+    id: freshness
+    attributes:
+      label: Freshness
+      description: >
+        Blame is an upper bound on age. Give both dates and the verdict.
+      value: |
+        - blame author-time, max over the range:
+        - date the text states:
+        - cutoff:
+        - verdict:
+    validations:
+      required: true
+  - type: textarea
+    id: verification
+    attributes:
+      label: Verification
+      description: >
+        Tier, host, the command verbatim, its first lines of output, a
+        one-sentence verdict and the UTC timestamp. Inside the freshness cutoff
+        write that it was taken as stated and unverified by design.
+    validations:
+      required: true
+  - type: textarea
+    id: exit
+    attributes:
+      label: Exit criterion
+      description: >
+        A command or a document line that closes this. "When we are happy with
+        it" is not an exit criterion.
+    validations:
+      required: true
+  - type: input
+    id: owner
+    attributes:
+      label: Owner
+      description: An institution, and the site the work runs at.
+      placeholder: "rice. Site nots."
+    validations:
+      required: true

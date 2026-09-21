@@ -227,17 +227,25 @@ def load_mean_annual_surface_temperature(Q, var="tas", data_root=None,
     return Tf
 
 
+def version_key(name):
+    r"""Sort key of a ``v<N>`` or ``v<N>.<M>`` directory name, or None if
+    ``name`` is not one. Dotted versions are real (the fracture forcing went
+    v2 -> v2.1 in September 2026), so the key is a tuple of integers, not
+    ``int(name[1:])``, which raised on them and hid the directory."""
+    if not re.fullmatch(r"v\d+(\.\d+)*", name):
+        return None
+    return tuple(int(x) for x in name[1:].split("."))
+
+
 def _version_subdirs(parent_dir):
     r"""``[(key, name)]`` of the ``v<N>`` and ``v<N>.<M>`` subdirectories of
-    ``parent_dir``, ascending. Dotted versions are real (the fracture forcing
-    went v2 -> v2.1 in September 2026), so the key is a tuple of integers,
-    not ``int(name[1:])``, which raised on them and hid the directory."""
+    ``parent_dir``, ascending."""
     versions = []
     if not os.path.isdir(parent_dir):
         return versions
     for name in os.listdir(parent_dir):
-        if re.fullmatch(r"v\d+(\.\d+)*", name) and os.path.isdir(os.path.join(parent_dir, name)):
-            versions.append((tuple(int(x) for x in name[1:].split(".")), name))
+        if version_key(name) is not None and os.path.isdir(os.path.join(parent_dir, name)):
+            versions.append((version_key(name), name))
     versions.sort()
     return versions
 
@@ -252,12 +260,98 @@ def _resolve_version(parent_dir, pinned):
     return versions[-1][1] if versions else pinned
 
 
+def _newer_versions(parent_dir, version):
+    r"""Version subdirs of ``parent_dir`` above ``version``: the reader stays
+    on its pin so that a campaign does not change forcing under itself, and
+    the run has to say so when something newer has landed beside it."""
+    key = version_key(version)
+    if key is None:
+        return []
+    return [name for k, name in _version_subdirs(parent_dir) if k > key]
+
+
+# core_report.py lifts every line carrying this marker out of the run log, the
+# way it lifts the climatology pool, so the committed report states which
+# forcing a run opened. The focus groups ask for exactly that in the
+# submission README (discussion #37), and an audit date is not it.
+FORCING_PROVENANCE_MARKER = "Forcing provenance:"
+
+
+def describe_forcing_provenance(*readers, variables=None):
+    r"""One marker line per forcing variable the given readers resolve, plus
+    one for every reader that resolves nothing, so an absent tree is a
+    statement in the log and not a silence. ``variables`` narrows a reader
+    kind to what the caller reads, ``{"atmosphere": ("acabf",)}``."""
+    lines = []
+    for reader in readers:
+        if reader is None:
+            continue
+        wanted = (variables or {}).get(reader.kind)
+        rows = reader.provenance(wanted) if wanted else reader.provenance()
+        if not rows:
+            lines.append(f"{FORCING_PROVENANCE_MARKER} {reader.kind} "
+                         f"{reader.esm} {reader.scenario}: nothing on disk")
+        for row in rows:
+            newer = (f"  NEWER ON DISK, NOT READ: {' '.join(row['newer'])}"
+                     if row["newer"] else "")
+            lines.append(f"{FORCING_PROVENANCE_MARKER} {reader.kind} {row['variable']} "
+                         f"{reader.esm} {reader.scenario} {row['product']} "
+                         f"{row['version']}{newer}")
+    return lines
+
+
+def describe_observational_forcing(smb=None, ocean=False):
+    r"""Marker lines for forcing that is not an ISMIP7 scenario tree: the
+    RACMO SMB a control or the OCX stopgap runs on (``smb`` says which, in
+    words) and the OI ocean climatology, whose release is
+    ``ISMIP7_OI_VERSION``."""
+    lines = []
+    if smb:
+        lines.append(f"{FORCING_PROVENANCE_MARKER} atmosphere {smb}")
+    if ocean:
+        release = os.environ.get("ISMIP7_OI_VERSION", "30_sep")
+        lines.append(f"{FORCING_PROVENANCE_MARKER} ocean OI climatology tf+so, "
+                     f"release {release}, constant in time")
+    return lines
+
+
+# The versions the readers ask for first. audit_forcing_versions.py reads
+# these, so that "current" means what a run would open and not merely what is
+# somewhere on disk.
+ATMOSPHERE_VERSION = "v2"
+OCEAN_VERSION = "v3"
+
+
+# The observation-constrained experiment. It has no ESM and no scenario, and
+# the focus groups decided it need not follow the ESM ordering, only be
+# consistent with itself (discussion #41, item 6). So its tree is scenario
+# first, ``OCX/<source>/<product>/<variable>/<version>/``, where every other
+# tree is ``<ESM>/<scenario>/...``, while its FILENAMES keep source before
+# OCX, which is the ``<esm>_<scenario>`` order the readers already build.
+# Reading it as ``esm=OCX_ATMOSPHERE_SOURCE, scenario=OCX`` therefore needs
+# the directory swapped and nothing else.
+OCX = "OCX"
+OCX_ATMOSPHERE_SOURCE = "RACMO2.3p2-ERA"
+# The Antarctic OCX ocean cites no source: it is four expert-judgment
+# scenarios (discussion #41), of which ``main`` is the core one.
+OCX_OCEAN_VARIANTS = ("main", "cold", "warm", "vary")
+OCX_OCEAN_SOURCE = "expert-judgment"
+
+
+def _scenario_dir(root, esm, scenario):
+    r"""``<root>/<esm>/<scenario>``, or ``<root>/OCX/<source>`` for OCX."""
+    if scenario == OCX:
+        return os.path.join(root, OCX, esm)
+    return os.path.join(root, esm, scenario)
+
+
 def atmosphere_path(scenario, esm="CESM2-WACCM", variable="acabf-anomaly",
-                    resolution="8000m", version="v2", data_root=None):
+                    resolution="8000m", version=ATMOSPHERE_VERSION, data_root=None):
     root = _find_ismip7_data(data_root)
     if root is None:
         return None
-    parent = os.path.join(root, esm, scenario, atmosphere_product(root, esm, scenario, resolution), variable)
+    parent = os.path.join(_scenario_dir(root, esm, scenario),
+                          atmosphere_product(root, esm, scenario, resolution), variable)
     return os.path.join(parent, _resolve_version(parent, version))
 
 
@@ -274,17 +368,24 @@ def atmosphere_product(root, esm, scenario, resolution="8000m"):
     first, so a tree fetched before the rename keeps working.
     """
     for product in ATMOSPHERE_PRODUCTS:
-        if os.path.isdir(os.path.join(root, esm, scenario, f"{product}-{resolution}")):
+        if os.path.isdir(os.path.join(_scenario_dir(root, esm, scenario), f"{product}-{resolution}")):
             return f"{product}-{resolution}"
     return f"SDBN1-{resolution}"
 
 
 def ocean_path(scenario, esm="CESM2-WACCM", variable="tf",
-               version="v3", data_root=None):
+               version=OCEAN_VERSION, data_root=None, variant="main"):
+    r"""``<root>/<esm>/<scenario>/ocean/<variable>/<version>``. The OCX ocean
+    is ``<root>/OCX/ocean/<variant>/<version>`` instead: no source, one
+    directory per expert-judgment scenario, and ``so``, ``tf`` and ``thetao``
+    side by side in it with no directory of their own."""
     root = _find_ismip7_data(data_root)
     if root is None:
         return None
-    parent = os.path.join(root, esm, scenario, "ocean", variable)
+    if scenario == OCX:
+        parent = os.path.join(root, OCX, "ocean", variant)
+    else:
+        parent = os.path.join(root, esm, scenario, "ocean", variable)
     return os.path.join(parent, _resolve_version(parent, version))
 
 
@@ -344,6 +445,41 @@ def _warn_unweighted(da, ds, reason):
     )
 
 
+def _refuse_empty_time_axis(n, ds, what):
+    r"""A forcing file with no time slices is a failed upload, not an empty
+    year. The 2300 ``dacabfdz``/``dtsdz``/``dmrrodz`` files on the share were
+    exactly that until 27 May 2026 (discussion #8), and a tree fetched before
+    then still holds them. Left alone it surfaces as numpy's "zero-size array
+    to reduction operation", which names neither the file nor the cause."""
+    if n == 0:
+        source = (ds.encoding.get("source") if ds is not None else None) or "<unknown file>"
+        raise ValueError(
+            f"ISMIP7 forcing: {what} in {source} has an empty time axis (0 "
+            f"slices). The share held empty 2300 files until 2026-05-27 "
+            f"(discussion #8); delete it and fetch it again."
+        )
+
+
+def _nearest_year_index(time, year, ds=None, what="time"):
+    r"""Index of the slice of ``time`` (a DataArray) nearest to ``year``.
+
+    The axis may be decoded to ``datetime64`` (standard calendars), to
+    ``cftime`` objects (noleap, or dates past 2262) or, where a file carries
+    plain years and no CF units, left numeric. Only the year is ever read, so
+    the calendars the ISMIP7 products disagree on (discussions #9 and #24)
+    cannot shift a slice.
+    """
+    values = time.values
+    _refuse_empty_time_axis(len(values), ds, what)
+    if np.issubdtype(values.dtype, np.number):
+        years = values
+    elif hasattr(values[0], "year"):
+        years = [t.year for t in values]
+    else:
+        years = time.dt.year.values
+    return int(np.argmin(np.abs(np.asarray(years, dtype=float) - int(year))))
+
+
 def _annual_mean_over_time(da, ds=None):
     r"""Collapse a per-year forcing file's time axis to the ANNUAL MEAN.
 
@@ -371,6 +507,7 @@ def _annual_mean_over_time(da, ds=None):
     import xarray as xr
 
     n = da.sizes["time"]
+    _refuse_empty_time_axis(n, ds, f"'{da.name}'")
     if n == 1:
         return da.isel(time=0)
 
@@ -427,7 +564,7 @@ class ISMIP7Atmosphere:
     r"""Read ISMIP7 downscaled atmosphere forcing for Antarctica."""
 
     def __init__(self, data_root=None, esm="CESM2-WACCM", scenario="ssp585",
-                 resolution="8000m", version="v2"):
+                 resolution="8000m", version=ATMOSPHERE_VERSION):
         self.data_root = _find_ismip7_data(data_root)
         self.esm = esm
         self.scenario = scenario
@@ -438,19 +575,43 @@ class ISMIP7Atmosphere:
         self._grid_x = None
         self._grid_y = None
 
+    kind = "atmosphere"
+
     def _var_dir(self, variable):
         return atmosphere_path(
             self.scenario, self.esm, variable,
             self.resolution, self.version, self.data_root,
         )
 
+    def provenance(self, variables=("acabf-anomaly", "acabf")):
+        r"""``[{variable, product, version, dir, newer}]`` for the variables
+        that are on disk: what ``_load_year`` would open, by its own rules."""
+        rows = []
+        for variable in variables:
+            vdir = self._var_dir(variable)
+            if vdir is None or not os.path.isdir(vdir):
+                continue
+            rows.append({
+                "variable": variable,
+                "product": os.path.basename(os.path.dirname(os.path.dirname(vdir))),
+                "version": os.path.basename(vdir), "dir": vdir,
+                "newer": _newer_versions(os.path.dirname(vdir), os.path.basename(vdir)),
+            })
+        return rows
+
+    def _years_on_disk(self, vdir, variable, product, version):
+        r"""Sorted years for which ``vdir`` holds a file ``_load_year`` would
+        open: the full name is matched, so a file filed under the wrong
+        scenario (the ssp585 anomalies named ``historical``, discussion #41)
+        is not a year of this series."""
+        head = f"{variable}_AIS_{self.esm}_{self.scenario}_{product}_{version}_"
+        return sorted(int(m.group(1)) for f in os.listdir(vdir)
+                      for m in [re.fullmatch(re.escape(head) + r"(\d{4})\.nc", f)] if m)
+
     def _year_span(self, vdir, variable, product, version):
         r"""``(first, last)`` year for which ``vdir`` holds a file, or None."""
-        import re
-        head = f"{variable}_AIS_{self.esm}_{self.scenario}_{product}_{version}_"
-        years = [int(m.group(1)) for f in os.listdir(vdir)
-                 for m in [re.fullmatch(re.escape(head) + r"(\d{4})\.nc", f)] if m]
-        return (min(years), max(years)) if years else None
+        years = self._years_on_disk(vdir, variable, product, version)
+        return (years[0], years[-1]) if years else None
 
     def _load_year(self, variable, year):
         import xarray as xr
@@ -544,19 +705,16 @@ class ISMIP7Atmosphere:
         return None
 
     def available_years(self, variable="acabf-anomaly"):
-        r"""List available years for a variable."""
+        r"""Years ``_load_year`` can open for a variable. The same strict
+        match as the loader: a looser one let a misnamed file pass the
+        availability gate, after which ``get_field`` found nothing under the
+        name it builds and returned a year of zeros."""
         vdir = self._var_dir(variable)
         if vdir is None or not os.path.isdir(vdir):
             return []
-        years = []
-        for fn in sorted(os.listdir(vdir)):
-            if fn.endswith(".nc"):
-                try:
-                    yr = int(fn.rstrip(".nc").split("_")[-1])
-                    years.append(yr)
-                except ValueError:
-                    pass
-        return years
+        version = os.path.basename(vdir)
+        product = os.path.basename(os.path.dirname(os.path.dirname(vdir)))
+        return self._years_on_disk(vdir, variable, product, version)
 
     def get_field(self, variable, year, mesh_x, mesh_y):
         r"""Get a forcing field interpolated to mesh coordinates.
@@ -594,7 +752,20 @@ class ISMIP7Atmosphere:
         return smb_kgm2s_to_myr(raw)
 
     def get_smb_gradient(self, year, mesh_x, mesh_y):
-        r"""Get SMB elevation gradient (dacabfdz) for ice-elevation feedback."""
+        r"""Get SMB elevation gradient (dacabfdz) for ice-elevation feedback.
+
+        Nothing calls this: the model has no SMB-height feedback, and the
+        submission README says so. Before anything does, three things from the
+        forum. The protocol prefers the RUNOFF gradient ``dmrrodz``, since
+        ``dacabfdz`` is dominated in places by precipitation patterns that
+        have nothing to do with elevation; either is accepted if the README
+        names it (discussion #36). Runoff is counted positive for mass LOSS,
+        so the SMB correction is MINUS ``dmrrodz`` times the elevation change
+        (#35), which a group found out from its results. And the AIS OCX
+        ``dacabfdz`` was spatially shifted until it was replaced in place
+        around 8 September 2026 (#45), so a copy fetched before then is wrong
+        under the right name: ``download_mirror.py`` will say REPLACED.
+        """
         return self.get_field("dacabfdz", year, mesh_x, mesh_y)
 
     def get_temperature(self, year, mesh_x, mesh_y, anomaly=True):
@@ -607,18 +778,95 @@ class ISMIP7Ocean:
     r"""Read ISMIP7 ocean forcing for Antarctica."""
 
     def __init__(self, data_root=None, esm="CESM2-WACCM", scenario="ssp585",
-                 version="v3"):
+                 version=OCEAN_VERSION, variant="main"):
         self.data_root = _find_ismip7_data(data_root)
+        if scenario == OCX:
+            if variant not in OCX_OCEAN_VARIANTS:
+                raise ValueError(f"the OCX ocean is one of {OCX_OCEAN_VARIANTS}, got {variant!r}")
+            esm = OCX_OCEAN_SOURCE
         self.esm = esm
         self.scenario = scenario
+        self.variant = variant
         self.version = version
         self._ds_cache = {}
         self._interp_cache = {}
+        self._persisted = set()          # variables already reported as held past the series end
+
+    kind = "ocean"
 
     def _var_dir(self, variable):
         return ocean_path(
             self.scenario, self.esm, variable,
-            self.version, self.data_root,
+            self.version, self.data_root, self.variant,
+        )
+
+    def provenance(self, variables=("tf", "so")):
+        r"""``[{variable, product, version, dir, newer}]`` for the variables
+        that are on disk: what ``_year_field`` would open."""
+        rows = []
+        for variable in variables:
+            vdir = self._var_dir(variable)
+            if vdir is None or not os.path.isdir(vdir) or not self.spans(variable):
+                continue
+            rows.append({
+                "variable": variable,
+                "product": f"ocean/{self.variant}" if self.scenario == OCX else "ocean",
+                "version": os.path.basename(vdir), "dir": vdir,
+                "newer": _newer_versions(os.path.dirname(vdir), os.path.basename(vdir)),
+            })
+        return rows
+
+    def spans(self, variable="tf"):
+        r"""Sorted ``[(first, last, path)]`` of the chunk files on disk."""
+        vdir = self._var_dir(variable)
+        if vdir is None or not os.path.isdir(vdir):
+            return []
+        # by the variable's own name: the OCX ocean keeps so, tf and thetao
+        # in one directory, and thetao's chunks are not tf's
+        return sorted((int(m.group(1)), int(m.group(2)), os.path.join(vdir, f))
+                      for f in os.listdir(vdir) if f.startswith(variable + "_")
+                      for m in [re.search(r"_(\d{4})-(\d{4})\.nc$", f)] if m)
+
+    def coverage(self, variable="tf"):
+        r"""``(first, last)`` forcing year on disk, or None. The run gate and
+        preflight both read this, so they agree with what ``_year_field``
+        will serve."""
+        spans = self.spans(variable)
+        return (spans[0][0], max(sp[1] for sp in spans)) if spans else None
+
+    def _chunk_for(self, variable, yr):
+        r"""The chunk file holding year ``yr``, or the last one for the single
+        year after the series ends; None when the variable has no files.
+
+        CESM2-WACCM stops at 2299 while a 2015-2300 run needs 2300 (discussion
+        #8), so exactly that one year is held, and said once per variable in
+        the log, the same rule as the atmosphere. Any other year outside the
+        files used to be served from the nearest chunk without a word: a
+        historical run starting before its ocean, or a tree with a chunk
+        missing, ran on the wrong decade and reported success.
+        """
+        spans = self.spans(variable)
+        if not spans:
+            return None
+        for first, last, path in spans:
+            if first <= yr <= last:
+                return path
+        end = max(sp[1] for sp in spans)
+        if yr == end + 1:
+            if variable not in self._persisted:
+                self._persisted.add(variable)
+                if _comm_rank() == 0:
+                    print(f"  ISMIP7Ocean: {variable} has no year {yr}; "
+                          f"holding {end}, the last year on disk", flush=True)
+            return max(spans, key=lambda sp: sp[1])[2]
+        where = ("precedes the series there" if yr < spans[0][0]
+                 else "is past the end of the series there" if yr > end
+                 else "falls between the chunk files there")
+        raise FileNotFoundError(
+            f"ISMIP7Ocean: {variable} for {self.esm} {self.scenario} has no "
+            f"year {yr} in {self._var_dir(variable)}: it {where} "
+            f"({', '.join(f'{a}-{b}' for a, b, _ in spans)}; only the single "
+            f"year after the end is held, 2300 after 2299)."
         )
 
     def _load_variable(self, variable):
@@ -654,7 +902,6 @@ class ISMIP7Ocean:
         calibration. The last few (variable, year) fields stay cached, so
         sub-yearly time steps re-read nothing.
         """
-        import re
         import xarray as xr
         from scipy.interpolate import RegularGridInterpolator
 
@@ -663,21 +910,7 @@ class ISMIP7Ocean:
         if key in self._interp_cache:
             return self._interp_cache[key]
 
-        vdir = self._var_dir(variable)
-        if vdir is None or not os.path.isdir(vdir):
-            return None
-
-        # The chunk file whose YYYY-YYYY range contains the year (nearest
-        # range for years outside coverage).
-        best, best_d = None, None
-        for f in sorted(os.listdir(vdir)):
-            m = re.search(r"_(\d{4})-(\d{4})\.nc$", f)
-            if not m:
-                continue
-            y0, y1 = int(m.group(1)), int(m.group(2))
-            d = 0 if y0 <= yr <= y1 else min(abs(yr - y0), abs(yr - y1))
-            if best_d is None or d < best_d:
-                best, best_d = os.path.join(vdir, f), d
+        best = self._chunk_for(variable, yr)
         if best is None:
             return None
 
@@ -694,14 +927,7 @@ class ISMIP7Ocean:
             da = ds[cands[0]]
 
         if "time" in da.dims:
-            times = ds["time"].values
-            if hasattr(times[0], "year"):  # cftime calendars
-                idx = min(range(len(times)),
-                          key=lambda i: abs(times[i].year - yr))
-            else:
-                years = ds["time"].dt.year.values
-                idx = int(np.argmin(np.abs(years - yr)))
-            da = da.isel(time=idx)
+            da = da.isel(time=_nearest_year_index(ds["time"], yr, ds, f"'{variable}'"))
 
         zdim = [d for d in da.dims if d.lower() in ("z", "depth", "lev")][0]
         za = ds[zdim].values.astype(float)
@@ -764,12 +990,15 @@ class ISMIP7Ocean:
 class ISMIP7Fracture:
     r"""Read ISMIP7 fracture / ice shelf collapse forcing."""
 
+    kind = "fracture"
+
     def __init__(self, data_root=None, esm="CESM2-WACCM", scenario="ssp585"):
         self.data_root = _find_ismip7_data(data_root)
         self.esm = esm
         self.scenario = scenario
         self._collapse_mask = None
         self._excess_melt = None
+        self._collapse_mask_path = None
 
     def _fracture_dir(self):
         root = _find_ismip7_data(self.data_root)
@@ -810,10 +1039,23 @@ class ISMIP7Fracture:
                     found["excess_melt"] = path
         if "collapse_mask" in found:
             self._collapse_mask = xr.open_dataset(found["collapse_mask"])
+            self._collapse_mask_path = found["collapse_mask"]
         if "excess_melt" in found:
             self._excess_melt = xr.open_dataset(found["excess_melt"])
 
         return self
+
+    def provenance(self):
+        r"""The collapse mask ``load`` opened, the only fracture product that
+        is read: its version is in the filename (``..._8km-v2.1.nc``), and the
+        highest version on disk is the one taken, so nothing newer is unread."""
+        if self._collapse_mask_path is None:
+            return []
+        name = os.path.basename(self._collapse_mask_path)
+        m = re.search(r"[_-](v\d+(?:\.\d+)*)\.nc$", name)
+        return [{"variable": "collapse_mask", "product": name,
+                 "version": m.group(1) if m else "unversioned",
+                 "dir": os.path.dirname(self._collapse_mask_path), "newer": []}]
 
     def get_collapse_mask(self, year, mesh_x, mesh_y):
         r"""Get ice shelf collapse mask (0/1) at given year."""
@@ -823,11 +1065,24 @@ class ISMIP7Fracture:
             return np.zeros(len(mesh_x))
 
         ds = self._collapse_mask
-        var = list(ds.data_vars)[0]
+        # By name, then by shape, never by position: the files also carry the
+        # scalar grid-mapping variable ``mapping`` as a data variable, and
+        # 2-D ``lon``/``lat`` that are coordinates only because ``mask`` has
+        # a ``coordinates`` attribute naming them.
+        named = [v for v in ds.data_vars
+                 if v == "mask" or ds[v].attrs.get("standard_name") == "ice_shelf_collapse_mask"]
+        gridded = [v for v in ds.data_vars
+                   if {d.lower() for d in ds[v].dims} >= {"x", "y"} and v.lower() not in ("lon", "lat")]
+        if not (named or gridded):
+            raise KeyError(f"{self._collapse_mask_path} has no gridded variable to read a "
+                           f"collapse mask from (found {list(ds.data_vars)})")
+        var = (named or gridded)[0]
         da = ds[var]
 
         if "time" in da.dims:
-            da = da.sel(time=int(year), method="nearest")
+            # not sel(time=year): that only works on an axis of plain years,
+            # and raises on one xarray has decoded to dates
+            da = da.isel(time=_nearest_year_index(ds["time"], year, ds, f"'{var}'"))
 
         mx = xr.DataArray(np.asarray(mesh_x), dims="node")
         my = xr.DataArray(np.asarray(mesh_y), dims="node")
@@ -1043,10 +1298,17 @@ def _oi_climatology_path(root, var, version):
         return os.path.join(
             root, "meltMIP", f"OI_Climatology_ismip8km_60m_{var}_extrap.nc"
         )
+    # Versions are per variable here as everywhere (discussion #37): in
+    # September 2026 the share holds tf at v3 and so and thetao at v4, the v4
+    # being the fix for the July fault below. Take the highest on disk; v3 is
+    # only the name of the path that is reported missing when there is none.
+    parent = os.path.join(root, "obs", "ocean", "climatology",
+                          f"zhou_annual_{version}", var)
+    found = _version_subdirs(parent)
+    v = found[-1][1] if found else "v3"
     return os.path.join(
-        root, "obs", "ocean", "climatology", f"zhou_annual_{version}",
-        var, "v3",
-        f"{var}_AIS_obs_ocean_climatology_zhou_annual_{version}_v3_1972-2024.nc",
+        parent, v,
+        f"{var}_AIS_obs_ocean_climatology_zhou_annual_{version}_{v}_1972-2024.nc",
     )
 
 
@@ -1071,9 +1333,10 @@ def build_oi_climatology_interpolators(data_root=None, version=None):
             ds.close()
             raise KeyError(
                 f"{path} has no '{var}' variable (found {found}). Known "
-                f"upstream packaging bug (Jul 2026): the 06_nov release "
-                f"ships the tf field inside the so/thetao files. Use "
-                f"ISMIP7_OI_VERSION=30_sep until it is fixed."
+                f"upstream packaging fault (Jul 2026): the 06_nov release "
+                f"shipped the tf field inside its v3 so/thetao files. The "
+                f"share's v4 of those holds the right variable; fetch it, or "
+                f"use ISMIP7_OI_VERSION=30_sep."
             )
         da = ds[var]
         zdim = [d for d in da.dims if d.lower() in ("z", "depth", "lev")][0]
@@ -1141,19 +1404,20 @@ def make_climatology_ocean_callback(K_field, data_root=None):
 
 
 def reject_collapse_mask(what):
-    r"""Refuse ``ISMIP7_FRACTURE=mask`` where no collapse mask can be applied.
+    r"""Refuse a mask mode of ``ISMIP7_FRACTURE`` where no collapse mask can
+    be applied.
 
     ``run_simulation`` allocates ``ctx["collapse"]`` from the knob alone and
     announces the forcing, but only a forcing callback carrying an
     :class:`ISMIP7Fracture` ever fills it. A driver that has none would print
     the banner and apply nothing, so it says so at startup instead. The
     protocol defines no collapse mask for the control or the OCX experiment,
-    which makes ``mask`` a wrong request there rather than a no-op.
+    which makes a mask mode a wrong request there rather than a no-op.
     """
-    from .runconfig import fracture as _fracture_mode
-    if _fracture_mode() == "mask":
+    from .runconfig import FRACTURE_MASK_MODES, fracture as _fracture_mode
+    if _fracture_mode() in FRACTURE_MASK_MODES:
         raise ValueError(
-            f"ISMIP7_FRACTURE=mask but {what} carries no ice-shelf collapse "
+            f"ISMIP7_FRACTURE={_fracture_mode()} but {what} carries no ice-shelf collapse "
             f"forcing, so no mask can ever be applied. The protocol defines "
             f"no collapse mask for the control or the OCX experiment; run "
             f"them with ISMIP7_FRACTURE=none."
@@ -1234,7 +1498,7 @@ def make_forcing_callback(atm=None, ocean=None, fracture=None,
 
         if fracture is not None and ctx.get("collapse") is not None:
             # The year's ice-shelf collapse mask on the geometry cells; the
-            # transport removes the floating cells it flags
-            # (simulation.run_simulation, ISMIP7_FRACTURE=mask).
+            # transport removes floating cells it flags
+            # (simulation.run_simulation, ISMIP7_FRACTURE=mask or mask_front).
             ctx["collapse"][:] = fracture.get_collapse_mask(yr, mesh_x, mesh_y) > 0.5
     return callback

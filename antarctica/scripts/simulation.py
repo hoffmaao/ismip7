@@ -69,6 +69,7 @@ from icepack2_tools.geometry import sample_to_geometry
 from icepack2_tools.naming import map_basename
 from icepack2_tools.front import (
     clamp_thickness, clear_reference_where_ice_free, retreat_slivers,
+    facet_neighbours, front_connected,
 )
 from icepack2_tools.runconfig import (
     obs_data_root,
@@ -79,6 +80,7 @@ from icepack2_tools.runconfig import (
     TARGET_MESH_GEOMETRY_METHOD,
     calving_law as _calving_law, calving_sigma_max as _calving_sigma_max,
     fracture as _fracture_mode, ismip7_output as _ismip7_output,
+    FRACTURE_MASK_MODES,
     # auto_resume is re-exported, not used here: every forward driver imports
     # it from this module alongside latest_checkpoint, so they resolve the
     # knob through one import rather than each reaching into runconfig.
@@ -2094,18 +2096,32 @@ def run_simulation(
         from mpi4py import MPI as _MPI
         return mesh.comm.allreduce(bool(local), op=_MPI.LOR)
 
-    # ISMIP7 ice-shelf collapse forcing (ISMIP7_FRACTURE=mask): the forcing
-    # callback fills ctx["collapse"] with the year's mask on the geometry
-    # cells, and every transport advance removes the FLOATING cells it
+    # ISMIP7 ice-shelf collapse forcing (ISMIP7_FRACTURE=mask or mask_front):
+    # the forcing callback fills ctx["collapse"] with the year's mask on the
+    # geometry cells, and every transport advance removes FLOATING cells it
     # flags, booked as calving. Grounded ice is never touched (protocol
-    # path C). Off by default.
+    # path C). `mask` takes every flagged floating cell; `mask_front` only
+    # those open water has reached, so no hole opens behind a standing front
+    # (discussion #30, icepack2_tools.front.front_connected). Off by default.
     collapse = None
-    if _fracture_mode() == "mask":
+    collapse_neighbours = None
+    collapse_edge = None
+    fracture_mode = _fracture_mode()
+    if fracture_mode in FRACTURE_MASK_MODES:
         if not geom_dg:
-            raise RuntimeError("ISMIP7_FRACTURE=mask needs ISMIP7_GEOMETRY_SPACE=dg0 (cell-wise removal)")
+            raise RuntimeError(f"ISMIP7_FRACTURE={fracture_mode} needs ISMIP7_GEOMETRY_SPACE=dg0 (cell-wise removal)")
         collapse = np.zeros(len(cell_area), dtype=bool)
         ctx["collapse"] = collapse
-        PETSc.Sys.Print("  Ice-shelf collapse forcing: ISMIP7_FRACTURE=mask (floating cells flagged by the mask are removed and booked as calving)")
+        if fracture_mode == "mask_front":
+            collapse_neighbours = facet_neighbours(Q_dg)
+            # Where the mesh ends at the calving front (the boundary-id
+            # sidecar says which exterior facets those are) a cell faces open
+            # water even though no ice-free buffer cell is there to say so.
+            collapse_edge = assemble(
+                phi_dg * ds(tuple(ctx["calving_ids"]))).dat.data_ro > 0.0
+            PETSc.Sys.Print("  Ice-shelf collapse forcing: ISMIP7_FRACTURE=mask_front (flagged floating cells are removed once open water reaches them, and booked as calving)")
+        else:
+            PETSc.Sys.Print("  Ice-shelf collapse forcing: ISMIP7_FRACTURE=mask (floating cells flagged by the mask are removed and booked as calving)")
 
     def _write_csv_row(row):
         if csv_f is None:
@@ -2432,6 +2448,21 @@ def run_simulation(
         # holding no ice: see clamp_thickness for why every such rule has to
         # name its cells here.
         collapsed = (collapse & ~grounded) if collapse is not None else None
+        if collapsed is not None and collapse_neighbours is not None:
+            # Open water as the advance found it: floating cells below the
+            # ice-mask thickness (the ones emptied on an earlier advance
+            # among them; after the transport they carry a trace of inflow,
+            # so this advance's h cannot say) and the cells the front rules
+            # name. Collective, so every rank sweeps or none does.
+            open_water = ~grounded & (h_dg_old.dat.data_ro < front_hmin)
+            for ice_free in (beyond, ls_ice_free):
+                if ice_free is not None:
+                    open_water |= ice_free & ~grounded
+            flagged = collapsed
+            collapsed = front_connected(
+                flagged, open_water | (collapse_edge & ~grounded),
+                collapse_neighbours, _any_rank)
+            ctx["collapse_held_cells"] = mesh.comm.allreduce(int((flagged & ~collapsed).sum()))
         clamp_thickness(h_dg.dat.data, h_clamp, ls_ice_free, beyond, collapsed)
         m2 = float(assemble(h_dg * dx)) * rho_gt
         clamp_gt = m2 - m1                                       # Gt added by DG floor
@@ -2439,7 +2470,7 @@ def run_simulation(
         calv_gt = 0.0
         if collapse is not None and _any_rank(collapse.any()):
             data = h_dg.dat.data
-            hit = collapse & ~grounded & (data > 0.0)
+            hit = collapsed & (data > 0.0)
             calv_gt += mesh.comm.allreduce(
                 float((data[hit] * cell_area[hit]).sum())) * rho_gt
             if annual is not None:

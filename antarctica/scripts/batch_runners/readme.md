@@ -148,7 +148,7 @@ configuration is its `ISMIP7_*` environment.
 |---|---|
 | `sites/rice_nots.sh` | complete, in production. Details below. |
 | `sites/iu_quartz.sh` | complete, from the IU Quartz runners on the upstream `timing_matrix` branch: partition `general` (`debug` for tests), account `r00905`, the IU module stack (`module use /N/u/dlilien/Quartz/modulefiles`, then gnu, openmpi, python, zlib, hdf5, openblas, patchelf, petsc, firedrake), 16 ranks for an inversion and 64 for a forward (the fastest production lane of `antarctica/TIMING_MATRIX_QUARTZ_SCPC_GAMG.md`), 128 cores and 515700 MB per node. A second IU user points `ISMIP7_FIREDRAKE` at their own build and `ISMIP7_ACCOUNT` at their own allocation in `sites/local.env`. |
-| `sites/uchicago_midway.sh` | a container site, not yet run end to end. It describes the image `icepack2_midway3_source.def` builds and names a persistent kernel cache; the image path, partitions, account and per-node limits are empty, so the first submission refuses until they are filled (the file's header says where to read each). |
+| `sites/uchicago_midway.sh` | a container site, not yet run end to end. It describes the image `icepack2_midway3_source.def` builds and names a persistent kernel cache; the image path, partitions, account and per-node limits are empty, so the first submission refuses until they are filled (the file's header says where to read each) (issue #47). |
 | `sites/local.sh` | no scheduler: every setting comes from the environment. For debugging a job script on a workstation, and what the chain tests use. |
 
 ## Rice NOTS, in detail
@@ -242,9 +242,9 @@ four editable packages: `icepack`, `icepack2`, `tlm_adjoint`, `icepack_tools`.
 It takes the venv and work filesystem from the site file and expects the
 sources under `$ISMIP7_WORK/sw/src` (`FD_PREFIX` moves that; at Rice it is
 `/projects/ah301/sw/src`). They are rsynced from a workstation rather than
-cloned, since `icepack2` carries uncommitted edits the inversion needs. Two
-more gaps surfaced here: `/tmp` is not writable on the login nodes (the script
-sets `TMPDIR`), and the `gmsh` wheel dlopens `libGLU.so.1`.
+cloned, since `icepack2` carries uncommitted edits the inversion needs
+(issue #46). Two more gaps surfaced here: `/tmp` is not writable on the login
+nodes (the script sets `TMPDIR`), and the `gmsh` wheel dlopens `libGLU.so.1`.
 
 `verify.sbatch` proves the build works across ranks: four tasks under `srun`,
 each partitioner on a unit square, then the real 2500 m mesh under `ptscotch`
@@ -379,7 +379,7 @@ independent, so a handful of nodes finishes it inside a week.
 - Rice forwards are fixed at 12 ranks because that is what was measured there.
   Quartz forwards take 64, the fastest production-mesh lane of
   `antarctica/TIMING_MATRIX_QUARTZ_SCPC_GAMG.md`. Going higher at Rice is
-  meaningful once the partition probe comes back clean.
+  meaningful once the partition probe comes back clean. (issue #45)
 - An inversion factors the complete mixed Jacobian with MUMPS, which sets its
   memory; `tlm_adjoint` differentiates through that solve, so no setting
   changes it. Cluster forwards took the field split this item asked for:

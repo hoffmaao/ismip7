@@ -112,8 +112,8 @@ def load_racmo_smb_climatology(Q, clim_start=2000, clim_end=2029, data_dir=None,
     from rasterio.warp import reproject, Resampling
 
     if data_dir is None:
-        base = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-        data_dir = os.path.join(base, "antarctica", "data", "racmo")
+        from .runconfig import obs_data_root
+        data_dir = os.path.join(obs_data_root(), "racmo")
     fn = os.path.join(
         data_dir, "smbgl_monthlyS_ANT11_RACMO2.4p1_ERA5_197901_202312.nc"
     )

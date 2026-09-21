@@ -26,10 +26,27 @@ ISMIP7_ACCOUNT="${ISMIP7_ACCOUNT:-}"
 ISMIP7_CONSTRAINT_INV="${ISMIP7_CONSTRAINT_INV:-sapphirerapids}"
 ISMIP7_CONSTRAINT_FWD="${ISMIP7_CONSTRAINT_FWD:-cascadelake}"
 
-# /projects is a 20 TB share; /home is a 10 TB NFS export and /scratch is
-# purged, so the forcing tree lives on /projects.
-ISMIP7_REPO="${ISMIP7_REPO:-/projects/ah301/ismip7}"
+# /home is a 10 TB NFS export and /scratch is purged, so the 20 TB /projects
+# share is what ISMIP7_WORK names. ISMIP7_REPO follows the checkout the command
+# was run from rather than naming one, as every other site file here does:
+# submit.sh cds to ISMIP7_REPO, so a pinned path makes the same command, run
+# from a second checkout, submit the FIRST tree's code -- silently, once both
+# trees carry the same script names.
+ISMIP7_REPO="${ISMIP7_REPO:-$ISMIP7_REPO_SELF}"
 ISMIP7_WORK="${ISMIP7_WORK:-/projects/ah301}"
+
+# The code root moves with the invocation; the shared artifacts cannot. Here
+# they are one tree a second checkout has none of: the AIS forcing tree is
+# ~313 GB, the 2 km meshes, the budd/RC MAPs and the observational rasters are
+# hundreds of MB, and all of them are gitignored rather than copied per
+# checkout. Spelled out rather than taken from ISMIP7_WORK, which
+# sites/local.env lets each user point at their own project space: that would
+# move the data with it, into a tree holding none. The meshes and MAPs sit
+# beside them; a run from a second checkout names ISMIP7_MESH on the submit
+# line, as the 2 km inversions do, with ISMIP7_MAP_OUT for an inversion (where
+# the MAP is written) or ISMIP7_INVERSION for a forward (which MAP to read).
+ISMIP7_DATA_ROOT="${ISMIP7_DATA_ROOT:-/projects/ah301/ismip7/ISMIP7/AIS}"
+ISMIP7_OBS_DATA_ROOT="${ISMIP7_OBS_DATA_ROOT:-/projects/ah301/ismip7/antarctica/data}"
 
 ISMIP7_TASKS="${ISMIP7_TASKS:-32}"
 ISMIP7_MEM="${ISMIP7_MEM:-240G}"

@@ -62,6 +62,7 @@ from tlm_adjoint.firedrake import (
 )
 from firedrake.petsc import PETSc
 from scipy.optimize import minimize as scipy_minimize
+from types import SimpleNamespace
 
 import rasterio, icepack
 from icepack2 import model
@@ -76,7 +77,6 @@ from icepack2.constants import (
 # absent from venv-firedrake-2026 and every rank died before loading data).
 
 _ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-DATA_DIR = os.path.join(_ROOT, "data")
 MESH_DIR = os.path.join(_ROOT, "mesh")
 FIG_DIR = os.path.join(_ROOT, "figs")
 
@@ -94,14 +94,20 @@ from icepack2_tools.mpi_stats import (global_mean, global_range,
                                       global_max, global_size, global_count)
 from icepack2_tools.naming import map_basename
 from icepack2_tools.runconfig import (
+    k_per_basin_candidates,
+    obs_data_root,
     BUDD_SHELF_GATE,
     friction as _friction, geometry_space as _geometry_space,
     raster_sample as _raster_sample,
     lc as _lc, lc_coarse as _lc_coarse, n_flow as _n_flow,
 )
+DATA_DIR = obs_data_root()
 from icepack2_tools.prior import (
-    regularization_form as reg_form,
-    regularization_gradient_form as reg_grad_form,
+    bilaplacian_aux_residual,
+    bilaplacian_coeffs,
+    bilaplacian_energy_form,
+    prior_operator_coeffs,
+    prior_operator_form,
 )
 from icepack2_tools.thermo_model import compute_fluidity_prior
 from icepack2_tools.forcing import (load_racmo_smb_climatology,
@@ -212,6 +218,34 @@ LOG_VEL_EPS = float(os.environ.get("ISMIP7_LOG_VEL_EPS", "1.0"))   # m/yr
 GAMMA_THETA = float(os.environ.get("ISMIP7_GAMMA_THETA", GAMMA_DEFAULT))
 GAMMA_PHI = float(os.environ.get("ISMIP7_GAMMA_PHI", GAMMA_DEFAULT))
 L_REG = float(os.environ.get("ISMIP7_L_REG", "7.5e3"))
+
+# ── Prior form (ISMIP7_PRIOR_FORM) ──────────────────────────────────────
+# `laplacian` (default, everything inverted so far) uses A = delta*M + gamma*K
+# as the prior precision itself. `bilaplacian` uses A M^-1 A, which is what
+# hIPPYlib's BiLaplacianPrior and fenics_ice's prior.Laplacian ("LM^-1L") use,
+# and what the Whittle-Matern SPDE needs in 2-D for the field to be a function
+# rather than a distribution (alpha = 2 > d/2; the un-squared operator has no
+# pointwise variance to speak of and does not converge under refinement).
+#
+# They are DIFFERENT PRIORS, not two spellings of one: gamma under `laplacian`
+# and (sigma, rho) under `bilaplacian` are not convertible, the regularization
+# magnitudes differ by orders of magnitude, and a MAP inverted under one is not
+# comparable with a MAP inverted under the other. save_map stamps prior_form
+# for that reason. Default stays `laplacian` so in-flight inversions and every
+# existing MAP keep their meaning.
+PRIOR_FORM = os.environ.get("ISMIP7_PRIOR_FORM", "laplacian").lower()
+if PRIOR_FORM not in ("laplacian", "bilaplacian"):
+    raise ValueError(
+        f"ISMIP7_PRIOR_FORM must be laplacian|bilaplacian, got {PRIOR_FORM!r}"
+    )
+# Bi-Laplacian knobs are PHYSICAL: the log-deviation scale the control is
+# expected to carry, and the distance over which it decorrelates. The defaults
+# are the scales prior.py's docstring quotes for the un-squared form (prior std
+# ~0.2-0.3 at the L_REG correlation length), so the two forms start from the
+# same intent even though their gammas are incomparable.
+PRIOR_SIGMA_THETA = float(os.environ.get("ISMIP7_PRIOR_SIGMA_THETA", "0.3"))
+PRIOR_SIGMA_PHI = float(os.environ.get("ISMIP7_PRIOR_SIGMA_PHI", "0.3"))
+PRIOR_RHO = float(os.environ.get("ISMIP7_PRIOR_RHO", str(L_REG)))
 
 # Friction law: "budd" (power-law dual, default) or "regularized_coulomb"
 # (Joughin/Schoof RC residual: grounded-only inference, exact-zero shelves).
@@ -905,6 +939,159 @@ def main():
     # comparable between masked and unmasked runs.
     area_val = assemble(obs_mask * dx(mesh))
 
+    # ── Prior operators (ISMIP7_PRIOR_FORM) ──────────────────────────────
+    # The single place that answers, for whichever form is active: the prior
+    # energy R(theta), its dual gradient, and the metric
+    # ISMIP7_GRAD_PRECOND=prior descends in. Everything downstream asks here
+    # instead of rebuilding a form, so the cost the optimizer pays, the
+    # gradient it follows and the metric it measures in cannot end up
+    # describing three different priors -- the failure prior.py exists to
+    # prevent, and the property Recinos et al. 2023 rely on when the UQ
+    # eigendecomposes the misfit Hessian against the inversion's own prior.
+    #
+    #   laplacian   : B = A,        R = 0.5 theta' A theta        (one form)
+    #   bilaplacian : B = A M^-1 A, R = 0.5 ||M^-1 A theta||^2_M  (one solve)
+    #
+    # A = delta*M + gamma*K either way; only the coefficients and the power
+    # differ. The bi-Laplacian's (delta, gamma) come from a physical
+    # (sigma, rho) through hIPPYlib's closed forms, which the un-squared
+    # operator does not possess.
+    _prior_test = TestFunction(Q)
+    if PRIOR_FORM == "bilaplacian":
+        _prior_dg = {
+            "theta": bilaplacian_coeffs(PRIOR_SIGMA_THETA, PRIOR_RHO),
+            "phi": bilaplacian_coeffs(PRIOR_SIGMA_PHI, PRIOR_RHO),
+        }
+        PETSc.Sys.Print(
+            f"  Prior: bi-Laplacian A M^-1 A (hIPPYlib / fenics_ice); "
+            f"sigma_theta={PRIOR_SIGMA_THETA:g} sigma_phi={PRIOR_SIGMA_PHI:g} "
+            f"rho={PRIOR_RHO:g} m -> "
+            f"delta={_prior_dg['theta'][0]:.4e} gamma={_prior_dg['theta'][1]:.4e}"
+        )
+    else:
+        _prior_dg = {
+            "theta": prior_operator_coeffs(GAMMA_THETA, area_val, L_REG),
+            "phi": prior_operator_coeffs(GAMMA_PHI, area_val, L_REG),
+        }
+    _prior_aux = {k: Function(Q, name=f"prior_aux_{k}") for k in ("theta", "phi")}
+
+    def _prior_energy_form(ctrl, which):
+        """``R(ctrl)`` as something ``assemble`` or ``Functional.addto`` takes.
+
+        Under `bilaplacian` this SOLVES ``M f = A ctrl`` into
+        ``_prior_aux[which]`` as a side effect, so :func:`_prior_grad` -- which
+        needs that ``f`` -- must be called after this and before the next
+        control changes. EquationSolver annotates when a manager is running
+        (the TAO path needs the solve on the tape for the gradient) and is an
+        ordinary solve when one is not (the scipy path differentiates it by
+        hand below).
+        """
+        d, g = _prior_dg[which]
+        if PRIOR_FORM == "laplacian":
+            return 0.5 * prior_operator_form(ctrl, ctrl, d, g)
+        aux = _prior_aux[which]
+        EquationSolver(
+            bilaplacian_aux_residual(ctrl, aux, _prior_test, d, g) == 0,
+            aux,
+            form_compiler_parameters=fc_params,
+        ).solve()
+        return bilaplacian_energy_form(aux)
+
+    def _prior_grad(ctrl, which):
+        """``dR/dctrl``, assembled (a dual vector, as the misfit gradient is).
+
+        ``A ctrl`` for the Laplacian; ``A M^-1 A ctrl = A f`` for the
+        bi-Laplacian, with ``f`` the field :func:`_prior_energy_form` just
+        solved for -- A is symmetric, so no second solve is needed.
+        """
+        d, g = _prior_dg[which]
+        src = ctrl if PRIOR_FORM == "laplacian" else _prior_aux[which]
+        return assemble(prior_operator_form(src, _prior_test, d, g))
+
+    def _prior_metric_solvers(metric):
+        """Per-control solvers for the prior COVARIANCE, the metric
+        ISMIP7_GRAD_PRECOND=prior descends in: ``A^-1`` for the Laplacian,
+        ``A^-1 M A^-1`` for the bi-Laplacian (fenics_ice's
+        ``Laplacian.inv_action``, "L^-1 M L^-1"). Returns a callable taking the
+        two assembled gradients and returning the two preconditioned
+        directions."""
+        _tr = fd.TrialFunction(Q)
+        # A is symmetric positive definite by construction (delta, gamma > 0),
+        # so Cholesky; it is constant, so this factors once and every
+        # application below is a back-substitution.
+        _fac = {"ksp_type": "preonly", "pc_type": "cholesky",
+                "pc_factor_mat_solver_type": "mumps"}
+        solvers = {
+            which: fd.LinearSolver(
+                assemble(prior_operator_form(_tr, _prior_test,
+                                             *_prior_dg[which])),
+                solver_parameters=_fac,
+            )
+            for which in ("theta", "phi")
+        }
+        # The consistent mass Riesz map, for metric == "mass": the same
+        # preconditioner fenics_ice ships, reached through the same code path
+        # so the two options differ only in the operator.
+        _mass_solver = fd.LinearSolver(
+            assemble(inner(_tr, _prior_test) * dx), solver_parameters=_fac
+        )
+
+        # First-step scaling, per control BLOCK. Following fenics_ice's
+        # minimize_l_bfgs call (solver.py): it passes block_theta_scale for a
+        # dual inversion, because "alpha & beta tend to have very different
+        # magnitudes. Theta scaling both alpha & beta by their combined mean is
+        # a bad idea". theta (friction) and phi (fluidity) are exactly that
+        # pair here, and a single combined scalar is what a 32 km probe took
+        # theta to [-883, +14165] with -- it is a log deviation, so order 1.
+        #
+        # The scaling exists because L-BFGS's first step is -H_0 g at unit
+        # length, with no curvature pair yet to rescale it, and on this path a
+        # line search cannot recover: one evaluation outside the region where
+        # the forward has a solution returns NaN and every later trial point
+        # inherits it. fenics_ice bounds the same thing with the line search's
+        # amax; TAO's lmvm gives no equivalent once H_0 is supplied, so the
+        # bound goes on H_0 instead. ISMIP7_PRECOND_STEP0 is the largest change
+        # the first step may make to a control, in that control's own units.
+        _step0 = float(os.environ.get("ISMIP7_PRECOND_STEP0", "0.15"))
+        _scale = {}
+
+        def action(g_theta, g_phi):
+            out = []
+            for which, rhs in (("theta", g_theta), ("phi", g_phi)):
+                x = Function(Q)
+                if metric == "mass_consistent":
+                    # What fenics_ice actually ships (config.mass_precon,
+                    # H_M_0): the Riesz map of the L2 inner product. It removes
+                    # the cell-size dependency and nothing else, which is why
+                    # it is robust where the prior metric is delicate.
+                    _mass_solver.solve(x, rhs)
+                else:
+                    solvers[which].solve(x, rhs)
+                    if PRIOR_FORM == "bilaplacian":
+                        # M x assembled against the test function IS the mass
+                        # action, and it lands in the dual space the second
+                        # A-solve wants, with no vector juggling.
+                        y = Function(Q)
+                        solvers[which].solve(
+                            y, assemble(inner(x, _prior_test) * dx)
+                        )
+                        x = y
+                if which not in _scale:
+                    with x.dat.vec_ro as _x:
+                        _n = _x.norm(PETSc.NormType.NORM_INFINITY)  # collective
+                    _scale[which] = (_step0 / _n) if _n > 0.0 else 1.0
+                    PETSc.Sys.Print(
+                        f"  Metric scale [{which}]: alpha={_scale[which]:.4e} "
+                        f"(unscaled first step |d{which}|_max={_n:.4e}, "
+                        f"bounded to {_step0:g})"
+                    )
+                if _scale[which] != 1.0:
+                    x.dat.data[:] *= _scale[which]
+                out.append(x)
+            return tuple(out)
+
+        return action
+
     # ── Transient (dH/dt) constraint ─────────────────────────────────────
     # A velocity-only inversion never constrains div(h u), so the MAP can carry
     # a flux divergence wildly inconsistent with the observed geometry; the
@@ -934,6 +1121,10 @@ def main():
     # stamps net_sigma_used, so a MAP can never claim a constraint it never saw.
     use_dhdt_net = False
     net_sigma_used = 0.0
+    # The per-basin K the dH/dt melt source actually used, stamped into
+    # the MAP: the fallback below is quiet by design, so the artifact has
+    # to carry the answer.
+    k_npz_used = "none"
     if use_dhdt:
         if not geom_dg:
             raise RuntimeError(
@@ -966,13 +1157,12 @@ def main():
         if os.environ.get("ISMIP7_DHDT_MELT", "1") != "0":
             from icepack2_tools.forcing import (
                 load_K_per_basin, make_climatology_ocean_callback)
-            _k_lc = os.path.join(_ROOT, "results",
-                                 f"calibrated_K_per_basin_{lc}.npz")
-            _k_2500 = os.path.join(_ROOT, "results",
-                                   "calibrated_K_per_basin_2500.npz")
-            k_npz = os.environ.get(
-                "ISMIP7_K_PER_BASIN_NPZ",
-                _k_lc if os.path.exists(_k_lc) else _k_2500)
+            _k_cands = k_per_basin_candidates(
+                os.path.join(_ROOT, "results"), lc)
+            k_npz = next((c for c in _k_cands if os.path.exists(c)),
+                         _k_cands[-1])
+            if os.path.exists(k_npz):
+                k_npz_used = k_npz
             if not os.path.exists(k_npz):
                 # Warn, do not abort: the melt source only touches shelf cells
                 # and the misfit is grounded-only, so an absent ocean
@@ -1370,8 +1560,21 @@ def main():
             chk.set_attr("/", "log_vel_eps", float(LOG_VEL_EPS))
             chk.set_attr("/", "gamma_theta", float(GAMMA_THETA))
             chk.set_attr("/", "gamma_phi", float(GAMMA_PHI))
+            # Which prior this MAP was inverted under. laplacian and
+            # bilaplacian are different priors with incomparable gammas, so a
+            # MAP that does not say which one it paid cannot be interpreted.
+            chk.set_attr("/", "prior_form", str(PRIOR_FORM))
+            if PRIOR_FORM == "bilaplacian":
+                chk.set_attr("/", "prior_sigma_theta", float(PRIOR_SIGMA_THETA))
+                chk.set_attr("/", "prior_sigma_phi", float(PRIOR_SIGMA_PHI))
+                chk.set_attr("/", "prior_rho", float(PRIOR_RHO))
             chk.set_attr("/", "dhdt_weight", float(dhdt_w))
             chk.set_attr("/", "dhdt_net_sigma", net_sigma_used)
+            # Which per-basin K the dH/dt melt source used, or "none". The
+            # fallback is deliberately non-fatal (the misfit is grounded-only
+            # and melt is zero there), but a MAP that cannot say whether it
+            # had the calibration cannot be told apart from one that did.
+            chk.set_attr("/", "dhdt_melt_k_npz", str(k_npz_used))
             # How BedMachine was put onto the cells (runconfig.RASTER_SAMPLES).
             # theta/phi absorb the bed representation just as they absorb the
             # front treatment, so a forward must reproduce it.
@@ -1531,11 +1734,12 @@ def main():
         # term (absent from the old gradient-only form) removes the null space
         # that let phi/theta drift to +-36 at n=3; combined with the physical
         # prior means it constrains the DEVIATION, not the amplitude.
-        _psi = fd.TestFunction(Q)
-        reg_theta = float(assemble(reg_form(theta, GAMMA_THETA, area_val, L_reg=L_REG)))
-        reg_phi = float(assemble(reg_form(phi, GAMMA_PHI, area_val, L_reg=L_REG)))
-        dR_theta = assemble(reg_grad_form(theta, _psi, GAMMA_THETA, area_val, L_reg=L_REG))
-        dR_phi = assemble(reg_grad_form(phi, _psi, GAMMA_PHI, area_val, L_reg=L_REG))
+        # Energy first, then gradient: under `bilaplacian` the energy solves
+        # the M f = A theta the gradient reuses (see _prior_energy_form).
+        reg_theta = float(assemble(_prior_energy_form(theta, "theta")))
+        dR_theta = _prior_grad(theta, "theta")
+        reg_phi = float(assemble(_prior_energy_form(phi, "phi")))
+        dR_phi = _prior_grad(phi, "phi")
 
         g_theta = func_to_global(dJ_dtheta) + func_to_global(dR_theta)
         g_phi = func_to_global(dJ_dphi) + func_to_global(dR_phi)
@@ -1579,6 +1783,158 @@ def main():
 
         return total, total_grad
 
+    def _minimize_prior_metric():
+        """L-BFGS in the prior metric, through TAO.
+
+        The seed inverse Hessian is A^-1 with A the prior precision of the
+        regularization this run pays (prior.prior_bilinear_form), applied per
+        control because theta and phi carry different gamma. A is constant, so
+        it is factored once here and every application is a back-substitution:
+        milliseconds against a forward-plus-adjoint.
+
+        Why TAO rather than the scipy path above: a metric can only reach
+        L-BFGS-B as a change of variables, which needs a factor of A and not
+        just its inverse -- the serial-only construction this replaces. TAO
+        takes the inverse action directly, and tlm_adjoint wires H_0_action
+        only for the lmvm and blmvm types, so the type is not free.
+
+        What it costs, relative to the scipy path:
+
+        * No line-search rescue. objective_and_gradient turns a failed forward
+          or adjoint into an inflated objective with a zero gradient, which
+          makes L-BFGS-B backtrack (it saved the Jul 18 2500 m Budd run at
+          iteration 60). Through a ReducedFunctional the same failure raises
+          and ends the run at the last periodic checkpoint. Use `none` or
+          `mass` for a configuration whose solves are known to be marginal.
+        * Per-iteration bookkeeping moves to the TAO monitor, so z_backup and
+          the residual on record track the last EVALUATED point rather than
+          the last accepted one. The publishing solve already tests that and
+          reports `result.x != last accepted controls` when they differ.
+        """
+        from tlm_adjoint.firedrake import TAOSolver
+
+        # The prior COVARIANCE action, from the same operator the objective
+        # pays for: A^-1, or A^-1 M A^-1 under `bilaplacian`.
+        _A_inv = _prior_metric_solvers(grad_precond)
+
+        _nfev = [0]
+
+        def forward_total(theta_ctrl, phi_ctrl):
+            """The objective TAO differentiates: misfit plus BOTH prior terms.
+
+            The scipy path adds the regularization outside the tape; here it
+            has to be inside it, or TAO would descend on the misfit gradient
+            in a metric built from a prior the objective never saw.
+            """
+            # Mirror this evaluation's controls and mixed state onto the
+            # module-level Functions that save_map and the monitor read.
+            # Raw dof writes: Function.assign under a running manager would
+            # annotate, and these are bookkeeping, not part of the model.
+            _nfev[0] += 1
+            theta.dat.data[:] = theta_ctrl.dat.data_ro
+            phi.dat.data[:] = phi_ctrl.dat.data_ro
+            J = forward(theta_ctrl, phi_ctrl)
+            J.addto(_prior_energy_form(theta_ctrl, "theta"))
+            J.addto(_prior_energy_form(phi_ctrl, "phi"))
+            for _zb, _z in zip(z_backup.subfunctions, z.subfunctions):
+                _zb.dat.data[:] = _z.dat.data_ro
+            return J
+
+        gtol = float(os.environ.get("ISMIP7_GTOL", "0.0"))
+        _step0_env = float(os.environ.get("ISMIP7_PRECOND_STEP0", "0.15"))
+        if grad_precond == "mass_consistent":
+            _desc = "consistent mass Riesz map (M^-1), as fenics_ice ships it"
+        else:
+            _desc = (
+                f"{PRIOR_FORM} prior covariance "
+                f"({'A^-1 M A^-1' if PRIOR_FORM == 'bilaplacian' else 'A^-1'})"
+                " -- EXPERIMENTAL: fenics_ice ships M^-1 and leaves its two "
+                "prior-preconditioned H_0 attempts commented out as not working"
+            )
+        PETSc.Sys.Print(
+            f"  Optimization metric: {_desc}; via TAO lmvm; "
+            f"gatol={gtol:g} max_it={max_iter} step0={_step0_env:g}"
+        )
+        solver = TAOSolver(
+            forward_total, [Q, Q],
+            solver_parameters={
+                "tao_type": "lmvm",
+                "tao_max_it": max_iter,
+                # The gradient norm TAO tests is the one M_inv_action defines,
+                # i.e. sqrt(g' A^-1 g) -- mesh independent, unlike the raw l2
+                # norm the scipy path prints. 0 keeps the old behaviour of
+                # running the whole iteration budget.
+                "tao_gatol": gtol,
+                "tao_grtol": 0.0,
+                "tao_gttol": 0.0,
+            },
+            H_0_action=_A_inv, M_inv_action=_A_inv,
+        )
+
+        _t_last = [perf_counter()]
+
+        def _monitor(tao):
+            its, f_val, gnorm, _cnorm, _xdiff, _reason = tao.getSolutionStatus()
+            iteration_count[0] = int(its)
+            now = perf_counter()
+            t_iter = now - _t_last[0]
+            _t_last[0] = now
+            # z holds the last evaluated forward, mirrored into z_backup above.
+            last_good_obj[0] = float(f_val)
+            last_good_fnorm[0] = _residual_norm()
+            last_good_vel_chi2[0] = float(assemble(_vel_chi2))
+            _x = np.concatenate([func_to_global(theta), func_to_global(phi)])
+            last_x[0] = _x
+            last_good_x[0] = np.array(_x, copy=True)
+            reg_theta = float(assemble(_prior_energy_form(theta, "theta")))
+            reg_phi = float(assemble(_prior_energy_form(phi, "phi")))
+            PETSc.Sys.Print(
+                f"  iter {iteration_count[0]:3d}: "
+                f"misfit={f_val - reg_theta - reg_phi:.6e} "
+                f"reg_θ={reg_theta:.4e} reg_φ={reg_phi:.4e} "
+                f"total={f_val:.6e} |grad|_A={gnorm:.4e} "
+                f"[total={t_iter:.1f}s]"
+            )
+            if timing_json:
+                timing_history.append({
+                    "eval": iteration_count[0],
+                    "misfit": float(f_val - reg_theta - reg_phi),
+                    "reg_theta": reg_theta,
+                    "reg_phi": reg_phi,
+                    "total": float(f_val),
+                    "grad_norm": float(gnorm),
+                    "total_seconds": t_iter,
+                    "terms": {"vel": float(last_good_vel_chi2[0])},
+                })
+                _write_timing_json(phase="running", message="in progress")
+            if iteration_count[0] > 0 and iteration_count[0] % 20 == 0:
+                save_map(os.path.join(_map_dir, map_fn))
+                PETSc.Sys.Print(f"    [checkpoint saved: iter {iteration_count[0]}]")
+
+        solver.tao.setMonitor(_monitor)
+        # TAO reports the iteration cap as a diverged reason and TAOSolver
+        # turns any such reason into an exception -- but only AFTER writing the
+        # solution back into (theta, phi). Reaching ISMIP7_MAXITER is how a
+        # production inversion normally ends here, so the cap is read back from
+        # TAO rather than treated as a failure.
+        try:
+            solver.solve([theta, phi])
+        except RuntimeError:
+            pass
+        reason = int(solver.tao.getConvergedReason())
+        message = (
+            "CONVERGED: gradient tolerance reached" if reason > 0
+            else f"STOP: TAO reason {reason} (iteration limit is {max_iter})"
+        )
+        return SimpleNamespace(
+            x=np.concatenate([func_to_global(theta), func_to_global(phi)]),
+            nit=int(solver.tao.getIterationNumber()),
+            # petsc4py exposes no evaluation count on TAO, and the number
+            # that matters is the taped forwards this run actually paid for.
+            nfev=_nfev[0],
+            message=message,
+        )
+
     # ── Optimization metric (ISMIP7_GRAD_PRECOND) ────────────────────────
     # L-BFGS-B works in raw dof coordinates, i.e. the Euclidean l2 metric, and
     # that metric is MESH-DEPENDENT: a gradient entry scales with the dof's
@@ -1587,12 +1943,34 @@ def main():
     # `mass` optimizes in u = M^(1/2) x (M = lumped mass), which is steepest
     # descent in L2 and makes the rate mesh-independent; peers compensate for
     # the same defect with brute iteration counts (ISSM/M1QN3 runs 1000+300 in
-    # cycles). The natural upgrade is the prior metric (delta*M+gamma*K)^-1
-    # (fenics_ice); the operator exists in icepack2_tools/prior.py. Default
-    # off so in-flight runs stay comparable; flip after the current A/B.
+    # cycles).
+    #
+    # `prior` goes further: it descends in the metric of the prior precision
+    # A = delta_eff*M + gamma_eff*K (prior.prior_bilinear_form, the Hessian of
+    # the regularization this run actually pays), so the reduced Hessian the
+    # optimizer sees is A^-1 H_misfit + I -- clustered at 1 with one outlier
+    # per data-informed mode. The iteration count then tracks the number of
+    # those modes rather than the mesh.
+    #
+    # It is the MPI-parallel form of the whitening in the MISMIP TDDA
+    # pipeline (scripts/run_inversion_weertman.py::PriorPreconditioner,
+    # zeta = L^T theta with A = L L^T, validated there to 1e-16). That
+    # construction is SERIAL-ONLY -- the PETSc native Cholesky factor's
+    # solveForward/solveBackward and its full-local-vector indexing assume one
+    # process -- so it cannot run at the 16-32 ranks these inversions use.
+    # L-BFGS seeded with the initial inverse Hessian A^-1 is the same metric
+    # and needs only a parallel solve against A, never a triangular factor.
+    #
+    # Scipy's L-BFGS-B takes no preconditioner, so `prior` runs through TAO
+    # (tlm_adjoint's TAOSolver, whose H_0_action is exactly this seed). See
+    # _minimize_prior_metric below for what that costs us.
     grad_precond = os.environ.get("ISMIP7_GRAD_PRECOND", "none").lower()
-    if grad_precond not in ("none", "mass"):
-        raise ValueError(f"ISMIP7_GRAD_PRECOND must be none|mass, got {grad_precond!r}")
+    _METRICS = ("none", "mass", "mass_consistent", "prior")
+    if grad_precond not in _METRICS:
+        raise ValueError(
+            f"ISMIP7_GRAD_PRECOND must be one of {_METRICS}, "
+            f"got {grad_precond!r}"
+        )
     if grad_precond == "mass":
         _mv = assemble(TestFunction(Q) * dx).dat.data_ro
         _mloc = Function(Q); _mloc.dat.data[:] = _mv
@@ -1606,16 +1984,19 @@ def main():
         def objective_and_gradient(u_vec):  # noqa: F811 (deliberate wrap)
             J, g_x = _inner_og(u_vec / _sqrtm)
             return J, g_x / _sqrtm
-    x0 = np.concatenate([func_to_global(theta), func_to_global(phi)])
-    if grad_precond == "mass":
-        x0 = x0 * _sqrtm
-    result = scipy_minimize(
-        objective_and_gradient,
-        x0,
-        method="L-BFGS-B",
-        jac=True,
-        options={"maxiter": max_iter, "ftol": 0, "gtol": 0},
-    )
+    if grad_precond in ("mass_consistent", "prior"):
+        result = _minimize_prior_metric()
+    else:
+        x0 = np.concatenate([func_to_global(theta), func_to_global(phi)])
+        if grad_precond == "mass":
+            x0 = x0 * _sqrtm
+        result = scipy_minimize(
+            objective_and_gradient,
+            x0,
+            method="L-BFGS-B",
+            jac=True,
+            options={"maxiter": max_iter, "ftol": 0, "gtol": 0},
+        )
 
     PETSc.Sys.Print(f"\nOptimization finished: {result.message}")
     PETSc.Sys.Print(f"  {result.nit} iterations, {result.nfev} function evaluations")

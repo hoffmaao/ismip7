@@ -46,7 +46,9 @@ from icepack2_tools.forcing import (
 from icepack2_tools.climatology import (
     clim_start, clim_end, clim_scenario, clim_pool_missing, describe_clim_pool,
 )
-from icepack2_tools.runconfig import FRACTURE_MASK_MODES, fracture as fracture_mode
+from icepack2_tools.runconfig import (
+    FRACTURE_MASK_MODES, fracture as fracture_mode, k_per_basin_candidates,
+)
 
 # Owned by icepack2_tools.climatology: this pool must match the CONTROL's
 # climatology, or the projections are re-referenced against a different
@@ -60,12 +62,7 @@ def find_k_npz():
     r"""Calibrated per-basin K npz: this mesh's calibration, else the 2500 m
     one (16 basin scalars remapped through the IMBIE2 8 km grid,
     mesh-independent), else None (scalar ISMIP7_K_MELT)."""
-    override = os.environ.get("ISMIP7_K_PER_BASIN_NPZ")
-    candidates = [override] if override else [
-        os.path.join(RESULTS_DIR, f"calibrated_K_per_basin_{lc}.npz"),
-        os.path.join(RESULTS_DIR, "calibrated_K_per_basin_2500.npz"),
-    ]
-    for c in candidates:
+    for c in k_per_basin_candidates(RESULTS_DIR, lc):
         if c and os.path.exists(c):
             return c
     return None

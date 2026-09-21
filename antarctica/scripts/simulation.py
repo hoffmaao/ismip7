@@ -52,7 +52,6 @@ _ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 # workstation with a local data volume. Keep the repository layout as the
 # default, but make the observational root explicit rather than requiring
 # large files to be copied or symlinked into the tree.
-DATA_DIR = os.environ.get("ISMIP7_OBS_DATA_ROOT", os.path.join(_ROOT, "data"))
 MESH_DIR = os.path.join(_ROOT, "mesh")
 RESULTS_DIR = os.path.join(_ROOT, "results")
 
@@ -73,6 +72,7 @@ from icepack2_tools.front import (
     facet_neighbours, front_connected,
 )
 from icepack2_tools.runconfig import (
+    obs_data_root,
     BUDD_SHELF_GATE as _BUDD_SHELF_GATE,
     residual_stabilizers,
     friction as _friction, geometry_space as _geometry_space,
@@ -86,6 +86,7 @@ from icepack2_tools.runconfig import (
     # knob through one import rather than each reaching into runconfig.
     fixed_front as _fixed_front, auto_resume, apparent_mb_mode,  # noqa: F401
 )
+DATA_DIR = obs_data_root()
 from icepack2_tools.solverconfig import (
     final_solve_bounds,
     continuation_steps,

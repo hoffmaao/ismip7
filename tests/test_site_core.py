@@ -19,10 +19,20 @@ import pytest
 REPO = Path(__file__).resolve().parents[1]
 BR = REPO / "antarctica" / "scripts" / "batch_runners"
 
+# What a run chooses: which mesh, which law, which resolution. A site file
+# states none of it. The data roots are not here -- where a cluster keeps the
+# forcing tree and the rasters is a fact about the site, not about the run, and
+# the timing lanes require ISMIP7_INVERSION, ISMIP7_MESH and
+# ISMIP7_TIMING_CACHE_RAW of their caller, never a data root.
 MODEL_VARS = (
     "ISMIP7_FRICTION", "ISMIP7_MESH", "ISMIP7_LC", "ISMIP7_LC_COARSE",
     "ISMIP7_GEOMETRY_SPACE", "ISMIP7_N_FLOW", "ISMIP7_MAP_DEFAULT",
-    "ISMIP7_DATA_ROOT",
+)
+
+# The artifacts a checkout does not carry, as opposed to ISMIP7_REPO's code.
+# A site names the two data roots; the mesh and the MAP follow ISMIP7_REPO.
+SHARED_VARS = (
+    "ISMIP7_DATA_ROOT", "ISMIP7_OBS_DATA_ROOT", "ISMIP7_MESH", "ISMIP7_MAP_DEFAULT",
 )
 
 
@@ -51,15 +61,21 @@ def show(*names):
     return "; ".join(f'echo "{n}=${{{n}-<unset>}}"' for n in names)
 
 
-def test_the_core_file_chooses_no_model_configuration(runners):
+@pytest.mark.parametrize("site", ["local", "iu_quartz", "rice_nots", "uchicago_midway"])
+def test_the_core_file_chooses_no_model_configuration(runners, site):
+    r"""Every site, not just the no-scheduler one: a site file that named a mesh
+    would defeat the timing lanes' `ISMIP7_MESH is required` guard, since they
+    source this file alone and bring their own model configuration."""
     rc, out, err = source(runners, "site_core.sh", show(*MODEL_VARS),
-                          ISMIP7_SITE="local")
+                          ISMIP7_SITE=site)
     assert rc == 0, err
     assert out.splitlines() == [f"{n}=<unset>" for n in MODEL_VARS]
 
 
 def test_site_env_still_supplies_the_runners_model_defaults(runners):
-    rc, out, err = source(runners, "site_env.sh", show(*MODEL_VARS),
+    rc, out, err = source(runners, "site_env.sh",
+                          show(*MODEL_VARS, "ISMIP7_DATA_ROOT",
+                               "ISMIP7_OBS_DATA_ROOT"),
                           ISMIP7_SITE="local", ISMIP7_REPO="/repo")
     assert rc == 0, err
     values = dict(line.split("=", 1) for line in out.splitlines())
@@ -70,6 +86,7 @@ def test_site_env_still_supplies_the_runners_model_defaults(runners):
         "/repo/antarctica/mesh/antarctica_10000_1000_buffered20000.msh")
     assert values["ISMIP7_MAP_DEFAULT"].endswith("_logvelnet_1000.h5")
     assert values["ISMIP7_DATA_ROOT"] == "/repo/ISMIP7/AIS"
+    assert values["ISMIP7_OBS_DATA_ROOT"] == "/repo/antarctica/data"
     assert "<unset>" not in out
 
 
@@ -122,12 +139,61 @@ def test_the_banner_prints_the_model_lines_only_with_site_env(runners):
     ]
 
 
-def test_repo_self_is_the_checkout_the_file_was_sourced_from(runners):
+@pytest.mark.parametrize("site", ["iu_quartz", "rice_nots", "uchicago_midway"])
+def test_repo_self_is_the_checkout_the_file_was_sourced_from(runners, site):
+    r"""Every cluster site, not just one. submit.sh cds to ISMIP7_REPO, so a
+    site that pins it submits that tree's code from any other checkout -- which
+    is how rice_nots kept pointing at one September checkout while this test
+    covered only Quartz."""
     rc, out, err = source(runners, "site_core.sh", show("ISMIP7_REPO_SELF", "ISMIP7_REPO"),
-                          ISMIP7_SITE="iu_quartz")
+                          ISMIP7_SITE=site)
     assert rc == 0, err
     repo = str(runners.parents[2])
     assert out.splitlines() == [f"ISMIP7_REPO_SELF={repo}", f"ISMIP7_REPO={repo}"]
+
+
+def test_a_site_that_names_no_root_keeps_the_artifacts_beside_its_code(runners):
+    r"""A cluster holding one checkout resolves everything inside it."""
+    rc, out, err = source(runners, "site_env.sh", show(*SHARED_VARS),
+                          ISMIP7_SITE="local", ISMIP7_REPO="/repo")
+    assert rc == 0, err
+    values = dict(line.split("=", 1) for line in out.splitlines())
+    assert all(values[n].startswith("/repo/") for n in SHARED_VARS), values
+
+
+def test_rice_keeps_the_data_roots_off_the_checkout(runners):
+    r"""The converse: the code root follows the invocation, but the ~313 GB
+    forcing tree and the observational rasters do not exist in a second
+    checkout, so the site names the tree that holds them."""
+    rc, out, err = source(runners, "site_env.sh",
+                          show("ISMIP7_REPO", "ISMIP7_DATA_ROOT",
+                               "ISMIP7_OBS_DATA_ROOT"),
+                          ISMIP7_SITE="rice_nots")
+    assert rc == 0, err
+    values = dict(line.split("=", 1) for line in out.splitlines())
+    checkout = str(runners.parents[2])
+    assert values["ISMIP7_REPO"] == checkout
+    for name in ("ISMIP7_DATA_ROOT", "ISMIP7_OBS_DATA_ROOT"):
+        assert not values[name].startswith(checkout), name
+        assert values[name].startswith("/projects/ah301/ismip7/"), name
+
+
+def test_a_root_given_for_one_submission_wins(runners):
+    r"""A site default never beats what the submission states."""
+    rc, out, err = source(runners, "site_env.sh", show("ISMIP7_OBS_DATA_ROOT"),
+                          ISMIP7_SITE="rice_nots",
+                          ISMIP7_OBS_DATA_ROOT="/tmp/obs")
+    assert rc == 0, err
+    values = dict(line.split("=", 1) for line in out.splitlines())
+    assert values["ISMIP7_OBS_DATA_ROOT"] == "/tmp/obs"
+
+
+@pytest.mark.parametrize("name", SHARED_VARS)
+def test_a_shared_path_given_for_one_submission_still_wins(runners, name):
+    rc, out, err = source(runners, "site_env.sh", show(name),
+                          ISMIP7_SITE="rice_nots", **{name: "/tmp/elsewhere"})
+    assert rc == 0, err
+    assert out == f"{name}=/tmp/elsewhere"
 
 
 def test_repo_self_stays_inside_a_symlinked_sandbox(runners, tmp_path):
@@ -226,3 +292,23 @@ def test_each_cluster_s_own_hostnames_choose_its_site(runners, tmp_path, host, s
                           PATH=f"{bin_dir}:{os.environ['PATH']}")
     assert rc == 0, err
     assert out == f"ISMIP7_SITE_NAME={site}"
+
+
+def test_activation_moves_loopys_cache_per_job_and_leaves_matplotlibs_alone(runners, tmp_path):
+    r"""XDG_CACHE_HOME is loopy's knob and also matplotlib's. Giving each job
+    its own is for loopy's persistent dict; matplotlib rebuilding a font cache
+    on every rank of a fresh directory is not wanted, so MPLCONFIGDIR is pinned
+    to the stable location instead of following the per-job move."""
+    activate = tmp_path / "activate"
+    activate.write_text("")
+    rc, out, err = source(runners, "site_core.sh",
+                          f"ismip7_activate >/dev/null; {show('XDG_CACHE_HOME', 'MPLCONFIGDIR')}",
+                          ISMIP7_SITE="local", ISMIP7_FIREDRAKE=str(activate),
+                          SLURM_JOB_ID="4242")
+    assert rc == 0, err
+    values = dict(line.split("=", 1) for line in out.splitlines())
+    xdg = Path(values["XDG_CACHE_HOME"])
+    mpl = Path(values["MPLCONFIGDIR"])
+    assert xdg.name == "4242" and xdg.is_dir()
+    assert not mpl.is_relative_to(xdg)
+    assert mpl == Path(runners) / ".cache" / "matplotlib" and mpl.is_dir()

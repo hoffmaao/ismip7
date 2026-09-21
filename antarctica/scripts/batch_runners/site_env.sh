@@ -16,7 +16,15 @@
 . "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/site_core.sh"
 
 # --- repository and data ------------------------------------------------
+# The gitignored artifacts a checkout does not carry -- the forcing tree and the
+# observational rasters -- hang off the invoking checkout. A site whose copies
+# live elsewhere names these two in its site file, which is sourced before these
+# defaults apply.
 export ISMIP7_DATA_ROOT="${ISMIP7_DATA_ROOT:-$ISMIP7_REPO/ISMIP7/AIS}"
+# simulation.py and preflight.py default this to the running checkout's
+# antarctica/data, which is gitignored and empty in a fresh clone, so state it
+# here too: the shell layer and the Python layer then name the same rasters.
+export ISMIP7_OBS_DATA_ROOT="${ISMIP7_OBS_DATA_ROOT:-$ISMIP7_REPO/antarctica/data}"
 
 # --- model configuration shared by every run ----------------------------
 # The production mesh is 1000 m / 10 km: the finest pair the timing matrix

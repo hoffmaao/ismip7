@@ -19,13 +19,13 @@ Install and download the rows your column ticks. Sizes are measured.
 | **Firedrake 2026.4** (brings PETSc, MUMPS, mpi4py) | firedrakeproject.org | x | x | x | x |
 | **icepack2** | github.com/icepack/icepack2 | x | x | x | x |
 | **icepack** (raster interpolation onto meshes) | github.com/icepack/icepack | x | x | x | x |
-| **icepack_tools** (`adapt_mesh`, `levelset`, `friction`, `grounding`) | github.com/hoffmaao/icepack_tools, private | | level-set front | x | |
+| **icepack_tools** (`adapt_mesh`, `levelset`, `friction`, `grounding`) | github.com/hoffmaao/icepack_tools | | level-set front | x | |
 | **tlm_adjoint** | github.com/jrmaddison/tlm_adjoint | x | | | |
 | `xarray netCDF4 scipy rasterio pyproj shapely gmsh matplotlib` (`geopandas` only to build a mesh, section 3) | pip, into the Firedrake venv | x | x | x | x |
 | `earthaccess` (NSIDC), `globus-sdk` (Globus route only) | pip | x | x | x | |
 | **isschecker** (`ismip7-compliance-checker`) | github.com/ismip/ISM_SimulationChecker | | | | x |
 
-`icepack_tools` is a separate private repository. Install it editable into the
+`icepack_tools` is a separate repository. Install it editable into the
 same venv: `pip install -e /path/to/icepack_tools`.
 `icepack2_tools/adapt_mesh.py` and `icepack2_tools/levelset.py` wrap it; the
 rest of the repository runs without it.
@@ -96,7 +96,6 @@ checker runs here on the workstation.
 |-----|---------|-------|
 | BedMachine, MEaSUREs (NSIDC) | NASA Earthdata (free) | https://urs.earthdata.nasa.gov/users/new |
 | ISMIP7 forcing over Globus (the mirror needs none) | Globus + the ISMIP7 collection | https://app.globus.org |
-| `icepack_tools` | access to the private repository | ask Andrew |
 | Submitting results | an upload folder from the ISMIP7 team | email ismip6 at gmail.com with your Globus id, `AIS`, group name and `ism_id` |
 
 Globus transfers to this machine also need Globus Connect Personal running
@@ -576,7 +575,11 @@ projection), run in that run's own shell so it captures the environment.
 | `ISMIP7_GAMMA_THETA` / `ISMIP7_GAMMA_PHI` | Whittle-Matern prior strength on `θ` and `φ`, coupled to `ISMIP7_MISFIT_NORM` since normalising divides the misfit by about sigma^2 | `1e5` under `sigma`, `1e4` under `none` |
 | `ISMIP7_L_REG` | prior correlation length (m) | `7.5e3` |
 | `ISMIP7_MAXITER` | L-BFGS-B iteration cap | `500` |
-| `ISMIP7_GRAD_PRECOND` | `none` is the raw-dof l2 metric, which is mesh dependent, so fine grounding-line cells converge slowest. `mass` optimises in `u = sqrt(M) x`, making the rate mesh independent. Defaults to `none` to keep runs comparable with everything measured so far | `none` |
+| `ISMIP7_GRAD_PRECOND` | `none` is the raw-dof l2 metric, which is mesh dependent, so fine grounding-line cells converge slowest. `mass` optimises in `u = sqrt(M) x` under scipy, making the rate mesh independent. `mass_consistent` and `prior` run under TAO instead (scipy takes no preconditioner) with the initial inverse Hessian set to `M^-1` or to the prior covariance; `mass_consistent` is the configuration fenics_ice ships, `prior` is the one it leaves commented out as not working. Defaults to `none` to keep runs comparable with everything measured so far | `none` |
+| `ISMIP7_PRIOR_FORM` | `laplacian` uses `A = delta*M + gamma*K` as the prior precision; `bilaplacian` uses `A M^-1 A`, the hIPPYlib/fenics_ice operator that a 2-D Whittle-Matern field needs to be function-valued. Different priors, not two spellings of one: their gammas are not convertible and their MAPs are not comparable, so the MAP stamps `prior_form` | `laplacian` |
+| `ISMIP7_PRIOR_SIGMA_THETA` / `_PHI`, `ISMIP7_PRIOR_RHO` | `bilaplacian` only: the log-deviation scale and correlation length (m), converted to `(delta, gamma)` by hIPPYlib's `sigma^2 = 1/(4 pi gamma delta)`, `rho = sqrt(8 gamma/delta)`. The un-squared form has no such closed form, which is why its gamma can only be tuned | `0.3` / `0.3` / `ISMIP7_L_REG` |
+| `ISMIP7_PRECOND_STEP0` | TAO metrics only: the largest change the FIRST step may make to a control, in that control's units, applied per control block. L-BFGS's first step is `-H_0 g` at unit length with no curvature pair to rescale it, and one evaluation outside the region where the forward has a solution returns NaN that every later trial point inherits | `0.15` |
+| `ISMIP7_GTOL` | TAO metrics only: `tao_gatol` on the prior-metric gradient norm `sqrt(g' A^-1 g)`, which is mesh independent unlike the raw l2 norm the scipy path prints. `0` spends the whole iteration budget, as the scipy path does | `0` |
 | `ISMIP7_SIGMA_U_FLOOR` | floor on the per-component MEaSUREs error (m/yr), so near-zero errors cannot let a few nodes dominate | `1.0` |
 | `ISMIP7_SIGMA_U_UNOBS` | sigma (m/yr) where MEaSUREs reports no error. Those nodes carry a zero-filled `u_obs`, so they need a large sigma when `ISMIP7_OBS_MASK=0` | `1e4` |
 | `ISMIP7_OBS_MASK` | `0` drops the velocity-observation mask | `1` |
@@ -588,7 +591,7 @@ projection), run in that run's own shell so it captures the environment.
 | `ISMIP7_DHDT_CLIM_START` / `_END` | RACMO climatology window for that source | `2003` / `2019` |
 | `ISMIP7_DHDT_REACH` | pixel-to-cell reach as a multiple of `sqrt(area)`, rejecting pixels outside the mesh that nearest-centroid assignment would snap onto boundary cells | `0.75` |
 | `ISMIP7_DHDT_NET_SIGMA` | sigma (Gt/yr) on the integrated grounded dH/dt; `0` disables the net term. Active only with `ISMIP7_DHDT_WEIGHT > 0` | `0` |
-| `ISMIP7_OBS_KIT` | path to `AntarcticaObsISMIP7-v*.nc`. The kit is needed only to build the dH/dt cache rasters in `antarctica/data/dhdt_cache/`; with those staged it may be absent. A path that does not exist is a hard error | newest under `<DATA_ROOT>/obs/mipkit` |
+| `ISMIP7_OBS_KIT` | path to `AntarcticaObsISMIP7-v*.nc`. The kit is needed only to build the dH/dt cache rasters in `<ISMIP7_OBS_DATA_ROOT>/dhdt_cache/`; with those staged it may be absent. A path that does not exist is a hard error | newest under `<DATA_ROOT>/obs/mipkit` |
 
 ### Environment knobs (forward runs)
 
@@ -618,7 +621,7 @@ redeclare those literals.
 | `ISMIP7_BNDIDS` | boundary-id JSON override | per-mesh sidecar, else `mesh/boundary_ids.json` |
 | `ISMIP7_GEOMETRY_SPACE` | `dg0` (one thickness for terminus force and mass flux) or `cg1` (legacy, A/B only). Selects the MAP. See `../GEOMETRY_DISCRETIZATION.md` | `dg0` |
 | `ISMIP7_DATA_ROOT` | forcing tree root | `<repo>/ISMIP7/AIS` |
-| `ISMIP7_OBS_DATA_ROOT` | BedMachine, MEaSUREs velocity, and RACMO observational-data root; useful when these files live on an external volume | `<repo>/antarctica/data` |
+| `ISMIP7_OBS_DATA_ROOT` | BedMachine, MEaSUREs velocity, RACMO and the dH/dt cache observational-data root; name it in a site file when these files do not live beside the code. Also a write target: with the MIPkit present `obs_dhdt` builds `<root>/dhdt_cache/` here, so staged cache tifs belong under this root, wherever it points | `<repo>/antarctica/data` |
 | `ISMIP7_T_END` / `ISMIP7_DT` | end time and timestep (yr). `t=Y.0` is 1 January of year Y, so a run covering 2015 to 2300 ends at `2301` and a historical covering 1850 to 2014 ends at `2015`. Each driver owns its end (historical `2015`, ssp370 `2101`, other projections and control `2301`, OCX `2026`) | driver's own / `1.0` |
 | `ISMIP7_FRICTION` | `budd` or `regularized_coulomb`; selects the MAP | `budd` |
 | `ISMIP7_OUTPUT_INTERVAL` | timeseries row every N steps | `10` |

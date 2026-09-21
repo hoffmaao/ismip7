@@ -37,10 +37,111 @@ def regularization_form(theta, gamma, area, L_reg=L_REG):
                    + float(L_reg) ** 2 * inner(grad(theta), grad(theta))) * dx
 
 
+def prior_operator_coeffs(gamma, area, L_reg=L_REG):
+    """``(delta_eff, gamma_eff)`` of the prior precision ``A = delta_eff*M +
+    gamma_eff*K``: exactly the coefficients of the Hessian of
+    :func:`regularization_form`."""
+    gamma = float(gamma)
+    area = float(area)
+    return gamma / area, gamma * float(L_reg) ** 2 / area
+
+
+def prior_bilinear_form(trial, test, gamma, area, L_reg=L_REG):
+    """Prior precision ``A`` as a bilinear form.
+
+    The Hessian of :func:`regularization_form`, so the regularization the
+    inversion pays, the metric it descends in, and the operator the UQ
+    eigendecomposes against are one definition rather than three copies that
+    can drift (the reason the MISMIP TDDA pipeline keeps them in one module).
+    """
+    from firedrake import dx, inner, grad
+    delta_eff, gamma_eff = prior_operator_coeffs(gamma, area, L_reg)
+    return (delta_eff * inner(trial, test)
+            + gamma_eff * inner(grad(trial), grad(test))) * dx
+
+
 def regularization_gradient_form(theta, test, gamma, area, L_reg=L_REG):
     """Gateaux derivative of regularization_form wrt theta (the assembled
-    cost-gradient contribution): gamma/area * (theta*test + L^2 grad.grad)."""
+    cost-gradient contribution): ``A theta`` tested against ``test``, which is
+    :func:`prior_bilinear_form` evaluated at the current control."""
+    return prior_bilinear_form(theta, test, gamma, area, L_reg=L_reg)
+
+
+# ---------------------------------------------------------------------------
+# Bi-Laplacian (squared) prior -- the hIPPYlib / fenics_ice precision
+# ---------------------------------------------------------------------------
+# Everything above uses A ITSELF as the prior precision. hIPPYlib
+# (BiLaplacianPrior) and fenics_ice (prior.Laplacian.action, "LM^-1L") instead
+# use the SQUARE
+#
+#     B = A M^-1 A,        A = delta*M + gamma*K
+#
+# and that is not a cosmetic difference. The Whittle-Matern SPDE
+# (delta - gamma*Lap)^(alpha/2) u = W gives a field in L^2 only for
+# alpha > d/2; in d = 2, A alone is alpha = 1 and the "field" is a
+# distribution, not a function -- its pointwise variance does not exist and
+# refining the mesh does not converge to anything. Squaring gives alpha = 2,
+# nu = alpha - d/2 = 1, and a genuine function-valued Matern field. This is
+# why both codes square, and why both quote closed-form marginal variance and
+# correlation length, which the un-squared operator has none of.
+#
+# The energy needs a mass solve, so unlike regularization_form it is not one
+# UFL form: R(theta) = 0.5 * theta' A M^-1 A theta is evaluated by solving
+# M f = A theta and then integrating 0.5*f^2 (exactly fenics_ice's
+# norm_sq applied to its solved field). The caller owns the solve so that the
+# inversion can put it on the adjoint tape and the UQ can reuse the operator.
+
+def bilaplacian_coeffs(sigma, rho):
+    r"""``(delta, gamma)`` of ``A = delta*M + gamma*K`` for a 2-D Matern field
+    of marginal standard deviation ``sigma`` and correlation length ``rho`` (m)
+    under the SQUARED precision ``A M^-1 A``.
+
+    hIPPYlib's BiLaplacianPrior relations at ``nu = alpha - d/2 = 1``:
+
+        sigma^2 = 1 / (4*pi*gamma*delta),      rho = sqrt(8*gamma/delta)
+
+    inverted here. Unlike the single-knob ``gamma``/``L_reg`` pair of the
+    un-squared form, both numbers are physical: ``sigma`` is the log-deviation
+    scale the control is expected to carry and ``rho`` the distance over which
+    it decorrelates, so a prior can be SET rather than tuned.
+    """
+    import math
+    sigma = float(sigma)
+    rho = float(rho)
+    if sigma <= 0.0 or rho <= 0.0:
+        raise ValueError(f"sigma and rho must be positive, got {sigma}, {rho}")
+    delta = math.sqrt(2.0 / math.pi) / (sigma * rho)
+    gamma = delta * rho ** 2 / 8.0
+    return delta, gamma
+
+
+def prior_operator_form(trial, test, delta, gamma):
+    r"""``A = delta*M + gamma*K`` as a bilinear form, in the (delta, gamma)
+    parameterisation hIPPYlib and fenics_ice use directly.
+
+    :func:`prior_bilinear_form` is the same operator reached through this
+    repository's (gamma, area, L_reg) knobs; both exist so the two conventions
+    never drift into two different operators.
+    """
     from firedrake import dx, inner, grad
-    coef = float(gamma) / float(area)
-    return coef * (theta * test
-                   + float(L_reg) ** 2 * inner(grad(theta), grad(test))) * dx
+    return (float(delta) * inner(trial, test)
+            + float(gamma) * inner(grad(trial), grad(test))) * dx
+
+
+def bilaplacian_aux_residual(theta, aux, test, delta, gamma):
+    r"""Residual of the mass solve ``M f = A theta`` defining ``f = M^-1 A theta``.
+
+    Solve this for ``aux`` (inside the tape, so the adjoint carries it), then
+    the prior energy is :func:`bilaplacian_energy_form` of the result.
+    """
+    from firedrake import dx, inner
+    return (inner(aux, test) * dx
+            - prior_operator_form(theta, test, delta, gamma))
+
+
+def bilaplacian_energy_form(aux):
+    r"""``0.5 * \int f^2 dx`` with ``f = M^-1 A theta``, i.e.
+    ``0.5 * theta' A M^-1 A theta`` -- fenics_ice's ``norm_sq`` of its solved
+    field."""
+    from firedrake import dx, inner
+    return 0.5 * inner(aux, aux) * dx

@@ -519,12 +519,19 @@ Output and submission:
     behind the 16 `MISSING` rows the audit had been reporting, 2,755 files and
     84 GB, mostly the `ctrl` ocean `thetao`, `tf` and `so` and the `ctrl`
     `mrro` and `mrro-anomaly`. The run ended 87,012 `adopt`, 2,755 fetched, 0
-    failed. Eight `MISSING` rows survive and the files behind them are on disk:
-    the mirror keeps `extra` and `extras` one level deeper than the audit's row
-    model (`<product>/extra/climatology/<variable>/<file>`), so
-    `local_versions` looks for a version directory directly under `extra`,
-    finds none and calls the row missing. `MISSING` sets no exit status, so the
-    audit still exits 0. (issue #14)
+    failed. Eight `MISSING` rows survived it with their files on disk, because
+    `local_versions` stopped at the top of a row while the mirror nests `extra`
+    and `extras` one level deeper; that is fixed here, and those rows read `ok`
+    against the Quartz tree.
+
+    **The mirror is not frozen.** Between 10:22 and 10:48 UTC on 21 September,
+    while the pass above was running, it gained 4,576 objects and 226 GB with
+    none removed: `pr`, `pr-anomaly`, `tas` and `tas-anomaly` for `ctrl`, at
+    `2000m` and `8000m`, for both core ESMs. Two listings two hours apart
+    settle it, and the manifest covers the 89,767 objects that existed at the
+    time of the run. The `ctrl` atmosphere is the gap this opens, and whether
+    to pull those 226 GB is an open decision. This is the case issue #41
+    exists for. (issue #14)
 13. **Bring the Quartz forcing tree up to the mirror.** Done on 20 September.
     The 19 September reading (listing and NetCDF headers only, nothing run)
     undercounted the rows: the audit reports seven `BEHIND`. OCX

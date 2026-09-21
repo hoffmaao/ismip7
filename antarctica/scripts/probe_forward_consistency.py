@@ -1,13 +1,13 @@
 #!/usr/bin/env python3
-r"""Which forward-only term moves the re-solve away from a MAP's own velocity?
+r"""How sensitive is the re-solve of a MAP's own velocity to each forward-only
+argument of the residual?
 
 `check_budd_map.py --forward` measures the distance between the forward's
-cold-start diagnostic and the velocity the inversion saved. On the Ua 2 km MAPs
-it is 0.67 with the forward running at half the inversion's mean speed
-(FORWARD_RUN_READINESS.md), with identical geometry and controls. Both codes
-build the residual through `dual_friction.build_rc_residual`; they differ only
-in what they pass. This runs the same re-solve under each candidate, one fresh
-process per variant because `simulation.setup_model()` holds global state:
+cold-start diagnostic and the velocity the inversion saved; a MAP inverted
+under the forward's residual returns about 1e-7. Both codes build the residual
+through `dual_friction.build_rc_residual` and differ only in what they pass.
+This runs the same re-solve under each variant, one fresh process per variant
+because `simulation.setup_model()` holds global state:
 
     as_is        the forward as shipped
     nref_none    N_ref=None, the inversion's own call (ISMIP7_BUDD_NREF)
@@ -15,7 +15,9 @@ process per variant because `simulation.setup_model()` holds global state:
     alpha_inv    composite alpha at the inversion's 1e-2 (Budd forward: 1e-4)
     all          every one of the above together
 
-A variant that returns ~1e-9 names the term.
+On a fresh 32 km Budd MAP N_ref=None and alpha_inv were inert and the drags
+moved the answer; on the 14 September Ua MAPs the drags were the whole
+difference (FORWARD_RUN_READINESS.md section 4).
 
     python antarctica/scripts/probe_forward_consistency.py MAP.h5 \
         ISMIP7_MESH=... ISMIP7_LC=32000 ISMIP7_LC_COARSE=320000 [-n 4]

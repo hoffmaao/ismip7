@@ -17,7 +17,6 @@ Usage:
     python download_data.py
 """
 
-import os
 import sys
 import urllib.request
 from pathlib import Path

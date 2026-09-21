@@ -67,8 +67,9 @@ shelf. A basin or block whose OCX melt is off the climatology's by more than
 Serial. Reuses calibrate_melt's loaders, so it needs the same inputs: a MAP for
 the mesh, the OI climatology, the IMBIE2 basins and BedMachine.
 
-The measured rows below predate the ``h > 0`` test in the forward half: they
-counted ice-free ``haf <= 0`` cells as floating and are to be re-measured.
+The measured rows below predate the ``h > 0`` test and the seawater flotation
+test in the forward half (icepack/ismip7#66): they counted ice-free cells as
+floating and grounded the deep-draft shelf, and are to be re-measured.
 
 Measured on the Ua 2 km mesh, September 2026, with
 calibrated_K_per_basin_2000.npz calibrated against the re-released observation
@@ -136,9 +137,8 @@ from firedrake.petsc import PETSc                                     # noqa: E4
 
 import calibrate_melt as cm                                           # noqa: E402
 from icepack2_tools.forcing import (quadratic_mixed_slope,            # noqa: E402
-                                    compute_sin_alpha, ISMIP7Ocean,
-                                    OCX, OCX_OCEAN_VARIANTS,
-                                    _RHO_ICE, _RHO_WATER)
+                                    compute_sin_alpha, is_floating,
+                                    ISMIP7Ocean, OCX, OCX_OCEAN_VARIANTS)
 from icepack2_tools.geometry import sample_to_geometry                # noqa: E402
 from icepack2_tools.runconfig import raster_sample                    # noqa: E402
 # The same year and density the writer converts with, so the bound compared
@@ -285,12 +285,12 @@ def main():
     xy_dg = fd.Function(VectorFunctionSpace(mesh, "DG", 0)).interpolate(
         fd.SpatialCoordinate(mesh)).dat.data_ro
     b_np, h_np, s_np = b_dg.dat.data_ro, h_dg.dat.data_ro, s_dg.dat.data_ro
-    haf = s_np - (b_np + (_RHO_WATER / _RHO_ICE) * np.maximum(-b_np, 0.0))
+    afloat = is_floating(s_np, b_np)
     forward = half(
         xy_dg[:, 0], xy_dg[:, 1], np.minimum(s_np - h_np, 0.0),
         compute_sin_alpha({"Q": Q, "V": VectorFunctionSpace(mesh, "CG", 1),
                            "Q_g": Q_g, "h": h_dg, "s": s_dg}),
-        (haf <= 0) & (h_np > 0),
+        afloat & (h_np > 0),
         assemble(fd.TestFunction(Q_g) * dx).dat.data_ro)
 
     cap = float(d["sin_alpha_cap"]) if "sin_alpha_cap" in d else float("nan")

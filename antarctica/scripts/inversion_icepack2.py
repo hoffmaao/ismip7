@@ -1869,8 +1869,8 @@ def main():
                 "tao_max_it": max_iter,
                 # The gradient norm TAO tests is the one M_inv_action defines,
                 # i.e. sqrt(g' A^-1 g) -- mesh independent, unlike the raw l2
-                # norm the scipy path prints. 0 keeps the old behaviour of
-                # running the whole iteration budget.
+                # norm the scipy path prints. 0 leaves stopping to the ftol
+                # rule in _monitor and to tao_max_it.
                 "tao_gatol": gtol,
                 "tao_grtol": 0.0,
                 "tao_gttol": 0.0,

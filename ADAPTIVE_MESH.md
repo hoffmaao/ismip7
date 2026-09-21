@@ -49,7 +49,8 @@ moves the state onto a fresh load of the same mesh and reproduces the run
 (outflux 672 to 797 against 782 Gt/yr unadapted, VAF 57637.4 against 57637.3).
 That exercises the transfer rules. `run_adaptive.py` and the segment loop are
 wired and correct as far as the identity test reaches; treat a real mid-run
-adaptation as unvalidated. (issue #37)
+adaptation as unvalidated. Closed as icepack/ismip7#37, not planned for
+September 2026.
 
 `GLmorphing` was not ported. Úa carries a mesh-deformation scheme
 (`GLmorphing.m`) with no caller in `Ua.m` or `Ua2D.m`, a hook commented out in

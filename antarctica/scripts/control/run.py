@@ -37,7 +37,8 @@ from icepack2_tools.forcing import (
     quadratic_mixed_slope,
     load_K_per_basin,
     forcing_coords,
-    _RHO_ICE, _RHO_WATER, _K_DEFAULT,
+    is_floating,
+    _K_DEFAULT,
 )
 from icepack2_tools.climatology import (
     clim_start, clim_end, clim_scenario, clim_pool_missing, describe_clim_pool,
@@ -156,9 +157,7 @@ def make_synthetic_ocean_callback(tf_max=1.5, depth_ref=1000.0, K=_K_DEFAULT):
         sal = np.full_like(tf, 34.5)
         sin_a = compute_sin_alpha(ctx)
         melt = quadratic_mixed_slope(tf, sal, sin_a, K=K)
-        haf = s - (b + (_RHO_WATER / _RHO_ICE) * np.maximum(-b, 0.0))
-        floating = haf <= 0
-        ctx["ocean_melt"].dat.data[:] = np.where(floating, melt, 0.0)
+        ctx["ocean_melt"].dat.data[:] = np.where(is_floating(s, b), melt, 0.0)
 
     return callback
 

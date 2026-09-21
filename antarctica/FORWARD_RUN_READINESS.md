@@ -5,7 +5,9 @@ Swept from the ISMIP discussion board (https://github.com/orgs/ismip/discussions
 the two in `ismip7-antarctic-ocean-forcing`). This file is the tracked home of
 both sweeps. Sections 1 to 5 are the first, corrected where the second found
 them out of date; section 6 is the second, with the thread-by-thread
-checklist. Ordered by what blocks a submission first.
+checklist. Section 7 is a third, read-only pass on 21 September (49 threads)
+over the threads that had moved; it updates that checklist in place. Ordered by
+what blocks a submission first.
 
 ## 1. Protocol changes since 12 August
 
@@ -19,7 +21,7 @@ replaced SDBN1 v2.
 
 **Source Cooperative mirror (#40).** Products `ismip7-ais-forcing`,
 `ismip7-ais-observations`, `ismip7-ais-melt-calibration`. Re-synced with Globus
-on 11 September, by hand every week or two. The forcing layout is
+on 11 and 21 September, by hand every week or two. The forcing layout is
 `data/<ESM>/<scenario>/<product>/<variable>/<file>`, with no `AIS/` level and
 no version directories; the version sits in the filename. Anonymous HTTPS
 listing needs a browser-like User-Agent. This is the route for NOTS, which has
@@ -48,7 +50,9 @@ front positions in `obs/`), ice mask ends 2021. The spatially shifted AIS OCX
 17th to be OCX only; the OCX gradients are v2 on the mirror. Nothing here reads
 them (no SMB-height feedback), but it is the case that showed a re-sync could
 not see a replaced file, see section 6. Open since 17 September: the OCX `main`
-thermal forcing departs from the Zhou climatology around Mertz (#48).
+thermal forcing departs from the Zhou climatology around Mertz (#48). Confirmed
+upstream on 20 September: OCX was built on an earlier extrapolation and is
+being regenerated, with no date set, section 7.
 
 **Fracture masks (#29, #30, #33).** Both ESMs' SSPs (CESM ssp585 at v2.1), none
 for historical or OCX. Floating ice only. The masks light up near the grounding
@@ -405,6 +409,9 @@ Forcing data:
       past the end of a series, atmosphere and now ocean alike, logged, and
       anything further raises. A file with no time slices is named, with the
       cause.
+- [x] #49 (the forum thread) CESM2-WACCM `thetao` ends in 2299 for ssp126 and
+      ssp585: the #8 rule, the ocean reader holds 2299 for the single year 2300.
+      [~] Upstream is asked to add 2300; a pre-matrix `download_mirror.py --dry-run` shows it. (issue #41)
 - [x] #9, #24 time stamps and calendars differ between products: the year comes
       from the filename and only the year of a time value is ever read.
 - [x] #10, #39 NaN fill and NaN outside the downscaled mask: zero-filled, in the
@@ -434,7 +441,9 @@ Forcing data:
       the README names both gradients as unused.
 - [x] #32, #33, #41 item 6 OCX: the readers open the real tree and core 11 runs
       on it by default (`ISMIP7_OCX_FORCING`).
-- [~] #48 Mertz: `check_melt_bound.py --ocx` is the tripwire. [ ] Run it. (issue #11)
+- [~] #48 Mertz, and Cook by the product author's account: OCX confirmed built
+      on an earlier extrapolation and being regenerated, no date set (section 7).
+      `check_melt_bound.py --ocx` is the tripwire. [ ] Run it. (issue #11)
 - [~] #11 Ross warm stripe: a feature of the climatology. Thermal forcing is
       used unsmoothed, in the README. A perturbed member, not a fix.
 - [x] #25 melt toolbox re-release: recalibrated on 14 September, section 4.
@@ -456,7 +465,7 @@ Output and submission:
 
 - [x] #14, #16, #20 time encoding, no initial state, filename years.
 - [x] #16 `licalvf` negative for loss. [~] #22 `ligroundf` sign, in the README
-      with a `[confirm]`. (issue #17)
+      with a `[confirm]`. The 21 September reply prescribes no sign, section 7. (issue #17)
 - [x] #23 bounds. [x] #46 the bundled request is 0.5.0's and records its tag;
       `audit_variable_request.py` finds drift. [ ] Re-run the checker at 0.5.0. (issue #12)
       Scalars are not range-checked upstream, so the negative `tendlicalvf`
@@ -465,7 +474,8 @@ Output and submission:
 - [x] #17 names: the core counter follows from the forcing and the ids are
       validated. [~] What goes in the forcing field of an OCX filename is
       unsettled: isschecker checks it against CMIP model names and has no `ocx`
-      experiment row. (issue #18)
+      experiment row, so it rejects the organisers' own GrIS example (`ERA5`,
+      `ocx`), and no AIS example exists, section 7. (issue #18)
 - [x] #5, #13, #21, #6, #18, #1, #12, #38.
 
 ### Actions added, continuing section 5
@@ -479,7 +489,9 @@ Output and submission:
 9. **Run `check_melt_bound.py --ocx` on the production mesh** before core 11
    runs on the OCX product, and hold that run until #48 is answered if the
    Mertz block is flagged. `ISMIP7_OCX_FORCING=stopgap` reproduces the old
-   core 11 meanwhile. (issue #11)
+   core 11 meanwhile. The 20 September answer names the cause and promises
+   regenerated files with no date, and places the difference at Cook, so read
+   the Cook block as well as Mertz, section 7. (issue #11)
 10. **Re-run isschecker at 0.5.0** on the 32 km control and ssp585 outputs,
     record the version in the README, and re-read action 5 in its light: below
     1 % of values the `libmassbffl` excursion is now a warning. (issue #12)
@@ -582,3 +594,92 @@ settled from NetCDF headers on Quartz:
   highest version. `30_sep` stays the default, since every K is fitted to it
   and `calibrate_melt.py` reads it whatever `ISMIP7_OI_VERSION` says. Moving
   the forward to `06_nov` without recalibrating shifts the melt.
+
+## 7. Third sweep, 21 September
+
+Read-only, two days after section 6. The board holds 49 threads. Read in full
+through the GitHub API: #17, #22, #30, #37, #40, #48 and the new #49.
+`ismip7-antarctic-ocean-forcing` has no item updated since the 18th. Nothing
+was posted upstream, isschecker was read at its tag and never run, and no
+mirror listing was taken. Thread and issue numbers now collide: `#49` below is
+the forum thread about `thetao`, and `(issue #49)` in section 6 is the board
+item about mirror prefixes.
+
+### What moved on the board since the 19th
+
+- **#48, 20 September, open.** The author of the OCX ocean product confirmed
+  that OCX was built from an earlier version of the extrapolated climatology,
+  v1 or v2 and unlabelled in the files, while `so` and `thetao` of the Zhou
+  climatology stand at v4. The author places the difference beneath the Cook
+  ice shelf near 152.5°E, in the Wilkes Land basin, about 1.5 °C colder at
+  500 m in OCX, and expects zero melt or refreezing there from any
+  parameterisation calibrated to the climatology. Cook is near x +1090 km,
+  y -2090 km in EPSG:3031 and Mertz near x +1440 km, y -2030 km, both
+  converted here from approximate positions. The OCX files are being
+  regenerated from the current climatology. A maintainer of the forcing mirror
+  called the update necessary; its timing is the steering committee's call and
+  was undecided on the 21st. Both question whether the v4 extrapolation is the
+  more realistic one at Cook, 1.5 °C above the surface freezing point under a
+  shelf observed to melt at 1.3 m/yr, and no change to the climatology is
+  planned. The regenerated OCX will follow the current re-release, while every
+  K here is fitted to `30_sep`; whether those two differ at Cook was not
+  checked. (issue #11)
+- **#30, 21 September.** UFEMISM (IMAU/KNMI) posted both end-members under
+  ssp585 for both core ESMs: removing flagged ice only at a front that touches
+  open ocean loses about 8 % less mass by 2300 than removing it everywhere.
+  The 3.5 m to nearly 5 m of section 6 is that model with the mask everywhere
+  against no fracture forcing, and the doubling is PISM's everywhere against
+  margin-only sensitivity runs from July. The two published end-member spreads
+  are therefore about 8 % and about 100 %. The organisers replied twice the
+  same day: the ISMIP6-style application can behave unrealistically on the
+  large shelves, a front-connected rule is a good way to limit that, no
+  front-connected mask can be supplied since every model's front differs, and
+  they welcome groups choosing different approaches so that the projections
+  carry the spread. Upstream prescribes no mode. (issue #10)
+- **#22, 21 September, open.** The sign question of the 18th drew one reply,
+  from a respondent who speaks for the organisers in #30: gain positive and
+  loss negative holds in general, and for `ligroundf` the sign depends on the
+  reference, since the grounded ice loses what the shelves gain. No sign is
+  prescribed. The organiser the board named on the 18th as best placed to
+  answer has not replied. The accepted answer is a 30 June reply, marked on
+  18 August, about converting the flux to a per-area quantity. The bundled
+  request table, whose `ligroundf` row is identical to isschecker 0.5.0's,
+  bounds `ligroundf` to [-1e9, 1e11] kg m-2 s-1 and `licalvf` to [-1e11, 0].
+  The thread opened because the checker then required `ligroundf` to be
+  nonnegative, and the lower bound was relaxed to 1 % of the upper for ice
+  rumples. The table therefore expects `ligroundf` positive for ice crossing
+  from grounded to floating, which is how the writer books it. (issue #17)
+- **#40, 21 September.** The mirror was re-synced with Globus, after 29 August
+  and 11 September. New: `ctrl` `pr`, `tas` and their anomalies for both core
+  ESMs at all resolutions, which matches the 4,576 objects action 12 saw
+  arrive that morning; dEBM2 atmosphere for the five additional ESMs,
+  `historical` and `ssp370`, AIS at 8 km, their SDBN1 downscaling being absent
+  from Globus so far; and the melt-calibration READMEs and licence files on
+  Globus. The additional ESMs are announced as incomplete in both places, with
+  the ISMIP7 protocol overview sheet as the place to check what is ready.
+  Nothing in the announcement touches the fracture product. (issue #41)
+- **#49, 21 September, open, new.** A group reports CESM2-WACCM `thetao` for
+  ssp126 and ssp585 ending in 2299 where MRI-ESM2-0 runs to 2300, and asks for
+  the year on Globus. No reply yet. This is the #8 case, already in section 1:
+  `ISMIP7Ocean._chunk_for` holds 2299 for the single year 2300 and says so once
+  per variable. If the year is added under the same version it shows as
+  `fetch` in `download_mirror.py --dry-run` while the audit table stays `ok`;
+  if the version is bumped, the audit reads `BEHIND`. (issue #41)
+- **Unmoved.** #17 since 29 June, #37 since 4 September. isschecker is still
+  0.5.0, tagged on 17 September at the head of its default branch, with no open
+  pull request and no open issue, so nothing upstream is adding an `ocx` row.
+
+### Read this pass in #17 and in the checker source
+
+The organisers' list of core filenames of 19 June gives core 11, for GrIS, as
+`iareafl_GrIS_NORCE_CISM3_m001_ERA5_f001_ocr_C011_2015-2300.nc`, and the ISMIP7
+web page carries the same list with `ocx` in place of `ocr` (read there through
+an automated page summary). No AIS example exists, and the conventions PDF the
+thread links was unreadable without a sign-in. At isschecker 0.5.0: `ERA5` is
+absent from `VALID_ESM_NAMES`, so field 5 is an error, and
+`experiments_ismip7.csv` has five rows (`historical`, `ssp370`, `ssp126`,
+`ssp585`, `ctrl`), so an `ocx` file set draws a naming error and its compliance
+check is skipped. The OCX atmosphere here is `RACMO2.3p2-ERA`
+(`forcing.OCX_ATMOSPHERE_SOURCE`), which the list lacks as well. Core 11 cannot
+pass 0.5.0 under any forcing name, the experiment row being what is missing.
+(issue #18)

@@ -809,7 +809,8 @@ Neither matrix has a 500 m timing, and that is not for want of trying: under
 `scpc_mumps` both 32-rank lanes ran at dt 0.025 and tripped the runaway
 tripwire at step 1, while the 64-rank pair was either not run or blocked by its
 scout; under `scpc_gamg` none were run. 500 m is an open stability question,
-not merely an untried one. (issue #22)
+not merely an untried one; the board closed it as not planned for this
+submission (21 September).
 
 `batch_runners/site_env.sh` names the mesh, `projection.sbatch` the solver and
 the step, and each `sites/<name>.sh` the rank count (64 on Quartz).

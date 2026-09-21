@@ -377,10 +377,10 @@ forcing-version audit, the output writer, and the melt calibration above.
    unsettled upstream local-slope question. Until it is made, `load_K_per_basin`
    warns once per run when the K file it reads records the cap it was fitted
    against. (issue #26)
-6. Optional: read the provided `ctrl` trees in place of the `ssp126`
-   reference-climate pool. (issue #43)
-7. Optional: the stress criterion (Lai et al. 2020) alongside the collapse
-   mask. (issue #44)
+6. Optional, not planned for this submission (board, 21 September): read the
+   provided `ctrl` trees in place of the `ssp126` reference-climate pool.
+7. Optional, not planned for this submission (board, 21 September): the
+   stress criterion (Lai et al. 2020) alongside the collapse mask.
 
 ## 6. Second sweep, 19 September
 

@@ -173,18 +173,25 @@ def _write_record(ls, out_dir, gt, gp, mis, rt, rp, phase):
 
 
 def test_harvest_lists_unfinished_points_but_fits_only_finished_ones(tmp_path, capsys):
+    """The weights 1e3..1e6 name files that sort out of numeric order as
+    strings (gt10000 before gt1000), so the rows must be ordered by value."""
     ls = _lsurface()
     _write_record(ls, tmp_path, 1e3, 1e5, 5.0, 3.0, 1.0, "finished")
     _write_record(ls, tmp_path, 1e4, 1e5, 9.0, 2.0, 1.0, "running")
+    _write_record(ls, tmp_path, 1e5, 1e5, 12.0, 1.5, 1.0, "finished")
+    _write_record(ls, tmp_path, 1e6, 1e5, 20.0, 1.2, 1.0, "finished")
     rows = ls.load_points(str(tmp_path))
     assert [(r["gamma_theta"], r["phase"], r["finished"]) for r in rows] == [
-        (1e3, "finished", True), (1e4, "running", False)]
+        (1e3, "finished", True), (1e4, "running", False),
+        (1e5, "finished", True), (1e6, "finished", True)]
     ls.main(["harvest", str(tmp_path)])
     out = capsys.readouterr().out
     assert "skipped 1 unfinished point(s)" in out
     assert "running" in out
     with open(tmp_path / "lsurface.csv") as f:
-        assert [line.rsplit(",", 1)[1].strip() for line in f][1:] == ["finished", "running"]
+        csv_rows = [line.strip().split(",") for line in f][1:]
+    assert [(float(c[0]), c[-1]) for c in csv_rows] == [
+        (1e3, "finished"), (1e4, "running"), (1e5, "finished"), (1e6, "finished")]
 
 
 def test_harvest_with_no_finished_point_says_so(tmp_path):

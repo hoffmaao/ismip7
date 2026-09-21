@@ -10,7 +10,7 @@ is an index.
 **Claim the card before you start a run or an inversion.** A card in
 Claimed for more than 24 hours with no comment reads as unclaimed.
 
-Generated: 2026-09-21 11:16 UTC. 22 blocking, 10 owed, 4 after the deadline, 9 unverified.
+Generated: 2026-09-21 11:45 UTC. 22 blocking, 11 owed, 4 after the deadline, 9 unverified.
 
 ## Blocking the submission
 
@@ -45,6 +45,7 @@ Decisions first: they have the longest lead time and they gate the runs.
 
 | # | item | unblocked by | owner | sites | state |
 |---|---|---|---|---|---|
+| [49](https://github.com/icepack/ismip7/issues/49) | forcing: decide which AIS forcing beyond the three audited prefixes to mirror | needs-decision | unassigned | n/a | verified open |
 | [32](https://github.com/icepack/ismip7/issues/32) | solver: the monolithic forward for core 7 and the core 10 tail is not implemented | needs-run | group | local | verified open |
 | [35](https://github.com/icepack/ismip7/issues/35) | mesh: the level-set unit tests were lost and are still to be rebuilt | needs-run | group | local | verified open |
 | [36](https://github.com/icepack/ismip7/issues/36) | calving: the von Mises level-set front is not calibrated | needs-run | group | local | verified open |
@@ -86,12 +87,12 @@ production run or a group decision.
 
 | source | items |
 |---|---|
-| `src:readiness` | 15 |
+| `src:readiness` | 16 |
 | `src:submission-readme` | 11 |
 | `src:matrix-status` | 6 |
 | `src:topic-doc` | 8 |
 | `src:runbook` | 3 |
-| `src:open-pr` | 5 |
+| `src:open-pr` | 6 |
 
 ## After the deadline
 

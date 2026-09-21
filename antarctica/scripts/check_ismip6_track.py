@@ -23,8 +23,11 @@ vibe. Reference numbers:
   SLE/yr after the first-year init transient (the 2016+ window; the
   post-continuation transient is real but must average out fast).
 - Stability: the Jul 2026 split-step blow-up doubled outflux per step.
-  Any sustained year-over-year outflux growth factor >= 1.5, or outflux
-  beyond 6000 Gt/yr, is an automatic FAIL regardless of the other rows.
+  A numerical runaway is an automatic FAIL regardless of the other rows: front
+  discharge growing by >= 1.5x in each of two consecutive years, or a year
+  whose median discharge exceeds 6000 Gt/yr. Single-step spikes do not count:
+  an emptying event books a step of discharge and the budget closes, and the
+  Jul 2026 blow-up that this exists to catch grew ~2x per 0.1-yr step.
 
 Usage:
     python check_ismip6_track.py <timeseries.csv> [--dt DT]
@@ -62,6 +65,36 @@ def load(csv_fn):
         raise SystemExit(f"{csv_fn}: empty timeseries")
     cols = {k: np.array([float(r[k]) for r in rows]) for k in rows[0]}
     return cols
+
+
+def runaway_detected(discharge, dt):
+    r"""True when the front discharge is running away, not merely spiking.
+
+    Year blocks make the test independent of dt. Two clauses, both sustained:
+    the block MEDIAN above 6000 Gt/yr (a mean is moved by one step, a median is
+    not), or a growth factor >= 1.5 in each of two consecutive years to above
+    1000 Gt/yr. Growth uses block means on purpose: a year whose mean is lifted
+    1.5x by several large steps counts as growth. The median clause is what
+    makes a single step harmless, and the growth clause is the stricter of the
+    two (it keeps the 285-year n=4 CTRL, whose growth years carry 2 and 4 steps
+    above 6000 Gt/yr out of 10, as FAIL). A trailing block shorter than half a
+    year is dropped, since one step would set its median. The Jul 2026 blow-up
+    (~2x per 0.1-yr step) fails the median clause in year one; the growth
+    clause needs three year blocks and cannot fire before year three. A single
+    emptying step, which the peak-of-any-step clause used to flag on cores 2,
+    3 and 7 of the July matrix, fails neither.
+    """
+    discharge = np.abs(np.asarray(discharge, float))
+    nblk = max(1, int(round(1.0 / dt)))
+    blocks = [discharge[i:i + nblk] for i in range(0, len(discharge), nblk)]
+    if len(blocks) > 1 and len(blocks[-1]) < nblk // 2:
+        blocks.pop()
+    means = [np.mean(b) for b in blocks]
+    medians = [np.median(b) for b in blocks]
+    growth = [means[i + 1] / max(means[i], 1e-9) for i in range(len(means) - 1)]
+    sustained = any(growth[i] >= 1.5 and growth[i + 1] >= 1.5 and means[i + 2] > 1000.0
+                    for i in range(len(growth) - 1))
+    return bool(max(medians) > 6000.0 or sustained)
 
 
 def main():
@@ -117,14 +150,7 @@ def main():
         "resid":     float(np.abs(resid_rate).max()),
     }
 
-    # Runaway detector: sustained growth of the front discharge. Compare
-    # year-block means so dt does not matter; the Jul 2026 blow-up grows
-    # ~2x per 0.1-yr step (~1000x/yr) and trips this in year one.
-    nblk = max(1, int(round(1.0 / dt)))
-    blocks = [np.mean(discharge[i:i + nblk]) for i in range(0, len(discharge), nblk)]
-    growth = [blocks[i + 1] / max(abs(blocks[i]), 1e-9) for i in range(len(blocks) - 1)]
-    runaway = (max(np.abs(discharge)) > 6000.0
-               or any(g >= 1.5 and blocks[i + 1] > 1000.0 for i, g in enumerate(growth)))
+    runaway = runaway_detected(discharge, dt)
 
     print(f"ISMIP6-track audit: {os.path.basename(csv_fn)}")
     print(f"  {len(yr)} steps, {yr[0]:.1f}->{yr[-1]:.1f}, dt={dt:.3g} yr\n")
@@ -140,7 +166,7 @@ def main():
     v = "FAIL" if runaway else "PASS"
     n_fail += int(runaway)
     print(f"  {'no discharge runaway':<22} {max(np.abs(discharge)):>10.1f}   "
-          f"[peak < 6000, growth<1.5x/yr] {v}")
+          f"[yr-median < 6000, growth<1.5x for 2 yr] {v}")
 
     print(f"\n  {'ON TRACK' if n_fail == 0 else 'OFF TRACK'} "
           f"({n_fail} FAIL row{'s' if n_fail != 1 else ''})")

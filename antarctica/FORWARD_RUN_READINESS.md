@@ -498,20 +498,47 @@ Output and submission:
     1 % of values the `libmassbffl` excursion is now a warning. (issue #12)
 11. **Run `ismip7-scalar-processing`** on the same outputs, for `sla20`,
     `slg20` and `slvaf`, and compare its scalars with the native ones. (issue #13)
-12. **Adopt or refetch the forcing that predates the manifest.** The first
-    `audit_forcing_versions.py` run after this lands will count most of the
-    Globus-era tree as `older`. `download_mirror.py --older adopt` vouches for
-    it, `--older refetch` replaces it; either way do it once, before action 4. (issue #14)
-13. **Bring the Quartz forcing tree up to the mirror.** Read there on 19
-    September (listing and NetCDF headers only, nothing run): the OCX
-    `dacabfdz` is still at `v1`, which is the spatially shifted file of #45,
-    with `v2` on the mirror; CESM2-WACCM ssp585 fracture is at `v2` with `v2.1`
-    on the mirror; and there is no download manifest yet. Nothing reads the
-    gradients and the core matrix runs without fracture, so no result is
-    affected, and `audit_forcing_versions.py` now lists the OCX tree by default
-    and reports both as BEHIND. The OCX `acabf` (47 years, 1979-2025) and the
-    four OCX oceans are there in the layout the readers expect, so core 11
-    passes its coverage gate on Quartz. (issue #15)
+12. **Adopt or refetch the forcing that predates the manifest.** Done on 20
+    September, and the premise above was wrong. The first
+    `audit_forcing_versions.py` run counts none of the Globus-era tree as
+    `older`. `plan()` reaches `OLDER` only for a file that already matches the
+    mirror object's byte length, and then compares mtimes; every file on Quartz
+    carries an mtime at or after its object's, so the whole tree comes back
+    `adopt`. `--older refetch` and `--older adopt` therefore name the same run
+    here, and neither re-downloads anything. Checked twice: the audit prints an
+    `older` line only when the count is nonzero and printed none, and replaying
+    `plan()` offline over all 89,767 mirror objects against a 109,931 file
+    inventory of the tree gave 87,012 `adopt`, 2,755 `fetch`, 0 `OLDER`.
+    The manifest is what the run is for. `download_mirror.py --older refetch`
+    over `data/CESM2-WACCM/`, `data/MRI-ESM2-0/` and `data/OCX/` wrote
+    `ISMIP7/AIS/.mirror_manifest.json` across those 89,767 objects, which gives
+    `REPLACED` (same name, new content, #45 and #41) something to compare
+    against from here on. Recording an entry and fetching are one knob: the
+    script records only the keys under the prefixes it is given, and it fetches
+    whatever is missing under them, so full coverage also pulled every file
+    behind the 16 `MISSING` rows the audit had been reporting, 2,755 files and
+    84 GB, mostly the `ctrl` ocean `thetao`, `tf` and `so` and the `ctrl`
+    `mrro` and `mrro-anomaly`. The run ended 87,012 `adopt`, 2,755 fetched, 0
+    failed. Eight `MISSING` rows survive and the files behind them are on disk:
+    the mirror keeps `extra` and `extras` one level deeper than the audit's row
+    model (`<product>/extra/climatology/<variable>/<file>`), so
+    `local_versions` looks for a version directory directly under `extra`,
+    finds none and calls the row missing. `MISSING` sets no exit status, so the
+    audit still exits 0. (issue #14)
+13. **Bring the Quartz forcing tree up to the mirror.** Done on 20 September.
+    The 19 September reading (listing and NetCDF headers only, nothing run)
+    undercounted the rows: the audit reports seven `BEHIND`. OCX
+    `dacabfdz`, `dmrrodz` and `dtsdz` each stood at `v1` against `v2` on the
+    mirror, at both `SDBN1-2000m` and `SDBN1-8000m`, the `dacabfdz` being the
+    spatially shifted file of #45; and the CESM2-WACCM ssp585 fracture stood at
+    `v2` against `v2.1`. Nothing reads the gradients and the core matrix runs
+    without fracture, so no result was affected. Those 286 files, 3.94 GB, are
+    fetched, and `audit_forcing_versions.py` over its 462 mirror entries now
+    reports 0 behind, 0 pinned, 0 replaced and 0 older, exiting 0. The OCX
+    `acabf` (47 years, 1979-2025) and the four OCX oceans were already there in
+    the layout the readers expect, so core 11 passes its coverage gate on
+    Quartz. Action 4 and issue #41 still call for a fresh audit immediately
+    before the production matrix. (issue #15)
 
 ### Read off the real files on 19 September
 

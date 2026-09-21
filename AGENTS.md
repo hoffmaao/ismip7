@@ -235,7 +235,8 @@ checkouts of the same clone. To keep handoffs clean:
   tool-specific memory that other platforms cannot see.
 - **A blocker gets an issue before it gets a paragraph.** Status and owner
   live in an issue on `icepack/ismip7`; the reasoning and the measured numbers
-  stay in the topic doc, which carries the issue number as a bare `(#NN)`. The
+  stay in the topic doc, which carries the issue number as `(issue #NN)`.
+  A bare `#NN` in this repository's prose is an ISMIP7 forum thread. The
   board at https://github.com/users/dlilien/projects/1 holds status and the
   claim, and `NOW.md` is the generated index for a login node with no `gh`.
   `tests/test_now_index.py` fails the suite when a document states something

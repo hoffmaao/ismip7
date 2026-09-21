@@ -188,7 +188,7 @@ OMP_NUM_THREADS=1 ISMIP7_FRICTION=budd ISMIP7_LC=32000 ISMIP7_LC_COARSE=320000 \
   mpiexec -n 8 python antarctica/scripts/inversion_icepack2.py
 ```
 
-## Open: the per-basin melt K was calibrated under CG1 (#30)
+## Open: the per-basin melt K was calibrated under CG1 (issue #30)
 
 `antarctica/scripts/calibrate_melt.py` is CG1 throughout, building its own
 `FunctionSpace(mesh, "CG", 1)` and vertex-sampling BedMachine, `sin_alpha` and

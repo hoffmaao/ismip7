@@ -23,7 +23,7 @@ INDEX = REPO / "NOW.md"
 
 # Generated files carry their own provenance and are never hand annotated.
 GENERATED = ("NOW.md", "TIMING_MATRIX")
-GENERATED_DIRS = ("antarctica/reports",)
+GENERATED_FILES = ("antarctica/reports/core",)
 
 # A line matching one of these states that something is open. It must carry an
 # issue reference, on itself or on the heading above it.
@@ -37,7 +37,7 @@ MARKERS = (
     (re.compile(r"⚠️\s*OPEN"), "an OPEN banner"),
     (re.compile(r"^##+ Open:"), "an Open: heading"),
 )
-REF = re.compile(r"\(#\d+\)|\[confirm(?:, draft)? #\d+\]|#\d+\)")
+REF = re.compile(r"\(issue #\d+\)|\[confirm(?:, draft)? #\d+\]")
 # The legend that explains the checkbox vocabulary is not itself an open item.
 # A legend that explains the vocabulary is not itself an open item.
 EXEMPT = re.compile(r"`\[x\]`|`\[ \]`|`\[~\]`|item marked|items are marked|marked \*\*\[confirm")
@@ -49,7 +49,7 @@ def tracked_markdown():
     for rel in out.split():
         if any(g in rel for g in GENERATED):
             continue
-        if any(rel.startswith(d) for d in GENERATED_DIRS):
+        if any(rel.startswith(f) for f in GENERATED_FILES):
             continue
         yield rel
 
@@ -80,7 +80,7 @@ def test_every_documented_open_item_carries_an_issue():
             f"{report}\n\n"
             "File it, then put the number on the line:\n"
             "  gh issue create --repo icepack/ismip7 --template blocker.yml\n"
-            "  ... then append (#NN), or write [confirm #NN]\n"
+            "  ... then append (issue #NN), or write [confirm #NN]\n"
             "Status and the claim live on the board; this file is an index."
         )
 
@@ -90,7 +90,9 @@ def test_the_detector_would_catch_a_new_marker(tmp_path):
     probe = "- [ ] a new blocker nobody filed"
     assert any(p.search(probe) for p, _ in MARKERS)
     assert not REF.search(probe)
-    assert REF.search(probe + " (#42)")
+    assert REF.search(probe + " (issue #42)")
+    # A bare forum-thread number is not a board reference.
+    assert not REF.search("departs from the climatology (#48).")
 
 
 def _gh_ready():
@@ -117,7 +119,7 @@ def test_every_reference_resolves_to_an_open_issue():
     stale = []
     for rel in tracked_markdown():
         for n, line in enumerate((REPO / rel).read_text().splitlines(), 1):
-            for num in re.findall(r"\(#(\d+)\)|\[confirm(?:, draft)? #(\d+)\]", line):
+            for num in re.findall(r"\(issue #(\d+)\)|\[confirm(?:, draft)? #(\d+)\]", line):
                 num = int(num[0] or num[1])
                 if num not in open_now:
                     stale.append(f"  {rel}:{n} points at #{num}, which is closed")

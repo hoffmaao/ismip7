@@ -23,7 +23,7 @@
 > the inversion absorbs a wrong front treatment into `θ`/`φ`, where the t=0
 > misfit cannot reveal it - so the matrix needs **re-inversion and re-running**,
 > not just re-running. Only the 32 km DG0 Budd MAP has been rebuilt so far. See
-> `../../GEOMETRY_DISCRETIZATION.md`. (#28)
+> `../../GEOMETRY_DISCRETIZATION.md`. (issue #28)
 
 **Resolution:** 32 km (`lc=32000`), the validated demonstration resolution.
 **Configuration (all cores):** Budd N_hat friction (exact-zero shelf), balanced
@@ -124,18 +124,18 @@ values fed in.
    forcing.** That bug overstates late-century ablation several-fold and is on
    its own a sufficient cause of the overshoot, so the magnitude and the
    attribution both have to be re-derived from the re-run before the ~9% unit
-   question can be judged against them. (#29)
+   question can be judged against them. (issue #29)
 2. **2014→2015 projection handoff** starts projections at the historical
-   final's 2014.0 with a one-year zero-anomaly gap. (#34)
+   final's 2014.0 with a one-year zero-anomaly gap. (issue #34)
 3. **Runaway-detector peak clause** flags isolated one-step discharge spikes
    during emptying events as FAIL even though the budget closes; the audit
-   verdict is otherwise ON TRACK. Worth refining to sustained-growth only. (#33)
-4. **Monolithic forward** for cores 7 (and the 10 tail) beyond saturation. (#32)
+   verdict is otherwise ON TRACK. Worth refining to sustained-growth only. (issue #33)
+4. **Monolithic forward** for cores 7 (and the 10 tail) beyond saturation. (issue #32)
 5. **500 m / 2500 m production resolution**: the 2500 m `_budd` MAP on disk
    (`inversion_icepack2_budd_2500.h5`) is the untagged n=4, CG1-geometry one;
    this matrix is the 32 km demonstration. An n=3 production line needs its own
    `inversion_icepack2_budd_n3_dg0_2500.h5` (see `../N3_FRAMEWORK.md` for the
-   naming rule), inverted with a 2500 m boundary-id sidecar. (#31)
+   naming rule), inverted with a 2500 m boundary-id sidecar. (issue #31)
 
 For the pipeline and its knobs see `antarctica/README.md`; for the rheology see
 `COMPOSITE_RHEOLOGY.md` and `antarctica/N3_FRAMEWORK.md`. (The deeper

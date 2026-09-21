@@ -516,7 +516,7 @@ front where it restarted. The shared implementation's tests are
 `icepack_tools/test/levelset_test.py`; the ISMIP7-side rules (retreat-sliver
 mask, apparent-MB extent masking, the `fixed` law's t=0 anchor) are covered by
 `tests/`. The level-set unit tests written against this integration in Sep 2026
-were lost before they were committed and are still to be rebuilt. (#35)
+were lost before they were committed and are still to be rebuilt. (issue #35)
 
 **Control and projection configurations differ.** The protocol's control is an
 unforced constant-climate run with calving set to end-of-2014 conditions, so
@@ -809,7 +809,7 @@ Neither matrix has a 500 m timing, and that is not for want of trying: under
 `scpc_mumps` both 32-rank lanes ran at dt 0.025 and tripped the runaway
 tripwire at step 1, while the 64-rank pair was either not run or blocked by its
 scout; under `scpc_gamg` none were run. 500 m is an open stability question,
-not merely an untried one. (#22)
+not merely an untried one. (issue #22)
 
 `batch_runners/site_env.sh` names the mesh, `projection.sbatch` the solver and
 the step, and each `sites/<name>.sh` the rank count (64 on Quartz).
@@ -838,7 +838,7 @@ section's default is regularized Coulomb, and the forward aborts on a MAP whose
 recorded law disagrees with the run. Without `ISMIP7_INVERSION` the runner falls
 back to `ISMIP7_MAP_DEFAULT`, which names an RC MAP at the run's own resolution
 that has never been inverted, and warns at submission that the file is absent.
-Re-inverting on the production mesh, and closing the Budd/RC gap, are both open. (#21)
+Re-inverting on the production mesh, and closing the Budd/RC gap, are both open. (issue #21)
 
 The stages and contracts are:
 

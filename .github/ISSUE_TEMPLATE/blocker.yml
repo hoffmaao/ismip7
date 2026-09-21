@@ -10,7 +10,8 @@ body:
         Add the label set after filing: one severity (`blocks-submission`,
         `owed`, `after-deadline`), one unblocker (`needs-decision`,
         `needs-run`, `needs-check`, `needs-upstream`), and one or more `src:`
-        labels. Then put `(#NN)` on the line in the document that states it,
+        labels. Then put `(issue #NN)` on the line in the document that states
+        it (a bare `#NN` here means an ISMIP7 forum thread),
         or the suite will fail.
 
         House style: no dash punctuation, no contrastive negation, institutions

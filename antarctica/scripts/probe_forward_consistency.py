@@ -16,7 +16,7 @@ because `simulation.setup_model()` holds global state:
     all          every one of the above together
 
 On a fresh 32 km Budd MAP N_ref=None and alpha_inv were inert and the drags
-moved the answer; on the 14 September Ua MAPs the drags were the whole
+moved the answer; on the 14 September adaptive-mesh MAPs the drags were the whole
 difference (FORWARD_RUN_READINESS.md section 4).
 
     python antarctica/scripts/probe_forward_consistency.py MAP.h5 \

@@ -216,7 +216,7 @@ digit, and the nodal speeds differed by up to 7,023 m/yr in the given order and
 by 0.012 m/yr once both were sorted, with identical sums. The comparison now
 aligns nodes by coordinate and refuses two meshes that are not the same vertex
 set (`check_budd_map.node_permutation`, `tests/test_forward_check_ordering.py`).
-The Úa measurements above used the checkpoint mesh, so the defect did not touch
+The adaptive-mesh measurements above used the checkpoint mesh, so the defect did not touch
 them. On the 32 km MAP `probe_forward_consistency.py` also found `N_ref=None`
 (the inversion's own call, via `ISMIP7_BUDD_NREF=none`) and the inversion's
 composite alpha inert to every digit.

@@ -11,8 +11,10 @@ Geometry: the same ISMIP7_GEOMETRY_SPACE the forward reads (default dg0).
   bed and thickness sampled onto the cells (ISMIP7_RASTER_SAMPLE), the
   surface from flotation, the cell slope of `forcing.compute_sin_alpha`
   uncapped, thermal forcing and salinity at each centroid and its own draft,
-  the callback's `haf <= 0` floating test, cell areas. A K fitted here is
-  the K the forward applies, by construction.
+  the callback's `haf <= 0` floating test on cells holding ice (`h > 0`),
+  cell areas. A K fitted here is the K the forward applies, by construction.
+  Ice-free cells with `haf <= 0` are left out: the forward cannot melt ice
+  from a cell holding none, and the observations cover real shelves only.
 * `cg1` is the nodal calibration the earlier K files came from: BedMachine
   interpolated onto CG1 nodes with its raster surface and `mask == 3` as
   the floating mask, grad(draft) projected onto CG1 and capped at 5e-3,
@@ -317,7 +319,12 @@ def forward_geometry(mesh):
     thickness sampled onto the cells (``ISMIP7_RASTER_SAMPLE``), the surface
     from flotation as simulation.py builds it, the cell slope of
     ``forcing.compute_sin_alpha``, the forcing at each cell centroid and its
-    own draft, the callback's ``haf <= 0`` floating test and cell areas."""
+    own draft, the callback's ``haf <= 0`` floating test and cell areas.
+
+    Floating is ``haf <= 0`` on cells with ``h > 0``. An ice-free ocean cell
+    also has ``haf <= 0``, but the forward cannot remove ice from a cell
+    holding none and the observations cover real shelves only, so it is left
+    out of the fit."""
     Q = FunctionSpace(mesh, "CG", 1)
     Q_g = FunctionSpace(mesh, "DG", 0)
     bm = _bedmachine_path()
@@ -332,16 +339,19 @@ def forward_geometry(mesh):
         fd.SpatialCoordinate(mesh)).dat.data_ro
     b_np, h_np, s_np = b_dg.dat.data_ro, h_dg.dat.data_ro, s_dg.dat.data_ro
     haf = s_np - (b_np + (_RHO_WATER / _RHO_ICE) * np.maximum(-b_np, 0.0))
+    floating = (haf <= 0) & (h_np > 0)
     PETSc.Sys.Print(f"  BedMachine on cells: h min={h_np.min():.1f}  "
                     f"med={np.median(h_np):.1f}  max={h_np.max():.1f}; "
-                    f"floating (haf <= 0) {int((haf <= 0).sum())} cells")
+                    f"floating (haf <= 0, h > 0) {int(floating.sum())} cells, "
+                    f"{int(((haf <= 0) & ~(h_np > 0)).sum())} ice-free "
+                    f"haf <= 0 cells left out")
     return {
         "x": xy[:, 0],
         "y": xy[:, 1],
         "draft": np.minimum(s_np - h_np, 0.0),
         "sin_a": compute_sin_alpha({"Q": Q, "V": VectorFunctionSpace(mesh, "CG", 1),
                                     "Q_g": Q_g, "h": h_dg, "s": s_dg}),
-        "floating": haf <= 0,
+        "floating": floating,
         "area": assemble(fd.TestFunction(Q_g) * dx).dat.data_ro,
         "dofs": "cells",
     }

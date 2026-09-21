@@ -22,8 +22,9 @@ The calibration half reproduces calibrate_melt on CG1 nodes: BedMachine
 interpolated with its raster ``surface`` and ``mask``, and grad(draft)
 projected onto CG1.
 
-* capped: sin_alpha capped at ISMIP7_SIN_ALPHA_CAP (calibrate_melt's default
-  5e-3), the slope K was fitted against;
+* capped: sin_alpha capped at the npz's ``sin_alpha_cap`` when it is finite,
+  otherwise at calibrate_melt's CG1 default 5e-3, the slope K was fitted
+  against;
 * uncapped: the same slope with no cap.
 
 The forward half reproduces the forward on DG0 cells, the field the forward
@@ -288,7 +289,9 @@ def main():
         haf <= 0,
         assemble(fd.TestFunction(Q_g) * dx).dat.data_ro)
 
-    cap = cm.SIN_ALPHA_CAP
+    cap = float(d["sin_alpha_cap"]) if "sin_alpha_cap" in d else float("nan")
+    if not (np.isfinite(cap) and cap > 0):
+        cap = cm.default_slope_cap("cg1")
     cases = [
         (f"calibration half, capped at {cap:.0e} on CG1 nodes, the slope K "
          f"was fitted against", calibration,

@@ -1417,16 +1417,10 @@ def make_climatology_ocean_callback(K_field, data_root=None):
     geometry: the CTRL2015 / observationally-constrained ocean forcing.
     K_field is a scalar or per-node array (calibrated per-basin K).
 
-    CALIBRATION MISMATCH (open, tracked separately): the per-basin K comes from
-    antarctica/scripts/calibrate_melt.py, which is CG1 throughout - it builds
-    its own CG1 space and vertex-samples BedMachine, sin_alpha and the floating
-    mask, and is not affected by ISMIP7_GEOMETRY_SPACE. Under DG0 geometry this
-    callback evaluates that same K with a cell-wise draft, a cell-wise
-    sin_alpha and a cell-wise `haf <= 0` floating mask, so the melt-receiving
-    area shifts by roughly a one-cell band at the grounding line and the ice
-    front, non-trivial at 32 km, where shelves are only a few cells wide.
-    Nothing here compensates for the shift; GEOMETRY_DISCRETIZATION.md tracks
-    the check of the DG0 melt total against the observational target."""
+    The per-basin K comes from antarctica/scripts/calibrate_melt.py, which
+    follows ISMIP7_GEOMETRY_SPACE like the forward. The K file records the
+    geometry_space it was fitted on, and `load_K_per_basin` warns when a run
+    melts on the other."""
     interps = build_oi_climatology_interpolators(data_root)
 
     def callback(ctx, t_yr):

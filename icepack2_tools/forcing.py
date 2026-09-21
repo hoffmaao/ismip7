@@ -460,6 +460,28 @@ def _refuse_empty_time_axis(n, ds, what):
         )
 
 
+def _open_forcing(path):
+    r"""``xarray.open_dataset`` for an ISMIP7 forcing file, its time axis
+    decoded to ``cftime`` datetimes whatever the calendar or the year.
+
+    The readers take only the year of a slice (:func:`_nearest_year_index`)
+    and the day spacing of a monthly axis (:func:`_time_axis_days`), and both
+    accept ``cftime`` objects. Left to its default, xarray decodes a
+    standard-calendar axis to ``datetime64[ns]`` while the dates fit and falls
+    back to ``cftime`` past 2262, with a ``SerializationWarning`` on every
+    open: a 2015-2300 projection printed one per chunk it read past 2262, and
+    the unit suite carried two. Asking for ``cftime`` up front makes the
+    decode the same for every file, and silent. An axis with no CF units
+    (plain years) is left numeric either way.
+    """
+    import xarray as xr
+    try:
+        coder = xr.coders.CFDatetimeCoder(use_cftime=True)
+    except AttributeError:          # xarray before 2025.01
+        return xr.open_dataset(path, use_cftime=True)
+    return xr.open_dataset(path, decode_times=coder)
+
+
 def _nearest_year_index(time, year, ds=None, what="time"):
     r"""Index of the slice of ``time`` (a DataArray) nearest to ``year``.
 
@@ -614,8 +636,6 @@ class ISMIP7Atmosphere:
         return (years[0], years[-1]) if years else None
 
     def _load_year(self, variable, year):
-        import xarray as xr
-
         key = (variable, int(year))
         if key in self._cache:
             return self._cache[key]
@@ -667,7 +687,7 @@ class ISMIP7Atmosphere:
                 f"bridged, 2300 after 2299)."
             )
 
-        ds = xr.open_dataset(path)
+        ds = _open_forcing(path)
 
         if self._grid_x is None:
             for xname in ["x", "X", "lon"]:
@@ -902,7 +922,6 @@ class ISMIP7Ocean:
         calibration. The last few (variable, year) fields stay cached, so
         sub-yearly time steps re-read nothing.
         """
-        import xarray as xr
         from scipy.interpolate import RegularGridInterpolator
 
         yr = int(year)
@@ -914,7 +933,7 @@ class ISMIP7Ocean:
         if best is None:
             return None
 
-        ds = xr.open_dataset(best)
+        ds = _open_forcing(best)
         da = None
         for name in ds.data_vars:
             if name.lower() in (variable.lower(), "thermal_forcing",
@@ -1015,8 +1034,6 @@ class ISMIP7Fracture:
         return self._collapse_mask is not None
 
     def load(self):
-        import xarray as xr
-
         fdir = self._fracture_dir()
         if fdir is None or not os.path.isdir(fdir):
             return self
@@ -1038,10 +1055,10 @@ class ISMIP7Fracture:
                 elif "excess_melt" in fn:
                     found["excess_melt"] = path
         if "collapse_mask" in found:
-            self._collapse_mask = xr.open_dataset(found["collapse_mask"])
+            self._collapse_mask = _open_forcing(found["collapse_mask"])
             self._collapse_mask_path = found["collapse_mask"]
         if "excess_melt" in found:
-            self._excess_melt = xr.open_dataset(found["excess_melt"])
+            self._excess_melt = _open_forcing(found["excess_melt"])
 
         return self
 

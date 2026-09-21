@@ -1,20 +1,22 @@
 # ISMIP7 Projections-Antarctica README (draft)
 
-Draft of 13 September 2026 against the June 2026 template (the Google
+Draft of 19 September 2026 against the June 2026 template (the Google
 document linked from discussion #6). Submit one README per ice sheet, saved
 as `README_AIS_RICE_icepack2`. Every item marked **[confirm]** needs a
 decision or a name from the group before submission; everything else is
-what the code on this branch does today.
+what the code on this branch does today. The forum asks that several
+modelling choices be stated here rather than settled centrally; those carry
+their discussion number.
 
-Contributor names, affiliations and emails: **[confirm]** Andrew Hoffman
+Contributor names, affiliations and emails: **[confirm #38]** Andrew Hoffman
 (Rice University, ah301@rice.edu) and collaborators at Indiana University and
 the University of Chicago.
 
-Date of submission: **[confirm]**
+Date of submission: **[confirm #38]**
 
 Ice Sheet Modeled/domain_id: AIS
-Modeling group name/source_id: RICE **[confirm]**
-Ice Sheet Model Name/ism_id: icepack2 **[confirm]** (icepack2 dual
+Modeling group name/source_id: RICE **[confirm #38]**
+Ice Sheet Model Name/ism_id: icepack2 **[confirm #38]** (icepack2 dual
 shallow-shelf formulation on Firedrake 2026.4.1)
 
 ## Initialization methods
@@ -61,7 +63,7 @@ shallow-shelf formulation on Firedrake 2026.4.1)
 6. Ocean melt: the ISMIP7 quadratic mixed-slope parameterisation of Burgard
    et al. (2022), local-quadratic variant (TF_avg = TF), with the slope
    `sin(alpha)` from the model's own draft (uncapped in the forward, capped
-   at 5e-3 in the calibration; **[confirm]** which side moves, see
+   at 5e-3 in the calibration; **[confirm #26]** which side moves, see
    `FORWARD_RUN_READINESS.md` action 5), constants from
    `multimelt.constants`. K is dimensionless and per IMBIE basin,
    calibrated with `antarctica/scripts/calibrate_melt.py` on the Úa 2 km
@@ -72,9 +74,14 @@ shallow-shelf formulation on Firedrake 2026.4.1)
    summary statistics of the fit, and the forward uses neither scalar.
    `ISMIP7_K_SCALE` multiplies the field. The previous draft quoted the
    2500 m fit against the older Paolo and Adusumilli table (865.0 Gt/yr).
-   **[confirm]** that every submitted run read this calibration. Thermal
-   forcing and salinity are read at the cell's draft from the ISMIP7 ocean
-   forcing.
+   **[confirm #42]** that every submitted run read this calibration. Thermal
+   forcing (`tf`) and salinity (`so`) are read at the cell's draft from the
+   ISMIP7 ocean forcing, nearest neighbour in depth and in the plane, and
+   used as provided: no smoothing inside the cavities (discussion #11: the
+   warm stripe through the Ross cavity is a feature of the climatology, and
+   smoothing within a basin is allowed, not required). Where the forcing is
+   undefined the thermal forcing is zero and the salinity 34.5. The last
+   ocean year (2299 for CESM2-WACCM) is held for 2300.
    Partially floating cells: the geometry is cell-wise (DG0); a cell is
    floating when its height above flotation is negative and then receives
    the full melt, grounded cells none. No melt on vertical ice fronts.
@@ -91,20 +98,52 @@ shallow-shelf formulation on Firedrake 2026.4.1)
    is removed and tallied as calving (`ISMIP7_FIXED_FRONT`). A level-set
    front with a von Mises calving law (Hahn, Mikula and Frolkovic 2025
    finite-volume level set; thresholds 1.0 MPa grounded, 0.15 MPa floating)
-   exists but is not calibrated; **[confirm]** which the projections use.
+   exists but is not calibrated; **[confirm #36]** which the projections use.
    No sub-grid scheme beyond the sub-cell shed of the level-set front.
-9. Ice-shelf collapse: the ISMIP7 collapse mask (v2.1 for CESM2-WACCM, v1
-   for MRI-ESM2-0) is applied to floating cells only: every floating cell
-   the year's mask flags is emptied and booked as calving
-   (`ISMIP7_FRACTURE=mask`). No stress condition. **[confirm]** whether
-   the projections are run with it on.
+9. Ice-shelf collapse: **[confirm #10]** which of three the submitted
+   projections use; the core matrix as configured today runs the first.
+   `ISMIP7_FRACTURE=none`: no collapse forcing. `mask`: every FLOATING cell
+   the year's ISMIP7 collapse mask flags (v2.1 for CESM2-WACCM, v1 for
+   MRI-ESM2-0) is emptied and booked as calving, wherever it is. The masks
+   flag the Ross and Filchner-Ronne shelves near their grounding lines
+   first, so this opens holes far behind the front which the momentum
+   balance treats as open ocean. `mask_front`: a flagged floating cell is
+   emptied only once open water has reached it through flagged cells, so a
+   shelf collapses from its front and nothing happens until the flagged
+   region touches it. These are the two end-members of discussion #30
+   (September 2026), where groups report 40 % to 100 % more sea level by
+   2300 from the first against the second. Grounded ice is never touched,
+   there is no stress condition (Lai et al. 2020), and the excess-meltwater
+   and lake-property products are not used. No collapse forcing in the
+   historical, control or OCX runs, for which none exists (discussions #29
+   and #33); the front there is pinned at its 2015 position rather than
+   following the observed fronts.
 10. Tributary glaciers after a collapse: no special treatment; the front
     retreats to the new extent, the grounding line responds to the lost
     buttressing through the momentum balance, friction is unchanged.
 11. The control uses the RACMO climatology and the ISMIP7 ocean climatology
     with the apparent-mass-balance correction; projections use the same
     baseline plus the ISMIP7 anomalies re-referenced to the 2000-2029 pool
-    (historical 2000-2014 and ssp126 2015-2029).
+    (historical 2000-2014 and ssp126 2015-2029). The control therefore runs
+    on observational climatologies and not on the ESM's own `ctrl` trees, so
+    C009 and C010 differ in the historical endpoint they branch from and not
+    in their forcing.
+    The historical runs start in 1850 from the 2015 initial state (there is
+    no spin-up) and end at 1 January 2015, where the projections and the
+    control branch. The ISMIP7 anomalies are relative to 1960-1989, and
+    adding them to a modern baseline is what produces the jump at the start
+    of a historical run that discussion #34 describes; here the anomaly's
+    2000-2029 mean is removed first, no temperature forcing is applied, and
+    the frozen apparent-mass-balance reference holds the initial state in
+    balance, so there is no such jump. The 165 years before the initial
+    state's epoch are a relaxation under that reference, not a hindcast.
+    OCX (C011) runs 1979-2025. **[confirm #19]** which forcing the submitted run
+    used: the ISMIP7 OCX product (RACMO2.3p2-ERA SDBN1 `acabf`, full field,
+    and the expert-judgment `main` ocean, `ISMIP7_OCX_FORCING=protocol`), or
+    RACMO2.4p1 actual-year SMB with the constant ocean climatology
+    (`stopgap`), which is what the core ran on until September 2026. K is
+    fitted to the climatology in either case, and the OCX `main` ocean
+    departs from it around Mertz (discussion #48, open).
 
 ## SMB questions
 
@@ -112,10 +151,15 @@ shallow-shelf formulation on Firedrake 2026.4.1)
     transport: RACMO2.4p1 climatology plus the ISMIP7 `acabf-anomaly`
     (SDBN1 8 km, v2 for CESM2-WACCM, v1 for MRI-ESM2-0) re-referenced so the
     anomaly's mean over the control window vanishes. No surface-elevation
-    feedback (the `dacabfdz` gradients are not used). Forcing is NaN
+    feedback: neither the runoff gradient `dmrrodz` the protocol prefers nor
+    `dacabfdz` is used (discussion #36), and no lapse rate (`dtsdz`), there
+    being no thermal model. Precipitation is not used. Forcing is NaN
     outside the downscaled mask and is filled with zero there (discussion
     #39). The last forcing year (2299 for CESM2-WACCM) is persisted for
-    2300.
+    2300 (discussion #8). Monthly fields are averaged to the year weighted
+    by month length from each file's own time axis, and the year a file
+    belongs to is taken from its name, so the differing calendars and time
+    stamps of the forcing products (discussions #9 and #24) do not enter.
 20. The apparent-mass-balance correction of item 5 is applied in every
     experiment, frozen at the initial state.
 
@@ -135,12 +179,12 @@ glaciers off the main sheet are outside the mesh; the target mask is the
 initial extent, enforced at run time by the pinned front (ice past it is
 removed) in the control and default projections.
 
-PPE / ESM participation: **[confirm]**.
+PPE / ESM participation: **[confirm #38]**.
 
-Summary paragraph: **[confirm, draft]** icepack2 is a finite-element
+Summary paragraph: **[confirm, draft #38]** icepack2 is a finite-element
 shallow-shelf model on Firedrake in its dual (velocity, membrane stress,
 basal stress) formulation, with a first-order upwind finite-volume
-thickness transport on the same unstructured mesh (resolution **[confirm]**,
+thickness transport on the same unstructured mesh (resolution **[confirm #20]**,
 pending the 1000 m inversions: 2 km at the grounding line coarsening to
 180 km in the interior, or 1000 m / 10 km), an adjoint initialisation to
 MEaSUReS velocities and observed thickness change, regularised Coulomb
@@ -154,30 +198,55 @@ Hahn, Mikula and Frolkovic 2025; Smith et al. 2020.
 | Characteristic | Main suite of experiments | PPE change? |
 |---|---|---|
 | Mesh discretisation | Delaunay triangulation (gmsh), Úa-style size field | no |
-| Native grid | H: anisotropic; resolution **[confirm]**, pending the 1000 m inversions: the Úa-style adaptive mesh, 2 km at the grounding line and calving front to 180 km in the interior (246,677 cells), as previously run; or `antarctica_10000_1000_buffered20000`, the 1000 m / 10 km gmsh mesh (1,869,088 vertices) that has been the code default since PR #7 and on which no inversion has yet been run. V: vertically integrated (shallow shelf) | no |
+| Native grid | H: anisotropic; resolution **[confirm #20]**, pending the 1000 m inversions: the Úa-style adaptive mesh, 2 km at the grounding line and calving front to 180 km in the interior (246,677 cells), as previously run; or `antarctica_10000_1000_buffered20000`, the 1000 m / 10 km gmsh mesh (1,869,088 vertices) that has been the code default since PR #7 and on which no inversion has yet been run. V: vertically integrated (shallow shelf) | no |
 | Native projection | EPSG:3031, same as BedMachine | no |
 | Interpolation to diagnostic grid | conservative: exact cell-pixel overlap areas (supermesh) onto the 8 km grid; whole-pixel means for thickness, fluxes and fractions, covered-part means for elevations | no |
 | Time integration | transport-first split: implicit Euler thickness transport, then the diagnostic solve at the new geometry; first order | no |
-| Time step | **[confirm]**, pending the 1000 m inversions: 0.1 yr on the Úa-style mesh, as previously run; 0.05 yr on the 1000 m / 10 km mesh, the code default since PR #7 | no |
+| Time step | **[confirm #20]**, pending the 1000 m inversions: 0.1 yr on the Úa-style mesh, as previously run; 0.05 yr on the 1000 m / 10 km mesh, the code default since PR #7 | no |
 | Advection scheme | upwind finite volume, DG0, implicit; first order | no |
 | Ice flow mechanics | shallow-shelf approximation, dual finite-element formulation (CG1 velocity, DG0 membrane and basal stress) | no |
 | Ice rheology | n = 3 (composite with a linear floor for thin ice) | no |
-| Basal sliding | regularised Coulomb, m = 3, c0 = 0.5 (Budd available) | **[confirm]** |
+| Basal sliding | regularised Coulomb, m = 3, c0 = 0.5 (Budd available) | **[confirm #21]** |
 | Basal hydrology | none | no |
-| Ice-shelf fracture | yes, ISMIP7 collapse mask on floating cells | no |
-| Advance and retreat | grounding line free; calving front pinned at 2015 (level-set von Mises optional) | **[confirm]** |
+| Ice-shelf fracture | **[confirm #10]** none, or the ISMIP7 collapse mask on floating cells, everywhere (`mask`) or from the front (`mask_front`); see item 9 | **[confirm]** |
+| Advance and retreat | grounding line free; calving front pinned at 2015 (level-set von Mises optional) | **[confirm #36]** |
 | Grounding line | flotation criterion per cell | no |
-| Calving | pinned front; ice past it removed | **[confirm]** |
+| Calving | pinned front; ice past it removed | **[confirm #36]** |
 | Initial SMB | RACMO2.4p1 2000-2023 climatology | no |
 | Bedrock adjustment | no | no |
 | Year of initial condition | 2015 | no |
 | Densities, gravity | rho_i = 917, rho_o = 1024, rho_w = 1000 kg m-3; g = 9.81 m s-2 | no |
 | Variables not included | none of the mandatory set; no 3D or thermal variables (no thermal model); `hfgeoubed`, `litemp*`, `zvel*`, `thdrflf`, `deltag`, `refgeoid` absent | no |
-| Days per year | 365.25: the model's year is icepack's, 31557600 s, and every model-to-SI conversion in the submitted files uses it. The time axis in the files is the standard calendar | no |
+| Days per year | 365.25: the model's year is icepack's, 31557600 s, and every model-to-SI conversion in the submitted files uses it. The forcing is converted on the way in with the tropical year, 31556926 s, a relative difference of 2e-5. The model counts time in years and has no calendar; the time axis in the files is the standard calendar (discussion #24), state at 1 January of the following year and fluxes at 1 July with bounds | no |
 | Other | apparent-mass-balance correction frozen at the initial state; forcing versions cited per file in the submission | no |
 
-Forcing versions used (from `antarctica/scripts/audit_forcing_versions.py`,
-13 September 2026): CESM2-WACCM atmosphere SDBN1-8000m v2, ocean v3,
-fracture v2.1; MRI-ESM2-0 atmosphere GEMB-SDBN1-8000m v1, ocean v3,
-fracture v1; ISMIP7 ocean climatology 30_sep; observations kit
+## Conventions in the submitted files
+
+Signs (discussions #16 and #22). `acabf`, `libmassbffl` and `licalvf` are
+positive for mass gained by the ice, so melt and calving are negative.
+`ligroundf` is the flux across the grounding line from the velocity the
+transport used, through the facets between a grounded and a floating cell on
+the native mesh, divided by the area of the first FLOATING cell it enters and
+remapped conservatively; it is positive for ice leaving the grounded sheet,
+and the upwinding that defines it cannot go negative at an ice rumple. Its
+sign relative to the other fluxes was an open question on the forum on 18
+September 2026; **[confirm #17]** against the answer before submission. The
+integrated scalars carry the signs of the fields they integrate, so
+`tendlicalvf` and `tendlibmassbffl` are negative. `topg` is not masked to the
+ice, `lithk` is zero and not fill where there is no ice, and the fill value
+is the finite netCDF default (discussions #10 and #19). Sea-level estimates
+(`sla20`, `slg20`, `slvaf`) are not computed by the model; **[confirm #13]** that
+`ismip7-scalar-processing` was run on the gridded files.
+
+Compliance: **[confirm #12]** the isschecker version the submitted files
+passed (0.5.0 of 17 September 2026 grades a range finding by the share of
+values outside the bounds, discussion #46). The bundled variable request is
+that release's.
+
+Forcing versions: each run logs the product and version its readers opened,
+and `core_report.py` carries those lines into the run's committed report;
+**[confirm #41]** by citing them here per experiment. As audited against the
+data-freeze mirror on 13 September 2026: CESM2-WACCM atmosphere SDBN1-8000m
+v2, ocean v3, fracture v2.1; MRI-ESM2-0 atmosphere GEMB-SDBN1-8000m v1,
+ocean v3, fracture v1; ISMIP7 ocean climatology 30_sep; observations kit
 AntarcticaObsISMIP7-v1.2.

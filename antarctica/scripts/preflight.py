@@ -12,7 +12,7 @@ Usage:
     python scripts/preflight.py
     ISMIP7_LC=500 ISMIP7_FRICTION=regularized_coulomb python scripts/preflight.py
 """
-import os, sys, glob, re
+import os, sys, glob
 
 _SCRIPTS = os.path.dirname(os.path.abspath(__file__))
 _ANT = os.path.dirname(_SCRIPTS)
@@ -21,7 +21,8 @@ sys.path.insert(0, _PROJECT)
 sys.path.insert(0, _SCRIPTS)
 
 from icepack2_tools.forcing import (
-    atmosphere_path, ocean_path, _oi_climatology_path, _find_ismip7_data,
+    ISMIP7Atmosphere, ISMIP7Ocean, OCX, OCX_ATMOSPHERE_SOURCE,
+    _oi_climatology_path, _find_ismip7_data,
 )
 from icepack2_tools.boundary import sidecar_path
 from icepack2_tools.naming import map_basename
@@ -30,7 +31,7 @@ from icepack2_tools.runconfig import (
     obs_data_root,
     calving_law as _calving_law, calving_sigma_max as _calving_sigma_max,
     friction as _friction, geometry_space as _geometry_space, lc as _lc,
-    lc_coarse as _lc_coarse,
+    lc_coarse as _lc_coarse, ocx_forcing as _ocx_forcing, ocx_ocean as _ocx_ocean,
 )
 DATA_DIR = obs_data_root()
 from mesh_naming import get_buffer_m, mesh_filename
@@ -63,15 +64,9 @@ CORES = [
 
 
 def atm_years(esm, scenario, var="acabf-anomaly"):
-    d = atmosphere_path(scenario, esm, var)
-    if d is None or not os.path.isdir(d):
-        return []
-    yrs = []
-    for fn in os.listdir(d):
-        m = re.search(r"_(\d{4})\.nc$", fn)
-        if m:
-            yrs.append(int(m.group(1)))
-    return sorted(yrs)
+    r"""The years the reader can open, by the reader's own match: a gate that
+    counts files the loader would not find clears a run that then fails."""
+    return ISMIP7Atmosphere(esm=esm, scenario=scenario).available_years(var)
 
 
 def clim_pool_years(esm, var):
@@ -128,18 +123,22 @@ def pool_status(esm, var, what_empty, what_partial):
             f"{what_partial if have else what_empty}")
 
 
+def ocx_atm_years():
+    return ISMIP7Atmosphere(esm=OCX_ATMOSPHERE_SOURCE, scenario=OCX).available_years("acabf")
+
+
+def ocx_ocean_cover():
+    r"""The years both OCX ocean variables cover, or None."""
+    ocean = ISMIP7Ocean(scenario=OCX, variant=_ocx_ocean())
+    covers = [ocean.coverage(v) for v in ("tf", "so")]
+    if None in covers:
+        return None
+    return max(c[0] for c in covers), min(c[1] for c in covers)
+
+
 def ocean_cover(esm, scenario):
-    d = ocean_path(scenario, esm, "tf")
-    if d is None or not os.path.isdir(d):
-        return None
-    spans = []
-    for fn in os.listdir(d):
-        m = re.search(r"_(\d{4})-(\d{4})\.nc$", fn)
-        if m:
-            spans.append((int(m.group(1)), int(m.group(2))))
-    if not spans:
-        return None
-    return min(s[0] for s in spans), max(s[1] for s in spans)
+    r"""``(first, last)`` ocean forcing year on disk, as the reader sees it."""
+    return ISMIP7Ocean(esm=esm, scenario=scenario).coverage("tf")
 
 
 def shared_missing(warn=None):
@@ -233,7 +232,23 @@ def main():
         miss = list(base_missing)
         degraded = []
         notes = []
-        if core == 11:
+        if core == 11 and _ocx_forcing() == "protocol":
+            # projections/ocx.py refuses to start on anything less, so this
+            # gate asks the same readers the same question.
+            yrs = ocx_atm_years()
+            gaps = sorted(set(range(y0, y1 + 1)) - set(yrs))
+            if gaps:
+                miss.append(f"OCX atmosphere acabf ({OCX_ATMOSPHERE_SOURCE}): "
+                            + (f"{len(gaps)} of {y0}-{y1} missing" if yrs else "absent"))
+            oc = ocx_ocean_cover()
+            if oc is None or oc[0] > y0 or oc[1] < y1:
+                miss.append(f"OCX ocean '{_ocx_ocean()}' tf/so"
+                            + (f" covers {oc[0]}-{oc[1]}, need {y0}-{y1}" if oc else ": absent"))
+            notes.append("K is fitted to the OI climatology, not to the OCX ocean: "
+                         "read check_melt_bound.py --ocx first (discussion #48)")
+        elif core == 11:
+            notes.append("ISMIP7_OCX_FORCING=stopgap: RACMO2.4p1 + OI climatology, "
+                         "not the ISMIP7 OCX product")
             if not racmo_ok():
                 miss.append("RACMO (OCX SMB)")
             if not oi_ok():

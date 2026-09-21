@@ -516,7 +516,7 @@ front where it restarted. The shared implementation's tests are
 `icepack_tools/test/levelset_test.py`; the ISMIP7-side rules (retreat-sliver
 mask, apparent-MB extent masking, the `fixed` law's t=0 anchor) are covered by
 `tests/`. The level-set unit tests written against this integration in Sep 2026
-were lost before they were committed and are still to be rebuilt.
+were lost before they were committed and are still to be rebuilt. (issue #35)
 
 **Control and projection configurations differ.** The protocol's control is an
 unforced constant-climate run with calving set to end-of-2014 conditions, so
@@ -614,7 +614,9 @@ redeclare those literals.
 | `ISMIP7_INVERSION` | explicit MAP path for a forward or preflight. The forward checks the MAP's recorded `friction`, `n_flow` and `geometry_space` against the run and aborts on a mismatch, warning only when the MAP predates those attributes; `preflight.py` checks that the file exists. Use it to A/B MAPs on one mesh, or, with `ISMIP7_MESH` also set (the timing matrix), to run a MAP on a different mesh: its fields are then interpolated onto `ISMIP7_MESH` | derived |
 | `ISMIP7_CALVING` | `none`, `fixed` or `vonmises` (see above) | `none` |
 | `ISMIP7_CALVING_SIGMA_MAX_GROUNDED` / `_FLOATING` | von Mises thresholds (MPa) | `1.0` / `0.15` |
-| `ISMIP7_FRACTURE` | `mask` applies the ISMIP7 collapse forcing to floating cells, booked as calving. Masks exist for the SSPs only, so the control, historicals and OCX abort on `mask`. Needs DG0 | `none` |
+| `ISMIP7_FRACTURE` | `mask` applies the ISMIP7 collapse forcing to every floating cell it flags, booked as calving; `mask_front` only to the flagged cells open water has reached, so no hole opens behind a standing front (the two end-members of discussion #30). Masks exist for the SSPs only, so the control, historicals and OCX abort on either. Needs DG0 | `none` |
+| `ISMIP7_OCX_FORCING` | what core 11 runs on. `protocol` is the ISMIP7 OCX product (RACMO2.3p2-ERA SDBN1 `acabf`, expert-judgment ocean `tf`/`so`), and the run refuses to start without it. `stopgap` is RACMO2.4p1 actual-year SMB with the constant OI ocean climatology, what the core ran on before the product was readable here. K is fitted to the climatology, so read `check_melt_bound.py --ocx` first (discussion #48) | `protocol` |
+| `ISMIP7_OCX_OCEAN` | which expert-judgment OCX ocean scenario to read: `main` (the core one), `cold`, `warm` or `vary`. A member other than `main` writes to `ocx_<member>` | `main` |
 | `ISMIP7_OUTPUT` | `1` records the ISMIP7 yearly fields and scalars (`<exp>_<lc>_ismip7_annual_<year>.h5`, `<exp>_<lc>_ismip7_scalars.csv`), regridded afterwards by `write_ismip7_output.py`. The value set is closed, so a typo is rejected at startup. A chained projection must export it on every link; a link that cold-starts mid-year logs the gap and begins at the next 1 January. Resuming continues a series, and a cold start into a populated series is refused | unset |
 | `ISMIP7_BNDIDS` | boundary-id JSON override | per-mesh sidecar, else `mesh/boundary_ids.json` |
 | `ISMIP7_GEOMETRY_SPACE` | `dg0` (one thickness for terminus force and mass flux) or `cg1` (legacy, A/B only). Selects the MAP. See `../GEOMETRY_DISCRETIZATION.md` | `dg0` |
@@ -807,7 +809,7 @@ Neither matrix has a 500 m timing, and that is not for want of trying: under
 `scpc_mumps` both 32-rank lanes ran at dt 0.025 and tripped the runaway
 tripwire at step 1, while the 64-rank pair was either not run or blocked by its
 scout; under `scpc_gamg` none were run. 500 m is an open stability question,
-not merely an untried one.
+not merely an untried one. (issue #22)
 
 `batch_runners/site_env.sh` names the mesh, `projection.sbatch` the solver and
 the step, and each `sites/<name>.sh` the rank count (64 on Quartz).
@@ -836,7 +838,7 @@ section's default is regularized Coulomb, and the forward aborts on a MAP whose
 recorded law disagrees with the run. Without `ISMIP7_INVERSION` the runner falls
 back to `ISMIP7_MAP_DEFAULT`, which names an RC MAP at the run's own resolution
 that has never been inverted, and warns at submission that the file is absent.
-Re-inverting on the production mesh, and closing the Budd/RC gap, are both open.
+Re-inverting on the production mesh, and closing the Budd/RC gap, are both open. (issue #21)
 
 The stages and contracts are:
 

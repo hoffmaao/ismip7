@@ -93,3 +93,54 @@ def test_a_complete_tree_is_ready_without_a_note(monkeypatch, tmp_path, capsys):
     line = _core_line(capsys)
     assert "READY" in line, line
     assert "absent" not in line
+
+
+# --- core 11 asks for the OCX product the driver will insist on -------------
+
+def _ocx_tree(root, years):
+    from icepack2_tools.forcing import OCX_ATMOSPHERE_SOURCE as SRC
+    d = os.path.join(root, "OCX", SRC, "SDBN1-8000m", "acabf", "v1")
+    os.makedirs(d, exist_ok=True)
+    for y in years:
+        open(os.path.join(d, f"acabf_AIS_{SRC}_OCX_SDBN1-8000m_v1_{y}.nc"), "wb").close()
+    d = os.path.join(root, "OCX", "ocean", "main", "v1")
+    os.makedirs(d, exist_ok=True)
+    for var in ("tf", "so"):
+        open(os.path.join(d, f"{var}_AIS_OCX_ocean_main_v1_1950-2025.nc"), "wb").close()
+
+
+def _run_core_11(monkeypatch, tmp_path, years, forcing="protocol"):
+    root = str(tmp_path / "ISMIP7" / "AIS")
+    os.makedirs(root, exist_ok=True)
+    if years is not None:
+        _ocx_tree(root, years)
+    monkeypatch.setenv("ISMIP7_DATA_ROOT", root)
+    monkeypatch.setenv("ISMIP7_OCX_FORCING", forcing)
+    monkeypatch.delenv("ISMIP7_OCX_OCEAN", raising=False)
+    sys.modules.pop("preflight", None)
+    preflight = importlib.import_module("preflight")
+    monkeypatch.setattr(preflight, "shared_missing", lambda warn: [])
+    monkeypatch.setattr(preflight, "racmo_ok", lambda: True)
+    monkeypatch.setattr(preflight, "oi_ok", lambda: True)
+    monkeypatch.setattr(preflight, "pool_status", lambda *a, **k: ("ok", ""))
+    preflight.main()
+
+
+def test_core_11_is_blocked_until_the_ocx_product_is_on_disk(monkeypatch, tmp_path, capsys):
+    r"""RACMO and the OI climatology being present used to be enough, which is
+    how the core ran on the stopgap with the product sitting unread."""
+    _run_core_11(monkeypatch, tmp_path, None)
+    line = _core_line(capsys, "core 11")
+    assert "BLOCKED" in line and "OCX atmosphere acabf" in line and "absent" in line
+
+
+def test_core_11_is_ready_on_the_product_and_points_at_the_tripwire(monkeypatch, tmp_path, capsys):
+    _run_core_11(monkeypatch, tmp_path, range(1979, 2026))
+    line = _core_line(capsys, "core 11")
+    assert "READY" in line and "check_melt_bound.py --ocx" in line and "#48" in line
+
+
+def test_core_11_on_the_stopgap_says_that_is_what_it_is(monkeypatch, tmp_path, capsys):
+    _run_core_11(monkeypatch, tmp_path, None, forcing="stopgap")
+    line = _core_line(capsys, "core 11")
+    assert "READY" in line and "ISMIP7_OCX_FORCING=stopgap" in line

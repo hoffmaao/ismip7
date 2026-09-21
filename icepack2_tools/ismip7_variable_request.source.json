@@ -1,0 +1,8 @@
+{
+  "repository": "ismip/ISM_SimulationChecker",
+  "path": "isschecker/data/ISMIP7_variable_request.csv",
+  "tag": "0.5.0",
+  "commit": "c5d36e5fbbb03198b11c11c404fd0feba965935b",
+  "committed": "2026-09-17",
+  "vendored": "2026-09-19"
+}

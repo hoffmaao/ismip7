@@ -2,6 +2,7 @@
 r"""How far does the draft-slope cap move melt past the variable request's bound?
 
     python antarctica/scripts/check_melt_bound.py [--npz antarctica/results/calibrated_K_per_basin_2000.npz]
+        [--ocx [main|cold|warm|vary]] [--ocx-years 2000,2015,2025] [--ocx-tol 0.25]
 
 The ISMIP7 variable request gives ``libmassbffl`` an AIS minimum of
 -0.008 kg m-2 s-1 with severity ``error``. In ice-equivalent thickness that is
@@ -47,6 +48,19 @@ is the bound the compliance checker applies.
 Scope: the reference state, with the OI thermal-forcing climatology and the
 BedMachine geometry. A projection's thermal forcing warms above the
 climatology and its shelves thin.
+
+``--ocx`` adds the check core 11 needs before it runs on the ISMIP7 OCX
+product. Every K here is fitted to the OI climatology, and the OCX ocean is a
+different field: discussion #48 (17 September 2026) reports the OCX ``main``
+thermal forcing so far from the Zhou climatology around Mertz that the
+region's melt halves against a calibration made on the climatology, possibly
+because OCX was built from an older extrapolated climatology. So the forward
+half is melted a second time, uncapped as the forward runs, with thermal
+forcing and salinity from the OCX ocean through the forward's own reader, for
+each of ``--ocx-years``, and the two melts are set side by side per IMBIE2
+basin and per 256 km block, the blocks because a basin total dilutes one
+shelf. A basin or block whose OCX melt is off the climatology's by more than
+``--ocx-tol`` is flagged and the exit status is 1, so a chain can stop on it.
 
 Serial. Reuses calibrate_melt's loaders, so it needs the same inputs: a MAP for
 the mesh, the OI climatology, the IMBIE2 basins and BedMachine.
@@ -117,7 +131,8 @@ from firedrake.petsc import PETSc                                     # noqa: E4
 
 import calibrate_melt as cm                                           # noqa: E402
 from icepack2_tools.forcing import (quadratic_mixed_slope,            # noqa: E402
-                                    compute_sin_alpha,
+                                    compute_sin_alpha, ISMIP7Ocean,
+                                    OCX, OCX_OCEAN_VARIANTS,
                                     _RHO_ICE, _RHO_WATER)
 from icepack2_tools.geometry import sample_to_geometry                # noqa: E402
 from icepack2_tools.runconfig import raster_sample                    # noqa: E402
@@ -136,6 +151,41 @@ def m_per_yr(kg_m2_s):
     return kg_m2_s * SECONDS_PER_YEAR / RHO_I
 
 
+# Side of the blocks the OCX comparison also sums over: 32 pixels of the 8 km
+# forcing grid, a few shelves wide, so one shelf is not lost in a basin total.
+BLOCK_M = 256.0e3
+
+
+def block_ids(x, y, size=BLOCK_M):
+    r"""An integer id per point naming the ``size`` square it falls in, and
+    the ``{id: (x centre, y centre)}`` of the squares that occur."""
+    ix, iy = np.floor(x / size).astype(int), np.floor(y / size).astype(int)
+    ids = ix * 100000 + iy
+    centres = {int(i): ((a + 0.5) * size, (b + 0.5) * size)
+               for i, a, b in zip(ids, ix, iy)}
+    return ids, centres
+
+
+def melt_by_group(groups, melt, area, floating):
+    r"""``{group: Gt/yr}`` of ``melt`` (m/yr of ice) over the floating dofs."""
+    gt = np.where(floating, melt * area, 0.0) * RHO_I / 1e12
+    return {int(g): float(gt[groups == g].sum()) for g in np.unique(groups[floating])}
+
+
+def off_by_more_than(reference, other, tol, floor_gt):
+    r"""The groups whose ``other`` melt is off ``reference`` by more than
+    ``tol`` (a fraction). Groups melting less than ``floor_gt`` either way are
+    left out: a ratio of two near-zero totals flags nothing worth reading."""
+    flagged = []
+    for g, ref in reference.items():
+        new = other.get(g, 0.0)
+        if max(ref, new) < floor_gt:
+            continue
+        if ref <= 0.0 or abs(new / ref - 1.0) > tol:
+            flagged.append(g)
+    return flagged
+
+
 def main():
     ap = argparse.ArgumentParser(
         description=__doc__,
@@ -143,6 +193,19 @@ def main():
     ap.add_argument("--npz", default=None,
                     help="calibrated_K_per_basin_<lc>.npz (default: the one "
                          "beside this run's lc)")
+    ap.add_argument("--ocx", nargs="?", const="main", default=None,
+                    choices=OCX_OCEAN_VARIANTS,
+                    help="also melt the forward half with this OCX ocean and "
+                         "compare it with the climatology K was fitted to "
+                         "(discussion #48); exit 1 if any region is off")
+    ap.add_argument("--ocx-years", default="2000,2015,2025",
+                    help="comma list of OCX years to compare (default %(default)s)")
+    ap.add_argument("--ocx-tol", type=float, default=0.25,
+                    help="flag a region whose OCX melt is off by more than "
+                         "this fraction (default %(default)s)")
+    ap.add_argument("--ocx-floor", type=float, default=2.0,
+                    help="ignore regions melting less than this many Gt/yr "
+                         "either way (default %(default)s)")
     a = ap.parse_args()
 
     bound = float(request_table()["libmassbffl"]["min_value_ais"])
@@ -280,6 +343,60 @@ def main():
             f"{np.median(area[over]) / 1e6:.2f} km^2, against "
             f"{ISMIP7_DX ** 2 / 1e6:.0f} km^2 for an 8 km pixel")
 
+    if a.ocx is None:
+        return 0
+    return compare_with_ocx(a, forward)
+
+
+def compare_with_ocx(a, g):
+    r"""Melt the forward half with the OCX ocean and set it beside the melt
+    from the climatology K was fitted to. Returns the exit status."""
+    ocean = ISMIP7Ocean(scenario=OCX, variant=a.ocx)
+    years = [int(v) for v in a.ocx_years.split(",") if v.strip()]
+    floating, area, sin_a = g["floating"], g["area"], g["sin_a"]
+    basin = np.round(cm._grid_interp(cm.IMBIE2_NC, "basinNumber", g["x"], g["y"])).astype(int)
+    block, centres = block_ids(g["x"], g["y"])
+
+    def melt_with(tf, sal):
+        return np.where(floating, quadratic_mixed_slope(tf, sal, sin_a, K=g["K"]), 0.0)
+
+    reference = melt_with(g["tf"], g["sal"])
+    PETSc.Sys.Print(
+        f"\n=== OCX ocean '{a.ocx}' against the climatology K was fitted to "
+        f"(discussion #48) ===\n"
+        f"  forward half, uncapped; a region is flagged past "
+        f"{100 * a.ocx_tol:.0f}%, regions under {a.ocx_floor:g} Gt/yr ignored")
+    status = 0
+    for year in years:
+        other = melt_with(ocean.get_thermal_forcing(year, g["x"], g["y"], draft=g["draft"]),
+                          ocean.get_salinity(year, g["x"], g["y"], draft=g["draft"]))
+        for name, groups, where in (("IMBIE2 basin", basin, None),
+                                    (f"{BLOCK_M / 1e3:.0f} km block", block, centres)):
+            ref = melt_by_group(groups, reference, area, floating)
+            new = melt_by_group(groups, other, area, floating)
+            bad = off_by_more_than(ref, new, a.ocx_tol, a.ocx_floor)
+            PETSc.Sys.Print(
+                f"\n  --- {year}, by {name}: climatology {sum(ref.values()):.0f} Gt/yr, "
+                f"OCX {sum(new.values()):.0f} Gt/yr, {len(bad)} of {len(ref)} flagged ---")
+            # every basin, but only the blocks that are off: there are hundreds
+            for grp in (sorted(ref) if where is None else
+                        sorted(bad, key=lambda b: -abs(new.get(b, 0.0) - ref[b]))):
+                at = (f"{grp:6d}" if where is None else
+                      f"x {where[grp][0] / 1e3:7.0f} km  y {where[grp][1] / 1e3:7.0f} km")
+                ratio = new.get(grp, 0.0) / ref[grp] if ref[grp] > 0 else float("inf")
+                PETSc.Sys.Print(
+                    f"    {at}  climatology {ref[grp]:8.1f}  OCX {new.get(grp, 0.0):8.1f} Gt/yr"
+                    f"  ratio {ratio:5.2f}{'   <-- OFF' if grp in bad else ''}")
+            if bad:
+                status = 1
+    if status:
+        PETSc.Sys.Print(
+            "\n  The OCX ocean and the climatology disagree by more than the "
+            "tolerance somewhere.\n  K is fitted to the climatology, so a "
+            "protocol-forced core 11 melts those regions\n  differently from "
+            "its own calibration. See discussion #48 before running it.")
+    return status
+
 
 if __name__ == "__main__":
-    main()
+    sys.exit(main())

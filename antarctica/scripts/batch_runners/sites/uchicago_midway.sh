@@ -4,10 +4,11 @@
 # .sif and ISMIP7_FIREDRAKE is not asked for; site_core.sh then runs every
 # `python` in the image and starts MPI with the image's own mpiexec.
 #
-# NOT yet run end to end: nobody has submitted this pipeline at RCC. Rather
-# than guess partition names and an account, those fields are empty and
-# submit.sh refuses until they are set, here or in sites/local.env. What each
-# needs, and where to read it on a login node (site_recon.sh prints most):
+# NOT yet run end to end (issue #47): nobody has submitted this pipeline at
+# RCC. Rather than guess partition names and an account, those fields are
+# empty and submit.sh refuses until they are set, here or in sites/local.env.
+# What each needs, and where to read it on a login node (site_recon.sh prints
+# most):
 #   ISMIP7_CONTAINER   the built image, e.g. /project/<pi>/ismip7/icepack2.sif
 #                      (per user or per group: sites/local.env is the place)
 #   ISMIP7_MODULES     whatever puts `apptainer` on PATH on a compute node, if

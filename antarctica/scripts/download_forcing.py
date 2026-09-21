@@ -20,6 +20,10 @@ import subprocess
 import sys
 from pathlib import Path
 
+sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
+
+from icepack2_tools.forcing import ATMOSPHERE_PRODUCTS, version_key  # noqa: E402
+
 # Downloads land directly in the runtime tree that icepack2_tools/forcing.py
 # reads (ISMIP7/AIS/...), mirroring the remote layout — no rename step.
 FORCING_DIR = Path(__file__).resolve().parents[2] / "ISMIP7" / "AIS"
@@ -340,24 +344,39 @@ def download_file_set(tc, file_set, dry_run=False):
 
 
 def _pick_version(tc, var_dir):
-    r"""Highest v<N> subdir of a remote var dir, or None if absent."""
-    vs = []
-    for e in list_remote_files(tc, var_dir):
-        if e["type"] == "dir" and e["name"].startswith("v"):
-            try:
-                vs.append((int(e["name"][1:]), e["name"]))
-            except ValueError:
-                pass
+    r"""Highest v<N> or v<N>.<M> subdir of a remote var dir, or None if
+    absent. The key is the readers' own: ``int("2.1")`` raised, so the
+    fracture v2.1 of September 2026 was passed over for v2."""
+    vs = [(version_key(e["name"]), e["name"]) for e in list_remote_files(tc, var_dir)
+          if e["type"] == "dir" and version_key(e["name"]) is not None]
     return max(vs)[1] if vs else None
 
 
+def _atmosphere_dir(tc, base, resolution="8000m"):
+    r"""The downscaled-atmosphere directory the share holds under ``base``:
+    ``SDBN1-*`` for CESM2-WACCM, ``GEMB-SDBN1-*`` for MRI-ESM2-0 since the
+    August 2026 rename (discussion #37). One listing, so an absent name is
+    not probed for and reported as an error."""
+    present = {e["name"] for e in list_remote_files(tc, base) if e["type"] == "dir"}
+    for product in ATMOSPHERE_PRODUCTS:
+        if f"{product}-{resolution}" in present:
+            return f"{product}-{resolution}"
+    return f"{ATMOSPHERE_PRODUCTS[0]}-{resolution}"
+
+
 def download_scenarios(tc, esms=SCENARIO_ESMS, scenarios=SCENARIO_NAMES,
-                       dry_run=False):
+                       dry_run=False, resync=False):
     r"""Mirror the minimal per-(ESM, scenario) runtime sets from the new
     /ISMIP7/AIS tree: SDBN1-8000m {acabf, acabf-anomaly}, ocean {tf, so},
     and the fracture masks. One recursive-dir Globus transfer per
     (ESM, scenario); sync_level=checksum makes re-runs incremental, so an
-    already-complete local set costs one listing pass server-side."""
+    already-complete local set costs one listing pass server-side.
+
+    A group whose local file count already matches is not submitted at all,
+    so the checksum sync never sees it. That is the right default for a
+    top-up and the wrong one after the share replaces a file in place, same
+    name and same version (discussions #45 and #41). ``resync`` submits every
+    group and lets the checksums decide."""
     import globus_sdk
 
     local_endpoint = None if dry_run else get_local_endpoint()
@@ -370,8 +389,9 @@ def download_scenarios(tc, esms=SCENARIO_ESMS, scenarios=SCENARIO_NAMES,
     for esm in esms:
         for scen in scenarios:
             base = f"{ISMIP7_BASE}/{esm}/{scen}"
+            atm = _atmosphere_dir(tc, base)
             groups = (
-                [(f"{base}/SDBN1-8000m/{v}", f"{esm}/{scen}/SDBN1-8000m/{v}")
+                [(f"{base}/{atm}/{v}", f"{esm}/{scen}/{atm}/{v}")
                  for v in SCENARIO_ATM_VARS]
                 + [(f"{base}/ocean/{v}", f"{esm}/{scen}/ocean/{v}")
                    for v in SCENARIO_OCEAN_VARS]
@@ -395,7 +415,7 @@ def download_scenarios(tc, esms=SCENARIO_ESMS, scenarios=SCENARIO_NAMES,
                          else f"{n_local}/{n_remote} local")
                 print(f"    {local_rel}{'/' + ver if ver else ''}: "
                       f"{n_remote} remote files [{state}]")
-                if n_local < n_remote:
+                if n_local < n_remote or (resync and n_remote > 0):
                     items.append((src, dst))
             if not items:
                 print("    nothing to transfer")
@@ -476,6 +496,9 @@ def main():
                         help="comma list of ESMs for --scenarios")
     parser.add_argument("--scenario", default=",".join(SCENARIO_NAMES),
                         help="comma list of scenarios for --scenarios")
+    parser.add_argument("--resync", action="store_true",
+                        help="with --scenarios: submit complete groups too, so the "
+                             "checksum sync picks up files replaced in place")
     parser.add_argument("--dry-run", action="store_true", help="Show what would be downloaded")
     args = parser.parse_args()
 
@@ -501,7 +524,7 @@ def main():
             tc,
             esms=tuple(e.strip() for e in args.esm.split(",") if e.strip()),
             scenarios=tuple(s.strip() for s in args.scenario.split(",") if s.strip()),
-            dry_run=dry,
+            dry_run=dry, resync=args.resync,
         )
     elif args.ocean:
         download_ocean(tc, dry_run=dry)

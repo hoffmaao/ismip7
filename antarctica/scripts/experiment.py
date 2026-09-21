@@ -22,12 +22,13 @@ Fracture / shelf-collapse masks are loaded when present, and
 make_forcing_callback publishes the year's mask as ctx["collapse"].
 Whether the run acts on it is ISMIP7_FRACTURE: under `mask` the transport
 empties every FLOATING cell the mask flags and books it as calving
-(protocol path C); grounded ice is never touched, and under the default
+(protocol path C), under `mask_front` only those open water has reached
+(discussion #30); grounded ice is never touched, and under the default
 `none` the mask is loaded but unused. No mask exists for historical or OCX.
 The stress-gated variant (Lai et al. 2020) is not implemented.
 """
 
-import os, sys
+import math, os, sys
 import numpy as np
 
 _SCRIPTS = os.path.dirname(os.path.abspath(__file__))
@@ -40,11 +41,14 @@ from simulation import (setup_model, run_simulation, latest_checkpoint,
 from icepack2_tools.forcing import (
     ISMIP7Atmosphere, ISMIP7Ocean, ISMIP7Fracture,
     make_forcing_callback, load_racmo_smb_climatology, forcing_coords,
+    describe_forcing_provenance, forcing_year,
 )
 from icepack2_tools.climatology import (
     clim_start, clim_end, clim_scenario, clim_pool_missing, describe_clim_pool,
 )
-from icepack2_tools.runconfig import fracture as fracture_mode, k_per_basin_candidates
+from icepack2_tools.runconfig import (
+    FRACTURE_MASK_MODES, fracture as fracture_mode, k_per_basin_candidates,
+)
 
 # Owned by icepack2_tools.climatology: this pool must match the CONTROL's
 # climatology, or the projections are re-referenced against a different
@@ -163,12 +167,25 @@ def run_core_experiment(*, core, title, name, esm, scenario,
         PETSc.Sys.Print(
             f"  Atmosphere forcing: {len(yrs)} years ({yrs[0]}-{yrs[-1]})"
         )
-    if not (ISMIP7Ocean(esm=esm, scenario=scenario)
-            ._year_field("tf", t_start, nan_fill=0.0)):
-        raise FileNotFoundError(
-            f"No ocean tf data for {esm}/{scenario} covering {t_start:.0f}. "
-            f"Download the ocean tree first."
-        )
+    # The reader serves the years its chunk files hold and the single year
+    # after them, and raises on anything else, so ask before the model setup
+    # rather than find out at the first step, or at the last one.
+    first, last = int(math.floor(t_start + 1e-9)), forcing_year(t_end)
+    for var in ("tf", "so"):
+        cover = ISMIP7Ocean(esm=esm, scenario=scenario).coverage(var)
+        if cover is None:
+            raise FileNotFoundError(
+                f"No ocean {var} data for {esm}/{scenario}. Download the "
+                f"ocean tree first."
+            )
+        if cover[0] > first or cover[1] + 1 < last:
+            raise FileNotFoundError(
+                f"Ocean {var} for {esm}/{scenario} covers {cover[0]}-{cover[1]}, "
+                f"and this run needs {first}-{last} (one year past the end is "
+                f"held, no more). Download the rest of the ocean tree, or move "
+                f"ISMIP7_T_START / ISMIP7_T_END inside it."
+            )
+    PETSc.Sys.Print(f"  Ocean forcing: tf, so cover {cover[0]}-{cover[1]}")
 
     if restart:
         PETSc.Sys.Print(f"  Restart: {restart}")
@@ -189,19 +206,25 @@ def run_core_experiment(*, core, title, name, esm, scenario,
         fracture.load()
     except Exception as e:
         # Under the default `none` the mask is never read, so an unreadable
-        # fracture tree must not abort a run that does not want it; under
-        # `mask` the run asked for exactly this file, so it sees the failure.
-        if fracture_mode() == "mask":
+        # fracture tree must not abort a run that does not want it; under a
+        # mask mode the run asked for exactly this file, so it sees the failure.
+        if fracture_mode() in FRACTURE_MASK_MODES:
             raise
         PETSc.Sys.Print(f"  Fracture tree not readable, ignored: {e}")
-    if fracture_mode() == "mask" and not fracture.has_collapse_mask():
+    if fracture_mode() in FRACTURE_MASK_MODES and not fracture.has_collapse_mask():
         raise FileNotFoundError(
-            f"ISMIP7_FRACTURE=mask but no ice-shelf collapse mask was found "
+            f"ISMIP7_FRACTURE={fracture_mode()} but no ice-shelf collapse mask was found "
             f"for {esm}/{scenario} under {fracture.fracture_dir()}. The masks "
             f"exist for the SSP scenarios only, so this is a configuration "
             f"error: download the fracture tree, or run with "
             f"ISMIP7_FRACTURE=none."
         )
+
+    # What this run opens, for the committed report: a collapse mask only
+    # counts when the run reads it.
+    for line in describe_forcing_provenance(
+            atm, ocean, fracture if fracture_mode() != "none" else None):
+        PETSc.Sys.Print(f"  {line}")
 
     K_npz = find_k_npz()
     K_melt = float(os.environ.get("ISMIP7_K_MELT", "1.15e-4"))

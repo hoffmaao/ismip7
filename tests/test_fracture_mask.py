@@ -41,6 +41,42 @@ def test_reader_samples_the_versioned_mask(mask_tree):
     assert fr.get_collapse_mask(2030, xs, ys).tolist() == [0.0, 1.0, 0.0, 0.0]   # nearest year
 
 
+def test_the_year_is_read_however_the_file_encodes_time(tmp_path):
+    r"""A plain-year axis is only one way to write the file. With CF units
+    xarray decodes the axis to dates, and ``sel(time=2050)`` raises on it."""
+    d = tmp_path / "CESM2-WACCM" / "ssp585" / "fracture" / "v2.1"
+    d.mkdir(parents=True)
+    m = np.zeros((2, 1, 1), dtype="int8")
+    m[1] = 1
+    ds = xr.Dataset({"ice_shelf_collapse_mask": (("time", "y", "x"), m)},
+                    coords={"time": np.array(["2050-07-01", "2100-07-01"], dtype="datetime64[ns]"),
+                            "y": np.array([0.0]), "x": np.array([0.0])})
+    ds.to_netcdf(d / "ice_shelf_collapse_mask_cesm2waccm_ssp585_ismip7_8km-v2.1.nc")
+    fr = ISMIP7Fracture(data_root=str(tmp_path), esm="CESM2-WACCM", scenario="ssp585").load()
+    at = (np.array([0.0]), np.array([0.0]))
+    assert fr.get_collapse_mask(2060, *at).tolist() == [0.0]
+    assert fr.get_collapse_mask(2090, *at).tolist() == [1.0]
+    assert fr.provenance()[0]["version"] == "v2.1"
+
+
+def test_the_mask_is_found_by_name_among_the_files_other_variables(tmp_path):
+    r"""The real files (read on the cluster, September 2026) hold ``mask``
+    beside a scalar ``mapping`` and 2-D ``lon``/``lat``. Taking the first data
+    variable worked only because ``mask`` happens to come first."""
+    d = tmp_path / "CESM2-WACCM" / "ssp585" / "fracture" / "v2.1"
+    d.mkdir(parents=True)
+    lon = np.full((1, 2), 170.0)
+    ds = xr.Dataset({"mapping": ((), np.int32(0)),
+                     "lon": (("y", "x"), lon),
+                     "mask": (("time", "y", "x"), np.array([[[0, 1]]], dtype="int8"),
+                              {"standard_name": "ice_shelf_collapse_mask", "units": "1"})},
+                    coords={"time": ("time", np.array([2050], dtype="int32"), {"units": "year"}),
+                            "y": np.array([0.0]), "x": np.array([0.0, 8000.0])})
+    ds.to_netcdf(d / "ice_shelf_collapse_mask_cesm2waccm_ssp585_ismip7_8km-v2.1.nc")
+    fr = ISMIP7Fracture(data_root=str(tmp_path), esm="CESM2-WACCM", scenario="ssp585").load()
+    assert fr.get_collapse_mask(2299, np.array([0.0, 8000.0]), np.array([0.0, 0.0])).tolist() == [0.0, 1.0]
+
+
 def test_callback_fills_the_collapse_cells(mask_tree):
     fr = ISMIP7Fracture(data_root=str(mask_tree), esm="CESM2-WACCM", scenario="ssp585").load()
     cb = make_forcing_callback(fracture=fr)

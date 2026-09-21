@@ -3,7 +3,7 @@ r"""ISMIP7 output, part two: the model's yearly fields onto the 8 km AIS grid
 in the request's files.
 
     python antarctica/scripts/write_ismip7_output.py ANNUAL.h5 --out-dir DIR
-        --esm CESM2-WACCM --scenario ssp585 --exp C007
+        --esm CESM2-WACCM --scenario ssp585 [--exp C007]
         [--source-id RICE] [--ism-id icepack2] [--set-id CORE] [--scalars CSV]
 
 Serial. ANNUAL.h5 is the STEM ``<experiment>_<lc>_ismip7_annual.h5`` that
@@ -46,6 +46,7 @@ written.
 import argparse
 import csv
 import os
+import re
 import sys
 
 import numpy as np
@@ -240,10 +241,68 @@ def write_scalar(path, var, meta, years, values, is_flux):
         _global_attrs(ds, meta)
 
 
+# The core set's counters (the ISMIP7 filenames and conventions document;
+# discussion #17). The counter names the experiment in every filename and in
+# the directory, it was typed by hand, and C007 for a run that is C008 is a
+# well-formed submission of the wrong experiment that no checker can catch.
+CORE_COUNTER = {
+    ("CESM2-WACCM", "historical"): "C001", ("MRI-ESM2-0", "historical"): "C002",
+    ("CESM2-WACCM", "ssp370"): "C003", ("MRI-ESM2-0", "ssp370"): "C004",
+    ("CESM2-WACCM", "ssp126"): "C005", ("MRI-ESM2-0", "ssp126"): "C006",
+    ("CESM2-WACCM", "ssp585"): "C007", ("MRI-ESM2-0", "ssp585"): "C008",
+    ("CESM2-WACCM", "ctrl"): "C009", ("MRI-ESM2-0", "ctrl"): "C010",
+}
+# OCX has no ESM, and what belongs in the filename's forcing field for it is
+# not settled upstream: isschecker 0.5.0 checks that field against a list of
+# CMIP models and its experiment table has no ocx row. So the counter follows
+# from the scenario alone.
+OCX_COUNTER = "C011"
+
+
+def set_counter(esm, scenario, set_id, given=None):
+    r"""The ``<set_counter>`` of a submission, e.g. ``C007``.
+
+    For the core set it follows from the forcing, so ``given`` is optional
+    and refused when it names another core experiment. Outside the core set
+    (``ESM``, ``PPE``) nothing here knows the numbering, and ``given`` is
+    required.
+    """
+    if given is not None and not re.fullmatch(r"[CEP]\d{3}", given):
+        raise ValueError(f"--exp must look like C007, E041 or P132, got {given!r}")
+    if set_id != "CORE":
+        if given is None:
+            raise ValueError(f"--exp is required for the {set_id} set: only the core set's "
+                             f"counters follow from the forcing")
+        return given
+    expected = OCX_COUNTER if scenario.lower() == "ocx" else CORE_COUNTER.get((esm, scenario))
+    if expected is None:
+        raise ValueError(f"{esm} {scenario} is not a core experiment "
+                         f"({', '.join(f'{e} {sc}' for e, sc in CORE_COUNTER)}, ocx); "
+                         f"pass --set-id ESM or PPE with its --exp")
+    if given is not None and given != expected:
+        raise ValueError(f"--exp {given} names another experiment: {esm} {scenario} "
+                         f"is {expected} in the core set")
+    return expected
+
+
+def submission_id(name, value):
+    r"""``source_id`` and ``ism_id`` go into the filename between underscores,
+    and the conventions allow neither an underscore nor a dot in them
+    (discussion #17: ``ISSMv2026p2``, not ``ISSM_2026.2``). An underscore
+    shifts every field after it, so the file parses as another run."""
+    if not re.fullmatch(r"[A-Za-z0-9-]+", value):
+        raise ValueError(f"--{name} {value!r}: letters, digits and hyphens only, "
+                         f"no underscore, dot or space (ISMIP7 filename conventions)")
+    return value
+
+
 def main():
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("annual"); ap.add_argument("--out-dir", required=True)
-    ap.add_argument("--esm", required=True); ap.add_argument("--scenario", required=True); ap.add_argument("--exp", required=True)
+    ap.add_argument("--esm", required=True); ap.add_argument("--scenario", required=True)
+    ap.add_argument("--exp", default=None,
+                    help="the set counter, e.g. C007. The core set's follows from --esm and "
+                         "--scenario, so it is optional there and checked when given")
     ap.add_argument("--source-id", default=os.environ.get("ISMIP7_SOURCE_ID", "RICE"))
     ap.add_argument("--ism-id", default=os.environ.get("ISMIP7_ISM_ID", "icepack2"))
     ap.add_argument("--set-id", default="CORE")
@@ -251,6 +310,12 @@ def main():
     ap.add_argument("--contact-email", default=os.environ.get("ISMIP7_CONTACT_EMAIL", "ah301@rice.edu"))
     ap.add_argument("--scalars", default=None, help="the *_ismip7_scalars.csv (default: next to the annual file)")
     a = ap.parse_args()
+    try:
+        a.exp = set_counter(a.esm, a.scenario, a.set_id, a.exp)
+        submission_id("source-id", a.source_id)
+        submission_id("ism-id", a.ism_id)
+    except ValueError as e:
+        ap.error(str(e))
     req = request_table()
     years = AnnualOutput.years_on_disk(a.annual)
     if not years:

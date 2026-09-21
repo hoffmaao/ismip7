@@ -208,7 +208,7 @@ DEBUG_STAMP := $(shell date +%Y%m%d_%H%M%S)
 	qualify qualify-if-needed qualify-2step qualify-5step timestep-probe debug \
 	reference solver-smoke matrix matrix-legacy sync-results timing-prepare timing-scout \
 	timing-scale timing-dry-run timing-cache-smoke timing-cache-audit \
-	timing-probe timing-amb-probe timing-inversion
+	timing-probe timing-amb-probe timing-inversion now now-check
 
 timing: qualify-if-needed
 	@mkdir -p results/timing
@@ -607,6 +607,12 @@ matrix:
 	  read -r tag < results/timing/latest_matrix_campaign.txt; \
 	fi; \
 	python scripts/build_timing_matrix.py --tag "$$tag" --output "$(MATRIX_OUTPUT)"
+
+now:
+	python scripts/build_now.py --write --output "$(CURDIR)/../NOW.md"
+
+now-check:
+	python scripts/build_now.py --check --output "$(CURDIR)/../NOW.md"
 
 matrix-legacy:
 	@test ! -d "$(CURDIR)/antarctica/results" || { \

@@ -147,20 +147,62 @@ CALVING_SIGMA_MAX_GROUNDED_DEFAULT = "1.0"     # MPa
 CALVING_SIGMA_MAX_FLOATING_DEFAULT = "0.15"    # MPa
 
 
-FRACTURE_MODES = ("none", "mask")
+FRACTURE_MODES = ("none", "mask", "mask_front")
+FRACTURE_MASK_MODES = ("mask", "mask_front")     # the modes that read the collapse mask
 FRACTURE_DEFAULT = "none"
 
 
 def fracture():
     r"""``ISMIP7_FRACTURE``: how the ISMIP7 ice-shelf collapse forcing is
-    applied. ``none`` (default) loads nothing; ``mask`` removes the ice of
-    every FLOATING cell the year's collapse mask flags, booked as calving
-    (protocol path C, discussions #30 and #33: floating ice only; no mask
-    exists for historical or OCX, so those runs see nothing either way).
+    applied. ``none`` (default) loads nothing. Both mask modes act on FLOATING
+    ice only and book what they remove as calving (protocol path C,
+    discussions #30 and #33; no mask exists for historical or OCX, so those
+    runs see nothing either way), and they are the two end-members the
+    modelling groups arrived at in discussion #30:
+
+    ``mask`` empties every floating cell the year's mask flags, wherever it
+    is. The masks flag the Ross and Filchner-Ronne shelves near their
+    grounding lines first, so this opens holes far behind the front which the
+    momentum balance treats as open ocean.
+
+    ``mask_front`` empties a flagged floating cell only once open water has
+    reached it through other flagged cells, so a shelf collapses from its
+    front and nothing happens until the flagged region touches it (see
+    ``icepack2_tools.front.front_connected``).
+
     A stress-gated variant (Lai et al. 2020) is not implemented."""
     value = os.environ.get("ISMIP7_FRACTURE", FRACTURE_DEFAULT).lower()
     if value not in FRACTURE_MODES:
         raise ValueError(f"ISMIP7_FRACTURE must be one of {FRACTURE_MODES}, got {value!r}")
+    return value
+
+
+OCX_FORCING_MODES = ("protocol", "stopgap")
+OCX_FORCING_DEFAULT = "protocol"
+
+
+def ocx_forcing():
+    r"""``ISMIP7_OCX_FORCING``: what core 11 runs on. ``protocol`` (default)
+    is the ISMIP7 OCX product, RACMO2.3p2-ERA downscaled SMB and the
+    expert-judgment ocean, and the run refuses to start without it.
+    ``stopgap`` is what the core ran on before the product was readable here:
+    RACMO2.4p1 actual-year SMB and the constant OI ocean climatology. It used
+    to be the silent fallback, which is how a core ran on it for weeks with
+    the real product on disk; it is now something a run has to ask for."""
+    value = os.environ.get("ISMIP7_OCX_FORCING", OCX_FORCING_DEFAULT).lower()
+    if value not in OCX_FORCING_MODES:
+        raise ValueError(f"ISMIP7_OCX_FORCING must be one of {OCX_FORCING_MODES}, got {value!r}")
+    return value
+
+
+def ocx_ocean():
+    r"""``ISMIP7_OCX_OCEAN``: which of the four expert-judgment OCX ocean
+    scenarios to read. ``main`` (default) is the core experiment's; ``cold``,
+    ``warm`` and ``vary`` are its sensitivity members."""
+    from .forcing import OCX_OCEAN_VARIANTS
+    value = os.environ.get("ISMIP7_OCX_OCEAN", "main").lower()
+    if value not in OCX_OCEAN_VARIANTS:
+        raise ValueError(f"ISMIP7_OCX_OCEAN must be one of {OCX_OCEAN_VARIANTS}, got {value!r}")
     return value
 
 

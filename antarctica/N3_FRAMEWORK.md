@@ -49,7 +49,7 @@ regenerated per machine.
 At n = 3 a constant fluidity baseline forces the control `phi = log(A/A0)` to
 carry all the spatial fluidity structure, which blows up (`phi` to ±36) since
 n = 3 lacks the n = 4 `a4×10` boost. So the n = 3 inversion follows the
-`mismip_time-dependent-da` (Recinos/fenics_ice) method: it regularizes the
+`mismip_time-dependent-da` method (Recinos et al. (2023)): it regularizes the
 **deviation from a physical prior mean**, not amplitude.
 
 - **Fluidity**: `phi = log(A / A_prior)` where `A_prior(x)` is a

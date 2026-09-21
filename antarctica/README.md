@@ -259,7 +259,7 @@ bundles them into the callback `run_simulation` expects.
 
 ## 3. Build the mesh
 
-Adaptive isotropic mesh with Ua-style grounding-zone and calving-front
+Adaptive isotropic mesh with grounding-zone and calving-front
 refinement, sized from BedMachine geometry and MEaSUREs strain rate.
 
 ```bash
@@ -575,9 +575,9 @@ projection), run in that run's own shell so it captures the environment.
 | `ISMIP7_GAMMA_THETA` / `ISMIP7_GAMMA_PHI` | Whittle-Matern prior strength on `θ` and `φ`, coupled to `ISMIP7_MISFIT_NORM` since normalising divides the misfit by about sigma^2 | `1e5` under `sigma`, `1e4` under `none` |
 | `ISMIP7_L_REG` | prior correlation length (m) | `7.5e3` |
 | `ISMIP7_MAXITER` | L-BFGS-B iteration cap | `500` |
-| `ISMIP7_GRAD_PRECOND` | `none` is the raw-dof l2 metric, which is mesh dependent, so fine grounding-line cells converge slowest. `mass` optimises in `u = sqrt(M) x` under scipy, making the rate mesh independent. `mass_consistent` and `prior` run under TAO instead (scipy takes no preconditioner) with the initial inverse Hessian set to `M^-1` or to the prior covariance; `mass_consistent` is the configuration fenics_ice ships, `prior` is the one it leaves commented out as not working. Defaults to `none` to keep runs comparable with everything measured so far | `none` |
-| `ISMIP7_PRIOR_FORM` | `laplacian` uses `A = delta*M + gamma*K` as the prior precision; `bilaplacian` uses `A M^-1 A`, the hIPPYlib/fenics_ice operator that a 2-D Whittle-Matern field needs to be function-valued. Different priors, not two spellings of one: their gammas are not convertible and their MAPs are not comparable, so the MAP stamps `prior_form` | `laplacian` |
-| `ISMIP7_PRIOR_SIGMA_THETA` / `_PHI`, `ISMIP7_PRIOR_RHO` | `bilaplacian` only: the log-deviation scale and correlation length (m), converted to `(delta, gamma)` by hIPPYlib's `sigma^2 = 1/(4 pi gamma delta)`, `rho = sqrt(8 gamma/delta)`. The un-squared form has no such closed form, which is why its gamma can only be tuned | `0.3` / `0.3` / `ISMIP7_L_REG` |
+| `ISMIP7_GRAD_PRECOND` | `none` is the raw-dof l2 metric, which is mesh dependent, so fine grounding-line cells converge slowest. `mass` optimises in `u = sqrt(M) x` under scipy, making the rate mesh independent. `mass_consistent` and `prior` run under TAO instead (scipy takes no preconditioner) with the initial inverse Hessian set to `M^-1` or to the prior covariance; `mass_consistent` is the configuration of Recinos et al. (2023); `prior` is the one they left untested. Defaults to `none` to keep runs comparable with everything measured so far | `none` |
+| `ISMIP7_PRIOR_FORM` | `laplacian` uses `A = delta*M + gamma*K` as the prior precision; `bilaplacian` uses `A M^-1 A`, the squared-operator prior of Villa et al. (2021), the operator that a 2-D Whittle-Matern field needs to be function-valued. Different priors, not two spellings of one: their gammas are not convertible and their MAPs are not comparable, so the MAP stamps `prior_form` | `laplacian` |
+| `ISMIP7_PRIOR_SIGMA_THETA` / `_PHI`, `ISMIP7_PRIOR_RHO` | `bilaplacian` only: the log-deviation scale and correlation length (m), converted to `(delta, gamma)` by the closed forms of Villa et al. (2021), `sigma^2 = 1/(4 pi gamma delta)`, `rho = sqrt(8 gamma/delta)`. The un-squared form has no such closed form, which is why its gamma can only be tuned | `0.3` / `0.3` / `ISMIP7_L_REG` |
 | `ISMIP7_PRECOND_STEP0` | TAO metrics only: the largest change the FIRST step may make to a control, in that control's units, applied per control block. L-BFGS's first step is `-H_0 g` at unit length with no curvature pair to rescale it, and one evaluation outside the region where the forward has a solution returns NaN that every later trial point inherits | `0.15` |
 | `ISMIP7_GTOL` | TAO metrics only: `tao_gatol` on the prior-metric gradient norm `sqrt(g' A^-1 g)`, which is mesh independent unlike the raw l2 norm the scipy path prints. `0` spends the whole iteration budget, as the scipy path does | `0` |
 | `ISMIP7_SIGMA_U_FLOOR` | floor on the per-component MEaSUREs error (m/yr), so near-zero errors cannot let a few nodes dominate | `1.0` |

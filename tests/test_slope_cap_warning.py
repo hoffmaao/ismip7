@@ -5,7 +5,7 @@ Melt is linear in ``sin(alpha)``, so a per-basin K is only valid for the slope
 field it was calibrated on. ``calibrate_melt.py`` caps the slope at
 ``ISMIP7_SIN_ALPHA_CAP`` and stamps that value into the npz;
 ``forcing.compute_sin_alpha``, which the forward calls every step, applies no
-cap. At the reference state on the Úa 2 km mesh the forward's own cell by
+cap. At the reference state on the adaptive 2 km mesh the forward's own cell by
 cell melt path integrates 1732 Gt/yr against the 1067.4 Gt/yr the K was fitted
 to, and capping its slope gives 646 Gt/yr; an earlier 4293 and 1028 from a
 lifted slope are superseded. The mismatch used to be invisible: both halves

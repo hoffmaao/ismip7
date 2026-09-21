@@ -1,7 +1,7 @@
 r"""The two prior precisions in icepack2_tools.prior.
 
-`laplacian` uses A itself; `bilaplacian` uses A M^-1 A, the hIPPYlib
-BiLaplacianPrior / fenics_ice `prior.Laplacian` ("LM^-1L") operator. These
+`laplacian` uses A itself; `bilaplacian` uses A M^-1 A, the
+squared-operator ("LM^-1L") prior of Villa et al. (2021). These
 check the second against dense linear algebra, because its energy is reached
 through a mass solve rather than a single form and a sign or a transpose there
 is invisible in the output of a run.
@@ -103,7 +103,7 @@ def test_the_covariance_action_inverts_the_precision(space):
 
 
 @pytest.mark.parametrize("sigma,rho", [(0.3, 7500.0), (1.0, 2500.0), (0.05, 500.0)])
-def test_sigma_and_rho_round_trip_through_the_hippylib_relations(sigma, rho):
+def test_sigma_and_rho_round_trip_through_the_villa_2021_relations(sigma, rho):
     """sigma^2 = 1/(4 pi gamma delta) and rho = sqrt(8 gamma/delta) at nu=1."""
     delta, gamma = bilaplacian_coeffs(sigma, rho)
     assert 1.0 / math.sqrt(4 * math.pi * gamma * delta) == pytest.approx(sigma, rel=1e-12)

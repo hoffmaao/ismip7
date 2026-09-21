@@ -1,8 +1,8 @@
 # Adaptive remeshing
 
-Implementation of adaptive mesh scheme implemented in Úa 
-(`UaMain/AdaptMesh.m`, `NewDesiredEleSizesAndElementsToRefineOrCoarsen2.m`,
-`Error2EleSize.m`, `GlobalRemeshing.m`, `MapFbetweenMeshes.m`, Sep 2026).
+Adaptive remeshing after Gudmundsson et al. (2012), ported to this model in
+September 2026: the desired-element-size field, `Error2EleSize`, the global
+remeshing, and the field transfer between meshes.
 
 ## Build the mesh first, do not refine mid-run
 
@@ -15,8 +15,8 @@ what this branch does.
 
 **Intended use.** Build the mesh, invert on it, run forward on it.
 
-1. Build a Úa-preset mesh. Two sidecars are committed, both under
-   `ISMIP7_LC=2000 ISMIP7_LC_COARSE=180000 ISMIP7_BUFFER_M=20000` with the Úa
+1. Build an adaptive-preset mesh. Two sidecars are committed, both under
+   `ISMIP7_LC=2000 ISMIP7_LC_COARSE=180000 ISMIP7_BUFFER_M=20000` with the adaptive
    preset, differing in where the desired sizes come from.
 
    Sized from the MODEL fields of the 2500 m MAP:
@@ -52,13 +52,13 @@ wired and correct as far as the identity test reaches; treat a real mid-run
 adaptation as unvalidated. Closed as icepack/ismip7#37, not planned for
 September 2026.
 
-`GLmorphing` was not ported. Úa carries a mesh-deformation scheme
-(`GLmorphing.m`) with no caller in `Ua.m` or `Ua2D.m`, a hook commented out in
+Grounding-line morphing was not ported: the reference scheme carries a
+mesh-deformation step with no caller, a hook commented out in
 `GlobalRemeshing.m` as "broken anyhow", and no mention in the 362-page
-Compendium. Úa runs `AdaptMesh`, which is what this implements. Morphing would
+Compendium. Its global remeshing is what this implements. Morphing would
 be about 100 lines on top of `icepack2_tools.adapt_mesh.grounding_line_points`.
 
-## The scheme (Úa names in brackets)
+## The scheme (the reference implementation's names in brackets)
 
 1. **Desired element size** at the nodes [`EleSizeDesired`]. Start at
    `MeshSizeMax`. For each enabled criterion
@@ -72,26 +72,26 @@ be about 100 lines on top of `icepack2_tools.adapt_mesh.grounding_line_points`.
    calving front.
 2. **Global remeshing** [`explicit:global`, gmsh]: the nodal size field becomes
    gmsh's background scalar view, the outline and physical groups are rebuilt
-   as `mesh_antarctica.py` builds them, and the mesh is regenerated. Then Úa's
+   as `mesh_antarctica.py` builds them, and the mesh is regenerated. Then the scheme's
    element-count control: up to four rescalings of `MeshSizeMin` so the count
    lands within `[LowerLimitFactor, UpperLimitFactor] * MaxNumberOfElements`.
 3. **Transfer** [`MapFbetweenMeshes`]: point-evaluation interpolation old to
-   new (Úa uses FE shape functions), thickness `ThickMin` outside the old mesh,
+   new (the reference uses FE shape functions), thickness `ThickMin` outside the old mesh,
    bed re-sampled from BedMachine with the method the MAP recorded, surface by
    flotation. Frozen anchors (`a_ref_mb`, `N_ref`, `C_w0`, `H_init`, level set)
    move too.
 
-Criteria available, exactly Úa's list: `effective strain rates`, `effective
-strain rates gradient`, `flotation` (Úa's `DiracDelta`
+Criteria available, the reference list: `effective strain rates`, `effective
+strain rates gradient`, `flotation` (the `DiracDelta`
 `0.5 k sech^2(k (h - h_f))`), `thickness gradient`, `upper surface gradient`,
 `lower surface gradient`, `|dhdt|`, `dhdt gradient`.
 
-Two choices where Úa is nodal and this model is DG0:
+Two choices where the reference is nodal and this model is DG0:
 
-- `EleSizeCurrent` is Úa's `sqrt(mean adjacent element area)`, kept despite
-  being 0.66 of an edge length, because Úa's relaxation and ratio limits are
+- `EleSizeCurrent` is `sqrt(mean adjacent element area)`, kept despite
+  being 0.66 of an edge length, because the relaxation and ratio limits are
   calibrated against it.
-- Thickness transfer follows Úa's nodal surface route
+- Thickness transfer follows the reference's nodal surface route
   (`ISMIP7_ADAPT_GEOMETRY=bh-FROM-sBS`, the default). Under it the thickness is
   never transferred: `surface_route_thickness` moves the surface and rebuilds
   `h` against the bed re-sampled on the new mesh, so `ISMIP7_ADAPT_TRANSFER`
@@ -118,9 +118,9 @@ the forward's rank count to parallelise the transfer under the default
 `interpolate`. Either way the transfer prints the volume change and the mean
 front thickness before and after.
 
-## Configuration (`ISMIP7_ADAPT_*`, defaults from Úa's `Ua2D_DefaultParameters`)
+## Configuration (`ISMIP7_ADAPT_*`, defaults from Gudmundsson et al. (2012))
 
-| variable | Úa `CtrlVar` | default |
+| variable | reference parameter | default |
 |---|---|---|
 | `ISMIP7_ADAPT_MESH_SIZE` | `MeshSize` | 10 km |
 | `ISMIP7_ADAPT_MESH_SIZE_MIN` / `_MAX` | `MeshSizeMin` / `MeshSizeMax` | 1 km / 10 km |
@@ -136,26 +136,26 @@ front thickness before and after.
 | `ISMIP7_ADAPT_GEOMETRY` | `MapOldToNew.Transient.Geometry` | `bh-FROM-sBS` |
 | `ISMIP7_ADAPT_KEEP_CURRENT=1` | none (null test at current sizes) | off |
 
-### The Úa preset: `ISMIP7_ADAPT_PRESET=ua`
+### The Antarctic preset: `ISMIP7_ADAPT_PRESET=ua`
 
-Sizes Úa itself uses for Antarctica, so the adaptation is consistent with a Úa
-run rather than with this repo's initial meshes.
+The sizes the reference setup uses for Antarctica, so the adaptation is consistent with
+that setup rather than with this repo's initial meshes.
 
 | setting | value | source |
 |---|---|---|
-| `MeshSizeMax` (interior) | 180 km | Úa-FESOM pan-Antarctic mesh, GMD 18 (2025): "up to 180 km in the interior" |
+| `MeshSizeMax` (interior) | 180 km | the coupled ice-ocean pan-Antarctic mesh, GMD 18 (2025): "up to 180 km in the interior" |
 | `MeshSizeMin` (grounding line) | 2 km | same paper: "adaptive refinement down to 2 km at the grounding line" |
 | `MeshSize` (fallback) | 90 km | PIG-TWG example: `MeshSize = MeshSizeMax/2` |
-| ice-shelf size | 10 km | inferred. Úa's PIG-TWG uses `MeshSizeIceShelves = MeshSizeMax/5` and its pan-Antarctic runs quote 4 km, which continent-wide is about 220,000 elements on the shelves alone. 10 km keeps the 1.5 M-dof budget |
+| ice-shelf size | 10 km | inferred. The reference PIG-TWG setup uses `MeshSizeIceShelves = MeshSizeMax/5` and its pan-Antarctic runs quote 4 km, which continent-wide is about 220,000 elements on the shelves alone. 10 km keeps the 1.5 M-dof budget |
 | low ground (`s < 1500 m`) | 36 km | PIG-TWG `EleSizeIndicator(s<1500) = MeshSizeMax/5`, scaled to 180 km |
 | `effective strain rates` | Scale 0.001, floor 4 km | PIG-TWG Scale; pan-Antarctic "4 km in regions of high strain rate" |
 | `GLrange` | 10 km: 4 km, 5 km: 2 km | inferred pan-Antarctic form of MISMIP+'s `[20000 5000; 10000 2000; 5000 500]` and the 2 km statement |
-| `MaxNumberOfElements` | 250,000 | pan-Antarctic Úa: "250 000 elements" (linear, `TriNodes=3`, as here) |
+| `MaxNumberOfElements` | 250,000 | the pan-Antarctic setup: "250 000 elements" (linear, `TriNodes=3`, as here) |
 | initial adaptation | up to 5 iterations | PIG-TWG `AdaptMeshMaxIterations=5` |
-| remesh interval | every step in Úa | here `--adapt-every` in years, 1 yr being the practical floor |
+| remesh interval | every step in the reference | here `--adapt-every` in years, 1 yr being the practical floor |
 
 The preset fills only what is unset, so any single `ISMIP7_ADAPT_*` variable
-overrides it. Úa's elements in these setups are linear, so a 4 km Úa element
+overrides it. Elements in these setups are linear, so a 4 km element
 and a 4 km cell here resolve alike.
 
 Timing knobs live in `run_adaptive.py`: `--adapt-every`
@@ -166,7 +166,7 @@ Timing knobs live in `run_adaptive.py`: `--adapt-every`
 
 - `icepack_tools/adapt_mesh.py`, the shared package: the scheme itself
   (criteria, `Error2EleSize`, relaxation and ratio limits, bands, PIG-TWG
-  rules, `remesh_global` with a project-supplied `build_geometry()` and Úa's
+  rules, `remesh_global` with a project-supplied `build_geometry()` and the reference's
   element-count control) and the transfer helpers (`cross_mesh_transfer`,
   `preserve_front`, `physical_divergence`, `surface_route_thickness`,
   `rebuild_reference_pressure`). Nothing in it knows about Antarctica. Tests:
@@ -185,11 +185,11 @@ Timing knobs live in `run_adaptive.py`: `--adapt-every`
 
 ## Geometry route
 
-Úa's default `MapOldToNew.Transient.Geometry = "bh-FROM-sBS"` moves the surface
+The reference default `MapOldToNew.Transient.Geometry = "bh-FROM-sBS"` moves the surface
 and derives the thickness from it and the re-sampled bed
-(`h = min(s - b, s rho_w / (rho_w - rho_i))`). The DG0 analogue of Úa's nodal
+(`h = min(s - b, s rho_w / (rho_w - rho_i))`). The DG0 analogue of the nodal
 surface is the volume-preserving CG1 lift of the cell surface, point-evaluated
-at the new centroids. On the first run-step of a transient run Úa takes all
+at the new centroids. On the first run-step of a transient run the reference takes all
 geometry from data, and `--rebuild-aref` does the same (bed and thickness from
 BedMachine, `H_init = H`).
 
@@ -248,7 +248,7 @@ the cap, He-only 133, production 0). The census is what calls for re-inverting
 Budd MAPs. Re-solved under the fixed law, the old MAP lands at rel L2 = 0.91
 from its saved velocity. A re-solve distance of this size is now known to
 appear under both friction laws and for a MAP inverted under the shipped gate
-(on the Úa 2 km mesh, 0.665 for the re-inverted Budd MAP and 0.685 for the
+(on the 2 km / 180 km adaptive mesh, 0.665 for the re-inverted Budd MAP and 0.685 for the
 regularized Coulomb MAP), so it does not by itself identify the shelf gate as
 the cause. Those two came from the forward's `ocean_drag` and `u_lim`, which
 the 14 September inversions did not assemble; section 4 of
@@ -262,7 +262,7 @@ carried a multiplicative `He`, which scaled grounded friction inside the
 GL_WIDTH band as well as zeroing the shelf. The shipped law is HAF only, with
 `He` entering the Budd branch through `tau_W`'s `exp(theta * He)` as it does
 under regularized Coulomb. The re-inversions must match that form, since the
-inversion and the forward assemble the same expression. The Úa-mesh Budd MAP
+inversion and the forward assemble the same expression. The adaptive-mesh Budd MAP
 inverted under the interim form is kept as
 `inversion_icepack2_budd_n3_dg0_logvelnet_ua2000_He.h5`; the production
 re-inversion (NOTS job 1339328) warm-starts from it under the shipped law. No

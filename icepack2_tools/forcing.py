@@ -33,8 +33,12 @@ _F_CORIOLIS = 1.4e-4   # representative Antarctic Coriolis parameter, 1/s
 _MELT_FACTOR = (_RHO_SW * _C_PO) / (_RHO_I * _L_I)
 
 # K50 median from Burgard 2022 calibration
-# (parameter_selection_quadratic_example.ipynb).
-_K_DEFAULT = 11.5e-5
+# K50 of the ISMIP7 toolbox's standard sampling (parameter_selection_quadratic
+# _example.ipynb, July 2026 update: K05 4.75e-5, K50 8.5e-5, K95 1.375e-4),
+# sampled with the constant slope SIN_ALPHA_ANT_DEFAULT below. The earlier
+# 1.15e-4 was the pre-update value.
+_K_DEFAULT = 8.5e-5
+_K_PERCENTILES = (4.75e-5, 8.5e-5, 1.375e-4)
 
 _DEFAULT_DATA_ROOT = os.path.join(
     os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
@@ -1146,7 +1150,7 @@ def quadratic_mixed_slope(tf, salinity, sin_alpha, K=_K_DEFAULT):
         salinity  : ambient salinity at ice draft, PSU (numpy array)
         sin_alpha : sin of local ice-draft slope, dimensionless (numpy array)
         K         : dimensionless tuning factor (scalar or per-node array).
-                    Burgard K50 = 1.15e-4.
+                    ISMIP7 toolbox K50 = 8.5e-5 (K05 4.75e-5, K95 1.375e-4).
 
     Returns melt rate in m/yr ice equivalent (positive = melting).
     """
@@ -1160,6 +1164,26 @@ _SLOPE_CAP_WARNED = False
 
 
 _GEOMETRY_SPACE_WARNED = False
+_MELT_SLOPE_WARNED = False
+
+
+def _warn_melt_slope(npz_path, fitted_under, running_under):
+    r"""Say once that the K on disk was fitted under the other slope
+    convention. Melt is linear in sin(alpha), so the K does not transfer."""
+    global _MELT_SLOPE_WARNED
+    if _MELT_SLOPE_WARNED:
+        return
+    _MELT_SLOPE_WARNED = True
+    if _comm_rank() == 0:
+        print(
+            f"  WARNING: {os.path.basename(npz_path)} was calibrated under "
+            f"ISMIP7_MELT_SLOPE={fitted_under} and this run melts under "
+            f"{running_under}; melt is linear in sin(alpha), so the K does "
+            f"not transfer. Refit with calibrate_melt.py under "
+            f"ISMIP7_MELT_SLOPE={running_under}, or name a matching file "
+            f"with ISMIP7_K_PER_BASIN_NPZ.",
+            flush=True,
+        )
 
 
 def _warn_geometry_space(npz_path, fitted_on, running_on):
@@ -1229,7 +1253,12 @@ def load_K_per_basin(npz_path, mesh_x, mesh_y, fill=0.0):
     # applies none. Which convention the forward should use is a science
     # decision (issue #26), so a mismatch is reported once and left to it.
     # See GEOMETRY_DISCRETIZATION.md.
-    if "sin_alpha_cap" in data:
+    # The slope convention the K was fitted under. A file without the entry
+    # predates the knob and was fitted on the local slope.
+    fitted_slope = str(data["melt_slope"]) if "melt_slope" in data else "local"
+    if fitted_slope != melt_slope():
+        _warn_melt_slope(npz_path, fitted_slope, melt_slope())
+    if fitted_slope == "local" and melt_slope() == "local" and "sin_alpha_cap" in data:
         cap = float(data["sin_alpha_cap"])
         if np.isfinite(cap) and cap > 0.0:
             _warn_slope_cap(npz_path, cap)
@@ -1316,8 +1345,43 @@ def is_floating(s, b):
     return height_above_flotation(s, b) <= 0.0
 
 
+# The slope the quadratic law sees. The ISMIP7 reference example is "quadratic
+# local with mean Antarctic slope (= no slope dependency)": one constant
+# sin(alpha) for every shelf, the mean of the 8 km local draft slope over the
+# shelves. The local slope is the notebook's other option, with its caveat
+# that gridded slopes are bumpy. The toolbox's K05, K50 and K95 belong to the
+# constant-slope law: its own gamma_T conversion gives the value they were
+# sampled with, sin(alpha) = 5.115e-3 for all three (K = gamma_T * 2|f| rho_sw
+# / (rho_i g beta_S S0 sin(alpha) yr) with the notebook's constants). The
+# notebook's recipe on the ISMIP7 8 km v3 topography gives 5.7e-3; Burgard et
+# al. (2022) tuned against 2.9e-3. The default is the value the percentiles
+# carry, so a K read against them means the same thing here.
+MELT_SLOPES = ("ant", "local")
+MELT_SLOPE_DEFAULT = "ant"
+SIN_ALPHA_ANT_DEFAULT = 5.115e-3
+
+
+def melt_slope():
+    r"""``ISMIP7_MELT_SLOPE``: ``ant`` (one constant slope, the protocol's
+    reference) or ``local`` (the slope of the draft on this mesh)."""
+    value = os.environ.get("ISMIP7_MELT_SLOPE", MELT_SLOPE_DEFAULT).lower()
+    if value not in MELT_SLOPES:
+        raise ValueError(
+            f"ISMIP7_MELT_SLOPE must be one of {MELT_SLOPES}, got {value!r}")
+    return value
+
+
+def sin_alpha_ant():
+    r"""``ISMIP7_SIN_ALPHA_ANT``: the constant ``sin(alpha)`` under ``ant``."""
+    return float(os.environ.get("ISMIP7_SIN_ALPHA_ANT", SIN_ALPHA_ANT_DEFAULT))
+
+
 def compute_sin_alpha(ctx):
-    r"""Return sin(alpha) of the local ice-draft slope, on the geometry space.
+    r"""Return sin(alpha) of the ice-draft slope, on the geometry space.
+
+    Under ``ISMIP7_MELT_SLOPE=ant`` (the default) this is one constant,
+    :func:`sin_alpha_ant`, on every dof: the protocol's mean Antarctic slope.
+    Under ``local`` it is the slope of this mesh's draft, computed as below.
 
     Computes draft = s - h and returns sin(arctan(|grad draft|)) =
     |grad|/sqrt(1 + |grad|^2), as a plain array aligned with the dofs of the
@@ -1336,6 +1400,8 @@ def compute_sin_alpha(ctx):
     h = ctx["h"]
     s = ctx["s"]
     Q_g = ctx.get("Q_g", Q)
+    if melt_slope() == "ant":
+        return np.full(h.dat.data_ro.shape[0], sin_alpha_ant())
     if Q_g.ufl_element().degree() == 0:
         draft = fd.Function(Q_g).interpolate(s - h)
         gd = fd.grad(cg1_lift(draft))

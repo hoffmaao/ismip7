@@ -235,11 +235,28 @@ vertex-sampled, the 865.0 Gt/yr table, 21 September 2026):
    so a K fitted to it absorbs mesh slope noise and lands every basin below
    Burgard's range, while the forward as it runs today would apply 4.1 times
    the target with the production K once the flotation test is right. The
-   slope convention is issue #26: capping the forward's slope at the
-   calibration's 5e-3 makes it apply the melt its K was fitted to, with the K
-   files essentially as they are. Until it is settled the DG0 calibration fits
-   the forward as it runs, and `ISMIP7_SIN_ALPHA_CAP` fits the capped
-   convention.
+   slope convention is issue #26. The ISMIP7 reference example is one
+   constant mean-Antarctic slope, "no slope dependency", and the toolbox's K
+   percentiles (July 2026: K05 4.75e-5, K50 8.5e-5, K95 1.375e-4) were sampled
+   with sin(alpha) = 5.115e-3, back-computed from the notebook's own gamma_T
+   conversion. That is now the forward's and the calibration's default
+   (`ISMIP7_MELT_SLOPE=ant`, `ISMIP7_SIN_ALPHA_ANT`); the local slope stays as
+   `local`, capped in the calibration and uncapped in the forward as before.
+
+3. **Under the constant slope the geometry space is immaterial and K lands
+   inside the toolbox's envelope.** Same mesh, same table, seawater flotation:
+
+| slope | geometry | K* | K total-match | melt at K* | basins in K05..K95 |
+|---|---|---|---|---|---|
+| constant 5.115e-3 | dg0 cells | 4.06e-5 | 4.44e-5 | 791 Gt/yr | 7 of 16 |
+| constant 5.115e-3 | cg1 nodes | 4.04e-5 | 4.44e-5 | 787 Gt/yr | 7 of 16 |
+
+   The two fits agree to 0.5 percent. Scaled to the July 2026 table (1067.4
+   Gt/yr, not staged here) K* is about 5.0e-5, between the toolbox's K05 and
+   K50, which is where a term-1-only fit should sit: the notebook's own K50
+   applies 1571 Gt/yr against the 1067 observed, because terms 2 to 4 pull K
+   up. The per-basin adjustment the protocol offers is a temperature offset
+   at fixed K, not a per-basin K; that is the next change.
 
 ## Incompatibilities
 

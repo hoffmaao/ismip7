@@ -21,12 +21,16 @@ CAP = 5e-3
 
 
 @pytest.fixture(autouse=True)
-def _rearm():
-    r"""The warning fires once per process, so re-arm it around each test."""
-    before = forcing._SLOPE_CAP_WARNED
-    forcing._SLOPE_CAP_WARNED = False
+def _rearm(monkeypatch):
+    r"""The warning fires once per process, so re-arm it around each test.
+    The cap belongs to the local slope convention, so these run under it."""
+    monkeypatch.setenv("ISMIP7_MELT_SLOPE", "local")
+    # The files here carry no geometry tag either; that warning has its own tests.
+    monkeypatch.setenv("ISMIP7_GEOMETRY_SPACE", "cg1")
+    monkeypatch.setattr(forcing, "_SLOPE_CAP_WARNED", False)
+    monkeypatch.setattr(forcing, "_MELT_SLOPE_WARNED", False)
+    monkeypatch.setattr(forcing, "_GEOMETRY_SPACE_WARNED", False)
     yield
-    forcing._SLOPE_CAP_WARNED = before
 
 
 @pytest.fixture

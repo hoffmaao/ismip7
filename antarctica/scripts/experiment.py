@@ -227,7 +227,7 @@ def run_core_experiment(*, core, title, name, esm, scenario,
         PETSc.Sys.Print(f"  {line}")
 
     K_npz = find_k_npz()
-    K_melt = float(os.environ.get("ISMIP7_K_MELT", "1.15e-4"))
+    K_melt = float(os.environ.get("ISMIP7_K_MELT", "8.5e-5"))
     if K_npz is not None:
         PETSc.Sys.Print(f"  Ocean melt: calibrated per-basin K from {K_npz}")
     else:

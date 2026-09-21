@@ -1,5 +1,5 @@
 """
-Smooth Heaviside grounding zone treatment (after Gudmundsson et al. (2012)).
+Smooth Heaviside grounding-zone treatment on height above flotation.
 
 Provides functions for:
   - Smooth Heaviside of height-above-flotation

@@ -81,13 +81,13 @@ def regularization_gradient_form(theta, test, gamma, area, L_reg=L_REG):
 # distribution, not a function -- its pointwise variance does not exist and
 # refining the mesh does not converge to anything. Squaring gives alpha = 2,
 # nu = alpha - d/2 = 1, and a genuine function-valued Matern field. This is
-# why both codes square, and why both quote closed-form marginal variance and
-# correlation length, which the un-squared operator has none of.
+# why the squared form is used, and why it has closed-form marginal variance
+# and correlation length, which the un-squared operator has none of.
 #
 # The energy needs a mass solve, so unlike regularization_form it is not one
 # UFL form: R(theta) = 0.5 * theta' A M^-1 A theta is evaluated by solving
-# M f = A theta and then integrating 0.5*f^2 (exactly the
-# norm_sq applied to its solved field). The caller owns the solve so that the
+# M f = A theta and then integrating 0.5*f^2 (the squared L2
+# norm of the solved field). The caller owns the solve so that the
 # inversion can put it on the adjoint tape and the UQ can reuse the operator.
 
 def bilaplacian_coeffs(sigma, rho):
@@ -95,7 +95,7 @@ def bilaplacian_coeffs(sigma, rho):
     of marginal standard deviation ``sigma`` and correlation length ``rho`` (m)
     under the SQUARED precision ``A M^-1 A``.
 
-    the relations of Villa et al. (2021) at ``nu = alpha - d/2 = 1``:
+    The relations of Villa et al. (2021) at ``nu = alpha - d/2 = 1``:
 
         sigma^2 = 1 / (4*pi*gamma*delta),      rho = sqrt(8*gamma/delta)
 

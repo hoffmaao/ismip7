@@ -221,8 +221,8 @@ L_REG = float(os.environ.get("ISMIP7_L_REG", "7.5e3"))
 
 # ── Prior form (ISMIP7_PRIOR_FORM) ──────────────────────────────────────
 # `laplacian` (default, everything inverted so far) uses A = delta*M + gamma*K
-# as the prior precision itself. `bilaplacian` uses A M^-1 A, which is what
-# The squared-operator prior of Villa et al. (2021) ("LM^-1L") uses,
+# as the prior precision itself. `bilaplacian` uses A M^-1 A, which is
+# the squared-operator prior of Villa et al. (2021) ("LM^-1L")
 # and what the Whittle-Matern SPDE needs in 2-D for the field to be a function
 # rather than a distribution (alpha = 2 > d/2; the un-squared operator has no
 # pointwise variance to speak of and does not converge under refinement).
@@ -1011,8 +1011,8 @@ def main():
     def _prior_metric_solvers(metric):
         """Per-control solvers for the prior COVARIANCE, the metric
         ISMIP7_GRAD_PRECOND=prior descends in: ``A^-1`` for the Laplacian,
-        ``A^-1 M A^-1`` for the bi-Laplacian (the
-        ``Laplacian.inv_action``, "L^-1 M L^-1"). Returns a callable taking the
+        ``A^-1 M A^-1`` for the bi-Laplacian (the covariance
+        action "L^-1 M L^-1"). Returns a callable taking the
         two assembled gradients and returning the two preconditioned
         directions."""
         _tr = fd.TrialFunction(Q)
@@ -1030,26 +1030,24 @@ def main():
             for which in ("theta", "phi")
         }
         # The consistent mass Riesz map, for metric == "mass": the same
-        # preconditioner of Recinos et al. (2023), reached through the same code path
-        # so the two options differ only in the operator.
+        # mass-matrix preconditioner, reached through the same code path so
+        # the two options differ only in the operator.
         _mass_solver = fd.LinearSolver(
             assemble(inner(_tr, _prior_test) * dx), solver_parameters=_fac
         )
 
-        # First-step scaling, per control BLOCK. Following the practice of
-        # minimize_l_bfgs call (solver.py): it passes block_theta_scale for a
-        # dual inversion, because "alpha & beta tend to have very different
-        # magnitudes. Theta scaling both alpha & beta by their combined mean is
-        # a bad idea". theta (friction) and phi (fluidity) are exactly that
-        # pair here, and a single combined scalar is what a 32 km probe took
+        # First-step scaling, per control BLOCK. The two controls of a dual
+        # inversion tend to have very different magnitudes, so scaling both
+        # by their combined mean is a bad idea. theta (friction) and phi
+        # (fluidity) are exactly that pair here, and a single combined scalar is what a 32 km probe took
         # theta to [-883, +14165] with -- it is a log deviation, so order 1.
         #
         # The scaling exists because L-BFGS's first step is -H_0 g at unit
         # length, with no curvature pair yet to rescale it, and on this path a
         # line search cannot recover: one evaluation outside the region where
         # the forward has a solution returns NaN and every later trial point
-        # inherits it. Recinos et al. (2023) bound the same thing with the line search's
-        # amax; TAO's lmvm gives no equivalent once H_0 is supplied, so the
+        # inherits it. A line search can cap the first step with amax; TAO's
+        # lmvm gives no equivalent once H_0 is supplied, so the
         # bound goes on H_0 instead. ISMIP7_PRECOND_STEP0 is the largest change
         # the first step may make to a control, in that control's own units.
         _step0 = float(os.environ.get("ISMIP7_PRECOND_STEP0", "0.15"))
@@ -1060,8 +1058,8 @@ def main():
             for which, rhs in (("theta", g_theta), ("phi", g_phi)):
                 x = Function(Q)
                 if metric == "mass_consistent":
-                    # The consistent mass Riesz map of Recinos et al. (2023) (their mass_precon,
-                    # H_M_0): the Riesz map of the L2 inner product. It removes
+                    # The consistent mass Riesz map: the same mass-matrix
+                    # preconditioner, the Riesz map of the L2 inner product. It removes
                     # the cell-size dependency and nothing else, which is why
                     # it is robust where the prior metric is delicate.
                     _mass_solver.solve(x, rhs)

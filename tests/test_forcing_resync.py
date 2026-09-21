@@ -187,6 +187,36 @@ def test_the_ocx_tree_is_audited_in_its_own_layout(tmp_path):
     assert mirror.local_path("R", tf) == os.path.join("R", "OCX", "ocean", "main", "v1", os.path.basename(tf))
 
 
+def test_extra_and_extras_are_found_below_the_row(tmp_path):
+    r"""Seen on Quartz in September 2026, with the whole mirror on disk: eight
+    ``extra`` and ``extras`` rows reading MISSING with every one of their files
+    present. The mirror nests them below the level a product/variable row
+    reaches, at ``<product>/extra/climatology/<variable>/<version>/``, so a
+    search that stops at the top of the row finds no version at all."""
+    esm, atm = "CESM2-WACCM", "SDBN1-8000m"
+    extra = (f"data/{esm}/historical/{atm}/extra/climatology/acabf/"
+             f"acabf_AIS_{esm}_historical_{atm}_v2_1960-1989.nc")
+    extras = (f"data/{esm}/historical/ocean/extras/bias/tf/"
+              f"tf_AIS_{esm}_historical_ocean_v3_1995-2014.nc")
+    got = _status(tmp_path, [_entry(tmp_path, extra), _entry(tmp_path, extras)])
+    assert got[("historical", atm, "extra")][:2] == ("ok", None)
+    assert got[("historical", "ocean", "extras")][:2] == ("ok", None)
+    assert audit.local_versions(str(tmp_path), esm, "historical", atm, "extra") == ["v2"]
+    # a row whose versions do sit at the top is untouched by the deeper search
+    plain = _key(esm, "ssp585", atm, "acabf", f"acabf_AIS_{esm}_ssp585_{atm}_v2_2015.nc")
+    _entry(tmp_path, plain)
+    assert audit.local_versions(str(tmp_path), esm, "ssp585", atm, "acabf") == ["v2"]
+
+
+def test_versions_below_a_row_sort_by_number(tmp_path):
+    r"""``v10`` is above ``v2``, and a plain string sort puts it below."""
+    esm, atm = "MRI-ESM2-0", "GEMB-SDBN1-8000m"
+    for v in ("v2", "v10"):
+        _file(tmp_path / esm / "ssp585" / atm / "extra" / "climatology" / "pr" / v
+              / f"pr_AIS_{esm}_ssp585_{atm}_{v}_1960-1989.nc")
+    assert audit.local_versions(str(tmp_path), esm, "ssp585", atm, "extra") == ["v2", "v10"]
+
+
 # --- the Globus route -------------------------------------------------------
 
 def _share(tree):

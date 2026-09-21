@@ -378,9 +378,10 @@ forcing-version audit, the output writer, and the melt calibration above.
    warns once per run when the K file it reads records the cap it was fitted
    against. (issue #26)
 6. Optional: read the provided `ctrl` trees in place of the `ssp126`
-   reference-climate pool. (issue #43)
+   reference-climate pool. Closed as icepack/ismip7#43, not planned for
+   September 2026.
 7. Optional: the stress criterion (Lai et al. 2020) alongside the collapse
-   mask. (issue #44)
+   mask. Closed as icepack/ismip7#44, not planned for September 2026.
 
 ## 6. Second sweep, 19 September
 

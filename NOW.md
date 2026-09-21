@@ -10,7 +10,7 @@ is an index.
 **Claim the card before you start a run or an inversion.** A card in
 Claimed for more than 24 hours with no comment reads as unclaimed.
 
-Generated: 2026-09-21 11:45 UTC. 22 blocking, 11 owed, 4 after the deadline, 9 unverified.
+Generated: 2026-09-21 14:07 UTC. 22 blocking, 11 owed, 0 after the deadline, 7 unverified.
 
 ## Blocking the submission
 
@@ -76,8 +76,6 @@ production run or a group decision.
 | [26](https://github.com/icepack/ismip7/issues/26) | melt: settle the draft-slope convention shared by calibration and forward | `unverifiable-run` |
 | [38](https://github.com/icepack/ismip7/issues/38) | submission: settle the contributor names, date, source_id, ism_id and PPE participation | `unverifiable-run` |
 | [39](https://github.com/icepack/ismip7/issues/39) | submission: request the Globus upload folder | `unverifiable-run` |
-| [43](https://github.com/icepack/ismip7/issues/43) | forcing: optionally read the provided ctrl trees in place of the ssp126 reference pool | `unverifiable-run` |
-| [44](https://github.com/icepack/ismip7/issues/44) | collapse: optionally pair a stress criterion with the collapse mask | `unverifiable-run` |
 | [27](https://github.com/icepack/ismip7/issues/27) | matrix: the full-length ssp585 is held in the NOTS queue | `unverifiable-nots` |
 | [41](https://github.com/icepack/ismip7/issues/41) | forcing: re-run audit_forcing_versions.py immediately before the production matrix | `unverifiable-run` |
 | [42](https://github.com/icepack/ismip7/issues/42) | melt: confirm every submitted run read the current per-basin K calibration | `unverifiable-run` |
@@ -87,16 +85,13 @@ production run or a group decision.
 
 | source | items |
 |---|---|
-| `src:readiness` | 16 |
+| `src:readiness` | 14 |
 | `src:submission-readme` | 11 |
 | `src:matrix-status` | 6 |
-| `src:topic-doc` | 8 |
+| `src:topic-doc` | 6 |
 | `src:runbook` | 3 |
 | `src:open-pr` | 6 |
 
 ## After the deadline
 
-- [43](https://github.com/icepack/ismip7/issues/43) forcing: optionally read the provided ctrl trees in place of the ssp126 reference pool
-- [44](https://github.com/icepack/ismip7/issues/44) collapse: optionally pair a stress criterion with the collapse mask
-- [22](https://github.com/icepack/ismip7/issues/22) solver: 500 m is an open stability question
-- [37](https://github.com/icepack/ismip7/issues/37) mesh: a real mid-run adaptation is unvalidated
+None.

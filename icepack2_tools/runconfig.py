@@ -263,3 +263,44 @@ def calving_sigma_max():
         float(os.environ.get("ISMIP7_CALVING_SIGMA_MAX_FLOATING",
                              CALVING_SIGMA_MAX_FLOATING_DEFAULT)),
     )
+
+
+# ── Roots a second checkout does not carry ──────────────────────────────
+# The code moves with the invocation; the large gitignored artifacts do not.
+# site_env.sh names them for the shell half of a run; these are the Python
+# half, so a driver started by hand resolves the same paths.
+_ANTARCTICA = os.path.join(
+    os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "antarctica"
+)
+
+
+def obs_data_root():
+    r"""``ISMIP7_OBS_DATA_ROOT``: BedMachine, MEaSUREs, RACMO and the dH/dt
+    cache rasters. Falls back to this checkout's ``antarctica/data``, which is
+    right wherever the data sits beside the code and empty where it does not."""
+    return os.environ.get("ISMIP7_OBS_DATA_ROOT",
+                          os.path.join(_ANTARCTICA, "data"))
+
+
+def k_per_basin_candidates(results_dir, lc_value):
+    r"""Where to look for the calibrated per-basin K, in order.
+
+    ``ISMIP7_K_PER_BASIN_NPZ`` wins; then this mesh's calibration and the
+    2500 m fallback (16 basin scalars remapped through the IMBIE2 8 km grid, so
+    mesh-independent). The file is gitignored, so a checkout that does not carry
+    it warns and falls back to an SMB-only melt source; name it with the
+    override when it lives elsewhere.
+    """
+    override = os.environ.get("ISMIP7_K_PER_BASIN_NPZ")
+    if override:
+        return [override]
+    names = [f"calibrated_K_per_basin_{lc_value}.npz",
+             "calibrated_K_per_basin_2500.npz"]
+    # At lc=2500 the two names coincide.
+    seen, out = set(), []
+    for name in names:
+        path = os.path.join(results_dir, name)
+        if path not in seen:
+            seen.add(path)
+            out.append(path)
+    return out

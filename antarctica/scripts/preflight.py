@@ -27,17 +27,16 @@ from icepack2_tools.boundary import sidecar_path
 from icepack2_tools.naming import map_basename
 from icepack2_tools.climatology import clim_start, clim_end, clim_scenario
 from icepack2_tools.runconfig import (
+    obs_data_root,
     calving_law as _calving_law, calving_sigma_max as _calving_sigma_max,
     friction as _friction, geometry_space as _geometry_space, lc as _lc,
     lc_coarse as _lc_coarse,
 )
+DATA_DIR = obs_data_root()
 from mesh_naming import get_buffer_m, mesh_filename
 
 MESH_DIR = os.path.join(_ANT, "mesh")
 RESULTS_DIR = os.path.join(_ANT, "results")
-DATA_DIR = os.environ.get(
-    "ISMIP7_OBS_DATA_ROOT", os.path.join(_ANT, "data")
-)
 
 lc = _lc()
 lc_coarse = _lc_coarse()

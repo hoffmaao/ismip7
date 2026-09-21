@@ -119,13 +119,15 @@ def _cache_rasters(variable, data_root=None, cache_dir=None):
     the single 1 km slice we need as two small EPSG:3031 rasters costs a
     one-time pass and makes the sampling path identical to BedMachine's.
     """
+    import uuid
+
     import netCDF4 as nc
     import rasterio
     from rasterio.transform import from_origin
 
     if cache_dir is None:
-        here = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-        cache_dir = os.path.join(here, "antarctica", "data", "dhdt_cache")
+        from .runconfig import obs_data_root
+        cache_dir = os.path.join(obs_data_root(), "dhdt_cache")
     os.makedirs(cache_dir, exist_ok=True)
     try:
         src = _obs_kit_path(data_root)
@@ -187,9 +189,27 @@ def _cache_rasters(variable, data_root=None, cache_dir=None):
     prof = dict(driver="GTiff", height=value.shape[0], width=value.shape[1],
                 count=1, dtype="float64", crs="EPSG:3031", transform=transform,
                 compress="deflate", tiled=True)
+    # Every rank that gets here writes the same two paths. That race predates
+    # ISMIP7_OBS_DATA_ROOT: before it the cache sat in the checkout and all
+    # ranks still raced on one path. Naming the shared root adds two more
+    # writers, a second checkout pointed at the same share, and it puts the
+    # partial file somewhere a later run trusts. Each raster is written under a
+    # name unique to this process and moved onto its final path with
+    # os.replace, which is atomic within a filesystem: a reader sees a complete
+    # file or none, the last writer wins, and a write that fails (a read-only
+    # share, a full disk) leaves no truncated .tif behind to be read as cache.
     for fn, a in ((val_fn, value), (cov_fn, valid)):
-        with rasterio.open(fn, "w", **prof) as dst:
-            dst.write(a, 1)
+        tmp_fn = f"{fn}.{os.getpid()}.{uuid.uuid4().hex}.part"
+        try:
+            with rasterio.open(tmp_fn, "w", **prof) as dst:
+                dst.write(a, 1)
+            os.replace(tmp_fn, fn)
+        except BaseException:
+            try:
+                os.remove(tmp_fn)
+            except OSError:
+                pass
+            raise
     return val_fn, cov_fn
 
 

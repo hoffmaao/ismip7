@@ -27,7 +27,8 @@ import os, sys
 with open(os.environ["FAKE_ENV_DUMP"], "a") as fh:
     fh.write("ARGV " + " ".join(sys.argv[1:]) + "\n")
     for key in sorted(os.environ):
-        if key.startswith(("ISMIP7_", "PYOP2_", "FIREDRAKE_", "OMP_", "OPENBLAS_", "FAKE_VENV")):
+        if key.startswith(("ISMIP7_", "PYOP2_", "FIREDRAKE_", "OMP_", "OPENBLAS_",
+                           "XDG_", "MPLCONFIGDIR", "FAKE_VENV")):
             fh.write(f"{key}={os.environ[key]}\n")
 status = os.environ.get("FAKE_WRITE_STATUS")
 if status:
@@ -118,6 +119,24 @@ def test_the_kernel_cache_persists_between_lanes(sandbox):
     assert (jit / "pyop2").is_dir()
 
 
+def test_loopys_dict_stays_per_lane_while_the_kernel_cache_is_shared(sandbox):
+    r"""Rice 1559476 died 40 s in with a pytools NoSuchEntryError, racing a job
+    submitted a second earlier. `make timing-scout` submits one lane per mesh at
+    once, so a shared loopy dict puts the timing lanes in exactly that state:
+    the warm tree the lanes were measured against comes back for PyOP2 and TSFC
+    alone, and loopy keeps the per-job directory ismip7_activate gave it."""
+    per_job = sandbox / ".pyop2_cache" / "xdg" / "777"
+    jit = sandbox / "jit"
+    for env in ({}, {"ISMIP7_TIMING_JIT_CACHE": str(jit)}):
+        (sandbox / "env_dump.txt").unlink(missing_ok=True)
+        proc, seen = run_script(sandbox, "timing_transient.script", **env)
+        assert proc.returncode == 0, proc.stderr
+        assert f"XDG_CACHE_HOME={per_job}" in seen
+        assert per_job.is_dir()
+    assert not (jit / "xdg").exists()
+    assert not (sandbox / ".pyop2_cache" / "777").exists()
+
+
 def test_a_cache_the_site_s_own_environment_names_is_the_one_kept(sandbox):
     r"""Found on Quartz: IU's firedrake modulefile sets PYOP2_CACHE_DIR and the
     TSFC cache to a scratch directory, and that is the warm cache every lane
@@ -134,6 +153,9 @@ def test_a_cache_the_site_s_own_environment_names_is_the_one_kept(sandbox):
     assert proc.returncode == 0, proc.stderr
     assert f"PYOP2_CACHE_DIR={site_cache}" in seen
     assert f"FIREDRAKE_TSFC_KERNEL_CACHE_DIR={site_cache}" in seen
+    # The site's XDG_CACHE_HOME is not restored with them: see
+    # test_loopys_dict_stays_per_lane_while_the_kernel_cache_is_shared.
+    assert f"XDG_CACHE_HOME={sandbox / '.pyop2_cache' / 'xdg' / '777'}" in seen
     assert not (sandbox / ".pyop2_cache" / "777").exists()
     # A cache named for the timing lanes still wins over the site's.
     jit = sandbox / "jit"

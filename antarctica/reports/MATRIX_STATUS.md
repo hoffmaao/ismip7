@@ -125,8 +125,15 @@ values fed in.
    its own a sufficient cause of the overshoot, so the magnitude and the
    attribution both have to be re-derived from the re-run before the ~9% unit
    question can be judged against them. (issue #29)
-2. **2014→2015 projection handoff** starts projections at the historical
-   final's 2014.0 with a one-year zero-anomaly gap. (issue #34)
+2. **Projection handoff is at 2015.0, with no gap.** This item used to say
+   projections start at the historical final's 2014.0 with a one-year
+   zero-anomaly gap; that described the July drivers (the 28 July matrix logs
+   show `1850.0->2014.0` and `2014.0->2300.0`). Since 2cd8b57 (14 September)
+   every core shim runs to the protocol year boundary: the historical ends at
+   `t_end_default=2015.0` and each projection starts at `t_start_default=2015.0`
+   (`antarctica/scripts/historical/*.py`, `projections/*.py`), so the handoff
+   checkpoint is 2015.0 and FORWARD_RUN_READINESS.md has it right. The next
+   historical run's `Time-stepping` line is the run-level confirmation. (issue #34)
 3. **Runaway-detector peak clause** flags isolated one-step discharge spikes
    during emptying events as FAIL even though the budget closes; the audit
    verdict is otherwise ON TRACK. Worth refining to sustained-growth only. (issue #33)

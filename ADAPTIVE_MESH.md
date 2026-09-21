@@ -53,9 +53,9 @@ adaptation as unvalidated. Closed as icepack/ismip7#37, not planned for
 September 2026.
 
 Grounding-line morphing was not ported: the reference scheme carries a
-mesh-deformation step with no caller, a hook commented out in
-`GlobalRemeshing.m` as "broken anyhow", and no mention in the 362-page
-Compendium. Its global remeshing is what this implements. Morphing would
+mesh-deformation step with no caller, a hook commented out in the global
+remeshing as "broken anyhow", and no mention in the reference documentation.
+Its global remeshing is what this implements. Morphing would
 be about 100 lines on top of `icepack2_tools.adapt_mesh.grounding_line_points`.
 
 ## The scheme (the reference implementation's names in brackets)
@@ -118,7 +118,7 @@ the forward's rank count to parallelise the transfer under the default
 `interpolate`. Either way the transfer prints the volume change and the mean
 front thickness before and after.
 
-## Configuration (`ISMIP7_ADAPT_*`, defaults from Gudmundsson et al. (2012))
+## Configuration (`ISMIP7_ADAPT_*`, defaults from the reference implementation)
 
 | variable | reference parameter | default |
 |---|---|---|

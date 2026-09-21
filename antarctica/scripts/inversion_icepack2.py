@@ -1848,8 +1848,8 @@ def main():
             _desc = (
                 f"{PRIOR_FORM} prior covariance "
                 f"({'A^-1 M A^-1' if PRIOR_FORM == 'bilaplacian' else 'A^-1'})"
-                " -- EXPERIMENTAL: Recinos et al. (2023) use M^-1 and left their two "
-                "prior-preconditioned H_0 attempts commented out as not working"
+                " -- EXPERIMENTAL: the prior-preconditioned variant was not used in the reference work; "
+                "its two prior-preconditioned H_0 attempts were left commented out as not working"
             )
         PETSc.Sys.Print(
             f"  Optimization metric: {_desc}; via TAO lmvm; "

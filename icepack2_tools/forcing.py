@@ -1146,7 +1146,7 @@ def _warn_slope_cap(npz_path, cap):
             f"  WARNING: {os.path.basename(npz_path)} was calibrated with the "
             f"draft slope capped at sin(alpha) = {cap:g}, and this forward "
             f"applies no cap, so it melts with a field the K was not fitted "
-            f"against. Measured at the reference state on the Ua 2 km mesh, "
+            f"against. Measured at the reference state on the adaptive 2 km mesh, "
             f"the forward's own melt path integrates 1732 Gt/yr against the "
             f"1067.4 Gt/yr the K was fitted to, and capping its slope gives "
             f"646 Gt/yr; these supersede an earlier 4293 and 1028 from a "
@@ -1181,7 +1181,7 @@ def load_K_per_basin(npz_path, mesh_x, mesh_y, fill=0.0):
     # is linear in sin(alpha). calibrate_melt.py caps the slope at
     # ISMIP7_SIN_ALPHA_CAP and records the value it used; compute_sin_alpha
     # below applies no cap at all. Measured by check_melt_bound.py at the
-    # reference state on the Ua 2 km mesh, the forward's own cell by cell melt
+    # reference state on the adaptive 2 km mesh, the forward's own cell by cell melt
     # path integrates 1732 Gt/yr against the 1067.4 Gt/yr the K was fitted to,
     # and capping its slope gives 646 Gt/yr, so neither convention on its own
     # reconciles the two. An earlier 4293 and 1028 from a lifted slope are

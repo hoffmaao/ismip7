@@ -1,11 +1,11 @@
-r"""Run a forward experiment with Úa-style mesh adaptation between segments.
+r"""Run a forward experiment with mesh adaptation between segments.
 
     python antarctica/scripts/run_adaptive.py \
         --driver antarctica/scripts/control/run.py --experiment-name ctrl2015_cesm2_waccm_adapt \
         --launcher "mpiexec -n 12" --t-start 2015 --t-end 2115 --adapt-every 10 \
         --initial-iterations 2 [--tag adapt]
 
-Úa adapts the mesh before the first run-step (`AdaptMeshInitial`, iterated up
+The reference scheme adapts the mesh before the first run-step (`AdaptMeshInitial`, iterated up
 to `AdaptMeshMaxIterations`) and then every `AdaptMeshTimeInterval`. This
 orchestrator does the same with the existing pieces, unchanged:
 
@@ -20,7 +20,7 @@ The initial adaptation runs the driver for ZERO years first (t_end = t_start)
 so the diagnostic velocity exists on the starting mesh for the strain-rate
 criteria, adapts with --rebuild-aref (the apparent-mass-balance reference is
 rebuilt exactly on the new mesh), and iterates until the element count
-changes by less than --until-change (Úa's
+changes by less than --until-change (the reference's
 AdaptMeshUntilChangeInNumberOfElementsLessThan) or --initial-iterations is
 reached. ISMIP7_APPARENT_MB must be set in the environment for a balanced
 control, as for any run.
@@ -96,9 +96,9 @@ def main():
     ap.add_argument("--python", default=sys.executable)
     ap.add_argument("--t-start", type=float, required=True)
     ap.add_argument("--t-end", type=float, required=True)
-    ap.add_argument("--adapt-every", type=float, required=True, help="years (Úa AdaptMeshTimeInterval)")
-    ap.add_argument("--initial-iterations", type=int, default=1, help="Úa AdaptMeshMaxIterations (0 = no initial adaptation)")
-    ap.add_argument("--until-change", type=int, default=0, help="Úa AdaptMeshUntilChangeInNumberOfElementsLessThan")
+    ap.add_argument("--adapt-every", type=float, required=True, help="years (AdaptMeshTimeInterval)")
+    ap.add_argument("--initial-iterations", type=int, default=1, help="AdaptMeshMaxIterations (0 = no initial adaptation)")
+    ap.add_argument("--until-change", type=int, default=0, help="AdaptMeshUntilChangeInNumberOfElementsLessThan")
     ap.add_argument("--tag", default=None, help="forwarded as ISMIP7_RUN_TAG")
     ap.add_argument("--restart", default=os.environ.get("ISMIP7_RESTART"), help="start from this checkpoint instead of a cold start")
     # Only used to predict the checkpoint the driver writes, so it has to be
@@ -159,7 +159,7 @@ def main():
         return out
 
     t0 = time.time()
-    # --- initial adaptation: Úa AdaptMeshInitial, iterated --------------
+    # --- initial adaptation: AdaptMeshInitial, iterated --------------
     if args.initial_iterations > 0:
         chk = run_to(args.t_start, restart)          # zero years: diagnostics on the start mesh
         prev = None

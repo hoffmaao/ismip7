@@ -6,7 +6,7 @@ r"""How far does the draft-slope cap move melt past the variable request's bound
 
 The ISMIP7 variable request gives ``libmassbffl`` an AIS minimum of
 -0.008 kg m-2 s-1 with severity ``error``. In ice-equivalent thickness that is
-275.3 m/yr, and a 10-year Ua-mesh ssp585 reached -0.0117 (402.6 m/yr) on
+275.3 m/yr, and a 10-year adaptive-mesh ssp585 reached -0.0117 (402.6 m/yr) on
 grounding-zone cells. Two readings fit that: the parameterisation is too strong
 somewhere, or the writer's ``no_floating_ice`` fill policy reports one hot cell
 as the whole 8 km pixel's value, which the request's own convention asks for.
@@ -65,7 +65,7 @@ shelf. A basin or block whose OCX melt is off the climatology's by more than
 Serial. Reuses calibrate_melt's loaders, so it needs the same inputs: a MAP for
 the mesh, the OI climatology, the IMBIE2 basins and BedMachine.
 
-Measured on the Ua 2 km mesh, September 2026, with
+Measured on the adaptive 2 km mesh, September 2026, with
 calibrated_K_per_basin_2000.npz calibrated against the re-released observation
 table:
 

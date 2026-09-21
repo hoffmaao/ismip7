@@ -66,7 +66,7 @@ shallow-shelf formulation on Firedrake 2026.4.1)
    at 5e-3 in the calibration; **[confirm #26]** which side moves, see
    `FORWARD_RUN_READINESS.md` action 5), constants from
    `multimelt.constants`. K is dimensionless and per IMBIE basin,
-   calibrated with `antarctica/scripts/calibrate_melt.py` on the Úa 2 km
+   calibrated with `antarctica/scripts/calibrate_melt.py` on the adaptive 2 km
    mesh against the July 2026 re-released observation table combining
    Paolo (2023), Davison (2023) and Adusumilli (2020), integrated target
    1067.4 Gt/yr; per basin 2.4e-5 to 1.9e-4. The forward applies this
@@ -197,12 +197,12 @@ Hahn, Mikula and Frolkovic 2025; Smith et al. 2020.
 
 | Characteristic | Main suite of experiments | PPE change? |
 |---|---|---|
-| Mesh discretisation | Delaunay triangulation (gmsh), Úa-style size field | no |
-| Native grid | H: anisotropic; resolution **[confirm #20]**, pending the 1000 m inversions: the Úa-style adaptive mesh, 2 km at the grounding line and calving front to 180 km in the interior (246,677 cells), as previously run; or `antarctica_10000_1000_buffered20000`, the 1000 m / 10 km gmsh mesh (1,869,088 vertices) that has been the code default since PR #7 and on which no inversion has yet been run. V: vertically integrated (shallow shelf) | no |
+| Mesh discretisation | Delaunay triangulation (gmsh), adaptive size field | no |
+| Native grid | H: anisotropic; resolution **[confirm #20]**, pending the 1000 m inversions: the 2 km / 180 km adaptive mesh, 2 km at the grounding line and calving front to 180 km in the interior (246,677 cells), as previously run; or `antarctica_10000_1000_buffered20000`, the 1000 m / 10 km gmsh mesh (1,869,088 vertices) that has been the code default since PR #7 and on which no inversion has yet been run. V: vertically integrated (shallow shelf) | no |
 | Native projection | EPSG:3031, same as BedMachine | no |
 | Interpolation to diagnostic grid | conservative: exact cell-pixel overlap areas (supermesh) onto the 8 km grid; whole-pixel means for thickness, fluxes and fractions, covered-part means for elevations | no |
 | Time integration | transport-first split: implicit Euler thickness transport, then the diagnostic solve at the new geometry; first order | no |
-| Time step | **[confirm #20]**, pending the 1000 m inversions: 0.1 yr on the Úa-style mesh, as previously run; 0.05 yr on the 1000 m / 10 km mesh, the code default since PR #7 | no |
+| Time step | **[confirm #20]**, pending the 1000 m inversions: 0.1 yr on the adaptive mesh, as previously run; 0.05 yr on the 1000 m / 10 km mesh, the code default since PR #7 | no |
 | Advection scheme | upwind finite volume, DG0, implicit; first order | no |
 | Ice flow mechanics | shallow-shelf approximation, dual finite-element formulation (CG1 velocity, DG0 membrane and basal stress) | no |
 | Ice rheology | n = 3 (composite with a linear floor for thin ice) | no |

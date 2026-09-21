@@ -161,7 +161,7 @@ What a submission needs (#5, #16, #17, #18, #19, #20, #22, #23):
 
 ## 4. Model-side state
 
-**Inversions.** RC and Budd MAPs exist on the Úa-preset mesh
+**Inversions.** RC and Budd MAPs exist on the adaptive-preset mesh
 (`inversion_icepack2_{rc,budd}_n3_dg0_logvelnet_ua2000.h5`). Every Budd MAP
 older than 13 September carries the shelf-friction defect and is unusable.
 
@@ -169,16 +169,16 @@ The 13 September Budd MAP was inverted while the shelf gate still multiplied
 through by the grounded indicator `He`, and the shipped gate is height above
 flotation alone, so it was re-inverted under the shipped law as NOTS 1390416
 (200 iterations, final masked misfit 1.041e4, 14 September). The census
-justifies that on its own: on the Úa mesh the old sign gate puts 13 647 of
+justifies that on its own: on the adaptive mesh the old sign gate puts 13 647 of
 103 233 floating cells at the friction cap, the `He` form 8 781, and the
 shipped gate 0. The superseded file is kept as
 `inversion_icepack2_budd_n3_dg0_logvelnet_ua2000_hegate.h5`. The RC MAP never
 carried the gate.
 
-**⚠️ OPEN, and it blocks the forward matrix: no MAP on the Úa mesh reproduces (issue #25)
+**⚠️ OPEN, and it blocks the forward matrix: no MAP on the adaptive mesh reproduces (issue #25)
 its own velocity.** `check_budd_map.py --forward` re-solves the diagnostic at a
 MAP's controls and compares against the velocity that MAP saved. A MAP the
-forward agrees with returns about 1e-9. Measured 15 September on the Úa 2 km
+forward agrees with returns about 1e-9. Measured 15 September on the adaptive 2 km
 mesh at 32 ranks, both laws fail by the same amount:
 
 | MAP | law | relative L2 | solved mean speed | saved mean speed |
@@ -236,7 +236,7 @@ so the 10-year result of job 1368723 should be read as a pipeline exercise
 rather than a science result. This question is one of the two that hold the
 full-length ssp585 (NOTS 1390452), and action 1 of section 5 names both.
 
-**Forward.** The RC control on the Úa mesh runs and holds (1 yr, resid 0). A
+**Forward.** The RC control on the adaptive mesh runs and holds (1 yr, resid 0). A
 10-year CESM2-WACCM ssp585 on that mesh (NOTS job 1368723) took 10.5 minutes on
 32 Sapphire Rapids ranks, 6 s per 0.1-year step, so a 2015-2300 projection is
 about 5 node-hours and eleven cores about 2.5 node-days.
@@ -245,7 +245,7 @@ about 5 node-hours and eleven cores about 2.5 node-days.
 combines Paolo (2023), Davison (2023) and Adusumilli (2020), and its integrated
 target is 1067.4 Gt/yr against the 865.0 Gt/yr of the Paolo plus Adusumilli
 table the old calibration used. Both tables went through `calibrate_melt.py` on
-the same Úa mesh, so the comparison isolates the observations:
+the same adaptive mesh, so the comparison isolates the observations:
 
 | observations | integrated target | K* | melt at K* |
 |---|---|---|---|
@@ -276,7 +276,7 @@ forcing-version audit, the output writer, and the melt calibration above.
 
 ## 5. Actions, in order
 
-1. Drive the full-length ssp585 (NOTS 1390452, 2015 to 2301 on the Úa mesh with
+1. Drive the full-length ssp585 (NOTS 1390452, 2015 to 2301 on the adaptive mesh with
    `ISMIP7_OUTPUT=1`) through the writer and the compliance checker. It is the
    first run at experiment length, so it is what clears the checker's remaining
    length checks. Record which K calibration it read: a run picks up whichever
@@ -288,7 +288,7 @@ forcing-version audit, the output writer, and the melt calibration above.
    taken up in action 5, since it decides which K the run should read. Once
    both are settled, `scontrol release 1390452` starts it. (issue #27)
 2. Settle the `[confirm]` items in the submission README draft with the group. (issue #38)
-3. Find why neither the RC nor the Budd MAP on the Úa mesh reproduces its own
+3. Find why neither the RC nor the Budd MAP on the adaptive mesh reproduces its own
    velocity (section 4). The tolerance probe is done and negative (NOTS
    1435598), so start from the residual comparison: the inversion's
    `build_rc_residual` call in `inversion_icepack2.py` `build_F` against the
@@ -300,14 +300,14 @@ forcing-version audit, the output writer, and the melt calibration above.
    the mirror is re-synced with Globus by hand every week or two, so the freeze
    versions can still move under a long campaign. (issue #41)
 5. Settle where the `libmassbffl` bound violation comes from. The request's AIS
-   minimum is -0.008 kg m-2 s-1, which is 275.3 m/yr of ice, and the 10-year Úa
+   minimum is -0.008 kg m-2 s-1, which is 275.3 m/yr of ice, and the 10-year adaptive-mesh
    ssp585 of job 1368723 reached -0.0117, or 402.6 m/yr.
 
    `check_melt_bound.py` measures the slope side of it. The calibration caps the
    draft slope `sin(alpha)` at 5e-3 and the forward applies no cap, so the melt
    the forward applies is a different field from the melt the per-basin K was
    fitted against. The script evaluates two halves at the reference geometry
-   with `calibrated_K_per_basin_2000.npz` on the Úa 2 km mesh, each capped and
+   with `calibrated_K_per_basin_2000.npz` on the adaptive 2 km mesh, each capped and
    uncapped. The calibration half reproduces `calibrate_melt.py` on CG1 nodes,
    with BedMachine's raster surface and mask and the cap on the nodal slope.
    The forward half reproduces the forward on DG0 cells, with the surface from

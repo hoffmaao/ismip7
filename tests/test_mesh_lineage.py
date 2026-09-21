@@ -26,7 +26,7 @@ sys.path.insert(0, os.path.join(
 
 from mesh_naming import adapt_lineage, next_adapted_mesh_name  # noqa: E402
 
-# The two Ua-preset meshes and one parametric mesh actually in antarctica/mesh.
+# The two adaptive-preset meshes and one parametric mesh actually in antarctica/mesh.
 FRESH = [
     "antarctica_ua_180000_2000",
     "antarctica_ua_180000_2000_obs",

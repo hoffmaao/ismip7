@@ -127,9 +127,13 @@ values fed in.
    question can be judged against them. (issue #29)
 2. **2014→2015 projection handoff** starts projections at the historical
    final's 2014.0 with a one-year zero-anomaly gap. (issue #34)
-3. **Runaway-detector peak clause** flags isolated one-step discharge spikes
-   during emptying events as FAIL even though the budget closes; the audit
-   verdict is otherwise ON TRACK. Worth refining to sustained-growth only. (issue #33)
+3. **Runaway detector: settled.** `check_ismip6_track.py` flags a runaway on
+   sustained signals only: a year whose median front discharge exceeds 6000
+   Gt/yr, or growth of 1.5x in each of two consecutive years. A single
+   emptying step no longer counts. Re-read under it, the July matrix's cores
+   2, 3 and 7 pass (one step of 60,446 Gt/yr; one year at 2.4x; two steps
+   above 6000 with year medians below 1,800) and cores 1, 5, 8 and 9 still
+   fail on sustained growth or a year median of 4,000 to 8,000.
 4. **Monolithic forward** for cores 7 (and the 10 tail) beyond saturation. (issue #32)
 5. **500 m / 2500 m production resolution**: the 2500 m `_budd` MAP on disk
    (`inversion_icepack2_budd_2500.h5`) is the untagged n=4, CG1-geometry one;

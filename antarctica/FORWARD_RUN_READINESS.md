@@ -377,10 +377,10 @@ forcing-version audit, the output writer, and the melt calibration above.
    unsettled upstream local-slope question. Until it is made, `load_K_per_basin`
    warns once per run when the K file it reads records the cap it was fitted
    against. (issue #26)
-6. Optional: read the provided `ctrl` trees in place of the `ssp126`
-   reference-climate pool. (issue #43)
-7. Optional: the stress criterion (Lai et al. 2020) alongside the collapse
-   mask. (issue #44)
+6. Optional, not planned for this submission (board, 21 September): read the
+   provided `ctrl` trees in place of the `ssp126` reference-climate pool.
+7. Optional, not planned for this submission (board, 21 September): the
+   stress criterion (Lai et al. 2020) alongside the collapse mask.
 
 ## 6. Second sweep, 19 September
 
@@ -498,20 +498,78 @@ Output and submission:
     1 % of values the `libmassbffl` excursion is now a warning. (issue #12)
 11. **Run `ismip7-scalar-processing`** on the same outputs, for `sla20`,
     `slg20` and `slvaf`, and compare its scalars with the native ones. (issue #13)
-12. **Adopt or refetch the forcing that predates the manifest.** The first
-    `audit_forcing_versions.py` run after this lands will count most of the
-    Globus-era tree as `older`. `download_mirror.py --older adopt` vouches for
-    it, `--older refetch` replaces it; either way do it once, before action 4. (issue #14)
-13. **Bring the Quartz forcing tree up to the mirror.** Read there on 19
-    September (listing and NetCDF headers only, nothing run): the OCX
-    `dacabfdz` is still at `v1`, which is the spatially shifted file of #45,
-    with `v2` on the mirror; CESM2-WACCM ssp585 fracture is at `v2` with `v2.1`
-    on the mirror; and there is no download manifest yet. Nothing reads the
-    gradients and the core matrix runs without fracture, so no result is
-    affected, and `audit_forcing_versions.py` now lists the OCX tree by default
-    and reports both as BEHIND. The OCX `acabf` (47 years, 1979-2025) and the
-    four OCX oceans are there in the layout the readers expect, so core 11
-    passes its coverage gate on Quartz. (issue #15)
+12. **Adopt or refetch the forcing that predates the manifest.** Done on 21
+    September, and the premise above was wrong. The first
+    `audit_forcing_versions.py` run counts none of the Globus-era tree as
+    `older`. `plan()` reaches `OLDER` only for a file that already matches the
+    mirror object's byte length, and then compares mtimes; every file on Quartz
+    carries an mtime at or after its object's, so the whole tree comes back
+    `adopt`. `--older refetch` and `--older adopt` therefore name the same run
+    here, and neither re-downloads anything. Checked twice: the audit prints an
+    `older` line only when the count is nonzero and printed none, and replaying
+    `plan()` offline over all 89,767 mirror objects against a 109,931 file
+    inventory of the tree gave 87,012 `adopt`, 2,755 `fetch`, 0 `OLDER`.
+    The manifest is what the run is for. `download_mirror.py --older refetch`
+    over `data/CESM2-WACCM/`, `data/MRI-ESM2-0/` and `data/OCX/` wrote
+    `ISMIP7/AIS/.mirror_manifest.json` across those 89,767 objects, which gives
+    `REPLACED` (same name, new content, #45 and #41) something to compare
+    against from here on. Recording an entry and fetching are one knob: the
+    script records only the keys under the prefixes it is given, and it fetches
+    whatever is missing under them, so full coverage also pulled every file
+    behind the 16 `MISSING` rows the audit had been reporting, 2,755 files and
+    84 GB, mostly the `ctrl` ocean `thetao`, `tf` and `so` and the `ctrl`
+    `mrro` and `mrro-anomaly`. The run ended 87,012 `adopt`, 2,755 fetched, 0
+    failed. Eight `MISSING` rows survived it with their files on disk, because
+    `local_versions` stopped at the top of a row while the mirror nests `extra`
+    and `extras` one level deeper; that is fixed here, and those rows read `ok`
+    against the Quartz tree.
+
+    **The mirror is not frozen.** Between 10:22 and 10:48 UTC on 21 September,
+    while the pass above was running, it gained 4,576 objects and 226 GB with
+    none removed: `pr`, `pr-anomaly`, `tas` and `tas-anomaly` for `ctrl`, at
+    `2000m` and `8000m`, for both core ESMs. Two listings two hours apart
+    settle it, and the manifest covers the 89,767 objects that existed at the
+    time of the run. The `ctrl` atmosphere was the gap this opens, and those
+    4,576 objects and 226 GB are fetched, nothing failed; all sixteen `ctrl`
+    `pr`, `pr-anomaly`, `tas` and `tas-anomaly` rows read `ok` over 478 mirror
+    entries with 0 behind, 0 pinned, 0 replaced and 0 older. Re-list before
+    trusting any earlier listing, and see issue #41 for the audit immediately
+    before the production matrix.
+
+    **The audit sees three of the mirror's ten prefixes.** Its default is
+    `CESM2-WACCM`, `MRI-ESM2-0` and `OCX`, so `ACCESS-CM2`, `CanESM5`,
+    `GFDL-ESM4`, `IPSL-CM6A-LR` and `MPI-ESM1-2-HR` have never appeared in an
+    audit here, and all five are absent from the Quartz tree in full: 14,298
+    objects and 155 GB. `grid` and `parameterisations` are unaudited and
+    present. The `ismip7-ais-melt-calibration` product is 17.2 GB absent of
+    25.2 GB, `meltMIP` being the part that is local. None of this reads as
+    `BEHIND` or `MISSING`, because a prefix the audit never lists cannot.
+
+    A second reason the audit cannot answer "is every file here": `MISSING` is
+    per row, and a row counts as present when any version of it is on disk. The
+    run that settled action 12 reported eight rows missing while thousands of
+    objects were absent under rows reading `ok`. Only a `download_mirror.py`
+    pass over every prefix settles file-level completeness, and
+    `download_mirror.py --dry-run` does it read-only. The audit's own docstring
+    now says so, and issues #41 and #16 carry the same note where their exit
+    criteria lean on it. Which prefixes the submission needs, and which a
+    routine re-sync covers, is open. (issue #49)
+
+    Closed as icepack/ismip7#14.
+13. **Bring the Quartz forcing tree up to the mirror.** Done on 21 September.
+    The 19 September reading (listing and NetCDF headers only, nothing run)
+    undercounted the rows: the audit reports seven `BEHIND`. OCX
+    `dacabfdz`, `dmrrodz` and `dtsdz` each stood at `v1` against `v2` on the
+    mirror, at both `SDBN1-2000m` and `SDBN1-8000m`, the `dacabfdz` being the
+    spatially shifted file of #45; and the CESM2-WACCM ssp585 fracture stood at
+    `v2` against `v2.1`. Nothing reads the gradients and the core matrix runs
+    without fracture, so no result was affected. Those 286 files, 3.94 GB, are
+    fetched, and `audit_forcing_versions.py` over its 462 mirror entries now
+    reports 0 behind, 0 pinned, 0 replaced and 0 older, exiting 0. The OCX
+    `acabf` (47 years, 1979-2025) and the four OCX oceans were already there in
+    the layout the readers expect, so core 11 passes its coverage gate on
+    Quartz. Action 4 and issue #41 still call for a fresh audit immediately
+    before the production matrix. Closed as icepack/ismip7#15.
 
 ### Read off the real files on 19 September
 

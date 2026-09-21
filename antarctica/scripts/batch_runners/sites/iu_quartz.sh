@@ -28,6 +28,19 @@ ISMIP7_CONSTRAINT="${ISMIP7_CONSTRAINT:-}"
 ISMIP7_REPO="${ISMIP7_REPO:-$ISMIP7_REPO_SELF}"
 ISMIP7_WORK="${ISMIP7_WORK:-$HOME}"
 
+# Quartz does not export SCRATCH, so site_core.sh's per-job kernel cache,
+# ${SCRATCH:-$HOME}/.pyop2_cache/$SLURM_JOB_ID, lands in a home directory that
+# nothing purges, while /N/scratch/$USER purges at 30 days
+# (00_SCRATCH_FILES_DELETED_AFTER_30_DAYS.txt sits in its root). Naming it here
+# puts that cache on the filesystem the firedrake modulefile already points
+# PYOP2_CACHE_DIR and FIREDRAKE_TSFC_KERNEL_CACHE_DIR at
+# (/N/scratch/$USER/firedrake.cache), which is the warm cache
+# ismip7_persistent_jit_cache hands a timing lane back to. Left unexported:
+# site_core.sh reads it in this same shell, and a job has no business
+# inheriting a SCRATCH the scheduler never set. The id -un fallback is for
+# site_core.sh's set -u.
+SCRATCH="${SCRATCH:-/N/scratch/${USER:-$(id -un)}}"
+
 # The IU timing runs use 12 to 16 ranks per node, 128 to 240 GB, up to 48 h.
 ISMIP7_TASKS="${ISMIP7_TASKS:-16}"
 ISMIP7_MEM="${ISMIP7_MEM:-240G}"

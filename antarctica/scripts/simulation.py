@@ -2876,8 +2876,9 @@ def run_simulation(
                 +
                 f"clamp={clamp_all/dt:+.1f} "
                 f"dM/dt={dm/dt:+.0f} resid={resid_gt/dt:+.2f}"
-                + ("\n      collapse [cells]: flagged={} removed={} held={}"
-                   .format(*collapse_cells) if collapse is not None else "")
+                + (f"\n      collapse [cells]: flagged={collapse_cells[0]} "
+                   f"removed={collapse_cells[1]} held={collapse_cells[2]}"
+                   if collapse is not None else "")
             )
 
         if not np.isfinite(resid_gt) or abs(resid_gt) > mass_tol_gt:
@@ -2911,13 +2912,13 @@ def run_simulation(
         # One line for the run record (core_report.py lifts the marker). The
         # peak covers the steps this process ran, so a chained run prints one
         # such line per link.
+        _flagged, _removed, _held = collapse_cells
         PETSc.Sys.Print(
             f"{COLLAPSE_MARKER} ISMIP7_FRACTURE={fracture_mode} ended "
             f"t={results[-1][0] if results else t_start:.1f} with "
-            "flagged={} removed={} held={} cells".format(*collapse_cells)
-            + f"; most held at once {collapse_held_peak[0]} cells at "
-            f"t={collapse_held_peak[1]:.1f} "
-            f"(steps from t={t_start:.1f})"
+            f"flagged={_flagged} removed={_removed} held={_held} cells; "
+            f"most held at once {collapse_held_peak[0]} cells at "
+            f"t={collapse_held_peak[1]:.1f} (steps from t={t_start:.1f})"
         )
 
     # Final state is a self-contained checkpoint too (a valid restart source).

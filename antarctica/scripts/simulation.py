@@ -861,9 +861,15 @@ def setup_model(restart_from=None, *, allow_timing_cache_a_ref=False):
                 N_ref = Function(Q_g, name="N_ref").interpolate(
                     max_value(effective_pressure(H, s), Constant(0.0))
                 )
+        # ISMIP7_BUDD_NREF=none reproduces the inversion's own call, which
+        # passes N_ref=None so N_hat = N/N is 1 wherever the gate is open. The
+        # forward otherwise divides by the N_ref the MAP carries. The two should
+        # agree cell-wise under DG0 geometry; this knob is how that is checked.
+        if friction == "budd" and os.environ.get("ISMIP7_BUDD_NREF", "").lower() == "none":
+            N_ref = None
         if friction == "budd":
             PETSc.Sys.Print(
-                f"  Friction: Budd N_hat (exact-zero shelf; delta="
+                f"  Friction: Budd N_hat (N_ref={'none' if N_ref is None else 'map'}; exact-zero shelf; delta="
                 f"{budd_nhat_floor:.3f}, N_hat_cap={budd_nhat_cap:.1f}, "
                 f"alpha_gl={alpha_gl:.2f}, h_visc_floor={rc_hvisc_floor:.0f}m, "
                 f"ocean_drag={ocean_drag:.0e}@h<{h_ocean:.0f}m, "

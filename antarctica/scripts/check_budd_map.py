@@ -87,6 +87,20 @@ def census(map_path, nhat_floor, nhat_cap, gl_width):
     return attrs, out
 
 
+def node_permutation(xa, xb, decimals=6):
+    r"""``(ia, ib)`` such that ``xa[ia] == xb[ib]`` row by row: the index maps
+    that align two numberings of one vertex set. Raises ``SystemExit`` when
+    the two are not the same set of points."""
+    import numpy as np
+    xa = np.asarray(xa, float)
+    xb = np.asarray(xb, float)
+    ia = np.lexsort(np.round(xa, decimals).T[::-1])
+    ib = np.lexsort(np.round(xb, decimals).T[::-1])
+    if xa.shape != xb.shape or not np.allclose(xa[ia], xb[ib], atol=10.0 ** -decimals):
+        raise SystemExit("forward mesh and checkpoint mesh are not the same vertex set")
+    return ia, ib
+
+
 def forward_check(map_path):
     os.environ["ISMIP7_INVERSION"] = map_path
     # Force the law, do not defer to the environment: this check exists to
@@ -110,12 +124,26 @@ def forward_check(map_path):
                                  "the re-solve check needs the final MAP")
             raise
         except Exception:                                                # forward mesh not from the checkpoint
+            # The forward built its mesh from the .msh, the checkpoint carries
+            # its own copy of the same mesh, and Firedrake numbers the two
+            # differently. A raw dat copy therefore compared PERMUTED fields:
+            # on a 32 km Budd MAP it reported rel L2 0.57 for a forward whose
+            # nodal speeds matched the MAP's to 1e-2 m/yr once sorted (Sep 20
+            # 2026). Match nodes by coordinate instead, and refuse anything
+            # that is not the same vertex set.
             m2 = chk.load_mesh()
             u2 = chk.load_function(m2, name="velocity")
-            if mesh.comm.size != 1 or u2.dat.data_ro.shape != u.dat.data_ro.shape:
+            if mesh.comm.size != 1:
                 raise SystemExit("forward mesh is not the checkpoint mesh; run serially")
+            from firedrake import SpatialCoordinate, VectorFunctionSpace
+            def _coords(msh, V):
+                return Function(VectorFunctionSpace(msh, V.ufl_element().family(),
+                                                    V.ufl_element().degree())
+                                ).interpolate(SpatialCoordinate(msh)).dat.data_ro
+            ia, ib = node_permutation(_coords(mesh, u.function_space()),
+                                      _coords(m2, u2.function_space()))
             u_map = Function(u.function_space())
-            u_map.dat.data[:] = u2.dat.data_ro
+            u_map.dat.data[ia] = u2.dat.data_ro[ib]
     num = sqrt(assemble(inner(u - u_map, u - u_map) * dx))
     den = sqrt(assemble(inner(u_map, u_map) * dx))
     return float(num / den), float(assemble(sqrt(inner(u, u)) * dx) / assemble(Constant(1.0) * dx(mesh)))

@@ -199,36 +199,47 @@ its own draft, the callback's `haf <= 0` floating test on cells holding ice
 construction.
 
 The earlier K files were fitted under `cg1`: BedMachine on CG1 nodes with its
-raster mask, the nodal slope capped at 5e-3, lumped-mass areas. Measured on the
-2 km adaptive mesh at the reference state (`check_melt_bound.py`, September
-2026), the forward's DG0 path applies 1380 Gt/yr with the 2500 m file fitted to
-865 and 1732 with the 2000 m file fitted to 1067.4, a ratio of 1.6 that is
-stable across the two files; capping the cell slope at the calibration's 5e-3
-goes the other way, to 646 Gt/yr with the 2000 m file. Neither convention alone
-reconciles a nodal K with the cell path, which also differ in floating area,
-mask and quadrature. The K file records `geometry_space`, and `load_K_per_basin`
-warns once when a run melts on a geometry other than the one its K was fitted
-on. The slope convention itself stays with issue #26; until it is settled the
-DG0 calibration fits the forward as it runs, and `ISMIP7_SIN_ALPHA_CAP` fits
-the capped convention for comparison.
+raster mask, the nodal slope capped at 5e-3, lumped-mass areas. The K file
+records `geometry_space` and `sin_alpha_cap`, and `load_K_per_basin` warns
+once when a run melts on a geometry other than the one its K was fitted on, and
+once when the file was fitted against a capped slope while the run applies none.
 
-Measured on the 2500 m mesh (`inversion_icepack2_budd_2500.h5`, BedMachine
-v4.1 vertex-sampled, the 865.0 Gt/yr table, 21 September 2026), what the
-forward's uncapped DG0 path applies with each K file:
+Two things were found by fitting through the forward's path, both measured on
+the 2500 m mesh (`inversion_icepack2_budd_2500.h5`, BedMachine v4.1
+vertex-sampled, the 865.0 Gt/yr table, 21 September 2026):
 
-| K fitted on | slope cap | K* | K total-match | forward applies | basins in Burgard K5..K95 |
+1. **The melt callbacks floated ice with fresh-water density** (issue #66).
+   Their `haf <= 0` test used the SMB conversion's 1000 kg/m3 where the forward
+   floats ice at 917/1024, which read every floating cell thicker than 78
+   percent of its flotation thickness as grounded: 364 038 km2, 24 percent of
+   BedMachine's shelf area, got no melt (the seawater test grounds 5 160 km2 of
+   it on nodes). The callbacks, the calibration and `check_melt_bound.py` now
+   share `forcing.is_floating`, with seawater. The rows `check_melt_bound.py`
+   records for the 2 km mesh (1732 and 646 Gt/yr) were measured through the
+   fresh-water test and are to be re-measured.
+
+2. **With a consistent floating test, the geometry space barely matters; the
+   slope convention does.** What the forward's uncapped DG0 path applies with
+   each K file, seawater flotation, ice-present cells:
+
+| K fitted on | slope cap | K* | K total-match | forward applies today (uncapped) | basins in Burgard K5..K95 |
 |---|---|---|---|---|---|
-| cg1 nodes (the production file) | 5e-3 | 4.26e-5 | 5.34e-5 | 1775 Gt/yr | 4 of 16 |
-| dg0 cells | none | 1.60e-5 | 2.92e-5 | 865 Gt/yr, by construction | 2 of 16 |
-| dg0 cells | 5e-3 | 7.46e-5 | 8.48e-5 | 2808 Gt/yr (needs the cap in the forward too) | 7 of 16 |
+| cg1 nodes (the production file) | 5e-3 | 4.26e-5 | 5.34e-5 | 3555 Gt/yr | 4 of 16 |
+| dg0 cells | 5e-3 | 4.37e-5 | 5.68e-5 | 3679 Gt/yr, 865 if the forward caps too | 4 of 16 |
+| dg0 cells | none | 6.67e-6 | 1.45e-5 | 865 Gt/yr, by construction | 0 of 16 |
 
-The uncapped cell slope has a median of 1.5e-2 and a 95th percentile of 0.11
-over floating cells, against 2.1e-2 and 0.16 for the nodal slope, so the
-uncapped fit reconciles the totals by absorbing mesh slope noise into K: the
-per-basin K then sit below Burgard's range, and the ratio to the nodal total
-is 1.83 here against 1.6 on the 2 km mesh, so such a K is mesh-dependent. The
-capped DG0 fit lands closest to Burgard's range but is only consistent with a
-forward that caps its slope the same way, which is the #26 decision.
+   The capped DG0 fit reproduces the nodal per-basin K within a few percent
+   (basin 9, Amundsen, 1.47e-4 on both), over a floating area of 1 577 840 km2
+   against 1 509 122 on nodes. The uncapped cell slope has a median of 1.5e-2
+   over floating cells and integrates 3.7 times the capped nodal melt at K = 1,
+   so a K fitted to it absorbs mesh slope noise and lands every basin below
+   Burgard's range, while the forward as it runs today would apply 4.1 times
+   the target with the production K once the flotation test is right. The
+   slope convention is issue #26: capping the forward's slope at the
+   calibration's 5e-3 makes it apply the melt its K was fitted to, with the K
+   files essentially as they are. Until it is settled the DG0 calibration fits
+   the forward as it runs, and `ISMIP7_SIN_ALPHA_CAP` fits the capped
+   convention.
 
 ## Incompatibilities
 

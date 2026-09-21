@@ -18,8 +18,9 @@ Geometry: the same ISMIP7_GEOMETRY_SPACE the forward reads (default dg0).
 * `cg1` is the nodal calibration the earlier K files came from: BedMachine
   interpolated onto CG1 nodes with its raster surface and `mask == 3` as
   the floating mask, grad(draft) projected onto CG1 and capped at 5e-3,
-  lumped-mass areas. The forward's DG0 path integrates about 1.6 times the
-  melt such a K was fitted to (`check_melt_bound.py`, issue #30).
+  lumped-mass areas. With the same cap the DG0 fit reproduces these within a
+  few percent per basin (GEOMETRY_DISCRETIZATION.md, issue #30); the slope
+  convention is what separates them (issue #26).
 
 The K file records the geometry it was fitted on, and `load_K_per_basin`
 warns once when a run melts on the other.
@@ -73,7 +74,7 @@ import rasterio
 import icepack
 
 from icepack2_tools.forcing import (quadratic_mixed_slope, compute_sin_alpha,
-                                    _RHO_I, _RHO_ICE, _RHO_WATER)
+                                    is_floating, _RHO_I)
 from icepack2_tools.geometry import sample_to_geometry
 from icepack2_tools.naming import map_basename
 from icepack2_tools.runconfig import (friction as _friction, lc as _lc,
@@ -338,12 +339,12 @@ def forward_geometry(mesh):
     xy = Function(VectorFunctionSpace(mesh, "DG", 0)).interpolate(
         fd.SpatialCoordinate(mesh)).dat.data_ro
     b_np, h_np, s_np = b_dg.dat.data_ro, h_dg.dat.data_ro, s_dg.dat.data_ro
-    haf = s_np - (b_np + (_RHO_WATER / _RHO_ICE) * np.maximum(-b_np, 0.0))
-    floating = (haf <= 0) & (h_np > 0)
+    afloat = is_floating(s_np, b_np)
+    floating = afloat & (h_np > 0)
     PETSc.Sys.Print(f"  BedMachine on cells: h min={h_np.min():.1f}  "
                     f"med={np.median(h_np):.1f}  max={h_np.max():.1f}; "
                     f"floating (haf <= 0, h > 0) {int(floating.sum())} cells, "
-                    f"{int(((haf <= 0) & ~(h_np > 0)).sum())} ice-free "
+                    f"{int((afloat & ~(h_np > 0)).sum())} ice-free "
                     f"haf <= 0 cells left out")
     return {
         "x": xy[:, 0],

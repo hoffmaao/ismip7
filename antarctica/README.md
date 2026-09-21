@@ -409,9 +409,10 @@ The calibration melts on the same `ISMIP7_GEOMETRY_SPACE` as the forward
 with the cell slope uncapped as the forward applies it, so the K it writes is
 the K the forward applies. `ISMIP7_GEOMETRY_SPACE=cg1` is the nodal
 calibration the earlier K files came from, with the slope capped at 5e-3;
-the forward's DG0 path integrates about 1.6 times the melt such a K was
-fitted to (`check_melt_bound.py`). `ISMIP7_SIN_ALPHA_CAP` names a cap on
-either geometry. The file records the geometry it was fitted on, and a run
+with the same cap the DG0 fit reproduces it within a few percent per basin,
+and the uncapped cell slope the forward applies today integrates 3.7 times
+as much melt at K = 1 (`GEOMETRY_DISCRETIZATION.md`). `ISMIP7_SIN_ALPHA_CAP`
+names a cap on either geometry. The file records the geometry it was fitted on, and a run
 that melts on the other is told once at startup.
 
 The control requires this npz. Projections take it (`K_per_basin_npz=`) or a

@@ -57,8 +57,11 @@ python antarctica/scripts/download_mirror.py \
     data/CESM2-WACCM/ssp585/ocean/tf/ data/CESM2-WACCM/ssp585/ocean/so/
 # the observations MIPkit (about 9 GB)
 python antarctica/scripts/download_mirror.py --product ismip7-ais-observations data/mipkit/
-# whether a local tree is current
+# whether a local tree is current: which version a run opens
 python antarctica/scripts/audit_forcing_versions.py --scenario ssp585
+# whether every file is there and unchanged: read-only, exit 1 if anything is
+# left to fetch or was replaced on the mirror
+python antarctica/scripts/download_mirror.py --check data/CESM2-WACCM/ssp585/
 ```
 
 Globus remains the archive of record and `download_forcing.py` drives it

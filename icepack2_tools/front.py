@@ -9,7 +9,18 @@ they can be exercised without standing up a whole run.
 import numpy as np
 
 __all__ = ["retreat_slivers", "clear_reference_where_ice_free", "clamp_thickness",
-           "front_connected", "facet_neighbours"]
+           "front_connected", "facet_neighbours", "collapse_cell_counts",
+           "collapse_banner", "collapse_csv_fields", "COLLAPSE_MARKER",
+           "COLLAPSE_CSV_COLUMNS"]
+
+# The prefix of every line a run prints about the collapse forcing: the mode
+# at startup, then the cell counts. core_report.py lifts the lines carrying it
+# into the run record, so keep it on one line with what it introduces.
+COLLAPSE_MARKER = "Ice-shelf collapse forcing:"
+
+# The timeseries columns collapse_cell_counts fills, in its return order.
+COLLAPSE_CSV_COLUMNS = ("collapse_flagged_cells", "collapse_removed_cells",
+                        "collapse_held_cells")
 
 
 def clamp_thickness(h, h_clamp, *ice_free):
@@ -120,6 +131,55 @@ def front_connected(flagged, open_water, neighbours_of, any_rank=bool):
             return reached
         reached |= new
         water |= new
+
+
+_COLLAPSE_RULES = {
+    "none": "no collapse mask is read and no cell is removed",
+    "mask": "floating cells flagged by the mask are removed and booked as calving",
+    "mask_front": "flagged floating cells are removed once open water reaches them, and booked as calving",
+}
+
+
+def collapse_banner(mode):
+    r"""The line a run prints once at startup, under every ``ISMIP7_FRACTURE``
+    mode. ``none`` prints too: a log with no such line is then a run that
+    predates it, and the mode of any later run can be read off its log."""
+    return f"{COLLAPSE_MARKER} ISMIP7_FRACTURE={mode} ({_COLLAPSE_RULES[mode]})"
+
+
+def collapse_cell_counts(flagged, removed, count=np.count_nonzero):
+    r"""``(flagged, removed, held)`` cell counts for one transport advance.
+
+    ``flagged`` is the floating cells the year's mask names. ``removed`` is
+    the ones the mode empties: all of them under ``mask``, the ones
+    :func:`front_connected` returns under ``mask_front``. An emptied cell
+    stays in both for as long as it is flagged and afloat (that is what names
+    it to the thickness floor), so ``removed`` accumulates over a run. Held
+    cells are the rest, flagged floating ice the advance leaves standing: zero
+    under ``mask`` by construction, and under ``mask_front`` the size of the
+    holes ``mask`` would have opened behind the front. Both arguments are
+    ``None`` when no mask is read (``ISMIP7_FRACTURE=none``) and every count is
+    zero.
+
+    ``count`` reduces a boolean cell array to a number of cells. A run passes
+    a global count (``icepack2_tools.mpi_stats.global_count``), which is
+    collective: every rank calls this, or none does. The default counts the
+    local array, for the tests.
+    """
+    if flagged is None:
+        return 0, 0, 0
+    return int(count(flagged)), int(count(removed)), int(count(flagged & ~removed))
+
+
+def collapse_csv_fields(header, counts):
+    r"""What a timeseries row appends for ``counts``: one field per entry of
+    ``COLLAPSE_CSV_COLUMNS`` when ``header``, the file's own first line,
+    carries them, and nothing otherwise. A series begun before the columns
+    existed keeps its header on resume, so its rows keep their width and the
+    counts reach the log alone."""
+    if COLLAPSE_CSV_COLUMNS[-1] not in header:
+        return ""
+    return "," + ",".join(str(int(c)) for c in counts)
 
 
 def facet_neighbours(Q_dg):

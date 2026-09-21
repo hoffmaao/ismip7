@@ -482,9 +482,11 @@ Output and submission:
 
 8. **Decide the collapse mode for the submission** (`none`, `mask`,
    `mask_front`) and settle README item 9. A 32 km ssp585 under each of the two
-   mask modes is the evidence: the log prints the mode, and
+   mask modes is the evidence: the log prints the mode under all three, and
    `ctx["collapse_held_cells"]` counts the flagged floating cells `mask_front`
-   is holding back. `mask_front` has unit tests for the rule and a 1-against-3
+   is holding back, written with the flagged and removed counts to the
+   timeseries (`collapse_*_cells`), the budget lines and the core report.
+   `mask_front` has unit tests for the rule and a 1-against-3
    rank check of the facet sweep, and has not yet run inside a forward. (issue #10)
 9. **Run `check_melt_bound.py --ocx` on the production mesh** before core 11
    runs on the OCX product, and hold that run until #48 is answered if the

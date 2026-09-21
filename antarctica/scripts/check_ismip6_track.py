@@ -73,14 +73,24 @@ def runaway_detected(discharge, dt):
     Year blocks make the test independent of dt. Two clauses, both sustained:
     the block MEDIAN above 6000 Gt/yr (a mean is moved by one step, a median is
     not), or a growth factor >= 1.5 in each of two consecutive years to above
-    1000 Gt/yr. The Jul 2026 blow-up (~2x per 0.1-yr step) fails both in year
-    one; a single emptying step, which the peak-of-any-step clause used to flag
-    on cores 2, 3 and 7 of the July matrix, fails neither.
+    1000 Gt/yr. Growth uses block means on purpose: a year whose mean is lifted
+    1.5x by several large steps counts as growth. The median clause is what
+    makes a single step harmless, and the growth clause is the stricter of the
+    two (it keeps the 285-year n=4 CTRL, whose growth years carry 2 and 4 steps
+    above 6000 Gt/yr out of 10, as FAIL). A trailing block shorter than half a
+    year is dropped, since one step would set its median. The Jul 2026 blow-up
+    (~2x per 0.1-yr step) fails the median clause in year one; the growth
+    clause needs three year blocks and cannot fire before year three. A single
+    emptying step, which the peak-of-any-step clause used to flag on cores 2,
+    3 and 7 of the July matrix, fails neither.
     """
     discharge = np.abs(np.asarray(discharge, float))
     nblk = max(1, int(round(1.0 / dt)))
-    means = [np.mean(discharge[i:i + nblk]) for i in range(0, len(discharge), nblk)]
-    medians = [np.median(discharge[i:i + nblk]) for i in range(0, len(discharge), nblk)]
+    blocks = [discharge[i:i + nblk] for i in range(0, len(discharge), nblk)]
+    if len(blocks) > 1 and len(blocks[-1]) < nblk // 2:
+        blocks.pop()
+    means = [np.mean(b) for b in blocks]
+    medians = [np.median(b) for b in blocks]
     growth = [means[i + 1] / max(means[i], 1e-9) for i in range(len(means) - 1)]
     sustained = any(growth[i] >= 1.5 and growth[i + 1] >= 1.5 and means[i + 2] > 1000.0
                     for i in range(len(growth) - 1))

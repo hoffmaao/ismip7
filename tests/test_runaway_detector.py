@@ -59,3 +59,15 @@ def test_dt_does_not_change_the_answer():
     d = np.full(600, 1000.0)
     d[300] = 60000.0
     assert _detect()(d, 0.05) is False
+
+
+def test_a_spike_on_a_one_step_trailing_block_is_not_a_runaway():
+    """A t=0 row leaves a one-step final block; its median would be the spike."""
+    d = np.full(301, 1000.0)
+    d[-1] = 60000.0
+    assert _detect()(d, 0.1) is False
+
+
+def test_a_full_trailing_year_above_the_ceiling_still_fails():
+    d = np.concatenate([np.full(290, 1000.0), np.full(10, 8000.0)])
+    assert _detect()(d, 0.1) is True

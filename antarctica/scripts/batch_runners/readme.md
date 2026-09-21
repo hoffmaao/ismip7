@@ -242,9 +242,9 @@ four editable packages: `icepack`, `icepack2`, `tlm_adjoint`, `icepack_tools`.
 It takes the venv and work filesystem from the site file and expects the
 sources under `$ISMIP7_WORK/sw/src` (`FD_PREFIX` moves that; at Rice it is
 `/projects/ah301/sw/src`). They are rsynced from a workstation rather than
-cloned, since `icepack2` carries uncommitted edits the inversion needs. Two
-more gaps surfaced here: `/tmp` is not writable on the login nodes (the script
-sets `TMPDIR`), and the `gmsh` wheel dlopens `libGLU.so.1`.
+cloned, since `icepack2` carries uncommitted edits the inversion needs
+(issue #46). Two more gaps surfaced here: `/tmp` is not writable on the login
+nodes (the script sets `TMPDIR`), and the `gmsh` wheel dlopens `libGLU.so.1`.
 
 `verify.sbatch` proves the build works across ranks: four tasks under `srun`,
 each partitioner on a unit square, then the real 2500 m mesh under `ptscotch`

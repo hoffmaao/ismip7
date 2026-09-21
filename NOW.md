@@ -10,7 +10,7 @@ is an index.
 **Claim the card before you start a run or an inversion.** A card in
 Claimed for more than 24 hours with no comment reads as unclaimed.
 
-Generated: 2026-09-21 00:56 UTC. 22 blocking, 10 owed, 4 after the deadline, 9 unverified.
+Generated: 2026-09-21 01:04 UTC. 23 blocking, 10 owed, 4 after the deadline, 9 unverified.
 
 ## Blocking the submission
 
@@ -38,6 +38,7 @@ Decisions first: they have the longest lead time and they gate the runs.
 | [41](https://github.com/icepack/ismip7/issues/41) | forcing: re-run audit_forcing_versions.py immediately before the production matrix | needs-run | group | quartz | unverifiable-run |
 | [25](https://github.com/icepack/ismip7/issues/25) | MAP: no MAP on the Ua mesh reproduces its own velocity in the forward | needs-check | rice | nots | verified open |
 | [42](https://github.com/icepack/ismip7/issues/42) | melt: confirm every submitted run read the current per-basin K calibration | needs-check | group | local | unverifiable-run |
+| [46](https://github.com/icepack/ismip7/issues/46) | solver: the inversion depends on uncommitted icepack2 edits that exist on one workstation | needs-check | rice | nots | verified open |
 | [17](https://github.com/icepack/ismip7/issues/17) | protocol: settle the ligroundf sign convention (#22) | needs-upstream | upstream | upstream | fresh, unverified by design |
 | [40](https://github.com/icepack/ismip7/issues/40) | protocol: confirm the submission round and its deadline | needs-upstream | upstream | upstream | unverifiable-run |
 
@@ -90,7 +91,7 @@ production run or a group decision.
 | `src:submission-readme` | 11 |
 | `src:matrix-status` | 6 |
 | `src:topic-doc` | 8 |
-| `src:runbook` | 1 |
+| `src:runbook` | 2 |
 | `src:open-pr` | 5 |
 
 ## After the deadline

@@ -28,6 +28,20 @@ exit status. The README must cite the versions a run used. A file the
 download manifest has never seen and which is older than the mirror's object
 is counted as ``older``: unproven either way, see ``download_mirror.py --older``.
 
+**This answers which version a run opens. It does not answer whether the
+forcing is complete.** Use ``download_mirror.py --dry-run`` for that, which is
+read-only and prints a per-object plan. Three reasons this tool cannot:
+
+- every count here is per row, and a row counts as present when any version of
+  it is on disk, so a row reads ``ok`` while individual years are absent
+  underneath it. On 21 September this printed ``16 missing locally`` over a
+  tree with 2,755 objects and 84 GB absent, nearly all under ``ok`` rows;
+- a prefix it is not told to list cannot be reported at all, and the default
+  is three of the mirror's ten top-level prefixes;
+- it compares version strings. A file replaced in place, same name and same
+  version, shows up as REPLACED only where the manifest holds an ETag for it,
+  so a tree with no manifest cannot report one.
+
 The mirror is anonymous S3 over HTTPS. Two things the endpoint insists on:
 prefixes are relative to the product (``data/<ESM>/...``, no ``AIS/`` level,
 while the keys it returns carry the product name), and a browser-like

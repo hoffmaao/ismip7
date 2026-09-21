@@ -529,9 +529,12 @@ Output and submission:
     none removed: `pr`, `pr-anomaly`, `tas` and `tas-anomaly` for `ctrl`, at
     `2000m` and `8000m`, for both core ESMs. Two listings two hours apart
     settle it, and the manifest covers the 89,767 objects that existed at the
-    time of the run. The `ctrl` atmosphere is the gap this opens, and those
-    226 GB are being fetched. Re-list before trusting any earlier listing, and
-    see issue #41 for the audit immediately before the production matrix.
+    time of the run. The `ctrl` atmosphere was the gap this opens, and those
+    4,576 objects and 226 GB are fetched, nothing failed; all sixteen `ctrl`
+    `pr`, `pr-anomaly`, `tas` and `tas-anomaly` rows read `ok` over 478 mirror
+    entries with 0 behind, 0 pinned, 0 replaced and 0 older. Re-list before
+    trusting any earlier listing, and see issue #41 for the audit immediately
+    before the production matrix.
 
     **The audit sees three of the mirror's ten prefixes.** Its default is
     `CESM2-WACCM`, `MRI-ESM2-0` and `OCX`, so `ACCESS-CM2`, `CanESM5`,
@@ -546,8 +549,11 @@ Output and submission:
     per row, and a row counts as present when any version of it is on disk. The
     run that settled action 12 reported eight rows missing while thousands of
     objects were absent under rows reading `ok`. Only a `download_mirror.py`
-    pass over every prefix settles file-level completeness. Which prefixes the
-    submission needs, and which a routine re-sync covers, is open. (issue #49)
+    pass over every prefix settles file-level completeness, and
+    `download_mirror.py --dry-run` does it read-only. The audit's own docstring
+    now says so, and issues #41 and #16 carry the same note where their exit
+    criteria lean on it. Which prefixes the submission needs, and which a
+    routine re-sync covers, is open. (issue #49)
 
     Closed as icepack/ismip7#14.
 13. **Bring the Quartz forcing tree up to the mirror.** Done on 21 September.

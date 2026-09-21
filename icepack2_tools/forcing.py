@@ -1236,8 +1236,8 @@ def load_K_per_basin(npz_path, mesh_x, mesh_y, fill=0.0):
     # A K is likewise only valid for the geometry it was fitted on. The
     # calibration records the space it melted (cell by cell under dg0, on
     # nodes under cg1); a file without the entry predates the tag and was
-    # fitted on nodes. With the same slope cap the two fits agree within a few
-    # percent per basin (GEOMETRY_DISCRETIZATION.md); the mismatch is still
+    # fitted on nodes. With the same slope cap the two fits agree within about
+    # 10 percent per basin, 22 percent in basin 7 (GEOMETRY_DISCRETIZATION.md); the mismatch is still
     # reported once per run so a file's provenance is never silent.
     from .runconfig import geometry_space
     fitted_on = str(data["geometry_space"]) if "geometry_space" in data else "cg1"

@@ -228,8 +228,8 @@ vertex-sampled, the 865.0 Gt/yr table, 21 September 2026):
 | dg0 cells | 5e-3 | 4.37e-5 | 5.68e-5 | 3679 Gt/yr, 865 if the forward caps too | 4 of 16 |
 | dg0 cells | none | 6.67e-6 | 1.45e-5 | 865 Gt/yr, by construction | 0 of 16 |
 
-   The capped DG0 fit reproduces the nodal per-basin K within a few percent
-   (basin 9, Amundsen, 1.47e-4 on both), over a floating area of 1 577 840 km2
+   The capped DG0 fit reproduces the nodal per-basin K within about 10 percent
+   per basin, 22 percent in basin 7 (basin 9, Amundsen, 1.47e-4 on both), over a floating area of 1 577 840 km2
    against 1 509 122 on nodes. The uncapped cell slope has a median of 1.5e-2
    over floating cells and integrates 3.7 times the capped nodal melt at K = 1,
    so a K fitted to it absorbs mesh slope noise and lands every basin below

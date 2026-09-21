@@ -293,10 +293,10 @@ forcing-version audit, the output writer, and the melt calibration above.
    minimum is -0.008 kg m-2 s-1, which is 275.3 m/yr of ice, and the 10-year Úa
    ssp585 of job 1368723 reached -0.0117, or 402.6 m/yr.
 
-   `check_melt_bound.py` measures the slope side of it. The calibration caps the
-   draft slope `sin(alpha)` at 5e-3 and the forward applies no cap, so the melt
-   the forward applies is a different field from the melt the per-basin K was
-   fitted against. The script evaluates two halves at the reference geometry
+   `check_melt_bound.py` measures the slope side of it. The CG1 calibration
+   behind the existing K files caps the draft slope `sin(alpha)` at 5e-3 and
+   the forward applies no cap, so the melt the forward applies is a different
+   field from the melt the per-basin K was fitted against. The script evaluates two halves at the reference geometry
    with `calibrated_K_per_basin_2000.npz` on the Úa 2 km mesh, each capped and
    uncapped. The calibration half reproduces `calibrate_melt.py` on CG1 nodes,
    with BedMachine's raster surface and mask and the cap on the nodal slope.

@@ -194,8 +194,9 @@ OMP_NUM_THREADS=1 ISMIP7_FRICTION=budd ISMIP7_LC=32000 ISMIP7_LC_COARSE=320000 \
 as the forward. Under `dg0` it evaluates the forward's own cell by cell melt
 path: bed and thickness sampled onto the cells, the surface from flotation, the
 cell slope of `forcing.compute_sin_alpha` uncapped, forcing at each centroid and
-its own draft, the callback's `haf <= 0` floating test and cell areas. A K
-fitted there is the K the forward applies, by construction.
+its own draft, the callback's `haf <= 0` floating test on cells holding ice
+(`h > 0`) and cell areas. A K fitted there is the K the forward applies, by
+construction.
 
 The earlier K files were fitted under `cg1`: BedMachine on CG1 nodes with its
 raster mask, the nodal slope capped at 5e-3, lumped-mass areas. Measured on the

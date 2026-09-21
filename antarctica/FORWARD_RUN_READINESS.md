@@ -529,9 +529,25 @@ Output and submission:
     none removed: `pr`, `pr-anomaly`, `tas` and `tas-anomaly` for `ctrl`, at
     `2000m` and `8000m`, for both core ESMs. Two listings two hours apart
     settle it, and the manifest covers the 89,767 objects that existed at the
-    time of the run. The `ctrl` atmosphere is the gap this opens. Whether
-    to pull those 226 GB is an open decision, and it belongs with whoever runs
-    the pre-matrix audit. (issue #41)
+    time of the run. The `ctrl` atmosphere is the gap this opens, and those
+    226 GB are being fetched. Re-list before trusting any earlier listing, and
+    see issue #41 for the audit immediately before the production matrix.
+
+    **The audit sees three of the mirror's ten prefixes.** Its default is
+    `CESM2-WACCM`, `MRI-ESM2-0` and `OCX`, so `ACCESS-CM2`, `CanESM5`,
+    `GFDL-ESM4`, `IPSL-CM6A-LR` and `MPI-ESM1-2-HR` have never appeared in an
+    audit here, and all five are absent from the Quartz tree in full: 14,298
+    objects and 155 GB. `grid` and `parameterisations` are unaudited and
+    present. The `ismip7-ais-melt-calibration` product is 17.2 GB absent of
+    25.2 GB, `meltMIP` being the part that is local. None of this reads as
+    `BEHIND` or `MISSING`, because a prefix the audit never lists cannot.
+
+    A second reason the audit cannot answer "is every file here": `MISSING` is
+    per row, and a row counts as present when any version of it is on disk. The
+    run that settled action 12 reported eight rows missing while thousands of
+    objects were absent under rows reading `ok`. Only a `download_mirror.py`
+    pass over every prefix settles file-level completeness. Which prefixes the
+    submission needs, and which a routine re-sync covers, is open. (issue #49)
 
     Closed as icepack/ismip7#14.
 13. **Bring the Quartz forcing tree up to the mirror.** Done on 21 September.

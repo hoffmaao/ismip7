@@ -87,7 +87,7 @@ def identify_grounding_line(H, b, rho_I=917.0, rho_W=1024.0, kH=1.0):
 
     Returns a mask that is 1.0 at the grounding line (where height
     above flotation ≈ 0) and 0.0 away from it. Uses the smooth
-    Dirac delta of height-above-flotation (after Gudmundsson et al. (2012)).
+    Dirac delta of height above flotation.
 
     Parameters
     ----------

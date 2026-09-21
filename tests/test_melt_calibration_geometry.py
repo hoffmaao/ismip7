@@ -90,6 +90,10 @@ def basin_grid(tmp_path, monkeypatch):
     xr.Dataset({"basinNumber": (("y", "x"), bn)}, coords={"x": x, "y": y}).to_netcdf(
         d / "basin_numbers_ismip8km_v2.nc")
     monkeypatch.setenv("ISMIP7_DATA_ROOT", str(tmp_path))
+    monkeypatch.delenv("ISMIP7_MELT_SLOPE", raising=False)
+    monkeypatch.delenv("ISMIP7_SIN_ALPHA_ANT", raising=False)
+    import icepack2_tools.forcing as forcing
+    monkeypatch.setattr(forcing, "_MELT_SLOPE_WARNED", False)
     return np.array([0.0, 0.0]), np.array([0.0, 8000.0])
 
 
@@ -127,5 +131,7 @@ def test_a_matching_geometry_is_silent(basin_grid, tmp_path, monkeypatch, capsys
     monkeypatch.setenv("ISMIP7_GEOMETRY_SPACE", "dg0")
     mx, my = basin_grid
     forcing.load_K_per_basin(_npz(tmp_path / "K.npz", geometry_space="dg0",
+                                  melt_slope="ant",
+                                  sin_alpha_ant=forcing.SIN_ALPHA_ANT_DEFAULT,
                                   sin_alpha_cap=float("inf")), mx, my)
     assert "WARNING" not in capsys.readouterr().out

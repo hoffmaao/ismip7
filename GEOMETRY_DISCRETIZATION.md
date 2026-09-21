@@ -244,7 +244,7 @@ vertex-sampled, the 865.0 Gt/yr table, 21 September 2026):
    `local`, capped in the calibration and uncapped in the forward as before.
 
 3. **Under the constant slope the geometry space is immaterial and K lands
-   inside the toolbox's envelope.** Same mesh, same table, seawater flotation:
+   between the toolbox's K05 and K50 once scaled to the July table.** Same mesh, same table, seawater flotation:
 
 | slope | geometry | K* | K total-match | melt at K* | basins in K05..K95 |
 |---|---|---|---|---|---|

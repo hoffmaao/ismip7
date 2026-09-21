@@ -1179,9 +1179,9 @@ def _warn_melt_slope(npz_path, fitted_under, running_under):
             f"  WARNING: {os.path.basename(npz_path)} was calibrated under "
             f"ISMIP7_MELT_SLOPE={fitted_under} and this run melts under "
             f"{running_under}; melt is linear in sin(alpha), so the K does "
-            f"not transfer. Refit with calibrate_melt.py under "
-            f"ISMIP7_MELT_SLOPE={running_under}, or name a matching file "
-            f"with ISMIP7_K_PER_BASIN_NPZ.",
+            f"not transfer. Refit with calibrate_melt.py under this run's "
+            f"ISMIP7_MELT_SLOPE and ISMIP7_SIN_ALPHA_ANT, or name a matching "
+            f"file with ISMIP7_K_PER_BASIN_NPZ.",
             flush=True,
         )
 
@@ -1255,9 +1255,16 @@ def load_K_per_basin(npz_path, mesh_x, mesh_y, fill=0.0):
     # See GEOMETRY_DISCRETIZATION.md.
     # The slope convention the K was fitted under. A file without the entry
     # predates the knob and was fitted on the local slope.
+    # Under ant the constant is part of the convention, so a K fitted with
+    # another constant does not transfer either.
     fitted_slope = str(data["melt_slope"]) if "melt_slope" in data else "local"
     if fitted_slope != melt_slope():
         _warn_melt_slope(npz_path, fitted_slope, melt_slope())
+    elif fitted_slope == "ant" and "sin_alpha_ant" in data:
+        fitted_sin = float(data["sin_alpha_ant"])
+        if np.isfinite(fitted_sin) and abs(fitted_sin / sin_alpha_ant() - 1.0) > 0.01:
+            _warn_melt_slope(npz_path, f"ant with sin(alpha) = {fitted_sin:g}",
+                             f"ant with sin(alpha) = {sin_alpha_ant():g}")
     if fitted_slope == "local" and melt_slope() == "local" and "sin_alpha_cap" in data:
         cap = float(data["sin_alpha_cap"])
         if np.isfinite(cap) and cap > 0.0:
@@ -1374,6 +1381,12 @@ def melt_slope():
 def sin_alpha_ant():
     r"""``ISMIP7_SIN_ALPHA_ANT``: the constant ``sin(alpha)`` under ``ant``."""
     return float(os.environ.get("ISMIP7_SIN_ALPHA_ANT", SIN_ALPHA_ANT_DEFAULT))
+
+
+def k_melt():
+    r"""``ISMIP7_K_MELT``: the scalar K a run melts with when no per-basin
+    calibration is found."""
+    return float(os.environ.get("ISMIP7_K_MELT", _K_DEFAULT))
 
 
 def compute_sin_alpha(ctx):

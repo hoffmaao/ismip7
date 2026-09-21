@@ -41,7 +41,9 @@ sys.path.insert(0, _PROJECT)
 from icepack2_tools.climatology import (
     CLIM_POOL_MARKER, clim_scenario, clim_start, clim_end,
 )
-from icepack2_tools.forcing import FORCING_PROVENANCE_MARKER
+from icepack2_tools.forcing import (
+    FORCING_PROVENANCE_MARKER, k_melt, melt_slope, sin_alpha_ant,
+)
 from icepack2_tools.runconfig import (
     N_FLOW_DEFAULT, friction, geometry_space, lc, lc_coarse,
 )
@@ -78,6 +80,11 @@ def effective_env():
         "ISMIP7_CLIM_SCENARIO": clim_scenario(),
         "ISMIP7_CLIM_START": str(clim_start()),
         "ISMIP7_CLIM_END": str(clim_end()),
+        # The melt slope law and K: the default flipped from the local slope
+        # and K 1.15e-4 to the constant slope and K 8.5e-5.
+        "ISMIP7_MELT_SLOPE": melt_slope(),
+        "ISMIP7_SIN_ALPHA_ANT": f"{sin_alpha_ant():g}",
+        "ISMIP7_K_MELT": f"{k_melt():g}",
     }
     resolved.update(effective_solver_env())
     canonical_key = "ISMIP7_DIAGNOSTIC_LINEAR_SOLVER_CANONICAL"

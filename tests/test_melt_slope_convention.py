@@ -105,9 +105,26 @@ def test_a_file_without_the_entry_was_fitted_on_the_local_slope(basins, tmp_path
 
 
 def test_a_matching_convention_is_silent(basins, tmp_path, capsys):
-    K = _load(_npz(tmp_path / "K.npz", melt_slope="ant", sin_alpha_ant=2.9e-3,
+    K = _load(_npz(tmp_path / "K.npz", melt_slope="ant",
+                   sin_alpha_ant=forcing.SIN_ALPHA_ANT_DEFAULT,
                    sin_alpha_cap=float("inf"), geometry_space="dg0"))
     assert np.allclose(K, [1e-4, 2e-4])
+    assert "WARNING" not in capsys.readouterr().out
+
+
+def test_a_k_fitted_with_another_constant_says_so_once(basins, tmp_path, capsys):
+    path = _npz(tmp_path / "K.npz", melt_slope="ant", sin_alpha_ant=2.9e-3,
+                sin_alpha_cap=float("inf"), geometry_space="dg0")
+    _load(path); _load(path)
+    out = capsys.readouterr().out
+    assert out.count("calibrated under ISMIP7_MELT_SLOPE=ant with sin(alpha) = 0.0029 "
+                     "and this run melts under ant with sin(alpha) = 0.005115") == 1
+
+
+def test_a_constant_within_a_percent_is_silent(basins, tmp_path, monkeypatch, capsys):
+    monkeypatch.setenv("ISMIP7_SIN_ALPHA_ANT", "5.1e-3")
+    _load(_npz(tmp_path / "K.npz", melt_slope="ant", sin_alpha_ant=5.115e-3,
+               sin_alpha_cap=float("inf"), geometry_space="dg0"))
     assert "WARNING" not in capsys.readouterr().out
 
 

@@ -498,7 +498,7 @@ Output and submission:
     1 % of values the `libmassbffl` excursion is now a warning. (issue #12)
 11. **Run `ismip7-scalar-processing`** on the same outputs, for `sla20`,
     `slg20` and `slvaf`, and compare its scalars with the native ones. (issue #13)
-12. **Adopt or refetch the forcing that predates the manifest.** Done on 20
+12. **Adopt or refetch the forcing that predates the manifest.** Done on 21
     September, and the premise above was wrong. The first
     `audit_forcing_versions.py` run counts none of the Globus-era tree as
     `older`. `plan()` reaches `OLDER` only for a file that already matches the
@@ -529,10 +529,12 @@ Output and submission:
     none removed: `pr`, `pr-anomaly`, `tas` and `tas-anomaly` for `ctrl`, at
     `2000m` and `8000m`, for both core ESMs. Two listings two hours apart
     settle it, and the manifest covers the 89,767 objects that existed at the
-    time of the run. The `ctrl` atmosphere is the gap this opens, and whether
-    to pull those 226 GB is an open decision. This is the case issue #41
-    exists for. (issue #14)
-13. **Bring the Quartz forcing tree up to the mirror.** Done on 20 September.
+    time of the run. The `ctrl` atmosphere is the gap this opens. Whether
+    to pull those 226 GB is an open decision, and it belongs with whoever runs
+    the pre-matrix audit. (issue #41)
+
+    Closed as icepack/ismip7#14.
+13. **Bring the Quartz forcing tree up to the mirror.** Done on 21 September.
     The 19 September reading (listing and NetCDF headers only, nothing run)
     undercounted the rows: the audit reports seven `BEHIND`. OCX
     `dacabfdz`, `dmrrodz` and `dtsdz` each stood at `v1` against `v2` on the
@@ -545,7 +547,7 @@ Output and submission:
     `acabf` (47 years, 1979-2025) and the four OCX oceans were already there in
     the layout the readers expect, so core 11 passes its coverage gate on
     Quartz. Action 4 and issue #41 still call for a fresh audit immediately
-    before the production matrix. (issue #15)
+    before the production matrix. Closed as icepack/ismip7#15.
 
 ### Read off the real files on 19 September
 

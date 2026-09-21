@@ -636,8 +636,6 @@ class ISMIP7Atmosphere:
         return (years[0], years[-1]) if years else None
 
     def _load_year(self, variable, year):
-        import xarray as xr
-
         key = (variable, int(year))
         if key in self._cache:
             return self._cache[key]
@@ -924,7 +922,6 @@ class ISMIP7Ocean:
         calibration. The last few (variable, year) fields stay cached, so
         sub-yearly time steps re-read nothing.
         """
-        import xarray as xr
         from scipy.interpolate import RegularGridInterpolator
 
         yr = int(year)
@@ -1037,8 +1034,6 @@ class ISMIP7Fracture:
         return self._collapse_mask is not None
 
     def load(self):
-        import xarray as xr
-
         fdir = self._fracture_dir()
         if fdir is None or not os.path.isdir(fdir):
             return self

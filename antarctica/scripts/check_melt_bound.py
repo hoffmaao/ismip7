@@ -41,8 +41,10 @@ salinity at each cell centroid and its own draft, and the forward callback's
 
 Both halves take their slope from ``ISMIP7_MELT_SLOPE`` as the forward and
 calibrate_melt do. The capped and uncapped rows above belong to ``local``.
-Under ``ant``, the default, each half melts with the one constant
-``ISMIP7_SIN_ALPHA_ANT``, no cap applies, and each half gives one row. A K file
+Under ``ant``, the default, the forward half melts with the one constant
+``ISMIP7_SIN_ALPHA_ANT`` and the calibration half with the constant the K file
+records, warning when the two differ by more than 1 percent; no cap applies,
+and each half gives one row. A K file
 whose recorded ``melt_slope`` differs from the run's is reported, since its K
 does not transfer.
 
@@ -304,13 +306,22 @@ def main():
                         f"melts under {running}, so no row is the slope K was "
                         f"fitted against")
     if running == "ant":
-        slope = f"the constant {sin_alpha_ant():g}"
+        fitted_sin = (float(d["sin_alpha_ant"])
+                      if fitted_slope == "ant" and "sin_alpha_ant" in d
+                      else float("nan"))
+        calibration_sin = fitted_sin if np.isfinite(fitted_sin) else sin_alpha_ant()
+        if abs(calibration_sin / sin_alpha_ant() - 1.0) > 0.01:
+            PETSc.Sys.Print(f"  WARNING: {os.path.basename(npz_path)} was calibrated "
+                            f"with sin(alpha) = {calibration_sin:g} and this check "
+                            f"melts the forward half with {sin_alpha_ant():g}; the "
+                            f"calibration half keeps the file's constant")
         fitted = ", the slope K was fitted against" if fitted_slope == "ant" else ""
         cases = [
-            (f"calibration half, {slope} on CG1 nodes{fitted}", calibration,
-             calibration["sin_a"], "nodes"),
-            (f"forward half, {slope} on DG0 cells, as the forward runs today",
-             forward, forward["sin_a"], "cells"),
+            (f"calibration half, the constant {calibration_sin:g} on CG1 nodes"
+             f"{fitted}", calibration,
+             np.full_like(calibration["sin_a"], calibration_sin), "nodes"),
+            (f"forward half, the constant {sin_alpha_ant():g} on DG0 cells, as "
+             f"the forward runs today", forward, forward["sin_a"], "cells"),
         ]
     else:
         cap = float(d["sin_alpha_cap"]) if "sin_alpha_cap" in d else float("nan")

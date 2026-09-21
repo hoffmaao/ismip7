@@ -176,7 +176,7 @@ shipped gate 0. The superseded file is kept as
 carried the gate.
 
 **Resolved 21 September: the MAPs reproduce their own velocity once the
-forward assembles the residual they were inverted under (issue #25).**
+forward assembles the residual they were inverted under.**
 `check_budd_map.py --forward` re-solves the diagnostic at a MAP's controls and
 compares against the velocity the MAP saved; `ISMIP7_CHECK_FRICTION` (default
 `budd`) selects the law. Measured at Rice, serially, under the `ismip7-pr6`
@@ -280,7 +280,7 @@ forcing-version audit, the output writer, and the melt calibration above.
    will use, on its final save, and record the number beside the MAP. A MAP
    inverted before 571d1c9 must run with `ISMIP7_OCEAN_DRAG=0 ISMIP7_U_LIM=0`
    or be re-inverted (section 4). The 2 km RC and Budd MAPs now inverting under
-   the prior metric are next when they finish. (issue #25)
+   the prior metric are next when they finish. (issues #24, #21)
 4. Re-run `audit_forcing_versions.py` immediately before the production matrix
    and cite it in the README. The `ctrl` pull for cores 9 and 10 is done, and
    the mirror is re-synced with Globus by hand every week or two, so the freeze

@@ -125,8 +125,12 @@ values fed in.
    its own a sufficient cause of the overshoot, so the magnitude and the
    attribution both have to be re-derived from the re-run before the ~9% unit
    question can be judged against them. (issue #29)
-2. **2014→2015 projection handoff** starts projections at the historical
-   final's 2014.0 with a one-year zero-anomaly gap. (issue #34)
+2. **Projection handoff: settled at 2015.0.** Since 2cd8b57 (14 September)
+   the historical shims end at `t_end_default=2015.0` and the projection shims
+   start at `t_start_default=2015.0` (`antarctica/scripts/historical/*.py`,
+   `projections/*.py`), as FORWARD_RUN_READINESS.md states. The 28 July matrix
+   logs show `1850.0->2014.0` and `2014.0->2300.0` under the July drivers. The
+   next historical run's `Time-stepping` line is the run-level confirmation.
 3. **Runaway detector: settled.** `check_ismip6_track.py` flags a runaway on
    sustained signals only: a year whose median front discharge exceeds 6000
    Gt/yr, or growth of 1.5x in each of two consecutive years. A single

@@ -34,6 +34,36 @@ import pytest
 REPO = Path(__file__).resolve().parent.parent
 MATRIX = REPO / "antarctica" / "scripts" / "run_core_matrix.sh"
 
+
+def _bash4():
+    r"""A bash that can run the shipped script, or None.
+
+    `run_core_matrix.sh` keeps its per-core state in associative arrays, so it
+    needs bash 4. macOS ships 3.2 as /bin/bash and every cluster this runs on
+    is well past 4, so the search covers the usual newer installs and the
+    suite skips where none is there, the way the `gh` and Firedrake tests do.
+    """
+    seen = set()
+    for name in ("bash", "bash5", "bash4",
+                 "/opt/homebrew/bin/bash", "/usr/local/bin/bash"):
+        path = shutil.which(name)
+        if path is None or path in seen:
+            continue
+        seen.add(path)
+        try:
+            out = subprocess.run([path, "-c", "echo ${BASH_VERSINFO[0]}"],
+                                 capture_output=True, text=True, timeout=30).stdout
+            if int(out.strip() or 0) >= 4:
+                return path
+        except (OSError, ValueError, subprocess.SubprocessError):
+            continue
+    return None
+
+
+BASH = _bash4()
+needs_bash4 = pytest.mark.skipif(
+    BASH is None, reason="the shipped matrix script needs bash 4 (macOS ships 3.2)")
+
 pytest.importorskip("h5py")
 
 # Advances to FAKE_STOP_YEAR on a cold start and to FAKE_TARGET once the matrix
@@ -112,7 +142,7 @@ def _run(sandbox, **env):
     e.pop("ISMIP7_RUN_TAG", None)
     e.update(env)
     p = subprocess.run(
-        ["bash", str(sandbox / "antarctica" / "scripts" / "run_core_matrix.sh")],
+        [BASH, str(sandbox / "antarctica" / "scripts" / "run_core_matrix.sh")],
         env=e, cwd=str(sandbox), capture_output=True, text=True, timeout=300,
     )
     return p.stdout + p.stderr
@@ -135,6 +165,7 @@ def _bank_a_series(sandbox, stem, years):
     (R / f"{stem}_ismip7_scalars.csv").write_text("year,lim\n")
 
 
+@needs_bash4
 def test_ocx_is_retried_from_its_own_saved_state(sandbox):
     r"""A wall stop at 2011 is resumed and reaches the 2026 target. Under the
     old `cold` classification the matrix stopped after one attempt and said
@@ -146,6 +177,7 @@ def test_ocx_is_retried_from_its_own_saved_state(sandbox):
     assert _attempts(sandbox) == ["cold", "restart"], out
 
 
+@needs_bash4
 def test_a_core_that_stops_advancing_is_still_left_alone(sandbox):
     r"""Retrying is gated on progress, not on the kind: a resumed attempt that
     reaches the same year as before gives up rather than looping."""
@@ -155,6 +187,7 @@ def test_a_core_that_stops_advancing_is_still_left_alone(sandbox):
     assert _attempts(sandbox) == ["cold", "restart"], out
 
 
+@needs_bash4
 def test_a_fresh_rerun_archives_the_ismip7_series_too(sandbox):
     r"""FRESH=1 over a core that banked an ISMIP7 series must leave nothing
     behind that blocks the cold start. The series is moved, not deleted, so
@@ -178,6 +211,7 @@ def test_a_fresh_rerun_archives_the_ismip7_series_too(sandbox):
     assert "COMPLETE at 2026" in out, out
 
 
+@needs_bash4
 def test_a_partially_complete_core_resumes_on_the_first_attempt(sandbox):
     r"""A core left short by a previous invocation keeps its output (nothing
     is stale), so attempt 1 must resume from its own checkpoint rather than
@@ -203,6 +237,7 @@ def test_a_partially_complete_core_resumes_on_the_first_attempt(sandbox):
     assert len(list(R.glob(f"{stem}_ismip7_annual_*.h5"))) == 2, out
 
 
+@needs_bash4
 def test_a_core_with_no_state_of_its_own_still_cold_starts(sandbox):
     r"""The first ever run of a core has nothing to resume, and a branch core
     must reach its driver's own restart logic rather than be handed one."""

@@ -61,8 +61,7 @@ def antarctica_geometry_builder(cfg, data_dir=None):
     as ``mesh_antarctica.py`` does, so the physical groups match the old mesh."""
     from .mesh import build_gmsh_geometry, classify_boundaries, extract_ice_outline, load_bedmachine_mask
     if data_dir is None:
-        # mesh.py's own DATA_DIR points at <repo>/data; every other script
-        # keeps BedMachine under ISMIP7_OBS_DATA_ROOT.
+        # BedMachine sits under ISMIP7_OBS_DATA_ROOT, like every other reader.
         from .runconfig import obs_data_root
         data_dir = obs_data_root()
     mask, x, y = load_bedmachine_mask(data_dir)

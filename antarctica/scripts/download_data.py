@@ -22,7 +22,12 @@ import sys
 import urllib.request
 from pathlib import Path
 
-DATA_DIR = Path(__file__).resolve().parent.parent / "data"
+sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
+from icepack2_tools.runconfig import obs_data_root  # noqa: E402
+
+# Where every run reads these files: ISMIP7_OBS_DATA_ROOT when a site names a
+# shared root, this checkout's antarctica/data otherwise.
+DATA_DIR = Path(obs_data_root())
 
 
 def progress_hook(count, block_size, total_size):
@@ -140,7 +145,7 @@ def main():
     print("Antarctic Data Download for ISMIP7")
     print("=" * 60)
 
-    DATA_DIR.mkdir(exist_ok=True)
+    DATA_DIR.mkdir(parents=True, exist_ok=True)
 
     # 1. RACMO (no auth needed, do first)
     print("\n[1/3] RACMO2.4p1 SMB (Zenodo - public, no auth)")

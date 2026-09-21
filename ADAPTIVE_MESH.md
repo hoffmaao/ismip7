@@ -250,8 +250,9 @@ from its saved velocity. A re-solve distance of this size is now known to
 appear under both friction laws and for a MAP inverted under the shipped gate
 (on the Úa 2 km mesh, 0.665 for the re-inverted Budd MAP and 0.685 for the
 regularized Coulomb MAP), so it does not by itself identify the shelf gate as
-the cause. Section 4 of `antarctica/FORWARD_RUN_READINESS.md` holds that open
-question.
+the cause. Those two came from the forward's `ocean_drag` and `u_lim`, which
+the 14 September inversions did not assemble; section 4 of
+`antarctica/FORWARD_RUN_READINESS.md` has the measurements.
 The outflux numbers quoted above (782, and the identity test's 672) were
 measured with the old test in place, as was every Budd forward and Budd MAP to
 date. Regularized Coulomb has a continuous `tau_cap` and never had the problem.

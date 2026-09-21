@@ -175,66 +175,54 @@ shipped gate 0. The superseded file is kept as
 `inversion_icepack2_budd_n3_dg0_logvelnet_ua2000_hegate.h5`. The RC MAP never
 carried the gate.
 
-**⚠️ OPEN, and it blocks the forward matrix: no MAP on the Úa mesh reproduces (issue #25)
-its own velocity.** `check_budd_map.py --forward` re-solves the diagnostic at a
-MAP's controls and compares against the velocity that MAP saved. A MAP the
-forward agrees with returns about 1e-9. Measured 15 September on the Úa 2 km
-mesh at 32 ranks, both laws fail by the same amount:
+**Resolved 21 September: the MAPs reproduce their own velocity once the
+forward assembles the residual they were inverted under.**
+`check_budd_map.py --forward` re-solves the diagnostic at a MAP's controls and
+compares against the velocity the MAP saved; `ISMIP7_CHECK_FRICTION` (default
+`budd`) selects the law. Measured at Rice, serially, under the `ismip7-pr6`
+clone:
 
-| MAP | law | relative L2 | solved mean speed | saved mean speed |
-|---|---|---|---|---|
-| `inversion_icepack2_rc_n3_dg0_logvelnet_ua2000.h5` | regularized Coulomb | 0.685 | 68.4 m/yr | 137.1 m/yr |
-| `inversion_icepack2_budd_n3_dg0_logvelnet_ua2000.h5` | Budd | 0.665 | 56.3 m/yr | 105.3 m/yr |
+| MAP | law | forward stabilizers | relative L2 | solved mean speed | saved mean speed |
+|---|---|---|---|---|---|
+| `inversion_icepack2_budd_n3_dg0_logvelnet_ua2000.h5`, 14 September | Budd | as shipped | 0.665 | 56.3 m/yr | 105.3 m/yr |
+| same (NOTS 1569253) | Budd | `ISMIP7_OCEAN_DRAG=0 ISMIP7_U_LIM=0` | 1.858e-8 | 105.3 m/yr | 105.3 m/yr |
+| `inversion_icepack2_rc_n3_dg0_logvelnet_ua2000.h5`, 14 September (NOTS 1568627) | regularized Coulomb | as shipped | 0.6854 | 68.4 m/yr | 137.1 m/yr |
+| same (NOTS 1569253) | regularized Coulomb | `ISMIP7_OCEAN_DRAG=0 ISMIP7_U_LIM=0` | 9.049e-8 | 137.1 m/yr | 137.1 m/yr |
+| `inversion_icepack2_budd_n3_dg0_logvelnet_ua2000_pr6.h5`, 18 September (NOTS 1563053) | Budd | as shipped | 1.104e-7 | 84.3 m/yr | 84.3 m/yr |
+| fresh 32 km Budd, 10 iterations, current code | Budd | as shipped | 1.04e-7 | 131.76 m/yr | 131.76 m/yr |
 
-The re-inverted Budd MAP scores the same as the retired one (0.665 against
-0.678), so the shelf gate is not what this measures. The failure is common to
-both laws and the forward runs roughly half as fast as the state the inversion
-converged to, which points at something shared between the two setups rather
-than at either friction law. `velocity` in a MAP is the model's own solution,
-saved by `inversion_icepack2.py` beside `velocity_obs`, so this compares model
-to model.
+The RC and `_pr6` rows are the same on both mesh routes, the `.msh` named and
+the mesh taken from the checkpoint. The two 14 September MAPs came from
+`ismip7-next`, whose `inversion_icepack2.py` passes no `residual_stabilizers`
+while its forward applies `ocean_drag` and `u_lim`. The commit that shares the
+stabilizers with the inversion (571d1c9) was authored at 19:04 CDT on 14
+September, after the Budd re-inversion NOTS 1390416 started at 15:29. Inversion
+and forward therefore assembled different residuals, and the 15 September mean
+speeds were real: the drags alone account for them.
 
-The inputs are not the cause. NOTS 1428624 compared every field the forward
-builds against the one the MAP saved, on the RC MAP under regularized Coulomb:
+A forward from a MAP inverted before 571d1c9 starts from the inverted state
+only with `ISMIP7_OCEAN_DRAG=0 ISMIP7_U_LIM=0`. MAPs inverted after it, the
+`_pr6` Budd and the 2 km RC and Budd now inverting under the prior metric,
+reproduce as shipped. The 14 September RC MAP needs re-inverting only to match
+the default forward. The 10-year run of job 1368723 used the default
+stabilizers, so it stays a pipeline exercise.
 
-| field | relative L2 |
-|---|---|
-| thickness, bed, surface | 0.000e+00 |
-| log_friction | 3.68e-17 |
-| log_fluidity | 3.19e-17 |
+A separate defect affected the 32 km measurement alone. When the forward
+builds its mesh from the `.msh`, the checkpoint carries its own copy numbered
+differently, the direct load of the saved field fails, and the fallback copied
+raw `dat` arrays between the two, so it compared permuted fields and reported
+0.570 for the fresh 32 km MAP. The two mean speeds were equal to every printed
+digit, and the nodal speeds differed by up to 7,023 m/yr in the given order and
+by 0.012 m/yr once both were sorted, with identical sums. The comparison now
+aligns nodes by coordinate and refuses two meshes that are not the same vertex
+set (`check_budd_map.node_permutation`, `tests/test_forward_check_ordering.py`).
+The adaptive-mesh measurements above used the checkpoint mesh, so the defect did not touch
+them. On the 32 km MAP `probe_forward_consistency.py` also found `N_ref=None`
+(the inversion's own call, via `ISMIP7_BUDD_NREF=none`) and the inversion's
+composite alpha inert to every digit.
 
-So the forward rebuilds the inversion's geometry exactly and loads its controls
-to machine precision.
-
-The solver tolerance is ruled out too. NOTS 1435598 re-solved the same system
-from the state `setup_model` leaves, keeping the model's own line search and
-asking for four orders below the residual the continuation reached. Newton went
-from 70.2 to 8.6e-5 in two steps and converged, and the velocity moved by a
-relative L2 of 7.4e-9. That movement carries the result: the distance to the
-saved velocity is unchanged to four figures at 0.6854, and the mean speed stayed
-at 68.4 m/yr against the MAP's 137.1. A first attempt swapped the line search
-for `bt` and diverged after nine iterations. It changed the line search along
-with the tolerance, so it is superseded by this one and carries no evidence.
-
-Identical geometry, identical controls, and both states converged roots, with a
-factor of two in mean speed between them. The two codes therefore assemble
-different residuals. Both build theirs through
-`icepack2_tools.dual_friction.build_rc_residual` for regularized Coulomb and for
-Budd: `inversion_icepack2.py` selects it for both laws with `USE_RESIDUAL`
-(line 188) and calls it inside `build_F` (line 664), and `simulation.py` calls
-it inside `_build_F` (line 820), which the model context exposes as `build_F`.
-Only the `budd_legacy` path assembles an action, and neither MAP here uses it.
-The next step is a term-by-term comparison of those two calls and the arguments
-each passes. The forward alone passes `ocean_drag`, `h_ocean`, `u_lim`, `k_lim`,
-`eps_tauc` and `drag_mask`, and it passes its own `N_ref` where the inversion
-passes `None`. Its banner already shows two of these, `ocean_drag=1e-02@h<10m`
-and `u_lim=2e+04`. Both are expected to be inert at these speeds and
-thicknesses, and they are the first to check.
-
-Until this is understood, a forward run does not start from the inverted state,
-so the 10-year result of job 1368723 should be read as a pipeline exercise
-rather than a science result. This question is one of the two that hold the
-full-length ssp585 (NOTS 1390452), and action 1 of section 5 names both.
+The check needs a MAP's final save: the every-20-iterate checkpoints carry the
+controls but not the velocity.
 
 **Forward.** The RC control on the Úa mesh runs and holds (1 yr, resid 0). A
 10-year CESM2-WACCM ssp585 on that mesh (NOTS job 1368723) took 10.5 minutes on
@@ -281,20 +269,18 @@ forcing-version audit, the output writer, and the melt calibration above.
    first run at experiment length, so it is what clears the checker's remaining
    length checks. Record which K calibration it read: a run picks up whichever
    `calibrated_K_per_basin_*.npz` is staged when it starts. The job is held in
-   the queue until two questions are settled. The first is the MAP
-   self-consistency question of section 4, taken up in action 3, since until a
-   MAP reproduces its own velocity the run does not start from the inverted
-   state. The second is the slope convention shared by calibration and forward,
-   taken up in action 5, since it decides which K the run should read. Once
-   both are settled, `scontrol release 1390452` starts it. (issue #27)
+   the queue until the slope convention shared by calibration and forward is
+   settled, taken up in action 5, since it decides which K the run should read.
+   It no longer waits on MAP self-consistency (section 4, 21 September);
+   its MAP must pass action 3 in the configuration it runs. Once the
+   convention is settled,
+   `scontrol release 1390452` starts it. (issue #27)
 2. Settle the `[confirm]` items in the submission README draft with the group. (issue #38)
-3. Find why neither the RC nor the Budd MAP on the Úa mesh reproduces its own
-   velocity (section 4). The tolerance probe is done and negative (NOTS
-   1435598), so start from the residual comparison: the inversion's
-   `build_rc_residual` call in `inversion_icepack2.py` `build_F` against the
-   forward's in `simulation.py` `_build_F`, checking `ocean_drag` and `u_lim`
-   first. Once a MAP passes `check_budd_map.py --forward`, run that check on
-   every MAP the matrix will use. (issue #25)
+3. Run the corrected `check_budd_map.py --forward` on every MAP the matrix
+   will use, on its final save, and record the number beside the MAP. A MAP
+   inverted before 571d1c9 must run with `ISMIP7_OCEAN_DRAG=0 ISMIP7_U_LIM=0`
+   or be re-inverted (section 4). The 2 km RC and Budd MAPs now inverting under
+   the prior metric are next when they finish. (issues #24, #21)
 4. Re-run `audit_forcing_versions.py` immediately before the production matrix
    and cite it in the README. The `ctrl` pull for cores 9 and 10 is done, and
    the mirror is re-synced with Globus by hand every week or two, so the freeze

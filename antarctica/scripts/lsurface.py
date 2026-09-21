@@ -73,7 +73,7 @@ def cmd_submit(args):
     gp = [float(g) for g in (args.gammas_phi or args.gammas).split(",")]
     lc = next((kv.split("=", 1)[1] for kv in args.passthrough if kv.startswith("ISMIP7_LC=")),
               os.environ.get("ISMIP7_LC", ""))
-    out_dir = args.out_dir or os.path.join(_ANT, "results", "lsurface", f"{args.law}_{lc}")
+    out_dir = os.path.abspath(args.out_dir or os.path.join(_ANT, "results", "lsurface", f"{args.law}_{lc}"))
     os.makedirs(out_dir, exist_ok=True)
     for g_t in gt:
         for g_p in gp:
@@ -86,7 +86,8 @@ def cmd_submit(args):
 # ── harvest ──────────────────────────────────────────────────────────────
 
 def load_points(out_dir):
-    r"""One row per finished JSON: weights, and the last evaluation's terms."""
+    r"""One row per JSON with evaluations: weights, phase, and the last
+    evaluation's terms. Only rows with `finished` set belong in a corner."""
     rows = []
     for fn in sorted(glob.glob(os.path.join(out_dir, "gt*_gp*.json"))):
         with open(fn) as f:
@@ -101,6 +102,7 @@ def load_points(out_dir):
             "reg_theta": float(last["reg_theta"]),
             "reg_phi": float(last["reg_phi"]),
             "nit": int(rec.get("nit", last.get("eval", 0))),
+            "phase": rec.get("phase", ""),
             "finished": rec.get("phase") == "finished",
             "message": rec.get("message", ""),
         })
@@ -111,7 +113,10 @@ def lcurve_corner(gammas, misfit, reg):
     r"""Index of maximum curvature of the log-log L-curve, parametrised by
     log(gamma). Interior points only: curvature needs both neighbours.
 
-    Returns -1 when there are fewer than three points."""
+    The curvature is signed for the physical orientation, misfit rising and
+    prior energy falling with gamma, so the convex L corner is the maximum and
+    a concave kink scores negative. Coincident points give no curvature and
+    cannot win. Returns -1 when no interior point has a curvature."""
     g = np.log10(np.asarray(gammas, float))
     x = np.log10(np.asarray(misfit, float))
     y = np.log10(np.asarray(reg, float))
@@ -121,10 +126,12 @@ def lcurve_corner(gammas, misfit, reg):
     g, x, y = g[order], x[order], y[order]
     dx, dy = np.gradient(x, g), np.gradient(y, g)
     ddx, ddy = np.gradient(dx, g), np.gradient(dy, g)
-    kappa = (dx * ddy - dy * ddx) / np.power(dx * dx + dy * dy, 1.5)
-    kappa = np.abs(kappa)
-    kappa[[0, -1]] = -np.inf
-    return int(order[np.argmax(kappa)])
+    with np.errstate(invalid="ignore", divide="ignore"):
+        kappa = (dx * ddy - dy * ddx) / np.power(dx * dx + dy * dy, 1.5)
+    kappa[[0, -1]] = np.nan
+    if np.isnan(kappa).all():
+        return -1
+    return int(order[np.nanargmax(kappa)])
 
 
 def slices(rows):
@@ -143,28 +150,33 @@ def slices(rows):
 
 
 def cmd_harvest(args):
-    rows = load_points(args.out_dir)
+    out_dir = os.path.abspath(args.out_dir)
+    rows = load_points(out_dir)
     if not rows:
-        sys.exit(f"no finished points under {args.out_dir}")
-    print(f"{'gamma_theta':>12} {'gamma_phi':>10} {'misfit':>12} {'reg_theta':>11} {'reg_phi':>11} {'nit':>4}  status")
-    for r in sorted(rows, key=lambda r: (r["gamma_theta"], r["gamma_phi"])):
+        sys.exit(f"no inversion records under {out_dir}")
+    print(f"{'gamma_theta':>12} {'gamma_phi':>10} {'misfit':>12} {'reg_theta':>11} {'reg_phi':>11} {'nit':>4}  phase")
+    for r in rows:
         print(f"{r['gamma_theta']:12.3g} {r['gamma_phi']:10.3g} {r['misfit']:12.5e} "
-              f"{r['reg_theta']:11.4e} {r['reg_phi']:11.4e} {r['nit']:4d}  "
-              f"{'finished' if r['finished'] else 'running'}")
+              f"{r['reg_theta']:11.4e} {r['reg_phi']:11.4e} {r['nit']:4d}  {r['phase'] or '?'}")
+    done = [r for r in rows if r["finished"]]
+    if len(done) < len(rows):
+        print(f"\nskipped {len(rows) - len(done)} unfinished point(s) from the corners and the figure")
+    if not done:
+        sys.exit(f"no finished points under {out_dir}")
     print("\ncorners (max curvature of each log-log slice):")
-    for axis, fixed, gam, mis, reg, k in slices(rows):
+    for axis, fixed, gam, mis, reg, k in slices(done):
         other = "gamma_phi" if axis == "theta" else "gamma_theta"
         where = f"gamma_{axis}={gam[k]:g}" if k >= 0 else "n/a (<3 points)"
         print(f"  {other}={fixed:<8g} -> {where}")
-    csv = os.path.join(args.out_dir, "lsurface.csv")
+    csv = os.path.join(out_dir, "lsurface.csv")
     with open(csv, "w") as f:
-        f.write("gamma_theta,gamma_phi,misfit,reg_theta,reg_phi,nit,finished\n")
+        f.write("gamma_theta,gamma_phi,misfit,reg_theta,reg_phi,nit,phase\n")
         for r in rows:
             f.write(f"{r['gamma_theta']:g},{r['gamma_phi']:g},{r['misfit']:.8e},"
-                    f"{r['reg_theta']:.8e},{r['reg_phi']:.8e},{r['nit']},{int(r['finished'])}\n")
+                    f"{r['reg_theta']:.8e},{r['reg_phi']:.8e},{r['nit']},{r['phase']}\n")
     print(f"\nwrote {csv}")
     if args.plot:
-        plot(rows, args.plot)
+        plot(done, args.plot)
         print(f"wrote {args.plot}")
 
 

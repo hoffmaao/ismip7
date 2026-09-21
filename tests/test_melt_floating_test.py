@@ -6,7 +6,6 @@ depth too low and read every floating cell thicker than 78 percent of its
 flotation thickness as grounded, withholding its melt (icepack/ismip7#66).
 """
 import numpy as np
-import pytest
 
 from icepack2_tools.forcing import height_above_flotation, is_floating
 

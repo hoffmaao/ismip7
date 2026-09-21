@@ -19,8 +19,9 @@ Geometry: the same ISMIP7_GEOMETRY_SPACE the forward reads (default dg0).
   interpolated onto CG1 nodes with its raster surface and `mask == 3` as
   the floating mask, grad(draft) projected onto CG1 and capped at 5e-3,
   lumped-mass areas. With the same cap the DG0 fit reproduces these within
-  about 10 percent per basin, 22 percent in basin 7 (GEOMETRY_DISCRETIZATION.md, issue #30); the slope
-  convention is what separates them (issue #26).
+  about 10 percent per basin, 22 percent in basin 7
+  (GEOMETRY_DISCRETIZATION.md, issue #30); the slope convention is what
+  separates them (issue #26).
 
 The K file records the geometry it was fitted on, and `load_K_per_basin`
 warns once when a run melts on the other.

@@ -194,8 +194,8 @@ OMP_NUM_THREADS=1 ISMIP7_FRICTION=budd ISMIP7_LC=32000 ISMIP7_LC_COARSE=320000 \
 as the forward. Under `dg0` it evaluates the forward's own cell by cell melt
 path: bed and thickness sampled onto the cells, the surface from flotation, the
 cell slope of `forcing.compute_sin_alpha` uncapped, forcing at each centroid and
-its own draft, the callback's `haf <= 0` floating test on cells holding ice
-(`h > 0`) and cell areas. A K fitted there is the K the forward applies, by
+its own draft, the callbacks' seawater floating test `forcing.is_floating` on
+cells holding ice (`h > 0`) and cell areas. A K fitted there is the K the forward applies, by
 construction.
 
 The earlier K files were fitted under `cg1`: BedMachine on CG1 nodes with its
@@ -222,15 +222,15 @@ vertex-sampled, the 865.0 Gt/yr table, 21 September 2026):
    slope convention does.** What the forward's uncapped DG0 path applies with
    each K file, seawater flotation, ice-present cells:
 
-| K fitted on | slope cap | K* | K total-match | forward applies today (uncapped) | basins in Burgard K5..K95 |
-|---|---|---|---|---|---|
-| cg1 nodes (the production file) | 5e-3 | 4.26e-5 | 5.34e-5 | 3555 Gt/yr | 4 of 16 |
-| dg0 cells | 5e-3 | 4.37e-5 | 5.68e-5 | 3679 Gt/yr, 865 if the forward caps too | 4 of 16 |
-| dg0 cells | none | 6.67e-6 | 1.45e-5 | 865 Gt/yr, by construction | 0 of 16 |
+   | K fitted on | slope cap | K* | K total-match | forward applies today (uncapped) | basins in Burgard K5..K95 |
+   |---|---|---|---|---|---|
+   | cg1 nodes (the production file) | 5e-3 | 4.26e-5 | 5.34e-5 | 3555 Gt/yr | 4 of 16 |
+   | dg0 cells | 5e-3 | 4.37e-5 | 5.68e-5 | 3679 Gt/yr, 865 if the forward caps too | 4 of 16 |
+   | dg0 cells | none | 6.67e-6 | 1.45e-5 | 865 Gt/yr, by construction | 0 of 16 |
 
    The capped DG0 fit reproduces the nodal per-basin K within about 10 percent
-   per basin, 22 percent in basin 7 (basin 9, Amundsen, 1.47e-4 on both), over a floating area of 1 577 840 km2
-   against 1 509 122 on nodes. The uncapped cell slope has a median of 1.5e-2
+   per basin, 22 percent in basin 7 (basin 9, Amundsen, 1.47e-4 on both), over
+   a floating area of 1 577 840 km2 against 1 509 122 on nodes. The uncapped cell slope has a median of 1.5e-2
    over floating cells and integrates 3.7 times the capped nodal melt at K = 1,
    so a K fitted to it absorbs mesh slope noise and lands every basin below
    Burgard's range, while the forward as it runs today would apply 4.1 times

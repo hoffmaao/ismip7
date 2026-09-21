@@ -307,6 +307,10 @@ forcing-version audit, the output writer, and the melt calibration above.
    forward half 1 631 466 km2 over 85 820 cells, and they differ in mask and
    quadrature as well, so their totals compare in magnitude.
 
+   The rows below predate the seawater flotation test (issue #66) and the
+   `h > 0` test in the forward half, and are to be re-measured; the current
+   numbers are in `GEOMETRY_DISCRETIZATION.md`.
+
    | slope | max, m/yr | p99, m/yr | area mean, m/yr | integrated, Gt/yr | past the bound |
    |---|---|---|---|---|---|
    | calibration half, capped, what K was fitted to | 71.1 | 22.2 | 0.77 | 1067 | 0 |
@@ -360,13 +364,13 @@ forcing-version audit, the output writer, and the melt calibration above.
    bookkeeping, since `book_advance` books the melt REQUESTED of a step while a
    nearly ice-free floating cell can only lose what it holds.
 
-   Closing the gap between calibration and forward is the next step. The clean
-   route is to recalibrate K through the forward's own melt path, cell by cell
-   with its own floating mask, under whichever slope convention is chosen.
-   Choosing the convention is a science decision, since the cap is tied to the
+   `calibrate_melt.py` now fits K through the forward's own melt path under
+   `ISMIP7_GEOMETRY_SPACE=dg0`, uncapped by default or capped with
+   `ISMIP7_SIN_ALPHA_CAP` (issue #30, `GEOMETRY_DISCRETIZATION.md`). Choosing
+   the slope convention is a science decision, since the cap is tied to the
    unsettled upstream local-slope question. Until it is made, `load_K_per_basin`
-   warns once per run when the K file it reads records the cap it was fitted
-   against. (issue #26)
+   warns once per run when the K file it reads records a cap the forward does
+   not apply. (issue #26)
 6. Optional: read the provided `ctrl` trees in place of the `ssp126`
    reference-climate pool. Closed as icepack/ismip7#43, not planned for
    September 2026.

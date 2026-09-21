@@ -379,7 +379,7 @@ independent, so a handful of nodes finishes it inside a week.
 - Rice forwards are fixed at 12 ranks because that is what was measured there.
   Quartz forwards take 64, the fastest production-mesh lane of
   `antarctica/TIMING_MATRIX_QUARTZ_SCPC_GAMG.md`. Going higher at Rice is
-  meaningful once the partition probe comes back clean.
+  meaningful once the partition probe comes back clean. (#45)
 - An inversion factors the complete mixed Jacobian with MUMPS, which sets its
   memory; `tlm_adjoint` differentiates through that solve, so no setting
   changes it. Cluster forwards took the field split this item asked for:

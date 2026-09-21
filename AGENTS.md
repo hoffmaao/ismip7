@@ -41,6 +41,7 @@ the relevant subsystem:
 | `antarctica/scripts/batch_runners/readme.md` | running on a cluster: site files, the runners, the build recipe, measured costs |
 | `antarctica/FORWARD_RUN_READINESS.md` | the protocol sweep and what still blocks a submission |
 | `antarctica/reports/MATRIX_STATUS.md` | which results are currently valid |
+| `NOW.md` | what blocks the submission right now, generated from the open issues |
 
 ## 2. What is in git, and what is not
 
@@ -232,6 +233,18 @@ checkouts of the same clone. To keep handoffs clean:
 - **Prefer a tracked doc over a private note.** If a finding matters beyond
   the current session, it belongs in this file or a topic doc, not in a
   tool-specific memory that other platforms cannot see.
+- **A blocker gets an issue before it gets a paragraph.** Status and owner
+  live in an issue on `icepack/ismip7`; the reasoning and the measured numbers
+  stay in the topic doc, which carries the issue number as a bare `(#NN)`. The
+  board at https://github.com/users/dlilien/projects/1 holds status and the
+  claim, and `NOW.md` is the generated index for a login node with no `gh`.
+  `tests/test_now_index.py` fails the suite when a document states something
+  open with no issue on it, so filing is the cheapest way past the gate.
+- **Claim the card before you start a run or an inversion.** Move it to
+  Claimed with your institution in Owner. A card in Claimed for more than 24
+  hours with no comment reads as unclaimed. PR #8 reported two 2 km
+  inversions running at Rice, and nothing in this repository said so, which
+  is the gap the card closes.
 - **Changes are gated before they reach the push target.** Do not push
   directly. Expect an automated review pass, and treat its findings as
   substantive: it has repeatedly caught real defects, including follow-on bugs

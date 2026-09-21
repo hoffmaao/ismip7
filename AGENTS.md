@@ -241,11 +241,12 @@ checkouts of the same clone. To keep handoffs clean:
   claim, and `NOW.md` is the generated index for a login node with no `gh`.
   `tests/test_now_index.py` fails the suite when a document states something
   open with no issue on it, so filing is the cheapest way past the gate.
-- **Claim the card before you start a run or an inversion.** Move it to
-  Claimed with your institution in Owner. A card in Claimed for more than 24
-  hours with no comment reads as unclaimed. PR #8 reported two 2 km
-  inversions running at Rice, and nothing in this repository said so, which
-  is the gap the card closes.
+- **Claim the card before you start a run or an inversion.** Move it to Claimed
+  with your institution in Owner, and name every site the work has to run at in
+  Sites, which is a multi-select: a check each cluster runs for itself names all
+  of them. A card in Claimed for more than 24 hours with no comment reads as
+  unclaimed. PR #8 reported two 2 km inversions running at Rice, and nothing in
+  this repository said so, which is the gap the card closes.
 - **Changes are gated before they reach the push target.** Do not push
   directly. Expect an automated review pass, and treat its findings as
   substantive: it has repeatedly caught real defects, including follow-on bugs

@@ -25,6 +25,7 @@ REPO = "icepack/ismip7"
 BOARD = "https://github.com/users/dlilien/projects/1"
 BOARD_OWNER = "dlilien"
 BOARD_NUMBER = "1"
+BOARD_ID = "PVT_kwHOAHDh9s4BkIgk"
 
 SEVERITY = ("blocks-submission", "owed", "after-deadline")
 UNBLOCKER = ("needs-decision", "needs-run", "needs-check", "needs-upstream")
@@ -42,28 +43,62 @@ def _run(cmd):
     return r.stdout
 
 
+# `gh project item-list` flattens a multi-select to nothing, so the board is
+# read through the API, which returns every option of the Sites field.
+BOARD_QUERY = """
+query($p:ID!, $after:String){
+  node(id:$p){ ... on ProjectV2 { items(first:100, after:$after){
+    pageInfo{ hasNextPage endCursor }
+    nodes{
+      content{ ... on Issue { number } }
+      fieldValues(first:20){ nodes{
+        __typename
+        ... on ProjectV2ItemFieldSingleSelectValue {
+          name field{ ... on ProjectV2FieldCommon { name } } }
+        ... on ProjectV2ItemFieldMultiSelectValue {
+          options{ name } field{ ... on ProjectV2FieldCommon { name } } }
+      } }
+    } } } }
+}
+"""
+
+
 def fetch():
-    """Issues from the repository, board fields from the project."""
+    """Issues from the repository, status and the claim from the board."""
     issues = json.loads(_run([
         "gh", "issue", "list", "--repo", REPO, "--state", "open", "--limit", "200",
         "--json", "number,title,labels,assignees,milestone,updatedAt"]))
-    board = json.loads(_run([
-        "gh", "project", "item-list", BOARD_NUMBER, "--owner", BOARD_OWNER,
-        "--limit", "200", "--format", "json"]))
-    return {"issues": issues, "board": board}
+    nodes, after = [], None
+    while True:
+        args = ["gh", "api", "graphql", "-f", f"query={BOARD_QUERY}",
+                "-F", f"p={BOARD_ID}"]
+        if after:
+            args += ["-F", f"after={after}"]
+        page = json.loads(_run(args))["data"]["node"]["items"]
+        nodes += page["nodes"]
+        if not page["pageInfo"]["hasNextPage"]:
+            break
+        after = page["pageInfo"]["endCursor"]
+    return {"issues": issues, "board": nodes}
 
 
 def index(dump):
     cards = {}
-    for it in dump["board"].get("items", []):
+    for it in dump["board"]:
         content = it.get("content") or {}
         if content.get("number") is None:
             continue
+        got = {}
+        for fv in it["fieldValues"]["nodes"]:
+            field = (fv.get("field") or {}).get("name")
+            if not field:
+                continue
+            got[field] = ([o["name"] for o in fv["options"]]
+                          if fv.get("options") is not None else fv.get("name"))
         cards[content["number"]] = {
-            "status": it.get("status") or "",
-            "owner": it.get("owner") or "",
-            "site": it.get("site") or "",
-            "updated": it.get("updatedAt") or "",
+            "status": got.get("Status") or "",
+            "owner": got.get("Owner") or "",
+            "sites": got.get("Sites") or [],
         }
     rows = []
     for iss in dump["issues"]:
@@ -80,7 +115,7 @@ def index(dump):
             "fresh": "fresh-24h" in names,
             "status": card.get("status", ""),
             "owner": card.get("owner", ""),
-            "site": card.get("site", ""),
+            "sites": card.get("sites", []),
             "updated": iss["updatedAt"],
         })
     rows.sort(key=lambda r: (UNBLOCKER_ORDER.get(r["unblocker"], 9), r["n"]))
@@ -88,14 +123,15 @@ def index(dump):
 
 
 def table(rows):
-    out = ["| # | item | unblocked by | owner | site | state |",
+    out = ["| # | item | unblocked by | owner | sites | state |",
            "|---|---|---|---|---|---|"]
     for r in rows:
         state = r["unverified"] or ("fresh, unverified by design" if r["fresh"]
                                     else "verified open")
         out.append(f'| [{r["n"]}](https://github.com/{REPO}/issues/{r["n"]}) '
                    f'| {r["title"]} | {r["unblocker"] or "n/a"} '
-                   f'| {r["owner"] or "unassigned"} | {r["site"] or "n/a"} | {state} |')
+                   f'| {r["owner"] or "unassigned"} '
+                   f'| {", ".join(r["sites"]) or "n/a"} | {state} |')
     return out
 
 
@@ -133,11 +169,11 @@ def render(rows, stamp):
     L += ["", "## Claimed now", "",
           "Work in flight. Do not duplicate it.", ""]
     if claimed:
-        L += ["| # | item | owner | site | last touched |", "|---|---|---|---|---|"]
+        L += ["| # | item | owner | sites | last touched |", "|---|---|---|---|---|"]
         for r in claimed:
             L.append(f'| [{r["n"]}](https://github.com/{REPO}/issues/{r["n"]}) '
                      f'| {r["title"]} | {r["owner"] or "unassigned"} '
-                     f'| {r["site"] or "n/a"} | {r["updated"][:10]} |')
+                     f'| {", ".join(r["sites"]) or "n/a"} | {r["updated"][:10]} |')
     else:
         L.append("Nothing is claimed.")
     L += ["", "## Unverified", "",

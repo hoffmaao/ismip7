@@ -48,7 +48,7 @@ from download_mirror import (                                   # noqa: E402
 )
 from icepack2_tools.forcing import (                            # noqa: E402
     ATMOSPHERE_PRODUCTS, ATMOSPHERE_VERSION, OCEAN_VERSION,
-    _resolve_version, _version_subdirs,
+    _resolve_version, _version_subdirs, version_key,
 )
 
 PRODUCT = DEFAULT_PRODUCT + "/"
@@ -110,6 +110,15 @@ def local_product(root, esm, scenario, product):
 
 
 def local_versions(root, esm, scenario, product, variable):
+    r"""The versions on disk for one row, ascending.
+
+    A row's versions normally sit directly under it, as ``<variable>/<version>/``
+    or in the filenames of a flat directory. ``extra`` and ``extras`` are laid
+    out deeper than a product/variable row reaches
+    (``<product>/extra/climatology/<variable>/<version>/``), and the mirror side
+    of the row already aggregates that whole subtree, so where nothing is found
+    at the top the search goes down to meet it. Without this the rows read
+    MISSING with every file present."""
     d = os.path.join(root, esm, scenario, product, variable) if variable else os.path.join(root, esm, scenario, product)
     if not os.path.isdir(d):
         return []
@@ -121,7 +130,14 @@ def local_versions(root, esm, scenario, product, variable):
         m = VERSION.search(f)
         if m:
             found.add(m.group(1))
-    return sorted(found)
+    if not found:
+        for _, dirnames, filenames in os.walk(d):
+            found.update(n for n in dirnames if version_key(n) is not None)
+            for f in filenames:
+                m = VERSION.search(f)
+                if m:
+                    found.add(m.group(1))
+    return [n for _, n in sorted((version_key(n) or (), n) for n in found)]
 
 
 def resolved_version(root, esm, scenario, product, variable):

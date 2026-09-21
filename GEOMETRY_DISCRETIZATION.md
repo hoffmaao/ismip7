@@ -188,24 +188,46 @@ OMP_NUM_THREADS=1 ISMIP7_FRICTION=budd ISMIP7_LC=32000 ISMIP7_LC_COARSE=320000 \
   mpiexec -n 8 python antarctica/scripts/inversion_icepack2.py
 ```
 
-## Open: the per-basin melt K was calibrated under CG1 (issue #30)
+## The per-basin melt K follows the geometry space (issue #30)
 
-`antarctica/scripts/calibrate_melt.py` is CG1 throughout, building its own
-`FunctionSpace(mesh, "CG", 1)` and vertex-sampling BedMachine, `sin_alpha` and
-the floating mask, and `ISMIP7_GEOMETRY_SPACE` does not reach it. The DG0
-forward evaluates that same per-basin `K` with a cell-wise draft, a cell-wise
-`sin_alpha` (CG1 lift, then cell-sampled) and a cell-wise `haf <= 0` floating
-mask, so the melt-receiving area shifts by roughly a one-cell band at the
-grounding line and at the ice front. At 32 km, where shelves are only a few
-cells wide, that can move the integrated shelf melt by a non-trivial fraction
-of the observed total the calibration targets.
+`antarctica/scripts/calibrate_melt.py` melts on the same `ISMIP7_GEOMETRY_SPACE`
+as the forward. Under `dg0` it evaluates the forward's own cell by cell melt
+path: bed and thickness sampled onto the cells, the surface from flotation, the
+cell slope of `forcing.compute_sin_alpha` uncapped, forcing at each centroid and
+its own draft, the callback's `haf <= 0` floating test and cell areas. A K
+fitted there is the K the forward applies, by construction.
 
-Nothing compensates for that by design. The recalibration against the July
-2026 observation table (`antarctica/FORWARD_RUN_READINESS.md`, section 4) ran
-through the same CG1 script, so the integrated DG0 melt total still needs
-checking against that target. The `sin(alpha)` treatment in the quadratic
-parameterisation is still unsettled upstream. Treat DG0 melt totals as
-uncalibrated until then.
+The earlier K files were fitted under `cg1`: BedMachine on CG1 nodes with its
+raster mask, the nodal slope capped at 5e-3, lumped-mass areas. Measured on the
+2 km adaptive mesh at the reference state (`check_melt_bound.py`, September
+2026), the forward's DG0 path applies 1380 Gt/yr with the 2500 m file fitted to
+865 and 1732 with the 2000 m file fitted to 1067.4, a ratio of 1.6 that is
+stable across the two files; capping the cell slope at the calibration's 5e-3
+goes the other way, to 646 Gt/yr with the 2000 m file. Neither convention alone
+reconciles a nodal K with the cell path, which also differ in floating area,
+mask and quadrature. The K file records `geometry_space`, and `load_K_per_basin`
+warns once when a run melts on a geometry other than the one its K was fitted
+on. The slope convention itself stays with issue #26; until it is settled the
+DG0 calibration fits the forward as it runs, and `ISMIP7_SIN_ALPHA_CAP` fits
+the capped convention for comparison.
+
+Measured on the 2500 m mesh (`inversion_icepack2_budd_2500.h5`, BedMachine
+v4.1 vertex-sampled, the 865.0 Gt/yr table, 21 September 2026), what the
+forward's uncapped DG0 path applies with each K file:
+
+| K fitted on | slope cap | K* | K total-match | forward applies | basins in Burgard K5..K95 |
+|---|---|---|---|---|---|
+| cg1 nodes (the production file) | 5e-3 | 4.26e-5 | 5.34e-5 | 1775 Gt/yr | 4 of 16 |
+| dg0 cells | none | 1.60e-5 | 2.92e-5 | 865 Gt/yr, by construction | 2 of 16 |
+| dg0 cells | 5e-3 | 7.46e-5 | 8.48e-5 | 2808 Gt/yr (needs the cap in the forward too) | 7 of 16 |
+
+The uncapped cell slope has a median of 1.5e-2 and a 95th percentile of 0.11
+over floating cells, against 2.1e-2 and 0.16 for the nodal slope, so the
+uncapped fit reconciles the totals by absorbing mesh slope noise into K: the
+per-basin K then sit below Burgard's range, and the ratio to the nodal total
+is 1.83 here against 1.6 on the 2 km mesh, so such a K is mesh-dependent. The
+capped DG0 fit lands closest to Burgard's range but is only consistent with a
+forward that caps its slope the same way, which is the #26 decision.
 
 ## Incompatibilities
 

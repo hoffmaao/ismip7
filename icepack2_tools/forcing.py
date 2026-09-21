@@ -1151,6 +1151,29 @@ def quadratic_mixed_slope(tf, salinity, sin_alpha, K=_K_DEFAULT):
 _SLOPE_CAP_WARNED = False
 
 
+_GEOMETRY_SPACE_WARNED = False
+
+
+def _warn_geometry_space(npz_path, fitted_on, running_on):
+    r"""Say once that the K on disk was fitted on a geometry other than the
+    one this run melts with."""
+    global _GEOMETRY_SPACE_WARNED
+    if _GEOMETRY_SPACE_WARNED:
+        return
+    _GEOMETRY_SPACE_WARNED = True
+    if _comm_rank() == 0:
+        print(
+            f"  WARNING: {os.path.basename(npz_path)} was calibrated on "
+            f"{fitted_on} geometry and this run melts on {running_on}, so the "
+            f"melt it applies is not the melt the K was fitted to (the DG0 "
+            f"cell path integrates about 1.6 times the nodal total at the "
+            f"reference state). Refit with ISMIP7_GEOMETRY_SPACE={running_on} "
+            f"calibrate_melt.py, or name a matching file with "
+            f"ISMIP7_K_PER_BASIN_NPZ.",
+            flush=True,
+        )
+
+
 def _warn_slope_cap(npz_path, cap):
     r"""Say once that the K on disk was fitted against a capped draft slope
     while the forward applies an uncapped one."""
@@ -1212,6 +1235,16 @@ def load_K_per_basin(npz_path, mesh_x, mesh_y, fill=0.0):
         cap = float(data["sin_alpha_cap"])
         if np.isfinite(cap) and cap > 0.0:
             _warn_slope_cap(npz_path, cap)
+    # A K is likewise only valid for the geometry it was fitted on. The
+    # calibration records the space it melted (cell by cell under dg0, on
+    # nodes under cg1); a file without the entry predates the tag and was
+    # fitted on nodes. Measured on the 2 km adaptive mesh, the forward's DG0
+    # melt path applies 1.6 times the melt a nodal K was fitted to
+    # (check_melt_bound.py), so a mismatch is reported once per run.
+    from .runconfig import geometry_space
+    fitted_on = str(data["geometry_space"]) if "geometry_space" in data else "cg1"
+    if fitted_on != geometry_space():
+        _warn_geometry_space(npz_path, fitted_on, geometry_space())
 
     root = os.environ.get(
         "ISMIP7_DATA_ROOT",

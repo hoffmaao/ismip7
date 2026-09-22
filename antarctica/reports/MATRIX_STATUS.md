@@ -147,7 +147,9 @@ values fed in.
    (`inversion_icepack2_budd_2500.h5`) is the untagged n=4, CG1-geometry one;
    this matrix is the 32 km demonstration. An n=3 production line needs its own
    `inversion_icepack2_budd_n3_dg0_2500.h5` (see `../N3_FRAMEWORK.md` for the
-   naming rule), inverted with a 2500 m boundary-id sidecar. (issue #31)
+   naming rule), inverted with a 2500 m boundary-id sidecar; the 2 km RC and
+   Budd inversions are the open line, and icepack/ismip7#31 was closed as
+   their duplicate on 22 September. (issue #24)
 
 For the pipeline and its knobs see `antarctica/README.md`; for the rheology see
 `COMPOSITE_RHEOLOGY.md` and `antarctica/N3_FRAMEWORK.md`. (The deeper

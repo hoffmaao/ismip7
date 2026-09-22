@@ -206,7 +206,7 @@ Hahn, Mikula and Frolkovic 2025; Smith et al. 2020.
 | Advection scheme | upwind finite volume, DG0, implicit; first order | no |
 | Ice flow mechanics | shallow-shelf approximation, dual finite-element formulation (CG1 velocity, DG0 membrane and basal stress) | no |
 | Ice rheology | n = 3 (composite with a linear floor for thin ice) | no |
-| Basal sliding | regularised Coulomb, m = 3, c0 = 0.5 (Budd available) | **[confirm #21]** |
+| Basal sliding | regularised Coulomb, m = 3, c0 = 0.5 (Budd available) | **[confirm #24]** |
 | Basal hydrology | none | no |
 | Ice-shelf fracture | **[confirm #10]** none, or the ISMIP7 collapse mask on floating cells, everywhere (`mask`) or from the front (`mask_front`); see item 9 | **[confirm]** |
 | Advance and retreat | grounding line free; calving front pinned at 2015 (level-set von Mises optional) | **[confirm #36]** |

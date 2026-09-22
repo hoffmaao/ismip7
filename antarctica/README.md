@@ -872,7 +872,9 @@ section's default is regularized Coulomb, and the forward aborts on a MAP whose
 recorded law disagrees with the run. Without `ISMIP7_INVERSION` the runner falls
 back to `ISMIP7_MAP_DEFAULT`, which names an RC MAP at the run's own resolution
 that has never been inverted, and warns at submission that the file is absent.
-Re-inverting on the production mesh, and closing the Budd/RC gap, are both open. (issue #21)
+Re-inverting on the production mesh, and closing the Budd/RC gap, are both
+open under the 2 km inversions; icepack/ismip7#21 was closed as their
+duplicate on 22 September. (issue #24)
 
 The stages and contracts are:
 

@@ -284,7 +284,7 @@ forcing-version audit, the output writer, and the melt calibration above.
    will use, on its final save, and record the number beside the MAP. A MAP
    inverted before 571d1c9 must run with `ISMIP7_OCEAN_DRAG=0 ISMIP7_U_LIM=0`
    or be re-inverted (section 4). The 2 km RC and Budd MAPs now inverting under
-   the prior metric are next when they finish. (issues #24, #21)
+   the prior metric are next when they finish. (issue #24)
 4. Re-run `audit_forcing_versions.py` immediately before the production matrix
    and cite it in the README. The `ctrl` pull for cores 9 and 10 is done, and
    the mirror is re-synced with Globus by hand every week or two, so the freeze
@@ -557,7 +557,10 @@ Output and submission:
     `download_mirror.py --dry-run` does it read-only. The audit's own docstring
     now says so, and issues #41 and #16 carry the same note where their exit
     criteria lean on it. Which prefixes the submission needs, and which a
-    routine re-sync covers, is open. (issue #49)
+    routine re-sync covers, was icepack/ismip7#49, closed on 22 September as
+    not required for the 30 September submission and to be reopened for an
+    October ESM submission; the five ESMs and the melt-calibration product
+    stay unfetched.
 
     Closed as icepack/ismip7#14.
 13. **Bring the Quartz forcing tree up to the mirror.** Done on 21 September.
@@ -607,8 +610,8 @@ through the GitHub API: #17, #22, #30, #37, #40, #48 and the new #49.
 `ismip7-antarctic-ocean-forcing` has no item updated since the 18th. Nothing
 was posted upstream, isschecker was read at its tag and never run, and no
 mirror listing was taken. Thread and issue numbers now collide: `#49` below is
-the forum thread about `thetao`, and `(issue #49)` in section 6 is the board
-item about mirror prefixes.
+the forum thread about `thetao`, and icepack/ismip7#49 in section 6 is the
+board item about mirror prefixes.
 
 ### What moved on the board since the 19th
 

@@ -335,10 +335,13 @@ class SlurmStageRunner:
             result = subprocess.run(
                 command, check=False, capture_output=True, text=True, env=env
             )
-        # The composed command goes to standard error; a dry run of the
-        # projection form prints it on standard output instead.
-        composed = result.stderr.strip() or (
-            result.stdout.strip() if self.dry_run else ""
+        # The `script` form prints the composed command on standard error and
+        # the job id alone on standard output. The projection form prints the
+        # composed command on standard output, followed by the job id when it
+        # submitted (Quartz 10569654's stamp carried the whole line as its id).
+        out_lines = [line for line in result.stdout.splitlines() if line.strip()]
+        composed = result.stderr.strip() or "\n".join(
+            out_lines[:-1] if (out_lines and not self.dry_run) else out_lines
         )
         if result.returncode == _SUBMIT_NOT_RUNNABLE:
             # One node of this site cannot hold the request. The lanes stay
@@ -370,7 +373,7 @@ class SlurmStageRunner:
             )
             self.submit_failures += 1
             return
-        job_id = result.stdout.strip().split(";", 1)[0]
+        job_id = (out_lines[-1].strip() if out_lines else "").split(";", 1)[0]
         atomic_write_status(
             status_path, "submitted", job_id=job_id, timestamp=_timestamp()
         )

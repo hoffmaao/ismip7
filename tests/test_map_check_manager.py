@@ -174,7 +174,10 @@ def test_a_control_goes_through_submit_sh_projection(sandbox, monkeypatch):
     assert any(line.startswith("ISMIP7_TRIPWIRE_U_MAX=") for line in env)
     assert "ARG: --export=ALL" in seen
     assert not any(line.startswith("ARG: --queue") for line in seen)
-    assert mmc.read_status(m.status_path("control_native"))["state"] == "submitted"
+    status = mmc.read_status(m.status_path("control_native"))
+    # The projection form prints its composed line on standard output ahead
+    # of the id; the stamp carries the id alone.
+    assert status["state"] == "submitted" and status["job_id"] == "4343"
     with pytest.raises(ValueError):
         m._submit("x", 1, "1G", {}, None, m.status_path("control_native"),
                   dependency="afterok:1", kind="projection")

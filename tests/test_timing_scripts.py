@@ -29,7 +29,7 @@ with open(os.environ["FAKE_ENV_DUMP"], "a") as fh:
     fh.write("ARGV " + " ".join(sys.argv[1:]) + "\n")
     for key in sorted(os.environ):
         if key.startswith(("ISMIP7_", "PYOP2_", "FIREDRAKE_", "OMP_", "OPENBLAS_",
-                           "XDG_", "MPLCONFIGDIR", "FAKE_VENV")):
+                           "XDG_", "MPLCONFIGDIR", "FAKE_VENV", "LOOPY_")):
             fh.write(f"{key}={os.environ[key]}\n")
 status = os.environ.get("FAKE_WRITE_STATUS")
 if status:
@@ -125,7 +125,8 @@ def test_loopys_dict_stays_per_lane_while_the_kernel_cache_is_shared(sandbox):
     submitted a second earlier. `make timing-scout` submits one lane per mesh at
     once, so a shared loopy dict puts the timing lanes in exactly that state:
     the warm tree the lanes were measured against comes back for PyOP2 and TSFC
-    alone, and loopy keeps the per-job directory ismip7_activate gave it."""
+    alone, and loopy keeps the per-job directory ismip7_activate gave it, with
+    its dict switched off (Quartz 10569250 and 10569252 hung on its lock)."""
     per_job = sandbox / ".pyop2_cache" / "xdg" / "777"
     jit = sandbox / "jit"
     for env in ({}, {"ISMIP7_TIMING_JIT_CACHE": str(jit)}):
@@ -133,6 +134,7 @@ def test_loopys_dict_stays_per_lane_while_the_kernel_cache_is_shared(sandbox):
         proc, seen = run_script(sandbox, "timing_transient.script", **env)
         assert proc.returncode == 0, proc.stderr
         assert f"XDG_CACHE_HOME={per_job}" in seen
+        assert "LOOPY_NO_CACHE=1" in seen
         assert per_job.is_dir()
     assert not (jit / "xdg").exists()
     assert not (sandbox / ".pyop2_cache" / "777").exists()

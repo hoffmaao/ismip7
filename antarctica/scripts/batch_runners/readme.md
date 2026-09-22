@@ -146,10 +146,12 @@ cache that persists between jobs (the one the site's modules or venv already
 name, as IU's firedrake modulefile does; else Firedrake's default location; or
 `ISMIP7_TIMING_JIT_CACHE`) rather than the private per-job one
 `ismip7_activate` gives the runners. Only the kernel cache goes back that way:
-loopy's persistent dict stays per job, because two jobs compiling the same
-kernel seconds apart race on a shared one, which is what `make timing-scout`
-launches (`site_core.sh` has the incident). Each record's `host` block says
-which site and node measured it and whether that cache started empty.
+loopy's persistent dict is switched off in every job (`LOOPY_NO_CACHE=1`),
+because two jobs compiling the same kernel seconds apart race on a shared one,
+which is what `make timing-scout` launches, and because the ranks of one job
+writing a per-job one on a networked filesystem stalled forever on its sqlite
+lock (`site_core.sh` has both incidents). Each record's `host` block says which
+site and node measured it and whether that cache started empty.
 
 ### A container site
 

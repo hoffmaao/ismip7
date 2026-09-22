@@ -265,8 +265,9 @@ reference; 43.6 s against 30.0 s per step, one step, no warm-up excluded).
 
 **10-year controls (`control_transfer`, `control_native`, production
 configuration, run under `MAP_CHECK_CONTROLS_AFTER_FAILED_LANE=1`).** Budd
-jobs 10569654 (1 km) and 10569655 (2 km), RC job 10569813 (1 km): pending
-(issue #20). The RC 2 km control was not run: it would cold-start through
+jobs 10570030 (1 km) and 10570031 (2 km), RC job 10570032 (1 km), each 64
+ranks, 128 GB, 5 h (resubmitted at that request to backfill a full
+partition): pending (issue #20). The RC 2 km control was not run: it would cold-start through
 the same gamg continuation that diverged in the lane, and the RC snapshot is
 already 2.7 times the observed discharge on that mesh.
 

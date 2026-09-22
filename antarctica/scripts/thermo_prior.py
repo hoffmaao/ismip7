@@ -3,7 +3,7 @@ r"""Physical (thermomechanical) fluidity prior mean A_prior(x) for the ISMIP7
 Antarctic inversion, following the mismip_time-dependent-da approach: the
 inversion control becomes phi = log(A / A_prior) - a small deviation from a
 physically-motivated fluidity - instead of log(A / A0_const), so the prior
-regularizes the DEVIATION, not the amplitude (Recinos/fenics_ice framing).
+regularizes the DEVIATION, not the amplitude (the framing of Recinos et al. (2023)).
 
 This standalone driver computes and PLOTS A_prior for inspection. The same
 `compute_fluidity_prior` is called inside inversion_icepack2.py at setup so the

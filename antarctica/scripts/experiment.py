@@ -41,7 +41,7 @@ from simulation import (setup_model, run_simulation, latest_checkpoint,
 from icepack2_tools.forcing import (
     ISMIP7Atmosphere, ISMIP7Ocean, ISMIP7Fracture,
     make_forcing_callback, load_racmo_smb_climatology, forcing_coords,
-    describe_forcing_provenance, forcing_year,
+    describe_forcing_provenance, forcing_year, k_melt,
 )
 from icepack2_tools.climatology import (
     clim_start, clim_end, clim_scenario, clim_pool_missing, describe_clim_pool,
@@ -227,7 +227,7 @@ def run_core_experiment(*, core, title, name, esm, scenario,
         PETSc.Sys.Print(f"  {line}")
 
     K_npz = find_k_npz()
-    K_melt = float(os.environ.get("ISMIP7_K_MELT", "1.15e-4"))
+    K_melt = k_melt()
     if K_npz is not None:
         PETSc.Sys.Print(f"  Ocean melt: calibrated per-basin K from {K_npz}")
     else:

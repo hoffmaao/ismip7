@@ -6,7 +6,7 @@ r"""How far does the draft-slope cap move melt past the variable request's bound
 
 The ISMIP7 variable request gives ``libmassbffl`` an AIS minimum of
 -0.008 kg m-2 s-1 with severity ``error``. In ice-equivalent thickness that is
-275.3 m/yr, and a 10-year Ua-mesh ssp585 reached -0.0117 (402.6 m/yr) on
+275.3 m/yr, and a 10-year adaptive-mesh ssp585 reached -0.0117 (402.6 m/yr) on
 grounding-zone cells. Two readings fit that: the parameterisation is too strong
 somewhere, or the writer's ``no_floating_ice`` fill policy reports one hot cell
 as the whole 8 km pixel's value, which the request's own convention asks for.
@@ -22,8 +22,9 @@ The calibration half reproduces calibrate_melt on CG1 nodes: BedMachine
 interpolated with its raster ``surface`` and ``mask``, and grad(draft)
 projected onto CG1.
 
-* capped: sin_alpha capped at ISMIP7_SIN_ALPHA_CAP (calibrate_melt's default
-  5e-3), the slope K was fitted against;
+* capped: sin_alpha capped at the npz's ``sin_alpha_cap`` when it is finite,
+  otherwise at calibrate_melt's CG1 default 5e-3, the slope K was fitted
+  against;
 * uncapped: the same slope with no cap.
 
 The forward half reproduces the forward on DG0 cells, the field the forward
@@ -31,11 +32,21 @@ melts with under DG0 geometry: bed and thickness sampled onto the cells, the
 surface from flotation, s = max(b + H, (1 - 917/1024) H), as simulation.py
 builds it, ``forcing.compute_sin_alpha``'s cell slope, thermal forcing and
 salinity at each cell centroid and its own draft, and the forward callback's
-``haf <= 0`` floating test.
+``haf <= 0`` floating test on cells holding ice (``h > 0``), the floating set
+``calibrate_melt.forward_geometry`` fits on.
 
 * uncapped: as the forward runs today;
 * capped: the cell slope capped at the same value, which is where a cap inside
   ``forcing.compute_sin_alpha`` would act.
+
+Both halves take their slope from ``ISMIP7_MELT_SLOPE`` as the forward and
+calibrate_melt do. The capped and uncapped rows above belong to ``local``.
+Under ``ant``, the default, the forward half melts with the one constant
+``ISMIP7_SIN_ALPHA_ANT`` and the calibration half with the constant the K file
+records, warning when the two differ by more than 1 percent; no cap applies,
+and each half gives one row. A K file
+whose recorded ``melt_slope`` differs from the run's is reported, since its K
+does not transfer.
 
 The two halves use different floating masks and different quadrature, nodal
 area weights against cell areas, so their totals compare in magnitude and
@@ -65,7 +76,11 @@ shelf. A basin or block whose OCX melt is off the climatology's by more than
 Serial. Reuses calibrate_melt's loaders, so it needs the same inputs: a MAP for
 the mesh, the OI climatology, the IMBIE2 basins and BedMachine.
 
-Measured on the Ua 2 km mesh, September 2026, with
+The measured rows below predate the ``h > 0`` test and the seawater flotation
+test in the forward half (icepack/ismip7#66): they counted ice-free cells as
+floating and grounded the deep-draft shelf, and are to be re-measured.
+
+Measured on the adaptive 2 km mesh, September 2026, with
 calibrated_K_per_basin_2000.npz calibrated against the re-released observation
 table:
 
@@ -131,9 +146,9 @@ from firedrake.petsc import PETSc                                     # noqa: E4
 
 import calibrate_melt as cm                                           # noqa: E402
 from icepack2_tools.forcing import (quadratic_mixed_slope,            # noqa: E402
-                                    compute_sin_alpha, ISMIP7Ocean,
-                                    OCX, OCX_OCEAN_VARIANTS,
-                                    _RHO_ICE, _RHO_WATER)
+                                    compute_sin_alpha, is_floating,
+                                    melt_slope, sin_alpha_ant,
+                                    ISMIP7Ocean, OCX, OCX_OCEAN_VARIANTS)
 from icepack2_tools.geometry import sample_to_geometry                # noqa: E402
 from icepack2_tools.runconfig import raster_sample                    # noqa: E402
 # The same year and density the writer converts with, so the bound compared
@@ -254,22 +269,17 @@ def main():
                 "K": k_at(xs, ys)}
 
     # The calibration half, as calibrate_melt builds it: BedMachine
-    # interpolated onto CG1 nodes with its raster surface and mask, and
-    # grad(draft) projected onto CG1.
-    bed, thk, sur, msk = cm._interp_bedmachine(mesh, Q)
-    x = mesh.coordinates.dat.data_ro[:, 0]
-    y = mesh.coordinates.dat.data_ro[:, 1]
-    calibration = half(
-        x, y, np.minimum(sur.dat.data_ro - thk.dat.data_ro, 0.0),
-        cm._compute_sin_alpha(mesh, thk, sur),
-        np.round(msk.dat.data_ro).astype(int) == 3,
-        assemble(fd.TestFunction(Q) * dx).dat.data_ro)
+    # interpolated onto CG1 nodes with its raster surface and mask, and the
+    # slope under this run's convention.
+    c = cm.calibration_geometry(mesh)
+    calibration = half(c["x"], c["y"], c["draft"], c["sin_a"], c["floating"],
+                       c["area"])
 
     # The forward half, as the forward melts cell by cell under DG0 geometry:
     # bed and thickness sampled onto the cells, the surface from flotation as
     # simulation.py builds it, forcing.compute_sin_alpha's DG0 slope, forcing
     # at each cell centroid and its own draft, and the callback's haf <= 0
-    # floating test.
+    # floating test on cells holding ice.
     bm = cm._bedmachine_path()
     b_dg = sample_to_geometry(rasterio.open(f"netcdf:{bm}:bed"), Q_g, Q,
                               method=raster_sample())
@@ -280,28 +290,59 @@ def main():
     xy_dg = fd.Function(VectorFunctionSpace(mesh, "DG", 0)).interpolate(
         fd.SpatialCoordinate(mesh)).dat.data_ro
     b_np, h_np, s_np = b_dg.dat.data_ro, h_dg.dat.data_ro, s_dg.dat.data_ro
-    haf = s_np - (b_np + (_RHO_WATER / _RHO_ICE) * np.maximum(-b_np, 0.0))
+    afloat = is_floating(s_np, b_np)
     forward = half(
         xy_dg[:, 0], xy_dg[:, 1], np.minimum(s_np - h_np, 0.0),
         compute_sin_alpha({"Q": Q, "V": VectorFunctionSpace(mesh, "CG", 1),
                            "Q_g": Q_g, "h": h_dg, "s": s_dg}),
-        haf <= 0,
+        afloat & (h_np > 0),
         assemble(fd.TestFunction(Q_g) * dx).dat.data_ro)
 
-    cap = cm.SIN_ALPHA_CAP
-    cases = [
-        (f"calibration half, capped at {cap:.0e} on CG1 nodes, the slope K "
-         f"was fitted against", calibration,
-         np.minimum(calibration["sin_a"], cap), "nodes"),
-        ("calibration half, uncapped", calibration, calibration["sin_a"],
-         "nodes"),
-        ("forward half, uncapped, as the forward runs today", forward,
-         forward["sin_a"], "cells"),
-        # A cap inside forcing.compute_sin_alpha would act on this DG0 slope,
-        # so the capped forward row caps it here.
-        (f"forward half, capped at {cap:.0e} on DG0 cells", forward,
-         np.minimum(forward["sin_a"], cap), "cells"),
-    ]
+    running = melt_slope()
+    fitted_slope = str(d["melt_slope"]) if "melt_slope" in d else "local"
+    if fitted_slope != running:
+        PETSc.Sys.Print(f"  WARNING: {os.path.basename(npz_path)} was calibrated "
+                        f"under ISMIP7_MELT_SLOPE={fitted_slope} and this check "
+                        f"melts under {running}, so no row is the slope K was "
+                        f"fitted against")
+    if running == "ant":
+        fitted_sin = (float(d["sin_alpha_ant"])
+                      if fitted_slope == "ant" and "sin_alpha_ant" in d
+                      else float("nan"))
+        calibration_sin = fitted_sin if np.isfinite(fitted_sin) else sin_alpha_ant()
+        if abs(calibration_sin / sin_alpha_ant() - 1.0) > 0.01:
+            PETSc.Sys.Print(f"  WARNING: {os.path.basename(npz_path)} was calibrated "
+                            f"with sin(alpha) = {calibration_sin:g} and this check "
+                            f"melts the forward half with {sin_alpha_ant():g}; the "
+                            f"calibration half keeps the file's constant")
+        fitted = ", the slope K was fitted against" if fitted_slope == "ant" else ""
+        cases = [
+            (f"calibration half, the constant {calibration_sin:g} on CG1 nodes"
+             f"{fitted}", calibration,
+             np.full_like(calibration["sin_a"], calibration_sin), "nodes"),
+            (f"forward half, the constant {sin_alpha_ant():g} on DG0 cells, as "
+             f"the forward runs today", forward, forward["sin_a"], "cells"),
+        ]
+    else:
+        cap = float(d["sin_alpha_cap"]) if "sin_alpha_cap" in d else float("nan")
+        if not (np.isfinite(cap) and cap > 0):
+            cap = cm.default_slope_cap("cg1")
+        fitted_on = str(d["geometry_space"]) if "geometry_space" in d else "cg1"
+        cases = [
+            (f"calibration half, local, capped at {cap:.0e} on CG1 nodes"
+             + (", the slope K was fitted against"
+                if fitted_slope == "local" and fitted_on == "cg1" else ""),
+             calibration,
+             np.minimum(calibration["sin_a"], cap), "nodes"),
+            ("calibration half, local, uncapped", calibration,
+             calibration["sin_a"], "nodes"),
+            ("forward half, local, uncapped, as the forward runs today", forward,
+             forward["sin_a"], "cells"),
+            # A cap inside forcing.compute_sin_alpha would act on this DG0 slope,
+            # so the capped forward row caps it here.
+            (f"forward half, local, capped at {cap:.0e} on DG0 cells", forward,
+             np.minimum(forward["sin_a"], cap), "cells"),
+        ]
 
     for label, g, sin_a, dofs in cases:
         floating, area = g["floating"], g["area"]

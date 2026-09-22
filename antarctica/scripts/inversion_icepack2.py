@@ -11,7 +11,7 @@ Follows the Kangerd demo pattern from Shapero's dual-problems repo:
 
 Controls are log-deviations from PHYSICAL prior means - theta = log(C/C_w0)
 on the balance-friction anchor, phi = log(A/A_prior) on a thermomechanical
-fluidity prior - regularized with the fenics_ice Whittle-Matern prior
+fluidity prior - regularized with the Whittle-Matern prior of Recinos et al. (2023)
 (icepack2_tools/prior.py). See antarctica/N3_FRAMEWORK.md.
 
 Usage:
@@ -110,6 +110,7 @@ from icepack2_tools.prior import (
     prior_operator_form,
 )
 from icepack2_tools.thermo_model import compute_fluidity_prior
+from icepack2_tools.optimization import FunctionalDecreaseStop
 from icepack2_tools.forcing import (load_racmo_smb_climatology,
                                     load_mean_annual_surface_temperature)
 from icepack2_tools.runconfig import (
@@ -171,7 +172,7 @@ if MISFIT_NORM not in ("sigma", "none"):
         f"ISMIP7_MISFIT_NORM must be 'sigma' or 'none', got {MISFIT_NORM!r}"
     )
 
-# Regularization -- fenics_ice Whittle-Matern prior (icepack2_tools/prior.py)
+# Regularization -- Whittle-Matern prior (icepack2_tools/prior.py)
 # on the log-deviation controls theta=log(C/C_w0), phi=log(A/A_prior). The
 # controls sit on PHYSICAL prior means (balance friction, thermomechanical
 # fluidity), so gamma is a PHYSICAL strength: gamma ~ 1e4 gives a prior std
@@ -207,7 +208,7 @@ GAMMA_DEFAULT = "1e5" if MISFIT_NORM == "sigma" else "1e4"
 #     J_log = 1/2 int [ ln( (|u| + eps) / (|u_obs| + eps) ) ]^2 dA / A
 #
 # with `eps` = ISSM's `epsvel`, a floor that keeps the logarithm finite where
-# the ice is not moving. Elmer/Ice and Ua use relative errors to the same end.
+# the ice is not moving. Other inversions use relative errors to the same end.
 #
 # ISMIP7_LOG_VEL_WEIGHT: 0 (default, the pre-Sep-2026 objective), a number, or
 # "auto" -- scaled so that at the STARTING state the log term equals the
@@ -221,8 +222,8 @@ L_REG = float(os.environ.get("ISMIP7_L_REG", "7.5e3"))
 
 # ── Prior form (ISMIP7_PRIOR_FORM) ──────────────────────────────────────
 # `laplacian` (default, everything inverted so far) uses A = delta*M + gamma*K
-# as the prior precision itself. `bilaplacian` uses A M^-1 A, which is what
-# hIPPYlib's BiLaplacianPrior and fenics_ice's prior.Laplacian ("LM^-1L") use,
+# as the prior precision itself. `bilaplacian` uses A M^-1 A, which is
+# the squared-operator prior of Villa et al. (2021) ("LM^-1L")
 # and what the Whittle-Matern SPDE needs in 2-D for the field to be a function
 # rather than a distribution (alpha = 2 > d/2; the un-squared operator has no
 # pointwise variance to speak of and does not converge under refinement).
@@ -613,7 +614,7 @@ def main():
     # In the dual form friction_power: Ψ*(τ) = |τ|^{1+n} / ((1+n)*K)
     # He → 0 makes K → 0 which makes Ψ* → ∞, penalizing any basal
     # stress on floating ice. Add a small floor to keep K > 0.
-    # Combined Ua approach: He multiplies τ in momentum_balance AND
+    # Combined approach: He multiplies τ in momentum_balance AND
     # K scales with 1/He so friction_power makes τ cheap on floating ice.
     # K large → τ unconstrained (floating), K small → τ penalized (grounded)
     # Together with floating=He in momentum_balance, this gives zero
@@ -732,7 +733,7 @@ def main():
     # Physical FLUIDITY PRIOR MEAN A_prior(x): a fixed-velocity thermomechanical
     # (Stefan enthalpy) solve at the observed geometry/velocity, so the control
     # phi = log(A / A_prior) is a small deviation from a physically-motivated
-    # fluidity rather than log(A / const). This is the Recinos/fenics_ice fix
+    # fluidity rather than log(A / const). This is the Recinos et al. (2023) fix
     # for the n=3 blow-up (a constant A0 baseline forced phi to carry all the
     # spatial fluidity structure). Frictional heating uses the balance C_w0.
     # When warm-starting from a prepare cache / MAP that already carries
@@ -954,7 +955,7 @@ def main():
     #
     # A = delta*M + gamma*K either way; only the coefficients and the power
     # differ. The bi-Laplacian's (delta, gamma) come from a physical
-    # (sigma, rho) through hIPPYlib's closed forms, which the un-squared
+    # (sigma, rho) through the closed forms of Villa et al. (2021), which the un-squared
     # operator does not possess.
     _prior_test = TestFunction(Q)
     if PRIOR_FORM == "bilaplacian":
@@ -963,7 +964,7 @@ def main():
             "phi": bilaplacian_coeffs(PRIOR_SIGMA_PHI, PRIOR_RHO),
         }
         PETSc.Sys.Print(
-            f"  Prior: bi-Laplacian A M^-1 A (hIPPYlib / fenics_ice); "
+            f"  Prior: bi-Laplacian A M^-1 A; "
             f"sigma_theta={PRIOR_SIGMA_THETA:g} sigma_phi={PRIOR_SIGMA_PHI:g} "
             f"rho={PRIOR_RHO:g} m -> "
             f"delta={_prior_dg['theta'][0]:.4e} gamma={_prior_dg['theta'][1]:.4e}"
@@ -1011,8 +1012,8 @@ def main():
     def _prior_metric_solvers(metric):
         """Per-control solvers for the prior COVARIANCE, the metric
         ISMIP7_GRAD_PRECOND=prior descends in: ``A^-1`` for the Laplacian,
-        ``A^-1 M A^-1`` for the bi-Laplacian (fenics_ice's
-        ``Laplacian.inv_action``, "L^-1 M L^-1"). Returns a callable taking the
+        ``A^-1 M A^-1`` for the bi-Laplacian (the covariance
+        action "L^-1 M L^-1"). Returns a callable taking the
         two assembled gradients and returning the two preconditioned
         directions."""
         _tr = fd.TrialFunction(Q)
@@ -1030,26 +1031,24 @@ def main():
             for which in ("theta", "phi")
         }
         # The consistent mass Riesz map, for metric == "mass": the same
-        # preconditioner fenics_ice ships, reached through the same code path
-        # so the two options differ only in the operator.
+        # mass-matrix preconditioner, reached through the same code path so
+        # the two options differ only in the operator.
         _mass_solver = fd.LinearSolver(
             assemble(inner(_tr, _prior_test) * dx), solver_parameters=_fac
         )
 
-        # First-step scaling, per control BLOCK. Following fenics_ice's
-        # minimize_l_bfgs call (solver.py): it passes block_theta_scale for a
-        # dual inversion, because "alpha & beta tend to have very different
-        # magnitudes. Theta scaling both alpha & beta by their combined mean is
-        # a bad idea". theta (friction) and phi (fluidity) are exactly that
-        # pair here, and a single combined scalar is what a 32 km probe took
+        # First-step scaling, per control BLOCK. The two controls of a dual
+        # inversion tend to have very different magnitudes, so scaling both
+        # by their combined mean is a bad idea. theta (friction) and phi
+        # (fluidity) are exactly that pair here, and a single combined scalar is what a 32 km probe took
         # theta to [-883, +14165] with -- it is a log deviation, so order 1.
         #
         # The scaling exists because L-BFGS's first step is -H_0 g at unit
         # length, with no curvature pair yet to rescale it, and on this path a
         # line search cannot recover: one evaluation outside the region where
         # the forward has a solution returns NaN and every later trial point
-        # inherits it. fenics_ice bounds the same thing with the line search's
-        # amax; TAO's lmvm gives no equivalent once H_0 is supplied, so the
+        # inherits it. A line search can cap the first step with amax; TAO's
+        # lmvm gives no equivalent once H_0 is supplied, so the
         # bound goes on H_0 instead. ISMIP7_PRECOND_STEP0 is the largest change
         # the first step may make to a control, in that control's own units.
         _step0 = float(os.environ.get("ISMIP7_PRECOND_STEP0", "0.15"))
@@ -1060,8 +1059,8 @@ def main():
             for which, rhs in (("theta", g_theta), ("phi", g_phi)):
                 x = Function(Q)
                 if metric == "mass_consistent":
-                    # What fenics_ice actually ships (config.mass_precon,
-                    # H_M_0): the Riesz map of the L2 inner product. It removes
+                    # The consistent mass Riesz map: the same mass-matrix
+                    # preconditioner, the Riesz map of the L2 inner product. It removes
                     # the cell-size dependency and nothing else, which is why
                     # it is robust where the prior metric is delicate.
                     _mass_solver.solve(x, rhs)
@@ -1606,8 +1605,12 @@ def main():
 
     # ── L-BFGS-B Inversion ──
     max_iter = int(os.environ.get("ISMIP7_MAXITER", "500"))
+    # Relative-decrease stopping rule; 0 disables it and the budget above decides.
+    ftol = float(os.environ.get("ISMIP7_FTOL", "1e-10"))
+    min_iter = int(os.environ.get("ISMIP7_MIN_ITER", "3"))
     PETSc.Sys.Print("\nStarting L-BFGS-B inversion (theta + phi)...")
-    PETSc.Sys.Print(f"  maxiter={max_iter}, nranks={COMM_WORLD.size}")
+    PETSc.Sys.Print(f"  maxiter={max_iter} ftol={ftol:g} min_iter={min_iter}, "
+                    f"nranks={COMM_WORLD.size}")
 
     global_ndof = len(func_to_global(theta))
     z_backup = z.copy(deepcopy=True)
@@ -1658,6 +1661,8 @@ def main():
                 "log_vel_eps": float(LOG_VEL_EPS),
                 "gamma_theta": float(GAMMA_THETA),
                 "gamma_phi": float(GAMMA_PHI),
+                "ftol": float(ftol),
+                "min_iter": int(min_iter),
                 "dhdt_weight": float(dhdt_w),
                 "dhdt_net_sigma": float(net_sigma_used),
                 "grad_precond": os.environ.get(
@@ -1843,13 +1848,13 @@ def main():
         gtol = float(os.environ.get("ISMIP7_GTOL", "0.0"))
         _step0_env = float(os.environ.get("ISMIP7_PRECOND_STEP0", "0.15"))
         if grad_precond == "mass_consistent":
-            _desc = "consistent mass Riesz map (M^-1), as fenics_ice ships it"
+            _desc = "consistent mass Riesz map (M^-1), after Recinos et al. (2023)"
         else:
             _desc = (
                 f"{PRIOR_FORM} prior covariance "
                 f"({'A^-1 M A^-1' if PRIOR_FORM == 'bilaplacian' else 'A^-1'})"
-                " -- EXPERIMENTAL: fenics_ice ships M^-1 and leaves its two "
-                "prior-preconditioned H_0 attempts commented out as not working"
+                " -- EXPERIMENTAL: the prior-preconditioned variant was not used in the reference work; "
+                "its two prior-preconditioned H_0 attempts were left commented out as not working"
             )
         PETSc.Sys.Print(
             f"  Optimization metric: {_desc}; via TAO lmvm; "
@@ -1862,8 +1867,8 @@ def main():
                 "tao_max_it": max_iter,
                 # The gradient norm TAO tests is the one M_inv_action defines,
                 # i.e. sqrt(g' A^-1 g) -- mesh independent, unlike the raw l2
-                # norm the scipy path prints. 0 keeps the old behaviour of
-                # running the whole iteration budget.
+                # norm the scipy path prints. 0 leaves stopping to the ftol
+                # rule in _monitor and to tao_max_it.
                 "tao_gatol": gtol,
                 "tao_grtol": 0.0,
                 "tao_gttol": 0.0,
@@ -1872,10 +1877,13 @@ def main():
         )
 
         _t_last = [perf_counter()]
+        _ftol_stop = FunctionalDecreaseStop(ftol, min_iter)
 
         def _monitor(tao):
             its, f_val, gnorm, _cnorm, _xdiff, _reason = tao.getSolutionStatus()
             iteration_count[0] = int(its)
+            if _ftol_stop.update(iteration_count[0], f_val):
+                tao.setConvergedReason(PETSc.TAO.ConvergedReason.CONVERGED_USER)
             now = perf_counter()
             t_iter = now - _t_last[0]
             _t_last[0] = now
@@ -1893,6 +1901,7 @@ def main():
                 f"misfit={f_val - reg_theta - reg_phi:.6e} "
                 f"reg_θ={reg_theta:.4e} reg_φ={reg_phi:.4e} "
                 f"total={f_val:.6e} |grad|_A={gnorm:.4e} "
+                f"dJ/J={_ftol_stop.criterion if _ftol_stop.criterion is not None else 0.0:.1e} "
                 f"[total={t_iter:.1f}s]"
             )
             if timing_json:
@@ -1923,7 +1932,9 @@ def main():
             pass
         reason = int(solver.tao.getConvergedReason())
         message = (
-            "CONVERGED: gradient tolerance reached" if reason > 0
+            f"CONVERGED: relative functional decrease <= ftol={ftol:g}"
+            if reason == int(PETSc.TAO.ConvergedReason.CONVERGED_USER)
+            else "CONVERGED: gradient tolerance reached" if reason > 0
             else f"STOP: TAO reason {reason} (iteration limit is {max_iter})"
         )
         return SimpleNamespace(
@@ -1995,7 +2006,7 @@ def main():
             x0,
             method="L-BFGS-B",
             jac=True,
-            options={"maxiter": max_iter, "ftol": 0, "gtol": 0},
+            options={"maxiter": max_iter, "ftol": ftol, "gtol": 0},
         )
 
     PETSc.Sys.Print(f"\nOptimization finished: {result.message}")

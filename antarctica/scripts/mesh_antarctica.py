@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 """
-Generate isotropic Antarctic mesh with Ua-style grounding zone refinement.
+Generate isotropic Antarctic mesh with grounding zone refinement.
 
-Refinement based on distance from the grounding line (Ua GLrange approach)
+Refinement based on distance from the grounding line (the GLrange bands of Gudmundsson et al. (2012))
 and strain-rate based sizing for outlet glaciers.
 
 Usage:
@@ -219,7 +219,7 @@ def main():
     # 1. Strain rate
     size_sr = np.clip(sr_floor / ref_vals, sr_floor, lc_coarse)
 
-    # 2. GL distance bands (Ua GLrange style, isotropic)
+    # 2. GL distance bands (isotropic)
     size_gl = np.full(len(gl_d), float(lc_coarse))
     for dist_m, elem_m in gl_bands:
         size_gl = np.where(gl_d < dist_m, np.minimum(size_gl, elem_m), size_gl)

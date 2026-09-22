@@ -212,9 +212,8 @@ def main():
             gap = (lo - ov) / spread
             print(f"  BELOW the ensemble by {lo - ov:.2f} mm ({gap:.1f}x the "
                   f"ensemble spread): too little sea-level contribution -> the "
-                  f"sheet is gaining/holding too much mass. Check SMB (the ~9% "
-                  f"aSMB unit inflation over-adds snowfall), or melt/discharge "
-                  f"being too weak (K_melt, friction).")
+                  f"sheet is gaining/holding too much mass. Check SMB, or "
+                  f"melt/discharge being too weak (K_melt, friction).")
         else:
             gap = (ov - hi) / spread
             print(f"  ABOVE the ensemble by {ov - hi:.2f} mm ({gap:.1f}x the "

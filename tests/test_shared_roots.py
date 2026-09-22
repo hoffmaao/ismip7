@@ -120,3 +120,18 @@ def test_the_adapt_driver_reads_the_obs_root(monkeypatch):
     monkeypatch.setenv("ISMIP7_OBS_DATA_ROOT", "/projects/shared/antarctica/data")
     driver = importlib.reload(importlib.import_module("adapt_mesh"))
     assert driver.DATA_DIR == "/projects/shared/antarctica/data"
+
+
+def test_downloads_land_under_the_obs_root(monkeypatch, tmp_path):
+    r"""download_data.py writes where every run reads: the obs root, not the
+    checkout, once a site names one."""
+    import importlib
+    import sys
+    monkeypatch.setenv("ISMIP7_OBS_DATA_ROOT", str(tmp_path / "shared"))
+    monkeypatch.syspath_prepend(os.path.join(ANT, "scripts"))
+    sys.modules.pop("download_data", None)
+    mod = importlib.import_module("download_data")
+    assert str(mod.DATA_DIR) == str(tmp_path / "shared")
+    monkeypatch.delenv("ISMIP7_OBS_DATA_ROOT")
+    sys.modules.pop("download_data")
+    assert str(importlib.import_module("download_data").DATA_DIR) == os.path.join(ANT, "data")

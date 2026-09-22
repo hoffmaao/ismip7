@@ -4,7 +4,7 @@ HTTPS (anonymous, resumable), no AWS tooling needed.
 
     python antarctica/scripts/download_mirror.py PREFIX [PREFIX ...]
         [--product ismip7-ais-forcing] [--root ISMIP7/AIS]
-        [--include REGEX] [--dry-run] [--jobs 4]
+        [--include REGEX] [--dry-run] [--check] [--jobs 4]
 
 ``--product`` selects the mirror product. The default is the forcing; the
 observations MIPkit lives in ``ismip7-ais-observations``.
@@ -31,6 +31,15 @@ manifest. If the mirror's object is newer it is OLDER, which proves nothing:
 most of a Globus tree predates the mirror itself. OLDER files are listed and
 left alone unless ``--older refetch`` (fetch them again) or ``--older adopt``
 (vouch for them) says otherwise. ``--dry-run`` lists both kinds.
+
+The totals line counts everything listed, which says nothing of how much is
+left to move, so the plan is printed by verb under it, followed by every row
+(``<ESM>/<scenario>/<product>/<variable>``, the audit's unit) that holds
+anything other than ``skip`` or ``adopt``. ``--dry-run`` stops there: it
+transfers nothing and writes nothing, the manifest included. ``--check`` is a
+dry run whose exit status is 1 unless every file is ``skip`` or ``adopt``,
+which is the file-level completeness gate ``audit_forcing_versions.py`` cannot
+be (issue #41).
 
 Every transfer is checked against the size the listing gave, so a truncated
 NetCDF is never reported as fetched: a short one is left in place for the
@@ -64,6 +73,10 @@ DEST_ROOT = {"ismip7-ais-observations/": "obs"}
 FLAT_DESTS = ("obs/mipkit",)
 
 MANIFEST_NAME = ".mirror_manifest.json"
+
+# Every verdict ``plan`` returns, and the two that leave nothing to transfer.
+VERBS = ("skip", "adopt", "fetch", "resume", "REPLACED", "OLDER")
+CLEAN = ("skip", "adopt")
 
 
 def list_keys(prefix, endpoint, product):
@@ -138,6 +151,31 @@ def plan(size, etag, last_modified, dest, entry):
     if entry:
         return "skip" if not etag or entry.get("etag") in ("", etag) else "REPLACED"
     return "OLDER" if os.path.getmtime(dest) < last_modified else "adopt"
+
+
+def row_of(key):
+    r"""The audit's row a key sits under: ``<ESM>/<scenario>/<product>/<variable>``,
+    or as much of it as the key has (a flat fracture directory stops at the
+    product)."""
+    parts = key.split("/")            # data, esm, scenario, [product], [variable], ..., file
+    return "/".join(parts[1:min(len(parts) - 1, 5)])
+
+
+def summarize(todo):
+    r"""``({verb: [files, bytes]}, {(verb, row): [files, bytes]})`` over a plan
+    of ``(key, size, etag, stamp, dest, action)``. Every verb is in the first,
+    so a zero prints as a zero. The second holds only what is left to look at:
+    the rows with anything other than ``skip`` or ``adopt`` under them."""
+    verbs = {v: [0, 0] for v in VERBS}
+    rows = {}
+    for key, size, _, _, _, action in todo:
+        hits = [verbs[action]]
+        if action not in CLEAN:
+            hits.append(rows.setdefault((action, row_of(key)), [0, 0]))
+        for h in hits:
+            h[0] += 1
+            h[1] += size
+    return verbs, rows
 
 
 def local_path(root, key, dest_root=""):
@@ -215,6 +253,8 @@ def main():
                     help="what to do with a complete file that predates the manifest "
                          "and is older than the mirror's object (default %(default)s)")
     ap.add_argument("--dry-run", action="store_true")
+    ap.add_argument("--check", action="store_true",
+                    help="a dry run whose exit status is 1 unless every file is skip or adopt")
     ap.add_argument("--jobs", type=int, default=4)
     a = ap.parse_args()
     product = a.product.strip("/") + "/"
@@ -233,6 +273,11 @@ def main():
             todo.append((key, size, etag, stamp, dest, action))
     total = sum(t[1] for t in todo)
     print(f"{len(todo)} files, {total / 1e9:.2f} GB  {product} -> {a.root}", flush=True)
+    verbs, rows = summarize(todo)
+    print("by verb: " + ", ".join(f"{n} {v}" + (f" ({b / 1e9:.2f} GB)" if n else "")
+                                  for v, (n, b) in verbs.items()), flush=True)
+    for (verb, row), (n, b) in sorted(rows.items()):
+        print(f"  {verb:8s} {n:6d} files {b / 1e9:9.2f} GB  {row}", flush=True)
     for verdict, what in (("REPLACED", "replaced on the mirror since they were fetched "
                                        "(same name, new content)"),
                           ("OLDER", "older than the mirror's object and unknown to the "
@@ -242,12 +287,12 @@ def main():
             print(f"{len(hits)} {what}:", flush=True)
             for key, *_ in hits:
                 print(f"  {verdict:8s} {key}", flush=True)
-    if a.dry_run:
+    if a.dry_run or a.check:
         for key, size, _, _, dest, action in todo[:20]:
             print(f"  {action:8s} {size / 1e6:9.1f} MB  {key}  ->  {os.path.relpath(dest, a.root)}")
         if len(todo) > 20:
             print(f"  ... {len(todo) - 20} more")
-        return 0
+        return 1 if a.check and any(n for v, (n, _) in verbs.items() if v not in CLEAN) else 0
     done, failed = 0, []
     try:
         with cf.ThreadPoolExecutor(max_workers=a.jobs) as ex:

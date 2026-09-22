@@ -1,6 +1,6 @@
-"""prior.py - fenics_ice-style Whittle-Matern prior for the ISMIP7 inversion.
+"""prior.py - Whittle-Matern prior for the ISMIP7 inversion.
 
-Ported from mismip_time-dependent-da/prior.py (Recinos et al. 2023 / fenics_ice
+Ported from mismip_time-dependent-da/prior.py (Recinos et al. 2023
 convention). For a control field ``theta`` (= log(param / param_prior), a
 log-deviation from a PHYSICAL prior mean) with strength ``gamma`` and
 correlation length ``L_reg``, the prior energy added to the inversion cost is
@@ -16,7 +16,7 @@ WHY THIS FIXES THE ISMIP7 n=3 BLOW-UP: the old ISMIP7 regularization was
 PURE SMOOTHNESS (gamma*L^2*|grad theta|^2 only, no mass term), so a large
 smooth control field was unpenalized -- and with the fluidity control on a
 CONSTANT baseline A0, phi had to carry all the spatial fluidity structure and
-blew up to +-36 at n=3. The fenics_ice fix is two-fold and does NOT penalize
+blew up to +-36 at n=3. The fix of Recinos et al. (2023) is two-fold and does NOT penalize
 parameter amplitude: (1) put the control on a PHYSICAL prior mean (thermo
 fluidity A_prior, balance friction C_w0), so the amplitude lives in the mean
 and theta is a small deviation; (2) use this proper prior whose mass term just
@@ -68,11 +68,10 @@ def regularization_gradient_form(theta, test, gamma, area, L_reg=L_REG):
 
 
 # ---------------------------------------------------------------------------
-# Bi-Laplacian (squared) prior -- the hIPPYlib / fenics_ice precision
+# Bi-Laplacian (squared) prior -- the precision of Villa et al. (2021)
 # ---------------------------------------------------------------------------
-# Everything above uses A ITSELF as the prior precision. hIPPYlib
-# (BiLaplacianPrior) and fenics_ice (prior.Laplacian.action, "LM^-1L") instead
-# use the SQUARE
+# Everything above uses A ITSELF as the prior precision. Villa et al. (2021)
+# use the SQUARE ("LM^-1L") instead,
 #
 #     B = A M^-1 A,        A = delta*M + gamma*K
 #
@@ -82,13 +81,13 @@ def regularization_gradient_form(theta, test, gamma, area, L_reg=L_REG):
 # distribution, not a function -- its pointwise variance does not exist and
 # refining the mesh does not converge to anything. Squaring gives alpha = 2,
 # nu = alpha - d/2 = 1, and a genuine function-valued Matern field. This is
-# why both codes square, and why both quote closed-form marginal variance and
-# correlation length, which the un-squared operator has none of.
+# why the squared form is used, and why it has closed-form marginal variance
+# and correlation length, which the un-squared operator has none of.
 #
 # The energy needs a mass solve, so unlike regularization_form it is not one
 # UFL form: R(theta) = 0.5 * theta' A M^-1 A theta is evaluated by solving
-# M f = A theta and then integrating 0.5*f^2 (exactly fenics_ice's
-# norm_sq applied to its solved field). The caller owns the solve so that the
+# M f = A theta and then integrating 0.5*f^2 (the squared L2
+# norm of the solved field). The caller owns the solve so that the
 # inversion can put it on the adjoint tape and the UQ can reuse the operator.
 
 def bilaplacian_coeffs(sigma, rho):
@@ -96,7 +95,7 @@ def bilaplacian_coeffs(sigma, rho):
     of marginal standard deviation ``sigma`` and correlation length ``rho`` (m)
     under the SQUARED precision ``A M^-1 A``.
 
-    hIPPYlib's BiLaplacianPrior relations at ``nu = alpha - d/2 = 1``:
+    The relations of Villa et al. (2021) at ``nu = alpha - d/2 = 1``:
 
         sigma^2 = 1 / (4*pi*gamma*delta),      rho = sqrt(8*gamma/delta)
 
@@ -117,7 +116,7 @@ def bilaplacian_coeffs(sigma, rho):
 
 def prior_operator_form(trial, test, delta, gamma):
     r"""``A = delta*M + gamma*K`` as a bilinear form, in the (delta, gamma)
-    parameterisation hIPPYlib and fenics_ice use directly.
+    parameterisation Villa et al. (2021) use directly.
 
     :func:`prior_bilinear_form` is the same operator reached through this
     repository's (gamma, area, L_reg) knobs; both exist so the two conventions
@@ -141,7 +140,7 @@ def bilaplacian_aux_residual(theta, aux, test, delta, gamma):
 
 def bilaplacian_energy_form(aux):
     r"""``0.5 * \int f^2 dx`` with ``f = M^-1 A theta``, i.e.
-    ``0.5 * theta' A M^-1 A theta`` -- fenics_ice's ``norm_sq`` of its solved
+    ``0.5 * theta' A M^-1 A theta`` -- the squared norm of the solved
     field."""
     from firedrake import dx, inner
     return 0.5 * inner(aux, aux) * dx

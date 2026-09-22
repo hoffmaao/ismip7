@@ -42,3 +42,14 @@ def test_a_control_says_which_climatologies_it_runs_on(monkeypatch):
     smb, ocean = describe_observational_forcing(smb="RACMO2.4p1 SMB climatology 2000-2029", ocean=True)
     assert smb == f"{FORCING_PROVENANCE_MARKER} atmosphere RACMO2.4p1 SMB climatology 2000-2029"
     assert "release 06_nov" in ocean
+
+
+def test_the_report_resolves_the_melt_knobs_left_at_their_defaults(monkeypatch):
+    for k in ("ISMIP7_MELT_SLOPE", "ISMIP7_SIN_ALPHA_ANT", "ISMIP7_K_MELT"):
+        monkeypatch.delenv(k, raising=False)
+    env = core_report.effective_env()
+    assert env["ISMIP7_MELT_SLOPE"] == "ant    # default (not exported)"
+    assert env["ISMIP7_SIN_ALPHA_ANT"] == "0.005115    # default (not exported)"
+    assert env["ISMIP7_K_MELT"] == "8.5e-05    # default (not exported)"
+    monkeypatch.setenv("ISMIP7_MELT_SLOPE", "local")
+    assert core_report.effective_env()["ISMIP7_MELT_SLOPE"] == "local"

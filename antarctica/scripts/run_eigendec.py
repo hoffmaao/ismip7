@@ -4,9 +4,9 @@ Gauss-Newton Hessian eigendecomposition for dual-control inversion.
 
 Computes leading eigenmodes of A^{-1} H_GN where:
   H_GN = Gauss-Newton Hessian (PSD via zero-residual trick)
-  A    = delta*M + gamma*K  (Laplacian prior, fenics_ice convention)
+  A    = delta*M + gamma*K  (Laplacian prior, the convention of Recinos et al. (2023))
 
-Follows Recinos et al. (2023) / fenics_ice UQ framework:
+Follows the UQ framework of Recinos et al. (2023):
   - Prior operator A = delta*M + gamma*K per control
   - Prior covariance Gamma = A^{-1} M A^{-1} (Isaac et al. 2015)
   - DOF-vector Euclidean inner product for eigenvector projections
@@ -89,7 +89,7 @@ K_LEADING = 40
 
 # Prior hyperparameters (must match inversion regularization)
 # Inversion uses: R = 0.5/A * gamma * ell^2 * |grad(theta)|^2 dx
-# In fenics_ice convention A = delta*M + gamma*K:
+# In that convention A = delta*M + gamma*K:
 #   delta = 1/A (mass weight from area normalization)
 #   gamma_eff = GAMMA * ELL^2 / A (stiffness weight)
 # These are computed at runtime from the mesh area.
@@ -345,13 +345,13 @@ def main():
         _, _, ddJ = H_gn.action([theta_map, phi_map], [v_theta, v_phi])
         return ddJ[0].riesz_representation("L2"), ddJ[1].riesz_representation("L2")
 
-    # ── Prior A^{-1} M (block-diagonal, fenics_ice convention) ──
+    # ── Prior A^{-1} M (block-diagonal) ──
     # A = delta*M + gamma*K where delta = 1/A, gamma = GAMMA*ELL^2/A
     delta_theta = Constant(1.0 / area_val)
     gamma_theta_eff = Constant(GAMMA_THETA * ELL**2 / area_val)
     delta_phi = Constant(1.0 / area_val)
     gamma_phi_eff = Constant(GAMMA_PHI * ELL**2 / area_val)
-    PETSc.Sys.Print("Prior (fenics_ice convention):")
+    PETSc.Sys.Print("Prior:")
     PETSc.Sys.Print(
         f"  delta_theta={float(delta_theta):.6e}, gamma_theta={float(gamma_theta_eff):.6e}"
     )

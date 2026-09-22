@@ -64,8 +64,9 @@ the submission uses is a decision, section 6.
 **NaN forcing outside the downscaled mask (#39)** is intended. Zero, nearest or
 a large melt are all acceptable, stated in the README. Ours fills with zero.
 
-**CESM2-WACCM ends in 2299 (#8).** The 2300 atmosphere files were removed and
-the ocean stops at 2299, while a 2015-2300 run needs 2300. Handled: the reader
+**CESM2-WACCM ends in 2299 (#8).** The empty 2300 atmosphere files were
+removed, and by 22 September 2300 was back as the 2290-2299 mean (#49, section
+8). The ocean stops at 2299, while a 2015-2300 run needs 2300. Handled: the reader
 persists the last year on disk exactly one year past the end and reports it
 once per variable; a gap inside the series stays an error.
 
@@ -307,9 +308,11 @@ forcing-version audit, the output writer, and the melt calibration above.
    forward half 1 631 466 km2 over 85 820 cells, and they differ in mask and
    quadrature as well, so their totals compare in magnitude.
 
-   The rows below predate the seawater flotation test (issue #66) and the
-   `h > 0` test in the forward half, and are to be re-measured; the current
-   numbers are in `GEOMETRY_DISCRETIZATION.md`.
+   The rows below predate the seawater flotation test, which landed with
+   issue #66, and the
+   `h > 0` test in the forward half, and are to be re-measured with the DG0
+   melt total (issue #30); the current numbers are in
+   `GEOMETRY_DISCRETIZATION.md`.
 
    | slope | max, m/yr | p99, m/yr | area mean, m/yr | integrated, Gt/yr | past the bound |
    |---|---|---|---|---|---|
@@ -693,3 +696,70 @@ check is skipped. The OCX atmosphere here is `RACMO2.3p2-ERA`
 (`forcing.OCX_ATMOSPHERE_SOURCE`), which the list lacks as well. Core 11 cannot
 pass 0.5.0 under any forcing name, the experiment row being what is missing.
 (issue #18)
+
+## 8. Fourth sweep, 22 September
+
+Read-only, one day after section 7. The board holds 50 threads. Read in full
+through the GitHub API: #22, #30, #48, #49 and the new #50. The Greenland
+thread #47 was skipped. `ismip7-antarctic-ocean-forcing`,
+`ismip7-scalar-processing` and the documentation repository itself have no
+commit or issue since the 20th. isschecker moved to 0.5.1. Nothing was posted
+upstream. On Quartz one targeted listing of the CESM2-WACCM tree was taken,
+and six 2300 files were read with h5py.
+
+### What moved since the 21st
+
+- **isschecker 0.5.1, 22 September.** Only the variable request changed,
+  from checker issue 35 (opened and closed the same morning) and #50. In
+  kg m-2 s-1, `licalvf` and `lifmassbf` go from [-1e11, 0] to [-10, 0], and
+  `ligroundf` from [-1e9, 1e11] to [-10, 10]. The six `tend*` totals go from
+  [0, 1e25] to [-1e9, 1e9] kg s-1. The experiment table is unchanged, so
+  core 11 still has no `ocx` row (issue #18). Our fluxes are annual means in
+  kg m-2 s-1 on the native cells before the conservative remap. Removing
+  1000 m of ice in one year is -0.029, and `ligroundf` for u = 4 km/yr,
+  H = 1000 m into a 500 m cell is 0.23, so the gridded fields sit one to two
+  orders of magnitude inside the new bounds. A few cells outside are a
+  warning, since the grading of 0.5.0 still applies. At 0.5.1 the scalars
+  are still not range-checked (`_check_numerical` calls `_check_range` only
+  when the file is not a scalar). If a later release does check them, a year
+  in which the mask removes a Ross-sized shelf (about 1.5e17 kg) would put
+  `tendlicalvf` near -5e9 kg s-1, past the new bound. The bundled
+  `icepack2_tools/ismip7_variable_request.csv` is still 0.5.0's.
+  (issues #12, #17)
+- **#50, 22 September, open, new.** Are the front and grounding-line fluxes
+  given over the face or averaged over the cell? An organiser answered: a
+  mass change per unit horizontal cell area, pointing to checker issue 35.
+  That is how the writer books all three (`icepack2_tools/ismip7_output.py`:
+  facet flux or removed thickness divided by the native cell area, then the
+  conservative remap). Nothing to change.
+- **#49, 21 September, after section 7 was written.** The ocean-forcing
+  maintainer does not plan to add 2300. The CMIP archives of CESM2-WACCM
+  ssp126 and ssp585 end in December 2299, and a forcing author confirmed
+  that from the raw files. MRI-ESM2-0 runs to December 2300. The same
+  maintainer reported that the atmosphere group padded 2300 with the
+  2290-2299 mean, and would not personally endorse that. The reporting group
+  leans to ending its runs in 2299 and has asked the organisers whether that
+  meets the protocol. No organiser has replied. Checked on Quartz: the
+  CESM2-WACCM SDBN1-8000m v2 directories hold 286 years including 2300.
+  `acabf`, `acabf-anomaly` and `tas` for 2300 match the 2290-2299 mean to
+  2e-7 relative for both scenarios, against 3e-2 to 5e-1 for 2299 alone. The
+  ocean v3 directories end in `2291-2299`. So a CESM2-WACCM run to 2300 here
+  reads the padded decadal mean for SMB and holds 2299 for the ocean. Section
+  1's "the 2300 atmosphere files were removed" and the reader's comment in
+  `forcing.py` are stale, and the SMB sentence of the submission README
+  claimed the 2299 hold for both. That sentence is corrected in this
+  change. (issues #78, #41)
+- **#30, 22 September.** PISM posted its margin-only runs. Under CESM2-WACCM
+  ssp585, the mask applied to all floating ice doubles the sea-level
+  contribution, 1.25 to 2.48 m of ice above flotation. Applied only at the
+  shelf margins it has hardly any effect. Under MRI-ESM2-0 the mask has almost
+  no effect either way. So the two published end-member spreads are now
+  about 8 % (UFEMISM) and about 100 %, with PISM's margin-only runs close to
+  no fracture forcing. The same author followed up on how a model should
+  treat fractured ice inside the shelf, as melange or as a reduced-viscosity
+  region rather than open ocean. No one has answered that, and the
+  organisers prescribe no mode. (issue #10)
+- **Unmoved.** #22 since 13:32 UTC on the 21st (the new 0.5.1 bounds stop
+  taking a side on the `ligroundf` sign, but the thread prescribes none).
+  #48 since the 20th: no date for the regenerated OCX. #17 and #37 as in
+  section 7.

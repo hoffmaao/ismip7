@@ -10,7 +10,7 @@ is an index.
 **Claim the card before you start a run or an inversion.** A card in
 Claimed for more than 24 hours with no comment reads as unclaimed.
 
-Generated: 2026-09-22 17:27 UTC. 18 blocking, 10 owed, 0 after the deadline, 7 unverified.
+Generated: 2026-09-22 18:19 UTC. 18 blocking, 9 owed, 0 after the deadline, 7 unverified.
 
 ## Blocking the submission
 
@@ -47,10 +47,9 @@ Decisions first: they have the longest lead time and they gate the runs.
 | [45](https://github.com/icepack/ismip7/issues/45) | solver: Rice forwards stay at 12 ranks until the partition probe comes back clean | needs-run | rice | nots | verified open |
 | [47](https://github.com/icepack/ismip7/issues/47) | solver: the UChicago Midway site has never run end to end | needs-run | uchicago | midway | verified open |
 | [16](https://github.com/icepack/ismip7/issues/16) | forcing: re-audit the CESM2-WACCM ssp585 fracture before production (#37) | needs-check | group | quartz, nots, midway | fresh, unverified by design |
-| [23](https://github.com/icepack/ismip7/issues/23) | review: UW review of the obs_data_root conversions and the obs_dhdt temp-then-rename | needs-check | uw | local | fresh, unverified by design |
 | [68](https://github.com/icepack/ismip7/issues/68) | inversion: a chained link re-derives the auto log-velocity weight and changes the objective | needs-check | rice | nots | verified open |
 | [18](https://github.com/icepack/ismip7/issues/18) | protocol: what goes in the forcing field of an OCX filename (#17) | needs-upstream | upstream | upstream | fresh, unverified by design |
-| [66](https://github.com/icepack/ismip7/issues/66) | melt: the callbacks test flotation with fresh-water density and withhold melt from 24 percent of the shelf area | n/a | unassigned | n/a | verified open |
+| [78](https://github.com/icepack/ismip7/issues/78) | forcing: CESM2-WACCM 2300 reads a padded 2290-2299 atmosphere mean over a held 2299 ocean, and upstream has not said whether runs end in 2299 | needs-upstream | upstream | n/a | verified open |
 
 ## Claimed now
 
@@ -82,12 +81,12 @@ production run or a group decision.
 
 | source | items |
 |---|---|
-| `src:readiness` | 12 |
-| `src:submission-readme` | 11 |
+| `src:readiness` | 13 |
+| `src:submission-readme` | 12 |
 | `src:matrix-status` | 2 |
 | `src:topic-doc` | 4 |
 | `src:runbook` | 4 |
-| `src:open-pr` | 3 |
+| `src:open-pr` | 2 |
 
 ## After the deadline
 

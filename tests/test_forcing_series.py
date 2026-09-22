@@ -94,6 +94,15 @@ def test_an_absent_variable_stays_optional(mri_tree):
     assert atm._load_year("dacabfdz", 2299) is None
 
 
+def test_get_smb_divides_the_flux_by_the_ice_density(mri_tree):
+    r"""``acabf`` is a mass flux, so the field the transport receives is the
+    flux over the ice density and nothing else (issue #29)."""
+    from icepack2_tools.forcing import _RHO_ICE, _SEC_PER_YEAR
+    atm = ISMIP7Atmosphere(data_root=str(mri_tree), esm="MRI-ESM2-0", scenario="ssp585", version="v1")
+    smb = atm.get_smb(2299, np.zeros(3), np.zeros(3), anomaly=False)
+    assert np.allclose(smb, 2.0 * _SEC_PER_YEAR / _RHO_ICE, rtol=1e-12)
+
+
 # ---- which year a step's forcing comes from ------------------------------
 #
 # run_simulation hands the callback the END of the step, so the step from

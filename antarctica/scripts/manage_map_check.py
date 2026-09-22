@@ -547,12 +547,17 @@ class MapCheckManager(SlurmStageRunner):
         """``(state, detail)`` with ``states`` the already computed states of
         earlier stages (the table is filled in order)."""
         verdict, detail = self.verdict(stage)
-        if verdict == "passed" and not (self.force and stage in self.forced()):
+        # --force reaches the named stages alone: a failed lane stays failed
+        # when its control is the one being forced, so that the control's
+        # dependency reads as failed (and the switch below may lift it) rather
+        # than as pending.
+        forced = self.force and stage in self.forced()
+        if verdict == "passed" and not forced:
             return "passed", detail
-        if verdict == "failed" and not self.force:
+        if verdict == "failed" and not forced:
             return "failed", detail
         status = read_status(self.status_path(stage))
-        if status is not None and not self.force:
+        if status is not None and not forced:
             state = status.get("state")
             if state in {"submitting", "submitted", "running"}:
                 if stage.startswith("control_"):

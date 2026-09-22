@@ -237,6 +237,13 @@ def test_a_failed_lane_blocks_its_control_unless_the_switch_says_otherwise(sandb
     assert "lane_native failed" in got["control_native"][1]
     assert got["control_transfer"][0] == "waiting"
     assert got["audit_controls"][0] == "waiting"
+    # Forcing the control alone leaves the lane failed (a resubmission with a
+    # smaller request found the lane read as pending and the control waiting).
+    forced = manager(sandbox, "--controls-after-failed-lane", "--force",
+                     "--stages", "control_native")
+    got = forced.table()
+    assert got["lane_native"][0] == "failed"
+    assert got["control_native"][0] == "pending"
 
 
 def _control_csv(m, role, last_year, resid="0.0000"):

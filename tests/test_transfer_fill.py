@@ -31,8 +31,9 @@ def test_a_scalar_fill_lands_on_every_dof_the_source_misses():
     x, y = fd.SpatialCoordinate(source)
     f = fd.Function(fd.FunctionSpace(source, "CG", 1)).interpolate(1 + x + 2 * y)
     g = fd.Function(fd.FunctionSpace(target, "CG", 1), name="g")
-    n_missing, n_total = interpolate_with_fill(g, f, 7.0)
+    n_missing, n_total, n_clamped = interpolate_with_fill(g, f, 7.0)
     outside = _outside(target)
+    assert n_clamped == 0
     assert n_missing == int(outside.sum()) == 20
     assert n_total == 36
     vals = g.dat.data_ro
@@ -52,7 +53,8 @@ def test_a_function_fill_supplies_the_uncovered_dofs_of_a_vector_field():
     X, Y = fd.SpatialCoordinate(target)
     raster = fd.Function(V_t).interpolate(fd.as_vector((X + 100.0, Y + 200.0)))
     w = fd.Function(V_t, name="velocity_obs")
-    n_missing, n_total = interpolate_with_fill(w, u, raster)
+    n_missing, n_total, n_clamped = interpolate_with_fill(w, u, raster)
+    assert n_clamped == 0
     outside = _outside(target)
     assert n_missing == 20 and n_total == 36
     vals = w.dat.data_ro
@@ -75,6 +77,29 @@ def test_a_same_mesh_transfer_misses_nothing():
     x, _y = fd.SpatialCoordinate(source)
     f = fd.Function(fd.FunctionSpace(source, "CG", 1)).interpolate(x)
     g = fd.Function(fd.FunctionSpace(source, "CG", 1))
-    n_missing, n_total = interpolate_with_fill(g, f, 7.0)
-    assert n_missing == 0 and n_total == 25
+    n_missing, n_total, n_clamped = interpolate_with_fill(g, f, 7.0)
+    assert n_missing == 0 and n_total == 25 and n_clamped == 0
     assert np.allclose(g.dat.data_ro, f.dat.data_ro)
+
+
+def test_a_point_located_by_tolerance_is_clamped_to_the_source_range():
+    r"""Firedrake locates a target point up to half a reference cell outside
+    a boundary cell (mesh.tolerance 0.5) and extrapolates that cell's linear
+    basis there. The 2 km MAPs onto the 1 km mesh gave a fluidity prior of
+    -218 from a source whose minimum was 1. Located dofs are bounded by the
+    source's own range; the corner beyond the tolerance is a fill."""
+    source = fd.UnitSquareMesh(4, 4)
+    x, _y = fd.SpatialCoordinate(source)
+    f = fd.Function(fd.FunctionSpace(source, "CG", 1)).interpolate(1 + 10 * x)
+    target = fd.RectangleMesh(11, 11, 1.1, 1.1)
+    g = fd.Function(fd.FunctionSpace(target, "CG", 1))
+    n_missing, n_total, n_clamped = interpolate_with_fill(g, f, 7.0)
+    xy = target.coordinates.dat.data_ro
+    vals = g.dat.data_ro
+    beyond = np.isclose(xy[:, 0], 1.1) & (xy[:, 1] <= 1.0 + 1e-9)
+    assert beyond.sum() == 11
+    assert np.all(vals[beyond] == 11.0)          # 12 without the clamp
+    assert n_clamped >= 11 and n_missing >= 1 and n_total == 144
+    assert vals.min() >= 1.0 and vals.max() <= 11.0
+    inside = (xy[:, 0] <= 1.0 + 1e-9) & (xy[:, 1] <= 1.0 + 1e-9)
+    assert np.allclose(vals[inside], 1 + 10 * xy[inside, 0], atol=1e-12)

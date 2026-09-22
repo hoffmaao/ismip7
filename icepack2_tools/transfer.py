@@ -13,11 +13,38 @@ controls (theta = phi = 0 is the prior) and fatal for the fluidity prior: the
 ``dual_friction.build_rc_residual`` at once: a singular membrane block.
 
 ``interpolate_with_fill`` makes the fill a stated choice and counts it.
+
+A second artefact comes with the first. Firedrake locates a target point in a
+source cell up to ``mesh.tolerance`` (0.5 of a reference cell by default)
+outside that cell, and then evaluates the cell's own linear basis there:
+a point in the ring within about half a source cell of the ice front is
+extrapolated. Where the prior falls steeply towards the front that gave a
+transferred fluidity prior spanning [-218.69, 1028.05] from a source spanning
+[1.00, 783.69] (the 22 September 2 km MAPs onto the 1 km mesh). Inside a
+source cell linear interpolation is a convex combination of the cell's vertex
+values, so a value outside the source field's range can only come from
+extrapolation; located dofs are therefore clamped to the source's range,
+component by component, and the clamped dofs counted too.
 """
 import numpy as np
 from firedrake import Function
+from mpi4py import MPI
 
 from .mpi_stats import global_count, global_size
+
+
+def _source_range(source, comm):
+    """Per-component ``(lo, hi)`` of ``source`` over all ranks."""
+    data = source.dat.data_ro
+    data = data.reshape(data.shape[0], -1)
+    width = data.shape[1]
+    if data.shape[0]:
+        lo, hi = data.min(axis=0), data.max(axis=0)
+    else:
+        lo, hi = np.full(width, np.inf), np.full(width, -np.inf)
+    lo = np.array([comm.allreduce(float(v), op=MPI.MIN) for v in lo])
+    hi = np.array([comm.allreduce(float(v), op=MPI.MAX) for v in hi])
+    return lo, hi
 
 
 def interpolate_with_fill(target, source, fill, comm=None):
@@ -26,32 +53,51 @@ def interpolate_with_fill(target, source, fill, comm=None):
 
     ``fill`` is a float, or a Function on ``target``'s space whose values are
     taken where the source has none (the raster-sampled velocity_obs, say).
-    Returns ``(n_missing, n_total)``, both reduced over ranks and counting
-    dofs once (owned dofs only, whatever the value shape). A same-mesh call
-    is a plain interpolate and reports no missing dofs.
+    Located dofs are clamped to the source field's own range (per component):
+    a value beyond it can only be an extrapolation from a boundary cell, since
+    interpolation inside a cell never leaves the range of its vertex values.
+    Returns ``(n_missing, n_total, n_clamped)``, all reduced over ranks and
+    counting dofs once (owned dofs only, whatever the value shape). A
+    same-mesh call is a plain interpolate and reports nothing missing or
+    clamped.
     """
     comm = comm if comm is not None else target.comm
     total = global_size(target, comm)
     if source.function_space().mesh() is target.function_space().mesh():
         target.interpolate(source)
-        return 0, total
+        return 0, total, 0
     target.interpolate(
         source, allow_missing_dofs=True, default_missing_val=np.nan
     )
     data = target.dat.data
-    missing = np.isnan(data.reshape(data.shape[0], -1)).any(axis=1)
+    flat = data.reshape(data.shape[0], -1)
+    missing = np.isnan(flat).any(axis=1)
+    located = ~missing
+    lo, hi = _source_range(source, comm)
+    clamped = np.zeros(flat.shape[0], dtype=bool)
+    if flat.shape[0]:
+        # Count an excursion only past a roundoff margin: a source vertex
+        # value reproduced at 1 ulp below the minimum is not an extrapolation.
+        margin = 1e-9 * np.maximum(hi - lo, np.maximum(np.abs(lo), np.abs(hi)))
+        margin = np.maximum(margin, 1e-12)
+        below = (flat[located] < lo - margin).any(axis=1)
+        above = (flat[located] > hi + margin).any(axis=1)
+        clamped[located] = below | above
+        flat[located] = np.clip(flat[located], lo, hi)
     if isinstance(fill, Function):
         if fill.function_space() != target.function_space():
             raise ValueError(
                 "the fill Function must live on the target's function space"
             )
-        data[missing] = fill.dat.data_ro[missing]
+        flat[missing] = fill.dat.data_ro.reshape(flat.shape[0], -1)[missing]
     else:
-        data[missing] = float(fill)
+        flat[missing] = float(fill)
+    data[...] = flat.reshape(data.shape)
     n_missing = global_count(missing, comm)
-    if global_count(np.isnan(data.reshape(data.shape[0], -1)).any(axis=1), comm):
+    n_clamped = global_count(clamped, comm)
+    if global_count(np.isnan(flat).any(axis=1), comm):
         raise RuntimeError(
             f"{target.name()}: NaN left after filling missing dofs; the fill "
             "itself carries NaN"
         )
-    return n_missing, total
+    return n_missing, total, n_clamped

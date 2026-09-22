@@ -551,11 +551,12 @@ def setup_model(restart_from=None, *, allow_timing_cache_a_ref=False):
                 return None
             raise
         target_field = Function(space, name=name)
-        n_missing, n_total = interpolate_with_fill(
+        n_missing, n_total, n_clamped = interpolate_with_fill(
             target_field, source_field, fill, mesh.comm
         )
         transfer_fill[name] = {
             "missing": n_missing, "total": n_total, "fill": fill_label,
+            "clamped": n_clamped,
         }
         return target_field
 
@@ -742,11 +743,14 @@ def setup_model(restart_from=None, *, allow_timing_cache_a_ref=False):
                 H.interpolate(max_value(H, Constant(h_clamp_init)))
                 s.interpolate(max_value(b + H, (Constant(1.0) - rho_ratio) * H))
 
-    _filled = {k: v for k, v in transfer_fill.items() if v["missing"]}
+    _filled = {k: v for k, v in transfer_fill.items()
+               if v["missing"] or v["clamped"]}
     for _name, _info in _filled.items():
         PETSc.Sys.Print(
             f"  Transfer fill: {_name}: {_info['missing']} of {_info['total']} "
-            f"dofs lie outside the source mesh; filled with {_info['fill']}"
+            f"dofs lie outside the source mesh; filled with {_info['fill']}; "
+            f"{_info['clamped']} located dofs clamped to the source range "
+            "(extrapolated from a boundary cell)"
         )
     if mesh_fn and not _filled:
         PETSc.Sys.Print(

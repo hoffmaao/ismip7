@@ -55,10 +55,21 @@ fills each field with a stated value (`icepack2_tools/transfer.py`,
 | `fluidity_prior` | the constant baseline `A0 * a4_factor`, the value the code uses when a MAP carries no prior at all |
 | `velocity_obs` | the raster sample the forward makes on its own mesh |
 
-Every filled field prints one `Transfer fill:` line with its count, the counts
-go into the context (`ctx["transfer_fill"]`), the cache manifest and the score
-JSON, and a fluidity prior whose minimum is not positive after loading aborts
-the run with the reason. A same-mesh load misses nothing and prints nothing.
+A second artefact comes with the first. Firedrake locates a target point in a
+source cell up to half a reference cell outside it (`mesh.tolerance`, 0.5 by
+default) and evaluates that cell's linear basis there, so ring points within
+about a kilometre of the 2 km front are extrapolated. Measured on the first
+Quartz pass (22 September, jobs 10569251 and 10569254): the transferred prior
+spanned [-218.69, 1028.05] from a source spanning [1.00, 783.69]. Inside a cell
+linear interpolation stays within the cell's vertex values, so a value beyond
+the source field's range can only be an extrapolation; located dofs are
+clamped to the source's range, component by component, and counted.
+
+Every filled or clamped field prints one `Transfer fill:` line with both
+counts, the counts go into the context (`ctx["transfer_fill"]`), the cache
+manifest and the score JSON, and a fluidity prior whose minimum is not
+positive after loading aborts the run with the reason (which is what caught
+the extrapolation). A same-mesh load misses nothing and prints nothing.
 
 `ISMIP7_MESH=checkpoint` names the mesh embedded in the MAP or restart file.
 `site_env.sh` always exports a derived `.msh` path, so this sentinel is the

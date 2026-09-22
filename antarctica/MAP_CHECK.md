@@ -250,7 +250,7 @@ Budd hotspot is the same Lambert Glacier confluence cell on both meshes.
 |---|---|---|---|---|
 | Budd | 2 km / 5 km, native | 91 Newton, 21,871 condensed iterations, 596 s; 25.6 s for the step | speed 1.00e5 m/yr at (1698255, 700000), Lambert confluence; dh +522 m in 0.1 yr on a 1365 m grounded cell there; (dh/h)/dt 11/yr on a 110 m floating cell at (-1608931, -328070), Pine Island Bay | 10569571 |
 | Budd | 1 km / 10 km, transferred | 19 Newton, 566 condensed iterations, 42 s; 43.6 s for the step | (dh/h)/dt 25/yr on a 126 m grounded cell at (-1244404, 136859), Rutford Ice Stream area; dh +420 m in 0.05 yr on a 1186 m cell at (1692481, 701685), Lambert confluence; speed max 1.65e4 m/yr there | 10569519 |
-| RC | 2 km / 5 km, native | continuation step 1 alone: 64 Newton, 54,867 condensed iterations, 1374 s under gamg; pending | pending (job 10569456) | 10569456 |
+| RC | 2 km / 5 km, native | no transient step: the gamg continuation converged its first step after 64 Newton and 54,867 condensed iterations (1374 s) and diverged on the second (200 Newton iterations, residual 1.2e6, 1587 s), then restarted with 16 steps; the lane was stopped there after 53 minutes. The mumps continuation of the native score converged in 8 steps (42, 10, 16, 8, 8, 9, 8, 9 Newton iterations) | none reached | 10569456 |
 | RC | 1 km / 10 km, transferred | 24 Newton, 1,136 condensed iterations, 76 s; 78.2 s for the step | speed 1.09e5 m/yr at (-2412787, 1261392), northern Antarctic Peninsula; (dh/h)/dt 57/yr on a 209 m grounded cell at (-1551062, 836317); dh +720 m in 0.05 yr on a 25 m cell at (-2312121, 1007756) | 10569709 |
 
 Cache audits of the transferred states (`audit_cache`, `no_forcing_dhdt`
@@ -265,12 +265,18 @@ reference; 43.6 s against 30.0 s per step, one step, no warm-up excluded).
 
 **10-year controls (`control_transfer`, `control_native`, production
 configuration, run under `MAP_CHECK_CONTROLS_AFTER_FAILED_LANE=1`).** Budd
-jobs 10569654 (1 km) and 10569655 (2 km), RC job 10569813 (1 km), RC 2 km
-after its lane: pending (issue #20).
+jobs 10569654 (1 km) and 10569655 (2 km), RC job 10569813 (1 km): pending
+(issue #20). The RC 2 km control was not run: it would cold-start through
+the same gamg continuation that diverged in the lane, and the RC snapshot is
+already 2.7 times the observed discharge on that mesh.
 
 Not measured on this pass: a clean cost per step on either mesh (every lane
-stopped at step 1; the controls give the production wall time per simulated
-year instead) and the 10-year drift.
+stopped at step 1 or before; the controls give the production wall time per
+simulated year instead), the 10-year drift, and anything on the RC 2 km
+mesh beyond the score. The RC descent's diagnostic solve under `scpc_gamg`
+on the buffer-0 mesh is itself a finding for the friction decision: the
+production linear solver did not carry its continuation where `scpc_mumps`
+did.
 
 ## Running it on Quartz
 

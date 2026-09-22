@@ -105,6 +105,11 @@ export ISMIP7_DIAGNOSTIC_LINEAR_SOLVER="${ISMIP7_DIAGNOSTIC_LINEAR_SOLVER:-full_
 export ISMIP7_DT="${ISMIP7_DT:-0.1}"
 export ISMIP7_OUTPUT_INTERVAL="${ISMIP7_OUTPUT_INTERVAL:-10}"
 export ISMIP7_APPARENT_MB="${ISMIP7_APPARENT_MB-1}"
+# The yearly ISMIP7 fields and scalars, as in batch_runners/projection.sbatch:
+# this runner exists to produce the core experiments, and without them a
+# finished matrix cannot be submitted or checked. ISMIP7_OUTPUT=0 for a
+# pipeline exercise.
+export ISMIP7_OUTPUT="${ISMIP7_OUTPUT-1}"
 export ISMIP7_FIXED_FRONT="${ISMIP7_FIXED_FRONT:-1}"
 export ISMIP7_SUBCYCLES="${ISMIP7_SUBCYCLES:-1,4,16,64}"
 TAG="${ISMIP7_RUN_TAG:-}"

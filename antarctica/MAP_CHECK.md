@@ -179,13 +179,98 @@ against transferred comparison carries both the mesh and the transfer.
 
 ## Results
 
-The measured rows go here, one per MAP, law and mesh, with job ids, the MAP
-md5, the forward SHA, the melt slope and K file, and the `Friction:` banner
-of each run. None have been run yet; the first pass is queued on Quartz
-(issue #20).
+### Snapshot pass, 22 September 2026 (issue #20, issue #24)
 
-| MAP | law | mesh | s/step (64) | min/yr | Newton/step | Q ratio overall | bands (<100, 100-500, 500-1500, >1500) | misfit0 | filled dofs | lane | dVAF/dt 2016-2025 | track |
-|---|---|---|---|---|---|---|---|---|---|---|---|---|
+Release `maps-2km-snap-2026-09-22`: RC md5 `30d64e08ec9dd651d8a67eb00da3e30d`
+(140 iterations kept, source sha256 `6f2c8694f360dd6f8017837913604d0412c05d9618034437a1ec89e57d850bbf`),
+Budd md5 `1c5d1031651f873e386c66aea34a69fe` (240 iterations, source sha256
+`fdc66d42ad8357a0cdb66ede45c8ce3b266ec32739c5e075e520c082bcdb3310`), both on
+`antarctica_5000_2000_buffered0.msh` (925,183 vertices), MAP code `be5d685`.
+Forward code: this branch at 7a0c7e0 for the physics (the later commits on
+the branch touch the site setup, the cache publisher and the manager); the
+Budd native score ran before the clamp commit, on the MAP's own mesh, where
+no transfer happens. IU Quartz, `general` partition, one 128-core node per
+job; `scpc_mumps` for the scores and the prepares on 16 ranks, `scpc_gamg`
+for the lanes and controls on 64 ranks. Melt slope the `ant` default, K file
+`K_issue11_mesh2500.npz`, `ISMIP7_N_FLOW=3.0`, `ISMIP7_A4_FACTOR=1.0`, DG0
+geometry, tripwires `u_max 2e4 m/yr, h_max 5000 m, (dh/h)/dt 20/yr over
+cells thicker than 100 m`. Banners: RC `regularized Coulomb (c0=0.5,
+h_visc_floor=10m, cw0_floor=0.0e+00, eps_tauc=0.0e+00 MPa, alpha=1.0e-02)`;
+Budd `Budd N_hat (N_ref=reference; exact-zero shelf; delta=0.020,
+N_hat_cap=3.0, alpha_gl=0.50, h_visc_floor=10m, ocean_drag=1e-02@h<10m,
+u_lim=2e+04)`. The rows below are for the snapshots and are superseded when
+the final MAPs are run.
+
+**Transfer (both laws, `prepare_transfer`).** 164,735 of 1,869,088 vertex
+dofs per continuous field lie in the 20 km ring outside the source mesh and
+took the stated fill; the clamp caught 996 located dofs on the fluidity prior
+and 2 on log fluidity, none on log friction or the observed velocity. The
+prior on the target is [1.00, 783.69], the source range. The 8-step
+continuation converged in about 15 minutes on 16 ranks for both laws (Budd
+job 10569349, RC 10569531). Every transferred dof inside ice came from the
+source: no cell thicker than 1 m lies beyond the source outline (the ring is
+open ocean).
+
+**t = 0 (`score_native`, `score_transfer`).** Q(u_model)/Q(u_obs) across the
+grounding line, overall and per speed band of the observations; `misfit0` is
+the whole-mesh mean squared velocity error and is context for one mesh only.
+
+| law | mesh | Q ratio | bands (<100, 100-500, 500-1500, >1500 m/yr) | Q(u_obs) Gt/yr | misfit0 | job |
+|---|---|---|---|---|---|---|
+| Budd | 2 km / 5 km, native | 1.06 | 1.38, 0.99, 1.08, 0.92 | 2151 | 1.29e5 | 10569253 |
+| Budd | 1 km / 10 km, transferred | 0.67 | 0.90, 0.66, 0.64, 0.48 | 2378 | 2.02e4 | 10569518 |
+| RC | 2 km / 5 km, native | 2.75 | 6.62, 2.62, 1.78, 0.68 | 2151 | 1.19e5 | 10569455 |
+| RC | 1 km / 10 km, transferred | 2.67 | 6.41, 2.54, 1.74, 0.52 | 2378 | 2.97e4 | 10569708 |
+
+The Budd snapshot reproduces the observed grounding-line discharge on its
+own mesh to within the observational uncertainty overall, with the slow band
+a third high. Transferred, it discharges a third less in every band. Two
+things the transfer rebuilds explain the direction: the friction anchor
+`C_w0 = tau_d / |u_obs|^(1/m)` (`weertman_anchor`) is recomputed from the
+1 km BedMachine cell averages and the interpolated observations while the
+inverted log adjustment `theta` was fitted against the 2 km anchor, so the
+transferred friction is `C_w0(1 km) exp(theta(2 km))` and not the inverted
+field; and the grounding line and its thickness are rebuilt at 1 km, which
+moves Q(u_obs) itself by a tenth (2151 to 2378 Gt/yr). Budd alone also has
+`N_ref`, the shelf gate and the `alpha_gl` collar that follow the rebuilt
+grounding line. The RC snapshot discharges 2.7 times the observations on its
+own mesh, 6.4 times in the slow band, and the transfer leaves that ratio
+where it is: at 140 iterations the RC descent is far from the observations,
+or the forward's RC form and the inversion's differ; the final MAP's
+self-consistency check (stage 12, issue #24) separates the two.
+
+**Strict 10-step lanes (`lane_transfer`, `lane_native`).** All four lanes
+failed at their first step on the runaway tripwire, on hotspots the states
+carry at t = 0 (the cache audit's `no_forcing_dhdt`, the thickness tendency
+with no forcing and no apparent-mass-balance correction, names the same
+cells before the step is taken). The failures are the snapshots' own: the
+Budd hotspot is the same Lambert Glacier confluence cell on both meshes.
+
+| law | mesh | step-1 diagnostic | tripwire | job |
+|---|---|---|---|---|
+| Budd | 2 km / 5 km, native | 91 Newton, 21,871 condensed iterations, 596 s; 25.6 s for the step | speed 1.00e5 m/yr at (1698255, 700000), Lambert confluence; dh +522 m in 0.1 yr on a 1365 m grounded cell there; (dh/h)/dt 11/yr on a 110 m floating cell at (-1608931, -328070), Pine Island Bay | 10569571 |
+| Budd | 1 km / 10 km, transferred | 19 Newton, 566 condensed iterations, 42 s; 43.6 s for the step | (dh/h)/dt 25/yr on a 126 m grounded cell at (-1244404, 136859), Rutford Ice Stream area; dh +420 m in 0.05 yr on a 1186 m cell at (1692481, 701685), Lambert confluence; speed max 1.65e4 m/yr there | 10569519 |
+| RC | 2 km / 5 km, native | continuation step 1 alone: 64 Newton, 54,867 condensed iterations, 1374 s under gamg; pending | pending (job 10569456) | 10569456 |
+| RC | 1 km / 10 km, transferred | 24 Newton, 1,136 condensed iterations, 76 s; 78.2 s for the step | speed 1.09e5 m/yr at (-2412787, 1261392), northern Antarctic Peninsula; (dh/h)/dt 57/yr on a 209 m grounded cell at (-1551062, 836317); dh +720 m in 0.05 yr on a 25 m cell at (-2312121, 1007756) | 10569709 |
+
+Cache audits of the transferred states (`audit_cache`, `no_forcing_dhdt`
+over the 288,090 cells thicker than 100 m): Budd extremes +8103 m/yr at the
+Lambert cell above and -4233 m/yr beside it, net +21.6 Gt/yr; RC extreme
+-55,214 m/yr on a 462 m grounded cell moving 43,681 m/yr at (424771,
+-1800789), Victoria Land coast, with a cluster of grounded 100 to 230 m cells
+at 66,000 to 101,000 m/yr around (-1546500, 831800), net +31.3 Gt/yr. A
+single step under the strict contract cannot carry either; only the 1 km
+Budd step-1 solve is a normal one (19 Newton iterations against the 12.9
+reference; 43.6 s against 30.0 s per step, one step, no warm-up excluded).
+
+**10-year controls (`control_transfer`, `control_native`, production
+configuration, run under `MAP_CHECK_CONTROLS_AFTER_FAILED_LANE=1`).** Budd
+jobs 10569654 (1 km) and 10569655 (2 km), RC job 10569813 (1 km), RC 2 km
+after its lane: pending (issue #20).
+
+Not measured on this pass: a clean cost per step on either mesh (every lane
+stopped at step 1; the controls give the production wall time per simulated
+year instead) and the 10-year drift.
 
 ## Running it on Quartz
 

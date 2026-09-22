@@ -1,0 +1,186 @@
+# MAP checks: one released MAP, native and transferred
+
+`make -C antarctica map-check MAP_CHECK_FRICTION=regularized_coulomb|budd`
+takes one released MAP through a fixed ladder of checks and prints where each
+stands. It exists for two open group decisions: the submission mesh and time
+step (issue #20), and the basal friction law, regularized Coulomb or Budd,
+which the 2 km inversions at Rice carry (issue #24). The ladder measures what
+a forward from the MAP does on the MAP's own mesh and after transfer onto the
+production mesh, so the group can read cost, stability, t = 0 fidelity and
+ten-year drift for each (mesh, law) row side by side. It records evidence; it
+recommends nothing.
+
+## The MAPs it was built for
+
+Rice released mid-descent snapshots of both 2 km MAPs on 22 September 2026
+(release `maps-2km-snap-2026-09-22`, one file per law, 581 MB each, md5 in the
+release notes):
+
+| file | law | iterations kept |
+|---|---|---|
+| `inversion_icepack2_rc_n3_dg0_logvelnet_2000_int5000_bilap_snap20260922_0948.h5` | regularized Coulomb | 60 + 80 across two links |
+| `inversion_icepack2_budd_n3_dg0_logvelnet_2000_int5000_bilap_snap20260922_0948.h5` | Budd | 120 + 120 across two links |
+
+Both were inverted on `antarctica_5000_2000_buffered0.msh` (2 km / 5 km gmsh,
+925,183 vertices, no ocean buffer), DG0 geometry, n = 3, bilaplacian prior
+with sigma 0.3 and rho 7500 m, gamma 1e5 on both controls, code `be5d685`.
+Each carries `log_friction`, `log_fluidity`, `fluidity_prior`, bed, thickness,
+surface, `velocity_obs` and `obs_mask`, and no `velocity`: a forward re-solves
+the diagnostic on start. The final MAPs, with velocity, follow when the chains
+end (issue #24); the ladder then runs again on them and the snapshot rows stay
+in the table marked superseded.
+
+## The transfer, and the hazard it closes
+
+With `ISMIP7_INVERSION` naming a MAP and `ISMIP7_MESH` naming another mesh,
+`simulation.setup_model` keeps the MAP's mesh as the interpolation source and
+solves on `ISMIP7_MESH`: the continuous fields (`log_friction`,
+`log_fluidity`, `fluidity_prior`, `velocity_obs`) are interpolated across, the
+DG0 geometry is rebuilt from BedMachine cell averages on the target, and the
+frozen anchors (`N_ref`, `C_w0`, `phi_eff`, `H_init`) are rebuilt on the target
+geometry. That is the path the timing matrix's lanes take from the 2.5 km MAP.
+
+The production mesh carries a 20 km ocean buffer and the 2 km MAPs carry none,
+so every target dof in that ring lies outside the source mesh. Firedrake's
+cross-mesh interpolate wrote `0.0` there. Zero is the prior for theta and phi
+and a singular block for the fluidity prior: `A_eff = A_prior * exp(phi)`
+multiplies the dislocation term, the `lin_reg` regularizer and the `alpha_gl`
+collar in `dual_friction.build_rc_residual`, all at once. The loader now
+fills each field with a stated value (`icepack2_tools/transfer.py`,
+`interpolate_with_fill`):
+
+| field | fill outside the source mesh |
+|---|---|
+| `log_friction`, `log_fluidity` | 0, the prior |
+| `fluidity_prior` | the constant baseline `A0 * a4_factor`, the value the code uses when a MAP carries no prior at all |
+| `velocity_obs` | the raster sample the forward makes on its own mesh |
+
+Every filled field prints one `Transfer fill:` line with its count, the counts
+go into the context (`ctx["transfer_fill"]`), the cache manifest and the score
+JSON, and a fluidity prior whose minimum is not positive after loading aborts
+the run with the reason. A same-mesh load misses nothing and prints nothing.
+
+`ISMIP7_MESH=checkpoint` names the mesh embedded in the MAP or restart file.
+`site_env.sh` always exports a derived `.msh` path, so this sentinel is the
+only way a job submitted through `submit.sh projection` runs MAP-native, and
+Quartz holds no `antarctica_5000_2000_buffered0.msh` at all: the native rows
+below take their mesh from the checkpoint.
+
+## The ladder
+
+One MAP, one law, both meshes. Every stage stamps
+`results/map_check/<map stem>/status_<stage>.txt`; the table reads each stage
+off its artifacts first and its stamp second, and `make map-check` submits the
+first stage whose dependencies passed (`MAP_CHECK_STAGES=all` submits every
+runnable one, `MAP_CHECK_STAGES=<stage>` one, `FORCE_TIMING=1` resubmits).
+`make map-check-dry-run` prints the table and every stage's composed sbatch
+line. The manager is `scripts/manage_map_check.py`; it composes its requests
+through `submit.sh` like the timing campaign and shares that code
+(`SlurmStageRunner` in `scripts/manage_timing_campaign.py`).
+
+Native means `ISMIP7_LC=2000 ISMIP7_LC_COARSE=5000 ISMIP7_BUFFER_M=0
+ISMIP7_MESH=checkpoint`, dt 0.1 (the matrix rule `0.125 * LC / 2500`), the
+tracked `boundary_ids_antarctica_5000_2000_buffered0.json`. Transferred means
+`ISMIP7_LC=1000 ISMIP7_LC_COARSE=10000 ISMIP7_BUFFER_M=20000`, the production
+mesh, dt 0.05. Every job carries `ISMIP7_FRICTION=<law>`, DG0, n = 3, and the
+lanes and controls carry the runaway tripwire defaults of
+`timing_campaign.TRIPWIRE_DEFAULTS`.
+
+| # | stage | job | passed means |
+|---|---|---|---|
+| 0 | `fetch` | curl of the release asset on the login node, md5 against the release notes (`MAP_CHECK_MD5=auto` reads them; a hex value pins it), the h5 root attributes read where h5py is importable | md5 equal; `friction`, `geometry_space`, `n_flow`, `mesh_basename`, `lc`, `lc_coarse`, `buffer_m` as expected |
+| 1 | `repack` | `timing_redistribute.script`, one rank, 32G: the one-rank rewrite every later job loads at its own rank count; the repack keeps the release basename, so every record names the release file | the repack exists |
+| 2 | `score_native` | `map_check_score.script`: `score_map.py --json` on the MAP's mesh, 16 ranks; under Budd also the `check_budd_map.py` shelf-gate census | the continuation converges, the discharge ratio is finite, no dof was filled, the fluidity prior minimum is positive |
+| 3 | `prepare_transfer` | `timing_prepare.script` with the law and the target mesh, cache role `map-check-initial-state`, under `<stem>/cache/`, 16 ranks 96G, 1 to 3 h | `validate_map_check_manifest` passes with the MAP's and the mesh's sha256 and the `scpc_mumps` fingerprint; the fill counts are in the manifest |
+| 4 | `audit_cache` | `timing_cache_audit.script`: the t = 0 finite-volume tendency of the transferred state | the audit JSON exists (record only) |
+| 5 | `score_transfer` | `map_check_score.script --restart <cache>`: the same discharge score on the transferred state | finite ratio, positive prior minimum |
+| 6 | `lane_transfer` | `timing_transient.script`, kind `map_check`, restart from the cache, 64 ranks under `MAP_CHECK_SOLVER` (`scpc_gamg`), the strict contract, 10 steps of dt 0.05 | the `make qualify` rule (whole interval, no diverged solve, mass residual at or under 5e-5 Gt), no tripwire, rescue off, `initial_state_source` is the release file |
+| 7 | `lane_native` | the same lane on the MAP's mesh, cold start from the MAP inside the lane (setup is timed apart from the steps), 10 steps of dt 0.1 | the same rule |
+| 8 | `control_transfer` | `submit.sh projection ISMIP7_EXPERIMENT=control ISMIP7_T_END=2025 ISMIP7_OUTPUT=1`, the production defaults (`ISMIP7_APPARENT_MB=1`, `ISMIP7_FIXED_FRONT=1`, `scpc_gamg`, self-chaining), cold start from the MAP through the transfer inside the job, the K file `MAP_CHECK_K_NPZ` names, `ISMIP7_RUN_TAG=mapcheck_<law>_<snap>_<lc>` | the timeseries reaches 2025 with `resid` at 0.00 on every row and the final state written |
+| 9 | `control_native` | the same control on the MAP's mesh | the same |
+| 10 | `audit_controls` | `map_check_audit.script`: `check_ismip6_track.py` on both series (exit codes kept), `compare_runs.py` overlay, `region_budget.py` at each final state under its own mesh triple | the audit JSON and the figure exist |
+| 11 | `summary` | the manager writes `<stem>/summary.md` from whatever JSON exists | always |
+
+Dependencies: `fetch`, then `repack`, then `score_native`, `prepare_transfer`
+and `lane_native` at once; `prepare_transfer` gates `audit_cache`,
+`score_transfer` and `lane_transfer`; each lane gates its control; both
+controls gate `audit_controls`. The controls cold-start from the MAP because
+`setup_model` refuses `ISMIP7_APPARENT_MB=1` on a restart that carries no
+`a_ref_mb`, and because that is the path production takes. The control driver
+prints its "no historical endpoint" warning on a cold start: these controls
+measure drift and are not a projection baseline.
+
+Stage 12, by hand when the final MAPs land: `ISMIP7_CHECK_FRICTION=<law>
+check_budd_map.py <final> --forward` on the MAP's mesh
+(`budd_map_census.script`). A MAP inverted under the forward's residual
+reproduces its own velocity to about 1e-7 (issue #24 carries the exit
+criterion); the snapshots have no velocity to compare against.
+
+## How to read the table
+
+- **Does the transfer work.** `prepare_transfer` passing with a positive
+  prior minimum and a continuation that converged, `score_transfer` within
+  0.05 of `score_native` overall and 0.10 per band (0.05 is the observed
+  discharge uncertainty, 100 of 2050 Gt/yr, Rignot 2019), and
+  `lane_transfer` passing. A filled dof inside ice (a cell thicker than 1 m
+  beyond the source outline) means the buffer-0 source does not cover the
+  buffered target's ice; the fallback is an `antarctica_10000_1000_buffered0`
+  mesh, to be built and re-timed.
+- **Cost.** `seconds_per_step` from each lane record, on 64 ranks, against the
+  matrix row for the 1 km mesh from the 2.5 km Budd MAP: 30.0 s per step,
+  10.0 minutes per simulated year, 47.5 h per 285 years, 1.0 GiB per rank
+  (`TIMING_MATRIX_QUARTZ_SCPC_GAMG.md`). Minutes per year is
+  `seconds_per_step / dt / 60`; the eleven-experiment matrix is about 2260
+  simulated years of transient loop.
+- **Stability.** The lane verdicts, the tripwire, the Newton iterations per
+  step (12.9 on the 1 km reference row) and the condensed iterations.
+- **t = 0 fidelity.** The discharge ratio overall and per speed band on each
+  mesh, the initial misfit against the observations, the filled dof counts,
+  and the `Apparent MB: a_ref in [lo, hi] m/yr, net X Gt/yr` line of each
+  control's log.
+- **Ten-year drift.** From each control's timeseries over 2016 to 2025:
+  dVAF/dt, dM/dt, the discharge in 2016 and 2025 and its block growth, the
+  grounded area from `iareagr`, melt and SMB, and the track verdict per row
+  (`check_ismip6_track.py`: dVAF/dt warns outside 2 and fails outside 5 mm
+  SLE/yr; the peak clause raises a known false positive, issue #33, written
+  as such).
+
+Confounders that go with every table: the snapshots are unconverged and at
+different iteration counts under log-velocity weights re-derived per chain
+link (issue #68); Budd carries the `ISMIP7_ALPHA_GL=0.5` grounding-line collar
+and a frozen `N_ref` that regularized Coulomb has no counterpart to; the K
+file was fitted under the local slope on a 2500 m mesh and the forward now
+defaults to the constant Antarctic slope (issues #26, #30); apparent mass
+balance zeroes the t = 0 tendency, so only the later drift and the size of
+the correction separate rows; the native mesh has no buffer and the
+production mesh 20 km of it, so front bookkeeping differs and the native
+against transferred comparison carries both the mesh and the transfer.
+
+## Results
+
+The measured rows go here, one per MAP, law and mesh, with job ids, the MAP
+md5, the forward SHA, the melt slope and K file, and the `Friction:` banner
+of each run. None have been run yet; the first pass is queued on Quartz
+(issue #20).
+
+| MAP | law | mesh | s/step (64) | min/yr | Newton/step | Q ratio overall | bands (<100, 100-500, 500-1500, >1500) | misfit0 | filled dofs | lane | dVAF/dt 2016-2025 | track |
+|---|---|---|---|---|---|---|---|---|---|---|---|---|
+
+## Running it on Quartz
+
+From a scratch clone of the branch (`/N/scratch/dlilien/ismip7_<branch>`,
+with `sites/local.env` naming the shared `ISMIP7_DATA_ROOT` and
+`ISMIP7_OBS_DATA_ROOT`), from `antarctica/`, once per law and again as each
+stage settles:
+
+```bash
+make map-check MAP_CHECK_FRICTION=regularized_coulomb \
+  MAP_CHECK_TARGET_MESH=/N/project/ice_rheology/ISMIP7/antarctica/mesh/antarctica_10000_1000_buffered20000.msh \
+  MAP_CHECK_K_NPZ=/N/project/ice_rheology/ISMIP7/antarctica/results/issue11_melt_check/K_issue11_mesh2500.npz
+```
+
+The whole ladder for one law is about nine to ten hours of wall time and
+roughly 700 core-hours, and the two laws run side by side. The mechanical
+half of the question, whether the transfer works, is answerable after
+`prepare_transfer`, `score_transfer` and `lane_transfer`, four to five hours
+in.

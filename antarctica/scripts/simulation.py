@@ -59,6 +59,7 @@ RESULTS_DIR = os.path.join(_ROOT, "results")
 sys.path.insert(0, os.path.dirname(_ROOT))
 from mesh_naming import mesh_filename
 
+from icepack2_tools.transfer import interpolate_with_fill
 from icepack2_tools.mpi_stats import (
     global_count,
     global_extreme_location,
@@ -79,6 +80,7 @@ from icepack2_tools.runconfig import (
     BUDD_SHELF_GATE as _BUDD_SHELF_GATE,
     residual_stabilizers,
     friction as _friction, geometry_space as _geometry_space,
+    mesh_override as _mesh_override,
     lc as _lc, lc_coarse as _lc_coarse, n_flow as _n_flow,
     TARGET_MESH_GEOMETRY_METHOD,
     calving_law as _calving_law, calving_sigma_max as _calving_sigma_max,
@@ -364,7 +366,9 @@ def setup_model(restart_from=None, *, allow_timing_cache_a_ref=False):
                               chk_buffer_m))
 
     source_mesh_basename = mesh_basename
-    mesh_fn = os.environ.get("ISMIP7_MESH")
+    # None for unset, empty and the sentinel `checkpoint`: solve on the mesh
+    # the checkpoint carries.
+    mesh_fn = _mesh_override()
     if mesh_fn:
         # The timing matrix deliberately solves on a mesh different from the
         # MAP mesh. Keep the checkpoint mesh as the interpolation source and
@@ -391,7 +395,7 @@ def setup_model(restart_from=None, *, allow_timing_cache_a_ref=False):
     # checkpoint was written on, so it must not override the record - and only
     # the recorded value is carried into the checkpoints this run writes.
     if not mesh_basename:
-        _env_mesh = os.environ.get("ISMIP7_MESH", "")
+        _env_mesh = _mesh_override() or ""
         mesh_basename = os.path.basename(_env_mesh) if _env_mesh else ""
         if mesh_basename:
             PETSc.Sys.Print(
@@ -519,8 +523,27 @@ def setup_model(restart_from=None, *, allow_timing_cache_a_ref=False):
     t_restart = None
     A_prior_f = None
     ismip7_resume = None
-    def load_checkpoint_field(chk, name, space, optional=False):
-        """Load a checkpoint field, interpolating it for a timing mesh."""
+    # The fluidity baseline, here because the loader below fills the prior
+    # with it where the compute mesh reaches past the MAP's.
+    A0 = Constant(icepack.rate_factor(Constant(260.0)))
+    a4_factor = float(os.environ.get("ISMIP7_A4_FACTOR", a4_factor_default()))
+    A_prior_baseline = float(A0) * a4_factor
+    # One entry per field loaded across meshes: how many target dofs lay
+    # outside the source mesh and what they were filled with. Printed below
+    # and carried in the context for the caches and the map checks.
+    transfer_fill = {}
+
+    def load_checkpoint_field(chk, name, space, optional=False,
+                              fill=0.0, fill_label="0"):
+        """Load a checkpoint field, interpolating it onto the compute mesh.
+
+        With ISMIP7_MESH naming another mesh, a target dof outside the source
+        mesh takes ``fill``: a float, or a Function on ``space`` (the raster
+        sample for velocity_obs). The buffered production mesh reaches 20 km
+        past a buffer-0 MAP, so the whole ring is filled; zero there is the
+        prior for theta and phi and a singular block for the fluidity prior
+        (icepack2_tools.transfer). Same-mesh loads miss nothing.
+        """
         try:
             source_field = chk.load_function(source_mesh, name=name)
         except (KeyError, RuntimeError, ValueError):
@@ -528,11 +551,12 @@ def setup_model(restart_from=None, *, allow_timing_cache_a_ref=False):
                 return None
             raise
         target_field = Function(space, name=name)
-        target_field.interpolate(
-            source_field,
-            allow_missing_dofs=True,
-            default_missing_val=0.0,
+        n_missing, n_total = interpolate_with_fill(
+            target_field, source_field, fill, mesh.comm
         )
+        transfer_fill[name] = {
+            "missing": n_missing, "total": n_total, "fill": fill_label,
+        }
         return target_field
 
     with fd.CheckpointFile(source_chk, "r") as chk:
@@ -546,7 +570,9 @@ def setup_model(restart_from=None, *, allow_timing_cache_a_ref=False):
         # MAPs and restart checkpoints carry it; older ones (constant-baseline
         # MAPs) don't, and A4_base falls back to A0*a4_factor below.
         A_prior_f = load_checkpoint_field(
-            chk, "fluidity_prior", Q, optional=True
+            chk, "fluidity_prior", Q, optional=True,
+            fill=A_prior_baseline,
+            fill_label=f"the constant baseline A0*a4_factor = {A_prior_baseline:.3g}",
         )
         if is_restart:
             # Self-contained restart: evolved geometry, frozen anchors, time.
@@ -563,7 +589,8 @@ def setup_model(restart_from=None, *, allow_timing_cache_a_ref=False):
             # current timing caches require velocity_obs and fail loudly if it
             # is absent.
             cached_u_obs = load_checkpoint_field(
-                chk, "velocity_obs", V, optional=True
+                chk, "velocity_obs", V, optional=True,
+                fill=u_obs, fill_label="the raster-sampled velocity_obs",
             )
             if cached_u_obs is not None:
                 u_obs.assign(cached_u_obs)
@@ -706,11 +733,25 @@ def setup_model(restart_from=None, *, allow_timing_cache_a_ref=False):
                 s = load_checkpoint_field(chk, "surface", Q_g)
                 geometry_source = os.path.realpath(source_chk)
                 geometry_source_method = "checkpoint-native-v1"
-            _uo = load_checkpoint_field(chk, "velocity_obs", V)
+            _uo = load_checkpoint_field(
+                chk, "velocity_obs", V,
+                fill=u_obs, fill_label="the raster-sampled velocity_obs",
+            )
             u_obs.dat.data[:] = _uo.dat.data_ro
             if h_clamp_init > 0.0:
                 H.interpolate(max_value(H, Constant(h_clamp_init)))
                 s.interpolate(max_value(b + H, (Constant(1.0) - rho_ratio) * H))
+
+    _filled = {k: v for k, v in transfer_fill.items() if v["missing"]}
+    for _name, _info in _filled.items():
+        PETSc.Sys.Print(
+            f"  Transfer fill: {_name}: {_info['missing']} of {_info['total']} "
+            f"dofs lie outside the source mesh; filled with {_info['fill']}"
+        )
+    if mesh_fn and not _filled:
+        PETSc.Sys.Print(
+            "  Transfer fill: none (every target dof lies inside the source mesh)"
+        )
 
     # Clip the log-adjustments to a sane band. theta/phi are O(1) in a
     # converged MAP, so anything far beyond that is optimization noise from an
@@ -733,12 +774,10 @@ def setup_model(restart_from=None, *, allow_timing_cache_a_ref=False):
                 f"|.|<={map_clip:.0f} (unconverged-checkpoint outliers)"
             )
 
-    A0 = Constant(icepack.rate_factor(Constant(260.0)))
     # Composite flow exponent (must match the inversion that produced the
     # MAP file we load above). This branch: n=3 standard Glen (A4_FACTOR=1).
     n_flow_val = _n_flow()
     m_slide_val = float(os.environ.get("ISMIP7_M_SLIDE", "3.0"))
-    a4_factor = float(os.environ.get("ISMIP7_A4_FACTOR", a4_factor_default()))
     n_flow = Constant(n_flow_val)
     m_slide = Constant(m_slide_val)
     tau_c = Constant(0.1)
@@ -772,12 +811,24 @@ def setup_model(restart_from=None, *, allow_timing_cache_a_ref=False):
             f"  Fluidity prior A_prior loaded "
             f"[{A_prior_lo:.2f}, {A_prior_hi:.2f}]"
         )
+        if not A_prior_lo > 0.0:
+            raise RuntimeError(
+                f"fluidity_prior minimum {A_prior_lo:g} is not positive after "
+                "loading: A_eff = A_prior*exp(phi) vanishes there, which zeroes "
+                "the dislocation term, the lin_reg regularizer and the alpha_gl "
+                "collar in dual_friction.build_rc_residual at once (a singular "
+                "membrane block). A transferred MAP fills the dofs outside its "
+                "mesh with the constant baseline; a MAP carrying zeros is not "
+                "usable as shipped."
+            )
     else:
-        A_prior_f = Function(Q, name="fluidity_prior").interpolate(A0 * Constant(a4_factor))
+        A_prior_f = Function(Q, name="fluidity_prior").interpolate(
+            Constant(A_prior_baseline)
+        )
         A4_base = A_prior_f
         PETSc.Sys.Print(
             f"  Fluidity prior: checkpoint has no fluidity_prior; using LEGACY "
-            f"constant baseline A0*a4_factor = {float(A0) * a4_factor:.2f}"
+            f"constant baseline A0*a4_factor = {A_prior_baseline:.2f}"
         )
     A_map = A4_base * exp(phi_f)
     K_base = u_c / (phi_eff * tau_c) ** m_slide
@@ -1363,6 +1414,8 @@ def setup_model(restart_from=None, *, allow_timing_cache_a_ref=False):
         "mesh_basename": mesh_basename,
         "geometry_source": geometry_source,
         "geometry_source_method": geometry_source_method,
+        "transfer_fill": transfer_fill,
+        "initial_misfit": misfit0,
         "V": V,
         "Z": Z,
         "z": z,

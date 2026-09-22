@@ -219,7 +219,165 @@ def _parse_mesh(value):
     return pair
 
 
-class CampaignManager:
+class SlurmStageRunner:
+    """What a stage machine needs from the scheduler: reconcile a stamp with
+    the allocation it names, and hand one job to submit.sh. CampaignManager
+    (the timing matrix) and MapCheckManager (manage_map_check.py, one
+    released MAP through its checks) share it; each sets ``root``, ``queue``,
+    ``partition``, ``constraint``, ``walltime``, ``dry_run`` and
+    ``submit_failures`` before calling either method."""
+
+    def reconcile_status(self, status_path):
+        """Turn a dead Slurm allocation's live-looking stamp into a failure."""
+        status = read_status(status_path)
+        kind, slurm_state, exit_code = _slurm_outcome(status)
+        if kind in {"active", "unknown"}:
+            return status, True
+        if kind != "terminal":
+            return status, False
+        category = (
+            "incomplete_output"
+            if slurm_state == "COMPLETED"
+            else "external_termination"
+        )
+        reconciled = {
+            "state": "failed",
+            "category": category,
+            "phase": "scheduler",
+            "slurm_state": slurm_state,
+            "exit_code": exit_code,
+            "job_id": status.get("job_id"),
+            "timestamp": _timestamp(),
+        }
+        if not self.dry_run:
+            atomic_write_status(
+                status_path,
+                reconciled.pop("state"),
+                **reconciled,
+            )
+            reconciled["state"] = "failed"
+        return reconciled, False
+
+    def _submit(
+        self,
+        job_name,
+        ncores,
+        memory,
+        exports,
+        script,
+        status_path,
+        dependency=None,
+        kind="script",
+    ):
+        # submit.sh composes the sbatch line from this cluster's site file
+        # (account, node feature, extra flags, per-node limits), so a lane is
+        # the same request here at every site. It submits from the checkout
+        # this manager runs in, whatever the site file would default to.
+        # kind="projection" hands a forward to projection.sbatch through
+        # `submit.sh projection`, which takes no script, --queue, --cd or
+        # --dependency: the runner chains itself and runs from the checkout
+        # root, and the site's short partition is its default.
+        submit = self.root / "scripts/batch_runners/submit.sh"
+        command = ["bash", os.fspath(submit), kind]
+        if kind == "script":
+            command.extend([
+                os.fspath(Path(script).relative_to(self.root)),
+                "--cd",
+                self.root.name,
+            ])
+        elif dependency:
+            raise ValueError(
+                "submit.sh projection takes no --dependency; the forward "
+                "runner chains itself"
+            )
+        command.extend([
+            "--name",
+            job_name,
+            "--tasks",
+            str(ncores),
+            "--mem",
+            memory,
+            "--time",
+            self.walltime,
+        ])
+        if self.partition:
+            command.extend(["--partition", self.partition])
+        elif kind == "script":
+            command.extend(["--queue", self.queue])
+        if self.constraint:
+            command.extend(["--constraint", self.constraint])
+        if dependency:
+            command.extend(["--dependency", dependency])
+        if self.dry_run:
+            command.append("--dry-run")
+        command.extend(f"{key}={value}" for key, value in exports.items())
+        env = dict(os.environ, ISMIP7_REPO=os.fspath(self.root.parent))
+        if not self.dry_run:
+            print("SUBMIT:", shlex.join(command))
+            if shutil.which("sbatch") is None:
+                raise RuntimeError(
+                    "sbatch is unavailable; use --dry-run off-cluster"
+                )
+            atomic_write_status(
+                status_path, "submitting", timestamp=_timestamp()
+            )
+        result = subprocess.run(
+            command, check=False, capture_output=True, text=True, env=env
+        )
+        if (
+            self.dry_run
+            and result.returncode == 2
+            and "no site definition matches" in result.stderr
+        ):
+            # Off-cluster there is no site to name. A dry run starts nothing,
+            # so show the request as the no-scheduler site would compose it.
+            env["ISMIP7_SITE"] = "local"
+            result = subprocess.run(
+                command, check=False, capture_output=True, text=True, env=env
+            )
+        # The composed command goes to standard error; a dry run of the
+        # projection form prints it on standard output instead.
+        composed = result.stderr.strip() or (
+            result.stdout.strip() if self.dry_run else ""
+        )
+        if result.returncode == _SUBMIT_NOT_RUNNABLE:
+            # One node of this site cannot hold the request. The lanes stay
+            # single-node and comparable between sites, so this is an outcome
+            # to record, not a failure to retry; --force does not change it.
+            reason = _not_runnable_reason(composed)
+            print("DRY RUN:" if self.dry_run else "NOT RUNNABLE:", composed)
+            if not self.dry_run:
+                atomic_write_status(
+                    status_path,
+                    "not_runnable",
+                    reason=reason,
+                    timestamp=_timestamp(),
+                )
+            return
+        if self.dry_run:
+            print("DRY RUN:", composed)
+            if result.returncode != 0:
+                self.submit_failures += 1
+            return
+        if composed:
+            print(composed)
+        if result.returncode != 0:
+            atomic_write_status(
+                status_path,
+                "submission_failed",
+                exit_code=result.returncode,
+                timestamp=_timestamp(),
+            )
+            self.submit_failures += 1
+            return
+        job_id = result.stdout.strip().split(";", 1)[0]
+        atomic_write_status(
+            status_path, "submitted", job_id=job_id, timestamp=_timestamp()
+        )
+        return job_id
+
+
+class CampaignManager(SlurmStageRunner):
     def __init__(self, args):
         self.root = Path(args.root).resolve()
         self.mesh_dir = self.root / "mesh"
@@ -290,37 +448,6 @@ class CampaignManager:
         if self.only_mesh is None:
             return lanes
         return tuple(lane for lane in lanes if lane[:2] == self.only_mesh)
-
-    def reconcile_status(self, status_path):
-        """Turn a dead Slurm allocation's live-looking stamp into a failure."""
-        status = read_status(status_path)
-        kind, slurm_state, exit_code = _slurm_outcome(status)
-        if kind in {"active", "unknown"}:
-            return status, True
-        if kind != "terminal":
-            return status, False
-        category = (
-            "incomplete_output"
-            if slurm_state == "COMPLETED"
-            else "external_termination"
-        )
-        reconciled = {
-            "state": "failed",
-            "category": category,
-            "phase": "scheduler",
-            "slurm_state": slurm_state,
-            "exit_code": exit_code,
-            "job_id": status.get("job_id"),
-            "timestamp": _timestamp(),
-        }
-        if not self.dry_run:
-            atomic_write_status(
-                status_path,
-                reconciled.pop("state"),
-                **reconciled,
-            )
-            reconciled["state"] = "failed"
-        return reconciled, False
 
     def source_checksum(self):
         if self.source_sha256 is None:
@@ -808,108 +935,6 @@ class CampaignManager:
                 status_path,
                 dependency=dependency,
             )
-
-    def _submit(
-        self,
-        job_name,
-        ncores,
-        memory,
-        exports,
-        script,
-        status_path,
-        dependency=None,
-    ):
-        # submit.sh composes the sbatch line from this cluster's site file
-        # (account, node feature, extra flags, per-node limits), so a lane is
-        # the same request here at every site. It submits from the checkout
-        # this manager runs in, whatever the site file would default to.
-        submit = self.root / "scripts/batch_runners/submit.sh"
-        command = [
-            "bash",
-            os.fspath(submit),
-            "script",
-            os.fspath(Path(script).relative_to(self.root)),
-            "--cd",
-            self.root.name,
-            "--name",
-            job_name,
-            "--tasks",
-            str(ncores),
-            "--mem",
-            memory,
-            "--time",
-            self.walltime,
-        ]
-        if self.partition:
-            command.extend(["--partition", self.partition])
-        else:
-            command.extend(["--queue", self.queue])
-        if self.constraint:
-            command.extend(["--constraint", self.constraint])
-        if dependency:
-            command.extend(["--dependency", dependency])
-        if self.dry_run:
-            command.append("--dry-run")
-        command.extend(f"{key}={value}" for key, value in exports.items())
-        env = dict(os.environ, ISMIP7_REPO=os.fspath(self.root.parent))
-        if not self.dry_run:
-            print("SUBMIT:", shlex.join(command))
-            if shutil.which("sbatch") is None:
-                raise RuntimeError(
-                    "sbatch is unavailable; use --dry-run off-cluster"
-                )
-            atomic_write_status(
-                status_path, "submitting", timestamp=_timestamp()
-            )
-        result = subprocess.run(
-            command, check=False, capture_output=True, text=True, env=env
-        )
-        if (
-            self.dry_run
-            and result.returncode == 2
-            and "no site definition matches" in result.stderr
-        ):
-            # Off-cluster there is no site to name. A dry run starts nothing,
-            # so show the request as the no-scheduler site would compose it.
-            env["ISMIP7_SITE"] = "local"
-            result = subprocess.run(
-                command, check=False, capture_output=True, text=True, env=env
-            )
-        composed = result.stderr.strip()
-        if result.returncode == _SUBMIT_NOT_RUNNABLE:
-            # One node of this site cannot hold the request. The lanes stay
-            # single-node and comparable between sites, so this is an outcome
-            # to record, not a failure to retry; --force does not change it.
-            reason = _not_runnable_reason(composed)
-            print("DRY RUN:" if self.dry_run else "NOT RUNNABLE:", composed)
-            if not self.dry_run:
-                atomic_write_status(
-                    status_path,
-                    "not_runnable",
-                    reason=reason,
-                    timestamp=_timestamp(),
-                )
-            return
-        if self.dry_run:
-            print("DRY RUN:", composed)
-            if result.returncode != 0:
-                self.submit_failures += 1
-            return
-        if composed:
-            print(composed)
-        if result.returncode != 0:
-            atomic_write_status(
-                status_path,
-                "submission_failed",
-                exit_code=result.returncode,
-                timestamp=_timestamp(),
-            )
-            self.submit_failures += 1
-            return
-        job_id = result.stdout.strip().split(";", 1)[0]
-        atomic_write_status(
-            status_path, "submitted", job_id=job_id, timestamp=_timestamp()
-        )
 
     def prepare(self):
         try:

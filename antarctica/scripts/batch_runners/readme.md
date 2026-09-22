@@ -268,6 +268,20 @@ it exists. A mesh named through `ISMIP7_MESH` is never built.
 
 ## The job scripts
 
+### `map_check_score.script` and `map_check_audit.script`
+
+`make -C antarctica map-check` (`antarctica/MAP_CHECK.md`) takes one released
+MAP through its checks with `timing_redistribute.script`,
+`timing_prepare.script`, `timing_cache_audit.script`,
+`timing_transient.script` and `projection.sbatch`, plus these two. The score
+script runs `scripts/score_map.py --json` on the MAP's own mesh or, with
+`ISMIP7_MAP_CHECK_RESTART`, on a prepared map-check cache, and under Budd the
+`check_budd_map.py` shelf-gate census. The audit script runs
+`check_ismip6_track.py`, `compare_runs.py` and `region_budget.py` over the two
+ten-year controls and collects every exit code and output into one JSON. Both
+source `site_core.sh` alone and walk their status file running to finished or
+failed, as the timing scripts do.
+
 ### `partition_probe.sbatch`, run first after a build
 
 Distributes the mesh at 1 to 32 ranks and reports the ghost-to-owned dof ratio.

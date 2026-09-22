@@ -217,3 +217,69 @@ def test_make_matrix_renders_the_campaign_the_command_line_names(sandbox):
     text = out.read_text()
     assert f"Campaign tag: `{mumps.replace('mumps', 'gamg')}`" in text
     assert "Lanes use `scpc_gamg`, an exact-mesh prepared cache (prepared under `scpc_mumps`" in text
+
+
+def _python_shim(sandbox):
+    import sys
+    (sandbox / "bin" / "python").write_text(f'#!/bin/bash\nexec "{sys.executable}" "$@"\n')
+    (sandbox / "bin" / "python").chmod(0o755)
+
+
+def _map_check_inputs(sandbox):
+    r"""A fetched stand-in MAP, the production mesh and the two sidecars."""
+    import hashlib
+    import shutil
+    root = sandbox / "repo" / "antarctica"
+    basename = "inversion_icepack2_rc_n3_dg0_logvelnet_2000_int5000_bilap_snap20260922_0948.h5"
+    download = root / "results/map_check/maps/download" / basename
+    download.parent.mkdir(parents=True)
+    download.write_text("a released MAP\n")
+    (root / "mesh").mkdir()
+    for name in ("boundary_ids_antarctica_10000_1000_buffered20000.json",
+                 "boundary_ids_antarctica_5000_2000_buffered0.json"):
+        shutil.copy(REPO / "antarctica" / "mesh" / name, root / "mesh" / name)
+    (root / "mesh" / "antarctica_10000_1000_buffered20000.msh").write_text("mesh\n")
+    return [f"MAP_CHECK_MD5={hashlib.md5(download.read_bytes()).hexdigest()}",
+            "MAP_CHECK_ATTRS=0"]
+
+
+def test_map_check_dry_run_lists_every_stage_and_submits_nothing(sandbox):
+    _python_shim(sandbox)
+    proc, seen = make(sandbox, "map-check-dry-run", *_map_check_inputs(sandbox),
+                      ISMIP7_SITE="iu_quartz")
+    assert proc.returncode == 0, proc.stderr
+    out = proc.stdout
+    stages = ("fetch", "repack", "score_native", "prepare_transfer", "audit_cache",
+              "score_transfer", "lane_transfer", "lane_native", "control_transfer",
+              "control_native", "audit_controls", "summary")
+    positions = [out.index(f"--- {stage}") for stage in stages]
+    assert positions == sorted(positions)
+    assert out.count("DRY RUN: site iu_quartz: sbatch") == 10
+    assert "ISMIP7_FRICTION=regularized_coulomb" in out
+    assert "ISMIP7_MESH=checkpoint" in out and "antarctica_10000_1000_buffered20000.msh" in out
+    assert "--ntasks-per-node=16" in out and "--ntasks-per-node=64" in out
+    assert "scripts/batch_runners/timing_prepare.script" in out
+    assert "antarctica/scripts/batch_runners/projection.sbatch" in out
+    assert seen == []
+
+
+def test_map_check_submits_the_first_runnable_stage_and_stamps_it(sandbox):
+    _python_shim(sandbox)
+    inputs = _map_check_inputs(sandbox)
+    # First call: the fetch runs in the manager itself and passes on the md5.
+    proc, seen = make(sandbox, "map-check", *inputs, ISMIP7_SITE="iu_quartz")
+    assert proc.returncode == 0, proc.stderr
+    assert "FETCH PASSED" in proc.stdout and seen == []
+    # Second call: the repack is the one runnable stage and goes to sbatch.
+    proc, seen = make(sandbox, "map-check", *inputs, ISMIP7_SITE="iu_quartz")
+    assert proc.returncode == 0, proc.stderr
+    assert seen[-1] == "ARG: scripts/batch_runners/timing_redistribute.script"
+    stem_dir = (sandbox / "repo/antarctica/results/map_check"
+                / "inversion_icepack2_rc_n3_dg0_logvelnet_2000_int5000_bilap_snap20260922_0948")
+    assert (stem_dir / "status_repack.txt").read_text().startswith("submitted job_id=5151 ")
+    assert (stem_dir / "summary.md").is_file()
+    # Third call: the repack is active and nothing else can run yet.
+    (sandbox / "sbatch_calls.txt").unlink()
+    proc, seen = make(sandbox, "map-check", *inputs, ISMIP7_SITE="iu_quartz")
+    assert proc.returncode == 0, proc.stderr
+    assert seen == [] and "active: repack" in proc.stdout

@@ -1,0 +1,95 @@
+#!/bin/bash
+
+# Audit the two 10-year controls of one MAP check: the IMBIE/Rignot/RACMO
+# track (scripts/check_ismip6_track.py, exit code kept), the overlay of the
+# two budgets (scripts/compare_runs.py), and the grounded/floating split at
+# each final state (scripts/region_budget.py, under that mesh's own triple).
+# Everything lands in one JSON for the stage table.
+
+#SBATCH -o ant_map_check_audit_%j.txt
+#SBATCH -e ant_map_check_audit_%j.err
+
+# Resources, the account and the partition come from submit.sh, which reads
+# this cluster's sites/<name>.sh; nothing here names a cluster. Submit with
+#   scripts/batch_runners/submit.sh script scripts/batch_runners/map_check_audit.script --cd antarctica ...
+# as manage_map_check.py does.
+cd "${SLURM_SUBMIT_DIR:-.}"
+# The site half only: every model setting arrives through --export, and
+# site_env.sh's defaults (ISMIP7_MESH, ISMIP7_FRICTION) are not this job's.
+. scripts/batch_runners/site_core.sh
+ismip7_activate
+ismip7_persistent_jit_cache
+ismip7_banner
+
+csv_native="${ISMIP7_MAP_CHECK_CSV_NATIVE:?ISMIP7_MAP_CHECK_CSV_NATIVE is required}"
+csv_transfer="${ISMIP7_MAP_CHECK_CSV_TRANSFER:?ISMIP7_MAP_CHECK_CSV_TRANSFER is required}"
+final_native="${ISMIP7_MAP_CHECK_FINAL_NATIVE:?ISMIP7_MAP_CHECK_FINAL_NATIVE is required}"
+final_transfer="${ISMIP7_MAP_CHECK_FINAL_TRANSFER:?ISMIP7_MAP_CHECK_FINAL_TRANSFER is required}"
+out="${ISMIP7_MAP_CHECK_AUDIT_JSON:?ISMIP7_MAP_CHECK_AUDIT_JSON is required}"
+png="${ISMIP7_MAP_CHECK_PNG:?ISMIP7_MAP_CHECK_PNG is required}"
+status="${ISMIP7_MAP_CHECK_STATUS:?ISMIP7_MAP_CHECK_STATUS is required}"
+dt_native="${ISMIP7_MAP_CHECK_DT_NATIVE:-0.1}"
+dt_transfer="${ISMIP7_MAP_CHECK_DT_TRANSFER:-0.05}"
+
+write_status() {
+    status_tmp="${status}.tmp.${SLURM_JOB_ID:-$$}"
+    printf '%s job_id=%s timestamp=%s\n' \
+        "$1" "${SLURM_JOB_ID:-unknown}" "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
+        > "${status_tmp}"
+    mv -f "${status_tmp}" "${status}"
+}
+
+work="${out%.json}.parts"
+mkdir -p "${work}"
+write_status "running phase=track"
+set +e
+python -u scripts/check_ismip6_track.py "${csv_native}" --dt "${dt_native}" \
+    > "${work}/track_native.txt" 2>&1
+echo $? > "${work}/track_native.rc"
+python -u scripts/check_ismip6_track.py "${csv_transfer}" --dt "${dt_transfer}" \
+    > "${work}/track_transfer.txt" 2>&1
+echo $? > "${work}/track_transfer.rc"
+
+write_status "running phase=overlay"
+python -u scripts/compare_runs.py "native=${csv_native}" "transfer=${csv_transfer}" \
+    --out "${png}" > "${work}/overlay.txt" 2>&1
+echo $? > "${work}/overlay.rc"
+
+write_status "running phase=region_budget"
+ISMIP7_LC="${ISMIP7_MAP_CHECK_NATIVE_LC}" ISMIP7_LC_COARSE="${ISMIP7_MAP_CHECK_NATIVE_LC_COARSE}" \
+    ISMIP7_BUFFER_M="${ISMIP7_MAP_CHECK_NATIVE_BUFFER_M}" ISMIP7_BNDIDS="${ISMIP7_MAP_CHECK_NATIVE_BNDIDS}" \
+    ISMIP7_MESH=checkpoint \
+    ismip7_mpirun "${SLURM_NTASKS}" python -u scripts/region_budget.py "${final_native}" \
+    --csv "${csv_native}" > "${work}/region_native.txt" 2>&1
+echo $? > "${work}/region_native.rc"
+ISMIP7_LC="${ISMIP7_MAP_CHECK_TRANSFER_LC}" ISMIP7_LC_COARSE="${ISMIP7_MAP_CHECK_TRANSFER_LC_COARSE}" \
+    ISMIP7_BUFFER_M="${ISMIP7_MAP_CHECK_TRANSFER_BUFFER_M}" ISMIP7_BNDIDS="${ISMIP7_MAP_CHECK_TRANSFER_BNDIDS}" \
+    ISMIP7_MESH=checkpoint \
+    ismip7_mpirun "${SLURM_NTASKS}" python -u scripts/region_budget.py "${final_transfer}" \
+    --csv "${csv_transfer}" > "${work}/region_transfer.txt" 2>&1
+echo $? > "${work}/region_transfer.rc"
+set -e
+
+write_status "running phase=collect"
+python - "${work}" "${out}" "${png}" <<'PY'
+import json, os, sys
+work, out, png = sys.argv[1:4]
+def part(name):
+    text_path = os.path.join(work, name + ".txt")
+    rc_path = os.path.join(work, name + ".rc")
+    text = open(text_path).read() if os.path.exists(text_path) else ""
+    rc = int(open(rc_path).read().strip() or -1) if os.path.exists(rc_path) else None
+    fails = [line.strip() for line in text.splitlines() if "FAIL" in line]
+    return {"exit_code": rc, "fail_lines": fails, "text": text[-8000:]}
+payload = {
+    "track": {"native": part("track_native"), "transfer": part("track_transfer")},
+    "overlay": dict(part("overlay"), png=png),
+    "region_budget": {"native": part("region_native"), "transfer": part("region_transfer")},
+}
+tmp = out + ".tmp"
+with open(tmp, "w") as stream:
+    json.dump(payload, stream, indent=2, sort_keys=True)
+os.replace(tmp, out)
+print(f"audit -> {out}")
+PY
+write_status "finished phase=collect exit_code=0"

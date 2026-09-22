@@ -31,6 +31,13 @@
 #   matrix        write TIMING_MATRIX.md from results/timing/*.json
 #                   (MATRIX_OUTPUT names another file, e.g. one per site and
 #                   solver: TIMING_MATRIX_QUARTZ_SCPC_GAMG.md)
+#   map-check     one released MAP through its checks (MAP_CHECK.md): fetch and
+#                 verify, score at t=0 on its own mesh and transferred onto the
+#                 production mesh, strict 10-step lanes on both, 10-year
+#                 controls on both, audit. Prints the stage table and submits
+#                 the first runnable stage (MAP_CHECK_STAGES=all|<stage>);
+#                 MAP_CHECK_FRICTION=regularized_coulomb|budd picks the MAP.
+#   map-check-dry-run  the stage table and every stage's composed sbatch line
 
 LCS ?= 500 1000 2000 2500 5000
 RATIOS ?= 20 10
@@ -138,6 +145,46 @@ MATRIX_OUTPUT ?= TIMING_MATRIX.md
 # it, e.g. `make matrix TIMING_SOLVER=scpc_gamg` after a scouts-only start.
 MATRIX_TAG_NAMED := $(filter-out file,$(foreach v,TIMING_TAG TIMING_SOLVER MATRIX_STEPS MATRIX_DT_2500 TIMING_CONTRACT,$(origin $(v))))
 
+# One released MAP through its checks (scripts/manage_map_check.py). The
+# 22 September 2 km snapshots are the defaults; MAP_CHECK_FRICTION picks the
+# law and with it the file. The target is the production mesh; on Quartz name
+# MAP_CHECK_TARGET_MESH and MAP_CHECK_K_NPZ explicitly from a scratch clone.
+MAP_CHECK_FRICTION ?= regularized_coulomb
+MAP_CHECK_RELEASE ?= maps-2km-snap-2026-09-22
+MAP_CHECK_SNAP ?= snap20260922_0948
+MAP_CHECK_MAP_BASENAME ?= inversion_icepack2_$(if $(filter regularized_coulomb,$(MAP_CHECK_FRICTION)),rc,budd)_n3_dg0_logvelnet_2000_int5000_bilap_$(MAP_CHECK_SNAP).h5
+MAP_CHECK_URL ?= https://github.com/icepack/ismip7/releases/download/$(MAP_CHECK_RELEASE)/$(MAP_CHECK_MAP_BASENAME)
+MAP_CHECK_MD5 ?= auto
+MAP_CHECK_DIR ?= $(CURDIR)/results/map_check
+MAP_CHECK_MAP ?= $(MAP_CHECK_DIR)/maps/$(MAP_CHECK_MAP_BASENAME)
+MAP_CHECK_LC ?= 2000
+MAP_CHECK_LC_COARSE ?= 5000
+MAP_CHECK_BUFFER ?= 0
+MAP_CHECK_TARGET_LC ?= 1000
+MAP_CHECK_TARGET_LC_COARSE ?= 10000
+MAP_CHECK_TARGET_BUFFER ?= 20000
+MAP_CHECK_TARGET_MESH ?= $(CURDIR)/mesh/antarctica_$(MAP_CHECK_TARGET_LC_COARSE)_$(MAP_CHECK_TARGET_LC)_buffered$(MAP_CHECK_TARGET_BUFFER).msh
+MAP_CHECK_STAGES ?= next
+MAP_CHECK_SOLVER ?= scpc_gamg
+MAP_CHECK_CORES ?= 64
+MAP_CHECK_DIAG_CORES ?= 16
+MAP_CHECK_T_END ?= 2025
+MAP_CHECK_K_NPZ ?=
+# MAP_CHECK_ATTRS=0 skips the h5 attribute check of the fetched file (tests);
+# MAP_CHECK_REPACK=0 reads the fetched file as is.
+MAP_CHECK_ATTRS ?= 1
+MAP_CHECK_REPACK ?= 1
+MAP_CHECK_ARGS = run --root "$(CURDIR)" --map "$(MAP_CHECK_MAP)" --url "$(MAP_CHECK_URL)" \
+  --md5 "$(MAP_CHECK_MD5)" --friction "$(MAP_CHECK_FRICTION)" \
+  --lc $(MAP_CHECK_LC) --lc-coarse $(MAP_CHECK_LC_COARSE) --buffer-m $(MAP_CHECK_BUFFER) \
+  --target-mesh "$(MAP_CHECK_TARGET_MESH)" --target-lc $(MAP_CHECK_TARGET_LC) \
+  --target-lc-coarse $(MAP_CHECK_TARGET_LC_COARSE) --target-buffer-m $(MAP_CHECK_TARGET_BUFFER) \
+  --root-dir "$(MAP_CHECK_DIR)" --stages "$(MAP_CHECK_STAGES)" --solver "$(MAP_CHECK_SOLVER)" \
+  --cores $(MAP_CHECK_CORES) --diag-cores $(MAP_CHECK_DIAG_CORES) --t-end $(MAP_CHECK_T_END) \
+  --check-map-attrs $(MAP_CHECK_ATTRS) --repack $(MAP_CHECK_REPACK) \
+  $(if $(MAP_CHECK_K_NPZ),--k-npz "$(MAP_CHECK_K_NPZ)",) \
+  $(SLURM_SELECT) --walltime "$(SLURM_TIME)" $(if $(FORCE_TIMING),--force,)
+
 # The active solver qualification/reference lane uses the improved DG0
 # log-velocity/net-balance MAP imported from the other branch and its exact
 # source mesh.  Keep these paths together: MAPs and meshes are not
@@ -208,7 +255,8 @@ DEBUG_STAMP := $(shell date +%Y%m%d_%H%M%S)
 	qualify qualify-if-needed qualify-2step qualify-5step timestep-probe debug \
 	reference solver-smoke matrix matrix-legacy sync-results timing-prepare timing-scout \
 	timing-scale timing-dry-run timing-cache-smoke timing-cache-audit \
-	timing-probe timing-amb-probe timing-inversion now now-check
+	timing-probe timing-amb-probe timing-inversion now now-check \
+	map-check map-check-dry-run
 
 timing: qualify-if-needed
 	@mkdir -p results/timing
@@ -607,6 +655,12 @@ matrix:
 	  read -r tag < results/timing/latest_matrix_campaign.txt; \
 	fi; \
 	python scripts/build_timing_matrix.py --tag "$$tag" --output "$(MATRIX_OUTPUT)"
+
+map-check:
+	python scripts/manage_map_check.py $(MAP_CHECK_ARGS)
+
+map-check-dry-run:
+	python scripts/manage_map_check.py $(MAP_CHECK_ARGS) --dry-run --assume-passed
 
 now:
 	python scripts/build_now.py --write --output "$(CURDIR)/../NOW.md"

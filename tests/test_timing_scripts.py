@@ -12,6 +12,7 @@ must not do to a lane:
   no warm-up excluded;
 - the status file still walks running -> finished/failed as the manager expects.
 """
+import json
 import os
 import subprocess
 import sys
@@ -208,3 +209,71 @@ def test_no_job_script_names_a_cluster_a_person_or_a_resource(name):
     assert all(line.split()[1] in ("-o", "-e") for line in directives), directives
     assert ". scripts/batch_runners/site_core.sh" in text
     assert ". scripts/batch_runners/site_env.sh" not in text
+
+
+def test_the_score_script_scores_a_map_and_then_its_transferred_state(sandbox):
+    r"""map_check_score.script: score_map.py --json on the MAP's own mesh,
+    --restart for a prepared cache, the census only when asked for."""
+    root = sandbox / "repo" / "antarctica"
+    map_path = sandbox / "map.h5"
+    map_path.write_text("map\n")
+    status = sandbox / "status.txt"
+    out = sandbox / "score.json"
+    proc, seen = run_script(sandbox, "map_check_score.script",
+                            ISMIP7_MAP=str(map_path), ISMIP7_MAP_CHECK_SCORE_JSON=str(out),
+                            ISMIP7_MAP_CHECK_STATUS=str(status), ISMIP7_MESH="checkpoint",
+                            ISMIP7_FRICTION="regularized_coulomb")
+    assert proc.returncode == 0, proc.stderr
+    assert f"SRUN -n 16 python -u scripts/score_map.py --json {out} {map_path}" in seen
+    assert not any("check_budd_map.py" in line for line in seen)
+    assert "ISMIP7_MESH=checkpoint" in seen and "ISMIP7_FRICTION=regularized_coulomb" in seen
+    assert status.read_text().startswith("finished phase=score exit_code=0 job_id=777 ")
+    (sandbox / "env_dump.txt").unlink()
+    census = sandbox / "census.txt"
+    proc, seen = run_script(sandbox, "map_check_score.script",
+                            ISMIP7_MAP=str(map_path), ISMIP7_MAP_CHECK_SCORE_JSON=str(out),
+                            ISMIP7_MAP_CHECK_STATUS=str(status),
+                            ISMIP7_MAP_CHECK_RESTART=str(sandbox / "cache.h5"),
+                            ISMIP7_MAP_CHECK_CENSUS=str(census), ISMIP7_FRICTION="budd")
+    assert proc.returncode == 0, proc.stderr
+    assert (f"SRUN -n 16 python -u scripts/score_map.py --json {out} "
+            f"--restart {sandbox / 'cache.h5'} {map_path}") in seen
+    assert f"SRUN -n 16 python -u scripts/check_budd_map.py {map_path}" in seen
+    assert "ISMIP7_CHECK_FRICTION=budd" in seen
+    assert census.is_file()
+    assert status.read_text().startswith("finished phase=score exit_code=0 ")
+    proc, _ = run_script(sandbox, "map_check_score.script",
+                         ISMIP7_MAP=str(map_path), ISMIP7_MAP_CHECK_SCORE_JSON=str(out),
+                         ISMIP7_MAP_CHECK_STATUS=str(status), FAKE_RC="3")
+    assert proc.returncode == 3
+    assert status.read_text().startswith("failed phase=score exit_code=3 ")
+
+
+def test_the_audit_script_collects_every_part_whatever_each_returns(sandbox):
+    r"""map_check_audit.script keeps each tool's exit code and output in one
+    JSON; a tool that fails on its input is recorded, never fatal."""
+    for name in ("native.csv", "transfer.csv", "native_final.h5", "transfer_final.h5"):
+        (sandbox / name).write_text("year,mass_gt\n2015.0,1\n")
+    out = sandbox / "audit_controls.json"
+    status = sandbox / "status.txt"
+    env = {
+        "ISMIP7_MAP_CHECK_CSV_NATIVE": str(sandbox / "native.csv"),
+        "ISMIP7_MAP_CHECK_CSV_TRANSFER": str(sandbox / "transfer.csv"),
+        "ISMIP7_MAP_CHECK_FINAL_NATIVE": str(sandbox / "native_final.h5"),
+        "ISMIP7_MAP_CHECK_FINAL_TRANSFER": str(sandbox / "transfer_final.h5"),
+        "ISMIP7_MAP_CHECK_AUDIT_JSON": str(out),
+        "ISMIP7_MAP_CHECK_PNG": str(sandbox / "overlay.png"),
+        "ISMIP7_MAP_CHECK_STATUS": str(status),
+        "ISMIP7_MAP_CHECK_NATIVE_LC": "2000", "ISMIP7_MAP_CHECK_NATIVE_LC_COARSE": "5000",
+        "ISMIP7_MAP_CHECK_NATIVE_BUFFER_M": "0", "ISMIP7_MAP_CHECK_NATIVE_BNDIDS": "/b0.json",
+        "ISMIP7_MAP_CHECK_TRANSFER_LC": "1000", "ISMIP7_MAP_CHECK_TRANSFER_LC_COARSE": "10000",
+        "ISMIP7_MAP_CHECK_TRANSFER_BUFFER_M": "20000", "ISMIP7_MAP_CHECK_TRANSFER_BNDIDS": "/b20.json",
+    }
+    proc, seen = run_script(sandbox, "map_check_audit.script", **env)
+    assert proc.returncode == 0, proc.stderr
+    payload = json.loads(out.read_text())
+    assert set(payload) == {"track", "overlay", "region_budget"}
+    assert payload["track"]["native"]["exit_code"] is not None
+    assert f"SRUN -n 16 python -u scripts/region_budget.py {sandbox / 'native_final.h5'} --csv {sandbox / 'native.csv'}" in seen
+    assert "ISMIP7_LC=2000" in seen and "ISMIP7_LC=1000" in seen and "ISMIP7_MESH=checkpoint" in seen
+    assert status.read_text().startswith("finished phase=collect exit_code=0 ")

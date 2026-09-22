@@ -522,6 +522,55 @@ def pristine_sibling(cache_path):
     return text[:-3] + ".prepare.h5" if text.endswith(".h5") else text
 
 
+# --- MAP checks (make map-check) ------------------------------------------
+# One released MAP under one law, on its own mesh and transferred onto the
+# production mesh (antarctica/MAP_CHECK.md). Its caches, tags and records are
+# named apart from the campaign's: the cache role differs, the cache stem
+# never starts with ``initial_state_``, and the tag never parses as a
+# campaign tag, so neither manager can claim the other's artifacts.
+MAP_CHECK_CACHE_ROLE = "map-check-initial-state"
+MAP_CHECK_KIND = "map_check"
+MAP_CHECK_STEPS = 10
+MAP_CHECK_LAW_TAGS = {"budd": "budd", "regularized_coulomb": "rc"}
+
+
+def map_check_law_tag(friction):
+    try:
+        return MAP_CHECK_LAW_TAGS[friction]
+    except KeyError:
+        raise ValueError(
+            f"a MAP check runs under one of {tuple(MAP_CHECK_LAW_TAGS)}, "
+            f"not {friction!r}"
+        ) from None
+
+
+def map_check_stem(map_path):
+    """The MAP's basename without its extension: the per-MAP directory name."""
+    return Path(os.fspath(map_path)).stem
+
+
+def map_check_tag(stem, friction, solver):
+    return (
+        f"mapcheck_{map_check_law_tag(friction)}_{lane_solver(solver)}"
+        f"_{MAP_CHECK_STEPS}step_{stem}"
+    )
+
+
+def map_check_cache_stem(stem, friction, lc, lc_coarse, buffer_m):
+    return (
+        f"map_check_state_{map_check_law_tag(friction)}_{stem}"
+        f"_{int(lc)}_{int(lc_coarse)}_buffered{int(buffer_m)}"
+    )
+
+
+def map_check_run_tag(stem, friction, mesh_label):
+    """``ISMIP7_RUN_TAG`` of a control: short, since the driver's experiment
+    name and its checkpoint names carry it."""
+    match = re.search(r"snap\d+_\d+", stem)
+    snap = match.group(0) if match else stem[:24]
+    return f"mapcheck_{map_check_law_tag(friction)}_{snap}_{mesh_label}"
+
+
 def timing_record_basename(tag, lc, lc_coarse, ncores):
     return f"timing_{tag}_{int(lc)}_{int(lc_coarse)}_{int(ncores)}.json"
 
@@ -686,6 +735,67 @@ def validate_cache_manifest(
         "mesh_basename": mesh_basename(lc, lc_coarse),
         "geometry_source_method": TARGET_MESH_GEOMETRY_METHOD,
     }
+    allowed_sources = {
+        SOURCE_INVERSION_BASENAME,
+        mesh_inversion_basename(lc, lc_coarse),
+    }
+    return _validate_manifest(
+        manifest, expected, allowed_sources,
+        cache_path=cache_path, source_sha256=source_sha256,
+        mesh_sha256=mesh_sha256, solver_fingerprint=solver_fingerprint,
+    )
+
+
+def validate_map_check_manifest(
+    manifest,
+    *,
+    lc,
+    lc_coarse,
+    buffer_m,
+    friction,
+    source_basename,
+    mesh_name=None,
+    cache_path=None,
+    source_sha256=None,
+    mesh_sha256=None,
+    solver_fingerprint=None,
+):
+    """Return ``(valid, detail)`` for a map-check initial-state cache: one
+    released MAP transferred onto one target mesh under one law. The role
+    keeps it apart from the campaign's caches, and the source is that MAP."""
+    expected = {
+        "cache_schema_version": CACHE_SCHEMA_VERSION,
+        "cache_role": MAP_CHECK_CACHE_ROLE,
+        "lc": int(lc),
+        "lc_coarse": int(lc_coarse),
+        "buffer_m": int(buffer_m),
+        "diagnostic_solver_mode": CACHE_SOLVER_MODE,
+        "friction": friction,
+        "friction_gate": BUDD_SHELF_GATE if friction == "budd" else None,
+        "geometry_space": "dg0",
+        "n_flow": 3.0,
+        "a4_factor": 1.0,
+        "t_yr": MATRIX_T_START,
+        "mesh_basename": mesh_name or mesh_basename(lc, lc_coarse, buffer_m),
+        "geometry_source_method": TARGET_MESH_GEOMETRY_METHOD,
+    }
+    return _validate_manifest(
+        manifest, expected, {os.path.basename(os.fspath(source_basename))},
+        cache_path=cache_path, source_sha256=source_sha256,
+        mesh_sha256=mesh_sha256, solver_fingerprint=solver_fingerprint,
+    )
+
+
+def _validate_manifest(
+    manifest,
+    expected,
+    allowed_sources,
+    *,
+    cache_path=None,
+    source_sha256=None,
+    mesh_sha256=None,
+    solver_fingerprint=None,
+):
     for key, value in expected.items():
         actual = manifest.get(key)
         if isinstance(value, float):
@@ -697,10 +807,6 @@ def validate_cache_manifest(
             matches = actual == value
         if not matches:
             return False, f"cache {key}={actual!r}; expected {value!r}"
-    allowed_sources = {
-        SOURCE_INVERSION_BASENAME,
-        mesh_inversion_basename(lc, lc_coarse),
-    }
     source_basename = manifest.get("source_inversion_basename")
     if source_basename not in allowed_sources:
         return False, (
@@ -1109,6 +1215,67 @@ def selftest():
     check(old, False, "schema", timing_tag=tag10)
     assert pristine_sibling("/x/initial_state_a.h5") == "/x/initial_state_a.prepare.h5"
     assert pristine_sibling("/x/initial_state_a.prepare.h5") == "/x/initial_state_a.prepare.h5"
+
+    # MAP checks: named apart from the campaign at every level.
+    stem = map_check_stem(
+        "/m/inversion_icepack2_rc_n3_dg0_logvelnet_2000_int5000_bilap_snap20260922_0948.h5"
+    )
+    mtag = map_check_tag(stem, "regularized_coulomb", "scpc_gamg")
+    assert mtag.startswith("mapcheck_rc_scpc_gamg_10step_inversion_icepack2_rc")
+    try:
+        parse_campaign_tag(mtag)
+    except ValueError:
+        pass
+    else:
+        raise AssertionError("a map-check tag must never parse as a campaign tag")
+    assert not map_check_cache_stem(stem, "budd", 1000, 10000, 20000).startswith(
+        "initial_state_"
+    )
+    assert map_check_run_tag(stem, "budd", "1000") == "mapcheck_budd_snap20260922_0948_1000"
+    assert mesh_inversion_source_mesh(stem + ".h5") is None
+    for bad in ("budd_legacy", "rc"):
+        try:
+            map_check_tag(stem, bad, "scpc_gamg")
+        except ValueError:
+            pass
+        else:
+            raise AssertionError(f"{bad} must not name a map check")
+    campaign_manifest = {
+        "cache_schema_version": CACHE_SCHEMA_VERSION, "cache_role": CACHE_ROLE,
+        "lc": 1000, "lc_coarse": 10000, "buffer_m": BUFFER_M,
+        "diagnostic_solver_mode": CACHE_SOLVER_MODE, "friction": "budd",
+        "friction_gate": BUDD_SHELF_GATE, "geometry_space": "dg0",
+        "n_flow": 3.0, "a4_factor": 1.0, "t_yr": MATRIX_T_START,
+        "mesh_basename": mesh_basename(1000, 10000),
+        "geometry_source_method": TARGET_MESH_GEOMETRY_METHOD,
+        "source_inversion_basename": SOURCE_INVERSION_BASENAME,
+        "source_inversion_sha256": "a", "source_mesh_sha256": "b",
+        "geometry_source": "/d/bedmachine.nc", "geometry_source_basename": "bedmachine.nc",
+        "checkpoint_fields": list(CACHE_REQUIRED_FIELDS),
+    }
+    assert validate_cache_manifest(campaign_manifest, lc=1000, lc_coarse=10000)[0]
+    valid, detail = validate_map_check_manifest(
+        campaign_manifest, lc=1000, lc_coarse=10000, buffer_m=BUFFER_M,
+        friction="budd", source_basename=SOURCE_INVERSION_BASENAME,
+    )
+    assert not valid and "cache_role" in detail, detail
+    rc_manifest = dict(
+        campaign_manifest, cache_role=MAP_CHECK_CACHE_ROLE,
+        friction="regularized_coulomb", friction_gate=None,
+        source_inversion_basename=stem + ".h5",
+    )
+    valid, detail = validate_map_check_manifest(
+        rc_manifest, lc=1000, lc_coarse=10000, buffer_m=BUFFER_M,
+        friction="regularized_coulomb", source_basename="/x/" + stem + ".h5",
+    )
+    assert valid, detail
+    valid, detail = validate_cache_manifest(rc_manifest, lc=1000, lc_coarse=10000)
+    assert not valid and "cache_role" in detail, detail
+    valid, detail = validate_map_check_manifest(
+        rc_manifest, lc=1000, lc_coarse=10000, buffer_m=BUFFER_M,
+        friction="budd", source_basename=stem + ".h5",
+    )
+    assert not valid and "friction" in detail, detail
     print("timing_campaign selftest OK")
 
 

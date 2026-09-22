@@ -324,6 +324,18 @@ def obs_data_root():
                           os.path.join(_ANTARCTICA, "data"))
 
 
+def deltat_per_basin_npz():
+    r"""``ISMIP7_DELTAT_PER_BASIN_NPZ``: the protocol's per-basin adjustment.
+
+    The ISMIP7 ocean-forcing recommendation calibrates ONE dimensionless K
+    from the 4-term toolbox and then, optionally, a thermal-forcing offset
+    deltaT_b per IMBIE basin at that K (``optimise_deltaT``); a per-basin K
+    is not part of it. ``antarctica/scripts/calibrate_deltaT.py`` writes the
+    file, the ocean callbacks add the offset to TF before the melt law and
+    melt with the file's K everywhere. Unset: the per-basin K path."""
+    return os.environ.get("ISMIP7_DELTAT_PER_BASIN_NPZ") or None
+
+
 def k_per_basin_candidates(results_dir, lc_value):
     r"""Where to look for the calibrated per-basin K, in order.
 

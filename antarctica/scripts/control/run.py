@@ -40,6 +40,7 @@ from icepack2_tools.forcing import (
     is_floating,
     _K_DEFAULT,
 )
+from icepack2_tools.runconfig import deltat_per_basin_npz
 from icepack2_tools.climatology import (
     clim_start, clim_end, clim_scenario, clim_pool_missing, describe_clim_pool,
 )
@@ -294,24 +295,29 @@ def main():
         callback = make_synthetic_ocean_callback(tf_max, depth_ref)
     else:
         # Fixed OI climatology TF/so + per-basin calibrated K
-        if not os.path.exists(K_NPZ):
+        if not os.path.exists(K_NPZ) and deltat_per_basin_npz() is None:
             raise FileNotFoundError(
                 f"Per-basin K calibration not found at {K_NPZ}. "
                 f"Run antarctica/scripts/calibrate_melt.py first "
                 f"(or set ISMIP7_SYNTHETIC_MELT=1 for the uncalibrated stopgap)."
             )
-        PETSc.Sys.Print(f"  Loading per-basin K from: {K_NPZ}")
         for line in describe_observational_forcing(ocean=True):
             PETSc.Sys.Print(f"  {line}")
-        K_field = load_K_per_basin(K_NPZ, mesh_x, mesh_y, fill=0.0)
+        if deltat_per_basin_npz() is not None:
+            # The callback resolves the offset and its K on first call.
+            K_field = _K_DEFAULT
+        else:
+            PETSc.Sys.Print(f"  Loading per-basin K from: {K_NPZ}")
+            K_field = load_K_per_basin(K_NPZ, mesh_x, mesh_y, fill=0.0)
         K_scale = float(os.environ.get("ISMIP7_K_SCALE", "1.0"))
         if K_scale != 1.0:
             K_field = K_field * K_scale
             PETSc.Sys.Print(f"  K scaled by ISMIP7_K_SCALE={K_scale:.3f}")
-        PETSc.Sys.Print(
-            f"  K field: nonzero={int((K_field>0).sum())}/{len(K_field)}  "
-            f"med={np.median(K_field[K_field>0]) if (K_field>0).any() else 0:.2e}"
-        )
+        if np.ndim(K_field):
+            PETSc.Sys.Print(
+                f"  K field: nonzero={int((K_field>0).sum())}/{len(K_field)}  "
+                f"med={np.median(K_field[K_field>0]) if (K_field>0).any() else 0:.2e}"
+            )
         callback = make_ctrl_ocean_callback(K_field)
 
     reject_collapse_mask("the control experiment")

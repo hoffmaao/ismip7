@@ -1238,6 +1238,92 @@ def _warn_slope_cap(npz_path, cap):
         )
 
 
+def _basin_on_mesh(mesh_x, mesh_y, imbie2=None):
+    r"""IMBIE2 basin number of each mesh dof (nearest 8 km cell, -1 outside).
+
+    The 8 km basin grid is re-read here so a per-basin calibration can be
+    stamped onto ANY mesh, not only the one it was fitted on. ``imbie2``
+    names the file; otherwise the v2 calibration-era file under the data
+    root, then the v3 release (an identical basinNumber field, verified July
+    2026)."""
+    import xarray as xr
+    from scipy.interpolate import RegularGridInterpolator
+
+    if imbie2 is None:
+        root = os.environ.get(
+            "ISMIP7_DATA_ROOT",
+            os.path.join(os.path.dirname(
+                os.path.dirname(os.path.abspath(__file__))), "ISMIP7", "AIS"),
+        )
+        candidates = [
+            os.path.join(root, "parameterisations", "ocean", "imbie2",
+                         "basin_numbers_ismip8km_v2.nc"),
+            os.path.join(root, "obs", "ocean", "IMBIE-basins", "v3",
+                         "IMBIE-basins_AIS_obs_ocean_v3.nc"),
+        ]
+        imbie2 = next((p for p in candidates if os.path.exists(p)), candidates[0])
+    ds = xr.open_dataset(imbie2)
+    xa = ds["x"].values; ya = ds["y"].values
+    bn = ds["basinNumber"].values
+    if ya[0] > ya[-1]:
+        ya = ya[::-1]; bn = bn[::-1, :]
+    if xa[0] > xa[-1]:
+        xa = xa[::-1]; bn = bn[:, ::-1]
+    interp = RegularGridInterpolator(
+        (ya, xa), bn.astype(np.float32),
+        method="nearest", bounds_error=False, fill_value=-1.0,
+    )
+    pts = np.column_stack([np.asarray(mesh_y), np.asarray(mesh_x)])
+    basin_node = np.round(interp(pts)).astype(int)
+    ds.close()
+    return basin_node
+
+
+def load_deltaT_per_basin(npz_path, mesh_x, mesh_y, fill=0.0, imbie2=None):
+    r"""Per-basin thermal-forcing offset deltaT_b [K] stamped onto the mesh.
+
+    ``npz_path`` is the output of ``antarctica/scripts/calibrate_deltaT.py``
+    (``basin_ids``, ``deltaT_basin``, ``K``): the ISMIP7 toolbox's
+    ``optimise_deltaT`` run through this model's own melt path, i.e. the
+    protocol's per-basin adjustment at one toolbox K. Returns
+    ``(deltaT_field, K)``; a run that applies the offset melts with that K
+    everywhere. ``fill`` is the offset outside the fitted basins. The slope
+    convention is checked as for a K file, since the fit depends on it."""
+    data = np.load(npz_path)
+    bids = np.asarray(data["basin_ids"]).astype(int)
+    dT = np.asarray(data["deltaT_basin"]).astype(float)
+    K = float(data["K"])
+    fitted_slope = str(data["melt_slope"]) if "melt_slope" in data else "local"
+    if fitted_slope != melt_slope():
+        _warn_melt_slope(npz_path, fitted_slope, melt_slope())
+    if imbie2 is None and "imbie2_nc" in data and os.path.exists(str(data["imbie2_nc"])):
+        imbie2 = str(data["imbie2_nc"])
+    basin_node = _basin_on_mesh(mesh_x, mesh_y, imbie2)
+    field = np.full(len(mesh_x), fill, dtype=float)
+    for bid, d in zip(bids, dT):
+        if np.isfinite(d):
+            field[basin_node == bid] = d
+    return field, K
+
+
+def _deltaT_for_run(cache, mesh_x, mesh_y):
+    r"""``(deltaT_field, K)`` for ``ISMIP7_DELTAT_PER_BASIN_NPZ``, resolved
+    once per callback and announced; ``(None, None)`` when the knob is unset."""
+    from .runconfig import deltat_per_basin_npz
+    npz = deltat_per_basin_npz()
+    if npz is None:
+        return None, None
+    if "dT" not in cache:
+        field, K = load_deltaT_per_basin(npz, mesh_x, mesh_y)
+        cache["dT"], cache["K"] = field, K
+        PETSc.Sys.Print(
+            f"  Per-basin deltaT from {npz}: K={K:.3e} everywhere, deltaT "
+            f"{field.min():+.2f}..{field.max():+.2f} K on "
+            f"{int((field != 0).sum())}/{len(field)} dofs (the per-basin K "
+            f"file is not used)")
+    return cache["dT"], cache["K"]
+
+
 def load_K_per_basin(npz_path, mesh_x, mesh_y, fill=0.0):
     r"""Load a per-basin calibrated K and return a per-node array.
 
@@ -1253,9 +1339,6 @@ def load_K_per_basin(npz_path, mesh_x, mesh_y, fill=0.0):
     Returns an array of shape (len(mesh_x),) of per-node K values, with
     `fill` outside the calibrated basin set or where K_basin is NaN.
     """
-    import xarray as xr
-    from scipy.interpolate import RegularGridInterpolator
-
     data = np.load(npz_path)
     bids = np.asarray(data["basin_ids"]).astype(int)
     Kbas = np.asarray(data["K_basin"]).astype(float)
@@ -1292,35 +1375,7 @@ def load_K_per_basin(npz_path, mesh_x, mesh_y, fill=0.0):
     if fitted_on != geometry_space():
         _warn_geometry_space(npz_path, fitted_on, geometry_space())
 
-    root = os.environ.get(
-        "ISMIP7_DATA_ROOT",
-        os.path.join(os.path.dirname(
-            os.path.dirname(os.path.abspath(__file__))), "ISMIP7", "AIS"),
-    )
-    # v2 (calibration-era) first; the v3 release from the reorganized share
-    # carries an IDENTICAL basinNumber field (verified Jul 2026), so it is a
-    # safe fallback for fresh clones that only ran the new downloader.
-    candidates = [
-        os.path.join(root, "parameterisations", "ocean", "imbie2",
-                     "basin_numbers_ismip8km_v2.nc"),
-        os.path.join(root, "obs", "ocean", "IMBIE-basins", "v3",
-                     "IMBIE-basins_AIS_obs_ocean_v3.nc"),
-    ]
-    imbie2 = next((p for p in candidates if os.path.exists(p)), candidates[0])
-    ds = xr.open_dataset(imbie2)
-    xa = ds["x"].values; ya = ds["y"].values
-    bn = ds["basinNumber"].values
-    if ya[0] > ya[-1]:
-        ya = ya[::-1]; bn = bn[::-1, :]
-    if xa[0] > xa[-1]:
-        xa = xa[::-1]; bn = bn[:, ::-1]
-    interp = RegularGridInterpolator(
-        (ya, xa), bn.astype(np.float32),
-        method="nearest", bounds_error=False, fill_value=-1.0,
-    )
-    pts = np.column_stack([np.asarray(mesh_y), np.asarray(mesh_x)])
-    basin_node = np.round(interp(pts)).astype(int)
-    ds.close()
+    basin_node = _basin_on_mesh(mesh_x, mesh_y)
 
     K_field = np.full(len(mesh_x), fill, dtype=float)
     for bid, kb in zip(bids, Kbas):
@@ -1524,8 +1579,11 @@ def make_climatology_ocean_callback(K_field, data_root=None):
     The per-basin K comes from antarctica/scripts/calibrate_melt.py, which
     follows ISMIP7_GEOMETRY_SPACE like the forward. The K file records the
     geometry_space it was fitted on, and `load_K_per_basin` warns when a run
-    melts on the other."""
+    melts on the other. With ISMIP7_DELTAT_PER_BASIN_NPZ set the run melts
+    with that file's one K and its per-basin TF offset instead
+    (`load_deltaT_per_basin`)."""
     interps = build_oi_climatology_interpolators(data_root)
+    dT_cache = {}
 
     def callback(ctx, t_yr):
         mesh_x, mesh_y = forcing_coords(ctx)
@@ -1542,7 +1600,13 @@ def make_climatology_ocean_callback(K_field, data_root=None):
         sal = so_interp(np.column_stack([d_so, mesh_y, mesh_x]))
         sin_a = compute_sin_alpha(ctx)
 
-        melt = quadratic_mixed_slope(tf, sal, sin_a, K=K_field)
+        # The protocol's per-basin adjustment: a TF offset at one K.
+        K_use = K_field
+        dT, K_one = _deltaT_for_run(dT_cache, mesh_x, mesh_y)
+        if dT is not None:
+            tf = tf + dT
+            K_use = K_one
+        melt = quadratic_mixed_slope(tf, sal, sin_a, K=K_use)
 
         floating = is_floating(s, b)
         ctx["ocean_melt"].dat.data[:] = np.where(floating, melt, 0.0)
@@ -1602,6 +1666,7 @@ def make_forcing_callback(atm=None, ocean=None, fracture=None,
     if fracture is None:
         reject_collapse_mask("this run's forcing callback")
     K_field_cache = {"arr": None}
+    dT_cache = {}
     K_scale = float(os.environ.get("ISMIP7_K_SCALE", "1.0"))
 
     def callback(ctx, t_yr):
@@ -1635,6 +1700,11 @@ def make_forcing_callback(atm=None, ocean=None, fracture=None,
                 K_use = K_field_cache["arr"]
             else:
                 K_use = K
+            # The protocol's per-basin adjustment: a TF offset at one K.
+            dT, K_one = _deltaT_for_run(dT_cache, mesh_x, mesh_y)
+            if dT is not None:
+                tf = tf + dT
+                K_use = K_one
 
             melt = quadratic_mixed_slope(tf, sal, sin_alpha, K=K_use * K_scale)
 

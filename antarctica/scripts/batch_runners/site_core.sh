@@ -357,10 +357,9 @@ ISMIP7_ACCOUNT="${ISMIP7_ACCOUNT:-}"
 ISMIP7_SBATCH_EXTRA="${ISMIP7_SBATCH_EXTRA:-}"
 
 # A site that needs one number sets ISMIP7_TASKS/ISMIP7_MEM and both kinds take
-# it. A site with measured per-kind values sets the pair. At Rice the forward
-# was measured at 12 ranks and the inversion at 32, so running the forward at
-# the inversion's size would be an unvalidated rank count on a narrower set of
-# nodes.
+# it. A site with measured per-kind values sets the pair, so a forward runs at
+# a rank count measured for forwards and never inherits the inversion's size
+# unvalidated (sites/rice_nots.sh carries its measurements).
 ISMIP7_TASKS_INV="${ISMIP7_TASKS_INV:-$ISMIP7_TASKS}"
 ISMIP7_MEM_INV="${ISMIP7_MEM_INV:-$ISMIP7_MEM}"
 ISMIP7_TASKS_FWD="${ISMIP7_TASKS_FWD:-$ISMIP7_TASKS}"

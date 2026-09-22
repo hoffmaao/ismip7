@@ -25,6 +25,7 @@ SCRIPT = ROOT / "scripts/batch_runners/timing_transient.script"
 
 FAKE_SBATCH = '''#!/bin/bash
 printf 'CWD: %s\\n' "$PWD" >> "$SBATCH_CALLS"
+env | grep '^ISMIP7_' | sort | sed 's/^/ENV: /' >> "$SBATCH_CALLS"
 printf 'ARG: %s\\n' "$@" >> "$SBATCH_CALLS"
 [ "${FAKE_SBATCH_RC:-0}" = 0 ] || { echo "sbatch: error: Batch job submission failed" >&2; exit "$FAKE_SBATCH_RC"; }
 echo "4242;cluster"
@@ -81,8 +82,9 @@ def test_a_lane_is_submitted_from_antarctica_and_its_job_id_stamped(manager, mon
     for arg in ("-A", "r00905", "-p", "general", "--ntasks-per-node=16", "--mem=64G",
                 "--time=12:00:00", "--dependency=afterok:7", "timing_2500_25000_16"):
         assert f"ARG: {arg}" in seen, seen
-    export = next(line for line in seen if line.startswith("ARG: --export="))
-    assert "ISMIP7_LC=2500" in export and f"ISMIP7_REPO={REPO}" in export
+    # Every value travels in sbatch's own environment under a bare ALL.
+    assert "ARG: --export=ALL" in seen
+    assert "ENV: ISMIP7_LC=2500" in seen and f"ENV: ISMIP7_REPO={REPO}" in seen
     assert "SUBMIT:" in capsys.readouterr().out
 
 
@@ -122,7 +124,7 @@ def test_a_dry_run_works_where_no_site_matches_and_stamps_nothing(manager, capsy
     manager.dry_run = True
     assert submit(manager) is None
     out = capsys.readouterr().out
-    assert out.startswith("DRY RUN: site local: sbatch ")
+    assert out.startswith("DRY RUN: site local: env ISMIP7_SITE=local ")
     assert "--ntasks-per-node=16" in out
     assert calls(manager) == [] and manager.submit_failures == 0
 

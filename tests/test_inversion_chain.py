@@ -59,7 +59,8 @@ STUBS = {
     "sbatch": (
         "#!/bin/bash\n"
         'printf "ARGV: %s\\n" "$*" >> "$SBATCH_CALLS"\n'
-        'env | grep "^ISMIP7_" | sort | sed "s/^/ENV: /" >> "$SBATCH_CALLS"\n'
+        'env | grep -E "^(ISMIP7_|SLURM_GET_USER_ENV=|SLURM_EXPORT_ENV=)" | sort'
+        ' | sed "s/^/ENV: /" >> "$SBATCH_CALLS"\n'
         'echo "999999"\n'
     ),
     "scontrol": (
@@ -197,6 +198,26 @@ def test_an_existing_marker_queues_nothing(sandbox):
     assert rc == 0, log
     assert "already finished; nothing to do" in log
     assert calls == "", f"nothing may be queued once the marker exists: {calls}"
+
+
+def test_the_successor_carries_its_depth_in_sbatch_s_environment(sandbox):
+    r"""The list form --export=ALL,ISMIP7_CHAIN_DEPTH=N has Slurm rebuild the
+    login environment when the successor starts and hold the job when that
+    fails, as IU Quartz held 10555984. The depth goes in sbatch's environment
+    under a bare ALL, and what a list-form first link left in the job
+    (SLURM_GET_USER_ENV=1 and the list itself in SLURM_EXPORT_ENV) stays out
+    of the successor."""
+    rc, log, calls = run_job(
+        sandbox, FAKE_DIE_AFTER="optimizer", ISMIP7_CHAIN_DEPTH="1",
+        SLURM_GET_USER_ENV="1",
+        SLURM_EXPORT_ENV="ALL,ISMIP7_SITE=local,ISMIP7_MAXITER=200")
+    assert rc == 137, log
+    argv = [line for line in calls.splitlines() if line.startswith("ARGV:")]
+    assert len(argv) == 1, calls
+    assert [word for word in argv[0].split() if word.startswith("--export")] == ["--export=ALL"]
+    assert "ENV: ISMIP7_CHAIN_DEPTH=2" in calls.splitlines()
+    assert "SLURM_GET_USER_ENV" not in calls and "SLURM_EXPORT_ENV" not in calls
+    assert "chain: successor 999999 queued (depth 2 of 4)" in log
 
 
 def test_the_chain_depth_cap_stops_it(sandbox):

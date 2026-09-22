@@ -86,9 +86,14 @@ if [ -z "${SLURM_JOB_ID:-}" ]; then
     echo "chain: no scheduler, so no successor to queue"
 elif [ "$DEPTH" -lt "$MAXD" ]; then
     ismip7_chain_resources
-    NEXT=$(sbatch --parsable --dependency=afterany:"$SLURM_JOB_ID" \
+    # The depth goes in sbatch's own environment, which a bare --export=ALL
+    # carries. The list form --export=ALL,ISMIP7_CHAIN_DEPTH=N has Slurm
+    # rebuild the login environment when the successor starts, and IU Quartz
+    # held successor 10555984 on 21 September 2026 when that failed.
+    NEXT=$(ISMIP7_CHAIN_DEPTH=$((DEPTH + 1)) sbatch --parsable \
+        --dependency=afterany:"$SLURM_JOB_ID" \
         "${ISMIP7_CHAIN_RES[@]}" \
-        --export=ALL,ISMIP7_CHAIN_DEPTH=$((DEPTH + 1)) \
+        --export=ALL \
         antarctica/scripts/batch_runners/inversion.sbatch) \
       && echo "chain: successor $NEXT queued (depth $((DEPTH + 1)) of $MAXD)" \
       || echo "chain: WARNING could not queue a successor"

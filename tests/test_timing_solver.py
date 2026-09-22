@@ -143,9 +143,11 @@ def dry_run(tmp_path, stage, *args):
         env=env, capture_output=True, text=True)
     assert proc.returncode == 0, proc.stderr
     line = next(line for line in proc.stdout.splitlines() if line.startswith("DRY RUN:"))
-    # submit.sh prints the sbatch line shell-quoted.
-    export = next(word for word in shlex.split(line) if word.startswith("--export="))
-    return dict(item.split("=", 1) for item in export.split(",")[1:])
+    # submit.sh prints the command shell-quoted: `env KEY=VALUE ... sbatch ...
+    # --export=ALL script`, every value set in sbatch's own environment.
+    words = shlex.split(line.split(": ", 2)[2])
+    assert words[0] == "env" and "--export=ALL" in words, words
+    return dict(word.split("=", 1) for word in words[1:words.index("sbatch")])
 
 
 @pytest.mark.parametrize("stage, kind, suffix", [

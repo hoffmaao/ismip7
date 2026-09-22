@@ -21,7 +21,7 @@ from firedrake import COMM_WORLD
 from firedrake.petsc import PETSc
 
 from timing_campaign import (
-    CACHE_REQUIRED_FIELDS,
+    cache_required_fields,
     CACHE_ROLE,
     CACHE_SCHEMA_VERSION,
     MATRIX_T_START,
@@ -249,7 +249,8 @@ def main():
             "(was it produced by inversion_icepack2.py?)"
         )
     if args.manifest or args.publish_timing_cache:
-        missing_fields = sorted(set(CACHE_REQUIRED_FIELDS) - set(loaded))
+        law = _json_value(root_attrs.get("friction")) or "budd"
+        missing_fields = sorted(set(cache_required_fields(law)) - set(loaded))
         if missing_fields:
             raise ValueError(
                 "Cannot publish incomplete timing cache; missing fields: "

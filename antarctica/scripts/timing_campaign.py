@@ -53,6 +53,17 @@ CACHE_REQUIRED_FIELDS = (
     "N_ref",
 )
 
+
+def cache_required_fields(friction="budd"):
+    """The fields a published initial-state cache has to carry. N_ref is
+    Budd's frozen reference effective pressure (simulation.setup_model builds
+    it under that law alone), so a regularized Coulomb state never has it
+    (found on Quartz 10569348, whose publish refused a complete RC cache)."""
+    if friction == "budd":
+        return CACHE_REQUIRED_FIELDS
+    return tuple(name for name in CACHE_REQUIRED_FIELDS if name != "N_ref")
+
+
 LCS = (500, 1000, 2000, 2500, 5000)
 RATIOS = (10, 20)
 DISPLAY_CORES = (16, 32, 64)
@@ -827,7 +838,8 @@ def _validate_manifest(
     if not isinstance(checkpoint_fields, list):
         return False, "cache checkpoint_fields is missing"
     missing_fields = sorted(
-        set(CACHE_REQUIRED_FIELDS) - set(checkpoint_fields)
+        set(cache_required_fields(expected.get("friction", "budd")))
+        - set(checkpoint_fields)
     )
     if missing_fields:
         return False, (
@@ -1276,6 +1288,25 @@ def selftest():
         friction="budd", source_basename=stem + ".h5",
     )
     assert not valid and "friction" in detail, detail
+    # A regularized Coulomb state has no N_ref and publishes without it; a
+    # Budd state without one is incomplete.
+    assert "N_ref" not in cache_required_fields("regularized_coulomb")
+    assert "N_ref" in cache_required_fields("budd")
+    rc_no_nref = dict(
+        rc_manifest,
+        checkpoint_fields=list(cache_required_fields("regularized_coulomb")),
+    )
+    valid, detail = validate_map_check_manifest(
+        rc_no_nref, lc=1000, lc_coarse=10000, buffer_m=BUFFER_M,
+        friction="regularized_coulomb", source_basename=stem + ".h5",
+    )
+    assert valid, detail
+    budd_no_nref = dict(
+        campaign_manifest,
+        checkpoint_fields=list(cache_required_fields("regularized_coulomb")),
+    )
+    valid, detail = validate_cache_manifest(budd_no_nref, lc=1000, lc_coarse=10000)
+    assert not valid and "N_ref" in detail, detail
     print("timing_campaign selftest OK")
 
 

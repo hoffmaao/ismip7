@@ -234,6 +234,9 @@ class MapCheckManager(SlurmStageRunner):
         self.dry_run = args.dry_run
         self.assume_passed = bool(args.assume_passed) and self.dry_run
         self.force = args.force
+        self.controls_after_failed_lane = bool(
+            getattr(args, "controls_after_failed_lane", False)
+        )
         self.stages = args.stages
         if self.assume_passed and self.stages == "next":
             # A dry run that assumes every dependency passed is asking to see
@@ -583,6 +586,17 @@ class MapCheckManager(SlurmStageRunner):
         dep_states = [states.get(dep, ("pending", ""))[0] for dep in DEPENDENCIES[stage]]
         if self.assume_passed:
             dep_states = ["passed" for _ in dep_states]
+        # A control cold-starts from the MAP under the production configuration
+        # (apparent mass balance, fixed front), which the strict lane does not
+        # run. When the lane failed on the state itself, the switch lets the
+        # control run anyway, for the cost per simulated year and the drift
+        # under production settings; the summary says which lane failed.
+        lanes_failed = []
+        if self.controls_after_failed_lane and stage.startswith("control_"):
+            for index, dep in enumerate(DEPENDENCIES[stage]):
+                if dep.startswith("lane_") and dep_states[index] == "failed":
+                    dep_states[index] = "passed"
+                    lanes_failed.append(dep)
         if any(s in {"failed", "blocked", "not_runnable"} for s in dep_states):
             return "blocked", "a dependency failed"
         if any(s != "passed" for s in dep_states):
@@ -592,6 +606,11 @@ class MapCheckManager(SlurmStageRunner):
         missing = self.inputs_missing(stage)
         if missing and not self.assume_passed:
             return "not_runnable", "missing " + ", ".join(missing)
+        if lanes_failed:
+            detail = (
+                ", ".join(lanes_failed) + " failed; the control runs the "
+                "production configuration regardless (--controls-after-failed-lane)"
+            )
         return "pending", detail
 
     def forced(self):
@@ -913,6 +932,21 @@ class MapCheckManager(SlurmStageRunner):
                           f"Newton iterations over {record.get('completed_steps')} steps, "
                           f"mass residual max {record.get('step_mass_residual_gt_max')} Gt, "
                           f"tripwire {record.get('tripwire')}."]
+        ran_after_failure = [
+            role for role, suffix in (("native", "native"), ("transferred", "transfer"))
+            if states[f"lane_{suffix}"][0] == "failed"
+            and states[f"control_{suffix}"][0]
+            not in {"waiting", "blocked", "pending", "not_runnable"}
+        ]
+        if ran_after_failure:
+            lines += ["", "## Controls after a failed lane", "",
+                      "The strict lane failed on the " + " and ".join(ran_after_failure)
+                      + " mesh and the control on that mesh ran anyway "
+                      "(`--controls-after-failed-lane`). A control cold-starts from "
+                      "the MAP under the production configuration, apparent mass "
+                      "balance and a fixed front, which cancels the t = 0 thickness "
+                      "tendency the strict contract exposes; its cost and drift are "
+                      "production numbers and no stability verdict on the state."]
         audit, _ = read_record(self.stem_dir / "audit_controls.json")
         if audit:
             lines += ["", "## 10-year controls", "", "```",
@@ -1020,6 +1054,9 @@ def parse_args(argv=None):
                           "dependencies had passed")
     run.add_argument("--force", action="store_true",
                      help="resubmit the named stage(s) whatever their state")
+    run.add_argument("--controls-after-failed-lane", action="store_true",
+                     help="run a control although the strict lane on its mesh "
+                          "failed (production configuration, cost and drift)")
     run.add_argument("--check-map-attrs", type=int, default=1)
     run.add_argument("--repack", type=int, default=1)
     args = parser.parse_args(argv)

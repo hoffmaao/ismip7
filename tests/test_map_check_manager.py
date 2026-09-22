@@ -216,6 +216,26 @@ def test_a_lane_passes_the_qualification_rule_and_names_its_source(sandbox):
     assert m.verdict("lane_native")[0] == "failed"
 
 
+def test_a_failed_lane_blocks_its_control_unless_the_switch_says_otherwise(sandbox):
+    r"""Quartz, 22 September: both Budd lanes tripped the runaway tripwire at
+    step 1 on the snapshot's own hotspots, and the controls, whose production
+    configuration cancels that t = 0 tendency, were what the mesh question
+    still needed. The switch runs the control on a failed lane's mesh and
+    says so; the other control keeps waiting for a lane that has not run."""
+    m = manager(sandbox)
+    m.run_fetch()
+    m.map_path.write_text("repacked\n")
+    _lane_record(m, "native", tripwire={"step": 1}, completed_steps=1)
+    assert states(m)["lane_native"] == "failed"
+    assert states(m)["control_native"] == "blocked"
+    told = manager(sandbox, "--controls-after-failed-lane")
+    got = told.table()
+    assert got["control_native"][0] == "pending"
+    assert "lane_native failed" in got["control_native"][1]
+    assert got["control_transfer"][0] == "waiting"
+    assert got["audit_controls"][0] == "waiting"
+
+
 def _control_csv(m, role, last_year, resid="0.0000"):
     m.control_csv(role).parent.mkdir(parents=True, exist_ok=True)
     dt = m.lane_dt(role)

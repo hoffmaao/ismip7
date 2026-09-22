@@ -171,9 +171,13 @@ MAP_CHECK_DIAG_CORES ?= 16
 MAP_CHECK_T_END ?= 2025
 MAP_CHECK_K_NPZ ?=
 # MAP_CHECK_ATTRS=0 skips the h5 attribute check of the fetched file (tests);
-# MAP_CHECK_REPACK=0 reads the fetched file as is.
+# MAP_CHECK_REPACK=0 reads the fetched file as is. MAP_CHECK_CONTROLS_AFTER_FAILED_LANE=1
+# lets a 10-year control run although the strict lane on its mesh failed: the
+# control's production configuration (apparent mass balance, fixed front) is
+# what a submission run uses, and its cost and drift are wanted even then.
 MAP_CHECK_ATTRS ?= 1
 MAP_CHECK_REPACK ?= 1
+MAP_CHECK_CONTROLS_AFTER_FAILED_LANE ?=
 MAP_CHECK_ARGS = run --root "$(CURDIR)" --map "$(MAP_CHECK_MAP)" --url "$(MAP_CHECK_URL)" \
   --md5 "$(MAP_CHECK_MD5)" --friction "$(MAP_CHECK_FRICTION)" \
   --lc $(MAP_CHECK_LC) --lc-coarse $(MAP_CHECK_LC_COARSE) --buffer-m $(MAP_CHECK_BUFFER) \
@@ -183,6 +187,7 @@ MAP_CHECK_ARGS = run --root "$(CURDIR)" --map "$(MAP_CHECK_MAP)" --url "$(MAP_CH
   --cores $(MAP_CHECK_CORES) --diag-cores $(MAP_CHECK_DIAG_CORES) --t-end $(MAP_CHECK_T_END) \
   --check-map-attrs $(MAP_CHECK_ATTRS) --repack $(MAP_CHECK_REPACK) \
   $(if $(MAP_CHECK_K_NPZ),--k-npz "$(MAP_CHECK_K_NPZ)",) \
+  $(if $(MAP_CHECK_CONTROLS_AFTER_FAILED_LANE),--controls-after-failed-lane,) \
   $(SLURM_SELECT) --walltime "$(SLURM_TIME)" $(if $(FORCE_TIMING),--force,)
 
 # The active solver qualification/reference lane uses the improved DG0

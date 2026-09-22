@@ -119,7 +119,13 @@ controls gate `audit_controls`. The controls cold-start from the MAP because
 `setup_model` refuses `ISMIP7_APPARENT_MB=1` on a restart that carries no
 `a_ref_mb`, and because that is the path production takes. The control driver
 prints its "no historical endpoint" warning on a cold start: these controls
-measure drift and are not a projection baseline.
+measure drift and are not a projection baseline. A lane that fails on the
+state itself (the snapshot's own runaway cells, on both meshes) would leave
+the controls blocked; `MAP_CHECK_CONTROLS_AFTER_FAILED_LANE=1` runs them
+anyway, because the production configuration cancels the t = 0 tendency the
+strict contract exposes and its cost per simulated year and drift are what
+the mesh question needs. `summary.md` then says which lane failed, and those
+control numbers are production numbers and no stability verdict.
 
 Stage 12, by hand when the final MAPs land: `ISMIP7_CHECK_FRICTION=<law>
 check_budd_map.py <final> --forward` on the MAP's mesh
@@ -148,7 +154,11 @@ criterion); the snapshots have no velocity to compare against.
 - **t = 0 fidelity.** The discharge ratio overall and per speed band on each
   mesh, the initial misfit against the observations, the filled dof counts,
   and the `Apparent MB: a_ref in [lo, hi] m/yr, net X Gt/yr` line of each
-  control's log.
+  control's log. The misfit line is the mean squared velocity error over the
+  whole mesh, open ocean cells and the buffer ring included, where the
+  thin-ice velocity is unconstrained and large; it is context for one mesh
+  and no measure across the two (the Budd snapshot gives 1.29e5 on its own
+  mesh and 2.02e4 transferred). The discharge ratio is the fidelity number.
 - **Ten-year drift.** From each control's timeseries over 2016 to 2025:
   dVAF/dt, dM/dt, the discharge in 2016 and 2025 and its block growth, the
   grounded area from `iareagr`, melt and SMB, and the track verdict per row

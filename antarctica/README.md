@@ -161,11 +161,13 @@ python scripts/download_data.py
 
 | Dataset | Product | Auth | Lands in |
 |---------|---------|------|----------|
-| BedMachine Antarctica v4 | NSIDC-0756 | Earthdata | `data/bedmachine/` |
-| MEaSUREs Ice Velocity v2 | NSIDC-0484 | Earthdata | `data/velocity/` |
-| RACMO2.4p1 SMB | Zenodo `10.5281/zenodo.14217231` | none | `data/racmo/` |
+| BedMachine Antarctica v4 | NSIDC-0756 | Earthdata | `<obs root>/bedmachine/` |
+| MEaSUREs Ice Velocity v2 | NSIDC-0484 | Earthdata | `<obs root>/velocity/` |
+| RACMO2.4p1 SMB | Zenodo `10.5281/zenodo.14217231` | none | `<obs root>/racmo/` |
 
-Existing files are skipped, so re-running is cheap.
+The obs root is `ISMIP7_OBS_DATA_ROOT` (section 6, environment knobs), the
+same directory every run reads, and it is created if missing. Existing files
+are skipped, so re-running is cheap.
 
 ---
 

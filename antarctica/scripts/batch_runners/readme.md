@@ -358,8 +358,9 @@ year, resuming through `ISMIP7_AUTO_RESUME=1`. Each driver owns its end year
 and the runner does not default `ISMIP7_T_END`; the chain reads the value the
 run used from the driver's `Time-stepping: <start>-><end>` line. At 1000 m /
 10 km on 64 ranks under `scpc_gamg`, 24 h buys at most 140 simulated years, so
-a full projection is about three links; the older 2500 m Cascade Lake
-configuration ran 26 min a year, i.e. 55 years a link and about six.
+a full projection is about three links. At Rice's default of 32 ranks on one
+Cascade Lake node, 31 min a year buys about 46 years a link, so a full
+projection is about seven.
 
 ```bash
 submit.sh projection ISMIP7_EXPERIMENT=control
@@ -408,13 +409,15 @@ final checkpoint for the successor.
 | full 11-experiment set at 2500 m | | | | 15,000 |
 | 1000 m / 10 km forward, per simulated year (Quartz, `scpc_gamg`) | 64 | under 70 GB | 10 min | 11 |
 | 1000 m / 10 km projection, 285 years (Quartz, `scpc_gamg`) | 64 | under 70 GB | 2 days | 3,040 |
+| 1000 m / 10 km forward, per simulated year (Rice, `scpc_gamg`) | 32 | under 180 GB | 31 min | 16 |
 
-The two 1000 m rows are the production configuration, from
+The two Quartz rows are the production configuration, from
 `antarctica/TIMING_MATRIX_QUARTZ_SCPC_GAMG.md`: the transient loop of a
 ten-step lane at `dt = 0.05` under the matrix's strict contract, extrapolated.
 Setup, forcing updates and output are not in them, and the memory is 64 times
-the largest rank's peak. The rows above them are whole runs on Cascade Lake
-under `full_mumps`.
+the largest rank's peak. The Rice row is a 1 km control from a transferred
+2 km MAP on one Cascade Lake node (job 1592597), 92 s per `dt = 0.05` step.
+The 2500 m and 2 km rows are whole runs on Cascade Lake under `full_mumps`.
 
 Per iterate at 2500 m on 12 ranks: forward median 1081 s (p10 932, p90 1365),
 adjoint 92 s, iterate 1174 s. The adjoint is 8% of the iterate, so the cost
@@ -430,7 +433,7 @@ independent, so a handful of nodes finishes it inside a week.
   partition probe on the 1 km / 10 km mesh (job 1592757, 22 September 2026)
   reports ghost/owned 0.010 at 32 ranks (max 0.017, halo 1.0 % of owned),
   so the build partitions by locality and rank counts up to a node are
-  meaningful there; a 1 km control ran 92 s per 0.05 yr step on 32 ranks.
+  meaningful there. The forward cost is the Rice row of the table above.
 - An inversion factors the complete mixed Jacobian with MUMPS, which sets its
   memory; `tlm_adjoint` differentiates through that solve, so no setting
   changes it. Cluster forwards took the field split this item asked for:

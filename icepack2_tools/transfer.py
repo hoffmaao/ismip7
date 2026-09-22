@@ -21,9 +21,8 @@ inversion produced.
 """
 import numpy as np
 from firedrake import Function, FunctionSpace
-from mpi4py import MPI
 
-from .mpi_stats import global_range
+from .mpi_stats import global_count, global_range, global_size
 
 #: Relative point-location tolerance for a strict transfer. Zero would let
 #: floating-point error push a dof on the shared outline outside; this keeps
@@ -36,6 +35,7 @@ def outside_source(source_mesh, target_space):
 
     An indicator that is one on the whole source mesh interpolates to one at
     every located dof and to the missing-dof default, zero, elsewhere."""
+    source_mesh.tolerance = STRICT_TOLERANCE
     one = Function(FunctionSpace(source_mesh, "CG", 1)).assign(1.0)
     el = target_space.ufl_element()
     scalar = FunctionSpace(target_space.mesh(), el.family(), el.degree())
@@ -50,8 +50,10 @@ def strict_transfer(source_field, target_space, fill=0.0, outside=None):
 
     Returns ``(field, info)`` with ``info`` carrying ``n_outside`` and
     ``n_all`` (global dof counts), ``fill``, and the source and target
-    ranges. ``outside`` may be passed from :func:`outside_source` when
-    several fields share one target space."""
+    ranges. A ``fill`` outside the source range is clipped into it, and
+    ``info["fill"]`` is the value actually written. ``outside`` may be
+    passed from :func:`outside_source` when several fields share one target
+    space."""
     source_mesh = source_field.function_space().mesh()
     source_mesh.tolerance = STRICT_TOLERANCE
     field = Function(target_space, name=source_field.name())
@@ -59,10 +61,10 @@ def strict_transfer(source_field, target_space, fill=0.0, outside=None):
                       default_missing_val=0.0)
     if outside is None:
         outside = outside_source(source_mesh, target_space)
-    comm = target_space.mesh().comm
-    n_out = comm.allreduce(int(outside.sum()), op=MPI.SUM)
-    n_all = comm.allreduce(int(outside.size), op=MPI.SUM)
+    n_out = global_count(outside, target_space.mesh().comm)
+    n_all = global_size(field)
     src_lo, src_hi = global_range(source_field)
+    fill = float(np.clip(fill, src_lo, src_hi))
     if n_out:
         field.dat.data[outside] = fill
     np.clip(field.dat.data, src_lo, src_hi, out=field.dat.data)

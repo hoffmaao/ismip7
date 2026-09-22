@@ -63,3 +63,22 @@ def test_a_vector_field_is_filled_row_wise():
     outside = outside_source(source, FunctionSpace(target, "CG", 1))
     assert np.all(g.dat.data_ro[outside] == 0.0)
     assert info["n_outside"] > 0
+
+
+def test_the_mask_is_strict_before_any_transfer():
+    source, target = _meshes()
+    space = FunctionSpace(target, "CG", 1)
+    outside = outside_source(source, space)
+    xy = Function(VectorFunctionSpace(target, "CG", 1)).interpolate(
+        SpatialCoordinate(target)).dat.data_ro
+    truly_outside = (xy < -1e-9).any(axis=1) | (xy > 1.0 + 1e-9).any(axis=1)
+    assert np.array_equal(outside, truly_outside)
+
+
+def test_a_fill_outside_the_source_range_is_reported_clipped():
+    source, target = _meshes()
+    f = _source_field(source)
+    g, info = strict_transfer(f, FunctionSpace(target, "CG", 1), fill=0.0)
+    outside = outside_source(source, g.function_space())
+    assert info["fill"] == 1.0
+    assert np.all(g.dat.data_ro[outside] == 1.0)

@@ -541,7 +541,8 @@ def setup_model(restart_from=None, *, allow_timing_cache_a_ref=False):
             target_field = Function(space, name=name)
             target_field.interpolate(source_field)
             return target_field
-        key = (space.ufl_element(), space.mesh())
+        el = space.ufl_element()
+        key = (el.family(), el.degree(), space.mesh())
         if key not in _outside_cache:
             _outside_cache[key] = outside_source(source_mesh, space)
         # The fluidity prior is a physical field with a floor (A > 0 keeps

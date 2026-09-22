@@ -99,6 +99,8 @@ subdir=""
 dependency=""
 wait_flag=0
 capped=1
+# A space, then a variable name and "=", inside one value.
+joined_pairs='[[:space:]][[:alpha:]_][[:alnum:]_]*='
 while [ $# -gt 0 ]; do
     # --opt=value is the spelling sbatch itself takes, so split it and let the
     # same branches handle both forms.
@@ -138,6 +140,13 @@ while [ $# -gt 0 ]; do
                 ""|[0-9]*|*[![:alnum:]_]*)
                     echo "not a variable name: '${1%%=*}' in $1" >&2; exit 2 ;;
             esac
+            # zsh passes an unquoted $VAR as one argument, so `submit.sh
+            # projection $COMMON` would set the first key to all the rest.
+            if [[ "${1#*=}" =~ $joined_pairs ]]; then
+                echo "one argument holds several KEY=VALUE pairs: $1" >&2
+                echo "  zsh passes an unquoted \$VAR whole; spell the pairs out or write \${=VAR}" >&2
+                exit 2
+            fi
             exports+=("$1"); shift ;;
         *) echo "unknown argument: $1" >&2; exit 2 ;;
     esac

@@ -222,3 +222,18 @@ def test_a_key_that_is_no_variable_name_is_refused(bin_dir):
                   ISMIP7_SITE="iu_quartz")
     assert proc.returncode == 2 and "ISMIP7-LC" in proc.stderr
     assert proc.stdout == ""
+
+
+def test_several_pairs_in_one_argument_are_refused(bin_dir):
+    r"""zsh passes an unquoted $VAR as one argument, so `submit.sh projection
+    $COMMON` would set ISMIP7_LC to "32000 ISMIP7_LC_COARSE=320000 ..."."""
+    joined = "ISMIP7_LC=32000 ISMIP7_LC_COARSE=320000 ISMIP7_SUBCYCLES=1,4,16,64"
+    proc = submit(bin_dir, "projection", "--dry-run", joined, ISMIP7_SITE="iu_quartz")
+    assert proc.returncode == 2 and "several KEY=VALUE pairs" in proc.stderr
+    assert "${=VAR}" in proc.stderr
+    assert proc.stdout == ""
+    # A space alone, or an option after one, still makes a single value.
+    proc = submit(bin_dir, "projection", "--dry-run", "ISMIP7_RUN_TAG=a b",
+                  "ISMIP7_NOTE=--mail-type=FAIL --mail-user=me@example.org",
+                  ISMIP7_SITE="iu_quartz")
+    assert proc.returncode == 0, proc.stderr

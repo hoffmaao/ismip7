@@ -7,10 +7,9 @@ import numpy as np
 
 _SEC_PER_YEAR = 31556926.0
 _RHO_ICE = 917.0
-_RHO_WATER = 1000.0    # fresh water: the SMB unit conversion only
 # Seawater for flotation, the value the forward builds its surface and its
 # flotation surface with (simulation.py, rho_ratio = 917 / 1024). The melt
-# callbacks used the fresh-water value above here until September 2026, which
+# callbacks used fresh water, 1000 kg/m^3, here until September 2026, which
 # put the flotation surface too low and read every floating cell thicker than
 # 78 percent of its flotation thickness as grounded, withholding its melt:
 # 364 000 km2, 24 percent of BedMachine's shelf area, on the 2500 m mesh (the
@@ -81,8 +80,16 @@ def forcing_year(t_yr):
 
 
 def smb_kgm2s_to_myr(smb_kgm2s):
-    r"""Convert SMB from kg/m^2/s to m/yr ice equivalent."""
-    return smb_kgm2s * _SEC_PER_YEAR / _RHO_ICE * (_RHO_WATER / _RHO_ICE)
+    r"""Convert SMB from kg/m^2/s to m/yr of ice.
+
+    ``acabf`` and ``acabf-anomaly`` are mass fluxes, so the thickness rate the
+    transport needs is the flux over the ice density; no water density enters.
+    ``write_ismip7_output`` converts the model's ``acabf`` back with the same
+    ice density. Until September 2026 this carried a further
+    ``rho_water / rho_ice`` factor, which read every ESM SMB anomaly 9 percent
+    too large (issue #29).
+    """
+    return smb_kgm2s * _SEC_PER_YEAR / _RHO_ICE
 
 
 def _sample_raster(raster, Q):

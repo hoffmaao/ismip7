@@ -215,7 +215,7 @@ Hahn, Mikula and Frolkovic 2025; Smith et al. 2020.
 | Initial SMB | RACMO2.4p1 2000-2023 climatology | no |
 | Bedrock adjustment | no | no |
 | Year of initial condition | 2015 | no |
-| Densities, gravity | rho_i = 917, rho_o = 1024, rho_w = 1000 kg m-3; g = 9.81 m s-2 | no |
+| Densities, gravity | rho_i = 917, rho_o = 1024 kg m-3; g = 9.81 m s-2 | no |
 | Variables not included | none of the mandatory set; no 3D or thermal variables (no thermal model); `hfgeoubed`, `litemp*`, `zvel*`, `thdrflf`, `deltag`, `refgeoid` absent | no |
 | Days per year | 365.25: the model's year is icepack's, 31557600 s, and every model-to-SI conversion in the submitted files uses it. The forcing is converted on the way in with the tropical year, 31556926 s, a relative difference of 2e-5. The model counts time in years and has no calendar; the time axis in the files is the standard calendar (discussion #24), state at 1 January of the following year and fluxes at 1 July with bounds | no |
 | Other | apparent-mass-balance correction frozen at the initial state; forcing versions cited per file in the submission | no |

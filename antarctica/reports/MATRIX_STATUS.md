@@ -102,8 +102,13 @@ values fed in.
 
 ## Open items (carried in the per-core reports)
 
-1. **~9% aSMB unit inflation** (`forcing.py:smb_kgm2s_to_myr`) - a real
-   pending decision; inflates every ESM SMB anomaly. (The matrix sitting
+1. **aSMB unit conversion, settled** (`forcing.py:smb_kgm2s_to_myr`). The
+   reader carried an extra water-to-ice density ratio, so every ESM SMB
+   anomaly entered 9 percent too large, while the output writer, the melt
+   bound check and the readiness doc all converted with the ice density
+   alone. The factor was removed on 2026-09-22: the anomaly is now the mass
+   flux over 917 kg m-3, the ISMIP6 convention. Cores 1-8 read the inflated
+   anomaly; cores 9-11 do not read the aSMB path. (The matrix sitting
    above the ISMIP6 envelope is a real forced-response bias - a
    melt/dynamics parametrization target - not a differencing artifact.
    `control/run.py` branches the CTRL from the historical endpoint because
@@ -121,10 +126,10 @@ values fed in.
    computed against them do not cleanly isolate the forced response.)
    **Every number in this item, including the isolation test and the
    above-envelope overshoot it explains, was produced with the January-only
-   forcing.** That bug overstates late-century ablation several-fold and is on
-   its own a sufficient cause of the overshoot, so the magnitude and the
-   attribution both have to be re-derived from the re-run before the ~9% unit
-   question can be judged against them. (issue #29)
+   forcing and the inflated anomaly.** The January bug overstates late-century
+   ablation several-fold and is on its own a sufficient cause of the
+   overshoot, so the magnitude and the attribution both have to be re-derived
+   from the re-run. (issue #29)
 2. **Projection handoff: settled at 2015.0.** Since 2cd8b57 (14 September)
    the historical shims end at `t_end_default=2015.0` and the projection shims
    start at `t_start_default=2015.0` (`antarctica/scripts/historical/*.py`,

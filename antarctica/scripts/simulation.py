@@ -34,6 +34,9 @@ from firedrake import (
     exp,
 )
 from firedrake.petsc import PETSc
+from icepack2_tools.transfer import (
+    outside_source, strict_transfer, describe as describe_transfer,
+)
 
 import rasterio, icepack
 from icepack2 import model
@@ -519,6 +522,13 @@ def setup_model(restart_from=None, *, allow_timing_cache_a_ref=False):
     t_restart = None
     A_prior_f = None
     ismip7_resume = None
+    # Cross-mesh transfer (ISMIP7_MESH names a mesh other than the MAP's):
+    # strict point location, a physical fill outside the source domain (the
+    # ocean buffer), and the source range as a bound. See
+    # icepack2_tools.transfer for the extrapolation this replaces.
+    transfer = mesh is not source_mesh
+    _outside_cache = {}
+
     def load_checkpoint_field(chk, name, space, optional=False):
         """Load a checkpoint field, interpolating it for a timing mesh."""
         try:
@@ -527,12 +537,20 @@ def setup_model(restart_from=None, *, allow_timing_cache_a_ref=False):
             if optional:
                 return None
             raise
-        target_field = Function(space, name=name)
-        target_field.interpolate(
-            source_field,
-            allow_missing_dofs=True,
-            default_missing_val=0.0,
-        )
+        if not transfer:
+            target_field = Function(space, name=name)
+            target_field.interpolate(source_field)
+            return target_field
+        key = (space.ufl_element(), space.mesh())
+        if key not in _outside_cache:
+            _outside_cache[key] = outside_source(source_mesh, space)
+        # The fluidity prior is a physical field with a floor (A > 0 keeps
+        # the composite rheology nonsingular); log-deviations and the
+        # observations are zero where the inversion had no ice.
+        fill = global_range(source_field)[0] if name == "fluidity_prior" else 0.0
+        target_field, info = strict_transfer(
+            source_field, space, fill=fill, outside=_outside_cache[key])
+        PETSc.Sys.Print("  " + describe_transfer(name, info))
         return target_field
 
     with fd.CheckpointFile(source_chk, "r") as chk:

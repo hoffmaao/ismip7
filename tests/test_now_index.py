@@ -95,14 +95,26 @@ def test_the_detector_would_catch_a_new_marker(tmp_path):
     assert not REF.search("departs from the climatology (#48).")
 
 
-def _gh_ready():
+def _gh_ready(scope=None):
+    r"""``gh`` is installed and authenticated, and its token carries ``scope``.
+
+    ``build_now.py`` reads the board through the ProjectV2 GraphQL API, which
+    needs ``read:project``; the write scope ``project`` implies it."""
     if shutil.which("gh") is None:
         return False
-    return subprocess.run(["gh", "auth", "status"],
-                          capture_output=True).returncode == 0
+    r = subprocess.run(["gh", "auth", "status"], capture_output=True, text=True)
+    if r.returncode != 0:
+        return False
+    if scope is None:
+        return True
+    scopes = set(re.findall(r"'([^']+)'", " ".join(
+        line for line in (r.stdout + r.stderr).splitlines() if "Token scopes" in line)))
+    return scope in scopes or scope.removeprefix("read:") in scopes
 
 
-@pytest.mark.skipif(not _gh_ready(), reason="gh is absent or not authenticated")
+@pytest.mark.skipif(not _gh_ready("read:project"),
+                    reason="gh is absent, not authenticated, or lacks read:project "
+                           "(gh auth refresh -s read:project)")
 def test_now_index_matches_the_open_issues():
     r = subprocess.run([sys.executable, str(BUILD), "--check"],
                        capture_output=True, text=True)

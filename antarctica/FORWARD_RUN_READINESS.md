@@ -308,9 +308,11 @@ forcing-version audit, the output writer, and the melt calibration above.
    forward half 1 631 466 km2 over 85 820 cells, and they differ in mask and
    quadrature as well, so their totals compare in magnitude.
 
-   The rows below predate the seawater flotation test (issue #66) and the
-   `h > 0` test in the forward half, and are to be re-measured; the current
-   numbers are in `GEOMETRY_DISCRETIZATION.md`.
+   The rows below predate the seawater flotation test, which landed with
+   issue #66, and the
+   `h > 0` test in the forward half, and are to be re-measured with the DG0
+   melt total (issue #30); the current numbers are in
+   `GEOMETRY_DISCRETIZATION.md`.
 
    | slope | max, m/yr | p99, m/yr | area mean, m/yr | integrated, Gt/yr | past the bound |
    |---|---|---|---|---|---|

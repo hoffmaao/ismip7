@@ -265,9 +265,35 @@ A successful build prints the whole list at the end.
 four editable packages: `icepack`, `icepack2`, `tlm_adjoint`, `icepack_tools`.
 It takes the venv and work filesystem from the site file and expects the
 sources under `$ISMIP7_WORK/sw/src` (`FD_PREFIX` moves that; at Rice it is
-`/projects/ah301/sw/src`). They are rsynced from a workstation rather than
-cloned, since `icepack2` carries uncommitted edits the inversion needs
-(issue #46). Two more gaps surfaced here: `/tmp` is not writable on the login
+`/projects/ah301/sw/src`). `icepack`, `tlm_adjoint` and `icepack_tools` are
+rsynced from a workstation, `icepack_tools` because it is a local project with
+no remote at all.
+
+`icepack2` is **cloned at a pin**, and is the one source a site must not rsync.
+The inversion needs two lines that Firedrake 2026 forces on it
+(`Mesh.geometric_dimension` became an attribute, and `viscous_power` and
+`flow_law` call it). Those lines used to be uncommitted edits in one
+workstation checkout, so two sites could differ with nothing to read (issue
+#46); they are now a commit, on the branch of the open pull request
+icepack/icepack2#3. `install_deps.sh` names that branch's head by SHA and
+installs exactly it, which is icepack2 `main` (`40e848b`) plus the two files, so
+every site runs one known tree and `--check-icepack2` prints which:
+
+```
+bash antarctica/scripts/batch_runners/install_deps.sh --check-icepack2
+icepack2: e0a46c9ce3e95dc916660a200e695f0417aa3037 (fix/firedrake-2026-geometric-dimension from https://github.com/hoffmaao/icepack2.git)
+```
+
+A checkout that is not a clone, or that carries local changes, is reported and
+left alone rather than reset: at a site still holding the rsynced copy, move it
+aside (`mv icepack2 icepack2.rsynced`) and run the script again. When the pull
+request merges, override `ICEPACK2_REMOTE`, `ICEPACK2_REF` and `ICEPACK2_SHA` to
+follow `main` and change the defaults in `install_deps.sh` in the same pass;
+`tests/test_icepack2_pin.py` pins them, so that edit is a deliberate one. As of
+22 September 2026 the workstation and Rice carried these edits and Quartz ran a
+clean `40e848b`, which is the disagreement the pin ends.
+
+Two more gaps surfaced here: `/tmp` is not writable on the login
 nodes (the script sets `TMPDIR`), and the `gmsh` wheel dlopens `libGLU.so.1`.
 
 `verify.sbatch` proves the build works across ranks: four tasks under `srun`,

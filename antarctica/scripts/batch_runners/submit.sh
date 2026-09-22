@@ -175,19 +175,17 @@ if ! cd "$ISMIP7_REPO/$subdir" 2>/dev/null || [ ! -f "$script_rel" ]; then
     exit 2
 fi
 
-# sbatch splits --export on commas and documents no quoting, so a list entry
-# ISMIP7_SUBCYCLES=1,4,16,64 would reach the job as ISMIP7_SUBCYCLES=1. A value
-# holding a comma is set in sbatch's own environment instead, over any value
-# the calling shell exported, and ALL carries it whole into the job and its
-# chain resubmits.
-export_list="ALL,ISMIP7_SITE=$ISMIP7_SITE_NAME,ISMIP7_REPO=$ISMIP7_REPO"
-comma_values=()
-for kv in ${exports+"${exports[@]}"}; do
-    case "$kv" in
-        *,*) comma_values+=("$kv") ;;
-        *)   export_list="$export_list,$kv" ;;
-    esac
-done
+# Every KEY=VALUE, with the site and the checkout, is set in sbatch's own
+# environment, where it wins over the same variable exported in the calling
+# shell, and a bare --export=ALL carries that environment whole into the job
+# and on to its chain links. An --export list has two faults. sbatch splits it
+# on commas and documents no quoting, so ISMIP7_SUBCYCLES=1,4,16,64 would reach
+# the job as ISMIP7_SUBCYCLES=1. And any value but a bare ALL or NIL sets
+# SLURM_GET_USER_ENV=1, which has slurmd rebuild the login environment when
+# the job starts and requeue and hold the job when that fails ("user env
+# retrieval failed requeued held", IU Quartz, Slurm 25.11.8).
+job_env=("ISMIP7_SITE=$ISMIP7_SITE_NAME" "ISMIP7_REPO=$ISMIP7_REPO"
+         ${exports+"${exports[@]}"})
 
 cmd=(sbatch --parsable
      -J "$name"
@@ -195,7 +193,7 @@ cmd=(sbatch --parsable
      --nodes=1 --ntasks-per-node="$tasks" --cpus-per-task="$cpus_per_task"
      --hint=nomultithread
      --mem="$mem" --time="$time"
-     --export="$export_list"
+     --export=ALL
      "$script_rel")
 [ -n "$constraint" ] && cmd=("${cmd[@]:0:1}" -C "$constraint" "${cmd[@]:1}")
 [ -n "$account" ] && cmd=("${cmd[@]:0:1}" -A "$account" "${cmd[@]:1}")
@@ -208,7 +206,7 @@ tail_flags=()
 last=$((${#cmd[@]} - 1))
 cmd=("${cmd[@]:0:$last}" ${tail_flags+"${tail_flags[@]}"} "${cmd[$last]}")
 # Put in front last, since the insertions above count positions from sbatch.
-[ -n "${comma_values+x}" ] && cmd=(env "${comma_values[@]}" "${cmd[@]}")
+cmd=(env "${job_env[@]}" "${cmd[@]}")
 
 # Memory as sbatch spells it (240G, 187000M, a bare number of megabytes), in
 # megabytes. Anything else prints nothing and the comparison is skipped.

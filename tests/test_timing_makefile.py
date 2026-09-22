@@ -21,6 +21,7 @@ pytestmark = pytest.mark.skipif(shutil.which("make") is None, reason="needs make
 
 FAKE_SBATCH = '''#!/bin/bash
 printf 'CWD: %s\\n' "$PWD" >> "$SBATCH_CALLS"
+env | grep -E '^(ISMIP7|TIMING)_' | sort | sed 's/^/ENV: /' >> "$SBATCH_CALLS"
 printf 'ARG: %s\\n' "$@" >> "$SBATCH_CALLS"
 echo "5151;cluster"
 '''
@@ -56,6 +57,12 @@ def make(sandbox, target, *variables, **env):
     return proc, (calls.read_text().splitlines() if calls.exists() else [])
 
 
+def environment(seen):
+    r"""What submit.sh set in sbatch's environment, which a bare --export=ALL
+    carries into the job."""
+    return dict(line[len("ENV: "):].split("=", 1) for line in seen if line.startswith("ENV: "))
+
+
 def lane(sandbox, cores="16"):
     stand_in = str(sandbox / "input")
     return ["LCS=2500", "RATIOS=10", f"CORES={cores}", "TIMING_KIND=debug",
@@ -77,12 +84,13 @@ def test_a_direct_lane_goes_through_the_site_file(sandbox):
     for arg in ("-A", "r00905", "general", "--ntasks-per-node=16", "--mem=64G",
                 "--time=12:00:00", "timing_2500_25000_16"):
         assert f"ARG: {arg}" in seen, seen
-    export = next(line for line in seen if line.startswith("ARG: --export="))
-    assert f"ISMIP7_REPO={sandbox / 'repo'}" in export
-    assert f"ISMIP7_TIMING_STATUS={root}/results/timing/status_maketest_2500_25000_16.txt" in export
-    assert "ISMIP7_LC=2500" in export and "ISMIP7_FRICTION=budd" in export
+    assert "ARG: --export=ALL" in seen
+    env = environment(seen)
+    assert env["ISMIP7_REPO"] == str(sandbox / "repo")
+    assert env["ISMIP7_TIMING_STATUS"] == f"{root}/results/timing/status_maketest_2500_25000_16.txt"
+    assert env["ISMIP7_LC"] == "2500" and env["ISMIP7_FRICTION"] == "budd"
     assert status(sandbox).startswith("submitted job_id=5151 ")
-    assert "site iu_quartz: sbatch" in proc.stderr
+    assert "site iu_quartz: env ISMIP7_SITE=iu_quartz " in proc.stderr
 
 
 def test_the_debug_lanes_ask_for_the_site_s_debug_partition(sandbox):
@@ -123,8 +131,8 @@ def test_meshes_and_redistribute_wait_on_a_one_rank_job(sandbox):
     assert seen[-1] == "ARG: scripts/batch_runners/timing_meshes.script"
     for arg in ("--wait", "--ntasks-per-node=1", "--mem=32G", "ant_timing_mesh", "r00905"):
         assert f"ARG: {arg}" in seen, seen
-    export = next(line for line in seen if line.startswith("ARG: --export="))
-    assert "TIMING_LCS=500:1000:2000:2500:5000" in export and "TIMING_BUFFER=20000" in export
+    env = environment(seen)
+    assert env["TIMING_LCS"] == "500:1000:2000:2500:5000" and env["TIMING_BUFFER"] == "20000"
 
 
 def source_maps(sandbox):
@@ -153,9 +161,9 @@ def test_a_parallel_original_with_no_repack_is_still_redistributed(sandbox):
                       f"TIMING_INVERSION={packed}", ISMIP7_SITE="iu_quartz")
     assert proc.returncode == 0, proc.stderr
     assert seen[-1] == "ARG: scripts/batch_runners/timing_redistribute.script"
-    export = next(line for line in seen if line.startswith("ARG: --export="))
-    assert f"TIMING_REDISTRIBUTE_INPUT={raw}" in export
-    assert f"TIMING_REDISTRIBUTE_OUTPUT={packed}" in export
+    env = environment(seen)
+    assert env["TIMING_REDISTRIBUTE_INPUT"] == str(raw)
+    assert env["TIMING_REDISTRIBUTE_OUTPUT"] == str(packed)
 
 
 def test_no_map_at_all_names_both_files(sandbox):
@@ -172,9 +180,9 @@ def test_a_matrix_lane_s_step_scales_with_the_mesh_only_up_to_the_cap(sandbox, l
     proc, seen = make(sandbox, "transient-direct", f"LCS={lc}", "TIMING_KIND=matrix",
                       *variables, ISMIP7_SITE="iu_quartz")
     assert proc.returncode == 0, proc.stderr
-    export = next(line for line in seen if line.startswith("ARG: --export="))
-    assert f"ISMIP7_DT={dt}," in export + ",", export
-    assert f"ISMIP7_T_END={t_end}," in export + ",", export
+    env = environment(seen)
+    assert env["ISMIP7_DT"] == dt, seen
+    assert env["ISMIP7_T_END"] == t_end, seen
 
 
 def dry(sandbox, target, *variables):

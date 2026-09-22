@@ -16,8 +16,8 @@ ismip7_persistent_jit_cache
 ismip7_banner
 
 # ISMIP7_LC, ISMIP7_LC_COARSE, ISMIP7_BUFFER_M, ISMIP7_INVERSION,
-# ISMIP7_T_END, ISMIP7_DT, and ISMIP7_TIMING_STATUS are forwarded via
-# sbatch --export=ALL,... . The
+# ISMIP7_T_END, ISMIP7_DT, and ISMIP7_TIMING_STATUS arrive as KEY=VALUE
+# arguments to submit.sh, which sets them in sbatch's environment. The
 # Makefile overrides --mem per resolution; 240G is the one-node retry request
 # for the finest 500 m timing case after every 128G lane was OOM-killed.
 write_status() {

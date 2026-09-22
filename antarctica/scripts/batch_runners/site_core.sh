@@ -205,6 +205,15 @@ ismip7_container_binds() {
 
 ismip7_activate() {
     ismip7_site_require
+    # A job submitted with an --export list carries two variables that must go
+    # no further. SLURM_GET_USER_ENV=1 has slurmd rebuild the login
+    # environment when a job starts, and requeue and hold the job when that
+    # fails; a chain resubmit's --export=ALL would hand it to every successor.
+    # SLURM_EXPORT_ENV holds the list, which srun takes as its own --export,
+    # so a variable the list names comes back in the job's steps after the
+    # script unsets it (projection.sbatch unsets ISMIP7_RESTART for its
+    # successor).
+    unset SLURM_GET_USER_ENV SLURM_EXPORT_ENV
     ismip7_load_modules
     if [ -n "$ISMIP7_CONTAINER" ]; then
         ismip7_activate_container

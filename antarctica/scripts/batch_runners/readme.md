@@ -28,16 +28,27 @@ submit.sh projection --partition debug --time 00:30:00 --tasks 8
 ```
 
 Any `KEY=VALUE` argument is exported into the job, which is how a run is
-configured (knobs in `antarctica/README.md`). A value holding a comma, such as
-`ISMIP7_SUBCYCLES=1,4,16,64`, goes into sbatch's own environment, since sbatch
-splits its `--export` list on commas: the printed line reads
-`env KEY=VALUE sbatch ...`, and the job and its chain links receive the value
-whole. One argument holding several pairs is refused, since that is how zsh
-passes an unquoted `$VAR`: spell the pairs out, or write `${=VAR}` in zsh. A
-value that really contains a space followed by `NAME=` can be exported in the
-calling shell instead. `--tasks`, `--mem`, `--time`,
-`--partition`, `--constraint`, `--account` and `--name` override site defaults
-for one submission, in either `--opt value` or `--opt=value` form.
+configured (knobs in `antarctica/README.md`). One argument holding several
+pairs is refused, since that is how zsh passes an unquoted `$VAR`: spell the
+pairs out, or write `${=VAR}` in zsh. A value that really contains a space
+followed by `NAME=` can be exported in the calling shell instead. `--tasks`,
+`--mem`, `--time`, `--partition`, `--constraint`, `--account` and `--name`
+override site defaults for one submission, in either `--opt value` or
+`--opt=value` form.
+
+`submit.sh` sets every `KEY=VALUE`, with `ISMIP7_SITE` and `ISMIP7_REPO`, in
+sbatch's own environment and passes a bare `--export=ALL`, which carries that
+environment whole into the job and its chain links. The printed line is the
+command that runs:
+`env ISMIP7_SITE=... ISMIP7_REPO=... KEY=VALUE ... sbatch ... --export=ALL <script>`.
+An `--export` list has two faults: sbatch splits it on commas
+(`ISMIP7_SUBCYCLES=1,4,16,64` would arrive as `1`), and any list sets
+`SLURM_GET_USER_ENV=1`, under which slurmd rebuilds the login environment when
+the job starts and requeues and holds the job when that fails ("user env
+retrieval failed requeued held" on IU Quartz). `ismip7_activate` clears that
+variable and `SLURM_EXPORT_ENV`, the list itself, which srun reads as its own
+`--export`, so a job submitted with a list passes neither on to its chain
+links.
 
 `submit.sh script PATH` submits any job script that sources `site_core.sh`. It
 is how `antarctica/Makefile` and `manage_timing_campaign.py` submit, and how to

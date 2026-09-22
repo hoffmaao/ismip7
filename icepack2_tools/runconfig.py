@@ -332,8 +332,29 @@ def deltat_per_basin_npz():
     deltaT_b per IMBIE basin at that K (``optimise_deltaT``); a per-basin K
     is not part of it. ``antarctica/scripts/calibrate_deltaT.py`` writes the
     file, the ocean callbacks add the offset to TF before the melt law and
-    melt with the file's K everywhere. Unset: the per-basin K path."""
-    return os.environ.get("ISMIP7_DELTAT_PER_BASIN_NPZ") or None
+    melt with the file's K everywhere, and no driver reads the per-basin K
+    file. Unset: the per-basin K path.
+
+    Checked where it is read, so a driver that calls this before its model
+    setup fails before the MAP is loaded: the file must exist, and
+    ``ISMIP7_K_SCALE`` must be 1, because the offsets were fitted at the
+    file's K and a scaled K invalidates them."""
+    path = os.environ.get("ISMIP7_DELTAT_PER_BASIN_NPZ") or None
+    if path is None:
+        return None
+    if not os.path.exists(path):
+        raise FileNotFoundError(
+            f"ISMIP7_DELTAT_PER_BASIN_NPZ={path} does not exist. Write it with "
+            f"antarctica/scripts/calibrate_deltaT.py, or unset the knob for "
+            f"the per-basin K path.")
+    k_scale = float(os.environ.get("ISMIP7_K_SCALE", "1.0"))
+    if k_scale != 1.0:
+        raise ValueError(
+            f"ISMIP7_DELTAT_PER_BASIN_NPZ={path} and ISMIP7_K_SCALE={k_scale:g} "
+            f"are both set. The offsets were fitted at the file's K, so a "
+            f"scaled K invalidates them: unset ISMIP7_K_SCALE, or refit with "
+            f"calibrate_deltaT.py --K at the K you want.")
+    return path
 
 
 def k_per_basin_candidates(results_dir, lc_value):

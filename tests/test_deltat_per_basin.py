@@ -5,6 +5,7 @@ import os
 
 import numpy as np
 import pytest
+from mpi4py import MPI
 
 REPO = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
@@ -41,10 +42,11 @@ def _synthetic(K=8.5e-5, true_dT=(0.3, -0.5)):
 def test_the_fit_recovers_a_known_offset():
     cd = _calibrate_deltaT()
     d = _synthetic()
-    dT, resid, sens, flagged = cd.fit_deltaT(
+    dT, M0, resid, sens, flagged = cd.fit_deltaT(
         d["tf"], d["sal"], d["sin_a"], d["K"], d["floating"], d["area"],
-        d["basin"], d["bids"], d["M_obs"])
+        d["basin"], d["bids"], d["M_obs"], MPI.COMM_WORLD)
     assert np.allclose(dT, (0.3, -0.5), atol=2e-4)
+    assert np.all(M0 > 0) and np.all(np.sign(M0 - d["M_obs"]) == (-1, 1))
     assert np.all(np.abs(resid) < 1e-3)  # Gt/yr, the root tolerance in dT
     assert np.all(sens > 0)
     assert flagged == []
@@ -54,17 +56,45 @@ def test_an_unreachable_basin_takes_the_window_end_and_is_flagged():
     cd = _calibrate_deltaT()
     d = _synthetic()
     d["M_obs"][0] *= 50.0
-    dT, resid, sens, flagged = cd.fit_deltaT(
+    dT, M0, resid, sens, flagged = cd.fit_deltaT(
         d["tf"], d["sal"], d["sin_a"], d["K"], d["floating"], d["area"],
-        d["basin"], d["bids"], d["M_obs"])
+        d["basin"], d["bids"], d["M_obs"], MPI.COMM_WORLD)
     assert dT[0] == cd.DT_WINDOW[1]
     assert [b for b, _ in flagged] == [3]
 
 
-def test_the_offset_is_stamped_by_basin(tmp_path, monkeypatch):
+class _TwinComm:
+    r"""Two ranks holding identical cells: every reduction doubles."""
+    def allreduce(self, x, op=MPI.SUM):
+        return 2 * x if op == MPI.SUM else x
+
+
+def test_the_fit_reduces_basin_totals_across_ranks():
+    cd = _calibrate_deltaT()
+    d = _synthetic()
+    # the observation covers both ranks' cells; each rank sees only its own
+    dT, M0, *_ = cd.fit_deltaT(
+        d["tf"], d["sal"], d["sin_a"], d["K"], d["floating"], d["area"],
+        d["basin"], d["bids"], 2 * d["M_obs"], _TwinComm())
+    assert np.allclose(dT, (0.3, -0.5), atol=2e-4)
+
+
+@pytest.fixture
+def clean(monkeypatch):
+    import icepack2_tools.forcing as forcing
+    for k in ("ISMIP7_MELT_SLOPE", "ISMIP7_SIN_ALPHA_ANT", "ISMIP7_GEOMETRY_SPACE",
+              "ISMIP7_K_SCALE", "ISMIP7_DELTAT_PER_BASIN_NPZ", "ISMIP7_FRACTURE"):
+        monkeypatch.delenv(k, raising=False)
+    monkeypatch.setattr(forcing, "_MELT_SLOPE_WARNED", False)
+    monkeypatch.setattr(forcing, "_SLOPE_CAP_WARNED", False)
+    monkeypatch.setattr(forcing, "_GEOMETRY_SPACE_WARNED", False)
+
+
+def _offsets(tmp_path, **extra):
+    r"""A basin grid with basin 3 on the left half of [0, 3]^2 and basin 9 on
+    the right, and an offsets file for basins 3 and 9 pointing at it."""
     xr = pytest.importorskip("xarray")
-    from icepack2_tools.forcing import load_deltaT_per_basin
-    # a 4 x 4 basin grid: basin 3 on the left half, basin 9 on the right
+    from icepack2_tools.runconfig import geometry_space
     x = np.array([0.0, 1.0, 2.0, 3.0])
     y = np.array([0.0, 1.0, 2.0, 3.0])
     bn = np.where(np.arange(4)[None, :] < 2, 3, 9).repeat(4, axis=0)
@@ -72,11 +102,100 @@ def test_the_offset_is_stamped_by_basin(tmp_path, monkeypatch):
     xr.Dataset({"basinNumber": (("y", "x"), bn)},
                coords={"x": x, "y": y}).to_netcdf(imbie)
     npz = tmp_path / "deltaT.npz"
-    np.savez(npz, basin_ids=np.array([3, 9]), deltaT_basin=np.array([0.3, -0.5]),
-             K=8.5e-5, melt_slope="ant", imbie2_nc=str(imbie))
-    monkeypatch.setenv("ISMIP7_MELT_SLOPE", "ant")
-    mx = np.array([0.4, 2.6, 0.2, 2.9])
-    my = np.array([0.1, 0.1, 2.9, 2.9])
-    field, K = load_deltaT_per_basin(str(npz), mx, my)
+    entries = dict(basin_ids=np.array([3, 9]), deltaT_basin=np.array([0.3, -0.5]),
+                   K=8.5e-5, melt_slope="ant", sin_alpha_ant=5.115e-3,
+                   geometry_space=geometry_space(), imbie2_nc=str(imbie))
+    entries.update(extra)
+    np.savez(npz, **entries)
+    return str(npz)
+
+
+def test_the_offset_is_stamped_by_basin(tmp_path, clean, capsys):
+    from icepack2_tools.forcing import load_deltaT_per_basin
+    npz = _offsets(tmp_path)
+    mx = np.array([0.4, 2.6, 0.2, 2.9, 40.0])
+    my = np.array([0.1, 0.1, 2.9, 2.9, 40.0])
+    field, K = load_deltaT_per_basin(npz, mx, my)
     assert K == 8.5e-5
-    assert np.allclose(field, [0.3, -0.5, 0.3, -0.5])
+    assert np.allclose(field, [0.3, -0.5, 0.3, -0.5, 0.0])
+    assert "WARNING" not in capsys.readouterr().out
+
+
+def test_another_slope_constant_names_the_deltaT_remedy(tmp_path, clean, capsys):
+    from icepack2_tools.forcing import load_deltaT_per_basin
+    npz = _offsets(tmp_path, sin_alpha_ant=5.7e-3)
+    load_deltaT_per_basin(npz, np.array([0.4]), np.array([0.1]))
+    out = capsys.readouterr().out
+    assert "sin(alpha) = 0.0057" in out
+    assert "calibrate_deltaT.py" in out and "ISMIP7_DELTAT_PER_BASIN_NPZ" in out
+    assert "calibrate_melt.py" not in out
+
+
+def test_another_geometry_names_the_deltaT_remedy(tmp_path, clean, capsys):
+    from icepack2_tools.forcing import load_deltaT_per_basin
+    from icepack2_tools.runconfig import geometry_space
+    other = "cg1" if geometry_space() == "dg0" else "dg0"
+    npz = _offsets(tmp_path, geometry_space=other)
+    load_deltaT_per_basin(npz, np.array([0.4]), np.array([0.1]))
+    out = capsys.readouterr().out
+    assert f"calibrated on {other} geometry" in out
+    assert "calibrate_deltaT.py" in out
+
+
+def test_a_missing_offsets_file_is_refused(tmp_path, clean, monkeypatch):
+    from icepack2_tools.runconfig import deltat_per_basin_npz
+    monkeypatch.setenv("ISMIP7_DELTAT_PER_BASIN_NPZ", str(tmp_path / "nope.npz"))
+    with pytest.raises(FileNotFoundError, match="nope.npz"):
+        deltat_per_basin_npz()
+
+
+def test_a_scaled_K_is_refused_with_offsets(tmp_path, clean, monkeypatch):
+    from icepack2_tools.runconfig import deltat_per_basin_npz
+    npz = _offsets(tmp_path)
+    monkeypatch.setenv("ISMIP7_DELTAT_PER_BASIN_NPZ", npz)
+    monkeypatch.setenv("ISMIP7_K_SCALE", "1.26")
+    with pytest.raises(ValueError, match="ISMIP7_K_SCALE=1.26") as e:
+        deltat_per_basin_npz()
+    assert "ISMIP7_DELTAT_PER_BASIN_NPZ" in str(e.value)
+    monkeypatch.setenv("ISMIP7_K_SCALE", "1.0")
+    assert deltat_per_basin_npz() == npz
+
+
+class _Ocean:
+    def get_thermal_forcing(self, yr, x, y, draft=None):
+        return np.full(len(x), 1.5)
+
+    def get_salinity(self, yr, x, y, draft=None):
+        return np.full(len(x), 34.5)
+
+
+def test_a_projection_melts_with_the_offsets_and_never_reads_the_K_file(
+        tmp_path, clean, monkeypatch, capsys):
+    fd = pytest.importorskip("firedrake")
+    import icepack2_tools.forcing as forcing
+    npz = _offsets(tmp_path)
+    monkeypatch.setenv("ISMIP7_DELTAT_PER_BASIN_NPZ", npz)
+    monkeypatch.setattr(forcing, "compute_sin_alpha",
+                        lambda ctx: np.full(len(ctx["h"].dat.data_ro), 5.115e-3))
+    # nearest basin cell: basin 3 for x < 1.5, basin 9 up to x = 3, then off
+    # the grid, where the offset is zero and the ice still melts at K
+    mesh = fd.RectangleMesh(4, 1, 6.0, 2.0)
+    Q_g = fd.FunctionSpace(mesh, "DG", 0)
+    xy = fd.Function(fd.VectorFunctionSpace(mesh, "DG", 0)).interpolate(
+        fd.SpatialCoordinate(mesh)).dat.data_ro
+    h = fd.Function(Q_g).assign(100.0)
+    ctx = {"mesh": mesh, "geom_xy": (xy[:, 0].copy(), xy[:, 1].copy()),
+           "h": h, "b": fd.Function(Q_g).assign(-1000.0),
+           "s": fd.Function(Q_g).assign(5.0),
+           "ocean_melt": fd.Function(Q_g)}
+    callback = forcing.make_forcing_callback(
+        ocean=_Ocean(), K_per_basin_npz=str(tmp_path / "absent_K.npz"))
+    callback(ctx, 2016.0)
+
+    x = ctx["geom_xy"][0]
+    dT = np.where(x < 1.5, 0.3, np.where(x <= 3.0, -0.5, 0.0))
+    assert (dT == 0.0).any()
+    expect = forcing.quadratic_mixed_slope(1.5 + dT, 34.5, 5.115e-3, K=8.5e-5)
+    assert np.allclose(ctx["ocean_melt"].dat.data_ro, expect)
+    out = capsys.readouterr().out
+    assert "outside the fitted basins" in out

@@ -22,8 +22,9 @@ flagged, as the toolbox's grid argmin would.
 
 Output: deltaT_per_basin_<lc>_K<K>.npz with basin_ids, deltaT_basin, K,
 residual_gt (M_b(dT*) - M_obs_b), sensitivity_gt_per_K (dM_b/dT at dT*),
-and the melt_slope / sin_alpha_ant / geometry_space provenance the forward
-checks. Run with the same ISMIP7_* melt knobs as the forward.
+and the melt_slope / sin_alpha_ant / sin_alpha_cap / geometry_space
+provenance the forward checks. Every basin total is reduced across ranks, so
+the offsets are the same under any mpiexec -n. Run with the same ISMIP7_* melt knobs as the forward.
 
     ISMIP7_LC=2000 python antarctica/scripts/calibrate_deltaT.py \
         [--K 8.5e-5 ...] [--out DIR]
@@ -48,40 +49,37 @@ from icepack2_tools.forcing import (  # noqa: E402
     quadratic_mixed_slope, sin_alpha_ant, melt_slope, _RHO_I, _K_PERCENTILES,
 )
 from icepack2_tools.runconfig import geometry_space  # noqa: E402
+from icepack2_tools.mpi_stats import (  # noqa: E402
+    global_count, global_range, global_sum,
+)
 
 DT_WINDOW = (-2.0, 2.0)
 
 
-def basin_totals(tf, sal, sin_a, K, floating, area, basin, bids, dT_b):
-    r"""Gt/yr per basin at offsets ``dT_b`` (one per basin)."""
-    out = np.zeros(len(bids))
-    for i, bid in enumerate(bids):
-        sel = floating & (basin == bid)
-        if not sel.any():
-            continue
-        m = quadratic_mixed_slope(tf[sel] + dT_b[i], sal[sel], sin_a[sel], K=K)
-        out[i] = float((m * area[sel]).sum()) * float(_RHO_I) / 1e12
-    return out
-
-
-def fit_deltaT(tf, sal, sin_a, K, floating, area, basin, bids, M_obs):
+def fit_deltaT(tf, sal, sin_a, K, floating, area, basin, bids, M_obs, comm):
+    r"""Per-basin offsets, with ``M(dT=0)``, the residual and ``dM/dT`` at
+    the root, all in Gt/yr. The arrays are this rank's dofs; every basin
+    total is reduced over ``comm``, so the root, and the file, are the same at
+    any rank count. Collective: call on every rank."""
     from scipy.optimize import brentq
     dT = np.full(len(bids), np.nan)
+    M0 = np.zeros(len(bids))
     resid = np.full(len(bids), np.nan)
     sens = np.full(len(bids), np.nan)
     flagged = []
     for i, bid in enumerate(bids):
         sel = floating & (basin == bid)
-        if not sel.any():
+        if global_count(sel, comm) == 0:
             flagged.append((bid, "no floating cells"))
             continue
         tf_b, s_b, a_b, A_b = tf[sel], sal[sel], sin_a[sel], area[sel]
 
         def M(d):
             m = quadratic_mixed_slope(tf_b + d, s_b, a_b, K=K)
-            return float((m * A_b).sum()) * float(_RHO_I) / 1e12
+            return global_sum(m * A_b, comm) * float(_RHO_I) / 1e12
 
         f = lambda d: M(d) - M_obs[i]  # noqa: E731
+        M0[i] = M(0.0)
         lo, hi = DT_WINDOW
         if f(lo) * f(hi) < 0:
             dT[i] = brentq(f, lo, hi, xtol=1e-4)
@@ -91,7 +89,7 @@ def fit_deltaT(tf, sal, sin_a, K, floating, area, basin, bids, M_obs):
                                  f"took the end point"))
         resid[i] = f(dT[i])
         sens[i] = (M(dT[i] + 0.05) - M(dT[i] - 0.05)) / 0.1
-    return dT, resid, sens, flagged
+    return dT, M0, resid, sens, flagged
 
 
 def main():
@@ -123,15 +121,15 @@ def main():
     if cm.MELT_SLOPE != "ant":
         sin_a = np.minimum(sin_a, cm.SIN_ALPHA_CAP)
     floating, area = g["floating"], g["area"]
-    PETSc.Sys.Print(f"  Slope: {cm.MELT_SLOPE}; floating cells {int(floating.sum())}; "
-                    f"TF {tf[floating].min():.2f}..{tf[floating].max():.2f} K")
+    comm = mesh.comm
+    tf_lo, tf_hi = global_range(tf[floating], comm)
+    PETSc.Sys.Print(f"  Slope: {cm.MELT_SLOPE}; floating cells "
+                    f"{global_count(floating, comm)}; TF {tf_lo:.2f}..{tf_hi:.2f} K")
 
     os.makedirs(args.out, exist_ok=True)
-    zero = np.zeros(len(bids))
     for K in args.K:
-        M0 = basin_totals(tf, sal, sin_a, K, floating, area, basin, bids, zero)
-        dT, resid, sens, flagged = fit_deltaT(tf, sal, sin_a, K, floating, area,
-                                             basin, bids, M_obs)
+        dT, M0, resid, sens, flagged = fit_deltaT(
+            tf, sal, sin_a, K, floating, area, basin, bids, M_obs, comm)
         M1 = M_obs + resid
         PETSc.Sys.Print(f"\n  K = {K:.3e}: total {M0.sum():.0f} Gt/yr at dT=0, "
                         f"{M1.sum():.0f} with deltaT_b (obs {M_obs.sum():.0f})")
@@ -147,7 +145,11 @@ def main():
             np.savez(fn, basin_ids=bids, deltaT_basin=dT, K=K,
                      M_obs=M_obs, M_dT0=M0, residual_gt=resid,
                      sensitivity_gt_per_K=sens,
-                     melt_slope=melt_slope(), sin_alpha_ant=sin_alpha_ant(),
+                     melt_slope=melt_slope(),
+                     sin_alpha_ant=(sin_alpha_ant() if melt_slope() == "ant"
+                                    else float("nan")),
+                     sin_alpha_cap=(cm.SIN_ALPHA_CAP if melt_slope() == "local"
+                                    else float("inf")),
                      geometry_space=geometry_space(), obs_csv=cm.OBS_CSV,
                      imbie2_nc=cm.IMBIE2_NC, inversion=cm.INV_H5)
         PETSc.Sys.Print(f"  wrote {fn}")

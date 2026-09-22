@@ -462,11 +462,19 @@ ISMIP7_DELTAT_PER_BASIN_NPZ=antarctica/results/deltaT_per_basin_2000_K8.500e-05.
 ```
 
 which makes every ocean callback (control, projections, OCX) add the offset
-to TF and melt with the file's one K; the per-basin K file is then not read.
+to TF and melt with the file's one K; no driver then reads or requires the
+per-basin K file. A driver refuses to start when the file is missing or
+`ISMIP7_K_SCALE` is not 1, since the offsets were fitted at the file's K.
+The fit reduces every basin total across ranks, so `mpiexec -n N` writes the
+same offsets as a serial run.
 Measured on the 2 km MAP mesh against the 865 Gt/yr table (22 September
 2026): K05 907, K50 1623 and K95 2625 Gt/yr uncorrected, each brought to
 865 by offsets within plus or minus 1.3 K, every basin with a root in the
-window.
+window. The 865 covers the fitted basins. Floating ice outside them (a basin
+the table lacks, a coverage gap, off the 8 km grid) keeps a zero offset and
+still melts at the file's K, as the toolbox applies its one K everywhere, so
+a run's integrated melt exceeds 865 by that amount; the first forcing step
+prints it (`Melt ... Gt/yr, of which ... outside the fitted basins`).
 
 ## 6. Control and projections
 
@@ -717,7 +725,7 @@ redeclare those literals.
 | `ISMIP7_MASS_RESIDUAL_TOL_GT` | fail-loud absolute tolerance for both the discrete transport identity and the complete step mass budget | `5e-5` Gt |
 | `ISMIP7_RESCUE_ENABLED` | permit a failed direct transient diagnostic solve to enter the continuation/trust-region/subcycle rescue ladder; set to `0` for strict timestep qualification | `1` |
 | `ISMIP7_K_MELT` / `ISMIP7_K_PER_BASIN_NPZ` | scalar K (projections), the ISMIP7 toolbox K50 of July 2026 (K05 4.75e-5, K95 1.375e-4), per-basin K file (control) | `8.5e-5` / `results/calibrated_K_per_basin_<lc>.npz` |
-| `ISMIP7_DELTAT_PER_BASIN_NPZ` | per-basin TF offset at one toolbox K from `calibrate_deltaT.py`; when set, every ocean callback melts with that file's K and the K file is not read | unset |
+| `ISMIP7_DELTAT_PER_BASIN_NPZ` | per-basin TF offset at one toolbox K from `calibrate_deltaT.py`; when set, every ocean callback melts with that file's K and the K file is not read. Refused with `ISMIP7_K_SCALE` other than 1 | unset |
 | `ISMIP7_MELT_OBS_CSV` | per-basin melt observation table read by `scripts/calibrate_melt.py`; columns are located by header name, so either published table serves | `Melt_Paolo_Davison_Adusumilli_imbie2.csv` under `<DATA_ROOT>/meltobs/`, else under `<DATA_ROOT>/parameterisations/ocean/meltobs/`, else the older Paolo and Adusumilli table with a `[!]` line |
 | `ISMIP7_MELT_SLOPE` | the draft slope the quadratic melt law sees, in the forward and in `scripts/calibrate_melt.py`: `ant` is one constant `sin(alpha)` on every shelf, the protocol's reference ("mean Antarctic slope, no slope dependency"); `local` is this mesh's draft slope. A K file records the convention it was fitted under and a run under the other is told once | `ant` |
 | `ISMIP7_SIN_ALPHA_ANT` | the constant under `ant`. The default is the value the toolbox's K percentiles were sampled with, back-computed from its own gamma_T conversion; the notebook's recipe on the 8 km v3 topography gives 5.7e-3 | `5.115e-3` |

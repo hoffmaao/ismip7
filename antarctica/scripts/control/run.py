@@ -41,6 +41,7 @@ from icepack2_tools.forcing import (
     _K_DEFAULT,
 )
 from icepack2_tools.runconfig import deltat_per_basin_npz
+from icepack2_tools.mpi_stats import global_count, global_range, global_size
 from icepack2_tools.climatology import (
     clim_start, clim_end, clim_scenario, clim_pool_missing, describe_clim_pool,
 )
@@ -237,6 +238,7 @@ def main():
             )
     if restart_from and not os.path.exists(restart_from):
         raise FileNotFoundError(f"CTRL restart not found: {restart_from}")
+    dT_npz = deltat_per_basin_npz()
 
     ctx = setup_model(restart_from=restart_from)
 
@@ -295,7 +297,7 @@ def main():
         callback = make_synthetic_ocean_callback(tf_max, depth_ref)
     else:
         # Fixed OI climatology TF/so + per-basin calibrated K
-        if not os.path.exists(K_NPZ) and deltat_per_basin_npz() is None:
+        if dT_npz is None and not os.path.exists(K_NPZ):
             raise FileNotFoundError(
                 f"Per-basin K calibration not found at {K_NPZ}. "
                 f"Run antarctica/scripts/calibrate_melt.py first "
@@ -303,22 +305,23 @@ def main():
             )
         for line in describe_observational_forcing(ocean=True):
             PETSc.Sys.Print(f"  {line}")
-        if deltat_per_basin_npz() is not None:
-            # The callback resolves the offset and its K on first call.
-            K_field = _K_DEFAULT
+        if dT_npz is not None:
+            # The callback melts with the offsets file's one K.
+            callback = make_ctrl_ocean_callback(_K_DEFAULT)
         else:
             PETSc.Sys.Print(f"  Loading per-basin K from: {K_NPZ}")
             K_field = load_K_per_basin(K_NPZ, mesh_x, mesh_y, fill=0.0)
-        K_scale = float(os.environ.get("ISMIP7_K_SCALE", "1.0"))
-        if K_scale != 1.0:
-            K_field = K_field * K_scale
-            PETSc.Sys.Print(f"  K scaled by ISMIP7_K_SCALE={K_scale:.3f}")
-        if np.ndim(K_field):
+            K_scale = float(os.environ.get("ISMIP7_K_SCALE", "1.0"))
+            if K_scale != 1.0:
+                K_field = K_field * K_scale
+                PETSc.Sys.Print(f"  K scaled by ISMIP7_K_SCALE={K_scale:.3f}")
+            comm = ctx["mesh"].comm
+            k_lo, k_hi = global_range(K_field[K_field > 0], comm)
             PETSc.Sys.Print(
-                f"  K field: nonzero={int((K_field>0).sum())}/{len(K_field)}  "
-                f"med={np.median(K_field[K_field>0]) if (K_field>0).any() else 0:.2e}"
+                f"  K field: nonzero={global_count(K_field > 0, comm)}/"
+                f"{global_size(K_field, comm)}  range={k_lo:.2e}..{k_hi:.2e}"
             )
-        callback = make_ctrl_ocean_callback(K_field)
+            callback = make_ctrl_ocean_callback(K_field)
 
     reject_collapse_mask("the control experiment")
 

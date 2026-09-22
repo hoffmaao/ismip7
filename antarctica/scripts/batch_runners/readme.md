@@ -426,10 +426,11 @@ independent, so a handful of nodes finishes it inside a week.
 
 ## Open items
 
-- Rice forwards are fixed at 12 ranks because that is what was measured there.
-  Quartz forwards take 64, the fastest production-mesh lane of
-  `antarctica/TIMING_MATRIX_QUARTZ_SCPC_GAMG.md`. Going higher at Rice is
-  meaningful once the partition probe comes back clean. (issue #45)
+- Rice forwards take 32 ranks and 180 GB, one Cascade Lake node. The
+  partition probe on the 1 km / 10 km mesh (job 1592757, 22 September 2026)
+  reports ghost/owned 0.010 at 32 ranks (max 0.017, halo 1.0 % of owned),
+  so the build partitions by locality and rank counts up to a node are
+  meaningful there; a 1 km control ran 92 s per 0.05 yr step on 32 ranks.
 - An inversion factors the complete mixed Jacobian with MUMPS, which sets its
   memory; `tlm_adjoint` differentiates through that solve, so no setting
   changes it. Cluster forwards took the field split this item asked for:

@@ -7,7 +7,15 @@ import numpy as np
 
 _SEC_PER_YEAR = 31556926.0
 _RHO_ICE = 917.0
-_RHO_WATER = 1000.0
+_RHO_WATER = 1000.0    # fresh water: the SMB unit conversion only
+# Seawater for flotation, the value the forward builds its surface and its
+# flotation surface with (simulation.py, rho_ratio = 917 / 1024). The melt
+# callbacks used the fresh-water value above here until September 2026, which
+# put the flotation surface too low and read every floating cell thicker than
+# 78 percent of its flotation thickness as grounded, withholding its melt:
+# 364 000 km2, 24 percent of BedMachine's shelf area, on the 2500 m mesh (the
+# seawater test grounds 0.3 percent of it).
+_RHO_SW_FLOTATION = 1024.0
 
 # Constants for the Burgard et al. 2022 quadratic-mixed-slope melt
 # parameterization, taken verbatim from multimelt.constants
@@ -1151,6 +1159,28 @@ def quadratic_mixed_slope(tf, salinity, sin_alpha, K=_K_DEFAULT):
 _SLOPE_CAP_WARNED = False
 
 
+_GEOMETRY_SPACE_WARNED = False
+
+
+def _warn_geometry_space(npz_path, fitted_on, running_on):
+    r"""Say once that the K on disk was fitted on a geometry other than the
+    one this run melts with."""
+    global _GEOMETRY_SPACE_WARNED
+    if _GEOMETRY_SPACE_WARNED:
+        return
+    _GEOMETRY_SPACE_WARNED = True
+    if _comm_rank() == 0:
+        print(
+            f"  WARNING: {os.path.basename(npz_path)} was calibrated on "
+            f"{fitted_on} geometry and this run melts on {running_on}, so the "
+            f"melt it applies may not be the melt the K was fitted to. Refit "
+            f"with ISMIP7_GEOMETRY_SPACE={running_on} "
+            f"calibrate_melt.py, or name a matching file with "
+            f"ISMIP7_K_PER_BASIN_NPZ.",
+            flush=True,
+        )
+
+
 def _warn_slope_cap(npz_path, cap):
     r"""Say once that the K on disk was fitted against a capped draft slope
     while the forward applies an uncapped one."""
@@ -1163,13 +1193,12 @@ def _warn_slope_cap(npz_path, cap):
             f"  WARNING: {os.path.basename(npz_path)} was calibrated with the "
             f"draft slope capped at sin(alpha) = {cap:g}, and this forward "
             f"applies no cap, so it melts with a field the K was not fitted "
-            f"against. Measured at the reference state on the Ua 2 km mesh, "
-            f"the forward's own melt path integrates 1732 Gt/yr against the "
-            f"1067.4 Gt/yr the K was fitted to, and capping its slope gives "
-            f"646 Gt/yr; these supersede an earlier 4293 and 1028 from a "
-            f"lifted slope. Recalibrating K through the forward's melt path "
-            f"reconciles the two. See antarctica/FORWARD_RUN_READINESS.md "
-            f"action 5.",
+            f"against. Measured on the 2500 m mesh at the reference state "
+            f"(GEOMETRY_DISCRETIZATION.md), the uncapped cell slope integrates "
+            f"3.7 times the capped melt at K = 1, so this forward applies about "
+            f"four times the total the K was fitted to. Capping the forward's "
+            f"slope the same way (issue #26) or refitting with "
+            f"ISMIP7_SIN_ALPHA_CAP=inf are the two consistent choices.",
             flush=True,
         )
 
@@ -1195,23 +1224,26 @@ def load_K_per_basin(npz_path, mesh_x, mesh_y, fill=0.0):
     Kbas = np.asarray(data["K_basin"]).astype(float)
 
     # A K is only valid for the draft slope it was fitted against, because melt
-    # is linear in sin(alpha). calibrate_melt.py caps the slope at
-    # ISMIP7_SIN_ALPHA_CAP and records the value it used; compute_sin_alpha
-    # below applies no cap at all. Measured by check_melt_bound.py at the
-    # reference state on the Ua 2 km mesh, the forward's own cell by cell melt
-    # path integrates 1732 Gt/yr against the 1067.4 Gt/yr the K was fitted to,
-    # and capping its slope gives 646 Gt/yr, so neither convention on its own
-    # reconciles the two. An earlier 4293 and 1028 from a lifted slope are
-    # superseded. Recalibrating K through the forward's melt path under the
-    # chosen slope convention is the clean route, and choosing that convention
-    # is a science decision (the cap is tied to the unsettled upstream
-    # local-slope question), so this reports the disagreement and leaves the
-    # choice open.
-    # See antarctica/FORWARD_RUN_READINESS.md action 5 and check_melt_bound.py.
+    # is linear in sin(alpha). calibrate_melt.py records the cap it applied
+    # (none under dg0 by default, 5e-3 under cg1); compute_sin_alpha below
+    # applies none. Which convention the forward should use is a science
+    # decision (issue #26), so a mismatch is reported once and left to it.
+    # See GEOMETRY_DISCRETIZATION.md.
     if "sin_alpha_cap" in data:
         cap = float(data["sin_alpha_cap"])
         if np.isfinite(cap) and cap > 0.0:
             _warn_slope_cap(npz_path, cap)
+    # A K is likewise only valid for the geometry it was fitted on. The
+    # calibration records the space it melted (cell by cell under dg0, on
+    # nodes under cg1); a file without the entry predates the tag and was
+    # fitted on nodes. With the same slope cap the two fits agree within about
+    # 10 percent per basin, 22 percent in basin 7 (GEOMETRY_DISCRETIZATION.md);
+    # the mismatch is still reported once per run so a file's provenance is
+    # never silent.
+    from .runconfig import geometry_space
+    fitted_on = str(data["geometry_space"]) if "geometry_space" in data else "cg1"
+    if fitted_on != geometry_space():
+        _warn_geometry_space(npz_path, fitted_on, geometry_space())
 
     root = os.environ.get(
         "ISMIP7_DATA_ROOT",
@@ -1267,6 +1299,21 @@ def forcing_coords(ctx):
         return xy
     coords = ctx["mesh"].coordinates.dat.data_ro
     return coords[:, 0], coords[:, 1]
+
+
+def height_above_flotation(s, b, rho_water=_RHO_SW_FLOTATION, rho_ice=_RHO_ICE):
+    r"""Height of the surface ``s`` above the flotation surface over bed ``b``,
+    ``s - (b + (rho_water / rho_ice) max(-b, 0))``: zero or negative where
+    the ice floats. The forward's flotation surface uses seawater, so the
+    melt callbacks and the calibration test flotation with the same density
+    the dynamics do; ``is_floating`` is the test itself."""
+    b = np.asarray(b, dtype=float)
+    return np.asarray(s, dtype=float) - (b + (rho_water / rho_ice) * np.maximum(-b, 0.0))
+
+
+def is_floating(s, b):
+    r"""The melt-receiving set: ``height_above_flotation(s, b) <= 0``."""
+    return height_above_flotation(s, b) <= 0.0
 
 
 def compute_sin_alpha(ctx):
@@ -1384,16 +1431,10 @@ def make_climatology_ocean_callback(K_field, data_root=None):
     geometry: the CTRL2015 / observationally-constrained ocean forcing.
     K_field is a scalar or per-node array (calibrated per-basin K).
 
-    CALIBRATION MISMATCH (open, tracked separately): the per-basin K comes from
-    antarctica/scripts/calibrate_melt.py, which is CG1 throughout - it builds
-    its own CG1 space and vertex-samples BedMachine, sin_alpha and the floating
-    mask, and is not affected by ISMIP7_GEOMETRY_SPACE. Under DG0 geometry this
-    callback evaluates that same K with a cell-wise draft, a cell-wise
-    sin_alpha and a cell-wise `haf <= 0` floating mask, so the melt-receiving
-    area shifts by roughly a one-cell band at the grounding line and the ice
-    front, non-trivial at 32 km, where shelves are only a few cells wide.
-    Nothing here compensates for the shift; GEOMETRY_DISCRETIZATION.md tracks
-    the check of the DG0 melt total against the observational target."""
+    The per-basin K comes from antarctica/scripts/calibrate_melt.py, which
+    follows ISMIP7_GEOMETRY_SPACE like the forward. The K file records the
+    geometry_space it was fitted on, and `load_K_per_basin` warns when a run
+    melts on the other."""
     interps = build_oi_climatology_interpolators(data_root)
 
     def callback(ctx, t_yr):
@@ -1413,8 +1454,7 @@ def make_climatology_ocean_callback(K_field, data_root=None):
 
         melt = quadratic_mixed_slope(tf, sal, sin_a, K=K_field)
 
-        haf = s - (b + (_RHO_WATER / _RHO_ICE) * np.maximum(-b, 0.0))
-        floating = haf <= 0
+        floating = is_floating(s, b)
         ctx["ocean_melt"].dat.data[:] = np.where(floating, melt, 0.0)
 
     return callback
@@ -1509,8 +1549,7 @@ def make_forcing_callback(atm=None, ocean=None, fracture=None,
             melt = quadratic_mixed_slope(tf, sal, sin_alpha, K=K_use * K_scale)
 
             # Only apply melt where ice is floating (haf <= 0)
-            haf = s - (b + (_RHO_WATER / _RHO_ICE) * np.maximum(-b, 0.0))
-            floating = haf <= 0
+            floating = is_floating(s, b)
             ctx["ocean_melt"].dat.data[:] = np.where(floating, melt, 0.0)
 
         if fracture is not None and ctx.get("collapse") is not None:

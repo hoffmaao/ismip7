@@ -380,11 +380,14 @@ python -c "import h5py,sys; print(dict(h5py.File(sys.argv[1])['/'].attrs))" MAP.
 
 Solves for the Burgard quadratic-mixed-slope coefficient K, global and per
 IMBIE2 basin, against integrated observed shelf melt. The target is the July
-2026 table combining Paolo, Davison and Adusumilli, 1067.4 Gt/yr, read from
-`<DATA_ROOT>/meltobs/Melt_Paolo_Davison_Adusumilli_imbie2.csv`. With that file
-absent it falls back to the older Paolo and Adusumilli table (865.0 Gt/yr) under
-`<DATA_ROOT>/parameterisations/ocean/meltobs/`; `ISMIP7_MELT_OBS_CSV` names
-either. Needs section 2 forcing and a section 4 mesh.
+2026 table combining Paolo, Davison and Adusumilli, 1067.4 Gt/yr,
+`Melt_Paolo_Davison_Adusumilli_imbie2.csv`, searched for under
+`<DATA_ROOT>/meltobs/` and then `<DATA_ROOT>/parameterisations/ocean/meltobs/`.
+With it in neither place the script falls back to the older Paolo and Adusumilli
+table (865.0 Gt/yr) under `<DATA_ROOT>/parameterisations/ocean/meltobs/` and
+prints a `[!]` line saying so; `ISMIP7_MELT_OBS_CSV` names either. Every run
+prints the table it opened and its integrated target. Needs section 2 forcing
+and a section 4 mesh.
 
 The newer table comes from the Source Cooperative melt-calibration product:
 
@@ -403,8 +406,30 @@ Only the mesh is read from the MAP, so any MAP built on it serves. The default
 is the section 4 name for the configured `ISMIP7_FRICTION`; `ISMIP7_INV_H5`
 names a different one.
 
+The calibration melts on the same `ISMIP7_GEOMETRY_SPACE` as the forward
+(default `dg0`): the cells the forward melts, through the forward's own path,
+with the cell slope uncapped as the forward applies it, so the K it writes is
+the K the forward applies. `ISMIP7_GEOMETRY_SPACE=cg1` is the nodal
+calibration the earlier K files came from, with the slope capped at 5e-3;
+with the same cap the DG0 fit reproduces it within about 10 percent per basin,
+22 percent in basin 7, and the uncapped cell slope the forward applies today
+integrates 3.7 times as much melt at K = 1 (`GEOMETRY_DISCRETIZATION.md`).
+`ISMIP7_SIN_ALPHA_CAP` names a cap on either geometry. The file records the
+geometry it was fitted on, and a run that melts on the other is told once at
+startup.
+
 The control requires this npz. Projections take it (`K_per_basin_npz=`) or a
 scalar `ISMIP7_K_MELT`.
+
+The default output is the file every forward and inversion in the checkout
+reads at that `lc`, and the 2500 m file is also their fallback at every other
+`lc`. For a calibration made as a check, `ISMIP7_K_OUT` writes it elsewhere and
+`check_melt_bound.py --npz` reads it from there:
+
+```bash
+ISMIP7_K_OUT=/scratch/check/K_2000.npz ISMIP7_LC=2000 \
+    python scripts/calibrate_melt.py
+```
 
 ---
 
@@ -657,7 +682,9 @@ redeclare those literals.
 | `ISMIP7_MASS_RESIDUAL_TOL_GT` | fail-loud absolute tolerance for both the discrete transport identity and the complete step mass budget | `5e-5` Gt |
 | `ISMIP7_RESCUE_ENABLED` | permit a failed direct transient diagnostic solve to enter the continuation/trust-region/subcycle rescue ladder; set to `0` for strict timestep qualification | `1` |
 | `ISMIP7_K_MELT` / `ISMIP7_K_PER_BASIN_NPZ` | scalar Burgard K (projections), per-basin K file (control) | `1.15e-4` / `results/calibrated_K_per_basin_<lc>.npz` |
-| `ISMIP7_MELT_OBS_CSV` | per-basin melt observation table read by `scripts/calibrate_melt.py`; columns are located by header name, so either published table serves | `<DATA_ROOT>/meltobs/Melt_Paolo_Davison_Adusumilli_imbie2.csv`, else the older Paolo and Adusumilli table |
+| `ISMIP7_MELT_OBS_CSV` | per-basin melt observation table read by `scripts/calibrate_melt.py`; columns are located by header name, so either published table serves | `Melt_Paolo_Davison_Adusumilli_imbie2.csv` under `<DATA_ROOT>/meltobs/`, else under `<DATA_ROOT>/parameterisations/ocean/meltobs/`, else the older Paolo and Adusumilli table with a `[!]` line |
+| `ISMIP7_SIN_ALPHA_CAP` | cap on the draft slope `sin(alpha)` in `scripts/calibrate_melt.py`; the forward applies none | none under `dg0`, `5e-3` under `cg1` |
+| `ISMIP7_K_OUT` | output path for `scripts/calibrate_melt.py`, overriding the generated name. Use it for a calibration made as a check, so it cannot replace the K that every forward and inversion in the checkout reads. A bare filename resolves under `results/` | `results/calibrated_K_per_basin_<lc>.npz` |
 | `ISMIP7_ESM` | ESM for the control | `CESM2-WACCM` |
 | `ISMIP7_CLIM_SCENARIO` / `_START` / `_END` | reference-climate pool: the scenario pooled with `historical`, and the window, shared by the control's SMB climatology and the projections' aSMB re-reference through `icepack2_tools/climatology.py`. A partial pool warns | `ssp126` / `2000` / `2029` |
 | `ISMIP7_H_CLAMP` | thickness floor (m) | `0` |

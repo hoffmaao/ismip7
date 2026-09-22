@@ -1,25 +1,10 @@
-r"""A K file records the draft slope it was fitted against, and the forward
-says so when that disagrees with what it applies.
+r"""A K fitted against a capped draft slope announces itself once per run.
 
-Melt is linear in ``sin(alpha)``, so a per-basin K is only valid for the slope
-field it was calibrated on. ``calibrate_melt.py`` caps the slope at
-``ISMIP7_SIN_ALPHA_CAP`` and stamps that value into the npz;
-``forcing.compute_sin_alpha``, which the forward calls every step, applies no
-cap. At the reference state on the Úa 2 km mesh the forward's own cell by
-cell melt path integrates 1732 Gt/yr against the 1067.4 Gt/yr the K was fitted
-to, and capping its slope gives 646 Gt/yr; an earlier 4293 and 1028 from a
-lifted slope are superseded. The mismatch used to be invisible: both halves
-ran, and nothing said they disagreed.
-
-These tests pin the warning, and the physics stays as it is. Recalibrating K
-through the forward's melt path under a chosen slope convention is the clean
-route, and choosing that convention is a science decision tied to the
-unsettled upstream local-slope question, so the forward's numbers are
-deliberately unchanged.
-
-Every test goes through ``forcing.load_K_per_basin``, the loader the forward
-calls, over a synthetic IMBIE2 basin file in the layout it resolves under
-``ISMIP7_DATA_ROOT``. Serial, one small npz, no mesh.
+calibrate_melt.py records the cap it applied and load_K_per_basin compares
+it with the forward's own slope, which applies none. Measured on the 2500 m
+mesh, the uncapped cell slope integrates 3.7 times the capped melt at K = 1,
+so the warning names that and the two consistent choices (issue #26). It is
+printed once, from rank 0, and not at all for a file fitted without a cap.
 """
 
 import os
@@ -77,7 +62,7 @@ def test_a_capped_calibration_is_announced(basins, tmp_path, capsys):
     assert "calibrated_K_per_basin_2000.npz" in said
     assert "0.005" in said
     # The reader has to be able to find out what to do about it.
-    assert "FORWARD_RUN_READINESS" in said
+    assert "GEOMETRY_DISCRETIZATION" in said
 
 
 def test_it_says_so_once(basins, tmp_path, capsys):

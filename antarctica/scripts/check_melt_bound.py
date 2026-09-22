@@ -22,8 +22,9 @@ The calibration half reproduces calibrate_melt on CG1 nodes: BedMachine
 interpolated with its raster ``surface`` and ``mask``, and grad(draft)
 projected onto CG1.
 
-* capped: sin_alpha capped at ISMIP7_SIN_ALPHA_CAP (calibrate_melt's default
-  5e-3), the slope K was fitted against;
+* capped: sin_alpha capped at the npz's ``sin_alpha_cap`` when it is finite,
+  otherwise at calibrate_melt's CG1 default 5e-3, the slope K was fitted
+  against;
 * uncapped: the same slope with no cap.
 
 The forward half reproduces the forward on DG0 cells, the field the forward
@@ -31,7 +32,8 @@ melts with under DG0 geometry: bed and thickness sampled onto the cells, the
 surface from flotation, s = max(b + H, (1 - 917/1024) H), as simulation.py
 builds it, ``forcing.compute_sin_alpha``'s cell slope, thermal forcing and
 salinity at each cell centroid and its own draft, and the forward callback's
-``haf <= 0`` floating test.
+``haf <= 0`` floating test on cells holding ice (``h > 0``), the floating set
+``calibrate_melt.forward_geometry`` fits on.
 
 * uncapped: as the forward runs today;
 * capped: the cell slope capped at the same value, which is where a cap inside
@@ -64,6 +66,10 @@ shelf. A basin or block whose OCX melt is off the climatology's by more than
 
 Serial. Reuses calibrate_melt's loaders, so it needs the same inputs: a MAP for
 the mesh, the OI climatology, the IMBIE2 basins and BedMachine.
+
+The measured rows below predate the ``h > 0`` test and the seawater flotation
+test in the forward half (icepack/ismip7#66): they counted ice-free cells as
+floating and grounded the deep-draft shelf, and are to be re-measured.
 
 Measured on the Ua 2 km mesh, September 2026, with
 calibrated_K_per_basin_2000.npz calibrated against the re-released observation
@@ -131,9 +137,8 @@ from firedrake.petsc import PETSc                                     # noqa: E4
 
 import calibrate_melt as cm                                           # noqa: E402
 from icepack2_tools.forcing import (quadratic_mixed_slope,            # noqa: E402
-                                    compute_sin_alpha, ISMIP7Ocean,
-                                    OCX, OCX_OCEAN_VARIANTS,
-                                    _RHO_ICE, _RHO_WATER)
+                                    compute_sin_alpha, is_floating,
+                                    ISMIP7Ocean, OCX, OCX_OCEAN_VARIANTS)
 from icepack2_tools.geometry import sample_to_geometry                # noqa: E402
 from icepack2_tools.runconfig import raster_sample                    # noqa: E402
 # The same year and density the writer converts with, so the bound compared
@@ -269,7 +274,7 @@ def main():
     # bed and thickness sampled onto the cells, the surface from flotation as
     # simulation.py builds it, forcing.compute_sin_alpha's DG0 slope, forcing
     # at each cell centroid and its own draft, and the callback's haf <= 0
-    # floating test.
+    # floating test on cells holding ice.
     bm = cm._bedmachine_path()
     b_dg = sample_to_geometry(rasterio.open(f"netcdf:{bm}:bed"), Q_g, Q,
                               method=raster_sample())
@@ -280,18 +285,22 @@ def main():
     xy_dg = fd.Function(VectorFunctionSpace(mesh, "DG", 0)).interpolate(
         fd.SpatialCoordinate(mesh)).dat.data_ro
     b_np, h_np, s_np = b_dg.dat.data_ro, h_dg.dat.data_ro, s_dg.dat.data_ro
-    haf = s_np - (b_np + (_RHO_WATER / _RHO_ICE) * np.maximum(-b_np, 0.0))
+    afloat = is_floating(s_np, b_np)
     forward = half(
         xy_dg[:, 0], xy_dg[:, 1], np.minimum(s_np - h_np, 0.0),
         compute_sin_alpha({"Q": Q, "V": VectorFunctionSpace(mesh, "CG", 1),
                            "Q_g": Q_g, "h": h_dg, "s": s_dg}),
-        haf <= 0,
+        afloat & (h_np > 0),
         assemble(fd.TestFunction(Q_g) * dx).dat.data_ro)
 
-    cap = cm.SIN_ALPHA_CAP
+    cap = float(d["sin_alpha_cap"]) if "sin_alpha_cap" in d else float("nan")
+    if not (np.isfinite(cap) and cap > 0):
+        cap = cm.default_slope_cap("cg1")
+    fitted_on = str(d["geometry_space"]) if "geometry_space" in d else "cg1"
     cases = [
-        (f"calibration half, capped at {cap:.0e} on CG1 nodes, the slope K "
-         f"was fitted against", calibration,
+        (f"calibration half, capped at {cap:.0e} on CG1 nodes"
+         + (", the slope K was fitted against" if fitted_on == "cg1" else ""),
+         calibration,
          np.minimum(calibration["sin_a"], cap), "nodes"),
         ("calibration half, uncapped", calibration, calibration["sin_a"],
          "nodes"),

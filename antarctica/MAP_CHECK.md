@@ -277,7 +277,7 @@ that mesh.
 |---|---|---|---|---|---|
 | Budd | 1 km / 10 km, transferred | 8 continuation steps under gamg, 15 then 6 to 8 Newton iterations each, about 6 min | a_ref in [-8101.5, +4236.8] m/yr, net -1184.6 Gt/yr; budget SMB +2532, melt -1387, outflux -4, calving -50 Gt/yr | killed at step 16 (t = 2015.8) by the speed check, 3.84e4 m/yr at (1695321, 699618), the Lambert confluence. From step 12 the cell at (1695698, 700055) oscillated with a period of two steps and a growing amplitude, +73, -178, +282, -481, +748 m per step, flipping between floating and grounded each time; elsewhere the largest (dh/h)/dt stayed near 2 to 4 per year. Diagnostic solves of 9 to 27 s at 4 to 14 Newton iterations per 0.05 yr step, about 4 to 5 min per simulated year before that. The series has rows at 2015.0 and 2015.8 and no drift to read | 10570030 |
 | Budd | 2 km / 5 km, native | 8 steps, 13 then 7 to 11 Newton iterations, about 9 min | a_ref in [-5429.4, +3082.9] m/yr, net +2157.1 Gt/yr; budget SMB +2431, melt -1242, outflux -3368 through the domain boundary at the front, calving -51 Gt/yr | killed at step 13 (t = 2016.3) by the speed check, 8.93e4 m/yr at (1687863, 702000), the Lambert confluence again. The cell at (1688440, 703000) went +247, -424, +899 m on steps 11 to 13, grounded, floating, grounded; the first ten steps were calm (largest (dh/h)/dt 0.5 to 6 per year on thin shelf cells, speed max 1.75e4 m/yr constant). Diagnostic solves of 12 to 22 s at 6 to 14 Newton iterations per 0.1 yr step, about 3 min per simulated year | 10570031 |
-| RC | 1 km / 10 km, transferred | in its first gamg continuation step after 15 minutes at full CPU, as the RC native lane was (issue #20) | | | 10570032 |
+| RC | 1 km / 10 km, transferred | 8 steps under gamg: the first took 70 Newton iterations, 26,600 condensed iterations and 23 min, the rest 8 to 17 Newton iterations and 35 to 75 s each (the same continuation diverged at its second step on the 2 km mesh) | a_ref in [-36709.9, +55214.0] m/yr, net -1174.9 Gt/yr | killed at step 1 (t = 2015.05) by the speed check, 9.77e4 m/yr at (394334, -1806697), Victoria Land coast, the cell the cache audit named; (dh/h)/dt 17.3 per year and a 25 m cell grown to 599 m on the Antarctic Peninsula in that step | 10570032 |
 
 The budget columns differ between the meshes by bookkeeping and not only by
 state: on the buffer-0 mesh the calving front is the domain boundary, so the
@@ -293,15 +293,20 @@ leaves the RC state where it is. Neither snapshot runs forward: the strict
 lanes fail at step 1 on both meshes, and under the production configuration
 the Budd state grows a two-step oscillation at the Lambert confluence on
 both meshes, at the same cell, with the cell's grounded state flipping each
-step, and is killed within 1.3 simulated years; the RC descent's cold start
-does not get through its gamg continuation. The Budd instability is
-therefore the snapshot's (or the Budd forward's handling of a cell at
-flotation there) and not the mesh's or the transfer's, and the resolution
-question gets no cost or drift row from these snapshots beyond the setup
-costs (a 1 km cold start of about 6 min on 64 ranks, 4 to 5 min per
-simulated year in the calm steps; 2 km about 9 min and 3 min) and the
-per-step Newton counts. Both decisions wait for the final MAPs (issue #20,
-issue #24).
+step, and is killed within 1.3 simulated years; the RC state carries
+grounded cells at 66,000 to 101,000 m/yr and the speed check kills its
+control at the first step, after a gamg cold start that converged on the
+1 km mesh (23 min for its first step) and diverged on the 2 km mesh. The
+Budd instability is therefore the snapshot's (or the Budd forward's handling
+of a cell at flotation there) and not the mesh's or the transfer's, and the
+resolution question gets no cost or drift row from these snapshots beyond
+the setup costs (a 1 km cold start of 6 min for Budd and 30 min for RC on 64
+ranks, 4 to 5 min per simulated year in the calm Budd steps; 2 km about
+9 min and 3 min) and the per-step Newton counts. Both decisions wait for the
+final MAPs (issue #20, issue #24). The transferred caches and the control
+series stay on Quartz scratch until its purge (about 22 October 2026); the
+records, scores, audits, summaries and job logs are copied under
+`/N/project/ice_rheology/ISMIP7/antarctica/results/map_check_snap20260922/`.
 
 Not measured on this pass: a clean cost per step on either mesh (every lane
 stopped at step 1 or before; the controls give the production wall time per

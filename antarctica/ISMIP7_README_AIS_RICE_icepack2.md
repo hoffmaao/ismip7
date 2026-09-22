@@ -225,17 +225,20 @@ Hahn, Mikula and Frolkovic 2025; Smith et al. 2020.
 
 Signs (discussions #16 and #22). `acabf`, `libmassbffl` and `licalvf` are
 positive for mass gained by the ice, so melt and calving are negative.
-`ligroundf` is the flux across the grounding line from the velocity the
-transport used, through the facets between a grounded and a floating cell on
-the native mesh, divided by the area of the first FLOATING cell it enters and
-remapped conservatively; it is positive for ice leaving the grounded sheet,
-and the upwinding that defines it cannot go negative at an ice rumple. Its
-sign relative to the other fluxes was an open question on the forum on 18
-September 2026; **[confirm #17]** against the answer before submission. The
-integrated scalars carry the signs of the fields they integrate, so
-`tendlicalvf` and `tendlibmassbffl` are negative. `topg` is not masked to the
-ice, `lithk` is zero and not fill where there is no ice, and the fill value
-is the finite netCDF default (discussions #10 and #19). Sea-level estimates
+`ligroundf` is the upwind flux across the grounding line from the velocity
+the transport used, through the facets between a grounded and a floating cell
+on the native mesh, divided by the area of the first FLOATING cell and
+remapped conservatively. Its reference is the grounded ice sheet: positive
+for grounded ice going afloat, negative where floating ice flows onto
+grounded ice, at a pinning point or an ice rumple. The organisers' reply of
+21 September 2026 on discussion #22 leaves the reference to each group, and
+isschecker 0.5.1 bounds the field symmetrically; the group settled on this
+reading on 22 September 2026. The integrated scalars carry the signs of the
+fields they integrate, so `tendlicalvf` and `tendlibmassbffl` are negative
+and `tendligroundf` is the net grounding-line discharge. `topg` is not
+masked to the ice, `lithk` is zero and not fill where there is no ice, and
+the fill value is the finite netCDF default (discussions #10 and #19).
+Sea-level estimates
 (`sla20`, `slg20`, `slvaf`) are not computed by the model; **[confirm #13]** that
 `ismip7-scalar-processing` was run on the gridded files.
 

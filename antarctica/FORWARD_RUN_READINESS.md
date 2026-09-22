@@ -121,8 +121,9 @@ consistency errors. The experiment-length checks remain.
 
 Conventions chosen: `acabf` is the forcing SMB with the apparent-MB correction
 travelling separately as `acabf_correction`, `ligroundf` is booked into the
-first floating cell, `lithk` is zero where the ice mask is zero, and
-`base = orog - lithk` on the grid.
+first floating cell and signed positive from grounded to floating (section 9),
+`lithk` is zero where the ice mask is zero, and `base = orog - lithk` on the
+grid.
 
 What a submission needs (#5, #16, #17, #18, #19, #20, #22, #23):
 
@@ -472,8 +473,9 @@ Ice-shelf collapse:
 Output and submission:
 
 - [x] #14, #16, #20 time encoding, no initial state, filename years.
-- [x] #16 `licalvf` negative for loss. [~] #22 `ligroundf` sign, in the README
-      with a `[confirm]`. The 21 September reply prescribes no sign, section 7. (issue #17)
+- [x] #16 `licalvf` negative for loss. [x] #22 `ligroundf` sign: settled by
+      the group on 22 September with the grounded sheet as the reference,
+      positive for grounded ice going afloat, section 9.
 - [x] #23 bounds. [x] #46 the bundled request is 0.5.0's and records its tag;
       `audit_variable_request.py` finds drift. [ ] Re-run the checker at 0.5.0. (issue #12)
       Scalars are not range-checked upstream, so the negative `tendlicalvf`
@@ -661,7 +663,8 @@ board item about mirror prefixes.
   The thread opened because the checker then required `ligroundf` to be
   nonnegative, and the lower bound was relaxed to 1 % of the upper for ice
   rumples. The table therefore expects `ligroundf` positive for ice crossing
-  from grounded to floating, which is how the writer books it. (issue #17)
+  from grounded to floating, which is how the writer books it. Settled on
+  the 22nd, section 9.
 - **#40, 21 September.** The mirror was re-synced with Globus, after 29 August
   and 11 September. New: `ctrl` `pr`, `tas` and their anomalies for both core
   ESMs at all resolutions, which matches the 4,576 objects action 12 saw
@@ -725,7 +728,7 @@ and six 2300 files were read with h5py.
   in which the mask removes a Ross-sized shelf (about 1.5e17 kg) would put
   `tendlicalvf` near -5e9 kg s-1, past the new bound. The bundled
   `icepack2_tools/ismip7_variable_request.csv` is still 0.5.0's.
-  (issues #12, #17)
+  (issue #12)
 - **#50, 22 September, open, new.** Are the front and grounding-line fluxes
   given over the face or averaged over the cell? An organiser answered: a
   mass change per unit horizontal cell area, pointing to checker issue 35.
@@ -763,3 +766,26 @@ and six 2300 files were read with h5py.
   taking a side on the `ligroundf` sign, but the thread prescribes none).
   #48 since the 20th: no date for the regenerated OCX. #17 and #37 as in
   section 7.
+
+## 9. The `ligroundf` sign, settled 22 September
+
+Thread #22 was read again through the GitHub API on 22 September. Its last
+reply is still the 13:32 UTC one of the 21st: gain positive and loss negative
+in general, and for `ligroundf` "it depends which part you are considering as
+your reference". isschecker 0.5.1 bounds the field to [-10, 10] kg m-2 s-1.
+The group settled the reference on 22 September: the grounded ice sheet, so
+`ligroundf` is positive for grounded ice going afloat and negative where
+floating ice flows onto grounded ice.
+
+The writer already booked the grounded-to-floating direction positive. It
+dropped the other direction: `book_advance` took the upwind outflow of the
+grounded cell alone, so ice flowing from a shelf onto a pinning point was
+never booked, and an ice rumple contributed its whole throughput to
+`tendligroundf` as discharge. The form now books the full upwind facet flux,
+the same flux the DG0 transport moved, signed from grounded to floating and
+still landed in the floating cell. `tests/test_ismip7_annual.py` checks both
+directions on a strip of cells, and the rumple case, whose net is zero.
+Series banked by earlier runs carry the one-sided booking; they differ from
+the new one only in cells with a facet across which ice flowed from floating
+to grounded. The README's `[confirm]` on this convention is cleared and the
+board item for it is closed.

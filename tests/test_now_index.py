@@ -102,7 +102,16 @@ def _gh_ready():
                           capture_output=True).returncode == 0
 
 
-@pytest.mark.skipif(not _gh_ready(), reason="gh is absent or not authenticated")
+def _gh_reads_board():
+    r"""The index reads the project board, which needs a project scope."""
+    if not _gh_ready():
+        return False
+    r = subprocess.run(["gh", "auth", "status"], capture_output=True, text=True)
+    return re.search(r"'(read:)?project'", r.stdout + r.stderr) is not None
+
+
+@pytest.mark.skipif(not _gh_reads_board(),
+                    reason="gh cannot read the board (gh auth refresh -s read:project)")
 def test_now_index_matches_the_open_issues():
     r = subprocess.run([sys.executable, str(BUILD), "--check"],
                        capture_output=True, text=True)

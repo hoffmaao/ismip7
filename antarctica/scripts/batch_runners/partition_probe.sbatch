@@ -54,7 +54,7 @@ for n in 1 2 4 8 16 32; do
     [ "$n" -gt "${SLURM_NTASKS:-1}" ] && break
     ismip7_mpirun "$n" \
         python -u antarctica/scripts/partition_probe.py "$MESH" 2>&1 \
-        | grep -iE "ranks=|error|traceback|signal|killed|fault"
+        | grep -iE "ranks=|error|traceback|signal|killed|segmentation fault"
 done
 
 echo

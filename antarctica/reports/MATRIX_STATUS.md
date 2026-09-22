@@ -129,7 +129,7 @@ values fed in.
    forcing and the inflated anomaly.** The January bug overstates late-century
    ablation several-fold and is on its own a sufficient cause of the
    overshoot, so the magnitude and the attribution both have to be re-derived
-   from the re-run. (issue #29)
+   from the re-run. (issue #28)
 2. **Projection handoff: settled at 2015.0.** Since 2cd8b57 (14 September)
    the historical shims end at `t_end_default=2015.0` and the projection shims
    start at `t_start_default=2015.0` (`antarctica/scripts/historical/*.py`,

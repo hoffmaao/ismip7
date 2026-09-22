@@ -19,7 +19,7 @@ sidecar filenames are both tagged with the exact resolution and buffer size
 a different one.
 
 This file is read by diagnostic_solve, inversion_icepack2, simulation,
-run_control, lcurve_icepack2, gl_sensitivity and run_eigendec, but no
+run_control, gl_sensitivity and run_eigendec, but no
 script in the repo produced it — this generator fills that gap.
 
 Usage:

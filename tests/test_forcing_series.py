@@ -309,3 +309,34 @@ def test_the_zhou_climatology_is_found_at_whatever_version_each_variable_is(tmp_
     # nothing on disk: the same missing path the callers already report
     assert _oi_climatology_path(str(tmp_path), "thetao", "06_nov").endswith(f"thetao/v3/thetao{tail}v3_1972-2024.nc")
     assert _oi_climatology_path(str(tmp_path), "tf", "30_sep").endswith("meltMIP/OI_Climatology_ismip8km_60m_tf_extrap.nc")
+
+
+# --- the decode of a late year is silent ------------------------------------
+
+def _serialization_warnings(call):
+    import warnings
+    with warnings.catch_warnings(record=True) as caught:
+        warnings.simplefilter("always")
+        result = call()
+    return result, [w for w in caught if issubclass(w.category, xr.SerializationWarning)]
+
+
+def test_the_readers_decode_years_past_2262_without_a_serialization_warning(mri_tree, ocean_tree):
+    r"""xarray decodes a standard-calendar axis to ``datetime64[ns]`` while
+    the dates fit and falls back to ``cftime`` past 2262, warning on every
+    open. The readers take only the year of a slice, so they ask for
+    ``cftime`` up front: a 2015-2300 projection then reads its late chunks
+    without printing a warning per chunk, and the values are the same."""
+    atm = ISMIP7Atmosphere(data_root=str(mri_tree), esm="MRI-ESM2-0", scenario="ssp585", version="v1")
+    field, warned = _serialization_warnings(lambda: atm._load_year("acabf", 2299))
+    assert not warned, [str(w.message) for w in warned]
+    assert np.allclose(np.asarray(field), 2.0)
+
+    from icepack2_tools.forcing import ISMIP7Ocean
+    ocean = ISMIP7Ocean(data_root=str(ocean_tree))
+    at = (np.array([8000.0]), np.array([8000.0]))
+    # 2289 sits in the standard-calendar chunk, 2299 in the noleap one
+    for year, expect in ((2289, 10.0), (2299, 9.0)):
+        tf, warned = _serialization_warnings(lambda: ocean.get_thermal_forcing(year, *at))
+        assert not warned, [str(w.message) for w in warned]
+        assert tf[0] == pytest.approx(expect)

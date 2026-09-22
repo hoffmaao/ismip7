@@ -60,20 +60,20 @@ shallow-shelf formulation on Firedrake 2026.4.1)
 
 ## Projections: ice-ocean and ice-shelf fracture (AIS)
 
-6. Ocean melt: the ISMIP7 quadratic mixed-slope parameterisation of Burgard
-   et al. (2022), local-quadratic variant (TF_avg = TF), with the slope
-   `sin(alpha)` from the model's own draft (uncapped in the forward, capped
-   at 5e-3 in the calibration; **[confirm #26]** which side moves, see
-   `FORWARD_RUN_READINESS.md` action 5), constants from
-   `multimelt.constants`. K is dimensionless and per IMBIE basin,
-   calibrated with `antarctica/scripts/calibrate_melt.py` on the adaptive 2 km
-   mesh against the July 2026 re-released observation table combining
-   Paolo (2023), Davison (2023) and Adusumilli (2020), integrated target
-   1067.4 Gt/yr; per basin 2.4e-5 to 1.9e-4. The forward applies this
-   per-basin field. K* = 4.700e-5 and the total-match K = 6.853e-5 are
-   summary statistics of the fit, and the forward uses neither scalar.
-   `ISMIP7_K_SCALE` multiplies the field. The previous draft quoted the
-   2500 m fit against the older Paolo and Adusumilli table (865.0 Gt/yr).
+6. Ocean melt: the ISMIP7 quadratic parameterisation of Burgard et al.
+   (2022), local-quadratic variant (TF_avg = TF), with one constant
+   `sin(alpha)` = 5.115e-3 on every shelf. This is the ISMIP7 reference's
+   mean Antarctic slope and the value the toolbox's K percentiles (K05
+   4.75e-5, K50 8.5e-5, K95 1.375e-4, July 2026) were sampled with; the
+   model's own draft slope is kept as an option only
+   (`ISMIP7_MELT_SLOPE=local`; **[confirm #26]**, see
+   `FORWARD_RUN_READINESS.md` action 5). Constants from `multimelt.constants`.
+   K is dimensionless and per IMBIE basin, fitted with
+   `antarctica/scripts/calibrate_melt.py` to the observed basin totals
+   through the model's own melt path; the forward applies this per-basin
+   field and `ISMIP7_K_SCALE` multiplies it. K* = 4.06e-5 on the 865 Gt/yr
+   table (about 5.0e-5 on the July 2026 table, between K05 and K50); see
+   `GEOMETRY_DISCRETIZATION.md`.
    **[confirm #42]** that every submitted run read this calibration. Thermal
    forcing (`tf`) and salinity (`so`) are read at the cell's draft from the
    ISMIP7 ocean forcing, nearest neighbour in depth and in the plane, and

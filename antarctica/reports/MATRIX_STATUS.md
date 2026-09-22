@@ -129,8 +129,12 @@ values fed in.
    the historical shims end at `t_end_default=2015.0` and the projection shims
    start at `t_start_default=2015.0` (`antarctica/scripts/historical/*.py`,
    `projections/*.py`), as FORWARD_RUN_READINESS.md states. The 28 July matrix
-   logs show `1850.0->2014.0` and `2014.0->2300.0` under the July drivers. The
-   next historical run's `Time-stepping` line is the run-level confirmation.
+   logs show `1850.0->2014.0` and `2014.0->2300.0` under the July drivers.
+   Confirmed at run level on 21 September: the 32 km CESM2-WACCM historical at
+   IU Quartz (job 10559683, 12854ec) printed `Time-stepping: 1850.0->2015.0,
+   dt=0.1yr, 1650 steps` and its final state carries `t_yr = 2015`. The
+   projection side (`2015.0->...`) is still to be read off the first run that
+   branches from it.
 3. **Runaway detector: settled.** `check_ismip6_track.py` flags a runaway on
    sustained signals only: a year whose median front discharge exceeds 6000
    Gt/yr, or growth of 1.5x in each of two consecutive years. A single

@@ -293,10 +293,10 @@ forcing-version audit, the output writer, and the melt calibration above.
    minimum is -0.008 kg m-2 s-1, which is 275.3 m/yr of ice, and the 10-year adaptive-mesh
    ssp585 of job 1368723 reached -0.0117, or 402.6 m/yr.
 
-   `check_melt_bound.py` measures the slope side of it. The calibration caps the
-   draft slope `sin(alpha)` at 5e-3 and the forward applies no cap, so the melt
-   the forward applies is a different field from the melt the per-basin K was
-   fitted against. The script evaluates two halves at the reference geometry
+   `check_melt_bound.py` measures the slope side of it. The CG1 calibration
+   behind the existing K files caps the draft slope `sin(alpha)` at 5e-3 and
+   the forward applies no cap, so the melt the forward applies is a different
+   field from the melt the per-basin K was fitted against. The script evaluates two halves at the reference geometry
    with `calibrated_K_per_basin_2000.npz` on the adaptive 2 km mesh, each capped and
    uncapped. The calibration half reproduces `calibrate_melt.py` on CG1 nodes,
    with BedMachine's raster surface and mask and the cap on the nodal slope.
@@ -306,6 +306,10 @@ forcing-version audit, the output writer, and the melt calibration above.
    slope. The calibration half floats 1 512 899 km2 over 47 288 nodes and the
    forward half 1 631 466 km2 over 85 820 cells, and they differ in mask and
    quadrature as well, so their totals compare in magnitude.
+
+   The rows below predate the seawater flotation test (issue #66) and the
+   `h > 0` test in the forward half, and are to be re-measured; the current
+   numbers are in `GEOMETRY_DISCRETIZATION.md`.
 
    | slope | max, m/yr | p99, m/yr | area mean, m/yr | integrated, Gt/yr | past the bound |
    |---|---|---|---|---|---|
@@ -360,13 +364,14 @@ forcing-version audit, the output writer, and the melt calibration above.
    bookkeeping, since `book_advance` books the melt REQUESTED of a step while a
    nearly ice-free floating cell can only lose what it holds.
 
-   Closing the gap between calibration and forward is the next step. The clean
-   route is to recalibrate K through the forward's own melt path, cell by cell
-   with its own floating mask, under whichever slope convention is chosen.
-   Choosing the convention is a science decision, since the cap is tied to the
-   unsettled upstream local-slope question. Until it is made, `load_K_per_basin`
-   warns once per run when the K file it reads records the cap it was fitted
-   against. (issue #26)
+   `calibrate_melt.py` now fits K through the forward's own melt path under
+   `ISMIP7_GEOMETRY_SPACE=dg0` (issue #30). The forward and the calibration
+   default to the ISMIP7 reference slope, one constant `sin(alpha)` =
+   5.115e-3 (`ISMIP7_MELT_SLOPE=ant`); the local slope, capped or not, stays
+   as `local` and is tied to the unsettled upstream local-slope question.
+   `load_K_per_basin` warns once per run when the K file it reads was fitted
+   under another convention, and under `local` when it records a cap the
+   forward does not apply (issue #26, `GEOMETRY_DISCRETIZATION.md`).
 6. Optional: read the provided `ctrl` trees in place of the `ssp126`
    reference-climate pool. Closed as icepack/ismip7#43, not planned for
    September 2026.

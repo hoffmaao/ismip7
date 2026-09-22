@@ -161,11 +161,13 @@ python scripts/download_data.py
 
 | Dataset | Product | Auth | Lands in |
 |---------|---------|------|----------|
-| BedMachine Antarctica v4 | NSIDC-0756 | Earthdata | `data/bedmachine/` |
-| MEaSUREs Ice Velocity v2 | NSIDC-0484 | Earthdata | `data/velocity/` |
-| RACMO2.4p1 SMB | Zenodo `10.5281/zenodo.14217231` | none | `data/racmo/` |
+| BedMachine Antarctica v4 | NSIDC-0756 | Earthdata | `<obs root>/bedmachine/` |
+| MEaSUREs Ice Velocity v2 | NSIDC-0484 | Earthdata | `<obs root>/velocity/` |
+| RACMO2.4p1 SMB | Zenodo `10.5281/zenodo.14217231` | none | `<obs root>/racmo/` |
 
-Existing files are skipped, so re-running is cheap.
+The obs root is `ISMIP7_OBS_DATA_ROOT` (section 6, environment knobs), the
+same directory every run reads, and it is created if missing. Existing files
+are skipped, so re-running is cheap.
 
 ---
 
@@ -378,11 +380,14 @@ python -c "import h5py,sys; print(dict(h5py.File(sys.argv[1])['/'].attrs))" MAP.
 
 Solves for the Burgard quadratic-mixed-slope coefficient K, global and per
 IMBIE2 basin, against integrated observed shelf melt. The target is the July
-2026 table combining Paolo, Davison and Adusumilli, 1067.4 Gt/yr, read from
-`<DATA_ROOT>/meltobs/Melt_Paolo_Davison_Adusumilli_imbie2.csv`. With that file
-absent it falls back to the older Paolo and Adusumilli table (865.0 Gt/yr) under
-`<DATA_ROOT>/parameterisations/ocean/meltobs/`; `ISMIP7_MELT_OBS_CSV` names
-either. Needs section 2 forcing and a section 4 mesh.
+2026 table combining Paolo, Davison and Adusumilli, 1067.4 Gt/yr,
+`Melt_Paolo_Davison_Adusumilli_imbie2.csv`, searched for under
+`<DATA_ROOT>/meltobs/` and then `<DATA_ROOT>/parameterisations/ocean/meltobs/`.
+With it in neither place the script falls back to the older Paolo and Adusumilli
+table (865.0 Gt/yr) under `<DATA_ROOT>/parameterisations/ocean/meltobs/` and
+prints a `[!]` line saying so; `ISMIP7_MELT_OBS_CSV` names either. Every run
+prints the table it opened and its integrated target. Needs section 2 forcing
+and a section 4 mesh.
 
 The newer table comes from the Source Cooperative melt-calibration product:
 
@@ -401,8 +406,30 @@ Only the mesh is read from the MAP, so any MAP built on it serves. The default
 is the section 4 name for the configured `ISMIP7_FRICTION`; `ISMIP7_INV_H5`
 names a different one.
 
+The calibration melts on the same `ISMIP7_GEOMETRY_SPACE` as the forward
+(default `dg0`) and with the same `ISMIP7_MELT_SLOPE` (default `ant`, the
+constant `ISMIP7_SIN_ALPHA_ANT` on every shelf): the cells the forward melts,
+through the forward's own path, so the K it writes is the K the forward
+applies. Its per-basin flags compare against the toolbox's July 2026 K05, K50
+and K95. `ISMIP7_GEOMETRY_SPACE=cg1 ISMIP7_MELT_SLOPE=local` is the nodal
+calibration the earlier K files came from, with the slope capped at 5e-3;
+`ISMIP7_SIN_ALPHA_CAP` names a cap on the local slope on either geometry
+(`GEOMETRY_DISCRETIZATION.md`). The file records the geometry and the slope
+convention it was fitted under, and a run under another is told once at
+startup.
+
 The control requires this npz. Projections take it (`K_per_basin_npz=`) or a
 scalar `ISMIP7_K_MELT`.
+
+The default output is the file every forward and inversion in the checkout
+reads at that `lc`, and the 2500 m file is also their fallback at every other
+`lc`. For a calibration made as a check, `ISMIP7_K_OUT` writes it elsewhere and
+`check_melt_bound.py --npz` reads it from there:
+
+```bash
+ISMIP7_K_OUT=/scratch/check/K_2000.npz ISMIP7_LC=2000 \
+    python scripts/calibrate_melt.py
+```
 
 ---
 
@@ -572,14 +599,16 @@ projection), run in that run's own shell so it captures the environment.
 | `ISMIP7_LOG_VEL_EPS` | regularisation speed (m/yr) inside the log | `1.0` |
 | `ISMIP7_WARM_START` | path to a MAP or timing-cache checkpoint used to seed `theta`/`phi` (and, when present, geometry, `fluidity_prior`, and the mixed diagnostic state). Fields are interpolated onto the live mesh, so a 1-core cache can warm-start a multi-rank invert | unset |
 | `ISMIP7_SKIP_CONTINUATION` | `1` skips the cold `n,m: 1→n` ramp on the initial solve and inside each annotated forward eval (single solve at full exponents). Auto-enabled when the warm start supplies a full mixed state | `0` |
-| `ISMIP7_GAMMA_THETA` / `ISMIP7_GAMMA_PHI` | Whittle-Matern prior strength on `θ` and `φ`, coupled to `ISMIP7_MISFIT_NORM` since normalising divides the misfit by about sigma^2 | `1e5` under `sigma`, `1e4` under `none` |
+| `ISMIP7_GAMMA_THETA` / `ISMIP7_GAMMA_PHI` | Whittle-Matern prior strength on `θ` and `φ`, coupled to `ISMIP7_MISFIT_NORM` since normalising divides the misfit by about sigma^2. `scripts/lsurface.py` sweeps both on a grid and picks the L-curve corner of each (usage in its docstring) | `1e5` under `sigma`, `1e4` under `none` |
 | `ISMIP7_L_REG` | prior correlation length (m) | `7.5e3` |
 | `ISMIP7_MAXITER` | L-BFGS-B iteration cap | `500` |
 | `ISMIP7_GRAD_PRECOND` | `none` is the raw-dof l2 metric, which is mesh dependent, so fine grounding-line cells converge slowest. `mass` optimises in `u = sqrt(M) x` under scipy, making the rate mesh independent. `mass_consistent` and `prior` run under TAO instead (scipy takes no preconditioner) with the initial inverse Hessian set to `M^-1` or to the prior covariance; `mass_consistent` is the consistent mass Riesz map; `prior`, the prior-preconditioned variant, was not used and is experimental here. Defaults to `none` to keep runs comparable with everything measured so far | `none` |
 | `ISMIP7_PRIOR_FORM` | `laplacian` uses `A = delta*M + gamma*K` as the prior precision; `bilaplacian` uses `A M^-1 A`, the squared-operator prior of Villa et al. (2021), the operator that a 2-D Whittle-Matern field needs to be function-valued. Different priors, not two spellings of one: their gammas are not convertible and their MAPs are not comparable, so the MAP stamps `prior_form` | `laplacian` |
 | `ISMIP7_PRIOR_SIGMA_THETA` / `_PHI`, `ISMIP7_PRIOR_RHO` | `bilaplacian` only: the log-deviation scale and correlation length (m), converted to `(delta, gamma)` by the closed forms of Villa et al. (2021), `sigma^2 = 1/(4 pi gamma delta)`, `rho = sqrt(8 gamma/delta)`. The un-squared form has no such closed form, which is why its gamma can only be tuned | `0.3` / `0.3` / `ISMIP7_L_REG` |
 | `ISMIP7_PRECOND_STEP0` | TAO metrics only: the largest change the FIRST step may make to a control, in that control's units, applied per control block. L-BFGS's first step is `-H_0 g` at unit length with no curvature pair to rescale it, and one evaluation outside the region where the forward has a solution returns NaN that every later trial point inherits | `0.15` |
-| `ISMIP7_GTOL` | TAO metrics only: `tao_gatol` on the prior-metric gradient norm `sqrt(g' A^-1 g)`, which is mesh independent unlike the raw l2 norm the scipy path prints. `0` spends the whole iteration budget, as the scipy path does | `0` |
+| `ISMIP7_GTOL` | TAO metrics only: `tao_gatol` on the prior-metric gradient norm `sqrt(g' A^-1 g)`, which is mesh independent unlike the raw l2 norm the scipy path prints. `0` leaves stopping to `ISMIP7_FTOL` and `ISMIP7_MAXITER` | `0` |
+| `ISMIP7_FTOL` | the relative-decrease stopping rule, on both optimizer paths: stop once `(J_old - J_new) / max(|J_old|, |J_new|, 1) <= ftol` (scipy's L-BFGS-B `ftol` is the same expression). `1e-10` converges a production inversion; the L-surface sweeps pass `1e-4`. `0` disables it | `1e-10` |
+| `ISMIP7_MIN_ITER` | TAO metrics only: iterations before `ISMIP7_FTOL` may stop the run | `3` |
 | `ISMIP7_SIGMA_U_FLOOR` | floor on the per-component MEaSUREs error (m/yr), so near-zero errors cannot let a few nodes dominate | `1.0` |
 | `ISMIP7_SIGMA_U_UNOBS` | sigma (m/yr) where MEaSUREs reports no error. Those nodes carry a zero-filled `u_obs`, so they need a large sigma when `ISMIP7_OBS_MASK=0` | `1e4` |
 | `ISMIP7_OBS_MASK` | `0` drops the velocity-observation mask | `1` |
@@ -652,8 +681,12 @@ redeclare those literals.
 | `ISMIP7_TRANSPORT_KSP_RTOL` / `ISMIP7_TRANSPORT_KSP_MAXIT` | GMRES relative tolerance / iteration limit for the persistent DG0 transport solver (`ismip7_transport_` PETSc prefix) | `1e-10` / `500` |
 | `ISMIP7_MASS_RESIDUAL_TOL_GT` | fail-loud absolute tolerance for both the discrete transport identity and the complete step mass budget | `5e-5` Gt |
 | `ISMIP7_RESCUE_ENABLED` | permit a failed direct transient diagnostic solve to enter the continuation/trust-region/subcycle rescue ladder; set to `0` for strict timestep qualification | `1` |
-| `ISMIP7_K_MELT` / `ISMIP7_K_PER_BASIN_NPZ` | scalar Burgard K (projections), per-basin K file (control) | `1.15e-4` / `results/calibrated_K_per_basin_<lc>.npz` |
-| `ISMIP7_MELT_OBS_CSV` | per-basin melt observation table read by `scripts/calibrate_melt.py`; columns are located by header name, so either published table serves | `<DATA_ROOT>/meltobs/Melt_Paolo_Davison_Adusumilli_imbie2.csv`, else the older Paolo and Adusumilli table |
+| `ISMIP7_K_MELT` / `ISMIP7_K_PER_BASIN_NPZ` | scalar K (projections), the ISMIP7 toolbox K50 of July 2026 (K05 4.75e-5, K95 1.375e-4), per-basin K file (control) | `8.5e-5` / `results/calibrated_K_per_basin_<lc>.npz` |
+| `ISMIP7_MELT_OBS_CSV` | per-basin melt observation table read by `scripts/calibrate_melt.py`; columns are located by header name, so either published table serves | `Melt_Paolo_Davison_Adusumilli_imbie2.csv` under `<DATA_ROOT>/meltobs/`, else under `<DATA_ROOT>/parameterisations/ocean/meltobs/`, else the older Paolo and Adusumilli table with a `[!]` line |
+| `ISMIP7_MELT_SLOPE` | the draft slope the quadratic melt law sees, in the forward and in `scripts/calibrate_melt.py`: `ant` is one constant `sin(alpha)` on every shelf, the protocol's reference ("mean Antarctic slope, no slope dependency"); `local` is this mesh's draft slope. A K file records the convention it was fitted under and a run under the other is told once | `ant` |
+| `ISMIP7_SIN_ALPHA_ANT` | the constant under `ant`. The default is the value the toolbox's K percentiles were sampled with, back-computed from its own gamma_T conversion; the notebook's recipe on the 8 km v3 topography gives 5.7e-3 | `5.115e-3` |
+| `ISMIP7_SIN_ALPHA_CAP` | `local` slope only: cap on `sin(alpha)` in `scripts/calibrate_melt.py`; the forward applies none | none under `dg0`, `5e-3` under `cg1` |
+| `ISMIP7_K_OUT` | output path for `scripts/calibrate_melt.py`, overriding the generated name. Use it for a calibration made as a check, so it cannot replace the K that every forward and inversion in the checkout reads. A bare filename resolves under `results/` | `results/calibrated_K_per_basin_<lc>.npz` |
 | `ISMIP7_ESM` | ESM for the control | `CESM2-WACCM` |
 | `ISMIP7_CLIM_SCENARIO` / `_START` / `_END` | reference-climate pool: the scenario pooled with `historical`, and the window, shared by the control's SMB climatology and the projections' aSMB re-reference through `icepack2_tools/climatology.py`. A partial pool warns | `ssp126` / `2000` / `2029` |
 | `ISMIP7_H_CLAMP` | thickness floor (m) | `0` |

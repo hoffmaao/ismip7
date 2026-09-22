@@ -165,7 +165,7 @@ What a submission needs (#5, #16, #17, #18, #19, #20, #22, #23):
 
 ## 4. Model-side state
 
-**Inversions.** RC and Budd MAPs exist on the Úa-preset mesh
+**Inversions.** RC and Budd MAPs exist on the adaptive-preset mesh
 (`inversion_icepack2_{rc,budd}_n3_dg0_logvelnet_ua2000.h5`). Every Budd MAP
 older than 13 September carries the shelf-friction defect and is unusable.
 
@@ -173,7 +173,7 @@ The 13 September Budd MAP was inverted while the shelf gate still multiplied
 through by the grounded indicator `He`, and the shipped gate is height above
 flotation alone, so it was re-inverted under the shipped law as NOTS 1390416
 (200 iterations, final masked misfit 1.041e4, 14 September). The census
-justifies that on its own: on the Úa mesh the old sign gate puts 13 647 of
+justifies that on its own: on the adaptive mesh the old sign gate puts 13 647 of
 103 233 floating cells at the friction cap, the `He` form 8 781, and the
 shipped gate 0. The superseded file is kept as
 `inversion_icepack2_budd_n3_dg0_logvelnet_ua2000_hegate.h5`. The RC MAP never
@@ -228,7 +228,7 @@ composite alpha inert to every digit.
 The check needs a MAP's final save: the every-20-iterate checkpoints carry the
 controls but not the velocity.
 
-**Forward.** The RC control on the Úa mesh runs and holds (1 yr, resid 0). A
+**Forward.** The RC control on the adaptive mesh runs and holds (1 yr, resid 0). A
 10-year CESM2-WACCM ssp585 on that mesh (NOTS job 1368723) took 10.5 minutes on
 32 Sapphire Rapids ranks, 6 s per 0.1-year step, so a 2015-2300 projection is
 about 5 node-hours and eleven cores about 2.5 node-days.
@@ -237,7 +237,7 @@ about 5 node-hours and eleven cores about 2.5 node-days.
 combines Paolo (2023), Davison (2023) and Adusumilli (2020), and its integrated
 target is 1067.4 Gt/yr against the 865.0 Gt/yr of the Paolo plus Adusumilli
 table the old calibration used. Both tables went through `calibrate_melt.py` on
-the same Úa mesh, so the comparison isolates the observations:
+the same adaptive mesh, so the comparison isolates the observations:
 
 | observations | integrated target | K* | melt at K* |
 |---|---|---|---|
@@ -268,7 +268,7 @@ forcing-version audit, the output writer, and the melt calibration above.
 
 ## 5. Actions, in order
 
-1. Drive the full-length ssp585 (NOTS 1390452, 2015 to 2301 on the Úa mesh with
+1. Drive the full-length ssp585 (NOTS 1390452, 2015 to 2301 on the adaptive mesh with
    `ISMIP7_OUTPUT=1`) through the writer and the compliance checker. It is the
    first run at experiment length, so it is what clears the checker's remaining
    length checks. Record which K calibration it read: a run picks up whichever
@@ -284,20 +284,20 @@ forcing-version audit, the output writer, and the melt calibration above.
    will use, on its final save, and record the number beside the MAP. A MAP
    inverted before 571d1c9 must run with `ISMIP7_OCEAN_DRAG=0 ISMIP7_U_LIM=0`
    or be re-inverted (section 4). The 2 km RC and Budd MAPs now inverting under
-   the prior metric are next when they finish. (issues #24, #21)
+   the prior metric are next when they finish. (issue #24)
 4. Re-run `audit_forcing_versions.py` immediately before the production matrix
    and cite it in the README. The `ctrl` pull for cores 9 and 10 is done, and
    the mirror is re-synced with Globus by hand every week or two, so the freeze
    versions can still move under a long campaign. (issue #41)
 5. Settle where the `libmassbffl` bound violation comes from. The request's AIS
-   minimum is -0.008 kg m-2 s-1, which is 275.3 m/yr of ice, and the 10-year Úa
+   minimum is -0.008 kg m-2 s-1, which is 275.3 m/yr of ice, and the 10-year adaptive-mesh
    ssp585 of job 1368723 reached -0.0117, or 402.6 m/yr.
 
    `check_melt_bound.py` measures the slope side of it. The CG1 calibration
    behind the existing K files caps the draft slope `sin(alpha)` at 5e-3 and
    the forward applies no cap, so the melt the forward applies is a different
    field from the melt the per-basin K was fitted against. The script evaluates two halves at the reference geometry
-   with `calibrated_K_per_basin_2000.npz` on the Úa 2 km mesh, each capped and
+   with `calibrated_K_per_basin_2000.npz` on the adaptive 2 km mesh, each capped and
    uncapped. The calibration half reproduces `calibrate_melt.py` on CG1 nodes,
    with BedMachine's raster surface and mask and the cap on the nodal slope.
    The forward half reproduces the forward on DG0 cells, with the surface from
@@ -557,7 +557,10 @@ Output and submission:
     `download_mirror.py --dry-run` does it read-only. The audit's own docstring
     now says so, and issues #41 and #16 carry the same note where their exit
     criteria lean on it. Which prefixes the submission needs, and which a
-    routine re-sync covers, is open. (issue #49)
+    routine re-sync covers, was icepack/ismip7#49, closed on 22 September as
+    not required for the 30 September submission and to be reopened for an
+    October ESM submission; the five ESMs and the melt-calibration product
+    stay unfetched.
 
     Closed as icepack/ismip7#14.
 13. **Bring the Quartz forcing tree up to the mirror.** Done on 21 September.
@@ -607,8 +610,8 @@ through the GitHub API: #17, #22, #30, #37, #40, #48 and the new #49.
 `ismip7-antarctic-ocean-forcing` has no item updated since the 18th. Nothing
 was posted upstream, isschecker was read at its tag and never run, and no
 mirror listing was taken. Thread and issue numbers now collide: `#49` below is
-the forum thread about `thetao`, and `(issue #49)` in section 6 is the board
-item about mirror prefixes.
+the forum thread about `thetao`, and icepack/ismip7#49 in section 6 is the
+board item about mirror prefixes.
 
 ### What moved on the board since the 19th
 

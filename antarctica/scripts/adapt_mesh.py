@@ -1,9 +1,9 @@
-r"""Adapt the mesh of a forward checkpoint the way Úa's AdaptMesh does.
+r"""Adapt the mesh of a forward checkpoint after Gudmundsson et al. (2012).
 
     mpiexec -n 4 python antarctica/scripts/adapt_mesh.py CHECKPOINT.h5 \
         --out-checkpoint NEW.h5 [--out-mesh NEW.msh] [--rebuild-aref]
 
-Reads the checkpoint's mesh and state, builds Úa's desired-element-size field
+Reads the checkpoint's mesh and state, builds the desired-element-size field
 from the ISMIP7_ADAPT_* configuration (icepack2_tools.adapt_mesh), remeshes
 the domain globally with gmsh on rank 0, transfers the state onto the new mesh
 (MapFbetweenMeshes semantics: interpolation, ThickMin outside, bed re-sampled

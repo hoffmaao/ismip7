@@ -197,16 +197,16 @@ Hahn, Mikula and Frolkovic 2025; Smith et al. 2020.
 
 | Characteristic | Main suite of experiments | PPE change? |
 |---|---|---|
-| Mesh discretisation | Delaunay triangulation (gmsh), Úa-style size field | no |
-| Native grid | H: anisotropic; resolution **[confirm #20]**, pending the 1000 m inversions: the Úa-style adaptive mesh, 2 km at the grounding line and calving front to 180 km in the interior (246,677 cells), as previously run; or `antarctica_10000_1000_buffered20000`, the 1000 m / 10 km gmsh mesh (1,869,088 vertices) that has been the code default since PR #7 and on which no inversion has yet been run. V: vertically integrated (shallow shelf) | no |
+| Mesh discretisation | Delaunay triangulation (gmsh), adaptive size field | no |
+| Native grid | H: anisotropic; resolution **[confirm #20]**, pending the 1000 m inversions: the 2 km / 180 km adaptive mesh, 2 km at the grounding line and calving front to 180 km in the interior (246,677 cells), as previously run; or `antarctica_10000_1000_buffered20000`, the 1000 m / 10 km gmsh mesh (1,869,088 vertices) that has been the code default since PR #7 and on which no inversion has yet been run. V: vertically integrated (shallow shelf) | no |
 | Native projection | EPSG:3031, same as BedMachine | no |
 | Interpolation to diagnostic grid | conservative: exact cell-pixel overlap areas (supermesh) onto the 8 km grid; whole-pixel means for thickness, fluxes and fractions, covered-part means for elevations | no |
 | Time integration | transport-first split: implicit Euler thickness transport, then the diagnostic solve at the new geometry; first order | no |
-| Time step | **[confirm #20]**, pending the 1000 m inversions: 0.1 yr on the Úa-style mesh, as previously run; 0.05 yr on the 1000 m / 10 km mesh, the code default since PR #7 | no |
+| Time step | **[confirm #20]**, pending the 1000 m inversions: 0.1 yr on the adaptive mesh, as previously run; 0.05 yr on the 1000 m / 10 km mesh, the code default since PR #7 | no |
 | Advection scheme | upwind finite volume, DG0, implicit; first order | no |
 | Ice flow mechanics | shallow-shelf approximation, dual finite-element formulation (CG1 velocity, DG0 membrane and basal stress) | no |
 | Ice rheology | n = 3 (composite with a linear floor for thin ice) | no |
-| Basal sliding | regularised Coulomb, m = 3, c0 = 0.5 (Budd available) | **[confirm #21]** |
+| Basal sliding | regularised Coulomb, m = 3, c0 = 0.5 (Budd available) | **[confirm #24]** |
 | Basal hydrology | none | no |
 | Ice-shelf fracture | **[confirm #10]** none, or the ISMIP7 collapse mask on floating cells, everywhere (`mask`) or from the front (`mask_front`); see item 9 | **[confirm]** |
 | Advance and retreat | grounding line free; calving front pinned at 2015 (level-set von Mises optional) | **[confirm #36]** |

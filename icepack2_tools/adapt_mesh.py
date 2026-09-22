@@ -1,7 +1,7 @@
-r"""ISMIP7's Úa-style mesh adaptation: the shared scheme plus this model's wiring.
+r"""ISMIP7's mesh adaptation: the shared scheme plus this model's wiring.
 
-The scheme (Úa's ``AdaptMesh``: criteria, ``Error2EleSize``, relaxation and
-ratio limits, ``GLrange``/``CFrange`` bands, gmsh global remeshing with Úa's
+The scheme (Gudmundsson et al. (2012): criteria, ``Error2EleSize``, relaxation and
+ratio limits, ``GLrange``/``CFrange`` bands, gmsh global remeshing with the reference's
 element-count control, ``MapFbetweenMeshes`` transfer, and the three DG0
 additions) lives in :mod:`icepack_tools.adapt_mesh`, shared with the other
 icepack2 projects. Everything ISMIP7 adds is here:
@@ -14,7 +14,7 @@ icepack2 projects. Everything ISMIP7 adds is here:
   exist, which are frozen references (``a_ref_mb``, ``N_ref``, ``H_init``),
   the geometry route, and the attributes a restart needs.
 
-The config comes from ``ISMIP7_ADAPT_*`` (``ISMIP7_ADAPT_PRESET=ua`` for Úa's
+The config comes from ``ISMIP7_ADAPT_*`` (``ISMIP7_ADAPT_PRESET=ua`` for the
 Antarctic sizes); see ``ADAPTIVE_MESH.md``.
 """
 
@@ -86,12 +86,12 @@ def remesh_global(mesh, h_des, cfg, out_msh, old_msh, old_sidecar, log=PETSc.Sys
 
 def transfer_state(chk_in, mesh_new, cfg, chk_out, new_msh_basename, bed_sampler,
                    rebuild_aref=False, thickness_sampler=None, log=PETSc.Sys.Print):
-    r"""Úa ``MapFbetweenMeshes`` for this model's checkpoint; writes ``chk_out``.
+    r"""``MapFbetweenMeshes`` for this model's checkpoint; writes ``chk_out``.
 
     ``bed_sampler(Q_g_new, Q_cg_new)`` returns the bed on the new mesh from
-    data (Úa's ``DefineGeometry`` route); ``thickness_sampler`` likewise, used
-    only for the initial adaptation (``rebuild_aref``), where Úa takes ALL
-    geometry from data. Otherwise ``cfg.geometry`` selects Úa's route.
+    data (the ``DefineGeometry`` route); ``thickness_sampler`` likewise, used
+    only for the initial adaptation (``rebuild_aref``), where the reference takes ALL
+    geometry from data. Otherwise ``cfg.geometry`` selects the route.
     Frozen references: ``a_ref_mb`` becomes the transferred physical
     divergence (the forward rebuilds it), ``N_ref`` is rebuilt from the
     transferred ratio, ``H_init`` moves like the thickness. Returns audits.
@@ -123,7 +123,7 @@ def transfer_state(chk_in, mesh_new, cfg, chk_out, new_msh_basename, bed_sampler
     new = {}
     b = bed_sampler(Q_g, Qc)
     if rebuild_aref and thickness_sampler is not None:
-        H, route = thickness_sampler(Q_g, Qc), "data"        # Úa: first run-step, all geometry from data
+        H, route = thickness_sampler(Q_g, Qc), "data"        # first run-step: all geometry from data
     elif cfg.geometry == "bh-FROM-sBS":
         H, route = surface_route_thickness(s_old, b, mesh_new, Q_g), "bh-FROM-sBS"
     else:

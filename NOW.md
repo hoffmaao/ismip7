@@ -10,7 +10,7 @@ is an index.
 **Claim the card before you start a run or an inversion.** A card in
 Claimed for more than 24 hours with no comment reads as unclaimed.
 
-Generated: 2026-09-22 14:41 UTC. 19 blocking, 11 owed, 0 after the deadline, 7 unverified.
+Generated: 2026-09-22 17:27 UTC. 18 blocking, 10 owed, 0 after the deadline, 7 unverified.
 
 ## Blocking the submission
 
@@ -22,7 +22,6 @@ Decisions first: they have the longest lead time and they gate the runs.
 | [19](https://github.com/icepack/ismip7/issues/19) | forcing: confirm which OCX forcing the submitted core 11 used | needs-decision | group | group | fresh, unverified by design |
 | [20](https://github.com/icepack/ismip7/issues/20) | mesh: choose the submission mesh and time step, Ua or the 1000 m / 10 km pair | needs-decision | group | group | fresh, unverified by design |
 | [26](https://github.com/icepack/ismip7/issues/26) | melt: settle the draft-slope convention shared by calibration and forward | needs-decision | group | group | unverifiable-run |
-| [29](https://github.com/icepack/ismip7/issues/29) | forcing: the ~9 percent aSMB unit inflation is an open decision | needs-decision | group | local | verified open |
 | [38](https://github.com/icepack/ismip7/issues/38) | submission: settle the contributor names, date, source_id, ism_id and PPE participation | needs-decision | group | group | unverifiable-run |
 | [39](https://github.com/icepack/ismip7/issues/39) | submission: request the Globus upload folder | needs-decision | group | group | unverifiable-run |
 | [11](https://github.com/icepack/ismip7/issues/11) | melt: run check_melt_bound.py --ocx before core 11 runs on the OCX product | needs-run | iu | quartz, nots, midway | fresh, unverified by design |
@@ -50,7 +49,6 @@ Decisions first: they have the longest lead time and they gate the runs.
 | [16](https://github.com/icepack/ismip7/issues/16) | forcing: re-audit the CESM2-WACCM ssp585 fracture before production (#37) | needs-check | group | quartz, nots, midway | fresh, unverified by design |
 | [23](https://github.com/icepack/ismip7/issues/23) | review: UW review of the obs_data_root conversions and the obs_dhdt temp-then-rename | needs-check | uw | local | fresh, unverified by design |
 | [68](https://github.com/icepack/ismip7/issues/68) | inversion: a chained link re-derives the auto log-velocity weight and changes the objective | needs-check | rice | nots | verified open |
-| [70](https://github.com/icepack/ismip7/issues/70) | runners: submit.sh cuts a KEY=VALUE at its first comma, so ISMIP7_SUBCYCLES=1,4,16,64 arrives as 1 | needs-check | uw | local | verified open |
 | [18](https://github.com/icepack/ismip7/issues/18) | protocol: what goes in the forcing field of an OCX filename (#17) | needs-upstream | upstream | upstream | fresh, unverified by design |
 | [66](https://github.com/icepack/ismip7/issues/66) | melt: the callbacks test flotation with fresh-water density and withhold melt from 24 percent of the shelf area | n/a | unassigned | n/a | verified open |
 
@@ -60,7 +58,7 @@ Work in flight. Do not duplicate it.
 
 | # | item | owner | sites | last touched |
 |---|---|---|---|---|
-| [10](https://github.com/icepack/ismip7/issues/10) | collapse: decide the mode for the submission (none, mask, mask_front) | iu | quartz | 2026-09-21 |
+| [10](https://github.com/icepack/ismip7/issues/10) | collapse: decide the mode for the submission (none, mask, mask_front) | iu | quartz | 2026-09-22 |
 | [11](https://github.com/icepack/ismip7/issues/11) | melt: run check_melt_bound.py --ocx before core 11 runs on the OCX product | iu | quartz, nots, midway | 2026-09-21 |
 | [24](https://github.com/icepack/ismip7/issues/24) | MAP: 2 km RC and Budd inversions running at Rice under the new prior metric | rice | nots | 2026-09-22 |
 
@@ -86,9 +84,9 @@ production run or a group decision.
 |---|---|
 | `src:readiness` | 12 |
 | `src:submission-readme` | 11 |
-| `src:matrix-status` | 3 |
+| `src:matrix-status` | 2 |
 | `src:topic-doc` | 4 |
-| `src:runbook` | 5 |
+| `src:runbook` | 4 |
 | `src:open-pr` | 3 |
 
 ## After the deadline

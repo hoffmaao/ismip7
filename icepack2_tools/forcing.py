@@ -668,10 +668,15 @@ class ISMIP7Atmosphere:
         path = os.path.join(vdir, pattern)
 
         if not os.path.exists(path):
-            # End of the series: CESM2-WACCM stops at 2299 and the empty 2300
-            # files were removed (discussion #8), while a 2015-2300 run needs
-            # the 2300 forcing year. Bridge exactly that one year, once per
-            # variable in the log, rather than failing at the last step.
+            # End of the series: a tree whose last atmosphere year is 2299
+            # while a 2015-2300 run needs 2300. Bridge exactly that one year,
+            # once per variable in the log, rather than failing at the last
+            # step. CESM2-WACCM was that case when the empty 2300 files were
+            # removed (discussion #8); as of 22 September 2026 the mirror
+            # carries 2300 again, padded by the atmosphere group with the
+            # 2290-2299 mean (discussion #49, issue #78), so those files are
+            # read as given and this branch no longer fires for them. It still
+            # covers an older mirror copy, and the ocean has no 2300 at all.
             # Anything further past the end is a short tree, not the end of
             # the series, and repeating one year of SMB for decades would be a
             # scientifically wrong run reported as a success, so it raises.

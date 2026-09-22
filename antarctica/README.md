@@ -407,15 +407,15 @@ is the section 4 name for the configured `ISMIP7_FRICTION`; `ISMIP7_INV_H5`
 names a different one.
 
 The calibration melts on the same `ISMIP7_GEOMETRY_SPACE` as the forward
-(default `dg0`): the cells the forward melts, through the forward's own path,
-with the cell slope uncapped as the forward applies it, so the K it writes is
-the K the forward applies. `ISMIP7_GEOMETRY_SPACE=cg1` is the nodal
+(default `dg0`) and with the same `ISMIP7_MELT_SLOPE` (default `ant`, the
+constant `ISMIP7_SIN_ALPHA_ANT` on every shelf): the cells the forward melts,
+through the forward's own path, so the K it writes is the K the forward
+applies. Its per-basin flags compare against the toolbox's July 2026 K05, K50
+and K95. `ISMIP7_GEOMETRY_SPACE=cg1 ISMIP7_MELT_SLOPE=local` is the nodal
 calibration the earlier K files came from, with the slope capped at 5e-3;
-with the same cap the DG0 fit reproduces it within about 10 percent per basin,
-22 percent in basin 7, and the uncapped cell slope the forward applies today
-integrates 3.7 times as much melt at K = 1 (`GEOMETRY_DISCRETIZATION.md`).
-`ISMIP7_SIN_ALPHA_CAP` names a cap on either geometry. The file records the
-geometry it was fitted on, and a run that melts on the other is told once at
+`ISMIP7_SIN_ALPHA_CAP` names a cap on the local slope on either geometry
+(`GEOMETRY_DISCRETIZATION.md`). The file records the geometry and the slope
+convention it was fitted under, and a run under another is told once at
 startup.
 
 The control requires this npz. Projections take it (`K_per_basin_npz=`) or a
@@ -681,9 +681,11 @@ redeclare those literals.
 | `ISMIP7_TRANSPORT_KSP_RTOL` / `ISMIP7_TRANSPORT_KSP_MAXIT` | GMRES relative tolerance / iteration limit for the persistent DG0 transport solver (`ismip7_transport_` PETSc prefix) | `1e-10` / `500` |
 | `ISMIP7_MASS_RESIDUAL_TOL_GT` | fail-loud absolute tolerance for both the discrete transport identity and the complete step mass budget | `5e-5` Gt |
 | `ISMIP7_RESCUE_ENABLED` | permit a failed direct transient diagnostic solve to enter the continuation/trust-region/subcycle rescue ladder; set to `0` for strict timestep qualification | `1` |
-| `ISMIP7_K_MELT` / `ISMIP7_K_PER_BASIN_NPZ` | scalar Burgard K (projections), per-basin K file (control) | `1.15e-4` / `results/calibrated_K_per_basin_<lc>.npz` |
+| `ISMIP7_K_MELT` / `ISMIP7_K_PER_BASIN_NPZ` | scalar K (projections), the ISMIP7 toolbox K50 of July 2026 (K05 4.75e-5, K95 1.375e-4), per-basin K file (control) | `8.5e-5` / `results/calibrated_K_per_basin_<lc>.npz` |
 | `ISMIP7_MELT_OBS_CSV` | per-basin melt observation table read by `scripts/calibrate_melt.py`; columns are located by header name, so either published table serves | `Melt_Paolo_Davison_Adusumilli_imbie2.csv` under `<DATA_ROOT>/meltobs/`, else under `<DATA_ROOT>/parameterisations/ocean/meltobs/`, else the older Paolo and Adusumilli table with a `[!]` line |
-| `ISMIP7_SIN_ALPHA_CAP` | cap on the draft slope `sin(alpha)` in `scripts/calibrate_melt.py`; the forward applies none | none under `dg0`, `5e-3` under `cg1` |
+| `ISMIP7_MELT_SLOPE` | the draft slope the quadratic melt law sees, in the forward and in `scripts/calibrate_melt.py`: `ant` is one constant `sin(alpha)` on every shelf, the protocol's reference ("mean Antarctic slope, no slope dependency"); `local` is this mesh's draft slope. A K file records the convention it was fitted under and a run under the other is told once | `ant` |
+| `ISMIP7_SIN_ALPHA_ANT` | the constant under `ant`. The default is the value the toolbox's K percentiles were sampled with, back-computed from its own gamma_T conversion; the notebook's recipe on the 8 km v3 topography gives 5.7e-3 | `5.115e-3` |
+| `ISMIP7_SIN_ALPHA_CAP` | `local` slope only: cap on `sin(alpha)` in `scripts/calibrate_melt.py`; the forward applies none | none under `dg0`, `5e-3` under `cg1` |
 | `ISMIP7_K_OUT` | output path for `scripts/calibrate_melt.py`, overriding the generated name. Use it for a calibration made as a check, so it cannot replace the K that every forward and inversion in the checkout reads. A bare filename resolves under `results/` | `results/calibrated_K_per_basin_<lc>.npz` |
 | `ISMIP7_ESM` | ESM for the control | `CESM2-WACCM` |
 | `ISMIP7_CLIM_SCENARIO` / `_START` / `_END` | reference-climate pool: the scenario pooled with `historical`, and the window, shared by the control's SMB climatology and the projections' aSMB re-reference through `icepack2_tools/climatology.py`. A partial pool warns | `ssp126` / `2000` / `2029` |

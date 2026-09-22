@@ -365,12 +365,13 @@ forcing-version audit, the output writer, and the melt calibration above.
    nearly ice-free floating cell can only lose what it holds.
 
    `calibrate_melt.py` now fits K through the forward's own melt path under
-   `ISMIP7_GEOMETRY_SPACE=dg0`, uncapped by default or capped with
-   `ISMIP7_SIN_ALPHA_CAP` (issue #30, `GEOMETRY_DISCRETIZATION.md`). Choosing
-   the slope convention is a science decision, since the cap is tied to the
-   unsettled upstream local-slope question. Until it is made, `load_K_per_basin`
-   warns once per run when the K file it reads records a cap the forward does
-   not apply. (issue #26)
+   `ISMIP7_GEOMETRY_SPACE=dg0` (issue #30). The forward and the calibration
+   default to the ISMIP7 reference slope, one constant `sin(alpha)` =
+   5.115e-3 (`ISMIP7_MELT_SLOPE=ant`); the local slope, capped or not, stays
+   as `local` and is tied to the unsettled upstream local-slope question.
+   `load_K_per_basin` warns once per run when the K file it reads was fitted
+   under another convention, and under `local` when it records a cap the
+   forward does not apply (issue #26, `GEOMETRY_DISCRETIZATION.md`).
 6. Optional: read the provided `ctrl` trees in place of the `ssp126`
    reference-climate pool. Closed as icepack/ismip7#43, not planned for
    September 2026.

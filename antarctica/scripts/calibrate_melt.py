@@ -9,8 +9,8 @@ Geometry: the same ISMIP7_GEOMETRY_SPACE the forward reads (default dg0).
 
 * `dg0` melts the cells the forward melts, through the forward's own path:
   bed and thickness sampled onto the cells (ISMIP7_RASTER_SAMPLE), the
-  surface from flotation, the cell slope of `forcing.compute_sin_alpha`
-  uncapped, thermal forcing and salinity at each centroid and its own draft,
+  surface from flotation, the slope of `forcing.compute_sin_alpha`,
+  thermal forcing and salinity at each centroid and its own draft,
   the callback's `haf <= 0` floating test on cells holding ice (`h > 0`),
   cell areas. A K fitted here is the K the forward applies, by construction.
   Ice-free cells with `haf <= 0` are left out: the forward cannot melt ice
@@ -23,13 +23,16 @@ Geometry: the same ISMIP7_GEOMETRY_SPACE the forward reads (default dg0).
   (GEOMETRY_DISCRETIZATION.md, issue #30); the slope convention is what
   separates them (issue #26).
 
-The K file records the geometry it was fitted on, and `load_K_per_basin`
-warns once when a run melts on the other.
+The K file records the geometry and the slope convention it was fitted
+under, and `load_K_per_basin` warns once when a run melts under another.
 
 Forcing: OI climatology TF + so (8 km, 60 m vertical) from the ISMIP7
 meltMIP folder, sampled at the local ice-shelf draft.
 
-Slope sin(alpha): capped at ISMIP7_SIN_ALPHA_CAP when one is named; the
+Slope sin(alpha): the same ISMIP7_MELT_SLOPE the forward reads. `ant` (the
+default, the ISMIP7 reference) is the constant ISMIP7_SIN_ALPHA_ANT on every
+shelf, the slope the toolbox's K05, K50 and K95 were sampled with. `local` is
+this mesh's draft slope, capped at ISMIP7_SIN_ALPHA_CAP when one is named; the
 default is no cap under dg0, the forward's convention, and 5e-3 under cg1 to
 suppress unstructured-mesh noise on the nodal slope.
 
@@ -75,7 +78,10 @@ import rasterio
 import icepack
 
 from icepack2_tools.forcing import (quadratic_mixed_slope, compute_sin_alpha,
-                                    is_floating, _RHO_I)
+                                    is_floating, melt_slope, sin_alpha_ant,
+                                    SIN_ALPHA_ANT_DEFAULT, _K_PERCENTILES,
+                                    _RHO_I)
+K05, K50, K95 = _K_PERCENTILES
 from icepack2_tools.geometry import sample_to_geometry
 from icepack2_tools.naming import map_basename
 from icepack2_tools.runconfig import (friction as _friction, lc as _lc,
@@ -190,6 +196,10 @@ def default_slope_cap(space):
 
 SIN_ALPHA_CAP = float(os.environ.get("ISMIP7_SIN_ALPHA_CAP",
                                      default_slope_cap(GEOMETRY)))
+# The slope convention, the same knob the forward reads: ``ant`` is one
+# constant sin(alpha) (the protocol's reference, no cap applies); ``local``
+# is this mesh's draft slope, capped as above.
+MELT_SLOPE = melt_slope()
 # The ice to seawater density ratio simulation.py builds the DG0 surface with.
 RHO_RATIO = 917.0 / 1024.0
 
@@ -308,7 +318,8 @@ def calibration_geometry(mesh):
         "x": mesh.coordinates.dat.data_ro[:, 0],
         "y": mesh.coordinates.dat.data_ro[:, 1],
         "draft": np.minimum(s_np - h_np, 0.0),
-        "sin_a": _compute_sin_alpha(mesh, thk, sur),
+        "sin_a": (np.full(h_np.shape[0], sin_alpha_ant()) if MELT_SLOPE == "ant"
+                  else _compute_sin_alpha(mesh, thk, sur)),
         # Authoritative floating mask from BedMachine: mask == 3
         "floating": np.round(mask_np).astype(int) == 3,
         "area": assemble(fd.TestFunction(Q) * dx).dat.data_ro,
@@ -453,9 +464,13 @@ def main():
                     f"S range: {sal.min():.2f} .. {sal.max():.2f} PSU")
 
     sin_a = g["sin_a"]
-    PETSc.Sys.Print(f"  sin(alpha) uncapped p50={np.median(sin_a):.2e} "
-                    f"p95={np.quantile(sin_a, 0.95):.2e}; cap={SIN_ALPHA_CAP:g}")
-    sin_a = np.minimum(sin_a, SIN_ALPHA_CAP)
+    if MELT_SLOPE == "ant":
+        PETSc.Sys.Print(f"  Slope: ant, sin(alpha) = {sin_alpha_ant():g} on every "
+                        f"{dofs[:-1]} (the protocol's mean Antarctic slope)")
+    else:
+        PETSc.Sys.Print(f"  Slope: local; sin(alpha) uncapped p50={np.median(sin_a):.2e} "
+                        f"p95={np.quantile(sin_a, 0.95):.2e}; cap={SIN_ALPHA_CAP:g}")
+        sin_a = np.minimum(sin_a, SIN_ALPHA_CAP)
 
     floating = g["floating"]
     PETSc.Sys.Print(f"  Floating {dofs}: {int(floating.sum())} / {len(floating)}")
@@ -491,10 +506,10 @@ def main():
     for bid, kb in zip(bids_obs, K_basin):
         flag = ""
         if np.isfinite(kb):
-            if kb < 8.5e-5:   flag = "<K5"
-            elif kb < 1.15e-4: flag = "in K5-K50"
-            elif kb < 1.70e-4: flag = "in K50-K95"
-            else:              flag = ">K95"
+            if kb < K05:    flag = "<K05"
+            elif kb < K50:  flag = "in K05-K50"
+            elif kb < K95:  flag = "in K50-K95"
+            else:           flag = ">K95"
         PETSc.Sys.Print(f"    basin {bid:2d}: K_b = {kb:.3e}  {flag}")
 
     PETSc.Sys.Print("")
@@ -502,7 +517,10 @@ def main():
     PETSc.Sys.Print(f"  Total model @K=1:    {float(np.sum(M_1)):.3e} Gt/yr")
     PETSc.Sys.Print(f"  K* (Term-1 weighted) {K_star:.3e}")
     PETSc.Sys.Print(f"  K  (total-match)     {K_total:.3e}")
-    PETSc.Sys.Print("  Burgard reference:   K5=8.5e-5  K50=1.15e-4  K95=1.70e-4")
+    PETSc.Sys.Print(f"  ISMIP7 toolbox (July 2026, constant slope "
+                    f"{SIN_ALPHA_ANT_DEFAULT:g}): K05={K05:g} K50={K50:g} K95={K95:g}"
+                    + ("" if MELT_SLOPE == "ant" else
+                       "; not like for like with a local-slope fit"))
 
     rho_i_si = float(_RHO_I)
     total_at_K = float((quadratic_mixed_slope(tf, sal, sin_a, K=K_star)
@@ -532,7 +550,10 @@ def main():
         K_star=K_star, K_total=K_total,
         basin_on_mesh=basin, K_field=K_field,
         obs_csv=os.path.basename(OBS_CSV), obs_total_gtyr=float(M_obs.sum()),
-        mesh_source=os.path.basename(INV_H5), sin_alpha_cap=SIN_ALPHA_CAP,
+        mesh_source=os.path.basename(INV_H5),
+        sin_alpha_cap=(SIN_ALPHA_CAP if MELT_SLOPE == "local" else float("inf")),
+        melt_slope=MELT_SLOPE,
+        sin_alpha_ant=(sin_alpha_ant() if MELT_SLOPE == "ant" else float("nan")),
         geometry_space=GEOMETRY, raster_sample=raster_sample(),
         floating_area_km2=float(area[floating].sum()) / 1e6,
         integrated_at_K_star_gtyr=total_at_K,

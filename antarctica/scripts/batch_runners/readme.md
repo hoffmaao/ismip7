@@ -28,7 +28,14 @@ submit.sh projection --partition debug --time 00:30:00 --tasks 8
 ```
 
 Any `KEY=VALUE` argument is exported into the job, which is how a run is
-configured (knobs in `antarctica/README.md`). `--tasks`, `--mem`, `--time`,
+configured (knobs in `antarctica/README.md`). A value holding a comma, such as
+`ISMIP7_SUBCYCLES=1,4,16,64`, goes into sbatch's own environment, since sbatch
+splits its `--export` list on commas: the printed line reads
+`env KEY=VALUE sbatch ...`, and the job and its chain links receive the value
+whole. One argument holding several pairs is refused, since that is how zsh
+passes an unquoted `$VAR`: spell the pairs out, or write `${=VAR}` in zsh. A
+value that really contains a space followed by `NAME=` can be exported in the
+calling shell instead. `--tasks`, `--mem`, `--time`,
 `--partition`, `--constraint`, `--account` and `--name` override site defaults
 for one submission, in either `--opt value` or `--opt=value` form.
 

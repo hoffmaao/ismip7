@@ -292,7 +292,11 @@ make map-check MAP_CHECK_FRICTION=regularized_coulomb \
 ```
 
 The whole ladder for one law is about nine to ten hours of wall time and
-roughly 700 core-hours, and the two laws run side by side. The mechanical
+roughly 700 core-hours, and the two laws run side by side. On a full
+partition the controls' default request (the production forward's, 240 GB
+and 12 h) waits for a whole free node; `MAP_CHECK_CONTROL_MEM=128G
+MAP_CHECK_CONTROL_TIME=05:00:00` backfills sooner (the lanes peaked near
+1 GB per rank), and a control that runs out of wall time chains itself. The mechanical
 half of the question, whether the transfer works, is answerable after
 `prepare_transfer`, `score_transfer` and `lane_transfer`, four to five hours
 in.

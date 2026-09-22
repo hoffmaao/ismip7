@@ -178,6 +178,12 @@ MAP_CHECK_K_NPZ ?=
 MAP_CHECK_ATTRS ?= 1
 MAP_CHECK_REPACK ?= 1
 MAP_CHECK_CONTROLS_AFTER_FAILED_LANE ?=
+# The controls' own request. The default is the production forward's; a
+# smaller one backfills sooner on a busy partition, and a control that runs
+# out of wall time chains itself, so a short request costs a restart and no
+# result.
+MAP_CHECK_CONTROL_MEM ?= 240G
+MAP_CHECK_CONTROL_TIME ?= 12:00:00
 MAP_CHECK_ARGS = run --root "$(CURDIR)" --map "$(MAP_CHECK_MAP)" --url "$(MAP_CHECK_URL)" \
   --md5 "$(MAP_CHECK_MD5)" --friction "$(MAP_CHECK_FRICTION)" \
   --lc $(MAP_CHECK_LC) --lc-coarse $(MAP_CHECK_LC_COARSE) --buffer-m $(MAP_CHECK_BUFFER) \
@@ -188,6 +194,7 @@ MAP_CHECK_ARGS = run --root "$(CURDIR)" --map "$(MAP_CHECK_MAP)" --url "$(MAP_CH
   --check-map-attrs $(MAP_CHECK_ATTRS) --repack $(MAP_CHECK_REPACK) \
   $(if $(MAP_CHECK_K_NPZ),--k-npz "$(MAP_CHECK_K_NPZ)",) \
   $(if $(MAP_CHECK_CONTROLS_AFTER_FAILED_LANE),--controls-after-failed-lane,) \
+  --control-mem "$(MAP_CHECK_CONTROL_MEM)" --control-time "$(MAP_CHECK_CONTROL_TIME)" \
   $(SLURM_SELECT) --walltime "$(SLURM_TIME)" $(if $(FORCE_TIMING),--force,)
 
 # The active solver qualification/reference lane uses the improved DG0

@@ -131,7 +131,14 @@ while [ $# -gt 0 ]; do
                 --dependency) dependency="$2"; shift 2 ;;
                 --wait)       wait_flag=1; shift ;;
             esac ;;
-        *=*)          exports+=("$1"); shift ;;
+        *=*)
+            # The key has to be a variable name for the job to read it, and
+            # the `env` below would take a leading dash for its own option.
+            case "${1%%=*}" in
+                ""|[0-9]*|*[![:alnum:]_]*)
+                    echo "not a variable name: '${1%%=*}' in $1" >&2; exit 2 ;;
+            esac
+            exports+=("$1"); shift ;;
         *) echo "unknown argument: $1" >&2; exit 2 ;;
     esac
 done
@@ -159,8 +166,19 @@ if ! cd "$ISMIP7_REPO/$subdir" 2>/dev/null || [ ! -f "$script_rel" ]; then
     exit 2
 fi
 
+# sbatch splits --export on commas and documents no quoting, so a list entry
+# ISMIP7_SUBCYCLES=1,4,16,64 would reach the job as ISMIP7_SUBCYCLES=1. A value
+# holding a comma is set in sbatch's own environment instead, over any value
+# the calling shell exported, and ALL carries it whole into the job and its
+# chain resubmits.
 export_list="ALL,ISMIP7_SITE=$ISMIP7_SITE_NAME,ISMIP7_REPO=$ISMIP7_REPO"
-for kv in ${exports+"${exports[@]}"}; do export_list="$export_list,$kv"; done
+comma_values=()
+for kv in ${exports+"${exports[@]}"}; do
+    case "$kv" in
+        *,*) comma_values+=("$kv") ;;
+        *)   export_list="$export_list,$kv" ;;
+    esac
+done
 
 cmd=(sbatch --parsable
      -J "$name"
@@ -180,6 +198,8 @@ tail_flags=()
 [ "$wait_flag" = 1 ] && tail_flags+=(--wait)
 last=$((${#cmd[@]} - 1))
 cmd=("${cmd[@]:0:$last}" ${tail_flags+"${tail_flags[@]}"} "${cmd[$last]}")
+# Put in front last, since the insertions above count positions from sbatch.
+[ -n "${comma_values+x}" ] && cmd=(env "${comma_values[@]}" "${cmd[@]}")
 
 # Memory as sbatch spells it (240G, 187000M, a bare number of megabytes), in
 # megabytes. Anything else prints nothing and the comparison is skipped.

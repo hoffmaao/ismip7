@@ -7,9 +7,12 @@ the job id from it; the submission really happens from antarctica/, because the
 timing scripts resolve scripts/, mesh/ and their logs from SLURM_SUBMIT_DIR;
 the job's exit status comes back under --wait; and a request one node of the
 site cannot hold is refused with status 3 and a single-token reason, which the
-campaign records as not_runnable.
+campaign records as not_runnable. A KEY=VALUE whose value holds a comma travels
+in sbatch's environment, since sbatch splits its --export list on commas, and so
+reaches the job whole.
 """
 import os
+import shlex
 import subprocess
 from pathlib import Path
 
@@ -21,6 +24,7 @@ SCRIPT = "scripts/batch_runners/timing_transient.script"
 
 FAKE_SBATCH = '''#!/bin/bash
 printf 'CWD: %s\\n' "$PWD" >> "$SBATCH_CALLS"
+[ -z "${ISMIP7_SUBCYCLES+x}" ] || printf 'ENV: ISMIP7_SUBCYCLES=%s\\n' "$ISMIP7_SUBCYCLES" >> "$SBATCH_CALLS"
 printf 'ARG: %s\\n' "$@" >> "$SBATCH_CALLS"
 echo "4242;cluster"
 exit "${FAKE_SBATCH_RC:-0}"
@@ -173,3 +177,48 @@ def test_a_missing_script_is_named(bin_dir):
                   "--cd", "antarctica", "--dry-run", ISMIP7_SITE="iu_quartz")
     assert proc.returncode == 2
     assert "antarctica/scripts/batch_runners/nope.script does not exist" in proc.stderr
+
+
+def test_a_value_holding_a_comma_reaches_the_job_whole(bin_dir):
+    r"""sbatch splits --export on commas, so in that list
+    ISMIP7_SUBCYCLES=1,4,16,64 would reach the job as ISMIP7_SUBCYCLES=1.
+    Set in sbatch's own environment, which ALL carries, it arrives whole, and
+    it wins over the same variable exported in the calling shell."""
+    proc = submit(bin_dir, "script", SCRIPT, "--cd", "antarctica",
+                  "ISMIP7_SUBCYCLES=1,4,16,64", "ISMIP7_LC=500",
+                  ISMIP7_SITE="local", ISMIP7_FIREDRAKE=str(SUBMIT), ISMIP7_SUBCYCLES="1")
+    assert proc.returncode == 0, proc.stderr
+    assert proc.stdout == "4242;cluster\n"
+    seen = calls(bin_dir)
+    assert "ENV: ISMIP7_SUBCYCLES=1,4,16,64" in seen, seen
+    export = next(line for line in seen if line.startswith("ARG: --export="))
+    fields = export.split("=", 1)[1].split(",")
+    assert "ISMIP7_LC=500" in fields
+    # Nothing in the list overrides the value or is a piece cut from it.
+    assert not any(field.startswith("ISMIP7_SUBCYCLES=") for field in fields), fields
+    assert all("=" in field for field in fields[1:]), fields
+    # env execs sbatch, so under --wait the job's status still comes back.
+    proc = submit(bin_dir, "script", SCRIPT, "--cd", "antarctica", "--wait",
+                  "ISMIP7_SUBCYCLES=1,4,16,64", ISMIP7_SITE="local",
+                  ISMIP7_FIREDRAKE=str(SUBMIT), FAKE_SBATCH_RC="7")
+    assert proc.returncode == 7
+
+
+def test_the_printed_line_sets_a_comma_value_ahead_of_sbatch(bin_dir):
+    proc = submit(bin_dir, "projection", "--dry-run", "ISMIP7_SUBCYCLES=1,4,16,64",
+                  "ISMIP7_EXPERIMENT=hist_cesm_waccm", ISMIP7_SITE="iu_quartz")
+    assert proc.returncode == 0, proc.stderr
+    words = shlex.split(proc.stdout.split(": ", 1)[1])
+    assert words[:3] == ["env", "ISMIP7_SUBCYCLES=1,4,16,64", "sbatch"]
+    export = next(word for word in words if word.startswith("--export="))
+    assert "ISMIP7_EXPERIMENT=hist_cesm_waccm" in export.split(",")
+    assert "ISMIP7_SUBCYCLES" not in export
+    assert words[-1] == "antarctica/scripts/batch_runners/projection.sbatch"
+    assert calls(bin_dir) == []
+
+
+def test_a_key_that_is_no_variable_name_is_refused(bin_dir):
+    proc = submit(bin_dir, "projection", "--dry-run", "ISMIP7-LC=500",
+                  ISMIP7_SITE="iu_quartz")
+    assert proc.returncode == 2 and "ISMIP7-LC" in proc.stderr
+    assert proc.stdout == ""

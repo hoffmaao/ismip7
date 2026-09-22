@@ -155,8 +155,9 @@ shallow-shelf formulation on Firedrake 2026.4.1)
     `dacabfdz` is used (discussion #36), and no lapse rate (`dtsdz`), there
     being no thermal model. Precipitation is not used. Forcing is NaN
     outside the downscaled mask and is filled with zero there (discussion
-    #39). The last forcing year (2299 for CESM2-WACCM) is persisted for
-    2300 (discussion #8). Monthly fields are averaged to the year weighted
+    #39). CESM2-WACCM ends in 2299 in its CMIP archive; its 2300
+    atmosphere files, as distributed, are the 2290-2299 mean, and are read
+    as given (discussions #8 and #49). Monthly fields are averaged to the year weighted
     by month length from each file's own time axis, and the year a file
     belongs to is taken from its name, so the differing calendars and time
     stamps of the forcing products (discussions #9 and #24) do not enter.

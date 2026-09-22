@@ -1491,6 +1491,42 @@ def setup_model(restart_from=None, *, allow_timing_cache_a_ref=False):
     }
 
 
+class LiveCalvingState:
+    r"""The fields a calving law reads, taken live from the forward's state.
+
+    hoffmaao/calving's ``laws.Law.rate(model, t)`` reads seven fields from
+    its model: the dual solution ``u``, ``M``, ``tau``, the DG0 thickness
+    ``h``, the height above flotation ``haf`` and the grounded indicator
+    ``chi_gr`` on the cells, and the outward front normal ``nfront``. Here
+    they are the forward's own: ``(u, M, tau)`` are the subfunctions of the
+    mixed solution, ``haf`` and ``chi_gr`` are UFL on the cells so they
+    follow the geometry without an update, and ``nfront`` is the unit
+    gradient of the level set the forward advances, the same object
+    ``calving/antarctic.py`` builds when a law is tuned against the Greene
+    fronts, so the tuned threshold means the same thing here.
+
+    Densities follow that tuning harness (CalvingMIP's 917 / 1028) rather
+    than the forward's 1024, as ``antarctic.AntarcticState`` does: a
+    threshold fitted there is applied under the same flotation test.
+    """
+    RHO_I = 917.0
+    RHO_W = 1028.0
+
+    def __init__(self, z, h_dg, b, level_set):
+        from firedrake import conditional, gt
+        self.u, self.M, self.tau = z.subfunctions
+        self.h = h_dg
+        self.b = b
+        self.Q0 = h_dg.function_space()
+        self.haf = self.h - Constant(self.RHO_W / self.RHO_I) * max_value(
+            -self.b, Constant(0.0))
+        self.chi_gr = conditional(gt(self.haf, Constant(0.0)),
+                                  Constant(1.0), Constant(0.0))
+        self.levelset = level_set
+        self.nfront = level_set.ghat
+        self.front_len = level_set.front_len
+
+
 def save_model_state(ctx, final_path, t_now, extra_attrs=None):
     r"""Atomically save one self-contained mixed state.
 
@@ -1697,6 +1733,17 @@ def run_simulation(
     fixed_front = _fixed_front()
     front_hmin = float(os.environ.get("ISMIP7_FRONT_HMIN", "1.0"))
     calving = _calving_law()
+    # An external calving law (ctx["calving_law"], any object with
+    # rate(model, t) -> UFL and describe(); hoffmaao/calving's laws.Law is
+    # the reference) drives the shared level set through its "prescribed"
+    # law, evaluated on the live dual state each transport advance.
+    calving_law_obj = ctx.get("calving_law")
+    if calving_law_obj is not None:
+        if calving != "none":
+            raise ValueError(
+                f"ISMIP7_CALVING={calving} and an external calving law were "
+                f"both requested; leave ISMIP7_CALVING=none for the law object")
+        calving = "prescribed"
     beyond_front = None
     n_beyond = 0
     cell_area = assemble(fd.TestFunction(Q_dg) * dx).dat.data_ro.copy()
@@ -2397,6 +2444,12 @@ def run_simulation(
             drag_mask=ctx.get("drag_mask"), phi_init=phi_init,
         )
         phi_entry = Function(level_set.Q0)
+    live_calving_state = None
+    if calving_law_obj is not None:
+        live_calving_state = LiveCalvingState(z, h_dg, b, level_set)
+        PETSc.Sys.Print(
+            f"  Calving law (external, on the live dual state): "
+            f"{calving_law_obj.describe()}")
     # save_model_state writes the front and the ISMIP7 year in progress.
     ctx["level_set"] = level_set
     ctx["annual"] = annual
@@ -2422,8 +2475,10 @@ def run_simulation(
         calv_frac = None
         ls_ice_free = None
         if level_set is not None:
+            ext_rate = (calving_law_obj.rate(live_calving_state, t_yr)
+                        if calving_law_obj is not None else None)
             last_c_mean = level_set.advance(
-                dt_local, u_vel, h_dg, b, A_map, n_flow_val)
+                dt_local, u_vel, h_dg, b, A_map, n_flow_val, rate=ext_rate)
             lsb, calv_frac = level_set.calving_masks()
             beyond = lsb
             ls_ice_free = level_set.beyond_front()

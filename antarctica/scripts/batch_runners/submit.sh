@@ -183,7 +183,9 @@ fi
 # the job as ISMIP7_SUBCYCLES=1. And any value but a bare ALL or NIL sets
 # SLURM_GET_USER_ENV=1, which has slurmd rebuild the login environment when
 # the job starts and requeue and hold the job when that fails ("user env
-# retrieval failed requeued held", IU Quartz, Slurm 25.11.8).
+# retrieval failed requeued held", IU Quartz, Slurm 25.11.8). The job starts
+# with this shell's environment alone, and site_core.sh reads
+# ISMIP7_MODULE_INIT when that holds no module system.
 job_env=("ISMIP7_SITE=$ISMIP7_SITE_NAME" "ISMIP7_REPO=$ISMIP7_REPO"
          ${exports+"${exports[@]}"})
 

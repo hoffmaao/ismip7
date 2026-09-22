@@ -50,6 +50,12 @@ variable and `SLURM_EXPORT_ENV`, the list itself, which srun reads as its own
 `--export`, so a job submitted with a list passes neither on to its chain
 links.
 
+A job therefore starts with the submitting shell's environment alone. A shell
+that never read the login scripts, such as the one `ssh host command` starts,
+holds no module system, so a job it submits finds no `module`.
+`ismip7_activate` then reads `ISMIP7_MODULE_INIT` (default `/etc/profile`, which
+a site file can change) and stops with exit status 2 if that defines none.
+
 `submit.sh script PATH` submits any job script that sources `site_core.sh`. It
 is how `antarctica/Makefile` and `manage_timing_campaign.py` submit, and how to
 run `budd_map_census.script` by hand:

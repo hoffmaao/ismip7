@@ -312,3 +312,49 @@ def test_activation_moves_loopys_cache_per_job_and_leaves_matplotlibs_alone(runn
     assert xdg.name == "4242" and xdg.is_dir()
     assert not mpl.is_relative_to(xdg)
     assert mpl == Path(runners) / ".cache" / "matplotlib" and mpl.is_dir()
+
+
+# A login profile as the tests see one: it defines `module` as a function that
+# records its calls, moves the umask as /etc/profile does, and leaves -e on.
+MODULE_INIT = '''module() { echo "module $*" >> "$MODULE_LOG"; }
+umask 077
+set -e
+'''
+
+
+def test_a_job_without_the_module_system_reads_the_login_profile(runners, tmp_path):
+    r"""A job inherits the submitting shell's environment and nothing more,
+    and a shell that never read the login scripts (the one `ssh host command`
+    starts) has no `module`; IU's venv then cannot find libpython.
+    ismip7_activate reads ISMIP7_MODULE_INIT, /etc/profile by default, loads
+    the site's modules through the function it defines, and keeps the job's
+    own umask and shell options."""
+    init = tmp_path / "profile"
+    init.write_text(MODULE_INIT)
+    (tmp_path / "activate").write_text("")
+    log = tmp_path / "module.log"
+    rc, out, err = source(
+        runners, "site_core.sh",
+        "umask 022; ismip7_activate >/dev/null; umask; "
+        "case $- in *e*) echo errexit ;; esac; case $- in *u*) echo nounset ;; esac",
+        ISMIP7_SITE="local", ISMIP7_FIREDRAKE=str(tmp_path / "activate"),
+        ISMIP7_MODULES="gnu/9.3.0 petsc/3.25.5", ISMIP7_MODULE_USE="/opt/modulefiles",
+        ISMIP7_MODULE_INIT=str(init), MODULE_LOG=str(log), SLURM_JOB_ID="4242")
+    assert rc == 0, err
+    assert out.splitlines() == ["0022", "nounset"]
+    assert log.read_text().splitlines() == [
+        "module purge", "module use /opt/modulefiles", "module load gnu/9.3.0 petsc/3.25.5"]
+
+
+def test_a_job_that_finds_no_module_command_stops(runners, tmp_path):
+    r"""The site's modules are the ones its venv was built against. Skipping
+    them would fail the job later, far from the cause."""
+    (tmp_path / "activate").write_text("")
+    common = dict(ISMIP7_SITE="local", ISMIP7_FIREDRAKE=str(tmp_path / "activate"),
+                  ISMIP7_MODULE_INIT=os.devnull, SLURM_JOB_ID="4242")
+    rc, _, err = source(runners, "site_core.sh", "ismip7_activate",
+                        ISMIP7_MODULES="gnu/9.3.0", **common)
+    assert rc == 2 and "no 'module' command" in err and os.devnull in err
+    # A site that loads no modules needs no module command.
+    rc, _, err = source(runners, "site_core.sh", "ismip7_activate", **common)
+    assert rc == 0, err

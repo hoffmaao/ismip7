@@ -71,6 +71,12 @@ ISMIP7_TIME_FWD="${ISMIP7_TIME_FWD:-1-00:00:00}"
 # own --mail-type/--mail-user belong in sites/local.env, not here.)
 #   ISMIP7_SBATCH_EXTRA="${ISMIP7_SBATCH_EXTRA:---qos=normal}"
 
+# --- optional: the module system ---------------------------------------
+# A job starts with the submitting shell's environment alone, and a shell that
+# never read the login scripts (`ssh host command`) has no `module`. The job
+# then reads this file to define it; /etc/profile is the default.
+#   ISMIP7_MODULE_INIT="${ISMIP7_MODULE_INIT:-/etc/profile}"
+
 # --- optional: the timing campaign ---------------------------------------
 # `submit.sh script`, which antarctica/Makefile and manage_timing_campaign.py
 # submit through, takes its node feature from ISMIP7_CONSTRAINT_TIMING (default:

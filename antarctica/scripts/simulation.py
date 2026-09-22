@@ -60,6 +60,7 @@ sys.path.insert(0, os.path.dirname(_ROOT))
 from mesh_naming import mesh_filename
 
 from icepack2_tools.mpi_stats import (
+    global_count,
     global_extreme_location,
     global_mean,
     global_range,
@@ -70,6 +71,8 @@ from icepack2_tools.naming import map_basename
 from icepack2_tools.front import (
     clamp_thickness, clear_reference_where_ice_free, retreat_slivers,
     facet_neighbours, front_connected,
+    collapse_banner, collapse_cell_counts, collapse_csv_fields,
+    COLLAPSE_CSV_COLUMNS, COLLAPSE_MARKER,
 )
 from icepack2_tools.runconfig import (
     obs_data_root,
@@ -2075,7 +2078,11 @@ def run_simulation(
     # warm restart, drop any rows at/after the resume year, then append.
     csv_fn = os.path.join(RESULTS_DIR, f"{experiment_name}_{lc}_timeseries.csv")
     csv_header = ("year,vaf_mm_sle,mass_gt,smb_gtyr,melt_gtyr,"
-                  "outflux_gtyr,calv_gt,clamp_gt,resid_gt,amb_gtyr\n")
+                  "outflux_gtyr,calv_gt,clamp_gt,resid_gt,amb_gtyr,"
+                  + ",".join(COLLAPSE_CSV_COLUMNS) + "\n")
+    # The header the file really carries: a series begun before the collapse
+    # columns existed keeps its own on resume (collapse_csv_fields).
+    csv_head = csv_header
     csv_f = None
     if mesh.comm.rank == 0:
         if t_restart is not None and os.path.exists(csv_fn):
@@ -2083,6 +2090,7 @@ def run_simulation(
                 _lines = _cf.readlines()
             kept = ([_lines[0]] if _lines and _lines[0].startswith("year")
                     else [csv_header])
+            csv_head = kept[0]
             for _ln in _lines[1:]:
                 try:
                     if float(_ln.split(",", 1)[0]) <= t_start + 0.5 * dt:
@@ -2096,6 +2104,8 @@ def run_simulation(
             csv_f = open(csv_fn, "w")
             csv_f.write(csv_header)
             csv_f.flush()
+    # Rank 0 alone read the file, and the note below is printed by all ranks.
+    csv_head = mesh.comm.bcast(csv_head, root=0)
 
     def _grounded_cells():
         return Function(Q_dg).interpolate(s - s_float).dat.data_ro > 0.0
@@ -2127,16 +2137,24 @@ def run_simulation(
             # water even though no ice-free buffer cell is there to say so.
             collapse_edge = assemble(
                 phi_dg * ds(tuple(ctx["calving_ids"]))).dat.data_ro > 0.0
-            PETSc.Sys.Print("  Ice-shelf collapse forcing: ISMIP7_FRACTURE=mask_front (flagged floating cells are removed once open water reaches them, and booked as calving)")
-        else:
-            PETSc.Sys.Print("  Ice-shelf collapse forcing: ISMIP7_FRACTURE=mask (floating cells flagged by the mask are removed and booked as calving)")
+    # Under every mode, `none` included, so the mode of a run can be read off
+    # its log (issue #10).
+    PETSc.Sys.Print(f"  {collapse_banner(fracture_mode)}")
+    if not collapse_csv_fields(csv_head, (0, 0, 0)):
+        PETSc.Sys.Print(
+            "  Timeseries header predates the collapse columns: this resume "
+            "keeps it, and the cell counts go to the log alone")
 
-    def _write_csv_row(row):
+    def _global_cells(mask):
+        return global_count(mask, mesh.comm)
+
+    def _write_csv_row(row, collapse_cells):
         if csv_f is None:
             return
         csv_f.write(
             f"{row[0]:.1f},{row[1]:.6f},{row[2]:.2f},"
-            + ",".join(f"{v:.4f}" for v in row[3:]) + "\n"
+            + ",".join(f"{v:.4f}" for v in row[3:])
+            + collapse_csv_fields(csv_head, collapse_cells) + "\n"
         )
         csv_f.flush()
 
@@ -2456,6 +2474,7 @@ def run_simulation(
         # holding no ice: see clamp_thickness for why every such rule has to
         # name its cells here.
         collapsed = (collapse & ~grounded) if collapse is not None else None
+        flagged = collapsed
         if collapsed is not None and collapse_neighbours is not None:
             # Open water as the advance found it: floating cells below the
             # ice-mask thickness (the ones emptied on an earlier advance
@@ -2466,11 +2485,13 @@ def run_simulation(
             for ice_free in (beyond, ls_ice_free):
                 if ice_free is not None:
                     open_water |= ice_free & ~grounded
-            flagged = collapsed
             collapsed = front_connected(
                 flagged, open_water | (collapse_edge & ~grounded),
                 collapse_neighbours, _any_rank)
-            ctx["collapse_held_cells"] = mesh.comm.allreduce(int((flagged & ~collapsed).sum()))
+        # Global counts, on every rank under either mask mode and on none
+        # under `none`. `mask` holds nothing by construction, so its held
+        # count is zero and says so.
+        collapse_cells = collapse_cell_counts(flagged, collapsed, _global_cells)
         clamp_thickness(h_dg.dat.data, h_clamp, ls_ice_free, beyond, collapsed)
         m2 = float(assemble(h_dg * dx)) * rho_gt
         clamp_gt = m2 - m1                                       # Gt added by DG floor
@@ -2545,6 +2566,7 @@ def run_simulation(
             "clamp_gt": clamp_gt + clamp_cg_gt + limit_gt,
             "limit_gt": limit_gt,
             "amb_gt": amb_gt,
+            "collapse_cells": collapse_cells,
         }
 
     # Time loop, transport-first: each step advances the geometry with the
@@ -2584,6 +2606,8 @@ def run_simulation(
     # mid-write, which is the outcome the budget exists to avoid.
     step_max_min = 0.0
     stalled = False
+    collapse_cells = (0, 0, 0)
+    collapse_held_peak = (0, t_start)      # most cells held at once, and when
 
     for k in range(1, nsteps + 1):
         if wall_stop_min > 0:
@@ -2644,6 +2668,9 @@ def run_simulation(
                 )
                 for key in acc:
                     acc[key] += sub[key]
+                # A state where the tallies are sums, so the last advance of
+                # the accepted attempt stands for the step.
+                collapse_cells = sub["collapse_cells"]
                 if not _solve_with_rescue(k):
                     ok = False
                     break
@@ -2696,7 +2723,11 @@ def run_simulation(
         results.append((t_yr, vaf, total_mass, smb_rate, melt_rate,
                         out_rate, calv_gt, clamp_all, resid_gt,
                         amb_rate))
-        _write_csv_row(results[-1])
+        _write_csv_row(results[-1], collapse_cells)
+        (ctx["collapse_flagged_cells"], ctx["collapse_removed_cells"],
+         ctx["collapse_held_cells"]) = collapse_cells
+        if collapse_cells[2] > collapse_held_peak[0]:
+            collapse_held_peak = (collapse_cells[2], t_yr)
         ctx.setdefault("step_budget", []).append({
             "step": k,
             "t_yr": float(t_yr),
@@ -2845,6 +2876,9 @@ def run_simulation(
                 +
                 f"clamp={clamp_all/dt:+.1f} "
                 f"dM/dt={dm/dt:+.0f} resid={resid_gt/dt:+.2f}"
+                + (f"\n      collapse [cells]: flagged={collapse_cells[0]} "
+                   f"removed={collapse_cells[1]} held={collapse_cells[2]}"
+                   if collapse is not None else "")
             )
 
         if not np.isfinite(resid_gt) or abs(resid_gt) > mass_tol_gt:
@@ -2874,6 +2908,18 @@ def run_simulation(
 
     ctx["transient_seconds"] = perf_counter() - ctx["transient_t0"]
     PETSc.Sys.Print(f"\n{experiment_name} simulation complete.")
+    if collapse is not None:
+        # One line for the run record (core_report.py lifts the marker). The
+        # peak covers the steps this process ran, so a chained run prints one
+        # such line per link.
+        _flagged, _removed, _held = collapse_cells
+        PETSc.Sys.Print(
+            f"{COLLAPSE_MARKER} ISMIP7_FRACTURE={fracture_mode} ended "
+            f"t={results[-1][0] if results else t_start:.1f} with "
+            f"flagged={_flagged} removed={_removed} held={_held} cells; "
+            f"most held at once {collapse_held_peak[0]} cells at "
+            f"t={collapse_held_peak[1]:.1f} (steps from t={t_start:.1f})"
+        )
 
     # Final state is a self-contained checkpoint too (a valid restart source).
     # Save the ACTUAL last year so a resume after an early stop continues from

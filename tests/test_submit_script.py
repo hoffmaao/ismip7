@@ -7,9 +7,10 @@ the job id from it; the submission really happens from antarctica/, because the
 timing scripts resolve scripts/, mesh/ and their logs from SLURM_SUBMIT_DIR;
 the job's exit status comes back under --wait; and a request one node of the
 site cannot hold is refused with status 3 and a single-token reason, which the
-campaign records as not_runnable. A KEY=VALUE whose value holds a comma travels
-in sbatch's environment, since sbatch splits its --export list on commas, and so
-reaches the job whole.
+campaign records as not_runnable. Every KEY=VALUE travels in sbatch's own
+environment under a bare --export=ALL, since sbatch splits an --export list on
+commas and has Slurm rebuild the login environment at the start of a job given
+one, and the printed line is the command that runs.
 """
 import os
 import shlex
@@ -24,7 +25,7 @@ SCRIPT = "scripts/batch_runners/timing_transient.script"
 
 FAKE_SBATCH = '''#!/bin/bash
 printf 'CWD: %s\\n' "$PWD" >> "$SBATCH_CALLS"
-[ -z "${ISMIP7_SUBCYCLES+x}" ] || printf 'ENV: ISMIP7_SUBCYCLES=%s\\n' "$ISMIP7_SUBCYCLES" >> "$SBATCH_CALLS"
+env | grep '^ISMIP7_' | sort | sed 's/^/ENV: /' >> "$SBATCH_CALLS"
 printf 'ARG: %s\\n' "$@" >> "$SBATCH_CALLS"
 echo "4242;cluster"
 exit "${FAKE_SBATCH_RC:-0}"
@@ -61,6 +62,19 @@ def calls(bin_dir):
     return path.read_text().splitlines() if path.exists() else []
 
 
+def environment(seen):
+    r"""The ISMIP7_* environment the fake sbatch ran with."""
+    return dict(line[len("ENV: "):].split("=", 1) for line in seen if line.startswith("ENV: "))
+
+
+def printed(output):
+    r"""The composed command split as the shell splits it: the assignments
+    `env` makes, then sbatch's own argv."""
+    words = shlex.split(output.strip().split(": ", 1)[1])
+    assert words[0] == "env", words
+    return words[1:words.index("sbatch")], words[words.index("sbatch"):]
+
+
 def test_quartz_line_carries_the_account_and_the_lane_request(bin_dir):
     proc = submit(bin_dir, "script", SCRIPT, "--cd", "antarctica", "--queue", "short",
                   "--tasks", "32", "--mem", "240G", "--time", "12:00:00",
@@ -68,12 +82,15 @@ def test_quartz_line_carries_the_account_and_the_lane_request(bin_dir):
                   "--dry-run", "ISMIP7_LC=500", ISMIP7_SITE="iu_quartz")
     assert proc.returncode == 0, proc.stderr
     assert proc.stdout == ""
-    line = proc.stderr.strip()
-    assert line.startswith("site iu_quartz: sbatch -A r00905 --parsable -J timing_500_5000_32 -p general ")
+    assert proc.stderr.startswith("site iu_quartz: env ISMIP7_SITE=iu_quartz ")
+    assignments, argv = printed(proc.stderr)
+    assert assignments == ["ISMIP7_SITE=iu_quartz", f"ISMIP7_REPO={REPO}", "ISMIP7_LC=500"]
+    assert argv[:8] == ["sbatch", "-A", "r00905", "--parsable",
+                        "-J", "timing_500_5000_32", "-p", "general"]
     for flag in ("--nodes=1", "--ntasks-per-node=32", "--mem=240G", "--time=12:00:00",
-                 "--dependency=afterok:7", "ISMIP7_LC=500", "ISMIP7_SITE=iu_quartz"):
-        assert flag in line, line
-    assert line.endswith(SCRIPT)
+                 "--dependency=afterok:7", "--export=ALL"):
+        assert flag in argv, argv
+    assert argv[-1] == SCRIPT
     assert calls(bin_dir) == []
 
 
@@ -108,7 +125,7 @@ def test_stdout_is_sbatch_s_and_the_job_starts_in_the_named_directory(bin_dir):
                   ISMIP7_SITE="local", ISMIP7_FIREDRAKE=str(SUBMIT))
     assert proc.returncode == 0, proc.stderr
     assert proc.stdout == "4242;cluster\n"
-    assert "site local: sbatch" in proc.stderr
+    assert proc.stderr.startswith("site local: env ISMIP7_SITE=local ")
     seen = calls(bin_dir)
     assert seen[0] == f"CWD: {REPO / 'antarctica'}"
     assert seen[-1] == f"ARG: {SCRIPT}"
@@ -179,24 +196,23 @@ def test_a_missing_script_is_named(bin_dir):
     assert "antarctica/scripts/batch_runners/nope.script does not exist" in proc.stderr
 
 
-def test_a_value_holding_a_comma_reaches_the_job_whole(bin_dir):
-    r"""sbatch splits --export on commas, so in that list
-    ISMIP7_SUBCYCLES=1,4,16,64 would reach the job as ISMIP7_SUBCYCLES=1.
-    Set in sbatch's own environment, which ALL carries, it arrives whole, and
-    it wins over the same variable exported in the calling shell."""
+def test_every_value_reaches_sbatch_s_environment_under_a_bare_all(bin_dir):
+    r"""An --export list has two faults. sbatch splits it on commas, so
+    ISMIP7_SUBCYCLES=1,4,16,64 would reach the job as ISMIP7_SUBCYCLES=1, and
+    any list sets SLURM_GET_USER_ENV=1, under which Slurm rebuilds the login
+    environment when the job starts and holds the job when that fails. In
+    sbatch's own environment a value arrives whole, an empty one stays set,
+    and each wins over the same variable exported in the calling shell."""
     proc = submit(bin_dir, "script", SCRIPT, "--cd", "antarctica",
-                  "ISMIP7_SUBCYCLES=1,4,16,64", "ISMIP7_LC=500",
+                  "ISMIP7_SUBCYCLES=1,4,16,64", "ISMIP7_LC=500", "ISMIP7_APPARENT_MB=",
                   ISMIP7_SITE="local", ISMIP7_FIREDRAKE=str(SUBMIT), ISMIP7_SUBCYCLES="1")
     assert proc.returncode == 0, proc.stderr
     assert proc.stdout == "4242;cluster\n"
     seen = calls(bin_dir)
-    assert "ENV: ISMIP7_SUBCYCLES=1,4,16,64" in seen, seen
-    export = next(line for line in seen if line.startswith("ARG: --export="))
-    fields = export.split("=", 1)[1].split(",")
-    assert "ISMIP7_LC=500" in fields
-    # Nothing in the list overrides the value or is a piece cut from it.
-    assert not any(field.startswith("ISMIP7_SUBCYCLES=") for field in fields), fields
-    assert all("=" in field for field in fields[1:]), fields
+    env = environment(seen)
+    assert env["ISMIP7_SUBCYCLES"] == "1,4,16,64", seen
+    assert env["ISMIP7_LC"] == "500" and env["ISMIP7_APPARENT_MB"] == ""
+    assert [line for line in seen if line.startswith("ARG: --export")] == ["ARG: --export=ALL"]
     # env execs sbatch, so under --wait the job's status still comes back.
     proc = submit(bin_dir, "script", SCRIPT, "--cd", "antarctica", "--wait",
                   "ISMIP7_SUBCYCLES=1,4,16,64", ISMIP7_SITE="local",
@@ -204,17 +220,31 @@ def test_a_value_holding_a_comma_reaches_the_job_whole(bin_dir):
     assert proc.returncode == 7
 
 
-def test_the_printed_line_sets_a_comma_value_ahead_of_sbatch(bin_dir):
-    proc = submit(bin_dir, "projection", "--dry-run", "ISMIP7_SUBCYCLES=1,4,16,64",
-                  "ISMIP7_EXPERIMENT=hist_cesm_waccm", ISMIP7_SITE="iu_quartz")
+def test_the_printed_line_is_the_command_that_runs(bin_dir):
+    r"""Split as the shell splits it, the printed line gives the environment
+    sbatch ran with and the arguments it received, the site and the checkout
+    first."""
+    proc = submit(bin_dir, "script", SCRIPT, "--cd", "antarctica",
+                  "ISMIP7_SUBCYCLES=1,4,16,64", "ISMIP7_EXPERIMENT=hist_cesm_waccm",
+                  ISMIP7_SITE="local", ISMIP7_FIREDRAKE=str(SUBMIT))
     assert proc.returncode == 0, proc.stderr
-    words = shlex.split(proc.stdout.split(": ", 1)[1])
-    assert words[:3] == ["env", "ISMIP7_SUBCYCLES=1,4,16,64", "sbatch"]
-    export = next(word for word in words if word.startswith("--export="))
-    assert "ISMIP7_EXPERIMENT=hist_cesm_waccm" in export.split(",")
-    assert "ISMIP7_SUBCYCLES" not in export
-    assert words[-1] == "antarctica/scripts/batch_runners/projection.sbatch"
-    assert calls(bin_dir) == []
+    assignments, argv = printed(proc.stderr)
+    assert assignments == ["ISMIP7_SITE=local", f"ISMIP7_REPO={REPO}",
+                           "ISMIP7_SUBCYCLES=1,4,16,64", "ISMIP7_EXPERIMENT=hist_cesm_waccm"]
+    seen = calls(bin_dir)
+    assert [line[len("ARG: "):] for line in seen if line.startswith("ARG: ")] == argv[1:]
+    env = environment(seen)
+    for name, value in (assignment.split("=", 1) for assignment in assignments):
+        assert env[name] == value, (name, seen)
+    # The runners' own kinds print the same form, on standard output.
+    proc = submit(bin_dir, "projection", "--dry-run", "ISMIP7_SUBCYCLES=1,4,16,64",
+                  ISMIP7_SITE="iu_quartz")
+    assert proc.returncode == 0, proc.stderr
+    assignments, argv = printed(proc.stdout)
+    assert assignments == ["ISMIP7_SITE=iu_quartz", f"ISMIP7_REPO={REPO}",
+                           "ISMIP7_SUBCYCLES=1,4,16,64"]
+    assert [word for word in argv if word.startswith("--export")] == ["--export=ALL"]
+    assert argv[-1] == "antarctica/scripts/batch_runners/projection.sbatch"
 
 
 def test_a_key_that_is_no_variable_name_is_refused(bin_dir):

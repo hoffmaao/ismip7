@@ -13,8 +13,8 @@
 #SBATCH -e logs/ismip7_smoke_%j.err
 set -uo pipefail
 cd "${SLURM_SUBMIT_DIR:-.}"
-# Defaults are the 32 km smoke; every value can be overridden through
-# sbatch --export=ALL,... to smoke-test another mesh or sampling, e.g. two
+# Defaults are the 32 km smoke; every value can be overridden with a KEY=VALUE
+# on the submit.sh line to smoke-test another mesh or sampling, e.g. two
 # iterates of the 2 km cell-mean case on 32 Sapphire Rapids ranks. They MUST
 # be set before site_env.sh is sourced: it fills ISMIP7_LC / ISMIP7_MESH with
 # the 2500 m production defaults, after which a ${VAR:-...} fallback here never

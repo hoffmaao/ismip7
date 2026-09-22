@@ -150,8 +150,38 @@ ismip7_chain_resources() {
     return 0
 }
 
+# The file that defines `module` for a job that arrives without it. A job's
+# environment is the submitting shell's alone (submit.sh passes a bare
+# --export=ALL, so slurmd adds no login environment), and a shell that never
+# read the login scripts, such as the one `ssh host command` starts, holds no
+# module system. The IU venv's python then cannot find libpython.
+# /etc/profile is the first file a login shell reads; a site whose module
+# system is set up elsewhere names that file.
+ISMIP7_MODULE_INIT="${ISMIP7_MODULE_INIT:-/etc/profile}"
+
 ismip7_load_modules() {
-    command -v module >/dev/null 2>&1 || return 0
+    if ! command -v module >/dev/null 2>&1; then
+        # A site that loads no modules needs no module command either.
+        [ -n "${ISMIP7_MODULES:-}${ISMIP7_MODULE_USE:-}" ] || return 0
+        if [ -r "$ISMIP7_MODULE_INIT" ]; then
+            # Login scripts expect a shell without -e or -u, and /etc/profile
+            # sets a umask; the job's own options and umask come back after.
+            local flags="$-" mask
+            mask="$(umask)"
+            set +eu
+            # shellcheck disable=SC1090
+            . "$ISMIP7_MODULE_INIT" >/dev/null 2>&1
+            case "$flags" in *e*) set -e ;; *) set +e ;; esac
+            case "$flags" in *u*) set -u ;; *) set +u ;; esac
+            umask "$mask"
+        fi
+        if ! command -v module >/dev/null 2>&1; then
+            echo "ERROR: this job has no 'module' command, even after reading" >&2
+            echo "       ISMIP7_MODULE_INIT=$ISMIP7_MODULE_INIT, so the site's modules cannot load." >&2
+            echo "       Submit from a login shell, or name the file that defines it." >&2
+            exit 2
+        fi
+    fi
     module purge 2>/dev/null || true
     if [ -n "${ISMIP7_MODULE_USE:-}" ]; then
         # shellcheck disable=SC2086
@@ -205,6 +235,15 @@ ismip7_container_binds() {
 
 ismip7_activate() {
     ismip7_site_require
+    # A job submitted with an --export list carries two variables that must go
+    # no further. SLURM_GET_USER_ENV=1 has slurmd rebuild the login
+    # environment when a job starts, and requeue and hold the job when that
+    # fails; a chain resubmit's --export=ALL would hand it to every successor.
+    # SLURM_EXPORT_ENV holds the list, which srun takes as its own --export,
+    # so a variable the list names comes back in the job's steps after the
+    # script unsets it (projection.sbatch unsets ISMIP7_RESTART for its
+    # successor).
+    unset SLURM_GET_USER_ENV SLURM_EXPORT_ENV
     ismip7_load_modules
     if [ -n "$ISMIP7_CONTAINER" ]; then
         ismip7_activate_container

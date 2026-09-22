@@ -168,7 +168,8 @@ def test_submit_asks_a_container_site_for_no_venv(sandbox):
          "--cd", "antarctica", "--dry-run"],
         env=env_for(sandbox), capture_output=True, text=True)
     assert proc.returncode == 0, proc.stderr
-    assert "site uchicago_midway: sbatch" in proc.stderr and " -p caslake " in proc.stderr
+    assert "site uchicago_midway: env ISMIP7_SITE=uchicago_midway " in proc.stderr
+    assert " -p caslake " in proc.stderr
     # Without an image the site is still the stub it ships as.
     env = env_for(sandbox)
     for name in ("ISMIP7_CONTAINER", "ISMIP7_PART_LONG", "ISMIP7_PART_SHORT", "ISMIP7_PART_DEBUG"):

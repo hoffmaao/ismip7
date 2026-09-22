@@ -27,6 +27,7 @@ URL = f"https://github.com/icepack/ismip7/releases/download/maps-2km-snap-2026-0
 
 FAKE_SBATCH = '''#!/bin/bash
 printf 'CWD: %s\\n' "$PWD" >> "$SBATCH_CALLS"
+env | grep '^ISMIP7_' | sort | sed 's/^/ENV: /' >> "$SBATCH_CALLS"
 printf 'ARG: %s\\n' "$@" >> "$SBATCH_CALLS"
 echo "4343;cluster"
 '''
@@ -161,14 +162,17 @@ def test_a_control_goes_through_submit_sh_projection(sandbox, monkeypatch):
     assert seen[-1] == "ARG: antarctica/scripts/batch_runners/projection.sbatch"
     assert "ARG: --ntasks-per-node=64" in seen and "ARG: --mem=240G" in seen
     assert f"ARG: {m.control_job_name('native')}" in seen
-    export = next(line for line in seen if line.startswith("ARG: --export="))
+    # submit.sh sets the KEY=VALUE pairs in sbatch's environment and passes a
+    # bare --export=ALL, so the job's settings are read off the fake's record.
+    env = [line[len("ENV: "):] for line in seen if line.startswith("ENV: ")]
     for pair in ("ISMIP7_EXPERIMENT=control", "ISMIP7_MESH=checkpoint",
                  "ISMIP7_FRICTION=regularized_coulomb", "ISMIP7_LC=2000",
                  "ISMIP7_T_END=2025", "ISMIP7_OUTPUT=1",
                  "ISMIP7_RUN_TAG=mapcheck_rc_snap20260922_0948_2000",
-                 "ISMIP7_K_PER_BASIN_NPZ=/k/K_issue11_mesh2500.npz",
-                 "ISMIP7_TRIPWIRE_U_MAX="):
-        assert pair in export, pair
+                 "ISMIP7_K_PER_BASIN_NPZ=/k/K_issue11_mesh2500.npz"):
+        assert pair in env, pair
+    assert any(line.startswith("ISMIP7_TRIPWIRE_U_MAX=") for line in env)
+    assert "ARG: --export=ALL" in seen
     assert not any(line.startswith("ARG: --queue") for line in seen)
     assert mmc.read_status(m.status_path("control_native"))["state"] == "submitted"
     with pytest.raises(ValueError):
@@ -247,7 +251,7 @@ def test_a_dry_run_that_assumes_its_dependencies_shows_every_stage(sandbox, monk
     out = capsys.readouterr().out
     for stage in mmc.STAGES:
         assert f"--- {stage}" in out
-    assert out.count("DRY RUN: site iu_quartz: sbatch") == 10
+    assert out.count("DRY RUN: site iu_quartz: ") == 10
     assert "ISMIP7_MESH=checkpoint" in out
     assert f"ISMIP7_MESH={m.target_mesh}" in out
     assert "--ntasks-per-node=64" in out and "--ntasks-per-node=16" in out

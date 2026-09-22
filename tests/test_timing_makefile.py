@@ -262,7 +262,7 @@ def test_map_check_dry_run_lists_every_stage_and_submits_nothing(sandbox):
               "control_native", "audit_controls", "summary")
     positions = [out.index(f"--- {stage}") for stage in stages]
     assert positions == sorted(positions)
-    assert out.count("DRY RUN: site iu_quartz: sbatch") == 10
+    assert out.count("DRY RUN: site iu_quartz: ") == 10
     assert "ISMIP7_FRICTION=regularized_coulomb" in out
     assert "ISMIP7_MESH=checkpoint" in out and "antarctica_10000_1000_buffered20000.msh" in out
     assert "--ntasks-per-node=16" in out and "--ntasks-per-node=64" in out

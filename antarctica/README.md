@@ -608,6 +608,37 @@ cleared each step wherever the level set reports ice-free, irreversibly, so a
 calved cell is not regrown and an advanced-into cell is not re-emptied. The run
 log prints one `Calving front owner:` line naming the mechanism in force.
 
+### A calving law from hoffmaao/calving (`forward_calving.py`)
+
+The laws developed for CalvingMIP (github.com/hoffmaao/calving: `fixed`,
+`velocity`, `position`, `thickness`, `vonmises`, `vonmises_strain`, `hfb`
+and any `--law-module` plugin) run in the forward unchanged. A law reads
+seven fields from its model, and `simulation.LiveCalvingState` supplies
+them from the live dual state: `u`, `M`, `tau` from the mixed solution,
+the DG0 `h`, `haf` and the grounded indicator as UFL on the cells, and the
+front normal from the level set the forward advances. The law's rate goes
+to the shared level set as its `prescribed` law, so the front is retreated
+and the shed mass is tallied exactly as under `ISMIP7_CALVING=vonmises`.
+
+```bash
+CALVING_DIR=/path/to/calving mpiexec -n 16 python antarctica/scripts/forward_calving.py \
+    --law hfb --law-param sigma_max=0.15 --experiment control --tag hfb_test
+```
+
+wraps the experiment driver (`control`, `ocx`, `ssp126|ssp370|ssp585` with
+`--esm`, `hist`), which keeps its own forcing, restart and auto-resume;
+leave `ISMIP7_CALVING` unset. `--tag` (or `ISMIP7_RUN_TAG`) is required, so a
+law-driven run never resumes from or overwrites a stock run's checkpoints. The
+law's `describe()` is written to every checkpoint's `calving_law` attribute and
+to the `Calving front owner:` line, which `core_report.py` lifts into the
+report. Any object with `rate(model, t)` returning a UFL rate on the cells and
+`describe()` can be placed in `ctx["calving_law"]` before `run_simulation` the
+same way. A threshold is fitted on Antarctica
+with `calving/tune_greene.py --experiment vonmises|hfb --state <forward
+checkpoint>` (per-Mouginot-basin flux against the Greene et al. 2022 fronts,
+on the same level-set normal), which is what makes a tuned parameter mean
+the same thing in both places.
+
 ### The whole matrix in one command (`run_core_matrix.sh`)
 
 Runs cores 1 to 11 in dependency order (historicals, controls, projections,

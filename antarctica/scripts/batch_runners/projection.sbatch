@@ -133,6 +133,17 @@ export ISMIP7_FIXED_FRONT="${ISMIP7_FIXED_FRONT:-1}"
 # Resume from this experiment's own newest checkpoint. This is what makes the
 # chain below safe to run unattended.
 export ISMIP7_AUTO_RESUME="${ISMIP7_AUTO_RESUME-1}"
+# The submission's own output: the yearly ISMIP7 fields and scalars
+# (icepack2_tools/ismip7_output.py), which write_ismip7_output.py regrids and
+# the compliance checker reads. Every experiment this runner offers is a core
+# experiment, and off it produces a timeseries CSV and checkpoints alone, so
+# a forgotten flag is found after the days of wall time it takes a projection
+# to finish, and the whole run has to be repeated because the per-year fields
+# are gone. Defaulted on for that reason; `ISMIP7_OUTPUT=0` turns it off for a
+# pipeline exercise, and the empty spelling `ISMIP7_OUTPUT=` does too (the
+# accessor's documented off values), which is why this is ${VAR-default} and
+# not ${VAR:-default}. The timing campaign has its own runner and is unaffected.
+export ISMIP7_OUTPUT="${ISMIP7_OUTPUT-1}"
 
 echo "    experiment $EXPERIMENT -> $DRIVER"
 echo "    map in  $ISMIP7_INVERSION"

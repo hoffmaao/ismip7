@@ -23,6 +23,7 @@ from firedrake import COMM_WORLD
 from firedrake.petsc import PETSc
 from mpi4py import MPI
 
+from icepack2_tools.runconfig import mesh_override
 from icepack2_tools.solverconfig import (
     diagnostic_solver_label,
     diagnostic_solver_mode,
@@ -34,6 +35,9 @@ from simulation import lc, run_simulation, setup_model
 from timing_campaign import (
     CACHE_SOLVER_MODE,
     CONTRACTS,
+    LANE_SOLVER_MODES,
+    MAP_CHECK_KIND,
+    MAP_CHECK_STEPS,
     RECORD_SCHEMA_VERSION,
     host_provenance,
     parse_campaign_tag,
@@ -41,10 +45,14 @@ from timing_campaign import (
     atomic_write_status,
     solver_configuration_fingerprint,
     validate_cache_manifest,
+    validate_map_check_manifest,
 )
+from icepack2_tools.runconfig import friction as _friction
 
 _ROOT = Path(__file__).resolve().parents[1]
-TIMING_DIR = _ROOT / "results" / "timing"
+# A MAP check keeps its records beside its own MAP (ISMIP7_TIMING_DIR); the
+# campaign's stay in results/timing.
+TIMING_DIR = Path(os.environ.get("ISMIP7_TIMING_DIR") or _ROOT / "results" / "timing")
 
 T_START = 2015.0
 T_END = float(os.environ.get("ISMIP7_T_END", "2020"))
@@ -78,8 +86,41 @@ CACHE_MANIFEST = os.environ.get("ISMIP7_TIMING_CACHE_MANIFEST") or None
 STATUS_PATH = os.environ.get("ISMIP7_TIMING_STATUS") or None
 
 
+def _validate_map_check_contract():
+    """A map-check lane runs the strict contract under a campaign solver, on
+    the MAP's own mesh (cold start) or on a prepared map-check cache."""
+    if not TIMING_TAG.startswith("mapcheck_"):
+        raise RuntimeError(
+            f"timing tag {TIMING_TAG!r} does not name a map check"
+        )
+    if DIAGNOSTIC_LINEAR_SOLVER not in LANE_SOLVER_MODES:
+        raise RuntimeError(
+            f"a map check times one of {LANE_SOLVER_MODES}, not "
+            f"{DIAGNOSTIC_LINEAR_SOLVER!r}"
+        )
+    contract = CONTRACTS["strict"]
+    if APPARENT_MB_MODE != contract["apparent_mb_mode"]:
+        raise RuntimeError(
+            f"a map check runs strict: ISMIP7_APPARENT_MB must be unset, got "
+            f"{APPARENT_MB_MODE!r}"
+        )
+    if abs(APPARENT_MB_CAP - contract["apparent_mb_cap_m_per_yr"]) > 1e-12:
+        raise RuntimeError(
+            f"a map check runs strict: ISMIP7_AMB_CAP must be 0, got {APPARENT_MB_CAP:g}"
+        )
+    if FIXED_FRONT != contract["fixed_front"]:
+        raise RuntimeError(
+            "a map check runs strict: ISMIP7_FIXED_FRONT must be 0/unset"
+        )
+    steps = int(os.environ.get("ISMIP7_MAP_CHECK_STEPS", str(MAP_CHECK_STEPS)))
+    LANE_CONTRACT.update(contract, name="strict", steps=steps, dt_2500=None)
+    return contract
+
+
 def _validate_lane_contract():
     """The tag names the contract; the environment must match it exactly."""
+    if TIMING_KIND == MAP_CHECK_KIND:
+        return _validate_map_check_contract()
     if TIMING_KIND not in {"matrix", "cache_probe"}:
         return None
     try:
@@ -194,13 +235,73 @@ def _normal(value):
     return value
 
 
+def _load_and_validate_map_check_cache():
+    """A map-check lane restarts from its prepared cache (the transferred
+    state) or cold-starts from the MAP on the MAP's own mesh."""
+    if mesh_override():
+        raise RuntimeError(
+            "A map-check lane solves on the mesh its MAP or cache carries; "
+            "ISMIP7_MESH must be unset or `checkpoint`"
+        )
+    source_basename = os.path.basename(os.environ.get("ISMIP7_INVERSION", ""))
+    if not RESTART_FROM:
+        return {
+            "status": "not_required",
+            "detail": "cold start from the MAP on its own mesh",
+            "source_inversion_basename": source_basename,
+        }
+    if not CACHE_MANIFEST:
+        raise RuntimeError(
+            "A map-check lane restarting from a cache needs "
+            "ISMIP7_TIMING_CACHE_MANIFEST"
+        )
+    with open(CACHE_MANIFEST) as stream:
+        manifest = json.load(stream)
+    fingerprint = solver_configuration_fingerprint(
+        solver_provenance(CACHE_SOLVER_MODE)
+    )
+    valid, detail = validate_map_check_manifest(
+        manifest,
+        lc=lc,
+        lc_coarse=int(os.environ["ISMIP7_LC_COARSE"]),
+        buffer_m=int(round(float(os.environ.get("ISMIP7_BUFFER_M", "20000")))),
+        friction=_friction(),
+        source_basename=source_basename,
+        mesh_name=manifest.get("mesh_basename"),
+        cache_path=RESTART_FROM,
+        solver_fingerprint=fingerprint,
+    )
+    if not valid:
+        raise RuntimeError(detail)
+    return {
+        "status": "valid",
+        "detail": detail,
+        "cache_path": str(Path(RESTART_FROM).resolve()),
+        "manifest_path": str(Path(CACHE_MANIFEST).resolve()),
+        "cache_schema_version": manifest["cache_schema_version"],
+        "source_inversion": manifest["source_inversion"],
+        "source_inversion_basename": manifest["source_inversion_basename"],
+        "source_inversion_sha256": manifest["source_inversion_sha256"],
+        "source_mesh_sha256": manifest["source_mesh_sha256"],
+        "geometry_source": manifest["geometry_source"],
+        "geometry_source_basename": manifest["geometry_source_basename"],
+        "geometry_source_method": manifest["geometry_source_method"],
+        "friction_gate": manifest.get("friction_gate"),
+        "transfer_fill": manifest.get("transfer_fill"),
+        "solver_configuration_fingerprint": fingerprint,
+        "manifest": manifest,
+    }
+
+
 def _load_and_validate_cache():
+    if TIMING_KIND == MAP_CHECK_KIND:
+        return _load_and_validate_map_check_cache()
     if TIMING_KIND not in {"matrix", "cache_probe"}:
         return {"status": "not_required"}
-    if os.environ.get("ISMIP7_MESH"):
+    if mesh_override():
         raise RuntimeError(
             "Cached timing must load the mesh embedded in its cache; "
-            "ISMIP7_MESH must be unset"
+            "ISMIP7_MESH must be unset or `checkpoint`"
         )
     if not RESTART_FROM or not CACHE_MANIFEST:
         raise RuntimeError(
@@ -245,8 +346,10 @@ def _load_and_validate_cache():
 
 
 def _validate_loaded_cache(ctx, cache_validation):
-    if TIMING_KIND not in {"matrix", "cache_probe"}:
+    if TIMING_KIND not in {"matrix", "cache_probe", MAP_CHECK_KIND}:
         return
+    if "manifest" not in cache_validation:
+        return  # a map-check cold start has no cache to hold to
     manifest = cache_validation["manifest"]
     attrs = {
         key: _normal(value)
@@ -267,7 +370,7 @@ def _validate_loaded_cache(ctx, cache_validation):
         "geometry_space": manifest["geometry_space"],
         "n_flow": manifest["n_flow"],
         "a4_factor": manifest["a4_factor"],
-        "friction_gate": manifest["friction_gate"],
+        "friction_gate": manifest.get("friction_gate"),
     }
     for key, expected_value in expected.items():
         actual = attrs.get(key)
@@ -535,6 +638,15 @@ def main():
         "step_mass_residual_gt_max": max(step_mass_residuals, default=None),
         "field_extrema": ctx.get("field_stats", []) if ctx else [],
     }
+    if TIMING_KIND == MAP_CHECK_KIND:
+        record["map_check"] = {
+            "friction": ctx.get("friction") if ctx else _friction(),
+            "mesh_role": "transferred" if RESTART_FROM else "native",
+            "transfer_fill": (
+                cache_validation.get("transfer_fill")
+                if RESTART_FROM else (ctx.get("transfer_fill") if ctx else None)
+            ),
+        }
     _write_record(record, target_lc_coarse, ncores)
 
     if caught is not None:

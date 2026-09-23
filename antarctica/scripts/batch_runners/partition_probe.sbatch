@@ -49,13 +49,12 @@ echo "    probing $MESH"
 echo
 
 # Only up to what this allocation actually holds: a step asking for more ranks
-# than the site's ISMIP7_TASKS cannot be created, and srun's lowercase "error:"
-# does not survive the filter below, so the row would silently vanish.
+# than the site's ISMIP7_TASKS cannot be created, so it yields no measurement.
 for n in 1 2 4 8 16 32; do
     [ "$n" -gt "${SLURM_NTASKS:-1}" ] && break
     ismip7_mpirun "$n" \
         python -u antarctica/scripts/partition_probe.py "$MESH" 2>&1 \
-        | grep -E "ranks=|Error|Traceback"
+        | grep -iE "ranks=|error|traceback|signal|killed|segmentation fault"
 done
 
 echo

@@ -44,6 +44,12 @@ compatibility, and `map_basename()`), which the inversion, the forward, the
 preflight and the launch gates all go through. MAP h5 files are gitignored and
 regenerated per machine.
 
+The runners add a `logvelnet` element the forward cannot derive, so those MAPs
+are named with `ISMIP7_INVERSION`. The 2 km pair from Rice,
+`inversion_icepack2_{rc,budd}_n3_dg0_logvelnet_2000_int5000_bilap*.h5` on the
+2 km / 5 km gmsh mesh, is the production line's input (issue #24); `MAP_CHECK.md`
+records what each does natively and transferred onto the 1 km / 10 km mesh.
+
 ## Physical fluidity prior (the n=3 inversion method)
 
 At n = 3 a constant fluidity baseline forces the control `phi = log(A/A0)` to

@@ -33,16 +33,17 @@ import os
 import sys
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-from icepack2_tools.runconfig import apparent_mb_mode, auto_resume
+from icepack2_tools.runconfig import apparent_mb_mode, auto_resume, ismip7_output
 from icepack2_tools.solverconfig import diagnostic_solver_mode
 
 try:
     resume = auto_resume()
     amb = apparent_mb_mode()
+    out = ismip7_output()
 except ValueError as exc:
     print(f"driver: {exc}")
     sys.exit(2)
-print(f"driver: auto_resume={resume} apparent_mb={amb}")
+print(f"driver: auto_resume={resume} apparent_mb={amb} ismip7_output={out}")
 print(f"driver: solver={diagnostic_solver_mode()} dt={os.environ.get('ISMIP7_DT')}")
 # srun takes SLURM_EXPORT_ENV as its own --export, so a list there would
 # reach the real driver's environment through the launcher.
@@ -276,6 +277,34 @@ def test_unset_auto_resume_defaults_on(sandbox):
     assert rc == 0, log
     assert "driver: auto_resume=True" in log
     assert calls.count("ARGV:") == 1
+
+
+def test_unset_output_writes_the_submission(sandbox):
+    r"""Every experiment this runner offers is a core experiment, and the
+    yearly fields and scalars cannot be recovered afterwards: a projection
+    that reaches 2300 without them has to be run again. So unset means on."""
+    rc, log, _ = run_job(sandbox, FAKE_T_YR="2301")
+    assert rc == 0, log
+    assert "driver: auto_resume=True apparent_mb=balance ismip7_output=True" in log
+
+
+@pytest.mark.parametrize("value", ["0", ""])
+def test_output_off_reaches_the_driver(sandbox, value):
+    r"""Both documented off spellings survive the runner's defaulting, so a
+    pipeline exercise can still say so; ``submit.sh projection ISMIP7_OUTPUT=``
+    delivers the empty one."""
+    rc, log, _ = run_job(sandbox, FAKE_T_YR="2301", ISMIP7_OUTPUT=value)
+    assert rc == 0, log
+    assert "ismip7_output=False" in log
+
+
+def test_a_bad_output_value_aborts_the_run(sandbox):
+    r"""runconfig owns the value set; the runner must not normalise a typo
+    into a decision about whether a submission gets written."""
+    rc, log, calls = run_job(sandbox, ISMIP7_OUTPUT="yes")
+    assert rc == 2, log
+    assert "ISMIP7_OUTPUT must be 1 to enable" in log
+    assert calls == ""
 
 
 def test_a_bad_auto_resume_value_aborts_the_run(sandbox):

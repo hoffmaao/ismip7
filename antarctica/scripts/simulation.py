@@ -1491,6 +1491,29 @@ def setup_model(restart_from=None, *, allow_timing_cache_a_ref=False):
     }
 
 
+def calving_front_owner(calving, fixed_front, sigma_max=None):
+    r"""Which mechanism owns removal of ice past the t=0 extent, as logged at
+    startup and written to every checkpoint as ``calving_front_owner``.
+
+    ``sigma_max`` is the von Mises (grounded, floating) threshold pair [MPa]
+    and is required for ``calving == "vonmises"``: the rate is inversely
+    proportional to it, so a bare "vonmises" cannot be reproduced. The
+    thresholds are written with ``repr`` so the string parses back to the
+    exact floats the run used."""
+    if calving != "none":
+        params = ""
+        if calving == "vonmises":
+            sg, sf = sigma_max
+            params = f", sigma_max grounded {sg!r} MPa floating {sf!r} MPa"
+        return f"level-set {calving} law (ISMIP7_CALVING={calving}{params})" + (
+            "; ISMIP7_FIXED_FRONT is set but ignored for removal"
+            if fixed_front else ""
+        )
+    if fixed_front:
+        return "legacy fixed-front mask (ISMIP7_FIXED_FRONT)"
+    return "none (no calving sink)"
+
+
 def save_model_state(ctx, final_path, t_now, extra_attrs=None):
     r"""Atomically save one self-contained mixed state.
 
@@ -1553,6 +1576,12 @@ def save_model_state(ctx, final_path, t_now, extra_attrs=None):
 
         chk.set_attr("/", "t_yr", float(t_now))
         chk.set_attr("/", "friction", str(ctx.get("friction", "budd")))
+        # Which mechanism owned the front, with its threshold. A result whose
+        # calving parameters live only in a log cannot be reproduced from the
+        # data file, and the log is the first thing lost.
+        if ctx.get("calving_front_owner"):
+            chk.set_attr("/", "calving_front_owner",
+                         str(ctx["calving_front_owner"]))
         if str(ctx.get("friction", "budd")) == "budd":
             # Provenance of the shelf gate this state was solved under
             # (runconfig.BUDD_SHELF_GATE); timing-cache manifests require it.
@@ -1771,15 +1800,11 @@ def run_simulation(
     # extent; `fixed` and the legacy flag pin it on purpose and keep the
     # t=0-only mask.
     free_front = calving not in ("none", "fixed")
-    if calving != "none":
-        front_owner = f"level-set {calving} law (ISMIP7_CALVING={calving})" + (
-            "; ISMIP7_FIXED_FRONT is set but ignored for removal"
-            if fixed_front else ""
-        )
-    elif fixed_front:
-        front_owner = "legacy fixed-front mask (ISMIP7_FIXED_FRONT)"
-    else:
-        front_owner = "none (no calving sink)"
+    front_owner = calving_front_owner(
+        calving, fixed_front,
+        _calving_sigma_max() if calving == "vonmises" else None,
+    )
+    ctx["calving_front_owner"] = front_owner
     PETSc.Sys.Print(f"  Calving front owner: {front_owner}")
 
     # ISMIP7_LEGACY_TRANSPORT=1 restores the pre-Jul-2026 scheme: the

@@ -607,7 +607,7 @@ C007: ssp585 with CESM2-WACCM (planned), unassigned.
 - **Melt: K, slope, deltaT:** one toolbox K with the per-basin offset
 - **Apparent MB:** balance
 - **dt (yr):** 0.05
-- **Notes:** issue #27 holds the full-length run in the NOTS queue as job 1390452. Issue #78: 2300 is a padded mean of 2290 to 2299
+- **Notes:** issue #27 holds the full-length run in the NOTS queue as job 1390452. The run ends in 2300, as issue #78 settled: 2300 reads the distributed atmosphere, the 2290 to 2299 mean, and holds the 2299 ocean
 
 ### core-c008-ssp585-mriesm20
 

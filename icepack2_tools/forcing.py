@@ -674,9 +674,13 @@ class ISMIP7Atmosphere:
             # step. CESM2-WACCM was that case when the empty 2300 files were
             # removed (discussion #8); as of 22 September 2026 the mirror
             # carries 2300 again, padded by the atmosphere group with the
-            # 2290-2299 mean (discussion #49, issue #78), so those files are
-            # read as given and this branch no longer fires for them. It still
-            # covers an older mirror copy, and the ocean has no 2300 at all.
+            # 2290-2299 mean, so those files are read as given and this branch
+            # no longer fires for them. It still covers an older mirror copy,
+            # and the ocean has no 2300 at all. On 23 September 2026 the
+            # organisers answered that a single forcing year at the end makes
+            # no significant difference and that a 2299 duplicate is
+            # acceptable, so a run still ends in 2300 (discussion #49,
+            # icepack/ismip7#78).
             # Anything further past the end is a short tree, not the end of
             # the series, and repeating one year of SMB for decades would be a
             # scientifically wrong run reported as a success, so it raises.

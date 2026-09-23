@@ -245,10 +245,13 @@ atmosphere directory is whichever of `SDBN1-8000m` and `GEMB-SDBN1-8000m`
 exists, `SDBN1` first, so trees fetched before MRI's August 2026 rename still
 work. Fracture masks resolve flat or versioned.
 
-**One year bridges the end of a series.** CESM2-WACCM's atmosphere stops at
-2299 and the empty 2300 files were withdrawn, so a request for the single year
-after the last one on disk reuses that year and logs it once per variable.
-Anything further past the end, or a gap inside the series, raises.
+**One year bridges the end of a series.** A request for the single year after
+the last one on disk reuses that year and logs it once per variable. Anything
+further past the end, or a gap inside the series, raises. CESM2-WACCM's ocean
+stops at 2299, so 2300 holds 2299, a duplicate the organisers accepted on 23
+September 2026 (discussion #49). Its 2300 atmosphere files, withdrawn while
+empty, are back as the 2290-2299 mean and are read as given; the bridge covers
+them only in a tree fetched without them.
 
 **Per-year atmosphere files hold 12 monthly slices.** The reader collapses them
 to the annual mean, weighting months by length from `time_bnds`, falling back

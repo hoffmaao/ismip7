@@ -248,6 +248,21 @@ def test_the_critical_thickness_knob_rejects_a_nonpositive_value(monkeypatch):
         calving_thickness_hc()
 
 
+def test_the_floating_von_mises_default_is_the_published_antarctic_value(monkeypatch):
+    r"""Wilner et al. (2023) calibrate this same law against ten Antarctic
+    shelves and report 105-400 kPa, mean 225, median 230 - the only one of the
+    four laws they test whose parameter is consistent between shelves. The
+    default is the centre of that cluster, so a silent change to it changes
+    what the submission claims to be running."""
+    from icepack2_tools.runconfig import calving_sigma_max
+    monkeypatch.delenv("ISMIP7_CALVING_SIGMA_MAX_FLOATING", raising=False)
+    monkeypatch.delenv("ISMIP7_CALVING_SIGMA_MAX_GROUNDED", raising=False)
+    grounded, floating = calving_sigma_max()
+    assert floating == pytest.approx(0.2)
+    assert 0.105 <= floating <= 0.400, "outside the published Antarctic range"
+    assert grounded == pytest.approx(1.0)
+
+
 def test_the_critical_thickness_default_is_the_observed_front(monkeypatch):
     r"""The published Antarctic minimum-thickness thresholds are for a position
     law and are shelf-specific, so the transferable number for our rate form is

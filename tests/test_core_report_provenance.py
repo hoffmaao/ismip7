@@ -61,3 +61,18 @@ def test_the_report_lifts_the_front_owner_an_external_law_names(tmp_path):
     line = f"{FRONT_OWNER_MARKER} level-set prescribed law (external: hfb sigma_max=0.15)"
     log.write_text(f"  {line}\nstep 1\n")
     assert core_report.front_owner(str(log)) == [line]
+
+
+def test_the_report_resolves_the_calving_law_and_its_knobs(monkeypatch):
+    for k in ("ISMIP7_CALVING", "ISMIP7_CALVING_SIGMA_MAX_FLOATING",
+              "ISMIP7_CALVING_SIGMA_MAX_GROUNDED", "ISMIP7_CALVING_HC"):
+        monkeypatch.delenv(k, raising=False)
+    env = core_report.effective_env()
+    assert env["ISMIP7_CALVING"] == "none    # default (not exported)"
+    assert "ISMIP7_CALVING_SIGMA_MAX_FLOATING" not in env
+    monkeypatch.setenv("ISMIP7_CALVING", "vonmises")
+    env = core_report.effective_env()
+    assert env["ISMIP7_CALVING_SIGMA_MAX_FLOATING"] == "0.2    # default (not exported)"
+    monkeypatch.setenv("ISMIP7_CALVING", "thickness")
+    monkeypatch.setenv("ISMIP7_CALVING_HC", "375")
+    assert core_report.effective_env()["ISMIP7_CALVING_HC"] == "375"

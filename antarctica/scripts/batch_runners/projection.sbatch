@@ -136,7 +136,7 @@ export ISMIP7_AUTO_RESUME="${ISMIP7_AUTO_RESUME-1}"
 # The submission's own output: the yearly ISMIP7 fields and scalars
 # (icepack2_tools/ismip7_output.py), which write_ismip7_output.py regrids and
 # the compliance checker reads. Every experiment this runner offers is a core
-# experiment, and off it produces a timeseries CSV and checkpoints alone -- so
+# experiment, and off it produces a timeseries CSV and checkpoints alone, so
 # a forgotten flag is found after the days of wall time it takes a projection
 # to finish, and the whole run has to be repeated because the per-year fields
 # are gone. Defaulted on for that reason; `ISMIP7_OUTPUT=0` turns it off for a

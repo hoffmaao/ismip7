@@ -534,6 +534,46 @@ Read-only diagnostics:
 `region_budget.py` and `score_map.py` take the run's environment, which must
 match the inversion's.
 
+### Is the law acting on ice that matters (`probe_front_flux.py`)
+
+A calving law can only remove ice the front runs through, so
+`ISMIP7_FRONT_HMIN`, the thickness that defines the front, decides which ice
+the law sees. It is one metre by default, and BedMachine averaged onto a cell
+smears the coastline, so the outermost ice cells hold a fraction of a calving
+face. Measured on the 2 km control `ctrl2015_cesm2_waccm_ua2000_2000_final.h5`
+(t = 2016, 22 September 2026):
+
+| `ISMIP7_FRONT_HMIN` | front length | mean front thickness | outward flux | net flux |
+|---|---|---|---|---|
+| 1 m | 33,400 km | 54 m | 139 Gt/yr | 137 Gt/yr |
+| 50 m | 51,300 km | 106 m | 261 Gt/yr | 233 Gt/yr |
+| 100 m | 61,900 km | 160 m | 641 Gt/yr | 576 Gt/yr |
+| 150 m | 68,000 km | 210 m | 1,041 Gt/yr | 920 Gt/yr |
+
+The outward flux counts every facet between ice and ice-free cells, so ice
+flowing through a thin patch inside the sheet adds its inflow side; the signed
+net cancels that and is the number to set against an observed Antarctic
+calving flux of about 1265 Gt/yr (Rignot et al. 2013). At one metre the front
+is a thin fringe carrying eleven percent of that, so a law tuned for a 200 m
+face removes almost nothing whatever its own threshold, the run's calving
+tally stays near zero, and the submitted `licalvf` does too. At 150 m the
+front carries 0.73 of the observed flux.
+
+`ISMIP7_FRONT_HMIN` is also the t=0 extent mask, the sliver removal threshold
+and the open-water classification in `simulation.py`. Raising it removes every
+cell thinner than the threshold at t=0 and books any cell that thins below it
+as calving, grounded margin ice included. A raised threshold therefore needs
+its own audited run (mass budget, `check_ismip6_track.py`, the t=0 mass
+change) before it is adopted.
+
+```bash
+python antarctica/scripts/probe_front_flux.py <state>.h5 --hmin 1,50,100,150
+```
+
+reports that table for any forward state or MAP final save, so the threshold
+is chosen against numbers. It solves nothing and reads only the thickness and
+the velocity.
+
 ### Calving front on a buffered mesh (`ISMIP7_CALVING`)
 
 A buffered mesh has no calving sink: ice reaching the 2015 outline flows into

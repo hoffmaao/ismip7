@@ -173,9 +173,19 @@ def n_flow():
 # behaviour: on a buffered mesh the front advances freely and never calves.
 CALVING_DEFAULT = "none"
 CALVING_LAWS = ("none", "fixed", "vonmises", "hfb", "thickness")
-# ISSM defaults for the von Mises thresholds (Morlighem et al. 2016).
+# Von Mises thresholds. The floating default is the published Antarctic value:
+# Wilner et al. (2023, doi:10.5194/tc-17-4889-2023) calibrate this same law,
+# c = |u| sigma~/sigma_max, against the observed front of ten ice shelves and
+# report sigma_max = 105 to 400 kPa (Amery 150, Denman 400, Filchner 200,
+# Larsen C 140, Pine Island 275, Ronne 120, Ross 105, Shackleton 280,
+# Thwaites 320, Totten 260; mean 225, median 230). They are the only one of
+# the four laws they test whose parameter is "generally consistent" between
+# shelves, which is what makes a single Antarctic-wide number defensible; 200
+# kPa is the round centre of that cluster. Their domains are shelves, so the
+# number constrains the floating threshold only. The grounded default is
+# Morlighem et al. (2016) and no Antarctic calibration here supersedes it.
 CALVING_SIGMA_MAX_GROUNDED_DEFAULT = "1.0"     # MPa
-CALVING_SIGMA_MAX_FLOATING_DEFAULT = "0.15"    # MPa
+CALVING_SIGMA_MAX_FLOATING_DEFAULT = "0.2"     # MPa, Wilner et al. 2023
 # Horizontal force balance (icepack2_tools.calving_laws): the papers' own
 # defaults. Zero tensile strength is the Buck, Coffey and Lai limit, in which
 # an unbuttressed shelf sits exactly at the threshold; Slater and Wagner's

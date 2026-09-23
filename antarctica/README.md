@@ -606,7 +606,9 @@ legacy `ISMIP7_FIXED_FRONT` mask removes nothing when a law is set and
 defined only on the t=0 ice extent under every law. Under a free law it is also
 cleared each step wherever the level set reports ice-free, irreversibly, so a
 calved cell is not regrown and an advanced-into cell is not re-emptied. The run
-log prints one `Calving front owner:` line naming the mechanism in force.
+log prints one `Calving front owner:` line naming the mechanism in force, with
+the exact `vonmises` thresholds, and every checkpoint carries the same string
+as its `calving_front_owner` attribute.
 
 ### The whole matrix in one command (`run_core_matrix.sh`)
 

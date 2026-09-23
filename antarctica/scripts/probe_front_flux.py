@@ -8,23 +8,29 @@ A calving law can only remove ice the front actually runs through, so the
 threshold that defines the front, ``ISMIP7_FRONT_HMIN``, decides which ice the
 law sees. That threshold is one metre by default, and BedMachine averaged onto
 a cell smears the coastline, so the outermost ice cells hold a fraction of a
-calving face's thickness. Measured on a 2 km state (22 September 2026) the
-front at one metre reads 41 m thick and 23 m/yr, carrying 80 Gt/yr, against an
-observed Antarctic calving flux of about 1265 Gt/yr (Rignot et al. 2013); at
-150 m it reads 202 m and 941 Gt/yr, which is the calving face BedMachine
-shows. A law tuned for a 200 m front and applied to a 40 m fringe removes
-almost nothing whatever its threshold, and the run's own calving tally and the
-submitted ``licalvf`` read near zero with it.
+calving face's thickness. A law tuned for a 200 m front and applied to a
+40 m fringe removes almost nothing whatever its threshold, and the run's own
+calving tally and the submitted ``licalvf`` read near zero with it.
 
-This reports, per threshold, the front's extent, its flux-weighted thickness,
-the outward normal speed and the flux across it, so the choice of threshold is
-made against numbers rather than left at its default. It reads a checkpoint
-and solves nothing.
+This reports, per threshold, the front's extent, its length-weighted
+thickness, the outward normal speed and the flux across it, so the choice of
+threshold is made against numbers rather than left at its default. It reads a
+checkpoint and solves nothing.
 
-The flux is ``sum_front max(u . n, 0) h L``, with ``n`` the level set's own
-unit gradient and ``L`` the front length in the cell, which is the same
-quantity the level set turns into a removal, so the answer is what a law would
-have to work with.
+The outward flux is ``sum_front max(u . n, 0) h L``, with ``n`` the level
+set's own unit gradient and ``L`` the front length in the cell. That is the
+ice the level set can act on, and it counts every facet between ice and
+ice-free cells, so a thin patch inside the sheet that ice flows through
+contributes its inflow side. The signed ``sum_front (u . n) h L`` cancels
+that through-flux, which makes the net the column to compare with the
+observed calving flux, and the gap between the two measures how much of the
+front is interior.
+
+``ISMIP7_FRONT_HMIN`` also sets the t=0 extent mask, the sliver removal
+threshold and the open-water classification in ``simulation.py``, so a
+threshold chosen here changes the run's t=0 mass and books every cell that
+thins below it as calving. Audit a run at a raised threshold (mass budget,
+``check_ismip6_track.py``, t=0 mass) before adopting it.
 """
 
 from __future__ import annotations
@@ -55,8 +61,10 @@ DEFAULT_THRESHOLDS = (1.0, 10.0, 25.0, 50.0, 100.0, 150.0)
 
 
 def front_flux(mesh, h, u, h_min):
-    r"""``(cells, length_m, h_front_m, u_normal_m_yr, flux_gt_yr)`` for the
-    front at ``h_min``, all reduced over the communicator."""
+    r"""``(cells, length_m, h_front_m, u_normal_m_yr, flux_gt_yr,
+    net_gt_yr)`` for the front at ``h_min``, all reduced over the
+    communicator: ``flux`` sums the outward part of ``(u . n) h L`` and
+    ``net`` the signed total."""
     Q0 = FunctionSpace(mesh, "DG", 0)
     ls = LevelSet(mesh, h, law="none", h_min=float(h_min))
     ls._update_unit_gradient()
@@ -73,12 +81,13 @@ def front_flux(mesh, h, u, h_min):
     cells = int(comm.allreduce(int(front.sum())))
     total_length = total(length[front])
     if cells == 0 or total_length == 0.0:
-        return cells, 0.0, 0.0, 0.0, 0.0
+        return cells, 0.0, 0.0, 0.0, 0.0, 0.0
     # length-weighted, so a long thin stretch counts for what it carries
     h_front = total(thickness[front] * length[front]) / total_length
     u_front = total(un[front] * length[front]) / total_length
     flux = total((np.maximum(un, 0.0) * thickness * length)[front]) * RHO_GT
-    return cells, total_length, h_front, u_front, flux
+    net = total((un * thickness * length)[front]) * RHO_GT
+    return cells, total_length, h_front, u_front, flux, net
 
 
 def main(argv=None):
@@ -90,15 +99,14 @@ def main(argv=None):
 
     with CheckpointFile(a.state, "r") as chk:
         mesh = chk.load_mesh()
-        missing = [n for n in ("thickness", "velocity")
-                   if _absent(chk, mesh, n)]
-        if missing:
+        try:
+            h = chk.load_function(mesh, name="thickness")
+            u = chk.load_function(mesh, name="velocity")
+        except RuntimeError as e:
             raise SystemExit(
-                f"{a.state} carries no {', '.join(missing)}; a periodic "
+                f"{a.state}: {' '.join(str(e).split())}\na periodic "
                 f"inversion checkpoint has no velocity, so use a forward "
-                f"state or a MAP's final save")
-        h = chk.load_function(mesh, name="thickness")
-        u = chk.load_function(mesh, name="velocity")
+                f"state or a MAP's final save") from e
         t_yr = (float(chk.get_attr("/", "t_yr"))
                 if chk.has_attr("/", "t_yr") else None)
         mesh_name = (str(chk.get_attr("/", "mesh_basename"))
@@ -117,35 +125,32 @@ def main(argv=None):
                     f"{mesh.comm.allreduce(h.dat.data_ro.size)} cells")
     PETSc.Sys.Print("")
     PETSc.Sys.Print(f"  {'h_min':>7s} {'cells':>8s} {'front km':>9s} "
-                    f"{'h_front':>8s} {'u_n':>7s} {'flux':>9s} {'vs obs':>7s}")
+                    f"{'h_front':>8s} {'u_n':>7s} {'outward':>9s} {'net':>9s} "
+                    f"{'vs obs':>7s}")
     PETSc.Sys.Print(f"  {'m':>7s} {'':>8s} {'':>9s} {'m':>8s} "
-                    f"{'m/yr':>7s} {'Gt/yr':>9s} {'':>7s}")
+                    f"{'m/yr':>7s} {'Gt/yr':>9s} {'Gt/yr':>9s} {'':>7s}")
     for value in [float(v) for v in a.hmin.split(",") if v.strip()]:
-        cells, length, h_front, u_front, flux = front_flux(mesh, h, u, value)
+        cells, length, h_front, u_front, flux, net = front_flux(
+            mesh, h, u, value)
         if cells == 0:
             PETSc.Sys.Print(f"  {value:7.0f}  no interior front at this "
                             f"threshold")
             continue
         PETSc.Sys.Print(
             f"  {value:7.0f} {cells:8d} {length / 1e3:9,.0f} {h_front:8.0f} "
-            f"{u_front:7.0f} {flux:9,.0f} {flux / OBSERVED_CALVING_GT_YR:6.2f}x")
+            f"{u_front:7.0f} {flux:9,.0f} {net:9,.0f} "
+            f"{net / OBSERVED_CALVING_GT_YR:6.2f}x")
     PETSc.Sys.Print("")
-    PETSc.Sys.Print(f"  'vs obs' is the flux over {OBSERVED_CALVING_GT_YR:.0f} "
-                    f"Gt/yr, the observed Antarctic calving flux (Rignot et "
-                    f"al. 2013).")
-    PETSc.Sys.Print("  A law acting on a front far below 1.00x cannot remove "
-                    "what the ice sheet calves,")
-    PETSc.Sys.Print("  whatever its own threshold: raise ISMIP7_FRONT_HMIN "
-                    "until the front is the calving face.")
+    PETSc.Sys.Print(f"  'vs obs' is the net flux over "
+                    f"{OBSERVED_CALVING_GT_YR:.0f} Gt/yr, the observed "
+                    f"Antarctic calving flux (Rignot et al. 2013).")
+    PETSc.Sys.Print("  'outward' well above 'net' means much of the front "
+                    "encloses interior thin patches.")
+    PETSc.Sys.Print("  ISMIP7_FRONT_HMIN also sets the t=0 extent and the "
+                    "sliver removal; audit a run at a")
+    PETSc.Sys.Print("  raised threshold (mass budget, check_ismip6_track.py, "
+                    "t=0 mass) before adopting it.")
     return 0
-
-
-def _absent(chk, mesh, name):
-    try:
-        chk.load_function(mesh, name=name)
-        return False
-    except Exception:
-        return True
 
 
 if __name__ == "__main__":

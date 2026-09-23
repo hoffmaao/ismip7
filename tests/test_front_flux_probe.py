@@ -2,8 +2,9 @@ r"""The front-flux probe's own arithmetic.
 
 ``probe_front_flux.py`` answers whether a calving law acts on ice that
 matters, so its numbers have to be the ones the level set would remove: the
-flux-weighted front thickness, the outward normal speed, and
-``sum max(u.n, 0) h L`` over the front cells. Checked on an imposed state
+length-weighted front thickness, the outward normal speed, and
+``sum max(u.n, 0) h L`` over the front cells, and the signed net that cancels
+ice flowing through a thin interior patch. Checked on an imposed state
 where every number follows by hand.
 """
 import importlib.util
@@ -27,9 +28,9 @@ probe = _load_probe()
 
 import numpy as np  # noqa: E402
 import pytest  # noqa: E402
-from firedrake import (Constant, Function, FunctionSpace,  # noqa: E402
-                       SpatialCoordinate, UnitSquareMesh, VectorFunctionSpace,
-                       as_vector)
+from firedrake import (And, Constant, Function,  # noqa: E402
+                       FunctionSpace, SpatialCoordinate, UnitSquareMesh,
+                       VectorFunctionSpace, as_vector, conditional)
 
 
 @pytest.fixture(scope="module")
@@ -48,7 +49,7 @@ def state():
 def test_the_front_is_found_and_its_thickness_is_the_ice_thickness(state):
     m = probe
     mesh, h, u = state
-    cells, length, h_front, u_front, flux = m.front_flux(mesh, h, u, 1.0)
+    cells, length, h_front, u_front, flux, _ = m.front_flux(mesh, h, u, 1.0)
     assert cells > 0
     assert length > 0.0
     assert h_front == pytest.approx(300.0)
@@ -60,16 +61,17 @@ def test_the_flux_is_thickness_times_speed_times_front_length(state):
     which is what makes it comparable with an observed calving flux."""
     m = probe
     mesh, h, u = state
-    _, length, h_front, u_front, flux = m.front_flux(mesh, h, u, 1.0)
+    _, length, h_front, u_front, flux, net = m.front_flux(mesh, h, u, 1.0)
     # u . n at a front whose normal is +x and whose speed is 1 m/yr
     assert u_front == pytest.approx(1.0, rel=1e-6)
     assert flux == pytest.approx(h_front * u_front * length * m.RHO_GT, rel=1e-6)
+    assert net == pytest.approx(flux, rel=1e-6)
 
 
 def test_a_threshold_above_the_ice_leaves_no_front(state):
     m = probe
     mesh, h, u = state
-    cells, length, _, _, flux = m.front_flux(mesh, h, u, 400.0)
+    cells, length, _, _, flux, _ = m.front_flux(mesh, h, u, 400.0)
     assert cells == 0
     assert flux == 0.0
 
@@ -82,6 +84,24 @@ def test_inflow_does_not_count_as_calving(state):
     mesh, h, _ = state
     u_in = Function(VectorFunctionSpace(mesh, "CG", 1)).interpolate(
         as_vector((Constant(-1.0), Constant(0.0))))
-    _, _, _, u_front, flux = m.front_flux(mesh, h, u_in, 1.0)
+    _, _, _, u_front, flux, net = m.front_flux(mesh, h, u_in, 1.0)
     assert u_front < 0.0
     assert flux == 0.0
+    assert net < 0.0
+
+
+def test_ice_flowing_through_an_interior_patch_nets_to_zero():
+    r"""A thin strip across a uniform flow is two fronts: the upstream edge
+    reads outward, the downstream edge inward. The outward sum counts the
+    strip as a calving face; the net cancels it."""
+    m = probe
+    mesh = UnitSquareMesh(16, 16)
+    Q0 = FunctionSpace(mesh, "DG", 0)
+    x, _ = SpatialCoordinate(mesh)
+    h = Function(Q0).interpolate(
+        conditional(And(x > 0.375, x < 0.625), 50.0, 300.0))
+    u = Function(VectorFunctionSpace(mesh, "CG", 1)).interpolate(
+        as_vector((Constant(1.0), Constant(0.0))))
+    _, _, _, _, flux, net = m.front_flux(mesh, h, u, 100.0)
+    assert flux > 0.0
+    assert net == pytest.approx(0.0, abs=1e-6 * flux)

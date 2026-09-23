@@ -1261,10 +1261,9 @@ reviewed in a pull request beside the code its run used, which is what makes it
 a trace rather than a note; `runlog-check` and `tests/test_runlog.py` refuse a
 stale render or a malformed record.
 
-The group's shared progress sheet imports `RUNLOG_CSV`, which makes it a second
-reader of these records rather than a second place to type them. Keeping a
-simulation's configuration and outcome in two places by hand is the duplication
-this section exists to end.
+The group's shared progress sheet imports `RUNLOG_CSV`, one row per record and
+one column per field in `build_runlog.py` order, so a run's configuration and
+outcome are typed only in its record.
 
 `id`, `task`, `title`, `status` and `institution` are required and everything else is
 optional, so a planned run is five lines and a finished one carries its whole

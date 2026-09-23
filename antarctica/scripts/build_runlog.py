@@ -26,6 +26,7 @@ what this file exists to replace, so the sheet reads the repository.
 Usage:
     python antarctica/scripts/build_runlog.py --write
     python antarctica/scripts/build_runlog.py --check       # exits 1 on drift
+    python antarctica/scripts/build_runlog.py --csv antarctica/results/runlog.csv
 """
 
 from __future__ import annotations

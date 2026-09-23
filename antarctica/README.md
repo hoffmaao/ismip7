@@ -1243,6 +1243,46 @@ experiment-length checks a two-year run cannot satisfy. `ismip7-scalars` 0.1.0
 then wrote `sla20`, `slg20` and `slvaf`, each with its glacier and ice-cap
 variant, in NetCDF and CSV.
 
+### The run log (`build_runlog.py`)
+
+None of the files above are in git: a checkpoint is hundreds of MB and a
+timeseries is regenerated. What reaches the repository is a record. Every
+simulation, of any kind, leaves one JSON file in `antarctica/runlog/`, and
+
+```bash
+make -C antarctica runlog                                # render reports/SIMULATIONS.md
+make -C antarctica runlog RUNLOG_CSV=results/runlog.csv  # and the records flat
+make -C antarctica runlog-check                          # exits 1 on a stale render
+```
+
+renders them into `antarctica/reports/SIMULATIONS.md`, grouped by task kind,
+with a summary table per group and every recorded field below it. A record is
+reviewed in a pull request beside the code its run used, which is what makes it
+a trace rather than a note; `runlog-check` and `tests/test_runlog.py` refuse a
+stale render or a malformed record.
+
+The group's shared progress sheet imports `RUNLOG_CSV`, one row per record and
+one column per field in `build_runlog.py` order, so a run's configuration and
+outcome are typed only in its record.
+
+`id`, `task`, `title`, `status` and `institution` are required and everything else is
+optional, so a planned run is five lines and a finished one carries its whole
+provenance: mesh, MAP and iteration count, what it branched from, forcing
+versions, the melt and front configuration, site, ranks, job ids, code SHA,
+cost per model year, the audit verdict, whether the ISMIP7 output was written,
+the checker version and result, the scalars, and the upload. `build_runlog.py`
+owns the field list, so a field it does not know is an error rather than a
+typo that renders as nothing.
+
+A core experiment still gets its full report from `core_report.py`, with the
+budget rows and the ensemble overlay. The run log is the index across all of
+them, and across the runs that are not core experiments: the inversions, the
+calibrations and the forward tests. A superseded run keeps its record with
+`status` set to `superseded` and the reason in `notes`. `institution` names the
+institution that owns the run, or `unassigned` for a planned run; `results` is
+relative to the checkout on the site the record names, and never an account or
+home-directory path.
+
 ---
 
 ## Known issues

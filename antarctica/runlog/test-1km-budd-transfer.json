@@ -1,0 +1,30 @@
+{
+  "id": "test-1km-budd-transfer",
+  "task": "test",
+  "institution": "Rice",
+  "title": "1 km control from the transferred Budd snapshot",
+  "status": "stopped",
+  "esm": "CESM2-WACCM",
+  "scenario": "ctrl, RACMO climatology and the OI ocean",
+  "period": "2015 to 2025 requested, stopped in 2016",
+  "friction": "budd",
+  "mesh": "antarctica_10000_1000_buffered20000, 1 km fine, 10 km interior, 20 km buffer",
+  "initial_state": "the Budd snapshot transferred from the 2 km mesh (the 22 September 2 km snapshot MAPs, https://github.com/icepack/ismip7/releases/tag/maps-2km-snap-2026-09-22)",
+  "branch_from": "cold start",
+  "forcing": "RACMO2.4p1 2000 to 2023; OI climatology 30_sep",
+  "melt": "per-basin K from the 2 km npz, constant slope",
+  "front": "held at the 2015 extent, no collapse",
+  "apparent_mb": "balance",
+  "dt": 0.05,
+  "site": "nots, commons partition, cascadelake",
+  "resources": "32 ranks, 180G",
+  "jobs": [
+    "1592597"
+  ],
+  "code": "upstream/main@87475b3 with the strict-transfer fix",
+  "started": "2026-09-22",
+  "cost": "92 s a step, about 31 minutes a model year",
+  "results": "antarctica/results/",
+  "audit": "year one clean: VAF drift 0.02 mm, mass balance +1 Gt/yr, residual zero. The Lambert and Amery grounding trough then accelerates from 7.6e3 to 1.9e7 m/yr in three steps and Newton diverges",
+  "notes": "the controls there run eight to ten times observed speed before anything evolves, which is a mid-descent MAP artifact rather than a defect; re-check on the converged MAP"
+}

@@ -102,7 +102,23 @@ def _gh_ready():
                           capture_output=True).returncode == 0
 
 
-@pytest.mark.skipif(not _gh_ready(), reason="gh is absent or not authenticated")
+def _board_ready():
+    r"""The board is a ProjectV2, which the token reads only with `read:project`."""
+    if not _gh_ready():
+        return False
+    from importlib.util import module_from_spec, spec_from_file_location
+    spec = spec_from_file_location("build_now", BUILD)
+    build_now = module_from_spec(spec)
+    spec.loader.exec_module(build_now)
+    return subprocess.run(
+        ["gh", "api", "graphql", "-F", f"p={build_now.BOARD_ID}", "-f",
+         "query=query($p:ID!){node(id:$p){... on ProjectV2{title}}}"],
+        capture_output=True).returncode == 0
+
+
+@pytest.mark.skipif(not _board_ready(),
+                    reason="gh cannot read the project board "
+                           "(gh auth refresh -s read:project)")
 def test_now_index_matches_the_open_issues():
     r = subprocess.run([sys.executable, str(BUILD), "--check"],
                        capture_output=True, text=True)

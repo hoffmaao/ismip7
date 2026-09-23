@@ -1,0 +1,17 @@
+{
+  "id": "core-c011-OCX-main-observations",
+  "task": "ocx",
+  "institution": "unassigned",
+  "title": "C011: OCX main with observations",
+  "status": "planned",
+  "exp_id": "C011",
+  "esm": "observations",
+  "scenario": "OCX main",
+  "period": "1979 to 2025",
+  "branch_from": "independent of the historical",
+  "melt": "one toolbox K with the per-basin offset",
+  "apparent_mb": "balance",
+  "dt": 0.05,
+  "mesh": "the production mesh, decision #20",
+  "notes": "issue #11: run check_melt_bound --ocx first. Issue #19: the OCX ocean is being regenerated upstream"
+}

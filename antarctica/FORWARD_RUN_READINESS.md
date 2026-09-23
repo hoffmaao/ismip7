@@ -442,7 +442,9 @@ Forcing data:
       mirror downloader keeps ETags in `.mirror_manifest.json` and refetches a
       moved one, the audit reports `REPLACED` and `PINNED` and fails on them
       (a version newer than the mirror's, fetched from Globus first, reads
-      `AHEAD` and passes), the Globus route has `--resync`.
+      `AHEAD` and passes, and a collapse mask below
+      `forcing.FRACTURE_MIN_VERSION` reads `OUTDATED` and fails), the Globus
+      route has `--resync`.
 - [x] #41 item 9, dotted fracture versions: the Globus downloader no longer
       passes over `v2.1` for `v2`.
 - [x] #41 items 1, 3, 4, 5, 7, 8, 10 to 14: none in a tree that is read. The
@@ -799,8 +801,12 @@ and six 2300 files were read with h5py.
   and 593 against 25,149 in 2250, with every v1 cell flagged in v2 at those
   years. So PISM's MRI-ESM2-0 result above ran on the faulty mask. Both
   versions end in 2299, as the CESM2-WACCM masks do. The reader opens v2, and
-  the audit reads the row `AHEAD` and passes. NOTS and Midway hold whatever
-  the mirror serves until they fetch from Globus themselves. (issue #16)
+  the audit reads the row `AHEAD` and passes. `FRACTURE_MIN_VERSION` in
+  `icepack2_tools/forcing.py` makes v2 the floor for MRI-ESM2-0 ssp585, and
+  v2.1 the floor for CESM2-WACCM ssp126, ssp370 and ssp585: a run under a mask
+  mode refuses an older mask at startup, and the audit reads it `OUTDATED`
+  and fails, whatever the mirror serves. NOTS and Midway therefore need v2
+  from Globus before a mask-mode core 8 can run there. (issue #16)
 - **Unmoved.** #22 since 13:32 UTC on the 21st (the new 0.5.1 bounds stop
   taking a side on the `ligroundf` sign, but the thread prescribes none).
   #48 since the 20th: no date for the regenerated OCX. #17 and #37 as in

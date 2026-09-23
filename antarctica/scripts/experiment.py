@@ -221,6 +221,10 @@ def run_core_experiment(*, core, title, name, esm, scenario,
             f"error: download the fracture tree, or run with "
             f"ISMIP7_FRACTURE=none."
         )
+    if fracture_mode() in FRACTURE_MASK_MODES:
+        # the highest version on disk can be one replaced on Globus before the
+        # mirror caught up; refuse it rather than run on it
+        fracture.check_min_version()
 
     # What this run opens, for the committed report: a collapse mask only
     # counts when the run reads it.

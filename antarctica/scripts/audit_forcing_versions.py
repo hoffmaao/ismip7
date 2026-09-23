@@ -24,14 +24,20 @@ open, and flag the rows that need attention before the production runs:
     AHEAD      the reader opens a version newer than any the mirror publishes,
                fetched from Globus before the mirror carried it (the MRI-ESM2-0
                ssp585 fracture v2 of 22 September 2026)
+    OUTDATED   the reader opens a collapse mask older than the submission
+               accepts (``forcing.FRACTURE_MIN_VERSION``), whatever the mirror
+               publishes: the fix is on Globus, and a run under a mask mode
+               refuses to start on it
 
 The mirror keeps only the current version of each product, so BEHIND, PINNED
 and REPLACED all mean "re-sync before the production runs", and they set the
-exit status. AHEAD is reported and leaves the exit status alone: the run reads
-the newer file, and the README cites it. Once the mirror carries that version,
-``download_mirror.py`` reads the early copy as ``OLDER``, having landed before
-the mirror's object, until ``--older refetch`` replaces it or ``--older adopt``
-records it. The README must cite the versions a run used. A file the
+exit status. OUTDATED sets it too, and a mirror re-sync cannot clear it while
+the mirror lags: fetch from Globus. AHEAD is reported and leaves the exit
+status alone: the run reads the newer file, and the README cites it. Once the
+mirror carries that version, ``download_mirror.py`` reads the early copy as
+``OLDER``, having landed before the mirror's object, until ``--older refetch``
+replaces it or ``--older adopt`` records it. The README must cite the
+versions a run used. A file the
 download manifest has never seen and which is older than the mirror's object
 is counted as ``older``: unproven either way, see ``download_mirror.py --older``.
 
@@ -69,7 +75,7 @@ from download_mirror import (                                   # noqa: E402
     DEFAULT_PRODUCT, MIRROR, VERSION, list_keys, load_manifest, local_path, plan,
 )
 from icepack2_tools.forcing import (                            # noqa: E402
-    ATMOSPHERE_PRODUCTS, ATMOSPHERE_VERSION, OCEAN_VERSION,
+    ATMOSPHERE_PRODUCTS, ATMOSPHERE_VERSION, FRACTURE_MIN_VERSION, OCEAN_VERSION,
     _resolve_version, _version_subdirs, version_key,
 )
 
@@ -176,6 +182,16 @@ def resolved_version(root, esm, scenario, product, variable):
     return subdirs[-1][1]                     # fracture, and anything unpinned: the highest
 
 
+def below_minimum(esm, scenario, product, opened):
+    r"""The minimum a fracture row must reach, when ``opened``, the version a
+    run reads, falls short of ``FRACTURE_MIN_VERSION``; otherwise None."""
+    floor = FRACTURE_MIN_VERSION.get((esm, scenario)) if product == "fracture" else None
+    if floor is None:
+        return None
+    have = version_key(opened) if opened else None
+    return floor if have is None or have < version_key(floor) else None
+
+
 def ahead_of_mirror(resolved, mirror_versions):
     r"""True when ``resolved`` is newer than every version the mirror publishes."""
     mine = version_key(resolved) if resolved else None
@@ -199,6 +215,8 @@ def audit(root, entries, manifest):
             verdicts.append(plan(size, etag, stamp, dest, manifest.get(PRODUCT + key)))
         if not loc:
             status = "MISSING"
+        elif below_minimum(esm, sc, pr, resolved or loc[-1]):
+            status = "OUTDATED"
         elif ahead_of_mirror(resolved, vers):
             status = "AHEAD"                  # whether or not the mirror's version is here too
         elif not set(vers) & set(loc):
@@ -230,7 +248,7 @@ def main():
         print(f"{esm:12s} {sc:11s} {pr:18s} {v:16s} {' '.join(vers):10s} {' '.join(loc) or '-':10s} "
               f"{resolved or '-':6s} {status}{note}")
     count = {s: sum(1 for r in rows if r[4].split()[0] == s)
-             for s in ("MISSING", "BEHIND", "PINNED", "REPLACED", "AHEAD")}
+             for s in ("MISSING", "BEHIND", "PINNED", "REPLACED", "AHEAD", "OUTDATED")}
     older = sum(r[5] for r in rows)
     print(f"\n{len(rows)} mirror entries: {count['MISSING']} missing locally, "
           f"{count['BEHIND']} behind (local version no longer on the mirror), "
@@ -239,10 +257,14 @@ def main():
     if count["AHEAD"]:
         print(f"{count['AHEAD']} ahead of the mirror: the reader opens a newer version fetched "
               f"elsewhere, which passes; cite where it came from")
+    if count["OUTDATED"]:
+        print(f"{count['OUTDATED']} outdated: a collapse mask older than forcing.FRACTURE_MIN_VERSION, "
+              f"which a mask-mode run refuses; fetch the fix from Globus with "
+              f"download_forcing.py --scenarios --esm <ESM> --scenario <scenario>")
     if older:
         print(f"{older} file(s) predate the download manifest and are older than the mirror's "
               f"object: unproven, see download_mirror.py --older")
-    return 1 if count["BEHIND"] or count["PINNED"] or count["REPLACED"] else 0
+    return 1 if count["BEHIND"] or count["PINNED"] or count["REPLACED"] or count["OUTDATED"] else 0
 
 
 if __name__ == "__main__":

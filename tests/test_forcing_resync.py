@@ -205,6 +205,33 @@ def test_a_version_newer_than_the_mirror_is_ahead_and_passes(tmp_path, monkeypat
     assert run("ssp370") == 1
 
 
+def test_a_mask_below_the_minimum_is_outdated_whatever_the_mirror_says(tmp_path, monkeypatch, capsys):
+    r"""The mirror still serves the MRI-ESM2-0 ssp585 v1 mask that v2 replaced
+    on Globus, so a tree synced from it matches the mirror and would read
+    ``ok``. The audit holds fracture rows to forcing.FRACTURE_MIN_VERSION
+    instead, and fails; ssp126, which has no fix, stays ``ok``."""
+    mri = "MRI-ESM2-0"
+    stale = _key(mri, "ssp585", "fracture", "", "ice_shelf_collapse_mask_mriesm20_ssp585_ismip7_8km-v1.nc")
+    current = _key(mri, "ssp126", "fracture", "", "ice_shelf_collapse_mask_mriesm20_ssp126_ismip7_8km-v1.nc")
+    entries = [_entry(tmp_path, stale), _entry(tmp_path, current)]
+    got = _status(tmp_path, entries)
+    assert got[("ssp585", "fracture", "")][:2] == ("OUTDATED", "v1")
+    assert got[("ssp126", "fracture", "")][:2] == ("ok", "v1")
+
+    listing = lambda prefix: [e for e in entries if e[0].startswith(prefix)]   # noqa: E731
+    real = audit.mirror_entries
+    monkeypatch.setattr(audit, "mirror_entries", lambda esms, scenarios: real(esms, scenarios, listing))
+
+    def run(scenario):
+        monkeypatch.setattr(sys, "argv", ["audit_forcing_versions.py", "--root", str(tmp_path),
+                                          "--esm", mri, "--scenario", scenario])
+        return audit.main()
+
+    assert run("ssp585") == 1
+    assert "1 outdated" in capsys.readouterr().out
+    assert run("ssp126") == 0
+
+
 def test_the_ocx_tree_is_audited_in_its_own_layout(tmp_path):
     r"""Seen on a cluster tree in September 2026: the OCX ``dacabfdz`` still at
     v1, the spatially shifted file of discussion #45, with v2 on the mirror."""

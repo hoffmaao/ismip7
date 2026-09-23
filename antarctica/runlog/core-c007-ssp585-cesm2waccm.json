@@ -13,5 +13,5 @@
   "apparent_mb": "balance",
   "dt": 0.05,
   "mesh": "the production mesh, issue #20",
-  "notes": "issue #27 holds the full-length run in the NOTS queue as job 1390452. Issue #78: 2300 is a padded mean of 2290 to 2299"
+  "notes": "issue #27 holds the full-length run in the NOTS queue as job 1390452. The run ends in 2300, as issue #78 settled: 2300 reads the distributed atmosphere, the 2290 to 2299 mean, and holds the 2299 ocean"
 }

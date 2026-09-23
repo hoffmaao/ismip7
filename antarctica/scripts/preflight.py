@@ -288,10 +288,10 @@ def main():
             yrs = atm_years(esm, scenario) or atm_years(esm, scenario, "acabf")
             gaps = sorted(set(range(y0, y1 + 1)) - set(yrs))
             # The last year of a series may be absent: the reader persists
-            # the last year on disk one year past the end (CESM2-WACCM stops
-            # at 2299 and the empty 2300 files were removed, discussion #8),
-            # so that is a note, not a missing input. Any other gap is an
-            # error the reader raises on, so it blocks.
+            # the last year on disk one year past the end (a CESM2-WACCM tree
+            # fetched while the empty 2300 files were withdrawn stops at 2299,
+            # discussion #8), so that is a note, not a missing input. Any
+            # other gap is an error the reader raises on, so it blocks.
             bridged = gaps == [y1] and yrs and yrs[-1] == y1 - 1
             if not yrs:
                 miss.append(f"{esm}/{scenario} atmosphere")

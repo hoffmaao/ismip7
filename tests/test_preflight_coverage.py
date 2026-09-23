@@ -1,11 +1,11 @@
 r"""What the preflight gate calls a missing input.
 
-The reader bridges exactly one year past the end of a series (CESM2-WACCM's
-atmosphere stops at 2299 and the empty 2300 files were removed, discussion
-#8), so a tree whose LAST year is absent runs correctly. The gate has to agree:
-calling that a missing input reports cores 5 and 7 as BLOCKED for the
-production tree they are meant to run against. Any other hole stays an error,
-because the reader raises on it.
+The reader bridges exactly one year past the end of a series (a CESM2-WACCM
+atmosphere fetched while the empty 2300 files were withdrawn stops at 2299,
+discussion #8), so a tree whose LAST year is absent runs correctly. The gate
+has to agree: calling that a missing input reports cores 5 and 7 as BLOCKED
+for such a tree. Any other hole stays an error, because the reader raises on
+it.
 
 ``atm_years`` reads only filenames, so the synthetic trees here are empty
 files in the layout ``atmosphere_path`` resolves. The shared mesh/MAP checks

@@ -114,7 +114,8 @@ shallow-shelf formulation on Firedrake 2026.4.1)
    (September 2026), where groups report 40 % to 100 % more sea level by
    2300 from the first against the second. Grounded ice is never touched,
    there is no stress condition (Lai et al. 2020), and the excess-meltwater
-   and lake-property products are not used. No collapse forcing in the
+   and lake-property products are not used. The CESM2-WACCM masks end in
+   2299, and 2300 reads the 2299 mask. No collapse forcing in the
    historical, control or OCX runs, for which none exists (discussions #29
    and #33); the front there is pinned at its 2015 position rather than
    following the observed fronts.
@@ -157,7 +158,10 @@ shallow-shelf formulation on Firedrake 2026.4.1)
     outside the downscaled mask and is filled with zero there (discussion
     #39). CESM2-WACCM ends in 2299 in its CMIP archive; its 2300
     atmosphere files, as distributed, are the 2290-2299 mean, and are read
-    as given (discussions #8 and #49). Monthly fields are averaged to the year weighted
+    as given (discussions #8 and #49). Its ocean (item 6) and collapse masks
+    (item 9) hold 2299 for 2300. The organisers' reply of 23 September 2026
+    on discussion #49 judges a single forcing year at the end insignificant
+    and accepts a 2299 duplicate for 2300. Monthly fields are averaged to the year weighted
     by month length from each file's own time axis, and the year a file
     belongs to is taken from its name, so the differing calendars and time
     stamps of the forcing products (discussions #9 and #24) do not enter.

@@ -102,7 +102,27 @@ def _gh_ready():
                           capture_output=True).returncode == 0
 
 
-@pytest.mark.skipif(not _gh_ready(), reason="gh is absent or not authenticated")
+def _board_ready():
+    r"""The board is read through the projects API, which needs `read:project`.
+
+    A classic token lists its scopes in `X-OAuth-Scopes`; a fine-grained or app
+    token sends no such header and is left to run, so a real failure still
+    fails. Grant the scope with `gh auth refresh -s read:project`.
+    """
+    if not _gh_ready():
+        return False
+    r = subprocess.run(["gh", "api", "-i", "user"], capture_output=True, text=True)
+    for line in r.stdout.splitlines():
+        if line.lower().startswith("x-oauth-scopes:"):
+            scopes = {s.strip() for s in line.split(":", 1)[1].split(",")}
+            return bool(scopes & {"read:project", "project"})
+    return True
+
+
+@pytest.mark.skipif(not _board_ready(),
+                    reason="gh cannot read the board: absent, not authenticated, "
+                           "or the token lacks read:project "
+                           "(gh auth refresh -s read:project)")
 def test_now_index_matches_the_open_issues():
     r = subprocess.run([sys.executable, str(BUILD), "--check"],
                        capture_output=True, text=True)

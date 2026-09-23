@@ -1,4 +1,4 @@
-# ismip7-scalars against the model's own scalars, 32 km ssp585 (issue #13)
+# ismip7-scalars against the model's own scalars, 32 km (issue #13)
 
 IU Quartz, 23 September 2026. `scripts/batch_runners/scalar_processing.script`
 at `b73d3ff` ran ismip7-scalars 0.1.0 (`3f36eb3`) and then
@@ -101,6 +101,34 @@ Four causes account for all of it.
 
 The p2 runs predate `2a3a58e`, which books ligroundf in both directions, so
 they exercise the chain and say nothing about the current booking.
+
+## The p4 pair: the applied-flux booking
+
+The issue 12 session ran a 32 km ctrl and ssp585 (tag p4) on its fixes
+branch. That branch books the SMB and melt the transport applied (`55ab22b`)
+and writes cells within 1 cm of flotation as grounded (`ae44194`); the same
+branch's writer regridded them. Jobs 10597334 and 10597335 at `739cdd6` ran
+the same comparison, and every gate holds. The near-flotation rule moved
+floating area to grounded in 41 (ctrl) and 14 (ssp585) years, and the gate on
+the two areas' sum absorbs it. Melt and SMB in Gt/yr, with "off the mask" the
+melt the model books outside the writer's year-end floating mask:
+
+| | year | tendlibmassbffl N | T | fill | off the mask | tendacabf N | T |
+|---|---|---|---|---|---|---|---|
+| p2_none | 2015 | -1,163 | -1,699 | -534 | -14 | +2,483 | +2,577 |
+| p2_none | 2300 | -123,427 | -43,340 | -30,933 | -111,231 | -9,492 | -10,395 |
+| p4 ssp585 | 2015 | -1,153 | -1,698 | -534 | -4 | +2,483 | +2,577 |
+| p4 ssp585 | 2300 | -3,929 | -4,978 | -2,995 | -1,986 | -2,043 | -2,153 |
+| p4 ctrl | 2300 | -1,047 | -1,592 | -545 | -9 | +2,458 | +2,547 |
+
+Booking the applied flux takes the melt off the mask at 2300 from 111,231 to
+1,986 Gt/yr, and what remains is melt the model applied to cells that are
+not floating at year end. The pixel convention then carries most of T - N:
+the tool's shelf melt is 47 % above the model's in 2015 (-1,698 against
+-1,153 Gt/yr) and 50 % above it throughout the control. Sea level is the p2
+run's to a tenth of a millimetre, since the booking is output only. The
+control's grid VAF term stays small, +3.4 mm at 2300 against -378.9 mm, where
+its shelves persist.
 
 The sections below are the job summaries as written, with two Quartz paths
 shortened: `<scratch>` is the scratch directory of the IU account that ran
@@ -690,3 +718,387 @@ max |N| = 6.8612e+07
 | 2200 | -508.768 | -486.609 | +22.159 | -10.365 | +0.000 | +0.000 | +32.524 |
 | 2282 (worst) | -471.918 | -443.353 | +28.565 | -14.787 | +0.000 | +0.000 | +43.351 |
 | 2300 | -429.294 | -402.023 | +27.271 | -15.492 | +0.000 | +0.000 | +42.764 |
+
+## Scalar comparison: p4_ctrl_C009
+
+- submission: `<scratch>/ismip7_issue12/fixed/p4/AIS/RICE/icepack2/CORE/C009`
+- tool output: `<scratch>/ismip7_issue13/p4_ctrl/tool/nc/AIS/RICE/icepack2/CORE/C009`
+- grids: `<checkout>/ISMIP7/Output-Processing/Data/AIS/af2_AIS_08000m_v1.nc` (float32), `<checkout>/ISMIP7/Output-Processing/Data/AIS/maxmask1_AIS_08000m_v0.nc` (int32)
+- densities in params.nc: 917 / 1024 / 1000
+- reference: the state stamped 2016 (nominal 2015), the run's own
+- years: 2015 to 2300 (286)
+- pixel coverage: `<checkout>/antarctica/results/ctrl2015_cesm2_waccm_p4_32000_ismip7_annual.h5.overlap.npz`
+- comparison: numpy 2.5.2, netCDF4 1.7.4
+- commit 739cdd6
+- ismip7-scalars 0.1.0, isschecker 0.5.1
+- af2_AIS_08000m_v1.nc sha256 e62c8d274cae4c262b495211ad6e8ba6fc870786e45ee31021317e4e9c3a6b0f
+- iaf2_GIC_AIS_08000m_v0.nc sha256 a133c411b899b84082625d8b2e78350294a7a76dbc8722adb7a5a46d79393999
+- maxmask1_AIS_08000m_v0.nc sha256 5a13d364ba3cbc7fdbe28bc7d54164c157ccbd33075c178efc77f7031fb7d310
+
+Exit status 0.
+
+### Gates
+
+| gate | result | worst |
+|---|---|---|
+| densities | pass | 0.000e+00 against 0.000e+00 at rhoi |
+| scalar files against the CSV | pass | -4.000e+00 against 8.075e+00 at tendligroundf 2241 |
+| T against the replay R | pass | 0.000e+00 against 2.430e+10 at lim 2015 |
+| forbidden-policy sums against N | pass | -5.319e+06 against 1.511e+07 at grounded area gained 2139 |
+| tendacabf with coverage against N | pass | -3.718e+00 against 8.747e+01 at 2215 |
+| zero fluxes | pass | 0.000e+00 against 0.000e+00 at tendlibmassbfgr 2015 |
+| sla20 = slg20 (fixed bed) | pass | 2.037e-14 against 1.000e-06 at 2292 |
+| slg20 - slvaf identity | pass | -4.897e-15 against 1.000e-09 at 2057 |
+| topg constant in time | pass | 0.000e+00 against 0.000e+00 at 2015 |
+| lim change against dlithkdt | pass | -9.805e+12 against 2.371e+13 at 2072 |
+| lim residual sign | pass | 3.799e+12 against 2.655e+13 at 2057 |
+| T differs from N | pass | 0.000e+00 against 0.000e+00 at lim 2015 |
+| af2 > 0 under ice and flux | pass | 0.000e+00 against 0.000e+00 at all years |
+
+### Named differences
+
+- area factor (af2), largest share of max |N|: lim +2.56%, limnsw +2.57%, iareagr +2.32%, iareafl +2.35%, tendacabf +0.97%, tendlibmassbffl -0.91%, tendlicalvf -1.23%, tendligroundf +1.17%, slvaf -1.99%, slg20 -1.99%, sla20 -1.99%
+- maximum-extent mask: 0 pixels carry ice or flux outside maxmask1; lim +0.000%, limnsw +0.000%, slvaf +0.000%, slg20 +0.000%
+- fill convention, tendacabf: the tool's whole-pixel sum minus the coverage-weighted one is +2.66% of max |N| (2300)
+- fill convention, tendlibmassbffl: the tool's whole-pixel sum minus the coverage-weighted one is -52.11% of max |N| (2299)
+- near flotation: 41 years write floating area as grounded, at most 1.152e+09 m2 (2151)
+- tendlibmassbffl: the model's value carries -13.8 Gt/yr outside the writer's year-end floating mask (2213)
+
+### By scalar
+
+T - N and its parts, as shares of max |N| over the run; sea level in mm.
+
+#### lim (kg)
+
+max |N| = 2.3808e+19
+
+| year | N | T | T - N | area | max mask | fill | residual |
+|---|---|---|---|---|---|---|---|
+| 2015 | 2.3688e+19 | 2.4296e+19 | +2.553% | +2.553% | +0.000% | +0.000% | +0.000% |
+| 2050 | 2.3702e+19 | 2.4310e+19 | +2.554% | +2.554% | +0.000% | +0.000% | -0.000% |
+| 2100 | 2.3723e+19 | 2.4331e+19 | +2.556% | +2.556% | +0.000% | +0.000% | -0.000% |
+| 2200 | 2.3765e+19 | 2.4375e+19 | +2.559% | +2.559% | +0.000% | +0.000% | -0.000% |
+| 2300 (worst) | 2.3808e+19 | 2.4418e+19 | +2.563% | +2.563% | +0.000% | +0.000% | -0.000% |
+
+#### limnsw (kg)
+
+max |N| = 2.0799e+19
+
+| year | N | T | T - N | area | max mask | fill | residual |
+|---|---|---|---|---|---|---|---|
+| 2015 | 2.0661e+19 | 2.1195e+19 | +2.564% | +2.556% | +0.000% | +0.000% | +0.008% |
+| 2050 | 2.0680e+19 | 2.1213e+19 | +2.565% | +2.558% | +0.000% | +0.000% | +0.006% |
+| 2100 | 2.0705e+19 | 2.1239e+19 | +2.566% | +2.561% | +0.000% | +0.000% | +0.006% |
+| 2200 | 2.0752e+19 | 2.1286e+19 | +2.569% | +2.565% | +0.000% | +0.000% | +0.004% |
+| 2300 (worst) | 2.0799e+19 | 2.1334e+19 | +2.571% | +2.570% | +0.000% | +0.000% | +0.002% |
+
+#### iareagr (m2)
+
+max |N| = 1.2086e+13
+
+| year | N | T | T - N | area | max mask | fill | residual |
+|---|---|---|---|---|---|---|---|
+| 2015 | 1.2077e+13 | 1.2357e+13 | +2.315% | +2.315% | +0.000% | +0.000% | +0.000% |
+| 2050 | 1.2078e+13 | 1.2358e+13 | +2.316% | +2.316% | +0.000% | +0.000% | +0.000% |
+| 2100 | 1.2085e+13 | 1.2366e+13 | +2.325% | +2.319% | +0.000% | +0.000% | +0.006% |
+| 2151 (worst) | 1.2075e+13 | 1.2356e+13 | +2.326% | +2.316% | +0.000% | +0.000% | +0.010% |
+| 2200 | 1.2074e+13 | 1.2354e+13 | +2.315% | +2.315% | +0.000% | +0.000% | -0.000% |
+| 2300 | 1.2074e+13 | 1.2354e+13 | +2.314% | +2.314% | +0.000% | +0.000% | -0.000% |
+
+#### iareafl (m2)
+
+max |N| = 1.4261e+12
+
+| year | N | T | T - N | area | max mask | fill | residual |
+|---|---|---|---|---|---|---|---|
+| 2015 | 1.4261e+12 | 1.4594e+12 | +2.338% | +2.338% | +0.000% | +0.000% | +0.000% |
+| 2050 | 1.4223e+12 | 1.4556e+12 | +2.329% | +2.329% | +0.000% | +0.000% | +0.000% |
+| 2100 | 1.4117e+12 | 1.4437e+12 | +2.248% | +2.297% | +0.000% | +0.000% | -0.049% |
+| 2200 | 1.4151e+12 | 1.4484e+12 | +2.337% | +2.337% | +0.000% | +0.000% | +0.000% |
+| 2268 (worst) | 1.4137e+12 | 1.4472e+12 | +2.348% | +2.348% | +0.000% | +0.000% | -0.000% |
+| 2300 | 1.4109e+12 | 1.4443e+12 | +2.341% | +2.341% | +0.000% | +0.000% | -0.000% |
+
+#### tendacabf (kg s-1)
+
+max |N| = 7.7877e+07
+
+| year | N | T | T - N | area | max mask | fill | residual |
+|---|---|---|---|---|---|---|---|
+| 2015 | 7.7877e+07 | 8.0705e+07 | +3.631% | +0.970% | +0.000% | +2.662% | -0.000% |
+| 2050 | 7.7877e+07 | 8.0705e+07 | +3.631% | +0.970% | +0.000% | +2.662% | -0.000% |
+| 2100 | 7.7877e+07 | 8.0705e+07 | +3.631% | +0.970% | +0.000% | +2.662% | -0.000% |
+| 2200 | 7.7877e+07 | 8.0705e+07 | +3.631% | +0.970% | +0.000% | +2.662% | -0.000% |
+| 2300 (worst) | 7.7877e+07 | 8.0705e+07 | +3.631% | +0.970% | +0.000% | +2.662% | -0.000% |
+
+#### tendlibmassbfgr (kg s-1)
+
+zero on both sides, 286 years
+
+#### tendlibmassbffl (kg s-1)
+
+max |N| = 3.3263e+07
+
+| year | N | T | T - N | area | max mask | fill | residual |
+|---|---|---|---|---|---|---|---|
+| 2015 | -3.3069e+07 | -4.9455e+07 | -49.261% | -0.885% | +0.000% | -48.772% | +0.396% |
+| 2050 | -3.2987e+07 | -4.9410e+07 | -49.375% | -0.884% | +0.000% | -48.949% | +0.458% |
+| 2100 | -3.2872e+07 | -4.9446e+07 | -49.827% | -0.861% | +0.000% | -49.539% | +0.574% |
+| 2200 | -3.3150e+07 | -5.0076e+07 | -50.887% | -0.899% | +0.000% | -50.822% | +0.835% |
+| 2299 (worst) | -3.3201e+07 | -5.0548e+07 | -52.149% | -0.897% | +0.000% | -52.106% | +0.854% |
+| 2300 | -3.3189e+07 | -5.0459e+07 | -51.919% | -0.888% | +0.000% | -51.910% | +0.879% |
+
+#### tendlicalvf (kg s-1)
+
+max |N| = 3.2724e+04
+
+| year | N | T | T - N | area | max mask | fill | residual |
+|---|---|---|---|---|---|---|---|
+| 2015 | -1.9721e+04 | -2.0003e+04 | -0.861% | -0.861% | +0.000% | +0.000% | +0.000% |
+| 2050 | -2.4211e+04 | -2.4553e+04 | -1.046% | -1.046% | +0.000% | +0.000% | -0.000% |
+| 2100 | -3.1519e+04 | -3.1865e+04 | -1.057% | -1.057% | +0.000% | +0.000% | -0.000% |
+| 2200 | -2.9860e+04 | -3.0259e+04 | -1.219% | -1.219% | +0.000% | +0.000% | -0.000% |
+| 2205 (worst) | -3.1547e+04 | -3.1949e+04 | -1.228% | -1.228% | +0.000% | +0.000% | -0.000% |
+| 2300 | -2.8915e+04 | -2.9311e+04 | -1.209% | -1.209% | +0.000% | +0.000% | +0.000% |
+
+#### tendlifmassbf (kg s-1)
+
+zero on both sides, 286 years
+
+#### tendligroundf (kg s-1)
+
+max |N| = 6.7960e+07
+
+| year | N | T | T - N | area | max mask | fill | residual |
+|---|---|---|---|---|---|---|---|
+| 2015 | 6.2242e+07 | 6.2889e+07 | +0.951% | +0.951% | +0.000% | +0.000% | -0.000% |
+| 2050 | 6.2915e+07 | 6.3569e+07 | +0.961% | +0.961% | +0.000% | +0.000% | +0.000% |
+| 2100 | 6.4576e+07 | 6.5284e+07 | +1.041% | +1.041% | +0.000% | +0.000% | +0.000% |
+| 2170 (worst) | 6.7372e+07 | 6.8167e+07 | +1.171% | +1.171% | +0.000% | +0.000% | +0.000% |
+| 2200 | 6.6658e+07 | 6.7421e+07 | +1.123% | +1.123% | +0.000% | +0.000% | -0.000% |
+| 2300 | 6.7775e+07 | 6.8566e+07 | +1.165% | +1.165% | +0.000% | +0.000% | +0.000% |
+
+#### slvaf (mm)
+
+| year | N | T | T - N | area | max mask | fill | residual |
+|---|---|---|---|---|---|---|---|
+| 2015 | -0.000 | -0.000 | +0.000 | +0.000 | +0.000 | +0.000 | +0.000 |
+| 2050 | -50.702 | -51.021 | -0.319 | -1.021 | +0.000 | +0.000 | +0.702 |
+| 2100 | -120.082 | -121.335 | -1.254 | -2.454 | +0.000 | +0.000 | +1.200 |
+| 2200 | -249.433 | -252.080 | -2.647 | -4.959 | +0.000 | +0.000 | +2.312 |
+| 2300 (worst) | -378.899 | -383.065 | -4.165 | -7.557 | +0.000 | +0.000 | +3.392 |
+
+#### slg20 (mm)
+
+| year | N | T | T - N | area | max mask | fill | residual |
+|---|---|---|---|---|---|---|---|
+| 2015 | -0.000 | -0.000 | +0.000 | +0.000 | +0.000 | +0.000 | +0.000 |
+| 2050 | -50.410 | -50.740 | -0.330 | -1.015 | +0.000 | +0.000 | +0.686 |
+| 2100 | -119.523 | -120.792 | -1.269 | -2.442 | +0.000 | +0.000 | +1.173 |
+| 2200 | -248.595 | -251.277 | -2.683 | -4.940 | +0.000 | +0.000 | +2.258 |
+| 2300 (worst) | -377.745 | -381.960 | -4.216 | -7.528 | +0.000 | +0.000 | +3.312 |
+
+#### sla20 (mm)
+
+| year | N | T | T - N | area | max mask | fill | residual |
+|---|---|---|---|---|---|---|---|
+| 2015 | -0.000 | 0.000 | +0.000 | +0.000 | +0.000 | +0.000 | +0.000 |
+| 2050 | -50.410 | -50.740 | -0.330 | -1.015 | +0.000 | +0.000 | +0.686 |
+| 2100 | -119.523 | -120.792 | -1.269 | -2.442 | +0.000 | +0.000 | +1.173 |
+| 2200 | -248.595 | -251.277 | -2.683 | -4.940 | +0.000 | +0.000 | +2.258 |
+| 2300 (worst) | -377.745 | -381.960 | -4.216 | -7.528 | +0.000 | +0.000 | +3.312 |
+
+## Scalar comparison: p4_ssp585_C007
+
+- submission: `<scratch>/ismip7_issue12/fixed/p4/AIS/RICE/icepack2/CORE/C007`
+- tool output: `<scratch>/ismip7_issue13/p4_ssp585/tool/nc/AIS/RICE/icepack2/CORE/C007`
+- grids: `<checkout>/ISMIP7/Output-Processing/Data/AIS/af2_AIS_08000m_v1.nc` (float32), `<checkout>/ISMIP7/Output-Processing/Data/AIS/maxmask1_AIS_08000m_v0.nc` (int32)
+- densities in params.nc: 917 / 1024 / 1000
+- reference: the state stamped 2016 (nominal 2015), the run's own
+- years: 2015 to 2300 (286)
+- pixel coverage: `<checkout>/antarctica/results/ssp585_cesm2_waccm_p4_32000_ismip7_annual.h5.overlap.npz`
+- comparison: numpy 2.5.2, netCDF4 1.7.4
+- commit 739cdd6
+- ismip7-scalars 0.1.0, isschecker 0.5.1
+- af2_AIS_08000m_v1.nc sha256 e62c8d274cae4c262b495211ad6e8ba6fc870786e45ee31021317e4e9c3a6b0f
+- iaf2_GIC_AIS_08000m_v0.nc sha256 a133c411b899b84082625d8b2e78350294a7a76dbc8722adb7a5a46d79393999
+- maxmask1_AIS_08000m_v0.nc sha256 5a13d364ba3cbc7fdbe28bc7d54164c157ccbd33075c178efc77f7031fb7d310
+
+Exit status 0.
+
+### Gates
+
+| gate | result | worst |
+|---|---|---|
+| densities | pass | 0.000e+00 against 0.000e+00 at rhoi |
+| scalar files against the CSV | pass | -2.000e+00 against 4.029e+00 at tendacabf 2240 |
+| T against the replay R | pass | 0.000e+00 against 2.430e+10 at lim 2015 |
+| forbidden-policy sums against N | pass | -5.174e+06 against 1.337e+07 at grounded area gained 2259 |
+| tendacabf with coverage against N | pass | -5.112e+00 against 3.812e+01 at 2194 |
+| zero fluxes | pass | 0.000e+00 against 0.000e+00 at tendlibmassbfgr 2015 |
+| sla20 = slg20 (fixed bed) | pass | -1.898e-14 against 1.000e-06 at 2134 |
+| slg20 - slvaf identity | pass | 5.173e-15 against 1.000e-09 at 2071 |
+| topg constant in time | pass | 0.000e+00 against 0.000e+00 at 2015 |
+| lim change against dlithkdt | pass | 1.040e+13 against 2.364e+13 at 2103 |
+| lim residual sign | pass | 2.028e+12 against 2.652e+13 at 2074 |
+| T differs from N | pass | 0.000e+00 against 0.000e+00 at lim 2015 |
+| af2 > 0 under ice and flux | pass | 0.000e+00 against 0.000e+00 at all years |
+
+### Named differences
+
+- area factor (af2), largest share of max |N|: lim +2.57%, limnsw +2.58%, iareagr +2.32%, iareafl +2.34%, tendacabf +2.14%, tendlibmassbffl -2.67%, tendlicalvf -1.13%, tendligroundf +1.30%, slvaf -3.48%, slg20 -3.48%, sla20 -3.48%
+- maximum-extent mask: 0 pixels carry ice or flux outside maxmask1; lim +0.000%, limnsw +0.000%, slvaf +0.000%, slg20 +0.000%
+- fill convention, tendacabf: the tool's whole-pixel sum minus the coverage-weighted one is -4.00% of max |N| (2259)
+- fill convention, tendlibmassbffl: the tool's whole-pixel sum minus the coverage-weighted one is -51.00% of max |N| (2203)
+- near flotation: 14 years write floating area as grounded, at most 1.076e+09 m2 (2144)
+- tendlibmassbffl: the model's value carries -2441.8 Gt/yr outside the writer's year-end floating mask (2283)
+- slvaf: residual +8.27% of max |N| (2297), above 2%
+- slg20: residual +8.82% of max |N| (2297), above 2%
+- sla20: residual +8.82% of max |N| (2297), above 2%
+
+### By scalar
+
+T - N and its parts, as shares of max |N| over the run; sea level in mm.
+
+#### lim (kg)
+
+max |N| = 2.3691e+19
+
+| year | N | T | T - N | area | max mask | fill | residual |
+|---|---|---|---|---|---|---|---|
+| 2015 | 2.3688e+19 | 2.4296e+19 | +2.566% | +2.566% | +0.000% | +0.000% | -0.000% |
+| 2036 (worst) | 2.3690e+19 | 2.4298e+19 | +2.566% | +2.566% | +0.000% | +0.000% | -0.000% |
+| 2050 | 2.3690e+19 | 2.4298e+19 | +2.566% | +2.566% | +0.000% | +0.000% | -0.000% |
+| 2100 | 2.3644e+19 | 2.4251e+19 | +2.561% | +2.561% | +0.000% | +0.000% | -0.000% |
+| 2200 | 2.3315e+19 | 2.3912e+19 | +2.521% | +2.521% | +0.000% | +0.000% | -0.000% |
+| 2300 | 2.3070e+19 | 2.3662e+19 | +2.501% | +2.502% | +0.000% | +0.000% | -0.000% |
+
+#### limnsw (kg)
+
+max |N| = 2.0835e+19
+
+| year | N | T | T - N | area | max mask | fill | residual |
+|---|---|---|---|---|---|---|---|
+| 2015 (worst) | 2.0661e+19 | 2.1195e+19 | +2.560% | +2.552% | +0.000% | +0.000% | +0.008% |
+| 2050 | 2.0683e+19 | 2.1216e+19 | +2.558% | +2.554% | +0.000% | +0.000% | +0.004% |
+| 2100 | 2.0729e+19 | 2.1261e+19 | +2.552% | +2.559% | +0.000% | +0.000% | -0.006% |
+| 2200 | 2.0831e+19 | 2.1359e+19 | +2.534% | +2.573% | +0.000% | +0.000% | -0.039% |
+| 2300 | 2.0797e+19 | 2.1322e+19 | +2.520% | +2.581% | +0.000% | +0.000% | -0.061% |
+
+#### iareagr (m2)
+
+max |N| = 1.2078e+13
+
+| year | N | T | T - N | area | max mask | fill | residual |
+|---|---|---|---|---|---|---|---|
+| 2015 | 1.2077e+13 | 1.2357e+13 | +2.316% | +2.316% | +0.000% | +0.000% | +0.000% |
+| 2050 | 1.2076e+13 | 1.2356e+13 | +2.317% | +2.317% | +0.000% | +0.000% | +0.000% |
+| 2100 | 1.2070e+13 | 1.2350e+13 | +2.318% | +2.318% | +0.000% | +0.000% | -0.000% |
+| 2144 (worst) | 1.2029e+13 | 1.2310e+13 | +2.324% | +2.315% | +0.000% | +0.000% | +0.009% |
+| 2200 | 1.1854e+13 | 1.2130e+13 | +2.286% | +2.286% | +0.000% | +0.000% | -0.000% |
+| 2300 | 1.1528e+13 | 1.1798e+13 | +2.236% | +2.236% | +0.000% | +0.000% | -0.000% |
+
+#### iareafl (m2)
+
+max |N| = 1.4262e+12
+
+| year | N | T | T - N | area | max mask | fill | residual |
+|---|---|---|---|---|---|---|---|
+| 2015 | 1.4261e+12 | 1.4595e+12 | +2.338% | +2.338% | +0.000% | +0.000% | +0.000% |
+| 2016 (worst) | 1.4260e+12 | 1.4593e+12 | +2.338% | +2.338% | +0.000% | +0.000% | -0.000% |
+| 2050 | 1.4238e+12 | 1.4571e+12 | +2.335% | +2.335% | +0.000% | +0.000% | +0.000% |
+| 2100 | 1.3701e+12 | 1.4032e+12 | +2.327% | +2.327% | +0.000% | +0.000% | -0.000% |
+| 2200 | 7.3468e+11 | 7.5900e+11 | +1.706% | +1.706% | +0.000% | +0.000% | +0.000% |
+| 2300 | 1.6128e+11 | 1.6541e+11 | +0.289% | +0.289% | +0.000% | +0.000% | +0.000% |
+
+#### tendacabf (kg s-1)
+
+max |N| = 9.8191e+07
+
+| year | N | T | T - N | area | max mask | fill | residual |
+|---|---|---|---|---|---|---|---|
+| 2015 | 7.8686e+07 | 8.1664e+07 | +3.032% | +0.742% | +0.000% | +2.291% | +0.000% |
+| 2050 | 8.1236e+07 | 8.4117e+07 | +2.935% | +0.577% | +0.000% | +2.358% | -0.000% |
+| 2100 | 9.3556e+07 | 9.5785e+07 | +2.270% | +1.389% | +0.000% | +0.882% | -0.000% |
+| 2200 | 2.3996e+06 | -1.2703e+06 | -3.738% | -0.203% | +0.000% | -3.535% | +0.000% |
+| 2273 (worst) | -7.2732e+07 | -7.6963e+07 | -4.309% | -0.438% | +0.000% | -3.872% | +0.000% |
+| 2300 | -6.4723e+07 | -6.8223e+07 | -3.565% | -0.067% | +0.000% | -3.498% | -0.000% |
+
+#### tendlibmassbfgr (kg s-1)
+
+zero on both sides, 286 years
+
+#### tendlibmassbffl (kg s-1)
+
+max |N| = 2.5420e+08
+
+| year | N | T | T - N | area | max mask | fill | residual |
+|---|---|---|---|---|---|---|---|
+| 2015 | -3.6534e+07 | -5.3816e+07 | -6.799% | -0.194% | +0.000% | -6.652% | +0.047% |
+| 2050 | -5.2311e+07 | -7.4606e+07 | -8.771% | -0.325% | +0.000% | -8.538% | +0.093% |
+| 2100 | -1.6483e+08 | -2.2567e+08 | -23.934% | -1.133% | +0.000% | -24.024% | +1.223% |
+| 2150 (worst) | -2.4137e+08 | -3.3581e+08 | -37.151% | -2.313% | +0.000% | -41.644% | +6.807% |
+| 2200 | -1.9415e+08 | -2.7460e+08 | -31.651% | -1.839% | +0.000% | -45.335% | +15.523% |
+| 2300 | -1.2451e+08 | -1.5774e+08 | -13.070% | -0.495% | +0.000% | -37.336% | +24.761% |
+
+#### tendlicalvf (kg s-1)
+
+max |N| = 3.5241e+04
+
+| year | N | T | T - N | area | max mask | fill | residual |
+|---|---|---|---|---|---|---|---|
+| 2015 | -1.7758e+04 | -1.8032e+04 | -0.775% | -0.775% | +0.000% | +0.000% | +0.000% |
+| 2050 | -2.7626e+04 | -2.7967e+04 | -0.968% | -0.968% | +0.000% | +0.000% | +0.000% |
+| 2081 (worst) | -2.9600e+04 | -2.9999e+04 | -1.135% | -1.135% | +0.000% | +0.000% | +0.000% |
+| 2100 | -2.4412e+04 | -2.4747e+04 | -0.952% | -0.952% | +0.000% | +0.000% | -0.000% |
+| 2200 | -1.7086e+04 | -1.7381e+04 | -0.835% | -0.835% | +0.000% | +0.000% | +0.000% |
+| 2300 | -2.9820e+03 | -3.0591e+03 | -0.219% | -0.219% | +0.000% | +0.000% | +0.000% |
+
+#### tendlifmassbf (kg s-1)
+
+zero on both sides, 286 years
+
+#### tendligroundf (kg s-1)
+
+max |N| = 6.5987e+07
+
+| year | N | T | T - N | area | max mask | fill | residual |
+|---|---|---|---|---|---|---|---|
+| 2015 | 6.2253e+07 | 6.2899e+07 | +0.979% | +0.979% | +0.000% | +0.000% | -0.000% |
+| 2050 | 6.3325e+07 | 6.4009e+07 | +1.037% | +1.037% | +0.000% | +0.000% | +0.000% |
+| 2100 | 6.4722e+07 | 6.5491e+07 | +1.164% | +1.164% | +0.000% | +0.000% | +0.000% |
+| 2176 (worst) | 5.5413e+07 | 5.6271e+07 | +1.301% | +1.301% | +0.000% | +0.000% | +0.000% |
+| 2200 | 4.9180e+07 | 4.9759e+07 | +0.877% | +0.877% | +0.000% | +0.000% | +0.000% |
+| 2300 | 4.8429e+07 | 4.9086e+07 | +0.996% | +0.996% | +0.000% | +0.000% | +0.000% |
+
+#### slvaf (mm)
+
+| year | N | T | T - N | area | max mask | fill | residual |
+|---|---|---|---|---|---|---|---|
+| 2015 | -0.000 | -0.000 | +0.000 | +0.000 | +0.000 | +0.000 | +0.000 |
+| 2050 | -58.291 | -57.365 | +0.925 | -1.162 | +0.000 | +0.000 | +2.088 |
+| 2100 | -186.180 | -181.905 | +4.275 | -3.715 | +0.000 | +0.000 | +7.990 |
+| 2200 | -467.200 | -452.279 | +14.921 | -11.776 | +0.000 | +0.000 | +26.697 |
+| 2293 (worst) | -389.297 | -366.172 | +23.125 | -16.357 | +0.000 | +0.000 | +39.482 |
+| 2300 | -373.573 | -350.785 | +22.789 | -16.625 | +0.000 | +0.000 | +39.414 |
+
+#### slg20 (mm)
+
+| year | N | T | T - N | area | max mask | fill | residual |
+|---|---|---|---|---|---|---|---|
+| 2015 | -0.000 | -0.000 | +0.000 | +0.000 | +0.000 | +0.000 | +0.000 |
+| 2050 | -57.067 | -56.164 | +0.903 | -1.135 | +0.000 | +0.000 | +2.039 |
+| 2100 | -179.003 | -174.758 | +4.245 | -3.558 | +0.000 | +0.000 | +7.803 |
+| 2200 | -432.142 | -416.890 | +15.252 | -10.823 | +0.000 | +0.000 | +26.074 |
+| 2293 (worst) | -341.006 | -317.443 | +23.563 | -14.999 | +0.000 | +0.000 | +38.561 |
+| 2300 | -324.839 | -301.599 | +23.240 | -15.255 | +0.000 | +0.000 | +38.495 |
+
+#### sla20 (mm)
+
+| year | N | T | T - N | area | max mask | fill | residual |
+|---|---|---|---|---|---|---|---|
+| 2015 | -0.000 | 0.000 | +0.000 | +0.000 | +0.000 | +0.000 | +0.000 |
+| 2050 | -57.067 | -56.164 | +0.903 | -1.135 | +0.000 | +0.000 | +2.039 |
+| 2100 | -179.003 | -174.758 | +4.245 | -3.558 | +0.000 | +0.000 | +7.803 |
+| 2200 | -432.142 | -416.890 | +15.252 | -10.823 | +0.000 | +0.000 | +26.074 |
+| 2293 (worst) | -341.006 | -317.443 | +23.563 | -14.999 | +0.000 | +0.000 | +38.561 |
+| 2300 | -324.839 | -301.599 | +23.240 | -15.255 | +0.000 | +0.000 | +38.495 |

@@ -21,7 +21,7 @@ stops immediately and says so.
 
 ```bash
 submit.sh inversion  ISMIP7_LC=2000 ISMIP7_LC_COARSE=5000 ISMIP7_MESH=$PWD/antarctica/mesh/antarctica_5000_2000_buffered0.msh
-submit.sh projection ISMIP7_EXPERIMENT=ssp585_cesm_waccm ISMIP7_OUTPUT=1
+submit.sh projection ISMIP7_EXPERIMENT=ssp585_cesm_waccm
 submit.sh smoke                                  # minutes, debug partition
 submit.sh inversion --dry-run                    # print the sbatch line only
 submit.sh projection --partition debug --time 00:30:00 --tasks 8
@@ -401,6 +401,8 @@ submit.sh projection ISMIP7_EXPERIMENT=control
 | `ssp585_cesm_waccm` / `ssp585_mri_esm2` | 7 / 8 | 2015-2300 |
 | `ocx` | 11 | 1979-2025 |
 | `hist_cesm_waccm` / `hist_mri_esm2` | 1 / 2 | 1850-2014 |
+
+The runner writes the submission's yearly fields and scalars by default (`ISMIP7_OUTPUT=1`), because every experiment it offers is a core experiment and a projection that reaches 2300 without them has to be run again. `ISMIP7_OUTPUT=0` turns that off for a pipeline exercise.
 
 **The chain stops on a non-zero exit and never retries.** The July
 grounding-line blow-up looked like a run that needed more time, and chaining

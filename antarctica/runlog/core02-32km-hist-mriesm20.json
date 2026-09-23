@@ -2,7 +2,6 @@
   "id": "core02-32km-hist-mriesm20",
   "task": "historical",
   "institution": "Rice",
-  "owner": "Andrew",
   "title": "Core 2: historical with MRI-ESM2-0",
   "status": "superseded",
   "esm": "MRI-ESM2-0",

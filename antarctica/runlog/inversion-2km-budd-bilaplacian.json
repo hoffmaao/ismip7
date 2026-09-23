@@ -2,7 +2,6 @@
   "id": "inversion-2km-budd-bilaplacian",
   "task": "inversion",
   "institution": "Rice",
-  "owner": "Andrew",
   "title": "2 km Budd inversion under the bilaplacian prior",
   "status": "running",
   "friction": "budd",

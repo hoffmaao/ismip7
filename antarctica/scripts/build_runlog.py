@@ -59,7 +59,6 @@ STATUSES = ("planned", "queued", "running", "stopped", "done", "superseded")
 FIELDS = (
     ("id", "Record"),
     ("institution", "Institution"),
-    ("owner", "Owner"),
     ("title", "Simulation"),
     ("status", "Status"),
     ("task", "Task type"),
@@ -197,6 +196,16 @@ def render(records):
     return "\n".join(out).rstrip() + "\n"
 
 
+def _csv_cell(value):
+    r"""One field as sheet text: a list joins, an empty value stays empty, and
+    everything else is the record's own text, which the csv module quotes."""
+    if value is None or value == [] or value == "":
+        return ""
+    if isinstance(value, (list, tuple)):
+        return " ".join(str(v) for v in value)
+    return str(value)
+
+
 def write_csv(records, path):
     r"""The records flat, one row each, for the group's shared progress sheet.
 
@@ -207,13 +216,13 @@ def write_csv(records, path):
     repository, so that reader is never a second place to type any of it."""
     import csv
 
+    Path(path).parent.mkdir(parents=True, exist_ok=True)
     with open(path, "w", newline="") as handle:
         writer = csv.writer(handle)
         writer.writerow([heading for _, heading in FIELDS])
         for record in records:
             writer.writerow([
-                "" if record.get(key) in (None, [], "") else _cell(record.get(key))
-                for key, _ in FIELDS])
+                _csv_cell(record.get(key)) for key, _ in FIELDS])
     return len(records)
 
 

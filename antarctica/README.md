@@ -1250,9 +1250,9 @@ timeseries is regenerated. What reaches the repository is a record. Every
 simulation, of any kind, leaves one JSON file in `antarctica/runlog/`, and
 
 ```bash
-make -C antarctica runlog                       # render reports/SIMULATIONS.md
-make -C antarctica runlog RUNLOG_CSV=log.csv    # and the records flat
-make -C antarctica runlog-check                 # exits 1 on a stale render
+make -C antarctica runlog                                # render reports/SIMULATIONS.md
+make -C antarctica runlog RUNLOG_CSV=results/runlog.csv  # and the records flat
+make -C antarctica runlog-check                          # exits 1 on a stale render
 ```
 
 renders them into `antarctica/reports/SIMULATIONS.md`, grouped by task kind,

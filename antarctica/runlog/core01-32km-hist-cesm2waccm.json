@@ -2,7 +2,6 @@
   "id": "core01-32km-hist-cesm2waccm",
   "task": "historical",
   "institution": "Rice",
-  "owner": "Andrew",
   "title": "Core 1: historical with CESM2-WACCM",
   "status": "superseded",
   "esm": "CESM2-WACCM",

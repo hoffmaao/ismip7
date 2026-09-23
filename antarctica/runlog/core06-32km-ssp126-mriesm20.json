@@ -2,7 +2,6 @@
   "id": "core06-32km-ssp126-mriesm20",
   "task": "projection",
   "institution": "Rice",
-  "owner": "Andrew",
   "title": "Core 6: ssp126 with MRI-ESM2-0",
   "status": "superseded",
   "esm": "MRI-ESM2-0",

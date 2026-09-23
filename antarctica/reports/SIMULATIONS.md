@@ -95,7 +95,6 @@ Status: 12 planned, 4 running, 3 stopped, 6 done, 11 superseded.
 
 1 km inversion (planned), Rice.
 
-- **Owner:** Andrew
 - **Task type:** inversion
 - **Mesh:** antarctica_10000_1000_buffered20000, 1 km fine, 10 km interior, 20 km buffer
 - **Site / partition:** nots, long partition
@@ -107,7 +106,6 @@ Status: 12 planned, 4 running, 3 stopped, 6 done, 11 superseded.
 
 2 km Budd inversion under the bilaplacian prior (running), Rice.
 
-- **Owner:** Andrew
 - **Task type:** inversion
 - **Period (yr):** 2015 state
 - **Friction law:** budd
@@ -129,7 +127,6 @@ Status: 12 planned, 4 running, 3 stopped, 6 done, 11 superseded.
 
 2 km regularized-Coulomb inversion under the bilaplacian prior (running), Rice.
 
-- **Owner:** Andrew
 - **Task type:** inversion
 - **Period (yr):** 2015 state
 - **Friction law:** regularized_coulomb
@@ -151,7 +148,6 @@ Status: 12 planned, 4 running, 3 stopped, 6 done, 11 superseded.
 
 Ocean melt: toolbox K and the per-basin thermal-forcing offset (done), Rice.
 
-- **Owner:** Andrew
 - **Task type:** calibration
 - **Period (yr):** present day
 - **Mesh:** antarctica_5000_2000_buffered0
@@ -242,7 +238,6 @@ Core 7 at 32 km, collapse mode ISMIP7_FRACTURE=none (done), IU.
 
 1 km control from the transferred Budd snapshot at half the step (running), Rice.
 
-- **Owner:** Andrew
 - **Task type:** test
 - **ESM:** CESM2-WACCM
 - **Scenario:** ctrl
@@ -268,7 +263,6 @@ Core 7 at 32 km, collapse mode ISMIP7_FRACTURE=none (done), IU.
 
 1 km control with the MAP's own geometry carried onto the target (stopped), Rice.
 
-- **Owner:** Andrew
 - **Task type:** test
 - **ESM:** CESM2-WACCM
 - **Scenario:** ctrl
@@ -295,7 +289,6 @@ Core 7 at 32 km, collapse mode ISMIP7_FRACTURE=none (done), IU.
 
 1 km control from the transferred Budd snapshot (stopped), Rice.
 
-- **Owner:** Andrew
 - **Task type:** test
 - **ESM:** CESM2-WACCM
 - **Scenario:** ctrl, RACMO climatology and the OI ocean
@@ -323,7 +316,6 @@ Core 7 at 32 km, collapse mode ISMIP7_FRACTURE=none (done), IU.
 
 1 km control from the transferred regularized-Coulomb snapshot (stopped), Rice.
 
-- **Owner:** Andrew
 - **Task type:** test
 - **ESM:** CESM2-WACCM
 - **Scenario:** ctrl
@@ -349,7 +341,6 @@ Core 7 at 32 km, collapse mode ISMIP7_FRACTURE=none (done), IU.
 
 2 km control on the MAP's own mesh, with no transfer (done), Rice.
 
-- **Owner:** Andrew
 - **Task type:** test
 - **ESM:** CESM2-WACCM
 - **Scenario:** ctrl
@@ -376,7 +367,6 @@ Core 7 at 32 km, collapse mode ISMIP7_FRACTURE=none (done), IU.
 
 2 km control from the transferred Budd snapshot (running), Rice.
 
-- **Owner:** Andrew
 - **Task type:** test
 - **ESM:** CESM2-WACCM
 - **Scenario:** ctrl
@@ -434,7 +424,6 @@ C002: historical with MRI-ESM2-0 (planned), unassigned.
 
 Core 1: historical with CESM2-WACCM (superseded), Rice.
 
-- **Owner:** Andrew
 - **Task type:** historical
 - **ESM:** CESM2-WACCM
 - **Scenario:** historical
@@ -455,7 +444,6 @@ Core 1: historical with CESM2-WACCM (superseded), Rice.
 
 Core 2: historical with MRI-ESM2-0 (superseded), Rice.
 
-- **Owner:** Andrew
 - **Task type:** historical
 - **ESM:** MRI-ESM2-0
 - **Scenario:** historical
@@ -506,7 +494,6 @@ C010: ctrl with MRI-ESM2-0 (planned), unassigned.
 
 Core 9: CTRL2015 with CESM2-WACCM (superseded), Rice.
 
-- **Owner:** Andrew
 - **Task type:** control
 - **ESM:** CESM2-WACCM
 - **Scenario:** ctrl
@@ -527,7 +514,6 @@ Core 9: CTRL2015 with CESM2-WACCM (superseded), Rice.
 
 Core 10: CTRL2015 with MRI-ESM2-0 (superseded), Rice.
 
-- **Owner:** Andrew
 - **Task type:** control
 - **ESM:** MRI-ESM2-0
 - **Scenario:** ctrl
@@ -639,7 +625,6 @@ C008: ssp585 with MRI-ESM2-0 (planned), unassigned.
 
 Core 3: ssp370 with CESM2-WACCM (superseded), Rice.
 
-- **Owner:** Andrew
 - **Task type:** projection
 - **ESM:** CESM2-WACCM
 - **Scenario:** ssp370
@@ -660,7 +645,6 @@ Core 3: ssp370 with CESM2-WACCM (superseded), Rice.
 
 Core 4: ssp370 with MRI-ESM2-0 (superseded), Rice.
 
-- **Owner:** Andrew
 - **Task type:** projection
 - **ESM:** MRI-ESM2-0
 - **Scenario:** ssp370
@@ -681,7 +665,6 @@ Core 4: ssp370 with MRI-ESM2-0 (superseded), Rice.
 
 Core 5: ssp126 with CESM2-WACCM (superseded), Rice.
 
-- **Owner:** Andrew
 - **Task type:** projection
 - **ESM:** CESM2-WACCM
 - **Scenario:** ssp126
@@ -702,7 +685,6 @@ Core 5: ssp126 with CESM2-WACCM (superseded), Rice.
 
 Core 6: ssp126 with MRI-ESM2-0 (superseded), Rice.
 
-- **Owner:** Andrew
 - **Task type:** projection
 - **ESM:** MRI-ESM2-0
 - **Scenario:** ssp126
@@ -723,7 +705,6 @@ Core 6: ssp126 with MRI-ESM2-0 (superseded), Rice.
 
 Core 7: ssp585 with CESM2-WACCM (superseded), Rice.
 
-- **Owner:** Andrew
 - **Task type:** projection
 - **ESM:** CESM2-WACCM
 - **Scenario:** ssp585
@@ -744,7 +725,6 @@ Core 7: ssp585 with CESM2-WACCM (superseded), Rice.
 
 Core 8: ssp585 with MRI-ESM2-0 (superseded), Rice.
 
-- **Owner:** Andrew
 - **Task type:** projection
 - **ESM:** MRI-ESM2-0
 - **Scenario:** ssp585
@@ -781,7 +761,6 @@ C011: OCX main with observations (planned), unassigned.
 
 Core 11: OCX, observation constrained (superseded), Rice.
 
-- **Owner:** Andrew
 - **Task type:** ocx
 - **ESM:** observations
 - **Scenario:** RACMO actual-year SMB and the OI ocean climatology
@@ -802,7 +781,6 @@ Core 11: OCX, observation constrained (superseded), Rice.
 
 Submission rehearsal: a 32 km control through the whole output chain (done), Rice.
 
-- **Owner:** Andrew
 - **Task type:** output
 - **ISMIP7 exp id:** C009 naming
 - **ESM:** CESM2-WACCM

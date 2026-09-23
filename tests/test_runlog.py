@@ -82,3 +82,20 @@ def test_the_csv_carries_every_field_in_one_row_each(tmp_path):
     assert rows[0] == [heading for _, heading in m.FIELDS]
     assert len(rows) == count + 1
     assert all(len(row) == len(m.FIELDS) for row in rows)
+
+
+def test_the_csv_keeps_a_record_value_verbatim(tmp_path):
+    import csv
+    m = _build_runlog()
+    record = {"id": "x", "task": "test", "title": "a | b", "status": "done",
+              "institution": "o", "notes": "line one\nline two",
+              "jobs": ["1", "2"]}
+    (tmp_path / "x.json").write_text(json.dumps(record))
+    out = tmp_path / "log.csv"
+    m.write_csv(m.load(tmp_path), out)
+    header, row = list(csv.reader(open(out, newline="")))
+    cells = dict(zip(header, row))
+    assert cells["Simulation"] == "a | b"
+    assert cells["Notes"] == "line one\nline two"
+    assert cells["Job ids"] == "1 2"
+    assert cells["Finished"] == ""

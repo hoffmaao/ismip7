@@ -2,7 +2,6 @@
   "id": "core10-32km-ctrl2015-mriesm20",
   "task": "control",
   "institution": "Rice",
-  "owner": "Andrew",
   "title": "Core 10: CTRL2015 with MRI-ESM2-0",
   "status": "superseded",
   "esm": "MRI-ESM2-0",

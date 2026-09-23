@@ -2,7 +2,6 @@
   "id": "core09-32km-ctrl2015-cesm2waccm",
   "task": "control",
   "institution": "Rice",
-  "owner": "Andrew",
   "title": "Core 9: CTRL2015 with CESM2-WACCM",
   "status": "superseded",
   "esm": "CESM2-WACCM",

@@ -2,7 +2,6 @@
   "id": "test-1km-budd-transfer",
   "task": "test",
   "institution": "Rice",
-  "owner": "Andrew",
   "title": "1 km control from the transferred Budd snapshot",
   "status": "stopped",
   "esm": "CESM2-WACCM",

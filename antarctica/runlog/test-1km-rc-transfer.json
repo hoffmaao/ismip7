@@ -2,7 +2,6 @@
   "id": "test-1km-rc-transfer",
   "task": "test",
   "institution": "Rice",
-  "owner": "Andrew",
   "title": "1 km control from the transferred regularized-Coulomb snapshot",
   "status": "stopped",
   "esm": "CESM2-WACCM",

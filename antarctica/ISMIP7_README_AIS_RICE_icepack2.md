@@ -97,8 +97,9 @@ shallow-shelf formulation on Firedrake 2026.4.1)
    front is pinned at its 2015 (BedMachine) position: ice flowing past it
    is removed and tallied as calving (`ISMIP7_FIXED_FRONT`). A level-set
    front with a von Mises calving law (Hahn, Mikula and Frolkovic 2025
-   finite-volume level set; thresholds 1.0 MPa grounded, 0.15 MPa floating)
-   exists but is not calibrated; **[confirm #36]** which the projections use.
+   finite-volume level set; thresholds 1.0 MPa grounded, 0.2 MPa floating),
+   a resistive-stress law and a minimum-thickness rule exist but are not
+   calibrated; **[confirm #36]** which the projections use.
    No sub-grid scheme beyond the sub-cell shed of the level-set front.
 9. Ice-shelf collapse: **[confirm #10]** which of three the submitted
    projections use; the core matrix as configured today runs the first.

@@ -118,14 +118,18 @@ Firedrake checkpoint per year, written atomically).
 `antarctica/scripts/write_ismip7_output.py` regrids conservatively to the 8 km
 grid through a cached supermesh overlap operator, applies the request's fill
 policies and units, encodes time, and writes the 21 gridded and 10 scalar files
-under `AIS/<source_id>/<ism_id>/CORE/<exp>/`. A 2-year control and a 10-year
-ssp585, both at 32 km, pass every content check of
-`ismip7-compliance-checker`: zero naming, numerical, spatial, attribute and
-consistency errors. The experiment-length checks remain.
+under `AIS/<source_id>/<ism_id>/CORE/<exp>/`. At full length, 2015 to 2300,
+a 32 km CESM2-WACCM control and ssp585 pass `ismip7-compliance-checker` 0.5.1
+with zero errors in every test group, the experiment-length checks included
+(run records `core09-32km-ctrl2015-cesm2waccm-p4` and
+`core07-32km-ssp585-cesm2waccm-p4`, 23 September 2026). Two output rules made
+that possible, both found by the first full-length check (action 10).
 
-Conventions chosen: `acabf` is the forcing SMB with the apparent-MB correction
-travelling separately as `acabf_correction`, `ligroundf` is booked into the
-first floating cell and signed positive from grounded to floating (section 9),
+Conventions chosen: the fluxes are what the transport applied, after the
+positivity limiter (action 10), `acabf` is that SMB with the apparent-MB
+correction travelling separately as `acabf_correction`, `ligroundf` is booked
+into the first floating cell and signed positive from grounded to floating
+(section 9), a floating cell within 1 cm of the bed is written as grounded,
 `lithk` is zero where the ice mask is zero, and `base = orog - lithk` on the
 grid.
 
@@ -148,7 +152,8 @@ What a submission needs (#5, #16, #17, #18, #19, #20, #22, #23):
   dots or underscores.
 - **Checker:** bounds were relaxed in July (topg to 5500 m). `licalvf` negative
   means loss. `ligroundf` is a specific mass flux booked into the last grounded
-  or first floating cell, small negatives allowed. `topg` and `lithk` must not
+  or first floating cell, bounded to [-10, 10] kg m-2 s-1 at 0.5.1. A wholly
+  floating pixel must sit more than 1 cm above `topg`. `topg` and `lithk` must not
   be masked to the evolving ice sheet, or the scalar tool's sea-level numbers
   break.
 - **Scalars:** the model integrates the ten scalars itself on the native mesh.
@@ -370,10 +375,12 @@ forcing-version audit, the output writer, and the melt calibration above.
    parameterisation itself exceeds it there. Their median area is 3.61 km2
    against 64 km2 for an 8 km pixel, so the gridded value comes from a small
    hot cell filling its pixel under the request's `no_floating_ice` fill
-   policy. The full-length run still has to settle two further contributions:
-   the evolved geometry with its warmer projected thermal forcing, and the
-   bookkeeping, since `book_advance` books the melt REQUESTED of a step while a
-   nearly ice-free floating cell can only lose what it holds.
+   policy. The full-length 32 km runs of 23 September measured the two further
+   contributions (action 10). The bookkeeping was the larger: `book_advance`
+   booked the melt requested of a step while a nearly ice-free floating cell
+   can only lose what it holds, and it now books what the transport applied.
+   With the evolved geometry and its warmer projected thermal forcing the
+   ssp585 then falls below the bound in 0.0382 % of its values, a warning.
 
    `calibrate_melt.py` now fits K through the forward's own melt path under
    `ISMIP7_GEOMETRY_SPACE=dg0` (issue #30). The forward and the calibration
@@ -484,10 +491,11 @@ Output and submission:
 - [x] #16 `licalvf` negative for loss. [x] #22 `ligroundf` sign: settled by
       the group on 22 September with the grounded sheet as the reference,
       positive for grounded ice going afloat, section 9.
-- [x] #23 bounds. [x] #46 the bundled request is 0.5.0's and records its tag;
-      `audit_variable_request.py` finds drift. [ ] Re-run the checker at 0.5.0. (issue #12)
-      Scalars are not range-checked upstream, so the negative `tendlicalvf`
-      against the table's `[0, 1e25]` is a quirk of the table.
+- [x] #23 bounds. [x] #46 the bundled request is 0.5.1's and records its tag;
+      `audit_variable_request.py` finds drift. [x] The checker at 0.5.1 passes
+      a full-length 32 km control and ssp585, action 10. At 0.5.1 the `tend*`
+      totals are bounded to [-1e9, 1e9] kg s-1, and scalars are still not
+      range-checked upstream.
 - [x] #19 scalar-tool pitfalls. [ ] Run the tool for the sea-level estimates. (issue #13)
 - [x] #17 names: the core counter follows from the forcing and the ids are
       validated. [~] What goes in the forcing field of an OCX filename is
@@ -512,9 +520,29 @@ Output and submission:
    core 11 meanwhile. The 20 September answer names the cause and promises
    regenerated files with no date, and places the difference at Cook, so read
    the Cook block as well as Mertz, section 7. (issue #11)
-10. **Re-run isschecker at 0.5.0** on the 32 km control and ssp585 outputs,
-    record the version in the README, and re-read action 5 in its light: below
-    1 % of values the `libmassbffl` excursion is now a warning. (issue #12)
+10. **Re-run isschecker** on full-length 32 km control and ssp585 outputs and
+    record the version in the README. Done on 23 September at 0.5.1, on IU
+    Quartz, and closed as icepack/ismip7#12. The first pass, over the three p2
+    ssp585 runs, found two errors the two-year rehearsal could not show:
+
+    | collapse mode | `libmassbffl` below -0.008 kg m-2 s-1 | `base` within 1 cm of `topg`, wholly floating |
+    |---|---|---|
+    | none | 1.43 % of values, an error | 13 pixel-years, an error |
+    | mask | 0.341 %, a warning | 24 pixel-years |
+    | mask_front | 0.35 %, a warning | 17 pixel-years |
+
+    The first came from booking the melt requested of the transport: by 2200
+    the positivity limiter held back 99 % of it. `book_advance` now takes the
+    withheld sink off the SMB, melt and reference in proportion, so the fluxes
+    are what the transport applied. The second is a cell 1.9 to 9.2 mm afloat,
+    inside the checker's `ELEVATION_TOLERANCE`; `write_ismip7_output.py` writes
+    such a cell as grounded. The p4 control and ssp585, run with both, report
+    zero errors. Their warnings are the non-mandatory variables, `strbasemag`
+    in 0.000813 % of the ssp585's values, and the `libmassbffl` excursion of
+    action 5, now 0.00767 % of the control's values and 0.0382 % of the
+    ssp585's. The booked basal melt of the ssp585 peaks near 7600 Gt/yr in
+    2150 and is 3929 Gt/yr in 2300, where the requested booking reported
+    123427.
 11. **Run `ismip7-scalar-processing`** on the same outputs, for `sla20`,
     `slg20` and `slvaf`, and compare its scalars with the native ones. (issue #13)
 12. **Adopt or refetch the forcing that predates the manifest.** Done on 21
@@ -736,8 +764,8 @@ and six 2300 files were read with h5py.
   when the file is not a scalar). If a later release does check them, a year
   in which the mask removes a Ross-sized shelf (about 1.5e17 kg) would put
   `tendlicalvf` near -5e9 kg s-1, past the new bound. The bundled
-  `icepack2_tools/ismip7_variable_request.csv` is still 0.5.0's.
-  (issue #12)
+  `icepack2_tools/ismip7_variable_request.csv` was still 0.5.0's; it was
+  re-vendored at 0.5.1 on 23 September.
 - **#50, 22 September, open, new.** Are the front and grounding-line fluxes
   given over the face or averaged over the cell? An organiser answered: a
   mass change per unit horizontal cell area, pointing to checker issue 35.

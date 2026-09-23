@@ -1264,7 +1264,12 @@ Four things that are easy to get wrong:
   3.10, so they belong in their own interpreter. Where conda is unavailable,
   `nix` provides one, and the nix interpreter then needs the shared libraries
   it cannot see: gcc's C++ runtime, zlib, expat and udunits, on
-  `LD_LIBRARY_PATH`, with `UDUNITS2_XML_PATH` set.
+  `LD_LIBRARY_PATH`, with `UDUNITS2_XML_PATH` set. On IU Quartz a venv on the
+  `python/3.14.5` module takes the checker from its release tag with every
+  dependency as a wheel, `pip install "isschecker @
+  git+https://github.com/ismip/ISM_SimulationChecker@0.5.1"`; conda-forge
+  carries the same release. Put the venv and pip's cache on scratch, since
+  the home file quota is small.
 - **The scalar tool needs four auxiliary grids** per region (the area factor,
   the extended Rignot basins, the glacier and ice-cap area factor and the
   maximum-extent mask), which live on Globus under
@@ -1283,6 +1288,14 @@ attribute tests, and 93 time errors, which are the three-per-file
 experiment-length checks a two-year run cannot satisfy. `ismip7-scalars` 0.1.0
 then wrote `sla20`, `slg20` and `slvaf`, each with its glacier and ice-cap
 variant, in NetCDF and CSV.
+
+At full length, 2015 to 2300, a 32 km control and ssp585 pass 0.5.1 with zero
+errors in every test group, the length checks included (23 September 2026, run
+records `core09-32km-ctrl2015-cesm2waccm-p4` and
+`core07-32km-ssp585-cesm2waccm-p4`). The first full-length pass failed on two
+things a short run does not reach, both since fixed in the output: melt booked
+before the positivity limiter, and cells within 1 cm of flotation written as
+floating (`antarctica/FORWARD_RUN_READINESS.md`, action 10).
 
 ### The run log (`build_runlog.py`)
 

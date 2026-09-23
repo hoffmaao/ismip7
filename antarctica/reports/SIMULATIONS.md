@@ -11,7 +11,7 @@ its full report from `core_report.py`; this is the index.
 
 36 records.
 
-Status: 12 planned, 4 running, 3 stopped, 6 done, 11 superseded.
+Status: 12 planned, 3 running, 3 stopped, 7 done, 11 superseded.
 
 ## Inversion
 
@@ -34,7 +34,7 @@ Status: 12 planned, 4 running, 3 stopped, 6 done, 11 superseded.
 | Core 7 at 32 km, collapse mode ISMIP7_FRACTURE=mask | done | antarctica_320000_32000, DG0 geometry | IU Quartz | - | 2026-09-22 | OFF TRACK against the present-day envelopes, as an ssp585 run at 2300 is; resid 0.0000 on all 2860 rows, no rescue or subcycle event |
 | Core 7 at 32 km, collapse mode ISMIP7_FRACTURE=mask_front | done | antarctica_320000_32000, DG0 geometry | IU Quartz | - | 2026-09-22 | OFF TRACK against the present-day envelopes, as an ssp585 run at 2300 is; resid 0.0000 on all 2860 rows, no rescue or subcycle event |
 | Core 7 at 32 km, collapse mode ISMIP7_FRACTURE=none | done | antarctica_320000_32000, DG0 geometry | IU Quartz | - | 2026-09-22 | OFF TRACK against the present-day envelopes, as an ssp585 run at 2300 is; resid 0.0000 on all 2860 rows, no rescue or subcycle event |
-| 1 km control from the transferred Budd snapshot at half the step | running | antarctica_10000_1000_buffered20000, 1 km fine, 10 km interior, 20 km buffer | nots, commons partition | 2026-09-22 | - | past 2016.5 with VAF drift of 0.007 mm, where the same run at dt=0.05 diverged in 2016.1: halving the step clears the trough |
+| 1 km control from the transferred Budd snapshot at half the step | done | antarctica_10000_1000_buffered20000, 1 km fine, 10 km interior, 20 km buffer | nots, commons partition | 2026-09-22 | 2026-09-22 | five years complete: VAF drift 0.13 mm of sea level, 0.027 mm a year against the 2 mm a year tolerance; mass +21 Gt over five years against a 2532 Gt/yr surface balance; budget residual zero on every row. The same configuration at dt=0.05 diverged in 2016.1, so halving the step is the cure. Shelf melt 1428 Gt/yr, calving 24, balanced correction -1151 |
 | 1 km control with the MAP's own geometry carried onto the target | stopped | antarctica_10000_1000_buffered20000, 1 km fine, 10 km interior, 20 km buffer | nots, commons partition | 2026-09-22 | - | starts 20 percent faster at the Amery trough than the target-native BedMachine geometry and diverges sooner, by step 19 |
 | 1 km control from the transferred Budd snapshot | stopped | antarctica_10000_1000_buffered20000, 1 km fine, 10 km interior, 20 km buffer | nots, commons partition, cascadelake | 2026-09-22 | - | year one clean: VAF drift 0.02 mm, mass balance +1 Gt/yr, residual zero. The Lambert and Amery grounding trough then accelerates from 7.6e3 to 1.9e7 m/yr in three steps and Newton diverges |
 | 1 km control from the transferred regularized-Coulomb snapshot | stopped | antarctica_10000_1000_buffered20000, 1 km fine, 10 km interior, 20 km buffer | nots, commons partition | 2026-09-22 | - | year one budget closed; diverged within four of its own steps, same signature as the Budd run |
@@ -236,7 +236,7 @@ Core 7 at 32 km, collapse mode ISMIP7_FRACTURE=none (done), IU.
 
 ### test-1km-budd-half-step
 
-1 km control from the transferred Budd snapshot at half the step (running), Rice.
+1 km control from the transferred Budd snapshot at half the step (done), Rice.
 
 - **Task type:** test
 - **ESM:** CESM2-WACCM
@@ -256,8 +256,11 @@ Core 7 at 32 km, collapse mode ISMIP7_FRACTURE=none (done), IU.
 - **Job ids:** 1594457
 - **Code:** upstream/main@87475b3 with the transfer fixes
 - **Started:** 2026-09-22
-- **Cost per model year:** 12 to 17 s a step
-- **Audit:** past 2016.5 with VAF drift of 0.007 mm, where the same run at dt=0.05 diverged in 2016.1: halving the step clears the trough
+- **Finished:** 2026-09-22
+- **Cost per model year:** 12 to 31 s a step, about 8 to 20 minutes a model year on 32 ranks
+- **Results path:** /projects/ah301/ismip7-fwd/antarctica/results/ctrl2015_cesm2_waccm_t1k_dthalf_1000_*
+- **Audit:** five years complete: VAF drift 0.13 mm of sea level, 0.027 mm a year against the 2 mm a year tolerance; mass +21 Gt over five years against a 2532 Gt/yr surface balance; budget residual zero on every row. The same configuration at dt=0.05 diverged in 2016.1, so halving the step is the cure. Shelf melt 1428 Gt/yr, calving 24, balanced correction -1151
+- **Notes:** the first production-resolution forward to run five years from a snapshot MAP. Its low calving flux is the front-placement question, not a stability one; re-run on the converged MAP at the chosen front threshold
 
 ### test-1km-budd-map-geometry
 

@@ -3,7 +3,7 @@
   "task": "test",
   "institution": "Rice",
   "title": "1 km control from the transferred Budd snapshot at half the step",
-  "status": "running",
+  "status": "done",
   "esm": "CESM2-WACCM",
   "scenario": "ctrl",
   "period": "2015 to 2020",
@@ -23,6 +23,9 @@
   ],
   "code": "upstream/main@87475b3 with the transfer fixes",
   "started": "2026-09-22",
-  "cost": "12 to 17 s a step",
-  "audit": "past 2016.5 with VAF drift of 0.007 mm, where the same run at dt=0.05 diverged in 2016.1: halving the step clears the trough"
+  "cost": "12 to 31 s a step, about 8 to 20 minutes a model year on 32 ranks",
+  "audit": "five years complete: VAF drift 0.13 mm of sea level, 0.027 mm a year against the 2 mm a year tolerance; mass +21 Gt over five years against a 2532 Gt/yr surface balance; budget residual zero on every row. The same configuration at dt=0.05 diverged in 2016.1, so halving the step is the cure. Shelf melt 1428 Gt/yr, calving 24, balanced correction -1151",
+  "finished": "2026-09-22",
+  "results": "/projects/ah301/ismip7-fwd/antarctica/results/ctrl2015_cesm2_waccm_t1k_dthalf_1000_*",
+  "notes": "the first production-resolution forward to run five years from a snapshot MAP. Its low calving flux is the front-placement question, not a stability one; re-run on the converged MAP at the chosen front threshold"
 }

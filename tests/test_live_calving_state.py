@@ -7,7 +7,7 @@ import os
 import numpy as np
 from firedrake import (Constant, Function, FunctionSpace, TensorFunctionSpace,
                        UnitSquareMesh, VectorFunctionSpace, FiniteElement,
-                       SpatialCoordinate, as_vector, dot, conditional, gt,
+                       SpatialCoordinate, as_vector, dot, conditional,
                        max_value)
 
 from icepack2_tools.levelset import LevelSet

@@ -298,11 +298,15 @@ def test_activation_moves_loopys_cache_per_job_and_leaves_matplotlibs_alone(runn
     r"""XDG_CACHE_HOME is loopy's knob and also matplotlib's. Giving each job
     its own is for loopy's persistent dict; matplotlib rebuilding a font cache
     on every rank of a fresh directory is not wanted, so MPLCONFIGDIR is pinned
-    to the stable location instead of following the per-job move."""
+    to the stable location instead of following the per-job move. The dict
+    itself is switched off: Quartz 10569250 and 10569252 sat in their first
+    kernel compile for good, every rank retrying a sqlite lock on scratch that
+    pytools retries without limit."""
     activate = tmp_path / "activate"
     activate.write_text("")
     rc, out, err = source(runners, "site_core.sh",
-                          f"ismip7_activate >/dev/null; {show('XDG_CACHE_HOME', 'MPLCONFIGDIR')}",
+                          f"ismip7_activate >/dev/null; "
+                          f"{show('XDG_CACHE_HOME', 'MPLCONFIGDIR', 'LOOPY_NO_CACHE')}",
                           ISMIP7_SITE="local", ISMIP7_FIREDRAKE=str(activate),
                           SLURM_JOB_ID="4242")
     assert rc == 0, err
@@ -312,6 +316,7 @@ def test_activation_moves_loopys_cache_per_job_and_leaves_matplotlibs_alone(runn
     assert xdg.name == "4242" and xdg.is_dir()
     assert not mpl.is_relative_to(xdg)
     assert mpl == Path(runners) / ".cache" / "matplotlib" and mpl.is_dir()
+    assert values["LOOPY_NO_CACHE"] == "1"
 
 
 # A login profile as the tests see one: it defines `module` as a function that

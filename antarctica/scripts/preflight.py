@@ -32,6 +32,7 @@ from icepack2_tools.runconfig import (
     calving_law as _calving_law, calving_sigma_max as _calving_sigma_max,
     friction as _friction, geometry_space as _geometry_space, lc as _lc,
     lc_coarse as _lc_coarse, ocx_forcing as _ocx_forcing, ocx_ocean as _ocx_ocean,
+    mesh_override,
 )
 DATA_DIR = obs_data_root()
 from mesh_naming import get_buffer_m, mesh_filename
@@ -152,9 +153,9 @@ def shared_missing(warn=None):
         _calving_sigma_max()
     except ValueError as e:
         miss.append(str(e))
-    mesh_fn = os.environ.get(
-        "ISMIP7_MESH", mesh_filename(lc_coarse, lc, get_buffer_m())
-    )
+    # ISMIP7_MESH=checkpoint means the mesh inside the MAP; there is no file
+    # to look for and the MAP check below covers it.
+    mesh_fn = mesh_override() or mesh_filename(lc_coarse, lc, get_buffer_m())
     if not os.path.exists(mesh_fn):
         miss.append(f"mesh ({os.path.basename(mesh_fn)})")
     # The MAP the forward will actually load: ISMIP7_INVERSION if it names one

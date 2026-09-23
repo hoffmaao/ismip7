@@ -146,10 +146,12 @@ cache that persists between jobs (the one the site's modules or venv already
 name, as IU's firedrake modulefile does; else Firedrake's default location; or
 `ISMIP7_TIMING_JIT_CACHE`) rather than the private per-job one
 `ismip7_activate` gives the runners. Only the kernel cache goes back that way:
-loopy's persistent dict stays per job, because two jobs compiling the same
-kernel seconds apart race on a shared one, which is what `make timing-scout`
-launches (`site_core.sh` has the incident). Each record's `host` block says
-which site and node measured it and whether that cache started empty.
+loopy's persistent dict is switched off in every job (`LOOPY_NO_CACHE=1`),
+because two jobs compiling the same kernel seconds apart race on a shared one,
+which is what `make timing-scout` launches, and because the ranks of one job
+writing a per-job one on a networked filesystem stalled forever on its sqlite
+lock (`site_core.sh` has both incidents). Each record's `host` block says which
+site and node measured it and whether that cache started empty.
 
 ### A container site
 
@@ -310,6 +312,20 @@ unsuffixed `antarctica_320000_32000.msh` an older generator left is used where
 it exists. A mesh named through `ISMIP7_MESH` is never built.
 
 ## The job scripts
+
+### `map_check_score.script` and `map_check_audit.script`
+
+`make -C antarctica map-check` (`antarctica/MAP_CHECK.md`) takes one released
+MAP through its checks with `timing_redistribute.script`,
+`timing_prepare.script`, `timing_cache_audit.script`,
+`timing_transient.script` and `projection.sbatch`, plus these two. The score
+script runs `scripts/score_map.py --json` on the MAP's own mesh or, with
+`ISMIP7_MAP_CHECK_RESTART`, on a prepared map-check cache, and under Budd the
+`check_budd_map.py` shelf-gate census. The audit script runs
+`check_ismip6_track.py`, `compare_runs.py` and `region_budget.py` over the two
+ten-year controls and collects every exit code and output into one JSON. Both
+source `site_core.sh` alone and walk their status file running to finished or
+failed, as the timing scripts do.
 
 ### `partition_probe.sbatch`, run first after a build
 

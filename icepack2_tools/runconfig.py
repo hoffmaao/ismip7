@@ -36,6 +36,9 @@ LC_DEFAULT = "1000"
 LC_COARSE_DEFAULT = "10000"
 GEOMETRY_SPACE_DEFAULT = "dg0"
 FRICTION_DEFAULT = "budd"
+# The closed set friction() accepts; an unknown spelling is an error at
+# startup, never a silent fall-through to another law's block.
+FRICTION_LAWS = ("budd", "regularized_coulomb", "budd_legacy")
 # THIS BRANCH (antarctica-n3) runs standard Glen n=3. An inversion and every
 # forward that loads its MAP must agree on this.
 N_FLOW_DEFAULT = "3.0"
@@ -94,6 +97,26 @@ def residual_stabilizers():
     }
 
 
+# ``ISMIP7_MESH=checkpoint`` names the mesh embedded in the MAP or restart
+# file. site_env.sh always exports a derived .msh path, so a job submitted
+# through it (submit.sh projection) has no other way to run MAP-native.
+MESH_FROM_CHECKPOINT = "checkpoint"
+
+
+def mesh_override():
+    r"""``ISMIP7_MESH`` as a compute-mesh override, or None.
+
+    Unset, empty and the sentinel ``checkpoint`` all mean: solve on the mesh
+    the MAP or restart checkpoint carries. Anything else is the path of the
+    mesh to solve on, with the checkpoint kept as the interpolation source
+    (the timing matrix and the 2 km to 1 km transfer).
+    """
+    value = os.environ.get("ISMIP7_MESH", "").strip()
+    if value in ("", MESH_FROM_CHECKPOINT):
+        return None
+    return value
+
+
 def lc():
     r"""Target edge length [m] in the refined region of the mesh."""
     return int(os.environ.get("ISMIP7_LC", LC_DEFAULT))
@@ -129,8 +152,16 @@ def raster_sample():
 
 
 def friction():
-    r"""Friction law: ``budd``, ``regularized_coulomb`` or ``budd_legacy``."""
-    return os.environ.get("ISMIP7_FRICTION", FRICTION_DEFAULT)
+    r"""Friction law: ``budd``, ``regularized_coulomb`` or ``budd_legacy``.
+    Validated here so every reader rejects the same set: theta means a
+    different thing under each law, and a mistyped value used to run the
+    legacy action branch without a word."""
+    value = os.environ.get("ISMIP7_FRICTION", FRICTION_DEFAULT).strip().lower()
+    if value not in FRICTION_LAWS:
+        raise ValueError(
+            f"ISMIP7_FRICTION must be one of {FRICTION_LAWS}, got {value!r}"
+        )
+    return value
 
 
 def n_flow():

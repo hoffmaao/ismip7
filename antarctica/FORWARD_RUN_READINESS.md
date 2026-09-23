@@ -170,6 +170,9 @@ What a submission needs (#5, #16, #17, #18, #19, #20, #22, #23):
 **Inversions.** RC and Budd MAPs exist on the adaptive-preset mesh
 (`inversion_icepack2_{rc,budd}_n3_dg0_logvelnet_ua2000.h5`). Every Budd MAP
 older than 13 September carries the shelf-friction defect and is unusable.
+The 2 km RC and Budd MAPs inverting at Rice replace them (issue #24); their
+22 September snapshots go through `make map-check`, native and transferred
+onto the 1 km / 10 km mesh, and the numbers land in `MAP_CHECK.md`.
 
 The 13 September Budd MAP was inverted while the shelf gate still multiplied
 through by the grounded indicator `He`, and the shipped gate is height above

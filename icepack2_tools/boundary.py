@@ -16,6 +16,8 @@ about to be used on.
 import json
 import os
 
+from .runconfig import mesh_override
+
 # Firedrake is imported inside load_boundary_ids so that the sidecar-name rule
 # stays importable from the (deliberately Firedrake-free, fast) preflight.
 
@@ -31,7 +33,7 @@ def sidecar_path(mesh_dir, mesh_hint=None):
     explicit = os.environ.get("ISMIP7_BNDIDS")
     if explicit:
         return explicit
-    hint = mesh_hint or os.environ.get("ISMIP7_MESH") or ""
+    hint = mesh_hint or mesh_override() or ""
     stem = os.path.splitext(os.path.basename(hint))[0]
     if stem:
         per_mesh = os.path.join(mesh_dir, f"boundary_ids_{stem}.json")

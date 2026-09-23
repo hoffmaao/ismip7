@@ -421,15 +421,19 @@ adjoint 92 s, iterate 1174 s. The adjoint is 8% of the iterate, so the cost
 sits in the forward's Newton continuation. Per forward step: 155 s median, of
 which the level set is 13 s.
 
+The Rice partition probe on `antarctica_10000_1000_buffered20000` (3,716,587
+cells) is clean up to a node: imbalance 1.01 and halo 1.0% at 32 ranks. A
+1 km / 10 km control from a transferred 2 km MAP ran 92 s per 0.05 yr step on
+32 ranks under `scpc_gamg` within 180 GB, about 31 min per simulated year. The
+Rice site default of 12 ranks is the 2500 m measurement; Quartz forwards take
+64, the fastest production-mesh lane of
+`antarctica/TIMING_MATRIX_QUARTZ_SCPC_GAMG.md`.
+
 The eleven-experiment set is about nineteen node-days, and the experiments are
 independent, so a handful of nodes finishes it inside a week.
 
 ## Open items
 
-- Rice forwards are fixed at 12 ranks because that is what was measured there.
-  Quartz forwards take 64, the fastest production-mesh lane of
-  `antarctica/TIMING_MATRIX_QUARTZ_SCPC_GAMG.md`. Going higher at Rice is
-  meaningful once the partition probe comes back clean. (issue #45)
 - An inversion factors the complete mixed Jacobian with MUMPS, which sets its
   memory; `tlm_adjoint` differentiates through that solve, so no setting
   changes it. Cluster forwards took the field split this item asked for:

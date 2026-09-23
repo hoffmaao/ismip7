@@ -172,7 +172,7 @@ def n_flow():
 # Calving front (icepack2_tools.levelset). ``none`` is the pre-Sep-2026
 # behaviour: on a buffered mesh the front advances freely and never calves.
 CALVING_DEFAULT = "none"
-CALVING_LAWS = ("none", "fixed", "vonmises", "hfb")
+CALVING_LAWS = ("none", "fixed", "vonmises", "hfb", "thickness")
 # ISSM defaults for the von Mises thresholds (Morlighem et al. 2016).
 CALVING_SIGMA_MAX_GROUNDED_DEFAULT = "1.0"     # MPa
 CALVING_SIGMA_MAX_FLOATING_DEFAULT = "0.15"    # MPa
@@ -188,6 +188,19 @@ HFB_RHO_C_DEFAULT = "1024.0"         # kg/m3, water in a basal crevasse
 HFB_MODE_DEFAULT = "hfb"             # or zero_stress, the Nye threshold
 HFB_EXPONENT_DEFAULT = "1.0"
 HFB_RATIO_MAX_DEFAULT = "5.0"
+# Minimum thickness (icepack2_tools.calving_laws.thickness_calving_rate): the
+# thickness the front settles at, since the rate equals the arrival speed at
+# h = Hc. Our rate form is CalvingMIP Experiment 5's, which prescribes 375 m
+# for its own idealised domain. The published ANTARCTIC thresholds are
+# Wilner et al. (2023): 55 to 440 m over ten shelves, mean 270. Those are not
+# ours to borrow, both because they tune a position form (calve where
+# h <= hmin) rather than a rate, and because the paper finds them "largely
+# dependent on the original thickness of the ice shelf", so unlike its
+# sigma_max they do not transfer. What does transfer is the observed front
+# itself: BedMachine v4.1 puts the Antarctic ice front at a 144.7 m mean over
+# 77762 front cells, median 127.5, and the floating front at a 152.4 m median.
+# Setting Hc there holds the observed front stationary by construction.
+THICKNESS_HC_DEFAULT = "150.0"        # m, the observed Antarctic front
 
 
 FRACTURE_MODES = ("none", "mask", "mask_front")
@@ -366,6 +379,15 @@ def calving_hfb_parameters():
         "ratio_max": float(os.environ.get("ISMIP7_CALVING_HFB_RATIO_MAX",
                                           HFB_RATIO_MAX_DEFAULT)),
     }
+
+
+def calving_thickness_hc():
+    r"""``ISMIP7_CALVING_HC``: the thickness the front settles at [m]."""
+    value = float(os.environ.get("ISMIP7_CALVING_HC", THICKNESS_HC_DEFAULT))
+    if value <= 0.0:
+        raise ValueError(
+            f"ISMIP7_CALVING_HC must be a positive thickness, got {value:g}")
+    return value
 
 
 def calving_sigma_max():

@@ -50,8 +50,8 @@ from firedrake import Constant, conditional, dot, gt, max_value, min_value, sqrt
 from icepack2.constants import gravity as g, ice_density as rho_I, water_density as rho_W
 
 __all__ = ["resistive_stress", "critical_stress", "height_above_flotation",
-           "buttressing_number", "hfb_calving_rate", "density_in_model_units",
-           "HFB_MODES"]
+           "buttressing_number", "hfb_calving_rate", "thickness_calving_rate",
+           "density_in_model_units", "HFB_MODES"]
 
 #: Seconds in icepack's year, which is how its densities carry their units.
 _YEAR = 365.25 * 24 * 60 * 60
@@ -137,4 +137,49 @@ def hfb_calving_rate(u, M, h, b, n, sigma_max=0.0, rho_c=None, mode="hfb",
         haf = height_above_flotation(h, b)
         rate = rate * conditional(gt(haf, Constant(0.0)),
                                   Constant(0.0), Constant(1.0))
+    return rate
+
+
+def thickness_calving_rate(u, h, h_critical, grounded_gate=False, b=None):
+    r"""``c = max(0, 1 + (Hc - H) / Hc) |u|`` [m/yr along the front normal].
+
+    The minimum-thickness rule, in the rate form CalvingMIP's experiment 5
+    prescribes (there with ``Hc = 375 m``). ``Hc`` is
+    the thickness the front settles at, not a cutoff: at ``H = Hc`` the rate is
+    exactly the speed the ice arrives with, so the front is stationary; below
+    it the front retreats and above it the front advances. That makes the rule
+    self-limiting, which a stress threshold is not.
+
+    It is also the one rule here that reads no inferred field. Over most of an
+    Antarctic front the observed speed is a few metres a year against a 3 m/yr
+    error floor, so the inversion has no leverage there and the rheology a
+    stress law would read is the regularizer's extrapolation rather than
+    anything the data constrained; cells the front later advances into were
+    never in the inversion's domain at all. A geometric rule is unaffected by
+    both.
+
+    On ``Hc``, note what does and does not transfer. Wilner et al. (2023)
+    calibrate a minimum-thickness threshold against ten Antarctic shelves and
+    get 55 to 440 m, but theirs is a position law (calve where ``h <= hmin``)
+    and they find the values "largely dependent on the original thickness of
+    the ice shelf" - unlike the von Mises strength in the same study, they are
+    shelf-specific. The transferable quantity for a rate form is the observed
+    front thickness, because that is where this rate holds a front still:
+    BedMachine v4.1 gives a 144.7 m mean over 77762 Antarctic front cells and
+    a 152.4 m floating-front median. ``b`` is only needed for
+    ``grounded_gate``.
+    """
+    from firedrake import Constant, conditional, dot, gt, max_value, sqrt
+
+    thickness = max_value(h, Constant(0.0))
+    hc = Constant(float(h_critical))
+    factor = max_value(Constant(1.0) + (hc - thickness) / hc, Constant(0.0))
+    speed = sqrt(dot(u, u) + Constant(1e-30))
+    rate = factor * speed
+    if grounded_gate:
+        if b is None:
+            raise ValueError("grounded_gate needs the bed")
+        rate = rate * conditional(
+            gt(height_above_flotation(h, b), Constant(0.0)),
+            Constant(0.0), Constant(1.0))
     return rate

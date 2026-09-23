@@ -587,9 +587,10 @@ front where it restarted. The shared implementation's tests are
 `icepack_tools/test/levelset_test.py`; the ISMIP7-side rules (retreat-sliver
 mask, apparent-MB extent masking, the `fixed` law's t=0 anchor) are covered by
 `tests/`. `tests/test_levelset_laws.py` checks each law against closed forms on
-a unit mesh: the `vonmises` rate under both thresholds, the shed fraction and
-its step-size behaviour under the transport's masks, the drag gate, and the
-refusal of an unknown or underspecified law.
+a unit mesh: the `vonmises` rate under both thresholds, the `thickness` bed
+gate, the `hfb` stress ratio, the shed fraction and its step-size behaviour
+under the transport's masks, the drag gate, and the refusal of an unknown or
+underspecified law.
 
 **Control and projection configurations differ.** The protocol's control is an
 unforced constant-climate run with calving set to end-of-2014 conditions, so
@@ -654,9 +655,9 @@ median front-normal resistive stress is 0.0000 MPa against a critical 0.53,
 buttressing is exactly 1.0 everywhere, and 13 of 15,639 front cells are at
 failure: the law correctly removes almost nothing from a fully buttressed
 41 m fringe, and lowering the strength to zero does not change that. Von
-Mises, being proportional rather than a threshold, calves anyway. So read
-`probe_front_flux.py` above before drawing a conclusion from a run of this
-law, and expect it to engage once the front is the calving face.
+Mises, being proportional rather than a threshold, calves anyway. So measure
+how much ice the front cells carry before drawing a conclusion from a run of
+this law, and expect it to engage once the front is the calving face.
 
 ### The minimum-thickness rule (`ISMIP7_CALVING=thickness`)
 
@@ -840,7 +841,7 @@ redeclare those literals.
 | `ISMIP7_INVERSION` | explicit MAP path for a forward or preflight. The forward checks the MAP's recorded `friction`, `n_flow` and `geometry_space` against the run and aborts on a mismatch, warning only when the MAP predates those attributes; `preflight.py` checks that the file exists. Use it to A/B MAPs on one mesh, or, with `ISMIP7_MESH` also set (the timing matrix, `make map-check`), to run a MAP on a different mesh: its continuous fields are then interpolated onto `ISMIP7_MESH`, and a target dof outside the MAP's mesh takes a stated fill (0 for the log controls, the constant baseline for the fluidity prior, the raster sample for `velocity_obs`), counted and printed as `Transfer fill:` lines (`MAP_CHECK.md`) | derived |
 | `ISMIP7_CALVING` | `none`, `fixed`, `vonmises`, `hfb` or `thickness` (see above) | `none` |
 | `ISMIP7_CALVING_SIGMA_MAX_GROUNDED` / `_FLOATING` | von Mises thresholds (MPa). The floating value is Wilner et al. 2023's Antarctic cluster centre | `1.0` / `0.2` |
-| `ISMIP7_CALVING_HC` | minimum-thickness `Hc` (m), where the front settles | `150.0` |
+| `ISMIP7_CALVING_SIGMA_MAX`, `_RHO_C`, `_HFB_EXPONENT`, `_HFB_RATIO_MAX`, `_HC` | the `hfb` and `thickness` laws' knobs, tabulated in their sections above | see there |
 | `ISMIP7_FRACTURE` | `mask` applies the ISMIP7 collapse forcing to every floating cell it flags, booked as calving; `mask_front` only to the flagged cells open water has reached, so no hole opens behind a standing front (the two end-members of discussion #30). Masks exist for the SSPs only, so the control, historicals and OCX abort on either. Needs DG0. Every run prints its mode once (`Ice-shelf collapse forcing: ISMIP7_FRACTURE=...`, `none` included). Under a mask mode the timeseries columns `collapse_flagged_cells`, `collapse_removed_cells` and `collapse_held_cells` count the flagged floating cells, the ones the mode has emptied and the ones it leaves standing (always 0 under `mask`), all ranks summed; the budget lines, a closing log line and the core report repeat them | `none` |
 | `ISMIP7_OCX_FORCING` | what core 11 runs on. `protocol` is the ISMIP7 OCX product (RACMO2.3p2-ERA SDBN1 `acabf`, expert-judgment ocean `tf`/`so`), and the run refuses to start without it. `stopgap` is RACMO2.4p1 actual-year SMB with the constant OI ocean climatology, what the core ran on before the product was readable here. K is fitted to the climatology, so read `check_melt_bound.py --ocx` first (discussion #48) | `protocol` |
 | `ISMIP7_OCX_OCEAN` | which expert-judgment OCX ocean scenario to read: `main` (the core one), `cold`, `warm` or `vary`. A member other than `main` writes to `ocx_<member>` | `main` |

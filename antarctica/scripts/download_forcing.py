@@ -7,6 +7,8 @@ Usage:
     python scripts/download_forcing.py --status
     python scripts/download_forcing.py --ocean
     python scripts/download_forcing.py --calibration
+    python scripts/download_forcing.py --scalar-processing
+                                       [--scalar-resolution 08000m]
     python scripts/download_forcing.py --scenarios [--esm MRI-ESM2-0]
                                        [--scenario historical,ssp585]
     python scripts/download_forcing.py

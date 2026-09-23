@@ -207,6 +207,7 @@ python scripts/download_forcing.py --ocean        # thetao/so/tf + climatology +
 python scripts/download_forcing.py --calibration  # meltMIP obs melt, IMBIE2 basins, grid, topography
 python scripts/download_forcing.py --scenarios    # per-(ESM, scenario) forcing (cores 1-8)
 python scripts/download_forcing.py --scenarios --esm MRI-ESM2-0 --scenario historical,ssp585
+python scripts/download_forcing.py --scalar-processing  # ismip7-scalars grids, see "From a finished run to a submission"
 python scripts/download_forcing.py --status
 ```
 
@@ -1186,9 +1187,9 @@ Four things that are easy to get wrong:
   `/ISMIP7/Output-Processing/Data` rather than with the forcing.
   `--scalar-processing` fetches them; `--scalar-resolution` picks the grid.
 - **`params.nc` carries the model's densities**, so give it ours: 917 ice and
-  1024 seawater, the pair `simulation.py` builds the surface with, not the
-  tool's 1027 default.
-- **`--refyear` is the stamped year, not the run year.** A state variable is
+  1024 seawater, the pair `simulation.py` builds the surface with. The tool
+  defaults to 1027 seawater.
+- **`--refyear` takes the stamped year.** A state variable is
   stamped 1 January of the following year, so a run starting in 2015 has 2016
   as its first state, and a reference of 2015 is not found.
 

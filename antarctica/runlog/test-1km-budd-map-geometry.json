@@ -2,6 +2,7 @@
   "id": "test-1km-budd-map-geometry",
   "task": "test",
   "institution": "Rice",
+  "owner": "Andrew",
   "title": "1 km control with the MAP's own geometry carried onto the target",
   "status": "stopped",
   "esm": "CESM2-WACCM",

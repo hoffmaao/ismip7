@@ -18,6 +18,11 @@ request beside the code the run used, and ``--check`` refuses a stale render.
 experiment, with its budget rows and audit. This is the index across all of
 them, and across the runs that are not core experiments.
 
+The group also keeps a shared progress sheet, which is a second reader of the
+same records rather than a second place to type them: ``--csv`` writes them
+flat for it to import. A hand-maintained copy of this information is exactly
+what this file exists to replace, so the sheet reads the repository.
+
 Usage:
     python antarctica/scripts/build_runlog.py --write
     python antarctica/scripts/build_runlog.py --check       # exits 1 on drift
@@ -54,6 +59,7 @@ STATUSES = ("planned", "queued", "running", "stopped", "done", "superseded")
 FIELDS = (
     ("id", "Record"),
     ("institution", "Institution"),
+    ("owner", "Owner"),
     ("title", "Simulation"),
     ("status", "Status"),
     ("task", "Task type"),
@@ -191,6 +197,26 @@ def render(records):
     return "\n".join(out).rstrip() + "\n"
 
 
+def write_csv(records, path):
+    r"""The records flat, one row each, for the group's shared progress sheet.
+
+    Every field of :data:`FIELDS` in that order, so the sheet's header is the
+    generator's own list and a field added there reaches the sheet on the next
+    import. Deliberately outside ``--check``: the markdown is the tracked
+    render, and this is a copy made on demand for a reader outside the
+    repository, so that reader is never a second place to type any of it."""
+    import csv
+
+    with open(path, "w", newline="") as handle:
+        writer = csv.writer(handle)
+        writer.writerow([heading for _, heading in FIELDS])
+        for record in records:
+            writer.writerow([
+                "" if record.get(key) in (None, [], "") else _cell(record.get(key))
+                for key, _ in FIELDS])
+    return len(records)
+
+
 def main(argv=None):
     p = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     p.add_argument("--runlog", type=Path, default=RUNLOG_DIR)
@@ -198,6 +224,8 @@ def main(argv=None):
     p.add_argument("--write", action="store_true")
     p.add_argument("--check", action="store_true",
                    help="exit 1 when the committed file differs from the render")
+    p.add_argument("--csv", type=Path,
+                   help="also write the records flat, for the shared sheet")
     a = p.parse_args(argv)
 
     try:
@@ -206,6 +234,10 @@ def main(argv=None):
         print(f"runlog: {exc}", file=sys.stderr)
         return 2
     text = render(records)
+
+    if a.csv:
+        write_csv(records, a.csv)
+        print(f"wrote {a.csv} with {len(records)} records")
 
     if a.check:
         if not a.output.exists():
@@ -222,7 +254,7 @@ def main(argv=None):
     if a.write:
         a.output.write_text(text)
         print(f"wrote {a.output} from {len(records)} records")
-    else:
+    elif not a.csv:
         print(text)
     return 0
 

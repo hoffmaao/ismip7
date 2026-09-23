@@ -618,7 +618,7 @@ now-check:
 # The run log: one JSON record per simulation in runlog/, rendered into
 # reports/SIMULATIONS.md.
 runlog:
-	python scripts/build_runlog.py --write
+	python scripts/build_runlog.py --write $(if $(RUNLOG_CSV),--csv "$(RUNLOG_CSV)",)
 
 runlog-check:
 	python scripts/build_runlog.py --check

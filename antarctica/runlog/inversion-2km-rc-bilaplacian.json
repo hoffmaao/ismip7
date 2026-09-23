@@ -2,6 +2,7 @@
   "id": "inversion-2km-rc-bilaplacian",
   "task": "inversion",
   "institution": "Rice",
+  "owner": "Andrew",
   "title": "2 km regularized-Coulomb inversion under the bilaplacian prior",
   "status": "running",
   "friction": "regularized_coulomb",

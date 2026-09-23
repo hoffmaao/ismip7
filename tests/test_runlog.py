@@ -68,3 +68,17 @@ def test_a_rewrite_with_no_record_change_leaves_the_log_unchanged(tmp_path):
     first = out.read_text()
     assert m.main(["--write", "--output", str(out)]) == 0
     assert out.read_text() == first
+
+
+def test_the_csv_carries_every_field_in_one_row_each(tmp_path):
+    r"""The shared sheet imports this, so its header is the generator's field
+    list and a list-valued field must join into one cell rather than breaking
+    the row."""
+    import csv
+    m = _build_runlog()
+    out = tmp_path / "log.csv"
+    count = m.write_csv(m.load(), out)
+    rows = list(csv.reader(open(out)))
+    assert rows[0] == [heading for _, heading in m.FIELDS]
+    assert len(rows) == count + 1
+    assert all(len(row) == len(m.FIELDS) for row in rows)

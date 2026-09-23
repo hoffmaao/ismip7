@@ -2,6 +2,7 @@
   "id": "inversion-1km",
   "task": "inversion",
   "institution": "Rice",
+  "owner": "Andrew",
   "title": "1 km inversion",
   "status": "planned",
   "mesh": "antarctica_10000_1000_buffered20000, 1 km fine, 10 km interior, 20 km buffer",

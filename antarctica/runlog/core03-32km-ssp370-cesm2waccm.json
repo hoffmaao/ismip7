@@ -2,6 +2,7 @@
   "id": "core03-32km-ssp370-cesm2waccm",
   "task": "projection",
   "institution": "Rice",
+  "owner": "Andrew",
   "title": "Core 3: ssp370 with CESM2-WACCM",
   "status": "superseded",
   "esm": "CESM2-WACCM",

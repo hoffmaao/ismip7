@@ -1251,6 +1251,7 @@ simulation, of any kind, leaves one JSON file in `antarctica/runlog/`, and
 
 ```bash
 make -C antarctica runlog                       # render reports/SIMULATIONS.md
+make -C antarctica runlog RUNLOG_CSV=log.csv    # and the records flat
 make -C antarctica runlog-check                 # exits 1 on a stale render
 ```
 
@@ -1259,6 +1260,11 @@ with a summary table per group and every recorded field below it. A record is
 reviewed in a pull request beside the code its run used, which is what makes it
 a trace rather than a note; `runlog-check` and `tests/test_runlog.py` refuse a
 stale render or a malformed record.
+
+The group's shared progress sheet imports `RUNLOG_CSV`, which makes it a second
+reader of these records rather than a second place to type them. Keeping a
+simulation's configuration and outcome in two places by hand is the duplication
+this section exists to end.
 
 `id`, `task`, `title`, `status` and `institution` are required and everything else is
 optional, so a planned run is five lines and a finished one carries its whole

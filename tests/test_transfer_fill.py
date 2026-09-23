@@ -10,7 +10,9 @@ import pytest
 
 fd = pytest.importorskip("firedrake")
 
-from icepack2_tools.transfer import interpolate_with_fill  # noqa: E402
+from icepack2_tools.transfer import (  # noqa: E402
+    STRICT_TOLERANCE, interpolate_with_fill, strict_location,
+)
 
 
 def _meshes():
@@ -82,12 +84,24 @@ def test_a_same_mesh_transfer_misses_nothing():
     assert np.allclose(g.dat.data_ro, f.dat.data_ro)
 
 
-def test_a_point_located_by_tolerance_is_clamped_to_the_source_range():
+def _shifted_meshes(shift=0.03):
+    # The target reaches past the source on every side, and its first row of
+    # dofs sits ``shift`` outside the outline: closer than half a source cell
+    # (0.0625 in reference L1 distance), which Firedrake's default tolerance
+    # accepts as inside, and further than the strict tolerance rejects.
+    source = fd.UnitSquareMesh(8, 8)
+    target = fd.RectangleMesh(12, 12, 1.5, 1.5)
+    target.coordinates.dat.data[:] -= shift
+    return source, target
+
+
+def test_a_point_within_the_location_tolerance_is_a_fill_not_an_extrapolation():
     r"""Firedrake locates a target point up to half a reference cell outside
     a boundary cell (mesh.tolerance 0.5) and extrapolates that cell's linear
-    basis there. The 2 km MAPs onto the 1 km mesh gave a fluidity prior of
-    -218 from a source whose minimum was 1. Located dofs are bounded by the
-    source's own range; the corner beyond the tolerance is a fill."""
+    basis there: the 2 km MAPs onto the 1 km mesh gave a fluidity prior of
+    -218 from a source whose minimum was 1. The transfer locates strictly,
+    so the band beyond the outline is a fill like the rest of the ring and
+    nothing is left for the clamp."""
     source = fd.UnitSquareMesh(4, 4)
     x, _y = fd.SpatialCoordinate(source)
     f = fd.Function(fd.FunctionSpace(source, "CG", 1)).interpolate(1 + 10 * x)
@@ -98,8 +112,48 @@ def test_a_point_located_by_tolerance_is_clamped_to_the_source_range():
     vals = g.dat.data_ro
     beyond = np.isclose(xy[:, 0], 1.1) & (xy[:, 1] <= 1.0 + 1e-9)
     assert beyond.sum() == 11
-    assert np.all(vals[beyond] == 11.0)          # 12 without the clamp
-    assert n_clamped >= 11 and n_missing >= 1 and n_total == 144
+    assert np.all(vals[beyond] == 7.0)   # 12 by extrapolation, 11 by the clamp
+    outside = (xy[:, 0] > 1.0 + 1e-9) | (xy[:, 1] > 1.0 + 1e-9)
+    assert n_missing == int(outside.sum()) == 23 and n_total == 144
+    assert n_clamped == 0
     assert vals.min() >= 1.0 and vals.max() <= 11.0
-    inside = (xy[:, 0] <= 1.0 + 1e-9) & (xy[:, 1] <= 1.0 + 1e-9)
-    assert np.allclose(vals[inside], 1 + 10 * xy[inside, 0], atol=1e-12)
+    assert np.allclose(vals[~outside], 1 + 10 * xy[~outside, 0], atol=1e-12)
+
+
+def test_the_default_tolerance_extrapolates_and_the_transfer_does_not():
+    r"""The raw cross-mesh interpolate, at Firedrake's default tolerance,
+    continues 1 + x past the outline (0.97 at x = -0.03, below the source
+    minimum of 1): the 2 km Budd snapshot onto the buffered 5 km mesh gave
+    a prior in [-164.7, 921.1] from [1.0, 783.7] (issue 81). The transfer
+    treats that band as outside the source."""
+    source, target = _shifted_meshes()
+    x, _y = fd.SpatialCoordinate(source)
+    f = fd.Function(fd.FunctionSpace(source, "CG", 1)).interpolate(1.0 + x)
+    raw = fd.Function(fd.FunctionSpace(target, "CG", 1)).interpolate(
+        f, allow_missing_dofs=True, default_missing_val=np.nan
+    )
+    assert np.nanmin(raw.dat.data_ro) < 1.0 - 1e-6
+    g = fd.Function(fd.FunctionSpace(target, "CG", 1))
+    n_missing, n_total, n_clamped = interpolate_with_fill(g, f, 1.0)
+    xy = target.coordinates.dat.data_ro
+    truly_outside = (xy < -1e-9).any(axis=1) | (xy > 1.0 + 1e-9).any(axis=1)
+    vals = g.dat.data_ro
+    assert n_clamped == 0
+    assert n_missing == int(truly_outside.sum()) and n_total == 169
+    assert np.all(vals[truly_outside] == 1.0)
+    assert vals.min() >= 1.0 and vals.max() <= 2.0 + 1e-12
+    assert np.allclose(vals[~truly_outside], 1.0 + xy[~truly_outside, 0], atol=1e-9)
+
+
+def test_the_source_tolerance_is_restored_after_a_transfer():
+    source, target = _meshes()
+    source.tolerance = 0.25
+    f = fd.Function(fd.FunctionSpace(source, "CG", 1)).interpolate(fd.Constant(1.0))
+    g = fd.Function(fd.FunctionSpace(target, "CG", 1))
+    interpolate_with_fill(g, f, 7.0)
+    assert source.tolerance == 0.25
+    with pytest.raises(RuntimeError, match="inside"):
+        with strict_location(source):
+            assert source.tolerance == STRICT_TOLERANCE
+            raise RuntimeError("inside")
+    assert source.tolerance == 0.25

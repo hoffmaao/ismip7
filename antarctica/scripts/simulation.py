@@ -65,6 +65,7 @@ from icepack2_tools.mpi_stats import (
     global_extreme_location,
     global_mean,
     global_range,
+    global_size,
 )
 from icepack2_tools.boundary import load_boundary_ids
 from icepack2_tools.geometry import sample_to_geometry
@@ -382,13 +383,19 @@ def setup_model(restart_from=None, *, allow_timing_cache_a_ref=False):
         chk_buffer_m = target_buffer_m
         PETSc.Sys.Print(
             f"  Compute mesh override: {mesh_fn} "
-            f"({mesh.num_vertices()} vertices, {mesh.num_cells()} cells)"
+            f"({global_size(mesh.coordinates)} vertices, "
+            f"{mesh.comm.allreduce(mesh.cell_set.size)} cells)"
         )
     else:
         mesh = source_mesh
         target_lc_coarse = chk_lc_coarse
         target_buffer_m = chk_buffer_m
-    PETSc.Sys.Print(f"  {mesh.num_vertices()} vertices, {mesh.num_cells()} cells")
+    # num_vertices()/num_cells() count this rank's plex, halo included; the
+    # coordinate dofs and the owned cell set are reduced to global totals.
+    PETSc.Sys.Print(
+        f"  {global_size(mesh.coordinates)} vertices, "
+        f"{mesh.comm.allreduce(mesh.cell_set.size)} cells"
+    )
     # The recorded basename is the provenance and WINS. ISMIP7_MESH is only a
     # fallback for legacy checkpoints that carry no attribute: it names the
     # mesh the caller intends to build, which is not necessarily the one this
@@ -750,7 +757,7 @@ def setup_model(restart_from=None, *, allow_timing_cache_a_ref=False):
             f"  Transfer fill: {_name}: {_info['missing']} of {_info['total']} "
             f"dofs lie outside the source mesh; filled with {_info['fill']}; "
             f"{_info['clamped']} located dofs clamped to the source range "
-            "(extrapolated from a boundary cell)"
+            "(beyond it after strict location)"
         )
     if mesh_fn and not _filled:
         PETSc.Sys.Print(

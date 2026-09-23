@@ -83,7 +83,7 @@ from icepack2_tools.runconfig import (
     mesh_override as _mesh_override,
     lc as _lc, lc_coarse as _lc_coarse, n_flow as _n_flow,
     TARGET_MESH_GEOMETRY_METHOD,
-    calving_law as _calving_law, calving_sigma_max as _calving_sigma_max,
+    calving_law as _calving_law, max_speed_bound as _max_speed_bound, calving_sigma_max as _calving_sigma_max,
     fracture as _fracture_mode, ismip7_output as _ismip7_output,
     FRACTURE_MASK_MODES,
     # auto_resume is re-exported, not used here: every forward driver imports
@@ -2044,6 +2044,34 @@ def run_simulation(
         )
         return stat
 
+    def _speed_bound_violation(label):
+        r"""The peak speed and where it is, when the solved velocity is faster
+        than any ice can be, else ``None``.
+
+        The step loop asks the solver whether it converged and nothing else, so
+        a solve that converges onto a runaway is accepted and carried forward.
+        That is how the Lambert/Amery trough destroys a run: SNES reason=2,
+        function norm below 1, peak speed 2.5e6 m/yr, step accepted. Raising
+        this as a convergence failure hands the step to the rescue ladder and
+        then the subcycles, which is what a hard step is supposed to get.
+        """
+        bound = _max_speed_bound()
+        if bound <= 0.0:
+            return None
+        speed_diag.interpolate(sqrt(fd.dot(u_transport, u_transport)))
+        u_max, u_max_xy = global_extreme_location(
+            speed_diag, speed_diag_xy, mode="max"
+        )
+        if u_max <= bound:
+            return None
+        where = "(" + ", ".join(f"{v:.0f}" for v in u_max_xy) + ")"
+        PETSc.Sys.Print(
+            f"  {label}: solve converged onto {u_max:.6e} m/yr at {where}, "
+            f"over the {bound:g} m/yr bound (ISMIP7_MAX_SPEED); "
+            "treating as a failed solve"
+        )
+        return u_max, u_max_xy
+
     def _record_transport(label, elapsed, mass_residual_gt=None):
         nonlocal transport_solve_count
         transport_solve_count += 1
@@ -2242,7 +2270,10 @@ def run_simulation(
         Returns True on success."""
         try:
             solve_diagnostic(f"step-{k}-direct")
-            return True
+            if _speed_bound_violation(f"step-{k}-direct") is None:
+                return True
+            raise fd.ConvergenceError(
+                "diagnostic solve converged onto an unphysical speed")
         except fd.ConvergenceError as exc:
             if not allow_rescue:
                 _field_diagnostics(f"step-{k}-diagnostic-failed")
@@ -2317,6 +2348,8 @@ def run_simulation(
                     k_lim_c.assign(k_rescue if use_lim else 0.0)
                 try:
                     action()
+                    if _speed_bound_violation(f"step-{k}-{label}") is not None:
+                        continue
                     if stype != snes_type0 or use_lim:
                         PETSc.Sys.Print(f"  Step {k}: recovered via {label}")
                     return True

@@ -178,6 +178,18 @@ CALVING_SIGMA_MAX_GROUNDED_DEFAULT = "1.0"     # MPa
 CALVING_SIGMA_MAX_FLOATING_DEFAULT = "0.15"    # MPa
 
 
+# A diagnostic solve can converge to a velocity no ice can have. At the
+# Lambert/Amery grounding trough a 1 km control reported SNES reason=2 with a
+# function norm under 1 and a peak speed of 2.5e6 m/yr, and the step loop
+# accepted it because it only ever asked whether the solver converged. The
+# bound turns that into a failed solve so the rescue ladder and the subcycles
+# get the step, which is the machinery that already exists for a hard step.
+# 20 km/yr is generous: the fastest ice measured anywhere is about 17 km/yr,
+# the fastest in Antarctica about 4, and a healthy 1 km control peaks near
+# 5.5. Set 0 to disable the check.
+SPEED_BOUND_DEFAULT = "20000.0"          # m/yr
+
+
 FRACTURE_MODES = ("none", "mask", "mask_front")
 FRACTURE_MASK_MODES = ("mask", "mask_front")     # the modes that read the collapse mask
 FRACTURE_DEFAULT = "none"
@@ -254,6 +266,17 @@ def ismip7_output():
         f"ISMIP7_OUTPUT must be 1 to enable or 0/empty to disable, "
         f"got {value!r}"
     )
+
+
+def max_speed_bound():
+    r"""``ISMIP7_MAX_SPEED``: reject a diagnostic solution faster than this
+    [m/yr]. ``0`` disables the check; a negative value is a mistake, not a
+    disable, so it is refused."""
+    value = float(os.environ.get("ISMIP7_MAX_SPEED", SPEED_BOUND_DEFAULT))
+    if value < 0.0:
+        raise ValueError(
+            f"ISMIP7_MAX_SPEED must be positive, or 0 to disable, got {value:g}")
+    return value
 
 
 def calving_law():

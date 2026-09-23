@@ -36,9 +36,11 @@ from icepack2_tools.mpi_stats import global_count, global_size  # noqa: E402
 from timing_campaign import (  # noqa: E402
     CACHE_ROLE,
     CACHE_SCHEMA_VERSION,
+    MAP_CHECK_CACHE_ROLE,
     atomic_write_json,
     expected_dt,
     validate_cache_manifest,
+    validate_map_check_manifest,
 )
 
 
@@ -70,12 +72,26 @@ def _read_manifest(path, cache_path):
         return None
     with open(path) as stream:
         manifest = json.load(stream)
-    valid, detail = validate_cache_manifest(
-        manifest,
-        lc=int(manifest["lc"]),
-        lc_coarse=int(manifest["lc_coarse"]),
-        cache_path=cache_path,
-    )
+    if manifest.get("cache_role") == MAP_CHECK_CACHE_ROLE:
+        # A map-check cache is held to what its own manifest states: one
+        # released MAP, one law, one target mesh.
+        valid, detail = validate_map_check_manifest(
+            manifest,
+            lc=int(manifest["lc"]),
+            lc_coarse=int(manifest["lc_coarse"]),
+            buffer_m=int(manifest["buffer_m"]),
+            friction=manifest.get("friction"),
+            source_basename=manifest.get("source_inversion_basename", ""),
+            mesh_name=manifest.get("mesh_basename"),
+            cache_path=cache_path,
+        )
+    else:
+        valid, detail = validate_cache_manifest(
+            manifest,
+            lc=int(manifest["lc"]),
+            lc_coarse=int(manifest["lc_coarse"]),
+            cache_path=cache_path,
+        )
     if not valid:
         raise RuntimeError(f"invalid timing cache manifest: {detail}")
     return manifest
@@ -121,7 +137,6 @@ def _load_cache(path, manifest):
 
     required_attrs = {
         "timing_cache_schema_version": CACHE_SCHEMA_VERSION,
-        "timing_cache_role": CACHE_ROLE,
         "geometry_space": "dg0",
     }
     for name, expected in required_attrs.items():
@@ -129,6 +144,11 @@ def _load_cache(path, manifest):
             raise RuntimeError(
                 f"cache {name}={attrs.get(name)!r}; expected {expected!r}"
             )
+    if attrs.get("timing_cache_role") not in (CACHE_ROLE, MAP_CHECK_CACHE_ROLE):
+        raise RuntimeError(
+            f"cache timing_cache_role={attrs.get('timing_cache_role')!r}; "
+            f"expected {CACHE_ROLE!r} or {MAP_CHECK_CACHE_ROLE!r}"
+        )
 
     if manifest is not None:
         manifest_to_attr = {

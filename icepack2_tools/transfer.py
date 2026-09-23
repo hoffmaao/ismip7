@@ -1,82 +1,103 @@
-r"""Cross-mesh transfer of a checkpoint field onto another mesh.
+r"""Cross-mesh transfer of checkpoint fields with an explicit fill.
 
-``simulation.setup_model`` interpolates a MAP's controls onto a different
-compute mesh when ``ISMIP7_MESH`` names one (the timing matrix, a
-production mesh finer than the inversion's). Firedrake locates each target
-dof in the source mesh with the source mesh's ``tolerance``, 0.5 of the
-reference cell by default, so a dof up to half a source cell OUTSIDE the
-source domain is still assigned a cell and the field is EXTRAPOLATED there.
-Measured (22 September 2026): the 2 km buffered0 Budd MAP transferred onto
-``antarctica_50000_5000_buffered20000`` gave a fluidity prior in
-[-164.7, 921.1] from a source range of [1.0, 783.7], and the condensed
-diagnostic solve then aborted on a singular local block ("Getri throws
-nonzero info"). The ocean buffer of the target lies outside the source
-outline, which is exactly where the extrapolation happens.
+A forward that names a MAP with ``ISMIP7_INVERSION`` and a compute mesh with
+``ISMIP7_MESH`` interpolates the MAP's continuous fields onto the compute
+mesh. Firedrake's cross-mesh ``interpolate`` can only evaluate the source
+where the source mesh exists; a target dof outside it is a "missing dof".
+The stock behaviour writes ``0.0`` there, which is harmless for the log
+controls (theta = phi = 0 is the prior) and fatal for the fluidity prior: the
+2 km MAPs were inverted on a buffer-0 mesh and the production mesh carries a
+20 km ocean buffer, so every dof in that ring is missing, and
+``A_eff = A_prior * exp(phi) = 0`` there zeroes the dislocation term, the
+``lin_reg`` regularizer and the ``alpha_gl`` collar in
+``dual_friction.build_rc_residual`` at once: a singular membrane block.
 
-:func:`strict_transfer` locates strictly, fills the dofs outside the
-source with a value the caller chooses (the prior's floor for a fluidity,
-zero for a log-deviation or an observation), and clamps the result to the
-source's range, so a transferred field can never leave the range the
-inversion produced.
+``interpolate_with_fill`` makes the fill a stated choice and counts it.
+
+A second artefact comes with the first. Firedrake locates a target point in a
+source cell up to ``mesh.tolerance`` (0.5 of a reference cell by default)
+outside that cell, and then evaluates the cell's own linear basis there:
+a point in the ring within about half a source cell of the ice front is
+extrapolated. Where the prior falls steeply towards the front that gave a
+transferred fluidity prior spanning [-218.69, 1028.05] from a source spanning
+[1.00, 783.69] (the 22 September 2 km MAPs onto the 1 km mesh). Inside a
+source cell linear interpolation is a convex combination of the cell's vertex
+values, so a value outside the source field's range can only come from
+extrapolation; located dofs are therefore clamped to the source's range,
+component by component, and the clamped dofs counted too.
 """
 import numpy as np
-from firedrake import Function, FunctionSpace
+from firedrake import Function
+from mpi4py import MPI
 
-from .mpi_stats import global_count, global_range, global_size
-
-#: Relative point-location tolerance for a strict transfer. Zero would let
-#: floating-point error push a dof on the shared outline outside; this keeps
-#: the outline and rejects anything a source cell does not contain.
-STRICT_TOLERANCE = 1e-8
+from .mpi_stats import global_count, global_size
 
 
-def outside_source(source_mesh, target_space):
-    r"""Boolean per owned dof of ``target_space``: not inside any source cell.
-
-    An indicator that is one on the whole source mesh interpolates to one at
-    every located dof and to the missing-dof default, zero, elsewhere."""
-    source_mesh.tolerance = STRICT_TOLERANCE
-    one = Function(FunctionSpace(source_mesh, "CG", 1)).assign(1.0)
-    el = target_space.ufl_element()
-    scalar = FunctionSpace(target_space.mesh(), el.family(), el.degree())
-    hit = Function(scalar).interpolate(
-        one, allow_missing_dofs=True, default_missing_val=0.0)
-    return hit.dat.data_ro < 0.5
-
-
-def strict_transfer(source_field, target_space, fill=0.0, outside=None):
-    r"""Interpolate ``source_field`` onto ``target_space`` without leaving
-    the source domain or the source range.
-
-    Returns ``(field, info)`` with ``info`` carrying ``n_outside`` and
-    ``n_all`` (global dof counts), ``fill``, and the source and target
-    ranges. A ``fill`` outside the source range is clipped into it, and
-    ``info["fill"]`` is the value actually written. ``outside`` may be
-    passed from :func:`outside_source` when several fields share one target
-    space."""
-    source_mesh = source_field.function_space().mesh()
-    source_mesh.tolerance = STRICT_TOLERANCE
-    field = Function(target_space, name=source_field.name())
-    field.interpolate(source_field, allow_missing_dofs=True,
-                      default_missing_val=0.0)
-    if outside is None:
-        outside = outside_source(source_mesh, target_space)
-    n_out = global_count(outside, target_space.mesh().comm)
-    n_all = global_size(field)
-    src_lo, src_hi = global_range(source_field)
-    fill = float(np.clip(fill, src_lo, src_hi))
-    if n_out:
-        field.dat.data[outside] = fill
-    np.clip(field.dat.data, src_lo, src_hi, out=field.dat.data)
-    tgt_lo, tgt_hi = global_range(field)
-    info = {"n_outside": n_out, "n_all": n_all, "fill": fill,
-            "source_range": (src_lo, src_hi), "target_range": (tgt_lo, tgt_hi)}
-    return field, info
+def _source_range(source, comm):
+    """Per-component ``(lo, hi)`` of ``source`` over all ranks."""
+    data = source.dat.data_ro
+    data = data.reshape(data.shape[0], -1)
+    width = data.shape[1]
+    if data.shape[0]:
+        lo, hi = data.min(axis=0), data.max(axis=0)
+    else:
+        lo, hi = np.full(width, np.inf), np.full(width, -np.inf)
+    lo = np.array([comm.allreduce(float(v), op=MPI.MIN) for v in lo])
+    hi = np.array([comm.allreduce(float(v), op=MPI.MAX) for v in hi])
+    return lo, hi
 
 
-def describe(name, info):
-    lo, hi = info["target_range"]
-    slo, shi = info["source_range"]
-    return (f"Transfer {name}: {info['n_outside']}/{info['n_all']} target dofs "
-            f"outside the source domain -> {info['fill']:.3g}; target "
-            f"[{lo:.4g}, {hi:.4g}] within source [{slo:.4g}, {shi:.4g}]")
+def interpolate_with_fill(target, source, fill, comm=None):
+    r"""Interpolate ``source`` into ``target`` across meshes; dofs of ``target``
+    outside the source mesh take ``fill``.
+
+    ``fill`` is a float, or a Function on ``target``'s space whose values are
+    taken where the source has none (the raster-sampled velocity_obs, say).
+    Located dofs are clamped to the source field's own range (per component):
+    a value beyond it can only be an extrapolation from a boundary cell, since
+    interpolation inside a cell never leaves the range of its vertex values.
+    Returns ``(n_missing, n_total, n_clamped)``, all reduced over ranks and
+    counting dofs once (owned dofs only, whatever the value shape). A
+    same-mesh call is a plain interpolate and reports nothing missing or
+    clamped.
+    """
+    comm = comm if comm is not None else target.comm
+    total = global_size(target, comm)
+    if source.function_space().mesh() is target.function_space().mesh():
+        target.interpolate(source)
+        return 0, total, 0
+    target.interpolate(
+        source, allow_missing_dofs=True, default_missing_val=np.nan
+    )
+    data = target.dat.data
+    flat = data.reshape(data.shape[0], -1)
+    missing = np.isnan(flat).any(axis=1)
+    located = ~missing
+    lo, hi = _source_range(source, comm)
+    clamped = np.zeros(flat.shape[0], dtype=bool)
+    if flat.shape[0]:
+        # Count an excursion only past a roundoff margin: a source vertex
+        # value reproduced at 1 ulp below the minimum is not an extrapolation.
+        margin = 1e-9 * np.maximum(hi - lo, np.maximum(np.abs(lo), np.abs(hi)))
+        margin = np.maximum(margin, 1e-12)
+        below = (flat[located] < lo - margin).any(axis=1)
+        above = (flat[located] > hi + margin).any(axis=1)
+        clamped[located] = below | above
+        flat[located] = np.clip(flat[located], lo, hi)
+    if isinstance(fill, Function):
+        if fill.function_space() != target.function_space():
+            raise ValueError(
+                "the fill Function must live on the target's function space"
+            )
+        flat[missing] = fill.dat.data_ro.reshape(flat.shape[0], -1)[missing]
+    else:
+        flat[missing] = float(fill)
+    data[...] = flat.reshape(data.shape)
+    n_missing = global_count(missing, comm)
+    n_clamped = global_count(clamped, comm)
+    if global_count(np.isnan(flat).any(axis=1), comm):
+        raise RuntimeError(
+            f"{target.name()}: NaN left after filling missing dofs; the fill "
+            "itself carries NaN"
+        )
+    return n_missing, total, n_clamped

@@ -33,7 +33,7 @@ from timing_campaign import (
     sha256_file,
     solver_configuration_fingerprint,
 )
-from icepack2_tools.runconfig import TARGET_MESH_GEOMETRY_METHOD
+from icepack2_tools.runconfig import TARGET_MESH_GEOMETRY_METHOD, mesh_override
 
 
 def _required(name):
@@ -45,6 +45,12 @@ def _required(name):
 
 def main():
     inversion = os.path.realpath(_required("ISMIP7_INVERSION"))
+    if mesh_override() is None:
+        raise RuntimeError(
+            "a prepare needs a target .msh in ISMIP7_MESH; "
+            f"{os.environ.get('ISMIP7_MESH', '')!r} names the MAP's own mesh, "
+            "and a same-mesh prepare is a DG0 transfer simulation.py refuses"
+        )
     mesh_input = os.path.realpath(_required("ISMIP7_MESH"))
     output = os.path.realpath(_required("ISMIP7_TIMING_CACHE_RAW"))
     if diagnostic_solver_mode() != "scpc_mumps":
@@ -77,9 +83,15 @@ def main():
     geometry_source = ctx.get("geometry_source")
     if not geometry_source:
         raise RuntimeError("timing cache geometry source was not recorded")
+    # The campaign's caches carry CACHE_ROLE; a map check names its own role
+    # so the two managers never accept each other's caches.
+    cache_role = os.environ.get("ISMIP7_TIMING_CACHE_ROLE") or CACHE_ROLE
     attrs = {
         "timing_cache_schema_version": CACHE_SCHEMA_VERSION,
-        "timing_cache_role": CACHE_ROLE,
+        "timing_cache_role": cache_role,
+        # Which target dofs lay outside the source MAP's mesh, per field, and
+        # what filled them (simulation.setup_model, icepack2_tools.transfer).
+        "transfer_fill": json.dumps(ctx.get("transfer_fill") or {}, sort_keys=True),
         "source_inversion": inversion,
         "source_inversion_sha256": source_sha256,
         "source_mesh_sha256": mesh_sha256,

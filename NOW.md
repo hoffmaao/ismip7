@@ -10,7 +10,7 @@ is an index.
 **Claim the card before you start a run or an inversion.** A card in
 Claimed for more than 24 hours with no comment reads as unclaimed.
 
-Generated: 2026-09-22 18:37 UTC. 16 blocking, 9 owed, 0 after the deadline, 7 unverified.
+Generated: 2026-09-23 00:48 UTC. 16 blocking, 10 owed, 0 after the deadline, 7 unverified.
 
 ## Blocking the submission
 
@@ -48,6 +48,7 @@ Decisions first: they have the longest lead time and they gate the runs.
 | [68](https://github.com/icepack/ismip7/issues/68) | inversion: a chained link re-derives the auto log-velocity weight and changes the objective | needs-check | rice | nots | verified open |
 | [18](https://github.com/icepack/ismip7/issues/18) | protocol: what goes in the forcing field of an OCX filename (#17) | needs-upstream | upstream | upstream | fresh, unverified by design |
 | [78](https://github.com/icepack/ismip7/issues/78) | forcing: CESM2-WACCM 2300 reads a padded 2290-2299 atmosphere mean over a held 2299 ocean, and upstream has not said whether runs end in 2299 | needs-upstream | upstream | n/a | verified open |
+| [81](https://github.com/icepack/ismip7/issues/81) | transfer: a MAP transferred onto a buffered mesh is extrapolated into the buffer | n/a | unassigned | n/a | verified open |
 
 ## Claimed now
 

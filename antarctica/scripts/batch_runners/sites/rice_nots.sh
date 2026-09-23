@@ -50,11 +50,16 @@ ISMIP7_OBS_DATA_ROOT="${ISMIP7_OBS_DATA_ROOT:-/projects/ah301/ismip7/antarctica/
 
 ISMIP7_TASKS="${ISMIP7_TASKS:-32}"
 ISMIP7_MEM="${ISMIP7_MEM:-240G}"
-# The forward was measured at 12 ranks and 80 GB resident (readme.md's timing
-# table), and the chain depth quoted there is a 12-rank figure. The inversion
-# keeps the 32 / 240G above, which is what the 2 km runs need.
-ISMIP7_TASKS_FWD="${ISMIP7_TASKS_FWD:-12}"
-ISMIP7_MEM_FWD="${ISMIP7_MEM_FWD:-96G}"
+# Forwards take a whole Cascade Lake node. The partition probe (job 1592757,
+# 22 September 2026, antarctica_10000_1000_buffered20000, 3.7 M cells) shows
+# this build partitions by locality: ghost/owned 0.001 at 2 ranks, 0.006 at
+# 16 and 0.010 at 32 (max 0.017), against the simple partitioner's 2.97 at
+# 2 and 287 at 32; halo dofs are 1.0 % of owned at 32 ranks. A 1 km / 10 km
+# control from a transferred 2 km MAP then ran 92 s per 0.05 yr step on 32
+# ranks under scpc_gamg (job 1592597), within 180 GB. The older 12 ranks /
+# 96 GB figure was a 2500 m measurement (readme.md's timing table).
+ISMIP7_TASKS_FWD="${ISMIP7_TASKS_FWD:-32}"
+ISMIP7_MEM_FWD="${ISMIP7_MEM_FWD:-180G}"
 ISMIP7_TIME_INV="${ISMIP7_TIME_INV:-3-00:00:00}"
 ISMIP7_TIME_FWD="${ISMIP7_TIME_FWD:-1-00:00:00}"
 

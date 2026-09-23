@@ -48,12 +48,12 @@ from simulation import (setup_model, run_simulation, latest_checkpoint,
 from experiment import find_k_npz
 import math
 
-from icepack2_tools.runconfig import ocx_forcing, ocx_ocean
+from icepack2_tools.runconfig import ocx_forcing, ocx_ocean, deltat_per_basin_npz
 from icepack2_tools.forcing import (
     OCX, OCX_ATMOSPHERE_SOURCE,
     ISMIP7Atmosphere, ISMIP7Ocean, make_forcing_callback,
     make_climatology_ocean_callback, load_racmo_smb_climatology,
-    load_K_per_basin, forcing_coords, reject_collapse_mask, forcing_year,
+    load_K_per_basin, forcing_coords, _K_DEFAULT, reject_collapse_mask, forcing_year,
     describe_forcing_provenance, describe_observational_forcing,
 )
 
@@ -120,34 +120,43 @@ def main():
             f"Auto-resume: {restart}" if restart
             else "Auto-resume: no prior checkpoint"
         )
+    dT_npz = deltat_per_basin_npz()
     ctx = setup_model(restart_from=restart)
     # Sample forcing at the geometry dofs, not the mesh vertices: under
     # DG0 geometry those are cell centroids (see forcing.forcing_coords).
     mesh_x, mesh_y = forcing_coords(ctx)
 
-    # Per-basin K (with 2500 m fallback) + optional global scale.
-    K_npz = find_k_npz()
-    if K_npz is None:
-        raise FileNotFoundError(
-            "OCX needs the calibrated per-basin K "
-            "(antarctica/scripts/calibrate_melt.py)."
-        )
-    K_field = load_K_per_basin(K_npz, mesh_x, mesh_y, fill=0.0)
-    K_scale = float(os.environ.get("ISMIP7_K_SCALE", "1.0"))
-    if K_scale != 1.0:
-        K_field = K_field * K_scale
-        PETSc.Sys.Print(f"  K scaled by ISMIP7_K_SCALE={K_scale:.3f}")
+    # Per-basin deltaT at one K, else per-basin K (with 2500 m fallback) +
+    # optional global scale.
+    if dT_npz is not None:
+        K_npz = None
+        K_field = _K_DEFAULT
+        melt_what = f"per-basin deltaT at one K ({dT_npz})"
+    else:
+        K_npz = find_k_npz()
+        if K_npz is None:
+            raise FileNotFoundError(
+                "OCX needs the calibrated per-basin K "
+                "(antarctica/scripts/calibrate_melt.py) or "
+                "ISMIP7_DELTAT_PER_BASIN_NPZ (calibrate_deltaT.py)."
+            )
+        K_field = load_K_per_basin(K_npz, mesh_x, mesh_y, fill=0.0)
+        K_scale = float(os.environ.get("ISMIP7_K_SCALE", "1.0"))
+        if K_scale != 1.0:
+            K_field = K_field * K_scale
+            PETSc.Sys.Print(f"  K scaled by ISMIP7_K_SCALE={K_scale:.3f}")
+        melt_what = f"per-basin K ({K_npz})"
     if readers is not None:
         atm, ocean = readers
         PETSc.Sys.Print(f"  Atmosphere: ISMIP7 OCX, {OCX_ATMOSPHERE_SOURCE} SDBN1 acabf")
-        PETSc.Sys.Print(f"  Ocean melt: ISMIP7 OCX '{ocean.variant}' tf/so + per-basin K ({K_npz})")
+        PETSc.Sys.Print(f"  Ocean melt: ISMIP7 OCX '{ocean.variant}' tf/so + {melt_what}")
         callback = make_forcing_callback(
             atm=atm, ocean=ocean, K_per_basin_npz=K_npz, smb_anomaly=False,
         )
         provenance = describe_forcing_provenance(
             atm, ocean, variables={"atmosphere": ("acabf",)})
     else:
-        PETSc.Sys.Print(f"  Ocean melt: OI climatology + per-basin K ({K_npz})")
+        PETSc.Sys.Print(f"  Ocean melt: OI climatology + {melt_what}")
         PETSc.Sys.Print("  Atmosphere: RACMO2.4p1 actual-year SMB (ISMIP7_OCX_FORCING=stopgap)")
         provenance = describe_observational_forcing(
             smb=f"RACMO2.4p1 actual-year SMB, {RACMO_LAST} held after it",

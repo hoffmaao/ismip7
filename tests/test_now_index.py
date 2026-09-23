@@ -102,29 +102,23 @@ def _gh_ready():
                           capture_output=True).returncode == 0
 
 
-def _board_readable():
-    r"""False only when gh reports a token scope list without project access.
-
-    The board is a ProjectV2, which GraphQL hides from a token lacking
-    `read:project`. A token whose scopes gh does not list is given the run.
-    """
+def _gh_reads_board():
+    r"""The index reads the project board, which needs a project scope."""
     if not _gh_ready():
         return False
-    out = subprocess.run(["gh", "auth", "status"], capture_output=True,
-                         text=True).stdout
-    listed = re.search(r"Token scopes:\s*(.*)", out)
-    if listed is None:
-        return True
-    scopes = set(re.findall(r"'([^']+)'", listed.group(1)))
-    return bool(scopes & {"read:project", "project"})
+    r = subprocess.run(["gh", "auth", "status"], capture_output=True, text=True)
+    return re.search(r"'(read:)?project'", r.stdout + r.stderr) is not None
 
 
-@pytest.mark.skipif(not _board_readable(),
-                    reason="gh is absent, not authenticated, or its token lacks "
-                           "read:project (gh auth refresh -s read:project)")
+@pytest.mark.skipif(not _gh_reads_board(),
+                    reason="gh cannot read the board (gh auth refresh -s read:project)")
 def test_now_index_matches_the_open_issues():
     r = subprocess.run([sys.executable, str(BUILD), "--check"],
                        capture_output=True, text=True)
+    # The board is a user project; reading it needs the read:project scope,
+    # which a default `gh auth login` token does not carry.
+    if r.returncode != 0 and "read:project" in r.stderr:
+        pytest.skip("gh token lacks read:project; run gh auth refresh -s read:project")
     assert r.returncode == 0, r.stderr or r.stdout
 
 

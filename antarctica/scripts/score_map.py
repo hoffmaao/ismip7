@@ -30,13 +30,21 @@ operator the forward would use, so the flux scored is the flux a forward run
 would apply.
 
     python antarctica/scripts/score_map.py MAP.h5 [MAP2.h5 ...]
+        [--json OUT.json] [--restart STATE.h5]
 
 The run environment (``ISMIP7_LC``, ``ISMIP7_FRICTION``, ``ISMIP7_N_FLOW``,
 ``ISMIP7_GEOMETRY_SPACE``, ``ISMIP7_MESH``) must match the inversion's, as it
-must for any forward that loads the MAP.
+must for any forward that loads the MAP. With ``ISMIP7_MESH`` naming another
+mesh the MAP is transferred onto it first, so the same command with and
+without it is the before/after comparison of a transfer (``make map-check``).
+``--restart`` scores an already solved state (a prepared map-check cache)
+instead of repeating the cold continuation; ``--json`` writes the numbers
+(ratio, bands, the transfer fill counts, the fluidity prior range, the
+initial misfit) for the stage table.
 """
 
 import argparse
+import json
 import os
 import sys
 
@@ -47,6 +55,7 @@ _ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, os.path.dirname(_ROOT))
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
+from icepack2_tools.mpi_stats import global_range
 from region_budget import discharge, regions
 
 BANDS = [0.0, 100.0, 500.0, 1500.0, 1e9]
@@ -55,10 +64,10 @@ BAND_LABELS = ["< 100", "100 - 500", "500 - 1500", "> 1500"]
 OBSERVED_DISCHARGE = (2050.0, 100.0)
 
 
-def score(path):
+def score(path, restart=None):
     from simulation import setup_model
     os.environ["ISMIP7_INVERSION"] = os.path.abspath(path)
-    ctx = setup_model()
+    ctx = setup_model(restart_from=os.path.abspath(restart) if restart else None)
     mesh, h, b = ctx["mesh"], ctx["h"], ctx["b"]
     u = ctx["z"].subfunctions[0]
     u_obs = ctx["u_obs"]
@@ -78,16 +87,45 @@ def score(path):
         m = discharge(state, reg, None, sp, lo, hi)
         o = discharge(state, reg, u_obs, sp, lo, hi)
         rows.append((lab, m, o, m / o if o > 1e-9 else float("nan")))
-    return {"path": path, "q_model": q_m, "q_obs": q_o,
-            "ratio": q_m / q_o if q_o > 1e-9 else float("nan"), "bands": rows}
+    a_prior = ctx.get("A_prior")
+    a_prior_range = list(global_range(a_prior)) if a_prior is not None else None
+    return {"path": path, "restart": restart, "q_model": q_m, "q_obs": q_o,
+            "ratio": q_m / q_o if q_o > 1e-9 else float("nan"), "bands": rows,
+            "initial_misfit": ctx.get("initial_misfit"),
+            "transfer_fill": ctx.get("transfer_fill"),
+            "a_prior_range": a_prior_range,
+            "mesh_basename": ctx.get("mesh_basename"),
+            "friction": ctx.get("friction"),
+            "vertices": int(ctx["Q"].dim()),
+            "comm_size": int(mesh.comm.size)}
 
 
 def main():
     ap = argparse.ArgumentParser(
         description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("maps", nargs="+")
+    ap.add_argument("--json", default=None,
+                    help="write the scores as JSON (one entry per MAP)")
+    ap.add_argument("--restart", default=None,
+                    help="score this solved state (a prepared cache) instead "
+                         "of re-running the cold continuation; one MAP only")
     args = ap.parse_args()
-    results = [score(p) for p in args.maps]
+    if args.restart and len(args.maps) != 1:
+        raise SystemExit("--restart scores exactly one MAP")
+    results = [score(p, args.restart) for p in args.maps]
+    if args.json and results[0]["comm_size"] and fd.COMM_WORLD.rank == 0:
+        payload = [
+            dict(r, bands=[{"band": lab, "q_model": m, "q_obs": o, "ratio": ratio}
+                           for lab, m, o, ratio in r["bands"]])
+            for r in results
+        ]
+        os.makedirs(os.path.dirname(os.path.abspath(args.json)), exist_ok=True)
+        tmp = args.json + ".tmp"
+        with open(tmp, "w") as stream:
+            json.dump(payload if len(payload) > 1 else payload[0], stream,
+                      indent=2, sort_keys=True)
+        os.replace(tmp, args.json)
+        print(f"scores -> {args.json}")
     print("\n" + "=" * 72)
     for r in results:
         print(f"\n{os.path.basename(r['path'])}")

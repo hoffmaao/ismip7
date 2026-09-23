@@ -133,9 +133,11 @@ def global_size(f, comm=None):
 
     Counts dofs, not array entries: a vector-valued Function stores
     ``(ndofs, dim)``, so summing ``.size`` would report ``dim`` times too
-    many.
+    many. Accepts a Function, or a bare array with an explicit ``comm``.
     """
-    d = np.asarray(f.dat.data_ro)
+    if comm is None and not hasattr(f, "dat"):
+        raise TypeError("global_size on a bare array needs an explicit comm=")
+    d = _data(f)
     n = d.shape[0] if d.ndim else int(d.size)
     return int(_comm_of(f, comm).allreduce(int(n), op=MPI.SUM))
 

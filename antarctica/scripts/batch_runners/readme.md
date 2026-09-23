@@ -65,6 +65,17 @@ submit.sh script scripts/batch_runners/budd_map_census.script --cd antarctica \
     --queue debug --tasks 16 --mem 64G --time 00:45:00 ISMIP7_MAP=$PWD/mesh/<map>.h5
 ```
 
+`check_melt_bound.script` is the serial OCX tripwire core 11 waits on
+(issue #11). Each site runs it for itself, and again whenever the OCX ocean on
+its mirror changes. The job ends with the check's status, 1 when a basin or a
+256 km block is flagged, and its log names the OCX version the reader opened:
+
+```bash
+submit.sh script scripts/batch_runners/check_melt_bound.script --cd antarctica \
+    --queue debug --tasks 1 --mem 16G --time 00:30:00 \
+    ISMIP7_LC=1000 ISMIP7_INV_H5=$PWD/mesh/<map or forward state>.h5
+```
+
 `--queue short|long|debug` names the site's partition by class, `--cd DIR`
 submits from `ISMIP7_REPO/DIR` (the timing scripts run from `antarctica/`),
 `--dependency` and `--wait` pass through. Standard output is sbatch's alone, so

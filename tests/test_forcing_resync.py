@@ -217,6 +217,53 @@ def test_versions_below_a_row_sort_by_number(tmp_path):
     assert audit.local_versions(str(tmp_path), esm, "ssp585", atm, "extra") == ["v2", "v10"]
 
 
+# --- the dry run as the completeness gate -----------------------------------
+
+def _dry_run(monkeypatch, capsys, root, listing, *flags):
+    def no_network(*args, **kwargs):
+        raise AssertionError("a dry run opened a connection")
+    monkeypatch.setattr(mirror, "list_keys", lambda prefix, endpoint, product: listing)
+    monkeypatch.setattr(mirror.urllib.request, "urlopen", no_network)
+    monkeypatch.setattr(sys, "argv", ["download_mirror.py", "--root", str(root), *flags, "data/CESM2-WACCM/"])
+    return mirror.main(), capsys.readouterr().out
+
+
+def test_a_dry_run_counts_the_plan_by_verb_and_writes_nothing(tmp_path, monkeypatch, capsys):
+    r"""The audit's rows read ``ok`` over a tree with 2,755 files absent
+    (issue #41), and the dry run's 20-line preview cannot be counted over
+    94,000 objects. The plan by verb, and the rows with work under them, are
+    what say whether every file is there and unchanged."""
+    esm = "CESM2-WACCM"
+    tf = _key(esm, "ssp585", "ocean", "tf", f"tf_AIS_{esm}_ssp585_ocean_v3_2015.nc")
+    so = _key(esm, "ssp585", "ocean", "so", f"so_AIS_{esm}_ssp585_ocean_v3_2015.nc")
+    lake = _key(esm, "ssp585", "fracture", "", "lake_properties_cesm2waccm_ssp585_ismip7_8km-v2.1.nc")
+    listing = [_entry(tmp_path, tf), _entry(tmp_path, so, body=b"abcdef", on_disk=False),
+               _entry(tmp_path, lake, etag="bbb")]
+    mirror.save_manifest(str(tmp_path), {"ismip7-ais-forcing/" + k: {"size": 4, "etag": "aaa", "last_modified": THEN}
+                                         for k in (tf, lake)})
+    manifest = tmp_path / mirror.MANIFEST_NAME
+    before = sorted(os.path.join(d, f) for d, _, fs in os.walk(tmp_path) for f in fs), manifest.read_bytes()
+
+    verbs, rows = mirror.summarize([(k, size, etag, stamp, mirror.local_path(str(tmp_path), k), verb)
+                                    for (k, size, etag, stamp), verb in zip(listing, ("skip", "fetch", "REPLACED"))])
+    assert verbs == {"skip": [1, 4], "adopt": [0, 0], "fetch": [1, 6], "resume": [0, 0],
+                     "REPLACED": [1, 4], "OLDER": [0, 0]}
+    # a flat fracture directory stops at the product, as the audit's row does
+    assert rows == {("fetch", f"{esm}/ssp585/ocean/so"): [1, 6], ("REPLACED", f"{esm}/ssp585/fracture"): [1, 4]}
+
+    status, out = _dry_run(monkeypatch, capsys, tmp_path, listing, "--dry-run")
+    assert status == 0
+    assert "by verb: 1 skip (0.00 GB), 0 adopt, 1 fetch (0.00 GB), 0 resume, 1 REPLACED (0.00 GB), 0 OLDER" in out
+    assert [line.split() for line in out.splitlines() if line.endswith(("ocean/so", "ssp585/fracture"))] == [
+        ["REPLACED", "1", "files", "0.00", "GB", f"{esm}/ssp585/fracture"],
+        ["fetch", "1", "files", "0.00", "GB", f"{esm}/ssp585/ocean/so"]]
+    # --check is the same dry run with the verdict in its exit status
+    assert _dry_run(monkeypatch, capsys, tmp_path, listing, "--check")[0] == 1
+    assert _dry_run(monkeypatch, capsys, tmp_path, listing[:1], "--check")[0] == 0
+    # nothing fetched, nothing swapped in, and the manifest byte for byte as it was
+    assert before == (sorted(os.path.join(d, f) for d, _, fs in os.walk(tmp_path) for f in fs), manifest.read_bytes())
+
+
 # --- the Globus route -------------------------------------------------------
 
 def _share(tree):

@@ -102,8 +102,13 @@ values fed in.
 
 ## Open items (carried in the per-core reports)
 
-1. **~9% aSMB unit inflation** (`forcing.py:smb_kgm2s_to_myr`) - a real
-   pending decision; inflates every ESM SMB anomaly. (The matrix sitting
+1. **aSMB unit conversion, settled** (`forcing.py:smb_kgm2s_to_myr`). The
+   reader carried an extra water-to-ice density ratio, so every ESM SMB
+   anomaly entered 9 percent too large, while the output writer, the melt
+   bound check and the readiness doc all converted with the ice density
+   alone. The factor was removed on 2026-09-22: the anomaly is now the mass
+   flux over 917 kg m-3, the ISMIP6 convention. Cores 1-8 read the inflated
+   anomaly; cores 9-11 do not read the aSMB path. (The matrix sitting
    above the ISMIP6 envelope is a real forced-response bias - a
    melt/dynamics parametrization target - not a differencing artifact.
    `control/run.py` branches the CTRL from the historical endpoint because
@@ -121,25 +126,35 @@ values fed in.
    computed against them do not cleanly isolate the forced response.)
    **Every number in this item, including the isolation test and the
    above-envelope overshoot it explains, was produced with the January-only
-   forcing.** That bug overstates late-century ablation several-fold and is on
-   its own a sufficient cause of the overshoot, so the magnitude and the
-   attribution both have to be re-derived from the re-run before the ~9% unit
-   question can be judged against them. (issue #29)
+   forcing and the inflated anomaly.** The January bug overstates late-century
+   ablation several-fold and is on its own a sufficient cause of the
+   overshoot, so the magnitude and the attribution both have to be re-derived
+   from the re-run. (issue #28)
 2. **Projection handoff: settled at 2015.0.** Since 2cd8b57 (14 September)
    the historical shims end at `t_end_default=2015.0` and the projection shims
    start at `t_start_default=2015.0` (`antarctica/scripts/historical/*.py`,
    `projections/*.py`), as FORWARD_RUN_READINESS.md states. The 28 July matrix
-   logs show `1850.0->2014.0` and `2014.0->2300.0` under the July drivers. The
-   next historical run's `Time-stepping` line is the run-level confirmation.
-3. **Runaway-detector peak clause** flags isolated one-step discharge spikes
-   during emptying events as FAIL even though the budget closes; the audit
-   verdict is otherwise ON TRACK. Worth refining to sustained-growth only. (issue #33)
+   logs show `1850.0->2014.0` and `2014.0->2300.0` under the July drivers.
+   Confirmed at run level on 21 September: the 32 km CESM2-WACCM historical at
+   IU Quartz (job 10559683, 12854ec) printed `Time-stepping: 1850.0->2015.0,
+   dt=0.1yr, 1650 steps` and its final state carries `t_yr = 2015`. The
+   projection side (`2015.0->...`) is still to be read off the first run that
+   branches from it.
+3. **Runaway detector: settled.** `check_ismip6_track.py` flags a runaway on
+   sustained signals only: a year whose median front discharge exceeds 6000
+   Gt/yr, or growth of 1.5x in each of two consecutive years. A single
+   emptying step no longer counts. Re-read under it, the July matrix's cores
+   2, 3 and 7 pass (one step of 60,446 Gt/yr; one year at 2.4x; two steps
+   above 6000 with year medians below 1,800) and cores 1, 5, 8 and 9 still
+   fail on sustained growth or a year median of 4,000 to 8,000.
 4. **Monolithic forward** for cores 7 (and the 10 tail) beyond saturation. (issue #32)
 5. **500 m / 2500 m production resolution**: the 2500 m `_budd` MAP on disk
    (`inversion_icepack2_budd_2500.h5`) is the untagged n=4, CG1-geometry one;
    this matrix is the 32 km demonstration. An n=3 production line needs its own
    `inversion_icepack2_budd_n3_dg0_2500.h5` (see `../N3_FRAMEWORK.md` for the
-   naming rule), inverted with a 2500 m boundary-id sidecar. (issue #31)
+   naming rule), inverted with a 2500 m boundary-id sidecar; the 2 km RC and
+   Budd inversions are the open line, and icepack/ismip7#31 was closed as
+   their duplicate on 22 September. (issue #24)
 
 For the pipeline and its knobs see `antarctica/README.md`; for the rheology see
 `COMPOSITE_RHEOLOGY.md` and `antarctica/N3_FRAMEWORK.md`. (The deeper

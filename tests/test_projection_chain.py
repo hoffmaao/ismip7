@@ -44,6 +44,9 @@ except ValueError as exc:
     sys.exit(2)
 print(f"driver: auto_resume={resume} apparent_mb={amb}")
 print(f"driver: solver={diagnostic_solver_mode()} dt={os.environ.get('ISMIP7_DT')}")
+# srun takes SLURM_EXPORT_ENV as its own --export, so a list there would
+# reach the real driver's environment through the launcher.
+print(f"driver: srun export list={os.environ.get('SLURM_EXPORT_ENV', 'none')}")
 
 start = os.environ.get("FAKE_START_YEAR", "")
 if start:
@@ -79,7 +82,8 @@ STUBS = {
     "sbatch": (
         "#!/bin/bash\n"
         'printf "ARGV: %s\\n" "$*" >> "$SBATCH_CALLS"\n'
-        'env | grep "^ISMIP7_" | sort | sed "s/^/ENV: /" >> "$SBATCH_CALLS"\n'
+        'env | grep -E "^(ISMIP7_|SLURM_GET_USER_ENV=|SLURM_EXPORT_ENV=)" | sort'
+        ' | sed "s/^/ENV: /" >> "$SBATCH_CALLS"\n'
         'echo "Submitted batch job 999999"\n'
     ),
     "scontrol": (
@@ -185,6 +189,27 @@ def test_the_successor_is_given_this_job_s_allocation(sandbox):
         assert flag in argv[0], f"successor lost {flag}: {argv[0]}"
 
 
+def test_a_list_form_first_link_leaves_nothing_behind(sandbox):
+    r"""sbatch gives a job submitted with an --export list two variables that
+    a bare --export=ALL would pass to every successor. SLURM_GET_USER_ENV=1
+    has slurmd rebuild the login environment when the successor starts and
+    hold the job when that fails. SLURM_EXPORT_ENV holds the list, which srun
+    takes as its own --export, so the ISMIP7_RESTART the runner unsets before
+    resubmitting would come back in every later link's driver and send it to
+    the first link's starting checkpoint."""
+    listed = "ALL,ISMIP7_SITE=local,ISMIP7_RESTART=/results/hist_final.h5"
+    rc, log, calls = run_job(sandbox, FAKE_T_YR="2050", FAKE_START_YEAR="2000",
+                             ISMIP7_RESTART="/results/hist_final.h5",
+                             SLURM_GET_USER_ENV="1", SLURM_EXPORT_ENV=listed)
+    assert rc == 0, log
+    assert "driver: srun export list=none" in log
+    argv = [line for line in calls.splitlines() if line.startswith("ARGV:")]
+    assert len(argv) == 1, calls
+    assert [word for word in argv[0].split() if word.startswith("--export")] == ["--export=ALL"]
+    assert "SLURM_GET_USER_ENV" not in calls and "SLURM_EXPORT_ENV" not in calls
+    assert "ENV: ISMIP7_RESTART" not in calls
+
+
 def test_the_successor_is_given_the_site_s_extra_flags(sandbox):
     r"""ISMIP7_SBATCH_EXTRA carries what a site insists on for every
     submission, a QOS for instance. scontrol does not hand it back in a form
@@ -234,8 +259,8 @@ def test_driver_exit_stops_the_chain(sandbox):
 def test_auto_resume_off_stops_the_chain(sandbox, value):
     r"""With resume off a successor would cold-start and repeat these years
     forever. The empty string is one of the off spellings, and
-    ``--export=ALL,ISMIP7_AUTO_RESUME=`` is the only way to say it through
-    sbatch, so it has to survive the runner's defaulting."""
+    ``submit.sh projection ISMIP7_AUTO_RESUME=`` delivers it (set empty in
+    sbatch's environment), so it has to survive the runner's defaulting."""
     rc, log, calls = run_job(
         sandbox, FAKE_T_YR="2050", FAKE_START_YEAR="2000",
         ISMIP7_AUTO_RESUME=value)

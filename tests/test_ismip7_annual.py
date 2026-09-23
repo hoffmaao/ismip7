@@ -586,3 +586,77 @@ def test_a_checkpoint_past_the_skipped_year_resumes_normally(two_cells, tmp_path
     assert resumed.year_time == pytest.approx(0.5)
     assert np.allclose(resumed.year_acc["acabf"], [1.0, 1.0])
     resumed.close()
+
+
+# --- the grounding-line flux carries a sign ----------------------------------
+#
+# ``ligroundf`` takes the grounded sheet as its reference (discussion #22,
+# settled 22 September 2026): positive for grounded ice going afloat, negative
+# where floating ice flows onto grounded ice, booked in the floating cell.
+
+def _strip(n):
+    r"""``n`` unit quadrilateral cells in a row, plus the dof order that
+    reads them left to right."""
+    mesh = fd.RectangleMesh(n, 1, float(n), 1.0, quadrilateral=True)
+    Q = fd.FunctionSpace(mesh, "DG", 0)
+    V = fd.VectorFunctionSpace(mesh, "CG", 1)
+    x = fd.Function(Q).interpolate(fd.SpatialCoordinate(mesh)[0]).dat.data_ro
+    return mesh, Q, V, np.argsort(x)
+
+
+def _one_advance(mesh, Q, V, grounded, ux, tmp_path):
+    r"""One unit advance of a unit-thick sheet at velocity (ux, 0), no sources.
+    Returns the writer and the ``ligroundf`` booked per cell in dof order,
+    which with unit cells is the facet flux u h L."""
+    annual = AnnualOutput(mesh, Q, str(tmp_path / "out" / "annual.h5"),
+                          str(tmp_path / "out" / "scalars.csv"),
+                          first_year=2015, rho_ratio=RHO_RATIO)
+    h = _dg(Q, np.ones(len(grounded)))
+    u = fd.Function(V)
+    u.dat.data[:, 0] = ux
+    annual.start_year(h)
+    annual.begin_step()
+    annual.book_advance(1.0, fd.Constant(0.0), fd.Constant(0.0), None, h, u, grounded)
+    annual.commit_step()
+    return annual, annual.year_acc["ligroundf"].copy(), h, u
+
+
+def test_ligroundf_is_positive_for_grounded_ice_going_afloat(tmp_path):
+    mesh, Q, V, order = _strip(4)
+    grounded = np.zeros(4, dtype=bool)
+    grounded[order[:2]] = True                     # x < 2 grounded, x > 2 afloat
+    _, booked, _, _ = _one_advance(mesh, Q, V, grounded, 1.0, tmp_path)
+    assert np.allclose(booked[order], [0.0, 0.0, 1.0, 0.0])
+
+
+def test_ligroundf_is_negative_where_floating_ice_grounds(tmp_path):
+    r"""The same facet with the flow reversed books the same magnitude with
+    the opposite sign, in the same floating cell, and the year's scalar
+    carries it."""
+    mesh, Q, V, order = _strip(4)
+    grounded = np.zeros(4, dtype=bool)
+    grounded[order[:2]] = True
+    annual, booked, h, u = _one_advance(mesh, Q, V, grounded, -1.0, tmp_path)
+    assert np.allclose(booked[order], [0.0, 0.0, -1.0, 0.0])
+
+    from icepack2_tools.ismip7_output import SECONDS_PER_YEAR
+    bed = _dg(Q, -1000.0 * np.ones(4))
+    annual.year_end(h, h, bed, u, fd.Function(V), grounded, np.ones(4, dtype=bool))
+    annual.close()
+    import csv
+    with open(tmp_path / "out" / "scalars.csv") as f:
+        row = next(iter(csv.DictReader(f)))
+    assert float(row["tendligroundf"]) == pytest.approx(-RHO_I / SECONDS_PER_YEAR, rel=1e-6)   # the csv carries 7 digits
+
+
+def test_an_ice_rumple_nets_to_zero(tmp_path):
+    r"""Floating, grounded, floating under uniform flow: what flows onto the
+    pinning point books negative upstream of it and positive downstream, so
+    the discharge sums to zero. Booking the grounded cell's outflow alone
+    gave +1 here, the rumple's throughput counted as loss."""
+    mesh, Q, V, order = _strip(5)
+    grounded = np.zeros(5, dtype=bool)
+    grounded[order[2]] = True
+    _, booked, _, _ = _one_advance(mesh, Q, V, grounded, 1.0, tmp_path)
+    assert np.allclose(booked[order], [0.0, -1.0, 0.0, 1.0, 0.0])
+    assert abs(booked.sum()) < 1e-12

@@ -99,6 +99,8 @@ subdir=""
 dependency=""
 wait_flag=0
 capped=1
+# A space, then a variable name and "=", inside one value.
+joined_pairs='[[:space:]][[:alpha:]_][[:alnum:]_]*='
 while [ $# -gt 0 ]; do
     # --opt=value is the spelling sbatch itself takes, so split it and let the
     # same branches handle both forms.
@@ -131,7 +133,21 @@ while [ $# -gt 0 ]; do
                 --dependency) dependency="$2"; shift 2 ;;
                 --wait)       wait_flag=1; shift ;;
             esac ;;
-        *=*)          exports+=("$1"); shift ;;
+        *=*)
+            # The key has to be a variable name for the job to read it, and
+            # the `env` below would take a leading dash for its own option.
+            case "${1%%=*}" in
+                ""|[0-9]*|*[![:alnum:]_]*)
+                    echo "not a variable name: '${1%%=*}' in $1" >&2; exit 2 ;;
+            esac
+            # zsh passes an unquoted $VAR as one argument, so `submit.sh
+            # projection $COMMON` would set the first key to all the rest.
+            if [[ "${1#*=}" =~ $joined_pairs ]]; then
+                echo "one argument holds several KEY=VALUE pairs: $1" >&2
+                echo "  zsh passes an unquoted \$VAR whole; spell the pairs out or write \${=VAR}" >&2
+                exit 2
+            fi
+            exports+=("$1"); shift ;;
         *) echo "unknown argument: $1" >&2; exit 2 ;;
     esac
 done
@@ -159,8 +175,19 @@ if ! cd "$ISMIP7_REPO/$subdir" 2>/dev/null || [ ! -f "$script_rel" ]; then
     exit 2
 fi
 
-export_list="ALL,ISMIP7_SITE=$ISMIP7_SITE_NAME,ISMIP7_REPO=$ISMIP7_REPO"
-for kv in ${exports+"${exports[@]}"}; do export_list="$export_list,$kv"; done
+# Every KEY=VALUE, with the site and the checkout, is set in sbatch's own
+# environment, where it wins over the same variable exported in the calling
+# shell, and a bare --export=ALL carries that environment whole into the job
+# and on to its chain links. An --export list has two faults. sbatch splits it
+# on commas and documents no quoting, so ISMIP7_SUBCYCLES=1,4,16,64 would reach
+# the job as ISMIP7_SUBCYCLES=1. And any value but a bare ALL or NIL sets
+# SLURM_GET_USER_ENV=1, which has slurmd rebuild the login environment when
+# the job starts and requeue and hold the job when that fails ("user env
+# retrieval failed requeued held", IU Quartz, Slurm 25.11.8). The job starts
+# with this shell's environment alone, and site_core.sh reads
+# ISMIP7_MODULE_INIT when that holds no module system.
+job_env=("ISMIP7_SITE=$ISMIP7_SITE_NAME" "ISMIP7_REPO=$ISMIP7_REPO"
+         ${exports+"${exports[@]}"})
 
 cmd=(sbatch --parsable
      -J "$name"
@@ -168,7 +195,7 @@ cmd=(sbatch --parsable
      --nodes=1 --ntasks-per-node="$tasks" --cpus-per-task="$cpus_per_task"
      --hint=nomultithread
      --mem="$mem" --time="$time"
-     --export="$export_list"
+     --export=ALL
      "$script_rel")
 [ -n "$constraint" ] && cmd=("${cmd[@]:0:1}" -C "$constraint" "${cmd[@]:1}")
 [ -n "$account" ] && cmd=("${cmd[@]:0:1}" -A "$account" "${cmd[@]:1}")
@@ -180,6 +207,8 @@ tail_flags=()
 [ "$wait_flag" = 1 ] && tail_flags+=(--wait)
 last=$((${#cmd[@]} - 1))
 cmd=("${cmd[@]:0:$last}" ${tail_flags+"${tail_flags[@]}"} "${cmd[$last]}")
+# Put in front last, since the insertions above count positions from sbatch.
+cmd=(env "${job_env[@]}" "${cmd[@]}")
 
 # Memory as sbatch spells it (240G, 187000M, a bare number of megabytes), in
 # megabytes. Anything else prints nothing and the comparison is skipped.

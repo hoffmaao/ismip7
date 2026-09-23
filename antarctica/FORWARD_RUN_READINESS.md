@@ -5,7 +5,9 @@ Swept from the ISMIP discussion board (https://github.com/orgs/ismip/discussions
 the two in `ismip7-antarctic-ocean-forcing`). This file is the tracked home of
 both sweeps. Sections 1 to 5 are the first, corrected where the second found
 them out of date; section 6 is the second, with the thread-by-thread
-checklist. Ordered by what blocks a submission first.
+checklist. Section 7 is a third, read-only pass on 21 September (49 threads)
+over the threads that had moved; it updates that checklist in place. Ordered by
+what blocks a submission first.
 
 ## 1. Protocol changes since 12 August
 
@@ -19,7 +21,7 @@ replaced SDBN1 v2.
 
 **Source Cooperative mirror (#40).** Products `ismip7-ais-forcing`,
 `ismip7-ais-observations`, `ismip7-ais-melt-calibration`. Re-synced with Globus
-on 11 September, by hand every week or two. The forcing layout is
+on 11 and 21 September, by hand every week or two. The forcing layout is
 `data/<ESM>/<scenario>/<product>/<variable>/<file>`, with no `AIS/` level and
 no version directories; the version sits in the filename. Anonymous HTTPS
 listing needs a browser-like User-Agent. This is the route for NOTS, which has
@@ -48,7 +50,9 @@ front positions in `obs/`), ice mask ends 2021. The spatially shifted AIS OCX
 17th to be OCX only; the OCX gradients are v2 on the mirror. Nothing here reads
 them (no SMB-height feedback), but it is the case that showed a re-sync could
 not see a replaced file, see section 6. Open since 17 September: the OCX `main`
-thermal forcing departs from the Zhou climatology around Mertz (#48).
+thermal forcing departs from the Zhou climatology around Mertz (#48). Confirmed
+upstream on 20 September: OCX was built on an earlier extrapolation and is
+being regenerated, with no date set, section 7.
 
 **Fracture masks (#29, #30, #33).** Both ESMs' SSPs (CESM ssp585 at v2.1), none
 for historical or OCX. Floating ice only. The masks light up near the grounding
@@ -60,8 +64,9 @@ the submission uses is a decision, section 6.
 **NaN forcing outside the downscaled mask (#39)** is intended. Zero, nearest or
 a large melt are all acceptable, stated in the README. Ours fills with zero.
 
-**CESM2-WACCM ends in 2299 (#8).** The 2300 atmosphere files were removed and
-the ocean stops at 2299, while a 2015-2300 run needs 2300. Handled: the reader
+**CESM2-WACCM ends in 2299 (#8).** The empty 2300 atmosphere files were
+removed, and by 22 September 2300 was back as the 2290-2299 mean (#49, section
+8). The ocean stops at 2299, while a 2015-2300 run needs 2300. Handled: the reader
 persists the last year on disk exactly one year past the end and reports it
 once per variable; a gap inside the series stays an error.
 
@@ -116,8 +121,9 @@ consistency errors. The experiment-length checks remain.
 
 Conventions chosen: `acabf` is the forcing SMB with the apparent-MB correction
 travelling separately as `acabf_correction`, `ligroundf` is booked into the
-first floating cell, `lithk` is zero where the ice mask is zero, and
-`base = orog - lithk` on the grid.
+first floating cell and signed positive from grounded to floating (section 9),
+`lithk` is zero where the ice mask is zero, and `base = orog - lithk` on the
+grid.
 
 What a submission needs (#5, #16, #17, #18, #19, #20, #22, #23):
 
@@ -161,82 +167,73 @@ What a submission needs (#5, #16, #17, #18, #19, #20, #22, #23):
 
 ## 4. Model-side state
 
-**Inversions.** RC and Budd MAPs exist on the Úa-preset mesh
+**Inversions.** RC and Budd MAPs exist on the adaptive-preset mesh
 (`inversion_icepack2_{rc,budd}_n3_dg0_logvelnet_ua2000.h5`). Every Budd MAP
 older than 13 September carries the shelf-friction defect and is unusable.
+The 2 km RC and Budd MAPs inverting at Rice replace them (issue #24); their
+22 September snapshots go through `make map-check`, native and transferred
+onto the 1 km / 10 km mesh, and the numbers land in `MAP_CHECK.md`.
 
 The 13 September Budd MAP was inverted while the shelf gate still multiplied
 through by the grounded indicator `He`, and the shipped gate is height above
 flotation alone, so it was re-inverted under the shipped law as NOTS 1390416
 (200 iterations, final masked misfit 1.041e4, 14 September). The census
-justifies that on its own: on the Úa mesh the old sign gate puts 13 647 of
+justifies that on its own: on the adaptive mesh the old sign gate puts 13 647 of
 103 233 floating cells at the friction cap, the `He` form 8 781, and the
 shipped gate 0. The superseded file is kept as
 `inversion_icepack2_budd_n3_dg0_logvelnet_ua2000_hegate.h5`. The RC MAP never
 carried the gate.
 
-**⚠️ OPEN, and it blocks the forward matrix: no MAP on the Úa mesh reproduces (issue #25)
-its own velocity.** `check_budd_map.py --forward` re-solves the diagnostic at a
-MAP's controls and compares against the velocity that MAP saved. A MAP the
-forward agrees with returns about 1e-9. Measured 15 September on the Úa 2 km
-mesh at 32 ranks, both laws fail by the same amount:
+**Resolved 21 September: the MAPs reproduce their own velocity once the
+forward assembles the residual they were inverted under.**
+`check_budd_map.py --forward` re-solves the diagnostic at a MAP's controls and
+compares against the velocity the MAP saved; `ISMIP7_CHECK_FRICTION` (default
+`budd`) selects the law. Measured at Rice, serially, under the `ismip7-pr6`
+clone:
 
-| MAP | law | relative L2 | solved mean speed | saved mean speed |
-|---|---|---|---|---|
-| `inversion_icepack2_rc_n3_dg0_logvelnet_ua2000.h5` | regularized Coulomb | 0.685 | 68.4 m/yr | 137.1 m/yr |
-| `inversion_icepack2_budd_n3_dg0_logvelnet_ua2000.h5` | Budd | 0.665 | 56.3 m/yr | 105.3 m/yr |
+| MAP | law | forward stabilizers | relative L2 | solved mean speed | saved mean speed |
+|---|---|---|---|---|---|
+| `inversion_icepack2_budd_n3_dg0_logvelnet_ua2000.h5`, 14 September | Budd | as shipped | 0.665 | 56.3 m/yr | 105.3 m/yr |
+| same (NOTS 1569253) | Budd | `ISMIP7_OCEAN_DRAG=0 ISMIP7_U_LIM=0` | 1.858e-8 | 105.3 m/yr | 105.3 m/yr |
+| `inversion_icepack2_rc_n3_dg0_logvelnet_ua2000.h5`, 14 September (NOTS 1568627) | regularized Coulomb | as shipped | 0.6854 | 68.4 m/yr | 137.1 m/yr |
+| same (NOTS 1569253) | regularized Coulomb | `ISMIP7_OCEAN_DRAG=0 ISMIP7_U_LIM=0` | 9.049e-8 | 137.1 m/yr | 137.1 m/yr |
+| `inversion_icepack2_budd_n3_dg0_logvelnet_ua2000_pr6.h5`, 18 September (NOTS 1563053) | Budd | as shipped | 1.104e-7 | 84.3 m/yr | 84.3 m/yr |
+| fresh 32 km Budd, 10 iterations, current code | Budd | as shipped | 1.04e-7 | 131.76 m/yr | 131.76 m/yr |
 
-The re-inverted Budd MAP scores the same as the retired one (0.665 against
-0.678), so the shelf gate is not what this measures. The failure is common to
-both laws and the forward runs roughly half as fast as the state the inversion
-converged to, which points at something shared between the two setups rather
-than at either friction law. `velocity` in a MAP is the model's own solution,
-saved by `inversion_icepack2.py` beside `velocity_obs`, so this compares model
-to model.
+The RC and `_pr6` rows are the same on both mesh routes, the `.msh` named and
+the mesh taken from the checkpoint. The two 14 September MAPs came from
+`ismip7-next`, whose `inversion_icepack2.py` passes no `residual_stabilizers`
+while its forward applies `ocean_drag` and `u_lim`. The commit that shares the
+stabilizers with the inversion (571d1c9) was authored at 19:04 CDT on 14
+September, after the Budd re-inversion NOTS 1390416 started at 15:29. Inversion
+and forward therefore assembled different residuals, and the 15 September mean
+speeds were real: the drags alone account for them.
 
-The inputs are not the cause. NOTS 1428624 compared every field the forward
-builds against the one the MAP saved, on the RC MAP under regularized Coulomb:
+A forward from a MAP inverted before 571d1c9 starts from the inverted state
+only with `ISMIP7_OCEAN_DRAG=0 ISMIP7_U_LIM=0`. MAPs inverted after it, the
+`_pr6` Budd and the 2 km RC and Budd now inverting under the prior metric,
+reproduce as shipped. The 14 September RC MAP needs re-inverting only to match
+the default forward. The 10-year run of job 1368723 used the default
+stabilizers, so it stays a pipeline exercise.
 
-| field | relative L2 |
-|---|---|
-| thickness, bed, surface | 0.000e+00 |
-| log_friction | 3.68e-17 |
-| log_fluidity | 3.19e-17 |
+A separate defect affected the 32 km measurement alone. When the forward
+builds its mesh from the `.msh`, the checkpoint carries its own copy numbered
+differently, the direct load of the saved field fails, and the fallback copied
+raw `dat` arrays between the two, so it compared permuted fields and reported
+0.570 for the fresh 32 km MAP. The two mean speeds were equal to every printed
+digit, and the nodal speeds differed by up to 7,023 m/yr in the given order and
+by 0.012 m/yr once both were sorted, with identical sums. The comparison now
+aligns nodes by coordinate and refuses two meshes that are not the same vertex
+set (`check_budd_map.node_permutation`, `tests/test_forward_check_ordering.py`).
+The adaptive-mesh measurements above used the checkpoint mesh, so the defect did not touch
+them. On the 32 km MAP `probe_forward_consistency.py` also found `N_ref=None`
+(the inversion's own call, via `ISMIP7_BUDD_NREF=none`) and the inversion's
+composite alpha inert to every digit.
 
-So the forward rebuilds the inversion's geometry exactly and loads its controls
-to machine precision.
+The check needs a MAP's final save: the every-20-iterate checkpoints carry the
+controls but not the velocity.
 
-The solver tolerance is ruled out too. NOTS 1435598 re-solved the same system
-from the state `setup_model` leaves, keeping the model's own line search and
-asking for four orders below the residual the continuation reached. Newton went
-from 70.2 to 8.6e-5 in two steps and converged, and the velocity moved by a
-relative L2 of 7.4e-9. That movement carries the result: the distance to the
-saved velocity is unchanged to four figures at 0.6854, and the mean speed stayed
-at 68.4 m/yr against the MAP's 137.1. A first attempt swapped the line search
-for `bt` and diverged after nine iterations. It changed the line search along
-with the tolerance, so it is superseded by this one and carries no evidence.
-
-Identical geometry, identical controls, and both states converged roots, with a
-factor of two in mean speed between them. The two codes therefore assemble
-different residuals. Both build theirs through
-`icepack2_tools.dual_friction.build_rc_residual` for regularized Coulomb and for
-Budd: `inversion_icepack2.py` selects it for both laws with `USE_RESIDUAL`
-(line 188) and calls it inside `build_F` (line 664), and `simulation.py` calls
-it inside `_build_F` (line 820), which the model context exposes as `build_F`.
-Only the `budd_legacy` path assembles an action, and neither MAP here uses it.
-The next step is a term-by-term comparison of those two calls and the arguments
-each passes. The forward alone passes `ocean_drag`, `h_ocean`, `u_lim`, `k_lim`,
-`eps_tauc` and `drag_mask`, and it passes its own `N_ref` where the inversion
-passes `None`. Its banner already shows two of these, `ocean_drag=1e-02@h<10m`
-and `u_lim=2e+04`. Both are expected to be inert at these speeds and
-thicknesses, and they are the first to check.
-
-Until this is understood, a forward run does not start from the inverted state,
-so the 10-year result of job 1368723 should be read as a pipeline exercise
-rather than a science result. This question is one of the two that hold the
-full-length ssp585 (NOTS 1390452), and action 1 of section 5 names both.
-
-**Forward.** The RC control on the Úa mesh runs and holds (1 yr, resid 0). A
+**Forward.** The RC control on the adaptive mesh runs and holds (1 yr, resid 0). A
 10-year CESM2-WACCM ssp585 on that mesh (NOTS job 1368723) took 10.5 minutes on
 32 Sapphire Rapids ranks, 6 s per 0.1-year step, so a 2015-2300 projection is
 about 5 node-hours and eleven cores about 2.5 node-days.
@@ -245,7 +242,7 @@ about 5 node-hours and eleven cores about 2.5 node-days.
 combines Paolo (2023), Davison (2023) and Adusumilli (2020), and its integrated
 target is 1067.4 Gt/yr against the 865.0 Gt/yr of the Paolo plus Adusumilli
 table the old calibration used. Both tables went through `calibrate_melt.py` on
-the same Úa mesh, so the comparison isolates the observations:
+the same adaptive mesh, so the comparison isolates the observations:
 
 | observations | integrated target | K* | melt at K* |
 |---|---|---|---|
@@ -276,38 +273,36 @@ forcing-version audit, the output writer, and the melt calibration above.
 
 ## 5. Actions, in order
 
-1. Drive the full-length ssp585 (NOTS 1390452, 2015 to 2301 on the Úa mesh with
+1. Drive the full-length ssp585 (NOTS 1390452, 2015 to 2301 on the adaptive mesh with
    `ISMIP7_OUTPUT=1`) through the writer and the compliance checker. It is the
    first run at experiment length, so it is what clears the checker's remaining
    length checks. Record which K calibration it read: a run picks up whichever
    `calibrated_K_per_basin_*.npz` is staged when it starts. The job is held in
-   the queue until two questions are settled. The first is the MAP
-   self-consistency question of section 4, taken up in action 3, since until a
-   MAP reproduces its own velocity the run does not start from the inverted
-   state. The second is the slope convention shared by calibration and forward,
-   taken up in action 5, since it decides which K the run should read. Once
-   both are settled, `scontrol release 1390452` starts it. (issue #27)
+   the queue until the slope convention shared by calibration and forward is
+   settled, taken up in action 5, since it decides which K the run should read.
+   It no longer waits on MAP self-consistency (section 4, 21 September);
+   its MAP must pass action 3 in the configuration it runs. Once the
+   convention is settled,
+   `scontrol release 1390452` starts it. (issue #27)
 2. Settle the `[confirm]` items in the submission README draft with the group. (issue #38)
-3. Find why neither the RC nor the Budd MAP on the Úa mesh reproduces its own
-   velocity (section 4). The tolerance probe is done and negative (NOTS
-   1435598), so start from the residual comparison: the inversion's
-   `build_rc_residual` call in `inversion_icepack2.py` `build_F` against the
-   forward's in `simulation.py` `_build_F`, checking `ocean_drag` and `u_lim`
-   first. Once a MAP passes `check_budd_map.py --forward`, run that check on
-   every MAP the matrix will use. (issue #25)
+3. Run the corrected `check_budd_map.py --forward` on every MAP the matrix
+   will use, on its final save, and record the number beside the MAP. A MAP
+   inverted before 571d1c9 must run with `ISMIP7_OCEAN_DRAG=0 ISMIP7_U_LIM=0`
+   or be re-inverted (section 4). The 2 km RC and Budd MAPs now inverting under
+   the prior metric are next when they finish. (issue #24)
 4. Re-run `audit_forcing_versions.py` immediately before the production matrix
    and cite it in the README. The `ctrl` pull for cores 9 and 10 is done, and
    the mirror is re-synced with Globus by hand every week or two, so the freeze
    versions can still move under a long campaign. (issue #41)
 5. Settle where the `libmassbffl` bound violation comes from. The request's AIS
-   minimum is -0.008 kg m-2 s-1, which is 275.3 m/yr of ice, and the 10-year Úa
+   minimum is -0.008 kg m-2 s-1, which is 275.3 m/yr of ice, and the 10-year adaptive-mesh
    ssp585 of job 1368723 reached -0.0117, or 402.6 m/yr.
 
-   `check_melt_bound.py` measures the slope side of it. The calibration caps the
-   draft slope `sin(alpha)` at 5e-3 and the forward applies no cap, so the melt
-   the forward applies is a different field from the melt the per-basin K was
-   fitted against. The script evaluates two halves at the reference geometry
-   with `calibrated_K_per_basin_2000.npz` on the Úa 2 km mesh, each capped and
+   `check_melt_bound.py` measures the slope side of it. The CG1 calibration
+   behind the existing K files caps the draft slope `sin(alpha)` at 5e-3 and
+   the forward applies no cap, so the melt the forward applies is a different
+   field from the melt the per-basin K was fitted against. The script evaluates two halves at the reference geometry
+   with `calibrated_K_per_basin_2000.npz` on the adaptive 2 km mesh, each capped and
    uncapped. The calibration half reproduces `calibrate_melt.py` on CG1 nodes,
    with BedMachine's raster surface and mask and the cap on the nodal slope.
    The forward half reproduces the forward on DG0 cells, with the surface from
@@ -316,6 +311,12 @@ forcing-version audit, the output writer, and the melt calibration above.
    slope. The calibration half floats 1 512 899 km2 over 47 288 nodes and the
    forward half 1 631 466 km2 over 85 820 cells, and they differ in mask and
    quadrature as well, so their totals compare in magnitude.
+
+   The rows below predate the seawater flotation test, which landed with
+   issue #66, and the
+   `h > 0` test in the forward half, and are to be re-measured with the DG0
+   melt total (issue #30); the current numbers are in
+   `GEOMETRY_DISCRETIZATION.md`.
 
    | slope | max, m/yr | p99, m/yr | area mean, m/yr | integrated, Gt/yr | past the bound |
    |---|---|---|---|---|---|
@@ -370,13 +371,14 @@ forcing-version audit, the output writer, and the melt calibration above.
    bookkeeping, since `book_advance` books the melt REQUESTED of a step while a
    nearly ice-free floating cell can only lose what it holds.
 
-   Closing the gap between calibration and forward is the next step. The clean
-   route is to recalibrate K through the forward's own melt path, cell by cell
-   with its own floating mask, under whichever slope convention is chosen.
-   Choosing the convention is a science decision, since the cap is tied to the
-   unsettled upstream local-slope question. Until it is made, `load_K_per_basin`
-   warns once per run when the K file it reads records the cap it was fitted
-   against. (issue #26)
+   `calibrate_melt.py` now fits K through the forward's own melt path under
+   `ISMIP7_GEOMETRY_SPACE=dg0` (issue #30). The forward and the calibration
+   default to the ISMIP7 reference slope, one constant `sin(alpha)` =
+   5.115e-3 (`ISMIP7_MELT_SLOPE=ant`); the local slope, capped or not, stays
+   as `local` and is tied to the unsettled upstream local-slope question.
+   `load_K_per_basin` warns once per run when the K file it reads was fitted
+   under another convention, and under `local` when it records a cap the
+   forward does not apply (issue #26, `GEOMETRY_DISCRETIZATION.md`).
 6. Optional: read the provided `ctrl` trees in place of the `ssp126`
    reference-climate pool. Closed as icepack/ismip7#43, not planned for
    September 2026.
@@ -419,6 +421,9 @@ Forcing data:
       past the end of a series, atmosphere and now ocean alike, logged, and
       anything further raises. A file with no time slices is named, with the
       cause.
+- [x] #49 (the forum thread) CESM2-WACCM `thetao` ends in 2299 for ssp126 and
+      ssp585: the #8 rule, the ocean reader holds 2299 for the single year 2300.
+      [~] Upstream is asked to add 2300; a pre-matrix `download_mirror.py --dry-run` shows it. (issue #41)
 - [x] #9, #24 time stamps and calendars differ between products: the year comes
       from the filename and only the year of a time value is ever read.
 - [x] #10, #39 NaN fill and NaN outside the downscaled mask: zero-filled, in the
@@ -448,7 +453,9 @@ Forcing data:
       the README names both gradients as unused.
 - [x] #32, #33, #41 item 6 OCX: the readers open the real tree and core 11 runs
       on it by default (`ISMIP7_OCX_FORCING`).
-- [~] #48 Mertz: `check_melt_bound.py --ocx` is the tripwire. [ ] Run it. (issue #11)
+- [~] #48 Mertz, and Cook by the product author's account: OCX confirmed built
+      on an earlier extrapolation and being regenerated, no date set (section 7).
+      `check_melt_bound.py --ocx` is the tripwire. [ ] Run it. (issue #11)
 - [~] #11 Ross warm stripe: a feature of the climatology. Thermal forcing is
       used unsmoothed, in the README. A perturbed member, not a fix.
 - [x] #25 melt toolbox re-release: recalibrated on 14 September, section 4.
@@ -469,8 +476,9 @@ Ice-shelf collapse:
 Output and submission:
 
 - [x] #14, #16, #20 time encoding, no initial state, filename years.
-- [x] #16 `licalvf` negative for loss. [~] #22 `ligroundf` sign, in the README
-      with a `[confirm]`. (issue #17)
+- [x] #16 `licalvf` negative for loss. [x] #22 `ligroundf` sign: settled by
+      the group on 22 September with the grounded sheet as the reference,
+      positive for grounded ice going afloat, section 9.
 - [x] #23 bounds. [x] #46 the bundled request is 0.5.0's and records its tag;
       `audit_variable_request.py` finds drift. [ ] Re-run the checker at 0.5.0. (issue #12)
       Scalars are not range-checked upstream, so the negative `tendlicalvf`
@@ -479,21 +487,26 @@ Output and submission:
 - [x] #17 names: the core counter follows from the forcing and the ids are
       validated. [~] What goes in the forcing field of an OCX filename is
       unsettled: isschecker checks it against CMIP model names and has no `ocx`
-      experiment row. (issue #18)
+      experiment row, so it rejects the organisers' own GrIS example (`ERA5`,
+      `ocx`), and no AIS example exists, section 7. (issue #18)
 - [x] #5, #13, #21, #6, #18, #1, #12, #38.
 
 ### Actions added, continuing section 5
 
 8. **Decide the collapse mode for the submission** (`none`, `mask`,
    `mask_front`) and settle README item 9. A 32 km ssp585 under each of the two
-   mask modes is the evidence: the log prints the mode, and
+   mask modes is the evidence: the log prints the mode under all three, and
    `ctx["collapse_held_cells"]` counts the flagged floating cells `mask_front`
-   is holding back. `mask_front` has unit tests for the rule and a 1-against-3
+   is holding back, written with the flagged and removed counts to the
+   timeseries (`collapse_*_cells`), the budget lines and the core report.
+   `mask_front` has unit tests for the rule and a 1-against-3
    rank check of the facet sweep, and has not yet run inside a forward. (issue #10)
 9. **Run `check_melt_bound.py --ocx` on the production mesh** before core 11
    runs on the OCX product, and hold that run until #48 is answered if the
    Mertz block is flagged. `ISMIP7_OCX_FORCING=stopgap` reproduces the old
-   core 11 meanwhile. (issue #11)
+   core 11 meanwhile. The 20 September answer names the cause and promises
+   regenerated files with no date, and places the difference at Cook, so read
+   the Cook block as well as Mertz, section 7. (issue #11)
 10. **Re-run isschecker at 0.5.0** on the 32 km control and ssp585 outputs,
     record the version in the README, and re-read action 5 in its light: below
     1 % of values the `libmassbffl` excursion is now a warning. (issue #12)
@@ -554,7 +567,10 @@ Output and submission:
     `download_mirror.py --dry-run` does it read-only. The audit's own docstring
     now says so, and issues #41 and #16 carry the same note where their exit
     criteria lean on it. Which prefixes the submission needs, and which a
-    routine re-sync covers, is open. (issue #49)
+    routine re-sync covers, was icepack/ismip7#49, closed on 22 September as
+    not required for the 30 September submission and to be reopened for an
+    October ESM submission; the five ESMs and the melt-calibration product
+    stay unfetched.
 
     Closed as icepack/ismip7#14.
 13. **Bring the Quartz forcing tree up to the mirror.** Done on 21 September.
@@ -596,3 +612,183 @@ settled from NetCDF headers on Quartz:
   highest version. `30_sep` stays the default, since every K is fitted to it
   and `calibrate_melt.py` reads it whatever `ISMIP7_OI_VERSION` says. Moving
   the forward to `06_nov` without recalibrating shifts the melt.
+
+## 7. Third sweep, 21 September
+
+Read-only, two days after section 6. The board holds 49 threads. Read in full
+through the GitHub API: #17, #22, #30, #37, #40, #48 and the new #49.
+`ismip7-antarctic-ocean-forcing` has no item updated since the 18th. Nothing
+was posted upstream, isschecker was read at its tag and never run, and no
+mirror listing was taken. Thread and issue numbers now collide: `#49` below is
+the forum thread about `thetao`, and icepack/ismip7#49 in section 6 is the
+board item about mirror prefixes.
+
+### What moved on the board since the 19th
+
+- **#48, 20 September, open.** The author of the OCX ocean product confirmed
+  that OCX was built from an earlier version of the extrapolated climatology,
+  v1 or v2 and unlabelled in the files, while `so` and `thetao` of the Zhou
+  climatology stand at v4. The author places the difference beneath the Cook
+  ice shelf near 152.5°E, in the Wilkes Land basin, about 1.5 °C colder at
+  500 m in OCX, and expects zero melt or refreezing there from any
+  parameterisation calibrated to the climatology. Cook is near x +1090 km,
+  y -2090 km in EPSG:3031 and Mertz near x +1440 km, y -2030 km, both
+  converted here from approximate positions. The OCX files are being
+  regenerated from the current climatology. A maintainer of the forcing mirror
+  called the update necessary; its timing is the steering committee's call and
+  was undecided on the 21st. Both question whether the v4 extrapolation is the
+  more realistic one at Cook, 1.5 °C above the surface freezing point under a
+  shelf observed to melt at 1.3 m/yr, and no change to the climatology is
+  planned. The regenerated OCX will follow the current re-release, while every
+  K here is fitted to `30_sep`; whether those two differ at Cook was not
+  checked. (issue #11)
+- **#30, 21 September.** UFEMISM (IMAU/KNMI) posted both end-members under
+  ssp585 for both core ESMs: removing flagged ice only at a front that touches
+  open ocean loses about 8 % less mass by 2300 than removing it everywhere.
+  The 3.5 m to nearly 5 m of section 6 is that model with the mask everywhere
+  against no fracture forcing, and the doubling is PISM's everywhere against
+  margin-only sensitivity runs from July. The two published end-member spreads
+  are therefore about 8 % and about 100 %. The organisers replied twice the
+  same day: the ISMIP6-style application can behave unrealistically on the
+  large shelves, a front-connected rule is a good way to limit that, no
+  front-connected mask can be supplied since every model's front differs, and
+  they welcome groups choosing different approaches so that the projections
+  carry the spread. Upstream prescribes no mode. (issue #10)
+- **#22, 21 September, open.** The sign question of the 18th drew one reply,
+  from a respondent who speaks for the organisers in #30: gain positive and
+  loss negative holds in general, and for `ligroundf` the sign depends on the
+  reference, since the grounded ice loses what the shelves gain. No sign is
+  prescribed. The organiser the board named on the 18th as best placed to
+  answer has not replied. The accepted answer is a 30 June reply, marked on
+  18 August, about converting the flux to a per-area quantity. The bundled
+  request table, whose `ligroundf` row is identical to isschecker 0.5.0's,
+  bounds `ligroundf` to [-1e9, 1e11] kg m-2 s-1 and `licalvf` to [-1e11, 0].
+  The thread opened because the checker then required `ligroundf` to be
+  nonnegative, and the lower bound was relaxed to 1 % of the upper for ice
+  rumples. The table therefore expects `ligroundf` positive for ice crossing
+  from grounded to floating, which is how the writer books it. Settled on
+  the 22nd, section 9.
+- **#40, 21 September.** The mirror was re-synced with Globus, after 29 August
+  and 11 September. New: `ctrl` `pr`, `tas` and their anomalies for both core
+  ESMs at all resolutions, which matches the 4,576 objects action 12 saw
+  arrive that morning; dEBM2 atmosphere for the five additional ESMs,
+  `historical` and `ssp370`, AIS at 8 km, their SDBN1 downscaling being absent
+  from Globus so far; and the melt-calibration READMEs and licence files on
+  Globus. The additional ESMs are announced as incomplete in both places, with
+  the ISMIP7 protocol overview sheet as the place to check what is ready.
+  Nothing in the announcement touches the fracture product. (issue #41)
+- **#49, 21 September, open, new.** A group reports CESM2-WACCM `thetao` for
+  ssp126 and ssp585 ending in 2299 where MRI-ESM2-0 runs to 2300, and asks for
+  the year on Globus. No reply yet. This is the #8 case, already in section 1:
+  `ISMIP7Ocean._chunk_for` holds 2299 for the single year 2300 and says so once
+  per variable. If the year is added under the same version it shows as
+  `fetch` in `download_mirror.py --dry-run` while the audit table stays `ok`;
+  if the version is bumped, the audit reads `BEHIND`. (issue #41)
+- **Unmoved.** #17 since 29 June, #37 since 4 September. isschecker is still
+  0.5.0, tagged on 17 September at the head of its default branch, with no open
+  pull request and no open issue, so nothing upstream is adding an `ocx` row.
+
+### Read this pass in #17 and in the checker source
+
+The organisers' list of core filenames of 19 June gives core 11, for GrIS, as
+`iareafl_GrIS_NORCE_CISM3_m001_ERA5_f001_ocr_C011_2015-2300.nc`, and the ISMIP7
+web page carries the same list with `ocx` in place of `ocr` (read there through
+an automated page summary). No AIS example exists, and the conventions PDF the
+thread links was unreadable without a sign-in. At isschecker 0.5.0: `ERA5` is
+absent from `VALID_ESM_NAMES`, so field 5 is an error, and
+`experiments_ismip7.csv` has five rows (`historical`, `ssp370`, `ssp126`,
+`ssp585`, `ctrl`), so an `ocx` file set draws a naming error and its compliance
+check is skipped. The OCX atmosphere here is `RACMO2.3p2-ERA`
+(`forcing.OCX_ATMOSPHERE_SOURCE`), which the list lacks as well. Core 11 cannot
+pass 0.5.0 under any forcing name, the experiment row being what is missing.
+(issue #18)
+
+## 8. Fourth sweep, 22 September
+
+Read-only, one day after section 7. The board holds 50 threads. Read in full
+through the GitHub API: #22, #30, #48, #49 and the new #50. The Greenland
+thread #47 was skipped. `ismip7-antarctic-ocean-forcing`,
+`ismip7-scalar-processing` and the documentation repository itself have no
+commit or issue since the 20th. isschecker moved to 0.5.1. Nothing was posted
+upstream. On Quartz one targeted listing of the CESM2-WACCM tree was taken,
+and six 2300 files were read with h5py.
+
+### What moved since the 21st
+
+- **isschecker 0.5.1, 22 September.** Only the variable request changed,
+  from checker issue 35 (opened and closed the same morning) and #50. In
+  kg m-2 s-1, `licalvf` and `lifmassbf` go from [-1e11, 0] to [-10, 0], and
+  `ligroundf` from [-1e9, 1e11] to [-10, 10]. The six `tend*` totals go from
+  [0, 1e25] to [-1e9, 1e9] kg s-1. The experiment table is unchanged, so
+  core 11 still has no `ocx` row (issue #18). Our fluxes are annual means in
+  kg m-2 s-1 on the native cells before the conservative remap. Removing
+  1000 m of ice in one year is -0.029, and `ligroundf` for u = 4 km/yr,
+  H = 1000 m into a 500 m cell is 0.23, so the gridded fields sit one to two
+  orders of magnitude inside the new bounds. A few cells outside are a
+  warning, since the grading of 0.5.0 still applies. At 0.5.1 the scalars
+  are still not range-checked (`_check_numerical` calls `_check_range` only
+  when the file is not a scalar). If a later release does check them, a year
+  in which the mask removes a Ross-sized shelf (about 1.5e17 kg) would put
+  `tendlicalvf` near -5e9 kg s-1, past the new bound. The bundled
+  `icepack2_tools/ismip7_variable_request.csv` is still 0.5.0's.
+  (issue #12)
+- **#50, 22 September, open, new.** Are the front and grounding-line fluxes
+  given over the face or averaged over the cell? An organiser answered: a
+  mass change per unit horizontal cell area, pointing to checker issue 35.
+  That is how the writer books all three (`icepack2_tools/ismip7_output.py`:
+  facet flux or removed thickness divided by the native cell area, then the
+  conservative remap). Nothing to change.
+- **#49, 21 September, after section 7 was written.** The ocean-forcing
+  maintainer does not plan to add 2300. The CMIP archives of CESM2-WACCM
+  ssp126 and ssp585 end in December 2299, and a forcing author confirmed
+  that from the raw files. MRI-ESM2-0 runs to December 2300. The same
+  maintainer reported that the atmosphere group padded 2300 with the
+  2290-2299 mean, and would not personally endorse that. The reporting group
+  leans to ending its runs in 2299 and has asked the organisers whether that
+  meets the protocol. No organiser has replied. Checked on Quartz: the
+  CESM2-WACCM SDBN1-8000m v2 directories hold 286 years including 2300.
+  `acabf`, `acabf-anomaly` and `tas` for 2300 match the 2290-2299 mean to
+  2e-7 relative for both scenarios, against 3e-2 to 5e-1 for 2299 alone. The
+  ocean v3 directories end in `2291-2299`. So a CESM2-WACCM run to 2300 here
+  reads the padded decadal mean for SMB and holds 2299 for the ocean. Section
+  1's "the 2300 atmosphere files were removed" and the reader's comment in
+  `forcing.py` are stale, and the SMB sentence of the submission README
+  claimed the 2299 hold for both. That sentence is corrected in this
+  change. (issues #78, #41)
+- **#30, 22 September.** PISM posted its margin-only runs. Under CESM2-WACCM
+  ssp585, the mask applied to all floating ice doubles the sea-level
+  contribution, 1.25 to 2.48 m of ice above flotation. Applied only at the
+  shelf margins it has hardly any effect. Under MRI-ESM2-0 the mask has almost
+  no effect either way. So the two published end-member spreads are now
+  about 8 % (UFEMISM) and about 100 %, with PISM's margin-only runs close to
+  no fracture forcing. The same author followed up on how a model should
+  treat fractured ice inside the shelf, as melange or as a reduced-viscosity
+  region rather than open ocean. No one has answered that, and the
+  organisers prescribe no mode. (issue #10)
+- **Unmoved.** #22 since 13:32 UTC on the 21st (the new 0.5.1 bounds stop
+  taking a side on the `ligroundf` sign, but the thread prescribes none).
+  #48 since the 20th: no date for the regenerated OCX. #17 and #37 as in
+  section 7.
+
+## 9. The `ligroundf` sign, settled 22 September
+
+Thread #22 was read again through the GitHub API on 22 September. Its last
+reply is still the 13:32 UTC one of the 21st: gain positive and loss negative
+in general, and for `ligroundf` "it depends which part you are considering as
+your reference". isschecker 0.5.1 bounds the field to [-10, 10] kg m-2 s-1.
+The group settled the reference on 22 September: the grounded ice sheet, so
+`ligroundf` is positive for grounded ice going afloat and negative where
+floating ice flows onto grounded ice.
+
+The writer already booked the grounded-to-floating direction positive. It
+dropped the other direction: `book_advance` took the upwind outflow of the
+grounded cell alone, so ice flowing from a shelf onto a pinning point was
+never booked, and an ice rumple contributed its whole throughput to
+`tendligroundf` as discharge. The form now books the full upwind facet flux,
+the same flux the DG0 transport moved, signed from grounded to floating and
+still landed in the floating cell. `tests/test_ismip7_annual.py` checks both
+directions on a strip of cells, and the rumple case, whose net is zero.
+Series banked by earlier runs carry the one-sided booking; they differ from
+the new one only in cells with a facet across which ice flowed from floating
+to grounded. The README's `[confirm]` on this convention is cleared and the
+board item for it is closed.

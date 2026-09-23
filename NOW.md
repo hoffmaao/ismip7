@@ -10,7 +10,7 @@ is an index.
 **Claim the card before you start a run or an inversion.** A card in
 Claimed for more than 24 hours with no comment reads as unclaimed.
 
-Generated: 2026-09-21 14:07 UTC. 22 blocking, 11 owed, 0 after the deadline, 7 unverified.
+Generated: 2026-09-23 00:48 UTC. 16 blocking, 10 owed, 0 after the deadline, 7 unverified.
 
 ## Blocking the submission
 
@@ -18,44 +18,37 @@ Decisions first: they have the longest lead time and they gate the runs.
 
 | # | item | unblocked by | owner | sites | state |
 |---|---|---|---|---|---|
-| [10](https://github.com/icepack/ismip7/issues/10) | collapse: decide the mode for the submission (none, mask, mask_front) | needs-decision | group | group | fresh, unverified by design |
+| [10](https://github.com/icepack/ismip7/issues/10) | collapse: decide the mode for the submission (none, mask, mask_front) | needs-decision | iu | quartz | fresh, unverified by design |
 | [19](https://github.com/icepack/ismip7/issues/19) | forcing: confirm which OCX forcing the submitted core 11 used | needs-decision | group | group | fresh, unverified by design |
 | [20](https://github.com/icepack/ismip7/issues/20) | mesh: choose the submission mesh and time step, Ua or the 1000 m / 10 km pair | needs-decision | group | group | fresh, unverified by design |
 | [26](https://github.com/icepack/ismip7/issues/26) | melt: settle the draft-slope convention shared by calibration and forward | needs-decision | group | group | unverifiable-run |
-| [29](https://github.com/icepack/ismip7/issues/29) | forcing: the ~9 percent aSMB unit inflation is an open decision | needs-decision | group | local | verified open |
 | [38](https://github.com/icepack/ismip7/issues/38) | submission: settle the contributor names, date, source_id, ism_id and PPE participation | needs-decision | group | group | unverifiable-run |
 | [39](https://github.com/icepack/ismip7/issues/39) | submission: request the Globus upload folder | needs-decision | group | group | unverifiable-run |
-| [11](https://github.com/icepack/ismip7/issues/11) | melt: run check_melt_bound.py --ocx before core 11 runs on the OCX product | needs-run | group | quartz, nots, midway | fresh, unverified by design |
+| [11](https://github.com/icepack/ismip7/issues/11) | melt: run check_melt_bound.py --ocx before core 11 runs on the OCX product | needs-run | iu | quartz, nots, midway | fresh, unverified by design |
 | [12](https://github.com/icepack/ismip7/issues/12) | output: re-run isschecker at 0.5.0 and record the version in the README | needs-run | group | local | fresh, unverified by design |
 | [13](https://github.com/icepack/ismip7/issues/13) | output: run ismip7-scalar-processing for sla20, slg20 and slvaf | needs-run | group | local | fresh, unverified by design |
-| [21](https://github.com/icepack/ismip7/issues/21) | MAP: re-invert on the production mesh and close the Budd/RC gap | needs-run | rice | nots | fresh, unverified by design |
 | [24](https://github.com/icepack/ismip7/issues/24) | MAP: 2 km RC and Budd inversions running at Rice under the new prior metric | needs-run | rice | nots | fresh, unverified by design |
 | [27](https://github.com/icepack/ismip7/issues/27) | matrix: the full-length ssp585 is held in the NOTS queue | needs-run | rice | nots | unverifiable-nots |
 | [28](https://github.com/icepack/ismip7/issues/28) | matrix: all 11 cores are superseded and need re-inversion, not only re-running | needs-run | group | nots | verified open |
 | [30](https://github.com/icepack/ismip7/issues/30) | melt: DG0 melt totals are uncalibrated, the per-basin K was fitted under CG1 | needs-run | group | local | verified open |
-| [31](https://github.com/icepack/ismip7/issues/31) | MAP: no n=3 production-resolution MAP exists | needs-run | rice | nots | verified open |
 | [41](https://github.com/icepack/ismip7/issues/41) | forcing: re-run audit_forcing_versions.py immediately before the production matrix | needs-run | group | quartz, nots, midway | unverifiable-run |
-| [25](https://github.com/icepack/ismip7/issues/25) | MAP: no MAP on the Ua mesh reproduces its own velocity in the forward | needs-check | rice | nots | verified open |
 | [42](https://github.com/icepack/ismip7/issues/42) | melt: confirm every submitted run read the current per-basin K calibration | needs-check | group | local | unverifiable-run |
-| [46](https://github.com/icepack/ismip7/issues/46) | solver: the inversion depends on uncommitted icepack2 edits that exist on one workstation | needs-check | rice | nots | verified open |
-| [17](https://github.com/icepack/ismip7/issues/17) | protocol: settle the ligroundf sign convention (#22) | needs-upstream | upstream | upstream | fresh, unverified by design |
 | [40](https://github.com/icepack/ismip7/issues/40) | protocol: confirm the submission round and its deadline | needs-upstream | upstream | upstream | unverifiable-run |
 
 ## Owed
 
 | # | item | unblocked by | owner | sites | state |
 |---|---|---|---|---|---|
-| [49](https://github.com/icepack/ismip7/issues/49) | forcing: decide which AIS forcing beyond the three audited prefixes to mirror | needs-decision | unassigned | n/a | verified open |
 | [32](https://github.com/icepack/ismip7/issues/32) | solver: the monolithic forward for core 7 and the core 10 tail is not implemented | needs-run | group | local | verified open |
 | [35](https://github.com/icepack/ismip7/issues/35) | mesh: the level-set unit tests were lost and are still to be rebuilt | needs-run | group | local | verified open |
 | [36](https://github.com/icepack/ismip7/issues/36) | calving: the von Mises level-set front is not calibrated | needs-run | group | local | verified open |
 | [45](https://github.com/icepack/ismip7/issues/45) | solver: Rice forwards stay at 12 ranks until the partition probe comes back clean | needs-run | rice | nots | verified open |
 | [47](https://github.com/icepack/ismip7/issues/47) | solver: the UChicago Midway site has never run end to end | needs-run | uchicago | midway | verified open |
 | [16](https://github.com/icepack/ismip7/issues/16) | forcing: re-audit the CESM2-WACCM ssp585 fracture before production (#37) | needs-check | group | quartz, nots, midway | fresh, unverified by design |
-| [23](https://github.com/icepack/ismip7/issues/23) | review: UW review of the obs_data_root conversions and the obs_dhdt temp-then-rename | needs-check | uw | local | fresh, unverified by design |
-| [33](https://github.com/icepack/ismip7/issues/33) | output: the runaway detector's peak clause raises false FAILs | needs-check | group | local | verified open |
-| [34](https://github.com/icepack/ismip7/issues/34) | matrix: two docs disagree on where the projection handoff sits | needs-check | group | local | verified open |
+| [68](https://github.com/icepack/ismip7/issues/68) | inversion: a chained link re-derives the auto log-velocity weight and changes the objective | needs-check | rice | nots | verified open |
 | [18](https://github.com/icepack/ismip7/issues/18) | protocol: what goes in the forcing field of an OCX filename (#17) | needs-upstream | upstream | upstream | fresh, unverified by design |
+| [78](https://github.com/icepack/ismip7/issues/78) | forcing: CESM2-WACCM 2300 reads a padded 2290-2299 atmosphere mean over a held 2299 ocean, and upstream has not said whether runs end in 2299 | needs-upstream | upstream | n/a | verified open |
+| [81](https://github.com/icepack/ismip7/issues/81) | transfer: a MAP transferred onto a buffered mesh is extrapolated into the buffer | n/a | unassigned | n/a | verified open |
 
 ## Claimed now
 
@@ -63,7 +56,9 @@ Work in flight. Do not duplicate it.
 
 | # | item | owner | sites | last touched |
 |---|---|---|---|---|
-| [24](https://github.com/icepack/ismip7/issues/24) | MAP: 2 km RC and Budd inversions running at Rice under the new prior metric | rice | nots | 2026-09-21 |
+| [10](https://github.com/icepack/ismip7/issues/10) | collapse: decide the mode for the submission (none, mask, mask_front) | iu | quartz | 2026-09-22 |
+| [11](https://github.com/icepack/ismip7/issues/11) | melt: run check_melt_bound.py --ocx before core 11 runs on the OCX product | iu | quartz, nots, midway | 2026-09-21 |
+| [24](https://github.com/icepack/ismip7/issues/24) | MAP: 2 km RC and Budd inversions running at Rice under the new prior metric | rice | nots | 2026-09-22 |
 
 ## Unverified
 
@@ -85,12 +80,12 @@ production run or a group decision.
 
 | source | items |
 |---|---|
-| `src:readiness` | 14 |
+| `src:readiness` | 12 |
 | `src:submission-readme` | 11 |
-| `src:matrix-status` | 6 |
-| `src:topic-doc` | 6 |
+| `src:matrix-status` | 2 |
+| `src:topic-doc` | 4 |
 | `src:runbook` | 3 |
-| `src:open-pr` | 6 |
+| `src:open-pr` | 2 |
 
 ## After the deadline
 

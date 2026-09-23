@@ -41,13 +41,14 @@ from simulation import (setup_model, run_simulation, latest_checkpoint,
 from icepack2_tools.forcing import (
     ISMIP7Atmosphere, ISMIP7Ocean, ISMIP7Fracture,
     make_forcing_callback, load_racmo_smb_climatology, forcing_coords,
-    describe_forcing_provenance, forcing_year,
+    describe_forcing_provenance, forcing_year, k_melt,
 )
 from icepack2_tools.climatology import (
     clim_start, clim_end, clim_scenario, clim_pool_missing, describe_clim_pool,
 )
 from icepack2_tools.runconfig import (
     FRACTURE_MASK_MODES, fracture as fracture_mode, k_per_basin_candidates,
+    deltat_per_basin_npz,
 )
 
 # Owned by icepack2_tools.climatology: this pool must match the CONTROL's
@@ -191,6 +192,7 @@ def run_core_experiment(*, core, title, name, esm, scenario,
         PETSc.Sys.Print(f"  Restart: {restart}")
     else:
         PETSc.Sys.Print("  Cold start from BedMachine/inversion initial state")
+    dT_npz = deltat_per_basin_npz()
 
     ctx = setup_model(restart_from=restart)
 
@@ -226,9 +228,11 @@ def run_core_experiment(*, core, title, name, esm, scenario,
             atm, ocean, fracture if fracture_mode() != "none" else None):
         PETSc.Sys.Print(f"  {line}")
 
-    K_npz = find_k_npz()
-    K_melt = float(os.environ.get("ISMIP7_K_MELT", "1.15e-4"))
-    if K_npz is not None:
+    K_npz = None if dT_npz is not None else find_k_npz()
+    K_melt = k_melt()
+    if dT_npz is not None:
+        PETSc.Sys.Print(f"  Ocean melt: per-basin deltaT at one K from {dT_npz}")
+    elif K_npz is not None:
         PETSc.Sys.Print(f"  Ocean melt: calibrated per-basin K from {K_npz}")
     else:
         PETSc.Sys.Print(

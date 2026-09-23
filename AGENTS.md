@@ -35,11 +35,12 @@ the relevant subsystem:
 |---|---|
 | `GEOMETRY_DISCRETIZATION.md` | the geometry finite-element space, the calving front, and why several odd-looking constructions are deliberate |
 | `COMPOSITE_RHEOLOGY.md` | the composite viscous formulation |
-| `ADAPTIVE_MESH.md` | the Úa-style adaptive remeshing port, the DG0 transfer rules, and what is validated |
+| `ADAPTIVE_MESH.md` | the adaptive remeshing port, the DG0 transfer rules, and what is validated |
 | `antarctica/N3_FRAMEWORK.md` | the n=3 rheology line |
 | `antarctica/README.md` | what to install and download, drivers, env knobs, how to run a core experiment |
 | `antarctica/scripts/batch_runners/readme.md` | running on a cluster: site files, the runners, the build recipe, measured costs |
 | `antarctica/FORWARD_RUN_READINESS.md` | the protocol sweep and what still blocks a submission |
+| `antarctica/MAP_CHECK.md` | one released MAP through its checks, native and transferred onto the production mesh; the transfer fill and the evidence for the mesh and friction decisions |
 | `antarctica/reports/MATRIX_STATUS.md` | which results are currently valid |
 | `NOW.md` | what blocks the submission right now, generated from the open issues |
 

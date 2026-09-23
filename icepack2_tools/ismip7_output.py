@@ -58,9 +58,12 @@ Conventions (from the request and discussions #16, #19, #22):
   cell it was removed from (whole-cell removal, sub-cell shed, retreat
   slivers), the same tallies as the ``calv`` budget column.
 * ``ligroundf`` is the flux across the grounding line, booked as a specific
-  mass flux into the first FLOATING cell (discussion #22), positive for ice
-  leaving grounded ice; the grid sum of ``ligroundf * area`` is the
-  grounding-line discharge.
+  mass flux into the first FLOATING cell (discussion #22), signed with the
+  grounded sheet as the reference: positive for grounded ice going afloat,
+  negative where floating ice flows onto grounded ice (a pinning point or an
+  ice rumple), so the grid sum of ``ligroundf * area`` is the net
+  grounding-line discharge. The group settled the reference on 22 September
+  2026.
 * ``dlithkdt`` is the change in thickness over the year divided by the year.
 * the three area fractions are cell indicators here (0 or 1 per DG0 cell);
   the conservative regridding to 8 km turns them into fractions.
@@ -287,14 +290,19 @@ class AnnualOutput:
             corr = assemble(a_ref * self._phi * dx).dat.data_ro / self.cell_area
             self.step_acc["acabf_correction"] += corr * dt
         self.step_acc["libmassbffl"] += -melt * dt * (~grounded_cells)
-        # grounding-line flux into the first floating cell: upwind facet flux
-        # across facets whose two cells differ in grounding, booked to the
-        # floating side (its test function)
+        # grounding-line flux into the first floating cell: the upwind facet
+        # flux across every facet whose two cells differ in grounding, the
+        # same flux the DG0 transport moved, booked to the floating side (its
+        # test function) and signed positive from grounded to floating. Ice
+        # flowing from a shelf onto a pinning point books negative, so the
+        # sum over the mesh is the net discharge and an ice rumple's
+        # throughput cancels instead of counting as loss.
         g = Function(self.Q_dg); g.dat.data[:] = grounded_cells.astype(float)
         un = fd.dot(u, self._n); un_plus = (un + abs(un)) / 2
+        flux = un_plus("+") * h_dg("+") - un_plus("-") * h_dg("-")   # upwind, "+" to "-"
         phi = self._phi
-        form = ((un_plus("+") * h_dg("+") * g("+") * (1 - g("-")) * phi("-")
-                 + un_plus("-") * h_dg("-") * g("-") * (1 - g("+")) * phi("+")) * dS)
+        form = (flux * g("+") * (1 - g("-")) * phi("-")
+                - flux * g("-") * (1 - g("+")) * phi("+")) * dS
         assemble(form, tensor=self._gl_cof)
         self.step_acc["ligroundf"] += self._gl_cof.dat.data_ro / self.cell_area * dt   # m/yr equivalent
         self.step_time += dt

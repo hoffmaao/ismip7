@@ -1,7 +1,7 @@
 """thermo_model.py - depth-averaged enthalpy (Stefan) model for a physical
 fluidity prior mean.
 
-Ported from mismip_time-dependent-da/scripts/thermo_model.py (Recinos/fenics_ice
+Ported from mismip_time-dependent-da/scripts/thermo_model.py (Recinos et al. (2023)
 line of work) into the ISMIP7 tree, with ONE adaptation for real Antarctica:
 the surface-energy boundary condition ``E_srf`` may be a spatially-varying
 Function (a mean-annual surface-temperature field) rather than the single

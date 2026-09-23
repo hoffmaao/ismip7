@@ -36,6 +36,9 @@ LC_DEFAULT = "1000"
 LC_COARSE_DEFAULT = "10000"
 GEOMETRY_SPACE_DEFAULT = "dg0"
 FRICTION_DEFAULT = "budd"
+# The closed set friction() accepts; an unknown spelling is an error at
+# startup, never a silent fall-through to another law's block.
+FRICTION_LAWS = ("budd", "regularized_coulomb", "budd_legacy")
 # THIS BRANCH (antarctica-n3) runs standard Glen n=3. An inversion and every
 # forward that loads its MAP must agree on this.
 N_FLOW_DEFAULT = "3.0"
@@ -94,6 +97,26 @@ def residual_stabilizers():
     }
 
 
+# ``ISMIP7_MESH=checkpoint`` names the mesh embedded in the MAP or restart
+# file. site_env.sh always exports a derived .msh path, so a job submitted
+# through it (submit.sh projection) has no other way to run MAP-native.
+MESH_FROM_CHECKPOINT = "checkpoint"
+
+
+def mesh_override():
+    r"""``ISMIP7_MESH`` as a compute-mesh override, or None.
+
+    Unset, empty and the sentinel ``checkpoint`` all mean: solve on the mesh
+    the MAP or restart checkpoint carries. Anything else is the path of the
+    mesh to solve on, with the checkpoint kept as the interpolation source
+    (the timing matrix and the 2 km to 1 km transfer).
+    """
+    value = os.environ.get("ISMIP7_MESH", "").strip()
+    if value in ("", MESH_FROM_CHECKPOINT):
+        return None
+    return value
+
+
 def lc():
     r"""Target edge length [m] in the refined region of the mesh."""
     return int(os.environ.get("ISMIP7_LC", LC_DEFAULT))
@@ -129,8 +152,16 @@ def raster_sample():
 
 
 def friction():
-    r"""Friction law: ``budd``, ``regularized_coulomb`` or ``budd_legacy``."""
-    return os.environ.get("ISMIP7_FRICTION", FRICTION_DEFAULT)
+    r"""Friction law: ``budd``, ``regularized_coulomb`` or ``budd_legacy``.
+    Validated here so every reader rejects the same set: theta means a
+    different thing under each law, and a mistyped value used to run the
+    legacy action branch without a word."""
+    value = os.environ.get("ISMIP7_FRICTION", FRICTION_DEFAULT).strip().lower()
+    if value not in FRICTION_LAWS:
+        raise ValueError(
+            f"ISMIP7_FRICTION must be one of {FRICTION_LAWS}, got {value!r}"
+        )
+    return value
 
 
 def n_flow():
@@ -322,6 +353,39 @@ def obs_data_root():
     right wherever the data sits beside the code and empty where it does not."""
     return os.environ.get("ISMIP7_OBS_DATA_ROOT",
                           os.path.join(_ANTARCTICA, "data"))
+
+
+def deltat_per_basin_npz():
+    r"""``ISMIP7_DELTAT_PER_BASIN_NPZ``: the protocol's per-basin adjustment.
+
+    The ISMIP7 ocean-forcing recommendation calibrates ONE dimensionless K
+    from the 4-term toolbox and then, optionally, a thermal-forcing offset
+    deltaT_b per IMBIE basin at that K (``optimise_deltaT``); a per-basin K
+    is not part of it. ``antarctica/scripts/calibrate_deltaT.py`` writes the
+    file, the ocean callbacks add the offset to TF before the melt law and
+    melt with the file's K everywhere, and no driver reads the per-basin K
+    file. Unset: the per-basin K path.
+
+    Checked where it is read, so a driver that calls this before its model
+    setup fails before the MAP is loaded: the file must exist, and
+    ``ISMIP7_K_SCALE`` must be 1, because the offsets were fitted at the
+    file's K and a scaled K invalidates them."""
+    path = os.environ.get("ISMIP7_DELTAT_PER_BASIN_NPZ") or None
+    if path is None:
+        return None
+    if not os.path.exists(path):
+        raise FileNotFoundError(
+            f"ISMIP7_DELTAT_PER_BASIN_NPZ={path} does not exist. Write it with "
+            f"antarctica/scripts/calibrate_deltaT.py, or unset the knob for "
+            f"the per-basin K path.")
+    k_scale = float(os.environ.get("ISMIP7_K_SCALE", "1.0"))
+    if k_scale != 1.0:
+        raise ValueError(
+            f"ISMIP7_DELTAT_PER_BASIN_NPZ={path} and ISMIP7_K_SCALE={k_scale:g} "
+            f"are both set. The offsets were fitted at the file's K, so a "
+            f"scaled K invalidates them: unset ISMIP7_K_SCALE, or refit with "
+            f"calibrate_deltaT.py --K at the K you want.")
+    return path
 
 
 def k_per_basin_candidates(results_dir, lc_value):

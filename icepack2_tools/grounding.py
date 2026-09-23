@@ -1,5 +1,5 @@
 """
-Smooth Heaviside grounding zone treatment (Ua/Gudmundsson approach).
+Smooth Heaviside grounding-zone treatment on height above flotation.
 
 Provides functions for:
   - Smooth Heaviside of height-above-flotation

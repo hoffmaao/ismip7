@@ -116,9 +116,10 @@ export ISMIP7_KEEP_CHECKPOINTS="${ISMIP7_KEEP_CHECKPOINTS:-3}"
 # calve freely must override ISMIP7_CALVING and unset ISMIP7_FIXED_FRONT.
 #
 # These two default only when UNSET (${VAR-default}, no colon). An explicitly
-# empty export is one of the documented off spellings, and --export=ALL,VAR=
-# is the only way to say "empty" through sbatch, so :- would substitute the
-# default and make the off switch unreachable.
+# empty value is one of the documented off spellings, and `submit.sh
+# projection VAR=` delivers one: VAR= goes into sbatch's environment, and ALL
+# carries it into the job and its successors. :- would substitute the default
+# and make that off switch unreachable.
 #   ISMIP7_APPARENT_MB  off: 0, off, none, empty. On: 1 or balance (balanced
 #                       control), div (divergence only).
 #   ISMIP7_AUTO_RESUME  off: 0, empty. On: any other integer.

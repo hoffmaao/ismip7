@@ -21,7 +21,7 @@ from firedrake import COMM_WORLD
 from firedrake.petsc import PETSc
 
 from timing_campaign import (
-    CACHE_REQUIRED_FIELDS,
+    cache_required_fields,
     CACHE_ROLE,
     CACHE_SCHEMA_VERSION,
     MATRIX_T_START,
@@ -127,7 +127,6 @@ def _cache_manifest(root_attrs, out_fn, mesh, checkpoint_fields):
         "a4_factor",
         "t_yr",
         "friction",
-        "friction_gate",
         "geometry_space",
         "mesh_basename",
         "lc",
@@ -136,6 +135,12 @@ def _cache_manifest(root_attrs, out_fn, mesh, checkpoint_fields):
         "geometry_source",
         "geometry_source_method",
     }
+    # Which shelf gate the Budd law had when this state was solved
+    # (runconfig.BUDD_SHELF_GATE): stamped by the state writer under Budd
+    # alone, never defaulted here, so a pre-fix Budd state cannot be
+    # published as a cache. Regularized Coulomb has no gate to record.
+    if _json_value(root_attrs.get("friction")) == "budd":
+        required_attrs.add("friction_gate")
     missing = sorted(required_attrs - set(root_attrs))
     if missing:
         raise ValueError(
@@ -171,10 +176,7 @@ def _cache_manifest(root_attrs, out_fn, mesh, checkpoint_fields):
         "a4_factor": float(attrs["a4_factor"]),
         "t_yr": float(attrs["t_yr"]),
         "friction": attrs["friction"],
-        # Which shelf gate the Budd law had when this state was solved
-        # (runconfig.BUDD_SHELF_GATE); stamped by the state writer, never
-        # defaulted here, so a pre-fix state cannot be published as a cache.
-        "friction_gate": attrs["friction_gate"],
+        "friction_gate": attrs.get("friction_gate"),
         "geometry_space": attrs["geometry_space"],
         "mesh_basename": attrs["mesh_basename"],
         "lc": int(attrs["lc"]),
@@ -188,6 +190,11 @@ def _cache_manifest(root_attrs, out_fn, mesh, checkpoint_fields):
     # Provenance of the mixed state itself, distinct from the lane contract
     # above: the solver that produced it and how its publishing solve ended.
     # Present only on caches published from a per-mesh invert MAP.
+    if attrs.get("transfer_fill"):
+        try:
+            manifest["transfer_fill"] = json.loads(attrs["transfer_fill"])
+        except (TypeError, json.JSONDecodeError):
+            manifest["transfer_fill"] = None
     if attrs.get("state_solver_mode"):
         try:
             state_parameters = json.loads(attrs.get("state_solver_parameters", "null"))
@@ -242,7 +249,8 @@ def main():
             "(was it produced by inversion_icepack2.py?)"
         )
     if args.manifest or args.publish_timing_cache:
-        missing_fields = sorted(set(CACHE_REQUIRED_FIELDS) - set(loaded))
+        law = _json_value(root_attrs.get("friction")) or "budd"
+        missing_fields = sorted(set(cache_required_fields(law)) - set(loaded))
         if missing_fields:
             raise ValueError(
                 "Cannot publish incomplete timing cache; missing fields: "
@@ -265,7 +273,8 @@ def main():
             diagnostic_solver_mode,
             solver_provenance,
         )
-        mesh_input = os.environ.get("ISMIP7_MESH", "").strip()
+        from icepack2_tools.runconfig import mesh_override
+        mesh_input = mesh_override() or ""
         if not mesh_input or not os.path.isfile(mesh_input):
             raise FileNotFoundError(
                 "ISMIP7_MESH must point at the timing mesh when publishing "

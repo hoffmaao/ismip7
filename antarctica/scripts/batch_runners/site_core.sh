@@ -150,8 +150,38 @@ ismip7_chain_resources() {
     return 0
 }
 
+# The file that defines `module` for a job that arrives without it. A job's
+# environment is the submitting shell's alone (submit.sh passes a bare
+# --export=ALL, so slurmd adds no login environment), and a shell that never
+# read the login scripts, such as the one `ssh host command` starts, holds no
+# module system. The IU venv's python then cannot find libpython.
+# /etc/profile is the first file a login shell reads; a site whose module
+# system is set up elsewhere names that file.
+ISMIP7_MODULE_INIT="${ISMIP7_MODULE_INIT:-/etc/profile}"
+
 ismip7_load_modules() {
-    command -v module >/dev/null 2>&1 || return 0
+    if ! command -v module >/dev/null 2>&1; then
+        # A site that loads no modules needs no module command either.
+        [ -n "${ISMIP7_MODULES:-}${ISMIP7_MODULE_USE:-}" ] || return 0
+        if [ -r "$ISMIP7_MODULE_INIT" ]; then
+            # Login scripts expect a shell without -e or -u, and /etc/profile
+            # sets a umask; the job's own options and umask come back after.
+            local flags="$-" mask
+            mask="$(umask)"
+            set +eu
+            # shellcheck disable=SC1090
+            . "$ISMIP7_MODULE_INIT" >/dev/null 2>&1
+            case "$flags" in *e*) set -e ;; *) set +e ;; esac
+            case "$flags" in *u*) set -u ;; *) set +u ;; esac
+            umask "$mask"
+        fi
+        if ! command -v module >/dev/null 2>&1; then
+            echo "ERROR: this job has no 'module' command, even after reading" >&2
+            echo "       ISMIP7_MODULE_INIT=$ISMIP7_MODULE_INIT, so the site's modules cannot load." >&2
+            echo "       Submit from a login shell, or name the file that defines it." >&2
+            exit 2
+        fi
+    fi
     module purge 2>/dev/null || true
     if [ -n "${ISMIP7_MODULE_USE:-}" ]; then
         # shellcheck disable=SC2086
@@ -205,6 +235,15 @@ ismip7_container_binds() {
 
 ismip7_activate() {
     ismip7_site_require
+    # A job submitted with an --export list carries two variables that must go
+    # no further. SLURM_GET_USER_ENV=1 has slurmd rebuild the login
+    # environment when a job starts, and requeue and hold the job when that
+    # fails; a chain resubmit's --export=ALL would hand it to every successor.
+    # SLURM_EXPORT_ENV holds the list, which srun takes as its own --export,
+    # so a variable the list names comes back in the job's steps after the
+    # script unsets it (projection.sbatch unsets ISMIP7_RESTART for its
+    # successor).
+    unset SLURM_GET_USER_ENV SLURM_EXPORT_ENV
     ismip7_load_modules
     if [ -n "$ISMIP7_CONTAINER" ]; then
         ismip7_activate_container
@@ -243,6 +282,17 @@ ismip7_activate() {
     # ismip7_persistent_jit_cache can retire an unused kernel cache while this
     # one stays in use for the whole job.
     export XDG_CACHE_HOME="${SCRATCH:-$HOME}/.pyop2_cache/xdg/${SLURM_JOB_ID:-manual}"
+    # That dict is a sqlite file every rank of the job writes at once, and on
+    # a networked filesystem the write can stall on a lock it never gets:
+    # pytools retries SQLITE_BUSY without limit (persistent_dict._exec_sql_fn),
+    # so the whole job then sits in the first kernel compile until its wall
+    # time (IU 10569250 and 10569252, 16 and 64 ranks on one node, 260
+    # retries at five seconds each and counting; three sibling jobs saw 20
+    # to 60 retries and got through). The dict starts empty in every job and
+    # only memoizes loopy's own preprocessing, which costs seconds per
+    # kernel, so it buys nothing here: switch it off. The compiled kernels
+    # still cache under PYOP2_CACHE_DIR, which is file based.
+    export LOOPY_NO_CACHE=1
     mkdir -p "$PYOP2_CACHE_DIR" "$XDG_CACHE_HOME" "$MPLCONFIGDIR"
     [ -n "$ISMIP7_CONTAINER" ] && ismip7_container_binds
     return 0
@@ -257,12 +307,13 @@ ismip7_activate() {
 # whatever the site's modules or venv had set before ismip7_activate replaced
 # it (IU's modulefile names a scratch directory); else Firedrake's own default.
 #
-# loopy's persistent dict stays where ismip7_activate put it, one per job. The
-# race that killed Rice 1559476 is between lanes launched together, and
-# `make timing-scout` submits one lane per mesh at once, so sharing that dict
-# back is the exact condition that failed. A cold pytools dict costs seconds of
-# loopy preprocessing per lane; the kernel compile the shared cache protects is
-# the expensive part, and it comes back below.
+# loopy's persistent dict stays off, and XDG_CACHE_HOME stays where
+# ismip7_activate put it, one per job. The race that killed Rice 1559476 is
+# between lanes launched together, and `make timing-scout` submits one lane
+# per mesh at once, so sharing that dict back is the exact condition that
+# failed. Doing without it costs seconds of loopy preprocessing per lane; the
+# kernel compile the shared cache protects is the expensive part, and it
+# comes back below.
 ismip7_persistent_jit_cache() {
     rmdir "$PYOP2_CACHE_DIR" 2>/dev/null || true
     if [ -n "${ISMIP7_TIMING_JIT_CACHE:-}" ]; then
@@ -318,10 +369,9 @@ ISMIP7_ACCOUNT="${ISMIP7_ACCOUNT:-}"
 ISMIP7_SBATCH_EXTRA="${ISMIP7_SBATCH_EXTRA:-}"
 
 # A site that needs one number sets ISMIP7_TASKS/ISMIP7_MEM and both kinds take
-# it. A site with measured per-kind values sets the pair. At Rice the forward
-# was measured at 12 ranks and the inversion at 32, so running the forward at
-# the inversion's size would be an unvalidated rank count on a narrower set of
-# nodes.
+# it. A site with measured per-kind values sets the pair, so a forward runs at
+# a rank count measured for forwards and never inherits the inversion's size
+# unvalidated (sites/rice_nots.sh carries its measurements).
 ISMIP7_TASKS_INV="${ISMIP7_TASKS_INV:-$ISMIP7_TASKS}"
 ISMIP7_MEM_INV="${ISMIP7_MEM_INV:-$ISMIP7_MEM}"
 ISMIP7_TASKS_FWD="${ISMIP7_TASKS_FWD:-$ISMIP7_TASKS}"

@@ -41,9 +41,12 @@ sys.path.insert(0, _PROJECT)
 from icepack2_tools.climatology import (
     CLIM_POOL_MARKER, clim_scenario, clim_start, clim_end,
 )
-from icepack2_tools.forcing import FORCING_PROVENANCE_MARKER
+from icepack2_tools.forcing import (
+    FORCING_PROVENANCE_MARKER, k_melt, melt_slope, sin_alpha_ant,
+)
+from icepack2_tools.front import COLLAPSE_MARKER
 from icepack2_tools.runconfig import (
-    N_FLOW_DEFAULT, friction, geometry_space, lc, lc_coarse,
+    N_FLOW_DEFAULT, fracture, friction, geometry_space, lc, lc_coarse,
 )
 from icepack2_tools.solverconfig import effective_solver_env, solver_provenance
 
@@ -73,11 +76,19 @@ def effective_env():
         "ISMIP7_LC": str(lc()),
         "ISMIP7_LC_COARSE": str(lc_coarse()),
         "ISMIP7_FRICTION": friction(),
+        # The collapse mode is the largest stated uncertainty of the
+        # submission (issue #10), and its default, `none`, is never exported.
+        "ISMIP7_FRACTURE": fracture(),
         "ISMIP7_GEOMETRY_SPACE": geometry_space(),
         "ISMIP7_N_FLOW": N_FLOW_DEFAULT,
         "ISMIP7_CLIM_SCENARIO": clim_scenario(),
         "ISMIP7_CLIM_START": str(clim_start()),
         "ISMIP7_CLIM_END": str(clim_end()),
+        # The melt slope law and K: the default flipped from the local slope
+        # and K 1.15e-4 to the constant slope and K 8.5e-5.
+        "ISMIP7_MELT_SLOPE": melt_slope(),
+        "ISMIP7_SIN_ALPHA_ANT": f"{sin_alpha_ant():g}",
+        "ISMIP7_K_MELT": f"{k_melt():g}",
     }
     resolved.update(effective_solver_env())
     canonical_key = "ISMIP7_DIAGNOSTIC_LINEAR_SOLVER_CANONICAL"
@@ -137,6 +148,15 @@ def forcing_provenance(log_path):
     so the record is the run's own statement and not the date of an audit."""
     return lifted(log_path, FORCING_PROVENANCE_MARKER,
                   "the run predates the provenance banner")
+
+
+def collapse_record(log_path):
+    r"""The collapse mode the run printed at startup and, under a mask mode,
+    its closing cell counts (flagged, removed, held), lifted out of its log.
+    The env block states the mode this shell resolves; these lines are the
+    run's own statement of it."""
+    return lifted(log_path, COLLAPSE_MARKER,
+                  "the run predates the collapse banner")
 
 
 def sh(cmd):
@@ -218,7 +238,8 @@ def main():
                 f"the tracked record)\n")
         f.write(f"- observational audit: "
                 f"{'ON TRACK' if audit_rc == 0 else 'OFF TRACK'}\n")
-        for line in climatology_pool(args.log) + forcing_provenance(args.log):
+        for line in (climatology_pool(args.log) + forcing_provenance(args.log)
+                     + collapse_record(args.log)):
             f.write(f"- {line}\n")
         if ens_rc is not None:
             f.write(f"- ISMIP6 ensemble: "

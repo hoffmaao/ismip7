@@ -67,6 +67,10 @@ from icepack2_tools.mpi_stats import (
     global_range,
 )
 from icepack2_tools.boundary import load_boundary_ids
+from icepack2_tools.speed_bound import (
+    limiter_speed_bound,
+    speed_bound_violation,
+)
 from icepack2_tools.geometry import sample_to_geometry
 from icepack2_tools.naming import map_basename
 from icepack2_tools.front import (
@@ -83,7 +87,7 @@ from icepack2_tools.runconfig import (
     mesh_override as _mesh_override,
     lc as _lc, lc_coarse as _lc_coarse, n_flow as _n_flow,
     TARGET_MESH_GEOMETRY_METHOD,
-    calving_law as _calving_law, calving_sigma_max as _calving_sigma_max,
+    calving_law as _calving_law, max_speed_bound as _max_speed_bound, calving_sigma_max as _calving_sigma_max,
     fracture as _fracture_mode, ismip7_output as _ismip7_output,
     FRACTURE_MASK_MODES,
     # auto_resume is re-exported, not used here: every forward driver imports
@@ -1467,6 +1471,7 @@ def setup_model(restart_from=None, *, allow_timing_cache_a_ref=False):
         # Rescue speed limiter (residual laws): live Constant, 0 = inert.
         "k_lim": k_lim if use_residual else None,
         "k_lim_rescue": k_lim_rescue if use_residual else 0.0,
+        "u_lim": u_lim if use_residual else 0.0,
         # Reference/frozen fields persisted into every checkpoint so a restart
         # is self-contained and rank-count-robust (no recompute from evolved h).
         "theta": theta_f,
@@ -2044,6 +2049,28 @@ def run_simulation(
         )
         return stat
 
+    def _speed_bound_violation(label, use_lim=False):
+        r"""The peak speed and where it is, when the solved velocity is faster
+        than any ice can be, else ``None``. A limiter rung is held to
+        ``limiter_speed_bound``, since the nodes it pins settle above u_lim.
+        """
+        bound = _max_speed_bound()
+        if use_lim:
+            bound = limiter_speed_bound(bound, ctx.get("u_lim", 0.0))
+        violation = speed_bound_violation(
+            u_transport, speed_diag, speed_diag_xy, bound
+        )
+        if violation is None:
+            return None
+        u_max, u_max_xy = violation
+        where = "(" + ", ".join(f"{v:.0f}" for v in u_max_xy) + ")"
+        PETSc.Sys.Print(
+            f"  {label}: solve converged onto {u_max:.6e} m/yr at {where}, "
+            f"over the {bound:g} m/yr bound (ISMIP7_MAX_SPEED); "
+            "treating as a failed solve"
+        )
+        return violation
+
     def _record_transport(label, elapsed, mass_residual_gt=None):
         nonlocal transport_solve_count
         transport_solve_count += 1
@@ -2242,7 +2269,10 @@ def run_simulation(
         Returns True on success."""
         try:
             solve_diagnostic(f"step-{k}-direct")
-            return True
+            if _speed_bound_violation(f"step-{k}-direct") is None:
+                return True
+            raise fd.ConvergenceError(
+                "diagnostic solve converged onto an unphysical speed")
         except fd.ConvergenceError as exc:
             if not allow_rescue:
                 _field_diagnostics(f"step-{k}-diagnostic-failed")
@@ -2317,6 +2347,10 @@ def run_simulation(
                     k_lim_c.assign(k_rescue if use_lim else 0.0)
                 try:
                     action()
+                    if _speed_bound_violation(
+                        f"step-{k}-{label}", use_lim
+                    ) is not None:
+                        continue
                     if stype != snes_type0 or use_lim:
                         PETSc.Sys.Print(f"  Step {k}: recovered via {label}")
                     return True

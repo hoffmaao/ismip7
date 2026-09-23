@@ -545,8 +545,10 @@ diagnostics; a restart rebuilds the front from the thickness. The exception is
 front where it restarted. The shared implementation's tests are
 `icepack_tools/test/levelset_test.py`; the ISMIP7-side rules (retreat-sliver
 mask, apparent-MB extent masking, the `fixed` law's t=0 anchor) are covered by
-`tests/`. The level-set unit tests written against this integration in Sep 2026
-were lost before they were committed and are still to be rebuilt. (issue #35)
+`tests/`. `tests/test_levelset_laws.py` checks each law against closed forms on
+a unit mesh: the `vonmises` rate under both thresholds, the shed fraction and
+its step-size behaviour under the transport's masks, the drag gate, and the
+refusal of an unknown or underspecified law.
 
 **Control and projection configurations differ.** The protocol's control is an
 unforced constant-climate run with calving set to end-of-2014 conditions, so

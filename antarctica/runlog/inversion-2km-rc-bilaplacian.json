@@ -1,0 +1,28 @@
+{
+  "id": "inversion-2km-rc-bilaplacian",
+  "task": "inversion",
+  "institution": "Rice",
+  "owner": "Andrew",
+  "title": "2 km regularized-Coulomb inversion under the bilaplacian prior",
+  "status": "running",
+  "friction": "regularized_coulomb",
+  "period": "2015 state",
+  "mesh": "antarctica_5000_2000_buffered0, 2 km fine, 5 km interior, no buffer",
+  "initial_state": "inversion_icepack2_rc_n3_dg0_logvelnet_2000_int5000_bilap.h5, 140 iterations at the 22 September snapshot",
+  "forcing": "observations: AntarcticaObsISMIP7-v1.2, MEaSUREs 450 m v2, BedMachine v4.1",
+  "melt": "the dH/dt term reads calibrated_K_per_basin_2000.npz",
+  "site": "nots, long partition, sapphirerapids",
+  "resources": "32 ranks, 240G",
+  "jobs": [
+    "1559475",
+    "1559482",
+    "1570660",
+    "1589182"
+  ],
+  "code": "hoffmaao/ismip7@be5d685",
+  "started": "2026-09-20",
+  "cost": "about 100 iterations a day",
+  "results": "/projects/ah301/ismip7/antarctica/mesh/",
+  "audit": "misfit still falling about half a percent per iteration; never reaches gatol, so the chain caps at four links",
+  "notes": "issue #24. Issue #68: the auto log-velocity weight is re-derived at every warm start, so links minimise different objectives"
+}

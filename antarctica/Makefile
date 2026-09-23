@@ -208,7 +208,8 @@ DEBUG_STAMP := $(shell date +%Y%m%d_%H%M%S)
 	qualify qualify-if-needed qualify-2step qualify-5step timestep-probe debug \
 	reference solver-smoke matrix matrix-legacy sync-results timing-prepare timing-scout \
 	timing-scale timing-dry-run timing-cache-smoke timing-cache-audit \
-	timing-probe timing-amb-probe timing-inversion now now-check
+	timing-probe timing-amb-probe timing-inversion now now-check \
+	runlog runlog-check
 
 timing: qualify-if-needed
 	@mkdir -p results/timing
@@ -613,6 +614,15 @@ now:
 
 now-check:
 	python scripts/build_now.py --check --output "$(CURDIR)/../NOW.md"
+
+# The run log: one JSON record per simulation in runlog/, rendered into
+# reports/SIMULATIONS.md. RUNLOG_CSV also writes the records flat, which is
+# what the group's shared progress sheet imports.
+runlog:
+	python scripts/build_runlog.py --write $(if $(RUNLOG_CSV),--csv "$(RUNLOG_CSV)",)
+
+runlog-check:
+	python scripts/build_runlog.py --check
 
 matrix-legacy:
 	@test ! -d "$(CURDIR)/antarctica/results" || { \

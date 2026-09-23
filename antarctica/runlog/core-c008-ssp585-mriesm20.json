@@ -1,0 +1,17 @@
+{
+  "id": "core-c008-ssp585-mriesm20",
+  "task": "projection",
+  "title": "C008: ssp585 with MRI-ESM2-0",
+  "status": "planned",
+  "owner": "unassigned",
+  "exp_id": "C008",
+  "esm": "MRI-ESM2-0",
+  "scenario": "ssp585",
+  "period": "2015 to 2300",
+  "branch_from": "the historical endpoint at 2015.0",
+  "melt": "one toolbox K with the per-basin offset",
+  "apparent_mb": "balance",
+  "dt": 0.05,
+  "mesh": "the production mesh, decision #20",
+  "notes": ""
+}

@@ -1,0 +1,13 @@
+{
+  "id": "inversion-1km",
+  "task": "inversion",
+  "institution": "Rice",
+  "owner": "Andrew",
+  "title": "1 km inversion",
+  "status": "planned",
+  "mesh": "antarctica_10000_1000_buffered20000, 1 km fine, 10 km interior, 20 km buffer",
+  "site": "nots, long partition",
+  "resources": "32 ranks, 410 to 480 GB estimated",
+  "cost": "25 to 45 minutes an iteration estimated",
+  "notes": "issue #31, and the production mesh decision #20. Deferred while the 2 km pair finishes"
+}

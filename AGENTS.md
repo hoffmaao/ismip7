@@ -71,6 +71,14 @@ are NOT version controlled:
   the real fork point from git, and the September 2026 sync of a rewritten fork
   cost a hand merge of four files that should have been a fast-forward.
 
+A run also leaves a record. `antarctica/runlog/<id>.json` is one file per
+simulation and `antarctica/reports/SIMULATIONS.md` is rendered from them by
+`make -C antarctica runlog`; never edit the rendered file. Finishing a run
+means writing or updating its record in the same change that reports the
+result, because the checkpoints and the timeseries are gitignored and the
+record is the only trace left. `make -C antarctica runlog-check` and
+`tests/test_runlog.py` refuse a stale render.
+
 ## 3. Invariants: code that looks like a bug and is not
 
 Every item below has been deliberately chosen, and at least one has already

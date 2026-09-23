@@ -1,0 +1,17 @@
+{
+  "id": "core-c009-ctrl-cesm2waccm",
+  "task": "control",
+  "title": "C009: ctrl with CESM2-WACCM",
+  "status": "planned",
+  "owner": "unassigned",
+  "exp_id": "C009",
+  "esm": "CESM2-WACCM",
+  "scenario": "ctrl, the 2000 to 2029 climatology",
+  "period": "2015 to 2300",
+  "branch_from": "the historical endpoint at 2015.0",
+  "melt": "one toolbox K with the per-basin offset",
+  "apparent_mb": "balance",
+  "dt": 0.05,
+  "mesh": "the production mesh, decision #20",
+  "notes": ""
+}

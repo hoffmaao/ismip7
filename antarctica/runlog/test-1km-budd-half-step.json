@@ -1,0 +1,29 @@
+{
+  "id": "test-1km-budd-half-step",
+  "task": "test",
+  "institution": "Rice",
+  "owner": "Andrew",
+  "title": "1 km control from the transferred Budd snapshot at half the step",
+  "status": "running",
+  "esm": "CESM2-WACCM",
+  "scenario": "ctrl",
+  "period": "2015 to 2020",
+  "friction": "budd",
+  "mesh": "antarctica_10000_1000_buffered20000, 1 km fine, 10 km interior, 20 km buffer",
+  "initial_state": "the Budd snapshot transferred from the 2 km mesh",
+  "branch_from": "cold start",
+  "forcing": "as above",
+  "melt": "as above",
+  "front": "held at the 2015 extent, no collapse",
+  "apparent_mb": "balance",
+  "dt": 0.025,
+  "site": "nots, commons partition",
+  "resources": "32 ranks, 180G",
+  "jobs": [
+    "1594457"
+  ],
+  "code": "upstream/main@87475b3 with the transfer fixes",
+  "started": "2026-09-22",
+  "cost": "12 to 17 s a step",
+  "audit": "past 2016.5 with VAF drift of 0.007 mm, where the same run at dt=0.05 diverged in 2016.1: halving the step clears the trough"
+}

@@ -1,0 +1,17 @@
+{
+  "id": "core-c005-ssp126-cesm2waccm",
+  "task": "projection",
+  "title": "C005: ssp126 with CESM2-WACCM",
+  "status": "planned",
+  "owner": "unassigned",
+  "exp_id": "C005",
+  "esm": "CESM2-WACCM",
+  "scenario": "ssp126",
+  "period": "2015 to 2300",
+  "branch_from": "the historical endpoint at 2015.0",
+  "melt": "one toolbox K with the per-basin offset",
+  "apparent_mb": "balance",
+  "dt": 0.05,
+  "mesh": "the production mesh, decision #20",
+  "notes": ""
+}

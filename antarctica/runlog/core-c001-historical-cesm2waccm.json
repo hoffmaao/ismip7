@@ -1,0 +1,17 @@
+{
+  "id": "core-c001-historical-cesm2waccm",
+  "task": "historical",
+  "title": "C001: historical with CESM2-WACCM",
+  "status": "planned",
+  "owner": "unassigned",
+  "exp_id": "C001",
+  "esm": "CESM2-WACCM",
+  "scenario": "historical",
+  "period": "1850, or a steady 1960 or 1975 start, to 2014",
+  "branch_from": "a steady state",
+  "melt": "one toolbox K with the per-basin offset",
+  "apparent_mb": "balance",
+  "dt": 0.05,
+  "mesh": "the production mesh, decision #20",
+  "notes": "issue #28: every core needs re-running from the new MAPs. Issue #34: the start year and the handoff year are unsettled"
+}

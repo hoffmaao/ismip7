@@ -1,0 +1,30 @@
+{
+  "id": "test-1km-budd-map-geometry",
+  "task": "test",
+  "institution": "Rice",
+  "owner": "Andrew",
+  "title": "1 km control with the MAP's own geometry carried onto the target",
+  "status": "stopped",
+  "esm": "CESM2-WACCM",
+  "scenario": "ctrl",
+  "period": "2015 to 2020",
+  "friction": "budd",
+  "mesh": "antarctica_10000_1000_buffered20000, 1 km fine, 10 km interior, 20 km buffer",
+  "initial_state": "the Budd snapshot, its own DG0 bed and thickness lifted to CG1, transferred and cell-averaged onto the target",
+  "branch_from": "cold start",
+  "forcing": "as above",
+  "melt": "as above",
+  "front": "held at the 2015 extent, no collapse",
+  "apparent_mb": "balance",
+  "dt": 0.05,
+  "site": "nots, commons partition",
+  "resources": "32 ranks, 180G",
+  "jobs": [
+    "1594458"
+  ],
+  "code": "upstream/main@87475b3 with the transfer fixes and an experimental geometry switch",
+  "started": "2026-09-22",
+  "cost": "20 to 27 s a step",
+  "audit": "starts 20 percent faster at the Amery trough than the target-native BedMachine geometry and diverges sooner, by step 19",
+  "notes": "a negative result: the shipped choice, cell-averaged BedMachine on the target mesh, is the better one, so the experimental switch was not kept"
+}

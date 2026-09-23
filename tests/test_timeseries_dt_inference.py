@@ -6,6 +6,7 @@ import numpy as np
 import pytest
 
 from antarctica.scripts.check_ismip6_track import infer_dt
+from icepack2_tools.timeseries import timeseries_csv_line
 
 
 def test_a_uniform_series_gives_its_own_step():
@@ -33,12 +34,12 @@ def test_a_single_row_falls_back_to_a_year():
     assert infer_dt(np.array([2015.0])) == pytest.approx(1.0)
 
 
-def test_the_year_column_is_written_finely_enough_to_resolve_the_step():
-    r"""Fixing the reader is not enough: the writer has to stop discarding the
-    information. Guard the format string itself, since nothing else in the
-    suite runs a sub-0.1 transient to disk."""
-    import pathlib
-    src = (pathlib.Path(__file__).resolve().parents[1]
-           / "antarctica" / "scripts" / "simulation.py").read_text()
-    assert 'f"{row[0]:.4f},' in src, "the timeseries year column lost precision"
-    assert 'f"{row[0]:.1f},' not in src
+def test_the_written_year_column_resolves_the_step():
+    r"""Fixing the reader is not enough: the writer has to keep the
+    information. Write a dt=0.05 series the way a run does and recover the
+    step from the years in the lines it produces."""
+    exact = 2015.0 + 0.05 * np.arange(40)
+    lines = [timeseries_csv_line((y, 0.0, 0.0, 1.0, 2.0), "year", (0, 0, 0))
+             for y in exact]
+    yr = np.array([float(line.split(",")[0]) for line in lines])
+    assert infer_dt(yr) == pytest.approx(0.05)

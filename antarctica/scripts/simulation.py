@@ -72,7 +72,7 @@ from icepack2_tools.front import (
     clamp_thickness, clear_reference_where_ice_free, retreat_slivers,
     facet_neighbours, front_connected,
     collapse_banner, collapse_cell_counts, collapse_csv_fields,
-    COLLAPSE_CSV_COLUMNS, COLLAPSE_MARKER,
+    COLLAPSE_CSV_COLUMNS, COLLAPSE_MARKER, FRONT_OWNER_MARKER,
 )
 from icepack2_tools.runconfig import (
     obs_data_root,
@@ -1531,6 +1531,8 @@ def save_model_state(ctx, final_path, t_now, extra_attrs=None):
                 chk.set_attr("/", _key, _val)
 
         chk.set_attr("/", "t_yr", float(t_now))
+        if ctx.get("calving_law") is not None:
+            chk.set_attr("/", "calving_law", str(ctx["calving_law"].describe()))
         chk.set_attr("/", "friction", str(ctx.get("friction", "budd")))
         if str(ctx.get("friction", "budd")) == "budd":
             # Provenance of the shelf gate this state was solved under
@@ -1761,7 +1763,12 @@ def run_simulation(
     # extent; `fixed` and the legacy flag pin it on purpose and keep the
     # t=0-only mask.
     free_front = calving not in ("none", "fixed")
-    if calving != "none":
+    if calving_law_obj is not None:
+        front_owner = (
+            f"level-set prescribed law (external: {calving_law_obj.describe()})"
+            + ("; ISMIP7_FIXED_FRONT is set but ignored for removal"
+               if fixed_front else ""))
+    elif calving != "none":
         front_owner = f"level-set {calving} law (ISMIP7_CALVING={calving})" + (
             "; ISMIP7_FIXED_FRONT is set but ignored for removal"
             if fixed_front else ""
@@ -1770,7 +1777,7 @@ def run_simulation(
         front_owner = "legacy fixed-front mask (ISMIP7_FIXED_FRONT)"
     else:
         front_owner = "none (no calving sink)"
-    PETSc.Sys.Print(f"  Calving front owner: {front_owner}")
+    PETSc.Sys.Print(f"  {FRONT_OWNER_MARKER} {front_owner}")
 
     # ISMIP7_LEGACY_TRANSPORT=1 restores the pre-Jul-2026 scheme: the
     # -h*div(u*phi) volume term (non-conservative for DG0: it adds

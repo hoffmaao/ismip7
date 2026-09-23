@@ -1153,10 +1153,10 @@ ISMIP7_OUTPUT=1 mpiexec -n 8 python antarctica/scripts/control/run.py
 
 # 2. onto the 8 km grid, in the request's files and names
 python antarctica/scripts/write_ismip7_output.py \
-    results/<exp>_<lc>_ismip7_annual.h5 --out-dir submission \
+    antarctica/results/<exp>_<lc>_ismip7_annual.h5 --out-dir submission \
     --esm CESM2-WACCM --scenario ctrl --exp C009 \
     --source-id RICE --ism-id icepack2 \
-    --scalars results/<exp>_<lc>_ismip7_scalars.csv
+    --scalars antarctica/results/<exp>_<lc>_ismip7_scalars.csv
 
 # 3. the compliance checker over what came out
 python -m isschecker --variable-list ismip7 \

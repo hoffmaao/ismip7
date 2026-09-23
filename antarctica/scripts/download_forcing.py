@@ -152,10 +152,10 @@ CALIBRATION_FILES = {
 #: the files it is given, so the set is built for whichever grid a submission
 #: is written on (8 km here).
 SCALAR_PROCESSING_PRODUCTS = (
-    ("af2_AIS_{res}_v1.nc", None),
-    ("basins_regions_AIS_Rignot_extended_{res}_v1.nc", None),
-    ("iaf2_GIC_AIS_{res}_v0.nc", None),
-    ("maxmask1_AIS_{res}_v0.nc", None),
+    "af2_AIS_{res}_v1.nc",
+    "basins_regions_AIS_Rignot_extended_{res}_v1.nc",
+    "iaf2_GIC_AIS_{res}_v0.nc",
+    "maxmask1_AIS_{res}_v0.nc",
 )
 
 #: Resolutions the share publishes them at.
@@ -172,7 +172,7 @@ def scalar_processing_file_set(resolution="08000m"):
     return {
         "remote_dir": f"{OUTPUT_PROCESSING_BASE}/AIS",
         "files": [name.format(res=resolution)
-                  for name, _ in SCALAR_PROCESSING_PRODUCTS],
+                  for name in SCALAR_PROCESSING_PRODUCTS],
         "local_dir": "AIS",
         "local_root": OUTPUT_PROCESSING_DIR,
     }

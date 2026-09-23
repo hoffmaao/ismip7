@@ -528,7 +528,7 @@ Read-only diagnostics:
 | `compare_runs.py LABEL=results/<a> ...` | overlays budget timeseries to show where two runs part ways |
 | `plot_movie.py results/<exp>` | thickness change, speed and thickness frames plus an mp4 under `figs/movie_<exp>/` |
 | `region_budget.py <ckpt>.h5 [<later>.h5] [--csv <run>_timeseries.csv]` | splits the budget into grounded and floating ice, so a control that gains volume above flotation is read against the observed 2000 to 2200 Gt/yr of discharge |
-| `score_map.py MAP.h5 [...]` | scores an inversion by `Q(u_model)/Q(u_obs)` across its own grounding line, overall and per speed band; re-solves through `setup_model`, so periodic MAPs without a velocity work |
+| `score_map.py MAP.h5 [...] [--json OUT] [--restart STATE.h5]` | scores an inversion by `Q(u_model)/Q(u_obs)` across its own grounding line, overall and per speed band; re-solves through `setup_model`, so periodic MAPs without a velocity work. With `ISMIP7_MESH` set the MAP is transferred first, so the same command with and without it compares a transfer; `--restart` scores a prepared state, `--json` writes the numbers with the transfer fill counts (`MAP_CHECK.md`) |
 | `plot_map.py MAP.h5 [--diff B.h5]` | model and observed speed and their difference, `θ`, `C = C_w0 exp(θ)` on grounded ice, and `φ`, into `figs/maps/` |
 
 `region_budget.py` and `score_map.py` take the run's environment, which must
@@ -684,9 +684,9 @@ redeclare those literals.
 |---------|---------|---------|
 | `ISMIP7_LC` / `ISMIP7_LC_COARSE` | fine and coarse mesh resolution tags, selecting mesh and MAP | `1000` / `10000`, the production pair (`2500` / `64000` until 2026-09-19) |
 | `ISMIP7_BUFFER_M` | outline buffer (m) in the default mesh and sidecar names | `20000` |
-| `ISMIP7_MESH` | mesh path for the inversion and tools. A forward takes its mesh from the checkpoint | `mesh/antarctica_<COARSE>_<LC>_buffered<BUFFER_M>.msh` |
+| `ISMIP7_MESH` | mesh path for the inversion and tools. A forward takes its mesh from the checkpoint unless this names another mesh, in which case the MAP is transferred onto it. `checkpoint` means the mesh embedded in the MAP or restart file: `site_env.sh` always exports a derived path, so this is how a job submitted through `submit.sh projection` runs MAP-native | `mesh/antarctica_<COARSE>_<LC>_buffered<BUFFER_M>.msh` |
 | `ISMIP7_RASTER_SAMPLE` | how BedMachine lands on a DG0 cell. `vertex` projects the CG1 vertex interpolant; `cell_mean` takes the raster's true cell mean. `cell_mean` measured rougher: neighbouring cells share two of three vertex samples, so `vertex` damps jumps by construction. Cell means raised interior surface jumps 6% and bed and thickness jumps 35%, and at 2 km the momentum solve did not converge within 60 minutes. It does classify flotation better (32 km misclassification 9.1% to 3.2%), so the knob stays. Stamped into the MAP and read back by the forward. Reproduce with `probe_raster_sampling.py` | `vertex` |
-| `ISMIP7_INVERSION` | explicit MAP path for a forward or preflight. The forward checks the MAP's recorded `friction`, `n_flow` and `geometry_space` against the run and aborts on a mismatch, warning only when the MAP predates those attributes; `preflight.py` checks that the file exists. Use it to A/B MAPs on one mesh, or, with `ISMIP7_MESH` also set (the timing matrix), to run a MAP on a different mesh: its fields are then interpolated onto `ISMIP7_MESH` | derived |
+| `ISMIP7_INVERSION` | explicit MAP path for a forward or preflight. The forward checks the MAP's recorded `friction`, `n_flow` and `geometry_space` against the run and aborts on a mismatch, warning only when the MAP predates those attributes; `preflight.py` checks that the file exists. Use it to A/B MAPs on one mesh, or, with `ISMIP7_MESH` also set (the timing matrix, `make map-check`), to run a MAP on a different mesh: its continuous fields are then interpolated onto `ISMIP7_MESH`, and a target dof outside the MAP's mesh takes a stated fill (0 for the log controls, the constant baseline for the fluidity prior, the raster sample for `velocity_obs`), counted and printed as `Transfer fill:` lines (`MAP_CHECK.md`) | derived |
 | `ISMIP7_CALVING` | `none`, `fixed` or `vonmises` (see above) | `none` |
 | `ISMIP7_CALVING_SIGMA_MAX_GROUNDED` / `_FLOATING` | von Mises thresholds (MPa) | `1.0` / `0.15` |
 | `ISMIP7_FRACTURE` | `mask` applies the ISMIP7 collapse forcing to every floating cell it flags, booked as calving; `mask_front` only to the flagged cells open water has reached, so no hole opens behind a standing front (the two end-members of discussion #30). Masks exist for the SSPs only, so the control, historicals and OCX abort on either. Needs DG0. Every run prints its mode once (`Ice-shelf collapse forcing: ISMIP7_FRACTURE=...`, `none` included). Under a mask mode the timeseries columns `collapse_flagged_cells`, `collapse_removed_cells` and `collapse_held_cells` count the flagged floating cells, the ones the mode has emptied and the ones it leaves standing (always 0 under `mask`), all ranks summed; the budget lines, a closing log line and the core report repeat them | `none` |
@@ -698,7 +698,7 @@ redeclare those literals.
 | `ISMIP7_DATA_ROOT` | forcing tree root | `<repo>/ISMIP7/AIS` |
 | `ISMIP7_OBS_DATA_ROOT` | BedMachine, MEaSUREs velocity, RACMO and the dH/dt cache observational-data root; name it in a site file when these files do not live beside the code. Also a write target: with the MIPkit present `obs_dhdt` builds `<root>/dhdt_cache/` here, so staged cache tifs belong under this root, wherever it points | `<repo>/antarctica/data` |
 | `ISMIP7_T_END` / `ISMIP7_DT` | end time and timestep (yr). `t=Y.0` is 1 January of year Y, so a run covering 2015 to 2300 ends at `2301` and a historical covering 1850 to 2014 ends at `2015`. Each driver owns its end (historical `2015`, ssp370 `2101`, other projections and control `2301`, OCX `2026`) | driver's own / `1.0` |
-| `ISMIP7_FRICTION` | `budd` or `regularized_coulomb`; selects the MAP | `budd` |
+| `ISMIP7_FRICTION` | `budd`, `regularized_coulomb` or `budd_legacy`; selects the MAP. The set is closed, so a misspelling is rejected at startup | `budd` |
 | `ISMIP7_OUTPUT_INTERVAL` | timeseries row every N steps | `10` |
 | `ISMIP7_CHECKPOINT_EVERY_YR` / `ISMIP7_KEEP_CHECKPOINTS` | checkpoint cadence in model years, and how many to keep besides `_final.h5` | `5` / `3` |
 | `ISMIP7_RESTART` | restart checkpoint | `hist_<esm>[_<tag>]_<lc>_final.h5` if present |
@@ -903,9 +903,10 @@ inversion reads to stamp its MAP.
 **Starting state, unsettled.** No MAP has been inverted on the 1000 m mesh, and
 the plan for now is not to invert one: transfer the coarse MAP instead, the way
 the matrix's own lanes do. Name the MAP and let the forward interpolate it onto
-the mesh `site_env.sh` exports — `simulation.py` keeps the MAP's own mesh as the
+the mesh `site_env.sh` exports: `simulation.py` keeps the MAP's own mesh as the
 interpolation source and uses `ISMIP7_MESH` only for the target spaces, which is
-the same path the 500 m lanes take from the 2.5 km MAP.
+the same path the 500 m lanes take from the 2.5 km MAP. A target dof outside
+the MAP's mesh takes a stated fill and is counted (`MAP_CHECK.md`).
 
 ```bash
 MAP=$ISMIP7_REPO/antarctica/results/timing/inversion
@@ -913,6 +914,10 @@ MAP=$MAP/inversion_icepack2_budd_n3_dg0_logvelnet_2500_25000_250iter.h5
 submit.sh projection ISMIP7_EXPERIMENT=control \
   ISMIP7_FRICTION=budd ISMIP7_INVERSION=$MAP
 ```
+
+`make map-check MAP_CHECK_FRICTION=regularized_coulomb|budd` runs one released
+2 km MAP through that transfer and its checks, on the MAP's own mesh and on
+this one, and prints where each stage stands (`MAP_CHECK.md`).
 
 `ISMIP7_FRICTION` has to come with it: the campaign source is a Budd MAP, this
 section's default is regularized Coulomb, and the forward aborts on a MAP whose
@@ -1135,6 +1140,8 @@ Individual stages can be run separately: `make meshes`, `make redistribute`,
 `make timing-scout`,
 `make timing-scale`, `make sync-results`, and `make matrix`.
 `make timing-dry-run` prints the staged commands without submitting jobs.
+`make map-check` and `make map-check-dry-run` are the same shape for one
+released MAP (`MAP_CHECK.md`).
 `make transient` routes matrix work through the scout gate;
 qualification/debug calls still use its direct compatibility path.
 Use `TIMING_ONLY_MESH=2500/25000` to prepare, invert, audit, probe, or scout one exact

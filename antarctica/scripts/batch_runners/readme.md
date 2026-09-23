@@ -146,10 +146,12 @@ cache that persists between jobs (the one the site's modules or venv already
 name, as IU's firedrake modulefile does; else Firedrake's default location; or
 `ISMIP7_TIMING_JIT_CACHE`) rather than the private per-job one
 `ismip7_activate` gives the runners. Only the kernel cache goes back that way:
-loopy's persistent dict stays per job, because two jobs compiling the same
-kernel seconds apart race on a shared one, which is what `make timing-scout`
-launches (`site_core.sh` has the incident). Each record's `host` block says
-which site and node measured it and whether that cache started empty.
+loopy's persistent dict is switched off in every job (`LOOPY_NO_CACHE=1`),
+because two jobs compiling the same kernel seconds apart race on a shared one,
+which is what `make timing-scout` launches, and because the ranks of one job
+writing a per-job one on a networked filesystem stalled forever on its sqlite
+lock (`site_core.sh` has both incidents). Each record's `host` block says which
+site and node measured it and whether that cache started empty.
 
 ### A container site
 
@@ -311,6 +313,20 @@ it exists. A mesh named through `ISMIP7_MESH` is never built.
 
 ## The job scripts
 
+### `map_check_score.script` and `map_check_audit.script`
+
+`make -C antarctica map-check` (`antarctica/MAP_CHECK.md`) takes one released
+MAP through its checks with `timing_redistribute.script`,
+`timing_prepare.script`, `timing_cache_audit.script`,
+`timing_transient.script` and `projection.sbatch`, plus these two. The score
+script runs `scripts/score_map.py --json` on the MAP's own mesh or, with
+`ISMIP7_MAP_CHECK_RESTART`, on a prepared map-check cache, and under Budd the
+`check_budd_map.py` shelf-gate census. The audit script runs
+`check_ismip6_track.py`, `compare_runs.py` and `region_budget.py` over the two
+ten-year controls and collects every exit code and output into one JSON. Both
+source `site_core.sh` alone and walk their status file running to finished or
+failed, as the timing scripts do.
+
 ### `partition_probe.sbatch`, run first after a build
 
 Distributes the mesh at 1 to 32 ranks and reports the ghost-to-owned dof ratio.
@@ -358,8 +374,9 @@ year, resuming through `ISMIP7_AUTO_RESUME=1`. Each driver owns its end year
 and the runner does not default `ISMIP7_T_END`; the chain reads the value the
 run used from the driver's `Time-stepping: <start>-><end>` line. At 1000 m /
 10 km on 64 ranks under `scpc_gamg`, 24 h buys at most 140 simulated years, so
-a full projection is about three links; the older 2500 m Cascade Lake
-configuration ran 26 min a year, i.e. 55 years a link and about six.
+a full projection is about three links. At Rice's default of 32 ranks on one
+Cascade Lake node, 31 min a year buys about 46 years a link, so a full
+projection is about seven.
 
 ```bash
 submit.sh projection ISMIP7_EXPERIMENT=control
@@ -408,13 +425,15 @@ final checkpoint for the successor.
 | full 11-experiment set at 2500 m | | | | 15,000 |
 | 1000 m / 10 km forward, per simulated year (Quartz, `scpc_gamg`) | 64 | under 70 GB | 10 min | 11 |
 | 1000 m / 10 km projection, 285 years (Quartz, `scpc_gamg`) | 64 | under 70 GB | 2 days | 3,040 |
+| 1000 m / 10 km forward, per simulated year (Rice, `scpc_gamg`) | 32 | under 180 GB | 31 min | 16 |
 
-The two 1000 m rows are the production configuration, from
+The two Quartz rows are the production configuration, from
 `antarctica/TIMING_MATRIX_QUARTZ_SCPC_GAMG.md`: the transient loop of a
 ten-step lane at `dt = 0.05` under the matrix's strict contract, extrapolated.
 Setup, forcing updates and output are not in them, and the memory is 64 times
-the largest rank's peak. The rows above them are whole runs on Cascade Lake
-under `full_mumps`.
+the largest rank's peak. The Rice row is a 1 km control from a transferred
+2 km MAP on one Cascade Lake node (job 1592597), 92 s per `dt = 0.05` step.
+The 2500 m and 2 km rows are whole runs on Cascade Lake under `full_mumps`.
 
 Per iterate at 2500 m on 12 ranks: forward median 1081 s (p10 932, p90 1365),
 adjoint 92 s, iterate 1174 s. The adjoint is 8% of the iterate, so the cost
@@ -426,10 +445,11 @@ independent, so a handful of nodes finishes it inside a week.
 
 ## Open items
 
-- Rice forwards are fixed at 12 ranks because that is what was measured there.
-  Quartz forwards take 64, the fastest production-mesh lane of
-  `antarctica/TIMING_MATRIX_QUARTZ_SCPC_GAMG.md`. Going higher at Rice is
-  meaningful once the partition probe comes back clean. (issue #45)
+- Rice forwards take 32 ranks and 180 GB, one Cascade Lake node. The
+  partition probe on the 1 km / 10 km mesh (job 1592757, 22 September 2026)
+  reports ghost/owned 0.010 at 32 ranks (max 0.017, halo 1.0 % of owned),
+  so the build partitions by locality and rank counts up to a node are
+  meaningful there. The forward cost is the Rice row of the table above.
 - An inversion factors the complete mixed Jacobian with MUMPS, which sets its
   memory; `tlm_adjoint` differentiates through that solve, so no setting
   changes it. Cluster forwards took the field split this item asked for:

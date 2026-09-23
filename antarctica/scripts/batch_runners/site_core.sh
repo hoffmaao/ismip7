@@ -282,6 +282,17 @@ ismip7_activate() {
     # ismip7_persistent_jit_cache can retire an unused kernel cache while this
     # one stays in use for the whole job.
     export XDG_CACHE_HOME="${SCRATCH:-$HOME}/.pyop2_cache/xdg/${SLURM_JOB_ID:-manual}"
+    # That dict is a sqlite file every rank of the job writes at once, and on
+    # a networked filesystem the write can stall on a lock it never gets:
+    # pytools retries SQLITE_BUSY without limit (persistent_dict._exec_sql_fn),
+    # so the whole job then sits in the first kernel compile until its wall
+    # time (IU 10569250 and 10569252, 16 and 64 ranks on one node, 260
+    # retries at five seconds each and counting; three sibling jobs saw 20
+    # to 60 retries and got through). The dict starts empty in every job and
+    # only memoizes loopy's own preprocessing, which costs seconds per
+    # kernel, so it buys nothing here: switch it off. The compiled kernels
+    # still cache under PYOP2_CACHE_DIR, which is file based.
+    export LOOPY_NO_CACHE=1
     mkdir -p "$PYOP2_CACHE_DIR" "$XDG_CACHE_HOME" "$MPLCONFIGDIR"
     [ -n "$ISMIP7_CONTAINER" ] && ismip7_container_binds
     return 0
@@ -296,12 +307,13 @@ ismip7_activate() {
 # whatever the site's modules or venv had set before ismip7_activate replaced
 # it (IU's modulefile names a scratch directory); else Firedrake's own default.
 #
-# loopy's persistent dict stays where ismip7_activate put it, one per job. The
-# race that killed Rice 1559476 is between lanes launched together, and
-# `make timing-scout` submits one lane per mesh at once, so sharing that dict
-# back is the exact condition that failed. A cold pytools dict costs seconds of
-# loopy preprocessing per lane; the kernel compile the shared cache protects is
-# the expensive part, and it comes back below.
+# loopy's persistent dict stays off, and XDG_CACHE_HOME stays where
+# ismip7_activate put it, one per job. The race that killed Rice 1559476 is
+# between lanes launched together, and `make timing-scout` submits one lane
+# per mesh at once, so sharing that dict back is the exact condition that
+# failed. Doing without it costs seconds of loopy preprocessing per lane; the
+# kernel compile the shared cache protects is the expensive part, and it
+# comes back below.
 ismip7_persistent_jit_cache() {
     rmdir "$PYOP2_CACHE_DIR" 2>/dev/null || true
     if [ -n "${ISMIP7_TIMING_JIT_CACHE:-}" ]; then
@@ -357,10 +369,9 @@ ISMIP7_ACCOUNT="${ISMIP7_ACCOUNT:-}"
 ISMIP7_SBATCH_EXTRA="${ISMIP7_SBATCH_EXTRA:-}"
 
 # A site that needs one number sets ISMIP7_TASKS/ISMIP7_MEM and both kinds take
-# it. A site with measured per-kind values sets the pair. At Rice the forward
-# was measured at 12 ranks and the inversion at 32, so running the forward at
-# the inversion's size would be an unvalidated rank count on a narrower set of
-# nodes.
+# it. A site with measured per-kind values sets the pair, so a forward runs at
+# a rank count measured for forwards and never inherits the inversion's size
+# unvalidated (sites/rice_nots.sh carries its measurements).
 ISMIP7_TASKS_INV="${ISMIP7_TASKS_INV:-$ISMIP7_TASKS}"
 ISMIP7_MEM_INV="${ISMIP7_MEM_INV:-$ISMIP7_MEM}"
 ISMIP7_TASKS_FWD="${ISMIP7_TASKS_FWD:-$ISMIP7_TASKS}"

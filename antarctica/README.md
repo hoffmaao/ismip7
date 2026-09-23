@@ -119,7 +119,7 @@ antarctica/scripts/batch_runners/submit.sh inversion ISMIP7_LC=2000 \
     ISMIP7_LC_COARSE=5000 \
     ISMIP7_MESH=$PWD/antarctica/mesh/antarctica_5000_2000_buffered0.msh
 ISMIP7_SITE=iu_quartz antarctica/scripts/batch_runners/submit.sh projection \
-    ISMIP7_EXPERIMENT=ssp585_cesm_waccm ISMIP7_OUTPUT=1 --dry-run
+    ISMIP7_EXPERIMENT=ssp585_cesm_waccm --dry-run
 ```
 
 The timing benchmark (section 7) goes through the same layer: `make timing`
@@ -649,7 +649,7 @@ redeclare those literals.
 | `ISMIP7_FRACTURE` | `mask` applies the ISMIP7 collapse forcing to every floating cell it flags, booked as calving; `mask_front` only to the flagged cells open water has reached, so no hole opens behind a standing front (the two end-members of discussion #30). Masks exist for the SSPs only, so the control, historicals and OCX abort on either. Needs DG0. Every run prints its mode once (`Ice-shelf collapse forcing: ISMIP7_FRACTURE=...`, `none` included). Under a mask mode the timeseries columns `collapse_flagged_cells`, `collapse_removed_cells` and `collapse_held_cells` count the flagged floating cells, the ones the mode has emptied and the ones it leaves standing (always 0 under `mask`), all ranks summed; the budget lines, a closing log line and the core report repeat them | `none` |
 | `ISMIP7_OCX_FORCING` | what core 11 runs on. `protocol` is the ISMIP7 OCX product (RACMO2.3p2-ERA SDBN1 `acabf`, expert-judgment ocean `tf`/`so`), and the run refuses to start without it. `stopgap` is RACMO2.4p1 actual-year SMB with the constant OI ocean climatology, what the core ran on before the product was readable here. K is fitted to the climatology, so read `check_melt_bound.py --ocx` first (discussion #48) | `protocol` |
 | `ISMIP7_OCX_OCEAN` | which expert-judgment OCX ocean scenario to read: `main` (the core one), `cold`, `warm` or `vary`. A member other than `main` writes to `ocx_<member>` | `main` |
-| `ISMIP7_OUTPUT` | `1` records the ISMIP7 yearly fields and scalars (`<exp>_<lc>_ismip7_annual_<year>.h5`, `<exp>_<lc>_ismip7_scalars.csv`), regridded afterwards by `write_ismip7_output.py`. The value set is closed, so a typo is rejected at startup. A chained projection must export it on every link; a link that cold-starts mid-year logs the gap and begins at the next 1 January. Resuming continues a series, and a cold start into a populated series is refused | unset |
+| `ISMIP7_OUTPUT` | `1` records the ISMIP7 yearly fields and scalars (`<exp>_<lc>_ismip7_annual_<year>.h5`, `<exp>_<lc>_ismip7_scalars.csv`), regridded afterwards by `write_ismip7_output.py`. The value set is closed, so a typo is rejected at startup. `projection.sbatch` and `run_core_matrix.sh` default it to `1`, and `=0` or an empty value turns it off there. A chained projection must export it on every link; a link that cold-starts mid-year logs the gap and begins at the next 1 January. Resuming continues a series, and a cold start into a populated series is refused | unset (`1` under the core-experiment runners) |
 | `ISMIP7_BNDIDS` | boundary-id JSON override | per-mesh sidecar, else `mesh/boundary_ids.json` |
 | `ISMIP7_GEOMETRY_SPACE` | `dg0` (one thickness for terminus force and mass flux) or `cg1` (legacy, A/B only). Selects the MAP. See `../GEOMETRY_DISCRETIZATION.md` | `dg0` |
 | `ISMIP7_DATA_ROOT` | forcing tree root | `<repo>/ISMIP7/AIS` |

@@ -2209,7 +2209,7 @@ def run_simulation(
         if csv_f is None:
             return
         csv_f.write(
-            f"{row[0]:.1f},{row[1]:.6f},{row[2]:.2f},"
+            f"{row[0]:.4f},{row[1]:.6f},{row[2]:.2f},"
             + ",".join(f"{v:.4f}" for v in row[3:])
             + collapse_csv_fields(csv_head, collapse_cells) + "\n"
         )

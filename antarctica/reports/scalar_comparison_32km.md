@@ -96,6 +96,8 @@ Four causes account for all of it.
    residual exactly. The scalar bounds in isschecker 0.5.1's table are
    ±1e9 kg/s for the tend* series, and 2300's -3.9e9 kg/s is four times that;
    0.5.1 does not range-check scalars.
+   The issue 12 branch's `55ab22b` books the applied flux after the
+   limiter; runs made with it are the check that this residual closes.
 
 The p2 runs predate `2a3a58e`, which books ligroundf in both directions, so
 they exercise the chain and say nothing about the current booking.

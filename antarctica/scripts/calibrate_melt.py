@@ -83,6 +83,7 @@ from icepack2_tools.forcing import (quadratic_mixed_slope, compute_sin_alpha,
                                     _RHO_I)
 K05, K50, K95 = _K_PERCENTILES
 from icepack2_tools.geometry import sample_to_geometry
+from icepack2_tools.mpi_stats import global_count, global_mean, global_range
 from icepack2_tools.naming import map_basename
 from icepack2_tools.runconfig import (friction as _friction, lc as _lc,
                                       geometry_space as _geometry_space,
@@ -353,10 +354,13 @@ def forward_geometry(mesh):
     b_np, h_np, s_np = b_dg.dat.data_ro, h_dg.dat.data_ro, s_dg.dat.data_ro
     afloat = is_floating(s_np, b_np)
     floating = afloat & (h_np > 0)
-    PETSc.Sys.Print(f"  BedMachine on cells: h min={h_np.min():.1f}  "
-                    f"med={np.median(h_np):.1f}  max={h_np.max():.1f}; "
-                    f"floating (haf <= 0, h > 0) {int(floating.sum())} cells, "
-                    f"{int((afloat & ~(h_np > 0)).sum())} ice-free "
+    comm = mesh.comm
+    h_lo, h_hi = global_range(h_np, comm)
+    PETSc.Sys.Print(f"  BedMachine on cells: h min={h_lo:.1f}  "
+                    f"mean={global_mean(h_np, comm):.1f}  max={h_hi:.1f}; "
+                    f"floating (haf <= 0, h > 0) "
+                    f"{global_count(floating, comm)} cells, "
+                    f"{global_count(afloat & ~(h_np > 0), comm)} ice-free "
                     f"haf <= 0 cells left out")
     return {
         "x": xy[:, 0],

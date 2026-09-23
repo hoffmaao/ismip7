@@ -115,6 +115,10 @@ def _gh_reads_board():
 def test_now_index_matches_the_open_issues():
     r = subprocess.run([sys.executable, str(BUILD), "--check"],
                        capture_output=True, text=True)
+    # The board is a user project; reading it needs the read:project scope,
+    # which a default `gh auth login` token does not carry.
+    if r.returncode != 0 and "read:project" in r.stderr:
+        pytest.skip("gh token lacks read:project; run gh auth refresh -s read:project")
     assert r.returncode == 0, r.stderr or r.stdout
 
 

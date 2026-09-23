@@ -1,0 +1,17 @@
+{
+  "id": "core-c010-ctrl-mriesm20",
+  "task": "control",
+  "institution": "unassigned",
+  "title": "C010: ctrl with MRI-ESM2-0",
+  "status": "planned",
+  "exp_id": "C010",
+  "esm": "MRI-ESM2-0",
+  "scenario": "ctrl",
+  "period": "2015 to 2300",
+  "branch_from": "the historical endpoint at 2015.0",
+  "melt": "one toolbox K with the per-basin offset",
+  "apparent_mb": "balance",
+  "dt": 0.05,
+  "mesh": "the production mesh, issue #20",
+  "notes": ""
+}

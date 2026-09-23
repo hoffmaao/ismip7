@@ -119,7 +119,7 @@ antarctica/scripts/batch_runners/submit.sh inversion ISMIP7_LC=2000 \
     ISMIP7_LC_COARSE=5000 \
     ISMIP7_MESH=$PWD/antarctica/mesh/antarctica_5000_2000_buffered0.msh
 ISMIP7_SITE=iu_quartz antarctica/scripts/batch_runners/submit.sh projection \
-    ISMIP7_EXPERIMENT=ssp585_cesm_waccm ISMIP7_OUTPUT=1 --dry-run
+    ISMIP7_EXPERIMENT=ssp585_cesm_waccm --dry-run
 ```
 
 The timing benchmark (section 7) goes through the same layer: `make timing`
@@ -207,6 +207,7 @@ python scripts/download_forcing.py --ocean        # thetao/so/tf + climatology +
 python scripts/download_forcing.py --calibration  # meltMIP obs melt, IMBIE2 basins, grid, topography
 python scripts/download_forcing.py --scenarios    # per-(ESM, scenario) forcing (cores 1-8)
 python scripts/download_forcing.py --scenarios --esm MRI-ESM2-0 --scenario historical,ssp585
+python scripts/download_forcing.py --scalar-processing  # ismip7-scalars grids, see "From a finished run to a submission"
 python scripts/download_forcing.py --status
 ```
 
@@ -436,6 +437,46 @@ ISMIP7_K_OUT=/scratch/check/K_2000.npz ISMIP7_LC=2000 \
 
 ---
 
+### Per-basin deltaT at one toolbox K (`calibrate_deltaT.py`)
+
+The ISMIP7 ocean-forcing recommendation calibrates one dimensionless K from
+the 4-term toolbox (K05, K50, K95) and then, optionally, a thermal-forcing
+offset per IMBIE basin at that K so each basin's present-day melt matches the
+observed total (`optimise_deltaT` in the toolbox notebook). That offset, not
+a per-basin K, is the protocol's per-basin knob.
+
+```bash
+ISMIP7_LC=2000 python antarctica/scripts/calibrate_deltaT.py          # K05 K50 K95
+ISMIP7_LC=2000 python antarctica/scripts/calibrate_deltaT.py --K 8.5e-5
+```
+
+runs the fit on the forward's own melt path (the same DG0 geometry, OI
+climatology at the draft, constant mean-Antarctic slope and seawater
+flotation test the forward uses, from `calibrate_melt.forward_geometry`),
+solving `M_b(deltaT) = M_obs(b)` per basin by a bracketed root in the
+toolbox's window of plus or minus 2 K, and writes
+`antarctica/results/deltaT_per_basin_<lc>_K<K>.npz` (basin ids, offsets, K,
+residual, dM/dT, the slope and geometry conventions). A run applies it with
+
+```bash
+ISMIP7_DELTAT_PER_BASIN_NPZ=antarctica/results/deltaT_per_basin_2000_K8.500e-05.npz
+```
+
+which makes every ocean callback (control, projections, OCX) add the offset
+to TF and melt with the file's one K; no driver then reads or requires the
+per-basin K file. A driver refuses to start when the file is missing or
+`ISMIP7_K_SCALE` is not 1, since the offsets were fitted at the file's K.
+The fit reduces every basin total across ranks, so `mpiexec -n N` writes the
+same offsets as a serial run.
+Measured on the 2 km MAP mesh against the 865 Gt/yr table (22 September
+2026): K05 907, K50 1623 and K95 2625 Gt/yr uncorrected, each brought to
+865 by offsets within plus or minus 1.3 K, every basin with a root in the
+window. The 865 covers the fitted basins. Floating ice outside them (a basin
+the table lacks, a coverage gap, off the 8 km grid) keeps a zero offset and
+still melts at the file's K, as the toolbox applies its one K everywhere, so
+a run's integrated melt exceeds 865 by that amount; the first forcing step
+prints it (`Melt ... Gt/yr, of which ... outside the fitted basins`).
+
 ## 6. Control and projections
 
 Forward runs go through `scripts/simulation.py` (`setup_model` and
@@ -545,8 +586,10 @@ diagnostics; a restart rebuilds the front from the thickness. The exception is
 front where it restarted. The shared implementation's tests are
 `icepack_tools/test/levelset_test.py`; the ISMIP7-side rules (retreat-sliver
 mask, apparent-MB extent masking, the `fixed` law's t=0 anchor) are covered by
-`tests/`. The level-set unit tests written against this integration in Sep 2026
-were lost before they were committed and are still to be rebuilt. (issue #35)
+`tests/`. `tests/test_levelset_laws.py` checks each law against closed forms on
+a unit mesh: the `vonmises` rate under both thresholds, the shed fraction and
+its step-size behaviour under the transport's masks, the drag gate, and the
+refusal of an unknown or underspecified law.
 
 **Control and projection configurations differ.** The protocol's control is an
 unforced constant-climate run with calving set to end-of-2014 conditions, so
@@ -649,7 +692,7 @@ redeclare those literals.
 | `ISMIP7_FRACTURE` | `mask` applies the ISMIP7 collapse forcing to every floating cell it flags, booked as calving; `mask_front` only to the flagged cells open water has reached, so no hole opens behind a standing front (the two end-members of discussion #30). Masks exist for the SSPs only, so the control, historicals and OCX abort on either. Needs DG0. Every run prints its mode once (`Ice-shelf collapse forcing: ISMIP7_FRACTURE=...`, `none` included). Under a mask mode the timeseries columns `collapse_flagged_cells`, `collapse_removed_cells` and `collapse_held_cells` count the flagged floating cells, the ones the mode has emptied and the ones it leaves standing (always 0 under `mask`), all ranks summed; the budget lines, a closing log line and the core report repeat them | `none` |
 | `ISMIP7_OCX_FORCING` | what core 11 runs on. `protocol` is the ISMIP7 OCX product (RACMO2.3p2-ERA SDBN1 `acabf`, expert-judgment ocean `tf`/`so`), and the run refuses to start without it. `stopgap` is RACMO2.4p1 actual-year SMB with the constant OI ocean climatology, what the core ran on before the product was readable here. K is fitted to the climatology, so read `check_melt_bound.py --ocx` first (discussion #48) | `protocol` |
 | `ISMIP7_OCX_OCEAN` | which expert-judgment OCX ocean scenario to read: `main` (the core one), `cold`, `warm` or `vary`. A member other than `main` writes to `ocx_<member>` | `main` |
-| `ISMIP7_OUTPUT` | `1` records the ISMIP7 yearly fields and scalars (`<exp>_<lc>_ismip7_annual_<year>.h5`, `<exp>_<lc>_ismip7_scalars.csv`), regridded afterwards by `write_ismip7_output.py`. The value set is closed, so a typo is rejected at startup. A chained projection must export it on every link; a link that cold-starts mid-year logs the gap and begins at the next 1 January. Resuming continues a series, and a cold start into a populated series is refused | unset |
+| `ISMIP7_OUTPUT` | `1` records the ISMIP7 yearly fields and scalars (`<exp>_<lc>_ismip7_annual_<year>.h5`, `<exp>_<lc>_ismip7_scalars.csv`), regridded afterwards by `write_ismip7_output.py`. The value set is closed, so a typo is rejected at startup. `projection.sbatch` and `run_core_matrix.sh` default it to `1`, and `=0` or an empty value turns it off there. A chained projection must export it on every link; a link that cold-starts mid-year logs the gap and begins at the next 1 January. Resuming continues a series, and a cold start into a populated series is refused | unset (`1` under the core-experiment runners) |
 | `ISMIP7_BNDIDS` | boundary-id JSON override | per-mesh sidecar, else `mesh/boundary_ids.json` |
 | `ISMIP7_GEOMETRY_SPACE` | `dg0` (one thickness for terminus force and mass flux) or `cg1` (legacy, A/B only). Selects the MAP. See `../GEOMETRY_DISCRETIZATION.md` | `dg0` |
 | `ISMIP7_DATA_ROOT` | forcing tree root | `<repo>/ISMIP7/AIS` |
@@ -685,8 +728,9 @@ redeclare those literals.
 | `ISMIP7_MASS_RESIDUAL_TOL_GT` | fail-loud absolute tolerance for both the discrete transport identity and the complete step mass budget | `5e-5` Gt |
 | `ISMIP7_RESCUE_ENABLED` | permit a failed direct transient diagnostic solve to enter the continuation/trust-region/subcycle rescue ladder; set to `0` for strict timestep qualification | `1` |
 | `ISMIP7_K_MELT` / `ISMIP7_K_PER_BASIN_NPZ` | scalar K (projections), the ISMIP7 toolbox K50 of July 2026 (K05 4.75e-5, K95 1.375e-4), per-basin K file (control) | `8.5e-5` / `results/calibrated_K_per_basin_<lc>.npz` |
+| `ISMIP7_DELTAT_PER_BASIN_NPZ` | per-basin TF offset at one toolbox K from `calibrate_deltaT.py`; when set, every ocean callback melts with that file's K and the K file is not read. Refused with `ISMIP7_K_SCALE` other than 1 | unset |
 | `ISMIP7_MELT_OBS_CSV` | per-basin melt observation table read by `scripts/calibrate_melt.py`; columns are located by header name, so either published table serves | `Melt_Paolo_Davison_Adusumilli_imbie2.csv` under `<DATA_ROOT>/meltobs/`, else under `<DATA_ROOT>/parameterisations/ocean/meltobs/`, else the older Paolo and Adusumilli table with a `[!]` line |
-| `ISMIP7_MELT_SLOPE` | the draft slope the quadratic melt law sees, in the forward and in `scripts/calibrate_melt.py`: `ant` is one constant `sin(alpha)` on every shelf, the protocol's reference ("mean Antarctic slope, no slope dependency"); `local` is this mesh's draft slope. A K file records the convention it was fitted under and a run under the other is told once | `ant` |
+| `ISMIP7_MELT_SLOPE` | the draft slope the quadratic melt law sees, in the forward and in `scripts/calibrate_melt.py` and `scripts/calibrate_deltaT.py`: `ant` is one constant `sin(alpha)` on every shelf, the protocol's reference ("mean Antarctic slope, no slope dependency"); `local` is this mesh's draft slope. A K or deltaT file records the convention it was fitted under and a run under the other is told once | `ant` |
 | `ISMIP7_SIN_ALPHA_ANT` | the constant under `ant`. The default is the value the toolbox's K percentiles were sampled with, back-computed from its own gamma_T conversion; the notebook's recipe on the 8 km v3 topography gives 5.7e-3 | `5.115e-3` |
 | `ISMIP7_SIN_ALPHA_CAP` | `local` slope only: cap on `sin(alpha)` in `scripts/calibrate_melt.py`; the forward applies none | none under `dg0`, `5e-3` under `cg1` |
 | `ISMIP7_K_OUT` | output path for `scripts/calibrate_melt.py`, overriding the generated name. Use it for a calibration made as a check, so it cannot replace the K that every forward and inversion in the checkout reads. A bare filename resolves under `results/` | `results/calibrated_K_per_basin_<lc>.npz` |
@@ -1148,6 +1192,103 @@ Per experiment in `results/`:
   clamp_gt, resid_gt, amb_gtyr`. The residual must close to 0.00.
 
 VAF is in mm of sea-level equivalent, mass in Gt.
+
+### From a finished run to a submission
+
+The chain has been run end to end on a workstation, with a two-year 32 km
+control standing in for a production run (22 September 2026):
+
+```bash
+# 1. the run itself banks the yearly fields and the native scalars
+ISMIP7_OUTPUT=1 mpiexec -n 8 python antarctica/scripts/control/run.py
+
+# 2. onto the 8 km grid, in the request's files and names
+python antarctica/scripts/write_ismip7_output.py \
+    antarctica/results/<exp>_<lc>_ismip7_annual.h5 --out-dir submission \
+    --esm CESM2-WACCM --scenario ctrl --exp C009 \
+    --source-id RICE --ism-id icepack2 \
+    --scalars antarctica/results/<exp>_<lc>_ismip7_scalars.csv
+
+# 3. the compliance checker over what came out
+python -m isschecker --variable-list ismip7 \
+    --source-path submission/AIS/RICE/icepack2/CORE/C009
+
+# 4. the sea-level scalars nothing here computes
+python antarctica/scripts/download_forcing.py --scalar-processing
+ismip7-scalars-set-params --region AIS --group RICE --model icepack2 \
+    --rhoi 917 --rhow 1024 --rhof 1000 --modelpath submission/AIS
+python -m ismip7_scalars --region AIS --group RICE --model icepack2 \
+    --experiment ctrl --modelid m001 --esm CESM2-WACCM --forcingid f001 \
+    --configid C009 --exp-group CORE \
+    --datapath ISMIP7/Output-Processing/Data/AIS \
+    --modelpath submission/AIS --outpath submission/scalars
+```
+
+Four things that are easy to get wrong:
+
+- **Both tools need Python 3.11 or newer**, and the Firedrake environment is
+  3.10, so they belong in their own interpreter. Where conda is unavailable,
+  `nix` provides one, and the nix interpreter then needs the shared libraries
+  it cannot see: gcc's C++ runtime, zlib, expat and udunits, on
+  `LD_LIBRARY_PATH`, with `UDUNITS2_XML_PATH` set.
+- **The scalar tool needs four auxiliary grids** per region (the area factor,
+  the extended Rignot basins, the glacier and ice-cap area factor and the
+  maximum-extent mask), which live on Globus under
+  `/ISMIP7/Output-Processing/Data` rather than with the forcing.
+  `--scalar-processing` fetches them; `--scalar-resolution` picks the grid.
+- **`params.nc` carries the model's densities**, so give it ours: 917 ice and
+  1024 seawater, the pair `simulation.py` builds the surface with. The tool
+  defaults to 1027 seawater.
+- **`--refyear` takes the stamped year.** A state variable is
+  stamped 1 January of the following year, so a run starting in 2015 has 2016
+  as its first state, and a reference of 2015 is not found.
+
+Measured on that rehearsal: `isschecker` 0.5.1 over 31 files reports zero
+errors in variable presence, naming, numerical, spatial, consistency and
+attribute tests, and 93 time errors, which are the three-per-file
+experiment-length checks a two-year run cannot satisfy. `ismip7-scalars` 0.1.0
+then wrote `sla20`, `slg20` and `slvaf`, each with its glacier and ice-cap
+variant, in NetCDF and CSV.
+
+### The run log (`build_runlog.py`)
+
+None of the files above are in git: a checkpoint is hundreds of MB and a
+timeseries is regenerated. What reaches the repository is a record. Every
+simulation, of any kind, leaves one JSON file in `antarctica/runlog/`, and
+
+```bash
+make -C antarctica runlog                                # render reports/SIMULATIONS.md
+make -C antarctica runlog RUNLOG_CSV=results/runlog.csv  # and the records flat
+make -C antarctica runlog-check                          # exits 1 on a stale render
+```
+
+renders them into `antarctica/reports/SIMULATIONS.md`, grouped by task kind,
+with a summary table per group and every recorded field below it. A record is
+reviewed in a pull request beside the code its run used, which is what makes it
+a trace rather than a note; `runlog-check` and `tests/test_runlog.py` refuse a
+stale render or a malformed record.
+
+The group's shared progress sheet imports `RUNLOG_CSV`, one row per record and
+one column per field in `build_runlog.py` order, so a run's configuration and
+outcome are typed only in its record.
+
+`id`, `task`, `title`, `status` and `institution` are required and everything else is
+optional, so a planned run is five lines and a finished one carries its whole
+provenance: mesh, MAP and iteration count, what it branched from, forcing
+versions, the melt and front configuration, site, ranks, job ids, code SHA,
+cost per model year, the audit verdict, whether the ISMIP7 output was written,
+the checker version and result, the scalars, and the upload. `build_runlog.py`
+owns the field list, so a field it does not know is an error rather than a
+typo that renders as nothing.
+
+A core experiment still gets its full report from `core_report.py`, with the
+budget rows and the ensemble overlay. The run log is the index across all of
+them, and across the runs that are not core experiments: the inversions, the
+calibrations and the forward tests. A superseded run keeps its record with
+`status` set to `superseded` and the reason in `notes`. `institution` names the
+institution that owns the run, or `unassigned` for a planned run; `results` is
+relative to the checkout on the site the record names, and never an account or
+home-directory path.
 
 ---
 

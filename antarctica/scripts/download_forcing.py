@@ -7,6 +7,8 @@ Usage:
     python scripts/download_forcing.py --status
     python scripts/download_forcing.py --ocean
     python scripts/download_forcing.py --calibration
+    python scripts/download_forcing.py --scalar-processing
+                                       [--scalar-resolution 08000m]
     python scripts/download_forcing.py --scenarios [--esm MRI-ESM2-0]
                                        [--scenario historical,ssp585]
     python scripts/download_forcing.py
@@ -57,6 +59,12 @@ AIS_BASE = "/ISMIP6/ISMIP7_Prep/CMIP6_test_protocol/AIS"
 
 # New top-level tree (see the 2026-07-19 note above): scenario forcing.
 ISMIP7_BASE = "/ISMIP7/AIS"
+# The scalar-processing auxiliary grids, which are neither forcing nor
+# observations: ismip7-scalars reads them as its own Data/<region>.
+OUTPUT_PROCESSING_BASE = "/ISMIP7/Output-Processing/Data"
+OUTPUT_PROCESSING_DIR = (
+    Path(__file__).resolve().parents[2] / "ISMIP7" / "Output-Processing" / "Data"
+)
 SCENARIO_ESMS = ("CESM2-WACCM", "MRI-ESM2-0")
 SCENARIO_NAMES = ("historical", "ssp126", "ssp370", "ssp585")
 # Minimal runtime vars (what experiment.py actually reads): re-referenced
@@ -138,6 +146,40 @@ CALIBRATION_FILES = {
 }
 
 
+#: The four auxiliary grids ``ismip7-scalars`` needs per region to turn the
+#: gridded submission into the sea-level scalars sla20, slg20 and slvaf: the
+#: area factor, the extended Rignot basins and regions, the glacier and ice-cap
+#: area factor, and the maximum-extent mask. Their versions are fixed per
+#: product, not per resolution, and the tool auto-detects the resolution from
+#: the files it is given, so the set is built for whichever grid a submission
+#: is written on (8 km here).
+SCALAR_PROCESSING_PRODUCTS = (
+    "af2_AIS_{res}_v1.nc",
+    "basins_regions_AIS_Rignot_extended_{res}_v1.nc",
+    "iaf2_GIC_AIS_{res}_v0.nc",
+    "maxmask1_AIS_{res}_v0.nc",
+)
+
+#: Resolutions the share publishes them at.
+SCALAR_PROCESSING_RESOLUTIONS = ("01000m", "02000m", "04000m", "08000m",
+                                 "16000m", "32000m")
+
+
+def scalar_processing_file_set(resolution="08000m"):
+    r"""File set for one resolution of the scalar-processing grids."""
+    if resolution not in SCALAR_PROCESSING_RESOLUTIONS:
+        raise ValueError(
+            f"resolution must be one of {', '.join(SCALAR_PROCESSING_RESOLUTIONS)}, "
+            f"not {resolution!r}")
+    return {
+        "remote_dir": f"{OUTPUT_PROCESSING_BASE}/AIS",
+        "files": [name.format(res=resolution)
+                  for name in SCALAR_PROCESSING_PRODUCTS],
+        "local_dir": "AIS",
+        "local_root": OUTPUT_PROCESSING_DIR,
+    }
+
+
 def _remote_local_pair(file_set, fn):
     r"""(remote_path, local_relpath) for one file, honoring per-var/v layout."""
     remote_dir = file_set["remote_dir"]
@@ -150,6 +192,13 @@ def _remote_local_pair(file_set, fn):
     rd = f"{remote_dir}/{sub}".rstrip("/")
     ld = Path(file_set["local_dir"]) / sub
     return f"{rd}/{fn}", ld / fn
+
+
+def _local_root(file_set):
+    r"""Where a set lands. Everything under the forcing tree except the
+    scalar-processing grids, which ``ismip7-scalars`` reads from their own
+    root and which are not forcing at all."""
+    return file_set.get("local_root", FORCING_DIR)
 
 
 def _client_from_cli_storage():
@@ -305,7 +354,7 @@ def download_file_set(tc, file_set, dry_run=False):
     to_download = []
     for fn in file_set["files"]:
         remote, rel = _remote_local_pair(file_set, fn)
-        local_path = FORCING_DIR / rel
+        local_path = _local_root(file_set) / rel
         if local_path.exists():
             size_mb = local_path.stat().st_size / 1e6
             print(f"    {fn}  ({size_mb:.0f} MB) [exists]")
@@ -460,6 +509,19 @@ def download_calibration(tc, dry_run=False):
         download_file_set(tc, fset, dry_run=dry_run)
 
 
+def download_scalar_processing(tc, resolution="08000m", dry_run=False):
+    r"""The auxiliary grids ``ismip7-scalars`` reads, for one resolution."""
+    print("\n" + "=" * 60)
+    print(f"Scalar-processing grids ({resolution})")
+    print("=" * 60)
+    fset = scalar_processing_file_set(resolution)
+    print(f"\n  Remote: {fset['remote_dir']}")
+    print(f"  Local:  {OUTPUT_PROCESSING_DIR / fset['local_dir']}")
+    download_file_set(tc, fset, dry_run=dry_run)
+    print("\n  ismip7-scalars reads these with")
+    print(f"    --datapath {OUTPUT_PROCESSING_DIR / 'AIS'}")
+
+
 def print_status():
     print("\n" + "=" * 60)
     print("ISMIP7 Forcing Data Status")
@@ -499,6 +561,13 @@ def main():
     parser.add_argument("--resync", action="store_true",
                         help="with --scenarios: submit complete groups too, so the "
                              "checksum sync picks up files replaced in place")
+    parser.add_argument("--scalar-processing", action="store_true",
+                        help="Download the auxiliary grids ismip7-scalars reads "
+                             "(sla20, slg20, slvaf)")
+    parser.add_argument("--scalar-resolution", default="08000m",
+                        choices=SCALAR_PROCESSING_RESOLUTIONS,
+                        help="grid for --scalar-processing (default: the "
+                             "submission's 8 km)")
     parser.add_argument("--dry-run", action="store_true", help="Show what would be downloaded")
     args = parser.parse_args()
 
@@ -530,6 +599,8 @@ def main():
         download_ocean(tc, dry_run=dry)
     elif args.calibration:
         download_calibration(tc, dry_run=dry)
+    elif args.scalar_processing:
+        download_scalar_processing(tc, args.scalar_resolution, dry_run=dry)
     else:
         download_ocean(tc, dry_run=dry)
         download_calibration(tc, dry_run=dry)

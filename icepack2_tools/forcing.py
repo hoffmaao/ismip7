@@ -339,6 +339,21 @@ def describe_observational_forcing(smb=None, ocean=False):
 ATMOSPHERE_VERSION = "v2"
 OCEAN_VERSION = "v3"
 
+# The oldest collapse-mask version the submission accepts, per ESM and
+# scenario. The fracture reader takes the highest version on disk, so a tree
+# synced from the mirror alone opens a mask the focus group has replaced when
+# the fix is on Globus and not yet on the mirror: the MRI-ESM2-0 ssp585 v1
+# flagged 593 cells of 8 km by 2250, the v2 of 22 September 2026 flags 25,149
+# (discussion #30). A run under a mask mode refuses anything older
+# (ISMIP7Fracture.check_min_version), and audit_forcing_versions.py fails on
+# it, whatever the mirror publishes.
+FRACTURE_MIN_VERSION = {
+    ("CESM2-WACCM", "ssp126"): "v2.1",
+    ("CESM2-WACCM", "ssp370"): "v2.1",
+    ("CESM2-WACCM", "ssp585"): "v2.1",
+    ("MRI-ESM2-0", "ssp585"): "v2",
+}
+
 
 # The observation-constrained experiment. It has no ESM and no scenario, and
 # the focus groups decided it need not follow the ESM ordering, only be
@@ -1089,16 +1104,45 @@ class ISMIP7Fracture:
 
         return self
 
+    def version(self):
+        r"""The version of the collapse mask ``load`` opened, from its filename
+        (``..._8km-v2.1.nc``), or None when none was opened or it names none."""
+        if self._collapse_mask_path is None:
+            return None
+        m = re.search(r"[_-](v\d+(?:\.\d+)*)\.nc$", os.path.basename(self._collapse_mask_path))
+        return m.group(1) if m else None
+
+    def check_min_version(self):
+        r"""Raise when the opened collapse mask is older than
+        ``FRACTURE_MIN_VERSION`` allows for this ESM and scenario. A run under
+        a mask mode calls this, so a tree still holding a replaced mask stops
+        at startup even while the mirror serves nothing newer."""
+        floor = FRACTURE_MIN_VERSION.get((self.esm, self.scenario))
+        if floor is None or self._collapse_mask_path is None:
+            return
+        have = self.version()
+        key = version_key(have) if have else None
+        if key is not None and key >= version_key(floor):
+            return
+        raise RuntimeError(
+            f"{self.esm} {self.scenario}: the collapse mask on disk is "
+            f"{have or 'unversioned'} ({self._collapse_mask_path}), and the "
+            f"submission needs {floor} or newer (FRACTURE_MIN_VERSION in "
+            f"icepack2_tools/forcing.py). The mirror may still serve the older "
+            f"one; {floor} is on Globus. Fetch it with `python "
+            f"antarctica/scripts/download_forcing.py --scenarios --esm {self.esm} "
+            f"--scenario {self.scenario}` (after `--login`), or copy it into "
+            f"{self.fracture_dir()}/{floor}/, then rerun.")
+
     def provenance(self):
         r"""The collapse mask ``load`` opened, the only fracture product that
         is read: its version is in the filename (``..._8km-v2.1.nc``), and the
         highest version on disk is the one taken, so nothing newer is unread."""
         if self._collapse_mask_path is None:
             return []
-        name = os.path.basename(self._collapse_mask_path)
-        m = re.search(r"[_-](v\d+(?:\.\d+)*)\.nc$", name)
-        return [{"variable": "collapse_mask", "product": name,
-                 "version": m.group(1) if m else "unversioned",
+        return [{"variable": "collapse_mask",
+                 "product": os.path.basename(self._collapse_mask_path),
+                 "version": self.version() or "unversioned",
                  "dir": os.path.dirname(self._collapse_mask_path), "newer": []}]
 
     def get_collapse_mask(self, year, mesh_x, mesh_y):

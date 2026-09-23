@@ -447,8 +447,11 @@ Forcing data:
       `core_report.py` carries that into the committed report.
 - [x] #45, #41 files replaced in place under the same name and version: the
       mirror downloader keeps ETags in `.mirror_manifest.json` and refetches a
-      moved one, the audit reports `REPLACED` and `PINNED` and fails on them,
-      the Globus route has `--resync`.
+      moved one, the audit reports `REPLACED` and `PINNED` and fails on them
+      (a version newer than the mirror's, fetched from Globus first, reads
+      `AHEAD` and passes, and a collapse mask below
+      `forcing.FRACTURE_MIN_VERSION` reads `OUTDATED` and fails), the Globus
+      route has `--resync`.
 - [x] #41 item 9, dotted fracture versions: the Globus downloader no longer
       passes over `v2.1` for `v2`.
 - [x] #41 items 1, 3, 4, 5, 7, 8, 10 to 14: none in a tree that is read. The
@@ -812,6 +815,26 @@ and six 2300 files were read with h5py.
   treat fractured ice inside the shelf, as melange or as a reduced-viscosity
   region rather than open ocean. No one has answered that, and the
   organisers prescribe no mode. (issue #10)
+- **#30, 23 September: the MRI-ESM2-0 ssp585 mask was faulty.** At 00:00 UTC,
+  under the PISM post above, a member of the ISMIP7 Antarctica team at
+  Dartmouth College reported an issue with the MRI-ESM2-0 ssp585 fracture
+  mask and an update on Globus. The update is v2, whose README credits
+  improved wind forcing in the excess meltwater, which changes all three
+  fracture files. IU fetched the MRI-ESM2-0 fracture tree from Globus to
+  Quartz that day, while the mirror still served the 29 August v1 (checked
+  19:30 UTC): v2 arrived for ssp585 and ssp534-over, and the v1 files of
+  ssp126, ssp370 and ssp534-over came back byte-identical, their collapse
+  masks matching the manifest's ETags. Flagged 8 km cells in the ssp585
+  mask, v1 against v2: 428 against 3,449 in 2100, 583 against 20,158 in 2200
+  and 593 against 25,149 in 2250, with every v1 cell flagged in v2 at those
+  years. So PISM's MRI-ESM2-0 result above ran on the faulty mask. Both
+  versions end in 2299, as the CESM2-WACCM masks do. The reader opens v2, and
+  the audit reads the row `AHEAD` and passes. `FRACTURE_MIN_VERSION` in
+  `icepack2_tools/forcing.py` makes v2 the floor for MRI-ESM2-0 ssp585, and
+  v2.1 the floor for CESM2-WACCM ssp126, ssp370 and ssp585: a run under a mask
+  mode refuses an older mask at startup, and the audit reads it `OUTDATED`
+  and fails, whatever the mirror serves. NOTS and Midway therefore need v2
+  from Globus before a mask-mode core 8 can run there. (issue #16)
 - **Unmoved.** #22 since 13:32 UTC on the 21st (the new 0.5.1 bounds stop
   taking a side on the `ligroundf` sign, but the thread prescribes none).
   #48 since the 20th: no date for the regenerated OCX. #17 and #37 as in

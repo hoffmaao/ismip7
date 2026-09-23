@@ -1553,6 +1553,12 @@ def save_model_state(ctx, final_path, t_now, extra_attrs=None):
 
         chk.set_attr("/", "t_yr", float(t_now))
         chk.set_attr("/", "friction", str(ctx.get("friction", "budd")))
+        # Which mechanism owned the front, with its threshold. A result whose
+        # calving parameters live only in a log cannot be reproduced from the
+        # data file, and the log is the first thing lost.
+        if ctx.get("calving_front_owner"):
+            chk.set_attr("/", "calving_front_owner",
+                         str(ctx["calving_front_owner"]))
         if str(ctx.get("friction", "budd")) == "budd":
             # Provenance of the shelf gate this state was solved under
             # (runconfig.BUDD_SHELF_GATE); timing-cache manifests require it.
@@ -1772,14 +1778,27 @@ def run_simulation(
     # t=0-only mask.
     free_front = calving not in ("none", "fixed")
     if calving != "none":
-        front_owner = f"level-set {calving} law (ISMIP7_CALVING={calving})" + (
-            "; ISMIP7_FIXED_FRONT is set but ignored for removal"
-            if fixed_front else ""
+        # Name the threshold, not just the law. A von Mises result is
+        # meaningless without its sigma_max, because the rate is inversely
+        # proportional to it, and the default has changed before; a bare
+        # "vonmises" in a log or a core report cannot be reproduced. The
+        # checkpoint attribute carries the same string.
+        _params = ""
+        if calving == "vonmises":
+            _sg, _sf = _calving_sigma_max()
+            _params = (f", sigma_max grounded {_sg:g} MPa floating {_sf:g} MPa")
+        front_owner = (
+            f"level-set {calving} law (ISMIP7_CALVING={calving}{_params})" + (
+                "; ISMIP7_FIXED_FRONT is set but ignored for removal"
+                if fixed_front else ""
+            )
         )
     elif fixed_front:
         front_owner = "legacy fixed-front mask (ISMIP7_FIXED_FRONT)"
     else:
         front_owner = "none (no calving sink)"
+    ctx["calving_front_owner"] = front_owner
+    ctx["calving_front_owner"] = front_owner
     PETSc.Sys.Print(f"  Calving front owner: {front_owner}")
 
     # ISMIP7_LEGACY_TRANSPORT=1 restores the pre-Jul-2026 scheme: the

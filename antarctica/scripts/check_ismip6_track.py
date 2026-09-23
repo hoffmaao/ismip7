@@ -103,14 +103,13 @@ def infer_dt(yr):
     The median of the differences is the obvious choice and is wrong whenever
     the column was written with fewer decimals than the timestep needs: a
     dt=0.05 run written to one decimal repeats years, so half the differences
-    are 0.0 and half are 0.1, and the median lands on 0.1 - exactly twice the
+    are 0.0 and half are 0.1, and the median lands on 0.1, exactly twice the
     truth. Every rate here is a per-step quantity divided by dt, so that
     doubles the apparent discharge and halves dM/dt and dVAF/dt, which can
     turn a failing run into a passing one. A difference of zero says the column
-    is rounded, so fall back to the mean spacing. That is not exact either -
-    rounding moves the endpoints by up to half a unit, so it carries an O(1/n)
-    error, a few percent over a short run - but it is the right value to within
-    that, where the median is wrong by a whole factor. The writer now emits
+    is rounded, so fall back to the mean spacing. Rounding moves the endpoints
+    by up to half a unit, so this carries an O(1/n) error, a few percent over a
+    short run; the median is wrong by a whole factor. The writer now emits
     four decimals, so this path only matters for timeseries written before
     that. The inferred value is printed; pass --dt to override it.
     """

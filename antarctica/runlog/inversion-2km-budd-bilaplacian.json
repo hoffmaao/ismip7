@@ -2,7 +2,6 @@
   "id": "inversion-2km-budd-bilaplacian",
   "task": "inversion",
   "institution": "Rice",
-  "owner": "Andrew",
   "title": "2 km Budd inversion under the bilaplacian prior",
   "status": "running",
   "friction": "budd",
@@ -22,7 +21,7 @@
   "code": "hoffmaao/ismip7@be5d685",
   "started": "2026-09-20",
   "cost": "about 128 iterations a day",
-  "results": "/projects/ah301/ismip7/antarctica/mesh/",
+  "results": "antarctica/mesh/",
   "audit": "misfit 2.04e4 and falling at link three",
   "notes": "issues #24 and #21. A timed-out link saves no velocity, so the chain needs a one-iteration publishing link before check_budd_map can run on it"
 }

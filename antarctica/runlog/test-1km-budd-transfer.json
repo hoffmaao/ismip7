@@ -2,7 +2,6 @@
   "id": "test-1km-budd-transfer",
   "task": "test",
   "institution": "Rice",
-  "owner": "Andrew",
   "title": "1 km control from the transferred Budd snapshot",
   "status": "stopped",
   "esm": "CESM2-WACCM",
@@ -25,7 +24,7 @@
   "code": "upstream/main@87475b3 with the strict-transfer fix",
   "started": "2026-09-22",
   "cost": "92 s a step, about 31 minutes a model year",
-  "results": "/projects/ah301/ismip7-fwd/antarctica/results/",
+  "results": "antarctica/results/",
   "audit": "year one clean: VAF drift 0.02 mm, mass balance +1 Gt/yr, residual zero. The Lambert and Amery grounding trough then accelerates from 7.6e3 to 1.9e7 m/yr in three steps and Newton diverges",
   "notes": "the controls there run eight to ten times observed speed before anything evolves, which is a mid-descent MAP artifact rather than a defect; re-check on the converged MAP"
 }

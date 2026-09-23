@@ -2,7 +2,6 @@
   "id": "test-1km-budd-half-step",
   "task": "test",
   "institution": "Rice",
-  "owner": "Andrew",
   "title": "1 km control from the transferred Budd snapshot at half the step",
   "status": "running",
   "esm": "CESM2-WACCM",

@@ -18,13 +18,9 @@ request beside the code the run used, and ``--check`` refuses a stale render.
 experiment, with its budget rows and audit. This is the index across all of
 them, and across the runs that are not core experiments.
 
-The log is not only ours to read: ``--csv`` writes the same records flat, for
-the group's shared progress sheet.
-
 Usage:
     python antarctica/scripts/build_runlog.py --write
     python antarctica/scripts/build_runlog.py --check       # exits 1 on drift
-    python antarctica/scripts/build_runlog.py --csv log.csv
 """
 
 from __future__ import annotations
@@ -32,7 +28,6 @@ from __future__ import annotations
 import argparse
 import json
 import sys
-from datetime import datetime, timezone
 from pathlib import Path
 
 _SCRIPTS = Path(__file__).resolve().parent
@@ -43,7 +38,7 @@ OUTPUT = _ANT / "reports" / "SIMULATIONS.md"
 #: Required of every record. Everything else is optional and rendered when set,
 #: so a planned run is one short file and a finished one carries its whole
 #: provenance.
-REQUIRED = ("id", "task", "title", "status", "owner")
+REQUIRED = ("id", "task", "title", "status", "institution")
 
 #: Task kinds, in the order the report groups them: what a run has to be
 #: before it can be the next thing.
@@ -54,13 +49,11 @@ TASKS = ("inversion", "calibration", "test", "historical", "control",
 #: invalidated must stay in the log saying so, not disappear from it.
 STATUSES = ("planned", "queued", "running", "stopped", "done", "superseded")
 
-#: Every field, in the order the CSV writes them, with the heading each one
-#: carries. The keys are the record's own; the headings are what a reader of
-#: the sheet sees.
+#: Every field, in the order a record's detail block lists them, with the
+#: heading each one carries.
 FIELDS = (
     ("id", "Record"),
     ("institution", "Institution"),
-    ("owner", "Owner"),
     ("title", "Simulation"),
     ("status", "Status"),
     ("task", "Task type"),
@@ -108,6 +101,8 @@ def load(directory=RUNLOG_DIR):
             record = json.loads(path.read_text())
         except json.JSONDecodeError as exc:
             raise ValueError(f"{path.name}: not valid JSON: {exc}") from exc
+        if not isinstance(record, dict):
+            raise ValueError(f"{path.name}: not a JSON object")
         missing = [k for k in REQUIRED if not record.get(k)]
         if missing:
             raise ValueError(f"{path.name}: missing {', '.join(missing)}")
@@ -146,7 +141,7 @@ def _cell(value):
     return str(value).replace("|", "\\|").replace("\n", " ")
 
 
-def render(records, stamp):
+def render(records):
     out = [
         "# ISMIP7 Antarctica simulations",
         "",
@@ -159,7 +154,7 @@ def render(records, stamp):
         "the trace a run leaves in the repository. A core experiment also gets",
         "its full report from `core_report.py`; this is the index.",
         "",
-        f"Generated: {stamp}. {len(records)} records.",
+        f"{len(records)} records.",
         "",
     ]
     counts = {}
@@ -184,9 +179,9 @@ def render(records, stamp):
     out += ["## Detail", ""]
     for r in records:
         out += [f"### {r['id']}", "", f"{r['title']} ({r['status']}), "
-                f"{r['owner']}.", ""]
+                f"{r['institution']}.", ""]
         for key, heading in FIELDS:
-            if key in ("id", "title", "status", "owner"):
+            if key in ("id", "title", "status", "institution"):
                 continue
             value = r.get(key)
             if value in (None, "", []):
@@ -196,23 +191,6 @@ def render(records, stamp):
     return "\n".join(out).rstrip() + "\n"
 
 
-def write_csv(records, path):
-    import csv
-    with open(path, "w", newline="") as handle:
-        writer = csv.writer(handle)
-        writer.writerow([h for _, h in FIELDS])
-        for r in records:
-            writer.writerow([
-                "" if r.get(k) in (None, [], "") else _cell(r.get(k))
-                for k, _ in FIELDS])
-    return len(records)
-
-
-def _strip(text):
-    return "\n".join(l for l in text.splitlines()
-                     if not l.startswith("Generated: "))
-
-
 def main(argv=None):
     p = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     p.add_argument("--runlog", type=Path, default=RUNLOG_DIR)
@@ -220,8 +198,6 @@ def main(argv=None):
     p.add_argument("--write", action="store_true")
     p.add_argument("--check", action="store_true",
                    help="exit 1 when the committed file differs from the render")
-    p.add_argument("--csv", type=Path,
-                   help="also write the records flat, for the shared sheet")
     a = p.parse_args(argv)
 
     try:
@@ -229,19 +205,14 @@ def main(argv=None):
     except ValueError as exc:
         print(f"runlog: {exc}", file=sys.stderr)
         return 2
-    stamp = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M UTC")
-    text = render(records, stamp)
-
-    if a.csv:
-        write_csv(records, a.csv)
-        print(f"wrote {a.csv} with {len(records)} records")
+    text = render(records)
 
     if a.check:
         if not a.output.exists():
             print(f"{a.output} is missing; run make -C antarctica runlog",
                   file=sys.stderr)
             return 1
-        if _strip(a.output.read_text()) != _strip(text):
+        if a.output.read_text() != text:
             print(f"{a.output} is stale; run make -C antarctica runlog",
                   file=sys.stderr)
             return 1
@@ -251,7 +222,7 @@ def main(argv=None):
     if a.write:
         a.output.write_text(text)
         print(f"wrote {a.output} from {len(records)} records")
-    elif not a.csv:
+    else:
         print(text)
     return 0
 

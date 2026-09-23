@@ -2,7 +2,6 @@
   "id": "inversion-2km-rc-bilaplacian",
   "task": "inversion",
   "institution": "Rice",
-  "owner": "Andrew",
   "title": "2 km regularized-Coulomb inversion under the bilaplacian prior",
   "status": "running",
   "friction": "regularized_coulomb",
@@ -22,7 +21,7 @@
   "code": "hoffmaao/ismip7@be5d685",
   "started": "2026-09-20",
   "cost": "about 100 iterations a day",
-  "results": "/projects/ah301/ismip7/antarctica/mesh/",
+  "results": "antarctica/mesh/",
   "audit": "misfit still falling about half a percent per iteration; never reaches gatol, so the chain caps at four links",
   "notes": "issue #24. Issue #68: the auto log-velocity weight is re-derived at every warm start, so links minimise different objectives"
 }

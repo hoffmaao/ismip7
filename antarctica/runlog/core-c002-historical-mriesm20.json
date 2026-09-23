@@ -1,9 +1,9 @@
 {
   "id": "core-c002-historical-mriesm20",
   "task": "historical",
+  "institution": "unassigned",
   "title": "C002: historical with MRI-ESM2-0",
   "status": "planned",
-  "owner": "unassigned",
   "exp_id": "C002",
   "esm": "MRI-ESM2-0",
   "scenario": "historical",

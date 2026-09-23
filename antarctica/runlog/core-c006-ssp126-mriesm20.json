@@ -1,9 +1,9 @@
 {
   "id": "core-c006-ssp126-mriesm20",
   "task": "projection",
+  "institution": "unassigned",
   "title": "C006: ssp126 with MRI-ESM2-0",
   "status": "planned",
-  "owner": "unassigned",
   "exp_id": "C006",
   "esm": "MRI-ESM2-0",
   "scenario": "ssp126",

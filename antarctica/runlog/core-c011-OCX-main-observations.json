@@ -1,9 +1,9 @@
 {
   "id": "core-c011-OCX-main-observations",
   "task": "ocx",
+  "institution": "unassigned",
   "title": "C011: OCX main with observations",
   "status": "planned",
-  "owner": "unassigned",
   "exp_id": "C011",
   "esm": "observations",
   "scenario": "OCX main",

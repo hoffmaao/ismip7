@@ -1,0 +1,27 @@
+{
+  "id": "core07-32km-ssp585-cesm2waccm-p2-none",
+  "task": "test",
+  "institution": "IU",
+  "title": "Core 7 at 32 km, collapse mode ISMIP7_FRACTURE=none",
+  "status": "done",
+  "esm": "CESM2-WACCM",
+  "scenario": "ssp585",
+  "period": "2015 to 2301",
+  "friction": "budd",
+  "mesh": "antarctica_320000_32000, DG0 geometry",
+  "front": "held fixed, ice-shelf collapse ISMIP7_FRACTURE=none",
+  "melt": "per-basin K from K_issue11_mesh2500.npz, local slope",
+  "apparent_mb": "balance",
+  "dt": 0.1,
+  "site": "IU Quartz",
+  "resources": "8 ranks",
+  "jobs": [
+    "10569013"
+  ],
+  "code": "a0f92a8",
+  "finished": "2026-09-22",
+  "cost": "one link of 1 h 11 min for 286 model years",
+  "results": "antarctica/results/ssp585_cesm2_waccm_p2_none_32000_*",
+  "audit": "OFF TRACK against the present-day envelopes, as an ssp585 run at 2300 is; resid 0.0000 on all 2860 rows, no rescue or subcycle event",
+  "notes": "collapse-mode evidence for issue #10, not the submission's core 7. Full record: antarctica/reports/core07_ssp585_cesm2_waccm_32km_p2_none.md"
+}

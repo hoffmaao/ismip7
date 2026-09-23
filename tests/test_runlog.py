@@ -35,15 +35,15 @@ def test_the_rendered_log_is_current():
 
 
 @pytest.mark.parametrize("bad,message", [
-    ({"id": "x", "task": "inversion", "title": "t", "status": "done"}, "owner"),
+    ({"id": "x", "task": "inversion", "title": "t", "status": "done"}, "institution"),
     ({"id": "x", "task": "nonsense", "title": "t", "status": "done",
-      "owner": "o"}, "task"),
+      "institution": "o"}, "task"),
     ({"id": "x", "task": "inversion", "title": "t", "status": "finished",
-      "owner": "o"}, "status"),
+      "institution": "o"}, "status"),
     ({"id": "x", "task": "inversion", "title": "t", "status": "done",
-      "owner": "o", "resolution": "2 km"}, "unknown field"),
+      "institution": "o", "resolution": "2 km"}, "unknown field"),
     ({"id": "other", "task": "inversion", "title": "t", "status": "done",
-      "owner": "o"}, "filename"),
+      "institution": "o"}, "filename"),
 ])
 def test_a_malformed_record_is_refused(tmp_path, bad, message):
     m = _build_runlog()
@@ -52,13 +52,19 @@ def test_a_malformed_record_is_refused(tmp_path, bad, message):
         m.load(tmp_path)
 
 
-def test_the_csv_carries_every_field(tmp_path):
+@pytest.mark.parametrize("payload", ["[]", "3", '"a string"'])
+def test_a_record_that_is_not_an_object_is_refused(tmp_path, capsys, payload):
     m = _build_runlog()
-    out = tmp_path / "log.csv"
-    n = m.write_csv(m.load(), out)
-    import csv
-    rows = list(csv.reader(open(out)))
-    assert rows[0] == [h for _, h in m.FIELDS]
-    assert len(rows) == n + 1
-    # a list field joins into one cell rather than breaking the row
-    assert all(len(r) == len(m.FIELDS) for r in rows)
+    (tmp_path / "x.json").write_text(payload)
+    assert m.main(["--runlog", str(tmp_path), "--check",
+                   "--output", str(tmp_path / "out.md")]) == 2
+    assert "x.json: not a JSON object" in capsys.readouterr().err
+
+
+def test_a_rewrite_with_no_record_change_leaves_the_log_unchanged(tmp_path):
+    m = _build_runlog()
+    out = tmp_path / "SIMULATIONS.md"
+    assert m.main(["--write", "--output", str(out)]) == 0
+    first = out.read_text()
+    assert m.main(["--write", "--output", str(out)]) == 0
+    assert out.read_text() == first

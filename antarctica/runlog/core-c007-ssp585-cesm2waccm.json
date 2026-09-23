@@ -1,9 +1,9 @@
 {
   "id": "core-c007-ssp585-cesm2waccm",
   "task": "projection",
+  "institution": "unassigned",
   "title": "C007: ssp585 with CESM2-WACCM",
   "status": "planned",
-  "owner": "unassigned",
   "exp_id": "C007",
   "esm": "CESM2-WACCM",
   "scenario": "ssp585",

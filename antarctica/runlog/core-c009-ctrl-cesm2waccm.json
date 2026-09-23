@@ -1,9 +1,9 @@
 {
   "id": "core-c009-ctrl-cesm2waccm",
   "task": "control",
+  "institution": "unassigned",
   "title": "C009: ctrl with CESM2-WACCM",
   "status": "planned",
-  "owner": "unassigned",
   "exp_id": "C009",
   "esm": "CESM2-WACCM",
   "scenario": "ctrl, the 2000 to 2029 climatology",

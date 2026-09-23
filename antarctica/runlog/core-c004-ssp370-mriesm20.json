@@ -1,9 +1,9 @@
 {
   "id": "core-c004-ssp370-mriesm20",
   "task": "projection",
+  "institution": "unassigned",
   "title": "C004: ssp370 with MRI-ESM2-0",
   "status": "planned",
-  "owner": "unassigned",
   "exp_id": "C004",
   "esm": "MRI-ESM2-0",
   "scenario": "ssp370",

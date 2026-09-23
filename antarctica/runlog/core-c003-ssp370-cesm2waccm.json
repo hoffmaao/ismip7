@@ -1,9 +1,9 @@
 {
   "id": "core-c003-ssp370-cesm2waccm",
   "task": "projection",
+  "institution": "unassigned",
   "title": "C003: ssp370 with CESM2-WACCM",
   "status": "planned",
-  "owner": "unassigned",
   "exp_id": "C003",
   "esm": "CESM2-WACCM",
   "scenario": "ssp370",

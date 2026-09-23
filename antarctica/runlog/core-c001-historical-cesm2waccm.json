@@ -1,9 +1,9 @@
 {
   "id": "core-c001-historical-cesm2waccm",
   "task": "historical",
+  "institution": "unassigned",
   "title": "C001: historical with CESM2-WACCM",
   "status": "planned",
-  "owner": "unassigned",
   "exp_id": "C001",
   "esm": "CESM2-WACCM",
   "scenario": "historical",

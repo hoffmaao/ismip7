@@ -616,10 +616,9 @@ now-check:
 	python scripts/build_now.py --check --output "$(CURDIR)/../NOW.md"
 
 # The run log: one JSON record per simulation in runlog/, rendered into
-# reports/SIMULATIONS.md. RUNLOG_CSV also writes the records flat, which is
-# what the group's shared progress sheet imports.
+# reports/SIMULATIONS.md.
 runlog:
-	python scripts/build_runlog.py --write $(if $(RUNLOG_CSV),--csv "$(RUNLOG_CSV)",)
+	python scripts/build_runlog.py --write
 
 runlog-check:
 	python scripts/build_runlog.py --check

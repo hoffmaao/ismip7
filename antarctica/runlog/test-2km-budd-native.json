@@ -2,7 +2,6 @@
   "id": "test-2km-budd-native",
   "task": "test",
   "institution": "Rice",
-  "owner": "Andrew",
   "title": "2 km control on the MAP's own mesh, with no transfer",
   "status": "done",
   "esm": "CESM2-WACCM",

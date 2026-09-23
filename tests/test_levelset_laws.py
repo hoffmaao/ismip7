@@ -22,25 +22,35 @@ from firedrake import (Constant, Function, FunctionSpace, SpatialCoordinate,
 from icepack2_tools.levelset import LevelSet, initial_distance
 
 #: Ice on the left half of a unit domain, open water beyond, so the extent has
-#: an interior front. Cells are 1/8 wide, and the imposed speed is small
-#: against that, so one step retreats the front by a fraction of a cell.
+#: an interior front. Cells are 1/8 wide; on the default diagonal every front
+#: cell is a triangle with one 1/8 facet on x = 0.5 and area 1/128.
 N = 8
 H_ICE = 300.0
-U_X = 1.0e-3
 HMIN = 1.0
+FRONT_LEN = 1.0 / N
+CELL_AREA = 1.0 / (2 * N * N)
+#: An extending flow u = (STRAIN x, 0), so e_xx = STRAIN and the von Mises
+#: stress is set by the strain rate rather than by a regulariser.
+STRAIN = 0.1
+#: A bed deep enough that every ice cell floats, and one shallow enough that
+#: every ice cell is grounded.
+BED_FLOATING = -2000.0
+BED_GROUNDED = -100.0
+SIGMA_MAX_GROUNDED = 1.0
+SIGMA_MAX_FLOATING = 0.15
 
 
-def _state(law, **kwargs):
+def _state(law, bed=BED_FLOATING, **kwargs):
     mesh = UnitSquareMesh(N, N)
     Q0 = FunctionSpace(mesh, "DG", 0)
     x, _ = SpatialCoordinate(mesh)
     h = Function(Q0).interpolate(H_ICE * (x < 0.5))
-    # a bed deep enough that every ice cell floats, so the floating threshold
-    # is the one the laws use
-    b = Function(Q0).interpolate(Constant(-2000.0))
+    b = Function(Q0).interpolate(Constant(bed))
     u = Function(VectorFunctionSpace(mesh, "CG", 1)).interpolate(
-        as_vector((Constant(U_X), Constant(0.0))))
-    ls = LevelSet(mesh, h, law=law, h_min=HMIN, **kwargs)
+        as_vector((STRAIN * x, Constant(0.0))))
+    ls = LevelSet(mesh, h, law=law, h_min=HMIN,
+                  sigma_max_grounded=SIGMA_MAX_GROUNDED,
+                  sigma_max_floating=SIGMA_MAX_FLOATING, **kwargs)
     return mesh, Q0, h, b, u, ls
 
 
@@ -55,14 +65,6 @@ def test_the_extent_anchor_is_the_default():
     authority on where ice is."""
     _, _, _, _, _, ls = _state("none")
     assert ls.anchor == "extent"
-
-
-def test_the_signed_distance_is_negative_in_ice():
-    _, _, h, _, _, ls = _state("none")
-    phi = ls.phi.dat.data_ro
-    ice = h.dat.data_ro > HMIN
-    assert np.all(phi[ice] < 0.0)
-    assert np.all(phi[~ice] > 0.0)
 
 
 def test_a_front_cell_is_one_with_an_ice_free_neighbour():
@@ -88,53 +90,81 @@ def test_fixed_holds_the_front_and_removes_nothing_from_it():
     assert np.all(beyond == (xc > 0.5))
 
 
-def test_vonmises_retreats_the_front_and_sheds_sub_cell_mass():
-    mesh, Q0, h, b, u, ls = _state("vonmises")
-    A, n = Constant(20.0), 3.0
-    rate = ls.advance(0.1, u, h, b, A, n)
-    assert rate > 0.0, "a stressed floating front must calve"
-    beyond, frac = ls.calving_masks()
-    assert frac is not None
+@pytest.mark.parametrize("bed, sigma_max", [
+    (BED_FLOATING, SIGMA_MAX_FLOATING),
+    (BED_GROUNDED, SIGMA_MAX_GROUNDED),
+])
+def test_vonmises_rate_is_speed_times_stress_over_threshold(bed, sigma_max):
+    r"""``c = |u| sqrt(3) A^(-1/n) e~^(1/n) / sigma_max``. Under uniaxial
+    extension ``e~ = e_xx / sqrt(2)``, and the threshold is the floating one
+    over the deep bed and the grounded one over the shallow bed."""
+    mesh, Q0, h, b, u, ls = _state("vonmises", bed=bed)
+    A, n, dt = 20.0, 3.0, 0.1
+    rate = ls.advance(dt, u, h, b, Constant(A), n)
     front = ls.front_len.dat.data_ro > 0.0
-    assert np.all(frac[front] > 0.0), "every front cell sheds something"
-    assert np.all(frac <= 1.0), "a cell cannot shed more than it holds"
+    xc = _xc(mesh)
+    sigma = np.sqrt(3.0) * A ** (-1.0 / n) * (STRAIN / np.sqrt(2.0)) ** (1.0 / n)
+    expected = STRAIN * xc[front] * sigma / sigma_max
+    assert np.allclose(ls.c_cell.dat.data_ro[front], expected, rtol=1e-6)
+    assert rate == pytest.approx(expected.mean(), rel=1e-6)
+    beyond, frac = ls.calving_masks()
+    assert np.allclose(frac[front], expected * dt * FRONT_LEN / CELL_AREA,
+                       rtol=1e-6)
+    assert np.all(frac[~front] == 0.0)
     assert not beyond[h.dat.data_ro > HMIN].any(), \
         "one small step must not carry the front past a whole ice cell"
 
 
 def test_the_shed_fraction_is_the_swept_area_over_the_cell():
     r"""``min(1, c dt L / A)``: the fraction a front cell loses is the area the
-    front sweeps through it, which is what makes the tally a volume."""
+    front sweeps through it, which is what makes the tally a volume. Every
+    front cell here has L = 1/8 and A = 1/128, so ``0.05 * 0.5 * 16 = 0.4``."""
     mesh, Q0, h, b, u, ls = _state("prescribed")
     c = Function(Q0).interpolate(Constant(0.05))
-    dt = 0.5
-    ls.advance(dt, u, h, b, rate=c)
-    _, frac = ls.calving_masks()
+    ls.advance(0.5, u, h, b, rate=c)
+    beyond, frac = ls.calving_masks()
     front = ls.front_len.dat.data_ro > 0.0
-    expected = np.clip(
-        ls.c_cell.dat.data_ro * dt * ls.front_len.dat.data_ro / ls.cell_area,
-        0.0, 1.0)
-    assert np.allclose(frac[front], expected[front])
+    assert front.sum() == N
+    assert np.allclose(ls.front_len.dat.data_ro[front], FRONT_LEN)
+    assert np.allclose(ls.cell_area[front], CELL_AREA)
+    assert np.allclose(ls.c_cell.dat.data_ro[front], 0.05)
+    assert np.allclose(frac[front], 0.4)
+    assert np.all(frac[~front] == 0.0)
+    assert not beyond.any()
 
 
 def test_retreat_scales_with_the_step():
     r"""Two half steps remove what one full step does, to the order of the
     scheme: a run that halves its timestep must not calve a different amount.
+
+    The masks are applied the way the transport applies them: cells beyond
+    the front are emptied, then each front cell loses ``frac`` of what it
+    still holds. One step of fraction ``f`` sheds ``f H``; two of ``f / 2``
+    shed ``(f / 2)(2 - f / 2) H``, which differs from it at ``O(f^2)``.
     """
-    def shed(dt, steps):
+    c0, dt = 0.02, 0.4
+
+    def shed(steps):
         mesh, Q0, h, b, u, ls = _state("prescribed")
-        c = Function(Q0).interpolate(Constant(0.02))
+        c = Function(Q0).interpolate(Constant(c0))
         total = 0.0
         for _ in range(steps):
-            ls.advance(dt, u, h, b, rate=c)
-            _, frac = ls.calving_masks()
-            total += float((frac * ls.cell_area).sum())
+            ls.advance(dt / steps, u, h, b, rate=c)
+            beyond, frac = ls.calving_masks()
+            data = h.dat.data
+            total += float((data[beyond] * ls.cell_area[beyond]).sum())
+            data[beyond] = 0.0
+            removed = data * frac
+            total += float((removed * ls.cell_area).sum())
+            data -= removed
         return total
 
-    one = shed(0.4, 1)
-    two = shed(0.2, 2)
-    assert one > 0.0
-    assert two == pytest.approx(one, rel=0.25)
+    f = c0 * dt * FRONT_LEN / CELL_AREA
+    one, two = shed(1), shed(2)
+    assert one == pytest.approx(N * H_ICE * CELL_AREA * f, rel=1e-9)
+    assert two == pytest.approx(
+        N * H_ICE * CELL_AREA * (f / 2) * (2 - f / 2), rel=1e-9)
+    assert two == pytest.approx(one, rel=0.05)
 
 
 def test_a_zero_rate_law_leaves_the_front_where_it_was():

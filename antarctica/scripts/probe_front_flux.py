@@ -40,8 +40,7 @@ import os
 import sys
 
 import numpy as np
-from firedrake import (CheckpointFile, Function, FunctionSpace,
-                       VectorFunctionSpace, dot)
+from firedrake import CheckpointFile, Function, FunctionSpace, dot
 from firedrake.petsc import PETSc
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(

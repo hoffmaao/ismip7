@@ -26,7 +26,6 @@ def _load_probe():
 
 probe = _load_probe()
 
-import numpy as np  # noqa: E402
 import pytest  # noqa: E402
 from firedrake import (And, Constant, Function,  # noqa: E402
                        FunctionSpace, SpatialCoordinate, UnitSquareMesh,

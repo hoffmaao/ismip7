@@ -207,6 +207,7 @@ python scripts/download_forcing.py --ocean        # thetao/so/tf + climatology +
 python scripts/download_forcing.py --calibration  # meltMIP obs melt, IMBIE2 basins, grid, topography
 python scripts/download_forcing.py --scenarios    # per-(ESM, scenario) forcing (cores 1-8)
 python scripts/download_forcing.py --scenarios --esm MRI-ESM2-0 --scenario historical,ssp585
+python scripts/download_forcing.py --scalar-processing  # ismip7-scalars grids, see "From a finished run to a submission"
 python scripts/download_forcing.py --status
 ```
 
@@ -1148,6 +1149,63 @@ Per experiment in `results/`:
   clamp_gt, resid_gt, amb_gtyr`. The residual must close to 0.00.
 
 VAF is in mm of sea-level equivalent, mass in Gt.
+
+### From a finished run to a submission
+
+The chain has been run end to end on a workstation, with a two-year 32 km
+control standing in for a production run (22 September 2026):
+
+```bash
+# 1. the run itself banks the yearly fields and the native scalars
+ISMIP7_OUTPUT=1 mpiexec -n 8 python antarctica/scripts/control/run.py
+
+# 2. onto the 8 km grid, in the request's files and names
+python antarctica/scripts/write_ismip7_output.py \
+    antarctica/results/<exp>_<lc>_ismip7_annual.h5 --out-dir submission \
+    --esm CESM2-WACCM --scenario ctrl --exp C009 \
+    --source-id RICE --ism-id icepack2 \
+    --scalars antarctica/results/<exp>_<lc>_ismip7_scalars.csv
+
+# 3. the compliance checker over what came out
+python -m isschecker --variable-list ismip7 \
+    --source-path submission/AIS/RICE/icepack2/CORE/C009
+
+# 4. the sea-level scalars nothing here computes
+python antarctica/scripts/download_forcing.py --scalar-processing
+ismip7-scalars-set-params --region AIS --group RICE --model icepack2 \
+    --rhoi 917 --rhow 1024 --rhof 1000 --modelpath submission/AIS
+python -m ismip7_scalars --region AIS --group RICE --model icepack2 \
+    --experiment ctrl --modelid m001 --esm CESM2-WACCM --forcingid f001 \
+    --configid C009 --exp-group CORE \
+    --datapath ISMIP7/Output-Processing/Data/AIS \
+    --modelpath submission/AIS --outpath submission/scalars
+```
+
+Four things that are easy to get wrong:
+
+- **Both tools need Python 3.11 or newer**, and the Firedrake environment is
+  3.10, so they belong in their own interpreter. Where conda is unavailable,
+  `nix` provides one, and the nix interpreter then needs the shared libraries
+  it cannot see: gcc's C++ runtime, zlib, expat and udunits, on
+  `LD_LIBRARY_PATH`, with `UDUNITS2_XML_PATH` set.
+- **The scalar tool needs four auxiliary grids** per region (the area factor,
+  the extended Rignot basins, the glacier and ice-cap area factor and the
+  maximum-extent mask), which live on Globus under
+  `/ISMIP7/Output-Processing/Data` rather than with the forcing.
+  `--scalar-processing` fetches them; `--scalar-resolution` picks the grid.
+- **`params.nc` carries the model's densities**, so give it ours: 917 ice and
+  1024 seawater, the pair `simulation.py` builds the surface with. The tool
+  defaults to 1027 seawater.
+- **`--refyear` takes the stamped year.** A state variable is
+  stamped 1 January of the following year, so a run starting in 2015 has 2016
+  as its first state, and a reference of 2015 is not found.
+
+Measured on that rehearsal: `isschecker` 0.5.1 over 31 files reports zero
+errors in variable presence, naming, numerical, spatial, consistency and
+attribute tests, and 93 time errors, which are the three-per-file
+experiment-length checks a two-year run cannot satisfy. `ismip7-scalars` 0.1.0
+then wrote `sla20`, `slg20` and `slvaf`, each with its glacier and ice-cap
+variant, in NetCDF and CSV.
 
 ---
 

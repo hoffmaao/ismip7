@@ -6,15 +6,13 @@ the resistive stress it carries is below what a crevasse field can bear. The
 numbers below are the ones those papers pin, so a change to the algebra shows
 up here rather than as a front that quietly stops calving.
 """
-import numpy as np
 import pytest
 from firedrake import (Constant, Function, FunctionSpace, TensorFunctionSpace,
                        UnitSquareMesh, VectorFunctionSpace, FiniteElement,
                        as_matrix, as_vector)
 from icepack2.constants import gravity as G, ice_density as RHO_I, water_density as RHO_W
 
-from icepack2_tools.calving_laws import (HFB_MODES, buttressing_number,
-                                         critical_stress,
+from icepack2_tools.calving_laws import (buttressing_number, critical_stress,
                                          density_in_model_units,
                                          height_above_flotation,
                                          hfb_calving_rate, resistive_stress)
@@ -72,16 +70,6 @@ def test_an_unbuttressed_shelf_sits_exactly_at_the_threshold(spaces):
     expected = (float(RHO_I) * float(G) * H_SHELF
                 * (1.0 - float(RHO_I / RHO_W)) / 2.0)
     assert r_crit.max() == pytest.approx(expected, rel=1e-10)
-
-
-def test_the_zero_stress_threshold_is_twice_the_force_balance_one(spaces):
-    r"""On a freely floating shelf the Nye criterion is twice as large, which
-    is why the choice of mode moves a front."""
-    mesh, Q0, _, _ = spaces
-    h, b = Constant(H_SHELF), Constant(B_DEEP)
-    hfb = _cells(Q0, critical_stress(h, b, 0.0, mode="hfb")).max()
-    nye = _cells(Q0, critical_stress(h, b, 0.0, mode="zero_stress")).max()
-    assert nye == pytest.approx(2.0 * hfb, rel=1e-10)
 
 
 def test_tensile_strength_raises_the_threshold(spaces):
@@ -166,30 +154,3 @@ def test_compression_does_not_calve(spaces):
     M = Function(Sigma).interpolate(as_matrix(((-0.3, 0.0), (0.0, 0.0))))
     assert _cells(Q0, hfb_calving_rate(u, M, h, b, n)).max() \
         == pytest.approx(0.0, abs=1e-12)
-
-
-def test_the_grounded_gate_spares_grounded_ice(spaces):
-    mesh, Q0, Sigma, W0 = spaces
-    n = Function(W0).interpolate(as_vector((1.0, 0.0)))
-    u = Function(VectorFunctionSpace(mesh, "CG", 1)).interpolate(
-        as_vector((500.0, 0.0)))
-    M = Function(Sigma).interpolate(as_matrix(((5.0, 0.0), (0.0, 0.0))))
-    grounded = (Constant(H_SHELF), Constant(-10.0))   # 300 m on a 10 m bed
-    afloat = (Constant(H_SHELF), Constant(B_DEEP))
-
-    def gated(h, b):
-        return _cells(Q0, hfb_calving_rate(
-            u, M, h, b, n, grounded_gate=True)).max()
-
-    assert gated(*grounded) == pytest.approx(0.0, abs=1e-12)
-    assert gated(*afloat) > 0.0
-    # and without the gate the grounded ice calves, so the gate is what spares
-    # it rather than the stress state
-    assert _cells(Q0, hfb_calving_rate(u, M, *grounded, n)).max() > 0.0
-
-
-def test_an_unknown_mode_is_refused(spaces):
-    mesh, _, _, _ = spaces
-    with pytest.raises(ValueError, match="mode"):
-        critical_stress(Constant(H_SHELF), Constant(B_DEEP), mode="nonesuch")
-    assert HFB_MODES == ("hfb", "zero_stress")

@@ -154,7 +154,6 @@ CALVING_SIGMA_MAX_FLOATING_DEFAULT = "0.15"    # MPa
 # thinned to nothing and never binds on thick ice.
 HFB_SIGMA_MAX_DEFAULT = "0.0"        # MPa, ice tensile strength
 HFB_RHO_C_DEFAULT = "1024.0"         # kg/m3, water in a basal crevasse
-HFB_MODE_DEFAULT = "hfb"             # or zero_stress, the Nye threshold
 HFB_EXPONENT_DEFAULT = "1.0"
 HFB_RATIO_MAX_DEFAULT = "5.0"
 
@@ -238,7 +237,7 @@ def ismip7_output():
 
 
 def calving_law():
-    r"""``ISMIP7_CALVING``: ``none``, ``fixed`` or ``vonmises``."""
+    r"""``ISMIP7_CALVING``: ``none``, ``fixed``, ``vonmises`` or ``hfb``."""
     value = os.environ.get("ISMIP7_CALVING", CALVING_DEFAULT).lower()
     if value not in CALVING_LAWS:
         raise ValueError(
@@ -311,25 +310,19 @@ def auto_resume():
 
 def calving_hfb_parameters():
     r"""The horizontal-force-balance law's parameters, as a dict for
-    ``icepack2_tools.calving_laws.hfb_calving_rate``.
+    ``icepack2_tools.calving_laws.hfb_calving_rate`` once ``rho_c`` is put in
+    model units with ``density_in_model_units``. ``rho_c`` stays in kg/m3,
+    as the knob and the run record quote it.
 
     ``ISMIP7_CALVING_SIGMA_MAX`` is the ice's tensile strength in MPa and is
     the one that decides whether a front holds, so it is the knob a
     calibration turns. The rest are the papers' own and rarely move.
     """
-    from .calving_laws import HFB_MODES, density_in_model_units
-    mode = os.environ.get("ISMIP7_CALVING_HFB_MODE", HFB_MODE_DEFAULT).lower()
-    if mode not in HFB_MODES:
-        raise ValueError(
-            f"ISMIP7_CALVING_HFB_MODE must be one of {HFB_MODES}, got {mode!r}")
     return {
         "sigma_max": float(os.environ.get("ISMIP7_CALVING_SIGMA_MAX",
                                           HFB_SIGMA_MAX_DEFAULT)),
-        # the knob is in kg/m3, which is how the papers quote it; the law
-        # wants icepack2's own MPa, m, yr
-        "rho_c": density_in_model_units(
-            float(os.environ.get("ISMIP7_CALVING_RHO_C", HFB_RHO_C_DEFAULT))),
-        "mode": mode,
+        "rho_c": float(os.environ.get("ISMIP7_CALVING_RHO_C",
+                                      HFB_RHO_C_DEFAULT)),
         "exponent": float(os.environ.get("ISMIP7_CALVING_HFB_EXPONENT",
                                          HFB_EXPONENT_DEFAULT)),
         "ratio_max": float(os.environ.get("ISMIP7_CALVING_HFB_RATIO_MAX",

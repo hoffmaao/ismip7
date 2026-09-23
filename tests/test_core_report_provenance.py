@@ -55,9 +55,30 @@ def test_the_report_resolves_the_melt_knobs_left_at_their_defaults(monkeypatch):
     assert core_report.effective_env()["ISMIP7_MELT_SLOPE"] == "local"
 
 
-def test_the_report_lifts_the_front_owner_an_external_law_names(tmp_path):
+def test_the_report_lifts_the_front_owner_line(tmp_path):
     from icepack2_tools.front import FRONT_OWNER_MARKER
     log = tmp_path / "run.log"
-    line = f"{FRONT_OWNER_MARKER} level-set prescribed law (external: hfb sigma_max=0.15)"
+    line = (f"{FRONT_OWNER_MARKER} level-set horizontal-force-balance law "
+            f"(ISMIP7_CALVING=hfb): sigma_max=0.15 MPa")
     log.write_text(f"  {line}\nstep 1\n")
     assert core_report.front_owner(str(log)) == [line]
+
+
+def test_the_report_resolves_the_hfb_law_parameters(monkeypatch):
+    r"""A run at the default tensile strength and one at 0.15 MPa differ only
+    in that knob, so the report has to state it even when left unexported."""
+    hfb_knobs = ("ISMIP7_CALVING_SIGMA_MAX", "ISMIP7_CALVING_RHO_C",
+                 "ISMIP7_CALVING_HFB_EXPONENT", "ISMIP7_CALVING_HFB_RATIO_MAX")
+    for k in ("ISMIP7_CALVING",) + hfb_knobs:
+        monkeypatch.delenv(k, raising=False)
+    env = core_report.effective_env()
+    assert env["ISMIP7_CALVING"] == "none    # default (not exported)"
+    assert not set(hfb_knobs) & set(env)
+    monkeypatch.setenv("ISMIP7_CALVING", "hfb")
+    env = core_report.effective_env()
+    assert env["ISMIP7_CALVING_SIGMA_MAX"] == "0    # default (not exported)"
+    assert env["ISMIP7_CALVING_RHO_C"] == "1024    # default (not exported)"
+    assert env["ISMIP7_CALVING_HFB_EXPONENT"] == "1    # default (not exported)"
+    assert env["ISMIP7_CALVING_HFB_RATIO_MAX"] == "5    # default (not exported)"
+    monkeypatch.setenv("ISMIP7_CALVING_SIGMA_MAX", "0.15")
+    assert core_report.effective_env()["ISMIP7_CALVING_SIGMA_MAX"] == "0.15"

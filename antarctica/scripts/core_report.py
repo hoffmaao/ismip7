@@ -46,7 +46,8 @@ from icepack2_tools.forcing import (
 )
 from icepack2_tools.front import COLLAPSE_MARKER, FRONT_OWNER_MARKER
 from icepack2_tools.runconfig import (
-    N_FLOW_DEFAULT, fracture, friction, geometry_space, lc, lc_coarse,
+    N_FLOW_DEFAULT, calving_hfb_parameters, calving_law, fracture, friction,
+    geometry_space, lc, lc_coarse,
 )
 from icepack2_tools.solverconfig import effective_solver_env, solver_provenance
 
@@ -89,7 +90,16 @@ def effective_env():
         "ISMIP7_MELT_SLOPE": melt_slope(),
         "ISMIP7_SIN_ALPHA_ANT": f"{sin_alpha_ant():g}",
         "ISMIP7_K_MELT": f"{k_melt():g}",
+        "ISMIP7_CALVING": calving_law(),
     }
+    if resolved["ISMIP7_CALVING"] == "hfb":
+        hfb = calving_hfb_parameters()
+        resolved.update({
+            "ISMIP7_CALVING_SIGMA_MAX": f"{hfb['sigma_max']:g}",
+            "ISMIP7_CALVING_RHO_C": f"{hfb['rho_c']:g}",
+            "ISMIP7_CALVING_HFB_EXPONENT": f"{hfb['exponent']:g}",
+            "ISMIP7_CALVING_HFB_RATIO_MAX": f"{hfb['ratio_max']:g}",
+        })
     resolved.update(effective_solver_env())
     canonical_key = "ISMIP7_DIAGNOSTIC_LINEAR_SOLVER_CANONICAL"
     env[canonical_key] = (
@@ -160,10 +170,8 @@ def collapse_record(log_path):
 
 
 def front_owner(log_path):
-    r"""The mechanism that owned the calving front, lifted out of its log.
-    An external law (``forward_calving.py``) leaves ``ISMIP7_CALVING`` at
-    ``none`` in the env block, so this line is where the law and its
-    parameters reach the record."""
+    r"""The mechanism that owned the calving front, with the law's
+    parameters at the values the run used, lifted out of its log."""
     return lifted(log_path, FRONT_OWNER_MARKER,
                   "the run predates the front owner line")
 

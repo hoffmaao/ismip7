@@ -613,9 +613,12 @@ log prints one `Calving front owner:` line naming the mechanism in force.
 The criterion of Buck (2023), Coffey et al. (2024), Coffey and Lai (2025) and
 Slater and Wagner (2025): a front holds while the resistive stress it carries
 stays below what a basal crevasse field can bear, and calves when it does not.
-`icepack2_tools/calving_laws.py` is ours, so a submission run needs no sibling
-checkout, and the level set drives it through the same prescribed rate the
-external hook uses.
+`icepack2_tools/calving_laws.py` builds the rate as UFL over the live dual
+state, and the shared level set takes it as its `prescribed` law, so the front
+is retreated and the shed mass is tallied exactly as under
+`ISMIP7_CALVING=vonmises`. The `Calving front owner:` line carries every
+parameter below at its effective value, and `core_report.py` lifts it into the
+report.
 
 ```bash
 ISMIP7_CALVING=hfb                          # zero tensile strength, the Buck limit
@@ -642,7 +645,6 @@ number.
 |---|---|---|
 | `ISMIP7_CALVING_SIGMA_MAX` | ice tensile strength, MPa; 0 is the Buck and Coffey-Lai limit | `0.0` |
 | `ISMIP7_CALVING_RHO_C` | water in a basal crevasse, kg/m3; 1000 for meltwater | `1024.0` |
-| `ISMIP7_CALVING_HFB_MODE` | `hfb`, or `zero_stress` for the Nye threshold, twice as large on a shelf | `hfb` |
 | `ISMIP7_CALVING_HFB_EXPONENT` | the power on the ratio | `1.0` |
 | `ISMIP7_CALVING_HFB_RATIO_MAX` | most a step may remove, for cells whose `R_crit` has thinned away | `5.0` |
 
@@ -655,37 +657,6 @@ failure: the law correctly removes almost nothing from a fully buttressed
 Mises, being proportional rather than a threshold, calves anyway. So read
 `probe_front_flux.py` above before drawing a conclusion from a run of this
 law, and expect it to engage once the front is the calving face.
-
-### A calving law from hoffmaao/calving (`forward_calving.py`)
-
-The laws developed for CalvingMIP (github.com/hoffmaao/calving: `fixed`,
-`velocity`, `position`, `thickness`, `vonmises`, `vonmises_strain`, `hfb`
-and any `--law-module` plugin) run in the forward unchanged. A law reads
-seven fields from its model, and `simulation.LiveCalvingState` supplies
-them from the live dual state: `u`, `M`, `tau` from the mixed solution,
-the DG0 `h`, `haf` and the grounded indicator as UFL on the cells, and the
-front normal from the level set the forward advances. The law's rate goes
-to the shared level set as its `prescribed` law, so the front is retreated
-and the shed mass is tallied exactly as under `ISMIP7_CALVING=vonmises`.
-
-```bash
-CALVING_DIR=/path/to/calving mpiexec -n 16 python antarctica/scripts/forward_calving.py \
-    --law hfb --law-param sigma_max=0.15 --experiment control --tag hfb_test
-```
-
-wraps the experiment driver (`control`, `ocx`, `ssp126|ssp370|ssp585` with
-`--esm`, `hist`), which keeps its own forcing, restart and auto-resume;
-leave `ISMIP7_CALVING` unset. `--tag` (or `ISMIP7_RUN_TAG`) is required, so a
-law-driven run never resumes from or overwrites a stock run's checkpoints. The
-law's `describe()` is written to every checkpoint's `calving_law` attribute and
-to the `Calving front owner:` line, which `core_report.py` lifts into the
-report. Any object with `rate(model, t)` returning a UFL rate on the cells and
-`describe()` can be placed in `ctx["calving_law"]` before `run_simulation` the
-same way. A threshold is fitted on Antarctica
-with `calving/tune_greene.py --experiment vonmises|hfb --state <forward
-checkpoint>` (per-Mouginot-basin flux against the Greene et al. 2022 fronts,
-on the same level-set normal), which is what makes a tuned parameter mean
-the same thing in both places.
 
 ### The whole matrix in one command (`run_core_matrix.sh`)
 

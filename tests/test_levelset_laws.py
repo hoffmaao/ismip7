@@ -226,3 +226,130 @@ def test_fixed_anchors_on_the_t0_extent_not_the_restarted_one():
     # the bar is the ORIGINAL front, so the band between them is still open
     assert np.all(beyond == (xc > 0.5))
     assert not beyond[(xc > 0.25) & (xc < 0.5)].any()
+
+
+# The two laws of ``icepack2_tools.calving_laws``, driven through the level set
+# the way the forward wires them: ``law="prescribed"`` with the UFL rate.
+
+#: One mesh, several margins. Ice fills x < 0.5 except for a nunatak hole; the
+#: front at x = 0.5 is cut into bands by y, each a different margin, and every
+#: band edge falls on a cell row so no front cell straddles two bands.
+HC = 150.0
+U_FRONT = 0.01
+_BANDS = {
+    # name: (y range, thickness, bed)
+    "marine_at_hc": ((0.0, 0.25), HC, -500.0),
+    "marine_thin": ((0.25, 0.5), HC / 2, -500.0),
+    # 100 m on a 50 m deep bed has 44 m above flotation, so it is grounded
+    "grounded_cliff": ((0.5, 0.75), 100.0, -50.0),
+    "land": ((0.75, 1.0), 50.0, 200.0),
+}
+#: The nunatak: one ice-free cell square well inside the ice, with the bed
+#: above sea level under it and under the ice ringing it.
+_NUNATAK_HOLE = (0.125, 0.25, 0.375, 0.5)
+_NUNATAK_BED = (0.0, 0.375, 0.25, 0.625)
+
+
+def _inside(box, x, y):
+    x0, x1, y0, y1 = box
+    return (x > x0) & (x < x1) & (y > y0) & (y < y1)
+
+
+def _margins():
+    mesh = UnitSquareMesh(N, N)
+    Q0 = FunctionSpace(mesh, "DG", 0)
+    xy = Function(VectorFunctionSpace(mesh, "DG", 0)).interpolate(
+        SpatialCoordinate(mesh)).dat.data_ro
+    x, y = xy[:, 0], xy[:, 1]
+    band = np.empty(len(x), dtype=object)
+    h = Function(Q0)
+    b = Function(Q0)
+    for name, ((y0, y1), thickness, bed) in _BANDS.items():
+        rows = (y > y0) & (y < y1)
+        band[rows] = name
+        h.dat.data[rows] = np.where(x[rows] < 0.5, thickness, 0.0)
+        b.dat.data[rows] = bed
+    hole = _inside(_NUNATAK_HOLE, x, y)
+    h.dat.data[hole] = 0.0
+    b.dat.data[_inside(_NUNATAK_BED, x, y)] = 20.0
+    u = Function(VectorFunctionSpace(mesh, "CG", 1)).interpolate(
+        as_vector((Constant(U_FRONT), Constant(0.0))))
+    ls = LevelSet(mesh, h, law="prescribed", h_min=HMIN)
+    return mesh, h, b, u, ls, x, y, band
+
+
+def test_the_thickness_law_calves_marine_fronts_and_spares_land_ones():
+    r"""The bed gate, in one mesh with every kind of margin the level set
+    anchors on. At ``H = Hc`` the removal is the ice's own arrival speed, so
+    the front holds; thinner marine ice, a grounded cliff on a bed below sea
+    level included, is removed faster than it arrives; a land margin and the
+    ice ringing a nunatak, both on a bed above sea level, shed nothing, so
+    nothing of theirs reaches the calving tally."""
+    from icepack2_tools.calving_laws import thickness_calving_rate
+    mesh, h, b, u, ls, x, y, band = _margins()
+    ls.advance(1.0, u, h, b, rate=thickness_calving_rate(u, h, b, HC))
+    beyond, frac = ls.calving_masks()
+    c = ls.c_cell.dat.data_ro
+    front = ls.front_len.dat.data_ro > 0.0
+    ring = front & _inside(_NUNATAK_BED, x, y)
+    outer = front & ~ring
+    shed = h.dat.data_ro * frac * ls.cell_area
+    assert not beyond.any()
+
+    def at(name):
+        cells = outer & (band == name)
+        assert cells.any(), name
+        return cells
+
+    assert c[at("marine_at_hc")] == pytest.approx(U_FRONT, rel=1e-9)
+    assert np.all(c[at("marine_thin")] == pytest.approx(1.5 * U_FRONT, rel=1e-9))
+    assert np.all(c[at("grounded_cliff")] == pytest.approx(
+        (2.0 - 100.0 / HC) * U_FRONT, rel=1e-9))
+    for name in ("marine_thin", "grounded_cliff"):
+        assert np.all(shed[at(name)] > 0.0), name
+    assert ring.sum() >= 4
+    for spared in (at("land"), ring):
+        assert np.all(c[spared] == 0.0)
+        assert np.all(frac[spared] == 0.0)
+        assert shed[spared].sum() == 0.0
+    # every calving cell is a marine one
+    assert np.all(b.dat.data_ro[shed > 0.0] < 0.0)
+
+
+def test_the_hfb_law_on_the_level_set_follows_the_stress_ratio(monkeypatch):
+    r"""The resistive-stress law through the level set with the knobs as
+    ``runconfig`` resolves them: a floating front at Buck's unbuttressed
+    threshold is removed at the ice speed, one at twice it at twice the speed,
+    one far past it at ``ratio_max`` times, and a buttressed or compressive
+    front not at all. A tensile strength raises the threshold, so the same
+    stress calves more slowly."""
+    from firedrake import TensorFunctionSpace, as_matrix
+    from icepack2.constants import (gravity as G, ice_density as RHO_I,
+                                    water_density as RHO_W)
+    from icepack2_tools.calving_laws import hfb_calving_rate
+    from icepack2_tools.runconfig import calving_hfb_parameters
+    for k in ("SIGMA_MAX", "RHO_C", "HFB_EXPONENT", "HFB_RATIO_MAX"):
+        monkeypatch.delenv(f"ISMIP7_CALVING_{k}", raising=False)
+    buck = (float(RHO_I) * float(G) * H_ICE * (1.0 - float(RHO_I / RHO_W)) / 2.0)
+
+    def front_rate(stress):
+        mesh, Q0, h, b, _, ls = _state("prescribed")
+        u = Function(VectorFunctionSpace(mesh, "CG", 1)).interpolate(
+            as_vector((Constant(U_FRONT), Constant(0.0))))
+        M = Function(TensorFunctionSpace(mesh, "DG", 0, symmetry=True)
+                     ).interpolate(as_matrix(((stress, 0.0), (0.0, 0.0))))
+        rate = hfb_calving_rate(u, M, h, b, ls.ghat, **calving_hfb_parameters())
+        # short enough that even the capped rate stays inside the front cell
+        ls.advance(0.1, u, h, b, rate=rate)
+        front = ls.front_len.dat.data_ro > 0.0
+        _, frac = ls.calving_masks()
+        return ls.c_cell.dat.data_ro[front], frac[front]
+
+    for stress, ratio in ((buck, 1.0), (2.0 * buck, 2.0), (100.0 * buck, 5.0),
+                          (0.0, 0.0), (-buck, 0.0)):
+        c, frac = front_rate(stress)
+        assert np.all(c == pytest.approx(ratio * U_FRONT, rel=1e-6, abs=1e-15))
+        assert np.all((frac > 0.0) == (ratio > 0.0))
+    monkeypatch.setenv("ISMIP7_CALVING_SIGMA_MAX", "0.15")
+    c, _ = front_rate(buck)
+    assert np.all(c < U_FRONT)

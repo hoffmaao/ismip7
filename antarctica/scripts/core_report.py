@@ -44,9 +44,10 @@ from icepack2_tools.climatology import (
 from icepack2_tools.forcing import (
     FORCING_PROVENANCE_MARKER, k_melt, melt_slope, sin_alpha_ant,
 )
-from icepack2_tools.front import COLLAPSE_MARKER
+from icepack2_tools.front import COLLAPSE_MARKER, FRONT_OWNER_MARKER
 from icepack2_tools.runconfig import (
-    N_FLOW_DEFAULT, fracture, friction, geometry_space, lc, lc_coarse,
+    N_FLOW_DEFAULT, calving_knobs, calving_law, fracture, friction,
+    geometry_space, lc, lc_coarse,
 )
 from icepack2_tools.solverconfig import effective_solver_env, solver_provenance
 
@@ -89,6 +90,10 @@ def effective_env():
         "ISMIP7_MELT_SLOPE": melt_slope(),
         "ISMIP7_SIN_ALPHA_ANT": f"{sin_alpha_ant():g}",
         "ISMIP7_K_MELT": f"{k_melt():g}",
+        # The calving law and the knobs it reads: the floating von Mises
+        # threshold flipped from 0.15 to 0.2 MPa.
+        "ISMIP7_CALVING": calving_law(),
+        **calving_knobs(calving_law()),
     }
     resolved.update(effective_solver_env())
     canonical_key = "ISMIP7_DIAGNOSTIC_LINEAR_SOLVER_CANONICAL"
@@ -157,6 +162,16 @@ def collapse_record(log_path):
     run's own statement of it."""
     return lifted(log_path, COLLAPSE_MARKER,
                   "the run predates the collapse banner")
+
+
+def front_owner(log_path):
+    r"""The mechanism that owned the calving front, lifted out of its log.
+    It names the law with its knobs at their effective values, and an
+    external law (``forward_calving.py``) leaves ``ISMIP7_CALVING`` at
+    ``none`` in the env block, so this line is where any law and its
+    parameters reach the record."""
+    return lifted(log_path, FRONT_OWNER_MARKER,
+                  "the run predates the front owner line")
 
 
 def sh(cmd):
@@ -239,7 +254,7 @@ def main():
         f.write(f"- observational audit: "
                 f"{'ON TRACK' if audit_rc == 0 else 'OFF TRACK'}\n")
         for line in (climatology_pool(args.log) + forcing_provenance(args.log)
-                     + collapse_record(args.log)):
+                     + collapse_record(args.log) + front_owner(args.log)):
             f.write(f"- {line}\n")
         if ens_rc is not None:
             f.write(f"- ISMIP6 ensemble: "

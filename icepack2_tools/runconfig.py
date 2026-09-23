@@ -172,10 +172,44 @@ def n_flow():
 # Calving front (icepack2_tools.levelset). ``none`` is the pre-Sep-2026
 # behaviour: on a buffered mesh the front advances freely and never calves.
 CALVING_DEFAULT = "none"
-CALVING_LAWS = ("none", "fixed", "vonmises")
-# ISSM defaults for the von Mises thresholds (Morlighem et al. 2016).
+CALVING_LAWS = ("none", "fixed", "vonmises", "hfb", "thickness")
+# Von Mises thresholds. The floating default is the published Antarctic value:
+# Wilner et al. (2023, doi:10.5194/tc-17-4889-2023) calibrate this same law,
+# c = |u| sigma~/sigma_max, against the observed front of ten ice shelves and
+# report sigma_max = 105 to 400 kPa (Amery 150, Denman 400, Filchner 200,
+# Larsen C 140, Pine Island 275, Ronne 120, Ross 105, Shackleton 280,
+# Thwaites 320, Totten 260; mean 225, median 230). They are the only one of
+# the four laws they test whose parameter is "generally consistent" between
+# shelves, which is what makes a single Antarctic-wide number defensible; 200
+# kPa is the round centre of that cluster. Their domains are shelves, so the
+# number constrains the floating threshold only. The grounded default is
+# Morlighem et al. (2016) and no Antarctic calibration here supersedes it.
 CALVING_SIGMA_MAX_GROUNDED_DEFAULT = "1.0"     # MPa
-CALVING_SIGMA_MAX_FLOATING_DEFAULT = "0.15"    # MPa
+CALVING_SIGMA_MAX_FLOATING_DEFAULT = "0.2"     # MPa, Wilner et al. 2023
+# Horizontal force balance (icepack2_tools.calving_laws): the papers' own
+# defaults. Zero tensile strength is the Buck, Coffey and Lai limit, in which
+# an unbuttressed shelf sits exactly at the threshold; Slater and Wagner's
+# 150 kPa is the value they find consistent with observed fronts, so it is
+# worth running both. The crevasse water is seawater unless a run means
+# meltwater. ratio_max bounds what one step may remove where R_crit has
+# thinned to nothing and never binds on thick ice.
+HFB_SIGMA_MAX_DEFAULT = "0.0"        # MPa, ice tensile strength
+HFB_RHO_C_DEFAULT = "1024.0"         # kg/m3, water in a basal crevasse
+HFB_EXPONENT_DEFAULT = "1.0"
+HFB_RATIO_MAX_DEFAULT = "5.0"
+# Minimum thickness (icepack2_tools.calving_laws.thickness_calving_rate): the
+# thickness the front settles at, since the rate equals the arrival speed at
+# h = Hc. Our rate form is CalvingMIP Experiment 5's, which prescribes 375 m
+# for its own idealised domain. The published ANTARCTIC thresholds are
+# Wilner et al. (2023): 55 to 440 m over ten shelves, mean 270. Those are not
+# ours to borrow, both because they tune a position form (calve where
+# h <= hmin) rather than a rate, and because the paper finds them "largely
+# dependent on the original thickness of the ice shelf", so unlike its
+# sigma_max they do not transfer. What does transfer is the observed front
+# itself: BedMachine v4.1 puts the Antarctic ice front at a 144.7 m mean over
+# 77762 front cells, median 127.5, and the floating front at a 152.4 m median.
+# Setting Hc there holds the observed front stationary by construction.
+THICKNESS_HC_DEFAULT = "150.0"        # m, the observed Antarctic front
 
 
 FRACTURE_MODES = ("none", "mask", "mask_front")
@@ -328,6 +362,45 @@ def auto_resume():
         ) from None
 
 
+def _calving_hfb_knobs():
+    r"""The horizontal-force-balance knobs in the units they are set in:
+    MPa, and kg/m3 for the crevasse water, which is how the papers quote it."""
+    return {
+        "sigma_max": float(os.environ.get("ISMIP7_CALVING_SIGMA_MAX",
+                                          HFB_SIGMA_MAX_DEFAULT)),
+        "rho_c": float(os.environ.get("ISMIP7_CALVING_RHO_C",
+                                      HFB_RHO_C_DEFAULT)),
+        "exponent": float(os.environ.get("ISMIP7_CALVING_HFB_EXPONENT",
+                                         HFB_EXPONENT_DEFAULT)),
+        "ratio_max": float(os.environ.get("ISMIP7_CALVING_HFB_RATIO_MAX",
+                                          HFB_RATIO_MAX_DEFAULT)),
+    }
+
+
+def calving_hfb_parameters():
+    r"""The horizontal-force-balance law's parameters, as a dict for
+    ``icepack2_tools.calving_laws.hfb_calving_rate``.
+
+    ``ISMIP7_CALVING_SIGMA_MAX`` is the ice's tensile strength in MPa and is
+    the one that decides whether a front holds, so it is the knob a
+    calibration turns. The rest are the papers' own and rarely move.
+    """
+    from .calving_laws import density_in_model_units
+    params = _calving_hfb_knobs()
+    # the law wants icepack2's own MPa, m, yr
+    params["rho_c"] = density_in_model_units(params["rho_c"])
+    return params
+
+
+def calving_thickness_hc():
+    r"""``ISMIP7_CALVING_HC``: the thickness the front settles at [m]."""
+    value = float(os.environ.get("ISMIP7_CALVING_HC", THICKNESS_HC_DEFAULT))
+    if value <= 0.0:
+        raise ValueError(
+            f"ISMIP7_CALVING_HC must be a positive thickness, got {value:g}")
+    return value
+
+
 def calving_sigma_max():
     r"""Von Mises thresholds (grounded, floating) [MPa]."""
     return (
@@ -336,6 +409,27 @@ def calving_sigma_max():
         float(os.environ.get("ISMIP7_CALVING_SIGMA_MAX_FLOATING",
                              CALVING_SIGMA_MAX_FLOATING_DEFAULT)),
     )
+
+
+def calving_knobs(law):
+    r"""The knobs ``law`` reads, resolved to the values the run uses and
+    keyed by their environment names: MPa for the strengths, kg/m3 for
+    ``ISMIP7_CALVING_RHO_C`` and m for ``ISMIP7_CALVING_HC``. The front owner
+    line, the checkpoint and the core report all record this one dict, so a
+    defaulted knob is stated at its value."""
+    if law == "vonmises":
+        grounded, floating = calving_sigma_max()
+        return {"ISMIP7_CALVING_SIGMA_MAX_GROUNDED": f"{grounded:g}",
+                "ISMIP7_CALVING_SIGMA_MAX_FLOATING": f"{floating:g}"}
+    if law == "hfb":
+        p = _calving_hfb_knobs()
+        return {"ISMIP7_CALVING_SIGMA_MAX": f"{p['sigma_max']:g}",
+                "ISMIP7_CALVING_RHO_C": f"{p['rho_c']:g}",
+                "ISMIP7_CALVING_HFB_EXPONENT": f"{p['exponent']:g}",
+                "ISMIP7_CALVING_HFB_RATIO_MAX": f"{p['ratio_max']:g}"}
+    if law == "thickness":
+        return {"ISMIP7_CALVING_HC": f"{calving_thickness_hc():g}"}
+    return {}
 
 
 # ── Roots a second checkout does not carry ──────────────────────────────

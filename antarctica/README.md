@@ -587,9 +587,10 @@ front where it restarted. The shared implementation's tests are
 `icepack_tools/test/levelset_test.py`; the ISMIP7-side rules (retreat-sliver
 mask, apparent-MB extent masking, the `fixed` law's t=0 anchor) are covered by
 `tests/`. `tests/test_levelset_laws.py` checks each law against closed forms on
-a unit mesh: the `vonmises` rate under both thresholds, the shed fraction and
-its step-size behaviour under the transport's masks, the drag gate, and the
-refusal of an unknown or underspecified law.
+a unit mesh: the `vonmises` rate under both thresholds, the `thickness` bed
+gate, the `hfb` stress ratio, the shed fraction and its step-size behaviour
+under the transport's masks, the drag gate, and the refusal of an unknown or
+underspecified law.
 
 **Control and projection configurations differ.** The protocol's control is an
 unforced constant-climate run with calving set to end-of-2014 conditions, so
@@ -606,7 +607,158 @@ legacy `ISMIP7_FIXED_FRONT` mask removes nothing when a law is set and
 defined only on the t=0 ice extent under every law. Under a free law it is also
 cleared each step wherever the level set reports ice-free, irreversibly, so a
 calved cell is not regrown and an advanced-into cell is not re-emptied. The run
-log prints one `Calving front owner:` line naming the mechanism in force.
+log prints one `Calving front owner:` line naming the mechanism in force and
+the law's knobs at their effective values, which `core_report.py` lifts into
+the report; the checkpoint carries the same string as its `calving_law`
+attribute.
+
+### The resistive-stress law (`ISMIP7_CALVING=hfb`)
+
+The criterion of Buck (2023), Coffey et al. (2024), Coffey and Lai (2025) and
+Slater and Wagner (2025): a front holds while the resistive stress it carries
+stays below what a basal crevasse field can bear, and calves when it does not.
+`icepack2_tools/calving_laws.py` is ours, so a submission run needs no sibling
+checkout, and the level set drives it through the same prescribed rate the
+external hook uses.
+
+```bash
+ISMIP7_CALVING=hfb                          # zero tensile strength, the Buck limit
+ISMIP7_CALVING=hfb ISMIP7_CALVING_SIGMA_MAX=0.15   # Slater and Wagner's 150 kPa
+```
+
+The front-normal resistive stress is `R_xx = n . M n`, read straight off the
+solved membrane stress rather than differentiated from the velocity, which is
+what building this on the dual form buys. The threshold is Slater and Wagner's
+equation 21,
+
+```
+R_crit / (rho_i g H) = (1 - (rho_i/rho_c)(1 - a)^2) / 2
+                       + rho_c sigma_max^2 / (2 (rho_c - rho_i) (rho_i g H)^2)
+```
+
+with `a` the height-above-flotation fraction, and the rate is
+`c = |u| min(R_xx / R_crit, ratio_max)^p`. At zero strength and seawater in the
+crevasse a freely spreading shelf sits exactly at the threshold, which is
+Coffey and Lai's `B = 0`, and the tests assert that identity rather than a
+number.
+
+| knob | meaning | default |
+|---|---|---|
+| `ISMIP7_CALVING_SIGMA_MAX` | ice tensile strength, MPa; 0 is the Buck and Coffey-Lai limit | `0.0` |
+| `ISMIP7_CALVING_RHO_C` | water in a basal crevasse, kg/m3; 1000 for meltwater | `1024.0` |
+| `ISMIP7_CALVING_HFB_EXPONENT` | the power on the ratio | `1.0` |
+| `ISMIP7_CALVING_HFB_RATIO_MAX` | most a step may remove, for cells whose `R_crit` has thinned away | `5.0` |
+
+**It is a threshold law, so where the front sits decides whether it does
+anything.** Measured on a 2 km state at the default front threshold, the
+median front-normal resistive stress is 0.0000 MPa against a critical 0.53,
+buttressing is exactly 1.0 everywhere, and 13 of 15,639 front cells are at
+failure: the law correctly removes almost nothing from a fully buttressed
+41 m fringe, and lowering the strength to zero does not change that. Von
+Mises, being proportional rather than a threshold, calves anyway. So measure
+how much ice the front cells carry before drawing a conclusion from a run of
+this law, and expect it to engage once the front is the calving face.
+
+### The minimum-thickness rule (`ISMIP7_CALVING=thickness`)
+
+`c = max(0, 1 + (Hc - H)/Hc) |u|`, the rate form CalvingMIP prescribes for its
+experiment 5. `Hc` is where the front settles rather than a cutoff: at `H = Hc`
+the rate is exactly the speed the ice arrives with, so the front stands still;
+thinner and it retreats, thicker and it advances. The rule is therefore
+self-limiting, which a stress threshold is not, and it is the only law here
+that reads no inferred field. It acts only where the bed is below sea level:
+the level set anchors on every ice edge, so land-terminating margins and
+nunataks thinner than `Hc` would otherwise erode and be booked as calving,
+while a marine grounded cliff still calves.
+
+```bash
+ISMIP7_CALVING=thickness                       # the observed front, 150 m
+ISMIP7_CALVING=thickness ISMIP7_CALVING_HC=375 # CalvingMIP experiment 5
+```
+
+| knob | meaning | default |
+|---|---|---|
+| `ISMIP7_CALVING_HC` | the thickness the front settles at, m; must be positive | `150.0` |
+
+Reading no inferred field is why it is the law to reach for on this
+initialization. The inversion constrains the rheology where the observations
+have leverage, and at the front they do not: over most of the Antarctic front
+the observed speed is a few metres a year against a 3 m/yr error floor, and the
+ice-free cells a front advances into were never in the inversion's domain at
+all. A stress law reads the regularizer's extrapolation there. A geometric rule
+does not care.
+
+### What the published calving parameters actually license
+
+Wilner et al. (2023, [doi:10.5194/tc-17-4889-2023](https://doi.org/10.5194/tc-17-4889-2023))
+calibrate four calving laws against the observed fronts of ten Antarctic ice
+shelves, by running each shelf 200 years under constant forcing and taking the
+parameter that best reproduces the modern front. It is the closest thing to a
+set of prescribed Antarctic values, and its Table 1 is worth reading before
+adopting any of them, because only one of the four transfers.
+
+| law | calibrated range over ten shelves | transfers? |
+|---|---|---|
+| von Mises `sigma_max` | 105 to 400 kPa, mean 225, median 230 | **yes**: "generally consistent with each other" |
+| eigencalving `K` | 2.0e7 to 3.0e10 m yr | no: four orders of magnitude |
+| minimum thickness `hmin` | 55 to 440 m, mean 270 | no: "largely dependent on the original thickness of the ice shelf" |
+| crevasse depth `r_c` | 0.1 to 0.9 | no: "ranges greatly between 0 and 1" |
+
+So the defensible Antarctic-wide prescription is **von Mises at 200 kPa**, the
+round centre of that cluster, and that is now the floating default here. Their
+domains are ice shelves, so the number constrains the floating threshold only;
+the grounded default is unchanged. Von Mises was also the best of the four for
+five of the ten shelves, with eigencalving best for four, so it is a reasonable
+baseline as well as a transferable one.
+
+Two cautions on borrowing from this table. Their minimum-thickness law is a
+*position* law, calving wherever `h <= hmin`, not our rate form, so its `hmin`
+is not our `Hc` even setting aside the shelf dependence. And their eigencalving
+`K` spans four orders of magnitude, which is the quantitative reason a single
+fitted `K` from our own front record was never going to be meaningful.
+
+**On the calibration target.** Their misfit is the *unsigned* area between the
+modelled and observed fronts divided by the observed front length, and they
+name its weakness themselves: "its inability to distinguish between regions of
+advance and regions of retreat for a given model run. Retreat and advance
+contribute equally to the misfit calculation since the area between the two
+fronts is unsigned." A front that advances in one place and over-calves in
+another scores like a front that did neither. The level set gives us the signed
+distance directly, so `calving/front_misfit.py` reports the signed bias, the
+rms, and the seaward and inland shares separately, and an advance-plus-retreat
+cancellation shows up as a small bias with a large rms rather than as a good
+score. Use that, not an area, when calibrating a front here.
+
+### A calving law from hoffmaao/calving (`forward_calving.py`)
+
+The laws developed for CalvingMIP (github.com/hoffmaao/calving: `fixed`,
+`velocity`, `position`, `thickness`, `vonmises`, `vonmises_strain`, `hfb`
+and any `--law-module` plugin) run in the forward unchanged. A law reads
+seven fields from its model, and `simulation.LiveCalvingState` supplies
+them from the live dual state: `u`, `M`, `tau` from the mixed solution,
+the DG0 `h`, `haf` and the grounded indicator as UFL on the cells, and the
+front normal from the level set the forward advances. The law's rate goes
+to the shared level set as its `prescribed` law, so the front is retreated
+and the shed mass is tallied exactly as under `ISMIP7_CALVING=vonmises`.
+
+```bash
+CALVING_DIR=/path/to/calving mpiexec -n 16 python antarctica/scripts/forward_calving.py \
+    --law hfb --law-param sigma_max=0.15 --experiment control --tag hfb_test
+```
+
+wraps the experiment driver (`control`, `ocx`, `ssp126|ssp370|ssp585` with
+`--esm`, `hist`), which keeps its own forcing, restart and auto-resume;
+leave `ISMIP7_CALVING` unset. `--tag` (or `ISMIP7_RUN_TAG`) is required, so a
+law-driven run never resumes from or overwrites a stock run's checkpoints. The
+law's `describe()` is written to every checkpoint's `calving_law` attribute and
+to the `Calving front owner:` line, which `core_report.py` lifts into the
+report. Any object with `rate(model, t)` returning a UFL rate on the cells and
+`describe()` can be placed in `ctx["calving_law"]` before `run_simulation` the
+same way. A threshold is fitted on Antarctica
+with `calving/tune_greene.py --experiment vonmises|hfb --state <forward
+checkpoint>` (per-Mouginot-basin flux against the Greene et al. 2022 fronts,
+on the same level-set normal), which is what makes a tuned parameter mean
+the same thing in both places.
 
 ### The whole matrix in one command (`run_core_matrix.sh`)
 
@@ -687,8 +839,9 @@ redeclare those literals.
 | `ISMIP7_MESH` | mesh path for the inversion and tools. A forward takes its mesh from the checkpoint unless this names another mesh, in which case the MAP is transferred onto it. `checkpoint` means the mesh embedded in the MAP or restart file: `site_env.sh` always exports a derived path, so this is how a job submitted through `submit.sh projection` runs MAP-native | `mesh/antarctica_<COARSE>_<LC>_buffered<BUFFER_M>.msh` |
 | `ISMIP7_RASTER_SAMPLE` | how BedMachine lands on a DG0 cell. `vertex` projects the CG1 vertex interpolant; `cell_mean` takes the raster's true cell mean. `cell_mean` measured rougher: neighbouring cells share two of three vertex samples, so `vertex` damps jumps by construction. Cell means raised interior surface jumps 6% and bed and thickness jumps 35%, and at 2 km the momentum solve did not converge within 60 minutes. It does classify flotation better (32 km misclassification 9.1% to 3.2%), so the knob stays. Stamped into the MAP and read back by the forward. Reproduce with `probe_raster_sampling.py` | `vertex` |
 | `ISMIP7_INVERSION` | explicit MAP path for a forward or preflight. The forward checks the MAP's recorded `friction`, `n_flow` and `geometry_space` against the run and aborts on a mismatch, warning only when the MAP predates those attributes; `preflight.py` checks that the file exists. Use it to A/B MAPs on one mesh, or, with `ISMIP7_MESH` also set (the timing matrix, `make map-check`), to run a MAP on a different mesh: its continuous fields are then interpolated onto `ISMIP7_MESH`, and a target dof outside the MAP's mesh takes a stated fill (0 for the log controls, the constant baseline for the fluidity prior, the raster sample for `velocity_obs`), counted and printed as `Transfer fill:` lines (`MAP_CHECK.md`) | derived |
-| `ISMIP7_CALVING` | `none`, `fixed` or `vonmises` (see above) | `none` |
-| `ISMIP7_CALVING_SIGMA_MAX_GROUNDED` / `_FLOATING` | von Mises thresholds (MPa) | `1.0` / `0.15` |
+| `ISMIP7_CALVING` | `none`, `fixed`, `vonmises`, `hfb` or `thickness` (see above) | `none` |
+| `ISMIP7_CALVING_SIGMA_MAX_GROUNDED` / `_FLOATING` | von Mises thresholds (MPa). The floating value is Wilner et al. 2023's Antarctic cluster centre | `1.0` / `0.2` |
+| `ISMIP7_CALVING_SIGMA_MAX`, `_RHO_C`, `_HFB_EXPONENT`, `_HFB_RATIO_MAX`, `_HC` | the `hfb` and `thickness` laws' knobs, tabulated in their sections above | see there |
 | `ISMIP7_FRACTURE` | `mask` applies the ISMIP7 collapse forcing to every floating cell it flags, booked as calving; `mask_front` only to the flagged cells open water has reached, so no hole opens behind a standing front (the two end-members of discussion #30). Masks exist for the SSPs only, so the control, historicals and OCX abort on either. Needs DG0. Every run prints its mode once (`Ice-shelf collapse forcing: ISMIP7_FRACTURE=...`, `none` included). Under a mask mode the timeseries columns `collapse_flagged_cells`, `collapse_removed_cells` and `collapse_held_cells` count the flagged floating cells, the ones the mode has emptied and the ones it leaves standing (always 0 under `mask`), all ranks summed; the budget lines, a closing log line and the core report repeat them | `none` |
 | `ISMIP7_OCX_FORCING` | what core 11 runs on. `protocol` is the ISMIP7 OCX product (RACMO2.3p2-ERA SDBN1 `acabf`, expert-judgment ocean `tf`/`so`), and the run refuses to start without it. `stopgap` is RACMO2.4p1 actual-year SMB with the constant OI ocean climatology, what the core ran on before the product was readable here. K is fitted to the climatology, so read `check_melt_bound.py --ocx` first (discussion #48) | `protocol` |
 | `ISMIP7_OCX_OCEAN` | which expert-judgment OCX ocean scenario to read: `main` (the core one), `cold`, `warm` or `vary`. A member other than `main` writes to `ocx_<member>` | `main` |

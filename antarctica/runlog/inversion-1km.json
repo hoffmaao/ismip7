@@ -8,5 +8,5 @@
   "site": "nots, long partition",
   "resources": "32 ranks, 410 to 480 GB estimated",
   "cost": "25 to 45 minutes an iteration estimated",
-  "notes": "issue #31, and the production mesh decision #20. Deferred while the 2 km pair finishes"
+  "notes": "issue #31, and issue #20 for the production mesh decision. Deferred while the 2 km pair finishes"
 }

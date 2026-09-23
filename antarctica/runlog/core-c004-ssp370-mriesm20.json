@@ -12,6 +12,6 @@
   "melt": "one toolbox K with the per-basin offset",
   "apparent_mb": "balance",
   "dt": 0.05,
-  "mesh": "the production mesh, decision #20",
+  "mesh": "the production mesh, issue #20",
   "notes": ""
 }

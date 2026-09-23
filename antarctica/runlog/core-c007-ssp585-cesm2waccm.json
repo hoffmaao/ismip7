@@ -12,6 +12,6 @@
   "melt": "one toolbox K with the per-basin offset",
   "apparent_mb": "balance",
   "dt": 0.05,
-  "mesh": "the production mesh, decision #20",
+  "mesh": "the production mesh, issue #20",
   "notes": "issue #27 holds the full-length run in the NOTS queue as job 1390452. Issue #78: 2300 is a padded mean of 2290 to 2299"
 }

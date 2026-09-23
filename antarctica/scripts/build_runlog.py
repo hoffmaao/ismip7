@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
 r"""Render the tracked run log from one JSON record per simulation.
 
-Every simulation this project runs -- an inversion, a historical, a control, a
+Every simulation this project runs (an inversion, a historical, a control, a
 projection, the OCX experiment, a calibration, a forward test, an output
-rehearsal -- leaves a record in ``antarctica/runlog/<id>.json``, and this
+rehearsal) leaves a record in ``antarctica/runlog/<id>.json``, and this
 renders them into ``antarctica/reports/SIMULATIONS.md``. One file per run so
 two sites never conflict in the same file, and JSON so the fields can be
 checked rather than eyeballed.

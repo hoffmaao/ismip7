@@ -45,8 +45,8 @@ Status: 12 planned, 3 running, 3 stopped, 7 done, 11 superseded.
 
 | Simulation | Status | Mesh | Site | Started | Finished | Headline result |
 |---|---|---|---|---|---|---|
-| C001: historical with CESM2-WACCM | planned | the production mesh, decision #20 | - | - | - | - |
-| C002: historical with MRI-ESM2-0 | planned | the production mesh, decision #20 | - | - | - | - |
+| C001: historical with CESM2-WACCM | planned | the production mesh, issue #20 | - | - | - | - |
+| C002: historical with MRI-ESM2-0 | planned | the production mesh, issue #20 | - | - | - | - |
 | Core 1: historical with CESM2-WACCM | superseded | antarctica_320000_32000 | - | - | 2026-07-19 | OFF TRACK; the budget residual closes to zero |
 | Core 2: historical with MRI-ESM2-0 | superseded | antarctica_320000_32000 | - | - | 2026-07-19 | OFF TRACK; the budget residual closes to zero |
 
@@ -54,8 +54,8 @@ Status: 12 planned, 3 running, 3 stopped, 7 done, 11 superseded.
 
 | Simulation | Status | Mesh | Site | Started | Finished | Headline result |
 |---|---|---|---|---|---|---|
-| C009: ctrl with CESM2-WACCM | planned | the production mesh, decision #20 | - | - | - | - |
-| C010: ctrl with MRI-ESM2-0 | planned | the production mesh, decision #20 | - | - | - | - |
+| C009: ctrl with CESM2-WACCM | planned | the production mesh, issue #20 | - | - | - | - |
+| C010: ctrl with MRI-ESM2-0 | planned | the production mesh, issue #20 | - | - | - | - |
 | Core 9: CTRL2015 with CESM2-WACCM | superseded | antarctica_320000_32000 | - | - | 2026-07-20 | OFF TRACK; the budget residual closes to zero |
 | Core 10: CTRL2015 with MRI-ESM2-0 | superseded | antarctica_320000_32000 | - | - | 2026-07-20 | ON TRACK; the budget residual closes to zero |
 
@@ -63,12 +63,12 @@ Status: 12 planned, 3 running, 3 stopped, 7 done, 11 superseded.
 
 | Simulation | Status | Mesh | Site | Started | Finished | Headline result |
 |---|---|---|---|---|---|---|
-| C003: ssp370 with CESM2-WACCM | planned | the production mesh, decision #20 | - | - | - | - |
-| C004: ssp370 with MRI-ESM2-0 | planned | the production mesh, decision #20 | - | - | - | - |
-| C005: ssp126 with CESM2-WACCM | planned | the production mesh, decision #20 | - | - | - | - |
-| C006: ssp126 with MRI-ESM2-0 | planned | the production mesh, decision #20 | - | - | - | - |
-| C007: ssp585 with CESM2-WACCM | planned | the production mesh, decision #20 | - | - | - | - |
-| C008: ssp585 with MRI-ESM2-0 | planned | the production mesh, decision #20 | - | - | - | - |
+| C003: ssp370 with CESM2-WACCM | planned | the production mesh, issue #20 | - | - | - | - |
+| C004: ssp370 with MRI-ESM2-0 | planned | the production mesh, issue #20 | - | - | - | - |
+| C005: ssp126 with CESM2-WACCM | planned | the production mesh, issue #20 | - | - | - | - |
+| C006: ssp126 with MRI-ESM2-0 | planned | the production mesh, issue #20 | - | - | - | - |
+| C007: ssp585 with CESM2-WACCM | planned | the production mesh, issue #20 | - | - | - | - |
+| C008: ssp585 with MRI-ESM2-0 | planned | the production mesh, issue #20 | - | - | - | - |
 | Core 3: ssp370 with CESM2-WACCM | superseded | antarctica_320000_32000 | - | - | 2026-07-20 | OFF TRACK; the budget residual closes to zero |
 | Core 4: ssp370 with MRI-ESM2-0 | superseded | antarctica_320000_32000 | - | - | 2026-07-19 | ON TRACK; the budget residual closes to zero |
 | Core 5: ssp126 with CESM2-WACCM | superseded | antarctica_320000_32000 | - | - | 2026-07-20 | OFF TRACK; the budget residual closes to zero |
@@ -80,7 +80,7 @@ Status: 12 planned, 3 running, 3 stopped, 7 done, 11 superseded.
 
 | Simulation | Status | Mesh | Site | Started | Finished | Headline result |
 |---|---|---|---|---|---|---|
-| C011: OCX main with observations | planned | the production mesh, decision #20 | - | - | - | - |
+| C011: OCX main with observations | planned | the production mesh, issue #20 | - | - | - | - |
 | Core 11: OCX, observation constrained | superseded | antarctica_320000_32000 | - | - | 2026-07-20 | ON TRACK; the budget residual closes to zero |
 
 ## Output
@@ -100,7 +100,7 @@ Status: 12 planned, 3 running, 3 stopped, 7 done, 11 superseded.
 - **Site / partition:** nots, long partition
 - **Ranks / memory:** 32 ranks, 410 to 480 GB estimated
 - **Cost per model year:** 25 to 45 minutes an iteration estimated
-- **Notes:** issue #31, and the production mesh decision #20. Deferred while the 2 km pair finishes
+- **Notes:** issue #31, and issue #20 for the production mesh decision. Deferred while the 2 km pair finishes
 
 ### inversion-2km-budd-bilaplacian
 
@@ -390,7 +390,7 @@ Core 7 at 32 km, collapse mode ISMIP7_FRACTURE=none (done), IU.
 - **Cost per model year:** about a minute a step on a loaded machine
 - **Results path:** antarctica/results/ctrl2015_cesm2_waccm_t2k_budd_2000_timeseries.csv
 - **Audit:** 3.5 years: VAF drift 0.01 mm, mass balance +2 Gt/yr, residual zero. The Amery cell sits near 6 km/yr without running away
-- **Notes:** the same state that diverges at 1 km is stable here, which is what the production mesh decision #20 turns on
+- **Notes:** the same state that diverges at 1 km is stable here, which is what the production mesh decision, issue #20, turns on
 
 ### core-c001-historical-cesm2waccm
 
@@ -401,12 +401,12 @@ C001: historical with CESM2-WACCM (planned), unassigned.
 - **ESM:** CESM2-WACCM
 - **Scenario:** historical
 - **Period (yr):** 1850, or a steady 1960 or 1975 start, to 2014
-- **Mesh:** the production mesh, decision #20
+- **Mesh:** the production mesh, issue #20
 - **Branch from:** a steady state
 - **Melt: K, slope, deltaT:** one toolbox K with the per-basin offset
 - **Apparent MB:** balance
 - **dt (yr):** 0.05
-- **Notes:** issue #28: every core needs re-running from the new MAPs. Issue #34: the start year and the handoff year are unsettled
+- **Notes:** issue #28: every core needs re-running from the new MAPs. The handoff to the projections is at 2015.0, as issue #34 settled
 
 ### core-c002-historical-mriesm20
 
@@ -417,7 +417,7 @@ C002: historical with MRI-ESM2-0 (planned), unassigned.
 - **ESM:** MRI-ESM2-0
 - **Scenario:** historical
 - **Period (yr):** as C001
-- **Mesh:** the production mesh, decision #20
+- **Mesh:** the production mesh, issue #20
 - **Branch from:** a steady state
 - **Melt: K, slope, deltaT:** one toolbox K with the per-basin offset
 - **Apparent MB:** balance
@@ -472,7 +472,7 @@ C009: ctrl with CESM2-WACCM (planned), unassigned.
 - **ESM:** CESM2-WACCM
 - **Scenario:** ctrl, the 2000 to 2029 climatology
 - **Period (yr):** 2015 to 2300
-- **Mesh:** the production mesh, decision #20
+- **Mesh:** the production mesh, issue #20
 - **Branch from:** the historical endpoint at 2015.0
 - **Melt: K, slope, deltaT:** one toolbox K with the per-basin offset
 - **Apparent MB:** balance
@@ -487,7 +487,7 @@ C010: ctrl with MRI-ESM2-0 (planned), unassigned.
 - **ESM:** MRI-ESM2-0
 - **Scenario:** ctrl
 - **Period (yr):** 2015 to 2300
-- **Mesh:** the production mesh, decision #20
+- **Mesh:** the production mesh, issue #20
 - **Branch from:** the historical endpoint at 2015.0
 - **Melt: K, slope, deltaT:** one toolbox K with the per-basin offset
 - **Apparent MB:** balance
@@ -542,7 +542,7 @@ C003: ssp370 with CESM2-WACCM (planned), unassigned.
 - **ESM:** CESM2-WACCM
 - **Scenario:** ssp370
 - **Period (yr):** 2015 to 2100
-- **Mesh:** the production mesh, decision #20
+- **Mesh:** the production mesh, issue #20
 - **Branch from:** the historical endpoint at 2015.0
 - **Melt: K, slope, deltaT:** one toolbox K with the per-basin offset
 - **Apparent MB:** balance
@@ -557,7 +557,7 @@ C004: ssp370 with MRI-ESM2-0 (planned), unassigned.
 - **ESM:** MRI-ESM2-0
 - **Scenario:** ssp370
 - **Period (yr):** 2015 to 2100
-- **Mesh:** the production mesh, decision #20
+- **Mesh:** the production mesh, issue #20
 - **Branch from:** the historical endpoint at 2015.0
 - **Melt: K, slope, deltaT:** one toolbox K with the per-basin offset
 - **Apparent MB:** balance
@@ -572,7 +572,7 @@ C005: ssp126 with CESM2-WACCM (planned), unassigned.
 - **ESM:** CESM2-WACCM
 - **Scenario:** ssp126
 - **Period (yr):** 2015 to 2300
-- **Mesh:** the production mesh, decision #20
+- **Mesh:** the production mesh, issue #20
 - **Branch from:** the historical endpoint at 2015.0
 - **Melt: K, slope, deltaT:** one toolbox K with the per-basin offset
 - **Apparent MB:** balance
@@ -587,7 +587,7 @@ C006: ssp126 with MRI-ESM2-0 (planned), unassigned.
 - **ESM:** MRI-ESM2-0
 - **Scenario:** ssp126
 - **Period (yr):** 2015 to 2300
-- **Mesh:** the production mesh, decision #20
+- **Mesh:** the production mesh, issue #20
 - **Branch from:** the historical endpoint at 2015.0
 - **Melt: K, slope, deltaT:** one toolbox K with the per-basin offset
 - **Apparent MB:** balance
@@ -602,7 +602,7 @@ C007: ssp585 with CESM2-WACCM (planned), unassigned.
 - **ESM:** CESM2-WACCM
 - **Scenario:** ssp585
 - **Period (yr):** 2015 to 2300
-- **Mesh:** the production mesh, decision #20
+- **Mesh:** the production mesh, issue #20
 - **Branch from:** the historical endpoint at 2015.0
 - **Melt: K, slope, deltaT:** one toolbox K with the per-basin offset
 - **Apparent MB:** balance
@@ -618,7 +618,7 @@ C008: ssp585 with MRI-ESM2-0 (planned), unassigned.
 - **ESM:** MRI-ESM2-0
 - **Scenario:** ssp585
 - **Period (yr):** 2015 to 2300
-- **Mesh:** the production mesh, decision #20
+- **Mesh:** the production mesh, issue #20
 - **Branch from:** the historical endpoint at 2015.0
 - **Melt: K, slope, deltaT:** one toolbox K with the per-basin offset
 - **Apparent MB:** balance
@@ -753,7 +753,7 @@ C011: OCX main with observations (planned), unassigned.
 - **ESM:** observations
 - **Scenario:** OCX main
 - **Period (yr):** 1979 to 2025
-- **Mesh:** the production mesh, decision #20
+- **Mesh:** the production mesh, issue #20
 - **Branch from:** independent of the historical
 - **Melt: K, slope, deltaT:** one toolbox K with the per-basin offset
 - **Apparent MB:** balance
@@ -808,4 +808,4 @@ Submission rehearsal: a 32 km control through the whole output chain (done), Ric
 - **ISMIP7 output written:** two years banked, with the ten native scalars
 - **Regridded, isschecker:** 31 files on the 8 km grid; isschecker 0.5.1 reports zero errors in variable presence, naming, numerical, spatial, consistency and attribute tests, and 93 time errors, all three-per-file experiment-length checks against a two-year run
 - **Scalars processed:** sla20, slg20 and slvaf written, each with its glacier and ice-cap variant, in NetCDF and CSV, by ismip7-scalars 0.1.0. The four auxiliary grids come from /ISMIP7/Output-Processing/Data on Globus and params.nc carries this model's densities, 917 and 1024; the reference year is the stamped one, 2016 for a run starting in 2015
-- **Notes:** issues #12 and #13 are both exercised end to end now, with the checker version recorded; what is left is a production-length run for both, and for #13 the comparison of the tool's scalars with the ten native ones, which has not been made. Both tools need Python 3.11 or newer, which this workstation has only through nix
+- **Notes:** issues #12 and #13 are both exercised end to end now, with the checker version recorded; what is left is a production-length run for both, and for issue #13 the comparison of the tool's scalars with the ten native ones, which has not been made. Both tools need Python 3.11 or newer, which this workstation has only through nix

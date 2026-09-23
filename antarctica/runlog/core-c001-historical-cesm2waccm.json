@@ -12,6 +12,6 @@
   "melt": "one toolbox K with the per-basin offset",
   "apparent_mb": "balance",
   "dt": 0.05,
-  "mesh": "the production mesh, decision #20",
-  "notes": "issue #28: every core needs re-running from the new MAPs. Issue #34: the start year and the handoff year are unsettled"
+  "mesh": "the production mesh, issue #20",
+  "notes": "issue #28: every core needs re-running from the new MAPs. The handoff to the projections is at 2015.0, as issue #34 settled"
 }

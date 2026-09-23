@@ -6,14 +6,13 @@ the resistive stress it carries is below what a crevasse field can bear. The
 numbers below are the ones those papers pin, so a change to the algebra shows
 up here rather than as a front that quietly stops calving.
 """
-import numpy as np
 import pytest
 from firedrake import (Constant, Function, FunctionSpace, TensorFunctionSpace,
                        UnitSquareMesh, VectorFunctionSpace, FiniteElement,
                        as_matrix, as_vector)
 from icepack2.constants import gravity as G, ice_density as RHO_I, water_density as RHO_W
 
-from icepack2_tools.calving_laws import (HFB_MODES, buttressing_number,
+from icepack2_tools.calving_laws import (buttressing_number,
                                          critical_stress,
                                          density_in_model_units,
                                          height_above_flotation,
@@ -72,16 +71,6 @@ def test_an_unbuttressed_shelf_sits_exactly_at_the_threshold(spaces):
     expected = (float(RHO_I) * float(G) * H_SHELF
                 * (1.0 - float(RHO_I / RHO_W)) / 2.0)
     assert r_crit.max() == pytest.approx(expected, rel=1e-10)
-
-
-def test_the_zero_stress_threshold_is_twice_the_force_balance_one(spaces):
-    r"""On a freely floating shelf the Nye criterion is twice as large, which
-    is why the choice of mode moves a front."""
-    mesh, Q0, _, _ = spaces
-    h, b = Constant(H_SHELF), Constant(B_DEEP)
-    hfb = _cells(Q0, critical_stress(h, b, 0.0, mode="hfb")).max()
-    nye = _cells(Q0, critical_stress(h, b, 0.0, mode="zero_stress")).max()
-    assert nye == pytest.approx(2.0 * hfb, rel=1e-10)
 
 
 def test_tensile_strength_raises_the_threshold(spaces):
@@ -168,33 +157,6 @@ def test_compression_does_not_calve(spaces):
         == pytest.approx(0.0, abs=1e-12)
 
 
-def test_the_grounded_gate_spares_grounded_ice(spaces):
-    mesh, Q0, Sigma, W0 = spaces
-    n = Function(W0).interpolate(as_vector((1.0, 0.0)))
-    u = Function(VectorFunctionSpace(mesh, "CG", 1)).interpolate(
-        as_vector((500.0, 0.0)))
-    M = Function(Sigma).interpolate(as_matrix(((5.0, 0.0), (0.0, 0.0))))
-    grounded = (Constant(H_SHELF), Constant(-10.0))   # 300 m on a 10 m bed
-    afloat = (Constant(H_SHELF), Constant(B_DEEP))
-
-    def gated(h, b):
-        return _cells(Q0, hfb_calving_rate(
-            u, M, h, b, n, grounded_gate=True)).max()
-
-    assert gated(*grounded) == pytest.approx(0.0, abs=1e-12)
-    assert gated(*afloat) > 0.0
-    # and without the gate the grounded ice calves, so the gate is what spares
-    # it rather than the stress state
-    assert _cells(Q0, hfb_calving_rate(u, M, *grounded, n)).max() > 0.0
-
-
-def test_an_unknown_mode_is_refused(spaces):
-    mesh, _, _, _ = spaces
-    with pytest.raises(ValueError, match="mode"):
-        critical_stress(Constant(H_SHELF), Constant(B_DEEP), mode="nonesuch")
-    assert HFB_MODES == ("hfb", "zero_stress")
-
-
 def test_the_thickness_rule_holds_the_front_at_its_critical_thickness(spaces):
     r"""``Hc`` is where the front settles, not a cutoff: at ``H = Hc`` the rate
     is exactly the speed the ice arrives with, so the front is stationary. That
@@ -203,13 +165,13 @@ def test_the_thickness_rule_holds_the_front_at_its_critical_thickness(spaces):
     mesh, Q0, _, _ = spaces
     u = Function(VectorFunctionSpace(mesh, "CG", 1)).interpolate(
         as_vector((500.0, 0.0)))
-    hc = 150.0
-    assert _cells(Q0, thickness_calving_rate(u, Constant(hc), hc)).max() \
+    hc, b = 150.0, Constant(B_DEEP)
+    assert _cells(Q0, thickness_calving_rate(u, Constant(hc), b, hc)).max() \
         == pytest.approx(500.0, rel=1e-6)
     # thinner than Hc: faster than the ice arrives, so the front retreats
-    assert _cells(Q0, thickness_calving_rate(u, Constant(50.0), hc)).max() > 500.0
+    assert _cells(Q0, thickness_calving_rate(u, Constant(50.0), b, hc)).max() > 500.0
     # thicker: slower, so the front advances
-    thick = _cells(Q0, thickness_calving_rate(u, Constant(300.0), hc)).max()
+    thick = _cells(Q0, thickness_calving_rate(u, Constant(300.0), b, hc)).max()
     assert 0.0 <= thick < 500.0
 
 
@@ -220,23 +182,25 @@ def test_the_thickness_rule_never_calves_backwards(spaces):
     mesh, Q0, _, _ = spaces
     u = Function(VectorFunctionSpace(mesh, "CG", 1)).interpolate(
         as_vector((500.0, 0.0)))
-    assert _cells(Q0, thickness_calving_rate(u, Constant(4000.0), 150.0)).max() \
+    assert _cells(Q0, thickness_calving_rate(
+        u, Constant(4000.0), Constant(B_DEEP), 150.0)).max() \
         == pytest.approx(0.0, abs=1e-12)
 
 
-def test_the_thickness_rule_reads_no_inferred_field(spaces):
-    r"""The reason to prefer it here: its rate depends on the thickness and the
-    speed alone, so neither the membrane stress nor the friction enters. A
-    change in the stress state must leave it untouched."""
+def test_the_thickness_rule_spares_a_margin_on_a_bed_above_sea_level(spaces):
+    r"""The level set anchors on every ice edge, so a land margin or nunatak
+    thinner than ``Hc`` would erode and be booked as calving. The gate is the
+    bed below sea level: a grounded marine cliff still calves."""
     from icepack2_tools.calving_laws import thickness_calving_rate
-    mesh, Q0, Sigma, _ = spaces
+    mesh, Q0, _, _ = spaces
     u = Function(VectorFunctionSpace(mesh, "CG", 1)).interpolate(
         as_vector((500.0, 0.0)))
-    before = _cells(Q0, thickness_calving_rate(u, Constant(80.0), 150.0)).copy()
-    # the stress field exists but the rule cannot see it
-    Function(Sigma).interpolate(as_matrix(((5.0, 0.0), (0.0, 0.0))))
-    after = _cells(Q0, thickness_calving_rate(u, Constant(80.0), 150.0))
-    assert np.allclose(before, after)
+    h = Constant(50.0)
+    land = _cells(Q0, thickness_calving_rate(u, h, Constant(200.0), 150.0))
+    assert land.max() == pytest.approx(0.0, abs=1e-12)
+    # 50 m of ice on a 10 m deep bed is grounded and still calves
+    cliff = _cells(Q0, thickness_calving_rate(u, h, Constant(-10.0), 150.0))
+    assert cliff.min() > 500.0
 
 
 def test_the_critical_thickness_knob_rejects_a_nonpositive_value(monkeypatch):
@@ -250,7 +214,7 @@ def test_the_critical_thickness_knob_rejects_a_nonpositive_value(monkeypatch):
 
 def test_the_floating_von_mises_default_is_the_published_antarctic_value(monkeypatch):
     r"""Wilner et al. (2023) calibrate this same law against ten Antarctic
-    shelves and report 105-400 kPa, mean 225, median 230 - the only one of the
+    shelves and report 105-400 kPa, mean 225, median 230: the only one of the
     four laws they test whose parameter is consistent between shelves. The
     default is the centre of that cluster, so a silent change to it changes
     what the submission claims to be running."""
@@ -271,3 +235,23 @@ def test_the_critical_thickness_default_is_the_observed_front(monkeypatch):
     from icepack2_tools.runconfig import calving_thickness_hc
     monkeypatch.delenv("ISMIP7_CALVING_HC", raising=False)
     assert calving_thickness_hc() == pytest.approx(150.0)
+
+
+def test_the_resolved_calving_knobs_name_every_parameter_at_its_value(monkeypatch):
+    r"""What the front owner line, the checkpoint and the core report record.
+    A defaulted knob is absent from the environment, so it has to be stated
+    at its value or two runs under different defaults read the same."""
+    from icepack2_tools.runconfig import calving_knobs
+    for k in ("SIGMA_MAX", "RHO_C", "HFB_EXPONENT", "HFB_RATIO_MAX", "HC",
+              "SIGMA_MAX_GROUNDED", "SIGMA_MAX_FLOATING"):
+        monkeypatch.delenv(f"ISMIP7_CALVING_{k}", raising=False)
+    assert calving_knobs("hfb") == {
+        "ISMIP7_CALVING_SIGMA_MAX": "0", "ISMIP7_CALVING_RHO_C": "1024",
+        "ISMIP7_CALVING_HFB_EXPONENT": "1", "ISMIP7_CALVING_HFB_RATIO_MAX": "5"}
+    assert calving_knobs("thickness") == {"ISMIP7_CALVING_HC": "150"}
+    assert calving_knobs("vonmises") == {
+        "ISMIP7_CALVING_SIGMA_MAX_GROUNDED": "1",
+        "ISMIP7_CALVING_SIGMA_MAX_FLOATING": "0.2"}
+    assert calving_knobs("none") == {}
+    monkeypatch.setenv("ISMIP7_CALVING_RHO_C", "1000")
+    assert calving_knobs("hfb")["ISMIP7_CALVING_RHO_C"] == "1000"

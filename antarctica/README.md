@@ -606,7 +606,10 @@ legacy `ISMIP7_FIXED_FRONT` mask removes nothing when a law is set and
 defined only on the t=0 ice extent under every law. Under a free law it is also
 cleared each step wherever the level set reports ice-free, irreversibly, so a
 calved cell is not regrown and an advanced-into cell is not re-emptied. The run
-log prints one `Calving front owner:` line naming the mechanism in force.
+log prints one `Calving front owner:` line naming the mechanism in force and
+the law's knobs at their effective values, which `core_report.py` lifts into
+the report; the checkpoint carries the same string as its `calving_law`
+attribute.
 
 ### The resistive-stress law (`ISMIP7_CALVING=hfb`)
 
@@ -642,7 +645,6 @@ number.
 |---|---|---|
 | `ISMIP7_CALVING_SIGMA_MAX` | ice tensile strength, MPa; 0 is the Buck and Coffey-Lai limit | `0.0` |
 | `ISMIP7_CALVING_RHO_C` | water in a basal crevasse, kg/m3; 1000 for meltwater | `1024.0` |
-| `ISMIP7_CALVING_HFB_MODE` | `hfb`, or `zero_stress` for the Nye threshold, twice as large on a shelf | `hfb` |
 | `ISMIP7_CALVING_HFB_EXPONENT` | the power on the ratio | `1.0` |
 | `ISMIP7_CALVING_HFB_RATIO_MAX` | most a step may remove, for cells whose `R_crit` has thinned away | `5.0` |
 
@@ -663,7 +665,10 @@ experiment 5. `Hc` is where the front settles rather than a cutoff: at `H = Hc`
 the rate is exactly the speed the ice arrives with, so the front stands still;
 thinner and it retreats, thicker and it advances. The rule is therefore
 self-limiting, which a stress threshold is not, and it is the only law here
-that reads no inferred field.
+that reads no inferred field. It acts only where the bed is below sea level:
+the level set anchors on every ice edge, so land-terminating margins and
+nunataks thinner than `Hc` would otherwise erode and be booked as calving,
+while a marine grounded cliff still calves.
 
 ```bash
 ISMIP7_CALVING=thickness                       # the observed front, 150 m
@@ -693,10 +698,10 @@ adopting any of them, because only one of the four transfers.
 
 | law | calibrated range over ten shelves | transfers? |
 |---|---|---|
-| von Mises `sigma_max` | 105 to 400 kPa, mean 225, median 230 | **yes** - "generally consistent with each other" |
-| eigencalving `K` | 2.0e7 to 3.0e10 m yr | no - four orders of magnitude |
-| minimum thickness `hmin` | 55 to 440 m, mean 270 | no - "largely dependent on the original thickness of the ice shelf" |
-| crevasse depth `r_c` | 0.1 to 0.9 | no - "ranges greatly between 0 and 1" |
+| von Mises `sigma_max` | 105 to 400 kPa, mean 225, median 230 | **yes**: "generally consistent with each other" |
+| eigencalving `K` | 2.0e7 to 3.0e10 m yr | no: four orders of magnitude |
+| minimum thickness `hmin` | 55 to 440 m, mean 270 | no: "largely dependent on the original thickness of the ice shelf" |
+| crevasse depth `r_c` | 0.1 to 0.9 | no: "ranges greatly between 0 and 1" |
 
 So the defensible Antarctic-wide prescription is **von Mises at 200 kPa**, the
 round centre of that cluster, and that is now the floating default here. Their

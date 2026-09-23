@@ -60,7 +60,8 @@ def test_the_seven_fields_are_the_forwards_own():
     # 300 m of ice on a 100 m deep bed is grounded; on 600 m it floats
     assert np.all(chi[(xc < 0.25)] == 1.0)
     assert np.all(chi[(xc > 0.25) & (xc < 0.5)] == 0.0)
-    assert np.allclose(haf[xc < 0.25], 300.0 - 1028.0 / 917.0 * 100.0)
+    # icepack2's densities, the forward's own flotation test
+    assert np.allclose(haf[xc < 0.25], 300.0 - 1024.0 / 917.0 * 100.0)
 
 
 def test_a_law_rate_is_a_cell_field_the_level_set_can_take():

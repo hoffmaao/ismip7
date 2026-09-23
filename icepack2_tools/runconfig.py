@@ -195,7 +195,6 @@ CALVING_SIGMA_MAX_FLOATING_DEFAULT = "0.2"     # MPa, Wilner et al. 2023
 # thinned to nothing and never binds on thick ice.
 HFB_SIGMA_MAX_DEFAULT = "0.0"        # MPa, ice tensile strength
 HFB_RHO_C_DEFAULT = "1024.0"         # kg/m3, water in a basal crevasse
-HFB_MODE_DEFAULT = "hfb"             # or zero_stress, the Nye threshold
 HFB_EXPONENT_DEFAULT = "1.0"
 HFB_RATIO_MAX_DEFAULT = "5.0"
 # Minimum thickness (icepack2_tools.calving_laws.thickness_calving_rate): the
@@ -363,6 +362,21 @@ def auto_resume():
         ) from None
 
 
+def _calving_hfb_knobs():
+    r"""The horizontal-force-balance knobs in the units they are set in:
+    MPa, and kg/m3 for the crevasse water, which is how the papers quote it."""
+    return {
+        "sigma_max": float(os.environ.get("ISMIP7_CALVING_SIGMA_MAX",
+                                          HFB_SIGMA_MAX_DEFAULT)),
+        "rho_c": float(os.environ.get("ISMIP7_CALVING_RHO_C",
+                                      HFB_RHO_C_DEFAULT)),
+        "exponent": float(os.environ.get("ISMIP7_CALVING_HFB_EXPONENT",
+                                         HFB_EXPONENT_DEFAULT)),
+        "ratio_max": float(os.environ.get("ISMIP7_CALVING_HFB_RATIO_MAX",
+                                          HFB_RATIO_MAX_DEFAULT)),
+    }
+
+
 def calving_hfb_parameters():
     r"""The horizontal-force-balance law's parameters, as a dict for
     ``icepack2_tools.calving_laws.hfb_calving_rate``.
@@ -371,24 +385,11 @@ def calving_hfb_parameters():
     the one that decides whether a front holds, so it is the knob a
     calibration turns. The rest are the papers' own and rarely move.
     """
-    from .calving_laws import HFB_MODES, density_in_model_units
-    mode = os.environ.get("ISMIP7_CALVING_HFB_MODE", HFB_MODE_DEFAULT).lower()
-    if mode not in HFB_MODES:
-        raise ValueError(
-            f"ISMIP7_CALVING_HFB_MODE must be one of {HFB_MODES}, got {mode!r}")
-    return {
-        "sigma_max": float(os.environ.get("ISMIP7_CALVING_SIGMA_MAX",
-                                          HFB_SIGMA_MAX_DEFAULT)),
-        # the knob is in kg/m3, which is how the papers quote it; the law
-        # wants icepack2's own MPa, m, yr
-        "rho_c": density_in_model_units(
-            float(os.environ.get("ISMIP7_CALVING_RHO_C", HFB_RHO_C_DEFAULT))),
-        "mode": mode,
-        "exponent": float(os.environ.get("ISMIP7_CALVING_HFB_EXPONENT",
-                                         HFB_EXPONENT_DEFAULT)),
-        "ratio_max": float(os.environ.get("ISMIP7_CALVING_HFB_RATIO_MAX",
-                                          HFB_RATIO_MAX_DEFAULT)),
-    }
+    from .calving_laws import density_in_model_units
+    params = _calving_hfb_knobs()
+    # the law wants icepack2's own MPa, m, yr
+    params["rho_c"] = density_in_model_units(params["rho_c"])
+    return params
 
 
 def calving_thickness_hc():
@@ -408,6 +409,27 @@ def calving_sigma_max():
         float(os.environ.get("ISMIP7_CALVING_SIGMA_MAX_FLOATING",
                              CALVING_SIGMA_MAX_FLOATING_DEFAULT)),
     )
+
+
+def calving_knobs(law):
+    r"""The knobs ``law`` reads, resolved to the values the run uses and
+    keyed by their environment names: MPa for the strengths, kg/m3 for
+    ``ISMIP7_CALVING_RHO_C`` and m for ``ISMIP7_CALVING_HC``. The front owner
+    line, the checkpoint and the core report all record this one dict, so a
+    defaulted knob is stated at its value."""
+    if law == "vonmises":
+        grounded, floating = calving_sigma_max()
+        return {"ISMIP7_CALVING_SIGMA_MAX_GROUNDED": f"{grounded:g}",
+                "ISMIP7_CALVING_SIGMA_MAX_FLOATING": f"{floating:g}"}
+    if law == "hfb":
+        p = _calving_hfb_knobs()
+        return {"ISMIP7_CALVING_SIGMA_MAX": f"{p['sigma_max']:g}",
+                "ISMIP7_CALVING_RHO_C": f"{p['rho_c']:g}",
+                "ISMIP7_CALVING_HFB_EXPONENT": f"{p['exponent']:g}",
+                "ISMIP7_CALVING_HFB_RATIO_MAX": f"{p['ratio_max']:g}"}
+    if law == "thickness":
+        return {"ISMIP7_CALVING_HC": f"{calving_thickness_hc():g}"}
+    return {}
 
 
 # ── Roots a second checkout does not carry ──────────────────────────────

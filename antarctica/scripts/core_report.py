@@ -46,7 +46,8 @@ from icepack2_tools.forcing import (
 )
 from icepack2_tools.front import COLLAPSE_MARKER, FRONT_OWNER_MARKER
 from icepack2_tools.runconfig import (
-    N_FLOW_DEFAULT, fracture, friction, geometry_space, lc, lc_coarse,
+    N_FLOW_DEFAULT, calving_knobs, calving_law, fracture, friction,
+    geometry_space, lc, lc_coarse,
 )
 from icepack2_tools.solverconfig import effective_solver_env, solver_provenance
 
@@ -89,6 +90,10 @@ def effective_env():
         "ISMIP7_MELT_SLOPE": melt_slope(),
         "ISMIP7_SIN_ALPHA_ANT": f"{sin_alpha_ant():g}",
         "ISMIP7_K_MELT": f"{k_melt():g}",
+        # The calving law and the knobs it reads: the floating von Mises
+        # threshold flipped from 0.15 to 0.2 MPa.
+        "ISMIP7_CALVING": calving_law(),
+        **calving_knobs(calving_law()),
     }
     resolved.update(effective_solver_env())
     canonical_key = "ISMIP7_DIAGNOSTIC_LINEAR_SOLVER_CANONICAL"
@@ -161,8 +166,9 @@ def collapse_record(log_path):
 
 def front_owner(log_path):
     r"""The mechanism that owned the calving front, lifted out of its log.
-    An external law (``forward_calving.py``) leaves ``ISMIP7_CALVING`` at
-    ``none`` in the env block, so this line is where the law and its
+    It names the law with its knobs at their effective values, and an
+    external law (``forward_calving.py``) leaves ``ISMIP7_CALVING`` at
+    ``none`` in the env block, so this line is where any law and its
     parameters reach the record."""
     return lifted(log_path, FRONT_OWNER_MARKER,
                   "the run predates the front owner line")

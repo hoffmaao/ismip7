@@ -587,9 +587,10 @@ wraps the experiment driver (`control`, `ocx`, `ssp126|ssp370|ssp585` with
 leave `ISMIP7_CALVING` unset. `--tag` (or `ISMIP7_RUN_TAG`) is required, so a
 law-driven run never resumes from or overwrites a stock run's checkpoints. The
 law's `describe()` is written to every checkpoint's `calving_law` attribute and
-to the `Calving front owner:` line, which `core_report.py` lifts into the report. Any object with `rate(model, t)` returning a
-UFL rate on the cells and `describe()` can be placed in `ctx["calving_law"]`
-before `run_simulation` the same way. A threshold is fitted on Antarctica
+to the `Calving front owner:` line, which `core_report.py` lifts into the
+report. Any object with `rate(model, t)` returning a UFL rate on the cells and
+`describe()` can be placed in `ctx["calving_law"]` before `run_simulation` the
+same way. A threshold is fitted on Antarctica
 with `calving/tune_greene.py --experiment vonmises|hfb --state <forward
 checkpoint>` (per-Mouginot-basin flux against the Greene et al. 2022 fronts,
 on the same level-set normal), which is what makes a tuned parameter mean

@@ -804,5 +804,5 @@ Submission rehearsal: a 32 km control through the whole output chain (done), Ric
 - **Results path:** antarctica/results/ctrl2015_cesm2_waccm_out32k_32000_*
 - **ISMIP7 output written:** two years banked, with the ten native scalars
 - **Regridded, isschecker:** 31 files on the 8 km grid; isschecker 0.5.1 reports zero errors in variable presence, naming, numerical, spatial, consistency and attribute tests, and 93 time errors, all three-per-file experiment-length checks against a two-year run
-- **Scalars processed:** blocked: ismip7-scalars 0.1.0 needs four auxiliary files per region from Globus (af2, basins_regions, iaf2_GIC and maxmask1 at 8 km) that no downloader here fetches
-- **Notes:** issue #12 is satisfied on mechanics with the version recorded; #13 waits on those data files. Both tools need Python 3.11 or newer, which this workstation has only through nix
+- **Scalars processed:** sla20, slg20 and slvaf written, each with its glacier and ice-cap variant, in NetCDF and CSV, by ismip7-scalars 0.1.0. The four auxiliary grids come from /ISMIP7/Output-Processing/Data on Globus and params.nc carries this model's densities, 917 and 1024; the reference year is the stamped one, 2016 for a run starting in 2015
+- **Notes:** issues #12 and #13 are both exercised end to end now, with the checker version recorded; what is left for them is a production-length run. Both tools need Python 3.11 or newer, which this workstation has only through nix

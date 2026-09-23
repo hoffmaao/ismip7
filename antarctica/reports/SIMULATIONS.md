@@ -258,9 +258,9 @@ Core 7 at 32 km, collapse mode ISMIP7_FRACTURE=none (done), IU.
 - **Started:** 2026-09-22
 - **Finished:** 2026-09-22
 - **Cost per model year:** 12 to 31 s a step, about 8 to 20 minutes a model year on 32 ranks
-- **Results path:** /projects/ah301/ismip7-fwd/antarctica/results/ctrl2015_cesm2_waccm_t1k_dthalf_1000_*
+- **Results path:** antarctica/results/ctrl2015_cesm2_waccm_t1k_dthalf_1000_*
 - **Audit:** five years complete: VAF drift 0.13 mm of sea level, 0.027 mm a year against the 2 mm a year tolerance; mass +21 Gt over five years against a 2532 Gt/yr surface balance; budget residual zero on every row. The same configuration at dt=0.05 diverged in 2016.1, so halving the step is the cure. Shelf melt 1428 Gt/yr, calving 24, balanced correction -1151
-- **Notes:** the first production-resolution forward to run five years from a snapshot MAP. Its low calving flux is the front-placement question, not a stability one; re-run on the converged MAP at the chosen front threshold
+- **Notes:** the first production-resolution forward to run five years from a snapshot MAP. Its low calving flux reflects front placement; re-run on the converged MAP at the chosen front threshold
 
 ### test-1km-budd-map-geometry
 

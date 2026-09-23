@@ -656,6 +656,32 @@ Mises, being proportional rather than a threshold, calves anyway. So read
 `probe_front_flux.py` above before drawing a conclusion from a run of this
 law, and expect it to engage once the front is the calving face.
 
+### The minimum-thickness rule (`ISMIP7_CALVING=thickness`)
+
+`c = max(0, 1 + (Hc - H)/Hc) |u|`, the rate form CalvingMIP prescribes for its
+experiment 5. `Hc` is where the front settles rather than a cutoff: at `H = Hc`
+the rate is exactly the speed the ice arrives with, so the front stands still;
+thinner and it retreats, thicker and it advances. The rule is therefore
+self-limiting, which a stress threshold is not, and it is the only law here
+that reads no inferred field.
+
+```bash
+ISMIP7_CALVING=thickness                       # the observed front, 150 m
+ISMIP7_CALVING=thickness ISMIP7_CALVING_HC=375 # CalvingMIP experiment 5
+```
+
+| knob | meaning | default |
+|---|---|---|
+| `ISMIP7_CALVING_HC` | the thickness the front settles at, m; must be positive | `150.0` |
+
+Reading no inferred field is why it is the law to reach for on this
+initialization. The inversion constrains the rheology where the observations
+have leverage, and at the front they do not: over most of the Antarctic front
+the observed speed is a few metres a year against a 3 m/yr error floor, and the
+ice-free cells a front advances into were never in the inversion's domain at
+all. A stress law reads the regularizer's extrapolation there. A geometric rule
+does not care.
+
 ### A calving law from hoffmaao/calving (`forward_calving.py`)
 
 The laws developed for CalvingMIP (github.com/hoffmaao/calving: `fixed`,
@@ -766,8 +792,9 @@ redeclare those literals.
 | `ISMIP7_MESH` | mesh path for the inversion and tools. A forward takes its mesh from the checkpoint unless this names another mesh, in which case the MAP is transferred onto it. `checkpoint` means the mesh embedded in the MAP or restart file: `site_env.sh` always exports a derived path, so this is how a job submitted through `submit.sh projection` runs MAP-native | `mesh/antarctica_<COARSE>_<LC>_buffered<BUFFER_M>.msh` |
 | `ISMIP7_RASTER_SAMPLE` | how BedMachine lands on a DG0 cell. `vertex` projects the CG1 vertex interpolant; `cell_mean` takes the raster's true cell mean. `cell_mean` measured rougher: neighbouring cells share two of three vertex samples, so `vertex` damps jumps by construction. Cell means raised interior surface jumps 6% and bed and thickness jumps 35%, and at 2 km the momentum solve did not converge within 60 minutes. It does classify flotation better (32 km misclassification 9.1% to 3.2%), so the knob stays. Stamped into the MAP and read back by the forward. Reproduce with `probe_raster_sampling.py` | `vertex` |
 | `ISMIP7_INVERSION` | explicit MAP path for a forward or preflight. The forward checks the MAP's recorded `friction`, `n_flow` and `geometry_space` against the run and aborts on a mismatch, warning only when the MAP predates those attributes; `preflight.py` checks that the file exists. Use it to A/B MAPs on one mesh, or, with `ISMIP7_MESH` also set (the timing matrix, `make map-check`), to run a MAP on a different mesh: its continuous fields are then interpolated onto `ISMIP7_MESH`, and a target dof outside the MAP's mesh takes a stated fill (0 for the log controls, the constant baseline for the fluidity prior, the raster sample for `velocity_obs`), counted and printed as `Transfer fill:` lines (`MAP_CHECK.md`) | derived |
-| `ISMIP7_CALVING` | `none`, `fixed` or `vonmises` (see above) | `none` |
+| `ISMIP7_CALVING` | `none`, `fixed`, `vonmises`, `hfb` or `thickness` (see above) | `none` |
 | `ISMIP7_CALVING_SIGMA_MAX_GROUNDED` / `_FLOATING` | von Mises thresholds (MPa) | `1.0` / `0.15` |
+| `ISMIP7_CALVING_HC` | minimum-thickness `Hc` (m), where the front settles | `150.0` |
 | `ISMIP7_FRACTURE` | `mask` applies the ISMIP7 collapse forcing to every floating cell it flags, booked as calving; `mask_front` only to the flagged cells open water has reached, so no hole opens behind a standing front (the two end-members of discussion #30). Masks exist for the SSPs only, so the control, historicals and OCX abort on either. Needs DG0. Every run prints its mode once (`Ice-shelf collapse forcing: ISMIP7_FRACTURE=...`, `none` included). Under a mask mode the timeseries columns `collapse_flagged_cells`, `collapse_removed_cells` and `collapse_held_cells` count the flagged floating cells, the ones the mode has emptied and the ones it leaves standing (always 0 under `mask`), all ranks summed; the budget lines, a closing log line and the core report repeat them | `none` |
 | `ISMIP7_OCX_FORCING` | what core 11 runs on. `protocol` is the ISMIP7 OCX product (RACMO2.3p2-ERA SDBN1 `acabf`, expert-judgment ocean `tf`/`so`), and the run refuses to start without it. `stopgap` is RACMO2.4p1 actual-year SMB with the constant OI ocean climatology, what the core ran on before the product was readable here. K is fitted to the climatology, so read `check_melt_bound.py --ocx` first (discussion #48) | `protocol` |
 | `ISMIP7_OCX_OCEAN` | which expert-judgment OCX ocean scenario to read: `main` (the core one), `cold`, `warm` or `vary`. A member other than `main` writes to `ocx_<member>` | `main` |

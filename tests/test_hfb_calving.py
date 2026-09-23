@@ -193,3 +193,66 @@ def test_an_unknown_mode_is_refused(spaces):
     with pytest.raises(ValueError, match="mode"):
         critical_stress(Constant(H_SHELF), Constant(B_DEEP), mode="nonesuch")
     assert HFB_MODES == ("hfb", "zero_stress")
+
+
+def test_the_thickness_rule_holds_the_front_at_its_critical_thickness(spaces):
+    r"""``Hc`` is where the front settles, not a cutoff: at ``H = Hc`` the rate
+    is exactly the speed the ice arrives with, so the front is stationary. That
+    is what makes the rule self-limiting where a stress threshold is not."""
+    from icepack2_tools.calving_laws import thickness_calving_rate
+    mesh, Q0, _, _ = spaces
+    u = Function(VectorFunctionSpace(mesh, "CG", 1)).interpolate(
+        as_vector((500.0, 0.0)))
+    hc = 150.0
+    assert _cells(Q0, thickness_calving_rate(u, Constant(hc), hc)).max() \
+        == pytest.approx(500.0, rel=1e-6)
+    # thinner than Hc: faster than the ice arrives, so the front retreats
+    assert _cells(Q0, thickness_calving_rate(u, Constant(50.0), hc)).max() > 500.0
+    # thicker: slower, so the front advances
+    thick = _cells(Q0, thickness_calving_rate(u, Constant(300.0), hc)).max()
+    assert 0.0 <= thick < 500.0
+
+
+def test_the_thickness_rule_never_calves_backwards(spaces):
+    r"""Well above ``Hc`` the factor would go negative, which would read as the
+    front advancing under its own calving law rather than under the ice flux."""
+    from icepack2_tools.calving_laws import thickness_calving_rate
+    mesh, Q0, _, _ = spaces
+    u = Function(VectorFunctionSpace(mesh, "CG", 1)).interpolate(
+        as_vector((500.0, 0.0)))
+    assert _cells(Q0, thickness_calving_rate(u, Constant(4000.0), 150.0)).max() \
+        == pytest.approx(0.0, abs=1e-12)
+
+
+def test_the_thickness_rule_reads_no_inferred_field(spaces):
+    r"""The reason to prefer it here: its rate depends on the thickness and the
+    speed alone, so neither the membrane stress nor the friction enters. A
+    change in the stress state must leave it untouched."""
+    from icepack2_tools.calving_laws import thickness_calving_rate
+    mesh, Q0, Sigma, _ = spaces
+    u = Function(VectorFunctionSpace(mesh, "CG", 1)).interpolate(
+        as_vector((500.0, 0.0)))
+    before = _cells(Q0, thickness_calving_rate(u, Constant(80.0), 150.0)).copy()
+    # the stress field exists but the rule cannot see it
+    Function(Sigma).interpolate(as_matrix(((5.0, 0.0), (0.0, 0.0))))
+    after = _cells(Q0, thickness_calving_rate(u, Constant(80.0), 150.0))
+    assert np.allclose(before, after)
+
+
+def test_the_critical_thickness_knob_rejects_a_nonpositive_value(monkeypatch):
+    from icepack2_tools.runconfig import calving_thickness_hc
+    monkeypatch.setenv("ISMIP7_CALVING_HC", "150")
+    assert calving_thickness_hc() == pytest.approx(150.0)
+    monkeypatch.setenv("ISMIP7_CALVING_HC", "0")
+    with pytest.raises(ValueError, match="positive thickness"):
+        calving_thickness_hc()
+
+
+def test_the_critical_thickness_default_is_the_observed_front(monkeypatch):
+    r"""The published Antarctic minimum-thickness thresholds are for a position
+    law and are shelf-specific, so the transferable number for our rate form is
+    the observed front thickness: BedMachine v4.1 has a 144.7 m mean and a
+    152.4 m floating-front median."""
+    from icepack2_tools.runconfig import calving_thickness_hc
+    monkeypatch.delenv("ISMIP7_CALVING_HC", raising=False)
+    assert calving_thickness_hc() == pytest.approx(150.0)

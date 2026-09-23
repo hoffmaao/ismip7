@@ -1830,6 +1830,11 @@ def run_simulation(
             "level-set horizontal-force-balance law (ISMIP7_CALVING=hfb)"
             + ("; ISMIP7_FIXED_FRONT is set but ignored for removal"
                if fixed_front else ""))
+    elif calving == "thickness":
+        front_owner = (
+            "level-set minimum-thickness law (ISMIP7_CALVING=thickness)"
+            + ("; ISMIP7_FIXED_FRONT is set but ignored for removal"
+               if fixed_front else ""))
     elif calving != "none":
         front_owner = f"level-set {calving} law (ISMIP7_CALVING={calving})" + (
             "; ISMIP7_FIXED_FRONT is set but ignored for removal"
@@ -2454,7 +2459,7 @@ def run_simulation(
         # horizontal-force-balance law is ours (icepack2_tools.calving_laws),
         # so it is driven through the same `prescribed` rate the external hook
         # uses, with the rate rebuilt from the live dual state each advance.
-        ls_law = "prescribed" if calving == "hfb" else calving
+        ls_law = ("prescribed" if calving in ("hfb", "thickness") else calving)
         level_set = LevelSet(
             mesh, h_dg, law=ls_law, h_min=front_hmin,
             sigma_max_grounded=sig_g, sigma_max_floating=sig_f,
@@ -2462,6 +2467,15 @@ def run_simulation(
         )
         phi_entry = Function(level_set.Q0)
     hfb_rate = None
+    if calving == "thickness":
+        from icepack2_tools.calving_laws import thickness_calving_rate
+        from icepack2_tools.runconfig import calving_thickness_hc
+        _hc = calving_thickness_hc()
+        hfb_rate = thickness_calving_rate(z.subfunctions[0], h_dg, _hc)
+        PETSc.Sys.Print(
+            f"  Calving law: minimum thickness, the front settles at "
+            f"Hc={_hc:g} m (PISM pairs this with eigencalving for Antarctica; "
+            f"CalvingMIP experiment 5). It reads no inferred field.")
     if calving == "hfb":
         from icepack2_tools.calving_laws import hfb_calving_rate
         from icepack2_tools.runconfig import calving_hfb_parameters

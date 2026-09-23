@@ -211,8 +211,8 @@ Two things were found by fitting through the forward's path, both measured on
 the 2500 m mesh (`inversion_icepack2_budd_2500.h5`, BedMachine v4.1
 vertex-sampled, the 865.0 Gt/yr table, 21 September 2026):
 
-1. **The melt callbacks floated ice with fresh-water density** (issue 66,
-   closed with PR 67: flotation is now decided once, against seawater).
+1. **The melt callbacks floated ice with fresh-water density**, issue #66,
+   closed on 22 September 2026 once the shared test landed.
    Their `haf <= 0` test used the SMB conversion's 1000 kg/m3 where the forward
    floats ice at 917/1024, which read every floating cell thicker than 78
    percent of its flotation thickness as grounded: 364 038 km2, 24 percent of

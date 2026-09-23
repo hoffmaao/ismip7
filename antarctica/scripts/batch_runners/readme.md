@@ -267,9 +267,35 @@ A successful build prints the whole list at the end.
 four editable packages: `icepack`, `icepack2`, `tlm_adjoint`, `icepack_tools`.
 It takes the venv and work filesystem from the site file and expects the
 sources under `$ISMIP7_WORK/sw/src` (`FD_PREFIX` moves that; at Rice it is
-`/projects/ah301/sw/src`). They are rsynced from a workstation rather than
-cloned, since `icepack2` carries uncommitted edits the inversion needs
-(issue #46). Two more gaps surfaced here: `/tmp` is not writable on the login
+`/projects/ah301/sw/src`). `icepack`, `tlm_adjoint` and `icepack_tools` are
+rsynced from a workstation, `icepack_tools` because it is a local project with
+no remote at all.
+
+`icepack2` is **cloned at a pin**, and is the one source a site must not rsync.
+The inversion needs two lines that Firedrake 2026 forces on it
+(`Mesh.geometric_dimension` became an attribute, and `viscous_power` and
+`flow_law` call it). Those lines used to be uncommitted edits in one
+workstation checkout, so two sites could differ with nothing to read (issue
+#46); they are now a commit, on the branch of the open pull request
+icepack/icepack2#3. `install_deps.sh` names that branch's head by SHA and
+installs exactly it, which is icepack2 `main` (`40e848b`) plus the two files, so
+every site runs one known tree and `--check-icepack2` prints which:
+
+```
+bash antarctica/scripts/batch_runners/install_deps.sh --check-icepack2
+icepack2: e0a46c9ce3e95dc916660a200e695f0417aa3037 (fix/firedrake-2026-geometric-dimension from https://github.com/hoffmaao/icepack2.git)
+```
+
+A checkout that is not a clone, or that carries local changes, is reported and
+left alone rather than reset: at a site still holding the rsynced copy, move it
+aside (`mv icepack2 icepack2.rsynced`) and run the script again. When the pull
+request merges, override `ICEPACK2_REMOTE`, `ICEPACK2_REF` and `ICEPACK2_SHA` to
+follow `main` and change the defaults in `install_deps.sh` in the same pass;
+`tests/test_icepack2_pin.py` pins them, so that edit is a deliberate one. As of
+22 September 2026 the workstation and Rice carried these edits and Quartz ran a
+clean `40e848b`, which is the disagreement the pin ends.
+
+Two more gaps surfaced here: `/tmp` is not writable on the login
 nodes (the script sets `TMPDIR`), and the `gmsh` wheel dlopens `libGLU.so.1`.
 
 `verify.sbatch` proves the build works across ranks: four tasks under `srun`,
@@ -348,8 +374,9 @@ year, resuming through `ISMIP7_AUTO_RESUME=1`. Each driver owns its end year
 and the runner does not default `ISMIP7_T_END`; the chain reads the value the
 run used from the driver's `Time-stepping: <start>-><end>` line. At 1000 m /
 10 km on 64 ranks under `scpc_gamg`, 24 h buys at most 140 simulated years, so
-a full projection is about three links; the older 2500 m Cascade Lake
-configuration ran 26 min a year, i.e. 55 years a link and about six.
+a full projection is about three links. At Rice's default of 32 ranks on one
+Cascade Lake node, 31 min a year buys about 46 years a link, so a full
+projection is about seven.
 
 ```bash
 submit.sh projection ISMIP7_EXPERIMENT=control
@@ -398,13 +425,15 @@ final checkpoint for the successor.
 | full 11-experiment set at 2500 m | | | | 15,000 |
 | 1000 m / 10 km forward, per simulated year (Quartz, `scpc_gamg`) | 64 | under 70 GB | 10 min | 11 |
 | 1000 m / 10 km projection, 285 years (Quartz, `scpc_gamg`) | 64 | under 70 GB | 2 days | 3,040 |
+| 1000 m / 10 km forward, per simulated year (Rice, `scpc_gamg`) | 32 | under 180 GB | 31 min | 16 |
 
-The two 1000 m rows are the production configuration, from
+The two Quartz rows are the production configuration, from
 `antarctica/TIMING_MATRIX_QUARTZ_SCPC_GAMG.md`: the transient loop of a
 ten-step lane at `dt = 0.05` under the matrix's strict contract, extrapolated.
 Setup, forcing updates and output are not in them, and the memory is 64 times
-the largest rank's peak. The rows above them are whole runs on Cascade Lake
-under `full_mumps`.
+the largest rank's peak. The Rice row is a 1 km control from a transferred
+2 km MAP on one Cascade Lake node (job 1592597), 92 s per `dt = 0.05` step.
+The 2500 m and 2 km rows are whole runs on Cascade Lake under `full_mumps`.
 
 Per iterate at 2500 m on 12 ranks: forward median 1081 s (p10 932, p90 1365),
 adjoint 92 s, iterate 1174 s. The adjoint is 8% of the iterate, so the cost
@@ -416,10 +445,11 @@ independent, so a handful of nodes finishes it inside a week.
 
 ## Open items
 
-- Rice forwards are fixed at 12 ranks because that is what was measured there.
-  Quartz forwards take 64, the fastest production-mesh lane of
-  `antarctica/TIMING_MATRIX_QUARTZ_SCPC_GAMG.md`. Going higher at Rice is
-  meaningful once the partition probe comes back clean. (issue #45)
+- Rice forwards take 32 ranks and 180 GB, one Cascade Lake node. The
+  partition probe on the 1 km / 10 km mesh (job 1592757, 22 September 2026)
+  reports ghost/owned 0.010 at 32 ranks (max 0.017, halo 1.0 % of owned),
+  so the build partitions by locality and rank counts up to a node are
+  meaningful there. The forward cost is the Rice row of the table above.
 - An inversion factors the complete mixed Jacobian with MUMPS, which sets its
   memory; `tlm_adjoint` differentiates through that solve, so no setting
   changes it. Cluster forwards took the field split this item asked for:

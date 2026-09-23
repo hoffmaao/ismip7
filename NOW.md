@@ -10,7 +10,7 @@ is an index.
 **Claim the card before you start a run or an inversion.** A card in
 Claimed for more than 24 hours with no comment reads as unclaimed.
 
-Generated: 2026-09-22 18:22 UTC. 18 blocking, 9 owed, 0 after the deadline, 7 unverified.
+Generated: 2026-09-23 00:48 UTC. 16 blocking, 10 owed, 0 after the deadline, 7 unverified.
 
 ## Blocking the submission
 
@@ -33,8 +33,6 @@ Decisions first: they have the longest lead time and they gate the runs.
 | [30](https://github.com/icepack/ismip7/issues/30) | melt: DG0 melt totals are uncalibrated, the per-basin K was fitted under CG1 | needs-run | group | local | verified open |
 | [41](https://github.com/icepack/ismip7/issues/41) | forcing: re-run audit_forcing_versions.py immediately before the production matrix | needs-run | group | quartz, nots, midway | unverifiable-run |
 | [42](https://github.com/icepack/ismip7/issues/42) | melt: confirm every submitted run read the current per-basin K calibration | needs-check | group | local | unverifiable-run |
-| [46](https://github.com/icepack/ismip7/issues/46) | solver: the inversion depends on uncommitted icepack2 edits that exist on one workstation | needs-check | rice | nots | verified open |
-| [17](https://github.com/icepack/ismip7/issues/17) | protocol: settle the ligroundf sign convention (#22) | needs-upstream | upstream | upstream | fresh, unverified by design |
 | [40](https://github.com/icepack/ismip7/issues/40) | protocol: confirm the submission round and its deadline | needs-upstream | upstream | upstream | unverifiable-run |
 
 ## Owed
@@ -50,6 +48,7 @@ Decisions first: they have the longest lead time and they gate the runs.
 | [68](https://github.com/icepack/ismip7/issues/68) | inversion: a chained link re-derives the auto log-velocity weight and changes the objective | needs-check | rice | nots | verified open |
 | [18](https://github.com/icepack/ismip7/issues/18) | protocol: what goes in the forcing field of an OCX filename (#17) | needs-upstream | upstream | upstream | fresh, unverified by design |
 | [78](https://github.com/icepack/ismip7/issues/78) | forcing: CESM2-WACCM 2300 reads a padded 2290-2299 atmosphere mean over a held 2299 ocean, and upstream has not said whether runs end in 2299 | needs-upstream | upstream | n/a | verified open |
+| [81](https://github.com/icepack/ismip7/issues/81) | transfer: a MAP transferred onto a buffered mesh is extrapolated into the buffer | n/a | unassigned | n/a | verified open |
 
 ## Claimed now
 
@@ -81,11 +80,11 @@ production run or a group decision.
 
 | source | items |
 |---|---|
-| `src:readiness` | 13 |
-| `src:submission-readme` | 12 |
+| `src:readiness` | 12 |
+| `src:submission-readme` | 11 |
 | `src:matrix-status` | 2 |
 | `src:topic-doc` | 4 |
-| `src:runbook` | 4 |
+| `src:runbook` | 3 |
 | `src:open-pr` | 2 |
 
 ## After the deadline

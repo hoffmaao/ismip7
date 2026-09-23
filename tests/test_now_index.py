@@ -102,7 +102,23 @@ def _gh_ready():
                           capture_output=True).returncode == 0
 
 
-@pytest.mark.skipif(not _gh_ready(), reason="gh is absent or not authenticated")
+def _gh_reads_board():
+    r"""The board is a ProjectV2, which a token reads only with a project scope.
+
+    `gh auth status` lists the scopes of a classic token. Where it lists none
+    (a fine-grained or environment token) the query itself decides.
+    """
+    if not _gh_ready():
+        return False
+    out = subprocess.run(["gh", "auth", "status"], capture_output=True,
+                         text=True).stdout
+    scopes = re.search(r"Token scopes:(.*)", out)
+    return scopes is None or re.search(r"'(read:)?project'", scopes.group(1)) is not None
+
+
+@pytest.mark.skipif(not _gh_reads_board(),
+                    reason="gh is absent, not authenticated, or lacks read:project "
+                           "(gh auth refresh -s read:project)")
 def test_now_index_matches_the_open_issues():
     r = subprocess.run([sys.executable, str(BUILD), "--check"],
                        capture_output=True, text=True)

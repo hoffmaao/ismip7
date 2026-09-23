@@ -738,6 +738,7 @@ redeclare those literals.
 | `ISMIP7_CLIM_SCENARIO` / `_START` / `_END` | reference-climate pool: the scenario pooled with `historical`, and the window, shared by the control's SMB climatology and the projections' aSMB re-reference through `icepack2_tools/climatology.py`. A partial pool warns | `ssp126` / `2000` / `2029` |
 | `ISMIP7_H_CLAMP` | thickness floor (m) | `0` |
 | `ISMIP7_NO_CALVING_TERMINUS` | drop the calving-terminus BC | unset |
+| `ISMIP7_MAX_SPEED` | peak diagnostic speed (m/yr) above which a solve that reports convergence is treated as failed and handed to the rescue ladder; `0` disables the check. The default sits above the fastest ice measured anywhere (about 17 km/yr) and at the speed the Lambert/Amery trough reached the step before a 1 km control ran away to 2.5e6 m/yr. The two speed-limiter rungs are held to the larger of this and `3 * ISMIP7_U_LIM`, because a node the limiter pins settles above `ISMIP7_U_LIM` | `20000` |
 | `ISMIP7_SUBCYCLES` / `ISMIP7_RESCUE_MAXIT` | dt-subcycle rescue ladder, and the Newton cap on its rungs | `1,4,16` / `600` |
 | `ISMIP7_H_OCEAN` / `ISMIP7_K_LIM` | front backstops read by `scripts/simulation.py`: the thickness (m) at which the ice-free ocean drag ramps to zero, and the speed-limiter coefficient the rescue ladder raises for a rescue solve | `10.0` / `1e-3` |
 | `ISMIP7_ALPHA_GL` | grounding-line coercivity, Budd only, read by `scripts/simulation.py` and `scripts/inversion_icepack2.py` | `0.5` (`0` for RC) |

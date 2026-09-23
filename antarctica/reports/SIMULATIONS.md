@@ -184,6 +184,8 @@ Core 7 at 32 km, collapse mode ISMIP7_FRACTURE=mask (done), IU.
 - **Cost per model year:** one link of 1 h 11 min for 286 model years
 - **Results path:** antarctica/results/ssp585_cesm2_waccm_p2_mask_32000_*
 - **Audit:** OFF TRACK against the present-day envelopes, as an ssp585 run at 2300 is; resid 0.0000 on all 2860 rows, no rescue or subcycle event
+- **ISMIP7 output written:** 286 years banked, 2015 to 2300, with the ten native scalars (ISMIP7_OUTPUT=1)
+- **Scalars processed:** ismip7-scalars 0.1.0 (3f36eb3) on the tree regridded for issue #12, as its own reference stamped 2016, job 10595619 with compare_scalars.py at b73d3ff: every gate holds. At 2300 slvaf is -457.9 mm against the native -484.9 mm, of which -16.9 mm is the tool's area factor and +43.9 mm the volume above flotation of partly grounded 8 km pixels; tendlibmassbffl is -4,647 against -124,591 Gt/yr, the native value being melt booked where no floating ice takes it. antarctica/reports/scalar_comparison_32km.md
 - **Notes:** collapse-mode evidence for issue #10, not the submission's core 7. Full record: antarctica/reports/core07_ssp585_cesm2_waccm_32km_p2_mask.md
 
 ### core07-32km-ssp585-cesm2waccm-p2-mask-front
@@ -208,6 +210,8 @@ Core 7 at 32 km, collapse mode ISMIP7_FRACTURE=mask_front (done), IU.
 - **Cost per model year:** one link of 1 h 11 min for 286 model years
 - **Results path:** antarctica/results/ssp585_cesm2_waccm_p2_mask_front_32000_*
 - **Audit:** OFF TRACK against the present-day envelopes, as an ssp585 run at 2300 is; resid 0.0000 on all 2860 rows, no rescue or subcycle event
+- **ISMIP7 output written:** 286 years banked, 2015 to 2300, with the ten native scalars (ISMIP7_OUTPUT=1)
+- **Scalars processed:** ismip7-scalars 0.1.0 (3f36eb3) on the tree regridded for issue #12, as its own reference stamped 2016, job 10595620 with compare_scalars.py at b73d3ff: every gate holds. At 2300 slvaf is -451.7 mm against the native -478.6 mm, of which -16.9 mm is the tool's area factor and +43.8 mm the volume above flotation of partly grounded 8 km pixels; tendlibmassbffl is -5,368 against -124,561 Gt/yr, the native value being melt booked where no floating ice takes it. antarctica/reports/scalar_comparison_32km.md
 - **Notes:** collapse-mode evidence for issue #10, not the submission's core 7. Full record: antarctica/reports/core07_ssp585_cesm2_waccm_32km_p2_mask_front.md
 
 ### core07-32km-ssp585-cesm2waccm-p2-none
@@ -232,6 +236,8 @@ Core 7 at 32 km, collapse mode ISMIP7_FRACTURE=none (done), IU.
 - **Cost per model year:** one link of 1 h 11 min for 286 model years
 - **Results path:** antarctica/results/ssp585_cesm2_waccm_p2_none_32000_*
 - **Audit:** OFF TRACK against the present-day envelopes, as an ssp585 run at 2300 is; resid 0.0000 on all 2860 rows, no rescue or subcycle event
+- **ISMIP7 output written:** 286 years banked, 2015 to 2300, with the ten native scalars (ISMIP7_OUTPUT=1)
+- **Scalars processed:** ismip7-scalars 0.1.0 (3f36eb3) on the tree regridded for issue #12, as its own reference stamped 2016, job 10595618 with compare_scalars.py at b73d3ff: every gate holds. At 2300 slvaf is -350.8 mm against the native -373.6 mm, of which -16.6 mm is the tool's area factor and +39.4 mm the volume above flotation of partly grounded 8 km pixels; tendlibmassbffl is -43,340 against -123,427 Gt/yr, the native value being melt booked where no floating ice takes it. antarctica/reports/scalar_comparison_32km.md
 - **Notes:** collapse-mode evidence for issue #10, not the submission's core 7. Full record: antarctica/reports/core07_ssp585_cesm2_waccm_32km_p2_none.md
 
 ### test-1km-budd-half-step

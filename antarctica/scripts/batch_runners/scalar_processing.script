@@ -8,7 +8,8 @@
 # otherwise (0 every gate holds, 1 a gate fails, 2 an input is missing), so
 # sacct carries the verdict.
 #
-# From antarctica/:
+# From antarctica/ (measured on Quartz, September 2026: 3 min and at most
+# 3.7 GiB for a 286-year experiment on the 8 km grid):
 #
 #   scripts/batch_runners/submit.sh script scripts/batch_runners/scalar_processing.script \
 #       --cd antarctica --queue short --tasks 1 --mem 16G --time 01:00:00 \

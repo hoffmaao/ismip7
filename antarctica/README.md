@@ -1321,7 +1321,9 @@ errors in variable presence, naming, numerical, spatial, consistency and
 attribute tests, and 93 time errors, which are the three-per-file
 experiment-length checks a two-year run cannot satisfy. `ismip7-scalars` 0.1.0
 then wrote `sla20`, `slg20` and `slvaf`, each with its glacier and ice-cap
-variant, in NetCDF and CSV.
+variant, in NetCDF and CSV. On three full-length 32 km ssp585 runs (IU Quartz,
+23 September 2026) every identity `compare_scalars.py` checks holds, and
+`reports/scalar_comparison_32km.md` sets out what differs and why.
 
 ### The run log (`build_runlog.py`)
 

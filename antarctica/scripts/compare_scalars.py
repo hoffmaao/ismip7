@@ -33,12 +33,16 @@ year by year and splits every difference into named parts:
   covered part of a pixel, so it is multiplied by the pixel coverage from the
   writer's overlap cache; libmassbffl is a mean over the part floating at year
   end, so it is multiplied by sftflf. The tool sums both over whole pixels.
-- d_resid, what is left against N. For iareagr, iareafl, tendlicalvf,
-  tendligroundf and, with the overlap cache, tendacabf it is zero up to
-  float32 and the CSV's seven digits, because the writer's remap is
-  conservative. For lim it is the mass in cells of 1 m or less, which lithk
-  leaves out; for limnsw the pixel averaging of a nonlinear integrand; for
-  tendlibmassbffl the melt booked outside ice that floats at year end.
+- d_resid, what is left against N. For tendlicalvf, tendligroundf, the ice
+  area iareagr + iareafl and, with the overlap cache, tendacabf it is zero up
+  to float32 and the CSV's seven digits, because the writer's remap is
+  conservative. A writer that writes floating cells within a centimetre of
+  flotation as grounded (isschecker's elevation tolerance) moves area from
+  iareafl to iareagr, so each of the two may differ while their sum holds;
+  the moved area is reported. For lim d_resid is the mass in cells of 1 m or
+  less, which lithk leaves out; for limnsw the pixel averaging of a nonlinear
+  integrand; for tendlibmassbffl the melt booked outside the writer's
+  year-end floating mask.
 
 The sea-level contributions get native counterparts from the model's lim and
 limnsw, with the tool's ocean area A_O = 3.625e14 m2:
@@ -83,7 +87,7 @@ SCALARS = ST_SCALARS + tuple(s for s, _ in FL_SCALARS) + SEA_LEVEL
 UNITS = dict({s: "kg" for s in ("lim", "limnsw")}, iareagr="m2", iareafl="m2",
              **{s: "kg s-1" for s, _ in FL_SCALARS}, **{s: "m" for s in SEA_LEVEL})
 # forbidden-policy fields: whole-pixel means, so a grid sum is the mesh sum
-EXACT = ("iareagr", "iareafl", "tendlicalvf", "tendligroundf")
+EXACT = ("tendlicalvf", "tendligroundf")
 ZERO = ("tendlibmassbfgr", "tendlifmassbf")
 GRID_FILES = {"af2": "af2_AIS_{res}000m_v1.nc", "maxmask1": "maxmask1_AIS_{res}000m_v0.nc"}
 MARKERS = (2015, 2050, 2100, 2200, 2300)
@@ -422,6 +426,13 @@ def compare(a):
         for s in EXACT:
             gates["forbidden-policy sums against N"].check(
                 f"{s} {yr}", C[s] - N[s], CSV_DIGITS * abs(N[s]) + F32 * L1[s])
+        # the two areas may trade near flotation, their sum may not, and area
+        # only ever moves to the grounded side
+        area_tol = CSV_DIGITS * (abs(N["iareagr"]) + abs(N["iareafl"])) + F32 * (L1["iareagr"] + L1["iareafl"])
+        gates["forbidden-policy sums against N"].check(
+            f"ice area {yr}", (C["iareagr"] + C["iareafl"]) - (N["iareagr"] + N["iareafl"]), area_tol)
+        gates["forbidden-policy sums against N"].check(
+            f"grounded area gained {yr}", min(C["iareagr"] - N["iareagr"], 0.0), area_tol)
         if cov is not None:
             gates["tendacabf with coverage against N"].check(
                 yr, C["tendacabf"] - N["tendacabf"],
@@ -485,14 +496,18 @@ def warnings_for(res, strict_share=RESID_SHARE):
         v, yr = share(s, "d_fill")
         out.append(f"fill convention, {s}: the tool's whole-pixel sum minus the "
                    f"coverage-weighted one is {100 * v:+.2f}% of max |N| ({yr})")
+    moved = [r for r in by["iareagr"] if r["d_resid"] > CSV_DIGITS * abs(r["N"]) + F32 * r["L1"]]
+    if moved:
+        m = max(moved, key=lambda r: r["d_resid"])
+        out.append(f"near flotation: {len(moved)} years write floating area as grounded, at most "
+                   f"{m['d_resid']:.3e} m2 ({m['year']})")
     if not res["coverage"]:
         out.append("no --overlap: tendacabf's fill convention is not undone, so its "
                    "residual carries it")
     m = max(by["tendlibmassbffl"], key=lambda r: abs(r["d_resid"]))
     out.append(f"tendlibmassbffl: the model's value carries "
-               f"{-m['d_resid'] * SECONDS_PER_YEAR / 1e12:+.1f} Gt/yr booked off ice that "
-               f"floats at year end ({m['year']}), since it books the melt requested of "
-               f"every cell, ice-free ones included")
+               f"{-m['d_resid'] * SECONDS_PER_YEAR / 1e12:+.1f} Gt/yr outside the writer's "
+               f"year-end floating mask ({m['year']})")
     for s in ("limnsw",) + SEA_LEVEL:
         v, yr = share(s, "d_resid")
         if abs(v) > strict_share:

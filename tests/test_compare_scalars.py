@@ -242,7 +242,7 @@ def tool_scalars(sub, datapath, params, refyear=2016):
 
 
 def build(tmp_path, *, rhow=1024.0, flip=False, moving_bed=False, shift_tool=False,
-          perturb_sftgrf=False, csv_off=False):
+          perturb_sftgrf=False, csv_off=False, ground_near=False):
     r"""A submission, its grids, params.nc, the tool's output and the
     writer's overlap cache; returns the argument list for compare_scalars."""
     sub = tmp_path / "tree" / "AIS" / "RICE" / "icepack2" / "CORE" / "C007"
@@ -252,13 +252,19 @@ def build(tmp_path, *, rhow=1024.0, flip=False, moving_bed=False, shift_tool=Fal
         d.mkdir(parents=True)
     f, cov = model_fields(moving_bed=moving_bed)
     N = native_scalars(f, cov)
+    grid = {v: f[v].copy() for v in ("lithk", "topg", "sftgrf", "sftflf") + FL_VARS}
+    if perturb_sftgrf:
+        grid["sftgrf"][1, 0, 0] = 0.0
+    if ground_near:
+        # the writer's rule for a cell a few millimetres afloat: grounded in
+        # the masks, so no floating melt there, while the model's own areas
+        # still count it floating
+        grid["sftflf"][1, 0, 4], grid["sftgrf"][1, 0, 4] = 0.0, 1.0
+        grid["libmassbffl"][1, 0, 4] = np.nan
     for v in ("lithk", "topg", "sftgrf", "sftflf"):
-        cube = f[v].copy()
-        if perturb_sftgrf and v == "sftgrf":
-            cube[1, 0, 0] = 0.0
-        write_gridded(sub, v, cube, flux=False)
+        write_gridded(sub, v, grid[v], flux=False)
     for v in FL_VARS:
-        write_gridded(sub, v, f[v], flux=True)
+        write_gridded(sub, v, grid[v], flux=True)
     # the writer takes each scalar from the CSV's seven digits into float32
     rows = [{"year": yr, **{s: f"{N[s][k]:.6e}" for s in N}} for k, yr in enumerate(YEARS)]
     for s in N:
@@ -355,6 +361,16 @@ def test_one_grounded_pixel_off_breaks_the_area_identity(tmp_path):
     args, _, _ = build(tmp_path, perturb_sftgrf=True)
     assert cs.main(args) == 1
     assert "| FAIL |" in gate_line(tmp_path, "forbidden-policy sums against N")
+
+
+def test_floating_area_written_as_grounded_trades_between_the_areas(tmp_path):
+    args, _, _ = build(tmp_path, ground_near=True)
+    assert cs.main(args) == 0, (tmp_path / "cmp.md").read_text()
+    rows = rows_of(tmp_path)
+    moved = rows[("iareagr", 2016)]["d_resid"]
+    assert moved == pytest.approx(DX * DX, rel=1e-6)
+    assert rows[("iareafl", 2016)]["d_resid"] == pytest.approx(-moved, rel=1e-6)
+    assert "near flotation: 1 years" in (tmp_path / "cmp.md").read_text()
 
 
 def test_a_moving_bed_is_caught(tmp_path):

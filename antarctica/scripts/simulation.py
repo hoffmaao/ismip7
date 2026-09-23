@@ -67,6 +67,10 @@ from icepack2_tools.mpi_stats import (
     global_range,
 )
 from icepack2_tools.boundary import load_boundary_ids
+from icepack2_tools.speed_bound import (
+    limiter_speed_bound,
+    speed_bound_violation,
+)
 from icepack2_tools.geometry import sample_to_geometry
 from icepack2_tools.naming import map_basename
 from icepack2_tools.front import (
@@ -1467,6 +1471,7 @@ def setup_model(restart_from=None, *, allow_timing_cache_a_ref=False):
         # Rescue speed limiter (residual laws): live Constant, 0 = inert.
         "k_lim": k_lim if use_residual else None,
         "k_lim_rescue": k_lim_rescue if use_residual else 0.0,
+        "u_lim": u_lim if use_residual else 0.0,
         # Reference/frozen fields persisted into every checkpoint so a restart
         # is self-contained and rank-count-robust (no recompute from evolved h).
         "theta": theta_f,
@@ -2044,33 +2049,27 @@ def run_simulation(
         )
         return stat
 
-    def _speed_bound_violation(label):
+    def _speed_bound_violation(label, use_lim=False):
         r"""The peak speed and where it is, when the solved velocity is faster
-        than any ice can be, else ``None``.
-
-        The step loop asks the solver whether it converged and nothing else, so
-        a solve that converges onto a runaway is accepted and carried forward.
-        That is how the Lambert/Amery trough destroys a run: SNES reason=2,
-        function norm below 1, peak speed 2.5e6 m/yr, step accepted. Raising
-        this as a convergence failure hands the step to the rescue ladder and
-        then the subcycles, which is what a hard step is supposed to get.
+        than any ice can be, else ``None``. A limiter rung is held to
+        ``limiter_speed_bound``, since the nodes it pins settle above u_lim.
         """
         bound = _max_speed_bound()
-        if bound <= 0.0:
-            return None
-        speed_diag.interpolate(sqrt(fd.dot(u_transport, u_transport)))
-        u_max, u_max_xy = global_extreme_location(
-            speed_diag, speed_diag_xy, mode="max"
+        if use_lim:
+            bound = limiter_speed_bound(bound, ctx.get("u_lim", 0.0))
+        violation = speed_bound_violation(
+            u_transport, speed_diag, speed_diag_xy, bound
         )
-        if u_max <= bound:
+        if violation is None:
             return None
+        u_max, u_max_xy = violation
         where = "(" + ", ".join(f"{v:.0f}" for v in u_max_xy) + ")"
         PETSc.Sys.Print(
             f"  {label}: solve converged onto {u_max:.6e} m/yr at {where}, "
             f"over the {bound:g} m/yr bound (ISMIP7_MAX_SPEED); "
             "treating as a failed solve"
         )
-        return u_max, u_max_xy
+        return violation
 
     def _record_transport(label, elapsed, mass_residual_gt=None):
         nonlocal transport_solve_count
@@ -2348,7 +2347,9 @@ def run_simulation(
                     k_lim_c.assign(k_rescue if use_lim else 0.0)
                 try:
                     action()
-                    if _speed_bound_violation(f"step-{k}-{label}") is not None:
+                    if _speed_bound_violation(
+                        f"step-{k}-{label}", use_lim
+                    ) is not None:
                         continue
                     if stype != snes_type0 or use_lim:
                         PETSc.Sys.Print(f"  Step {k}: recovered via {label}")

@@ -261,7 +261,8 @@ vertex-sampled, the 865.0 Gt/yr table, 21 September 2026):
    K50, which is where a term-1-only fit should sit: the notebook's own K50
    applies 1571 Gt/yr against the 1067 observed, because terms 2 to 4 pull K
    up. The per-basin adjustment the protocol offers is a temperature offset
-   at fixed K, not a per-basin K; that is the next change.
+   at fixed K, not a per-basin K: `calibrate_deltaT.py` and
+   `ISMIP7_DELTAT_PER_BASIN_NPZ` (antarctica/README.md, section 5).
 
 ## Incompatibilities
 

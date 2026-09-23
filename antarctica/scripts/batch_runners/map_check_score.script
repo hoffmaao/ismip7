@@ -1,0 +1,73 @@
+#!/bin/bash
+
+# Score one MAP at t = 0 (scripts/score_map.py --json): the grounding-line
+# discharge the re-solved velocity carries against the observed, overall and
+# per speed band, with the transfer fill counts and the fluidity prior range.
+# On the MAP's own mesh (ISMIP7_MESH=checkpoint, the cold continuation) or on
+# a prepared map-check cache (ISMIP7_MAP_CHECK_RESTART). Under Budd,
+# ISMIP7_MAP_CHECK_CENSUS names where the shelf-gate census goes.
+
+#SBATCH -o ant_map_check_score_%j.txt
+#SBATCH -e ant_map_check_score_%j.err
+
+# Resources, the account and the partition come from submit.sh, which reads
+# this cluster's sites/<name>.sh; nothing here names a cluster. Submit with
+#   scripts/batch_runners/submit.sh script scripts/batch_runners/map_check_score.script --cd antarctica ...
+# as manage_map_check.py does.
+cd "${SLURM_SUBMIT_DIR:-.}"
+# The site half only: every model setting arrives through --export, and
+# site_env.sh's defaults (ISMIP7_MESH, ISMIP7_FRICTION) are not this job's.
+. scripts/batch_runners/site_core.sh
+ismip7_activate
+ismip7_persistent_jit_cache
+ismip7_banner
+
+map="${ISMIP7_MAP:?ISMIP7_MAP is required (the MAP checkpoint)}"
+out="${ISMIP7_MAP_CHECK_SCORE_JSON:?ISMIP7_MAP_CHECK_SCORE_JSON is required}"
+status="${ISMIP7_MAP_CHECK_STATUS:?ISMIP7_MAP_CHECK_STATUS is required}"
+restart="${ISMIP7_MAP_CHECK_RESTART:-}"
+census="${ISMIP7_MAP_CHECK_CENSUS:-}"
+[ -f "${map}" ] || { echo "MAP not found: ${map}" >&2; exit 2; }
+
+write_status() {
+    status_tmp="${status}.tmp.${SLURM_JOB_ID:-$$}"
+    printf '%s job_id=%s timestamp=%s\n' \
+        "$1" "${SLURM_JOB_ID:-unknown}" "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
+        > "${status_tmp}"
+    mv -f "${status_tmp}" "${status}"
+}
+
+write_status "running phase=score"
+set +e
+if [ -n "${restart}" ]; then
+    ismip7_mpirun "${SLURM_NTASKS}" python -u scripts/score_map.py \
+        --json "${out}" --restart "${restart}" "${map}"
+else
+    ismip7_mpirun "${SLURM_NTASKS}" python -u scripts/score_map.py \
+        --json "${out}" "${map}"
+fi
+score_rc=$?
+set -e
+if [ "${score_rc}" -ne 0 ]; then
+    write_status "failed phase=score exit_code=${score_rc}"
+    exit "${score_rc}"
+fi
+
+if [ -n "${census}" ]; then
+    # The shelf-gate census on the MAP's own geometry. check_budd_map.py reads
+    # the law from ISMIP7_CHECK_FRICTION, never from an inherited ISMIP7_FRICTION.
+    write_status "running phase=census"
+    set +e
+    ISMIP7_CHECK_FRICTION="${ISMIP7_FRICTION:-budd}" \
+        ismip7_mpirun "${SLURM_NTASKS}" python -u scripts/check_budd_map.py "${map}" \
+        > "${census}.tmp" 2>&1
+    census_rc=$?
+    set -e
+    mv -f "${census}.tmp" "${census}"
+    if [ "${census_rc}" -ne 0 ]; then
+        write_status "failed phase=census exit_code=${census_rc}"
+        exit "${census_rc}"
+    fi
+fi
+
+write_status "finished phase=score exit_code=0"

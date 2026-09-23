@@ -493,6 +493,36 @@ Read-only diagnostics:
 `region_budget.py` and `score_map.py` take the run's environment, which must
 match the inversion's.
 
+### Is the law acting on ice that matters (`probe_front_flux.py`)
+
+A calving law can only remove ice the front runs through, so
+`ISMIP7_FRONT_HMIN`, the thickness that defines the front, decides which ice
+the law sees. It is one metre by default, and BedMachine averaged onto a cell
+smears the coastline, so the outermost ice cells hold a fraction of a calving
+face. Measured on a 2 km state (22 September 2026):
+
+| `ISMIP7_FRONT_HMIN` | front length | mean front thickness | flux across it |
+|---|---|---|---|
+| 1 m | 44,500 km | 41 m | 80 Gt/yr |
+| 50 m | 82,000 km | 93 m | 219 Gt/yr |
+| 100 m | 100,000 km | 149 m | 533 Gt/yr |
+| 150 m | 112,000 km | 202 m | 941 Gt/yr |
+
+Against an observed Antarctic calving flux of about 1265 Gt/yr (Rignot et al.
+2013). At one metre the front is a thin fringe carrying six percent of that, so
+a law tuned for a 200 m face removes almost nothing whatever its own
+threshold, the run's calving tally stays near zero, and the submitted
+`licalvf` does too. At 150 m the front reads the thickness BedMachine shows at
+the calving face.
+
+```bash
+python antarctica/scripts/probe_front_flux.py <state>.h5 --hmin 1,50,100,150
+```
+
+reports that table for any forward state or MAP final save, so the threshold
+is chosen against numbers. It solves nothing and reads only the thickness and
+the velocity.
+
 ### Calving front on a buffered mesh (`ISMIP7_CALVING`)
 
 A buffered mesh has no calving sink: ice reaching the 2015 outline flows into

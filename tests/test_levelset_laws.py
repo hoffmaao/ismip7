@@ -216,6 +216,11 @@ def test_fixed_anchors_on_the_t0_extent_not_the_restarted_one():
     h_now = Function(Q0).interpolate(H_ICE * (x < 0.25))   # already retreated
     phi0 = initial_distance(mesh, h0, h_min=HMIN)
     ls = LevelSet(mesh, h_now, law="fixed", h_min=HMIN, phi_init=phi0)
+    # the forward advances before it asks for the masks, and the advance
+    # re-solves phi from the current extent, so the bar must survive it
+    b = Function(Q0).interpolate(Constant(BED_FLOATING))
+    u = Function(VectorFunctionSpace(mesh, "CG", 1))
+    assert ls.advance(0.1, u, h_now, b) == 0.0
     beyond, _ = ls.calving_masks()
     xc = _xc(mesh)
     # the bar is the ORIGINAL front, so the band between them is still open

@@ -60,10 +60,17 @@ source cell up to half a reference cell outside it (`mesh.tolerance`, 0.5 by
 default) and evaluates that cell's linear basis there, so ring points within
 about a kilometre of the 2 km front are extrapolated. Measured on the first
 Quartz pass (22 September, jobs 10569251 and 10569254): the transferred prior
-spanned [-218.69, 1028.05] from a source spanning [1.00, 783.69]. Inside a cell
-linear interpolation stays within the cell's vertex values, so a value beyond
-the source field's range can only be an extrapolation; located dofs are
-clamped to the source's range, component by component, and counted.
+spanned [-218.69, 1028.05] from a source spanning [1.00, 783.69]; the same
+snapshot onto the buffered 5 km production mesh gave [-164.7, 921.1] (issue
+#81). The transfer therefore locates strictly: the source mesh's tolerance is
+1e-8 for the interpolation and restored afterwards, so a dof the source does
+not contain is a fill whatever its distance from the front. Behind that,
+inside a cell linear interpolation stays within the cell's vertex values, so
+a value beyond the source field's range can only be an extrapolation;
+located dofs are still clamped to the source's range, component by
+component, and counted, as a guard on the tolerance. The snapshot rows below
+were measured before strict location, with the clamp alone: the 996 clamped
+prior dofs they report are the band that now takes the fill.
 
 Every filled or clamped field prints one `Transfer fill:` line with both
 counts, the counts go into the context (`ctx["transfer_fill"]`), the cache

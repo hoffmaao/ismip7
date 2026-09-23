@@ -757,7 +757,7 @@ def setup_model(restart_from=None, *, allow_timing_cache_a_ref=False):
             f"  Transfer fill: {_name}: {_info['missing']} of {_info['total']} "
             f"dofs lie outside the source mesh; filled with {_info['fill']}; "
             f"{_info['clamped']} located dofs clamped to the source range "
-            "(extrapolated from a boundary cell)"
+            "(beyond it after strict location)"
         )
     if mesh_fn and not _filled:
         PETSc.Sys.Print(

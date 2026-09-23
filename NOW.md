@@ -10,7 +10,7 @@ is an index.
 **Claim the card before you start a run or an inversion.** A card in
 Claimed for more than 24 hours with no comment reads as unclaimed.
 
-Generated: 2026-09-23 18:50 UTC. 16 blocking, 7 owed, 0 after the deadline, 7 unverified.
+Generated: 2026-09-23 19:36 UTC. 16 blocking, 6 owed, 0 after the deadline, 7 unverified.
 
 ## Blocking the submission
 
@@ -25,8 +25,8 @@ Decisions first: they have the longest lead time and they gate the runs.
 | [38](https://github.com/icepack/ismip7/issues/38) | submission: settle the contributor names, date, source_id, ism_id and PPE participation | needs-decision | group | group | unverifiable-run |
 | [39](https://github.com/icepack/ismip7/issues/39) | submission: request the Globus upload folder | needs-decision | group | group | unverifiable-run |
 | [11](https://github.com/icepack/ismip7/issues/11) | melt: run check_melt_bound.py --ocx before core 11 runs on the OCX product | needs-run | iu | quartz, nots, midway | fresh, unverified by design |
-| [12](https://github.com/icepack/ismip7/issues/12) | output: re-run isschecker at 0.5.0 and record the version in the README | needs-run | group | local | fresh, unverified by design |
-| [13](https://github.com/icepack/ismip7/issues/13) | output: run ismip7-scalar-processing for sla20, slg20 and slvaf | needs-run | group | local | fresh, unverified by design |
+| [12](https://github.com/icepack/ismip7/issues/12) | output: re-run isschecker at 0.5.0 and record the version in the README | needs-run | iu | local | fresh, unverified by design |
+| [13](https://github.com/icepack/ismip7/issues/13) | output: run ismip7-scalar-processing for sla20, slg20 and slvaf | needs-run | iu | local | fresh, unverified by design |
 | [24](https://github.com/icepack/ismip7/issues/24) | MAP: 2 km RC and Budd inversions running at Rice under the new prior metric | needs-run | rice | nots | fresh, unverified by design |
 | [27](https://github.com/icepack/ismip7/issues/27) | matrix: the full-length ssp585 is held in the NOTS queue | needs-run | rice | nots | unverifiable-nots |
 | [28](https://github.com/icepack/ismip7/issues/28) | matrix: all 11 cores are superseded and need re-inversion, not only re-running | needs-run | group | nots | verified open |
@@ -45,7 +45,6 @@ Decisions first: they have the longest lead time and they gate the runs.
 | [16](https://github.com/icepack/ismip7/issues/16) | forcing: re-audit the CESM2-WACCM ssp585 fracture before production (#37) | needs-check | group | quartz, nots, midway | fresh, unverified by design |
 | [68](https://github.com/icepack/ismip7/issues/68) | inversion: a chained link re-derives the auto log-velocity weight and changes the objective | needs-check | rice | nots | verified open |
 | [18](https://github.com/icepack/ismip7/issues/18) | protocol: what goes in the forcing field of an OCX filename (#17) | needs-upstream | upstream | upstream | fresh, unverified by design |
-| [78](https://github.com/icepack/ismip7/issues/78) | forcing: CESM2-WACCM 2300 reads a padded 2290-2299 atmosphere mean over a held 2299 ocean, and upstream has not said whether runs end in 2299 | needs-upstream | upstream | n/a | verified open |
 
 ## Claimed now
 
@@ -55,6 +54,8 @@ Work in flight. Do not duplicate it.
 |---|---|---|---|---|
 | [10](https://github.com/icepack/ismip7/issues/10) | collapse: decide the mode for the submission (none, mask, mask_front) | iu | quartz | 2026-09-23 |
 | [11](https://github.com/icepack/ismip7/issues/11) | melt: run check_melt_bound.py --ocx before core 11 runs on the OCX product | iu | quartz, nots, midway | 2026-09-21 |
+| [12](https://github.com/icepack/ismip7/issues/12) | output: re-run isschecker at 0.5.0 and record the version in the README | iu | local | 2026-09-23 |
+| [13](https://github.com/icepack/ismip7/issues/13) | output: run ismip7-scalar-processing for sla20, slg20 and slvaf | iu | local | 2026-09-23 |
 | [24](https://github.com/icepack/ismip7/issues/24) | MAP: 2 km RC and Budd inversions running at Rice under the new prior metric | rice | nots | 2026-09-22 |
 
 ## Unverified
@@ -77,8 +78,8 @@ production run or a group decision.
 
 | source | items |
 |---|---|
-| `src:readiness` | 12 |
-| `src:submission-readme` | 11 |
+| `src:readiness` | 11 |
+| `src:submission-readme` | 10 |
 | `src:matrix-status` | 2 |
 | `src:topic-doc` | 3 |
 | `src:runbook` | 2 |

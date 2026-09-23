@@ -172,10 +172,22 @@ def n_flow():
 # Calving front (icepack2_tools.levelset). ``none`` is the pre-Sep-2026
 # behaviour: on a buffered mesh the front advances freely and never calves.
 CALVING_DEFAULT = "none"
-CALVING_LAWS = ("none", "fixed", "vonmises")
+CALVING_LAWS = ("none", "fixed", "vonmises", "hfb")
 # ISSM defaults for the von Mises thresholds (Morlighem et al. 2016).
 CALVING_SIGMA_MAX_GROUNDED_DEFAULT = "1.0"     # MPa
 CALVING_SIGMA_MAX_FLOATING_DEFAULT = "0.15"    # MPa
+# Horizontal force balance (icepack2_tools.calving_laws): the papers' own
+# defaults. Zero tensile strength is the Buck, Coffey and Lai limit, in which
+# an unbuttressed shelf sits exactly at the threshold; Slater and Wagner's
+# 150 kPa is the value they find consistent with observed fronts, so it is
+# worth running both. The crevasse water is seawater unless a run means
+# meltwater. ratio_max bounds what one step may remove where R_crit has
+# thinned to nothing and never binds on thick ice.
+HFB_SIGMA_MAX_DEFAULT = "0.0"        # MPa, ice tensile strength
+HFB_RHO_C_DEFAULT = "1024.0"         # kg/m3, water in a basal crevasse
+HFB_MODE_DEFAULT = "hfb"             # or zero_stress, the Nye threshold
+HFB_EXPONENT_DEFAULT = "1.0"
+HFB_RATIO_MAX_DEFAULT = "5.0"
 
 
 FRACTURE_MODES = ("none", "mask", "mask_front")
@@ -326,6 +338,34 @@ def auto_resume():
             f"ISMIP7_AUTO_RESUME must be an integer flag (0 to disable), "
             f"got {value!r}"
         ) from None
+
+
+def calving_hfb_parameters():
+    r"""The horizontal-force-balance law's parameters, as a dict for
+    ``icepack2_tools.calving_laws.hfb_calving_rate``.
+
+    ``ISMIP7_CALVING_SIGMA_MAX`` is the ice's tensile strength in MPa and is
+    the one that decides whether a front holds, so it is the knob a
+    calibration turns. The rest are the papers' own and rarely move.
+    """
+    from .calving_laws import HFB_MODES, density_in_model_units
+    mode = os.environ.get("ISMIP7_CALVING_HFB_MODE", HFB_MODE_DEFAULT).lower()
+    if mode not in HFB_MODES:
+        raise ValueError(
+            f"ISMIP7_CALVING_HFB_MODE must be one of {HFB_MODES}, got {mode!r}")
+    return {
+        "sigma_max": float(os.environ.get("ISMIP7_CALVING_SIGMA_MAX",
+                                          HFB_SIGMA_MAX_DEFAULT)),
+        # the knob is in kg/m3, which is how the papers quote it; the law
+        # wants icepack2's own MPa, m, yr
+        "rho_c": density_in_model_units(
+            float(os.environ.get("ISMIP7_CALVING_RHO_C", HFB_RHO_C_DEFAULT))),
+        "mode": mode,
+        "exponent": float(os.environ.get("ISMIP7_CALVING_HFB_EXPONENT",
+                                         HFB_EXPONENT_DEFAULT)),
+        "ratio_max": float(os.environ.get("ISMIP7_CALVING_HFB_RATIO_MAX",
+                                          HFB_RATIO_MAX_DEFAULT)),
+    }
 
 
 def calving_sigma_max():

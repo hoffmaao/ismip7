@@ -1825,6 +1825,11 @@ def run_simulation(
             f"level-set prescribed law (external: {calving_law_obj.describe()})"
             + ("; ISMIP7_FIXED_FRONT is set but ignored for removal"
                if fixed_front else ""))
+    elif calving == "hfb":
+        front_owner = (
+            "level-set horizontal-force-balance law (ISMIP7_CALVING=hfb)"
+            + ("; ISMIP7_FIXED_FRONT is set but ignored for removal"
+               if fixed_front else ""))
     elif calving != "none":
         front_owner = f"level-set {calving} law (ISMIP7_CALVING={calving})" + (
             "; ISMIP7_FIXED_FRONT is set but ignored for removal"
@@ -2445,12 +2450,32 @@ def run_simulation(
         if calving == "fixed":
             _h0 = Function(Q_dg).project(ctx.get("H_init", h))
             phi_init = initial_distance(mesh, _h0, h_min=front_hmin)
+        # The shared level set carries `vonmises` itself; the
+        # horizontal-force-balance law is ours (icepack2_tools.calving_laws),
+        # so it is driven through the same `prescribed` rate the external hook
+        # uses, with the rate rebuilt from the live dual state each advance.
+        ls_law = "prescribed" if calving == "hfb" else calving
         level_set = LevelSet(
-            mesh, h_dg, law=calving, h_min=front_hmin,
+            mesh, h_dg, law=ls_law, h_min=front_hmin,
             sigma_max_grounded=sig_g, sigma_max_floating=sig_f,
             drag_mask=ctx.get("drag_mask"), phi_init=phi_init,
         )
         phi_entry = Function(level_set.Q0)
+    hfb_rate = None
+    if calving == "hfb":
+        from icepack2_tools.calving_laws import hfb_calving_rate
+        from icepack2_tools.runconfig import calving_hfb_parameters
+        _hfb = calving_hfb_parameters()
+        # UFL over the live state, so it follows the geometry and the stress
+        # without being rebuilt: z's subfunctions and h_dg are the run's own.
+        hfb_rate = hfb_calving_rate(
+            z.subfunctions[0], z.subfunctions[1], h_dg, b, level_set.ghat,
+            **_hfb)
+        PETSc.Sys.Print(
+            f"  Calving law: horizontal force balance (Buck 2023, Coffey et "
+            f"al. 2024, Coffey and Lai 2025, Slater and Wagner 2025), "
+            f"sigma_max={_hfb['sigma_max']:g} MPa, mode={_hfb['mode']}, "
+            f"exponent={_hfb['exponent']:g}, ratio_max={_hfb['ratio_max']:g}")
     live_calving_state = None
     if calving_law_obj is not None:
         live_calving_state = LiveCalvingState(z, h_dg, b, level_set)
@@ -2483,7 +2508,7 @@ def run_simulation(
         ls_ice_free = None
         if level_set is not None:
             ext_rate = (calving_law_obj.rate(live_calving_state, t_yr)
-                        if calving_law_obj is not None else None)
+                        if calving_law_obj is not None else hfb_rate)
             last_c_mean = level_set.advance(
                 dt_local, u_vel, h_dg, b, A_map, n_flow_val, rate=ext_rate)
             lsb, calv_frac = level_set.calving_masks()

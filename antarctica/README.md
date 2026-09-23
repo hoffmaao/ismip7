@@ -608,6 +608,54 @@ cleared each step wherever the level set reports ice-free, irreversibly, so a
 calved cell is not regrown and an advanced-into cell is not re-emptied. The run
 log prints one `Calving front owner:` line naming the mechanism in force.
 
+### The resistive-stress law (`ISMIP7_CALVING=hfb`)
+
+The criterion of Buck (2023), Coffey et al. (2024), Coffey and Lai (2025) and
+Slater and Wagner (2025): a front holds while the resistive stress it carries
+stays below what a basal crevasse field can bear, and calves when it does not.
+`icepack2_tools/calving_laws.py` is ours, so a submission run needs no sibling
+checkout, and the level set drives it through the same prescribed rate the
+external hook uses.
+
+```bash
+ISMIP7_CALVING=hfb                          # zero tensile strength, the Buck limit
+ISMIP7_CALVING=hfb ISMIP7_CALVING_SIGMA_MAX=0.15   # Slater and Wagner's 150 kPa
+```
+
+The front-normal resistive stress is `R_xx = n . M n`, read straight off the
+solved membrane stress rather than differentiated from the velocity, which is
+what building this on the dual form buys. The threshold is Slater and Wagner's
+equation 21,
+
+```
+R_crit / (rho_i g H) = (1 - (rho_i/rho_c)(1 - a)^2) / 2
+                       + rho_c sigma_max^2 / (2 (rho_c - rho_i) (rho_i g H)^2)
+```
+
+with `a` the height-above-flotation fraction, and the rate is
+`c = |u| min(R_xx / R_crit, ratio_max)^p`. At zero strength and seawater in the
+crevasse a freely spreading shelf sits exactly at the threshold, which is
+Coffey and Lai's `B = 0`, and the tests assert that identity rather than a
+number.
+
+| knob | meaning | default |
+|---|---|---|
+| `ISMIP7_CALVING_SIGMA_MAX` | ice tensile strength, MPa; 0 is the Buck and Coffey-Lai limit | `0.0` |
+| `ISMIP7_CALVING_RHO_C` | water in a basal crevasse, kg/m3; 1000 for meltwater | `1024.0` |
+| `ISMIP7_CALVING_HFB_MODE` | `hfb`, or `zero_stress` for the Nye threshold, twice as large on a shelf | `hfb` |
+| `ISMIP7_CALVING_HFB_EXPONENT` | the power on the ratio | `1.0` |
+| `ISMIP7_CALVING_HFB_RATIO_MAX` | most a step may remove, for cells whose `R_crit` has thinned away | `5.0` |
+
+**It is a threshold law, so where the front sits decides whether it does
+anything.** Measured on a 2 km state at the default front threshold, the
+median front-normal resistive stress is 0.0000 MPa against a critical 0.53,
+buttressing is exactly 1.0 everywhere, and 13 of 15,639 front cells are at
+failure: the law correctly removes almost nothing from a fully buttressed
+41 m fringe, and lowering the strength to zero does not change that. Von
+Mises, being proportional rather than a threshold, calves anyway. So read
+`probe_front_flux.py` above before drawing a conclusion from a run of this
+law, and expect it to engage once the front is the calving face.
+
 ### A calving law from hoffmaao/calving (`forward_calving.py`)
 
 The laws developed for CalvingMIP (github.com/hoffmaao/calving: `fixed`,

@@ -7,6 +7,7 @@ import numpy as np
 from firedrake import (Function, FunctionSpace, RectangleMesh, as_vector,
                        SpatialCoordinate, UnitSquareMesh, VectorFunctionSpace)
 
+from icepack2_tools.mpi_stats import global_count
 from icepack2_tools.transfer import outside_source, strict_transfer
 
 
@@ -50,7 +51,8 @@ def test_strict_transfer_fills_and_bounds():
     assert np.array_equal(outside, truly_outside)
     assert np.all(data[outside] == 1.0)
     assert np.allclose(data[~outside], 1.0 + xy[~outside, 0], atol=1e-9)
-    assert info["n_outside"] == int(truly_outside.sum())
+    # n_outside is a global dof count; the mask here is this rank's slice.
+    assert info["n_outside"] == global_count(truly_outside, target.comm)
     assert info["source_range"] == (1.0, 2.0)
 
 

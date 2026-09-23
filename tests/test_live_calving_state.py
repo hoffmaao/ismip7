@@ -7,7 +7,8 @@ import os
 import numpy as np
 from firedrake import (Constant, Function, FunctionSpace, TensorFunctionSpace,
                        UnitSquareMesh, VectorFunctionSpace, FiniteElement,
-                       SpatialCoordinate, as_vector, dot, conditional, gt)
+                       SpatialCoordinate, as_vector, dot, conditional, gt,
+                       max_value)
 
 from icepack2_tools.levelset import LevelSet
 
@@ -43,7 +44,6 @@ def _state():
     h = Function(Q0).interpolate(conditional(x < 0.5, Constant(300.0), Constant(0.0)))
     b = Function(Q0).interpolate(conditional(x < 0.25, Constant(-100.0), Constant(-600.0)))
     ls = LevelSet(mesh, h, law="prescribed", h_min=1.0, anchor="extent")
-    ls._update_unit_gradient()
     return mesh, z, h, b, ls
 
 
@@ -85,3 +85,22 @@ def test_a_law_rate_is_a_cell_field_the_level_set_can_take():
     beyond, frac = ls.calving_masks()
     assert frac is not None and frac.max() > 0.0
     assert not beyond.any()
+
+
+def test_a_law_reads_the_front_normal_of_the_current_extent_at_the_first_advance():
+    Live = _live_state_class()
+    mesh, z, h, b, ls = _state()
+    m = Live(z, h, b, ls)
+
+    class NormalFlowLaw:
+        def rate(self, model, t):
+            return max_value(dot(model.u, model.nfront), Constant(0.0))
+
+        def describe(self):
+            return "u.n"
+
+    ls.advance(0.05, z.subfunctions[0], h, b, rate=NormalFlowLaw().rate(m, 0.0))
+    front = ls.front_len.dat.data_ro > 0.0
+    assert front.any()
+    # the front at x = 0.5 faces +x and the ice flows at 1e-3 in +x
+    assert np.allclose(ls.c_cell.dat.data_ro[front], 1e-3, rtol=0.05)

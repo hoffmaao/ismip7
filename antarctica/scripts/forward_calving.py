@@ -16,7 +16,10 @@ against the Greene et al. 2022 ice-front record).
 The experiment driver is wrapped, not copied: its ``run_simulation`` call is
 intercepted to put the law object in ``ctx`` and everything else (forcing,
 restart, tags, auto-resume, ISMIP7_* knobs) stays the driver's own. Leave
-``ISMIP7_CALVING`` unset; the law object owns the front.
+``ISMIP7_CALVING`` unset; the law object owns the front. ``--tag`` (or
+``ISMIP7_RUN_TAG``) is required and exported for every driver. The law's
+``describe()`` is written to each checkpoint's ``calving_law`` attribute and
+to the ``Calving front owner:`` log line that ``core_report.py`` lifts.
 """
 import argparse
 import os
@@ -35,8 +38,16 @@ ap.add_argument("--experiment", default="control",
                 choices=("control", "ocx", "ssp126", "ssp370", "ssp585",
                          "hist"))
 ap.add_argument("--esm", default="cesm_waccm", choices=("cesm_waccm", "mri_esm2"))
+ap.add_argument("--tag", default=os.environ.get("ISMIP7_RUN_TAG", ""),
+                help="run tag (ISMIP7_RUN_TAG), required so a law-driven run "
+                     "never resumes from or overwrites a stock run's files")
 args, rest = ap.parse_known_args()
 sys.argv = [sys.argv[0]] + rest
+if not args.tag:
+    raise SystemExit("name the run with --tag or ISMIP7_RUN_TAG: the drivers "
+                     "key output and auto-resume on it, and an untagged "
+                     "law-driven run would share a stock run's checkpoints")
+os.environ["ISMIP7_RUN_TAG"] = args.tag
 if not args.calving_dir or not os.path.isdir(args.calving_dir):
     raise SystemExit("name the hoffmaao/calving checkout with --calving-dir "
                      "or CALVING_DIR")

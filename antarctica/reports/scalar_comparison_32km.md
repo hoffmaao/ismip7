@@ -1154,15 +1154,15 @@ The fill term is zero and every gate holds, the tendacabf gate included,
 which a whole-pixel tree passes without the overlap cache; what T - N keeps
 for tendacabf is the area factor. The control's shelf melt as the tool reads
 it is the model's to 0.4 %, where it read 50 % high. In the ssp585 run T
-falls below N from about 2150, by the melt booked in pixels whose floating ice
-is gone by year end: 2 Gt/yr in 2015, 1,771 in 2300 and 2,223 at most, in
-2283, as the shelves thin away. The request fills a pixel with no floating ice
-at year end, under any pixel convention. Keeping the melt of every cell in a
+falls below N from about 2150, by the melt booked in pixels with no floating
+ice at year end: 2 Gt/yr in 2015, 1,771 in 2300 and 2,223 at most, in 2283.
+The request fills such a pixel under any pixel convention, and isschecker
+0.5.1 reports a value there as an error. Keeping the melt of every cell in a
 pixel that still floats holds 216 Gt/yr more at 2300 than the year-end
 floating cells alone would (1,986, the "off the mask" of the p4 section). The
 writer's summary line reports the same numbers as the comparison's residual,
 and the near-flotation rule accounts for at most 0.6 Gt/yr of them (2.0 in
-the control).
+the control). What that melt is follows below.
 
 isschecker 0.5.1 finds 0 errors in every test group on the regridded pair,
 with `AIS/RICE/icepack2/params.nc` in the tree. Its warnings are the
@@ -1170,6 +1170,51 @@ non-mandatory variables and, for the ssp585, `libmassbffl` below
 -0.008 kg m-2 s-1 in 0.00545 % of values (0.0382 % before) and `strbasemag`
 above 1e6 Pa in 0.000813 %. The control's `libmassbffl` warning (0.00767 %
 before) is gone.
+
+### What the left-out melt is
+
+Jobs 10604946 and 10605000 read the p4 ssp585 annual files with the writer's
+overlap cache and split each year's left-out melt by the state, at the start
+of that year, of the cells that booked it. The script, `leftout_melt.py`, ran
+from the scratch clone at `df1a2c0` and is attached to issue 105. Its totals
+match the writer's to the digit. Melt in Gt over 2016 to 2300, and in Gt/yr
+at 2300:
+
+| cells that booked it | 2016 to 2300 | 2300 |
+|---|---|---|
+| floating at the start of the year, no floating ice at its end | 18,196 | 87 |
+| grounded at the start, afloat and emptied within the year | 711 | 0 |
+| no ice (1 m or less) at both ends of the year | 180,082 | 1,684 |
+| all left out | 198,990 | 1,771 |
+
+Only the first row is shelf ice that melted away during the year. It carries
+the peak: in 2283 a single 15,384 km² cell at 84.3°S, 142.9°W melted through
+46 m of ice and holds 27 % of that year's left-out melt.
+
+The cells of the third row cover 1.30 million km² by 2300. The positivity
+limiter lets a cell lose only the ice it held when a step began, so a cell
+with no ice books as melt its share of whatever arrives in the step. Their
+thickness budgets say what arrives:
+
+| arriving in those cells | 2016 to 2300 | 2300 |
+|---|---|---|
+| the frozen apparent-MB reference | 134,363 | 1,373 |
+| ice flowing in | 72,394 | 640 |
+| of which across the grounding line | 66,198 | 627 |
+| taken by their negative SMB | -26,671 | -329 |
+
+Under a pinned front the reference is never cleared, so a shelf cell that melt
+has emptied keeps receiving it and books it as melt in the same step. Shared
+in proportion with the ice flowing in, the reference accounts for about
+117,000 Gt of the left-out melt over the run (59 %) and 1,150 Gt/yr at 2300,
+29 % of the native `tendlibmassbffl`. That is melt of ice the model's state
+never holds. The fill drops it from the tool's sum except in pixels that
+still float, where the whole-pixel mean keeps it as part of the 216 Gt/yr
+above, and the native scalar keeps all of it. The rest, about 620 Gt/yr at
+2300, is real melt the gridded field cannot carry: ice that crosses the
+grounding line into an empty cell and melts on arrival, and the shelf ice of
+the first row. Whether the production runs keep the reference is a group
+decision (issue 104), and the melt it books is issue 105.
 
 ### True area
 

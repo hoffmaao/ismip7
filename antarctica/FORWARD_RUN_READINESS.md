@@ -575,8 +575,14 @@ Output and submission:
     with `--native-af2` the area term is zero. `params.nc` sits in the upload
     beside `CORE/`, where the tool reads it. isschecker 0.5.1 still reports zero
     errors on the pair. Late in the ssp585 run the tool reads less melt than
-    the model books, 1,771 Gt/yr at 2300, booked in pixels whose floating ice
-    is gone by year end, which the request fills.
+    the model books: 1,771 Gt/yr at 2300 sits in pixels with no floating ice
+    at year end, which the request fills. Nine tenths of it over the run is
+    booked by cells with no ice at either end of the year, and the frozen
+    apparent-MB reference supplies about two thirds of what those cells melt:
+    117,000 of the 198,990 Gt left out over 2016 to 2300, and 1,150 of the
+    model's 3,929 Gt/yr at 2300. Whether the production runs keep the
+    reference is a group decision (issue #104); the melt it books under a
+    pinned front is tracked on its own (issue #105).
     What is left is the submitted files, paired with their historical. (issue #13)
 12. **Adopt or refetch the forcing that predates the manifest.** Done on 21
     September, and the premise above was wrong. The first

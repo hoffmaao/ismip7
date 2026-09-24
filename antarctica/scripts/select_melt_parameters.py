@@ -485,7 +485,14 @@ def run_notebook8km(args):
     if agree < 0.95 or flipped > agree:
         raise SystemExit("BedMap3 does not pair with the grid by position")
     draft = bed["draft"].values
-    if not np.all(draft[ff] < 0):
+    # The sign is unstated in the file. The conservative remap leaves a few
+    # partly floating margin points with a positive mean draft, which the
+    # notebook melts at its shallowest level, as the clipped sampler does.
+    above = int(np.count_nonzero(~(draft[ff] < 0)))
+    report["draft_not_negative_under_shelves"] = above
+    log(f"  BedMap3 draft under the shelves: {above} of {int(ff.sum())} points "
+        f"not below sea level")
+    if above > 0.01 * ff.sum():
         raise SystemExit("BedMap3 draft is not negative under the shelves")
 
     recipe = ms.notebook_mean_slope(draft, ff, 8000.0, 8000.0)

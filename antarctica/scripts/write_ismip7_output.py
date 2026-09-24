@@ -142,7 +142,8 @@ def ground_near_flotation(cells, tol=FLOTATION_TOLERANCE_M):
     change; the geometry stays as the model had it. The melt booked on such a
     cell stays in ``libmassbffl`` while its pixel keeps other floating ice,
     and leaves it where the rule empties the pixel of floating ice; the
-    summary line reports how much.
+    summary line reports how much: at most 2.0 Gt/yr in the full-length 32 km
+    control of September 2026 and 0.6 Gt/yr in its ssp585.
     """
     floating = cells["sftflf"] > 0.5
     near = floating & (cells["orog"] - cells["lithk"] - cells["topg"] <= tol)

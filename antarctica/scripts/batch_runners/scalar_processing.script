@@ -24,16 +24,25 @@
 # is called by path with the Firedrake environment's PYTHONPATH scrubbed, and
 # the comparison runs under the job's own python.
 #
+# ISMIP7_SCALAR_NATIVE_AF2=1 says the run's native scalars integrate over true
+# area, as a forward with the area factor writes them. The writer stamps which
+# area a tree's scalars carry, and the comparison exits 2 when the knob
+# disagrees with the stamp.
+#
 # A run that is its own reference names the stamped year of its first state,
 # 2016 for a run from 2015. A projection paired with its historical names
 # ISMIP7_SCALAR_HIST=historical and ISMIP7_SCALAR_HIST_CONFIGID=C001 (C002 for
 # MRI-ESM2-0) and no year: the tool looks a year up in the historical first and
 # then in the projection, so a stray 2016 would quietly become the reference.
 #
-# Nothing is written into the submission tree. params.nc, the tool's files
-# (which carry the submission's own file names) and the comparison all go
-# under ISMIP7_SCALAR_OUT. ISMIP7_SCALAR_DATAPATH holds the auxiliary grids
-# (download_forcing.py --scalar-processing puts them under the checkout).
+# The job writes nothing into the submission tree. It reads the model's
+# densities from the tree's AIS/<source_id>/<ism_id>/params.nc, where
+# ismip7-scalars-set-params puts it for the upload (antarctica/README.md,
+# "From a finished run to a submission"), and stops with status 2 without one.
+# The tool's files (which carry the submission's own file names) and the
+# comparison go under ISMIP7_SCALAR_OUT. ISMIP7_SCALAR_DATAPATH holds the
+# auxiliary grids (download_forcing.py --scalar-processing puts them under the
+# checkout).
 
 #SBATCH -o ant_scalars_%j.txt
 #SBATCH -e ant_scalars_%j.err
@@ -49,7 +58,7 @@ venv="${ISMIP7_TOOLS_VENV:?ISMIP7_TOOLS_VENV is required (a Python 3.11+ venv wi
 tree="${ISMIP7_SCALAR_TREE:?ISMIP7_SCALAR_TREE is required (the --out-dir given to the writer, holding AIS/)}"
 exp="${ISMIP7_SCALAR_EXPERIMENT:?ISMIP7_SCALAR_EXPERIMENT is required (ssp585, ctrl, ...)}"
 cfg="${ISMIP7_SCALAR_CONFIGID:?ISMIP7_SCALAR_CONFIGID is required (C007, C009, ...)}"
-out="${ISMIP7_SCALAR_OUT:?ISMIP7_SCALAR_OUT is required (params, tool output and comparison go there)}"
+out="${ISMIP7_SCALAR_OUT:?ISMIP7_SCALAR_OUT is required (the tool output and the comparison go there)}"
 hist="${ISMIP7_SCALAR_HIST:-${exp}}"
 histcfg="${ISMIP7_SCALAR_HIST_CONFIGID:-${cfg}}"
 data="${ISMIP7_SCALAR_DATAPATH:-${ISMIP7_REPO}/ISMIP7/Output-Processing/Data/AIS}"
@@ -62,6 +71,7 @@ case "${cfg}" in
     *) group=CORE ;;
 esac
 sub="${tree}/AIS/${source_id}/${ism_id}/${group}"
+params="${tree}/AIS/${source_id}/${ism_id}/params.nc"
 
 for f in "${venv}/bin/ismip7-scalars" "${sub}/${cfg}" "${data}"; do
     [ -e "${f}" ] || { echo "not found: ${f}" >&2; exit 2; }
@@ -69,6 +79,12 @@ done
 for f in "${ISMIP7_SCALAR_NATIVE_CSV:-}" "${ISMIP7_SCALAR_OVERLAP:-}"; do
     [ -z "${f}" ] || [ -f "${f}" ] || { echo "not found: ${f}" >&2; exit 2; }
 done
+if [ ! -f "${params}" ]; then
+    echo "not found: ${params}. The upload carries the model's densities there;" \
+         "write it with ismip7-scalars-set-params --region AIS --group ${source_id}" \
+         "--model ${ism_id} --rhoi 917 --rhow 1024 --rhof 1000 --modelpath ${tree}/AIS" >&2
+    exit 2
+fi
 
 if [ "${hist}" = "${exp}" ] && [ "${histcfg}" = "${cfg}" ]; then
     year="${ISMIP7_SCALAR_REFYEAR:?ISMIP7_SCALAR_REFYEAR is required for a run that is its own reference (the stamped year of its first state, 2016 for a run from 2015)}"
@@ -103,27 +119,24 @@ for f in "${data}"/*_AIS_08000m_*.nc; do
     notes+=(--note "$(basename "${f}") sha256 $(sha "${f}")")
 done
 
-# the model's densities; compare_scalars.py refuses any others
-tools ismip7-scalars-set-params --region AIS --group "${source_id}" --model "${ism_id}" \
-    --rhoi 917 --rhow 1024 --rhof 1000 --modelpath "${out}/params"
-status=$?
-[ "${status}" -eq 0 ] || { echo "ismip7-scalars-set-params exit status: ${status}"; exit "${status}"; }
-
+# the tool reads params.nc from the tree, as the organisers' run will;
+# compare_scalars.py refuses densities other than the model's
 tools ismip7-scalars --region AIS --group "${source_id}" --model "${ism_id}" --modelid m001 \
     --esm "${esm}" --forcingid f001 --experiment "${exp}" --configid "${cfg}" \
     --exp-group "${group}" --hist "${hist}" --hist-configid "${histcfg}" \
     ${tool_ref[@]+"${tool_ref[@]}"} --datapath "${data}" --modelpath "${tree}/AIS" \
-    --params-path "${out}/params" --outpath "${out}/tool"
+    --outpath "${out}/tool"
 status=$?
 echo "ismip7-scalars exit status: ${status}"
 [ "${status}" -eq 0 ] || exit "${status}"
 
 args=(--submission "${sub}/${cfg}" --tool "${out}/tool/nc/AIS/${source_id}/${ism_id}/${group}/${cfg}"
-      --datapath "${data}" --params "${out}/params/${source_id}/${ism_id}/params.nc"
+      --datapath "${data}" --params "${params}"
       "${cmp_ref[@]}" --label "${ISMIP7_SCALAR_LABEL:-${exp} ${cfg}}" "${notes[@]}"
       --out-csv "${out}/compare/comparison.csv" --out-md "${out}/compare/comparison.md")
 [ -z "${ISMIP7_SCALAR_NATIVE_CSV:-}" ] || args+=(--native-csv "${ISMIP7_SCALAR_NATIVE_CSV}")
 [ -z "${ISMIP7_SCALAR_OVERLAP:-}" ] || args+=(--overlap "${ISMIP7_SCALAR_OVERLAP}")
+[ "${ISMIP7_SCALAR_NATIVE_AF2:-0}" = 0 ] || args+=(--native-af2)
 python -u scripts/compare_scalars.py "${args[@]}"
 status=$?
 echo "compare_scalars exit status: ${status}"

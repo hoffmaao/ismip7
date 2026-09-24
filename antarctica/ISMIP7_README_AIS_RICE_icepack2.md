@@ -207,7 +207,7 @@ Hahn, Mikula and Frolkovic 2025; Smith et al. 2020.
 | Mesh discretisation | Delaunay triangulation (gmsh), adaptive size field | no |
 | Native grid | H: anisotropic; resolution **[confirm #20]**, pending the 1000 m inversions: the 2 km / 180 km adaptive mesh, 2 km at the grounding line and calving front to 180 km in the interior (246,677 cells), as previously run; or `antarctica_10000_1000_buffered20000`, the 1000 m / 10 km gmsh mesh (1,869,088 vertices) that has been the code default since PR #7 and on which no inversion has yet been run. V: vertically integrated (shallow shelf) | no |
 | Native projection | EPSG:3031, same as BedMachine | no |
-| Interpolation to diagnostic grid | conservative: exact cell-pixel overlap areas (supermesh) onto the 8 km grid; whole-pixel means for thickness, fluxes and fractions, covered-part means for elevations | no |
+| Interpolation to diagnostic grid | conservative: exact cell-pixel overlap areas (supermesh) onto the 8 km grid; whole-pixel means for thickness, fractions and every flux, so a flux times the pixel area sums to the model's integral (`acabf` is fill outside the model domain, `libmassbffl` where no ice floats at year end); covered-part means for elevations | no |
 | Time integration | transport-first split: implicit Euler thickness transport, then the diagnostic solve at the new geometry; first order | no |
 | Time step | **[confirm #20]**, pending the 1000 m inversions: 0.1 yr on the adaptive mesh, as previously run; 0.05 yr on the 1000 m / 10 km mesh, the code default since PR #7 | no |
 | Advection scheme | upwind finite volume, DG0, implicit; first order | no |
@@ -222,7 +222,7 @@ Hahn, Mikula and Frolkovic 2025; Smith et al. 2020.
 | Initial SMB | RACMO2.4p1 2000-2023 climatology | no |
 | Bedrock adjustment | no | no |
 | Year of initial condition | 2015 | no |
-| Densities, gravity | rho_i = 917, rho_o = 1024 kg m-3; g = 9.81 m s-2 | no |
+| Densities, gravity | rho_i = 917, rho_o = 1024, fresh water 1000 kg m-3, also in `params.nc` beside `CORE/`; g = 9.81 m s-2 | no |
 | Variables not included | none of the mandatory set; no 3D or thermal variables (no thermal model); `hfgeoubed`, `litemp*`, `zvel*`, `thdrflf`, `deltag`, `refgeoid` absent | no |
 | Days per year | 365.25: the model's year is icepack's, 31557600 s, and every model-to-SI conversion in the submitted files uses it. The forcing is converted on the way in with the tropical year, 31556926 s, a relative difference of 2e-5. The model counts time in years and has no calendar; the time axis in the files is the standard calendar (discussion #24), state at 1 January of the following year and fluxes at 1 July with bounds | no |
 | Other | apparent-mass-balance correction frozen at the initial state; forcing versions cited per file in the submission | no |
@@ -241,7 +241,10 @@ grounded ice, at a pinning point or an ice rumple. The organisers' reply of
 isschecker 0.5.1 bounds the field symmetrically; the group settled on this
 reading on 22 September 2026. The integrated scalars carry the signs of the
 fields they integrate, so `tendlicalvf` and `tendlibmassbffl` are negative
-and `tendligroundf` is the net grounding-line discharge. `topg` is not
+and `tendligroundf` is the net grounding-line discharge. They integrate over
+true area: each native cell counts its map-plane area times af2 = (1/k)^2,
+the EPSG:3031 area factor at the cell's centroid, the factor
+`ismip7-scalar-processing` weights every 8 km pixel by. `topg` is not
 masked to the ice, `lithk` is zero and not fill where there is no ice, and
 the fill value is the finite netCDF default (discussions #10 and #19).
 The fluxes are the ones the model applied: where the thickness floor held

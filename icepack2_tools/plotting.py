@@ -10,6 +10,12 @@ import matplotlib.tri as mtri
 def mesh_plot(mesh, figsize=(20, 14), title=None, save_path=None, zooms=None):
     """Plot mesh with element size colormap and optional zoom panels.
 
+    Serial only. The triangulation reads this rank's coordinates and cell
+    map, so under MPI a rank either raises or draws its own partition. On one
+    rank ``num_vertices()`` and ``num_cells()`` in the title are the global
+    counts; a collective reduction there would hang a caller that plots from
+    rank 0 alone.
+
     Parameters
     ----------
     mesh : firedrake.Mesh

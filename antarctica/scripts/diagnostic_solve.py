@@ -53,6 +53,7 @@ FIG_DIR = os.path.join(_ROOT, "figs")
 
 sys.path.insert(0, os.path.dirname(_ROOT))
 from icepack2_tools.boundary import load_boundary_ids
+from icepack2_tools.mpi_stats import global_size
 from icepack2_tools.runconfig import obs_data_root, lc as _lc, lc_coarse as _lc_coarse
 
 DATA_DIR = obs_data_root()
@@ -76,7 +77,10 @@ def main():
     mesh_fn = os.environ.get("ISMIP7_MESH", mesh_filename(lc_coarse, lc, buffer_m))
     PETSc.Sys.Print(f"Loading mesh: {mesh_fn}")
     mesh = firedrake.Mesh(mesh_fn)
-    PETSc.Sys.Print(f"  {mesh.num_vertices()} vertices, {mesh.num_cells()} cells")
+    # num_vertices()/num_cells() count this rank's plex, halo included; the
+    # coordinate dofs and the owned cell set are reduced to global totals.
+    PETSc.Sys.Print(f"  {global_size(mesh.coordinates)} vertices, "
+                    f"{mesh.comm.allreduce(mesh.cell_set.size)} cells")
 
     # Boundary classification, hard-checked against this mesh (a sidecar built
     # for another mesh leaves most of the front without terminus back-pressure).

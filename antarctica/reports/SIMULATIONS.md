@@ -9,9 +9,9 @@ gitignored, so these records and the per-core reports beside them are
 the trace a run leaves in the repository. A core experiment also gets
 its full report from `core_report.py`; this is the index.
 
-36 records.
+38 records.
 
-Status: 12 planned, 3 running, 3 stopped, 7 done, 11 superseded.
+Status: 12 planned, 3 running, 3 stopped, 9 done, 11 superseded.
 
 ## Inversion
 
@@ -25,7 +25,9 @@ Status: 12 planned, 3 running, 3 stopped, 7 done, 11 superseded.
 
 | Simulation | Status | Mesh | Site | Started | Finished | Headline result |
 |---|---|---|---|---|---|---|
+| Ocean melt: the per-basin thermal-forcing offset on the 1000 m production mesh | done | antarctica_10000_1000_buffered20000, DG0 cells | IU Quartz, debug partition | 2026-09-24 | 2026-09-24 | uncorrected totals 925, 1656 and 2678 Gt/yr at K05, K50 and K95, 2.0 percent above the 2 km mesh; every basin reaches its July total with a root in the toolbox window, and the offsets differ from the 2 km fit by at most 0.12 K (basin 1). The 2 km files applied here put, to first order, 1095, 1085 and 1072 Gt/yr on the fitted basins, with basins 1, 6, 12 and 13 more than 10 percent off at some K and basin 6 44 percent under at K95 |
 | Ocean melt: toolbox K and the per-basin thermal-forcing offset | done | antarctica_5000_2000_buffered0 | local workstation | 2026-09-22 | 2026-09-22 | uncorrected totals 907, 1623 and 2625 Gt/yr at K05, K50 and K95; every basin reaches its observed total with an offset inside 1.3 K, so every basin has a root in the toolbox window |
+| Ocean melt: the per-basin thermal-forcing offset refitted to the July 2026 table | done | antarctica_5000_2000_buffered0, DG0 cells | IU Quartz, debug partition | 2026-09-24 | 2026-09-24 | uncorrected totals 907, 1623 and 2625 Gt/yr at K05, K50 and K95, as calibration-melt-2km measured, which is 0.85, 1.52 and 2.46 times 1067.4; every basin reaches its July total with a root in the toolbox window, offsets -0.55 to +1.72 K at K05, -0.85 to +0.87 K at K50 and -1.17 to +0.30 K at K95, the largest Amundsen (basin 9) at K05; the 865 control needs offsets up to 1.30 K, as calibration-melt-2km found. calibrate_melt.py on the July table: K* 4.46e-5, just under K05; total-match K 5.59e-5; melt at K* 851 Gt/yr; 7 of 16 basin K inside K05 to K95 |
 
 ## Test
 
@@ -144,6 +146,26 @@ Status: 12 planned, 3 running, 3 stopped, 7 done, 11 superseded.
 - **Audit:** misfit still falling about half a percent per iteration; never reaches gatol, so the chain caps at four links
 - **Notes:** issue #24. Issue #68: the auto log-velocity weight is re-derived at every warm start, so links minimise different objectives
 
+### calibration-melt-1km-1067
+
+Ocean melt: the per-basin thermal-forcing offset on the 1000 m production mesh (done), IU.
+
+- **Task type:** calibration
+- **Period (yr):** present day
+- **Mesh:** antarctica_10000_1000_buffered20000, DG0 cells
+- **Initial state / MAP:** the 1000 m timing state timing_scpc_gamg_10step_dt0p125at2500_dg0_logvelnet_cached_strict_v4_lcc10000_n64_1000_final.h5, for its mesh only
+- **Forcing versions:** OI climatology 30_sep; observed melt from the Paolo, Davison and Adusumilli table, 1067.4 Gt/yr integrated (sha256 ccea556e)
+- **Melt: K, slope, deltaT:** K05 4.75e-5, K50 8.5e-5, K95 1.375e-4 from the toolbox; one constant mean-Antarctic slope of 5.115e-3; BedMachine v4.1 vertex-sampled; offsets in deltaT_per_basin_1000_K*.npz
+- **Site / partition:** IU Quartz, debug partition
+- **Ranks / memory:** serial, 3.4 GB peak, 3 min 9 s
+- **Job ids:** 10603590
+- **Code:** 6af8a6a
+- **Started:** 2026-09-24
+- **Finished:** 2026-09-24
+- **Results path:** Quartz antarctica/results/issue30_deltaT/mesh1000_table1067/deltaT_per_basin_1000_K*.npz
+- **Audit:** uncorrected totals 925, 1656 and 2678 Gt/yr at K05, K50 and K95, 2.0 percent above the 2 km mesh; every basin reaches its July total with a root in the toolbox window, and the offsets differ from the 2 km fit by at most 0.12 K (basin 1). The 2 km files applied here put, to first order, 1095, 1085 and 1072 Gt/yr on the fitted basins, with basins 1, 6, 12 and 13 more than 10 percent off at some K and basin 6 44 percent under at K95
+- **Notes:** issue #30; mesh evidence for issue #20. The mesh the MAP check transfers onto (MAP_CHECK.md)
+
 ### calibration-melt-2km
 
 Ocean melt: toolbox K and the per-basin thermal-forcing offset (done), Rice.
@@ -161,6 +183,26 @@ Ocean melt: toolbox K and the per-basin thermal-forcing offset (done), Rice.
 - **Results path:** antarctica/results/deltaT_per_basin_2000_K*.npz
 - **Audit:** uncorrected totals 907, 1623 and 2625 Gt/yr at K05, K50 and K95; every basin reaches its observed total with an offset inside 1.3 K, so every basin has a root in the toolbox window
 - **Notes:** issues #26, #30 and #42. Refit once the July 1067 Gt/yr table is staged locally
+
+### calibration-melt-2km-1067
+
+Ocean melt: the per-basin thermal-forcing offset refitted to the July 2026 table (done), IU.
+
+- **Task type:** calibration
+- **Period (yr):** present day
+- **Mesh:** antarctica_5000_2000_buffered0, DG0 cells
+- **Initial state / MAP:** the Budd 22 September snapshot (release maps-2km-snap-2026-09-22, md5 1c5d1031651f873e386c66aea34a69fe), for its mesh only
+- **Forcing versions:** OI climatology 30_sep; observed melt from the Paolo, Davison and Adusumilli table, 1067.4 Gt/yr integrated (sha256 ccea556e); the Paolo and Adusumilli table, 865.0 Gt/yr (sha256 e5751383), as a control
+- **Melt: K, slope, deltaT:** K05 4.75e-5, K50 8.5e-5, K95 1.375e-4 from the toolbox; one constant mean-Antarctic slope of 5.115e-3; BedMachine v4.1 vertex-sampled; offsets in deltaT_per_basin_2000_K*.npz; calibrate_melt.py K* written with ISMIP7_K_OUT, so no run reads it
+- **Site / partition:** IU Quartz, debug partition
+- **Ranks / memory:** serial, 2.2 GB peak, 5 min 43 s for both tables and the K* fit
+- **Job ids:** 10603589
+- **Code:** 6af8a6a
+- **Started:** 2026-09-24
+- **Finished:** 2026-09-24
+- **Results path:** Quartz antarctica/results/issue30_deltaT/: mesh2000_table1067/ and mesh2000_table865/deltaT_per_basin_2000_K*.npz, K_mesh2000_table1067.npz, the job script and its log
+- **Audit:** uncorrected totals 907, 1623 and 2625 Gt/yr at K05, K50 and K95, as calibration-melt-2km measured, which is 0.85, 1.52 and 2.46 times 1067.4; every basin reaches its July total with a root in the toolbox window, offsets -0.55 to +1.72 K at K05, -0.85 to +0.87 K at K50 and -1.17 to +0.30 K at K95, the largest Amundsen (basin 9) at K05; the 865 control needs offsets up to 1.30 K, as calibration-melt-2km found. calibrate_melt.py on the July table: K* 4.46e-5, just under K05; total-match K 5.59e-5; melt at K* 851 Gt/yr; 7 of 16 basin K inside K05 to K95
+- **Notes:** issue #30; numbers for issue #26 and file names for issue #42. Refits calibration-melt-2km, which used the 865 table. The offsets depend on the mesh: calibration-melt-1km-1067
 
 ### core07-32km-ssp585-cesm2waccm-p2-mask
 

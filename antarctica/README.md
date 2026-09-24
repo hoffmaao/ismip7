@@ -476,14 +476,22 @@ per-basin K file. A driver refuses to start when the file is missing or
 `ISMIP7_K_SCALE` is not 1, since the offsets were fitted at the file's K.
 The fit reduces every basin total across ranks, so `mpiexec -n N` writes the
 same offsets as a serial run.
-Measured on the 2 km MAP mesh against the 865 Gt/yr table (22 September
-2026): K05 907, K50 1623 and K95 2625 Gt/yr uncorrected, each brought to
-865 by offsets within plus or minus 1.3 K, every basin with a root in the
-window. The 865 covers the fitted basins. Floating ice outside them (a basin
-the table lacks, a coverage gap, off the 8 km grid) keeps a zero offset and
-still melts at the file's K, as the toolbox applies its one K everywhere, so
-a run's integrated melt exceeds 865 by that amount; the first forcing step
-prints it (`Melt ... Gt/yr, of which ... outside the fitted basins`).
+Measured on the 2 km MAP mesh against the July table (24 September 2026, run
+record `calibration-melt-2km-1067`): K05 907, K50 1623 and K95 2625 Gt/yr
+uncorrected, each brought to 1067.4 by offsets from -0.55 to +1.72 K at K05,
+-0.85 to +0.87 K at K50 and -1.17 to +0.30 K at K95, every basin with a root
+in the window; Amundsen (basin 9) takes the largest, +1.72 K at K05. Against
+the 865 Gt/yr table the same fit needs offsets within plus or minus 1.3 K.
+A file reproduces the basin totals on the mesh it was fitted on. On the
+1000 m / 10 km production mesh (`calibration-melt-1km-1067`) the uncorrected
+totals are 2 percent higher and the offsets differ by up to 0.12 K; the 2 km
+files applied there put 1072 to 1095 Gt/yr on the fitted basins to first
+order, with single basins up to 44 percent off (basin 6 at K95). The 1067.4
+covers the fitted basins. Floating ice outside them (a basin the table lacks,
+a coverage gap, off the 8 km grid) keeps a zero offset and still melts at the
+file's K, as the toolbox applies its one K everywhere, so a run's integrated
+melt exceeds 1067.4 by that amount; the first forcing step prints it
+(`Melt ... Gt/yr, of which ... outside the fitted basins`).
 
 ## 6. Control and projections
 

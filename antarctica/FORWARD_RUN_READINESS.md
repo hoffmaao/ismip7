@@ -531,6 +531,9 @@ Output and submission:
     (+39 to +44 mm of sea level by 2300, about 10 % of the signal), the
     writer's fill conventions for acabf and libmassbffl, and melt and SMB
     booked where no ice takes them, `reports/scalar_comparison_32km.md`.
+    Each has its issue: the pixel means (issue #96), the area factor
+    (issue #97), `params.nc` in the upload (issue #98) and the grid VAF
+    (issue #99); pull request 95 books the applied flux.
     What is left is the submitted files, paired with their historical. (issue #13)
 12. **Adopt or refetch the forcing that predates the manifest.** Done on 21
     September, and the premise above was wrong. The first

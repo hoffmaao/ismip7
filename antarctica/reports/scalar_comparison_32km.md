@@ -50,7 +50,7 @@ Four causes account for all of it.
    on the state scalars and -16 to -17 mm on slvaf. For the fluxes it depends on
    latitude, about +1 % on the grounding-line flux and up to +4 % on the calving
    of a collapse year. It is the whole of T - N for iareagr, iareafl,
-   tendlicalvf and tendligroundf.
+   tendlicalvf and tendligroundf. (issue #97)
 2. **Volume above flotation on the 8 km grid.** Before the area factor, the
    tool's sea level sits +39 to +44 mm above the mesh's by 2300, about 10 % of
    the signal. A diagnostic regridded the mesh integrand max(lithk - hf, 0) on
@@ -72,14 +72,14 @@ Four causes account for all of it.
    The change from 2015 to 2300, -14,281 Gt, is the +39.4 mm, and 90 % of it
    is in the grounding-line pixels (p2_mask: -15,898 Gt, 90 %). The 2300 total
    is the comparison's limnsw residual to the gigatonne. The interior term
-   barely moves (+9,329 to +7,575 Gt).
+   barely moves (+9,329 to +7,575 Gt). (issue #99)
 3. **The writer's fill conventions.** acabf is a mean over the covered part
    of a pixel and libmassbffl over the part that floats at year end. The tool
    sums both over whole pixels, which adds -840 Gt/yr of SMB at the domain
    edge in 2300. For melt the partly floating pixels add -30,933 Gt/yr in
    p2_none and -3,300 to -3,800 Gt/yr in the mask modes. Forum thread 50 has
    the organisers reading a flux as a mass change per unit horizontal cell
-   area.
+   area. (issue #96)
 4. **The model books the fluxes requested of every cell.** Melt and SMB are
    booked before the positivity limiter, on cells with no ice to take them.
    tendacabf is identical in all three modes, collapse or not, because it is
@@ -96,8 +96,8 @@ Four causes account for all of it.
    residual exactly. The scalar bounds in isschecker 0.5.1's table are
    ±1e9 kg/s for the tend* series, and 2300's -3.9e9 kg/s is four times that;
    0.5.1 does not range-check scalars.
-   The issue 12 branch's `55ab22b` books the applied flux after the
-   limiter; runs made with it are the check that this residual closes.
+   Pull request 95 (`55ab22b`) books the applied flux after the limiter,
+   and the p4 pair below is the check.
 
 The p2 runs predate `2a3a58e`, which books ligroundf in both directions, so
 they exercise the chain and say nothing about the current booking.

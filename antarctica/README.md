@@ -1307,7 +1307,8 @@ Things that are easy to get wrong:
   CLI login (IU Quartz, 23 September 2026).
 - **`params.nc` carries the model's densities**, so give it ours: 917 ice and
   1024 seawater, the pair `simulation.py` builds the surface with. The tool
-  defaults to 1027 seawater, and the comparison refuses any other pair.
+  defaults to 1027 seawater, and the comparison refuses any other pair. The
+  organisers need the same file with the upload. (issue #98)
 - **The tool stops without a historical run.** A run on its own names itself
   as `--hist` with the stamped year of its first state as `--refyear`. A
   projection paired with its historical names `--hist historical

@@ -76,6 +76,22 @@ submit.sh script scripts/batch_runners/check_melt_bound.script --cd antarctica \
     ISMIP7_LC=1000 ISMIP7_INV_H5=$PWD/mesh/<map or forward state>.h5
 ```
 
+`scalar_processing.script` runs the organisers' `ismip7-scalars` over one
+experiment of a tree written by `write_ismip7_output.py`, then
+`compare_scalars.py` against the model's own scalars (issue #13). The tool
+lives in a Python 3.11+ venv of its own, named by `ISMIP7_TOOLS_VENV` (a
+per-user path, so `sites/local.env`; `antarctica/README.md` has the install).
+The job ends with the comparison's status. A 286-year experiment on the 8 km
+grid took 3 min and at most 3.7 GiB on one core (IU Quartz, September 2026):
+
+```bash
+submit.sh script scripts/batch_runners/scalar_processing.script --cd antarctica \
+    --queue short --tasks 1 --mem 16G --time 01:00:00 \
+    ISMIP7_TOOLS_VENV=<venv> ISMIP7_SCALAR_TREE=<the writer's --out-dir> \
+    ISMIP7_SCALAR_EXPERIMENT=ssp585 ISMIP7_SCALAR_CONFIGID=C007 \
+    ISMIP7_SCALAR_REFYEAR=2016 ISMIP7_SCALAR_OUT=<dir>
+```
+
 `--queue short|long|debug` names the site's partition by class, `--cd DIR`
 submits from `ISMIP7_REPO/DIR` (the timing scripts run from `antarctica/`),
 `--dependency` and `--wait` pass through. Standard output is sbatch's alone, so

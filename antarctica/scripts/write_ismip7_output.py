@@ -94,6 +94,29 @@ CONVERT = {
     "Pa": 1.0e6,                                          # MPa -> Pa
 }
 
+# isschecker's ELEVATION_TOLERANCE (checker.py at 0.5.1): a wholly grounded
+# pixel may sit this far from topg, and a wholly floating one must sit further
+# above it than this.
+FLOTATION_TOLERANCE_M = 1.0e-2
+
+
+def ground_near_flotation(cells, tol=FLOTATION_TOLERANCE_M):
+    r"""Write as grounded, in place, the floating cells whose base lies within
+    ``tol`` of the bed, and return how many there were.
+
+    The checker reads a wholly floating pixel less than 1 cm above ``topg`` as
+    ice resting on the bed, an error at any share, and allows a wholly
+    grounded one the same 1 cm. A DG0 cell just past flotation has its base
+    millimetres above the bed: 1.9 to 9.2 mm in the full-length 32 km ssp585
+    runs of September 2026, 13 to 24 pixel-years each. Only the two masks
+    change; the geometry stays as the model had it.
+    """
+    floating = cells["sftflf"] > 0.5
+    near = floating & (cells["orog"] - cells["lithk"] - cells["topg"] <= tol)
+    cells["sftflf"][near] = 0.0
+    cells["sftgrf"][near] = 1.0
+    return int(near.sum())
+
 
 def grid_mesh():
     r"""A triangulated copy of the 8 km grid whose pixel centres are the
@@ -253,7 +276,7 @@ CORE_COUNTER = {
     ("CESM2-WACCM", "ctrl"): "C009", ("MRI-ESM2-0", "ctrl"): "C010",
 }
 # OCX has no ESM, and what belongs in the filename's forcing field for it is
-# not settled upstream: isschecker 0.5.0 checks that field against a list of
+# not settled upstream: isschecker 0.5.1 checks that field against a list of
 # CMIP models and its experiment table has no ocx row. So the counter follows
 # from the scenario alone.
 OCX_COUNTER = "C011"
@@ -390,6 +413,7 @@ def main():
             handles[var] = create_2d(tmps[var], var, req[var], years,
                                      req[var]["Type"] == "FL")
         stats = {var: [np.inf, -np.inf, 0] for var in VARIABLES_2D}
+        grounded_near = 0
         for k, yr in enumerate(years):
             with fd.CheckpointFile(AnnualOutput.year_path(a.annual, yr), "r") as chk:
                 ymesh = chk.load_mesh()
@@ -404,6 +428,7 @@ def main():
                     f"the mesh changed inside the series, so one conservative "
                     f"operator cannot cover it."
                 )
+            grounded_near += ground_near_flotation(cells)
             masks = {"no_ice": cells["sftgif"] > 0.5,
                      "no_grounded_ice": cells["sftgrf"] > 0.5,
                      "no_floating_ice": cells["sftflf"] > 0.5}
@@ -433,6 +458,8 @@ def main():
                     st[0] = min(st[0], float(np.min(p_yr[finite])))
                     st[1] = max(st[1], float(np.max(p_yr[finite])))
                 st[2] += int(finite.sum())
+        print(f"  {grounded_near} cell-years within {FLOTATION_TOLERANCE_M:g} m of "
+              f"flotation written as grounded", flush=True)
         for var in VARIABLES_2D:
             handles.pop(var)[0].close()
             lo, hi, nfin = stats[var]

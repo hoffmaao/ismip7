@@ -9,9 +9,9 @@ gitignored, so these records and the per-core reports beside them are
 the trace a run leaves in the repository. A core experiment also gets
 its full report from `core_report.py`; this is the index.
 
-36 records.
+41 records.
 
-Status: 12 planned, 3 running, 3 stopped, 7 done, 11 superseded.
+Status: 12 planned, 3 running, 3 stopped, 12 done, 11 superseded.
 
 ## Inversion
 
@@ -31,9 +31,14 @@ Status: 12 planned, 3 running, 3 stopped, 7 done, 11 superseded.
 
 | Simulation | Status | Mesh | Site | Started | Finished | Headline result |
 |---|---|---|---|---|---|---|
+| Core 1 at 32 km, the p2 historical: branch state of the p2 and p3 runs | done | antarctica_320000_32000, DG0 geometry | IU Quartz | 2026-09-22 | 2026-09-22 | ON TRACK, with dM/dt WARN at 247.7 Gt/yr; resid 0.0000 on all 1650 rows |
 | Core 7 at 32 km, collapse mode ISMIP7_FRACTURE=mask | done | antarctica_320000_32000, DG0 geometry | IU Quartz | - | 2026-09-22 | OFF TRACK against the present-day envelopes, as an ssp585 run at 2300 is; resid 0.0000 on all 2860 rows, no rescue or subcycle event |
 | Core 7 at 32 km, collapse mode ISMIP7_FRACTURE=mask_front | done | antarctica_320000_32000, DG0 geometry | IU Quartz | - | 2026-09-22 | OFF TRACK against the present-day envelopes, as an ssp585 run at 2300 is; resid 0.0000 on all 2860 rows, no rescue or subcycle event |
 | Core 7 at 32 km, collapse mode ISMIP7_FRACTURE=none | done | antarctica_320000_32000, DG0 geometry | IU Quartz | - | 2026-09-22 | OFF TRACK against the present-day envelopes, as an ssp585 run at 2300 is; resid 0.0000 on all 2860 rows, no rescue or subcycle event |
+| Core 7 at 32 km on main, collapse mode none, branched from the p2 historical | done | antarctica_320000_32000, DG0 geometry | IU Quartz | 2026-09-23 | 2026-09-23 | OFF TRACK against the present-day envelopes, as an ssp585 run at 2300 is; resid 0.0000 on all 2860 rows, no rescue or stall event |
+| Core 7 at 32 km with the fluxes booked after the positivity limiter, collapse mode none, branched from the p2 historical | done | antarctica_320000_32000, DG0 geometry | IU Quartz | 2026-09-23 | 2026-09-23 | OFF TRACK against the present-day envelopes, as an ssp585 run at 2300 is; resid 0.0000 on all 2860 rows, no rescue or stall event |
+| Core 9 at 32 km on main, branched from the p2 historical | done | antarctica_320000_32000, DG0 geometry | IU Quartz | 2026-09-23 | 2026-09-23 | ON TRACK, with dM/dt WARN at 419.2 Gt/yr; resid 0.0000 on all 2860 rows, no rescue or stall event |
+| Core 9 at 32 km with the fluxes booked after the positivity limiter, branched from the p2 historical | done | antarctica_320000_32000, DG0 geometry | IU Quartz | 2026-09-23 | 2026-09-23 | ON TRACK, with dM/dt WARN at 419.3 Gt/yr; resid 0.0000 on all 2860 rows, no rescue or stall event |
 | 1 km control from the transferred Budd snapshot at half the step | done | antarctica_10000_1000_buffered20000, 1 km fine, 10 km interior, 20 km buffer | nots, commons partition | 2026-09-22 | 2026-09-22 | five years complete: VAF drift 0.13 mm of sea level, 0.027 mm a year against the 2 mm a year tolerance; mass +21 Gt over five years against a 2532 Gt/yr surface balance; budget residual zero on every row. The same configuration at dt=0.05 diverged in 2016.1, so halving the step is the cure. Shelf melt 1428 Gt/yr, calving 24, balanced correction -1151 |
 | 1 km control with the MAP's own geometry carried onto the target | stopped | antarctica_10000_1000_buffered20000, 1 km fine, 10 km interior, 20 km buffer | nots, commons partition | 2026-09-22 | - | starts 20 percent faster at the Amery trough than the target-native BedMachine geometry and diverges sooner, by step 19 |
 | 1 km control from the transferred Budd snapshot | stopped | antarctica_10000_1000_buffered20000, 1 km fine, 10 km interior, 20 km buffer | nots, commons partition, cascadelake | 2026-09-22 | - | year one clean: VAF drift 0.02 mm, mass balance +1 Gt/yr, residual zero. The Lambert and Amery grounding trough then accelerates from 7.6e3 to 1.9e7 m/yr in three steps and Newton diverges |
@@ -162,6 +167,34 @@ Ocean melt: toolbox K and the per-basin thermal-forcing offset (done), Rice.
 - **Audit:** uncorrected totals 907, 1623 and 2625 Gt/yr at K05, K50 and K95; every basin reaches its observed total with an offset inside 1.3 K, so every basin has a root in the toolbox window
 - **Notes:** issues #26, #30 and #42. Refit once the July 1067 Gt/yr table is staged locally
 
+### core01-32km-hist-cesm2waccm-p2
+
+Core 1 at 32 km, the p2 historical: branch state of the p2 and p3 runs (done), IU.
+
+- **Task type:** test
+- **ESM:** CESM2-WACCM
+- **Scenario:** historical
+- **Period (yr):** 1850 to 2015, reached 2015.0
+- **Friction law:** budd
+- **Mesh:** antarctica_320000_32000, DG0 geometry
+- **Initial state / MAP:** inversion_icepack2_budd_n3_dg0_logvelnet_32000.h5, sha256 3b3aefa1c69a5daf87d1db291cae9337e00c2696f412bce147b1f488228ef472
+- **Branch from:** cold start
+- **Forcing versions:** CESM2-WACCM historical, atmosphere SDBN1-8000m v2, ocean v3
+- **Melt: K, slope, deltaT:** per-basin K from K_issue11_mesh2500.npz, local slope
+- **Calving front, collapse:** held fixed, ice-shelf collapse ISMIP7_FRACTURE=none
+- **Apparent MB:** balance
+- **dt (yr):** 0.1
+- **Site / partition:** IU Quartz
+- **Ranks / memory:** 8 ranks
+- **Job ids:** 10568488
+- **Code:** a0f92a8
+- **Started:** 2026-09-22
+- **Finished:** 2026-09-22
+- **Cost per model year:** one link of 27 min for 165 model years
+- **Results path:** antarctica/results/hist_cesm2_waccm_p2_32000_*
+- **Audit:** ON TRACK, with dM/dt WARN at 247.7 Gt/yr; resid 0.0000 on all 1650 rows
+- **Notes:** the final state hist_cesm2_waccm_p2_32000_final.h5, sha256 a9552130a0fede0c436684049a7bb29fc5ba68bda03c9fc3c7fce8cfb796a26d, is the 2015.0 state every p2 ssp585 run and both p3 runs restart from. Run without ISMIP7_OUTPUT, which the historical does not need. Full record: antarctica/reports/core01_hist_cesm2_waccm_32km_p2.md
+
 ### core07-32km-ssp585-cesm2waccm-p2-mask
 
 Core 7 at 32 km, collapse mode ISMIP7_FRACTURE=mask (done), IU.
@@ -172,6 +205,8 @@ Core 7 at 32 km, collapse mode ISMIP7_FRACTURE=mask (done), IU.
 - **Period (yr):** 2015 to 2301
 - **Friction law:** budd
 - **Mesh:** antarctica_320000_32000, DG0 geometry
+- **Initial state / MAP:** hist_cesm2_waccm_p2_32000_final.h5, sha256 a9552130a0fede0c436684049a7bb29fc5ba68bda03c9fc3c7fce8cfb796a26d
+- **Branch from:** core01-32km-hist-cesm2waccm-p2 at 2015.0, from the log's Restart line
 - **Melt: K, slope, deltaT:** per-basin K from K_issue11_mesh2500.npz, local slope
 - **Calving front, collapse:** held fixed, ice-shelf collapse ISMIP7_FRACTURE=mask
 - **Apparent MB:** balance
@@ -184,6 +219,8 @@ Core 7 at 32 km, collapse mode ISMIP7_FRACTURE=mask (done), IU.
 - **Cost per model year:** one link of 1 h 11 min for 286 model years
 - **Results path:** antarctica/results/ssp585_cesm2_waccm_p2_mask_32000_*
 - **Audit:** OFF TRACK against the present-day envelopes, as an ssp585 run at 2300 is; resid 0.0000 on all 2860 rows, no rescue or subcycle event
+- **ISMIP7 output written:** 286 annual files, 2015 to 2300, with the ten native scalars, from the writer of a0f92a8: fluxes booked before the positivity limiter and ligroundf one-sided
+- **Regridded, isschecker:** isschecker 0.5.1 over 31 files on the 8 km grid as C007. Regridded by main's writer: 1 error, base within 1 cm of topg in 24 wholly floating pixel-years. With cells within 1 cm of flotation written as grounded: 0 errors. Warnings: the non-mandatory variables, acabf 0.00118 %, libmassbffl 0.341 % and strbasemag 0.000574 % out of range
 - **Notes:** collapse-mode evidence for issue #10, not the submission's core 7. Full record: antarctica/reports/core07_ssp585_cesm2_waccm_32km_p2_mask.md
 
 ### core07-32km-ssp585-cesm2waccm-p2-mask-front
@@ -196,6 +233,8 @@ Core 7 at 32 km, collapse mode ISMIP7_FRACTURE=mask_front (done), IU.
 - **Period (yr):** 2015 to 2301
 - **Friction law:** budd
 - **Mesh:** antarctica_320000_32000, DG0 geometry
+- **Initial state / MAP:** hist_cesm2_waccm_p2_32000_final.h5, sha256 a9552130a0fede0c436684049a7bb29fc5ba68bda03c9fc3c7fce8cfb796a26d
+- **Branch from:** core01-32km-hist-cesm2waccm-p2 at 2015.0, from the log's Restart line
 - **Melt: K, slope, deltaT:** per-basin K from K_issue11_mesh2500.npz, local slope
 - **Calving front, collapse:** held fixed, ice-shelf collapse ISMIP7_FRACTURE=mask_front
 - **Apparent MB:** balance
@@ -208,6 +247,8 @@ Core 7 at 32 km, collapse mode ISMIP7_FRACTURE=mask_front (done), IU.
 - **Cost per model year:** one link of 1 h 11 min for 286 model years
 - **Results path:** antarctica/results/ssp585_cesm2_waccm_p2_mask_front_32000_*
 - **Audit:** OFF TRACK against the present-day envelopes, as an ssp585 run at 2300 is; resid 0.0000 on all 2860 rows, no rescue or subcycle event
+- **ISMIP7 output written:** 286 annual files, 2015 to 2300, with the ten native scalars, from the writer of a0f92a8: fluxes booked before the positivity limiter and ligroundf one-sided
+- **Regridded, isschecker:** isschecker 0.5.1 over 31 files on the 8 km grid as C007. Regridded by main's writer: 1 error, base within 1 cm of topg in 17 wholly floating pixel-years. With cells within 1 cm of flotation written as grounded: 0 errors. Warnings: the non-mandatory variables, acabf 0.00118 %, libmassbffl 0.35 % and strbasemag 0.000568 % out of range
 - **Notes:** collapse-mode evidence for issue #10, not the submission's core 7. Full record: antarctica/reports/core07_ssp585_cesm2_waccm_32km_p2_mask_front.md
 
 ### core07-32km-ssp585-cesm2waccm-p2-none
@@ -220,6 +261,8 @@ Core 7 at 32 km, collapse mode ISMIP7_FRACTURE=none (done), IU.
 - **Period (yr):** 2015 to 2301
 - **Friction law:** budd
 - **Mesh:** antarctica_320000_32000, DG0 geometry
+- **Initial state / MAP:** hist_cesm2_waccm_p2_32000_final.h5, sha256 a9552130a0fede0c436684049a7bb29fc5ba68bda03c9fc3c7fce8cfb796a26d
+- **Branch from:** core01-32km-hist-cesm2waccm-p2 at 2015.0, from the log's Restart line
 - **Melt: K, slope, deltaT:** per-basin K from K_issue11_mesh2500.npz, local slope
 - **Calving front, collapse:** held fixed, ice-shelf collapse ISMIP7_FRACTURE=none
 - **Apparent MB:** balance
@@ -232,7 +275,133 @@ Core 7 at 32 km, collapse mode ISMIP7_FRACTURE=none (done), IU.
 - **Cost per model year:** one link of 1 h 11 min for 286 model years
 - **Results path:** antarctica/results/ssp585_cesm2_waccm_p2_none_32000_*
 - **Audit:** OFF TRACK against the present-day envelopes, as an ssp585 run at 2300 is; resid 0.0000 on all 2860 rows, no rescue or subcycle event
+- **ISMIP7 output written:** 286 annual files, 2015 to 2300, with the ten native scalars, from the writer of a0f92a8: fluxes booked before the positivity limiter and ligroundf one-sided
+- **Regridded, isschecker:** isschecker 0.5.1 over 31 files on the 8 km grid as C007. Regridded by main's writer: 2 errors, libmassbffl below -0.008 kg m-2 s-1 in 1.43 % of values and base within 1 cm of topg in 13 wholly floating pixel-years. With cells within 1 cm of flotation written as grounded: 1 error, the libmassbffl one, which comes from the requested-melt booking. Warnings: the non-mandatory variables, acabf 0.00118 % and strbasemag 0.000813 % out of range
 - **Notes:** collapse-mode evidence for issue #10, not the submission's core 7. Full record: antarctica/reports/core07_ssp585_cesm2_waccm_32km_p2_none.md
+
+### core07-32km-ssp585-cesm2waccm-p3
+
+Core 7 at 32 km on main, collapse mode none, branched from the p2 historical (done), IU.
+
+- **Task type:** test
+- **ISMIP7 exp id:** C007
+- **ESM:** CESM2-WACCM
+- **Scenario:** ssp585
+- **Period (yr):** 2015 to 2301, reached 2301.0
+- **Friction law:** budd
+- **Mesh:** antarctica_320000_32000, DG0 geometry
+- **Initial state / MAP:** hist_cesm2_waccm_p2_32000_final.h5, sha256 a9552130a0fede0c436684049a7bb29fc5ba68bda03c9fc3c7fce8cfb796a26d
+- **Branch from:** core01-32km-hist-cesm2waccm-p2 at 2015.0, from the log's restart lines
+- **Forcing versions:** CESM2-WACCM ssp585, atmosphere SDBN1-8000m v2, ocean v3
+- **Melt: K, slope, deltaT:** per-basin K from K_issue11_mesh2500.npz, local slope
+- **Calving front, collapse:** held fixed, ice-shelf collapse ISMIP7_FRACTURE=none
+- **Apparent MB:** balance
+- **dt (yr):** 0.1
+- **Site / partition:** IU Quartz
+- **Ranks / memory:** 8 ranks
+- **Job ids:** 10595137 10596086
+- **Code:** 91bf573
+- **Started:** 2026-09-23
+- **Finished:** 2026-09-23
+- **Cost per model year:** two links: 1 h 34 min to 2283.1, where the 95 min wall budget stopped it, then 15 min to 2301
+- **Results path:** antarctica/results/ssp585_cesm2_waccm_p3_32000_*
+- **Audit:** OFF TRACK against the present-day envelopes, as an ssp585 run at 2300 is; resid 0.0000 on all 2860 rows, no rescue or stall event
+- **ISMIP7 output written:** 286 annual files, 2015 to 2300, with the ten native scalars, the series carried across the chain link at 2283.1; fluxes booked before the positivity limiter, the convention of main at 91bf573
+- **Regridded, isschecker:** isschecker 0.5.1 over 31 files on the 8 km grid as C007, regridded with cells within 1 cm of flotation written as grounded (14 cell-years): 1 error, libmassbffl below -0.008 kg m-2 s-1 in 1.43 % of values, from the requested-melt booking. Warnings: the non-mandatory variables, acabf 0.00118 % and strbasemag 0.000813 % out of range
+- **Notes:** run for issue #12. It tracks core07-32km-ssp585-cesm2waccm-p2-none, the same configuration at a0f92a8: identical through 2018.3, then apart by at most 0.10 mm SLE in VAF and 44 Gt in mass, and by 0.03 mm SLE at 2301 against a gain of 375 mm SLE since 2015.1. The p4 rerun, whose only change is to the booking, is as far from this one, so the difference is run-to-run roundoff. Final state sha256 0c122c09f6601f2ccce1ee85854507afd5acc422bcffae5aceb65efa5741da5d. Full record: antarctica/reports/core07_ssp585_cesm2_waccm_32km_p3.md
+
+### core07-32km-ssp585-cesm2waccm-p4
+
+Core 7 at 32 km with the fluxes booked after the positivity limiter, collapse mode none, branched from the p2 historical (done), IU.
+
+- **Task type:** test
+- **ISMIP7 exp id:** C007
+- **ESM:** CESM2-WACCM
+- **Scenario:** ssp585
+- **Period (yr):** 2015 to 2301, reached 2301.0
+- **Friction law:** budd
+- **Mesh:** antarctica_320000_32000, DG0 geometry
+- **Initial state / MAP:** hist_cesm2_waccm_p2_32000_final.h5, sha256 a9552130a0fede0c436684049a7bb29fc5ba68bda03c9fc3c7fce8cfb796a26d
+- **Branch from:** core01-32km-hist-cesm2waccm-p2 at 2015.0, from the log's restart lines
+- **Forcing versions:** CESM2-WACCM ssp585, atmosphere SDBN1-8000m v2, ocean v3
+- **Melt: K, slope, deltaT:** per-basin K from K_issue11_mesh2500.npz, local slope
+- **Calving front, collapse:** held fixed, ice-shelf collapse ISMIP7_FRACTURE=none
+- **Apparent MB:** balance
+- **dt (yr):** 0.1
+- **Site / partition:** IU Quartz
+- **Ranks / memory:** 8 ranks
+- **Job ids:** 10595732 10596649
+- **Code:** ae44194, the pull request that closes issue #12
+- **Started:** 2026-09-23
+- **Finished:** 2026-09-23
+- **Cost per model year:** two links, 1 h 25 min to 2229.0 on a node that sacct reports at 1.5 GHz, then 1 h 17 min to 2301 through shared-filesystem stalls of up to 7 min
+- **Results path:** antarctica/results/ssp585_cesm2_waccm_p4_32000_*
+- **Audit:** OFF TRACK against the present-day envelopes, as an ssp585 run at 2300 is; resid 0.0000 on all 2860 rows, no rescue or stall event
+- **ISMIP7 output written:** 286 annual files, 2015 to 2300, with the ten native scalars, the series carried across the chain link at 2229.0; fluxes booked after the positivity limiter. The booked basal melt is 1153, 5202, 7617, 6127 and 3929 Gt/yr in 2015, 2100, 2150, 2200 and 2300, where the requested booking of the p3 run reported 1163, 6259, 20791, 47405 and 123427
+- **Regridded, isschecker:** isschecker 0.5.1 over 31 files on the 8 km grid as C007, with cells within 1 cm of flotation written as grounded (14 cell-years): 0 errors in every test group. Warnings: the non-mandatory variables, libmassbffl 0.0382 % below -0.008 kg m-2 s-1 (1.43 % under the requested booking) and strbasemag 0.000813 % above 1e6 Pa
+- **Notes:** run for issue #12 from a scratch clone of the branch, with results and logs in the shared checkout. It tracks core07-32km-ssp585-cesm2waccm-p3 to 0.043 mm SLE in VAF and to 0.0001 mm SLE at 2301; the booking cannot feed back into the model, so that is run-to-run roundoff, and so is p3's 0.10 mm from the p2 run. Final state sha256 ecd5ef2d7047c30a88e61351f29c0bc434d5456b4866086304140017859df8fe. Full record: antarctica/reports/core07_ssp585_cesm2_waccm_32km_p4.md
+
+### core09-32km-ctrl2015-cesm2waccm-p3
+
+Core 9 at 32 km on main, branched from the p2 historical (done), IU.
+
+- **Task type:** test
+- **ISMIP7 exp id:** C009
+- **ESM:** CESM2-WACCM
+- **Scenario:** ctrl
+- **Period (yr):** 2015 to 2301, reached 2301.0
+- **Friction law:** budd
+- **Mesh:** antarctica_320000_32000, DG0 geometry
+- **Initial state / MAP:** hist_cesm2_waccm_p2_32000_final.h5, sha256 a9552130a0fede0c436684049a7bb29fc5ba68bda03c9fc3c7fce8cfb796a26d
+- **Branch from:** core01-32km-hist-cesm2waccm-p2 at 2015.0, from the log's restart lines
+- **Forcing versions:** RACMO2.4p1 SMB climatology 2000 to 2029 and the OI ocean climatology (30_sep), constant in time
+- **Melt: K, slope, deltaT:** per-basin K from K_issue11_mesh2500.npz, local slope
+- **Calving front, collapse:** held fixed, ice-shelf collapse ISMIP7_FRACTURE=none
+- **Apparent MB:** balance
+- **dt (yr):** 0.1
+- **Site / partition:** IU Quartz
+- **Ranks / memory:** 8 ranks
+- **Job ids:** 10595136
+- **Code:** 91bf573
+- **Started:** 2026-09-23
+- **Finished:** 2026-09-23
+- **Cost per model year:** one link of 1 h 14 min for 286 model years
+- **Results path:** antarctica/results/ctrl2015_cesm2_waccm_p3_32000_*
+- **Audit:** ON TRACK, with dM/dt WARN at 419.2 Gt/yr; resid 0.0000 on all 2860 rows, no rescue or stall event
+- **ISMIP7 output written:** 286 annual files, 2015 to 2300, with the ten native scalars; fluxes booked before the positivity limiter, the convention of main at 91bf573
+- **Regridded, isschecker:** isschecker 0.5.1 over 31 files on the 8 km grid as C009, regridded with cells within 1 cm of flotation written as grounded (46 cell-years): 0 errors. Warnings: the non-mandatory variables, and libmassbffl 0.00767 % out of range
+- **Notes:** the control of the IU 32 km line, run for issue #12; VAF gains 380 mm SLE over 2015 to 2301 under the constant climate. Final state sha256 5c3c15e2f0bd799ba733c4b4552137cf88d3f8b9cba9c6001473415ca390d911. Full record: antarctica/reports/core09_ctrl2015_cesm2_waccm_32km_p3.md
+
+### core09-32km-ctrl2015-cesm2waccm-p4
+
+Core 9 at 32 km with the fluxes booked after the positivity limiter, branched from the p2 historical (done), IU.
+
+- **Task type:** test
+- **ISMIP7 exp id:** C009
+- **ESM:** CESM2-WACCM
+- **Scenario:** ctrl
+- **Period (yr):** 2015 to 2301, reached 2301.0
+- **Friction law:** budd
+- **Mesh:** antarctica_320000_32000, DG0 geometry
+- **Initial state / MAP:** hist_cesm2_waccm_p2_32000_final.h5, sha256 a9552130a0fede0c436684049a7bb29fc5ba68bda03c9fc3c7fce8cfb796a26d
+- **Branch from:** core01-32km-hist-cesm2waccm-p2 at 2015.0, from the log's restart lines
+- **Forcing versions:** RACMO2.4p1 SMB climatology 2000 to 2029 and the OI ocean climatology (30_sep), constant in time
+- **Melt: K, slope, deltaT:** per-basin K from K_issue11_mesh2500.npz, local slope
+- **Calving front, collapse:** held fixed, ice-shelf collapse ISMIP7_FRACTURE=none
+- **Apparent MB:** balance
+- **dt (yr):** 0.1
+- **Site / partition:** IU Quartz
+- **Ranks / memory:** 8 ranks
+- **Job ids:** 10595731 10596654
+- **Code:** ae44194, the pull request that closes issue #12
+- **Started:** 2026-09-23
+- **Finished:** 2026-09-23
+- **Cost per model year:** two links, 1 h 26 min to 2185.0 and 1 h 23 min to 2301, on a node that sacct reports at 1.1 to 2.1 GHz against 4.2 GHz for the p3 control
+- **Results path:** antarctica/results/ctrl2015_cesm2_waccm_p4_32000_*
+- **Audit:** ON TRACK, with dM/dt WARN at 419.3 Gt/yr; resid 0.0000 on all 2860 rows, no rescue or stall event
+- **ISMIP7 output written:** 286 annual files, 2015 to 2300, with the ten native scalars, the series carried across the chain link at 2185.0; fluxes booked after the positivity limiter
+- **Regridded, isschecker:** isschecker 0.5.1 over 31 files on the 8 km grid as C009, with cells within 1 cm of flotation written as grounded (46 cell-years): 0 errors in every test group. Warnings: the non-mandatory variables, and libmassbffl 0.00767 % below -0.008 kg m-2 s-1
+- **Notes:** run for issue #12 from a scratch clone of the branch, with results and logs in the shared checkout. It tracks core09-32km-ctrl2015-cesm2waccm-p3 to 0.006 mm SLE in VAF; the booking cannot feed back into the model, so that is run-to-run roundoff. Final state sha256 8894a82aea90a6a40bdbdc4e1336c65357be5dc18e1d0c02ebb187be13d2a721. Full record: antarctica/reports/core09_ctrl2015_cesm2_waccm_32km_p4.md
 
 ### test-1km-budd-half-step
 

@@ -10,12 +10,16 @@ runs inside the parallel forward, gated by ``ISMIP7_OUTPUT=1``:
 * state variables (``ST``) are snapshots at the end of each year, stamped
   1 January of the following year by the writer;
 * flux variables (``FL``) are the year's means, accumulated every transport
-  advance from the sources REQUESTED of the transport, stamped 1 July. That
-  is the forcing SMB as handed to the transport, BEFORE the positivity
-  limiter clips a net sink that would draw a cell below ``h_clamp``, plus the
-  ocean melt. The withheld part is the run's ``clamp`` budget column and is
-  not any ISMIP7 variable, so in the thin front cells where the limiter fires
-  the grid budget does not close against ``dlithkdt``;
+  advance from the sources the transport APPLIED, stamped 1 July. Where the
+  positivity limiter withholds part of a net sink that would draw a cell
+  below ``h_clamp``, the withheld part comes off the SMB, melt and reference
+  sinks in proportion to their sizes (``book_advance``), so a cell the
+  limiter holds at the floor books only the melt it had ice for. The run's
+  ``clamp`` budget column still carries the withheld total. Booking the
+  requested sources instead put 1.43 % of the floating values of a
+  full-length 32 km ssp585 below the request's -0.008 kg m-2 s-1, an
+  isschecker 0.5.1 error, because by 2200 the limiter held back 99 % of the
+  requested melt;
 * the scalars are the integrals of the same fields, written to a CSV as the
   run goes so an early stop loses nothing.
 
@@ -42,16 +46,18 @@ The year in progress rides in the run's OWN checkpoint, not here: see
 
 Conventions (from the request and discussions #16, #19, #22):
 
-* ``acabf`` is the forcing surface mass balance REQUESTED of the transport
-  (RACMO climatology plus the re-referenced anomaly), not what survived the
-  positivity limiter. The apparent-mass-balance reference ``a_ref`` is NOT
+* ``acabf`` is the surface mass balance the transport applied: the forcing
+  SMB (RACMO climatology plus the re-referenced anomaly) less its share of any
+  sink the positivity limiter withheld. The apparent-mass-balance reference ``a_ref`` is NOT
   part of it: it cancels the discrete flux
   divergence spike by spike (up to ~1000 m/yr at the Pine Island grounding
   zone) and reported as SMB it would sit two orders of magnitude outside the
   request's range. It is recorded separately as ``acabf_correction`` (m/yr
   ice, not a request variable) so the grid budget can be closed by anyone
   who needs it, and the README states the convention.
-* ``libmassbffl`` is the ocean melt on floating cells (negative = loss);
+* ``libmassbffl`` is the ocean melt the transport applied on floating cells
+  (negative = loss), less than the parameterization's melt wherever the
+  limiter holds a cell at the floor;
   ``libmassbfgr`` is zero (no grounded basal melt in the model);
   ``lifmassbf`` is zero (no frontal melt distinct from the basal melt).
 * ``licalvf`` is the ice removed at the front, negative = loss, booked in the
@@ -278,16 +284,32 @@ class AnnualOutput:
             a[:] = 0.0
         self.step_time = 0.0
 
-    def book_advance(self, dt, accum, ocean_melt, a_ref, h_dg, u, grounded_cells):
+    def book_advance(self, dt, accum, ocean_melt, a_ref, h_dg, u, grounded_cells,
+                     withheld=None):
         r"""Called by ``_advance`` after the transport solve, BEFORE removal:
-        books the sources REQUESTED of this advance (the forcing SMB before
-        the positivity limiter, and the melt) and the grounding-line flux
-        with the velocity the transport used."""
+        books the sources this advance APPLIED (the SMB, the melt and the
+        apparent-mass-balance reference) and the grounding-line flux with the
+        velocity the transport used.
+
+        ``withheld`` is the part of each cell's net sink that the positivity
+        limiter held back in this advance (m/yr, never negative), the limited
+        source minus the requested one. It comes off the three sinks, the
+        negative SMB, the melt and the negative reference, in proportion to
+        their sizes, so the booked sources sum to the source the transport
+        applied. ``None`` books the requested sources."""
         smb = assemble(accum * self._phi * dx).dat.data_ro / self.cell_area        # m/yr, cell mean
         melt = assemble(ocean_melt * self._phi * dx).dat.data_ro / self.cell_area
+        corr = (assemble(a_ref * self._phi * dx).dat.data_ro / self.cell_area
+                if a_ref is not None else np.zeros_like(smb))
+        if withheld is not None:
+            sinks = np.maximum(-smb, 0.0) + np.maximum(melt, 0.0) + np.maximum(-corr, 0.0)
+            keep = 1.0 - np.divide(np.minimum(withheld, sinks), sinks,
+                                   out=np.zeros_like(sinks), where=sinks > 0.0)
+            smb = np.where(smb < 0.0, smb * keep, smb)
+            melt = np.where(melt > 0.0, melt * keep, melt)
+            corr = np.where(corr < 0.0, corr * keep, corr)
         self.step_acc["acabf"] += smb * dt
         if a_ref is not None:
-            corr = assemble(a_ref * self._phi * dx).dat.data_ro / self.cell_area
             self.step_acc["acabf_correction"] += corr * dt
         self.step_acc["libmassbffl"] += -melt * dt * (~grounded_cells)
         # grounding-line flux into the first floating cell: the upwind facet

@@ -24,6 +24,11 @@
 # is called by path with the Firedrake environment's PYTHONPATH scrubbed, and
 # the comparison runs under the job's own python.
 #
+# ISMIP7_SCALAR_NATIVE_AF2=1 says the run's native scalars integrate over true
+# area, as a forward with the area factor writes them. The writer stamps which
+# area a tree's scalars carry, and the comparison exits 2 when the knob
+# disagrees with the stamp.
+#
 # A run that is its own reference names the stamped year of its first state,
 # 2016 for a run from 2015. A projection paired with its historical names
 # ISMIP7_SCALAR_HIST=historical and ISMIP7_SCALAR_HIST_CONFIGID=C001 (C002 for
@@ -124,6 +129,7 @@ args=(--submission "${sub}/${cfg}" --tool "${out}/tool/nc/AIS/${source_id}/${ism
       --out-csv "${out}/compare/comparison.csv" --out-md "${out}/compare/comparison.md")
 [ -z "${ISMIP7_SCALAR_NATIVE_CSV:-}" ] || args+=(--native-csv "${ISMIP7_SCALAR_NATIVE_CSV}")
 [ -z "${ISMIP7_SCALAR_OVERLAP:-}" ] || args+=(--overlap "${ISMIP7_SCALAR_OVERLAP}")
+[ "${ISMIP7_SCALAR_NATIVE_AF2:-0}" = 0 ] || args+=(--native-af2)
 python -u scripts/compare_scalars.py "${args[@]}"
 status=$?
 echo "compare_scalars exit status: ${status}"

@@ -241,7 +241,10 @@ grounded ice, at a pinning point or an ice rumple. The organisers' reply of
 isschecker 0.5.1 bounds the field symmetrically; the group settled on this
 reading on 22 September 2026. The integrated scalars carry the signs of the
 fields they integrate, so `tendlicalvf` and `tendlibmassbffl` are negative
-and `tendligroundf` is the net grounding-line discharge. `topg` is not
+and `tendligroundf` is the net grounding-line discharge. They integrate over
+true area: each native cell counts its map-plane area times af2 = (1/k)^2,
+the EPSG:3031 area factor at the cell's centroid, the factor
+`ismip7-scalar-processing` weights every 8 km pixel by. `topg` is not
 masked to the ice, `lithk` is zero and not fill where there is no ice, and
 the fill value is the finite netCDF default (discussions #10 and #19).
 The fluxes are the ones the model applied: where the thickness floor held

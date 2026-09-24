@@ -37,6 +37,8 @@ FILL = netCDF4.default_fillvals["f4"]
 EXTRA_MELT = -2.5e5      # kg/s the model books off ice floating at year end
 THIN = 3.0e9             # m3 of ice in cells of 1 m or less
 FL_VARS = ("acabf", "libmassbfgr", "libmassbffl", "licalvf", "lifmassbf", "ligroundf", "dlithkdt")
+# the stand-in for af2_AIS_08000m_v1.nc
+AF2 = (1.02 + 0.01 * np.arange(NX)[None, :] + 0.002 * np.arange(NY)[:, None]).astype("f4")
 
 
 def stamp(year, month, day):
@@ -74,8 +76,10 @@ def write_gridded(folder, var, cube, flux, attrs=None):
         v[:] = arr
 
 
-def write_series(folder, var, values, flux, time_dtype="f4", tag=TAG):
+def write_series(folder, var, values, flux, time_dtype="f4", tag=TAG, attrs=None):
     with netCDF4.Dataset(folder / f"{var}_{tag}.nc", "w") as ds:
+        for k, v in (attrs or {}).items():
+            ds.setncattr(k, v)
         ds.createDimension("time", None)
         t = ds.createVariable("time", time_dtype, ("time",))
         t.units, t.calendar, t.long_name = UNITS, "standard", "time"
@@ -138,24 +142,26 @@ def model_fields(moving_bed=False):
     return {v: np.array(c, dtype="f4").astype(np.float64) for v, c in f.items()}, cov
 
 
-def native_scalars(f, cov):
-    r"""What the model's mesh sums give, from the float32 grid as written."""
+def native_scalars(f, cov, weight=1.0):
+    r"""What the model's mesh sums give, from the float32 grid as written.
+    ``weight`` is the area factor a forward with true-area scalars carries."""
     A = DX * DX
+    w = np.asarray(weight, dtype=np.float64)
     out = {s: [] for s in cs.ST_SCALARS + tuple(s for s, _ in cs.FL_SCALARS)}
     for k in range(len(YEARS)):
         h, b = f["lithk"][k], np.nan_to_num(f["topg"][k])
         hf = np.maximum(-b, 0.0) * 1024.0 / 917.0
-        out["lim"].append(917.0 * (np.sum(h) * A + THIN))
-        out["limnsw"].append(917.0 * np.sum(np.maximum(h - hf, 0.0)) * A)
-        out["iareagr"].append(np.sum(f["sftgrf"][k]) * A)
-        out["iareafl"].append(np.sum(f["sftflf"][k]) * A)
+        out["lim"].append(917.0 * (np.sum(h * w) * A + THIN))
+        out["limnsw"].append(917.0 * np.sum(np.maximum(h - hf, 0.0) * w) * A)
+        out["iareagr"].append(np.sum(f["sftgrf"][k] * w) * A)
+        out["iareafl"].append(np.sum(f["sftflf"][k] * w) * A)
         z = {v: np.nan_to_num(f[v][k]) for v in FL_VARS}
-        out["tendacabf"].append(np.sum(z["acabf"] * cov) * A)
+        out["tendacabf"].append(np.sum(z["acabf"] * cov * w) * A)
         out["tendlibmassbfgr"].append(0.0)
-        out["tendlibmassbffl"].append(np.sum(z["libmassbffl"] * f["sftflf"][k]) * A + EXTRA_MELT)
-        out["tendlicalvf"].append(np.sum(z["licalvf"]) * A)
+        out["tendlibmassbffl"].append(np.sum(z["libmassbffl"] * f["sftflf"][k] * w) * A + EXTRA_MELT)
+        out["tendlicalvf"].append(np.sum(z["licalvf"] * w) * A)
         out["tendlifmassbf"].append(0.0)
-        out["tendligroundf"].append(np.sum(z["ligroundf"]) * A)
+        out["tendligroundf"].append(np.sum(z["ligroundf"] * w) * A)
     return out
 
 
@@ -245,18 +251,22 @@ def tool_scalars(sub, datapath, params, refyear=2016):
 
 
 def build(tmp_path, *, rhow=1024.0, flip=False, moving_bed=False, shift_tool=False,
-          perturb_sftgrf=False, csv_off=False, ground_near=False, whole_pixel=True):
+          perturb_sftgrf=False, csv_off=False, ground_near=False, whole_pixel=True,
+          native_af2=False, stamp=True, native_scale=1.0):
     r"""A submission, its grids, params.nc, the tool's output and the
     writer's overlap cache; returns the argument list for compare_scalars.
     ``whole_pixel=False`` writes the tree the way the writer did before its
-    flux means were whole-pixel means."""
+    flux means were whole-pixel means. ``native_af2`` gives the model's
+    scalars the area factor, ``stamp=False`` leaves the writer's stamp of
+    their area off, and ``native_scale`` puts them that factor off."""
     sub = tmp_path / "tree" / "AIS" / "RICE" / "icepack2" / "CORE" / "C007"
     tool = tmp_path / "out" / "tool" / "nc" / "AIS" / "RICE" / "icepack2" / "CORE" / "C007"
     data = tmp_path / "grids"
     for d in (sub, tool, data):
         d.mkdir(parents=True)
     f, cov = model_fields(moving_bed=moving_bed)
-    N = native_scalars(f, cov)
+    N = native_scalars(f, cov, weight=AF2 if native_af2 else 1.0)
+    N = {s: [v * native_scale for v in vals] for s, vals in N.items()}
     grid = {v: f[v].copy() for v in ("lithk", "topg", "sftgrf", "sftflf") + FL_VARS}
     if whole_pixel:
         # the same fluxes as whole-pixel means: fill stays fill (NaN * 0)
@@ -275,11 +285,13 @@ def build(tmp_path, *, rhow=1024.0, flip=False, moving_bed=False, shift_tool=Fal
     for v in FL_VARS:
         write_gridded(sub, v, grid[v], flux=True,
                       attrs={cs.FLUX_MEAN_ATTR: cs.WHOLE_PIXEL} if whole_pixel else None)
-    # the writer takes each scalar from the CSV's seven digits into float32
+    # the writer takes each scalar from the CSV's seven digits into float32,
+    # and stamps the area it found them to integrate over
     rows = [{"year": yr, **{s: f"{N[s][k]:.6e}" for s in N}} for k, yr in enumerate(YEARS)]
+    area = {cs.SCALAR_AREA_ATTR: cs.TRUE_AREA if native_af2 else cs.MAP_PLANE} if stamp else None
     for s in N:
         write_series(sub, s, np.array([float(r[s]) for r in rows], dtype="f4"),
-                     flux=s not in cs.ST_SCALARS)
+                     flux=s not in cs.ST_SCALARS, attrs=area)
     if csv_off:
         rows[1]["lim"] = f"{float(rows[1]['lim']) * 1.001:.6e}"
     native_csv = tmp_path / "run_ismip7_scalars.csv"
@@ -287,9 +299,8 @@ def build(tmp_path, *, rhow=1024.0, flip=False, moving_bed=False, shift_tool=Fal
         w = csv.DictWriter(fh, fieldnames=list(rows[0]))
         w.writeheader(); w.writerows(rows)
 
-    af2 = (1.02 + 0.01 * np.arange(NX)[None, :] + 0.002 * np.arange(NY)[:, None]).astype("f4")
     mm = np.ones((NY, NX), dtype="i4"); mm[4, 1] = 0          # one ice pixel outside the mask
-    write_grid(data, "af2", af2, "f4", flip=False)
+    write_grid(data, "af2", AF2, "f4", flip=False)
     write_grid(data, "maxmask1", mm, "i4", flip=flip)
     write_grid(data, "iaf2", np.ones((NY, NX), dtype="f4"), "f4")
     params = tmp_path / "out" / "params" / "RICE" / "icepack2" / "params.nc"
@@ -332,9 +343,8 @@ def test_a_consistent_submission_passes_and_every_difference_is_named(tmp_path):
         assert parts == pytest.approx(r["T_minus_N"], rel=1e-9, abs=1e-12 * max(1.0, abs(r["N"])))
     k = 1
     # the area factor on lim, by hand: rho_i sum(h * maxmask1 * (af2 - 1)) dx^2
-    af2 = (1.02 + 0.01 * np.arange(NX)[None, :] + 0.002 * np.arange(NY)[:, None]).astype("f4")
     mm = np.ones((NY, NX)); mm[4, 1] = 0
-    want = 917.0 * np.sum(f["lithk"][k] * mm * (af2.astype(np.float64) - 1.0)) * A
+    want = 917.0 * np.sum(f["lithk"][k] * mm * (AF2.astype(np.float64) - 1.0)) * A
     assert rows[("lim", 2016)]["d_area"] == pytest.approx(want, rel=1e-6)
     assert rows[("lim", 2016)]["d_mm"] == pytest.approx(-917.0 * f["lithk"][k][4, 1] * A, rel=1e-6)
     # the thin-cell mass lithk leaves out, and the melt booked off the floating ice
@@ -458,6 +468,40 @@ def test_whole_pixel_means_need_no_overlap_cache(tmp_path):
     assert "no --overlap" not in (tmp_path / "cmp.md").read_text()
 
 
+def test_native_scalars_over_true_area_leave_no_area_term(tmp_path):
+    r"""Issue #97: with the area factor on both sides the area term is zero,
+    and every gate still holds."""
+    args, _, _ = build(tmp_path, native_af2=True)
+    assert cs.main(args + ["--native-af2"]) == 0, (tmp_path / "cmp.md").read_text()
+    assert all(r["d_area"] == 0.0 for r in rows_of(tmp_path).values())
+    md = (tmp_path / "cmp.md").read_text()
+    assert "- native scalars: over true area" in md and "the area term is zero" in md
+
+
+def test_a_switch_that_contradicts_the_writer_s_stamp_is_refused(tmp_path, capsys):
+    args, _, _ = build(tmp_path / "true", native_af2=True)
+    assert cs.main(args) == 2
+    assert "stamped the native scalars true_area" in capsys.readouterr().err
+    args, _, _ = build(tmp_path / "plane")
+    assert cs.main(args + ["--native-af2"]) == 2
+    assert "stamped the native scalars map_plane" in capsys.readouterr().err
+
+
+def test_unstamped_true_area_scalars_without_the_switch_fail_the_sums(tmp_path):
+    args, _, _ = build(tmp_path, native_af2=True, stamp=False)
+    assert cs.main(args) == 1
+    assert "| FAIL |" in gate_line(tmp_path, "forbidden-policy sums against N")
+
+
+def test_a_native_factor_five_percent_off_fails_under_the_switch(tmp_path):
+    r"""The switch allows af2's largest change between neighbouring pixels
+    (1 % on this small grid, 5.9e-4 on the 8 km one); a missing or doubled
+    factor exceeds it."""
+    args, _, _ = build(tmp_path, native_af2=True, native_scale=1.05)
+    assert cs.main(args + ["--native-af2"]) == 1
+    assert "| FAIL |" in gate_line(tmp_path, "forbidden-policy sums against N")
+
+
 def test_strict_fails_on_the_named_differences(tmp_path):
     args, _, _ = build(tmp_path)
     assert cs.main(args + ["--strict"]) == 1
@@ -470,6 +514,8 @@ def test_the_constants_are_the_model_s():
     assert cs.RHO_I == ismip7_output.RHO_I
     assert cs.SECONDS_PER_YEAR == ismip7_output.SECONDS_PER_YEAR
     assert (cs.FLUX_MEAN_ATTR, cs.WHOLE_PIXEL) == (wio.FLUX_MEAN_ATTR, wio.FLUX_MEAN)
+    assert ((cs.SCALAR_AREA_ATTR, cs.TRUE_AREA, cs.MAP_PLANE)
+            == (wio.SCALAR_AREA_ATTR, wio.TRUE_AREA, wio.MAP_PLANE))
 
 
 def test_it_imports_without_firedrake():

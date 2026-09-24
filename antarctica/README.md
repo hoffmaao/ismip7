@@ -1230,7 +1230,11 @@ Per experiment in `results/`:
   `year, vaf_mm_sle, mass_gt, smb_gtyr, melt_gtyr, outflux_gtyr, calv_gt,
   clamp_gt, resid_gt, amb_gtyr`. The residual must close to 0.00.
 
-VAF is in mm of sea-level equivalent, mass in Gt.
+VAF is in mm of sea-level equivalent, mass in Gt, both over map-plane area.
+The ISMIP7 scalars of a run with `ISMIP7_OUTPUT=1`
+(`<exp>_<lc>_ismip7_scalars.csv`) integrate over true area, map-plane area
+times af2 = (1/k)^2 of EPSG:3031, as the organisers' tool does, so their mass
+sits about 2.6 % above `mass_gt`.
 
 ### From a finished run to a submission
 
@@ -1267,7 +1271,7 @@ python antarctica/scripts/compare_scalars.py \
     --submission submission/AIS/RICE/icepack2/CORE/C009 \
     --tool scalars/nc/AIS/RICE/icepack2/CORE/C009 \
     --datapath ISMIP7/Output-Processing/Data/AIS \
-    --params scalars/params/RICE/icepack2/params.nc --refyear 2016 \
+    --params scalars/params/RICE/icepack2/params.nc --refyear 2016 --native-af2 \
     --native-csv antarctica/results/<exp>_<lc>_ismip7_scalars.csv \
     --out-csv scalars/comparison.csv --out-md scalars/comparison.md
 ```
@@ -1322,6 +1326,12 @@ Things that are easy to get wrong:
 - **The tool's files carry the submission's own names** (`lim_AIS_RICE_...`),
   so `--outpath` and `params.nc` stay outside the upload tree. The upload
   carries the model's scalars; the tool's copies of them fail the checker.
+- **`--native-af2` says the model's scalars integrate over true area**, as a
+  current forward writes them. The writer checks every year of the scalars
+  CSV against the annual files, refuses a series that mixes true-area and
+  map-plane years, and stamps the scalar files with the one it found
+  (`scalar_area`). The comparison exits 2 when the switch disagrees with the
+  stamp; leave it off for a run from before the change.
 - **A tree written before the whole-pixel flux means needs `--overlap`.**
   Its flux files carry no `flux_pixel_mean`, and `acabf` there is a mean over
   the covered part of a pixel, which the comparison undoes with the writer's

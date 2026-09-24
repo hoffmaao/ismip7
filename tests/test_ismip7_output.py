@@ -146,6 +146,94 @@ def test_the_grid_is_the_official_8_km_description():
     assert regrid.ISMIP7_DX == 8000.0 and x[-1] == y[-1] == 3040000.0
 
 
+# af2_AIS_08000m_v1.nc, the area factor ismip7-scalars weights every pixel by
+# (/ISMIP7/Output-Processing/Data/AIS on Globus, float32, "after Snyder
+# (1987)", sha256 e62c8d274cae4c262b495211ad6e8ba6fc870786e45ee31021317e4e9c3a6b0f),
+# at the centres of eleven pixels (row j, column i), read on IU Quartz on
+# 24 September 2026: the pole, its neighbours, 71 S, the grid's corners.
+ORGANISERS_AF2 = {
+    (380, 380): 1.056770205, (380, 381): 1.056769252, (381, 381): 1.056768417,
+    (380, 500): 1.044315219, (100, 380): 0.991517127, (0, 0): 0.843348742,
+    (760, 760): 0.843348742, (200, 600): 0.989615023, (380, 0): 0.941123068,
+    (600, 150): 0.973586619, (450, 300): 1.046977997,
+}
+
+
+def test_the_area_factor_is_the_organisers_grid():
+    r"""Issue #97: the native scalars weight each cell by the factor the
+    organisers' tool weights each pixel by, to the file's float32 rounding."""
+    from icepack2_tools.regrid import area_factor, ismip7_grid_coords
+    x, y = ismip7_grid_coords()
+    j, i = (np.array(ax) for ax in zip(*ORGANISERS_AF2))
+    want = np.array(list(ORGANISERS_AF2.values()))
+    assert np.allclose(area_factor(x[i], y[j]), want, rtol=1.2e-7, atol=0.0)
+
+
+def test_the_area_factor_is_snyder_s_scale_factor():
+    r"""(1/k)^2 of the polar stereographic projection on WGS84, true at 71 S
+    (Snyder 1987, eqs. 21-33 to 21-35), written out apart from pyproj at
+    points placed by latitude, the pole included."""
+    from icepack2_tools.regrid import area_factor
+    a, f = 6378137.0, 1.0 / 298.257223563
+    e2 = f * (2.0 - f)
+    e = np.sqrt(e2)
+
+    def t(p):
+        return np.tan(np.pi / 4 - p / 2) / ((1 - e * np.sin(p)) / (1 + e * np.sin(p))) ** (e / 2)
+
+    def m(p):
+        return np.cos(p) / np.sqrt(1 - e2 * np.sin(p) ** 2)
+
+    pc = np.radians(71.0)
+    phi = np.radians([85.0, 71.0, 65.0, 55.0])        # degrees south
+    rho = a * m(pc) * t(phi) / t(pc)
+    k = rho / (a * m(phi))
+    assert np.isclose(k[1], 1.0, rtol=1e-12, atol=0.0)
+    assert np.allclose(area_factor(rho / np.sqrt(2), -rho / np.sqrt(2)), k ** -2, rtol=1e-9, atol=0.0)
+    k_pole = m(pc) / (2 * t(pc)) * np.sqrt((1 + e) ** (1 + e) * (1 - e) ** (1 - e))
+    assert np.isclose(area_factor(np.zeros(1), np.zeros(1))[0], k_pole ** -2, rtol=1e-9, atol=0.0)
+
+
+def test_the_area_factor_matches_the_organisers_whole_grid():
+    r"""Every pixel centre, where the file is at hand: ``ISMIP7_AF2_GRID``,
+    or where ``download_forcing.py --scalar-processing`` puts it."""
+    repo = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    path = os.environ.get("ISMIP7_AF2_GRID") or os.path.join(
+        repo, "ISMIP7", "Output-Processing", "Data", "AIS", "af2_AIS_08000m_v1.nc")
+    if not os.path.exists(path):
+        pytest.skip(f"no {path}")
+    import netCDF4
+    from icepack2_tools.regrid import area_factor
+    with netCDF4.Dataset(path) as ds:
+        grid = np.asarray(ds.variables["af2"][:, :], dtype=np.float64)
+        x = np.asarray(ds.variables["x"][:], dtype=np.float64)
+        y = np.asarray(ds.variables["y"][:], dtype=np.float64)
+    X, Y = np.meshgrid(x, y)
+    got = area_factor(X.ravel(), Y.ravel()).reshape(grid.shape)
+    assert np.max(np.abs(got / grid - 1.0)) <= 1.2e-7
+
+
+def test_the_writer_tells_which_area_the_scalars_csv_integrates_over():
+    r"""A forward with the area factor writes true-area scalars and one from
+    before map-plane ones; the annual file's own areas under each convention
+    tell which a CSV row holds."""
+    sums = {wio.TRUE_AREA: (1.2357e13, 1.4595e12), wio.MAP_PLANE: (1.2077e13, 1.4261e12)}
+    row = {"year": "2015", "iareagr": "1.235700e+13", "iareafl": "1.459500e+12"}
+    assert wio.scalar_area(row, sums) == wio.TRUE_AREA
+    row = dict(row, iareagr="1.207700e+13", iareafl="1.426100e+12")
+    assert wio.scalar_area(row, sums) == wio.MAP_PLANE
+    with pytest.raises(ValueError, match="match none"):
+        wio.scalar_area(dict(row, iareagr="1.300000e+13"), sums)
+
+
+def test_a_series_that_mixes_the_two_areas_is_refused():
+    r"""A chained run whose links straddled the change to true-area scalars
+    would submit both in one series."""
+    assert wio.series_area({2015: wio.TRUE_AREA, 2016: wio.TRUE_AREA}) == wio.TRUE_AREA
+    with pytest.raises(ValueError, match="map_plane in 2 years, 2015 to 2016; true_area"):
+        wio.series_area({2015: wio.MAP_PLANE, 2016: wio.MAP_PLANE, 2017: wio.TRUE_AREA})
+
+
 def test_the_bundled_request_says_where_it_came_from():
     r"""Upstream edits the table as the forum finds problems (#16, #22, #23,
     #46), so the copy records its tag, and the writer's columns are there."""

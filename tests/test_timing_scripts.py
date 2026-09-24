@@ -374,15 +374,17 @@ def test_the_scalar_processing_job_keeps_the_tool_clear_and_ends_with_the_verdic
     argv = next(ln for ln in seen if ln.startswith("ARGV"))
     assert f"--submission {tree}/AIS/RICE/icepack2/CORE/C007" in argv
     assert "--refyear 2016" in argv and f"--native-csv {native}" in argv
-    assert "af2_AIS_08000m_v1.nc sha256" in argv
+    assert "af2_AIS_08000m_v1.nc sha256" in argv and "--native-af2" not in argv
     assert "compare_scalars exit status: 1" in proc.stdout
 
-    # a paired run hands the comparison the historical's folder
+    # a paired run hands the comparison the historical's folder, and a run
+    # whose native scalars carry the area factor says so
     proc, seen = run_script(sandbox, "scalar_processing.script", ISMIP7_SCALAR_HIST="historical",
-                            ISMIP7_SCALAR_HIST_CONFIGID="C001", **env)
+                            ISMIP7_SCALAR_HIST_CONFIGID="C001", ISMIP7_SCALAR_NATIVE_AF2="1", **env)
     assert proc.returncode == 0, proc.stderr
-    assert f"--hist-submission {tree}/AIS/RICE/icepack2/CORE/C001" in \
-        [ln for ln in seen if ln.startswith("ARGV")][-1]
+    argv = [ln for ln in seen if ln.startswith("ARGV")][-1]
+    assert f"--hist-submission {tree}/AIS/RICE/icepack2/CORE/C001" in argv
+    assert "--native-af2" in argv
 
     # a failed tool ends the job with its status and no comparison
     n = len([ln for ln in seen if ln.startswith("ARGV")])

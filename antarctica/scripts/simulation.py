@@ -2594,7 +2594,10 @@ def run_simulation(
         # state and must see it.
         grounded = _grounded_cells()
         if annual is not None:
-            annual.book_advance(dt_local, accum, ocean_melt, a_ref, h_dg, u_vel, grounded)
+            # the sources as the limiter left them: the withheld sink comes
+            # off the booked SMB, melt and reference (ismip7_output)
+            annual.book_advance(dt_local, accum, ocean_melt, a_ref, h_dg, u_vel, grounded,
+                                withheld=src_dg.dat.data_ro - _src_want)
 
         # Floor to h_clamp, EXCEPT in the cells the front rules report as
         # holding no ice: see clamp_thickness for why every such rule has to

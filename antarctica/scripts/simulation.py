@@ -198,6 +198,36 @@ def latest_checkpoint(experiment_name, lc_val=None):
     return best
 
 
+def auto_resume_checkpoint(experiment_name, lc_val=None):
+    r"""The checkpoint an unattended run resumes from, or None.
+
+    :func:`latest_checkpoint`, refused when it was written under another
+    calving law. The experiment name carries only the run tag, so a run that
+    selects a law without a tag of its own finds a stock run's checkpoints
+    (and a stock run a law run's), would resume the other run's state and then
+    overwrite its files. Every checkpoint of a law-driven run records the law
+    with its parameters (the ``calving_law`` attribute, absent under ``none``),
+    and a resume under a different law or different parameters stops here.
+    An explicit ``ISMIP7_RESTART`` is taken as meant and does not come here.
+    """
+    path = latest_checkpoint(experiment_name, lc_val)
+    if path is None:
+        return None
+    law = _calving_law_object()
+    want = law.describe() if law is not None else None
+    with fd.CheckpointFile(path, "r") as chk:
+        have = (str(chk.get_attr("/", "calving_law"))
+                if chk.has_attr("/", "calving_law") else None)
+    if have != want:
+        raise RuntimeError(
+            f"auto-resume found {path}, written under the calving law "
+            f"{have or 'none'}, but this run is configured with "
+            f"{want or 'none'}. Give this run its own ISMIP7_RUN_TAG so it "
+            f"keeps its own checkpoints, or start it from that state on "
+            f"purpose with ISMIP7_RESTART.")
+    return path
+
+
 def setup_model(restart_from=None, *, allow_timing_cache_a_ref=False):
     r"""Load mesh, data, inversion fields, and build diagnostic solver.
 

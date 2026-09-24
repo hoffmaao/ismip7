@@ -322,10 +322,11 @@ def test_the_melt_bound_job_ends_with_the_check_s_own_status(sandbox):
 
 def test_the_scalar_processing_job_keeps_the_tool_clear_and_ends_with_the_verdict(sandbox):
     r"""scalar_processing.script: the organisers' tool runs from its own venv
-    with the Firedrake environment's PYTHONPATH scrubbed; a run that is its own
-    reference has to name its stamped year and a paired run must not; the job
-    ends with the tool's status when that fails and the comparison's
-    otherwise."""
+    with the Firedrake environment's PYTHONPATH scrubbed; it reads params.nc
+    from the tree, as the organisers' run of it will, and the job stops
+    without one; a run that is its own reference has to name its stamped year
+    and a paired run must not; the job ends with the tool's status when that
+    fails and the comparison's otherwise."""
     venv = sandbox / "tools" / "bin"
     venv.mkdir(parents=True)
     fake = ('#!/bin/bash\n'
@@ -346,6 +347,8 @@ def test_the_scalar_processing_job_keeps_the_tool_clear_and_ends_with_the_verdic
     stub.chmod(0o755)
     tree = sandbox / "tree"
     (tree / "AIS" / "RICE" / "icepack2" / "CORE" / "C007").mkdir(parents=True)
+    params = tree / "AIS" / "RICE" / "icepack2" / "params.nc"
+    params.write_text("")
     grids = sandbox / "grids"
     grids.mkdir()
     (grids / "af2_AIS_08000m_v1.nc").write_text("")
@@ -369,10 +372,12 @@ def test_the_scalar_processing_job_keeps_the_tool_clear_and_ends_with_the_verdic
     assert proc.returncode == 1, proc.stderr
     tool = next(ln for ln in seen if ln.startswith("ismip7-scalars --region"))
     assert "--hist ssp585 --hist-configid C007 --refyear 2016" in tool
-    assert f"--params-path {sandbox}/out/params --outpath {sandbox}/out/tool" in tool
-    assert tool.endswith("PYTHONPATH=unset")
+    assert f"--modelpath {tree}/AIS --outpath {sandbox}/out/tool" in tool
+    assert "--params-path" not in tool and tool.endswith("PYTHONPATH=unset")
+    assert not [ln for ln in seen if ln.startswith("ismip7-scalars-set-params")]
     argv = next(ln for ln in seen if ln.startswith("ARGV"))
     assert f"--submission {tree}/AIS/RICE/icepack2/CORE/C007" in argv
+    assert f"--params {params}" in argv
     assert "--refyear 2016" in argv and f"--native-csv {native}" in argv
     assert "af2_AIS_08000m_v1.nc sha256" in argv and "--native-af2" not in argv
     assert "compare_scalars exit status: 1" in proc.stdout
@@ -392,3 +397,12 @@ def test_the_scalar_processing_job_keeps_the_tool_clear_and_ends_with_the_verdic
                             FAKE_TOOL_RC="2", **env)
     assert proc.returncode == 2 and "ismip7-scalars exit status: 2" in proc.stdout
     assert len([ln for ln in seen if ln.startswith("ARGV")]) == n
+
+    # a tree without params.nc stops the job before the tool runs, and says
+    # how to write it
+    params.unlink()
+    n = len([ln for ln in seen if ln.startswith("ismip7-scalars --region")])
+    proc, seen = run_script(sandbox, "scalar_processing.script", ISMIP7_SCALAR_REFYEAR="2016", **env)
+    assert proc.returncode == 2 and f"not found: {params}" in proc.stderr
+    assert "ismip7-scalars-set-params --region AIS --group RICE" in proc.stderr
+    assert len([ln for ln in seen if ln.startswith("ismip7-scalars --region")]) == n

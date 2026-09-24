@@ -303,7 +303,7 @@ def build(tmp_path, *, rhow=1024.0, flip=False, moving_bed=False, shift_tool=Fal
     write_grid(data, "af2", AF2, "f4", flip=False)
     write_grid(data, "maxmask1", mm, "i4", flip=flip)
     write_grid(data, "iaf2", np.ones((NY, NX), dtype="f4"), "f4")
-    params = tmp_path / "out" / "params" / "RICE" / "icepack2" / "params.nc"
+    params = tmp_path / "tree" / "AIS" / "RICE" / "icepack2" / "params.nc"   # in the upload
     write_params(params, rhow=rhow)
 
     T = tool_scalars(sub, data, params)
@@ -525,6 +525,8 @@ def test_it_imports_without_firedrake():
 
 
 def test_the_tool_itself_agrees_with_the_replay(tmp_path):
+    r"""The tool finds params.nc in the upload tree, with no --params-path,
+    as the organisers' run of it will."""
     scalars = pytest.importorskip("ismip7_scalars.scalars")
     args, _, _ = build(tmp_path)
     out = tmp_path / "real"
@@ -532,8 +534,7 @@ def test_the_tool_itself_agrees_with_the_replay(tmp_path):
                        "--modelid", "m001", "--esm", "CESM2-WACCM", "--forcingid", "f001",
                        "--experiment", "ssp585", "--configid", "C007", "--hist", "ssp585",
                        "--refyear", "2016", "--datapath", args[args.index("--datapath") + 1],
-                       "--modelpath", str(tmp_path / "tree" / "AIS"),
-                       "--params-path", str(tmp_path / "out" / "params"), "--outpath", str(out)])
+                       "--modelpath", str(tmp_path / "tree" / "AIS"), "--outpath", str(out)])
     assert rc == 0
     args[args.index("--tool") + 1] = str(out / "nc" / "AIS" / "RICE" / "icepack2" / "CORE" / "C007")
     assert cs.main(args) == 0, (tmp_path / "cmp.md").read_text()

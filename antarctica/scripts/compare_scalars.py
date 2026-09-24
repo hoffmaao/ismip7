@@ -6,7 +6,7 @@ r"""The organisers' scalar processing set against the model's own scalars
         --submission SUB/AIS/RICE/icepack2/CORE/C007 \
         --tool OUT/tool/nc/AIS/RICE/icepack2/CORE/C007 \
         --datapath ISMIP7/Output-Processing/Data/AIS \
-        --params OUT/params/RICE/icepack2/params.nc \
+        --params SUB/AIS/RICE/icepack2/params.nc \
         --refyear 2016 [--native-csv RUN_ismip7_scalars.csv] [--native-af2] \
         [--overlap RUN_ismip7_annual.h5.overlap.npz] \
         --out-csv OUT/compare/comparison.csv --out-md OUT/compare/comparison.md
@@ -709,7 +709,8 @@ def main(argv=None):
     ap.add_argument("--tool", required=True, help="the tool's folder for the same experiment, "
                     "<outpath>/nc/AIS/<source>/<ism>/CORE/<counter>")
     ap.add_argument("--datapath", required=True, help="the auxiliary grids (af2, maxmask1)")
-    ap.add_argument("--params", required=True, help="the params.nc the tool read")
+    ap.add_argument("--params", required=True, help="the params.nc the tool read, the upload's "
+                    "AIS/<source_id>/<ism_id>/params.nc")
     ref = ap.add_mutually_exclusive_group(required=True)
     ref.add_argument("--refyear", type=int, help="the stamped year given to the tool")
     ref.add_argument("--hist-submission", help="the historical's experiment folder, when the "

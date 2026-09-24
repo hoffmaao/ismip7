@@ -1256,22 +1256,23 @@ python antarctica/scripts/write_ismip7_output.py \
 python -m isschecker --variable-list ismip7 \
     --source-path submission/AIS/RICE/icepack2/CORE/C009
 
-# 4. the sea-level scalars nothing here computes, from the tools' own venv
-python antarctica/scripts/download_forcing.py --scalar-processing
+# 4. the model's densities into the upload, then the sea-level scalars
+#    nothing here computes, from the tools' own venv
 ismip7-scalars-set-params --region AIS --group RICE --model icepack2 \
-    --rhoi 917 --rhow 1024 --rhof 1000 --modelpath scalars/params
+    --rhoi 917 --rhow 1024 --rhof 1000 --modelpath submission/AIS
+python antarctica/scripts/download_forcing.py --scalar-processing
 ismip7-scalars --region AIS --group RICE --model icepack2 \
     --experiment ctrl --modelid m001 --esm CESM2-WACCM --forcingid f001 \
     --configid C009 --exp-group CORE --hist ctrl --refyear 2016 \
     --datapath ISMIP7/Output-Processing/Data/AIS \
-    --modelpath submission/AIS --params-path scalars/params --outpath scalars
+    --modelpath submission/AIS --outpath scalars
 
 # 5. the tool's scalars against the model's own
 python antarctica/scripts/compare_scalars.py \
     --submission submission/AIS/RICE/icepack2/CORE/C009 \
     --tool scalars/nc/AIS/RICE/icepack2/CORE/C009 \
     --datapath ISMIP7/Output-Processing/Data/AIS \
-    --params scalars/params/RICE/icepack2/params.nc --refyear 2016 --native-af2 \
+    --params submission/AIS/RICE/icepack2/params.nc --refyear 2016 --native-af2 \
     --native-csv antarctica/results/<exp>_<lc>_ismip7_scalars.csv \
     --out-csv scalars/comparison.csv --out-md scalars/comparison.md
 ```
@@ -1310,10 +1311,13 @@ Things that are easy to get wrong:
   Copying `/ISMIP7/Output-Processing/Data` with the Globus web app into
   `ISMIP7/Output-Processing/Data/` of the checkout, the same path, needs no
   CLI login (IU Quartz, 23 September 2026).
-- **`params.nc` carries the model's densities**, so give it ours: 917 ice and
-  1024 seawater, the pair `simulation.py` builds the surface with. The tool
-  defaults to 1027 seawater, and the comparison refuses any other pair. The
-  organisers need the same file with the upload. (issue #98)
+- **`params.nc` carries the model's densities, in the upload**:
+  `AIS/RICE/icepack2/params.nc`, beside `CORE/`, where the organisers' run of
+  the tool reads it and where the tool looks by default, so it runs without
+  `--params-path`. Give it ours: 917 ice and 1024 seawater, the pair
+  `simulation.py` builds the surface with, and 1000 fresh water. The tool
+  defaults to 1027 seawater, and the comparison refuses any other densities.
+  `scalar_processing.script` reads the tree's file and stops without one.
 - **The tool stops without a historical run.** A run on its own names itself
   as `--hist` with the stamped year of its first state as `--refyear`. A
   projection paired with its historical names `--hist historical
@@ -1324,8 +1328,10 @@ Things that are easy to get wrong:
   stamped 1 January of the following year, so a run starting in 2015 has 2016
   as its first state, and a reference of 2015 is not found.
 - **The tool's files carry the submission's own names** (`lim_AIS_RICE_...`),
-  so `--outpath` and `params.nc` stay outside the upload tree. The upload
-  carries the model's scalars; the tool's copies of them fail the checker.
+  so `--outpath` stays outside the upload tree. The upload carries the model's
+  scalars; the tool's copies of them fail the checker. `params.nc` sits in the
+  tree above `CORE/`, where the checker, which reads one set-counter directory,
+  never sees it.
 - **`--native-af2` says the model's scalars integrate over true area**, as a
   current forward writes them. The writer checks every year of the scalars
   CSV against the annual files, refuses a series that mixes true-area and

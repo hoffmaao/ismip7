@@ -46,51 +46,15 @@ RESULTS_DIR = os.path.join(os.path.dirname(HERE), "results")
 import calibrate_melt as cm  # noqa: E402
 from calibrate_melt import PETSc  # noqa: E402
 from icepack2_tools.forcing import (  # noqa: E402
-    quadratic_mixed_slope, sin_alpha_ant, melt_slope, _RHO_I, _K_PERCENTILES,
+    sin_alpha_ant, melt_slope, _K_PERCENTILES,
 )
+# The fit lives in the library, so the selection over the whole K grid
+# (select_melt_parameters.py) runs this same code; re-exported here.
+from icepack2_tools.melt_selection import DT_WINDOW, fit_deltaT  # noqa: E402,F401
 from icepack2_tools.runconfig import geometry_space  # noqa: E402
 from icepack2_tools.mpi_stats import (  # noqa: E402
-    global_count, global_range, global_sum,
+    global_count, global_range,
 )
-
-DT_WINDOW = (-2.0, 2.0)
-
-
-def fit_deltaT(tf, sal, sin_a, K, floating, area, basin, bids, M_obs, comm):
-    r"""Per-basin offsets, with ``M(dT=0)``, the residual and ``dM/dT`` at
-    the root, all in Gt/yr. The arrays are this rank's dofs; every basin
-    total is reduced over ``comm``, so the root, and the file, are the same at
-    any rank count. Collective: call on every rank."""
-    from scipy.optimize import brentq
-    dT = np.full(len(bids), np.nan)
-    M0 = np.zeros(len(bids))
-    resid = np.full(len(bids), np.nan)
-    sens = np.full(len(bids), np.nan)
-    flagged = []
-    for i, bid in enumerate(bids):
-        sel = floating & (basin == bid)
-        if global_count(sel, comm) == 0:
-            flagged.append((bid, "no floating cells"))
-            continue
-        tf_b, s_b, a_b, A_b = tf[sel], sal[sel], sin_a[sel], area[sel]
-
-        def M(d):
-            m = quadratic_mixed_slope(tf_b + d, s_b, a_b, K=K)
-            return global_sum(m * A_b, comm) * float(_RHO_I) / 1e12
-
-        f = lambda d: M(d) - M_obs[i]  # noqa: E731
-        M0[i] = M(0.0)
-        lo, hi = DT_WINDOW
-        if f(lo) * f(hi) < 0:
-            dT[i] = brentq(f, lo, hi, xtol=1e-4)
-        else:
-            dT[i] = lo if abs(f(lo)) < abs(f(hi)) else hi
-            flagged.append((bid, f"no root in [{lo:g}, {hi:g}] K, "
-                                 f"took the end point"))
-        resid[i] = f(dT[i])
-        sens[i] = (M(dT[i] + 0.05) - M(dT[i] - 0.05)) / 0.1
-    return dT, M0, resid, sens, flagged
-
 
 def main():
     ap = argparse.ArgumentParser(description=__doc__.split("\n")[0])

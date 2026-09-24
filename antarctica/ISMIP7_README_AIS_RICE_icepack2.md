@@ -55,8 +55,9 @@ shallow-shelf formulation on Firedrake 2026.4.1)
    state with the model's own transport operator so that the initial
    thickness tendency is exactly zero (the ISMIP6 ctrl_proj convention of a
    balanced control); it is frozen and applied in every experiment. It is
-   NOT reported in `acabf` (which is the forcing SMB) but written alongside
-   it as `acabf_correction` in the same units for anyone closing the budget.
+   NOT reported in `acabf` (which is the SMB the model applied) but written
+   alongside it as `acabf_correction` in the same units for anyone closing
+   the budget.
 
 ## Projections: ice-ocean and ice-shelf fracture (AIS)
 
@@ -243,14 +244,20 @@ fields they integrate, so `tendlicalvf` and `tendlibmassbffl` are negative
 and `tendligroundf` is the net grounding-line discharge. `topg` is not
 masked to the ice, `lithk` is zero and not fill where there is no ice, and
 the fill value is the finite netCDF default (discussions #10 and #19).
+The fluxes are the ones the model applied: where the thickness floor held
+back part of a cell's net sink, that part comes off the SMB, the melt and the
+reference in proportion, so `libmassbffl` never reports melt of ice the cell
+did not have. A floating cell whose base lies within 1 cm of the bed, the
+checker's elevation tolerance, is written as grounded.
 Sea-level estimates
 (`sla20`, `slg20`, `slvaf`) are not computed by the model; **[confirm #13]** that
 `ismip7-scalar-processing` was run on the gridded files.
 
-Compliance: **[confirm #12]** the isschecker version the submitted files
-passed (0.5.0 of 17 September 2026 grades a range finding by the share of
-values outside the bounds, discussion #46). The bundled variable request is
-that release's.
+Compliance: isschecker 0.5.1 of 22 September 2026, which grades a range
+finding by the share of values outside the bounds (discussion #46). A 32 km
+CESM2-WACCM control and ssp585, 2015 to 2300, pass it with zero errors in
+every test group (23 September 2026), and each submitted file set is checked
+with it before upload. The bundled variable request is that release's.
 
 Forcing versions: each run logs the product and version its readers opened,
 and `core_report.py` carries those lines into the run's committed report;

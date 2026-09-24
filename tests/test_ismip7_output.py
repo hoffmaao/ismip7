@@ -127,3 +127,23 @@ def test_the_request_audit_reports_a_moved_cell():
         ("newvar", None, "absent", "present"),
     ]
     assert "units" in avr.WRITER_COLUMNS and "range_severity" not in avr.WRITER_COLUMNS
+
+
+def test_a_cell_at_flotation_to_rounding_is_written_grounded():
+    r"""isschecker reads a wholly floating pixel less than 1 cm above
+    ``topg`` as ice resting on the bed. A floating cell 5 mm above its bed
+    goes into the grounded mask, one 2 cm above stays floating, and a grounded
+    cell is left alone; the geometry does not move."""
+    cells = {
+        "lithk": np.array([100.0, 100.0, 300.0]),
+        "orog": np.array([10.45, 10.02, 100.0]),       # bases -89.55, -89.98, -200
+        "topg": np.array([-89.555, -90.0, -200.0]),
+        "sftflf": np.array([1.0, 1.0, 0.0]),
+        "sftgrf": np.array([0.0, 0.0, 1.0]),
+    }
+    before = {k: v.copy() for k, v in cells.items()}
+    assert wio.ground_near_flotation(cells) == 1
+    assert np.array_equal(cells["sftflf"], [0.0, 1.0, 0.0])
+    assert np.array_equal(cells["sftgrf"], [1.0, 0.0, 1.0])
+    for k in ("lithk", "orog", "topg"):
+        assert np.array_equal(cells[k], before[k])

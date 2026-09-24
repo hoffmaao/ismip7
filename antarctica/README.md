@@ -493,6 +493,67 @@ file's K, as the toolbox applies its one K everywhere, so a run's integrated
 melt exceeds 1067.4 by that amount; the first forcing step prints it
 (`Melt ... Gt/yr, of which ... outside the fitted basins`).
 
+### K05, K50 and K95 from the toolbox objective (`select_melt_parameters.py`)
+
+Protocol section 2.3 asks for the percentiles of K to come out of the
+toolbox's objective with melt computed by the model's own code on its own
+grid, and prefers fitting the per-basin offsets for every K before the
+objective runs. `select_melt_parameters.py` does both on the forward's DG0
+cells:
+
+```bash
+ISMIP7_LC=2000 ISMIP7_INV_H5=<mesh.h5> ISMIP7_MELT_OBS_CSV=<table.csv> \
+    python antarctica/scripts/select_melt_parameters.py --geometry mesh --out /abs/dir
+```
+
+For each K of the toolbox notebook's grid (120 values, 2.5e-6 to 3.0e-4),
+variant `per_k` fits one offset per IMBIE2 basin to the table with the fit
+above, melts the present-day climatology, the 12 ocean-model states and the
+13 observed states with those offsets, and sums the toolbox's four terms on
+the cells (`icepack2_tools/melt_selection.py`); variant `none` melts without
+offsets, the notebook's own order. The toolbox's
+`calculate_objective_function`, vendored unchanged
+(`icepack2_tools/ismip7_parameter_selection_toolbox.py`, with its MIT
+licence and source record), then draws the notebook's weights 100000 times
+per seed; seed 0 is the headline and seeds 1 to 4 the spread. Two
+departures from the notebook are deliberate: an offset is a bracketed root,
+where the notebook takes the nearest point of a 0.04 K grid, so term 1 is
+flat across the K whose basins all root; and each ocean state melts with its
+own salinity, as notebook cells 12, 15 and 65 do (cell 63 reuses the
+climatology's). A K whose fit ends at the window edge stays in the ensemble
+with its residual in term 1, the toolbox's own convention.
+`--geometry notebook8km` runs the same aggregation on the notebook's 8 km
+grid beside the toolbox's own `calculate_term1..4`, the check that comes
+before a mesh result is read. Everything is written under `--out`:
+`ensemble_<variant>.nc` (terms, offsets, residuals and TF plausibility at
+every K), `selection_<variant>.json` and, for `per_k`,
+`deltaT_per_basin_<lc>_K<K>.npz` at each selected K, which
+`ISMIP7_DELTAT_PER_BASIN_NPZ` applies at that file's K. On a cluster:
+`scripts/batch_runners/select_melt_parameters.script`.
+
+Measured on 24 September 2026 against the July table (run records
+`calibration-melt-toolbox-8km`, `-2km` and `-1km`), evidence for the
+percentile choice (issue #26):
+
+| grid | offsets | K05 | K50 | K95 |
+|---|---|---|---|---|
+| notebook's 8 km | none | 4.75e-5 | 8.5e-5 | 1.375e-4 |
+| 2 km MAP mesh | none | 4.5e-5 | 8.75e-5 | 1.40e-4 |
+| 1000 m / 10 km production mesh | none | 4.5e-5 | 8.5e-5 | 1.375e-4 |
+| 2 km MAP mesh | fitted for every K | 2.75e-5 | 5.75e-5 | 2.725e-4 |
+| 1000 m / 10 km production mesh | fitted for every K | 2.75e-5 | 6.25e-5 | 2.70e-4 |
+
+On the notebook's grid the aggregation matches the toolbox's term functions
+to 1.6e-12 and reproduces the notebook's printed percentiles and totals
+(877.8, 1570.7 and 2540.9 Gt/yr against 878, 1571 and 2541). With the
+offsets fitted first, term 1 is flat wherever every basin roots and terms 2
+to 4 place K. Below K = 4.25e-5 (4.0e-5 on the 1000 m mesh) Amundsen
+(basin 9) cannot reach its total inside plus or minus 2 K, and 34 percent of
+the samples (26) still land there, K05 among them; 3.8 percent (3.5) land on
+the grid's top, 3.0e-4. At K95 the offsets put over 40 percent of the shelf
+area of nine basins (eleven) below 0 degC. On Quartz the 30_sep files the
+forward reads are byte-identical to the notebook's 06_nov tf v3 and so v4.
+
 ## 6. Control and projections
 
 Forward runs go through `scripts/simulation.py` (`setup_model` and
@@ -778,7 +839,7 @@ redeclare those literals.
 | `ISMIP7_DELTAT_PER_BASIN_NPZ` | per-basin TF offset at one toolbox K from `calibrate_deltaT.py`; when set, every ocean callback melts with that file's K and the K file is not read. Refused with `ISMIP7_K_SCALE` other than 1 | unset |
 | `ISMIP7_MELT_OBS_CSV` | per-basin melt observation table read by `scripts/calibrate_melt.py`; columns are located by header name, so either published table serves | `Melt_Paolo_Davison_Adusumilli_imbie2.csv` under `<DATA_ROOT>/meltobs/`, else under `<DATA_ROOT>/parameterisations/ocean/meltobs/`, else the older Paolo and Adusumilli table with a `[!]` line |
 | `ISMIP7_MELT_SLOPE` | the draft slope the quadratic melt law sees, in the forward and in `scripts/calibrate_melt.py` and `scripts/calibrate_deltaT.py`: `ant` is one constant `sin(alpha)` on every shelf, the protocol's reference ("mean Antarctic slope, no slope dependency"); `local` is this mesh's draft slope. A K or deltaT file records the convention it was fitted under and a run under the other is told once | `ant` |
-| `ISMIP7_SIN_ALPHA_ANT` | the constant under `ant`. The default is the value the toolbox's K percentiles were sampled with, back-computed from its own gamma_T conversion; the notebook's recipe on the 8 km v3 topography gives 5.7e-3 | `5.115e-3` |
+| `ISMIP7_SIN_ALPHA_ANT` | the constant under `ant`. The toolbox's K percentiles were sampled with 5.1117e-3, which its own gamma_T conversion gives and the notebook's slope recipe on the 8 km BedMap3 v3 topography reproduces; the default rounds it up by 0.065 percent | `5.115e-3` |
 | `ISMIP7_SIN_ALPHA_CAP` | `local` slope only: cap on `sin(alpha)` in `scripts/calibrate_melt.py`; the forward applies none | none under `dg0`, `5e-3` under `cg1` |
 | `ISMIP7_K_OUT` | output path for `scripts/calibrate_melt.py`, overriding the generated name. Use it for a calibration made as a check, so it cannot replace the K that every forward and inversion in the checkout reads. A bare filename resolves under `results/` | `results/calibrated_K_per_basin_<lc>.npz` |
 | `ISMIP7_ESM` | ESM for the control | `CESM2-WACCM` |
@@ -1260,42 +1321,94 @@ python antarctica/scripts/write_ismip7_output.py \
 python -m isschecker --variable-list ismip7 \
     --source-path submission/AIS/RICE/icepack2/CORE/C009
 
-# 4. the sea-level scalars nothing here computes
+# 4. the sea-level scalars nothing here computes, from the tools' own venv
 python antarctica/scripts/download_forcing.py --scalar-processing
 ismip7-scalars-set-params --region AIS --group RICE --model icepack2 \
-    --rhoi 917 --rhow 1024 --rhof 1000 --modelpath submission/AIS
-python -m ismip7_scalars --region AIS --group RICE --model icepack2 \
+    --rhoi 917 --rhow 1024 --rhof 1000 --modelpath scalars/params
+ismip7-scalars --region AIS --group RICE --model icepack2 \
     --experiment ctrl --modelid m001 --esm CESM2-WACCM --forcingid f001 \
-    --configid C009 --exp-group CORE \
+    --configid C009 --exp-group CORE --hist ctrl --refyear 2016 \
     --datapath ISMIP7/Output-Processing/Data/AIS \
-    --modelpath submission/AIS --outpath submission/scalars
+    --modelpath submission/AIS --params-path scalars/params --outpath scalars
+
+# 5. the tool's scalars against the model's own
+python antarctica/scripts/compare_scalars.py \
+    --submission submission/AIS/RICE/icepack2/CORE/C009 \
+    --tool scalars/nc/AIS/RICE/icepack2/CORE/C009 \
+    --datapath ISMIP7/Output-Processing/Data/AIS \
+    --params scalars/params/RICE/icepack2/params.nc --refyear 2016 \
+    --native-csv antarctica/results/<exp>_<lc>_ismip7_scalars.csv \
+    --overlap antarctica/results/<exp>_<lc>_ismip7_annual.h5.overlap.npz \
+    --out-csv scalars/comparison.csv --out-md scalars/comparison.md
 ```
 
-Four things that are easy to get wrong:
+On a cluster, steps 4 and 5 are one serial job,
+`scripts/batch_runners/scalar_processing.script`, whose header carries the
+`submit.sh` line and the knobs.
 
-- **Both tools need Python 3.11 or newer**, and the Firedrake environment is
-  3.10, so they belong in their own interpreter. Where conda is unavailable,
-  `nix` provides one, and the nix interpreter then needs the shared libraries
-  it cannot see: gcc's C++ runtime, zlib, expat and udunits, on
-  `LD_LIBRARY_PATH`, with `UDUNITS2_XML_PATH` set.
+The tools' venv, from any Python 3.11 to 3.14 (on Quartz, the
+`python/3.14.5` module). Neither package is on PyPI, so both come from their
+tags:
+
+```bash
+python3 -m venv <venv>
+<venv>/bin/pip install \
+    "isschecker @ git+https://github.com/ismip/ISM_SimulationChecker@0.5.1" \
+    "ismip7-scalars @ git+https://github.com/ismip/ismip7-scalar-processing@3f36eb3"
+```
+
+Things that are easy to get wrong:
+
+- **Both tools need Python 3.11 to 3.14**, in an interpreter of their own:
+  the workstation's Firedrake environment is 3.10, and on a cluster the
+  Firedrake environment's `PYTHONPATH` would shadow the venv's packages (the
+  job script scrubs it). Where conda is unavailable, `nix` provides one, and
+  the nix interpreter then needs the shared libraries it cannot see: gcc's C++
+  runtime, zlib, expat and udunits, on `LD_LIBRARY_PATH`, with
+  `UDUNITS2_XML_PATH` set. On Quartz every dependency of the checker installs
+  as a wheel, and conda-forge carries its release too. Put the venv and pip's
+  cache on scratch, since the home file quota is small.
 - **The scalar tool needs four auxiliary grids** per region (the area factor,
   the extended Rignot basins, the glacier and ice-cap area factor and the
   maximum-extent mask), which live on Globus under
   `/ISMIP7/Output-Processing/Data` rather than with the forcing.
   `--scalar-processing` fetches them; `--scalar-resolution` picks the grid.
+  Copying `/ISMIP7/Output-Processing/Data` with the Globus web app into
+  `ISMIP7/Output-Processing/Data/` of the checkout, the same path, needs no
+  CLI login (IU Quartz, 23 September 2026).
 - **`params.nc` carries the model's densities**, so give it ours: 917 ice and
   1024 seawater, the pair `simulation.py` builds the surface with. The tool
-  defaults to 1027 seawater.
+  defaults to 1027 seawater, and the comparison refuses any other pair. The
+  organisers need the same file with the upload. (issue #98)
+- **The tool stops without a historical run.** A run on its own names itself
+  as `--hist` with the stamped year of its first state as `--refyear`. A
+  projection paired with its historical names `--hist historical
+  --hist-configid C001` (C002 for MRI-ESM2-0) and no year: the tool looks a
+  year up in the historical and then in the projection, so a stray one quietly
+  becomes the reference.
 - **`--refyear` takes the stamped year.** A state variable is
   stamped 1 January of the following year, so a run starting in 2015 has 2016
   as its first state, and a reference of 2015 is not found.
+- **The tool's files carry the submission's own names** (`lim_AIS_RICE_...`),
+  so `--outpath` and `params.nc` stay outside the upload tree. The upload
+  carries the model's scalars; the tool's copies of them fail the checker.
 
 Measured on that rehearsal: `isschecker` 0.5.1 over 31 files reports zero
 errors in variable presence, naming, numerical, spatial, consistency and
 attribute tests, and 93 time errors, which are the three-per-file
 experiment-length checks a two-year run cannot satisfy. `ismip7-scalars` 0.1.0
 then wrote `sla20`, `slg20` and `slvaf`, each with its glacier and ice-cap
-variant, in NetCDF and CSV.
+variant, in NetCDF and CSV. On three full-length 32 km ssp585 runs (IU Quartz,
+23 September 2026) every identity `compare_scalars.py` checks holds, and
+`reports/scalar_comparison_32km.md` sets out what differs and why.
+
+At full length, 2015 to 2300, a 32 km control and ssp585 pass 0.5.1 with zero
+errors in every test group, the length checks included (23 September 2026, run
+records `core09-32km-ctrl2015-cesm2waccm-p4` and
+`core07-32km-ssp585-cesm2waccm-p4`). The first full-length pass failed on two
+things a short run does not reach, both since fixed in the output: melt booked
+before the positivity limiter, and cells within 1 cm of flotation written as
+floating (`antarctica/FORWARD_RUN_READINESS.md`, action 10).
 
 ### The run log (`build_runlog.py`)
 

@@ -660,3 +660,55 @@ def test_an_ice_rumple_nets_to_zero(tmp_path):
     _, booked, _, _ = _one_advance(mesh, Q, V, grounded, 1.0, tmp_path)
     assert np.allclose(booked[order], [0.0, -1.0, 0.0, 1.0, 0.0])
     assert abs(booked.sum()) < 1e-12
+
+
+# The fluxes book what the transport applied. The positivity limiter holds
+# back the part of a net sink that would draw a cell below the floor; that
+# part comes off the SMB, melt and reference sinks in proportion, so a cell
+# held at the floor does not report melt of ice it did not have.
+
+def _book(two_cells, tmp_path, smb, melt, withheld, a_ref=None):
+    r"""One unit advance of two floating 100 m cells with no flow, the given
+    per-cell sources (m/yr) and withheld sink; returns the booked year."""
+    mesh, Q, V = two_cells
+    annual = AnnualOutput(mesh, Q, str(tmp_path / "out" / "annual.h5"),
+                          str(tmp_path / "out" / "scalars.csv"),
+                          first_year=2015, rho_ratio=RHO_RATIO)
+    h = _dg(Q, [100.0, 100.0])
+    annual.start_year(h)
+    annual.begin_step()
+    annual.book_advance(1.0, _dg(Q, smb), _dg(Q, melt),
+                        None if a_ref is None else _dg(Q, a_ref), h, fd.Function(V),
+                        np.zeros(2, dtype=bool),
+                        withheld=None if withheld is None else np.asarray(withheld, float))
+    annual.commit_step()
+    return annual.year_acc
+
+
+def test_without_a_withheld_sink_the_requested_sources_are_booked(two_cells, tmp_path):
+    acc = _book(two_cells, tmp_path, [-2.0, 3.0], [6.0, 5.0], None)
+    assert np.allclose(acc["acabf"], [-2.0, 3.0])
+    assert np.allclose(acc["libmassbffl"], [-6.0, -5.0])
+
+
+def test_a_withheld_sink_comes_off_the_melt(two_cells, tmp_path):
+    r"""Melt alone: the cell books the melt it had ice for."""
+    acc = _book(two_cells, tmp_path, [0.0, 0.0], [10.0, 10.0], [4.0, 0.0])
+    assert np.allclose(acc["libmassbffl"], [-6.0, -10.0])
+    assert np.allclose(acc["acabf"], [0.0, 0.0])
+
+
+def test_a_withheld_sink_splits_in_proportion_and_closes(two_cells, tmp_path):
+    r"""Cell 0 sinks 2 of SMB, 6 of melt and 2 of reference, and the limiter
+    holds back 5, half of them, so each keeps half. Cell 1 gains 3 of SMB,
+    which the limiter never touches, against 5 of melt, 2 held back. Either
+    way the booked sources sum to the requested source plus what was held
+    back."""
+    smb, melt, ref, held = [-2.0, 3.0], [6.0, 5.0], [-2.0, 0.0], [5.0, 2.0]
+    acc = _book(two_cells, tmp_path, smb, melt, held, a_ref=ref)
+    assert np.allclose(acc["acabf"], [-1.0, 3.0])
+    assert np.allclose(acc["libmassbffl"], [-3.0, -3.0])
+    assert np.allclose(acc["acabf_correction"], [-1.0, 0.0])
+    applied = acc["acabf"] + acc["libmassbffl"] + acc["acabf_correction"]
+    requested = np.array(smb) - np.array(melt) + np.array(ref)
+    assert np.allclose(applied, requested + np.array(held))

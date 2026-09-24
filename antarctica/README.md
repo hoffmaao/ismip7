@@ -1269,7 +1269,6 @@ python antarctica/scripts/compare_scalars.py \
     --datapath ISMIP7/Output-Processing/Data/AIS \
     --params scalars/params/RICE/icepack2/params.nc --refyear 2016 \
     --native-csv antarctica/results/<exp>_<lc>_ismip7_scalars.csv \
-    --overlap antarctica/results/<exp>_<lc>_ismip7_annual.h5.overlap.npz \
     --out-csv scalars/comparison.csv --out-md scalars/comparison.md
 ```
 
@@ -1323,6 +1322,10 @@ Things that are easy to get wrong:
 - **The tool's files carry the submission's own names** (`lim_AIS_RICE_...`),
   so `--outpath` and `params.nc` stay outside the upload tree. The upload
   carries the model's scalars; the tool's copies of them fail the checker.
+- **A tree written before the whole-pixel flux means needs `--overlap`.**
+  Its flux files carry no `flux_pixel_mean`, and `acabf` there is a mean over
+  the covered part of a pixel, which the comparison undoes with the writer's
+  cached `<annual>.overlap.npz`. A current tree needs nothing undone.
 
 Measured on that rehearsal: `isschecker` 0.5.1 over 31 files reports zero
 errors in variable presence, naming, numerical, spatial, consistency and

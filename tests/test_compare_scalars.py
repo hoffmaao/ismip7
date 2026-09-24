@@ -3,13 +3,14 @@ model's own scalars (issue #13).
 
 A 6 x 5 grid over three years stands in for a submission. The model's scalars
 are built the way the writer's conservative remap makes them hold: a grid sum
-of a forbidden-policy field is the mesh sum, acabf is a mean over the covered
-part of a pixel and libmassbffl over the floating part. On top of that the
-model books a known amount of melt off the floating ice and keeps a known mass
-in cells thinner than lithk shows. The tool's output comes from a transcription
-of its own expressions (ismip7_scalars 0.1.0, scalars.py and slc/), including
-A2020's step by step accumulation, and from the tool itself where it is
-installed.
+of a flux is the mesh sum, since every flux is a whole-pixel mean. A tree
+written before the whole-pixel means (``whole_pixel=False``) holds acabf as a
+mean over the covered part of a pixel and libmassbffl over the floating part.
+On top of that the model books a known amount of melt where the grid holds no
+floating ice and keeps a known mass in cells thinner than lithk shows. The
+tool's output comes from a transcription of its own expressions
+(ismip7_scalars 0.1.0, scalars.py and slc/), including A2020's step by step
+accumulation, and from the tool itself where it is installed.
 """
 import csv
 import os
@@ -52,8 +53,10 @@ def fl_times():
     return np.array([stamp(y, 7, 1) for y in YEARS], dtype="f4")
 
 
-def write_gridded(folder, var, cube, flux):
+def write_gridded(folder, var, cube, flux, attrs=None):
     with netCDF4.Dataset(folder / f"{var}_{TAG}.nc", "w") as ds:
+        for k, v in (attrs or {}).items():
+            ds.setncattr(k, v)
         ds.createDimension("time", None); ds.createDimension("y", NY); ds.createDimension("x", NX)
         ds.createVariable("x", "f8", ("x",))[:] = X
         ds.createVariable("y", "f8", ("y",))[:] = Y
@@ -242,9 +245,11 @@ def tool_scalars(sub, datapath, params, refyear=2016):
 
 
 def build(tmp_path, *, rhow=1024.0, flip=False, moving_bed=False, shift_tool=False,
-          perturb_sftgrf=False, csv_off=False, ground_near=False):
+          perturb_sftgrf=False, csv_off=False, ground_near=False, whole_pixel=True):
     r"""A submission, its grids, params.nc, the tool's output and the
-    writer's overlap cache; returns the argument list for compare_scalars."""
+    writer's overlap cache; returns the argument list for compare_scalars.
+    ``whole_pixel=False`` writes the tree the way the writer did before its
+    flux means were whole-pixel means."""
     sub = tmp_path / "tree" / "AIS" / "RICE" / "icepack2" / "CORE" / "C007"
     tool = tmp_path / "out" / "tool" / "nc" / "AIS" / "RICE" / "icepack2" / "CORE" / "C007"
     data = tmp_path / "grids"
@@ -253,6 +258,10 @@ def build(tmp_path, *, rhow=1024.0, flip=False, moving_bed=False, shift_tool=Fal
     f, cov = model_fields(moving_bed=moving_bed)
     N = native_scalars(f, cov)
     grid = {v: f[v].copy() for v in ("lithk", "topg", "sftgrf", "sftflf") + FL_VARS}
+    if whole_pixel:
+        # the same fluxes as whole-pixel means: fill stays fill (NaN * 0)
+        grid["acabf"] = grid["acabf"] * cov
+        grid["libmassbffl"] = grid["libmassbffl"] * f["sftflf"]
     if perturb_sftgrf:
         grid["sftgrf"][1, 0, 0] = 0.0
     if ground_near:
@@ -264,7 +273,8 @@ def build(tmp_path, *, rhow=1024.0, flip=False, moving_bed=False, shift_tool=Fal
     for v in ("lithk", "topg", "sftgrf", "sftflf"):
         write_gridded(sub, v, grid[v], flux=False)
     for v in FL_VARS:
-        write_gridded(sub, v, grid[v], flux=True)
+        write_gridded(sub, v, grid[v], flux=True,
+                      attrs={cs.FLUX_MEAN_ATTR: cs.WHOLE_PIXEL} if whole_pixel else None)
     # the writer takes each scalar from the CSV's seven digits into float32
     rows = [{"year": yr, **{s: f"{N[s][k]:.6e}" for s in N}} for k, yr in enumerate(YEARS)]
     for s in N:
@@ -331,17 +341,43 @@ def test_a_consistent_submission_passes_and_every_difference_is_named(tmp_path):
     lim = rows[("lim", 2016)]
     assert lim["d_resid"] == pytest.approx(-917.0 * THIN, abs=cs.CSV_DIGITS * abs(lim["N"]))
     assert rows[("tendlibmassbffl", 2016)]["d_resid"] == pytest.approx(-EXTRA_MELT, rel=1e-3)
+    # whole-pixel means are the tool's own convention: nothing to undo
+    for s in ("tendacabf", "tendlibmassbffl"):
+        assert all(rows[(s, yr)]["d_fill"] == 0.0 for yr in YEARS)
+    # sea level: zero at the reference, and the native counterpart from lim and limnsw
+    assert rows[("slvaf", 2015)]["T"] == 0.0 and rows[("slvaf", 2015)]["N"] == 0.0
+    assert rows[("sla20", 2017)]["T"] == pytest.approx(rows[("slg20", 2017)]["T"], abs=1e-9)
+    md = (tmp_path / "cmp.md").read_text()
+    assert "FAIL" not in md and "Exit status 0." in md
+    assert "- flux means: whole pixel" in md and "| tendacabf against N | pass |" in md
+
+
+def test_a_tree_written_before_the_whole_pixel_means_still_compares(tmp_path):
+    r"""No ``flux_pixel_mean`` in the flux files: acabf is a mean over the
+    covered part of a pixel and libmassbffl over the floating part, and the
+    comparison undoes both."""
+    args, f, cov = build(tmp_path, whole_pixel=False)
+    assert cs.main(args) == 0, (tmp_path / "cmp.md").read_text()
+    rows = rows_of(tmp_path)
+    A, k = DX * DX, 1
     # the fill conventions: the half-covered acabf pixel and the half-floating melt pixel
     acabf = np.nan_to_num(f["acabf"][k])
     assert rows[("tendacabf", 2016)]["d_fill"] == pytest.approx(np.sum(acabf * (1 - cov)) * A, rel=1e-6)
     bmb = np.nan_to_num(f["libmassbffl"][k])
     assert rows[("tendlibmassbffl", 2016)]["d_fill"] == pytest.approx(
         np.sum(bmb * (1 - f["sftflf"][k])) * A, rel=1e-6)
-    # sea level: zero at the reference, and the native counterpart from lim and limnsw
-    assert rows[("slvaf", 2015)]["T"] == 0.0 and rows[("slvaf", 2015)]["N"] == 0.0
-    assert rows[("sla20", 2017)]["T"] == pytest.approx(rows[("slg20", 2017)]["T"], abs=1e-9)
+    assert rows[("tendlibmassbffl", 2016)]["d_resid"] == pytest.approx(-EXTRA_MELT, rel=1e-3)
     md = (tmp_path / "cmp.md").read_text()
-    assert "FAIL" not in md and "Exit status 0." in md
+    assert "covered part of a pixel" in md and "| tendacabf against N | pass |" in md
+
+
+def test_flux_files_that_disagree_on_their_pixel_means_are_refused(tmp_path, capsys):
+    args, _, _ = build(tmp_path)
+    melt = next((tmp_path / "tree").rglob("libmassbffl_*.nc"))
+    with netCDF4.Dataset(melt, "a") as ds:
+        ds.delncattr(cs.FLUX_MEAN_ATTR)
+    assert cs.main(args) == 2
+    assert "disagree" in capsys.readouterr().err
 
 
 def test_a_tool_series_a_year_out_fails_the_replay(tmp_path):
@@ -404,13 +440,22 @@ def test_a_reference_year_that_is_not_there_exits_2(tmp_path):
     assert cs.main(args) == 2
 
 
-def test_without_the_overlap_cache_acabf_is_reported_and_not_gated(tmp_path):
-    args, _, _ = build(tmp_path)
+def test_without_the_overlap_cache_an_old_tree_s_acabf_is_reported_and_not_gated(tmp_path):
+    args, _, _ = build(tmp_path, whole_pixel=False)
     i = args.index("--overlap")
     del args[i:i + 2]
     assert cs.main(args) == 0
-    assert "| not checked |" in gate_line(tmp_path, "tendacabf with coverage against N")
+    assert "| not checked |" in gate_line(tmp_path, "tendacabf against N")
     assert "no --overlap" in (tmp_path / "cmp.md").read_text()
+
+
+def test_whole_pixel_means_need_no_overlap_cache(tmp_path):
+    args, _, _ = build(tmp_path)
+    i = args.index("--overlap")
+    del args[i:i + 2]
+    assert cs.main(args) == 0, (tmp_path / "cmp.md").read_text()
+    assert "| pass |" in gate_line(tmp_path, "tendacabf against N")
+    assert "no --overlap" not in (tmp_path / "cmp.md").read_text()
 
 
 def test_strict_fails_on_the_named_differences(tmp_path):
@@ -421,8 +466,10 @@ def test_strict_fails_on_the_named_differences(tmp_path):
 def test_the_constants_are_the_model_s():
     pytest.importorskip("firedrake")
     from icepack2_tools import ismip7_output
+    import write_ismip7_output as wio
     assert cs.RHO_I == ismip7_output.RHO_I
     assert cs.SECONDS_PER_YEAR == ismip7_output.SECONDS_PER_YEAR
+    assert (cs.FLUX_MEAN_ATTR, cs.WHOLE_PIXEL) == (wio.FLUX_MEAN_ATTR, wio.FLUX_MEAN)
 
 
 def test_it_imports_without_firedrake():

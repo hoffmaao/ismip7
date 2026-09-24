@@ -7,7 +7,8 @@ a state written for year 2015 is stamped 2016-01-01, day 60630 since
 day 60446. The fill policies follow the request's csv: ``forbidden``
 means the uncovered part of a pixel counts as zero (sums are conserved),
 ``outside_domain`` means the mean over the covered part, ``no_ice`` and
-friends mean over the masked part.
+friends mean over the masked part. A flux is a whole-pixel mean under any
+policy, which then decides only where it is fill.
 """
 import os
 import sys
@@ -45,6 +46,52 @@ def test_masked_policy_averages_over_the_mask():
     out = wio.regrid(W, v, "no_ice", mask)
     assert np.allclose(out, [10.0, 50.0])
     assert np.isnan(wio.regrid(W, v, "no_ice", np.zeros(3, bool))).all()
+
+
+def test_a_flux_is_a_whole_pixel_mean_and_the_policy_only_fills():
+    r"""ismip7-scalars sums a flux times the pixel area (forum thread 50,
+    issue #96), so a flux mean is taken over the whole pixel and sums to the
+    model's integral. The policy still fills where its own mean would have no
+    area: outside the domain for acabf, where no ice floats for libmassbffl.
+    A cell that no longer floats keeps its melt in a pixel that still does."""
+    A = wio.PIXEL_AREA
+    # pixel 0 fully covered by cells 0 and 1, pixel 1 a quarter by cell 2,
+    # pixel 2 not at all
+    W = scipy_sparse.csr_matrix(np.array([[A / 2, A / 2, 0.0], [0.0, 0.0, A / 4],
+                                          [0.0, 0.0, 0.0]]))
+    v = np.array([100.0, 300.0, 400.0])
+    out = wio.regrid(W, v, "outside_domain", whole_pixel=True)
+    assert np.allclose(out[:2], [200.0, 100.0]) and np.isnan(out[2])
+    assert np.isclose(np.nansum(out) * A, (W @ v).sum())
+    melt = np.array([-10.0, -30.0, -50.0])
+    afloat = np.array([True, False, False])               # cell 1 grounded during the year
+    out = wio.regrid(W, melt, "no_floating_ice", afloat, whole_pixel=True)
+    assert np.isclose(out[0], -20.0)                      # both cells' melt, over the pixel
+    assert np.isnan(out[1]) and np.isnan(out[2])          # no floating ice left: fill
+    assert np.isnan(wio.regrid(W, melt, "no_floating_ice", afloat)[1])
+
+
+def test_the_request_types_choose_the_mean():
+    r"""acabf and orog share ``outside_domain``. The flux is a whole-pixel
+    mean; the elevation stays a covered-part mean, which the writer's
+    ``base := orog - lithk`` rests on."""
+    req = wio.request_table()
+    W = _operator(); v = np.array([100.0, 300.0, 400.0])
+    assert np.allclose(wio.pixel_values(W, v, req["orog"], {}), [200.0, 400.0])
+    assert np.allclose(wio.pixel_values(W, v, req["acabf"], {}),
+                       np.array([200.0, 100.0]) * wio.CONVERT["kg m-2 s-1"])
+
+
+def test_the_flux_files_say_how_their_pixel_means_were_taken(tmp_path):
+    import netCDF4
+    req = wio.request_table()
+    for var, flux in (("acabf", True), ("orog", False)):
+        ds, _ = wio.create_2d(str(tmp_path / f"{var}.nc"), var, req[var], [2015], flux)
+        ds.close()
+    with netCDF4.Dataset(tmp_path / "acabf.nc") as ds:
+        assert ds.getncattr(wio.FLUX_MEAN_ATTR) == wio.FLUX_MEAN
+    with netCDF4.Dataset(tmp_path / "orog.nc") as ds:
+        assert wio.FLUX_MEAN_ATTR not in ds.ncattrs()
 
 
 def test_time_encoding_matches_the_board():

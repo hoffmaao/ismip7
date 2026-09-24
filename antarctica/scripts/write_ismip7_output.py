@@ -18,13 +18,21 @@ variable under
 Regridding is conservative: a supermesh mixed mass matrix between the model's
 DG0 cells and a triangulated copy of the 8 km grid gives the exact area of
 every (cell, pixel) overlap; a pixel's value is the area-weighted mean of the
-cells under it. Which area the mean is taken over follows the request's fill
-policy (``isschecker/data/ISMIP7_variable_request.csv``): ``forbidden``
-(thickness, fluxes, fractions) means over the whole pixel with the uncovered
-part counting as zero, so sums over the grid are the model's sums;
-``outside_domain`` (elevations) means over the covered part and fills pixels
-the model does not cover; ``no_ice`` and friends mean over the ice part and
-fill pixels without it. The overlap operator is cached next to the input
+cells under it. A flux (``FL``) is a mean over the whole pixel of everything
+the cells under it booked, so its value times the pixel area sums to the
+model's integral, which is how the organisers' scalar tool sums a flux (forum
+thread 50). The flux files say so in the global attribute
+``flux_pixel_mean``. For a flux the request's fill policy
+(``isschecker/data/ISMIP7_variable_request.csv``) decides only where the
+value is fill: ``outside_domain`` (``acabf``) where the model covers no part
+of the pixel, ``no_floating_ice`` (``libmassbffl``) where no ice floats at
+year end. Melt booked in such a pixel leaves ``libmassbffl``, and the summary
+line reports how much. A state variable (``ST``) takes its mean over the area
+the policy names: ``forbidden`` (thickness, fractions) over the whole pixel
+with the uncovered part counting as zero, so sums over the grid are the
+model's sums; ``outside_domain`` (elevations) over the covered part, filling
+pixels the model does not cover; ``no_ice`` and friends over the ice part,
+filling pixels without it. The overlap operator is cached next to the input
 (``<annual>.overlap.npz``) because it depends on the mesh only.
 
 Model-to-SI conversions use icepack's year, 365.25 days (31557600 s), which
@@ -65,6 +73,12 @@ FILL = _nc4.default_fillvals["f4"]          # the checker wants the netCDF4 defa
 TIME_UNITS = "days since 1850-01-01"        # the checker's exact spelling
 PIXEL_AREA = ISMIP7_DX * ISMIP7_DX
 REQUEST = os.path.join(os.path.dirname(os.path.dirname(_ROOT)), "icepack2_tools", "ismip7_variable_request.csv")   # not under a data/ dir: .gitignore ignores those
+# The global attribute on every gridded flux file, saying its pixel means are
+# whole-pixel means (issue #96). compare_scalars.py reads it; a tree written
+# before it carries none, and its acabf and libmassbffl are means over the
+# covered part and over the floating part of a pixel.
+FLUX_MEAN_ATTR = "flux_pixel_mean"
+FLUX_MEAN = "whole_pixel"
 
 
 def standard_name(meta):
@@ -109,7 +123,10 @@ def ground_near_flotation(cells, tol=FLOTATION_TOLERANCE_M):
     grounded one the same 1 cm. A DG0 cell just past flotation has its base
     millimetres above the bed: 1.9 to 9.2 mm in the full-length 32 km ssp585
     runs of September 2026, 13 to 24 pixel-years each. Only the two masks
-    change; the geometry stays as the model had it.
+    change; the geometry stays as the model had it. The melt booked on such a
+    cell stays in ``libmassbffl`` while its pixel keeps other floating ice,
+    and leaves it where the rule empties the pixel of floating ice; the
+    summary line reports how much.
     """
     floating = cells["sftflf"] > 0.5
     near = floating & (cells["orog"] - cells["lithk"] - cells["topg"] <= tol)
@@ -152,26 +169,39 @@ def overlap_operator(mesh_src, cache):
     return W
 
 
-def regrid(W, values, policy, mask=None):
-    r"""Pixel values under the request's fill policy; NaN where filled."""
-    num = W @ values
+def regrid(W, values, policy, mask=None, whole_pixel=False):
+    r"""Pixel values under the request's fill policy; NaN where filled.
+
+    ``whole_pixel`` divides everything the cells under a pixel carry by the
+    pixel's area and keeps the policy for the fill alone: a pixel is filled
+    where the policy's own mean would have no area to divide by."""
     if policy == "forbidden":
-        return num / PIXEL_AREA
+        return (W @ values) / PIXEL_AREA
     if policy == "outside_domain":
         # mean over the covered part of the pixel; any coverage counts, so
         # every pixel that carries ice (sftgif > 0) also carries elevations
-        cov = W @ np.ones_like(values)
-        out = np.full(num.shape, np.nan)
-        ok = cov > 0.0
-        out[ok] = num[ok] / cov[ok]
-        return out
-    # no_ice / no_grounded_ice / no_floating_ice: mean over the masked part
-    m = mask.astype(float)
-    num = W @ (values * m); den = W @ m
+        num, den = W @ values, W @ np.ones_like(values)
+    else:
+        # no_ice / no_grounded_ice / no_floating_ice: mean over the masked part
+        m = mask.astype(float)
+        num, den = (W @ values if whole_pixel else W @ (values * m)), W @ m
     out = np.full(num.shape, np.nan)
     ok = den > 0.0
-    out[ok] = num[ok] / den[ok]
+    out[ok] = num[ok] / (PIXEL_AREA if whole_pixel else den[ok])
     return out
+
+
+def pixel_values(W, values, meta, masks):
+    r"""One variable on the 8 km grid, flat, in the request's units.
+
+    A flux is a whole-pixel mean under any fill policy, so its value times the
+    pixel area sums to the model's integral. A state variable is the mean its
+    policy names: ``acabf`` and ``orog`` share ``outside_domain``, and the
+    elevations stay covered-part means, which ``base := orog - lithk`` in
+    ``main`` rests on."""
+    policy = meta["fill_policy"]
+    return (regrid(W, values, policy, masks.get(policy), whole_pixel=meta["Type"] == "FL")
+            * CONVERT[meta["units"]])
 
 
 GLOBAL = {}
@@ -230,6 +260,8 @@ def create_2d(path, var, meta, years, is_flux):
     else:
         v.cell_methods = "time: point"
     _global_attrs(ds, meta)
+    if is_flux:
+        ds.setncattr(FLUX_MEAN_ATTR, FLUX_MEAN)
     return ds, v
 
 
@@ -414,6 +446,10 @@ def main():
                                      req[var]["Type"] == "FL")
         stats = {var: [np.inf, -np.inf, 0] for var in VARIABLES_2D}
         grounded_near = 0
+        # the melt booked in pixels with no floating ice at year end, which
+        # the no_floating_ice fill leaves out of libmassbffl, and the part of
+        # it in pixels the near-flotation rule emptied: (Gt/yr, year), largest
+        melt_out = {"all": (0.0, None), "near flotation": (0.0, None)}
         for k, yr in enumerate(years):
             with fd.CheckpointFile(AnnualOutput.year_path(a.annual, yr), "r") as chk:
                 ymesh = chk.load_mesh()
@@ -428,16 +464,22 @@ def main():
                     f"the mesh changed inside the series, so one conservative "
                     f"operator cannot cover it."
                 )
+            afloat_before = W @ (cells["sftflf"] > 0.5).astype(float)
             grounded_near += ground_near_flotation(cells)
             masks = {"no_ice": cells["sftgif"] > 0.5,
                      "no_grounded_ice": cells["sftgrf"] > 0.5,
                      "no_floating_ice": cells["sftflf"] > 0.5}
+            afloat = W @ masks["no_floating_ice"].astype(float)
+            melt_px = W @ cells["libmassbffl"]                     # m3/yr of ice per pixel
+            for key, where in (("all", afloat <= 0.0),
+                               ("near flotation", (afloat_before > 0.0) & (afloat <= 0.0))):
+                gt = float(melt_px[where].sum()) * RHO_I / 1e12
+                if abs(gt) > abs(melt_out[key][0]):
+                    melt_out[key] = (gt, yr)
 
             def plane(var):
-                meta = req[var]; policy = meta["fill_policy"]
-                m = masks[policy] if policy in masks else None
-                return (regrid(W, cells[var], policy, m)
-                        * CONVERT[meta["units"]]).reshape(ISMIP7_NY, ISMIP7_NX).astype("f4")
+                return pixel_values(W, cells[var], req[var], masks).reshape(
+                    ISMIP7_NY, ISMIP7_NX).astype("f4")
 
             # the checker requires orog == base + lithk pixel by pixel and
             # orog >= 0; the elevations are covered-part means while lithk is a
@@ -460,6 +502,11 @@ def main():
                 st[2] += int(finite.sum())
         print(f"  {grounded_near} cell-years within {FLOTATION_TOLERANCE_M:g} m of "
               f"flotation written as grounded", flush=True)
+        for key, (gt, yr) in melt_out.items():
+            where = ("in pixels with no floating ice at year end" if key == "all" else
+                     "in pixels the near-flotation rule left with no floating ice")
+            print(f"  libmassbffl leaves out the melt booked {where}: at most "
+                  f"{gt:+.1f} Gt/yr" + (f" ({yr})" if yr is not None else ""), flush=True)
         for var in VARIABLES_2D:
             handles.pop(var)[0].close()
             lo, hi, nfin = stats[var]

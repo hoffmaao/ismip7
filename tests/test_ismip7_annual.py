@@ -20,6 +20,9 @@ fd = pytest.importorskip("firedrake")
 from icepack2_tools.ismip7_output import AnnualOutput, RHO_I  # noqa: E402
 
 RHO_RATIO = 917.0 / 1024.0
+# The scalars integrate over true area (issue #97). The unit meshes below sit
+# within metres of the pole, where af2 = (1/k)^2 of EPSG:3031 is 1/k0^2.
+AF2_POLE = 1.0567701662990163
 
 
 @pytest.fixture
@@ -63,13 +66,43 @@ def test_limnsw_is_the_thickness_above_flotation(two_cells, tmp_path):
     with open(tmp_path / "out" / "scalars.csv") as f:
         row = next(iter(csv.DictReader(f)))
     # marine cell: 2000 - 1000 / rho_ratio; dry cell: the whole thickness
-    expected = RHO_I * 0.5 * ((2000.0 - 1000.0 / RHO_RATIO) + 2000.0)
-    assert float(row["limnsw"]) == pytest.approx(expected, rel=1e-9)
+    expected = RHO_I * 0.5 * AF2_POLE * ((2000.0 - 1000.0 / RHO_RATIO) + 2000.0)
+    assert float(row["limnsw"]) == pytest.approx(expected, rel=1e-6)   # the csv carries 7 digits
     # height above flotation would have given rho_ratio times less on the
     # marine cell and bed + rho_ratio * h on the dry one
-    haf_height = RHO_I * 0.5 * ((2000.0 - (1.0 - RHO_RATIO) * 2000.0 - 1000.0)
-                                + (1000.0 + RHO_RATIO * 2000.0))
+    haf_height = RHO_I * 0.5 * AF2_POLE * ((2000.0 - (1.0 - RHO_RATIO) * 2000.0 - 1000.0)
+                                           + (1000.0 + RHO_RATIO * 2000.0))
     assert float(row["limnsw"]) != pytest.approx(haf_height, rel=1e-3)
+
+
+def test_the_scalars_integrate_over_true_area(tmp_path):
+    r"""ismip7-scalars weights every pixel by af2 = (1/k)^2 of EPSG:3031, so
+    the native scalars weight every cell by it too (issue #97): the cell's
+    map-plane area times af2 at its centroid. Two cells of 1e12 m2 whose
+    centroids sit 687 and 1344 km from the pole, where af2 is 1.050 and
+    1.033; the mass budget's own cell areas stay map-plane."""
+    from icepack2_tools.regrid import area_factor
+    mesh = fd.RectangleMesh(1, 1, 2.0e6, 0.5e6, originX=0.0, originY=-0.5e6)
+    Q = fd.FunctionSpace(mesh, "DG", 0)
+    V = fd.VectorFunctionSpace(mesh, "CG", 1)
+    h, bed = [1000.0, 3000.0], [500.0, 500.0]        # both grounded on dry beds
+    annual = AnnualOutput(mesh, Q, str(tmp_path / "out" / "annual.h5"),
+                          str(tmp_path / "out" / "scalars.csv"),
+                          first_year=2015, rho_ratio=RHO_RATIO)
+    annual.start_year(_dg(Q, h))
+    _write_year(annual, Q, V, h, bed)
+    annual.close()
+    import csv
+    with open(tmp_path / "out" / "scalars.csv") as f:
+        row = next(iter(csv.DictReader(f)))
+    area = fd.assemble(fd.TestFunction(Q) * fd.dx).dat.data_ro
+    X = fd.SpatialCoordinate(mesh)
+    af2 = area_factor(*(fd.Function(Q).interpolate(X[i]).dat.data_ro for i in (0, 1)))
+    assert np.allclose(annual.cell_area, area)
+    assert float(row["iareagr"]) == pytest.approx(np.sum(area * af2), rel=1e-6)
+    assert float(row["lim"]) == pytest.approx(RHO_I * np.sum(np.array(h) * area * af2), rel=1e-6)
+    assert float(row["limnsw"]) == pytest.approx(float(row["lim"]), rel=1e-6)
+    assert float(row["iareagr"]) / np.sum(area) == pytest.approx(1.0414669, rel=1e-6)
 
 
 def test_a_resume_appends_to_the_annual_file(two_cells, tmp_path):
@@ -646,7 +679,8 @@ def test_ligroundf_is_negative_where_floating_ice_grounds(tmp_path):
     import csv
     with open(tmp_path / "out" / "scalars.csv") as f:
         row = next(iter(csv.DictReader(f)))
-    assert float(row["tendligroundf"]) == pytest.approx(-RHO_I / SECONDS_PER_YEAR, rel=1e-6)   # the csv carries 7 digits
+    assert float(row["tendligroundf"]) == pytest.approx(-RHO_I / SECONDS_PER_YEAR * AF2_POLE,
+                                                        rel=1e-6)   # the csv carries 7 digits
 
 
 def test_an_ice_rumple_nets_to_zero(tmp_path):

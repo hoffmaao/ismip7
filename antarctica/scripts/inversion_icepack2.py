@@ -282,7 +282,10 @@ def main():
     mesh_fn = os.environ.get("ISMIP7_MESH", mesh_filename(lc_coarse, lc, buffer_m))
     PETSc.Sys.Print(f"Loading mesh: {mesh_fn}")
     mesh = Mesh(mesh_fn)
-    PETSc.Sys.Print(f"  {mesh.num_vertices()} vertices, {mesh.num_cells()} cells")
+    # num_vertices()/num_cells() count this rank's plex, halo included; the
+    # coordinate dofs and the owned cell set are reduced to global totals.
+    PETSc.Sys.Print(f"  {global_size(mesh.coordinates)} vertices, "
+                    f"{mesh.comm.allreduce(mesh.cell_set.size)} cells")
 
     use_calving_terminus = os.environ.get("ISMIP7_NO_CALVING_TERMINUS") is None
     # Per-mesh sidecar, hard-checked against this mesh: a stale sidecar leaves

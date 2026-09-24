@@ -29,7 +29,7 @@ from icepack2_tools.naming import map_basename
 from icepack2_tools.climatology import clim_start, clim_end, clim_scenario
 from icepack2_tools.runconfig import (
     obs_data_root,
-    calving_law as _calving_law, calving_sigma_max as _calving_sigma_max,
+    calving_law_object as _calving_law_object,
     friction as _friction, geometry_space as _geometry_space, lc as _lc,
     lc_coarse as _lc_coarse, ocx_forcing as _ocx_forcing, ocx_ocean as _ocx_ocean,
     mesh_override,
@@ -149,8 +149,7 @@ def shared_missing(warn=None):
     # Front configuration: a mistyped law would otherwise surface only after
     # the forward's MAP load and initial solve.
     try:
-        _calving_law()
-        _calving_sigma_max()
+        _calving_law_object()
     except ValueError as e:
         miss.append(str(e))
     # ISMIP7_MESH=checkpoint means the mesh inside the MAP; there is no file

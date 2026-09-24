@@ -161,9 +161,9 @@ def collapse_record(log_path):
 
 def front_owner(log_path):
     r"""The mechanism that owned the calving front, lifted out of its log.
-    An external law (``forward_calving.py``) leaves ``ISMIP7_CALVING`` at
-    ``none`` in the env block, so this line is where the law and its
-    parameters reach the record."""
+    The env block carries ``ISMIP7_CALVING`` and ``ISMIP7_CALVING_PARAMS``
+    only as exported; this line is where the law reaches the record with
+    every parameter at the value the run used, defaults included."""
     return lifted(log_path, FRONT_OWNER_MARKER,
                   "the run predates the front owner line")
 

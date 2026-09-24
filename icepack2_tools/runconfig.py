@@ -169,13 +169,20 @@ def n_flow():
     return float(os.environ.get("ISMIP7_N_FLOW", N_FLOW_DEFAULT))
 
 
-# Calving front (icepack2_tools.levelset). ``none`` is the pre-Sep-2026
-# behaviour: on a buffered mesh the front advances freely and never calves.
+# Calving front. ``none`` (the default) runs no level set: on a buffered mesh
+# the front advances freely and never calves, and ISMIP7_FIXED_FRONT decides
+# whether the ice that flows past the t=0 extent is removed. Any other value
+# names a law in icepack_tools.calving, the one registry every project that
+# runs a front selects from (ISMIP7_CALVING_MODULE registers a law from a
+# file first), made with the parameters in ISMIP7_CALVING_PARAMS.
 CALVING_DEFAULT = "none"
-CALVING_LAWS = ("none", "fixed", "vonmises")
-# ISSM defaults for the von Mises thresholds (Morlighem et al. 2016).
-CALVING_SIGMA_MAX_GROUNDED_DEFAULT = "1.0"     # MPa
-CALVING_SIGMA_MAX_FLOATING_DEFAULT = "0.15"    # MPa
+#: Knobs that named one law's parameters before the laws had one home. Their
+#: values now go in ISMIP7_CALVING_PARAMS; set, they are refused rather than
+#: silently ignored.
+RETIRED_CALVING_KNOBS = {
+    "ISMIP7_CALVING_SIGMA_MAX_GROUNDED": "sigma_max_gr",
+    "ISMIP7_CALVING_SIGMA_MAX_FLOATING": "sigma_max_fl",
+}
 
 
 FRACTURE_MODES = ("none", "mask", "mask_front")
@@ -257,13 +264,70 @@ def ismip7_output():
 
 
 def calving_law():
-    r"""``ISMIP7_CALVING``: ``none``, ``fixed`` or ``vonmises``."""
-    value = os.environ.get("ISMIP7_CALVING", CALVING_DEFAULT).lower()
-    if value not in CALVING_LAWS:
-        raise ValueError(
-            f"ISMIP7_CALVING must be one of {CALVING_LAWS}, got {value!r}"
-        )
+    r"""``ISMIP7_CALVING``, lower-cased: ``none`` or the name of a law in
+    :mod:`icepack_tools.calving`.
+
+    Pure, like the rest of this module: it refuses parameters given for no
+    law and, when a law is configured, the retired per-law knobs, but
+    whether the name is a registered law, and whether its parameters are its
+    own, only :func:`calving_law_object` can say.
+    """
+    value = os.environ.get("ISMIP7_CALVING", CALVING_DEFAULT).strip().lower()
+    if value == "none":
+        if calving_params():
+            raise ValueError(
+                "ISMIP7_CALVING_PARAMS is set but ISMIP7_CALVING is none: the "
+                "parameters would configure no law")
+        return value
+    for knob, key in RETIRED_CALVING_KNOBS.items():
+        if knob in os.environ:
+            raise ValueError(
+                f"{knob} is retired: a law's parameters live with the law "
+                f"(icepack_tools.calving), so set "
+                f"ISMIP7_CALVING_PARAMS={key}=<value> instead")
     return value
+
+
+def calving_params():
+    r"""``ISMIP7_CALVING_PARAMS``: the law's parameters as ``key=value``
+    items, from a comma-separated list (``sigma_max_fl=0.2,sigma_max_gr=1``).
+    Parsing and validation are the law's (:func:`calving_law_object`)."""
+    raw = os.environ.get("ISMIP7_CALVING_PARAMS", "")
+    return [item.strip() for item in raw.split(",") if item.strip()]
+
+
+#: Law files already registered in this process, so a second call does not
+#: register the same law twice.
+_CALVING_MODULES_LOADED = set()
+
+
+def calving_law_object():
+    r"""The configured calving law, made with its parameters, or ``None`` for
+    ``none``.
+
+    Raises for an unknown law, a misspelt or impossible parameter, a retired
+    knob or a missing ``ISMIP7_CALVING_MODULE``, so a mistyped front fails at
+    startup rather than after the MAP load. Imports
+    :mod:`icepack_tools.calving`, and with it Firedrake, only when a law is
+    configured: under the default ``none`` this stays pure.
+    """
+    name = calving_law()
+    if name == "none":
+        return None
+    from icepack_tools import calving
+    module = os.environ.get("ISMIP7_CALVING_MODULE")
+    if module:
+        path = os.path.realpath(module)
+        if not os.path.isfile(path):
+            raise ValueError(f"ISMIP7_CALVING_MODULE={module!r} is not a file")
+        if path not in _CALVING_MODULES_LOADED:
+            calving.load_module(path)
+            _CALVING_MODULES_LOADED.add(path)
+    params = calving.parse_params(calving_params())
+    try:
+        return calving.make(name, **params)
+    except ValueError as err:
+        raise ValueError(f"ISMIP7_CALVING={name}: {err}") from None
 
 
 def fixed_front():
@@ -326,16 +390,6 @@ def auto_resume():
             f"ISMIP7_AUTO_RESUME must be an integer flag (0 to disable), "
             f"got {value!r}"
         ) from None
-
-
-def calving_sigma_max():
-    r"""Von Mises thresholds (grounded, floating) [MPa]."""
-    return (
-        float(os.environ.get("ISMIP7_CALVING_SIGMA_MAX_GROUNDED",
-                             CALVING_SIGMA_MAX_GROUNDED_DEFAULT)),
-        float(os.environ.get("ISMIP7_CALVING_SIGMA_MAX_FLOATING",
-                             CALVING_SIGMA_MAX_FLOATING_DEFAULT)),
-    )
 
 
 # ── Roots a second checkout does not carry ──────────────────────────────

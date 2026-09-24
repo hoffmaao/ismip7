@@ -14,7 +14,7 @@ __all__ = ["retreat_slivers", "clear_reference_where_ice_free", "clamp_thickness
            "COLLAPSE_CSV_COLUMNS", "FRONT_OWNER_MARKER"]
 
 # The prefix of the line a run prints naming the mechanism that owns the
-# calving front (an ISMIP7_CALVING law, an external law with its parameters,
+# calving front (an ISMIP7_CALVING law with every parameter it ran with,
 # or the legacy mask). core_report.py lifts it into the run record.
 FRONT_OWNER_MARKER = "Calving front owner:"
 

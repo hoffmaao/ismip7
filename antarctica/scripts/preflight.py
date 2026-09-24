@@ -3,8 +3,9 @@ r"""Data preflight for the ISMIP7 core experiments.
 
 Answers "which experiments can run on this machine right now?" in a few
 seconds, checking every input each core needs: mesh, MAP inversion,
-boundary ids, per-basin K, RACMO, OI climatology, and the (ESM,
-scenario) atmosphere/ocean trees over the run period. Honors the same
+boundary ids, per-basin K, RACMO, the OI climatology (core 11's stopgap),
+and the (ESM, scenario) atmosphere/ocean trees over the run period, the
+control's `ctrl` ocean among them. Honors the same
 environment knobs as the runs (ISMIP7_LC, ISMIP7_FRICTION,
 ISMIP7_OI_VERSION, ...).
 
@@ -255,8 +256,13 @@ def main():
             if not oi_ok():
                 miss.append(f"OI climatology ({oi_version})")
         elif scenario is None:  # CTRL
-            if not oi_ok():
-                miss.append(f"OI climatology ({oi_version})")
+            # the ESM's own ctrl ocean, which control/run.py refuses to start
+            # without (icepack/ismip7#107)
+            oc = ocean_cover(esm, "ctrl")
+            if oc is None:
+                miss.append(f"{esm}/ctrl ocean tf/so")
+            elif oc[0] > y0 or oc[1] < y1 - 1:
+                miss.append(f"ctrl ocean covers {oc[0]}-{oc[1]}, need {y0}-{y1}")
             if not racmo_ok():
                 bucket, detail = pool_status(
                     esm, "acabf",

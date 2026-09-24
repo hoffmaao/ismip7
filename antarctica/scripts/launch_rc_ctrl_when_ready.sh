@@ -3,7 +3,7 @@
 #
 # Runs antarctica/scripts/control/run.py with ISMIP7_FRICTION=regularized_coulomb
 # against inversion_icepack2_rc_500.h5: constant 2015-2029 SMB climatology,
-# OI-climatology ocean + per-basin calibrated K, dt=0.1, 2015->T_END.
+# the ESM's `ctrl` ocean + per-basin calibrated K, dt=0.1, 2015->T_END.
 # This is the clamp-free verification of the RC + h_clamp=0 pipeline: the
 # initial state is the true BedMachine geometry and no thickness floor is
 # ever applied, so total mass should track (SMB - melt - discharge) with no

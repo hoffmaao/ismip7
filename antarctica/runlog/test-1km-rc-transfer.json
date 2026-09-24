@@ -1,0 +1,28 @@
+{
+  "id": "test-1km-rc-transfer",
+  "task": "test",
+  "institution": "Rice",
+  "title": "1 km control from the transferred regularized-Coulomb snapshot",
+  "status": "stopped",
+  "esm": "CESM2-WACCM",
+  "scenario": "ctrl",
+  "period": "2015 to 2025 requested",
+  "friction": "regularized_coulomb",
+  "mesh": "antarctica_10000_1000_buffered20000, 1 km fine, 10 km interior, 20 km buffer",
+  "initial_state": "the regularized-Coulomb snapshot transferred from the 2 km mesh (the 22 September 2 km snapshot MAPs, https://github.com/icepack/ismip7/releases/tag/maps-2km-snap-2026-09-22)",
+  "branch_from": "cold start",
+  "forcing": "as the Budd run",
+  "melt": "as the Budd run",
+  "front": "held at the 2015 extent, no collapse",
+  "apparent_mb": "balance",
+  "dt": 0.05,
+  "site": "nots, commons partition",
+  "resources": "32 ranks, 180G",
+  "jobs": [
+    "1592598"
+  ],
+  "code": "upstream/main@87475b3 with the strict-transfer fix",
+  "started": "2026-09-22",
+  "cost": "the first continuation solve took 2273 s over 90 Newton iterations",
+  "audit": "year one budget closed; diverged within four of its own steps, same signature as the Budd run"
+}

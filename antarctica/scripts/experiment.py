@@ -37,6 +37,7 @@ sys.path.insert(0, _PROJECT)
 sys.path.insert(0, _SCRIPTS)
 
 from simulation import (setup_model, run_simulation, latest_checkpoint,
+                        historical_endpoint,
                         auto_resume, RESULTS_DIR, PETSc, lc)
 from icepack2_tools.forcing import (
     ISMIP7Atmosphere, ISMIP7Ocean, ISMIP7Fracture,
@@ -146,8 +147,7 @@ def run_core_experiment(*, core, title, name, esm, scenario,
             else "Auto-resume: no prior checkpoint"
         )
     if restart is None and restart_from_hist:
-        cand = os.path.join(RESULTS_DIR, f"hist_{esm_tag}{tag_sfx}_{lc}_final.h5")
-        restart = cand if os.path.exists(cand) else None
+        restart = historical_endpoint(esm_tag, tag_sfx, t_start)
     if restart and not os.path.exists(restart):
         raise FileNotFoundError(f"ISMIP7_RESTART not found: {restart}")
 
@@ -221,6 +221,10 @@ def run_core_experiment(*, core, title, name, esm, scenario,
             f"error: download the fracture tree, or run with "
             f"ISMIP7_FRACTURE=none."
         )
+    if fracture_mode() in FRACTURE_MASK_MODES:
+        # the highest version on disk can be one replaced on Globus before the
+        # mirror caught up; refuse it rather than run on it
+        fracture.check_min_version()
 
     # What this run opens, for the committed report: a collapse mask only
     # counts when the run reads it.

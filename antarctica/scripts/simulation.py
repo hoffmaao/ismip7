@@ -65,15 +65,17 @@ from icepack2_tools.mpi_stats import (
     global_extreme_location,
     global_mean,
     global_range,
+    global_size,
 )
 from icepack2_tools.boundary import load_boundary_ids
 from icepack2_tools.geometry import sample_to_geometry
 from icepack2_tools.naming import map_basename
 from icepack2_tools.front import (
     clamp_thickness, clear_reference_where_ice_free, retreat_slivers,
+    unforced_cells, applied_forcing,
     facet_neighbours, front_connected,
     collapse_banner, collapse_cell_counts, collapse_csv_fields,
-    COLLAPSE_CSV_COLUMNS, COLLAPSE_MARKER,
+    COLLAPSE_CSV_COLUMNS, COLLAPSE_MARKER, FRONT_OWNER_MARKER,
 )
 from icepack2_tools.timeseries import timeseries_csv_line
 from icepack2_tools.runconfig import (
@@ -195,6 +197,32 @@ def latest_checkpoint(experiment_name, lc_val=None):
                 or (t == best_t and fn.endswith("_final.h5"))):
             best, best_t = fn, t
     return best
+
+
+def historical_endpoint(esm_tag, tag_sfx, t_branch, lc_val=None):
+    r"""The historical endpoint a control or projection branches from, or None
+    when there is none.
+
+    A historical chain rewrites its ``_final.h5`` at the end of every job, so
+    a chain that stalled, or was stopped, leaves one that holds the year it
+    reached rather than the handoff. A control or projection that branched
+    from it would start its 2015 experiment on an earlier geometry and say
+    nothing, so an endpoint short of ``t_branch`` is refused outright.
+    """
+    lc_val = lc if lc_val is None else lc_val
+    path = os.path.join(RESULTS_DIR, f"hist_{esm_tag}{tag_sfx}_{lc_val}_final.h5")
+    if not os.path.exists(path):
+        return None
+    with fd.CheckpointFile(path, "r") as chk:
+        t = (float(chk.get_attr("/", "t_yr"))
+             if chk.has_attr("/", "t_yr") else None)
+    if t is None or t < t_branch - 1e-6:
+        reached = "no t_yr" if t is None else f"t_yr={t:g}"
+        raise RuntimeError(
+            f"the historical endpoint {path} holds {reached}, short of the "
+            f"{t_branch:g} handoff: its chain stopped early. Finish the "
+            f"historical, or name a state with ISMIP7_RESTART.")
+    return path
 
 
 def setup_model(restart_from=None, *, allow_timing_cache_a_ref=False):
@@ -383,13 +411,19 @@ def setup_model(restart_from=None, *, allow_timing_cache_a_ref=False):
         chk_buffer_m = target_buffer_m
         PETSc.Sys.Print(
             f"  Compute mesh override: {mesh_fn} "
-            f"({mesh.num_vertices()} vertices, {mesh.num_cells()} cells)"
+            f"({global_size(mesh.coordinates)} vertices, "
+            f"{mesh.comm.allreduce(mesh.cell_set.size)} cells)"
         )
     else:
         mesh = source_mesh
         target_lc_coarse = chk_lc_coarse
         target_buffer_m = chk_buffer_m
-    PETSc.Sys.Print(f"  {mesh.num_vertices()} vertices, {mesh.num_cells()} cells")
+    # num_vertices()/num_cells() count this rank's plex, halo included; the
+    # coordinate dofs and the owned cell set are reduced to global totals.
+    PETSc.Sys.Print(
+        f"  {global_size(mesh.coordinates)} vertices, "
+        f"{mesh.comm.allreduce(mesh.cell_set.size)} cells"
+    )
     # The recorded basename is the provenance and WINS. ISMIP7_MESH is only a
     # fallback for legacy checkpoints that carry no attribute: it names the
     # mesh the caller intends to build, which is not necessarily the one this
@@ -751,7 +785,7 @@ def setup_model(restart_from=None, *, allow_timing_cache_a_ref=False):
             f"  Transfer fill: {_name}: {_info['missing']} of {_info['total']} "
             f"dofs lie outside the source mesh; filled with {_info['fill']}; "
             f"{_info['clamped']} located dofs clamped to the source range "
-            "(extrapolated from a boundary cell)"
+            "(beyond it after strict location)"
         )
     if mesh_fn and not _filled:
         PETSc.Sys.Print(
@@ -1492,6 +1526,42 @@ def setup_model(restart_from=None, *, allow_timing_cache_a_ref=False):
     }
 
 
+class LiveCalvingState:
+    r"""The fields a calving law reads, taken live from the forward's state.
+
+    hoffmaao/calving's ``laws.Law.rate(model, t)`` reads seven fields from
+    its model: the dual solution ``u``, ``M``, ``tau``, the DG0 thickness
+    ``h``, the height above flotation ``haf`` and the grounded indicator
+    ``chi_gr`` on the cells, and the outward front normal ``nfront``. Here
+    they are the forward's own: ``(u, M, tau)`` are the subfunctions of the
+    mixed solution, ``haf`` and ``chi_gr`` are UFL on the cells so they
+    follow the geometry without an update, and ``nfront`` is the unit
+    gradient of the level set the forward advances, the same object
+    ``calving/antarctic.py`` builds when a law is tuned against the Greene
+    fronts, so the tuned threshold means the same thing here.
+
+    Densities follow that tuning harness (CalvingMIP's 917 / 1028) rather
+    than the forward's 1024, as ``antarctic.AntarcticState`` does: a
+    threshold fitted there is applied under the same flotation test.
+    """
+    RHO_I = 917.0
+    RHO_W = 1028.0
+
+    def __init__(self, z, h_dg, b, level_set):
+        from firedrake import conditional, gt
+        self.u, self.M, self.tau = z.subfunctions
+        self.h = h_dg
+        self.b = b
+        self.Q0 = h_dg.function_space()
+        self.haf = self.h - Constant(self.RHO_W / self.RHO_I) * max_value(
+            -self.b, Constant(0.0))
+        self.chi_gr = conditional(gt(self.haf, Constant(0.0)),
+                                  Constant(1.0), Constant(0.0))
+        self.levelset = level_set
+        self.nfront = level_set.ghat
+        self.front_len = level_set.front_len
+
+
 def save_model_state(ctx, final_path, t_now, extra_attrs=None):
     r"""Atomically save one self-contained mixed state.
 
@@ -1553,6 +1623,8 @@ def save_model_state(ctx, final_path, t_now, extra_attrs=None):
                 chk.set_attr("/", _key, _val)
 
         chk.set_attr("/", "t_yr", float(t_now))
+        if ctx.get("calving_law") is not None:
+            chk.set_attr("/", "calving_law", str(ctx["calving_law"].describe()))
         chk.set_attr("/", "friction", str(ctx.get("friction", "budd")))
         if str(ctx.get("friction", "budd")) == "budd":
             # Provenance of the shelf gate this state was solved under
@@ -1698,6 +1770,17 @@ def run_simulation(
     fixed_front = _fixed_front()
     front_hmin = float(os.environ.get("ISMIP7_FRONT_HMIN", "1.0"))
     calving = _calving_law()
+    # An external calving law (ctx["calving_law"], any object with
+    # rate(model, t) -> UFL and describe(); hoffmaao/calving's laws.Law is
+    # the reference) drives the shared level set through its "prescribed"
+    # law, evaluated on the live dual state each transport advance.
+    calving_law_obj = ctx.get("calving_law")
+    if calving_law_obj is not None:
+        if calving != "none":
+            raise ValueError(
+                f"ISMIP7_CALVING={calving} and an external calving law were "
+                f"both requested; leave ISMIP7_CALVING=none for the law object")
+        calving = "prescribed"
     beyond_front = None
     n_beyond = 0
     cell_area = assemble(fd.TestFunction(Q_dg) * dx).dat.data_ro.copy()
@@ -1772,7 +1855,12 @@ def run_simulation(
     # extent; `fixed` and the legacy flag pin it on purpose and keep the
     # t=0-only mask.
     free_front = calving not in ("none", "fixed")
-    if calving != "none":
+    if calving_law_obj is not None:
+        front_owner = (
+            f"level-set prescribed law (external: {calving_law_obj.describe()})"
+            + ("; ISMIP7_FIXED_FRONT is set but ignored for removal"
+               if fixed_front else ""))
+    elif calving != "none":
         front_owner = f"level-set {calving} law (ISMIP7_CALVING={calving})" + (
             "; ISMIP7_FIXED_FRONT is set but ignored for removal"
             if fixed_front else ""
@@ -1781,7 +1869,7 @@ def run_simulation(
         front_owner = "legacy fixed-front mask (ISMIP7_FIXED_FRONT)"
     else:
         front_owner = "none (no calving sink)"
-    PETSc.Sys.Print(f"  Calving front owner: {front_owner}")
+    PETSc.Sys.Print(f"  {FRONT_OWNER_MARKER} {front_owner}")
 
     # ISMIP7_LEGACY_TRANSPORT=1 restores the pre-Jul-2026 scheme: the
     # -h*div(u*phi) volume term (non-conservative for DG0: it adds
@@ -1805,6 +1893,13 @@ def run_simulation(
     proj_rhs = fd.Cofunction(Q.dual())
     src_dg = Function(Q_dg, name="mass_source")
     src_cof = fd.Cofunction(Q_dg.dual())
+    # Where the surface and ocean forcing act: 1 on cells that can hold ice,
+    # 0 on open ocean and on cells a front rule holds ice-free
+    # (front.unforced_cells). Refreshed at the start of every advance, and at
+    # t=0 for the balancing reference, so the reference, the transport source,
+    # the budget and the ISMIP7 fields all count the same forcing.
+    forced = Function(Q_dg, name="forced")
+    bed_cell = Function(Q_dg).project(b).dat.data_ro.copy()
 
     # h_dg is the PERSISTENT prognostic state (DG0). The old scheme
     # re-projected CG1 h -> DG0 every step; that roundtrip (L2 project +
@@ -1918,7 +2013,14 @@ def run_simulation(
                 # balanced control: evaluate the t=0 forcing and fold it in
                 if forcing_callback is not None:
                     forcing_callback(ctx, t_start + dt)
-                b_smb = assemble((accum - ocean_melt) * phi_dg * dx)
+                # the forcing the loop will apply, so the t=0 tendency is
+                # zero where it acts and no reference is left where it
+                # does not (open ocean would otherwise be handed a source
+                # equal to the melt it never receives)
+                forced.dat.data[:] = np.where(
+                    unforced_cells(h_dg.dat.data_ro, bed_cell, beyond_front),
+                    0.0, 1.0)
+                b_smb = assemble(forced * (accum - ocean_melt) * phi_dg * dx)
                 a_ref.dat.data[:] -= b_smb.dat.data_ro / cell_area
             if beyond_front is not None:
                 # No ice existed outside the t=0 extent, so no balancing
@@ -2394,6 +2496,12 @@ def run_simulation(
             drag_mask=ctx.get("drag_mask"), phi_init=phi_init,
         )
         phi_entry = Function(level_set.Q0)
+    live_calving_state = None
+    if calving_law_obj is not None:
+        live_calving_state = LiveCalvingState(z, h_dg, b, level_set)
+        PETSc.Sys.Print(
+            f"  Calving law (external, on the live dual state): "
+            f"{calving_law_obj.describe()}")
     # save_model_state writes the front and the ISMIP7 year in progress.
     ctx["level_set"] = level_set
     ctx["annual"] = annual
@@ -2419,22 +2527,35 @@ def run_simulation(
         calv_frac = None
         ls_ice_free = None
         if level_set is not None:
+            ext_rate = (calving_law_obj.rate(live_calving_state, t_yr)
+                        if calving_law_obj is not None else None)
             last_c_mean = level_set.advance(
-                dt_local, u_vel, h_dg, b, A_map, n_flow_val)
+                dt_local, u_vel, h_dg, b, A_map, n_flow_val, rate=ext_rate)
             lsb, calv_frac = level_set.calving_masks()
             beyond = lsb
             ls_ice_free = level_set.beyond_front()
             if a_ref is not None and free_front:
                 clear_reference_where_ice_free(a_ref.dat.data, ls_ice_free)
 
-        src = accum - ocean_melt
+        # No forcing where there can be no ice: open ocean at the start of
+        # this advance and the cells the front rules hold ice-free. SMB there
+        # would make ice the front removes and books as calving; melt there
+        # has nothing to melt (front.unforced_cells has the measured cost).
+        forced.dat.data[:] = np.where(
+            unforced_cells(h_dg_old.dat.data_ro, bed_cell, beyond, ls_ice_free),
+            0.0, 1.0)
+        smb_f, melt_f, ref_f = applied_forcing(forced, accum, ocean_melt, a_ref)
+        smb_gt = float(assemble(smb_f * dx)) * rho_gt * dt_local
+        melt_gt = float(assemble(melt_f * dx)) * rho_gt * dt_local
+        src = smb_f - melt_f
         amb_gt = 0.0
-        if a_ref is not None:
-            src = src + a_ref
+        if ref_f is not None:
+            src = src + ref_f
             # The reference as APPLIED here: the live-extent mask above may
-            # have zeroed cells since the step's entry measurement, so the
-            # budget and the CSV must use this, not the entry value.
-            amb_gt = float(assemble(a_ref * dx)) * rho_gt * dt_local
+            # have zeroed cells since the step's entry measurement, and the
+            # forcing mask withholds it from open ocean, so the budget and
+            # the CSV must use this, not the entry value.
+            amb_gt = float(assemble(ref_f * dx)) * rho_gt * dt_local
         # Cell-averaged DG0 source (exact for the DG0 test space) with a
         # positivity limit (gia a_step clamp): the net sink may not draw a
         # cell below h_clamp within one advance. With the limited source
@@ -2522,7 +2643,8 @@ def run_simulation(
         # state and must see it.
         grounded = _grounded_cells()
         if annual is not None:
-            annual.book_advance(dt_local, accum, ocean_melt, a_ref, h_dg, u_vel, grounded)
+            annual.book_advance(dt_local, smb_f, melt_f, ref_f,
+                                h_dg, u_vel, grounded)
 
         # Floor to h_clamp, EXCEPT in the cells the front rules report as
         # holding no ice: see clamp_thickness for why every such rule has to
@@ -2620,6 +2742,8 @@ def run_simulation(
             "clamp_gt": clamp_gt + clamp_cg_gt + limit_gt,
             "limit_gt": limit_gt,
             "amb_gt": amb_gt,
+            "smb_gt": smb_gt,
+            "melt_gt": melt_gt,
             "collapse_cells": collapse_cells,
         }
 
@@ -2683,9 +2807,6 @@ def run_simulation(
         if forcing_callback is not None:
             forcing_callback(ctx, t_yr)
 
-        # Forcing-field integrals are constant within the step.
-        smb_rate = float(assemble(accum * dx)) * rho_gt          # Gt/yr
-        melt_rate = float(assemble(ocean_melt * dx)) * rho_gt    # Gt/yr
 
         z_entry.assign(z)
         h_dg_entry.assign(h_dg)
@@ -2714,7 +2835,8 @@ def run_simulation(
                     level_set.phi.assign(phi_entry)
                     level_set.update_cell_fields()
             acc = {"out_gt": 0.0, "calv_gt": 0.0, "clamp_gt": 0.0,
-                   "limit_gt": 0.0, "amb_gt": 0.0}
+                   "limit_gt": 0.0, "amb_gt": 0.0,
+                   "smb_gt": 0.0, "melt_gt": 0.0}
             ok = True
             for _j in range(m):
                 sub = _advance(
@@ -2763,6 +2885,10 @@ def run_simulation(
         vaf = float(assemble(haf * dx)) * _RHO_I_SI / 1e12 / 362.5
         total_mass = float(assemble(h * dx)) * _RHO_I_SI / 1e12
 
+        # SMB and melt as the advances applied them, where there was ice to
+        # force, so the budget, the timeseries and the ISMIP7 fields agree.
+        smb_rate = tallies["smb_gt"] / dt                        # Gt/yr
+        melt_rate = tallies["melt_gt"] / dt                      # Gt/yr
         out_rate = tallies["out_gt"] / dt                        # Gt/yr
         calv_gt = tallies["calv_gt"]
         clamp_all = tallies["clamp_gt"]

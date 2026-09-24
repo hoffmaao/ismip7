@@ -21,7 +21,7 @@ stops immediately and says so.
 
 ```bash
 submit.sh inversion  ISMIP7_LC=2000 ISMIP7_LC_COARSE=5000 ISMIP7_MESH=$PWD/antarctica/mesh/antarctica_5000_2000_buffered0.msh
-submit.sh projection ISMIP7_EXPERIMENT=ssp585_cesm_waccm ISMIP7_OUTPUT=1
+submit.sh projection ISMIP7_EXPERIMENT=ssp585_cesm_waccm
 submit.sh smoke                                  # minutes, debug partition
 submit.sh inversion --dry-run                    # print the sbatch line only
 submit.sh projection --partition debug --time 00:30:00 --tasks 8
@@ -63,6 +63,17 @@ run `budd_map_census.script` by hand:
 ```bash
 submit.sh script scripts/batch_runners/budd_map_census.script --cd antarctica \
     --queue debug --tasks 16 --mem 64G --time 00:45:00 ISMIP7_MAP=$PWD/mesh/<map>.h5
+```
+
+`check_melt_bound.script` is the serial OCX tripwire core 11 waits on
+(issue #11). Each site runs it for itself, and again whenever the OCX ocean on
+its mirror changes. The job ends with the check's status, 1 when a basin or a
+256 km block is flagged, and its log names the OCX version the reader opened:
+
+```bash
+submit.sh script scripts/batch_runners/check_melt_bound.script --cd antarctica \
+    --queue debug --tasks 1 --mem 16G --time 00:30:00 \
+    ISMIP7_LC=1000 ISMIP7_INV_H5=$PWD/mesh/<map or forward state>.h5
 ```
 
 `--queue short|long|debug` names the site's partition by class, `--cd DIR`
@@ -391,6 +402,8 @@ submit.sh projection ISMIP7_EXPERIMENT=control
 | `ocx` | 11 | 1979-2025 |
 | `hist_cesm_waccm` / `hist_mri_esm2` | 1 / 2 | 1850-2014 |
 
+The runner writes the submission's yearly fields and scalars by default (`ISMIP7_OUTPUT=1`), because every experiment it offers is a core experiment and a projection that reaches 2300 without them has to be run again. `ISMIP7_OUTPUT=0` turns that off for a pipeline exercise.
+
 **The chain stops on a non-zero exit and never retries.** The July
 grounding-line blow-up looked like a run that needed more time, and chaining
 through it would have burned days.
@@ -404,9 +417,36 @@ resubmits, unless `ISMIP7_CHAIN=0`, or auto-resume is off (a successor would
 cold-start and repeat the years), or the final checkpoint is unreadable, or the
 job advanced no years at all (setup alone spent the budget).
 
+**A historical can queue what branches from it.** `ISMIP7_CHAIN_THEN` names
+follow-on experiments (space-separated, from the runner's list), and the job
+that brings the chain to its end year queues each one behind itself, as a fresh
+chain with the same environment and allocation, less the follow-on list itself,
+`ISMIP7_RESTART`, the wall budget, and the period (`ISMIP7_T_START`,
+`ISMIP7_T_END`), since each follow-on resumes its own checkpoints and its
+driver owns its period; a job that stops short carries the list on to its
+successor, and a stalled or failed one queues nothing. So a control and the
+projections are submitted with their historical and start only once it has
+reached 2015, which is what `simulation.historical_endpoint` then checks before
+they branch. A misspelt follow-on stops the first job before the driver runs:
+
+```bash
+ISMIP7_EXPERIMENT=hist_mri_esm2 ISMIP7_ESM=MRI-ESM2-0 \
+    ISMIP7_CHAIN_THEN="control" antarctica/scripts/batch_runners/submit.sh projection
+```
+
 A relaunch from a stalled state has cleared the diagnostic-Newton wall in every
 observed case (see Known issues in `antarctica/README.md`). The chain leaves
 that judgement to you: resubmit, and auto-resume picks the run up.
+
+**MPI-IO goes through romio.** Every rank is started with
+`OMPI_MCA_io=romio321` (`ismip7_mpirun` in `site_core.sh`), because Open MPI's
+default ompio component writes a parallel HDF5 file to an NFS file system at
+about 1.5 MB/s: on NOTS, 32 ranks on the 1000 m mesh, one 1.48 GB yearly
+output file took 1042 s to `/scratch` under ompio and 52 s under romio321
+(24 September 2026), on a file system that takes a single stream at 600 MB/s.
+Before the change the yearly write was a third of a 45-minute model year.
+`ISMIP7_MPI_IO` names the component; set it empty to leave the MPI's own
+default. An MPI other than Open MPI ignores the variable.
 
 The wall budget is derived per job. Each link reads its own partition's
 `TimeLimit`, holds back 25 minutes and passes the rest as

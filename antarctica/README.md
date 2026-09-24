@@ -65,7 +65,12 @@ python antarctica/scripts/download_mirror.py --check data/CESM2-WACCM/ssp585/
 ```
 
 Globus remains the archive of record and `download_forcing.py` drives it
-(section 2a). Use it for anything the mirror has not synced.
+(section 2a). Use it for anything the mirror has not synced. The MRI-ESM2-0
+ssp585 collapse mask is such a case: v2 replaced v1 on Globus on 22 September
+2026. `FRACTURE_MIN_VERSION` in `icepack2_tools/forcing.py` names the oldest
+mask each ESM and scenario may be read at; a run under a mask mode refuses an
+older one at startup, and the audit reads it `OUTDATED` and fails. Fetch it
+with `download_forcing.py --scenarios --esm MRI-ESM2-0 --scenario ssp585`.
 
 ### 0.3 Short paths
 
@@ -74,8 +79,9 @@ BedMachine, MEaSUReS, RACMO, one scenario of forcing, their `.msh` and
 `inversion_*.h5`, the OI climatology, the IMBIE basin numbers, and
 `results/calibrated_K_per_basin_<lc>.npz`. That npz comes from
 `calibrate_melt.py` or a colleague; the 2500 m one is mesh independent and
-serves as the fallback for any `lc`. `control/run.py` and `projections/ocx.py`
-abort without it; the ssp drivers warn and substitute a scalar `K`, which
+serves as the fallback for any `lc`. With `ISMIP7_DELTAT_PER_BASIN_NPZ` set no
+driver reads it, and `preflight.py` accepts either. `control/run.py` and
+`projections/ocx.py` abort without it; the ssp drivers warn and substitute a scalar `K`, which
 completes with the wrong melt.
 
 **Inversion.** Add `tlm_adjoint`, and the MIPkit for the dH/dt term.
@@ -119,7 +125,7 @@ antarctica/scripts/batch_runners/submit.sh inversion ISMIP7_LC=2000 \
     ISMIP7_LC_COARSE=5000 \
     ISMIP7_MESH=$PWD/antarctica/mesh/antarctica_5000_2000_buffered0.msh
 ISMIP7_SITE=iu_quartz antarctica/scripts/batch_runners/submit.sh projection \
-    ISMIP7_EXPERIMENT=ssp585_cesm_waccm ISMIP7_OUTPUT=1 --dry-run
+    ISMIP7_EXPERIMENT=ssp585_cesm_waccm --dry-run
 ```
 
 The timing benchmark (section 7) goes through the same layer: `make timing`
@@ -245,10 +251,13 @@ atmosphere directory is whichever of `SDBN1-8000m` and `GEMB-SDBN1-8000m`
 exists, `SDBN1` first, so trees fetched before MRI's August 2026 rename still
 work. Fracture masks resolve flat or versioned.
 
-**One year bridges the end of a series.** CESM2-WACCM's atmosphere stops at
-2299 and the empty 2300 files were withdrawn, so a request for the single year
-after the last one on disk reuses that year and logs it once per variable.
-Anything further past the end, or a gap inside the series, raises.
+**One year bridges the end of a series.** A request for the single year after
+the last one on disk reuses that year and logs it once per variable. Anything
+further past the end, or a gap inside the series, raises. CESM2-WACCM's ocean
+stops at 2299, so 2300 holds 2299, a duplicate the organisers accepted on 23
+September 2026 (discussion #49). Its 2300 atmosphere files, withdrawn while
+empty, are back as the 2290-2299 mean and are read as given; the bridge covers
+them only in a tree fetched without them.
 
 **Per-year atmosphere files hold 12 monthly slices.** The reader collapses them
 to the annual mean, weighting months by length from `time_bnds`, falling back
@@ -497,7 +506,9 @@ shims over `scripts/experiment.py`. Run a historical driver first to produce
 from it, so they share a t=0 state and the same frozen apparent-MB correction,
 and their relaxation drift cancels in projection minus control (the ISMIP6
 ctrl_proj convention). Without it a projection cold-starts from BedMachine and
-the control warns that it starts from a different geometry.
+the control warns that it starts from a different geometry. An endpoint whose
+`t_yr` is short of the branch year (a chain that stopped early) or missing is
+refused (`simulation.historical_endpoint`).
 
 Run management on the drivers: `--restart <ckpt>` or `ISMIP7_RESTART` resumes;
 `ISMIP7_AUTO_RESUME=1` picks up the newest checkpoint for the experiment, which
@@ -608,6 +619,37 @@ cleared each step wherever the level set reports ice-free, irreversibly, so a
 calved cell is not regrown and an advanced-into cell is not re-emptied. The run
 log prints one `Calving front owner:` line naming the mechanism in force.
 
+### A calving law from hoffmaao/calving (`forward_calving.py`)
+
+The laws developed for CalvingMIP (github.com/hoffmaao/calving: `fixed`,
+`velocity`, `position`, `thickness`, `vonmises`, `vonmises_strain`, `hfb`
+and any `--law-module` plugin) run in the forward unchanged. A law reads
+seven fields from its model, and `simulation.LiveCalvingState` supplies
+them from the live dual state: `u`, `M`, `tau` from the mixed solution,
+the DG0 `h`, `haf` and the grounded indicator as UFL on the cells, and the
+front normal from the level set the forward advances. The law's rate goes
+to the shared level set as its `prescribed` law, so the front is retreated
+and the shed mass is tallied exactly as under `ISMIP7_CALVING=vonmises`.
+
+```bash
+CALVING_DIR=/path/to/calving mpiexec -n 16 python antarctica/scripts/forward_calving.py \
+    --law hfb --law-param sigma_max=0.15 --experiment control --tag hfb_test
+```
+
+wraps the experiment driver (`control`, `ocx`, `ssp126|ssp370|ssp585` with
+`--esm`, `hist`), which keeps its own forcing, restart and auto-resume;
+leave `ISMIP7_CALVING` unset. `--tag` (or `ISMIP7_RUN_TAG`) is required, so a
+law-driven run never resumes from or overwrites a stock run's checkpoints. The
+law's `describe()` is written to every checkpoint's `calving_law` attribute and
+to the `Calving front owner:` line, which `core_report.py` lifts into the
+report. Any object with `rate(model, t)` returning a UFL rate on the cells and
+`describe()` can be placed in `ctx["calving_law"]` before `run_simulation` the
+same way. A threshold is fitted on Antarctica
+with `calving/tune_greene.py --experiment vonmises|hfb --state <forward
+checkpoint>` (per-Mouginot-basin flux against the Greene et al. 2022 fronts,
+on the same level-set normal), which is what makes a tuned parameter mean
+the same thing in both places.
+
 ### The whole matrix in one command (`run_core_matrix.sh`)
 
 Runs cores 1 to 11 in dependency order (historicals, controls, projections,
@@ -686,13 +728,13 @@ redeclare those literals.
 | `ISMIP7_BUFFER_M` | outline buffer (m) in the default mesh and sidecar names | `20000` |
 | `ISMIP7_MESH` | mesh path for the inversion and tools. A forward takes its mesh from the checkpoint unless this names another mesh, in which case the MAP is transferred onto it. `checkpoint` means the mesh embedded in the MAP or restart file: `site_env.sh` always exports a derived path, so this is how a job submitted through `submit.sh projection` runs MAP-native | `mesh/antarctica_<COARSE>_<LC>_buffered<BUFFER_M>.msh` |
 | `ISMIP7_RASTER_SAMPLE` | how BedMachine lands on a DG0 cell. `vertex` projects the CG1 vertex interpolant; `cell_mean` takes the raster's true cell mean. `cell_mean` measured rougher: neighbouring cells share two of three vertex samples, so `vertex` damps jumps by construction. Cell means raised interior surface jumps 6% and bed and thickness jumps 35%, and at 2 km the momentum solve did not converge within 60 minutes. It does classify flotation better (32 km misclassification 9.1% to 3.2%), so the knob stays. Stamped into the MAP and read back by the forward. Reproduce with `probe_raster_sampling.py` | `vertex` |
-| `ISMIP7_INVERSION` | explicit MAP path for a forward or preflight. The forward checks the MAP's recorded `friction`, `n_flow` and `geometry_space` against the run and aborts on a mismatch, warning only when the MAP predates those attributes; `preflight.py` checks that the file exists. Use it to A/B MAPs on one mesh, or, with `ISMIP7_MESH` also set (the timing matrix, `make map-check`), to run a MAP on a different mesh: its continuous fields are then interpolated onto `ISMIP7_MESH`, and a target dof outside the MAP's mesh takes a stated fill (0 for the log controls, the constant baseline for the fluidity prior, the raster sample for `velocity_obs`), counted and printed as `Transfer fill:` lines (`MAP_CHECK.md`) | derived |
+| `ISMIP7_INVERSION` | explicit MAP path for a forward or preflight. The forward checks the MAP's recorded `friction`, `n_flow` and `geometry_space` against the run and aborts on a mismatch, warning only when the MAP predates those attributes; `preflight.py` checks that the file exists. Use it to A/B MAPs on one mesh, or, with `ISMIP7_MESH` also set (the timing matrix, `make map-check`), to run a MAP on a different mesh: its continuous fields are then interpolated onto `ISMIP7_MESH` by strict point location (`icepack2_tools/transfer.py`), and a target dof outside the MAP's outline takes a stated fill (0 for the log controls, the constant baseline for the fluidity prior, the raster sample for `velocity_obs`), counted and printed as `Transfer fill:` lines (`MAP_CHECK.md`) | derived |
 | `ISMIP7_CALVING` | `none`, `fixed` or `vonmises` (see above) | `none` |
 | `ISMIP7_CALVING_SIGMA_MAX_GROUNDED` / `_FLOATING` | von Mises thresholds (MPa) | `1.0` / `0.15` |
 | `ISMIP7_FRACTURE` | `mask` applies the ISMIP7 collapse forcing to every floating cell it flags, booked as calving; `mask_front` only to the flagged cells open water has reached, so no hole opens behind a standing front (the two end-members of discussion #30). Masks exist for the SSPs only, so the control, historicals and OCX abort on either. Needs DG0. Every run prints its mode once (`Ice-shelf collapse forcing: ISMIP7_FRACTURE=...`, `none` included). Under a mask mode the timeseries columns `collapse_flagged_cells`, `collapse_removed_cells` and `collapse_held_cells` count the flagged floating cells, the ones the mode has emptied and the ones it leaves standing (always 0 under `mask`), all ranks summed; the budget lines, a closing log line and the core report repeat them | `none` |
 | `ISMIP7_OCX_FORCING` | what core 11 runs on. `protocol` is the ISMIP7 OCX product (RACMO2.3p2-ERA SDBN1 `acabf`, expert-judgment ocean `tf`/`so`), and the run refuses to start without it. `stopgap` is RACMO2.4p1 actual-year SMB with the constant OI ocean climatology, what the core ran on before the product was readable here. K is fitted to the climatology, so read `check_melt_bound.py --ocx` first (discussion #48) | `protocol` |
 | `ISMIP7_OCX_OCEAN` | which expert-judgment OCX ocean scenario to read: `main` (the core one), `cold`, `warm` or `vary`. A member other than `main` writes to `ocx_<member>` | `main` |
-| `ISMIP7_OUTPUT` | `1` records the ISMIP7 yearly fields and scalars (`<exp>_<lc>_ismip7_annual_<year>.h5`, `<exp>_<lc>_ismip7_scalars.csv`), regridded afterwards by `write_ismip7_output.py`. The value set is closed, so a typo is rejected at startup. A chained projection must export it on every link; a link that cold-starts mid-year logs the gap and begins at the next 1 January. Resuming continues a series, and a cold start into a populated series is refused | unset |
+| `ISMIP7_OUTPUT` | `1` records the ISMIP7 yearly fields and scalars (`<exp>_<lc>_ismip7_annual_<year>.h5`, `<exp>_<lc>_ismip7_scalars.csv`), regridded afterwards by `write_ismip7_output.py`. The value set is closed, so a typo is rejected at startup. `projection.sbatch` and `run_core_matrix.sh` default it to `1`, and `=0` or an empty value turns it off there. A chained projection must export it on every link; a link that cold-starts mid-year logs the gap and begins at the next 1 January. Resuming continues a series, and a cold start into a populated series is refused | unset (`1` under the core-experiment runners) |
 | `ISMIP7_BNDIDS` | boundary-id JSON override | per-mesh sidecar, else `mesh/boundary_ids.json` |
 | `ISMIP7_GEOMETRY_SPACE` | `dg0` (one thickness for terminus force and mass flux) or `cg1` (legacy, A/B only). Selects the MAP. See `../GEOMETRY_DISCRETIZATION.md` | `dg0` |
 | `ISMIP7_DATA_ROOT` | forcing tree root | `<repo>/ISMIP7/AIS` |
@@ -701,7 +743,7 @@ redeclare those literals.
 | `ISMIP7_FRICTION` | `budd`, `regularized_coulomb` or `budd_legacy`; selects the MAP. The set is closed, so a misspelling is rejected at startup | `budd` |
 | `ISMIP7_OUTPUT_INTERVAL` | timeseries row every N steps | `10` |
 | `ISMIP7_CHECKPOINT_EVERY_YR` / `ISMIP7_KEEP_CHECKPOINTS` | checkpoint cadence in model years, and how many to keep besides `_final.h5` | `5` / `3` |
-| `ISMIP7_RESTART` | restart checkpoint | `hist_<esm>[_<tag>]_<lc>_final.h5` if present |
+| `ISMIP7_RESTART` | restart checkpoint | `hist_<esm>[_<tag>]_<lc>_final.h5` if present; refused when it is short of the branch year |
 | `ISMIP7_AUTO_RESUME` | resume from this experiment's newest checkpoint when no `ISMIP7_RESTART` is given. An integer flag, `=0` disables it, since the runners export it unconditionally and `--export=ALL` cannot unset. `projection.sbatch` refuses to chain when it is off | unset |
 | `ISMIP7_RUN_TAG` | experiment-name suffix for a parallel method line | unset |
 | `ISMIP7_WALL_STOP_MIN` | wall-clock budget in minutes from process start, checked before each step against the longest step so far, so the run writes its final checkpoint and exits with `t_yr` short of `t_end` for a chained job to resume. `projection.sbatch` derives it from the job's own TimeLimit, holding back 25 minutes. `0` disables | `0` |
@@ -1189,7 +1231,11 @@ Per experiment in `results/`:
   `ISMIP7_KEEP_CHECKPOINTS` most recently written.
 - `<exp>_timeseries.csv`, one row per `OUTPUT_INTERVAL` steps:
   `year, vaf_mm_sle, mass_gt, smb_gtyr, melt_gtyr, outflux_gtyr, calv_gt,
-  clamp_gt, resid_gt, amb_gtyr`. The residual must close to 0.00.
+  clamp_gt, resid_gt, amb_gtyr`. The residual must close to 0.00. SMB and
+  melt are what the advances applied: no forcing acts on open ocean or on
+  cells a front rule holds ice-free (`front.unforced_cells`), so `clamp` is
+  only the positivity limit on thin ice and `calv` only ice that crossed the
+  front. The ISMIP7 `acabf` and `libmassbffl` fields book the same forcing.
 
 VAF is in mm of sea-level equivalent, mass in Gt.
 
@@ -1249,6 +1295,46 @@ attribute tests, and 93 time errors, which are the three-per-file
 experiment-length checks a two-year run cannot satisfy. `ismip7-scalars` 0.1.0
 then wrote `sla20`, `slg20` and `slvaf`, each with its glacier and ice-cap
 variant, in NetCDF and CSV.
+
+### The run log (`build_runlog.py`)
+
+None of the files above are in git: a checkpoint is hundreds of MB and a
+timeseries is regenerated. What reaches the repository is a record. Every
+simulation, of any kind, leaves one JSON file in `antarctica/runlog/`, and
+
+```bash
+make -C antarctica runlog                                # render reports/SIMULATIONS.md
+make -C antarctica runlog RUNLOG_CSV=results/runlog.csv  # and the records flat
+make -C antarctica runlog-check                          # exits 1 on a stale render
+```
+
+renders them into `antarctica/reports/SIMULATIONS.md`, grouped by task kind,
+with a summary table per group and every recorded field below it. A record is
+reviewed in a pull request beside the code its run used, which is what makes it
+a trace rather than a note; `runlog-check` and `tests/test_runlog.py` refuse a
+stale render or a malformed record.
+
+The group's shared progress sheet imports `RUNLOG_CSV`, one row per record and
+one column per field in `build_runlog.py` order, so a run's configuration and
+outcome are typed only in its record.
+
+`id`, `task`, `title`, `status` and `institution` are required and everything else is
+optional, so a planned run is five lines and a finished one carries its whole
+provenance: mesh, MAP and iteration count, what it branched from, forcing
+versions, the melt and front configuration, site, ranks, job ids, code SHA,
+cost per model year, the audit verdict, whether the ISMIP7 output was written,
+the checker version and result, the scalars, and the upload. `build_runlog.py`
+owns the field list, so a field it does not know is an error rather than a
+typo that renders as nothing.
+
+A core experiment still gets its full report from `core_report.py`, with the
+budget rows and the ensemble overlay. The run log is the index across all of
+them, and across the runs that are not core experiments: the inversions, the
+calibrations and the forward tests. A superseded run keeps its record with
+`status` set to `superseded` and the reason in `notes`. `institution` names the
+institution that owns the run, or `unassigned` for a planned run; `results` is
+relative to the checkout on the site the record names, and never an account or
+home-directory path.
 
 ---
 

@@ -64,11 +64,15 @@ the submission uses is a decision, section 6.
 **NaN forcing outside the downscaled mask (#39)** is intended. Zero, nearest or
 a large melt are all acceptable, stated in the README. Ours fills with zero.
 
-**CESM2-WACCM ends in 2299 (#8).** The empty 2300 atmosphere files were
-removed, and by 22 September 2300 was back as the 2290-2299 mean (#49, section
-8). The ocean stops at 2299, while a 2015-2300 run needs 2300. Handled: the reader
-persists the last year on disk exactly one year past the end and reports it
-once per variable; a gap inside the series stays an error.
+**CESM2-WACCM ends in 2299 (#8, #49).** The empty 2300 atmosphere files were
+removed, and by 22 September 2300 was back as the 2290-2299 mean, which the
+reader opens as given. The ocean stops at 2299, while a 2015-2300 run needs
+2300. Handled: the reader persists the last year on disk exactly one year past
+the end and reports it once per variable; a gap inside the series stays an
+error. The collapse masks end in 2299 too, and 2300 reads the 2299 mask
+(section 6). On 23 September the organisers answered that one forcing year at
+the end makes no significant difference and that duplicating 2299 into 2300 is
+acceptable, so runs end in 2300 (section 8).
 
 **Melt toolbox re-release (#25).** Rerun the calibration notebook with the new
 constraint datasets. No ice-model rerun.
@@ -423,7 +427,8 @@ Forcing data:
       cause.
 - [x] #49 (the forum thread) CESM2-WACCM `thetao` ends in 2299 for ssp126 and
       ssp585: the #8 rule, the ocean reader holds 2299 for the single year 2300.
-      [~] Upstream is asked to add 2300; a pre-matrix `download_mirror.py --dry-run` shows it. (issue #41)
+      Upstream will not add 2300, and on 23 September the organisers accepted
+      a 2299 duplicate for 2300, section 8.
 - [x] #9, #24 time stamps and calendars differ between products: the year comes
       from the filename and only the year of a time value is ever read.
 - [x] #10, #39 NaN fill and NaN outside the downscaled mask: zero-filled, in the
@@ -435,8 +440,11 @@ Forcing data:
       `core_report.py` carries that into the committed report.
 - [x] #45, #41 files replaced in place under the same name and version: the
       mirror downloader keeps ETags in `.mirror_manifest.json` and refetches a
-      moved one, the audit reports `REPLACED` and `PINNED` and fails on them,
-      the Globus route has `--resync`.
+      moved one, the audit reports `REPLACED` and `PINNED` and fails on them
+      (a version newer than the mirror's, fetched from Globus first, reads
+      `AHEAD` and passes, and a collapse mask below
+      `forcing.FRACTURE_MIN_VERSION` reads `OUTDATED` and fails), the Globus
+      route has `--resync`.
 - [x] #41 item 9, dotted fracture versions: the Globus downloader no longer
       passes over `v2.1` for `v2`.
 - [x] #41 items 1, 3, 4, 5, 7, 8, 10 to 14: none in a tree that is read. The
@@ -683,7 +691,8 @@ board item about mirror prefixes.
   `ISMIP7Ocean._chunk_for` holds 2299 for the single year 2300 and says so once
   per variable. If the year is added under the same version it shows as
   `fetch` in `download_mirror.py --dry-run` while the audit table stays `ok`;
-  if the version is bumped, the audit reads `BEHIND`. (issue #41)
+  if the version is bumped, the audit reads `BEHIND`. Answered on the 21st
+  and 23rd, section 8. (issue #41)
 - **Unmoved.** #17 since 29 June, #37 since 4 September. isschecker is still
   0.5.0, tagged on 17 September at the head of its default branch, with no open
   pull request and no open issue, so nothing upstream is adding an `ocx` row.
@@ -754,7 +763,20 @@ and six 2300 files were read with h5py.
   1's "the 2300 atmosphere files were removed" and the reader's comment in
   `forcing.py` are stale, and the SMB sentence of the submission README
   claimed the 2299 hold for both. That sentence is corrected in this
-  change. (issues #78, #41)
+  change. Answered on the 23rd, below. (issue #41)
+- **#49, 23 September, answered.** Read that day through the GitHub API. At
+  00:03 UTC a member of the ISMIP7 Antarctica team at Dartmouth College gave
+  the team's answer to the reporting group's question: a single forcing
+  year at the very end should make no significant difference, and
+  duplicating the 2299 data into 2300 is acceptable. The question had been
+  put to the ISMIP7 lead. Runs therefore end in 2300, and the runners, the
+  time axis and the filenames of cores 5 and 7 stand. For 2300 a CESM2-WACCM
+  run reads the distributed atmosphere file, the 2290-2299 mean, for SMB;
+  holds 2299 for the ocean `tf` and `so`, which is the duplicate the reply
+  accepts; and under a mask mode reads the 2299 collapse mask. The v2.1
+  masks for ssp126 and ssp585 end in 2299; their time axes were read on
+  Quartz that day with h5py. No reader changes. Closed as
+  icepack/ismip7#78.
 - **#30, 22 September.** PISM posted its margin-only runs. Under CESM2-WACCM
   ssp585, the mask applied to all floating ice doubles the sea-level
   contribution, 1.25 to 2.48 m of ice above flotation. Applied only at the
@@ -765,6 +787,26 @@ and six 2300 files were read with h5py.
   treat fractured ice inside the shelf, as melange or as a reduced-viscosity
   region rather than open ocean. No one has answered that, and the
   organisers prescribe no mode. (issue #10)
+- **#30, 23 September: the MRI-ESM2-0 ssp585 mask was faulty.** At 00:00 UTC,
+  under the PISM post above, a member of the ISMIP7 Antarctica team at
+  Dartmouth College reported an issue with the MRI-ESM2-0 ssp585 fracture
+  mask and an update on Globus. The update is v2, whose README credits
+  improved wind forcing in the excess meltwater, which changes all three
+  fracture files. IU fetched the MRI-ESM2-0 fracture tree from Globus to
+  Quartz that day, while the mirror still served the 29 August v1 (checked
+  19:30 UTC): v2 arrived for ssp585 and ssp534-over, and the v1 files of
+  ssp126, ssp370 and ssp534-over came back byte-identical, their collapse
+  masks matching the manifest's ETags. Flagged 8 km cells in the ssp585
+  mask, v1 against v2: 428 against 3,449 in 2100, 583 against 20,158 in 2200
+  and 593 against 25,149 in 2250, with every v1 cell flagged in v2 at those
+  years. So PISM's MRI-ESM2-0 result above ran on the faulty mask. Both
+  versions end in 2299, as the CESM2-WACCM masks do. The reader opens v2, and
+  the audit reads the row `AHEAD` and passes. `FRACTURE_MIN_VERSION` in
+  `icepack2_tools/forcing.py` makes v2 the floor for MRI-ESM2-0 ssp585, and
+  v2.1 the floor for CESM2-WACCM ssp126, ssp370 and ssp585: a run under a mask
+  mode refuses an older mask at startup, and the audit reads it `OUTDATED`
+  and fails, whatever the mirror serves. NOTS and Midway therefore need v2
+  from Globus before a mask-mode core 8 can run there. (issue #16)
 - **Unmoved.** #22 since 13:32 UTC on the 21st (the new 0.5.1 bounds stop
   taking a side on the `ligroundf` sign, but the thread prescribes none).
   #48 since the 20th: no date for the regenerated OCX. #17 and #37 as in

@@ -68,7 +68,18 @@ def test_a_law_run_resumes_its_own_checkpoint(simulation, monkeypatch):
 def test_a_law_run_does_not_resume_a_stock_run(simulation, monkeypatch):
     _checkpoint(simulation)
     _law(monkeypatch, "vonmises")
-    with pytest.raises(RuntimeError, match="calving law none, but this run is configured with vonmises"):
+    with pytest.raises(RuntimeError, match="records no calving law") as err:
+        simulation.auto_resume_checkpoint(NAME, 1000)
+    msg = str(err.value)
+    assert "written under none, or by a law run from before checkpoints recorded one" in msg
+    assert "configured with vonmises" in msg
+    assert "ISMIP7_RESTART" in msg and "ISMIP7_RUN_TAG" in msg
+
+
+def test_a_law_run_does_not_resume_a_pre_branch_fixed_chain(simulation, monkeypatch):
+    _checkpoint(simulation)
+    _law(monkeypatch, "fixed")
+    with pytest.raises(RuntimeError, match="built-in ISMIP7_CALVING=fixed or =vonmises chain"):
         simulation.auto_resume_checkpoint(NAME, 1000)
 
 

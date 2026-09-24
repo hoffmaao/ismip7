@@ -218,6 +218,15 @@ def auto_resume_checkpoint(experiment_name, lc_val=None):
     with fd.CheckpointFile(path, "r") as chk:
         have = (str(chk.get_attr("/", "calving_law"))
                 if chk.has_attr("/", "calving_law") else None)
+    if have is None and want is not None:
+        raise RuntimeError(
+            f"auto-resume found {path}, which records no calving law: it was "
+            f"written under none, or by a law run from before checkpoints "
+            f"recorded one (such as a built-in ISMIP7_CALVING=fixed or "
+            f"=vonmises chain), but this run is configured with {want}. "
+            f"Continue that state on purpose with ISMIP7_RESTART, or give "
+            f"this run its own ISMIP7_RUN_TAG so it keeps its own "
+            f"checkpoints.")
     if have != want:
         raise RuntimeError(
             f"auto-resume found {path}, written under the calving law "

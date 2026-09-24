@@ -10,7 +10,7 @@ is an index.
 **Claim the card before you start a run or an inversion.** A card in
 Claimed for more than 24 hours with no comment reads as unclaimed.
 
-Generated: 2026-09-24 18:39 UTC. 16 blocking, 9 owed, 0 after the deadline, 7 unverified.
+Generated: 2026-09-24 19:41 UTC. 18 blocking, 9 owed, 0 after the deadline, 7 unverified.
 
 ## Blocking the submission
 
@@ -24,6 +24,7 @@ Decisions first: they have the longest lead time and they gate the runs.
 | [26](https://github.com/icepack/ismip7/issues/26) | melt: settle the draft-slope convention shared by calibration and forward | needs-decision | group | group | unverifiable-run |
 | [38](https://github.com/icepack/ismip7/issues/38) | submission: settle the contributor names, date, source_id, ism_id and PPE participation | needs-decision | group | group | unverifiable-run |
 | [39](https://github.com/icepack/ismip7/issues/39) | submission: request the Globus upload folder | needs-decision | group | group | unverifiable-run |
+| [104](https://github.com/icepack/ismip7/issues/104) | initialisation: whether the production runs keep the apparent mass-balance reference (ISMIP7_APPARENT_MB) is an open decision | needs-decision | group | n/a | verified open |
 | [11](https://github.com/icepack/ismip7/issues/11) | melt: run check_melt_bound.py --ocx before core 11 runs on the OCX product | needs-run | iu | quartz, nots, midway | fresh, unverified by design |
 | [13](https://github.com/icepack/ismip7/issues/13) | output: run ismip7-scalar-processing for sla20, slg20 and slvaf | needs-run | iu | local | fresh, unverified by design |
 | [24](https://github.com/icepack/ismip7/issues/24) | MAP: 2 km RC and Budd inversions running at Rice under the new prior metric | needs-run | rice | nots | fresh, unverified by design |
@@ -32,6 +33,7 @@ Decisions first: they have the longest lead time and they gate the runs.
 | [30](https://github.com/icepack/ismip7/issues/30) | melt: DG0 melt totals are uncalibrated, the per-basin K was fitted under CG1 | needs-run | group | local | verified open |
 | [41](https://github.com/icepack/ismip7/issues/41) | forcing: re-run audit_forcing_versions.py immediately before the production matrix | needs-run | group | quartz, nots, midway | unverifiable-run |
 | [96](https://github.com/icepack/ismip7/issues/96) | output: acabf and libmassbffl are means over part of a pixel, so the organisers' sums overcount them | needs-run | iu | n/a | verified open |
+| [105](https://github.com/icepack/ismip7/issues/105) | output: under a pinned front, emptied shelf cells book the frozen apparent-MB reference as basal melt | needs-run | group | n/a | verified open |
 | [42](https://github.com/icepack/ismip7/issues/42) | melt: confirm every submitted run read the current per-basin K calibration | needs-check | group | local | unverifiable-run |
 | [40](https://github.com/icepack/ismip7/issues/40) | protocol: confirm the submission round and its deadline | needs-upstream | upstream | upstream | unverifiable-run |
 
@@ -40,7 +42,7 @@ Decisions first: they have the longest lead time and they gate the runs.
 | # | item | unblocked by | owner | sites | state |
 |---|---|---|---|---|---|
 | [99](https://github.com/icepack/ismip7/issues/99) | sea level: on the 8 km grid the tool loses about 10 % of the model's volume-above-flotation change by 2300 | needs-decision | group | n/a | verified open |
-| [32](https://github.com/icepack/ismip7/issues/32) | solver: the monolithic forward for core 7 and the core 10 tail is not implemented | needs-run | iu | local | verified open |
+| [32](https://github.com/icepack/ismip7/issues/32) | solver: the monolithic forward for core 7 and the core 10 tail is not implemented | needs-run | group | local | verified open |
 | [36](https://github.com/icepack/ismip7/issues/36) | calving: the von Mises level-set front is not calibrated | needs-run | group | local | verified open |
 | [47](https://github.com/icepack/ismip7/issues/47) | solver: the UChicago Midway site has never run end to end | needs-run | uchicago | midway | verified open |
 | [97](https://github.com/icepack/ismip7/issues/97) | output: the native scalars sum map-plane area, and the organisers' tool sums true area | needs-run | iu | n/a | verified open |
@@ -58,7 +60,6 @@ Work in flight. Do not duplicate it.
 | [10](https://github.com/icepack/ismip7/issues/10) | collapse: decide the mode for the submission (none, mask, mask_front) | iu | quartz | 2026-09-23 |
 | [11](https://github.com/icepack/ismip7/issues/11) | melt: run check_melt_bound.py --ocx before core 11 runs on the OCX product | iu | quartz, nots, midway | 2026-09-21 |
 | [24](https://github.com/icepack/ismip7/issues/24) | MAP: 2 km RC and Budd inversions running at Rice under the new prior metric | rice | nots | 2026-09-22 |
-| [32](https://github.com/icepack/ismip7/issues/32) | solver: the monolithic forward for core 7 and the core 10 tail is not implemented | iu | local | 2026-09-24 |
 | [96](https://github.com/icepack/ismip7/issues/96) | output: acabf and libmassbffl are means over part of a pixel, so the organisers' sums overcount them | iu | n/a | 2026-09-24 |
 | [97](https://github.com/icepack/ismip7/issues/97) | output: the native scalars sum map-plane area, and the organisers' tool sums true area | iu | n/a | 2026-09-24 |
 | [98](https://github.com/icepack/ismip7/issues/98) | submission: ship params.nc with the model's densities | iu | n/a | 2026-09-24 |
@@ -83,10 +84,10 @@ production run or a group decision.
 
 | source | items |
 |---|---|
-| `src:readiness` | 13 |
+| `src:readiness` | 14 |
 | `src:submission-readme` | 9 |
 | `src:matrix-status` | 2 |
-| `src:topic-doc` | 4 |
+| `src:topic-doc` | 5 |
 | `src:runbook` | 2 |
 | `src:open-pr` | 2 |
 

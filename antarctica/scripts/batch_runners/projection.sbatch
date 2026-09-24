@@ -111,9 +111,12 @@ export ISMIP7_DT="${ISMIP7_DT:-0.05}"
 # and the chain reads the end the run actually used out of its own log.
 export ISMIP7_CHECKPOINT_EVERY_YR="${ISMIP7_CHECKPOINT_EVERY_YR:-5}"
 export ISMIP7_KEEP_CHECKPOINTS="${ISMIP7_KEEP_CHECKPOINTS:-3}"
-# The control configuration the protocol asks for: calving held at end-of-2014
-# conditions, with the apparent mass-balance reference. Projections that should
-# calve freely must override ISMIP7_CALVING and unset ISMIP7_FIXED_FRONT.
+# The protocol's control holds calving at end-of-2014 conditions, and
+# ISMIP7_FIXED_FRONT holds the front here. The apparent mass-balance reference
+# is this repository's choice: the protocol leaves initial conditions to each
+# group, and whether the production runs keep the reference is a group
+# decision (issue #104). Projections that should calve freely must override
+# ISMIP7_CALVING and unset ISMIP7_FIXED_FRONT.
 #
 # These two default only when UNSET (${VAR-default}, no colon). An explicitly
 # empty value is one of the documented off spellings, and `submit.sh

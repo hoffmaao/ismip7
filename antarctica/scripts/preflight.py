@@ -152,6 +152,8 @@ def shared_missing(warn=None):
         _calving_law_object()
     except ValueError as e:
         miss.append(str(e))
+    except ImportError as e:
+        miss.append(f"icepack_tools.calving (ISMIP7_CALVING needs it: {e})")
     # ISMIP7_MESH=checkpoint means the mesh inside the MAP; there is no file
     # to look for and the MAP check below covers it.
     mesh_fn = mesh_override() or mesh_filename(lc_coarse, lc, get_buffer_m())

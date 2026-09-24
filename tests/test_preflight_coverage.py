@@ -144,3 +144,19 @@ def test_core_11_on_the_stopgap_says_that_is_what_it_is(monkeypatch, tmp_path, c
     _run_core_11(monkeypatch, tmp_path, None, forcing="stopgap")
     line = _core_line(capsys, "core 11")
     assert "READY" in line and "ISMIP7_OCX_FORCING=stopgap" in line
+
+
+def test_a_law_on_an_icepack_tools_without_calving_is_a_missing_input(monkeypatch):
+    r"""A site whose icepack_tools predates the calving module reports it as a
+    missing input rather than crashing the gate with a traceback."""
+    import types
+    for knob in ("ISMIP7_CALVING_PARAMS", "ISMIP7_CALVING_MODULE"):
+        monkeypatch.delenv(knob, raising=False)
+    monkeypatch.setenv("ISMIP7_CALVING", "vonmises")
+    sys.modules.pop("preflight", None)
+    preflight = importlib.import_module("preflight")
+    monkeypatch.setitem(sys.modules, "icepack_tools",
+                        types.ModuleType("icepack_tools"))
+    monkeypatch.delitem(sys.modules, "icepack_tools.calving", raising=False)
+    miss = preflight.shared_missing([])
+    assert any(m.startswith("icepack_tools.calving") for m in miss)

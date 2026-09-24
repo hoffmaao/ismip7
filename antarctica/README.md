@@ -55,6 +55,9 @@ Source Cooperative carries the data-freeze copy and needs no account.
 python antarctica/scripts/download_mirror.py \
     data/CESM2-WACCM/ssp585/SDBN1-8000m/acabf-anomaly/ \
     data/CESM2-WACCM/ssp585/ocean/tf/ data/CESM2-WACCM/ssp585/ocean/so/
+# the control's ocean for one ESM, which cores 9 and 10 read (about 18 GB)
+python antarctica/scripts/download_mirror.py \
+    data/CESM2-WACCM/ctrl/ocean/tf/ data/CESM2-WACCM/ctrl/ocean/so/
 # the observations MIPkit (about 9 GB)
 python antarctica/scripts/download_mirror.py --product ismip7-ais-observations data/mipkit/
 # whether a local tree is current: which version a run opens
@@ -212,6 +215,7 @@ python scripts/download_forcing.py --ocean        # thetao/so/tf + climatology +
 python scripts/download_forcing.py --calibration  # meltMIP obs melt, IMBIE2 basins, grid, topography
 python scripts/download_forcing.py --scenarios    # per-(ESM, scenario) forcing (cores 1-8)
 python scripts/download_forcing.py --scenarios --esm MRI-ESM2-0 --scenario historical,ssp585
+python scripts/download_forcing.py --scenarios --scenario ctrl   # the control's ocean (cores 9, 10); its atmosphere comes too, unread
 python scripts/download_forcing.py --scalar-processing  # ismip7-scalars grids, see "From a finished run to a submission"
 python scripts/download_forcing.py --status
 ```

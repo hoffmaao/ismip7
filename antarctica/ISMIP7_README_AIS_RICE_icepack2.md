@@ -124,13 +124,15 @@ shallow-shelf formulation on Firedrake 2026.4.1)
 10. Tributary glaciers after a collapse: no special treatment; the front
     retreats to the new extent, the grounding line responds to the lost
     buttressing through the momentum balance, friction is unchanged.
-11. The control uses the RACMO climatology and the ISMIP7 ocean climatology
-    with the apparent-mass-balance correction; projections use the same
-    baseline plus the ISMIP7 anomalies re-referenced to the 2000-2029 pool
-    (historical 2000-2014 and ssp126 2015-2029). The control therefore runs
-    on observational climatologies and not on the ESM's own `ctrl` trees, so
-    C009 and C010 differ in the historical endpoint they branch from and not
-    in their forcing.
+11. The control holds the 2000-2029 climate constant, with the
+    apparent-mass-balance correction. Its ocean is the ESM's own `ctrl` tree
+    (`tf` and `so`, v3), read and melted as in the projections (item 6), so
+    the per-basin K fitted against the 30_sep OI climatology applies
+    unchanged to every ESM ocean. Its SMB is the RACMO climatology, the
+    baseline the projections add the ISMIP7 anomalies to after re-referencing
+    them to the 2000-2029 pool (historical 2000-2014 and ssp126 2015-2029);
+    in that frame RACMO is the 2000-2029 climate. C009 and C010 differ in
+    their ocean and in the historical endpoint they branch from.
     The historical runs start in 1850 from the 2015 initial state (there is
     no spin-up) and end at 1 January 2015, where the projections and the
     control branch. The ISMIP7 anomalies are relative to 1960-1989, and

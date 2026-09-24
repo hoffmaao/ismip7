@@ -463,8 +463,9 @@ Forcing data:
       misfiled-scenario case (item 3) is what made `available_years` strict.
 - [~] #37 CESM2-WACCM ssp585 fracture may be re-cut: re-audit before production. (issue #16)
 - [x] #29, #33 no fracture forcing for historical, control or OCX: refused.
-- [x] #15, #28 control definition: window and pool centralised. Reading the
-      provided `ctrl` trees stays optional (action 6).
+- [x] #15, #28 control definition: window and pool centralised. The control
+      reads its ESM's `ctrl` ocean (icepack/ismip7#107); reading the `ctrl`
+      atmosphere in place of the `ssp126` pool stays optional (action 6).
 - [x] #34 1960-1989 anomaly reference: the anomaly is re-referenced to the
       2000-2029 pool and there is no temperature forcing, so no jump at the
       start of a historical. The README now says the historical starts in 1850

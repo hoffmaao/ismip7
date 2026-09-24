@@ -6,7 +6,7 @@
 # stable Budd residual friction (ISMIP7_FRICTION=budd: PISM-delta grounded
 # floor via N_hat, exact-zero shelf drag, driven by the
 # inversion_icepack2_budd MAP). This runs the 2500 m
-# Budd CTRL with all the conservation work: RACMO SMB, OI-climatology
+# Budd CTRL with all the conservation work: RACMO SMB, the ESM's `ctrl`
 # ocean + per-basin K, exactly-conservative transport, fixed calving
 # front, h_clamp_init=0 (true geometry), dt=0.1, 2015->T_END.
 #

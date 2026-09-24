@@ -53,7 +53,7 @@ Four causes account for all of it.
    on the state scalars and -16 to -17 mm on slvaf. For the fluxes it depends on
    latitude, about +1 % on the grounding-line flux and up to +4 % on the calving
    of a collapse year. It is the whole of T - N for iareagr, iareafl,
-   tendlicalvf and tendligroundf. (issue #97)
+   tendlicalvf and tendligroundf. (issue 97, closed on 24 September)
 2. **Volume above flotation on the 8 km grid.** Before the area factor, the
    tool's sea level sits +39 to +44 mm above the mesh's by 2300, about 10 % of
    the signal. A diagnostic regridded the mesh integrand max(lithk - hf, 0) on
@@ -82,7 +82,7 @@ Four causes account for all of it.
    edge in 2300. For melt the partly floating pixels add -30,933 Gt/yr in
    p2_none and -3,300 to -3,800 Gt/yr in the mask modes. Forum thread 50 has
    the organisers reading a flux as a mass change per unit horizontal cell
-   area. (issue #96)
+   area. (issue 96, closed on 24 September)
 4. **The model books the fluxes requested of every cell.** Melt and SMB are
    booked before the positivity limiter, on cells with no ice to take them.
    tendacabf is identical in all three modes, collapse or not, because it is
@@ -1214,7 +1214,8 @@ above, and the native scalar keeps all of it. The rest, about 620 Gt/yr at
 2300, is real melt the gridded field cannot carry: ice that crosses the
 grounding line into an empty cell and melts on arrival, and the shelf ice of
 the first row. Whether the production runs keep the reference is a group
-decision (issue 104), and the melt it books is issue 105.
+decision (issue 104), the melt it books is issue 105, and where the
+submission reports the real melt is issue 109.
 
 ### True area
 

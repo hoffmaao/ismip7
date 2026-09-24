@@ -160,7 +160,8 @@ What a submission needs (#5, #16, #17, #18, #19, #20, #22, #23):
   `ismip/ismip7-scalar-processing` also produces them, and the sea-level
   estimates (`sla20`, `slg20`, `slvaf`) which nothing here computes, so it
   still has to be run on the gridded files; 2D fields and scalars share the
-  experiment folder.
+  experiment folder. `scripts/compare_scalars.py` sets its scalars against
+  ours and names every part of the difference.
 - **README:** the template is the Google document from discussion #6, recording
   forcing versions, the NaN rule, the historical start year and the spin-up.
   Drafted in `ISMIP7_README_AIS_RICE_icepack2.md`, which owns those answers;
@@ -499,7 +500,9 @@ Output and submission:
       a full-length 32 km control and ssp585, action 10. At 0.5.1 the `tend*`
       totals are bounded to [-1e9, 1e9] kg s-1, and scalars are still not
       range-checked upstream.
-- [x] #19 scalar-tool pitfalls. [ ] Run the tool for the sea-level estimates. (issue #13)
+- [x] #19 scalar-tool pitfalls. [x] The tool ran on the three 32 km p2 runs and
+      the p4 pair, and its scalars are compared with ours, `reports/scalar_comparison_32km.md`.
+      [ ] Run it on the submitted files and clear the README confirm. (issue #13)
 - [x] #17 names: the core counter follows from the forcing and the ids are
       validated. [~] What goes in the forcing field of an OCX filename is
       unsettled: isschecker checks it against CMIP model names and has no `ocx`
@@ -546,8 +549,21 @@ Output and submission:
     ssp585's. The booked basal melt of the ssp585 peaks near 7600 Gt/yr in
     2150 and is 3929 Gt/yr in 2300, where the requested booking reported
     123427.
-11. **Run `ismip7-scalar-processing`** on the same outputs, for `sla20`,
-    `slg20` and `slvaf`, and compare its scalars with the native ones. (issue #13)
+11. **Run `ismip7-scalar-processing`** on the submitted files, for `sla20`,
+    `slg20` and `slvaf`, compare its scalars with the native ones, and clear
+    the submission README's confirm. `scripts/batch_runners/scalar_processing.script`
+    runs the tool and `scripts/compare_scalars.py` as one job. Done on
+    23 September on the three 32 km p2 runs and the p4 pair, each its own
+    reference: every identity holds, and T - N is the tool's area factor
+    (+2.2 to +2.6 % on the state scalars), the volume above flotation of
+    partly grounded 8 km pixels (+39 to +44 mm of sea level by 2300 in the p2
+    runs, about 10 % of the signal), the writer's fill conventions for acabf
+    and libmassbffl, and melt and SMB booked where no ice takes them (111,231
+    Gt/yr of melt at 2300 in p2 none, 1,986 with the applied-flux booking of
+    action 10), `reports/scalar_comparison_32km.md`. Each has its issue: the
+    pixel means (issue #96), the area factor (issue #97), `params.nc` in the
+    upload (issue #98) and the grid VAF (issue #99).
+    What is left is the submitted files, paired with their historical. (issue #13)
 12. **Adopt or refetch the forcing that predates the manifest.** Done on 21
     September, and the premise above was wrong. The first
     `audit_forcing_versions.py` run counts none of the Globus-era tree as

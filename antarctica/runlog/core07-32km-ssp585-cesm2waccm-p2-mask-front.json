@@ -27,5 +27,6 @@
   "audit": "OFF TRACK against the present-day envelopes, as an ssp585 run at 2300 is; resid 0.0000 on all 2860 rows, no rescue or subcycle event",
   "ismip7_output": "286 annual files, 2015 to 2300, with the ten native scalars, from the writer of a0f92a8: fluxes booked before the positivity limiter and ligroundf one-sided",
   "checker": "isschecker 0.5.1 over 31 files on the 8 km grid as C007. Regridded by main's writer: 1 error, base within 1 cm of topg in 17 wholly floating pixel-years. With cells within 1 cm of flotation written as grounded: 0 errors. Warnings: the non-mandatory variables, acabf 0.00118 %, libmassbffl 0.35 % and strbasemag 0.000568 % out of range",
+  "scalars": "ismip7-scalars 0.1.0 (3f36eb3) on the tree regridded for issue #12, as its own reference stamped 2016, job 10595620 with compare_scalars.py at b73d3ff: every gate holds. At 2300 slvaf is -451.7 mm against the native -478.6 mm, of which -16.9 mm is the tool's area factor and +43.8 mm the volume above flotation of partly grounded 8 km pixels; tendlibmassbffl is -5,368 against -124,561 Gt/yr, the native value being melt booked where no floating ice takes it. antarctica/reports/scalar_comparison_32km.md",
   "notes": "collapse-mode evidence for issue #10, not the submission's core 7. Full record: antarctica/reports/core07_ssp585_cesm2_waccm_32km_p2_mask_front.md"
 }

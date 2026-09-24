@@ -10,7 +10,7 @@ is an index.
 **Claim the card before you start a run or an inversion.** A card in
 Claimed for more than 24 hours with no comment reads as unclaimed.
 
-Generated: 2026-09-24 19:28 UTC. 15 blocking, 9 owed, 0 after the deadline, 7 unverified.
+Generated: 2026-09-24 19:34 UTC. 16 blocking, 9 owed, 0 after the deadline, 7 unverified.
 
 ## Blocking the submission
 
@@ -31,6 +31,7 @@ Decisions first: they have the longest lead time and they gate the runs.
 | [28](https://github.com/icepack/ismip7/issues/28) | matrix: all 11 cores are superseded and need re-inversion, not only re-running | needs-run | group | nots | verified open |
 | [30](https://github.com/icepack/ismip7/issues/30) | melt: DG0 melt totals are uncalibrated, the per-basin K was fitted under CG1 | needs-run | group | local | verified open |
 | [41](https://github.com/icepack/ismip7/issues/41) | forcing: re-run audit_forcing_versions.py immediately before the production matrix | needs-run | group | quartz, nots, midway | unverifiable-run |
+| [96](https://github.com/icepack/ismip7/issues/96) | output: acabf and libmassbffl are means over part of a pixel, so the organisers' sums overcount them | needs-run | iu | n/a | verified open |
 | [42](https://github.com/icepack/ismip7/issues/42) | melt: confirm every submitted run read the current per-basin K calibration | needs-check | group | local | unverifiable-run |
 | [40](https://github.com/icepack/ismip7/issues/40) | protocol: confirm the submission round and its deadline | needs-upstream | upstream | upstream | unverifiable-run |
 
@@ -57,6 +58,7 @@ Work in flight. Do not duplicate it.
 | [10](https://github.com/icepack/ismip7/issues/10) | collapse: decide the mode for the submission (none, mask, mask_front) | iu | quartz | 2026-09-23 |
 | [11](https://github.com/icepack/ismip7/issues/11) | melt: run check_melt_bound.py --ocx before core 11 runs on the OCX product | iu | quartz, nots, midway | 2026-09-21 |
 | [24](https://github.com/icepack/ismip7/issues/24) | MAP: 2 km RC and Budd inversions running at Rice under the new prior metric | rice | nots | 2026-09-22 |
+| [96](https://github.com/icepack/ismip7/issues/96) | output: acabf and libmassbffl are means over part of a pixel, so the organisers' sums overcount them | iu | n/a | 2026-09-24 |
 | [97](https://github.com/icepack/ismip7/issues/97) | output: the native scalars sum map-plane area, and the organisers' tool sums true area | iu | n/a | 2026-09-24 |
 | [98](https://github.com/icepack/ismip7/issues/98) | submission: ship params.nc with the model's densities | iu | n/a | 2026-09-24 |
 
@@ -80,7 +82,7 @@ production run or a group decision.
 
 | source | items |
 |---|---|
-| `src:readiness` | 12 |
+| `src:readiness` | 13 |
 | `src:submission-readme` | 9 |
 | `src:matrix-status` | 2 |
 | `src:topic-doc` | 4 |

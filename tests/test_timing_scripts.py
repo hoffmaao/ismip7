@@ -318,3 +318,75 @@ def test_the_melt_bound_job_ends_with_the_check_s_own_status(sandbox):
                             ISMIP7_K_PER_BASIN_NPZ=str(sandbox / "absent.npz"))
     assert proc.returncode == 2 and "K file not found" in proc.stderr
     assert len(seen) == n_before
+
+
+def test_the_scalar_processing_job_keeps_the_tool_clear_and_ends_with_the_verdict(sandbox):
+    r"""scalar_processing.script: the organisers' tool runs from its own venv
+    with the Firedrake environment's PYTHONPATH scrubbed; a run that is its own
+    reference has to name its stamped year and a paired run must not; the job
+    ends with the tool's status when that fails and the comparison's
+    otherwise."""
+    venv = sandbox / "tools" / "bin"
+    venv.mkdir(parents=True)
+    fake = ('#!/bin/bash\n'
+            'echo "$(basename "$0") $* PYTHONPATH=${PYTHONPATH-unset}" >> "$FAKE_ENV_DUMP"\n'
+            'case "$(basename "$0")" in\n'
+            '    ismip7-scalars) [ "$1" = --version ] && { echo "ismip7-scalars 0.1.0"; exit 0; }\n'
+            '                    exit "${FAKE_TOOL_RC:-0}" ;;\n'
+            '    python) echo 0.5.1 ;;\n'
+            'esac\n')
+    for name in ("ismip7-scalars", "ismip7-scalars-set-params", "python"):
+        (venv / name).write_text(fake)
+        (venv / name).chmod(0o755)
+    # the comparison runs under the job's own python: drop `-u` and the script
+    # path, hand the rest to the driver
+    stub = sandbox / "bin" / "python"
+    stub.write_text('#!/bin/bash\n[ "$1" = -u ] && shift\nshift\n'
+                    'exec "$FAKE_PYTHON" "$FAKE_DRIVER" "$@"\n')
+    stub.chmod(0o755)
+    tree = sandbox / "tree"
+    (tree / "AIS" / "RICE" / "icepack2" / "CORE" / "C007").mkdir(parents=True)
+    grids = sandbox / "grids"
+    grids.mkdir()
+    (grids / "af2_AIS_08000m_v1.nc").write_text("")
+    native = sandbox / "run_ismip7_scalars.csv"
+    native.write_text("")
+    env = dict(ISMIP7_TOOLS_VENV=str(sandbox / "tools"), ISMIP7_SCALAR_TREE=str(tree),
+               ISMIP7_SCALAR_EXPERIMENT="ssp585", ISMIP7_SCALAR_CONFIGID="C007",
+               ISMIP7_SCALAR_OUT=str(sandbox / "out"), ISMIP7_SCALAR_DATAPATH=str(grids),
+               PYTHONPATH="/firedrake/site-packages")
+
+    proc, seen = run_script(sandbox, "scalar_processing.script", **env)
+    assert proc.returncode != 0 and "ISMIP7_SCALAR_REFYEAR is required" in proc.stderr
+    proc, seen = run_script(sandbox, "scalar_processing.script", ISMIP7_SCALAR_HIST="historical",
+                            ISMIP7_SCALAR_HIST_CONFIGID="C001", ISMIP7_SCALAR_REFYEAR="2016", **env)
+    assert proc.returncode == 2 and "refused" in proc.stderr
+    assert not [ln for ln in seen if ln.startswith("ismip7-scalars --region")]
+
+    # exit 1 is the comparison's verdict; the job has to end with it
+    proc, seen = run_script(sandbox, "scalar_processing.script", ISMIP7_SCALAR_REFYEAR="2016",
+                            ISMIP7_SCALAR_NATIVE_CSV=str(native), FAKE_RC="1", **env)
+    assert proc.returncode == 1, proc.stderr
+    tool = next(ln for ln in seen if ln.startswith("ismip7-scalars --region"))
+    assert "--hist ssp585 --hist-configid C007 --refyear 2016" in tool
+    assert f"--params-path {sandbox}/out/params --outpath {sandbox}/out/tool" in tool
+    assert tool.endswith("PYTHONPATH=unset")
+    argv = next(ln for ln in seen if ln.startswith("ARGV"))
+    assert f"--submission {tree}/AIS/RICE/icepack2/CORE/C007" in argv
+    assert "--refyear 2016" in argv and f"--native-csv {native}" in argv
+    assert "af2_AIS_08000m_v1.nc sha256" in argv
+    assert "compare_scalars exit status: 1" in proc.stdout
+
+    # a paired run hands the comparison the historical's folder
+    proc, seen = run_script(sandbox, "scalar_processing.script", ISMIP7_SCALAR_HIST="historical",
+                            ISMIP7_SCALAR_HIST_CONFIGID="C001", **env)
+    assert proc.returncode == 0, proc.stderr
+    assert f"--hist-submission {tree}/AIS/RICE/icepack2/CORE/C001" in \
+        [ln for ln in seen if ln.startswith("ARGV")][-1]
+
+    # a failed tool ends the job with its status and no comparison
+    n = len([ln for ln in seen if ln.startswith("ARGV")])
+    proc, seen = run_script(sandbox, "scalar_processing.script", ISMIP7_SCALAR_REFYEAR="2016",
+                            FAKE_TOOL_RC="2", **env)
+    assert proc.returncode == 2 and "ismip7-scalars exit status: 2" in proc.stdout
+    assert len([ln for ln in seen if ln.startswith("ARGV")]) == n

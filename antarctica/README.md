@@ -1252,47 +1252,86 @@ python antarctica/scripts/write_ismip7_output.py \
 python -m isschecker --variable-list ismip7 \
     --source-path submission/AIS/RICE/icepack2/CORE/C009
 
-# 4. the sea-level scalars nothing here computes
+# 4. the sea-level scalars nothing here computes, from the tools' own venv
 python antarctica/scripts/download_forcing.py --scalar-processing
 ismip7-scalars-set-params --region AIS --group RICE --model icepack2 \
-    --rhoi 917 --rhow 1024 --rhof 1000 --modelpath submission/AIS
-python -m ismip7_scalars --region AIS --group RICE --model icepack2 \
+    --rhoi 917 --rhow 1024 --rhof 1000 --modelpath scalars/params
+ismip7-scalars --region AIS --group RICE --model icepack2 \
     --experiment ctrl --modelid m001 --esm CESM2-WACCM --forcingid f001 \
-    --configid C009 --exp-group CORE \
+    --configid C009 --exp-group CORE --hist ctrl --refyear 2016 \
     --datapath ISMIP7/Output-Processing/Data/AIS \
-    --modelpath submission/AIS --outpath submission/scalars
+    --modelpath submission/AIS --params-path scalars/params --outpath scalars
+
+# 5. the tool's scalars against the model's own
+python antarctica/scripts/compare_scalars.py \
+    --submission submission/AIS/RICE/icepack2/CORE/C009 \
+    --tool scalars/nc/AIS/RICE/icepack2/CORE/C009 \
+    --datapath ISMIP7/Output-Processing/Data/AIS \
+    --params scalars/params/RICE/icepack2/params.nc --refyear 2016 \
+    --native-csv antarctica/results/<exp>_<lc>_ismip7_scalars.csv \
+    --overlap antarctica/results/<exp>_<lc>_ismip7_annual.h5.overlap.npz \
+    --out-csv scalars/comparison.csv --out-md scalars/comparison.md
 ```
 
-Four things that are easy to get wrong:
+On a cluster, steps 4 and 5 are one serial job,
+`scripts/batch_runners/scalar_processing.script`, whose header carries the
+`submit.sh` line and the knobs.
 
-- **Both tools need Python 3.11 or newer**, and the Firedrake environment is
-  3.10, so they belong in their own interpreter. Where conda is unavailable,
-  `nix` provides one, and the nix interpreter then needs the shared libraries
-  it cannot see: gcc's C++ runtime, zlib, expat and udunits, on
-  `LD_LIBRARY_PATH`, with `UDUNITS2_XML_PATH` set. On IU Quartz a venv on the
-  `python/3.14.5` module takes the checker from its release tag with every
-  dependency as a wheel, `pip install "isschecker @
-  git+https://github.com/ismip/ISM_SimulationChecker@0.5.1"`; conda-forge
-  carries the same release. Put the venv and pip's cache on scratch, since
-  the home file quota is small.
+The tools' venv, from any Python 3.11 to 3.14 (on Quartz, the
+`python/3.14.5` module). Neither package is on PyPI, so both come from their
+tags:
+
+```bash
+python3 -m venv <venv>
+<venv>/bin/pip install \
+    "isschecker @ git+https://github.com/ismip/ISM_SimulationChecker@0.5.1" \
+    "ismip7-scalars @ git+https://github.com/ismip/ismip7-scalar-processing@3f36eb3"
+```
+
+Things that are easy to get wrong:
+
+- **Both tools need Python 3.11 to 3.14**, in an interpreter of their own:
+  the workstation's Firedrake environment is 3.10, and on a cluster the
+  Firedrake environment's `PYTHONPATH` would shadow the venv's packages (the
+  job script scrubs it). Where conda is unavailable, `nix` provides one, and
+  the nix interpreter then needs the shared libraries it cannot see: gcc's C++
+  runtime, zlib, expat and udunits, on `LD_LIBRARY_PATH`, with
+  `UDUNITS2_XML_PATH` set. On Quartz every dependency of the checker installs
+  as a wheel, and conda-forge carries its release too. Put the venv and pip's
+  cache on scratch, since the home file quota is small.
 - **The scalar tool needs four auxiliary grids** per region (the area factor,
   the extended Rignot basins, the glacier and ice-cap area factor and the
   maximum-extent mask), which live on Globus under
   `/ISMIP7/Output-Processing/Data` rather than with the forcing.
   `--scalar-processing` fetches them; `--scalar-resolution` picks the grid.
+  Copying `/ISMIP7/Output-Processing/Data` with the Globus web app into
+  `ISMIP7/Output-Processing/Data/` of the checkout, the same path, needs no
+  CLI login (IU Quartz, 23 September 2026).
 - **`params.nc` carries the model's densities**, so give it ours: 917 ice and
   1024 seawater, the pair `simulation.py` builds the surface with. The tool
-  defaults to 1027 seawater.
+  defaults to 1027 seawater, and the comparison refuses any other pair. The
+  organisers need the same file with the upload. (issue #98)
+- **The tool stops without a historical run.** A run on its own names itself
+  as `--hist` with the stamped year of its first state as `--refyear`. A
+  projection paired with its historical names `--hist historical
+  --hist-configid C001` (C002 for MRI-ESM2-0) and no year: the tool looks a
+  year up in the historical and then in the projection, so a stray one quietly
+  becomes the reference.
 - **`--refyear` takes the stamped year.** A state variable is
   stamped 1 January of the following year, so a run starting in 2015 has 2016
   as its first state, and a reference of 2015 is not found.
+- **The tool's files carry the submission's own names** (`lim_AIS_RICE_...`),
+  so `--outpath` and `params.nc` stay outside the upload tree. The upload
+  carries the model's scalars; the tool's copies of them fail the checker.
 
 Measured on that rehearsal: `isschecker` 0.5.1 over 31 files reports zero
 errors in variable presence, naming, numerical, spatial, consistency and
 attribute tests, and 93 time errors, which are the three-per-file
 experiment-length checks a two-year run cannot satisfy. `ismip7-scalars` 0.1.0
 then wrote `sla20`, `slg20` and `slvaf`, each with its glacier and ice-cap
-variant, in NetCDF and CSV.
+variant, in NetCDF and CSV. On three full-length 32 km ssp585 runs (IU Quartz,
+23 September 2026) every identity `compare_scalars.py` checks holds, and
+`reports/scalar_comparison_32km.md` sets out what differs and why.
 
 At full length, 2015 to 2300, a 32 km control and ssp585 pass 0.5.1 with zero
 errors in every test group, the length checks included (23 September 2026, run

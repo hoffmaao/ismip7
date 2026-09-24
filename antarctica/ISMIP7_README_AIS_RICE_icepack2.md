@@ -53,8 +53,8 @@ shallow-shelf formulation on Firedrake 2026.4.1)
    initialisation (there is no spin-up).
 5. Yes. An apparent-mass-balance reference is computed once at the initial
    state with the model's own transport operator so that the initial
-   thickness tendency is exactly zero (the ISMIP6 ctrl_proj convention of a
-   balanced control); it is frozen and applied in every experiment. It is
+   thickness tendency is exactly zero; it is frozen and applied in every
+   experiment. It is
    NOT reported in `acabf` (which is the SMB the model applied) but written
    alongside it as `acabf_correction` in the same units for anyone closing
    the budget.

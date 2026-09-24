@@ -9,9 +9,9 @@ gitignored, so these records and the per-core reports beside them are
 the trace a run leaves in the repository. A core experiment also gets
 its full report from `core_report.py`; this is the index.
 
-41 records.
+42 records.
 
-Status: 12 planned, 3 running, 3 stopped, 12 done, 11 superseded.
+Status: 12 planned, 3 running, 3 stopped, 13 done, 11 superseded.
 
 ## Inversion
 
@@ -39,6 +39,7 @@ Status: 12 planned, 3 running, 3 stopped, 12 done, 11 superseded.
 | Core 7 at 32 km with the fluxes booked after the positivity limiter, collapse mode none, branched from the p2 historical | done | antarctica_320000_32000, DG0 geometry | IU Quartz | 2026-09-23 | 2026-09-23 | OFF TRACK against the present-day envelopes, as an ssp585 run at 2300 is; resid 0.0000 on all 2860 rows, no rescue or stall event |
 | Core 9 at 32 km on main, branched from the p2 historical | done | antarctica_320000_32000, DG0 geometry | IU Quartz | 2026-09-23 | 2026-09-23 | ON TRACK, with dM/dt WARN at 419.2 Gt/yr; resid 0.0000 on all 2860 rows, no rescue or stall event |
 | Core 9 at 32 km with the fluxes booked after the positivity limiter, branched from the p2 historical | done | antarctica_320000_32000, DG0 geometry | IU Quartz | 2026-09-23 | 2026-09-23 | ON TRACK, with dM/dt WARN at 419.3 Gt/yr; resid 0.0000 on all 2860 rows, no rescue or stall event |
+| Core 9 at 32 km for five years with the native scalars over true area, branched from the p2 historical | done | antarctica_320000_32000, DG0 geometry | IU Quartz, debug partition | 2026-09-24 | 2026-09-24 | ON TRACK; resid 0.0000 on all 50 rows, no rescue or stall event; the timeseries equals the p4 control's first 50 rows to the last digit |
 | 1 km control from the transferred Budd snapshot at half the step | done | antarctica_10000_1000_buffered20000, 1 km fine, 10 km interior, 20 km buffer | nots, commons partition | 2026-09-22 | 2026-09-22 | five years complete: VAF drift 0.13 mm of sea level, 0.027 mm a year against the 2 mm a year tolerance; mass +21 Gt over five years against a 2532 Gt/yr surface balance; budget residual zero on every row. The same configuration at dt=0.05 diverged in 2016.1, so halving the step is the cure. Shelf melt 1428 Gt/yr, calving 24, balanced correction -1151 |
 | 1 km control with the MAP's own geometry carried onto the target | stopped | antarctica_10000_1000_buffered20000, 1 km fine, 10 km interior, 20 km buffer | nots, commons partition | 2026-09-22 | - | starts 20 percent faster at the Amery trough than the target-native BedMachine geometry and diverges sooner, by step 19 |
 | 1 km control from the transferred Budd snapshot | stopped | antarctica_10000_1000_buffered20000, 1 km fine, 10 km interior, 20 km buffer | nots, commons partition, cascadelake | 2026-09-22 | - | year one clean: VAF drift 0.02 mm, mass balance +1 Gt/yr, residual zero. The Lambert and Amery grounding trough then accelerates from 7.6e3 to 1.9e7 m/yr in three steps and Newton diverges |
@@ -341,8 +342,8 @@ Core 7 at 32 km with the fluxes booked after the positivity limiter, collapse mo
 - **Results path:** antarctica/results/ssp585_cesm2_waccm_p4_32000_*
 - **Audit:** OFF TRACK against the present-day envelopes, as an ssp585 run at 2300 is; resid 0.0000 on all 2860 rows, no rescue or stall event
 - **ISMIP7 output written:** 286 annual files, 2015 to 2300, with the ten native scalars, the series carried across the chain link at 2229.0; fluxes booked after the positivity limiter. The booked basal melt is 1153, 5202, 7617, 6127 and 3929 Gt/yr in 2015, 2100, 2150, 2200 and 2300, where the requested booking of the p3 run reported 1163, 6259, 20791, 47405 and 123427
-- **Regridded, isschecker:** isschecker 0.5.1 over 31 files on the 8 km grid as C007, with cells within 1 cm of flotation written as grounded (14 cell-years): 0 errors in every test group. Warnings: the non-mandatory variables, libmassbffl 0.0382 % below -0.008 kg m-2 s-1 (1.43 % under the requested booking) and strbasemag 0.000813 % above 1e6 Pa
-- **Scalars processed:** ismip7-scalars 0.1.0 (3f36eb3) on the tree regridded for issue #12, as its own reference stamped 2016, job 10597335 with compare_scalars.py at 739cdd6: every gate holds. At 2300 slvaf is -350.8 mm against the native -373.6 mm, of which -16.6 mm is the tool's area factor and +39.4 mm the volume above flotation of partly grounded 8 km pixels; tendlibmassbffl is -4,978 against -3,929 Gt/yr, of which -2,995 Gt/yr comes from the tool's whole-pixel sum over partly floating pixels. antarctica/reports/scalar_comparison_32km.md
+- **Regridded, isschecker:** isschecker 0.5.1 over 31 files on the 8 km grid as C007, with cells within 1 cm of flotation written as grounded (14 cell-years): 0 errors in every test group. Warnings: the non-mandatory variables, libmassbffl 0.0382 % below -0.008 kg m-2 s-1 (1.43 % under the requested booking) and strbasemag 0.000813 % above 1e6 Pa Regridded again on 24 September 2026 at df1a2c0, with every flux a whole-pixel mean and params.nc beside CORE/ (job 10604339): 0 errors in every test group. Warnings: the non-mandatory variables, libmassbffl 0.00545 % below -0.008 kg m-2 s-1 and strbasemag 0.000813 % above 1e6 Pa.
+- **Scalars processed:** ismip7-scalars 0.1.0 (3f36eb3) on the tree regridded for issue #12, as its own reference stamped 2016, job 10597335 with compare_scalars.py at 739cdd6: every gate holds. At 2300 slvaf is -350.8 mm against the native -373.6 mm, of which -16.6 mm is the tool's area factor and +39.4 mm the volume above flotation of partly grounded 8 km pixels; tendlibmassbffl is -4,978 against -3,929 Gt/yr, of which -2,995 Gt/yr comes from the tool's whole-pixel sum over partly floating pixels. antarctica/reports/scalar_comparison_32km.md Again on 24 September 2026 at df1a2c0 over that tree, the tool reading params.nc from it (job 10604343): every gate holds and the fill term is zero. tendlibmassbffl is -1,163 against -1,153 Gt/yr in 2015 and -2,181 against -3,929 in 2300, where 1,771 Gt/yr of the model's melt is booked in pixels with no floating ice at year end, which the request fills (2,223 at most, in 2283). Jobs 10604946 and 10605000 split it: over 2016 to 2300, 180,082 of the 198,990 Gt left out were booked by cells with no ice at either end of the year, fed by the frozen apparent-MB reference (134,363 Gt) and by ice flowing in (72,394, of which 66,198 across the grounding line), and 18,196 by shelf cells that floated at the start of the year (issues 104 and 105).
 - **Notes:** run for issue #12 from a scratch clone of the branch, with results and logs in the shared checkout. It tracks core07-32km-ssp585-cesm2waccm-p3 to 0.043 mm SLE in VAF and to 0.0001 mm SLE at 2301; the booking cannot feed back into the model, so that is run-to-run roundoff, and so is p3's 0.10 mm from the p2 run. Final state sha256 ecd5ef2d7047c30a88e61351f29c0bc434d5456b4866086304140017859df8fe. Full record: antarctica/reports/core07_ssp585_cesm2_waccm_32km_p4.md
 
 ### core09-32km-ctrl2015-cesm2waccm-p3
@@ -404,9 +405,41 @@ Core 9 at 32 km with the fluxes booked after the positivity limiter, branched fr
 - **Results path:** antarctica/results/ctrl2015_cesm2_waccm_p4_32000_*
 - **Audit:** ON TRACK, with dM/dt WARN at 419.3 Gt/yr; resid 0.0000 on all 2860 rows, no rescue or stall event
 - **ISMIP7 output written:** 286 annual files, 2015 to 2300, with the ten native scalars, the series carried across the chain link at 2185.0; fluxes booked after the positivity limiter
-- **Regridded, isschecker:** isschecker 0.5.1 over 31 files on the 8 km grid as C009, with cells within 1 cm of flotation written as grounded (46 cell-years): 0 errors in every test group. Warnings: the non-mandatory variables, and libmassbffl 0.00767 % below -0.008 kg m-2 s-1
-- **Scalars processed:** ismip7-scalars 0.1.0 (3f36eb3) on the tree regridded for issue #12, as its own reference stamped 2016, job 10597334 with compare_scalars.py at 739cdd6: every gate holds. At 2300 slvaf is -383.1 mm against the native -378.9 mm, of which -7.6 mm is the tool's area factor and +3.4 mm the volume above flotation of partly grounded 8 km pixels; tendlibmassbffl is -1,592 against -1,047 Gt/yr, of which -545 Gt/yr comes from the tool's whole-pixel sum over partly floating pixels. antarctica/reports/scalar_comparison_32km.md
+- **Regridded, isschecker:** isschecker 0.5.1 over 31 files on the 8 km grid as C009, with cells within 1 cm of flotation written as grounded (46 cell-years): 0 errors in every test group. Warnings: the non-mandatory variables, and libmassbffl 0.00767 % below -0.008 kg m-2 s-1 Regridded again on 24 September 2026 at df1a2c0, with every flux a whole-pixel mean and params.nc beside CORE/ (job 10604339): 0 errors in every test group, and the one warning is the non-mandatory variables; the libmassbffl excursion is gone.
+- **Scalars processed:** ismip7-scalars 0.1.0 (3f36eb3) on the tree regridded for issue #12, as its own reference stamped 2016, job 10597334 with compare_scalars.py at 739cdd6: every gate holds. At 2300 slvaf is -383.1 mm against the native -378.9 mm, of which -7.6 mm is the tool's area factor and +3.4 mm the volume above flotation of partly grounded 8 km pixels; tendlibmassbffl is -1,592 against -1,047 Gt/yr, of which -545 Gt/yr comes from the tool's whole-pixel sum over partly floating pixels. antarctica/reports/scalar_comparison_32km.md Again on 24 September 2026 at df1a2c0 over that tree, the tool reading params.nc from it (job 10604342): every gate holds and the fill term is zero. tendlibmassbffl is -1,048 against -1,044 Gt/yr in 2015 and -1,048 against -1,047 in 2300, and the melt booked in pixels with no floating ice at year end is 8.2 Gt/yr at most (2213).
 - **Notes:** run for issue #12 from a scratch clone of the branch, with results and logs in the shared checkout. It tracks core09-32km-ctrl2015-cesm2waccm-p3 to 0.006 mm SLE in VAF; the booking cannot feed back into the model, so that is run-to-run roundoff. Final state sha256 8894a82aea90a6a40bdbdc4e1336c65357be5dc18e1d0c02ebb187be13d2a721. Full record: antarctica/reports/core09_ctrl2015_cesm2_waccm_32km_p4.md
+
+### core09-32km-ctrl2015-cesm2waccm-p5
+
+Core 9 at 32 km for five years with the native scalars over true area, branched from the p2 historical (done), IU.
+
+- **Task type:** test
+- **ISMIP7 exp id:** C009
+- **ESM:** CESM2-WACCM
+- **Scenario:** ctrl
+- **Period (yr):** 2015 to 2020, reached 2020.0
+- **Friction law:** budd
+- **Mesh:** antarctica_320000_32000, DG0 geometry
+- **Initial state / MAP:** hist_cesm2_waccm_p2_32000_final.h5, sha256 a9552130a0fede0c436684049a7bb29fc5ba68bda03c9fc3c7fce8cfb796a26d
+- **Branch from:** core01-32km-hist-cesm2waccm-p2 at 2015.0, from the log's restart lines
+- **Forcing versions:** RACMO2.4p1 SMB climatology 2000 to 2029 and the OI ocean climatology (30_sep), constant in time
+- **Melt: K, slope, deltaT:** per-basin K from K_issue11_mesh2500.npz, local slope
+- **Calving front, collapse:** held fixed, ice-shelf collapse ISMIP7_FRACTURE=none
+- **Apparent MB:** balance
+- **dt (yr):** 0.1
+- **Site / partition:** IU Quartz, debug partition
+- **Ranks / memory:** 8 ranks, 32 GiB
+- **Job ids:** 10604433 10604612
+- **Code:** df1a2c0, the pull request for issues 96 to 98
+- **Started:** 2026-09-24
+- **Finished:** 2026-09-24
+- **Cost per model year:** 2 min for the five years on one node; the first attempt, job 10604433, lost rank 0 to the 16 GiB limit while loading the RACMO climatology, and the rerun peaked at 1.2 GiB per rank
+- **Results path:** IU Quartz scratch, <scratch>/ismip7_issue96_98/repo/antarctica/results/ctrl2015_cesm2_waccm_p5_32000_*, purged around 23 October 2026
+- **Audit:** ON TRACK; resid 0.0000 on all 50 rows, no rescue or stall event; the timeseries equals the p4 control's first 50 rows to the last digit
+- **ISMIP7 output written:** 5 annual files, 2015 to 2019, with the ten native scalars over true area, af2 from 0.9526 to 1.0567 on the mesh. lim is 2.5743 % and iareagr 2.3234 % above the p4 control's map-plane values in 2015, where the tool's area factor on p4 gives 2.5659 % and 2.3164 %
+- **Regridded, isschecker:** isschecker 0.5.1 over 31 files on the 8 km grid as C009, the writer finding the scalars CSV on true area in every year (job 10604344): 0 errors in every test group but the time tests, whose 93 errors are the length checks a five-year run fails
+- **Scalars processed:** ismip7-scalars 0.1.0 (3f36eb3), as its own reference stamped 2016, reading params.nc from the tree, job 10604347 with compare_scalars.py --native-af2 at df1a2c0: every gate holds and the area term is zero; the exact sums agree to 6.26e-5 of their L1, against an allowance of 5.93e-4. Without the switch the writer's stamp refuses the comparison (job 10604348, exit 2). antarctica/reports/scalar_comparison_32km.md
+- **Notes:** run for issue 97 from a scratch clone of claude/scalar-output-fixes, with the knobs of core09-32km-ctrl2015-cesm2waccm-p4 but ISMIP7_T_END=2020, ISMIP7_RUN_TAG=p5 and the memory. <scratch> is the scratch directory of the IU account that ran it. Full record: antarctica/reports/core09_ctrl2015_cesm2_waccm_32km_p5.md
 
 ### test-1km-budd-half-step
 

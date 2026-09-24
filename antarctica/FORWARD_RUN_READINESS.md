@@ -382,6 +382,10 @@ forcing-version audit, the output writer, and the melt calibration above.
    can only lose what it holds, and it now books what the transport applied.
    With the evolved geometry and its warmer projected thermal forcing the
    ssp585 then falls below the bound in 0.0382 % of its values, a warning.
+   Since 24 September every flux is a whole-pixel mean, which weights a hot
+   cell by its share of the pixel. The p4 pair regridded that way falls below
+   the bound in 0.00545 % of the ssp585's values, and the control no longer
+   does.
 
    `calibrate_melt.py` now fits K through the forward's own melt path under
    `ISMIP7_GEOMETRY_SPACE=dg0` (issue #30). The forward and the calibration
@@ -563,6 +567,22 @@ Output and submission:
     action 10), `reports/scalar_comparison_32km.md`. Each has its issue: the
     pixel means (issue #96), the area factor (issue #97), `params.nc` in the
     upload (issue #98) and the grid VAF (issue #99).
+    The first three were fixed on 24 September on `claude/scalar-output-fixes`,
+    measured on the p4 pair regridded again and a five-year p5 control. Every
+    flux is a whole-pixel mean: the fill term is zero, and the control's shelf
+    melt as the tool reads it is the model's to 0.4 %. The native scalars
+    integrate over true area, the writer stamps the scalar files with it, and
+    with `--native-af2` the area term is zero. `params.nc` sits in the upload
+    beside `CORE/`, where the tool reads it. isschecker 0.5.1 still reports zero
+    errors on the pair. Late in the ssp585 run the tool reads less melt than
+    the model books: 1,771 Gt/yr at 2300 sits in pixels with no floating ice
+    at year end, which the request fills. Nine tenths of it over the run is
+    booked by cells with no ice at either end of the year, and the frozen
+    apparent-MB reference supplies about two thirds of what those cells melt:
+    117,000 of the 198,990 Gt left out over 2016 to 2300, and 1,150 of the
+    model's 3,929 Gt/yr at 2300. Whether the production runs keep the
+    reference is a group decision (issue #104); the melt it books under a
+    pinned front is tracked on its own (issue #105).
     What is left is the submitted files, paired with their historical. (issue #13)
 12. **Adopt or refetch the forcing that predates the manifest.** Done on 21
     September, and the premise above was wrong. The first

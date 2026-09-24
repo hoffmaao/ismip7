@@ -8,8 +8,9 @@ The ISMIP7 variable request gives ``libmassbffl`` an AIS minimum of
 -0.008 kg m-2 s-1 with severity ``error``. In ice-equivalent thickness that is
 275.3 m/yr, and a 10-year adaptive-mesh ssp585 reached -0.0117 (402.6 m/yr) on
 grounding-zone cells. Two readings fit that: the parameterisation is too strong
-somewhere, or the writer's ``no_floating_ice`` fill policy reports one hot cell
-as the whole 8 km pixel's value, which the request's own convention asks for.
+somewhere, or one hot cell sets the value of its whole 8 km pixel. The writer's
+flux means are whole-pixel means (issue #96), which weight a cell by its share
+of the pixel, so a hot cell smaller than its pixel reaches the grid diluted.
 
 This looks at the first on the model side, before any regridding. At the
 reference geometry, with the calibrated per-basin K, it evaluates the melt four
@@ -377,9 +378,9 @@ def main():
                 f"    {g['x'][i] / 1e3:9.1f} {g['y'][i] / 1e3:9.1f} "
                 f"{melt[i]:9.1f} {g['tf'][i]:6.2f} {g['draft'][i]:8.1f} "
                 f"{sin_a[i]:9.2e} {area[i] / 1e6:8.2f}")
-        # A dof whose own area is a small fraction of an 8 km pixel cannot
-        # fill that pixel on its own, so its value reaching the grid means the
-        # pixel carried little other floating ice.
+        # The writer's whole-pixel means scale a dof's value by its share of
+        # the 8 km pixel, so the median area says how far the grid dilutes the
+        # dofs past the bound.
         PETSc.Sys.Print(
             f"  median area of the {dofs} past the bound: "
             f"{np.median(area[over]) / 1e6:.2f} km^2, against "

@@ -18,14 +18,30 @@ variable under
 Regridding is conservative: a supermesh mixed mass matrix between the model's
 DG0 cells and a triangulated copy of the 8 km grid gives the exact area of
 every (cell, pixel) overlap; a pixel's value is the area-weighted mean of the
-cells under it. Which area the mean is taken over follows the request's fill
-policy (``isschecker/data/ISMIP7_variable_request.csv``): ``forbidden``
-(thickness, fluxes, fractions) means over the whole pixel with the uncovered
-part counting as zero, so sums over the grid are the model's sums;
-``outside_domain`` (elevations) means over the covered part and fills pixels
-the model does not cover; ``no_ice`` and friends mean over the ice part and
-fill pixels without it. The overlap operator is cached next to the input
+cells under it. A flux (``FL``) is a mean over the whole pixel of everything
+the cells under it booked, so its value times the pixel area sums to the
+model's integral, which is how the organisers' scalar tool sums a flux (forum
+thread 50). The flux files say so in the global attribute
+``flux_pixel_mean``. For a flux the request's fill policy
+(``isschecker/data/ISMIP7_variable_request.csv``) decides only where the
+value is fill: ``outside_domain`` (``acabf``) where the model covers no part
+of the pixel, ``no_floating_ice`` (``libmassbffl``) where no ice floats at
+year end. Melt booked in such a pixel leaves ``libmassbffl``, and the summary
+line reports how much. A state variable (``ST``) takes its mean over the area
+the policy names: ``forbidden`` (thickness, fractions) over the whole pixel
+with the uncovered part counting as zero, so sums over the grid are the
+model's sums; ``outside_domain`` (elevations) over the covered part, filling
+pixels the model does not cover; ``no_ice`` and friends over the ice part,
+filling pixels without it. The overlap operator is cached next to the input
 (``<annual>.overlap.npz``) because it depends on the mesh only.
+
+The ten scalars are the run's CSV as it stands, after one check of the area
+they integrate over. A current forward weights each cell by af2 = (1/k)^2 of
+EPSG:3031 at its centroid, as ``ismip7-scalars`` weights its pixels, and a
+forward from before summed map-plane area. Every year's ``iareagr`` and
+``iareafl`` must match the annual file's sums under one of the two, the same
+one in every year, and the scalar files name it in the global attribute
+``scalar_area``.
 
 Model-to-SI conversions use icepack's year, 365.25 days (31557600 s), which
 is the model's own time unit; the time axis in the files is the standard
@@ -57,7 +73,8 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(_ROOT)))
 import icepack2_tools.dual_friction  # noqa: F401,E402  (icepack2 -> irksome import order)
 from icepack2_tools.ismip7_output import (AnnualOutput, RHO_I, SCALARS, SECONDS_PER_YEAR,  # noqa: E402
                                           VARIABLES_2D, VARIABLES_BANKED)
-from icepack2_tools.regrid import ISMIP7_DX, ISMIP7_NX, ISMIP7_NY, ISMIP7_X0, ISMIP7_Y0  # noqa: E402
+from icepack2_tools.regrid import (ISMIP7_DX, ISMIP7_NX, ISMIP7_NY, ISMIP7_X0, ISMIP7_Y0,  # noqa: E402
+                                   area_factor)
 import firedrake as fd  # noqa: E402
 
 import netCDF4 as _nc4
@@ -65,6 +82,19 @@ FILL = _nc4.default_fillvals["f4"]          # the checker wants the netCDF4 defa
 TIME_UNITS = "days since 1850-01-01"        # the checker's exact spelling
 PIXEL_AREA = ISMIP7_DX * ISMIP7_DX
 REQUEST = os.path.join(os.path.dirname(os.path.dirname(_ROOT)), "icepack2_tools", "ismip7_variable_request.csv")   # not under a data/ dir: .gitignore ignores those
+# The global attribute on every gridded flux file, saying its pixel means are
+# whole-pixel means (issue #96). compare_scalars.py reads it; a tree written
+# before it carries none, and its acabf and libmassbffl are means over the
+# covered part and over the floating part of a pixel.
+FLUX_MEAN_ATTR = "flux_pixel_mean"
+FLUX_MEAN = "whole_pixel"
+# The global attribute on the ten scalar files, saying which area the run's
+# scalars CSV integrates over (issue #97): ``true_area`` from a forward that
+# weights each cell by af2, ``map_plane`` from one before. The writer reads
+# which it is off the annual files, and compare_scalars.py holds its
+# --native-af2 to it.
+SCALAR_AREA_ATTR = "scalar_area"
+TRUE_AREA, MAP_PLANE = "true_area", "map_plane"
 
 
 def standard_name(meta):
@@ -109,13 +139,56 @@ def ground_near_flotation(cells, tol=FLOTATION_TOLERANCE_M):
     grounded one the same 1 cm. A DG0 cell just past flotation has its base
     millimetres above the bed: 1.9 to 9.2 mm in the full-length 32 km ssp585
     runs of September 2026, 13 to 24 pixel-years each. Only the two masks
-    change; the geometry stays as the model had it.
+    change; the geometry stays as the model had it. The melt booked on such a
+    cell stays in ``libmassbffl`` while its pixel keeps other floating ice,
+    and leaves it where the rule empties the pixel of floating ice; the
+    summary line reports how much: at most 2.0 Gt/yr in the full-length 32 km
+    control of September 2026 and 0.6 Gt/yr in its ssp585.
     """
     floating = cells["sftflf"] > 0.5
     near = floating & (cells["orog"] - cells["lithk"] - cells["topg"] <= tol)
     cells["sftflf"][near] = 0.0
     cells["sftgrf"][near] = 1.0
     return int(near.sum())
+
+
+def scalar_area(row, sums, rtol=1.0e-6):
+    r"""Which area one year's row of the scalars CSV integrates over.
+
+    ``sums`` maps each convention, ``TRUE_AREA`` and ``MAP_PLANE``, to the
+    grounded and floating ice areas the year's annual file gives under it.
+    The CSV carries seven digits and the two conventions sit about 2 % apart
+    over the ice sheet, so exactly one of them matches a row of the same run.
+    Neither matching means the CSV belongs to another run."""
+    def close(a, b):
+        return abs(a - b) <= rtol * max(abs(a), abs(b))
+    hits = [k for k, (gr, fl) in sums.items()
+            if close(float(row["iareagr"]), gr) and close(float(row["iareafl"]), fl)]
+    if len(hits) != 1:
+        raise ValueError(
+            f"year {row['year']}: the scalars CSV's iareagr {row['iareagr']} and iareafl "
+            f"{row['iareafl']} match {'none' if not hits else 'more than one'} of the annual "
+            f"file's area sums, "
+            + ", ".join(f"{k} {gr:.6e} and {fl:.6e}" for k, (gr, fl) in sums.items())
+            + ": the CSV and the annual files do not come from one run")
+    return hits[0]
+
+
+def series_area(area_of):
+    r"""The one area convention of a series, from ``{year: convention}``.
+
+    A chained run whose links straddled the change to true-area scalars
+    wrote both conventions into one CSV, and the submission would carry the
+    mix; it is refused."""
+    kinds = sorted(set(area_of.values()))
+    if len(kinds) == 1:
+        return kinds[0]
+    spans = {k: [y for y, v in sorted(area_of.items()) if v == k] for k in kinds}
+    raise ValueError(
+        "the scalars CSV mixes two areas: "
+        + "; ".join(f"{k} in {len(ys)} years, {ys[0]} to {ys[-1]}" for k, ys in spans.items())
+        + ". The run's links straddled the change to true-area scalars; run the "
+          "series again on one version of the code.")
 
 
 def grid_mesh():
@@ -152,26 +225,39 @@ def overlap_operator(mesh_src, cache):
     return W
 
 
-def regrid(W, values, policy, mask=None):
-    r"""Pixel values under the request's fill policy; NaN where filled."""
-    num = W @ values
+def regrid(W, values, policy, mask=None, whole_pixel=False):
+    r"""Pixel values under the request's fill policy; NaN where filled.
+
+    ``whole_pixel`` divides everything the cells under a pixel carry by the
+    pixel's area and keeps the policy for the fill alone: a pixel is filled
+    where the policy's own mean would have no area to divide by."""
     if policy == "forbidden":
-        return num / PIXEL_AREA
+        return (W @ values) / PIXEL_AREA
     if policy == "outside_domain":
         # mean over the covered part of the pixel; any coverage counts, so
         # every pixel that carries ice (sftgif > 0) also carries elevations
-        cov = W @ np.ones_like(values)
-        out = np.full(num.shape, np.nan)
-        ok = cov > 0.0
-        out[ok] = num[ok] / cov[ok]
-        return out
-    # no_ice / no_grounded_ice / no_floating_ice: mean over the masked part
-    m = mask.astype(float)
-    num = W @ (values * m); den = W @ m
+        num, den = W @ values, W @ np.ones_like(values)
+    else:
+        # no_ice / no_grounded_ice / no_floating_ice: mean over the masked part
+        m = mask.astype(float)
+        num, den = (W @ values if whole_pixel else W @ (values * m)), W @ m
     out = np.full(num.shape, np.nan)
     ok = den > 0.0
-    out[ok] = num[ok] / den[ok]
+    out[ok] = num[ok] / (PIXEL_AREA if whole_pixel else den[ok])
     return out
+
+
+def pixel_values(W, values, meta, masks):
+    r"""One variable on the 8 km grid, flat, in the request's units.
+
+    A flux is a whole-pixel mean under any fill policy, so its value times the
+    pixel area sums to the model's integral. A state variable is the mean its
+    policy names: ``acabf`` and ``orog`` share ``outside_domain``, and the
+    elevations stay covered-part means, which ``base := orog - lithk`` in
+    ``main`` rests on."""
+    policy = meta["fill_policy"]
+    return (regrid(W, values, policy, masks.get(policy), whole_pixel=meta["Type"] == "FL")
+            * CONVERT[meta["units"]])
 
 
 GLOBAL = {}
@@ -230,6 +316,8 @@ def create_2d(path, var, meta, years, is_flux):
     else:
         v.cell_methods = "time: point"
     _global_attrs(ds, meta)
+    if is_flux:
+        ds.setncattr(FLUX_MEAN_ATTR, FLUX_MEAN)
     return ds, v
 
 
@@ -240,9 +328,11 @@ def write_slice(v, k, plane):
     v[k] = arr
 
 
-def write_scalar(path, var, meta, years, values, is_flux):
+def write_scalar(path, var, meta, years, values, is_flux, attrs=None):
     import netCDF4
     with netCDF4.Dataset(path, "w", format="NETCDF4") as ds:
+        for k, v in (attrs or {}).items():
+            ds.setncattr(k, v)
         ds.createDimension("time", None)
         vt = ds.createVariable("time", "f4", ("time",))
         vt.units = TIME_UNITS; vt.calendar = "standard"; vt.standard_name = "time"; vt.long_name = "time"; vt.axis = "T"
@@ -368,6 +458,12 @@ def main():
           f"{len(VARIABLES_2D)} variables", flush=True)
     W = overlap_operator(mesh, a.annual + ".overlap.npz")
     print(f"  overlap operator {W.shape}, {W.nnz} entries, pixels covered {int((W.sum(axis=1) > 0).sum())}", flush=True)
+    # each cell's area and af2 at its centroid, in the operator's column
+    # order, to tell which area the scalars CSV integrates over
+    cell_area = np.asarray(W.sum(axis=0)).ravel()
+    X = fd.SpatialCoordinate(mesh)
+    cell_af2 = area_factor(*(fd.Function(fd.FunctionSpace(mesh, "DG", 0)).interpolate(X[i]).dat.data_ro
+                             for i in (0, 1)))
 
     scal = a.scalars or a.annual.replace("_ismip7_annual.h5", "_ismip7_scalars.csv")
     if not os.path.exists(scal):
@@ -414,6 +510,11 @@ def main():
                                      req[var]["Type"] == "FL")
         stats = {var: [np.inf, -np.inf, 0] for var in VARIABLES_2D}
         grounded_near = 0
+        # the melt booked in pixels with no floating ice at year end, which
+        # the no_floating_ice fill leaves out of libmassbffl, and the part of
+        # it in pixels the near-flotation rule emptied: (Gt/yr, year), largest
+        melt_out = {"all": (0.0, None), "near flotation": (0.0, None)}
+        area_of = {}
         for k, yr in enumerate(years):
             with fd.CheckpointFile(AnnualOutput.year_path(a.annual, yr), "r") as chk:
                 ymesh = chk.load_mesh()
@@ -428,16 +529,27 @@ def main():
                     f"the mesh changed inside the series, so one conservative "
                     f"operator cannot cover it."
                 )
+            # the forward's own masks, before the near-flotation rule below
+            gr, fl = cells["sftgrf"] * cell_area, cells["sftflf"] * cell_area
+            area_of[yr] = scalar_area(rows[yr], {
+                TRUE_AREA: (float((gr * cell_af2).sum()), float((fl * cell_af2).sum())),
+                MAP_PLANE: (float(gr.sum()), float(fl.sum()))})
+            afloat_before = W @ (cells["sftflf"] > 0.5).astype(float)
             grounded_near += ground_near_flotation(cells)
             masks = {"no_ice": cells["sftgif"] > 0.5,
                      "no_grounded_ice": cells["sftgrf"] > 0.5,
                      "no_floating_ice": cells["sftflf"] > 0.5}
+            afloat = W @ masks["no_floating_ice"].astype(float)
+            melt_px = W @ cells["libmassbffl"]                     # m3/yr of ice per pixel
+            for key, where in (("all", afloat <= 0.0),
+                               ("near flotation", (afloat_before > 0.0) & (afloat <= 0.0))):
+                gt = float(melt_px[where].sum()) * RHO_I / 1e12
+                if abs(gt) > abs(melt_out[key][0]):
+                    melt_out[key] = (gt, yr)
 
             def plane(var):
-                meta = req[var]; policy = meta["fill_policy"]
-                m = masks[policy] if policy in masks else None
-                return (regrid(W, cells[var], policy, m)
-                        * CONVERT[meta["units"]]).reshape(ISMIP7_NY, ISMIP7_NX).astype("f4")
+                return pixel_values(W, cells[var], req[var], masks).reshape(
+                    ISMIP7_NY, ISMIP7_NX).astype("f4")
 
             # the checker requires orog == base + lithk pixel by pixel and
             # orog >= 0; the elevations are covered-part means while lithk is a
@@ -460,6 +572,11 @@ def main():
                 st[2] += int(finite.sum())
         print(f"  {grounded_near} cell-years within {FLOTATION_TOLERANCE_M:g} m of "
               f"flotation written as grounded", flush=True)
+        for key, (gt, yr) in melt_out.items():
+            where = ("in pixels with no floating ice at year end" if key == "all" else
+                     "in pixels the near-flotation rule left with no floating ice")
+            print(f"  libmassbffl leaves out the melt booked {where}: at most "
+                  f"{gt:+.1f} Gt/yr" + (f" ({yr})" if yr is not None else ""), flush=True)
         for var in VARIABLES_2D:
             handles.pop(var)[0].close()
             lo, hi, nfin = stats[var]
@@ -468,11 +585,14 @@ def main():
             print(f"  {var:12s} {req[var]['units']:11s} {rng} "
                   f"{pct:5.1f}% valid  -> {os.path.basename(paths[var])}", flush=True)
 
+        area = series_area(area_of)
         for var in SCALARS:
             meta = req[var]
             values = [float(rows[yr][var]) for yr in years]
-            write_scalar(tmps[var], var, meta, years, values, meta["Type"] == "FL")
-        print(f"  {len(SCALARS)} scalars from {os.path.basename(scal)}")
+            write_scalar(tmps[var], var, meta, years, values, meta["Type"] == "FL",
+                         {SCALAR_AREA_ATTR: area})
+        print(f"  {len(SCALARS)} scalars from {os.path.basename(scal)}, over {area.replace('_', ' ')} "
+              f"in every year (iareagr and iareafl match the annual files' sums)", flush=True)
 
         for var, tmp in tmps.items():
             os.replace(tmp, paths[var])

@@ -251,6 +251,7 @@ def run_mesh(args):
         inputs[f"{kind}_{label}_tf"], inputs[f"{kind}_{label}_so"] = tf_p, so_p
     require(inputs.values())
     knobs = {"geometry": "mesh", "lc": cm.LC, "oi_version": version,
+             "k_max": float(ms.notebook_K_grid(args.k_max)[-1]),
              "geometry_space": geometry_space(), "raster_sample": raster_sample(),
              "melt_slope": melt_slope(),
              "sin_alpha_ant": sin_alpha_ant() if melt_slope() == "ant" else None,
@@ -316,7 +317,7 @@ def run_mesh(args):
             f"{int(np.isnan(t).sum())}")
         sampled.append((kind, label, t, s))
 
-    K = ms.notebook_K_grid()
+    K = ms.notebook_K_grid(args.k_max)
     plaus = ms.Plausibility(tf, area, basin)
     report = {"basin_area_km2": area_by_basin.tolist(), "floating_cells": int(len(x)),
               "climatology_gaps": gaps}
@@ -445,7 +446,8 @@ def run_notebook8km(args):
         inputs[f"{kind}_{label}_tf"], inputs[f"{kind}_{label}_so"] = tf_p, so_p
     require(inputs.values())
     rho, sin_a = ms.NOTEBOOK_RHO_I, ms.NOTEBOOK_SIN_ALPHA
-    knobs = {"geometry": "notebook8km", "rho_i": rho, "sin_alpha": sin_a}
+    knobs = {"geometry": "notebook8km", "rho_i": rho, "sin_alpha": sin_a,
+             "k_max": float(ms.notebook_K_grid(args.k_max)[-1])}
     log("=== toolbox selection on the notebook's 8 km grid ===")
     prov = provenance(inputs, knobs)
     targets = ms.load_targets(paths, melt_csv)
@@ -540,7 +542,7 @@ def run_notebook8km(args):
         check_state(so_p, "so", s, SO_RANGE)
         sampled.append((kind, label, t, s))
 
-    K = ms.notebook_K_grid()
+    K = ms.notebook_K_grid(args.k_max)
     log(f"  {len(jy)} grid points melt, {int(cells.basin_agg.__ge__(0).sum())} "
         f"inside the floating mask")
     agg, per = run_ensemble(K, "none", present, sampled, cells,
@@ -657,6 +659,9 @@ def main():
     ap.add_argument("--chunk", type=int, default=10000)
     ap.add_argument("--seeds", type=int, nargs="+", default=[0, 1, 2, 3, 4])
     ap.add_argument("--issue30", help="mesh: issue 30's deltaT files for this lc")
+    ap.add_argument("--k-max", type=float, default=None,
+                    help="extend the notebook's K grid (2.5e-6 to 3.0e-4) upward "
+                         "on its step to this K")
     args = ap.parse_args()
     if not os.path.isabs(args.out):
         raise SystemExit("--out must be absolute")

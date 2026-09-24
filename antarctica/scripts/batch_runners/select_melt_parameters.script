@@ -24,7 +24,9 @@
 # ISMIP7_INV_H5 supplies the mesh and nothing else. MELTSEL_ISSUE30 names a
 # directory of calibrate_deltaT.py files for the same mesh to compare the
 # offsets against; MELTSEL_VARIANTS (per_k none), MELTSEL_SAMPLES and
-# MELTSEL_SEEDS narrow a run.
+# MELTSEL_SEEDS narrow a run. MELTSEL_K_MAX extends the notebook's K grid
+# upward on its step, and MELTSEL_CHUNK sets the samples per objective call
+# (10000 by default; 5000 keeps a 400 K grid near 6 GB).
 
 #SBATCH -o ant_melt_selection_%j.txt
 #SBATCH -e ant_melt_selection_%j.err
@@ -55,6 +57,8 @@ fi
 if [ -n "${MELTSEL_VARIANTS:-}" ]; then read -r -a v <<< "${MELTSEL_VARIANTS}"; args+=(--variants "${v[@]}"); fi
 if [ -n "${MELTSEL_SAMPLES:-}" ]; then args+=(--samples "${MELTSEL_SAMPLES}"); fi
 if [ -n "${MELTSEL_SEEDS:-}" ]; then read -r -a v <<< "${MELTSEL_SEEDS}"; args+=(--seeds "${v[@]}"); fi
+if [ -n "${MELTSEL_K_MAX:-}" ]; then args+=(--k-max "${MELTSEL_K_MAX}"); fi
+if [ -n "${MELTSEL_CHUNK:-}" ]; then args+=(--chunk "${MELTSEL_CHUNK}"); fi
 
 echo "    commit  $(git rev-parse HEAD 2>/dev/null || echo unknown)"
 env | grep -E '^(ISMIP7_|MELTSEL_|OMP_NUM_THREADS=)' | sort | sed 's/^/    /'

@@ -384,3 +384,15 @@ def test_the_vendored_toolbox_is_the_recorded_upstream_file():
     assert len(src["commit"]) == 40 and len(src["file_commit"]) == 40
     with open(os.path.join(TOOLS, "ismip7_parameter_selection_toolbox.LICENSE")) as f:
         assert f.readline().strip() == "MIT License"
+
+
+def test_an_extended_K_grid_keeps_the_notebook_values():
+    base = ms.notebook_K_grid()
+    assert len(base) == 120 and base[-1] == pytest.approx(3.0e-4)
+    assert np.array_equal(ms.notebook_K_grid(3.0e-4), base)
+    wide = ms.notebook_K_grid(1.0e-3)
+    assert len(wide) == 400 and wide[-1] == pytest.approx(1.0e-3)
+    assert np.array_equal(wide[:120], base)
+    assert np.allclose(np.diff(wide), 2.5e-6)
+    with pytest.raises(ValueError, match="inside the notebook's grid"):
+        ms.notebook_K_grid(2.0e-4)

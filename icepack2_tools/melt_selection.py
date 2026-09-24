@@ -77,14 +77,33 @@ TERM_ARGS = ("t1_model", "t1_obs_mean", "t1_obs_sigma", "t1_weights",
              "t4_model", "t4_obs_mean", "t4_obs_sigma", "t4_weights")
 
 
-def notebook_K_grid():
+NOTEBOOK_K_MAX = 3.0e-4
+
+
+def notebook_K_grid(k_max=None):
     r"""The notebook's K grid (cell 6): 2.5e-6 to 3.0e-4 in steps of 2.5e-6.
+
+    ``k_max`` extends it upward on the same step, and its first 120 values
+    stay the notebook's bit for bit. An extension changes more than the tail:
+    the objective divides each term by its median over the whole grid, so
+    the grid's extent sets the terms' relative weight.
 
     ``np.arange`` rounds differently across numpy builds, so a run makes the
     grid once and stores it, and every later step reads the stored values:
     the objective aligns its terms on these labels, and a K that differs in
     the last bit drops out of that inner join without a message."""
-    return np.arange(0.25e-5, 3.025e-4, 0.25e-5)
+    grid = np.arange(0.25e-5, 3.025e-4, 0.25e-5)
+    if k_max is None or np.isclose(k_max, NOTEBOOK_K_MAX, rtol=1e-9, atol=0):
+        return grid
+    if k_max < NOTEBOOK_K_MAX:
+        raise ValueError(f"k_max {k_max:g} lies inside the notebook's grid, "
+                         f"which ends at {NOTEBOOK_K_MAX:g}")
+    wide = np.arange(0.25e-5, k_max + 0.25e-5, 0.25e-5)
+    wide = wide[wide <= k_max * (1 + 1e-9)]
+    if not np.array_equal(wide[:len(grid)], grid):
+        raise ValueError("this numpy extends the grid with other values "
+                         "than the notebook's")
+    return wide
 
 
 def toolbox_paths(root):

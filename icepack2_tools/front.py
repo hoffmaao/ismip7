@@ -9,7 +9,8 @@ they can be exercised without standing up a whole run.
 import numpy as np
 
 __all__ = ["retreat_slivers", "clear_reference_where_ice_free", "clamp_thickness",
-           "front_connected", "facet_neighbours", "collapse_cell_counts",
+           "unforced_cells", "front_connected", "facet_neighbours",
+           "collapse_cell_counts",
            "collapse_banner", "collapse_csv_fields", "COLLAPSE_MARKER",
            "COLLAPSE_CSV_COLUMNS", "FRONT_OWNER_MARKER"]
 
@@ -26,6 +27,33 @@ COLLAPSE_MARKER = "Ice-shelf collapse forcing:"
 # The timeseries columns collapse_cell_counts fills, in its return order.
 COLLAPSE_CSV_COLUMNS = ("collapse_flagged_cells", "collapse_removed_cells",
                         "collapse_held_cells")
+
+
+def unforced_cells(h, bed, *ice_free):
+    r"""The cells the surface and ocean forcing must not act on.
+
+    ``h`` is the per-cell thickness at the start of the advance, ``bed`` the
+    per-cell bed elevation, and each ``ice_free`` argument a boolean mask (or
+    ``None``) of cells a front rule holds ice-free. Returns a boolean mask:
+    open ocean (no ice on a bed below sea level) and every such held cell.
+
+    Forcing there has no ice to act on, and the model used to count it anyway.
+    Measured on a 2 km control, the open ocean beyond a fixed front received
+    57 Gt/yr of SMB and 87 to 90 Gt/yr of melt. The positivity limit withheld
+    the melt that had no ice to melt and booked it as ``clamp`` (+64 Gt/yr),
+    while the melt column and the ISMIP7 ``libmassbffl`` field still counted
+    it; where the SMB won, it made ice on open water that the front removed
+    on the next advance and booked as calving, 31 of the 48 Gt/yr the run
+    called calving. None of it touched the ice.
+
+    Ice-free land (a bed at or above sea level) stays forced unless a front
+    rule holds it, so ice can still grow on it as before.
+    """
+    out = (np.asarray(h) <= 0.0) & (np.asarray(bed) < 0.0)
+    for mask in ice_free:
+        if mask is not None:
+            out = out | np.asarray(mask, dtype=bool)
+    return out
 
 
 def clamp_thickness(h, h_clamp, *ice_free):

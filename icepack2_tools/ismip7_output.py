@@ -280,9 +280,10 @@ class AnnualOutput:
 
     def book_advance(self, dt, accum, ocean_melt, a_ref, h_dg, u, grounded_cells):
         r"""Called by ``_advance`` after the transport solve, BEFORE removal:
-        books the sources REQUESTED of this advance (the forcing SMB before
-        the positivity limiter, and the melt) and the grounding-line flux
-        with the velocity the transport used."""
+        books the forcing this advance applied (the SMB and the melt where
+        there can be ice, which the caller passes already masked, before the
+        positivity limit) and the grounding-line flux with the velocity the
+        transport used."""
         smb = assemble(accum * self._phi * dx).dat.data_ro / self.cell_area        # m/yr, cell mean
         melt = assemble(ocean_melt * self._phi * dx).dat.data_ro / self.cell_area
         self.step_acc["acabf"] += smb * dt

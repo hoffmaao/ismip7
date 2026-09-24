@@ -62,3 +62,27 @@ def test_nothing_ice_free_is_a_no_op():
     before = a_ref.copy()
     clear_reference_where_ice_free(a_ref, np.zeros(3, dtype=bool))
     assert np.array_equal(a_ref, before)
+
+
+# ── where the forcing acts ──────────────────────────────────────────────────
+from icepack2_tools.front import unforced_cells  # noqa: E402
+
+
+def test_open_ocean_is_not_forced_and_ice_and_land_are():
+    r"""Ice on any bed is forced; an ice-free cell on a bed below sea level is
+    open ocean and is not; an ice-free cell on land stays forced, so ice can
+    still grow there."""
+    h = np.array([300.0, 5.0, 0.0, 0.0, 0.0])
+    bed = np.array([-800.0, 200.0, -400.0, 150.0, 0.0])
+    assert unforced_cells(h, bed).tolist() == [False, False, True, False, False]
+
+
+def test_cells_a_front_rule_holds_ice_free_are_not_forced():
+    r"""Whatever a front rule empties, land or ocean, gets no forcing: SMB
+    there would make ice the rule removes and books as calving."""
+    h = np.array([300.0, 0.0, 0.0, 0.0])
+    bed = np.array([-800.0, 150.0, 150.0, -400.0])
+    beyond = np.array([False, True, False, False])
+    ls_ice_free = np.array([False, False, False, True])
+    assert unforced_cells(h, bed, beyond, None, ls_ice_free).tolist() == \
+        [False, True, False, True]

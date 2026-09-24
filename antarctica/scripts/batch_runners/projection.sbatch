@@ -25,8 +25,9 @@
 # control or projection branches from the historical's endpoint, so it must
 # not start before the historical has finished, and no earlier point in the
 # chain knows that it has. Each follow-on starts a chain of its own with this
-# run's environment and allocation, less ISMIP7_CHAIN_THEN itself and the
-# period (ISMIP7_T_START, ISMIP7_T_END), which each follow-on's driver owns:
+# run's environment and allocation, less ISMIP7_CHAIN_THEN itself, this run's
+# ISMIP7_RESTART and wall budget, and the period (ISMIP7_T_START,
+# ISMIP7_T_END), which each follow-on's driver owns:
 #
 #   ISMIP7_EXPERIMENT=hist_mri_esm2 ISMIP7_ESM=MRI-ESM2-0 \
 #       ISMIP7_CHAIN_THEN="control ssp585_mri_esm2" submit.sh projection

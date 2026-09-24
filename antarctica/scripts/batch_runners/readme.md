@@ -420,14 +420,14 @@ job advanced no years at all (setup alone spent the budget).
 **A historical can queue what branches from it.** `ISMIP7_CHAIN_THEN` names
 follow-on experiments (space-separated, from the runner's list), and the job
 that brings the chain to its end year queues each one behind itself, as a fresh
-chain with the same environment and allocation, less `ISMIP7_T_START` and
-`ISMIP7_T_END`, since each follow-on's driver owns its period; a job that stops
-short carries the list on to its successor, and a stalled or failed one queues
-nothing. So a
-control and the projections are submitted with their historical and start only
-once it has reached 2015, which is what `simulation.historical_endpoint` then
-checks before they branch. A misspelt follow-on stops the first job before the
-driver runs:
+chain with the same environment and allocation, less the follow-on list itself,
+`ISMIP7_RESTART`, the wall budget, and the period (`ISMIP7_T_START`,
+`ISMIP7_T_END`), since each follow-on resumes its own checkpoints and its
+driver owns its period; a job that stops short carries the list on to its
+successor, and a stalled or failed one queues nothing. So a control and the
+projections are submitted with their historical and start only once it has
+reached 2015, which is what `simulation.historical_endpoint` then checks before
+they branch. A misspelt follow-on stops the first job before the driver runs:
 
 ```bash
 ISMIP7_EXPERIMENT=hist_mri_esm2 ISMIP7_ESM=MRI-ESM2-0 \

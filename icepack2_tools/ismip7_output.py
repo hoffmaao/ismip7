@@ -13,9 +13,13 @@ runs inside the parallel forward, gated by ``ISMIP7_OUTPUT=1``:
   advance from the sources REQUESTED of the transport, stamped 1 July. That
   is the forcing SMB as handed to the transport, BEFORE the positivity
   limiter clips a net sink that would draw a cell below ``h_clamp``, plus the
-  ocean melt. The withheld part is the run's ``clamp`` budget column and is
-  not any ISMIP7 variable, so in the thin front cells where the limiter fires
-  the grid budget does not close against ``dlithkdt``;
+  ocean melt. Neither acts on open ocean or on a cell a front rule holds
+  ice-free (``front.unforced_cells``), so those cells book zero and the
+  fields, the run's ``smb`` and ``melt`` budget columns and the transport
+  all count the same forcing. The withheld part is the run's ``clamp``
+  budget column and is not any ISMIP7 variable, so in the thin front cells
+  where the limiter fires the grid budget does not close against
+  ``dlithkdt``;
 * the scalars are the integrals of the same fields, written to a CSV as the
   run goes so an early stop loses nothing.
 

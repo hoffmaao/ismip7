@@ -387,10 +387,10 @@ def _submits(calls):
 def test_a_finished_run_queues_its_follow_ons(sandbox):
     r"""The historical reached 2015, so the control and the projection that
     branch from its endpoint are queued, each behind this job, each a fresh
-    chain that queues nothing further."""
+    chain that queues nothing further and runs its own driver's period."""
     rc, log, calls = run_job(
         sandbox, FAKE_T_YR="2015", FAKE_START_YEAR="1990", ISMIP7_T_END="2015",
-        ISMIP7_EXPERIMENT="hist_mri_esm2",
+        ISMIP7_T_START="1990", ISMIP7_EXPERIMENT="hist_mri_esm2",
         ISMIP7_CHAIN_THEN="control ssp585_mri_esm2")
     assert rc == 0, log
     submits = _submits(calls)
@@ -398,6 +398,9 @@ def test_a_finished_run_queues_its_follow_ons(sandbox):
     for sub, exp in zip(submits, ("control", "ssp585_mri_esm2")):
         assert f"ENV: ISMIP7_EXPERIMENT={exp}\n" in sub
         assert "ISMIP7_CHAIN_THEN" not in sub
+        # each follow-on's driver owns its period
+        assert "ISMIP7_T_START" not in sub
+        assert "ISMIP7_T_END" not in sub
         assert f"--dependency=afterok:{JOB_ID}" in sub
         assert "-J ismip7_fwd" in sub
 

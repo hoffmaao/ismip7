@@ -9,7 +9,7 @@ they can be exercised without standing up a whole run.
 import numpy as np
 
 __all__ = ["retreat_slivers", "clear_reference_where_ice_free", "clamp_thickness",
-           "unforced_cells", "front_connected", "facet_neighbours",
+           "unforced_cells", "applied_forcing", "front_connected", "facet_neighbours",
            "collapse_cell_counts",
            "collapse_banner", "collapse_csv_fields", "COLLAPSE_MARKER",
            "COLLAPSE_CSV_COLUMNS", "FRONT_OWNER_MARKER"]
@@ -54,6 +54,25 @@ def unforced_cells(h, bed, *ice_free):
         if mask is not None:
             out = out | np.asarray(mask, dtype=bool)
     return out
+
+
+def applied_forcing(forced, accum, ocean_melt, a_ref=None):
+    r"""The SMB, melt and apparent-MB reference an advance applies.
+
+    ``forced`` is 1 where the forcing acts and 0 on the cells
+    :func:`unforced_cells` names; the other arguments are the raw fields.
+    Works on cell arrays and on UFL expressions alike. Returns
+    ``(smb, melt, ref)``, each masked by ``forced``; ``ref`` is ``None`` when
+    ``a_ref`` is.
+
+    The reference is masked with the forcing. A cell emptied mid-run (a
+    collapsed shelf, or one melted through to h=0) turns into open ocean, and
+    its t=0 reference, about the shelf's t=0 melt, would regrow it every
+    advance for the front to remove and book as calving. ``a_ref`` itself is
+    left as it is, so it applies again if ice returns to the cell.
+    """
+    ref = None if a_ref is None else forced * a_ref
+    return forced * accum, forced * ocean_melt, ref
 
 
 def clamp_thickness(h, h_clamp, *ice_free):

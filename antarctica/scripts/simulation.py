@@ -72,7 +72,7 @@ from icepack2_tools.geometry import sample_to_geometry
 from icepack2_tools.naming import map_basename
 from icepack2_tools.front import (
     clamp_thickness, clear_reference_where_ice_free, retreat_slivers,
-    unforced_cells,
+    unforced_cells, applied_forcing,
     facet_neighbours, front_connected,
     collapse_banner, collapse_cell_counts, collapse_csv_fields,
     COLLAPSE_CSV_COLUMNS, COLLAPSE_MARKER, FRONT_OWNER_MARKER,
@@ -2547,16 +2547,18 @@ def run_simulation(
         forced.dat.data[:] = np.where(
             unforced_cells(h_dg_old.dat.data_ro, bed_cell, beyond, ls_ice_free),
             0.0, 1.0)
-        smb_gt = float(assemble(forced * accum * dx)) * rho_gt * dt_local
-        melt_gt = float(assemble(forced * ocean_melt * dx)) * rho_gt * dt_local
-        src = forced * (accum - ocean_melt)
+        smb_f, melt_f, ref_f = applied_forcing(forced, accum, ocean_melt, a_ref)
+        smb_gt = float(assemble(smb_f * dx)) * rho_gt * dt_local
+        melt_gt = float(assemble(melt_f * dx)) * rho_gt * dt_local
+        src = smb_f - melt_f
         amb_gt = 0.0
-        if a_ref is not None:
-            src = src + a_ref
+        if ref_f is not None:
+            src = src + ref_f
             # The reference as APPLIED here: the live-extent mask above may
-            # have zeroed cells since the step's entry measurement, so the
-            # budget and the CSV must use this, not the entry value.
-            amb_gt = float(assemble(a_ref * dx)) * rho_gt * dt_local
+            # have zeroed cells since the step's entry measurement, and the
+            # forcing mask withholds it from open ocean, so the budget and
+            # the CSV must use this, not the entry value.
+            amb_gt = float(assemble(ref_f * dx)) * rho_gt * dt_local
         # Cell-averaged DG0 source (exact for the DG0 test space) with a
         # positivity limit (gia a_step clamp): the net sink may not draw a
         # cell below h_clamp within one advance. With the limited source
@@ -2644,8 +2646,8 @@ def run_simulation(
         # state and must see it.
         grounded = _grounded_cells()
         if annual is not None:
-            annual.book_advance(dt_local, forced * accum, forced * ocean_melt,
-                                a_ref, h_dg, u_vel, grounded)
+            annual.book_advance(dt_local, smb_f, melt_f, ref_f,
+                                h_dg, u_vel, grounded)
 
         # Floor to h_clamp, EXCEPT in the cells the front rules report as
         # holding no ice: see clamp_thickness for why every such rule has to

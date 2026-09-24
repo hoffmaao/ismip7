@@ -542,6 +542,10 @@ percentile choice (issue #26):
 | 1000 m / 10 km production mesh | none | 4.5e-5 | 8.5e-5 | 1.375e-4 |
 | 2 km MAP mesh | fitted for every K | 2.75e-5 | 5.75e-5 | 2.725e-4 |
 | 1000 m / 10 km production mesh | fitted for every K | 2.75e-5 | 6.25e-5 | 2.70e-4 |
+| 2 km MAP mesh, grid to 1e-3 | none | 4.5e-5 | 8.0e-5 | 1.375e-4 |
+| 1000 m / 10 km production mesh, grid to 1e-3 | none | 4.25e-5 | 7.75e-5 | 1.375e-4 |
+| 2 km MAP mesh, grid to 1e-3 | fitted for every K | 2.5e-5 | 7.5e-5 | 4.475e-4 |
+| 1000 m / 10 km production mesh, grid to 1e-3 | fitted for every K | 2.5e-5 | 7.5e-5 | 4.15e-4 |
 
 On the notebook's grid the aggregation matches the toolbox's term functions
 to 1.6e-12 and reproduces the notebook's printed percentiles and totals
@@ -550,8 +554,13 @@ offsets fitted first, term 1 is flat wherever every basin roots and terms 2
 to 4 place K. Below K = 4.25e-5 (4.0e-5 on the 1000 m mesh) Amundsen
 (basin 9) cannot reach its total inside plus or minus 2 K, and 34 percent of
 the samples (26) still land there, K05 among them; 3.8 percent (3.5) land on
-the grid's top, 3.0e-4. At K95 the offsets put over 40 percent of the shelf
-area of nine basins (eleven) below 0 degC. On Quartz the 30_sep files the
+the grid's top, 3.0e-4. `--k-max 1e-3` (run records ending `-wide`)
+extends the grid on its step: 14 percent of the samples (13) then lie above
+3.0e-4 and 0.01 percent reach 1e-3, so the tail is complete. The toolbox
+divides each term by its median over the grid, so the grid's reach moves
+every percentile; the table's rows to 1e-3 differ from the notebook grid's
+at K50 too. At K95 the offsets put over 40 percent of the shelf area of nine
+basins (eleven) below 0 degC. On Quartz the 30_sep files the
 forward reads are byte-identical to the notebook's 06_nov tf v3 and so v4.
 
 ## 6. Control and projections

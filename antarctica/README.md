@@ -65,7 +65,12 @@ python antarctica/scripts/download_mirror.py --check data/CESM2-WACCM/ssp585/
 ```
 
 Globus remains the archive of record and `download_forcing.py` drives it
-(section 2a). Use it for anything the mirror has not synced.
+(section 2a). Use it for anything the mirror has not synced. The MRI-ESM2-0
+ssp585 collapse mask is such a case: v2 replaced v1 on Globus on 22 September
+2026. `FRACTURE_MIN_VERSION` in `icepack2_tools/forcing.py` names the oldest
+mask each ESM and scenario may be read at; a run under a mask mode refuses an
+older one at startup, and the audit reads it `OUTDATED` and fails. Fetch it
+with `download_forcing.py --scenarios --esm MRI-ESM2-0 --scenario ssp585`.
 
 ### 0.3 Short paths
 

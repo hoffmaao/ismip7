@@ -54,7 +54,7 @@ MESH_DIR = os.path.join(_ROOT, "mesh")
 RESULTS_DIR = os.path.join(_ROOT, "results")
 
 sys.path.insert(0, os.path.dirname(_ROOT))
-from icepack2_tools.mpi_stats import global_mean
+from icepack2_tools.mpi_stats import global_mean, global_size
 from icepack2_tools.boundary import load_boundary_ids
 from icepack2_tools.runconfig import obs_data_root, lc as _lc, lc_coarse as _lc_coarse
 
@@ -85,7 +85,10 @@ def main():
     mesh_fn = os.environ.get("ISMIP7_MESH", mesh_filename(lc_coarse, lc, buffer_m))
     PETSc.Sys.Print(f"Loading mesh: {mesh_fn}")
     mesh = Mesh(mesh_fn)
-    PETSc.Sys.Print(f"  {mesh.num_vertices()} vertices, {mesh.num_cells()} cells")
+    # num_vertices()/num_cells() count this rank's plex, halo included; the
+    # coordinate dofs and the owned cell set are reduced to global totals.
+    PETSc.Sys.Print(f"  {global_size(mesh.coordinates)} vertices, "
+                    f"{mesh.comm.allreduce(mesh.cell_set.size)} cells")
 
     # Sidecar resolved (per-mesh preferred, parametric fallback) and
     # HARD-CHECKED against this mesh: an id absent from the mesh makes

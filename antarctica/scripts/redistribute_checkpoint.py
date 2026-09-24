@@ -182,6 +182,7 @@ def _cache_manifest(root_attrs, out_fn, mesh, checkpoint_fields):
         "lc": int(attrs["lc"]),
         "lc_coarse": int(attrs["lc_coarse"]),
         "buffer_m": int(round(float(attrs["buffer_m"]))),
+        # main() refuses more than one rank, so the plex counts are global.
         "vertices": int(mesh.num_vertices()),
         "cells": int(mesh.num_cells()),
         "published_on_ranks": 1,

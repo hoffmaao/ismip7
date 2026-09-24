@@ -97,6 +97,30 @@ def runaway_detected(discharge, dt):
     return bool(max(medians) > 6000.0 or sustained)
 
 
+def infer_dt(yr):
+    r"""The timestep a `year` column implies, in years.
+
+    The median of the differences is the obvious choice and is wrong whenever
+    the column was written with fewer decimals than the timestep needs: a
+    dt=0.05 run written to one decimal repeats years, so half the differences
+    are 0.0 and half are 0.1, and the median lands on 0.1, exactly twice the
+    truth. Every rate here is a per-step quantity divided by dt, so that
+    doubles the apparent discharge and halves dM/dt and dVAF/dt, which can
+    turn a failing run into a passing one. A difference of zero says the column
+    is rounded, so fall back to the mean spacing. Rounding moves the endpoints
+    by up to half a unit, so this carries an O(1/n) error, a few percent over a
+    short run; the median is wrong by a whole factor. The writer now emits
+    four decimals, so this path only matters for timeseries written before
+    that. The inferred value is printed; pass --dt to override it.
+    """
+    if len(yr) < 2:
+        return 1.0
+    diffs = np.diff(yr)
+    if np.any(diffs <= 0.0):
+        return float((yr[-1] - yr[0]) / (len(yr) - 1))
+    return float(np.median(diffs))
+
+
 def main():
     args = []
     dt_arg = None
@@ -129,7 +153,7 @@ def main():
               f"(legacy timeseries format?)")
         sys.exit(2)
     yr = c["year"]
-    dt = dt_arg if dt_arg else (float(np.median(np.diff(yr))) if len(yr) > 1 else 1.0)
+    dt = dt_arg if dt_arg else infer_dt(yr)
     n_yr1 = max(1, int(round(1.0 / dt)))          # steps in the init-transient year
 
     # calv/clamp/resid columns are per-STEP Gt; convert to rates.

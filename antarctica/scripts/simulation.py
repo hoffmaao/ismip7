@@ -76,6 +76,7 @@ from icepack2_tools.front import (
     collapse_banner, collapse_cell_counts, collapse_csv_fields,
     COLLAPSE_CSV_COLUMNS, COLLAPSE_MARKER, FRONT_OWNER_MARKER,
 )
+from icepack2_tools.timeseries import timeseries_csv_line
 from icepack2_tools.runconfig import (
     obs_data_root,
     BUDD_SHELF_GATE as _BUDD_SHELF_GATE,
@@ -2243,11 +2244,7 @@ def run_simulation(
     def _write_csv_row(row, collapse_cells):
         if csv_f is None:
             return
-        csv_f.write(
-            f"{row[0]:.1f},{row[1]:.6f},{row[2]:.2f},"
-            + ",".join(f"{v:.4f}" for v in row[3:])
-            + collapse_csv_fields(csv_head, collapse_cells) + "\n"
-        )
+        csv_f.write(timeseries_csv_line(row, csv_head, collapse_cells))
         csv_f.flush()
 
     # Rescue ladder state: the last CONVERGED mixed state, restored between

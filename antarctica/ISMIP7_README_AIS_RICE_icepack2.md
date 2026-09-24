@@ -96,28 +96,31 @@ shallow-shelf formulation on Firedrake 2026.4.1)
 8. Calving: in the control and, by default, in the projections the calving
    front is pinned at its 2015 (BedMachine) position: ice flowing past it
    is removed and tallied as calving (`ISMIP7_FIXED_FRONT`). A level-set
-   front with a von Mises calving law (Hahn, Mikula and Frolkovic 2025
-   finite-volume level set; thresholds 1.0 MPa grounded, 0.15 MPa floating)
-   exists but is not calibrated; **[confirm #36]** which the projections use.
+   front (Hahn, Mikula and Frolkovic 2025 finite-volume level set) driven by
+   a calving law (von Mises, thresholds 1.0 MPa grounded and 0.15 MPa
+   floating by default; horizontal force balance; minimum thickness) exists
+   but is not calibrated; **[confirm #36]** which the projections use.
    No sub-grid scheme beyond the sub-cell shed of the level-set front.
 9. Ice-shelf collapse: **[confirm #10]** which of three the submitted
    projections use; the core matrix as configured today runs the first.
    `ISMIP7_FRACTURE=none`: no collapse forcing. `mask`: every FLOATING cell
-   the year's ISMIP7 collapse mask flags (v2.1 for CESM2-WACCM, v1 for
-   MRI-ESM2-0) is emptied and booked as calving, wherever it is. The masks
-   flag the Ross and Filchner-Ronne shelves near their grounding lines
-   first, so this opens holes far behind the front which the momentum
-   balance treats as open ocean. `mask_front`: a flagged floating cell is
+   the year's ISMIP7 collapse mask flags (v2.1 for CESM2-WACCM; for
+   MRI-ESM2-0, v2 under ssp585 and v1 under ssp126 and ssp370) is emptied
+   and booked as calving, wherever it is. The masks flag the Ross and
+   Filchner-Ronne shelves near their grounding lines first, so this opens
+   holes far behind the front which the momentum balance treats as open
+   ocean. `mask_front`: a flagged floating cell is
    emptied only once open water has reached it through flagged cells, so a
    shelf collapses from its front and nothing happens until the flagged
    region touches it. These are the two end-members of discussion #30
    (September 2026), where groups report 40 % to 100 % more sea level by
    2300 from the first against the second. Grounded ice is never touched,
    there is no stress condition (Lai et al. 2020), and the excess-meltwater
-   and lake-property products are not used. No collapse forcing in the
-   historical, control or OCX runs, for which none exists (discussions #29
-   and #33); the front there is pinned at its 2015 position rather than
-   following the observed fronts.
+   and lake-property products are not used. The ssp126 and ssp585 masks of
+   both ESMs end in 2299, and 2300 reads the 2299 mask. No collapse forcing
+   in the historical, control or OCX runs, for which none exists
+   (discussions #29 and #33); the front there is pinned at its 2015 position
+   rather than following the observed fronts.
 10. Tributary glaciers after a collapse: no special treatment; the front
     retreats to the new extent, the grounding line responds to the lost
     buttressing through the momentum balance, friction is unchanged.
@@ -157,7 +160,10 @@ shallow-shelf formulation on Firedrake 2026.4.1)
     outside the downscaled mask and is filled with zero there (discussion
     #39). CESM2-WACCM ends in 2299 in its CMIP archive; its 2300
     atmosphere files, as distributed, are the 2290-2299 mean, and are read
-    as given (discussions #8 and #49). Monthly fields are averaged to the year weighted
+    as given (discussions #8 and #49). Its ocean (item 6) and collapse masks
+    (item 9) hold 2299 for 2300. The organisers' reply of 23 September 2026
+    on discussion #49 judges a single forcing year at the end insignificant
+    and accepts a 2299 duplicate for 2300. Monthly fields are averaged to the year weighted
     by month length from each file's own time axis, and the year a file
     belongs to is taken from its name, so the differing calendars and time
     stamps of the forcing products (discussions #9 and #24) do not enter.
@@ -253,4 +259,6 @@ and `core_report.py` carries those lines into the run's committed report;
 data-freeze mirror on 13 September 2026: CESM2-WACCM atmosphere SDBN1-8000m
 v2, ocean v3, fracture v2.1; MRI-ESM2-0 atmosphere GEMB-SDBN1-8000m v1,
 ocean v3, fracture v1; ISMIP7 ocean climatology 30_sep; observations kit
-AntarcticaObsISMIP7-v1.2.
+AntarcticaObsISMIP7-v1.2. Since that audit the MRI-ESM2-0 ssp585 fracture
+has moved to v2 (22 September 2026, discussion #30), which the reader opens;
+ssp126 and ssp370 stay at v1.

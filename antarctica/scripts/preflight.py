@@ -29,7 +29,7 @@ from icepack2_tools.naming import map_basename
 from icepack2_tools.climatology import clim_start, clim_end, clim_scenario
 from icepack2_tools.runconfig import (
     obs_data_root,
-    calving_law as _calving_law, calving_sigma_max as _calving_sigma_max,
+    calving_law_object as _calving_law_object,
     friction as _friction, geometry_space as _geometry_space, lc as _lc,
     lc_coarse as _lc_coarse, ocx_forcing as _ocx_forcing, ocx_ocean as _ocx_ocean,
     mesh_override,
@@ -149,10 +149,11 @@ def shared_missing(warn=None):
     # Front configuration: a mistyped law would otherwise surface only after
     # the forward's MAP load and initial solve.
     try:
-        _calving_law()
-        _calving_sigma_max()
+        _calving_law_object()
     except ValueError as e:
         miss.append(str(e))
+    except ImportError as e:
+        miss.append(f"icepack_tools.calving (ISMIP7_CALVING needs it: {e})")
     # ISMIP7_MESH=checkpoint means the mesh inside the MAP; there is no file
     # to look for and the MAP check below covers it.
     mesh_fn = mesh_override() or mesh_filename(lc_coarse, lc, get_buffer_m())
@@ -288,10 +289,10 @@ def main():
             yrs = atm_years(esm, scenario) or atm_years(esm, scenario, "acabf")
             gaps = sorted(set(range(y0, y1 + 1)) - set(yrs))
             # The last year of a series may be absent: the reader persists
-            # the last year on disk one year past the end (CESM2-WACCM stops
-            # at 2299 and the empty 2300 files were removed, discussion #8),
-            # so that is a note, not a missing input. Any other gap is an
-            # error the reader raises on, so it blocks.
+            # the last year on disk one year past the end (a CESM2-WACCM tree
+            # fetched while the empty 2300 files were withdrawn stops at 2299,
+            # discussion #8), so that is a note, not a missing input. Any
+            # other gap is an error the reader raises on, so it blocks.
             bridged = gaps == [y1] and yrs and yrs[-1] == y1 - 1
             if not yrs:
                 miss.append(f"{esm}/{scenario} atmosphere")

@@ -1,11 +1,11 @@
 r"""What the preflight gate calls a missing input.
 
-The reader bridges exactly one year past the end of a series (CESM2-WACCM's
-atmosphere stops at 2299 and the empty 2300 files were removed, discussion
-#8), so a tree whose LAST year is absent runs correctly. The gate has to agree:
-calling that a missing input reports cores 5 and 7 as BLOCKED for the
-production tree they are meant to run against. Any other hole stays an error,
-because the reader raises on it.
+The reader bridges exactly one year past the end of a series (a CESM2-WACCM
+atmosphere fetched while the empty 2300 files were withdrawn stops at 2299,
+discussion #8), so a tree whose LAST year is absent runs correctly. The gate
+has to agree: calling that a missing input reports cores 5 and 7 as BLOCKED
+for such a tree. Any other hole stays an error, because the reader raises on
+it.
 
 ``atm_years`` reads only filenames, so the synthetic trees here are empty
 files in the layout ``atmosphere_path`` resolves. The shared mesh/MAP checks
@@ -144,3 +144,19 @@ def test_core_11_on_the_stopgap_says_that_is_what_it_is(monkeypatch, tmp_path, c
     _run_core_11(monkeypatch, tmp_path, None, forcing="stopgap")
     line = _core_line(capsys, "core 11")
     assert "READY" in line and "ISMIP7_OCX_FORCING=stopgap" in line
+
+
+def test_a_law_on_an_icepack_tools_without_calving_is_a_missing_input(monkeypatch):
+    r"""A site whose icepack_tools predates the calving module reports it as a
+    missing input rather than crashing the gate with a traceback."""
+    import types
+    for knob in ("ISMIP7_CALVING_PARAMS", "ISMIP7_CALVING_MODULE"):
+        monkeypatch.delenv(knob, raising=False)
+    monkeypatch.setenv("ISMIP7_CALVING", "vonmises")
+    sys.modules.pop("preflight", None)
+    preflight = importlib.import_module("preflight")
+    monkeypatch.setitem(sys.modules, "icepack_tools",
+                        types.ModuleType("icepack_tools"))
+    monkeypatch.delitem(sys.modules, "icepack_tools.calving", raising=False)
+    miss = preflight.shared_missing([])
+    assert any(m.startswith("icepack_tools.calving") for m in miss)

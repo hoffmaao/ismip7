@@ -65,6 +65,7 @@ from icepack2_tools.mpi_stats import (
     global_extreme_location,
     global_mean,
     global_range,
+    global_size,
 )
 from icepack2_tools.boundary import load_boundary_ids
 from icepack2_tools.geometry import sample_to_geometry
@@ -73,7 +74,7 @@ from icepack2_tools.front import (
     clamp_thickness, clear_reference_where_ice_free, retreat_slivers,
     facet_neighbours, front_connected,
     collapse_banner, collapse_cell_counts, collapse_csv_fields,
-    COLLAPSE_CSV_COLUMNS, COLLAPSE_MARKER,
+    COLLAPSE_CSV_COLUMNS, COLLAPSE_MARKER, FRONT_OWNER_MARKER,
 )
 from icepack2_tools.timeseries import timeseries_csv_line
 from icepack2_tools.runconfig import (
@@ -84,7 +85,7 @@ from icepack2_tools.runconfig import (
     mesh_override as _mesh_override,
     lc as _lc, lc_coarse as _lc_coarse, n_flow as _n_flow,
     TARGET_MESH_GEOMETRY_METHOD,
-    calving_law as _calving_law, calving_sigma_max as _calving_sigma_max,
+    calving_law as _calving_law, calving_law_object as _calving_law_object,
     fracture as _fracture_mode, ismip7_output as _ismip7_output,
     FRACTURE_MASK_MODES,
     # auto_resume is re-exported, not used here: every forward driver imports
@@ -197,6 +198,45 @@ def latest_checkpoint(experiment_name, lc_val=None):
     return best
 
 
+def auto_resume_checkpoint(experiment_name, lc_val=None):
+    r"""The checkpoint an unattended run resumes from, or None.
+
+    :func:`latest_checkpoint`, refused when it was written under another
+    calving law. The experiment name carries only the run tag, so a run that
+    selects a law without a tag of its own finds a stock run's checkpoints
+    (and a stock run a law run's), would resume the other run's state and then
+    overwrite its files. Every checkpoint of a law-driven run records the law
+    with its parameters (the ``calving_law`` attribute, absent under ``none``),
+    and a resume under a different law or different parameters stops here.
+    An explicit ``ISMIP7_RESTART`` is taken as meant and does not come here.
+    """
+    path = latest_checkpoint(experiment_name, lc_val)
+    if path is None:
+        return None
+    law = _calving_law_object()
+    want = law.describe() if law is not None else None
+    with fd.CheckpointFile(path, "r") as chk:
+        have = (str(chk.get_attr("/", "calving_law"))
+                if chk.has_attr("/", "calving_law") else None)
+    if have is None and want is not None:
+        raise RuntimeError(
+            f"auto-resume found {path}, which records no calving law: it was "
+            f"written under none, or by a law run from before checkpoints "
+            f"recorded one (such as a built-in ISMIP7_CALVING=fixed or "
+            f"=vonmises chain), but this run is configured with {want}. "
+            f"Continue that state on purpose with ISMIP7_RESTART, or give "
+            f"this run its own ISMIP7_RUN_TAG so it keeps its own "
+            f"checkpoints.")
+    if have != want:
+        raise RuntimeError(
+            f"auto-resume found {path}, written under the calving law "
+            f"{have or 'none'}, but this run is configured with "
+            f"{want or 'none'}. Give this run its own ISMIP7_RUN_TAG so it "
+            f"keeps its own checkpoints, or start it from that state on "
+            f"purpose with ISMIP7_RESTART.")
+    return path
+
+
 def setup_model(restart_from=None, *, allow_timing_cache_a_ref=False):
     r"""Load mesh, data, inversion fields, and build diagnostic solver.
 
@@ -217,8 +257,7 @@ def setup_model(restart_from=None, *, allow_timing_cache_a_ref=False):
     # Reject a mistyped front configuration before the MAP load and the
     # initial Newton solve, which cost minutes to tens of minutes at 2500 m
     # on a detached launch.
-    _calving_law()
-    _calving_sigma_max()
+    _calving_law_object()
     # Exact-zero-shelf residual laws (icepack2 dual, dual_friction.py):
     #   regularized_coulomb -> Coulomb cap tau_c=c0*N
     #   budd                -> tau_b ~ N_hat=N_eff/N_ref, PISM-delta grounded
@@ -383,13 +422,19 @@ def setup_model(restart_from=None, *, allow_timing_cache_a_ref=False):
         chk_buffer_m = target_buffer_m
         PETSc.Sys.Print(
             f"  Compute mesh override: {mesh_fn} "
-            f"({mesh.num_vertices()} vertices, {mesh.num_cells()} cells)"
+            f"({global_size(mesh.coordinates)} vertices, "
+            f"{mesh.comm.allreduce(mesh.cell_set.size)} cells)"
         )
     else:
         mesh = source_mesh
         target_lc_coarse = chk_lc_coarse
         target_buffer_m = chk_buffer_m
-    PETSc.Sys.Print(f"  {mesh.num_vertices()} vertices, {mesh.num_cells()} cells")
+    # num_vertices()/num_cells() count this rank's plex, halo included; the
+    # coordinate dofs and the owned cell set are reduced to global totals.
+    PETSc.Sys.Print(
+        f"  {global_size(mesh.coordinates)} vertices, "
+        f"{mesh.comm.allreduce(mesh.cell_set.size)} cells"
+    )
     # The recorded basename is the provenance and WINS. ISMIP7_MESH is only a
     # fallback for legacy checkpoints that carry no attribute: it names the
     # mesh the caller intends to build, which is not necessarily the one this
@@ -751,7 +796,7 @@ def setup_model(restart_from=None, *, allow_timing_cache_a_ref=False):
             f"  Transfer fill: {_name}: {_info['missing']} of {_info['total']} "
             f"dofs lie outside the source mesh; filled with {_info['fill']}; "
             f"{_info['clamped']} located dofs clamped to the source range "
-            "(extrapolated from a boundary cell)"
+            "(beyond it after strict location)"
         )
     if mesh_fn and not _filled:
         PETSc.Sys.Print(
@@ -1492,6 +1537,24 @@ def setup_model(restart_from=None, *, allow_timing_cache_a_ref=False):
     }
 
 
+def calving_front_state(z, h_dg, b, level_set, A=None, n=None):
+    r"""The state a calving law reads (:class:`icepack_tools.calving.FrontState`),
+    taken live from the forward.
+
+    ``(u, M, tau)`` are the subfunctions of the mixed solution, ``h`` the DG0
+    transport thickness, ``haf`` and ``chi_gr`` UFL on the cells so they
+    follow the geometry without an update, and ``nfront`` the unit gradient of
+    the level set the forward advances. The densities are the forward's own,
+    so a law's floating/grounded split is the forward's grounding test, and
+    ``A`` and ``n`` are the run's fluidity and exponent. ``calving/antarctic.py``
+    builds the same class from a checkpoint when a law is tuned against the
+    Greene fronts, so a tuned threshold means the same thing here.
+    """
+    from icepack_tools.calving import FrontState
+    return FrontState.from_dual(z, h_dg, b, level_set, A=A, n=n,
+                                rho_i=rho_I, rho_w=rho_W)
+
+
 def save_model_state(ctx, final_path, t_now, extra_attrs=None):
     r"""Atomically save one self-contained mixed state.
 
@@ -1553,6 +1616,8 @@ def save_model_state(ctx, final_path, t_now, extra_attrs=None):
                 chk.set_attr("/", _key, _val)
 
         chk.set_attr("/", "t_yr", float(t_now))
+        if ctx.get("calving_law") is not None:
+            chk.set_attr("/", "calving_law", str(ctx["calving_law"].describe()))
         chk.set_attr("/", "friction", str(ctx.get("friction", "budd")))
         if str(ctx.get("friction", "budd")) == "budd":
             # Provenance of the shelf gate this state was solved under
@@ -1698,6 +1763,11 @@ def run_simulation(
     fixed_front = _fixed_front()
     front_hmin = float(os.environ.get("ISMIP7_FRONT_HMIN", "1.0"))
     calving = _calving_law()
+    # The law (icepack_tools.calving, the registry every project that runs a
+    # front selects from) or None. Its rate, evaluated on the live dual state,
+    # drives the level set as the "prescribed" rate; `fixed` freezes it.
+    calving_law_obj = _calving_law_object()
+    ctx["calving_law"] = calving_law_obj
     beyond_front = None
     n_beyond = 0
     cell_area = assemble(fd.TestFunction(Q_dg) * dx).dat.data_ro.copy()
@@ -1767,21 +1837,25 @@ def run_simulation(
     # when no law is configured at all; run_core_matrix.sh exports
     # ISMIP7_FIXED_FRONT=1 unconditionally, which is why the flag may not
     # override an explicit ISMIP7_CALVING choice.
-    legacy_front_sink = fixed_front and calving == "none"
+    legacy_front_sink = fixed_front and calving_law_obj is None
     # A free law moves the front, so the frozen a_ref must follow the live
     # extent; `fixed` and the legacy flag pin it on purpose and keep the
     # t=0-only mask.
-    free_front = calving not in ("none", "fixed")
-    if calving != "none":
-        front_owner = f"level-set {calving} law (ISMIP7_CALVING={calving})" + (
-            "; ISMIP7_FIXED_FRONT is set but ignored for removal"
-            if fixed_front else ""
-        )
+    free_front = (calving_law_obj is not None
+                  and calving_law_obj.front_mode != "fixed")
+    if calving_law_obj is not None:
+        # describe() names every parameter at full precision, so this line
+        # (which core_report.py lifts) records the law as the run used it
+        front_owner = (
+            f"level-set law {calving_law_obj.describe()} "
+            f"(ISMIP7_CALVING={calving})"
+            + ("; ISMIP7_FIXED_FRONT is set but ignored for removal"
+               if fixed_front else ""))
     elif fixed_front:
         front_owner = "legacy fixed-front mask (ISMIP7_FIXED_FRONT)"
     else:
         front_owner = "none (no calving sink)"
-    PETSc.Sys.Print(f"  Calving front owner: {front_owner}")
+    PETSc.Sys.Print(f"  {FRONT_OWNER_MARKER} {front_owner}")
 
     # ISMIP7_LEGACY_TRANSPORT=1 restores the pre-Jul-2026 scheme: the
     # -h*div(u*phi) volume term (non-conservative for DG0: it adds
@@ -2372,9 +2446,8 @@ def run_simulation(
     level_set = None
     phi_entry = None
     last_c_mean = 0.0
-    if calving != "none":
+    if calving_law_obj is not None:
         from icepack2_tools.levelset import LevelSet, initial_distance
-        sig_g, sig_f = _calving_sigma_max()
         # `fixed` holds the front at phi0, which LevelSet captures at
         # construction. On a warm restart h_dg is the RESTARTED extent, so
         # anchor phi0 on the t=0 thickness (ctx["H_init"], reloaded from every
@@ -2385,12 +2458,11 @@ def run_simulation(
         # solve reads the thickness of the object it belongs to. Use a scratch
         # Function, NOT h_dg: under DG0 geometry h_dg IS the live geometry.
         phi_init = None
-        if calving == "fixed":
+        if calving_law_obj.front_mode == "fixed":
             _h0 = Function(Q_dg).project(ctx.get("H_init", h))
             phi_init = initial_distance(mesh, _h0, h_min=front_hmin)
         level_set = LevelSet(
-            mesh, h_dg, law=calving, h_min=front_hmin,
-            sigma_max_grounded=sig_g, sigma_max_floating=sig_f,
+            mesh, h_dg, law=calving_law_obj.front_mode, h_min=front_hmin,
             drag_mask=ctx.get("drag_mask"), phi_init=phi_init,
         )
         phi_entry = Function(level_set.Q0)
@@ -2399,13 +2471,21 @@ def run_simulation(
     ctx["annual"] = annual
     a_ref_entry = Function(a_ref.function_space()) if a_ref is not None else None
     A_map = ctx.get("A_map")
+    # The law's rate on the live state. Its fields are the forward's own
+    # Functions, so one expression stays current as the run evolves; only a
+    # law with an explicit time dependence is re-evaluated each advance.
+    front_state = None
+    calving_rate = None
+    if calving_law_obj is not None and calving_law_obj.front_mode == "prescribed":
+        front_state = calving_front_state(z, h_dg, b, level_set, A_map, n_flow_val)
+        calving_rate = calving_law_obj.rate(front_state, t_start)
 
     def _advance(dt_local, label):
         r"""One transport advance of dt_local with the CURRENT velocity
         (transport-first ordering: the velocity was solved at the current
         geometry). Mutates h_dg and the derived CG fields; returns the
         advance's mass tallies [Gt]."""
-        nonlocal last_c_mean
+        nonlocal last_c_mean, calving_rate
         u_vel = z.subfunctions[0]
         if legacy_transport:
             h_dg.project(h)
@@ -2419,8 +2499,9 @@ def run_simulation(
         calv_frac = None
         ls_ice_free = None
         if level_set is not None:
-            last_c_mean = level_set.advance(
-                dt_local, u_vel, h_dg, b, A_map, n_flow_val)
+            if front_state is not None and calving_law_obj.time_dependent:
+                calving_rate = calving_law_obj.rate(front_state, t_yr)
+            last_c_mean = level_set.advance(dt_local, u_vel, rate=calving_rate)
             lsb, calv_frac = level_set.calving_masks()
             beyond = lsb
             ls_ice_free = level_set.beyond_front()

@@ -11,7 +11,12 @@ import numpy as np
 __all__ = ["retreat_slivers", "clear_reference_where_ice_free", "clamp_thickness",
            "front_connected", "facet_neighbours", "collapse_cell_counts",
            "collapse_banner", "collapse_csv_fields", "COLLAPSE_MARKER",
-           "COLLAPSE_CSV_COLUMNS"]
+           "COLLAPSE_CSV_COLUMNS", "FRONT_OWNER_MARKER"]
+
+# The prefix of the line a run prints naming the mechanism that owns the
+# calving front (an ISMIP7_CALVING law with every parameter it ran with,
+# or the legacy mask). core_report.py lifts it into the run record.
+FRONT_OWNER_MARKER = "Calving front owner:"
 
 # The prefix of every line a run prints about the collapse forcing: the mode
 # at startup, then the cell counts. core_report.py lifts the lines carrying it

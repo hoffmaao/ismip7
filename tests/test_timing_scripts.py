@@ -216,7 +216,6 @@ def test_no_job_script_names_a_cluster_a_person_or_a_resource(name):
 def test_the_score_script_scores_a_map_and_then_its_transferred_state(sandbox):
     r"""map_check_score.script: score_map.py --json on the MAP's own mesh,
     --restart for a prepared cache, the census only when asked for."""
-    root = sandbox / "repo" / "antarctica"
     map_path = sandbox / "map.h5"
     map_path.write_text("map\n")
     status = sandbox / "status.txt"
@@ -279,3 +278,42 @@ def test_the_audit_script_collects_every_part_whatever_each_returns(sandbox):
     assert f"SRUN -n 16 python -u scripts/region_budget.py {sandbox / 'native_final.h5'} --csv {sandbox / 'native.csv'}" in seen
     assert "ISMIP7_LC=2000" in seen and "ISMIP7_LC=1000" in seen and "ISMIP7_MESH=checkpoint" in seen
     assert status.read_text().startswith("finished phase=collect exit_code=0 ")
+
+
+def test_the_melt_bound_job_ends_with_the_check_s_own_status(sandbox):
+    # The check is serial and starts under plain `python`, so stub that the way
+    # srun is stubbed: drop `-u` and the script path, hand the rest to the driver.
+    stub = sandbox / "bin" / "python"
+    stub.write_text('#!/bin/bash\n[ "$1" = -u ] && shift\nshift\n'
+                    'exec "$FAKE_PYTHON" "$FAKE_DRIVER" "$@"\n')
+    stub.chmod(0o755)
+    state = sandbox / "state_1000_final.h5"
+    state.write_text("")
+    k_npz = sandbox / "K.npz"
+    k_npz.write_text("")
+
+    # exit 1 is the verdict "flagged"; the job has to fail with it so that
+    # sacct and an afterok dependency both see it
+    proc, seen = run_script(sandbox, "check_melt_bound.script", FAKE_RC="1",
+                            ISMIP7_LC="1000", ISMIP7_INV_H5=str(state),
+                            ISMIP7_K_PER_BASIN_NPZ=str(k_npz))
+    assert proc.returncode == 1, proc.stderr
+    assert f"ARGV --ocx main --npz {k_npz}" in seen
+    assert f"ISMIP7_INV_H5={state}" in seen and "OMP_NUM_THREADS=1" in seen
+    assert "check_melt_bound exit status: 1" in proc.stdout
+
+    # with no override the check resolves results/calibrated_K_per_basin_<lc>.npz itself
+    proc, seen = run_script(sandbox, "check_melt_bound.script", ISMIP7_LC="1000",
+                            ISMIP7_INV_H5=str(state), ISMIP7_OCX_OCEAN="warm")
+    assert proc.returncode == 0, proc.stderr
+    assert [ln for ln in seen if ln.startswith("ARGV")][-1] == "ARGV --ocx warm"
+
+    # a missing mesh source or K file stops the job before the check starts
+    n_before = len(seen)
+    proc, seen = run_script(sandbox, "check_melt_bound.script", ISMIP7_LC="1000")
+    assert proc.returncode != 0 and "ISMIP7_INV_H5 is required" in proc.stderr
+    proc, seen = run_script(sandbox, "check_melt_bound.script", ISMIP7_LC="1000",
+                            ISMIP7_INV_H5=str(state),
+                            ISMIP7_K_PER_BASIN_NPZ=str(sandbox / "absent.npz"))
+    assert proc.returncode == 2 and "K file not found" in proc.stderr
+    assert len(seen) == n_before

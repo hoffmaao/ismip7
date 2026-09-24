@@ -7,8 +7,6 @@ pixel, and that the forcing callback fills ``ctx["collapse"]`` on the
 geometry cells when the run provides it. The removal itself is the
 transport's (``ISMIP7_FRACTURE=mask``), exercised by the forward.
 """
-import os
-
 import numpy as np
 import pytest
 
@@ -91,3 +89,43 @@ def test_callback_fills_the_collapse_cells(mask_tree):
 def test_missing_mask_means_no_collapse(tmp_path):
     fr = ISMIP7Fracture(data_root=str(tmp_path), esm="CESM2-WACCM", scenario="historical").load()
     assert not fr.get_collapse_mask(2000, np.zeros(3), np.zeros(3)).any()
+
+
+def _mask(root, esm, scenario, version):
+    r"""An empty collapse mask named as the focus group names them."""
+    tag = {"CESM2-WACCM": "cesm2waccm", "MRI-ESM2-0": "mriesm20"}[esm]
+    d = root / esm / scenario / "fracture" / version
+    d.mkdir(parents=True, exist_ok=True)
+    ds = xr.Dataset({"mask": (("time", "y", "x"), np.zeros((1, 2, 2), dtype="int8"))},
+                    coords={"time": np.array([2100]), "y": np.array([0.0, 8000.0]),
+                            "x": np.array([0.0, 8000.0])})
+    ds.to_netcdf(d / f"ice_shelf_collapse_mask_{tag}_{scenario}_ismip7_8km-{version}.nc")
+
+
+def test_a_mask_mode_run_refuses_a_replaced_mask(tmp_path):
+    r"""The focus group replaced the MRI-ESM2-0 ssp585 v1 mask with v2 on Globus
+    on 22 September 2026 while the mirror still served v1 (discussion #30). A
+    tree synced from the mirror alone has to stop a mask-mode run, and the
+    message has to say where the fix is; a tree holding v2 runs."""
+    _mask(tmp_path, "MRI-ESM2-0", "ssp585", "v1")
+    fr = ISMIP7Fracture(data_root=str(tmp_path), esm="MRI-ESM2-0", scenario="ssp585").load()
+    assert fr.version() == "v1"
+    with pytest.raises(RuntimeError, match=r"needs v2 or newer.*on Globus.*"
+                                           r"download_forcing\.py --scenarios --esm MRI-ESM2-0 "
+                                           r"--scenario ssp585"):
+        fr.check_min_version()
+    _mask(tmp_path, "MRI-ESM2-0", "ssp585", "v2")
+    fr = ISMIP7Fracture(data_root=str(tmp_path), esm="MRI-ESM2-0", scenario="ssp585").load()
+    assert fr.version() == "v2"
+    fr.check_min_version()
+
+
+def test_the_minimum_is_per_esm_and_scenario(mask_tree):
+    r"""MRI-ESM2-0 ssp126 has no fix, so its v1 is current; CESM2-WACCM is at
+    v2.1 everywhere, and its v2 is the replaced one."""
+    _mask(mask_tree, "MRI-ESM2-0", "ssp126", "v1")
+    ISMIP7Fracture(data_root=str(mask_tree), esm="MRI-ESM2-0", scenario="ssp126").load().check_min_version()
+    ISMIP7Fracture(data_root=str(mask_tree), esm="CESM2-WACCM", scenario="ssp585").load().check_min_version()
+    _mask(mask_tree, "CESM2-WACCM", "ssp370", "v2")
+    with pytest.raises(RuntimeError, match=r"needs v2\.1 or newer"):
+        ISMIP7Fracture(data_root=str(mask_tree), esm="CESM2-WACCM", scenario="ssp370").load().check_min_version()

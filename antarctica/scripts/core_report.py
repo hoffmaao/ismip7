@@ -44,7 +44,7 @@ from icepack2_tools.climatology import (
 from icepack2_tools.forcing import (
     FORCING_PROVENANCE_MARKER, k_melt, melt_slope, sin_alpha_ant,
 )
-from icepack2_tools.front import COLLAPSE_MARKER
+from icepack2_tools.front import COLLAPSE_MARKER, FRONT_OWNER_MARKER
 from icepack2_tools.runconfig import (
     N_FLOW_DEFAULT, fracture, friction, geometry_space, lc, lc_coarse,
 )
@@ -159,6 +159,15 @@ def collapse_record(log_path):
                   "the run predates the collapse banner")
 
 
+def front_owner(log_path):
+    r"""The mechanism that owned the calving front, lifted out of its log.
+    The env block carries ``ISMIP7_CALVING`` and ``ISMIP7_CALVING_PARAMS``
+    only as exported; this line is where the law reaches the record with
+    every parameter at the value the run used, defaults included."""
+    return lifted(log_path, FRONT_OWNER_MARKER,
+                  "the run predates the front owner line")
+
+
 def sh(cmd):
     r = subprocess.run(cmd, capture_output=True, text=True)
     return (r.stdout + r.stderr).strip(), r.returncode
@@ -239,7 +248,7 @@ def main():
         f.write(f"- observational audit: "
                 f"{'ON TRACK' if audit_rc == 0 else 'OFF TRACK'}\n")
         for line in (climatology_pool(args.log) + forcing_provenance(args.log)
-                     + collapse_record(args.log)):
+                     + collapse_record(args.log) + front_owner(args.log)):
             f.write(f"- {line}\n")
         if ens_rc is not None:
             f.write(f"- ISMIP6 ensemble: "

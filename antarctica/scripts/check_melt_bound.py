@@ -152,6 +152,7 @@ from icepack2_tools.forcing import (quadratic_mixed_slope,            # noqa: E4
                                     ISMIP7Ocean, OCX, OCX_OCEAN_VARIANTS,
                                     describe_forcing_provenance)
 from icepack2_tools.geometry import sample_to_geometry                # noqa: E402
+from icepack2_tools.mpi_stats import global_size                      # noqa: E402
 from icepack2_tools.runconfig import raster_sample                    # noqa: E402
 # The same year and density the writer converts with, so the bound compared
 # here is the one the checker applies.
@@ -247,8 +248,10 @@ def main():
     mesh = cm._load_mesh()
     Q = FunctionSpace(mesh, "CG", 1)
     Q_g = FunctionSpace(mesh, "DG", 0)
-    PETSc.Sys.Print(f"  Mesh: {mesh.num_vertices()} vertices, "
-                    f"{mesh.num_cells()} cells")
+    # num_vertices()/num_cells() count this rank's plex, halo included; the
+    # coordinate dofs and the owned cell set are reduced to global totals.
+    PETSc.Sys.Print(f"  Mesh: {global_size(mesh.coordinates)} vertices, "
+                    f"{mesh.comm.allreduce(mesh.cell_set.size)} cells")
 
     def k_at(xs, ys):
         r"""The per-basin K the forward stamps onto the mesh. K_field in the

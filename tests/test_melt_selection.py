@@ -280,6 +280,88 @@ def test_the_plausibility_statistics_shift_with_the_offset():
     assert out["frac_below_0"][0] == pytest.approx(0.25)
     assert out["frac_above_5"][1] == pytest.approx(1.0)
     assert np.isnan(out["tf_mean"][2])
+    assert "frac_below_floor" not in out
+    ruled = p.at(d, ms.TFRule(floor_area=(0.5, 0.25), cap_area=(5.25, 0.25)))
+    assert ruled["frac_below_floor"][0] == pytest.approx(0.5)   # -0.25 and 0.25 of 4
+    assert ruled["frac_above_cap"][1] == pytest.approx(1.0)     # 5.5
+    assert ruled["frac_above_cap"][0] == 0.0
+    assert np.isnan(ruled["frac_below_floor"][2])
+
+
+def _per(n_K):
+    r"""Per-K, per-basin statistics that pass the default rule everywhere;
+    basin 15 has no floating cells."""
+    per = {"unrooted": np.zeros((n_K, 16)), "tf_mean": np.full((n_K, 16), 1.0),
+           "tf_min": np.full((n_K, 16), 0.2), "tf_max": np.full((n_K, 16), 4.0),
+           "frac_below_floor": np.zeros((n_K, 16)),
+           "frac_above_cap": np.zeros((n_K, 16))}
+    for name in per:
+        per[name][:, 15] = np.nan
+    per["unrooted"][:, 15] = 1.0          # fit_deltaT flags a basin with no cells
+    return per
+
+
+def test_the_rule_admits_a_K_only_when_every_test_passes():
+    per = _per(7)
+    per["unrooted"][1, 9] = 1.0           # Amundsen outside the window
+    per["tf_min"][2, 4] = -1.81           # one cell below the floor
+    per["frac_below_floor"][3, 6] = 0.26  # over a quarter of basin 6 below -1 degC
+    per["frac_below_floor"][4, 6] = 0.25  # a quarter exactly passes
+    per["tf_max"][5, 9] = 6.81
+    per["frac_above_cap"][6, 9] = 0.3
+    ok, tests = ms.TFRule().admits(per)
+    assert ok.tolist() == [True, False, False, False, True, False, False]
+    assert tests["rooted"].tolist() == [True, False] + [True] * 5
+    assert tests["floor"].tolist() == [True, True, False] + [True] * 4
+    assert tests["floor_area"].tolist() == [True] * 3 + [False] + [True] * 3
+    assert tests["cap"].tolist() == [True] * 5 + [False, True]
+    assert tests["cap_area"].tolist() == [True] * 6 + [False]
+    # each test switches off on its own
+    ok, tests = ms.TFRule(cap=None, cap_area=None, rooted=False).admits(per)
+    assert set(tests) == {"floor", "floor_area"}
+    assert ok.tolist() == [True, True, False, False, True, True, True]
+
+
+def test_a_basin_beyond_the_toolbox_window_is_fitted_inside_three_K():
+    from icepack2_tools.forcing import quadratic_mixed_slope, _RHO_I
+    rng = np.random.default_rng(3)
+    n, K = 200, 3.0e-5
+    tf = rng.uniform(1.0, 3.5, n)
+    sal, sin_a, area = np.full(n, 34.5), np.full(n, 5.115e-3), np.full(n, 4.0e6)
+    basin, bids = np.full(n, 9), np.array([9])
+    M_obs = np.array([float((quadratic_mixed_slope(tf + 2.6, sal, sin_a, K=K)
+                             * area).sum()) * _RHO_I / 1e12])
+    fit = lambda **kw: ms.fit_deltaT(tf, sal, sin_a, K, np.ones(n, bool), area,  # noqa: E731
+                                     basin, bids, M_obs, MPI.COMM_SELF, **kw)
+    dT, _, _, _, flagged = fit()
+    assert ms.DT_WINDOW == (-3.0, 3.0) and flagged == []
+    assert dT[0] == pytest.approx(2.6, abs=2e-4)
+    dT, _, resid, _, flagged = fit(window=ms.TOOLBOX_DT_WINDOW)
+    assert dT[0] == 2.0 and [b for b, _ in flagged] == [9] and resid[0] < 0
+
+
+def test_the_objective_on_the_admitted_K_stays_on_them(tmp_path):
+    g, targets = _grid(), _targets(tmp_path)
+    K = np.array([1e-5, 3e-5, 6e-5, 1e-4, 2e-4])
+    jy, jx = np.nonzero(g["melts"])
+    cells = ms.Cells(np.full(len(jy), RESO ** 2), ms.as_labels(g["basins"][jy, jx]),
+                     ms.as_labels(g["bins"][jy, jx]), g["regions"][jy, jx],
+                     ms.NOTEBOOK_SIN_ALPHA, agg=g["fmask"][jy, jx] > 0.5)
+    present = tuple(f[jy, jx] for f in g["present"])
+    states = [(kind, label, g["states"][(kind, label)][0][jy, jx],
+               g["states"][(kind, label)][1][jy, jx])
+              for kind, label, _, _ in ms.state_files("/nowhere")]
+    rows = [ms.aggregate(k, np.zeros(len(jy)), present, states, cells,
+                         ms.NOTEBOOK_RHO_I) for k in K]
+    agg = {name: np.array([r[name] for r in rows]) for name in rows[0]}
+    ok = np.array([False, True, True, True, False])
+    full = ms.toolbox_terms(K, agg, targets)
+    sub = ms.toolbox_terms(K[ok], {n: v[ok] for n, v in agg.items()}, targets)
+    for name in ("t1_model", "t2_model", "t3_model", "t4_model"):
+        assert sub[name].equals(full[name].sel(p1=K[ok])), name
+    sub.update(ms.notebook_weights(sub, targets["t2_weight"], targets["term4"]))
+    picks = ms.select(sub, 300, 100, seed=5)
+    assert np.isin(picks, K[ok]).all()
 
 
 def test_the_notebook_slope_recipe_on_a_plane():

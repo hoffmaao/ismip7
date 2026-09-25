@@ -16,7 +16,9 @@ builds them on any set of cells with areas, the forward's DG0 cells
 included, in the layout ``calculate_objective_function`` reads, and that
 function runs unchanged. ``fit_deltaT`` is the per-basin thermal-forcing
 offset; fitted at every K before the objective runs, the order section 2.3
-prefers, each K's offsets enter every term.
+prefers, each K's offsets enter every term. ``TFRule`` says which K leave a
+plausible present-day thermal forcing (section 2.1) and a fitted total in
+every basin; the objective can then run on those K alone.
 
 The defaults are the toolbox's quadratic example notebook
 (``parameter_selection_quadratic_example.ipynb`` at 5f4d3df, cells 6 to 40):
@@ -68,8 +70,12 @@ NOTEBOOK_T4_YEARS = (2009, 2012)
 # of x = -1.625e6 (cell 20).
 PIG_ID, DOTSON_ID, PIG_X_MIN = 110, 97, -1.625e6
 REGIONS = ("pig", "dotson")
-# The toolbox's deltaT search window, in K (optimise_deltaT).
-DT_WINDOW = (-2.0, 2.0)
+# The deltaT search window, in K. The toolbox searches plus or minus 2 K
+# (optimise_deltaT); the protocol sets no window and bounds the offsets
+# through the thermal forcing they leave (TFRule), so this repository
+# searches plus or minus 3 K.
+TOOLBOX_DT_WINDOW = (-2.0, 2.0)
+DT_WINDOW = (-3.0, 3.0)
 # The order calculate_objective_function takes its arguments in.
 TERM_ARGS = ("t1_model", "t1_obs_mean", "t1_obs_sigma", "t1_weights",
              "t2_model", "t2_obs_mean", "t2_obs_sigma", "t2_weights",
@@ -277,11 +283,16 @@ def read_melt_table(path):
     return np.array(bids), np.array(mobs), np.array(sobs)
 
 
-def fit_deltaT(tf, sal, sin_a, K, floating, area, basin, bids, M_obs, comm):
+def fit_deltaT(tf, sal, sin_a, K, floating, area, basin, bids, M_obs, comm,
+               window=None):
     r"""Per-basin offsets, with ``M(dT=0)``, the residual and ``dM/dT`` at
     the root, all in Gt/yr. The arrays are this rank's dofs; every basin
     total is reduced over ``comm``, so the root, and the file, are the same at
-    any rank count. Collective: call on every rank."""
+    any rank count. Collective: call on every rank.
+
+    The root is searched in ``window`` (``DT_WINDOW`` when None); a basin
+    with no root there takes the end point with the smaller residual and is
+    flagged."""
     from scipy.optimize import brentq
     dT = np.full(len(bids), np.nan)
     M0 = np.zeros(len(bids))
@@ -301,7 +312,7 @@ def fit_deltaT(tf, sal, sin_a, K, floating, area, basin, bids, M_obs, comm):
 
         f = lambda d: M(d) - M_obs[i]  # noqa: E731
         M0[i] = M(0.0)
-        lo, hi = DT_WINDOW
+        lo, hi = DT_WINDOW if window is None else window
         if f(lo) * f(hi) < 0:
             dT[i] = brentq(f, lo, hi, xtol=1e-4)
         else:
@@ -431,12 +442,70 @@ def aggregate(K, dT_cell, present, states, cells, rho):
     return out
 
 
+class TFRule:
+    r"""Which K the present-day thermal forcing admits once each basin's
+    offset is applied.
+
+    Section 2.1 asks the offsets to keep present-day thermal forcing "not
+    significantly below 0 degC or above 5 degC". This repository reads
+    significantly as two tests on each side: a bound every floating cell must
+    meet (``floor``, ``cap``), and a bound at most a share of each basin's
+    area may cross (``floor_area``, ``cap_area``, each a (degC, share) pair).
+    The defaults hold every cell at or above -1.8 degC and at most 25 % of any
+    basin's area below -1.0 degC, and mirror both about the 0 to 5 degC range
+    for the cap. ``rooted`` also refuses a K at which some basin cannot reach
+    its observed total inside the offset window; the toolbox keeps such a K
+    with a term 1 penalty. None switches a test off."""
+
+    def __init__(self, floor=-1.8, floor_area=(-1.0, 0.25), cap=6.8,
+                 cap_area=(6.0, 0.25), rooted=True):
+        def pair(p):
+            return None if p is None else (float(p[0]), float(p[1]))
+        self.floor = None if floor is None else float(floor)
+        self.cap = None if cap is None else float(cap)
+        self.floor_area, self.cap_area = pair(floor_area), pair(cap_area)
+        self.rooted = bool(rooted)
+
+    def as_dict(self):
+        return {"floor": self.floor, "floor_area": self.floor_area,
+                "cap": self.cap, "cap_area": self.cap_area,
+                "rooted": self.rooted}
+
+    def admits(self, per):
+        r"""A bool per K, true where every test passes, and each test's own
+        bool per K. ``per`` holds the per-K, per-basin statistics
+        (``unrooted``, ``tf_mean``, ``tf_min``, ``tf_max`` and, for the area
+        tests, ``frac_below_floor`` and ``frac_above_cap`` from
+        ``Plausibility.at`` with this rule). A basin with no floating cells
+        has NaN statistics and takes part in no test."""
+        has = np.isfinite(np.asarray(per["tf_mean"], np.float64))
+        tests = {}
+        with np.errstate(invalid="ignore"):
+            if self.rooted:
+                tests["rooted"] = ~((np.asarray(per["unrooted"]) > 0) & has).any(axis=1)
+            if self.floor is not None:
+                tests["floor"] = ~(np.asarray(per["tf_min"]) < self.floor).any(axis=1)
+            if self.floor_area is not None:
+                tests["floor_area"] = ~(np.asarray(per["frac_below_floor"])
+                                        > self.floor_area[1]).any(axis=1)
+            if self.cap is not None:
+                tests["cap"] = ~(np.asarray(per["tf_max"]) > self.cap).any(axis=1)
+            if self.cap_area is not None:
+                tests["cap_area"] = ~(np.asarray(per["frac_above_cap"])
+                                      > self.cap_area[1]).any(axis=1)
+        ok = np.ones(has.shape[0], bool)
+        for passed in tests.values():
+            ok &= passed
+        return ok, tests
+
+
 class Plausibility:
     r"""Present-day thermal forcing with each basin's offset, against the
     protocol's plausible range of 0 to 5 degC (section 2.1): per basin the
     area-weighted mean, min and max, and the area fractions below 0 and above
-    5. The offset is one number per basin, so min, max and mean shift with it
-    and only the two fractions are summed again at each K."""
+    5, and beyond a ``TFRule``'s area thresholds when one is given. The
+    offset is one number per basin, so min, max and mean shift with it and
+    only the fractions are summed again at each K."""
 
     def __init__(self, tf, area, basin):
         tf = np.asarray(tf, np.float64)
@@ -453,18 +522,25 @@ class Plausibility:
         empty = self.total <= 0
         self.mean[empty] = self.lo[empty] = self.hi[empty] = np.nan
 
-    def at(self, dT_basin):
-        r"""The five statistics per basin for offsets ``dT_basin`` (16)."""
+    def at(self, dT_basin, rule=None):
+        r"""The statistics per basin for offsets ``dT_basin`` (16): five, and
+        with a ``rule`` the area fractions below its floor and above its cap
+        area thresholds."""
         d = np.nan_to_num(np.asarray(dT_basin, np.float64), nan=0.0)
         shifted = self.tf + d[self.basin]
-        with np.errstate(invalid="ignore", divide="ignore"):
-            below = np.bincount(self.basin, weights=self.area * (shifted < 0.0),
-                                minlength=N_BASINS) / self.total
-            above = np.bincount(self.basin, weights=self.area * (shifted > 5.0),
-                                minlength=N_BASINS) / self.total
-        return {"tf_mean": self.mean + d, "tf_min": self.lo + d,
-                "tf_max": self.hi + d, "frac_below_0": below,
-                "frac_above_5": above}
+
+        def share(mask):
+            with np.errstate(invalid="ignore", divide="ignore"):
+                return np.bincount(self.basin, weights=self.area * mask,
+                                   minlength=N_BASINS) / self.total
+        out = {"tf_mean": self.mean + d, "tf_min": self.lo + d,
+               "tf_max": self.hi + d, "frac_below_0": share(shifted < 0.0),
+               "frac_above_5": share(shifted > 5.0)}
+        if rule is not None and rule.floor_area is not None:
+            out["frac_below_floor"] = share(shifted < rule.floor_area[0])
+        if rule is not None and rule.cap_area is not None:
+            out["frac_above_cap"] = share(shifted > rule.cap_area[0])
+        return out
 
 
 def load_targets(paths, melt_csv):

@@ -16,9 +16,10 @@ the deltaT the forward applies reproduces the basin totals by construction.
 
 For each basin b and K:  M_b(dT) = sum_cells rho_i A_c m(TF_c + dT, S_c; K)
 is monotone in dT (the law is TF |TF|), so the offset is a bracketed root of
-M_b(dT) - M_obs_b on [-2, 2] K (the toolbox's search window); when no root
-exists in the window the end point with the smaller residual is taken and
-flagged, as the toolbox's grid argmin would.
+M_b(dT) - M_obs_b on [-3, 3] K (melt_selection.DT_WINDOW; the toolbox
+searches [-2, 2] K, and the protocol sets no window); when no root exists in
+the window the end point with the smaller residual is taken and flagged, as
+the toolbox's grid argmin would.
 
 Output: deltaT_per_basin_<lc>_K<K>.npz with basin_ids, deltaT_basin, K,
 residual_gt (M_b(dT*) - M_obs_b), sensitivity_gt_per_K (dM_b/dT at dT*),

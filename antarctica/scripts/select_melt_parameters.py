@@ -7,15 +7,23 @@ cells, with a per-basin thermal-forcing offset fitted at every K first
     --geometry notebook8km  the toolbox notebook's own 8 km grid: the check that
                             this aggregation reproduces the toolbox's own
 
-For every K of the notebook's grid (120 values, 2.5e-6 to 3.0e-4), variant
-``per_k`` fits one offset per IMBIE2 basin to the observation table
-(``fit_deltaT``, the calibrate_deltaT.py fit, window plus or minus 2 K), then
-melts the present-day climatology, the 12 ocean-model states and the 13
-observed states with those offsets and builds the toolbox's four terms on the
-cells (icepack2_tools/melt_selection.py). Variant ``none`` melts without
-offsets, the notebook's own order. The vendored
-``calculate_objective_function`` then draws the notebook's weights, 100000
-samples per seed; seed 0 is the headline and seeds 1 to 4 give the spread.
+For every K of the notebook's grid (120 values, 2.5e-6 to 3.0e-4, or up to
+--k-max on the same step), variant ``per_k`` fits one offset per IMBIE2 basin
+to the observation table (``fit_deltaT``, the calibrate_deltaT.py fit, window
+--dt-window, plus or minus 3 K by default), then melts the present-day
+climatology, the 12 ocean-model states and the 13 observed states with those
+offsets and builds the toolbox's four terms on the cells
+(icepack2_tools/melt_selection.py). Variant ``none`` melts without offsets,
+the notebook's own order. The vendored ``calculate_objective_function`` then
+draws the notebook's weights, 100000 samples per seed; seed 0 is the headline
+and seeds 1 to 4 give the spread.
+
+Under ``per_k`` the objective runs on the K that ``melt_selection.TFRule``
+admits: every basin fitted inside the window, and present-day thermal forcing
+with the offsets at or above --tf-floor on every floating cell, below
+--tf-floor-area on at most its share of each basin, and the same on the warm
+side (--tf-cap, --tf-cap-area). The objective over every K, the toolbox's
+handling, is recorded beside it.
 
 Knobs come from the environment, as for the forward: ISMIP7_DATA_ROOT and
 ISMIP7_MELT_OBS_CSV always; under ``mesh`` also ISMIP7_LC, ISMIP7_INV_H5,
@@ -24,10 +32,13 @@ reads. Serial only. Everything is written under --out:
 
     ensemble_<variant>.nc      the aggregates, offsets, fit residuals and TF
                                plausibility at every K, with provenance
-    selection_<variant>.json   the percentiles per seed and where they fell
+    selection_<variant>.json   the percentiles per seed and where they fell,
+                               on the admitted K and on every K
     deltaT_per_basin_<lc>_K<K>.npz   per_k: the offsets at each selected K,
                                in calibrate_deltaT.py's keys, for
                                ISMIP7_DELTAT_PER_BASIN_NPZ
+    tf_present_<lc>.npz        mesh: present-day TF, area and basin of every
+                               floating cell, to test another rule offline
     v1_report.json             notebook8km: the checks against the toolbox
 
     ISMIP7_LC=2000 ISMIP7_INV_H5=<mesh.h5> ISMIP7_MELT_OBS_CSV=<table.csv> \
@@ -57,6 +68,8 @@ from icepack2_tools.forcing import (  # noqa: E402
 )
 
 VARIANTS = ("per_k", "none")
+# The aggregates the objective's terms are built from.
+AGG = ("t1", "t2", "t3_cold", "t3_warm", "t4")
 # What the notebook printed (cells 40 and 59), for the notebook8km report.
 NOTEBOOK_PERCENTILES = {"p5": 4.75e-5, "p50": 8.5e-5, "p95": 1.375e-4}
 NOTEBOOK_TOTALS = {"p5": 878.0, "p50": 1571.0, "p95": 2541.0}
@@ -145,7 +158,8 @@ def write_ensemble(path, K, agg, per, attrs):
     units = {"deltaT": "K", "M_dT0": "Gt/yr", "residual": "Gt/yr",
              "sensitivity": "Gt/yr/K", "unrooted": "1", "tf_mean": "degC",
              "tf_min": "degC", "tf_max": "degC", "frac_below_0": "1",
-             "frac_above_5": "1"}
+             "frac_above_5": "1", "frac_below_floor": "1",
+             "frac_above_cap": "1"}
     for name, values in per.items():
         dv[name] = (("p1", "basin"), np.asarray(values, dtype=np.float64),
                     units[name])
@@ -156,7 +170,8 @@ def write_ensemble(path, K, agg, per, attrs):
     ds.to_netcdf(path)
 
 
-def run_ensemble(K, variant, present, states, cells, bids, M_obs, rho, plaus):
+def run_ensemble(K, variant, present, states, cells, bids, M_obs, rho, plaus,
+                 window=None, rule=None):
     r"""The four aggregates and the fit at every K for one variant."""
     rows, per = [], []
     ones = np.ones(len(cells.area), bool)
@@ -166,7 +181,7 @@ def run_ensemble(K, variant, present, states, cells, bids, M_obs, rho, plaus):
         if variant == "per_k":
             dT, M0, resid, sens, flagged = ms.fit_deltaT(
                 tf, so, cells.sin_alpha, k, ones, cells.area, cells.basin,
-                bids, M_obs, _SERIAL)
+                bids, M_obs, _SERIAL, window=window)
             unrooted = np.isin(bids, [b for b, _ in flagged])
         else:
             dT = np.zeros(len(bids))
@@ -179,7 +194,7 @@ def run_ensemble(K, variant, present, states, cells, bids, M_obs, rho, plaus):
             resid, sens = M0 - M_obs, np.full(len(bids), np.nan)
         row = {"deltaT": dT, "M_dT0": M0, "residual": resid,
                "sensitivity": sens, "unrooted": unrooted.astype(float)}
-        row.update(plaus.at(dT) if plaus is not None else {})
+        row.update(plaus.at(dT, rule) if plaus is not None else {})
         rows.append(a)
         per.append(row)
         if i % 20 == 0 or i == len(K) - 1:
@@ -206,7 +221,7 @@ def select_all(K, agg, targets, seeds, samples, chunk, reso, unrooted):
         log(f"    seed {seed}: K05 {by_seed[int(seed)]['p5']:.4e}  "
             f"K50 {by_seed[int(seed)]['p50']:.4e}  "
             f"K95 {by_seed[int(seed)]['p95']:.4e}  ({time.time() - t0:.0f} s)")
-    step = float(np.median(np.diff(K)))
+    step = float(np.median(np.diff(K))) if len(K) > 1 else float("nan")
     spread = {q: [min(r[q] for r in by_seed.values()),
                   max(r[q] for r in by_seed.values())] for q in ("p5", "p50", "p95")}
     return terms, {
@@ -218,14 +233,33 @@ def select_all(K, agg, targets, seeds, samples, chunk, reso, unrooted):
     }
 
 
-def rooted_range(K, unrooted_any):
-    ok = np.asarray(K)[~np.asarray(unrooted_any)]
-    if ok.size == 0:
+def k_range(K, ok):
+    r"""The span of the K where ``ok`` holds, and whether it has holes."""
+    K, ok = np.asarray(K), np.asarray(ok, bool)
+    if not ok.any():
         return None
-    lo, hi = float(ok.min()), float(ok.max())
-    inside = (np.asarray(K) >= lo) & (np.asarray(K) <= hi)
-    return {"min": lo, "max": hi,
-            "contiguous": bool(not np.asarray(unrooted_any)[inside].any())}
+    lo, hi = float(K[ok].min()), float(K[ok].max())
+    inside = (K >= lo) & (K <= hi)
+    return {"min": lo, "max": hi, "count": int(ok.sum()),
+            "contiguous": bool(ok[inside].all())}
+
+
+def admitted(K, ens, rule):
+    r"""The K the rule admits, with each test's failures, logged."""
+    ok, tests = rule.admits(ens)
+    report = {"rule": rule.as_dict(), "admitted": k_range(K, ok), "tests": {}}
+    for name, passed in tests.items():
+        failed = np.asarray(K)[~passed]
+        report["tests"][name] = {
+            "failing": int(failed.size),
+            "failing_range": [float(failed.min()), float(failed.max())] if failed.size else None}
+        log(f"  {name}: fails at {failed.size} K"
+            + (f", {failed.min():.3e}..{failed.max():.3e}" if failed.size else ""))
+    span = report["admitted"]
+    log("  admitted: " + ("no K" if span is None else
+                          f"{span['count']} K, {span['min']:.3e}..{span['max']:.3e}"
+                          + ("" if span["contiguous"] else " with holes")))
+    return ok, report
 
 
 # --- geometry: mesh ----------------------------------------------------------
@@ -257,7 +291,8 @@ def run_mesh(args):
              "sin_alpha_ant": sin_alpha_ant() if melt_slope() == "ant" else None,
              "sin_alpha_cap": (cm.SIN_ALPHA_CAP if melt_slope() == "local"
                                else float("inf")),
-             "rho_i": float(_RHO_I)}
+             "rho_i": float(_RHO_I), "dt_window": list(args.window),
+             "tf_rule": args.rule.as_dict()}
     log("=== toolbox selection on the forward's DG0 cells ===")
     for k, v in knobs.items():
         log(f"  {k}: {v}")
@@ -305,6 +340,11 @@ def run_mesh(args):
         f"{int((bfrn_bin < 0).sum())} ({area[bfrn_bin < 0].sum() / 1e6:.0f} km2); "
         f"Pine Island {area[region == 1].sum() / 1e6:.0f} km2, "
         f"Dotson {area[region == 2].sum() / 1e6:.0f} km2")
+    # With the offsets in ensemble_per_k.nc, any other thermal forcing rule
+    # can be tested from this file alone.
+    np.savez_compressed(os.path.join(args.out, f"tf_present_{cm.LC}.npz"),
+                        tf=tf, area=area, basin=basin.astype(np.int16),
+                        x=x.astype(np.float32), y=y.astype(np.float32))
 
     sampled = []
     for kind, label, tf_p, so_p in states:
@@ -321,30 +361,54 @@ def run_mesh(args):
     plaus = ms.Plausibility(tf, area, basin)
     report = {"basin_area_km2": area_by_basin.tolist(), "floating_cells": int(len(x)),
               "climatology_gaps": gaps}
+    status = 0
     for variant in args.variants:
         log(f"\n  --- variant {variant} ---")
         agg, per = run_ensemble(K, variant, (tf, so), sampled, cells, bids,
-                                M_obs, float(_RHO_I), plaus)
+                                M_obs, float(_RHO_I), plaus, args.window,
+                                args.rule)
         ens_path = os.path.join(args.out, f"ensemble_{variant}.nc")
         write_ensemble(ens_path, K, agg, per,
                        {"variant": variant, "provenance": prov})
         ens = _load_ensemble(ens_path)
         Ks = ens["p1"]
         unrooted_any = ens["unrooted"].astype(bool).any(axis=1)
-        _, result = select_all(Ks, ens, targets, args.seeds, args.samples,
-                               args.chunk, cm.LC, unrooted_any)
-        result.update({"variant": variant, "ensemble": os.path.basename(ens_path),
-                       "rooted_K_range": rooted_range(Ks, unrooted_any),
-                       "unrooted_K": Ks[unrooted_any].tolist(),
-                       "provenance": prov, "mesh_report": report})
-        if variant == "per_k":
-            result["selected"] = write_selected(
-                args, cm, result["headline"], Ks, ens, (tf, so), sin_a, x, y,
-                area, basin, bids, M_obs, prov)
-            if args.issue30:
-                result["issue30"] = compare_issue30(args.issue30, cm.LC, Ks, ens)
+        base = {"variant": variant, "ensemble": os.path.basename(ens_path),
+                "rooted_K_range": k_range(Ks, ~unrooted_any),
+                "unrooted_K": Ks[unrooted_any].tolist(),
+                "provenance": prov, "mesh_report": report}
+        if variant != "per_k":
+            _, result = select_all(Ks, ens, targets, args.seeds, args.samples,
+                                   args.chunk, cm.LC, unrooted_any)
+            result.update(base)
+            _dump(os.path.join(args.out, f"selection_{variant}.json"), result)
+            continue
+        log("  thermal forcing rule, " + json.dumps(args.rule.as_dict()))
+        ok, rule_report = admitted(Ks, ens, args.rule)
+        log("  every K, unfittable K kept with their term 1 penalty (the toolbox's handling):")
+        _, every = select_all(Ks, ens, targets, args.seeds[:1], args.samples,
+                              args.chunk, cm.LC, unrooted_any)
+        base.update({"tf_rule": rule_report,
+                     "every_K": {k: every[k] for k in ("headline", "sample_size",
+                                                       "chunk", "seeds")}})
+        if not ok.any():
+            log("  the rule admits no K: nothing selected")
+            _dump(os.path.join(args.out, f"selection_{variant}.json"), base)
+            status = 3
+            continue
+        log("  admitted K:")
+        _, result = select_all(Ks[ok], {n: ens[n][ok] for n in AGG}, targets,
+                               args.seeds, args.samples, args.chunk, cm.LC,
+                               unrooted_any[ok])
+        result.update(base)
+        result["selected"] = write_selected(
+            args, cm, result["headline"], Ks, ens, (tf, so), sin_a, x, y,
+            area, basin, bids, M_obs, prov, plaus)
+        if args.issue30:
+            result["issue30"] = compare_issue30(args.issue30, cm.LC, Ks, ens)
         _dump(os.path.join(args.out, f"selection_{variant}.json"), result)
     log("done")
+    return status
 
 
 def _load_ensemble(path):
@@ -354,9 +418,10 @@ def _load_ensemble(path):
 
 
 def write_selected(args, cm, headline, K, ens, present, sin_a, x, y, area,
-                   basin, bids, M_obs, prov):
+                   basin, bids, M_obs, prov, plaus):
     r"""The offsets at K05, K50 and K95 (seed 0) in calibrate_deltaT.py's
-    keys, each read back through the forward's loader and melted again."""
+    keys, each read back through the forward's loader and melted again, with
+    the thermal forcing rule's verdict at that K."""
     from icepack2_tools.runconfig import geometry_space
     tf, so = present
     chosen = {}
@@ -369,12 +434,17 @@ def write_selected(args, cm, headline, K, ens, present, sin_a, x, y, area,
             i = int(hit[0])
             dT, M0 = ens["deltaT"][i], ens["M_dT0"][i]
             resid, sens = ens["residual"][i], ens["sensitivity"][i]
+            unrooted = ens["unrooted"][i]
             how = "grid"
         else:
-            dT, M0, resid, sens, _ = ms.fit_deltaT(
+            dT, M0, resid, sens, flagged = ms.fit_deltaT(
                 tf, so, sin_a, k, np.ones(len(area), bool), area, basin, bids,
-                M_obs, _SERIAL)
+                M_obs, _SERIAL, window=args.window)
+            unrooted = np.isin(bids, [b for b, _ in flagged]).astype(float)
             how = "refitted off the grid"
+        stats = plaus.at(dT, args.rule)
+        stats["unrooted"] = unrooted
+        admits, tests = args.rule.admits({n: np.asarray(v)[None] for n, v in stats.items()})
         fn = os.path.join(args.out, f"deltaT_per_basin_{cm.LC}_K{k:.3e}.npz")
         ms.write_offsets(
             fn, bids, dT, k, M_obs, M0, resid, sens,
@@ -387,7 +457,9 @@ def write_selected(args, cm, headline, K, ens, present, sin_a, x, y, area,
             imbie2_nc=cm.IMBIE2_NC, inversion=cm.INV_H5,
             selected_as=",".join(names),
             toolbox_commit=prov["toolbox"]["commit"],
-            selection_commit=prov["commit"])
+            selection_commit=prov["commit"],
+            dt_window=np.asarray(args.window, np.float64),
+            tf_rule=json.dumps(args.rule.as_dict()))
         field, K_file = load_deltaT_per_basin(fn, x, y, imbie2=cm.IMBIE2_NC)
         melt = quadratic_mixed_slope(tf + field, so, sin_a, K=K_file) * float(_RHO_I)
         totals = ms.label_totals(melt, area, basin, ms.N_BASINS)
@@ -399,7 +471,14 @@ def write_selected(args, cm, headline, K, ens, present, sin_a, x, y, area,
                 field - ms.offsets_on_cells(dT, bids, basin)))),
             "reload_max_total_diff_gtyr": float(np.max(np.abs(totals - expect))),
             "total_gtyr": float(totals.sum()),
+            "rule_admits": bool(admits[0]),
+            "rule_tests": {n: bool(t[0]) for n, t in tests.items()},
+            "tf_range": [float(np.nanmin(stats["tf_min"])), float(np.nanmax(stats["tf_max"]))],
+            "sensitivity_gt_per_K": float(np.nansum(sens)),
         }
+        if not admits[0]:
+            log(f"  {','.join(names)} = {k:.4e} fails the rule: "
+                + ", ".join(n for n, t in tests.items() if not t[0]))
         log(f"  {','.join(names)} = {k:.4e} ({how}): offsets "
             f"{np.nanmin(dT):+.2f}..{np.nanmax(dT):+.2f} K, reloaded total "
             f"{totals.sum():.1f} Gt/yr, max basin difference "
@@ -649,6 +728,27 @@ def _dump(path, obj):
     log(f"  wrote {path}")
 
 
+def _bound(text, flag):
+    if text.strip().lower() == "none":
+        return None
+    try:
+        return float(text)
+    except ValueError:
+        raise SystemExit(f"{flag} takes degC or none, not {text!r}")
+
+
+def _area_bound(words, flag):
+    if len(words) == 1 and words[0].strip().lower() == "none":
+        return None
+    try:
+        degc, share = (float(w) for w in words)
+    except ValueError:
+        raise SystemExit(f"{flag} takes DEGC SHARE or none, not {' '.join(words)!r}")
+    if not 0.0 <= share <= 1.0:
+        raise SystemExit(f"{flag}: the share {share:g} is not in [0, 1]")
+    return degc, share
+
+
 def main():
     ap = argparse.ArgumentParser(description=__doc__.split("\n")[0])
     ap.add_argument("--geometry", choices=("mesh", "notebook8km"), required=True)
@@ -662,9 +762,34 @@ def main():
     ap.add_argument("--k-max", type=float, default=None,
                     help="extend the notebook's K grid (2.5e-6 to 3.0e-4) upward "
                          "on its step to this K")
+    rule = ms.TFRule()
+    ap.add_argument("--dt-window", type=float, default=ms.DT_WINDOW[1],
+                    help="search each basin's offset in plus or minus this many K "
+                         "(the toolbox uses 2)")
+    ap.add_argument("--tf-floor", default=str(rule.floor), metavar="DEGC|none",
+                    help="per_k: every floating cell at or above this")
+    ap.add_argument("--tf-floor-area", nargs="+", default=list(map(str, rule.floor_area)),
+                    metavar="DEGC SHARE|none",
+                    help="per_k: at most SHARE of each basin's area below DEGC")
+    ap.add_argument("--tf-cap", default=str(rule.cap), metavar="DEGC|none",
+                    help="per_k: every floating cell at or below this")
+    ap.add_argument("--tf-cap-area", nargs="+", default=list(map(str, rule.cap_area)),
+                    metavar="DEGC SHARE|none",
+                    help="per_k: at most SHARE of each basin's area above DEGC")
+    ap.add_argument("--keep-unfitted", action="store_true",
+                    help="per_k: admit a K at which some basin cannot reach its "
+                         "observed total inside the window")
     args = ap.parse_args()
     if not os.path.isabs(args.out):
         raise SystemExit("--out must be absolute")
+    if not args.dt_window > 0:
+        raise SystemExit("--dt-window must be positive")
+    args.window = (-args.dt_window, args.dt_window)
+    args.rule = ms.TFRule(floor=_bound(args.tf_floor, "--tf-floor"),
+                          floor_area=_area_bound(args.tf_floor_area, "--tf-floor-area"),
+                          cap=_bound(args.tf_cap, "--tf-cap"),
+                          cap_area=_area_bound(args.tf_cap_area, "--tf-cap-area"),
+                          rooted=not args.keep_unfitted)
     os.makedirs(args.out, exist_ok=True)
     if args.geometry == "mesh":
         return run_mesh(args) or 0

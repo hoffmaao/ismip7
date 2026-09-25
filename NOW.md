@@ -10,7 +10,7 @@ is an index.
 **Claim the card before you start a run or an inversion.** A card in
 Claimed for more than 24 hours with no comment reads as unclaimed.
 
-Generated: 2026-09-25 12:36 UTC. 15 blocking, 8 owed, 0 after the deadline, 6 unverified.
+Generated: 2026-09-25 13:34 UTC. 15 blocking, 7 owed, 1 after the deadline, 6 unverified.
 
 ## Blocking the submission
 
@@ -40,7 +40,6 @@ Decisions first: they have the longest lead time and they gate the runs.
 |---|---|---|---|---|---|
 | [99](https://github.com/icepack/ismip7/issues/99) | sea level: on the 8 km grid the tool loses about 10 % of the model's volume-above-flotation change by 2300 | needs-decision | group | n/a | verified open |
 | [109](https://github.com/icepack/ismip7/issues/109) | output: the libmassbffl fill drops real melt of ice gone by year end, about 620 Gt/yr at 2300 in ssp585 | needs-decision | group | n/a | verified open |
-| [32](https://github.com/icepack/ismip7/issues/32) | solver: the monolithic forward for core 7 and the core 10 tail is not implemented | needs-run | group | local | verified open |
 | [36](https://github.com/icepack/ismip7/issues/36) | calving: the von Mises level-set front is not calibrated | needs-run | group | local | verified open |
 | [47](https://github.com/icepack/ismip7/issues/47) | solver: the UChicago Midway site has never run end to end | needs-run | uchicago | midway | verified open |
 | [16](https://github.com/icepack/ismip7/issues/16) | forcing: re-audit the CESM2-WACCM ssp585 fracture before production (#37) | needs-check | group | quartz, nots, midway | fresh, unverified by design |
@@ -85,4 +84,4 @@ production run or a group decision.
 
 ## After the deadline
 
-None.
+- [113](https://github.com/icepack/ismip7/issues/113) feature: monolithic solve

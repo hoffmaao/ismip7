@@ -896,6 +896,35 @@ class ISMIP7Ocean:
         spans = self.spans(variable)
         return (spans[0][0], max(sp[1] for sp in spans)) if spans else None
 
+    def require_years(self, first, last, variables=("tf", "so")):
+        r"""Refuse a run that needs years ``first`` to ``last`` from a tree
+        that does not hold them, and return the ``(first, last)`` span every
+        variable covers.
+
+        A variable with no files at all reads as zero thermal forcing
+        (``get_thermal_forcing``), so a run on an absent tree would melt
+        nothing and report success. A driver calls this before its model
+        setup. The single year after the series is held (``_chunk_for``), so
+        ``last`` may lie one past the files.
+        """
+        covers = []
+        for var in variables:
+            cover = self.coverage(var)
+            if cover is None:
+                raise FileNotFoundError(
+                    f"No ocean {var} data for {self.esm}/{self.scenario}. Download the "
+                    f"ocean tree first."
+                )
+            if cover[0] > first or cover[1] + 1 < last:
+                raise FileNotFoundError(
+                    f"Ocean {var} for {self.esm}/{self.scenario} covers {cover[0]}-{cover[1]}, "
+                    f"and this run needs {first}-{last} (one year past the end is "
+                    f"held, no more). Download the rest of the ocean tree, or move "
+                    f"ISMIP7_T_START / ISMIP7_T_END inside it."
+                )
+            covers.append(cover)
+        return max(c[0] for c in covers), min(c[1] for c in covers)
+
     def _chunk_for(self, variable, yr):
         r"""The chunk file holding year ``yr``, or the last one for the single
         year after the series ends; None when the variable has no files.
@@ -1605,8 +1634,10 @@ def _oi_climatology_path(root, var, version):
 
 def build_oi_climatology_interpolators(data_root=None, version=None):
     r"""Load the OI climatology TF and so into (z, y, x)
-    RegularGridInterpolators (nearest, fill 0). Shared by the CTRL and any
-    observationally-forced run (OCX). ISMIP7_OI_VERSION selects the
+    RegularGridInterpolators (nearest, fill 0). Shared by the observationally
+    forced runs (the OCX stopgap) and the inversion's melt. The control reads
+    its ESM's ``ctrl`` ocean through :class:`ISMIP7Ocean` instead
+    (icepack/ismip7#107). ISMIP7_OI_VERSION selects the
     release (default 30_sep, matching the per-basin K calibration;
     switching to 06_nov without recalibrating K shifts the melt)."""
     import xarray as xr
@@ -1655,8 +1686,8 @@ def build_oi_climatology_interpolators(data_root=None, version=None):
 
 def make_climatology_ocean_callback(K_field, data_root=None):
     r"""Ocean-melt callback with CONSTANT OI-climatology TF/so and evolving
-    geometry: the CTRL2015 / observationally-constrained ocean forcing.
-    K_field is a scalar or per-node array (calibrated per-basin K).
+    geometry: the observationally constrained ocean forcing of the OCX
+    stopgap. K_field is a scalar or per-node array (calibrated per-basin K).
 
     The per-basin K comes from antarctica/scripts/calibrate_melt.py, which
     follows ISMIP7_GEOMETRY_SPACE like the forward. The K file records the

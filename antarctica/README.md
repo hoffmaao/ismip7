@@ -55,6 +55,9 @@ Source Cooperative carries the data-freeze copy and needs no account.
 python antarctica/scripts/download_mirror.py \
     data/CESM2-WACCM/ssp585/SDBN1-8000m/acabf-anomaly/ \
     data/CESM2-WACCM/ssp585/ocean/tf/ data/CESM2-WACCM/ssp585/ocean/so/
+# the control's ocean for one ESM, which cores 9 and 10 read (about 18 GB)
+python antarctica/scripts/download_mirror.py \
+    data/CESM2-WACCM/ctrl/ocean/tf/ data/CESM2-WACCM/ctrl/ocean/so/
 # the observations MIPkit (about 9 GB)
 python antarctica/scripts/download_mirror.py --product ismip7-ais-observations data/mipkit/
 # whether a local tree is current: which version a run opens
@@ -212,6 +215,7 @@ python scripts/download_forcing.py --ocean        # thetao/so/tf + climatology +
 python scripts/download_forcing.py --calibration  # meltMIP obs melt, IMBIE2 basins, grid, topography
 python scripts/download_forcing.py --scenarios    # per-(ESM, scenario) forcing (cores 1-8)
 python scripts/download_forcing.py --scenarios --esm MRI-ESM2-0 --scenario historical,ssp585
+python scripts/download_forcing.py --scenarios --scenario ctrl   # the control's ocean (cores 9, 10); its atmosphere comes too, unread
 python scripts/download_forcing.py --scalar-processing  # ismip7-scalars grids, see "From a finished run to a submission"
 python scripts/download_forcing.py --status
 ```
@@ -678,9 +682,13 @@ its step-size behaviour under the transport's masks, the drag gate, and the
 refusal of an unknown or underspecified law.
 
 **Control and projection configurations differ.** The protocol's control is an
-unforced constant-climate run with calving set to end-of-2014 conditions, so
-the control here is `ISMIP7_APPARENT_MB` with `ISMIP7_FIXED_FRONT=1` and
-`ISMIP7_CALVING=none`. That is what `run_core_matrix.sh` runs and what every
+unforced constant-climate run with fracture, collapse, calving and GIA held at
+end-of-2014 conditions (the April 2026 protocol cheat sheet in `../protocol/`),
+so the control here runs with `ISMIP7_FIXED_FRONT=1` and `ISMIP7_CALVING=none`.
+It also runs with `ISMIP7_APPARENT_MB`, a choice of this repository: the
+protocol leaves initial conditions to each group and keeps the control to
+assess drift, and whether the production runs keep the reference is a group
+decision (issue #104). That is what `run_core_matrix.sh` runs and what every
 control result used. `ISMIP7_CALVING=fixed` also pins the front and is a
 different run: it builds a level set, so ocean drag is gated off near the front
 and the retreat-sliver rule applies inside the t=0 extent, giving a slightly
@@ -823,7 +831,7 @@ redeclare those literals.
 | `ISMIP7_RUN_TAG` | experiment-name suffix for a parallel method line | unset |
 | `ISMIP7_WALL_STOP_MIN` | wall-clock budget in minutes from process start, checked before each step against the longest step so far, so the run writes its final checkpoint and exits with `t_yr` short of `t_end` for a chained job to resume. `projection.sbatch` derives it from the job's own TimeLimit, holding back 25 minutes. `0` disables | `0` |
 | `ISMIP7_EXPERIMENT_NAME` | the run's identity, used by `adapt_mesh.py` to name adapted meshes and sidecars so parallel experiments cannot overwrite each other. Set by `run_adaptive.py --experiment-name`. See `../ADAPTIVE_MESH.md` | unset |
-| `ISMIP7_APPARENT_MB` | `1` or `balance` zeroes the t=0 thickness tendency (ISMIP6 ctrl_proj style); `div` cancels only the flux divergence; `0`, `off`, `none` and empty disable it | unset |
+| `ISMIP7_APPARENT_MB` | `1` or `balance` zeroes the t=0 thickness tendency; `div` cancels only the flux divergence; `0`, `off`, `none` and empty disable it | unset |
 | `ISMIP7_FIXED_FRONT` | hold the calving front at the t=0 extent, tallying inflow beyond it as calving. `=0` disables. Ignored whenever an `ISMIP7_CALVING` law is configured | unset |
 | `ISMIP7_TRIPWIRE_U_MAX` / `ISMIP7_TRIPWIRE_H_MAX` / `ISMIP7_TRIPWIRE_DH_RATE` / `ISMIP7_TRIPWIRE_HMIN` | runaway tripwire: fail the step when max speed exceeds `U_MAX` [m/yr], max thickness exceeds `H_MAX` [m], or a cell that entered the step at least `HMIN` thick thickens at a relative rate `(dh/h)/dt` above `DH_RATE` [1/yr] (a rate so every dt scores the same physics alike; thinner cells are reported, never tripped: buffer cells fill by more than their own thickness); every step prints a `tripwire step-k:` line with the worst cells; unset = off (timing lanes export 2e4 / 5000 / 20 / 100) | _(unset)_ |
 | `ISMIP7_LEGACY_TRANSPORT` | restore the pre-July-2026 CG-projection transport (needs `cg1`) | unset |

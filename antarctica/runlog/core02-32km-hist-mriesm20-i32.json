@@ -1,0 +1,31 @@
+{
+  "id": "core02-32km-hist-mriesm20-i32",
+  "task": "test",
+  "institution": "IU",
+  "title": "Core 2 at 32 km, the i32 historical: branch state of the i32 core 10 control",
+  "status": "done",
+  "esm": "MRI-ESM2-0",
+  "scenario": "historical",
+  "period": "1850 to 2015, reached 2015.0",
+  "friction": "budd",
+  "mesh": "antarctica_320000_32000, DG0 geometry",
+  "initial_state": "inversion_icepack2_budd_n3_dg0_logvelnet_32000.h5, sha256 3b3aefa1c69a5daf87d1db291cae9337e00c2696f412bce147b1f488228ef472",
+  "branch_from": "cold start",
+  "forcing": "MRI-ESM2-0 historical, atmosphere GEMB-SDBN1-8000m v2, ocean v3",
+  "melt": "per-basin K from K_issue11_mesh2500.npz, local slope",
+  "front": "held fixed, ice-shelf collapse ISMIP7_FRACTURE=none",
+  "apparent_mb": "balance",
+  "dt": 0.1,
+  "site": "IU Quartz",
+  "resources": "8 ranks",
+  "jobs": [
+    "10604488"
+  ],
+  "code": "6af8a6a",
+  "started": "2026-09-24",
+  "finished": "2026-09-24",
+  "cost": "one link of 41 min for 165 model years",
+  "results": "antarctica/results/hist_mri_esm2_0_i32_32000_*",
+  "audit": "ON TRACK, with dM/dt WARN at 300.8 Gt/yr; resid 0.0000 on all 1650 rows, no rescue, subcycle or stall event",
+  "notes": "run for issue #32. The final state hist_mri_esm2_0_i32_32000_final.h5, sha256 75536d1926268539fdb202045e7c6c021d03d36fa1967e13bf3345b779670dee, is the 2015.0 state the i32 control restarts from. Every step converged on its first direct diagnostic solve, with 5.2 Newton iterations on average and 36 at the most (step 1594, t = 2009.4). Run without ISMIP7_OUTPUT, which the historical does not need. Full record: antarctica/reports/core02_hist_mri_esm2_0_32km_i32.md"
+}

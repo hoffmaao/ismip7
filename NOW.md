@@ -10,7 +10,7 @@ is an index.
 **Claim the card before you start a run or an inversion.** A card in
 Claimed for more than 24 hours with no comment reads as unclaimed.
 
-Generated: 2026-09-25 03:03 UTC. 15 blocking, 8 owed, 0 after the deadline, 6 unverified.
+Generated: 2026-09-25 12:36 UTC. 15 blocking, 8 owed, 0 after the deadline, 6 unverified.
 
 ## Blocking the submission
 

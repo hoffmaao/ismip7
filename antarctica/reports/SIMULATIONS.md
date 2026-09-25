@@ -9,9 +9,9 @@ gitignored, so these records and the per-core reports beside them are
 the trace a run leaves in the repository. A core experiment also gets
 its full report from `core_report.py`; this is the index.
 
-56 records.
+58 records.
 
-Status: 12 planned, 3 running, 3 stopped, 27 done, 11 superseded.
+Status: 12 planned, 3 running, 3 stopped, 29 done, 11 superseded.
 
 ## Inversion
 
@@ -35,6 +35,7 @@ Status: 12 planned, 3 running, 3 stopped, 27 done, 11 superseded.
 | Core 1 at 32 km with the apparent-MB reference on main at 700a846, the same-code partner of the i104off historical | done | antarctica_320000_32000, DG0 geometry | IU Quartz | 2026-09-24 | 2026-09-24 | ON TRACK, with dM/dt WARN at 247.7 Gt/yr; resid 0.0000 on all 1650 rows, no rescue, subcycle or stall event |
 | Core 1 at 32 km, the p2 historical: branch state of the p2 and p3 runs | done | antarctica_320000_32000, DG0 geometry | IU Quartz | 2026-09-22 | 2026-09-22 | ON TRACK, with dM/dt WARN at 247.7 Gt/yr; resid 0.0000 on all 1650 rows |
 | Core 2 at 32 km without the apparent-MB reference: branch state of the i104off runs | done | antarctica_320000_32000, DG0 geometry | IU Quartz | 2026-09-24 | 2026-09-24 | OFF TRACK, with dM/dt FAIL at 730.1 Gt/yr; resid 0.0000 on all 1650 rows, no rescue, subcycle or stall event |
+| Core 2 at 32 km, the i32 historical: branch state of the i32 core 10 control | done | antarctica_320000_32000, DG0 geometry | IU Quartz | 2026-09-24 | 2026-09-24 | ON TRACK, with dM/dt WARN at 300.8 Gt/yr; resid 0.0000 on all 1650 rows, no rescue, subcycle or stall event |
 | Core 3 at 32 km without the apparent-MB reference, branched from the i104off historical | done | antarctica_320000_32000, DG0 geometry | IU Quartz | 2026-09-24 | 2026-09-24 | ON TRACK, with dM/dt WARN at 279.6 Gt/yr; resid 0.0000 on all 860 rows, no rescue, subcycle or stall event |
 | Core 4 at 32 km without the apparent-MB reference, branched from the i104off historical | done | antarctica_320000_32000, DG0 geometry | IU Quartz | 2026-09-24 | 2026-09-24 | OFF TRACK, with dM/dt FAIL at 999.4 Gt/yr; resid 0.0000 on all 860 rows, no rescue, subcycle or stall event |
 | Core 5 at 32 km without the apparent-MB reference, branched from the i104off historical | done | antarctica_320000_32000, DG0 geometry | IU Quartz | 2026-09-24 | 2026-09-24 | OFF TRACK, with dM/dt FAIL at 747.5 Gt/yr; resid 0.0000 on all 2860 rows, no rescue, subcycle or stall event |
@@ -53,6 +54,7 @@ Status: 12 planned, 3 running, 3 stopped, 27 done, 11 superseded.
 | Core 9 at 32 km for five years with the native scalars over true area, branched from the p2 historical | done | antarctica_320000_32000, DG0 geometry | IU Quartz, debug partition | 2026-09-24 | 2026-09-24 | ON TRACK; resid 0.0000 on all 50 rows, no rescue or stall event; the timeseries equals the p4 control's first 50 rows to the last digit |
 | Core 10 at 32 km without the apparent-MB reference, branched from the i104off historical | done | antarctica_320000_32000, DG0 geometry | IU Quartz | 2026-09-24 | 2026-09-24 | OFF TRACK, with dM/dt FAIL at 945.9 Gt/yr; resid 0.0000 on all 2860 rows, 1 rescued step, no subcycle or stall event |
 | Core 10 at 32 km on the MRI-ESM2-0 ctrl ocean, branched from the i32 historical | done | antarctica_320000_32000, DG0 geometry | IU Quartz | 2026-09-24 | 2026-09-24 | ON TRACK, with dM/dt WARN at 425.2 Gt/yr; resid 0.0000 on all 2860 rows, no rescue, subcycle or stall event |
+| Core 10 at 32 km, branched from the i32 historical: the July 2040.5 wall on the current stack | done | antarctica_320000_32000, DG0 geometry | IU Quartz | 2026-09-24 | 2026-09-24 | ON TRACK, with dM/dt WARN at 422.1 Gt/yr; resid 0.0000 on all 2860 rows, no rescue, subcycle or stall event |
 | Core 11 at 32 km without the apparent-MB reference, a cold start on the OCX protocol forcing | done | antarctica_320000_32000, DG0 geometry | IU Quartz | 2026-09-24 | 2026-09-24 | OFF TRACK, with dM/dt FAIL at 603.9 Gt/yr; resid 0.0000 on all 470 rows, 1 rescued step, no subcycle or stall event |
 | 1 km control from the transferred Budd snapshot at half the step | done | antarctica_10000_1000_buffered20000, 1 km fine, 10 km interior, 20 km buffer | nots, commons partition | 2026-09-22 | 2026-09-22 | five years complete: VAF drift 0.13 mm of sea level, 0.027 mm a year against the 2 mm a year tolerance; mass +21 Gt over five years against a 2532 Gt/yr surface balance; budget residual zero on every row. The same configuration at dt=0.05 diverged in 2016.1, so halving the step is the cure. Shelf melt 1428 Gt/yr, calving 24, balanced correction -1151 |
 | 1 km control with the MAP's own geometry carried onto the target | stopped | antarctica_10000_1000_buffered20000, 1 km fine, 10 km interior, 20 km buffer | nots, commons partition | 2026-09-22 | - | starts 20 percent faster at the Amery trough than the target-native BedMachine geometry and diverges sooner, by step 19 |
@@ -293,6 +295,34 @@ Core 2 at 32 km without the apparent-MB reference: branch state of the i104off r
 - **Results path:** antarctica/results/hist_mri_esm2_0_i104off_32000_*
 - **Audit:** OFF TRACK, with dM/dt FAIL at 730.1 Gt/yr; resid 0.0000 on all 1650 rows, no rescue, subcycle or stall event
 - **Notes:** run for issue #104 from a scratch clone of main at 700a846, with results and logs in the shared checkout. 1650 of 1650 steps converged on their first direct diagnostic solve, with 6.0 Newton iterations on average and 17 at the most (step 838, t = 1933.8). VAF changes by +498 mm SLE over 1850 to 2015; the peak ice speed on the mesh is 42078 m/yr at t = 1880.1, at (417000, -1689000) m. Against core02-32km-hist-mriesm20-i32 with the reference, VAF gains 498 mm SLE against 171, the post-first-year dM/dt is +730.1 against +300.8 Gt/yr, and the requested basal melt averages 466 against 921 Gt/yr. Run without ISMIP7_OUTPUT. Final state sha256 5d794657a1bfa9cb6e7d8b7ffeb8496c579b7f776989b48ec0bf5bffe1476cbc. Full record: antarctica/reports/core02_hist_mri_esm2_0_32km_i104off.md.
+
+### core02-32km-hist-mriesm20-i32
+
+Core 2 at 32 km, the i32 historical: branch state of the i32 core 10 control (done), IU.
+
+- **Task type:** test
+- **ESM:** MRI-ESM2-0
+- **Scenario:** historical
+- **Period (yr):** 1850 to 2015, reached 2015.0
+- **Friction law:** budd
+- **Mesh:** antarctica_320000_32000, DG0 geometry
+- **Initial state / MAP:** inversion_icepack2_budd_n3_dg0_logvelnet_32000.h5, sha256 3b3aefa1c69a5daf87d1db291cae9337e00c2696f412bce147b1f488228ef472
+- **Branch from:** cold start
+- **Forcing versions:** MRI-ESM2-0 historical, atmosphere GEMB-SDBN1-8000m v2, ocean v3
+- **Melt: K, slope, deltaT:** per-basin K from K_issue11_mesh2500.npz, local slope
+- **Calving front, collapse:** held fixed, ice-shelf collapse ISMIP7_FRACTURE=none
+- **Apparent MB:** balance
+- **dt (yr):** 0.1
+- **Site / partition:** IU Quartz
+- **Ranks / memory:** 8 ranks
+- **Job ids:** 10604488
+- **Code:** 6af8a6a
+- **Started:** 2026-09-24
+- **Finished:** 2026-09-24
+- **Cost per model year:** one link of 41 min for 165 model years
+- **Results path:** antarctica/results/hist_mri_esm2_0_i32_32000_*
+- **Audit:** ON TRACK, with dM/dt WARN at 300.8 Gt/yr; resid 0.0000 on all 1650 rows, no rescue, subcycle or stall event
+- **Notes:** run for issue #32. The final state hist_mri_esm2_0_i32_32000_final.h5, sha256 75536d1926268539fdb202045e7c6c021d03d36fa1967e13bf3345b779670dee, is the 2015.0 state the i32 control restarts from. Every step converged on its first direct diagnostic solve, with 5.2 Newton iterations on average and 36 at the most (step 1594, t = 2009.4). Run without ISMIP7_OUTPUT, which the historical does not need. Full record: antarctica/reports/core02_hist_mri_esm2_0_32km_i32.md
 
 ### core03-32km-ssp370-cesm2waccm-i104off
 
@@ -828,6 +858,35 @@ Core 10 at 32 km on the MRI-ESM2-0 ctrl ocean, branched from the i32 historical 
 - **Results path:** antarctica/results/ctrl2015_mri_esm2_0_i107_32000_*
 - **Audit:** ON TRACK, with dM/dt WARN at 425.2 Gt/yr; resid 0.0000 on all 2860 rows, no rescue, subcycle or stall event
 - **Notes:** run for issue #107's forcing change from a scratch clone of main at 700a846, with results and logs in the shared checkout. 2860 of 2860 steps converged on their first direct diagnostic solve, with 7.4 Newton iterations on average and 13 at the most (step 665, t = 2081.5). VAF changes by +360 mm SLE over 2015 to 2301; the peak ice speed on the mesh is 8812 m/yr at t = 2300.4, at (-2083000, 783000) m. Against core10-32km-ctrl2015-mriesm20-i32, the same branch state on the OI ocean climatology, the first-step basal melt is 991 against 1011 Gt/yr (x0.979), its mean 1022 against 1034 Gt/yr, the post-first-year dM/dt +425.2 against +422.1 Gt/yr, and VAF gains 360 against 359 mm SLE. Steps 250 to 260 (2040.0 to 2041.0, the July wall) took 6 to 7 Newton iterations. Run without ISMIP7_OUTPUT. Final state sha256 02512b81a131dd389a99e3a64519faf2bc524bc220f57aeaf8bf37b6e86a0d79. Full record: antarctica/reports/core10_ctrl2015_mri_esm2_0_32km_i107.md.
+
+### core10-32km-ctrl2015-mriesm20-i32
+
+Core 10 at 32 km, branched from the i32 historical: the July 2040.5 wall on the current stack (done), IU.
+
+- **Task type:** test
+- **ISMIP7 exp id:** C010
+- **ESM:** MRI-ESM2-0
+- **Scenario:** ctrl
+- **Period (yr):** 2015 to 2301, reached 2301.0
+- **Friction law:** budd
+- **Mesh:** antarctica_320000_32000, DG0 geometry
+- **Initial state / MAP:** hist_mri_esm2_0_i32_32000_final.h5, sha256 75536d1926268539fdb202045e7c6c021d03d36fa1967e13bf3345b779670dee
+- **Branch from:** core02-32km-hist-mriesm20-i32 at 2015.0, from the log's branch and restart lines
+- **Forcing versions:** RACMO2.4p1 SMB climatology 2000 to 2029 and the OI ocean climatology (30_sep), constant in time
+- **Melt: K, slope, deltaT:** per-basin K from K_issue11_mesh2500.npz, local slope
+- **Calving front, collapse:** held fixed, ice-shelf collapse ISMIP7_FRACTURE=none
+- **Apparent MB:** balance
+- **dt (yr):** 0.1
+- **Site / partition:** IU Quartz
+- **Ranks / memory:** 8 ranks
+- **Job ids:** 10604858
+- **Code:** 6af8a6a
+- **Started:** 2026-09-24
+- **Finished:** 2026-09-24
+- **Cost per model year:** one link of 48 min for 286 model years
+- **Results path:** antarctica/results/ctrl2015_mri_esm2_0_i32_32000_*
+- **Audit:** ON TRACK, with dM/dt WARN at 422.1 Gt/yr; resid 0.0000 on all 2860 rows, no rescue, subcycle or stall event
+- **Notes:** run for issue #32: the July core 10 (core10-32km-ctrl2015-mriesm20) stopped at 2040.5. Every step converged on its first direct diagnostic solve, with 7.6 Newton iterations on average and 17 at the most (step 918, t = 2106.8); steps 250 to 260 (2040.0 to 2041.0) took 5 to 8. VAF gains 359 mm SLE over 2015 to 2301 under the constant climate. Run without ISMIP7_OUTPUT. Final state sha256 85ed6c5c4677f7d7bc3f69c1c97e10b06a7f942caae82004bfef0edbd2127154. Full record: antarctica/reports/core10_ctrl2015_mri_esm2_0_32km_i32.md
 
 ### core11-32km-ocx-i104off
 

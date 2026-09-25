@@ -115,8 +115,10 @@ from icepack2_tools.forcing import (load_racmo_smb_climatology,
                                     load_mean_annual_surface_temperature)
 from icepack2_tools.runconfig import (
     TARGET_MESH_GEOMETRY_METHOD,
+    front_hmin,
     residual_stabilizers,
 )
+from icepack2_tools.front import facet_neighbours, ocean_drag_cells
 from icepack2_tools.solverconfig import (
     diagnostic_solver_mode,
     final_solve_bounds,
@@ -834,6 +836,21 @@ def main():
         "  Residual stabilizers (shared with the forward): "
         + ", ".join(f"{key}={value:g}" for key, value in stabilizers.items())
     )
+    # The forward's ocean-drag gate (front.ocean_drag_cells) on the geometry
+    # this inversion fits, which is the forward's t=0 extent: the drag acts
+    # only in open water a cell away from the ice, so the controls are fitted
+    # to the same free front, with no drag under any floating ice, that the
+    # forward then runs. Without it the MAP learned a front the drag held at
+    # a tenth of its observed speed.
+    drag_mask = Function(FunctionSpace(mesh, "DG", 0), name="drag_mask")
+    _ice = Function(drag_mask.function_space()).project(H).dat.data_ro >= front_hmin()
+    drag_mask.dat.data[:] = ocean_drag_cells(
+        _ice, facet_neighbours(drag_mask.function_space()), _ice)
+    PETSc.Sys.Print(
+        f"  Ocean drag gate: {COMM_WORLD.allreduce(int(drag_mask.dat.data_ro.sum()))} "
+        f"of {COMM_WORLD.allreduce(int(drag_mask.dat.data_ro.size))} cells, open water "
+        f"a cell away from the ice (h < {front_hmin():g} m), as in the forward"
+    )
 
     def build_F(theta_c, phi_c):
         # Residual closure (tau linear, grounded-only theta via exp(theta*He),
@@ -847,7 +864,7 @@ def main():
                 fric_law=FRICTION, N_ref=None,
                 nhat_floor=BUDD_DELTA, nhat_cap=BUDD_NHAT_CAP, alpha_gl=ALPHA_GL,
                 c0=C0_RC, c_w0_floor=RC_CW0_FLOOR, h_visc_floor=RC_HVISC_FLOOR,
-                k_lim=0.0, **stabilizers,
+                k_lim=0.0, **stabilizers, drag_mask=drag_mask,
                 calving_ids=calving_ids if use_calving_terminus else None,
             )
         return derivative(_build_action(theta_c, phi_c, fields), z)

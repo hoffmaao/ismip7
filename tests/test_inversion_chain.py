@@ -220,6 +220,36 @@ def test_the_successor_carries_its_depth_in_sbatch_s_environment(sandbox):
     assert "chain: successor 999999 queued (depth 2 of 4)" in log
 
 
+def _successor_argv(calls):
+    argv = [line for line in calls.splitlines() if line.startswith("ARGV:")]
+    assert len(argv) == 1, calls
+    return argv[0].split()
+
+
+def test_a_multinode_link_hands_its_layout_to_the_successor(sandbox):
+    r"""A link that asked for 2 nodes x 32 tasks queues its successor with the
+    same layout. Without it the successor's srun, reading the link's
+    SLURM_NTASKS_PER_NODE from the exported environment, asked an allocation
+    laid out by Slurm for more than it held (NOTS 1614035)."""
+    rc, log, calls = run_job(
+        sandbox, FAKE_DIE_AFTER="optimizer",
+        SLURM_JOB_NUM_NODES="2", SLURM_NTASKS="64", SLURM_NTASKS_PER_NODE="32")
+    assert rc == 137, log
+    words = _successor_argv(calls)
+    assert words[words.index("-N") + 1] == "2"
+    assert words[words.index("-n") + 1] == "64"
+    assert "--ntasks-per-node=32" in words
+
+
+def test_a_link_without_a_layout_request_leaves_it_to_slurm(sandbox):
+    r"""A link that named no per-node layout does not invent one for its
+    successor."""
+    rc, log, calls = run_job(sandbox, FAKE_DIE_AFTER="optimizer")
+    assert rc == 137, log
+    words = _successor_argv(calls)
+    assert not [word for word in words if word.startswith("--ntasks-per-node")]
+
+
 def test_the_chain_depth_cap_stops_it(sandbox):
     r"""The cap is the only bound on a chain whose links keep failing early."""
     rc, log, calls = run_job(

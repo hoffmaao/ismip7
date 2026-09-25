@@ -135,6 +135,15 @@ ismip7_chain_resources() {
     ISMIP7_CHAIN_RES=(-N "${SLURM_JOB_NUM_NODES:-1}" -n "${SLURM_NTASKS:-1}"
                       --cpus-per-task="${SLURM_CPUS_PER_TASK:-1}"
                       --hint=nomultithread)
+    # The link's per-node layout, when it asked for one. Slurm sets
+    # SLURM_NTASKS_PER_NODE only for a job that requested it, --export=ALL
+    # hands the link's value to the successor, and srun reads it there as its
+    # own --ntasks-per-node, so a successor allocated without the same request
+    # is asked for a layout it may not hold: the successor of a 2 x 32 link
+    # (NOTS 1614035) died at srun with "More processors requested than
+    # permitted".
+    [ -n "${SLURM_NTASKS_PER_NODE:-}" ] &&
+        ISMIP7_CHAIN_RES+=(--ntasks-per-node="$SLURM_NTASKS_PER_NODE")
     [ -n "${SLURM_JOB_NAME:-}" ] && ISMIP7_CHAIN_RES+=(-J "$SLURM_JOB_NAME")
     [ -n "${SLURM_JOB_PARTITION:-}" ] && ISMIP7_CHAIN_RES+=(-p "$SLURM_JOB_PARTITION")
     [ -n "$feat" ] && ISMIP7_CHAIN_RES+=(-C "$feat")

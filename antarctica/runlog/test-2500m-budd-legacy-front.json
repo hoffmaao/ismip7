@@ -1,0 +1,29 @@
+{
+ "id": "test-2500m-budd-legacy-front",
+ "task": "test",
+ "institution": "IU",
+ "title": "2.5 km legacy pinned front from the v4 timing cache, the twin of the level-set run (issue #115)",
+ "status": "done",
+ "period": "2015.0 to 2025.0, 80 steps, reached 2025.0",
+ "friction": "budd",
+ "mesh": "antarctica_25000_2500_buffered20000, 2.5 km fine, 25 km interior, 20 km buffer, DG0 geometry",
+ "initial_state": "v4 timing cache initial_state_scpc_mumps_dg0_logvelnet_v4_2500_25000_buffered20000.h5, sha256 a684a8d592ce7e04614e68fc26b716b84efc39099bfc7b7245534ce22c928424: the 2.5 km 250-iteration Budd n=3 DG0 MAP republished (MAP sha256 bd4f4cd5858f488c4c7523e91377e6520405e3f072e2ffd53c7f971591def95f)",
+ "branch_from": "the cache at 2015.0, accepted without a setup solve",
+ "forcing": "none: run_timing.py passes no forcing callback, so SMB and melt are zero",
+ "melt": "none",
+ "front": "legacy fixed-front mask (ISMIP7_FIXED_FRONT=1, ISMIP7_CALVING=none), no collapse",
+ "apparent_mb": "div, built from the cached velocity; without forcing it equals balance",
+ "dt": 0.125,
+ "site": "IU Quartz, debug partition",
+ "resources": "32 ranks, 128G",
+ "jobs": [
+  "10635652"
+ ],
+ "code": "6af8a6a, whose run code matches main 5ffd38e (the one simulation.py hunk books ISMIP7 output, off here)",
+ "started": "2026-09-25",
+ "finished": "2026-09-25",
+ "cost": "6.7 s a step on 32 ranks, 54 s a model year",
+ "results": "antarctica/results/issue115_legacy_2500_* in the IU Quartz checkout; lane record, log and front check in Quartz scratch ismip7_issue115/",
+ "audit": "80 of 80 steps solved directly (5.0 Newton iterations on average, 9 at most), resid at most 1.1e-7 Gt; calving 12.38 to 12.50 Gt/yr after a one-step 8.9 Gt removal of the sub-1 m ice beyond the t=0 front; mass -2 Gt and VAF +0.004 mm SLE over the decade",
+ "notes": "The control arm for the level-set run test-2500m-budd-levelset-fixed: the same state and knobs with ISMIP7_CALVING=none. Run through antarctica/scripts/run_timing.py as a cache_probe under the divfront contract (ISMIP7_APPARENT_MB=div, ISMIP7_AMB_CAP=0, ISMIP7_FIXED_FRONT=1), with the rescue ladder on (subcycles 1,4,16), ISMIP7_OUTPUT=0 and the timing tripwires; records outside the campaign directory. Step 1 books 71.2 Gt/yr of calving, the ice under 1 m beyond the front; from step 2 the calving is the t=0 front flux, 12.39 Gt/yr by antarctica/scripts/front_flux_check.py. dM/dt stays within +0.05 to +2.1 Gt/yr, carried by the positivity clamp, which grows from 0.07 to 2.35 Gt/yr over the decade. The front check at 2016, 2017, 2020 and 2025 reads the floating t=0 front at +3.5 m/yr outward and 10.5 to 10.6 Gt/yr, against 168 to 171 Gt/yr under velocity_obs on the same facets; the front band holds 2,960 to 2,964 Gt; the grounding-line flux stays at 2,266 to 2,269 Gt/yr; the fastest node stays 4,611 m/yr on the Pine Island shelf. Final state sha256 cda746fa3a6de5512e469eddbed3af2fbf39604390b74ccd7464ed7793f11cad."
+}

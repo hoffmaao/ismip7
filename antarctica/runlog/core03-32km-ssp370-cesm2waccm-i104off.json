@@ -1,0 +1,32 @@
+{
+  "id": "core03-32km-ssp370-cesm2waccm-i104off",
+  "task": "test",
+  "institution": "IU",
+  "title": "Core 3 at 32 km without the apparent-MB reference, branched from the i104off historical",
+  "status": "done",
+  "exp_id": "C003",
+  "esm": "CESM2-WACCM",
+  "scenario": "ssp370",
+  "period": "2015 to 2101, reached 2101.0",
+  "friction": "budd",
+  "mesh": "antarctica_320000_32000, DG0 geometry",
+  "initial_state": "hist_cesm2_waccm_i104off_32000_final.h5, sha256 be4517207b9d60cda146ef71d5fd7374caecf9a7a54ed41f2546517f6de17452",
+  "branch_from": "core01-32km-hist-cesm2waccm-i104off at 2015.0, from the log's restart lines",
+  "forcing": "CESM2-WACCM ssp370, atmosphere SDBN1-8000m v2, ocean v3",
+  "melt": "per-basin K from K_issue11_mesh2500.npz, local slope",
+  "front": "held fixed, ice-shelf collapse ISMIP7_FRACTURE=none",
+  "apparent_mb": "off",
+  "dt": 0.1,
+  "site": "IU Quartz",
+  "resources": "8 ranks, 32 GiB",
+  "jobs": [
+    "10609877"
+  ],
+  "code": "700a846",
+  "started": "2026-09-24",
+  "finished": "2026-09-24",
+  "cost": "one link of 18 min for 86 model years",
+  "results": "antarctica/results/ssp370_cesm2_waccm_i104off_32000_*",
+  "audit": "ON TRACK, with dM/dt WARN at 279.6 Gt/yr; resid 0.0000 on all 860 rows, no rescue, subcycle or stall event",
+  "notes": "run for issue #104 from a scratch clone of main at 700a846, with results and logs in the shared checkout. 860 of 860 steps converged on their first direct diagnostic solve, with 6.1 Newton iterations on average and 11 at the most (step 799, t = 2094.9). VAF changes by +321 mm SLE over 2015 to 2101; the peak ice speed on the mesh is 18591 m/yr at t = 2094.6, at (-2083000, 783000) m. Run without ISMIP7_OUTPUT. Final state sha256 8ef99507f82d55188dc3dbdfd2e94569e8b80e14c7378327cea0386b65c11f43. Full record: antarctica/reports/core03_ssp370_cesm2_waccm_32km_i104off.md."
+}

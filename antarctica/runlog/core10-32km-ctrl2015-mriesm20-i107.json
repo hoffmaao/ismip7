@@ -1,0 +1,32 @@
+{
+  "id": "core10-32km-ctrl2015-mriesm20-i107",
+  "task": "test",
+  "institution": "IU",
+  "title": "Core 10 at 32 km on the MRI-ESM2-0 ctrl ocean, branched from the i32 historical",
+  "status": "done",
+  "exp_id": "C010",
+  "esm": "MRI-ESM2-0",
+  "scenario": "ctrl",
+  "period": "2015 to 2301, reached 2301.0",
+  "friction": "budd",
+  "mesh": "antarctica_320000_32000, DG0 geometry",
+  "initial_state": "hist_mri_esm2_0_i32_32000_final.h5, sha256 75536d1926268539fdb202045e7c6c021d03d36fa1967e13bf3345b779670dee",
+  "branch_from": "core02-32km-hist-mriesm20-i32 at 2015.0, from the log's restart lines",
+  "forcing": "RACMO2.4p1 SMB climatology 2000 to 2029 and the MRI-ESM2-0 ctrl ocean v3, the organisers' 2000 to 2029 mean of historical and ssp126",
+  "melt": "per-basin K from K_issue11_mesh2500.npz, local slope",
+  "front": "held fixed, ice-shelf collapse ISMIP7_FRACTURE=none",
+  "apparent_mb": "balance",
+  "dt": 0.1,
+  "site": "IU Quartz",
+  "resources": "8 ranks, 32 GiB",
+  "jobs": [
+    "10609210"
+  ],
+  "code": "700a846",
+  "started": "2026-09-24",
+  "finished": "2026-09-24",
+  "cost": "one link of 52 min for 286 model years",
+  "results": "antarctica/results/ctrl2015_mri_esm2_0_i107_32000_*",
+  "audit": "ON TRACK, with dM/dt WARN at 425.2 Gt/yr; resid 0.0000 on all 2860 rows, no rescue, subcycle or stall event",
+  "notes": "run for issue #107's forcing change from a scratch clone of main at 700a846, with results and logs in the shared checkout. 2860 of 2860 steps converged on their first direct diagnostic solve, with 7.4 Newton iterations on average and 13 at the most (step 665, t = 2081.5). VAF changes by +360 mm SLE over 2015 to 2301; the peak ice speed on the mesh is 8812 m/yr at t = 2300.4, at (-2083000, 783000) m. Against core10-32km-ctrl2015-mriesm20-i32, the same branch state on the OI ocean climatology, the first-step basal melt is 991 against 1011 Gt/yr (x0.979), its mean 1022 against 1034 Gt/yr, the post-first-year dM/dt +425.2 against +422.1 Gt/yr, and VAF gains 360 against 359 mm SLE. Steps 250 to 260 (2040.0 to 2041.0, the July wall) took 6 to 7 Newton iterations. Run without ISMIP7_OUTPUT. Final state sha256 02512b81a131dd389a99e3a64519faf2bc524bc220f57aeaf8bf37b6e86a0d79. Full record: antarctica/reports/core10_ctrl2015_mri_esm2_0_32km_i107.md."
+}

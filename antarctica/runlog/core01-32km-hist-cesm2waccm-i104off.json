@@ -1,0 +1,31 @@
+{
+  "id": "core01-32km-hist-cesm2waccm-i104off",
+  "task": "test",
+  "institution": "IU",
+  "title": "Core 1 at 32 km without the apparent-MB reference: branch state of the i104off runs",
+  "status": "done",
+  "esm": "CESM2-WACCM",
+  "scenario": "historical",
+  "period": "1850 to 2015, reached 2015.0",
+  "friction": "budd",
+  "mesh": "antarctica_320000_32000, DG0 geometry",
+  "initial_state": "inversion_icepack2_budd_n3_dg0_logvelnet_32000.h5, sha256 3b3aefa1c69a5daf87d1db291cae9337e00c2696f412bce147b1f488228ef472",
+  "branch_from": "cold start",
+  "forcing": "CESM2-WACCM historical, atmosphere SDBN1-8000m v2, ocean v3",
+  "melt": "per-basin K from K_issue11_mesh2500.npz, local slope",
+  "front": "held fixed, ice-shelf collapse ISMIP7_FRACTURE=none",
+  "apparent_mb": "off",
+  "dt": 0.1,
+  "site": "IU Quartz",
+  "resources": "8 ranks, 32 GiB",
+  "jobs": [
+    "10609212"
+  ],
+  "code": "700a846",
+  "started": "2026-09-24",
+  "finished": "2026-09-24",
+  "cost": "one link of 28 min for 165 model years",
+  "results": "antarctica/results/hist_cesm2_waccm_i104off_32000_*",
+  "audit": "OFF TRACK, with dM/dt FAIL at 756.7 Gt/yr; resid 0.0000 on all 1650 rows, 1 rescued step, no subcycle or stall event",
+  "notes": "run for issue #104 from a scratch clone of main at 700a846, with results and logs in the shared checkout. 1649 of 1650 steps converged on their first direct diagnostic solve, with 6.2 Newton iterations on average and 15 at the most (step 24, t = 1852.4). Step 1534 (t = 2003.4) stopped at the 200-iteration Newton limit on its first solve, and the rescue ladder's re-continuation (n from 1 to 3 in 10 stages) recovered it. VAF changes by +495 mm SLE over 1850 to 2015; the peak ice speed on the mesh is 43085 m/yr at t = 1882.6, at (417000, -1689000) m. Against the i104on historical with the reference, VAF gains 495 mm SLE against 156, the post-first-year dM/dt is +756.7 against +247.7 Gt/yr, and the requested basal melt averages 422 against 918 Gt/yr. The first step's dM/dt is -605 Gt/yr against -7. Run without ISMIP7_OUTPUT. Final state sha256 be4517207b9d60cda146ef71d5fd7374caecf9a7a54ed41f2546517f6de17452. Full record: antarctica/reports/core01_hist_cesm2_waccm_32km_i104off.md."
+}

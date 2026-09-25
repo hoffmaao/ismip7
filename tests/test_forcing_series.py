@@ -270,6 +270,25 @@ def test_the_ocean_holds_one_year_past_its_end_and_says_so(ocean_tree, capsys):
     assert capsys.readouterr().out.count("holding 2299, the last year on disk") == 1
 
 
+def test_a_run_asks_the_ocean_for_its_years_before_its_setup(ocean_tree):
+    r"""A variable with no files reads as zero thermal forcing, so a control
+    on a missing ``ctrl`` tree would melt nothing and succeed
+    (icepack/ismip7#107). The drivers ask first, with the one-year hold
+    counted."""
+    from icepack2_tools.forcing import ISMIP7Ocean
+    ocean = ISMIP7Ocean(data_root=str(ocean_tree))
+    assert ocean.require_years(2280, 2300, variables=("tf",)) == (2280, 2299)
+    with pytest.raises(FileNotFoundError, match="covers 2280-2299, and this run needs 2279-2300"):
+        ocean.require_years(2279, 2300, variables=("tf",))
+    with pytest.raises(FileNotFoundError, match="covers 2280-2299, and this run needs 2280-2301"):
+        ocean.require_years(2280, 2301, variables=("tf",))
+    with pytest.raises(FileNotFoundError, match="No ocean so data for CESM2-WACCM/ssp585"):
+        ocean.require_years(2280, 2300)
+    ctrl = ISMIP7Ocean(data_root=str(ocean_tree), scenario="ctrl")
+    with pytest.raises(FileNotFoundError, match="No ocean tf data for CESM2-WACCM/ctrl"):
+        ctrl.require_years(2015, 2300)
+
+
 @pytest.mark.parametrize("year, where", [(2279, "precedes the series"),
                                          (2292, "falls between the chunk files"),
                                          (2301, "past the end of the series")])

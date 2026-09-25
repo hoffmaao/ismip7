@@ -37,7 +37,7 @@ def _tree(root, years, esm=ESM, scenario=SCENARIO):
             open(os.path.join(d, head), "wb").close()
 
 
-def _run(monkeypatch, tmp_path, years):
+def _run(monkeypatch, tmp_path, years, ocean_cover=lambda e, s: (2015, 2300)):
     r"""preflight.main() over a tree covering `years`, returning its output."""
     root = str(tmp_path / "ISMIP7" / "AIS")
     os.makedirs(root, exist_ok=True)
@@ -49,7 +49,7 @@ def _run(monkeypatch, tmp_path, years):
     monkeypatch.setattr(preflight, "shared_missing", lambda warn: [])
     monkeypatch.setattr(preflight, "racmo_ok", lambda: True)
     monkeypatch.setattr(preflight, "oi_ok", lambda: True)
-    monkeypatch.setattr(preflight, "ocean_cover", lambda e, s: (2015, 2300))
+    monkeypatch.setattr(preflight, "ocean_cover", ocean_cover)
     monkeypatch.setattr(preflight, "pool_status",
                         lambda *a, **k: ("ok", ""))
     preflight.main()
@@ -93,6 +93,29 @@ def test_a_complete_tree_is_ready_without_a_note(monkeypatch, tmp_path, capsys):
     line = _core_line(capsys)
     assert "READY" in line, line
     assert "absent" not in line
+
+
+# --- cores 9 and 10 melt under the ESM's own ctrl ocean ---------------------
+
+def test_the_control_is_blocked_without_its_esms_ctrl_ocean(monkeypatch, tmp_path, capsys):
+    r"""The control reads ``<ESM>/ctrl/ocean`` (icepack/ismip7#107), so that
+    tree is what gates cores 9 and 10."""
+    asked = []
+
+    def cover(esm, scenario):
+        asked.append((esm, scenario))
+        return None if scenario == "ctrl" else (2015, 2300)
+
+    _run(monkeypatch, tmp_path, range(2015, 2301), ocean_cover=cover)
+    line = _core_line(capsys, "core  9")
+    assert "BLOCKED" in line and "CESM2-WACCM/ctrl ocean tf/so" in line, line
+    assert ("MRI-ESM2-0", "ctrl") in asked
+
+
+def test_the_control_is_ready_on_its_ctrl_ocean(monkeypatch, tmp_path, capsys):
+    _run(monkeypatch, tmp_path, range(2015, 2301))
+    line = _core_line(capsys, "core  9")
+    assert "READY" in line, line
 
 
 # --- core 11 asks for the OCX product the driver will insist on -------------

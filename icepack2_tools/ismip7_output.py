@@ -20,8 +20,12 @@ runs inside the parallel forward, gated by ``ISMIP7_OUTPUT=1``:
   full-length 32 km ssp585 below the request's -0.008 kg m-2 s-1, an
   isschecker 0.5.1 error, because by 2200 the limiter held back 99 % of the
   requested melt;
-* the scalars are the integrals of the same fields, written to a CSV as the
-  run goes so an early stop loses nothing.
+* the scalars are the integrals of the same fields over true area, written to
+  a CSV as the run goes so an early stop loses nothing. A cell counts its
+  map-plane area times af2 = (1/k)^2 of EPSG:3031 at its centroid, the factor
+  ``ismip7-scalars`` weights every pixel by (``regrid.area_factor``). The
+  cell means and the run's own mass budget stay map-plane, so at 32 km the
+  scalars' mass sits about 2.6 % above the timeseries' ``mass_gt``.
 
 Everything is kept on the model's own mesh in Firedrake checkpoints, ONE PER
 YEAR: ``<results>/<experiment>_<lc>_ismip7_annual_<year>.h5``, each holding
@@ -79,6 +83,9 @@ import os
 import numpy as np
 from firedrake import Function, TestFunction, assemble, dS, dx
 import firedrake as fd
+
+from .mpi_stats import global_range
+from .regrid import area_factor
 
 # icepack's year (365.25 days): the model's own time unit, so every
 # model-to-SI conversion the submission carries uses it. The time axis
@@ -171,6 +178,17 @@ class AnnualOutput:
         # owned cells only: dat.data_ro is the owned slice, dof_count counts
         # the halo too (5650 vs 3772 on one of two ranks of the 32 km mesh)
         self.cell_area = assemble(TestFunction(Q_dg) * dx).dat.data_ro.copy()
+        # The scalars integrate over true area (issue #97): each cell's
+        # map-plane area times af2 at its centroid, the same owned cells in
+        # the same order. cell_area stays map-plane, since book_advance
+        # divides by it for the cell means.
+        X = fd.SpatialCoordinate(mesh)
+        x, y = (Function(Q_dg).interpolate(X[i]).dat.data_ro for i in (0, 1))
+        self.area_factor = area_factor(x, y)
+        self.true_area = self.cell_area * self.area_factor
+        lo, hi = global_range(self.area_factor, comm=self.comm)
+        self.log(f"  ISMIP7 output: scalars over true area, af2 from {lo:.4f} to "
+                 f"{hi:.4f} on this mesh")
         n = len(self.cell_area)
         self.year_acc = {k: np.zeros(n) for k in self.ACCUMULATORS}
         self.step_acc = {k: np.zeros(n) for k in self.year_acc}
@@ -477,8 +495,8 @@ class AnnualOutput:
             os.replace(tmp, final_path)
         self.comm.barrier()
         self._written_years.append(yr)
-        # scalars, from the same fields (kg, m2, kg/s)
-        area = self.cell_area
+        # scalars, from the same fields over true area (kg, m2, kg/s)
+        area = self.true_area
         def integ(arr):
             return self.comm.allreduce(float((arr * area).sum()))
         # limnsw is the mass of the ice ABOVE FLOTATION: the request defines it
@@ -503,9 +521,9 @@ class AnnualOutput:
         }
         if self._csv is not None:
             self._csv.write(f"{yr}," + ",".join(f"{row[k]:.6e}" for k in SCALARS) + "\n"); self._csv.flush()
-        self.log(f"  ISMIP7 output: year {yr} written ({len(fields)} fields; GL flux "
-                 f"{row['tendligroundf'] * SECONDS_PER_YEAR / 1e12:+.0f} Gt/yr, calving "
-                 f"{row['tendlicalvf'] * SECONDS_PER_YEAR / 1e12:+.0f} Gt/yr)")
+        self.log(f"  ISMIP7 output: year {yr} written ({len(fields)} fields; over true "
+                 f"area, GL flux {row['tendligroundf'] * SECONDS_PER_YEAR / 1e12:+.0f} Gt/yr, "
+                 f"calving {row['tendlicalvf'] * SECONDS_PER_YEAR / 1e12:+.0f} Gt/yr)")
         self.year = yr + 1
         self.start_year(h_dg)
 

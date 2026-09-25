@@ -83,7 +83,8 @@ from icepack2_tools.forcing import (quadratic_mixed_slope, compute_sin_alpha,
                                     _RHO_I)
 K05, K50, K95 = _K_PERCENTILES
 from icepack2_tools.geometry import sample_to_geometry
-from icepack2_tools.mpi_stats import global_count, global_mean, global_range
+from icepack2_tools.mpi_stats import (global_count, global_mean, global_range,
+                                      global_size)
 from icepack2_tools.naming import map_basename
 from icepack2_tools.runconfig import (friction as _friction, lc as _lc,
                                       geometry_space as _geometry_space,
@@ -442,8 +443,10 @@ def main():
                     f"over {len(bids_obs)} basins")
 
     mesh = _load_mesh()
-    PETSc.Sys.Print(f"  Mesh: {mesh.num_vertices()} vertices, "
-                    f"{mesh.num_cells()} cells")
+    # num_vertices()/num_cells() count this rank's plex, halo included; the
+    # coordinate dofs and the owned cell set are reduced to global totals.
+    PETSc.Sys.Print(f"  Mesh: {global_size(mesh.coordinates)} vertices, "
+                    f"{mesh.comm.allreduce(mesh.cell_set.size)} cells")
     how = ("the forward's cell by cell melt path" if GEOMETRY == "dg0"
            else "CG1 nodes")
     PETSc.Sys.Print(f"  Geometry: {GEOMETRY} ({how})")

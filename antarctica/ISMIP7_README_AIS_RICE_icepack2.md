@@ -53,8 +53,8 @@ shallow-shelf formulation on Firedrake 2026.4.1)
    initialisation (there is no spin-up).
 5. Yes. An apparent-mass-balance reference is computed once at the initial
    state with the model's own transport operator so that the initial
-   thickness tendency is exactly zero (the ISMIP6 ctrl_proj convention of a
-   balanced control); it is frozen and applied in every experiment. It is
+   thickness tendency is exactly zero; it is frozen and applied in every
+   experiment. It is
    NOT reported in `acabf` (which is the SMB the model applied) but written
    alongside it as `acabf_correction` in the same units for anyone closing
    the budget.
@@ -124,13 +124,15 @@ shallow-shelf formulation on Firedrake 2026.4.1)
 10. Tributary glaciers after a collapse: no special treatment; the front
     retreats to the new extent, the grounding line responds to the lost
     buttressing through the momentum balance, friction is unchanged.
-11. The control uses the RACMO climatology and the ISMIP7 ocean climatology
-    with the apparent-mass-balance correction; projections use the same
-    baseline plus the ISMIP7 anomalies re-referenced to the 2000-2029 pool
-    (historical 2000-2014 and ssp126 2015-2029). The control therefore runs
-    on observational climatologies and not on the ESM's own `ctrl` trees, so
-    C009 and C010 differ in the historical endpoint they branch from and not
-    in their forcing.
+11. The control holds the 2000-2029 climate constant, with the
+    apparent-mass-balance correction. Its ocean is the ESM's own `ctrl` tree
+    (`tf` and `so`, v3), read and melted as in the projections (item 6), so
+    the per-basin K fitted against the 30_sep OI climatology applies
+    unchanged to every ESM ocean. Its SMB is the RACMO climatology, the
+    baseline the projections add the ISMIP7 anomalies to after re-referencing
+    them to the 2000-2029 pool (historical 2000-2014 and ssp126 2015-2029);
+    in that frame RACMO is the 2000-2029 climate. C009 and C010 differ in
+    their ocean and in the historical endpoint they branch from.
     The historical runs start in 1850 from the 2015 initial state (there is
     no spin-up) and end at 1 January 2015, where the projections and the
     control branch. The ISMIP7 anomalies are relative to 1960-1989, and
@@ -207,7 +209,7 @@ Hahn, Mikula and Frolkovic 2025; Smith et al. 2020.
 | Mesh discretisation | Delaunay triangulation (gmsh), adaptive size field | no |
 | Native grid | H: anisotropic; resolution **[confirm #20]**, pending the 1000 m inversions: the 2 km / 180 km adaptive mesh, 2 km at the grounding line and calving front to 180 km in the interior (246,677 cells), as previously run; or `antarctica_10000_1000_buffered20000`, the 1000 m / 10 km gmsh mesh (1,869,088 vertices) that has been the code default since PR #7 and on which no inversion has yet been run. V: vertically integrated (shallow shelf) | no |
 | Native projection | EPSG:3031, same as BedMachine | no |
-| Interpolation to diagnostic grid | conservative: exact cell-pixel overlap areas (supermesh) onto the 8 km grid; whole-pixel means for thickness, fluxes and fractions, covered-part means for elevations | no |
+| Interpolation to diagnostic grid | conservative: exact cell-pixel overlap areas (supermesh) onto the 8 km grid; whole-pixel means for thickness, fractions and every flux, so a flux times the pixel area sums to the model's integral (`acabf` is fill outside the model domain, `libmassbffl` where no ice floats at year end); covered-part means for elevations | no |
 | Time integration | transport-first split: implicit Euler thickness transport, then the diagnostic solve at the new geometry; first order | no |
 | Time step | **[confirm #20]**, pending the 1000 m inversions: 0.1 yr on the adaptive mesh, as previously run; 0.05 yr on the 1000 m / 10 km mesh, the code default since PR #7 | no |
 | Advection scheme | upwind finite volume, DG0, implicit; first order | no |
@@ -222,7 +224,7 @@ Hahn, Mikula and Frolkovic 2025; Smith et al. 2020.
 | Initial SMB | RACMO2.4p1 2000-2023 climatology | no |
 | Bedrock adjustment | no | no |
 | Year of initial condition | 2015 | no |
-| Densities, gravity | rho_i = 917, rho_o = 1024 kg m-3; g = 9.81 m s-2 | no |
+| Densities, gravity | rho_i = 917, rho_o = 1024, fresh water 1000 kg m-3, also in `params.nc` beside `CORE/`; g = 9.81 m s-2 | no |
 | Variables not included | none of the mandatory set; no 3D or thermal variables (no thermal model); `hfgeoubed`, `litemp*`, `zvel*`, `thdrflf`, `deltag`, `refgeoid` absent | no |
 | Days per year | 365.25: the model's year is icepack's, 31557600 s, and every model-to-SI conversion in the submitted files uses it. The forcing is converted on the way in with the tropical year, 31556926 s, a relative difference of 2e-5. The model counts time in years and has no calendar; the time axis in the files is the standard calendar (discussion #24), state at 1 January of the following year and fluxes at 1 July with bounds | no |
 | Other | apparent-mass-balance correction frozen at the initial state; forcing versions cited per file in the submission | no |
@@ -241,7 +243,10 @@ grounded ice, at a pinning point or an ice rumple. The organisers' reply of
 isschecker 0.5.1 bounds the field symmetrically; the group settled on this
 reading on 22 September 2026. The integrated scalars carry the signs of the
 fields they integrate, so `tendlicalvf` and `tendlibmassbffl` are negative
-and `tendligroundf` is the net grounding-line discharge. `topg` is not
+and `tendligroundf` is the net grounding-line discharge. They integrate over
+true area: each native cell counts its map-plane area times af2 = (1/k)^2,
+the EPSG:3031 area factor at the cell's centroid, the factor
+`ismip7-scalar-processing` weights every 8 km pixel by. `topg` is not
 masked to the ice, `lithk` is zero and not fill where there is no ice, and
 the fill value is the finite netCDF default (discussions #10 and #19).
 The fluxes are the ones the model applied: where the thickness floor held

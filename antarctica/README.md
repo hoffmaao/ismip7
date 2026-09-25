@@ -55,6 +55,9 @@ Source Cooperative carries the data-freeze copy and needs no account.
 python antarctica/scripts/download_mirror.py \
     data/CESM2-WACCM/ssp585/SDBN1-8000m/acabf-anomaly/ \
     data/CESM2-WACCM/ssp585/ocean/tf/ data/CESM2-WACCM/ssp585/ocean/so/
+# the control's ocean for one ESM, which cores 9 and 10 read (about 18 GB)
+python antarctica/scripts/download_mirror.py \
+    data/CESM2-WACCM/ctrl/ocean/tf/ data/CESM2-WACCM/ctrl/ocean/so/
 # the observations MIPkit (about 9 GB)
 python antarctica/scripts/download_mirror.py --product ismip7-ais-observations data/mipkit/
 # whether a local tree is current: which version a run opens
@@ -212,6 +215,7 @@ python scripts/download_forcing.py --ocean        # thetao/so/tf + climatology +
 python scripts/download_forcing.py --calibration  # meltMIP obs melt, IMBIE2 basins, grid, topography
 python scripts/download_forcing.py --scenarios    # per-(ESM, scenario) forcing (cores 1-8)
 python scripts/download_forcing.py --scenarios --esm MRI-ESM2-0 --scenario historical,ssp585
+python scripts/download_forcing.py --scenarios --scenario ctrl   # the control's ocean (cores 9, 10); its atmosphere comes too, unread
 python scripts/download_forcing.py --scalar-processing  # ismip7-scalars grids, see "From a finished run to a submission"
 python scripts/download_forcing.py --status
 ```
@@ -600,9 +604,13 @@ its step-size behaviour under the transport's masks, the drag gate, and the
 refusal of an unknown or underspecified law.
 
 **Control and projection configurations differ.** The protocol's control is an
-unforced constant-climate run with calving set to end-of-2014 conditions, so
-the control here is `ISMIP7_APPARENT_MB` with `ISMIP7_FIXED_FRONT=1` and
-`ISMIP7_CALVING=none`. That is what `run_core_matrix.sh` runs and what every
+unforced constant-climate run with fracture, collapse, calving and GIA held at
+end-of-2014 conditions (the April 2026 protocol cheat sheet in `../protocol/`),
+so the control here runs with `ISMIP7_FIXED_FRONT=1` and `ISMIP7_CALVING=none`.
+It also runs with `ISMIP7_APPARENT_MB`, a choice of this repository: the
+protocol leaves initial conditions to each group and keeps the control to
+assess drift, and whether the production runs keep the reference is a group
+decision (issue #104). That is what `run_core_matrix.sh` runs and what every
 control result used. `ISMIP7_CALVING=fixed` also pins the front and is a
 different run: it builds a level set, so ocean drag is gated off near the front
 and the retreat-sliver rule applies inside the t=0 extent, giving a slightly
@@ -745,7 +753,7 @@ redeclare those literals.
 | `ISMIP7_RUN_TAG` | experiment-name suffix for a parallel method line | unset |
 | `ISMIP7_WALL_STOP_MIN` | wall-clock budget in minutes from process start, checked before each step against the longest step so far, so the run writes its final checkpoint and exits with `t_yr` short of `t_end` for a chained job to resume. `projection.sbatch` derives it from the job's own TimeLimit, holding back 25 minutes. `0` disables | `0` |
 | `ISMIP7_EXPERIMENT_NAME` | the run's identity, used by `adapt_mesh.py` to name adapted meshes and sidecars so parallel experiments cannot overwrite each other. Set by `run_adaptive.py --experiment-name`. See `../ADAPTIVE_MESH.md` | unset |
-| `ISMIP7_APPARENT_MB` | `1` or `balance` zeroes the t=0 thickness tendency (ISMIP6 ctrl_proj style); `div` cancels only the flux divergence; `0`, `off`, `none` and empty disable it | unset |
+| `ISMIP7_APPARENT_MB` | `1` or `balance` zeroes the t=0 thickness tendency; `div` cancels only the flux divergence; `0`, `off`, `none` and empty disable it | unset |
 | `ISMIP7_FIXED_FRONT` | hold the calving front at the t=0 extent, tallying inflow beyond it as calving. `=0` disables. Ignored whenever an `ISMIP7_CALVING` law is configured | unset |
 | `ISMIP7_TRIPWIRE_U_MAX` / `ISMIP7_TRIPWIRE_H_MAX` / `ISMIP7_TRIPWIRE_DH_RATE` / `ISMIP7_TRIPWIRE_HMIN` | runaway tripwire: fail the step when max speed exceeds `U_MAX` [m/yr], max thickness exceeds `H_MAX` [m], or a cell that entered the step at least `HMIN` thick thickens at a relative rate `(dh/h)/dt` above `DH_RATE` [1/yr] (a rate so every dt scores the same physics alike; thinner cells are reported, never tripped: buffer cells fill by more than their own thickness); every step prints a `tripwire step-k:` line with the worst cells; unset = off (timing lanes export 2e4 / 5000 / 20 / 100) | _(unset)_ |
 | `ISMIP7_LEGACY_TRANSPORT` | restore the pre-July-2026 CG-projection transport (needs `cg1`) | unset |
@@ -1230,7 +1238,11 @@ Per experiment in `results/`:
   `year, vaf_mm_sle, mass_gt, smb_gtyr, melt_gtyr, outflux_gtyr, calv_gt,
   clamp_gt, resid_gt, amb_gtyr`. The residual must close to 0.00.
 
-VAF is in mm of sea-level equivalent, mass in Gt.
+VAF is in mm of sea-level equivalent, mass in Gt, both over map-plane area.
+The ISMIP7 scalars of a run with `ISMIP7_OUTPUT=1`
+(`<exp>_<lc>_ismip7_scalars.csv`) integrate over true area, map-plane area
+times af2 = (1/k)^2 of EPSG:3031, as the organisers' tool does, so their mass
+sits about 2.6 % above `mass_gt`.
 
 ### From a finished run to a submission
 
@@ -1252,24 +1264,24 @@ python antarctica/scripts/write_ismip7_output.py \
 python -m isschecker --variable-list ismip7 \
     --source-path submission/AIS/RICE/icepack2/CORE/C009
 
-# 4. the sea-level scalars nothing here computes, from the tools' own venv
-python antarctica/scripts/download_forcing.py --scalar-processing
+# 4. the model's densities into the upload, then the sea-level scalars
+#    nothing here computes, from the tools' own venv
 ismip7-scalars-set-params --region AIS --group RICE --model icepack2 \
-    --rhoi 917 --rhow 1024 --rhof 1000 --modelpath scalars/params
+    --rhoi 917 --rhow 1024 --rhof 1000 --modelpath submission/AIS
+python antarctica/scripts/download_forcing.py --scalar-processing
 ismip7-scalars --region AIS --group RICE --model icepack2 \
     --experiment ctrl --modelid m001 --esm CESM2-WACCM --forcingid f001 \
     --configid C009 --exp-group CORE --hist ctrl --refyear 2016 \
     --datapath ISMIP7/Output-Processing/Data/AIS \
-    --modelpath submission/AIS --params-path scalars/params --outpath scalars
+    --modelpath submission/AIS --outpath scalars
 
 # 5. the tool's scalars against the model's own
 python antarctica/scripts/compare_scalars.py \
     --submission submission/AIS/RICE/icepack2/CORE/C009 \
     --tool scalars/nc/AIS/RICE/icepack2/CORE/C009 \
     --datapath ISMIP7/Output-Processing/Data/AIS \
-    --params scalars/params/RICE/icepack2/params.nc --refyear 2016 \
+    --params submission/AIS/RICE/icepack2/params.nc --refyear 2016 --native-af2 \
     --native-csv antarctica/results/<exp>_<lc>_ismip7_scalars.csv \
-    --overlap antarctica/results/<exp>_<lc>_ismip7_annual.h5.overlap.npz \
     --out-csv scalars/comparison.csv --out-md scalars/comparison.md
 ```
 
@@ -1307,10 +1319,13 @@ Things that are easy to get wrong:
   Copying `/ISMIP7/Output-Processing/Data` with the Globus web app into
   `ISMIP7/Output-Processing/Data/` of the checkout, the same path, needs no
   CLI login (IU Quartz, 23 September 2026).
-- **`params.nc` carries the model's densities**, so give it ours: 917 ice and
-  1024 seawater, the pair `simulation.py` builds the surface with. The tool
-  defaults to 1027 seawater, and the comparison refuses any other pair. The
-  organisers need the same file with the upload. (issue #98)
+- **`params.nc` carries the model's densities, in the upload**:
+  `AIS/RICE/icepack2/params.nc`, beside `CORE/`, where the organisers' run of
+  the tool reads it and where the tool looks by default, so it runs without
+  `--params-path`. Give it ours: 917 ice and 1024 seawater, the pair
+  `simulation.py` builds the surface with, and 1000 fresh water. The tool
+  defaults to 1027 seawater, and the comparison refuses any other densities.
+  `scalar_processing.script` reads the tree's file and stops without one.
 - **The tool stops without a historical run.** A run on its own names itself
   as `--hist` with the stamped year of its first state as `--refyear`. A
   projection paired with its historical names `--hist historical
@@ -1321,8 +1336,20 @@ Things that are easy to get wrong:
   stamped 1 January of the following year, so a run starting in 2015 has 2016
   as its first state, and a reference of 2015 is not found.
 - **The tool's files carry the submission's own names** (`lim_AIS_RICE_...`),
-  so `--outpath` and `params.nc` stay outside the upload tree. The upload
-  carries the model's scalars; the tool's copies of them fail the checker.
+  so `--outpath` stays outside the upload tree. The upload carries the model's
+  scalars; the tool's copies of them fail the checker. `params.nc` sits in the
+  tree above `CORE/`, where the checker, which reads one set-counter directory,
+  never sees it.
+- **`--native-af2` says the model's scalars integrate over true area**, as a
+  current forward writes them. The writer checks every year of the scalars
+  CSV against the annual files, refuses a series that mixes true-area and
+  map-plane years, and stamps the scalar files with the one it found
+  (`scalar_area`). The comparison exits 2 when the switch disagrees with the
+  stamp; leave it off for a run from before the change.
+- **A tree written before the whole-pixel flux means needs `--overlap`.**
+  Its flux files carry no `flux_pixel_mean`, and `acabf` there is a mean over
+  the covered part of a pixel, which the comparison undoes with the writer's
+  cached `<annual>.overlap.npz`. A current tree needs nothing undone.
 
 Measured on that rehearsal: `isschecker` 0.5.1 over 31 files reports zero
 errors in variable presence, naming, numerical, spatial, consistency and

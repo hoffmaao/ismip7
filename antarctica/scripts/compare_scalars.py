@@ -6,8 +6,8 @@ r"""The organisers' scalar processing set against the model's own scalars
         --submission SUB/AIS/RICE/icepack2/CORE/C007 \
         --tool OUT/tool/nc/AIS/RICE/icepack2/CORE/C007 \
         --datapath ISMIP7/Output-Processing/Data/AIS \
-        --params OUT/params/RICE/icepack2/params.nc \
-        --refyear 2016 [--native-csv RUN_ismip7_scalars.csv] \
+        --params SUB/AIS/RICE/icepack2/params.nc \
+        --refyear 2016 [--native-csv RUN_ismip7_scalars.csv] [--native-af2] \
         [--overlap RUN_ismip7_annual.h5.overlap.npz] \
         --out-csv OUT/compare/comparison.csv --out-md OUT/compare/comparison.md
 
@@ -27,22 +27,33 @@ year by year and splits every difference into named parts:
   arithmetic is float64 and a faithful replay agrees to roundoff. T - R
   therefore checks the reading and the time alignment.
 - d_area, R minus the same with af2 = 1. af2 = (1/k)^2 is the EPSG:3031 area
-  factor, which the model's map-plane cell areas do not carry.
+  factor, which map-plane native scalars do not carry. A forward with the
+  area factor integrates its scalars over true area (issue #97), and the
+  writer stamps which area a tree's scalars carry. With --native-af2, which
+  the stamp must agree with, every replay below keeps af2, d_area is zero
+  and the column R_noaf2 is R. The model takes af2 at its cell centroids and
+  the tool at pixel centres, so the exact-sum gates then allow af2's largest
+  change between neighbouring pixels (5.9e-4 at 8 km) of each sum's L1; a
+  missing or doubled factor is 1 to 5 %.
 - d_mm, the maximum-extent mask the tool applies to lim, limnsw and sea level.
-- d_fill, the writer's fill convention undone. acabf is a mean over the
-  covered part of a pixel, so it is multiplied by the pixel coverage from the
-  writer's overlap cache; libmassbffl is a mean over the part floating at year
-  end, so it is multiplied by sftflf. The tool sums both over whole pixels.
+- d_fill, the writer's fill convention undone. The tool sums every flux over
+  whole pixels. A tree whose flux files carry ``flux_pixel_mean =
+  whole_pixel`` holds whole-pixel means (issue #96), so nothing is undone and
+  d_fill is zero. In a tree written before, acabf is a mean over the covered
+  part of a pixel, so it is multiplied by the pixel coverage from the writer's
+  overlap cache, and libmassbffl a mean over the part floating at year end, so
+  it is multiplied by sftflf.
 - d_resid, what is left against N. For tendlicalvf, tendligroundf, the ice
-  area iareagr + iareafl and, with the overlap cache, tendacabf it is zero up
-  to float32 and the CSV's seven digits, because the writer's remap is
-  conservative. A writer that writes floating cells within a centimetre of
-  flotation as grounded (isschecker's elevation tolerance) moves area from
-  iareafl to iareagr, so each of the two may differ while their sum holds;
-  the moved area is reported. For lim d_resid is the mass in cells of 1 m or
-  less, which lithk leaves out; for limnsw the pixel averaging of a nonlinear
-  integrand; for tendlibmassbffl the melt booked outside the writer's
-  year-end floating mask.
+  area iareagr + iareafl and tendacabf (whole-pixel means, or the overlap
+  cache) it is zero up to float32 and the CSV's seven digits, because the
+  writer's remap is conservative. A writer that writes floating cells within a
+  centimetre of flotation as grounded (isschecker's elevation tolerance) moves
+  area from iareafl to iareagr, so each of the two may differ while their sum
+  holds; the moved area is reported. For lim d_resid is the mass in cells of
+  1 m or less, which lithk leaves out; for limnsw the pixel averaging of a
+  nonlinear integrand; for tendlibmassbffl the melt booked where the grid
+  holds none: in pixels with no floating ice at year end, or, in a tree
+  written before, outside the year-end floating mask.
 
 The sea-level contributions get native counterparts from the model's lim and
 limnsw, with the tool's ocean area A_O = 3.625e14 m2:
@@ -87,10 +98,21 @@ SCALARS = ST_SCALARS + tuple(s for s, _ in FL_SCALARS) + SEA_LEVEL
 UNITS = dict({s: "kg" for s in ("lim", "limnsw")}, iareagr="m2", iareafl="m2",
              **{s: "kg s-1" for s, _ in FL_SCALARS}, **{s: "m" for s in SEA_LEVEL})
 # forbidden-policy fields: whole-pixel means, so a grid sum is the mesh sum
+# (tendacabf holds too in a tree of whole-pixel means, under its own gate)
 EXACT = ("tendlicalvf", "tendligroundf")
 ZERO = ("tendlibmassbfgr", "tendlifmassbf")
 GRID_FILES = {"af2": "af2_AIS_{res}000m_v1.nc", "maxmask1": "maxmask1_AIS_{res}000m_v0.nc"}
 MARKERS = (2015, 2050, 2100, 2200, 2300)
+# The writer's global attribute on its gridded flux files (FLUX_MEAN_ATTR and
+# FLUX_MEAN in write_ismip7_output.py, restated so that this runs without
+# Firedrake). A tree written before it carries none.
+FLUX_MEAN_ATTR = "flux_pixel_mean"
+WHOLE_PIXEL = "whole_pixel"
+COVERED_PART = "covered_part"
+# The writer's stamp on the ten scalar files (SCALAR_AREA_ATTR in
+# write_ismip7_output.py): the area the run's scalars integrate over.
+SCALAR_AREA_ATTR = "scalar_area"
+TRUE_AREA, MAP_PLANE = "true_area", "map_plane"
 
 # Tolerances. F32 is twice float32's half ulp: every gridded value and every
 # submitted scalar was rounded to float32 once. CSV is twice the half digit of
@@ -212,12 +234,55 @@ def pixel_coverage(npz, shape, pixel_area):
     return (covered / pixel_area).reshape(shape)
 
 
+def flux_means(grids):
+    r"""How the writer took the pixel means of acabf and libmassbffl:
+    WHOLE_PIXEL when their files say so, COVERED_PART for a tree written
+    before the attribute (acabf over the covered part of a pixel, libmassbffl
+    over the part floating at year end)."""
+    seen = {}
+    for v in ("acabf", "libmassbffl"):
+        ds = grids[v].ds
+        seen[v] = ds.getncattr(FLUX_MEAN_ATTR) if FLUX_MEAN_ATTR in ds.ncattrs() else None
+    if seen["acabf"] != seen["libmassbffl"]:
+        raise InputError(f"acabf and libmassbffl disagree on {FLUX_MEAN_ATTR}: "
+                         f"{seen['acabf']!r} and {seen['libmassbffl']!r}")
+    if seen["acabf"] not in (None, WHOLE_PIXEL):
+        raise InputError(f"{FLUX_MEAN_ATTR} = {seen['acabf']!r} is no convention this "
+                         f"comparison knows")
+    return WHOLE_PIXEL if seen["acabf"] else COVERED_PART
+
+
+def scalar_area_stamp(folder):
+    r"""The area the writer found the native scalars of ``folder`` to
+    integrate over, from its stamp on the lim file; None for a tree written
+    before the stamp."""
+    nc4 = netcdf()
+    with nc4.Dataset(one_file(folder, "lim")) as ds:
+        return ds.getncattr(SCALAR_AREA_ATTR) if SCALAR_AREA_ATTR in ds.ncattrs() else None
+
+
+def af2_step(af2):
+    r"""The largest relative change of af2 between neighbouring pixels.
+
+    The model takes af2 at its cell centroids and the tool at pixel centres.
+    The tool's factor for a cell is the overlap-weighted mean over the pixels
+    it covers, which is af2 within about half a pixel of the centroid, plus
+    the curvature of af2 over the cell (4e-5 for a 180 km cell). So over any
+    sum the two differ by less than this share of its L1. Over the 8 km grid
+    it is 5.9e-4."""
+    a = np.ma.filled(af2, np.nan).astype(np.float64)
+    steps = [np.abs(a[1:, :] - a[:-1, :]) / np.minimum(a[1:, :], a[:-1, :]),
+             np.abs(a[:, 1:] - a[:, :-1]) / np.minimum(a[:, 1:], a[:, :-1])]
+    return float(max(np.nanmax(s) for s in steps))
+
+
 class Replay:
     r"""The tool's integrals (ismip7_scalars 0.1.0, ``scalars.py`` and
     ``slc/``), written as the same expressions on the same masked arrays.
 
     ``af2`` and ``maxmask1`` are swapped for ones to take the area factor and
-    the maximum-extent mask out one at a time; the arithmetic keeps its types.
+    the maximum-extent mask out one at a time (af2 stays under --native-af2);
+    the arithmetic keeps its types.
     """
 
     def __init__(self, af2, maxmask1, area_m2, rho):
@@ -315,6 +380,18 @@ def compare(a):
     fl_names = [v for _, v in FL_SCALARS] + ["dlithkdt"]
     grids = {v: Gridded(a.submission, v, flux=False) for v in ("lithk", "topg", "sftgrf", "sftflf")}
     grids.update({v: Gridded(a.submission, v, flux=True) for v in fl_names})
+    means = flux_means(grids)
+    whole = means == WHOLE_PIXEL
+    # the area the native scalars integrate over: the switch, held to the
+    # writer's stamp wherever the stamp exists
+    told = TRUE_AREA if a.native_af2 else MAP_PLANE
+    stamps = {}
+    for folder in [a.submission] + ([a.hist_submission] if a.hist_submission else []):
+        stamps[folder] = scalar_area_stamp(folder)
+        if stamps[folder] not in (None, told):
+            raise InputError(f"{folder}: the writer stamped the native scalars {stamps[folder]}, "
+                             f"and the comparison was told {told} "
+                             f"({'--native-af2' if a.native_af2 else 'no --native-af2'})")
     lith = grids["lithk"]
     x = np.asarray(lith.ds.variables["x"][:], dtype=np.float64)
     y = np.asarray(lith.ds.variables["y"][:], dtype=np.float64)
@@ -362,9 +439,15 @@ def compare(a):
         lim0, limnsw0 = native["lim"][yref][1], native["limnsw"][yref][1]
         reference = f"the state stamped {a.refyear} (nominal {yref}), the run's own"
 
-    ones_af2, ones_mm = np.ones_like(af2), np.ones_like(mm)
-    replays = {"R": Replay(af2, mm, area_m2, rho), "Rn": Replay(ones_af2, mm, area_m2, rho),
-               "P": Replay(ones_af2, ones_mm, area_m2, rho)}
+    # With --native-af2 both sides carry the area factor, so the replays that
+    # take the named differences out one at a time keep it (d_area is zero)
+    # and the exact sums allow for where each side samples it.
+    af2_n = af2 if a.native_af2 else np.ones_like(af2)
+    w64 = np.ma.filled(af2_n, 1.0).astype(np.float64)   # 1.0 exactly without the switch
+    allow = af2_step(af2) if a.native_af2 else 0.0
+    ones_mm = np.ones_like(mm)
+    replays = {"R": Replay(af2, mm, area_m2, rho), "Rn": Replay(af2_n, mm, area_m2, rho),
+               "P": Replay(af2_n, ones_mm, area_m2, rho)}
     for r in replays.values():
         r.reference(lithk_ref, topg_ref)
 
@@ -375,7 +458,7 @@ def compare(a):
 
     gates = {name: Gate(name) for name in (
         "densities", "scalar files against the CSV", "T against the replay R",
-        "forbidden-policy sums against N", "tendacabf with coverage against N",
+        "forbidden-policy sums against N", "tendacabf against N",
         "zero fluxes", "sla20 = slg20 (fixed bed)", "slg20 - slvaf identity",
         "topg constant in time", "lim change against dlithkdt", "lim residual sign",
         "T differs from N", "af2 > 0 under ice and flux")}
@@ -397,15 +480,18 @@ def compare(a):
             out[key]["slvaf"], out[key]["slg20"] = rp.sea_level(f["lithk"], f["topg"])
             out[key]["sla20"] = out[key]["slg20"]    # identity, fixed bed
         C = dict(out["P"])
-        if cov is not None:
-            C["tendacabf"] = float(np.sum(np.ma.filled(f["acabf"], 0.0).astype(np.float64) * cov) * area_m2)
-        C["tendlibmassbffl"] = float(np.sum(np.ma.filled(f["libmassbffl"], 0.0).astype(np.float64)
-                                            * np.ma.filled(f["sftflf"], 0.0).astype(np.float64)) * area_m2)
+        if not whole:
+            if cov is not None:
+                C["tendacabf"] = float(np.sum(np.ma.filled(f["acabf"], 0.0).astype(np.float64)
+                                              * cov * w64) * area_m2)
+            C["tendlibmassbffl"] = float(np.sum(np.ma.filled(f["libmassbffl"], 0.0).astype(np.float64)
+                                                * np.ma.filled(f["sftflf"], 0.0).astype(np.float64)
+                                                * w64) * area_m2)
         lithk64 = np.ma.filled(f["lithk"], 0.0).astype(np.float64)
-        L1 = {"lim": RHO_I * np.sum(np.abs(lithk64)) * area_m2, "limnsw": abs(out["P"]["limnsw"]),
+        L1 = {"lim": RHO_I * np.sum(np.abs(lithk64) * w64) * area_m2, "limnsw": abs(out["P"]["limnsw"]),
               "iareagr": abs(out["P"]["iareagr"]), "iareafl": abs(out["P"]["iareafl"])}
         for s, v in FL_SCALARS:
-            L1[s] = float(np.sum(np.abs(np.ma.filled(f[v], 0.0).astype(np.float64))) * area_m2)
+            L1[s] = float(np.sum(np.abs(np.ma.filled(f[v], 0.0).astype(np.float64)) * w64) * area_m2)
 
         N = {s: native[s][yr][1] for s in native}
         N["slvaf"], N["slg20"] = native_sea_level(N["lim"], N["limnsw"], lim0, limnsw0)
@@ -423,24 +509,27 @@ def compare(a):
             else:
                 gates["T against the replay R"].check(f"{s} {yr}", T - R, REPLAY * max(L1[s], abs(R)))
                 gates["T differs from N"].check(f"{s} {yr}", float(T == N[s] and N[s] != 0.0), 0.0)
+        # float32 and the CSV's digits, plus where the two sides sample af2
+        # when both carry it (allow is zero otherwise)
+        rel = F32 + allow
         for s in EXACT:
             gates["forbidden-policy sums against N"].check(
-                f"{s} {yr}", C[s] - N[s], CSV_DIGITS * abs(N[s]) + F32 * L1[s])
+                f"{s} {yr}", C[s] - N[s], CSV_DIGITS * abs(N[s]) + rel * L1[s])
         # the two areas may trade near flotation, their sum may not, and area
         # only ever moves to the grounded side
-        area_tol = CSV_DIGITS * (abs(N["iareagr"]) + abs(N["iareafl"])) + F32 * (L1["iareagr"] + L1["iareafl"])
+        area_tol = CSV_DIGITS * (abs(N["iareagr"]) + abs(N["iareafl"])) + rel * (L1["iareagr"] + L1["iareafl"])
         gates["forbidden-policy sums against N"].check(
             f"ice area {yr}", (C["iareagr"] + C["iareafl"]) - (N["iareagr"] + N["iareafl"]), area_tol)
         gates["forbidden-policy sums against N"].check(
             f"grounded area gained {yr}", min(C["iareagr"] - N["iareagr"], 0.0), area_tol)
-        if cov is not None:
-            gates["tendacabf with coverage against N"].check(
+        if whole or cov is not None:
+            gates["tendacabf against N"].check(
                 yr, C["tendacabf"] - N["tendacabf"],
-                CSV_DIGITS * abs(N["tendacabf"]) + F32 * L1["tendacabf"])
+                CSV_DIGITS * abs(N["tendacabf"]) + rel * L1["tendacabf"])
         for s in ZERO:
             gates["zero fluxes"].check(f"{s} {yr}", max(abs(N[s]), abs(tool[s][yr][1]), L1[s]), 0.0)
         gates["lim residual sign"].check(yr, max(C["lim"] - N["lim"], 0.0),
-                                         CSV_DIGITS * abs(N["lim"]) + F32 * L1["lim"])
+                                         CSV_DIGITS * abs(N["lim"]) + rel * L1["lim"])
         slg, slv = tool["slg20"][yr][1], tool["slvaf"][yr][1]
         gates["sla20 = slg20 (fixed bed)"].check(yr, tool["sla20"][yr][1] - slg, A2020_ABS)
         R0 = replays["R"]
@@ -449,12 +538,11 @@ def compare(a):
             * ((tool["limnsw"][yr][1] - R0.limnsw0) - (tool["lim"][yr][1] - R0.lim0)) / OCEAN_AREA,
             SEA_LEVEL_ABS)
         if lim_prev is not None:
-            d_lim = RHO_I * SECONDS_PER_YEAR * float(np.sum(
-                np.ma.filled(f["dlithkdt"], 0.0).astype(np.float64))) * area_m2
-            l1 = RHO_I * SECONDS_PER_YEAR * float(np.sum(np.abs(
-                np.ma.filled(f["dlithkdt"], 0.0).astype(np.float64)))) * area_m2
+            dh64 = np.ma.filled(f["dlithkdt"], 0.0).astype(np.float64)
+            d_lim = RHO_I * SECONDS_PER_YEAR * float(np.sum(dh64 * w64)) * area_m2
+            l1 = RHO_I * SECONDS_PER_YEAR * float(np.sum(np.abs(dh64) * w64)) * area_m2
             gates["lim change against dlithkdt"].check(
-                yr, (N["lim"] - lim_prev) - d_lim, CSV_DIGITS * abs(N["lim"]) + F32 * l1)
+                yr, (N["lim"] - lim_prev) - d_lim, CSV_DIGITS * abs(N["lim"]) + rel * l1)
         lim_prev = N["lim"]
         if csv_rows is not None:
             if yr not in csv_rows:
@@ -470,7 +558,8 @@ def compare(a):
             "years": years, "paths": paths,
             "grids": {"af2": (af2_path, str(af2.dtype)), "maxmask1": (mm_path, str(mm.dtype))},
             "maxmask_pixels_dropped": int(np.sum(carries & ~np.ma.filled(mm > 0, False))),
-            "coverage": a.overlap}
+            "coverage": a.overlap, "flux_means": means,
+            "native_af2": a.native_af2, "af2_allow": allow, "stamps": stamps}
 
 
 def warnings_for(res, strict_share=RESID_SHARE):
@@ -486,28 +575,48 @@ def warnings_for(res, strict_share=RESID_SHARE):
         m = max(by[s], key=lambda r: abs(r[key]))
         return m[key] / scale[s] if scale[s] else 0.0, m["year"]
 
-    area = [f"{s} {100 * share(s, 'd_area')[0]:+.2f}%" for s in by if scale[s]]
-    out.append("area factor (af2), largest share of max |N|: " + ", ".join(area))
+    whole = res["flux_means"] == WHOLE_PIXEL
+    if res["native_af2"]:
+        # the exact sums, as a share of their L1: how closely the model's af2
+        # at its cell centroids reproduces the tool's at pixel centres
+        exact = list(EXACT) + (["tendacabf"] if whole or res["coverage"] else [])
+        worst = max([(abs(r["d_resid"]) / r["L1"], r["scalar"], r["year"])
+                     for s in exact for r in by[s] if r["L1"] > 0]
+                    + [(abs(g["d_resid"] + f["d_resid"]) / (g["L1"] + f["L1"]), "ice area", g["year"])
+                       for g, f in zip(by["iareagr"], by["iareafl"]) if g["L1"] + f["L1"] > 0])
+        out.append(f"area factor: the native scalars carry it too (--native-af2), so the area "
+                   f"term is zero; the exact sums' worst |C - N| is {worst[0]:.2e} of their L1 "
+                   f"({worst[1]} {worst[2]}), against an allowance of {res['af2_allow']:.2e}")
+    else:
+        area = [f"{s} {100 * share(s, 'd_area')[0]:+.2f}%" for s in by if scale[s]]
+        out.append("area factor (af2), largest share of max |N|: " + ", ".join(area))
     mm = [f"{s} {100 * share(s, 'd_mm')[0]:+.3f}%" for s in ("lim", "limnsw", "slvaf", "slg20")
           if scale.get(s)]
     out.append(f"maximum-extent mask: {res['maxmask_pixels_dropped']} pixels carry ice or "
                f"flux outside maxmask1; " + ", ".join(mm))
-    for s in ("tendacabf", "tendlibmassbffl"):
-        v, yr = share(s, "d_fill")
-        out.append(f"fill convention, {s}: the tool's whole-pixel sum minus the "
-                   f"coverage-weighted one is {100 * v:+.2f}% of max |N| ({yr})")
-    moved = [r for r in by["iareagr"] if r["d_resid"] > CSV_DIGITS * abs(r["N"]) + F32 * r["L1"]]
+    if whole:
+        out.append(f"fill convention: acabf and libmassbffl are whole-pixel means "
+                   f"({FLUX_MEAN_ATTR}), the tool's own, so nothing is undone and the "
+                   f"fill term is zero")
+    else:
+        for s in ("tendacabf", "tendlibmassbffl"):
+            v, yr = share(s, "d_fill")
+            out.append(f"fill convention, {s}: the tool's whole-pixel sum minus the "
+                       f"coverage-weighted one is {100 * v:+.2f}% of max |N| ({yr})")
+    moved = [r for r in by["iareagr"]
+             if r["d_resid"] > CSV_DIGITS * abs(r["N"]) + (F32 + res["af2_allow"]) * r["L1"]]
     if moved:
         m = max(moved, key=lambda r: r["d_resid"])
         out.append(f"near flotation: {len(moved)} years write floating area as grounded, at most "
                    f"{m['d_resid']:.3e} m2 ({m['year']})")
-    if not res["coverage"]:
+    if not res["coverage"] and not whole:
         out.append("no --overlap: tendacabf's fill convention is not undone, so its "
                    "residual carries it")
     m = max(by["tendlibmassbffl"], key=lambda r: abs(r["d_resid"]))
+    where = ("in pixels with no floating ice at year end, which the fill leaves out" if whole
+             else "outside the writer's year-end floating mask")
     out.append(f"tendlibmassbffl: the model's value carries "
-               f"{-m['d_resid'] * SECONDS_PER_YEAR / 1e12:+.1f} Gt/yr outside the writer's "
-               f"year-end floating mask ({m['year']})")
+               f"{-m['d_resid'] * SECONDS_PER_YEAR / 1e12:+.1f} Gt/yr {where} ({m['year']})")
     for s in ("limnsw",) + SEA_LEVEL:
         v, yr = share(s, "d_resid")
         if abs(v) > strict_share:
@@ -541,7 +650,12 @@ def write_markdown(path, res, a, warns, status):
              f"{res['rho']['rhof']:g}",
              f"- reference: {res['reference']}",
              f"- years: {years[0]} to {years[-1]} ({len(years)})",
+             f"- flux means: whole pixel (`{FLUX_MEAN_ATTR}`)" if res["flux_means"] == WHOLE_PIXEL
+             else f"- flux means: acabf over the covered part of a pixel, libmassbffl over the part "
+                  f"floating at year end (no `{FLUX_MEAN_ATTR}`)",
              f"- pixel coverage: `{res['coverage']}`" if res["coverage"] else "- pixel coverage: none given",
+             f"- native scalars: over {'true' if res['native_af2'] else 'map-plane'} area; the "
+             f"writer's stamp: " + ", ".join(f"{v or 'none'} (`{k}`)" for k, v in res["stamps"].items()),
              f"- comparison: numpy {np.__version__}, netCDF4 {nc4.__version__}"]
     lines += [f"- {n}" for n in (a.note or [])]
     lines += ["", f"Exit status {status}.", "", "## Gates", "", "| gate | result | worst |", "|---|---|---|"]
@@ -595,14 +709,21 @@ def main(argv=None):
     ap.add_argument("--tool", required=True, help="the tool's folder for the same experiment, "
                     "<outpath>/nc/AIS/<source>/<ism>/CORE/<counter>")
     ap.add_argument("--datapath", required=True, help="the auxiliary grids (af2, maxmask1)")
-    ap.add_argument("--params", required=True, help="the params.nc the tool read")
+    ap.add_argument("--params", required=True, help="the params.nc the tool read, the upload's "
+                    "AIS/<source_id>/<ism_id>/params.nc")
     ref = ap.add_mutually_exclusive_group(required=True)
     ref.add_argument("--refyear", type=int, help="the stamped year given to the tool")
     ref.add_argument("--hist-submission", help="the historical's experiment folder, when the "
                      "tool paired the run with it")
     ap.add_argument("--native-csv", help="the run's _ismip7_scalars.csv, checked against the "
                     "scalar files")
-    ap.add_argument("--overlap", help="the writer's <annual>.overlap.npz, for pixel coverage")
+    ap.add_argument("--native-af2", action="store_true",
+                    help="the native scalars integrate over true area, map-plane cell area times "
+                         "af2 at the centroid, as a forward with the area factor writes them; "
+                         "the writer's scalar_area stamp must agree")
+    ap.add_argument("--overlap", help="the writer's <annual>.overlap.npz, for pixel coverage; "
+                    "only a tree without whole-pixel flux means needs it, to undo acabf's "
+                    "covered-part means")
     ap.add_argument("--label", help="title of the summary")
     ap.add_argument("--note", action="append", help="a provenance line for the summary")
     ap.add_argument("--strict", action="store_true", help="fail on the named differences too")

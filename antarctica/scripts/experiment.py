@@ -172,20 +172,7 @@ def run_core_experiment(*, core, title, name, esm, scenario,
     # after them, and raises on anything else, so ask before the model setup
     # rather than find out at the first step, or at the last one.
     first, last = int(math.floor(t_start + 1e-9)), forcing_year(t_end)
-    for var in ("tf", "so"):
-        cover = ISMIP7Ocean(esm=esm, scenario=scenario).coverage(var)
-        if cover is None:
-            raise FileNotFoundError(
-                f"No ocean {var} data for {esm}/{scenario}. Download the "
-                f"ocean tree first."
-            )
-        if cover[0] > first or cover[1] + 1 < last:
-            raise FileNotFoundError(
-                f"Ocean {var} for {esm}/{scenario} covers {cover[0]}-{cover[1]}, "
-                f"and this run needs {first}-{last} (one year past the end is "
-                f"held, no more). Download the rest of the ocean tree, or move "
-                f"ISMIP7_T_START / ISMIP7_T_END inside it."
-            )
+    cover = ISMIP7Ocean(esm=esm, scenario=scenario).require_years(first, last)
     PETSc.Sys.Print(f"  Ocean forcing: tf, so cover {cover[0]}-{cover[1]}")
 
     if restart:

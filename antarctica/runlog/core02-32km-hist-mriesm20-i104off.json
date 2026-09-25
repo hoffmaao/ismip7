@@ -1,0 +1,31 @@
+{
+  "id": "core02-32km-hist-mriesm20-i104off",
+  "task": "test",
+  "institution": "IU",
+  "title": "Core 2 at 32 km without the apparent-MB reference: branch state of the i104off runs",
+  "status": "done",
+  "esm": "MRI-ESM2-0",
+  "scenario": "historical",
+  "period": "1850 to 2015, reached 2015.0",
+  "friction": "budd",
+  "mesh": "antarctica_320000_32000, DG0 geometry",
+  "initial_state": "inversion_icepack2_budd_n3_dg0_logvelnet_32000.h5, sha256 3b3aefa1c69a5daf87d1db291cae9337e00c2696f412bce147b1f488228ef472",
+  "branch_from": "cold start",
+  "forcing": "MRI-ESM2-0 historical, atmosphere GEMB-SDBN1-8000m v2, ocean v3",
+  "melt": "per-basin K from K_issue11_mesh2500.npz, local slope",
+  "front": "held fixed, ice-shelf collapse ISMIP7_FRACTURE=none",
+  "apparent_mb": "off",
+  "dt": 0.1,
+  "site": "IU Quartz",
+  "resources": "8 ranks, 32 GiB",
+  "jobs": [
+    "10609213"
+  ],
+  "code": "700a846",
+  "started": "2026-09-24",
+  "finished": "2026-09-24",
+  "cost": "one link of 32 min for 165 model years",
+  "results": "antarctica/results/hist_mri_esm2_0_i104off_32000_*",
+  "audit": "OFF TRACK, with dM/dt FAIL at 730.1 Gt/yr; resid 0.0000 on all 1650 rows, no rescue, subcycle or stall event",
+  "notes": "run for issue #104 from a scratch clone of main at 700a846, with results and logs in the shared checkout. 1650 of 1650 steps converged on their first direct diagnostic solve, with 6.0 Newton iterations on average and 17 at the most (step 838, t = 1933.8). VAF changes by +498 mm SLE over 1850 to 2015; the peak ice speed on the mesh is 42078 m/yr at t = 1880.1, at (417000, -1689000) m. Against core02-32km-hist-mriesm20-i32 with the reference, VAF gains 498 mm SLE against 171, the post-first-year dM/dt is +730.1 against +300.8 Gt/yr, and the requested basal melt averages 466 against 921 Gt/yr. Run without ISMIP7_OUTPUT. Final state sha256 5d794657a1bfa9cb6e7d8b7ffeb8496c579b7f776989b48ec0bf5bffe1476cbc. Full record: antarctica/reports/core02_hist_mri_esm2_0_32km_i104off.md."
+}

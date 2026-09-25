@@ -3,13 +3,14 @@ model's own scalars (issue #13).
 
 A 6 x 5 grid over three years stands in for a submission. The model's scalars
 are built the way the writer's conservative remap makes them hold: a grid sum
-of a forbidden-policy field is the mesh sum, acabf is a mean over the covered
-part of a pixel and libmassbffl over the floating part. On top of that the
-model books a known amount of melt off the floating ice and keeps a known mass
-in cells thinner than lithk shows. The tool's output comes from a transcription
-of its own expressions (ismip7_scalars 0.1.0, scalars.py and slc/), including
-A2020's step by step accumulation, and from the tool itself where it is
-installed.
+of a flux is the mesh sum, since every flux is a whole-pixel mean. A tree
+written before the whole-pixel means (``whole_pixel=False``) holds acabf as a
+mean over the covered part of a pixel and libmassbffl over the floating part.
+On top of that the model books a known amount of melt where the grid holds no
+floating ice and keeps a known mass in cells thinner than lithk shows. The
+tool's output comes from a transcription of its own expressions
+(ismip7_scalars 0.1.0, scalars.py and slc/), including A2020's step by step
+accumulation, and from the tool itself where it is installed.
 """
 import csv
 import os
@@ -36,6 +37,8 @@ FILL = netCDF4.default_fillvals["f4"]
 EXTRA_MELT = -2.5e5      # kg/s the model books off ice floating at year end
 THIN = 3.0e9             # m3 of ice in cells of 1 m or less
 FL_VARS = ("acabf", "libmassbfgr", "libmassbffl", "licalvf", "lifmassbf", "ligroundf", "dlithkdt")
+# the stand-in for af2_AIS_08000m_v1.nc
+AF2 = (1.02 + 0.01 * np.arange(NX)[None, :] + 0.002 * np.arange(NY)[:, None]).astype("f4")
 
 
 def stamp(year, month, day):
@@ -52,8 +55,10 @@ def fl_times():
     return np.array([stamp(y, 7, 1) for y in YEARS], dtype="f4")
 
 
-def write_gridded(folder, var, cube, flux):
+def write_gridded(folder, var, cube, flux, attrs=None):
     with netCDF4.Dataset(folder / f"{var}_{TAG}.nc", "w") as ds:
+        for k, v in (attrs or {}).items():
+            ds.setncattr(k, v)
         ds.createDimension("time", None); ds.createDimension("y", NY); ds.createDimension("x", NX)
         ds.createVariable("x", "f8", ("x",))[:] = X
         ds.createVariable("y", "f8", ("y",))[:] = Y
@@ -71,8 +76,10 @@ def write_gridded(folder, var, cube, flux):
         v[:] = arr
 
 
-def write_series(folder, var, values, flux, time_dtype="f4", tag=TAG):
+def write_series(folder, var, values, flux, time_dtype="f4", tag=TAG, attrs=None):
     with netCDF4.Dataset(folder / f"{var}_{tag}.nc", "w") as ds:
+        for k, v in (attrs or {}).items():
+            ds.setncattr(k, v)
         ds.createDimension("time", None)
         t = ds.createVariable("time", time_dtype, ("time",))
         t.units, t.calendar, t.long_name = UNITS, "standard", "time"
@@ -135,24 +142,26 @@ def model_fields(moving_bed=False):
     return {v: np.array(c, dtype="f4").astype(np.float64) for v, c in f.items()}, cov
 
 
-def native_scalars(f, cov):
-    r"""What the model's mesh sums give, from the float32 grid as written."""
+def native_scalars(f, cov, weight=1.0):
+    r"""What the model's mesh sums give, from the float32 grid as written.
+    ``weight`` is the area factor a forward with true-area scalars carries."""
     A = DX * DX
+    w = np.asarray(weight, dtype=np.float64)
     out = {s: [] for s in cs.ST_SCALARS + tuple(s for s, _ in cs.FL_SCALARS)}
     for k in range(len(YEARS)):
         h, b = f["lithk"][k], np.nan_to_num(f["topg"][k])
         hf = np.maximum(-b, 0.0) * 1024.0 / 917.0
-        out["lim"].append(917.0 * (np.sum(h) * A + THIN))
-        out["limnsw"].append(917.0 * np.sum(np.maximum(h - hf, 0.0)) * A)
-        out["iareagr"].append(np.sum(f["sftgrf"][k]) * A)
-        out["iareafl"].append(np.sum(f["sftflf"][k]) * A)
+        out["lim"].append(917.0 * (np.sum(h * w) * A + THIN))
+        out["limnsw"].append(917.0 * np.sum(np.maximum(h - hf, 0.0) * w) * A)
+        out["iareagr"].append(np.sum(f["sftgrf"][k] * w) * A)
+        out["iareafl"].append(np.sum(f["sftflf"][k] * w) * A)
         z = {v: np.nan_to_num(f[v][k]) for v in FL_VARS}
-        out["tendacabf"].append(np.sum(z["acabf"] * cov) * A)
+        out["tendacabf"].append(np.sum(z["acabf"] * cov * w) * A)
         out["tendlibmassbfgr"].append(0.0)
-        out["tendlibmassbffl"].append(np.sum(z["libmassbffl"] * f["sftflf"][k]) * A + EXTRA_MELT)
-        out["tendlicalvf"].append(np.sum(z["licalvf"]) * A)
+        out["tendlibmassbffl"].append(np.sum(z["libmassbffl"] * f["sftflf"][k] * w) * A + EXTRA_MELT)
+        out["tendlicalvf"].append(np.sum(z["licalvf"] * w) * A)
         out["tendlifmassbf"].append(0.0)
-        out["tendligroundf"].append(np.sum(z["ligroundf"]) * A)
+        out["tendligroundf"].append(np.sum(z["ligroundf"] * w) * A)
     return out
 
 
@@ -242,17 +251,27 @@ def tool_scalars(sub, datapath, params, refyear=2016):
 
 
 def build(tmp_path, *, rhow=1024.0, flip=False, moving_bed=False, shift_tool=False,
-          perturb_sftgrf=False, csv_off=False, ground_near=False):
+          perturb_sftgrf=False, csv_off=False, ground_near=False, whole_pixel=True,
+          native_af2=False, stamp=True, native_scale=1.0):
     r"""A submission, its grids, params.nc, the tool's output and the
-    writer's overlap cache; returns the argument list for compare_scalars."""
+    writer's overlap cache; returns the argument list for compare_scalars.
+    ``whole_pixel=False`` writes the tree the way the writer did before its
+    flux means were whole-pixel means. ``native_af2`` gives the model's
+    scalars the area factor, ``stamp=False`` leaves the writer's stamp of
+    their area off, and ``native_scale`` puts them that factor off."""
     sub = tmp_path / "tree" / "AIS" / "RICE" / "icepack2" / "CORE" / "C007"
     tool = tmp_path / "out" / "tool" / "nc" / "AIS" / "RICE" / "icepack2" / "CORE" / "C007"
     data = tmp_path / "grids"
     for d in (sub, tool, data):
         d.mkdir(parents=True)
     f, cov = model_fields(moving_bed=moving_bed)
-    N = native_scalars(f, cov)
+    N = native_scalars(f, cov, weight=AF2 if native_af2 else 1.0)
+    N = {s: [v * native_scale for v in vals] for s, vals in N.items()}
     grid = {v: f[v].copy() for v in ("lithk", "topg", "sftgrf", "sftflf") + FL_VARS}
+    if whole_pixel:
+        # the same fluxes as whole-pixel means: fill stays fill (NaN * 0)
+        grid["acabf"] = grid["acabf"] * cov
+        grid["libmassbffl"] = grid["libmassbffl"] * f["sftflf"]
     if perturb_sftgrf:
         grid["sftgrf"][1, 0, 0] = 0.0
     if ground_near:
@@ -264,12 +283,15 @@ def build(tmp_path, *, rhow=1024.0, flip=False, moving_bed=False, shift_tool=Fal
     for v in ("lithk", "topg", "sftgrf", "sftflf"):
         write_gridded(sub, v, grid[v], flux=False)
     for v in FL_VARS:
-        write_gridded(sub, v, grid[v], flux=True)
-    # the writer takes each scalar from the CSV's seven digits into float32
+        write_gridded(sub, v, grid[v], flux=True,
+                      attrs={cs.FLUX_MEAN_ATTR: cs.WHOLE_PIXEL} if whole_pixel else None)
+    # the writer takes each scalar from the CSV's seven digits into float32,
+    # and stamps the area it found them to integrate over
     rows = [{"year": yr, **{s: f"{N[s][k]:.6e}" for s in N}} for k, yr in enumerate(YEARS)]
+    area = {cs.SCALAR_AREA_ATTR: cs.TRUE_AREA if native_af2 else cs.MAP_PLANE} if stamp else None
     for s in N:
         write_series(sub, s, np.array([float(r[s]) for r in rows], dtype="f4"),
-                     flux=s not in cs.ST_SCALARS)
+                     flux=s not in cs.ST_SCALARS, attrs=area)
     if csv_off:
         rows[1]["lim"] = f"{float(rows[1]['lim']) * 1.001:.6e}"
     native_csv = tmp_path / "run_ismip7_scalars.csv"
@@ -277,12 +299,11 @@ def build(tmp_path, *, rhow=1024.0, flip=False, moving_bed=False, shift_tool=Fal
         w = csv.DictWriter(fh, fieldnames=list(rows[0]))
         w.writeheader(); w.writerows(rows)
 
-    af2 = (1.02 + 0.01 * np.arange(NX)[None, :] + 0.002 * np.arange(NY)[:, None]).astype("f4")
     mm = np.ones((NY, NX), dtype="i4"); mm[4, 1] = 0          # one ice pixel outside the mask
-    write_grid(data, "af2", af2, "f4", flip=False)
+    write_grid(data, "af2", AF2, "f4", flip=False)
     write_grid(data, "maxmask1", mm, "i4", flip=flip)
     write_grid(data, "iaf2", np.ones((NY, NX), dtype="f4"), "f4")
-    params = tmp_path / "out" / "params" / "RICE" / "icepack2" / "params.nc"
+    params = tmp_path / "tree" / "AIS" / "RICE" / "icepack2" / "params.nc"   # in the upload
     write_params(params, rhow=rhow)
 
     T = tool_scalars(sub, data, params)
@@ -322,26 +343,51 @@ def test_a_consistent_submission_passes_and_every_difference_is_named(tmp_path):
         assert parts == pytest.approx(r["T_minus_N"], rel=1e-9, abs=1e-12 * max(1.0, abs(r["N"])))
     k = 1
     # the area factor on lim, by hand: rho_i sum(h * maxmask1 * (af2 - 1)) dx^2
-    af2 = (1.02 + 0.01 * np.arange(NX)[None, :] + 0.002 * np.arange(NY)[:, None]).astype("f4")
     mm = np.ones((NY, NX)); mm[4, 1] = 0
-    want = 917.0 * np.sum(f["lithk"][k] * mm * (af2.astype(np.float64) - 1.0)) * A
+    want = 917.0 * np.sum(f["lithk"][k] * mm * (AF2.astype(np.float64) - 1.0)) * A
     assert rows[("lim", 2016)]["d_area"] == pytest.approx(want, rel=1e-6)
     assert rows[("lim", 2016)]["d_mm"] == pytest.approx(-917.0 * f["lithk"][k][4, 1] * A, rel=1e-6)
     # the thin-cell mass lithk leaves out, and the melt booked off the floating ice
     lim = rows[("lim", 2016)]
     assert lim["d_resid"] == pytest.approx(-917.0 * THIN, abs=cs.CSV_DIGITS * abs(lim["N"]))
     assert rows[("tendlibmassbffl", 2016)]["d_resid"] == pytest.approx(-EXTRA_MELT, rel=1e-3)
+    # whole-pixel means are the tool's own convention: nothing to undo
+    for s in ("tendacabf", "tendlibmassbffl"):
+        assert all(rows[(s, yr)]["d_fill"] == 0.0 for yr in YEARS)
+    # sea level: zero at the reference, and the native counterpart from lim and limnsw
+    assert rows[("slvaf", 2015)]["T"] == 0.0 and rows[("slvaf", 2015)]["N"] == 0.0
+    assert rows[("sla20", 2017)]["T"] == pytest.approx(rows[("slg20", 2017)]["T"], abs=1e-9)
+    md = (tmp_path / "cmp.md").read_text()
+    assert "FAIL" not in md and "Exit status 0." in md
+    assert "- flux means: whole pixel" in md and "| tendacabf against N | pass |" in md
+
+
+def test_a_tree_written_before_the_whole_pixel_means_still_compares(tmp_path):
+    r"""No ``flux_pixel_mean`` in the flux files: acabf is a mean over the
+    covered part of a pixel and libmassbffl over the floating part, and the
+    comparison undoes both."""
+    args, f, cov = build(tmp_path, whole_pixel=False)
+    assert cs.main(args) == 0, (tmp_path / "cmp.md").read_text()
+    rows = rows_of(tmp_path)
+    A, k = DX * DX, 1
     # the fill conventions: the half-covered acabf pixel and the half-floating melt pixel
     acabf = np.nan_to_num(f["acabf"][k])
     assert rows[("tendacabf", 2016)]["d_fill"] == pytest.approx(np.sum(acabf * (1 - cov)) * A, rel=1e-6)
     bmb = np.nan_to_num(f["libmassbffl"][k])
     assert rows[("tendlibmassbffl", 2016)]["d_fill"] == pytest.approx(
         np.sum(bmb * (1 - f["sftflf"][k])) * A, rel=1e-6)
-    # sea level: zero at the reference, and the native counterpart from lim and limnsw
-    assert rows[("slvaf", 2015)]["T"] == 0.0 and rows[("slvaf", 2015)]["N"] == 0.0
-    assert rows[("sla20", 2017)]["T"] == pytest.approx(rows[("slg20", 2017)]["T"], abs=1e-9)
+    assert rows[("tendlibmassbffl", 2016)]["d_resid"] == pytest.approx(-EXTRA_MELT, rel=1e-3)
     md = (tmp_path / "cmp.md").read_text()
-    assert "FAIL" not in md and "Exit status 0." in md
+    assert "covered part of a pixel" in md and "| tendacabf against N | pass |" in md
+
+
+def test_flux_files_that_disagree_on_their_pixel_means_are_refused(tmp_path, capsys):
+    args, _, _ = build(tmp_path)
+    melt = next((tmp_path / "tree").rglob("libmassbffl_*.nc"))
+    with netCDF4.Dataset(melt, "a") as ds:
+        ds.delncattr(cs.FLUX_MEAN_ATTR)
+    assert cs.main(args) == 2
+    assert "disagree" in capsys.readouterr().err
 
 
 def test_a_tool_series_a_year_out_fails_the_replay(tmp_path):
@@ -404,13 +450,56 @@ def test_a_reference_year_that_is_not_there_exits_2(tmp_path):
     assert cs.main(args) == 2
 
 
-def test_without_the_overlap_cache_acabf_is_reported_and_not_gated(tmp_path):
-    args, _, _ = build(tmp_path)
+def test_without_the_overlap_cache_an_old_tree_s_acabf_is_reported_and_not_gated(tmp_path):
+    args, _, _ = build(tmp_path, whole_pixel=False)
     i = args.index("--overlap")
     del args[i:i + 2]
     assert cs.main(args) == 0
-    assert "| not checked |" in gate_line(tmp_path, "tendacabf with coverage against N")
+    assert "| not checked |" in gate_line(tmp_path, "tendacabf against N")
     assert "no --overlap" in (tmp_path / "cmp.md").read_text()
+
+
+def test_whole_pixel_means_need_no_overlap_cache(tmp_path):
+    args, _, _ = build(tmp_path)
+    i = args.index("--overlap")
+    del args[i:i + 2]
+    assert cs.main(args) == 0, (tmp_path / "cmp.md").read_text()
+    assert "| pass |" in gate_line(tmp_path, "tendacabf against N")
+    assert "no --overlap" not in (tmp_path / "cmp.md").read_text()
+
+
+def test_native_scalars_over_true_area_leave_no_area_term(tmp_path):
+    r"""Issue #97: with the area factor on both sides the area term is zero,
+    and every gate still holds."""
+    args, _, _ = build(tmp_path, native_af2=True)
+    assert cs.main(args + ["--native-af2"]) == 0, (tmp_path / "cmp.md").read_text()
+    assert all(r["d_area"] == 0.0 for r in rows_of(tmp_path).values())
+    md = (tmp_path / "cmp.md").read_text()
+    assert "- native scalars: over true area" in md and "the area term is zero" in md
+
+
+def test_a_switch_that_contradicts_the_writer_s_stamp_is_refused(tmp_path, capsys):
+    args, _, _ = build(tmp_path / "true", native_af2=True)
+    assert cs.main(args) == 2
+    assert "stamped the native scalars true_area" in capsys.readouterr().err
+    args, _, _ = build(tmp_path / "plane")
+    assert cs.main(args + ["--native-af2"]) == 2
+    assert "stamped the native scalars map_plane" in capsys.readouterr().err
+
+
+def test_unstamped_true_area_scalars_without_the_switch_fail_the_sums(tmp_path):
+    args, _, _ = build(tmp_path, native_af2=True, stamp=False)
+    assert cs.main(args) == 1
+    assert "| FAIL |" in gate_line(tmp_path, "forbidden-policy sums against N")
+
+
+def test_a_native_factor_five_percent_off_fails_under_the_switch(tmp_path):
+    r"""The switch allows af2's largest change between neighbouring pixels
+    (1 % on this small grid, 5.9e-4 on the 8 km one); a missing or doubled
+    factor exceeds it."""
+    args, _, _ = build(tmp_path, native_af2=True, native_scale=1.05)
+    assert cs.main(args + ["--native-af2"]) == 1
+    assert "| FAIL |" in gate_line(tmp_path, "forbidden-policy sums against N")
 
 
 def test_strict_fails_on_the_named_differences(tmp_path):
@@ -421,8 +510,12 @@ def test_strict_fails_on_the_named_differences(tmp_path):
 def test_the_constants_are_the_model_s():
     pytest.importorskip("firedrake")
     from icepack2_tools import ismip7_output
+    import write_ismip7_output as wio
     assert cs.RHO_I == ismip7_output.RHO_I
     assert cs.SECONDS_PER_YEAR == ismip7_output.SECONDS_PER_YEAR
+    assert (cs.FLUX_MEAN_ATTR, cs.WHOLE_PIXEL) == (wio.FLUX_MEAN_ATTR, wio.FLUX_MEAN)
+    assert ((cs.SCALAR_AREA_ATTR, cs.TRUE_AREA, cs.MAP_PLANE)
+            == (wio.SCALAR_AREA_ATTR, wio.TRUE_AREA, wio.MAP_PLANE))
 
 
 def test_it_imports_without_firedrake():
@@ -432,6 +525,8 @@ def test_it_imports_without_firedrake():
 
 
 def test_the_tool_itself_agrees_with_the_replay(tmp_path):
+    r"""The tool finds params.nc in the upload tree, with no --params-path,
+    as the organisers' run of it will."""
     scalars = pytest.importorskip("ismip7_scalars.scalars")
     args, _, _ = build(tmp_path)
     out = tmp_path / "real"
@@ -439,8 +534,7 @@ def test_the_tool_itself_agrees_with_the_replay(tmp_path):
                        "--modelid", "m001", "--esm", "CESM2-WACCM", "--forcingid", "f001",
                        "--experiment", "ssp585", "--configid", "C007", "--hist", "ssp585",
                        "--refyear", "2016", "--datapath", args[args.index("--datapath") + 1],
-                       "--modelpath", str(tmp_path / "tree" / "AIS"),
-                       "--params-path", str(tmp_path / "out" / "params"), "--outpath", str(out)])
+                       "--modelpath", str(tmp_path / "tree" / "AIS"), "--outpath", str(out)])
     assert rc == 0
     args[args.index("--tool") + 1] = str(out / "nc" / "AIS" / "RICE" / "icepack2" / "CORE" / "C007")
     assert cs.main(args) == 0, (tmp_path / "cmp.md").read_text()

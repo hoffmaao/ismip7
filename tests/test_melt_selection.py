@@ -309,7 +309,7 @@ def test_the_rule_admits_a_K_only_when_every_test_passes():
     per["frac_below_floor"][4, 6] = 0.25  # a quarter exactly passes
     per["tf_max"][5, 9] = 6.81
     per["frac_above_cap"][6, 9] = 0.3
-    ok, tests = ms.TFRule().admits(per)
+    ok, tests = ms.TFRule(cap=6.8, cap_area=(6.0, 0.25)).admits(per)
     assert ok.tolist() == [True, False, False, False, True, False, False]
     assert tests["rooted"].tolist() == [True, False] + [True] * 5
     assert tests["floor"].tolist() == [True, True, False] + [True] * 4
@@ -320,6 +320,13 @@ def test_the_rule_admits_a_K_only_when_every_test_passes():
     ok, tests = ms.TFRule(cap=None, cap_area=None, rooted=False).admits(per)
     assert set(tests) == {"floor", "floor_area"}
     assert ok.tolist() == [True, True, False, False, True, True, True]
+    # the defaults bound no single cell on the warm side
+    rule = ms.TFRule()
+    assert (rule.floor, rule.floor_area, rule.cap, rule.cap_area, rule.rooted) == (
+        -1.8, (-1.0, 0.25), None, (5.5, 0.25), True)
+    ok, tests = rule.admits(per)
+    assert "cap" not in tests
+    assert ok.tolist() == [True, False, False, False, True, True, False]
 
 
 def test_a_basin_beyond_the_toolbox_window_is_fitted_inside_three_K():

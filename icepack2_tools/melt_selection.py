@@ -448,17 +448,17 @@ class TFRule:
 
     Section 2.1 asks the offsets to keep present-day thermal forcing "not
     significantly below 0 degC or above 5 degC". This repository reads
-    significantly as two tests on each side: a bound every floating cell must
-    meet (``floor``, ``cap``), and a bound at most a share of each basin's
-    area may cross (``floor_area``, ``cap_area``, each a (degC, share) pair).
-    The defaults hold every cell at or above -1.8 degC and at most 25 % of any
-    basin's area below -1.0 degC, and mirror both about the 0 to 5 degC range
-    for the cap. ``rooted`` also refuses a K at which some basin cannot reach
-    its observed total inside the offset window; the toolbox keeps such a K
-    with a term 1 penalty. None switches a test off."""
+    significantly as a bound every floating cell must meet (``floor``,
+    ``cap``) and a bound at most a share of each basin's area may cross
+    (``floor_area``, ``cap_area``, each a (degC, share) pair). The defaults
+    hold every cell at or above -1.8 degC, at most 25 % of any basin's area
+    below -1.0 degC and at most 25 % above 5.5 degC, and bound no single cell
+    on the warm side. ``rooted`` also refuses a K at which some basin cannot
+    reach its observed total inside the offset window; the toolbox keeps such
+    a K with a term 1 penalty. None switches a test off."""
 
-    def __init__(self, floor=-1.8, floor_area=(-1.0, 0.25), cap=6.8,
-                 cap_area=(6.0, 0.25), rooted=True):
+    def __init__(self, floor=-1.8, floor_area=(-1.0, 0.25), cap=None,
+                 cap_area=(5.5, 0.25), rooted=True):
         def pair(p):
             return None if p is None else (float(p[0]), float(p[1]))
         self.floor = None if floor is None else float(floor)

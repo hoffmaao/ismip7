@@ -20,10 +20,11 @@ and seeds 1 to 4 give the spread.
 
 Under ``per_k`` the objective runs on the K that ``melt_selection.TFRule``
 admits: every basin fitted inside the window, and present-day thermal forcing
-with the offsets at or above --tf-floor on every floating cell, below
---tf-floor-area on at most its share of each basin, and the same on the warm
-side (--tf-cap, --tf-cap-area). The objective over every K, the toolbox's
-handling, is recorded beside it.
+with the offsets at or above --tf-floor on every floating cell, below and
+above the --tf-floor-area and --tf-cap-area temperatures on at most their
+shares of each basin, and at or below --tf-cap on every cell (off by
+default). The objective over every K, the toolbox's handling, is recorded
+beside it.
 
 Knobs come from the environment, as for the forward: ISMIP7_DATA_ROOT and
 ISMIP7_MELT_OBS_CSV always; under ``mesh`` also ISMIP7_LC, ISMIP7_INV_H5,
@@ -763,17 +764,20 @@ def main():
                     help="extend the notebook's K grid (2.5e-6 to 3.0e-4) upward "
                          "on its step to this K")
     rule = ms.TFRule()
+
+    def shown(v):
+        return ["none"] if v is None else [str(x) for x in (v if isinstance(v, tuple) else (v,))]
     ap.add_argument("--dt-window", type=float, default=ms.DT_WINDOW[1],
                     help="search each basin's offset in plus or minus this many K "
                          "(the toolbox uses 2)")
-    ap.add_argument("--tf-floor", default=str(rule.floor), metavar="DEGC|none",
+    ap.add_argument("--tf-floor", default=shown(rule.floor)[0], metavar="DEGC|none",
                     help="per_k: every floating cell at or above this")
-    ap.add_argument("--tf-floor-area", nargs="+", default=list(map(str, rule.floor_area)),
+    ap.add_argument("--tf-floor-area", nargs="+", default=shown(rule.floor_area),
                     metavar="DEGC SHARE|none",
                     help="per_k: at most SHARE of each basin's area below DEGC")
-    ap.add_argument("--tf-cap", default=str(rule.cap), metavar="DEGC|none",
+    ap.add_argument("--tf-cap", default=shown(rule.cap)[0], metavar="DEGC|none",
                     help="per_k: every floating cell at or below this")
-    ap.add_argument("--tf-cap-area", nargs="+", default=list(map(str, rule.cap_area)),
+    ap.add_argument("--tf-cap-area", nargs="+", default=shown(rule.cap_area),
                     metavar="DEGC SHARE|none",
                     help="per_k: at most SHARE of each basin's area above DEGC")
     ap.add_argument("--keep-unfitted", action="store_true",

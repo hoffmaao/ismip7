@@ -539,11 +539,12 @@ each basin's area. A K is admitted when, with each basin's offset applied:
 | every basin reaches its observed total inside the offset window | plus or minus 3 K | `--dt-window`, `--keep-unfitted` |
 | every floating cell at or above | -1.8 degC | `--tf-floor` |
 | at most this share of any basin's floating area below | 25 percent below -1.0 degC | `--tf-floor-area` |
-| every floating cell at or below | 6.8 degC | `--tf-cap` |
-| at most this share of any basin's floating area above | 25 percent above 6.0 degC | `--tf-cap-area` |
+| at most this share of any basin's floating area above | 25 percent above 5.5 degC | `--tf-cap-area` |
+| every floating cell at or below | no bound | `--tf-cap` |
 
-The two warm-side tests mirror the cold-side ones about the protocol's 0 to
-5 degC range; `none` drops any of the four TF tests. The toolbox searches
+The warm side applies the cold side's 25 percent share half a degree past
+the protocol's 5 degC and bounds no single cell; `none` drops any of the
+four TF tests. The toolbox searches
 offsets in plus or minus 2 K and keeps a K whose fit ends at the window
 edge, with its residual in term 1; the objective over every K, handled that
 way inside the same 3 K window, is recorded beside the admitted one in

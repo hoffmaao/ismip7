@@ -574,7 +574,7 @@ percentile choice (issue #26):
 | 1000 m / 10 km production mesh, grid to 1e-3 | none | 4.25e-5 | 7.75e-5 | 1.375e-4 |
 | 2 km MAP mesh, grid to 1e-3 | fitted for every K | 2.5e-5 | 7.5e-5 | 4.475e-4 |
 | 1000 m / 10 km production mesh, grid to 1e-3 | fitted for every K | 2.5e-5 | 7.5e-5 | 4.15e-4 |
-| 2 km MAP mesh, grid to 1e-3 | fitted for every K in 3 K, admitted K only | 2.75e-5 | 7.0e-5 | 3.25e-4 |
+| 2 km MAP mesh, grid to 1e-3 | fitted for every K in 3 K, admitted K only | 2.5e-5 | 7.0e-5 | 3.225e-4 |
 | 1000 m / 10 km production mesh, grid to 1e-3 | fitted for every K in 3 K, admitted K only | 2.5e-5 | 6.5e-5 | 2.525e-4 |
 
 On the notebook's grid the aggregation matches the toolbox's term functions
@@ -594,24 +594,22 @@ basins (eleven) below 0 degC. On Quartz the 30_sep files the
 forward reads are byte-identical to the notebook's 06_nov tf v3 and so v4.
 
 The rows marked admitted K only (25 September 2026, run records ending
-`-rule`) search the offsets in 3 K and apply the thermal forcing rule
-above. Every basin then fits from K = 2.5e-5, and the admitted K run from
-2.75e-5 to 3.5e-4 on the 2 km mesh and from 2.5e-5 to 2.55e-4 on the 1000 m
-mesh. On the 2 km mesh the bottom is the last K before Amundsen's offset
-carries a cell past the 6.8 degC cap (+2.75 K and 6.66 degC at 2.75e-5); on
-the 1000 m mesh Amundsen stops fitting below 2.5e-5, where it takes +2.88 K
-and reaches 6.79 degC. The top is where basin 4 passes 25 percent of its
-area below -1.0 degC, and that basin alone moves the top between the
-meshes. The -1.8 degC floor never
-binds. 14 percent of the samples (11) sit on the bottom and 3.8 percent
-(4.9) on the top, and every seed gives the same K05 and K95 and K50 within
-one step. At the 2 km K05, K50 and K95 the present-day dM/dT is 1415, 2123
-and 5343 Gt/yr per K (1386, 2087 and 4476), against 1787 to 2893 at the
-notebook's percentiles; the term 3 warm-minus-cold response is 0.80, 1.56
+`-rule`) search the offsets in 3 K and apply the thermal forcing rule above.
+Every basin then fits from K = 2.5e-5, where Amundsen takes +2.96 K on the 2
+km mesh (+2.88 K) and puts 12 percent of its shelf (11) above 5.5 degC, and
+the admitted K run from 2.5e-5 to 3.5e-4 on the 2 km mesh and to 2.55e-4 on
+the 1000 m mesh. The top is where basin 4 passes 25 percent of its area
+below -1.0 degC, and that basin alone moves the top between the meshes. The
+-1.8 degC floor never binds and the 5.5 degC test fails only at K of 1.0e-5
+and below, so the 3 K window sets the bottom. 12 percent of the samples (11)
+sit on the bottom and 3.75 percent (4.9) on the top, and the seeds agree
+within one step. At the 2 km K05, K50 and K95 the present-day dM/dT is 1362,
+2123 and 5305 Gt/yr per K (1386, 2087 and 4476), against 1787 to 2893 at the
+notebook's percentiles; the term 3 warm-minus-cold response is 0.74, 1.56
 and 5.2 times the ocean models' (0.73, 1.45 and 4.2), and at K95 46 percent
-of the shelf area (40) refreezes at present day. Dropping the warm-side
-tests moves the 2 km K05 to 2.5e-5 and K95 to 3.225e-4 and leaves the
-1000 m result unchanged; a 5 degC cap on every cell leaves 7.25e-5, 8.0e-5
+of the shelf area (40) refreezes at present day. The superseded
+`-rule-cap68` runs also bounded every cell at 6.8 degC, which lifted the 2
+km K05 to 2.75e-5; a 5 degC bound on every cell would leave 7.25e-5, 8.0e-5
 and 3.475e-4 (7.25e-5, 7.25e-5 and 2.55e-4) with half the samples on the
 bottom. The objective over every K, unfitted K kept, gives 1.75e-5, 7.75e-5
 and 4.475e-4 (4.15e-4). The offsets at issue 30's K match its files within

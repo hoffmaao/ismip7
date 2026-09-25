@@ -465,8 +465,9 @@ ISMIP7_LC=2000 python antarctica/scripts/calibrate_deltaT.py --K 8.5e-5
 runs the fit on the forward's own melt path (the same DG0 geometry, OI
 climatology at the draft, constant mean-Antarctic slope and seawater
 flotation test the forward uses, from `calibrate_melt.forward_geometry`),
-solving `M_b(deltaT) = M_obs(b)` per basin by a bracketed root in the
-toolbox's window of plus or minus 2 K, and writes
+solving `M_b(deltaT) = M_obs(b)` per basin by a bracketed root in plus or
+minus 3 K (`melt_selection.DT_WINDOW`; the toolbox searches plus or minus
+2 K and the protocol sets no window), and writes
 `antarctica/results/deltaT_per_basin_<lc>_K<K>.npz` (basin ids, offsets, K,
 residual, dM/dT, the slope and geometry conventions). A run applies it with
 
@@ -510,9 +511,10 @@ ISMIP7_LC=2000 ISMIP7_INV_H5=<mesh.h5> ISMIP7_MELT_OBS_CSV=<table.csv> \
     python antarctica/scripts/select_melt_parameters.py --geometry mesh --out /abs/dir
 ```
 
-For each K of the toolbox notebook's grid (120 values, 2.5e-6 to 3.0e-4),
-variant `per_k` fits one offset per IMBIE2 basin to the table with the fit
-above, melts the present-day climatology, the 12 ocean-model states and the
+For each K of the toolbox notebook's grid (120 values, 2.5e-6 to 3.0e-4, or
+on its step to `--k-max`), variant `per_k` fits one offset per IMBIE2 basin
+to the table with the fit above, melts the present-day climatology, the 12
+ocean-model states and the
 13 observed states with those offsets, and sums the toolbox's four terms on
 the cells (`icepack2_tools/melt_selection.py`); variant `none` melts without
 offsets, the notebook's own order. The toolbox's
@@ -524,16 +526,37 @@ departures from the notebook are deliberate: an offset is a bracketed root,
 where the notebook takes the nearest point of a 0.04 K grid, so term 1 is
 flat across the K whose basins all root; and each ocean state melts with its
 own salinity, as notebook cells 12, 15 and 65 do (cell 63 reuses the
-climatology's). A K whose fit ends at the window edge stays in the ensemble
-with its residual in term 1, the toolbox's own convention.
+climatology's).
+
+Under `per_k` the objective runs on the K that `melt_selection.TFRule`
+admits. Section 2.1 asks the offsets to keep present-day thermal forcing
+"not significantly below 0 degC or above 5 degC", and this repository reads
+significantly as a bound on every floating cell and a bound on a share of
+each basin's area. A K is admitted when, with each basin's offset applied:
+
+| test | default | option |
+|---|---|---|
+| every basin reaches its observed total inside the offset window | plus or minus 3 K | `--dt-window`, `--keep-unfitted` |
+| every floating cell at or above | -1.8 degC | `--tf-floor` |
+| at most this share of any basin's floating area below | 25 percent below -1.0 degC | `--tf-floor-area` |
+| every floating cell at or below | 6.8 degC | `--tf-cap` |
+| at most this share of any basin's floating area above | 25 percent above 6.0 degC | `--tf-cap-area` |
+
+The two warm-side tests mirror the cold-side ones about the protocol's 0 to
+5 degC range; `none` drops any of the four TF tests. The toolbox searches
+offsets in plus or minus 2 K and keeps a K whose fit ends at the window
+edge, with its residual in term 1; the objective over every K, handled that
+way inside the same 3 K window, is recorded beside the admitted one in
+`selection_per_k.json`.
 `--geometry notebook8km` runs the same aggregation on the notebook's 8 km
 grid beside the toolbox's own `calculate_term1..4`, the check that comes
 before a mesh result is read. Everything is written under `--out`:
 `ensemble_<variant>.nc` (terms, offsets, residuals and TF plausibility at
-every K), `selection_<variant>.json` and, for `per_k`,
-`deltaT_per_basin_<lc>_K<K>.npz` at each selected K, which
-`ISMIP7_DELTAT_PER_BASIN_NPZ` applies at that file's K. On a cluster:
-`scripts/batch_runners/select_melt_parameters.script`.
+every K), `selection_<variant>.json`, `tf_present_<lc>.npz` (each floating
+cell's present-day TF, area and basin, enough to test another rule against
+the ensemble's offsets) and, for `per_k`, `deltaT_per_basin_<lc>_K<K>.npz`
+at each selected K, which `ISMIP7_DELTAT_PER_BASIN_NPZ` applies at that
+file's K. On a cluster: `scripts/batch_runners/select_melt_parameters.script`.
 
 Measured on 24 September 2026 against the July table (run records
 `calibration-melt-toolbox-8km`, `-2km` and `-1km`), evidence for the
@@ -550,6 +573,8 @@ percentile choice (issue #26):
 | 1000 m / 10 km production mesh, grid to 1e-3 | none | 4.25e-5 | 7.75e-5 | 1.375e-4 |
 | 2 km MAP mesh, grid to 1e-3 | fitted for every K | 2.5e-5 | 7.5e-5 | 4.475e-4 |
 | 1000 m / 10 km production mesh, grid to 1e-3 | fitted for every K | 2.5e-5 | 7.5e-5 | 4.15e-4 |
+| 2 km MAP mesh, grid to 1e-3 | fitted for every K in 3 K, admitted K only | 2.75e-5 | 7.0e-5 | 3.25e-4 |
+| 1000 m / 10 km production mesh, grid to 1e-3 | fitted for every K in 3 K, admitted K only | 2.5e-5 | 6.5e-5 | 2.525e-4 |
 
 On the notebook's grid the aggregation matches the toolbox's term functions
 to 1.6e-12 and reproduces the notebook's printed percentiles and totals
@@ -566,6 +591,30 @@ every percentile; the table's rows to 1e-3 differ from the notebook grid's
 at K50 too. At K95 the offsets put over 40 percent of the shelf area of nine
 basins (eleven) below 0 degC. On Quartz the 30_sep files the
 forward reads are byte-identical to the notebook's 06_nov tf v3 and so v4.
+
+The rows marked admitted K only (25 September 2026, run records ending
+`-rule`) search the offsets in 3 K and apply the thermal forcing rule
+above. Every basin then fits from K = 2.5e-5, and the admitted K run from
+2.75e-5 to 3.5e-4 on the 2 km mesh and from 2.5e-5 to 2.55e-4 on the 1000 m
+mesh. On the 2 km mesh the bottom is the last K before Amundsen's offset
+carries a cell past the 6.8 degC cap (+2.75 K and 6.66 degC at 2.75e-5); on
+the 1000 m mesh Amundsen stops fitting below 2.5e-5, where it takes +2.88 K
+and reaches 6.79 degC. The top is where basin 4 passes 25 percent of its
+area below -1.0 degC, and that basin alone moves the top between the
+meshes. The -1.8 degC floor never
+binds. 14 percent of the samples (11) sit on the bottom and 3.8 percent
+(4.9) on the top, and every seed gives the same K05 and K95 and K50 within
+one step. At the 2 km K05, K50 and K95 the present-day dM/dT is 1415, 2123
+and 5343 Gt/yr per K (1386, 2087 and 4476), against 1787 to 2893 at the
+notebook's percentiles; the term 3 warm-minus-cold response is 0.80, 1.56
+and 5.2 times the ocean models' (0.73, 1.45 and 4.2), and at K95 46 percent
+of the shelf area (40) refreezes at present day. Dropping the warm-side
+tests moves the 2 km K05 to 2.5e-5 and K95 to 3.225e-4 and leaves the
+1000 m result unchanged; a 5 degC cap on every cell leaves 7.25e-5, 8.0e-5
+and 3.475e-4 (7.25e-5, 7.25e-5 and 2.55e-4) with half the samples on the
+bottom. The objective over every K, unfitted K kept, gives 1.75e-5, 7.75e-5
+and 4.475e-4 (4.15e-4). The offsets at issue 30's K match its files within
+3.7e-5 K, the root tolerance in the wider bracket.
 
 ## 6. Control and projections
 

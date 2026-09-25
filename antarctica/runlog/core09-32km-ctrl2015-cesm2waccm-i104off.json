@@ -1,0 +1,32 @@
+{
+  "id": "core09-32km-ctrl2015-cesm2waccm-i104off",
+  "task": "test",
+  "institution": "IU",
+  "title": "Core 9 at 32 km without the apparent-MB reference, branched from the i104off historical",
+  "status": "done",
+  "exp_id": "C009",
+  "esm": "CESM2-WACCM",
+  "scenario": "ctrl",
+  "period": "2015 to 2301, reached 2301.0",
+  "friction": "budd",
+  "mesh": "antarctica_320000_32000, DG0 geometry",
+  "initial_state": "hist_cesm2_waccm_i104off_32000_final.h5, sha256 be4517207b9d60cda146ef71d5fd7374caecf9a7a54ed41f2546517f6de17452",
+  "branch_from": "core01-32km-hist-cesm2waccm-i104off at 2015.0, from the log's restart lines",
+  "forcing": "RACMO2.4p1 SMB climatology 2000 to 2029 and the CESM2-WACCM ctrl ocean v3, the organisers' 2000 to 2029 mean of historical and ssp126",
+  "melt": "per-basin K from K_issue11_mesh2500.npz, local slope",
+  "front": "held fixed, ice-shelf collapse ISMIP7_FRACTURE=none",
+  "apparent_mb": "off",
+  "dt": 0.1,
+  "site": "IU Quartz",
+  "resources": "8 ranks, 32 GiB",
+  "jobs": [
+    "10609876"
+  ],
+  "code": "700a846",
+  "started": "2026-09-24",
+  "finished": "2026-09-24",
+  "cost": "one link of 55 min for 286 model years",
+  "results": "antarctica/results/ctrl2015_cesm2_waccm_i104off_32000_*",
+  "audit": "OFF TRACK, with dM/dt FAIL at 909.5 Gt/yr; resid 0.0000 on all 2860 rows, no rescue, subcycle or stall event",
+  "notes": "run for issue #104 from a scratch clone of main at 700a846, with results and logs in the shared checkout. 2860 of 2860 steps converged on their first direct diagnostic solve, with 6.8 Newton iterations on average and 11 at the most (step 1286, t = 2143.6). VAF changes by +874 mm SLE over 2015 to 2301; the peak ice speed on the mesh is 18305 m/yr at t = 2081.0, at (-2083000, 783000) m. Against the i107 control with the reference, VAF gains 874 mm SLE against 378 and the post-first-year dM/dt is +909.5 against +384.0 Gt/yr. Run without ISMIP7_OUTPUT. Final state sha256 1cc7231232620cdbdb9db380c54de30dbb75ec090712b4b42032423e05167897. Full record: antarctica/reports/core09_ctrl2015_cesm2_waccm_32km_i104off.md."
+}

@@ -10,7 +10,7 @@ is an index.
 **Claim the card before you start a run or an inversion.** A card in
 Claimed for more than 24 hours with no comment reads as unclaimed.
 
-Generated: 2026-09-24 20:56 UTC. 18 blocking, 8 owed, 0 after the deadline, 7 unverified.
+Generated: 2026-09-25 03:03 UTC. 15 blocking, 8 owed, 0 after the deadline, 6 unverified.
 
 ## Blocking the submission
 
@@ -29,13 +29,10 @@ Decisions first: they have the longest lead time and they gate the runs.
 | [13](https://github.com/icepack/ismip7/issues/13) | output: run ismip7-scalar-processing for sla20, slg20 and slvaf | needs-run | iu | local | fresh, unverified by design |
 | [24](https://github.com/icepack/ismip7/issues/24) | MAP: 2 km RC and Budd inversions running at Rice under the new prior metric | needs-run | rice | nots | fresh, unverified by design |
 | [27](https://github.com/icepack/ismip7/issues/27) | matrix: the full-length ssp585 is held in the NOTS queue | needs-run | rice | nots | unverifiable-nots |
-| [28](https://github.com/icepack/ismip7/issues/28) | matrix: all 11 cores are superseded and need re-inversion, not only re-running | needs-run | group | nots | verified open |
 | [30](https://github.com/icepack/ismip7/issues/30) | melt: DG0 melt totals are uncalibrated, the per-basin K was fitted under CG1 | needs-run | group | local | verified open |
 | [41](https://github.com/icepack/ismip7/issues/41) | forcing: re-run audit_forcing_versions.py immediately before the production matrix | needs-run | group | quartz, nots, midway | unverifiable-run |
 | [105](https://github.com/icepack/ismip7/issues/105) | output: under a pinned front, emptied shelf cells book the frozen apparent-MB reference as basal melt | needs-run | group | n/a | verified open |
 | [42](https://github.com/icepack/ismip7/issues/42) | melt: confirm every submitted run read the current per-basin K calibration | needs-check | group | local | unverifiable-run |
-| [40](https://github.com/icepack/ismip7/issues/40) | protocol: confirm the submission round and its deadline | needs-upstream | upstream | upstream | unverifiable-run |
-| [107](https://github.com/icepack/ismip7/issues/107) | control: the CTRL2015 ocean is the Zhou climatology for both ESMs, and the protocol's is each ESM's 2000-2029 mean | n/a | group | n/a | verified open |
 
 ## Owed
 
@@ -56,7 +53,7 @@ Work in flight. Do not duplicate it.
 
 | # | item | owner | sites | last touched |
 |---|---|---|---|---|
-| [10](https://github.com/icepack/ismip7/issues/10) | collapse: decide the mode for the submission (none, mask, mask_front) | iu | quartz | 2026-09-23 |
+| [10](https://github.com/icepack/ismip7/issues/10) | collapse: decide the mode for the submission (none, mask, mask_front) | iu | quartz | 2026-09-25 |
 | [11](https://github.com/icepack/ismip7/issues/11) | melt: run check_melt_bound.py --ocx before core 11 runs on the OCX product | iu | quartz, nots, midway | 2026-09-21 |
 | [24](https://github.com/icepack/ismip7/issues/24) | MAP: 2 km RC and Budd inversions running at Rice under the new prior metric | rice | nots | 2026-09-22 |
 
@@ -74,15 +71,14 @@ production run or a group decision.
 | [27](https://github.com/icepack/ismip7/issues/27) | matrix: the full-length ssp585 is held in the NOTS queue | `unverifiable-nots` |
 | [41](https://github.com/icepack/ismip7/issues/41) | forcing: re-run audit_forcing_versions.py immediately before the production matrix | `unverifiable-run` |
 | [42](https://github.com/icepack/ismip7/issues/42) | melt: confirm every submitted run read the current per-basin K calibration | `unverifiable-run` |
-| [40](https://github.com/icepack/ismip7/issues/40) | protocol: confirm the submission round and its deadline | `unverifiable-run` |
 
 ## Sources
 
 | source | items |
 |---|---|
-| `src:readiness` | 13 |
-| `src:submission-readme` | 10 |
-| `src:matrix-status` | 2 |
+| `src:readiness` | 12 |
+| `src:submission-readme` | 9 |
+| `src:matrix-status` | 1 |
 | `src:topic-doc` | 4 |
 | `src:runbook` | 2 |
 | `src:open-pr` | 2 |

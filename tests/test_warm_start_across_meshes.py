@@ -17,8 +17,9 @@ def test_the_same_mesh_matches_and_a_finer_one_does_not():
 
 
 def test_a_warm_start_from_a_smaller_mesh_fills_the_prior_with_cold_ice():
-    r"""Target dofs the source mesh does not cover take the stated fill, 1 for
-    the fluidity prior, so A = A_prior exp(phi) stays positive there."""
+    r"""Target dofs the source mesh does not cover take the stated fill (the
+    inversion passes the forward's cold-ice baseline for the fluidity prior),
+    so A = A_prior exp(phi) stays positive there."""
     source_mesh = UnitSquareMesh(4, 4)
     target_mesh = firedrake.RectangleMesh(8, 8, 1.5, 1.5)     # a wider domain
     src = Function(FunctionSpace(source_mesh, "CG", 1)).assign(40.0)

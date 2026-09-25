@@ -118,10 +118,15 @@ from icepack2_tools.runconfig import (
     TARGET_MESH_GEOMETRY_METHOD,
     residual_stabilizers,
 )
+from icepack2_tools.continuation import ladder, ramp_exponents
 from icepack2_tools.solverconfig import (
+    continuation_steps,
+    diagnostic_solver_label,
     diagnostic_solver_mode,
+    diagnostic_solver_parameters,
     final_solve_bounds,
     final_solve_parameters,
+    linearization_state,
     nonlinear_solver_options,
     snes_atol_scale,
     snes_monitor_enabled,
@@ -490,6 +495,10 @@ def main():
         "mat_mumps_icntl_14": 400,  # working memory increase
         "mat_mumps_icntl_24": 1,  # detect null pivots
         "mat_mumps_cntl_3": 1e-12,  # null pivot threshold
+        # MUMPS prints its error return (INFOG(1), the workspace or pivot
+        # code) instead of failing silently: a factorisation that fails
+        # reaches SNES only as DIVERGED_LINEAR_SOLVE (job 1612624).
+        "mat_mumps_icntl_4": 1,
     })
     state_solver_mode = "full_mumps"
     state_solver_parameters = json.dumps(sparams, sort_keys=True)
@@ -500,11 +509,14 @@ def main():
     if _solver_log:
         os.makedirs(os.path.dirname(os.path.abspath(_solver_log)), exist_ok=True)
     _viewer = f"ascii:{_solver_log}::append" if _solver_log else None
-    if snes_monitor_enabled():
-        sparams.update({
-            "snes_monitor": _viewer,
-            "snes_converged_reason": _viewer,
-        })
+    _monitor_options = {
+        "snes_monitor": _viewer,
+        "snes_converged_reason": _viewer,
+        # Which way the linear solve went: a failed factorisation
+        # (DIVERGED_PC_FAILED) or an inexact one (DIVERGED_ITS).
+        "ksp_converged_reason": _viewer,
+    } if snes_monitor_enabled() else {}
+    sparams.update(_monitor_options)
     # The mode consumers of the published state must run (validate_cache_manifest
     # asserts it). Resolved now so an invalid environment fails here, not
     # inside the final save after hours of work.
@@ -532,10 +544,13 @@ def main():
     warm_recorded = None
 
     # What a target dof outside the warm start's mesh takes: the prior for
-    # the log controls (0), cold ice for the fluidity prior mean, since
-    # A = A_prior exp(phi) must stay positive there (transfer.py has the
-    # measurement behind that). Same-mesh warm starts miss nothing.
-    warm_fill = {"fluidity_prior": 1.0}
+    # the log controls (0), and for the fluidity prior mean the constant
+    # baseline the forward fills the same ring with when it loads a MAP from
+    # a smaller mesh (A = A_prior exp(phi) must stay positive there;
+    # transfer.py has the measurement behind that), so the ring of a MAP
+    # inverted on the production mesh is what production already runs.
+    # Same-mesh warm starts miss nothing.
+    warm_fill = {"fluidity_prior": float(A0) * a4_factor}
 
     def _warm_load(chk, source_mesh, name, space):
         source_field = chk.load_function(source_mesh, name=name)
@@ -912,17 +927,60 @@ def main():
             )
             slvr.solve()
     else:
-        # Ramp n_flow (1 → n_flow_val) and m_slide (1 → m_slide_val) together.
-        # Single solve at full exponents can fail from a cold (u≈0) guess.
+        # Ramp n_flow (1 → n_flow_val) and m_slide (1 → m_slide_val) together:
+        # a single solve at the full exponents can fail from a cold (u≈0)
+        # guess. The ramp is not annotated, so it runs under the lane's
+        # diagnostic solver (ISMIP7_DIAGNOSTIC_LINEAR_SOLVER), the one the
+        # forward that loads this MAP cold-starts with, and climbs the
+        # transient's step ladder. The full-Jacobian MUMPS LU that tlm_adjoint
+        # differentiates through takes over at the converged state: on the
+        # 1 km production mesh its factorisation failed mid-ramp
+        # (DIVERGED_LINEAR_SOLVE, job 1612624) where the forward's condensed
+        # GAMG had climbed the same ramp on the same mesh and MAP.
+        ramp_params = diagnostic_solver_parameters(lane_solver_mode)
+        ramp_params.update(_monitor_options)
+        ramp_J, ramp_pre_jacobian = None, None
+        if linearization_state(lane_solver_mode) == "frozen":
+            from icepack2_tools.preconditioners import frozen_linearization
+            ramp_J, ramp_pre_jacobian = frozen_linearization(F, z)
+        ramp_solver = NonlinearVariationalSolver(
+            NonlinearVariationalProblem(
+                F, z, J=ramp_J, form_compiler_parameters=fc_params
+            ),
+            solver_parameters=ramp_params,
+            options_prefix="ismip7_inversion_continuation_",
+            pre_jacobian_callback=ramp_pre_jacobian,
+        )
+        ramp_ladder = ladder(continuation_steps())
         PETSc.Sys.Print(
             f"Warm start (continuation n_flow 1→{n_flow_val:.1f}, "
-            f"m_slide 1→{m_slide_val:.1f})..."
+            f"m_slide 1→{m_slide_val:.1f}; "
+            f"{diagnostic_solver_label(lane_solver_mode)}, "
+            f"{linearization_state(lane_solver_mode)} linearization, "
+            f"steps {'/'.join(str(s) for s in ramp_ladder)})..."
         )
-        for t in np.linspace(0.0, 1.0, 5):
-            n_flow.assign(1.0 + t * (n_flow_val - 1.0))
-            m_slide.assign(1.0 + t * (m_slide_val - 1.0))
-            slvr.solve()
-        PETSc.Sys.Print("  Done")
+
+        def _ramp_solve(attempt, step, steps, t):
+            t0 = perf_counter()
+            try:
+                ramp_solver.solve()
+            finally:
+                snes = ramp_solver.snes
+                PETSc.Sys.Print(
+                    f"    rung {attempt} step {step}/{steps} "
+                    f"n_flow={float(n_flow):.4g} m_slide={float(m_slide):.4g}: "
+                    f"{_snes_reason_name(snes.getConvergedReason())} "
+                    f"snes_its={snes.getIterationNumber()} "
+                    f"linear_its={snes.getLinearSolveIterations()} "
+                    f"fnorm={snes.getFunctionNorm():.3e} "
+                    f"{perf_counter() - t0:.1f}s"
+                )
+
+        _, ramp_steps = ramp_exponents(
+            _ramp_solve, z, n_flow, m_slide, n_flow_val, m_slide_val,
+            ramp_ladder, report=PETSc.Sys.Print,
+        )
+        PETSc.Sys.Print(f"  Done ({ramp_steps} continuation steps)")
 
     # Forward-solve tolerance. Now that the stabilizers are shared, a
     # prepared warm start is already a converged solution of THIS F, so the

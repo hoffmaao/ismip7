@@ -10,7 +10,7 @@ is an index.
 **Claim the card before you start a run or an inversion.** A card in
 Claimed for more than 24 hours with no comment reads as unclaimed.
 
-Generated: 2026-09-25 13:34 UTC. 15 blocking, 7 owed, 1 after the deadline, 6 unverified.
+Generated: 2026-09-25 19:11 UTC. 18 blocking, 8 owed, 1 after the deadline, 6 unverified.
 
 ## Blocking the submission
 
@@ -25,6 +25,8 @@ Decisions first: they have the longest lead time and they gate the runs.
 | [38](https://github.com/icepack/ismip7/issues/38) | submission: settle the contributor names, date, source_id, ism_id and PPE participation | needs-decision | group | group | unverifiable-run |
 | [39](https://github.com/icepack/ismip7/issues/39) | submission: request the Globus upload folder | needs-decision | group | group | unverifiable-run |
 | [104](https://github.com/icepack/ismip7/issues/104) | initialisation: whether the production runs keep the apparent mass-balance reference (ISMIP7_APPARENT_MB) is an open decision | needs-decision | group | n/a | verified open |
+| [115](https://github.com/icepack/ismip7/issues/115) | front: under the legacy fixed front, the buffer's ocean drag holds the ice front of a buffered mesh to a few m/yr | needs-decision | group | n/a | verified open |
+| [117](https://github.com/icepack/ismip7/issues/117) | initialisation: when the historicals and OCX start, and from which geometry, is an open decision | needs-decision | group | n/a | verified open |
 | [11](https://github.com/icepack/ismip7/issues/11) | melt: run check_melt_bound.py --ocx before core 11 runs on the OCX product | needs-run | iu | quartz, nots, midway | fresh, unverified by design |
 | [13](https://github.com/icepack/ismip7/issues/13) | output: run ismip7-scalar-processing for sla20, slg20 and slvaf | needs-run | iu | local | fresh, unverified by design |
 | [24](https://github.com/icepack/ismip7/issues/24) | MAP: 2 km RC and Budd inversions running at Rice under the new prior metric | needs-run | rice | nots | fresh, unverified by design |
@@ -33,6 +35,7 @@ Decisions first: they have the longest lead time and they gate the runs.
 | [41](https://github.com/icepack/ismip7/issues/41) | forcing: re-run audit_forcing_versions.py immediately before the production matrix | needs-run | group | quartz, nots, midway | unverifiable-run |
 | [105](https://github.com/icepack/ismip7/issues/105) | output: under a pinned front, emptied shelf cells book the frozen apparent-MB reference as basal melt | needs-run | group | n/a | verified open |
 | [42](https://github.com/icepack/ismip7/issues/42) | melt: confirm every submitted run read the current per-basin K calibration | needs-check | group | local | unverifiable-run |
+| [118](https://github.com/icepack/ismip7/issues/118) | submission: README question 19 misstates the Antarctic gradient guidance and the MRI-ESM2-0 atmosphere version | needs-check | group | n/a | verified open |
 
 ## Owed
 
@@ -40,6 +43,7 @@ Decisions first: they have the longest lead time and they gate the runs.
 |---|---|---|---|---|---|
 | [99](https://github.com/icepack/ismip7/issues/99) | sea level: on the 8 km grid the tool loses about 10 % of the model's volume-above-flotation change by 2300 | needs-decision | group | n/a | verified open |
 | [109](https://github.com/icepack/ismip7/issues/109) | output: the libmassbffl fill drops real melt of ice gone by year end, about 620 Gt/yr at 2300 in ssp585 | needs-decision | group | n/a | verified open |
+| [116](https://github.com/icepack/ismip7/issues/116) | forcing: whether the runs carry an SMB-elevation feedback (dmrrodz or dacabfdz) is an open decision | needs-decision | group | n/a | verified open |
 | [36](https://github.com/icepack/ismip7/issues/36) | calving: the von Mises level-set front is not calibrated | needs-run | group | local | verified open |
 | [47](https://github.com/icepack/ismip7/issues/47) | solver: the UChicago Midway site has never run end to end | needs-run | uchicago | midway | verified open |
 | [16](https://github.com/icepack/ismip7/issues/16) | forcing: re-audit the CESM2-WACCM ssp585 fracture before production (#37) | needs-check | group | quartz, nots, midway | fresh, unverified by design |
@@ -75,10 +79,10 @@ production run or a group decision.
 
 | source | items |
 |---|---|
-| `src:readiness` | 12 |
-| `src:submission-readme` | 9 |
+| `src:readiness` | 13 |
+| `src:submission-readme` | 12 |
 | `src:matrix-status` | 1 |
-| `src:topic-doc` | 4 |
+| `src:topic-doc` | 5 |
 | `src:runbook` | 2 |
 | `src:open-pr` | 2 |
 

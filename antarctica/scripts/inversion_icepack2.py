@@ -89,6 +89,7 @@ from icepack2_tools.dual_friction import (
     weertman_anchor,
 )
 from icepack2_tools.geometry import cg1_lift, sample_to_geometry
+from icepack2_tools.transfer import interpolate_with_fill, meshes_match
 from icepack2_tools.grounding import height_above_flotation
 from icepack2_tools.mpi_stats import (global_mean, global_range,
                                       global_max, global_size, global_count)
@@ -530,14 +531,22 @@ def main():
     # save_model_state and by save_map): the forwards' absolute tolerance.
     warm_recorded = None
 
+    # What a target dof outside the warm start's mesh takes: the prior for
+    # the log controls (0), cold ice for the fluidity prior mean, since
+    # A = A_prior exp(phi) must stay positive there (transfer.py has the
+    # measurement behind that). Same-mesh warm starts miss nothing.
+    warm_fill = {"fluidity_prior": 1.0}
+
     def _warm_load(chk, source_mesh, name, space):
         source_field = chk.load_function(source_mesh, name=name)
         target = Function(space, name=name)
-        target.interpolate(
-            source_field,
-            allow_missing_dofs=True,
-            default_missing_val=0.0,
-        )
+        n_missing, n_total, n_clamped = interpolate_with_fill(
+            target, source_field, warm_fill.get(name, 0.0))
+        if n_missing or n_clamped:
+            PETSc.Sys.Print(
+                f"    transfer {name}: {n_missing}/{n_total} target dofs "
+                f"outside the warm start's mesh -> {warm_fill.get(name, 0.0)}; "
+                f"{n_clamped} clamped to the source range")
         return target
 
     if warm_chk:
@@ -551,7 +560,28 @@ def main():
                     warm_recorded = None
             theta.assign(_warm_load(chk, chk_mesh, "log_friction", Q))
             phi.assign(_warm_load(chk, chk_mesh, "log_fluidity", Q))
+            # A warm start on this mesh supplies its geometry, observations
+            # and mixed state as well. One from another mesh (a 2 km MAP
+            # warm-starting a 1 km inversion) supplies the controls and the
+            # fluidity prior only: its cell-wise geometry would arrive
+            # blocky, and this mesh's own BedMachine sample and raster
+            # observations are what the forward that loads the MAP will
+            # use. ISMIP7_WARM_START_GEOMETRY=0/1 overrides the default.
+            same_mesh = meshes_match(chk_mesh, mesh)
+            warm_geometry = os.environ.get(
+                "ISMIP7_WARM_START_GEOMETRY", "1" if same_mesh else "0"
+            ).strip() != "0"
+            PETSc.Sys.Print(
+                "    warm start is on " + ("this mesh" if same_mesh else "another mesh")
+                + ("; taking its geometry, velocity_obs and state"
+                   if warm_geometry else
+                   "; taking its controls and fluidity prior only "
+                   "(geometry and velocity_obs are this mesh's own)"))
+            if not warm_geometry:
+                raise_geometry = KeyError("warm start geometry not taken")
             try:
+                if not warm_geometry:
+                    raise raise_geometry
                 H.assign(_warm_load(chk, chk_mesh, "thickness", Q_g))
                 b.assign(_warm_load(chk, chk_mesh, "bed", Q_g))
                 s.assign(_warm_load(chk, chk_mesh, "surface", Q_g))
@@ -564,6 +594,8 @@ def main():
                     "(warm start has no thickness/bed/surface)"
                 )
             try:
+                if not warm_geometry:
+                    raise raise_geometry
                 u_obs.assign(_warm_load(chk, chk_mesh, "velocity_obs", V))
                 PETSc.Sys.Print("    velocity_obs from warm start")
             except (KeyError, RuntimeError, ValueError):
@@ -575,6 +607,8 @@ def main():
             except (KeyError, RuntimeError, ValueError):
                 warm_A_prior = None
             try:
+                if not warm_geometry:
+                    raise raise_geometry
                 u_ws = _warm_load(chk, chk_mesh, "velocity", V)
                 M_ws = _warm_load(
                     chk, chk_mesh, "membrane_stress",

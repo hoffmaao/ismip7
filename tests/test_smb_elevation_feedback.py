@@ -4,8 +4,9 @@ Decided on icepack/ismip7 issue 116 and on by default. These pin the
 arithmetic, the reference surface, the gates that refuse a run on a missing
 or shifted gradient, and the rule that a chain carries the feedback from its
 cold start or not at all. The 32 km comparison of core 7 with and without it
-is in the run records (``antarctica/runlog/*-i116on.json`` and
-``*-i116off.json``).
+is in the run records: ``antarctica/runlog/*-i116y2003on.json`` and
+``*-i116y2003off.json`` from the 2003 historical start, ``*-i116on.json`` and
+``*-i116off.json`` from 1850.
 
 The reader tests build trees of empty files: ``available_years`` reads names
 only, which is all the gates ask about.

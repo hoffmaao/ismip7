@@ -753,11 +753,16 @@ mode in its `smb_elevation_feedback` attribute (absent reads as off), and a
 restart refuses a checkpoint from the other mode unless it is an adapted t=0
 state: a chain carries the feedback from its cold start or not at all, so a
 projection with the feedback on needs a historical run with it on. Its size at
-32 km, CESM2-WACCM core 1 from an 1850 start then core 7, against the same
-chain without it: -3.6 Gt/yr of SMB at 2015, -613 Gt/yr at 2300, and 17 mm SLE
-more VAF at 2300 (`runlog/core07-32km-ssp585-cesm2waccm-i116on.json`). Most of
-the surface change it multiplied by 2015 was that chain's 165 years of drift,
-so a 2003 start begins its projections with less of it.
+32 km, CESM2-WACCM core 1 then core 7, as the chain with it minus the same
+chain without it:
+
+| historical start | SMB at 2015 | at 2150 | at 2300 | VAF at 2300 | record |
+|---|---|---|---|---|---|
+| 2003 | -0.1 Gt/yr | -22 Gt/yr | -866 Gt/yr | -43.9 mm SLE | `runlog/core07-32km-ssp585-cesm2waccm-i116y2003on.json` |
+| 1850 | -3.6 Gt/yr | +39 Gt/yr | -613 Gt/yr | +17.2 mm SLE | `runlog/core07-32km-ssp585-cesm2waccm-i116on.json` |
+
+The 1850 chain entered 2015 with a surface change of up to +790 m, 165 years
+of drift, and the 2003 chain with up to +414 m.
 
 **Is the run on track?**
 

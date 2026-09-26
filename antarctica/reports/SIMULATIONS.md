@@ -9,9 +9,9 @@ gitignored, so these records and the per-core reports beside them are
 the trace a run leaves in the repository. A core experiment also gets
 its full report from `core_report.py`; this is the index.
 
-78 records.
+82 records.
 
-Status: 12 planned, 3 running, 3 stopped, 47 done, 13 superseded.
+Status: 12 planned, 3 running, 3 stopped, 51 done, 13 superseded.
 
 ## Inversion
 
@@ -48,6 +48,8 @@ Status: 12 planned, 3 running, 3 stopped, 47 done, 13 superseded.
 | Core 1 at 32 km with the apparent-MB reference on main at 700a846, the same-code partner of the i104off historical | done | antarctica_320000_32000, DG0 geometry | IU Quartz | 2026-09-24 | 2026-09-24 | ON TRACK, with dM/dt WARN at 247.7 Gt/yr; resid 0.0000 on all 1650 rows, no rescue, subcycle or stall event |
 | Core 1 at 32 km without the SMB-elevation feedback: branch state of the i116off runs | done | antarctica_320000_32000, DG0 geometry | IU Quartz | 2026-09-25 | 2026-09-25 | ON TRACK, with dM/dt WARN at 238.7 Gt/yr; resid 0.0000 on all 1650 rows, no rescue, subcycle or stall event |
 | Core 1 at 32 km with the SMB-elevation feedback on dacabfdz: branch state of the i116on runs | done | antarctica_320000_32000, DG0 geometry | IU Quartz | 2026-09-25 | 2026-09-25 | ON TRACK, with dM/dt WARN at 238.4 Gt/yr; resid 0.0000 on all 1650 rows, no rescue, subcycle or stall event |
+| Core 1 at 32 km from the 2003 start without the SMB-elevation feedback: branch state of the i116y2003off runs | done | antarctica_320000_32000, DG0 geometry | IU Quartz | 2026-09-26 | 2026-09-26 | ON TRACK, with dM/dt PASS at 26.8 Gt/yr; resid 0.0000 on all 120 rows, no rescue, subcycle or stall event |
+| Core 1 at 32 km from the 2003 start with the SMB-elevation feedback on dacabfdz: branch state of the i116y2003on runs | done | antarctica_320000_32000, DG0 geometry | IU Quartz | 2026-09-26 | 2026-09-26 | ON TRACK, with dM/dt PASS at 26.7 Gt/yr; resid 0.0000 on all 120 rows, no rescue, subcycle or stall event |
 | Core 1 at 32 km, the p2 historical: branch state of the p2 and p3 runs | done | antarctica_320000_32000, DG0 geometry | IU Quartz | 2026-09-22 | 2026-09-22 | ON TRACK, with dM/dt WARN at 247.7 Gt/yr; resid 0.0000 on all 1650 rows |
 | Core 2 at 32 km without the apparent-MB reference: branch state of the i104off runs | done | antarctica_320000_32000, DG0 geometry | IU Quartz | 2026-09-24 | 2026-09-24 | OFF TRACK, with dM/dt FAIL at 730.1 Gt/yr; resid 0.0000 on all 1650 rows, no rescue, subcycle or stall event |
 | Core 2 at 32 km, the i32 historical: branch state of the i32 core 10 control | done | antarctica_320000_32000, DG0 geometry | IU Quartz | 2026-09-24 | 2026-09-24 | ON TRACK, with dM/dt WARN at 300.8 Gt/yr; resid 0.0000 on all 1650 rows, no rescue, subcycle or stall event |
@@ -58,6 +60,8 @@ Status: 12 planned, 3 running, 3 stopped, 47 done, 13 superseded.
 | Core 7 at 32 km without the apparent-MB reference, branched from the i104off historical | done | antarctica_320000_32000, DG0 geometry | IU Quartz | 2026-09-24 | 2026-09-24 | OFF TRACK against the present-day envelopes, as an ssp585 run at 2300 is, with dM/dt FAIL at -1775.1 Gt/yr; resid 0.0000 on all 2860 rows, no rescue, subcycle or stall event |
 | Core 7 at 32 km without the SMB-elevation feedback, branched from the i116off historical | done | antarctica_320000_32000, DG0 geometry | IU Quartz | 2026-09-26 | 2026-09-26 | OFF TRACK against the present-day envelopes, as an ssp585 run at 2300 is, with dM/dt FAIL at -2638.3 Gt/yr; resid 0.0000 on all 2860 rows, no rescue, subcycle or stall event |
 | Core 7 at 32 km with the SMB-elevation feedback on dacabfdz, branched from the i116on historical | done | antarctica_320000_32000, DG0 geometry | IU Quartz | 2026-09-26 | 2026-09-26 | OFF TRACK against the present-day envelopes, as an ssp585 run at 2300 is, with dM/dt FAIL at -2648.3 Gt/yr; resid 0.0000 on all 2860 rows, no rescue, subcycle or stall event |
+| Core 7 at 32 km without the SMB-elevation feedback, queued by ISMIP7_CHAIN_THEN from the i116y2003off historical of the 2003 start | done | antarctica_320000_32000, DG0 geometry | IU Quartz | 2026-09-26 | 2026-09-26 | OFF TRACK against the present-day envelopes, as an ssp585 run at 2300 is, with dM/dt FAIL at -3019.7 Gt/yr; resid 0.0000 on all 2860 rows, no rescue, subcycle or stall event |
+| Core 7 at 32 km with the SMB-elevation feedback on dacabfdz, queued by ISMIP7_CHAIN_THEN from the i116y2003on historical of the 2003 start | done | antarctica_320000_32000, DG0 geometry | IU Quartz | 2026-09-26 | 2026-09-26 | OFF TRACK against the present-day envelopes, as an ssp585 run at 2300 is, with dM/dt FAIL at -3097.0 Gt/yr; resid 0.0000 on all 2860 rows, no rescue, subcycle or stall event |
 | Core 7 at 32 km, collapse mode ISMIP7_FRACTURE=mask | done | antarctica_320000_32000, DG0 geometry | IU Quartz | - | 2026-09-22 | OFF TRACK against the present-day envelopes, as an ssp585 run at 2300 is; resid 0.0000 on all 2860 rows, no rescue or subcycle event |
 | Core 7 at 32 km, collapse mode ISMIP7_FRACTURE=mask_front | done | antarctica_320000_32000, DG0 geometry | IU Quartz | - | 2026-09-22 | OFF TRACK against the present-day envelopes, as an ssp585 run at 2300 is; resid 0.0000 on all 2860 rows, no rescue or subcycle event |
 | Core 7 at 32 km, collapse mode ISMIP7_FRACTURE=none | done | antarctica_320000_32000, DG0 geometry | IU Quartz | - | 2026-09-22 | OFF TRACK against the present-day envelopes, as an ssp585 run at 2300 is; resid 0.0000 on all 2860 rows, no rescue or subcycle event |
@@ -575,6 +579,62 @@ Core 1 at 32 km with the SMB-elevation feedback on dacabfdz: branch state of the
 - **Audit:** ON TRACK, with dM/dt WARN at 238.4 Gt/yr; resid 0.0000 on all 1650 rows, no rescue, subcycle or stall event
 - **Notes:** run for issue #116 from a scratch clone of claude/dacabfdz-gradient-version-565c93 at 525e14d, with results and logs in the shared checkout. 1650 of 1650 steps converged on their first direct diagnostic solve, with 3.7 Newton iterations on average and 18 at the most (step 1397, t = 1989.7). VAF changes by +154 mm SLE over 1850 to 2015; the peak ice speed on the mesh is 1085236 m/yr at t = 1919.4, at (453837, -1726983) m. The feedback's evidence run for issue #116, with ISMIP7_SMB_ELEVATION_FEEDBACK=1 against the i116off historical on the same code. The feedback is exactly zero at the cold start: the 1850 feedback line reads a surface change of 0.0..0.0 m, and the first step's SMB (2082.33 Gt/yr) and the a_ref (in [-908.9, +442.1] m/yr, net +559.0 Gt/yr) equal the off run's. The base SMB is the same forcing on the same mesh in both runs, so the SMB columns differ by the feedback alone: -0.55, -1.13, -1.84 and -3.59 Gt/yr at 1900, 1950, 2000 and 2015, about 0.1 percent of the SMB, and each of the 165 yearly feedback lines agrees with that difference to the log's 0.005 Gt/yr. VAF differs by -0.6 mm SLE at 2015 (+153.6 against +154.2 mm over the run) and mass by -44 Gt. The surface change the feedback multiplies is the chain's drift from its 1850 start, -235 to +790 m by 2015. Both runs exceed 1e5 m/yr at that cell on 221 steps from 1888 to 1986, where the i104on historical at 700a846 peaked at 2.6e4 m/yr: that change came with the shared code, and the feedback does not cause it. The final state records smb_elevation_feedback = dacabfdz. Run without ISMIP7_OUTPUT. Final state sha256 e480739890c24a39dd605569a7a0c76a338dee6b0ff1e28c7fab4213746af054. Full record: antarctica/reports/core01_hist_cesm2_waccm_32km_i116on.md.
 
+### core01-32km-hist-cesm2waccm-i116y2003off
+
+Core 1 at 32 km from the 2003 start without the SMB-elevation feedback: branch state of the i116y2003off runs (done), IU.
+
+- **Task type:** test
+- **ESM:** CESM2-WACCM
+- **Scenario:** historical
+- **Period (yr):** 2003 to 2015, reached 2015.0
+- **Friction law:** budd
+- **Mesh:** antarctica_320000_32000, DG0 geometry
+- **Initial state / MAP:** inversion_icepack2_budd_n3_dg0_logvelnet_32000.h5, sha256 3b3aefa1c69a5daf87d1db291cae9337e00c2696f412bce147b1f488228ef472, backdated 12 yr by the Smith et al. (2020) dH/dt on grounded ice (issue #117)
+- **Branch from:** cold start at 2003.0
+- **Forcing versions:** CESM2-WACCM historical, atmosphere SDBN1-8000m v2, SMB-elevation feedback off (ISMIP7_SMB_ELEVATION_FEEDBACK=0), ocean v3
+- **Melt: K, slope, deltaT:** per-basin K from K_issue11_mesh2500.npz, local slope
+- **Calving front, collapse:** held fixed, ice-shelf collapse ISMIP7_FRACTURE=none
+- **Apparent MB:** balance
+- **dt (yr):** 0.1
+- **Site / partition:** IU Quartz
+- **Ranks / memory:** 8 ranks, 32 GiB
+- **Job ids:** 10659415
+- **Code:** 9c24421
+- **Started:** 2026-09-26
+- **Finished:** 2026-09-26
+- **Cost per model year:** one link of 8 min for 12 model years
+- **Results path:** antarctica/results/hist_cesm2_waccm_i116y2003off_32000_*
+- **Audit:** ON TRACK, with dM/dt PASS at 26.8 Gt/yr; resid 0.0000 on all 120 rows, no rescue, subcycle or stall event
+- **Notes:** run for issue #116 from a scratch clone of claude/dacabfdz-gradient-version-565c93 at 9c24421, with results and logs in the shared checkout. 120 of 120 steps converged on their first direct diagnostic solve, with 3.5 Newton iterations on average and 12 at the most (step 102, t = 2013.2). VAF changes by +4 mm SLE over 2003 to 2015; the peak ice speed on the mesh is 6041 m/yr at t = 2006.0, at (2653000, -429000) m. The same-code partner of the i116y2003on historical, with ISMIP7_SMB_ELEVATION_FEEDBACK=0; the comparison is in core01-32km-hist-cesm2waccm-i116y2003on. The final state records smb_elevation_feedback = off. Run without ISMIP7_OUTPUT. Final state sha256 be279aff19a05c19ef36015b72ec43152c041c7f70ef238fd9f685f4fda2e910. Full record: antarctica/reports/core01_hist_cesm2_waccm_32km_i116y2003off.md.
+
+### core01-32km-hist-cesm2waccm-i116y2003on
+
+Core 1 at 32 km from the 2003 start with the SMB-elevation feedback on dacabfdz: branch state of the i116y2003on runs (done), IU.
+
+- **Task type:** test
+- **ESM:** CESM2-WACCM
+- **Scenario:** historical
+- **Period (yr):** 2003 to 2015, reached 2015.0
+- **Friction law:** budd
+- **Mesh:** antarctica_320000_32000, DG0 geometry
+- **Initial state / MAP:** inversion_icepack2_budd_n3_dg0_logvelnet_32000.h5, sha256 3b3aefa1c69a5daf87d1db291cae9337e00c2696f412bce147b1f488228ef472, backdated 12 yr by the Smith et al. (2020) dH/dt on grounded ice (issue #117)
+- **Branch from:** cold start at 2003.0
+- **Forcing versions:** CESM2-WACCM historical, atmosphere SDBN1-8000m v2, SMB gradient dacabfdz SDBN1-8000m v2 (SMB-elevation feedback on), ocean v3
+- **Melt: K, slope, deltaT:** per-basin K from K_issue11_mesh2500.npz, local slope
+- **Calving front, collapse:** held fixed, ice-shelf collapse ISMIP7_FRACTURE=none
+- **Apparent MB:** balance
+- **dt (yr):** 0.1
+- **Site / partition:** IU Quartz
+- **Ranks / memory:** 8 ranks, 32 GiB
+- **Job ids:** 10659414
+- **Code:** 9c24421
+- **Started:** 2026-09-26
+- **Finished:** 2026-09-26
+- **Cost per model year:** one link of 7 min for 12 model years
+- **Results path:** antarctica/results/hist_cesm2_waccm_i116y2003on_32000_*
+- **Audit:** ON TRACK, with dM/dt PASS at 26.7 Gt/yr; resid 0.0000 on all 120 rows, no rescue, subcycle or stall event
+- **Notes:** run for issue #116 from a scratch clone of claude/dacabfdz-gradient-version-565c93 at 9c24421, with results and logs in the shared checkout. 120 of 120 steps converged on their first direct diagnostic solve, with 3.5 Newton iterations on average and 12 at the most (step 102, t = 2013.2). VAF changes by +4 mm SLE over 2003 to 2015; the peak ice speed on the mesh is 6041 m/yr at t = 2006.0, at (2653000, -429000) m. The feedback's evidence run for issue #116 from the 2003 start of PR #126, with ISMIP7_SMB_ELEVATION_FEEDBACK=1 against the i116y2003off historical on the same code. The feedback is exactly zero at the cold start: the 2003 feedback line reads a surface change of 0.0..0.0 m, and the first step's SMB (2392.29 Gt/yr) and the a_ref (in [-908.3, +436.0] m/yr, net +630.7 Gt/yr) equal the off run's. The SMB columns differ by -0.02, +0.03, -0.01 and -0.11 Gt/yr at 2005, 2010, 2014 and 2015, and each of the 12 yearly feedback lines agrees with that difference to the log's 0.005 Gt/yr. VAF differs by -0.002 mm SLE at 2015 (+3.598 against +3.600 mm over the run) and mass by -0.6 Gt. The surface change the feedback multiplies is the chain's drift from its 2003 start, -92 to +402 m by 2014, where the 1850 start of the i116on historical had drifted -235 to +790 m by 2015. The final state records smb_elevation_feedback = dacabfdz. Run without ISMIP7_OUTPUT. Final state sha256 e1005e293c41d9f2be4927b75c1ad1dca7c7fa3f6d431559816db2b6ea98b792. Full record: antarctica/reports/core01_hist_cesm2_waccm_32km_i116y2003on.md.
+
 ### core01-32km-hist-cesm2waccm-p2
 
 Core 1 at 32 km, the p2 historical: branch state of the p2 and p3 runs (done), IU.
@@ -861,6 +921,64 @@ Core 7 at 32 km with the SMB-elevation feedback on dacabfdz, branched from the i
 - **Results path:** antarctica/results/ssp585_cesm2_waccm_i116on_32000_*
 - **Audit:** OFF TRACK against the present-day envelopes, as an ssp585 run at 2300 is, with dM/dt FAIL at -2648.3 Gt/yr; resid 0.0000 on all 2860 rows, no rescue, subcycle or stall event
 - **Notes:** run for issue #116 from a scratch clone of claude/dacabfdz-gradient-version-565c93 at 525e14d, with results and logs in the shared checkout. 2860 of 2860 steps converged on their first direct diagnostic solve, with 6.4 Newton iterations on average and 18 at the most (step 654, t = 2225.5). VAF changes by +62 mm SLE over 2015 to 2301; the peak ice speed on the mesh is 1447710 m/yr at t = 2248.1, at (-177105, -506755) m. The feedback's evidence run for issue #116, against the i116off core 7 on the same code, each branched from its own arm's historical; the restart check passed on a branch state recorded smb_elevation_feedback = dacabfdz, and the 2015 feedback line carries the historical's surface change (-234 to +790 m). The SMB columns differ by the feedback alone: -5.2, -1.9, +11.1, +38.8, -5.1, -237.1 and -612.7 Gt/yr at 2015.1, 2050, 2100, 2150, 2200, 2250 and 2300, and each of the 287 yearly feedback lines agrees with that difference to the log's 0.005 Gt/yr. VAF differs by -0.6, -0.8, -0.4, +4.5, +15.0, +19.1 and +17.2 mm SLE at the same years (+62.0 against +44.4 mm over the run), and mass by -45, -121, +48, +1555, +4749, -1647 and -2760 Gt. By 2300 the surface has moved -739 to +893 m since 1850. At that cell the off run peaks at 3.3e5 m/yr, at t = 2256.5. The cost matches the off run's; the i104off core 7 at 700a846 took one link of 63 min. Run without ISMIP7_OUTPUT. Final state sha256 e2d925997d78fa0adce360d7c8714c59c44bf8b5e2e04efb8947775e6018352c. Full record: antarctica/reports/core07_ssp585_cesm2_waccm_32km_i116on.md.
+
+### core07-32km-ssp585-cesm2waccm-i116y2003off
+
+Core 7 at 32 km without the SMB-elevation feedback, queued by ISMIP7_CHAIN_THEN from the i116y2003off historical of the 2003 start (done), IU.
+
+- **Task type:** test
+- **ISMIP7 exp id:** C007
+- **ESM:** CESM2-WACCM
+- **Scenario:** ssp585
+- **Period (yr):** 2015 to 2301, reached 2301.0
+- **Friction law:** budd
+- **Mesh:** antarctica_320000_32000, DG0 geometry
+- **Initial state / MAP:** hist_cesm2_waccm_i116y2003off_32000_final.h5, sha256 be279aff19a05c19ef36015b72ec43152c041c7f70ef238fd9f685f4fda2e910
+- **Branch from:** core01-32km-hist-cesm2waccm-i116y2003off at 2015.0, queued by ISMIP7_CHAIN_THEN, from the log's restart lines
+- **Forcing versions:** CESM2-WACCM ssp585, atmosphere SDBN1-8000m v2, SMB-elevation feedback off (ISMIP7_SMB_ELEVATION_FEEDBACK=0), ocean v3
+- **Melt: K, slope, deltaT:** per-basin K from K_issue11_mesh2500.npz, local slope
+- **Calving front, collapse:** held fixed, ice-shelf collapse ISMIP7_FRACTURE=none
+- **Apparent MB:** balance
+- **dt (yr):** 0.1
+- **Site / partition:** IU Quartz
+- **Ranks / memory:** 8 ranks, 32 GiB
+- **Job ids:** 10659477 10661204
+- **Code:** 9c24421
+- **Started:** 2026-09-26
+- **Finished:** 2026-09-26
+- **Cost per model year:** 2 links, 121 min, 2 min, for 286 model years
+- **Results path:** antarctica/results/ssp585_cesm2_waccm_i116y2003off_32000_*
+- **Audit:** OFF TRACK against the present-day envelopes, as an ssp585 run at 2300 is, with dM/dt FAIL at -3019.7 Gt/yr; resid 0.0000 on all 2860 rows, no rescue, subcycle or stall event
+- **Notes:** run for issue #116 from a scratch clone of claude/dacabfdz-gradient-version-565c93 at 9c24421, with results and logs in the shared checkout. 2860 of 2860 steps converged on their first direct diagnostic solve, with 6.7 Newton iterations on average and 20 at the most (step 2820, t = 2297.0). VAF changes by -124 mm SLE over 2015 to 2301; the peak ice speed on the mesh is 2166736 m/yr at t = 2237.7, at (-190602, -433202) m. The same-code partner of the i116y2003on core 7, with ISMIP7_SMB_ELEVATION_FEEDBACK=0, queued from the i116y2003off historical, recorded smb_elevation_feedback = off; the comparison is in core07-32km-ssp585-cesm2waccm-i116y2003on. Its first link stopped at t = 2298.5 under the chain's wall budget (120.7 of 155 min used) and the chain resumed it for the last 2.5 years. Run without ISMIP7_OUTPUT. Final state sha256 76d07d30e869cf003f1719baaca0940e3f222560ee8807f6cb4330f8f1af163f. Full record: antarctica/reports/core07_ssp585_cesm2_waccm_32km_i116y2003off.md.
+
+### core07-32km-ssp585-cesm2waccm-i116y2003on
+
+Core 7 at 32 km with the SMB-elevation feedback on dacabfdz, queued by ISMIP7_CHAIN_THEN from the i116y2003on historical of the 2003 start (done), IU.
+
+- **Task type:** test
+- **ISMIP7 exp id:** C007
+- **ESM:** CESM2-WACCM
+- **Scenario:** ssp585
+- **Period (yr):** 2015 to 2301, reached 2301.0
+- **Friction law:** budd
+- **Mesh:** antarctica_320000_32000, DG0 geometry
+- **Initial state / MAP:** hist_cesm2_waccm_i116y2003on_32000_final.h5, sha256 e1005e293c41d9f2be4927b75c1ad1dca7c7fa3f6d431559816db2b6ea98b792
+- **Branch from:** core01-32km-hist-cesm2waccm-i116y2003on at 2015.0, queued by ISMIP7_CHAIN_THEN, from the log's restart lines
+- **Forcing versions:** CESM2-WACCM ssp585, atmosphere SDBN1-8000m v2, SMB gradient dacabfdz SDBN1-8000m v2 (SMB-elevation feedback on), ocean v3
+- **Melt: K, slope, deltaT:** per-basin K from K_issue11_mesh2500.npz, local slope
+- **Calving front, collapse:** held fixed, ice-shelf collapse ISMIP7_FRACTURE=none
+- **Apparent MB:** balance
+- **dt (yr):** 0.1
+- **Site / partition:** IU Quartz
+- **Ranks / memory:** 8 ranks, 32 GiB
+- **Job ids:** 10659475
+- **Code:** 9c24421
+- **Started:** 2026-09-26
+- **Finished:** 2026-09-26
+- **Cost per model year:** one link of 121 min for 286 model years
+- **Results path:** antarctica/results/ssp585_cesm2_waccm_i116y2003on_32000_*
+- **Audit:** OFF TRACK against the present-day envelopes, as an ssp585 run at 2300 is, with dM/dt FAIL at -3097.0 Gt/yr; resid 0.0000 on all 2860 rows, no rescue, subcycle or stall event
+- **Notes:** run for issue #116 from a scratch clone of claude/dacabfdz-gradient-version-565c93 at 9c24421, with results and logs in the shared checkout. 2860 of 2860 steps converged on their first direct diagnostic solve, with 6.8 Newton iterations on average and 19 at the most (step 2647, t = 2279.7). VAF changes by -169 mm SLE over 2015 to 2301; the peak ice speed on the mesh is 1920815 m/yr at t = 2234.8, at (-190602, -433202) m. The feedback's evidence run for issue #116 from the 2003 start, against the i116y2003off core 7 on the same code, each queued by ISMIP7_CHAIN_THEN from its own arm's historical; the restart check passed on a branch state recorded smb_elevation_feedback = dacabfdz, and the 2015 feedback line carries the historical's surface change (-100 to +414 m). VAF differs by 0.0, -0.1, +0.1, +1.5, +0.2, -11.1 and -43.9 mm SLE at 2015.1, 2050, 2100, 2150, 2200, 2250 and 2300 (-168.6 against -123.7 mm over the run), and mass by -1, -27, -17, +282, -1125, -13161 and -21188 Gt. The yearly feedback lines read -0.13, -1.20, +0.40, -13.97, -159.98, -426.83 and -861.60 Gt/yr at 2015, 2050, 2100, 2150, 2200, 2250 and 2300, and the SMB columns differ by -0.13, -1.05, +2.14, -21.54, -107.44, -487.18 and -865.80 Gt/yr at the marker years. The two agree to the log's 0.005 Gt/yr through 2064 and within 0.3 Gt/yr through 2124, then part by up to 193 Gt/yr in a year (2276): this code forces only the cells that are not open ocean (front.unforced_cells, from main's d205248, which the 1850-start runs at 525e14d predate), and the arms' open ocean differs, 230 cells and 30000 km2 at 2301 (119 cells open in the on arm alone and 111 in the off arm alone), so their base SMB differs there as well. The feedback line at this code also counts open ocean: -5.2 of -871.3 Gt/yr at the on arm's final state with the 2300 gradient, a share the PR's later commit leaves out of the line. By 2300 the surface has moved -678 to +971 m since 2003. The off arm peaks at the same cell, at 2.2e6 m/yr at t = 2237.7, so that spike does not need the feedback. The 1850-start pair (core07-32km-ssp585-cesm2waccm-i116on) differed by +17.2 mm SLE at 2300. Run without ISMIP7_OUTPUT. Final state sha256 48549d61518752624dea7a2c2c3394fc98fe69dd59067b2e6bcde3857ffe9417. Full record: antarctica/reports/core07_ssp585_cesm2_waccm_32km_i116y2003on.md.
 
 ### core07-32km-ssp585-cesm2waccm-p2-mask
 

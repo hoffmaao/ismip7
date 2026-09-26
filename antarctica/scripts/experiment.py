@@ -174,11 +174,9 @@ def run_core_experiment(*, core, title, name, esm, scenario,
     cover = ISMIP7Ocean(esm=esm, scenario=scenario).require_years(first, last)
     PETSc.Sys.Print(f"  Ocean forcing: tf, so cover {cover[0]}-{cover[1]}")
     # The SMB-elevation feedback reads this scenario's own gradient. A run
-    # forced to zero SMB has no tree to read it from, so it refuses here
-    # unless the feedback is off as well.
-    feedback = build_smb_feedback(
-        atm if atm is not None else ISMIP7Atmosphere(esm=esm, scenario=scenario),
-        first, last, log=PETSc.Sys.Print)
+    # forced to zero SMB (atm None) has no SMB to add it to, so it refuses
+    # here, before the setup, unless the feedback is off as well.
+    feedback = build_smb_feedback(atm, first, last, log=PETSc.Sys.Print)
 
     if restart:
         PETSc.Sys.Print(f"  Restart: {restart}")

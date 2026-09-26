@@ -250,6 +250,14 @@ def test_with_the_feedback_off_nothing_is_checked(monkeypatch, tmp_path):
         build_smb_feedback(_atm(tmp_path), 2015, 2300)
 
 
+def test_a_zero_smb_run_is_refused_the_feedback_before_setup(monkeypatch):
+    monkeypatch.delenv("ISMIP7_SMB_ELEVATION_FEEDBACK", raising=False)
+    with pytest.raises(ValueError, match="ISMIP7_SMB_ELEVATION_FEEDBACK=0"):
+        build_smb_feedback(None, 2015, 2300)
+    monkeypatch.setenv("ISMIP7_SMB_ELEVATION_FEEDBACK", "0")
+    assert build_smb_feedback(None, 2015, 2300) is None
+
+
 def test_the_shifted_ocx_gradient_is_refused(tmp_path):
     r"""The OCX ``dacabfdz`` v1 was spatially shifted (discussion #45). With
     no v2 beside it the reader falls back to it, so the feedback refuses."""

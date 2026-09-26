@@ -2099,10 +2099,17 @@ def build_smb_feedback(atm, first, last, log=None):
     r"""The run's SMB-elevation feedback on ``atm``'s gradient, checked to
     cover ``first`` to ``last``, or None under
     ``ISMIP7_SMB_ELEVATION_FEEDBACK=0``. A driver calls this before its model
-    setup."""
+    setup. ``atm`` None is a run forced to zero SMB
+    (``ISMIP7_ALLOW_ZERO_SMB``), which the feedback has no SMB to add to, so
+    it is refused unless the feedback is off."""
     from .runconfig import smb_elevation_feedback
     if not smb_elevation_feedback():
         return None
+    if atm is None:
+        raise ValueError(
+            "the SMB-elevation feedback needs an SMB to add to, and this run "
+            "is forced to zero SMB: set ISMIP7_SMB_ELEVATION_FEEDBACK=0 with "
+            "ISMIP7_ALLOW_ZERO_SMB=1")
     feedback = SMBElevationFeedback(atm, log=log)
     feedback.check(first, last)
     return feedback

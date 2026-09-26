@@ -298,7 +298,7 @@ def main():
     print(f"Preflight: lc={lc}, friction={friction}, geometry={geom}, "
           f"OI={oi_version}, climatology=historical+{CLIM_SCENARIO} "
           f"{CLIM_START}-{CLIM_END}")
-    print(f"  SMB-elevation feedback: "
+    print("  SMB-elevation feedback: "
           + (f"on, every core needs its {SMB_GRADIENT}" if feedback
              else "off (ISMIP7_SMB_ELEVATION_FEEDBACK=0)"))
     warn = []

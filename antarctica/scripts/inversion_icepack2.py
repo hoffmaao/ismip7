@@ -2325,7 +2325,27 @@ def main():
             _nfev[0] += 1
             theta.dat.data[:] = theta_ctrl.dat.data_ro
             phi.dat.data[:] = phi_ctrl.dat.data_ro
-            J = forward(theta_ctrl, phi_ctrl)
+            try:
+                J = forward(theta_ctrl, phi_ctrl)
+            except fd.ConvergenceError:
+                # A line-search trial point where the forward Newton solve
+                # diverges (the 32 km sum-likelihood run: iteration 5's
+                # trial put log-fluidity at -20). The scipy path's rescue,
+                # carried over: restore the last converged state and hand
+                # TAO an inflated objective with no control dependence, so
+                # its line search backtracks instead of the run ending here
+                # with the trial point written into the MAP.
+                z.assign(z_backup)
+                if not np.isfinite(last_good_obj[0]):
+                    raise RuntimeError(
+                        "First forward solve failed - the inversion cannot start "
+                        "(fewer MPI ranks for a small mesh; check the fluidity prior).")
+                PETSc.Sys.Print(
+                    "  [!] Forward solve failed at a trial point; returning an "
+                    "inflated objective so the line search backtracks")
+                J = Functional(name="J_failed")
+                J.assign(float(10.0 * last_good_obj[0]))
+                return J
             J.addto(_prior_energy_form(theta_ctrl, "theta"))
             J.addto(_prior_energy_form(phi_ctrl, "phi"))
             # The last few evaluations with their controls: the monitor picks
@@ -2441,6 +2461,17 @@ def main():
             pass
         if _handoff_failed[0]:
             raise RuntimeError(_handoff_failed[0])
+        # TAOSolver writes its current point back into (theta, phi) on exit,
+        # which after an aborted line search is a rejected trial point. The
+        # MAP must hold the last ACCEPTED iterate, which the monitor kept.
+        if last_good_x[0] is not None:
+            _x_now = np.concatenate([func_to_global(theta), func_to_global(phi)])
+            if not np.array_equal(_x_now, last_good_x[0]):
+                global_to_func(last_good_x[0][:global_ndof], theta)
+                global_to_func(last_good_x[0][global_ndof:], phi)
+                PETSc.Sys.Print(
+                    "  TAO exited on a point other than the last accepted iterate; "
+                    "the accepted iterate is what the MAP records")
         reason = int(solver.tao.getConvergedReason())
         message = (
             f"CONVERGED: relative functional decrease <= ftol={ftol:g}"

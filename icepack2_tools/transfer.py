@@ -20,17 +20,48 @@ outside that cell, and then evaluates the cell's own linear basis there:
 a point in the ring within about half a source cell of the ice front is
 extrapolated. Where the prior falls steeply towards the front that gave a
 transferred fluidity prior spanning [-218.69, 1028.05] from a source spanning
-[1.00, 783.69] (the 22 September 2 km MAPs onto the 1 km mesh). Inside a
-source cell linear interpolation is a convex combination of the cell's vertex
-values, so a value outside the source field's range can only come from
-extrapolation; located dofs are therefore clamped to the source's range,
-component by component, and the clamped dofs counted too.
+[1.00, 783.69] (the 22 September 2 km MAPs onto the 1 km mesh), and
+[-164.7, 921.1] on the 5 km production mesh (issue 81). The transfer
+therefore locates strictly: the source mesh's tolerance is set to
+``STRICT_TOLERANCE`` for the interpolation and restored afterwards, so a dof
+the source does not contain is a missing dof and takes the fill, whatever
+its distance from the outline. Behind that, inside a source cell linear
+interpolation is a convex combination of the cell's vertex values, so a
+value outside the source field's range can only come from extrapolation;
+located dofs are still clamped to the source's range, component by
+component, and the clamped dofs counted, as a guard on the tolerance.
 """
+import contextlib
+import numbers
+
 import numpy as np
 from firedrake import Function
 from mpi4py import MPI
 
 from .mpi_stats import global_count, global_size
+
+#: Relative point-location tolerance (on the reference cell) while a field is
+#: transferred. Zero would let floating-point error push a dof that sits on
+#: the shared outline outside; this keeps the outline and rejects anything a
+#: source cell does not contain.
+STRICT_TOLERANCE = 1e-8
+
+
+@contextlib.contextmanager
+def strict_location(mesh, tolerance=STRICT_TOLERANCE):
+    r"""Locate points in ``mesh`` with ``tolerance`` inside the block and
+    restore the mesh's own tolerance on exit (setting it clears the spatial
+    index, which Firedrake rebuilds on the next location)."""
+    previous = mesh.tolerance
+    mesh.tolerance = tolerance
+    try:
+        yield
+    finally:
+        if isinstance(previous, numbers.Number):
+            mesh.tolerance = previous
+        else:
+            mesh.clear_spatial_index()
+            mesh._tolerance = previous
 
 
 def _source_range(source, comm):
@@ -53,9 +84,12 @@ def interpolate_with_fill(target, source, fill, comm=None):
 
     ``fill`` is a float, or a Function on ``target``'s space whose values are
     taken where the source has none (the raster-sampled velocity_obs, say).
-    Located dofs are clamped to the source field's own range (per component):
-    a value beyond it can only be an extrapolation from a boundary cell, since
-    interpolation inside a cell never leaves the range of its vertex values.
+    The source mesh locates strictly for the call (``STRICT_TOLERANCE``,
+    restored afterwards), so every dof outside the source outline is a
+    missing dof and takes the fill. Located dofs are clamped to the source
+    field's own range (per component) behind that: a value beyond it can only
+    be an extrapolation from a boundary cell, since interpolation inside a
+    cell never leaves the range of its vertex values.
     Returns ``(n_missing, n_total, n_clamped)``, all reduced over ranks and
     counting dofs once (owned dofs only, whatever the value shape). A
     same-mesh call is a plain interpolate and reports nothing missing or
@@ -66,9 +100,10 @@ def interpolate_with_fill(target, source, fill, comm=None):
     if source.function_space().mesh() is target.function_space().mesh():
         target.interpolate(source)
         return 0, total, 0
-    target.interpolate(
-        source, allow_missing_dofs=True, default_missing_val=np.nan
-    )
+    with strict_location(source.function_space().mesh()):
+        target.interpolate(
+            source, allow_missing_dofs=True, default_missing_val=np.nan
+        )
     data = target.dat.data
     flat = data.reshape(data.shape[0], -1)
     missing = np.isnan(flat).any(axis=1)

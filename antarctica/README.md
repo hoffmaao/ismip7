@@ -608,6 +608,37 @@ cleared each step wherever the level set reports ice-free, irreversibly, so a
 calved cell is not regrown and an advanced-into cell is not re-emptied. The run
 log prints one `Calving front owner:` line naming the mechanism in force.
 
+### A calving law from hoffmaao/calving (`forward_calving.py`)
+
+The laws developed for CalvingMIP (github.com/hoffmaao/calving: `fixed`,
+`velocity`, `position`, `thickness`, `vonmises`, `vonmises_strain`, `hfb`
+and any `--law-module` plugin) run in the forward unchanged. A law reads
+seven fields from its model, and `simulation.LiveCalvingState` supplies
+them from the live dual state: `u`, `M`, `tau` from the mixed solution,
+the DG0 `h`, `haf` and the grounded indicator as UFL on the cells, and the
+front normal from the level set the forward advances. The law's rate goes
+to the shared level set as its `prescribed` law, so the front is retreated
+and the shed mass is tallied exactly as under `ISMIP7_CALVING=vonmises`.
+
+```bash
+CALVING_DIR=/path/to/calving mpiexec -n 16 python antarctica/scripts/forward_calving.py \
+    --law hfb --law-param sigma_max=0.15 --experiment control --tag hfb_test
+```
+
+wraps the experiment driver (`control`, `ocx`, `ssp126|ssp370|ssp585` with
+`--esm`, `hist`), which keeps its own forcing, restart and auto-resume;
+leave `ISMIP7_CALVING` unset. `--tag` (or `ISMIP7_RUN_TAG`) is required, so a
+law-driven run never resumes from or overwrites a stock run's checkpoints. The
+law's `describe()` is written to every checkpoint's `calving_law` attribute and
+to the `Calving front owner:` line, which `core_report.py` lifts into the
+report. Any object with `rate(model, t)` returning a UFL rate on the cells and
+`describe()` can be placed in `ctx["calving_law"]` before `run_simulation` the
+same way. A threshold is fitted on Antarctica
+with `calving/tune_greene.py --experiment vonmises|hfb --state <forward
+checkpoint>` (per-Mouginot-basin flux against the Greene et al. 2022 fronts,
+on the same level-set normal), which is what makes a tuned parameter mean
+the same thing in both places.
+
 ### The whole matrix in one command (`run_core_matrix.sh`)
 
 Runs cores 1 to 11 in dependency order (historicals, controls, projections,
@@ -686,7 +717,7 @@ redeclare those literals.
 | `ISMIP7_BUFFER_M` | outline buffer (m) in the default mesh and sidecar names | `20000` |
 | `ISMIP7_MESH` | mesh path for the inversion and tools. A forward takes its mesh from the checkpoint unless this names another mesh, in which case the MAP is transferred onto it. `checkpoint` means the mesh embedded in the MAP or restart file: `site_env.sh` always exports a derived path, so this is how a job submitted through `submit.sh projection` runs MAP-native | `mesh/antarctica_<COARSE>_<LC>_buffered<BUFFER_M>.msh` |
 | `ISMIP7_RASTER_SAMPLE` | how BedMachine lands on a DG0 cell. `vertex` projects the CG1 vertex interpolant; `cell_mean` takes the raster's true cell mean. `cell_mean` measured rougher: neighbouring cells share two of three vertex samples, so `vertex` damps jumps by construction. Cell means raised interior surface jumps 6% and bed and thickness jumps 35%, and at 2 km the momentum solve did not converge within 60 minutes. It does classify flotation better (32 km misclassification 9.1% to 3.2%), so the knob stays. Stamped into the MAP and read back by the forward. Reproduce with `probe_raster_sampling.py` | `vertex` |
-| `ISMIP7_INVERSION` | explicit MAP path for a forward or preflight. The forward checks the MAP's recorded `friction`, `n_flow` and `geometry_space` against the run and aborts on a mismatch, warning only when the MAP predates those attributes; `preflight.py` checks that the file exists. Use it to A/B MAPs on one mesh, or, with `ISMIP7_MESH` also set (the timing matrix, `make map-check`), to run a MAP on a different mesh: its continuous fields are then interpolated onto `ISMIP7_MESH`, and a target dof outside the MAP's mesh takes a stated fill (0 for the log controls, the constant baseline for the fluidity prior, the raster sample for `velocity_obs`), counted and printed as `Transfer fill:` lines (`MAP_CHECK.md`) | derived |
+| `ISMIP7_INVERSION` | explicit MAP path for a forward or preflight. The forward checks the MAP's recorded `friction`, `n_flow` and `geometry_space` against the run and aborts on a mismatch, warning only when the MAP predates those attributes; `preflight.py` checks that the file exists. Use it to A/B MAPs on one mesh, or, with `ISMIP7_MESH` also set (the timing matrix, `make map-check`), to run a MAP on a different mesh: its continuous fields are then interpolated onto `ISMIP7_MESH` by strict point location (`icepack2_tools/transfer.py`), and a target dof outside the MAP's outline takes a stated fill (0 for the log controls, the constant baseline for the fluidity prior, the raster sample for `velocity_obs`), counted and printed as `Transfer fill:` lines (`MAP_CHECK.md`) | derived |
 | `ISMIP7_CALVING` | `none`, `fixed` or `vonmises` (see above) | `none` |
 | `ISMIP7_CALVING_SIGMA_MAX_GROUNDED` / `_FLOATING` | von Mises thresholds (MPa) | `1.0` / `0.15` |
 | `ISMIP7_FRACTURE` | `mask` applies the ISMIP7 collapse forcing to every floating cell it flags, booked as calving; `mask_front` only to the flagged cells open water has reached, so no hole opens behind a standing front (the two end-members of discussion #30). Masks exist for the SSPs only, so the control, historicals and OCX abort on either. Needs DG0. Every run prints its mode once (`Ice-shelf collapse forcing: ISMIP7_FRACTURE=...`, `none` included). Under a mask mode the timeseries columns `collapse_flagged_cells`, `collapse_removed_cells` and `collapse_held_cells` count the flagged floating cells, the ones the mode has emptied and the ones it leaves standing (always 0 under `mask`), all ranks summed; the budget lines, a closing log line and the core report repeat them | `none` |
@@ -1249,6 +1280,46 @@ attribute tests, and 93 time errors, which are the three-per-file
 experiment-length checks a two-year run cannot satisfy. `ismip7-scalars` 0.1.0
 then wrote `sla20`, `slg20` and `slvaf`, each with its glacier and ice-cap
 variant, in NetCDF and CSV.
+
+### The run log (`build_runlog.py`)
+
+None of the files above are in git: a checkpoint is hundreds of MB and a
+timeseries is regenerated. What reaches the repository is a record. Every
+simulation, of any kind, leaves one JSON file in `antarctica/runlog/`, and
+
+```bash
+make -C antarctica runlog                                # render reports/SIMULATIONS.md
+make -C antarctica runlog RUNLOG_CSV=results/runlog.csv  # and the records flat
+make -C antarctica runlog-check                          # exits 1 on a stale render
+```
+
+renders them into `antarctica/reports/SIMULATIONS.md`, grouped by task kind,
+with a summary table per group and every recorded field below it. A record is
+reviewed in a pull request beside the code its run used, which is what makes it
+a trace rather than a note; `runlog-check` and `tests/test_runlog.py` refuse a
+stale render or a malformed record.
+
+The group's shared progress sheet imports `RUNLOG_CSV`, one row per record and
+one column per field in `build_runlog.py` order, so a run's configuration and
+outcome are typed only in its record.
+
+`id`, `task`, `title`, `status` and `institution` are required and everything else is
+optional, so a planned run is five lines and a finished one carries its whole
+provenance: mesh, MAP and iteration count, what it branched from, forcing
+versions, the melt and front configuration, site, ranks, job ids, code SHA,
+cost per model year, the audit verdict, whether the ISMIP7 output was written,
+the checker version and result, the scalars, and the upload. `build_runlog.py`
+owns the field list, so a field it does not know is an error rather than a
+typo that renders as nothing.
+
+A core experiment still gets its full report from `core_report.py`, with the
+budget rows and the ensemble overlay. The run log is the index across all of
+them, and across the runs that are not core experiments: the inversions, the
+calibrations and the forward tests. A superseded run keeps its record with
+`status` set to `superseded` and the reason in `notes`. `institution` names the
+institution that owns the run, or `unassigned` for a planned run; `results` is
+relative to the checkout on the site the record names, and never an account or
+home-directory path.
 
 ---
 

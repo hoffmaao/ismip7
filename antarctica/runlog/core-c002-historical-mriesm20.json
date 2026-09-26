@@ -1,0 +1,17 @@
+{
+  "id": "core-c002-historical-mriesm20",
+  "task": "historical",
+  "institution": "unassigned",
+  "title": "C002: historical with MRI-ESM2-0",
+  "status": "planned",
+  "exp_id": "C002",
+  "esm": "MRI-ESM2-0",
+  "scenario": "historical",
+  "period": "as C001",
+  "branch_from": "a steady state",
+  "melt": "one toolbox K with the per-basin offset",
+  "apparent_mb": "balance",
+  "dt": 0.05,
+  "mesh": "the production mesh, issue #20",
+  "notes": ""
+}

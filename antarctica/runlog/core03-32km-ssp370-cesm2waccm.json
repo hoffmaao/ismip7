@@ -1,0 +1,21 @@
+{
+  "id": "core03-32km-ssp370-cesm2waccm",
+  "task": "projection",
+  "institution": "Rice",
+  "title": "Core 3: ssp370 with CESM2-WACCM",
+  "status": "superseded",
+  "esm": "CESM2-WACCM",
+  "scenario": "ssp370",
+  "period": "2015 to 2100, reached 2100.0",
+  "friction": "budd",
+  "mesh": "antarctica_320000_32000",
+  "initial_state": "the untagged legacy 32 km CG1 Budd MAP, n = 4",
+  "front": "held fixed",
+  "apparent_mb": "balance",
+  "dt": 0.1,
+  "code": "74f5bf8",
+  "finished": "2026-07-20",
+  "results": "antarctica/results/ssp370_cesm2_waccm_32000_*",
+  "audit": "OFF TRACK; the budget residual closes to zero",
+  "notes": "superseded by the annual-mean atmosphere-forcing fix fa7230c (the reader applied January as the whole year) and by the two August 2026 ice-front fixes, which need a re-inversion as well as a re-run; issue #28. Full record: antarctica/reports/core03_ssp370_cesm2_waccm_32km.md; status across the matrix: antarctica/reports/MATRIX_STATUS.md"
+}

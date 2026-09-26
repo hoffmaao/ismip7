@@ -1,0 +1,31 @@
+{
+  "id": "test-1km-budd-half-step",
+  "task": "test",
+  "institution": "Rice",
+  "title": "1 km control from the transferred Budd snapshot at half the step",
+  "status": "done",
+  "esm": "CESM2-WACCM",
+  "scenario": "ctrl",
+  "period": "2015 to 2020",
+  "friction": "budd",
+  "mesh": "antarctica_10000_1000_buffered20000, 1 km fine, 10 km interior, 20 km buffer",
+  "initial_state": "the Budd snapshot transferred from the 2 km mesh",
+  "branch_from": "cold start",
+  "forcing": "as above",
+  "melt": "as above",
+  "front": "held at the 2015 extent, no collapse",
+  "apparent_mb": "balance",
+  "dt": 0.025,
+  "site": "nots, commons partition",
+  "resources": "32 ranks, 180G",
+  "jobs": [
+    "1594457"
+  ],
+  "code": "upstream/main@87475b3 with the transfer fixes",
+  "started": "2026-09-22",
+  "cost": "12 to 31 s a step, about 8 to 20 minutes a model year on 32 ranks",
+  "audit": "five years complete: VAF drift 0.13 mm of sea level, 0.027 mm a year against the 2 mm a year tolerance; mass +21 Gt over five years against a 2532 Gt/yr surface balance; budget residual zero on every row. The same configuration at dt=0.05 diverged in 2016.1, so halving the step is the cure. Shelf melt 1428 Gt/yr, calving 24, balanced correction -1151",
+  "finished": "2026-09-22",
+  "results": "antarctica/results/ctrl2015_cesm2_waccm_t1k_dthalf_1000_*",
+  "notes": "the first production-resolution forward to run five years from a snapshot MAP. Its low calving flux reflects front placement; re-run on the converged MAP at the chosen front threshold"
+}

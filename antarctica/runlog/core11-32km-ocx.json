@@ -1,0 +1,21 @@
+{
+  "id": "core11-32km-ocx",
+  "task": "ocx",
+  "institution": "Rice",
+  "title": "Core 11: OCX, observation constrained",
+  "status": "superseded",
+  "esm": "observations",
+  "scenario": "RACMO actual-year SMB and the OI ocean climatology",
+  "period": "1990 to 2025, reached 2025.0",
+  "friction": "budd",
+  "mesh": "antarctica_320000_32000",
+  "initial_state": "the untagged legacy 32 km CG1 Budd MAP, n = 4",
+  "front": "held fixed",
+  "apparent_mb": "balance",
+  "dt": 0.1,
+  "code": "2f55628",
+  "finished": "2026-07-20",
+  "results": "antarctica/results/ocx_32000_*",
+  "audit": "ON TRACK; the budget residual closes to zero",
+  "notes": "superseded by the two August 2026 ice-front fixes (the 2500 m boundary-id sidecar on the 32 km mesh and the CG1 front-thickness bias), which need a re-inversion as well as a re-run; issue #28. Full record: antarctica/reports/core11_ocx_32km.md; status across the matrix: antarctica/reports/MATRIX_STATUS.md"
+}

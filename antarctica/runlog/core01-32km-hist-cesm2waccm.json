@@ -1,0 +1,21 @@
+{
+  "id": "core01-32km-hist-cesm2waccm",
+  "task": "historical",
+  "institution": "Rice",
+  "title": "Core 1: historical with CESM2-WACCM",
+  "status": "superseded",
+  "esm": "CESM2-WACCM",
+  "scenario": "historical",
+  "period": "1850 to 2014, reached 2014.0",
+  "friction": "budd",
+  "mesh": "antarctica_320000_32000",
+  "initial_state": "the untagged legacy 32 km CG1 Budd MAP, n = 4",
+  "front": "held fixed",
+  "apparent_mb": "balance",
+  "dt": 0.1,
+  "code": "235cdf6",
+  "finished": "2026-07-19",
+  "results": "antarctica/results/hist_cesm2_waccm_32000_*",
+  "audit": "OFF TRACK; the budget residual closes to zero",
+  "notes": "superseded by the annual-mean atmosphere-forcing fix fa7230c (the reader applied January as the whole year) and by the two August 2026 ice-front fixes, which need a re-inversion as well as a re-run; issue #28. Full record: antarctica/reports/core01_hist_cesm2_waccm_32km.md; status across the matrix: antarctica/reports/MATRIX_STATUS.md"
+}

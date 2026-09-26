@@ -1,0 +1,17 @@
+{
+  "id": "core-c006-ssp126-mriesm20",
+  "task": "projection",
+  "institution": "unassigned",
+  "title": "C006: ssp126 with MRI-ESM2-0",
+  "status": "planned",
+  "exp_id": "C006",
+  "esm": "MRI-ESM2-0",
+  "scenario": "ssp126",
+  "period": "2015 to 2300",
+  "branch_from": "the historical endpoint at 2015.0",
+  "melt": "one toolbox K with the per-basin offset",
+  "apparent_mb": "balance",
+  "dt": 0.05,
+  "mesh": "the production mesh, issue #20",
+  "notes": ""
+}

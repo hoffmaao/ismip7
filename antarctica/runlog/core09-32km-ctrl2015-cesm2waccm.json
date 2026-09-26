@@ -1,0 +1,21 @@
+{
+  "id": "core09-32km-ctrl2015-cesm2waccm",
+  "task": "control",
+  "institution": "Rice",
+  "title": "Core 9: CTRL2015 with CESM2-WACCM",
+  "status": "superseded",
+  "esm": "CESM2-WACCM",
+  "scenario": "ctrl",
+  "period": "2015 to 2300, reached 2300.0",
+  "friction": "budd",
+  "mesh": "antarctica_320000_32000",
+  "initial_state": "the untagged legacy 32 km CG1 Budd MAP, n = 4",
+  "front": "held fixed",
+  "apparent_mb": "balance",
+  "dt": 0.1,
+  "code": "2f55628",
+  "finished": "2026-07-20",
+  "results": "antarctica/results/ctrl2015_cesm2_waccm_32000_*",
+  "audit": "OFF TRACK; the budget residual closes to zero",
+  "notes": "superseded by the two August 2026 ice-front fixes (the 2500 m boundary-id sidecar on the 32 km mesh and the CG1 front-thickness bias), which need a re-inversion as well as a re-run; issue #28. Full record: antarctica/reports/core09_ctrl2015_cesm2_waccm_32km.md; status across the matrix: antarctica/reports/MATRIX_STATUS.md"
+}

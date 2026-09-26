@@ -1,0 +1,21 @@
+{
+  "id": "core02-32km-hist-mriesm20",
+  "task": "historical",
+  "institution": "Rice",
+  "title": "Core 2: historical with MRI-ESM2-0",
+  "status": "superseded",
+  "esm": "MRI-ESM2-0",
+  "scenario": "historical",
+  "period": "1850 to 2014, reached 2014.0",
+  "friction": "budd",
+  "mesh": "antarctica_320000_32000",
+  "initial_state": "the untagged legacy 32 km CG1 Budd MAP, n = 4",
+  "front": "held fixed",
+  "apparent_mb": "balance",
+  "dt": 0.1,
+  "code": "ec86c51",
+  "finished": "2026-07-19",
+  "results": "antarctica/results/hist_mri_esm2_0_32000_*",
+  "audit": "OFF TRACK; the budget residual closes to zero",
+  "notes": "superseded by the annual-mean atmosphere-forcing fix fa7230c (the reader applied January as the whole year) and by the two August 2026 ice-front fixes, which need a re-inversion as well as a re-run; issue #28. Full record: antarctica/reports/core02_hist_mri_esm2_0_32km.md; status across the matrix: antarctica/reports/MATRIX_STATUS.md"
+}

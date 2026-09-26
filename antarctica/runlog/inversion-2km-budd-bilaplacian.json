@@ -1,0 +1,27 @@
+{
+  "id": "inversion-2km-budd-bilaplacian",
+  "task": "inversion",
+  "institution": "Rice",
+  "title": "2 km Budd inversion under the bilaplacian prior",
+  "status": "running",
+  "friction": "budd",
+  "period": "2015 state",
+  "mesh": "antarctica_5000_2000_buffered0, 2 km fine, 5 km interior, no buffer",
+  "initial_state": "inversion_icepack2_budd_n3_dg0_logvelnet_2000_int5000_bilap.h5, 240 iterations at the 22 September snapshot",
+  "forcing": "as the regularized-Coulomb inversion",
+  "melt": "the dH/dt term reads calibrated_K_per_basin_2000.npz",
+  "site": "nots, long partition, sapphirerapids",
+  "resources": "32 ranks, 240G",
+  "jobs": [
+    "1559481",
+    "1559483",
+    "1570704",
+    "1589212"
+  ],
+  "code": "hoffmaao/ismip7@be5d685",
+  "started": "2026-09-20",
+  "cost": "about 128 iterations a day",
+  "results": "antarctica/mesh/",
+  "audit": "misfit 2.04e4 and falling at link three",
+  "notes": "issues #24 and #21. A timed-out link saves no velocity, so the chain needs a one-iteration publishing link before check_budd_map can run on it"
+}

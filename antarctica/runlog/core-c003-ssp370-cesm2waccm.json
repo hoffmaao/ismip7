@@ -1,0 +1,17 @@
+{
+  "id": "core-c003-ssp370-cesm2waccm",
+  "task": "projection",
+  "institution": "unassigned",
+  "title": "C003: ssp370 with CESM2-WACCM",
+  "status": "planned",
+  "exp_id": "C003",
+  "esm": "CESM2-WACCM",
+  "scenario": "ssp370",
+  "period": "2015 to 2100",
+  "branch_from": "the historical endpoint at 2015.0",
+  "melt": "one toolbox K with the per-basin offset",
+  "apparent_mb": "balance",
+  "dt": 0.05,
+  "mesh": "the production mesh, issue #20",
+  "notes": ""
+}

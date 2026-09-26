@@ -40,10 +40,21 @@ class LevelSet(_LevelSet):
     buffered ocean the thickness decides where ice is, and re-solving the
     eikonal problem there each step keeps the front and the mass conservation
     describing the same ice.
+
+    The unit normal ``ghat`` is refreshed with every eikonal solve, so a
+    ``prescribed`` rate that reads it (a calving law's ``nfront``) is
+    evaluated on the normal of the current extent, including at the first
+    advance.
     """
 
     def __init__(self, *args, anchor="extent", **kwargs):
         super().__init__(*args, anchor=anchor, **kwargs)
+
+    def solve_eikonal_from_extent(self):
+        n_seg = super().solve_eikonal_from_extent()
+        if hasattr(self, "_grad_form"):
+            self._update_unit_gradient()
+        return n_seg
 
 
 class _DistanceOnly(LevelSet):

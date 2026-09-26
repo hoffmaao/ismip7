@@ -1,0 +1,21 @@
+{
+  "id": "core10-32km-ctrl2015-mriesm20",
+  "task": "control",
+  "institution": "Rice",
+  "title": "Core 10: CTRL2015 with MRI-ESM2-0",
+  "status": "superseded",
+  "esm": "MRI-ESM2-0",
+  "scenario": "ctrl",
+  "period": "2015 to 2300, reached 2040.5, walled at a front-emptying event a warm resume could not cross",
+  "friction": "budd",
+  "mesh": "antarctica_320000_32000",
+  "initial_state": "the untagged legacy 32 km CG1 Budd MAP, n = 4",
+  "front": "held fixed",
+  "apparent_mb": "balance",
+  "dt": 0.1,
+  "code": "2f55628",
+  "finished": "2026-07-20",
+  "results": "antarctica/results/ctrl2015_mri_esm2_0_32000_*",
+  "audit": "ON TRACK; the budget residual closes to zero",
+  "notes": "superseded by the two August 2026 ice-front fixes (the 2500 m boundary-id sidecar on the 32 km mesh and the CG1 front-thickness bias), which need a re-inversion as well as a re-run; issue #28. Full record: antarctica/reports/core10_ctrl2015_mri_esm2_0_32km.md; status across the matrix: antarctica/reports/MATRIX_STATUS.md"
+}

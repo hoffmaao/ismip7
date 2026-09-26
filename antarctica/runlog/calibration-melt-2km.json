@@ -1,0 +1,19 @@
+{
+  "id": "calibration-melt-2km",
+  "task": "calibration",
+  "institution": "Rice",
+  "title": "Ocean melt: toolbox K and the per-basin thermal-forcing offset",
+  "status": "done",
+  "period": "present day",
+  "mesh": "antarctica_5000_2000_buffered0",
+  "initial_state": "the Budd 22 September snapshot, for its mesh only",
+  "forcing": "OI climatology 30_sep; observed melt from the Paolo and Adusumilli table, 865 Gt/yr integrated",
+  "melt": "K05 4.75e-5, K50 8.5e-5, K95 1.375e-4 from the toolbox; one constant mean-Antarctic slope of 5.115e-3; offsets in deltaT_per_basin_2000_K*.npz",
+  "site": "local workstation",
+  "resources": "serial",
+  "started": "2026-09-22",
+  "finished": "2026-09-22",
+  "results": "antarctica/results/deltaT_per_basin_2000_K*.npz",
+  "audit": "uncorrected totals 907, 1623 and 2625 Gt/yr at K05, K50 and K95; every basin reaches its observed total with an offset inside 1.3 K, so every basin has a root in the toolbox window",
+  "notes": "issues #26, #30 and #42. Refit once the July 1067 Gt/yr table is staged locally"
+}

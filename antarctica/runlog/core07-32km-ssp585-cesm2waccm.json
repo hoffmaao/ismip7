@@ -1,0 +1,21 @@
+{
+  "id": "core07-32km-ssp585-cesm2waccm",
+  "task": "projection",
+  "institution": "Rice",
+  "title": "Core 7: ssp585 with CESM2-WACCM",
+  "status": "superseded",
+  "esm": "CESM2-WACCM",
+  "scenario": "ssp585",
+  "period": "2015 to 2300, reached 2124.5, stopped where front-emptying events became continuous",
+  "friction": "budd",
+  "mesh": "antarctica_320000_32000",
+  "initial_state": "the untagged legacy 32 km CG1 Budd MAP, n = 4",
+  "front": "held fixed",
+  "apparent_mb": "balance",
+  "dt": 0.1,
+  "code": "76f9a14",
+  "finished": "2026-07-20",
+  "results": "antarctica/results/ssp585_cesm2_waccm_32000_*",
+  "audit": "OFF TRACK; the budget residual closes to zero",
+  "notes": "superseded by the annual-mean atmosphere-forcing fix fa7230c (the reader applied January as the whole year) and by the two August 2026 ice-front fixes, which need a re-inversion as well as a re-run; issue #28. Full record: antarctica/reports/core07_ssp585_cesm2_waccm_32km.md; status across the matrix: antarctica/reports/MATRIX_STATUS.md"
+}

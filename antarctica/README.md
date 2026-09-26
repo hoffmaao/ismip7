@@ -1363,7 +1363,11 @@ Per experiment in `results/`:
   `ISMIP7_KEEP_CHECKPOINTS` most recently written.
 - `<exp>_timeseries.csv`, one row per `OUTPUT_INTERVAL` steps:
   `year, vaf_mm_sle, mass_gt, smb_gtyr, melt_gtyr, outflux_gtyr, calv_gt,
-  clamp_gt, resid_gt, amb_gtyr`. The residual must close to 0.00.
+  clamp_gt, resid_gt, amb_gtyr`. The residual must close to 0.00. SMB and
+  melt are what the advances applied: no forcing acts on open ocean or on
+  cells a front rule holds ice-free (`front.unforced_cells`), so `clamp` is
+  only the positivity limit on thin ice and `calv` only ice that crossed the
+  front. The ISMIP7 `acabf` and `libmassbffl` fields book the same forcing.
 
 VAF is in mm of sea-level equivalent, mass in Gt, both over map-plane area.
 The ISMIP7 scalars of a run with `ISMIP7_OUTPUT=1`

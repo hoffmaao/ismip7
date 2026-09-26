@@ -1,0 +1,33 @@
+{
+ "task": "test",
+ "institution": "IU",
+ "status": "done",
+ "exp_id": "C007",
+ "esm": "CESM2-WACCM",
+ "scenario": "ssp585",
+ "period": "2294.0 to 2299.0, 50 steps, reached 2299.0",
+ "friction": "budd",
+ "mesh": "antarctica_320000_32000, DG0 geometry",
+ "initial_state": "ssp585_cesm2_waccm_p4_32000_t2294.0.h5, the state checkpoint of core07-32km-ssp585-cesm2waccm-p4, sha256 c8b60d6d9aadd7109e6a068c6c33ca6c40048e5541330e56f2730b719c48be62",
+ "branch_from": "core07-32km-ssp585-cesm2waccm-p4 at 2294.0. The restart re-solved the loaded state (||F|| 7.13e9 to 4.31e3), and the grounding line passes 41,593 Gt/yr in 2294, falling to 3,479 in 2298, as in the front-melt pair",
+ "forcing": "CESM2-WACCM ssp585, atmosphere SDBN1-8000m v2, ocean v3",
+ "melt": "the tracked default, deltaT_per_basin_1000_K6.500e-05.npz (sha256 4f525009), K 6.5e-5 with its per-basin offsets and the constant slope, no melt variable set; the front-melt pair ran p4's per-basin K from K_issue11_mesh2500.npz with the local slope",
+ "front": "held fixed (ISMIP7_FIXED_FRONT=1), ice-shelf collapse ISMIP7_FRACTURE=none",
+ "apparent_mb": "balance, the frozen reference loaded from the p4 checkpoint",
+ "dt": 0.1,
+ "site": "IU Quartz, debug partition",
+ "resources": "8 ranks, 32G",
+ "started": "2026-09-26",
+ "finished": "2026-09-26",
+ "id": "test-32km-ssp585-reference-land",
+ "title": "The p4 ssp585 at 32 km restarted at 2294.0 on main after pull requests 127 and 130 for five years, following the frozen reference on emptied cells (issue #136)",
+ "jobs": [
+  "10659900"
+ ],
+ "code": "main 687c508, from a scratch clone with its own results",
+ "cost": "25 min 45 s elapsed for five model years",
+ "results": "Quartz scratch ismip7_issue105_land/main/antarctica/results/ssp585_cesm2_waccm_i105land_32000_*",
+ "audit": "resid 0.0000 on all 50 rows, forward exit 0; dM/dt -20,540 Gt/yr at the first step, -20,224 at 2295.0 and -5,432 at 2299.0, as the re-solved state thins",
+ "ismip7_output": "five annual files, 2294 to 2298, with the ten native scalars; lifmassbf zero and no front_melt stamp, the booking before issue 109",
+ "notes": "Compared with test-32km-ssp585-front-melt-main, restarted from the same checkpoint before pull requests 127 and 130, by melt_left.py and land_regrowth.py (attached to issue #136) on copies of both runs' annual files. Over 2294 to 2298 the melt on land cells with no ice at either end of a year falls from 14.7 to 2.6 Gt/yr, and the reference's share of the melt on emptied marine cells stays: 1,334 Gt/yr on average in the pixels the fill blanks, against 791 before. The 170 land cells inside the 2015 extent that the reference feeds receive 27.8 Gt/yr in both runs, and the applied SMB now removes it. The 666 land cells there with no ice at the restart gain 1,233 Gt over the five years against 1,256 before, nearly all of it inflow in the first two years. The melt calibration differs between the two runs, so their melt totals do not compare. Run by submit_i105land.sh in Quartz scratch ismip7_issue105_land."
+}

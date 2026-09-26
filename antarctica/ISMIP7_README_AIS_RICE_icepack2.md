@@ -273,7 +273,7 @@ Sea-level estimates
 (`sla20`, `slg20`, `slvaf`) are not computed by the model; **[confirm #13]** that
 `ismip7-scalar-processing` was run on the gridded files.
 
-Front melt, chosen by the group on 25 September 2026 (issue #109). The
+Front melt, chosen by the group on 25 September 2026 (issue 109). The
 request fills `libmassbffl` wherever no ice floats at year end, so the melt
 of ice gone within the year would reach no gridded field. Most of it is
 grounded ice that goes afloat into a marine cell whose shelf has gone, and
@@ -282,7 +282,7 @@ request never fills: in a cell with its bed below sea level and no ice (1 m
 or less) at either end of the year, the share of the year's melt that the
 inflow supplied, out of what the inflow, the positive SMB and the frozen
 apparent-mass-balance reference supplied together. The reference's share
-stays in `libmassbffl` (issue #105), and the two fields sum to the melt the
+stays in `libmassbffl` (issue #136), and the two fields sum to the melt the
 model applied. Every yearly file names this booking, and the writer refuses
 a series that mixes it with the earlier one, so a chain must not change code
 versions across it. Where the melt lands depends on the time step: the
@@ -294,11 +294,13 @@ where the fill keeps it. In the 32 km CESM2-WACCM ssp585 of 23 September at
 the gridded `libmassbffl` still leaves out 1,200 Gt/yr of the native melt:
 1,094 is the reference's share on emptied marine cells, 20 is the reference's
 supply melted on emptied land cells, which the melt law of that run counted
-as afloat at zero thickness (issue #105), and 87 is shelf ice that melted
-away within the year. The model now melts only cells holding ice and forces
-no open ocean, so the land melt and the reference's share on marine cells
-that stay empty no longer arise. **[confirm #109]** the production ssp585's
-numbers, which the writer prints.
+as afloat at zero thickness, and 87 is shelf ice that melted away within the
+year. The model now melts only cells holding ice and leaves open ocean
+unforced. Restarted from that run at 2294.0 on the code of 26 September, it
+books 3 Gt/yr of melt on emptied land cells, and the reference still reaches
+a marine cell that begins a step holding the last step's inflow: its share
+left out averages 1,334 Gt/yr over 2294 to 2298 (issue #136).
+**[confirm #136]** the production ssp585's numbers, which the writer prints.
 
 Compliance: isschecker 0.5.1 of 22 September 2026, which grades a range
 finding by the share of values outside the bounds (discussion #46). A 32 km

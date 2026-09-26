@@ -78,8 +78,8 @@ Status: 12 planned, 3 running, 5 stopped, 46 done, 13 superseded.
 | 2 km control on the MAP's own mesh, with no transfer | done | antarctica_5000_2000_buffered0 | local workstation | 2026-09-22 | 2026-09-22 | peak speed 17469 m/yr, which is the inversion chain's own warm-start maximum, so the forward reproduces the MAP. Amery reads 5937 m/yr with no transfer at all, against 6041 through the transfer |
 | 2 km control from the transferred Budd snapshot | running | antarctica_20000_2000_buffered20000, 2 km fine, 20 km interior, 20 km buffer | local workstation | 2026-09-22 | - | 3.5 years: VAF drift 0.01 mm, mass balance +2 Gt/yr, residual zero. The Amery cell sits near 6 km/yr without running away |
 | 32 km probe of the tracked K50 melt calibration: core 11's stopgap forcing for 5 model years | done | antarctica_320000_32000_buffered0, DG0 geometry | IU Quartz, general partition | 2026-09-25 | 2026-09-25 | resid 0.0 Gt on all 50 rows and forward exit 0 at both commits, the rerun (job 10644548) passing the thickness-floor check; the provenance line names the file, its sha256, K50 and both meshes, and the raster sampling is the calibration's vertex. The first step books 1069.4891 Gt/yr of melt, the forward total check_melt_bound.py gives on the same mesh (job 10644430, 1069.489), and 1068.9659 at 1984. That check exits 1 by design: at 32 km the offsets fitted on the 1000 m mesh put the basins at 0.33 (basin 6) to 1.74 (basin 10) times their fitted totals |
-| The p4 ssp585 at 32 km restarted at 2294.0 on the front-melt branch for five years, booking the melt of emptied marine cells as lifmassbf (issue #109) | done | antarctica_320000_32000, DG0 geometry | IU Quartz, debug partition | 2026-09-25 | 2026-09-25 | resid 0.0000 on all 50 rows, no rescue. Front melt (true area) 3,068, 632, 596, 604 and 716 Gt/yr from 2294 to 2298, with 910 to 1,162 Gt/yr of reference-fed melt left in libmassbffl on the same cells |
-| The p4 ssp585 at 32 km restarted at 2294.0 on main for five years, the control arm of the front-melt booking (issue #109) | done | antarctica_320000_32000, DG0 geometry | IU Quartz, debug partition | 2026-09-25 | 2026-09-25 | resid 0.0000 on all 50 rows, no rescue; dM/dt near -15,000 Gt/yr in 2294 and -10,500 in 2295, as the re-solved state thins |
+| The p4 ssp585 at 32 km restarted at 2294.0 on the front-melt branch for five years, booking the melt of emptied marine cells as lifmassbf (issue 109) | done | antarctica_320000_32000, DG0 geometry | IU Quartz, debug partition | 2026-09-25 | 2026-09-25 | resid 0.0000 on all 50 rows, no rescue. Front melt (true area) 3,068, 632, 596, 604 and 716 Gt/yr from 2294 to 2298, with 910 to 1,162 Gt/yr of reference-fed melt left in libmassbffl on the same cells |
+| The p4 ssp585 at 32 km restarted at 2294.0 on main for five years, the control arm of the front-melt booking (issue 109) | done | antarctica_320000_32000, DG0 geometry | IU Quartz, debug partition | 2026-09-25 | 2026-09-25 | resid 0.0000 on all 50 rows, no rescue; dM/dt near -15,000 Gt/yr in 2294 and -10,500 in 2295, as the re-solved state thins |
 | The p4 ssp585 at 32 km restarted at 2294.0 on main after pull requests 127 and 130 for five years, following the frozen reference on emptied cells (issue #136) | done | antarctica_320000_32000, DG0 geometry | IU Quartz, debug partition | 2026-09-26 | 2026-09-26 | resid 0.0000 on all 50 rows, forward exit 0; dM/dt -20,540 Gt/yr at the first step, -20,224 at 2295.0 and -5,432 at 2299.0, as the re-solved state thins |
 
 ## Historical
@@ -1437,7 +1437,7 @@ Core 11 at 32 km without the apparent-MB reference, a cold start on the OCX prot
 
 ### test-32km-ssp585-front-melt-branch
 
-The p4 ssp585 at 32 km restarted at 2294.0 on the front-melt branch for five years, booking the melt of emptied marine cells as lifmassbf (issue #109) (done), IU.
+The p4 ssp585 at 32 km restarted at 2294.0 on the front-melt branch for five years, booking the melt of emptied marine cells as lifmassbf (issue 109) (done), IU.
 
 - **Task type:** test
 - **ISMIP7 exp id:** C007
@@ -1469,7 +1469,7 @@ The p4 ssp585 at 32 km restarted at 2294.0 on the front-melt branch for five yea
 
 ### test-32km-ssp585-front-melt-main
 
-The p4 ssp585 at 32 km restarted at 2294.0 on main for five years, the control arm of the front-melt booking (issue #109) (done), IU.
+The p4 ssp585 at 32 km restarted at 2294.0 on main for five years, the control arm of the front-melt booking (issue 109) (done), IU.
 
 - **Task type:** test
 - **ISMIP7 exp id:** C007
@@ -1494,7 +1494,7 @@ The p4 ssp585 at 32 km restarted at 2294.0 on main for five years, the control a
 - **Cost per model year:** 3 min 54 s for five model years, about 47 s a model year
 - **Results path:** Quartz scratch ismip7_issue109/main/antarctica/results/ssp585_cesm2_waccm_i109main_32000_*
 - **Audit:** resid 0.0000 on all 50 rows, no rescue; dM/dt near -15,000 Gt/yr in 2294 and -10,500 in 2295, as the re-solved state thins
-- **ISMIP7 output written:** five annual files, 2294 to 2298, with the ten native scalars; lifmassbf zero and no front_melt stamp, the booking before issue #109
+- **ISMIP7 output written:** five annual files, 2294 to 2298, with the ten native scalars; lifmassbf zero and no front_melt stamp, the booking before issue 109
 - **Notes:** Paired with test-32km-ssp585-front-melt-branch through the same knobs, restart, node (c1) and rank count. The two timeseries first differ at 2294.2 in the seventh digit, before the first year end, the only place the branch's code differs from main's, so the solver does not reproduce bit for bit between jobs and this fast state amplifies it: melt differs by at most 0.6 % and mass by 2e-8 over the five years. Run by submit_i109.sh in Quartz scratch ismip7_issue109.
 
 ### test-32km-ssp585-reference-land
@@ -1521,7 +1521,7 @@ The p4 ssp585 at 32 km restarted at 2294.0 on main after pull requests 127 and 1
 - **Code:** main 687c508, from a scratch clone with its own results
 - **Started:** 2026-09-26
 - **Finished:** 2026-09-26
-- **Cost per model year:** 25 min 45 s elapsed for five model years
+- **Cost per model year:** 25 min 45 s for five model years, about 5 min 9 s a model year
 - **Results path:** Quartz scratch ismip7_issue105_land/main/antarctica/results/ssp585_cesm2_waccm_i105land_32000_*
 - **Audit:** resid 0.0000 on all 50 rows, forward exit 0; dM/dt -20,540 Gt/yr at the first step, -20,224 at 2295.0 and -5,432 at 2299.0, as the re-solved state thins
 - **ISMIP7 output written:** five annual files, 2294 to 2298, with the ten native scalars; lifmassbf zero and no front_melt stamp, the booking before issue 109

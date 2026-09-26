@@ -2,7 +2,7 @@
  "id": "test-32km-ssp585-front-melt-branch",
  "task": "test",
  "institution": "IU",
- "title": "The p4 ssp585 at 32 km restarted at 2294.0 on the front-melt branch for five years, booking the melt of emptied marine cells as lifmassbf (issue #109)",
+ "title": "The p4 ssp585 at 32 km restarted at 2294.0 on the front-melt branch for five years, booking the melt of emptied marine cells as lifmassbf (issue 109)",
  "status": "done",
  "exp_id": "C007",
  "esm": "CESM2-WACCM",

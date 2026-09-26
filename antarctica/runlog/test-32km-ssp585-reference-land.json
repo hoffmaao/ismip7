@@ -25,7 +25,7 @@
   "10659900"
  ],
  "code": "main 687c508, from a scratch clone with its own results",
- "cost": "25 min 45 s elapsed for five model years",
+ "cost": "25 min 45 s for five model years, about 5 min 9 s a model year",
  "results": "Quartz scratch ismip7_issue105_land/main/antarctica/results/ssp585_cesm2_waccm_i105land_32000_*",
  "audit": "resid 0.0000 on all 50 rows, forward exit 0; dM/dt -20,540 Gt/yr at the first step, -20,224 at 2295.0 and -5,432 at 2299.0, as the re-solved state thins",
  "ismip7_output": "five annual files, 2294 to 2298, with the ten native scalars; lifmassbf zero and no front_melt stamp, the booking before issue 109",

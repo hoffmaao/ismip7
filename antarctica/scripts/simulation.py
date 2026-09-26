@@ -602,6 +602,12 @@ def setup_model(restart_from=None, *, allow_timing_cache_a_ref=False):
         theta_f.rename("theta")
         phi_f = load_checkpoint_field(chk, "log_fluidity", Q)
         phi_f.rename("phi")
+        # A MAP inverted on the sqrt(C) control (ISMIP7_FRICTION_CONTROL=sqrt)
+        # carries alpha = sqrt(C): its friction is alpha^2 outright, with no
+        # anchor and a zero log deviation. Restart checkpoints carry that
+        # friction as C_w0 with theta = 0, so they take the ordinary path.
+        alpha_f = load_checkpoint_field(
+            chk, "sqrt_friction", Q, optional=True, fill=0.0, fill_label="0")
         # Fluidity prior mean (physical thermomechanical field): the fluidity
         # control is phi = log(A / A_prior), so the forward must reconstruct
         # A = A_prior * exp(phi) with the SAME A_prior the inversion used. New
@@ -980,6 +986,13 @@ def setup_model(restart_from=None, *, allow_timing_cache_a_ref=False):
                 N_ref = Function(Q_g, name="N_ref").interpolate(
                     max_value(effective_pressure(H, s), Constant(0.0))
                 )
+            if alpha_f is not None:
+                C_w0 = Function(Q_g, name="C_w0").project(alpha_f ** 2)
+                theta_f.assign(0.0)
+                _a_lo, _a_hi = global_range(alpha_f)
+                PETSc.Sys.Print(
+                    "  Friction from the MAP's sqrt(C) control: C = alpha^2, "
+                    f"alpha in [{_a_lo:.3e}, {_a_hi:.3e}] (no anchor; theta = 0)")
         # ISMIP7_BUDD_NREF=none reproduces the inversion's own call, which
         # passes N_ref=None so N_hat = N/N is 1 wherever the gate is open. The
         # forward otherwise divides by the N_ref above, computed on a cold start
@@ -1130,7 +1143,9 @@ def setup_model(restart_from=None, *, allow_timing_cache_a_ref=False):
                 phi_c if phi_c is not None else phi_f,
                 H=h_c if h_c is not None else h,
                 s=s_c if s_c is not None else s,
-                b=b, C_w0=C_w0,
+                # the sqrt control's friction is alpha^2 pointwise (the
+                # inversion's own form), not its cell average
+                b=b, C_w0=(alpha_f ** 2 if alpha_f is not None else C_w0),
                 A4_base=A4_base, n_flow=n_flow, n_flow_val=n_flow_val,
                 m_slide=m_slide_val, tau_c=tau_c, alpha=alpha_reg, H_ref=H_ref,
                 fric_law=friction, N_ref=N_ref,
@@ -1537,6 +1552,10 @@ def setup_model(restart_from=None, *, allow_timing_cache_a_ref=False):
         # is self-contained and rank-count-robust (no recompute from evolved h).
         "theta": theta_f,
         "phi": phi_f,
+        # alpha = sqrt(C) of a sqrt-control MAP (None otherwise): the
+        # residual's friction, carried into every checkpoint so a restart
+        # assembles the same form.
+        "alpha": alpha_f,
         "C_w0": C_w0,
         "N_ref": N_ref,
         "A_prior": A_prior_f,
@@ -1629,6 +1648,8 @@ def save_model_state(ctx, final_path, t_now, extra_attrs=None):
         chk.save_function(ctx["phi_eff"], name="phi_eff")
         if ctx.get("C_w0") is not None:
             chk.save_function(ctx["C_w0"], name="C_w0")
+        if ctx.get("alpha") is not None:
+            chk.save_function(ctx["alpha"], name="sqrt_friction")
         if ctx.get("N_ref") is not None:
             chk.save_function(ctx["N_ref"], name="N_ref")
         if ctx.get("A_prior") is not None:

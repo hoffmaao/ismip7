@@ -259,12 +259,66 @@ PRIOR_SIGMA_THETA = float(os.environ.get("ISMIP7_PRIOR_SIGMA_THETA", "0.3"))
 PRIOR_SIGMA_PHI = float(os.environ.get("ISMIP7_PRIOR_SIGMA_PHI", "0.3"))
 PRIOR_RHO = float(os.environ.get("ISMIP7_PRIOR_RHO", str(L_REG)))
 
+# ── Friction control (ISMIP7_FRICTION_CONTROL) ──────────────────────────
+# `log` (default): theta = log(C / C_w0), a deviation from the balance anchor
+# with prior mean zero, so the prior sets the friction's amplitude wherever
+# the data are weak. `sqrt`: the control is alpha = sqrt(C) itself with a
+# ZERO prior mean (Recinos et al. 2023 / fenics_ice: their mass term is
+# negligible, the prior only smooths, and the data set the amplitude); the
+# anchor is the initial guess only, as their driving-stress initial guess
+# is. Residual laws and the bi-Laplacian prior only. The prior scale
+# ISMIP7_PRIOR_SIGMA_ALPHA is in sqrt(MPa yr^(1/m) m^(-1/m)) (Recinos's
+# m^(-1/6) yr^(1/6) Pa^(1/2) times 1e-3); "auto" takes the grounded median of
+# the initial alpha, so the pointwise prior std is the typical friction and
+# the amplitude is free in practice. ISMIP7_PRIOR_RHO_THETA is the friction
+# correlation length (default ISMIP7_PRIOR_RHO; Recinos's l = sqrt(gamma/delta)
+# is rho / sqrt(8)).
+FRICTION_CONTROL = os.environ.get("ISMIP7_FRICTION_CONTROL", "log").strip().lower()
+if FRICTION_CONTROL not in ("log", "sqrt"):
+    raise ValueError(
+        f"ISMIP7_FRICTION_CONTROL must be log|sqrt, got {FRICTION_CONTROL!r}")
+if FRICTION_CONTROL == "sqrt" and PRIOR_FORM != "bilaplacian":
+    raise ValueError(
+        "ISMIP7_FRICTION_CONTROL=sqrt needs ISMIP7_PRIOR_FORM=bilaplacian")
+PRIOR_SIGMA_ALPHA = os.environ.get("ISMIP7_PRIOR_SIGMA_ALPHA", "auto").strip().lower()
+PRIOR_RHO_THETA = float(os.environ.get("ISMIP7_PRIOR_RHO_THETA", str(PRIOR_RHO)))
+
+# ── Fluidity prior mean (ISMIP7_FLUIDITY_PRIOR) ─────────────────────────
+# `thermo` (default): the fixed-velocity enthalpy model (thermo_model.py).
+# `pattyn`: rate_factor of the depth-averaged Pattyn temperature raster
+# (icepack2_tools/rheology_prior.py; ISMIP7_PATTYN_TEMP names the file,
+# default <data root>/temp/Pattyn_2013.tif), the source Recinos et al. (2023)
+# take their rheology prior mean from. Anything else: the constant A0.
+FLUIDITY_PRIOR = os.environ.get("ISMIP7_FLUIDITY_PRIOR", "thermo").strip().lower()
+
+# ── Likelihood scale (ISMIP7_MISFIT_SCALE) ───────────────────────────────
+# The data terms are normalised by the observed AREA, so the misfit is a mean
+# chi^2 per node (1 at a perfect fit) while the prior energy is a sum over
+# the whole domain; the prior therefore outweighs the data by about the
+# number of observed nodes, and a MAP sits on its prior mean (91-94% of the
+# 2 km MAP within 0.1 of it, Sep 2026). A Gaussian likelihood is the SUM of
+# the per-datum chi^2, which is what fenics_ice assembles (Recinos et al.
+# 2023) and why their zero-mean friction prior can leave the amplitude to the
+# data. `nodes` multiplies every data term by the number of observed nodes
+# (the sum over the control space's nodes); a number is a plain multiplier;
+# 1 (default) keeps the mean. Recorded in the MAP as misfit_scale.
+MISFIT_SCALE = os.environ.get("ISMIP7_MISFIT_SCALE", "1").strip().lower()
+if MISFIT_SCALE != "nodes":
+    try:
+        float(MISFIT_SCALE)
+    except ValueError:
+        raise ValueError(
+            f"ISMIP7_MISFIT_SCALE must be a number or 'nodes', got {MISFIT_SCALE!r}")
+
 # Friction law: "budd" (power-law dual, default) or "regularized_coulomb"
 # (Joughin/Schoof RC residual: grounded-only inference, exact-zero shelves).
 FRICTION = _friction()
 # Exact-zero-shelf residual laws share the C_w0/He/composite structure.
 USE_RESIDUAL = FRICTION in ("regularized_coulomb", "budd")
 USE_RC = USE_RESIDUAL  # geometry/anchor handling is shared
+if FRICTION_CONTROL == "sqrt" and not USE_RESIDUAL:
+    raise ValueError("ISMIP7_FRICTION_CONTROL=sqrt needs a residual friction "
+                     "law (budd or regularized_coulomb)")
 C0_RC = float(os.environ.get("ISMIP7_RC_C0", "0.5"))
 # Buffer-node (h_clamp=0) coercivity controls; see dual_friction.build_rc_residual.
 # h_visc_floor (membrane-only thickness floor) is the primary, bias-free cure;
@@ -554,6 +608,8 @@ def main():
     # the warm start's anchor length, when its theta is to be rebased onto
     # this run's anchor once that is built (ISMIP7_WARM_START_THETA=physical)
     warm_theta_anchor = None
+    # alpha = sqrt(C) of a warm start inverted on the sqrt control
+    warm_alpha = None
     # Residual the warm start's writer reached under the shared F (stamped by
     # save_model_state and by save_map): the forwards' absolute tolerance.
     warm_recorded = None
@@ -614,7 +670,17 @@ def main():
                         f"{ANCHOR_LENGTH:g} m: the same theta means a different "
                         f"friction. ISMIP7_WARM_START_THETA=physical keeps the "
                         f"friction; =0 starts at the prior mean.")
-            phi.assign(_warm_load(chk, chk_mesh, "log_fluidity", Q))
+            if os.environ.get("ISMIP7_WARM_START_PHI", "1").strip() == "0":
+                PETSc.Sys.Print("    log_fluidity: prior mean (ISMIP7_WARM_START_PHI=0)")
+            else:
+                phi.assign(_warm_load(chk, chk_mesh, "log_fluidity", Q))
+            # A MAP inverted on the sqrt(C) control carries alpha itself; its
+            # log_friction is zero by construction.
+            _warm_fc = (str(chk.get_attr("/", "friction_control"))
+                        if chk.has_attr("/", "friction_control") else "log")
+            if _warm_fc == "sqrt" and _theta_mode != "0":
+                warm_alpha = _warm_load(chk, chk_mesh, "sqrt_friction", Q)
+                PETSc.Sys.Print("    sqrt_friction (alpha) from warm start")
             # A warm start on this mesh supplies its geometry, observations
             # and mixed state as well. One from another mesh (a 2 km MAP
             # warm-starting a 1 km inversion) supplies the controls and the
@@ -858,6 +924,49 @@ def main():
     else:
         PETSc.Sys.Print("  Friction: Budd power-law dual (legacy action)")
 
+    # ── sqrt(C) friction control (ISMIP7_FRICTION_CONTROL=sqrt) ───────────
+    # theta now IS alpha = sqrt(C). It starts from the friction the anchor
+    # (and any warm-started log deviation, rebased above) describes, or from
+    # the alpha of a warm start inverted on this control. The prior mean is
+    # zero, so nothing but the start remembers the anchor.
+    sigma_alpha_val = None
+    if FRICTION_CONTROL == "sqrt":
+        C_cg = cg1_lift(C_w0) if geom_dg else C_w0
+        if warm_alpha is not None:
+            theta.assign(warm_alpha)
+        else:
+            theta.interpolate(sqrt(max_value(C_cg * exp(theta), Constant(0.0))))
+        theta.rename("alpha")
+        H_cg = cg1_lift(H) if geom_dg else H
+        b_cg = cg1_lift(b) if geom_dg else b
+        _haf = Function(Q).interpolate(height_above_flotation(H_cg, b_cg)).dat.data_ro
+        _grounded = (_haf > 0.0) & (H_cg.dat.data_ro > 10.0)
+        _alpha_grounded = np.concatenate(COMM_WORLD.allgather(
+            np.asarray(theta.dat.data_ro[_grounded], dtype=float)))
+        _alpha_median = (float(np.median(_alpha_grounded))
+                         if _alpha_grounded.size else float("nan"))
+        if PRIOR_SIGMA_ALPHA == "auto":
+            sigma_alpha_val = _alpha_median
+        else:
+            sigma_alpha_val = float(PRIOR_SIGMA_ALPHA)
+        if not sigma_alpha_val > 0.0:
+            raise ValueError(
+                f"the prior sigma for alpha must be positive, got {sigma_alpha_val}")
+        _a_lo, _a_hi = global_range(theta)
+        PETSc.Sys.Print(
+            f"  Friction control: alpha = sqrt(C) with a zero prior mean "
+            f"(Recinos et al. 2023); initial alpha in [{_a_lo:.3e}, {_a_hi:.3e}], "
+            f"grounded median {_alpha_median:.3e}; sigma_alpha={sigma_alpha_val:.3e} "
+            f"({PRIOR_SIGMA_ALPHA}), rho_theta={PRIOR_RHO_THETA:g} m")
+    elif warm_alpha is not None:
+        # a sqrt-control MAP warm-starting a log-control run: the deviation
+        # from THIS anchor that reproduces its friction on grounded ice
+        C_cg = cg1_lift(C_w0) if geom_dg else C_w0
+        theta.interpolate(ln(max_value(warm_alpha ** 2, Constant(1e-12))
+                             / max_value(C_cg, Constant(1e-12))))
+        PETSc.Sys.Print("    log_friction rebuilt from the warm start's alpha: "
+                        "theta = ln(alpha^2 / C_w0)")
+
     # Physical FLUIDITY PRIOR MEAN A_prior(x): a fixed-velocity thermomechanical
     # (Stefan enthalpy) solve at the observed geometry/velocity, so the control
     # phi = log(A / A_prior) is a small deviation from a physically-motivated
@@ -871,13 +980,39 @@ def main():
     if warm_A_prior is not None:
         A_prior = warm_A_prior
         prior_origin = warm_prior_origin or "warm start"
+        if FLUIDITY_PRIOR != "thermo":
+            PETSc.Sys.Print(
+                f"    WARNING: ISMIP7_FLUIDITY_PRIOR={FLUIDITY_PRIOR} but the warm "
+                "start's fluidity_prior is kept (ISMIP7_WARM_START_PRIOR=0 recomputes)")
         A_prior.rename("fluidity_prior")
         A_prior_lo, A_prior_hi = global_range(A_prior)
         PETSc.Sys.Print(
             f"  Fluidity prior A_prior in [{A_prior_lo:.2f}, "
             f"{A_prior_hi:.2f}] (from warm start)"
         )
-    elif os.environ.get("ISMIP7_FLUIDITY_PRIOR", "thermo") == "thermo":
+    elif FLUIDITY_PRIOR == "pattyn":
+        from icepack2_tools.rheology_prior import fluidity_prior_from_temperature_raster
+        _pattyn_fn = os.environ.get(
+            "ISMIP7_PATTYN_TEMP", os.path.join(DATA_DIR, "temp", "Pattyn_2013.tif"))
+        if not os.path.exists(_pattyn_fn):
+            raise FileNotFoundError(
+                f"ISMIP7_FLUIDITY_PRIOR=pattyn: temperature raster {_pattyn_fn} "
+                "not found (ISMIP7_PATTYN_TEMP names it)")
+        A_prior, _pinfo = fluidity_prior_from_temperature_raster(_pattyn_fn, Q)
+        _n_rep = COMM_WORLD.allreduce(int(_pinfo["nodes_from_replaced"]))
+        _n_tot = COMM_WORLD.allreduce(int(_pinfo["nodes_total"]))
+        prior_origin = (
+            "rate_factor of the depth-averaged Pattyn temperature "
+            f"({os.path.basename(_pattyn_fn)}); no strain heating, geothermal "
+            "flux or water content of our own")
+        A_prior_lo, A_prior_hi = global_range(A_prior)
+        PETSc.Sys.Print(
+            f"  Fluidity prior A_prior in [{A_prior_lo:.2f}, {A_prior_hi:.2f}] "
+            f"(Pattyn depth-averaged temperature {_pattyn_fn}; "
+            f"{_pinfo['pixels_replaced']} of {_pinfo['pixels_total']} raster pixels "
+            "missing or outside [200, 273.15] K were filled from their nearest "
+            f"valid neighbour, reaching {_n_rep} of {_n_tot} nodes)")
+    elif FLUIDITY_PRIOR == "thermo":
         acc_prior = load_racmo_smb_climatology(Q)
         T_srf = load_mean_annual_surface_temperature(Q)
         # The thermal prior is a smooth englacial calculation and it is the
@@ -979,13 +1114,20 @@ def main():
         f"a cell away from the ice (h < {front_hmin():g} m), as in the forward"
     )
 
+    _zero_theta = Constant(0.0)
+
     def build_F(theta_c, phi_c):
         # Residual closure (tau linear, grounded-only theta via exp(theta*He),
         # exact-zero shelves): budd -> N_hat=1 at the reference geometry;
         # regularized_coulomb -> Coulomb cap. Legacy budd -> action derivative.
         if USE_RESIDUAL:
+            if FRICTION_CONTROL == "sqrt":
+                # C = alpha^2 outright; the He-gated log deviation is zero
+                theta_arg, C_arg = _zero_theta, theta_c ** 2
+            else:
+                theta_arg, C_arg = theta_c, C_w0
             return build_rc_residual(
-                z, theta_c, phi_c, H=H, s=s, b=b, C_w0=C_w0,
+                z, theta_arg, phi_c, H=H, s=s, b=b, C_w0=C_arg,
                 A4_base=A4_base, n_flow=n_flow, n_flow_val=n_flow_val,
                 m_slide=m_slide_val, tau_c=tau_c, alpha=alpha_reg, H_ref=H_ref,
                 fric_law=FRICTION, N_ref=None,
@@ -1129,6 +1271,18 @@ def main():
     # Normalize by the OBSERVED area so the misfit magnitude stays
     # comparable between masked and unmasked runs.
     area_val = assemble(obs_mask * dx(mesh))
+    # ISMIP7_MISFIT_SCALE: the multiplier that turns the mean chi^2 into the
+    # likelihood the prior is weighed against (see the knob's comment).
+    if MISFIT_SCALE == "nodes":
+        misfit_scale = float(COMM_WORLD.allreduce(
+            int((obs_mask.dat.data_ro > 0.5).sum())))
+    else:
+        misfit_scale = float(MISFIT_SCALE)
+    if not misfit_scale > 0.0:
+        raise ValueError(f"ISMIP7_MISFIT_SCALE resolved to {misfit_scale}, not positive")
+    PETSc.Sys.Print(
+        f"  Misfit scale: {misfit_scale:g} x the mean chi^2 "
+        f"({'sum over observed nodes' if MISFIT_SCALE == 'nodes' else 'ISMIP7_MISFIT_SCALE'})")
 
     # ── Prior operators (ISMIP7_PRIOR_FORM) ──────────────────────────────
     # The single place that answers, for whichever form is active: the prior
@@ -1149,15 +1303,18 @@ def main():
     # operator does not possess.
     _prior_test = TestFunction(Q)
     if PRIOR_FORM == "bilaplacian":
+        _sigma_theta = (sigma_alpha_val if FRICTION_CONTROL == "sqrt"
+                        else PRIOR_SIGMA_THETA)
         _prior_dg = {
-            "theta": bilaplacian_coeffs(PRIOR_SIGMA_THETA, PRIOR_RHO),
+            "theta": bilaplacian_coeffs(_sigma_theta, PRIOR_RHO_THETA),
             "phi": bilaplacian_coeffs(PRIOR_SIGMA_PHI, PRIOR_RHO),
         }
         PETSc.Sys.Print(
             f"  Prior: bi-Laplacian A M^-1 A; "
-            f"sigma_theta={PRIOR_SIGMA_THETA:g} sigma_phi={PRIOR_SIGMA_PHI:g} "
-            f"rho={PRIOR_RHO:g} m -> "
-            f"delta={_prior_dg['theta'][0]:.4e} gamma={_prior_dg['theta'][1]:.4e}"
+            f"sigma_{'alpha' if FRICTION_CONTROL == 'sqrt' else 'theta'}="
+            f"{_sigma_theta:g} rho_theta={PRIOR_RHO_THETA:g} m, "
+            f"sigma_phi={PRIOR_SIGMA_PHI:g} rho={PRIOR_RHO:g} m -> "
+            f"theta delta={_prior_dg['theta'][0]:.4e} gamma={_prior_dg['theta'][1]:.4e}"
         )
     else:
         _prior_dg = {
@@ -1601,7 +1758,7 @@ def main():
                 )
 
         J = Functional(name="J")
-        J.assign(integrand * dx)
+        J.assign(Constant(misfit_scale) * integrand * dx)
         return J
 
     # ── MPI helpers ──
@@ -1702,10 +1859,24 @@ def main():
     # has been bitten by exactly that class of look-alike MAP before (see
     # ../GEOMETRY_DISCRETIZATION.md on the geometry tag), and MAPs are
     # gitignored, so the checkpoint is the only place this provenance can live.
+    def _friction_reference():
+        # What a consumer multiplies exp(log_friction) by: the anchor, or
+        # under the sqrt control alpha^2 itself (log_friction is saved as 0).
+        if FRICTION_CONTROL == "sqrt":
+            return Function(Q_g, name="C_w0").project(theta ** 2)
+        return C_w0
+
     def save_map(path, *, full_state=False):
         with fd.CheckpointFile(path, "w") as chk:
             chk.save_mesh(mesh)
-            chk.save_function(theta, name="log_friction")
+            if FRICTION_CONTROL == "sqrt":
+                # the control is alpha = sqrt(C): C_w0 (below) is alpha^2 and
+                # the log deviation a consumer applies to it is zero
+                chk.save_function(Function(Q, name="log_friction"),
+                                  name="log_friction")
+                chk.save_function(theta, name="sqrt_friction")
+            else:
+                chk.save_function(theta, name="log_friction")
             chk.save_function(phi, name="log_fluidity")
             chk.save_function(u_obs, name="velocity_obs")
             chk.save_function(obs_mask, name="obs_mask")
@@ -1719,7 +1890,7 @@ def main():
                 chk.save_function(z.subfunctions[2], name="basal_stress")
                 chk.save_function(H, name="H_init")
                 chk.save_function(phi_eff, name="phi_eff")
-                chk.save_function(C_w0, name="C_w0")
+                chk.save_function(_friction_reference(), name="C_w0")
                 if N_ref is not None:
                     chk.save_function(N_ref, name="N_ref")
             # The .msh this MAP was inverted on. A CheckpointFile mesh is named
@@ -1748,8 +1919,15 @@ def main():
             # forward rebuilds C_w0 from them, so it takes both from here.
             chk.set_attr("/", "friction_anchor_length", float(ANCHOR_LENGTH))
             chk.set_attr("/", "lake_ice_base", int(LAKE_ICE_BASE))
+            # Which field the friction is: C_w0 exp(log_friction) on the
+            # anchor (log), or sqrt_friction^2 with no anchor (sqrt).
+            chk.set_attr("/", "friction_control", FRICTION_CONTROL)
+            if FRICTION_CONTROL == "sqrt":
+                chk.set_attr("/", "prior_sigma_alpha", float(sigma_alpha_val))
+                chk.set_attr("/", "prior_rho_theta", float(PRIOR_RHO_THETA))
             chk.set_attr("/", "fluidity_prior_origin", str(prior_origin))
             chk.set_attr("/", "misfit_norm", MISFIT_NORM)
+            chk.set_attr("/", "misfit_scale", float(misfit_scale))
             chk.set_attr("/", "log_vel_weight", float(log_vel_w))
             chk.set_attr("/", "log_vel_eps", float(LOG_VEL_EPS))
             chk.set_attr("/", "gamma_theta", float(GAMMA_THETA))
@@ -1851,10 +2029,14 @@ def main():
             "optimize_seconds": perf_counter() - t_opt0,
             "knobs": {
                 "misfit_norm": MISFIT_NORM,
+                "misfit_scale": float(misfit_scale),
+                "misfit_scale_requested": MISFIT_SCALE,
                 "log_vel_weight_requested": LOG_VEL_WEIGHT,
                 "log_vel_weight": float(log_vel_w),
                 "log_vel_eps": float(LOG_VEL_EPS),
                 "gamma_theta": float(GAMMA_THETA),
+                "friction_control": FRICTION_CONTROL,
+                "fluidity_prior": FLUIDITY_PRIOR,
                 "gamma_phi": float(GAMMA_PHI),
                 "ftol": float(ftol),
                 "min_iter": int(min_iter),

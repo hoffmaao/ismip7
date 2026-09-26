@@ -903,7 +903,8 @@ def main():
         A_prior = compute_fluidity_prior(
             u_obs, H_th, s_th, b_th, C_th, acc_prior, T_srf
         )
-        prior_origin = "thermomechanical, friction heat only where the base rests on the bed"
+        prior_origin = ("thermomechanical; over water the base is at the ice-ocean melting point "
+                        "and supplies nothing more (no friction, no geothermal flux, no water content)")
         A_prior.rename("fluidity_prior")
         A_prior_lo, A_prior_hi = global_range(A_prior)
         PETSc.Sys.Print(

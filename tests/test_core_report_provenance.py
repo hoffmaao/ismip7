@@ -55,9 +55,10 @@ def test_the_report_resolves_the_melt_knobs_left_at_their_defaults(monkeypatch):
     assert core_report.effective_env()["ISMIP7_MELT_SLOPE"] == "local"
 
 
-def test_the_report_lifts_the_front_owner_an_external_law_names(tmp_path):
+def test_the_report_lifts_the_front_owner_with_the_laws_parameters(tmp_path):
     from icepack2_tools.front import FRONT_OWNER_MARKER
     log = tmp_path / "run.log"
-    line = f"{FRONT_OWNER_MARKER} level-set prescribed law (external: hfb sigma_max=0.15)"
+    line = (f"{FRONT_OWNER_MARKER} level-set law hfb(sigma_max=0.15, rho_c=seawater, "
+            f"mode=hfb, stress=normal, exponent=1.0, ratio_max=5.0) (ISMIP7_CALVING=hfb)")
     log.write_text(f"  {line}\nstep 1\n")
     assert core_report.front_owner(str(log)) == [line]

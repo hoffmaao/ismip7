@@ -76,6 +76,7 @@ from icepack2_tools.front import (
     collapse_banner, collapse_cell_counts, collapse_csv_fields,
     COLLAPSE_CSV_COLUMNS, COLLAPSE_MARKER, FRONT_OWNER_MARKER,
 )
+from icepack2_tools.timeseries import timeseries_csv_line
 from icepack2_tools.runconfig import (
     obs_data_root,
     BUDD_SHELF_GATE as _BUDD_SHELF_GATE,
@@ -84,7 +85,7 @@ from icepack2_tools.runconfig import (
     mesh_override as _mesh_override,
     lc as _lc, lc_coarse as _lc_coarse, n_flow as _n_flow,
     TARGET_MESH_GEOMETRY_METHOD,
-    calving_law as _calving_law, calving_sigma_max as _calving_sigma_max,
+    calving_law as _calving_law, calving_law_object as _calving_law_object,
     fracture as _fracture_mode, ismip7_output as _ismip7_output,
     FRACTURE_MASK_MODES,
     # auto_resume is re-exported, not used here: every forward driver imports
@@ -198,6 +199,45 @@ def latest_checkpoint(experiment_name, lc_val=None):
     return best
 
 
+def auto_resume_checkpoint(experiment_name, lc_val=None):
+    r"""The checkpoint an unattended run resumes from, or None.
+
+    :func:`latest_checkpoint`, refused when it was written under another
+    calving law. The experiment name carries only the run tag, so a run that
+    selects a law without a tag of its own finds a stock run's checkpoints
+    (and a stock run a law run's), would resume the other run's state and then
+    overwrite its files. Every checkpoint of a law-driven run records the law
+    with its parameters (the ``calving_law`` attribute, absent under ``none``),
+    and a resume under a different law or different parameters stops here.
+    An explicit ``ISMIP7_RESTART`` is taken as meant and does not come here.
+    """
+    path = latest_checkpoint(experiment_name, lc_val)
+    if path is None:
+        return None
+    law = _calving_law_object()
+    want = law.describe() if law is not None else None
+    with fd.CheckpointFile(path, "r") as chk:
+        have = (str(chk.get_attr("/", "calving_law"))
+                if chk.has_attr("/", "calving_law") else None)
+    if have is None and want is not None:
+        raise RuntimeError(
+            f"auto-resume found {path}, which records no calving law: it was "
+            f"written under none, or by a law run from before checkpoints "
+            f"recorded one (such as a built-in ISMIP7_CALVING=fixed or "
+            f"=vonmises chain), but this run is configured with {want}. "
+            f"Continue that state on purpose with ISMIP7_RESTART, or give "
+            f"this run its own ISMIP7_RUN_TAG so it keeps its own "
+            f"checkpoints.")
+    if have != want:
+        raise RuntimeError(
+            f"auto-resume found {path}, written under the calving law "
+            f"{have or 'none'}, but this run is configured with "
+            f"{want or 'none'}. Give this run its own ISMIP7_RUN_TAG so it "
+            f"keeps its own checkpoints, or start it from that state on "
+            f"purpose with ISMIP7_RESTART.")
+    return path
+
+
 def setup_model(restart_from=None, *, allow_timing_cache_a_ref=False):
     r"""Load mesh, data, inversion fields, and build diagnostic solver.
 
@@ -218,8 +258,7 @@ def setup_model(restart_from=None, *, allow_timing_cache_a_ref=False):
     # Reject a mistyped front configuration before the MAP load and the
     # initial Newton solve, which cost minutes to tens of minutes at 2500 m
     # on a detached launch.
-    _calving_law()
-    _calving_sigma_max()
+    _calving_law_object()
     # Exact-zero-shelf residual laws (icepack2 dual, dual_friction.py):
     #   regularized_coulomb -> Coulomb cap tau_c=c0*N
     #   budd                -> tau_b ~ N_hat=N_eff/N_ref, PISM-delta grounded
@@ -1625,40 +1664,30 @@ def setup_model(restart_from=None, *, allow_timing_cache_a_ref=False):
     }
 
 
-class LiveCalvingState:
-    r"""The fields a calving law reads, taken live from the forward's state.
+def calving_front_state(z, h_dg, b, level_set, A=None, n=None, gr_frac=None):
+    r"""The state a calving law reads (:class:`icepack_tools.calving.FrontState`),
+    taken live from the forward.
 
-    hoffmaao/calving's ``laws.Law.rate(model, t)`` reads seven fields from
-    its model: the dual solution ``u``, ``M``, ``tau``, the DG0 thickness
-    ``h``, the height above flotation ``haf`` and the grounded indicator
-    ``chi_gr`` on the cells, and the outward front normal ``nfront``. Here
-    they are the forward's own: ``(u, M, tau)`` are the subfunctions of the
-    mixed solution, ``haf`` and ``chi_gr`` are UFL on the cells so they
-    follow the geometry without an update, and ``nfront`` is the unit
-    gradient of the level set the forward advances, the same object
-    ``calving/antarctic.py`` builds when a law is tuned against the Greene
-    fronts, so the tuned threshold means the same thing here.
-
-    Densities follow that tuning harness (CalvingMIP's 917 / 1028) rather
-    than the forward's 1024, as ``antarctic.AntarcticState`` does: a
-    threshold fitted there is applied under the same flotation test.
+    ``(u, M, tau)`` are the subfunctions of the mixed solution, ``h`` the DG0
+    transport thickness, ``haf`` and ``chi_gr`` UFL on the cells so they
+    follow the geometry without an update, and ``nfront`` the unit gradient of
+    the level set the forward advances. The densities are the forward's own,
+    so a law's floating/grounded split is the forward's grounding test, and
+    ``A`` and ``n`` are the run's fluidity and exponent. ``calving/antarctic.py``
+    builds the same class from a checkpoint when a law is tuned against the
+    Greene fronts, so a tuned threshold means the same thing here.
     """
-    RHO_I = 917.0
-    RHO_W = 1028.0
-
-    def __init__(self, z, h_dg, b, level_set):
-        from firedrake import conditional, gt
-        self.u, self.M, self.tau = z.subfunctions
-        self.h = h_dg
-        self.b = b
-        self.Q0 = h_dg.function_space()
-        self.haf = self.h - Constant(self.RHO_W / self.RHO_I) * max_value(
-            -self.b, Constant(0.0))
-        self.chi_gr = conditional(gt(self.haf, Constant(0.0)),
-                                  Constant(1.0), Constant(0.0))
-        self.levelset = level_set
-        self.nfront = level_set.ghat
-        self.front_len = level_set.front_len
+    from icepack_tools.calving import FrontState
+    state = FrontState.from_dual(z, h_dg, b, level_set, A=A, n=n,
+                                 rho_i=rho_I, rho_w=rho_W)
+    if gr_frac is not None:
+        # The grounded measure the friction sees (the sub-element grounded
+        # fraction): a law gated on grounded ice reads it instead of the
+        # binary cell indicator, so a front cell at flotation is exactly as
+        # grounded for calving as for sliding and does not toggle between
+        # steps (icepack_tools.calving, gr_frac).
+        state.gr_frac = gr_frac
+    return state
 
 
 def save_model_state(ctx, final_path, t_now, extra_attrs=None):
@@ -1877,17 +1906,11 @@ def run_simulation(
     fixed_front = _fixed_front()
     front_hmin = _front_hmin()
     calving = _calving_law()
-    # An external calving law (ctx["calving_law"], any object with
-    # rate(model, t) -> UFL and describe(); hoffmaao/calving's laws.Law is
-    # the reference) drives the shared level set through its "prescribed"
-    # law, evaluated on the live dual state each transport advance.
-    calving_law_obj = ctx.get("calving_law")
-    if calving_law_obj is not None:
-        if calving != "none":
-            raise ValueError(
-                f"ISMIP7_CALVING={calving} and an external calving law were "
-                f"both requested; leave ISMIP7_CALVING=none for the law object")
-        calving = "prescribed"
+    # The law (icepack_tools.calving, the registry every project that runs a
+    # front selects from) or None. Its rate, evaluated on the live dual state,
+    # drives the level set as the "prescribed" rate; `fixed` freezes it.
+    calving_law_obj = _calving_law_object()
+    ctx["calving_law"] = calving_law_obj
     beyond_front = None
     n_beyond = 0
     cell_area = assemble(fd.TestFunction(Q_dg) * dx).dat.data_ro.copy()
@@ -1957,21 +1980,20 @@ def run_simulation(
     # when no law is configured at all; run_core_matrix.sh exports
     # ISMIP7_FIXED_FRONT=1 unconditionally, which is why the flag may not
     # override an explicit ISMIP7_CALVING choice.
-    legacy_front_sink = fixed_front and calving == "none"
+    legacy_front_sink = fixed_front and calving_law_obj is None
     # A free law moves the front, so the frozen a_ref must follow the live
     # extent; `fixed` and the legacy flag pin it on purpose and keep the
     # t=0-only mask.
-    free_front = calving not in ("none", "fixed")
+    free_front = (calving_law_obj is not None
+                  and calving_law_obj.front_mode != "fixed")
     if calving_law_obj is not None:
+        # describe() names every parameter at full precision, so this line
+        # (which core_report.py lifts) records the law as the run used it
         front_owner = (
-            f"level-set prescribed law (external: {calving_law_obj.describe()})"
+            f"level-set law {calving_law_obj.describe()} "
+            f"(ISMIP7_CALVING={calving})"
             + ("; ISMIP7_FIXED_FRONT is set but ignored for removal"
                if fixed_front else ""))
-    elif calving != "none":
-        front_owner = f"level-set {calving} law (ISMIP7_CALVING={calving})" + (
-            "; ISMIP7_FIXED_FRONT is set but ignored for removal"
-            if fixed_front else ""
-        )
     elif fixed_front:
         front_owner = "legacy fixed-front mask (ISMIP7_FIXED_FRONT)"
     else:
@@ -2404,11 +2426,7 @@ def run_simulation(
     def _write_csv_row(row, collapse_cells):
         if csv_f is None:
             return
-        csv_f.write(
-            f"{row[0]:.1f},{row[1]:.6f},{row[2]:.2f},"
-            + ",".join(f"{v:.4f}" for v in row[3:])
-            + collapse_csv_fields(csv_head, collapse_cells) + "\n"
-        )
+        csv_f.write(timeseries_csv_line(row, csv_head, collapse_cells))
         csv_f.flush()
 
     # Rescue ladder state: the last CONVERGED mixed state, restored between
@@ -2572,9 +2590,8 @@ def run_simulation(
     phi_entry = None
     last_c_mean = 0.0
     drag_rule = ctx.get("drag_rule")
-    if calving != "none":
+    if calving_law_obj is not None:
         from icepack2_tools.levelset import LevelSet, initial_distance
-        sig_g, sig_f = _calving_sigma_max()
         # `fixed` holds the front at phi0, which LevelSet captures at
         # construction. On a warm restart h_dg is the RESTARTED extent, so
         # anchor phi0 on the t=0 thickness (ctx["H_init"], reloaded from every
@@ -2585,33 +2602,37 @@ def run_simulation(
         # solve reads the thickness of the object it belongs to. Use a scratch
         # Function, NOT h_dg: under DG0 geometry h_dg IS the live geometry.
         phi_init = None
-        if calving == "fixed":
+        if calving_law_obj.front_mode == "fixed":
             _h0 = Function(Q_dg).project(ctx.get("H_init", h))
             phi_init = initial_distance(mesh, _h0, h_min=front_hmin)
         level_set = LevelSet(
-            mesh, h_dg, law=calving, h_min=front_hmin,
-            sigma_max_grounded=sig_g, sigma_max_floating=sig_f,
+            mesh, h_dg, law=calving_law_obj.front_mode, h_min=front_hmin,
             drag_mask=ctx.get("drag_mask"), phi_init=phi_init,
         )
         phi_entry = Function(level_set.Q0)
-    live_calving_state = None
-    if calving_law_obj is not None:
-        live_calving_state = LiveCalvingState(z, h_dg, b, level_set)
-        PETSc.Sys.Print(
-            f"  Calving law (external, on the live dual state): "
-            f"{calving_law_obj.describe()}")
     # save_model_state writes the front and the ISMIP7 year in progress.
     ctx["level_set"] = level_set
     ctx["annual"] = annual
     a_ref_entry = Function(a_ref.function_space()) if a_ref is not None else None
     A_map = ctx.get("A_map")
+    # The law's rate on the live state. Its fields are the forward's own
+    # Functions, so one expression stays current as the run evolves; only a
+    # law with an explicit time dependence is re-evaluated each advance.
+    front_state = None
+    calving_rate = None
+    if calving_law_obj is not None and calving_law_obj.front_mode == "prescribed":
+        front_state = calving_front_state(
+            z, h_dg, b, level_set, A_map, n_flow_val,
+            gr_frac=(ctx["subelement"].fraction
+                     if ctx.get("subelement") is not None else None))
+        calving_rate = calving_law_obj.rate(front_state, t_start)
 
     def _advance(dt_local, label):
         r"""One transport advance of dt_local with the CURRENT velocity
         (transport-first ordering: the velocity was solved at the current
         geometry). Mutates h_dg and the derived CG fields; returns the
         advance's mass tallies [Gt]."""
-        nonlocal last_c_mean
+        nonlocal last_c_mean, calving_rate
         u_vel = z.subfunctions[0]
         if legacy_transport:
             h_dg.project(h)
@@ -2625,10 +2646,9 @@ def run_simulation(
         calv_frac = None
         ls_ice_free = None
         if level_set is not None:
-            ext_rate = (calving_law_obj.rate(live_calving_state, t_yr)
-                        if calving_law_obj is not None else None)
-            last_c_mean = level_set.advance(
-                dt_local, u_vel, h_dg, b, A_map, n_flow_val, rate=ext_rate)
+            if front_state is not None and calving_law_obj.time_dependent:
+                calving_rate = calving_law_obj.rate(front_state, t_yr)
+            last_c_mean = level_set.advance(dt_local, u_vel, rate=calving_rate)
             lsb, calv_frac = level_set.calving_masks()
             beyond = lsb
             ls_ice_free = level_set.beyond_front()

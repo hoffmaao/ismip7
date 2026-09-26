@@ -7,8 +7,6 @@ pixel, and that the forcing callback fills ``ctx["collapse"]`` on the
 geometry cells when the run provides it. The removal itself is the
 transport's (``ISMIP7_FRACTURE=mask``), exercised by the forward.
 """
-import os
-
 import numpy as np
 import pytest
 

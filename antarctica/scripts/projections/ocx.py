@@ -43,7 +43,7 @@ _PROJECT = os.path.dirname(os.path.dirname(_SCRIPTS))
 sys.path.insert(0, _PROJECT)
 sys.path.insert(0, _SCRIPTS)
 
-from simulation import (setup_model, run_simulation, latest_checkpoint,
+from simulation import (setup_model, run_simulation, auto_resume_checkpoint,
                         auto_resume, PETSc)
 from experiment import find_k_npz
 import math
@@ -115,7 +115,7 @@ def main():
     # cold-starts and the chain never advances.
     restart = os.environ.get("ISMIP7_RESTART")
     if restart is None and auto_resume():
-        restart = latest_checkpoint(experiment_name)
+        restart = auto_resume_checkpoint(experiment_name)
         PETSc.Sys.Print(
             f"Auto-resume: {restart}" if restart
             else "Auto-resume: no prior checkpoint"

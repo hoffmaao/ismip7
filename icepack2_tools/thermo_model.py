@@ -17,7 +17,8 @@ mesh):
   + a_plus*(E - E_srf)                   (accumulation deposits ice at surface
                                           energy; basal melt cancels)
   = h*q_strain + q_fric + q_geo
-with q_strain = 2 A^(-1/n) eps_e^(1/n+1), q_fric = grounded * C|u|^(1/m+1), and
+with q_strain = 2 A^(-1/n) eps_e^(1/n+1), q_fric = grounded * C|u|^(1/m+1) (zero
+where the base is over water: sliding over water does no frictional work), and
 the Stefan relations T = min(E/rho c, Tm), w = (E - rho c Tm)+ / rho L.
 
 Shear-layer closure: solve once with and once without strain heating (the
@@ -38,8 +39,7 @@ from icepack.models.viscosity import rate_factor
 from icepack2_tools.mpi_stats import global_range
 
 DEFAULTS = dict(kappa=4.0, T_srf=263.15, q_geo=50.0, shear_amp=30.0,
-                duval=181.25, w_max=0.01, friction_exp=3.0, melt_delta=50.0,
-                u_scale=1.0)
+                duval=181.25, w_max=0.01, friction_exp=3.0, u_scale=1.0)
 
 
 # 1 mW/m^2 = 3.15576e4 Pa m/yr = 3.15576e-2 MPa m/yr (icepack MPa-m-yr units)
@@ -69,9 +69,24 @@ def fluidity_from(E_eff, p):
     return A_cold * (1 + Constant(p["duval"]) * w)
 
 
-def grounded_frac(h, s, bed, p):
-    cavity = (s - h) - bed
-    return 1.0 - 0.5 * (1.0 + fd.tanh(cavity / Constant(p["melt_delta"])))
+#: Water column [m] beneath the ice base below which the base counts as resting
+#: on the bed. Under the surface this model builds, s = max(b + H, flotation),
+#: a grounded column's gap is zero to roundoff.
+BED_CONTACT_TOL = 1e-3
+
+
+def grounded_frac(h, s, bed, p=None):
+    r"""1 where the ice base rests on the bed, 0 where water lies beneath it.
+
+    Ice sliding over water does no frictional work on itself, so floating ice
+    takes no frictional heat, and grounded ice takes all of it. The earlier
+    form, ``1 - 0.5 (1 + tanh(gap / 50 m))``, was centred on a zero gap, which
+    is where every grounded column sits, so it gave grounded ice half its
+    frictional heat and floating ice near the grounding line a share of it.
+    ``p`` is accepted and unused, for the callers that pass the parameters.
+    """
+    gap = (s - h) - bed
+    return fd.conditional(fd.gt(gap, Constant(BED_CONTACT_TOL)), 0.0, 1.0)
 
 
 def solve_energy(u_adv, h, s, C, A_k, bed, acc, p, with_strain=True,

@@ -549,6 +549,7 @@ def main():
         os.environ.get("ISMIP7_SKIP_CONTINUATION", "0").strip() == "1"
     )
     warm_A_prior = None
+    warm_prior_origin = None
     warm_loaded_z = False
     # the warm start's anchor length, when its theta is to be rebased onto
     # this run's anchor once that is built (ISMIP7_WARM_START_THETA=physical)
@@ -663,12 +664,24 @@ def main():
                 PETSc.Sys.Print("    velocity_obs from warm start")
             except (KeyError, RuntimeError, ValueError):
                 pass
-            try:
-                warm_A_prior = _warm_load(
-                    chk, chk_mesh, "fluidity_prior", Q
-                )
-            except (KeyError, RuntimeError, ValueError):
+            # ISMIP7_WARM_START_PRIOR=0 recomputes the thermal prior instead,
+            # e.g. after a change to its physics; phi is kept, as a deviation
+            # from the new prior mean.
+            if os.environ.get("ISMIP7_WARM_START_PRIOR", "1").strip() == "0":
                 warm_A_prior = None
+                PETSc.Sys.Print("    fluidity_prior: recomputed below "
+                                "(ISMIP7_WARM_START_PRIOR=0); log_fluidity kept")
+            else:
+                try:
+                    warm_A_prior = _warm_load(
+                        chk, chk_mesh, "fluidity_prior", Q
+                    )
+                    warm_prior_origin = (
+                        str(chk.get_attr("/", "fluidity_prior_origin"))
+                        if chk.has_attr("/", "fluidity_prior_origin")
+                        else f"warm start {os.path.basename(warm_chk)}")
+                except (KeyError, RuntimeError, ValueError):
+                    warm_A_prior = None
             try:
                 if not warm_geometry:
                     raise raise_geometry
@@ -854,8 +867,10 @@ def main():
     # When warm-starting from a prepare cache / MAP that already carries
     # fluidity_prior, reuse it: phi = log(A/A_prior) is meaningless against a
     # freshly recomputed prior.
+    prior_origin = "constant A0*a4_factor"
     if warm_A_prior is not None:
         A_prior = warm_A_prior
+        prior_origin = warm_prior_origin or "warm start"
         A_prior.rename("fluidity_prior")
         A_prior_lo, A_prior_hi = global_range(A_prior)
         PETSc.Sys.Print(
@@ -888,6 +903,7 @@ def main():
         A_prior = compute_fluidity_prior(
             u_obs, H_th, s_th, b_th, C_th, acc_prior, T_srf
         )
+        prior_origin = "thermomechanical, friction heat only where the base rests on the bed"
         A_prior.rename("fluidity_prior")
         A_prior_lo, A_prior_hi = global_range(A_prior)
         PETSc.Sys.Print(
@@ -1731,6 +1747,7 @@ def main():
             # forward rebuilds C_w0 from them, so it takes both from here.
             chk.set_attr("/", "friction_anchor_length", float(ANCHOR_LENGTH))
             chk.set_attr("/", "lake_ice_base", int(LAKE_ICE_BASE))
+            chk.set_attr("/", "fluidity_prior_origin", str(prior_origin))
             chk.set_attr("/", "misfit_norm", MISFIT_NORM)
             chk.set_attr("/", "log_vel_weight", float(log_vel_w))
             chk.set_attr("/", "log_vel_eps", float(LOG_VEL_EPS))

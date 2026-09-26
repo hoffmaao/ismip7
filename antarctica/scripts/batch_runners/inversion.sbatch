@@ -54,7 +54,10 @@ ismip7_banner
 export ISMIP7_MISFIT_NORM="${ISMIP7_MISFIT_NORM:-sigma}"
 export ISMIP7_SIGMA_U_FLOOR="${ISMIP7_SIGMA_U_FLOOR:-3}"
 export ISMIP7_LOG_VEL_WEIGHT="${ISMIP7_LOG_VEL_WEIGHT:-auto}"
-export ISMIP7_DHDT_WEIGHT="${ISMIP7_DHDT_WEIGHT:-1}"
+# The dH/dt term is OFF by default (Andrew, 26 Sep 2026): the inversion's
+# prognostic step carries no forcing, so the term asks the velocity to absorb
+# whatever SMB and melt are wrong by.
+export ISMIP7_DHDT_WEIGHT="${ISMIP7_DHDT_WEIGHT:-0}"
 export ISMIP7_DHDT_NET_SIGMA="${ISMIP7_DHDT_NET_SIGMA:-10}"
 export ISMIP7_GAMMA_THETA="${ISMIP7_GAMMA_THETA:-1e5}"
 export ISMIP7_GAMMA_PHI="${ISMIP7_GAMMA_PHI:-1e5}"

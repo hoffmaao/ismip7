@@ -96,7 +96,7 @@ from icepack2_tools.mpi_stats import (global_mean, global_range,
                                       global_max, global_size, global_count)
 from icepack2_tools.naming import map_basename
 from icepack2_tools.runconfig import (
-    k_per_basin_candidates,
+    deltat_per_basin_npz, k_per_basin_npz,
     obs_data_root,
     BUDD_SHELF_GATE,
     friction as _friction, geometry_space as _geometry_space,
@@ -116,6 +116,9 @@ from icepack2_tools.handoff import (
     OBJECTIVE_KEYS, OBJECTIVE_RECORD_KEYS, accepted_evaluation, handoff_gap,
     objective_mismatches)
 from icepack2_tools.optimization import FunctionalDecreaseStop
+from icepack2_tools.optimization import (FunctionalDecreaseStop,
+                                         recorded_objective,
+                                         resolve_log_vel_weight)
 from icepack2_tools.forcing import (load_racmo_smb_climatology,
                                     load_mean_annual_surface_temperature)
 from icepack2_tools.runconfig import (
@@ -225,9 +228,13 @@ GAMMA_DEFAULT = "1e5" if MISFIT_NORM == "sigma" else "1e4"
 # the ice is not moving. Other inversions use relative errors to the same end.
 #
 # ISMIP7_LOG_VEL_WEIGHT: 0 (default, the pre-Sep-2026 objective), a number, or
-# "auto" -- scaled so that at the STARTING state the log term equals the
-# velocity chi^2 term, which is the only weight that means anything before
-# the first iteration. The resolved value is stamped in the MAP.
+# "auto", which scales the log term to equal the velocity chi^2 term at the
+# STARTING state, the only weight that means anything before the first
+# iteration. A chained link starts from its predecessor's checkpoint, so under
+# "auto" a warm start that records a positive weight under the same misfit
+# norm and eps supplies that weight, and every link minimises one objective
+# (issue 68, optimization.resolve_log_vel_weight). The resolved value and its
+# source are stamped in the MAP.
 LOG_VEL_WEIGHT = os.environ.get("ISMIP7_LOG_VEL_WEIGHT", "0")
 LOG_VEL_EPS = float(os.environ.get("ISMIP7_LOG_VEL_EPS", "1.0"))   # m/yr
 GAMMA_THETA = float(os.environ.get("ISMIP7_GAMMA_THETA", GAMMA_DEFAULT))
@@ -634,6 +641,9 @@ def main():
     # Everything the warm start's writer recorded about ITS objective and the
     # objective value at its checkpointed iterate (icepack2_tools.handoff).
     warm_attrs = {}
+    # The log-velocity term the warm start was minimised under, which an
+    # "auto" weight is held to. None without a warm start.
+    warm_objective = None
 
     # What a target dof outside the warm start's mesh takes: the prior for
     # the log controls (0), and for the fluidity prior mean the constant
@@ -665,6 +675,7 @@ def main():
                     warm_recorded = float(chk.get_attr("/", "full_state_residual"))
                 except (TypeError, ValueError):
                     warm_recorded = None
+            warm_objective = recorded_objective(chk)
             _warm_anchor = (float(chk.get_attr("/", "friction_anchor_length"))
                             if chk.has_attr("/", "friction_anchor_length") else 0.0)
             _warm_lake = (int(chk.get_attr("/", "lake_ice_base"))
@@ -1543,9 +1554,9 @@ def main():
     # stamps net_sigma_used, so a MAP can never claim a constraint it never saw.
     use_dhdt_net = False
     net_sigma_used = 0.0
-    # The per-basin K the dH/dt melt source actually used, stamped into
-    # the MAP: the fallback below is quiet by design, so the artifact has
-    # to carry the answer.
+    # The melt calibration the dH/dt melt source used, stamped into the MAP
+    # under the attribute's original name, dhdt_melt_k_npz, so the artifact
+    # carries the answer.
     k_npz_used = "none"
     if use_dhdt:
         if not geom_dg:
@@ -1566,7 +1577,7 @@ def main():
 
         # Ocean melt for the prognostic step, from the SAME parameterisation
         # and forcing the experiments use: OI-climatology TF/so at draft depth
-        # + per-basin calibrated K through the Burgard quadratic-mixed-slope
+        # + the melt calibration through the Burgard quadratic-mixed-slope
         # formula, via the shared make_climatology_ocean_callback -- not a
         # reimplementation. Evaluated ONCE at the frozen reference geometry
         # (the controls move; the reference geometry does not), so it is a
@@ -1579,46 +1590,31 @@ def main():
         if os.environ.get("ISMIP7_DHDT_MELT", "1") != "0":
             from icepack2_tools.forcing import (
                 load_K_per_basin, make_climatology_ocean_callback)
-            _k_cands = k_per_basin_candidates(
-                os.path.join(_ROOT, "results"), lc)
-            k_npz = next((c for c in _k_cands if os.path.exists(c)),
-                         _k_cands[-1])
-            if os.path.exists(k_npz):
-                k_npz_used = k_npz
-            if not os.path.exists(k_npz):
-                # Warn, do not abort: the melt source only touches shelf cells
-                # and the misfit is grounded-only, so an absent ocean
-                # calibration cannot change this objective. Making it a hard
-                # prerequisite would fail the whole inversion over an artifact
-                # the term provably does not use.
-                PETSc.Sys.Print(
-                    f"  [!] dH/dt melt source: per-basin K not found at "
-                    f"{k_npz}; falling back to an SMB-only source. The "
-                    f"grounded-only misfit is unaffected (melt is zero on "
-                    f"grounded ice and the DG0 upwind step never carries a "
-                    f"shelf value upstream); shelf cells of the single "
-                    f"prognostic step are no longer forcing-consistent with "
-                    f"the forward. Calibrate K, or set ISMIP7_DHDT_MELT=0 to "
-                    f"silence this."
-                )
-            else:
-                _W2 = VectorFunctionSpace(mesh, "DG", 0)
-                _xy = Function(_W2).interpolate(
-                    fd.SpatialCoordinate(mesh)).dat.data_ro.reshape(-1, 2)
-                geom_xy = (_xy[:, 0].copy(), _xy[:, 1].copy())
+            # The forward's melt calibration: per-basin deltaT at one K, the
+            # tracked file unless another is named, else a legacy per-basin
+            # K named with ISMIP7_K_PER_BASIN_NPZ. The tracked file is in
+            # every checkout, so the source always carries melt.
+            dT_npz = deltat_per_basin_npz()
+            k_npz = None if dT_npz is not None else k_per_basin_npz()
+            k_npz_used = dT_npz or k_npz
+            _W2 = VectorFunctionSpace(mesh, "DG", 0)
+            _xy = Function(_W2).interpolate(
+                fd.SpatialCoordinate(mesh)).dat.data_ro.reshape(-1, 2)
+            geom_xy = (_xy[:, 0].copy(), _xy[:, 1].copy())
+            K_field = None
+            if k_npz is not None:
                 K_field = load_K_per_basin(
                     k_npz, geom_xy[0], geom_xy[1], fill=0.0)
                 K_field = K_field * float(
                     os.environ.get("ISMIP7_K_SCALE", "1.0"))
-                _ctx = {"mesh": mesh, "Q": Q, "V": V, "Q_g": Q_g,
-                        "geom_xy": geom_xy, "h": H, "b": b, "s": s,
-                        "ocean_melt": melt_ref}
-                make_climatology_ocean_callback(K_field)(_ctx, 0.0)
-                _melt_gt = float(assemble(melt_ref * dx)) * 917.0 / 1e12
-                PETSc.Sys.Print(
-                    f"  dH/dt melt source: per-basin K "
-                    f"({os.path.basename(k_npz)}), integrated "
-                    f"{_melt_gt:.0f} Gt/yr at reference geometry")
+            _ctx = {"mesh": mesh, "Q": Q, "V": V, "Q_g": Q_g,
+                    "geom_xy": geom_xy, "h": H, "b": b, "s": s,
+                    "ocean_melt": melt_ref}
+            make_climatology_ocean_callback(K_field)(_ctx, 0.0)
+            _melt_gt = float(assemble(melt_ref * dx)) * 917.0 / 1e12
+            PETSc.Sys.Print(
+                f"  dH/dt melt source: {os.path.basename(k_npz_used)}, "
+                f"integrated {_melt_gt:.0f} Gt/yr at reference geometry")
         else:
             PETSc.Sys.Print("  dH/dt melt source: DISABLED (SMB-only)")
 
@@ -1694,20 +1690,13 @@ def main():
         sp_obs = sqrt(u_obs[0] ** 2 + u_obs[1] ** 2 + Constant(1e-12))
         return ln((sp + _eps_v) / (sp_obs + _eps_v))
 
+    _derived_w = None
     log_vel_w = (0.0 if LOG_VEL_WEIGHT.lower() == "auto"
                  else float(LOG_VEL_WEIGHT))
-    if (LOG_VEL_WEIGHT.lower() == "auto"
-            and float(warm_attrs.get("log_vel_weight", 0.0) or 0.0) > 0.0):
-        # Frozen from the warm start: the weight is part of the objective, and
-        # re-deriving it at every link made the links minimise different
-        # objectives (RC chain: 1.80e6 -> 3.33e5 across one restart).
-        log_vel_w = float(warm_attrs["log_vel_weight"])
-        PETSc.Sys.Print(
-            f"  Log-velocity misfit (ISSM 103): auto weight frozen from the warm "
-            f"start, {log_vel_w:.4g}, eps={LOG_VEL_EPS:g} m/yr")
-    elif LOG_VEL_WEIGHT.lower() == "auto":
+    if LOG_VEL_WEIGHT.lower() == "auto":
         # Scale so the two velocity terms start out comparable: the ratio of
-        # the chi^2 term to the unweighted log term at the warm-start state.
+        # the chi^2 term to the unweighted log term at the state this run
+        # starts from, used when the warm start holds no weight of its own.
         _u0 = z.subfunctions[0]
         _chi2_0 = float(assemble(
             (0.5 / area_val * obs_mask
@@ -1715,15 +1704,27 @@ def main():
                 + (_u0[1] - u_obs[1]) ** 2 / sig_uy ** 2)) * dx(mesh)))
         _log_0 = float(assemble(
             (0.5 / area_val * obs_mask * _log_ratio(_u0) ** 2) * dx(mesh)))
-        log_vel_w = (_chi2_0 / _log_0) if _log_0 > 0 else 0.0
+        _derived_w = (_chi2_0 / _log_0) if _log_0 > 0 else 0.0
+    log_vel_w, log_vel_source, _log_vel_note = resolve_log_vel_weight(
+        LOG_VEL_WEIGHT, _derived_w, warm_objective,
+        misfit_norm=MISFIT_NORM, eps=LOG_VEL_EPS)
+    if log_vel_source == "warm_start":
+        PETSc.Sys.Print(
+            f"  Log-velocity misfit (ISSM 103): auto weight {log_vel_w:.6g} "
+            f"held from the warm start (chi2 {_chi2_0:.3e} / log "
+            f"{_log_0:.3e} here would give {_derived_w:.4g}), "
+            f"eps={LOG_VEL_EPS:g} m/yr")
+    elif log_vel_source == "derived":
         PETSc.Sys.Print(
             f"  Log-velocity misfit (ISSM 103): auto weight {log_vel_w:.4g} "
             f"= chi2 {_chi2_0:.3e} / log {_log_0:.3e} at "
             f"the start, eps={LOG_VEL_EPS:g} m/yr")
-    elif log_vel_w > 0.0:
+    elif log_vel_w > 0.0 or _log_vel_note:
         PETSc.Sys.Print(
             f"  Log-velocity misfit (ISSM 103): weight {log_vel_w:g}, "
             f"eps={LOG_VEL_EPS:g} m/yr")
+    if _log_vel_note:
+        PETSc.Sys.Print(f"    {_log_vel_note}")
 
     def forward(theta_ctrl, phi_ctrl):
         clear_caches()
@@ -2025,6 +2026,12 @@ def main():
             chk.set_attr("/", "misfit_norm", MISFIT_NORM)
             chk.set_attr("/", "misfit_scale", float(misfit_scale))
             chk.set_attr("/", "log_vel_weight", float(log_vel_w))
+            # requested, derived (auto, at this run's start) or warm_start
+            # (auto, held from the MAP this run warm-started from). A MAP
+            # without it predates issue 68: if several chained links wrote it
+            # under auto, each re-derived the weight, and log_vel_weight is
+            # the last link's.
+            chk.set_attr("/", "log_vel_weight_source", log_vel_source)
             chk.set_attr("/", "log_vel_eps", float(LOG_VEL_EPS))
             chk.set_attr("/", "gamma_theta", float(GAMMA_THETA))
             chk.set_attr("/", "gamma_phi", float(GAMMA_PHI))
@@ -2136,6 +2143,7 @@ def main():
                 "misfit_scale_requested": MISFIT_SCALE,
                 "log_vel_weight_requested": LOG_VEL_WEIGHT,
                 "log_vel_weight": float(log_vel_w),
+                "log_vel_weight_source": log_vel_source,
                 "log_vel_eps": float(LOG_VEL_EPS),
                 "gamma_theta": float(GAMMA_THETA),
                 "friction_control": FRICTION_CONTROL,

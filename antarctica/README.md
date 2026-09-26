@@ -47,7 +47,7 @@ own venv and call it by absolute path.
 | Ocean OI climatology and IMBIE basin numbers | 3 GB | `scripts/download_forcing.py --ocean --calibration` | | x | | |
 | Whole AIS tree (all ESMs, scenarios, `ctrl`, OCX, calibration) | 313 GB | same | | | | |
 | Meshes and MAP checkpoints | 15 MB, 80 MB | sections 3 and 4, or from a colleague | | x | x | |
-| Per-basin melt calibration `results/calibrated_K_per_basin_<lc>.npz` | 2 to 5 MB | `scripts/calibrate_melt.py` (section 5), or from a colleague | | x | | |
+| Melt calibration `calibration/deltaT_per_basin_1000_K6.500e-05.npz` | 8 kB | tracked in git (section 5) | | x | | |
 
 Source Cooperative carries the data-freeze copy and needs no account.
 
@@ -80,12 +80,9 @@ with `download_forcing.py --scenarios --esm MRI-ESM2-0 --scenario ssp585`.
 
 **Forward run from someone else's MAP.** Firedrake, icepack2, icepack,
 BedMachine, MEaSUReS, RACMO, one scenario of forcing, their `.msh` and
-`inversion_*.h5`, the OI climatology, the IMBIE basin numbers, and
-`results/calibrated_K_per_basin_<lc>.npz`. That npz comes from
-`calibrate_melt.py` or a colleague; the 2500 m one is mesh independent and
-serves as the fallback for any `lc`. `control/run.py` and `projections/ocx.py`
-abort without it; the ssp drivers warn and substitute a scalar `K`, which
-completes with the wrong melt.
+`inversion_*.h5`, the OI climatology and the IMBIE basin numbers. The melt
+calibration is tracked (`calibration/`, section 5), so a fresh clone melts
+with it and nothing is calibrated or copied.
 
 **Inversion.** Add `tlm_adjoint`, and the MIPkit for the dH/dt term.
 
@@ -244,7 +241,7 @@ ISMIP7/AIS/
   <ESM>/<scenario>/ocean/<tf|thetao|so>/<version>/
   <ESM>/<scenario>/fracture/[v*/]                     # collapse and lake masks
   meltMIP/OI_Climatology_ismip8km_60m_<tf|so|thetao>_extrap.nc
-  parameterisations/ocean/imbie2/                     # basin numbers for per-basin K
+  parameterisations/ocean/imbie2/                     # basin numbers the melt offsets are stamped through
   parameterisations/{ocean,fracture}/
 ```
 
@@ -383,17 +380,99 @@ IMBIE and GRACE. The per-iteration `net=` diagnostic prints either way. See
 The MAP filename encodes friction, `LC`, geometry space and flow exponent only,
 so velocity-only and transient variants collide. Give variants their own
 `ISMIP7_MAP_OUT`. Every MAP records its objective as root attributes
-(`misfit_norm`, `gamma_theta`, `gamma_phi`, `log_vel_weight`, `log_vel_eps`,
-`dhdt_weight`, `dhdt_net_sigma`, `mesh_basename`, `lc`, `lc_coarse`,
-`buffer_m`):
+(`misfit_norm`, `gamma_theta`, `gamma_phi`, `log_vel_weight`,
+`log_vel_weight_source`, `log_vel_eps`, `dhdt_weight`, `dhdt_net_sigma`,
+`mesh_basename`, `lc`, `lc_coarse`, `buffer_m`):
 
 ```bash
 python -c "import h5py,sys; print(dict(h5py.File(sys.argv[1])['/'].attrs))" MAP.h5
 ```
 
+A MAP without `log_vel_weight_source` predates issue 68: if a chain of several
+links wrote it under `ISMIP7_LOG_VEL_WEIGHT=auto`, each link re-derived the
+weight, and `log_vel_weight` is the last link's.
+
 ---
 
-## 5. Calibrate ocean melt (`calibrate_melt.py`)
+## 5. Ocean melt calibration
+
+### The calibration every run reads
+
+A run melts with one K and a thermal-forcing offset per IMBIE basin, the
+protocol's recommendation, from a tracked file,
+`calibration/deltaT_per_basin_1000_K6.500e-05.npz`:
+
+| | |
+|---|---|
+| K | 6.5e-5, the K50 of the rule-based selection below on the 1000 m / 10 km production mesh (run record `calibration-melt-toolbox-1km-rule`, IU's build), chosen by the group on 25 September 2026 (issue 26) |
+| offsets | 16 IMBIE2 basins, -0.68 K to +1.20 K (Amundsen), each basin at its July 2026 total, 1067.4 Gt/yr together, fitted at that K on Rice's build of the mesh, the submission mesh (issue 20; `calibration-melt-refit-1km-rice-k50`) |
+| fitted under | `ISMIP7_MELT_SLOPE=ant`, `ISMIP7_SIN_ALPHA_ANT=5.115e-3`, `ISMIP7_GEOMETRY_SPACE=dg0`, `ISMIP7_RASTER_SAMPLE=vertex` and the 30_sep OI climatology, on `antarctica_10000_1000_buffered20000`, Rice's build (1,869,252 vertices) |
+| sidecar | `deltaT_per_basin_1000_K6.500e-05.source.json`: the file's sha256, the settings above, the mesh build and its vertex count, the input hashes, the jobs and the commits |
+
+Every clone carries it, so a new machine runs with it and nothing is
+calibrated or copied. The offsets are stamped onto any mesh through the
+IMBIE2 8 km basin grid under `ISMIP7_DATA_ROOT`.
+
+The forward applies the melt the file was fitted to:
+
+- it melts the cells the fit summed over, floating and holding ice
+  (`forcing.melt_receiving`);
+- an offsets file whose recorded slope law, slope constant or geometry
+  space differs from the run's stops the run, and so does geometry sampled
+  with another `raster_sample` than the file's, or a cold start that floors
+  the initial thickness (`ISMIP7_H_CLAMP_INIT` above 0, the legacy friction
+  law's default);
+- the tracked file has to match the sha256 its sidecar records;
+- `ISMIP7_K_SCALE` other than 1 is refused with an offsets file, and the
+  removed `ISMIP7_K_MELT` is refused when exported;
+- every run logs a `Forcing provenance:` line naming the file, its sha256
+  and K, and the mesh it was fitted on beside the run's, and
+  `core_report.py` carries that line into the report.
+
+On another mesh the forward runs with these offsets and says so in that
+line, so a coarse probe needs nothing more. `preflight.py` refuses a core on
+a mesh other than the calibration's until `ISMIP7_DELTAT_PER_BASIN_NPZ` names
+a file: offsets refitted on that mesh at the same K, or the tracked file to
+run with its offsets as they are. It also refuses another build of the same
+mesh name, told apart by the vertex count in the `.msh` header against the
+sidecar's: the offsets were fitted on Rice's build of the production mesh
+(1,869,252 vertices), and IU's has 1,869,088. A refit is a job
+(`calibrate_deltaT.script`, which also reports whether the thermal forcing
+rule admits the K there); `ISMIP7_INV_H5` names a checkpoint on the mesh or
+the `.msh` itself:
+
+```bash
+scripts/batch_runners/submit.sh script scripts/batch_runners/calibrate_deltaT.script \
+    --cd antarctica --queue debug --tasks 1 --mem 32G --time 00:40:00 \
+    ISMIP7_LC=1000 ISMIP7_INV_H5=<mesh.msh> DELTAT_K=6.5e-5 DELTAT_OUT=<absolute dir>
+```
+
+`check_melt_bound.py` melts the reference geometry with the forward's own
+callback and sets each basin against the total its offsets were fitted to,
+and exits 1 when a basin is off by more than `--match-tol` (default 0.1
+percent):
+
+```bash
+ISMIP7_INV_H5=<mesh.h5 or mesh.msh> python antarctica/scripts/check_melt_bound.py
+```
+
+On Rice's build of the production mesh (run record
+`calibration-melt-refit-1km-rice-k50`, Quartz job 10649438) the forward melts
+1067.389 Gt/yr against the 1067.386 its offsets were fitted to, every basin
+within 0.006 Gt/yr, and no cell passes the `libmassbffl` bound (maximum 41.7
+m/yr). Its earlier melt set also covered 257 836 ice-free open-ocean cells,
+where it booked 156.2 Gt/yr of melt and 23.1 Gt/yr of refreezing, and 6 805
+cells of bare land, where the climatology melts nothing. The two builds need
+their own fits: the offsets differ by at most 0.0008 K, and the fit on IU's
+build missed basins 1 and 7 on Rice's by 0.18 and 0.17 percent (job 10649416).
+At 32 km (job 10644430) the offsets put the basins at 0.33 to 1.74 times their
+totals and the whole at 1069.5 Gt/yr, which is why a production core runs on
+the calibration's mesh.
+
+`ISMIP7_K_PER_BASIN_NPZ` names a legacy per-basin K file (next subsection)
+in place of the offsets; no run searches for one.
+
+### The legacy per-basin K (`calibrate_melt.py`)
 
 Solves for the Burgard quadratic-mixed-slope coefficient K, global and per
 IMBIE2 basin, against integrated observed shelf melt. The target is the July
@@ -435,12 +514,8 @@ calibration the earlier K files came from, with the slope capped at 5e-3;
 convention it was fitted under, and a run under another is told once at
 startup.
 
-The control requires this npz. Projections take it (`K_per_basin_npz=`) or a
-scalar `ISMIP7_K_MELT`.
-
-The default output is the file every forward and inversion in the checkout
-reads at that `lc`, and the 2500 m file is also their fallback at every other
-`lc`. For a calibration made as a check, `ISMIP7_K_OUT` writes it elsewhere and
+A run reads this file only when `ISMIP7_K_PER_BASIN_NPZ` names it, and
+`ISMIP7_K_SCALE` multiplies it there. `ISMIP7_K_OUT` writes it elsewhere, and
 `check_melt_bound.py --npz` reads it from there:
 
 ```bash
@@ -459,8 +534,8 @@ observed total (`optimise_deltaT` in the toolbox notebook). That offset, not
 a per-basin K, is the protocol's per-basin knob.
 
 ```bash
-ISMIP7_LC=2000 python antarctica/scripts/calibrate_deltaT.py          # K05 K50 K95
-ISMIP7_LC=2000 python antarctica/scripts/calibrate_deltaT.py --K 8.5e-5
+ISMIP7_LC=2000 python antarctica/scripts/calibrate_deltaT.py          # the notebook's K05 K50 K95
+ISMIP7_LC=2000 python antarctica/scripts/calibrate_deltaT.py --K 6.5e-5
 ```
 
 runs the fit on the forward's own melt path (the same DG0 geometry, OI
@@ -470,16 +545,17 @@ solving `M_b(deltaT) = M_obs(b)` per basin by a bracketed root in plus or
 minus 3 K (`melt_selection.DT_WINDOW`; the toolbox searches plus or minus
 2 K and the protocol sets no window), and writes
 `antarctica/results/deltaT_per_basin_<lc>_K<K>.npz` (basin ids, offsets, K,
-residual, dM/dT, the slope and geometry conventions). A run applies it with
+residual, dM/dT, the slope and geometry conventions). A run applies it in
+place of the tracked calibration with
 
 ```bash
-ISMIP7_DELTAT_PER_BASIN_NPZ=antarctica/results/deltaT_per_basin_2000_K8.500e-05.npz
+ISMIP7_DELTAT_PER_BASIN_NPZ=antarctica/results/deltaT_per_basin_2000_K6.500e-05.npz
 ```
 
-which makes every ocean callback (control, projections, OCX) add the offset
-to TF and melt with the file's one K; no driver then reads or requires the
-per-basin K file. A driver refuses to start when the file is missing or
-`ISMIP7_K_SCALE` is not 1, since the offsets were fitted at the file's K.
+and every ocean callback (control, projections, OCX) adds the offset to TF
+and melts with the file's one K. A driver refuses to start when the file is
+missing or `ISMIP7_K_SCALE` is not 1, since the offsets were fitted at the
+file's K.
 The fit reduces every basin total across ranks, so `mpiexec -n N` writes the
 same offsets as a serial run.
 Measured on the 2 km MAP mesh against the July table (24 September 2026, run
@@ -561,8 +637,8 @@ at each selected K, which `ISMIP7_DELTAT_PER_BASIN_NPZ` applies at that
 file's K. On a cluster: `scripts/batch_runners/select_melt_parameters.script`.
 
 Measured on 24 September 2026 against the July table (run records
-`calibration-melt-toolbox-8km`, `-2km` and `-1km`), evidence for the
-percentile choice (issue #26):
+`calibration-melt-toolbox-8km`, `-2km` and `-1km`), the evidence the
+percentile was chosen from (issue 26):
 
 | grid | offsets | K05 | K50 | K95 |
 |---|---|---|---|---|
@@ -636,7 +712,9 @@ shims over `scripts/experiment.py`. Run a historical driver first to produce
 from it, so they share a t=0 state and the same frozen apparent-MB correction,
 and their relaxation drift cancels in projection minus control (the ISMIP6
 ctrl_proj convention). Without it a projection cold-starts from BedMachine and
-the control warns that it starts from a different geometry.
+the control warns that it starts from a different geometry. An endpoint whose
+`t_yr` is short of the branch year (a chain that stopped early) or missing is
+refused (`simulation.historical_endpoint`).
 
 Run management on the drivers: `--restart <ckpt>` or `ISMIP7_RESTART` resumes;
 `ISMIP7_AUTO_RESUME=1` picks up the newest checkpoint for the experiment, which
@@ -812,7 +890,7 @@ projection), run in that run's own shell so it captures the environment.
 |---------|---------|---------|
 | `ISMIP7_MAP_OUT` | output path for the MAP, overriding the generated name. Use it for smoke tests and variants so a short run cannot replace a production MAP. A bare filename resolves under `mesh/` | generated |
 | `ISMIP7_MISFIT_NORM` | `sigma` divides each residual by its datum's squared error, giving a dimensionless chi^2; `none` is the legacy dimensional misfit. Selects the `ISMIP7_GAMMA_*` defaults | `sigma` |
-| `ISMIP7_LOG_VEL_WEIGHT` | weight on the ISSM logarithmic velocity misfit (cost function 103). The chi^2 alone over-weights slow interior ice and leaves discharge-carrying tributaries 40 to 50% too slow; the log term is scale free. `auto` equalises it with the chi^2 term at the warm-start state. Stamped into the MAP | `0` |
+| `ISMIP7_LOG_VEL_WEIGHT` | weight on the ISSM logarithmic velocity misfit (cost function 103). The chi^2 alone over-weights slow interior ice and leaves discharge-carrying tributaries 40 to 50% too slow; the log term is scale free. `auto` equalises it with the chi^2 term at the state the inversion starts from, and under `auto` a warm start that records a positive weight under the same `ISMIP7_MISFIT_NORM` and `ISMIP7_LOG_VEL_EPS` supplies that weight, so every link of a chain minimises one objective (issue 68). Stamped into the MAP with `log_vel_weight_source`: `requested`, `derived` or `warm_start` | `0` |
 | `ISMIP7_LOG_VEL_EPS` | regularisation speed (m/yr) inside the log | `1.0` |
 | `ISMIP7_WARM_START` | path to a MAP or timing-cache checkpoint used to seed `theta`/`phi` (and, when present, geometry, `fluidity_prior`, and the mixed diagnostic state). Fields are interpolated onto the live mesh, so a 1-core cache can warm-start a multi-rank invert | unset |
 | `ISMIP7_WARM_START_THETA` | how `θ` comes over from the warm start. `θ` is a log-deviation from the friction anchor, so under a different anchor (`ISMIP7_ANCHOR_LENGTH`) the same `θ` is a different friction. `1` takes it as it is and warns when the anchors differ; `physical` rebases it on grounded ice so the friction `C_w0 exp(θ)` is the warm start's and the first solve reproduces the warm start's; `0` starts at the new prior mean | `1` |
@@ -837,7 +915,7 @@ projection), run in that run's own shell so it captures the environment.
 | `ISMIP7_DHDT_SIGMA` | assumed dH/dt uncertainty (m/yr), hand set since the MIPkit ships no uncertainty field | `0.1` |
 | `ISMIP7_DHDT_DT` | timestep of the prognostic step (yr) | `1.0` |
 | `ISMIP7_DHDT_VAR` | `dhdt_smith` (firn corrected, 2003 to 2019) or `dhdt_cpom` (uncorrected, so not interchangeable) | `dhdt_smith` |
-| `ISMIP7_DHDT_MELT` | `0` drops ocean melt from the prognostic source. Per-basin K comes from `ISMIP7_K_PER_BASIN_NPZ`, else the `<lc>` npz, else the 2500 m file; with none it warns and uses SMB only, melt being zero on grounded ice | `1` |
+| `ISMIP7_DHDT_MELT` | `0` drops ocean melt from the prognostic source, which otherwise melts with the forward's calibration (section 5); melt is zero on grounded ice | `1` |
 | `ISMIP7_DHDT_CLIM_START` / `_END` | RACMO climatology window for that source | `2003` / `2019` |
 | `ISMIP7_DHDT_REACH` | pixel-to-cell reach as a multiple of `sqrt(area)`, rejecting pixels outside the mesh that nearest-centroid assignment would snap onto boundary cells | `0.75` |
 | `ISMIP7_DHDT_NET_SIGMA` | sigma (Gt/yr) on the integrated grounded dH/dt; `0` disables the net term. Active only with `ISMIP7_DHDT_WEIGHT > 0` | `0` |
@@ -858,8 +936,8 @@ redeclare those literals.
 | Env var | Meaning | Default |
 |---------|---------|---------|
 | `ISMIP7_LC` / `ISMIP7_LC_COARSE` | fine and coarse mesh resolution tags, selecting mesh and MAP | `1000` / `10000`, the production pair (`2500` / `64000` until 2026-09-19) |
-| `ISMIP7_BUFFER_M` | outline buffer (m) in the default mesh and sidecar names | `20000` |
-| `ISMIP7_MESH` | mesh path for the inversion and tools. A forward takes its mesh from the checkpoint unless this names another mesh, in which case the MAP is transferred onto it. `checkpoint` means the mesh embedded in the MAP or restart file: `site_env.sh` always exports a derived path, so this is how a job submitted through `submit.sh projection` runs MAP-native | `mesh/antarctica_<COARSE>_<LC>_buffered<BUFFER_M>.msh` |
+| `ISMIP7_BUFFER_M` | outline buffer (m) the mesh is built with and named by (`runconfig.BUFFER_M_DEFAULT`, which the outline extraction and the mesh and sidecar names all read) | `20000` |
+| `ISMIP7_MESH` | mesh path for the inversion and tools. A forward takes its mesh from the checkpoint unless this names another mesh, in which case the MAP is transferred onto it; a file with the checkpoint mesh's name and another triangulation is refused (`ISMIP7_MESH_BUILD_CHECK`). `checkpoint` means the mesh embedded in the MAP or restart file: `site_env.sh` always exports a derived path, so this is how a job submitted through `submit.sh projection` runs MAP-native | `mesh/antarctica_<COARSE>_<LC>_buffered<BUFFER_M>.msh` |
 | `ISMIP7_RASTER_SAMPLE` | how BedMachine lands on a DG0 cell. `vertex` projects the CG1 vertex interpolant; `cell_mean` takes the raster's true cell mean. `cell_mean` measured rougher: neighbouring cells share two of three vertex samples, so `vertex` damps jumps by construction. Cell means raised interior surface jumps 6% and bed and thickness jumps 35%, and at 2 km the momentum solve did not converge within 60 minutes. It does classify flotation better (32 km misclassification 9.1% to 3.2%), so the knob stays. Stamped into the MAP and read back by the forward. Reproduce with `probe_raster_sampling.py` | `vertex` |
 | `ISMIP7_INVERSION` | explicit MAP path for a forward or preflight. The forward checks the MAP's recorded `friction`, `n_flow` and `geometry_space` against the run and aborts on a mismatch, warning only when the MAP predates those attributes; `preflight.py` checks that the file exists. Use it to A/B MAPs on one mesh, or, with `ISMIP7_MESH` also set (the timing matrix, `make map-check`), to run a MAP on a different mesh: its continuous fields are then interpolated onto `ISMIP7_MESH` by strict point location (`icepack2_tools/transfer.py`), and a target dof outside the MAP's outline takes a stated fill (0 for the log controls, the constant baseline for the fluidity prior, the raster sample for `velocity_obs`), counted and printed as `Transfer fill:` lines (`MAP_CHECK.md`) | derived |
 | `ISMIP7_CALVING` | `none`, or a law in `icepack_tools.calving`: `fixed`, `velocity`, `thickness`, `vonmises`, `vonmises_strain`, `hfb` (see above) | `none` |
@@ -873,12 +951,14 @@ redeclare those literals.
 | `ISMIP7_GEOMETRY_SPACE` | `dg0` (one thickness for terminus force and mass flux) or `cg1` (legacy, A/B only). Selects the MAP. See `../GEOMETRY_DISCRETIZATION.md` | `dg0` |
 | `ISMIP7_DATA_ROOT` | forcing tree root | `<repo>/ISMIP7/AIS` |
 | `ISMIP7_OBS_DATA_ROOT` | BedMachine, MEaSUREs velocity, RACMO and the dH/dt cache observational-data root; name it in a site file when these files do not live beside the code. Also a write target: with the MIPkit present `obs_dhdt` builds `<root>/dhdt_cache/` here, so staged cache tifs belong under this root, wherever it points | `<repo>/antarctica/data` |
-| `ISMIP7_T_END` / `ISMIP7_DT` | end time and timestep (yr). `t=Y.0` is 1 January of year Y, so a run covering 2015 to 2300 ends at `2301` and a historical covering 1850 to 2014 ends at `2015`. Each driver owns its end (historical `2015`, ssp370 `2101`, other projections and control `2301`, OCX `2026`) | driver's own / `1.0` |
+| `ISMIP7_T_END` / `ISMIP7_DT` | end time and timestep (yr). `t=Y.0` is 1 January of year Y, so a run covering 2015 to 2300 ends at `2301` and a historical covering 2003 to 2014 ends at `2015`. Each driver owns its end (historical `2015`, ssp370 `2101`, other projections and control `2301`, OCX `2026`). The step defaults to `runconfig.DT_DEFAULT`, the production step, which `projection.sbatch` also exports | driver's own / `0.025` |
+| `ISMIP7_GEOMETRY_BACKDATE` | years of the Smith et al. (2020) mean dH/dt a cold start undoes on grounded ice before it runs (issue #117). Unset: `2015 - ISMIP7_T_START` for a start from 2003 up to 2015 (the historicals and OCX start in 2003), none from 2015 on, and a start before 2003 is refused. The friction anchors stay on the 2015 geometry; floating ice keeps its 2015 thickness. `0` turns it off | driver's start |
 | `ISMIP7_FRICTION` | `budd`, `regularized_coulomb` or `budd_legacy`; selects the MAP. The set is closed, so a misspelling is rejected at startup | `budd` |
-| `ISMIP7_OUTPUT_INTERVAL` | timeseries row every N steps | `10` |
+| `ISMIP7_OUTPUT_INTERVAL` | budget log line every N steps; the timeseries gets a row every step | `10` |
 | `ISMIP7_CHECKPOINT_EVERY_YR` / `ISMIP7_KEEP_CHECKPOINTS` | checkpoint cadence in model years, and how many to keep besides `_final.h5` | `5` / `3` |
-| `ISMIP7_RESTART` | restart checkpoint | `hist_<esm>[_<tag>]_<lc>_final.h5` if present |
-| `ISMIP7_AUTO_RESUME` | resume from this experiment's newest checkpoint when no `ISMIP7_RESTART` is given. An integer flag, `=0` disables it, since the runners export it unconditionally and `--export=ALL` cannot unset. `projection.sbatch` refuses to chain when it is off. A checkpoint written under another calving law, or the same law with other parameters, is refused (the experiment name carries only the tag): give a law-driven run its own `ISMIP7_RUN_TAG`. A checkpoint with no recorded law counts as `none`, which includes one from a built-in `fixed` or `vonmises` chain started before 24 September 2026. An explicit `ISMIP7_RESTART` is not checked | unset |
+| `ISMIP7_RESTART` | restart checkpoint | `hist_<esm>[_<tag>]_<lc>_final.h5` if present; refused when it is short of the branch year |
+| `ISMIP7_MESH_BUILD_CHECK` | refuse a MAP or restart whose mesh has the `ISMIP7_MESH` file's name and another triangulation (vertex and cell counts and two centroid sums, `transfer.meshes_match`), the way two sites' builds of the production mesh differ; `0` transfers across them on purpose | `1` |
+| `ISMIP7_AUTO_RESUME` | resume from this experiment's newest checkpoint when no `ISMIP7_RESTART` is given. An integer flag, `=0` disables it, since the runners export it unconditionally and `--export=ALL` cannot unset. `projection.sbatch` refuses to chain when it is off | unset |
 | `ISMIP7_RUN_TAG` | experiment-name suffix for a parallel method line | unset |
 | `ISMIP7_WALL_STOP_MIN` | wall-clock budget in minutes from process start, checked before each step against the longest step so far, so the run writes its final checkpoint and exits with `t_yr` short of `t_end` for a chained job to resume. `projection.sbatch` derives it from the job's own TimeLimit, holding back 25 minutes. `0` disables | `0` |
 | `ISMIP7_EXPERIMENT_NAME` | the run's identity, used by `adapt_mesh.py` to name adapted meshes and sidecars so parallel experiments cannot overwrite each other. Set by `run_adaptive.py --experiment-name`. See `../ADAPTIVE_MESH.md` | unset |
@@ -904,13 +984,15 @@ redeclare those literals.
 | `ISMIP7_TRANSPORT_KSP_RTOL` / `ISMIP7_TRANSPORT_KSP_MAXIT` | GMRES relative tolerance / iteration limit for the persistent DG0 transport solver (`ismip7_transport_` PETSc prefix) | `1e-10` / `500` |
 | `ISMIP7_MASS_RESIDUAL_TOL_GT` | fail-loud absolute tolerance for both the discrete transport identity and the complete step mass budget | `5e-5` Gt |
 | `ISMIP7_RESCUE_ENABLED` | permit a failed direct transient diagnostic solve to enter the continuation/trust-region/subcycle rescue ladder; set to `0` for strict timestep qualification | `1` |
-| `ISMIP7_K_MELT` / `ISMIP7_K_PER_BASIN_NPZ` | scalar K (projections), the ISMIP7 toolbox K50 of July 2026 (K05 4.75e-5, K95 1.375e-4), per-basin K file (control) | `8.5e-5` / `results/calibrated_K_per_basin_<lc>.npz` |
-| `ISMIP7_DELTAT_PER_BASIN_NPZ` | per-basin TF offset at one toolbox K from `calibrate_deltaT.py`; when set, every ocean callback melts with that file's K and the K file is not read. Refused with `ISMIP7_K_SCALE` other than 1 | unset |
+| `ISMIP7_DELTAT_PER_BASIN_NPZ` | the melt calibration, one K and a TF offset per basin (`select_melt_parameters.py`, `calibrate_deltaT.py`); every ocean callback melts with its K. Refused with `ISMIP7_K_SCALE` other than 1, and when fitted under another slope or geometry than the run's (section 5) | `calibration/deltaT_per_basin_1000_K6.500e-05.npz` |
+| `ISMIP7_K_PER_BASIN_NPZ` | a legacy per-basin K file from `calibrate_melt.py`, read in place of the offsets; refused together with `ISMIP7_DELTAT_PER_BASIN_NPZ` | unset |
+| `ISMIP7_K_SCALE` | multiplies a legacy per-basin K; refused with an offsets file | `1` |
+| `ISMIP7_K_MELT` | removed with the tracked calibration, and refused when exported | |
 | `ISMIP7_MELT_OBS_CSV` | per-basin melt observation table read by `scripts/calibrate_melt.py`; columns are located by header name, so either published table serves | `Melt_Paolo_Davison_Adusumilli_imbie2.csv` under `<DATA_ROOT>/meltobs/`, else under `<DATA_ROOT>/parameterisations/ocean/meltobs/`, else the older Paolo and Adusumilli table with a `[!]` line |
 | `ISMIP7_MELT_SLOPE` | the draft slope the quadratic melt law sees, in the forward and in `scripts/calibrate_melt.py` and `scripts/calibrate_deltaT.py`: `ant` is one constant `sin(alpha)` on every shelf, the protocol's reference ("mean Antarctic slope, no slope dependency"); `local` is this mesh's draft slope. A K or deltaT file records the convention it was fitted under and a run under the other is told once | `ant` |
 | `ISMIP7_SIN_ALPHA_ANT` | the constant under `ant`. The toolbox's K percentiles were sampled with 5.1117e-3, which its own gamma_T conversion gives and the notebook's slope recipe on the 8 km BedMap3 v3 topography reproduces; the default rounds it up by 0.065 percent | `5.115e-3` |
 | `ISMIP7_SIN_ALPHA_CAP` | `local` slope only: cap on `sin(alpha)` in `scripts/calibrate_melt.py`; the forward applies none | none under `dg0`, `5e-3` under `cg1` |
-| `ISMIP7_K_OUT` | output path for `scripts/calibrate_melt.py`, overriding the generated name. Use it for a calibration made as a check, so it cannot replace the K that every forward and inversion in the checkout reads. A bare filename resolves under `results/` | `results/calibrated_K_per_basin_<lc>.npz` |
+| `ISMIP7_K_OUT` | output path for `scripts/calibrate_melt.py`, overriding the generated name. A bare filename resolves under `results/` | `results/calibrated_K_per_basin_<lc>.npz` |
 | `ISMIP7_ESM` | ESM for the control | `CESM2-WACCM` |
 | `ISMIP7_CLIM_SCENARIO` / `_START` / `_END` | reference-climate pool: the scenario pooled with `historical`, and the window, shared by the control's SMB climatology and the projections' aSMB re-reference through `icepack2_tools/climatology.py`. A partial pool warns | `ssp126` / `2000` / `2029` |
 | `ISMIP7_H_CLAMP` | thickness floor (m) | `0` |
@@ -921,9 +1003,13 @@ redeclare those literals.
 | `ISMIP7_RC_HVISC_FLOOR` / `ISMIP7_RC_CW0_FLOOR` | RC viscous-thickness and `C_w0` floors, read by `scripts/simulation.py` and `scripts/inversion_icepack2.py` | `10.0` / `0.0` |
 | `ISMIP7_M_SLIDE` | sliding exponent, read by `scripts/inversion_icepack2.py`, `scripts/simulation.py`, `scripts/thermo_prior.py`, `scripts/plot_map.py`, `scripts/run_eigendec.py` | `3.0` |
 
-> **dt guidance.** Production projections on the 1000 m mesh run
-> `ISMIP7_DT=0.05`, the step the timing matrix ran there and the one
-> `projection.sbatch` defaults to. At 2500 m and coarser use `0.1`; `0.25` is
+> **dt guidance.** Production runs on the 1000 m mesh use `ISMIP7_DT=0.025`,
+> the step the group chose with the mesh on 25 September 2026 (issue 20):
+> `runconfig.DT_DEFAULT`, which `projection.sbatch` also exports. The timing
+> matrix ran 0.05 there, and at 0.05 a 1 km control from a transferred 2 km
+> Budd MAP diverged at the Lambert confluence (`MAP_CHECK.md`); at 0.025
+> Rice's 1 km historicals ran 78 and 66 model years with no rescue step.
+> At 2500 m and coarser use `0.1`; `0.25` is
 > acceptable there when 10 steps per year is too costly, under the production
 > closure only: under the matrix's strict contract `0.125` passed and `0.25`
 > ran away at both 2500 m and 5000 m, so the stable step does not grow with
@@ -1045,13 +1131,20 @@ ISMIP7_CONDENSED_PETSC_OPTIONS="pc_gamg_threshold=0.02" \
 the same campaign from the same caches with every accepted lane under the
 frozen linearization, so they differ in the linear solver alone. They set the
 production forward configuration: the **1000 m / 10 km mesh, `scpc_gamg`, up to
-64 ranks, `dt = 0.05` yr**. Minutes of transient loop per simulated year on
-that mesh (and the 285-year extrapolation):
+64 ranks**, and the group chose the mesh for the submission on 25 September
+2026 with a **step of `0.025` yr** (issue 20), half the matrix's 0.05 (see the
+dt guidance above). Minutes of transient loop per simulated year on that mesh
+at the matrix's 0.05 (and the 285-year extrapolation):
 
 | 1000/10000 | 16 ranks | 32 ranks | 64 ranks |
 |---|---|---|---|
 | `scpc_mumps` | 34.0 (6.7 d) | 23.4 (4.6 d) | 23.2 (4.6 d) |
 | `scpc_gamg` | 32.3 (6.4 d) | 15.7 (3.1 d) | 10.0 (47.5 h) |
+
+At 0.025 a simulated year takes twice the steps. Rice measured 22.5 min per
+simulated year on 32 Cascade Lake ranks under `scpc_gamg`, 62 simulated years
+per 24 h job. The 64-rank Quartz figure at 0.025 is not yet measured; at the
+matrix's 30 s a step it is about 20 min, about 4 days per 285 years.
 
 The factorization stops scaling past 32 ranks and the V-cycles do not. The two
 64-rank lanes take the same nonlinear path (129 Newton iterations and 286
@@ -1077,8 +1170,19 @@ through that solve, and no setting changes it. That is also why the switch is
 made in the forward runner and not in `solverconfig`'s default, which the
 inversion reads to stamp its MAP.
 
-**Starting state, unsettled.** No MAP has been inverted on the 1000 m mesh, and
-the plan for now is not to invert one: transfer the coarse MAP instead, the way
+**Starting state.** The production MAP is inverted on the production mesh: a
+1 km / 10 km Budd inversion, warm-started from the 2 km Budd snapshot 0241,
+was running at Rice on 25 September (issue #24), on Rice's build of the
+mesh (1,869,252 vertices), which is the submission mesh. A site with its own
+build (IU's has 1,869,088 vertices) uses Rice's `.msh` (release
+`maps-2km-snap-2026-09-24`, md5 `5d318c0a`) with the MAP: a forward
+interpolates a MAP onto whatever `ISMIP7_MESH` names, and it refuses a file
+with the MAP mesh's name and another triangulation (`ISMIP7_MESH_BUILD_CHECK=0`
+allows that transfer on purpose). On Quartz the default name has held Rice's
+build since 26 September, and IU's is kept as
+`mesh/antarctica_10000_1000_buffered20000_iubuild.msh`.
+
+Until that MAP exists a forward starts from a coarse MAP by transfer, the way
 the matrix's own lanes do. Name the MAP and let the forward interpolate it onto
 the mesh `site_env.sh` exports: `simulation.py` keeps the MAP's own mesh as the
 interpolation source and uses `ISMIP7_MESH` only for the target spaces, which is
@@ -1101,9 +1205,9 @@ section's default is regularized Coulomb, and the forward aborts on a MAP whose
 recorded law disagrees with the run. Without `ISMIP7_INVERSION` the runner falls
 back to `ISMIP7_MAP_DEFAULT`, which names an RC MAP at the run's own resolution
 that has never been inverted, and warns at submission that the file is absent.
-Re-inverting on the production mesh, and closing the Budd/RC gap, are both
-open under the 2 km inversions; icepack/ismip7#21 was closed as their
-duplicate on 22 September. (issue #24)
+The MAP on the production mesh, and closing the Budd/RC gap, are both open
+under the inversions; icepack/ismip7#21 was closed as a duplicate on
+22 September. (issue #24)
 
 The stages and contracts are:
 
@@ -1361,12 +1465,18 @@ Per experiment in `results/`:
   reference, and `levelset` when a calving law is configured. Under `dg0` the
   saved `thickness` is the prognostic state; a `cg1` run also saves
   `thickness_dg`. The `geometry_space` and `mesh_basename` attributes let a
-  restart resolve the same sidecar.
+  restart resolve the same sidecar, and `dt_yr` records the step. A resume
+  that continues its own series at another step, as a run taken past a crash
+  may need, prints a `WARNING: step change on resume` line and continues.
 - `<exp>_t<year>.h5`, periodic checkpoints, keeping the
   `ISMIP7_KEEP_CHECKPOINTS` most recently written.
-- `<exp>_timeseries.csv`, one row per `OUTPUT_INTERVAL` steps:
+- `<exp>_timeseries.csv`, one row per step, the year at six decimals:
   `year, vaf_mm_sle, mass_gt, smb_gtyr, melt_gtyr, outflux_gtyr, calv_gt,
-  clamp_gt, resid_gt, amb_gtyr`. The residual must close to 0.00.
+  clamp_gt, resid_gt, amb_gtyr`. The residual must close to 0.00. SMB and
+  melt are what the advances applied: no forcing acts on open ocean or on
+  cells a front rule holds ice-free (`front.unforced_cells`), so `clamp` is
+  only the positivity limit on thin ice and `calv` only ice that crossed the
+  front. The ISMIP7 `acabf` and `libmassbffl` fields book the same forcing.
 
 VAF is in mm of sea-level equivalent, mass in Gt, both over map-plane area.
 The ISMIP7 scalars of a run with `ISMIP7_OUTPUT=1`

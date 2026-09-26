@@ -45,14 +45,23 @@ def test_a_control_says_which_climatologies_it_runs_on(monkeypatch):
 
 
 def test_the_report_resolves_the_melt_knobs_left_at_their_defaults(monkeypatch):
-    for k in ("ISMIP7_MELT_SLOPE", "ISMIP7_SIN_ALPHA_ANT", "ISMIP7_K_MELT"):
+    for k in ("ISMIP7_MELT_SLOPE", "ISMIP7_SIN_ALPHA_ANT", "ISMIP7_K_MELT",
+              "ISMIP7_DELTAT_PER_BASIN_NPZ", "ISMIP7_K_PER_BASIN_NPZ"):
         monkeypatch.delenv(k, raising=False)
     env = core_report.effective_env()
     assert env["ISMIP7_MELT_SLOPE"] == "ant    # default (not exported)"
     assert env["ISMIP7_SIN_ALPHA_ANT"] == "0.005115    # default (not exported)"
-    assert env["ISMIP7_K_MELT"] == "8.5e-05    # default (not exported)"
+    # the tracked calibration, by its path in the repository; the run's own
+    # provenance line carries its sha256 and K
+    assert env["ISMIP7_DELTAT_PER_BASIN_NPZ"] == (
+        "antarctica/calibration/deltaT_per_basin_1000_K6.500e-05.npz"
+        "    # default (not exported)")
+    assert "ISMIP7_K_MELT" not in env
     monkeypatch.setenv("ISMIP7_MELT_SLOPE", "local")
     assert core_report.effective_env()["ISMIP7_MELT_SLOPE"] == "local"
+    monkeypatch.setenv("ISMIP7_K_PER_BASIN_NPZ", "/k/K_2500.npz")
+    assert core_report.effective_env()["ISMIP7_DELTAT_PER_BASIN_NPZ"].startswith(
+        "none, the legacy per-basin K")
 
 
 def test_the_report_lifts_the_front_owner_with_the_laws_parameters(tmp_path):
@@ -62,3 +71,24 @@ def test_the_report_lifts_the_front_owner_with_the_laws_parameters(tmp_path):
             f"mode=hfb, stress=normal, exponent=1.0, ratio_max=5.0) (ISMIP7_CALVING=hfb)")
     log.write_text(f"  {line}\nstep 1\n")
     assert core_report.front_owner(str(log)) == [line]
+
+
+def test_the_report_resolves_the_step_left_at_its_default(monkeypatch):
+    r"""Issue 20 moved the production step to 0.025; a report written from a
+    shell that never exported it still states the step the drivers used."""
+    monkeypatch.delenv("ISMIP7_DT", raising=False)
+    assert core_report.effective_env()["ISMIP7_DT"] == "0.025    # default (not exported)"
+    monkeypatch.setenv("ISMIP7_DT", "0.1")
+    assert core_report.effective_env()["ISMIP7_DT"] == "0.1"
+
+
+def test_the_report_is_named_for_the_run_resolution(monkeypatch):
+    r"""The 32 km demonstration matrix keeps its names, and a production core
+    is named and titled for the 1 km mesh it ran on."""
+    monkeypatch.delenv("ISMIP7_LC", raising=False)
+    assert core_report.resolution_km("results/hist_cesm2_waccm_32000_timeseries.csv") == "32"
+    assert core_report.resolution_km("/r/ssp585_cesm2_waccm_1000_timeseries.csv") == "1"
+    assert core_report.resolution_km("/r/ctrl_t1k_dthalf_2500_timeseries.csv") == "2.5"
+    assert core_report.resolution_km("/r/renamed.csv") == "1"
+    monkeypatch.setenv("ISMIP7_LC", "32000")
+    assert core_report.resolution_km("/r/renamed.csv") == "32"

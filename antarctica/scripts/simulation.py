@@ -57,9 +57,9 @@ RESULTS_DIR = os.path.join(_ROOT, "results")
 
 # Repo root on the path for the shared dual-friction operator.
 sys.path.insert(0, os.path.dirname(_ROOT))
-from mesh_naming import mesh_filename
+from mesh_naming import mesh_filename, mesh_stem
 
-from icepack2_tools.transfer import interpolate_with_fill
+from icepack2_tools.transfer import interpolate_with_fill, meshes_match
 from icepack2_tools.mpi_stats import (
     global_count,
     global_extreme_location,
@@ -72,19 +72,22 @@ from icepack2_tools.geometry import raise_bed_to_lake_ice_base, sample_to_geomet
 from icepack2_tools.naming import map_basename
 from icepack2_tools.front import (
     clamp_thickness, clear_reference_where_ice_free, retreat_slivers,
-    front_removal_mask,
+    front_removal_mask, unforced_cells, applied_forcing,
     facet_neighbours, front_connected, ocean_drag_cells,
     collapse_banner, collapse_cell_counts, collapse_csv_fields,
     COLLAPSE_CSV_COLUMNS, COLLAPSE_MARKER, FRONT_OWNER_MARKER,
 )
-from icepack2_tools.timeseries import timeseries_csv_line
+from icepack2_tools.timeseries import (
+    format_year, resumed_step, rows_kept_on_resume, step_changed,
+    timeseries_csv_line,
+)
 from icepack2_tools.runconfig import (
     obs_data_root,
     BUDD_SHELF_GATE as _BUDD_SHELF_GATE,
     residual_stabilizers,
     friction as _friction, geometry_space as _geometry_space,
     mesh_override as _mesh_override,
-    lc as _lc, lc_coarse as _lc_coarse, n_flow as _n_flow,
+    lc as _lc, lc_coarse as _lc_coarse, n_flow as _n_flow, buffer_m as _buffer_m,
     TARGET_MESH_GEOMETRY_METHOD,
     calving_law as _calving_law, calving_law_object as _calving_law_object,
     front_advance as _front_advance,
@@ -95,6 +98,8 @@ from icepack2_tools.runconfig import (
     # knob through one import rather than each reaching into runconfig.
     fixed_front as _fixed_front, auto_resume, apparent_mb_mode,  # noqa: F401
     front_hmin as _front_hmin,
+    GEOMETRY_YEAR,
+    mesh_build_check,
 )
 DATA_DIR = obs_data_root()
 from icepack2_tools.solverconfig import (
@@ -117,7 +122,7 @@ from icepack2_tools.solverconfig import (
 
 lc = _lc()
 lc_coarse = _lc_coarse()
-buffer_m = float(os.environ.get("ISMIP7_BUFFER_M", "20000"))
+buffer_m = _buffer_m()
 
 # Flow-law exponent for the composite viscous rheology: owned by
 # icepack2_tools.runconfig, which the inversion that produced the MAP reads
@@ -201,6 +206,32 @@ def latest_checkpoint(experiment_name, lc_val=None):
     return best
 
 
+def historical_endpoint(esm_tag, tag_sfx, t_branch, lc_val=None):
+    r"""The historical endpoint a control or projection branches from, or None
+    when there is none.
+
+    A historical chain rewrites its ``_final.h5`` at the end of every job, so
+    a chain that stalled, or was stopped, leaves one that holds the year it
+    reached rather than the handoff. A control or projection that branched
+    from it would start its 2015 experiment on an earlier geometry and say
+    nothing, so an endpoint short of ``t_branch`` is refused outright.
+    """
+    lc_val = lc if lc_val is None else lc_val
+    path = os.path.join(RESULTS_DIR, f"hist_{esm_tag}{tag_sfx}_{lc_val}_final.h5")
+    if not os.path.exists(path):
+        return None
+    with fd.CheckpointFile(path, "r") as chk:
+        t = (float(chk.get_attr("/", "t_yr"))
+             if chk.has_attr("/", "t_yr") else None)
+    if t is None or t < t_branch - 1e-6:
+        reached = "no t_yr" if t is None else f"t_yr={t:g}"
+        raise RuntimeError(
+            f"the historical endpoint {path} holds {reached}, short of the "
+            f"{t_branch:g} handoff: its chain stopped early. Finish the "
+            f"historical, or name a state with ISMIP7_RESTART.")
+    return path
+
+
 def auto_resume_checkpoint(experiment_name, lc_val=None):
     r"""The checkpoint an unattended run resumes from, or None.
 
@@ -240,13 +271,19 @@ def auto_resume_checkpoint(experiment_name, lc_val=None):
     return path
 
 
-def setup_model(restart_from=None, *, allow_timing_cache_a_ref=False):
+def setup_model(restart_from=None, *, allow_timing_cache_a_ref=False,
+                backdate_years=0.0):
     r"""Load mesh, data, inversion fields, and build diagnostic solver.
 
     ``allow_timing_cache_a_ref`` is the narrow exception used after a timing
     manifest has been validated: it permits ``APPARENT_MB=div`` to be built
     from that pristine initial state. Evolved restarts must carry their frozen
     correction and cannot use this escape hatch.
+
+    ``backdate_years`` dates a cold start before the 2015 geometry: that many
+    years of the Smith mean dH/dt are undone on grounded ice after the friction
+    anchors are built, so the 2015 friction and fluidity carry over unchanged
+    and the run starts from the earlier ice (issue #117). A restart ignores it.
     """
     os.makedirs(RESULTS_DIR, exist_ok=True)
 
@@ -438,6 +475,28 @@ def setup_model(restart_from=None, *, allow_timing_cache_a_ref=False):
             f"({global_size(mesh.coordinates)} vertices, "
             f"{mesh.comm.allreduce(mesh.cell_set.size)} cells)"
         )
+        # The transfer below interpolates the checkpoint onto this file. Two
+        # builds of one mesh name can differ: Rice's production mesh has
+        # 1,869,252 vertices and IU's 1,869,088 (issue 20), and a transfer
+        # across them ran without a word, starting the run from a state its
+        # MAP was never solved on. The same name with another triangulation is
+        # refused; a transfer between differently named meshes is the timing
+        # matrix's and the MAP check's, and stays allowed.
+        if (mesh_stem(mesh_fn) == mesh_stem(source_mesh_basename)
+                and mesh_build_check()
+                and not meshes_match(source_mesh, mesh)):
+            raise RuntimeError(
+                f"ISMIP7_MESH={mesh_fn} ({global_size(mesh.coordinates)} "
+                f"vertices, {mesh.comm.allreduce(mesh.cell_set.size)} cells) "
+                f"has the name of the mesh {source_chk} was solved on "
+                f"({global_size(source_mesh.coordinates)} vertices, "
+                f"{source_mesh.comm.allreduce(source_mesh.cell_set.size)} "
+                f"cells) and another triangulation: a different build of the "
+                f"same mesh. Use the build the checkpoint was solved on (for "
+                f"the production mesh, Rice's .msh travels with the MAP), "
+                f"ISMIP7_MESH=checkpoint to solve on the checkpoint's own "
+                f"mesh, or ISMIP7_MESH_BUILD_CHECK=0 to transfer on purpose."
+            )
     else:
         mesh = source_mesh
         target_lc_coarse = chk_lc_coarse
@@ -610,6 +669,7 @@ def setup_model(restart_from=None, *, allow_timing_cache_a_ref=False):
     phys_div = None
     h_dg_state = None
     t_restart = None
+    restart_dt = None
     A_prior_f = None
     ismip7_resume = None
     # The fluidity baseline, here because the loader below fills the prior
@@ -731,6 +791,11 @@ def setup_model(restart_from=None, *, allow_timing_cache_a_ref=False):
                 N_ref = load_checkpoint_field(chk, "N_ref", Q_g)
             if chk.has_attr("/", "t_yr"):
                 t_restart = float(chk.get_attr("/", "t_yr"))
+            # The step the run that wrote this checkpoint took (absent before
+            # the production step moved to 0.025, issue 20); run_simulation
+            # holds a resumed series to it.
+            if chk.has_attr("/", "dt_yr"):
+                restart_dt = float(chk.get_attr("/", "dt_yr"))
             # The ISMIP7 year in progress, so a link that stopped mid-year
             # continues the same year's flux means instead of losing them.
             from icepack2_tools.ismip7_output import AnnualOutput as _AnnualOutput
@@ -1067,6 +1132,35 @@ def setup_model(restart_from=None, *, allow_timing_cache_a_ref=False):
                 f"h_visc_floor={rc_hvisc_floor:.0f}m, cw0_floor={rc_cw0_floor:.1e}, "
                 f"eps_tauc={rc_eps_tauc:.1e} MPa, alpha={float(alpha_reg):.1e})"
             )
+
+    # Issue #117: a cold start dated before the 2015 geometry starts from that
+    # geometry with the Smith et al. (2020) mean thinning undone on grounded
+    # ice. It comes after the anchors above, so C_w0 and N_ref stay those of
+    # the 2015 geometry the MAP was inverted on, and before the prognostic
+    # thickness is copied from H below, so the initial solve, the transport,
+    # H_init and the apparent-MB reference all start from the earlier ice.
+    if backdate_years > 0.0 and not is_restart:
+        if not geom_dg:
+            raise RuntimeError(
+                "backdating the geometry (issue #117) needs the DG0 geometry "
+                "(ISMIP7_GEOMETRY_SPACE=dg0)")
+        from icepack2_tools.obs_dhdt import load_dhdt_obs, backdate_thickness
+        _dhdt, _observed = load_dhdt_obs(Q_g)
+        _h_obs = H.dat.data_ro.copy()
+        _h_new, _changed = backdate_thickness(
+            _h_obs, b.dat.data_ro, _dhdt.dat.data_ro, _observed.dat.data_ro,
+            backdate_years, float(rho_ratio))
+        H.dat.data[:] = _h_new
+        s.interpolate(max_value(b + H, (Constant(1.0) - rho_ratio) * H))
+        _area = assemble(fd.TestFunction(Q_g) * dx).dat.data_ro
+        _dm_gt = mesh.comm.allreduce(
+            float(((_h_new - _h_obs) * _area).sum())) * 917.0 / 1e12
+        PETSc.Sys.Print(
+            f"  Geometry backdated {backdate_years:g} yr (issue #117): "
+            f"{mesh.comm.allreduce(int(_changed.sum()))} grounded cells with "
+            f"Smith dH/dt coverage, ice mass {_dm_gt:+.0f} Gt; floating ice and "
+            f"unobserved cells keep their {GEOMETRY_YEAR:g} thickness; friction "
+            f"anchors from the {GEOMETRY_YEAR:g} geometry")
 
     # ISMIP7_SNES_TYPE=newtontr switches the diagnostic Newton to trust
     # region (gia COUPLED_SOLVER's choice: more robust than line search at
@@ -1607,6 +1701,11 @@ def setup_model(restart_from=None, *, allow_timing_cache_a_ref=False):
         "phi_eff": phi_eff,
         "rho_ratio": rho_ratio,
         "h_clamp": h_clamp,
+        # The floor a cold start put under the initial thickness (0 on a
+        # restart, which reads its geometry). A floor turns ice-free cells
+        # into floating ice the melt calibration never fitted, so the melt
+        # contract refuses it (forcing.check_melt_contract).
+        "thickness_floor": 0.0 if is_restart else h_clamp_init,
         "calving_ids": calving_ids,
         "u_obs": u_obs,
         "friction": friction,
@@ -1658,6 +1757,8 @@ def setup_model(restart_from=None, *, allow_timing_cache_a_ref=False):
         # Resume time (None on a cold start); run_simulation continues the
         # timeline from here instead of the caller's t_start.
         "t_restart": t_restart,
+        # The step the checkpoint's run took, when it records one.
+        "restart_dt": restart_dt,
         # Timing-cache identity, if this is a prepared timing restart.
         # Ordinary production checkpoints legitimately omit these fields.
         "checkpoint_metadata": checkpoint_metadata,
@@ -1755,6 +1856,9 @@ def save_model_state(ctx, final_path, t_now, extra_attrs=None):
                 chk.set_attr("/", _key, _val)
 
         chk.set_attr("/", "t_yr", float(t_now))
+        # The step, so a resume can hold the series to it (run_simulation).
+        if ctx.get("dt") is not None:
+            chk.set_attr("/", "dt_yr", float(ctx["dt"]))
         if ctx.get("calving_law") is not None:
             chk.set_attr("/", "calving_law", str(ctx["calving_law"].describe()))
         chk.set_attr("/", "friction", str(ctx.get("friction", "budd")))
@@ -1866,6 +1970,40 @@ def run_simulation(
     PETSc.Sys.Print(
         f"\nTime-stepping: {t_start}->{t_end}, dt={dt}yr, {nsteps} steps"
     )
+    # Every checkpoint this run writes records its step (save_model_state).
+    ctx["dt"] = dt
+
+    # A resumed run continues its own timeseries. Its step may change on
+    # purpose, to take a run past a crash, so a change prints a warning and
+    # the run continues at the new step; a hand resume of a 0.05 run under the
+    # 0.025 default (issue 20) used to do so without a word. The series' step
+    # is the checkpoint's dt_yr, or, for a checkpoint older than that record,
+    # read back from the rows up to the resume year. A branch from another
+    # run's endpoint keeps no row of its own series and starts one at its own
+    # step.
+    csv_fn = os.path.join(RESULTS_DIR, f"{experiment_name}_{lc}_timeseries.csv")
+    prior_dt, prior_from = None, None
+    if t_restart is not None and mesh.comm.rank == 0 and os.path.exists(csv_fn):
+        with open(csv_fn) as _cf:
+            prior_dt, prior_from = resumed_step(
+                rows_kept_on_resume(_cf.readlines(), "", t_start, dt),
+                ctx.get("restart_dt"))
+    prior_dt, prior_from = mesh.comm.bcast((prior_dt, prior_from), root=0)
+    if prior_dt is not None and step_changed(prior_dt, dt):
+        PETSc.Sys.Print(
+            f"  WARNING: step change on resume: {os.path.basename(csv_fn)} was "
+            f"written at dt={prior_dt:g} yr ({prior_from}) and continues at "
+            f"dt={dt:g}. ISMIP7_DT={prior_dt:g} keeps the series' step.")
+    elif prior_from == "unknown":
+        PETSc.Sys.Print(
+            f"  Resume: too few rows of {os.path.basename(csv_fn)} to read its "
+            f"step back; continuing at dt={dt:g}")
+    elif prior_dt is None and ctx.get("restart_dt") is not None \
+            and step_changed(ctx["restart_dt"], dt):
+        PETSc.Sys.Print(
+            f"  Restart: the checkpoint's run stepped at "
+            f"dt={ctx['restart_dt']:g} yr; this run starts its own series at "
+            f"dt={dt:g}")
 
     # Checkpoint cadence in YEARS (default 5) so a reboot loses bounded wall
     # time regardless of dt; keep only the last few (plus _final.h5) to bound
@@ -2039,6 +2177,13 @@ def run_simulation(
     proj_rhs = fd.Cofunction(Q.dual())
     src_dg = Function(Q_dg, name="mass_source")
     src_cof = fd.Cofunction(Q_dg.dual())
+    # Where the surface and ocean forcing act: 1 on cells that can hold ice,
+    # 0 on open ocean and on cells a front rule holds ice-free
+    # (front.unforced_cells). Refreshed at the start of every advance, and at
+    # t=0 for the balancing reference, so the reference, the transport source,
+    # the budget and the ISMIP7 fields all count the same forcing.
+    forced = Function(Q_dg, name="forced")
+    bed_cell = Function(Q_dg).project(b).dat.data_ro.copy()
 
     # h_dg is the PERSISTENT prognostic state (DG0). The old scheme
     # re-projected CG1 h -> DG0 every step; that roundtrip (L2 project +
@@ -2152,7 +2297,14 @@ def run_simulation(
                 # balanced control: evaluate the t=0 forcing and fold it in
                 if forcing_callback is not None:
                     forcing_callback(ctx, t_start + dt)
-                b_smb = assemble((accum - ocean_melt) * phi_dg * dx)
+                # the forcing the loop will apply, so the t=0 tendency is
+                # zero where it acts and no reference is left where it
+                # does not (open ocean would otherwise be handed a source
+                # equal to the melt it never receives)
+                forced.dat.data[:] = np.where(
+                    unforced_cells(h_dg.dat.data_ro, bed_cell, beyond_front),
+                    0.0, 1.0)
+                b_smb = assemble(forced * (accum - ocean_melt) * phi_dg * dx)
                 a_ref.dat.data[:] -= b_smb.dat.data_ro / cell_area
             if beyond_front is not None:
                 # No ice existed outside the t=0 extent, so no balancing
@@ -2367,8 +2519,9 @@ def run_simulation(
 
     # Crash-safe timeseries: append each row and flush, so a reboot keeps the
     # budget-audit history (it used to be dumped only at completion). On a
-    # warm restart, drop any rows at/after the resume year, then append.
-    csv_fn = os.path.join(RESULTS_DIR, f"{experiment_name}_{lc}_timeseries.csv")
+    # warm restart, drop the rows after the resume year, then append. The
+    # year is written at full precision (icepack2_tools.timeseries): the trim
+    # and the audits' step both read it back.
     csv_header = ("year,vaf_mm_sle,mass_gt,smb_gtyr,melt_gtyr,"
                   "outflux_gtyr,calv_gt,clamp_gt,resid_gt,amb_gtyr,"
                   + ",".join(COLLAPSE_CSV_COLUMNS) + "\n")
@@ -2380,15 +2533,8 @@ def run_simulation(
         if t_restart is not None and os.path.exists(csv_fn):
             with open(csv_fn) as _cf:
                 _lines = _cf.readlines()
-            kept = ([_lines[0]] if _lines and _lines[0].startswith("year")
-                    else [csv_header])
+            kept = rows_kept_on_resume(_lines, csv_header, t_start, dt)
             csv_head = kept[0]
-            for _ln in _lines[1:]:
-                try:
-                    if float(_ln.split(",", 1)[0]) <= t_start + 0.5 * dt:
-                        kept.append(_ln)
-                except (ValueError, IndexError):
-                    pass
             with open(csv_fn, "w") as _cf:
                 _cf.writelines(kept)
             csv_f = open(csv_fn, "a")
@@ -2672,14 +2818,25 @@ def run_simulation(
             if a_ref is not None and free_front:
                 clear_reference_where_ice_free(a_ref.dat.data, ls_ice_free)
 
-        src = accum - ocean_melt
+        # No forcing where there can be no ice: open ocean at the start of
+        # this advance and the cells the front rules hold ice-free. SMB there
+        # would make ice the front removes and books as calving; melt there
+        # has nothing to melt (front.unforced_cells has the measured cost).
+        forced.dat.data[:] = np.where(
+            unforced_cells(h_dg_old.dat.data_ro, bed_cell, beyond, ls_ice_free),
+            0.0, 1.0)
+        smb_f, melt_f, ref_f = applied_forcing(forced, accum, ocean_melt, a_ref)
+        smb_gt = float(assemble(smb_f * dx)) * rho_gt * dt_local
+        melt_gt = float(assemble(melt_f * dx)) * rho_gt * dt_local
+        src = smb_f - melt_f
         amb_gt = 0.0
-        if a_ref is not None:
-            src = src + a_ref
+        if ref_f is not None:
+            src = src + ref_f
             # The reference as APPLIED here: the live-extent mask above may
-            # have zeroed cells since the step's entry measurement, so the
-            # budget and the CSV must use this, not the entry value.
-            amb_gt = float(assemble(a_ref * dx)) * rho_gt * dt_local
+            # have zeroed cells since the step's entry measurement, and the
+            # forcing mask withholds it from open ocean, so the budget and
+            # the CSV must use this, not the entry value.
+            amb_gt = float(assemble(ref_f * dx)) * rho_gt * dt_local
         # Cell-averaged DG0 source (exact for the DG0 test space) with a
         # positivity limit (gia a_step clamp): the net sink may not draw a
         # cell below h_clamp within one advance. With the limited source
@@ -2767,9 +2924,11 @@ def run_simulation(
         # state and must see it.
         grounded = _grounded_cells()
         if annual is not None:
-            # the sources as the limiter left them: the withheld sink comes
-            # off the booked SMB, melt and reference (ismip7_output)
-            annual.book_advance(dt_local, accum, ocean_melt, a_ref, h_dg, u_vel, grounded,
+            # the sources as the limiter left them, and only where there can
+            # be ice: the withheld sink comes off the booked SMB, melt and
+            # reference (ismip7_output)
+            annual.book_advance(dt_local, smb_f, melt_f, ref_f,
+                                h_dg, u_vel, grounded,
                                 withheld=src_dg.dat.data_ro - _src_want)
 
         # Floor to h_clamp, EXCEPT in the cells the front rules report as
@@ -2873,6 +3032,8 @@ def run_simulation(
             "clamp_gt": clamp_gt + clamp_cg_gt + limit_gt,
             "limit_gt": limit_gt,
             "amb_gt": amb_gt,
+            "smb_gt": smb_gt,
+            "melt_gt": melt_gt,
             "collapse_cells": collapse_cells,
         }
 
@@ -2936,9 +3097,6 @@ def run_simulation(
         if forcing_callback is not None:
             forcing_callback(ctx, t_yr)
 
-        # Forcing-field integrals are constant within the step.
-        smb_rate = float(assemble(accum * dx)) * rho_gt          # Gt/yr
-        melt_rate = float(assemble(ocean_melt * dx)) * rho_gt    # Gt/yr
 
         z_entry.assign(z)
         h_dg_entry.assign(h_dg)
@@ -2967,7 +3125,8 @@ def run_simulation(
                     level_set.phi.assign(phi_entry)
                     level_set.update_cell_fields()
             acc = {"out_gt": 0.0, "calv_gt": 0.0, "clamp_gt": 0.0,
-                   "limit_gt": 0.0, "amb_gt": 0.0}
+                   "limit_gt": 0.0, "amb_gt": 0.0,
+                   "smb_gt": 0.0, "melt_gt": 0.0}
             ok = True
             for _j in range(m):
                 sub = _advance(
@@ -3016,6 +3175,10 @@ def run_simulation(
         vaf = float(assemble(haf * dx)) * _RHO_I_SI / 1e12 / 362.5
         total_mass = float(assemble(h * dx)) * _RHO_I_SI / 1e12
 
+        # SMB and melt as the advances applied them, where there was ice to
+        # force, so the budget, the timeseries and the ISMIP7 fields agree.
+        smb_rate = tallies["smb_gt"] / dt                        # Gt/yr
+        melt_rate = tallies["melt_gt"] / dt                      # Gt/yr
         out_rate = tallies["out_gt"] / dt                        # Gt/yr
         calv_gt = tallies["calv_gt"]
         clamp_all = tallies["clamp_gt"]

@@ -16,6 +16,7 @@ import importlib
 import os
 import sys
 
+import numpy as np
 import pytest
 
 REPO = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -183,3 +184,28 @@ def test_a_law_on_an_icepack_tools_without_calving_is_a_missing_input(monkeypatc
     monkeypatch.delitem(sys.modules, "icepack_tools.calving", raising=False)
     miss = preflight.shared_missing([])
     assert any(m.startswith("icepack_tools.calving") for m in miss)
+# ── the melt calibration a run reads ────────────────────────────────────────
+def _shared(monkeypatch, tmp_path):
+    r"""preflight.shared_missing under the environment the test set."""
+    sys.modules.pop("preflight", None)
+    preflight = importlib.import_module("preflight")
+    return preflight.shared_missing([])
+
+
+def test_a_deltat_file_is_the_melt_calibration(monkeypatch, tmp_path):
+    r"""With ISMIP7_DELTAT_PER_BASIN_NPZ naming a file the drivers read no
+    per-basin K, so the gate must not ask for one."""
+    for knob in ("ISMIP7_K_PER_BASIN_NPZ", "ISMIP7_K_SCALE"):
+        monkeypatch.delenv(knob, raising=False)
+    dT = tmp_path / "deltaT_per_basin_1000_K8.500e-05.npz"
+    np.savez(dT, K=8.5e-5)
+    monkeypatch.setenv("ISMIP7_DELTAT_PER_BASIN_NPZ", str(dT))
+    assert not [m for m in _shared(monkeypatch, tmp_path) if "per-basin" in m]
+
+
+def test_a_named_deltat_file_that_is_absent_is_reported(monkeypatch, tmp_path):
+    monkeypatch.delenv("ISMIP7_K_SCALE", raising=False)
+    monkeypatch.setenv("ISMIP7_DELTAT_PER_BASIN_NPZ", str(tmp_path / "nope.npz"))
+    missing = _shared(monkeypatch, tmp_path)
+    assert any("ISMIP7_DELTAT_PER_BASIN_NPZ" in m and "does not exist" in m
+               for m in missing)

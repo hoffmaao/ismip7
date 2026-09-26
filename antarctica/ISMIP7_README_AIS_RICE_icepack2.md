@@ -39,7 +39,8 @@ shallow-shelf formulation on Firedrake 2026.4.1)
    adjustment theta, log fluidity adjustment phi, and the velocity field
    consistent with them.
 3. The velocity misfit (median 16-19 m/yr over observed nodes; the figure is
-   mesh-specific and is to be re-measured on the chosen production mesh),
+   mesh-specific and is to be re-measured on the production mesh once its
+   MAP exists),
    the grounding-line discharge scored against the flux
    the observed velocity carries across the same facets
    (`antarctica/scripts/score_map.py`), a check that a forward re-solve
@@ -63,19 +64,28 @@ shallow-shelf formulation on Firedrake 2026.4.1)
 
 6. Ocean melt: the ISMIP7 quadratic parameterisation of Burgard et al.
    (2022), local-quadratic variant (TF_avg = TF), with one constant
-   `sin(alpha)` = 5.115e-3 on every shelf. This is the ISMIP7 reference's
-   mean Antarctic slope and the value the toolbox's K percentiles (K05
-   4.75e-5, K50 8.5e-5, K95 1.375e-4, July 2026) were sampled with; the
-   model's own draft slope is kept as an option only
-   (`ISMIP7_MELT_SLOPE=local`; **[confirm #26]**, see
-   `FORWARD_RUN_READINESS.md` action 5). Constants from `multimelt.constants`.
-   K is dimensionless and per IMBIE basin, fitted with
-   `antarctica/scripts/calibrate_melt.py` to the observed basin totals
-   through the model's own melt path; the forward applies this per-basin
-   field and `ISMIP7_K_SCALE` multiplies it. K* = 4.06e-5 on the 865 Gt/yr
-   table (2500 m mesh) and 4.46e-5 on the July 2026 table (2 km mesh), just
-   under K05; see `GEOMETRY_DISCRETIZATION.md`.
-   **[confirm #42]** that every submitted run read this calibration. Thermal
+   `sin(alpha)` = 5.115e-3 on every shelf, the ISMIP7 reference's mean
+   Antarctic slope. Constants from `multimelt.constants`. The calibration
+   follows the protocol: one dimensionless K for every shelf and a
+   thermal-forcing offset per IMBIE basin. K = 6.5e-5 is the K50 of the
+   toolbox's four-term objective (`calculate_objective_function`, vendored
+   unchanged) run through the model's own DG0 melt path on the 1000 m /
+   10 km production mesh, with the offsets fitted for every K first (within
+   ±3 K) and the objective restricted to the K whose offsets keep present-day
+   thermal forcing plausible (every floating cell at or above -1.8 °C, at
+   most 25 percent of any basin's floating area below -1.0 °C or above
+   5.5 °C). That selection gives K05 2.5e-5 and K95 2.525e-4; the toolbox
+   notebook's own are 4.75e-5, 8.5e-5 and 1.375e-4. The offsets at K50,
+   refitted on the submission mesh's own cells (Rice's build of it), run
+   from -0.68 K to +1.20 K (Amundsen) and bring every basin to its total in
+   the July 2026 table (1067.4 Gt/yr). The group chose K50 on 25 September
+   2026 (issue 26); the file is tracked as
+   `antarctica/calibration/deltaT_per_basin_1000_K6.500e-05.npz`, and every
+   run reads it unless another is named. The forward applies exactly the
+   melt it was fitted to: the same cells (floating and holding ice), slope
+   and geometry, and it refuses an offsets file fitted under other settings.
+   **[confirm #42]** that every submitted run read this calibration: each
+   run's provenance line and report name the file and its sha256. Thermal
    forcing (`tf`) and salinity (`so`) are read at the cell's draft from the
    ISMIP7 ocean forcing, nearest neighbour in depth and in the plane, and
    used as provided: no smoothing inside the cavities (discussion #11: the
@@ -128,8 +138,8 @@ shallow-shelf formulation on Firedrake 2026.4.1)
 11. The control holds the 2000-2029 climate constant, with the
     apparent-mass-balance correction. Its ocean is the ESM's own `ctrl` tree
     (`tf` and `so`, v3), read and melted as in the projections (item 6), so
-    the per-basin K fitted against the 30_sep OI climatology applies
-    unchanged to every ESM ocean. Its SMB is the RACMO climatology, the
+    the K and per-basin offsets fitted against the 30_sep OI climatology
+    apply unchanged to every ESM ocean. Its SMB is the RACMO climatology, the
     baseline the projections add the ISMIP7 anomalies to after re-referencing
     them to the 2000-2029 pool (historical 2000-2014 and ssp126 2015-2029);
     in that frame RACMO is the 2000-2029 climate. C009 and C010 differ in
@@ -194,25 +204,26 @@ PPE / ESM participation: **[confirm #38]**.
 Summary paragraph: **[confirm, draft #38]** icepack2 is a finite-element
 shallow-shelf model on Firedrake in its dual (velocity, membrane stress,
 basal stress) formulation, with a first-order upwind finite-volume
-thickness transport on the same unstructured mesh (resolution **[confirm #20]**,
-pending the 1000 m inversions: 2 km at the grounding line coarsening to
-180 km in the interior, or 1000 m / 10 km), an adjoint initialisation to
+thickness transport on the same unstructured mesh (1000 m near the
+grounding line and calving front coarsening to 10 km in the interior, with
+a 20 km ice-free buffer around the initial ice outline, and a 0.025 yr
+step), an adjoint initialisation to
 MEaSUReS velocities and observed thickness change, regularised Coulomb
-sliding, the ISMIP7 quadratic mixed-slope ocean melt with per-basin
-calibration, a pinned or level-set calving front, and the ISMIP7 collapse
-masks. References: Shapero et al. 2021 (icepack); Burgard et al. 2022;
-Hahn, Mikula and Frolkovic 2025; Smith et al. 2020.
+sliding, the ISMIP7 quadratic mixed-slope ocean melt with one K and a
+thermal-forcing offset per basin, a pinned or level-set calving front, and
+the ISMIP7 collapse masks. References: Shapero et al. 2021 (icepack);
+Burgard et al. 2022; Hahn, Mikula and Frolkovic 2025; Smith et al. 2020.
 
 ## Model Characteristic Table
 
 | Characteristic | Main suite of experiments | PPE change? |
 |---|---|---|
 | Mesh discretisation | Delaunay triangulation (gmsh), adaptive size field | no |
-| Native grid | H: anisotropic; resolution **[confirm #20]**, pending the 1000 m inversions: the 2 km / 180 km adaptive mesh, 2 km at the grounding line and calving front to 180 km in the interior (246,677 cells), as previously run; or `antarctica_10000_1000_buffered20000`, the 1000 m / 10 km gmsh mesh (1,869,088 vertices) that has been the code default since PR #7 and on which no inversion has yet been run. V: vertically integrated (shallow shelf) | no |
+| Native grid | H: isotropic triangles, 1000 m near the grounding line and calving front coarsening to 10 km in the interior (sized by distance from the grounding line and by strain rate on outlet glaciers), with a 20 km ice-free buffer around the initial ice outline: `antarctica_10000_1000_buffered20000`, 1,869,252 vertices, Rice's build, on which the initial state is inverted. V: vertically integrated (shallow shelf) | no |
 | Native projection | EPSG:3031, same as BedMachine | no |
 | Interpolation to diagnostic grid | conservative: exact cell-pixel overlap areas (supermesh) onto the 8 km grid; whole-pixel means for thickness, fractions and every flux, so a flux times the pixel area sums to the model's integral (`acabf` is fill outside the model domain, `libmassbffl` where no ice floats at year end); covered-part means for elevations | no |
 | Time integration | transport-first split: implicit Euler thickness transport, then the diagnostic solve at the new geometry; first order | no |
-| Time step | **[confirm #20]**, pending the 1000 m inversions: 0.1 yr on the adaptive mesh, as previously run; 0.05 yr on the 1000 m / 10 km mesh, the code default since PR #7 | no |
+| Time step | 0.025 yr | no |
 | Advection scheme | upwind finite volume, DG0, implicit; first order | no |
 | Ice flow mechanics | shallow-shelf approximation, dual finite-element formulation (CG1 velocity, DG0 membrane and basal stress) | no |
 | Ice rheology | n = 3 (composite with a linear floor for thin ice) | no |

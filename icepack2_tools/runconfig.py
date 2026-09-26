@@ -22,18 +22,37 @@ Pure Python: importable without Firedrake so the preflight and the report stay
 fast.
 """
 
+import hashlib
+import json
 import os
 
-# 1000 m / 10 km is the production pair (``antarctica_10000_1000_buffered20000``):
-# the finest mesh the Quartz timing matrix carries through a 285-year run in
-# two days, under scpc_gamg on 64 ranks
-# (antarctica/TIMING_MATRIX_QUARTZ_SCPC_GAMG.md). It is the pair the batch
-# runners export (batch_runners/site_env.sh) and the README documents; until
-# 2026-09-19 that was 2500 m / 64 km. The old 8000 and 32000 module-level
-# defaults were dev-probe leftovers; a coarse probe exports ISMIP7_LC /
-# ISMIP7_LC_COARSE instead of disagreeing with the gate about what "unset" means.
+# 1000 m / 10 km is the production pair (``antarctica_10000_1000_buffered20000``),
+# the submission mesh since 25 September 2026 (issue 20): the finest mesh the
+# Quartz timing matrix carries through a 285-year run in two days at dt 0.05,
+# under scpc_gamg on 64 ranks (antarctica/TIMING_MATRIX_QUARTZ_SCPC_GAMG.md).
+# It is the pair the batch runners export (batch_runners/site_env.sh) and the
+# README documents; until 2026-09-19 that was 2500 m / 64 km. The old 8000 and
+# 32000 module-level defaults were dev-probe leftovers; a coarse probe exports
+# ISMIP7_LC / ISMIP7_LC_COARSE instead of disagreeing with the gate about what
+# "unset" means.
 LC_DEFAULT = "1000"
 LC_COARSE_DEFAULT = "10000"
+# Metres the ice outline is pushed outward before meshing, so the calving
+# front sits inside the domain beside ice-free cells (the `_buffered<N>` of
+# mesh_naming.mesh_basename). 20 km is the production mesh's (issue 20); the
+# 32 km probes export 0. The outline extraction used to default to 0 while the
+# mesh names defaulted to 20000, so a bare call could build an unbuffered mesh
+# under a buffered name.
+BUFFER_M_DEFAULT = "20000"
+# The production forward step [yr], chosen with the mesh (issue 20). The timing
+# matrix's rule gives 0.05 at 1000 m. At 0.05 a 1 km control from a transferred
+# 2 km Budd MAP diverged in 2016.1 at Rice, and on Quartz it grew a two-step
+# grounded/floating oscillation at the Lambert confluence (MAP_CHECK.md). At
+# 0.025 the same control ran five years, and Rice's 1 km historicals ran 78
+# (CESM2-WACCM) and 66 (MRI-ESM2-0) model years with no rescue step.
+# batch_runners/projection.sbatch exports the same value, and a test holds the
+# two equal.
+DT_DEFAULT = "0.025"
 GEOMETRY_SPACE_DEFAULT = "dg0"
 FRICTION_DEFAULT = "budd"
 # The closed set friction() accepts; an unknown spelling is an error at
@@ -125,6 +144,16 @@ def lc():
 def lc_coarse():
     r"""Target edge length [m] in the coarse region of the mesh."""
     return int(os.environ.get("ISMIP7_LC_COARSE", LC_COARSE_DEFAULT))
+
+
+def dt():
+    r"""Forward time step [yr]."""
+    return float(os.environ.get("ISMIP7_DT", DT_DEFAULT))
+
+
+def buffer_m():
+    r"""Outline buffer [m] a mesh is built with, and named by."""
+    return float(os.environ.get("ISMIP7_BUFFER_M", BUFFER_M_DEFAULT))
 
 
 def geometry_space():
@@ -400,6 +429,39 @@ def front_advance():
     return value
 
 
+# The year the initial geometry is dated (BedMachine v4.1's nominal year, the
+# year the MAPs are inverted at), and the window of the Smith et al. (2020)
+# mean dH/dt that dates a cold start before it (issue #117).
+GEOMETRY_YEAR = 2015.0
+DHDT_WINDOW = (2003.0, 2019.0)
+
+
+def geometry_backdate_years(t_start):
+    r"""Years of the Smith mean dH/dt a cold start at ``t_start`` subtracts from
+    the 2015 geometry (issue #117, 25 September 2026 meeting: "2003, subtracting
+    the change map").
+
+    ``ISMIP7_GEOMETRY_BACKDATE`` names the years outright (``0`` turns it off).
+    Unset, a start from 2003 up to 2015 subtracts ``2015 - t_start`` years, a
+    start at or after 2015 none, and a start before 2003 is refused: the
+    2003 to 2019 mean would be extrapolated past its own window.
+    """
+    named = os.environ.get("ISMIP7_GEOMETRY_BACKDATE", "").strip()
+    if named:
+        return float(named)
+    years = GEOMETRY_YEAR - float(t_start)
+    if years <= 0.0:
+        return 0.0
+    if float(t_start) < DHDT_WINDOW[0]:
+        raise ValueError(
+            f"a cold start at {t_start:g} would subtract {years:g} years of the "
+            f"{DHDT_WINDOW[0]:g} to {DHDT_WINDOW[1]:g} Smith mean dH/dt from the "
+            f"{GEOMETRY_YEAR:g} geometry, past the window it was measured over; set "
+            f"ISMIP7_GEOMETRY_BACKDATE=0 to start from the {GEOMETRY_YEAR:g} "
+            f"geometry as it is, or to the years to subtract")
+    return years
+
+
 def apparent_mb_mode():
     r"""``ISMIP7_APPARENT_MB``: the apparent-mass-balance init, or None for off.
 
@@ -452,6 +514,25 @@ def auto_resume():
         ) from None
 
 
+def _int_flag(name, default):
+    r"""An integer flag read like ``auto_resume``: unset or empty is
+    ``default``, ``0`` is off, any other integer on, anything else an error."""
+    value = (os.environ.get(name) or "").strip()
+    if not value:
+        return default
+    try:
+        return int(value) != 0
+    except ValueError:
+        raise ValueError(f"{name} must be an integer flag, got {value!r}") from None
+
+
+def mesh_build_check():
+    r"""``ISMIP7_MESH_BUILD_CHECK``: refuse a MAP or restart whose mesh has the
+    name of the ``ISMIP7_MESH`` file and a different triangulation, as two
+    sites' builds of the production mesh do. On unless ``0``."""
+    return _int_flag("ISMIP7_MESH_BUILD_CHECK", True)
+
+
 # ── Roots a second checkout does not carry ──────────────────────────────
 # The code moves with the invocation; the large gitignored artifacts do not.
 # site_env.sh names them for the shell half of a run; these are the Python
@@ -469,58 +550,125 @@ def obs_data_root():
                           os.path.join(_ANTARCTICA, "data"))
 
 
+# ── The melt calibration every run reads ─────────────────────────────────
+# Issue 26, decided on 25 September 2026: K50 of IU's rule-based toolbox
+# selection (scripts/select_melt_parameters.py, run record
+# calibration-melt-toolbox-1km-rule), one K with a thermal-forcing offset per
+# IMBIE basin, fitted through the forward's own DG0 melt path on the
+# 1000 m / 10 km production mesh. The file is tracked, so a fresh clone melts
+# with it and nothing is copied or rerun. Its sidecar (<name>.source.json)
+# records the file's sha256 and the conventions the fit holds under, which
+# the forward checks (forcing.check_melt_contract).
+MELT_CALIBRATION_DEFAULT = os.path.join(
+    _ANTARCTICA, "calibration", "deltaT_per_basin_1000_K6.500e-05.npz")
+
+# Knobs that no longer shape a run. They are refused rather than ignored, so
+# a job script written before the change fails at startup.
+REMOVED_MELT_KNOBS = {
+    "ISMIP7_K_MELT": "the scalar K fallback went with the tracked melt "
+                     "calibration; a run takes K from its calibration file",
+}
+
+
+def file_sha256(path):
+    r"""sha256 of a file, as hex."""
+    digest = hashlib.sha256()
+    with open(path, "rb") as f:
+        for block in iter(lambda: f.read(1 << 20), b""):
+            digest.update(block)
+    return digest.hexdigest()
+
+
+def melt_calibration_sidecar(npz_path):
+    r"""The ``.source.json`` beside a melt calibration npz."""
+    return os.path.splitext(npz_path)[0] + ".source.json"
+
+
+def melt_calibration_contract(npz_path):
+    r"""The sidecar of ``npz_path`` as a dict, or None where there is none.
+
+    It records what the npz does not: the file's sha256, the mesh it was
+    fitted on, the raster sampling of its geometry and the observation table.
+    The tracked default always has one; a file named with
+    ISMIP7_DELTAT_PER_BASIN_NPZ may."""
+    sidecar = melt_calibration_sidecar(npz_path)
+    if not os.path.exists(sidecar):
+        return None
+    with open(sidecar) as f:
+        return json.load(f)
+
+
 def deltat_per_basin_npz():
-    r"""``ISMIP7_DELTAT_PER_BASIN_NPZ``: the protocol's per-basin adjustment.
+    r"""The per-basin thermal-forcing offsets a run melts with, or None on the
+    legacy per-basin K path.
 
     The ISMIP7 ocean-forcing recommendation calibrates ONE dimensionless K
-    from the 4-term toolbox and then, optionally, a thermal-forcing offset
-    deltaT_b per IMBIE basin at that K (``optimise_deltaT``); a per-basin K
-    is not part of it. ``antarctica/scripts/calibrate_deltaT.py`` writes the
-    file, the ocean callbacks add the offset to TF before the melt law and
-    melt with the file's K everywhere, and no driver reads the per-basin K
-    file. Unset: the per-basin K path.
+    from the 4-term toolbox and then a thermal-forcing offset deltaT_b per
+    IMBIE basin at that K (``optimise_deltaT``); a per-basin K is not part of
+    it. The ocean callbacks add the offset to TF before the melt law and melt
+    with the file's K everywhere.
+
+    ``ISMIP7_DELTAT_PER_BASIN_NPZ`` names the file; unset, it is
+    ``MELT_CALIBRATION_DEFAULT``. ``ISMIP7_K_PER_BASIN_NPZ`` selects the legacy
+    per-basin K path instead (``k_per_basin_npz``), and then this returns
+    None. Naming both is refused.
 
     Checked where it is read, so a driver that calls this before its model
-    setup fails before the MAP is loaded: the file must exist, and
-    ``ISMIP7_K_SCALE`` must be 1, because the offsets were fitted at the
-    file's K and a scaled K invalidates them."""
+    setup fails before the MAP is loaded: the file must exist, it must match
+    the sha256 its sidecar records, and ``ISMIP7_K_SCALE`` must be 1, because
+    the offsets were fitted at the file's K and a scaled K invalidates them."""
+    for knob, why in REMOVED_MELT_KNOBS.items():
+        if os.environ.get(knob):
+            raise ValueError(f"{knob} is no longer read: {why}. Unset it.")
     path = os.environ.get("ISMIP7_DELTAT_PER_BASIN_NPZ") or None
-    if path is None:
+    legacy = os.environ.get("ISMIP7_K_PER_BASIN_NPZ") or None
+    if path is not None and legacy is not None:
+        raise ValueError(
+            f"ISMIP7_DELTAT_PER_BASIN_NPZ={path} and "
+            f"ISMIP7_K_PER_BASIN_NPZ={legacy} are both set. A run melts with "
+            f"one calibration: unset one of them.")
+    if legacy is not None:
         return None
-    if not os.path.exists(path):
+    if path is None:
+        path = MELT_CALIBRATION_DEFAULT
+        if not os.path.exists(path):
+            raise FileNotFoundError(
+                f"The tracked melt calibration {path} is missing from this "
+                f"checkout. Restore it with git checkout, or name another "
+                f"file with ISMIP7_DELTAT_PER_BASIN_NPZ.")
+    elif not os.path.exists(path):
         raise FileNotFoundError(
             f"ISMIP7_DELTAT_PER_BASIN_NPZ={path} does not exist. Write it with "
             f"antarctica/scripts/calibrate_deltaT.py, or unset the knob for "
-            f"the per-basin K path.")
+            f"the tracked calibration.")
+    contract = melt_calibration_contract(path)
+    if contract is not None and contract.get("sha256") != file_sha256(path):
+        raise ValueError(
+            f"{path} does not match the sha256 its sidecar "
+            f"{melt_calibration_sidecar(path)} records. The file changed "
+            f"without its record: restore it with git checkout, or rewrite "
+            f"the sidecar with the calibration that produced it.")
     k_scale = float(os.environ.get("ISMIP7_K_SCALE", "1.0"))
     if k_scale != 1.0:
         raise ValueError(
-            f"ISMIP7_DELTAT_PER_BASIN_NPZ={path} and ISMIP7_K_SCALE={k_scale:g} "
-            f"are both set. The offsets were fitted at the file's K, so a "
-            f"scaled K invalidates them: unset ISMIP7_K_SCALE, or refit with "
-            f"calibrate_deltaT.py --K at the K you want.")
+            f"The melt calibration {path} and ISMIP7_K_SCALE={k_scale:g} "
+            f"are both in effect. The offsets were fitted at the file's K, so "
+            f"a scaled K invalidates them: unset ISMIP7_K_SCALE, or refit with "
+            f"calibrate_deltaT.py --K at the K you want and name the file "
+            f"with ISMIP7_DELTAT_PER_BASIN_NPZ.")
     return path
 
 
-def k_per_basin_candidates(results_dir, lc_value):
-    r"""Where to look for the calibrated per-basin K, in order.
+def k_per_basin_npz():
+    r"""``ISMIP7_K_PER_BASIN_NPZ``: a per-basin K file from calibrate_melt.py,
+    the calibration the runs used before issue 26 was decided, or None.
 
-    ``ISMIP7_K_PER_BASIN_NPZ`` wins; then this mesh's calibration and the
-    2500 m fallback (16 basin scalars remapped through the IMBIE2 8 km grid, so
-    mesh-independent). The file is gitignored, so a checkout that does not carry
-    it warns and falls back to an SMB-only melt source; name it with the
-    override when it lives elsewhere.
-    """
-    override = os.environ.get("ISMIP7_K_PER_BASIN_NPZ")
-    if override:
-        return [override]
-    names = [f"calibrated_K_per_basin_{lc_value}.npz",
-             "calibrated_K_per_basin_2500.npz"]
-    # At lc=2500 the two names coincide.
-    seen, out = set(), []
-    for name in names:
-        path = os.path.join(results_dir, name)
-        if path not in seen:
-            seen.add(path)
-            out.append(path)
-    return out
+    It is read only when named: no directory is searched, so a run on a
+    machine that happens to hold an old file still melts with the tracked
+    calibration. A named file that does not exist is refused."""
+    path = os.environ.get("ISMIP7_K_PER_BASIN_NPZ") or None
+    if path is not None and not os.path.exists(path):
+        raise FileNotFoundError(
+            f"ISMIP7_K_PER_BASIN_NPZ={path} does not exist. Unset it for the "
+            f"tracked melt calibration.")
+    return path

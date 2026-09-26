@@ -1226,6 +1226,54 @@ def main():
     slvr = NonlinearVariationalSolver(prob, solver_parameters=sparams)
     n_flow.assign(n_flow_val)
     m_slide.assign(m_slide_val)
+    ramp_params = diagnostic_solver_parameters(lane_solver_mode)
+    ramp_params.update(_monitor_options)
+    ramp_J, ramp_pre_jacobian = None, None
+    if linearization_state(lane_solver_mode) == "frozen":
+        from icepack2_tools.preconditioners import frozen_linearization
+        ramp_J, ramp_pre_jacobian = frozen_linearization(F, z)
+    ramp_solver = NonlinearVariationalSolver(
+        NonlinearVariationalProblem(
+            F, z, J=ramp_J, form_compiler_parameters=fc_params
+        ),
+        solver_parameters=ramp_params,
+        options_prefix="ismip7_inversion_continuation_",
+        pre_jacobian_callback=ramp_pre_jacobian,
+    )
+    ramp_ladder = ladder(continuation_steps())
+    def _ramp_solve(attempt, step, steps, t):
+        t0 = perf_counter()
+        try:
+            ramp_solver.solve()
+        finally:
+            snes = ramp_solver.snes
+            PETSc.Sys.Print(
+                f"    rung {attempt} step {step}/{steps} "
+                f"n_flow={float(n_flow):.4g} m_slide={float(m_slide):.4g}: "
+                f"{_snes_reason_name(snes.getConvergedReason())} "
+                f"snes_its={snes.getIterationNumber()} "
+                f"linear_its={snes.getLinearSolveIterations()} "
+                f"fnorm={snes.getFunctionNorm():.3e} "
+                f"{perf_counter() - t0:.1f}s"
+            )
+
+
+    def _reramp_at_current_controls():
+        r"""Re-climb the exponent ladder, unannotated, at the controls the
+        module-level (theta, phi) hold, from the state z holds: the rescue
+        for a line-search trial point where the single Newton solve of the
+        annotated forward diverges (the 32 km sum-likelihood run stopped at
+        iteration 5 on three such trials). Leaves the exponents at their
+        targets whatever happens."""
+        try:
+            _, steps = ramp_exponents(
+                _ramp_solve, z, n_flow, m_slide, n_flow_val, m_slide_val,
+                ramp_ladder, report=PETSc.Sys.Print)
+        finally:
+            n_flow.assign(n_flow_val)
+            m_slide.assign(m_slide_val)
+        return steps
+
     if skip_continuation:
         if warm_loaded_z:
             PETSc.Sys.Print(
@@ -1250,21 +1298,6 @@ def main():
         # 1 km production mesh its factorisation failed mid-ramp
         # (DIVERGED_LINEAR_SOLVE, job 1612624) where the forward's condensed
         # GAMG had climbed the same ramp on the same mesh and MAP.
-        ramp_params = diagnostic_solver_parameters(lane_solver_mode)
-        ramp_params.update(_monitor_options)
-        ramp_J, ramp_pre_jacobian = None, None
-        if linearization_state(lane_solver_mode) == "frozen":
-            from icepack2_tools.preconditioners import frozen_linearization
-            ramp_J, ramp_pre_jacobian = frozen_linearization(F, z)
-        ramp_solver = NonlinearVariationalSolver(
-            NonlinearVariationalProblem(
-                F, z, J=ramp_J, form_compiler_parameters=fc_params
-            ),
-            solver_parameters=ramp_params,
-            options_prefix="ismip7_inversion_continuation_",
-            pre_jacobian_callback=ramp_pre_jacobian,
-        )
-        ramp_ladder = ladder(continuation_steps())
         PETSc.Sys.Print(
             f"Warm start (continuation n_flow 1→{n_flow_val:.1f}, "
             f"m_slide 1→{m_slide_val:.1f}; "
@@ -1272,22 +1305,6 @@ def main():
             f"{linearization_state(lane_solver_mode)} linearization, "
             f"steps {'/'.join(str(s) for s in ramp_ladder)})..."
         )
-
-        def _ramp_solve(attempt, step, steps, t):
-            t0 = perf_counter()
-            try:
-                ramp_solver.solve()
-            finally:
-                snes = ramp_solver.snes
-                PETSc.Sys.Print(
-                    f"    rung {attempt} step {step}/{steps} "
-                    f"n_flow={float(n_flow):.4g} m_slide={float(m_slide):.4g}: "
-                    f"{_snes_reason_name(snes.getConvergedReason())} "
-                    f"snes_its={snes.getIterationNumber()} "
-                    f"linear_its={snes.getLinearSolveIterations()} "
-                    f"fnorm={snes.getFunctionNorm():.3e} "
-                    f"{perf_counter() - t0:.1f}s"
-                )
 
         _, ramp_steps = ramp_exponents(
             _ramp_solve, z, n_flow, m_slide, n_flow_val, m_slide_val,
@@ -2328,24 +2345,39 @@ def main():
             try:
                 J = forward(theta_ctrl, phi_ctrl)
             except fd.ConvergenceError:
-                # A line-search trial point where the forward Newton solve
-                # diverges (the 32 km sum-likelihood run: iteration 5's
-                # trial put log-fluidity at -20). The scipy path's rescue,
-                # carried over: restore the last converged state and hand
-                # TAO an inflated objective with no control dependence, so
-                # its line search backtracks instead of the run ending here
-                # with the trial point written into the MAP.
+                # A line-search trial point where the single Newton solve
+                # of the forward diverges (the trial is far from the last
+                # converged state). First rescue: re-climb the exponent
+                # ladder at the trial controls, unannotated, from the last
+                # converged state, then take the annotated solve from there.
+                # Failing that, the scipy path's rescue: restore the state
+                # and hand TAO an inflated objective with no control
+                # dependence, so its line search backtracks instead of the
+                # run ending here.
                 z.assign(z_backup)
                 if not np.isfinite(last_good_obj[0]):
                     raise RuntimeError(
                         "First forward solve failed - the inversion cannot start "
                         "(fewer MPI ranks for a small mesh; check the fluidity prior).")
+                stop_manager()
                 PETSc.Sys.Print(
-                    "  [!] Forward solve failed at a trial point; returning an "
-                    "inflated objective so the line search backtracks")
-                J = Functional(name="J_failed")
-                J.assign(float(10.0 * last_good_obj[0]))
-                return J
+                    "  [!] Forward solve failed at a trial point; re-climbing the "
+                    "continuation there")
+                try:
+                    _reramp_at_current_controls()
+                    reset_manager()
+                    start_manager()
+                    J = forward(theta_ctrl, phi_ctrl)
+                except fd.ConvergenceError:
+                    z.assign(z_backup)
+                    reset_manager()
+                    start_manager()
+                    PETSc.Sys.Print(
+                        "  [!] The continuation failed there too; returning an "
+                        "inflated objective so the line search backtracks")
+                    J = Functional(name="J_failed")
+                    J.assign(float(10.0 * last_good_obj[0]))
+                    return J
             J.addto(_prior_energy_form(theta_ctrl, "theta"))
             J.addto(_prior_energy_form(phi_ctrl, "phi"))
             # The last few evaluations with their controls: the monitor picks
@@ -2408,7 +2440,17 @@ def main():
                     "the last evaluated point")
             if its == 0:
                 _check_handoff(float(f_val), tao=tao)
-            if _ftol_stop.update(iteration_count[0], f_val):
+            # An accepted point identical to the last one is a line search
+            # that found no new point (every trial diverged), not a
+            # functional decrease of zero: it must not read as convergence.
+            _x_acc = np.concatenate([func_to_global(theta), func_to_global(phi)])
+            _unchanged = (its > 0 and last_good_x[0] is not None
+                          and np.array_equal(_x_acc, last_good_x[0]))
+            if _unchanged:
+                PETSc.Sys.Print(
+                    "    (the line search accepted no new point this iteration; "
+                    "not a functional-decrease stop)")
+            elif _ftol_stop.update(iteration_count[0], f_val):
                 tao.setConvergedReason(PETSc.TAO.ConvergedReason.CONVERGED_USER)
             now = perf_counter()
             t_iter = now - _t_last[0]

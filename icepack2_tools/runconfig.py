@@ -266,6 +266,17 @@ def calving_law():
     return value
 
 
+FRONT_HMIN_DEFAULT = "1.0"    # m
+
+
+def front_hmin():
+    r"""``ISMIP7_FRONT_HMIN`` [m]: the thickness below which a cell holds no
+    ice. It draws the fixed front's t=0 extent and decides where the ocean
+    drag may act (``front.ocean_drag_cells``), in the forward and the
+    inversion alike."""
+    return float(os.environ.get("ISMIP7_FRONT_HMIN", FRONT_HMIN_DEFAULT))
+
+
 def fixed_front():
     r"""``ISMIP7_FIXED_FRONT``: the legacy pinned front.
 

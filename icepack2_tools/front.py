@@ -9,7 +9,8 @@ they can be exercised without standing up a whole run.
 import numpy as np
 
 __all__ = ["retreat_slivers", "clear_reference_where_ice_free", "clamp_thickness",
-           "front_connected", "facet_neighbours", "collapse_cell_counts",
+           "front_connected", "facet_neighbours", "ocean_drag_cells",
+           "collapse_cell_counts",
            "collapse_banner", "collapse_csv_fields", "COLLAPSE_MARKER",
            "COLLAPSE_CSV_COLUMNS", "FRONT_OWNER_MARKER"]
 
@@ -185,6 +186,29 @@ def collapse_csv_fields(header, counts):
     if COLLAPSE_CSV_COLUMNS[-1] not in header:
         return ""
     return "," + ",".join(str(int(c)) for c in counts)
+
+
+def ocean_drag_cells(ice, neighbours_of, extent0):
+    r"""The cells the floor-cell ocean drag may act on: open water that holds
+    no ice now, shares no facet with a cell that does, and lies outside the
+    t=0 ice extent.
+
+    ``ice`` is the per-cell boolean "holds ice now" (thickness at least the
+    front threshold), ``extent0`` the same test on the t=0 thickness, and
+    ``neighbours_of(mask)`` the cells sharing a facet with a cell of ``mask``
+    (:func:`facet_neighbours`). Every other cell, floating or grounded, gets
+    no drag.
+
+    The drag exists to give the ice-free buffer some velocity coercivity. Left
+    on everywhere below ``h_ocean`` it also acted on thin floating ice and on
+    the water row the front's vertices share, and held the front back: at
+    1875 in the 1 km CESM2-WACCM historical the floating front moved at 0.12
+    of the observed speed (median; 0.09 summed), against 0.83 one cell further
+    in, and only 19 Gt/yr crossed into the ice-free cells as calving. Keeping
+    the t=0 extent drag-free as well means a front that retreats inside it
+    meets no drag either, before a restart and after.
+    """
+    return ~ice & ~neighbours_of(ice) & ~extent0
 
 
 def facet_neighbours(Q_dg):

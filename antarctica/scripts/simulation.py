@@ -72,7 +72,7 @@ from icepack2_tools.geometry import sample_to_geometry
 from icepack2_tools.naming import map_basename
 from icepack2_tools.front import (
     clamp_thickness, clear_reference_where_ice_free, retreat_slivers,
-    facet_neighbours, front_connected,
+    facet_neighbours, front_connected, ocean_drag_cells,
     collapse_banner, collapse_cell_counts, collapse_csv_fields,
     COLLAPSE_CSV_COLUMNS, COLLAPSE_MARKER, FRONT_OWNER_MARKER,
 )
@@ -91,6 +91,7 @@ from icepack2_tools.runconfig import (
     # it from this module alongside latest_checkpoint, so they resolve the
     # knob through one import rather than each reaching into runconfig.
     fixed_front as _fixed_front, auto_resume, apparent_mb_mode,  # noqa: F401
+    front_hmin as _front_hmin,
 )
 DATA_DIR = obs_data_root()
 from icepack2_tools.solverconfig import (
@@ -228,6 +229,7 @@ def setup_model(restart_from=None, *, allow_timing_cache_a_ref=False):
     use_residual = friction in ("regularized_coulomb", "budd")
     use_rc = use_residual  # geometry/alpha/h_clamp handling is shared
     drag_mask = None       # set in the residual branch below
+    drag_rule = None       # ditto: rewrites drag_mask for a new thickness
 
     is_restart = restart_from is not None
     # Prefer the MAP inverted under this geometry space. Falling back to the
@@ -894,12 +896,35 @@ def setup_model(restart_from=None, *, allow_timing_cache_a_ref=False):
         _stabilizers = residual_stabilizers()
         ocean_drag = _stabilizers["ocean_drag"]
         h_ocean = _stabilizers["h_ocean"]
-        # DG0 gate on the ocean drag, 1 everywhere unless a level-set front
-        # is running, which zeroes it in the water cells next to the front
-        # each step (icepack2_tools.levelset). A live Function in the
-        # residual, so the gate changes without re-assembly.
+        # DG0 gate on the ocean drag, a live Function in the residual so the
+        # gate changes without re-assembly. The drag never touches ice,
+        # floating or grounded: it acts only in open water outside the t=0
+        # extent that shares no facet with a cell holding ice now
+        # (front.ocean_drag_cells, which has the measurement of the front it
+        # used to pin). The t=0 extent is H_init on a restart and the
+        # starting thickness on a cold start, so a restart applies the same
+        # rule; run_simulation re-applies it after every transport advance,
+        # and a level-set front, when one runs, writes its own gate instead.
         drag_mask = Function(FunctionSpace(mesh, "DG", 0), name="drag_mask")
-        drag_mask.assign(1.0)
+        _Q0 = drag_mask.function_space()
+        _drag_neighbours_of = facet_neighbours(_Q0)
+        _drag_hmin = _front_hmin()
+        _drag_extent0 = Function(_Q0).project(
+            H if H_init is None else H_init).dat.data_ro >= _drag_hmin
+
+        def _drag_rule(h_cells):
+            r"""Write the ocean-drag gate for the per-cell thickness ``h_cells``."""
+            drag_mask.dat.data[:] = ocean_drag_cells(
+                h_cells >= _drag_hmin, _drag_neighbours_of, _drag_extent0)
+
+        drag_rule = _drag_rule
+        drag_rule(Function(_Q0).project(H).dat.data_ro)
+        _n_drag = mesh.comm.allreduce(int(drag_mask.dat.data_ro.sum()))
+        _n_cells = mesh.comm.allreduce(int(drag_mask.dat.data_ro.size))
+        PETSc.Sys.Print(
+            f"  Ocean drag gate: {_n_drag} of {_n_cells} cells, open water "
+            f"outside the t=0 extent a cell away from any ice (h < {_drag_hmin:g} m)"
+        )
         # Speed limiter: structurally present (threshold u_lim > 0) but INERT
         # by default - k_lim is a live Constant at 0 (term vanishes
         # identically; the cold continuation is unaffected, unlike a built-in
@@ -1457,6 +1482,9 @@ def setup_model(restart_from=None, *, allow_timing_cache_a_ref=False):
         # rebuilds it from the current thickness every step, and the `fixed`
         # law anchors on H_init below, so a restart needs no saved front.
         "drag_mask": drag_mask,
+        # Rewrites drag_mask from a per-cell thickness under the ocean-drag
+        # rule (front.ocean_drag_cells); None without a residual.
+        "drag_rule": drag_rule,
         # Residual builder for a time-dependent assimilation (None for the
         # legacy action formulation, which has no residual to rebuild).
         "build_F": _build_F if use_residual else None,
@@ -1740,7 +1768,7 @@ def run_simulation(
     # (RC mode / h_clamp_init=0) - with a clamped initial state every cell has
     # ice and the mask is empty.
     fixed_front = _fixed_front()
-    front_hmin = float(os.environ.get("ISMIP7_FRONT_HMIN", "1.0"))
+    front_hmin = _front_hmin()
     calving = _calving_law()
     # An external calving law (ctx["calving_law"], any object with
     # rate(model, t) -> UFL and describe(); hoffmaao/calving's laws.Law is
@@ -2436,6 +2464,7 @@ def run_simulation(
     level_set = None
     phi_entry = None
     last_c_mean = 0.0
+    drag_rule = ctx.get("drag_rule")
     if calving != "none":
         from icepack2_tools.levelset import LevelSet, initial_distance
         sig_g, sig_f = _calving_sigma_max()
@@ -2682,6 +2711,11 @@ def run_simulation(
             data[sliver] = 0.0
 
         _lift_h()
+        # The ocean-drag gate follows the ice: without a level set (which
+        # writes its own) the next diagnostic solve sees drag only in water
+        # outside the t=0 extent that no ice cell now touches.
+        if level_set is None and drag_rule is not None:
+            drag_rule(h_dg.dat.data_ro)
         m3 = m2 - calv_gt                                        # ∫h preserved by projection
         mass_now = float(assemble(h * dx)) * _RHO_I_SI / 1e12
         clamp_cg_gt = mass_now - m3          # Gt added by the CG floor after projection

@@ -40,6 +40,18 @@ from mpi4py import MPI
 
 from .mpi_stats import global_count, global_size
 
+def meshes_match(mesh_a, mesh_b, comm=None):
+    r"""Whether two meshes are plausibly the same mesh: the same global cell
+    and vertex counts. A warm start from a checkpoint on another mesh must
+    not carry that mesh's cell-wise geometry across, so the inversion asks
+    this before it decides what a warm start supplies."""
+    comm = comm if comm is not None else mesh_a.comm
+    def counts(m):
+        return (comm.allreduce(int(m.cell_set.size), op=MPI.SUM),
+                comm.allreduce(int(m.coordinates.dat.data_ro.shape[0]), op=MPI.SUM))
+    return counts(mesh_a) == counts(mesh_b)
+
+
 #: Relative point-location tolerance (on the reference cell) while a field is
 #: transferred. Zero would let floating-point error push a dof that sits on
 #: the shared outline outside; this keeps the outline and rejects anything a

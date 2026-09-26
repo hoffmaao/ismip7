@@ -188,6 +188,61 @@ OMP_NUM_THREADS=1 ISMIP7_FRICTION=budd ISMIP7_LC=32000 ISMIP7_LC_COARSE=320000 \
   mpiexec -n 8 python antarctica/scripts/inversion_icepack2.py
 ```
 
+## The ice front of a buffered mesh (issue #115)
+
+On a buffered mesh the ice front sits inside the domain, beside ice-free buffer
+cells. The floor-cell ocean drag (`ISMIP7_OCEAN_DRAG`, 1e-2 MPa yr/m, ramping to
+zero at `ISMIP7_H_OCEAN` = 10 m) acts in those cells, and the CG1 front nodes
+they share with the ice take it. The inversion and the legacy fixed-front mask
+(`ISMIP7_FIXED_FRONT`) keep the drag everywhere. A level-set front
+(`ISMIP7_CALVING`) keeps it only where the signed distance to the current ice
+extent exceeds one cell diameter, so every ice cell and the first ring or two
+of water lose it.
+
+Measured on the v4 2500/25000 timing cache, the 2.5 km Budd MAP's own state,
+with `antarctica/scripts/front_flux_check.py`. The front is the set of facets
+between t=0 ice (`H_init >= 1 m`) and the buffer, and fluxes are upwind:
+
+| state | floating front u.n (m/yr) | floating front flux (Gt/yr) | grounding-line flux (Gt/yr) |
+|---|---|---|---|
+| `velocity_obs` on the same facets | +82 | 168 | 2,139 |
+| t=0, drag on (the MAP) | +3.5 | 10.5 | 2,266 |
+| first solve with the level-set gate | +768 | 1,793 | 2,599 |
+
+At t=0 the deficit sits at the front nodes: floating ice 5 to 100 km behind
+the front moves at 419 to 496 m/yr, against 383 to 428 m/yr in
+`velocity_obs`. The gated solve speeds floating ice up at every distance, to
+1,362 m/yr within 5 km of the front and 1,519 to 1,950 m/yr from 25 to 250 km.
+The MAP's front band is slightly stiffer than the rest of the ice (mean log
+fluidity -0.13 against -0.04).
+
+Ten years from the same cache through `run_timing.py`, with no forcing and
+`ISMIP7_APPARENT_MB=div` (equal to balance without forcing), the two runs
+differing only in `ISMIP7_CALVING`; records `test-2500m-budd-legacy-front` and
+`test-2500m-budd-levelset-fixed` in `antarctica/runlog/`:
+
+| | legacy mask | level set, `ISMIP7_CALVING=fixed` |
+|---|---|---|
+| calving, 2016 / 2020 / 2024 means (Gt/yr) | 12.4 / 12.5 / 12.4 | 3,534 / 3,135 / 2,839 |
+| grounding-line flux, 2025 (Gt/yr) | 2,266 | 4,028 |
+| mass change, 2015 to 2025 (Gt) | -2 | -30,908 |
+| VAF change, 2015 to 2025 (mm SLE) | +0.004 | -18.8 |
+| fastest node (m/yr) | 4,611 | 81,018 at step 1, 14,161 in 2025 |
+| Newton iterations a step, mean / max | 5.0 / 9 | 8.8 / 16 |
+
+Every step of both runs converged on its first direct solve. The timing
+harness's speed tripwire (2e4 m/yr) stops the level-set run at step 1, so the
+ten-year run leaves it unset, as the production runners do. The apparent-MB
+reference is built from the drag-on velocity before the level set exists, so
+step 1 of both runs moves ice with the same velocity and the gated velocity
+first moves ice in step 2.
+
+A restart checks the loaded state against the residual with the drag on
+everywhere. From the level-set run's 2024.0 checkpoint that residual was 2.19e10
+against an acceptance of 7.84, so the restart re-solved the state with the
+drag on, and its first step calved 21.7 Gt/yr where the uninterrupted run
+calved 2,865.
+
 ## The per-basin melt K follows the geometry space (issue #30)
 
 `antarctica/scripts/calibrate_melt.py` melts on the same `ISMIP7_GEOMETRY_SPACE`

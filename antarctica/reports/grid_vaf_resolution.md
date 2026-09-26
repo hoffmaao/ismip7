@@ -22,6 +22,11 @@ a mesh, forms the pixel means the writer submits (`lithk` over the whole
 pixel, `topg` over the covered part), and sets the tool's integrand
 `max(lithk - max(-topg, 0) rho_w/rho_i, 0)` on them against the model's
 `max(h - h_f, 0)` on grounded cells, taken to the grid by the same operator.
+Every pixel is weighed by its map-plane area, with af2 = 1 and without
+maxmask1. The tool's own slvaf carries af2 and maxmask1 on top of this: that
+is the area factor, cause 1 in `scalar_comparison_32km.md` (issue #97). The
++39.4 mm the 32 km run reached is the same map-plane term, cause 2 there, so
+every number here compares with it like for like.
 On the p2 run's 2015 state it reproduces the issue 13 attribution to the
 tenth of a gigatonne: +1,594.9 Gt in total, -5,800.9 Gt of it in 4,455
 grounding-line pixels.
@@ -34,7 +39,7 @@ ways, by the same rule on every mesh:
 
 | change | what it measures |
 |---|---|
-| floating ice thinned by 25 % or 50 %, or removed | the tool's error alone: floating ice holds no VAF, so the model's VAF stays where it was |
+| floating ice thinned by 25, 50 or 75 %, or removed | the tool's error alone: floating ice holds no VAF, so the model's VAF stays where it was |
 | the shelves removed, and every marine grounded cell within X m of flotation with them | a grounding-line retreat onto open water; X is interpolated to the 550,000 km² of grounded area the 32 km run lost by 2300 |
 
 ## Result

@@ -140,3 +140,29 @@ def test_a_region_whose_ocx_melt_is_off_is_flagged():
     assert cmb.off_by_more_than(ref, new, tol=0.25, floor_gt=0.1) == [int(ids[2])]
     # under the floor a ratio of two small totals is not worth reading
     assert cmb.off_by_more_than(ref, new, tol=0.25, floor_gt=5.0) == []
+
+
+def test_the_check_names_the_ocx_version_it_was_measured_on(ocx_tree, monkeypatch, capsys):
+    pytest.importorskip("firedrake")
+    pytest.importorskip("rasterio")
+    import argparse
+    import check_melt_bound as cmb
+    from icepack2_tools.forcing import OCEAN_VERSION
+    monkeypatch.setenv("ISMIP7_DATA_ROOT", str(ocx_tree))
+    # one basin everywhere: the IMBIE2 grid is not what this is about
+    monkeypatch.setattr(cmb.cm, "_grid_interp",
+                        lambda path, var, x, y, draft=None: np.ones(len(x)))
+    n = 3
+    g = {"x": XY["x"], "y": XY["y"], "draft": np.full(n, -60.0),
+         "sin_a": np.full(n, 1e-2), "floating": np.ones(n, dtype=bool),
+         "area": np.full(n, 64e6), "K": np.full(n, 1e-4),
+         "tf": np.full(n, 1.0), "sal": np.full(n, 34.0)}          # the tree's 1950
+    a = argparse.Namespace(ocx="main", ocx_years="1950", ocx_tol=0.25, ocx_floor=0.0)
+
+    assert cmb.compare_with_ocx(a, g) == 0
+    said = capsys.readouterr().out
+    # The tree holds v1 alone, so the reader fell back from its pin, which is
+    # the case at every site until upstream ships the pinned version.
+    assert OCEAN_VERSION != "v1"
+    assert "ocean tf expert-judgment OCX ocean/main v1" in said
+    assert "ocean so expert-judgment OCX ocean/main v1" in said

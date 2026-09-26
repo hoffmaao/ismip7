@@ -148,7 +148,8 @@ import calibrate_melt as cm                                           # noqa: E4
 from icepack2_tools.forcing import (quadratic_mixed_slope,            # noqa: E402
                                     compute_sin_alpha, is_floating,
                                     melt_slope, sin_alpha_ant,
-                                    ISMIP7Ocean, OCX, OCX_OCEAN_VARIANTS)
+                                    ISMIP7Ocean, OCX, OCX_OCEAN_VARIANTS,
+                                    describe_forcing_provenance)
 from icepack2_tools.geometry import sample_to_geometry                # noqa: E402
 from icepack2_tools.runconfig import raster_sample                    # noqa: E402
 # The same year and density the writer converts with, so the bound compared
@@ -407,6 +408,11 @@ def compare_with_ocx(a, g):
         f"(discussion #48) ===\n"
         f"  forward half, uncapped; a region is flagged past "
         f"{100 * a.ocx_tol:.0f}%, regions under {a.ocx_floor:g} Gt/yr ignored")
+    # The marker lines a forward logs, so the verdict names the version it was
+    # measured on: the reader falls back from its pinned version to the highest
+    # one on disk, and upstream regenerates these files (discussion #48).
+    for line in describe_forcing_provenance(ocean):
+        PETSc.Sys.Print(f"  {line}")
     status = 0
     for year in years:
         other = melt_with(ocean.get_thermal_forcing(year, g["x"], g["y"], draft=g["draft"]),

@@ -12,7 +12,7 @@
 #
 #   submit.sh inversion ISMIP7_LC=2000 ISMIP7_LC_COARSE=5000 \
 #       ISMIP7_MESH=$PWD/antarctica/mesh/antarctica_5000_2000_buffered0.msh
-#   submit.sh projection ISMIP7_EXPERIMENT=ssp585_cesm_waccm ISMIP7_OUTPUT=1
+#   submit.sh projection ISMIP7_EXPERIMENT=ssp585_cesm_waccm
 #   ISMIP7_SITE=iu_quartz submit.sh inversion --dry-run
 #
 # Options (each overrides the site default, in either spelling, --mem 240G or

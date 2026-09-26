@@ -16,10 +16,15 @@ mesh):
   + kappa*alpha*(E - E_srf)/h            (HeatTransport3D-style surface exchange)
   + a_plus*(E - E_srf)                   (accumulation deposits ice at surface
                                           energy; basal melt cancels)
-  = h*q_strain + q_fric + q_geo
-with q_strain = 2 A^(-1/n) eps_e^(1/n+1), q_fric = grounded * C|u|^(1/m+1) (zero
-where the base is over water: sliding over water does no frictional work), and
-the Stefan relations T = min(E/rho c, Tm), w = (E - rho c Tm)+ / rho L.
+  + (1 - g)*kappa*alpha*(E - E_ocean)/h  (over water only: the base is held at
+                                          the ice-ocean interface's melting point)
+  = h*q_strain + g*(q_fric + q_geo)
+with g = 1 where the base rests on the bed and 0 where water lies beneath it,
+q_strain = 2 A^(-1/n) eps_e^(1/n+1), q_fric = C|u|^(1/m+1), and the Stefan
+relations T = min(E/rho c, Tm), w = (E - rho c Tm)+ / rho L. Over water the base
+supplies nothing but its melting-point temperature: no frictional heat (the
+shelf's basal shear stress is zero), no geothermal flux, and no water content
+(the enthalpy of floating ice is capped at the melting point).
 
 Shear-layer closure: solve once with and once without strain heating (the
 operator is linear), amplify only the strain anomaly:
@@ -67,6 +72,29 @@ def fluidity_from(E_eff, p):
     A_cold = rate_factor(temperature(E_eff))
     w = min_value(meltwater(E_eff), Constant(p["w_max"]))
     return A_cold * (1 + Constant(p["duval"]) * w)
+
+
+#: Freezing point of seawater at the surface [K] and its fall with depth [K/m]
+#: (practical salinity 34.5, linearised): the ice-ocean interface's melting point.
+OCEAN_T_FREEZE_0 = 273.15 - 1.89
+OCEAN_T_FREEZE_GRAD = 7.61e-4
+
+
+def ocean_melting_point(h):
+    r"""Melting point [K] at the base of floating ice of thickness ``h``: the
+    in-situ freezing point of seawater at the ice draft (917/1024) ``h``."""
+    return Constant(OCEAN_T_FREEZE_0) - Constant(OCEAN_T_FREEZE_GRAD * 917.0 / 1024.0) * h
+
+
+def cap_floating_enthalpy(E, g):
+    r"""Cap the enthalpy of floating ice (``g`` < 0.5, DG0) at the melting
+    point, in place: a floating column reaches the melting point at most and
+    holds no water, so the Duval water-content enhancement never applies."""
+    E_melt = float(rho_I * c_heat * Tm)
+    data = E.dat.data
+    floating = g.dat.data_ro < 0.5
+    data[floating] = np.minimum(data[floating], E_melt)
+    return E
 
 
 #: Water column [m] beneath the ice base below which the base counts as resting
@@ -121,18 +149,25 @@ def solve_energy(u_adv, h, s, C, A_k, bed, acc, p, with_strain=True,
     a_plus = max_value(acc, Constant(0.0))
     a_exch = (Constant(p["kappa"]) * alpha_th / h + a_plus) * E * psi * dx
     L_exch = (Constant(p["kappa"]) * alpha_th / h + a_plus) * E_srf * psi * dx
+    # Over water the base sits at the ice-ocean interface's melting point and
+    # supplies nothing more: the column conducts toward that temperature, the
+    # surface exchange's counterpart at the base, and takes no heat flux.
+    g = grounded_frac(h, s, bed, p)
+    E_ocean = Constant(float(rho_I * c_heat)) * ocean_melting_point(h)
+    a_base = (1 - g) * Constant(p["kappa"]) * alpha_th / h * E * psi * dx
+    L_base = (1 - g) * Constant(p["kappa"]) * alpha_th / h * E_ocean * psi * dx
 
     eps = sym(grad(u_adv))
     eps_e = sqrt(0.5 * inner(eps, eps) + Constant(1e-16))
     q_strain = 2 * A_k ** (-1.0 / n_glen) * eps_e ** (1.0 / n_glen + 1)
     speed = sqrt(inner(u_adv, u_adv) + Constant(1e-12))
-    q_fric = grounded_frac(h, s, bed, p) * C * speed ** (1.0 / p["friction_exp"] + 1)
+    q_fric = C * speed ** (1.0 / p["friction_exp"] + 1)
     strain_on = Constant(1.0 if with_strain else 0.0)
-    L_src = (strain_on * h * q_strain + q_fric
-             + Constant(q_geo_icepack(p["q_geo"]))) * psi * dx
+    L_src = (strain_on * h * q_strain
+             + g * (q_fric + Constant(q_geo_icepack(p["q_geo"])))) * psi * dx
 
     E_out = fd.Function(QD, name="energy")
-    fd.solve(a_adv + a_exch == L_in + L_exch + L_src, E_out,
+    fd.solve(a_adv + a_exch + a_base == L_in + L_exch + L_base + L_src, E_out,
              solver_parameters={"ksp_type": "preonly", "pc_type": "lu",
                                 "pc_factor_mat_solver_type": "mumps"})
     return E_out
@@ -197,6 +232,8 @@ def compute_fluidity_prior(u, h, s, bed, C, acc, T_srf, p=None, max_picard=60,
         T_field = fd.Function(QD).project(T_srf)
 
     A_k = fd.Function(Q, name="fluidity").interpolate(Constant(A_init))  # cold uniform start
+    # where water lies beneath the base, on the operator's own (floored) thickness
+    g_dg = fd.Function(QD).interpolate(grounded_frac(h_th, s, bed))
     E = None
     comm = mesh.comm if comm is None else comm
     _sz = A_k.dat.data_ro.size
@@ -211,6 +248,7 @@ def compute_fluidity_prior(u, h, s, bed, C, acc, T_srf, p=None, max_picard=60,
     for it in range(1, max_picard + 1):
         A_dg = fd.Function(QD).project(A_k)
         E, _ = thermo_update(u, h_th, s, C, A_dg, bed, acc_dg, P, T_srf_field=T_field)
+        cap_floating_enthalpy(E, g_dg)
         A_new = fd.Function(Q, name="fluidity").project(fluidity_from(E, P))
         A_new.dat.data[:] = np.clip(A_new.dat.data_ro, *A_clip)
         # Under-relaxation: A <-> strain-heating is a stiff fixed point at

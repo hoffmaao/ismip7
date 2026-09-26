@@ -277,6 +277,32 @@ def front_hmin():
     return float(os.environ.get("ISMIP7_FRONT_HMIN", FRONT_HMIN_DEFAULT))
 
 
+ANCHOR_LENGTH_DEFAULT = "0"    # m: local balance
+
+
+def anchor_length():
+    r"""``ISMIP7_ANCHOR_LENGTH`` [m]: the reach of the driving stress in the
+    inversion's friction anchor (``dual_friction.weertman_anchor``). ``0``
+    keeps the local balance, which vanishes with the surface slope at ice
+    divides; a positive length averages the grounded driving stress over about
+    that distance. The inversion records it in the MAP, and a forward takes it
+    from there, never from this variable."""
+    length = float(os.environ.get("ISMIP7_ANCHOR_LENGTH", ANCHOR_LENGTH_DEFAULT))
+    if length < 0.0:
+        raise ValueError(f"ISMIP7_ANCHOR_LENGTH must be >= 0 m, got {length}")
+    return length
+
+
+def lake_ice_base():
+    r"""``ISMIP7_LAKE_ICE_BASE``: under BedMachine's subglacial-lake mask
+    (``mask == 4``, Lake Vostok) raise the bed to the ice base, so the model
+    surface ``b + H`` is BedMachine's surface rather than a bowl the depth of
+    the lake's water column. On unless set to ``"0"``. The inversion records
+    it in the MAP, and a forward takes it from there, so a MAP inverted without
+    it keeps the geometry it was inverted on."""
+    return os.environ.get("ISMIP7_LAKE_ICE_BASE", "1").strip() != "0"
+
+
 def fixed_front():
     r"""``ISMIP7_FIXED_FRONT``: the legacy pinned front.
 

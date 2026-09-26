@@ -88,7 +88,7 @@ from icepack2_tools.dual_friction import (
     effective_pressure,
     weertman_anchor,
 )
-from icepack2_tools.geometry import cg1_lift, sample_to_geometry
+from icepack2_tools.geometry import cg1_lift, raise_bed_to_lake_ice_base, sample_to_geometry
 from icepack2_tools.transfer import interpolate_with_fill, meshes_match
 from icepack2_tools.grounding import height_above_flotation
 from icepack2_tools.mpi_stats import (global_mean, global_range,
@@ -116,7 +116,9 @@ from icepack2_tools.forcing import (load_racmo_smb_climatology,
                                     load_mean_annual_surface_temperature)
 from icepack2_tools.runconfig import (
     TARGET_MESH_GEOMETRY_METHOD,
+    anchor_length,
     front_hmin,
+    lake_ice_base,
     residual_stabilizers,
 )
 from icepack2_tools.front import facet_neighbours, ocean_drag_cells
@@ -341,8 +343,14 @@ def main():
                     f"(nodes h<=1m: "
                     f"{global_count(H.dat.data_ro <= 1.0, mesh.comm)} / "
                     f"{global_size(H)})")
-    rho_ratio = Constant(917.0 / 1024.0)
-
+    # Lake Vostok: BedMachine's bed there is the lake floor, so b + H would
+    # sink the surface by the water column (runconfig.lake_ice_base).
+    LAKE_ICE_BASE = lake_ice_base()
+    ANCHOR_LENGTH = anchor_length()     # read here: the warm start checks it too
+    if LAKE_ICE_BASE:
+        n_lake = raise_bed_to_lake_ice_base(b, H, bm_fn, Q_g, Q, method=raster_sample)
+        PETSc.Sys.Print(f"  Lake ice base: bed raised to BedMachine's ice base on "
+                        f"{n_lake} geometry dofs over its subglacial lake")
     rho_ratio = Constant(917.0 / 1024.0)
     s = Function(Q_g).interpolate(max_value(b + H, (Constant(1.0) - rho_ratio) * H))
 
@@ -575,7 +583,23 @@ def main():
                     warm_recorded = float(chk.get_attr("/", "full_state_residual"))
                 except (TypeError, ValueError):
                     warm_recorded = None
-            theta.assign(_warm_load(chk, chk_mesh, "log_friction", Q))
+            _warm_anchor = (float(chk.get_attr("/", "friction_anchor_length"))
+                            if chk.has_attr("/", "friction_anchor_length") else 0.0)
+            _warm_lake = (int(chk.get_attr("/", "lake_ice_base"))
+                          if chk.has_attr("/", "lake_ice_base") else 0)
+            # theta is a log-deviation from the warm start's anchor. Under a
+            # different anchor the same theta is a different friction, so
+            # ISMIP7_WARM_START_THETA=0 starts it at the new prior mean instead.
+            if os.environ.get("ISMIP7_WARM_START_THETA", "1").strip() != "0":
+                theta.assign(_warm_load(chk, chk_mesh, "log_friction", Q))
+                if _warm_anchor != ANCHOR_LENGTH:
+                    PETSc.Sys.Print(
+                        f"    WARNING: log_friction taken from a MAP whose anchor "
+                        f"length is {_warm_anchor:g} m, not this run's "
+                        f"{ANCHOR_LENGTH:g} m: the same theta means a different "
+                        f"friction. ISMIP7_WARM_START_THETA=0 starts at the prior mean.")
+            else:
+                PETSc.Sys.Print("    log_friction: prior mean (ISMIP7_WARM_START_THETA=0)")
             phi.assign(_warm_load(chk, chk_mesh, "log_fluidity", Q))
             # A warm start on this mesh supplies its geometry, observations
             # and mixed state as well. One from another mesh (a 2 km MAP
@@ -585,9 +609,18 @@ def main():
             # observations are what the forward that loads the MAP will
             # use. ISMIP7_WARM_START_GEOMETRY=0/1 overrides the default.
             same_mesh = meshes_match(chk_mesh, mesh)
+            # A MAP inverted before the lake fix carries the lake bowl in its
+            # geometry; taking it would undo the fix, so by default it is not.
+            _geometry_default = "1" if (same_mesh and _warm_lake == int(LAKE_ICE_BASE)) else "0"
             warm_geometry = os.environ.get(
-                "ISMIP7_WARM_START_GEOMETRY", "1" if same_mesh else "0"
+                "ISMIP7_WARM_START_GEOMETRY", _geometry_default
             ).strip() != "0"
+            if same_mesh and _warm_lake != int(LAKE_ICE_BASE):
+                PETSc.Sys.Print(
+                    f"    warm start records lake_ice_base={_warm_lake}, this run "
+                    f"{int(LAKE_ICE_BASE)}: its geometry is "
+                    + ("taken anyway (ISMIP7_WARM_START_GEOMETRY)" if warm_geometry
+                       else "not taken"))
             PETSc.Sys.Print(
                 "    warm start is on " + ("this mesh" if same_mesh else "another mesh")
                 + ("; taking its geometry, velocity_obs and state"
@@ -763,7 +796,10 @@ def main():
     # Under DG0 geometry the anchor's |grad s| comes from a CG1 reconstruction
     # inside weertman_anchor (a cell-wise surface has no cell gradient); the
     # anchor is a fixed reference scaling, not a force in the residual.
-    C_w0 = weertman_anchor(H, s, u_obs, m_slide_val, Q_g)
+    C_w0 = weertman_anchor(H, s, u_obs, m_slide_val, Q_g, length=ANCHOR_LENGTH, b=b)
+    PETSc.Sys.Print(
+        "  Friction anchor: " + ("local driving stress" if ANCHOR_LENGTH == 0.0 else
+                                 f"grounded driving stress averaged over {ANCHOR_LENGTH / 1e3:g} km"))
     # Budd pins N_hat=1 at the inversion geometry; freeze N_ref with the MAP /
     # timing-cache so forwards reproduce the inverted friction at t=0.
     N_ref = None
@@ -1666,6 +1702,10 @@ def main():
             chk.set_attr("/", "friction", str(FRICTION))
             chk.set_attr("/", "n_flow", float(n_flow_val))
             chk.set_attr("/", "geometry_space", str(geometry_space))
+            # theta is a log-deviation from THIS anchor, on THIS geometry: a
+            # forward rebuilds C_w0 from them, so it takes both from here.
+            chk.set_attr("/", "friction_anchor_length", float(ANCHOR_LENGTH))
+            chk.set_attr("/", "lake_ice_base", int(LAKE_ICE_BASE))
             chk.set_attr("/", "misfit_norm", MISFIT_NORM)
             chk.set_attr("/", "log_vel_weight", float(log_vel_w))
             chk.set_attr("/", "log_vel_eps", float(LOG_VEL_EPS))

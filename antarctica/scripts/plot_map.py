@@ -45,7 +45,8 @@ def load(map_path, m_slide=3.0):
                 f[name] = chk.load_function(mesh, name=name)
             except Exception:
                 f[name] = None
-        attrs = {k: chk.get_attr("/", k) for k in ("lc", "lc_coarse", "buffer_m", "mesh_basename")
+        attrs = {k: chk.get_attr("/", k) for k in ("lc", "lc_coarse", "buffer_m", "mesh_basename",
+                                                    "friction_anchor_length")
                  if chk.has_attr("/", k)}
     xy = mesh.coordinates.dat.data_ro
     tri = mesh.coordinates.cell_node_map().values
@@ -61,7 +62,9 @@ def load(map_path, m_slide=3.0):
     out["theta"], out["phi"] = theta, phi
     out["nodal_controls"] = (theta.shape[0] == xy.shape[0])
     if f["velocity_obs"] is not None:
-        C_w0 = weertman_anchor(H, s, f["velocity_obs"], m_slide, Q_g)
+        # the anchor theta deviates from, as the MAP records it (local if it predates the record)
+        C_w0 = weertman_anchor(H, s, f["velocity_obs"], m_slide, Q_g,
+                               length=float(attrs.get("friction_anchor_length", 0.0)), b=b)
         c0 = Function(Q0).interpolate(C_w0).dat.data_ro.copy()
         th_cell = theta[tri].mean(axis=1) if out["nodal_controls"] else theta
         out["C"] = c0 * np.exp(th_cell)

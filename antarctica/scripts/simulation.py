@@ -68,7 +68,7 @@ from icepack2_tools.mpi_stats import (
     global_size,
 )
 from icepack2_tools.boundary import load_boundary_ids
-from icepack2_tools.geometry import sample_to_geometry
+from icepack2_tools.geometry import raise_bed_to_lake_ice_base, sample_to_geometry
 from icepack2_tools.naming import map_basename
 from icepack2_tools.front import (
     clamp_thickness, clear_reference_where_ice_free, retreat_slivers,
@@ -317,6 +317,11 @@ def setup_model(restart_from=None, *, allow_timing_cache_a_ref=False):
             # Residual of the saved mixed state under its writer's F; the
             # restart fast path trusts the state only within a factor of it.
             "full_state_residual",
+            # The friction anchor theta is a deviation from, and the geometry
+            # it was inverted on (dual_friction.weertman_anchor,
+            # geometry.raise_bed_to_lake_ice_base): a forward follows the MAP.
+            "friction_anchor_length",
+            "lake_ice_base",
         ):
             if _chk.has_attr("/", _key):
                 checkpoint_metadata[_key] = _chk.get_attr("/", _key)
@@ -490,6 +495,26 @@ def setup_model(restart_from=None, *, allow_timing_cache_a_ref=False):
     geometry_source_method = checkpoint_metadata.get(
         "geometry_source_method"
     )
+    # A MAP (or a state restarted from one) that predates these records was
+    # inverted with the local anchor on BedMachine's raw bed.
+    map_anchor_length = float(checkpoint_metadata.get("friction_anchor_length", 0.0))
+    map_lake_ice_base = int(checkpoint_metadata.get("lake_ice_base", 0))
+    for _var, _val, _map in (("ISMIP7_ANCHOR_LENGTH", map_anchor_length, map_anchor_length),
+                             ("ISMIP7_LAKE_ICE_BASE", map_lake_ice_base, map_lake_ice_base)):
+        _env = os.environ.get(_var)
+        if _env is None:
+            continue
+        _want = float(_env) if _var == "ISMIP7_ANCHOR_LENGTH" else int(_env.strip() != "0")
+        if _want != _map:
+            raise RuntimeError(
+                f"{_var}={_env} but {os.path.basename(source_chk)} was inverted with "
+                f"{_map:g}. A forward takes the friction anchor and the lake geometry "
+                f"from its MAP, since theta is a deviation from them; unset {_var} or "
+                f"point at a MAP inverted that way.")
+    PETSc.Sys.Print(
+        "  Friction anchor (from the MAP): " + ("local driving stress" if map_anchor_length == 0.0
+                                                 else f"grounded driving stress over {map_anchor_length / 1e3:g} km")
+        + f"; lake ice base {'on' if map_lake_ice_base else 'off'}")
     if not is_restart:
         # Cold start: geometry from BedMachine (RC/Budd overwrites it with the
         # inversion-time geometry from the MAP only when no target-mesh
@@ -511,6 +536,9 @@ def setup_model(restart_from=None, *, allow_timing_cache_a_ref=False):
             rasterio.open(f"netcdf:{bm_fn}:thickness"),
             Q_g, Q, floor=h_clamp_init, method=chk_raster_sample)
         H.rename("thickness")
+        if map_lake_ice_base:
+            _n_lake = raise_bed_to_lake_ice_base(b, H, bm_fn, Q_g, Q, method=chk_raster_sample)
+            PETSc.Sys.Print(f"  Lake ice base: bed raised on {_n_lake} geometry dofs")
         s = Function(Q_g, name="surface").interpolate(
             max_value(b + H, (Constant(1.0) - rho_ratio) * H)
         )
@@ -946,7 +974,8 @@ def setup_model(restart_from=None, *, allow_timing_cache_a_ref=False):
             # weertman_anchor needs |grad s|; under DG0 geometry it takes that
             # from a CG1 reconstruction internally (see geometry.surface_slope)
             # since a cell-wise surface has no cell gradient.
-            C_w0 = weertman_anchor(H, s, u_obs, m_slide_val, Q_g)
+            C_w0 = weertman_anchor(H, s, u_obs, m_slide_val, Q_g,
+                                   length=map_anchor_length, b=b)
             if friction == "budd":
                 N_ref = Function(Q_g, name="N_ref").interpolate(
                     max_value(effective_pressure(H, s), Constant(0.0))
@@ -1499,6 +1528,8 @@ def setup_model(restart_from=None, *, allow_timing_cache_a_ref=False):
         "lc_coarse": chk_lc_coarse,
         "buffer_m": chk_buffer_m,
         "raster_sample": chk_raster_sample,
+        "friction_anchor_length": map_anchor_length,
+        "lake_ice_base": map_lake_ice_base,
         # Rescue speed limiter (residual laws): live Constant, 0 = inert.
         "k_lim": k_lim if use_residual else None,
         "k_lim_rescue": k_lim_rescue if use_residual else 0.0,
@@ -1645,6 +1676,12 @@ def save_model_state(ctx, final_path, t_now, extra_attrs=None):
             chk.set_attr("/", "buffer_m", float(ctx["buffer_m"]))
         if ctx.get("raster_sample"):
             chk.set_attr("/", "raster_sample", str(ctx["raster_sample"]))
+        # Carried so a restart, and anything reading this state, knows the
+        # anchor and geometry its frozen C_w0 was built under.
+        if ctx.get("friction_anchor_length") is not None:
+            chk.set_attr("/", "friction_anchor_length", float(ctx["friction_anchor_length"]))
+        if ctx.get("lake_ice_base") is not None:
+            chk.set_attr("/", "lake_ice_base", int(ctx["lake_ice_base"]))
         if full_state_residual is not None:
             chk.set_attr("/", "full_state_residual", full_state_residual)
         for name, value in (extra_attrs or {}).items():

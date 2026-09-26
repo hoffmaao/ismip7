@@ -305,9 +305,9 @@ class AnnualOutput:
     def book_advance(self, dt, accum, ocean_melt, a_ref, h_dg, u, grounded_cells,
                      withheld=None):
         r"""Called by ``_advance`` after the transport solve, BEFORE removal:
-        books the sources this advance APPLIED (the SMB and the melt where
-        there can be ice, which the caller passes already masked, and the
-        apparent-mass-balance reference) and the grounding-line flux with the
+        books the sources this advance APPLIED (the SMB, the melt and the
+        apparent-mass-balance reference where there can be ice, which the
+        caller passes already masked) and the grounding-line flux with the
         velocity the transport used.
 
         ``withheld`` is the part of each cell's net sink that the positivity

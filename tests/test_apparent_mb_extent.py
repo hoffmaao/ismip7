@@ -86,3 +86,42 @@ def test_cells_a_front_rule_holds_ice_free_are_not_forced():
     ls_ice_free = np.array([False, False, False, True])
     assert unforced_cells(h, bed, beyond, None, ls_ice_free).tolist() == \
         [False, True, False, True]
+
+
+from icepack2_tools.front import applied_forcing  # noqa: E402
+
+
+def test_an_emptied_shelf_cell_gets_no_reference():
+    r"""A floating cell the collapse mask empties becomes open ocean. Its t=0
+    reference, about the shelf's t=0 melt, must not regrow it each advance;
+    the neighbouring ice keeps its reference, and the stored field is kept
+    so the reference applies again if ice returns."""
+    dt = 0.1
+    h = np.array([400.0, 0.0, 250.0])          # cell 1 was just collapsed
+    bed = np.array([-600.0, -700.0, 100.0])
+    accum = np.array([0.3, 0.2, 0.4])
+    melt = np.array([5.0, 8.0, 0.0])
+    a_ref = np.array([4.0, 7.9, -0.1])
+    stored = a_ref.copy()
+
+    forced = np.where(unforced_cells(h, bed), 0.0, 1.0)
+    smb, mlt, ref = applied_forcing(forced, accum, melt, a_ref)
+    src = smb - mlt + ref
+
+    assert (h + a_ref * dt)[1] > 0.0, "guard: the unmasked reference regrows it"
+    assert src[1] == 0.0 and ref[1] == 0.0
+    assert ref[[0, 2]].tolist() == a_ref[[0, 2]].tolist()
+    assert np.array_equal(a_ref, stored)
+
+    # Ice flows back into the cell: the stored reference applies again.
+    h[1] = 50.0
+    forced = np.where(unforced_cells(h, bed), 0.0, 1.0)
+    _, _, ref = applied_forcing(forced, accum, melt, a_ref)
+    assert ref[1] == a_ref[1]
+
+
+def test_no_reference_passes_through_as_none():
+    smb, mlt, ref = applied_forcing(np.array([1.0, 0.0]), np.array([0.3, 0.3]),
+                                    np.array([1.0, 1.0]))
+    assert ref is None
+    assert smb.tolist() == [0.3, 0.0] and mlt.tolist() == [1.0, 0.0]

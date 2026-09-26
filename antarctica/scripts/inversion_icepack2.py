@@ -306,6 +306,18 @@ FLUIDITY_PRIOR = os.environ.get("ISMIP7_FLUIDITY_PRIOR", "thermo").strip().lower
 # (the sum over the control space's nodes); a number is a plain multiplier;
 # 1 (default) keeps the mean. Recorded in the MAP as misfit_scale.
 MISFIT_SCALE = os.environ.get("ISMIP7_MISFIT_SCALE", "1").strip().lower()
+
+# ── Sub-element grounding scheme (ISMIP7_SUBELEMENT_FRICTION) ───────────
+# ISSM's SEP2 through icepack_tools (icepack2_tools/subelement.py): the
+# basal friction is integrated over the grounded part of each cell, so the
+# grounding line is exact inside a cell instead of a cell-wise staircase.
+# Budd then runs with N_hat = 1 on the grounded part (no N_ref, no delta
+# floor). ISMIP7_EXACT_FRONT adds the exact depth-integrated push on a
+# calving front inside the mesh (on by default under the scheme, since it
+# is the shared residual's default; off otherwise, so nothing else moves).
+SUBELEMENT_FRICTION = os.environ.get("ISMIP7_SUBELEMENT_FRICTION", "0").strip() == "1"
+EXACT_FRONT = os.environ.get(
+    "ISMIP7_EXACT_FRONT", "1" if SUBELEMENT_FRICTION else "0").strip() == "1"
 if MISFIT_SCALE != "nodes":
     try:
         float(MISFIT_SCALE)
@@ -319,6 +331,9 @@ FRICTION = _friction()
 # Exact-zero-shelf residual laws share the C_w0/He/composite structure.
 USE_RESIDUAL = FRICTION in ("regularized_coulomb", "budd")
 USE_RC = USE_RESIDUAL  # geometry/anchor handling is shared
+if SUBELEMENT_FRICTION and (not USE_RESIDUAL or FRICTION not in ("budd", "weertman")):
+    raise ValueError("ISMIP7_SUBELEMENT_FRICTION=1 needs ISMIP7_FRICTION=budd (or "
+                     "weertman): the scheme integrates a velocity-only stress")
 if FRICTION_CONTROL == "sqrt" and not USE_RESIDUAL:
     raise ValueError("ISMIP7_FRICTION_CONTROL=sqrt needs a residual friction "
                      "law (budd or regularized_coulomb)")
@@ -1148,6 +1163,20 @@ def main():
         f"a cell away from the ice (h < {front_hmin():g} m), as in the forward"
     )
 
+    subelement = None
+    if SUBELEMENT_FRICTION:
+        from icepack2_tools.subelement import ice_indicator, subelement_from_geometry
+        subelement = subelement_from_geometry(
+            mesh, H, b, ice=ice_indicator(H, front_hmin()))
+        _fr = subelement.fraction.dat.data_ro
+        _n_part = COMM_WORLD.allreduce(int(((_fr > 0.0) & (_fr < 1.0)).sum()))
+        _n_full = COMM_WORLD.allreduce(int((_fr == 1.0).sum()))
+        PETSc.Sys.Print(
+            f"  Sub-element grounding (ISSM SEP2, icepack_tools): {_n_full} cells fully "
+            f"grounded, {_n_part} partly grounded; {FRICTION} runs with N_hat = 1 on the "
+            f"grounded part (no N_ref, no delta floor); exact front push "
+            f"{'on' if EXACT_FRONT else 'off'}")
+
     _zero_theta = Constant(0.0)
 
     def build_F(theta_c, phi_c):
@@ -1160,6 +1189,19 @@ def main():
                 theta_arg, C_arg = _zero_theta, theta_c ** 2
             else:
                 theta_arg, C_arg = theta_c, C_w0
+            if subelement is not None:
+                from icepack2_tools.subelement import build_subelement_residual
+                return build_subelement_residual(
+                    z, theta_arg, phi_c, H=H, s=s, b=b, C_w0=C_arg,
+                    A4_base=A4_base, n_flow=n_flow, n_flow_val=n_flow_val,
+                    m_slide=m_slide_val, tau_c=tau_c, alpha=alpha_reg, H_ref=H_ref,
+                    subelement=subelement, fric_law=FRICTION, nhat_cap=BUDD_NHAT_CAP,
+                    alpha_gl=ALPHA_GL, c_w0_floor=RC_CW0_FLOOR,
+                    h_visc_floor=RC_HVISC_FLOOR, k_lim=0.0, **stabilizers,
+                    drag_mask=drag_mask,
+                    calving_ids=calving_ids if use_calving_terminus else None,
+                    exact_front=EXACT_FRONT,
+                )
             return build_rc_residual(
                 z, theta_arg, phi_c, H=H, s=s, b=b, C_w0=C_arg,
                 A4_base=A4_base, n_flow=n_flow, n_flow_val=n_flow_val,
@@ -1972,6 +2014,10 @@ def main():
             # Which field the friction is: C_w0 exp(log_friction) on the
             # anchor (log), or sqrt_friction^2 with no anchor (sqrt).
             chk.set_attr("/", "friction_control", FRICTION_CONTROL)
+            # The grounding scheme and the front push the MAP was inverted
+            # under: a forward follows them (icepack2_tools.subelement).
+            chk.set_attr("/", "subelement_friction", int(SUBELEMENT_FRICTION))
+            chk.set_attr("/", "exact_front", int(EXACT_FRONT))
             if FRICTION_CONTROL == "sqrt":
                 chk.set_attr("/", "prior_sigma_alpha", float(sigma_alpha_val))
                 chk.set_attr("/", "prior_rho_theta", float(PRIOR_RHO_THETA))
@@ -2467,6 +2513,7 @@ def main():
         "friction_anchor_length": float(ANCHOR_LENGTH),
         "lake_ice_base": int(LAKE_ICE_BASE),
         "fluidity_prior_origin": str(prior_origin), "grad_precond": grad_precond,
+        "subelement_friction": int(SUBELEMENT_FRICTION), "exact_front": int(EXACT_FRONT),
     })
     if PRIOR_FORM == "bilaplacian":
         run_settings.update({"prior_sigma_theta": float(PRIOR_SIGMA_THETA),

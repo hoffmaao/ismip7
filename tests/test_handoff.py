@@ -24,6 +24,7 @@ def _settings(**over):
         "geometry_space": "dg0", "friction_anchor_length": 20000.0,
         "lake_ice_base": 1, "fluidity_prior_origin": "thermomechanical",
         "grad_precond": "mass_consistent",
+        "subelement_friction": 0, "exact_front": 0,
     }
     base.update(over)
     return base

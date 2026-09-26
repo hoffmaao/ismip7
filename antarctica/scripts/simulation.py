@@ -322,6 +322,10 @@ def setup_model(restart_from=None, *, allow_timing_cache_a_ref=False):
             # geometry.raise_bed_to_lake_ice_base): a forward follows the MAP.
             "friction_anchor_length",
             "lake_ice_base",
+            # The grounding scheme and the front push the MAP was inverted
+            # under (icepack2_tools.subelement): a forward follows the MAP.
+            "subelement_friction",
+            "exact_front",
         ):
             if _chk.has_attr("/", _key):
                 checkpoint_metadata[_key] = _chk.get_attr("/", _key)
@@ -499,6 +503,13 @@ def setup_model(restart_from=None, *, allow_timing_cache_a_ref=False):
     # inverted with the local anchor on BedMachine's raw bed.
     map_anchor_length = float(checkpoint_metadata.get("friction_anchor_length", 0.0))
     map_lake_ice_base = int(checkpoint_metadata.get("lake_ice_base", 0))
+    map_subelement = int(checkpoint_metadata.get("subelement_friction", 0))
+    map_exact_front = int(checkpoint_metadata.get("exact_front", 0))
+    _env_sub = os.environ.get("ISMIP7_SUBELEMENT_FRICTION")
+    if _env_sub is not None and int(_env_sub) != map_subelement:
+        raise RuntimeError(
+            f"ISMIP7_SUBELEMENT_FRICTION={_env_sub} but the MAP was inverted with "
+            f"subelement_friction={map_subelement}: a forward follows its MAP")
     for _var, _val, _map in (("ISMIP7_ANCHOR_LENGTH", map_anchor_length, map_anchor_length),
                              ("ISMIP7_LAKE_ICE_BASE", map_lake_ice_base, map_lake_ice_base)):
         _env = os.environ.get(_var)
@@ -1160,6 +1171,39 @@ def setup_model(restart_from=None, *, allow_timing_cache_a_ref=False):
 
         # The closure above is the single definition of this residual: the
         # forward solves exactly what a time-dependent assimilation rebuilds.
+        if map_subelement:
+            from icepack2_tools.subelement import (
+                build_subelement_residual, ice_indicator, subelement_from_geometry)
+            subelement = subelement_from_geometry(
+                mesh, h, b, ice=ice_indicator(h, _front_hmin()))
+            _fr = subelement.fraction.dat.data_ro
+            PETSc.Sys.Print(
+                "  Sub-element grounding (ISSM SEP2) from the MAP: "
+                f"{mesh.comm.allreduce(int((_fr == 1.0).sum()))} cells fully grounded, "
+                f"{mesh.comm.allreduce(int(((_fr > 0.0) & (_fr < 1.0)).sum()))} partly; "
+                f"{friction} with N_hat = 1 on the grounded part, so NO effective-pressure "
+                f"feedback; exact front push {'on' if map_exact_front else 'off'}; the "
+                "quadrature follows the geometry before every diagnostic solve")
+
+            def _build_F(theta_c=None, phi_c=None, h_c=None, s_c=None, z_c=None):
+                return build_subelement_residual(
+                    z_c if z_c is not None else z,
+                    theta_c if theta_c is not None else theta_f,
+                    phi_c if phi_c is not None else phi_f,
+                    H=h_c if h_c is not None else h,
+                    s=s_c if s_c is not None else s,
+                    b=b, C_w0=(alpha_f ** 2 if alpha_f is not None else C_w0),
+                    A4_base=A4_base, n_flow=n_flow, n_flow_val=n_flow_val,
+                    m_slide=m_slide_val, tau_c=tau_c, alpha=alpha_reg, H_ref=H_ref,
+                    subelement=subelement, fric_law=friction, nhat_cap=budd_nhat_cap,
+                    alpha_gl=alpha_gl, c_w0_floor=rc_cw0_floor,
+                    h_visc_floor=rc_hvisc_floor, ocean_drag=ocean_drag,
+                    h_ocean=h_ocean, drag_mask=drag_mask, u_lim=u_lim, k_lim=k_lim,
+                    calving_ids=calving_ids if use_calving_terminus else None,
+                    exact_front=bool(map_exact_front),
+                )
+        else:
+            subelement = None
         F = _build_F()
     else:
         L = (
@@ -1254,6 +1298,10 @@ def setup_model(restart_from=None, *, allow_timing_cache_a_ref=False):
         )
 
     def solve_diagnostic(label, **metadata):
+        if subelement is not None:
+            # the grounded part of each cell follows the live geometry
+            subelement_from_geometry(
+                mesh, h, b, ice=ice_indicator(h, _front_hmin()), sub=subelement)
         """Execute one solve and always emit one compact convergence record."""
         _write_solve_header(label, **metadata)
         work_before = _condensed_work()
@@ -1558,6 +1606,7 @@ def setup_model(restart_from=None, *, allow_timing_cache_a_ref=False):
         "alpha": alpha_f,
         "C_w0": C_w0,
         "N_ref": N_ref,
+        "subelement": subelement,
         "A_prior": A_prior_f,
         "H_init": H_init,
         # Frozen t=0 apparent-MB correction (restart only; else None).

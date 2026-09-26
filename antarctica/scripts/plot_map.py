@@ -40,13 +40,15 @@ def load(map_path, m_slide=3.0):
         mesh = chk.load_mesh()
         f = {}
         for name in ("thickness", "surface", "bed", "log_friction", "log_fluidity",
-                     "fluidity_prior", "velocity", "velocity_obs", "obs_mask"):
+                     "fluidity_prior", "velocity", "velocity_obs", "obs_mask",
+                     "sqrt_friction"):
             try:
                 f[name] = chk.load_function(mesh, name=name)
             except Exception:
                 f[name] = None
         attrs = {k: chk.get_attr("/", k) for k in ("lc", "lc_coarse", "buffer_m", "mesh_basename",
-                                                    "friction_anchor_length")
+                                                    "friction_anchor_length", "friction_control",
+                                                    "subelement_friction", "misfit_scale")
                  if chk.has_attr("/", k)}
     xy = mesh.coordinates.dat.data_ro
     tri = mesh.coordinates.cell_node_map().values
@@ -61,13 +63,20 @@ def load(map_path, m_slide=3.0):
     phi = f["log_fluidity"].dat.data_ro.copy()
     out["theta"], out["phi"] = theta, phi
     out["nodal_controls"] = (theta.shape[0] == xy.shape[0])
-    if f["velocity_obs"] is not None:
+    out["alpha"] = None
+    if f["sqrt_friction"] is not None:
+        # the sqrt(C) control: the friction is alpha^2 outright, no anchor
+        alpha = f["sqrt_friction"].dat.data_ro.copy()
+        out["alpha"] = alpha
+        out["C"] = (alpha ** 2)[tri].mean(axis=1) if alpha.shape[0] == xy.shape[0] else alpha ** 2
+    elif f["velocity_obs"] is not None:
         # the anchor theta deviates from, as the MAP records it (local if it predates the record)
         C_w0 = weertman_anchor(H, s, f["velocity_obs"], m_slide, Q_g,
                                length=float(attrs.get("friction_anchor_length", 0.0)), b=b)
         c0 = Function(Q0).interpolate(C_w0).dat.data_ro.copy()
         th_cell = theta[tri].mean(axis=1) if out["nodal_controls"] else theta
         out["C"] = c0 * np.exp(th_cell)
+    if f["velocity_obs"] is not None:
         uo = f["velocity_obs"].dat.data_ro
         out["speed_obs"] = np.hypot(uo[:, 0], uo[:, 1])
         out["obs_mask"] = (f["obs_mask"].dat.data_ro.copy() > 0.5) if f["obs_mask"] is not None else np.ones(xy.shape[0], bool)
@@ -116,11 +125,14 @@ def figure_map(d, label):
         r = 1
     else:
         r = 0
-    panel(axes[r, 0], d, d["theta"], "log friction adjustment theta", "RdBu_r", TwoSlopeNorm(0, -3, 3), nodal=nodal)
+    if d.get("alpha") is not None:
+        panel(axes[r, 0], d, np.maximum(d["alpha"], 1e-6), "friction control alpha = sqrt(C), zero-mean prior", "plasma", LogNorm(1e-3, 1e0), nodal=nodal, units="sqrt(MPa (m/yr)^-1/m)")
+    else:
+        panel(axes[r, 0], d, d["theta"], "log friction adjustment theta", "RdBu_r", TwoSlopeNorm(0, -3, 3), nodal=nodal)
     if "C" in d:
         grounded = d["ice"] & (d["haf"] > 0)
         C = np.where(grounded, np.maximum(d["C"], 1e-6), np.nan)
-        panel(axes[r, 1], d, C, "C = C_w0 exp(theta), grounded", "plasma", LogNorm(1e-4, 1e-1), nodal=False, mask=grounded, units="MPa (m/yr)^-1/m")
+        panel(axes[r, 1], d, C, ("C = alpha^2, grounded" if d.get("alpha") is not None else "C = C_w0 exp(theta), grounded"), "plasma", LogNorm(1e-4, 1e-1), nodal=False, mask=grounded, units="MPa (m/yr)^-1/m")
     else:
         axes[r, 1].axis("off")
     panel(axes[r, 2], d, d["phi"], "log fluidity adjustment phi", "RdBu_r", TwoSlopeNorm(0, -3, 3), nodal=nodal)

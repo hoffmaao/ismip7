@@ -112,6 +112,9 @@ from icepack2_tools.prior import (
     prior_operator_form,
 )
 from icepack2_tools.thermo_model import compute_fluidity_prior
+from icepack2_tools.handoff import (
+    OBJECTIVE_KEYS, OBJECTIVE_RECORD_KEYS, accepted_evaluation, handoff_gap,
+    objective_mismatches)
 from icepack2_tools.optimization import FunctionalDecreaseStop
 from icepack2_tools.forcing import (load_racmo_smb_climatology,
                                     load_mean_annual_surface_temperature)
@@ -613,6 +616,9 @@ def main():
     # Residual the warm start's writer reached under the shared F (stamped by
     # save_model_state and by save_map): the forwards' absolute tolerance.
     warm_recorded = None
+    # Everything the warm start's writer recorded about ITS objective and the
+    # objective value at its checkpointed iterate (icepack2_tools.handoff).
+    warm_attrs = {}
 
     # What a target dof outside the warm start's mesh takes: the prior for
     # the log controls (0), and for the fluidity prior mean the constant
@@ -648,6 +654,14 @@ def main():
                             if chk.has_attr("/", "friction_anchor_length") else 0.0)
             _warm_lake = (int(chk.get_attr("/", "lake_ice_base"))
                           if chk.has_attr("/", "lake_ice_base") else 0)
+            for _key in OBJECTIVE_KEYS + OBJECTIVE_RECORD_KEYS:
+                if chk.has_attr("/", _key):
+                    warm_attrs[_key] = chk.get_attr("/", _key)
+            if "objective_total" in warm_attrs:
+                PETSc.Sys.Print(
+                    f"    objective recorded at iteration "
+                    f"{int(float(warm_attrs.get('objective_iteration', -1)))}: "
+                    f"total {float(warm_attrs['objective_total']):.6e}")
             # theta is a log-deviation from the warm start's anchor. Under a
             # different anchor the same theta is a different friction:
             # ISMIP7_WARM_START_THETA=0 starts it at the new prior mean, and
@@ -945,7 +959,12 @@ def main():
             np.asarray(theta.dat.data_ro[_grounded], dtype=float)))
         _alpha_median = (float(np.median(_alpha_grounded))
                          if _alpha_grounded.size else float("nan"))
-        if PRIOR_SIGMA_ALPHA == "auto":
+        if PRIOR_SIGMA_ALPHA == "auto" and float(warm_attrs.get("prior_sigma_alpha", 0.0) or 0.0) > 0.0:
+            # frozen: re-deriving it from the warm-started alpha would change
+            # the objective between links
+            sigma_alpha_val = float(warm_attrs["prior_sigma_alpha"])
+            PETSc.Sys.Print(f"    sigma_alpha frozen from the warm start: {sigma_alpha_val:.4e}")
+        elif PRIOR_SIGMA_ALPHA == "auto":
             sigma_alpha_val = _alpha_median
         else:
             sigma_alpha_val = float(PRIOR_SIGMA_ALPHA)
@@ -1635,7 +1654,16 @@ def main():
 
     log_vel_w = (0.0 if LOG_VEL_WEIGHT.lower() == "auto"
                  else float(LOG_VEL_WEIGHT))
-    if LOG_VEL_WEIGHT.lower() == "auto":
+    if (LOG_VEL_WEIGHT.lower() == "auto"
+            and float(warm_attrs.get("log_vel_weight", 0.0) or 0.0) > 0.0):
+        # Frozen from the warm start: the weight is part of the objective, and
+        # re-deriving it at every link made the links minimise different
+        # objectives (RC chain: 1.80e6 -> 3.33e5 across one restart).
+        log_vel_w = float(warm_attrs["log_vel_weight"])
+        PETSc.Sys.Print(
+            f"  Log-velocity misfit (ISSM 103): auto weight frozen from the warm "
+            f"start, {log_vel_w:.4g}, eps={LOG_VEL_EPS:g} m/yr")
+    elif LOG_VEL_WEIGHT.lower() == "auto":
         # Scale so the two velocity terms start out comparable: the ratio of
         # the chi^2 term to the unweighted log term at the warm-start state.
         _u0 = z.subfunctions[0]
@@ -1874,6 +1902,13 @@ def main():
     # has been bitten by exactly that class of look-alike MAP before (see
     # ../GEOMETRY_DISCRETIZATION.md on the geometry tag), and MAPs are
     # gitignored, so the checkpoint is the only place this provenance can live.
+    # The objective at the last ACCEPTED iterate (written into every
+    # checkpoint), the resolved run settings (idem), and a handoff failure
+    # raised after TAO returns (its monitor cannot raise through petsc4py).
+    last_accepted = {}
+    run_settings = {}
+    _handoff_failed = [None]
+
     def _friction_reference():
         # What a consumer multiplies exp(log_friction) by: the anchor, or
         # under the sqrt control alpha^2 itself (log_friction is saved as 0).
@@ -1962,6 +1997,13 @@ def main():
             # and melt is zero there), but a MAP that cannot say whether it
             # had the calibration cannot be told apart from one that did.
             chk.set_attr("/", "dhdt_melt_k_npz", str(k_npz_used))
+            # The optimisation metric and the objective at the checkpointed
+            # iterate, so the next link can verify it continues THIS
+            # minimisation from THIS point (icepack2_tools.handoff).
+            if run_settings.get("grad_precond") is not None:
+                chk.set_attr("/", "grad_precond", str(run_settings["grad_precond"]))
+            for _key, _val in last_accepted.items():
+                chk.set_attr("/", f"objective_{_key}", float(_val))
             # How BedMachine was put onto the cells (runconfig.RASTER_SAMPLES).
             # theta/phi absorb the bed representation just as they absorb the
             # front treatment, so a forward must reproduce it.
@@ -2146,6 +2188,12 @@ def main():
 
         t_iter = perf_counter() - t_iter
         iteration_count[0] += 1
+        # NB: this path records the last EVALUATED point (L-BFGS-B trial
+        # points included); the TAO path below records the accepted iterate.
+        last_accepted.update(iteration=iteration_count[0], total=total, misfit=J_val,
+                             reg_theta=reg_theta, reg_phi=reg_phi)
+        if iteration_count[0] == 1:
+            _check_handoff(total)
         PETSc.Sys.Print(
             f"  iter {iteration_count[0]:3d}: "
             f"misfit={J_val:.6e}{term_report()} "
@@ -2215,6 +2263,7 @@ def main():
         _A_inv = _prior_metric_solvers(grad_precond)
 
         _nfev = [0]
+        _ring = []
 
         def forward_total(theta_ctrl, phi_ctrl):
             """The objective TAO differentiates: misfit plus BOTH prior terms.
@@ -2233,6 +2282,12 @@ def main():
             J = forward(theta_ctrl, phi_ctrl)
             J.addto(_prior_energy_form(theta_ctrl, "theta"))
             J.addto(_prior_energy_form(phi_ctrl, "phi"))
+            # The last few evaluations with their controls: the monitor picks
+            # the one TAO accepted, so a checkpoint never holds a rejected
+            # line-search trial point.
+            _ring.append((float(J), theta_ctrl.dat.data_ro.copy(),
+                          phi_ctrl.dat.data_ro.copy()))
+            del _ring[:-6]
             for _zb, _z in zip(z_backup.subfunctions, z.subfunctions):
                 _zb.dat.data[:] = _z.dat.data_ro
             return J
@@ -2274,6 +2329,19 @@ def main():
         def _monitor(tao):
             its, f_val, gnorm, _cnorm, _xdiff, _reason = tao.getSolutionStatus()
             iteration_count[0] = int(its)
+            # theta/phi mirror the LAST EVALUATION; put the ACCEPTED iterate
+            # there before anything below reads or saves them.
+            _hit = accepted_evaluation(_ring, float(f_val))
+            if _hit is not None:
+                theta.dat.data[:] = _hit[1]
+                phi.dat.data[:] = _hit[2]
+            else:
+                PETSc.Sys.Print(
+                    f"    WARNING: no recent evaluation matches the accepted "
+                    f"objective {float(f_val):.6e}; the controls on record are "
+                    "the last evaluated point")
+            if its == 0:
+                _check_handoff(float(f_val), tao=tao)
             if _ftol_stop.update(iteration_count[0], f_val):
                 tao.setConvergedReason(PETSc.TAO.ConvergedReason.CONVERGED_USER)
             now = perf_counter()
@@ -2288,6 +2356,9 @@ def main():
             last_good_x[0] = np.array(_x, copy=True)
             reg_theta = float(assemble(_prior_energy_form(theta, "theta")))
             reg_phi = float(assemble(_prior_energy_form(phi, "phi")))
+            last_accepted.update(iteration=int(its), total=float(f_val),
+                                 misfit=float(f_val) - reg_theta - reg_phi,
+                                 reg_theta=reg_theta, reg_phi=reg_phi)
             PETSc.Sys.Print(
                 f"  iter {iteration_count[0]:3d}: "
                 f"misfit={f_val - reg_theta - reg_phi:.6e} "
@@ -2322,6 +2393,8 @@ def main():
             solver.solve([theta, phi])
         except RuntimeError:
             pass
+        if _handoff_failed[0]:
+            raise RuntimeError(_handoff_failed[0])
         reason = int(solver.tao.getConvergedReason())
         message = (
             f"CONVERGED: relative functional decrease <= ftol={ftol:g}"
@@ -2374,6 +2447,75 @@ def main():
             f"ISMIP7_GRAD_PRECOND must be one of {_METRICS}, "
             f"got {grad_precond!r}"
         )
+
+    # ── One objective across restarts (icepack2_tools.handoff) ──────────
+    # What this run minimises, compared with what the warm start's writer
+    # minimised. A chain link that would silently change the objective is a
+    # different inversion; ISMIP7_WARM_START_STRICT=1 (the chain runner's
+    # default) refuses it, otherwise the differences are printed. The first
+    # evaluation must then reproduce the recorded objective to
+    # ISMIP7_WARM_START_OBJ_TOL (relative, default 1e-3: the re-solved state
+    # differs from the writer's by the forward tolerance only).
+    run_settings.update({
+        "misfit_norm": MISFIT_NORM, "misfit_scale": float(misfit_scale),
+        "log_vel_weight": float(log_vel_w), "log_vel_eps": float(LOG_VEL_EPS),
+        "dhdt_weight": float(dhdt_w), "dhdt_net_sigma": net_sigma_used,
+        "prior_form": PRIOR_FORM, "gamma_theta": float(GAMMA_THETA),
+        "gamma_phi": float(GAMMA_PHI), "friction_control": FRICTION_CONTROL,
+        "friction": str(FRICTION), "n_flow": float(n_flow_val),
+        "geometry_space": str(geometry_space),
+        "friction_anchor_length": float(ANCHOR_LENGTH),
+        "lake_ice_base": int(LAKE_ICE_BASE),
+        "fluidity_prior_origin": str(prior_origin), "grad_precond": grad_precond,
+    })
+    if PRIOR_FORM == "bilaplacian":
+        run_settings.update({"prior_sigma_theta": float(PRIOR_SIGMA_THETA),
+                             "prior_sigma_phi": float(PRIOR_SIGMA_PHI),
+                             "prior_rho": float(PRIOR_RHO)})
+        if FRICTION_CONTROL == "sqrt":
+            run_settings.update({"prior_sigma_alpha": float(sigma_alpha_val),
+                                 "prior_rho_theta": float(PRIOR_RHO_THETA)})
+    _strict = os.environ.get("ISMIP7_WARM_START_STRICT", "0").strip() == "1"
+    _obj_tol = float(os.environ.get("ISMIP7_WARM_START_OBJ_TOL", "1e-3"))
+    if warm_attrs:
+        _mism = objective_mismatches(warm_attrs, run_settings)
+        if _mism:
+            PETSc.Sys.Print("  Handoff: this run's objective differs from the warm start's:")
+            for _m in _mism:
+                PETSc.Sys.Print(f"    {_m}")
+            if _strict:
+                raise RuntimeError(
+                    "ISMIP7_WARM_START_STRICT=1: refusing to continue a "
+                    "different objective from the warm start's controls "
+                    f"({len(_mism)} setting(s) differ, listed above)")
+        else:
+            PETSc.Sys.Print("  Handoff: objective settings match the warm start's")
+    _handoff_checked = [False]
+
+    def _check_handoff(first_total, tao=None):
+        """The first evaluation against the recorded objective."""
+        if _handoff_checked[0]:
+            return
+        _handoff_checked[0] = True
+        if "objective_total" not in warm_attrs:
+            return
+        _rec = float(warm_attrs["objective_total"])
+        _gap = handoff_gap(_rec, first_total)
+        _msg = (f"  Handoff: first objective {float(first_total):.6e} vs recorded "
+                f"{_rec:.6e} (relative gap {_gap:.2e}, tolerance {_obj_tol:g})")
+        PETSc.Sys.Print(_msg)
+        if _gap > _obj_tol:
+            _why = (f"the warm start's objective is not reproduced (gap {_gap:.2e} "
+                    f"> {_obj_tol:g}): the optimiser would not be continuing the "
+                    "same minimisation")
+            if _strict:
+                _handoff_failed[0] = _why
+                if tao is not None:
+                    tao.setConvergedReason(PETSc.TAO.ConvergedReason.DIVERGED_USER)
+                else:
+                    raise RuntimeError(_why)
+            else:
+                PETSc.Sys.Print(f"    WARNING: {_why}")
     if grad_precond == "mass":
         _mv = assemble(TestFunction(Q) * dx).dat.data_ro
         _mloc = Function(Q); _mloc.dat.data[:] = _mv

@@ -59,6 +59,9 @@ export ISMIP7_DHDT_NET_SIGMA="${ISMIP7_DHDT_NET_SIGMA:-10}"
 export ISMIP7_GAMMA_THETA="${ISMIP7_GAMMA_THETA:-1e5}"
 export ISMIP7_GAMMA_PHI="${ISMIP7_GAMMA_PHI:-1e5}"
 export ISMIP7_MAXITER="${ISMIP7_MAXITER:-200}"
+# A chain link must continue the SAME objective from the accepted iterate
+# (icepack2_tools.handoff); a link that would change it refuses.
+export ISMIP7_WARM_START_STRICT="${ISMIP7_WARM_START_STRICT:-1}"
 export ISMIP7_RASTER_SAMPLE="${ISMIP7_RASTER_SAMPLE:-vertex}"
 # Name the output explicitly: without it every run, including a smoke test,
 # writes the production filename and can silently replace a converged map.

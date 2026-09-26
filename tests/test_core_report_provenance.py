@@ -94,3 +94,24 @@ def test_the_report_lifts_the_smb_feedback_banner_and_not_its_yearly_lines(tmp_p
     old.write_text("step 1\n")
     (none,) = core_report.smb_feedback_record(str(old))
     assert "ran without the feedback" in none
+
+
+def test_the_report_resolves_the_step_left_at_its_default(monkeypatch):
+    r"""Issue 20 moved the production step to 0.025; a report written from a
+    shell that never exported it still states the step the drivers used."""
+    monkeypatch.delenv("ISMIP7_DT", raising=False)
+    assert core_report.effective_env()["ISMIP7_DT"] == "0.025    # default (not exported)"
+    monkeypatch.setenv("ISMIP7_DT", "0.1")
+    assert core_report.effective_env()["ISMIP7_DT"] == "0.1"
+
+
+def test_the_report_is_named_for_the_run_resolution(monkeypatch):
+    r"""The 32 km demonstration matrix keeps its names, and a production core
+    is named and titled for the 1 km mesh it ran on."""
+    monkeypatch.delenv("ISMIP7_LC", raising=False)
+    assert core_report.resolution_km("results/hist_cesm2_waccm_32000_timeseries.csv") == "32"
+    assert core_report.resolution_km("/r/ssp585_cesm2_waccm_1000_timeseries.csv") == "1"
+    assert core_report.resolution_km("/r/ctrl_t1k_dthalf_2500_timeseries.csv") == "2.5"
+    assert core_report.resolution_km("/r/renamed.csv") == "1"
+    monkeypatch.setenv("ISMIP7_LC", "32000")
+    assert core_report.resolution_km("/r/renamed.csv") == "32"

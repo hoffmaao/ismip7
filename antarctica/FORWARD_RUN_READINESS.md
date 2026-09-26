@@ -609,10 +609,29 @@ Output and submission:
     117,000 of the 198,990 Gt left out over 2016 to 2300, and 1,150 of the
     model's 3,929 Gt/yr at 2300. Whether the production runs keep the
     reference is a group decision (issue #104); the melt it books under a
-    pinned front is tracked on its own (issue #105). The rest, about 82,000 Gt
+    pinned front is tracked with the other open melt bookkeeping
+    (issue #136). The rest, about 82,000 Gt
     over the run and 620 Gt/yr at 2300, is melt of real ice gone by year end,
     most of it grounded ice that goes afloat into an empty cell and melts on
-    arrival; where the submission reports it is a group decision (issue #109).
+    arrival. The group chose on 25 September, in issue 109, to report that as
+    front melt: the forward books the inflow's share of the melt in marine
+    cells holding no ice at either end of the year as `lifmassbf`, which the
+    request never fills, and leaves the reference's share in `libmassbffl`.
+    Applied to the p4 annual files, the split moves 571 Gt/yr at 2300 out of
+    the pixels the fill blanks and leaves 1,200 there: 1,094 the reference's
+    share on emptied marine cells, 20 the reference melted on emptied land
+    cells, which the melt law of that run counted as afloat at zero
+    thickness, and 87 shelf ice; the submission README states the booking. A main and
+    branch pair restarted from p4 at 2294.0 checked it end to end on Quartz
+    (runlog `test-32km-ssp585-front-melt-main` and `-branch`): the forward's
+    split matches the function applied offline to 1.5e-14 m/yr, the tool's
+    `tendlifmassbf` matches the model's to 0.000 %, and isschecker 0.5.1
+    finds no error outside the length checks of a five-year series. The same
+    restart on the code of 26 September (runlog
+    `test-32km-ssp585-reference-land`) books 3 Gt/yr of melt on emptied land
+    cells and keeps the reference's share on emptied marine cells, 1,334 Gt/yr
+    on average over 2294 to 2298 in the pixels the fill blanks. That share, the
+    land melt and the README's production numbers are one item (issue #136).
     What is left is the submitted files, paired with their historical. (issue #13)
 12. **Adopt or refetch the forcing that predates the manifest.** Done on 21
     September, and the premise above was wrong. The first

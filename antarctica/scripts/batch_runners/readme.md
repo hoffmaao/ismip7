@@ -440,7 +440,8 @@ job advanced no years at all (setup alone spent the budget).
 **A historical can queue what branches from it.** `ISMIP7_CHAIN_THEN` names
 follow-on experiments (space-separated, from the runner's list), and the job
 that brings the chain to its end year queues each one behind itself, as a fresh
-chain with the same environment and allocation; a job that stops short carries
+chain with the same environment and allocation, less `ISMIP7_T_START` and
+`ISMIP7_T_END`, since each follow-on's driver owns its period; a job that stops short carries
 the list on to its successor, and a stalled or failed one queues nothing. So a
 control and the projections are submitted with their historical and start only
 once it has reached 2015, which is what `simulation.historical_endpoint` then

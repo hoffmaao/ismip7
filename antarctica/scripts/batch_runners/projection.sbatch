@@ -25,7 +25,8 @@
 # control or projection branches from the historical's endpoint, so it must
 # not start before the historical has finished, and no earlier point in the
 # chain knows that it has. Each follow-on starts a chain of its own with this
-# run's environment and allocation, less ISMIP7_CHAIN_THEN itself:
+# run's environment and allocation, less ISMIP7_CHAIN_THEN itself and the
+# period (ISMIP7_T_START, ISMIP7_T_END), which each follow-on's driver owns:
 #
 #   ISMIP7_EXPERIMENT=hist_mri_esm2 ISMIP7_ESM=MRI-ESM2-0 \
 #       ISMIP7_CHAIN_THEN="control ssp585_mri_esm2" submit.sh projection
@@ -297,8 +298,10 @@ if [ "$done_yet" = "1" ]; then
         fi
         then_list="$ISMIP7_CHAIN_THEN"
         # Each follow-on is a fresh chain: it resumes its own checkpoints, not
-        # this run's restart or wall budget, and it queues nothing further.
-        unset ISMIP7_CHAIN_THEN ISMIP7_WALL_STOP_MIN ISMIP7_RESTART
+        # this run's restart or wall budget, runs its driver's own period, not
+        # this run's ISMIP7_T_START / ISMIP7_T_END, and queues nothing further.
+        unset ISMIP7_CHAIN_THEN ISMIP7_WALL_STOP_MIN ISMIP7_RESTART \
+              ISMIP7_T_START ISMIP7_T_END
         ismip7_chain_resources
         for next in $then_list; do
             echo "chain: queueing the follow-on ${next}"

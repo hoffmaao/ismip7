@@ -313,16 +313,20 @@ def test_on_a_dg0_mesh_the_reference_is_the_forwards_surface_and_the_log_adds_up
     r"""The arrays the feedback reads are the geometry dofs, and ``s_ref``
     from H_init is the forward's own surface: the UFL expression simulation.py
     interpolates, cell by cell. The yearly line's net is the integral of the
-    correction."""
+    correction over the cells the forward forces: a marine cell emptied since
+    t=0 keeps a surface change, and open ocean takes no forcing
+    (front.unforced_cells)."""
     fd = pytest.importorskip("firedrake")
     # 800 km across, so the net is Gt/yr and not a rounded zero; the second
-    # half is a marine bed on which 60 m of thinning floats some cells
+    # half is a marine bed on which 60 m of thinning floats some cells, and
+    # its last 100 km have emptied to open ocean
     mesh = fd.RectangleMesh(4, 4, 800e3, 800e3)
     Q = fd.FunctionSpace(mesh, "DG", 0)
     x, _ = fd.SpatialCoordinate(mesh)
     b = fd.Function(Q).interpolate(fd.conditional(x < 400e3, 200.0, -600.0))
     H_init = fd.Function(Q).interpolate(fd.Constant(500.0) + x / 2000.0)
-    h = fd.Function(Q).interpolate(H_init - 60.0)
+    h = fd.Function(Q).interpolate(
+        fd.conditional(x > 700e3, 0.0, H_init - 60.0))
     rho_ratio = fd.Constant(RHO_RATIO)
     s_ufl = fd.Function(Q).interpolate(
         fd.max_value(b + H_init, (fd.Constant(1.0) - rho_ratio) * H_init))
@@ -340,12 +344,18 @@ def test_on_a_dg0_mesh_the_reference_is_the_forwards_surface_and_the_log_adds_up
     ds = (flotation_surface(b.dat.data_ro, h.dat.data_ro, RHO_RATIO)
           - s_ufl.dat.data_ro)
     assert np.allclose(corr, G_MYR * ds, rtol=1e-12, atol=0.0)
+    ocean = (h.dat.data_ro <= 0.0) & (b.dat.data_ro < 0.0)
+    assert ocean.any() and (ds[ocean] < -100.0).all()
     field = fd.Function(Q)
-    field.dat.data[:] = corr
+    field.dat.data[:] = np.where(ocean, 0.0, corr)
     net = float(fd.assemble(field * fd.dx)) * 917.0 / 1e12
+    field.dat.data[:] = corr
+    everywhere = float(fd.assemble(field * fd.dx)) * 917.0 / 1e12
     (line,) = lines
     assert line.strip().startswith("dacabfdz feedback 2015: net")
     assert abs(net) > 1.0 and f"net {net:+.2f} Gt/yr" in line
+    assert f"{everywhere:+.2f}" != f"{net:+.2f}"
+    assert f"surface change {ds[~ocean].min():+.1f}..{ds[~ocean].max():+.1f} m" in line
     assert SMB_FEEDBACK_MARKER not in line
     fb.correction(ctx, 2015)
     assert len(lines) == 1                         # once per forcing year

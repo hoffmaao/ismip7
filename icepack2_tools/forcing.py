@@ -2074,15 +2074,21 @@ class SMBElevationFeedback:
 
     def _announce(self, ctx, yr, corr, ds):
         r"""One line per forcing year: the net feedback, the surface change
-        and the gradient on this mesh. Collective: every rank enters the
-        callback, so every rank reduces."""
+        and the gradient on this mesh. The net and the surface change leave
+        out open ocean (``front.unforced_cells`` without the front masks,
+        which the callback does not see), so the net is the feedback the
+        step's first advance applies: a shelf cell emptied since t=0 keeps a
+        surface change there that the forward never applies. Collective:
+        every rank enters the callback, so every rank reduces."""
         from firedrake import Function, assemble, dx
+        from .front import unforced_cells
         from .mpi_stats import global_range
         comm = ctx["mesh"].comm
+        forced = ~unforced_cells(ctx["h"].dat.data_ro, ctx["b"].dat.data_ro)
         field = Function(ctx["accum"].function_space())
-        field.dat.data[:] = corr
+        field.dat.data[:] = np.where(forced, corr, 0.0)
         net = float(assemble(field * dx)) * _RHO_ICE / 1e12
-        ds_lo, ds_hi = global_range(ds, comm)
+        ds_lo, ds_hi = global_range(ds[forced], comm)
         g_lo, g_hi = global_range(self._gradient, comm)
         self.log(f"  {SMB_GRADIENT} feedback {yr}: net {net:+.2f} Gt/yr, "
                  f"surface change {ds_lo:+.1f}..{ds_hi:+.1f} m, gradient "

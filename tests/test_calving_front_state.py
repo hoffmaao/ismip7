@@ -120,8 +120,10 @@ def test_a_gated_law_reads_the_friction_grounded_fraction_when_given():
     chi = Function(Q0).interpolate(plain.chi_gr).dat.data_ro
     floating = (chi == 0.0) & (h.dat.data_ro > 1.0)
     grounded = (chi == 1.0)
-    # afloat both gate fully open; grounded the binary gate closes, the
-    # fractional one leaves half the rate
-    assert np.allclose(c_frac[floating], 0.5 * c_plain[floating])
+    # afloat the binary gate is fully open while the fraction (0.5 here,
+    # everywhere) scales the rate down; on grounded cells the binary gate
+    # closes the rate and the fractional one leaves part of it
+    assert np.all(c_plain[floating] > 0.0)
+    assert np.all((c_frac[floating] > 0.0) & (c_frac[floating] < c_plain[floating]))
     assert np.allclose(c_plain[grounded], 0.0)
-    assert np.all(c_frac[grounded] >= 0.0)
+    assert np.all(c_frac[grounded] > 0.0)

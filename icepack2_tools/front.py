@@ -9,6 +9,7 @@ they can be exercised without standing up a whole run.
 import numpy as np
 
 __all__ = ["retreat_slivers", "clear_reference_where_ice_free", "clamp_thickness",
+           "front_removal_mask",
            "front_connected", "facet_neighbours", "ocean_drag_cells",
            "collapse_cell_counts",
            "collapse_banner", "collapse_csv_fields", "COLLAPSE_MARKER",
@@ -236,3 +237,16 @@ def facet_neighbours(Q_dg):
         return touched.dat.data_ro > 0.0
 
     return neighbours_of
+
+
+def front_removal_mask(law_beyond, initial_beyond, retreat_only):
+    r"""The cells a step empties for the front: the ones the level-set law's
+    front has passed (``law_beyond``), and under a retreat-only front
+    (``ISMIP7_FRONT_ADVANCE=none``) also every cell beyond the t=0 extent
+    (``initial_beyond``), so ice the transport carries past the initial
+    outline is removed and booked as calving instead of becoming new
+    extent. ``initial_beyond`` may be None when it was never built."""
+    import numpy as np
+    if not retreat_only or initial_beyond is None:
+        return law_beyond
+    return np.logical_or(law_beyond, initial_beyond)

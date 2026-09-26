@@ -72,6 +72,7 @@ from icepack2_tools.geometry import raise_bed_to_lake_ice_base, sample_to_geomet
 from icepack2_tools.naming import map_basename
 from icepack2_tools.front import (
     clamp_thickness, clear_reference_where_ice_free, retreat_slivers,
+    front_removal_mask,
     facet_neighbours, front_connected, ocean_drag_cells,
     collapse_banner, collapse_cell_counts, collapse_csv_fields,
     COLLAPSE_CSV_COLUMNS, COLLAPSE_MARKER, FRONT_OWNER_MARKER,
@@ -86,6 +87,7 @@ from icepack2_tools.runconfig import (
     lc as _lc, lc_coarse as _lc_coarse, n_flow as _n_flow,
     TARGET_MESH_GEOMETRY_METHOD,
     calving_law as _calving_law, calving_law_object as _calving_law_object,
+    front_advance as _front_advance,
     fracture as _fracture_mode, ismip7_output as _ismip7_output,
     FRACTURE_MASK_MODES,
     # auto_resume is re-exported, not used here: every forward driver imports
@@ -1981,6 +1983,19 @@ def run_simulation(
     # ISMIP7_FIXED_FRONT=1 unconditionally, which is why the flag may not
     # override an explicit ISMIP7_CALVING choice.
     legacy_front_sink = fixed_front and calving_law_obj is None
+    # Retreat-only (ISMIP7_FRONT_ADVANCE=none): the law retreats the front
+    # and nothing advances past the t=0 extent, which is removed each step
+    # and booked as calving - the retreat-only front of most ISMIP6 models
+    # and the ISMIP7 submission's. Explicit, so the matrix runner's
+    # unconditional ISMIP7_FIXED_FRONT=1 cannot pin a projection law by
+    # accident (the reason the legacy flag is ignored under a law).
+    front_advance = _front_advance()
+    retreat_only = calving_law_obj is not None and front_advance == "none"
+    if front_advance == "none" and calving_law_obj is None:
+        raise ValueError(
+            "ISMIP7_FRONT_ADVANCE=none needs a level-set law (ISMIP7_CALVING); "
+            "without one ISMIP7_FIXED_FRONT already holds the front")
+    ctx["front_advance"] = front_advance
     # A free law moves the front, so the frozen a_ref must follow the live
     # extent; `fixed` and the legacy flag pin it on purpose and keep the
     # t=0-only mask.
@@ -1992,8 +2007,10 @@ def run_simulation(
         front_owner = (
             f"level-set law {calving_law_obj.describe()} "
             f"(ISMIP7_CALVING={calving})"
+            + ("; retreat-only: nothing advances past the t=0 extent "
+               "(ISMIP7_FRONT_ADVANCE=none)" if retreat_only else "")
             + ("; ISMIP7_FIXED_FRONT is set but ignored for removal"
-               if fixed_front else ""))
+               if fixed_front and not retreat_only else ""))
     elif fixed_front:
         front_owner = "legacy fixed-front mask (ISMIP7_FIXED_FRONT)"
     else:
@@ -2650,7 +2667,7 @@ def run_simulation(
                 calving_rate = calving_law_obj.rate(front_state, t_yr)
             last_c_mean = level_set.advance(dt_local, u_vel, rate=calving_rate)
             lsb, calv_frac = level_set.calving_masks()
-            beyond = lsb
+            beyond = front_removal_mask(lsb, beyond_front, retreat_only)
             ls_ice_free = level_set.beyond_front()
             if a_ref is not None and free_front:
                 clear_reference_where_ice_free(a_ref.dat.data, ls_ice_free)

@@ -377,6 +377,29 @@ def fixed_front():
     return os.environ.get("ISMIP7_FIXED_FRONT") not in (None, "0")
 
 
+FRONT_ADVANCE_MODES = ("free", "none")
+
+
+def front_advance():
+    r"""``ISMIP7_FRONT_ADVANCE``: what a level-set law's front may do besides
+    retreat.
+
+    ``free`` (default): the transport advances the front wherever ice reaches
+    an empty cell that the law does not remove (the extent anchor follows the
+    thickness). ``none``: nothing advances past the t=0 extent; ice reaching
+    a cell beyond it is removed each step and booked as calving, while the
+    law still retreats the front inside it. That is the retreat-only front of
+    most ISMIP6 models (Seroussi et al. 2020) and the ISMIP7 submission's
+    (Andrew, 26 Sep 2026). Needs a law: without one ``ISMIP7_FIXED_FRONT``
+    already holds the front.
+    """
+    value = os.environ.get("ISMIP7_FRONT_ADVANCE", "free").strip().lower()
+    if value not in FRONT_ADVANCE_MODES:
+        raise ValueError(
+            f"ISMIP7_FRONT_ADVANCE must be one of {FRONT_ADVANCE_MODES}, got {value!r}")
+    return value
+
+
 def apparent_mb_mode():
     r"""``ISMIP7_APPARENT_MB``: the apparent-mass-balance init, or None for off.
 

@@ -90,7 +90,7 @@ def test_the_prior_is_the_rate_factor_of_the_raster_temperature(tmp_path, space)
     # a linear field is reproduced exactly by bilinear interpolation
     assert np.allclose(A.dat.data_ro, expected, rtol=1e-9, atol=0.0)
     assert info["pixels_replaced"] == 0
-    assert info["nodes_from_replaced"] == 0
+    assert info["nodes_filled"] == 0
     assert np.all(A.dat.data_ro > 0.0)
 
 
@@ -102,7 +102,7 @@ def test_a_bad_pixel_is_filled_and_the_nodes_it_reaches_are_counted(
     xy = _coords(space)
     exact = _temperature(xy[:, 0], xy[:, 1])
     assert info["pixels_replaced"] == 1
-    assert 0 < info["nodes_from_replaced"] < 8
+    assert 0 < info["nodes_filled"] < 8
     assert np.all(np.isfinite(T.dat.data_ro))
     assert np.all((T.dat.data_ro >= T_MIN) & (T.dat.data_ro <= T_MAX))
     far = np.hypot(xy[:, 0] - BAD[0], xy[:, 1] - BAD[1]) > 1.5 * DX
@@ -111,3 +111,66 @@ def test_a_bad_pixel_is_filled_and_the_nodes_it_reaches_are_counted(
     # are off by at most one pixel's worth of the gradient
     near = ~far
     assert np.all(np.abs(T.dat.data_ro[near] - exact[near]) <= 5e-4 * DX + 2e-4 * DX)
+
+
+def _bedmachine_mask(path, ice_x_max):
+    """A BedMachine-shaped file at 500 m over the raster's extent: grounded
+    ice (2) for x < ice_x_max, ocean (0) beyond."""
+    import netCDF4
+    x = np.arange(X0, X1 + 1.0, 500.0)
+    y = x[::-1].copy() * (Y1 - Y0) / (X1 - X0) + Y0 + (Y1 - Y0) * 0.0
+    y = np.arange(Y1, Y0 - 1.0, -500.0)
+    X, _ = np.meshgrid(x, y)
+    with netCDF4.Dataset(path, "w") as d:
+        d.createDimension("x", len(x))
+        d.createDimension("y", len(y))
+        for name, vals in (("x", x), ("y", y)):
+            v = d.createVariable(name, "f8", (name,))
+            v[:] = vals
+        v = d.createVariable("mask", "i1", ("y", "x"))
+        v[:] = np.where(X < ice_x_max, 2, 0).astype("i1")
+    return str(path)
+
+
+def test_pixels_outside_bedmachine_ice_are_undefined_and_take_the_fill(
+        tmp_path, space):
+    from firedrake import Constant
+    from icepack2_tools.rheology_prior import ice_extent_on_grid, read_temperature_raster
+    fn = _raster(tmp_path / "T.tif", garbage=None)        # in range everywhere
+    bm = _bedmachine_mask(tmp_path / "bm.nc", ice_x_max=12e3)
+    x, y, _ = read_temperature_raster(fn)
+    defined = ice_extent_on_grid(bm, x, y, stride=1)
+    assert defined.shape == (len(y), len(x))
+    assert defined[:, x < 12e3].all() and not defined[:, x > 12e3].any()
+    fill = Function(space).interpolate(Constant(240.0))
+    A, info = fluidity_prior_from_temperature_raster(fn, space, bm_fn=bm, fill=fill)
+    xy = _coords(space)
+    T = info["temperature"].dat.data_ro
+    inside = xy[:, 0] < 11e3
+    outside = xy[:, 0] > 13e3
+    assert np.allclose(T[inside], _temperature(xy[inside, 0], xy[inside, 1]),
+                       rtol=1e-9, atol=0.0)
+    assert np.all(T[outside] == 240.0)
+    assert info["fill_source"] == "caller temperature"
+    assert info["nodes_filled"] == int(info["filled"].sum()) > 0
+    assert np.allclose(A.dat.data_ro[outside], rate_factor(240.0))
+
+
+def test_the_column_fill_is_the_surface_temperature_or_its_mean_with_the_freezing_point(space):
+    from firedrake import Constant, SpatialCoordinate, conditional
+    from icepack2_tools.rheology_prior import column_fill_temperature
+    from icepack2_tools.thermo_model import ocean_melting_point
+    mesh = space.mesh()
+    x, _ = SpatialCoordinate(mesh)
+    T_srf = Function(space).interpolate(Constant(250.0))
+    # grounded for x < 10 km (bed above sea level), floating beyond (deep bed)
+    H = Function(space).interpolate(Constant(400.0))
+    b = Function(space).interpolate(conditional(x < 10e3, 100.0, -1500.0))
+    T = column_fill_temperature(T_srf, H, b, space)
+    xy = _coords(space)
+    gnd = xy[:, 0] < 9.5e3
+    flt = xy[:, 0] > 10.5e3
+    assert np.allclose(T.dat.data_ro[gnd], 250.0)
+    T_fr = float(Function(space).interpolate(ocean_melting_point(H)).dat.data_ro[0])
+    assert 270.0 < T_fr < 273.15
+    assert np.allclose(T.dat.data_ro[flt], 0.5 * (250.0 + T_fr))

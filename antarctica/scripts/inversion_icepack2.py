@@ -991,27 +991,42 @@ def main():
             f"{A_prior_hi:.2f}] (from warm start)"
         )
     elif FLUIDITY_PRIOR == "pattyn":
-        from icepack2_tools.rheology_prior import fluidity_prior_from_temperature_raster
+        from icepack2_tools.rheology_prior import (
+            column_fill_temperature, fluidity_prior_from_temperature_raster)
         _pattyn_fn = os.environ.get(
             "ISMIP7_PATTYN_TEMP", os.path.join(DATA_DIR, "temp", "Pattyn_2013.tif"))
         if not os.path.exists(_pattyn_fn):
             raise FileNotFoundError(
                 f"ISMIP7_FLUIDITY_PRIOR=pattyn: temperature raster {_pattyn_fn} "
                 "not found (ISMIP7_PATTYN_TEMP names it)")
-        A_prior, _pinfo = fluidity_prior_from_temperature_raster(_pattyn_fn, Q)
-        _n_rep = COMM_WORLD.allreduce(int(_pinfo["nodes_from_replaced"]))
+        # The raster is defined only under BedMachine ice (outside it is an
+        # extrapolation halo); nodes it does not define take a column
+        # temperature from the surface-temperature climatology and the
+        # flotation state, on the same CG1 geometry the thermal prior uses.
+        _H_cg = cg1_lift(H) if geom_dg else H
+        _b_cg = cg1_lift(b) if geom_dg else b
+        _T_fill = column_fill_temperature(
+            load_mean_annual_surface_temperature(Q), _H_cg, _b_cg, Q)
+        A_prior, _pinfo = fluidity_prior_from_temperature_raster(
+            _pattyn_fn, Q, bm_fn=bm_fn, fill=_T_fill)
+        _ice_node = _H_cg.dat.data_ro > 10.0
+        _n_fill = COMM_WORLD.allreduce(int(_pinfo["nodes_filled"]))
+        _n_fill_ice = COMM_WORLD.allreduce(int((_pinfo["filled"] & _ice_node).sum()))
+        _n_ice = COMM_WORLD.allreduce(int(_ice_node.sum()))
         _n_tot = COMM_WORLD.allreduce(int(_pinfo["nodes_total"]))
         prior_origin = (
             "rate_factor of the depth-averaged Pattyn temperature "
-            f"({os.path.basename(_pattyn_fn)}); no strain heating, geothermal "
-            "flux or water content of our own")
+            f"({os.path.basename(_pattyn_fn)}) under BedMachine ice, column "
+            "temperature from the surface climatology where it is undefined; "
+            "no strain heating, geothermal flux or water content of our own")
         A_prior_lo, A_prior_hi = global_range(A_prior)
         PETSc.Sys.Print(
             f"  Fluidity prior A_prior in [{A_prior_lo:.2f}, {A_prior_hi:.2f}] "
-            f"(Pattyn depth-averaged temperature {_pattyn_fn}; "
-            f"{_pinfo['pixels_replaced']} of {_pinfo['pixels_total']} raster pixels "
-            "missing or outside [200, 273.15] K were filled from their nearest "
-            f"valid neighbour, reaching {_n_rep} of {_n_tot} nodes)")
+            f"(Pattyn depth-averaged temperature {_pattyn_fn}: "
+            f"{_pinfo['pixels_replaced']} of {_pinfo['pixels_total']} pixels are "
+            "undefined - outside BedMachine ice, missing or outside [200, 273.15] K; "
+            f"{_n_fill} of {_n_tot} nodes took the surface-climatology column "
+            f"temperature, {_n_fill_ice} of the {_n_ice} nodes with more than 10 m of ice)")
     elif FLUIDITY_PRIOR == "thermo":
         acc_prior = load_racmo_smb_climatology(Q)
         T_srf = load_mean_annual_surface_temperature(Q)

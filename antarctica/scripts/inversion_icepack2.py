@@ -86,6 +86,7 @@ from icepack2_tools.boundary import load_boundary_ids
 from icepack2_tools.dual_friction import (
     build_rc_residual,
     effective_pressure,
+    rebase_log_friction,
     weertman_anchor,
 )
 from icepack2_tools.geometry import cg1_lift, raise_bed_to_lake_ice_base, sample_to_geometry
@@ -549,6 +550,9 @@ def main():
     )
     warm_A_prior = None
     warm_loaded_z = False
+    # the warm start's anchor length, when its theta is to be rebased onto
+    # this run's anchor once that is built (ISMIP7_WARM_START_THETA=physical)
+    warm_theta_anchor = None
     # Residual the warm start's writer reached under the shared F (stamped by
     # save_model_state and by save_map): the forwards' absolute tolerance.
     warm_recorded = None
@@ -588,18 +592,27 @@ def main():
             _warm_lake = (int(chk.get_attr("/", "lake_ice_base"))
                           if chk.has_attr("/", "lake_ice_base") else 0)
             # theta is a log-deviation from the warm start's anchor. Under a
-            # different anchor the same theta is a different friction, so
-            # ISMIP7_WARM_START_THETA=0 starts it at the new prior mean instead.
-            if os.environ.get("ISMIP7_WARM_START_THETA", "1").strip() != "0":
+            # different anchor the same theta is a different friction:
+            # ISMIP7_WARM_START_THETA=0 starts it at the new prior mean, and
+            # =physical rebases it so the friction C_w0 exp(theta) is the warm
+            # start's (the first solve then reproduces the warm start's).
+            _theta_mode = os.environ.get("ISMIP7_WARM_START_THETA", "1").strip()
+            if _theta_mode not in ("0", "1", "physical"):
+                raise ValueError(
+                    f"ISMIP7_WARM_START_THETA={_theta_mode!r}: use 1, 0 or physical")
+            if _theta_mode == "0":
+                PETSc.Sys.Print("    log_friction: prior mean (ISMIP7_WARM_START_THETA=0)")
+            else:
                 theta.assign(_warm_load(chk, chk_mesh, "log_friction", Q))
-                if _warm_anchor != ANCHOR_LENGTH:
+                if _theta_mode == "physical":
+                    warm_theta_anchor = _warm_anchor
+                elif _warm_anchor != ANCHOR_LENGTH:
                     PETSc.Sys.Print(
                         f"    WARNING: log_friction taken from a MAP whose anchor "
                         f"length is {_warm_anchor:g} m, not this run's "
                         f"{ANCHOR_LENGTH:g} m: the same theta means a different "
-                        f"friction. ISMIP7_WARM_START_THETA=0 starts at the prior mean.")
-            else:
-                PETSc.Sys.Print("    log_friction: prior mean (ISMIP7_WARM_START_THETA=0)")
+                        f"friction. ISMIP7_WARM_START_THETA=physical keeps the "
+                        f"friction; =0 starts at the prior mean.")
             phi.assign(_warm_load(chk, chk_mesh, "log_fluidity", Q))
             # A warm start on this mesh supplies its geometry, observations
             # and mixed state as well. One from another mesh (a 2 km MAP
@@ -800,6 +813,18 @@ def main():
     PETSc.Sys.Print(
         "  Friction anchor: " + ("local driving stress" if ANCHOR_LENGTH == 0.0 else
                                  f"grounded driving stress averaged over {ANCHOR_LENGTH / 1e3:g} km"))
+    if warm_theta_anchor is not None:
+        # The warm start's anchor, rebuilt on this run's geometry, and its theta
+        # moved onto this run's anchor: the friction the first solve sees is the
+        # warm start's wherever the geometry is the same.
+        C_prev = weertman_anchor(H, s, u_obs, m_slide_val, Q_g,
+                                 length=warm_theta_anchor, b=b)
+        theta_prev = theta.copy(deepcopy=True)
+        theta.assign(rebase_log_friction(theta_prev, C_prev, C_w0, H, b))
+        _shift = Function(Q).interpolate(abs(theta - theta_prev))
+        PETSc.Sys.Print(
+            f"    log_friction rebased from a {warm_theta_anchor / 1e3:g} km anchor onto "
+            f"this run's: |shift| mean {global_mean(_shift):.3f}, max {global_max(_shift):.2f}")
     # Budd pins N_hat=1 at the inversion geometry; freeze N_ref with the MAP /
     # timing-cache so forwards reproduce the inverted friction at t=0.
     N_ref = None

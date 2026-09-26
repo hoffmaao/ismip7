@@ -13,6 +13,7 @@ Serial, a 120 km x 40 km rectangle with 2 km cells, no data files.
 # dual_friction first: it pulls icepack2 -> irksome, which must be imported
 # before any UFL form is assembled.
 from icepack2_tools.dual_friction import (                      # noqa: E402
+    rebase_log_friction,
     regional_driving_stress,
     weertman_anchor,
 )
@@ -117,3 +118,24 @@ def test_the_anchor_length_is_checked():
         weertman_anchor(H, s, u, 3.0, Q0, length=20e3)
     with pytest.raises(ValueError, match=">= 0"):
         weertman_anchor(H, s, u, 3.0, Q0, length=-1.0, b=b)
+
+
+def test_rebasing_theta_keeps_the_friction_on_grounded_ice():
+    r"""ISMIP7_WARM_START_THETA=physical: a warm start's theta moved onto a new
+    anchor gives back the same friction C exp(theta) on grounded ice, and
+    leaves theta alone where the ice floats."""
+    from firedrake import conditional, lt, sin
+    mesh, Q, Q0, s, H, b, u, xc = _dome()
+    x, _ = SpatialCoordinate(mesh)
+    # grounded for x < 60 km, floating beyond (bed far below flotation)
+    b.interpolate(conditional(lt(x, X0), 1000.0, -5000.0))
+    theta = Function(Q).interpolate(0.3 * sin(x / 7e3))
+    C_to = Function(Q0).assign(0.02)
+    C_from = Function(Q0).assign(0.05)                 # the old anchor, 2.5x the new
+    new = rebase_log_friction(theta, C_from, C_to, H, b)
+    xn = Function(VectorFunctionSpace(mesh, "CG", 1)).interpolate(
+        SpatialCoordinate(mesh)).dat.data_ro[:, 0]
+    inside = xn < X0 - 3e3              # nodes whose every cell is grounded
+    shelf = xn > X0 + 3e3               # nodes whose every cell floats
+    assert np.allclose(new.dat.data_ro[inside] - theta.dat.data_ro[inside], np.log(2.5))
+    assert np.array_equal(new.dat.data_ro[shelf], theta.dat.data_ro[shelf])

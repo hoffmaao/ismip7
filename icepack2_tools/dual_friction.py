@@ -180,6 +180,29 @@ def weertman_anchor(H, s, u_obs, m_slide, Q, length=0.0, b=None):
     return Function(Q, name="C_w0").interpolate(tau / u_speed ** (1.0 / m_slide))
 
 
+def rebase_log_friction(theta, C_from, C_to, H, b, floor=1e-8):
+    r"""The log-friction control that keeps the friction ``C_from exp(theta)``
+    when the anchor changes to ``C_to``, as a new CG1 ``Function``.
+
+    ``theta + ln(C_from / C_to)`` on grounded cells, lifted to the control's
+    CG1 space; floating and ice-free cells, where the friction is gated off,
+    keep ``theta`` unchanged, so a vanishing anchor there cannot put an
+    unbounded log into the prior. ``floor`` [MPa (m/yr)^(-1/3)] keeps the
+    ratio finite where either anchor vanishes on grounded ice.
+    """
+    from firedrake import FunctionSpace, ln
+    from .geometry import cg1_lift
+    Q0 = FunctionSpace(theta.function_space().mesh(), "DG", 0)
+    grounded = gt(height_above_flotation(H, b), 0.0)
+    shift = Function(Q0).interpolate(conditional(
+        grounded,
+        ln(max_value(C_from, Constant(floor)) / max_value(C_to, Constant(floor))),
+        0.0))
+    out = Function(theta.function_space(), name=theta.name())
+    out.interpolate(theta + cg1_lift(shift))
+    return out
+
+
 def budd_nhat_ungated(N, N_ref, H, nhat_floor=0.02, nhat_cap=3.0):
     r"""Normalised Budd effective pressure ``N_hat`` BEFORE the shelf gate.
 

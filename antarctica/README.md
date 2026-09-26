@@ -1590,7 +1590,11 @@ experiment-length checks a two-year run cannot satisfy. `ismip7-scalars` 0.1.0
 then wrote `sla20`, `slg20` and `slvaf`, each with its glacier and ice-cap
 variant, in NetCDF and CSV. On three full-length 32 km ssp585 runs (IU Quartz,
 23 September 2026) every identity `compare_scalars.py` checks holds, and
-`reports/scalar_comparison_32km.md` sets out what differs and why.
+`reports/scalar_comparison_32km.md` sets out what differs and why. The tool's
+slvaf runs above the model's as shelves thin and the grounding line retreats,
+by about as much on a 1 km mesh as on a 32 km one (issue #99).
+`scripts/grid_vaf_attribution.py` measures it for any state or year of annual
+output, and `reports/grid_vaf_resolution.md` has the September 2026 numbers.
 
 At full length, 2015 to 2300, a 32 km control and ssp585 pass 0.5.1 with zero
 errors in every test group, the length checks included (23 September 2026, run

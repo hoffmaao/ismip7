@@ -23,10 +23,11 @@ pixel, `topg` over the covered part), and sets the tool's integrand
 `max(lithk - max(-topg, 0) rho_w/rho_i, 0)` on them against the model's
 `max(h - h_f, 0)` on grounded cells, taken to the grid by the same operator.
 Every pixel is weighed by its map-plane area, with af2 = 1 and without
-maxmask1. The tool's own slvaf carries af2 and maxmask1 on top of this: that
-is the area factor, cause 1 in `scalar_comparison_32km.md` (issue #97). The
-+39.4 mm the 32 km run reached is the same map-plane term, cause 2 there, so
-every number here compares with it like for like.
+maxmask1. The tool's own slvaf applies both: af2 is the area factor, cause 1
+in `scalar_comparison_32km.md` (issue 97, closed on 24 September), and
+maxmask1 is the maximum-extent mask, which `compare_scalars.py` splits out on
+its own. The +39.4 mm the 32 km run reached is the same map-plane term,
+cause 2 there, so every number here compares with it like for like.
 On the p2 run's 2015 state it reproduces the issue 13 attribution to the
 tenth of a gigatonne: +1,594.9 Gt in total, -5,800.9 Gt of it in 4,455
 grounding-line pixels.

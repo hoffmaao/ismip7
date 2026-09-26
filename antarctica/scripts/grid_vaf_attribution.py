@@ -17,8 +17,9 @@ max(lithk - max(-topg, 0) rho_w/rho_i, 0) on them against the model's
 max(h - h_f, 0) on grounded ice, taken to the grid by the same operator.
 Every pixel is weighed by its map-plane area, with af2 = 1 and without
 maxmask1, as in the issue 13 attribution and the grid VAF term of
-``scalar_comparison_32km.md`` cause 2; the tool's own slvaf carries af2 and
-maxmask1 on top of this (the area factor, cause 1 there, issue #97).
+``scalar_comparison_32km.md`` cause 2. The tool's own slvaf applies both:
+af2 is the area factor (cause 1 there, issue 97) and maxmask1 the
+maximum-extent mask, which ``compare_scalars.py`` splits out on its own.
 Pixels are classed as domain edge (partly covered by the mesh), grounding
 line (covered and partly grounded) and interior. On a covered pixel grid
 minus mesh splits exactly into

@@ -75,7 +75,9 @@ Four causes account for all of it.
    The change from 2015 to 2300, -14,281 Gt, is the +39.4 mm, and 90 % of it
    is in the grounding-line pixels (p2_mask: -15,898 Gt, 90 %). The 2300 total
    is the comparison's limnsw residual to the gigatonne. The interior term
-   barely moves (+9,329 to +7,575 Gt). (issue #99)
+   barely moves (+9,329 to +7,575 Gt). A finer mesh leaves it as large: on
+   every mesh down to 0.5 km the same change to the ice sheet costs the tool
+   as much or a little more (`grid_vaf_resolution.md`). (issue #99)
 3. **The writer's fill conventions.** acabf is a mean over the covered part
    of a pixel and libmassbffl over the part that floats at year end. The tool
    sums both over whole pixels, which adds -840 Gt/yr of SMB at the domain

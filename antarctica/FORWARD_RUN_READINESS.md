@@ -522,10 +522,11 @@ Output and submission:
       the p4 pair, and its scalars are compared with ours, `reports/scalar_comparison_32km.md`.
       [ ] Run it on the submitted files and clear the README confirm. (issue #13)
 - [x] #17 names: the core counter follows from the forcing and the ids are
-      validated. [~] What goes in the forcing field of an OCX filename is
-      unsettled: isschecker checks it against CMIP model names and has no `ocx`
-      experiment row, so it rejects the organisers' own GrIS example (`ERA5`,
-      `ocx`), and no AIS example exists, section 7. (issue #18)
+      validated. [x] The forcing field of an OCX filename is `ERA5`, as the
+      organisers' conventions document writes it, and the writer refuses any
+      other value for `ocx`, section 10. [x] `scripts/isschecker_ocx.py`
+      checks core 11 under 0.5.1 with the `ocx` experiment and `ERA5` added;
+      stock 0.5.1 checks no core 11 file. (issue #18)
 - [x] #5, #13, #21, #6, #18, #1, #12, #38.
 
 ### Actions added, continuing section 5
@@ -581,7 +582,10 @@ Output and submission:
     action 10), `reports/scalar_comparison_32km.md`. Each has its issue: the
     pixel means (issue 96), the area factor (issue 97) and `params.nc` in the
     upload (issue 98), all three closed on 24 September when PR 101 merged,
-    and the grid VAF (issue #99).
+    and the grid VAF (issue #99), which a finer mesh leaves as large: the
+    p2 run's change by 2300, imposed on the 2015 state of each mesh, costs
+    the tool +43 mm at 32 km and +56 mm on the 1 km production layout
+    (`reports/grid_vaf_resolution.md`).
     The first three were fixed on 24 September on `claude/scalar-output-fixes`,
     measured on the p4 pair regridded again and a five-year p5 control. Every
     flux is a whole-pixel mean: the fill term is zero, and the control's shelf
@@ -935,3 +939,110 @@ Series banked by earlier runs carry the one-sided booking; they differ from
 the new one only in cells with a facet across which ice flowed from floating
 to grounded. The README's `[confirm]` on this convention is cleared and the
 board item for it is closed.
+
+## 10. The OCX filename, 27 September (issue #18)
+
+Read on 27 September: the 52 forum threads through the GitHub API, the
+organisers' shared documents by direct download, other groups' public
+ISMIP7 repositories, and the source.coop listing. isschecker 0.5.1 was
+installed from its tag in a scratch venv on a Mac and run. Nothing was posted
+upstream.
+
+### What the organisers wrote
+
+- **#17** is unchanged since 29 June, and no thread addresses the forcing
+  field of an OCX filename. New since section 8: #51 (uploads go to one
+  source.coop product per group, unlisted during the embargo) and #52 (the
+  `ismip/ismip7-community` repository).
+- **The conventions document** #17 links, "ISMIP7 filenames and
+  conventions" (19 June, revised 27 August), downloads without a sign-in
+  from `https://drive.google.com/uc?export=download&id=1Yfhx-ecnVt6bCeIqhvDKBKIlvA0KMSgn`.
+  Its complete core set gives core 11 as
+  `iareafl_GrIS_NORCE_CISM3_m001_ERA5_f001_ocx_C011_2015-2025.nc`. The
+  ISMIP7 web page, read directly this time, gives the same name ending
+  `2015-2300`. Both are GrIS examples, and no AIS example exists.
+- **The Protocol Overview sheet** (linked from #40) lists the AIS row as
+  counter C011, experiment `ocx`, ESM `-`, start 1990 to 2015, end 2025.
+- **The AIS OCX SMB is forced by ERA5.** The `history` attribute of
+  `acabf_AIS_RACMO2.3p2-ERA_OCX_SDBN1-8000m_v1_<year>.nc` on source.coop
+  names `RACMO2.3p2_ANT27_ERA5_3h` for 1979, 2003 and 2025.
+
+### isschecker 0.5.1, run
+
+0.5.1 (22 September) is still the latest release, and `main` has moved past
+it only by agent instructions. There is no open issue or pull request.
+The experiment table and `VALID_ESM_NAMES` are as in 0.5.0. Run on a
+synthetic AIS 32 km core 11 set from the checker's own generator (27 files,
+2003 to 2025, gridded and scalar):
+
+| forcing field | stock 0.5.1 | with an `ocx` row |
+|---|---|---|
+| `ERA5`, `ERA`, `OCX`, `RACMO2.3p2-ERA` | 1 naming error, 0 files checked | 27 naming errors, one per file on field 5, and no other error |
+| `CESM2-WACCM` | 1 naming error, 0 files checked | no error |
+
+The row, `ocx;1990;2015;2025;-1` from the Protocol Overview, was added to
+the loaded table in-process, leaving the installed package unedited, as
+`isschecker_ocx.py` below does. Stock 0.5.1 therefore checks none of
+a core 11 set's files, and given a row it passes a CMIP model in field 5, so
+no checker catches a core 11 file that claims ESM forcing. The row makes the
+time tests bite: the same set started in 1979, as core 11 did before issue
+#117, draws a second error in all 27 files, "the file name starts at year
+1979, but experiment 'ocx' must be between 1990 and 2015".
+
+### What other groups do
+
+| group | model, ice sheet | core 11 name | source |
+|---|---|---|---|
+| NORCE | CISM, AIS | `<var>_AIS_NORCE_CISM8_m001_ERA_f001_ocx_C011_1990-2025.nc` | `hgoelzer/norce-ismip7-ais-processing`, 26 and 27 September |
+| UAF | PISM, GrIS | `<var>_GrIS_UAF_PISM_m001_OCX_f001_OCX_C011_1990-2024.nc` | `pism/pism-terra`, its tests and changelog |
+
+NORCE, the institution of the author isschecker's `pyproject.toml` lists,
+runs 0.5.1 with `ocx;1990;1990;2025;36` added to its installed table, leaves
+`VALID_ESM_NAMES` alone, and records the 27 `ERA` naming errors on C011 as
+expected for reanalysis forcing. The public ISMIP7 repositories of
+IGE (Elmer/Ice), Monash (ISSM) and WAVI name no core 11 file. source.coop
+shows no submission: the `ismip` account lists only its four forcing and
+observation products. The organisers' synthetic template on Globus
+(`/ISMIP7/Submission_Templates/AIS/ISMIP7/SYNTH1/`) was not listed: the
+collection's HTTPS endpoint serves files anonymously and lists no directory,
+and no Globus CLI was at hand.
+
+### What changed here
+
+The group chose on 27 September to name core 11 as the organisers'
+conventions document does and to check it with a patched checker. The writer
+names it `<var>_AIS_RICE_icepack2_m001_ERA5_f001_ocx_C011_2003-2025.nc`, the
+span being the 2003 start of issue #117. `--scenario ocx` takes `ERA5` as the
+forcing field by default and refuses any other value, and an upper-case
+`OCX` scenario is refused (`forcing_id` in `write_ismip7_output.py`). NORCE
+writes `ERA` there and UAF writes `OCX`.
+
+`antarctica/scripts/isschecker_ocx.py` runs 0.5.1 with the Protocol
+Overview's `ocx` row added and `ERA5` accepted in field 5 of `ocx` files, in
+its own process, the installed package unedited, and names the patch in the
+log's version line. It refuses any release but 0.5.1 and stops once a
+release carries an `ocx` row. Run on synthetic AIS 32 km sets from the
+checker's generator (27 files each):
+
+| set | errors | exit |
+|---|---|---|
+| `ERA5`, `ocx`, 2003 to 2025 | 0 | 0 |
+| `ERA`, `ocx`, 2003 to 2025 | 27 naming, field 5 | 1 |
+| `ERA5`, `ocx`, 1979 to 2025 | 27 time, the start | 1 |
+| `ERA5`, `ocx`, 2003 to 2020 | 81 time | 1 |
+| `ERA5`, `ctrl`, 2015 to 2016 | 27 naming, field 5, and 81 time | 1 |
+
+On a `CESM2-WACCM` `ctrl` set its log differs from stock 0.5.1's in the
+version line alone. Stock 0.5.1, the release the organisers publish, still
+gives any core 11 set, NORCE's included, the one naming error and no file
+check.
+
+Real output: on IU Quartz on 27 September (job 10721768) the core 11 runs of
+the 25 km rehearsal (issue #138), `rehnoamb` and `rehamb` at `b554238`, whose
+writer differs from this branch's in docstrings alone, were written with
+`--esm ERA5`, 31 files each for 2003 to 2025. For each, stock 0.5.1 reported
+the one naming error and checked no file, and the patched checker checked all
+31 files and found 0 errors. Its one warning is the one every core carries,
+the list of non-mandatory variables the model does not write. The
+rehearsal's own output chain, which lives outside the repository, still
+passes `--esm OCX` for core 11, and the writer now refuses that. (issue #18)

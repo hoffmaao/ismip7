@@ -1,0 +1,25 @@
+{
+  "id": "inversion-25km-budd-rehearsal",
+  "task": "inversion",
+  "institution": "IU",
+  "title": "25 km Budd re-inversion for the rehearsal, warm-started across meshes from the 2 km snapshot 0241",
+  "status": "done",
+  "friction": "budd",
+  "mesh": "antarctica_250000_25000_buffered20000 (IU's build, 4,509 vertices, 7,615 cells, md5 3e8b44b0), DG0 geometry, vertex raster sampling",
+  "initial_state": "warm start from inversion_icepack2_budd_n3_dg0_logvelnet_2000_int5000_bilap_snap20260924_0241.h5 (release maps-2km-snap-2026-09-24) on antarctica_5000_2000_buffered0: its log friction, log fluidity and fluidity prior interpolated by point location; 2,031 of 4,509 target vertices lie outside the 2 km mesh (the 20 km buffer ring and the coast) and take theta and phi 0 and the constant prior 11.1",
+  "forcing": "MEaSUREs velocity; Smith 2003 to 2019 dH/dt with RACMO SMB climatology 2003 to 2019; melt source from calibration-melt-refit-25km-rehearsal-k50",
+  "melt": "deltaT_per_basin_25000_K6.500e-05.npz (sha256 384f8c5c) in the dH/dt source, 1067 Gt/yr at the reference geometry",
+  "site": "IU Quartz, general partition",
+  "resources": "8 ranks, 64 GiB; peak 2.0 GB a rank while loading the 2 km source",
+  "jobs": [
+    "10669726",
+    "10669739"
+  ],
+  "code": "b554238",
+  "started": "2026-09-27",
+  "finished": "2026-09-27",
+  "cost": "11 min for the first 50 iterations (the ramp 12 s, then about 11 s an iteration), 7 min for the last 88 (about 2.5 s an iteration)",
+  "results": "Quartz antarctica/results/rehearsal_25km/maps/inversion_icepack2_budd_n3_dg0_logvelnet_25000_int250000_bilap_ws0241.h5 (sha256 8d11bc2f), the full mixed state; the 50-iteration state kept as ..._ws0241_it050.h5 (sha256 3eb9cefc)",
+  "audit": "the PR 123 ramp converged on its first rung (8 steps); the log-velocity weight 85380.4 was held from the warm start across meshes (issue 68; a fresh derivation gives 3.68e4 at the start and 1.77e4 at iteration 50). Objective 3.511e5 to 1.078e5 over 50 iterations; iterations 40 to 50 still lowered it 1.18 percent, so the budget was extended as planned and the second link converged on the relative decrease (ftol 1e-10) at its 88th iteration, total 1.051e5. theta in -0.93 to 4.54, phi in -2.55 to 0.39. Published-state residual 7.48e3 after a final solve that converged in 0 Newton iterations",
+  "notes": "the rehearsal of issue 138, with the prior and metric of Rice's 2 km chains named explicitly (bilaplacian, sigma 0.3 on both controls, rho 7500 m, the mass-consistent metric), misfit sigma with a 3 m/yr floor, dH/dt weight 1 and net sigma 10. rho 7.5 km is well under the 25 km cells here. 1,857 of 4,509 vertices carry no velocity observation"
+}

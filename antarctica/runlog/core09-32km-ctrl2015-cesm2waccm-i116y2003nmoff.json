@@ -1,0 +1,31 @@
+{
+  "id": "core09-32km-ctrl2015-cesm2waccm-i116y2003nmoff",
+  "task": "test",
+  "institution": "IU",
+  "title": "Core 9 at 32 km without the SMB-elevation feedback and no ocean melt (ISMIP7_K_SCALE=0), cancelled",
+  "status": "stopped",
+  "exp_id": "C009",
+  "esm": "CESM2-WACCM",
+  "scenario": "ctrl",
+  "period": "2015 to 2301, stopped at 2070.0",
+  "friction": "budd",
+  "mesh": "antarctica_320000_32000, DG0 geometry",
+  "initial_state": "hist_cesm2_waccm_i116y2003off_32000_final.h5, sha256 be279aff19a05c19ef36015b72ec43152c041c7f70ef238fd9f685f4fda2e910",
+  "branch_from": "core01-32km-hist-cesm2waccm-i116y2003off at 2015.0, named by ISMIP7_RESTART",
+  "forcing": "RACMO2.4p1 SMB climatology 2000 to 2029 and the CESM2-WACCM ctrl ocean v3, read and given no melt",
+  "melt": "none: ISMIP7_K_SCALE=0 on the per-basin K from K_issue11_mesh2500.npz",
+  "front": "held fixed, ice-shelf collapse ISMIP7_FRACTURE=none",
+  "apparent_mb": "balance",
+  "dt": 0.1,
+  "site": "IU Quartz",
+  "resources": "8 ranks, 32 GiB",
+  "jobs": [
+    "10664220"
+  ],
+  "code": "c6244e6",
+  "started": "2026-09-26",
+  "finished": "2026-09-26",
+  "cost": "cancelled after 11 min",
+  "results": "antarctica/results/ctrl2015_cesm2_waccm_i116y2003nmoff_32000_* (partial)",
+  "notes": "run for issue #116 from a scratch clone of claude/dacabfdz-gradient-version-565c93 at c6244e6. Cancelled at t = 2070.0: the comparison asked for the controls with the feedback on and off and their own ctrl ocean, and this melt-off arm came from misreading that request. Its partial timeseries and checkpoints are no result. With the melt removed at the branch, the frozen apparent-MB reference still offset it, and the first step gained 1374 Gt/yr."
+}

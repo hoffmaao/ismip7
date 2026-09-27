@@ -767,7 +767,12 @@ chain without it:
 | 1850 | -3.6 Gt/yr | +39 Gt/yr | -613 Gt/yr | +17.2 mm SLE | `runlog/core07-32km-ssp585-cesm2waccm-i116on.json` |
 
 The 1850 chain entered 2015 with a surface change of up to +790 m, 165 years
-of drift, and the 2003 chain with up to +414 m.
+of drift, and the 2003 chain with up to +414 m. The controls from the 2003
+start carry almost none of the difference: by 2301 the feedback changes VAF by
+-1.3 mm SLE in core 9 and -0.9 in core 10
+(`runlog/core09-32km-ctrl2015-cesm2waccm-i116y2003on.json`,
+`runlog/core10-32km-ctrl2015-mriesm20-i116y2003on.json`), so core 7 minus core
+9 keeps -43.7 of the -44.9 mm SLE.
 
 **Is the run on track?**
 

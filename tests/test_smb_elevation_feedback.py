@@ -5,8 +5,9 @@ arithmetic, the reference surface, the gates that refuse a run on a missing
 or shifted gradient, and the rule that a chain carries the feedback from its
 cold start or not at all. The 32 km comparison of core 7 with and without it
 is in the run records: ``antarctica/runlog/*-i116y2003on.json`` and
-``*-i116y2003off.json`` from the 2003 historical start, ``*-i116on.json`` and
-``*-i116off.json`` from 1850.
+``*-i116y2003off.json`` from the 2003 historical start, with the core 9 and
+10 controls under the same tags, and ``*-i116on.json`` and ``*-i116off.json``
+from 1850.
 
 The reader tests build trees of empty files: ``available_years`` reads names
 only, which is all the gates ask about.

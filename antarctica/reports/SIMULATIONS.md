@@ -1581,7 +1581,7 @@ Core 10 at 32 km without the SMB-elevation feedback and no ocean melt (ISMIP7_K_
 - **Finished:** 2026-09-26
 - **Cost per model year:** cancelled after 6 min
 - **Results path:** antarctica/results/ctrl2015_mri_esm2_0_i116y2003nmoff_32000_* (partial)
-- **Notes:** run for issue #116 from a scratch clone of claude/dacabfdz-gradient-version-565c93 at c6244e6. Cancelled at t = 2035.0: the comparison asked for the controls with the feedback on and off and their own ctrl ocean, and this melt-off arm came from misreading that request. Its partial timeseries and checkpoints are no result. With the melt removed at the branch, the frozen apparent-MB reference still offset it, and the first step gained 1374 Gt/yr.
+- **Notes:** run for issue #116 from a scratch clone of claude/dacabfdz-gradient-version-565c93 at c6244e6. Cancelled at t = 2035.0: the comparison asked for the controls with the feedback on and off and their own ctrl ocean, and this melt-off arm came from misreading that request. Its partial timeseries and checkpoints are no result. With the melt removed at the branch, the frozen apparent-MB reference still offset it, and the first step gained 1249 Gt/yr.
 
 ### core10-32km-ctrl2015-mriesm20-i116y2003nmon
 
@@ -1609,7 +1609,7 @@ Core 10 at 32 km with the SMB-elevation feedback on dacabfdz and no ocean melt (
 - **Finished:** 2026-09-26
 - **Cost per model year:** cancelled after 6 min
 - **Results path:** antarctica/results/ctrl2015_mri_esm2_0_i116y2003nmon_32000_* (partial)
-- **Notes:** run for issue #116 from a scratch clone of claude/dacabfdz-gradient-version-565c93 at c6244e6. Cancelled at t = 2035.0: the comparison asked for the controls with the feedback on and off and their own ctrl ocean, and this melt-off arm came from misreading that request. Its partial timeseries and checkpoints are no result. With the melt removed at the branch, the frozen apparent-MB reference still offset it, and the first step gained 1374 Gt/yr.
+- **Notes:** run for issue #116 from a scratch clone of claude/dacabfdz-gradient-version-565c93 at c6244e6. Cancelled at t = 2035.0: the comparison asked for the controls with the feedback on and off and their own ctrl ocean, and this melt-off arm came from misreading that request. Its partial timeseries and checkpoints are no result. With the melt removed at the branch, the frozen apparent-MB reference still offset it, and the first step gained 1249 Gt/yr.
 
 ### core10-32km-ctrl2015-mriesm20-i116y2003off
 

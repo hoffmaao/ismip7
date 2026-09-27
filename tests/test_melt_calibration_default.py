@@ -22,7 +22,7 @@ try:
 except ImportError:
     pass
 from icepack2_tools.forcing import (                                  # noqa: E402
-    MELT_SLOPE_DEFAULT, SIN_ALPHA_ANT_DEFAULT, check_melt_contract,
+    MELT_SLOPE_DEFAULT, SIN_ALPHA_ANT_DEFAULT, afloat, check_melt_contract,
     describe_melt_calibration, is_floating, load_deltaT_per_basin,
     melt_receiving,
 )
@@ -195,6 +195,21 @@ def test_melt_falls_on_floating_cells_that_hold_ice():
     s = np.maximum(b + h, (1.0 - 917.0 / 1024.0) * h)
     assert is_floating(s, b).tolist() == [True, True, False]
     assert melt_receiving(s, b, h).tolist() == [False, True, False]
+
+
+def test_a_film_on_land_takes_no_melt():
+    r"""The transport leaves films on ice-free land thinner than the spacing
+    of doubles at the surface, where b + h rounds to b: the 25 km rehearsal
+    of issue 138 held 1e-19 to 1.4e-14 m films and melted them (issue #136).
+    The flotation test passes them, and a bed at or above sea level never
+    floats; a film on a marine bed floats as before."""
+    b = np.array([1000.0, 0.0, 1000.0, -500.0])
+    h = np.array([1e-15, 1e-300, 50.0, 1e-15])
+    s = np.maximum(b + h, (1.0 - 917.0 / 1024.0) * h)
+    assert s[0] == b[0]                                    # the film rounds away
+    assert is_floating(s, b).tolist() == [True, False, False, True]
+    assert afloat(s, b).tolist() == [False, False, False, True]
+    assert melt_receiving(s, b, h).tolist() == [False, False, False, True]
 
 
 def test_the_climatology_callback_melts_no_ice_free_cell(clean, monkeypatch, tmp_path):

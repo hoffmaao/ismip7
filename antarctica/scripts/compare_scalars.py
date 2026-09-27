@@ -55,10 +55,12 @@ year by year and splits every difference into named parts:
   melt booked where the grid holds none: in pixels with no floating ice at
   year end, or, in a tree written before, outside the year-end floating mask.
   Since the forward books the melt of ice flowing into cells holding no ice at
-  either end of the year as lifmassbf (issue #109), that residual is the melt
-  of shelf ice gone within the year and the share the frozen apparent-MB
-  reference supplied; a tree from before carries the front melt in it too,
-  and its lifmassbf is zero.
+  either end of the year as lifmassbf (issue #109), and the frozen apparent-MB
+  reference such a cell received against the melt and SMB that only cancelled
+  it (issue #136), that residual is the melt of shelf ice gone within the
+  year and the share the positive SMB supplied. A tree written between the
+  two changes carries the reference's share in it as well, and one from
+  before both carries the front melt too, with lifmassbf zero.
 
 The sea-level contributions get native counterparts from the model's lim and
 limnsw, with the tool's ocean area A_O = 3.625e14 m2:

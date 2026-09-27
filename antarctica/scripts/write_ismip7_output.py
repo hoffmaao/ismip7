@@ -31,11 +31,13 @@ of the pixel, ``no_floating_ice`` (``libmassbffl``) where no ice floats at
 year end. Melt booked in such a pixel leaves ``libmassbffl``. The forward
 books the melt of ice that flowed into a marine cell holding no ice at either
 end of the year as ``lifmassbf`` instead (issue #109), whose ``forbidden``
-policy never fills, so what leaves is the melt of shelf ice gone within the
-year and the share the frozen apparent-MB reference supplied. The summary
-lines report both, at their largest and at 2100, 2200 and 2300. Every year
-file names its booking in the ``front_melt`` attribute, and a series that
-mixes two bookings is refused. A state variable (``ST``) takes its mean over the area
+policy never fills, and books the frozen apparent-MB reference such a cell
+received against the melt and SMB that only cancelled it (issue #136), so
+what leaves is the melt of shelf ice gone within the year and the share the
+positive SMB supplied. The summary lines report both, at their largest and
+at 2100, 2200 and 2300. Every year file names its booking in the
+``front_melt`` attribute, and a series that mixes two bookings is refused. A
+state variable (``ST``) takes its mean over the area
 the policy names: ``forbidden`` (thickness, fractions) over the whole pixel
 with the uncovered part counting as zero, so sums over the grid are the
 model's sums; ``outside_domain`` (elevations) over the covered part, filling
@@ -60,7 +62,9 @@ apparent-mass-balance reference stays where the forward put it, as
 ``acabf_correction`` in the annual file: it is not a request variable, and
 folded into the SMB it would sit two orders of magnitude outside the
 request's range. A reader who wants a grid budget that closes adds the two
-from the annual file; the submission files never carry the sum.
+from the annual file; the submission files never carry the sum. On a cell
+holding no ice at either end of the year ``acabf_correction`` is net of the
+melt and SMB that cancelled it, as are ``acabf`` and ``libmassbffl``.
 
 Time follows ismip/ismip7-time-encoding: ``days since 1850-01-01`` on the
 standard calendar; state variables are stamped 1 January of the following
@@ -210,9 +214,12 @@ def series_front_melt(booking_of):
     r"""The one melt booking of a series, from ``{year: front_melt stamp}``.
 
     A year file written before the forward booked front melt carries no
-    stamp and counts as ``UNSTAMPED_MELT``. A chained run whose links
-    straddled that change would submit ``lifmassbf`` as zero in some years
-    and the melt of the same cells in others, so any mix is refused."""
+    stamp and counts as ``UNSTAMPED_MELT``, and one written before it booked
+    the frozen reference against the melt and SMB it cancelled carries the
+    stamp of that version. A chained run whose links straddled either change
+    would submit ``lifmassbf`` as zero in some years and the melt of the same
+    cells in others, or the reference as melt in some years and not in
+    others, so any mix is refused."""
     kinds = sorted(set(booking_of.values()))
     if len(kinds) == 1:
         return kinds[0]
@@ -220,8 +227,9 @@ def series_front_melt(booking_of):
     raise ValueError(
         "the annual files mix melt bookings: "
         + "; ".join(f"{k} in {len(ys)} years, {ys[0]} to {ys[-1]}" for k, ys in spans.items())
-        + ". The run's links straddled the change that books front melt as "
-          "lifmassbf (issue #109); run the series again on one version of the code.")
+        + ". The run's links straddled a change to the melt booking (front melt as "
+          "lifmassbf, issue #109; the reference booked against the melt it cancelled, "
+          "issue #136); run the series again on one version of the code.")
 
 
 def melt_booking(W, cells, afloat_before, afloat):

@@ -18,7 +18,8 @@ import pytest
 fd = pytest.importorskip("firedrake")
 
 from icepack2_tools.ismip7_output import (AnnualOutput, FRONT_MELT, FRONT_MELT_ATTR,  # noqa: E402
-                                          RHO_I, SECONDS_PER_YEAR, split_front_melt)
+                                          RHO_I, SECONDS_PER_YEAR, net_reference,
+                                          split_front_melt)
 
 RHO_RATIO = 917.0 / 1024.0
 # The scalars integrate over true area (issue #97). The unit meshes below sit
@@ -638,13 +639,14 @@ def _strip(n):
     return mesh, Q, V, np.argsort(x)
 
 
-def _one_advance(mesh, Q, V, grounded, ux, tmp_path):
+def _one_advance(mesh, Q, V, grounded, ux, tmp_path, bed=None):
     r"""One unit advance of a unit-thick sheet at velocity (ux, 0), no sources.
     Returns the writer and the ``ligroundf`` booked per cell in dof order,
-    which with unit cells is the facet flux u h L."""
+    which with unit cells is the facet flux u h L. ``bed`` (per cell, dof
+    order) goes to the writer."""
     annual = AnnualOutput(mesh, Q, str(tmp_path / "out" / "annual.h5"),
                           str(tmp_path / "out" / "scalars.csv"),
-                          first_year=2015, rho_ratio=RHO_RATIO)
+                          first_year=2015, rho_ratio=RHO_RATIO, bed=bed)
     h = _dg(Q, np.ones(len(grounded)))
     u = fd.Function(V)
     u.dat.data[:, 0] = ux
@@ -695,6 +697,32 @@ def test_an_ice_rumple_nets_to_zero(tmp_path):
     _, booked, _, _ = _one_advance(mesh, Q, V, grounded, 1.0, tmp_path)
     assert np.allclose(booked[order], [0.0, -1.0, 0.0, 1.0, 0.0])
     assert abs(booked.sum()) < 1e-12
+
+
+def test_ice_pushed_onto_ice_free_land_is_no_grounding_line_flux(tmp_path):
+    r"""A land-terminating margin pushing ice onto ice-free land beyond a
+    pinned front. The flotation test reads the ice-free land cells as afloat
+    (a height above flotation of exactly 0), and the booking counted the flow
+    as grounding-line flux (issue #136, 8 to 35 Gt/yr in the 25 km
+    rehearsal). Given the bed, a cell on a bed at or above sea level counts as
+    grounded; grounded ice going afloat onto a marine bed still books."""
+    mesh, Q, V, order = _strip(4)
+    grounded = np.zeros(4, dtype=bool)
+    grounded[order[:2]] = True                     # as the flotation test reads it
+    _, booked, _, _ = _one_advance(mesh, Q, V, grounded, 1.0, tmp_path / "land",
+                                   bed=np.full(4, 100.0))
+    assert np.allclose(booked, 0.0)
+    bed = np.full(4, 100.0)
+    bed[order[2:]] = -500.0                        # the margin reaches the sea
+    _, booked, _, _ = _one_advance(mesh, Q, V, grounded, 1.0, tmp_path / "coast", bed=bed)
+    assert np.allclose(booked[order], [0.0, 0.0, 1.0, 0.0])
+
+
+def test_the_writer_refuses_a_bed_of_the_wrong_size(tmp_path):
+    mesh, Q, _, _ = _strip(4)
+    with pytest.raises(ValueError, match="owns 4 cells"):
+        AnnualOutput(mesh, Q, str(tmp_path / "annual.h5"), str(tmp_path / "scalars.csv"),
+                     first_year=2015, rho_ratio=RHO_RATIO, bed=np.zeros(3))
 
 
 # The fluxes book what the transport applied. The positivity limiter holds
@@ -752,18 +780,19 @@ def test_a_withheld_sink_splits_in_proportion_and_closes(two_cells, tmp_path):
 # Front melt (issue #109, option 3 of the 25 September 2026 meeting). The melt
 # of ice that flows into a marine cell holding no ice at either end of the
 # year is written as lifmassbf, the inflow's share of what the cell was
-# supplied; the share the reference and the SMB supplied stays in
-# libmassbffl, and the two sum to the melt the transport applied.
+# supplied; the share the SMB supplied stays in libmassbffl. Before the split,
+# the reference a cell holding no ice at either end received is booked
+# against the melt and SMB that only cancelled it (issue #136), so the two
+# fields sum to the melt the transport applied less that part.
 
-def _front_year(tmp_path, cases, year_time=1.0):
+def _front_fields(tmp_path, cases, year_time=1.0):
     r"""One year of a strip of unit cells, one per case, with the year's sums
     set as the transport books them, then ``year_end`` with the forward's own
     masks. A case gives the start and end thickness ``h0`` and ``h1`` (m),
     the bed (m, marine by default) and the year's sums in metres of ice:
     ``melt`` (booked ``libmassbffl``), ``smb``, ``ref`` (the apparent-MB
-    reference) and ``calv`` (``licalvf``). Returns the year file's
-    ``libmassbffl`` and ``lifmassbf`` in case order (m/yr), its scalars row
-    and its front-melt stamp."""
+    reference) and ``calv`` (``licalvf``). Returns the year file's flux
+    fields in case order (m/yr), its scalars row and its front-melt stamp."""
     import csv
     n = len(cases)
     mesh, Q, V, order = _strip(n)
@@ -787,16 +816,23 @@ def _front_year(tmp_path, cases, year_time=1.0):
     annual.year_end(h1, h1, _dg(Q, column("bed", -500.0)), fd.Function(V), fd.Function(V),
                     np.zeros(n, dtype=bool), h1.dat.data_ro > AnnualOutput.ICE_THICKNESS)
     annual.close()
+    names = ("libmassbffl", "lifmassbf", "acabf", "acabf_correction")
     with fd.CheckpointFile(AnnualOutput.year_path(out, 2015), "r") as chk:
         m = chk.load_mesh()
-        got = {k: chk.load_function(m, name=k) for k in ("libmassbffl", "lifmassbf")}
+        got = {k: chk.load_function(m, name=k) for k in names}
         stamp = str(chk.get_attr("/", FRONT_MELT_ATTR)) if chk.has_attr("/", FRONT_MELT_ATTR) else None
     x = fd.Function(got["lifmassbf"].function_space()).interpolate(fd.SpatialCoordinate(m)[0])
     left_to_right = np.argsort(x.dat.data_ro)
     with open(tmp_path / "out" / "scalars.csv") as f:
         row = next(iter(csv.DictReader(f)))
-    return (got["libmassbffl"].dat.data_ro[left_to_right].copy(),
-            got["lifmassbf"].dat.data_ro[left_to_right].copy(), row, stamp)
+    return {k: got[k].dat.data_ro[left_to_right].copy() for k in names}, row, stamp
+
+
+def _front_year(tmp_path, cases, year_time=1.0):
+    r""":func:`_front_fields`, returning the year file's ``libmassbffl`` and
+    ``lifmassbf``, its scalars row and its stamp."""
+    fields, row, stamp = _front_fields(tmp_path, cases, year_time)
+    return fields["libmassbffl"], fields["lifmassbf"], row, stamp
 
 
 # The cases, year sums in metres of ice. The inflow a cell kept is the
@@ -826,13 +862,32 @@ def test_the_melt_of_inflow_into_an_empty_cell_is_front_melt(tmp_path):
     assert stamp == FRONT_MELT
 
 
-def test_the_reference_s_share_of_an_empty_cell_s_melt_stays_basal(tmp_path):
+def test_the_reference_an_empty_cell_received_is_booked_against_its_melt(tmp_path):
     r"""An emptied shelf cell under a pinned front keeps receiving the frozen
-    reference (issue #105). The melt is shared in proportion to what the
-    inflow and the reference supplied, and the reference's share stays in
-    libmassbffl."""
-    lib, lif, _, _ = _front_year(tmp_path, [MIXED])
-    assert lif == pytest.approx([-10.0]) and lib == pytest.approx([-30.0])
+    reference, and its melt removes it in the step it arrives (issue #136).
+    The 30 m of melt that only cancelled the reference come off the melt and
+    the reference; what stays is the melt of the 10 m of inflow, all of it
+    front melt, and no reference is booked."""
+    f, row, _ = _front_fields(tmp_path, [MIXED])
+    assert f["lifmassbf"] == pytest.approx([-10.0])
+    assert f["libmassbffl"] == pytest.approx([0.0], abs=1e-12)
+    assert f["acabf_correction"] == pytest.approx([0.0], abs=1e-12)
+    assert f["acabf"] == pytest.approx([0.0], abs=1e-12)
+    assert float(row["tendlibmassbffl"]) == pytest.approx(0.0, abs=1e-12)
+
+
+def test_a_reference_fed_land_cell_books_no_smb(tmp_path):
+    r"""Emptied land cells: one the reference alone feeds, whose negative SMB
+    removes it (the 25 km rehearsal's ssp585 had 9 to 13 such cells late in
+    the run), and one where the reference outruns the SMB and the rest flows
+    on. Neither books SMB of the reference, and land takes no front melt."""
+    fed = dict(h0=0.0, h1=0.0, smb=-4.0, ref=4.0, bed=50.0)
+    outrun = dict(h0=0.0, h1=0.0, smb=-1.0, ref=4.0, bed=50.0)     # 3 m flows on
+    f, _, _ = _front_fields(tmp_path, [fed, outrun])
+    assert f["acabf"] == pytest.approx([0.0, 0.0], abs=1e-12)
+    assert f["acabf_correction"] == pytest.approx([0.0, 3.0])
+    assert f["libmassbffl"] == pytest.approx([0.0, 0.0], abs=1e-12)
+    assert f["lifmassbf"] == pytest.approx([0.0, 0.0], abs=1e-12)
 
 
 @pytest.mark.parametrize("case", sorted(UNTOUCHED))
@@ -855,22 +910,31 @@ def test_a_cell_at_the_ice_threshold_at_both_ends_holds_no_ice(tmp_path):
 def test_the_split_uses_the_change_in_thickness_and_the_year_s_length(tmp_path):
     r"""A cell whose residue grew over the year, and a year of half length
     whose sums become means over it; the other cells ride along to check
-    that each case keeps its own cell."""
+    that each case keeps its own cell. In the first, 7 m of the 21 m of melt
+    and negative SMB only cancelled the reference, taken off in proportion
+    (20:1), and the 14.7 m of inflow it kept fed all the melt left."""
     cases = [dict(h0=0.2, h1=0.9, melt=-20.0, smb=-1.0, ref=7.0), INFLOW, MIXED]
     lib, lif, _, _ = _front_year(tmp_path, cases, year_time=0.5)
-    kept = 0.9 - 0.2 + 1.0 - 7.0 + 20.0                      # 14.7 of a supply of 21.7
-    assert lif == pytest.approx([-20.0 * kept / (kept + 7.0) / 0.5, -80.0, -20.0])
-    assert lib + lif == pytest.approx([-40.0, -80.0, -80.0])
+    melt = -20.0 + 7.0 * 20.0 / 21.0
+    assert lif == pytest.approx([melt / 0.5, -80.0, -20.0])
+    assert lib == pytest.approx([0.0, 0.0, 0.0], abs=1e-12)
 
 
-def test_front_melt_and_basal_melt_sum_to_the_melt_applied(tmp_path):
+def test_the_booked_sources_sum_to_what_the_transport_applied(tmp_path):
+    r"""The netting moves melt and SMB into the reference and back, never
+    the total; the melt fields sum to the melt applied less the part that
+    only cancelled the reference (30 of MIXED's 40 m)."""
     cases = [INFLOW, MIXED] + [UNTOUCHED[k] for k in sorted(UNTOUCHED)]
-    lib, lif, row, _ = _front_year(tmp_path, cases)
-    assert lib + lif == pytest.approx([c["melt"] for c in cases])
-    assert np.all(lif <= 0.0)
+    f, row, _ = _front_fields(tmp_path, cases)
+    applied = [c.get("melt", 0.0) + c.get("smb", 0.0) + c.get("ref", 0.0) for c in cases]
+    booked = f["libmassbffl"] + f["lifmassbf"] + f["acabf"] + f["acabf_correction"]
+    assert booked == pytest.approx(applied)
+    melt = [c["melt"] for c in cases]
+    melt[1] = -10.0
+    assert f["libmassbffl"] + f["lifmassbf"] == pytest.approx(melt)
+    assert np.all(f["lifmassbf"] <= 0.0)
     total = float(row["tendlibmassbffl"]) + float(row["tendlifmassbf"])
-    assert total == pytest.approx(sum(c["melt"] for c in cases) * AF2_POLE * RHO_I
-                                  / SECONDS_PER_YEAR, rel=2e-6)
+    assert total == pytest.approx(sum(melt) * AF2_POLE * RHO_I / SECONDS_PER_YEAR, rel=2e-6)
 
 
 def test_a_midyear_resume_splits_the_year_as_one_link_would(tmp_path):
@@ -951,3 +1015,68 @@ def test_split_front_melt_with_nothing_supplied_moves_nothing():
     lib, lif = split_front_melt(np.array([-0.8, -3.0]), np.zeros(2), np.array([0.0, 3.0]),
                                 np.array([-0.8, 0.0]), np.ones(2, dtype=bool))
     assert (lif == 0.0).all() and lib == pytest.approx([-0.8, -3.0])
+
+
+def _random_year(seed, n=20000):
+    r"""Random year sums in metres of ice, with refreezing, bare cells, both
+    signs of reference and SMB, and a cell set; the same mix as the split's
+    random test."""
+    rng = np.random.default_rng(seed)
+    melt = rng.normal(0.0, 30.0, n)
+    melt[rng.random(n) < 0.1] = 0.0
+    smb, ref = rng.normal(0.0, 5.0, n), rng.normal(0.0, 20.0, n)
+    ref[rng.random(n) < 0.3] = 0.0
+    cells = rng.random(n) < 0.7
+    return melt, smb, ref, cells
+
+
+def test_net_reference_never_books_a_gain_and_keeps_the_sum():
+    r"""On random cells: the three keep their sum; the melt and the negative
+    SMB only shrink and the reference only falls, to no less than zero; no
+    positive reference is left where a sink could have taken it; a negative
+    reference, refreezing, a positive SMB and every cell outside the set are
+    untouched, bit for bit."""
+    melt, smb, ref, cells = _random_year(136)
+    m2, s2, r2 = net_reference(melt, smb, ref, cells)
+    assert np.allclose(m2 + s2 + r2, melt + smb + ref, rtol=0.0, atol=1e-12)
+    assert (m2 >= melt).all() and (s2 >= smb).all() and (r2 <= ref).all()
+    assert (m2[melt <= 0.0] <= 1e-12).all() and (s2[smb <= 0.0] <= 1e-12).all()
+    assert (r2[(ref > 0.0) & cells] >= -1e-12).all()
+    sinks = np.maximum(-m2, 0.0) + np.maximum(-s2, 0.0)
+    assert np.minimum(np.maximum(r2, 0.0), sinks)[cells].max() <= 1e-12
+    untouched = ~cells | (ref <= 0.0)
+    for new, old in ((m2, melt), (s2, smb), (r2, ref)):
+        assert (new[untouched] == old[untouched]).all()
+    assert (m2[melt >= 0.0] == melt[melt >= 0.0]).all()
+    assert (s2[smb >= 0.0] == smb[smb >= 0.0]).all()
+
+
+def test_net_reference_without_a_reference_returns_its_inputs():
+    melt, smb, _, cells = _random_year(1360)
+    for ref in (np.zeros_like(melt), -np.abs(melt)):
+        m2, s2, r2 = net_reference(melt, smb, ref, cells)
+        assert (m2 == melt).all() and (s2 == smb).all() and (r2 == ref).all()
+
+
+def test_the_netting_leaves_front_melt_where_a_cell_ends_as_it_began():
+    r"""Cells holding no ice at either end whose thickness did not change:
+    the sinks removed everything supplied, so they covered the reference,
+    and the inflow's share of the melt comes out the same after the netting
+    as before it (the 25 km rehearsal's lifmassbf moved by at most 2.8 Gt/yr
+    in any year, where cells kept some ice)."""
+    rng = np.random.default_rng(1361)
+    n = 5000
+    inflow = rng.uniform(0.0, 50.0, n)
+    ref = np.where(rng.random(n) < 0.8, rng.uniform(0.0, 40.0, n), 0.0)
+    smb = rng.normal(0.0, 5.0, n)
+    smb = np.maximum(smb, -(inflow + ref) * 0.9)        # the melt stays non-negative
+    melt = -(inflow + ref + smb)                         # everything supplied leaves
+    dh = np.zeros(n)
+    empty = np.ones(n, dtype=bool)
+    lib0, lif0 = split_front_melt(melt, smb, ref, dh, empty)
+    m2, s2, r2 = net_reference(melt, smb, ref, empty)
+    lib1, lif1 = split_front_melt(m2, s2, r2, dh, empty)
+    assert np.allclose(r2, 0.0, atol=1e-12)
+    assert np.allclose(lif1, lif0, rtol=1e-12, atol=1e-10)
+    assert np.allclose(lib1 + lif1, melt + (ref - r2) * melt / (melt + np.minimum(smb, 0.0)),
+                       atol=1e-9)

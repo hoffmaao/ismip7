@@ -361,3 +361,13 @@ def test_a_series_that_mixes_two_melt_bookings_is_refused():
     assert wio.series_front_melt(old) == wio.UNSTAMPED_MELT
     with pytest.raises(ValueError, match="mix melt bookings.*2 years, 2015 to 2016"):
         wio.series_front_melt({**old, 2017: FRONT_MELT})
+
+
+def test_a_series_across_the_reference_netting_is_refused():
+    r"""Links that straddled issue 136's change would book the frozen
+    reference as melt in some years and against itself in others."""
+    from icepack2_tools.ismip7_output import FRONT_MELT
+    before = "inflow_share_of_empty_marine_cells"
+    assert FRONT_MELT != before
+    with pytest.raises(ValueError, match="mix melt bookings.*issue #136"):
+        wio.series_front_melt({2015: before, 2016: FRONT_MELT})

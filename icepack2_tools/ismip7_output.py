@@ -57,8 +57,15 @@ Conventions (from the request and discussions #16, #19, #22):
   divergence spike by spike (up to ~1000 m/yr at the Pine Island grounding
   zone) and reported as SMB it would sit two orders of magnitude outside the
   request's range. It is recorded separately as ``acabf_correction`` (m/yr
-  ice, not a request variable) so the grid budget can be closed by anyone
-  who needs it, and the README states the convention.
+  ice, not a request variable) in the annual files, which are not uploaded,
+  so the grid budget can be closed by anyone who needs it, and the README
+  states the convention.
+* In a cell holding no ice at either end of the year, a positive reference
+  supplies ice the model's state never holds, and the melt and negative SMB
+  remove it in the step it arrives. ``year_end`` books the part of those
+  sinks that only cancelled it against the reference (``net_reference``,
+  issue #136), so ``acabf``, ``libmassbffl`` and ``lifmassbf`` there carry
+  what the inflow and the positive SMB supplied.
 * ``libmassbffl`` is the ocean melt the transport applied on floating cells
   (negative = loss), less than the parameterization's melt wherever the
   limiter holds a cell at the floor;
@@ -69,10 +76,10 @@ Conventions (from the request and discussions #16, #19, #22):
   melts there. The request's ``no_floating_ice`` fill would blank that melt
   from ``libmassbffl``; ``lifmassbf`` is never filled. ``year_end`` moves the
   inflow's share of such a cell's melt out of ``libmassbffl``
-  (``split_front_melt``), and the share the frozen apparent-MB reference and
-  the SMB supplied stays behind, so the two fields sum to the melt the
-  transport applied. Each year file is stamped ``FRONT_MELT_ATTR``; the
-  writer refuses a series that mixes this booking with the earlier one.
+  (``split_front_melt``), and the share the SMB supplied stays behind, so the
+  two fields sum to the melt the transport applied less the part booked
+  against the reference. Each year file is stamped ``FRONT_MELT_ATTR``; the
+  writer refuses a series that mixes this booking with an earlier one.
 * ``licalvf`` is the ice removed at the front, negative = loss, booked in the
   cell it was removed from (whole-cell removal, sub-cell shed, retreat
   slivers), the same tallies as the ``calv`` budget column.
@@ -82,7 +89,9 @@ Conventions (from the request and discussions #16, #19, #22):
   negative where floating ice flows onto grounded ice (a pinning point or an
   ice rumple), so the grid sum of ``ligroundf * area`` is the net
   grounding-line discharge. The group settled the reference on 22 September
-  2026.
+  2026. A cell on a bed at or above sea level counts as grounded here, so ice
+  a land-terminating margin pushes onto ice-free land beyond a pinned front
+  is booked as ``licalvf`` alone (issue #136).
 * ``dlithkdt`` is the change in thickness over the year divided by the year.
 * the three area fractions are cell indicators here (0 or 1 per DG0 cell);
   the conservative regridding to 8 km turns them into fractions.
@@ -125,9 +134,11 @@ VARIABLES_BANKED = tuple(v for v in VARIABLES_2D if v not in GRID_DERIVED)
 
 #: the attribute on every year file naming how its melt is booked, and the
 #: value this module writes; a year file without it comes from a forward that
-#: wrote ``lifmassbf`` as zero and kept all the melt in ``libmassbffl``
+#: wrote ``lifmassbf`` as zero and kept all the melt in ``libmassbffl``, and
+#: one stamped ``inflow_share_of_empty_marine_cells`` from a forward that
+#: split the front melt but left the reference's share in ``libmassbffl``
 FRONT_MELT_ATTR = "front_melt"
-FRONT_MELT = "inflow_share_of_empty_marine_cells"
+FRONT_MELT = "inflow_share_of_empty_marine_cells_reference_netted"
 
 
 def split_front_melt(libmassbffl, acabf, corr, dh, empty):
@@ -171,6 +182,39 @@ def split_front_melt(libmassbffl, acabf, corr, dh, empty):
     return libmassbffl - lifmassbf, lifmassbf
 
 
+def net_reference(libmassbffl, acabf, corr, cells):
+    r"""A year's booked melt, SMB and apparent-MB reference, with the
+    reference booked against the sinks that only cancelled it (issue #136).
+
+    Every array is per cell, the year's sums of what the transport applied in
+    metres of ice, and ``cells`` marks the cells holding no ice at either end
+    of the year, marine and land. There a positive reference supplies ice the
+    model's state never holds, since the melt and the negative SMB remove it
+    in the step it arrives, and booking both would report melt and SMB of ice
+    that never existed. The part of those sinks that only cancelled it,
+
+        X = min(corr+, M + acabf-),    M = max(-libmassbffl, 0),
+
+    comes off the melt and the negative SMB in proportion to their sizes, and
+    off the reference. What stays booked is what the inflow and the positive
+    SMB supplied, so on a pinned front the reference books nothing as melt or
+    SMB once a cell has emptied. A reference the sinks could not take is ice
+    the cell kept and stays booked as reference; a negative reference is a
+    sink on real ice and is left as it is, as is every cell outside ``cells``.
+
+    The three returned arrays ``(libmassbffl, acabf, corr)`` keep their sum,
+    so the thickness budget closes as before and :func:`split_front_melt`
+    finds the same inflow. In a cell that ends the year as thick as it began,
+    and whose sinks took all the reference, the inflow's share of the melt
+    that :func:`split_front_melt` returns is the same before and after.
+    """
+    melt = np.maximum(-libmassbffl, 0.0)
+    sinks = melt + np.maximum(-acabf, 0.0)
+    x = np.where(cells, np.minimum(np.maximum(corr, 0.0), sinks), 0.0)
+    off_melt = x * np.divide(melt, sinks, out=np.zeros_like(sinks), where=sinks > 0.0)
+    return libmassbffl + off_melt, acabf + (x - off_melt), corr - x
+
+
 class AnnualOutput:
     r"""Accumulates a year of a forward run and writes it at the year end.
 
@@ -204,6 +248,16 @@ class AnnualOutput:
     1 January. The state carries the model's own year plus a skip flag, so a
     checkpoint taken inside that window resumes the skip rather than reading
     the year back as an accumulation in progress.
+
+    ``bed`` is the per-cell bed elevation over the owned cells, in the order
+    of ``Q_dg``'s dofs. The booking then counts every cell on a bed at or
+    above sea level as grounded, whatever the grounded mask it is handed
+    says: an ice-free land cell has a height above flotation of exactly 0, so
+    the forward's flotation test reads it as afloat, and ice a
+    land-terminating margin pushes onto it beyond a pinned front was booked
+    as grounding-line flux, 8 to 35 Gt/yr in the 25 km rehearsal of issue
+    #138 (issue #136). Only the booking reads it; the forward's own mask,
+    which the collapse forcing uses, is unchanged.
     """
 
     #: the per-cell year sums carried across a chained resume
@@ -211,7 +265,8 @@ class AnnualOutput:
                     "ligroundf")
     #: a cell holds ice when it is thicker than this (m): the forward's
     #: ``ice_cells`` for ``year_end``, and the same test on the thickness
-    #: the year began with, which ``split_front_melt`` needs
+    #: the year began with, which ``net_reference`` and ``split_front_melt``
+    #: need
     ICE_THICKNESS = 1.0
     #: dataset names of the in-progress year inside the run's checkpoint
     STATE_PREFIX = "ismip7_acc_"
@@ -227,7 +282,7 @@ class AnnualOutput:
     STATE_SKIPPING = "ismip7_skipping"
 
     def __init__(self, mesh, Q_dg, out_path, scalars_path, first_year, rho_ratio,
-                 comm=None, log=None, resume=None):
+                 comm=None, log=None, resume=None, bed=None):
         self.mesh, self.Q_dg = mesh, Q_dg
         self.out_path, self.scalars_path = out_path, scalars_path
         self.year = int(np.floor(float(first_year) + 1e-6))   # the year the model time lies in
@@ -250,6 +305,14 @@ class AnnualOutput:
         self.log(f"  ISMIP7 output: scalars over true area, af2 from {lo:.4f} to "
                  f"{hi:.4f} on this mesh")
         n = len(self.cell_area)
+        # the cells the booking counts as grounded whatever the mask says: a
+        # bed at or above sea level (see the class docstring)
+        self.land = None
+        if bed is not None:
+            bed = np.asarray(bed, dtype=float)
+            if bed.shape != (n,):
+                raise ValueError(f"bed has shape {bed.shape}, but this rank owns {n} cells")
+            self.land = bed >= 0.0
         self.year_acc = {k: np.zeros(n) for k in self.ACCUMULATORS}
         self.step_acc = {k: np.zeros(n) for k in self.year_acc}
         self.year_time = 0.0
@@ -357,6 +420,12 @@ class AnnualOutput:
             self._csv = None
 
     # ---- per-step bookkeeping -------------------------------------------
+    def _grounded(self, grounded_cells):
+        r"""The caller's grounded mask with every land cell counted as
+        grounded, when the bed was given (see the class docstring)."""
+        grounded_cells = np.asarray(grounded_cells, dtype=bool)
+        return grounded_cells if self.land is None else grounded_cells | self.land
+
     def begin_step(self):
         for a in self.step_acc.values():
             a[:] = 0.0
@@ -376,6 +445,7 @@ class AnnualOutput:
         negative SMB, the melt and the negative reference, in proportion to
         their sizes, so the booked sources sum to the source the transport
         applied. ``None`` books the requested sources."""
+        grounded_cells = self._grounded(grounded_cells)
         smb = assemble(accum * self._phi * dx).dat.data_ro / self.cell_area        # m/yr, cell mean
         melt = assemble(ocean_melt * self._phi * dx).dat.data_ro / self.cell_area
         corr = (assemble(a_ref * self._phi * dx).dat.data_ro / self.cell_area
@@ -520,6 +590,7 @@ class AnnualOutput:
             return
         yr = self.year
         T = self.year_time if self.year_time > 0 else 1.0
+        grounded_cells = self._grounded(grounded_cells)
         fields = {}
         Q = self.Q_dg
         def dg(arr):
@@ -539,19 +610,24 @@ class AnnualOutput:
             fields[name] = ux
         for name in ("yvelmean", "yvelsurf", "yvelbase"):
             fields[name] = uy
-        for name in ("acabf", "acabf_correction", "licalvf", "ligroundf"):
+        for name in ("licalvf", "ligroundf"):
             fields[name] = dg(self.year_acc[name] / T)                            # m/yr ice
         fields["libmassbfgr"] = dg(np.zeros_like(self.cell_area))
         h0 = self.h_year_start if self.h_year_start is not None else h_dg.dat.data_ro
         dh = h_dg.dat.data_ro - h0
         fields["dlithkdt"] = dg(dh / T)                                              # m/yr
-        # front melt (issue #109): the inflow's share of the melt in marine
-        # cells holding no ice at either end of the year
-        empty = ((h0 <= self.ICE_THICKNESS) & ~ice_cells
-                 & (fields["topg"].dat.data_ro < 0.0))
-        melt, front = split_front_melt(
-            self.year_acc["libmassbffl"], self.year_acc["acabf"],
-            self.year_acc["acabf_correction"], dh, empty)
+        # cells holding no ice at either end of the year, marine and land:
+        # the reference they received is booked against the sinks that only
+        # cancelled it (issue #136), and the inflow's share of what the marine
+        # ones melt is front melt (issue #109)
+        none = (h0 <= self.ICE_THICKNESS) & ~ice_cells
+        empty = none & (fields["topg"].dat.data_ro < 0.0)
+        corr0 = self.year_acc["acabf_correction"]
+        melt, smb, corr = net_reference(
+            self.year_acc["libmassbffl"], self.year_acc["acabf"], corr0, none)
+        melt, front = split_front_melt(melt, smb, corr, dh, empty)
+        fields["acabf"] = dg(smb / T)                                                # m/yr ice
+        fields["acabf_correction"] = dg(corr / T)
         fields["libmassbffl"] = dg(melt / T)
         fields["lifmassbf"] = dg(front / T)
         final_path = self.year_path(self.out_path, yr)
@@ -590,17 +666,17 @@ class AnnualOutput:
             "tendlifmassbf": integ(fields["lifmassbf"].dat.data_ro) * RHO_I / SECONDS_PER_YEAR,
             "tendligroundf": integ(fields["ligroundf"].dat.data_ro) * RHO_I / SECONDS_PER_YEAR,
         }
-        # the melt that stays in libmassbffl on those cells: the share the
-        # reference and the SMB supplied, which the fill drops wherever the
-        # pixel holds no floating ice
-        kept_gt = integ(fields["libmassbffl"].dat.data_ro * empty) * RHO_I / 1e12
+        # the reference booked against the melt and SMB it only cancelled on
+        # cells holding no ice at either end of the year
+        netted_gt = integ((corr0 - corr) / T) * RHO_I / 1e12
         if self._csv is not None:
             self._csv.write(f"{yr}," + ",".join(f"{row[k]:.6e}" for k in SCALARS) + "\n"); self._csv.flush()
         self.log(f"  ISMIP7 output: year {yr} written ({len(fields)} fields; over true "
                  f"area, GL flux {row['tendligroundf'] * SECONDS_PER_YEAR / 1e12:+.0f} Gt/yr, "
                  f"calving {row['tendlicalvf'] * SECONDS_PER_YEAR / 1e12:+.0f} Gt/yr, "
-                 f"front melt {row['tendlifmassbf'] * SECONDS_PER_YEAR / 1e12:+.0f} Gt/yr with "
-                 f"{kept_gt:+.0f} Gt/yr more melt left in libmassbffl on the same cells)")
+                 f"front melt {row['tendlifmassbf'] * SECONDS_PER_YEAR / 1e12:+.0f} Gt/yr; "
+                 f"{netted_gt:.0f} Gt/yr of the reference booked against the melt and SMB it "
+                 f"cancelled on cells holding no ice)")
         self.year = yr + 1
         self.start_year(h_dg)
 

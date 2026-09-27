@@ -108,7 +108,7 @@ def test_the_core_counter_follows_from_the_forcing():
     assert wio.set_counter("CESM2-WACCM", "ssp585", "CORE") == "C007"
     assert wio.set_counter("MRI-ESM2-0", "ssp585", "CORE", "C008") == "C008"
     assert wio.set_counter("MRI-ESM2-0", "ctrl", "CORE") == "C010"
-    assert wio.set_counter("ERA5", "ocx", "CORE") == "C011"
+    assert wio.set_counter("ERA", "ocx", "CORE") == "C011"
     with pytest.raises(ValueError, match="MRI-ESM2-0 ssp585 is C008"):
         wio.set_counter("MRI-ESM2-0", "ssp585", "CORE", "C007")
     with pytest.raises(ValueError, match="not a core experiment"):
@@ -118,18 +118,27 @@ def test_the_core_counter_follows_from_the_forcing():
 
 
 def test_ocx_names_the_reanalysis_in_the_forcing_field():
-    r"""Issue #18: the organisers' conventions document names core 11
-    ``..._m001_ERA5_f001_ocx_C011_...``. isschecker 0.5.1 given an ocx row
-    passes a CMIP model in field 5, so no checker catches a core 11 file
-    that claims CESM2-WACCM forcing."""
-    assert wio.forcing_id(None, "ocx") == wio.forcing_id("ERA5", "ocx") == "ERA5"
+    r"""Issue #18: core 11 is ``..._m001_ERA_f001_ocx_C011_...``, as NORCE's
+    AIS processing names it. isschecker 0.5.1 given an ocx row passes a CMIP
+    model in field 5, so no checker catches a core 11 file that claims
+    CESM2-WACCM forcing."""
+    assert wio.forcing_id(None, "ocx") == wio.forcing_id("ERA", "ocx") == "ERA"
     assert wio.forcing_id("MRI-ESM2-0", "ssp585") == "MRI-ESM2-0"
-    with pytest.raises(ValueError, match="OCX has no ESM"):
-        wio.forcing_id("CESM2-WACCM", "ocx")
+    for other in ("CESM2-WACCM", "ERA5"):
+        with pytest.raises(ValueError, match="OCX has no ESM"):
+            wio.forcing_id(other, "ocx")
     with pytest.raises(ValueError, match="in lower case"):
         wio.forcing_id(None, "OCX")
     with pytest.raises(ValueError, match="--esm is required"):
         wio.forcing_id(None, "ssp585")
+
+
+def test_the_checker_patch_accepts_the_name_the_writer_writes():
+    r"""isschecker_ocx.py runs in the tools venv, where the writer cannot be
+    imported, so it carries its own copy of the forcing name."""
+    import isschecker_ocx
+    assert isschecker_ocx.OCX_FORCING == wio.OCX_FORCING
+    assert isschecker_ocx.OCX_EXPERIMENT["experiment"] == "ocx"
 
 
 def test_outside_the_core_set_the_counter_has_to_be_given():

@@ -307,13 +307,14 @@ finding by the share of values outside the bounds (discussion #46). A 32 km
 CESM2-WACCM control and ssp585, 2015 to 2300, pass it with zero errors in
 every test group (23 September 2026), and each submitted file set is checked
 with it before upload. The bundled variable request is that release's. Core
-11 is named `<var>_AIS_RICE_icepack2_m001_ERA5_f001_ocx_C011_2003-2025.nc`,
-with `ERA5` in the forcing field as in the core 11 example of the ISMIP7
-filenames and conventions document. 0.5.1 has no `ocx` experiment and takes
-only CMIP models in that field, so core 11 is checked with an `ocx` row
-supplied (a start from 1990 to 2015, an end in 2025), under which each file
-carries one naming error, on `ERA5`. **[confirm #18]** that result on the
-submitted C011 files.
+11 is named `<var>_AIS_RICE_icepack2_m001_ERA_f001_ocx_C011_2003-2025.nc`,
+with `ERA`, for the ERA5-forced reanalysis SMB, in the forcing field. 0.5.1
+has no `ocx` experiment and takes only CMIP models in that field, so it
+checks none of a core 11 set's files. Core 11 is checked with 0.5.1 patched
+in-process to add both: an `ocx` experiment starting from 1990 to 2015 and
+ending in 2025, the Protocol Overview's C011 row, and `ERA` in the forcing
+field of `ocx` files. Every other check is the release's own.
+**[confirm #18]** that result on the submitted C011 files.
 
 Forcing versions: each run logs the product and version its readers opened,
 and `core_report.py` carries those lines into the run's committed report;

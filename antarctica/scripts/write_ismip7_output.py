@@ -14,7 +14,7 @@ already banked) and this globs them in year order. It writes one NetCDF per
 variable under
 ``DIR/AIS/<source_id>/<ism_id>/<set_id>/<exp>/``, named
 ``<var>_AIS_<source_id>_<ism_id>_m001_<ESM>_f001_<scenario>_<exp>_<y0>-<y1>.nc``.
-OCX takes ``--scenario ocx`` and no ``--esm``: its forcing field is ``ERA5``
+OCX takes ``--scenario ocx`` and no ``--esm``: its forcing field is ``ERA``
 (issue #18).
 
 Regridding is conservative: a supermesh mixed mass matrix between the model's
@@ -444,17 +444,15 @@ CORE_COUNTER = {
     ("CESM2-WACCM", "ctrl"): "C009", ("MRI-ESM2-0", "ctrl"): "C010",
 }
 # OCX has no ESM, so its counter follows from the scenario alone, and its
-# forcing field names the reanalysis (issue #18): ERA5, as in the core 11
-# example of the organisers' filenames and conventions document (revised 27
-# August 2026) and of the ISMIP7 web page. The history attribute of the AIS OCX
-# SMB files names RACMO2.3p2 forced by ERA5 (read for 1979, 2003 and 2025).
-# No core 11 name passes
-# isschecker 0.5.1: its experiment table has no ocx row, so it checks none of
-# the files, and with a row supplied each file draws one error on field 5,
-# which it checks against CMIP models. A CMIP model there passes that check
-# and claims forcing the run never read, so it is refused.
+# forcing field names the reanalysis (issue #18): ERA, as NORCE's AIS
+# processing writes it, which the group chose on 27 September 2026. The
+# organisers' conventions document gives only a GrIS example, which writes
+# ERA5. No core 11 name passes isschecker 0.5.1, whose experiment table has no
+# ocx row and whose field 5 takes CMIP models only, so core 11 is checked by
+# isschecker_ocx.py, which adds both. A CMIP model in field 5 passes that
+# check and claims forcing the run never read, so it is refused here.
 OCX_COUNTER = "C011"
-OCX_FORCING = "ERA5"
+OCX_FORCING = "ERA"
 
 
 def forcing_id(esm, scenario):

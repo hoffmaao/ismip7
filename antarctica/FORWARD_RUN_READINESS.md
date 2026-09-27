@@ -522,11 +522,11 @@ Output and submission:
       the p4 pair, and its scalars are compared with ours, `reports/scalar_comparison_32km.md`.
       [ ] Run it on the submitted files and clear the README confirm. (issue #13)
 - [x] #17 names: the core counter follows from the forcing and the ids are
-      validated. [x] The forcing field of an OCX filename is `ERA5`, from the
-      organisers' conventions document, and the writer refuses any other
-      value for `ocx`, section 10. [~] No core 11 name passes isschecker
-      0.5.1, which has no `ocx` experiment row and checks the forcing field
-      against CMIP model names. (issue #18)
+      validated. [x] The forcing field of an OCX filename is `ERA`, as
+      NORCE's AIS processing writes it, and the writer refuses any other
+      value for `ocx`, section 10. [x] `scripts/isschecker_ocx.py` checks
+      core 11 under 0.5.1 with the `ocx` experiment and `ERA` added; stock
+      0.5.1 checks no core 11 file. (issue #18)
 - [x] #5, #13, #21, #6, #18, #1, #12, #38.
 
 ### Actions added, continuing section 5
@@ -978,8 +978,8 @@ synthetic AIS 32 km core 11 set from the checker's own generator (27 files,
 | `CESM2-WACCM` | 1 naming error, 0 files checked | no error |
 
 The row, `ocx;1990;2015;2025;-1` from the Protocol Overview, was added to
-the loaded table in-process, leaving the installed package unedited (the
-command is in `antarctica/README.md`). Stock 0.5.1 therefore checks none of
+the loaded table in-process, leaving the installed package unedited, as
+`isschecker_ocx.py` below does. Stock 0.5.1 therefore checks none of
 a core 11 set's files, and given a row it passes a CMIP model in field 5, so
 no checker catches a core 11 file that claims ESM forcing. The row makes the
 time tests bite: the same set started in 1979, as core 11 did before issue
@@ -1006,15 +1006,31 @@ and no Globus CLI was at hand.
 
 ### What changed here
 
-The writer names core 11
-`<var>_AIS_RICE_icepack2_m001_ERA5_f001_ocx_C011_2003-2025.nc`, the span
-being the 2003 start of issue #117. `--scenario ocx` takes `ERA5` as the
+The group chose on 27 September to name core 11 as NORCE does and to check
+it with a patched checker. The writer names it
+`<var>_AIS_RICE_icepack2_m001_ERA_f001_ocx_C011_2003-2025.nc`, the span
+being the 2003 start of issue #117. `--scenario ocx` takes `ERA` as the
 forcing field by default and refuses any other value, and an upper-case
-`OCX` scenario is refused (`forcing_id` in `write_ismip7_output.py`). `ERA5`
-is the conventions document's name and the reanalysis under the AIS OCX SMB.
-NORCE's `ERA` and UAF's `OCX` depart from the document.
+`OCX` scenario is refused (`forcing_id` in `write_ismip7_output.py`). The
+conventions document's GrIS example writes `ERA5` there, and UAF writes
+`OCX`.
 
-Upstream, isschecker needs an `ocx` row and a reanalysis name for field 5.
-Until a release carries both, running it with the row supplied is the only
-way core 11's files get checked, and each file then carries one naming
-error. (issue #18)
+`antarctica/scripts/isschecker_ocx.py` runs 0.5.1 with the Protocol
+Overview's `ocx` row added and `ERA` accepted in field 5 of `ocx` files, in
+its own process, the installed package unedited, and names the patch in the
+log's version line. It refuses any release but 0.5.1 and stops once a
+release carries an `ocx` row. Run on synthetic AIS 32 km sets from the
+checker's generator (27 files each):
+
+| set | errors | exit |
+|---|---|---|
+| `ERA`, `ocx`, 2003 to 2025 | 0 | 0 |
+| `ERA5`, `ocx`, 2003 to 2025 | 27 naming, field 5 | 1 |
+| `ERA`, `ocx`, 1979 to 2025 | 27 time, the start | 1 |
+| `ERA`, `ocx`, 2003 to 2020 | 81 time | 1 |
+| `ERA`, `ctrl`, 2015 to 2016 | 27 naming, field 5, and 81 time | 1 |
+
+On a `CESM2-WACCM` `ctrl` set its log differs from stock 0.5.1's in the
+version line alone. Stock 0.5.1, the release the organisers publish, still
+gives any core 11 set, NORCE's included, the one naming error and no file
+check. (issue #18)

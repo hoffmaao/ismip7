@@ -1583,7 +1583,8 @@ Things that are easy to get wrong:
   (`scalar_area`). The comparison exits 2 when the switch disagrees with the
   stamp; leave it off for a run from before the change.
 - **Core 11 goes through `scripts/isschecker_ocx.py`.** `--scenario ocx`
-  names its forcing field `ERA`, as NORCE's AIS processing does (issue #18).
+  names its forcing field `ERA5`, as the organisers' conventions document
+  does (issue #18).
   Stock isschecker 0.5.1 has no `ocx` experiment, so over a C011 directory it
   reports one naming error and checks no file, and its field 5 takes CMIP
   models only. The script runs 0.5.1 with both added in-process, and takes

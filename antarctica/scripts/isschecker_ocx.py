@@ -11,12 +11,13 @@ run to a submission"); it imports nothing from this repository.
 Stock 0.5.1 cannot check core 11. Its experiment table has no ``ocx`` row, so
 a C011 set draws one naming error and none of its files is read, and field 5
 of a filename takes CMIP models only, where core 11 names the reanalysis,
-``ERA``, as NORCE's AIS processing does. This adds, in this process only:
+``ERA5``, as the organisers' conventions document does. This adds, in this
+process only:
 
 - the ``ocx`` experiment, the Protocol Overview's C011 row: a start from 1990
   to 2015 and an end in 2025, the start being free inside that window as the
   historical's is (duration -1);
-- ``ERA`` in field 5, for files whose experiment is ``ocx``.
+- ``ERA5`` in field 5, for files whose experiment is ``ocx``.
 
 Every other check is the release's own, and a set of any other core is
 checked as stock 0.5.1 checks it. The log's version line names the patch. It
@@ -29,7 +30,7 @@ PATCHED_RELEASE = "0.5.1"
 OCX_EXPERIMENT = {"experiment": "ocx", "start_year_min": 1990, "start_year_max": 2015,
                   "end_year": 2025, "duration": -1}
 # write_ismip7_output.OCX_FORCING, which the unit suite holds this equal to
-OCX_FORCING = "ERA"
+OCX_FORCING = "ERA5"
 PATCH_NOTE = (f"with the {OCX_EXPERIMENT['experiment']} experiment and {OCX_FORCING} "
               f"in field 5 of its files added (icepack/ismip7 issue #18)")
 

@@ -108,7 +108,7 @@ def test_the_core_counter_follows_from_the_forcing():
     assert wio.set_counter("CESM2-WACCM", "ssp585", "CORE") == "C007"
     assert wio.set_counter("MRI-ESM2-0", "ssp585", "CORE", "C008") == "C008"
     assert wio.set_counter("MRI-ESM2-0", "ctrl", "CORE") == "C010"
-    assert wio.set_counter("ERA", "ocx", "CORE") == "C011"
+    assert wio.set_counter("ERA5", "ocx", "CORE") == "C011"
     with pytest.raises(ValueError, match="MRI-ESM2-0 ssp585 is C008"):
         wio.set_counter("MRI-ESM2-0", "ssp585", "CORE", "C007")
     with pytest.raises(ValueError, match="not a core experiment"):
@@ -118,13 +118,13 @@ def test_the_core_counter_follows_from_the_forcing():
 
 
 def test_ocx_names_the_reanalysis_in_the_forcing_field():
-    r"""Issue #18: core 11 is ``..._m001_ERA_f001_ocx_C011_...``, as NORCE's
-    AIS processing names it. isschecker 0.5.1 given an ocx row passes a CMIP
-    model in field 5, so no checker catches a core 11 file that claims
-    CESM2-WACCM forcing."""
-    assert wio.forcing_id(None, "ocx") == wio.forcing_id("ERA", "ocx") == "ERA"
+    r"""Issue #18: core 11 is ``..._m001_ERA5_f001_ocx_C011_...``, as the
+    organisers' conventions document names it. isschecker 0.5.1 given an ocx
+    row passes a CMIP model in field 5, so no checker catches a core 11 file
+    that claims CESM2-WACCM forcing."""
+    assert wio.forcing_id(None, "ocx") == wio.forcing_id("ERA5", "ocx") == "ERA5"
     assert wio.forcing_id("MRI-ESM2-0", "ssp585") == "MRI-ESM2-0"
-    for other in ("CESM2-WACCM", "ERA5"):
+    for other in ("CESM2-WACCM", "ERA"):
         with pytest.raises(ValueError, match="OCX has no ESM"):
             wio.forcing_id(other, "ocx")
     with pytest.raises(ValueError, match="in lower case"):

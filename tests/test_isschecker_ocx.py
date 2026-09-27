@@ -1,6 +1,6 @@
 r"""``isschecker_ocx.py``: isschecker 0.5.1 with core 11 checked (issue #18).
 
-The patch adds the ``ocx`` experiment and accepts ``ERA`` in field 5 of ocx
+The patch adds the ``ocx`` experiment and accepts ``ERA5`` in field 5 of ocx
 files, and leaves every other file to the release's own checks. Most of it
 is exercised on a stand-in for the checker module, so it runs without
 isschecker; the last test holds the installed release to the names the patch
@@ -15,8 +15,8 @@ import pytest
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "antarctica", "scripts"))
 import isschecker_ocx  # noqa: E402
 
-OCX_FILE = "lithk_AIS_RICE_icepack2_m001_ERA_f001_ocx_C011_2003-2025.nc"
-CTRL_FILE = "lithk_AIS_RICE_icepack2_m001_ERA_f001_ctrl_C009_2015-2300.nc"
+OCX_FILE = "lithk_AIS_RICE_icepack2_m001_ERA5_f001_ocx_C011_2003-2025.nc"
+CTRL_FILE = "lithk_AIS_RICE_icepack2_m001_ERA5_f001_ctrl_C009_2015-2300.nc"
 
 
 def _checker(version="0.5.1", experiments=("historical", "ctrl"), names=("CESM2-WACCM",)):
@@ -56,15 +56,15 @@ def test_era_is_accepted_in_field_5_of_ocx_files_only():
     isschecker_ocx.patch(checker)
     assert checker._check_naming(None, OCX_FILE, "AIS") == OCX_FILE
     checker._check_naming(None, CTRL_FILE, "AIS")
-    assert "ERA" in seen[0] and "ERA" not in seen[1]
+    assert "ERA5" in seen[0] and "ERA5" not in seen[1]
     assert checker.VALID_ESM_NAMES == {"CESM2-WACCM"}
 
 
 def test_a_name_the_release_already_accepts_stays_accepted():
-    checker, _ = _checker(names=("CESM2-WACCM", "ERA"))
+    checker, _ = _checker(names=("CESM2-WACCM", "ERA5"))
     isschecker_ocx.patch(checker)
     checker._check_naming(None, OCX_FILE)
-    assert "ERA" in checker.VALID_ESM_NAMES
+    assert "ERA5" in checker.VALID_ESM_NAMES
 
 
 def test_another_release_is_refused():
@@ -90,4 +90,4 @@ def test_the_installed_release_takes_the_patch(monkeypatch):
         assert callable(getattr(checker, name))
     isschecker_ocx.patch(checker)
     assert checker._load_experiments_csv()[-1] == isschecker_ocx.OCX_EXPERIMENT
-    assert "ERA" not in checker.VALID_ESM_NAMES
+    assert "ERA5" not in checker.VALID_ESM_NAMES

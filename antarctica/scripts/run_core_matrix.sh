@@ -5,12 +5,12 @@
 # Protocol order (cores 3-10 all branch from the historical endpoint, so the
 # historicals must finish first; see experiment.py and control/run.py):
 #
-#   1,2   historical   CESM2-WACCM / MRI-ESM2-0        1850-2014
+#   1,2   historical   CESM2-WACCM / MRI-ESM2-0        2003-2014
 #   9,10  CTRL2015     both ESMs, constant 2015 climate   ->2300
 #   3,4   ssp370       both ESMs                          ->2100
 #   5,6   ssp126       both ESMs                          ->2300
 #   7,8   ssp585       both ESMs                          ->2300
-#   11    OCX          obs-constrained, independent    1979-2025
+#   11    OCX          obs-constrained, independent    2003-2025
 #
 # A core that branches from the historical is only launched once that ESM's
 # historical endpoint is on disk, complete and post-fix. A missing, short or
@@ -128,7 +128,7 @@ ARCHIVE="$R/archive_stale_$TS"
 #
 # The target is the model TIME a complete run ends at, compared against the
 # checkpoint's t_yr, so it is 1 January of the year after the last one the
-# core covers: a historical covering 1850-2014 finishes at 2015.
+# core covers: a historical covering 2003-2014 finishes at 2015.
 # kind: hist = historical, branch = branches from the historical endpoint,
 #       solo = starts from the inversion rather than a historical endpoint.
 # Every kind resumes from its own saved state, so every one is retried.

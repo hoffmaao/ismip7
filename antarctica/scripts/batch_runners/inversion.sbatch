@@ -14,8 +14,9 @@
 # this job converged, timed out or lost its node), and each link exits at once
 # if the "<map>.done" marker exists. Depth is capped by ISMIP7_CHAIN_MAX. The
 # successor copies this job's partition, constraint, memory, time and task
-# layout from scontrol, so a chain never changes rank count mid-run -- the
-# inversion now refuses a warm start whose dof ordering differs anyway.
+# layout from scontrol, so a chain never changes rank count mid-run. The
+# inversion reads a warm start by point location (interpolate_with_fill), so
+# one written on another rank count or on another mesh loads correctly too.
 #
 # Defaults write inversion_icepack2_rc_n3_dg0_logvelnet_<ISMIP7_LC>.h5 (1000
 # on the production mesh site_env.sh names) under the settings the 2500 m

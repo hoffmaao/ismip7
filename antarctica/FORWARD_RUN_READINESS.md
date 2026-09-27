@@ -1032,4 +1032,14 @@ checker's generator (27 files each):
 On a `CESM2-WACCM` `ctrl` set its log differs from stock 0.5.1's in the
 version line alone. Stock 0.5.1, the release the organisers publish, still
 gives any core 11 set, NORCE's included, the one naming error and no file
-check. (issue #18)
+check.
+
+Real output: on IU Quartz on 27 September (job 10721768) the core 11 runs of
+the 25 km rehearsal (issue #138), `rehnoamb` and `rehamb` at `b554238`, whose
+writer differs from this branch's in docstrings alone, were written with
+`--esm ERA5`, 31 files each for 2003 to 2025. For each, stock 0.5.1 reported
+the one naming error and checked no file, and the patched checker checked all
+31 files and found 0 errors. Its one warning is the one every core carries,
+the list of non-mandatory variables the model does not write. The
+rehearsal's own output chain, which lives outside the repository, still
+passes `--esm OCX` for core 11, and the writer now refuses that. (issue #18)

@@ -423,7 +423,7 @@ submit.sh projection ISMIP7_EXPERIMENT=control
 | `ssp126_cesm_waccm` / `ssp126_mri_esm2` | 5 / 6 | 2015-2300 |
 | `ssp370_cesm_waccm` / `ssp370_mri_esm2` | 3 / 4 | 2015-2100 |
 | `ssp585_cesm_waccm` / `ssp585_mri_esm2` | 7 / 8 | 2015-2300 |
-| `ocx` | 11 | 1979-2025 |
+| `ocx` | 11 | 2003-2025 |
 | `hist_cesm_waccm` / `hist_mri_esm2` | 1 / 2 | 1850-2014 |
 
 The runner writes the submission's yearly fields and scalars by default (`ISMIP7_OUTPUT=1`), because every experiment it offers is a core experiment and a projection that reaches 2300 without them has to be run again. `ISMIP7_OUTPUT=0` turns that off for a pipeline exercise.

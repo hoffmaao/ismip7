@@ -1582,6 +1582,24 @@ Things that are easy to get wrong:
   map-plane years, and stamps the scalar files with the one it found
   (`scalar_area`). The comparison exits 2 when the switch disagrees with the
   stamp; leave it off for a run from before the change.
+- **Core 11 goes through `scripts/isschecker_ocx.py`.** `--scenario ocx`
+  names its forcing field `ERA5`, as the organisers' conventions document
+  does (issue #18).
+  Stock isschecker 0.5.1 has no `ocx` experiment, so over a C011 directory it
+  reports one naming error and checks no file, and its field 5 takes CMIP
+  models only. The script runs 0.5.1 with both added in-process, and takes
+  the checker's arguments:
+
+  ```bash
+  <venv>/bin/python antarctica/scripts/isschecker_ocx.py \
+      --source-path submission/AIS/RICE/icepack2/CORE/C011 --variable-list ismip7
+  ```
+
+  The `ocx` row is the Protocol Overview's C011 window, a start from 1990 to
+  2015 and an end in 2025, so a start before 1990 or an end before 2025
+  draws time errors. The log's version line says the checker was patched.
+  The script refuses any release but 0.5.1, and stops once a release has an
+  `ocx` row of its own.
 - **A tree written before the whole-pixel flux means needs `--overlap`.**
   Its flux files carry no `flux_pixel_mean`, and `acabf` there is a mean over
   the covered part of a pixel, which the comparison undoes with the writer's
@@ -1594,7 +1612,11 @@ experiment-length checks a two-year run cannot satisfy. `ismip7-scalars` 0.1.0
 then wrote `sla20`, `slg20` and `slvaf`, each with its glacier and ice-cap
 variant, in NetCDF and CSV. On three full-length 32 km ssp585 runs (IU Quartz,
 23 September 2026) every identity `compare_scalars.py` checks holds, and
-`reports/scalar_comparison_32km.md` sets out what differs and why.
+`reports/scalar_comparison_32km.md` sets out what differs and why. The tool's
+slvaf runs above the model's as shelves thin and the grounding line retreats,
+by about as much on a 1 km mesh as on a 32 km one (issue #99).
+`scripts/grid_vaf_attribution.py` measures it for any state or year of annual
+output, and `reports/grid_vaf_resolution.md` has the September 2026 numbers.
 
 At full length, 2015 to 2300, a 32 km control and ssp585 pass 0.5.1 with zero
 errors in every test group, the length checks included (23 September 2026, run

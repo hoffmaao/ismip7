@@ -4,6 +4,7 @@ r"""Data preflight for the ISMIP7 core experiments.
 Answers "which experiments can run on this machine right now?" in a few
 seconds, checking every input each core needs: mesh, MAP inversion,
 boundary ids, the melt calibration, RACMO, the OI climatology (core 11's stopgap),
+the Smith dH/dt that a backdated cold start reads,
 and the (ESM, scenario) atmosphere/ocean trees over the run period, the
 control's `ctrl` ocean among them. Honors the same
 environment knobs as the runs (ISMIP7_LC, ISMIP7_FRICTION,
@@ -29,6 +30,7 @@ from icepack2_tools.forcing import (
 )
 from icepack2_tools.boundary import sidecar_path
 from icepack2_tools.naming import map_basename
+from icepack2_tools.obs_dhdt import dhdt_source
 from icepack2_tools.climatology import clim_start, clim_end, clim_scenario
 from icepack2_tools.runconfig import (
     obs_data_root,
@@ -94,7 +96,8 @@ def _time(node, env):
 def driver_period(driver, core=None, env=None):
     r"""``(t_start, t_end)`` of the run ``driver`` makes under ``env``
     (``os.environ`` by default), read from its source: importing a driver
-    loads Firedrake, which takes about 20 s.
+    loads Firedrake and the model, 3 to 19 s on a Mac against 0.1 s for the
+    whole preflight.
 
     A core-experiment shim passes ``t_start_default`` and ``t_end_default``
     to ``experiment.run_core_experiment``, where ``ISMIP7_T_START`` and
@@ -323,6 +326,16 @@ def shared_missing(warn=None):
     return miss
 
 
+def dhdt_missing():
+    r"""What stops a backdated cold start from reading the dH/dt: the MIPkit,
+    or its two cached rasters, looked for as ``load_dhdt_obs`` looks."""
+    try:
+        dhdt_source()
+    except (FileNotFoundError, ValueError) as e:
+        return [f"dH/dt for the geometry backdating: {e}"]
+    return []
+
+
 def racmo_ok():
     return os.path.exists(os.path.join(
         DATA_DIR, "racmo",
@@ -370,14 +383,18 @@ def main():
         if scenario == "historical" or core == 11:
             # A cold start from the MAP. A start before 2015 backdates its
             # geometry by the Smith dH/dt (issue 117), which setup_model does
-            # on the DG0 geometry only, and the drivers refuse a start before
-            # the dH/dt window.
+            # on the DG0 geometry only, reading the MIPkit or its cached
+            # rasters, and the drivers refuse a start before the dH/dt window.
             try:
-                if geometry_backdate_years(t_start) > 0.0 and geom != "dg0":
-                    miss.append(f"a start at {t_start:g} backdates the geometry, "
-                                f"which needs ISMIP7_GEOMETRY_SPACE=dg0")
+                backdate = geometry_backdate_years(t_start)
             except ValueError as e:
                 miss.append(f"geometry backdating: {e}")
+                backdate = 0.0
+            if backdate > 0.0:
+                if geom != "dg0":
+                    miss.append(f"a start at {t_start:g} backdates the geometry, "
+                                f"which needs ISMIP7_GEOMETRY_SPACE=dg0")
+                miss += dhdt_missing()
         if core == 11 and _ocx_forcing() == "protocol":
             # projections/ocx.py refuses to start on anything less, so this
             # gate asks the same readers the same question.

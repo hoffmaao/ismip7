@@ -26,15 +26,18 @@ pytest.importorskip("firedrake")
 
 ESM, SCENARIO = "CESM2-WACCM", "ssp585"
 CORE_7 = "core  7"
-# the knobs that move a core's period or refuse its start; cleared so a
-# developer's shell cannot change what the tests see
-PERIOD_KNOBS = ("ISMIP7_T_START", "ISMIP7_T_END", "ISMIP7_GEOMETRY_BACKDATE",
-                "ISMIP7_GEOMETRY_SPACE")
+# the knobs that move a core's period, refuse its start or locate its dH/dt;
+# cleared so a developer's shell cannot change what the tests see
+KNOBS = ("ISMIP7_T_START", "ISMIP7_T_END", "ISMIP7_GEOMETRY_BACKDATE",
+         "ISMIP7_GEOMETRY_SPACE", "ISMIP7_OBS_KIT", "ISMIP7_DHDT_VAR")
 
 
-def _period_env(monkeypatch, env=None):
-    for knob in PERIOD_KNOBS:
+def _knobs(monkeypatch, tmp_path, env=None):
+    for knob in KNOBS:
         monkeypatch.delenv(knob, raising=False)
+    # the dH/dt cache is looked for under the obs root, which by default is
+    # the checkout's, where a real cache may sit
+    monkeypatch.setenv("ISMIP7_OBS_DATA_ROOT", str(tmp_path / "obs"))
     for knob, value in (env or {}).items():
         monkeypatch.setenv(knob, value)
 
@@ -50,13 +53,14 @@ def _tree(root, years, esm=ESM, scenario=SCENARIO):
 
 
 def _run(monkeypatch, tmp_path, years, ocean_cover=lambda e, s: (2015, 2300),
-         scenario=SCENARIO, env=None):
-    r"""preflight.main() over a tree covering `years`, returning its output."""
+         scenario=SCENARIO, env=None, dhdt=False):
+    r"""preflight.main() over a tree covering `years`, returning its output.
+    ``dhdt=True`` keeps the real dH/dt lookup, which has tests of its own."""
     root = str(tmp_path / "ISMIP7" / "AIS")
     os.makedirs(root, exist_ok=True)
     _tree(root, years, scenario=scenario)
     monkeypatch.setenv("ISMIP7_DATA_ROOT", root)
-    _period_env(monkeypatch, env)
+    _knobs(monkeypatch, tmp_path, env)
     sys.modules.pop("preflight", None)
     preflight = importlib.import_module("preflight")
     # isolate the forcing-coverage verdict from the mesh/MAP/ocean checks
@@ -66,6 +70,8 @@ def _run(monkeypatch, tmp_path, years, ocean_cover=lambda e, s: (2015, 2300),
     monkeypatch.setattr(preflight, "ocean_cover", ocean_cover)
     monkeypatch.setattr(preflight, "pool_status",
                         lambda *a, **k: ("ok", ""))
+    if not dhdt:
+        monkeypatch.setattr(preflight, "dhdt_missing", lambda: [])
     preflight.main()
     return None
 
@@ -220,7 +226,8 @@ def _ocx_tree(root, years):
         open(os.path.join(d, f"{var}_AIS_OCX_ocean_main_v1_1950-2025.nc"), "wb").close()
 
 
-def _run_core_11(monkeypatch, tmp_path, years, forcing="protocol"):
+def _run_core_11(monkeypatch, tmp_path, years, forcing="protocol", env=None,
+                 dhdt=False):
     root = str(tmp_path / "ISMIP7" / "AIS")
     os.makedirs(root, exist_ok=True)
     if years is not None:
@@ -228,13 +235,15 @@ def _run_core_11(monkeypatch, tmp_path, years, forcing="protocol"):
     monkeypatch.setenv("ISMIP7_DATA_ROOT", root)
     monkeypatch.setenv("ISMIP7_OCX_FORCING", forcing)
     monkeypatch.delenv("ISMIP7_OCX_OCEAN", raising=False)
-    _period_env(monkeypatch)
+    _knobs(monkeypatch, tmp_path, env)
     sys.modules.pop("preflight", None)
     preflight = importlib.import_module("preflight")
     monkeypatch.setattr(preflight, "shared_missing", lambda warn: [])
     monkeypatch.setattr(preflight, "racmo_ok", lambda: True)
     monkeypatch.setattr(preflight, "oi_ok", lambda: True)
     monkeypatch.setattr(preflight, "pool_status", lambda *a, **k: ("ok", ""))
+    if not dhdt:
+        monkeypatch.setattr(preflight, "dhdt_missing", lambda: [])
     preflight.main()
 
 
@@ -259,6 +268,94 @@ def test_core_11_on_the_stopgap_says_that_is_what_it_is(monkeypatch, tmp_path, c
     _run_core_11(monkeypatch, tmp_path, None, forcing="stopgap")
     line = _core_line(capsys, "core 11")
     assert "READY" in line and "ISMIP7_OCX_FORCING=stopgap" in line
+
+
+# --- a backdated cold start reads the Smith dH/dt ---------------------------
+
+def _stage_kit(tmp_path):
+    kit = tmp_path / "ISMIP7" / "AIS" / "obs" / "mipkit"
+    kit.mkdir(parents=True)
+    (kit / "AntarcticaObsISMIP7-v1.2.nc").touch()
+
+
+def _stage_cache(tmp_path, *rasters):
+    cache = tmp_path / "obs" / "dhdt_cache"
+    cache.mkdir(parents=True)
+    for raster in rasters:
+        (cache / f"dhdt_smith_AntarcticaObsISMIP7-v1.2_{raster}.tif").touch()
+
+
+def _historical_line(monkeypatch, tmp_path, capsys):
+    r"""Core 1 from 2003 on a complete tree, with the real dH/dt lookup."""
+    _run(monkeypatch, tmp_path, range(2003, 2015), scenario="historical",
+         ocean_cover=lambda e, s: (2003, 2014), dhdt=True)
+    return _core_line(capsys, "core  1")
+
+
+def test_a_backdated_start_without_the_dhdt_is_blocked(monkeypatch, tmp_path, capsys):
+    r"""setup_model would stop there, after loading the mesh and the MAP."""
+    line = _historical_line(monkeypatch, tmp_path, capsys)
+    assert "BLOCKED" in line and "dH/dt for the geometry backdating" in line, line
+    assert "MIPkit not found" in line and "_valid.tif" in line, line
+
+
+def test_the_mipkit_is_a_dhdt_source(monkeypatch, tmp_path, capsys):
+    _stage_kit(tmp_path)
+    line = _historical_line(monkeypatch, tmp_path, capsys)
+    assert "READY" in line, line
+
+
+def test_the_cached_rasters_are_a_dhdt_source(monkeypatch, tmp_path, capsys):
+    r"""A cluster may stage the two small rasters and no 9 GB kit."""
+    _stage_cache(tmp_path, "value", "valid")
+    line = _historical_line(monkeypatch, tmp_path, capsys)
+    assert "READY" in line, line
+
+
+def test_a_cached_value_raster_without_its_coverage_is_no_source(monkeypatch, tmp_path, capsys):
+    _stage_cache(tmp_path, "value")
+    line = _historical_line(monkeypatch, tmp_path, capsys)
+    assert "BLOCKED" in line and "dH/dt" in line, line
+
+
+def test_a_start_from_2015_reads_no_dhdt(monkeypatch, tmp_path, capsys):
+    r"""Nothing is backdated from 2015 on, so OCX started there needs no
+    source."""
+    _run_core_11(monkeypatch, tmp_path, range(2015, 2026),
+                 env={"ISMIP7_T_START": "2015"}, dhdt=True)
+    line = _core_line(capsys, "core 11")
+    assert "READY" in line and "2015-2025" in line, line
+
+
+def test_the_dhdt_lookup_writes_nothing_and_honours_a_named_kit(monkeypatch, tmp_path):
+    r"""The preflight must not build the cache it asks about, and a named
+    ISMIP7_OBS_KIT that does not exist stops the loader even beside a cache."""
+    from icepack2_tools.obs_dhdt import dhdt_source
+    _knobs(monkeypatch, tmp_path)
+    monkeypatch.setenv("ISMIP7_DATA_ROOT", str(tmp_path / "ISMIP7" / "AIS"))
+    _stage_kit(tmp_path)
+    kit, val_fn, cov_fn = dhdt_source()
+    assert kit.endswith("AntarcticaObsISMIP7-v1.2.nc")
+    assert val_fn.endswith("dhdt_smith_AntarcticaObsISMIP7-v1.2_value.tif")
+    assert cov_fn.endswith("dhdt_smith_AntarcticaObsISMIP7-v1.2_valid.tif")
+    assert not (tmp_path / "obs").exists()
+    _stage_cache(tmp_path, "value", "valid")
+    monkeypatch.setenv("ISMIP7_OBS_KIT", str(tmp_path / "moved.nc"))
+    with pytest.raises(FileNotFoundError, match="ISMIP7_OBS_KIT"):
+        dhdt_source()
+
+
+def test_the_preflight_imports_without_firedrake():
+    r"""The preflight imports in 0.1 s because nothing it imports loads
+    Firedrake, which is why obs_dhdt imports Firedrake inside the loader."""
+    import subprocess
+    code = ("import sys; sys.path[:0] = sys.argv[1:]; import preflight; "
+            "loaded = [m for m in sys.modules if m.split('.')[0] == 'firedrake']; "
+            "assert not loaded, loaded")
+    result = subprocess.run(
+        [sys.executable, "-c", code, REPO, os.path.join(REPO, "antarctica", "scripts")],
+        capture_output=True, text=True)
+    assert result.returncode == 0, result.stderr
 
 
 # ── the melt calibration a run reads ────────────────────────────────────────

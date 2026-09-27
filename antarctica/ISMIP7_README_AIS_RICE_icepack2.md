@@ -154,7 +154,7 @@ shallow-shelf formulation on Firedrake 2026.4.1)
     the frozen apparent-mass-balance reference holds the initial state in
     balance, so there is no such jump. The 165 years before the initial
     state's epoch are a relaxation under that reference, not a hindcast.
-    OCX (C011) runs 1979-2025. **[confirm #19]** which forcing the submitted run
+    OCX (C011) runs 2003-2025. **[confirm #19]** which forcing the submitted run
     used: the ISMIP7 OCX product (RACMO2.3p2-ERA SDBN1 `acabf`, full field,
     and the expert-judgment `main` ocean, `ISMIP7_OCX_FORCING=protocol`), or
     RACMO2.4p1 actual-year SMB with the constant ocean climatology
@@ -306,7 +306,14 @@ Compliance: isschecker 0.5.1 of 22 September 2026, which grades a range
 finding by the share of values outside the bounds (discussion #46). A 32 km
 CESM2-WACCM control and ssp585, 2015 to 2300, pass it with zero errors in
 every test group (23 September 2026), and each submitted file set is checked
-with it before upload. The bundled variable request is that release's.
+with it before upload. The bundled variable request is that release's. Core
+11 is named `<var>_AIS_RICE_icepack2_m001_ERA5_f001_ocx_C011_2003-2025.nc`,
+with `ERA5` in the forcing field as in the core 11 example of the ISMIP7
+filenames and conventions document. 0.5.1 has no `ocx` experiment and takes
+only CMIP models in that field, so core 11 is checked with an `ocx` row
+supplied (a start from 1990 to 2015, an end in 2025), under which each file
+carries one naming error, on `ERA5`. **[confirm #18]** that result on the
+submitted C011 files.
 
 Forcing versions: each run logs the product and version its readers opened,
 and `core_report.py` carries those lines into the run's committed report;

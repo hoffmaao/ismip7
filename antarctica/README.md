@@ -1582,6 +1582,27 @@ Things that are easy to get wrong:
   map-plane years, and stamps the scalar files with the one it found
   (`scalar_area`). The comparison exits 2 when the switch disagrees with the
   stamp; leave it off for a run from before the change.
+- **Core 11 fails the checker's naming tests.** `--scenario ocx` names its
+  forcing field `ERA5`, after the conventions document (issue #18).
+  isschecker 0.5.1 has no `ocx` experiment, so over a C011 directory it
+  reports one naming error and checks no file. Supplying the row checks
+  them, with one naming error per file on `ERA5`, which it expects to be a
+  CMIP model:
+
+  ```bash
+  <venv>/bin/python - --source-path submission/AIS/RICE/icepack2/CORE/C011 \
+      --variable-list ismip7 <<'EOF'
+  import sys, isschecker.checker as c
+  load = c._load_experiments_csv
+  c._load_experiments_csv = lambda *a, **k: load(*a, **k) + [dict(
+      experiment="ocx", start_year_min=1990, start_year_max=2015, end_year=2025, duration=-1)]
+  sys.exit(c.main())
+  EOF
+  ```
+
+  The row is the Protocol Overview's C011 window, a start from 1990 to 2015
+  and an end in 2025, so a start before 1990 draws a time error in every
+  file.
 - **A tree written before the whole-pixel flux means needs `--overlap`.**
   Its flux files carry no `flux_pixel_mean`, and `acabf` there is a mean over
   the covered part of a pixel, which the comparison undoes with the writer's

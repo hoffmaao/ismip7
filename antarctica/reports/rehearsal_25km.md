@@ -28,7 +28,7 @@ regenerate the tree.
 | attempt A | `ISMIP7_APPARENT_MB=0`, tag `rehnoamb` |
 | attempt B | `ISMIP7_APPARENT_MB=1`, tag `rehamb` |
 
-Every submission named its knobs explicitly (`submit_r25.sh`, appendix):
+Every submission named its knobs explicitly (`submit_r25.sh`, Reproducing, below):
 `site_env.sh` defaults to the 1 km mesh and to regularized Coulomb, and
 `simulation.py` names every output after `ISMIP7_LC`.
 

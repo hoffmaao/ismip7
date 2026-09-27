@@ -1582,6 +1582,24 @@ Things that are easy to get wrong:
   map-plane years, and stamps the scalar files with the one it found
   (`scalar_area`). The comparison exits 2 when the switch disagrees with the
   stamp; leave it off for a run from before the change.
+- **Core 11 goes through `scripts/isschecker_ocx.py`.** `--scenario ocx`
+  names its forcing field `ERA5`, as the organisers' conventions document
+  does (issue #18).
+  Stock isschecker 0.5.1 has no `ocx` experiment, so over a C011 directory it
+  reports one naming error and checks no file, and its field 5 takes CMIP
+  models only. The script runs 0.5.1 with both added in-process, and takes
+  the checker's arguments:
+
+  ```bash
+  <venv>/bin/python antarctica/scripts/isschecker_ocx.py \
+      --source-path submission/AIS/RICE/icepack2/CORE/C011 --variable-list ismip7
+  ```
+
+  The `ocx` row is the Protocol Overview's C011 window, a start from 1990 to
+  2015 and an end in 2025, so a start before 1990 or an end before 2025
+  draws time errors. The log's version line says the checker was patched.
+  The script refuses any release but 0.5.1, and stops once a release has an
+  `ocx` row of its own.
 - **A tree written before the whole-pixel flux means needs `--overlap`.**
   Its flux files carry no `flux_pixel_mean`, and `acabf` there is a mean over
   the covered part of a pixel, which the comparison undoes with the writer's

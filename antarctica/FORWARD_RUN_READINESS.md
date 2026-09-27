@@ -581,7 +581,10 @@ Output and submission:
     action 10), `reports/scalar_comparison_32km.md`. Each has its issue: the
     pixel means (issue 96), the area factor (issue 97) and `params.nc` in the
     upload (issue 98), all three closed on 24 September when PR 101 merged,
-    and the grid VAF (issue #99).
+    and the grid VAF (issue #99), which a finer mesh leaves as large: the
+    p2 run's change by 2300, imposed on the 2015 state of each mesh, costs
+    the tool +43 mm at 32 km and +56 mm on the 1 km production layout
+    (`reports/grid_vaf_resolution.md`).
     The first three were fixed on 24 September on `claude/scalar-output-fixes`,
     measured on the p4 pair regridded again and a five-year p5 control. Every
     flux is a whole-pixel mean: the fill term is zero, and the control's shelf

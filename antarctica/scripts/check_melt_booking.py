@@ -30,6 +30,10 @@ Per year, in Gt/yr over map-plane area, ice at 917 kg m-3:
   reference (``ismip7_output.net_reference``), so it is zero on files written
   since issue #136; on earlier files it is the melt and SMB booked of ice that
   never existed;
+* ``negative reference``, the negative reference booked on cells holding no
+  ice at either end, a sink on real ice: the part of their inflow it removed,
+  which stays in ``acabf_correction`` and reaches no submitted field
+  (reported, not gated);
 * ``land melt``, the melt booked on land cells (a bed at or above sea level)
   holding no ice at either end;
 * ``land ligroundf``, the grounding-line flux booked into those land cells;
@@ -96,6 +100,7 @@ def year_booking(prev, cur, W):
         "left out: no ice at either end": left_out(none),
         "left out: the rest": left_out(~afloat0 & ~none),
         "reference in sinks": gt(in_sinks),
+        "negative reference": gt(np.minimum(R, 0.0), none),
         "land melt": gt(np.maximum(-B, 0.0), none & land),
         "land ligroundf": gt(cur["ligroundf"], none & land),
         "split": float(np.max(np.abs(lif - F), initial=0.0)),
@@ -203,7 +208,8 @@ def main(argv=None):
         print(f"{yr}: lifmassbf {r['lifmassbf']:,.1f}, left out {r['left out']:,.1f} "
               f"(afloat at start {r['left out: afloat at start']:,.1f}, no ice at either end "
               f"{r['left out: no ice at either end']:,.1f}), reference in sinks "
-              f"{r['reference in sinks']:.3g}, land melt {r['land melt']:.3g}, land ligroundf "
+              f"{r['reference in sinks']:.3g}, negative reference {r['negative reference']:.3g}, land "
+              f"melt {r['land melt']:.3g}, land ligroundf "
               f"{r['land ligroundf']:.3g} Gt/yr; split {r['split']:.1e} m/yr", flush=True)
         prev = cur
     if rows:

@@ -65,6 +65,7 @@ def test_the_old_booking_shows_the_reference_and_the_land_film():
     assert r["reference in sinks"] == pytest.approx(4.5 * GT)
     assert r["land melt"] == pytest.approx(0.5 * GT)
     assert r["land ligroundf"] == pytest.approx(2.0 * GT)
+    assert r["negative reference"] == 0.0
     assert r["left out"] == pytest.approx(4.5 * GT)        # cell 1's 4 m and the film
     assert r["left out: no ice at either end"] == pytest.approx(4.5 * GT)
     assert r["left out: afloat at start"] == pytest.approx(0.0)

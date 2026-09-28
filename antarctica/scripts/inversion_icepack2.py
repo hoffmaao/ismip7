@@ -301,12 +301,13 @@ C_REF = os.environ.get("ISMIP7_C_REF", "auto").strip().lower()
 PRIOR_RHO_THETA = float(os.environ.get("ISMIP7_PRIOR_RHO_THETA", str(PRIOR_RHO)))
 
 # ── Fluidity prior mean (ISMIP7_FLUIDITY_PRIOR) ─────────────────────────
-# `thermo` (default): the fixed-velocity enthalpy model (thermo_model.py).
-# `pattyn`: rate_factor of the depth-averaged Pattyn temperature raster
+# `pattyn` (default since 27 Sep 2026, Andrew: "focus on the pattyn prior";
+# its shelves start ten times closer to the observed speed than the thermal
+# model's at 2 km): rate_factor of the depth-averaged Pattyn temperature raster
 # (icepack2_tools/rheology_prior.py; ISMIP7_PATTYN_TEMP names the file,
 # default <data root>/temp/Pattyn_2013.tif), the source Recinos et al. (2023)
 # take their rheology prior mean from. Anything else: the constant A0.
-FLUIDITY_PRIOR = os.environ.get("ISMIP7_FLUIDITY_PRIOR", "thermo").strip().lower()
+FLUIDITY_PRIOR = os.environ.get("ISMIP7_FLUIDITY_PRIOR", "pattyn").strip().lower()
 
 # ── Where the fluidity control acts (ISMIP7_FLUIDITY_CONTROL) ───────────
 # `all` (default): phi = log(A / A_prior) everywhere. `floating`: phi acts

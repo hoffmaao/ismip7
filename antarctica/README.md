@@ -247,9 +247,11 @@ ISMIP7/AIS/
 Readers pin `version=v2` for the atmosphere and `v3` for the ocean, falling
 back to the highest `v<N>` present, dotted versions included, so the `v2.1`
 fracture release and MRI-ESM2-0's `v1` resolve without code changes. The
-atmosphere directory is whichever of `SDBN1-8000m` and `GEMB-SDBN1-8000m`
-exists, `SDBN1` first, so trees fetched before MRI's August 2026 rename still
-work. Fracture masks resolve flat or versioned.
+atmosphere directory is whichever of `GEMB-SDBN1-8000m` and `SDBN1-8000m`
+exists, so trees fetched before MRI's August 2026 rename still work. Where
+both exist a run opens `GEMB-SDBN1-8000m`, the name a mirror re-sync writes,
+and `audit_forcing_versions.py` audits that same directory. Fracture masks
+resolve flat or versioned.
 
 **One year bridges the end of a series.** A request for the single year after
 the last one on disk reuses that year and logs it once per variable. Anything

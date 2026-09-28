@@ -76,7 +76,7 @@ from download_mirror import (                                   # noqa: E402
 )
 from icepack2_tools.forcing import (                            # noqa: E402
     ATMOSPHERE_PRODUCTS, ATMOSPHERE_VERSION, FRACTURE_MIN_VERSION, OCEAN_VERSION,
-    _resolve_version, _version_subdirs, version_key,
+    _atmosphere_product_in, _resolve_version, _version_subdirs, version_key,
 )
 
 PRODUCT = DEFAULT_PRODUCT + "/"
@@ -122,18 +122,17 @@ def versions_of(entries):
 
 
 def local_product(root, esm, scenario, product):
-    r"""The directory on disk that holds ``product``. MRI-ESM2-0's ``SDBN1-*``
-    became ``GEMB-SDBN1-*`` in August 2026 with the data unchanged (#37), and
-    the reader takes whichever is there, so a tree fetched before the rename
-    is current under its old name."""
-    if os.path.isdir(os.path.join(root, esm, scenario, product)):
-        return product
+    r"""The directory a run opens for the mirror's ``product``. MRI-ESM2-0's
+    ``SDBN1-*`` became ``GEMB-SDBN1-*`` in August 2026 with the data unchanged
+    (#37), so a tree fetched before the rename is current under its old name,
+    and a tree holding both is read from ``GEMB-SDBN1-*``. An atmosphere row
+    asks the reader's own rule (``forcing._atmosphere_product_in``) and falls
+    back to its own name when neither is on disk; every other product is its
+    own directory."""
     for name in ATMOSPHERE_PRODUCTS:
         if product.startswith(name + "-"):
-            for other in ATMOSPHERE_PRODUCTS:
-                alias = other + product[len(name):]
-                if os.path.isdir(os.path.join(root, esm, scenario, alias)):
-                    return alias
+            resolution = product[len(name) + 1:]
+            return _atmosphere_product_in(os.path.join(root, esm, scenario), resolution) or product
     return product
 
 

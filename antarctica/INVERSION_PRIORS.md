@@ -161,11 +161,9 @@ before the runner re-solves it (2.7e8 for the exp MAP, 1.5e8 for the sqrt one,
 recorded residuals 0.2 to 4), because the sub-element quadrature is rebuilt
 from the loaded geometry only when the diagnostic solve starts; the re-solve
 converges and the budget continues without a break, so the cost is one extra
-Newton solve per link. And a sqrt run warm-started from an exp MAP freezes
-the exp record's `prior_sigma_alpha` (1, in log units) although its own auto
-value would be the grounded median alpha (0.13): the handoff reports the
-changed objective, and a chain does not switch control mid-way, so it stands
-as a note.
+Newton solve per link. An auto `prior_sigma_alpha` (and `friction_c_ref`) is
+reused across a warm start only within one friction control; a warm start
+from another control derives its own auto value.
 
 ## 6. Where the chains are (27 September, 22:00 EDT)
 

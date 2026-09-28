@@ -114,8 +114,8 @@ from icepack2_tools.prior import (
 )
 from icepack2_tools.thermo_model import compute_fluidity_prior
 from icepack2_tools.handoff import (
-    OBJECTIVE_KEYS, OBJECTIVE_RECORD_KEYS, accepted_evaluation, handoff_gap,
-    objective_mismatches)
+    OBJECTIVE_KEYS, OBJECTIVE_RECORD_KEYS, accepted_evaluation, frozen_in_control,
+    handoff_gap, objective_mismatches)
 from icepack2_tools.optimization import FunctionalDecreaseStop
 from icepack2_tools.optimization import (FunctionalDecreaseStop,
                                          recorded_objective,
@@ -1028,6 +1028,12 @@ def main():
     # the alpha of a warm start inverted on this control. The prior mean is
     # zero, so nothing but the start remembers the anchor.
     sigma_alpha_val = None
+    if (FRICTION_CONTROL in ("sqrt", "exp") and PRIOR_SIGMA_ALPHA == "auto"
+            and "prior_sigma_alpha" in warm_attrs
+            and frozen_in_control(warm_attrs, "prior_sigma_alpha", FRICTION_CONTROL) is None):
+        PETSc.Sys.Print(
+            f"    sigma_alpha of the warm start ({warm_attrs['prior_sigma_alpha']}) is in the "
+            f"{warm_attrs.get('friction_control', 'log')} control's units; not reused")
     if FRICTION_CONTROL == "sqrt":
         C_cg = cg1_lift(C_w0) if geom_dg else C_w0
         if warm_alpha is not None:
@@ -1045,10 +1051,11 @@ def main():
             np.asarray(theta.dat.data_ro[_grounded], dtype=float)))
         _alpha_median = (float(np.median(_alpha_grounded))
                          if _alpha_grounded.size else float("nan"))
-        if PRIOR_SIGMA_ALPHA == "auto" and float(warm_attrs.get("prior_sigma_alpha", 0.0) or 0.0) > 0.0:
-            # frozen: re-deriving it from the warm-started alpha would change
-            # the objective between links
-            sigma_alpha_val = float(warm_attrs["prior_sigma_alpha"])
+        # frozen within one control: re-deriving it from the warm-started
+        # alpha would change the objective between links
+        _warm_sigma = frozen_in_control(warm_attrs, "prior_sigma_alpha", FRICTION_CONTROL)
+        if PRIOR_SIGMA_ALPHA == "auto" and _warm_sigma is not None:
+            sigma_alpha_val = _warm_sigma
             PETSc.Sys.Print(f"    sigma_alpha frozen from the warm start: {sigma_alpha_val:.4e}")
         elif PRIOR_SIGMA_ALPHA == "auto":
             sigma_alpha_val = _alpha_median
@@ -1083,9 +1090,10 @@ def main():
         _C_grounded = np.concatenate(COMM_WORLD.allgather(
             np.asarray(C_start.dat.data_ro[_grounded], dtype=float)))
         _C_median = (float(np.median(_C_grounded)) if _C_grounded.size else float("nan"))
-        if float(warm_attrs.get("friction_c_ref", 0.0) or 0.0) > 0.0:
+        _warm_c_ref = frozen_in_control(warm_attrs, "friction_c_ref", FRICTION_CONTROL)
+        if _warm_c_ref is not None:
             # frozen: the control is a deviation from THIS reference
-            c_ref_val = float(warm_attrs["friction_c_ref"])
+            c_ref_val = _warm_c_ref
             PETSc.Sys.Print(f"    C_ref frozen from the warm start: {c_ref_val:.4e}")
         elif C_REF == "auto":
             c_ref_val = _C_median
@@ -1101,8 +1109,9 @@ def main():
             theta.interpolate(ln(max_value(C_start, Constant(1e-4 * c_ref_val)) / Constant(c_ref_val)))
             theta.dat.data[~_grounded] = 0.0
         theta.rename("alpha")
-        if PRIOR_SIGMA_ALPHA == "auto" and float(warm_attrs.get("prior_sigma_alpha", 0.0) or 0.0) > 0.0:
-            sigma_alpha_val = float(warm_attrs["prior_sigma_alpha"])
+        _warm_sigma = frozen_in_control(warm_attrs, "prior_sigma_alpha", FRICTION_CONTROL)
+        if PRIOR_SIGMA_ALPHA == "auto" and _warm_sigma is not None:
+            sigma_alpha_val = _warm_sigma
             PETSc.Sys.Print(f"    sigma_alpha frozen from the warm start: {sigma_alpha_val:.4e}")
         elif PRIOR_SIGMA_ALPHA == "auto":
             sigma_alpha_val = 1.0

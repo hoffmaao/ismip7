@@ -7,6 +7,7 @@ import pytest
 from icepack2_tools.handoff import (
     OBJECTIVE_KEYS,
     accepted_evaluation,
+    frozen_in_control,
     handoff_gap,
     objective_mismatches,
 )
@@ -65,3 +66,15 @@ def test_the_handoff_gap_is_relative():
     assert handoff_gap(1.0e9, 1.0e9) == 0.0
     assert handoff_gap(1.0e9, 1.001e9) == pytest.approx(1e-3)
     assert np.isfinite(handoff_gap(0.0, 1.0))
+
+
+def test_auto_weight_frozen_only_within_one_control():
+    sqrt_record = _settings()
+    assert frozen_in_control(sqrt_record, "prior_sigma_alpha", "sqrt") == 0.1828
+    assert frozen_in_control(sqrt_record, "prior_sigma_alpha", "exp") is None
+    exp_record = _settings(friction_control="exp", prior_sigma_alpha=1.0)
+    assert frozen_in_control(exp_record, "prior_sigma_alpha", "sqrt") is None
+    assert frozen_in_control(exp_record, "friction_c_ref", "exp") == 0.0334
+    legacy = {"prior_sigma_alpha": 0.2}
+    assert frozen_in_control(legacy, "prior_sigma_alpha", "sqrt") is None
+    assert frozen_in_control(_settings(friction_c_ref=0.0), "friction_c_ref", "sqrt") is None

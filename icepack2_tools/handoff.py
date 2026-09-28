@@ -81,3 +81,18 @@ def handoff_gap(recorded_total, first_total):
     continues the same minimisation from the same point."""
     return abs(float(first_total) - float(recorded_total)) / max(
         abs(float(recorded_total)), 1e-300)
+
+
+def frozen_in_control(recorded, key, friction_control):
+    r"""The positive value ``recorded`` holds for ``key`` (an auto weight in
+    the friction control's units: ``prior_sigma_alpha``, ``friction_c_ref``)
+    if the record was minimised on the same ``friction_control``, else None.
+    A record without a ``friction_control`` was inverted on the log
+    control."""
+    if str(recorded.get("friction_control", "log")) != str(friction_control):
+        return None
+    try:
+        value = float(recorded.get(key, 0.0) or 0.0)
+    except (TypeError, ValueError):
+        return None
+    return value if value > 0.0 else None

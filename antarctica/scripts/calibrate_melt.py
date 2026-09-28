@@ -15,7 +15,8 @@ Geometry: the same ISMIP7_GEOMETRY_SPACE the forward reads (default dg0).
   bed and thickness sampled onto the cells (ISMIP7_RASTER_SAMPLE), the
   surface from flotation, the slope of `forcing.compute_sin_alpha`,
   thermal forcing and salinity at each centroid and its own draft,
-  the forward's melt set `forcing.melt_receiving` (floating, `h > 0`),
+  the forward's melt set `forcing.melt_receiving` (floating, `h > 0`, on a
+  bed below sea level),
   cell areas. A K fitted here is the K the forward applies, by construction.
   Ice-free cells with `haf <= 0` are left out, as the forward leaves them
   out: the observations cover real shelves only.
@@ -318,7 +319,7 @@ def forward_geometry(mesh):
     and cell areas.
 
     The melt set is ``forcing.melt_receiving``, ``haf <= 0`` on cells with
-    ``h > 0``, the one the forward's callbacks melt. An ice-free cell also has
+    ``h > 0`` on a bed below sea level, the one the forward's callbacks melt. An ice-free cell also has
     ``haf <= 0``; the observations cover real shelves only, so it is left out
     of the fit, and the forward leaves it out of the melt."""
     c = forward_cells(mesh)

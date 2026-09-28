@@ -33,7 +33,7 @@ Per year, in Gt/yr over map-plane area, ice at 917 kg m-3:
 * ``negative reference``, the negative reference booked on cells holding no
   ice at either end, a sink on real ice: the part of their inflow it removed,
   which stays in ``acabf_correction`` and reaches no submitted field
-  (reported, not gated);
+  (reported only);
 * ``land melt``, the melt booked on land cells (a bed at or above sea level)
   holding no ice at either end;
 * ``land ligroundf``, the grounding-line flux booked into those land cells;

@@ -414,8 +414,8 @@ IMBIE2 8 km basin grid under `ISMIP7_DATA_ROOT`.
 
 The forward applies the melt the file was fitted to:
 
-- it melts the cells the fit summed over, floating and holding ice
-  (`forcing.melt_receiving`);
+- it melts the cells the fit summed over, floating and holding ice on a bed
+  below sea level (`forcing.melt_receiving`);
 - an offsets file whose recorded slope law, slope constant or geometry
   space differs from the run's stops the run, and so does geometry sampled
   with another `raster_sample` than the file's, or a cold start that floors

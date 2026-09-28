@@ -252,8 +252,8 @@ thickness sampled onto the cells, the surface from flotation, the slope of
 `ISMIP7_MELT_SLOPE=ant`, the uncapped cell slope under `local`), forcing at
 each centroid and its own draft, the forward's melt set
 `forcing.melt_receiving` (the seawater floating test `forcing.is_floating` on
-cells holding ice, `h > 0`) and cell areas. A K or an offset fitted there is
-the one the forward applies, by construction. The runs melt with the tracked
+cells holding ice, `h > 0`, on a bed below sea level) and cell areas. A K or
+an offset fitted there is the one the forward applies, by construction. The runs melt with the tracked
 calibration of item 4.
 
 The earlier K files were fitted under `cg1`: BedMachine on CG1 nodes with its

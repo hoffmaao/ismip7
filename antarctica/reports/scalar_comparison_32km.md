@@ -1229,8 +1229,14 @@ pixels the fill blanks in 2150, 2250 and 2300 (against the class-wide 535 at
 them the reference's share on emptied marine cells, and 0.4, 8.7 and 20 the
 reference melted on emptied land cells, which the melt law of these runs
 counted as afloat at zero thickness. The runs in this report predate the
-change, and their `lifmassbf` is zero. The reference's share, the melt on
-emptied land cells and the production numbers are one item now (issue #136).
+change, and their `lifmassbf` is zero.
+
+Note of 27 September 2026 (issue 136): the annual output now books the
+reference that a cell holding no ice at either end of a year receives against
+the melt and SMB that only cancelled it, and counts ice-free land as grounded
+in `ligroundf`; the melt law keeps off land. The runs in this report predate
+both. `FORWARD_RUN_READINESS.md` action 11 has the numbers, measured at 25 km
+on a mesh with the production layout's 20 km buffer.
 
 ### True area
 

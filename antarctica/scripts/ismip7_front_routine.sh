@@ -1,6 +1,6 @@
 #!/bin/bash
 # The ISMIP7 submission's front, sourced by a runner before the core drivers
-# (Andrew, 26 Sep 2026: "for the ismip7 submission we need to focus on just one
+# (Rice, 26 Sep 2026: "for the ismip7 submission we need to focus on just one
 # simulation" - the resistive-stress law).
 #
 #   * calving: the horizontal-force-balance (resistive-stress) law from

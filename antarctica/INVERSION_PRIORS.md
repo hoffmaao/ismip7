@@ -52,7 +52,7 @@ so a staged inversion warm-starts each stage through the handoff check.
 
 ## 3. What was measured
 
-**The prior is not the problem; its weight against the data is.** Under
+**The prior operator is right; its weight against the data is uncalibrated.** Under
 `misfit_scale=1` the prior outweighs the data by about the number of nodes
 and every MAP sat on its prior. Under `nodes` with the 3 m/yr sigma a 400 m/yr
 error costs 2e4 per node; chi-squared per node at every 32 km MAP is about
@@ -60,8 +60,8 @@ error costs 2e4 per node; chi-squared per node at every 32 km MAP is about
 `exp(phi)` of 1e6 on the shelves unpunished (32 km stage 1; the 2 km sqrt
 thermal MAP reached 5e6). Neither weight is calibrated. The discrepancy
 principle (chi-squared per node of order one at the MAP, i.e. a sigma that
-carries representation error) is the principled middle. Decision pending
-(Andrew).
+carries representation error) is the principled middle. The likelihood
+weight is uncalibrated, and the error model is Rice's choice.
 
 **The shelves are the misfit.** On the 2 km Recinos chains the grounded ice
 is fitted to a median speed error of 3 to 4 m/yr against an observed median

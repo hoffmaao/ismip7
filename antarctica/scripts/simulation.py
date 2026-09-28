@@ -1009,15 +1009,21 @@ def setup_model(restart_from=None, *, allow_timing_cache_a_ref=False,
             f"  Fluidity prior: checkpoint has no fluidity_prior; using LEGACY "
             f"constant baseline A0*a4_factor = {A_prior_baseline:.2f}"
         )
-    if str(checkpoint_metadata.get("fluidity_control", "all")) == "floating":
+    phi_floating = str(checkpoint_metadata.get("fluidity_control", "all")) == "floating"
+    if phi_floating:
         # the MAP's phi acts on floating ice only; grounded ice keeps the
         # prior fluidity, through the same smooth indicator, on the LIVE
         # geometry so the shelf rheology follows the grounding line
         from icepack2_tools.dual_friction import grounded_mask as _gm_phi
         PETSc.Sys.Print("  Fluidity from the MAP: phi acts on floating ice only")
-        A_map = A4_base * exp(phi_f * (Constant(1.0) - _gm_phi(h, b)))
+        A_map = A4_base * exp(phi_f * (Constant(1.0) - _gm_phi(H, b)))
     else:
         A_map = A4_base * exp(phi_f)
+
+    def _map_phi(H_c):
+        if phi_floating:
+            return phi_f * (Constant(1.0) - _gm_phi(H_c, b))
+        return phi_f
     K_base = u_c / (phi_eff * tau_c) ** m_slide
     K_map = K_base * exp(-m_slide * theta_f)
 
@@ -1317,7 +1323,7 @@ def setup_model(restart_from=None, *, allow_timing_cache_a_ref=False,
             return build_rc_residual(
                 z_c if z_c is not None else z,
                 theta_c if theta_c is not None else theta_f,
-                phi_c if phi_c is not None else phi_f,
+                phi_c if phi_c is not None else _map_phi(h_c if h_c is not None else h),
                 H=h_c if h_c is not None else h,
                 s=s_c if s_c is not None else s,
                 # the sqrt control's friction is alpha^2 pointwise (the
@@ -1355,7 +1361,7 @@ def setup_model(restart_from=None, *, allow_timing_cache_a_ref=False,
                 return build_subelement_residual(
                     z_c if z_c is not None else z,
                     theta_c if theta_c is not None else theta_f,
-                    phi_c if phi_c is not None else phi_f,
+                    phi_c if phi_c is not None else _map_phi(h_c if h_c is not None else h),
                     H=h_c if h_c is not None else h,
                     s=s_c if s_c is not None else s,
                     b=b, C_w0=(alpha_f ** 2 if alpha_f is not None else C_exp if C_exp is not None else C_w0),

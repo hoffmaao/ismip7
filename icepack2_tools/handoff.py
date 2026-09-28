@@ -13,7 +13,7 @@ minimises the same objective from the point the previous link had accepted:
 * the checkpoint records the objective at that iterate, and the next link's
   first evaluation must reproduce it (:func:`handoff_gap`).
 
-Andrew (26 Sep 2026): "between restarts I think we need to check to make
+Rice (26 Sep 2026): "between restarts I think we need to check to make
 sure the optimizer doesn't change."
 """
 import math

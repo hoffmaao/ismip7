@@ -284,7 +284,7 @@ PRIOR_RHO = float(os.environ.get("ISMIP7_PRIOR_RHO", str(L_REG)))
 # the amplitude is free in practice. ISMIP7_PRIOR_RHO_THETA is the friction
 # correlation length (default ISMIP7_PRIOR_RHO; Recinos's l = sqrt(gamma/delta)
 # is rho / sqrt(8)).
-# `exp` (Andrew, 27 Sep 2026: "instead of alpha squared we should use
+# `exp` (Rice, 27 Sep 2026: "instead of alpha squared we should use
 # exp(alpha)"): C = C_ref exp(alpha), alpha a zero-mean control as under
 # `sqrt`, but a log parameterisation, so a step in alpha is a multiplicative
 # change of C everywhere: the weak beds under the ice streams, where C must
@@ -308,7 +308,7 @@ C_REF = os.environ.get("ISMIP7_C_REF", "auto").strip().lower()
 PRIOR_RHO_THETA = float(os.environ.get("ISMIP7_PRIOR_RHO_THETA", str(PRIOR_RHO)))
 
 # ── Fluidity prior mean (ISMIP7_FLUIDITY_PRIOR) ─────────────────────────
-# `pattyn` (default since 27 Sep 2026, Andrew: "focus on the pattyn prior";
+# `pattyn` (default since 27 Sep 2026, Rice: "focus on the pattyn prior";
 # its shelves start ten times closer to the observed speed than the thermal
 # model's at 2 km): rate_factor of the depth-averaged Pattyn temperature raster
 # (icepack2_tools/rheology_prior.py; ISMIP7_PATTYN_TEMP names the file,
@@ -324,7 +324,7 @@ FLUIDITY_PRIOR = os.environ.get("ISMIP7_FLUIDITY_PRIOR", "pattyn").strip().lower
 # ISMIP6/7 groups initialise with (a thermal rate factor on grounded ice,
 # friction inverted; a shelf rheology inverted where there is no friction),
 # and it removes the friction/rheology trade-off on grounded ice that let the
-# data move the friction while the fluidity sat at its prior (Andrew, 26 Sep
+# data move the friction while the fluidity sat at its prior (Rice, 26 Sep
 # 2026). The prior still smooths phi everywhere; where phi has no effect the
 # prior alone holds it at zero.
 FLUIDITY_CONTROL = os.environ.get("ISMIP7_FLUIDITY_CONTROL", "all").strip().lower()
@@ -682,6 +682,9 @@ def main():
     warm_theta_anchor = None
     # alpha = sqrt(C) of a warm start inverted on the sqrt control
     warm_alpha = None
+    # theta holds an exp-control warm start's alpha = ln(C / C_ref), a
+    # deviation from the constant C_ref and not from any anchor
+    warm_exp_alpha = False
     # Residual the warm start's writer reached under the shared F (stamped by
     # save_model_state and by save_map): the forwards' absolute tolerance.
     warm_recorded = None
@@ -765,6 +768,7 @@ def main():
             # log_friction is zero by construction.
             _warm_fc = (str(chk.get_attr("/", "friction_control"))
                         if chk.has_attr("/", "friction_control") else "log")
+            warm_exp_alpha = _warm_fc == "exp" and _theta_mode != "0"
             if _warm_fc == "sqrt" and _theta_mode != "0":
                 warm_alpha = _warm_load(chk, chk_mesh, "sqrt_friction", Q)
                 PETSc.Sys.Print("    sqrt_friction (alpha) from warm start")
@@ -979,17 +983,24 @@ def main():
     PETSc.Sys.Print(
         "  Friction anchor: " + ("local driving stress" if ANCHOR_LENGTH == 0.0 else
                                  f"grounded driving stress averaged over {ANCHOR_LENGTH / 1e3:g} km"))
-    if warm_theta_anchor is not None:
+    if warm_theta_anchor is not None and not (warm_exp_alpha and FRICTION_CONTROL == "exp"):
         # The warm start's anchor, rebuilt on this run's geometry, and its theta
         # moved onto this run's anchor: the friction the first solve sees is the
-        # warm start's wherever the geometry is the same.
-        C_prev = weertman_anchor(H, s, u_obs, m_slide_val, Q_g,
-                                 length=warm_theta_anchor, b=b)
+        # warm start's wherever the geometry is the same. An exp-control MAP's
+        # anchor is its constant C_ref; an exp-control run keeps it as is.
+        if warm_exp_alpha:
+            C_prev = Function(Q_g).assign(Constant(float(warm_attrs["friction_c_ref"])))
+            _from = "the exp control's C_ref"
+        else:
+            C_prev = weertman_anchor(H, s, u_obs, m_slide_val, Q_g,
+                                     length=warm_theta_anchor, b=b)
+            _from = f"a {warm_theta_anchor / 1e3:g} km anchor"
         theta_prev = theta.copy(deepcopy=True)
         theta.assign(rebase_log_friction(theta_prev, C_prev, C_w0, H, b))
+        warm_exp_alpha = False
         _shift = Function(Q).interpolate(abs(theta - theta_prev))
         PETSc.Sys.Print(
-            f"    log_friction rebased from a {warm_theta_anchor / 1e3:g} km anchor onto "
+            f"    log_friction rebased from {_from} onto "
             f"this run's: |shift| mean {global_mean(_shift):.3f}, max {global_max(_shift):.2f}")
     # Budd pins N_hat=1 at the inversion geometry; freeze N_ref with the MAP /
     # timing-cache so forwards reproduce the inverted friction at t=0.
@@ -1021,6 +1032,8 @@ def main():
         C_cg = cg1_lift(C_w0) if geom_dg else C_w0
         if warm_alpha is not None:
             theta.assign(warm_alpha)
+        elif warm_exp_alpha:
+            theta.interpolate(sqrt(Constant(float(warm_attrs["friction_c_ref"])) * exp(theta)))
         else:
             theta.interpolate(sqrt(max_value(C_cg * exp(theta), Constant(0.0))))
         theta.rename("alpha")
@@ -1056,8 +1069,7 @@ def main():
         # alpha^2 of a sqrt-control MAP, or the alpha of an exp-control MAP,
         # which is already this control) and the prior mean is zero.
         C_cg = cg1_lift(C_w0) if geom_dg else C_w0
-        _warm_fc = str(warm_attrs.get("friction_control", "log"))
-        if _warm_fc == "exp":
+        if warm_exp_alpha:
             C_start = Function(Q).interpolate(
                 Constant(float(warm_attrs["friction_c_ref"])) * exp(theta))
         elif warm_alpha is not None:
@@ -1083,9 +1095,11 @@ def main():
             raise ValueError(f"the friction reference C_ref must be positive, got {c_ref_val}")
         # ln floors at 1e-4 C_ref (alpha >= -9.2): the anchor is ~0 under
         # some grounded nodes, and -inf is not a start. Floating and ice-free
-        # nodes, where the friction is inert, start at the prior mean.
-        theta.interpolate(ln(max_value(C_start, Constant(1e-4 * c_ref_val)) / Constant(c_ref_val)))
-        theta.dat.data[~_grounded] = 0.0
+        # nodes, where the friction is inert, start at the prior mean. A chain
+        # link from an exp-control warm start resumes its alpha unchanged.
+        if not warm_exp_alpha:
+            theta.interpolate(ln(max_value(C_start, Constant(1e-4 * c_ref_val)) / Constant(c_ref_val)))
+            theta.dat.data[~_grounded] = 0.0
         theta.rename("alpha")
         if PRIOR_SIGMA_ALPHA == "auto" and float(warm_attrs.get("prior_sigma_alpha", 0.0) or 0.0) > 0.0:
             sigma_alpha_val = float(warm_attrs["prior_sigma_alpha"])
@@ -1103,7 +1117,7 @@ def main():
             f"C_ref={c_ref_val:.3e} ({C_REF}; grounded median of the start {_C_median:.3e}), "
             f"initial alpha in [{_a_lo:.3f}, {_a_hi:.3f}]; sigma_alpha={sigma_alpha_val:.3g} "
             f"log units ({PRIOR_SIGMA_ALPHA}), rho_theta={PRIOR_RHO_THETA:g} m")
-    elif str(warm_attrs.get("friction_control", "log")) == "exp":
+    elif warm_exp_alpha:
         # an exp-control MAP warm-starting a log-control run: its alpha is a
         # deviation from C_ref; rebase it onto THIS anchor
         C_cg = cg1_lift(C_w0) if geom_dg else C_w0

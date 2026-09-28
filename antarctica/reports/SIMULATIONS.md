@@ -1535,9 +1535,9 @@ C001: historical with CESM2-WACCM (planned), unassigned.
 - **ISMIP7 exp id:** C001
 - **ESM:** CESM2-WACCM
 - **Scenario:** historical
-- **Period (yr):** 1850, or a steady 1960 or 1975 start, to 2014
+- **Period (yr):** 2003 to 2014
 - **Mesh:** antarctica_10000_1000_buffered20000 (Rice's build, 1,869,252 vertices), 1 km fine, 10 km interior, 20 km buffer
-- **Branch from:** a steady state
+- **Branch from:** cold start from the MAP, its geometry backdated to 2003 by the Smith et al. (2020) dH/dt (issue 117)
 - **Melt: K, slope, deltaT:** one toolbox K with the per-basin offset
 - **Apparent MB:** balance
 - **dt (yr):** 0.025
@@ -1553,7 +1553,7 @@ C002: historical with MRI-ESM2-0 (planned), unassigned.
 - **Scenario:** historical
 - **Period (yr):** as C001
 - **Mesh:** antarctica_10000_1000_buffered20000 (Rice's build, 1,869,252 vertices), 1 km fine, 10 km interior, 20 km buffer
-- **Branch from:** a steady state
+- **Branch from:** as C001
 - **Melt: K, slope, deltaT:** one toolbox K with the per-basin offset
 - **Apparent MB:** balance
 - **dt (yr):** 0.025
@@ -1921,9 +1921,9 @@ C011: OCX main with observations (planned), unassigned.
 - **ISMIP7 exp id:** C011
 - **ESM:** observations
 - **Scenario:** OCX main
-- **Period (yr):** 1979 to 2025
+- **Period (yr):** 2003 to 2025
 - **Mesh:** antarctica_10000_1000_buffered20000 (Rice's build, 1,869,252 vertices), 1 km fine, 10 km interior, 20 km buffer
-- **Branch from:** independent of the historical
+- **Branch from:** independent of the historical: a cold start from the MAP, its geometry backdated to 2003 as for C001
 - **Melt: K, slope, deltaT:** one toolbox K with the per-basin offset
 - **Apparent MB:** balance
 - **dt (yr):** 0.025

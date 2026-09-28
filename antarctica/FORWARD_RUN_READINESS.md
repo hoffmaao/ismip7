@@ -32,7 +32,8 @@ AWS tooling.
 MRI-ESM2-0, a name change with the data unchanged. The core experiment uses
 `SDBN1` for CESM2-WACCM and `GEMB-SDBN1` for MRI-ESM2-0; `dEBM2` is the second
 downscaling for perturbed ensembles. Handled: `atmosphere_product` accepts
-whichever exists.
+whichever exists and takes `GEMB-SDBN1` where both do, and the audit asks it
+which one a run opens.
 
 **Control experiment (#28, #15).** ctrlclim is the 2000-2029 climatology of the
 last 15 years of `historical` and the first 15 of `ssp126`, per ESM. Files are

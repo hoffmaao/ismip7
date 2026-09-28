@@ -40,7 +40,7 @@ own venv and call it by absolute path.
 |---|---|---|:--:|:--:|:--:|:--:|
 | BedMachine Antarctica v4.1, MEaSUREs velocity v2 | 8 GB | `scripts/download_data.py` (Earthdata login) | x | x | x | |
 | RACMO2.4p1 SMB climatology | 2 GB | same script | | x | | |
-| ISMIP7 observations MIPkit v1.2 (Smith dH/dt) | 9 GB | `scripts/download_mirror.py --product ismip7-ais-observations data/mipkit/`, landing at `ISMIP7/AIS/obs/mipkit/AntarcticaObsISMIP7-v1.2.nc` (`ISMIP7_OBS_KIT` overrides). `scripts/download_forcing.py --calibration` stages the same v1.2 file in the same place over Globus | `ISMIP7_DHDT_WEIGHT` | | `--from-obs` | |
+| ISMIP7 observations MIPkit v1.2 (Smith dH/dt) | 9 GB | `scripts/download_mirror.py --product ismip7-ais-observations data/mipkit/`, landing at `ISMIP7/AIS/obs/mipkit/AntarcticaObsISMIP7-v1.2.nc` (`ISMIP7_OBS_KIT` overrides). `scripts/download_forcing.py --calibration` stages the same v1.2 file in the same place over Globus | `ISMIP7_DHDT_WEIGHT` | a start before 2015 (historicals, OCX) | `--from-obs` | |
 | ISMIP7 forcing per ESM and scenario: SMB anomaly 7.5 GB, ocean `tf` 11 GB, `so` 6.9 GB (ssp585; historical 4.3 GB) | 25 GB each | `scripts/download_mirror.py` | | x | | |
 | ISMIP7 fracture (collapse mask, lake properties, excess melt) | 3 GB per scenario | same, `data/<ESM>/<scenario>/fracture/` | | `ISMIP7_FRACTURE=mask` | | |
 | Ocean OI climatology and IMBIE basin numbers | 3 GB | `scripts/download_forcing.py --ocean --calibration` | | x | | |

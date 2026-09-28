@@ -513,9 +513,14 @@ class AnnualOutput:
         self.step_acc["ligroundf"] += self._gl_cof.dat.data_ro / self.cell_area * dt   # m/yr equivalent
         # ice leaving across the mesh's exterior boundary: the transport's own
         # upwind outflow term, per cell, booked as a loss to licalvf in the
-        # cell it leaves (issue #136); no ISMIP7 field carried it before
+        # cell it leaves (issue #136); no ISMIP7 field carried it before. The
+        # solve can leave an empty boundary cell a roundoff below zero, where
+        # the term turns negative (1e-30 to 1e-17 m/yr in 71 cell-years of the
+        # 25 km ssp585 without the reference), and licalvf's range stops at
+        # zero, so only outflow is booked
         assemble(un_plus * h_dg * phi * ds, tensor=self._out_cof)
-        self.step_acc["licalvf"] -= self._out_cof.dat.data_ro / self.cell_area * dt
+        self.step_acc["licalvf"] -= (np.maximum(self._out_cof.dat.data_ro, 0.0)
+                                     / self.cell_area * dt)
         self.step_time += dt
 
     def book_removal(self, cells, thickness_removed):

@@ -79,6 +79,7 @@ def test_the_old_booking_shows_what_the_fields_missed():
     assert r["land ligroundf"] == pytest.approx(2.0 * GT)
     assert r["left out"] == pytest.approx(5.5 * GT)        # cell 1's 5 m and the film
     assert r["reference on melting cells"] == pytest.approx(4.5 * GT)
+    assert r["reference applied"] == pytest.approx(4.5 * GT)
     assert r["budget residual"] == pytest.approx(-1.0 * GT)   # the outflux
     assert r["split"] == pytest.approx(5.0)
     bad = cmb.failures([{"year": 2300, **r}], tol=1e-6)
@@ -99,6 +100,8 @@ def test_the_current_booking_passes_the_gate():
     assert r["left out"] == 0.0 and r["refreezing left out"] == 0.0
     assert r["licalvf"] == pytest.approx(1.0 * GT)
     assert r["budget residual"] == pytest.approx(0.0, abs=1e-12)
+    # the land cell's reference flowed on: the submitted fields miss it
+    assert r["reference applied"] == pytest.approx(0.5 * GT)
     assert cmb.failures([{"year": 2300, **r}], tol=1e-6) == []
 
 

@@ -718,6 +718,31 @@ def test_ice_pushed_onto_ice_free_land_is_no_grounding_line_flux(tmp_path):
     assert np.allclose(booked[order], [0.0, 0.0, 1.0, 0.0])
 
 
+def test_an_empty_boundary_cell_a_roundoff_below_zero_books_no_gain(tmp_path):
+    r"""The transport's solve can leave an empty cell a hair below zero; its
+    outflow term across the mesh's edge is then negative, and booked as it
+    stands it would put a positive licalvf past the request's bound of zero
+    (71 cell-years in the 25 km ssp585 without the reference). Only outflow
+    is booked; a cell with ice books its outflow in full."""
+    mesh, Q, V, order = _strip(2)
+    h = np.zeros(2)
+    h[order] = [1.0, -1e-15]                       # out across x = 2, from the right cell
+    booked = []
+    for right in (-1e-15, 1.0):
+        h[order[1]] = right
+        annual, _, _, _ = _one_advance(mesh, Q, V, np.ones(2, dtype=bool), 1.0,
+                                       tmp_path / str(right))
+        hdg = _dg(Q, h)
+        u = fd.Function(V)
+        u.dat.data[:, 0] = 1.0
+        annual.begin_step()
+        annual.book_advance(1.0, fd.Constant(0.0), fd.Constant(0.0), None, hdg, u,
+                            np.ones(2, dtype=bool))
+        booked.append(annual.step_acc["licalvf"][order].copy())
+    assert (booked[0] <= 0.0).all() and booked[0][1] == 0.0
+    assert booked[1] == pytest.approx([0.0, -1.0])
+
+
 def test_the_writer_refuses_a_bed_of_the_wrong_size(tmp_path):
     mesh, Q, _, _ = _strip(4)
     with pytest.raises(ValueError, match="owns 4 cells"):

@@ -36,9 +36,11 @@ Per year, in Gt/yr over map-plane area, ice at 917 kg m-3:
   melt could have taken, ``min(acabf+, M)`` (``ismip7_output.net_snowfall``);
 * ``negative reference``, the negative reference booked on cells holding no
   ice at either end, a sink on real ice: the part of their inflow it removed,
-  which stays in ``acabf_correction`` and reaches no submitted field, and
+  which stays in ``acabf_correction`` and reaches no submitted field;
   ``reference on melting cells``, the reference booked on every cell that
-  books melt (both reported only, for issue #104);
+  books melt; and ``reference applied``, the reference booked on every cell,
+  which no submitted field carries, so the submitted fields' mass budget
+  misses it by that much (all three reported only, for issue #104);
 * ``land melt``, the melt booked on land cells (a bed at or above sea level)
   holding no ice at either end;
 * ``land ligroundf``, the grounding-line flux booked into those land cells;
@@ -128,6 +130,7 @@ def year_booking(prev, cur, W):
         "snowfall in sinks": gt(snow),
         "negative reference": gt(np.minimum(R, 0.0), none),
         "reference on melting cells": gt(R, M > 0.0),
+        "reference applied": gt(R),
         "land melt": gt(M, none & land),
         "land ligroundf": gt(cur["ligroundf"], none & land),
         "licalvf": -gt(C),

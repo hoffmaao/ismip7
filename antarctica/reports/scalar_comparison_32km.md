@@ -75,7 +75,9 @@ Four causes account for all of it.
    The change from 2015 to 2300, -14,281 Gt, is the +39.4 mm, and 90 % of it
    is in the grounding-line pixels (p2_mask: -15,898 Gt, 90 %). The 2300 total
    is the comparison's limnsw residual to the gigatonne. The interior term
-   barely moves (+9,329 to +7,575 Gt). (issue #99)
+   barely moves (+9,329 to +7,575 Gt). A finer mesh leaves it as large: on
+   every mesh down to 0.5 km the same change to the ice sheet costs the tool
+   as much or a little more (`grid_vaf_resolution.md`). (issue #99)
 3. **The writer's fill conventions.** acabf is a mean over the covered part
    of a pixel and libmassbffl over the part that floats at year end. The tool
    sums both over whole pixels, which adds -840 Gt/yr of SMB at the domain
@@ -1216,6 +1218,19 @@ grounding line into an empty cell and melts on arrival, and the shelf ice of
 the first row. Whether the production runs keep the reference is a group
 decision (issue 104), the melt it books is issue 105, and where the
 submission reports the real melt is issue 109.
+
+Note of 25 September 2026: the group chose option 3 of issue 109, and the
+forward now writes the melt of ice flowing into marine cells holding no ice
+at either end of the year as `lifmassbf`, the inflow's share of what those
+cells melt; the reference's share stays in `libmassbffl`. The same split
+applied to the p4 annual files moves 131, 451 and 571 Gt/yr out of the
+pixels the fill blanks in 2150, 2250 and 2300 (against the class-wide 535 at
+2300 above) and leaves 250, 978 and 1,200 Gt/yr there: 216, 937 and 1,094 of
+them the reference's share on emptied marine cells, and 0.4, 8.7 and 20 the
+reference melted on emptied land cells, which the melt law of these runs
+counted as afloat at zero thickness. The runs in this report predate the
+change, and their `lifmassbf` is zero. The reference's share, the melt on
+emptied land cells and the production numbers are one item now (issue #136).
 
 ### True area
 

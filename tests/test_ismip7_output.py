@@ -108,13 +108,37 @@ def test_the_core_counter_follows_from_the_forcing():
     assert wio.set_counter("CESM2-WACCM", "ssp585", "CORE") == "C007"
     assert wio.set_counter("MRI-ESM2-0", "ssp585", "CORE", "C008") == "C008"
     assert wio.set_counter("MRI-ESM2-0", "ctrl", "CORE") == "C010"
-    assert wio.set_counter("CESM2-WACCM", "ocx", "CORE") == "C011"
+    assert wio.set_counter("ERA5", "ocx", "CORE") == "C011"
     with pytest.raises(ValueError, match="MRI-ESM2-0 ssp585 is C008"):
         wio.set_counter("MRI-ESM2-0", "ssp585", "CORE", "C007")
     with pytest.raises(ValueError, match="not a core experiment"):
         wio.set_counter("CESM2-WACCM", "ssp534-over", "CORE")
     # the ten ESM-forced cores, numbered as the conventions document has them
     assert sorted(wio.CORE_COUNTER.values()) == [f"C{n:03d}" for n in range(1, 11)]
+
+
+def test_ocx_names_the_reanalysis_in_the_forcing_field():
+    r"""Issue #18: core 11 is ``..._m001_ERA5_f001_ocx_C011_...``, as the
+    organisers' conventions document names it. isschecker 0.5.1 given an ocx
+    row passes a CMIP model in field 5, so no checker catches a core 11 file
+    that claims CESM2-WACCM forcing."""
+    assert wio.forcing_id(None, "ocx") == wio.forcing_id("ERA5", "ocx") == "ERA5"
+    assert wio.forcing_id("MRI-ESM2-0", "ssp585") == "MRI-ESM2-0"
+    for other in ("CESM2-WACCM", "ERA"):
+        with pytest.raises(ValueError, match="OCX has no ESM"):
+            wio.forcing_id(other, "ocx")
+    with pytest.raises(ValueError, match="in lower case"):
+        wio.forcing_id(None, "OCX")
+    with pytest.raises(ValueError, match="--esm is required"):
+        wio.forcing_id(None, "ssp585")
+
+
+def test_the_checker_patch_accepts_the_name_the_writer_writes():
+    r"""isschecker_ocx.py runs in the tools venv, where the writer cannot be
+    imported, so it carries its own copy of the forcing name."""
+    import isschecker_ocx
+    assert isschecker_ocx.OCX_FORCING == wio.OCX_FORCING
+    assert isschecker_ocx.OCX_EXPERIMENT["experiment"] == "ocx"
 
 
 def test_outside_the_core_set_the_counter_has_to_be_given():
@@ -282,3 +306,58 @@ def test_a_cell_at_flotation_to_rounding_is_written_grounded():
     assert np.array_equal(cells["sftgrf"], [1.0, 0.0, 1.0])
     for k in ("lithk", "orog", "topg"):
         assert np.array_equal(cells[k], before[k])
+
+
+def test_front_melt_is_never_filled_where_the_basal_melt_would_be():
+    r"""lifmassbf carries the melt of ice that flowed into cells holding no
+    ice at either end of the year (issue #109) under the request's
+    ``forbidden`` policy: a whole-pixel mean in every pixel, summing to the
+    model's integral, where the same melt booked as libmassbffl would be fill
+    for want of floating ice."""
+    req = wio.request_table()
+    assert req["lifmassbf"]["fill_policy"] == "forbidden"
+    W = _operator(); v = np.array([0.0, -30.0, -40.0])          # m/yr of ice
+    masks = {"no_floating_ice": np.zeros(3, dtype=bool)}           # nothing floats
+    k = wio.CONVERT["kg m-2 s-1"]
+    out = wio.pixel_values(W, v, req["lifmassbf"], masks)
+    assert np.isfinite(out).all()
+    assert np.allclose(out, np.array([-15.0, -10.0]) * k)
+    assert np.isclose((out * wio.PIXEL_AREA).sum(), (W @ v).sum() * k)
+    assert np.isnan(wio.pixel_values(W, v, req["libmassbffl"], masks)).all()
+
+
+def test_the_melt_summary_reports_what_leaves_and_what_front_melt_carries():
+    r"""Per year: the melt the fill leaves out of libmassbffl, its part in
+    pixels only the near-flotation rule emptied, and lifmassbf's grid sum;
+    then each at its largest and at the marker years and the series' last."""
+    W = _operator()
+    cells = {"libmassbffl": np.array([-10.0, -20.0, -40.0]),
+             "lifmassbf": np.array([0.0, 0.0, -8.0])}
+    # pixel 1 floated before the near-flotation rule and not after it
+    got = wio.melt_booking(W, cells, np.array([1.0, 1.0]), np.array([1.0, 0.0]))
+    gt = wio.RHO_I / 1e12 * wio.PIXEL_AREA / 4                     # cell 2's quarter of pixel 1
+    assert got["left out"] == pytest.approx(-40.0 * gt)
+    assert got["near flotation"] == pytest.approx(-40.0 * gt)
+    assert got["front melt"] == pytest.approx(-8.0 * gt)
+
+    per_year = {y: {"left out": -1.0, "near flotation": 0.0, "front melt": -2.0}
+                for y in (2099, 2100, 2101)}
+    per_year[2101] = {"left out": -3.0, "near flotation": -0.5, "front melt": -1.0}
+    lines = wio.melt_summary(per_year)
+    assert len(lines) == 3
+    assert "libmassbffl leaves out" in lines[0] and "largest -3.0 Gt/yr (2101)" in lines[0]
+    assert "-1.0 in 2100, -3.0 in 2101" in lines[0]
+    assert "lifmassbf carries the front melt" in lines[2]
+    assert "largest -2.0 Gt/yr (2099)" in lines[2] and "-2.0 in 2100, -1.0 in 2101" in lines[2]
+
+
+def test_a_series_that_mixes_two_melt_bookings_is_refused():
+    r"""A chained run whose links straddled the front-melt booking would
+    submit lifmassbf as zero in some years and as the melt of the same cells
+    in others."""
+    from icepack2_tools.ismip7_output import FRONT_MELT
+    assert wio.series_front_melt({2015: FRONT_MELT, 2016: FRONT_MELT}) == FRONT_MELT
+    old = {2015: wio.UNSTAMPED_MELT, 2016: wio.UNSTAMPED_MELT}
+    assert wio.series_front_melt(old) == wio.UNSTAMPED_MELT
+    with pytest.raises(ValueError, match="mix melt bookings.*2 years, 2015 to 2016"):
+        wio.series_front_melt({**old, 2017: FRONT_MELT})

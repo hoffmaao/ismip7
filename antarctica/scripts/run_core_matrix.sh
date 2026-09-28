@@ -10,7 +10,7 @@
 #   3,4   ssp370       both ESMs                          ->2100
 #   5,6   ssp126       both ESMs                          ->2300
 #   7,8   ssp585       both ESMs                          ->2300
-#   11    OCX          obs-constrained, independent    1979-2025
+#   11    OCX          obs-constrained, independent    2003-2025
 #
 # A core that branches from the historical is only launched once that ESM's
 # historical endpoint is on disk, complete and post-fix. A missing, short or

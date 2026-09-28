@@ -112,7 +112,8 @@ starting residual of 1e17, hence the ceiling.
 
 **Restart handoff.** Every checkpoint records the objective's settings and
 the objective at the accepted iterate; a warm start freezes the auto weights
-(log-speed weight, sigma_alpha, C_ref) from the record, refuses a changed
+(log-speed weight, and sigma_alpha and C_ref within one friction control,
+section 5) from the record, refuses a changed
 objective under `ISMIP7_WARM_START_STRICT=1`, and checks that its first
 evaluation reproduces the recorded objective. Verified: the stage-2 handoff
 reproduced 5.2008401e7 to all printed digits.

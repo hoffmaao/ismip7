@@ -116,7 +116,6 @@ from icepack2_tools.thermo_model import compute_fluidity_prior
 from icepack2_tools.handoff import (
     OBJECTIVE_KEYS, OBJECTIVE_RECORD_KEYS, accepted_evaluation, frozen_in_control,
     handoff_gap, objective_mismatches)
-from icepack2_tools.optimization import FunctionalDecreaseStop
 from icepack2_tools.optimization import (FunctionalDecreaseStop,
                                          recorded_objective,
                                          resolve_log_vel_weight)

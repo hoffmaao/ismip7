@@ -481,8 +481,8 @@ def write_selected(args, cm, headline, K, ens, present, sin_a, x, y, area,
             "written_by": "antarctica/scripts/select_melt_parameters.py --geometry mesh",
             "dt_window": list(args.window), "tf_rule": args.rule.as_dict(),
             "rule_admits": bool(admits[0]),
-            "melt_fitted_gtyr": round(float(np.nansum(M_obs + resid)), 3),
-            "melt_dT0_gtyr": round(float(np.sum(M0)), 3),
+            "melt_total_gtyr": round(float(np.nansum(M_obs + resid)), 3),
+            "melt_total_dT0_gtyr": round(float(np.sum(M0)), 3),
             "unrooted": [int(b) for b, u in zip(bids, unrooted) if u]})
         field, K_file = load_deltaT_per_basin(fn, x, y, imbie2=cm.IMBIE2_NC)
         melt = quadratic_mixed_slope(tf + field, so, sin_a, K=K_file) * float(_RHO_I)

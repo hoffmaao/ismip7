@@ -177,8 +177,8 @@ def main():
         sidecar = {"K": float(K), **refit, **record, "written_by": written_by,
                    "dt_window": list(DT_WINDOW), "tf_rule": rule.as_dict(),
                    "rule_admits": verdict.get("rule_admits"),
-                   "melt_fitted_gtyr": round(float(np.nansum(M1)), 3),
-                   "melt_dT0_gtyr": round(float(M0.sum()), 3),
+                   "melt_total_gtyr": round(float(np.nansum(M1)), 3),
+                   "melt_total_dT0_gtyr": round(float(M0.sum()), 3),
                    "unrooted": [int(bid) for bid, _ in flagged]}
         check_melt_calibration_record(sidecar)
         if mesh.comm.rank == 0:

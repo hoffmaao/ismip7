@@ -458,15 +458,20 @@ for the K it selects:
 | `K`, `melt_slope`, `sin_alpha_ant` or `sin_alpha_cap`, `geometry_space`, `raster_sample`, `oi_version`, `rho_i`, `dt_window`, `tf_rule`, `rule_admits` | the settings of the fit and the thermal forcing rule's verdict (`null` from a parallel fit, which does not judge) |
 | `mesh`, `vertices`, `cells`, `floating_cells`, `mesh_file` | the mesh's name and counts, and the sha256 and md5 of the file `ISMIP7_INV_H5` named |
 | `obs_table`, `bedmachine`, `inputs_sha256` | every input, by name and sha256 |
-| `melt_fitted_gtyr`, `melt_dT0_gtyr`, `unrooted` | the basins' total at their offsets as the fit summed it, the total at no offset, and the basins with no root in the window |
+| `melt_total_gtyr`, `melt_total_dT0_gtyr`, `unrooted` | the basins' total at their offsets as the fit summed it, the total at no offset, and the basins with no root in the window |
 | `selected_as`, `refit_of`, `selection` | the K's selection: a refit at the tracked K names the tracked file and keeps its `selected_as` (K50); a selection names its toolbox commit |
 | `site`, `partition`, `ranks`, `job`, `code`, `code_modified` | `ISMIP7_SITE` as `submit.sh` exports it (`null` for a fit started by hand), the Slurm partition and job, the rank count, the commit, and the tracked files modified in the checkout |
 
 A run that names the file with `ISMIP7_DELTAT_PER_BASIN_NPZ` is then checked
 against its raster sampling, and its provenance line names the mesh the
 offsets were fitted on. A file written before the fits wrote sidecars is
-read as given. Promoting a fit to the tracked calibration copies both files
-into `calibration/`, adds by hand the decision fields the sidecar lacks
+read as given. On the 25 km rehearsal mesh a refit at the tracked K
+reproduced the rehearsal's npz bit for bit, and its sidecar matched the
+hand-written one in every field a fit can know (run record
+`calibration-melt-sidecar-25km-check`).
+
+Promoting a fit to the tracked calibration copies both files into
+`calibration/`, adds by hand the decision fields the sidecar lacks
 (`decided`, `decision`, `selected_as`, `selection`, `run_record`,
 `mesh_build`) and takes a run record; a fit refuses to write into
 `calibration/` itself.

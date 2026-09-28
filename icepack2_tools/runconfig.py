@@ -589,12 +589,11 @@ def write_melt_calibration_sidecar(npz_path, record):
     r"""Write the sidecar of the offsets file ``npz_path`` from ``record``,
     and return its path.
 
-    ``file`` and ``sha256`` are taken from the npz as written: ``np.savez``
-    stamps the time into the zip, so a refit of the same numbers hashes
-    differently and only the file on disk names itself. The record is
-    checked first (`check_melt_calibration_record`), and the sidecar is
-    replaced in one step, so a job that dies mid-write leaves the old sidecar,
-    whose hash then refuses the new npz."""
+    ``file`` and ``sha256`` are taken from the npz as written, the bytes the
+    forward hashes. The record is checked first
+    (`check_melt_calibration_record`), and the sidecar is replaced in one
+    step, so a job that dies mid-write leaves the old sidecar, whose hash then
+    refuses a changed npz."""
     refuse_tracked_calibration_out(os.path.dirname(os.path.abspath(npz_path)))
     contract = {"file": os.path.basename(npz_path),
                 "sha256": file_sha256(npz_path)}

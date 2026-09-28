@@ -82,7 +82,7 @@ def _record(**extra):
         "obs_table": {"name": "Melt_Paolo_Davison_Adusumilli_imbie2.csv",
                       "sha256": "c" * 64, "total_gtyr": 1067.4},
         "tf_rule": TFRule().as_dict(), "rule_admits": np.bool_(True),
-        "melt_fitted_gtyr": np.float64(1067.386), "unrooted": [np.int64(5)],
+        "melt_total_gtyr": np.float64(1067.386), "unrooted": [np.int64(5)],
     }
     record.update(extra)
     return record
@@ -139,7 +139,7 @@ def test_a_record_the_forward_could_not_trust_is_refused(tmp_path):
             (_record(written_by="calibrate_deltaT.py --out /N/scratch/someone/refit"),
              "names a path"),
             (_record(mesh_file={"name": "~/meshes/x.msh"}), "names a path"),
-            (_record(melt_fitted_gtyr=float("nan")), "Out of range float"),
+            (_record(melt_total_gtyr=float("nan")), "Out of range float"),
             (_record(sin_alpha_cap=float("inf")), "Out of range float")):
         with pytest.raises(ValueError, match=said):
             write_melt_calibration_sidecar(npz, bad)

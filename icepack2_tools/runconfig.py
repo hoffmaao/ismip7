@@ -486,13 +486,125 @@ def melt_calibration_contract(npz_path):
 
     It records what the npz does not: the file's sha256, the mesh it was
     fitted on, the raster sampling of its geometry and the observation table.
-    The tracked default always has one; a file named with
-    ISMIP7_DELTAT_PER_BASIN_NPZ may."""
+    calibrate_deltaT.py and select_melt_parameters.py write one beside every
+    offsets file they fit (`write_melt_calibration_sidecar`), and the tracked
+    default carries one. A file named with ISMIP7_DELTAT_PER_BASIN_NPZ that
+    has none, written before the fits wrote sidecars, is read as given."""
     sidecar = melt_calibration_sidecar(npz_path)
     if not os.path.exists(sidecar):
         return None
     with open(sidecar) as f:
         return json.load(f)
+
+
+# What every melt calibration sidecar records: the keys the forward reads
+# (sha256, mesh, vertices, raster_sample) and the ones a reader needs to tell
+# one fit from another. The fits write more; the tracked default also carries
+# the decision fields a person adds when a file is promoted (decided,
+# decision, selected_as, selection, run_record, mesh_build).
+MELT_CALIBRATION_REQUIRED = (
+    "file", "sha256", "K", "mesh", "vertices", "raster_sample", "melt_slope",
+    "geometry_space", "obs_table", "job", "code",
+)
+
+
+def refuse_tracked_calibration_out(directory):
+    r"""Refuse to write a fit into the tracked calibration's directory.
+
+    A fit writes its offsets and their sidecar together, so a fit written
+    there would replace the tracked file and its hand-kept record with a
+    consistent pair that has lost the decision fields, and every run would
+    read it as the default without a word. Promoting a fit takes a reviewed
+    change: write it elsewhere, copy both files in, add the decision fields
+    and a run record."""
+    tracked = os.path.dirname(MELT_CALIBRATION_DEFAULT)
+    if os.path.realpath(directory) == os.path.realpath(tracked):
+        raise ValueError(
+            f"{directory} holds the tracked melt calibration. Write the fit to "
+            f"another directory; promoting it means copying the npz and its "
+            f".source.json here, adding the decision fields and writing a run "
+            f"record.")
+
+
+def _json_value(value):
+    r"""A numpy scalar or array as the plain value JSON writes (``np.int64``
+    and ``np.bool_`` are not JSON serialisable)."""
+    if hasattr(value, "tolist"):
+        return value.tolist()
+    raise TypeError(f"{type(value).__name__} is not JSON serialisable")
+
+
+def _strings(value):
+    r"""Every string inside a record, however deeply nested."""
+    if isinstance(value, str):
+        yield value
+    elif isinstance(value, dict):
+        for v in value.values():
+            yield from _strings(v)
+    elif isinstance(value, (list, tuple)):
+        for v in value:
+            yield from _strings(v)
+
+
+def _names_a_path(text):
+    r"""Whether a word of ``text`` is an absolute or home-directory path. A
+    lone slash is prose ("1000 m / 10 km"), which the tracked sidecar has."""
+    for word in text.split():
+        word = word.strip("()[]{}<>,;:'\"")
+        if len(word) > 1 and (os.path.isabs(word) or word.startswith("~")):
+            return True
+    return False
+
+
+def check_melt_calibration_record(record):
+    r"""Refuse a sidecar record, and return it as the JSON a sidecar holds.
+
+    Refused: a `MELT_CALIBRATION_REQUIRED` key missing (``file`` and
+    ``sha256`` excepted, which the writer takes from the npz) or empty
+    (``job`` excepted, since a fit run outside Slurm has none); an absolute
+    path anywhere, since a promoted sidecar is tracked and a path would carry
+    a home directory into git; a NaN or an infinity, which JSON cannot hold.
+    Pure, so every rank of a parallel fit checks the record it is about to
+    write and a bad one stops them all together."""
+    problems = []
+    absent = [k for k in MELT_CALIBRATION_REQUIRED
+              if k not in ("file", "sha256") and k not in record]
+    if absent:
+        problems.append(f"lacks {', '.join(absent)}")
+    empty = [k for k in MELT_CALIBRATION_REQUIRED
+             if k != "job" and k in record and record[k] is None]
+    if empty:
+        problems.append(f"leaves {', '.join(empty)} empty")
+    paths = [s for s in _strings(record) if _names_a_path(s)]
+    if paths:
+        problems.append(f"names a path ({paths[0]}); name files by basename "
+                        f"and sha256")
+    if problems:
+        raise ValueError("a melt calibration sidecar record "
+                         + "; ".join(problems))
+    return json.dumps(record, indent=2, allow_nan=False, default=_json_value)
+
+
+def write_melt_calibration_sidecar(npz_path, record):
+    r"""Write the sidecar of the offsets file ``npz_path`` from ``record``,
+    and return its path.
+
+    ``file`` and ``sha256`` are taken from the npz as written: ``np.savez``
+    stamps the time into the zip, so a refit of the same numbers hashes
+    differently and only the file on disk names itself. The record is
+    checked first (`check_melt_calibration_record`), and the sidecar is
+    replaced in one step, so a job that dies mid-write leaves the old sidecar,
+    whose hash then refuses the new npz."""
+    refuse_tracked_calibration_out(os.path.dirname(os.path.abspath(npz_path)))
+    contract = {"file": os.path.basename(npz_path),
+                "sha256": file_sha256(npz_path)}
+    contract.update((k, v) for k, v in record.items() if k not in contract)
+    text = check_melt_calibration_record(contract)
+    sidecar = melt_calibration_sidecar(npz_path)
+    with open(sidecar + ".tmp", "w") as f:
+        f.write(text + "\n")
+    os.replace(sidecar + ".tmp", sidecar)
+    return sidecar
 
 
 def deltat_per_basin_npz():

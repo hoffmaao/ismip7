@@ -408,7 +408,7 @@ protocol's recommendation, from a tracked file,
 | K | 6.5e-5, the K50 of the rule-based selection below on the 1000 m / 10 km production mesh (run record `calibration-melt-toolbox-1km-rule`, IU's build), chosen by the group on 25 September 2026 (issue 26) |
 | offsets | 16 IMBIE2 basins, -0.68 K to +1.20 K (Amundsen), each basin at its July 2026 total, 1067.4 Gt/yr together, fitted at that K on Rice's build of the mesh, the submission mesh (issue 20; `calibration-melt-refit-1km-rice-k50`) |
 | fitted under | `ISMIP7_MELT_SLOPE=ant`, `ISMIP7_SIN_ALPHA_ANT=5.115e-3`, `ISMIP7_GEOMETRY_SPACE=dg0`, `ISMIP7_RASTER_SAMPLE=vertex` and the 30_sep OI climatology, on `antarctica_10000_1000_buffered20000`, Rice's build (1,869,252 vertices) |
-| sidecar | `deltaT_per_basin_1000_K6.500e-05.source.json`: the file's sha256, the settings above, the mesh build and its vertex count, the input hashes, the jobs and the commits |
+| sidecar | `deltaT_per_basin_1000_K6.500e-05.source.json`: the file's sha256, the settings above, the mesh build and its vertex count, the input hashes, the jobs and the commits, with the decision fields added on promotion (below) |
 
 Every clone carries it, so a new machine runs with it and nothing is
 calibrated or copied. The offsets are stamped onto any mesh through the
@@ -447,6 +447,29 @@ scripts/batch_runners/submit.sh script scripts/batch_runners/calibrate_deltaT.sc
     --cd antarctica --queue debug --tasks 1 --mem 32G --time 00:40:00 \
     ISMIP7_LC=1000 ISMIP7_INV_H5=<mesh.msh> DELTAT_K=6.5e-5 DELTAT_OUT=<absolute dir>
 ```
+
+The fit writes each offsets file with its sidecar, `<name>.source.json`
+(`calibrate_melt.calibration_record`), and so does `select_melt_parameters.py`
+for the K it selects:
+
+| field | holds |
+|---|---|
+| `file`, `sha256` | the npz as written |
+| `K`, `melt_slope`, `sin_alpha_ant` or `sin_alpha_cap`, `geometry_space`, `raster_sample`, `oi_version`, `rho_i`, `dt_window`, `tf_rule`, `rule_admits` | the settings of the fit and the thermal forcing rule's verdict (`null` from a parallel fit, which does not judge) |
+| `mesh`, `vertices`, `cells`, `floating_cells`, `mesh_file` | the mesh's name and counts, and the sha256 and md5 of the file `ISMIP7_INV_H5` named |
+| `obs_table`, `bedmachine`, `inputs_sha256` | every input, by name and sha256 |
+| `melt_fitted_gtyr`, `melt_dT0_gtyr`, `unrooted` | the basins' total at their offsets as the fit summed it, the total at no offset, and the basins with no root in the window |
+| `selected_as`, `refit_of`, `selection` | the K's selection: a refit at the tracked K names the tracked file and keeps its `selected_as` (K50); a selection names its toolbox commit |
+| `site`, `partition`, `ranks`, `job`, `code`, `code_modified` | `ISMIP7_SITE` as `submit.sh` exports it (`null` for a fit started by hand), the Slurm partition and job, the rank count, the commit, and the tracked files modified in the checkout |
+
+A run that names the file with `ISMIP7_DELTAT_PER_BASIN_NPZ` is then checked
+against its raster sampling, and its provenance line names the mesh the
+offsets were fitted on. A file written before the fits wrote sidecars is
+read as given. Promoting a fit to the tracked calibration copies both files
+into `calibration/`, adds by hand the decision fields the sidecar lacks
+(`decided`, `decision`, `selected_as`, `selection`, `run_record`,
+`mesh_build`) and takes a run record; a fit refuses to write into
+`calibration/` itself.
 
 `check_melt_bound.py` melts the reference geometry with the forward's own
 callback and sets each basin against the total its offsets were fitted to,

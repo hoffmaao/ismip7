@@ -149,6 +149,7 @@ Attempt A, without the reference (`rehnoamb`):
      refused; it is read by point location. Corrected on this branch.
    - `calibrate_deltaT.py` writes no `.source.json`, so a refit carries no
      record of its mesh or raster sampling until one is written by hand.
+     Since issue 145 the fit writes its sidecar.
    - `site_env.sh` defaults to regularized Coulomb and the 1 km mesh, and
      `simulation.py` names outputs after `ISMIP7_LC`: a submission that omits
      a knob is silently misnamed or misconfigured.

@@ -565,7 +565,7 @@ def test_front_melt_in_a_pixel_with_no_floating_ice_sums_to_the_model(tmp_path):
         r = rows[("tendlifmassbf", yr)]
         assert r["N"] < 0.0
         assert abs(r["d_resid"]) <= 1e-6 * abs(r["N"])
-    assert "tendlifmassbf: the front melt booked" in (tmp_path / "cmp.md").read_text()
+    assert "tendlifmassbf: the melt booked in cells with no floating ice" in (tmp_path / "cmp.md").read_text()
 
     old = tmp_path / "old"
     old.mkdir()

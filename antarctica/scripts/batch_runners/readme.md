@@ -396,9 +396,11 @@ the driver's `Saved MAP:` line is the fallback. Depth is capped by
 `ISMIP7_CHAIN_MAX` (4). Under `ISMIP7_LOG_VEL_WEIGHT=auto`, the runner's
 default, a link takes the log-velocity weight the checkpoint records, so every
 link of one MAP minimises the objective the first link set (issue 68). A warm
-start whose mesh dof ordering differs from the run's own is refused, since a
-rank-count change mid-chain would scramble theta and phi silently. Regression
-test: `tests/test_inversion_chain.py`.
+start is read by point location (`transfer.interpolate_with_fill`), so one
+written on another rank count or on another mesh loads correctly. A target
+point outside the warm start's mesh takes the stated fill (theta and phi 0, the
+fluidity prior's constant baseline), and the log counts those points per
+field. Regression test: `tests/test_inversion_chain.py`.
 
 ### `projection.sbatch`, self-chaining
 

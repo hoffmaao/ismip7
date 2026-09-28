@@ -72,13 +72,17 @@ def pool_for(proj_fn):
 
 
 def load_csv_vaf(fn):
-    with open(fn) as f:
-        rows = list(csv.DictReader(f))
-    if not rows or "vaf_mm_sle" not in rows[0]:
-        print(f"{fn}: not a run_simulation timeseries (no vaf_mm_sle)")
+    try:
+        with open(fn) as f:
+            rows = list(csv.DictReader(f))
+        if not rows or "vaf_mm_sle" not in rows[0]:
+            print(f"{fn}: not a run_simulation timeseries (no vaf_mm_sle)")
+            sys.exit(2)
+        yr = np.array([float(r["year"]) for r in rows])
+        vaf = np.array([float(r["vaf_mm_sle"]) for r in rows])
+    except (OSError, ValueError, TypeError, KeyError) as e:
+        print(f"{fn}: unreadable timeseries: {e}")
         sys.exit(2)
-    yr = np.array([float(r["year"]) for r in rows])
-    vaf = np.array([float(r["vaf_mm_sle"]) for r in rows])
     return yr, vaf
 
 

@@ -244,9 +244,9 @@ def main():
     target_sizes = np.minimum(np.minimum(size_sr, size_gl), size_cf)
     target_sizes = np.clip(target_sizes, lc, lc_coarse)
 
-    n_1k = int((target_sizes <= 1000).sum())
-    n_2k = int((target_sizes <= 2000).sum())
-    print(f"  GL bands: <=1km: {n_1k}, <=2km: {n_2k}")
+    n_fine = int((target_sizes <= lc).sum())
+    n_2fine = int((target_sizes <= 2 * lc).sum())
+    print(f"  GL bands: <={lc / 1e3:g}km: {n_fine}, <={2 * lc / 1e3:g}km: {n_2fine}")
     print(f"  Size range: [{target_sizes.min():.0f}, {target_sizes.max():.0f}] m")
 
     sf_view = gmsh.view.add("size field")

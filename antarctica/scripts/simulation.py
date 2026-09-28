@@ -1012,13 +1012,11 @@ def setup_model(restart_from=None, *, allow_timing_cache_a_ref=False,
     phi_floating = str(checkpoint_metadata.get("fluidity_control", "all")) == "floating"
     if phi_floating:
         # the MAP's phi acts on floating ice only; grounded ice keeps the
-        # prior fluidity, through the same smooth indicator, on the LIVE
-        # geometry so the shelf rheology follows the grounding line
+        # prior fluidity, through the same smooth indicator. The residual and
+        # A_map mask on the live thickness h, so the shelf rheology follows
+        # the grounding line; the t=0 linearisation A_linear on the loaded H.
         from icepack2_tools.dual_friction import grounded_mask as _gm_phi
         PETSc.Sys.Print("  Fluidity from the MAP: phi acts on floating ice only")
-        A_map = A4_base * exp(phi_f * (Constant(1.0) - _gm_phi(H, b)))
-    else:
-        A_map = A4_base * exp(phi_f)
 
     def _map_phi(H_c):
         if phi_floating:
@@ -1038,7 +1036,8 @@ def setup_model(restart_from=None, *, allow_timing_cache_a_ref=False,
         os.environ.get("ISMIP7_COMPOSITE_ALPHA", "1e-2" if use_rc else "1e-4")
     ))
     H_ref = Constant(float(os.environ.get("ISMIP7_H_REF", "100.0")))
-    A_linear = A_map * tau_c ** (n_flow_val - 1)   # linearized at tau_c
+    A_map_t0 = A4_base * exp(_map_phi(H))
+    A_linear = A_map_t0 * tau_c ** (n_flow_val - 1)   # linearized at tau_c
     K_linear = u_c / (phi_eff * tau_c) * exp(-theta_f)  # linearized at tau_c
 
     # C_w0/N_ref were initialized (and, on a restart, loaded frozen) in the
@@ -1279,6 +1278,7 @@ def setup_model(restart_from=None, *, allow_timing_cache_a_ref=False,
 
     h = H.copy(deepcopy=True)
     h.rename("thickness")
+    A_map = A4_base * exp(_map_phi(h))
 
     u_s, M_s, tau_s = split(z)
     fields = {
@@ -1832,6 +1832,10 @@ def calving_front_state(z, h_dg, b, level_set, A=None, n=None, gr_frac=None):
     return state
 
 
+MAP_CONFIG_KEYS = ("friction_control", "friction_c_ref", "subelement_friction",
+                   "exact_front", "fluidity_control")
+
+
 def save_model_state(ctx, final_path, t_now, extra_attrs=None):
     r"""Atomically save one self-contained mixed state.
 
@@ -1928,6 +1932,12 @@ def save_model_state(ctx, final_path, t_now, extra_attrs=None):
             chk.set_attr("/", "friction_anchor_length", float(ctx["friction_anchor_length"]))
         if ctx.get("lake_ice_base") is not None:
             chk.set_attr("/", "lake_ice_base", int(ctx["lake_ice_base"]))
+        # The MAP's controls and grounding scheme, so a chained link restarted
+        # from this state rebuilds the same residual.
+        _map_meta = ctx.get("checkpoint_metadata") or {}
+        for name in MAP_CONFIG_KEYS:
+            if name in _map_meta:
+                chk.set_attr("/", name, _map_meta[name])
         if full_state_residual is not None:
             chk.set_attr("/", "full_state_residual", full_state_residual)
         for name, value in (extra_attrs or {}).items():

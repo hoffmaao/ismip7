@@ -39,16 +39,22 @@ The MAP records the control (`friction_control`), and under `exp` the
 reference (`friction_c_ref`) with alpha saved as `log_friction` and `C_ref` as
 a constant `C_w0`; the forward and `plot_map.py` take `C = C_ref exp(alpha)`
 pointwise with no anchor, checkpoints carry it as `friction_exp`, and warm
-starts rebase between the three controls. The fluidity control is
-`A = A_prior exp(phi)` under every friction control.
+starts rebase between the three controls (an exp-control chain link resumes
+its alpha unchanged). Every forward state checkpoint copies the MAP's
+`friction_control`, `friction_c_ref`, `subelement_friction`, `exact_front`
+and `fluidity_control`, so a restarted link rebuilds the same residual. The
+fluidity control is `A = A_prior exp(phi)` under every friction control.
 
 `ISMIP7_FLUIDITY_PRIOR`: `pattyn` (default since 27 September) is the rate
 factor of the Pattyn (2013) depth-averaged temperature; `thermo` is the
 enthalpy model. `ISMIP7_FLUIDITY_CONTROL=floating` lets phi act on floating
 ice only, the split the data-assimilating ISMIP6 groups initialised with
-(Seroussi et al. 2020, Appendix C). `ISMIP7_INVERT=phi|theta|both` moves one
-control with the other held as a fixed coefficient, the objective unchanged,
-so a staged inversion warm-starts each stage through the handoff check.
+(Seroussi et al. 2020, Appendix C); the forward masks phi with the grounded
+indicator of the live thickness, in the residual and in the calving law's
+`A_map`, so the shelf rheology follows the grounding line.
+`ISMIP7_INVERT=phi|theta|both` moves one control with the other held as a
+fixed coefficient, the objective unchanged, so a staged inversion
+warm-starts each stage through the handoff check.
 
 ## 3. What was measured
 

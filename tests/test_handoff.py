@@ -19,12 +19,12 @@ def _settings(**over):
         "dhdt_weight": 1.0, "dhdt_net_sigma": 10.0,
         "prior_form": "bilaplacian", "gamma_theta": 1e5, "gamma_phi": 1e5,
         "prior_sigma_theta": 0.3, "prior_sigma_phi": 0.3, "prior_rho": 7500.0,
-        "prior_sigma_alpha": 0.1828, "prior_rho_theta": 7500.0,
+        "prior_sigma_alpha": 0.1828, "prior_rho_theta": 7500.0, "friction_c_ref": 0.0334,
         "friction_control": "sqrt", "friction": "budd", "n_flow": 3.0,
         "geometry_space": "dg0", "friction_anchor_length": 20000.0,
         "lake_ice_base": 1, "fluidity_prior_origin": "thermomechanical",
         "grad_precond": "mass_consistent",
-        "subelement_friction": 0, "exact_front": 0,
+        "subelement_friction": 0, "exact_front": 0, "fluidity_control": "all",
     }
     base.update(over)
     return base

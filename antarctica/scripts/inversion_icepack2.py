@@ -84,6 +84,7 @@ FIG_DIR = os.path.join(_ROOT, "figs")
 sys.path.insert(0, os.path.dirname(_ROOT))
 from icepack2_tools.boundary import load_boundary_ids
 from icepack2_tools.dual_friction import (
+    grounded_mask,
     build_rc_residual,
     effective_pressure,
     rebase_log_friction,
@@ -283,23 +284,69 @@ PRIOR_RHO = float(os.environ.get("ISMIP7_PRIOR_RHO", str(L_REG)))
 # the amplitude is free in practice. ISMIP7_PRIOR_RHO_THETA is the friction
 # correlation length (default ISMIP7_PRIOR_RHO; Recinos's l = sqrt(gamma/delta)
 # is rho / sqrt(8)).
+# `exp` (Andrew, 27 Sep 2026: "instead of alpha squared we should use
+# exp(alpha)"): C = C_ref exp(alpha), alpha a zero-mean control as under
+# `sqrt`, but a log parameterisation, so a step in alpha is a multiplicative
+# change of C everywhere: the weak beds under the ice streams, where C must
+# fall by orders of magnitude, are as reachable as the stiff interior (under
+# `sqrt` a step is additive in sqrt(C), small where C is small). C_ref is
+# one scalar (ISMIP7_C_REF: "auto" = grounded median of the friction the
+# start describes; 1 makes it exp(alpha) outright), so the prior mean is
+# "typical friction" with no spatial structure, as Recinos's zero mean is.
+# ISMIP7_PRIOR_SIGMA_ALPHA is then in log units ("auto" = 1, a factor e);
+# the MAP carries alpha as log_friction and C_ref as a constant C_w0, so
+# every consumer reads it as C_w0 exp(log_friction) with no new code.
 FRICTION_CONTROL = os.environ.get("ISMIP7_FRICTION_CONTROL", "log").strip().lower()
-if FRICTION_CONTROL not in ("log", "sqrt"):
+if FRICTION_CONTROL not in ("log", "sqrt", "exp"):
     raise ValueError(
-        f"ISMIP7_FRICTION_CONTROL must be log|sqrt, got {FRICTION_CONTROL!r}")
-if FRICTION_CONTROL == "sqrt" and PRIOR_FORM != "bilaplacian":
+        f"ISMIP7_FRICTION_CONTROL must be log|sqrt|exp, got {FRICTION_CONTROL!r}")
+if FRICTION_CONTROL in ("sqrt", "exp") and PRIOR_FORM != "bilaplacian":
     raise ValueError(
-        "ISMIP7_FRICTION_CONTROL=sqrt needs ISMIP7_PRIOR_FORM=bilaplacian")
+        f"ISMIP7_FRICTION_CONTROL={FRICTION_CONTROL} needs ISMIP7_PRIOR_FORM=bilaplacian")
 PRIOR_SIGMA_ALPHA = os.environ.get("ISMIP7_PRIOR_SIGMA_ALPHA", "auto").strip().lower()
+C_REF = os.environ.get("ISMIP7_C_REF", "auto").strip().lower()
 PRIOR_RHO_THETA = float(os.environ.get("ISMIP7_PRIOR_RHO_THETA", str(PRIOR_RHO)))
 
 # ── Fluidity prior mean (ISMIP7_FLUIDITY_PRIOR) ─────────────────────────
-# `thermo` (default): the fixed-velocity enthalpy model (thermo_model.py).
-# `pattyn`: rate_factor of the depth-averaged Pattyn temperature raster
+# `pattyn` (default since 27 Sep 2026, Andrew: "focus on the pattyn prior";
+# its shelves start ten times closer to the observed speed than the thermal
+# model's at 2 km): rate_factor of the depth-averaged Pattyn temperature raster
 # (icepack2_tools/rheology_prior.py; ISMIP7_PATTYN_TEMP names the file,
 # default <data root>/temp/Pattyn_2013.tif), the source Recinos et al. (2023)
 # take their rheology prior mean from. Anything else: the constant A0.
-FLUIDITY_PRIOR = os.environ.get("ISMIP7_FLUIDITY_PRIOR", "thermo").strip().lower()
+FLUIDITY_PRIOR = os.environ.get("ISMIP7_FLUIDITY_PRIOR", "pattyn").strip().lower()
+
+# ── Where the fluidity control acts (ISMIP7_FLUIDITY_CONTROL) ───────────
+# `all` (default): phi = log(A / A_prior) everywhere. `floating`: phi acts
+# on floating ice only, through the smooth grounded indicator (1 - He); on
+# grounded ice the fluidity is the prior mean (a temperature field), and the
+# velocity there is fitted by the friction alone. That is the split most
+# ISMIP6/7 groups initialise with (a thermal rate factor on grounded ice,
+# friction inverted; a shelf rheology inverted where there is no friction),
+# and it removes the friction/rheology trade-off on grounded ice that let the
+# data move the friction while the fluidity sat at its prior (Andrew, 26 Sep
+# 2026). The prior still smooths phi everywhere; where phi has no effect the
+# prior alone holds it at zero.
+FLUIDITY_CONTROL = os.environ.get("ISMIP7_FLUIDITY_CONTROL", "all").strip().lower()
+if FLUIDITY_CONTROL not in ("all", "floating"):
+    raise ValueError(
+        f"ISMIP7_FLUIDITY_CONTROL must be all|floating, got {FLUIDITY_CONTROL!r}")
+
+# ── Which controls move (ISMIP7_INVERT) ──────────────────────────────────
+# `both` (default): theta and phi descend together. `phi` / `theta`: only
+# that control moves; the other stays at its current value (the prior mean,
+# or the warm start's field) as a fixed coefficient of the forward. The
+# OBJECTIVE is the same in every mode, so a staged inversion warm-starts each
+# stage from the previous stage's MAP and the handoff check still applies.
+# Staging is how the ISSM groups initialised ISMIP6 ("first invert for ice
+# shelf viscosity and then for basal friction under grounded ice", Seroussi
+# et al. 2020 Appendix C9): in the joint descent the friction gradient is
+# ~50x the fluidity gradient per unit control, so L-BFGS fits the friction
+# first and the fluidity sits at its prior for tens of iterations (the 26 Sep
+# 32 km MAPs: phi rms 0.01 after 3 iterations). TAO path only.
+INVERT = os.environ.get("ISMIP7_INVERT", "both").strip().lower()
+if INVERT not in ("both", "phi", "theta"):
+    raise ValueError(f"ISMIP7_INVERT must be both|phi|theta, got {INVERT!r}")
 
 # ── Likelihood scale (ISMIP7_MISFIT_SCALE) ───────────────────────────────
 # The data terms are normalised by the observed AREA, so the misfit is a mean
@@ -341,8 +388,8 @@ USE_RC = USE_RESIDUAL  # geometry/anchor handling is shared
 if SUBELEMENT_FRICTION and (not USE_RESIDUAL or FRICTION not in ("budd", "weertman")):
     raise ValueError("ISMIP7_SUBELEMENT_FRICTION=1 needs ISMIP7_FRICTION=budd (or "
                      "weertman): the scheme integrates a velocity-only stress")
-if FRICTION_CONTROL == "sqrt" and not USE_RESIDUAL:
-    raise ValueError("ISMIP7_FRICTION_CONTROL=sqrt needs a residual friction "
+if FRICTION_CONTROL in ("sqrt", "exp") and not USE_RESIDUAL:
+    raise ValueError(f"ISMIP7_FRICTION_CONTROL={FRICTION_CONTROL} needs a residual friction "
                      "law (budd or regularized_coulomb)")
 C0_RC = float(os.environ.get("ISMIP7_RC_C0", "0.5"))
 # Buffer-node (h_clamp=0) coercivity controls; see dual_friction.build_rc_residual.
@@ -1003,6 +1050,68 @@ def main():
             f"(Recinos et al. 2023); initial alpha in [{_a_lo:.3e}, {_a_hi:.3e}], "
             f"grounded median {_alpha_median:.3e}; sigma_alpha={sigma_alpha_val:.3e} "
             f"({PRIOR_SIGMA_ALPHA}), rho_theta={PRIOR_RHO_THETA:g} m")
+    elif FRICTION_CONTROL == "exp":
+        # theta now IS alpha = ln(C / C_ref). It starts from the friction the
+        # loaded state describes (the anchor with any log deviation, the
+        # alpha^2 of a sqrt-control MAP, or the alpha of an exp-control MAP,
+        # which is already this control) and the prior mean is zero.
+        C_cg = cg1_lift(C_w0) if geom_dg else C_w0
+        _warm_fc = str(warm_attrs.get("friction_control", "log"))
+        if _warm_fc == "exp":
+            C_start = Function(Q).interpolate(
+                Constant(float(warm_attrs["friction_c_ref"])) * exp(theta))
+        elif warm_alpha is not None:
+            C_start = Function(Q).interpolate(warm_alpha ** 2)
+        else:
+            C_start = Function(Q).interpolate(C_cg * exp(theta))
+        H_cg = cg1_lift(H) if geom_dg else H
+        b_cg = cg1_lift(b) if geom_dg else b
+        _haf = Function(Q).interpolate(height_above_flotation(H_cg, b_cg)).dat.data_ro
+        _grounded = (_haf > 0.0) & (H_cg.dat.data_ro > 10.0)
+        _C_grounded = np.concatenate(COMM_WORLD.allgather(
+            np.asarray(C_start.dat.data_ro[_grounded], dtype=float)))
+        _C_median = (float(np.median(_C_grounded)) if _C_grounded.size else float("nan"))
+        if float(warm_attrs.get("friction_c_ref", 0.0) or 0.0) > 0.0:
+            # frozen: the control is a deviation from THIS reference
+            c_ref_val = float(warm_attrs["friction_c_ref"])
+            PETSc.Sys.Print(f"    C_ref frozen from the warm start: {c_ref_val:.4e}")
+        elif C_REF == "auto":
+            c_ref_val = _C_median
+        else:
+            c_ref_val = float(C_REF)
+        if not c_ref_val > 0.0:
+            raise ValueError(f"the friction reference C_ref must be positive, got {c_ref_val}")
+        # ln floors at 1e-4 C_ref (alpha >= -9.2): the anchor is ~0 under
+        # some grounded nodes, and -inf is not a start. Floating and ice-free
+        # nodes, where the friction is inert, start at the prior mean.
+        theta.interpolate(ln(max_value(C_start, Constant(1e-4 * c_ref_val)) / Constant(c_ref_val)))
+        theta.dat.data[~_grounded] = 0.0
+        theta.rename("alpha")
+        if PRIOR_SIGMA_ALPHA == "auto" and float(warm_attrs.get("prior_sigma_alpha", 0.0) or 0.0) > 0.0:
+            sigma_alpha_val = float(warm_attrs["prior_sigma_alpha"])
+            PETSc.Sys.Print(f"    sigma_alpha frozen from the warm start: {sigma_alpha_val:.4e}")
+        elif PRIOR_SIGMA_ALPHA == "auto":
+            sigma_alpha_val = 1.0
+        else:
+            sigma_alpha_val = float(PRIOR_SIGMA_ALPHA)
+        if not sigma_alpha_val > 0.0:
+            raise ValueError(
+                f"the prior sigma for alpha must be positive, got {sigma_alpha_val}")
+        _a_lo, _a_hi = global_range(theta)
+        PETSc.Sys.Print(
+            f"  Friction control: C = C_ref exp(alpha) with a zero prior mean on alpha; "
+            f"C_ref={c_ref_val:.3e} ({C_REF}; grounded median of the start {_C_median:.3e}), "
+            f"initial alpha in [{_a_lo:.3f}, {_a_hi:.3f}]; sigma_alpha={sigma_alpha_val:.3g} "
+            f"log units ({PRIOR_SIGMA_ALPHA}), rho_theta={PRIOR_RHO_THETA:g} m")
+    elif str(warm_attrs.get("friction_control", "log")) == "exp":
+        # an exp-control MAP warm-starting a log-control run: its alpha is a
+        # deviation from C_ref; rebase it onto THIS anchor
+        C_cg = cg1_lift(C_w0) if geom_dg else C_w0
+        theta.interpolate(ln(max_value(Constant(float(warm_attrs["friction_c_ref"])) * exp(theta),
+                                       Constant(1e-12))
+                             / max_value(C_cg, Constant(1e-12))))
+        PETSc.Sys.Print("    log_friction rebuilt from the warm start's exp control: "
+                        "theta = ln(C_ref exp(alpha) / C_w0)")
     elif warm_alpha is not None:
         # a sqrt-control MAP warm-starting a log-control run: the deviation
         # from THIS anchor that reproduces its friction on grounded ice
@@ -1189,6 +1298,13 @@ def main():
             f"{'on' if EXACT_FRONT else 'off'}")
 
     _zero_theta = Constant(0.0)
+    # the smooth grounded indicator of THIS geometry, for a floating-only
+    # fluidity control (UFL on the cell fields; the residual builds its own
+    # copy for the friction gate)
+    _He_phi = grounded_mask(H, b) if FLUIDITY_CONTROL == "floating" else None
+    if _He_phi is not None:
+        PETSc.Sys.Print("  Fluidity control: phi acts on floating ice only "
+                        "(grounded ice keeps the prior fluidity)")
 
     def build_F(theta_c, phi_c):
         # Residual closure (tau linear, grounded-only theta via exp(theta*He),
@@ -1198,8 +1314,16 @@ def main():
             if FRICTION_CONTROL == "sqrt":
                 # C = alpha^2 outright; the He-gated log deviation is zero
                 theta_arg, C_arg = _zero_theta, theta_c ** 2
+            elif FRICTION_CONTROL == "exp":
+                # C = C_ref exp(alpha) outright, as the sqrt control passes
+                # alpha^2: the residual's He gate on a log deviation would
+                # otherwise pull the friction to C_ref across the grounding
+                # band, which is the anchor's role under `log` and no one's here
+                theta_arg, C_arg = _zero_theta, Constant(c_ref_val) * exp(theta_c)
             else:
                 theta_arg, C_arg = theta_c, C_w0
+            if _He_phi is not None:
+                phi_c = phi_c * (Constant(1.0) - _He_phi)
             if subelement is not None:
                 from icepack2_tools.subelement import build_subelement_residual
                 return build_subelement_residual(
@@ -1407,7 +1531,7 @@ def main():
     # operator does not possess.
     _prior_test = TestFunction(Q)
     if PRIOR_FORM == "bilaplacian":
-        _sigma_theta = (sigma_alpha_val if FRICTION_CONTROL == "sqrt"
+        _sigma_theta = (sigma_alpha_val if FRICTION_CONTROL in ("sqrt", "exp")
                         else PRIOR_SIGMA_THETA)
         _prior_dg = {
             "theta": bilaplacian_coeffs(_sigma_theta, PRIOR_RHO_THETA),
@@ -1506,8 +1630,12 @@ def main():
         _scale = {}
 
         def action(g_theta, g_phi):
+            # a block passed as None is a frozen control (ISMIP7_INVERT): no
+            # solve, no entry in the result
             out = []
             for which, rhs in (("theta", g_theta), ("phi", g_phi)):
+                if rhs is None:
+                    continue
                 x = Function(Q)
                 if metric == "mass_consistent":
                     # The consistent mass Riesz map: the same mass-matrix
@@ -1974,6 +2102,9 @@ def main():
         # under the sqrt control alpha^2 itself (log_friction is saved as 0).
         if FRICTION_CONTROL == "sqrt":
             return Function(Q_g, name="C_w0").project(theta ** 2)
+        if FRICTION_CONTROL == "exp":
+            # the constant reference: C = C_w0 exp(log_friction) reads exactly
+            return Function(Q_g, name="C_w0").interpolate(Constant(c_ref_val))
         return C_w0
 
     def save_map(path, *, full_state=False):
@@ -2032,13 +2163,19 @@ def main():
             # Which field the friction is: C_w0 exp(log_friction) on the
             # anchor (log), or sqrt_friction^2 with no anchor (sqrt).
             chk.set_attr("/", "friction_control", FRICTION_CONTROL)
+            chk.set_attr("/", "fluidity_control", FLUIDITY_CONTROL)
+            # Which controls this stage moved (provenance only: the objective
+            # is the same in every ISMIP7_INVERT mode)
+            chk.set_attr("/", "invert_controls", INVERT)
             # The grounding scheme and the front push the MAP was inverted
             # under: a forward follows them (icepack2_tools.subelement).
             chk.set_attr("/", "subelement_friction", int(SUBELEMENT_FRICTION))
             chk.set_attr("/", "exact_front", int(EXACT_FRONT))
-            if FRICTION_CONTROL == "sqrt":
+            if FRICTION_CONTROL in ("sqrt", "exp"):
                 chk.set_attr("/", "prior_sigma_alpha", float(sigma_alpha_val))
                 chk.set_attr("/", "prior_rho_theta", float(PRIOR_RHO_THETA))
+            if FRICTION_CONTROL == "exp":
+                chk.set_attr("/", "friction_c_ref", float(c_ref_val))
             chk.set_attr("/", "fluidity_prior_origin", str(prior_origin))
             chk.set_attr("/", "misfit_norm", MISFIT_NORM)
             chk.set_attr("/", "misfit_scale", float(misfit_scale))
@@ -2108,7 +2245,9 @@ def main():
     # Relative-decrease stopping rule; 0 disables it and the budget above decides.
     ftol = float(os.environ.get("ISMIP7_FTOL", "1e-10"))
     min_iter = int(os.environ.get("ISMIP7_MIN_ITER", "3"))
-    PETSc.Sys.Print("\nStarting L-BFGS-B inversion (theta + phi)...")
+    PETSc.Sys.Print("\nStarting L-BFGS-B inversion ("
+                    + {"both": "theta + phi", "phi": "phi only, theta frozen",
+                       "theta": "theta only, phi frozen"}[INVERT] + ")...")
     PETSc.Sys.Print(f"  maxiter={max_iter} ftol={ftol:g} min_iter={min_iter}, "
                     f"nranks={COMM_WORLD.size}")
 
@@ -2336,6 +2475,25 @@ def main():
         _nfev = [0]
         _ring = []
 
+        # A forward that "converged" by the relative test from a wild initial
+        # residual can sit at ||F|| 1e9 (stage 2 of the 26 Sep staged 32 km
+        # run: accepted iterate at 3.4e9, published as converged). Such a
+        # state is a failed solve for the objective's purposes: it takes the
+        # trial-point rescue path like a diverged one. The ceiling is a
+        # multiple of the residual the last accepted forward reached.
+        _fnorm_ceiling_factor = float(os.environ.get("ISMIP7_FNORM_CEILING", "1e4"))
+
+        def _forward_checked(theta_ctrl, phi_ctrl):
+            J = forward(theta_ctrl, phi_ctrl)
+            f_ref = float(last_good_fnorm[0])
+            if np.isfinite(f_ref) and f_ref > 0.0:
+                f_now = _residual_norm()
+                if not np.isfinite(f_now) or f_now > _fnorm_ceiling_factor * f_ref:
+                    raise fd.ConvergenceError(
+                        f"forward reported convergence at ||F||={f_now:.3e}, above "
+                        f"{_fnorm_ceiling_factor:g}x the last accepted {f_ref:.3e}")
+            return J
+
         def forward_total(theta_ctrl, phi_ctrl):
             """The objective TAO differentiates: misfit plus BOTH prior terms.
 
@@ -2351,7 +2509,7 @@ def main():
             theta.dat.data[:] = theta_ctrl.dat.data_ro
             phi.dat.data[:] = phi_ctrl.dat.data_ro
             try:
-                J = forward(theta_ctrl, phi_ctrl)
+                J = _forward_checked(theta_ctrl, phi_ctrl)
             except fd.ConvergenceError:
                 # A line-search trial point where the single Newton solve
                 # of the forward diverges (the trial is far from the last
@@ -2375,7 +2533,7 @@ def main():
                     _reramp_at_current_controls()
                     reset_manager()
                     start_manager()
-                    J = forward(theta_ctrl, phi_ctrl)
+                    J = _forward_checked(theta_ctrl, phi_ctrl)
                 except fd.ConvergenceError:
                     z.assign(z_backup)
                     reset_manager()
@@ -2391,12 +2549,41 @@ def main():
             # The last few evaluations with their controls: the monitor picks
             # the one TAO accepted, so a checkpoint never holds a rejected
             # line-search trial point.
+            # The mixed state goes in with the controls: the monitor puts
+            # the ACCEPTED evaluation's state back into z, so the state on
+            # record, its residual and the published velocity belong to the
+            # controls the MAP saves. Without it z_backup held the last
+            # EVALUATED trial's state, and after a failed line search the
+            # publishing solve started from a state of other controls,
+            # "converged" in 0 iterations at an atol scaled from its own
+            # residual (32 km joint Pattyn run, 26 Sep: ||F|| 3e35 published).
             _ring.append((float(J), theta_ctrl.dat.data_ro.copy(),
-                          phi_ctrl.dat.data_ro.copy()))
+                          phi_ctrl.dat.data_ro.copy(),
+                          [_z.dat.data_ro.copy() for _z in z.subfunctions]))
             del _ring[:-6]
             for _zb, _z in zip(z_backup.subfunctions, z.subfunctions):
                 _zb.dat.data[:] = _z.dat.data_ro
             return J
+
+        _accepted_entry = [None]
+
+        def _restore_accepted(f_val):
+            """Put the evaluation TAO accepted at objective ``f_val`` into
+            (theta, phi, z, z_backup); returns the entry or None. The last
+            accepted entry stays pinned so a long run of rejected trials
+            cannot push it out of the ring."""
+            _hit = accepted_evaluation(
+                _ring + ([_accepted_entry[0]] if _accepted_entry[0] is not None else []),
+                float(f_val))
+            if _hit is None:
+                return None
+            _accepted_entry[0] = _hit
+            theta.dat.data[:] = _hit[1]
+            phi.dat.data[:] = _hit[2]
+            for _z, _zb, _d in zip(z.subfunctions, z_backup.subfunctions, _hit[3]):
+                _z.dat.data[:] = _d
+                _zb.dat.data[:] = _d
+            return _hit
 
         gtol = float(os.environ.get("ISMIP7_GTOL", "0.0"))
         _step0_env = float(os.environ.get("ISMIP7_PRECOND_STEP0", "0.15"))
@@ -2413,8 +2600,36 @@ def main():
             f"  Optimization metric: {_desc}; via TAO lmvm; "
             f"gatol={gtol:g} max_it={max_iter} step0={_step0_env:g}"
         )
+        if INVERT == "both":
+            _tao_forward, _tao_spaces, _tao_x, _tao_action = (
+                forward_total, [Q, Q], [theta, phi], _A_inv)
+        else:
+            # One control moves. The other enters the forward as a fixed
+            # coefficient (not a control: no gradient, its prior term a
+            # constant), so the objective TAO sees is forward_total's with
+            # that field held where it is.
+            _frozen = Function(Q, name="frozen_control")
+            _frozen.dat.data[:] = (theta if INVERT == "phi" else phi).dat.data_ro
+            if INVERT == "phi":
+                def _tao_forward(phi_ctrl):
+                    return forward_total(_frozen, phi_ctrl)
+
+                def _tao_action(g_phi):
+                    return _A_inv(None, g_phi)
+                _tao_x = [phi]
+            else:
+                def _tao_forward(theta_ctrl):
+                    return forward_total(theta_ctrl, _frozen)
+
+                def _tao_action(g_theta):
+                    return _A_inv(g_theta, None)
+                _tao_x = [theta]
+            _tao_spaces = [Q]
+            PETSc.Sys.Print(
+                f"  Controls: {INVERT} only (ISMIP7_INVERT); "
+                f"{'phi' if INVERT == 'theta' else 'theta'} frozen at its current field")
         solver = TAOSolver(
-            forward_total, [Q, Q],
+            _tao_forward, _tao_spaces,
             solver_parameters={
                 "tao_type": "lmvm",
                 "tao_max_it": max_iter,
@@ -2426,7 +2641,7 @@ def main():
                 "tao_grtol": 0.0,
                 "tao_gttol": 0.0,
             },
-            H_0_action=_A_inv, M_inv_action=_A_inv,
+            H_0_action=_tao_action, M_inv_action=_tao_action,
         )
 
         _t_last = [perf_counter()]
@@ -2435,13 +2650,11 @@ def main():
         def _monitor(tao):
             its, f_val, gnorm, _cnorm, _xdiff, _reason = tao.getSolutionStatus()
             iteration_count[0] = int(its)
-            # theta/phi mirror the LAST EVALUATION; put the ACCEPTED iterate
-            # there before anything below reads or saves them.
-            _hit = accepted_evaluation(_ring, float(f_val))
-            if _hit is not None:
-                theta.dat.data[:] = _hit[1]
-                phi.dat.data[:] = _hit[2]
-            else:
+            # theta/phi/z mirror the LAST EVALUATION; put the ACCEPTED
+            # iterate (controls AND mixed state) there before anything below
+            # reads, measures or saves them.
+            _hit = _restore_accepted(f_val)
+            if _hit is None:
                 PETSc.Sys.Print(
                     f"    WARNING: no recent evaluation matches the accepted "
                     f"objective {float(f_val):.6e}; the controls on record are "
@@ -2506,7 +2719,7 @@ def main():
         # production inversion normally ends here, so the cap is read back from
         # TAO rather than treated as a failure.
         try:
-            solver.solve([theta, phi])
+            solver.solve(_tao_x)
         except RuntimeError:
             pass
         if _handoff_failed[0]:
@@ -2522,6 +2735,12 @@ def main():
                 PETSc.Sys.Print(
                     "  TAO exited on a point other than the last accepted iterate; "
                     "the accepted iterate is what the MAP records")
+            # and its mixed state, evaluated at those controls, is what the
+            # publishing solve starts from
+            if _restore_accepted(last_good_obj[0]) is None:
+                PETSc.Sys.Print(
+                    "    WARNING: the accepted iterate's mixed state is not on "
+                    "record; the publishing solve starts from the last evaluated state")
         reason = int(solver.tao.getConvergedReason())
         message = (
             f"CONVERGED: relative functional decrease <= ftol={ftol:g}"
@@ -2595,14 +2814,17 @@ def main():
         "lake_ice_base": int(LAKE_ICE_BASE),
         "fluidity_prior_origin": str(prior_origin), "grad_precond": grad_precond,
         "subelement_friction": int(SUBELEMENT_FRICTION), "exact_front": int(EXACT_FRONT),
+        "fluidity_control": FLUIDITY_CONTROL,
     })
     if PRIOR_FORM == "bilaplacian":
         run_settings.update({"prior_sigma_theta": float(PRIOR_SIGMA_THETA),
                              "prior_sigma_phi": float(PRIOR_SIGMA_PHI),
                              "prior_rho": float(PRIOR_RHO)})
-        if FRICTION_CONTROL == "sqrt":
+        if FRICTION_CONTROL in ("sqrt", "exp"):
             run_settings.update({"prior_sigma_alpha": float(sigma_alpha_val),
                                  "prior_rho_theta": float(PRIOR_RHO_THETA)})
+        if FRICTION_CONTROL == "exp":
+            run_settings["friction_c_ref"] = float(c_ref_val)
     _strict = os.environ.get("ISMIP7_WARM_START_STRICT", "0").strip() == "1"
     _obj_tol = float(os.environ.get("ISMIP7_WARM_START_OBJ_TOL", "1e-3"))
     if warm_attrs:
@@ -2660,6 +2882,10 @@ def main():
     if grad_precond in ("mass_consistent", "prior"):
         result = _minimize_prior_metric()
     else:
+        if INVERT != "both":
+            raise ValueError(
+                f"ISMIP7_INVERT={INVERT} needs the TAO path "
+                "(ISMIP7_GRAD_PRECOND=mass_consistent or prior)")
         x0 = np.concatenate([func_to_global(theta), func_to_global(phi)])
         if grad_precond == "mass":
             x0 = x0 * _sqrtm

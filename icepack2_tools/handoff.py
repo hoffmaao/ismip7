@@ -26,10 +26,10 @@ OBJECTIVE_KEYS = (
     "dhdt_weight", "dhdt_net_sigma",
     "prior_form", "gamma_theta", "gamma_phi",
     "prior_sigma_theta", "prior_sigma_phi", "prior_rho",
-    "prior_sigma_alpha", "prior_rho_theta",
+    "prior_sigma_alpha", "prior_rho_theta", "friction_c_ref",
     "friction_control", "friction", "n_flow", "geometry_space",
     "friction_anchor_length", "lake_ice_base", "fluidity_prior_origin",
-    "grad_precond", "subelement_friction", "exact_front",
+    "grad_precond", "subelement_friction", "exact_front", "fluidity_control",
 )
 
 # Recorded with the controls: the objective at the checkpointed iterate.

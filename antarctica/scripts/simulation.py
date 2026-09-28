@@ -399,11 +399,16 @@ def setup_model(restart_from=None, *, allow_timing_cache_a_ref=False,
             # it was inverted on (dual_friction.weertman_anchor,
             # geometry.raise_bed_to_lake_ice_base): a forward follows the MAP.
             "friction_anchor_length",
+            # An exp-control MAP (ISMIP7_FRICTION_CONTROL=exp): log_friction
+            # is a deviation from the constant C_ref, not from the anchor.
+            "friction_control",
+            "friction_c_ref",
             "lake_ice_base",
             # The grounding scheme and the front push the MAP was inverted
             # under (icepack2_tools.subelement): a forward follows the MAP.
             "subelement_friction",
             "exact_front",
+            "fluidity_control",
         ):
             if _chk.has_attr("/", _key):
                 checkpoint_metadata[_key] = _chk.get_attr("/", _key)
@@ -720,6 +725,16 @@ def setup_model(restart_from=None, *, allow_timing_cache_a_ref=False,
         # friction as C_w0 with theta = 0, so they take the ordinary path.
         alpha_f = load_checkpoint_field(
             chk, "sqrt_friction", Q, optional=True, fill=0.0, fill_label="0")
+        # A MAP inverted on the exp control (ISMIP7_FRICTION_CONTROL=exp)
+        # carries alpha = ln(C / C_ref) as log_friction and C_ref as a
+        # constant C_w0. The residual takes C = C_ref exp(alpha) pointwise
+        # (no anchor, theta = 0), and checkpoints carry that C as
+        # friction_exp so a restart assembles the same form.
+        C_exp = load_checkpoint_field(
+            chk, "friction_exp", Q, optional=True, fill=0.0, fill_label="0")
+        if C_exp is None and str(checkpoint_metadata.get("friction_control", "log")) == "exp":
+            C_exp = Function(Q, name="friction_exp").interpolate(
+                Constant(float(checkpoint_metadata["friction_c_ref"])) * fd.exp(theta_f))
         # Fluidity prior mean (physical thermomechanical field): the fluidity
         # control is phi = log(A / A_prior), so the forward must reconstruct
         # A = A_prior * exp(phi) with the SAME A_prior the inversion used. New
@@ -994,7 +1009,15 @@ def setup_model(restart_from=None, *, allow_timing_cache_a_ref=False,
             f"  Fluidity prior: checkpoint has no fluidity_prior; using LEGACY "
             f"constant baseline A0*a4_factor = {A_prior_baseline:.2f}"
         )
-    A_map = A4_base * exp(phi_f)
+    if str(checkpoint_metadata.get("fluidity_control", "all")) == "floating":
+        # the MAP's phi acts on floating ice only; grounded ice keeps the
+        # prior fluidity, through the same smooth indicator, on the LIVE
+        # geometry so the shelf rheology follows the grounding line
+        from icepack2_tools.dual_friction import grounded_mask as _gm_phi
+        PETSc.Sys.Print("  Fluidity from the MAP: phi acts on floating ice only")
+        A_map = A4_base * exp(phi_f * (Constant(1.0) - _gm_phi(h, b)))
+    else:
+        A_map = A4_base * exp(phi_f)
     K_base = u_c / (phi_eff * tau_c) ** m_slide
     K_map = K_base * exp(-m_slide * theta_f)
 
@@ -1103,6 +1126,14 @@ def setup_model(restart_from=None, *, allow_timing_cache_a_ref=False,
                 N_ref = Function(Q_g, name="N_ref").interpolate(
                     max_value(effective_pressure(H, s), Constant(0.0))
                 )
+            if C_exp is not None:
+                C_w0 = Function(Q_g, name="C_w0").project(C_exp)
+                theta_f.assign(0.0)
+                _c_lo, _c_hi = global_range(C_exp)
+                PETSc.Sys.Print(
+                    "  Friction from the MAP's exp control: C = C_ref exp(alpha), "
+                    f"C_ref={float(checkpoint_metadata.get('friction_c_ref', float('nan'))):.3e}, "
+                    f"C in [{_c_lo:.3e}, {_c_hi:.3e}] (no anchor; theta = 0)")
             if alpha_f is not None:
                 C_w0 = Function(Q_g, name="C_w0").project(alpha_f ** 2)
                 theta_f.assign(0.0)
@@ -1291,7 +1322,7 @@ def setup_model(restart_from=None, *, allow_timing_cache_a_ref=False,
                 s=s_c if s_c is not None else s,
                 # the sqrt control's friction is alpha^2 pointwise (the
                 # inversion's own form), not its cell average
-                b=b, C_w0=(alpha_f ** 2 if alpha_f is not None else C_w0),
+                b=b, C_w0=(alpha_f ** 2 if alpha_f is not None else C_exp if C_exp is not None else C_w0),
                 A4_base=A4_base, n_flow=n_flow, n_flow_val=n_flow_val,
                 m_slide=m_slide_val, tau_c=tau_c, alpha=alpha_reg, H_ref=H_ref,
                 fric_law=friction, N_ref=N_ref,
@@ -1327,7 +1358,7 @@ def setup_model(restart_from=None, *, allow_timing_cache_a_ref=False,
                     phi_c if phi_c is not None else phi_f,
                     H=h_c if h_c is not None else h,
                     s=s_c if s_c is not None else s,
-                    b=b, C_w0=(alpha_f ** 2 if alpha_f is not None else C_w0),
+                    b=b, C_w0=(alpha_f ** 2 if alpha_f is not None else C_exp if C_exp is not None else C_w0),
                     A4_base=A4_base, n_flow=n_flow, n_flow_val=n_flow_val,
                     m_slide=m_slide_val, tau_c=tau_c, alpha=alpha_reg, H_ref=H_ref,
                     subelement=subelement, fric_law=friction, nhat_cap=budd_nhat_cap,
@@ -1744,6 +1775,8 @@ def setup_model(restart_from=None, *, allow_timing_cache_a_ref=False,
         # residual's friction, carried into every checkpoint so a restart
         # assembles the same form.
         "alpha": alpha_f,
+        # C = C_ref exp(alpha) of an exp-control MAP (None otherwise), idem
+        "C_exp": C_exp,
         "C_w0": C_w0,
         "N_ref": N_ref,
         "subelement": subelement,
@@ -1831,6 +1864,8 @@ def save_model_state(ctx, final_path, t_now, extra_attrs=None):
             chk.save_function(ctx["C_w0"], name="C_w0")
         if ctx.get("alpha") is not None:
             chk.save_function(ctx["alpha"], name="sqrt_friction")
+        if ctx.get("C_exp") is not None:
+            chk.save_function(ctx["C_exp"], name="friction_exp")
         if ctx.get("N_ref") is not None:
             chk.save_function(ctx["N_ref"], name="N_ref")
         if ctx.get("A_prior") is not None:

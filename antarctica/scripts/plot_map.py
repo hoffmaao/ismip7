@@ -48,7 +48,8 @@ def load(map_path, m_slide=3.0):
                 f[name] = None
         attrs = {k: chk.get_attr("/", k) for k in ("lc", "lc_coarse", "buffer_m", "mesh_basename",
                                                     "friction_anchor_length", "friction_control",
-                                                    "subelement_friction", "misfit_scale")
+                                                    "subelement_friction", "misfit_scale",
+                                                    "friction_c_ref")
                  if chk.has_attr("/", k)}
     xy = mesh.coordinates.dat.data_ro
     tri = mesh.coordinates.cell_node_map().values
@@ -69,6 +70,11 @@ def load(map_path, m_slide=3.0):
         alpha = f["sqrt_friction"].dat.data_ro.copy()
         out["alpha"] = alpha
         out["C"] = (alpha ** 2)[tri].mean(axis=1) if alpha.shape[0] == xy.shape[0] else alpha ** 2
+    elif str(attrs.get("friction_control", "log")) == "exp":
+        # the exp control: C = C_ref exp(alpha), one constant reference
+        th_cell = theta[tri].mean(axis=1) if out["nodal_controls"] else theta
+        out["C"] = float(attrs["friction_c_ref"]) * np.exp(th_cell)
+        out["C_title"] = "C = C_ref exp(alpha), grounded"
     elif f["velocity_obs"] is not None:
         # the anchor theta deviates from, as the MAP records it (local if it predates the record)
         C_w0 = weertman_anchor(H, s, f["velocity_obs"], m_slide, Q_g,
@@ -132,7 +138,7 @@ def figure_map(d, label):
     if "C" in d:
         grounded = d["ice"] & (d["haf"] > 0)
         C = np.where(grounded, np.maximum(d["C"], 1e-6), np.nan)
-        panel(axes[r, 1], d, C, ("C = alpha^2, grounded" if d.get("alpha") is not None else "C = C_w0 exp(theta), grounded"), "plasma", LogNorm(1e-4, 1e-1), nodal=False, mask=grounded, units="MPa (m/yr)^-1/m")
+        panel(axes[r, 1], d, C, (d.get("C_title") or ("C = alpha^2, grounded" if d.get("alpha") is not None else "C = C_w0 exp(theta), grounded")), "plasma", LogNorm(1e-4, 1e-1), nodal=False, mask=grounded, units="MPa (m/yr)^-1/m")
     else:
         axes[r, 1].axis("off")
     panel(axes[r, 2], d, d["phi"], "log fluidity adjustment phi", "RdBu_r", TwoSlopeNorm(0, -3, 3), nodal=nodal)

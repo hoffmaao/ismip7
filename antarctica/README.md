@@ -574,7 +574,8 @@ solving `M_b(deltaT) = M_obs(b)` per basin by a bracketed root in plus or
 minus 3 K (`melt_selection.DT_WINDOW`; the toolbox searches plus or minus
 2 K and the protocol sets no window), and writes
 `antarctica/results/deltaT_per_basin_<lc>_K<K>.npz` (basin ids, offsets, K,
-residual, dM/dT, the slope and geometry conventions). A run applies it in
+residual, dM/dT, the slope and geometry conventions) with its
+`.source.json` sidecar (section 5). A run applies it in
 place of the tracked calibration with
 
 ```bash

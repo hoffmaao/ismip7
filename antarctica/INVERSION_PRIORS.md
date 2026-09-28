@@ -136,12 +136,44 @@ minutes.
 * 27 September: the Pattyn temperature is the fluidity prior; the thermal
   model stays available.
 
-## 5. Where the chains are (27 September, 19:30 EDT)
+## 5. The forward this hands to: the 2003 chain
+
+The forward protocol moved while this work was under way, and the MAPs here
+feed it. Indiana's work since 22 September, merged into `upstream/main` and
+into this branch: the historicals and OCX start in 2003 from the 2015
+geometry backdated by the Smith mean dH/dt (issue #117, `ISMIP7_GEOMETRY_BACKDATE`);
+a control or projection branches only from a historical that reached 2015,
+and the runner queues them once it has (`simulation.historical_endpoint`);
+the controls are forced with each ESM's ctrl ocean (issue #107); the 32 km
+cores and the controls with the surface-elevation feedback on and off from
+the 2003 start are recorded in `antarctica/reports`, and the 25 km rehearsal
+of the whole matrix (issue #138) is on a branch of `icepack/ismip7` that is
+not in this merge. What it means for a MAP from this branch: it is inverted
+on the 2015 geometry, the forward backdates that geometry on a cold start,
+and every MAP attribute the residual needs (`friction_control`,
+`friction_c_ref`, `fluidity_control`, `subelement_friction`, `exact_front`)
+travels through the chain's restart checkpoints. The 32 km probes in section
+3 start in 1850 and therefore ran with the backdating off.
+
+Two measurements from those probes for whoever restarts a sub-element MAP:
+on a restart the saved mixed state's residual under the rebuilt form is 1e8
+before the runner re-solves it (2.7e8 for the exp MAP, 1.5e8 for the sqrt one,
+recorded residuals 0.2 to 4), because the sub-element quadrature is rebuilt
+from the loaded geometry only when the diagnostic solve starts; the re-solve
+converges and the budget continues without a break, so the cost is one extra
+Newton solve per link. And a sqrt run warm-started from an exp MAP freezes
+the exp record's `prior_sigma_alpha` (1, in log units) although its own auto
+value would be the grounded median alpha (0.13): the handoff reports the
+changed objective, and a chain does not switch control mid-way, so it stands
+as a note.
+
+## 6. Where the chains are (27 September, 22:00 EDT)
 
 | job | mesh | control, prior | state |
 |---|---|---|---|
-| 1638543 | 2 km | exp, Pattyn | running, iteration 5 (read from the log) |
-| 1643735 | 2 km | sqrt, Pattyn | started 19:05 |
+| 1638543 | 2 km | exp, Pattyn | running, iteration 6 with 4 rescues (read from the log) |
+| 1643735 | 2 km | sqrt, Pattyn | running, iteration 2 (read from the log) |
+| 1638542 | 2 km | exp, thermal | cancelled at iteration 7 when the prior moved to Pattyn |
 | 1635853 | 2 km | sqrt, thermal | ended at iteration 9, MAP saved |
 | 1632739 | 2 km | sqrt, thermal, with dH/dt | ended at iteration 23, MAP saved |
 | 1631512-14 | 2 km | log, thermal, prior sweep sigma 0.3, 1, 3 | hit the 24 h wall at iterations 81, 91, 95; checkpoints at 80 |

@@ -2507,6 +2507,14 @@ def main():
         }
         atomic_write_json(timing_json, payload)
 
+    # Periodic checkpoint interval: accepted iterates on the TAO path,
+    # evaluations on the scipy path. A wall-clocked link resumes from the
+    # last one, so every iteration past it is repeated: 2 km link 1643735
+    # lost iterations 21 to 30 (about five hours) to the old interval of 20,
+    # and at five, with iterations of 3-6 h, links 1656863 and 1662734 each
+    # lost four. A 2 km MAP write costs a minute.
+    _ckpt_every = max(1, int(os.environ.get("ISMIP7_CHECKPOINT_EVERY_IT", "1")))
+
     def objective_and_gradient(x_vec):
         t_iter = perf_counter()
         global_to_func(x_vec[:global_ndof], theta)
@@ -2616,8 +2624,7 @@ def main():
             })
             _write_timing_json(phase="running", message="in progress")
 
-        # Periodic checkpoint every 20 iterations
-        if iteration_count[0] % 20 == 0:
+        if iteration_count[0] % _ckpt_every == 0:
             save_map(os.path.join(_map_dir, map_fn))
             PETSc.Sys.Print(f"    [checkpoint saved: iter {iteration_count[0]}]")
 
@@ -2801,6 +2808,8 @@ def main():
             # objective or its gradient wrong under C = C_ref exp(alpha)?
             from tlm_adjoint import taylor_test
             import time as _time
+            _theta0 = theta.copy(deepcopy=True)
+            _phi0 = phi.copy(deepcopy=True)
             reset_manager()
             start_manager()
             _J0 = forward_total(theta, phi)
@@ -2834,9 +2843,11 @@ def main():
                 f"  Taylor test (seed {_seed:g}, 4 sizes): minimum order {_order:.3f} "
                 f"(2 = the gradient is consistent with the objective; 1 = it is not) "
                 f"[{_time.perf_counter() - _t0:.0f}s]")
-            return SimpleNamespace(
-                x=np.concatenate([func_to_global(theta), func_to_global(phi)]),
-                nit=0, nfev=_nfev[0], message="GRAD_CHECK: stopped after the Taylor test")
+            theta.dat.data[:] = _theta0.dat.data_ro
+            phi.dat.data[:] = _phi0.dat.data_ro
+            PETSc.Sys.Print("  GRAD_CHECK: stopped after the Taylor test; no MAP written")
+            COMM_WORLD.barrier()
+            sys.exit(0)
         if INVERT == "both":
             _tao_forward, _tao_spaces, _tao_x, _tao_action = (
                 forward_total, [Q, Q], [theta, phi], _A_inv)
@@ -2883,14 +2894,6 @@ def main():
 
         _t_last = [perf_counter()]
         _ftol_stop = FunctionalDecreaseStop(ftol, min_iter)
-        # Periodic checkpoint interval in accepted iterations. A wall-clocked
-        # link resumes from the last one, so every iteration past it is
-        # repeated: 2 km link 1643735 lost iterations 21 to 30 (about five
-        # hours) to the old interval of 20, and at five, with iterations of
-        # 3-6 h, links 1656863 and 1662734 each lost four. A 2 km MAP write
-        # costs a minute.
-        _ckpt_every = max(1, int(os.environ.get("ISMIP7_CHECKPOINT_EVERY_IT", "1")))
-
         def _monitor(tao):
             its, f_val, gnorm, _cnorm, _xdiff, _reason = tao.getSolutionStatus()
             iteration_count[0] = int(its)

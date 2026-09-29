@@ -386,7 +386,8 @@ vertex sampling), each named so the converged 2500 m MAP is never touched, with
 partition, constraint and rank count from the site file.
 
 **The chain.** A 2 km inversion can outlast a wall limit. The inversion
-checkpoints `ISMIP7_MAP_OUT` every 20 iterates and warm-starts from it, so each
+checkpoints `ISMIP7_MAP_OUT` every `ISMIP7_CHECKPOINT_EVERY_IT` iterates (default
+1) and warm-starts from it, so each
 job queues its successor first with `--dependency=afterany`, copying partition,
 constraint, memory, time and task layout from `scontrol`. Every link exits at
 once if `<map>.done` exists, meaning the MAP reached disk. The driver writes

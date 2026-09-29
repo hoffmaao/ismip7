@@ -9,9 +9,10 @@
 #     ISMIP7_MESH=... ISMIP7_RASTER_SAMPLE=vertex ISMIP7_MAP_OUT=...
 #
 # CHAIN. A 2 km inversion can outlast a wall limit. The inversion checkpoints
-# ISMIP7_MAP_OUT every 20 iterates and can warm-start from it, so this script
-# queues its own successor FIRST (--dependency=afterany, so it runs whether
-# this job converged, timed out or lost its node), and each link exits at once
+# ISMIP7_MAP_OUT every ISMIP7_CHECKPOINT_EVERY_IT iterates (default 1) and can
+# warm-start from it, so this script queues its own successor FIRST
+# (--dependency=afterany, so it runs whether this job converged, timed out or
+# lost its node), and each link exits at once
 # if the "<map>.done" marker exists. Depth is capped by ISMIP7_CHAIN_MAX. The
 # successor copies this job's partition, constraint, memory, time and task
 # layout from scontrol, so a chain never changes rank count mid-run. The

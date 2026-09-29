@@ -1231,12 +1231,17 @@ reference melted on emptied land cells, which the melt law of these runs
 counted as afloat at zero thickness. The runs in this report predate the
 change, and their `lifmassbf` is zero.
 
-Note of 27 September 2026 (issue 136): the annual output now books the
-reference that a cell holding no ice at either end of a year receives against
-the melt and SMB that only cancelled it, and counts ice-free land as grounded
-in `ligroundf`; the melt law keeps off land. The runs in this report predate
-both. `FORWARD_RUN_READINESS.md` action 11 has the numbers, measured at 25 km
-on a mesh with the production layout's 20 km buffer.
+Note of 28 September 2026 (issue 136): the annual output now books the
+reference and the snowfall that a cell holding no ice at either end of a year
+receives against the melt and SMB that only cancelled them, writes the melt of
+every cell with no floating ice at year end as `lifmassbf`, books the ice that
+flows out across the mesh's exterior boundary as `licalvf`, and counts
+ice-free land as grounded in `ligroundf`; the melt law keeps off land. The
+runs in this report predate all of it. On these unbuffered meshes the front
+is the mesh's edge, so nearly all of their discharge left as outflux, which
+their `tendlicalvf` leaves out. `FORWARD_RUN_READINESS.md` action 11 has the
+numbers, measured at 25 km on a mesh with the production layout's 20 km
+buffer.
 
 ### True area
 

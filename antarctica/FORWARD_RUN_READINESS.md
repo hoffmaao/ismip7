@@ -131,8 +131,13 @@ Conventions chosen:
   (action 10);
 - `acabf` is that SMB, with the apparent-MB correction travelling separately
   as `acabf_correction`; on a cell holding no ice at either end of a year the
-  melt and SMB that only cancelled the correction are booked against it
+  melt and SMB that only cancelled the correction are booked against it, and
+  the snowfall the melt removed there against the melt (action 11);
+- `libmassbffl` is the melt of cells afloat at year end and `lifmassbf` the
+  melt of every other cell, so the fill of `libmassbffl` drops none of it
   (action 11);
+- `licalvf` is what the front removes and what flows out across the mesh's
+  exterior boundary (action 11);
 - `ligroundf` is booked into the first floating cell and signed positive from
   grounded to floating (section 9), with a cell on a bed at or above sea level
   counted as grounded;
@@ -640,29 +645,46 @@ Output and submission:
     booked at most 0.6 Gt/yr of the reference as melt; there the negative
     reference kept the emptied cells empty, removing 157 Gt/yr of inflow at
     2300 against 4.5 of melt, so clearing the reference would have refilled
-    them and changed the trajectory issue #104 is judging. Issue 136 therefore settled on booking:
-    `ismip7_output.net_reference` books the part of the melt and negative SMB
-    that only cancelled the reference against it, on cells holding no ice at
-    either end of a year, before the front-melt split; `forcing.afloat` keeps
-    the melt law off land; and the booking counts land as grounded, so flow
-    onto ice-free land is calving alone. `check_melt_booking.py` gates those
-    rules on any series. Both ssp585 arms rerun on that code from the
-    rehearsal's historicals (runlog `core08-25km-ssp585-mriesm20-i136on` and
-    `-i136off`) pass it. With the reference, the gridded `libmassbffl` leaves
-    out 28.0 Gt/yr at 2300 and 694.2 at most (2281), nearly all shelf ice
-    afloat at the start of the year, and 1,690 Gt/yr of the reference is booked
-    against the melt and SMB it cancelled; without it, 10.0 and 456.0 (2295).
-    `lifmassbf` moves by at most 2.9 Gt/yr in any year, no melt or `ligroundf`
-    falls on ice-free land, at most 5.5e-15 Gt/yr of the reference stays in the
-    sinks, and isschecker 0.5.1 reports zero errors on both C008 sets. Mass and
-    VAF match the rehearsal's to 1 Gt and 0.01 mm SLE. `tendligroundf` drops
-    by the land booking (17 Gt/yr at 2300 with the reference, 8 without), and
-    the forward's `melt_gtyr` and `clamp_gt` columns drop together by the melt
-    the law had prescribed on land films and the thickness floor returned, at
-    most 95 Gt/yr with the reference and 557 without (both in 2279). Issue 13
-    runs the check on the production ssp585 and fills the README's numbers
-    from its writer log. What is left is the submitted files, paired with
-    their historical. (issue #13)
+    them and changed the trajectory issue #104 is judging. Issue 136 therefore settled on booking,
+    in two steps. On 27 September: `ismip7_output.net_reference` books the part
+    of the melt and negative SMB that only cancelled the reference against it,
+    on cells holding no ice at either end of a year; `forcing.afloat` keeps the
+    melt law off land; and the booking counts land as grounded, so flow onto
+    ice-free land is calving alone. Both arms rerun on that code (runlog
+    `core08-25km-ssp585-mriesm20-i136on` and `-i136off`) still left shelf ice
+    afloat at the start of a year and gone by its end in the pixels the fill
+    blanks, 694.2 Gt/yr at most (2281) with the reference, and kept the snowfall
+    the melt removed on emptied cells in `acabf`. On 28 September the group
+    booked the melt of every cell with no floating ice at year end as
+    `lifmassbf` (`ismip7_output.split_melt`, on the floating mask the files
+    carry), and that snowfall against the melt (`net_snowfall`, after the
+    reference). The same reruns showed the transport's outflow across the mesh's
+    exterior boundary, about 500 Gt/yr in 2015, in no field and in the budget's
+    residual; `AnnualOutput.book_advance` books it into `licalvf` in the cell it
+    leaves. `check_melt_booking.py` gates all of it on any series, closes each
+    year's budget against `dlithkdt`, and checks `licalvf` against the
+    timeseries' `calv` plus `outflux`. Both arms rerun on the final code
+    (runlog `core08-25km-ssp585-mriesm20-i136con` and `-i136coff`, code a25033c)
+    pass it: nothing of the melt left out of the gridded fields, at most
+    5.6e-15 Gt/yr of the reference and none of the snowfall in the sinks, no
+    melt or `ligroundf` on ice-free land, the annual budget residual at most
+    4.9e-8 Gt/yr, and `licalvf` within 6.3e-4 Gt/yr of the timeseries.
+    `lifmassbf` is 1,314.7 Gt/yr at 2300 with the reference (1,930.5 at most,
+    2281) and 668.3 without (1,131.0 at most, 2295). The submitted 8 km files
+    close the budget over pixel area to 0.012 Gt/yr, the refreezing the fill
+    drops, and over true area to 26.2 Gt/yr, the af2 weighting of a transport
+    that conserves map-plane volume; with the reference they leave out the
+    reference the model applied, 4,065 Gt/yr at 2300 and 4,133 at most (2294),
+    which stays in `acabf_correction` (issue #104). isschecker 0.5.1 reports
+    zero errors on both C008 sets and every gate of `compare_scalars.py` holds.
+    Mass and VAF match the rehearsal's to 1 Gt and 0.01 mm SLE. `tendligroundf`
+    drops by the land booking (17 Gt/yr at 2300 with the reference, 8 without),
+    and the forward's `melt_gtyr` and `clamp_gt` columns drop together by the
+    melt the law had prescribed on land films and the thickness floor returned,
+    at most 95 Gt/yr with the reference and 557 without (both in 2279). Issue 13
+    runs the check on the production ssp585 and fills the README's numbers from
+    its writer log. What is left is the submitted files, paired with their
+    historical. (issue #13)
 12. **Adopt or refetch the forcing that predates the manifest.** Done on 21
     September, and the premise above was wrong. The first
     `audit_forcing_versions.py` run counts none of the Globus-era tree as

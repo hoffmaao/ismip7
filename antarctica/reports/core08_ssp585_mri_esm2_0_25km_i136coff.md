@@ -1,13 +1,9 @@
-# Core 8: ssp585_mri_esm2_0_i136on (25 km)
+# Core 8: ssp585_mri_esm2_0_i136coff (25 km)
 
-> **SUPERSEDED.** The booking in these annual files was superseded on 28 September 2026 (issue 136): the melt of every cell without floating ice at year end is now lifmassbf, the snowfall on cells holding no ice at either end is booked against its melt, and licalvf carries the outflux across the mesh's exterior boundary. The trajectory is the same; see core08-25km-ssp585-mriesm20-i136bon and -i136boff.
->
-> See `reports/MATRIX_STATUS.md` for which results are currently valid.
-
-- date: 2026-09-28
-- git: 498c099
-- log: `../logs/ismip7_fwd_10723838.out`
-- timeseries: `results/ssp585_mri_esm2_0_i136on_25000_timeseries.csv` (gitignored; this report is the tracked record)
+- date: 2026-09-29
+- git: a25033c
+- log: `../logs/ismip7_fwd_10746134.out`
+- timeseries: `results/ssp585_mri_esm2_0_i136coff_25000_timeseries.csv` (gitignored; this report is the tracked record)
 - observational audit: OFF TRACK
 - SMB climatology pool: COMPLETE 30/30 yr, 2000-2029 (historical+ssp126, window 2000-2029, acabf-anomaly)
 - Forcing provenance: atmosphere acabf-anomaly MRI-ESM2-0 ssp585 GEMB-SDBN1-8000m v2
@@ -25,7 +21,7 @@
 ## Run environment
 
 ```
-ISMIP7_APPARENT_MB=1
+ISMIP7_APPARENT_MB=0
 ISMIP7_AUTO_RESUME=1
 ISMIP7_BNDIDS=/N/project/ice_rheology/ISMIP7/antarctica/results/rehearsal_25km/mesh/boundary_ids_antarctica_250000_25000_buffered20000.json
 ISMIP7_BUFFER_M=20000
@@ -34,10 +30,10 @@ ISMIP7_CLIM_END=2029    # default (not exported)
 ISMIP7_CLIM_SCENARIO=ssp126    # default (not exported)
 ISMIP7_CLIM_START=2000    # default (not exported)
 ISMIP7_CONTINUATION_STEPS=8    # default (not exported)
-ISMIP7_DATA_ROOT=/N/project/ice_rheology/ISMIP7/ISMIP7/AIS
+ISMIP7_DATA_ROOT=/N/scratch/dlilien/ismip7_issue136/data/AIS
 ISMIP7_DELTAT_PER_BASIN_NPZ=/N/project/ice_rheology/ISMIP7/antarctica/results/rehearsal_25km/calibration/deltaT_per_basin_25000_K6.500e-05.npz
-ISMIP7_DIAGNOSTIC_LINEAR_SOLVER=scpc_gamg
-ISMIP7_DIAGNOSTIC_LINEAR_SOLVER_CANONICAL=scpc_gamg    # resolved canonical mode
+ISMIP7_DIAGNOSTIC_LINEAR_SOLVER=scpc_mumps
+ISMIP7_DIAGNOSTIC_LINEAR_SOLVER_CANONICAL=scpc_mumps    # resolved canonical mode
 ISMIP7_DT=0.025
 ISMIP7_ESM=MRI-ESM2-0
 ISMIP7_EXPERIMENT=ssp585_mri_esm2
@@ -59,8 +55,8 @@ ISMIP7_OBS_DATA_ROOT=/N/project/ice_rheology/ISMIP7/antarctica/data
 ISMIP7_OUTPUT=1
 ISMIP7_RESCUE_ENABLED=1    # default (not exported)
 ISMIP7_RESCUE_MAXIT=600    # default (not exported)
-ISMIP7_RESTART=/N/project/ice_rheology/ISMIP7/antarctica/results/rehearsal_25km/results/hist_mri_esm2_0_rehamb_25000_final.h5
-ISMIP7_RUN_TAG=i136on
+ISMIP7_RESTART=/N/project/ice_rheology/ISMIP7/antarctica/results/rehearsal_25km/results/hist_mri_esm2_0_rehnoamb_25000_final.h5
+ISMIP7_RUN_TAG=i136coff
 ISMIP7_SIN_ALPHA_ANT=0.005115    # default (not exported)
 ISMIP7_SMB_ELEVATION_FEEDBACK=1
 ISMIP7_SNES_ATOL=1e-50    # default (not exported)
@@ -87,25 +83,16 @@ OMP_NUM_THREADS=1
 ```json
 {
   "continuation_steps": 8,
-  "diagnostic_label": "exact-local-condensation-gamg",
-  "diagnostic_mode": "scpc_gamg",
-  "diagnostic_mode_requested": "scpc_gamg",
+  "diagnostic_label": "exact-local-condensation-mumps-ptscotch",
+  "diagnostic_mode": "scpc_mumps",
+  "diagnostic_mode_requested": "scpc_mumps",
   "diagnostic_petsc_options": {
-    "condensed_field_ksp_atol": 5e-07,
-    "condensed_field_ksp_gmres_restart": 100,
-    "condensed_field_ksp_max_it": 1000,
-    "condensed_field_ksp_rtol": 1e-12,
-    "condensed_field_ksp_type": "fgmres",
+    "condensed_field_ksp_type": "preonly",
+    "condensed_field_mat_mumps_icntl_28": 2,
+    "condensed_field_mat_mumps_icntl_29": 1,
     "condensed_field_mat_type": "aij",
-    "condensed_field_mg_coarse_ksp_max_it": 50,
-    "condensed_field_mg_coarse_ksp_rtol": 0.01,
-    "condensed_field_mg_coarse_ksp_type": "gmres",
-    "condensed_field_mg_coarse_pc_type": "jacobi",
-    "condensed_field_mg_levels_ksp_type": "chebyshev",
-    "condensed_field_mg_levels_pc_type": "jacobi",
-    "condensed_field_near_nullspace": "none",
-    "condensed_field_pc_gamg_parallel_coarse_grid_solver": null,
-    "condensed_field_pc_type": "gamg",
+    "condensed_field_pc_factor_mat_solver_type": "mumps",
+    "condensed_field_pc_type": "lu",
     "ksp_max_it": 1000,
     "ksp_rtol": 1e-06,
     "ksp_type": "fgmres",
@@ -161,29 +148,29 @@ OMP_NUM_THREADS=1
 
 year | vaf_mm_sle | mass_gt | smb_gtyr | melt_gtyr | outflux_gtyr | calv_gt | clamp_gt | resid_gt | amb_gtyr | collapse_flagged_cells | collapse_removed_cells | collapse_held_cells
 --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | ---
-2015.025000 | 57302.068335 | 23876392.96 | 2503.6267 | 1129.9841 | 494.2141 | 31.0131 | 0.0223 | -0.0000 | 219.2613 | 0 | 0 | 0
-2055.875000 | 57314.980092 | 23873492.31 | 2669.2802 | 1286.1481 | 482.3880 | 30.2228 | 1.4645 | 0.0000 | 227.6262 | 0 | 0 | 0
-2096.725000 | 57361.576710 | 23857461.16 | 2420.4895 | 3495.6136 | 403.4427 | 25.8485 | 4.6641 | 0.0000 | 221.3463 | 0 | 0 | 0
-2137.575000 | 57422.904231 | 23729677.75 | 842.6523 | 7316.4014 | 113.4163 | 12.2608 | 40.9057 | -0.0000 | 236.6080 | 0 | 0 | 0
-2178.450000 | 57464.698229 | 23484609.65 | -1500.8743 | 16110.5351 | 37.9697 | 7.1029 | 251.2862 | 0.0000 | 239.0326 | 0 | 0 | 0
-2219.300000 | 57488.217556 | 23311696.15 | -3805.6406 | 23988.6110 | 17.2194 | 5.1279 | 589.9634 | 0.0000 | 267.3601 | 0 | 0 | 0
-2260.150000 | 57490.002292 | 23234672.81 | -2847.1919 | 23396.2452 | 40.9177 | 6.6601 | 629.4347 | -0.0000 | 307.3820 | 0 | 0 | 0
-2301.000000 | 57482.912204 | 23128803.47 | -6524.4650 | 34648.7756 | 13.2963 | 3.8860 | 946.7247 | 0.0000 | 235.0614 | 0 | 0 | 0
+2015.025000 | 57328.442064 | 23873787.79 | 2502.4827 | 896.0667 | 625.1507 | 31.7580 | 0.0285 | -0.0000 | 0.0000 | 0 | 0 | 0
+2055.875000 | 57469.294424 | 23877295.23 | 2665.6137 | 804.4298 | 493.8391 | 26.2090 | 0.2114 | 0.0000 | 0.0000 | 0 | 0 | 0
+2096.725000 | 57641.086988 | 23882798.39 | 2427.2105 | 2460.5910 | 405.3267 | 23.5477 | 1.4245 | 0.0000 | 0.0000 | 0 | 0 | 0
+2137.575000 | 57830.897454 | 23790447.03 | 903.6867 | 5366.3143 | 215.0410 | 13.3122 | 24.4222 | 0.0000 | 0.0000 | 0 | 0 | 0
+2178.450000 | 58003.298732 | 23603099.96 | -1259.9264 | 14070.6886 | 58.5442 | 5.0589 | 269.8337 | -0.0000 | 0.0000 | 0 | 0 | 0
+2219.300000 | 58149.172008 | 23510425.11 | -3467.6992 | 22124.0776 | 10.6153 | 2.0839 | 583.2406 | 0.0000 | 0.0000 | 0 | 0 | 0
+2260.150000 | 58294.169051 | 23493784.85 | -2423.7456 | 21888.2691 | 5.0867 | 1.5724 | 623.6868 | 0.0000 | 0.0000 | 0 | 0 | 0
+2301.000000 | 58402.112150 | 23463649.12 | -5976.1871 | 32127.5911 | 3.0572 | 1.2313 | 885.6226 | 0.0000 | 0.0000 | 0 | 0 | 0
 
 ## Observational audit
 
 ```
-ISMIP6-track audit: ssp585_mri_esm2_0_i136on_25000_timeseries.csv
+ISMIP6-track audit: ssp585_mri_esm2_0_i136coff_25000_timeseries.csv
   11440 steps, 2015.0->2301.0, dt=0.025 yr
 
   quantity                      run   obs/ISMIP6 envelope    verdict
-  SMB                        -209.5   [ 2000.0,  2900.0] Gt/yr     FAIL
-  shelf basal melt          12989.1   [  600.0,  1800.0] Gt/yr     FAIL
-  front discharge             785.7   [  700.0,  2400.0] Gt/yr     PASS
-  dM/dt (post-2016)         -2622.6   [ -400.0,   200.0] Gt/yr     FAIL
-  dVAF/dt (post-2016)           0.6   [   -2.0,     2.0] mm SLE/yr PASS
+  SMB                         -54.6   [ 2000.0,  2900.0] Gt/yr     FAIL
+  shelf basal melt          11602.4   [  600.0,  1800.0] Gt/yr     FAIL
+  front discharge             710.8   [  700.0,  2400.0] Gt/yr     PASS
+  dM/dt (post-2016)         -1438.1   [ -400.0,   200.0] Gt/yr     FAIL
+  dVAF/dt (post-2016)           3.8   [   -2.0,     2.0] mm SLE/yr WARN
   budget residual               0.0   [   -0.5,     0.5] Gt/yr     PASS
-  no discharge runaway       1743.7   [yr-median < 6000, growth<1.5x for 2 yr] PASS
+  no discharge runaway       1944.1   [yr-median < 6000, growth<1.5x for 2 yr] PASS
 
   OFF TRACK (3 FAIL rows)
 ```

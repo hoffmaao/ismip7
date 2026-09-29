@@ -1,6 +1,10 @@
 # Core 8: ssp585_mri_esm2_0_i136off (25 km)
 
-- date: 2026-09-27
+> **SUPERSEDED.** The booking in these annual files was superseded on 28 September 2026 (issue 136): the melt of every cell without floating ice at year end is now lifmassbf, the snowfall on cells holding no ice at either end is booked against its melt, and licalvf carries the outflux across the mesh's exterior boundary. The trajectory is the same; see core08-25km-ssp585-mriesm20-i136bon and -i136boff.
+>
+> See `reports/MATRIX_STATUS.md` for which results are currently valid.
+
+- date: 2026-09-28
 - git: 498c099
 - log: `../logs/ismip7_fwd_10723839.out`
 - timeseries: `results/ssp585_mri_esm2_0_i136off_25000_timeseries.csv` (gitignored; this report is the tracked record)

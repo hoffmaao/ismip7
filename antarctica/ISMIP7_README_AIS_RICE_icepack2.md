@@ -60,7 +60,8 @@ shallow-shelf formulation on Firedrake 2026.4.1)
    `acabf_correction`, in the same units, for anyone closing the budget;
    those files are not uploaded. In a cell holding no ice at either end of a
    year, the part of the melt and negative SMB that only cancelled the
-   reference is booked against it (see the front-melt paragraph below).
+   reference is booked against it, and `acabf` leaves out the snowfall the
+   melt removed there (see the front-melt paragraph below).
 
 ## Projections: ice-ocean and ice-shelf fracture (AIS)
 
@@ -99,8 +100,9 @@ shallow-shelf formulation on Firedrake 2026.4.1)
    Partially floating cells: the geometry is cell-wise (DG0); a cell is
    floating when its height above flotation is negative and then receives
    the full melt, grounded cells none. No melt law acts on vertical ice
-   fronts; the melt of ice that flows into an emptied marine cell is
-   reported as front melt, `lifmassbf` (see the conventions below).
+   fronts; the melt of every cell without floating ice at year end, most of
+   it ice that flows into an emptied marine cell, is reported as front melt,
+   `lifmassbf` (see the conventions below).
 7. Grounding line: the flotation criterion per cell (height above
    flotation from thickness and bed); no sub-cell parameterisation.
    Basal friction is a regularised Coulomb law (`c0 = 0.5`, exact-zero on
@@ -250,6 +252,9 @@ Burgard et al. 2022; Hahn, Mikula and Frolkovic 2025; Smith et al. 2020.
 Signs (discussions #16 and #22). `acabf`, `libmassbffl`, `lifmassbf` and
 `licalvf` are positive for mass gained by the ice, so melt and calving are
 negative.
+`licalvf` carries all the ice that leaves the model, booked in the cell it
+leaves: what the pinned front removes, and what flows out across the mesh's
+exterior boundary before the front can remove it (issue 136).
 `ligroundf` is the upwind flux across the grounding line from the velocity
 the transport used, through the facets between a grounded and a floating cell
 on the native mesh, divided by the area of the first FLOATING cell and
@@ -279,47 +284,70 @@ Sea-level estimates
 (`sla20`, `slg20`, `slvaf`) are not computed by the model; **[confirm #13]** that
 `ismip7-scalar-processing` was run on the gridded files.
 
-Front melt, chosen by the group on 25 September 2026 (issue 109). The
-request fills `libmassbffl` wherever no ice floats at year end, so the melt
-of ice gone within the year would reach no gridded field. Most of it is
-grounded ice that goes afloat into a marine cell whose shelf has gone, and
-melts on arrival. The model reports that melt as `lifmassbf`, which the
-request never fills: in a cell with its bed below sea level and no ice (1 m
-or less) at either end of the year, the share of the year's melt that the
-inflow supplied, out of what the inflow and the positive SMB supplied
-together. Such a cell under the pinned front keeps receiving the frozen
-apparent-mass-balance reference, whose ice the model's state never holds,
-since the melt and the negative SMB remove it in the step it arrives. That
-part of the melt and SMB is booked against the reference before the split
-(item 5), so on a cell holding no ice at either end of the year `acabf`,
-`libmassbffl` and `lifmassbf` carry what the inflow and the positive SMB
-supplied, and the two melt fields sum to the melt the model applied less
-that part. A negative reference on such a cell is a sink on real ice: what
-it removes of the inflow and the positive SMB stays in `acabf_correction`
-and reaches no submitted field. No melt falls on a cell whose bed is at or above sea level
-(item 6). Every yearly file names this booking, and the writer refuses a series
-that mixes it with an earlier one, so a chain must not change code versions
-across it. Where the melt lands depends on the time step: the thickness
-floor lets a cell melt only the ice it held when a step began, so a
-receiving cell ends the year holding the last step's inflow, and where that
-exceeds 1 m the cell counts as ice and its melt stays in `libmassbffl`,
-where the fill keeps it. A 25 km MRI-ESM2-0 ssp585 on the production layout's
-20 km buffer books these magnitudes (27 September 2026):
+Front melt, chosen by the group on 25 September 2026 (issue 109) and extended
+on 28 September (issue 136). The request fills `libmassbffl` wherever no ice
+floats at year end, so the melt of a cell that ends the year without floating
+ice would reach no gridded field. The model writes the melt of every such cell
+as `lifmassbf`, which the request never fills, and keeps the melt of cells
+afloat at year end in `libmassbffl`, where the fill keeps it, so the two
+gridded fields carry all the melt the model applied, less the part booked
+against the reference and the snowfall (below). `lifmassbf` holds three kinds:
+ice that flowed into a cell holding no ice (1 m or less) at either end of the
+year and melted there, most of it grounded ice that goes afloat into a marine
+cell whose shelf has gone; shelf ice afloat when the year began and gone by its
+end; and cells grounded at the end of the year that floated during it. The
+floating mask is the one the files carry, with a floating cell within 1 cm of
+the bed written as grounded. Refreezing stays in `libmassbffl`, since
+`lifmassbf`'s range excludes it. Under the pinned front a cell holding no ice
+at either end keeps receiving the frozen apparent-mass-balance reference, and
+snow falls on it, and the melt and the negative SMB remove both before the
+model's state holds them. That part of the melt and SMB is booked against the
+reference first and the snowfall next (item 5), so on such a cell `acabf` and
+the melt fields carry what came in by flow. A negative reference on such a
+cell is a sink on real ice: what it removes of the inflow stays in
+`acabf_correction` and reaches no submitted field. No melt falls on a cell
+whose bed is at or above sea level (item 6). Every yearly file names this
+booking, and the writer refuses a series that mixes it with an earlier one, so
+a chain must not change code versions across it. A 25 km MRI-ESM2-0 ssp585 on
+the production layout's 20 km buffer books these magnitudes (28 September
+2026; `lifmassbf`, its parts and the negative reference summed over map-plane
+area by `check_melt_booking.py`, the netted reference and snowfall over true
+area by the model's yearly log):
 
 | Gt/yr | 2100 | 2200 | 2300 | largest |
 |---|---|---|---|---|
-| with the reference: `lifmassbf` | 18.5 | 757.1 | 1,275.6 | 1,331.1 (2270) |
-| with the reference: `libmassbffl` the fill leaves out | 6.8 | 106.7 | 28.0 | 694.2 (2281) |
-| with the reference: reference booked against the melt and SMB it cancelled | 7 | 518 | 1,690 | 1,727 (2297) |
-| with the reference: inflow and positive SMB the negative reference removes on cells holding no ice | 113 | 618 | 779 | 951 (2286) |
-| without the reference: `lifmassbf` | 7.4 | 272.2 | 658.4 | 722.0 (2299) |
-| without the reference: `libmassbffl` the fill leaves out | 5.4 | 72.4 | 10.0 | 456.0 (2295) |
+| **with the reference** | | | | |
+| `lifmassbf` | 21.9 | 883.0 | 1,314.7 | 1,930.5 (2281) |
+| of it, inflow melted in cells holding no ice at either end | 15.7 | 756.3 | 1,275.6 | 1,330.7 (2270) |
+| of it, shelf ice afloat when the year began | 6.2 | 126.7 | 39.1 | 755.2 (2281) |
+| reference booked against the melt and SMB it cancelled | 7 | 518 | 1,690 | 1,736 (2297) |
+| snowfall booked against the melt | 6.6 | 4.5 | 2.0 | 19.0 (2286) |
+| what the negative reference removes on cells holding no ice | 112.7 | 617.6 | 779.2 | 951.2 (2286) |
+| **without the reference** | | | | |
+| `lifmassbf` | 11.4 | 349.1 | 668.3 | 1,131.0 (2295) |
+| of it, inflow melted in cells holding no ice at either end | 7.4 | 272.2 | 658.4 | 722.0 (2299) |
+| of it, shelf ice afloat when the year began | 4.0 | 76.9 | 9.9 | 500.9 (2295) |
+| snowfall booked against the melt | 4.9 | 7.5 | 3.0 | 30.9 (2286) |
 
-What the fill leaves out is shelf ice afloat at the start of a year and gone
-by its end (692.5 of the 694.2 Gt/yr in 2281), and the positive SMB's share
-of the melt in cells holding no ice at either end of the year (15 Gt/yr at
-most with the reference, 30 without).
+The third kind of `lifmassbf` is 2.4 Gt/yr at most with the reference and 8.8
+without. `libmassbffl` leaves out no melt: the fill drops only refreezing,
+0.012 Gt/yr at most with the reference and 0.005 without.
 **[confirm #13]** the production ssp585's numbers, which the writer prints.
+
+Mass budget. Summed over pixel area, `acabf` + `libmassbffl` + `lifmassbf` +
+`libmassbfgr` + `licalvf` equals `dlithkdt` times the ice density to
+0.012 Gt/yr in every year of the two runs above, the refreezing the fill drops;
+`libmassbfgr` is zero, since no melt falls on grounded ice. The yearly change
+of `lithk` agrees with `dlithkdt` to 9.9 Gt/yr, the ice of 1 m or less that
+`lithk` writes as zero.
+`licalvf` carries the outflux across the mesh's exterior boundary: 495 Gt/yr
+in 2015 with the reference and 627 without, 14 and 3 in 2300. Summed over true
+area, as the scalars are, the two sides differ by 26.2 Gt/yr at most (2017,
+without the reference) and 6.4 in 2300: the transport conserves volume on the
+map plane, and af2 weights the cells a year's flow moves ice between
+differently. With the reference, the submitted fields leave out the reference
+the model applied (item 5): 220 Gt/yr in 2015, 361 in 2100, 3,170 in 2200 and
+4,065 in 2300. Whether the submission keeps it is issue 104's.
 
 Compliance: isschecker 0.5.1 of 22 September 2026, which grades a range
 finding by the share of values outside the bounds (discussion #46). A 32 km

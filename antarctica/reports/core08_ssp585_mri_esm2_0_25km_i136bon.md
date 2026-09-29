@@ -1,13 +1,13 @@
-# Core 8: ssp585_mri_esm2_0_i136on (25 km)
+# Core 8: ssp585_mri_esm2_0_i136bon (25 km)
 
-> **SUPERSEDED.** The booking in these annual files was superseded on 28 September 2026 (issue 136): the melt of every cell without floating ice at year end is now lifmassbf, the snowfall on cells holding no ice at either end is booked against its melt, and licalvf carries the outflux across the mesh's exterior boundary. The trajectory is the same; see core08-25km-ssp585-mriesm20-i136bon and -i136boff.
+> **SUPERSEDED.** Stopped on 28 September 2026 at t = 2155.8, with the years through 2154 written: from 2153 the forcing file so_AIS_MRI-ESM2-0_ssp585_ocean_v3_2151-2160.nc on /N/project read at 0.34 MB/s while the rest of the tree read normally, the ranks sat in I/O wait for about 25 minutes a model year, and the job was cancelled. Superseded by core08-25km-ssp585-mriesm20-i136con, the same run on the final code.
 >
 > See `reports/MATRIX_STATUS.md` for which results are currently valid.
 
 - date: 2026-09-28
-- git: 498c099
-- log: `../logs/ismip7_fwd_10723838.out`
-- timeseries: `results/ssp585_mri_esm2_0_i136on_25000_timeseries.csv` (gitignored; this report is the tracked record)
+- git: 2ba30b8
+- log: `../logs/ismip7_fwd_10737272.out`
+- timeseries: `results/ssp585_mri_esm2_0_i136bon_25000_timeseries.csv` (gitignored; this report is the tracked record)
 - observational audit: OFF TRACK
 - SMB climatology pool: COMPLETE 30/30 yr, 2000-2029 (historical+ssp126, window 2000-2029, acabf-anomaly)
 - Forcing provenance: atmosphere acabf-anomaly MRI-ESM2-0 ssp585 GEMB-SDBN1-8000m v2
@@ -60,7 +60,7 @@ ISMIP7_OUTPUT=1
 ISMIP7_RESCUE_ENABLED=1    # default (not exported)
 ISMIP7_RESCUE_MAXIT=600    # default (not exported)
 ISMIP7_RESTART=/N/project/ice_rheology/ISMIP7/antarctica/results/rehearsal_25km/results/hist_mri_esm2_0_rehamb_25000_final.h5
-ISMIP7_RUN_TAG=i136on
+ISMIP7_RUN_TAG=i136bon
 ISMIP7_SIN_ALPHA_ANT=0.005115    # default (not exported)
 ISMIP7_SMB_ELEVATION_FEEDBACK=1
 ISMIP7_SNES_ATOL=1e-50    # default (not exported)
@@ -162,28 +162,28 @@ OMP_NUM_THREADS=1
 year | vaf_mm_sle | mass_gt | smb_gtyr | melt_gtyr | outflux_gtyr | calv_gt | clamp_gt | resid_gt | amb_gtyr | collapse_flagged_cells | collapse_removed_cells | collapse_held_cells
 --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | ---
 2015.025000 | 57302.068335 | 23876392.96 | 2503.6267 | 1129.9841 | 494.2141 | 31.0131 | 0.0223 | -0.0000 | 219.2613 | 0 | 0 | 0
-2055.875000 | 57314.980092 | 23873492.31 | 2669.2802 | 1286.1481 | 482.3880 | 30.2228 | 1.4645 | 0.0000 | 227.6262 | 0 | 0 | 0
-2096.725000 | 57361.576710 | 23857461.16 | 2420.4895 | 3495.6136 | 403.4427 | 25.8485 | 4.6641 | 0.0000 | 221.3463 | 0 | 0 | 0
-2137.575000 | 57422.904231 | 23729677.75 | 842.6523 | 7316.4014 | 113.4163 | 12.2608 | 40.9057 | -0.0000 | 236.6080 | 0 | 0 | 0
-2178.450000 | 57464.698229 | 23484609.65 | -1500.8743 | 16110.5351 | 37.9697 | 7.1029 | 251.2862 | 0.0000 | 239.0326 | 0 | 0 | 0
-2219.300000 | 57488.217556 | 23311696.15 | -3805.6406 | 23988.6110 | 17.2194 | 5.1279 | 589.9634 | 0.0000 | 267.3601 | 0 | 0 | 0
-2260.150000 | 57490.002292 | 23234672.81 | -2847.1919 | 23396.2452 | 40.9177 | 6.6601 | 629.4347 | -0.0000 | 307.3820 | 0 | 0 | 0
-2301.000000 | 57482.912204 | 23128803.47 | -6524.4650 | 34648.7756 | 13.2963 | 3.8860 | 946.7247 | 0.0000 | 235.0614 | 0 | 0 | 0
+2035.150000 | 57303.669468 | 23874234.24 | 2471.4023 | 1003.5138 | 489.1384 | 30.8603 | 1.0247 | 0.0000 | 218.8884 | 0 | 0 | 0
+2055.275000 | 57314.637166 | 23873508.54 | 2669.7434 | 1294.4324 | 482.4440 | 30.2931 | 1.4673 | 0.0000 | 227.2542 | 0 | 0 | 0
+2075.400000 | 57333.708603 | 23873688.75 | 3021.0150 | 1672.6966 | 473.2923 | 29.2482 | 2.5843 | 0.0000 | 225.8318 | 0 | 0 | 0
+2095.525000 | 57359.908547 | 23859717.32 | 3117.5882 | 3566.7329 | 410.7780 | 26.2447 | 4.2986 | -0.0000 | 221.4626 | 0 | 0 | 0
+2115.650000 | 57392.928442 | 23818220.41 | 2425.1037 | 5465.5014 | 259.5399 | 19.4576 | 16.1308 | -0.0000 | 229.1136 | 0 | 0 | 0
+2135.775000 | 57420.471871 | 23738093.70 | 1400.7854 | 7190.1366 | 122.5003 | 12.5519 | 39.2082 | 0.0000 | 238.1698 | 0 | 0 | 0
+2155.900000 | 57442.712639 | 23628999.28 | 433.4805 | 9495.4580 | 61.4957 | 9.1319 | 92.2392 | -0.0000 | 246.4053 | 0 | 0 | 0
 
 ## Observational audit
 
 ```
-ISMIP6-track audit: ssp585_mri_esm2_0_i136on_25000_timeseries.csv
-  11440 steps, 2015.0->2301.0, dt=0.025 yr
+ISMIP6-track audit: ssp585_mri_esm2_0_i136bon_25000_timeseries.csv
+  5636 steps, 2015.0->2155.9, dt=0.025 yr
 
   quantity                      run   obs/ISMIP6 envelope    verdict
-  SMB                        -209.5   [ 2000.0,  2900.0] Gt/yr     FAIL
-  shelf basal melt          12989.1   [  600.0,  1800.0] Gt/yr     FAIL
-  front discharge             785.7   [  700.0,  2400.0] Gt/yr     PASS
-  dM/dt (post-2016)         -2622.6   [ -400.0,   200.0] Gt/yr     FAIL
-  dVAF/dt (post-2016)           0.6   [   -2.0,     2.0] mm SLE/yr PASS
+  SMB                        2273.4   [ 2000.0,  2900.0] Gt/yr     PASS
+  shelf basal melt           3540.4   [  600.0,  1800.0] Gt/yr     FAIL
+  front discharge            1318.9   [  700.0,  2400.0] Gt/yr     PASS
+  dM/dt (post-2016)         -1767.4   [ -400.0,   200.0] Gt/yr     FAIL
+  dVAF/dt (post-2016)           1.0   [   -2.0,     2.0] mm SLE/yr PASS
   budget residual               0.0   [   -0.5,     0.5] Gt/yr     PASS
   no discharge runaway       1743.7   [yr-median < 6000, growth<1.5x for 2 yr] PASS
 
-  OFF TRACK (3 FAIL rows)
+  OFF TRACK (2 FAIL rows)
 ```

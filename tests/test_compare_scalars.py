@@ -150,9 +150,10 @@ def model_fields(moving_bed=False, front_melt=True):
     return {v: np.array(c, dtype="f4").astype(np.float64) for v, c in f.items()}, cov
 
 
-def native_scalars(f, cov, weight=1.0):
+def native_scalars(f, cov, weight=1.0, extra_melt=EXTRA_MELT):
     r"""What the model's mesh sums give, from the float32 grid as written.
-    ``weight`` is the area factor a forward with true-area scalars carries."""
+    ``weight`` is the area factor a forward with true-area scalars carries,
+    and ``extra_melt`` the melt it books where the fill blanks."""
     A = DX * DX
     w = np.asarray(weight, dtype=np.float64)
     out = {s: [] for s in cs.ST_SCALARS + tuple(s for s, _ in cs.FL_SCALARS)}
@@ -166,7 +167,7 @@ def native_scalars(f, cov, weight=1.0):
         z = {v: np.nan_to_num(f[v][k]) for v in FL_VARS}
         out["tendacabf"].append(np.sum(z["acabf"] * cov * w) * A)
         out["tendlibmassbfgr"].append(0.0)
-        out["tendlibmassbffl"].append(np.sum(z["libmassbffl"] * f["sftflf"][k] * w) * A + EXTRA_MELT)
+        out["tendlibmassbffl"].append(np.sum(z["libmassbffl"] * f["sftflf"][k] * w) * A + extra_melt)
         out["tendlicalvf"].append(np.sum(z["licalvf"] * w) * A)
         out["tendlifmassbf"].append(np.sum(z["lifmassbf"] * w) * A)
         out["tendligroundf"].append(np.sum(z["ligroundf"] * w) * A)
@@ -261,22 +262,23 @@ def tool_scalars(sub, datapath, params, refyear=2016):
 def build(tmp_path, *, rhow=1024.0, flip=False, moving_bed=False, shift_tool=False,
           perturb_sftgrf=False, csv_off=False, ground_near=False, whole_pixel=True,
           native_af2=False, stamp=True, native_scale=1.0, front_melt=True,
-          perturb_front=False):
+          perturb_front=False, extra_melt=EXTRA_MELT):
     r"""A submission, its grids, params.nc, the tool's output and the
     writer's overlap cache; returns the argument list for compare_scalars.
     ``whole_pixel=False`` writes the tree the way the writer did before its
     flux means were whole-pixel means. ``native_af2`` gives the model's
     scalars the area factor, ``stamp=False`` leaves the writer's stamp of
     their area off, and ``native_scale`` puts them that factor off.
-    ``front_melt=False`` writes lifmassbf as zero, and ``perturb_front`` puts
-    the model's tendlifmassbf one percent off the grid's in one year."""
+    ``front_melt=False`` writes lifmassbf as zero, ``perturb_front`` puts
+    the model's tendlifmassbf one percent off the grid's in one year, and
+    ``extra_melt`` is the melt the model books where the fill blanks."""
     sub = tmp_path / "tree" / "AIS" / "RICE" / "icepack2" / "CORE" / "C007"
     tool = tmp_path / "out" / "tool" / "nc" / "AIS" / "RICE" / "icepack2" / "CORE" / "C007"
     data = tmp_path / "grids"
     for d in (sub, tool, data):
         d.mkdir(parents=True)
     f, cov = model_fields(moving_bed=moving_bed, front_melt=front_melt)
-    N = native_scalars(f, cov, weight=AF2 if native_af2 else 1.0)
+    N = native_scalars(f, cov, weight=AF2 if native_af2 else 1.0, extra_melt=extra_melt)
     N = {s: [v * native_scale for v in vals] for s, vals in N.items()}
     if perturb_front:
         N["tendlifmassbf"][1] *= 1.01
@@ -572,6 +574,26 @@ def test_front_melt_in_a_pixel_with_no_floating_ice_sums_to_the_model(tmp_path):
     args, _, _ = build(old, front_melt=False)
     assert cs.main(args) == 0, (old / "cmp.md").read_text()
     assert "tendlifmassbf: zero in every year" in (old / "cmp.md").read_text()
+
+
+def test_a_booking_that_leaves_no_melt_where_the_fill_blanks_says_so(tmp_path):
+    r"""Issue #136 books the melt of every cell without floating ice at year
+    end as lifmassbf, so libmassbffl's sums agree to the exact sums'
+    tolerance and the note says the fill leaves nothing out; melt the model
+    books where the fill blanks is still named."""
+    args, _, _ = build(tmp_path, native_af2=True, extra_melt=0.0)
+    assert cs.main(args + ["--native-af2"]) == 0, (tmp_path / "cmp.md").read_text()
+    md = (tmp_path / "cmp.md").read_text()
+    assert "tendlibmassbffl: the fill leaves out no melt beyond the exact sums' tolerance" in md
+    assert "which the fill leaves out" not in md
+
+    leak = tmp_path / "leak"
+    leak.mkdir()
+    args, _, _ = build(leak, native_af2=True)
+    assert cs.main(args + ["--native-af2"]) == 0, (leak / "cmp.md").read_text()
+    md = (leak / "cmp.md").read_text()
+    assert "in pixels with no floating ice at year end, which the fill leaves out" in md
+    assert "no melt beyond" not in md
 
 
 def test_a_model_front_melt_off_the_grid_fails(tmp_path):

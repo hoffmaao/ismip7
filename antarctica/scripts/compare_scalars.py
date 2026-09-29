@@ -58,7 +58,10 @@ year by year and splits every difference into named parts:
   ice at year end as lifmassbf, after booking the frozen apparent-MB
   reference and the snowfall a cell holding no ice at either end received
   against the melt that only cancelled them, so that residual is the
-  refreezing there alone. In a tree from before, it is the melt of shelf ice
+  refreezing there, inside the exact sums' tolerance, and the note says the
+  fill leaves out no melt (0.09 Gt/yr and 6 % of the tolerance at most on
+  both arms of the 25 km ssp585 of 28 September 2026). In a tree from
+  before, it is the melt of shelf ice
   gone within the year and the positive SMB's share of the melt of emptied
   cells, with the reference's share as well before its netting, and with the
   front melt too before issue #109, when lifmassbf was zero. tendlicalvf
@@ -627,10 +630,19 @@ def warnings_for(res, strict_share=RESID_SHARE):
         out.append("no --overlap: tendacabf's fill convention is not undone, so its "
                    "residual carries it")
     m = max(by["tendlibmassbffl"], key=lambda r: abs(r["d_resid"]))
-    where = ("in pixels with no floating ice at year end, which the fill leaves out" if whole
-             else "outside the writer's year-end floating mask")
-    out.append(f"tendlibmassbffl: the model's value carries "
-               f"{-m['d_resid'] * SECONDS_PER_YEAR / 1e12:+.1f} Gt/yr {where} ({m['year']})")
+    gt = -m["d_resid"] * SECONDS_PER_YEAR / 1e12
+    # the exact sums' tolerance: a booking that writes no melt where the fill
+    # blanks (issue #136) leaves only float32, the CSV's digits and af2
+    rel = F32 + res["af2_allow"]
+    if all(abs(r["d_resid"]) <= CSV_DIGITS * abs(r["N"]) + rel * r["L1"]
+           for r in by["tendlibmassbffl"]):
+        out.append(f"tendlibmassbffl: the fill leaves out no melt beyond the exact sums' "
+                   f"tolerance in any year (largest difference {gt:+.1f} Gt/yr, {m['year']})")
+    else:
+        where = ("in pixels with no floating ice at year end, which the fill leaves out" if whole
+                 else "outside the writer's year-end floating mask")
+        out.append(f"tendlibmassbffl: the model's value carries {gt:+.1f} Gt/yr {where} "
+                   f"({m['year']})")
     front = max(by["tendlifmassbf"], key=lambda r: abs(r["N"]))
     out.append(f"tendlifmassbf: the melt booked in cells with no floating ice at year end "
                f"(issues #109 and #136) is at most "

@@ -412,7 +412,11 @@ protocol's recommendation, from a tracked file,
 
 Every clone carries it, so a new machine runs with it and nothing is
 calibrated or copied. The offsets are stamped onto any mesh through the
-IMBIE2 8 km basin grid under `ISMIP7_DATA_ROOT`.
+IMBIE2 8 km basin grid under `ISMIP7_DATA_ROOT`. A fit records its inputs in
+the npz by basename (`obs_csv`, `imbie2_nc`, `inversion`;
+`calibrate_melt.input_names`), and the grid is found by that name under the
+data root. The tracked file predates that and still names three paths on IU
+Quartz; replacing it is open (issue #150).
 
 The forward applies the melt the file was fitted to:
 

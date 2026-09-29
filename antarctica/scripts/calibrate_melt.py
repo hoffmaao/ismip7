@@ -165,6 +165,19 @@ def _announce_obs_table():
     )
 
 
+def input_names():
+    r"""The inputs an offsets file records beside its numbers, by basename:
+    the observation table, the IMBIE2 basin grid and the mesh source. A
+    tracked offsets file carries no cluster path (AGENTS.md section 6), and
+    nothing needs one: ``obs_csv`` is only printed, ``inversion`` is read by
+    nothing, and ``forcing.imbie2_basin_path`` finds the grid ``imbie2_nc``
+    names under ``ISMIP7_DATA_ROOT``. calibrate_deltaT.py and
+    select_melt_parameters.py both write these entries from here."""
+    return {"obs_csv": os.path.basename(OBS_CSV),
+            "imbie2_nc": os.path.basename(IMBIE2_NC),
+            "inversion": os.path.basename(INV_H5)}
+
+
 def _k_out():
     r"""Where the calibration is written.
 

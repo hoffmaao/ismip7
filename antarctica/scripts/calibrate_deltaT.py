@@ -149,8 +149,7 @@ def main():
                                     else float("nan")),
                      sin_alpha_cap=(cm.SIN_ALPHA_CAP if melt_slope() == "local"
                                     else float("inf")),
-                     geometry_space=geometry_space(), obs_csv=cm.OBS_CSV,
-                     imbie2_nc=cm.IMBIE2_NC, inversion=cm.INV_H5,
+                     geometry_space=geometry_space(), **cm.input_names(),
                      dt_window=np.array(DT_WINDOW, dtype=float), **verdict)
         PETSc.Sys.Print(f"  wrote {fn}")
 

@@ -212,3 +212,46 @@ def test_a_projection_melts_with_the_offsets_and_never_reads_the_K_file(
     assert np.allclose(ctx["ocean_melt"].dat.data_ro, expect)
     out = capsys.readouterr().out
     assert "outside the fitted basins" in out
+
+
+def test_an_offsets_file_names_its_inputs_by_basename(tmp_path, clean, monkeypatch):
+    r"""A fit records its inputs by basename (calibrate_melt.input_names), so
+    an offsets file promoted into git carries no cluster path (AGENTS.md
+    section 6, issue #150), and the forward still stamps it through the
+    IMBIE2 grid it finds by that name under ISMIP7_DATA_ROOT."""
+    xr = pytest.importorskip("xarray")
+    from icepack2_tools.forcing import load_deltaT_per_basin
+    from icepack2_tools.melt_selection import offsets_on_cells, write_offsets
+    from icepack2_tools.runconfig import geometry_space
+    cm = _calibrate_deltaT().cm
+    root = tmp_path / "AIS"
+    grid = root / "parameterisations" / "ocean" / "imbie2" / "basin_numbers_ismip8km_v2.nc"
+    grid.parent.mkdir(parents=True)
+    x = np.array([0.0, 1.0, 2.0, 3.0])
+    bn = np.where(np.arange(4)[None, :] < 2, 3, 9).repeat(4, axis=0)
+    xr.Dataset({"basinNumber": (("y", "x"), bn)},
+               coords={"x": x, "y": x.copy()}).to_netcdf(grid)
+    monkeypatch.setenv("ISMIP7_DATA_ROOT", str(root))
+    # where a fit on a cluster reads its inputs
+    for name, path in (
+            ("OBS_CSV", "/N/project/ISMIP7/meltobs/Melt_Paolo_Davison_Adusumilli_imbie2.csv"),
+            ("IMBIE2_NC", "/N/project/ISMIP7/AIS/parameterisations/ocean/imbie2/"
+                          "basin_numbers_ismip8km_v2.nc"),
+            ("INV_H5", "/N/scratch/someone/mesh/antarctica_10000_1000_buffered20000.msh")):
+        monkeypatch.setattr(cm, name, path)
+    npz = str(tmp_path / "deltaT_per_basin_1000_K6.500e-05.npz")
+    bids, dT = np.array([3, 9]), np.array([0.3, -0.5])
+    write_offsets(npz, bids, dT, 6.5e-5, np.array([10.0, 20.0]),
+                  np.array([8.0, 25.0]), np.zeros(2), np.array([3.0, 4.0]),
+                  melt_slope="ant", sin_alpha_ant=5.115e-3,
+                  geometry_space=geometry_space(), **cm.input_names())
+    with np.load(npz) as d:
+        text = {k: str(d[k]) for k in d.files if d[k].dtype.kind == "U"}
+    assert (text["obs_csv"], text["imbie2_nc"], text["inversion"]) == (
+        "Melt_Paolo_Davison_Adusumilli_imbie2.csv", "basin_numbers_ismip8km_v2.nc",
+        "antarctica_10000_1000_buffered20000.msh")
+    assert not any(os.sep in v for v in text.values())
+    field, K = load_deltaT_per_basin(npz, np.array([0.4, 2.6, 40.0]),
+                                     np.array([0.1, 2.9, 40.0]))
+    assert K == 6.5e-5
+    assert np.array_equal(field, offsets_on_cells(dT, bids, np.array([3, 9, -1])))

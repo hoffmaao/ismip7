@@ -390,7 +390,20 @@ def atmosphere_path(scenario, esm="CESM2-WACCM", variable="acabf-anomaly",
     return os.path.join(parent, _resolve_version(parent, version))
 
 
-ATMOSPHERE_PRODUCTS = ("SDBN1", "GEMB-SDBN1")
+# The downscaled-atmosphere product names, in the order the reader takes them
+# when a tree holds more than one (atmosphere_product says why).
+ATMOSPHERE_PRODUCTS = ("GEMB-SDBN1", "SDBN1")
+
+
+def _atmosphere_product_in(scenario_dir, resolution):
+    r"""The first ``<product>-<resolution>`` of ``ATMOSPHERE_PRODUCTS`` that is
+    a directory under ``scenario_dir``, or None. audit_forcing_versions.py
+    asks this too, so the directory it audits is the one a run opens."""
+    for product in ATMOSPHERE_PRODUCTS:
+        name = f"{product}-{resolution}"
+        if os.path.isdir(os.path.join(scenario_dir, name)):
+            return name
+    return None
 
 
 def atmosphere_product(root, esm, scenario, resolution="8000m"):
@@ -399,13 +412,15 @@ def atmosphere_product(root, esm, scenario, resolution="8000m"):
     The core experiment uses ``SDBN1`` for CESM2-WACCM and ``GEMB-SDBN1`` for
     MRI-ESM2-0 (MRI's runoff needed an energy-balance step before the
     statistical downscaling; the directories were renamed in August 2026,
-    discussion #37, data unchanged). Whichever exists on disk wins, ``SDBN1``
-    first, so a tree fetched before the rename keeps working.
+    discussion #37, data unchanged). Whichever exists on disk wins, so a tree
+    fetched before the rename, holding MRI-ESM2-0 under ``SDBN1`` alone, keeps
+    working. Where both exist ``GEMB-SDBN1`` wins: a mirror re-sync lands
+    every new version under the current name, so the pre-rename ``SDBN1``
+    copy beside it can only fall behind (it holds MRI-ESM2-0 at v1, and the
+    reader pins v2).
     """
-    for product in ATMOSPHERE_PRODUCTS:
-        if os.path.isdir(os.path.join(_scenario_dir(root, esm, scenario), f"{product}-{resolution}")):
-            return f"{product}-{resolution}"
-    return f"SDBN1-{resolution}"
+    return (_atmosphere_product_in(_scenario_dir(root, esm, scenario), resolution)
+            or f"SDBN1-{resolution}")
 
 
 def ocean_path(scenario, esm="CESM2-WACCM", variable="tf",

@@ -4,16 +4,19 @@ r"""Data preflight for the ISMIP7 core experiments.
 Answers "which experiments can run on this machine right now?" in a few
 seconds, checking every input each core needs: mesh, MAP inversion,
 boundary ids, the melt calibration, RACMO, the OI climatology (core 11's stopgap),
+the Smith dH/dt that a backdated cold start reads,
 and the (ESM, scenario) atmosphere/ocean trees over the run period, the
 control's `ctrl` ocean among them. Honors the same
 environment knobs as the runs (ISMIP7_LC, ISMIP7_FRICTION,
-ISMIP7_OI_VERSION, ...).
+ISMIP7_OI_VERSION, ...). The run period is read from each core's driver,
+with ISMIP7_T_START and ISMIP7_T_END applied as that driver applies them, and
+a cold start that the geometry backdating refuses (issue 117) is BLOCKED.
 
 Usage:
     python scripts/preflight.py
     ISMIP7_LC=500 ISMIP7_FRICTION=regularized_coulomb python scripts/preflight.py
 """
-import os, sys, glob
+import ast, glob, math, os, sys
 
 _SCRIPTS = os.path.dirname(os.path.abspath(__file__))
 _ANT = os.path.dirname(_SCRIPTS)
@@ -23,10 +26,11 @@ sys.path.insert(0, _SCRIPTS)
 
 from icepack2_tools.forcing import (
     ISMIP7Atmosphere, ISMIP7Ocean, OCX, OCX_ATMOSPHERE_SOURCE,
-    _oi_climatology_path, _find_ismip7_data, imbie2_basin_path,
+    _oi_climatology_path, _find_ismip7_data, imbie2_basin_path, forcing_year,
 )
 from icepack2_tools.boundary import sidecar_path
 from icepack2_tools.naming import map_basename
+from icepack2_tools.obs_dhdt import dhdt_source
 from icepack2_tools.climatology import clim_start, clim_end, clim_scenario
 from icepack2_tools.runconfig import (
     obs_data_root,
@@ -34,7 +38,7 @@ from icepack2_tools.runconfig import (
     friction as _friction, geometry_space as _geometry_space, lc as _lc,
     lc_coarse as _lc_coarse, ocx_forcing as _ocx_forcing, ocx_ocean as _ocx_ocean,
     mesh_override, deltat_per_basin_npz, k_per_basin_npz,
-    melt_calibration_contract,
+    melt_calibration_contract, geometry_backdate_years,
 )
 DATA_DIR = obs_data_root()
 from mesh_naming import get_buffer_m, mesh_filename
@@ -50,19 +54,78 @@ CLIM_END = clim_end()
 CLIM_SCENARIO = clim_scenario()
 root = _find_ismip7_data()
 
+#: core, title, the driver under scripts/ that runs it, ESM, scenario. The
+#: years a core is checked over come from its driver (driver_period).
 CORES = [
-    (1, "hist CESM2-WACCM", "CESM2-WACCM", "historical", 1850, 2014),
-    (2, "hist MRI-ESM2-0", "MRI-ESM2-0", "historical", 1850, 2014),
-    (3, "ssp370 CESM2-WACCM", "CESM2-WACCM", "ssp370", 2015, 2100),
-    (4, "ssp370 MRI-ESM2-0", "MRI-ESM2-0", "ssp370", 2015, 2100),
-    (5, "ssp126 CESM2-WACCM", "CESM2-WACCM", "ssp126", 2015, 2300),
-    (6, "ssp126 MRI-ESM2-0", "MRI-ESM2-0", "ssp126", 2015, 2300),
-    (7, "ssp585 CESM2-WACCM", "CESM2-WACCM", "ssp585", 2015, 2300),
-    (8, "ssp585 MRI-ESM2-0", "MRI-ESM2-0", "ssp585", 2015, 2300),
-    (9, "CTRL2015 (CESM2-WACCM clim)", "CESM2-WACCM", None, 2015, 2300),
-    (10, "CTRL2015 (MRI-ESM2-0 clim)", "MRI-ESM2-0", None, 2015, 2300),
-    (11, "OCX obs-constrained", None, None, 1979, 2025),
+    (1, "hist CESM2-WACCM", "historical/cesm_waccm.py", "CESM2-WACCM", "historical"),
+    (2, "hist MRI-ESM2-0", "historical/mri_esm2.py", "MRI-ESM2-0", "historical"),
+    (3, "ssp370 CESM2-WACCM", "projections/ssp370_cesm_waccm.py", "CESM2-WACCM", "ssp370"),
+    (4, "ssp370 MRI-ESM2-0", "projections/ssp370_mri_esm2.py", "MRI-ESM2-0", "ssp370"),
+    (5, "ssp126 CESM2-WACCM", "projections/ssp126_cesm_waccm.py", "CESM2-WACCM", "ssp126"),
+    (6, "ssp126 MRI-ESM2-0", "projections/ssp126_mri_esm2.py", "MRI-ESM2-0", "ssp126"),
+    (7, "ssp585 CESM2-WACCM", "projections/ssp585_cesm_waccm.py", "CESM2-WACCM", "ssp585"),
+    (8, "ssp585 MRI-ESM2-0", "projections/ssp585_mri_esm2.py", "MRI-ESM2-0", "ssp585"),
+    (9, "CTRL2015 (CESM2-WACCM clim)", "control/run.py", "CESM2-WACCM", None),
+    (10, "CTRL2015 (MRI-ESM2-0 clim)", "control/run.py", "MRI-ESM2-0", None),
+    (11, "OCX obs-constrained", "projections/ocx.py", None, None),
 ]
+
+
+def _keyword(call, name, driver):
+    r"""The literal a driver passes ``run_core_experiment`` as ``name``."""
+    for k in call.keywords:
+        if k.arg == name:
+            return ast.literal_eval(k.value)
+    raise ValueError(f"{driver} passes run_core_experiment no {name}")
+
+
+def _time(node, env):
+    r"""A start or end time as a driver computes it: a number, or
+    ``float(os.environ.get(knob, default))`` evaluated under ``env``."""
+    if isinstance(node, ast.Constant) and isinstance(node.value, (int, float)):
+        return float(node.value)
+    if (isinstance(node, ast.Call) and ast.unparse(node.func) == "float"
+            and len(node.args) == 1 and isinstance(node.args[0], ast.Call)
+            and ast.unparse(node.args[0].func) == "os.environ.get"
+            and len(node.args[0].args) == 2):
+        knob, default = (ast.literal_eval(a) for a in node.args[0].args)
+        return float(env.get(knob, default))
+    raise ValueError(f"cannot read a time from {ast.unparse(node)}")
+
+
+def driver_period(driver, core=None, env=None):
+    r"""``(t_start, t_end)`` of the run ``driver`` makes under ``env``
+    (``os.environ`` by default), read from its source: importing a driver
+    loads Firedrake and the model, 3 to 19 s on a Mac against 0.1 s for the
+    whole preflight.
+
+    A core-experiment shim passes ``t_start_default`` and ``t_end_default``
+    to ``experiment.run_core_experiment``, where ``ISMIP7_T_START`` and
+    ``ISMIP7_T_END`` replace them. OCX and the control set module-level
+    ``T_START`` and ``T_END``, each a number or ``float(os.environ.get(knob,
+    default))``. Any other form raises ``ValueError``, as does a shim that
+    runs a core other than ``core``, and ``main`` reports that core BLOCKED
+    with the reason.
+    """
+    env = os.environ if env is None else env
+    path = os.path.join(_SCRIPTS, driver)
+    with open(path) as f:
+        tree = ast.parse(f.read(), path)
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Call) and ast.unparse(node.func) == "run_core_experiment":
+            runs = _keyword(node, "core", driver)
+            if core is not None and runs != core:
+                raise ValueError(f"{driver} runs core {runs}, listed here as core {core}")
+            return (float(env.get("ISMIP7_T_START", _keyword(node, "t_start_default", driver))),
+                    float(env.get("ISMIP7_T_END", _keyword(node, "t_end_default", driver))))
+    times = {target.id: _time(node.value, env)
+             for node in tree.body if isinstance(node, ast.Assign)
+             for target in node.targets
+             if isinstance(target, ast.Name) and target.id in ("T_START", "T_END")}
+    if set(times) != {"T_START", "T_END"}:
+        raise ValueError(f"{driver} has no run_core_experiment call and no "
+                         f"module-level T_START and T_END")
+    return times["T_START"], times["T_END"]
 
 
 def atm_years(esm, scenario, var="acabf-anomaly"):
@@ -263,6 +326,16 @@ def shared_missing(warn=None):
     return miss
 
 
+def dhdt_missing():
+    r"""What stops a backdated cold start from reading the dH/dt: the MIPkit,
+    or its two cached rasters, looked for as ``load_dhdt_obs`` looks."""
+    try:
+        dhdt_source()
+    except (FileNotFoundError, ValueError) as e:
+        return [f"dH/dt for the geometry backdating: {e}"]
+    return []
+
+
 def racmo_ok():
     return os.path.exists(os.path.join(
         DATA_DIR, "racmo",
@@ -296,10 +369,32 @@ def main():
           "but warns and its provenance is degraded; BLOCKED = missing input")
     print()
 
-    for core, title, esm, scenario, y0, y1 in CORES:
+    for core, title, driver, esm, scenario in CORES:
+        try:
+            t_start, t_end = driver_period(driver, core)
+        except ValueError as e:
+            print(f"  core {core:2d}  BLOCKED  {title}  <- period: {e}")
+            continue
+        # the years the driver asks its readers for
+        y0, y1 = int(math.floor(t_start + 1e-9)), forcing_year(t_end)
         miss = list(base_missing)
         degraded = []
         notes = []
+        if scenario == "historical" or core == 11:
+            # A cold start from the MAP. A start before 2015 backdates its
+            # geometry by the Smith dH/dt (issue 117), which setup_model does
+            # on the DG0 geometry only, reading the MIPkit or its cached
+            # rasters, and the drivers refuse a start before the dH/dt window.
+            try:
+                backdate = geometry_backdate_years(t_start)
+            except ValueError as e:
+                miss.append(f"geometry backdating: {e}")
+                backdate = 0.0
+            if backdate > 0.0:
+                if geom != "dg0":
+                    miss.append(f"a start at {t_start:g} backdates the geometry, "
+                                f"which needs ISMIP7_GEOMETRY_SPACE=dg0")
+                miss += dhdt_missing()
         if core == 11 and _ocx_forcing() == "protocol":
             # projections/ocx.py refuses to start on anything less, so this
             # gate asks the same readers the same question.
@@ -387,7 +482,7 @@ def main():
         status = "BLOCKED" if miss else "PARTIAL" if degraded else "READY  "
         shown = miss + degraded + notes
         detail = "" if not shown else "  <- " + "; ".join(shown)
-        print(f"  core {core:2d}  {status}  {title}{detail}")
+        print(f"  core {core:2d}  {status}  {title} {y0}-{y1}{detail}")
 
 
 if __name__ == "__main__":

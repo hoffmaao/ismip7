@@ -8,7 +8,7 @@
   "esm": "MRI-ESM2-0",
   "scenario": "historical",
   "period": "as C001",
-  "branch_from": "a steady state",
+  "branch_from": "as C001",
   "melt": "one toolbox K with the per-basin offset",
   "apparent_mb": "balance",
   "dt": 0.025,

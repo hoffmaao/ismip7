@@ -1,0 +1,24 @@
+{
+  "id": "calibration-melt-sidecar-25km-check",
+  "task": "calibration",
+  "institution": "IU",
+  "title": "Ocean melt: the K50 offsets refitted on the 25 km rehearsal mesh by a fit that writes its own sidecar (issue 145)",
+  "status": "done",
+  "period": "present day",
+  "mesh": "antarctica_250000_25000_buffered20000 (IU's build, 4,509 vertices, 7,615 cells, md5 3e8b44b0), DG0 cells",
+  "initial_state": "the rehearsal .msh, with BedMachine v4.1 vertex-sampled onto the cells: 2,923 floating cells",
+  "forcing": "OI climatology 30_sep; observed melt from the Paolo, Davison and Adusumilli table, 1067.4 Gt/yr (sha256 ccea556e)",
+  "melt": "K 6.5e-5 held fixed, the K50 of the tracked calibration (issue 26); one offset per basin fitted in plus or minus 3 K through the forward's DG0 melt path; the constant slope 5.115e-3",
+  "site": "IU Quartz, debug partition",
+  "resources": "serial; 2 min 17 s for the fit, 19 s for the check",
+  "jobs": [
+    "10742030",
+    "10742031"
+  ],
+  "code": "37c68f2 (branch claude/plan-issue-145-c69ef6: origin/main ecaac86 with the sidecar writer), run from a scratch clone",
+  "started": "2026-09-28",
+  "finished": "2026-09-28",
+  "results": "Quartz /N/scratch/dlilien/ismip7_issue145/refit/deltaT_per_basin_25000_K6.500e-05.npz (sha256 384f8c5c) and the .source.json the fit wrote beside it",
+  "audit": "the fit reproduced the rehearsal's offsets file bit for bit (sha256 384f8c5c, the file of calibration-melt-refit-25km-rehearsal-k50), and the sidecar it wrote matches that file's hand-written one in every field a fit can know: the mesh, 4,509 vertices, 7,615 cells, 2,923 floating cells, vertex sampling, the slope law and constant, dg0, the 30_sep climatology, the density, the offset window, the thermal forcing rule and its verdict (admits), the melt at the offsets (1067.382 Gt/yr), the sha256 of the mesh file, the observation table and the three inputs, and selected_as K50. It differs in the job, the commit and the spelling of the site, and carries no purpose, run_record or mesh_build, which a person adds. check_melt_bound.py with the refit named (job 10742031) exits 0: every basin at ratio 1.0000 or 0.9999, 1067.382 Gt/yr against the 1067.386 fitted, no cell past the libmassbffl bound, and its provenance line reads K 6.500e-05 (K50), fitted on antarctica_250000_25000_buffered20000, which the rehearsal's run needed a hand-written sidecar to say",
+  "notes": "issue 145. Run at 37c68f2, where the sidecar named its two totals melt_fitted_gtyr and melt_dT0_gtyr; the commit after it names them melt_total_gtyr and melt_total_dT0_gtyr, the hand-written sidecars' keys, since this check shows they hold the same quantities (1067.382 and 1436.58 Gt/yr against the hand-written 1067.382 and 1436.6). The refit stays in scratch, and the rehearsal's own files are unchanged"
+}

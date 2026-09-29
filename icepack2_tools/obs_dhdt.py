@@ -70,8 +70,9 @@ the momentum residual.
 import os
 
 import numpy as np
-from firedrake import Function
 
+# Firedrake is imported inside load_dhdt_obs, so the preflight can ask
+# dhdt_source where the field would come from without loading Firedrake.
 _VARIABLES = ("dhdt_smith", "dhdt_cpom")
 
 # Pixel-to-cell reach as a multiple of the local cell scale sqrt(area); see
@@ -111,6 +112,70 @@ def _obs_kit_path(data_root=None):
     )
 
 
+def _variable(variable=None):
+    r"""The dH/dt field to read: ``variable``, else ``ISMIP7_DHDT_VAR``, else
+    ``dhdt_smith``."""
+    variable = variable or os.environ.get("ISMIP7_DHDT_VAR", "dhdt_smith")
+    if variable not in _VARIABLES:
+        raise ValueError(f"dH/dt variable must be one of {_VARIABLES}, "
+                         f"got {variable!r}")
+    return variable
+
+
+def _cache_dir(cache_dir=None):
+    r"""Where the rasters are cached, ``<ISMIP7_OBS_DATA_ROOT>/dhdt_cache``
+    unless named."""
+    if cache_dir is None:
+        from .runconfig import obs_data_root
+        cache_dir = os.path.join(obs_data_root(), "dhdt_cache")
+    return cache_dir
+
+
+def dhdt_source(variable=None, data_root=None, cache_dir=None):
+    r"""The files :func:`load_dhdt_obs` reads ``variable`` from, found without
+    opening or writing any: ``(kit, val_fn, cov_fn)``.
+
+    With a MIPkit on this machine ``kit`` is its path, and the two rasters
+    are its cache, which :func:`_cache_rasters` writes on first use. With
+    none, ``kit`` is None and the rasters are the newest cached pair. Raises
+    ``FileNotFoundError`` where the loader does: a named ``ISMIP7_OBS_KIT``
+    that does not exist, or no kit and no complete pair.
+    """
+    variable = _variable(variable)
+    cache_dir = _cache_dir(cache_dir)
+    try:
+        src = _obs_kit_path(data_root)
+    except FileNotFoundError as no_kit:
+        # An explicitly named kit that is missing is a configuration error, not
+        # a machine without the kit staged: report the bad path rather than
+        # silently pinning whatever version happens to be cached.
+        if os.environ.get("ISMIP7_OBS_KIT"):
+            raise
+        # No kit on this machine (a cluster staging only the two small
+        # cache rasters). The cache is complete on its own, so use the newest
+        # cached version rather than demanding the kit just to name the files.
+        import glob
+        import re
+        cands = sorted(glob.glob(os.path.join(
+            cache_dir, f"{variable}_AntarcticaObsISMIP7-v*_value.tif")))
+
+        def _ver(fn):
+            m = re.search(r"v(\d+)\.(\d+)", os.path.basename(fn))
+            return (int(m.group(1)), int(m.group(2))) if m else (0, 0)
+        val_fn = max(cands, key=_ver) if cands else None
+        cov_fn = val_fn.replace("_value.tif", "_valid.tif") if val_fn else None
+        if cov_fn is None or not os.path.exists(cov_fn):
+            raise FileNotFoundError(
+                f"{no_kit} The two cached rasters would do in its place, and "
+                f"{cache_dir} holds no {variable}_AntarcticaObsISMIP7-v*"
+                f"_value.tif, or its newest one has no _valid.tif beside it."
+            ) from no_kit
+        return None, val_fn, cov_fn
+    tag = f"{variable}_{os.path.basename(src).replace('.nc', '')}"
+    return (src, os.path.join(cache_dir, f"{tag}_value.tif"),
+            os.path.join(cache_dir, f"{tag}_valid.tif"))
+
+
 def _cache_rasters(variable, data_root=None, cache_dir=None):
     r"""Write NaN-free value and 0/1 coverage GeoTIFFs for ``variable``.
 
@@ -125,40 +190,10 @@ def _cache_rasters(variable, data_root=None, cache_dir=None):
     import rasterio
     from rasterio.transform import from_origin
 
-    if cache_dir is None:
-        from .runconfig import obs_data_root
-        cache_dir = os.path.join(obs_data_root(), "dhdt_cache")
+    cache_dir = _cache_dir(cache_dir)
     os.makedirs(cache_dir, exist_ok=True)
-    try:
-        src = _obs_kit_path(data_root)
-    except FileNotFoundError:
-        # An explicitly named kit that is missing is a configuration error, not
-        # a machine without the kit staged: report the bad path rather than
-        # silently pinning whatever version happens to be cached.
-        if os.environ.get("ISMIP7_OBS_KIT"):
-            raise
-        # No kit on this machine (a cluster staging only the two small
-        # cache rasters). The cache is complete on its own, so use the newest
-        # cached version rather than demanding the kit just to name the files.
-        import glob
-        import re
-        cands = sorted(glob.glob(os.path.join(
-            cache_dir, f"{variable}_AntarcticaObsISMIP7-v*_value.tif")))
-        if not cands:
-            raise
-
-        def _ver(fn):
-            m = re.search(r"v(\d+)\.(\d+)", os.path.basename(fn))
-            return (int(m.group(1)), int(m.group(2))) if m else (0, 0)
-        val_fn = max(cands, key=_ver)
-        cov_fn = val_fn.replace("_value.tif", "_valid.tif")
-        if not os.path.exists(cov_fn):
-            raise
-        return val_fn, cov_fn
-    tag = f"{variable}_{os.path.basename(src).replace('.nc', '')}"
-    val_fn = os.path.join(cache_dir, f"{tag}_value.tif")
-    cov_fn = os.path.join(cache_dir, f"{tag}_valid.tif")
-    if os.path.exists(val_fn) and os.path.exists(cov_fn):
+    src, val_fn, cov_fn = dhdt_source(variable, data_root, cache_dir)
+    if src is None or (os.path.exists(val_fn) and os.path.exists(cov_fn)):
         return val_fn, cov_fn
 
     with nc.Dataset(src) as d:
@@ -227,7 +262,7 @@ def load_dhdt_obs(Q_g, variable=None, data_root=None, min_coverage=0.5):
     constraint to grounded ice (recommended -- see module docstring).
     """
     import rasterio
-    from firedrake import SpatialCoordinate, VectorFunctionSpace, assemble, dx
+    from firedrake import Function, SpatialCoordinate, VectorFunctionSpace, assemble, dx
     from firedrake import TestFunction
     from scipy.spatial import cKDTree
 
@@ -238,10 +273,7 @@ def load_dhdt_obs(Q_g, variable=None, data_root=None, min_coverage=0.5):
             "the cell-area weights are only meaningful cell-wise."
         )
 
-    variable = variable or os.environ.get("ISMIP7_DHDT_VAR", "dhdt_smith")
-    if variable not in _VARIABLES:
-        raise ValueError(f"dH/dt variable must be one of {_VARIABLES}, "
-                         f"got {variable!r}")
+    variable = _variable(variable)
     val_fn, cov_fn = _cache_rasters(variable, data_root=data_root)
 
     with rasterio.open(val_fn) as src:

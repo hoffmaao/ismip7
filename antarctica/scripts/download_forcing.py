@@ -404,13 +404,15 @@ def _pick_version(tc, var_dir):
 def _atmosphere_dir(tc, base, resolution="8000m"):
     r"""The downscaled-atmosphere directory the share holds under ``base``:
     ``SDBN1-*`` for CESM2-WACCM, ``GEMB-SDBN1-*`` for MRI-ESM2-0 since the
-    August 2026 rename (discussion #37). One listing, so an absent name is
-    not probed for and reported as an error."""
+    August 2026 rename (discussion #37). Where the share holds both, the
+    current name wins, in the reader's order, so the copy fetched is the one a
+    run opens. One listing, so an absent name is not probed for and reported
+    as an error."""
     present = {e["name"] for e in list_remote_files(tc, base) if e["type"] == "dir"}
     for product in ATMOSPHERE_PRODUCTS:
         if f"{product}-{resolution}" in present:
             return f"{product}-{resolution}"
-    return f"{ATMOSPHERE_PRODUCTS[0]}-{resolution}"
+    return f"SDBN1-{resolution}"
 
 
 def download_scenarios(tc, esms=SCENARIO_ESMS, scenarios=SCENARIO_NAMES,

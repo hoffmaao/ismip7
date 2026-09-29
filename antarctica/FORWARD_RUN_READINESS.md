@@ -32,7 +32,8 @@ AWS tooling.
 MRI-ESM2-0, a name change with the data unchanged. The core experiment uses
 `SDBN1` for CESM2-WACCM and `GEMB-SDBN1` for MRI-ESM2-0; `dEBM2` is the second
 downscaling for perturbed ensembles. Handled: `atmosphere_product` accepts
-whichever exists.
+whichever exists and takes `GEMB-SDBN1` where both do, and the audit asks it
+which one a run opens.
 
 **Control experiment (#28, #15).** ctrlclim is the 2000-2029 climatology of the
 last 15 years of `historical` and the first 15 of `ssp126`, per ESM. Files are
@@ -492,8 +493,8 @@ Forcing data:
       atmosphere in place of the `ssp126` pool stays optional (action 6).
 - [x] #34 1960-1989 anomaly reference: the anomaly is re-referenced to the
       2000-2029 pool and there is no temperature forcing, so no jump at the
-      start of a historical. The README now says the historical starts in 1850
-      from the 2015 state.
+      start of a historical. The README now says the historicals start in 2003
+      from the 2015 state backdated by the Smith dH/dt (issue 117).
 - [x] #35, #36 runoff-gradient sign, which gradient: no SMB-height feedback, and
       the README names both gradients as unused.
 - [x] #32, #33, #41 item 6 OCX: the readers open the real tree and core 11 runs

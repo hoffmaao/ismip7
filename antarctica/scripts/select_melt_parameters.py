@@ -37,7 +37,8 @@ reads. Serial only. Everything is written under --out:
                                on the admitted K and on every K
     deltaT_per_basin_<lc>_K<K>.npz   per_k: the offsets at each selected K,
                                in calibrate_deltaT.py's keys, for
-                               ISMIP7_DELTAT_PER_BASIN_NPZ
+                               ISMIP7_DELTAT_PER_BASIN_NPZ, each with the
+                               .source.json sidecar the forward reads
     tf_present_<lc>.npz        mesh: present-day TF, area and basin of every
                                floating cell, to test another rule offline
     v1_report.json             notebook8km: the checks against the toolbox
@@ -267,10 +268,15 @@ def admitted(K, ens, rule):
 
 def run_mesh(args):
     import calibrate_melt as cm
-    from icepack2_tools.runconfig import geometry_space, raster_sample
+    from icepack2_tools.runconfig import (geometry_space, raster_sample,
+                                          refuse_tracked_calibration_out)
 
+    # per_k writes offsets files with their sidecars (write_selected).
+    refuse_tracked_calibration_out(args.out)
     if cm.GEOMETRY != "dg0":
         raise SystemExit("run with ISMIP7_GEOMETRY_SPACE=dg0 (the forward's path)")
+    # The name each offsets file's sidecar records, before any data is read.
+    mesh_name = cm.mesh_name()
     root = cm.DATA_ROOT
     paths = ms.toolbox_paths(root)
     version = os.environ.get("ISMIP7_OI_VERSION", "30_sep")
@@ -308,6 +314,7 @@ def run_mesh(args):
     if mesh.comm.size != 1:
         raise SystemExit("serial only: run without mpiexec")
     g = cm.forward_geometry(mesh)
+    record = cm.calibration_record(mesh, g, mesh_name, oi_version=version)
     fl = g["floating"]
     x, y, draft, area = g["x"][fl], g["y"][fl], g["draft"][fl], g["area"][fl]
     sin_a = np.asarray(g["sin_a"])[fl]
@@ -404,7 +411,7 @@ def run_mesh(args):
         result.update(base)
         result["selected"] = write_selected(
             args, cm, result["headline"], Ks, ens, (tf, so), sin_a, x, y,
-            area, basin, bids, M_obs, prov, plaus)
+            area, basin, bids, M_obs, prov, plaus, record)
         if args.issue30:
             result["issue30"] = compare_issue30(args.issue30, cm.LC, Ks, ens)
         _dump(os.path.join(args.out, f"selection_{variant}.json"), result)
@@ -419,11 +426,14 @@ def _load_ensemble(path):
 
 
 def write_selected(args, cm, headline, K, ens, present, sin_a, x, y, area,
-                   basin, bids, M_obs, prov, plaus):
+                   basin, bids, M_obs, prov, plaus, record):
     r"""The offsets at K05, K50 and K95 (seed 0) in calibrate_deltaT.py's
     keys, each read back through the forward's loader and melted again, with
-    the thermal forcing rule's verdict at that K."""
-    from icepack2_tools.runconfig import geometry_space
+    the thermal forcing rule's verdict at that K. Each file gets the sidecar
+    the forward reads, from ``record`` (calibrate_melt.calibration_record)
+    and that K's fields."""
+    from icepack2_tools.runconfig import (geometry_space,
+                                          write_melt_calibration_sidecar)
     tf, so = present
     chosen = {}
     for name, q in (("K05", "p5"), ("K50", "p50"), ("K95", "p95")):
@@ -461,6 +471,19 @@ def write_selected(args, cm, headline, K, ens, present, sin_a, x, y, area,
             selection_commit=prov["commit"],
             dt_window=np.asarray(args.window, np.float64),
             tf_rule=json.dumps(args.rule.as_dict()))
+        # A basin with no floating cells melts nothing and has no residual,
+        # so the fitted total skips it.
+        write_melt_calibration_sidecar(fn, {
+            "K": float(k), "selected_as": ",".join(names),
+            "selection": {"toolbox_commit": prov["toolbox"]["commit"],
+                          "offsets": how},
+            **record,
+            "written_by": "antarctica/scripts/select_melt_parameters.py --geometry mesh",
+            "dt_window": list(args.window), "tf_rule": args.rule.as_dict(),
+            "rule_admits": bool(admits[0]),
+            "melt_total_gtyr": round(float(np.nansum(M_obs + resid)), 3),
+            "melt_total_dT0_gtyr": round(float(np.sum(M0)), 3),
+            "unrooted": [int(b) for b, u in zip(bids, unrooted) if u]})
         field, K_file = load_deltaT_per_basin(fn, x, y, imbie2=cm.IMBIE2_NC)
         melt = quadratic_mixed_slope(tf + field, so, sin_a, K=K_file) * float(_RHO_I)
         totals = ms.label_totals(melt, area, basin, ms.N_BASINS)

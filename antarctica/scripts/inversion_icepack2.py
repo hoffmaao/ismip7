@@ -2622,6 +2622,50 @@ def main():
             f"  Optimization metric: {_desc}; via TAO lmvm; "
             f"gatol={gtol:g} max_it={max_iter} step0={_step0_env:g}"
         )
+        if os.environ.get("ISMIP7_GRAD_CHECK", "0").strip() == "1":
+            # ISMIP7_GRAD_CHECK=1: verify the taped gradient of the FULL
+            # objective by a Taylor test at the start, print the spread of
+            # the metric-scaled first step over the nodes, and stop. Written
+            # for the exp-control question (Rice, 28 Sep 2026): is the
+            # objective or its gradient wrong under C = C_ref exp(alpha)?
+            from tlm_adjoint import taylor_test
+            import time as _time
+            reset_manager()
+            start_manager()
+            _J0 = forward_total(theta, phi)
+            stop_manager()
+            _dJ = compute_gradient(_J0, [theta, phi])
+            _xt, _xp = _A_inv(_dJ[0], _dJ[1])
+            _Hc = cg1_lift(H) if geom_dg else H
+            _bc = cg1_lift(b) if geom_dg else b
+            _hafc = Function(Q).interpolate(height_above_flotation(_Hc, _bc)).dat.data_ro
+            _gr = (_hafc > 0.0) & (_Hc.dat.data_ro > 10.0)
+            _fl = (_hafc <= 0.0) & (_Hc.dat.data_ro > 10.0)
+
+            def _pct(arr, msk):
+                a = np.concatenate(COMM_WORLD.allgather(
+                    np.abs(np.asarray(arr[msk], dtype=float))))
+                if a.size == 0:
+                    return "n/a"
+                q = np.percentile(a, [50, 90, 99, 100])
+                return (f"median {q[0]:.3e} p90 {q[1]:.3e} p99 {q[2]:.3e} max {q[3]:.3e} "
+                        f"(max/median {q[3] / max(q[0], 1e-300):.1e})")
+            PETSc.Sys.Print(f"  Gradient check: objective {float(_J0):.6e}")
+            PETSc.Sys.Print(f"    raw dJ/dtheta, grounded nodes: {_pct(_dJ[0].dat.data_ro, _gr)}")
+            PETSc.Sys.Print(f"    raw dJ/dphi, floating nodes:   {_pct(_dJ[1].dat.data_ro, _fl)}")
+            PETSc.Sys.Print(f"    first step H0 g, theta grounded: {_pct(_xt.dat.data_ro, _gr)}")
+            PETSc.Sys.Print(f"    first step H0 g, phi floating:   {_pct(_xp.dat.data_ro, _fl)}")
+            _seed = float(os.environ.get("ISMIP7_GRAD_CHECK_SEED", "1e-3"))
+            _t0 = _time.perf_counter()
+            _order = taylor_test(forward_total, [theta, phi], J_val=float(_J0), dJ=_dJ,
+                                 seed=_seed, size=4)
+            PETSc.Sys.Print(
+                f"  Taylor test (seed {_seed:g}, 4 sizes): minimum order {_order:.3f} "
+                f"(2 = the gradient is consistent with the objective; 1 = it is not) "
+                f"[{_time.perf_counter() - _t0:.0f}s]")
+            return SimpleNamespace(
+                x=np.concatenate([func_to_global(theta), func_to_global(phi)]),
+                nit=0, nfev=_nfev[0], message="GRAD_CHECK: stopped after the Taylor test")
         if INVERT == "both":
             _tao_forward, _tao_spaces, _tao_x, _tao_action = (
                 forward_total, [Q, Q], [theta, phi], _A_inv)
@@ -2668,6 +2712,11 @@ def main():
 
         _t_last = [perf_counter()]
         _ftol_stop = FunctionalDecreaseStop(ftol, min_iter)
+        # Periodic checkpoint interval in accepted iterations. A wall-clocked
+        # link resumes from the last one, so every iteration past it is
+        # repeated: 2 km link 1643735 lost iterations 21 to 30 (about five
+        # hours) to the old interval of 20.
+        _ckpt_every = max(1, int(os.environ.get("ISMIP7_CHECKPOINT_EVERY_IT", "5")))
 
         def _monitor(tao):
             its, f_val, gnorm, _cnorm, _xdiff, _reason = tao.getSolutionStatus()
@@ -2730,7 +2779,7 @@ def main():
                     "terms": {"vel": float(last_good_vel_chi2[0])},
                 })
                 _write_timing_json(phase="running", message="in progress")
-            if iteration_count[0] > 0 and iteration_count[0] % 20 == 0:
+            if iteration_count[0] > 0 and iteration_count[0] % _ckpt_every == 0:
                 save_map(os.path.join(_map_dir, map_fn))
                 PETSc.Sys.Print(f"    [checkpoint saved: iter {iteration_count[0]}]")
 

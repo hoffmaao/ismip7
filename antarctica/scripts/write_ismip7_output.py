@@ -14,6 +14,8 @@ already banked) and this globs them in year order. It writes one NetCDF per
 variable under
 ``DIR/AIS/<source_id>/<ism_id>/<set_id>/<exp>/``, named
 ``<var>_AIS_<source_id>_<ism_id>_m001_<ESM>_f001_<scenario>_<exp>_<y0>-<y1>.nc``.
+OCX takes ``--scenario ocx`` and no ``--esm``: its forcing field is ``ERA5``
+(issue #18).
 
 Regridding is conservative: a supermesh mixed mass matrix between the model's
 DG0 cells and a triangulated copy of the 8 km grid gives the exact area of
@@ -442,11 +444,34 @@ CORE_COUNTER = {
     ("CESM2-WACCM", "ssp585"): "C007", ("MRI-ESM2-0", "ssp585"): "C008",
     ("CESM2-WACCM", "ctrl"): "C009", ("MRI-ESM2-0", "ctrl"): "C010",
 }
-# OCX has no ESM, and what belongs in the filename's forcing field for it is
-# not settled upstream: isschecker 0.5.1 checks that field against a list of
-# CMIP models and its experiment table has no ocx row. So the counter follows
-# from the scenario alone.
+# OCX has no ESM, so its counter follows from the scenario alone, and its
+# forcing field names the reanalysis (issue #18): ERA5, as the core 11 example
+# of the organisers' filenames and conventions document (revised 27 August
+# 2026) and of the ISMIP7 web page writes it. The history attribute of the AIS
+# OCX SMB files names RACMO2.3p2 forced by ERA5. NORCE's AIS processing writes
+# ERA. No core 11 name passes isschecker 0.5.1, whose experiment table has no
+# ocx row and whose field 5 takes CMIP models only, so core 11 is checked by
+# isschecker_ocx.py, which adds both. A CMIP model in field 5 passes that
+# check and claims forcing the run never read, so it is refused here.
 OCX_COUNTER = "C011"
+OCX_FORCING = "ERA5"
+
+
+def forcing_id(esm, scenario):
+    r"""Field 5 of a filename: the ESM, e.g. ``CESM2-WACCM``, or for OCX the
+    reanalysis, ``OCX_FORCING``, which is also its default. The experiment id
+    is lower case, as the conventions write every one, and ``OCX`` is
+    refused."""
+    if scenario.lower() == "ocx" and scenario != "ocx":
+        raise ValueError(f"--scenario {scenario}: the experiment id is ocx, in lower case")
+    if scenario == "ocx":
+        if esm not in (None, OCX_FORCING):
+            raise ValueError(f"--esm {esm}: OCX has no ESM, and its forcing field is "
+                             f"{OCX_FORCING} (issue #18)")
+        return OCX_FORCING
+    if esm is None:
+        raise ValueError(f"--esm is required for --scenario {scenario}")
+    return esm
 
 
 def set_counter(esm, scenario, set_id, given=None):
@@ -464,7 +489,7 @@ def set_counter(esm, scenario, set_id, given=None):
             raise ValueError(f"--exp is required for the {set_id} set: only the core set's "
                              f"counters follow from the forcing")
         return given
-    expected = OCX_COUNTER if scenario.lower() == "ocx" else CORE_COUNTER.get((esm, scenario))
+    expected = OCX_COUNTER if scenario == "ocx" else CORE_COUNTER.get((esm, scenario))
     if expected is None:
         raise ValueError(f"{esm} {scenario} is not a core experiment "
                          f"({', '.join(f'{e} {sc}' for e, sc in CORE_COUNTER)}, ocx); "
@@ -489,7 +514,10 @@ def submission_id(name, value):
 def main():
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("annual"); ap.add_argument("--out-dir", required=True)
-    ap.add_argument("--esm", required=True); ap.add_argument("--scenario", required=True)
+    ap.add_argument("--esm", default=None,
+                    help=f"the filename's forcing field: the ESM, or {OCX_FORCING} for "
+                         f"--scenario ocx, where it is the default")
+    ap.add_argument("--scenario", required=True)
     ap.add_argument("--exp", default=None,
                     help="the set counter, e.g. C007. The core set's follows from --esm and "
                          "--scenario, so it is optional there and checked when given")
@@ -501,6 +529,7 @@ def main():
     ap.add_argument("--scalars", default=None, help="the *_ismip7_scalars.csv (default: next to the annual file)")
     a = ap.parse_args()
     try:
+        a.esm = forcing_id(a.esm, a.scenario)
         a.exp = set_counter(a.esm, a.scenario, a.set_id, a.exp)
         submission_id("source-id", a.source_id)
         submission_id("ism-id", a.ism_id)

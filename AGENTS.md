@@ -185,8 +185,9 @@ instead, in order of cost:
    `projection - CTRL` sea-level contribution on the real ISMIP6 ensemble.
    Note the ISMIP6 `ctrl_proj` convention: the control and the projection must
    branch from the SAME state or their spin-up drift does not cancel.
-4. **A 32 km probe run.** 32 km is roughly 3k vertices and a few seconds per
-   step, so a targeted 3 to 10 year run is the standard way to localize
+4. **A 32 km probe run.** The 32 km mesh (`antarctica_320000_32000_buffered0`)
+   has 6,282 vertices and takes a few seconds per step, so a targeted 3 to 10
+   year run is the standard way to localize
    behaviour before committing to a production resolution. Prefer this over
    reasoning about the discretization in the abstract.
 

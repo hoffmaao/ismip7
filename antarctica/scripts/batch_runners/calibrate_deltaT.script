@@ -16,8 +16,10 @@
 #       DELTAT_K=6.5e-5 DELTAT_OUT=<absolute dir>
 #
 # DELTAT_K takes several values separated by spaces; unset, the toolbox
-# notebook's K05, K50 and K95. The log names the observation table the fit
-# read and carries the per-basin table; record them with the file.
+# notebook's K05, K50 and K95. Each offsets file is written with its sidecar
+# (<name>.source.json), which records the mesh, its vertex count, the raster
+# sampling, the observation table and every input by sha256, the job and the
+# commit. The log carries the per-basin table.
 
 #SBATCH -o ant_calibrate_deltaT_%j.txt
 #SBATCH -e ant_calibrate_deltaT_%j.err

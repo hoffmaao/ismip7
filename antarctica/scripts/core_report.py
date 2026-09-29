@@ -194,6 +194,18 @@ def sh(cmd):
     return (r.stdout + r.stderr).strip(), r.returncode
 
 
+def verdict(rc, passed, failed):
+    r"""A check's exit status in the report's words. check_ismip6_track.py and
+    compare_ismip6.py both exit 0 on a pass, 1 on a failure and 2 when they
+    could not judge the run (a missing CSV, no ISMIP6 members on disk), and
+    the last is neither verdict."""
+    if rc == 0:
+        return passed
+    if rc == 1:
+        return failed
+    return f"not judged (exit {rc}: missing data or bad input)"
+
+
 def resolution_km(csv_fn):
     r"""The run's refined resolution in km, as the report's name and title
     carry it: from the ``_<lc>_timeseries.csv`` suffix every forward writes,
@@ -277,14 +289,14 @@ def main():
         f.write(f"- timeseries: `{args.csv}` (gitignored; this report is "
                 f"the tracked record)\n")
         f.write(f"- observational audit: "
-                f"{'ON TRACK' if audit_rc == 0 else 'OFF TRACK'}\n")
+                f"{verdict(audit_rc, 'ON TRACK', 'OFF TRACK')}\n")
         for line in (climatology_pool(args.log) + forcing_provenance(args.log)
                      + smb_feedback_record(args.log)
                      + collapse_record(args.log) + front_owner(args.log)):
             f.write(f"- {line}\n")
         if ens_rc is not None:
             f.write(f"- ISMIP6 ensemble: "
-                    f"{'inside envelope' if ens_rc == 0 else 'outside envelope'}"
+                    f"{verdict(ens_rc, 'inside envelope', 'outside envelope')}"
                     f" (pool: {args.exps})\n")
         if args.notes:
             f.write(f"\n{args.notes}\n")

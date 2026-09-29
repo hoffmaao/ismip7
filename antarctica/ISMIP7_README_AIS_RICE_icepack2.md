@@ -145,16 +145,22 @@ shallow-shelf formulation on Firedrake 2026.4.1)
     them to the 2000-2029 pool (historical 2000-2014 and ssp126 2015-2029);
     in that frame RACMO is the 2000-2029 climate. C009 and C010 differ in
     their ocean and in the historical endpoint they branch from.
-    The historical runs start in 1850 from the 2015 initial state (there is
-    no spin-up) and end at 1 January 2015, where the projections and the
-    control branch. The ISMIP7 anomalies are relative to 1960-1989, and
-    adding them to a modern baseline is what produces the jump at the start
-    of a historical run that discussion #34 describes; here the anomaly's
-    2000-2029 mean is removed first, no temperature forcing is applied, and
-    the frozen apparent-mass-balance reference holds the initial state in
-    balance, so there is no such jump. The 165 years before the initial
-    state's epoch are a relaxation under that reference, not a hindcast.
-    OCX (C011) runs 1979-2025. **[confirm #19]** which forcing the submitted run
+    The historical runs and OCX start on 1 January 2003 from the 2015 state
+    with 12 years of the Smith et al. (2020) 2003-2019 mean dH/dt undone on
+    the grounded cells it covers, the surface following by flotation.
+    Floating and unobserved cells keep their 2015 thickness, and the friction
+    and fluidity fields are the 2015 inversion's, with no re-inversion and no
+    spin-up (issue 117). The historical runs end at 1 January 2015, where the
+    projections and the control branch. The ISMIP7 anomalies are relative to
+    1960-1989, and adding them to a modern baseline is what produces the jump
+    at the start of a historical run that discussion #34 describes; here the
+    anomaly's 2000-2029 mean is removed first, no temperature forcing is
+    applied, and the frozen apparent-mass-balance reference holds the initial
+    state in balance, so there is no such jump. The reference balances the
+    2003 geometry against the SMB and melt of 2003, the first year of the run
+    that builds it: a historical builds it from its ESM's forcing, and the
+    control and the projections inherit it at 2015; OCX builds its own.
+    OCX (C011) runs 2003-2025. **[confirm #19]** which forcing the submitted run
     used: the ISMIP7 OCX product (RACMO2.3p2-ERA SDBN1 `acabf`, full field,
     and the expert-judgment `main` ocean, `ISMIP7_OCX_FORCING=protocol`), or
     RACMO2.4p1 actual-year SMB with the constant ocean climatology
@@ -246,7 +252,7 @@ Burgard et al. 2022; Hahn, Mikula and Frolkovic 2025; Smith et al. 2020.
 | Calving | pinned front; ice past it removed | **[confirm #36]** |
 | Initial SMB | RACMO2.4p1 2000-2023 climatology | no |
 | Bedrock adjustment | no | no |
-| Year of initial condition | 2015 | no |
+| Year of initial condition | 2003: the 2015 state with 12 years of the Smith et al. (2020) mean dH/dt undone on grounded ice; friction and fluidity from the 2015 inversion (item 11) | no |
 | Densities, gravity | rho_i = 917, rho_o = 1024, fresh water 1000 kg m-3, also in `params.nc` beside `CORE/`; g = 9.81 m s-2 | no |
 | Variables not included | none of the mandatory set; no 3D or thermal variables (no thermal model); `hfgeoubed`, `litemp*`, `zvel*`, `thdrflf`, `deltag`, `refgeoid` absent | no |
 | Days per year | 365.25: the model's year is icepack's, 31557600 s, and every model-to-SI conversion in the submitted files uses it. The forcing is converted on the way in with the tropical year, 31556926 s, a relative difference of 2e-5. The model counts time in years and has no calendar; the time axis in the files is the standard calendar (discussion #24), state at 1 January of the following year and fluxes at 1 July with bounds | no |
@@ -316,7 +322,16 @@ Compliance: isschecker 0.5.1 of 22 September 2026, which grades a range
 finding by the share of values outside the bounds (discussion #46). A 32 km
 CESM2-WACCM control and ssp585, 2015 to 2300, pass it with zero errors in
 every test group (23 September 2026), and each submitted file set is checked
-with it before upload. The bundled variable request is that release's.
+with it before upload. The bundled variable request is that release's. Core
+11 is named `<var>_AIS_RICE_icepack2_m001_ERA5_f001_ocx_C011_2003-2025.nc`,
+with `ERA5` in the forcing field as in the core 11 example of the ISMIP7
+filenames and conventions document. 0.5.1 has no `ocx` experiment and takes
+only CMIP models in that field, so it checks none of a core 11 set's files.
+Core 11 is checked with 0.5.1 patched in-process to add both: an `ocx`
+experiment starting from 1990 to 2015 and ending in 2025, the Protocol
+Overview's C011 row, and `ERA5` in the forcing field of `ocx` files. Every
+other check is the release's own. A 25 km core 11, 2003 to 2025, passes it
+with zero errors in all 31 files (27 September 2026).
 
 Forcing versions: each run logs the product and version its readers opened,
 and `core_report.py` carries those lines into the run's committed report;

@@ -71,7 +71,7 @@ from icepack2_tools.forcing import (
 
 T_START = float(os.environ.get("ISMIP7_T_START", "2003"))
 # 1 January of the year AFTER the last one covered, the convention every core
-# driver uses: years 1979 through 2025 run and 2025 is the last banked year.
+# driver uses: years 2003 through 2025 run and 2025 is the last banked year.
 T_END = float(os.environ.get("ISMIP7_T_END", "2026"))
 DT = time_step()
 OUTPUT_INTERVAL = int(os.environ.get("ISMIP7_OUTPUT_INTERVAL", "10"))

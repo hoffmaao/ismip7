@@ -1,0 +1,22 @@
+{
+  "id": "test-25km-budd-map-check-rehearsal",
+  "task": "test",
+  "institution": "IU",
+  "title": "25 km rehearsal MAP: t=0 discharge, shelf-gate census and forward self-consistency",
+  "status": "done",
+  "friction": "budd",
+  "mesh": "antarctica_250000_25000_buffered20000, DG0 geometry",
+  "initial_state": "inversion-25km-budd-rehearsal's published MAP (sha256 8d11bc2f)",
+  "site": "IU Quartz, debug partition",
+  "resources": "8 ranks, 32 GiB; 20 s and 14 s",
+  "jobs": [
+    "10669747",
+    "10669748"
+  ],
+  "code": "b554238",
+  "started": "2026-09-27",
+  "finished": "2026-09-27",
+  "results": "Quartz antarctica/results/rehearsal_25km/mapcheck/score_native.json, census_native.txt and the job logs",
+  "audit": "grounding-line discharge 2803 Gt/yr against 1848 with the observed velocity (ratio 1.52; observed 2050 plus or minus 100), by observed speed of the source cell 5.61 under 100 m/yr, 0.77 in 100 to 500, 0.38 in 500 to 1500 and 0.32 above 1500. No transfer fill on the MAP's own mesh; the fluidity prior spans 1.0 to 519.9. Under the production HAF gate 0 of 2,884 floating cells carry friction (the old sign test would have put it on 396). The forward re-solve at the MAP's controls matches the MAP's velocity to rel L2 5.9e-8",
+  "notes": "the rehearsal of issue 138. The discharge ratio misses the [0.8, 1.25] target because 25 km cells do not resolve the narrow fast outlets, and the inversion had already converged, so it was recorded and not iterated further"
+}

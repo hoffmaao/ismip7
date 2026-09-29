@@ -29,6 +29,20 @@ pytest.importorskip("firedrake")
 
 ESM, SCENARIO = "CESM2-WACCM", "ssp585"
 CORE_7 = "core  7"
+# the knobs that move a core's period, refuse its start or locate its dH/dt;
+# cleared so a developer's shell cannot change what the tests see
+KNOBS = ("ISMIP7_T_START", "ISMIP7_T_END", "ISMIP7_GEOMETRY_BACKDATE",
+         "ISMIP7_GEOMETRY_SPACE", "ISMIP7_OBS_KIT", "ISMIP7_DHDT_VAR")
+
+
+def _knobs(monkeypatch, tmp_path, env=None):
+    for knob in KNOBS:
+        monkeypatch.delenv(knob, raising=False)
+    # the dH/dt cache is looked for under the obs root, which by default is
+    # the checkout's, where a real cache may sit
+    monkeypatch.setenv("ISMIP7_OBS_DATA_ROOT", str(tmp_path / "obs"))
+    for knob, value in (env or {}).items():
+        monkeypatch.setenv(knob, value)
 
 
 def _tree(root, years, esm=ESM, scenario=SCENARIO,
@@ -43,17 +57,19 @@ def _tree(root, years, esm=ESM, scenario=SCENARIO,
 
 
 def _run(monkeypatch, tmp_path, years, ocean_cover=lambda e, s: (2015, 2300),
-         gradient=True, ctrl_gradient=True):
+         scenario=SCENARIO, env=None, dhdt=False, gradient=True, ctrl_gradient=True):
     r"""preflight.main() over a tree covering `years`, returning its output.
-    `gradient` and `ctrl_gradient` add the ``dacabfdz`` that core 7 and the
+    ``dhdt=True`` keeps the real dH/dt lookup, which has tests of its own.
+    `gradient` and `ctrl_gradient` add the ``dacabfdz`` that the core and the
     CESM2-WACCM control read."""
     root = str(tmp_path / "ISMIP7" / "AIS")
     os.makedirs(root, exist_ok=True)
-    _tree(root, years, variables=("acabf-anomaly", "acabf")
+    _tree(root, years, scenario=scenario, variables=("acabf-anomaly", "acabf")
           + (("dacabfdz",) if gradient else ()))
     if ctrl_gradient:
         _tree(root, range(2015, 2301), scenario="ctrl", variables=("dacabfdz",))
     monkeypatch.setenv("ISMIP7_DATA_ROOT", root)
+    _knobs(monkeypatch, tmp_path, env)
     sys.modules.pop("preflight", None)
     preflight = importlib.import_module("preflight")
     # isolate the forcing-coverage verdict from the mesh/MAP/ocean checks
@@ -63,6 +79,8 @@ def _run(monkeypatch, tmp_path, years, ocean_cover=lambda e, s: (2015, 2300),
     monkeypatch.setattr(preflight, "ocean_cover", ocean_cover)
     monkeypatch.setattr(preflight, "pool_status",
                         lambda *a, **k: ("ok", ""))
+    if not dhdt:
+        monkeypatch.setattr(preflight, "dhdt_missing", lambda: [])
     preflight.main()
     return None
 
@@ -104,6 +122,80 @@ def test_a_complete_tree_is_ready_without_a_note(monkeypatch, tmp_path, capsys):
     line = _core_line(capsys)
     assert "READY" in line, line
     assert "absent" not in line
+
+
+# --- the years a core needs are its driver's own period ---------------------
+
+def _preflight():
+    sys.modules.pop("preflight", None)
+    return importlib.import_module("preflight")
+
+
+def test_each_core_is_checked_over_its_drivers_period():
+    r"""Read from the drivers, with the knobs applied as each driver applies
+    them: the control starts at 2015 whatever ISMIP7_T_START says."""
+    preflight = _preflight()
+    period = {core: preflight.driver_period(driver, core, {})
+              for core, _, driver, _, _ in preflight.CORES}
+    assert period[1] == period[2] == (2003.0, 2015.0)
+    assert period[3] == period[4] == (2015.0, 2101.0)
+    assert {period[c] for c in (5, 6, 7, 8, 9, 10)} == {(2015.0, 2301.0)}
+    assert period[11] == (2003.0, 2026.0)
+    moved = {"ISMIP7_T_START": "1990", "ISMIP7_T_END": "2101"}
+    assert preflight.driver_period("historical/cesm_waccm.py", 1, moved) == (1990.0, 2101.0)
+    assert preflight.driver_period("projections/ocx.py", 11, moved) == (1990.0, 2101.0)
+    assert preflight.driver_period("control/run.py", 9, moved) == (2015.0, 2101.0)
+
+
+def test_a_driver_listed_wrongly_or_written_unreadably_is_refused(tmp_path):
+    r"""The guard is worth nothing if it cannot fail."""
+    preflight = _preflight()
+    with pytest.raises(ValueError, match="runs core 7"):
+        preflight.driver_period("projections/ssp585_cesm_waccm.py", 5, {})
+    driver = tmp_path / "driver.py"
+    driver.write_text("T_START = start_year()\nT_END = 2026.0\n")
+    with pytest.raises(ValueError, match="start_year"):
+        preflight.driver_period(str(driver), None, {})
+
+
+def test_a_historical_tree_from_2003_is_ready(monkeypatch, tmp_path, capsys):
+    r"""The historicals start in 2003 (issue 117), so a tree holding
+    2003-2014 is all they read."""
+    _run(monkeypatch, tmp_path, range(2003, 2015), scenario="historical",
+         ocean_cover=lambda e, s: (2003, 2014))
+    line = _core_line(capsys, "core  1")
+    assert "READY" in line and "2003-2014" in line, line
+
+
+def test_ISMIP7_T_START_moves_the_years_a_historical_reads(monkeypatch, tmp_path, capsys):
+    _run(monkeypatch, tmp_path, range(2003, 2015), scenario="historical",
+         ocean_cover=lambda e, s: (2003, 2014),
+         env={"ISMIP7_T_START": "1990", "ISMIP7_GEOMETRY_BACKDATE": "25"})
+    line = _core_line(capsys, "core  1")
+    assert "BLOCKED" in line and "13 of 1990-2014 missing (1990..2002)" in line, line
+
+
+@pytest.mark.parametrize("backdate,status", [(None, "BLOCKED"), ("0", "READY")])
+def test_an_1850_start_runs_only_with_the_backdating_named(
+        monkeypatch, tmp_path, capsys, backdate, status):
+    r"""The driver refuses a start before the Smith dH/dt window unless
+    ISMIP7_GEOMETRY_BACKDATE says how many years to undo."""
+    env = {"ISMIP7_T_START": "1850"}
+    if backdate is not None:
+        env["ISMIP7_GEOMETRY_BACKDATE"] = backdate
+    _run(monkeypatch, tmp_path, range(1850, 2015), scenario="historical",
+         ocean_cover=lambda e, s: (1850, 2014), env=env)
+    line = _core_line(capsys, "core  1")
+    assert status in line, line
+    assert ("past the window" in line) == (backdate is None), line
+
+
+def test_a_backdated_start_needs_the_dg0_geometry(monkeypatch, tmp_path, capsys):
+    _run(monkeypatch, tmp_path, range(2003, 2015), scenario="historical",
+         ocean_cover=lambda e, s: (2003, 2014),
+         env={"ISMIP7_GEOMETRY_SPACE": "cg1"})
+    line = _core_line(capsys, "core  1")
+    assert "BLOCKED" in line and "ISMIP7_GEOMETRY_SPACE=dg0" in line, line
 
 
 # --- cores 9 and 10 melt under the ESM's own ctrl ocean ---------------------
@@ -185,8 +277,8 @@ def _ocx_gradient(root, years, version):
              "wb").close()
 
 
-def _run_core_11(monkeypatch, tmp_path, years, forcing="protocol",
-                 gradient_versions=("v2",)):
+def _run_core_11(monkeypatch, tmp_path, years, forcing="protocol", env=None,
+                 dhdt=False, gradient_versions=("v2",)):
     r"""preflight.main() over an OCX tree, with the ``dacabfdz`` of the
     SMB-elevation feedback at each of `gradient_versions` over 1979-2025."""
     root = str(tmp_path / "ISMIP7" / "AIS")
@@ -199,12 +291,15 @@ def _run_core_11(monkeypatch, tmp_path, years, forcing="protocol",
     monkeypatch.setenv("ISMIP7_DATA_ROOT", root)
     monkeypatch.setenv("ISMIP7_OCX_FORCING", forcing)
     monkeypatch.delenv("ISMIP7_OCX_OCEAN", raising=False)
+    _knobs(monkeypatch, tmp_path, env)
     sys.modules.pop("preflight", None)
     preflight = importlib.import_module("preflight")
     monkeypatch.setattr(preflight, "shared_missing", lambda warn: [])
     monkeypatch.setattr(preflight, "racmo_ok", lambda: True)
     monkeypatch.setattr(preflight, "oi_ok", lambda: True)
     monkeypatch.setattr(preflight, "pool_status", lambda *a, **k: ("ok", ""))
+    if not dhdt:
+        monkeypatch.setattr(preflight, "dhdt_missing", lambda: [])
     preflight.main()
 
 
@@ -217,9 +312,12 @@ def test_core_11_is_blocked_until_the_ocx_product_is_on_disk(monkeypatch, tmp_pa
 
 
 def test_core_11_is_ready_on_the_product_and_points_at_the_tripwire(monkeypatch, tmp_path, capsys):
-    _run_core_11(monkeypatch, tmp_path, range(1979, 2026))
+    r"""OCX starts in 2003 (issue 117), so a product holding 2003-2025 is
+    all it reads."""
+    _run_core_11(monkeypatch, tmp_path, range(2003, 2026))
     line = _core_line(capsys, "core 11")
     assert "READY" in line and "check_melt_bound.py --ocx" in line and "#48" in line
+    assert "2003-2025" in line
 
 
 def test_core_11_on_the_stopgap_says_that_is_what_it_is(monkeypatch, tmp_path, capsys):
@@ -244,6 +342,94 @@ def test_core_11_reads_the_v2_gradient_beside_the_v1(monkeypatch, tmp_path, caps
     _run_core_11(monkeypatch, tmp_path, range(1979, 2026), gradient_versions=("v1", "v2"))
     line = _core_line(capsys, "core 11")
     assert "READY" in line, line
+
+
+# --- a backdated cold start reads the Smith dH/dt ---------------------------
+
+def _stage_kit(tmp_path):
+    kit = tmp_path / "ISMIP7" / "AIS" / "obs" / "mipkit"
+    kit.mkdir(parents=True)
+    (kit / "AntarcticaObsISMIP7-v1.2.nc").touch()
+
+
+def _stage_cache(tmp_path, *rasters):
+    cache = tmp_path / "obs" / "dhdt_cache"
+    cache.mkdir(parents=True)
+    for raster in rasters:
+        (cache / f"dhdt_smith_AntarcticaObsISMIP7-v1.2_{raster}.tif").touch()
+
+
+def _historical_line(monkeypatch, tmp_path, capsys):
+    r"""Core 1 from 2003 on a complete tree, with the real dH/dt lookup."""
+    _run(monkeypatch, tmp_path, range(2003, 2015), scenario="historical",
+         ocean_cover=lambda e, s: (2003, 2014), dhdt=True)
+    return _core_line(capsys, "core  1")
+
+
+def test_a_backdated_start_without_the_dhdt_is_blocked(monkeypatch, tmp_path, capsys):
+    r"""setup_model would stop there, after loading the mesh and the MAP."""
+    line = _historical_line(monkeypatch, tmp_path, capsys)
+    assert "BLOCKED" in line and "dH/dt for the geometry backdating" in line, line
+    assert "MIPkit not found" in line and "_valid.tif" in line, line
+
+
+def test_the_mipkit_is_a_dhdt_source(monkeypatch, tmp_path, capsys):
+    _stage_kit(tmp_path)
+    line = _historical_line(monkeypatch, tmp_path, capsys)
+    assert "READY" in line, line
+
+
+def test_the_cached_rasters_are_a_dhdt_source(monkeypatch, tmp_path, capsys):
+    r"""A cluster may stage the two small rasters and no 9 GB kit."""
+    _stage_cache(tmp_path, "value", "valid")
+    line = _historical_line(monkeypatch, tmp_path, capsys)
+    assert "READY" in line, line
+
+
+def test_a_cached_value_raster_without_its_coverage_is_no_source(monkeypatch, tmp_path, capsys):
+    _stage_cache(tmp_path, "value")
+    line = _historical_line(monkeypatch, tmp_path, capsys)
+    assert "BLOCKED" in line and "dH/dt" in line, line
+
+
+def test_a_start_from_2015_reads_no_dhdt(monkeypatch, tmp_path, capsys):
+    r"""Nothing is backdated from 2015 on, so OCX started there needs no
+    source."""
+    _run_core_11(monkeypatch, tmp_path, range(2015, 2026),
+                 env={"ISMIP7_T_START": "2015"}, dhdt=True)
+    line = _core_line(capsys, "core 11")
+    assert "READY" in line and "2015-2025" in line, line
+
+
+def test_the_dhdt_lookup_writes_nothing_and_honours_a_named_kit(monkeypatch, tmp_path):
+    r"""The preflight must not build the cache it asks about, and a named
+    ISMIP7_OBS_KIT that does not exist stops the loader even beside a cache."""
+    from icepack2_tools.obs_dhdt import dhdt_source
+    _knobs(monkeypatch, tmp_path)
+    monkeypatch.setenv("ISMIP7_DATA_ROOT", str(tmp_path / "ISMIP7" / "AIS"))
+    _stage_kit(tmp_path)
+    kit, val_fn, cov_fn = dhdt_source()
+    assert kit.endswith("AntarcticaObsISMIP7-v1.2.nc")
+    assert val_fn.endswith("dhdt_smith_AntarcticaObsISMIP7-v1.2_value.tif")
+    assert cov_fn.endswith("dhdt_smith_AntarcticaObsISMIP7-v1.2_valid.tif")
+    assert not (tmp_path / "obs").exists()
+    _stage_cache(tmp_path, "value", "valid")
+    monkeypatch.setenv("ISMIP7_OBS_KIT", str(tmp_path / "moved.nc"))
+    with pytest.raises(FileNotFoundError, match="ISMIP7_OBS_KIT"):
+        dhdt_source()
+
+
+def test_the_preflight_imports_without_firedrake():
+    r"""The preflight imports in 0.1 s because nothing it imports loads
+    Firedrake, which is why obs_dhdt imports Firedrake inside the loader."""
+    import subprocess
+    code = ("import sys; sys.path[:0] = sys.argv[1:]; import preflight; "
+            "loaded = [m for m in sys.modules if m.split('.')[0] == 'firedrake']; "
+            "assert not loaded, loaded")
+    result = subprocess.run(
+        [sys.executable, "-c", code, REPO, os.path.join(REPO, "antarctica", "scripts")],
+        capture_output=True, text=True)
+    assert result.returncode == 0, result.stderr
 
 
 # ── the melt calibration a run reads ────────────────────────────────────────

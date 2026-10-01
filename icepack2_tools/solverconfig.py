@@ -27,9 +27,10 @@ import os
 # The launchers name their own: the timing Makefile exports its campaign's
 # solver, and the cluster forward runner (batch_runners/projection.sbatch)
 # exports scpc_gamg for production. This default does not follow them, because
-# it is not only the forward's: the inversion, whose linear solve is
-# full-Jacobian MUMPS whatever is set here, stamps the mode it resolves on its
-# MAP, and redistribute_checkpoint.py fingerprints a published cache with it.
+# it is not only the forward's: the inversion, whose taped solves follow
+# ISMIP7_INVERSION_LINEAR_SOLVER whatever is set here, stamps the mode it
+# resolves on its MAP, and redistribute_checkpoint.py fingerprints a
+# published cache with it.
 DIAGNOSTIC_SOLVER_DEFAULT = "full_mumps"
 DIAGNOSTIC_SOLVER_MODES = (
     "schur_gamg",
@@ -44,6 +45,28 @@ DIAGNOSTIC_SOLVER_ALIASES = {
     "iterative": "schur_gamg",
     "mumps": "schur_mumps",
 }
+# The inversion's taped solves: the annotated forward, the adjoint tlm_adjoint
+# solves against it, and the solve that publishes the MAP's state. A knob of
+# its own, so the scpc_mumps the timing campaign exports for the lane's
+# ISMIP7_DIAGNOSTIC_LINEAR_SOLVER leaves the taped solve where it was. The
+# approximate-Schur modes are out: their selfp preconditioner was never
+# qualified for the mixed system.
+INVERSION_SOLVER_DEFAULT = "full_mumps"
+INVERSION_SOLVER_MODES = ("full_mumps", "scpc_mumps", "scpc_gamg")
+# The inversion's taped forward under scpc_gamg backtracks on the residual
+# norm. Each evaluation starts from the last one's state at new controls, as
+# far as ||F|| = 9e10 from the solution at 32 km, and there NLEQ-ERR, which
+# judges a step by the norm of the Newton correction, cannot use corrections
+# solved to the forward's relative 1e-6: at the same trial point where the
+# exact condensation converged in 6 Newton iterations it stalled at
+# ||F|| = 7.9e10 for 200. A residual decreasing line search accepts the same
+# inexact corrections (each is a descent direction for ||F||), converged in
+# the same 6, and needs one condensed solve a Newton iteration where NLEQ-ERR
+# needs two: 214 V-cycles at that point against 950 for NLEQ-ERR with the
+# Krylov tolerance tightened to 1e-8 (README, "Inversion solver"). The exact
+# modes keep the shared ISMIP7_SNES_LINESEARCH. The transient is unchanged:
+# its steps start next to the solution.
+INVERSION_GAMG_LINESEARCH_DEFAULT = "bt"
 
 SNES_TYPE_DEFAULT = "newtonls"
 SNES_LINESEARCH_DEFAULT = "nleqerr"
@@ -359,6 +382,73 @@ def diagnostic_solver_parameters(mode=None):
     else:
         params.update(_mumps_options("condensed_field_"))
     return params
+
+
+def inversion_solver_mode(requested=None):
+    r"""``ISMIP7_INVERSION_LINEAR_SOLVER``, canonical: the solver of the
+    inversion's taped forward, its adjoint and its publishing solve."""
+    if requested is None:
+        requested = _env("ISMIP7_INVERSION_LINEAR_SOLVER", INVERSION_SOLVER_DEFAULT)
+    mode = str(requested).strip().lower()
+    if mode not in INVERSION_SOLVER_MODES:
+        raise ValueError(
+            "ISMIP7_INVERSION_LINEAR_SOLVER must be one of "
+            f"{', '.join(INVERSION_SOLVER_MODES)}, not {requested!r}"
+        )
+    return mode
+
+
+def inversion_state_parameters(mode=None):
+    r"""PETSc options of the inversion's taped forward under ``mode``.
+
+    ``full_mumps`` is the inversion's own reference, kept as it was before the
+    knob existed: the shared SNES options around a GMRES-wrapped MUMPS LU of
+    the whole mixed Jacobian, with MUMPS printing its error return (INFOG(1),
+    the workspace or pivot code) so a factorisation that fails is named and
+    does not reach SNES only as DIVERGED_LINEAR_SOLVE (job 1612624).  The
+    scpc_* modes are the forward's own options for that mode, with the line
+    search ``ISMIP7_INVERSION_SNES_LINESEARCH`` names, by default ``bt``
+    under scpc_gamg (INVERSION_GAMG_LINESEARCH_DEFAULT) and the shared one
+    under scpc_mumps."""
+    mode = inversion_solver_mode(mode)
+    if mode != "full_mumps":
+        params = diagnostic_solver_parameters(mode)
+        default = (INVERSION_GAMG_LINESEARCH_DEFAULT if mode == "scpc_gamg"
+                   else params["snes_linesearch_type"])
+        params["snes_linesearch_type"] = _env(
+            "ISMIP7_INVERSION_SNES_LINESEARCH", default)
+        return params
+    params = _nonlinear_options()
+    params.update({
+        "ksp_type": "gmres",
+        "pc_type": "lu",
+        "pc_factor_mat_solver_type": "mumps",
+        "mat_mumps_icntl_14": 400,  # working memory increase
+        "mat_mumps_icntl_24": 1,  # detect null pivots
+        "mat_mumps_cntl_3": 1e-12,  # null pivot threshold
+        "mat_mumps_icntl_4": 1,
+    })
+    return params
+
+
+def inversion_adjoint_parameters(params):
+    r"""The adjoint's options, from the taped forward's ``params``.
+
+    The adjoint is one linear solve, so every ``snes_*`` entry goes. That
+    matters twice. An absolute tolerance sized for the forward residual lets
+    the adjoint exit at iteration 0 whenever ||dJ/du|| is small, returning a
+    zero adjoint and a gradient that is the prior's alone (job 10432790). And
+    under ``mat_type: matfree`` tlm_adjoint hands these options to a
+    LinearVariationalSolver, whose ``ksponly`` default the forward's
+    ``newtonls`` would replace with a line-searched Newton solve of a linear
+    problem; the assembled path ignores SNES options either way. The outer
+    Krylov tolerance is the forward's relative one, and the condensed solve's
+    absolute tolerance is scale-free here too: FGMRES hands the preconditioner
+    unit vectors."""
+    adjoint = {k: v for k, v in params.items() if not k.startswith("snes_")}
+    if adjoint.get("mat_type") == "matfree":
+        adjoint["snes_type"] = "ksponly"
+    return adjoint
 
 
 def transport_solver_parameters():

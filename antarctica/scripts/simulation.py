@@ -1390,17 +1390,9 @@ def setup_model(restart_from=None, *, allow_timing_cache_a_ref=False,
         F = derivative(L, z)
 
     if linear_solver.startswith("scpc_"):
-        # Firedrake's three-field SCPC expects both off-diagonal entries of the
-        # eliminated (M, tau) block to be present in split_form.  These fields
-        # are physically uncoupled, so UFL otherwise omits both structural-zero
-        # blocks and SCPC raises KeyError before assembly.  A runtime Constant
-        # preserves the block metadata while contributing exactly zero to the
-        # residual and Jacobian.  Do not replace it with the literal 0: UFL
-        # simplifies that away and recreates the missing-block failure.
-        scpc_structural_zero = Constant(0.0)
-        F += derivative(
-            scpc_structural_zero * M_s[0, 0] * tau_s[0] * dx, z
-        )
+        # The (M, tau) structural-zero blocks SCPC needs (see the helper).
+        from icepack2_tools.preconditioners import with_scpc_blocks
+        F = with_scpc_blocks(F, z)
 
     # A matrix-free Jacobian follows the state Function, which the line
     # search's residual evaluations overwrite with its trial point; hold it at

@@ -48,6 +48,24 @@ def frozen_linearization(F, z):
     return J, pre_jacobian_callback
 
 
+def with_scpc_blocks(F, z):
+    r"""``F`` plus a zero-valued term that keeps the (M, tau) blocks for SCPC.
+
+    Firedrake's three-field SCPC expects both off-diagonal entries of the
+    eliminated (M, tau) block to be present in split_form.  These fields are
+    physically uncoupled, so UFL otherwise omits both structural-zero blocks
+    and SCPC raises KeyError before assembly.  A runtime Constant preserves
+    the block metadata while contributing exactly zero to the residual and
+    Jacobian, and to the adjoint form tlm_adjoint assembles from it.  Do not
+    replace it with the literal 0: UFL simplifies that away and recreates the
+    missing-block failure."""
+    from firedrake import Constant, derivative, dx, split
+
+    _, M, tau = split(z)
+    scpc_structural_zero = Constant(0.0)
+    return F + derivative(scpc_structural_zero * M[0, 0] * tau[0] * dx, z)
+
+
 def rigid_body_modes(V):
     r"""Orthonormal translations and in-plane rotation of a 2-D vector space:
     the modes a membrane-stress operator without basal drag does not see."""

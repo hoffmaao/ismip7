@@ -349,6 +349,75 @@ own geometry space, since the inversion absorbs the calving-front treatment into
 loud warning. See
 `../GEOMETRY_DISCRETIZATION.md`.
 
+### Inversion solver
+
+`ISMIP7_INVERSION_LINEAR_SOLVER` picks the linear solver of every solve
+`tlm_adjoint` differentiates, and of the solve that publishes the MAP's state.
+`full_mumps`, the default, factors the whole mixed Jacobian, estimated at 410
+to 480 GB at 1 km (`runlog/inversion-1km.json`). `scpc_gamg` is the transient's production solver: Slate
+eliminates `M` and `τ` cell by cell and GAMG solves the condensed velocity
+system. `scpc_mumps` condenses the same way and factors the condensed system,
+which makes it the exact reference for `scpc_gamg`.
+
+`tlm_adjoint` computes the adjoint by assembling `adjoint(J)` at the recorded
+state and solving it with the adjoint options (`inversion_adjoint_parameters`:
+the forward's linear options, one Krylov solve, no absolute exit), so SCPC
+serves the adjoint unchanged. `icepack2_tools/taped_solve.py` handles two
+details of the condensed modes:
+
+- The Newton solve holds its Jacobian at the iterate SCPC condensed
+  (`frozen_linearization`), and `tlm_adjoint` refuses that callback while it
+  records. The solve therefore runs with the manager paused, and the recorded
+  equation confirms the converged state at SNES iteration 0.
+- The matrix-free adjoint solve receives no form compiler parameters, so the
+  taped form carries its quadrature degree in its integrals. Without that the
+  adjoint is assembled at UFL's estimated degree (up to 26) against a degree 4
+  forward, and the gradient was 1e-3 off.
+
+Under `scpc_gamg` the taped forward backtracks on the residual norm
+(`snes_linesearch_type bt`; `ISMIP7_INVERSION_SNES_LINESEARCH` overrides it,
+and the transient keeps NLEQ-ERR). Each evaluation starts from the previous
+one's state at new controls, at 32 km as far as ||F|| = 9e10 from the
+solution. NLEQ-ERR judges a step by the norm of the Newton correction, which
+the condensed GAMG solve leaves inexact at the forward's relative 1e-6: at a
+trial point the exact solvers took in 6 Newton iterations it stalled at
+||F|| = 7.9e10 for 200, at every full L-BFGS step, so the descent fell back to
+short ones. Measured at that trial point:
+
+| taped forward under `scpc_gamg` | Newton iterations | V-cycles |
+|---|---|---|
+| NLEQ-ERR, Krylov rtol 1e-6 (the transient's) | 200, failed | |
+| NLEQ-ERR, Krylov rtol 1e-8 | 6 | 950 |
+| NLEQ-ERR, Krylov rtol 1e-10 | 6 | 1292 |
+| `bt`, Krylov rtol 1e-6 | 6 | 214 |
+
+Gradient against `full_mumps` on the synthetic slab of
+`tests/test_scpc_adjoint.py` (grounded and floating, Budd, n = 3):
+
+| solver | relative gradient difference | Taylor order |
+|---|---|---|
+| `scpc_mumps` | 2.6e-13 | |
+| `scpc_gamg` | 1.4e-8 | 2.00 |
+
+On Antarctica at 32 km (`antarctica_320000_32000_buffered0`, 6,282 vertices,
+8 ranks, two runs at a time on a 16-core workstation, Budd, the `legacy` fluidity prior, a cold start,
+`ISMIP7_EVAL_CONTINUATION=0`), against `full_mumps` from the same start:
+
+| solver | optimizer | evaluations | largest relative difference in the objective | s per evaluation, forward / adjoint |
+|---|---|---|---|---|
+| `scpc_mumps` | L-BFGS-B | 4 | 1.1e-13 | 11 / 0.9 |
+| `scpc_gamg` | L-BFGS-B, 30 iterations | 32 | 4.3e-7 | 9.5 / 0.6 |
+| `scpc_gamg` | TAO lmvm, mass-consistent metric, bi-Laplacian prior, 20 iterations | 21 | 1.2e-8 | 19 a whole iteration |
+
+The two L-BFGS-B runs took the same 30 iterations and 32 evaluations, from
+3.0156e4 to 3.7463e3; the condensed GAMG solve averaged 51 V-cycles and the
+forward 5.1 Newton iterations an evaluation. `full_mumps` took 6.5 s and 0.5 s,
+which is expected at 32 km: the condensed solver pays for itself only at 1 km
+on 32 ranks or more (section 7). On the TAO path both published
+||F|| = 1.493 after 20 iterations; `full_mumps` failed its forward at three
+trial points and took the re-ramp rescue at each, where `scpc_gamg` under
+`bt` failed none.
+
 ### Transient (dH/dt-constrained) inversion
 
 A velocity-only inversion fits `u` while leaving `div(h u)` unconstrained, so
@@ -934,6 +1003,7 @@ projection), run in that run's own shell so it captures the environment.
 | `ISMIP7_LAKE_ICE_BASE` | under BedMachine's subglacial-lake mask (4, Lake Vostok) raise the bed to the ice base `s - H`. BedMachine's bed there is the lake floor, so `b + H` sits below its surface by the water column: a bowl a median 266 m and up to 916 m deep over 15,200 km2, with driving stresses near 1 MPa on its walls. Stamped into the MAP as `lake_ice_base`; a forward follows the MAP, so a MAP inverted without it keeps its own geometry | `1` |
 | `ISMIP7_SKIP_CONTINUATION` | `1` skips the cold `n,m: 1→n` ramp on the initial solve and inside each annotated forward eval (single solve at full exponents). Auto-enabled when the warm start supplies a full mixed state | `0` |
 | `ISMIP7_EVAL_CONTINUATION` | `0` keeps the initial `n,m: 1→n` ramp and then solves each annotated forward eval once at the full exponents, from the previous eval's state; a trial point where that solve fails takes the TAO path's re-ramp rescue. The objective is the same either way, and the MAP records the mode as `eval_continuation` | `1` |
+| `ISMIP7_INVERSION_LINEAR_SOLVER` | linear solver of the annotated forwards, of the adjoint solves against them and of the publishing solve: `full_mumps` (the full mixed-Jacobian MUMPS LU), `scpc_mumps` or `scpc_gamg` (the transient's condensed modes; see "Inversion solver" in section 4). Recorded in the MAP as `state_solver_mode`, outside the objective, so a chain may change it between links. The startup ramp follows `ISMIP7_DIAGNOSTIC_LINEAR_SOLVER` | `full_mumps` |
 | `ISMIP7_GAMMA_THETA` / `ISMIP7_GAMMA_PHI` | Whittle-Matern prior strength on `θ` and `φ`, coupled to `ISMIP7_MISFIT_NORM` since normalising divides the misfit by about sigma^2. `scripts/lsurface.py` sweeps both on a grid and picks the L-curve corner of each (usage in its docstring) | `1e5` under `sigma`, `1e4` under `none` |
 | `ISMIP7_L_REG` | prior correlation length (m) | `7.5e3` |
 | `ISMIP7_MAXITER` | L-BFGS-B iteration cap | `500` |
@@ -1009,7 +1079,7 @@ redeclare those literals.
 | `ISMIP7_SNES_DIVERGENCE_TOL` | residual-growth divergence threshold; PETSc's `-3` (`PETSC_UNLIMITED`) disables this test (`-1` means `PETSC_DETERMINE`, restoring the default `1e4`) | `-3` |
 | `ISMIP7_SNES_ATOL_SCALE` / `ISMIP7_SNES_RESTART_FAILURE_ATOL_SCALE` | persistent absolute tolerance after a converged setup solve (`scale * achieved norm`) / after accepting a loaded hard-era state (`scale * loaded-state norm`) | `100` / `1e-6` |
 | `ISMIP7_SNES_KSP_EW` | enable PETSc Eisenstat-Walker variable inner tolerance for an A/B test | `0` |
-| `ISMIP7_DIAGNOSTIC_LINEAR_SOLVER` | `schur_gamg` or `schur_mumps`: legacy PETSc `selfp` approximation; `scpc_gamg` or `scpc_mumps`: exact cell-local Slate elimination and an assembled velocity solve; `full_mumps`: complete mixed-Jacobian reference. Legacy `iterative`/`mumps` aliases mean `schur_gamg`/`schur_mumps` | `scpc_gamg` for cluster forwards (`batch_runners/projection.sbatch`); `full_mumps` for a forward driver run by hand, the core runner and the workstation launchers, and the inversion's own linear solve whatever is set; the timing Makefile's `TIMING_SOLVER` (`scpc_mumps`) |
+| `ISMIP7_DIAGNOSTIC_LINEAR_SOLVER` | `schur_gamg` or `schur_mumps`: legacy PETSc `selfp` approximation; `scpc_gamg` or `scpc_mumps`: exact cell-local Slate elimination and an assembled velocity solve; `full_mumps`: complete mixed-Jacobian reference. Legacy `iterative`/`mumps` aliases mean `schur_gamg`/`schur_mumps` | `scpc_gamg` for cluster forwards (`batch_runners/projection.sbatch`); `full_mumps` for a forward driver run by hand, the core runner, the workstation launchers and the inversion's startup ramp (its taped solves follow `ISMIP7_INVERSION_LINEAR_SOLVER`); the timing Makefile's `TIMING_SOLVER` (`scpc_mumps`) |
 | `ISMIP7_FREEZE_LINEARIZATION` | `scpc_*` only (their Jacobian is matrix-free): build it on a copy of the state that is refreshed only when SNES re-forms the Jacobian, so the NLEQ-ERR line search's simplified-Newton solve sees the Jacobian SCPC condensed instead of one that has followed the state to the trial point. `0` restores the live state every lane before 2026-09-19 ran with; records carry `solver_configuration.linearization_state` (`frozen`/`live`/`assembled`) | `1` |
 | `ISMIP7_KSP_RTOL` / `ISMIP7_KSP_MAXIT` | outer FGMRES relative tolerance / iteration limit for the iterative diagnostic mode | `1e-6` / `1000` |
 | `ISMIP7_CONDENSED_KSP_TYPE` / `ISMIP7_CONDENSED_KSP_ATOL_FACTOR` / `ISMIP7_CONDENSED_KSP_RTOL` / `ISMIP7_CONDENSED_KSP_RESTART` | `scpc_gamg` only: the Krylov method that iterates on SCPC's assembled condensed velocity system around GAMG; its **absolute** tolerance as a fraction of `ISMIP7_KSP_RTOL` (FGMRES hands the preconditioner unit vectors and the elimination is exact, so the outer relative residual after one iteration is the inner absolute residual: this is the loosest inner solve that leaves the outer FGMRES one iteration); its relative tolerance, parked out of reach; and the GMRES restart. `preonly` restores one V-cycle per outer iteration | `fgmres` / `0.5` / `1e-12` / `100` |

@@ -91,6 +91,8 @@ from icepack2_tools.dual_friction import (
     weertman_anchor,
 )
 from icepack2_tools.geometry import cg1_lift, raise_bed_to_lake_ice_base, sample_to_geometry
+from icepack2_tools.preconditioners import frozen_linearization, with_scpc_blocks
+from icepack2_tools.taped_solve import taped_state_solve
 from icepack2_tools.transfer import (
     interpolate_with_fill, load_checkpoint_mesh, meshes_match,
 )
@@ -140,8 +142,10 @@ from icepack2_tools.solverconfig import (
     diagnostic_solver_parameters,
     final_solve_bounds,
     final_solve_parameters,
+    inversion_adjoint_parameters,
+    inversion_solver_mode,
+    inversion_state_parameters,
     linearization_state,
-    nonlinear_solver_options,
     snes_atol_scale,
     snes_monitor_enabled,
 )
@@ -632,24 +636,14 @@ def main():
     # tolerance -3 (PETSC_UNLIMITED; the legacy -1 is PETSC_DETERMINE, which
     # restores PETSc's 1e4 growth cutoff and reports DIVERGED_DTOL on solves
     # that would otherwise reach their real result -- README "Timing
-    # benchmark" §7). The linear solve is the full mixed-Jacobian MUMPS LU:
-    # tlm_adjoint differentiates through it, so this is deliberately NOT the
-    # transient's condensed scpc_mumps mode, and the MAP records that as
+    # benchmark" §7). The linear solve of every annotated forward, of the
+    # adjoint tlm_adjoint solves against it, and of the publishing solve
+    # follows ISMIP7_INVERSION_LINEAR_SOLVER: full_mumps (the default) is the
+    # full mixed-Jacobian MUMPS LU, scpc_mumps and scpc_gamg the transient's
+    # condensed modes (icepack2_tools/taped_solve.py). The MAP records it as
     # state_solver_mode beside the lane contract diagnostic_solver_mode.
-    sparams = nonlinear_solver_options()
-    sparams.update({
-        "ksp_type": "gmres",
-        "pc_type": "lu",
-        "pc_factor_mat_solver_type": "mumps",
-        "mat_mumps_icntl_14": 400,  # working memory increase
-        "mat_mumps_icntl_24": 1,  # detect null pivots
-        "mat_mumps_cntl_3": 1e-12,  # null pivot threshold
-        # MUMPS prints its error return (INFOG(1), the workspace or pivot
-        # code) instead of failing silently: a factorisation that fails
-        # reaches SNES only as DIVERGED_LINEAR_SOLVE (job 1612624).
-        "mat_mumps_icntl_4": 1,
-    })
-    state_solver_mode = "full_mumps"
+    state_solver_mode = inversion_solver_mode()
+    sparams = inversion_state_parameters(state_solver_mode)
     state_solver_parameters = json.dumps(sparams, sort_keys=True)
     # Optional SNES monitoring (ISMIP7_SNES_MONITOR=1, ISMIP7_SNES_LOG=file),
     # the transient runner's convention. Applies to every annotated forward
@@ -670,6 +664,14 @@ def main():
     # asserts it). Resolved now so an invalid environment fails here, not
     # inside the final save after hours of work.
     lane_solver_mode = diagnostic_solver_mode()
+    # Either solver condensing with SCPC needs the (M, tau) structural-zero
+    # blocks in F (preconditioners.with_scpc_blocks).
+    scpc_blocks = (state_solver_mode.startswith("scpc_")
+                   or lane_solver_mode.startswith("scpc_"))
+    PETSc.Sys.Print(
+        f"  Inversion linear solver: {diagnostic_solver_label(state_solver_mode)} "
+        f"(ISMIP7_INVERSION_LINEAR_SOLVER={state_solver_mode}); startup ramp: "
+        f"{diagnostic_solver_label(lane_solver_mode)}")
     fc_params = {"quadrature_degree": 4}
 
     # ── Build form (Kangerd pattern: controls baked into sliding coefficient) ──
@@ -1344,6 +1346,10 @@ def main():
                         "(grounded ice keeps the prior fluidity)")
 
     def build_F(theta_c, phi_c):
+        F_c = _build_residual(theta_c, phi_c)
+        return with_scpc_blocks(F_c, z) if scpc_blocks else F_c
+
+    def _build_residual(theta_c, phi_c):
         # Residual closure (tau linear, grounded-only theta via exp(theta*He),
         # exact-zero shelves): budd -> N_hat=1 at the reference geometry;
         # regularized_coulomb -> Coulomb cap. Legacy budd -> action derivative.
@@ -1392,17 +1398,31 @@ def main():
         PETSc.Sys.Print("  NO calving_terminus BC (buffered mesh, h=0 at front)")
     F = build_F(theta, phi)
 
+    def _untaped_state_solver(F_form, params):
+        """An unannotated solve of F_form under the taped solve's mode: under
+        scpc_* with the Jacobian frozen at the Newton iterate, as the taped
+        solve and the transient run it (preconditioners.frozen_linearization;
+        tlm_adjoint refuses its callback while annotating, so call this with
+        the manager stopped)."""
+        J_form, pre_jacobian = None, None
+        if state_solver_mode.startswith("scpc_"):
+            J_form, pre_jacobian = frozen_linearization(F_form, z)
+        return NonlinearVariationalSolver(
+            NonlinearVariationalProblem(
+                F_form, z, J=J_form, form_compiler_parameters=fc_params),
+            solver_parameters=params,
+            pre_jacobian_callback=pre_jacobian,
+        )
+
     # ── Warm start ──
     stop_manager()
-    prob = NonlinearVariationalProblem(F, z, form_compiler_parameters=fc_params)
-    slvr = NonlinearVariationalSolver(prob, solver_parameters=sparams)
+    slvr = _untaped_state_solver(F, sparams)
     n_flow.assign(n_flow_val)
     m_slide.assign(m_slide_val)
     ramp_params = diagnostic_solver_parameters(lane_solver_mode)
     ramp_params.update(_monitor_options)
     ramp_J, ramp_pre_jacobian = None, None
     if linearization_state(lane_solver_mode) == "frozen":
-        from icepack2_tools.preconditioners import frozen_linearization
         ramp_J, ramp_pre_jacobian = frozen_linearization(F, z)
     ramp_solver = NonlinearVariationalSolver(
         NonlinearVariationalProblem(
@@ -1524,9 +1544,10 @@ def main():
     # is the prior's alone and L-BFGS pulls the controls toward the prior
     # means while the misfit rises (job 10432790, 2026-09-14: adjoint time
     # 25 s -> 0.7 s, |grad| 47 -> 12, misfit +7% in four evaluations).
-    adjoint_sparams = {
-        key: value for key, value in sparams.items() if key != "snes_atol"
-    }
+    # The same rule drops every SNES option: under scpc_* tlm_adjoint hands
+    # these to a LinearVariationalSolver, which a forward's newtonls would
+    # turn into a line-searched Newton solve (inversion_adjoint_parameters).
+    adjoint_sparams = inversion_adjoint_parameters(sparams)
 
     u_init = z.subfunctions[0]
     u_mag = Function(Q).interpolate(sqrt(inner(u_init, u_init)))
@@ -1921,33 +1942,32 @@ def main():
            "1->n continuation in 5 annotated solves (ISMIP7_EVAL_CONTINUATION=0 "
            "solves once at full n)"))
 
+    # The untaped work of the last evaluation's state solves under scpc_*
+    # (taped_state_solve); written into the timing record per evaluation.
+    state_work = []
+
+    def _taped_state_solve(F_ctrl):
+        state_work.append(taped_state_solve(
+            F_ctrl, z, state_solver_mode, sparams, adjoint_sparams,
+            form_compiler_parameters=fc_params,
+        ))
+
     def forward(theta_ctrl, phi_ctrl):
         clear_caches()
+        state_work.clear()
         F_ctrl = build_F(theta_ctrl, phi_ctrl)
         if eval_full_n:
             # Stay at the physical exponents so each eval is one Newton solve.
             n_flow.assign(n_flow_val)
             m_slide.assign(m_slide_val)
-            EquationSolver(
-                F_ctrl == 0,
-                z,
-                solver_parameters=sparams,
-                adjoint_solver_parameters=adjoint_sparams,
-                form_compiler_parameters=fc_params,
-            ).solve()
+            _taped_state_solve(F_ctrl)
         else:
             # Continuation inside annotation for robustness — ramp both
             # n_flow and m_slide on the same [0,1] parameter.
             for t in np.linspace(0.0, 1.0, 5):
                 n_flow.assign(1.0 + t * (n_flow_val - 1.0))
                 m_slide.assign(1.0 + t * (m_slide_val - 1.0))
-                EquationSolver(
-                    F_ctrl == 0,
-                    z,
-                    solver_parameters=sparams,
-                    adjoint_solver_parameters=adjoint_sparams,
-                    form_compiler_parameters=fc_params,
-                ).solve()
+                _taped_state_solve(F_ctrl)
 
         u_sol, _, _ = split(z)
         # chi^2 density: each residual divided by the squared error of its own
@@ -2368,6 +2388,8 @@ def main():
                 "warm_start": bool(warm_chk),
                 "skip_continuation": bool(skip_continuation),
                 "eval_continuation": bool(not eval_full_n),
+                "inversion_linear_solver": state_solver_mode,
+                "diagnostic_linear_solver": lane_solver_mode,
             },
             "evaluations": list(timing_history),
             # Set only by the "finished" record: how the publishing solve
@@ -2386,7 +2408,7 @@ def main():
         start_manager()
         try:
             J = forward(theta, phi)
-        except fd.ConvergenceError:
+        except fd.ConvergenceError as exc:
             stop_manager()
             z.assign(z_backup)
             if iteration_count[0] == 0:
@@ -2399,7 +2421,8 @@ def main():
                     "is fragile at <~100 vertices/rank); also check the "
                     "fluidity prior."
                 )
-            PETSc.Sys.Print("  [!] Forward solve failed, returning large objective")
+            PETSc.Sys.Print(
+                f"  [!] Forward solve failed ({exc}), returning large objective")
             return last_good_obj[0] * 10, np.zeros(2 * global_ndof)
         stop_manager()
         J_val = float(J)
@@ -2482,6 +2505,7 @@ def main():
                 "adj_seconds": t_adj,
                 "total_seconds": t_iter,
                 "terms": terms,
+                "state_solves": [w for w in state_work if w],
             })
             _write_timing_json(phase="running", message="in progress")
 
@@ -2760,6 +2784,7 @@ def main():
                     "grad_norm": float(gnorm),
                     "total_seconds": t_iter,
                     "terms": {"vel": float(last_good_vel_chi2[0])},
+                    "state_solves": [w for w in state_work if w],
                 })
                 _write_timing_json(phase="running", message="in progress")
             if iteration_count[0] > 0 and iteration_count[0] % 20 == 0:
@@ -3031,10 +3056,7 @@ def main():
             "  WARNING: no converged forward residual on record; the final "
             "solve falls back to the relative test alone"
         )
-    final_solver = NonlinearVariationalSolver(
-        NonlinearVariationalProblem(F, z, form_compiler_parameters=fc_params),
-        solver_parameters=final_sparams,
-    )
+    final_solver = _untaped_state_solver(F, final_sparams)
     final_solve_ok = False
     try:
         final_solver.solve()

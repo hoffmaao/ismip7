@@ -1968,6 +1968,11 @@ def main():
         params = {k: v for k, v in sparams.items() if k != "snes_atol"}
         params.update(final_solve_bounds())
         params["snes_max_it"] = direct_forward_max_it()
+        # A trial whose residual has grown 1e6x is lost; fail it now and let
+        # the line search backtrack, rather than run the cap out (2 km SEP2,
+        # NOTS 1692389: 50 iterations to ||F|| 5e33, 289 s).
+        params["snes_divergence_tolerance"] = float(
+            os.environ.get("ISMIP7_DIRECT_FORWARD_DTOL", "1e6"))
         solver = NonlinearVariationalSolver(
             NonlinearVariationalProblem(
                 F_ctrl, z, form_compiler_parameters=fc_params),

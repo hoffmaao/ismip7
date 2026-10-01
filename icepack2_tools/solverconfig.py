@@ -86,7 +86,9 @@ FINAL_KSP_MAXIT_DEFAULT = "50"
 # failed trials diverged
 # (snes_recinos_sqrtC_pattyn_noprior_subelement_nodhdt.log, 30 Sep 2026).
 DIRECT_FORWARD_DEFAULT = "1"
-DIRECT_FORWARD_MAXIT_DEFAULT = "50"
+# Successful direct solves took 1-17 Newton iterations on the 2 km and 32 km
+# meshes; one that has not converged by 30 is a lost trial (30 Sep 2026).
+DIRECT_FORWARD_MAXIT_DEFAULT = "30"
 # Rungs of the continuation ladder the failed-trial rescue may climb: each
 # failed rung cost 1-3 h on the 2 km mesh and ~80% of rescues failed anyway
 # (2 km chains, 27-30 Sep 2026). 0 disables the rescue.

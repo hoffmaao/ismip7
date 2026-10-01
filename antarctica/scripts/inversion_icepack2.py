@@ -876,13 +876,19 @@ def main():
             try:
                 if not warm_geometry:
                     raise raise_geometry
-                u_ws = _warm_load(chk, chk_mesh, "velocity", V)
+                # a published MAP's state, else a periodic checkpoint's
+                try:
+                    _pre = ""
+                    u_ws = _warm_load(chk, chk_mesh, "velocity", V)
+                except (KeyError, RuntimeError, ValueError):
+                    _pre = "ckpt_"
+                    u_ws = _warm_load(chk, chk_mesh, "ckpt_velocity", V)
                 M_ws = _warm_load(
-                    chk, chk_mesh, "membrane_stress",
+                    chk, chk_mesh, f"{_pre}membrane_stress",
                     z.subfunctions[1].function_space(),
                 )
                 tau_ws = _warm_load(
-                    chk, chk_mesh, "basal_stress",
+                    chk, chk_mesh, f"{_pre}basal_stress",
                     z.subfunctions[2].function_space(),
                 )
                 z.subfunctions[0].assign(u_ws)
@@ -2284,6 +2290,14 @@ def main():
                 chk.save_function(z.subfunctions[0], name="velocity")
                 chk.save_function(z.subfunctions[1], name="membrane_stress")
                 chk.save_function(z.subfunctions[2], name="basal_stress")
+            else:
+                # A periodic checkpoint carries the accepted mixed state for
+                # the next chain link only, under names no forward reads: the
+                # link starts from it instead of re-ramping n=1->3 from rest
+                # (~20 min of a one-hour 2 km link, 30 Sep 2026).
+                chk.save_function(z.subfunctions[0], name="ckpt_velocity")
+                chk.save_function(z.subfunctions[1], name="ckpt_membrane_stress")
+                chk.save_function(z.subfunctions[2], name="ckpt_basal_stress")
                 chk.save_function(H, name="H_init")
                 chk.save_function(phi_eff, name="phi_eff")
                 chk.save_function(_friction_reference(), name="C_w0")

@@ -1,0 +1,33 @@
+{
+  "id": "core07-32km-ssp585-cesm2waccm-i116y2003off",
+  "task": "test",
+  "institution": "IU",
+  "title": "Core 7 at 32 km without the SMB-elevation feedback, queued by ISMIP7_CHAIN_THEN from the i116y2003off historical of the 2003 start",
+  "status": "done",
+  "exp_id": "C007",
+  "esm": "CESM2-WACCM",
+  "scenario": "ssp585",
+  "period": "2015 to 2301, reached 2301.0",
+  "friction": "budd",
+  "mesh": "antarctica_320000_32000, DG0 geometry",
+  "initial_state": "hist_cesm2_waccm_i116y2003off_32000_final.h5, sha256 be279aff19a05c19ef36015b72ec43152c041c7f70ef238fd9f685f4fda2e910",
+  "branch_from": "core01-32km-hist-cesm2waccm-i116y2003off at 2015.0, queued by ISMIP7_CHAIN_THEN, from the log's restart lines",
+  "forcing": "CESM2-WACCM ssp585, atmosphere SDBN1-8000m v2, SMB-elevation feedback off (ISMIP7_SMB_ELEVATION_FEEDBACK=0), ocean v3",
+  "melt": "per-basin K from K_issue11_mesh2500.npz, local slope",
+  "front": "held fixed, ice-shelf collapse ISMIP7_FRACTURE=none",
+  "apparent_mb": "balance",
+  "dt": 0.1,
+  "site": "IU Quartz",
+  "resources": "8 ranks, 32 GiB",
+  "jobs": [
+    "10659477",
+    "10661204"
+  ],
+  "code": "9c24421",
+  "started": "2026-09-26",
+  "finished": "2026-09-26",
+  "cost": "2 links, 121 min, 2 min, for 286 model years",
+  "results": "antarctica/results/ssp585_cesm2_waccm_i116y2003off_32000_*",
+  "audit": "OFF TRACK against the present-day envelopes, as an ssp585 run at 2300 is, with dM/dt FAIL at -3019.7 Gt/yr; resid 0.0000 on all 2860 rows, no rescue, subcycle or stall event",
+  "notes": "run for issue #116 from a scratch clone of claude/dacabfdz-gradient-version-565c93 at 9c24421, with results and logs in the shared checkout. 2860 of 2860 steps converged on their first direct diagnostic solve, with 6.7 Newton iterations on average and 20 at the most (step 2820, t = 2297.0). VAF changes by -124 mm SLE over 2015 to 2301; the peak ice speed on the mesh is 2166736 m/yr at t = 2237.7, at (-190602, -433202) m. The same-code partner of the i116y2003on core 7, with ISMIP7_SMB_ELEVATION_FEEDBACK=0, queued from the i116y2003off historical, recorded smb_elevation_feedback = off; the comparison is in core07-32km-ssp585-cesm2waccm-i116y2003on. Its first link stopped at t = 2298.5 under the chain's wall budget (120.7 of 155 min used) and the chain resumed it for the last 2.5 years. Run without ISMIP7_OUTPUT. Final state sha256 76d07d30e869cf003f1719baaca0940e3f222560ee8807f6cb4330f8f1af163f. Full record: antarctica/reports/core07_ssp585_cesm2_waccm_32km_i116y2003off.md."
+}

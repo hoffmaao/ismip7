@@ -1,0 +1,31 @@
+{
+  "id": "core01-32km-hist-cesm2waccm-i116y2003off",
+  "task": "test",
+  "institution": "IU",
+  "title": "Core 1 at 32 km from the 2003 start without the SMB-elevation feedback: branch state of the i116y2003off runs",
+  "status": "done",
+  "esm": "CESM2-WACCM",
+  "scenario": "historical",
+  "period": "2003 to 2015, reached 2015.0",
+  "friction": "budd",
+  "mesh": "antarctica_320000_32000, DG0 geometry",
+  "initial_state": "inversion_icepack2_budd_n3_dg0_logvelnet_32000.h5, sha256 3b3aefa1c69a5daf87d1db291cae9337e00c2696f412bce147b1f488228ef472, backdated 12 yr by the Smith et al. (2020) dH/dt on grounded ice (issue #117)",
+  "branch_from": "cold start at 2003.0",
+  "forcing": "CESM2-WACCM historical, atmosphere SDBN1-8000m v2, SMB-elevation feedback off (ISMIP7_SMB_ELEVATION_FEEDBACK=0), ocean v3",
+  "melt": "per-basin K from K_issue11_mesh2500.npz, local slope",
+  "front": "held fixed, ice-shelf collapse ISMIP7_FRACTURE=none",
+  "apparent_mb": "balance",
+  "dt": 0.1,
+  "site": "IU Quartz",
+  "resources": "8 ranks, 32 GiB",
+  "jobs": [
+    "10659415"
+  ],
+  "code": "9c24421",
+  "started": "2026-09-26",
+  "finished": "2026-09-26",
+  "cost": "one link of 8 min for 12 model years",
+  "results": "antarctica/results/hist_cesm2_waccm_i116y2003off_32000_*",
+  "audit": "ON TRACK, with dM/dt PASS at 26.8 Gt/yr; resid 0.0000 on all 120 rows, no rescue, subcycle or stall event",
+  "notes": "run for issue #116 from a scratch clone of claude/dacabfdz-gradient-version-565c93 at 9c24421, with results and logs in the shared checkout. 120 of 120 steps converged on their first direct diagnostic solve, with 3.5 Newton iterations on average and 12 at the most (step 102, t = 2013.2). VAF changes by +4 mm SLE over 2003 to 2015; the peak ice speed on the mesh is 6041 m/yr at t = 2006.0, at (2653000, -429000) m. The same-code partner of the i116y2003on historical, with ISMIP7_SMB_ELEVATION_FEEDBACK=0; the comparison is in core01-32km-hist-cesm2waccm-i116y2003on. The final state records smb_elevation_feedback = off. Run without ISMIP7_OUTPUT. Final state sha256 be279aff19a05c19ef36015b72ec43152c041c7f70ef238fd9f685f4fda2e910. Full record: antarctica/reports/core01_hist_cesm2_waccm_32km_i116y2003off.md."
+}

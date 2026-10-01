@@ -24,8 +24,19 @@ the toolbox's grid argmin would.
 Output: deltaT_per_basin_<lc>_K<K>.npz with basin_ids, deltaT_basin, K,
 residual_gt (M_b(dT*) - M_obs_b), sensitivity_gt_per_K (dM_b/dT at dT*),
 and the melt_slope / sin_alpha_ant / sin_alpha_cap / geometry_space
-provenance the forward checks. Every basin total is reduced across ranks, so
-the offsets are the same under any mpiexec -n. Run with the same ISMIP7_* melt knobs as the forward.
+provenance the forward checks. Beside it,
+deltaT_per_basin_<lc>_K<K>.source.json, the sidecar the forward reads
+(runconfig.melt_calibration_contract): the npz's sha256, the mesh with its
+vertex and cell counts, the raster sampling, the slope settings, the
+observation table and every input by name and sha256, the fitted totals, and
+the site, job and commit (calibrate_melt.calibration_record). A fit at the
+tracked calibration's K also records that K's selection (selected_as, and
+refit_of naming the tracked file), so a run's provenance line still reads
+K50. Promoting a fit to the tracked calibration also takes the decision
+fields a person adds (decided, decision, selected_as, selection, run_record,
+mesh_build), so --out may not name the tracked calibration's directory. Every
+basin total is reduced across ranks, so the offsets are the same under any
+mpiexec -n. Run with the same ISMIP7_* melt knobs as the forward.
 
     ISMIP7_LC=2000 python antarctica/scripts/calibrate_deltaT.py \
         [--K 8.5e-5 ...] [--out DIR]
@@ -61,7 +72,11 @@ from icepack2_tools.forcing import (  # noqa: E402
 from icepack2_tools.melt_selection import (  # noqa: E402,F401
     DT_WINDOW, N_BASINS, Plausibility, TFRule, fit_deltaT,
 )
-from icepack2_tools.runconfig import geometry_space  # noqa: E402
+from icepack2_tools.runconfig import (  # noqa: E402
+    MELT_CALIBRATION_DEFAULT, check_melt_calibration_record, geometry_space,
+    melt_calibration_contract, melt_calibration_sidecar,
+    refuse_tracked_calibration_out, write_melt_calibration_sidecar,
+)
 from icepack2_tools.mpi_stats import (  # noqa: E402
     global_count, global_range,
 )
@@ -73,6 +88,7 @@ def main():
     ap.add_argument("--out", default=RESULTS_DIR,
                     help="directory for deltaT_per_basin_<lc>_K<K>.npz")
     args = ap.parse_args()
+    refuse_tracked_calibration_out(args.out)
 
     PETSc.Sys.Print("=== per-basin deltaT at fixed K (ISMIP7 toolbox optimise_deltaT, "
                     "on the forward's DG0 melt path) ===")
@@ -80,6 +96,8 @@ def main():
     for p in (cm.INV_H5, cm.CLIM_TF, cm.CLIM_SO, cm.IMBIE2_NC, cm.OBS_CSV):
         if not os.path.exists(p):
             raise FileNotFoundError(p)
+    # The name the sidecar records, resolved before any data is read.
+    mesh_name = cm.mesh_name()
     bids, M_obs, sigma_obs = cm._load_obs()
     PETSc.Sys.Print(f"  Target: {float(M_obs.sum()):.1f} Gt/yr over {len(bids)} basins")
 
@@ -107,6 +125,13 @@ def main():
     rule = TFRule()
     plaus = (Plausibility(tf[floating], area[floating], basin[floating])
              if comm.size == 1 else None)
+    record = cm.calibration_record(mesh, g, mesh_name)
+    written_by = ("antarctica/scripts/calibrate_deltaT.py --K "
+                  + " ".join(f"{K:g}" for K in args.K))
+    # Refitting the tracked calibration's K on another mesh is this script's
+    # documented use; such a fit keeps the K's selection, so the provenance
+    # line still names it (K50).
+    tracked = melt_calibration_contract(MELT_CALIBRATION_DEFAULT) or {}
 
     os.makedirs(args.out, exist_ok=True)
     for K in args.K:
@@ -140,6 +165,22 @@ def main():
         for bid, why in flagged:
             PETSc.Sys.Print(f"  [!] basin {bid}: {why}")
         fn = os.path.join(args.out, f"deltaT_per_basin_{cm.LC}_K{K:.3e}.npz")
+        refit = ({"selected_as": tracked["selected_as"],
+                  "refit_of": {"file": tracked["file"],
+                               "sha256": tracked["sha256"]}}
+                 if tracked.get("selected_as")
+                 and np.isclose(K, tracked["K"], rtol=1e-9, atol=0) else {})
+        # dT, M0 and resid are reduced and the record broadcast, so every rank
+        # builds and checks the same sidecar: a bad one stops them together.
+        # A basin with no floating cells melts nothing and has no residual,
+        # so the fitted total skips it.
+        sidecar = {"K": float(K), **refit, **record, "written_by": written_by,
+                   "dt_window": list(DT_WINDOW), "tf_rule": rule.as_dict(),
+                   "rule_admits": verdict.get("rule_admits"),
+                   "melt_total_gtyr": round(float(np.nansum(M1)), 3),
+                   "melt_total_dT0_gtyr": round(float(M0.sum()), 3),
+                   "unrooted": [int(bid) for bid, _ in flagged]}
+        check_melt_calibration_record(sidecar)
         if mesh.comm.rank == 0:
             np.savez(fn, basin_ids=bids, deltaT_basin=dT, K=K,
                      M_obs=M_obs, M_dT0=M0, residual_gt=resid,
@@ -149,10 +190,10 @@ def main():
                                     else float("nan")),
                      sin_alpha_cap=(cm.SIN_ALPHA_CAP if melt_slope() == "local"
                                     else float("inf")),
-                     geometry_space=geometry_space(), obs_csv=cm.OBS_CSV,
-                     imbie2_nc=cm.IMBIE2_NC, inversion=cm.INV_H5,
+                     geometry_space=geometry_space(), **cm.input_names(),
                      dt_window=np.array(DT_WINDOW, dtype=float), **verdict)
-        PETSc.Sys.Print(f"  wrote {fn}")
+            write_melt_calibration_sidecar(fn, sidecar)
+        PETSc.Sys.Print(f"  wrote {fn}\n    and {melt_calibration_sidecar(fn)}")
 
 
 if __name__ == "__main__":

@@ -20,7 +20,7 @@
  "started": "2026-09-26",
  "finished": "2026-09-26",
  "id": "test-32km-ssp585-reference-land",
- "title": "The p4 ssp585 at 32 km restarted at 2294.0 on main after pull requests 127 and 130 for five years, following the frozen reference on emptied cells (issue #136)",
+ "title": "The p4 ssp585 at 32 km restarted at 2294.0 on main after pull requests 127 and 130 for five years, following the frozen reference on emptied cells (issue 136)",
  "jobs": [
   "10659900"
  ],

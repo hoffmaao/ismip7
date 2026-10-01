@@ -54,11 +54,20 @@ year by year and splits every difference into named parts:
   limnsw the pixel averaging of a nonlinear integrand; for tendlibmassbffl the
   melt booked where the grid holds none: in pixels with no floating ice at
   year end, or, in a tree written before, outside the year-end floating mask.
-  Since the forward books the melt of ice flowing into cells holding no ice at
-  either end of the year as lifmassbf (issue #109), that residual is the melt
-  of shelf ice gone within the year and the share the frozen apparent-MB
-  reference supplied; a tree from before carries the front melt in it too,
-  and its lifmassbf is zero.
+  Since issue #136 the forward books the melt of every cell with no floating
+  ice at year end as lifmassbf, after booking the frozen apparent-MB
+  reference and the snowfall a cell holding no ice at either end received
+  against the melt that only cancelled them, so that residual is the
+  refreezing there, inside the exact sums' tolerance, and the note says the
+  fill leaves out no melt (0.09 Gt/yr and 6 % of the tolerance at most on
+  both arms of the 25 km ssp585 of 28 September 2026). In a tree from
+  before, it is the melt of shelf ice
+  gone within the year and the positive SMB's share of the melt of emptied
+  cells, with the reference's share as well before its netting, and with the
+  front melt too before issue #109, when lifmassbf was zero. tendlicalvf
+  carries the outflux across the mesh's exterior boundary since issue #136;
+  a tree from before carries the front's removal alone, and the same gate
+  passes it.
 
 The sea-level contributions get native counterparts from the model's lim and
 limnsw, with the tool's ocean area A_O = 3.625e14 m2:
@@ -104,8 +113,9 @@ UNITS = dict({s: "kg" for s in ("lim", "limnsw")}, iareagr="m2", iareafl="m2",
              **{s: "kg s-1" for s, _ in FL_SCALARS}, **{s: "m" for s in SEA_LEVEL})
 # forbidden-policy fields: whole-pixel means, so a grid sum is the mesh sum
 # (tendacabf holds too in a tree of whole-pixel means, under its own gate).
-# lifmassbf carries front melt since issue #109 and is zero in a tree from
-# before, which the same gate passes.
+# lifmassbf carries front melt since issue #109, and the melt of every cell
+# without floating ice at year end since issue #136; it is zero in a tree from
+# before issue #109, which the same gate passes.
 EXACT = ("tendlicalvf", "tendlifmassbf", "tendligroundf")
 ZERO = ("tendlibmassbfgr",)
 GRID_FILES = {"af2": "af2_AIS_{res}000m_v1.nc", "maxmask1": "maxmask1_AIS_{res}000m_v0.nc"}
@@ -620,17 +630,26 @@ def warnings_for(res, strict_share=RESID_SHARE):
         out.append("no --overlap: tendacabf's fill convention is not undone, so its "
                    "residual carries it")
     m = max(by["tendlibmassbffl"], key=lambda r: abs(r["d_resid"]))
-    where = ("in pixels with no floating ice at year end, which the fill leaves out" if whole
-             else "outside the writer's year-end floating mask")
-    out.append(f"tendlibmassbffl: the model's value carries "
-               f"{-m['d_resid'] * SECONDS_PER_YEAR / 1e12:+.1f} Gt/yr {where} ({m['year']})")
+    gt = -m["d_resid"] * SECONDS_PER_YEAR / 1e12
+    # the exact sums' tolerance: a booking that writes no melt where the fill
+    # blanks (issue #136) leaves only float32, the CSV's digits and af2
+    rel = F32 + res["af2_allow"]
+    if all(abs(r["d_resid"]) <= CSV_DIGITS * abs(r["N"]) + rel * r["L1"]
+           for r in by["tendlibmassbffl"]):
+        out.append(f"tendlibmassbffl: the fill leaves out no melt beyond the exact sums' "
+                   f"tolerance in any year (largest difference {gt:+.1f} Gt/yr, {m['year']})")
+    else:
+        where = ("in pixels with no floating ice at year end, which the fill leaves out" if whole
+                 else "outside the writer's year-end floating mask")
+        out.append(f"tendlibmassbffl: the model's value carries {gt:+.1f} Gt/yr {where} "
+                   f"({m['year']})")
     front = max(by["tendlifmassbf"], key=lambda r: abs(r["N"]))
-    out.append(f"tendlifmassbf: the front melt booked in cells holding no ice at either end "
-               f"of the year (issue #109) is at most "
+    out.append(f"tendlifmassbf: the melt booked in cells with no floating ice at year end "
+               f"(issues #109 and #136) is at most "
                f"{front['N'] * SECONDS_PER_YEAR / 1e12:+.1f} Gt/yr ({front['year']})"
                if front["N"] else
                "tendlifmassbf: zero in every year (a tree from before the front-melt booking "
-               "of issue #109, or no cell emptied)")
+               "of issue #109, or no cell lost its floating ice)")
     for s in ("limnsw",) + SEA_LEVEL:
         v, yr = share(s, "d_resid")
         if abs(v) > strict_share:

@@ -1,0 +1,30 @@
+{
+  "id": "test-25km-hist-cesm2waccm-probe-rehnoamb",
+  "task": "test",
+  "institution": "IU",
+  "title": "25 km rehearsal probe: the first ten steps of core 1 on production defaults without the apparent mass-balance reference",
+  "status": "done",
+  "exp_id": "C001",
+  "esm": "CESM2-WACCM",
+  "scenario": "historical",
+  "period": "2003.0 to 2003.25",
+  "friction": "budd",
+  "mesh": "antarctica_250000_25000_buffered20000, DG0 geometry",
+  "initial_state": "inversion-25km-budd-rehearsal's MAP, backdated 12 years with the Smith dH/dt on 2,944 grounded cells (+477 Gt)",
+  "front": "held fixed, ice-shelf collapse ISMIP7_FRACTURE=none",
+  "apparent_mb": "off",
+  "dt": 0.025,
+  "melt": "deltaT_per_basin_25000_K6.500e-05.npz, the constant slope",
+  "site": "IU Quartz, general partition (debug refused a third concurrent job)",
+  "resources": "8 ranks, 32 GiB, scpc_gamg",
+  "jobs": [
+    "10669749"
+  ],
+  "code": "b554238",
+  "started": "2026-09-27",
+  "finished": "2026-09-27",
+  "cost": "2 min 14 s for the job; 0.4 to 0.9 s a step once running",
+  "results": "Quartz antarctica/results/rehearsal_25km/results/hist_cesm2_waccm_r25probenoamb_25000_*",
+  "audit": "every step converged on its first scpc_gamg direct solve in 2 to 8 Newton iterations; no rescue, subcycle or tripwire event (speed and thickness bounds armed); mass residual about 1e-8 Gt a step and resid 0.00; speed max 1.65e4 m/yr at step 1, falling to 1.46e4 by step 10; largest relative thickening 1.6 per year in a 112 m floating cell. Budget at step 1: SMB +2435, melt -985, outflux -503, calving -1399, dM/dt -453 Gt/yr",
+  "notes": "gate G4c of the rehearsal (issue 138): attempt A of the matrix, without the reference, went ahead on it"
+}

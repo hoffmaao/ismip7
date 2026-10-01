@@ -41,7 +41,7 @@ own venv and call it by absolute path.
 |---|---|---|:--:|:--:|:--:|:--:|
 | BedMachine Antarctica v4.1, MEaSUREs velocity v2 | 8 GB | `scripts/download_data.py` (Earthdata login) | x | x | x | |
 | RACMO2.4p1 SMB climatology | 2 GB | same script | | x | | |
-| ISMIP7 observations MIPkit v1.2 (Smith dH/dt) | 9 GB | `scripts/download_mirror.py --product ismip7-ais-observations data/mipkit/`, landing at `ISMIP7/AIS/obs/mipkit/AntarcticaObsISMIP7-v1.2.nc` (`ISMIP7_OBS_KIT` overrides). `scripts/download_forcing.py --calibration` stages the same v1.2 file in the same place over Globus | `ISMIP7_DHDT_WEIGHT` | | `--from-obs` | |
+| ISMIP7 observations MIPkit v1.2 (Smith dH/dt) | 9 GB | `scripts/download_mirror.py --product ismip7-ais-observations data/mipkit/`, landing at `ISMIP7/AIS/obs/mipkit/AntarcticaObsISMIP7-v1.2.nc` (`ISMIP7_OBS_KIT` overrides). `scripts/download_forcing.py --calibration` stages the same v1.2 file in the same place over Globus | `ISMIP7_DHDT_WEIGHT` | a start before 2015 (historicals, OCX) | `--from-obs` | |
 | ISMIP7 forcing per ESM and scenario: SMB anomaly 7.5 GB, ocean `tf` 11 GB, `so` 6.9 GB (ssp585; historical 4.3 GB) | 25 GB each | `scripts/download_mirror.py` | | x | | |
 | ISMIP7 fracture (collapse mask, lake properties, excess melt) | 3 GB per scenario | same, `data/<ESM>/<scenario>/fracture/` | | `ISMIP7_FRACTURE=mask` | | |
 | Ocean OI climatology and IMBIE basin numbers | 3 GB | `scripts/download_forcing.py --ocean --calibration` | | x | | |
@@ -248,9 +248,11 @@ ISMIP7/AIS/
 Readers pin `version=v2` for the atmosphere and `v3` for the ocean, falling
 back to the highest `v<N>` present, dotted versions included, so the `v2.1`
 fracture release and MRI-ESM2-0's `v1` resolve without code changes. The
-atmosphere directory is whichever of `SDBN1-8000m` and `GEMB-SDBN1-8000m`
-exists, `SDBN1` first, so trees fetched before MRI's August 2026 rename still
-work. Fracture masks resolve flat or versioned.
+atmosphere directory is whichever of `GEMB-SDBN1-8000m` and `SDBN1-8000m`
+exists, so trees fetched before MRI's August 2026 rename still work. Where
+both exist a run opens `GEMB-SDBN1-8000m`, the name a mirror re-sync writes,
+and `audit_forcing_versions.py` audits that same directory. Fracture masks
+resolve flat or versioned.
 
 **One year bridges the end of a series.** A request for the single year after
 the last one on disk reuses that year and logs it once per variable. Anything
@@ -407,16 +409,20 @@ protocol's recommendation, from a tracked file,
 | K | 6.5e-5, the K50 of the rule-based selection below on the 1000 m / 10 km production mesh (run record `calibration-melt-toolbox-1km-rule`, IU's build), chosen by the group on 25 September 2026 (issue 26) |
 | offsets | 16 IMBIE2 basins, -0.68 K to +1.20 K (Amundsen), each basin at its July 2026 total, 1067.4 Gt/yr together, fitted at that K on Rice's build of the mesh, the submission mesh (issue 20; `calibration-melt-refit-1km-rice-k50`) |
 | fitted under | `ISMIP7_MELT_SLOPE=ant`, `ISMIP7_SIN_ALPHA_ANT=5.115e-3`, `ISMIP7_GEOMETRY_SPACE=dg0`, `ISMIP7_RASTER_SAMPLE=vertex` and the 30_sep OI climatology, on `antarctica_10000_1000_buffered20000`, Rice's build (1,869,252 vertices) |
-| sidecar | `deltaT_per_basin_1000_K6.500e-05.source.json`: the file's sha256, the settings above, the mesh build and its vertex count, the input hashes, the jobs and the commits |
+| sidecar | `deltaT_per_basin_1000_K6.500e-05.source.json`: the file's sha256, the settings above, the mesh build and its vertex count, the input hashes, the jobs and the commits, with the decision fields added on promotion (below) |
 
 Every clone carries it, so a new machine runs with it and nothing is
 calibrated or copied. The offsets are stamped onto any mesh through the
-IMBIE2 8 km basin grid under `ISMIP7_DATA_ROOT`.
+IMBIE2 8 km basin grid under `ISMIP7_DATA_ROOT`. A fit records its inputs in
+the npz by basename (`obs_csv`, `imbie2_nc`, `inversion`;
+`calibrate_melt.input_names`), and the grid is found by that name under the
+data root. The tracked file predates that and still names three paths on IU
+Quartz; replacing it is open (issue #150).
 
 The forward applies the melt the file was fitted to:
 
-- it melts the cells the fit summed over, floating and holding ice
-  (`forcing.melt_receiving`);
+- it melts the cells the fit summed over, floating and holding ice on a bed
+  below sea level (`forcing.melt_receiving`);
 - an offsets file whose recorded slope law, slope constant or geometry
   space differs from the run's stops the run, and so does geometry sampled
   with another `raster_sample` than the file's, or a cold start that floors
@@ -446,6 +452,34 @@ scripts/batch_runners/submit.sh script scripts/batch_runners/calibrate_deltaT.sc
     --cd antarctica --queue debug --tasks 1 --mem 32G --time 00:40:00 \
     ISMIP7_LC=1000 ISMIP7_INV_H5=<mesh.msh> DELTAT_K=6.5e-5 DELTAT_OUT=<absolute dir>
 ```
+
+The fit writes each offsets file with its sidecar, `<name>.source.json`
+(`calibrate_melt.calibration_record`), and so does `select_melt_parameters.py`
+for the K it selects:
+
+| field | holds |
+|---|---|
+| `file`, `sha256` | the npz as written |
+| `K`, `melt_slope`, `sin_alpha_ant` or `sin_alpha_cap`, `geometry_space`, `raster_sample`, `oi_version`, `rho_i`, `dt_window`, `tf_rule`, `rule_admits` | the settings of the fit and the thermal forcing rule's verdict (`null` from a parallel fit, which does not judge) |
+| `mesh`, `vertices`, `cells`, `floating_cells`, `mesh_file` | the mesh's name and counts, and the sha256 and md5 of the file `ISMIP7_INV_H5` named |
+| `obs_table`, `bedmachine`, `inputs_sha256` | every input, by name and sha256 |
+| `melt_total_gtyr`, `melt_total_dT0_gtyr`, `unrooted` | the basins' total at their offsets as the fit summed it, the total at no offset, and the basins with no root in the window |
+| `selected_as`, `refit_of`, `selection` | the K's selection: a refit at the tracked K names the tracked file and keeps its `selected_as` (K50); a selection names its toolbox commit |
+| `site`, `partition`, `ranks`, `job`, `code`, `code_modified` | `ISMIP7_SITE` as `submit.sh` exports it (`null` for a fit started by hand), the Slurm partition and job, the rank count, the commit, and the tracked files modified in the checkout |
+
+A run that names the file with `ISMIP7_DELTAT_PER_BASIN_NPZ` is then checked
+against its raster sampling, and its provenance line names the mesh the
+offsets were fitted on. A file written before the fits wrote sidecars is
+read as given. On the 25 km rehearsal mesh a refit at the tracked K
+reproduced the rehearsal's npz bit for bit, and its sidecar matched the
+hand-written one in every field a fit can know (run record
+`calibration-melt-sidecar-25km-check`).
+
+Promoting a fit to the tracked calibration copies both files into
+`calibration/`, adds by hand the decision fields the sidecar lacks
+(`decided`, `decision`, `selected_as`, `selection`, `run_record`,
+`mesh_build`) and takes a run record; a fit refuses to write into
+`calibration/` itself.
 
 `check_melt_bound.py` melts the reference geometry with the forward's own
 callback and sets each basin against the total its offsets were fitted to,
@@ -545,7 +579,8 @@ solving `M_b(deltaT) = M_obs(b)` per basin by a bracketed root in plus or
 minus 3 K (`melt_selection.DT_WINDOW`; the toolbox searches plus or minus
 2 K and the protocol sets no window), and writes
 `antarctica/results/deltaT_per_basin_<lc>_K<K>.npz` (basin ids, offsets, K,
-residual, dM/dT, the slope and geometry conventions). A run applies it in
+residual, dM/dT, the slope and geometry conventions) with its
+`.source.json` sidecar (section 5). A run applies it in
 place of the tracked calibration with
 
 ```bash
@@ -1476,7 +1511,8 @@ Per experiment in `results/`:
   melt are what the advances applied: no forcing acts on open ocean or on
   cells a front rule holds ice-free (`front.unforced_cells`), so `clamp` is
   only the positivity limit on thin ice and `calv` only ice that crossed the
-  front. The ISMIP7 `acabf` and `libmassbffl` fields book the same forcing.
+  front. How the ISMIP7 fields book this forcing, the outflux and the
+  apparent-MB reference is in `ISMIP7_README_AIS_RICE_icepack2.md`.
 
 VAF is in mm of sea-level equivalent, mass in Gt, both over map-plane area.
 The ISMIP7 scalars of a run with `ISMIP7_OUTPUT=1`

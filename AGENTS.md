@@ -129,15 +129,19 @@ without reading the linked rationale and stating why.
   the block structure without changing the residual; `ISMIP7SCPC` fixes the
   retained-first indexing. Deleting the term or replacing the `Constant` with
   literal zero makes UFL simplify it away and SCPC fails during setup.
-- **Melt falls only on floating cells that hold ice (`forcing.melt_receiving`).**
-  An ice-free cell passes the flotation test (open ocean at draft 0, bare
-  land at a height above flotation of exactly 0), and the melt calibration
-  was fitted over cells holding ice, so the forward melts exactly the set its
+- **Melt falls only on floating cells that hold ice on a bed below sea level
+  (`forcing.melt_receiving`).** An ice-free cell passes the flotation test
+  (open ocean at draft 0, bare land at a height above flotation of exactly
+  0), and so does a land cell holding a transport film thinner than the
+  spacing of doubles at its surface, where `b + h` rounds to `b`; the bed
+  test is what keeps the melt law off those films. The melt calibration was
+  fitted over cells holding ice, so the forward melts exactly the set its
   calibration summed over. An offsets file fitted under another slope law,
   slope constant, geometry space or raster sampling stops the run instead of
   warning, and so does a cold start that floors the initial thickness
   (`ISMIP7_H_CLAMP_INIT`): the forward has to apply the melt its calibration
-  was fitted to. `check_melt_bound.py` measures that per basin.
+  was fitted to. `check_melt_bound.py` measures that per basin. Regression
+  test: `tests/test_melt_calibration_default.py`.
 
 One line that looks fine and is always a bug:
 
@@ -175,8 +179,9 @@ instead, in order of cost:
    `projection - CTRL` sea-level contribution on the real ISMIP6 ensemble.
    Note the ISMIP6 `ctrl_proj` convention: the control and the projection must
    branch from the SAME state or their spin-up drift does not cancel.
-4. **A 32 km probe run.** 32 km is roughly 3k vertices and a few seconds per
-   step, so a targeted 3 to 10 year run is the standard way to localize
+4. **A 32 km probe run.** The 32 km mesh (`antarctica_320000_32000_buffered0`)
+   has 6,282 vertices and takes a few seconds per step, so a targeted 3 to 10
+   year run is the standard way to localize
    behaviour before committing to a production resolution. Prefer this over
    reasoning about the discretization in the abstract.
 

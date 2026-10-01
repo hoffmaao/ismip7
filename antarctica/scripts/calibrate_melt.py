@@ -15,7 +15,8 @@ Geometry: the same ISMIP7_GEOMETRY_SPACE the forward reads (default dg0).
   bed and thickness sampled onto the cells (ISMIP7_RASTER_SAMPLE), the
   surface from flotation, the slope of `forcing.compute_sin_alpha`,
   thermal forcing and salinity at each centroid and its own draft,
-  the forward's melt set `forcing.melt_receiving` (floating, `h > 0`),
+  the forward's melt set `forcing.melt_receiving` (floating, `h > 0`, on a
+  bed below sea level),
   cell areas. A K fitted here is the K the forward applies, by construction.
   Ice-free cells with `haf <= 0` are left out, as the forward leaves them
   out: the observations cover real shelves only.
@@ -63,6 +64,7 @@ Usage:
 """
 
 import os, sys, glob
+import hashlib, subprocess
 import numpy as np
 
 _HERE = os.path.dirname(os.path.abspath(__file__))
@@ -84,7 +86,7 @@ from icepack2_tools.forcing import (quadratic_mixed_slope, compute_sin_alpha,
                                     is_floating, melt_receiving,
                                     melt_slope, sin_alpha_ant,
                                     SIN_ALPHA_ANT_DEFAULT, _K_PERCENTILES,
-                                    _RHO_I)
+                                    _RHO_I, _oi_climatology_path)
 K05, K50, K95 = _K_PERCENTILES
 from icepack2_tools.geometry import sample_to_geometry
 from icepack2_tools.melt_selection import read_melt_table, sample_nearest
@@ -93,7 +95,9 @@ from icepack2_tools.mpi_stats import (global_count, global_mean, global_range,
 from icepack2_tools.naming import map_basename
 from icepack2_tools.runconfig import (friction as _friction, lc as _lc,
                                       geometry_space as _geometry_space,
-                                      obs_data_root, raster_sample)
+                                      file_sha256, obs_data_root,
+                                      raster_sample)
+from mesh_naming import mesh_basename, mesh_stem
 
 DATA_ROOT = os.environ.get(
     "ISMIP7_DATA_ROOT", os.path.join(_PROJECT, "ISMIP7", "AIS")
@@ -106,8 +110,11 @@ INV_H5 = os.environ.get(
     "ISMIP7_INV_H5", os.path.join(MESH_DIR, map_basename(_friction(), LC))
 )
 
-CLIM_TF = os.path.join(DATA_ROOT, "meltMIP", "OI_Climatology_ismip8km_60m_tf_extrap.nc")
-CLIM_SO = os.path.join(DATA_ROOT, "meltMIP", "OI_Climatology_ismip8km_60m_so_extrap.nc")
+# The OI climatology release the fits read, the 2025-09-30 one under meltMIP/,
+# named here so a calibration sidecar records the release these paths hold.
+OI_VERSION = "30_sep"
+CLIM_TF = _oi_climatology_path(DATA_ROOT, "tf", OI_VERSION)
+CLIM_SO = _oi_climatology_path(DATA_ROOT, "so", OI_VERSION)
 IMBIE2_NC = os.path.join(
     DATA_ROOT, "parameterisations", "ocean", "imbie2",
     "basin_numbers_ismip8km_v2.nc",
@@ -163,6 +170,19 @@ def _announce_obs_table():
         f"1067.4. Stage the new table at one of those paths, or name a table "
         f"with ISMIP7_MELT_OBS_CSV."
     )
+
+
+def input_names():
+    r"""The inputs an offsets file records beside its numbers, by basename:
+    the observation table, the IMBIE2 basin grid and the mesh source. A
+    tracked offsets file carries no cluster path (AGENTS.md section 6), and
+    nothing needs one: ``obs_csv`` is only printed, ``inversion`` is read by
+    nothing, and ``forcing.imbie2_basin_path`` finds the grid ``imbie2_nc``
+    names under ``ISMIP7_DATA_ROOT``. calibrate_deltaT.py and
+    select_melt_parameters.py both write these entries from here."""
+    return {"obs_csv": os.path.basename(OBS_CSV),
+            "imbie2_nc": os.path.basename(IMBIE2_NC),
+            "inversion": os.path.basename(INV_H5)}
 
 
 def _k_out():
@@ -221,6 +241,33 @@ def _load_mesh():
     with CheckpointFile(INV_H5, "r") as chk:
         mesh = chk.load_mesh()
     return mesh
+
+
+def mesh_name():
+    r"""The name of the mesh ``INV_H5`` holds, without ``.msh``: the file
+    itself, or the ``mesh_basename`` a MAP or forward state records, rebuilt
+    from its ``lc_coarse``, ``lc`` and ``buffer_m`` where it predates that
+    attribute, as ``simulation.py`` names the mesh a run starts from. It is
+    the ``mesh`` a calibration sidecar records and ``preflight.py`` compares
+    with a core's mesh. A checkpoint recording none of these is refused, so a
+    fit stops before it reads any data. Collective, like opening the
+    checkpoint."""
+    if INV_H5.endswith(".msh"):
+        return mesh_stem(INV_H5)
+    with CheckpointFile(INV_H5, "r") as chk:
+        def attr(name, cast):
+            return cast(chk.get_attr("/", name)) if chk.has_attr("/", name) else None
+        named = attr("mesh_basename", str)
+        lc_coarse, lc, buffer = (attr("lc_coarse", int), attr("lc", int),
+                                 attr("buffer_m", float))
+    if not named and lc_coarse is not None and buffer is not None:
+        named = mesh_basename(lc_coarse, lc if lc is not None else LC, buffer)
+    if not named:
+        raise ValueError(
+            f"{INV_H5} records neither mesh_basename nor the lc_coarse and "
+            f"buffer_m to rebuild it, so a fit on it cannot record the mesh "
+            f"it was fitted on. Name the mesh's .msh with ISMIP7_INV_H5.")
+    return mesh_stem(named)
 
 
 def _bedmachine_path():
@@ -318,7 +365,7 @@ def forward_geometry(mesh):
     and cell areas.
 
     The melt set is ``forcing.melt_receiving``, ``haf <= 0`` on cells with
-    ``h > 0``, the one the forward's callbacks melt. An ice-free cell also has
+    ``h > 0`` on a bed below sea level, the one the forward's callbacks melt. An ice-free cell also has
     ``haf <= 0``; the observations cover real shelves only, so it is left out
     of the fit, and the forward leaves it out of the melt."""
     c = forward_cells(mesh)
@@ -343,6 +390,103 @@ def forward_geometry(mesh):
         "area": assemble(fd.TestFunction(c["Q_g"]) * dx).dat.data_ro,
         "dofs": "cells",
     }
+
+
+def _file_digests(path):
+    r"""sha256 and md5 of a file in one read (the MAP releases publish md5)."""
+    sha, md5 = hashlib.sha256(), hashlib.md5()
+    with open(path, "rb") as f:
+        for block in iter(lambda: f.read(1 << 20), b""):
+            sha.update(block)
+            md5.update(block)
+    return sha.hexdigest(), md5.hexdigest()
+
+
+def _code_version():
+    r"""The commit of this checkout, with the tracked files it has modified
+    when there are any, or ``unknown`` where git cannot say. Untracked files,
+    a fit's own output among them, do not count."""
+    def git(*args):
+        return subprocess.run(["git", "-C", _PROJECT, *args], capture_output=True,
+                              text=True, check=True).stdout
+    try:
+        sha = git("rev-parse", "HEAD").strip()
+        modified = [line[3:] for line in
+                    git("status", "--porcelain", "--untracked-files=no").splitlines()]
+    except (OSError, subprocess.CalledProcessError):
+        return {"code": "unknown"}
+    return {"code": sha, **({"code_modified": modified} if modified else {})}
+
+
+def calibration_record(mesh, g, name, oi_version=OI_VERSION):
+    r"""What a melt calibration's sidecar records about the fit that wrote it:
+    the mesh ``name`` (`mesh_name`) and its counts, the settings the npz also
+    records, every input by name and sha256, and the site, job and commit.
+    ``g`` is what `forward_geometry` returned for ``mesh``, and
+    ``oi_version`` the climatology release the fit read
+    (select_melt_parameters.py reads ISMIP7_OI_VERSION's). The caller adds
+    each K's fields and writes the sidecar with
+    ``runconfig.write_melt_calibration_sidecar``.
+
+    ``site`` is ``ISMIP7_SITE`` as ``submit.sh`` exports it, and None for a
+    fit started by hand: a workstation's hostname can name a person.
+
+    Collective: every rank reduces the counts; rank 0 alone hashes the inputs
+    and asks git, then broadcasts the record, or the error that stopped it,
+    so every rank returns the same record or raises together."""
+    comm = mesh.comm
+    counts = {"vertices": global_size(mesh.coordinates),
+              "cells": comm.allreduce(int(mesh.cell_set.size)),
+              "floating_cells": global_count(g["floating"], comm)}
+
+    def on_rank_0():
+        sha, md5 = _file_digests(INV_H5)
+        _, M_obs, _ = _load_obs()
+        if MELT_SLOPE == "ant":
+            slope = {"sin_alpha_ant": float(sin_alpha_ant())}
+        else:
+            # No cap, the DG0 default, is infinite, which JSON cannot hold.
+            slope = {"sin_alpha_cap": (float(SIN_ALPHA_CAP)
+                                       if np.isfinite(SIN_ALPHA_CAP) else None)}
+        clim = {v: _oi_climatology_path(DATA_ROOT, v, oi_version)
+                for v in ("tf", "so")}
+        return {
+            "site": os.environ.get("ISMIP7_SITE") or None,
+            "partition": os.environ.get("SLURM_JOB_PARTITION") or None,
+            "ranks": comm.size,
+            "job": os.environ.get("SLURM_JOB_ID") or None,
+            **_code_version(),
+            "mesh": name,
+            **counts,
+            "mesh_file": {"name": os.path.basename(INV_H5), "md5": md5,
+                          "sha256": sha},
+            "lc": int(LC),
+            "geometry_space": GEOMETRY,
+            "raster_sample": raster_sample(),
+            "melt_slope": MELT_SLOPE,
+            **slope,
+            "oi_version": oi_version,
+            "rho_i": float(_RHO_I),
+            "obs_table": {"name": os.path.basename(OBS_CSV),
+                          "sha256": file_sha256(OBS_CSV),
+                          "total_gtyr": round(float(M_obs.sum()), 3)},
+            "bedmachine": os.path.basename(_bedmachine_path()),
+            "inputs_sha256": {key: [os.path.basename(path), file_sha256(path)]
+                              for key, path in (("clim_tf", clim["tf"]),
+                                                ("clim_so", clim["so"]),
+                                                ("imbie2", IMBIE2_NC))},
+        }
+
+    record = None
+    if comm.rank == 0:
+        try:
+            record = on_rank_0()
+        except Exception as e:  # raised on every rank below
+            record = e
+    record = comm.bcast(record, root=0)
+    if isinstance(record, Exception):
+        raise record
+    return record
 
 
 def fit_per_basin_K(basin, melt_1, area, bids_obs, M_obs, sigma_obs):

@@ -1,0 +1,28 @@
+{
+  "id": "core11-25km-ocx-rehnoamb-oceanv1",
+  "task": "test",
+  "institution": "IU",
+  "title": "Core 11 at 25 km, rehearsal attempt A, on the OCX ocean v1 (superseded)",
+  "status": "superseded",
+  "exp_id": "C011",
+  "esm": "none (OCX)",
+  "scenario": "ocx",
+  "period": "2003 to 2026, reached 2026.0",
+  "friction": "budd",
+  "mesh": "antarctica_250000_25000_buffered20000, DG0 geometry",
+  "initial_state": "inversion-25km-budd-rehearsal's MAP, backdated 12 years with the Smith dH/dt",
+  "forcing": "atmosphere acabf RACMO2.3p2-ERA OCX SDBN1-8000m v1; ocean tf and so expert-judgment OCX ocean/main v1, which the Source Cooperative mirror had replaced with v2",
+  "apparent_mb": "off",
+  "dt": 0.025,
+  "site": "IU Quartz, general partition",
+  "resources": "8 ranks, 32 GiB, scpc_gamg",
+  "jobs": [
+    "10669765"
+  ],
+  "code": "b554238",
+  "started": "2026-09-27",
+  "finished": "2026-09-27",
+  "results": "Quartz antarctica/results/rehearsal_25km/results/ocx_rehnoamb_oceanv1/",
+  "audit": "ON TRACK; resid 0.00 on 920 rows; 3 rescued steps",
+  "notes": "superseded by core11-25km-ocx-rehnoamb, the rerun on the OCX ocean v2 fetched during the rehearsal (issue 138). Report: antarctica/reports/core11_ocx_25km_rehnoamb_oceanv1.md"
+}

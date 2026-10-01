@@ -33,7 +33,9 @@ Usage:
     python check_ismip6_track.py <timeseries.csv> [--dt DT]
     python check_ismip6_track.py            # newest *_timeseries.csv in results/
 
-Exit code 0 iff no FAIL rows (WARNs allowed), so gates can chain on it.
+Exit code 0 iff no FAIL rows (WARNs allowed), so gates can chain on it; 1 on
+a FAIL row; 2 when the run cannot be judged (no CSV, an empty or unreadable
+timeseries, missing budget columns), with the reason on stderr.
 """
 
 import csv
@@ -62,13 +64,20 @@ ENVELOPES = {
 }
 
 
+def unjudged(msg):
+    print(msg, file=sys.stderr)
+    sys.exit(2)
+
+
 def load(csv_fn):
-    with open(csv_fn) as f:
-        rows = list(csv.DictReader(f))
-    if not rows:
-        raise SystemExit(f"{csv_fn}: empty timeseries")
-    cols = {k: np.array([float(r[k]) for r in rows]) for k in rows[0]}
-    return cols
+    try:
+        with open(csv_fn) as f:
+            rows = list(csv.DictReader(f))
+        if not rows:
+            unjudged(f"{csv_fn}: empty timeseries")
+        return {k: np.array([float(r[k]) for r in rows]) for k in rows[0]}
+    except (OSError, ValueError, TypeError) as e:
+        unjudged(f"{csv_fn}: unreadable timeseries: {e}")
 
 
 def runaway_detected(discharge, dt):
@@ -125,7 +134,7 @@ def main():
         cands = sorted(glob.glob(os.path.join(RESULTS_DIR, "*_timeseries.csv")),
                        key=os.path.getmtime)
         if not cands:
-            raise SystemExit("no *_timeseries.csv in results/")
+            unjudged("no *_timeseries.csv in results/")
         csv_fn = cands[-1]
 
     c = load(csv_fn)
@@ -133,9 +142,8 @@ def main():
                 "outflux_gtyr", "calv_gt", "resid_gt")
     missing = [k for k in required if k not in c]
     if missing:
-        print(f"{csv_fn}: missing budget column(s): {', '.join(missing)} "
-              f"(legacy timeseries format?)")
-        sys.exit(2)
+        unjudged(f"{csv_fn}: missing budget column(s): {', '.join(missing)} "
+                 f"(legacy timeseries format?)")
     yr = c["year"]
     if dt_arg:
         dt = np.full(len(yr), dt_arg)
@@ -143,8 +151,7 @@ def main():
         try:
             dt = np.asarray(row_steps(yr))
         except ValueError as e:
-            print(f"{csv_fn}: {e}; pass --dt")
-            sys.exit(2)
+            unjudged(f"{csv_fn}: {e}; pass --dt")
 
     # calv/clamp/resid columns are per-STEP Gt; convert to rates.
     calv_rate = c["calv_gt"] / dt

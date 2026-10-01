@@ -396,9 +396,11 @@ the driver's `Saved MAP:` line is the fallback. Depth is capped by
 `ISMIP7_CHAIN_MAX` (4). Under `ISMIP7_LOG_VEL_WEIGHT=auto`, the runner's
 default, a link takes the log-velocity weight the checkpoint records, so every
 link of one MAP minimises the objective the first link set (issue 68). A warm
-start whose mesh dof ordering differs from the run's own is refused, since a
-rank-count change mid-chain would scramble theta and phi silently. Regression
-test: `tests/test_inversion_chain.py`.
+start is read by point location (`transfer.interpolate_with_fill`), so one
+written on another rank count or on another mesh loads correctly. A target
+point outside the warm start's mesh takes the stated fill (theta and phi 0, the
+fluidity prior's constant baseline), and the log counts those points per
+field. Regression test: `tests/test_inversion_chain.py`.
 
 ### `projection.sbatch`, self-chaining
 
@@ -424,7 +426,7 @@ submit.sh projection ISMIP7_EXPERIMENT=control
 | `ssp370_cesm_waccm` / `ssp370_mri_esm2` | 3 / 4 | 2015-2100 |
 | `ssp585_cesm_waccm` / `ssp585_mri_esm2` | 7 / 8 | 2015-2300 |
 | `ocx` | 11 | 2003-2025 |
-| `hist_cesm_waccm` / `hist_mri_esm2` | 1 / 2 | 1850-2014 |
+| `hist_cesm_waccm` / `hist_mri_esm2` | 1 / 2 | 2003-2014 |
 
 The runner writes the submission's yearly fields and scalars by default (`ISMIP7_OUTPUT=1`), because every experiment it offers is a core experiment and a projection that reaches 2300 without them has to be run again. `ISMIP7_OUTPUT=0` turns that off for a pipeline exercise.
 

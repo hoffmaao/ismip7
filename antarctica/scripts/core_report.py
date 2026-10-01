@@ -43,12 +43,12 @@ from icepack2_tools.climatology import (
     CLIM_POOL_MARKER, clim_scenario, clim_start, clim_end,
 )
 from icepack2_tools.forcing import (
-    FORCING_PROVENANCE_MARKER, melt_slope, sin_alpha_ant,
+    FORCING_PROVENANCE_MARKER, SMB_FEEDBACK_MARKER, melt_slope, sin_alpha_ant,
 )
 from icepack2_tools.front import COLLAPSE_MARKER, FRONT_OWNER_MARKER
 from icepack2_tools.runconfig import (
     MELT_CALIBRATION_DEFAULT, N_FLOW_DEFAULT, dt, fracture, friction,
-    geometry_space, lc, lc_coarse,
+    geometry_space, lc, lc_coarse, smb_elevation_feedback,
 )
 from icepack2_tools.solverconfig import effective_solver_env, solver_provenance
 
@@ -99,6 +99,8 @@ def effective_env():
             "none, the legacy per-basin K named in ISMIP7_K_PER_BASIN_NPZ"
             if os.environ.get("ISMIP7_K_PER_BASIN_NPZ")
             else os.path.relpath(MELT_CALIBRATION_DEFAULT, _PROJECT)),
+        # On by default since issue 116, and never exported by the runners.
+        "ISMIP7_SMB_ELEVATION_FEEDBACK": "1" if smb_elevation_feedback() else "0",
     }
     resolved.update(effective_solver_env())
     canonical_key = "ISMIP7_DIAGNOSTIC_LINEAR_SOLVER_CANONICAL"
@@ -167,6 +169,15 @@ def collapse_record(log_path):
     run's own statement of it."""
     return lifted(log_path, COLLAPSE_MARKER,
                   "the run predates the collapse banner")
+
+
+def smb_feedback_record(log_path):
+    r"""Whether the run carried the SMB-elevation feedback and which gradient
+    it read, lifted out of its log: the startup line of every forward driver
+    (``forcing.smb_feedback_banner``)."""
+    return lifted(log_path, SMB_FEEDBACK_MARKER,
+                  "the run predates the SMB-elevation feedback banner, so it "
+                  "ran without the feedback")
 
 
 def front_owner(log_path):
@@ -280,6 +291,7 @@ def main():
         f.write(f"- observational audit: "
                 f"{verdict(audit_rc, 'ON TRACK', 'OFF TRACK')}\n")
         for line in (climatology_pool(args.log) + forcing_provenance(args.log)
+                     + smb_feedback_record(args.log)
                      + collapse_record(args.log) + front_owner(args.log)):
             f.write(f"- {line}\n")
         if ens_rc is not None:

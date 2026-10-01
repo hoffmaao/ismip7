@@ -136,6 +136,39 @@ def mesh_override():
     return value
 
 
+def inversion_mesh_source(derived):
+    r"""Where the inversion reads its mesh: ``(path, from_checkpoint)``.
+
+    Unset or empty ``ISMIP7_MESH`` is ``derived``, the .msh the mesh knobs
+    name. The sentinel ``checkpoint`` is the mesh inside ``ISMIP7_WARM_START``,
+    so an inversion can continue a MAP on its own mesh when the .msh did not
+    travel with it (Rice's 2 km MAPs are released without theirs, and another
+    site's build of the same name is another triangulation). It needs a warm
+    start to read the mesh from. Anything else is a .msh path.
+    """
+    value = os.environ.get("ISMIP7_MESH", "").strip()
+    if not value:
+        return derived, False
+    if value != MESH_FROM_CHECKPOINT:
+        return value, False
+    warm = os.environ.get("ISMIP7_WARM_START", "").strip()
+    if not warm:
+        raise ValueError(
+            f"ISMIP7_MESH={MESH_FROM_CHECKPOINT} reads the mesh from the warm "
+            f"start, and ISMIP7_WARM_START is not set.")
+    return warm, True
+
+
+def eval_continuation():
+    r"""``ISMIP7_EVAL_CONTINUATION``: whether every inversion evaluation ramps
+    n_flow and m_slide from 1 in five annotated solves. ``0`` solves once at
+    the full exponents from the previous evaluation's state, which the startup
+    ramp has already brought there. The objective depends on the full-n
+    solution alone, so it is the same either way; the cost is not. On unless
+    ``0``."""
+    return _int_flag("ISMIP7_EVAL_CONTINUATION", True)
+
+
 def lc():
     r"""Target edge length [m] in the refined region of the mesh."""
     return int(os.environ.get("ISMIP7_LC", LC_DEFAULT))

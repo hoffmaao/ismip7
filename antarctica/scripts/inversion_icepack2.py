@@ -91,7 +91,9 @@ from icepack2_tools.dual_friction import (
     weertman_anchor,
 )
 from icepack2_tools.geometry import cg1_lift, raise_bed_to_lake_ice_base, sample_to_geometry
-from icepack2_tools.transfer import interpolate_with_fill, meshes_match
+from icepack2_tools.transfer import (
+    interpolate_with_fill, load_checkpoint_mesh, meshes_match,
+)
 from icepack2_tools.grounding import height_above_flotation
 from icepack2_tools.mpi_stats import (global_mean, global_range,
                                       global_max, global_size, global_count)
@@ -103,6 +105,7 @@ from icepack2_tools.runconfig import (
     friction as _friction, geometry_space as _geometry_space,
     raster_sample as _raster_sample,
     lc as _lc, lc_coarse as _lc_coarse, n_flow as _n_flow,
+    eval_continuation, inversion_mesh_source,
 )
 DATA_DIR = obs_data_root()
 from icepack2_tools.prior import (
@@ -415,9 +418,19 @@ def find_file(d, p):
 def main():
     os.makedirs(FIG_DIR, exist_ok=True)
 
-    mesh_fn = os.environ.get("ISMIP7_MESH", mesh_filename(lc_coarse, lc, buffer_m))
-    PETSc.Sys.Print(f"Loading mesh: {mesh_fn}")
-    mesh = Mesh(mesh_fn)
+    mesh_fn, mesh_from_warm = inversion_mesh_source(
+        mesh_filename(lc_coarse, lc, buffer_m))
+    if mesh_from_warm:
+        # The warm start's own mesh. mesh_fn becomes the .msh basename that
+        # checkpoint recorded, which picks the boundary-id sidecar and is
+        # stamped into this run's MAP, so the chain and the forward that loads
+        # the result name the mesh the controls were inverted on.
+        PETSc.Sys.Print(f"Loading mesh from the warm start: {mesh_fn}")
+        mesh, mesh_fn = load_checkpoint_mesh(mesh_fn)
+        PETSc.Sys.Print(f"  recorded mesh: {mesh_fn}")
+    else:
+        PETSc.Sys.Print(f"Loading mesh: {mesh_fn}")
+        mesh = Mesh(mesh_fn)
     # num_vertices()/num_cells() count this rank's plex, halo included; the
     # coordinate dofs and the owned cell set are reduced to global totals.
     PETSc.Sys.Print(f"  {global_size(mesh.coordinates)} vertices, "
@@ -718,7 +731,9 @@ def main():
     if warm_chk:
         PETSc.Sys.Print(f"  Loading warm start from {warm_chk}")
         with fd.CheckpointFile(warm_chk, "r") as chk:
-            chk_mesh = chk.load_mesh()
+            # Under ISMIP7_MESH=checkpoint the compute mesh IS this file's
+            # mesh, so its fields load onto it directly, with no transfer.
+            chk_mesh = mesh if mesh_from_warm else chk.load_mesh()
             if chk.has_attr("/", "full_state_residual"):
                 try:
                     warm_recorded = float(chk.get_attr("/", "full_state_residual"))
@@ -1893,12 +1908,24 @@ def main():
     if _log_vel_note:
         PETSc.Sys.Print(f"    {_log_vel_note}")
 
+    # One annotated Newton solve at the full exponents per evaluation when the
+    # state is already there: a prepared full-n warm start, or, under
+    # ISMIP7_EVAL_CONTINUATION=0, the state the startup ramp left. Each
+    # evaluation then starts from the last one's solution, and a trial point
+    # where that solve fails takes the re-ramp rescue on the TAO path.
+    eval_full_n = skip_continuation or not eval_continuation()
+    PETSc.Sys.Print(
+        "  Evaluations: "
+        + ("one annotated solve at full n_flow/m_slide"
+           if eval_full_n else
+           "1->n continuation in 5 annotated solves (ISMIP7_EVAL_CONTINUATION=0 "
+           "solves once at full n)"))
+
     def forward(theta_ctrl, phi_ctrl):
         clear_caches()
         F_ctrl = build_F(theta_ctrl, phi_ctrl)
-        if skip_continuation:
-            # Timing-matrix short invert starts from a full-n prepare cache;
-            # stay at the physical exponents so each eval is one Newton solve.
+        if eval_full_n:
+            # Stay at the physical exponents so each eval is one Newton solve.
             n_flow.assign(n_flow_val)
             m_slide.assign(m_slide_val)
             EquationSolver(
@@ -2237,6 +2264,10 @@ def main():
             # theta/phi absorb the bed representation just as they absorb the
             # front treatment, so a forward must reproduce it.
             chk.set_attr("/", "raster_sample", raster_sample)
+            # How each evaluation reached the full exponents: 1 for the
+            # five-solve continuation, 0 for one solve. A solver fact, outside
+            # the objective (handoff.OBJECTIVE_KEYS).
+            chk.set_attr("/", "eval_continuation", int(not eval_full_n))
             if full_state:
                 chk.set_attr("/", "t_yr", float(MATRIX_T_START))
                 chk.set_attr("/", "friction", str(FRICTION))
@@ -2336,6 +2367,7 @@ def main():
                 ).lower(),
                 "warm_start": bool(warm_chk),
                 "skip_continuation": bool(skip_continuation),
+                "eval_continuation": bool(not eval_full_n),
             },
             "evaluations": list(timing_history),
             # Set only by the "finished" record: how the publishing solve

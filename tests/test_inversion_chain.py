@@ -44,6 +44,7 @@ import sys
 map_out = os.environ["ISMIP7_MAP_OUT"]
 print(f"driver: warm_start={os.environ.get('ISMIP7_WARM_START', 'none')}")
 print(f"driver: maxiter={os.environ['ISMIP7_MAXITER']}")
+print(f"driver: strict={os.environ.get('ISMIP7_WARM_START_STRICT', 'unset')}")
 
 die = os.environ.get("FAKE_DIE_AFTER", "")
 print("Optimization finished: CONVERGENCE: REL_REDUCTION_OF_F_<=_FACTR*EPSMCH")
@@ -183,6 +184,29 @@ def test_the_successor_warm_starts_from_an_unfinished_map(sandbox, die):
     assert rc == 0, log
     assert f"driver: warm_start={map_out(sandbox)}" in log
     assert calls.count("ARGV:") == 2, "each unfinished link queues a successor"
+
+
+def test_a_resumed_link_is_held_to_the_chain_s_objective(sandbox):
+    r"""A first link may warm-start from a MAP of another objective on purpose
+    (IU's re-inversion of Rice's 2 km MAPs without their prior mean) under
+    ISMIP7_WARM_START_STRICT=0. Its successor inherits that 0 through
+    --export=ALL, and resuming the chain's own checkpoint it is strict
+    again."""
+    rice = sandbox / "rice_2km.h5"
+    rice.write_text("checkpoint\n")
+    rc, log, calls = run_job(sandbox, ISMIP7_WARM_START=str(rice),
+                             ISMIP7_WARM_START_STRICT="0",
+                             FAKE_DIE_AFTER="map_write")
+    assert rc == 137, log
+    assert f"driver: warm_start={rice}" in log
+    assert "driver: strict=0" in log
+    assert "ENV: ISMIP7_WARM_START_STRICT=0" in calls
+
+    rc, log, _ = run_job(sandbox, job_id="424244", ISMIP7_WARM_START=str(rice),
+                         ISMIP7_WARM_START_STRICT="0")
+    assert rc == 0, log
+    assert f"driver: warm_start={map_out(sandbox)}" in log
+    assert "driver: strict=1" in log
 
 
 def test_the_fallback_marks_a_saved_map_the_driver_could_not(sandbox):

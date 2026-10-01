@@ -123,6 +123,26 @@ def _source_range(source, comm):
     return lo, hi
 
 
+def load_checkpoint_mesh(path):
+    r"""The mesh inside the checkpoint ``path`` and the .msh basename that
+    checkpoint recorded, ``(mesh, basename)``.
+
+    The inversion solves on it under ``ISMIP7_MESH=checkpoint``
+    (``runconfig.inversion_mesh_source``). The recorded basename picks the
+    mesh's boundary-id sidecar and is stamped into the new MAP, so a file that
+    records none is refused: its sidecar could not be named."""
+    from firedrake import CheckpointFile
+    with CheckpointFile(path, "r") as chk:
+        mesh = chk.load_mesh()
+        basename = (str(chk.get_attr("/", "mesh_basename"))
+                    if chk.has_attr("/", "mesh_basename") else "")
+    if not basename:
+        raise ValueError(
+            f"{path} records no mesh_basename, so the boundary-id sidecar of "
+            f"its mesh cannot be named. Name the .msh in ISMIP7_MESH instead.")
+    return mesh, basename
+
+
 def interpolate_with_fill(target, source, fill, comm=None):
     r"""Interpolate ``source`` into ``target`` across meshes; dofs of ``target``
     outside the source mesh take ``fill``.

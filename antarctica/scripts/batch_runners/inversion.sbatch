@@ -114,7 +114,13 @@ fi
 # link minimises the objective the first one set (issue 68).
 if [ -f "$ISMIP7_MAP_OUT" ]; then
     export ISMIP7_WARM_START="$ISMIP7_MAP_OUT"
-    echo "chain: warm-starting theta/phi from the periodic checkpoint $ISMIP7_MAP_OUT"
+    # Resuming this chain's own checkpoint is always strict. A first link may
+    # set ISMIP7_WARM_START_STRICT=0 to change the objective of the MAP it
+    # starts from on purpose (another prior), and the successor it queued
+    # inherits that 0 through --export=ALL; here it is held to the one
+    # objective the chain has been minimising.
+    export ISMIP7_WARM_START_STRICT=1
+    echo "chain: warm-starting theta/phi from the periodic checkpoint $ISMIP7_MAP_OUT (strict handoff)"
 fi
 
 ismip7_mpirun "${SLURM_NTASKS:-1}" python -u antarctica/scripts/inversion_icepack2.py

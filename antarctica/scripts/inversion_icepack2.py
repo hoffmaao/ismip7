@@ -373,10 +373,13 @@ MISFIT_SCALE = os.environ.get("ISMIP7_MISFIT_SCALE", "1").strip().lower()
 # calving front inside the mesh (on by default under the scheme, since it
 # is the shared residual's default; off otherwise, so nothing else moves).
 SUBELEMENT_FRICTION = os.environ.get("ISMIP7_SUBELEMENT_FRICTION", "0").strip() == "1"
-# ISMIP7_SUBELEMENT_SCHEME: sep2 (grounded-part quadrature, the default) or
-# sep1 (ISSM's default: whole-cell quadrature, drag times the grounded
-# fraction); recorded in the MAP and followed by the forward.
-SUBELEMENT_SCHEME = os.environ.get("ISMIP7_SUBELEMENT_SCHEME", "sep2").strip().lower()
+# ISMIP7_SUBELEMENT_SCHEME: sep1 (ISSM's default: whole-cell quadrature,
+# drag times the grounded fraction; the default here since 1 Oct 2026) or
+# sep2 (grounded-part quadrature); recorded in the MAP and followed by the
+# forward. On the same 2 km start SEP1 reached misfit 3.42e9 in 21 accepted
+# iterations with no failed line-search trial, SEP2 4.21e9 with nine, at a
+# quarter of SEP1's iterations per hour (NOTS scavenge chains, 1 Oct).
+SUBELEMENT_SCHEME = os.environ.get("ISMIP7_SUBELEMENT_SCHEME", "sep1").strip().lower()
 if SUBELEMENT_SCHEME not in ("sep2", "sep1"):
     raise ValueError(f"ISMIP7_SUBELEMENT_SCHEME must be sep2 or sep1, not {SUBELEMENT_SCHEME!r}")
 EXACT_FRONT = os.environ.get(

@@ -177,8 +177,9 @@ shallow-shelf formulation on Firedrake 2026.4.1)
 
 19. SMB is applied as a cell-mean source in the finite-volume thickness
     transport: RACMO2.4p1 climatology plus the ISMIP7 `acabf-anomaly`
-    (SDBN1 8 km, v2 for CESM2-WACCM, v1 for MRI-ESM2-0) re-referenced so the
-    anomaly's mean over the control window vanishes. The SMB carries the
+    (8 km, `SDBN1-8000m` for CESM2-WACCM and `GEMB-SDBN1-8000m` for
+    MRI-ESM2-0, both v2) re-referenced so the anomaly's mean over the
+    control window vanishes. The SMB carries the
     surface-elevation feedback on the SMB gradient `dacabfdz`, the one the
     SMB focus group's Atmospheric forcing README (September 2026) recommends
     for Antarctica; the organisers accept either gradient when the README
@@ -388,4 +389,6 @@ v2, ocean v3, fracture v2.1; MRI-ESM2-0 atmosphere GEMB-SDBN1-8000m v1,
 ocean v3, fracture v1; ISMIP7 ocean climatology 30_sep; observations kit
 AntarcticaObsISMIP7-v1.2. Since that audit the MRI-ESM2-0 ssp585 fracture
 has moved to v2 (22 September 2026, discussion #30), which the reader opens;
-ssp126 and ssp370 stay at v1.
+ssp126 and ssp370 stay at v1. The MRI-ESM2-0 atmosphere has moved to
+GEMB-SDBN1-8000m v2, which the SMB focus group's Atmospheric forcing README
+(September 2026) recommends and the reader opens (question 19).

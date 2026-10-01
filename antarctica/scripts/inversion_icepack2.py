@@ -55,6 +55,7 @@ from tlm_adjoint.firedrake import (
     reset_manager,
     start_manager,
     stop_manager,
+    paused_manager,
     clear_caches,
     compute_gradient,
     Functional,
@@ -133,6 +134,8 @@ from icepack2_tools.continuation import ladder, ramp_exponents
 from icepack2_tools.solverconfig import (
     continuation_steps,
     diagnostic_solver_label,
+    direct_forward_enabled,
+    direct_forward_max_it,
     diagnostic_solver_mode,
     diagnostic_solver_parameters,
     final_solve_bounds,
@@ -141,6 +144,7 @@ from icepack2_tools.solverconfig import (
     nonlinear_solver_options,
     snes_atol_scale,
     snes_monitor_enabled,
+    trial_rescue_rungs,
 )
 from mesh_naming import get_buffer_m, mesh_filename
 from timing_campaign import MATRIX_T_START, atomic_write_json
@@ -675,6 +679,9 @@ def main():
     )
     warm_A_prior = None
     warm_prior_origin = None
+    # The warm start's fluidity prior under ISMIP7_WARM_START_PHI=physical:
+    # phi is moved onto this run's prior so A = A_prior exp(phi) is kept.
+    warm_A_prior_rebase = None
     warm_loaded_z = False
     # the warm start's anchor length, when its theta is to be rebased onto
     # this run's anchor once that is built (ISMIP7_WARM_START_THETA=physical)
@@ -759,7 +766,14 @@ def main():
                         f"{ANCHOR_LENGTH:g} m: the same theta means a different "
                         f"friction. ISMIP7_WARM_START_THETA=physical keeps the "
                         f"friction; =0 starts at the prior mean.")
-            if os.environ.get("ISMIP7_WARM_START_PHI", "1").strip() == "0":
+            # =physical keeps the warm start's fluidity under this run's
+            # own prior mean (ISMIP7_FLUIDITY_PRIOR): phi is rebased once the
+            # prior is built, below.
+            _phi_mode = os.environ.get("ISMIP7_WARM_START_PHI", "1").strip()
+            if _phi_mode not in ("0", "1", "physical"):
+                raise ValueError(
+                    f"ISMIP7_WARM_START_PHI={_phi_mode!r}: use 1, 0 or physical")
+            if _phi_mode == "0":
                 PETSc.Sys.Print("    log_fluidity: prior mean (ISMIP7_WARM_START_PHI=0)")
             else:
                 phi.assign(_warm_load(chk, chk_mesh, "log_fluidity", Q))
@@ -823,7 +837,12 @@ def main():
             # ISMIP7_WARM_START_PRIOR=0 recomputes the thermal prior instead,
             # e.g. after a change to its physics; phi is kept, as a deviation
             # from the new prior mean.
-            if os.environ.get("ISMIP7_WARM_START_PRIOR", "1").strip() == "0":
+            if _phi_mode == "physical":
+                warm_A_prior_rebase = _warm_load(chk, chk_mesh, "fluidity_prior", Q)
+                warm_A_prior = None
+                PETSc.Sys.Print("    fluidity_prior: recomputed below; log_fluidity "
+                                "rebased onto it (ISMIP7_WARM_START_PHI=physical)")
+            elif os.environ.get("ISMIP7_WARM_START_PRIOR", "1").strip() == "0":
                 warm_A_prior = None
                 PETSc.Sys.Print("    fluidity_prior: recomputed below "
                                 "(ISMIP7_WARM_START_PRIOR=0); log_fluidity kept")
@@ -1240,6 +1259,15 @@ def main():
     else:
         A_prior = Function(Q, name="fluidity_prior").interpolate(A0 * Constant(a4_factor))
         PETSc.Sys.Print("  Fluidity prior: constant A0*a4_factor (legacy)")
+    if warm_A_prior_rebase is not None:
+        _phi_prev = phi.copy(deepcopy=True)
+        phi.interpolate(phi + ln(max_value(warm_A_prior_rebase, Constant(1e-30))
+                                 / max_value(A_prior, Constant(1e-30))))
+        _shift = Function(Q).interpolate(phi - _phi_prev)
+        _s_lo, _s_hi = global_range(_shift)
+        PETSc.Sys.Print(
+            f"    log_fluidity rebased onto this prior (A kept): shift in "
+            f"[{_s_lo:.2f}, {_s_hi:.2f}], mean {global_mean(_shift):.3f}")
     A4_base = A_prior
     # The MAP name carries BOTH the flow exponent and the geometry space it was
     # inverted under, so n=3/n=4 and DG0/CG1 MAPs coexist on disk and a forward
@@ -1425,7 +1453,7 @@ def main():
         try:
             _, steps = ramp_exponents(
                 _ramp_solve, z, n_flow, m_slide, n_flow_val, m_slide_val,
-                ramp_ladder, report=PETSc.Sys.Print)
+                ramp_ladder[:trial_rescue_rungs()], report=PETSc.Sys.Print)
         finally:
             n_flow.assign(n_flow_val)
             m_slide.assign(m_slide_val)
@@ -1893,6 +1921,61 @@ def main():
     if _log_vel_note:
         PETSc.Sys.Print(f"    {_log_vel_note}")
 
+    _direct_fnorm = [float("nan")]
+
+    def _direct_solve(F_ctrl):
+        """One untaped Newton solve at the full exponents from the state z
+        holds -- the last converged forward, at controls one line-search step
+        away. Returns whether it converged; on failure z is back at its entry
+        state for the taped ladder."""
+        z_entry = z.copy(deepcopy=True)
+        n_flow.assign(n_flow_val)
+        m_slide.assign(m_slide_val)
+        # The relative test against this trial's own initial residual, so a
+        # small control step still moves the state as far as it should (an
+        # absolute floor at the accepted residual stopped such solves before
+        # they responded); the live step-size exit ends a solve that starts
+        # at the rounding floor, e.g. after the rescue's re-climb.
+        params = {k: v for k, v in sparams.items() if k != "snes_atol"}
+        params.update(final_solve_bounds())
+        params["snes_max_it"] = direct_forward_max_it()
+        solver = NonlinearVariationalSolver(
+            NonlinearVariationalProblem(
+                F_ctrl, z, form_compiler_parameters=fc_params),
+            solver_parameters=params,
+            options_prefix="ismip7_inversion_direct_",
+        )
+        t0 = perf_counter()
+        with paused_manager():
+            try:
+                solver.solve()
+                ok = True
+            except fd.ConvergenceError:
+                ok = False
+            snes = solver.snes
+            PETSc.Sys.Print(
+                f"    direct forward: "
+                f"{_snes_reason_name(snes.getConvergedReason())} "
+                f"snes_its={snes.getIterationNumber()} "
+                f"fnorm={snes.getFunctionNorm():.3e} "
+                f"{perf_counter() - t0:.1f}s"
+                + ("" if ok else "; falling back to the taped ladder"))
+            if ok:
+                with assemble(F_ctrl, form_compiler_parameters=fc_params
+                              ).dat.vec_ro as _rv:
+                    _direct_fnorm[0] = float(_rv.norm())
+            else:
+                z.assign(z_entry)
+        return ok
+
+    def _confirm_sparams():
+        """The taped solve after a converged direct one: snes_atol at the
+        residual that solve reached, so it exits at iteration 0."""
+        params = dict(sparams)
+        params.update(final_solve_bounds())
+        params["snes_atol"] = snes_atol_scale() * max(_direct_fnorm[0], 1e-300)
+        return params
+
     def forward(theta_ctrl, phi_ctrl):
         clear_caches()
         F_ctrl = build_F(theta_ctrl, phi_ctrl)
@@ -1905,6 +1988,16 @@ def main():
                 F_ctrl == 0,
                 z,
                 solver_parameters=sparams,
+                adjoint_solver_parameters=adjoint_sparams,
+                form_compiler_parameters=fc_params,
+            ).solve()
+        elif direct_forward_enabled() and _direct_solve(F_ctrl):
+            # z is converged at these controls: the taped solve confirms it
+            # at iteration 0 and records the equation the adjoint needs.
+            EquationSolver(
+                F_ctrl == 0,
+                z,
+                solver_parameters=_confirm_sparams(),
                 adjoint_solver_parameters=adjoint_sparams,
                 form_compiler_parameters=fc_params,
             ).solve()
@@ -2532,7 +2625,8 @@ def main():
             phi.dat.data[:] = phi_ctrl.dat.data_ro
             try:
                 J = _forward_checked(theta_ctrl, phi_ctrl)
-            except fd.ConvergenceError:
+            except fd.ConvergenceError as err:
+                PETSc.Sys.Print(f"    ({str(err).splitlines()[0][:200]})")
                 # A line-search trial point where the single Newton solve
                 # of the forward diverges (the trial is far from the last
                 # converged state). First rescue: re-climb the exponent
@@ -2548,15 +2642,18 @@ def main():
                         "First forward solve failed - the inversion cannot start "
                         "(fewer MPI ranks for a small mesh; check the fluidity prior).")
                 stop_manager()
-                PETSc.Sys.Print(
-                    "  [!] Forward solve failed at a trial point; re-climbing the "
-                    "continuation there")
                 try:
+                    if trial_rescue_rungs() == 0:
+                        raise fd.ConvergenceError("trial rescue disabled")
+                    PETSc.Sys.Print(
+                        "  [!] Forward solve failed at a trial point; re-climbing "
+                        "the continuation there")
                     _reramp_at_current_controls()
                     reset_manager()
                     start_manager()
                     J = _forward_checked(theta_ctrl, phi_ctrl)
-                except fd.ConvergenceError:
+                except fd.ConvergenceError as err:
+                    PETSc.Sys.Print(f"    ({str(err).splitlines()[0][:200]})")
                     z.assign(z_backup)
                     reset_manager()
                     start_manager()
@@ -2715,8 +2812,10 @@ def main():
         # Periodic checkpoint interval in accepted iterations. A wall-clocked
         # link resumes from the last one, so every iteration past it is
         # repeated: 2 km link 1643735 lost iterations 21 to 30 (about five
-        # hours) to the old interval of 20.
-        _ckpt_every = max(1, int(os.environ.get("ISMIP7_CHECKPOINT_EVERY_IT", "5")))
+        # hours) to the old interval of 20, and at five, with iterations of
+        # 3-6 h, links 1656863 and 1662734 each lost four. A 2 km MAP write
+        # costs a minute.
+        _ckpt_every = max(1, int(os.environ.get("ISMIP7_CHECKPOINT_EVERY_IT", "1")))
 
         def _monitor(tao):
             its, f_val, gnorm, _cnorm, _xdiff, _reason = tao.getSolutionStatus()

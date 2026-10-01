@@ -77,6 +77,19 @@ FREEZE_LINEARIZATION_DEFAULT = "1"
 FINAL_SNES_STOL_DEFAULT = "1e-8"
 FINAL_SNES_MAXIT_DEFAULT = "50"
 FINAL_KSP_MAXIT_DEFAULT = "50"
+# The inversion's objective evaluations: first one untaped Newton solve at the
+# full exponents from the last converged state, then a taped solve that starts
+# converged. The in-tape 5-stage n=1->3 ladder is the fallback. Restarting
+# that ladder at n=1 from the n=3 state put every evaluation of the 2 km
+# sub-element chains at an initial ||F|| of 1e11-1e13 and ~200 Newton
+# iterations, and its n=2.5->3 stage is where the failed trials diverged
+# (snes_recinos_sqrtC_pattyn_noprior_subelement_nodhdt.log, 30 Sep 2026).
+DIRECT_FORWARD_DEFAULT = "1"
+DIRECT_FORWARD_MAXIT_DEFAULT = "50"
+# Rungs of the continuation ladder the failed-trial rescue may climb: each
+# failed rung cost 1-3 h on the 2 km mesh and ~80% of rescues failed anyway
+# (2 km chains, 27-30 Sep 2026). 0 disables the rescue.
+TRIAL_RESCUE_RUNGS_DEFAULT = "1"
 
 KSP_RTOL_DEFAULT = "1e-6"
 KSP_MAXIT_DEFAULT = "1000"
@@ -438,6 +451,25 @@ def nonlinear_solver_options():
     ``ISMIP7_SNES_*`` knobs the campaign exports mean one thing everywhere.
     """
     return _nonlinear_options()
+
+
+def direct_forward_enabled():
+    r"""Whether an inversion forward first tries one Newton solve at the full
+    exponents from the last converged state (``ISMIP7_DIRECT_FORWARD``)."""
+    return _enabled("ISMIP7_DIRECT_FORWARD", DIRECT_FORWARD_DEFAULT)
+
+
+def direct_forward_max_it():
+    return int(_env("ISMIP7_DIRECT_FORWARD_MAXIT", DIRECT_FORWARD_MAXIT_DEFAULT))
+
+
+def trial_rescue_rungs():
+    r"""Rungs of the continuation ladder a failed line-search trial may climb
+    (``ISMIP7_TRIAL_RESCUE_RUNGS``); 0 sends it straight to backtracking."""
+    rungs = int(_env("ISMIP7_TRIAL_RESCUE_RUNGS", TRIAL_RESCUE_RUNGS_DEFAULT))
+    if rungs < 0:
+        raise ValueError("ISMIP7_TRIAL_RESCUE_RUNGS must be >= 0")
+    return rungs
 
 
 def final_solve_bounds():

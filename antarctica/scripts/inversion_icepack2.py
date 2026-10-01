@@ -373,6 +373,12 @@ MISFIT_SCALE = os.environ.get("ISMIP7_MISFIT_SCALE", "1").strip().lower()
 # calving front inside the mesh (on by default under the scheme, since it
 # is the shared residual's default; off otherwise, so nothing else moves).
 SUBELEMENT_FRICTION = os.environ.get("ISMIP7_SUBELEMENT_FRICTION", "0").strip() == "1"
+# ISMIP7_SUBELEMENT_SCHEME: sep2 (grounded-part quadrature, the default) or
+# sep1 (ISSM's default: whole-cell quadrature, drag times the grounded
+# fraction); recorded in the MAP and followed by the forward.
+SUBELEMENT_SCHEME = os.environ.get("ISMIP7_SUBELEMENT_SCHEME", "sep2").strip().lower()
+if SUBELEMENT_SCHEME not in ("sep2", "sep1"):
+    raise ValueError(f"ISMIP7_SUBELEMENT_SCHEME must be sep2 or sep1, not {SUBELEMENT_SCHEME!r}")
 EXACT_FRONT = os.environ.get(
     "ISMIP7_EXACT_FRONT", "1" if SUBELEMENT_FRICTION else "0").strip() == "1"
 if MISFIT_SCALE != "nodes":
@@ -1364,7 +1370,7 @@ def main():
         _n_part = COMM_WORLD.allreduce(int(((_fr > 0.0) & (_fr < 1.0)).sum()))
         _n_full = COMM_WORLD.allreduce(int((_fr == 1.0).sum()))
         PETSc.Sys.Print(
-            f"  Sub-element grounding (ISSM SEP2, icepack_tools): {_n_full} cells fully "
+            f"  Sub-element grounding (ISSM {SUBELEMENT_SCHEME.upper()}, icepack_tools): {_n_full} cells fully "
             f"grounded, {_n_part} partly grounded; {FRICTION} runs with N_hat = 1 on the "
             f"grounded part (no N_ref, no delta floor); exact front push "
             f"{'on' if EXACT_FRONT else 'off'}")
@@ -1402,7 +1408,8 @@ def main():
                     z, theta_arg, phi_c, H=H, s=s, b=b, C_w0=C_arg,
                     A4_base=A4_base, n_flow=n_flow, n_flow_val=n_flow_val,
                     m_slide=m_slide_val, tau_c=tau_c, alpha=alpha_reg, H_ref=H_ref,
-                    subelement=subelement, fric_law=FRICTION, nhat_cap=BUDD_NHAT_CAP,
+                    subelement=subelement, scheme=SUBELEMENT_SCHEME,
+                    fric_law=FRICTION, nhat_cap=BUDD_NHAT_CAP,
                     alpha_gl=ALPHA_GL, c_w0_floor=RC_CW0_FLOOR,
                     h_visc_floor=RC_HVISC_FLOOR, k_lim=0.0, **stabilizers,
                     drag_mask=drag_mask,
@@ -2339,6 +2346,7 @@ def main():
             # The grounding scheme and the front push the MAP was inverted
             # under: a forward follows them (icepack2_tools.subelement).
             chk.set_attr("/", "subelement_friction", int(SUBELEMENT_FRICTION))
+            chk.set_attr("/", "subelement_scheme", SUBELEMENT_SCHEME)
             chk.set_attr("/", "exact_front", int(EXACT_FRONT))
             if FRICTION_CONTROL in ("sqrt", "exp"):
                 chk.set_attr("/", "prior_sigma_alpha", float(sigma_alpha_val))
@@ -3042,6 +3050,7 @@ def main():
         "lake_ice_base": int(LAKE_ICE_BASE),
         "fluidity_prior_origin": str(prior_origin), "grad_precond": grad_precond,
         "subelement_friction": int(SUBELEMENT_FRICTION), "exact_front": int(EXACT_FRONT),
+        "subelement_scheme": SUBELEMENT_SCHEME,
         "fluidity_control": FLUIDITY_CONTROL,
     })
     if PRIOR_FORM == "bilaplacian":

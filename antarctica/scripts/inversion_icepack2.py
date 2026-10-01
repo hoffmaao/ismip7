@@ -782,6 +782,22 @@ def main():
             _warm_fc = (str(chk.get_attr("/", "friction_control"))
                         if chk.has_attr("/", "friction_control") else "log")
             warm_exp_alpha = _warm_fc == "exp" and _theta_mode != "0"
+            if _warm_fc == "log" and _theta_mode != "0":
+                # The band a forward bounds a loaded MAP's log controls to
+                # (simulation.py, ISMIP7_MAP_CLIP: 10 at n=3, 6 at n=4). The
+                # 94-iteration sigma=3 MAP carries ~30 spikes up to theta=19
+                # (C x 1e8) at the grounding line, and from them the first
+                # n=1 solve of a sub-element sqrt run wandered at ||F|| 1e13-1e21.
+                _clip = float(os.environ.get(
+                    "ISMIP7_MAP_CLIP", "6.0" if float(n_flow_val) == 4.0 else "10.0"))
+                if _clip > 0.0:
+                    _d = theta.dat.data
+                    _n_clip = COMM_WORLD.allreduce(int((np.abs(_d) > _clip).sum()))
+                    np.clip(_d, -_clip, _clip, out=_d)
+                    if _n_clip:
+                        PETSc.Sys.Print(
+                            f"    log_friction: {_n_clip} node(s) bounded to "
+                            f"|theta|<={_clip:g} (ISMIP7_MAP_CLIP, as a forward does)")
             if _warm_fc == "sqrt" and _theta_mode != "0":
                 warm_alpha = _warm_load(chk, chk_mesh, "sqrt_friction", Q)
                 PETSc.Sys.Print("    sqrt_friction (alpha) from warm start")
@@ -2223,6 +2239,18 @@ def main():
         return C_w0
 
     def save_map(path, *, full_state=False):
+        """Write the MAP to ``path`` atomically: into a sibling temporary file,
+        renamed over ``path`` once every rank has closed it, so a link killed
+        mid-write (a wall limit, a preempted scavenge job) leaves the previous
+        checkpoint intact for its successor rather than a truncated file."""
+        tmp = f"{path}.tmp"
+        _write_map(tmp, full_state=full_state)
+        COMM_WORLD.Barrier()
+        if COMM_WORLD.rank == 0:
+            os.replace(tmp, path)
+        COMM_WORLD.Barrier()
+
+    def _write_map(path, *, full_state=False):
         with fd.CheckpointFile(path, "w") as chk:
             chk.save_mesh(mesh)
             if FRICTION_CONTROL == "sqrt":

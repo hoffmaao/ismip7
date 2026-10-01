@@ -347,7 +347,7 @@ def test_the_melt_summary_reports_what_leaves_and_what_front_melt_carries():
     assert len(lines) == 3
     assert "libmassbffl leaves out" in lines[0] and "largest -3.0 Gt/yr (2101)" in lines[0]
     assert "-1.0 in 2100, -3.0 in 2101" in lines[0]
-    assert "lifmassbf carries the front melt" in lines[2]
+    assert "lifmassbf carries the melt of cells with no floating ice" in lines[2]
     assert "largest -2.0 Gt/yr (2099)" in lines[2] and "-2.0 in 2100, -1.0 in 2101" in lines[2]
 
 
@@ -361,3 +361,15 @@ def test_a_series_that_mixes_two_melt_bookings_is_refused():
     assert wio.series_front_melt(old) == wio.UNSTAMPED_MELT
     with pytest.raises(ValueError, match="mix melt bookings.*2 years, 2015 to 2016"):
         wio.series_front_melt({**old, 2017: FRONT_MELT})
+
+
+def test_a_series_across_issue_136s_bookings_is_refused():
+    r"""Links that straddled issue 136's changes would book the frozen
+    reference as melt in some years and against itself in others, or the
+    melt of shelf ice gone within the year in one field and then another."""
+    from icepack2_tools.ismip7_output import FRONT_MELT
+    for before in ("inflow_share_of_empty_marine_cells",
+                   "inflow_share_of_empty_marine_cells_reference_netted"):
+        assert FRONT_MELT != before
+        with pytest.raises(ValueError, match="mix melt bookings.*issue #136"):
+            wio.series_front_melt({2015: before, 2016: FRONT_MELT})

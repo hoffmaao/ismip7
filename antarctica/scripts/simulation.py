@@ -2361,7 +2361,10 @@ def run_simulation(
             os.path.join(RESULTS_DIR, f"{experiment_name}_{lc}_ismip7_annual.h5"),
             os.path.join(RESULTS_DIR, f"{experiment_name}_{lc}_ismip7_scalars.csv"),
             first_year=t_start, rho_ratio=float(rho_ratio), log=PETSc.Sys.Print,
-            resume=ctx.get("ismip7_resume"))
+            resume=ctx.get("ismip7_resume"),
+            # the booking counts a bed at or above sea level as grounded, so
+            # ice a margin pushes onto ice-free land books as calving alone
+            bed=bed_cell)
         if annual.h_year_start is None:
             annual.start_year(h_dg)
         _stem, _ext = os.path.splitext(annual.out_path)

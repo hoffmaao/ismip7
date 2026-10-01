@@ -79,10 +79,11 @@ FINAL_SNES_MAXIT_DEFAULT = "50"
 FINAL_KSP_MAXIT_DEFAULT = "50"
 # The inversion's objective evaluations: first one untaped Newton solve at the
 # full exponents from the last converged state, then a taped solve that starts
-# converged. The in-tape 5-stage n=1->3 ladder is the fallback. Restarting
-# that ladder at n=1 from the n=3 state put every evaluation of the 2 km
-# sub-element chains at an initial ||F|| of 1e11-1e13 and ~200 Newton
-# iterations, and its n=2.5->3 stage is where the failed trials diverged
+# converged; one that fails goes to the failed-trial rescue. The in-tape
+# 5-stage n=1->3 ladder this replaces restarted at n=1 from the n=3 state:
+# every evaluation of the 2 km sub-element chains began at ||F|| 1e11-1e13
+# and took ~200 Newton iterations, and its n=2.5->3 stage is where the
+# failed trials diverged
 # (snes_recinos_sqrtC_pattyn_noprior_subelement_nodhdt.log, 30 Sep 2026).
 DIRECT_FORWARD_DEFAULT = "1"
 DIRECT_FORWARD_MAXIT_DEFAULT = "50"

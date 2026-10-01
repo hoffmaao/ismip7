@@ -1943,7 +1943,7 @@ def main():
         """One untaped Newton solve at the full exponents from the state z
         holds -- the last converged forward, at controls one line-search step
         away. Returns whether it converged; on failure z is back at its entry
-        state for the taped ladder."""
+        state for the rescue."""
         z_entry = z.copy(deepcopy=True)
         n_flow.assign(n_flow_val)
         m_slide.assign(m_slide_val)
@@ -1975,7 +1975,7 @@ def main():
                 f"snes_its={snes.getIterationNumber()} "
                 f"fnorm={snes.getFunctionNorm():.3e} "
                 f"{perf_counter() - t0:.1f}s"
-                + ("" if ok else "; falling back to the taped ladder"))
+                + ("" if ok else "; not converged"))
             if ok:
                 with assemble(F_ctrl, form_compiler_parameters=fc_params
                               ).dat.vec_ro as _rv:
@@ -1995,7 +1995,12 @@ def main():
     def forward(theta_ctrl, phi_ctrl):
         clear_caches()
         F_ctrl = build_F(theta_ctrl, phi_ctrl)
-        if skip_continuation:
+        # The direct solve unless a timing lane asked for the single taped
+        # solve by name: a warm start that loaded its mixed state also sets
+        # skip_continuation, and it wants the direct path's rescue route.
+        if skip_continuation and (
+                os.environ.get("ISMIP7_SKIP_CONTINUATION", "0").strip() == "1"
+                or not direct_forward_enabled()):
             # Timing-matrix short invert starts from a full-n prepare cache;
             # stay at the physical exponents so each eval is one Newton solve.
             n_flow.assign(n_flow_val)
@@ -2007,7 +2012,14 @@ def main():
                 adjoint_solver_parameters=adjoint_sparams,
                 form_compiler_parameters=fc_params,
             ).solve()
-        elif direct_forward_enabled() and _direct_solve(F_ctrl):
+        elif direct_forward_enabled():
+            if not _direct_solve(F_ctrl):
+                # Straight to the caller's rescue (one untaped rung of the
+                # ladder at these controls, then this direct solve) or its
+                # backtrack. The taped 5-stage ladder restarts at n=1 with
+                # ||F|| 1e11-1e13 and failed at the same trial points, at up
+                # to an hour a try on the 2 km mesh.
+                raise fd.ConvergenceError("direct forward did not converge")
             # z is converged at these controls: the taped solve confirms it
             # at iteration 0 and records the equation the adjoint needs.
             EquationSolver(
@@ -2628,7 +2640,11 @@ def main():
 
         def _forward_checked(theta_ctrl, phi_ctrl):
             J = forward(theta_ctrl, phi_ctrl)
-            f_ref = float(last_good_fnorm[0])
+            # Never below the warm start's converged residual: an accepted
+            # forward that began at the converged state ends at the rounding
+            # floor (5e-5 on the 2 km mesh), and 1e4x that rejected an
+            # ordinary relative-test solve at ||F|| 1.8 (NOTS 1691937).
+            f_ref = float(np.nanmax([float(last_good_fnorm[0]), f_warm]))
             if np.isfinite(f_ref) and f_ref > 0.0:
                 f_now = _residual_norm()
                 if not np.isfinite(f_now) or f_now > _fnorm_ceiling_factor * f_ref:

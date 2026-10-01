@@ -1507,7 +1507,8 @@ Per experiment in `results/`:
   melt are what the advances applied: no forcing acts on open ocean or on
   cells a front rule holds ice-free (`front.unforced_cells`), so `clamp` is
   only the positivity limit on thin ice and `calv` only ice that crossed the
-  front. The ISMIP7 `acabf` and `libmassbffl` fields book the same forcing.
+  front. How the ISMIP7 fields book this forcing, the outflux and the
+  apparent-MB reference is in `ISMIP7_README_AIS_RICE_icepack2.md`.
 
 VAF is in mm of sea-level equivalent, mass in Gt, both over map-plane area.
 The ISMIP7 scalars of a run with `ISMIP7_OUTPUT=1`

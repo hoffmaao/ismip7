@@ -15,7 +15,6 @@ tool's output comes from a transcription of its own expressions
 accumulation, and from the tool itself where it is installed.
 """
 import csv
-import os
 import subprocess
 import sys
 from pathlib import Path

@@ -353,8 +353,9 @@ loud warning. See
 
 `ISMIP7_INVERSION_LINEAR_SOLVER` picks the linear solver of every solve
 `tlm_adjoint` differentiates, and of the solve that publishes the MAP's state.
-`full_mumps`, the default, factors the whole mixed Jacobian, estimated at 410
-to 480 GB at 1 km (`runlog/inversion-1km.json`). `scpc_gamg` is the transient's production solver: Slate
+`full_mumps`, the default, factors the whole mixed Jacobian: at 1 km on 32
+ranks of Quartz an evaluation took 334 s, against 58 s under `scpc_gamg` (the
+table at the end of this section). `scpc_gamg` is the transient's production solver: Slate
 eliminates `M` and `τ` cell by cell and GAMG solves the condensed velocity
 system. `scpc_mumps` condenses the same way and factors the condensed system,
 which makes it the exact reference for `scpc_gamg`.
@@ -417,6 +418,41 @@ on 32 ranks or more (section 7). On the TAO path both published
 ||F|| = 1.493 after 20 iterations; `full_mumps` failed its forward at three
 trial points and took the re-ramp rescue at each, where `scpc_gamg` under
 `bt` failed none.
+
+On Quartz (issue #156, jobs 10818443 to 10818449), from Rice's 2 km snapshot
+0948, which carries controls and no state: continued on its own mesh
+(`ISMIP7_MESH=checkpoint`, 925,183 vertices), and transferred onto
+`antarctica_10000_1000_buffered20000` (1,869,252 vertices). Budd, the
+snapshot's fluidity prior, the bi-Laplacian prior, L-BFGS-B,
+`ISMIP7_EVAL_CONTINUATION=0`, the startup ramp under `scpc_mumps` in every
+arm, 5 iterations at 2 km and 3 at 1 km. Medians over the evaluations after
+the first; memory is sacct's AveRSS and MaxRSS a rank:
+
+| mesh | solver | ranks | forward (s) | adjoint (s) | evaluation (s) | GiB a rank, mean / peak |
+|---|---|---|---|---|---|---|
+| 2 km | `full_mumps` | 32 | 102 | 52 | 168 | 2.8 / 3.6 |
+| 2 km | `scpc_gamg` | 32 | 41 | 9.3 | 64 | 3.7 / 4.0 |
+| 2 km | `scpc_gamg` | 16 | 61 | 20 | 107 | 6.1 / 6.5 |
+| 2 km | `scpc_gamg`, NLEQ-ERR, Krylov rtol 1e-8 | 32 | 70 | 12 | 95 | 3.8 / 4.0 |
+| 1 km | `full_mumps` | 32 | 189 | 118 | 334 | 5.5 / 6.7 |
+| 1 km | `scpc_gamg` | 32 | 21 | 8.5 | 58 | 4.5 / 5.2 |
+| 1 km | `scpc_gamg` | 64 | 11.5 | 4.1 | 43 | 3.1 / 3.6 |
+
+Every arm on 32 ranks ended on the objective `full_mumps` reached, to seven
+digits (4.935180e4 at 2 km, 4.179544e4 at 1 km), and no forward failed. Over
+every evaluation, `scpc_gamg` stayed within 3.7e-6 of `full_mumps` at 2 km
+(6.5e-8 under NLEQ-ERR at 1e-8) and within 4.3e-9 at 1 km. The rest of an evaluation, 13 s at 2 km and 27 s at 1 km, is outside
+the forward and the adjoint (the prior terms and their gradients among it),
+the same under both solvers, and is most of a 64-rank evaluation. The rank
+count moves the first evaluation's objective (1.3e-6 at 2 km from 16 to 32
+ranks, 2e-5 at 1 km from 32 to 64): a controls-only start converges the ramp
+on the relative SNES test, so the state it leaves follows the partition's
+rounding. Memory decides nothing at these settings: the whole 1 km LU fit in
+7 GiB a rank on 32 ranks, against Rice's estimate of 410 to 480 GB for its
+1 km chain (`runlog/inversion-1km.json`). Slurm samples memory every 30 s
+here (`JobAcctGatherFrequency`), and a 1 km factorisation outlasts that (the
+adjoint, one factorisation and its solve, took about 2 min), so its peak is in
+the sample.
 
 ### Transient (dH/dt-constrained) inversion
 

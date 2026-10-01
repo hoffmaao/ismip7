@@ -1743,13 +1743,27 @@ def height_above_flotation(s, b, rho_water=_RHO_SW_FLOTATION, rho_ice=_RHO_ICE):
 
 def is_floating(s, b):
     r"""The flotation test: ``height_above_flotation(s, b) <= 0``. An ice-free
-    cell passes it too, open ocean at draft 0 and bare land at exactly 0; the
-    melt law acts on :func:`melt_receiving`."""
+    cell passes it too, open ocean at draft 0 and bare land at exactly 0, and
+    so does a land cell whose thickness is below the spacing of doubles at its
+    surface, where ``b + h`` rounds to ``b``. :func:`afloat` leaves land out,
+    and the melt law acts on :func:`melt_receiving`."""
     return height_above_flotation(s, b) <= 0.0
 
 
+def afloat(s, b):
+    r"""Floating by :func:`is_floating`, on a bed below sea level.
+
+    Over a bed at or above sea level the flotation surface is the bed, so the
+    height above flotation is the thickness and no ice there floats. Rounding
+    breaks that: the transport leaves films of 1e-19 to 1.4e-14 m on ice-free
+    land, where ``s - b`` is exactly 0, and the 25 km rehearsal of issue #138
+    melted them at 2295 and 2300 (issue #136)."""
+    return is_floating(s, b) & (np.asarray(b, dtype=float) < 0.0)
+
+
 def melt_receiving(s, b, h):
-    r"""The cells the melt law acts on: floating and holding ice (``h > 0``).
+    r"""The cells the melt law acts on: afloat on a bed below sea level
+    (:func:`afloat`) and holding ice (``h > 0``).
 
     This is the set the calibrations fit on (calibrate_melt.forward_geometry,
     select_melt_parameters.py), so the forward melts exactly the cells whose
@@ -1757,8 +1771,9 @@ def melt_receiving(s, b, h):
     flotation test, open ocean at draft 0 and bare land at a height above
     flotation of exactly 0. Melting it booked melt that the transport limiter
     then withheld, and a negative thermal forcing there made a source that
-    grows ice wherever no front mask clears the cell."""
-    return is_floating(s, b) & (np.asarray(h, dtype=float) > 0.0)
+    grows ice wherever no front mask clears the cell. The bed test changes no
+    cell of an initial state, whose ice-free land holds no ice at all."""
+    return afloat(s, b) & (np.asarray(h, dtype=float) > 0.0)
 
 
 # The slope the quadratic law sees. The ISMIP7 reference example is "quadratic
@@ -2268,8 +2283,8 @@ def make_forcing_callback(atm=None, ocean=None, fracture=None,
 
             melt = quadratic_mixed_slope(tf, sal, sin_alpha, K=K_use * K_scale)
 
-            # Melt only floating cells holding ice, the set the calibration
-            # was fitted on
+            # Melt only floating cells holding ice on a bed below sea level,
+            # the set the calibration was fitted on
             ctx["ocean_melt"].dat.data[:] = np.where(melt_receiving(s, b, h), melt, 0.0)
             if dT_npz is not None:
                 _announce_deltaT(dT_cache, dT_npz, ctx)

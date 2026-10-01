@@ -137,13 +137,24 @@ with zero errors in every test group, the experiment-length checks included
 `core07-32km-ssp585-cesm2waccm-p4`, 23 September 2026). Two output rules made
 that possible, both found by the first full-length check (action 10).
 
-Conventions chosen: the fluxes are what the transport applied, after the
-positivity limiter (action 10), `acabf` is that SMB with the apparent-MB
-correction travelling separately as `acabf_correction`, `ligroundf` is booked
-into the first floating cell and signed positive from grounded to floating
-(section 9), a floating cell within 1 cm of the bed is written as grounded,
-`lithk` is zero where the ice mask is zero, and `base = orog - lithk` on the
-grid.
+Conventions chosen:
+
+- the fluxes are what the transport applied, after the positivity limiter
+  (action 10);
+- `acabf` is that SMB, with the apparent-MB correction travelling separately
+  as `acabf_correction`; on a cell holding no ice at either end of a year the
+  melt and SMB that only cancelled the correction are booked against it, and
+  the snowfall the melt removed there against the melt (action 11);
+- `libmassbffl` is the melt of cells afloat at year end and `lifmassbf` the
+  melt of every other cell, so the fill of `libmassbffl` drops none of it
+  (action 11);
+- `licalvf` is what the front removes and what flows out across the mesh's
+  exterior boundary (action 11);
+- `ligroundf` is booked into the first floating cell and signed positive from
+  grounded to floating (section 9), with a cell on a bed at or above sea level
+  counted as grounded;
+- a floating cell within 1 cm of the bed is written as grounded, `lithk` is
+  zero where the ice mask is zero, and `base = orog - lithk` on the grid.
 
 What a submission needs (#5, #16, #17, #18, #19, #20, #22, #23):
 
@@ -613,9 +624,8 @@ Output and submission:
     apparent-MB reference supplies about two thirds of what those cells melt:
     117,000 of the 198,990 Gt left out over 2016 to 2300, and 1,150 of the
     model's 3,929 Gt/yr at 2300. Whether the production runs keep the
-    reference is a group decision (issue #104); the melt it books under a
-    pinned front is tracked with the other open melt bookkeeping
-    (issue #136). The rest, about 82,000 Gt
+    reference is a group decision (issue #104); issue 136 books that part of
+    the melt against the reference (below). The rest, about 82,000 Gt
     over the run and 620 Gt/yr at 2300, is melt of real ice gone by year end,
     most of it grounded ice that goes afloat into an empty cell and melts on
     arrival. The group chose on 25 September, in issue 109, to report that as
@@ -633,11 +643,61 @@ Output and submission:
     `tendlifmassbf` matches the model's to 0.000 %, and isschecker 0.5.1
     finds no error outside the length checks of a five-year series. The same
     restart on the code of 26 September (runlog
-    `test-32km-ssp585-reference-land`) books 3 Gt/yr of melt on emptied land
-    cells and keeps the reference's share on emptied marine cells, 1,334 Gt/yr
-    on average over 2294 to 2298 in the pixels the fill blanks. That share, the
-    land melt and the README's production numbers are one item (issue #136).
-    What is left is the submitted files, paired with their historical. (issue #13)
+    `test-32km-ssp585-reference-land`) booked 3 Gt/yr of melt on emptied land
+    cells and kept the reference's share on emptied marine cells, 1,334 Gt/yr
+    on average over 2294 to 2298 in the pixels the fill blanks.
+    The 25 km rehearsal of issue 138, whose mesh carries the production
+    layout's 20 km buffer, showed the same on the code of 27 September. Its
+    MRI-ESM2-0 ssp585 with the reference left 1,318.7 Gt/yr out of the gridded
+    `libmassbffl` at 2300, 1,290.7 of it the reference's share on emptied
+    marine cells. It melted land films 1e-19 to 1.4e-14 m thick, where
+    `s - b` rounds to 0 and the flotation test passes, and it booked 18 to 35
+    Gt/yr of ice pushed from land-terminating margins onto ice-free land
+    beyond the front as grounding-line flux as well as calving (8 to 15 at
+    2100 to 2300 without the reference). Its control
+    booked at most 0.6 Gt/yr of the reference as melt; there the negative
+    reference kept the emptied cells empty, removing 157 Gt/yr of inflow at
+    2300 against 4.5 of melt, so clearing the reference would have refilled
+    them and changed the trajectory issue #104 is judging. Issue 136 therefore settled on booking,
+    in two steps. On 27 September: `ismip7_output.net_reference` books the part
+    of the melt and negative SMB that only cancelled the reference against it,
+    on cells holding no ice at either end of a year; `forcing.afloat` keeps the
+    melt law off land; and the booking counts land as grounded, so flow onto
+    ice-free land is calving alone. Both arms rerun on that code (runlog
+    `core08-25km-ssp585-mriesm20-i136on` and `-i136off`) still left shelf ice
+    afloat at the start of a year and gone by its end in the pixels the fill
+    blanks, 694.2 Gt/yr at most (2281) with the reference, and kept the snowfall
+    the melt removed on emptied cells in `acabf`. On 28 September the group
+    booked the melt of every cell with no floating ice at year end as
+    `lifmassbf` (`ismip7_output.split_melt`, on the floating mask the files
+    carry), and that snowfall against the melt (`net_snowfall`, after the
+    reference). The same reruns showed the transport's outflow across the mesh's
+    exterior boundary, about 500 Gt/yr in 2015, in no field and in the budget's
+    residual; `AnnualOutput.book_advance` books it into `licalvf` in the cell it
+    leaves. `check_melt_booking.py` gates all of it on any series, closes each
+    year's budget against `dlithkdt`, and checks `licalvf` against the
+    timeseries' `calv` plus `outflux`. Both arms rerun on the final code
+    (runlog `core08-25km-ssp585-mriesm20-i136con` and `-i136coff`, code a25033c)
+    pass it: nothing of the melt left out of the gridded fields, at most
+    5.6e-15 Gt/yr of the reference and none of the snowfall in the sinks, no
+    melt or `ligroundf` on ice-free land, the annual budget residual at most
+    4.9e-8 Gt/yr, and `licalvf` within 6.3e-4 Gt/yr of the timeseries.
+    `lifmassbf` is 1,314.7 Gt/yr at 2300 with the reference (1,930.5 at most,
+    2281) and 668.3 without (1,131.0 at most, 2295). The submitted 8 km files
+    close the budget over pixel area to 0.012 Gt/yr, the refreezing the fill
+    drops, and over true area to 26.2 Gt/yr, the af2 weighting of a transport
+    that conserves map-plane volume; with the reference they leave out the
+    reference the model applied, 4,065 Gt/yr at 2300 and 4,133 at most (2294),
+    which stays in `acabf_correction` (issue #104). isschecker 0.5.1 reports
+    zero errors on both C008 sets and every gate of `compare_scalars.py` holds.
+    Mass and VAF match the rehearsal's to 1 Gt and 0.01 mm SLE. `tendligroundf`
+    drops by the land booking (17 Gt/yr at 2300 with the reference, 8 without),
+    and the forward's `melt_gtyr` and `clamp_gt` columns drop together by the
+    melt the law had prescribed on land films and the thickness floor returned,
+    at most 95 Gt/yr with the reference and 557 without (both in 2279). Issue 13
+    runs the check on the production ssp585 and fills the README's numbers from
+    its writer log. What is left is the submitted files, paired with their
+    historical. (issue #13)
 12. **Adopt or refetch the forcing that predates the manifest.** Done on 21
     September, and the premise above was wrong. The first
     `audit_forcing_versions.py` run counts none of the Globus-era tree as
@@ -948,6 +1008,13 @@ never booked, and an ice rumple contributed its whole throughput to
 the same flux the DG0 transport moved, signed from grounded to floating and
 still landed in the floating cell. `tests/test_ismip7_annual.py` checks both
 directions on a strip of cells, and the rumple case, whose net is zero.
+The flotation test reads an ice-free land cell as afloat (a height above
+flotation of exactly 0), so ice that a land-terminating margin pushed onto
+ice-free land beyond the pinned front was booked as grounding-line flux as
+well as calving: 8 to 35 Gt/yr in the 25 km rehearsal (issue 138), all of it
+in buffer cells outside the 2015 extent. The booking now counts a cell on a
+bed at or above sea level as grounded (issue 136), and the same test checks
+a land strip.
 Series banked by earlier runs carry the one-sided booking; they differ from
 the new one only in cells with a facet across which ice flowed from floating
 to grounded. The README's `[confirm]` on this convention is cleared and the

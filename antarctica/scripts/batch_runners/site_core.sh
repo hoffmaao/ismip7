@@ -281,6 +281,18 @@ ismip7_activate() {
     # so a chain link killed mid compile cannot hand its successor a truncated
     # object through --export=ALL.
     export PYOP2_CACHE_DIR="${SCRATCH:-$HOME}/.pyop2_cache/${SLURM_JOB_ID:-manual}"
+    # ISMIP7_SHARED_JIT_CACHE (a site file or the submitting shell) names one
+    # kernel cache every job shares instead. PyOP2 2026 writes each entry to a
+    # temporary file and renames it into place (pyop2/caching.py), so a link
+    # killed mid compile leaves no truncated object, and two jobs compiling
+    # the same kernel at once both rename identical files. Without it every
+    # 2 km NOTS chain link recompiled the sub-element kernels into an empty
+    # cache: ~45 min before the first iteration of each 24 h link, the whole
+    # of a one-hour scavenge link (30 Sep 2026).
+    if [ -n "${ISMIP7_SHARED_JIT_CACHE:-}" ]; then
+        rmdir "$PYOP2_CACHE_DIR" 2>/dev/null || true
+        export PYOP2_CACHE_DIR="$ISMIP7_SHARED_JIT_CACHE"
+    fi
     # XDG_CACHE_HOME is loopy's knob and also matplotlib's, so pin the font
     # cache where it is already warm and move only loopy.
     export MPLCONFIGDIR="${MPLCONFIGDIR:-${_ISMIP7_SITE_XDG_CACHE_HOME:-$HOME/.cache}/matplotlib}"

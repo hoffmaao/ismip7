@@ -42,16 +42,36 @@ pointwise with no anchor, checkpoints carry it as `friction_exp`, and warm
 starts rebase between the three controls (an exp-control chain link resumes
 its alpha unchanged). Every forward state checkpoint copies the MAP's
 `friction_control`, `friction_c_ref`, `subelement_friction`,
-`subelement_scheme`, `exact_front` and `fluidity_control`, so a restarted link
-rebuilds the same residual.
+`subelement_scheme`, `subelement_scheme_version`, `exact_front` and
+`fluidity_control`, so a restarted link rebuilds the same residual.
 
 `ISMIP7_SUBELEMENT_SCHEME` picks the sub-element grounding scheme under
 `ISMIP7_SUBELEMENT_FRICTION=1`: `sep1` (the default, ISSM's
 SubelementFriction1: whole-cell quadrature, Weertman drag times the grounded
 fraction) or `sep2` (quadrature over the grounded part). The MAP records it as
 `subelement_scheme` and the forward follows it; a sub-element MAP without the
-record runs SEP2. The
-fluidity control is `A = A_prior exp(phi)` under every friction control.
+record runs SEP2.
+
+The MAP also records which form of its scheme it was inverted under, as
+`subelement_scheme_version` (`icepack2_tools/handoff.py`,
+`SUBELEMENT_SCHEME_VERSIONS`), a decision of 2 October:
+
+| scheme | version | form |
+|---|---|---|
+| `sep2` | 1 | the only form |
+| `sep1` | 1 | `exp(He θ)` through the shared Weertman closure (PR 158 before `1c13b38`) |
+| `sep1` | 2 | `exp(θ)` ungated, as under SEP2 (this code) |
+
+The two SEP1 forms agree where θ is zero, under the sqrt and exp controls. A
+record without the version stands for version 1 under SEP2 and for the current
+version under SEP1 with the sqrt or exp control. A log-control SEP1 record
+without it cannot say which form it was. A forward refuses a MAP of another
+version, and that unversioned log-control case; a chain link counts a changed
+version as a changed objective. Rice reports no log-control SEP1 MAP written
+before the record (PR 158). A change to a scheme's residual at the same
+control fields takes a new version.
+
+The fluidity control is `A = A_prior exp(phi)` under every friction control.
 
 `ISMIP7_FLUIDITY_PRIOR`: `pattyn` (default since 27 September) is the rate
 factor of the Pattyn (2013) depth-averaged temperature; `thermo` is the

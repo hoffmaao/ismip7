@@ -121,8 +121,8 @@ from icepack2_tools.prior import (
 )
 from icepack2_tools.thermo_model import compute_fluidity_prior
 from icepack2_tools.handoff import (
-    OBJECTIVE_KEYS, OBJECTIVE_RECORD_KEYS, accepted_evaluation, frozen_in_control,
-    handoff_gap, objective_mismatches)
+    OBJECTIVE_KEYS, OBJECTIVE_RECORD_KEYS, SUBELEMENT_SCHEME_VERSIONS,
+    accepted_evaluation, frozen_in_control, handoff_gap, objective_mismatches)
 from icepack2_tools.profiling import Spans
 from icepack2_tools.optimization import (FunctionalDecreaseStop,
                                          recorded_objective,
@@ -400,6 +400,9 @@ SUBELEMENT_FRICTION = os.environ.get("ISMIP7_SUBELEMENT_FRICTION", "0").strip() 
 SUBELEMENT_SCHEME = os.environ.get("ISMIP7_SUBELEMENT_SCHEME", "sep1").strip().lower()
 if SUBELEMENT_SCHEME not in ("sep2", "sep1"):
     raise ValueError(f"ISMIP7_SUBELEMENT_SCHEME must be sep2 or sep1, not {SUBELEMENT_SCHEME!r}")
+# The form of that scheme this code builds, recorded with it in the MAP
+# (icepack2_tools.handoff.SUBELEMENT_SCHEME_VERSIONS).
+SUBELEMENT_SCHEME_VERSION = SUBELEMENT_SCHEME_VERSIONS[SUBELEMENT_SCHEME]
 EXACT_FRONT = os.environ.get(
     "ISMIP7_EXACT_FRONT", "1" if SUBELEMENT_FRICTION else "0").strip() == "1"
 if MISFIT_SCALE != "nodes":
@@ -1404,7 +1407,8 @@ def main():
         _n_part = COMM_WORLD.allreduce(int(((_fr > 0.0) & (_fr < 1.0)).sum()))
         _n_full = COMM_WORLD.allreduce(int((_fr == 1.0).sum()))
         PETSc.Sys.Print(
-            f"  Sub-element grounding (ISSM {SUBELEMENT_SCHEME.upper()}, icepack_tools): {_n_full} cells fully "
+            f"  Sub-element grounding (ISSM {SUBELEMENT_SCHEME.upper()} version "
+            f"{SUBELEMENT_SCHEME_VERSION}, icepack_tools): {_n_full} cells fully "
             f"grounded, {_n_part} partly grounded; {FRICTION} runs with N_hat = 1 on the "
             f"grounded part (no N_ref, no delta floor); exact front push "
             f"{'on' if EXACT_FRONT else 'off'}")
@@ -2395,6 +2399,7 @@ def main():
             # under: a forward follows them (icepack2_tools.subelement).
             chk.set_attr("/", "subelement_friction", int(SUBELEMENT_FRICTION))
             chk.set_attr("/", "subelement_scheme", SUBELEMENT_SCHEME)
+            chk.set_attr("/", "subelement_scheme_version", int(SUBELEMENT_SCHEME_VERSION))
             chk.set_attr("/", "exact_front", int(EXACT_FRONT))
             if FRICTION_CONTROL in ("sqrt", "exp"):
                 chk.set_attr("/", "prior_sigma_alpha", float(sigma_alpha_val))
@@ -3208,6 +3213,7 @@ def main():
         "fluidity_prior_origin": str(prior_origin), "grad_precond": grad_precond,
         "subelement_friction": int(SUBELEMENT_FRICTION), "exact_front": int(EXACT_FRONT),
         "subelement_scheme": SUBELEMENT_SCHEME,
+        "subelement_scheme_version": int(SUBELEMENT_SCHEME_VERSION),
         "fluidity_control": FLUIDITY_CONTROL,
     })
     if PRIOR_FORM == "bilaplacian":

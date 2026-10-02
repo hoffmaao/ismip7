@@ -29,9 +29,21 @@ OBJECTIVE_KEYS = (
     "prior_sigma_alpha", "prior_rho_theta", "friction_c_ref",
     "friction_control", "friction", "n_flow", "geometry_space",
     "friction_anchor_length", "lake_ice_base", "fluidity_prior_origin",
-    "grad_precond", "subelement_friction", "subelement_scheme", "exact_front",
-    "fluidity_control",
+    "grad_precond", "subelement_friction", "subelement_scheme",
+    "subelement_scheme_version", "exact_front", "fluidity_control",
 )
+
+# The residual each sub-element scheme builds today (icepack2_tools.subelement),
+# recorded in the MAP as subelement_scheme_version. A change to a scheme's
+# residual at the same control fields takes a new version.
+#   sep2 1: quadrature over the grounded part (26 Sep 2026).
+#   sep1 1: whole-cell quadrature, drag times the grounded fraction, theta
+#           through the shared Weertman closure as exp(He theta) (PR 158,
+#           73bd05a).
+#   sep1 2: the same with exp(theta) ungated, as under SEP2 (PR 158, 1c13b38).
+# The two sep1 forms agree where theta is zero: the sqrt and exp friction
+# controls, which carry the friction in C_w0.
+SUBELEMENT_SCHEME_VERSIONS = {"sep2": 1, "sep1": 2}
 
 # Recorded with the controls: the objective at the checkpointed iterate.
 OBJECTIVE_RECORD_KEYS = (
@@ -57,21 +69,70 @@ def _truthy(value):
         return False
 
 
+def recorded_scheme_version(scheme, version, friction_control):
+    r"""The version of ``SUBELEMENT_SCHEME_VERSIONS`` a sub-element record
+    stands for. A record from before the version existed carries none: SEP2
+    has had one form, and under the sqrt and exp controls both SEP1 forms
+    agree, so those stand for the current version; a log-control SEP1 record
+    cannot say which form it was inverted under, and stands for none."""
+    if version is not None:
+        return int(version)
+    scheme = str(scheme)
+    if scheme == "sep2":
+        return SUBELEMENT_SCHEME_VERSIONS["sep2"]
+    if str(friction_control) in ("sqrt", "exp"):
+        return SUBELEMENT_SCHEME_VERSIONS.get(scheme)
+    return None
+
+
+def check_subelement_record(scheme, version, friction_control, source="the MAP"):
+    r"""Refuse a sub-element MAP this code cannot rebuild: one recorded under
+    another version of its scheme, or a log-control SEP1 MAP from before the
+    version was recorded. Returns the version."""
+    scheme = str(scheme)
+    if scheme not in SUBELEMENT_SCHEME_VERSIONS:
+        raise RuntimeError(f"{source} records sub-element scheme {scheme!r}; "
+                           f"this code builds {sorted(SUBELEMENT_SCHEME_VERSIONS)}")
+    current = SUBELEMENT_SCHEME_VERSIONS[scheme]
+    got = recorded_scheme_version(scheme, version, friction_control)
+    if got is None:
+        raise RuntimeError(
+            f"{source} was inverted under {scheme.upper()} with the "
+            f"{friction_control} friction control before the scheme's version "
+            f"was recorded, so it cannot say whether theta entered as exp(He "
+            f"theta) (version 1) or exp(theta) (version 2, this code)")
+    if got != current:
+        raise RuntimeError(
+            f"{source} was inverted under {scheme.upper()} version {got}; this "
+            f"code builds version {current} (icepack2_tools.handoff."
+            f"SUBELEMENT_SCHEME_VERSIONS)")
+    return got
+
+
 def objective_mismatches(recorded, current, rel_tol=1e-9):
     r"""The keys of ``current`` whose recorded value differs, as
     ``"key: recorded -> current"`` strings. Keys the record lacks are not
     mismatches (an older checkpoint), keys ``current`` lacks are ignored.
     A sub-element record with no ``subelement_scheme`` was written under
-    SEP2, the only scheme before the record existed; the scheme is compared
-    only when both sides use sub-element friction, since otherwise it selects
-    nothing."""
+    SEP2, the only scheme before the record existed, and one with no
+    ``subelement_scheme_version`` stands for ``recorded_scheme_version``; a
+    record that cannot name its version (log-control SEP1) is a mismatch.
+    The scheme and its version are compared only when both sides use
+    sub-element friction, since otherwise they select nothing."""
     out = []
-    if "subelement_scheme" not in recorded and _truthy(recorded.get("subelement_friction")):
-        recorded = {**recorded, "subelement_scheme": "sep2"}
+    if _truthy(recorded.get("subelement_friction")):
+        if "subelement_scheme" not in recorded:
+            recorded = {**recorded, "subelement_scheme": "sep2"}
+        if "subelement_scheme_version" not in recorded:
+            version = recorded_scheme_version(
+                recorded["subelement_scheme"], None,
+                recorded.get("friction_control", "log"))
+            recorded = {**recorded, "subelement_scheme_version":
+                        "unrecorded" if version is None else version}
     both_sub = (_truthy(recorded.get("subelement_friction"))
                 and _truthy(current.get("subelement_friction")))
     for key in OBJECTIVE_KEYS:
-        if key == "subelement_scheme" and not both_sub:
+        if key in ("subelement_scheme", "subelement_scheme_version") and not both_sub:
             continue
         if key in recorded and key in current:
             if not _same(recorded[key], current[key], rel_tol):

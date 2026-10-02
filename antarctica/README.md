@@ -519,6 +519,66 @@ Every same-rank pair that finished ended on one objective (within 1.1e-9 at
 step, and the one failed trial point (the 2 km single-solve pair, iteration 3)
 failed under both solvers and took the same re-ramp rescue.
 
+### Inversion time outside the forward and the adjoint
+
+The timing record names this time by span, each the slowest rank's
+(`icepack2_tools/profiling.py`), and the log prints the spans under each
+iteration line. An L-BFGS-B evaluation carries `other_spans` (inside
+`total_seconds`) and `before_spans` (the previous evaluation's report, term
+assembly, timing write and checkpoint, and `gap`, the whole interval that
+holds the optimizer's own step). A TAO iteration carries `iteration_spans`
+over all of its evaluations; its `unspanned` is the adjoint and TAO itself.
+
+Under the bi-Laplacian prior three spans held that time:
+
+| span | path | before | since `4e45164` |
+|---|---|---|---|
+| `prior_solve` | both | the mass solve `M f = A θ` of each prior energy, an `EquationSolver` on the residual form: a Newton solve with a fresh MUMPS LU of `M` at every call, analysed on one rank (`ICNTL(28)=1`, the MUMPS 5.8.2 default) | `prior.BilaplacianAuxSolver`: `M` factored once (MUMPS Cholesky), then a back-substitution |
+| `prior_taped` | TAO | the same solve on the tape, and one more LU of `M` in the adjoint | the same solver as a tlm_adjoint `LinearEquation`, back-substituting in the forward and the adjoint |
+| `residual_norm` | TAO | the fnorm-ceiling check assembled `F` while tlm_adjoint recorded, 4 to 8 s a call at 32 km and 4 km | the check runs under `paused_manager()` |
+
+The old solve grows with the vertex count and stays flat in the rank count,
+the pattern of the 13 s and 27 s above. `scripts/probe_eval_overhead.py`
+times the prior work alone on the 32 km mesh refined uniformly; seconds an
+evaluation for both controls on the Mac workstation, with another 8-rank job
+on its 16 cores:
+
+| vertices | ranks | off the tape, before | parallel analysis (`ICNTL(28)=2`) | factored | TAO tape, before (forward + adjoint) | TAO tape, factored |
+|---|---|---|---|---|---|---|
+| 79,455 | 1 / 8 | 0.54 / 0.56 | 0.60 / 0.24 | 0.016 / 0.027 | 0.84 / 0.85 | 0.037 / 0.046 |
+| 303,789 | 1 / 8 | 2.21 / 1.90 | 2.42 / 0.67 | 0.055 / 0.035 | 3.51 / 2.92 | 0.10 / 0.08 |
+| 1,187,097 | 1 / 2 / 4 / 8 | 9.8 / 9.1 / 8.3 / 8.2 | 10.1 / 4.7 / 2.9 / 3.0 | 0.22 / 0.15 / 0.10 / 0.12 | 15.3 / 13.9 / 12.6 / 12.4 | 0.40 / 0.27 / 0.18 / 0.21 |
+
+The factored solver's one factorisation took 4.1 to 4.8 s at 1.19 million
+vertices. Energies agree with the old solve to 3e-16 and taped gradients to
+2e-16. CG with Jacobi (22 to 26 iterations at every size) costs about what
+the back-substitution does. The replicated gathers of an L-BFGS-B evaluation
+(`func_to_global` four times, `global_to_func` twice) took 0.13 s on 1 rank
+and 0.016 s on 8. At the old solve's 6.9 to 8.2 µs a vertex, a 1 km evaluation
+(1.87 million vertices) spends 13 to 15 s in it on this workstation, about
+half the 27 s Quartz recorded outside the solves; Quartz has not been
+measured with the spans.
+
+In situ, base (`2626c71`, spans only) against `4e45164`, each pair back to
+back: Budd, the `legacy` fluidity prior, the bi-Laplacian prior, a cold
+start, `ISMIP7_EVAL_CONTINUATION=0`; `full_mumps` on 4 ranks at 32 km,
+`scpc_gamg` with the ramp under `scpc_mumps` on 8 ranks at 4 km. Medians
+after the first two L-BFGS-B evaluations or TAO iterations:
+
+| mesh | optimizer | before: s an evaluation or iteration | after | spans that moved | largest relative objective difference |
+|---|---|---|---|---|---|
+| 32 km, 6,282 vertices | L-BFGS-B | 5.67 | 5.68 | outside the solves 0.115 to 0.080 | 1.1e-14 over 7 |
+| 4 km, 117,348 vertices | L-BFGS-B | 12.5 | 13.0 | outside the solves 0.90 to 0.15 | 9.8e-14 over 5 |
+| 32 km | TAO | 21.6 | 13.6 | `residual_norm` 7.86 to 0.23 | 2.2e-13 over 5 |
+| 4 km | TAO | 23.0 | 14.9 | `residual_norm` 7.34 to 0.24, `prior_solve` 0.75 to 0.02, `prior_taped` 0.87 to 0.03, unspanned 1.72 to 1.30 | 9.6e-14 over 5 |
+
+The 4 km pairs ran beside the other job (load 16 to 57), so their forward
+times moved by up to 1.2 s between arms; the spans above are the comparison.
+At 32 km every TAO run failed its forward at the same three trial points and
+took the re-ramp rescue, now its own span (`reramp`, 2.9 s an iteration).
+What an L-BFGS-B evaluation still spends outside the solves is
+`residual_norm`, 0.07 s at 32 km and 0.13 s at 4 km.
+
 ### Transient (dH/dt-constrained) inversion
 
 A velocity-only inversion fits `u` while leaving `div(h u)` unconstrained, so

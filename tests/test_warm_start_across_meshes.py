@@ -31,7 +31,7 @@ def test_a_warm_start_from_a_smaller_mesh_fills_the_prior_with_cold_ice():
     assert vals.min() > 0.0
 
 
-def test_a_map_s_own_mesh_loads_from_the_checkpoint_with_its_recorded_name(tmp_path):
+def test_checkpoint_mesh_loads_its_recorded_parameters(tmp_path):
     r"""Rice's 2 km MAPs travel without their .msh, so ISMIP7_MESH=checkpoint
     solves on the mesh the MAP carries, under the basename it recorded, which
     names the boundary-id sidecar."""
@@ -41,9 +41,49 @@ def test_a_map_s_own_mesh_loads_from_the_checkpoint_with_its_recorded_name(tmp_p
     with firedrake.CheckpointFile(path, "w") as chk:
         chk.save_mesh(mesh)
         chk.set_attr("/", "mesh_basename", "antarctica_5000_2000_buffered0.msh")
-    loaded, basename = load_checkpoint_mesh(path)
+        chk.set_attr("/", "lc", 2000)
+        chk.set_attr("/", "lc_coarse", 5000)
+        chk.set_attr("/", "buffer_m", 0.0)
+    loaded, basename, lc, lc_coarse, buffer_m = load_checkpoint_mesh(path)
     assert basename == "antarctica_5000_2000_buffered0.msh"
+    assert (lc, lc_coarse, buffer_m) == (2000, 5000, 0.0)
     assert meshes_match(loaded, mesh)
+
+
+def test_checkpoint_mesh_derives_parameters_from_its_basename(tmp_path):
+    from icepack2_tools.transfer import load_checkpoint_mesh
+    path = str(tmp_path / "map.h5")
+    with firedrake.CheckpointFile(path, "w") as chk:
+        chk.save_mesh(UnitSquareMesh(2, 2, name="firedrake_default"))
+        chk.set_attr(
+            "/", "mesh_basename", "antarctica_10000_1000_buffered20000.msh"
+        )
+    _mesh, basename, lc, lc_coarse, buffer_m = load_checkpoint_mesh(path)
+    assert basename == "antarctica_10000_1000_buffered20000.msh"
+    assert (lc, lc_coarse, buffer_m) == (1000, 10000, 20000.0)
+
+
+def test_checkpoint_mesh_refuses_contradictory_parameters(tmp_path):
+    from icepack2_tools.transfer import load_checkpoint_mesh
+    path = str(tmp_path / "map.h5")
+    with firedrake.CheckpointFile(path, "w") as chk:
+        chk.save_mesh(UnitSquareMesh(2, 2, name="firedrake_default"))
+        chk.set_attr("/", "mesh_basename", "antarctica_5000_2000_buffered0.msh")
+        chk.set_attr("/", "lc", 1000)
+        chk.set_attr("/", "lc_coarse", 5000)
+        chk.set_attr("/", "buffer_m", 0.0)
+    with pytest.raises(ValueError, match="contradictory mesh identity: lc="):
+        load_checkpoint_mesh(path)
+
+
+def test_checkpoint_mesh_refuses_incomplete_identity(tmp_path):
+    from icepack2_tools.transfer import load_checkpoint_mesh
+    path = str(tmp_path / "map.h5")
+    with firedrake.CheckpointFile(path, "w") as chk:
+        chk.save_mesh(UnitSquareMesh(2, 2, name="firedrake_default"))
+        chk.set_attr("/", "mesh_basename", "custom_mesh.msh")
+    with pytest.raises(ValueError, match="lacks mesh parameters"):
+        load_checkpoint_mesh(path)
 
 
 def test_a_checkpoint_that_names_no_mesh_is_refused(tmp_path):

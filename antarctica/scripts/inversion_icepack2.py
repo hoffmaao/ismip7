@@ -449,16 +449,24 @@ def find_file(d, p):
 def main():
     os.makedirs(FIG_DIR, exist_ok=True)
 
+    mesh_lc = lc
+    mesh_lc_coarse = lc_coarse
+    mesh_buffer_m = buffer_m
     mesh_fn, mesh_from_warm = inversion_mesh_source(
-        mesh_filename(lc_coarse, lc, buffer_m))
+        mesh_filename(mesh_lc_coarse, mesh_lc, mesh_buffer_m))
     if mesh_from_warm:
         # The warm start's own mesh. mesh_fn becomes the .msh basename that
         # checkpoint recorded, which picks the boundary-id sidecar and is
         # stamped into this run's MAP, so the chain and the forward that loads
         # the result name the mesh the controls were inverted on.
         PETSc.Sys.Print(f"Loading mesh from the warm start: {mesh_fn}")
-        mesh, mesh_fn = load_checkpoint_mesh(mesh_fn)
-        PETSc.Sys.Print(f"  recorded mesh: {mesh_fn}")
+        (mesh, mesh_fn, mesh_lc, mesh_lc_coarse,
+         mesh_buffer_m) = load_checkpoint_mesh(mesh_fn)
+        PETSc.Sys.Print(
+            f"  recorded mesh: {mesh_fn} "
+            f"(lc={mesh_lc}, lc_coarse={mesh_lc_coarse}, "
+            f"buffer_m={mesh_buffer_m:g})"
+        )
     else:
         PETSc.Sys.Print(f"Loading mesh: {mesh_fn}")
         mesh = Mesh(mesh_fn)
@@ -1345,7 +1353,8 @@ def main():
     # dH/dt-constrained inversion) should also name themselves distinctly here
     # rather than shadow the velocity-only MAP the forwards auto-load.
     map_out = os.environ.get("ISMIP7_MAP_OUT")
-    map_fn = os.path.basename(map_out) if map_out else map_basename(FRICTION, lc)
+    map_fn = (os.path.basename(map_out) if map_out
+              else map_basename(FRICTION, mesh_lc))
     # A bare filename (ISMIP7_MAP_OUT=map.h5) has no dirname; resolve it under
     # MESH_DIR like the non-override path rather than silently against the CWD.
     _map_dir = (os.path.dirname(map_out) or MESH_DIR) if map_out else MESH_DIR
@@ -2374,9 +2383,9 @@ def main():
             # ds(absent_id) integrates to zero -- silently wrong physics with
             # no crash. The basename covers meshes outside the standard naming
             # pattern; the parameters let bndids_filename() rebuild the name.
-            chk.set_attr("/", "lc", int(lc))
-            chk.set_attr("/", "lc_coarse", int(lc_coarse))
-            chk.set_attr("/", "buffer_m", float(buffer_m))
+            chk.set_attr("/", "lc", int(mesh_lc))
+            chk.set_attr("/", "lc_coarse", int(mesh_lc_coarse))
+            chk.set_attr("/", "buffer_m", float(mesh_buffer_m))
             # The configuration theta/phi only mean anything under. The
             # derived MAP filename encodes all three, but ISMIP7_INVERSION
             # bypasses the name, so the forward needs them recorded to check
@@ -2532,9 +2541,9 @@ def main():
             "map_path": os.path.realpath(published) if published else written,
             "map_path_written": written,
             "mesh_basename": os.path.basename(mesh_fn),
-            "lc": int(lc),
-            "lc_coarse": int(lc_coarse),
-            "buffer_m": float(buffer_m),
+            "lc": int(mesh_lc),
+            "lc_coarse": int(mesh_lc_coarse),
+            "buffer_m": float(mesh_buffer_m),
             "ncores": int(COMM_WORLD.size),
             "maxiter": int(max_iter),
             "nit": int(nit if nit is not None else iteration_count[0]),
@@ -3561,7 +3570,7 @@ def main():
     fig.colorbar(cs, cax=cax1, label="m/yr")
     fig.colorbar(cd, cax=cax2, label="m/yr")
 
-    out_fn = os.path.join(FIG_DIR, f"inversion_icepack2_{lc}.png")
+    out_fn = os.path.join(FIG_DIR, f"inversion_icepack2_{mesh_lc}.png")
     fig.savefig(out_fn, dpi=200, bbox_inches="tight")
     PETSc.Sys.Print(f"Saved: {out_fn}")
 

@@ -306,6 +306,15 @@ if FRICTION_CONTROL not in ("log", "sqrt", "exp"):
 if FRICTION_CONTROL in ("sqrt", "exp") and PRIOR_FORM != "bilaplacian":
     raise ValueError(
         f"ISMIP7_FRICTION_CONTROL={FRICTION_CONTROL} needs ISMIP7_PRIOR_FORM=bilaplacian")
+# ISMIP7_GRAD_CHECK=1 runs its Taylor test on the TAO path only. Refused here
+# on the scipy metrics, where it would run an ordinary inversion and write
+# over ISMIP7_MAP_OUT.
+if (os.environ.get("ISMIP7_GRAD_CHECK", "0").strip() == "1"
+        and os.environ.get("ISMIP7_GRAD_PRECOND", "none").lower()
+        not in ("mass_consistent", "prior")):
+    raise ValueError(
+        "ISMIP7_GRAD_CHECK=1 needs the TAO path "
+        "(ISMIP7_GRAD_PRECOND=mass_consistent or prior)")
 PRIOR_SIGMA_ALPHA = os.environ.get("ISMIP7_PRIOR_SIGMA_ALPHA", "auto").strip().lower()
 C_REF = os.environ.get("ISMIP7_C_REF", "auto").strip().lower()
 PRIOR_RHO_THETA = float(os.environ.get("ISMIP7_PRIOR_RHO_THETA", str(PRIOR_RHO)))

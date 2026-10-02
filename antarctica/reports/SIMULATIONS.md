@@ -9,9 +9,9 @@ gitignored, so these records and the per-core reports beside them are
 the trace a run leaves in the repository. A core experiment also gets
 its full report from `core_report.py`; this is the index.
 
-157 records.
+158 records.
 
-Status: 12 planned, 3 running, 10 stopped, 115 done, 17 superseded.
+Status: 12 planned, 3 running, 10 stopped, 116 done, 17 superseded.
 
 ## Inversion
 
@@ -147,6 +147,7 @@ Status: 12 planned, 3 running, 10 stopped, 115 done, 17 superseded.
 | 32 km inversion, 10 TAO iterations under scpc_gamg with sub-element friction and five-solve evaluations, one paused solver for the run, timed on a quiet machine | done | antarctica_320000_32000_buffered0 (Quartz's .msh, sha256 fd66fc42; 6,282 vertices, 9,055 cells), DG0 geometry, vertex raster sampling | IU workstation (Mac, 16 cores, 128 GB), data under /Volumes/LaCie/Data/antarctica_general/ismip7_obs; alone on the machine (a 10 s CPU log saw one other process, once, at 39 % of a core) | 2026-10-02 | 2026-10-02 | the same 10 iterations and 12 evaluations as test-32km-inversion-reuse-tao-before-rerun, every objective within 1.6e-10 of it; 10.1 Newton iterations and 208 V-cycles a condensed solve, the n = 1 restart solve 474; 59 of 60 taped solves reused the solver, across TAO evaluations as within them; published residual 280 after a 0-iteration final solve; no forward failed |
 | 32 km inversion, 20 TAO iterations under scpc_gamg with sub-element friction and five-solve evaluations on PR 155's head: a new paused solver every taped solve | done | antarctica_320000_32000_buffered0 (Quartz's .msh, sha256 fd66fc42; 6,282 vertices, 9,055 cells), DG0 geometry, vertex raster sampling | IU workstation (Mac, 16 cores, 128 GB), data under /Volumes/LaCie/Data/antarctica_general/ismip7_obs; ran about 09:45 to 10:20, beside another session's 8-rank 4 km inversions, 4-rank 32 km runs and its serial test suite (load up to 69), so its seconds are contended (test-32km-inversion-reuse-tao-before-rerun times the same comparison on a quiet machine); work counts, objectives and RSS do not depend on it | 2026-10-02 | 2026-10-02 | objective 7.849914e4 to 2.120453e4, as test-32km-inversion-subelement-scpc-gamg; 10.0 Newton iterations and 195 V-cycles a condensed solve; published residual 57.9 after a 0-iteration final solve; no forward failed |
 | 32 km inversion, 10 TAO iterations under scpc_gamg with sub-element friction and five-solve evaluations on PR 155's head, timed on a quiet machine: a new paused solver every taped solve | done | antarctica_320000_32000_buffered0 (Quartz's .msh, sha256 fd66fc42; 6,282 vertices, 9,055 cells), DG0 geometry, vertex raster sampling | IU workstation (Mac, 16 cores, 128 GB), data under /Volumes/LaCie/Data/antarctica_general/ismip7_obs; alone on the machine (a 10 s CPU log saw one other process, once, at 39 % of a core) | 2026-10-02 | 2026-10-02 | objective 7.849914e4 to 2.507499e4, the first 10 iterations of test-32km-inversion-reuse-tao-before; 10.1 Newton iterations and 203 V-cycles a condensed solve, the n = 1 restart solve 478; published residual 273 after a 0-iteration final solve; no forward failed |
+| 32 km inversion, 12 TAO lmvm iterations under full_mumps on the solver-reuse change, against the issue #157 TAO arm | done | antarctica_320000_32000_buffered0 (Quartz's .msh, sha256 fd66fc42; 6,282 vertices, 9,055 cells), DG0 geometry, vertex raster sampling | IU workstation (Mac, 16 cores, 128 GB), data under /Volumes/LaCie/Data/antarctica_general/ismip7_obs | 2026-10-02 | 2026-10-02 | 12 TAO iterations, objective 7.849914e4 to 2.433756e4; every iteration's objective within 1.7e-15 and gradient norm within 1.8e-14 of test-32km-inversion-opt-tao (4cf7f0e) at the same iteration, with the same six rescued trial points |
 | 32 km inversion under scpc_gamg on 4 ranks, and with the startup ramp under scpc_gamg | done | antarctica_320000_32000_buffered0 (Quartz's .msh, sha256 fd66fc42; 6,282 vertices, 9,055 cells), DG0 geometry, vertex raster sampling | IU workstation (Mac, 16 cores, 128 GB), data under /Volumes/LaCie/Data/antarctica_general/ismip7_obs | 2026-10-01 | 2026-10-01 | 4 ranks against 8: objective and \|grad\| within 1.4e-7 over four evaluations. The ramp under scpc_gamg (the structural-zero blocks in F) stalled on the 8-step rung at n = 2.43 (DIVERGED_MAX_IT, the transient's NLEQ-ERR with GAMG) and climbed on the 16-step rung; its evaluations then matched the 8-rank scpc_gamg run to 1e-12 |
 | 32 km inversion, four evaluations under each ISMIP7_INVERSION_LINEAR_SOLVER and three scpc_gamg line-search and tolerance settings | done | antarctica_320000_32000_buffered0 (Quartz's .msh, sha256 fd66fc42; 6,282 vertices, 9,055 cells), DG0 geometry, vertex raster sampling | IU workstation (Mac, 16 cores, 128 GB), data under /Volumes/LaCie/Data/antarctica_general/ismip7_obs | 2026-10-01 | 2026-10-01 | Against full_mumps over the same four evaluations: scpc_mumps 1.1e-13 in the objective and 3e-13 in \|grad\|. scpc_gamg with the transient's options (NLEQ-ERR, Krylov rtol 1e-6) matched to 1.8e-8 for three evaluations and then failed every full L-BFGS step (DIVERGED_MAX_IT, \|\|F\|\| stalled at 7.9e10 from 9.1e10), so the descent fell back to short steps. At that trial point the exact solvers took 6 Newton iterations; scpc_gamg took 6 with NLEQ-ERR at rtol 1e-8 (950 V-cycles) or 1e-10 (1292), and 6 with bt at 1e-6 (214 V-cycles), all four evaluations matching full_mumps to 1.4e-7 or better |
 | 32 km inversion, 20 TAO iterations under full_mumps with sub-element friction, the exact front push and five-solve evaluations | done | antarctica_320000_32000_buffered0 (Quartz's .msh, sha256 fd66fc42; 6,282 vertices, 9,055 cells), DG0 geometry, vertex raster sampling | IU workstation (Mac, 16 cores, 128 GB), data under /Volumes/LaCie/Data/antarctica_general/ismip7_obs | 2026-10-01 | 2026-10-01 | objective 7.849914e4 to 2.120453e4 over 20 iterations, no forward failed; published residual 64.7 after a 0-iteration final solve |
@@ -3217,6 +3218,25 @@ Core 11 at 32 km without the apparent-MB reference, a cold start on the OCX prot
 - **Results path:** /Volumes/LaCie/Data/antarctica_general/ismip7_runs/inversion_solver_reuse_32km/P_base2_gamg/ (map.h5 sha256 d167b942, log.txt, timing.json)
 - **Audit:** objective 7.849914e4 to 2.507499e4, the first 10 iterations of test-32km-inversion-reuse-tao-before; 10.1 Newton iterations and 203 V-cycles a condensed solve, the n = 1 restart solve 478; published residual 273 after a 0-iteration final solve; no forward failed
 - **Notes:** ISMIP7_SUBELEMENT_FRICTION=1 (exact front push on) ISMIP7_GRAD_PRECOND=mass_consistent ISMIP7_PRIOR_FORM=bilaplacian; the configuration of test-32km-inversion-subelement-scpc-gamg; run under a probe wrapper (scratch, not tracked) that times solver construction, SCPC setup and each taped solve and logs each rank's RSS after every taped solve; it changes nothing the driver computes
+
+### test-32km-inversion-reuse-tao-full-mumps-check
+
+32 km inversion, 12 TAO lmvm iterations under full_mumps on the solver-reuse change, against the issue #157 TAO arm (done), IU.
+
+- **Task type:** test
+- **Friction law:** budd
+- **Mesh:** antarctica_320000_32000_buffered0 (Quartz's .msh, sha256 fd66fc42; 6,282 vertices, 9,055 cells), DG0 geometry, vertex raster sampling
+- **Initial state / MAP:** cold start: u = 0.1 u_obs, theta = phi = 0, the n,m 1 to 3 ramp under full_mumps, then ISMIP7_EVAL_CONTINUATION=0 (one annotated solve at full n an evaluation)
+- **Forcing versions:** MEaSUREs v2 450 m (sha256 268be94e) and BedMachine v4.1 (sha256 6bd08dbb), byte-identical to Quartz's antarctica/data; ISMIP7_FLUIDITY_PRIOR=legacy; sub-element friction with the exact front push (ISMIP7_SUBELEMENT_FRICTION=1), bi-Laplacian prior (sigma 0.3, rho 7.5 km), full_mumps, no dH/dt term; log-speed weight 0; TAO lmvm with the mass-consistent metric (ISMIP7_GRAD_PRECOND=mass_consistent)
+- **Site / partition:** IU workstation (Mac, 16 cores, 128 GB), data under /Volumes/LaCie/Data/antarctica_general/ismip7_obs
+- **Ranks / memory:** 4 ranks, beside the unit suite; peak 3.1 GB a rank
+- **Code:** c7ea173 (PR 155 with the solver reuse); icepack_tools e7b923e
+- **Started:** 2026-10-02
+- **Finished:** 2026-10-02
+- **Cost per model year:** 393 s wall; 13.6 to 14.1 s an iteration of one evaluation, about 30 s at a rescued one
+- **Results path:** /Volumes/LaCie/Data/antarctica_general/ismip7_runs/inversion_solver_reuse_32km/tao_full_mumps_check/map.h5 (sha256 bed176c6), log.txt, timing.json
+- **Audit:** 12 TAO iterations, objective 7.849914e4 to 2.433756e4; every iteration's objective within 1.7e-15 and gradient norm within 1.8e-14 of test-32km-inversion-opt-tao (4cf7f0e) at the same iteration, with the same six rescued trial points
+- **Notes:** checks the TAO path's assigned control copies under full_mumps, the production default, which the slab tests cover under scpc_gamg only; the seconds are no before/after measurement, since the reference arm ran beside two others
 
 ### test-32km-inversion-scpc-gamg-checks
 

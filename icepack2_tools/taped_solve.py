@@ -10,17 +10,17 @@ the forward.
 How the forward gets to that state differs. With the direct forward disabled,
 ``full_mumps`` lets the recorded equation solve itself, as it always has.
 Under ``scpc_*`` the Newton solve needs a Jacobian frozen at the iterate SCPC
-assembled its condensed system at
-(``preconditioners.frozen_linearization``), and the frozen Jacobian is
-refreshed by a ``pre_jacobian_callback`` that tlm_adjoint's patched
-``NonlinearVariationalSolver.solve`` refuses while it annotates ("Callbacks
-not supported"). The Newton solve therefore runs with the manager paused, and
-the recorded equation then confirms the converged state: its absolute
-tolerance is set just above the residual the paused solve reached, so SNES
-accepts the state at iteration 0, with no linear solve, and the tape holds
-``F`` and the converged ``z`` exactly as a recorded solve would. The driver
-already writes ``z`` outside the tape before a recorded solve the same way
-(the startup ramp, and the re-ramp rescue at a failed trial point).
+assembled its condensed system at (``preconditioners.frozen_linearization``),
+and the frozen Jacobian is refreshed by a ``pre_jacobian_callback`` that
+tlm_adjoint's patched ``NonlinearVariationalSolver.solve`` refuses while it
+annotates ("Callbacks not supported"). The Newton solve therefore runs with
+the manager paused, and the recorded equation then confirms the converged
+state: its absolute tolerance is set just above the residual the paused solve
+reached, so SNES accepts the state at iteration 0, with no linear solve, and
+the tape holds ``F`` and the converged ``z`` exactly as a recorded solve
+would. The driver already writes ``z`` outside the tape before a recorded
+solve the same way (the startup ramp, and the re-ramp rescue at a failed
+trial point).
 
 The paused solver's Firedrake context can outlive the call. In the condensed
 modes that context includes the frozen linearization's state Function and,
@@ -123,9 +123,8 @@ class StateSolverCache:
     matrix on every new Jacobian and starts its Krylov solves from zero. What
     the condensed preconditioner built at its first setup stays, as it does
     across the Newton iterations of one solve and across every step of a
-    transient run,
-    which keeps one solver throughout: GAMG redoes its Galerkin products and
-    Chebyshev eigenvalue estimates on its first interpolation
+    transient run, which keeps one solver throughout: GAMG redoes its Galerkin
+    products and Chebyshev eigenvalue estimates on its first interpolation
     (``pc_gamg_reuse_interpolation`` and ``pc_gamg_recompute_esteig``, both
     true by default), and an LU refactors on its first symbolic analysis
     (README, "Inversion solver", for what that changed). A solve that raises

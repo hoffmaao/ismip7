@@ -446,10 +446,9 @@ def test_a_lost_direct_trial_leaves_the_state_and_drops_the_solver(slab, mode):
 
 
 def test_a_destroyed_scpc_frees_its_condensed_solver(slab):
-    r"""The issue #159 regression: the condensed KSP and operator go with the
-    PC, and the rest
-    of the context waits for the next SCPC setup, where no PETSc garbage
-    cleanup is running. On one rank nothing is stashed, so this checks the
+    r"""The issue #159 regression: the condensed KSP and operator go with
+    the PC, and the rest of the context waits for the next SCPC setup, where
+    no PETSc garbage cleanup is running. On one rank nothing is stashed, so this checks the
     lifetimes; the leak itself needs more than one rank (run records
     test-32km-inversion-scpc-destroy-*)."""
     if slab["law"] != "cellwise":

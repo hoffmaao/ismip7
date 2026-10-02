@@ -559,20 +559,50 @@ on a form object. The blocks made a `full_mumps` evaluation 32 % slower on
 PR 155's head (7.36 against 5.56 s).
 
 RSS grew with every solver built, 6.2 MiB a rank an evaluation before and 3.8
-after with one solve an evaluation, 22.6 and 4.6 with five. What remains is no
-uncollected garbage (a full `gc.collect()` and PETSc garbage cleanup after
-every taped solve left it at 3.5), and it scales with the local problem: 7.4
-MiB a rank an evaluation on 4 ranks, the same total across ranks. Python sees
-none of it (rank 0's live PyOP2 Dats held 1.8 MiB after the 10th taped solve
-and after the 30th, and no Function or PETSc object accumulated), so it is in
-PETSc, Slate or the allocator; the `full_mumps` runs grew at most 50 MiB a
-rank over 31 evaluations. Scaled linearly to 2 km on 32 ranks (37 times the
-local size), the growth before this change would be about 230 MiB a rank an
-evaluation with one solve and 830 with five, comparable to `scpc_gamg`'s
-excess AveRSS on Quartz above (3.7 against 2.8 and 6.9 against 3.6 GiB);
-Quartz has not measured it (issue #159). `runlog/test-32km-inversion-reuse-*` and
-`runlog/test-32km-inversion-ramp-blocks-*` hold the runs, including a first
-round timed beside another session's jobs.
+after with one solve an evaluation, 22.6 and 4.6 with five. The rest was the
+adjoint's condensed solver, which PETSc lost (issue #159). tlm_adjoint drops
+its matrix-free adjoint solver without destroying it; on more than one rank
+petsc4py stashes it for `PetscGarbageCleanup`, and the cleanup that destroys
+it (tlm_adjoint's, in `compute_gradient`) releases the `ISMIP7SCPC` context,
+whose own objects are stashed while the cleanup runs. PETSc 3.25 puts the
+communicator's old garbage map back after its destroy loop, dropping the map
+those stashes went into, so the condensed KSP with its GAMG hierarchy and
+operator, and the weight vector, stayed at reference count 1 for good. Python
+saw none of it, a later cleanup could not reach it, it scaled with the local
+problem, and one rank never leaks (petsc4py destroys at once there).
+`ISMIP7SCPC.destroy` now destroys the condensed KSP and operator itself and
+keeps the rest of the context until the next SCPC setup, outside any cleanup.
+Every evaluation in `ISMIP7_INVERSION_TIMING_JSON` carries `rss_mib`: the mean
+and the maximum RSS over ranks after its adjoint (once an accepted iteration
+on the TAO path), and the largest peak any rank has reached. The same 32 km
+configurations rerun from 508a9be (before) and fb7c32e (after), 30 L-BFGS-B or
+10 TAO iterations; MiB a rank (mean over ranks) an evaluation from that field,
+over the 2nd to the 20th evaluation and over the 21st to the 32nd:
+
+| configuration | ranks | before | after |
+|---|---|---|---|
+| `scpc_gamg`, L-BFGS-B, one solve an evaluation | 8 | 2.05 / 1.84 | 0.24 / -0.33 |
+| `scpc_gamg`, L-BFGS-B, one solve an evaluation | 4 | 2.32 / 2.02 | 0.20 / 0.14 |
+| `full_mumps`, L-BFGS-B | 8 | | 0.42 / 0.10 |
+| `scpc_gamg`, TAO, sub-element friction, five solves an evaluation (an iteration) | 8 | 2.31 | 0.45 |
+
+Each pair took the same iterations, objectives within 7.1e-11, at the same
+cost (7.11 against 6.90 s an evaluation, 63.2 against 63.1 s a TAO
+iteration). The L-BFGS-B rows leave out a step of 24 to 26 MiB at the 21st
+evaluation, the checkpoint the driver writes at iteration 20, and every row the
+first evaluation or iteration (3 to 11 MiB). On
+a 2,400-cell synthetic slab on 4 ranks PETSc's own allocations grew 1.7 MiB a
+rank an adjoint solve under `scpc_gamg` (0.31 under `scpc_mumps`, plus MUMPS's
+factors) and 0.006 with the fix, as `full_mumps`. The lost PETSc memory grew
+with the local problem, 1.5 MiB a rank an adjoint solve at 519 cells a rank and
+4.6 at 2,080 (2 ranks); RSS understates it (1.7 and 4.3 MiB there, and the
+32 km before arm grew alike on 8 and 4 ranks). At the slab's rate a 2 km
+evaluation on 32 ranks (57,000 cells a rank) would lose about 115 MiB a rank
+and a 1 km one about 230: 34 and 69 GiB a rank over 300 evaluations. Quartz did
+not measure it.
+`runlog/test-32km-inversion-reuse-*`, `runlog/test-32km-inversion-ramp-blocks-*`
+and `runlog/test-32km-inversion-scpc-destroy-*` hold the runs, including a
+first round timed beside another session's jobs.
 
 ### Inversion time outside the forward and the adjoint
 

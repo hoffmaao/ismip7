@@ -194,6 +194,39 @@ starts at 7.8499e4 (32 km) and 5.6211e4 (2 km).
   L-BFGS-B arm ends lower over a whole chain is open.
 * The TAO arm's iterations 0 to 5 reproduce the issue #156 probe of the same
   configuration (job 10824069) to 7e-15 relative.
+
+The 32 km arms again on PR 155 at `432c831`, under SEP1 (version 2) and the
+direct forward, PR 158's defaults, with the log control and with the sqrt and
+exp controls at their `auto` prior scales; 40 iterations from a cold start on
+4 ranks of the IU workstation, the three arms of a control run together
+(records `test-32km-inversion-sep1-opt-*`). Time includes the checkpoint the
+scipy path now writes before each evaluation (`ISMIP7_CHECKPOINT_EVERY_IT=1`,
+1.5 to 1.7 s here); the last column is the lowest objective an arm had
+reached by the `none` arm's total time.
+
+| control | arm | evaluations | time | best objective | best at the `none` arm's time |
+|---|---|---|---|---|---|
+| log, from 4.9239e4 | `none` | 44 | 311 s | 1.3944e4 | 1.3944e4 |
+| log | `mass` | 48 | 336 s | 1.3788e4 | 1.3796e4 |
+| log | `mass_consistent` | 41 | 294 s | 1.4022e4 | 1.4022e4 |
+| sqrt, from 1.4221e5 | `none` | 43 | 312 s | 4.9213e4 | 4.9213e4 |
+| sqrt | `mass` | 57 | 411 s | 4.8482e4 | 4.9457e4 |
+| sqrt | `mass_consistent` | 41 | 313 s | 5.5072e4 | 5.5287e4 |
+| exp, from 3.8615e4 | `none` | 43 | 297 s | 7.0787e3 | 7.0787e3 |
+| exp | `mass` | 51 | 354 s | 6.4786e3 | 6.8559e3 |
+| exp | `mass_consistent` | 41 | 307 s | 1.3284e4 | 1.3735e4 |
+
+* No forward failed and no arm took a rescue; TAO's seven rescued failures at
+  32 km were under SEP2 on `4cf7f0e`.
+* The order holds under every control, `mass` lowest and TAO highest. TAO
+  ends 0.6 % above `none` under the log control (7.0 % under SEP2), 11.9 %
+  under the sqrt control and 88 % under the exp control, the control new
+  chains take.
+* A TAO iteration and an L-BFGS-B evaluation with its checkpoint cost the
+  same here: 6.75 to 7.20 s against 6.60 to 7.01 s (medians).
+* The exp control's cold start climbed the startup ramp on its first rung;
+  under SEP2 it diverged near n = 2.1 on every rung (README, "Inversion
+  solver").
 * Whether the chains change optimizer is the group's call (issue #157).
 
 ## 4. Decisions taken

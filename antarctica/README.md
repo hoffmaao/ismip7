@@ -375,7 +375,9 @@ the one-solve rows are now the ones that matter, and they predate three
 changes that move each side: `full_mumps` lost the SCPC zero blocks (its
 seconds are upper bounds), `scpc_gamg` keeps its solver across evaluations,
 and both lost the prior's per-call LU (the tables closing this section).
-The default is open again. Seconds a TAO iteration on 32 ranks of Quartz,
+The default is open again: on the workstation under SEP1 and the direct
+forward, `scpc_gamg` is ahead from 4 km on 8 ranks (the last table of this
+section). Seconds a TAO iteration on 32 ranks of Quartz,
 SEP2 sub-element friction, the exact front push, the mass-consistent metric:
 
 | evaluations | mesh | `full_mumps` | `scpc_gamg` |
@@ -488,7 +490,9 @@ there took 10 Newton iterations and 192 V-cycles on average, against 5 and 51
 under the cell-wise law. A cold start with the exp control and sub-element
 friction did not climb the startup ramp at all (it diverged near n = 2.1 on
 every rung, under `full_mumps` as under `scpc_gamg`), so that pair ran the log
-control; the slabs cover the exp control's friction.
+control; the slabs cover the exp control's friction. Under SEP1 on `432c831`
+the same cold start climbs the ramp on its first rung under `full_mumps`
+(`runlog/test-32km-inversion-sep1-opt-exp-*`).
 
 On Quartz (issue #156, jobs 10818443 to 10818449), from Rice's 2 km snapshot
 0948, which carries controls and no state: continued on its own mesh
@@ -622,6 +626,28 @@ not measure it.
 `runlog/test-32km-inversion-reuse-*`, `runlog/test-32km-inversion-ramp-blocks-*`
 and `runlog/test-32km-inversion-scpc-destroy-*` hold the runs, including a
 first round timed beside another session's jobs.
+
+Under SEP1 and the direct forward (PR 158's defaults; PR 155 at `432c831`), on
+the workstation with other sessions sharing it: Budd, the `legacy` fluidity
+prior, the log control, a cold start ramped under `full_mumps`, TAO with the
+mass-consistent metric, 10 iterations. Seconds a TAO iteration, the median
+after the first; the adjoint column is the iteration's time outside every
+span, the adjoint and TAO's own work:
+
+| mesh | ranks | `full_mumps` | `scpc_gamg` | adjoint, `full_mumps` / `scpc_gamg` | V-cycles a condensed solve |
+|---|---|---|---|---|---|
+| 32 km | 4 | 6.27 | 8.64 | 0.36 / 0.59 | 79.1 |
+| 8 km | 8 | 8.22 | 9.30 | 1.35 / 0.52 | 34.5 |
+| 4 km | 8 | 13.47 | 10.17 | 4.80 / 0.71 | 40.2 |
+
+Each pair took the same Newton iterations in every direct solve and the same
+objective (every iteration within 4.8e-10, gradient norms within 3.4e-9), and
+no trial was lost. `scpc_gamg` comes out ahead first at 4 km, through the
+adjoint: one LU factorisation of the whole mixed Jacobian under `full_mumps`,
+one condensed GAMG solve under `scpc_gamg`. On all three meshes and under
+both solvers 4.1 to 4.5 s of each forward lies outside its Newton solve. Peak
+memory stayed between 2.4 and 2.8 GB a rank. Quartz has not measured 2 km and
+1 km under these defaults (`runlog/test-*km-inversion-sep1-*`).
 
 ### Inversion time outside the forward and the adjoint
 

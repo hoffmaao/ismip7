@@ -2389,6 +2389,9 @@ def main():
                 "skip_continuation": bool(skip_continuation),
                 "eval_continuation": bool(not eval_full_n),
                 "inversion_linear_solver": state_solver_mode,
+                "inversion_snes_linesearch": sparams.get("snes_linesearch_type"),
+                # None under full_mumps, whose LU has no Krylov tolerance
+                "inversion_ksp_rtol": sparams.get("ksp_rtol"),
                 "diagnostic_linear_solver": lane_solver_mode,
             },
             "evaluations": list(timing_history),

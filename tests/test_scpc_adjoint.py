@@ -202,7 +202,9 @@ def _rel(a, b):
         return d.norm() / vb.norm()
 
 
-@pytest.mark.parametrize("mode, tol", [("scpc_mumps", 1e-10), ("scpc_gamg", 1e-6)])
+# scpc_gamg: 4e-11 (cell-wise) and 2e-9 (sub-element) at the inversion's Krylov
+# rtol of 1e-8; at the transient's 1e-6 it was 1.4e-8 and 1.6e-7, which fails.
+@pytest.mark.parametrize("mode, tol", [("scpc_mumps", 1e-10), ("scpc_gamg", 1e-8)])
 def test_scpc_gradient_is_the_assembled_gradient(gradients, mode, tol):
     ref, got = gradients["full_mumps"], gradients[mode]
     assert got["J"] == pytest.approx(ref["J"], rel=1e-10)

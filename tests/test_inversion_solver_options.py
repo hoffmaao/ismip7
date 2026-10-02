@@ -19,6 +19,7 @@ def _clean_env(monkeypatch):
         "ISMIP7_INVERSION_KSP_RTOL",
         "ISMIP7_KSP_RTOL",
         "ISMIP7_CONDENSED_KSP_ATOL_FACTOR",
+        "ISMIP7_CONDENSED_PETSC_OPTIONS",
     ):
         monkeypatch.delenv(name, raising=False)
 
@@ -74,6 +75,13 @@ def test_scpc_modes_are_the_forward_options_at_a_tighter_krylov_tolerance(mode):
         params.pop(key, None)
         forward.pop(key, None)
     assert params == forward
+
+
+def test_a_rungs_condensed_options_still_come_last(monkeypatch):
+    monkeypatch.setenv("ISMIP7_CONDENSED_PETSC_OPTIONS", "ksp_atol=1e-9 pc_gamg_threshold=0.02")
+    params = sc.inversion_state_parameters("scpc_gamg")
+    assert params["condensed_field_ksp_atol"] == "1e-9"
+    assert params["condensed_field_pc_gamg_threshold"] == "0.02"
 
 
 def test_the_inversion_knobs_override_and_leave_the_transient_alone(monkeypatch):

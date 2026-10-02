@@ -1390,9 +1390,18 @@ def setup_model(restart_from=None, *, allow_timing_cache_a_ref=False,
         F = derivative(L, z)
 
     if linear_solver.startswith("scpc_"):
-        # The (M, tau) structural-zero blocks SCPC needs (see the helper).
+        # The (M, tau) structural-zero blocks SCPC needs (see the helper), in
+        # this residual and in the builder the context hands a time-dependent
+        # assimilation with these same solver options.
         from icepack2_tools.preconditioners import with_scpc_blocks
         F = with_scpc_blocks(F, z)
+        if use_residual:
+            _build_F_unblocked = _build_F
+
+            def _build_F(theta_c=None, phi_c=None, h_c=None, s_c=None, z_c=None):
+                z_b = z_c if z_c is not None else z
+                return with_scpc_blocks(
+                    _build_F_unblocked(theta_c, phi_c, h_c, s_c, z_c), z_b)
 
     # A matrix-free Jacobian follows the state Function, which the line
     # search's residual evaluations overwrite with its trial point; hold it at

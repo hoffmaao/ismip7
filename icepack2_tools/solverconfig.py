@@ -422,6 +422,10 @@ def inversion_state_parameters(mode=None):
                 "ISMIP7_CONDENSED_KSP_ATOL_FACTOR",
                 CONDENSED_KSP_ATOL_FACTOR_DEFAULT,
             ))
+        if mode == "scpc_gamg":
+            # A rung's extra condensed options still come last, as in the
+            # forward (_extra_condensed_options).
+            params.update(_extra_condensed_options("condensed_field_"))
         params["snes_linesearch_type"] = _env(
             "ISMIP7_INVERSION_SNES_LINESEARCH", params["snes_linesearch_type"])
         return params

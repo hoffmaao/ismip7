@@ -80,7 +80,9 @@ LOG="logs/ismip7_inv_${SLURM_JOB_ID:-manual}.out"
 
 echo "    map out  $ISMIP7_MAP_OUT"
 echo "    sampling $ISMIP7_RASTER_SAMPLE  net sigma $ISMIP7_DHDT_NET_SIGMA  log-vel $ISMIP7_LOG_VEL_WEIGHT  maxiter $ISMIP7_MAXITER"
-echo "    solver   ${ISMIP7_INVERSION_LINEAR_SOLVER:-full_mumps}  ramp ${ISMIP7_DIAGNOSTIC_LINEAR_SOLVER:-full_mumps}"
+# The driver prints the modes it resolves ("Inversion linear solver:"); an
+# unset knob here means the driver's default, which this file does not repeat.
+echo "    solver   ${ISMIP7_INVERSION_LINEAR_SOLVER:-default}  ramp ${ISMIP7_DIAGNOSTIC_LINEAR_SOLVER:-default}"
 
 if [ -f "$DONE" ]; then
     echo "chain: $DONE exists, inversion already finished; nothing to do"

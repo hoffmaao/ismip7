@@ -126,6 +126,45 @@ scripts set `PYOP2_CACHE_DIR` and `FIREDRAKE_TSFC_KERNEL_CACHE_DIR` to
 `/projects/ah301/sw`; with the cache warm the first iteration arrives in 20
 minutes.
 
+**L-BFGS-B against TAO at one objective (issue #157).** Three arms
+minimised one objective (bi-Laplacian prior, sub-element friction with the
+exact front push, `full_mumps`, `ISMIP7_EVAL_CONTINUATION=0`) on PR 155's
+`4cf7f0e`: scipy L-BFGS-B under `ISMIP7_GRAD_PRECOND=none` and `mass`, and TAO
+lmvm under `mass_consistent`, the path Rice's chains take. At 32 km they ran
+40 iterations from a cold start on 4 ranks of the IU workstation; at 2 km, 15
+iterations from Rice's snapshot 0948 on 32 Quartz ranks (records
+`test-32km-inversion-opt-*`, `test-2km-inversion-opt-*`). The objective
+starts at 7.8499e4 (32 km) and 5.6211e4 (2 km).
+
+| mesh | arm | evaluations | evaluation time | best objective | best at the `none` arm's time | forward failures |
+|---|---|---|---|---|---|---|
+| 32 km | `none` | 43 | 375 s | 1.6342e4 | 1.6342e4 | 0 |
+| 32 km | `mass` | 52 | 450 s | 1.6148e4 | 1.6155e4 | 0 |
+| 32 km | `mass_consistent` | 42 | 730 s | 1.7489e4 | 2.2946e4 | 7 |
+| 2 km | `none` | 18 | 3356 s | 5.0444e4 | 5.0444e4 | 0 |
+| 2 km | `mass` | 21 | 3820 s | 5.1462e4 | 5.2370e4 | 0 |
+| 2 km | `mass_consistent` | 21 | 5801 s | 5.3800e4 | 5.5115e4 | 1 |
+
+* TAO ends highest at both resolutions, after equal iterations, after equal
+  evaluations and at equal time. On `4cf7f0e` its median iteration cost 1.7
+  times the L-BFGS-B arms' median evaluation at 32 km (14.5 s against 8.4 s)
+  and 1.3 times at 2 km (245 s against 184 s). Most of that was a residual
+  check TAO recorded on its tape, which PR 155 runs untaped since `71a6809`:
+  there the same 32 km iterations take 7.9 s a TAO iteration against 7.2 s
+  an L-BFGS-B evaluation (`test-32km-inversion-merged-*-check`), so the time
+  columns above overstate TAO's cost and its deficit an evaluation stands.
+  Its forward failed at eight trial points over the two meshes, each
+  recovered by the re-ramp rescue; no L-BFGS-B arm had a forward failure.
+* `mass` starts slowly: each early decrease is about four times the last, the
+  line search growing a short first step, so the first eight evaluations at
+  32 km moved the objective by 4.9 percent and the first six at 2 km by 0.06
+  percent. It then descends fastest: over the last six evaluations at 2 km it
+  gained 1,877 against 887 for `none`, and at 32 km it finished lowest. Which
+  L-BFGS-B arm ends lower over a whole chain is open.
+* The TAO arm's iterations 0 to 5 reproduce the issue #156 probe of the same
+  configuration (job 10824069) to 7e-15 relative.
+* Whether the chains change optimizer is the group's call (issue #157).
+
 ## 4. Decisions taken
 
 * 26 September: no dH/dt term in the inversion (the inversion carries no

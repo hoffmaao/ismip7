@@ -1,0 +1,23 @@
+{
+  "id": "test-2km-inversion-opt-mass-consistent",
+  "task": "test",
+  "institution": "IU",
+  "title": "2 km inversion, 15 iterations of TAO lmvm (mass-consistent metric) from Rice's snapshot 0948, for the optimizer comparison",
+  "status": "done",
+  "friction": "budd",
+  "mesh": "Rice's antarctica_5000_2000_buffered0, read from the snapshot (ISMIP7_MESH=checkpoint; 925,183 vertices, 1,835,718 cells), DG0 geometry, vertex raster sampling",
+  "initial_state": "warm start from inversion_icepack2_budd_n3_dg0_logvelnet_2000_int5000_bilap_snap20260924_0948.h5 (Rice, log control, controls only) on its own mesh, ISMIP7_WARM_START_STRICT=0; the n,m 1 to 3 ramp under scpc_mumps, then ISMIP7_EVAL_CONTINUATION=0",
+  "forcing": "MEaSUREs v2 and BedMachine v4.1 from Quartz's antarctica/data; the snapshot's fluidity prior; sub-element friction with the exact front push (ISMIP7_SUBELEMENT_FRICTION=1), bi-Laplacian prior (sigma 0.3, rho 7.5 km), full_mumps, no dH/dt term; log-speed weight 85380.4 (auto); TAO lmvm with the mass-consistent metric (ISMIP7_GRAD_PRECOND=mass_consistent)",
+  "site": "IU Quartz, general partition",
+  "resources": "32 ranks, 400G; MaxRSS 3.5 GiB a rank",
+  "jobs": [
+    "10929497"
+  ],
+  "code": "4cf7f0e (PR 155); icepack_tools e7b923e",
+  "started": "2026-10-02",
+  "finished": "2026-10-02",
+  "cost": "109 min wall; 5801 s in 21 evaluations over 15 iterations, 236 to 250 s an iteration of one evaluation, 896 s at the rescued one",
+  "results": "Quartz /N/scratch/dlilien/ismip7_issue157_runs/maps/mass_consistent.h5 (sha256 d141375c; scratch, purged after 30 days); timing record, log and submit script copied to /Volumes/LaCie/Data/antarctica_general/ismip7_runs/optimizer_issue157/2km",
+  "audit": "15 TAO iterations, objective 5.621096e4 to 5.380034e4; one trial point failed in iteration 3 and the re-ramp rescue recovered it; iterations 0 to 5 reproduce job 10824069 (test-2km-inversion-prod-full-mumps-ec0) to 7e-15 relative; published residual 1.09e-4",
+  "notes": "issue #157 optimizer comparison, arm mass_consistent; no MAP is kept (strict handoff off, the legacy prior name overridden by the warm start's prior)"
+}

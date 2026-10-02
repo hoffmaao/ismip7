@@ -99,7 +99,8 @@ from icepack2_tools.transfer import (
 )
 from icepack2_tools.grounding import height_above_flotation
 from icepack2_tools.mpi_stats import (global_mean, global_range,
-                                      global_max, global_size, global_count)
+                                      global_max, global_size, global_count,
+                                      global_rss_mib)
 from icepack2_tools.naming import map_basename
 from icepack2_tools.runconfig import (
     deltat_per_basin_npz, k_per_basin_npz,
@@ -2721,6 +2722,9 @@ def main():
                 "before_spans": prev_gap,
                 "terms": terms,
                 "state_solves": [w for w in state_work if w],
+                # after the adjoint: its growth across evaluations is how a
+                # solver leak shows (issue 159)
+                "rss_mib": global_rss_mib(COMM_WORLD),
             })
             with gap_spans("timing_json"):
                 _write_timing_json(phase="running", message="in progress")
@@ -3092,6 +3096,7 @@ def main():
                     "iteration_spans": {**iter_spans, "unspanned": _unspanned},
                     "terms": {"vel": float(last_good_vel_chi2[0])},
                     "state_solves": [w for w in state_work if w],
+                    "rss_mib": global_rss_mib(COMM_WORLD),
                 })
                 with spans("timing_json"):
                     _write_timing_json(phase="running", message="in progress")

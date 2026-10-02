@@ -80,6 +80,11 @@ def rigid_body_modes(V):
     return basis
 
 
+# The Python state of destroyed ISMIP7SCPC contexts, released when the next
+# one is set up (ISMIP7SCPC.destroy).
+_RETIRED_STATE = []
+
+
 class ISMIP7SCPC(SCPC):
     r"""SCPC for ``(u, M, tau)`` with the retained field ordered first.
 
@@ -97,6 +102,9 @@ class ISMIP7SCPC(SCPC):
     """
 
     def initialize(self, pc):
+        # Not inside a garbage cleanup: the place to drop what destroyed
+        # contexts left (destroy, below).
+        _RETIRED_STATE.clear()
         super().initialize(pc)
         # Work done on the condensed system since this PC was built: one
         # solve per outer Krylov iteration, and the iterations of those
@@ -126,6 +134,30 @@ class ISMIP7SCPC(SCPC):
         super().sc_solve(pc)
         self.condensed_solves += 1
         self.condensed_iterations += self.condensed_ksp.getIterationNumber()
+
+    def destroy(self, pc):
+        r"""Destroy the condensed solver and operator now, and keep the rest
+        of this context's state until the next ``initialize``.
+
+        Upstream SCPC leaves all of it to the Python garbage collector. On
+        more than one rank petsc4py stashes a dropped object for
+        ``PetscGarbageCleanup``, and a solver dropped without ``destroy()``
+        (tlm_adjoint's matrix-free adjoint solve, every evaluation) reaches
+        this method from inside that cleanup. PETSc 3.25 detaches the garbage
+        map for the cleanup's destroy loop and puts the old map back after
+        it, so what this context's references stash meanwhile is never
+        destroyed: the condensed KSP with its GAMG hierarchy and operator,
+        and the weight vector (issue 159). Destroying the KSP and operator
+        here is collective and immediate; the rest is released at the next
+        ``initialize``, where no cleanup is running."""
+        super().destroy(pc)
+        if hasattr(self, "condensed_ksp"):
+            self.condensed_ksp.destroy()
+        for name in ("S", "S_pc"):
+            if hasattr(self, name):
+                getattr(self, name).petscmat.destroy()
+        _RETIRED_STATE.append(dict(vars(self)))
+        vars(self).clear()
 
     def condensed_system(self, A, rhs, elim_fields, prefix, pc):
         elim_fields = sorted(map(int, elim_fields))

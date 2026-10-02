@@ -483,8 +483,9 @@ Every arm on 32 ranks ended on the objective `full_mumps` reached, to seven
 digits (4.935180e4 at 2 km, 4.179544e4 at 1 km), and no forward failed. Over
 every evaluation, `scpc_gamg` stayed within 3.7e-6 of `full_mumps` at 2 km
 (6.5e-8 under NLEQ-ERR at 1e-8) and within 4.3e-9 at 1 km. The rest of an evaluation, 13 s at 2 km and 27 s at 1 km, is outside
-the forward and the adjoint (the prior terms and their gradients among it),
-the same under both solvers, and is most of a 64-rank evaluation. The rank
+the forward and the adjoint, the same under both solvers, and is most of a
+64-rank evaluation; 98 % of it at 1 km was the prior's mass solve, which
+`4e45164` removes (next section). The rank
 count moves the first evaluation's objective (1.3e-6 at 2 km from 16 to 32
 ranks, 2e-5 at 1 km from 32 to 64): a controls-only start converges the ramp
 on the relative SNES test, so the state it leaves follows the partition's
@@ -554,10 +555,23 @@ vertices. Energies agree with the old solve to 3e-16 and taped gradients to
 2e-16. CG with Jacobi (22 to 26 iterations at every size) costs about what
 the back-substitution does. The replicated gathers of an L-BFGS-B evaluation
 (`func_to_global` four times, `global_to_func` twice) took 0.13 s on 1 rank
-and 0.016 s on 8. At the old solve's 6.9 to 8.2 µs a vertex, a 1 km evaluation
-(1.87 million vertices) spends 13 to 15 s in it on this workstation, about
-half the 27 s Quartz recorded outside the solves; Quartz has not been
-measured with the spans.
+and 0.016 s on 8.
+
+On Quartz the old solve is the 27 s. Jobs 10937657 (`2626c71`) and 10937658
+(`4e45164`) reran job 10818449's 1 km arm (`scpc_gamg`, 64 ranks, 3
+iterations) back to back on one node; seconds an evaluation, medians over
+evaluations 2 to 4:
+
+| code | evaluation | forward | adjoint | outside both | of it `prior_solve` | next largest spans |
+|---|---|---|---|---|---|---|
+| `2626c71` | 54.0 | 22.0 | 5.3 | 26.8 | 26.2 | `gather_gradient` 0.33, `set_controls` 0.10, `residual_norm` 0.07 |
+| `4e45164` | 27.9 | 22.0 | 5.4 | 0.73 | 0.17 | the same |
+
+That is 14 µs a vertex on Quartz against 6.9 to 8.2 on the workstation. The
+factored solver's first call, which factors, took 14.8 s once per run. The
+objective agreed to 7e-16 and the gradient norm to 2e-15 at every
+evaluation. Between evaluations L-BFGS-B's own step, replicated on every rank
+over the 3.7 million controls, took 1.0 to 1.2 s (`gap` less its spans).
 
 In situ, base (`2626c71`, spans only) against `4e45164`, each pair back to
 back: Budd, the `legacy` fluidity prior, the bi-Laplacian prior, a cold

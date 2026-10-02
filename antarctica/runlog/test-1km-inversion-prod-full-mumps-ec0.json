@@ -7,7 +7,7 @@
   "friction": "budd",
   "mesh": "antarctica_10000_1000_buffered20000 (Rice's .msh on Quartz; 1,869,252 vertices, 3,716,587 cells), DG0 geometry, vertex raster sampling",
   "initial_state": "warm start from inversion_icepack2_budd_n3_dg0_logvelnet_2000_int5000_bilap_snap20260924_0948.h5 (Rice, log control, controls only), controls and prior transferred by point location, ISMIP7_WARM_START_STRICT=0; the n,m 1 to 3 ramp under scpc_mumps, then ISMIP7_EVAL_CONTINUATION=0",
-  "forcing": "MEaSUREs v2 and BedMachine v4.1 from Quartz's antarctica/data; the snapshot's fluidity prior; sub-element friction with the exact front push (ISMIP7_SUBELEMENT_FRICTION=1), TAO lmvm with the mass-consistent metric, bi-Laplacian prior; no dH/dt term",
+  "forcing": "MEaSUREs v2 and BedMachine v4.1 from Quartz's antarctica/data; the snapshot's fluidity prior; SEP2 sub-element friction with the exact front push (ISMIP7_SUBELEMENT_FRICTION=1), TAO lmvm with the mass-consistent metric, bi-Laplacian prior; no dH/dt term",
   "site": "IU Quartz, general partition",
   "resources": "32 ranks, 500G; AveRSS 4.6 GiB, MaxRSS 7.2 GiB a rank",
   "jobs": [

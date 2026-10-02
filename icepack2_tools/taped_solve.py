@@ -26,10 +26,23 @@ Firedrake's solver context and, from its first linear solve, the SCPC context
 GAMG builds its hierarchy under) can outlive the call: ``StateSolverCache``
 keeps it for the next call with the same form. The recorded confirmation and
 the adjoint are tlm_adjoint's own solves and build theirs each time.
+
+The direct forward (``ISMIP7_DIRECT_FORWARD``, on by default) takes the same
+route under every mode, ``full_mumps`` included: one paused Newton solve at
+the full exponents from the state ``z`` holds, under
+``solverconfig.direct_forward_parameters``, then the recorded confirmation.
+A direct solve that does not converge leaves ``z`` at its entry state and
+raises, so the driver's failed-trial rescue starts from the last converged
+state. ``full_mumps`` keeps its Newton Jacobian live; the condensed modes
+freeze it as above.
 """
+
+from time import perf_counter
 
 import ufl
 from firedrake import (
+    ConvergenceError,
+    Function,
     NonlinearVariationalProblem,
     NonlinearVariationalSolver,
     assemble,
@@ -72,9 +85,14 @@ def _condensed_work(snes):
     r"""Solves and iterations on the condensed velocity system, from the
     ISMIP7SCPC counters (SNES's own linear count misses the line search's).
     The counters run from the PC's first setup, so a reused solver's work
-    is the difference across the call."""
+    is the difference across the call. ``None`` under any other PC: petsc4py's
+    ``getPythonContext`` on a PC of another type (the direct forward's MUMPS
+    LU under ``full_mumps``) is a segmentation fault, not an exception."""
+    pc = snes.getKSP().getPC()
+    if pc.getType() != "python":
+        return None, None
     try:
-        ctx = snes.getKSP().getPC().getPythonContext()
+        ctx = pc.getPythonContext()
     except Exception:
         return None, None
     return (getattr(ctx, "condensed_solves", None),
@@ -118,20 +136,23 @@ class StateSolverCache:
     def clear(self):
         self._entry = None
 
-    def get(self, F, z, params, form_compiler_parameters, options_prefix):
+    def get(self, F, z, params, form_compiler_parameters, options_prefix,
+            *, frozen=True):
         r"""``(F_q, solver, reused)``: ``F`` with the quadrature degree in its
         integrals (``with_quadrature_degree``) and the Newton solver of
-        ``F_q(z) = 0`` with its Jacobian frozen at the iterate. Call it with
-        the manager paused."""
+        ``F_q(z) = 0``, with its Jacobian frozen at the iterate (``frozen``,
+        the condensed modes) or live (``full_mumps``). Call it with the
+        manager paused."""
         key = (dict(params), dict(form_compiler_parameters or {}),
-               options_prefix)
+               options_prefix, bool(frozen))
         entry = self._entry
         if (entry is not None and entry["F"] is F and entry["z"] is z
                 and entry["key"] == key):
             return entry["F_q"], entry["solver"], True
         self._entry = None
         F_q = with_quadrature_degree(F, form_compiler_parameters)
-        J, pre_jacobian = frozen_linearization(F_q, z)
+        J, pre_jacobian = (frozen_linearization(F_q, z) if frozen
+                           else (None, None))
         solver = NonlinearVariationalSolver(
             NonlinearVariationalProblem(
                 F_q, z, J=J, form_compiler_parameters=form_compiler_parameters
@@ -141,8 +162,17 @@ class StateSolverCache:
             pre_jacobian_callback=pre_jacobian,
         )
         self._entry = {"F": F, "z": z, "key": key, "F_q": F_q,
-                       "solver": solver, "residual": None}
+                       "solver": solver, "residual": None, "z_entry": None}
         return F_q, solver, False
+
+    def save_entry_state(self):
+        r"""Copy ``z`` into a buffer kept with the solver, for
+        :meth:`restore_entry_state` after a direct solve that fails."""
+        entry = self._entry
+        if entry["z_entry"] is None:
+            entry["z_entry"] = Function(entry["z"].function_space())
+        entry["z_entry"].assign(entry["z"])
+        return entry["z_entry"]
 
     def residual_norm(self, form_compiler_parameters):
         r"""``||F_q(z)||`` of the cached form, assembled into one buffer."""
@@ -157,7 +187,7 @@ class StateSolverCache:
 def taped_state_solve(F, z, mode, params, adjoint_params, *,
                       form_compiler_parameters=None,
                       options_prefix="ismip7_inversion_state_",
-                      cache=None):
+                      cache=None, direct=False):
     r"""Solve ``F(z) = 0`` and record it on the tlm_adjoint tape.
 
     ``params`` are the forward's options under ``mode``
@@ -170,11 +200,17 @@ def taped_state_solve(F, z, mode, params, adjoint_params, *,
     converge raises ``firedrake.ConvergenceError``, as the recorded solve
     does.
 
-    Returns a dict of the untaped solve's work under ``scpc_*``, with
-    ``reused`` saying whether its solver came from ``cache`` (empty under
-    ``full_mumps``, whose work happens inside the recorded solve).
+    With ``direct`` every mode, ``full_mumps`` included, solves untaped under
+    ``params``, which are then the direct solve's options
+    (``solverconfig.direct_forward_parameters``), and a solve that does not
+    converge leaves ``z`` at its entry state before it raises, with its SNES
+    reason, iterations and residual in the message.
+
+    Returns a dict of the untaped solve's work, with ``reused`` saying
+    whether its solver came from ``cache`` (empty under ``full_mumps``
+    without ``direct``, whose work happens inside the recorded solve).
     """
-    if mode == "full_mumps":
+    if mode == "full_mumps" and not direct:
         EquationSolver(
             F == 0,
             z,
@@ -188,14 +224,28 @@ def taped_state_solve(F, z, mode, params, adjoint_params, *,
         cache = StateSolverCache()
     with paused_manager():
         F, solver, reused = cache.get(
-            F, z, params, form_compiler_parameters, options_prefix)
+            F, z, params, form_compiler_parameters, options_prefix,
+            frozen=mode != "full_mumps")
         snes = solver.snes
         solves_before, iterations_before = _condensed_work(snes)
+        z_entry = cache.save_entry_state() if direct else None
+        t0 = perf_counter()
         try:
             solver.solve()
+        except ConvergenceError as err:
+            cache.clear()
+            if z_entry is None:
+                raise
+            z.assign(z_entry)
+            raise ConvergenceError(
+                f"direct forward did not converge: SNES reason "
+                f"{int(snes.getConvergedReason())}, "
+                f"{int(snes.getIterationNumber())} iterations, "
+                f"||F|| {snes.getFunctionNorm():.3e}") from err
         except BaseException:
             cache.clear()
             raise
+        seconds = perf_counter() - t0
         condensed_solves, condensed_iterations = _condensed_work(snes)
         work = {
             "snes_iterations": int(snes.getIterationNumber()),
@@ -205,6 +255,7 @@ def taped_state_solve(F, z, mode, params, adjoint_params, *,
             "condensed_iterations": _since(
                 condensed_iterations, iterations_before),
             "reused": reused,
+            "seconds": seconds,
         }
         fnorm = cache.residual_norm(form_compiler_parameters)
     work["fnorm"] = fnorm

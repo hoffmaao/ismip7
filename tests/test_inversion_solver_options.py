@@ -20,6 +20,10 @@ def _clean_env(monkeypatch):
         "ISMIP7_KSP_RTOL",
         "ISMIP7_CONDENSED_KSP_ATOL_FACTOR",
         "ISMIP7_CONDENSED_PETSC_OPTIONS",
+        "ISMIP7_DIRECT_FORWARD_MAXIT",
+        "ISMIP7_DIRECT_FORWARD_DTOL",
+        "ISMIP7_FINAL_SNES_STOL",
+        "ISMIP7_FINAL_SNES_MAXIT",
     ):
         monkeypatch.delenv(name, raising=False)
 
@@ -119,3 +123,24 @@ def test_adjoint_is_one_linear_solve_with_no_absolute_exit(mode):
     assert {k: v for k, v in adjoint.items() if not k.startswith("snes_")} == rest
     # and the forward's dictionary is left alone
     assert params["snes_atol"] == 1e-3
+
+
+@pytest.mark.parametrize("mode", sc.INVERSION_SOLVER_MODES)
+def test_the_direct_solve_keeps_the_mode_and_bounds_the_trial(monkeypatch, mode):
+    # PR 158's direct forward under every inversion solver: the mode's
+    # linear options, a relative test only, a live step-size exit, and a
+    # lost trial after 30 Newton iterations or a millionfold growth
+    params = sc.inversion_state_parameters(mode)
+    direct = sc.direct_forward_parameters(params)
+    assert "snes_atol" in params and "snes_atol" not in direct
+    assert direct["snes_max_it"] == 30
+    assert direct["snes_divergence_tolerance"] == 1e6
+    assert direct["snes_stol"] == float(sc.FINAL_SNES_STOL_DEFAULT)
+    for key, value in params.items():
+        if key not in ("snes_atol", "snes_max_it", "snes_stol",
+                       "snes_divergence_tolerance"):
+            assert direct[key] == value, key
+    monkeypatch.setenv("ISMIP7_DIRECT_FORWARD_MAXIT", "12")
+    monkeypatch.setenv("ISMIP7_DIRECT_FORWARD_DTOL", "1e4")
+    direct = sc.direct_forward_parameters(params)
+    assert (direct["snes_max_it"], direct["snes_divergence_tolerance"]) == (12, 1e4)

@@ -41,8 +41,16 @@ a constant `C_w0`; the forward and `plot_map.py` take `C = C_ref exp(alpha)`
 pointwise with no anchor, checkpoints carry it as `friction_exp`, and warm
 starts rebase between the three controls (an exp-control chain link resumes
 its alpha unchanged). Every forward state checkpoint copies the MAP's
-`friction_control`, `friction_c_ref`, `subelement_friction`, `exact_front`
-and `fluidity_control`, so a restarted link rebuilds the same residual. The
+`friction_control`, `friction_c_ref`, `subelement_friction`,
+`subelement_scheme`, `exact_front` and `fluidity_control`, so a restarted link
+rebuilds the same residual.
+
+`ISMIP7_SUBELEMENT_SCHEME` picks the sub-element grounding scheme under
+`ISMIP7_SUBELEMENT_FRICTION=1`: `sep1` (the default, ISSM's
+SubelementFriction1: whole-cell quadrature, Weertman drag times the grounded
+fraction) or `sep2` (quadrature over the grounded part). The MAP records it as
+`subelement_scheme` and the forward follows it; a sub-element MAP without the
+record runs SEP2. The
 fluidity control is `A = A_prior exp(phi)` under every friction control.
 
 `ISMIP7_FLUIDITY_PRIOR`: `pattyn` (default since 27 September) is the rate
@@ -105,7 +113,8 @@ line search the publishing solve started from a state of other controls and
 the evaluation ring keeps the mixed state, the monitor restores the accepted
 evaluation's controls and state (pinned), and a forward that reported
 convergence at more than `ISMIP7_FNORM_CEILING` (1e4) times the last
-accepted residual is a failed trial. The fix was verified on a 12-iteration
+accepted residual, floored at the warm start's recorded residual, is a
+failed trial. The fix was verified on a 12-iteration
 joint run (published residual 76). The stage-2 run showed the second half:
 its accepted iterate had a forward that converged only relatively from a
 starting residual of 1e17, hence the ceiling.
@@ -121,16 +130,18 @@ reproduced 5.2008401e7 to all printed digits.
 **Cost.** The sub-element scheme costs nothing per iteration (790 to 860 s
 per iteration at 2 km on 32 ranks, the same as the cell-wise law) but its
 kernels take about 4.4 hours to compile, and Firedrake's kernel cache
-defaults to the node-local `/tmp`, cold on every allocation. The exp submit
-scripts set `PYOP2_CACHE_DIR` and `FIREDRAKE_TSFC_KERNEL_CACHE_DIR` to
-`/projects/ah301/sw`; with the cache warm the first iteration arrives in 20
-minutes.
+defaults to the node-local `/tmp`, cold on every allocation. A single-node job
+seeds its node-local cache from the shared store `ISMIP7_SHARED_JIT_CACHE`
+and copies its new kernels back (`site_core.sh`; the Rice site file names
+`/projects/ah301/sw/pyop2-cache`); with the cache warm the first iteration
+arrives in 20 minutes.
 
 **L-BFGS-B against TAO at one objective (issue #157).** Three arms
-minimised one objective (bi-Laplacian prior, sub-element friction with the
-exact front push, `full_mumps`, `ISMIP7_EVAL_CONTINUATION=0`) on PR 155's
-`4cf7f0e`: scipy L-BFGS-B under `ISMIP7_GRAD_PRECOND=none` and `mass`, and TAO
-lmvm under `mass_consistent`, the path Rice's chains take. At 32 km they ran
+minimised one objective (bi-Laplacian prior, the log friction control, the
+`legacy` fluidity prior, SEP2 sub-element friction with the exact front push,
+`full_mumps`, `ISMIP7_EVAL_CONTINUATION=0`) on PR 155's `4cf7f0e`: scipy
+L-BFGS-B under `ISMIP7_GRAD_PRECOND=none` and `mass`, and TAO lmvm under
+`mass_consistent`, the path Rice's chains take. At 32 km they ran
 40 iterations from a cold start on 4 ranks of the IU workstation; at 2 km, 15
 iterations from Rice's snapshot 0948 on 32 Quartz ranks (records
 `test-32km-inversion-opt-*`, `test-2km-inversion-opt-*`). The objective
@@ -175,6 +186,14 @@ starts at 7.8499e4 (32 km) and 5.6211e4 (2 km).
   chains; the square chains already running were left to finish.
 * 27 September: the Pattyn temperature is the fluidity prior; the thermal
   model stays available.
+* 30 September: each objective evaluation solves directly at n=3 from the last
+  converged state (`ISMIP7_DIRECT_FORWARD`), a failed trial gets one rescue
+  rung (`ISMIP7_TRIAL_RESCUE_RUNGS`), and the inversion checkpoints every
+  accepted iterate with its mixed state, so a chain link skips the ramp.
+* 1 October: SEP1 is the inversion's sub-element scheme, and the SEP2 chains
+  were stopped. On the same 2 km start SEP1 reached misfit 3.42e9 in 21
+  accepted iterations with no failed line-search trial; SEP2 reached 4.21e9
+  with nine (read from the NOTS logs).
 
 ## 5. The forward this hands to: the 2003 chain
 
@@ -190,9 +209,8 @@ the 2003 start are recorded in `antarctica/reports`, and the 25 km rehearsal
 of the whole matrix (issue #138) is on a branch of `icepack/ismip7` that is
 not in this merge. What it means for a MAP from this branch: it is inverted
 on the 2015 geometry, the forward backdates that geometry on a cold start,
-and every MAP attribute the residual needs (`friction_control`,
-`friction_c_ref`, `fluidity_control`, `subelement_friction`, `exact_front`)
-travels through the chain's restart checkpoints. The 32 km probes in section
+and every MAP attribute the residual needs (section 2) travels through the
+chain's restart checkpoints. The 32 km probes in section
 3 start in 1850 and therefore ran with the backdating off.
 
 Two measurements from those probes for whoever restarts a sub-element MAP:

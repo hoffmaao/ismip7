@@ -2,7 +2,7 @@
   "id": "test-32km-inversion-reuse-tao-after-rerun",
   "task": "test",
   "institution": "IU",
-  "title": "32 km inversion, 10 TAO iterations under scpc_gamg with sub-element friction and five-solve evaluations, one paused solver for the run, timed on a quiet machine",
+  "title": "32 km inversion, 10 TAO iterations under scpc_gamg with SEP2 sub-element friction and five-solve evaluations, one paused solver for the run, timed on a quiet machine",
   "status": "done",
   "friction": "budd",
   "mesh": "antarctica_320000_32000_buffered0 (Quartz's .msh, sha256 fd66fc42; 6,282 vertices, 9,055 cells), DG0 geometry, vertex raster sampling",

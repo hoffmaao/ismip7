@@ -47,6 +47,9 @@ ISMIP7_WORK="${ISMIP7_WORK:-/projects/ah301}"
 # the MAP is written) or ISMIP7_INVERSION for a forward (which MAP to read).
 ISMIP7_DATA_ROOT="${ISMIP7_DATA_ROOT:-/projects/ah301/ismip7/ISMIP7/AIS}"
 ISMIP7_OBS_DATA_ROOT="${ISMIP7_OBS_DATA_ROOT:-/projects/ah301/ismip7/antarctica/data}"
+# One PyOP2 kernel cache for every job (site_core.sh, ISMIP7_SHARED_JIT_CACHE):
+# a chain link starts from the kernels its predecessors compiled.
+ISMIP7_SHARED_JIT_CACHE="${ISMIP7_SHARED_JIT_CACHE:-/projects/ah301/sw/pyop2-cache}"
 
 ISMIP7_TASKS="${ISMIP7_TASKS:-32}"
 ISMIP7_MEM="${ISMIP7_MEM:-240G}"

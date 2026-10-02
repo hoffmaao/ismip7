@@ -2,7 +2,7 @@
   "id": "test-32km-inversion-subelement-scpc-gamg",
   "task": "test",
   "institution": "IU",
-  "title": "32 km inversion, 20 TAO iterations under scpc_gamg (NLEQ-ERR at Krylov rtol 1e-8) with sub-element friction, the exact front push and five-solve evaluations",
+  "title": "32 km inversion, 20 TAO iterations under scpc_gamg (NLEQ-ERR at Krylov rtol 1e-8) with SEP2 sub-element friction, the exact front push and five-solve evaluations",
   "status": "done",
   "friction": "budd",
   "mesh": "antarctica_320000_32000_buffered0 (Quartz's .msh, sha256 fd66fc42; 6,282 vertices, 9,055 cells), DG0 geometry, vertex raster sampling",

@@ -9,9 +9,9 @@ gitignored, so these records and the per-core reports beside them are
 the trace a run leaves in the repository. A core experiment also gets
 its full report from `core_report.py`; this is the index.
 
-170 records.
+188 records.
 
-Status: 12 planned, 3 running, 10 stopped, 128 done, 17 superseded.
+Status: 12 planned, 3 running, 14 stopped, 142 done, 17 superseded.
 
 ## Inversion
 
@@ -51,10 +51,16 @@ Status: 12 planned, 3 running, 10 stopped, 128 done, 17 superseded.
 | Core 1 at 25 km, rehearsal attempt A: CESM2-WACCM historical, without the apparent mass-balance reference | done | antarctica_250000_25000_buffered20000 (IU's build, 4,509 vertices), DG0 geometry | IU Quartz, general partition | 2026-09-27 | 2026-09-27 | ON TRACK; resid at most 0.0000 Gt on 480 rows; 1 rescued and 0 subcycled steps; VAF +26.3 mm SLE and mass -4368 Gt over the run; peak speed 16474 m/yr at t = 2003.03, (-2432522, 1418654) m |
 | Core 1 at 32 km without the apparent-MB reference: branch state of the i104off runs | done | antarctica_320000_32000, DG0 geometry | IU Quartz | 2026-09-24 | 2026-09-24 | OFF TRACK, with dM/dt FAIL at 756.7 Gt/yr; resid 0.0000 on all 1650 rows, 1 rescued step, no subcycle or stall event |
 | Core 1 at 32 km with the apparent-MB reference on main at 700a846, the same-code partner of the i104off historical | done | antarctica_320000_32000, DG0 geometry | IU Quartz | 2026-09-24 | 2026-09-24 | ON TRACK, with dM/dt WARN at 247.7 Gt/yr; resid 0.0000 on all 1650 rows, no rescue, subcycle or stall event |
+| Core 1 at 32 km without the SMB-elevation feedback: branch state of the i116off runs | done | antarctica_320000_32000, DG0 geometry | IU Quartz | 2026-09-25 | 2026-09-25 | ON TRACK, with dM/dt WARN at 238.7 Gt/yr; resid 0.0000 on all 1650 rows, no rescue, subcycle or stall event |
+| Core 1 at 32 km with the SMB-elevation feedback on dacabfdz: branch state of the i116on runs | done | antarctica_320000_32000, DG0 geometry | IU Quartz | 2026-09-25 | 2026-09-25 | ON TRACK, with dM/dt WARN at 238.4 Gt/yr; resid 0.0000 on all 1650 rows, no rescue, subcycle or stall event |
+| Core 1 at 32 km from the 2003 start without the SMB-elevation feedback: branch state of the i116y2003off runs | done | antarctica_320000_32000, DG0 geometry | IU Quartz | 2026-09-26 | 2026-09-26 | ON TRACK, with dM/dt PASS at 26.8 Gt/yr; resid 0.0000 on all 120 rows, no rescue, subcycle or stall event |
+| Core 1 at 32 km from the 2003 start with the SMB-elevation feedback on dacabfdz: branch state of the i116y2003on runs | done | antarctica_320000_32000, DG0 geometry | IU Quartz | 2026-09-26 | 2026-09-26 | ON TRACK, with dM/dt PASS at 26.7 Gt/yr; resid 0.0000 on all 120 rows, no rescue, subcycle or stall event |
 | Core 1 at 32 km, the p2 historical: branch state of the p2 and p3 runs | done | antarctica_320000_32000, DG0 geometry | IU Quartz | 2026-09-22 | 2026-09-22 | ON TRACK, with dM/dt WARN at 247.7 Gt/yr; resid 0.0000 on all 1650 rows |
 | Core 2 at 25 km, rehearsal attempt B: MRI-ESM2-0 historical, with the apparent mass-balance reference | done | antarctica_250000_25000_buffered20000 (IU's build, 4,509 vertices), DG0 geometry | IU Quartz, general partition | 2026-09-27 | 2026-09-27 | ON TRACK; resid at most 0.0000 Gt on 480 rows; 0 rescued and 0 subcycled steps; VAF -0.7 mm SLE and mass -1122 Gt over the run; peak speed 16871 m/yr at t = 2003.03, (-2432522, 1418654) m |
 | Core 2 at 25 km, rehearsal attempt A: MRI-ESM2-0 historical, without the apparent mass-balance reference | done | antarctica_250000_25000_buffered20000 (IU's build, 4,509 vertices), DG0 geometry | IU Quartz, general partition | 2026-09-27 | 2026-09-27 | ON TRACK; resid at most 0.0000 Gt on 480 rows; 3 rescued and 0 subcycled steps; VAF +25.6 mm SLE and mass -3718 Gt over the run; peak speed 16478 m/yr at t = 2003.03, (-2432522, 1418654) m |
 | Core 2 at 32 km without the apparent-MB reference: branch state of the i104off runs | done | antarctica_320000_32000, DG0 geometry | IU Quartz | 2026-09-24 | 2026-09-24 | OFF TRACK, with dM/dt FAIL at 730.1 Gt/yr; resid 0.0000 on all 1650 rows, no rescue, subcycle or stall event |
+| Core 2 at 32 km from the 2003 start without the SMB-elevation feedback: branch state of the i116y2003off controls | done | antarctica_320000_32000, DG0 geometry | IU Quartz | 2026-09-26 | 2026-09-26 | ON TRACK, with dM/dt PASS at -110.4 Gt/yr; resid 0.0000 on all 120 rows, no rescue, subcycle or stall event |
+| Core 2 at 32 km from the 2003 start with the SMB-elevation feedback on dacabfdz: branch state of the i116y2003on controls | done | antarctica_320000_32000, DG0 geometry | IU Quartz | 2026-09-26 | 2026-09-26 | ON TRACK, with dM/dt PASS at -110.4 Gt/yr; resid 0.0000 on all 120 rows, no rescue, subcycle or stall event |
 | Core 2 at 32 km, the i32 historical: branch state of the i32 core 10 control | done | antarctica_320000_32000, DG0 geometry | IU Quartz | 2026-09-24 | 2026-09-24 | ON TRACK, with dM/dt WARN at 300.8 Gt/yr; resid 0.0000 on all 1650 rows, no rescue, subcycle or stall event |
 | Core 3 at 25 km, rehearsal attempt B: ssp370 CESM2-WACCM, with the apparent mass-balance reference | done | antarctica_250000_25000_buffered20000 (IU's build, 4,509 vertices), DG0 geometry | IU Quartz, general partition | 2026-09-27 | 2026-09-27 | OFF TRACK (shelf basal melt 3143.0 [ 600.0, 1800.0] Gt/yr FAIL; dM/dt (post-2016) -1403.9 [ -400.0, 200.0] Gt/yr FAIL); resid at most 0.0000 Gt on 3440 rows; 5 rescued and 0 subcycled steps; VAF +66.6 mm SLE and mass -119874 Gt over the run; peak speed 23093 m/yr at t = 2071.15, (-1629653, -589785) m |
 | Core 3 at 25 km, rehearsal attempt A: ssp370 CESM2-WACCM, without the apparent mass-balance reference | done | antarctica_250000_25000_buffered20000 (IU's build, 4,509 vertices), DG0 geometry | IU Quartz, general partition | 2026-09-27 | 2026-09-27 | OFF TRACK (dM/dt (post-2016) -1123.1 [ -400.0, 200.0] Gt/yr FAIL); resid at most 0.0000 Gt on 3440 rows; 0 rescued and 0 subcycled steps; VAF +316.9 mm SLE and mass -96234 Gt over the run; peak speed 16587 m/yr at t = 2028.6, (-1493126, -616884) m |
@@ -71,6 +77,10 @@ Status: 12 planned, 3 running, 10 stopped, 128 done, 17 superseded.
 | Core 7 at 25 km, rehearsal attempt B: ssp585 CESM2-WACCM, with the apparent mass-balance reference | done | antarctica_250000_25000_buffered20000 (IU's build, 4,509 vertices), DG0 geometry | IU Quartz, general partition | 2026-09-27 | 2026-09-27 | OFF TRACK (SMB -1916.3 [ 2000.0, 2900.0] Gt/yr FAIL; shelf basal melt 60136.3 [ 600.0, 1800.0] Gt/yr FAIL; dM/dt (post-2016) -3440.1 [ -400.0, 200.0] Gt/yr FAIL); resid at most 0.0000 Gt on 11440 rows; 63 rescued and 0 subcycled steps; VAF -236.0 mm SLE and mass -980617 Gt over the run; peak speed 4148664 m/yr at t = 2280.38, (-300478, -442914) m |
 | Core 7 at 25 km, rehearsal attempt A: ssp585 CESM2-WACCM, without the apparent mass-balance reference | done | antarctica_250000_25000_buffered20000 (IU's build, 4,509 vertices), DG0 geometry | IU Quartz, general partition | 2026-09-27 | 2026-09-27 | OFF TRACK (SMB -1388.6 [ 2000.0, 2900.0] Gt/yr FAIL; shelf basal melt 55746.4 [ 600.0, 1800.0] Gt/yr FAIL; dM/dt (post-2016) -2391.2 [ -400.0, 200.0] Gt/yr FAIL); resid at most 0.0000 Gt on 11440 rows; 10 rescued and 0 subcycled steps; VAF +500.9 mm SLE and mass -681907 Gt over the run; peak speed 78696120 m/yr at t = 2298.68, (-684988, 436738) m |
 | Core 7 at 32 km without the apparent-MB reference, branched from the i104off historical | done | antarctica_320000_32000, DG0 geometry | IU Quartz | 2026-09-24 | 2026-09-24 | OFF TRACK against the present-day envelopes, as an ssp585 run at 2300 is, with dM/dt FAIL at -1775.1 Gt/yr; resid 0.0000 on all 2860 rows, no rescue, subcycle or stall event |
+| Core 7 at 32 km without the SMB-elevation feedback, branched from the i116off historical | done | antarctica_320000_32000, DG0 geometry | IU Quartz | 2026-09-26 | 2026-09-26 | OFF TRACK against the present-day envelopes, as an ssp585 run at 2300 is, with dM/dt FAIL at -2638.3 Gt/yr; resid 0.0000 on all 2860 rows, no rescue, subcycle or stall event |
+| Core 7 at 32 km with the SMB-elevation feedback on dacabfdz, branched from the i116on historical | done | antarctica_320000_32000, DG0 geometry | IU Quartz | 2026-09-26 | 2026-09-26 | OFF TRACK against the present-day envelopes, as an ssp585 run at 2300 is, with dM/dt FAIL at -2648.3 Gt/yr; resid 0.0000 on all 2860 rows, no rescue, subcycle or stall event |
+| Core 7 at 32 km without the SMB-elevation feedback, queued by ISMIP7_CHAIN_THEN from the i116y2003off historical of the 2003 start | done | antarctica_320000_32000, DG0 geometry | IU Quartz | 2026-09-26 | 2026-09-26 | OFF TRACK against the present-day envelopes, as an ssp585 run at 2300 is, with dM/dt FAIL at -3019.7 Gt/yr; resid 0.0000 on all 2860 rows, no rescue, subcycle or stall event |
+| Core 7 at 32 km with the SMB-elevation feedback on dacabfdz, queued by ISMIP7_CHAIN_THEN from the i116y2003on historical of the 2003 start | done | antarctica_320000_32000, DG0 geometry | IU Quartz | 2026-09-26 | 2026-09-26 | OFF TRACK against the present-day envelopes, as an ssp585 run at 2300 is, with dM/dt FAIL at -3097.0 Gt/yr; resid 0.0000 on all 2860 rows, no rescue, subcycle or stall event |
 | Core 7 at 32 km, collapse mode ISMIP7_FRACTURE=mask | done | antarctica_320000_32000, DG0 geometry | IU Quartz | - | 2026-09-22 | OFF TRACK against the present-day envelopes, as an ssp585 run at 2300 is; resid 0.0000 on all 2860 rows, no rescue or subcycle event |
 | Core 7 at 32 km, collapse mode ISMIP7_FRACTURE=mask_front | done | antarctica_320000_32000, DG0 geometry | IU Quartz | - | 2026-09-22 | OFF TRACK against the present-day envelopes, as an ssp585 run at 2300 is; resid 0.0000 on all 2860 rows, no rescue or subcycle event |
 | Core 7 at 32 km, collapse mode ISMIP7_FRACTURE=none | done | antarctica_320000_32000, DG0 geometry | IU Quartz | - | 2026-09-22 | OFF TRACK against the present-day envelopes, as an ssp585 run at 2300 is; resid 0.0000 on all 2860 rows, no rescue or subcycle event |
@@ -89,6 +99,10 @@ Status: 12 planned, 3 running, 10 stopped, 128 done, 17 superseded.
 | Core 9 at 25 km, rehearsal attempt A: control on the CESM2-WACCM ctrl forcing, without the apparent mass-balance reference | done | antarctica_250000_25000_buffered20000 (IU's build, 4,509 vertices), DG0 geometry | IU Quartz, general partition | 2026-09-27 | 2026-09-27 | OFF TRACK (dM/dt (post-2016) 545.6 [ -400.0, 200.0] Gt/yr FAIL); resid at most 0.0000 Gt on 11440 rows; 4 rescued and 0 subcycled steps; VAF +868.6 mm SLE and mass +155196 Gt over the run; peak speed 30539 m/yr at t = 2221.5, (355711, -1845139) m |
 | Core 9 at 32 km without the apparent-MB reference, branched from the i104off historical | done | antarctica_320000_32000, DG0 geometry | IU Quartz | 2026-09-24 | 2026-09-24 | OFF TRACK, with dM/dt FAIL at 909.5 Gt/yr; resid 0.0000 on all 2860 rows, no rescue, subcycle or stall event |
 | Core 9 at 32 km on the CESM2-WACCM ctrl ocean, branched from the p2 historical | done | antarctica_320000_32000, DG0 geometry | IU Quartz | 2026-09-24 | 2026-09-24 | ON TRACK, with dM/dt WARN at 384.0 Gt/yr; resid 0.0000 on all 2860 rows, no rescue, subcycle or stall event |
+| Core 9 at 32 km without the SMB-elevation feedback and no ocean melt (ISMIP7_K_SCALE=0), cancelled | stopped | antarctica_320000_32000, DG0 geometry | IU Quartz | 2026-09-26 | 2026-09-26 | - |
+| Core 9 at 32 km with the SMB-elevation feedback on dacabfdz and no ocean melt (ISMIP7_K_SCALE=0), cancelled | stopped | antarctica_320000_32000, DG0 geometry | IU Quartz | 2026-09-26 | 2026-09-26 | - |
+| Core 9 at 32 km without the SMB-elevation feedback, branched from the i116y2003off historical of the 2003 start | done | antarctica_320000_32000, DG0 geometry | IU Quartz | 2026-09-26 | 2026-09-26 | ON TRACK, with dM/dt PASS at 72.0 Gt/yr; resid 0.0000 on all 2860 rows, no rescue, subcycle or stall event |
+| Core 9 at 32 km with the SMB-elevation feedback on dacabfdz, branched from the i116y2003on historical of the 2003 start | done | antarctica_320000_32000, DG0 geometry | IU Quartz | 2026-09-26 | 2026-09-26 | ON TRACK, with dM/dt PASS at 70.1 Gt/yr; resid 0.0000 on all 2860 rows, no rescue, subcycle or stall event |
 | Core 9 at 32 km on main, branched from the p2 historical | done | antarctica_320000_32000, DG0 geometry | IU Quartz | 2026-09-23 | 2026-09-23 | ON TRACK, with dM/dt WARN at 419.2 Gt/yr; resid 0.0000 on all 2860 rows, no rescue or stall event |
 | Core 9 at 32 km with the fluxes booked after the positivity limiter, branched from the p2 historical | done | antarctica_320000_32000, DG0 geometry | IU Quartz | 2026-09-23 | 2026-09-23 | ON TRACK, with dM/dt WARN at 419.3 Gt/yr; resid 0.0000 on all 2860 rows, no rescue or stall event |
 | Core 9 at 32 km for five years with the native scalars over true area, branched from the p2 historical | done | antarctica_320000_32000, DG0 geometry | IU Quartz, debug partition | 2026-09-24 | 2026-09-24 | ON TRACK; resid 0.0000 on all 50 rows, no rescue or stall event; the timeseries equals the p4 control's first 50 rows to the last digit |
@@ -96,6 +110,10 @@ Status: 12 planned, 3 running, 10 stopped, 128 done, 17 superseded.
 | Core 10 at 25 km, rehearsal attempt A: control on the MRI-ESM2-0 ctrl forcing, without the apparent mass-balance reference | done | antarctica_250000_25000_buffered20000 (IU's build, 4,509 vertices), DG0 geometry | IU Quartz, general partition | 2026-09-27 | 2026-09-27 | OFF TRACK (dM/dt (post-2016) 596.3 [ -400.0, 200.0] Gt/yr FAIL); resid at most 0.0000 Gt on 11440 rows; 118 rescued and 0 subcycled steps; VAF +870.4 mm SLE and mass +169784 Gt over the run; peak speed 30746 m/yr at t = 2217.75, (355711, -1845139) m |
 | Core 10 at 32 km without the apparent-MB reference, branched from the i104off historical | done | antarctica_320000_32000, DG0 geometry | IU Quartz | 2026-09-24 | 2026-09-24 | OFF TRACK, with dM/dt FAIL at 945.9 Gt/yr; resid 0.0000 on all 2860 rows, 1 rescued step, no subcycle or stall event |
 | Core 10 at 32 km on the MRI-ESM2-0 ctrl ocean, branched from the i32 historical | done | antarctica_320000_32000, DG0 geometry | IU Quartz | 2026-09-24 | 2026-09-24 | ON TRACK, with dM/dt WARN at 425.2 Gt/yr; resid 0.0000 on all 2860 rows, no rescue, subcycle or stall event |
+| Core 10 at 32 km without the SMB-elevation feedback and no ocean melt (ISMIP7_K_SCALE=0), cancelled | stopped | antarctica_320000_32000, DG0 geometry | IU Quartz | 2026-09-26 | 2026-09-26 | - |
+| Core 10 at 32 km with the SMB-elevation feedback on dacabfdz and no ocean melt (ISMIP7_K_SCALE=0), cancelled | stopped | antarctica_320000_32000, DG0 geometry | IU Quartz | 2026-09-26 | 2026-09-26 | - |
+| Core 10 at 32 km without the SMB-elevation feedback, branched from the i116y2003off historical of the 2003 start | done | antarctica_320000_32000, DG0 geometry | IU Quartz | 2026-09-26 | 2026-09-26 | ON TRACK, with dM/dt PASS at 106.8 Gt/yr; resid 0.0000 on all 2860 rows, no rescue, subcycle or stall event |
+| Core 10 at 32 km with the SMB-elevation feedback on dacabfdz, branched from the i116y2003on historical of the 2003 start | done | antarctica_320000_32000, DG0 geometry | IU Quartz | 2026-09-26 | 2026-09-26 | ON TRACK, with dM/dt PASS at 105.4 Gt/yr; resid 0.0000 on all 2860 rows, no rescue, subcycle or stall event |
 | Core 10 at 32 km, branched from the i32 historical: the July 2040.5 wall on the current stack | done | antarctica_320000_32000, DG0 geometry | IU Quartz | 2026-09-24 | 2026-09-24 | ON TRACK, with dM/dt WARN at 422.1 Gt/yr; resid 0.0000 on all 2860 rows, no rescue, subcycle or stall event |
 | Core 11 at 25 km, rehearsal attempt B: OCX on the protocol forcing, with the apparent mass-balance reference | done | antarctica_250000_25000_buffered20000 (IU's build, 4,509 vertices), DG0 geometry | IU Quartz, general partition | 2026-09-27 | 2026-09-27 | ON TRACK; resid at most 0.0000 Gt on 920 rows; 0 rescued and 0 subcycled steps; VAF +11.0 mm SLE and mass +4385 Gt over the run; peak speed 16990 m/yr at t = 2011.0, (-2432522, 1418654) m |
 | Core 11 at 25 km, rehearsal attempt A: OCX on the protocol forcing, without the apparent mass-balance reference | done | antarctica_250000_25000_buffered20000 (IU's build, 4,509 vertices), DG0 geometry | IU Quartz, general partition | 2026-09-27 | 2026-09-27 | ON TRACK; resid at most 0.0000 Gt on 920 rows; 3 rescued and 0 subcycled steps; VAF +67.7 mm SLE and mass +247 Gt over the run; peak speed 16496 m/yr at t = 2003.03, (-2432522, 1418654) m |
@@ -133,7 +151,7 @@ Status: 12 planned, 3 running, 10 stopped, 128 done, 17 superseded.
 | 2 km inversion, production configuration with one solve an evaluation, scpc_gamg (NLEQ-ERR, Krylov rtol 1e-8) on 32 ranks | done | Rice's antarctica_5000_2000_buffered0, read from the snapshot (ISMIP7_MESH=checkpoint; 925,183 vertices, 1,835,718 cells), DG0 geometry, vertex raster sampling | IU Quartz, general partition | 2026-10-01 | 2026-10-02 | every iterate within 1.0e-9 of test-2km-inversion-prod-full-mumps-ec0, final 5.570022e4; the same trial point failed in iteration 3 and took the same rescue (795 s); every recorded solve confirmed with no step; 1.3 times faster than full_mumps |
 | 2 km inversion, production configuration with five-solve evaluations, scpc_gamg (NLEQ-ERR, Krylov rtol 1e-8) on 32 ranks | done | Rice's antarctica_5000_2000_buffered0, read from the snapshot (ISMIP7_MESH=checkpoint; 925,183 vertices, 1,835,718 cells), DG0 geometry, vertex raster sampling | IU Quartz, general partition | 2026-10-01 | 2026-10-02 | every iterate within 1.1e-9 of test-2km-inversion-prod-full-mumps-ec1, final 5.570022e4; no forward failed; every recorded solve confirmed with no step; 2.4 times slower than full_mumps |
 | 32 km inversion, the time outside the forward and adjoint by span, before and after the factored prior solve (L-BFGS-B and TAO) | done | antarctica_320000_32000_buffered0 (Quartz's .msh, sha256 fd66fc42; 6,282 vertices, 9,055 cells), DG0 geometry, vertex raster sampling | IU workstation (Mac, 16 cores, 128 GB), data under /Volumes/LaCie/Data/antarctica_general/ismip7_obs; another session's 8-rank jobs shared the machine for most runs (load at each start in its commit.txt) | 2026-10-02 | 2026-10-02 | L-BFGS-B: objective within 1.1e-14 and \|grad\| within 2.6e-13 of the base over 7 evaluations, final 1.320942e4, published \|\|F\|\| 2.941e1 in every run; outside the solves, prior_solve 0.037 to 0.002 s and residual_norm 0.074 s, the rest under 0.002 s. TAO: objective within 2.2e-13 over 5 evaluations, final 1.438882e4, published \|\|F\|\| 1.96e-2; residual_norm 7.86 to 0.23 s an iteration (the fnorm-ceiling check off the tape), prior_solve 0.037 to 0.002 s, prior_taped 0.042 to 0.006 s. Every TAO run failed its forward at the same three trial points and took the re-ramp rescue (reramp span, 2.9 s an iteration at 4e45164) |
-| 32 km inversion cold start with the exp friction control and sub-element friction, full_mumps and scpc_gamg | stopped | antarctica_320000_32000_buffered0 (Quartz's .msh, sha256 fd66fc42; 6,282 vertices, 9,055 cells), DG0 geometry, vertex raster sampling | IU workstation (Mac, 16 cores, 128 GB), data under /Volumes/LaCie/Data/antarctica_general/ismip7_obs | 2026-10-01 | 2026-10-01 | the startup ramp (full_mumps in both runs, unannotated, before the solver under test runs) diverged on every rung near n = 2.1 (rung 1 step 5 to \|\|F\|\| 4e37 and 4e20, rung 2 and rung 3 likewise) and the run stopped with ConvergenceError; the solver choice played no part |
+| 32 km inversion cold start with the exp friction control and SEP2 sub-element friction, full_mumps and scpc_gamg | stopped | antarctica_320000_32000_buffered0 (Quartz's .msh, sha256 fd66fc42; 6,282 vertices, 9,055 cells), DG0 geometry, vertex raster sampling | IU workstation (Mac, 16 cores, 128 GB), data under /Volumes/LaCie/Data/antarctica_general/ismip7_obs | 2026-10-01 | 2026-10-01 | the startup ramp (full_mumps in both runs, unannotated, before the solver under test runs) diverged on every rung near n = 2.1 (rung 1 step 5 to \|\|F\|\| 4e37 and 4e20, rung 2 and rung 3 likewise) and the run stopped with ConvergenceError; the solver choice played no part |
 | 32 km inversion, 30 L-BFGS-B iterations under full_mumps, the reference for the scpc_gamg trajectory | done | antarctica_320000_32000_buffered0 (Quartz's .msh, sha256 fd66fc42; 6,282 vertices, 9,055 cells), DG0 geometry, vertex raster sampling | IU workstation (Mac, 16 cores, 128 GB), data under /Volumes/LaCie/Data/antarctica_general/ismip7_obs | 2026-10-01 | 2026-10-01 | objective 3.0156e4 to 3.7463e3; published residual 9.99e-4 after a final solve that converged in 0 Newton iterations; no forward failed |
 | 32 km inversion, 30 L-BFGS-B iterations under scpc_gamg (bt line search) | done | antarctica_320000_32000_buffered0 (Quartz's .msh, sha256 fd66fc42; 6,282 vertices, 9,055 cells), DG0 geometry, vertex raster sampling | IU workstation (Mac, 16 cores, 128 GB), data under /Volumes/LaCie/Data/antarctica_general/ismip7_obs | 2026-10-01 | 2026-10-01 | the same 30 iterations and 32 evaluations as test-32km-inversion-lbfgs-full-mumps; every evaluation's objective within 4.3e-7 of it and \|grad\| within 1e-4; published residual 1.20e-3; no forward failed; every recorded solve confirmed the paused solve's state with no step |
 | 32 km inversion, 12 L-BFGS-B iterations on PR 155 after both follow-ups merged, against the issue #157 none arm | done | antarctica_320000_32000_buffered0 (Quartz's .msh, sha256 fd66fc42; 6,282 vertices, 9,055 cells), DG0 geometry, vertex raster sampling | IU workstation (Mac, 16 cores, 128 GB), data under /Volumes/LaCie/Data/antarctica_general/ismip7_obs | 2026-10-02 | 2026-10-02 | 12 L-BFGS-B iterations in 13 evaluations, objective 7.849914e4 to 1.717453e4; every evaluation's objective within 2.8e-14 and gradient norm within 1.3e-12 of test-32km-inversion-opt-none; no forward failure; published residual 23.4 |
@@ -153,15 +171,15 @@ Status: 12 planned, 3 running, 10 stopped, 128 done, 17 superseded.
 | 32 km inversion, 30 L-BFGS-B iterations under scpc_gamg with one paused solver on 4 ranks: does the remaining RSS growth scale with the local problem | done | antarctica_320000_32000_buffered0 (Quartz's .msh, sha256 fd66fc42; 6,282 vertices, 9,055 cells), DG0 geometry, vertex raster sampling | IU workstation (Mac, 16 cores, 128 GB), data under /Volumes/LaCie/Data/antarctica_general/ismip7_obs; alone on the machine (no other session's process in a 10 s CPU log) | 2026-10-02 | 2026-10-02 | the same 30 iterations and 32 evaluations as the 8-rank run, objectives within 1.3e-7 of it (the partition), 74.5 V-cycles a condensed solve |
 | 32 km inversion, 30 L-BFGS-B iterations under scpc_gamg with one paused solver, counting rank 0's live Python objects after taped solves 10 and 30: where is the remaining RSS growth | done | antarctica_320000_32000_buffered0 (Quartz's .msh, sha256 fd66fc42; 6,282 vertices, 9,055 cells), DG0 geometry, vertex raster sampling | IU workstation (Mac, 16 cores, 128 GB), data under /Volumes/LaCie/Data/antarctica_general/ismip7_obs; alone on the machine (no other session's process in a 10 s CPU log) | 2026-10-02 | 2026-10-02 | over 20 evaluations the bytes in rank 0's live PyOP2 Dats stayed 1.8 MiB and no Function, Cofunction or petsc4py object accumulated; what grew is small: 80 tlm_adjoint Functionals with their Caches and FloatSpaces (4 an evaluation) and about 3,200 functions and 6,200 closure cells. The dof-proportional growth is in memory Python does not see (PETSc, Slate or the allocator) |
 | 32 km inversion under scpc_gamg with one paused solver and tracemalloc on rank 0: stopped | stopped | antarctica_320000_32000_buffered0 (Quartz's .msh, sha256 fd66fc42; 6,282 vertices, 9,055 cells), DG0 geometry, vertex raster sampling | IU workstation (Mac, 16 cores, 128 GB), data under /Volumes/LaCie/Data/antarctica_general/ismip7_obs; alone on the machine (no other session's process in a 10 s CPU log) | 2026-10-02 | 2026-10-02 | no result; replaced by test-32km-inversion-reuse-memory-objects |
-| 32 km inversion, 20 TAO iterations under scpc_gamg with sub-element friction and five-solve evaluations, one paused solver for the run | done | antarctica_320000_32000_buffered0 (Quartz's .msh, sha256 fd66fc42; 6,282 vertices, 9,055 cells), DG0 geometry, vertex raster sampling | IU workstation (Mac, 16 cores, 128 GB), data under /Volumes/LaCie/Data/antarctica_general/ismip7_obs; ran about 10:20 to 10:48, beside another session's 8-rank 4 km and 4-rank 32 km inversions and 1 to 8-rank probe until 10:46, so its seconds are contended (test-32km-inversion-reuse-tao-after-rerun times the same comparison on a quiet machine); work counts, objectives and RSS do not depend on it | 2026-10-02 | 2026-10-02 | the same 20 iterations and 22 evaluations as test-32km-inversion-reuse-tao-before, every objective within 1.65e-10 of it, final 2.120453e4; 10.0 Newton iterations and 197 V-cycles a condensed solve (195 before), the n = 1 restart solve 455 on average (460 before); 104 of 105 taped solves reused the solver; published residual 63.3 after a 0-iteration final solve; no forward failed; its startup and first evaluation ran about twice as slow as the baseline's, every ramp rung included, with no kernel compiled (no cache write after 09:42): contention |
-| 32 km inversion, 10 TAO iterations under scpc_gamg with sub-element friction and five-solve evaluations, one paused solver for the run, timed on a quiet machine | done | antarctica_320000_32000_buffered0 (Quartz's .msh, sha256 fd66fc42; 6,282 vertices, 9,055 cells), DG0 geometry, vertex raster sampling | IU workstation (Mac, 16 cores, 128 GB), data under /Volumes/LaCie/Data/antarctica_general/ismip7_obs; alone on the machine (a 10 s CPU log saw one other process, once, at 39 % of a core) | 2026-10-02 | 2026-10-02 | the same 10 iterations and 12 evaluations as test-32km-inversion-reuse-tao-before-rerun, every objective within 1.6e-10 of it; 10.1 Newton iterations and 208 V-cycles a condensed solve, the n = 1 restart solve 474; 59 of 60 taped solves reused the solver, across TAO evaluations as within them; published residual 280 after a 0-iteration final solve; no forward failed |
-| 32 km inversion, 20 TAO iterations under scpc_gamg with sub-element friction and five-solve evaluations on PR 155's head: a new paused solver every taped solve | done | antarctica_320000_32000_buffered0 (Quartz's .msh, sha256 fd66fc42; 6,282 vertices, 9,055 cells), DG0 geometry, vertex raster sampling | IU workstation (Mac, 16 cores, 128 GB), data under /Volumes/LaCie/Data/antarctica_general/ismip7_obs; ran about 09:45 to 10:20, beside another session's 8-rank 4 km inversions, 4-rank 32 km runs and its serial test suite (load up to 69), so its seconds are contended (test-32km-inversion-reuse-tao-before-rerun times the same comparison on a quiet machine); work counts, objectives and RSS do not depend on it | 2026-10-02 | 2026-10-02 | objective 7.849914e4 to 2.120453e4, as test-32km-inversion-subelement-scpc-gamg; 10.0 Newton iterations and 195 V-cycles a condensed solve; published residual 57.9 after a 0-iteration final solve; no forward failed |
-| 32 km inversion, 10 TAO iterations under scpc_gamg with sub-element friction and five-solve evaluations on PR 155's head, timed on a quiet machine: a new paused solver every taped solve | done | antarctica_320000_32000_buffered0 (Quartz's .msh, sha256 fd66fc42; 6,282 vertices, 9,055 cells), DG0 geometry, vertex raster sampling | IU workstation (Mac, 16 cores, 128 GB), data under /Volumes/LaCie/Data/antarctica_general/ismip7_obs; alone on the machine (a 10 s CPU log saw one other process, once, at 39 % of a core) | 2026-10-02 | 2026-10-02 | objective 7.849914e4 to 2.507499e4, the first 10 iterations of test-32km-inversion-reuse-tao-before; 10.1 Newton iterations and 203 V-cycles a condensed solve, the n = 1 restart solve 478; published residual 273 after a 0-iteration final solve; no forward failed |
+| 32 km inversion, 20 TAO iterations under scpc_gamg with SEP2 sub-element friction and five-solve evaluations, one paused solver for the run | done | antarctica_320000_32000_buffered0 (Quartz's .msh, sha256 fd66fc42; 6,282 vertices, 9,055 cells), DG0 geometry, vertex raster sampling | IU workstation (Mac, 16 cores, 128 GB), data under /Volumes/LaCie/Data/antarctica_general/ismip7_obs; ran about 10:20 to 10:48, beside another session's 8-rank 4 km and 4-rank 32 km inversions and 1 to 8-rank probe until 10:46, so its seconds are contended (test-32km-inversion-reuse-tao-after-rerun times the same comparison on a quiet machine); work counts, objectives and RSS do not depend on it | 2026-10-02 | 2026-10-02 | the same 20 iterations and 22 evaluations as test-32km-inversion-reuse-tao-before, every objective within 1.65e-10 of it, final 2.120453e4; 10.0 Newton iterations and 197 V-cycles a condensed solve (195 before), the n = 1 restart solve 455 on average (460 before); 104 of 105 taped solves reused the solver; published residual 63.3 after a 0-iteration final solve; no forward failed; its startup and first evaluation ran about twice as slow as the baseline's, every ramp rung included, with no kernel compiled (no cache write after 09:42): contention |
+| 32 km inversion, 10 TAO iterations under scpc_gamg with SEP2 sub-element friction and five-solve evaluations, one paused solver for the run, timed on a quiet machine | done | antarctica_320000_32000_buffered0 (Quartz's .msh, sha256 fd66fc42; 6,282 vertices, 9,055 cells), DG0 geometry, vertex raster sampling | IU workstation (Mac, 16 cores, 128 GB), data under /Volumes/LaCie/Data/antarctica_general/ismip7_obs; alone on the machine (a 10 s CPU log saw one other process, once, at 39 % of a core) | 2026-10-02 | 2026-10-02 | the same 10 iterations and 12 evaluations as test-32km-inversion-reuse-tao-before-rerun, every objective within 1.6e-10 of it; 10.1 Newton iterations and 208 V-cycles a condensed solve, the n = 1 restart solve 474; 59 of 60 taped solves reused the solver, across TAO evaluations as within them; published residual 280 after a 0-iteration final solve; no forward failed |
+| 32 km inversion, 20 TAO iterations under scpc_gamg with SEP2 sub-element friction and five-solve evaluations on PR 155's head: a new paused solver every taped solve | done | antarctica_320000_32000_buffered0 (Quartz's .msh, sha256 fd66fc42; 6,282 vertices, 9,055 cells), DG0 geometry, vertex raster sampling | IU workstation (Mac, 16 cores, 128 GB), data under /Volumes/LaCie/Data/antarctica_general/ismip7_obs; ran about 09:45 to 10:20, beside another session's 8-rank 4 km inversions, 4-rank 32 km runs and its serial test suite (load up to 69), so its seconds are contended (test-32km-inversion-reuse-tao-before-rerun times the same comparison on a quiet machine); work counts, objectives and RSS do not depend on it | 2026-10-02 | 2026-10-02 | objective 7.849914e4 to 2.120453e4, as test-32km-inversion-subelement-scpc-gamg; 10.0 Newton iterations and 195 V-cycles a condensed solve; published residual 57.9 after a 0-iteration final solve; no forward failed |
+| 32 km inversion, 10 TAO iterations under scpc_gamg with SEP2 sub-element friction and five-solve evaluations on PR 155's head, timed on a quiet machine: a new paused solver every taped solve | done | antarctica_320000_32000_buffered0 (Quartz's .msh, sha256 fd66fc42; 6,282 vertices, 9,055 cells), DG0 geometry, vertex raster sampling | IU workstation (Mac, 16 cores, 128 GB), data under /Volumes/LaCie/Data/antarctica_general/ismip7_obs; alone on the machine (a 10 s CPU log saw one other process, once, at 39 % of a core) | 2026-10-02 | 2026-10-02 | objective 7.849914e4 to 2.507499e4, the first 10 iterations of test-32km-inversion-reuse-tao-before; 10.1 Newton iterations and 203 V-cycles a condensed solve, the n = 1 restart solve 478; published residual 273 after a 0-iteration final solve; no forward failed |
 | 32 km inversion, 12 TAO lmvm iterations under full_mumps on the solver-reuse change, against the issue #157 TAO arm | done | antarctica_320000_32000_buffered0 (Quartz's .msh, sha256 fd66fc42; 6,282 vertices, 9,055 cells), DG0 geometry, vertex raster sampling | IU workstation (Mac, 16 cores, 128 GB), data under /Volumes/LaCie/Data/antarctica_general/ismip7_obs | 2026-10-02 | 2026-10-02 | 12 TAO iterations, objective 7.849914e4 to 2.433756e4; every iteration's objective within 1.7e-15 and gradient norm within 1.8e-14 of test-32km-inversion-opt-tao (4cf7f0e) at the same iteration, with the same six rescued trial points |
 | 32 km inversion under scpc_gamg on 4 ranks, and with the startup ramp under scpc_gamg | done | antarctica_320000_32000_buffered0 (Quartz's .msh, sha256 fd66fc42; 6,282 vertices, 9,055 cells), DG0 geometry, vertex raster sampling | IU workstation (Mac, 16 cores, 128 GB), data under /Volumes/LaCie/Data/antarctica_general/ismip7_obs | 2026-10-01 | 2026-10-01 | 4 ranks against 8: objective and \|grad\| within 1.4e-7 over four evaluations. The ramp under scpc_gamg (the structural-zero blocks in F) stalled on the 8-step rung at n = 2.43 (DIVERGED_MAX_IT, the transient's NLEQ-ERR with GAMG) and climbed on the 16-step rung; its evaluations then matched the 8-rank scpc_gamg run to 1e-12 |
 | 32 km inversion, four evaluations under each ISMIP7_INVERSION_LINEAR_SOLVER and three scpc_gamg line-search and tolerance settings | done | antarctica_320000_32000_buffered0 (Quartz's .msh, sha256 fd66fc42; 6,282 vertices, 9,055 cells), DG0 geometry, vertex raster sampling | IU workstation (Mac, 16 cores, 128 GB), data under /Volumes/LaCie/Data/antarctica_general/ismip7_obs | 2026-10-01 | 2026-10-01 | Against full_mumps over the same four evaluations: scpc_mumps 1.1e-13 in the objective and 3e-13 in \|grad\|. scpc_gamg with the transient's options (NLEQ-ERR, Krylov rtol 1e-6) matched to 1.8e-8 for three evaluations and then failed every full L-BFGS step (DIVERGED_MAX_IT, \|\|F\|\| stalled at 7.9e10 from 9.1e10), so the descent fell back to short steps. At that trial point the exact solvers took 6 Newton iterations; scpc_gamg took 6 with NLEQ-ERR at rtol 1e-8 (950 V-cycles) or 1e-10 (1292), and 6 with bt at 1e-6 (214 V-cycles), all four evaluations matching full_mumps to 1.4e-7 or better |
-| 32 km inversion, 20 TAO iterations under full_mumps with sub-element friction, the exact front push and five-solve evaluations | done | antarctica_320000_32000_buffered0 (Quartz's .msh, sha256 fd66fc42; 6,282 vertices, 9,055 cells), DG0 geometry, vertex raster sampling | IU workstation (Mac, 16 cores, 128 GB), data under /Volumes/LaCie/Data/antarctica_general/ismip7_obs | 2026-10-01 | 2026-10-01 | objective 7.849914e4 to 2.120453e4 over 20 iterations, no forward failed; published residual 64.7 after a 0-iteration final solve |
-| 32 km inversion, 20 TAO iterations under scpc_gamg (NLEQ-ERR at Krylov rtol 1e-8) with sub-element friction, the exact front push and five-solve evaluations | done | antarctica_320000_32000_buffered0 (Quartz's .msh, sha256 fd66fc42; 6,282 vertices, 9,055 cells), DG0 geometry, vertex raster sampling | IU workstation (Mac, 16 cores, 128 GB), data under /Volumes/LaCie/Data/antarctica_general/ismip7_obs | 2026-10-01 | 2026-10-01 | every iterate's objective within 1.6e-9 of test-32km-inversion-subelement-full-mumps, the same 20 iterations, final 2.120453e4; no forward failed; every recorded solve confirmed with no step; published residual 57.9 |
+| 32 km inversion, 20 TAO iterations under full_mumps with SEP2 sub-element friction, the exact front push and five-solve evaluations | done | antarctica_320000_32000_buffered0 (Quartz's .msh, sha256 fd66fc42; 6,282 vertices, 9,055 cells), DG0 geometry, vertex raster sampling | IU workstation (Mac, 16 cores, 128 GB), data under /Volumes/LaCie/Data/antarctica_general/ismip7_obs | 2026-10-01 | 2026-10-01 | objective 7.849914e4 to 2.120453e4 over 20 iterations, no forward failed; published residual 64.7 after a 0-iteration final solve |
+| 32 km inversion, 20 TAO iterations under scpc_gamg (NLEQ-ERR at Krylov rtol 1e-8) with SEP2 sub-element friction, the exact front push and five-solve evaluations | done | antarctica_320000_32000_buffered0 (Quartz's .msh, sha256 fd66fc42; 6,282 vertices, 9,055 cells), DG0 geometry, vertex raster sampling | IU workstation (Mac, 16 cores, 128 GB), data under /Volumes/LaCie/Data/antarctica_general/ismip7_obs | 2026-10-01 | 2026-10-01 | every iterate's objective within 1.6e-9 of test-32km-inversion-subelement-full-mumps, the same 20 iterations, final 2.120453e4; no forward failed; every recorded solve confirmed with no step; published residual 57.9 |
 | 32 km inversion, 20 TAO lmvm iterations (mass-consistent metric, bi-Laplacian prior) under full_mumps | done | antarctica_320000_32000_buffered0 (Quartz's .msh, sha256 fd66fc42; 6,282 vertices, 9,055 cells), DG0 geometry, vertex raster sampling | IU workstation (Mac, 16 cores, 128 GB), data under /Volumes/LaCie/Data/antarctica_general/ismip7_obs | 2026-10-01 | 2026-10-01 | objective 3.0156e4 to 1.1884e4, published residual 1.493; the forward failed at three trial points and the re-ramp rescue recovered each |
 | 32 km inversion, 20 TAO lmvm iterations (mass-consistent metric, bi-Laplacian prior) under scpc_gamg (bt line search) | done | antarctica_320000_32000_buffered0 (Quartz's .msh, sha256 fd66fc42; 6,282 vertices, 9,055 cells), DG0 geometry, vertex raster sampling | IU workstation (Mac, 16 cores, 128 GB), data under /Volumes/LaCie/Data/antarctica_general/ismip7_obs | 2026-10-01 | 2026-10-01 | every accepted iterate's objective within 1.2e-8 of test-32km-inversion-tao-full-mumps, the same 20 iterations, published residual 1.493; no forward failed |
 | 32 km probe of the tracked K50 melt calibration: core 11's stopgap forcing for 5 model years | done | antarctica_320000_32000_buffered0, DG0 geometry | IU Quartz, general partition | 2026-09-25 | 2026-09-25 | resid 0.0 Gt on all 50 rows and forward exit 0 at both commits, the rerun (job 10644548) passing the thickness-floor check; the provenance line names the file, its sha256, K50 and both meshes, and the raster sampling is the calibration's vertex. The first step books 1069.4891 Gt/yr of melt, the forward total check_melt_bound.py gives on the same mesh (job 10644430, 1069.489), and 1068.9659 at 1984. That check exits 1 by design: at 32 km the offsets fitted on the 1000 m mesh put the basins at 0.33 (basin 6) to 1.74 (basin 10) times their fitted totals |
@@ -736,6 +754,118 @@ Core 1 at 32 km with the apparent-MB reference on main at 700a846, the same-code
 - **Audit:** ON TRACK, with dM/dt WARN at 247.7 Gt/yr; resid 0.0000 on all 1650 rows, no rescue, subcycle or stall event
 - **Notes:** run for issue #104 from a scratch clone of main at 700a846, with results and logs in the shared checkout. 1650 of 1650 steps converged on their first direct diagnostic solve, with 4.7 Newton iterations on average and 13 at the most (step 184, t = 1868.4). VAF changes by +156 mm SLE over 1850 to 2015; the peak ice speed on the mesh is 25916 m/yr at t = 1889.9, at (453000, -1713000) m. It reproduces core01-32km-hist-cesm2waccm-p2 (a0f92a8) on main at 700a846: VAF agrees to 1e-4 mm SLE and mass to 0.23 Gt on every row, the final VAF to 1e-6 mm SLE, and the log builds the same a_ref, in [-908.9, +442.1] m/yr and net +554.2 Gt/yr. The melt and outflux columns differ by up to 0.9 Gt/yr because p2 booked them before the positivity limiter. Run without ISMIP7_OUTPUT. Final state sha256 f90ff4a4bfa9e22c7d27646558902eac83f7dab2ddc32421806cc837044a08b1. Full record: antarctica/reports/core01_hist_cesm2_waccm_32km_i104on.md.
 
+### core01-32km-hist-cesm2waccm-i116off
+
+Core 1 at 32 km without the SMB-elevation feedback: branch state of the i116off runs (done), IU.
+
+- **Task type:** test
+- **ESM:** CESM2-WACCM
+- **Scenario:** historical
+- **Period (yr):** 1850 to 2015, reached 2015.0
+- **Friction law:** budd
+- **Mesh:** antarctica_320000_32000, DG0 geometry
+- **Initial state / MAP:** inversion_icepack2_budd_n3_dg0_logvelnet_32000.h5, sha256 3b3aefa1c69a5daf87d1db291cae9337e00c2696f412bce147b1f488228ef472
+- **Branch from:** cold start
+- **Forcing versions:** CESM2-WACCM historical, atmosphere SDBN1-8000m v2, SMB-elevation feedback off (ISMIP7_SMB_ELEVATION_FEEDBACK=0), ocean v3
+- **Melt: K, slope, deltaT:** per-basin K from K_issue11_mesh2500.npz, local slope
+- **Calving front, collapse:** held fixed, ice-shelf collapse ISMIP7_FRACTURE=none
+- **Apparent MB:** balance
+- **dt (yr):** 0.1
+- **Site / partition:** IU Quartz
+- **Ranks / memory:** 8 ranks, 32 GiB
+- **Job ids:** 10644974
+- **Code:** 525e14d
+- **Started:** 2026-09-25
+- **Finished:** 2026-09-25
+- **Cost per model year:** one link of 35 min for 165 model years
+- **Results path:** antarctica/results/hist_cesm2_waccm_i116off_32000_*
+- **Audit:** ON TRACK, with dM/dt WARN at 238.7 Gt/yr; resid 0.0000 on all 1650 rows, no rescue, subcycle or stall event
+- **Notes:** run for issue #116 from a scratch clone of claude/dacabfdz-gradient-version-565c93 at 525e14d, with results and logs in the shared checkout. 1650 of 1650 steps converged on their first direct diagnostic solve, with 3.7 Newton iterations on average and 14 at the most (step 1109, t = 1960.9). VAF changes by +154 mm SLE over 1850 to 2015; the peak ice speed on the mesh is 1082453 m/yr at t = 1919.4, at (453837, -1726983) m. The same-code partner of the i116on historical, with ISMIP7_SMB_ELEVATION_FEEDBACK=0; the comparison is in core01-32km-hist-cesm2waccm-i116on. The final state records smb_elevation_feedback = off. Run without ISMIP7_OUTPUT. Final state sha256 ed68c4d6a8c73fc5ae889ddaad297c459a90f77f7a8dcdd0847d7436c4fceca4. Full record: antarctica/reports/core01_hist_cesm2_waccm_32km_i116off.md.
+
+### core01-32km-hist-cesm2waccm-i116on
+
+Core 1 at 32 km with the SMB-elevation feedback on dacabfdz: branch state of the i116on runs (done), IU.
+
+- **Task type:** test
+- **ESM:** CESM2-WACCM
+- **Scenario:** historical
+- **Period (yr):** 1850 to 2015, reached 2015.0
+- **Friction law:** budd
+- **Mesh:** antarctica_320000_32000, DG0 geometry
+- **Initial state / MAP:** inversion_icepack2_budd_n3_dg0_logvelnet_32000.h5, sha256 3b3aefa1c69a5daf87d1db291cae9337e00c2696f412bce147b1f488228ef472
+- **Branch from:** cold start
+- **Forcing versions:** CESM2-WACCM historical, atmosphere SDBN1-8000m v2, SMB gradient dacabfdz SDBN1-8000m v2 (SMB-elevation feedback on), ocean v3
+- **Melt: K, slope, deltaT:** per-basin K from K_issue11_mesh2500.npz, local slope
+- **Calving front, collapse:** held fixed, ice-shelf collapse ISMIP7_FRACTURE=none
+- **Apparent MB:** balance
+- **dt (yr):** 0.1
+- **Site / partition:** IU Quartz
+- **Ranks / memory:** 8 ranks, 32 GiB
+- **Job ids:** 10644973
+- **Code:** 525e14d
+- **Started:** 2026-09-25
+- **Finished:** 2026-09-25
+- **Cost per model year:** one link of 38 min for 165 model years
+- **Results path:** antarctica/results/hist_cesm2_waccm_i116on_32000_*
+- **Audit:** ON TRACK, with dM/dt WARN at 238.4 Gt/yr; resid 0.0000 on all 1650 rows, no rescue, subcycle or stall event
+- **Notes:** run for issue #116 from a scratch clone of claude/dacabfdz-gradient-version-565c93 at 525e14d, with results and logs in the shared checkout. 1650 of 1650 steps converged on their first direct diagnostic solve, with 3.7 Newton iterations on average and 18 at the most (step 1397, t = 1989.7). VAF changes by +154 mm SLE over 1850 to 2015; the peak ice speed on the mesh is 1085236 m/yr at t = 1919.4, at (453837, -1726983) m. The feedback's evidence run for issue #116, with ISMIP7_SMB_ELEVATION_FEEDBACK=1 against the i116off historical on the same code. The feedback is exactly zero at the cold start: the 1850 feedback line reads a surface change of 0.0..0.0 m, and the first step's SMB (2082.33 Gt/yr) and the a_ref (in [-908.9, +442.1] m/yr, net +559.0 Gt/yr) equal the off run's. The base SMB is the same forcing on the same mesh in both runs, so the SMB columns differ by the feedback alone: -0.55, -1.13, -1.84 and -3.59 Gt/yr at 1900, 1950, 2000 and 2015, about 0.1 percent of the SMB, and each of the 165 yearly feedback lines agrees with that difference to the log's 0.005 Gt/yr. VAF differs by -0.6 mm SLE at 2015 (+153.6 against +154.2 mm over the run) and mass by -44 Gt. The surface change the feedback multiplies is the chain's drift from its 1850 start, -235 to +790 m by 2015. Both runs exceed 1e5 m/yr at that cell on 221 steps from 1888 to 1986, where the i104on historical at 700a846 peaked at 2.6e4 m/yr: that change came with the shared code, and the feedback does not cause it. The final state records smb_elevation_feedback = dacabfdz. Run without ISMIP7_OUTPUT. Final state sha256 e480739890c24a39dd605569a7a0c76a338dee6b0ff1e28c7fab4213746af054. Full record: antarctica/reports/core01_hist_cesm2_waccm_32km_i116on.md.
+
+### core01-32km-hist-cesm2waccm-i116y2003off
+
+Core 1 at 32 km from the 2003 start without the SMB-elevation feedback: branch state of the i116y2003off runs (done), IU.
+
+- **Task type:** test
+- **ESM:** CESM2-WACCM
+- **Scenario:** historical
+- **Period (yr):** 2003 to 2015, reached 2015.0
+- **Friction law:** budd
+- **Mesh:** antarctica_320000_32000, DG0 geometry
+- **Initial state / MAP:** inversion_icepack2_budd_n3_dg0_logvelnet_32000.h5, sha256 3b3aefa1c69a5daf87d1db291cae9337e00c2696f412bce147b1f488228ef472, backdated 12 yr by the Smith et al. (2020) dH/dt on grounded ice (issue #117)
+- **Branch from:** cold start at 2003.0
+- **Forcing versions:** CESM2-WACCM historical, atmosphere SDBN1-8000m v2, SMB-elevation feedback off (ISMIP7_SMB_ELEVATION_FEEDBACK=0), ocean v3
+- **Melt: K, slope, deltaT:** per-basin K from K_issue11_mesh2500.npz, local slope
+- **Calving front, collapse:** held fixed, ice-shelf collapse ISMIP7_FRACTURE=none
+- **Apparent MB:** balance
+- **dt (yr):** 0.1
+- **Site / partition:** IU Quartz
+- **Ranks / memory:** 8 ranks, 32 GiB
+- **Job ids:** 10659415
+- **Code:** 9c24421
+- **Started:** 2026-09-26
+- **Finished:** 2026-09-26
+- **Cost per model year:** one link of 8 min for 12 model years
+- **Results path:** antarctica/results/hist_cesm2_waccm_i116y2003off_32000_*
+- **Audit:** ON TRACK, with dM/dt PASS at 26.8 Gt/yr; resid 0.0000 on all 120 rows, no rescue, subcycle or stall event
+- **Notes:** run for issue #116 from a scratch clone of claude/dacabfdz-gradient-version-565c93 at 9c24421, with results and logs in the shared checkout. 120 of 120 steps converged on their first direct diagnostic solve, with 3.5 Newton iterations on average and 12 at the most (step 102, t = 2013.2). VAF changes by +4 mm SLE over 2003 to 2015; the peak ice speed on the mesh is 6041 m/yr at t = 2006.0, at (2653000, -429000) m. The same-code partner of the i116y2003on historical, with ISMIP7_SMB_ELEVATION_FEEDBACK=0; the comparison is in core01-32km-hist-cesm2waccm-i116y2003on. The final state records smb_elevation_feedback = off. Run without ISMIP7_OUTPUT. Final state sha256 be279aff19a05c19ef36015b72ec43152c041c7f70ef238fd9f685f4fda2e910. Full record: antarctica/reports/core01_hist_cesm2_waccm_32km_i116y2003off.md.
+
+### core01-32km-hist-cesm2waccm-i116y2003on
+
+Core 1 at 32 km from the 2003 start with the SMB-elevation feedback on dacabfdz: branch state of the i116y2003on runs (done), IU.
+
+- **Task type:** test
+- **ESM:** CESM2-WACCM
+- **Scenario:** historical
+- **Period (yr):** 2003 to 2015, reached 2015.0
+- **Friction law:** budd
+- **Mesh:** antarctica_320000_32000, DG0 geometry
+- **Initial state / MAP:** inversion_icepack2_budd_n3_dg0_logvelnet_32000.h5, sha256 3b3aefa1c69a5daf87d1db291cae9337e00c2696f412bce147b1f488228ef472, backdated 12 yr by the Smith et al. (2020) dH/dt on grounded ice (issue #117)
+- **Branch from:** cold start at 2003.0
+- **Forcing versions:** CESM2-WACCM historical, atmosphere SDBN1-8000m v2, SMB gradient dacabfdz SDBN1-8000m v2 (SMB-elevation feedback on), ocean v3
+- **Melt: K, slope, deltaT:** per-basin K from K_issue11_mesh2500.npz, local slope
+- **Calving front, collapse:** held fixed, ice-shelf collapse ISMIP7_FRACTURE=none
+- **Apparent MB:** balance
+- **dt (yr):** 0.1
+- **Site / partition:** IU Quartz
+- **Ranks / memory:** 8 ranks, 32 GiB
+- **Job ids:** 10659414
+- **Code:** 9c24421
+- **Started:** 2026-09-26
+- **Finished:** 2026-09-26
+- **Cost per model year:** one link of 7 min for 12 model years
+- **Results path:** antarctica/results/hist_cesm2_waccm_i116y2003on_32000_*
+- **Audit:** ON TRACK, with dM/dt PASS at 26.7 Gt/yr; resid 0.0000 on all 120 rows, no rescue, subcycle or stall event
+- **Notes:** run for issue #116 from a scratch clone of claude/dacabfdz-gradient-version-565c93 at 9c24421, with results and logs in the shared checkout. 120 of 120 steps converged on their first direct diagnostic solve, with 3.5 Newton iterations on average and 12 at the most (step 102, t = 2013.2). VAF changes by +4 mm SLE over 2003 to 2015; the peak ice speed on the mesh is 6041 m/yr at t = 2006.0, at (2653000, -429000) m. The feedback's evidence run for issue #116 from the 2003 start of PR #126, with ISMIP7_SMB_ELEVATION_FEEDBACK=1 against the i116y2003off historical on the same code. The feedback is exactly zero at the cold start: the 2003 feedback line reads a surface change of 0.0..0.0 m, and the first step's SMB (2392.29 Gt/yr) and the a_ref (in [-908.3, +436.0] m/yr, net +630.7 Gt/yr) equal the off run's. The SMB columns differ by -0.02, +0.03, -0.01 and -0.11 Gt/yr at 2005, 2010, 2014 and 2015, and each of the 12 yearly feedback lines agrees with that difference to the log's 0.005 Gt/yr. VAF differs by -0.002 mm SLE at 2015 (+3.598 against +3.600 mm over the run) and mass by -0.6 Gt. The surface change the feedback multiplies is the chain's drift from its 2003 start, -92 to +402 m by 2014, where the 1850 start of the i116on historical had drifted -235 to +790 m by 2015. The final state records smb_elevation_feedback = dacabfdz. Run without ISMIP7_OUTPUT. Final state sha256 e1005e293c41d9f2be4927b75c1ad1dca7c7fa3f6d431559816db2b6ea98b792. Full record: antarctica/reports/core01_hist_cesm2_waccm_32km_i116y2003on.md.
+
 ### core01-32km-hist-cesm2waccm-p2
 
 Core 1 at 32 km, the p2 historical: branch state of the p2 and p3 runs (done), IU.
@@ -855,6 +985,62 @@ Core 2 at 32 km without the apparent-MB reference: branch state of the i104off r
 - **Results path:** antarctica/results/hist_mri_esm2_0_i104off_32000_*
 - **Audit:** OFF TRACK, with dM/dt FAIL at 730.1 Gt/yr; resid 0.0000 on all 1650 rows, no rescue, subcycle or stall event
 - **Notes:** run for issue #104 from a scratch clone of main at 700a846, with results and logs in the shared checkout. 1650 of 1650 steps converged on their first direct diagnostic solve, with 6.0 Newton iterations on average and 17 at the most (step 838, t = 1933.8). VAF changes by +498 mm SLE over 1850 to 2015; the peak ice speed on the mesh is 42078 m/yr at t = 1880.1, at (417000, -1689000) m. Against core02-32km-hist-mriesm20-i32 with the reference, VAF gains 498 mm SLE against 171, the post-first-year dM/dt is +730.1 against +300.8 Gt/yr, and the requested basal melt averages 466 against 921 Gt/yr. Run without ISMIP7_OUTPUT. Final state sha256 5d794657a1bfa9cb6e7d8b7ffeb8496c579b7f776989b48ec0bf5bffe1476cbc. Full record: antarctica/reports/core02_hist_mri_esm2_0_32km_i104off.md.
+
+### core02-32km-hist-mriesm20-i116y2003off
+
+Core 2 at 32 km from the 2003 start without the SMB-elevation feedback: branch state of the i116y2003off controls (done), IU.
+
+- **Task type:** test
+- **ESM:** MRI-ESM2-0
+- **Scenario:** historical
+- **Period (yr):** 2003 to 2015, reached 2015.0
+- **Friction law:** budd
+- **Mesh:** antarctica_320000_32000, DG0 geometry
+- **Initial state / MAP:** inversion_icepack2_budd_n3_dg0_logvelnet_32000.h5, sha256 3b3aefa1c69a5daf87d1db291cae9337e00c2696f412bce147b1f488228ef472, backdated 12 yr by the Smith et al. (2020) dH/dt on grounded ice (issue #117)
+- **Branch from:** cold start at 2003.0
+- **Forcing versions:** MRI-ESM2-0 historical, atmosphere GEMB-SDBN1-8000m v2, SMB-elevation feedback off (ISMIP7_SMB_ELEVATION_FEEDBACK=0), ocean v3
+- **Melt: K, slope, deltaT:** per-basin K from K_issue11_mesh2500.npz, local slope
+- **Calving front, collapse:** held fixed, ice-shelf collapse ISMIP7_FRACTURE=none
+- **Apparent MB:** balance
+- **dt (yr):** 0.1
+- **Site / partition:** IU Quartz
+- **Ranks / memory:** 8 ranks, 32 GiB
+- **Job ids:** 10664222
+- **Code:** c6244e6
+- **Started:** 2026-09-26
+- **Finished:** 2026-09-26
+- **Cost per model year:** one link of 4 min for 12 model years
+- **Results path:** antarctica/results/hist_mri_esm2_0_i116y2003off_32000_*
+- **Audit:** ON TRACK, with dM/dt PASS at -110.4 Gt/yr; resid 0.0000 on all 120 rows, no rescue, subcycle or stall event
+- **Notes:** run for issue #116 from a scratch clone of claude/dacabfdz-gradient-version-565c93 at c6244e6, with results and logs in the shared checkout. 120 of 120 steps converged on their first direct diagnostic solve, with 2.4 Newton iterations on average and 9 at the most (step 81, t = 2011.1). VAF changes by -1 mm SLE over 2003 to 2015; the peak ice speed on the mesh is 5986 m/yr at t = 2004.0, at (2653000, -429000) m. The same-code partner of the i116y2003on MRI-ESM2-0 historical, with ISMIP7_SMB_ELEVATION_FEEDBACK=0, which queued core10-32km-ctrl2015-mriesm20-i116y2003off; the comparison is in core02-32km-hist-mriesm20-i116y2003on. The final state records smb_elevation_feedback = off. Run without ISMIP7_OUTPUT. Final state sha256 cce95a39dfd7c022495f6da10b1532c5561f3beb8db483bb149f6345d3e2cf78. Full record: antarctica/reports/core02_hist_mri_esm2_0_32km_i116y2003off.md.
+
+### core02-32km-hist-mriesm20-i116y2003on
+
+Core 2 at 32 km from the 2003 start with the SMB-elevation feedback on dacabfdz: branch state of the i116y2003on controls (done), IU.
+
+- **Task type:** test
+- **ESM:** MRI-ESM2-0
+- **Scenario:** historical
+- **Period (yr):** 2003 to 2015, reached 2015.0
+- **Friction law:** budd
+- **Mesh:** antarctica_320000_32000, DG0 geometry
+- **Initial state / MAP:** inversion_icepack2_budd_n3_dg0_logvelnet_32000.h5, sha256 3b3aefa1c69a5daf87d1db291cae9337e00c2696f412bce147b1f488228ef472, backdated 12 yr by the Smith et al. (2020) dH/dt on grounded ice (issue #117)
+- **Branch from:** cold start at 2003.0
+- **Forcing versions:** MRI-ESM2-0 historical, atmosphere GEMB-SDBN1-8000m v2, SMB gradient dacabfdz GEMB-SDBN1-8000m v2 (SMB-elevation feedback on), ocean v3
+- **Melt: K, slope, deltaT:** per-basin K from K_issue11_mesh2500.npz, local slope
+- **Calving front, collapse:** held fixed, ice-shelf collapse ISMIP7_FRACTURE=none
+- **Apparent MB:** balance
+- **dt (yr):** 0.1
+- **Site / partition:** IU Quartz
+- **Ranks / memory:** 8 ranks, 32 GiB
+- **Job ids:** 10664221
+- **Code:** c6244e6
+- **Started:** 2026-09-26
+- **Finished:** 2026-09-26
+- **Cost per model year:** one link of 4 min for 12 model years
+- **Results path:** antarctica/results/hist_mri_esm2_0_i116y2003on_32000_*
+- **Audit:** ON TRACK, with dM/dt PASS at -110.4 Gt/yr; resid 0.0000 on all 120 rows, no rescue, subcycle or stall event
+- **Notes:** run for issue #116 from a scratch clone of claude/dacabfdz-gradient-version-565c93 at c6244e6, with results and logs in the shared checkout. 120 of 120 steps converged on their first direct diagnostic solve, with 2.4 Newton iterations on average and 9 at the most (step 81, t = 2011.1). VAF changes by -1 mm SLE over 2003 to 2015; the peak ice speed on the mesh is 5986 m/yr at t = 2004.0, at (2653000, -429000) m. The MRI-ESM2-0 historical the issue #116 core 10 controls branch from, from the 2003 start with ISMIP7_SMB_ELEVATION_FEEDBACK=1 against the i116y2003off historical on the same code. The feedback is exactly zero at the cold start: the 2003 line reads a surface change of 0.0..0.0 m, and the first step's SMB (2441.09 Gt/yr) and the a_ref (in [-908.0, +426.9] m/yr, net +491.9 Gt/yr) equal the off run's. Its 2014 line reads +0.10 Gt/yr on a surface change of -100 to +166 m, each of the 12 lines agrees with the SMB columns' difference to the log's 0.005 Gt/yr, and at 2015 VAF differs by +0.001 mm SLE and mass by +0.3 Gt. It queued core10-32km-ctrl2015-mriesm20-i116y2003on through ISMIP7_CHAIN_THEN. The final state records smb_elevation_feedback = dacabfdz. Run without ISMIP7_OUTPUT. Final state sha256 b1a6710e5cfee68529df137dbd2dce145cabde5a0865fb1c6f23f93f65037e69. Full record: antarctica/reports/core02_hist_mri_esm2_0_32km_i116y2003on.md.
 
 ### core02-32km-hist-mriesm20-i32
 
@@ -1348,6 +1534,122 @@ Core 7 at 32 km without the apparent-MB reference, branched from the i104off his
 - **Results path:** antarctica/results/ssp585_cesm2_waccm_i104off_32000_*
 - **Audit:** OFF TRACK against the present-day envelopes, as an ssp585 run at 2300 is, with dM/dt FAIL at -1775.1 Gt/yr; resid 0.0000 on all 2860 rows, no rescue, subcycle or stall event
 - **Notes:** run for issue #104 from a scratch clone of main at 700a846, with results and logs in the shared checkout. 2860 of 2860 steps converged on their first direct diagnostic solve, with 5.4 Newton iterations on average and 10 at the most (step 194, t = 2034.4). VAF changes by +498 mm SLE over 2015 to 2301; the peak ice speed on the mesh is 18580 m/yr at t = 2086.1, at (-2083000, 783000) m. Against core07-32km-ssp585-cesm2waccm-p4 with the reference, VAF gains 498 mm SLE against 375. Projection minus control in VAF is +64.8, +135.9 and -369.9 mm SLE at 2100, 2200 and 2300, against +64.6, +217.8 and +0.9 mm for p4 minus the i107 control. Run without ISMIP7_OUTPUT. Final state sha256 a73f8aff1e10ddf75a5d2a4466bd2a27fca56be84746c6a7ced6a1ea650cdd6f. Full record: antarctica/reports/core07_ssp585_cesm2_waccm_32km_i104off.md.
+
+### core07-32km-ssp585-cesm2waccm-i116off
+
+Core 7 at 32 km without the SMB-elevation feedback, branched from the i116off historical (done), IU.
+
+- **Task type:** test
+- **ISMIP7 exp id:** C007
+- **ESM:** CESM2-WACCM
+- **Scenario:** ssp585
+- **Period (yr):** 2015 to 2301, reached 2301.0
+- **Friction law:** budd
+- **Mesh:** antarctica_320000_32000, DG0 geometry
+- **Initial state / MAP:** hist_cesm2_waccm_i116off_32000_final.h5, sha256 ed68c4d6a8c73fc5ae889ddaad297c459a90f77f7a8dcdd0847d7436c4fceca4
+- **Branch from:** core01-32km-hist-cesm2waccm-i116off at 2015.0, from the log's restart lines
+- **Forcing versions:** CESM2-WACCM ssp585, atmosphere SDBN1-8000m v2, SMB-elevation feedback off (ISMIP7_SMB_ELEVATION_FEEDBACK=0), ocean v3
+- **Melt: K, slope, deltaT:** per-basin K from K_issue11_mesh2500.npz, local slope
+- **Calving front, collapse:** held fixed, ice-shelf collapse ISMIP7_FRACTURE=none
+- **Apparent MB:** balance
+- **dt (yr):** 0.1
+- **Site / partition:** IU Quartz
+- **Ranks / memory:** 8 ranks, 32 GiB
+- **Job ids:** 10647797 10648392
+- **Code:** 525e14d
+- **Started:** 2026-09-26
+- **Finished:** 2026-09-26
+- **Cost per model year:** 2 links, 143 min, 109 min, for 286 model years
+- **Results path:** antarctica/results/ssp585_cesm2_waccm_i116off_32000_*
+- **Audit:** OFF TRACK against the present-day envelopes, as an ssp585 run at 2300 is, with dM/dt FAIL at -2638.3 Gt/yr; resid 0.0000 on all 2860 rows, no rescue, subcycle or stall event
+- **Notes:** run for issue #116 from a scratch clone of claude/dacabfdz-gradient-version-565c93 at 525e14d, with results and logs in the shared checkout. 2860 of 2860 steps converged on their first direct diagnostic solve, with 6.3 Newton iterations on average and 19 at the most (step 663, t = 2226.3). VAF changes by +44 mm SLE over 2015 to 2301; the peak ice speed on the mesh is 328466 m/yr at t = 2256.5, at (-177105, -506755) m. The same-code partner of the i116on core 7, with ISMIP7_SMB_ELEVATION_FEEDBACK=0, branched from the i116off historical, recorded smb_elevation_feedback = off; the comparison is in core07-32km-ssp585-cesm2waccm-i116on. Run without ISMIP7_OUTPUT. Final state sha256 bfac7b47f148cc4e21e2ae441eeae295d2358b86ec970078fadbc57d605697fd. Full record: antarctica/reports/core07_ssp585_cesm2_waccm_32km_i116off.md.
+
+### core07-32km-ssp585-cesm2waccm-i116on
+
+Core 7 at 32 km with the SMB-elevation feedback on dacabfdz, branched from the i116on historical (done), IU.
+
+- **Task type:** test
+- **ISMIP7 exp id:** C007
+- **ESM:** CESM2-WACCM
+- **Scenario:** ssp585
+- **Period (yr):** 2015 to 2301, reached 2301.0
+- **Friction law:** budd
+- **Mesh:** antarctica_320000_32000, DG0 geometry
+- **Initial state / MAP:** hist_cesm2_waccm_i116on_32000_final.h5, sha256 e480739890c24a39dd605569a7a0c76a338dee6b0ff1e28c7fab4213746af054
+- **Branch from:** core01-32km-hist-cesm2waccm-i116on at 2015.0, from the log's restart lines
+- **Forcing versions:** CESM2-WACCM ssp585, atmosphere SDBN1-8000m v2, SMB gradient dacabfdz SDBN1-8000m v2 (SMB-elevation feedback on), ocean v3
+- **Melt: K, slope, deltaT:** per-basin K from K_issue11_mesh2500.npz, local slope
+- **Calving front, collapse:** held fixed, ice-shelf collapse ISMIP7_FRACTURE=none
+- **Apparent MB:** balance
+- **dt (yr):** 0.1
+- **Site / partition:** IU Quartz
+- **Ranks / memory:** 8 ranks, 32 GiB
+- **Job ids:** 10647796 10648396
+- **Code:** 525e14d
+- **Started:** 2026-09-26
+- **Finished:** 2026-09-26
+- **Cost per model year:** 2 links, 144 min, 107 min, for 286 model years
+- **Results path:** antarctica/results/ssp585_cesm2_waccm_i116on_32000_*
+- **Audit:** OFF TRACK against the present-day envelopes, as an ssp585 run at 2300 is, with dM/dt FAIL at -2648.3 Gt/yr; resid 0.0000 on all 2860 rows, no rescue, subcycle or stall event
+- **Notes:** run for issue #116 from a scratch clone of claude/dacabfdz-gradient-version-565c93 at 525e14d, with results and logs in the shared checkout. 2860 of 2860 steps converged on their first direct diagnostic solve, with 6.4 Newton iterations on average and 18 at the most (step 654, t = 2225.5). VAF changes by +62 mm SLE over 2015 to 2301; the peak ice speed on the mesh is 1447710 m/yr at t = 2248.1, at (-177105, -506755) m. The feedback's evidence run for issue #116, against the i116off core 7 on the same code, each branched from its own arm's historical; the restart check passed on a branch state recorded smb_elevation_feedback = dacabfdz, and the 2015 feedback line carries the historical's surface change (-234 to +790 m). The SMB columns differ by the feedback alone: -5.2, -1.9, +11.1, +38.8, -5.1, -237.1 and -612.7 Gt/yr at 2015.1, 2050, 2100, 2150, 2200, 2250 and 2300, and each of the 287 yearly feedback lines agrees with that difference to the log's 0.005 Gt/yr. VAF differs by -0.6, -0.8, -0.4, +4.5, +15.0, +19.1 and +17.2 mm SLE at the same years (+62.0 against +44.4 mm over the run), and mass by -45, -121, +48, +1555, +4749, -1647 and -2760 Gt. By 2300 the surface has moved -739 to +893 m since 1850. At that cell the off run peaks at 3.3e5 m/yr, at t = 2256.5. The cost matches the off run's; the i104off core 7 at 700a846 took one link of 63 min. Run without ISMIP7_OUTPUT. Final state sha256 e2d925997d78fa0adce360d7c8714c59c44bf8b5e2e04efb8947775e6018352c. Full record: antarctica/reports/core07_ssp585_cesm2_waccm_32km_i116on.md.
+
+### core07-32km-ssp585-cesm2waccm-i116y2003off
+
+Core 7 at 32 km without the SMB-elevation feedback, queued by ISMIP7_CHAIN_THEN from the i116y2003off historical of the 2003 start (done), IU.
+
+- **Task type:** test
+- **ISMIP7 exp id:** C007
+- **ESM:** CESM2-WACCM
+- **Scenario:** ssp585
+- **Period (yr):** 2015 to 2301, reached 2301.0
+- **Friction law:** budd
+- **Mesh:** antarctica_320000_32000, DG0 geometry
+- **Initial state / MAP:** hist_cesm2_waccm_i116y2003off_32000_final.h5, sha256 be279aff19a05c19ef36015b72ec43152c041c7f70ef238fd9f685f4fda2e910
+- **Branch from:** core01-32km-hist-cesm2waccm-i116y2003off at 2015.0, queued by ISMIP7_CHAIN_THEN, from the log's restart lines
+- **Forcing versions:** CESM2-WACCM ssp585, atmosphere SDBN1-8000m v2, SMB-elevation feedback off (ISMIP7_SMB_ELEVATION_FEEDBACK=0), ocean v3
+- **Melt: K, slope, deltaT:** per-basin K from K_issue11_mesh2500.npz, local slope
+- **Calving front, collapse:** held fixed, ice-shelf collapse ISMIP7_FRACTURE=none
+- **Apparent MB:** balance
+- **dt (yr):** 0.1
+- **Site / partition:** IU Quartz
+- **Ranks / memory:** 8 ranks, 32 GiB
+- **Job ids:** 10659477 10661204
+- **Code:** 9c24421
+- **Started:** 2026-09-26
+- **Finished:** 2026-09-26
+- **Cost per model year:** 2 links, 121 min, 2 min, for 286 model years
+- **Results path:** antarctica/results/ssp585_cesm2_waccm_i116y2003off_32000_*
+- **Audit:** OFF TRACK against the present-day envelopes, as an ssp585 run at 2300 is, with dM/dt FAIL at -3019.7 Gt/yr; resid 0.0000 on all 2860 rows, no rescue, subcycle or stall event
+- **Notes:** run for issue #116 from a scratch clone of claude/dacabfdz-gradient-version-565c93 at 9c24421, with results and logs in the shared checkout. 2860 of 2860 steps converged on their first direct diagnostic solve, with 6.7 Newton iterations on average and 20 at the most (step 2820, t = 2297.0). VAF changes by -124 mm SLE over 2015 to 2301; the peak ice speed on the mesh is 2166736 m/yr at t = 2237.7, at (-190602, -433202) m. The same-code partner of the i116y2003on core 7, with ISMIP7_SMB_ELEVATION_FEEDBACK=0, queued from the i116y2003off historical, recorded smb_elevation_feedback = off; the comparison is in core07-32km-ssp585-cesm2waccm-i116y2003on. Its first link stopped at t = 2298.5 under the chain's wall budget (120.7 of 155 min used) and the chain resumed it for the last 2.5 years. Run without ISMIP7_OUTPUT. Final state sha256 76d07d30e869cf003f1719baaca0940e3f222560ee8807f6cb4330f8f1af163f. Full record: antarctica/reports/core07_ssp585_cesm2_waccm_32km_i116y2003off.md.
+
+### core07-32km-ssp585-cesm2waccm-i116y2003on
+
+Core 7 at 32 km with the SMB-elevation feedback on dacabfdz, queued by ISMIP7_CHAIN_THEN from the i116y2003on historical of the 2003 start (done), IU.
+
+- **Task type:** test
+- **ISMIP7 exp id:** C007
+- **ESM:** CESM2-WACCM
+- **Scenario:** ssp585
+- **Period (yr):** 2015 to 2301, reached 2301.0
+- **Friction law:** budd
+- **Mesh:** antarctica_320000_32000, DG0 geometry
+- **Initial state / MAP:** hist_cesm2_waccm_i116y2003on_32000_final.h5, sha256 e1005e293c41d9f2be4927b75c1ad1dca7c7fa3f6d431559816db2b6ea98b792
+- **Branch from:** core01-32km-hist-cesm2waccm-i116y2003on at 2015.0, queued by ISMIP7_CHAIN_THEN, from the log's restart lines
+- **Forcing versions:** CESM2-WACCM ssp585, atmosphere SDBN1-8000m v2, SMB gradient dacabfdz SDBN1-8000m v2 (SMB-elevation feedback on), ocean v3
+- **Melt: K, slope, deltaT:** per-basin K from K_issue11_mesh2500.npz, local slope
+- **Calving front, collapse:** held fixed, ice-shelf collapse ISMIP7_FRACTURE=none
+- **Apparent MB:** balance
+- **dt (yr):** 0.1
+- **Site / partition:** IU Quartz
+- **Ranks / memory:** 8 ranks, 32 GiB
+- **Job ids:** 10659475
+- **Code:** 9c24421
+- **Started:** 2026-09-26
+- **Finished:** 2026-09-26
+- **Cost per model year:** one link of 121 min for 286 model years
+- **Results path:** antarctica/results/ssp585_cesm2_waccm_i116y2003on_32000_*
+- **Audit:** OFF TRACK against the present-day envelopes, as an ssp585 run at 2300 is, with dM/dt FAIL at -3097.0 Gt/yr; resid 0.0000 on all 2860 rows, no rescue, subcycle or stall event
+- **Notes:** run for issue #116 from a scratch clone of claude/dacabfdz-gradient-version-565c93 at 9c24421, with results and logs in the shared checkout. 2860 of 2860 steps converged on their first direct diagnostic solve, with 6.8 Newton iterations on average and 19 at the most (step 2647, t = 2279.7). VAF changes by -169 mm SLE over 2015 to 2301; the peak ice speed on the mesh is 1920815 m/yr at t = 2234.8, at (-190602, -433202) m. The feedback's evidence run for issue #116 from the 2003 start, against the i116y2003off core 7 on the same code, each queued by ISMIP7_CHAIN_THEN from its own arm's historical; the restart check passed on a branch state recorded smb_elevation_feedback = dacabfdz, and the 2015 feedback line carries the historical's surface change (-100 to +414 m). VAF differs by 0.0, -0.1, +0.1, +1.5, +0.2, -11.1 and -43.9 mm SLE at 2015.1, 2050, 2100, 2150, 2200, 2250 and 2300 (-168.6 against -123.7 mm over the run), and mass by -1, -27, -17, +282, -1125, -13161 and -21188 Gt. The yearly feedback lines read -0.13, -1.20, +0.40, -13.97, -159.98, -426.83 and -861.60 Gt/yr at 2015, 2050, 2100, 2150, 2200, 2250 and 2300, and the SMB columns differ by -0.13, -1.05, +2.14, -21.54, -107.44, -487.18 and -865.80 Gt/yr at the marker years. The two agree to the log's 0.005 Gt/yr through 2064 and within 0.3 Gt/yr through 2124, then part by up to 193 Gt/yr in a year (2276): this code forces only the cells that are not open ocean (front.unforced_cells, from main's d205248, which the 1850-start runs at 525e14d predate), and the arms' open ocean differs, 230 cells and 30000 km2 at 2301 (119 cells open in the on arm alone and 111 in the off arm alone), so their base SMB differs there as well. The feedback line at this code also counts open ocean: -5.2 of -871.3 Gt/yr at the on arm's final state with the 2300 gradient, a share the PR's later commit leaves out of the line. By 2300 the surface has moved -678 to +971 m since 2003. The off arm peaks at the same cell, at 2.2e6 m/yr at t = 2237.7, so that spike does not need the feedback. The 1850-start pair (core07-32km-ssp585-cesm2waccm-i116on) differed by +17.2 mm SLE at 2300. Run without ISMIP7_OUTPUT. Final state sha256 48549d61518752624dea7a2c2c3394fc98fe69dd59067b2e6bcde3857ffe9417. Full record: antarctica/reports/core07_ssp585_cesm2_waccm_32km_i116y2003on.md.
 
 ### core07-32km-ssp585-cesm2waccm-p2-mask
 
@@ -1906,6 +2208,120 @@ Core 9 at 32 km on the CESM2-WACCM ctrl ocean, branched from the p2 historical (
 - **Audit:** ON TRACK, with dM/dt WARN at 384.0 Gt/yr; resid 0.0000 on all 2860 rows, no rescue, subcycle or stall event
 - **Notes:** run for issue #107's forcing change from a scratch clone of main at 700a846, with results and logs in the shared checkout. 2860 of 2860 steps converged on their first direct diagnostic solve, with 8.8 Newton iterations on average and 17 at the most (step 1127, t = 2127.7). VAF changes by +378 mm SLE over 2015 to 2301; the peak ice speed on the mesh is 9530 m/yr at t = 2112.4, at (1845000, 1635000) m. Against core09-32km-ctrl2015-cesm2waccm-p4, the same branch state on the OI ocean climatology, the first-step basal melt is 1153 against 1062 Gt/yr (x1.086), its mean 1131 against 1057 Gt/yr, the post-first-year dM/dt +384.0 against +419.3 Gt/yr, and VAF gains 378 against 380 mm SLE. Run without ISMIP7_OUTPUT. Final state sha256 da657815afa3e302967c942a630a9dc303c704278d4c3b5216f7e9799f347087. Full record: antarctica/reports/core09_ctrl2015_cesm2_waccm_32km_i107.md.
 
+### core09-32km-ctrl2015-cesm2waccm-i116y2003nmoff
+
+Core 9 at 32 km without the SMB-elevation feedback and no ocean melt (ISMIP7_K_SCALE=0), cancelled (stopped), IU.
+
+- **Task type:** test
+- **ISMIP7 exp id:** C009
+- **ESM:** CESM2-WACCM
+- **Scenario:** ctrl
+- **Period (yr):** 2015 to 2301, stopped at 2070.0
+- **Friction law:** budd
+- **Mesh:** antarctica_320000_32000, DG0 geometry
+- **Initial state / MAP:** hist_cesm2_waccm_i116y2003off_32000_final.h5, sha256 be279aff19a05c19ef36015b72ec43152c041c7f70ef238fd9f685f4fda2e910
+- **Branch from:** core01-32km-hist-cesm2waccm-i116y2003off at 2015.0, named by ISMIP7_RESTART
+- **Forcing versions:** RACMO2.4p1 SMB climatology 2000 to 2029 and the CESM2-WACCM ctrl ocean v3, read and given no melt
+- **Melt: K, slope, deltaT:** none: ISMIP7_K_SCALE=0 on the per-basin K from K_issue11_mesh2500.npz
+- **Calving front, collapse:** held fixed, ice-shelf collapse ISMIP7_FRACTURE=none
+- **Apparent MB:** balance
+- **dt (yr):** 0.1
+- **Site / partition:** IU Quartz
+- **Ranks / memory:** 8 ranks, 32 GiB
+- **Job ids:** 10664220
+- **Code:** c6244e6
+- **Started:** 2026-09-26
+- **Finished:** 2026-09-26
+- **Cost per model year:** cancelled after 11 min
+- **Results path:** antarctica/results/ctrl2015_cesm2_waccm_i116y2003nmoff_32000_* (partial)
+- **Notes:** run for issue #116 from a scratch clone of claude/dacabfdz-gradient-version-565c93 at c6244e6. Cancelled at t = 2070.0: the comparison asked for the controls with the feedback on and off and their own ctrl ocean, and this melt-off arm came from misreading that request. Its partial timeseries and checkpoints are no result. With the melt removed at the branch, the frozen apparent-MB reference still offset it, and the first step gained 1374 Gt/yr.
+
+### core09-32km-ctrl2015-cesm2waccm-i116y2003nmon
+
+Core 9 at 32 km with the SMB-elevation feedback on dacabfdz and no ocean melt (ISMIP7_K_SCALE=0), cancelled (stopped), IU.
+
+- **Task type:** test
+- **ISMIP7 exp id:** C009
+- **ESM:** CESM2-WACCM
+- **Scenario:** ctrl
+- **Period (yr):** 2015 to 2301, stopped at 2067.0
+- **Friction law:** budd
+- **Mesh:** antarctica_320000_32000, DG0 geometry
+- **Initial state / MAP:** hist_cesm2_waccm_i116y2003on_32000_final.h5, sha256 e1005e293c41d9f2be4927b75c1ad1dca7c7fa3f6d431559816db2b6ea98b792
+- **Branch from:** core01-32km-hist-cesm2waccm-i116y2003on at 2015.0, named by ISMIP7_RESTART
+- **Forcing versions:** RACMO2.4p1 SMB climatology 2000 to 2029 and the CESM2-WACCM ctrl ocean v3, read and given no melt
+- **Melt: K, slope, deltaT:** none: ISMIP7_K_SCALE=0 on the per-basin K from K_issue11_mesh2500.npz
+- **Calving front, collapse:** held fixed, ice-shelf collapse ISMIP7_FRACTURE=none
+- **Apparent MB:** balance
+- **dt (yr):** 0.1
+- **Site / partition:** IU Quartz
+- **Ranks / memory:** 8 ranks, 32 GiB
+- **Job ids:** 10664219
+- **Code:** c6244e6
+- **Started:** 2026-09-26
+- **Finished:** 2026-09-26
+- **Cost per model year:** cancelled after 11 min
+- **Results path:** antarctica/results/ctrl2015_cesm2_waccm_i116y2003nmon_32000_* (partial)
+- **Notes:** run for issue #116 from a scratch clone of claude/dacabfdz-gradient-version-565c93 at c6244e6. Cancelled at t = 2067.0: the comparison asked for the controls with the feedback on and off and their own ctrl ocean, and this melt-off arm came from misreading that request. Its partial timeseries and checkpoints are no result. With the melt removed at the branch, the frozen apparent-MB reference still offset it, and the first step gained 1374 Gt/yr.
+
+### core09-32km-ctrl2015-cesm2waccm-i116y2003off
+
+Core 9 at 32 km without the SMB-elevation feedback, branched from the i116y2003off historical of the 2003 start (done), IU.
+
+- **Task type:** test
+- **ISMIP7 exp id:** C009
+- **ESM:** CESM2-WACCM
+- **Scenario:** ctrl
+- **Period (yr):** 2015 to 2301, reached 2301.0
+- **Friction law:** budd
+- **Mesh:** antarctica_320000_32000, DG0 geometry
+- **Initial state / MAP:** hist_cesm2_waccm_i116y2003off_32000_final.h5, sha256 be279aff19a05c19ef36015b72ec43152c041c7f70ef238fd9f685f4fda2e910
+- **Branch from:** core01-32km-hist-cesm2waccm-i116y2003off at 2015.0, the historical endpoint of its tag, from the log's restart lines
+- **Forcing versions:** RACMO2.4p1 SMB climatology 2000 to 2029 and the CESM2-WACCM ctrl ocean v3, the organisers' 2000 to 2029 mean of historical and ssp126, SMB-elevation feedback off (ISMIP7_SMB_ELEVATION_FEEDBACK=0)
+- **Melt: K, slope, deltaT:** per-basin K from K_issue11_mesh2500.npz, local slope
+- **Calving front, collapse:** held fixed, ice-shelf collapse ISMIP7_FRACTURE=none
+- **Apparent MB:** balance
+- **dt (yr):** 0.1
+- **Site / partition:** IU Quartz
+- **Ranks / memory:** 8 ranks, 32 GiB
+- **Job ids:** 10664218
+- **Code:** c6244e6
+- **Started:** 2026-09-26
+- **Finished:** 2026-09-26
+- **Cost per model year:** one link of 52 min for 286 model years
+- **Results path:** antarctica/results/ctrl2015_cesm2_waccm_i116y2003off_32000_*
+- **Audit:** ON TRACK, with dM/dt PASS at 72.0 Gt/yr; resid 0.0000 on all 2860 rows, no rescue, subcycle or stall event
+- **Notes:** run for issue #116 from a scratch clone of claude/dacabfdz-gradient-version-565c93 at c6244e6, with results and logs in the shared checkout. 2860 of 2860 steps converged on their first direct diagnostic solve, with 4.8 Newton iterations on average and 14 at the most (step 787, t = 2093.7). VAF changes by +128 mm SLE over 2015 to 2301; the peak ice speed on the mesh is 231828 m/yr at t = 2038.5, at (-2083000, 783000) m. The same-code partner of the i116y2003on core 9 control, with ISMIP7_SMB_ELEVATION_FEEDBACK=0; the comparison is in core09-32km-ctrl2015-cesm2waccm-i116y2003on. The final state records smb_elevation_feedback = off. Run without ISMIP7_OUTPUT. Final state sha256 d5415881da55ad65f50d2fd7d575418db7c04a050eef152c43593352cd36f0ee. Full record: antarctica/reports/core09_ctrl2015_cesm2_waccm_32km_i116y2003off.md.
+
+### core09-32km-ctrl2015-cesm2waccm-i116y2003on
+
+Core 9 at 32 km with the SMB-elevation feedback on dacabfdz, branched from the i116y2003on historical of the 2003 start (done), IU.
+
+- **Task type:** test
+- **ISMIP7 exp id:** C009
+- **ESM:** CESM2-WACCM
+- **Scenario:** ctrl
+- **Period (yr):** 2015 to 2301, reached 2301.0
+- **Friction law:** budd
+- **Mesh:** antarctica_320000_32000, DG0 geometry
+- **Initial state / MAP:** hist_cesm2_waccm_i116y2003on_32000_final.h5, sha256 e1005e293c41d9f2be4927b75c1ad1dca7c7fa3f6d431559816db2b6ea98b792
+- **Branch from:** core01-32km-hist-cesm2waccm-i116y2003on at 2015.0, the historical endpoint of its tag, from the log's restart lines
+- **Forcing versions:** RACMO2.4p1 SMB climatology 2000 to 2029 and the CESM2-WACCM ctrl ocean v3, the organisers' 2000 to 2029 mean of historical and ssp126, SMB gradient dacabfdz ctrl SDBN1-8000m v2 (SMB-elevation feedback on)
+- **Melt: K, slope, deltaT:** per-basin K from K_issue11_mesh2500.npz, local slope
+- **Calving front, collapse:** held fixed, ice-shelf collapse ISMIP7_FRACTURE=none
+- **Apparent MB:** balance
+- **dt (yr):** 0.1
+- **Site / partition:** IU Quartz
+- **Ranks / memory:** 8 ranks, 32 GiB
+- **Job ids:** 10664216
+- **Code:** c6244e6
+- **Started:** 2026-09-26
+- **Finished:** 2026-09-26
+- **Cost per model year:** one link of 57 min for 286 model years
+- **Results path:** antarctica/results/ctrl2015_cesm2_waccm_i116y2003on_32000_*
+- **Audit:** ON TRACK, with dM/dt PASS at 70.1 Gt/yr; resid 0.0000 on all 2860 rows, no rescue, subcycle or stall event
+- **Notes:** run for issue #116 from a scratch clone of claude/dacabfdz-gradient-version-565c93 at c6244e6, with results and logs in the shared checkout. 2860 of 2860 steps converged on their first direct diagnostic solve, with 4.8 Newton iterations on average and 13 at the most (step 1141, t = 2129.1). VAF changes by +126 mm SLE over 2015 to 2301; the peak ice speed on the mesh is 231768 m/yr at t = 2038.5, at (-2083000, 783000) m. The core 9 control of the issue #116 feedback comparison, with ISMIP7_SMB_ELEVATION_FEEDBACK=1 against the i116y2003off control on the same code, each branched from its own arm's historical, the states the core 7 pair (core07-32km-ssp585-cesm2waccm-i116y2003on and off) branched from; both read the CESM2-WACCM ctrl ocean. Over 2015 to 2301 mass changes by +20,010 Gt against +20,558 Gt (on minus off -548 Gt) and VAF by +126.3 against +127.6 mm SLE (-1.3). The yearly feedback line reads -0.56, -0.88, -1.26, -1.70, -2.17 and -2.62 Gt/yr at 2050, 2100, 2150, 2200, 2250 and 2300, and each of its 286 lines agrees with the on-minus-off SMB column of its step to 0.05 Gt/yr. Against this control core 7's forced response at 2301 is -294.8 mm SLE of VAF with the feedback and -251.2 without (-43.7), and -902,587 against -881,127 Gt of mass (-21,460): the control's own difference is 1.3 of core 7's 44.9 mm SLE. Both arms peak at 2.3e5 m/yr at (-2083000, 783000) m, where the i104off control at 700a846 peaked at 1.8e4 m/yr. The final state records smb_elevation_feedback = dacabfdz. Run without ISMIP7_OUTPUT. Final state sha256 c384f9e800c5187171471e9343724c477afd4fd894de7e344744506761a7a1a1. Full record: antarctica/reports/core09_ctrl2015_cesm2_waccm_32km_i116y2003on.md.
+
 ### core09-32km-ctrl2015-cesm2waccm-p3
 
 Core 9 at 32 km on main, branched from the p2 historical (done), IU.
@@ -2122,6 +2538,120 @@ Core 10 at 32 km on the MRI-ESM2-0 ctrl ocean, branched from the i32 historical 
 - **Results path:** antarctica/results/ctrl2015_mri_esm2_0_i107_32000_*
 - **Audit:** ON TRACK, with dM/dt WARN at 425.2 Gt/yr; resid 0.0000 on all 2860 rows, no rescue, subcycle or stall event
 - **Notes:** run for issue #107's forcing change from a scratch clone of main at 700a846, with results and logs in the shared checkout. 2860 of 2860 steps converged on their first direct diagnostic solve, with 7.4 Newton iterations on average and 13 at the most (step 665, t = 2081.5). VAF changes by +360 mm SLE over 2015 to 2301; the peak ice speed on the mesh is 8812 m/yr at t = 2300.4, at (-2083000, 783000) m. Against core10-32km-ctrl2015-mriesm20-i32, the same branch state on the OI ocean climatology, the first-step basal melt is 991 against 1011 Gt/yr (x0.979), its mean 1022 against 1034 Gt/yr, the post-first-year dM/dt +425.2 against +422.1 Gt/yr, and VAF gains 360 against 359 mm SLE. Steps 250 to 260 (2040.0 to 2041.0, the July wall) took 6 to 7 Newton iterations. Run without ISMIP7_OUTPUT. Final state sha256 02512b81a131dd389a99e3a64519faf2bc524bc220f57aeaf8bf37b6e86a0d79. Full record: antarctica/reports/core10_ctrl2015_mri_esm2_0_32km_i107.md.
+
+### core10-32km-ctrl2015-mriesm20-i116y2003nmoff
+
+Core 10 at 32 km without the SMB-elevation feedback and no ocean melt (ISMIP7_K_SCALE=0), cancelled (stopped), IU.
+
+- **Task type:** test
+- **ISMIP7 exp id:** C010
+- **ESM:** MRI-ESM2-0
+- **Scenario:** ctrl
+- **Period (yr):** 2015 to 2301, stopped at 2035.0
+- **Friction law:** budd
+- **Mesh:** antarctica_320000_32000, DG0 geometry
+- **Initial state / MAP:** hist_mri_esm2_0_i116y2003off_32000_final.h5, sha256 cce95a39dfd7c022495f6da10b1532c5561f3beb8db483bb149f6345d3e2cf78
+- **Branch from:** core02-32km-hist-mriesm20-i116y2003off at 2015.0, named by ISMIP7_RESTART
+- **Forcing versions:** RACMO2.4p1 SMB climatology 2000 to 2029 and the MRI-ESM2-0 ctrl ocean v3, read and given no melt
+- **Melt: K, slope, deltaT:** none: ISMIP7_K_SCALE=0 on the per-basin K from K_issue11_mesh2500.npz
+- **Calving front, collapse:** held fixed, ice-shelf collapse ISMIP7_FRACTURE=none
+- **Apparent MB:** balance
+- **dt (yr):** 0.1
+- **Site / partition:** IU Quartz
+- **Ranks / memory:** 8 ranks, 32 GiB
+- **Job ids:** 10664582
+- **Code:** c6244e6
+- **Started:** 2026-09-26
+- **Finished:** 2026-09-26
+- **Cost per model year:** cancelled after 6 min
+- **Results path:** antarctica/results/ctrl2015_mri_esm2_0_i116y2003nmoff_32000_* (partial)
+- **Notes:** run for issue #116 from a scratch clone of claude/dacabfdz-gradient-version-565c93 at c6244e6. Cancelled at t = 2035.0: the comparison asked for the controls with the feedback on and off and their own ctrl ocean, and this melt-off arm came from misreading that request. Its partial timeseries and checkpoints are no result. With the melt removed at the branch, the frozen apparent-MB reference still offset it, and the first step gained 1249 Gt/yr.
+
+### core10-32km-ctrl2015-mriesm20-i116y2003nmon
+
+Core 10 at 32 km with the SMB-elevation feedback on dacabfdz and no ocean melt (ISMIP7_K_SCALE=0), cancelled (stopped), IU.
+
+- **Task type:** test
+- **ISMIP7 exp id:** C010
+- **ESM:** MRI-ESM2-0
+- **Scenario:** ctrl
+- **Period (yr):** 2015 to 2301, stopped at 2035.0
+- **Friction law:** budd
+- **Mesh:** antarctica_320000_32000, DG0 geometry
+- **Initial state / MAP:** hist_mri_esm2_0_i116y2003on_32000_final.h5, sha256 b1a6710e5cfee68529df137dbd2dce145cabde5a0865fb1c6f23f93f65037e69
+- **Branch from:** core02-32km-hist-mriesm20-i116y2003on at 2015.0, named by ISMIP7_RESTART
+- **Forcing versions:** RACMO2.4p1 SMB climatology 2000 to 2029 and the MRI-ESM2-0 ctrl ocean v3, read and given no melt
+- **Melt: K, slope, deltaT:** none: ISMIP7_K_SCALE=0 on the per-basin K from K_issue11_mesh2500.npz
+- **Calving front, collapse:** held fixed, ice-shelf collapse ISMIP7_FRACTURE=none
+- **Apparent MB:** balance
+- **dt (yr):** 0.1
+- **Site / partition:** IU Quartz
+- **Ranks / memory:** 8 ranks, 32 GiB
+- **Job ids:** 10664581
+- **Code:** c6244e6
+- **Started:** 2026-09-26
+- **Finished:** 2026-09-26
+- **Cost per model year:** cancelled after 6 min
+- **Results path:** antarctica/results/ctrl2015_mri_esm2_0_i116y2003nmon_32000_* (partial)
+- **Notes:** run for issue #116 from a scratch clone of claude/dacabfdz-gradient-version-565c93 at c6244e6. Cancelled at t = 2035.0: the comparison asked for the controls with the feedback on and off and their own ctrl ocean, and this melt-off arm came from misreading that request. Its partial timeseries and checkpoints are no result. With the melt removed at the branch, the frozen apparent-MB reference still offset it, and the first step gained 1249 Gt/yr.
+
+### core10-32km-ctrl2015-mriesm20-i116y2003off
+
+Core 10 at 32 km without the SMB-elevation feedback, branched from the i116y2003off historical of the 2003 start (done), IU.
+
+- **Task type:** test
+- **ISMIP7 exp id:** C010
+- **ESM:** MRI-ESM2-0
+- **Scenario:** ctrl
+- **Period (yr):** 2015 to 2301, reached 2301.0
+- **Friction law:** budd
+- **Mesh:** antarctica_320000_32000, DG0 geometry
+- **Initial state / MAP:** hist_mri_esm2_0_i116y2003off_32000_final.h5, sha256 cce95a39dfd7c022495f6da10b1532c5561f3beb8db483bb149f6345d3e2cf78
+- **Branch from:** core02-32km-hist-mriesm20-i116y2003off at 2015.0, queued by ISMIP7_CHAIN_THEN, from the log's restart lines
+- **Forcing versions:** RACMO2.4p1 SMB climatology 2000 to 2029 and the MRI-ESM2-0 ctrl ocean v3, the organisers' 2000 to 2029 mean of historical and ssp126, SMB-elevation feedback off (ISMIP7_SMB_ELEVATION_FEEDBACK=0)
+- **Melt: K, slope, deltaT:** per-basin K from K_issue11_mesh2500.npz, local slope
+- **Calving front, collapse:** held fixed, ice-shelf collapse ISMIP7_FRACTURE=none
+- **Apparent MB:** balance
+- **dt (yr):** 0.1
+- **Site / partition:** IU Quartz
+- **Ranks / memory:** 8 ranks, 32 GiB
+- **Job ids:** 10664432
+- **Code:** c6244e6
+- **Started:** 2026-09-26
+- **Finished:** 2026-09-26
+- **Cost per model year:** one link of 50 min for 286 model years
+- **Results path:** antarctica/results/ctrl2015_mri_esm2_0_i116y2003off_32000_*
+- **Audit:** ON TRACK, with dM/dt PASS at 106.8 Gt/yr; resid 0.0000 on all 2860 rows, no rescue, subcycle or stall event
+- **Notes:** run for issue #116 from a scratch clone of claude/dacabfdz-gradient-version-565c93 at c6244e6, with results and logs in the shared checkout. 2860 of 2860 steps converged on their first direct diagnostic solve, with 6.1 Newton iterations on average and 16 at the most (step 703, t = 2085.3). VAF changes by +105 mm SLE over 2015 to 2301; the peak ice speed on the mesh is 245190 m/yr at t = 2037.4, at (-2419000, 1351000) m. The same-code partner of the i116y2003on core 10 control, with ISMIP7_SMB_ELEVATION_FEEDBACK=0; the comparison is in core10-32km-ctrl2015-mriesm20-i116y2003on. The final state records smb_elevation_feedback = off. Run without ISMIP7_OUTPUT. Final state sha256 167d5baac2d6609b5395e2a1f2073b91bbc56cdc85d66118600d64d6df545796. Full record: antarctica/reports/core10_ctrl2015_mri_esm2_0_32km_i116y2003off.md.
+
+### core10-32km-ctrl2015-mriesm20-i116y2003on
+
+Core 10 at 32 km with the SMB-elevation feedback on dacabfdz, branched from the i116y2003on historical of the 2003 start (done), IU.
+
+- **Task type:** test
+- **ISMIP7 exp id:** C010
+- **ESM:** MRI-ESM2-0
+- **Scenario:** ctrl
+- **Period (yr):** 2015 to 2301, reached 2301.0
+- **Friction law:** budd
+- **Mesh:** antarctica_320000_32000, DG0 geometry
+- **Initial state / MAP:** hist_mri_esm2_0_i116y2003on_32000_final.h5, sha256 b1a6710e5cfee68529df137dbd2dce145cabde5a0865fb1c6f23f93f65037e69
+- **Branch from:** core02-32km-hist-mriesm20-i116y2003on at 2015.0, queued by ISMIP7_CHAIN_THEN, from the log's restart lines
+- **Forcing versions:** RACMO2.4p1 SMB climatology 2000 to 2029 and the MRI-ESM2-0 ctrl ocean v3, the organisers' 2000 to 2029 mean of historical and ssp126, SMB gradient dacabfdz ctrl GEMB-SDBN1-8000m v2 (SMB-elevation feedback on)
+- **Melt: K, slope, deltaT:** per-basin K from K_issue11_mesh2500.npz, local slope
+- **Calving front, collapse:** held fixed, ice-shelf collapse ISMIP7_FRACTURE=none
+- **Apparent MB:** balance
+- **dt (yr):** 0.1
+- **Site / partition:** IU Quartz
+- **Ranks / memory:** 8 ranks, 32 GiB
+- **Job ids:** 10664430
+- **Code:** c6244e6
+- **Started:** 2026-09-26
+- **Finished:** 2026-09-26
+- **Cost per model year:** one link of 43 min for 286 model years
+- **Results path:** antarctica/results/ctrl2015_mri_esm2_0_i116y2003on_32000_*
+- **Audit:** ON TRACK, with dM/dt PASS at 105.4 Gt/yr; resid 0.0000 on all 2860 rows, no rescue, subcycle or stall event
+- **Notes:** run for issue #116 from a scratch clone of claude/dacabfdz-gradient-version-565c93 at c6244e6, with results and logs in the shared checkout. 2860 of 2860 steps converged on their first direct diagnostic solve, with 6.1 Newton iterations on average and 16 at the most (step 710, t = 2086.0). VAF changes by +104 mm SLE over 2015 to 2301; the peak ice speed on the mesh is 228098 m/yr at t = 2061.5, at (-2083000, 783000) m. The core 10 control of the issue #116 feedback comparison, with ISMIP7_SMB_ELEVATION_FEEDBACK=1 against the i116y2003off control on the same code, each queued by ISMIP7_CHAIN_THEN from its own arm's MRI-ESM2-0 historical; both read the MRI-ESM2-0 ctrl ocean. Over 2015 to 2301 mass changes by +30,031 Gt against +30,422 Gt (on minus off -391 Gt) and VAF by +104.5 against +105.4 mm SLE (-0.9). The yearly feedback line reads -0.32, -1.34, -2.63, -3.61, -4.38 and -5.03 Gt/yr at 2050, 2100, 2150, 2200, 2250 and 2300, and each of its 286 lines agrees with the on-minus-off SMB column of its step to 0.05 Gt/yr. The off arm peaks at 2.5e5 m/yr at (-2419000, 1351000) m at t = 2037.4. The final state records smb_elevation_feedback = dacabfdz. Run without ISMIP7_OUTPUT. Final state sha256 4f7395999abe022cef541744bb6184f02306feb3d77f3de9b2af889ded711315. Full record: antarctica/reports/core10_ctrl2015_mri_esm2_0_32km_i116y2003on.md.
 
 ### core10-32km-ctrl2015-mriesm20-i32
 
@@ -2439,7 +2969,7 @@ Core 11 at 32 km without the apparent-MB reference, a cold start on the OCX prot
 - **Friction law:** budd
 - **Mesh:** antarctica_10000_1000_buffered20000 (Rice's .msh on Quartz; 1,869,252 vertices, 3,716,587 cells), DG0 geometry, vertex raster sampling
 - **Initial state / MAP:** warm start from inversion_icepack2_budd_n3_dg0_logvelnet_2000_int5000_bilap_snap20260924_0948.h5 (Rice, log control, controls only), controls and prior transferred by point location, ISMIP7_WARM_START_STRICT=0; the n,m 1 to 3 ramp under scpc_mumps, then ISMIP7_EVAL_CONTINUATION=0
-- **Forcing versions:** MEaSUREs v2 and BedMachine v4.1 from Quartz's antarctica/data; the snapshot's fluidity prior; sub-element friction with the exact front push (ISMIP7_SUBELEMENT_FRICTION=1), TAO lmvm with the mass-consistent metric, bi-Laplacian prior; no dH/dt term
+- **Forcing versions:** MEaSUREs v2 and BedMachine v4.1 from Quartz's antarctica/data; the snapshot's fluidity prior; SEP2 sub-element friction with the exact front push (ISMIP7_SUBELEMENT_FRICTION=1), TAO lmvm with the mass-consistent metric, bi-Laplacian prior; no dH/dt term
 - **Site / partition:** IU Quartz, general partition
 - **Ranks / memory:** 32 ranks, 500G; AveRSS 4.6 GiB, MaxRSS 7.2 GiB a rank
 - **Job ids:** 10824071
@@ -2459,7 +2989,7 @@ Core 11 at 32 km without the apparent-MB reference, a cold start on the OCX prot
 - **Friction law:** budd
 - **Mesh:** antarctica_10000_1000_buffered20000 (Rice's .msh on Quartz; 1,869,252 vertices, 3,716,587 cells), DG0 geometry, vertex raster sampling
 - **Initial state / MAP:** warm start from inversion_icepack2_budd_n3_dg0_logvelnet_2000_int5000_bilap_snap20260924_0948.h5 (Rice, log control, controls only), controls and prior transferred by point location, ISMIP7_WARM_START_STRICT=0; the n,m 1 to 3 ramp under scpc_mumps, then ISMIP7_EVAL_CONTINUATION=1
-- **Forcing versions:** MEaSUREs v2 and BedMachine v4.1 from Quartz's antarctica/data; the snapshot's fluidity prior; sub-element friction with the exact front push (ISMIP7_SUBELEMENT_FRICTION=1), TAO lmvm with the mass-consistent metric, bi-Laplacian prior; no dH/dt term
+- **Forcing versions:** MEaSUREs v2 and BedMachine v4.1 from Quartz's antarctica/data; the snapshot's fluidity prior; SEP2 sub-element friction with the exact front push (ISMIP7_SUBELEMENT_FRICTION=1), TAO lmvm with the mass-consistent metric, bi-Laplacian prior; no dH/dt term
 - **Site / partition:** IU Quartz, general partition
 - **Ranks / memory:** 32 ranks, 500G; AveRSS 7.1 GiB, MaxRSS 8.6 GiB a rank
 - **Job ids:** 10823632
@@ -2479,7 +3009,7 @@ Core 11 at 32 km without the apparent-MB reference, a cold start on the OCX prot
 - **Friction law:** budd
 - **Mesh:** antarctica_10000_1000_buffered20000 (Rice's .msh on Quartz; 1,869,252 vertices, 3,716,587 cells), DG0 geometry, vertex raster sampling
 - **Initial state / MAP:** warm start from inversion_icepack2_budd_n3_dg0_logvelnet_2000_int5000_bilap_snap20260924_0948.h5 (Rice, log control, controls only), controls and prior transferred by point location, ISMIP7_WARM_START_STRICT=0; the n,m 1 to 3 ramp under scpc_mumps, then ISMIP7_EVAL_CONTINUATION=0
-- **Forcing versions:** MEaSUREs v2 and BedMachine v4.1 from Quartz's antarctica/data; the snapshot's fluidity prior; sub-element friction with the exact front push (ISMIP7_SUBELEMENT_FRICTION=1), TAO lmvm with the mass-consistent metric, bi-Laplacian prior; no dH/dt term
+- **Forcing versions:** MEaSUREs v2 and BedMachine v4.1 from Quartz's antarctica/data; the snapshot's fluidity prior; SEP2 sub-element friction with the exact front push (ISMIP7_SUBELEMENT_FRICTION=1), TAO lmvm with the mass-consistent metric, bi-Laplacian prior; no dH/dt term
 - **Site / partition:** IU Quartz, general partition
 - **Ranks / memory:** 32 ranks, 400G; AveRSS 4.8 GiB, MaxRSS 5.4 GiB a rank
 - **Job ids:** 10824072
@@ -2499,7 +3029,7 @@ Core 11 at 32 km without the apparent-MB reference, a cold start on the OCX prot
 - **Friction law:** budd
 - **Mesh:** antarctica_10000_1000_buffered20000 (Rice's .msh on Quartz; 1,869,252 vertices, 3,716,587 cells), DG0 geometry, vertex raster sampling
 - **Initial state / MAP:** warm start from inversion_icepack2_budd_n3_dg0_logvelnet_2000_int5000_bilap_snap20260924_0948.h5 (Rice, log control, controls only), controls and prior transferred by point location, ISMIP7_WARM_START_STRICT=0; the n,m 1 to 3 ramp under scpc_mumps, then ISMIP7_EVAL_CONTINUATION=1
-- **Forcing versions:** MEaSUREs v2 and BedMachine v4.1 from Quartz's antarctica/data; the snapshot's fluidity prior; sub-element friction with the exact front push (ISMIP7_SUBELEMENT_FRICTION=1), TAO lmvm with the mass-consistent metric, bi-Laplacian prior; no dH/dt term
+- **Forcing versions:** MEaSUREs v2 and BedMachine v4.1 from Quartz's antarctica/data; the snapshot's fluidity prior; SEP2 sub-element friction with the exact front push (ISMIP7_SUBELEMENT_FRICTION=1), TAO lmvm with the mass-consistent metric, bi-Laplacian prior; no dH/dt term
 - **Site / partition:** IU Quartz, general partition
 - **Ranks / memory:** 32 ranks, 400G
 - **Job ids:** 10823633
@@ -2519,7 +3049,7 @@ Core 11 at 32 km without the apparent-MB reference, a cold start on the OCX prot
 - **Friction law:** budd
 - **Mesh:** antarctica_10000_1000_buffered20000 (Rice's .msh on Quartz; 1,869,252 vertices, 3,716,587 cells), DG0 geometry, vertex raster sampling
 - **Initial state / MAP:** warm start from inversion_icepack2_budd_n3_dg0_logvelnet_2000_int5000_bilap_snap20260924_0948.h5 (Rice, log control, controls only), controls and prior transferred by point location, ISMIP7_WARM_START_STRICT=0; the n,m 1 to 3 ramp under scpc_mumps, then ISMIP7_EVAL_CONTINUATION=1
-- **Forcing versions:** MEaSUREs v2 and BedMachine v4.1 from Quartz's antarctica/data; the snapshot's fluidity prior; sub-element friction with the exact front push (ISMIP7_SUBELEMENT_FRICTION=1), TAO lmvm with the mass-consistent metric, bi-Laplacian prior; no dH/dt term
+- **Forcing versions:** MEaSUREs v2 and BedMachine v4.1 from Quartz's antarctica/data; the snapshot's fluidity prior; SEP2 sub-element friction with the exact front push (ISMIP7_SUBELEMENT_FRICTION=1), TAO lmvm with the mass-consistent metric, bi-Laplacian prior; no dH/dt term
 - **Site / partition:** IU Quartz, general partition
 - **Ranks / memory:** 64 ranks, 480G
 - **Job ids:** 10823634
@@ -2820,7 +3350,7 @@ Core 11 at 32 km without the apparent-MB reference, a cold start on the OCX prot
 - **Friction law:** budd
 - **Mesh:** Rice's antarctica_5000_2000_buffered0, read from the snapshot (ISMIP7_MESH=checkpoint; 925,183 vertices, 1,835,718 cells), DG0 geometry, vertex raster sampling
 - **Initial state / MAP:** warm start from inversion_icepack2_budd_n3_dg0_logvelnet_2000_int5000_bilap_snap20260924_0948.h5 (Rice, log control, controls only) on its own mesh, ISMIP7_WARM_START_STRICT=0; the n,m 1 to 3 ramp under scpc_mumps, then ISMIP7_EVAL_CONTINUATION=0
-- **Forcing versions:** MEaSUREs v2 and BedMachine v4.1 from Quartz's antarctica/data; the snapshot's fluidity prior; sub-element friction with the exact front push (ISMIP7_SUBELEMENT_FRICTION=1), bi-Laplacian prior (sigma 0.3, rho 7.5 km), full_mumps, no dH/dt term; log-speed weight 85380.4 (auto); scipy L-BFGS-B in sqrt(M) coordinates (ISMIP7_GRAD_PRECOND=mass)
+- **Forcing versions:** MEaSUREs v2 and BedMachine v4.1 from Quartz's antarctica/data; the snapshot's fluidity prior; SEP2 sub-element friction with the exact front push (ISMIP7_SUBELEMENT_FRICTION=1), bi-Laplacian prior (sigma 0.3, rho 7.5 km), full_mumps, no dH/dt term; log-speed weight 85380.4 (auto); scipy L-BFGS-B in sqrt(M) coordinates (ISMIP7_GRAD_PRECOND=mass)
 - **Site / partition:** IU Quartz, general partition
 - **Ranks / memory:** 32 ranks, 400G; MaxRSS 3.5 GiB a rank
 - **Job ids:** 10929496
@@ -2840,7 +3370,7 @@ Core 11 at 32 km without the apparent-MB reference, a cold start on the OCX prot
 - **Friction law:** budd
 - **Mesh:** Rice's antarctica_5000_2000_buffered0, read from the snapshot (ISMIP7_MESH=checkpoint; 925,183 vertices, 1,835,718 cells), DG0 geometry, vertex raster sampling
 - **Initial state / MAP:** warm start from inversion_icepack2_budd_n3_dg0_logvelnet_2000_int5000_bilap_snap20260924_0948.h5 (Rice, log control, controls only) on its own mesh, ISMIP7_WARM_START_STRICT=0; the n,m 1 to 3 ramp under scpc_mumps, then ISMIP7_EVAL_CONTINUATION=0
-- **Forcing versions:** MEaSUREs v2 and BedMachine v4.1 from Quartz's antarctica/data; the snapshot's fluidity prior; sub-element friction with the exact front push (ISMIP7_SUBELEMENT_FRICTION=1), bi-Laplacian prior (sigma 0.3, rho 7.5 km), full_mumps, no dH/dt term; log-speed weight 85380.4 (auto); TAO lmvm with the mass-consistent metric (ISMIP7_GRAD_PRECOND=mass_consistent)
+- **Forcing versions:** MEaSUREs v2 and BedMachine v4.1 from Quartz's antarctica/data; the snapshot's fluidity prior; SEP2 sub-element friction with the exact front push (ISMIP7_SUBELEMENT_FRICTION=1), bi-Laplacian prior (sigma 0.3, rho 7.5 km), full_mumps, no dH/dt term; log-speed weight 85380.4 (auto); TAO lmvm with the mass-consistent metric (ISMIP7_GRAD_PRECOND=mass_consistent)
 - **Site / partition:** IU Quartz, general partition
 - **Ranks / memory:** 32 ranks, 400G; MaxRSS 3.5 GiB a rank
 - **Job ids:** 10929497
@@ -2860,7 +3390,7 @@ Core 11 at 32 km without the apparent-MB reference, a cold start on the OCX prot
 - **Friction law:** budd
 - **Mesh:** Rice's antarctica_5000_2000_buffered0, read from the snapshot (ISMIP7_MESH=checkpoint; 925,183 vertices, 1,835,718 cells), DG0 geometry, vertex raster sampling
 - **Initial state / MAP:** warm start from inversion_icepack2_budd_n3_dg0_logvelnet_2000_int5000_bilap_snap20260924_0948.h5 (Rice, log control, controls only) on its own mesh, ISMIP7_WARM_START_STRICT=0; the n,m 1 to 3 ramp under scpc_mumps, then ISMIP7_EVAL_CONTINUATION=0
-- **Forcing versions:** MEaSUREs v2 and BedMachine v4.1 from Quartz's antarctica/data; the snapshot's fluidity prior; sub-element friction with the exact front push (ISMIP7_SUBELEMENT_FRICTION=1), bi-Laplacian prior (sigma 0.3, rho 7.5 km), full_mumps, no dH/dt term; log-speed weight 85380.4 (auto); scipy L-BFGS-B in raw dof coordinates (ISMIP7_GRAD_PRECOND=none)
+- **Forcing versions:** MEaSUREs v2 and BedMachine v4.1 from Quartz's antarctica/data; the snapshot's fluidity prior; SEP2 sub-element friction with the exact front push (ISMIP7_SUBELEMENT_FRICTION=1), bi-Laplacian prior (sigma 0.3, rho 7.5 km), full_mumps, no dH/dt term; log-speed weight 85380.4 (auto); scipy L-BFGS-B in raw dof coordinates (ISMIP7_GRAD_PRECOND=none)
 - **Site / partition:** IU Quartz, general partition
 - **Ranks / memory:** 32 ranks, 400G; MaxRSS 3.7 GiB a rank
 - **Job ids:** 10929495
@@ -2880,7 +3410,7 @@ Core 11 at 32 km without the apparent-MB reference, a cold start on the OCX prot
 - **Friction law:** budd
 - **Mesh:** Rice's antarctica_5000_2000_buffered0, read from the snapshot (ISMIP7_MESH=checkpoint; 925,183 vertices, 1,835,718 cells), DG0 geometry, vertex raster sampling
 - **Initial state / MAP:** warm start from inversion_icepack2_budd_n3_dg0_logvelnet_2000_int5000_bilap_snap20260924_0948.h5 (Rice, log control, controls only) on its own mesh, ISMIP7_WARM_START_STRICT=0; the n,m 1 to 3 ramp under scpc_mumps, then ISMIP7_EVAL_CONTINUATION=0
-- **Forcing versions:** MEaSUREs v2 and BedMachine v4.1 from Quartz's antarctica/data; the snapshot's fluidity prior; sub-element friction with the exact front push (ISMIP7_SUBELEMENT_FRICTION=1), TAO lmvm with the mass-consistent metric, bi-Laplacian prior; no dH/dt term
+- **Forcing versions:** MEaSUREs v2 and BedMachine v4.1 from Quartz's antarctica/data; the snapshot's fluidity prior; SEP2 sub-element friction with the exact front push (ISMIP7_SUBELEMENT_FRICTION=1), TAO lmvm with the mass-consistent metric, bi-Laplacian prior; no dH/dt term
 - **Site / partition:** IU Quartz, general partition
 - **Ranks / memory:** 32 ranks, 400G; AveRSS 2.7 GiB, MaxRSS 3.4 GiB a rank
 - **Job ids:** 10824069
@@ -2900,7 +3430,7 @@ Core 11 at 32 km without the apparent-MB reference, a cold start on the OCX prot
 - **Friction law:** budd
 - **Mesh:** Rice's antarctica_5000_2000_buffered0, read from the snapshot (ISMIP7_MESH=checkpoint; 925,183 vertices, 1,835,718 cells), DG0 geometry, vertex raster sampling
 - **Initial state / MAP:** warm start from inversion_icepack2_budd_n3_dg0_logvelnet_2000_int5000_bilap_snap20260924_0948.h5 (Rice, log control, controls only) on its own mesh, ISMIP7_WARM_START_STRICT=0; the n,m 1 to 3 ramp under scpc_mumps, then ISMIP7_EVAL_CONTINUATION=1
-- **Forcing versions:** MEaSUREs v2 and BedMachine v4.1 from Quartz's antarctica/data; the snapshot's fluidity prior; sub-element friction with the exact front push (ISMIP7_SUBELEMENT_FRICTION=1), TAO lmvm with the mass-consistent metric, bi-Laplacian prior; no dH/dt term
+- **Forcing versions:** MEaSUREs v2 and BedMachine v4.1 from Quartz's antarctica/data; the snapshot's fluidity prior; SEP2 sub-element friction with the exact front push (ISMIP7_SUBELEMENT_FRICTION=1), TAO lmvm with the mass-consistent metric, bi-Laplacian prior; no dH/dt term
 - **Site / partition:** IU Quartz, general partition
 - **Ranks / memory:** 32 ranks, 400G; AveRSS 3.6 GiB, MaxRSS 4.4 GiB a rank
 - **Job ids:** 10823630
@@ -2920,7 +3450,7 @@ Core 11 at 32 km without the apparent-MB reference, a cold start on the OCX prot
 - **Friction law:** budd
 - **Mesh:** Rice's antarctica_5000_2000_buffered0, read from the snapshot (ISMIP7_MESH=checkpoint; 925,183 vertices, 1,835,718 cells), DG0 geometry, vertex raster sampling
 - **Initial state / MAP:** warm start from inversion_icepack2_budd_n3_dg0_logvelnet_2000_int5000_bilap_snap20260924_0948.h5 (Rice, log control, controls only) on its own mesh, ISMIP7_WARM_START_STRICT=0; the n,m 1 to 3 ramp under scpc_mumps, then ISMIP7_EVAL_CONTINUATION=0
-- **Forcing versions:** MEaSUREs v2 and BedMachine v4.1 from Quartz's antarctica/data; the snapshot's fluidity prior; sub-element friction with the exact front push (ISMIP7_SUBELEMENT_FRICTION=1), TAO lmvm with the mass-consistent metric, bi-Laplacian prior; no dH/dt term
+- **Forcing versions:** MEaSUREs v2 and BedMachine v4.1 from Quartz's antarctica/data; the snapshot's fluidity prior; SEP2 sub-element friction with the exact front push (ISMIP7_SUBELEMENT_FRICTION=1), TAO lmvm with the mass-consistent metric, bi-Laplacian prior; no dH/dt term
 - **Site / partition:** IU Quartz, general partition
 - **Ranks / memory:** 32 ranks, 240G; AveRSS 3.6 GiB, MaxRSS 3.9 GiB a rank
 - **Job ids:** 10824070
@@ -2940,7 +3470,7 @@ Core 11 at 32 km without the apparent-MB reference, a cold start on the OCX prot
 - **Friction law:** budd
 - **Mesh:** Rice's antarctica_5000_2000_buffered0, read from the snapshot (ISMIP7_MESH=checkpoint; 925,183 vertices, 1,835,718 cells), DG0 geometry, vertex raster sampling
 - **Initial state / MAP:** warm start from inversion_icepack2_budd_n3_dg0_logvelnet_2000_int5000_bilap_snap20260924_0948.h5 (Rice, log control, controls only) on its own mesh, ISMIP7_WARM_START_STRICT=0; the n,m 1 to 3 ramp under scpc_mumps, then ISMIP7_EVAL_CONTINUATION=1
-- **Forcing versions:** MEaSUREs v2 and BedMachine v4.1 from Quartz's antarctica/data; the snapshot's fluidity prior; sub-element friction with the exact front push (ISMIP7_SUBELEMENT_FRICTION=1), TAO lmvm with the mass-consistent metric, bi-Laplacian prior; no dH/dt term
+- **Forcing versions:** MEaSUREs v2 and BedMachine v4.1 from Quartz's antarctica/data; the snapshot's fluidity prior; SEP2 sub-element friction with the exact front push (ISMIP7_SUBELEMENT_FRICTION=1), TAO lmvm with the mass-consistent metric, bi-Laplacian prior; no dH/dt term
 - **Site / partition:** IU Quartz, general partition
 - **Ranks / memory:** 32 ranks, 240G; AveRSS 6.9 GiB, MaxRSS 7.2 GiB a rank
 - **Job ids:** 10823631
@@ -2973,7 +3503,7 @@ Core 11 at 32 km without the apparent-MB reference, a cold start on the OCX prot
 
 ### test-32km-inversion-exp-subelement-cold-start
 
-32 km inversion cold start with the exp friction control and sub-element friction, full_mumps and scpc_gamg (stopped), IU.
+32 km inversion cold start with the exp friction control and SEP2 sub-element friction, full_mumps and scpc_gamg (stopped), IU.
 
 - **Task type:** test
 - **Friction law:** budd
@@ -3034,7 +3564,7 @@ Core 11 at 32 km without the apparent-MB reference, a cold start on the OCX prot
 - **Friction law:** budd
 - **Mesh:** antarctica_320000_32000_buffered0 (Quartz's .msh, sha256 fd66fc42; 6,282 vertices, 9,055 cells), DG0 geometry, vertex raster sampling
 - **Initial state / MAP:** cold start: u = 0.1 u_obs, theta = phi = 0, the n,m 1 to 3 ramp under full_mumps, then ISMIP7_EVAL_CONTINUATION=0 (one annotated solve at full n an evaluation)
-- **Forcing versions:** MEaSUREs v2 450 m (sha256 268be94e) and BedMachine v4.1 (sha256 6bd08dbb), byte-identical to Quartz's antarctica/data; ISMIP7_FLUIDITY_PRIOR=legacy; sub-element friction with the exact front push (ISMIP7_SUBELEMENT_FRICTION=1), bi-Laplacian prior (sigma 0.3, rho 7.5 km), full_mumps, no dH/dt term; log-speed weight 0; scipy L-BFGS-B in raw dof coordinates (ISMIP7_GRAD_PRECOND=none)
+- **Forcing versions:** MEaSUREs v2 450 m (sha256 268be94e) and BedMachine v4.1 (sha256 6bd08dbb), byte-identical to Quartz's antarctica/data; ISMIP7_FLUIDITY_PRIOR=legacy; SEP2 sub-element friction with the exact front push (ISMIP7_SUBELEMENT_FRICTION=1), bi-Laplacian prior (sigma 0.3, rho 7.5 km), full_mumps, no dH/dt term; log-speed weight 0; scipy L-BFGS-B in raw dof coordinates (ISMIP7_GRAD_PRECOND=none)
 - **Site / partition:** IU workstation (Mac, 16 cores, 128 GB), data under /Volumes/LaCie/Data/antarctica_general/ismip7_obs
 - **Ranks / memory:** 4 ranks, run after its TAO twin, beside another session's 5-process memory probe (9 of 16 cores busy); peak 2.5 GB a rank
 - **Code:** 71a6809 (PR 155 with the solver reuse and the prior-solve fix merged); icepack_tools e7b923e
@@ -3053,7 +3583,7 @@ Core 11 at 32 km without the apparent-MB reference, a cold start on the OCX prot
 - **Friction law:** budd
 - **Mesh:** antarctica_320000_32000_buffered0 (Quartz's .msh, sha256 fd66fc42; 6,282 vertices, 9,055 cells), DG0 geometry, vertex raster sampling
 - **Initial state / MAP:** cold start: u = 0.1 u_obs, theta = phi = 0, the n,m 1 to 3 ramp under full_mumps, then ISMIP7_EVAL_CONTINUATION=0 (one annotated solve at full n an evaluation)
-- **Forcing versions:** MEaSUREs v2 450 m (sha256 268be94e) and BedMachine v4.1 (sha256 6bd08dbb), byte-identical to Quartz's antarctica/data; ISMIP7_FLUIDITY_PRIOR=legacy; sub-element friction with the exact front push (ISMIP7_SUBELEMENT_FRICTION=1), bi-Laplacian prior (sigma 0.3, rho 7.5 km), full_mumps, no dH/dt term; log-speed weight 0; TAO lmvm with the mass-consistent metric (ISMIP7_GRAD_PRECOND=mass_consistent)
+- **Forcing versions:** MEaSUREs v2 450 m (sha256 268be94e) and BedMachine v4.1 (sha256 6bd08dbb), byte-identical to Quartz's antarctica/data; ISMIP7_FLUIDITY_PRIOR=legacy; SEP2 sub-element friction with the exact front push (ISMIP7_SUBELEMENT_FRICTION=1), bi-Laplacian prior (sigma 0.3, rho 7.5 km), full_mumps, no dH/dt term; log-speed weight 0; TAO lmvm with the mass-consistent metric (ISMIP7_GRAD_PRECOND=mass_consistent)
 - **Site / partition:** IU workstation (Mac, 16 cores, 128 GB), data under /Volumes/LaCie/Data/antarctica_general/ismip7_obs
 - **Ranks / memory:** 4 ranks, run before its L-BFGS-B twin, beside another session's 5-process memory probe (9 of 16 cores busy); peak 2.5 GB a rank
 - **Code:** 71a6809 (PR 155 with the solver reuse and the prior-solve fix merged); icepack_tools e7b923e
@@ -3072,7 +3602,7 @@ Core 11 at 32 km without the apparent-MB reference, a cold start on the OCX prot
 - **Friction law:** budd
 - **Mesh:** antarctica_320000_32000_buffered0 (Quartz's .msh, sha256 fd66fc42; 6,282 vertices, 9,055 cells), DG0 geometry, vertex raster sampling
 - **Initial state / MAP:** cold start: u = 0.1 u_obs, theta = phi = 0, the n,m 1 to 3 ramp under full_mumps, then ISMIP7_EVAL_CONTINUATION=0 (one annotated solve at full n an evaluation)
-- **Forcing versions:** MEaSUREs v2 450 m (sha256 268be94e) and BedMachine v4.1 (sha256 6bd08dbb), byte-identical to Quartz's antarctica/data; ISMIP7_FLUIDITY_PRIOR=legacy; sub-element friction with the exact front push (ISMIP7_SUBELEMENT_FRICTION=1), bi-Laplacian prior (sigma 0.3, rho 7.5 km), full_mumps, no dH/dt term; log-speed weight 0; scipy L-BFGS-B in sqrt(M) coordinates (ISMIP7_GRAD_PRECOND=mass)
+- **Forcing versions:** MEaSUREs v2 450 m (sha256 268be94e) and BedMachine v4.1 (sha256 6bd08dbb), byte-identical to Quartz's antarctica/data; ISMIP7_FLUIDITY_PRIOR=legacy; SEP2 sub-element friction with the exact front push (ISMIP7_SUBELEMENT_FRICTION=1), bi-Laplacian prior (sigma 0.3, rho 7.5 km), full_mumps, no dH/dt term; log-speed weight 0; scipy L-BFGS-B in sqrt(M) coordinates (ISMIP7_GRAD_PRECOND=mass)
 - **Site / partition:** IU workstation (Mac, 16 cores, 128 GB), data under /Volumes/LaCie/Data/antarctica_general/ismip7_obs
 - **Ranks / memory:** 4 ranks, the three arms run together; peak 2.8 GB a rank
 - **Code:** 4cf7f0e (PR 155); icepack_tools e7b923e
@@ -3091,7 +3621,7 @@ Core 11 at 32 km without the apparent-MB reference, a cold start on the OCX prot
 - **Friction law:** budd
 - **Mesh:** antarctica_320000_32000_buffered0 (Quartz's .msh, sha256 fd66fc42; 6,282 vertices, 9,055 cells), DG0 geometry, vertex raster sampling
 - **Initial state / MAP:** cold start: u = 0.1 u_obs, theta = phi = 0, the n,m 1 to 3 ramp under full_mumps, then ISMIP7_EVAL_CONTINUATION=0 (one annotated solve at full n an evaluation)
-- **Forcing versions:** MEaSUREs v2 450 m (sha256 268be94e) and BedMachine v4.1 (sha256 6bd08dbb), byte-identical to Quartz's antarctica/data; ISMIP7_FLUIDITY_PRIOR=legacy; sub-element friction with the exact front push (ISMIP7_SUBELEMENT_FRICTION=1), bi-Laplacian prior (sigma 0.3, rho 7.5 km), full_mumps, no dH/dt term; log-speed weight 0; scipy L-BFGS-B in raw dof coordinates (ISMIP7_GRAD_PRECOND=none)
+- **Forcing versions:** MEaSUREs v2 450 m (sha256 268be94e) and BedMachine v4.1 (sha256 6bd08dbb), byte-identical to Quartz's antarctica/data; ISMIP7_FLUIDITY_PRIOR=legacy; SEP2 sub-element friction with the exact front push (ISMIP7_SUBELEMENT_FRICTION=1), bi-Laplacian prior (sigma 0.3, rho 7.5 km), full_mumps, no dH/dt term; log-speed weight 0; scipy L-BFGS-B in raw dof coordinates (ISMIP7_GRAD_PRECOND=none)
 - **Site / partition:** IU workstation (Mac, 16 cores, 128 GB), data under /Volumes/LaCie/Data/antarctica_general/ismip7_obs
 - **Ranks / memory:** 4 ranks, the three arms run together; peak 2.6 GB a rank
 - **Code:** 4cf7f0e (PR 155); icepack_tools e7b923e
@@ -3110,7 +3640,7 @@ Core 11 at 32 km without the apparent-MB reference, a cold start on the OCX prot
 - **Friction law:** budd
 - **Mesh:** antarctica_320000_32000_buffered0 (Quartz's .msh, sha256 fd66fc42; 6,282 vertices, 9,055 cells), DG0 geometry, vertex raster sampling
 - **Initial state / MAP:** cold start: u = 0.1 u_obs, theta = phi = 0, the n,m 1 to 3 ramp under full_mumps, then ISMIP7_EVAL_CONTINUATION=0 (one annotated solve at full n an evaluation)
-- **Forcing versions:** MEaSUREs v2 450 m (sha256 268be94e) and BedMachine v4.1 (sha256 6bd08dbb), byte-identical to Quartz's antarctica/data; ISMIP7_FLUIDITY_PRIOR=legacy; sub-element friction with the exact front push (ISMIP7_SUBELEMENT_FRICTION=1), bi-Laplacian prior (sigma 0.3, rho 7.5 km), full_mumps, no dH/dt term; log-speed weight 0; TAO lmvm with the mass-consistent metric (ISMIP7_GRAD_PRECOND=mass_consistent)
+- **Forcing versions:** MEaSUREs v2 450 m (sha256 268be94e) and BedMachine v4.1 (sha256 6bd08dbb), byte-identical to Quartz's antarctica/data; ISMIP7_FLUIDITY_PRIOR=legacy; SEP2 sub-element friction with the exact front push (ISMIP7_SUBELEMENT_FRICTION=1), bi-Laplacian prior (sigma 0.3, rho 7.5 km), full_mumps, no dH/dt term; log-speed weight 0; TAO lmvm with the mass-consistent metric (ISMIP7_GRAD_PRECOND=mass_consistent)
 - **Site / partition:** IU workstation (Mac, 16 cores, 128 GB), data under /Volumes/LaCie/Data/antarctica_general/ismip7_obs
 - **Ranks / memory:** 4 ranks, the three arms run together; peak 2.6 GB a rank
 - **Code:** 4cf7f0e (PR 155); icepack_tools e7b923e
@@ -3351,7 +3881,7 @@ Core 11 at 32 km without the apparent-MB reference, a cold start on the OCX prot
 
 ### test-32km-inversion-reuse-tao-after
 
-32 km inversion, 20 TAO iterations under scpc_gamg with sub-element friction and five-solve evaluations, one paused solver for the run (done), IU.
+32 km inversion, 20 TAO iterations under scpc_gamg with SEP2 sub-element friction and five-solve evaluations, one paused solver for the run (done), IU.
 
 - **Task type:** test
 - **Friction law:** budd
@@ -3370,7 +3900,7 @@ Core 11 at 32 km without the apparent-MB reference, a cold start on the OCX prot
 
 ### test-32km-inversion-reuse-tao-after-rerun
 
-32 km inversion, 10 TAO iterations under scpc_gamg with sub-element friction and five-solve evaluations, one paused solver for the run, timed on a quiet machine (done), IU.
+32 km inversion, 10 TAO iterations under scpc_gamg with SEP2 sub-element friction and five-solve evaluations, one paused solver for the run, timed on a quiet machine (done), IU.
 
 - **Task type:** test
 - **Friction law:** budd
@@ -3389,7 +3919,7 @@ Core 11 at 32 km without the apparent-MB reference, a cold start on the OCX prot
 
 ### test-32km-inversion-reuse-tao-before
 
-32 km inversion, 20 TAO iterations under scpc_gamg with sub-element friction and five-solve evaluations on PR 155's head: a new paused solver every taped solve (done), IU.
+32 km inversion, 20 TAO iterations under scpc_gamg with SEP2 sub-element friction and five-solve evaluations on PR 155's head: a new paused solver every taped solve (done), IU.
 
 - **Task type:** test
 - **Friction law:** budd
@@ -3408,7 +3938,7 @@ Core 11 at 32 km without the apparent-MB reference, a cold start on the OCX prot
 
 ### test-32km-inversion-reuse-tao-before-rerun
 
-32 km inversion, 10 TAO iterations under scpc_gamg with sub-element friction and five-solve evaluations on PR 155's head, timed on a quiet machine: a new paused solver every taped solve (done), IU.
+32 km inversion, 10 TAO iterations under scpc_gamg with SEP2 sub-element friction and five-solve evaluations on PR 155's head, timed on a quiet machine: a new paused solver every taped solve (done), IU.
 
 - **Task type:** test
 - **Friction law:** budd
@@ -3433,7 +3963,7 @@ Core 11 at 32 km without the apparent-MB reference, a cold start on the OCX prot
 - **Friction law:** budd
 - **Mesh:** antarctica_320000_32000_buffered0 (Quartz's .msh, sha256 fd66fc42; 6,282 vertices, 9,055 cells), DG0 geometry, vertex raster sampling
 - **Initial state / MAP:** cold start: u = 0.1 u_obs, theta = phi = 0, the n,m 1 to 3 ramp under full_mumps, then ISMIP7_EVAL_CONTINUATION=0 (one annotated solve at full n an evaluation)
-- **Forcing versions:** MEaSUREs v2 450 m (sha256 268be94e) and BedMachine v4.1 (sha256 6bd08dbb), byte-identical to Quartz's antarctica/data; ISMIP7_FLUIDITY_PRIOR=legacy; sub-element friction with the exact front push (ISMIP7_SUBELEMENT_FRICTION=1), bi-Laplacian prior (sigma 0.3, rho 7.5 km), full_mumps, no dH/dt term; log-speed weight 0; TAO lmvm with the mass-consistent metric (ISMIP7_GRAD_PRECOND=mass_consistent)
+- **Forcing versions:** MEaSUREs v2 450 m (sha256 268be94e) and BedMachine v4.1 (sha256 6bd08dbb), byte-identical to Quartz's antarctica/data; ISMIP7_FLUIDITY_PRIOR=legacy; SEP2 sub-element friction with the exact front push (ISMIP7_SUBELEMENT_FRICTION=1), bi-Laplacian prior (sigma 0.3, rho 7.5 km), full_mumps, no dH/dt term; log-speed weight 0; TAO lmvm with the mass-consistent metric (ISMIP7_GRAD_PRECOND=mass_consistent)
 - **Site / partition:** IU workstation (Mac, 16 cores, 128 GB), data under /Volumes/LaCie/Data/antarctica_general/ismip7_obs
 - **Ranks / memory:** 4 ranks, beside the unit suite; peak 3.1 GB a rank
 - **Code:** c7ea173 (PR 155 with the solver reuse); icepack_tools e7b923e
@@ -3484,7 +4014,7 @@ Core 11 at 32 km without the apparent-MB reference, a cold start on the OCX prot
 
 ### test-32km-inversion-subelement-full-mumps
 
-32 km inversion, 20 TAO iterations under full_mumps with sub-element friction, the exact front push and five-solve evaluations (done), IU.
+32 km inversion, 20 TAO iterations under full_mumps with SEP2 sub-element friction, the exact front push and five-solve evaluations (done), IU.
 
 - **Task type:** test
 - **Friction law:** budd
@@ -3503,7 +4033,7 @@ Core 11 at 32 km without the apparent-MB reference, a cold start on the OCX prot
 
 ### test-32km-inversion-subelement-scpc-gamg
 
-32 km inversion, 20 TAO iterations under scpc_gamg (NLEQ-ERR at Krylov rtol 1e-8) with sub-element friction, the exact front push and five-solve evaluations (done), IU.
+32 km inversion, 20 TAO iterations under scpc_gamg (NLEQ-ERR at Krylov rtol 1e-8) with SEP2 sub-element friction, the exact front push and five-solve evaluations (done), IU.
 
 - **Task type:** test
 - **Friction law:** budd

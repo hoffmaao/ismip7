@@ -42,7 +42,7 @@ own venv and call it by absolute path.
 | BedMachine Antarctica v4.1, MEaSUREs velocity v2 | 8 GB | `scripts/download_data.py` (Earthdata login) | x | x | x | |
 | RACMO2.4p1 SMB climatology | 2 GB | same script | | x | | |
 | ISMIP7 observations MIPkit v1.2 (Smith dH/dt) | 9 GB | `scripts/download_mirror.py --product ismip7-ais-observations data/mipkit/`, landing at `ISMIP7/AIS/obs/mipkit/AntarcticaObsISMIP7-v1.2.nc` (`ISMIP7_OBS_KIT` overrides). `scripts/download_forcing.py --calibration` stages the same v1.2 file in the same place over Globus | `ISMIP7_DHDT_WEIGHT` | a start before 2015 (historicals, OCX) | `--from-obs` | |
-| ISMIP7 forcing per ESM and scenario: SMB anomaly 7.5 GB, ocean `tf` 11 GB, `so` 6.9 GB (ssp585; historical 4.3 GB) | 25 GB each | `scripts/download_mirror.py` | | x | | |
+| ISMIP7 forcing per ESM and scenario: SMB anomaly 7.5 GB, SMB gradient `dacabfdz` 0.2 GB, ocean `tf` 11 GB, `so` 6.9 GB (ssp585; historical 4.3 GB) | 25 GB each | `scripts/download_mirror.py` | | x | | |
 | ISMIP7 fracture (collapse mask, lake properties, excess melt) | 3 GB per scenario | same, `data/<ESM>/<scenario>/fracture/` | | `ISMIP7_FRACTURE=mask` | | |
 | Ocean OI climatology and IMBIE basin numbers | 3 GB | `scripts/download_forcing.py --ocean --calibration` | | x | | |
 | Whole AIS tree (all ESMs, scenarios, `ctrl`, OCX, calibration) | 313 GB | same | | | | |
@@ -52,12 +52,16 @@ own venv and call it by absolute path.
 Source Cooperative carries the data-freeze copy and needs no account.
 
 ```bash
-# one scenario for one ESM (about 25 GB)
+# one scenario for one ESM (about 25 GB); dacabfdz is the SMB gradient the
+# SMB-elevation feedback reads (section 6)
 python antarctica/scripts/download_mirror.py \
     data/CESM2-WACCM/ssp585/SDBN1-8000m/acabf-anomaly/ \
+    data/CESM2-WACCM/ssp585/SDBN1-8000m/dacabfdz/ \
     data/CESM2-WACCM/ssp585/ocean/tf/ data/CESM2-WACCM/ssp585/ocean/so/
-# the control's ocean for one ESM, which cores 9 and 10 read (about 18 GB)
+# the control's ocean and SMB gradient for one ESM, which cores 9 and 10 read
+# (about 18 GB)
 python antarctica/scripts/download_mirror.py \
+    data/CESM2-WACCM/ctrl/SDBN1-8000m/dacabfdz/ \
     data/CESM2-WACCM/ctrl/ocean/tf/ data/CESM2-WACCM/ctrl/ocean/so/
 # the observations MIPkit (about 9 GB)
 python antarctica/scripts/download_mirror.py --product ismip7-ais-observations data/mipkit/
@@ -224,13 +228,15 @@ python scripts/download_forcing.py --status
 | `GLOBUS_LOCAL_ENDPOINT` | your Globus Connect Personal endpoint UUID | required to transfer |
 
 Scenario forcing lives in the collection's top-level `/ISMIP7/AIS/<ESM>/<scenario>/`
-tree. `--scenarios` mirrors the minimal runtime sets (SDBN1-8000m `acabf` and
-`acabf-anomaly`, ocean `tf` and `so`, fracture) with version autodetection and
-checksum sync, so re-runs are completeness checks. Climatology, obs and
-calibration sets come from `/ISMIP6/ISMIP7_Prep/CMIP6_test_protocol/AIS`; the
-`OCEAN_FILES` and `CALIBRATION_FILES` dicts in the script are the manifest.
-Without `GLOBUS_LOCAL_ENDPOINT` the script prints the paths for a manual
-transfer in the web app.
+tree. `--scenarios` mirrors the minimal runtime sets (SDBN1-8000m `acabf`,
+`acabf-anomaly` and the SMB gradient `dacabfdz`, ocean `tf` and `so`, fracture)
+with version autodetection and checksum sync, so re-runs are completeness
+checks. `--scenario ctrl` fetches the control's set, its `dacabfdz` and ocean.
+Climatology, obs and calibration sets come from
+`/ISMIP6/ISMIP7_Prep/CMIP6_test_protocol/AIS`; the `OCEAN_FILES` and
+`CALIBRATION_FILES` dicts in the script are the manifest. Without
+`GLOBUS_LOCAL_ENDPOINT` the script prints the paths for a manual transfer in
+the web app.
 
 ### 2b. The runtime tree
 
@@ -360,16 +366,23 @@ way and factors the condensed system, which makes it the exact reference for
 `scpc_gamg`.
 
 Which is faster depends on the friction law and on how an evaluation reaches
-full n, and in the configuration production inversions run it is
-`full_mumps`, so the default stays (issue #156; the tables close this
-section). Seconds a TAO iteration on 32 ranks of Quartz, sub-element
-friction, the exact front push, the mass-consistent metric:
+full n. On the Quartz measurements below `full_mumps` stayed the default
+(issue #156), because the five-solve evaluations, then the default, were
+where production inversions spent their time. Every sub-element number in
+this section is SEP2, the only scheme before PR 158. PR 158 made SEP1 and
+the direct forward (one solve an evaluation) the inversion's defaults, so
+the one-solve rows are now the ones that matter, and they predate three
+changes that move each side: `full_mumps` lost the SCPC zero blocks (its
+seconds are upper bounds), `scpc_gamg` keeps its solver across evaluations,
+and both lost the prior's per-call LU (the tables closing this section).
+The default is open again. Seconds a TAO iteration on 32 ranks of Quartz,
+SEP2 sub-element friction, the exact front push, the mass-consistent metric:
 
 | evaluations | mesh | `full_mumps` | `scpc_gamg` |
 |---|---|---|---|
-| one solve at full n (`ISMIP7_EVAL_CONTINUATION=0`) | 2 km | 227 | 175 |
+| one solve at full n (`ISMIP7_EVAL_CONTINUATION=0`; the direct forward's count) | 2 km | 227 | 175 |
 | one solve at full n | 1 km | 347 | 343 |
-| five solves, n from 1 (`ISMIP7_EVAL_CONTINUATION=1`, the default) | 2 km | 982 | 2405 |
+| five solves, n from 1 (`ISMIP7_EVAL_CONTINUATION=1`, the default before PR 158) | 2 km | 982 | 2405 |
 | five solves | 1 km | 1463 | 4023 on 64 ranks; on 32, evaluation 1 unfinished after 4.9 h |
 
 Each five-solve evaluation restarts at n = 1 from the previous evaluation's
@@ -392,7 +405,13 @@ details of the condensed modes:
 - The Newton solve holds its Jacobian at the iterate SCPC condensed
   (`frozen_linearization`), and `tlm_adjoint` refuses that callback while it
   records. The solve therefore runs with the manager paused, and the recorded
-  equation confirms the converged state at SNES iteration 0.
+  equation confirms the converged state at SNES iteration 0. The direct
+  forward (`ISMIP7_DIRECT_FORWARD`, PR 158) sends every mode this way,
+  `full_mumps` with its Jacobian live, under `direct_forward_parameters`; a
+  direct solve that fails leaves the state where it found it and raises, for
+  the failed-trial rescue. On the slabs the direct gradient is the taped one
+  to 1e-13 under the exact solvers and to 2.2e-9 under `scpc_gamg`, SEP1 as
+  SEP2.
 - The matrix-free adjoint solve receives no form compiler parameters, so the
   taped form carries its quadrature degree in its integrals. Without that the
   adjoint is assembled at UFL's estimated degree (up to 26) against a degree 4
@@ -1057,7 +1076,50 @@ historical endpoint so only the first link starts there; `--tag` or
 resumes its own files; `--checkpoint-interval` sets the step-count fallback.
 Checkpoints carry the mesh, geometry, inversion fields and the full `(u, M, τ)`
 state, so restarts work at any rank count. A resume refuses to start when
-`ISMIP7_FRICTION` or `ISMIP7_APPARENT_MB` disagree with the checkpoint.
+`ISMIP7_FRICTION`, `ISMIP7_APPARENT_MB` or `ISMIP7_SMB_ELEVATION_FEEDBACK`
+disagree with the checkpoint.
+
+**SMB-elevation feedback.** Every driver adds `dacabfdz(t) (s - s_ref)` to the
+SMB each step (`forcing.SMBElevationFeedback`), the form and the gradient the
+SMB focus group's Atmospheric forcing README (September 2026) recommends for
+Antarctica. Both surfaces are the flotation surface `max(b + h, (1 - rho_I/rho_W) h)`:
+of the thickness at the start of the step, and of `H_init`, the thickness of
+the chain's initial state, which every checkpoint carries. A projection or
+control branched from a historical therefore measures its surface change from
+the historical's initial state, and the change is exactly zero at a cold
+start, where the `balance` apparent-MB reference folds the first step's SMB
+into `a_ref`. The feedback enters `accum`, so the transport, the `smb_gtyr`
+budget column and the submitted `acabf` all carry it. The gradient each core
+reads:
+
+| cores | gradient |
+|---|---|
+| 1 to 8 | the core's own ESM and scenario, same product and version as its `acabf-anomaly` |
+| 9, 10 | the ESM's `ctrl`, the same in every year |
+| 11 | the OCX product's, at v2 or newer in both `ISMIP7_OCX_FORCING` modes (the v1 was spatially shifted, discussion #45) |
+
+`ISMIP7_SMB_ELEVATION_FEEDBACK=0` turns it off. With it on, a run refuses to
+start on a gradient that is absent, short or below its version floor, and the
+preflight reports the same cores BLOCKED. Every forward checkpoint records the
+mode in its `smb_elevation_feedback` attribute (absent reads as off), and a
+restart refuses a checkpoint from the other mode unless it is an adapted t=0
+state: a chain carries the feedback from its cold start or not at all, so a
+projection with the feedback on needs a historical run with it on. Its size at
+32 km, CESM2-WACCM core 1 then core 7, as the chain with it minus the same
+chain without it:
+
+| historical start | SMB at 2015 | at 2150 | at 2300 | VAF at 2300 | record |
+|---|---|---|---|---|---|
+| 2003 | -0.1 Gt/yr | -22 Gt/yr | -866 Gt/yr | -43.9 mm SLE | `runlog/core07-32km-ssp585-cesm2waccm-i116y2003on.json` |
+| 1850 | -3.6 Gt/yr | +39 Gt/yr | -613 Gt/yr | +17.2 mm SLE | `runlog/core07-32km-ssp585-cesm2waccm-i116on.json` |
+
+The 1850 chain entered 2015 with a surface change of up to +790 m, 165 years
+of drift, and the 2003 chain with up to +414 m. The controls from the 2003
+start carry almost none of the difference: by 2301 the feedback changes VAF by
+-1.3 mm SLE in core 9 and -0.9 in core 10
+(`runlog/core09-32km-ctrl2015-cesm2waccm-i116y2003on.json`,
+`runlog/core10-32km-ctrl2015-mriesm20-i116y2003on.json`), so core 7 minus core
+9 keeps -43.7 of the -44.9 mm SLE.
 
 **Is the run on track?**
 
@@ -1227,11 +1289,15 @@ projection), run in that run's own shell so it captures the environment.
 | `ISMIP7_LOG_VEL_EPS` | regularisation speed (m/yr) inside the log | `1.0` |
 | `ISMIP7_WARM_START` | path to a MAP or timing-cache checkpoint used to seed `theta`/`phi` (and, when present, geometry, `fluidity_prior`, and the mixed diagnostic state). Fields are interpolated onto the live mesh, so a 1-core cache can warm-start a multi-rank invert | unset |
 | `ISMIP7_WARM_START_THETA` | how `θ` comes over from the warm start. `θ` is a log-deviation from the friction anchor, so under a different anchor (`ISMIP7_ANCHOR_LENGTH`) the same `θ` is a different friction. `1` takes it as it is and warns when the anchors differ; `physical` rebases it on grounded ice so the friction `C_w0 exp(θ)` is the warm start's and the first solve reproduces the warm start's (from an exp-control MAP the previous anchor is its constant `friction_c_ref`); `0` starts at the new prior mean | `1` |
+| `ISMIP7_WARM_START_PHI` | how `φ` comes over from the warm start. `1` takes it as it is, a deviation from this run's own fluidity prior; `physical` rebases it onto this run's prior (`ISMIP7_FLUIDITY_PRIOR`) so `A = A_prior exp(φ)` is the warm start's, e.g. a thermal-prior MAP warm-starting a Pattyn-prior run; `0` starts at the prior mean | `1` |
 | `ISMIP7_WARM_START_GEOMETRY` | `1` takes thickness, bed, surface, `velocity_obs` and the mixed state from the warm start; `0` keeps this mesh's own BedMachine sample. Defaults to `1` on the same mesh, except that a MAP recording a different `lake_ice_base` does not supply its geometry, so an old MAP cannot bring the lake bowl back | `1` on the same mesh, else `0` |
 | `ISMIP7_ANCHOR_LENGTH` | reach (m) of the driving stress in the friction anchor `C_w0 = tau / max(|u_obs|, 1)^(1/m)`, the prior mean of the friction. `0` is the local balance, which vanishes with the surface slope and leaves ice divides with no friction in the prior. A positive length averages the driving-stress magnitude of the grounded ice over about that distance (a screened-Poisson filter with the second moment of a Gaussian of that standard deviation), so floating and ice-free cells neither add to nor dilute it. Stamped into the MAP as `friction_anchor_length`; a forward rebuilds the anchor from the MAP's value and aborts if this variable says otherwise | `0` |
 | `ISMIP7_LAKE_ICE_BASE` | under BedMachine's subglacial-lake mask (4, Lake Vostok) raise the bed to the ice base `s - H`. BedMachine's bed there is the lake floor, so `b + H` sits below its surface by the water column: a bowl a median 266 m and up to 916 m deep over 15,200 km2, with driving stresses near 1 MPa on its walls. Stamped into the MAP as `lake_ice_base`; a forward follows the MAP, so a MAP inverted without it keeps its own geometry | `1` |
-| `ISMIP7_SKIP_CONTINUATION` | `1` skips the cold `n,m: 1→n` ramp on the initial solve and inside each annotated forward eval (single solve at full exponents). Auto-enabled when the warm start supplies a full mixed state | `0` |
-| `ISMIP7_EVAL_CONTINUATION` | `0` keeps the initial `n,m: 1→n` ramp and then solves each annotated forward eval once at the full exponents, from the previous eval's state; a trial point where that solve fails takes the TAO path's re-ramp rescue. The objective is the same either way, and the MAP records the mode as `eval_continuation` | `1` |
+| `ISMIP7_SKIP_CONTINUATION` | `1` skips the cold `n,m: 1→n` ramp on the initial solve, and makes each objective evaluation one taped solve at the full exponents in place of the direct forward (timing lanes). A warm start that supplies a full mixed state skips the initial ramp by itself and keeps the direct forward | `0` |
+| `ISMIP7_DIRECT_FORWARD` | each objective evaluation is one untaped Newton solve at the full exponents from the last converged state, then a taped solve that starts converged, under every `ISMIP7_INVERSION_LINEAR_SOLVER` (`icepack2_tools/taped_solve.py`). A direct solve that fails goes to the failed-trial rescue, or to the line search's backtrack. `0` restores the taped 5-stage `n: 1→3` ladder in every evaluation, or one taped solve when the warm start supplied its mixed state or `ISMIP7_EVAL_CONTINUATION=0`. The MAP and the timing record carry the mode as `eval_mode` | `1` |
+| `ISMIP7_DIRECT_FORWARD_MAXIT` / `_DTOL` | the direct solve's Newton iteration cap, and the residual growth (`snes_divergence_tolerance`) at which it is a lost trial | `30` / `1e6` |
+| `ISMIP7_TRIAL_RESCUE_RUNGS` | rungs of the continuation ladder a failed line-search trial may climb before the trial counts as failed; `0` sends it straight to backtracking | `1` |
+| `ISMIP7_EVAL_CONTINUATION` | with `ISMIP7_DIRECT_FORWARD=0` only: `0` keeps the initial `n,m: 1→n` ramp and then solves each annotated forward eval once at the full exponents, from the previous eval's state; a trial point where that solve fails takes the TAO path's re-ramp rescue. The objective is the same either way, and the MAP records the mode as `eval_continuation` | `1` |
 | `ISMIP7_INVERSION_LINEAR_SOLVER` | linear solver of the annotated forwards, of the adjoint solves against them and of the publishing solve: `full_mumps` (the full mixed-Jacobian MUMPS LU), `scpc_mumps` or `scpc_gamg` (the transient's condensed modes; see "Inversion solver" in section 4). Recorded in the published (full-state) MAP as `state_solver_mode`, with its options as `state_solver_parameters`; the periodic checkpoints carry no solver record. It is outside the objective, so a chain may change it between links. The startup ramp follows `ISMIP7_DIAGNOSTIC_LINEAR_SOLVER` | `full_mumps` |
 | `ISMIP7_GAMMA_THETA` / `ISMIP7_GAMMA_PHI` | Whittle-Matern prior strength on `θ` and `φ`, coupled to `ISMIP7_MISFIT_NORM` since normalising divides the misfit by about sigma^2. `scripts/lsurface.py` sweeps both on a grid and picks the L-curve corner of each (usage in its docstring) | `1e5` under `sigma`, `1e4` under `none` |
 | `ISMIP7_L_REG` | prior correlation length (m) | `7.5e3` |
@@ -1240,6 +1306,9 @@ projection), run in that run's own shell so it captures the environment.
 | `ISMIP7_PRIOR_FORM` | `laplacian` uses `A = delta*M + gamma*K` as the prior precision; `bilaplacian` uses `A M^-1 A`, the squared-operator prior of Villa et al. (2021), the operator that a 2-D Whittle-Matern field needs to be function-valued. Different priors, not two spellings of one: their gammas are not convertible and their MAPs are not comparable, so the MAP stamps `prior_form` | `laplacian` |
 | `ISMIP7_PRIOR_SIGMA_THETA` / `_PHI`, `ISMIP7_PRIOR_RHO` | `bilaplacian` only: the log-deviation scale and correlation length (m), converted to `(delta, gamma)` by the closed forms of Villa et al. (2021), `sigma^2 = 1/(4 pi gamma delta)`, `rho = sqrt(8 gamma/delta)`. The un-squared form has no such closed form, which is why its gamma can only be tuned | `0.3` / `0.3` / `ISMIP7_L_REG` |
 | `ISMIP7_PRECOND_STEP0` | TAO metrics only: the largest change the FIRST step may make to a control, in that control's units, applied per control block. L-BFGS's first step is `-H_0 g` at unit length with no curvature pair to rescale it, and one evaluation outside the region where the forward has a solution returns NaN that every later trial point inherits | `0.15` |
+| `ISMIP7_CHECKPOINT_EVERY_IT` | inversion checkpoint cadence: `ISMIP7_MAP_OUT` is rewritten every N accepted TAO iterates (every N evaluations on the scipy path). A chain link resumes from the last one, so a long interval repeats work after a wall-clock kill | `1` |
+| `ISMIP7_GRAD_CHECK` | `1` runs a Taylor test of the taped objective's gradient at the start controls, prints the spread of the gradient and of the metric-scaled first step over grounded and floating nodes, and exits without writing a MAP or a `.done` marker. TAO metrics only (`ISMIP7_GRAD_PRECOND=mass_consistent` or `prior`); on a scipy metric the driver refuses it at startup | `0` |
+| `ISMIP7_GRAD_CHECK_SEED` | the Taylor test's largest perturbation, relative to the controls' l-inf norm | `1e-3` |
 | `ISMIP7_GTOL` | TAO metrics only: `tao_gatol` on the prior-metric gradient norm `sqrt(g' A^-1 g)`, which is mesh independent unlike the raw l2 norm the scipy path prints. `0` leaves stopping to `ISMIP7_FTOL` and `ISMIP7_MAXITER` | `0` |
 | `ISMIP7_FTOL` | the relative-decrease stopping rule, on both optimizer paths: stop once `(J_old - J_new) / max(|J_old|, |J_new|, 1) <= ftol` (scipy's L-BFGS-B `ftol` is the same expression). `1e-10` converges a production inversion; the L-surface sweeps pass `1e-4`. `0` disables it | `1e-10` |
 | `ISMIP7_MIN_ITER` | TAO metrics only: iterations before `ISMIP7_FTOL` may stop the run | `3` |
@@ -1281,6 +1350,7 @@ redeclare those literals.
 | `ISMIP7_FRACTURE` | `mask` applies the ISMIP7 collapse forcing to every floating cell it flags, booked as calving; `mask_front` only to the flagged cells open water has reached, so no hole opens behind a standing front (the two end-members of discussion #30). Masks exist for the SSPs only, so the control, historicals and OCX abort on either. Needs DG0. Every run prints its mode once (`Ice-shelf collapse forcing: ISMIP7_FRACTURE=...`, `none` included). Under a mask mode the timeseries columns `collapse_flagged_cells`, `collapse_removed_cells` and `collapse_held_cells` count the flagged floating cells, the ones the mode has emptied and the ones it leaves standing (always 0 under `mask`), all ranks summed; the budget lines, a closing log line and the core report repeat them | `none` |
 | `ISMIP7_OCX_FORCING` | what core 11 runs on. `protocol` is the ISMIP7 OCX product (RACMO2.3p2-ERA SDBN1 `acabf`, expert-judgment ocean `tf`/`so`), and the run refuses to start without it. `stopgap` is RACMO2.4p1 actual-year SMB with the constant OI ocean climatology, what the core ran on before the product was readable here. K is fitted to the climatology, so read `check_melt_bound.py --ocx` first (discussion #48) | `protocol` |
 | `ISMIP7_OCX_OCEAN` | which expert-judgment OCX ocean scenario to read: `main` (the core one), `cold`, `warm` or `vary`. A member other than `main` writes to `ocx_<member>` | `main` |
+| `ISMIP7_SMB_ELEVATION_FEEDBACK` | the SMB-elevation feedback, `dacabfdz` times the surface change since the chain's initial state, added to the SMB every step (section 6). `1` or unset turns it on; `0` or an empty value turns it off, and the value set is closed. With it on a run refuses to start without the gradient it reads, and a resume refuses a checkpoint written in the other mode | `1` |
 | `ISMIP7_OUTPUT` | `1` records the ISMIP7 yearly fields and scalars (`<exp>_<lc>_ismip7_annual_<year>.h5`, `<exp>_<lc>_ismip7_scalars.csv`), regridded afterwards by `write_ismip7_output.py`. The value set is closed, so a typo is rejected at startup. `projection.sbatch` and `run_core_matrix.sh` default it to `1`, and `=0` or an empty value turns it off there. A chained projection must export it on every link; a link that cold-starts mid-year logs the gap and begins at the next 1 January. Resuming continues a series, and a cold start into a populated series is refused | unset (`1` under the core-experiment runners) |
 | `ISMIP7_BNDIDS` | boundary-id JSON override | per-mesh sidecar, else `mesh/boundary_ids.json` |
 | `ISMIP7_GEOMETRY_SPACE` | `dg0` (one thickness for terminus force and mass flux) or `cg1` (legacy, A/B only). Selects the MAP. See `../GEOMETRY_DISCRETIZATION.md` | `dg0` |

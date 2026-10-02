@@ -2,7 +2,7 @@
   "id": "test-32km-inversion-subelement-full-mumps",
   "task": "test",
   "institution": "IU",
-  "title": "32 km inversion, 20 TAO iterations under full_mumps with sub-element friction, the exact front push and five-solve evaluations",
+  "title": "32 km inversion, 20 TAO iterations under full_mumps with SEP2 sub-element friction, the exact front push and five-solve evaluations",
   "status": "done",
   "friction": "budd",
   "mesh": "antarctica_320000_32000_buffered0 (Quartz's .msh, sha256 fd66fc42; 6,282 vertices, 9,055 cells), DG0 geometry, vertex raster sampling",

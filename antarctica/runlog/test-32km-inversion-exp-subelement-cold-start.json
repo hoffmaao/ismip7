@@ -2,7 +2,7 @@
   "id": "test-32km-inversion-exp-subelement-cold-start",
   "task": "test",
   "institution": "IU",
-  "title": "32 km inversion cold start with the exp friction control and sub-element friction, full_mumps and scpc_gamg",
+  "title": "32 km inversion cold start with the exp friction control and SEP2 sub-element friction, full_mumps and scpc_gamg",
   "status": "stopped",
   "friction": "budd",
   "mesh": "antarctica_320000_32000_buffered0 (Quartz's .msh, sha256 fd66fc42; 6,282 vertices, 9,055 cells), DG0 geometry, vertex raster sampling",

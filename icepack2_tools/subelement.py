@@ -24,9 +24,18 @@ gate plays no part.  The forward therefore has no effective-pressure
 feedback under this scheme until the shared builder evaluates ``N`` at the
 grounded-part points.  Andrew (26 Sep 2026): "start the process of setting
 up the inversions with these grounding zone fixes".
+
+``scheme="sep1"`` is ISSM's default ``SubelementFriction1`` instead: the
+cell's ordinary quadrature with the drag scaled by its grounded fraction
+(``alpha2 = phi * alpha2`` in ISSM's ``CreateKMatrixSSAFriction``).  The
+drag is the same Weertman stress, ``exp(theta)`` unscaled by the smooth
+``He`` band as under SEP2, zero on floating cells, but it varies
+with the grounded fraction alone, without SEP2's quadrature points that
+jump across the grounding line inside a cell.  At 32 km SEP2 alone turned
+a run with no failed line-search trials into one with twelve (30 Sep 2026).
 """
 from firedrake import (Constant, Function, FunctionSpace, TestFunction, dx,
-                       inner, max_value, split, sqrt)
+                       exp, inner, max_value, split, sqrt)
 
 from icepack2_tools.geometry import cg1_lift
 from icepack2_tools.grounding import height_above_flotation
@@ -74,9 +83,12 @@ def ocean_drag_closure(z, H, ocean_drag, h_ocean, drag_mask=None, u_min=1.0):
     return inner(tau_o * u / u_reg, sig) * dx
 
 
+SCHEMES = ("sep2", "sep1")
+
+
 def build_subelement_residual(z, theta, phi, *, H, s, b, C_w0, A4_base, n_flow,
                               n_flow_val, m_slide, tau_c, alpha, H_ref,
-                              subelement, fric_law="budd", nhat_cap=3.0,
+                              subelement, scheme="sep2", fric_law="budd", nhat_cap=3.0,
                               alpha_gl=0.0, c_w0_floor=0.0, h_visc_floor=0.0,
                               ocean_drag=0.0, h_ocean=10.0, drag_mask=None,
                               u_lim=0.0, k_lim=0.0, gl_width=10.0,
@@ -87,8 +99,12 @@ def build_subelement_residual(z, theta, phi, *, H, s, b, C_w0, A4_base, n_flow,
     Budd with ``N_ref=None`` and no floor (or Weertman), which is what the
     scheme supports.  ``exact_front`` adds the exact depth-integrated push on
     a calving front inside the mesh (``icepack_tools.momentum.front_cliff_correction``).
+    ``scheme`` is ``"sep2"`` (grounded-part quadrature) or ``"sep1"``
+    (whole-cell quadrature, drag times the grounded fraction).
     """
     from icepack_tools.momentum import dual_residual
+    if scheme not in SCHEMES:
+        raise ValueError(f"sub-element scheme must be one of {SCHEMES}, not {scheme!r}")
     if fric_law not in ("budd", "weertman"):
         raise ValueError(
             f"the sub-element grounding scheme supports budd or weertman, not {fric_law!r}")
@@ -98,7 +114,26 @@ def build_subelement_residual(z, theta, phi, *, H, s, b, C_w0, A4_base, n_flow,
         # the scheme evaluates exp(theta) at points through grad(theta); a
         # domainless Constant (the sqrt control's zero deviation) has none
         theta = Function(FunctionSpace(mesh, "R", 0)).assign(float(theta))
-    A_eff = A4_base * __import__("firedrake").exp(phi)
+    A_eff = A4_base * exp(phi)
+    if scheme == "sep1":
+        # Budd with N_hat = 1 on the grounded part is the Weertman stress;
+        # the floor applies to the coefficient, never to floating cells.
+        # exp(theta) rides in the coefficient, unscaled as under SEP2: the
+        # shared Weertman closure would damp theta by the smooth He band
+        C = max_value(C_w0, Constant(c_w0_floor)) if c_w0_floor else C_w0
+        F = dual_residual(
+            z, Constant(0.0), phi, H=H, s=s, b=b, h_layers=[H],
+            C_w0=C * subelement.fraction * exp(theta),
+            A_layers=[A_eff], n_consts=[n_flow], n_vals=[n_flow_val],
+            m_slide=m_slide, mesh=mesh, law="weertman", tau_c=float(tau_c),
+            alpha=float(alpha), H_ref=float(H_ref), u_min=u_min,
+            N_ref=None, nhat_floor=0.0, nhat_cap=nhat_cap,
+            c_w0_floor=0.0, h_visc_floor=h_visc_floor, alpha_gl=alpha_gl,
+            u_lim=u_lim, k_lim=k_lim, gl_width=gl_width,
+            outflow_ids=tuple(calving_ids) if calving_ids else None,
+            subelement=None, exact_front=exact_front,
+        )
+        return F + ocean_drag_closure(z, H, ocean_drag, h_ocean, drag_mask, u_min=u_min)
     F = dual_residual(
         z, theta, phi, H=H, s=s, b=b, h_layers=[H], C_w0=C_w0,
         A_layers=[A_eff], n_consts=[n_flow], n_vals=[n_flow_val],

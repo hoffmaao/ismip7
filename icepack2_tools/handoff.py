@@ -29,7 +29,8 @@ OBJECTIVE_KEYS = (
     "prior_sigma_alpha", "prior_rho_theta", "friction_c_ref",
     "friction_control", "friction", "n_flow", "geometry_space",
     "friction_anchor_length", "lake_ice_base", "fluidity_prior_origin",
-    "grad_precond", "subelement_friction", "exact_front", "fluidity_control",
+    "grad_precond", "subelement_friction", "subelement_scheme", "exact_front",
+    "fluidity_control",
 )
 
 # Recorded with the controls: the objective at the checkpointed iterate.
@@ -49,12 +50,29 @@ def _same(a, b, rel_tol):
     return math.isclose(fa, fb, rel_tol=rel_tol, abs_tol=0.0)
 
 
+def _truthy(value):
+    try:
+        return bool(int(float(value)))
+    except (TypeError, ValueError):
+        return False
+
+
 def objective_mismatches(recorded, current, rel_tol=1e-9):
     r"""The keys of ``current`` whose recorded value differs, as
     ``"key: recorded -> current"`` strings. Keys the record lacks are not
-    mismatches (an older checkpoint), keys ``current`` lacks are ignored."""
+    mismatches (an older checkpoint), keys ``current`` lacks are ignored.
+    A sub-element record with no ``subelement_scheme`` was written under
+    SEP2, the only scheme before the record existed; the scheme is compared
+    only when both sides use sub-element friction, since otherwise it selects
+    nothing."""
     out = []
+    if "subelement_scheme" not in recorded and _truthy(recorded.get("subelement_friction")):
+        recorded = {**recorded, "subelement_scheme": "sep2"}
+    both_sub = (_truthy(recorded.get("subelement_friction"))
+                and _truthy(current.get("subelement_friction")))
     for key in OBJECTIVE_KEYS:
+        if key == "subelement_scheme" and not both_sub:
+            continue
         if key in recorded and key in current:
             if not _same(recorded[key], current[key], rel_tol):
                 out.append(f"{key}: {recorded[key]!r} -> {current[key]!r}")

@@ -281,6 +281,29 @@ ismip7_activate() {
     # so a chain link killed mid compile cannot hand its successor a truncated
     # object through --export=ALL.
     export PYOP2_CACHE_DIR="${SCRATCH:-$HOME}/.pyop2_cache/${SLURM_JOB_ID:-manual}"
+    # ISMIP7_SHARED_JIT_CACHE (a site file or the submitting shell) names a
+    # kernel store every single-node job starts from. The job copies it to
+    # node-local disk, compiles into that copy, and copies its new kernels
+    # back (every ten minutes and at exit, rsync --ignore-existing, which
+    # renames each file into place). Without it every 2 km NOTS chain link
+    # recompiled the sub-element kernels into an empty cache. The ranks must
+    # not share the store over NFS directly: only rank 0 compiles a miss, and
+    # on /projects (NFSv3) the others still saw "File not on disk" after it
+    # had written the file (job 1691916, 30 Sep 2026).
+    if [ -n "${ISMIP7_SHARED_JIT_CACHE:-}" ] && [ "${SLURM_JOB_NUM_NODES:-1}" = 1 ]; then
+        rmdir "$PYOP2_CACHE_DIR" 2>/dev/null || true
+        mkdir -p "$ISMIP7_SHARED_JIT_CACHE"
+        export PYOP2_CACHE_DIR="${TMPDIR:-/tmp}/ismip7_pyop2_${SLURM_JOB_ID:-$$}"
+        mkdir -p "$PYOP2_CACHE_DIR"
+        rsync -a --exclude '*.tmp' "$ISMIP7_SHARED_JIT_CACHE/" "$PYOP2_CACHE_DIR/" || true
+        _ismip7_jit_harvest() {
+            rsync -a --ignore-existing --exclude '*.tmp' \
+                "$PYOP2_CACHE_DIR/" "$ISMIP7_SHARED_JIT_CACHE/" 2>/dev/null || true
+        }
+        ( while sleep 600; do _ismip7_jit_harvest; done ) &
+        _ISMIP7_JIT_HARVESTER=$!
+        trap '_ismip7_jit_harvest; kill "$_ISMIP7_JIT_HARVESTER" 2>/dev/null; rm -rf "$PYOP2_CACHE_DIR"' EXIT
+    fi
     # XDG_CACHE_HOME is loopy's knob and also matplotlib's, so pin the font
     # cache where it is already warm and move only loopy.
     export MPLCONFIGDIR="${MPLCONFIGDIR:-${_ISMIP7_SITE_XDG_CACHE_HOME:-$HOME/.cache}/matplotlib}"

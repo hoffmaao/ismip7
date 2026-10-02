@@ -4,20 +4,24 @@ mode gives one objective and one gradient.
 A 30 km x 10 km grounded slab with a floating tongue (Budd law, n = 3), the
 real CG1 x DG0-symmetric-tensor x DG0-vector layout and the inversion's two
 residual builders, no data files: the cell-wise law (``build_rc_residual``,
-no friction on the tongue) and the sub-element grounding scheme
-(``build_subelement_residual``, with the exact front push on an ice-free strip
-past 27 km and the friction ``C_ref exp(theta)`` of the exp control). The
+no friction on the tongue) and the sub-element grounding schemes SEP2 and
+SEP1 (``build_subelement_residual``, with the exact front push on an
+ice-free strip past 27 km and the friction ``C_ref exp(theta)`` of the exp
+control). The
 gradient of a velocity misfit with respect to both controls is computed
 through ``taped_state_solve`` and tlm_adjoint:
 
 - ``scpc_mumps`` condenses exactly, so its gradient is the assembled
-  ``full_mumps`` gradient to roundoff (3e-14 to 3e-13 measured);
+  ``full_mumps`` gradient to roundoff (9e-15 to 3e-13 measured);
 - ``scpc_gamg`` stops its Krylov solves at the inversion's relative
-  tolerance (1e-8 or better measured);
+  tolerance (4e-11 to 2.2e-9 measured, SEP1 as SEP2);
 - a Taylor test of the ``scpc_gamg`` gradient converges at second order;
 - ``scpc_gamg`` takes its Newton steps whole: 4 iterations here, as the exact
   condensation does. Backtracking on ||F|| (``bt``) took 113 and 20 on these
-  slabs, with an exact LU as with GAMG.
+  slabs, with an exact LU as with GAMG;
+- the direct forward (``taped_state_solve(..., direct=True)``, the default
+  evaluation since PR 158) gives each mode's gradient, and a direct solve
+  that fails leaves the state where it found it.
 
 Before ``with_quadrature_degree`` both scpc gradients sat 1e-3 off the
 assembled one: tlm_adjoint's matrix-free adjoint solve passes no form compiler
@@ -77,13 +81,14 @@ from icepack2_tools.taped_solve import (                        # noqa: E402
     taped_state_solve,
     with_quadrature_degree,
 )
+from icepack2_tools.solverconfig import direct_forward_parameters  # noqa: E402
 
 RHO_I, RHO_W = 917.0, 1024.0
 FCP = {"quadrature_degree": 4}
 MODES = ("full_mumps", "scpc_mumps", "scpc_gamg")
 
 
-@pytest.fixture(scope="module", params=["cellwise", "subelement"])
+@pytest.fixture(scope="module", params=["cellwise", "subelement", "sep1"])
 def slab(request):
     stop_manager()
     law = request.param
@@ -117,7 +122,7 @@ def slab(request):
         theta0=Function(Q, name="theta").interpolate(0.2 * x / 30e3 - 0.1),
         phi0=Function(Q, name="phi").interpolate(0.1 * y / 10e3),
     )
-    if law == "subelement":
+    if law != "cellwise":
         f["subelement"] = subelement_from_geometry(mesh, H, b, ice=ice_indicator(H, 1.0))
     # A converged state at the reference controls: climb n from 1, untaped.
     z0 = Function(Z)
@@ -147,7 +152,8 @@ def _residual(f, z, theta, phi, *, scpc):
         )
     else:
         # the exp control as the inversion passes it: a zero log deviation
-        # and the friction C_ref exp(theta) outright
+        # and the friction C_ref exp(theta) outright; "subelement" is SEP2,
+        # the library's default scheme
         F = build_subelement_residual(
             z, Constant(0.0), phi, H=f["H"], s=f["s"], b=f["b"],
             C_w0=Constant(0.05) * exp(theta), A4_base=f["A_prior"],
@@ -156,17 +162,19 @@ def _residual(f, z, theta, phi, *, scpc):
             subelement=f["subelement"], fric_law="budd", nhat_cap=3.0,
             alpha_gl=0.5, c_w0_floor=0.0, h_visc_floor=10.0, ocean_drag=1e-2,
             h_ocean=10.0, u_lim=0.0, k_lim=0.0, exact_front=True,
+            scheme="sep1" if f["law"] == "sep1" else "sep2",
         )
     return with_scpc_blocks(F, z) if scpc else F
 
 
-def _misfit(f, mode, theta, phi):
+def _misfit(f, mode, theta, phi, *, direct=False):
     z = Function(f["Z"]).assign(f["z0"])
     params = inversion_state_parameters(mode)
     work = taped_state_solve(
         _residual(f, z, theta, phi, scpc=mode != "full_mumps"), z, mode,
-        params, inversion_adjoint_parameters(params),
-        form_compiler_parameters=FCP,
+        direct_forward_parameters(params) if direct else params,
+        inversion_adjoint_parameters(params),
+        form_compiler_parameters=FCP, direct=direct,
     )
     u = split(z)[0]
     J = Functional(name="J")
@@ -192,6 +200,21 @@ def gradients(slab):
         stop_manager()
         dJ = compute_gradient(J, [theta, phi])
         out[mode] = dict(J=float(J.value), dJ=dJ, work=work, controls=(theta, phi))
+    reset_manager()
+    return out
+
+
+@pytest.fixture(scope="module")
+def direct_gradients(slab):
+    out = {}
+    for mode in MODES:
+        theta, phi = _controls(slab)
+        reset_manager()
+        start_manager()
+        J, work = _misfit(slab, mode, theta, phi, direct=True)
+        stop_manager()
+        dJ = compute_gradient(J, [theta, phi])
+        out[mode] = dict(J=float(J.value), dJ=dJ, work=work)
     reset_manager()
     return out
 
@@ -372,3 +395,51 @@ def test_the_degree_survives_into_the_adjoint_form(slab):
     for form in (F, derivative(F, z), adjoint(derivative(F, z))):
         degrees = {i.metadata().get("quadrature_degree") for i in form.integrals()}
         assert degrees == {4}
+
+
+# Against the taped full_mumps gradient: 5e-14 or better under the exact
+# solvers on all three slabs, 4e-11 to 2.2e-9 under scpc_gamg, as taped.
+@pytest.mark.parametrize("mode, tol", [
+    ("full_mumps", 1e-10), ("scpc_mumps", 1e-10), ("scpc_gamg", 1e-8)])
+def test_the_direct_forward_gives_the_gradient(gradients, direct_gradients, mode, tol):
+    ref, got = gradients["full_mumps"], direct_gradients[mode]
+    assert got["work"]["converged_reason"] > 0
+    assert got["work"]["confirm_step"] == 0.0
+    assert got["J"] == pytest.approx(ref["J"], rel=tol)
+    for g, g_ref in zip(got["dJ"], ref["dJ"]):
+        assert _rel(g, g_ref) < tol
+
+
+@pytest.mark.parametrize("mode", MODES)
+def test_a_lost_direct_trial_leaves_the_state_and_drops_the_solver(slab, mode):
+    if slab["law"] != "cellwise":
+        pytest.skip("the rollback is the same under either law")
+    f = slab
+    theta, phi = _controls(f)
+    z = Function(f["Z"]).assign(f["z0"])
+    F = _residual(f, z, theta, phi, scpc=mode != "full_mumps")
+    params = inversion_state_parameters(mode)
+    lost = dict(direct_forward_parameters(params), snes_max_it=1)
+    cache = StateSolverCache()
+    with z.dat.vec_ro as v:
+        entry = v.copy()
+    reset_manager()
+    start_manager()
+    try:
+        with pytest.raises(firedrake.ConvergenceError,
+                           match="direct forward did not converge"):
+            taped_state_solve(F, z, mode, lost, inversion_adjoint_parameters(params),
+                              form_compiler_parameters=FCP, cache=cache, direct=True)
+        with z.dat.vec_ro as v:
+            entry.axpy(-1.0, v)
+        assert entry.norm() == 0.0
+        # the retry, the rescue's, starts from a new solver and converges
+        work = taped_state_solve(
+            F, z, mode, direct_forward_parameters(params),
+            inversion_adjoint_parameters(params),
+            form_compiler_parameters=FCP, cache=cache, direct=True)
+        assert not work["reused"] and work["converged_reason"] > 0
+    finally:
+        stop_manager()
+        reset_manager()
+        entry.destroy()

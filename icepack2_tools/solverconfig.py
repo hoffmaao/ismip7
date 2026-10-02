@@ -53,20 +53,21 @@ DIAGNOSTIC_SOLVER_ALIASES = {
 # qualified for the mixed system.
 INVERSION_SOLVER_DEFAULT = "full_mumps"
 INVERSION_SOLVER_MODES = ("full_mumps", "scpc_mumps", "scpc_gamg")
-# The inversion's taped forward under scpc_gamg backtracks on the residual
-# norm. Each evaluation starts from the last one's state at new controls, as
-# far as ||F|| = 9e10 from the solution at 32 km, and there NLEQ-ERR, which
-# judges a step by the norm of the Newton correction, cannot use corrections
-# solved to the forward's relative 1e-6: at the same trial point where the
-# exact condensation converged in 6 Newton iterations it stalled at
-# ||F|| = 7.9e10 for 200. A residual decreasing line search accepts the same
-# inexact corrections (each is a descent direction for ||F||), converged in
-# the same 6, and needs one condensed solve a Newton iteration where NLEQ-ERR
-# needs two: 214 V-cycles at that point against 950 for NLEQ-ERR with the
-# Krylov tolerance tightened to 1e-8 (README, "Inversion solver"). The exact
-# modes keep the shared ISMIP7_SNES_LINESEARCH. The transient is unchanged:
-# its steps start next to the solution.
-INVERSION_GAMG_LINESEARCH_DEFAULT = "bt"
+# The inversion's taped forward under scpc_* solves its Newton corrections to
+# a relative 1e-8, not the transient's 1e-6. Each evaluation starts from the
+# last one's state at new controls, as far as ||F|| = 9e10 from the solution
+# at 32 km, and there NLEQ-ERR, which judges a step by the norm of the Newton
+# correction, could not use corrections solved to 1e-6: at a trial point the
+# exact condensation took in 6 Newton iterations it stalled at
+# ||F|| = 7.9e10 for 200. At 1e-8 it took the same 6. Backtracking on ||F||
+# instead (bt) also took 6 there and costs less where it works (64 s an
+# evaluation against 95 s at 2 km), but it damps nearly every step on the
+# synthetic slabs: 113 Newton iterations against 4 under the cell-wise law
+# and 20 against 4 under the sub-element law, with an exact LU as with GAMG
+# (README, "Inversion solver"). ISMIP7_INVERSION_SNES_LINESEARCH and
+# ISMIP7_INVERSION_KSP_RTOL override both. The transient is unchanged: its
+# steps start next to the solution.
+INVERSION_KSP_RTOL_DEFAULT = "1e-8"
 
 SNES_TYPE_DEFAULT = "newtonls"
 SNES_LINESEARCH_DEFAULT = "nleqerr"
@@ -406,17 +407,23 @@ def inversion_state_parameters(mode=None):
     the whole mixed Jacobian, with MUMPS printing its error return (INFOG(1),
     the workspace or pivot code) so a factorisation that fails is named and
     does not reach SNES only as DIVERGED_LINEAR_SOLVE (job 1612624).  The
-    scpc_* modes are the forward's own options for that mode, with the line
-    search ``ISMIP7_INVERSION_SNES_LINESEARCH`` names, by default ``bt``
-    under scpc_gamg (INVERSION_GAMG_LINESEARCH_DEFAULT) and the shared one
-    under scpc_mumps."""
+    scpc_* modes are the forward's own options for that mode with the outer
+    Krylov tolerance ``ISMIP7_INVERSION_KSP_RTOL`` (default 1e-8,
+    INVERSION_KSP_RTOL_DEFAULT; the condensed solve's absolute tolerance
+    follows it as the forward's follows ISMIP7_KSP_RTOL) and the line search
+    ``ISMIP7_INVERSION_SNES_LINESEARCH``, by default the shared one."""
     mode = inversion_solver_mode(mode)
     if mode != "full_mumps":
         params = diagnostic_solver_parameters(mode)
-        default = (INVERSION_GAMG_LINESEARCH_DEFAULT if mode == "scpc_gamg"
-                   else params["snes_linesearch_type"])
+        rtol = float(_env("ISMIP7_INVERSION_KSP_RTOL", INVERSION_KSP_RTOL_DEFAULT))
+        params["ksp_rtol"] = rtol
+        if "condensed_field_ksp_atol" in params:
+            params["condensed_field_ksp_atol"] = rtol * float(_env(
+                "ISMIP7_CONDENSED_KSP_ATOL_FACTOR",
+                CONDENSED_KSP_ATOL_FACTOR_DEFAULT,
+            ))
         params["snes_linesearch_type"] = _env(
-            "ISMIP7_INVERSION_SNES_LINESEARCH", default)
+            "ISMIP7_INVERSION_SNES_LINESEARCH", params["snes_linesearch_type"])
         return params
     params = _nonlinear_options()
     params.update({

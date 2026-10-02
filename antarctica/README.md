@@ -375,30 +375,42 @@ details of the condensed modes:
   adjoint is assembled at UFL's estimated degree (up to 26) against a degree 4
   forward, and the gradient was 1e-3 off.
 
-Under `scpc_gamg` the taped forward backtracks on the residual norm
-(`snes_linesearch_type bt`; `ISMIP7_INVERSION_SNES_LINESEARCH` overrides it,
-and the transient keeps NLEQ-ERR). Each evaluation starts from the previous
-one's state at new controls, at 32 km as far as ||F|| = 9e10 from the
-solution. NLEQ-ERR judges a step by the norm of the Newton correction, which
-the condensed GAMG solve leaves inexact at the forward's relative 1e-6: at a
-trial point the exact solvers took in 6 Newton iterations it stalled at
-||F|| = 7.9e10 for 200, at every full L-BFGS step, so the descent fell back to
-short ones. Measured at that trial point:
+Under `scpc_*` the taped forward keeps the transient's NLEQ-ERR line search
+and solves its Newton corrections to a relative 1e-8
+(`ISMIP7_INVERSION_KSP_RTOL`; the condensed solve's absolute tolerance
+follows it; `ISMIP7_INVERSION_SNES_LINESEARCH` names another line search).
+The transient keeps 1e-6. Each evaluation starts from the previous one's state
+at new controls, at 32 km as far as ||F|| = 9e10 from the solution, and
+NLEQ-ERR judges a step by the norm of the Newton correction, which a GAMG solve
+to 1e-6 leaves too inexact there: at a trial point the exact solvers took in 6
+Newton iterations it stalled at ||F|| = 7.9e10 for 200, at every full L-BFGS
+step. Backtracking on ||F|| (`bt`) does not need exact corrections and was the
+default for a day, until the synthetic slabs showed it damping nearly every
+step, with an exact LU as with GAMG. Newton iterations of one taped forward:
 
-| taped forward under `scpc_gamg` | Newton iterations | V-cycles |
-|---|---|---|
-| NLEQ-ERR, Krylov rtol 1e-6 (the transient's) | 200, failed | |
-| NLEQ-ERR, Krylov rtol 1e-8 | 6 | 950 |
-| NLEQ-ERR, Krylov rtol 1e-10 | 6 | 1292 |
-| `bt`, Krylov rtol 1e-6 | 6 | 214 |
+| line search, Krylov rtol | 32 km trial point | slab, cell-wise law | slab, sub-element law | 2 km, s an evaluation |
+|---|---|---|---|---|
+| NLEQ-ERR, 1e-6 (the transient's) | 200, failed | 4 | 4 | |
+| NLEQ-ERR, 1e-8 (the default) | 6 | 4 | 4 | 95 |
+| NLEQ-ERR, 1e-10 | 6 | 4 | 4 | |
+| `bt`, 1e-6 | 6 | 114 | 20 | 64 |
 
-Gradient against `full_mumps` on the synthetic slab of
-`tests/test_scpc_adjoint.py` (grounded and floating, Budd, n = 3):
+`tests/test_scpc_adjoint.py` holds the taped forward on both slabs to 8 Newton
+iterations, which fails under `bt`.
 
-| solver | relative gradient difference | Taylor order |
-|---|---|---|
-| `scpc_mumps` | 2.6e-13 | |
-| `scpc_gamg` | 1.4e-8 | 2.00 |
+Gradient against `full_mumps` on the synthetic slabs of
+`tests/test_scpc_adjoint.py` (grounded and floating, Budd, n = 3; the
+sub-element one with the exact front push on an ice-free strip and the exp
+control's friction), the larger of the two controls:
+
+| solver | relative gradient difference, cell-wise | sub-element | Taylor order |
+|---|---|---|---|
+| `scpc_mumps` | 2.6e-13 | 2.8e-14 | |
+| `scpc_gamg` (NLEQ-ERR, 1e-8) | 4.1e-11 | 2.1e-9 | 2.00 on both |
+| `scpc_gamg` at the transient's 1e-6 | 1.4e-8 | 1.6e-7 | |
+
+The 32 km and Quartz runs below that name `bt` ran before the default moved
+to NLEQ-ERR at 1e-8.
 
 On Antarctica at 32 km (`antarctica_320000_32000_buffered0`, 6,282 vertices,
 8 ranks, two runs at a time on a 16-core workstation, Budd, the `legacy` fluidity prior, a cold start,
@@ -407,8 +419,9 @@ On Antarctica at 32 km (`antarctica_320000_32000_buffered0`, 6,282 vertices,
 | solver | optimizer | evaluations | largest relative difference in the objective | s per evaluation, forward / adjoint |
 |---|---|---|---|---|
 | `scpc_mumps` | L-BFGS-B | 4 | 1.1e-13 | 11 / 0.9 |
-| `scpc_gamg` | L-BFGS-B, 30 iterations | 32 | 4.3e-7 | 9.5 / 0.6 |
-| `scpc_gamg` | TAO lmvm, mass-consistent metric, bi-Laplacian prior, 20 iterations | 21 | 1.2e-8 | 19 a whole iteration |
+| `scpc_gamg`, `bt` | L-BFGS-B, 30 iterations | 32 | 4.3e-7 | 9.5 / 0.6 |
+| `scpc_gamg`, `bt` | TAO lmvm, mass-consistent metric, bi-Laplacian prior, 20 iterations | 21 | 1.2e-8 | 19 a whole iteration |
+| `scpc_gamg`, NLEQ-ERR at 1e-8 | TAO as above, with sub-element friction, the exact front push and the five-solve evaluations (`ISMIP7_SUBELEMENT_FRICTION=1`, `ISMIP7_EVAL_CONTINUATION=1`), 20 iterations | 21 | 1.6e-9 | 76 a whole iteration, against 53 |
 
 The two L-BFGS-B runs took the same 30 iterations and 32 evaluations, from
 3.0156e4 to 3.7463e3; the condensed GAMG solve averaged 51 V-cycles and the
@@ -417,7 +430,12 @@ which is expected at 32 km: the condensed solver pays for itself only at 1 km
 on 32 ranks or more (section 7). On the TAO path both published
 ||F|| = 1.493 after 20 iterations; `full_mumps` failed its forward at three
 trial points and took the re-ramp rescue at each, where `scpc_gamg` under
-`bt` failed none.
+`bt` failed none. Under sub-element friction neither failed; a condensed solve
+there took 10 Newton iterations and 192 V-cycles on average, against 5 and 51
+under the cell-wise law. A cold start with the exp control and sub-element
+friction did not climb the startup ramp at all (it diverged near n = 2.1 on
+every rung, under `full_mumps` as under `scpc_gamg`), so that pair ran the log
+control; the slabs cover the exp control's friction.
 
 On Quartz (issue #156, jobs 10818443 to 10818449), from Rice's 2 km snapshot
 0948, which carries controls and no state: continued on its own mesh
@@ -431,12 +449,12 @@ the first; memory is sacct's AveRSS and MaxRSS a rank:
 | mesh | solver | ranks | forward (s) | adjoint (s) | evaluation (s) | GiB a rank, mean / peak |
 |---|---|---|---|---|---|---|
 | 2 km | `full_mumps` | 32 | 102 | 52 | 168 | 2.8 / 3.6 |
-| 2 km | `scpc_gamg` | 32 | 41 | 9.3 | 64 | 3.7 / 4.0 |
-| 2 km | `scpc_gamg` | 16 | 61 | 20 | 107 | 6.1 / 6.5 |
-| 2 km | `scpc_gamg`, NLEQ-ERR, Krylov rtol 1e-8 | 32 | 70 | 12 | 95 | 3.8 / 4.0 |
+| 2 km | `scpc_gamg`, `bt` | 32 | 41 | 9.3 | 64 | 3.7 / 4.0 |
+| 2 km | `scpc_gamg`, `bt` | 16 | 61 | 20 | 107 | 6.1 / 6.5 |
+| 2 km | `scpc_gamg`, NLEQ-ERR, Krylov rtol 1e-8 (now the default) | 32 | 70 | 12 | 95 | 3.8 / 4.0 |
 | 1 km | `full_mumps` | 32 | 189 | 118 | 334 | 5.5 / 6.7 |
-| 1 km | `scpc_gamg` | 32 | 21 | 8.5 | 58 | 4.5 / 5.2 |
-| 1 km | `scpc_gamg` | 64 | 11.5 | 4.1 | 43 | 3.1 / 3.6 |
+| 1 km | `scpc_gamg`, `bt` | 32 | 21 | 8.5 | 58 | 4.5 / 5.2 |
+| 1 km | `scpc_gamg`, `bt` | 64 | 11.5 | 4.1 | 43 | 3.1 / 3.6 |
 
 Every arm on 32 ranks ended on the objective `full_mumps` reached, to seven
 digits (4.935180e4 at 2 km, 4.179544e4 at 1 km), and no forward failed. Over

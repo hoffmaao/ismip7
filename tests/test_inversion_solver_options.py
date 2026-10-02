@@ -16,6 +16,9 @@ def _clean_env(monkeypatch):
         "ISMIP7_SNES_RTOL",
         "ISMIP7_SNES_LINESEARCH",
         "ISMIP7_INVERSION_SNES_LINESEARCH",
+        "ISMIP7_INVERSION_KSP_RTOL",
+        "ISMIP7_KSP_RTOL",
+        "ISMIP7_CONDENSED_KSP_ATOL_FACTOR",
     ):
         monkeypatch.delenv(name, raising=False)
 
@@ -54,28 +57,38 @@ def test_full_mumps_is_the_inversion_reference_unchanged():
 
 
 @pytest.mark.parametrize("mode", ["scpc_mumps", "scpc_gamg"])
-def test_scpc_modes_are_the_forward_options(mode):
+def test_scpc_modes_are_the_forward_options_at_a_tighter_krylov_tolerance(mode):
     params = sc.inversion_state_parameters(mode)
     forward = sc.diagnostic_solver_parameters(mode)
     assert params["mat_type"] == "matfree"
     assert params["pc_python_type"].endswith("ISMIP7SCPC")
-    params.pop("snes_linesearch_type")
-    forward.pop("snes_linesearch_type")
+    # the shared NLEQ-ERR, the transient's line search
+    assert params["snes_linesearch_type"] == forward["snes_linesearch_type"] == "nleqerr"
+    assert params["ksp_rtol"] == 1e-8
+    assert forward["ksp_rtol"] == 1e-6
+    if mode == "scpc_gamg":
+        # the condensed solve's absolute tolerance follows the outer one
+        assert params["condensed_field_ksp_atol"] == pytest.approx(0.5e-8)
+        assert forward["condensed_field_ksp_atol"] == pytest.approx(0.5e-6)
+    for key in ("ksp_rtol", "condensed_field_ksp_atol"):
+        params.pop(key, None)
+        forward.pop(key, None)
     assert params == forward
 
 
-def test_gamg_backtracks_on_the_residual_and_exact_modes_do_not(monkeypatch):
-    monkeypatch.delenv("ISMIP7_INVERSION_SNES_LINESEARCH", raising=False)
-    monkeypatch.delenv("ISMIP7_SNES_LINESEARCH", raising=False)
-    shared = sc.nonlinear_solver_options()["snes_linesearch_type"]
-    assert shared == "nleqerr"
-    assert sc.inversion_state_parameters("scpc_gamg")["snes_linesearch_type"] == "bt"
-    assert sc.inversion_state_parameters("scpc_mumps")["snes_linesearch_type"] == shared
-    assert sc.inversion_state_parameters("full_mumps")["snes_linesearch_type"] == shared
-    # the transient's scpc_gamg is untouched
-    assert sc.diagnostic_solver_parameters("scpc_gamg")["snes_linesearch_type"] == shared
-    monkeypatch.setenv("ISMIP7_INVERSION_SNES_LINESEARCH", "nleqerr")
-    assert sc.inversion_state_parameters("scpc_gamg")["snes_linesearch_type"] == "nleqerr"
+def test_the_inversion_knobs_override_and_leave_the_transient_alone(monkeypatch):
+    monkeypatch.setenv("ISMIP7_INVERSION_SNES_LINESEARCH", "bt")
+    monkeypatch.setenv("ISMIP7_INVERSION_KSP_RTOL", "1e-10")
+    params = sc.inversion_state_parameters("scpc_gamg")
+    assert params["snes_linesearch_type"] == "bt"
+    assert params["ksp_rtol"] == 1e-10
+    assert params["condensed_field_ksp_atol"] == pytest.approx(0.5e-10)
+    forward = sc.diagnostic_solver_parameters("scpc_gamg")
+    assert forward["snes_linesearch_type"] == "nleqerr"
+    assert forward["ksp_rtol"] == 1e-6
+    # full_mumps is the reference: neither knob reaches it
+    assert sc.inversion_state_parameters("full_mumps")["snes_linesearch_type"] == "nleqerr"
+    assert "ksp_rtol" not in sc.inversion_state_parameters("full_mumps")
 
 
 @pytest.mark.parametrize("mode", ["full_mumps", "scpc_mumps", "scpc_gamg"])

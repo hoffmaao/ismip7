@@ -9,9 +9,9 @@ gitignored, so these records and the per-core reports beside them are
 the trace a run leaves in the repository. A core experiment also gets
 its full report from `core_report.py`; this is the index.
 
-162 records.
+164 records.
 
-Status: 12 planned, 3 running, 10 stopped, 120 done, 17 superseded.
+Status: 12 planned, 3 running, 10 stopped, 122 done, 17 superseded.
 
 ## Inversion
 
@@ -133,6 +133,8 @@ Status: 12 planned, 3 running, 10 stopped, 120 done, 17 superseded.
 | 32 km inversion cold start with the exp friction control and sub-element friction, full_mumps and scpc_gamg | stopped | antarctica_320000_32000_buffered0 (Quartz's .msh, sha256 fd66fc42; 6,282 vertices, 9,055 cells), DG0 geometry, vertex raster sampling | IU workstation (Mac, 16 cores, 128 GB), data under /Volumes/LaCie/Data/antarctica_general/ismip7_obs | 2026-10-01 | 2026-10-01 | the startup ramp (full_mumps in both runs, unannotated, before the solver under test runs) diverged on every rung near n = 2.1 (rung 1 step 5 to \|\|F\|\| 4e37 and 4e20, rung 2 and rung 3 likewise) and the run stopped with ConvergenceError; the solver choice played no part |
 | 32 km inversion, 30 L-BFGS-B iterations under full_mumps, the reference for the scpc_gamg trajectory | done | antarctica_320000_32000_buffered0 (Quartz's .msh, sha256 fd66fc42; 6,282 vertices, 9,055 cells), DG0 geometry, vertex raster sampling | IU workstation (Mac, 16 cores, 128 GB), data under /Volumes/LaCie/Data/antarctica_general/ismip7_obs | 2026-10-01 | 2026-10-01 | objective 3.0156e4 to 3.7463e3; published residual 9.99e-4 after a final solve that converged in 0 Newton iterations; no forward failed |
 | 32 km inversion, 30 L-BFGS-B iterations under scpc_gamg (bt line search) | done | antarctica_320000_32000_buffered0 (Quartz's .msh, sha256 fd66fc42; 6,282 vertices, 9,055 cells), DG0 geometry, vertex raster sampling | IU workstation (Mac, 16 cores, 128 GB), data under /Volumes/LaCie/Data/antarctica_general/ismip7_obs | 2026-10-01 | 2026-10-01 | the same 30 iterations and 32 evaluations as test-32km-inversion-lbfgs-full-mumps; every evaluation's objective within 4.3e-7 of it and \|grad\| within 1e-4; published residual 1.20e-3; no forward failed; every recorded solve confirmed the paused solve's state with no step |
+| 32 km inversion, 12 L-BFGS-B iterations on PR 155 after both follow-ups merged, against the issue #157 none arm | done | antarctica_320000_32000_buffered0 (Quartz's .msh, sha256 fd66fc42; 6,282 vertices, 9,055 cells), DG0 geometry, vertex raster sampling | IU workstation (Mac, 16 cores, 128 GB), data under /Volumes/LaCie/Data/antarctica_general/ismip7_obs | 2026-10-02 | 2026-10-02 | 12 L-BFGS-B iterations in 13 evaluations, objective 7.849914e4 to 1.717453e4; every evaluation's objective within 2.8e-14 and gradient norm within 1.3e-12 of test-32km-inversion-opt-none; no forward failure; published residual 23.4 |
+| 32 km inversion, 12 TAO lmvm iterations on PR 155 after both follow-ups merged, against the issue #157 TAO arm | done | antarctica_320000_32000_buffered0 (Quartz's .msh, sha256 fd66fc42; 6,282 vertices, 9,055 cells), DG0 geometry, vertex raster sampling | IU workstation (Mac, 16 cores, 128 GB), data under /Volumes/LaCie/Data/antarctica_general/ismip7_obs | 2026-10-02 | 2026-10-02 | 12 TAO iterations, objective 7.849914e4 to 2.433756e4; every iteration's objective within 6.2e-15 and gradient norm within 1.5e-14 of test-32km-inversion-opt-tao, through the same six rescued trial points; published residual 5.0 |
 | 32 km inversion, 30 L-BFGS-B iterations under full_mumps after a scpc_mumps startup ramp: the blocks only in the ramp's form, one taped form for the run | done | antarctica_320000_32000_buffered0 (Quartz's .msh, sha256 fd66fc42; 6,282 vertices, 9,055 cells), DG0 geometry, vertex raster sampling | IU workstation (Mac, 16 cores, 128 GB), data under /Volumes/LaCie/Data/antarctica_general/ismip7_obs; alone on the machine (no other session's process in a 10 s CPU log) | 2026-10-02 | 2026-10-02 | the same 30 iterations and 32 evaluations as test-32km-inversion-ramp-blocks-before, every objective within 2.2e-11 of it; published residual 1.02e-3; no forward failed |
 | 32 km inversion, 30 L-BFGS-B iterations under full_mumps after a scpc_mumps startup ramp on PR 155's head: the taped Jacobian carries the SCPC structural-zero blocks | done | antarctica_320000_32000_buffered0 (Quartz's .msh, sha256 fd66fc42; 6,282 vertices, 9,055 cells), DG0 geometry, vertex raster sampling | IU workstation (Mac, 16 cores, 128 GB), data under /Volumes/LaCie/Data/antarctica_general/ismip7_obs; alone on the machine (no other session's process in a 10 s CPU log) | 2026-10-02 | 2026-10-02 | objective 3.015616e4 to 3.746343e3, the trajectory of test-32km-inversion-lbfgs-full-mumps; published residual 1.01e-3 after a 0-iteration final solve; no forward failed |
 | 32 km inversion, 30 L-BFGS-B iterations under full_mumps after a full_mumps ramp, one taped form for the run | done | antarctica_320000_32000_buffered0 (Quartz's .msh, sha256 fd66fc42; 6,282 vertices, 9,055 cells), DG0 geometry, vertex raster sampling | IU workstation (Mac, 16 cores, 128 GB), data under /Volumes/LaCie/Data/antarctica_general/ismip7_obs; alone on the machine (no other session's process in a 10 s CPU log) | 2026-10-02 | 2026-10-02 | the same 30 iterations and 32 evaluations as test-32km-inversion-reuse-full-mumps-before, every objective within 1.6e-11 of it; published residual 1.02e-3; no forward failed |
@@ -2957,6 +2959,44 @@ Core 11 at 32 km without the apparent-MB reference, a cold start on the OCX prot
 - **Cost per model year:** 438 s for 30 iterations (32 evaluations): 9.5 s forward and 0.6 s adjoint an evaluation, 5.1 Newton iterations and 51 V-cycles a condensed solve
 - **Results path:** /Volumes/LaCie/Data/antarctica_general/ismip7_runs/inversion_solver_32km/i30_gamg/map.h5 (sha256 aa98cad2), log.txt, timing.json
 - **Audit:** the same 30 iterations and 32 evaluations as test-32km-inversion-lbfgs-full-mumps; every evaluation's objective within 4.3e-7 of it and \|grad\| within 1e-4; published residual 1.20e-3; no forward failed; every recorded solve confirmed the paused solve's state with no step
+
+### test-32km-inversion-merged-lbfgs-check
+
+32 km inversion, 12 L-BFGS-B iterations on PR 155 after both follow-ups merged, against the issue #157 none arm (done), IU.
+
+- **Task type:** test
+- **Friction law:** budd
+- **Mesh:** antarctica_320000_32000_buffered0 (Quartz's .msh, sha256 fd66fc42; 6,282 vertices, 9,055 cells), DG0 geometry, vertex raster sampling
+- **Initial state / MAP:** cold start: u = 0.1 u_obs, theta = phi = 0, the n,m 1 to 3 ramp under full_mumps, then ISMIP7_EVAL_CONTINUATION=0 (one annotated solve at full n an evaluation)
+- **Forcing versions:** MEaSUREs v2 450 m (sha256 268be94e) and BedMachine v4.1 (sha256 6bd08dbb), byte-identical to Quartz's antarctica/data; ISMIP7_FLUIDITY_PRIOR=legacy; sub-element friction with the exact front push (ISMIP7_SUBELEMENT_FRICTION=1), bi-Laplacian prior (sigma 0.3, rho 7.5 km), full_mumps, no dH/dt term; log-speed weight 0; scipy L-BFGS-B in raw dof coordinates (ISMIP7_GRAD_PRECOND=none)
+- **Site / partition:** IU workstation (Mac, 16 cores, 128 GB), data under /Volumes/LaCie/Data/antarctica_general/ismip7_obs
+- **Ranks / memory:** 4 ranks, run after its TAO twin, beside another session's 5-process memory probe (9 of 16 cores busy); peak 2.5 GB a rank
+- **Code:** 71a6809 (PR 155 with the solver reuse and the prior-solve fix merged); icepack_tools e7b923e
+- **Started:** 2026-10-02
+- **Finished:** 2026-10-02
+- **Cost per model year:** 149 s wall; 7.2 s an evaluation (median), 8.4 s for the same evaluations on 4cf7f0e (test-32km-inversion-opt-none, beside two other arms); outside the solves residual_norm 0.09 s
+- **Results path:** /Volumes/LaCie/Data/antarctica_general/ismip7_runs/optimizer_issue157/32km/merged_none/map.h5 (sha256 6d95a914), log.txt, timing.json
+- **Audit:** 12 L-BFGS-B iterations in 13 evaluations, objective 7.849914e4 to 1.717453e4; every evaluation's objective within 2.8e-14 and gradient norm within 1.3e-12 of test-32km-inversion-opt-none; no forward failure; published residual 23.4
+- **Notes:** the L-BFGS-B twin of test-32km-inversion-merged-tao-check, for the cost of an evaluation on each optimizer path
+
+### test-32km-inversion-merged-tao-check
+
+32 km inversion, 12 TAO lmvm iterations on PR 155 after both follow-ups merged, against the issue #157 TAO arm (done), IU.
+
+- **Task type:** test
+- **Friction law:** budd
+- **Mesh:** antarctica_320000_32000_buffered0 (Quartz's .msh, sha256 fd66fc42; 6,282 vertices, 9,055 cells), DG0 geometry, vertex raster sampling
+- **Initial state / MAP:** cold start: u = 0.1 u_obs, theta = phi = 0, the n,m 1 to 3 ramp under full_mumps, then ISMIP7_EVAL_CONTINUATION=0 (one annotated solve at full n an evaluation)
+- **Forcing versions:** MEaSUREs v2 450 m (sha256 268be94e) and BedMachine v4.1 (sha256 6bd08dbb), byte-identical to Quartz's antarctica/data; ISMIP7_FLUIDITY_PRIOR=legacy; sub-element friction with the exact front push (ISMIP7_SUBELEMENT_FRICTION=1), bi-Laplacian prior (sigma 0.3, rho 7.5 km), full_mumps, no dH/dt term; log-speed weight 0; TAO lmvm with the mass-consistent metric (ISMIP7_GRAD_PRECOND=mass_consistent)
+- **Site / partition:** IU workstation (Mac, 16 cores, 128 GB), data under /Volumes/LaCie/Data/antarctica_general/ismip7_obs
+- **Ranks / memory:** 4 ranks, run before its L-BFGS-B twin, beside another session's 5-process memory probe (9 of 16 cores busy); peak 2.5 GB a rank
+- **Code:** 71a6809 (PR 155 with the solver reuse and the prior-solve fix merged); icepack_tools e7b923e
+- **Started:** 2026-10-02
+- **Finished:** 2026-10-02
+- **Cost per model year:** 225 s wall; 7.9 s a TAO iteration (median), 14.7 s for the same iterations on 4cf7f0e (test-32km-inversion-opt-tao, beside two other arms); spans of the last iteration: forward 7.13 s, residual_norm 0.18 s, prior_taped 0.01 s, unspanned 0.55 s
+- **Results path:** /Volumes/LaCie/Data/antarctica_general/ismip7_runs/optimizer_issue157/32km/merged_tao/map.h5 (sha256 092a9133), log.txt, timing.json
+- **Audit:** 12 TAO iterations, objective 7.849914e4 to 2.433756e4; every iteration's objective within 6.2e-15 and gradient norm within 1.5e-14 of test-32km-inversion-opt-tao, through the same six rescued trial points; published residual 5.0
+- **Notes:** checks the merge of the solver reuse and the per-evaluation profiling on the default path, and measures TAO's cost an iteration after the fnorm-ceiling check left the tape
 
 ### test-32km-inversion-ramp-blocks-after
 

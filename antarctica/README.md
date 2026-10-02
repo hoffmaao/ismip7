@@ -569,7 +569,7 @@ rank over 31 evaluations. Scaled linearly to 2 km on 32 ranks (37 times the
 local size), the growth before this change would be about 230 MiB a rank an
 evaluation with one solve and 830 with five, comparable to `scpc_gamg`'s
 excess AveRSS on Quartz above (3.7 against 2.8 and 6.9 against 3.6 GiB);
-Quartz has not measured it. `runlog/test-32km-inversion-reuse-*` and
+Quartz has not measured it (issue #159). `runlog/test-32km-inversion-reuse-*` and
 `runlog/test-32km-inversion-ramp-blocks-*` hold the runs, including a first
 round timed beside another session's jobs.
 

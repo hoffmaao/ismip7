@@ -10,7 +10,7 @@ is an index.
 **Claim the card before you start a run or an inversion.** A card in
 Claimed for more than 24 hours with no comment reads as unclaimed.
 
-Generated: 2026-10-02 06:30 UTC. 10 blocking, 6 owed, 0 after the deadline, 4 unverified.
+Generated: 2026-10-02 17:41 UTC. 10 blocking, 7 owed, 1 after the deadline, 4 unverified.
 
 ## Blocking the submission
 
@@ -38,6 +38,7 @@ Decisions first: they have the longest lead time and they gate the runs.
 | [47](https://github.com/icepack/ismip7/issues/47) | solver: the UChicago Midway site has never run end to end | needs-run | uchicago | midway | verified open |
 | [153](https://github.com/icepack/ismip7/issues/153) | MAP: IU re-inversion of the 2 km Budd and RC MAPs without the prior mean, then on the 20 km buffered mesh | needs-run | iu | n/a | verified open |
 | [156](https://github.com/icepack/ismip7/issues/156) | solver: measure the inversion on scpc_gamg at 2 km and 1 km (PR 155) | needs-run | iu | n/a | verified open |
+| [157](https://github.com/icepack/ismip7/issues/157) | optimizer: compare TAO lmvm with the mass-consistent metric against L-BFGS-B at a fixed objective | needs-run | iu | n/a | verified open |
 | [16](https://github.com/icepack/ismip7/issues/16) | forcing: re-audit the CESM2-WACCM ssp585 fracture before production (#37) | needs-check | group | quartz, nots, midway | fresh, unverified by design |
 
 ## Claimed now
@@ -50,6 +51,7 @@ Work in flight. Do not duplicate it.
 | [11](https://github.com/icepack/ismip7/issues/11) | melt: run check_melt_bound.py --ocx before core 11 runs on the OCX product | iu | quartz, nots, midway | 2026-09-26 |
 | [24](https://github.com/icepack/ismip7/issues/24) | MAP: 2 km RC and Budd inversions running at Rice under the new prior metric | rice | nots | 2026-09-26 |
 | [153](https://github.com/icepack/ismip7/issues/153) | MAP: IU re-inversion of the 2 km Budd and RC MAPs without the prior mean, then on the 20 km buffered mesh | iu | n/a | 2026-10-01 |
+| [157](https://github.com/icepack/ismip7/issues/157) | optimizer: compare TAO lmvm with the mass-consistent metric against L-BFGS-B at a fixed objective | iu | n/a | 2026-10-02 |
 
 ## Unverified
 
@@ -71,10 +73,10 @@ production run or a group decision.
 | `src:readiness` | 6 |
 | `src:submission-readme` | 7 |
 | `src:matrix-status` | 0 |
-| `src:topic-doc` | 2 |
+| `src:topic-doc` | 3 |
 | `src:runbook` | 1 |
 | `src:open-pr` | 2 |
 
 ## After the deadline
 
-None.
+- [159](https://github.com/icepack/ismip7/issues/159) solver: inversion RSS grows a few MiB a rank every evaluation under scpc_*

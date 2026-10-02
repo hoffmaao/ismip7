@@ -147,7 +147,7 @@ class ISMIP7SCPC(SCPC):
         map for the cleanup's destroy loop and puts the old map back after
         it, so what this context's references stash meanwhile is never
         destroyed: the condensed KSP with its GAMG hierarchy and operator,
-        and the weight vector (issue 159). Destroying the KSP and operator
+        and the weight vector (issue #159). Destroying the KSP and operator
         here is collective and immediate; the rest is released at the next
         ``initialize``, where no cleanup is running."""
         super().destroy(pc)

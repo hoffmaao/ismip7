@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 r"""Cost of the inversion's per-evaluation prior work at production sizes.
 
-Issue 156 measured about 27 s of each 1 km L-BFGS-B evaluation outside the
-forward and the adjoint (13 s at 2 km), the same under full_mumps and
+The issue #156 measurements put about 27 s of each 1 km L-BFGS-B evaluation
+outside the forward and the adjoint (13 s at 2 km), the same under full_mumps and
 scpc_gamg and the same on 16, 32 and 64 ranks. The spans
 inversion_icepack2.py records put that time on the 32 km mesh at 0.12 s, too
 small to say how it grows, so this refines the same mesh uniformly

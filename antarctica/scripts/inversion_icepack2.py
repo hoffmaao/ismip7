@@ -1566,9 +1566,9 @@ def main():
         # guess. The ramp is not annotated, so it runs under the lane's
         # diagnostic solver (ISMIP7_DIAGNOSTIC_LINEAR_SOLVER), the one the
         # forward that loads this MAP cold-starts with, and climbs the
-        # transient's step ladder. The full-Jacobian MUMPS LU that tlm_adjoint
-        # differentiates through takes over at the converged state: on the
-        # 1 km production mesh its factorisation failed mid-ramp
+        # transient's step ladder. The selected inversion solver takes over at
+        # the converged state. On the 1 km production mesh the full-Jacobian
+        # MUMPS factorisation failed mid-ramp
         # (DIVERGED_LINEAR_SOLVE, job 1612624) where the forward's condensed
         # GAMG had climbed the same ramp on the same mesh and MAP.
         PETSc.Sys.Print(
@@ -2728,7 +2728,7 @@ def main():
                 "terms": terms,
                 "state_solves": [w for w in state_work if w],
                 # after the adjoint: its growth across evaluations is how a
-                # solver leak shows (issue 159)
+                # solver leak shows (issue #159)
                 "rss_mib": global_rss_mib(COMM_WORLD),
             })
             with gap_spans("timing_json"):

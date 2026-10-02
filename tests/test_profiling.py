@@ -1,4 +1,4 @@
-r"""The span accumulator behind the inversion's timing record (issue 156)."""
+r"""The span accumulator behind the inversion's timing record (issue #156)."""
 import pytest
 
 pytest.importorskip("mpi4py")

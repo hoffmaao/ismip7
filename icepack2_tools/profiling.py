@@ -1,7 +1,7 @@
 r"""Wall-clock spans inside one inversion evaluation, reduced across ranks.
 
 The inversion's timing record splits an evaluation into the forward, the
-adjoint and the rest (issue 156). ``Spans`` names the rest: each span is timed
+adjoint and the rest (issue #156). ``Spans`` names the rest: each span is timed
 with ``perf_counter`` on every rank and reported as the SLOWEST rank's time,
 so the number printed from rank 0 is the critical path and not rank 0's own
 share (AGENTS.md section 3). The reduction is collective; call

@@ -555,8 +555,9 @@ def snes_restart_failure_atol_scale():
 def nonlinear_solver_options():
     r"""Shared SNES options (type, tolerances, line search) for any momentum solve.
 
-    The inversion layers its full-Jacobian MUMPS options on top of these so the
-    ``ISMIP7_SNES_*`` knobs the campaign exports mean one thing everywhere.
+    Diagnostic and inversion solver builders layer their linear options on
+    top. The condensed inversion modes may override the line search through
+    ``ISMIP7_INVERSION_SNES_LINESEARCH``.
     """
     return _nonlinear_options()
 

@@ -160,12 +160,12 @@ def inversion_mesh_source(derived):
 
 
 def eval_continuation():
-    r"""``ISMIP7_EVAL_CONTINUATION``: whether every inversion evaluation ramps
-    n_flow and m_slide from 1 in five annotated solves. ``0`` solves once at
-    the full exponents from the previous evaluation's state, which the startup
-    ramp has already brought there. The objective depends on the full-n
-    solution alone, so it is the same either way; the cost is not. On unless
-    ``0``."""
+    r"""``ISMIP7_EVAL_CONTINUATION`` with the direct forward disabled:
+    whether every inversion evaluation ramps n_flow and m_slide from 1 in
+    five annotated solves. ``0`` solves once at the full exponents from the
+    previous evaluation's state, which the startup ramp has already brought
+    there. The objective depends on the full-n solution alone, so it is the
+    same either way; the cost differs. On unless ``0``."""
     return _int_flag("ISMIP7_EVAL_CONTINUATION", True)
 
 

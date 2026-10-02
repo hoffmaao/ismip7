@@ -1,5 +1,5 @@
 r"""``mpi_stats.global_rss_mib``: the per-evaluation memory figure the
-inversion writes into its timing record (issue 159)."""
+inversion writes into its timing record (issue #159)."""
 import pytest
 
 MPI = pytest.importorskip("mpi4py.MPI")

@@ -1,0 +1,20 @@
+{
+  "id": "test-32km-inversion-reuse-tao-before-rerun",
+  "task": "test",
+  "institution": "IU",
+  "title": "32 km inversion, 10 TAO iterations under scpc_gamg with sub-element friction and five-solve evaluations on PR 155's head, timed on a quiet machine: a new paused solver every taped solve",
+  "status": "done",
+  "friction": "budd",
+  "mesh": "antarctica_320000_32000_buffered0 (Quartz's .msh, sha256 fd66fc42; 6,282 vertices, 9,055 cells), DG0 geometry, vertex raster sampling",
+  "initial_state": "cold start: u = 0.1 u_obs, theta = phi = 0, the n,m 1 to 3 ramp under full_mumps, then ISMIP7_EVAL_CONTINUATION=1 (five annotated solves an evaluation)",
+  "forcing": "MEaSUREs v2 450 m (sha256 268be94e) and BedMachine v4.1 (sha256 6bd08dbb); ISMIP7_FLUIDITY_PRIOR=legacy; no dH/dt term",
+  "site": "IU workstation (Mac, 16 cores, 128 GB), data under /Volumes/LaCie/Data/antarctica_general/ismip7_obs; alone on the machine (a 10 s CPU log saw one other process, once, at 39 % of a core)",
+  "resources": "8 ranks; RSS a rank (mean over ranks) 1027 MiB after the first taped solve, 1276 MiB after the last; peak 1470 MiB",
+  "code": "4cf7f0e (PR 155 head, a git archive); icepack_tools e7b923e",
+  "started": "2026-10-02",
+  "finished": "2026-10-02",
+  "cost": "880 s for 10 iterations (12 evaluations): 72.7 s an evaluation (median after the first); 60 taped solves 755 s; 196 NonlinearVariationalSolver builds and 72 SCPC setups",
+  "results": "/Volumes/LaCie/Data/antarctica_general/ismip7_runs/inversion_solver_reuse_32km/P_base2_gamg/ (map.h5 sha256 d167b942, log.txt, timing.json)",
+  "audit": "objective 7.849914e4 to 2.507499e4, the first 10 iterations of test-32km-inversion-reuse-tao-before; 10.1 Newton iterations and 203 V-cycles a condensed solve, the n = 1 restart solve 478; published residual 273 after a 0-iteration final solve; no forward failed",
+  "notes": "ISMIP7_SUBELEMENT_FRICTION=1 (exact front push on) ISMIP7_GRAD_PRECOND=mass_consistent ISMIP7_PRIOR_FORM=bilaplacian; the configuration of test-32km-inversion-subelement-scpc-gamg; run under a probe wrapper (scratch, not tracked) that times solver construction, SCPC setup and each taped solve and logs each rank's RSS after every taped solve; it changes nothing the driver computes"
+}

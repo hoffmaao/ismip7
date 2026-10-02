@@ -386,7 +386,7 @@ under 9 GiB a rank on 32 ranks.
 `tlm_adjoint` computes the adjoint by assembling `adjoint(J)` at the recorded
 state and solving it with the adjoint options (`inversion_adjoint_parameters`:
 the forward's linear options, one Krylov solve, no absolute exit), so SCPC
-serves the adjoint unchanged. `icepack2_tools/taped_solve.py` handles two
+serves the adjoint unchanged. `icepack2_tools/taped_solve.py` handles three
 details of the condensed modes:
 
 - The Newton solve holds its Jacobian at the iterate SCPC condensed
@@ -397,6 +397,17 @@ details of the condensed modes:
   taped form carries its quadrature degree in its integrals. Without that the
   adjoint is assembled at UFL's estimated degree (up to 26) against a degree 4
   forward, and the gradient was 1e-3 off.
+- One Newton solver serves the run (`StateSolverCache`). The driver builds
+  its taped form once, over `(theta, phi)` on the L-BFGS-B path and over two
+  Functions that TAO's fresh control copies are assigned into on the tape, so
+  every evaluation reuses the solver, its SCPC context and the symbolic work
+  Firedrake caches on a form. What the condensed preconditioner built at its
+  first setup stays, as across the Newton iterations of one solve and the
+  steps of a transient run: PETSc redoes GAMG's Galerkin products and
+  Chebyshev estimates on its first interpolation, and refactors an LU on its
+  first symbolic analysis. On the slabs a reused solver takes a new one's
+  Newton iterations and its gradient agrees to 1.1e-12; at 32 km see the
+  table closing this section.
 
 Under `scpc_*` the taped forward keeps the transient's NLEQ-ERR line search
 and solves its Newton corrections to a relative 1e-8
@@ -518,6 +529,49 @@ Every same-rank pair that finished ended on one objective (within 1.1e-9 at
 2 km and 2.1e-9 at 1 km over every iteration), the recorded solves confirmed with no
 step, and the one failed trial point (the 2 km single-solve pair, iteration 3)
 failed under both solvers and took the same re-ramp rescue.
+
+The PR 155 review's two efficiency findings came after those runs. Each form
+now carries the SCPC structural-zero blocks only when its own solver condenses:
+the taped form under an `scpc_*` inversion solver, the startup ramp's under an
+`scpc_*` lane solver. In an assembled Jacobian the blocks are 12 nonzeros a
+cell, 15.8 % of the whole, and every Quartz `full_mumps` arm above ramped under
+`scpc_mumps`, so it factored them, and its seconds are an upper bound. The
+second finding is the one taped form and one solver for the run, described
+in the list above. PR 155's head against the change, 32 km on the workstation,
+8 ranks with nothing else running, Budd, the `legacy` fluidity prior, a cold
+start; RSS is each rank's after the first and the last taped solve, the mean
+over ranks:
+
+| configuration | evaluations | s an evaluation, before / after | RSS a rank in MiB, before | after |
+|---|---|---|---|---|
+| `scpc_gamg`, L-BFGS-B, one solve an evaluation | 32 | 8.69 / 6.64 | 1125 to 1316 | 1034 to 1153 |
+| `scpc_gamg`, TAO, sub-element friction, five solves an evaluation | 12 | 72.7 / 61.3 | 1027 to 1276 | 1050 to 1101 |
+| `full_mumps`, L-BFGS-B, ramp under `full_mumps` | 32 | 5.56 / 4.62 | 1155 to 1011 | 998 to 1014 |
+| `full_mumps`, L-BFGS-B, ramp under `scpc_mumps` | 32 | 7.36 / 4.69 | 1060 to 1073 | 962 to 1012 |
+
+Every pair took the same iterations, with objectives within 3.5e-9 under
+`scpc_gamg` and 2.2e-11 under `full_mumps`; under `scpc_gamg` the Newton
+iterations matched and the V-cycles a condensed solve stayed within 2 %
+(79.7 against 79.8, 207.5 against 203.4). Building an SCPC context took
+0.17 s; most of what a new solver cost was the symbolic work Firedrake caches
+on a form object. The blocks made a `full_mumps` evaluation 32 % slower on
+PR 155's head (7.36 against 5.56 s).
+
+RSS grew with every solver built, 6.2 MiB a rank an evaluation before and 3.8
+after with one solve an evaluation, 22.6 and 4.6 with five. What remains is no
+uncollected garbage (a full `gc.collect()` and PETSc garbage cleanup after
+every taped solve left it at 3.5), and it scales with the local problem: 7.4
+MiB a rank an evaluation on 4 ranks, the same total across ranks. Python sees
+none of it (rank 0's live PyOP2 Dats held 1.8 MiB after the 10th taped solve
+and after the 30th, and no Function or PETSc object accumulated), so it is in
+PETSc, Slate or the allocator; the `full_mumps` runs grew at most 50 MiB a
+rank over 31 evaluations. Scaled linearly to 2 km on 32 ranks (37 times the
+local size), the growth before this change would be about 230 MiB a rank an
+evaluation with one solve and 830 with five, comparable to `scpc_gamg`'s
+excess AveRSS on Quartz above (3.7 against 2.8 and 6.9 against 3.6 GiB);
+Quartz has not measured it. `runlog/test-32km-inversion-reuse-*` and
+`runlog/test-32km-inversion-ramp-blocks-*` hold the runs, including a first
+round timed beside another session's jobs.
 
 ### Transient (dH/dt-constrained) inversion
 

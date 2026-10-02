@@ -9,9 +9,9 @@ gitignored, so these records and the per-core reports beside them are
 the trace a run leaves in the repository. A core experiment also gets
 its full report from `core_report.py`; this is the index.
 
-141 records.
+157 records.
 
-Status: 12 planned, 3 running, 9 stopped, 100 done, 17 superseded.
+Status: 12 planned, 3 running, 10 stopped, 115 done, 17 superseded.
 
 ## Inversion
 
@@ -131,6 +131,22 @@ Status: 12 planned, 3 running, 9 stopped, 100 done, 17 superseded.
 | 32 km inversion cold start with the exp friction control and sub-element friction, full_mumps and scpc_gamg | stopped | antarctica_320000_32000_buffered0 (Quartz's .msh, sha256 fd66fc42; 6,282 vertices, 9,055 cells), DG0 geometry, vertex raster sampling | IU workstation (Mac, 16 cores, 128 GB), data under /Volumes/LaCie/Data/antarctica_general/ismip7_obs | 2026-10-01 | 2026-10-01 | the startup ramp (full_mumps in both runs, unannotated, before the solver under test runs) diverged on every rung near n = 2.1 (rung 1 step 5 to \|\|F\|\| 4e37 and 4e20, rung 2 and rung 3 likewise) and the run stopped with ConvergenceError; the solver choice played no part |
 | 32 km inversion, 30 L-BFGS-B iterations under full_mumps, the reference for the scpc_gamg trajectory | done | antarctica_320000_32000_buffered0 (Quartz's .msh, sha256 fd66fc42; 6,282 vertices, 9,055 cells), DG0 geometry, vertex raster sampling | IU workstation (Mac, 16 cores, 128 GB), data under /Volumes/LaCie/Data/antarctica_general/ismip7_obs | 2026-10-01 | 2026-10-01 | objective 3.0156e4 to 3.7463e3; published residual 9.99e-4 after a final solve that converged in 0 Newton iterations; no forward failed |
 | 32 km inversion, 30 L-BFGS-B iterations under scpc_gamg (bt line search) | done | antarctica_320000_32000_buffered0 (Quartz's .msh, sha256 fd66fc42; 6,282 vertices, 9,055 cells), DG0 geometry, vertex raster sampling | IU workstation (Mac, 16 cores, 128 GB), data under /Volumes/LaCie/Data/antarctica_general/ismip7_obs | 2026-10-01 | 2026-10-01 | the same 30 iterations and 32 evaluations as test-32km-inversion-lbfgs-full-mumps; every evaluation's objective within 4.3e-7 of it and \|grad\| within 1e-4; published residual 1.20e-3; no forward failed; every recorded solve confirmed the paused solve's state with no step |
+| 32 km inversion, 30 L-BFGS-B iterations under full_mumps after a scpc_mumps startup ramp: the blocks only in the ramp's form, one taped form for the run | done | antarctica_320000_32000_buffered0 (Quartz's .msh, sha256 fd66fc42; 6,282 vertices, 9,055 cells), DG0 geometry, vertex raster sampling | IU workstation (Mac, 16 cores, 128 GB), data under /Volumes/LaCie/Data/antarctica_general/ismip7_obs; alone on the machine (no other session's process in a 10 s CPU log) | 2026-10-02 | 2026-10-02 | the same 30 iterations and 32 evaluations as test-32km-inversion-ramp-blocks-before, every objective within 2.2e-11 of it; published residual 1.02e-3; no forward failed |
+| 32 km inversion, 30 L-BFGS-B iterations under full_mumps after a scpc_mumps startup ramp on PR 155's head: the taped Jacobian carries the SCPC structural-zero blocks | done | antarctica_320000_32000_buffered0 (Quartz's .msh, sha256 fd66fc42; 6,282 vertices, 9,055 cells), DG0 geometry, vertex raster sampling | IU workstation (Mac, 16 cores, 128 GB), data under /Volumes/LaCie/Data/antarctica_general/ismip7_obs; alone on the machine (no other session's process in a 10 s CPU log) | 2026-10-02 | 2026-10-02 | objective 3.015616e4 to 3.746343e3, the trajectory of test-32km-inversion-lbfgs-full-mumps; published residual 1.01e-3 after a 0-iteration final solve; no forward failed |
+| 32 km inversion, 30 L-BFGS-B iterations under full_mumps after a full_mumps ramp, one taped form for the run | done | antarctica_320000_32000_buffered0 (Quartz's .msh, sha256 fd66fc42; 6,282 vertices, 9,055 cells), DG0 geometry, vertex raster sampling | IU workstation (Mac, 16 cores, 128 GB), data under /Volumes/LaCie/Data/antarctica_general/ismip7_obs; alone on the machine (no other session's process in a 10 s CPU log) | 2026-10-02 | 2026-10-02 | the same 30 iterations and 32 evaluations as test-32km-inversion-reuse-full-mumps-before, every objective within 1.6e-11 of it; published residual 1.02e-3; no forward failed |
+| 32 km inversion, 30 L-BFGS-B iterations under full_mumps after a full_mumps ramp on PR 155's head: no SCPC blocks anywhere, a new form every evaluation | done | antarctica_320000_32000_buffered0 (Quartz's .msh, sha256 fd66fc42; 6,282 vertices, 9,055 cells), DG0 geometry, vertex raster sampling | IU workstation (Mac, 16 cores, 128 GB), data under /Volumes/LaCie/Data/antarctica_general/ismip7_obs; alone on the machine (no other session's process in a 10 s CPU log) | 2026-10-02 | 2026-10-02 | objective 3.015616e4 to 3.746343e3; published residual 1.04e-3 after a 0-iteration final solve; no forward failed |
+| 32 km inversion, 30 L-BFGS-B iterations under scpc_gamg with one paused solver for the run, timed on a quiet machine | done | antarctica_320000_32000_buffered0 (Quartz's .msh, sha256 fd66fc42; 6,282 vertices, 9,055 cells), DG0 geometry, vertex raster sampling | IU workstation (Mac, 16 cores, 128 GB), data under /Volumes/LaCie/Data/antarctica_general/ismip7_obs; alone on the machine (no other session's process in a 10 s CPU log) | 2026-10-02 | 2026-10-02 | the same 30 iterations and 32 evaluations as test-32km-inversion-reuse-lbfgs-before-rerun, every objective within 3.5e-9 of it, the same Newton iterations every evaluation, 79.7 V-cycles a condensed solve against 79.8; all 31 later taped solves reused the solver; published residual 1.00e-3; no forward failed |
+| 32 km inversion, 30 L-BFGS-B iterations under scpc_gamg on PR 155's head: a new paused solver every evaluation (the reference for the solver cache) | done | antarctica_320000_32000_buffered0 (Quartz's .msh, sha256 fd66fc42; 6,282 vertices, 9,055 cells), DG0 geometry, vertex raster sampling | IU workstation (Mac, 16 cores, 128 GB), data under /Volumes/LaCie/Data/antarctica_general/ismip7_obs; ran about 09:10 to 09:16, beside another session's 4-rank 32 km run and 1 to 8-rank probe, so its seconds are contended (test-32km-inversion-reuse-lbfgs-before-rerun times the same comparison on a quiet machine); work counts, objectives and RSS do not depend on it | 2026-10-02 | 2026-10-02 | objective 3.015616e4 to 3.746343e3, as test-32km-inversion-lbfgs-scpc-gamg; published residual 1.02e-3 after a 0-iteration final solve; no forward failed |
+| 32 km inversion, 30 L-BFGS-B iterations under scpc_gamg on PR 155's head, timed on a quiet machine: a new paused solver every evaluation | done | antarctica_320000_32000_buffered0 (Quartz's .msh, sha256 fd66fc42; 6,282 vertices, 9,055 cells), DG0 geometry, vertex raster sampling | IU workstation (Mac, 16 cores, 128 GB), data under /Volumes/LaCie/Data/antarctica_general/ismip7_obs; alone on the machine (no other session's process in a 10 s CPU log) | 2026-10-02 | 2026-10-02 | objective 3.015616e4 to 3.746343e3; published residual 1.03e-3 after a 0-iteration final solve; no forward failed |
+| 32 km inversion, 30 L-BFGS-B iterations under scpc_gamg with one paused solver for the run (the working tree that became 9bc7682) | done | antarctica_320000_32000_buffered0 (Quartz's .msh, sha256 fd66fc42; 6,282 vertices, 9,055 cells), DG0 geometry, vertex raster sampling | IU workstation (Mac, 16 cores, 128 GB), data under /Volumes/LaCie/Data/antarctica_general/ismip7_obs; ran about 09:21 to 09:27, beside another session's 4-rank 32 km pair, so its seconds are contended (test-32km-inversion-reuse-lbfgs-after times the same comparison on a quiet machine); work counts, objectives and RSS do not depend on it | 2026-10-02 | 2026-10-02 | the same 30 iterations and 32 evaluations as test-32km-inversion-reuse-lbfgs-before, every objective within 3.5e-9 of it, the same Newton iterations every evaluation and V-cycles a condensed solve within a few percent (79.7 against 79.8 on average); published residual 1.03e-3; all 31 later taped solves reused the solver |
+| 32 km inversion, 30 L-BFGS-B iterations under scpc_gamg with one paused solver, a full gc.collect() and PETSc garbage cleanup after every taped solve: is the remaining RSS growth uncollected garbage | done | antarctica_320000_32000_buffered0 (Quartz's .msh, sha256 fd66fc42; 6,282 vertices, 9,055 cells), DG0 geometry, vertex raster sampling | IU workstation (Mac, 16 cores, 128 GB), data under /Volumes/LaCie/Data/antarctica_general/ismip7_obs; alone on the machine (no other session's process in a 10 s CPU log) | 2026-10-02 | 2026-10-02 | every objective within 5.6e-12 of test-32km-inversion-reuse-lbfgs-after; the growth stays: memory something still holds, which a collection does not release |
+| 32 km inversion, 30 L-BFGS-B iterations under scpc_gamg with one paused solver on 4 ranks: does the remaining RSS growth scale with the local problem | done | antarctica_320000_32000_buffered0 (Quartz's .msh, sha256 fd66fc42; 6,282 vertices, 9,055 cells), DG0 geometry, vertex raster sampling | IU workstation (Mac, 16 cores, 128 GB), data under /Volumes/LaCie/Data/antarctica_general/ismip7_obs; alone on the machine (no other session's process in a 10 s CPU log) | 2026-10-02 | 2026-10-02 | the same 30 iterations and 32 evaluations as the 8-rank run, objectives within 1.3e-7 of it (the partition), 74.5 V-cycles a condensed solve |
+| 32 km inversion, 30 L-BFGS-B iterations under scpc_gamg with one paused solver, counting rank 0's live Python objects after taped solves 10 and 30: where is the remaining RSS growth | done | antarctica_320000_32000_buffered0 (Quartz's .msh, sha256 fd66fc42; 6,282 vertices, 9,055 cells), DG0 geometry, vertex raster sampling | IU workstation (Mac, 16 cores, 128 GB), data under /Volumes/LaCie/Data/antarctica_general/ismip7_obs; alone on the machine (no other session's process in a 10 s CPU log) | 2026-10-02 | 2026-10-02 | over 20 evaluations the bytes in rank 0's live PyOP2 Dats stayed 1.8 MiB and no Function, Cofunction or petsc4py object accumulated; what grew is small: 80 tlm_adjoint Functionals with their Caches and FloatSpaces (4 an evaluation) and about 3,200 functions and 6,200 closure cells. The dof-proportional growth is in memory Python does not see (PETSc, Slate or the allocator) |
+| 32 km inversion under scpc_gamg with one paused solver and tracemalloc on rank 0: stopped | stopped | antarctica_320000_32000_buffered0 (Quartz's .msh, sha256 fd66fc42; 6,282 vertices, 9,055 cells), DG0 geometry, vertex raster sampling | IU workstation (Mac, 16 cores, 128 GB), data under /Volumes/LaCie/Data/antarctica_general/ismip7_obs; alone on the machine (no other session's process in a 10 s CPU log) | 2026-10-02 | 2026-10-02 | no result; replaced by test-32km-inversion-reuse-memory-objects |
+| 32 km inversion, 20 TAO iterations under scpc_gamg with sub-element friction and five-solve evaluations, one paused solver for the run | done | antarctica_320000_32000_buffered0 (Quartz's .msh, sha256 fd66fc42; 6,282 vertices, 9,055 cells), DG0 geometry, vertex raster sampling | IU workstation (Mac, 16 cores, 128 GB), data under /Volumes/LaCie/Data/antarctica_general/ismip7_obs; ran about 10:20 to 10:48, beside another session's 8-rank 4 km and 4-rank 32 km inversions and 1 to 8-rank probe until 10:46, so its seconds are contended (test-32km-inversion-reuse-tao-after-rerun times the same comparison on a quiet machine); work counts, objectives and RSS do not depend on it | 2026-10-02 | 2026-10-02 | the same 20 iterations and 22 evaluations as test-32km-inversion-reuse-tao-before, every objective within 1.65e-10 of it, final 2.120453e4; 10.0 Newton iterations and 197 V-cycles a condensed solve (195 before), the n = 1 restart solve 455 on average (460 before); 104 of 105 taped solves reused the solver; published residual 63.3 after a 0-iteration final solve; no forward failed; its startup and first evaluation ran about twice as slow as the baseline's, every ramp rung included, with no kernel compiled (no cache write after 09:42): contention |
+| 32 km inversion, 10 TAO iterations under scpc_gamg with sub-element friction and five-solve evaluations, one paused solver for the run, timed on a quiet machine | done | antarctica_320000_32000_buffered0 (Quartz's .msh, sha256 fd66fc42; 6,282 vertices, 9,055 cells), DG0 geometry, vertex raster sampling | IU workstation (Mac, 16 cores, 128 GB), data under /Volumes/LaCie/Data/antarctica_general/ismip7_obs; alone on the machine (a 10 s CPU log saw one other process, once, at 39 % of a core) | 2026-10-02 | 2026-10-02 | the same 10 iterations and 12 evaluations as test-32km-inversion-reuse-tao-before-rerun, every objective within 1.6e-10 of it; 10.1 Newton iterations and 208 V-cycles a condensed solve, the n = 1 restart solve 474; 59 of 60 taped solves reused the solver, across TAO evaluations as within them; published residual 280 after a 0-iteration final solve; no forward failed |
+| 32 km inversion, 20 TAO iterations under scpc_gamg with sub-element friction and five-solve evaluations on PR 155's head: a new paused solver every taped solve | done | antarctica_320000_32000_buffered0 (Quartz's .msh, sha256 fd66fc42; 6,282 vertices, 9,055 cells), DG0 geometry, vertex raster sampling | IU workstation (Mac, 16 cores, 128 GB), data under /Volumes/LaCie/Data/antarctica_general/ismip7_obs; ran about 09:45 to 10:20, beside another session's 8-rank 4 km inversions, 4-rank 32 km runs and its serial test suite (load up to 69), so its seconds are contended (test-32km-inversion-reuse-tao-before-rerun times the same comparison on a quiet machine); work counts, objectives and RSS do not depend on it | 2026-10-02 | 2026-10-02 | objective 7.849914e4 to 2.120453e4, as test-32km-inversion-subelement-scpc-gamg; 10.0 Newton iterations and 195 V-cycles a condensed solve; published residual 57.9 after a 0-iteration final solve; no forward failed |
+| 32 km inversion, 10 TAO iterations under scpc_gamg with sub-element friction and five-solve evaluations on PR 155's head, timed on a quiet machine: a new paused solver every taped solve | done | antarctica_320000_32000_buffered0 (Quartz's .msh, sha256 fd66fc42; 6,282 vertices, 9,055 cells), DG0 geometry, vertex raster sampling | IU workstation (Mac, 16 cores, 128 GB), data under /Volumes/LaCie/Data/antarctica_general/ismip7_obs; alone on the machine (a 10 s CPU log saw one other process, once, at 39 % of a core) | 2026-10-02 | 2026-10-02 | objective 7.849914e4 to 2.507499e4, the first 10 iterations of test-32km-inversion-reuse-tao-before; 10.1 Newton iterations and 203 V-cycles a condensed solve, the n = 1 restart solve 478; published residual 273 after a 0-iteration final solve; no forward failed |
 | 32 km inversion under scpc_gamg on 4 ranks, and with the startup ramp under scpc_gamg | done | antarctica_320000_32000_buffered0 (Quartz's .msh, sha256 fd66fc42; 6,282 vertices, 9,055 cells), DG0 geometry, vertex raster sampling | IU workstation (Mac, 16 cores, 128 GB), data under /Volumes/LaCie/Data/antarctica_general/ismip7_obs | 2026-10-01 | 2026-10-01 | 4 ranks against 8: objective and \|grad\| within 1.4e-7 over four evaluations. The ramp under scpc_gamg (the structural-zero blocks in F) stalled on the 8-step rung at n = 2.43 (DIVERGED_MAX_IT, the transient's NLEQ-ERR with GAMG) and climbed on the 16-step rung; its evaluations then matched the 8-rank scpc_gamg run to 1e-12 |
 | 32 km inversion, four evaluations under each ISMIP7_INVERSION_LINEAR_SOLVER and three scpc_gamg line-search and tolerance settings | done | antarctica_320000_32000_buffered0 (Quartz's .msh, sha256 fd66fc42; 6,282 vertices, 9,055 cells), DG0 geometry, vertex raster sampling | IU workstation (Mac, 16 cores, 128 GB), data under /Volumes/LaCie/Data/antarctica_general/ismip7_obs | 2026-10-01 | 2026-10-01 | Against full_mumps over the same four evaluations: scpc_mumps 1.1e-13 in the objective and 3e-13 in \|grad\|. scpc_gamg with the transient's options (NLEQ-ERR, Krylov rtol 1e-6) matched to 1.8e-8 for three evaluations and then failed every full L-BFGS step (DIVERGED_MAX_IT, \|\|F\|\| stalled at 7.9e10 from 9.1e10), so the descent fell back to short steps. At that trial point the exact solvers took 6 Newton iterations; scpc_gamg took 6 with NLEQ-ERR at rtol 1e-8 (950 V-cycles) or 1e-10 (1292), and 6 with bt at 1e-6 (214 V-cycles), all four evaluations matching full_mumps to 1.4e-7 or better |
 | 32 km inversion, 20 TAO iterations under full_mumps with sub-element friction, the exact front push and five-solve evaluations | done | antarctica_320000_32000_buffered0 (Quartz's .msh, sha256 fd66fc42; 6,282 vertices, 9,055 cells), DG0 geometry, vertex raster sampling | IU workstation (Mac, 16 cores, 128 GB), data under /Volumes/LaCie/Data/antarctica_general/ismip7_obs | 2026-10-01 | 2026-10-01 | objective 7.849914e4 to 2.120453e4 over 20 iterations, no forward failed; published residual 64.7 after a 0-iteration final solve |
@@ -2897,6 +2913,310 @@ Core 11 at 32 km without the apparent-MB reference, a cold start on the OCX prot
 - **Cost per model year:** 438 s for 30 iterations (32 evaluations): 9.5 s forward and 0.6 s adjoint an evaluation, 5.1 Newton iterations and 51 V-cycles a condensed solve
 - **Results path:** /Volumes/LaCie/Data/antarctica_general/ismip7_runs/inversion_solver_32km/i30_gamg/map.h5 (sha256 aa98cad2), log.txt, timing.json
 - **Audit:** the same 30 iterations and 32 evaluations as test-32km-inversion-lbfgs-full-mumps; every evaluation's objective within 4.3e-7 of it and \|grad\| within 1e-4; published residual 1.20e-3; no forward failed; every recorded solve confirmed the paused solve's state with no step
+
+### test-32km-inversion-ramp-blocks-after
+
+32 km inversion, 30 L-BFGS-B iterations under full_mumps after a scpc_mumps startup ramp: the blocks only in the ramp's form, one taped form for the run (done), IU.
+
+- **Task type:** test
+- **Friction law:** budd
+- **Mesh:** antarctica_320000_32000_buffered0 (Quartz's .msh, sha256 fd66fc42; 6,282 vertices, 9,055 cells), DG0 geometry, vertex raster sampling
+- **Initial state / MAP:** cold start: u = 0.1 u_obs, theta = phi = 0, the n,m 1 to 3 ramp under scpc_mumps (ISMIP7_DIAGNOSTIC_LINEAR_SOLVER=scpc_mumps, as every Quartz arm of issue #156), then ISMIP7_EVAL_CONTINUATION=0
+- **Forcing versions:** MEaSUREs v2 450 m (sha256 268be94e) and BedMachine v4.1 (sha256 6bd08dbb); ISMIP7_FLUIDITY_PRIOR=legacy; no dH/dt term
+- **Site / partition:** IU workstation (Mac, 16 cores, 128 GB), data under /Volumes/LaCie/Data/antarctica_general/ismip7_obs; alone on the machine (no other session's process in a 10 s CPU log)
+- **Ranks / memory:** 8 ranks; RSS a rank (mean over ranks) 962 MiB after the first taped solve, 1012 MiB after the last; peak 1385 MiB
+- **Code:** 9bc7682; icepack_tools e7b923e
+- **Started:** 2026-10-02
+- **Finished:** 2026-10-02
+- **Cost per model year:** 166 s for 30 iterations (32 evaluations): 4.69 s an evaluation (median after the first), 4.23 s forward and 0.33 s adjoint; 140 s in the taped solves
+- **Results path:** /Volumes/LaCie/Data/antarctica_general/ismip7_runs/inversion_solver_reuse_32km/R_new_full/ (map.h5 sha256 34f02a6a, log.txt, timing.json)
+- **Audit:** the same 30 iterations and 32 evaluations as test-32km-inversion-ramp-blocks-before, every objective within 2.2e-11 of it; published residual 1.02e-3; no forward failed
+- **Notes:** the taped Jacobian loses 12 nonzeros a cell (15.8 %); the run also solves one form for the run, so test-32km-inversion-reuse-full-mumps-before/after separate the two; run under a probe wrapper (scratch, not tracked) that times solver construction, SCPC setup and each taped solve and logs each rank's RSS after every taped solve; it changes nothing the driver computes
+
+### test-32km-inversion-ramp-blocks-before
+
+32 km inversion, 30 L-BFGS-B iterations under full_mumps after a scpc_mumps startup ramp on PR 155's head: the taped Jacobian carries the SCPC structural-zero blocks (done), IU.
+
+- **Task type:** test
+- **Friction law:** budd
+- **Mesh:** antarctica_320000_32000_buffered0 (Quartz's .msh, sha256 fd66fc42; 6,282 vertices, 9,055 cells), DG0 geometry, vertex raster sampling
+- **Initial state / MAP:** cold start: u = 0.1 u_obs, theta = phi = 0, the n,m 1 to 3 ramp under scpc_mumps (ISMIP7_DIAGNOSTIC_LINEAR_SOLVER=scpc_mumps, as every Quartz arm of issue #156), then ISMIP7_EVAL_CONTINUATION=0
+- **Forcing versions:** MEaSUREs v2 450 m (sha256 268be94e) and BedMachine v4.1 (sha256 6bd08dbb); ISMIP7_FLUIDITY_PRIOR=legacy; no dH/dt term
+- **Site / partition:** IU workstation (Mac, 16 cores, 128 GB), data under /Volumes/LaCie/Data/antarctica_general/ismip7_obs; alone on the machine (no other session's process in a 10 s CPU log)
+- **Ranks / memory:** 8 ranks; RSS a rank (mean over ranks) 1060 MiB after the first taped solve, 1073 MiB after the last; peak 1460 MiB
+- **Code:** 4cf7f0e (PR 155 head, a git archive); icepack_tools e7b923e
+- **Started:** 2026-10-02
+- **Finished:** 2026-10-02
+- **Cost per model year:** 254 s for 30 iterations (32 evaluations): 7.36 s an evaluation (median after the first), 6.91 s forward and 0.37 s adjoint; 226 s in the taped solves
+- **Results path:** /Volumes/LaCie/Data/antarctica_general/ismip7_runs/inversion_solver_reuse_32km/R_base_full/ (map.h5 sha256 29398dda, log.txt, timing.json)
+- **Audit:** objective 3.015616e4 to 3.746343e3, the trajectory of test-32km-inversion-lbfgs-full-mumps; published residual 1.01e-3 after a 0-iteration final solve; no forward failed
+- **Notes:** run under a probe wrapper (scratch, not tracked) that times solver construction, SCPC setup and each taped solve and logs each rank's RSS after every taped solve; it changes nothing the driver computes
+
+### test-32km-inversion-reuse-full-mumps-after
+
+32 km inversion, 30 L-BFGS-B iterations under full_mumps after a full_mumps ramp, one taped form for the run (done), IU.
+
+- **Task type:** test
+- **Friction law:** budd
+- **Mesh:** antarctica_320000_32000_buffered0 (Quartz's .msh, sha256 fd66fc42; 6,282 vertices, 9,055 cells), DG0 geometry, vertex raster sampling
+- **Initial state / MAP:** cold start: u = 0.1 u_obs, theta = phi = 0, the n,m 1 to 3 ramp under full_mumps, then ISMIP7_EVAL_CONTINUATION=0
+- **Forcing versions:** MEaSUREs v2 450 m (sha256 268be94e) and BedMachine v4.1 (sha256 6bd08dbb); ISMIP7_FLUIDITY_PRIOR=legacy; no dH/dt term
+- **Site / partition:** IU workstation (Mac, 16 cores, 128 GB), data under /Volumes/LaCie/Data/antarctica_general/ismip7_obs; alone on the machine (no other session's process in a 10 s CPU log)
+- **Ranks / memory:** 8 ranks; RSS a rank (mean over ranks) 998 MiB after the first taped solve, 1014 MiB after the last; peak 1387 MiB
+- **Code:** 9bc7682; icepack_tools e7b923e
+- **Started:** 2026-10-02
+- **Finished:** 2026-10-02
+- **Cost per model year:** 161 s for 30 iterations (32 evaluations): 4.62 s an evaluation (median after the first), 4.18 s forward and 0.34 s adjoint; 136 s in the taped solves
+- **Results path:** /Volumes/LaCie/Data/antarctica_general/ismip7_runs/inversion_solver_reuse_32km/F_new_full/ (map.h5 sha256 d4e0b963, log.txt, timing.json)
+- **Audit:** the same 30 iterations and 32 evaluations as test-32km-inversion-reuse-full-mumps-before, every objective within 1.6e-11 of it; published residual 1.02e-3; no forward failed
+- **Notes:** isolates the single taped form under full_mumps (5.56 to 4.62 s an evaluation), whose recorded solve is tlm_adjoint's own; run under the probe wrapper of test-32km-inversion-ramp-blocks-before
+
+### test-32km-inversion-reuse-full-mumps-before
+
+32 km inversion, 30 L-BFGS-B iterations under full_mumps after a full_mumps ramp on PR 155's head: no SCPC blocks anywhere, a new form every evaluation (done), IU.
+
+- **Task type:** test
+- **Friction law:** budd
+- **Mesh:** antarctica_320000_32000_buffered0 (Quartz's .msh, sha256 fd66fc42; 6,282 vertices, 9,055 cells), DG0 geometry, vertex raster sampling
+- **Initial state / MAP:** cold start: u = 0.1 u_obs, theta = phi = 0, the n,m 1 to 3 ramp under full_mumps, then ISMIP7_EVAL_CONTINUATION=0
+- **Forcing versions:** MEaSUREs v2 450 m (sha256 268be94e) and BedMachine v4.1 (sha256 6bd08dbb); ISMIP7_FLUIDITY_PRIOR=legacy; no dH/dt term
+- **Site / partition:** IU workstation (Mac, 16 cores, 128 GB), data under /Volumes/LaCie/Data/antarctica_general/ismip7_obs; alone on the machine (no other session's process in a 10 s CPU log)
+- **Ranks / memory:** 8 ranks; RSS a rank (mean over ranks) 1155 MiB after the first taped solve, 1011 MiB after the last; peak 1385 MiB
+- **Code:** 4cf7f0e (PR 155 head, a git archive); icepack_tools e7b923e
+- **Started:** 2026-10-02
+- **Finished:** 2026-10-02
+- **Cost per model year:** 191 s for 30 iterations (32 evaluations): 5.56 s an evaluation (median after the first), 5.11 s forward and 0.34 s adjoint; 164 s in the taped solves
+- **Results path:** /Volumes/LaCie/Data/antarctica_general/ismip7_runs/inversion_solver_reuse_32km/F_base_full/ (map.h5 sha256 098f23b8, log.txt, timing.json)
+- **Audit:** objective 3.015616e4 to 3.746343e3; published residual 1.04e-3 after a 0-iteration final solve; no forward failed
+- **Notes:** with test-32km-inversion-ramp-blocks-before it isolates what the blocks cost a full_mumps evaluation (7.36 against 5.56 s); run under the probe wrapper of that record
+
+### test-32km-inversion-reuse-lbfgs-after
+
+32 km inversion, 30 L-BFGS-B iterations under scpc_gamg with one paused solver for the run, timed on a quiet machine (done), IU.
+
+- **Task type:** test
+- **Friction law:** budd
+- **Mesh:** antarctica_320000_32000_buffered0 (Quartz's .msh, sha256 fd66fc42; 6,282 vertices, 9,055 cells), DG0 geometry, vertex raster sampling
+- **Initial state / MAP:** cold start: u = 0.1 u_obs, theta = phi = 0, the n,m 1 to 3 ramp under full_mumps, then ISMIP7_EVAL_CONTINUATION=0 (one annotated solve at full n an evaluation)
+- **Forcing versions:** MEaSUREs v2 450 m (sha256 268be94e) and BedMachine v4.1 (sha256 6bd08dbb); ISMIP7_FLUIDITY_PRIOR=legacy; no dH/dt term
+- **Site / partition:** IU workstation (Mac, 16 cores, 128 GB), data under /Volumes/LaCie/Data/antarctica_general/ismip7_obs; alone on the machine (no other session's process in a 10 s CPU log)
+- **Ranks / memory:** 8 ranks; RSS a rank (mean over ranks) 1034 MiB after the first taped solve, 1153 MiB after the last; peak 1435 MiB
+- **Code:** 9bc7682; icepack_tools e7b923e
+- **Started:** 2026-10-02
+- **Finished:** 2026-10-02
+- **Cost per model year:** 232 s for 30 iterations (32 evaluations): 6.64 s an evaluation (median after the first), 6.08 s forward and 0.42 s adjoint; 202 s in the taped solves; 33 SCPC setups, one of them the forward's
+- **Results path:** /Volumes/LaCie/Data/antarctica_general/ismip7_runs/inversion_solver_reuse_32km/L_new2_gamg/ (map.h5 sha256 61896bf0, log.txt, timing.json)
+- **Audit:** the same 30 iterations and 32 evaluations as test-32km-inversion-reuse-lbfgs-before-rerun, every objective within 3.5e-9 of it, the same Newton iterations every evaluation, 79.7 V-cycles a condensed solve against 79.8; all 31 later taped solves reused the solver; published residual 1.00e-3; no forward failed
+- **Notes:** run under a probe wrapper (scratch, not tracked) that times solver construction, SCPC setup and each taped solve and logs each rank's RSS after every taped solve; it changes nothing the driver computes
+
+### test-32km-inversion-reuse-lbfgs-before
+
+32 km inversion, 30 L-BFGS-B iterations under scpc_gamg on PR 155's head: a new paused solver every evaluation (the reference for the solver cache) (done), IU.
+
+- **Task type:** test
+- **Friction law:** budd
+- **Mesh:** antarctica_320000_32000_buffered0 (Quartz's .msh, sha256 fd66fc42; 6,282 vertices, 9,055 cells), DG0 geometry, vertex raster sampling
+- **Initial state / MAP:** cold start: u = 0.1 u_obs, theta = phi = 0, the n,m 1 to 3 ramp under full_mumps, then ISMIP7_EVAL_CONTINUATION=0 (one annotated solve at full n an evaluation)
+- **Forcing versions:** MEaSUREs v2 450 m (sha256 268be94e) and BedMachine v4.1 (sha256 6bd08dbb); ISMIP7_FLUIDITY_PRIOR=legacy; no dH/dt term
+- **Site / partition:** IU workstation (Mac, 16 cores, 128 GB), data under /Volumes/LaCie/Data/antarctica_general/ismip7_obs; ran about 09:10 to 09:16, beside another session's 4-rank 32 km run and 1 to 8-rank probe, so its seconds are contended (test-32km-inversion-reuse-lbfgs-before-rerun times the same comparison on a quiet machine); work counts, objectives and RSS do not depend on it
+- **Ranks / memory:** 8 ranks; RSS a rank (mean over ranks) 1106 MiB after the first taped solve, 1293 MiB after the last; peak 1519 MiB
+- **Code:** 4cf7f0e (PR 155 head, a git archive); icepack_tools e7b923e
+- **Started:** 2026-10-02
+- **Finished:** 2026-10-02
+- **Cost per model year:** 313 s for 30 iterations (32 evaluations): 8.86 s an evaluation (median after the first), 8.31 s forward and 0.44 s adjoint; 99 NonlinearVariationalSolver builds (1.8 s) and 64 SCPC setups (10.7 s)
+- **Results path:** /Volumes/LaCie/Data/antarctica_general/ismip7_runs/inversion_solver_reuse_32km/L_base_gamg/ (map.h5 sha256 bc2d9219, log.txt, timing.json)
+- **Audit:** objective 3.015616e4 to 3.746343e3, as test-32km-inversion-lbfgs-scpc-gamg; published residual 1.02e-3 after a 0-iteration final solve; no forward failed
+- **Notes:** run under a probe wrapper (scratch, not tracked) that times solver construction, SCPC setup and each taped solve and logs each rank's RSS after every taped solve; it changes nothing the driver computes
+
+### test-32km-inversion-reuse-lbfgs-before-rerun
+
+32 km inversion, 30 L-BFGS-B iterations under scpc_gamg on PR 155's head, timed on a quiet machine: a new paused solver every evaluation (done), IU.
+
+- **Task type:** test
+- **Friction law:** budd
+- **Mesh:** antarctica_320000_32000_buffered0 (Quartz's .msh, sha256 fd66fc42; 6,282 vertices, 9,055 cells), DG0 geometry, vertex raster sampling
+- **Initial state / MAP:** cold start: u = 0.1 u_obs, theta = phi = 0, the n,m 1 to 3 ramp under full_mumps, then ISMIP7_EVAL_CONTINUATION=0 (one annotated solve at full n an evaluation)
+- **Forcing versions:** MEaSUREs v2 450 m (sha256 268be94e) and BedMachine v4.1 (sha256 6bd08dbb); ISMIP7_FLUIDITY_PRIOR=legacy; no dH/dt term
+- **Site / partition:** IU workstation (Mac, 16 cores, 128 GB), data under /Volumes/LaCie/Data/antarctica_general/ismip7_obs; alone on the machine (no other session's process in a 10 s CPU log)
+- **Ranks / memory:** 8 ranks; RSS a rank (mean over ranks) 1125 MiB after the first taped solve, 1316 MiB after the last; peak 1535 MiB
+- **Code:** 4cf7f0e (PR 155 head, a git archive); icepack_tools e7b923e
+- **Started:** 2026-10-02
+- **Finished:** 2026-10-02
+- **Cost per model year:** 298 s for 30 iterations (32 evaluations): 8.69 s an evaluation (median after the first), 8.17 s forward and 0.42 s adjoint; 266 s in the taped solves; 64 SCPC setups
+- **Results path:** /Volumes/LaCie/Data/antarctica_general/ismip7_runs/inversion_solver_reuse_32km/L_base2_gamg/ (map.h5 sha256 d7ee9a98, log.txt, timing.json)
+- **Audit:** objective 3.015616e4 to 3.746343e3; published residual 1.03e-3 after a 0-iteration final solve; no forward failed
+- **Notes:** run under a probe wrapper (scratch, not tracked) that times solver construction, SCPC setup and each taped solve and logs each rank's RSS after every taped solve; it changes nothing the driver computes
+
+### test-32km-inversion-reuse-lbfgs-draft
+
+32 km inversion, 30 L-BFGS-B iterations under scpc_gamg with one paused solver for the run (the working tree that became 9bc7682) (done), IU.
+
+- **Task type:** test
+- **Friction law:** budd
+- **Mesh:** antarctica_320000_32000_buffered0 (Quartz's .msh, sha256 fd66fc42; 6,282 vertices, 9,055 cells), DG0 geometry, vertex raster sampling
+- **Initial state / MAP:** cold start: u = 0.1 u_obs, theta = phi = 0, the n,m 1 to 3 ramp under full_mumps, then ISMIP7_EVAL_CONTINUATION=0 (one annotated solve at full n an evaluation)
+- **Forcing versions:** MEaSUREs v2 450 m (sha256 268be94e) and BedMachine v4.1 (sha256 6bd08dbb); ISMIP7_FLUIDITY_PRIOR=legacy; no dH/dt term
+- **Site / partition:** IU workstation (Mac, 16 cores, 128 GB), data under /Volumes/LaCie/Data/antarctica_general/ismip7_obs; ran about 09:21 to 09:27, beside another session's 4-rank 32 km pair, so its seconds are contended (test-32km-inversion-reuse-lbfgs-after times the same comparison on a quiet machine); work counts, objectives and RSS do not depend on it
+- **Ranks / memory:** 8 ranks; RSS a rank (mean over ranks) 1012 MiB after the first taped solve, 1113 MiB after the last; peak 1402 MiB
+- **Code:** 4cf7f0e plus the uncommitted change committed as 9bc7682, whose L-BFGS-B path it runs unchanged (its TAO path and comments came later); icepack_tools e7b923e
+- **Started:** 2026-10-02
+- **Finished:** 2026-10-02
+- **Cost per model year:** 277 s for 30 iterations (32 evaluations): 7.83 s an evaluation (median after the first), 7.16 s forward and 0.57 s adjoint; 68 NonlinearVariationalSolver builds and 33 SCPC setups (one of them the forward's)
+- **Results path:** /Volumes/LaCie/Data/antarctica_general/ismip7_runs/inversion_solver_reuse_32km/L_new_gamg/ (map.h5 sha256 b6a9ce8b, log.txt, timing.json)
+- **Audit:** the same 30 iterations and 32 evaluations as test-32km-inversion-reuse-lbfgs-before, every objective within 3.5e-9 of it, the same Newton iterations every evaluation and V-cycles a condensed solve within a few percent (79.7 against 79.8 on average); published residual 1.03e-3; all 31 later taped solves reused the solver
+- **Notes:** run under a probe wrapper (scratch, not tracked) that times solver construction, SCPC setup and each taped solve and logs each rank's RSS after every taped solve; it changes nothing the driver computes
+
+### test-32km-inversion-reuse-memory-gc
+
+32 km inversion, 30 L-BFGS-B iterations under scpc_gamg with one paused solver, a full gc.collect() and PETSc garbage cleanup after every taped solve: is the remaining RSS growth uncollected garbage (done), IU.
+
+- **Task type:** test
+- **Friction law:** budd
+- **Mesh:** antarctica_320000_32000_buffered0 (Quartz's .msh, sha256 fd66fc42; 6,282 vertices, 9,055 cells), DG0 geometry, vertex raster sampling
+- **Initial state / MAP:** cold start: u = 0.1 u_obs, theta = phi = 0, the n,m 1 to 3 ramp under full_mumps, then ISMIP7_EVAL_CONTINUATION=0 (one annotated solve at full n an evaluation)
+- **Forcing versions:** MEaSUREs v2 450 m (sha256 268be94e) and BedMachine v4.1 (sha256 6bd08dbb); ISMIP7_FLUIDITY_PRIOR=legacy; no dH/dt term
+- **Site / partition:** IU workstation (Mac, 16 cores, 128 GB), data under /Volumes/LaCie/Data/antarctica_general/ismip7_obs; alone on the machine (no other session's process in a 10 s CPU log)
+- **Ranks / memory:** 8 ranks; RSS a rank (mean over ranks) 1003 MiB after the first taped solve, 1112 MiB after the last (3.5 MiB an evaluation, against 3.8 without the cleanup); peak 1409 MiB
+- **Code:** 9bc7682; icepack_tools e7b923e
+- **Started:** 2026-10-02
+- **Finished:** 2026-10-02
+- **Cost per model year:** 239 s for 30 iterations (32 evaluations): 6.77 s an evaluation (median after the first), 0.13 s above test-32km-inversion-reuse-lbfgs-after
+- **Results path:** /Volumes/LaCie/Data/antarctica_general/ismip7_runs/inversion_solver_reuse_32km/L_new_gc/ (map.h5 sha256 3470af32, log.txt, timing.json)
+- **Audit:** every objective within 5.6e-12 of test-32km-inversion-reuse-lbfgs-after; the growth stays: memory something still holds, which a collection does not release
+- **Notes:** the probe wrapper's PROBE_GC=1 calls firedrake.petsc.garbage_cleanup on every rank after every taped solve
+
+### test-32km-inversion-reuse-memory-np4
+
+32 km inversion, 30 L-BFGS-B iterations under scpc_gamg with one paused solver on 4 ranks: does the remaining RSS growth scale with the local problem (done), IU.
+
+- **Task type:** test
+- **Friction law:** budd
+- **Mesh:** antarctica_320000_32000_buffered0 (Quartz's .msh, sha256 fd66fc42; 6,282 vertices, 9,055 cells), DG0 geometry, vertex raster sampling
+- **Initial state / MAP:** cold start: u = 0.1 u_obs, theta = phi = 0, the n,m 1 to 3 ramp under full_mumps, then ISMIP7_EVAL_CONTINUATION=0 (one annotated solve at full n an evaluation)
+- **Forcing versions:** MEaSUREs v2 450 m (sha256 268be94e) and BedMachine v4.1 (sha256 6bd08dbb); ISMIP7_FLUIDITY_PRIOR=legacy; no dH/dt term
+- **Site / partition:** IU workstation (Mac, 16 cores, 128 GB), data under /Volumes/LaCie/Data/antarctica_general/ismip7_obs; alone on the machine (no other session's process in a 10 s CPU log)
+- **Ranks / memory:** 4 ranks; RSS a rank (mean over ranks) 1125 MiB after the first taped solve, 1355 MiB after the last (7.4 MiB a rank an evaluation, twice the 8-rank 3.8: the same total); peak 1978 MiB
+- **Code:** 9bc7682; icepack_tools e7b923e
+- **Started:** 2026-10-02
+- **Finished:** 2026-10-02
+- **Cost per model year:** 232 s for 30 iterations (32 evaluations): 6.60 s an evaluation (median after the first)
+- **Results path:** /Volumes/LaCie/Data/antarctica_general/ismip7_runs/inversion_solver_reuse_32km/L_new_np4/ (map.h5 sha256 08520273, log.txt, timing.json)
+- **Audit:** the same 30 iterations and 32 evaluations as the 8-rank run, objectives within 1.3e-7 of it (the partition), 74.5 V-cycles a condensed solve
+- **Notes:** run under the probe wrapper of test-32km-inversion-reuse-lbfgs-before
+
+### test-32km-inversion-reuse-memory-objects
+
+32 km inversion, 30 L-BFGS-B iterations under scpc_gamg with one paused solver, counting rank 0's live Python objects after taped solves 10 and 30: where is the remaining RSS growth (done), IU.
+
+- **Task type:** test
+- **Friction law:** budd
+- **Mesh:** antarctica_320000_32000_buffered0 (Quartz's .msh, sha256 fd66fc42; 6,282 vertices, 9,055 cells), DG0 geometry, vertex raster sampling
+- **Initial state / MAP:** cold start: u = 0.1 u_obs, theta = phi = 0, the n,m 1 to 3 ramp under full_mumps, then ISMIP7_EVAL_CONTINUATION=0 (one annotated solve at full n an evaluation)
+- **Forcing versions:** MEaSUREs v2 450 m (sha256 268be94e) and BedMachine v4.1 (sha256 6bd08dbb); ISMIP7_FLUIDITY_PRIOR=legacy; no dH/dt term
+- **Site / partition:** IU workstation (Mac, 16 cores, 128 GB), data under /Volumes/LaCie/Data/antarctica_general/ismip7_obs; alone on the machine (no other session's process in a 10 s CPU log)
+- **Ranks / memory:** 8 ranks; RSS a rank (mean over ranks) 1199 MiB after the first taped solve, 1256 MiB after the last
+- **Code:** 9bc7682; icepack_tools e7b923e
+- **Started:** 2026-10-02
+- **Finished:** 2026-10-02
+- **Cost per model year:** the gc.get_objects() sweeps add a few seconds on rank 0 at two solves
+- **Results path:** /Volumes/LaCie/Data/antarctica_general/ismip7_runs/inversion_solver_reuse_32km/L_new_obj/ (map.h5 sha256 24a13739, log.txt with the [objcount] lines, timing.json)
+- **Audit:** over 20 evaluations the bytes in rank 0's live PyOP2 Dats stayed 1.8 MiB and no Function, Cofunction or petsc4py object accumulated; what grew is small: 80 tlm_adjoint Functionals with their Caches and FloatSpaces (4 an evaluation) and about 3,200 functions and 6,200 closure cells. The dof-proportional growth is in memory Python does not see (PETSc, Slate or the allocator)
+- **Notes:** the probe wrapper's PROBE_OBJCOUNT=1
+
+### test-32km-inversion-reuse-memory-tracemalloc
+
+32 km inversion under scpc_gamg with one paused solver and tracemalloc on rank 0: stopped (stopped), IU.
+
+- **Task type:** test
+- **Friction law:** budd
+- **Mesh:** antarctica_320000_32000_buffered0 (Quartz's .msh, sha256 fd66fc42; 6,282 vertices, 9,055 cells), DG0 geometry, vertex raster sampling
+- **Initial state / MAP:** cold start: u = 0.1 u_obs, theta = phi = 0, the n,m 1 to 3 ramp under full_mumps, then ISMIP7_EVAL_CONTINUATION=0 (one annotated solve at full n an evaluation)
+- **Forcing versions:** MEaSUREs v2 450 m (sha256 268be94e) and BedMachine v4.1 (sha256 6bd08dbb); ISMIP7_FLUIDITY_PRIOR=legacy; no dH/dt term
+- **Site / partition:** IU workstation (Mac, 16 cores, 128 GB), data under /Volumes/LaCie/Data/antarctica_general/ismip7_obs; alone on the machine (no other session's process in a 10 s CPU log)
+- **Ranks / memory:** 8 ranks
+- **Code:** 9bc7682; icepack_tools e7b923e
+- **Started:** 2026-10-02
+- **Finished:** 2026-10-02
+- **Cost per model year:** tracemalloc with 12-frame tracebacks made each taped solve take 137 s against 6; stopped by hand at the 8th, before its first snapshot
+- **Results path:** /Volumes/LaCie/Data/antarctica_general/ismip7_runs/inversion_solver_reuse_32km/L_new_tm/ (log.txt)
+- **Audit:** no result; replaced by test-32km-inversion-reuse-memory-objects
+- **Notes:** the probe wrapper's PROBE_TRACEMALLOC=1
+
+### test-32km-inversion-reuse-tao-after
+
+32 km inversion, 20 TAO iterations under scpc_gamg with sub-element friction and five-solve evaluations, one paused solver for the run (done), IU.
+
+- **Task type:** test
+- **Friction law:** budd
+- **Mesh:** antarctica_320000_32000_buffered0 (Quartz's .msh, sha256 fd66fc42; 6,282 vertices, 9,055 cells), DG0 geometry, vertex raster sampling
+- **Initial state / MAP:** cold start: u = 0.1 u_obs, theta = phi = 0, the n,m 1 to 3 ramp under full_mumps, then ISMIP7_EVAL_CONTINUATION=1 (five annotated solves an evaluation)
+- **Forcing versions:** MEaSUREs v2 450 m (sha256 268be94e) and BedMachine v4.1 (sha256 6bd08dbb); ISMIP7_FLUIDITY_PRIOR=legacy; no dH/dt term
+- **Site / partition:** IU workstation (Mac, 16 cores, 128 GB), data under /Volumes/LaCie/Data/antarctica_general/ismip7_obs; ran about 10:20 to 10:48, beside another session's 8-rank 4 km and 4-rank 32 km inversions and 1 to 8-rank probe until 10:46, so its seconds are contended (test-32km-inversion-reuse-tao-after-rerun times the same comparison on a quiet machine); work counts, objectives and RSS do not depend on it
+- **Ranks / memory:** 8 ranks; RSS a rank (mean over ranks) 1016 MiB after the first taped solve, 1093 MiB after the last; peak 1394 MiB
+- **Code:** 9bc7682; icepack_tools e7b923e
+- **Started:** 2026-10-02
+- **Finished:** 2026-10-02
+- **Cost per model year:** 1578 s for 20 iterations (22 evaluations): 62.3 s an evaluation (median after the first); 110 taped solves 1303 s; 23 SCPC setups (one the forward's, the rest the adjoint's) and 247 NonlinearVariationalSolver builds
+- **Results path:** /Volumes/LaCie/Data/antarctica_general/ismip7_runs/inversion_solver_reuse_32km/P_new_gamg/ (map.h5 sha256 9db93981, log.txt, timing.json)
+- **Audit:** the same 20 iterations and 22 evaluations as test-32km-inversion-reuse-tao-before, every objective within 1.65e-10 of it, final 2.120453e4; 10.0 Newton iterations and 197 V-cycles a condensed solve (195 before), the n = 1 restart solve 455 on average (460 before); 104 of 105 taped solves reused the solver; published residual 63.3 after a 0-iteration final solve; no forward failed; its startup and first evaluation ran about twice as slow as the baseline's, every ramp rung included, with no kernel compiled (no cache write after 09:42): contention
+- **Notes:** ISMIP7_SUBELEMENT_FRICTION=1 (exact front push on) ISMIP7_GRAD_PRECOND=mass_consistent ISMIP7_PRIOR_FORM=bilaplacian; the configuration of test-32km-inversion-subelement-scpc-gamg; run under a probe wrapper (scratch, not tracked) that times solver construction, SCPC setup and each taped solve and logs each rank's RSS after every taped solve; it changes nothing the driver computes
+
+### test-32km-inversion-reuse-tao-after-rerun
+
+32 km inversion, 10 TAO iterations under scpc_gamg with sub-element friction and five-solve evaluations, one paused solver for the run, timed on a quiet machine (done), IU.
+
+- **Task type:** test
+- **Friction law:** budd
+- **Mesh:** antarctica_320000_32000_buffered0 (Quartz's .msh, sha256 fd66fc42; 6,282 vertices, 9,055 cells), DG0 geometry, vertex raster sampling
+- **Initial state / MAP:** cold start: u = 0.1 u_obs, theta = phi = 0, the n,m 1 to 3 ramp under full_mumps, then ISMIP7_EVAL_CONTINUATION=1 (five annotated solves an evaluation)
+- **Forcing versions:** MEaSUREs v2 450 m (sha256 268be94e) and BedMachine v4.1 (sha256 6bd08dbb); ISMIP7_FLUIDITY_PRIOR=legacy; no dH/dt term
+- **Site / partition:** IU workstation (Mac, 16 cores, 128 GB), data under /Volumes/LaCie/Data/antarctica_general/ismip7_obs; alone on the machine (a 10 s CPU log saw one other process, once, at 39 % of a core)
+- **Ranks / memory:** 8 ranks; RSS a rank (mean over ranks) 1050 MiB after the first taped solve, 1101 MiB after the last; peak 1465 MiB
+- **Code:** 9bc7682; icepack_tools e7b923e
+- **Started:** 2026-10-02
+- **Finished:** 2026-10-02
+- **Cost per model year:** 748 s for 10 iterations (12 evaluations): 61.3 s an evaluation (median after the first); 60 taped solves 623 s; 137 NonlinearVariationalSolver builds and 13 SCPC setups, one of them the forward's
+- **Results path:** /Volumes/LaCie/Data/antarctica_general/ismip7_runs/inversion_solver_reuse_32km/P_new2_gamg/ (map.h5 sha256 a0cb8ddc, log.txt, timing.json)
+- **Audit:** the same 10 iterations and 12 evaluations as test-32km-inversion-reuse-tao-before-rerun, every objective within 1.6e-10 of it; 10.1 Newton iterations and 208 V-cycles a condensed solve, the n = 1 restart solve 474; 59 of 60 taped solves reused the solver, across TAO evaluations as within them; published residual 280 after a 0-iteration final solve; no forward failed
+- **Notes:** ISMIP7_SUBELEMENT_FRICTION=1 (exact front push on) ISMIP7_GRAD_PRECOND=mass_consistent ISMIP7_PRIOR_FORM=bilaplacian; the configuration of test-32km-inversion-subelement-scpc-gamg; run under a probe wrapper (scratch, not tracked) that times solver construction, SCPC setup and each taped solve and logs each rank's RSS after every taped solve; it changes nothing the driver computes
+
+### test-32km-inversion-reuse-tao-before
+
+32 km inversion, 20 TAO iterations under scpc_gamg with sub-element friction and five-solve evaluations on PR 155's head: a new paused solver every taped solve (done), IU.
+
+- **Task type:** test
+- **Friction law:** budd
+- **Mesh:** antarctica_320000_32000_buffered0 (Quartz's .msh, sha256 fd66fc42; 6,282 vertices, 9,055 cells), DG0 geometry, vertex raster sampling
+- **Initial state / MAP:** cold start: u = 0.1 u_obs, theta = phi = 0, the n,m 1 to 3 ramp under full_mumps, then ISMIP7_EVAL_CONTINUATION=1 (five annotated solves an evaluation)
+- **Forcing versions:** MEaSUREs v2 450 m (sha256 268be94e) and BedMachine v4.1 (sha256 6bd08dbb); ISMIP7_FLUIDITY_PRIOR=legacy; no dH/dt term
+- **Site / partition:** IU workstation (Mac, 16 cores, 128 GB), data under /Volumes/LaCie/Data/antarctica_general/ismip7_obs; ran about 09:45 to 10:20, beside another session's 8-rank 4 km inversions, 4-rank 32 km runs and its serial test suite (load up to 69), so its seconds are contended (test-32km-inversion-reuse-tao-before-rerun times the same comparison on a quiet machine); work counts, objectives and RSS do not depend on it
+- **Ranks / memory:** 8 ranks; RSS a rank (mean over ranks) 1034 MiB after the first taped solve, 1612 MiB after the last; peak 1729 MiB
+- **Code:** 4cf7f0e (PR 155 head, a git archive); icepack_tools e7b923e
+- **Started:** 2026-10-02
+- **Finished:** 2026-10-02
+- **Cost per model year:** 2191 s for 20 iterations (22 evaluations): 98.8 s an evaluation (median after the first); 110 taped solves 1860 s; 356 NonlinearVariationalSolver builds (34 s) and 132 SCPC setups (36 s)
+- **Results path:** /Volumes/LaCie/Data/antarctica_general/ismip7_runs/inversion_solver_reuse_32km/P_base_gamg/ (map.h5 sha256 8377c950, log.txt, timing.json)
+- **Audit:** objective 7.849914e4 to 2.120453e4, as test-32km-inversion-subelement-scpc-gamg; 10.0 Newton iterations and 195 V-cycles a condensed solve; published residual 57.9 after a 0-iteration final solve; no forward failed
+- **Notes:** ISMIP7_SUBELEMENT_FRICTION=1 (exact front push on) ISMIP7_GRAD_PRECOND=mass_consistent ISMIP7_PRIOR_FORM=bilaplacian; the configuration of test-32km-inversion-subelement-scpc-gamg; run under a probe wrapper (scratch, not tracked) that times solver construction, SCPC setup and each taped solve and logs each rank's RSS after every taped solve; it changes nothing the driver computes
+
+### test-32km-inversion-reuse-tao-before-rerun
+
+32 km inversion, 10 TAO iterations under scpc_gamg with sub-element friction and five-solve evaluations on PR 155's head, timed on a quiet machine: a new paused solver every taped solve (done), IU.
+
+- **Task type:** test
+- **Friction law:** budd
+- **Mesh:** antarctica_320000_32000_buffered0 (Quartz's .msh, sha256 fd66fc42; 6,282 vertices, 9,055 cells), DG0 geometry, vertex raster sampling
+- **Initial state / MAP:** cold start: u = 0.1 u_obs, theta = phi = 0, the n,m 1 to 3 ramp under full_mumps, then ISMIP7_EVAL_CONTINUATION=1 (five annotated solves an evaluation)
+- **Forcing versions:** MEaSUREs v2 450 m (sha256 268be94e) and BedMachine v4.1 (sha256 6bd08dbb); ISMIP7_FLUIDITY_PRIOR=legacy; no dH/dt term
+- **Site / partition:** IU workstation (Mac, 16 cores, 128 GB), data under /Volumes/LaCie/Data/antarctica_general/ismip7_obs; alone on the machine (a 10 s CPU log saw one other process, once, at 39 % of a core)
+- **Ranks / memory:** 8 ranks; RSS a rank (mean over ranks) 1027 MiB after the first taped solve, 1276 MiB after the last; peak 1470 MiB
+- **Code:** 4cf7f0e (PR 155 head, a git archive); icepack_tools e7b923e
+- **Started:** 2026-10-02
+- **Finished:** 2026-10-02
+- **Cost per model year:** 880 s for 10 iterations (12 evaluations): 72.7 s an evaluation (median after the first); 60 taped solves 755 s; 196 NonlinearVariationalSolver builds and 72 SCPC setups
+- **Results path:** /Volumes/LaCie/Data/antarctica_general/ismip7_runs/inversion_solver_reuse_32km/P_base2_gamg/ (map.h5 sha256 d167b942, log.txt, timing.json)
+- **Audit:** objective 7.849914e4 to 2.507499e4, the first 10 iterations of test-32km-inversion-reuse-tao-before; 10.1 Newton iterations and 203 V-cycles a condensed solve, the n = 1 restart solve 478; published residual 273 after a 0-iteration final solve; no forward failed
+- **Notes:** ISMIP7_SUBELEMENT_FRICTION=1 (exact front push on) ISMIP7_GRAD_PRECOND=mass_consistent ISMIP7_PRIOR_FORM=bilaplacian; the configuration of test-32km-inversion-subelement-scpc-gamg; run under a probe wrapper (scratch, not tracked) that times solver construction, SCPC setup and each taped solve and logs each rank's RSS after every taped solve; it changes nothing the driver computes
 
 ### test-32km-inversion-scpc-gamg-checks
 

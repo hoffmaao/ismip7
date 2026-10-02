@@ -494,8 +494,9 @@ Every arm on 32 ranks ended on the objective `full_mumps` reached, to seven
 digits (4.935180e4 at 2 km, 4.179544e4 at 1 km), and no forward failed. Over
 every evaluation, `scpc_gamg` stayed within 3.7e-6 of `full_mumps` at 2 km
 (6.5e-8 under NLEQ-ERR at 1e-8) and within 4.3e-9 at 1 km. The rest of an evaluation, 13 s at 2 km and 27 s at 1 km, is outside
-the forward and the adjoint (the prior terms and their gradients among it),
-the same under both solvers, and is most of a 64-rank evaluation. The rank
+the forward and the adjoint, the same under both solvers, and is most of a
+64-rank evaluation; 98 % of it at 1 km was the prior's mass solve, which
+`4e45164` removes (next section). The rank
 count moves the first evaluation's objective (1.3e-6 at 2 km from 16 to 32
 ranks, 2e-5 at 1 km from 32 to 64): a controls-only start converges the ramp
 on the relative SNES test, so the state it leaves follows the partition's
@@ -572,6 +573,79 @@ excess AveRSS on Quartz above (3.7 against 2.8 and 6.9 against 3.6 GiB);
 Quartz has not measured it (issue #159). `runlog/test-32km-inversion-reuse-*` and
 `runlog/test-32km-inversion-ramp-blocks-*` hold the runs, including a first
 round timed beside another session's jobs.
+
+### Inversion time outside the forward and the adjoint
+
+The timing record names this time by span, each the slowest rank's
+(`icepack2_tools/profiling.py`), and the log prints the spans under each
+iteration line. An L-BFGS-B evaluation carries `other_spans` (inside
+`total_seconds`) and `before_spans` (the previous evaluation's report, term
+assembly, timing write and checkpoint, and `gap`, the whole interval that
+holds the optimizer's own step). A TAO iteration carries `iteration_spans`
+over all of its evaluations; its `unspanned` is the adjoint and TAO itself.
+
+Under the bi-Laplacian prior three spans held that time:
+
+| span | path | before | since `4e45164` |
+|---|---|---|---|
+| `prior_solve` | both | the mass solve `M f = A θ` of each prior energy, an `EquationSolver` on the residual form: a Newton solve with a fresh MUMPS LU of `M` at every call, analysed on one rank (`ICNTL(28)=1`, the MUMPS 5.8.2 default) | `prior.BilaplacianAuxSolver`: `M` factored once (MUMPS Cholesky), then a back-substitution |
+| `prior_taped` | TAO | the same solve on the tape, and one more LU of `M` in the adjoint | the same solver as a tlm_adjoint `LinearEquation`, back-substituting in the forward and the adjoint |
+| `residual_norm` | TAO | the fnorm-ceiling check assembled `F` while tlm_adjoint recorded, 4 to 8 s a call at 32 km and 4 km | the check runs under `paused_manager()` |
+
+The old solve grows with the vertex count and stays flat in the rank count,
+the pattern of the 13 s and 27 s above. `scripts/probe_eval_overhead.py`
+times the prior work alone on the 32 km mesh refined uniformly; seconds an
+evaluation for both controls on the Mac workstation, with another 8-rank job
+on its 16 cores:
+
+| vertices | ranks | off the tape, before | parallel analysis (`ICNTL(28)=2`) | factored | TAO tape, before (forward + adjoint) | TAO tape, factored |
+|---|---|---|---|---|---|---|
+| 79,455 | 1 / 8 | 0.54 / 0.56 | 0.60 / 0.24 | 0.016 / 0.027 | 0.84 / 0.85 | 0.037 / 0.046 |
+| 303,789 | 1 / 8 | 2.21 / 1.90 | 2.42 / 0.67 | 0.055 / 0.035 | 3.51 / 2.92 | 0.10 / 0.08 |
+| 1,187,097 | 1 / 2 / 4 / 8 | 9.8 / 9.1 / 8.3 / 8.2 | 10.1 / 4.7 / 2.9 / 3.0 | 0.22 / 0.15 / 0.10 / 0.12 | 15.3 / 13.9 / 12.6 / 12.4 | 0.40 / 0.27 / 0.18 / 0.21 |
+
+The factored solver's one factorisation took 4.1 to 4.8 s at 1.19 million
+vertices. Energies agree with the old solve to 3e-16 and taped gradients to
+2e-16. CG with Jacobi (22 to 26 iterations at every size) costs about what
+the back-substitution does. The replicated gathers of an L-BFGS-B evaluation
+(`func_to_global` four times, `global_to_func` twice) took 0.13 s on 1 rank
+and 0.016 s on 8.
+
+On Quartz the old solve is the 27 s. Jobs 10937657 (`2626c71`) and 10937658
+(`4e45164`) reran job 10818449's 1 km arm (`scpc_gamg`, 64 ranks, 3
+iterations) back to back on one node; seconds an evaluation, medians over
+evaluations 2 to 4:
+
+| code | evaluation | forward | adjoint | outside both | of it `prior_solve` | next largest spans |
+|---|---|---|---|---|---|---|
+| `2626c71` | 54.0 | 22.0 | 5.3 | 26.8 | 26.2 | `gather_gradient` 0.33, `set_controls` 0.10, `residual_norm` 0.07 |
+| `4e45164` | 27.9 | 22.0 | 5.4 | 0.73 | 0.17 | the same |
+
+That is 14 µs a vertex on Quartz against 6.9 to 8.2 on the workstation. The
+factored solver's first call, which factors, took 14.8 s once per run. The
+objective agreed to 7e-16 and the gradient norm to 2e-15 at every
+evaluation. Between evaluations L-BFGS-B's own step, replicated on every rank
+over the 3.7 million controls, took 1.0 to 1.2 s (`gap` less its spans).
+
+In situ, base (`2626c71`, spans only) against `4e45164`, each pair back to
+back: Budd, the `legacy` fluidity prior, the bi-Laplacian prior, a cold
+start, `ISMIP7_EVAL_CONTINUATION=0`; `full_mumps` on 4 ranks at 32 km,
+`scpc_gamg` with the ramp under `scpc_mumps` on 8 ranks at 4 km. Medians
+after the first two L-BFGS-B evaluations or TAO iterations:
+
+| mesh | optimizer | before: s an evaluation or iteration | after | spans that moved | largest relative objective difference |
+|---|---|---|---|---|---|
+| 32 km, 6,282 vertices | L-BFGS-B | 5.67 | 5.68 | outside the solves 0.115 to 0.080 | 1.1e-14 over 7 |
+| 4 km, 117,348 vertices | L-BFGS-B | 12.5 | 13.0 | outside the solves 0.90 to 0.15 | 9.8e-14 over 5 |
+| 32 km | TAO | 21.6 | 13.6 | `residual_norm` 7.86 to 0.23 | 2.2e-13 over 5 |
+| 4 km | TAO | 23.0 | 14.9 | `residual_norm` 7.34 to 0.24, `prior_solve` 0.75 to 0.02, `prior_taped` 0.87 to 0.03, unspanned 1.72 to 1.30 | 9.6e-14 over 5 |
+
+The 4 km pairs ran beside the other job (load 16 to 57), so their forward
+times moved by up to 1.2 s between arms; the spans above are the comparison.
+At 32 km every TAO run failed its forward at the same three trial points and
+took the re-ramp rescue, now its own span (`reramp`, 2.9 s an iteration).
+What an L-BFGS-B evaluation still spends outside the solves is
+`residual_norm`, 0.07 s at 32 km and 0.13 s at 4 km.
 
 ### Transient (dH/dt-constrained) inversion
 

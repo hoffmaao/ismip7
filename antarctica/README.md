@@ -353,12 +353,35 @@ loud warning. See
 
 `ISMIP7_INVERSION_LINEAR_SOLVER` picks the linear solver of every solve
 `tlm_adjoint` differentiates, and of the solve that publishes the MAP's state.
-`full_mumps`, the default, factors the whole mixed Jacobian: at 1 km on 32
-ranks of Quartz an evaluation took 334 s, against 58 s under `scpc_gamg` (the
-table at the end of this section). `scpc_gamg` is the transient's production solver: Slate
-eliminates `M` and `τ` cell by cell and GAMG solves the condensed velocity
-system. `scpc_mumps` condenses the same way and factors the condensed system,
-which makes it the exact reference for `scpc_gamg`.
+`full_mumps`, the default, factors the whole mixed Jacobian. `scpc_gamg` is
+the transient's production solver: Slate eliminates `M` and `τ` cell by cell
+and GAMG solves the condensed velocity system. `scpc_mumps` condenses the same
+way and factors the condensed system, which makes it the exact reference for
+`scpc_gamg`.
+
+Which is faster depends on the friction law and on how an evaluation reaches
+full n, and in the configuration production inversions run it is
+`full_mumps`, so the default stays (issue #156; the tables close this
+section). Seconds a TAO iteration on 32 ranks of Quartz, sub-element
+friction, the exact front push, the mass-consistent metric:
+
+| evaluations | mesh | `full_mumps` | `scpc_gamg` |
+|---|---|---|---|
+| one solve at full n (`ISMIP7_EVAL_CONTINUATION=0`) | 2 km | 227 | 175 |
+| one solve at full n | 1 km | 347 | 343 |
+| five solves, n from 1 (`ISMIP7_EVAL_CONTINUATION=1`, the default) | 2 km | 982 | 2405 |
+| five solves | 1 km | 1463 | 4023 on 64 ranks; on 32, evaluation 1 unfinished after 4.9 h |
+
+Each five-solve evaluation restarts at n = 1 from the previous evaluation's
+n = 3 state, and there a condensed GAMG solve needed about 625 V-cycles
+against 75 at n = 3; an LU costs the same per Newton iteration whatever n is.
+Under the sub-element law a condensed solve needs 103 to 125 V-cycles with one
+solve an evaluation, against 31 to 64 under the cell-wise law, where
+`scpc_gamg` with one solve an evaluation ran 1.8 times faster than
+`full_mumps` at 2 km under today's line search, and 2.6 (2 km) and 5.8 (1 km)
+times faster under the `bt` line search of the first round (the L-BFGS-B
+table below). Memory decides nothing either way: the whole 1 km LU fit in
+under 9 GiB a rank on 32 ranks.
 
 `tlm_adjoint` computes the adjoint by assembling `adjoint(J)` at the recorded
 state and solving it with the adjoint options (`inversion_adjoint_parameters`:
@@ -471,6 +494,30 @@ rounding. Memory decides nothing at these settings: the whole 1 km LU fit in
 here (`JobAcctGatherFrequency`), and a 1 km factorisation outlasts that (the
 adjoint, one factorisation and its solve, took about 2 min), so its peak is in
 the sample.
+
+The production configuration (issue #156, jobs 10823630 to 10823634 and
+10824069 to 10824072): the same snapshot and meshes, sub-element friction with
+the exact front push, TAO with the mass-consistent metric and the bi-Laplacian
+prior, `scpc_gamg` under NLEQ-ERR at 1e-8, 5 iterations at 2 km and 3 at 1 km.
+Seconds a TAO iteration, the median after the first; GiB a rank, sacct's
+AveRSS and MaxRSS:
+
+| evaluations | mesh | solver | ranks | s an iteration | GiB a rank, mean / peak | V-cycles a condensed solve |
+|---|---|---|---|---|---|---|
+| one solve | 2 km | `full_mumps` | 32 | 227 | 2.7 / 3.4 | |
+| one solve | 2 km | `scpc_gamg` | 32 | 175 | 3.6 / 3.9 | 103 |
+| one solve | 1 km | `full_mumps` | 32 | 347 | 4.6 / 7.2 | |
+| one solve | 1 km | `scpc_gamg` | 32 | 343 | 4.8 / 5.4 | 125 |
+| five solves | 2 km | `full_mumps` | 32 | 982 | 3.6 / 4.4 | |
+| five solves | 2 km | `scpc_gamg` | 32 | 2405 | 6.9 / 7.2 | 242 |
+| five solves | 1 km | `full_mumps` | 32 | 1463 | 7.1 / 8.6 | |
+| five solves | 1 km | `scpc_gamg` | 64 | 4023 | cancelled after 2 iterations | 403 |
+| five solves | 1 km | `scpc_gamg` | 32 | none | cancelled in evaluation 1 after 4.9 h | |
+
+Every same-rank pair that finished ended on one objective (within 1.1e-9 at
+2 km and 2.1e-9 at 1 km over every iteration), the recorded solves confirmed with no
+step, and the one failed trial point (the 2 km single-solve pair, iteration 3)
+failed under both solvers and took the same re-ramp rescue.
 
 ### Transient (dH/dt-constrained) inversion
 

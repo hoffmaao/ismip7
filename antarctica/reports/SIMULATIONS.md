@@ -9,9 +9,9 @@ gitignored, so these records and the per-core reports beside them are
 the trace a run leaves in the repository. A core experiment also gets
 its full report from `core_report.py`; this is the index.
 
-132 records.
+141 records.
 
-Status: 12 planned, 3 running, 7 stopped, 93 done, 17 superseded.
+Status: 12 planned, 3 running, 9 stopped, 100 done, 17 superseded.
 
 ## Inversion
 
@@ -107,6 +107,11 @@ Status: 12 planned, 3 running, 7 stopped, 93 done, 17 superseded.
 | 1 km inversion cost probe, full_mumps on 32 ranks | done | antarctica_10000_1000_buffered20000 (Rice's .msh on Quartz; 1,869,252 vertices, 3,716,587 cells), DG0 geometry, vertex raster sampling | IU Quartz, general partition | 2026-10-01 | 2026-10-01 | 3 L-BFGS-B iterations, 4 evaluations, objective 8.06337e4 to 4.179544e4 (the prior terms carry most of it after the transfer); published residual 6.5e-5 |
 | 1 km inversion cost probe, scpc_gamg (bt) on 32 ranks | done | antarctica_10000_1000_buffered20000 (Rice's .msh on Quartz; 1,869,252 vertices, 3,716,587 cells), DG0 geometry, vertex raster sampling | IU Quartz, general partition | 2026-10-01 | 2026-10-01 | every evaluation's objective within 4.3e-9 of test-1km-inversion-cost-full-mumps-p32, final 4.179544e4; no forward failed; published residual 2.7e-4 |
 | 1 km inversion cost probe, scpc_gamg (bt) on 64 ranks | done | antarctica_10000_1000_buffered20000 (Rice's .msh on Quartz; 1,869,252 vertices, 3,716,587 cells), DG0 geometry, vertex raster sampling | IU Quartz, general partition | 2026-10-01 | 2026-10-01 | objective within 3.8e-5 of the 32-rank runs at every evaluation, 2e-5 at the first (the ramp's state follows the partition; startup scalars identical), final 4.179385e4; no forward failed |
+| 1 km inversion, production configuration with one solve an evaluation, full_mumps on 32 ranks | done | antarctica_10000_1000_buffered20000 (Rice's .msh on Quartz; 1,869,252 vertices, 3,716,587 cells), DG0 geometry, vertex raster sampling | IU Quartz, general partition | 2026-10-01 | 2026-10-02 | 3 TAO iterations, objective 8.110678e4 to 6.209233e4; no forward failed; published residual 7.0e-5 |
+| 1 km inversion, production configuration with five-solve evaluations, full_mumps on 32 ranks | done | antarctica_10000_1000_buffered20000 (Rice's .msh on Quartz; 1,869,252 vertices, 3,716,587 cells), DG0 geometry, vertex raster sampling | IU Quartz, general partition | 2026-10-01 | 2026-10-02 | 3 TAO iterations, objective 8.110641e4 to 6.209196e4; no forward failed; published residual 12.3 |
+| 1 km inversion, production configuration with one solve an evaluation, scpc_gamg (NLEQ-ERR, Krylov rtol 1e-8) on 32 ranks | done | antarctica_10000_1000_buffered20000 (Rice's .msh on Quartz; 1,869,252 vertices, 3,716,587 cells), DG0 geometry, vertex raster sampling | IU Quartz, general partition | 2026-10-01 | 2026-10-02 | every iterate within 2.1e-9 of test-1km-inversion-prod-full-mumps-ec0, final 6.209233e4; no forward failed; every recorded solve confirmed with no step; the same cost per iteration as full_mumps |
+| 1 km inversion, production configuration with five-solve evaluations, scpc_gamg on 32 ranks | stopped | antarctica_10000_1000_buffered20000 (Rice's .msh on Quartz; 1,869,252 vertices, 3,716,587 cells), DG0 geometry, vertex raster sampling | IU Quartz, general partition | 2026-10-01 | 2026-10-02 | no evaluation finished; the n = 1 restart steps under GAMG at 1 km dominate, as on 64 ranks |
+| 1 km inversion, production configuration with five-solve evaluations, scpc_gamg on 64 ranks | stopped | antarctica_10000_1000_buffered20000 (Rice's .msh on Quartz; 1,869,252 vertices, 3,716,587 cells), DG0 geometry, vertex raster sampling | IU Quartz, general partition | 2026-10-01 | 2026-10-02 | first objective 8.110449e4 (2.4e-5 off the 32-rank full_mumps run: the ramp's state follows the partition); no forward failed; 2.7 times slower per iteration than full_mumps on 32 ranks, with twice the ranks |
 | 1 km control from the transferred regularized-Coulomb snapshot | stopped | antarctica_10000_1000_buffered20000, 1 km fine, 10 km interior, 20 km buffer | nots, commons partition | 2026-09-22 | - | year one budget closed; diverged within four of its own steps, same signature as the Budd run |
 | 2.5 km legacy pinned front from the v4 timing cache, the twin of the level-set run (issue #115) | done | antarctica_25000_2500_buffered20000, 2.5 km fine, 25 km interior, 20 km buffer, DG0 geometry | IU Quartz, debug partition | 2026-09-25 | 2026-09-25 | 80 of 80 steps solved directly (5.0 Newton iterations on average, 9 at most), resid at most 1.1e-7 Gt; calving 12.38 to 12.50 Gt/yr after a one-step 8.9 Gt removal of the sub-1 m ice beyond the t=0 front; mass -2 Gt and VAF +0.004 mm SLE over the decade |
 | 2.5 km level-set pinned front (ISMIP7_CALVING=fixed) from the v4 timing cache, option 2 of issue #115 | done | antarctica_25000_2500_buffered20000, 2.5 km fine, 25 km interior, 20 km buffer, DG0 geometry | IU Quartz, debug partition | 2026-09-25 | 2026-09-25 | 80 of 80 steps solved directly (8.8 Newton iterations on average, 16 at most), resid at most 1.2e-7 Gt; calving 2,370 Gt/yr at step 2, 3,534 over 2016 and 2,839 over 2024 against the legacy twin's 12.4; mass -30,908 Gt and VAF -18.8 mm SLE over the decade |
@@ -119,6 +124,10 @@ Status: 12 planned, 3 running, 7 stopped, 93 done, 17 superseded.
 | 2 km inversion cost probe, scpc_gamg with NLEQ-ERR at Krylov rtol 1e-8 on 32 ranks | done | Rice's antarctica_5000_2000_buffered0, read from the snapshot (ISMIP7_MESH=checkpoint; 925,183 vertices, 1,835,718 cells), DG0 geometry, vertex raster sampling | IU Quartz, general partition | 2026-10-01 | 2026-10-01 | every evaluation's objective within 6.5e-8 of the full_mumps arm, final 4.935180e4; no forward failed |
 | 2 km inversion cost probe, scpc_gamg (bt) on 16 ranks | done | Rice's antarctica_5000_2000_buffered0, read from the snapshot (ISMIP7_MESH=checkpoint; 925,183 vertices, 1,835,718 cells), DG0 geometry, vertex raster sampling | IU Quartz, general partition | 2026-10-01 | 2026-10-01 | the same trajectory as on 32 ranks, every evaluation within 2.6e-6 of it (the ramp's state follows the partition), final 4.935170e4; no forward failed |
 | 2 km inversion cost probe, scpc_gamg (bt) on 32 ranks | done | Rice's antarctica_5000_2000_buffered0, read from the snapshot (ISMIP7_MESH=checkpoint; 925,183 vertices, 1,835,718 cells), DG0 geometry, vertex raster sampling | IU Quartz, general partition | 2026-10-01 | 2026-10-01 | every evaluation's objective within 3.7e-6 of test-2km-inversion-cost-full-mumps-p32 (the largest at the rejected trial, evaluation 4), final 4.935180e4 in both; no forward failed; published residual 1.3e-3 |
+| 2 km inversion, production configuration with one solve an evaluation, full_mumps on 32 ranks | done | Rice's antarctica_5000_2000_buffered0, read from the snapshot (ISMIP7_MESH=checkpoint; 925,183 vertices, 1,835,718 cells), DG0 geometry, vertex raster sampling | IU Quartz, general partition | 2026-10-01 | 2026-10-02 | 5 TAO iterations, objective 5.621096e4 to 5.570022e4; one trial point failed in iteration 3 and the re-ramp rescue recovered it (878 s that iteration); published residual 7.9e-2 |
+| 2 km inversion, production configuration with five-solve evaluations, full_mumps on 32 ranks | done | Rice's antarctica_5000_2000_buffered0, read from the snapshot (ISMIP7_MESH=checkpoint; 925,183 vertices, 1,835,718 cells), DG0 geometry, vertex raster sampling | IU Quartz, general partition | 2026-10-01 | 2026-10-02 | 5 TAO iterations, objective 5.621096e4 to 5.570022e4; no forward failed; published residual 40.9 |
+| 2 km inversion, production configuration with one solve an evaluation, scpc_gamg (NLEQ-ERR, Krylov rtol 1e-8) on 32 ranks | done | Rice's antarctica_5000_2000_buffered0, read from the snapshot (ISMIP7_MESH=checkpoint; 925,183 vertices, 1,835,718 cells), DG0 geometry, vertex raster sampling | IU Quartz, general partition | 2026-10-01 | 2026-10-02 | every iterate within 1.0e-9 of test-2km-inversion-prod-full-mumps-ec0, final 5.570022e4; the same trial point failed in iteration 3 and took the same rescue (795 s); every recorded solve confirmed with no step; 1.3 times faster than full_mumps |
+| 2 km inversion, production configuration with five-solve evaluations, scpc_gamg (NLEQ-ERR, Krylov rtol 1e-8) on 32 ranks | done | Rice's antarctica_5000_2000_buffered0, read from the snapshot (ISMIP7_MESH=checkpoint; 925,183 vertices, 1,835,718 cells), DG0 geometry, vertex raster sampling | IU Quartz, general partition | 2026-10-01 | 2026-10-02 | every iterate within 1.1e-9 of test-2km-inversion-prod-full-mumps-ec1, final 5.570022e4; no forward failed; every recorded solve confirmed with no step; 2.4 times slower than full_mumps |
 | 32 km inversion cold start with the exp friction control and sub-element friction, full_mumps and scpc_gamg | stopped | antarctica_320000_32000_buffered0 (Quartz's .msh, sha256 fd66fc42; 6,282 vertices, 9,055 cells), DG0 geometry, vertex raster sampling | IU workstation (Mac, 16 cores, 128 GB), data under /Volumes/LaCie/Data/antarctica_general/ismip7_obs | 2026-10-01 | 2026-10-01 | the startup ramp (full_mumps in both runs, unannotated, before the solver under test runs) diverged on every rung near n = 2.1 (rung 1 step 5 to \|\|F\|\| 4e37 and 4e20, rung 2 and rung 3 likewise) and the run stopped with ConvergenceError; the solver choice played no part |
 | 32 km inversion, 30 L-BFGS-B iterations under full_mumps, the reference for the scpc_gamg trajectory | done | antarctica_320000_32000_buffered0 (Quartz's .msh, sha256 fd66fc42; 6,282 vertices, 9,055 cells), DG0 geometry, vertex raster sampling | IU workstation (Mac, 16 cores, 128 GB), data under /Volumes/LaCie/Data/antarctica_general/ismip7_obs | 2026-10-01 | 2026-10-01 | objective 3.0156e4 to 3.7463e3; published residual 9.99e-4 after a final solve that converged in 0 Newton iterations; no forward failed |
 | 32 km inversion, 30 L-BFGS-B iterations under scpc_gamg (bt line search) | done | antarctica_320000_32000_buffered0 (Quartz's .msh, sha256 fd66fc42; 6,282 vertices, 9,055 cells), DG0 geometry, vertex raster sampling | IU workstation (Mac, 16 cores, 128 GB), data under /Volumes/LaCie/Data/antarctica_general/ismip7_obs | 2026-10-01 | 2026-10-01 | the same 30 iterations and 32 evaluations as test-32km-inversion-lbfgs-full-mumps; every evaluation's objective within 4.3e-7 of it and \|grad\| within 1e-4; published residual 1.20e-3; no forward failed; every recorded solve confirmed the paused solve's state with no step |
@@ -2373,6 +2382,106 @@ Core 11 at 32 km without the apparent-MB reference, a cold start on the OCX prot
 - **Audit:** objective within 3.8e-5 of the 32-rank runs at every evaluation, 2e-5 at the first (the ramp's state follows the partition; startup scalars identical), final 4.179385e4; no forward failed
 - **Notes:** cost probe for issue #156: no MAP is kept, the objective differs from Rice's (ISMIP7_FLUIDITY_PRIOR=legacy names the prior the warm start overrides; strict handoff off)
 
+### test-1km-inversion-prod-full-mumps-ec0
+
+1 km inversion, production configuration with one solve an evaluation, full_mumps on 32 ranks (done), IU.
+
+- **Task type:** test
+- **Friction law:** budd
+- **Mesh:** antarctica_10000_1000_buffered20000 (Rice's .msh on Quartz; 1,869,252 vertices, 3,716,587 cells), DG0 geometry, vertex raster sampling
+- **Initial state / MAP:** warm start from inversion_icepack2_budd_n3_dg0_logvelnet_2000_int5000_bilap_snap20260924_0948.h5 (Rice, log control, controls only), controls and prior transferred by point location, ISMIP7_WARM_START_STRICT=0; the n,m 1 to 3 ramp under scpc_mumps, then ISMIP7_EVAL_CONTINUATION=0
+- **Forcing versions:** MEaSUREs v2 and BedMachine v4.1 from Quartz's antarctica/data; the snapshot's fluidity prior; sub-element friction with the exact front push (ISMIP7_SUBELEMENT_FRICTION=1), TAO lmvm with the mass-consistent metric, bi-Laplacian prior; no dH/dt term
+- **Site / partition:** IU Quartz, general partition
+- **Ranks / memory:** 32 ranks, 500G; AveRSS 4.6 GiB, MaxRSS 7.2 GiB a rank
+- **Job ids:** 10824071
+- **Code:** e84ccdf (PR 155); icepack_tools e7b923e
+- **Started:** 2026-10-01
+- **Finished:** 2026-10-02
+- **Cost per model year:** 40 min wall; 347 s a TAO iteration
+- **Results path:** Quartz /N/scratch/dlilien/ismip7_issue156_runs/maps/ec0_1km_full_p32.h5 (scratch, purged after 30 days); timing record and log copied to /Volumes/LaCie/Data/antarctica_general/ismip7_runs/inversion_solver_quartz
+- **Audit:** 3 TAO iterations, objective 8.110678e4 to 6.209233e4; no forward failed; published residual 7.0e-5
+- **Notes:** issue #156 production-configuration cost probe; no MAP is kept (strict handoff off, the legacy prior name overridden by the warm start's prior)
+
+### test-1km-inversion-prod-full-mumps-ec1
+
+1 km inversion, production configuration with five-solve evaluations, full_mumps on 32 ranks (done), IU.
+
+- **Task type:** test
+- **Friction law:** budd
+- **Mesh:** antarctica_10000_1000_buffered20000 (Rice's .msh on Quartz; 1,869,252 vertices, 3,716,587 cells), DG0 geometry, vertex raster sampling
+- **Initial state / MAP:** warm start from inversion_icepack2_budd_n3_dg0_logvelnet_2000_int5000_bilap_snap20260924_0948.h5 (Rice, log control, controls only), controls and prior transferred by point location, ISMIP7_WARM_START_STRICT=0; the n,m 1 to 3 ramp under scpc_mumps, then ISMIP7_EVAL_CONTINUATION=1
+- **Forcing versions:** MEaSUREs v2 and BedMachine v4.1 from Quartz's antarctica/data; the snapshot's fluidity prior; sub-element friction with the exact front push (ISMIP7_SUBELEMENT_FRICTION=1), TAO lmvm with the mass-consistent metric, bi-Laplacian prior; no dH/dt term
+- **Site / partition:** IU Quartz, general partition
+- **Ranks / memory:** 32 ranks, 500G; AveRSS 7.1 GiB, MaxRSS 8.6 GiB a rank
+- **Job ids:** 10823632
+- **Code:** e84ccdf (PR 155); icepack_tools e7b923e
+- **Started:** 2026-10-01
+- **Finished:** 2026-10-02
+- **Cost per model year:** 1 h 51 min wall; 1463 s a TAO iteration
+- **Results path:** Quartz /N/scratch/dlilien/ismip7_issue156_runs/maps/prod1km_full_p32.h5 (scratch, purged after 30 days); timing record and log copied to /Volumes/LaCie/Data/antarctica_general/ismip7_runs/inversion_solver_quartz
+- **Audit:** 3 TAO iterations, objective 8.110641e4 to 6.209196e4; no forward failed; published residual 12.3
+- **Notes:** issue #156 production-configuration cost probe; no MAP is kept (strict handoff off, the legacy prior name overridden by the warm start's prior)
+
+### test-1km-inversion-prod-scpc-gamg-ec0
+
+1 km inversion, production configuration with one solve an evaluation, scpc_gamg (NLEQ-ERR, Krylov rtol 1e-8) on 32 ranks (done), IU.
+
+- **Task type:** test
+- **Friction law:** budd
+- **Mesh:** antarctica_10000_1000_buffered20000 (Rice's .msh on Quartz; 1,869,252 vertices, 3,716,587 cells), DG0 geometry, vertex raster sampling
+- **Initial state / MAP:** warm start from inversion_icepack2_budd_n3_dg0_logvelnet_2000_int5000_bilap_snap20260924_0948.h5 (Rice, log control, controls only), controls and prior transferred by point location, ISMIP7_WARM_START_STRICT=0; the n,m 1 to 3 ramp under scpc_mumps, then ISMIP7_EVAL_CONTINUATION=0
+- **Forcing versions:** MEaSUREs v2 and BedMachine v4.1 from Quartz's antarctica/data; the snapshot's fluidity prior; sub-element friction with the exact front push (ISMIP7_SUBELEMENT_FRICTION=1), TAO lmvm with the mass-consistent metric, bi-Laplacian prior; no dH/dt term
+- **Site / partition:** IU Quartz, general partition
+- **Ranks / memory:** 32 ranks, 400G; AveRSS 4.8 GiB, MaxRSS 5.4 GiB a rank
+- **Job ids:** 10824072
+- **Code:** e84ccdf (PR 155); icepack_tools e7b923e
+- **Started:** 2026-10-01
+- **Finished:** 2026-10-02
+- **Cost per model year:** 37 min wall; 343 s a TAO iteration; 2.8 Newton iterations and 125 V-cycles a condensed solve
+- **Results path:** Quartz /N/scratch/dlilien/ismip7_issue156_runs/maps/ec0_1km_gamg_p32.h5 (scratch, purged after 30 days); timing record and log copied to /Volumes/LaCie/Data/antarctica_general/ismip7_runs/inversion_solver_quartz
+- **Audit:** every iterate within 2.1e-9 of test-1km-inversion-prod-full-mumps-ec0, final 6.209233e4; no forward failed; every recorded solve confirmed with no step; the same cost per iteration as full_mumps
+- **Notes:** issue #156 production-configuration cost probe; no MAP is kept (strict handoff off, the legacy prior name overridden by the warm start's prior)
+
+### test-1km-inversion-prod-scpc-gamg-ec1-p32
+
+1 km inversion, production configuration with five-solve evaluations, scpc_gamg on 32 ranks (stopped), IU.
+
+- **Task type:** test
+- **Friction law:** budd
+- **Mesh:** antarctica_10000_1000_buffered20000 (Rice's .msh on Quartz; 1,869,252 vertices, 3,716,587 cells), DG0 geometry, vertex raster sampling
+- **Initial state / MAP:** warm start from inversion_icepack2_budd_n3_dg0_logvelnet_2000_int5000_bilap_snap20260924_0948.h5 (Rice, log control, controls only), controls and prior transferred by point location, ISMIP7_WARM_START_STRICT=0; the n,m 1 to 3 ramp under scpc_mumps, then ISMIP7_EVAL_CONTINUATION=1
+- **Forcing versions:** MEaSUREs v2 and BedMachine v4.1 from Quartz's antarctica/data; the snapshot's fluidity prior; sub-element friction with the exact front push (ISMIP7_SUBELEMENT_FRICTION=1), TAO lmvm with the mass-consistent metric, bi-Laplacian prior; no dH/dt term
+- **Site / partition:** IU Quartz, general partition
+- **Ranks / memory:** 32 ranks, 400G
+- **Job ids:** 10823633
+- **Code:** e84ccdf (PR 155); icepack_tools e7b923e
+- **Started:** 2026-10-01
+- **Finished:** 2026-10-02
+- **Cost per model year:** cancelled after 4 h 52 min, still in its first evaluation (computing, no output since the ramp)
+- **Results path:** Quartz /N/scratch/dlilien/ismip7_issue156_runs/maps/prod1km_gamg_p32.h5 (scratch, purged after 30 days); timing record and log copied to /Volumes/LaCie/Data/antarctica_general/ismip7_runs/inversion_solver_quartz
+- **Audit:** no evaluation finished; the n = 1 restart steps under GAMG at 1 km dominate, as on 64 ranks
+- **Notes:** issue #156 production-configuration cost probe; no MAP is kept (strict handoff off, the legacy prior name overridden by the warm start's prior)
+
+### test-1km-inversion-prod-scpc-gamg-ec1-p64
+
+1 km inversion, production configuration with five-solve evaluations, scpc_gamg on 64 ranks (stopped), IU.
+
+- **Task type:** test
+- **Friction law:** budd
+- **Mesh:** antarctica_10000_1000_buffered20000 (Rice's .msh on Quartz; 1,869,252 vertices, 3,716,587 cells), DG0 geometry, vertex raster sampling
+- **Initial state / MAP:** warm start from inversion_icepack2_budd_n3_dg0_logvelnet_2000_int5000_bilap_snap20260924_0948.h5 (Rice, log control, controls only), controls and prior transferred by point location, ISMIP7_WARM_START_STRICT=0; the n,m 1 to 3 ramp under scpc_mumps, then ISMIP7_EVAL_CONTINUATION=1
+- **Forcing versions:** MEaSUREs v2 and BedMachine v4.1 from Quartz's antarctica/data; the snapshot's fluidity prior; sub-element friction with the exact front push (ISMIP7_SUBELEMENT_FRICTION=1), TAO lmvm with the mass-consistent metric, bi-Laplacian prior; no dH/dt term
+- **Site / partition:** IU Quartz, general partition
+- **Ranks / memory:** 64 ranks, 480G
+- **Job ids:** 10823634
+- **Code:** e84ccdf (PR 155); icepack_tools e7b923e
+- **Started:** 2026-10-01
+- **Finished:** 2026-10-02
+- **Cost per model year:** cancelled after 3 h 29 min and 2 iterations: 2451 s the first, 4023 s the second; 403 V-cycles a condensed solve
+- **Results path:** Quartz /N/scratch/dlilien/ismip7_issue156_runs/maps/prod1km_gamg_p64.h5 (scratch, purged after 30 days); timing record and log copied to /Volumes/LaCie/Data/antarctica_general/ismip7_runs/inversion_solver_quartz
+- **Audit:** first objective 8.110449e4 (2.4e-5 off the 32-rank full_mumps run: the ramp's state follows the partition); no forward failed; 2.7 times slower per iteration than full_mumps on 32 ranks, with twice the ranks
+- **Notes:** issue #156 production-configuration cost probe; no MAP is kept (strict handoff off, the legacy prior name overridden by the warm start's prior)
+
 ### test-1km-rc-transfer
 
 1 km control from the transferred regularized-Coulomb snapshot (stopped), Rice.
@@ -2653,6 +2762,86 @@ Core 11 at 32 km without the apparent-MB reference, a cold start on the OCX prot
 - **Results path:** Quartz /N/scratch/dlilien/ismip7_issue156_runs/maps/2km_gamg_p32.h5 (scratch, purged after 30 days); timing record, log and sacct summary copied to /Volumes/LaCie/Data/antarctica_general/ismip7_runs/inversion_solver_quartz
 - **Audit:** every evaluation's objective within 3.7e-6 of test-2km-inversion-cost-full-mumps-p32 (the largest at the rejected trial, evaluation 4), final 4.935180e4 in both; no forward failed; published residual 1.3e-3
 - **Notes:** cost probe for issue #156: no MAP is kept, the objective differs from Rice's (ISMIP7_FLUIDITY_PRIOR=legacy names the prior the warm start overrides; strict handoff off)
+
+### test-2km-inversion-prod-full-mumps-ec0
+
+2 km inversion, production configuration with one solve an evaluation, full_mumps on 32 ranks (done), IU.
+
+- **Task type:** test
+- **Friction law:** budd
+- **Mesh:** Rice's antarctica_5000_2000_buffered0, read from the snapshot (ISMIP7_MESH=checkpoint; 925,183 vertices, 1,835,718 cells), DG0 geometry, vertex raster sampling
+- **Initial state / MAP:** warm start from inversion_icepack2_budd_n3_dg0_logvelnet_2000_int5000_bilap_snap20260924_0948.h5 (Rice, log control, controls only) on its own mesh, ISMIP7_WARM_START_STRICT=0; the n,m 1 to 3 ramp under scpc_mumps, then ISMIP7_EVAL_CONTINUATION=0
+- **Forcing versions:** MEaSUREs v2 and BedMachine v4.1 from Quartz's antarctica/data; the snapshot's fluidity prior; sub-element friction with the exact front push (ISMIP7_SUBELEMENT_FRICTION=1), TAO lmvm with the mass-consistent metric, bi-Laplacian prior; no dH/dt term
+- **Site / partition:** IU Quartz, general partition
+- **Ranks / memory:** 32 ranks, 400G; AveRSS 2.7 GiB, MaxRSS 3.4 GiB a rank
+- **Job ids:** 10824069
+- **Code:** e84ccdf (PR 155); icepack_tools e7b923e
+- **Started:** 2026-10-01
+- **Finished:** 2026-10-02
+- **Cost per model year:** 47 min wall; 227 s a TAO iteration
+- **Results path:** Quartz /N/scratch/dlilien/ismip7_issue156_runs/maps/ec0_2km_full_p32.h5 (scratch, purged after 30 days); timing record and log copied to /Volumes/LaCie/Data/antarctica_general/ismip7_runs/inversion_solver_quartz
+- **Audit:** 5 TAO iterations, objective 5.621096e4 to 5.570022e4; one trial point failed in iteration 3 and the re-ramp rescue recovered it (878 s that iteration); published residual 7.9e-2
+- **Notes:** issue #156 production-configuration cost probe; no MAP is kept (strict handoff off, the legacy prior name overridden by the warm start's prior)
+
+### test-2km-inversion-prod-full-mumps-ec1
+
+2 km inversion, production configuration with five-solve evaluations, full_mumps on 32 ranks (done), IU.
+
+- **Task type:** test
+- **Friction law:** budd
+- **Mesh:** Rice's antarctica_5000_2000_buffered0, read from the snapshot (ISMIP7_MESH=checkpoint; 925,183 vertices, 1,835,718 cells), DG0 geometry, vertex raster sampling
+- **Initial state / MAP:** warm start from inversion_icepack2_budd_n3_dg0_logvelnet_2000_int5000_bilap_snap20260924_0948.h5 (Rice, log control, controls only) on its own mesh, ISMIP7_WARM_START_STRICT=0; the n,m 1 to 3 ramp under scpc_mumps, then ISMIP7_EVAL_CONTINUATION=1
+- **Forcing versions:** MEaSUREs v2 and BedMachine v4.1 from Quartz's antarctica/data; the snapshot's fluidity prior; sub-element friction with the exact front push (ISMIP7_SUBELEMENT_FRICTION=1), TAO lmvm with the mass-consistent metric, bi-Laplacian prior; no dH/dt term
+- **Site / partition:** IU Quartz, general partition
+- **Ranks / memory:** 32 ranks, 400G; AveRSS 3.6 GiB, MaxRSS 4.4 GiB a rank
+- **Job ids:** 10823630
+- **Code:** e84ccdf (PR 155); icepack_tools e7b923e
+- **Started:** 2026-10-01
+- **Finished:** 2026-10-02
+- **Cost per model year:** 1 h 57 min wall; 982 s a TAO iteration after the first (1130 s with the compile)
+- **Results path:** Quartz /N/scratch/dlilien/ismip7_issue156_runs/maps/prod2km_full_p32.h5 (scratch, purged after 30 days); timing record and log copied to /Volumes/LaCie/Data/antarctica_general/ismip7_runs/inversion_solver_quartz
+- **Audit:** 5 TAO iterations, objective 5.621096e4 to 5.570022e4; no forward failed; published residual 40.9
+- **Notes:** issue #156 production-configuration cost probe; no MAP is kept (strict handoff off, the legacy prior name overridden by the warm start's prior)
+
+### test-2km-inversion-prod-scpc-gamg-ec0
+
+2 km inversion, production configuration with one solve an evaluation, scpc_gamg (NLEQ-ERR, Krylov rtol 1e-8) on 32 ranks (done), IU.
+
+- **Task type:** test
+- **Friction law:** budd
+- **Mesh:** Rice's antarctica_5000_2000_buffered0, read from the snapshot (ISMIP7_MESH=checkpoint; 925,183 vertices, 1,835,718 cells), DG0 geometry, vertex raster sampling
+- **Initial state / MAP:** warm start from inversion_icepack2_budd_n3_dg0_logvelnet_2000_int5000_bilap_snap20260924_0948.h5 (Rice, log control, controls only) on its own mesh, ISMIP7_WARM_START_STRICT=0; the n,m 1 to 3 ramp under scpc_mumps, then ISMIP7_EVAL_CONTINUATION=0
+- **Forcing versions:** MEaSUREs v2 and BedMachine v4.1 from Quartz's antarctica/data; the snapshot's fluidity prior; sub-element friction with the exact front push (ISMIP7_SUBELEMENT_FRICTION=1), TAO lmvm with the mass-consistent metric, bi-Laplacian prior; no dH/dt term
+- **Site / partition:** IU Quartz, general partition
+- **Ranks / memory:** 32 ranks, 240G; AveRSS 3.6 GiB, MaxRSS 3.9 GiB a rank
+- **Job ids:** 10824070
+- **Code:** e84ccdf (PR 155); icepack_tools e7b923e
+- **Started:** 2026-10-01
+- **Finished:** 2026-10-02
+- **Cost per model year:** 42 min wall; 175 s a TAO iteration; 3.8 Newton iterations and 103 V-cycles a condensed solve
+- **Results path:** Quartz /N/scratch/dlilien/ismip7_issue156_runs/maps/ec0_2km_gamg_p32.h5 (scratch, purged after 30 days); timing record and log copied to /Volumes/LaCie/Data/antarctica_general/ismip7_runs/inversion_solver_quartz
+- **Audit:** every iterate within 1.0e-9 of test-2km-inversion-prod-full-mumps-ec0, final 5.570022e4; the same trial point failed in iteration 3 and took the same rescue (795 s); every recorded solve confirmed with no step; 1.3 times faster than full_mumps
+- **Notes:** issue #156 production-configuration cost probe; no MAP is kept (strict handoff off, the legacy prior name overridden by the warm start's prior)
+
+### test-2km-inversion-prod-scpc-gamg-ec1
+
+2 km inversion, production configuration with five-solve evaluations, scpc_gamg (NLEQ-ERR, Krylov rtol 1e-8) on 32 ranks (done), IU.
+
+- **Task type:** test
+- **Friction law:** budd
+- **Mesh:** Rice's antarctica_5000_2000_buffered0, read from the snapshot (ISMIP7_MESH=checkpoint; 925,183 vertices, 1,835,718 cells), DG0 geometry, vertex raster sampling
+- **Initial state / MAP:** warm start from inversion_icepack2_budd_n3_dg0_logvelnet_2000_int5000_bilap_snap20260924_0948.h5 (Rice, log control, controls only) on its own mesh, ISMIP7_WARM_START_STRICT=0; the n,m 1 to 3 ramp under scpc_mumps, then ISMIP7_EVAL_CONTINUATION=1
+- **Forcing versions:** MEaSUREs v2 and BedMachine v4.1 from Quartz's antarctica/data; the snapshot's fluidity prior; sub-element friction with the exact front push (ISMIP7_SUBELEMENT_FRICTION=1), TAO lmvm with the mass-consistent metric, bi-Laplacian prior; no dH/dt term
+- **Site / partition:** IU Quartz, general partition
+- **Ranks / memory:** 32 ranks, 240G; AveRSS 6.9 GiB, MaxRSS 7.2 GiB a rank
+- **Job ids:** 10823631
+- **Code:** e84ccdf (PR 155); icepack_tools e7b923e
+- **Started:** 2026-10-01
+- **Finished:** 2026-10-02
+- **Cost per model year:** 4 h 00 min wall; 2405 s a TAO iteration after the first (1886 s the first); 10.3 Newton iterations and 242 V-cycles a condensed solve, about 625 at the n = 1 step of each evaluation
+- **Results path:** Quartz /N/scratch/dlilien/ismip7_issue156_runs/maps/prod2km_gamg_p32.h5 (scratch, purged after 30 days); timing record and log copied to /Volumes/LaCie/Data/antarctica_general/ismip7_runs/inversion_solver_quartz
+- **Audit:** every iterate within 1.1e-9 of test-2km-inversion-prod-full-mumps-ec1, final 5.570022e4; no forward failed; every recorded solve confirmed with no step; 2.4 times slower than full_mumps
+- **Notes:** issue #156 production-configuration cost probe; no MAP is kept (strict handoff off, the legacy prior name overridden by the warm start's prior)
 
 ### test-32km-inversion-exp-subelement-cold-start
 

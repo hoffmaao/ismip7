@@ -97,21 +97,110 @@ def grounded_mask(H, b, gl_width=GL_WIDTH):
     return smooth_heaviside(haf, kH=1.0 / gl_width)
 
 
-def weertman_anchor(H, s, u_obs, m_slide, Q):
-    r"""Balance Weertman coefficient ``C_w0 = tau_d / |u_obs|^(1/m)`` as a
+def driving_stress_magnitude(H, s):
+    r"""``|tau_d| = rho_I g H |grad s|`` [MPa] as a UFL expression; ``s`` may
+    be DG0 (see :func:`surface_slope`)."""
+    grad_s = surface_slope(s)
+    return rho_I * g * H * sqrt(inner(grad_s, grad_s) + Constant(1e-12))
+
+
+def regional_driving_stress(H, s, b, Q, length):
+    r"""The driving-stress magnitude averaged over grounded ice within about
+    ``length`` [m], as a CG1 ``Function`` on ``Q``'s mesh.
+
+    The average is a screened-Poisson (Helmholtz) filter,
+    ``(1 - l^2 lap) f = g`` with natural boundary conditions, applied to
+    ``grounded * |tau_d|`` and to ``grounded`` and divided, so floating and
+    ice-free cells neither contribute nor dilute the average near a grounding
+    line or front. ``l = length / sqrt(2)`` gives the filter kernel the second
+    moment of a Gaussian of standard deviation ``length``.
+
+    The MAGNITUDE is averaged, not the vector. Across an ice divide the
+    driving-stress vectors point apart and their mean vanishes, yet the bed
+    there carries the stress of the ice on both flanks: membrane stresses
+    couple the column to its surroundings over several ice thicknesses
+    (Kamb and Echelmeyer, 1986), so the local slope is not what the bed
+    resists.
+    """
+    from firedrake import FunctionSpace, LinearSolver, TrialFunction, assemble
+    mesh = Q.mesh()
+    V = FunctionSpace(mesh, "CG", 1)
+    grounded = conditional(gt(height_above_flotation(H, b), 0.0), 1.0, 0.0)
+    ell2 = Constant(float(length) ** 2 / 2.0)
+    f, v = TrialFunction(V), TestFunction(V)
+    # One direct factorization for both right-hand sides. Deep inside a shelf
+    # the grounded weight decays to ~1e-6, and the quotient below then turns an
+    # iterative solver's round-off into order-10 % differences between rank
+    # counts; the anchor is unused there (friction is zero on floating ice),
+    # but a direct solve keeps it identical wherever it is rebuilt.
+    solver = LinearSolver(
+        assemble((f * v + ell2 * inner(grad(f), grad(v))) * dx),
+        solver_parameters={"ksp_type": "preonly", "pc_type": "lu",
+                           "pc_factor_mat_solver_type": "mumps"})
+    num = Function(V, name="regional_tau_d_sum")
+    den = Function(V, name="regional_grounded_weight")
+    solver.solve(num, assemble(grounded * driving_stress_magnitude(H, s) * v * dx))
+    solver.solve(den, assemble(grounded * v * dx))
+    out = Function(V, name="regional_driving_stress")
+    # Where no grounded ice lies within reach the value is never used (the
+    # anchor only acts on grounded ice); the floor keeps the division finite.
+    out.interpolate(max_value(num, Constant(0.0)) / max_value(den, Constant(1e-3)))
+    return out
+
+
+def weertman_anchor(H, s, u_obs, m_slide, Q, length=0.0, b=None):
+    r"""Balance Weertman coefficient ``C_w0 = tau / |u_obs|^(1/m)`` as a
     ``Function`` on ``Q`` -- a fixed anchor so the inverted ``theta`` is an O(1)
     log-adjustment rather than carrying the full friction magnitude.
 
-    ``tau_d = rho_I g H |grad s|`` is the driving stress; ``|u_obs|`` is floored
-    at 1 m/yr.  At ``u = u_obs`` and ``theta = 0`` the Weertman branch returns
-    ``tau_W = tau_d`` -- i.e. the balance is driving-stress-consistent.
+    With ``length == 0`` (the default) ``tau`` is the local driving stress
+    ``rho_I g H |grad s|``, so at ``u = u_obs`` and ``theta = 0`` the Weertman
+    branch returns ``tau_W = tau_d``: a local balance. That anchor vanishes
+    wherever the surface slope does, which leaves ice divides with no
+    friction in the prior (``ISMIP7_ANCHOR_LENGTH``).
 
-    ``s`` may be DG0 (see :func:`surface_slope`).
+    With ``length > 0`` ``tau`` is :func:`regional_driving_stress`, the
+    driving stress of the grounded ice within about ``length`` metres, which
+    stays finite across a divide. ``b`` is then required, to tell grounded
+    from floating ice.
+
+    ``|u_obs|`` is floored at 1 m/yr. ``s`` may be DG0 (see
+    :func:`surface_slope`).
     """
-    grad_s = surface_slope(s)
-    tau_d = rho_I * g * H * sqrt(inner(grad_s, grad_s) + Constant(1e-12))
+    length = float(length)
+    if length < 0.0:
+        raise ValueError(f"anchor length must be >= 0 m, got {length}")
+    if length > 0.0:
+        if b is None:
+            raise ValueError("a regional anchor needs the bed b to find grounded ice")
+        tau = regional_driving_stress(H, s, b, Q, length)
+    else:
+        tau = driving_stress_magnitude(H, s)
     u_speed = max_value(sqrt(inner(u_obs, u_obs)), Constant(1.0))
-    return Function(Q, name="C_w0").interpolate(tau_d / u_speed ** (1.0 / m_slide))
+    return Function(Q, name="C_w0").interpolate(tau / u_speed ** (1.0 / m_slide))
+
+
+def rebase_log_friction(theta, C_from, C_to, H, b, floor=1e-8):
+    r"""The log-friction control that keeps the friction ``C_from exp(theta)``
+    when the anchor changes to ``C_to``, as a new CG1 ``Function``.
+
+    ``theta + ln(C_from / C_to)`` on grounded cells, lifted to the control's
+    CG1 space; floating and ice-free cells, where the friction is gated off,
+    keep ``theta`` unchanged, so a vanishing anchor there cannot put an
+    unbounded log into the prior. ``floor`` [MPa (m/yr)^(-1/3)] keeps the
+    ratio finite where either anchor vanishes on grounded ice.
+    """
+    from firedrake import FunctionSpace, ln
+    from .geometry import cg1_lift
+    Q0 = FunctionSpace(theta.function_space().mesh(), "DG", 0)
+    grounded = gt(height_above_flotation(H, b), 0.0)
+    shift = Function(Q0).interpolate(conditional(
+        grounded,
+        ln(max_value(C_from, Constant(floor)) / max_value(C_to, Constant(floor))),
+        0.0))
+    out = Function(theta.function_space(), name=theta.name())
+    out.interpolate(theta + cg1_lift(shift))
+    return out
 
 
 def budd_nhat_ungated(N, N_ref, H, nhat_floor=0.02, nhat_cap=3.0):

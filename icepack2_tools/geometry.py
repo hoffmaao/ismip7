@@ -260,3 +260,46 @@ def sample_to_geometry(raster, Q_g, Q_cg, floor=None, method="vertex"):
     if not is_dg0:
         return field if isinstance(field, Function) else Function(Q_cg).interpolate(field)
     return Function(Q_g).project(field)
+
+
+# BedMachine Antarctica mask values: 0 ocean, 1 ice-free land, 2 grounded ice,
+# 3 floating ice, 4 Lake Vostok.
+LAKE_MASK = 4
+
+
+def raise_bed_to_lake_ice_base(b, H, bm_fn, Q_g, Q_cg, method="vertex"):
+    r"""Set the bed to the ice base ``s - H`` under BedMachine's subglacial lake.
+
+    Under ``mask == 4`` (Lake Vostok) BedMachine's ``bed`` is the lake FLOOR
+    and its ``thickness`` the ice alone, so ``b + H`` -- the surface every part
+    of this model builds -- sits below BedMachine's surface by the lake's water
+    column: a bowl a median 266 m and up to 916 m deep over 15,200 km2, whose
+    walls carry driving stresses near 1 MPa into the friction anchor and the
+    momentum balance. The ice base ``s - H`` taken from BedMachine's own
+    surface removes it, and the ice over the lake keeps its thickness.
+
+    A cell takes the ice base when any of its vertices lies on the lake, so the
+    correction covers the lake's whole footprint on the mesh; in a cell only
+    partly over the lake the cell-averaged ``s - H`` carries only that part of
+    the water column. ``b`` and ``H`` must come from :func:`sample_to_geometry`
+    with the same ``method``. Modifies ``b`` in place and returns the global
+    number of cells (or nodes, under CG1 geometry) it changed.
+    """
+    import icepack
+    import rasterio
+    from firedrake import conditional, gt, lt
+
+    s_bm = sample_to_geometry(
+        rasterio.open(f"netcdf:{bm_fn}:surface"), Q_g, Q_cg, method=method)
+    mask = icepack.interpolate(
+        rasterio.open(f"netcdf:{bm_fn}:mask"), Q_cg, method="nearest")
+    on_lake = Function(Q_cg).interpolate(
+        conditional(lt(abs(mask - LAKE_MASK), 0.5), 1.0, 0.0))
+    # Into DG0 the vertex indicator arrives as its vertex mean, positive when
+    # any vertex is on the lake; under CG1 geometry it is the indicator itself.
+    touches = Function(Q_g).interpolate(on_lake)
+    new_b = Function(Q_g).interpolate(conditional(gt(touches, 0.0), s_bm - H, b))
+    changed = int(np.count_nonzero(
+        np.abs(new_b.dat.data_ro - b.dat.data_ro) > 1e-6))
+    b.assign(new_b)
+    return Q_g.mesh().comm.allreduce(changed, op=MPI.SUM)

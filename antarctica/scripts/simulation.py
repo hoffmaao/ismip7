@@ -68,11 +68,11 @@ from icepack2_tools.mpi_stats import (
     global_size,
 )
 from icepack2_tools.boundary import load_boundary_ids
-from icepack2_tools.geometry import sample_to_geometry
+from icepack2_tools.geometry import raise_bed_to_lake_ice_base, sample_to_geometry
 from icepack2_tools.naming import map_basename
 from icepack2_tools.front import (
     clamp_thickness, clear_reference_where_ice_free, retreat_slivers,
-    unforced_cells, applied_forcing,
+    front_removal_mask, unforced_cells, applied_forcing,
     facet_neighbours, front_connected, ocean_drag_cells,
     collapse_banner, collapse_cell_counts, collapse_csv_fields,
     COLLAPSE_CSV_COLUMNS, COLLAPSE_MARKER, FRONT_OWNER_MARKER,
@@ -80,6 +80,7 @@ from icepack2_tools.front import (
 from icepack2_tools.forcing import SMB_FEEDBACK_ATTR, smb_feedback_restart_error
 from icepack2_tools.timeseries import (
     format_year, resumed_step, rows_kept_on_resume, step_changed,
+    timeseries_csv_line,
 )
 from icepack2_tools.runconfig import (
     obs_data_root,
@@ -89,7 +90,8 @@ from icepack2_tools.runconfig import (
     mesh_override as _mesh_override,
     lc as _lc, lc_coarse as _lc_coarse, n_flow as _n_flow, buffer_m as _buffer_m,
     TARGET_MESH_GEOMETRY_METHOD,
-    calving_law as _calving_law, calving_sigma_max as _calving_sigma_max,
+    calving_law as _calving_law, calving_law_object as _calving_law_object,
+    front_advance as _front_advance,
     fracture as _fracture_mode, ismip7_output as _ismip7_output,
     FRACTURE_MASK_MODES,
     # auto_resume is re-exported, not used here: every forward driver imports
@@ -231,6 +233,45 @@ def historical_endpoint(esm_tag, tag_sfx, t_branch, lc_val=None):
     return path
 
 
+def auto_resume_checkpoint(experiment_name, lc_val=None):
+    r"""The checkpoint an unattended run resumes from, or None.
+
+    :func:`latest_checkpoint`, refused when it was written under another
+    calving law. The experiment name carries only the run tag, so a run that
+    selects a law without a tag of its own finds a stock run's checkpoints
+    (and a stock run a law run's), would resume the other run's state and then
+    overwrite its files. Every checkpoint of a law-driven run records the law
+    with its parameters (the ``calving_law`` attribute, absent under ``none``),
+    and a resume under a different law or different parameters stops here.
+    An explicit ``ISMIP7_RESTART`` is taken as meant and does not come here.
+    """
+    path = latest_checkpoint(experiment_name, lc_val)
+    if path is None:
+        return None
+    law = _calving_law_object()
+    want = law.describe() if law is not None else None
+    with fd.CheckpointFile(path, "r") as chk:
+        have = (str(chk.get_attr("/", "calving_law"))
+                if chk.has_attr("/", "calving_law") else None)
+    if have is None and want is not None:
+        raise RuntimeError(
+            f"auto-resume found {path}, which records no calving law: it was "
+            f"written under none, or by a law run from before checkpoints "
+            f"recorded one (such as a built-in ISMIP7_CALVING=fixed or "
+            f"=vonmises chain), but this run is configured with {want}. "
+            f"Continue that state on purpose with ISMIP7_RESTART, or give "
+            f"this run its own ISMIP7_RUN_TAG so it keeps its own "
+            f"checkpoints.")
+    if have != want:
+        raise RuntimeError(
+            f"auto-resume found {path}, written under the calving law "
+            f"{have or 'none'}, but this run is configured with "
+            f"{want or 'none'}. Give this run its own ISMIP7_RUN_TAG so it "
+            f"keeps its own checkpoints, or start it from that state on "
+            f"purpose with ISMIP7_RESTART.")
+    return path
+
+
 def setup_model(restart_from=None, *, allow_timing_cache_a_ref=False,
                 backdate_years=0.0, smb_feedback=None):
     r"""Load mesh, data, inversion fields, and build diagnostic solver.
@@ -263,8 +304,7 @@ def setup_model(restart_from=None, *, allow_timing_cache_a_ref=False,
     # Reject a mistyped front configuration before the MAP load and the
     # initial Newton solve, which cost minutes to tens of minutes at 2500 m
     # on a detached launch.
-    _calving_law()
-    _calving_sigma_max()
+    _calving_law_object()
     # Exact-zero-shelf residual laws (icepack2 dual, dual_friction.py):
     #   regularized_coulomb -> Coulomb cap tau_c=c0*N
     #   budd                -> tau_b ~ N_hat=N_eff/N_ref, PISM-delta grounded
@@ -362,6 +402,20 @@ def setup_model(restart_from=None, *, allow_timing_cache_a_ref=False,
             # Residual of the saved mixed state under its writer's F; the
             # restart fast path trusts the state only within a factor of it.
             "full_state_residual",
+            # The friction anchor theta is a deviation from, and the geometry
+            # it was inverted on (dual_friction.weertman_anchor,
+            # geometry.raise_bed_to_lake_ice_base): a forward follows the MAP.
+            "friction_anchor_length",
+            # An exp-control MAP (ISMIP7_FRICTION_CONTROL=exp): log_friction
+            # is a deviation from the constant C_ref, not from the anchor.
+            "friction_control",
+            "friction_c_ref",
+            "lake_ice_base",
+            # The grounding scheme and the front push the MAP was inverted
+            # under (icepack2_tools.subelement): a forward follows the MAP.
+            "subelement_friction",
+            "exact_front",
+            "fluidity_control",
         ):
             if _chk.has_attr("/", _key):
                 checkpoint_metadata[_key] = _chk.get_attr("/", _key)
@@ -557,6 +611,33 @@ def setup_model(restart_from=None, *, allow_timing_cache_a_ref=False,
     geometry_source_method = checkpoint_metadata.get(
         "geometry_source_method"
     )
+    # A MAP (or a state restarted from one) that predates these records was
+    # inverted with the local anchor on BedMachine's raw bed.
+    map_anchor_length = float(checkpoint_metadata.get("friction_anchor_length", 0.0))
+    map_lake_ice_base = int(checkpoint_metadata.get("lake_ice_base", 0))
+    map_subelement = int(checkpoint_metadata.get("subelement_friction", 0))
+    map_exact_front = int(checkpoint_metadata.get("exact_front", 0))
+    _env_sub = os.environ.get("ISMIP7_SUBELEMENT_FRICTION")
+    if _env_sub is not None and int(_env_sub) != map_subelement:
+        raise RuntimeError(
+            f"ISMIP7_SUBELEMENT_FRICTION={_env_sub} but the MAP was inverted with "
+            f"subelement_friction={map_subelement}: a forward follows its MAP")
+    for _var, _val, _map in (("ISMIP7_ANCHOR_LENGTH", map_anchor_length, map_anchor_length),
+                             ("ISMIP7_LAKE_ICE_BASE", map_lake_ice_base, map_lake_ice_base)):
+        _env = os.environ.get(_var)
+        if _env is None:
+            continue
+        _want = float(_env) if _var == "ISMIP7_ANCHOR_LENGTH" else int(_env.strip() != "0")
+        if _want != _map:
+            raise RuntimeError(
+                f"{_var}={_env} but {os.path.basename(source_chk)} was inverted with "
+                f"{_map:g}. A forward takes the friction anchor and the lake geometry "
+                f"from its MAP, since theta is a deviation from them; unset {_var} or "
+                f"point at a MAP inverted that way.")
+    PETSc.Sys.Print(
+        "  Friction anchor (from the MAP): " + ("local driving stress" if map_anchor_length == 0.0
+                                                 else f"grounded driving stress over {map_anchor_length / 1e3:g} km")
+        + f"; lake ice base {'on' if map_lake_ice_base else 'off'}")
     if not is_restart:
         # Cold start: geometry from BedMachine (RC/Budd overwrites it with the
         # inversion-time geometry from the MAP only when no target-mesh
@@ -578,6 +659,9 @@ def setup_model(restart_from=None, *, allow_timing_cache_a_ref=False,
             rasterio.open(f"netcdf:{bm_fn}:thickness"),
             Q_g, Q, floor=h_clamp_init, method=chk_raster_sample)
         H.rename("thickness")
+        if map_lake_ice_base:
+            _n_lake = raise_bed_to_lake_ice_base(b, H, bm_fn, Q_g, Q, method=chk_raster_sample)
+            PETSc.Sys.Print(f"  Lake ice base: bed raised on {_n_lake} geometry dofs")
         s = Function(Q_g, name="surface").interpolate(
             max_value(b + H, (Constant(1.0) - rho_ratio) * H)
         )
@@ -642,6 +726,22 @@ def setup_model(restart_from=None, *, allow_timing_cache_a_ref=False,
         theta_f.rename("theta")
         phi_f = load_checkpoint_field(chk, "log_fluidity", Q)
         phi_f.rename("phi")
+        # A MAP inverted on the sqrt(C) control (ISMIP7_FRICTION_CONTROL=sqrt)
+        # carries alpha = sqrt(C): its friction is alpha^2 outright, with no
+        # anchor and a zero log deviation. Restart checkpoints carry that
+        # friction as C_w0 with theta = 0, so they take the ordinary path.
+        alpha_f = load_checkpoint_field(
+            chk, "sqrt_friction", Q, optional=True, fill=0.0, fill_label="0")
+        # A MAP inverted on the exp control (ISMIP7_FRICTION_CONTROL=exp)
+        # carries alpha = ln(C / C_ref) as log_friction and C_ref as a
+        # constant C_w0. The residual takes C = C_ref exp(alpha) pointwise
+        # (no anchor, theta = 0), and checkpoints carry that C as
+        # friction_exp so a restart assembles the same form.
+        C_exp = load_checkpoint_field(
+            chk, "friction_exp", Q, optional=True, fill=0.0, fill_label="0")
+        if C_exp is None and str(checkpoint_metadata.get("friction_control", "log")) == "exp":
+            C_exp = Function(Q, name="friction_exp").interpolate(
+                Constant(float(checkpoint_metadata["friction_c_ref"])) * fd.exp(theta_f))
         # Fluidity prior mean (physical thermomechanical field): the fluidity
         # control is phi = log(A / A_prior), so the forward must reconstruct
         # A = A_prior * exp(phi) with the SAME A_prior the inversion used. New
@@ -923,7 +1023,19 @@ def setup_model(restart_from=None, *, allow_timing_cache_a_ref=False,
             f"  Fluidity prior: checkpoint has no fluidity_prior; using LEGACY "
             f"constant baseline A0*a4_factor = {A_prior_baseline:.2f}"
         )
-    A_map = A4_base * exp(phi_f)
+    phi_floating = str(checkpoint_metadata.get("fluidity_control", "all")) == "floating"
+    if phi_floating:
+        # the MAP's phi acts on floating ice only; grounded ice keeps the
+        # prior fluidity, through the same smooth indicator. The residual and
+        # A_map mask on the live thickness h, so the shelf rheology follows
+        # the grounding line; the t=0 linearisation A_linear on the loaded H.
+        from icepack2_tools.dual_friction import grounded_mask as _gm_phi
+        PETSc.Sys.Print("  Fluidity from the MAP: phi acts on floating ice only")
+
+    def _map_phi(H_c):
+        if phi_floating:
+            return phi_f * (Constant(1.0) - _gm_phi(H_c, b))
+        return phi_f
     K_base = u_c / (phi_eff * tau_c) ** m_slide
     K_map = K_base * exp(-m_slide * theta_f)
 
@@ -938,7 +1050,8 @@ def setup_model(restart_from=None, *, allow_timing_cache_a_ref=False,
         os.environ.get("ISMIP7_COMPOSITE_ALPHA", "1e-2" if use_rc else "1e-4")
     ))
     H_ref = Constant(float(os.environ.get("ISMIP7_H_REF", "100.0")))
-    A_linear = A_map * tau_c ** (n_flow_val - 1)   # linearized at tau_c
+    A_map_t0 = A4_base * exp(_map_phi(H))
+    A_linear = A_map_t0 * tau_c ** (n_flow_val - 1)   # linearized at tau_c
     K_linear = u_c / (phi_eff * tau_c) * exp(-theta_f)  # linearized at tau_c
 
     # C_w0/N_ref were initialized (and, on a restart, loaded frozen) in the
@@ -1026,11 +1139,27 @@ def setup_model(restart_from=None, *, allow_timing_cache_a_ref=False,
             # weertman_anchor needs |grad s|; under DG0 geometry it takes that
             # from a CG1 reconstruction internally (see geometry.surface_slope)
             # since a cell-wise surface has no cell gradient.
-            C_w0 = weertman_anchor(H, s, u_obs, m_slide_val, Q_g)
+            C_w0 = weertman_anchor(H, s, u_obs, m_slide_val, Q_g,
+                                   length=map_anchor_length, b=b)
             if friction == "budd":
                 N_ref = Function(Q_g, name="N_ref").interpolate(
                     max_value(effective_pressure(H, s), Constant(0.0))
                 )
+            if C_exp is not None:
+                C_w0 = Function(Q_g, name="C_w0").project(C_exp)
+                theta_f.assign(0.0)
+                _c_lo, _c_hi = global_range(C_exp)
+                PETSc.Sys.Print(
+                    "  Friction from the MAP's exp control: C = C_ref exp(alpha), "
+                    f"C_ref={float(checkpoint_metadata.get('friction_c_ref', float('nan'))):.3e}, "
+                    f"C in [{_c_lo:.3e}, {_c_hi:.3e}] (no anchor; theta = 0)")
+            if alpha_f is not None:
+                C_w0 = Function(Q_g, name="C_w0").project(alpha_f ** 2)
+                theta_f.assign(0.0)
+                _a_lo, _a_hi = global_range(alpha_f)
+                PETSc.Sys.Print(
+                    "  Friction from the MAP's sqrt(C) control: C = alpha^2, "
+                    f"alpha in [{_a_lo:.3e}, {_a_hi:.3e}] (no anchor; theta = 0)")
         # ISMIP7_BUDD_NREF=none reproduces the inversion's own call, which
         # passes N_ref=None so N_hat = N/N is 1 wherever the gate is open. The
         # forward otherwise divides by the N_ref above, computed on a cold start
@@ -1163,6 +1292,7 @@ def setup_model(restart_from=None, *, allow_timing_cache_a_ref=False,
 
     h = H.copy(deepcopy=True)
     h.rename("thickness")
+    A_map = A4_base * exp(_map_phi(h))
 
     u_s, M_s, tau_s = split(z)
     fields = {
@@ -1207,10 +1337,12 @@ def setup_model(restart_from=None, *, allow_timing_cache_a_ref=False,
             return build_rc_residual(
                 z_c if z_c is not None else z,
                 theta_c if theta_c is not None else theta_f,
-                phi_c if phi_c is not None else phi_f,
+                phi_c if phi_c is not None else _map_phi(h_c if h_c is not None else h),
                 H=h_c if h_c is not None else h,
                 s=s_c if s_c is not None else s,
-                b=b, C_w0=C_w0,
+                # the sqrt control's friction is alpha^2 pointwise (the
+                # inversion's own form), not its cell average
+                b=b, C_w0=(alpha_f ** 2 if alpha_f is not None else C_exp if C_exp is not None else C_w0),
                 A4_base=A4_base, n_flow=n_flow, n_flow_val=n_flow_val,
                 m_slide=m_slide_val, tau_c=tau_c, alpha=alpha_reg, H_ref=H_ref,
                 fric_law=friction, N_ref=N_ref,
@@ -1225,6 +1357,39 @@ def setup_model(restart_from=None, *, allow_timing_cache_a_ref=False,
 
         # The closure above is the single definition of this residual: the
         # forward solves exactly what a time-dependent assimilation rebuilds.
+        if map_subelement:
+            from icepack2_tools.subelement import (
+                build_subelement_residual, ice_indicator, subelement_from_geometry)
+            subelement = subelement_from_geometry(
+                mesh, h, b, ice=ice_indicator(h, _front_hmin()))
+            _fr = subelement.fraction.dat.data_ro
+            PETSc.Sys.Print(
+                "  Sub-element grounding (ISSM SEP2) from the MAP: "
+                f"{mesh.comm.allreduce(int((_fr == 1.0).sum()))} cells fully grounded, "
+                f"{mesh.comm.allreduce(int(((_fr > 0.0) & (_fr < 1.0)).sum()))} partly; "
+                f"{friction} with N_hat = 1 on the grounded part, so NO effective-pressure "
+                f"feedback; exact front push {'on' if map_exact_front else 'off'}; the "
+                "quadrature follows the geometry before every diagnostic solve")
+
+            def _build_F(theta_c=None, phi_c=None, h_c=None, s_c=None, z_c=None):
+                return build_subelement_residual(
+                    z_c if z_c is not None else z,
+                    theta_c if theta_c is not None else theta_f,
+                    phi_c if phi_c is not None else _map_phi(h_c if h_c is not None else h),
+                    H=h_c if h_c is not None else h,
+                    s=s_c if s_c is not None else s,
+                    b=b, C_w0=(alpha_f ** 2 if alpha_f is not None else C_exp if C_exp is not None else C_w0),
+                    A4_base=A4_base, n_flow=n_flow, n_flow_val=n_flow_val,
+                    m_slide=m_slide_val, tau_c=tau_c, alpha=alpha_reg, H_ref=H_ref,
+                    subelement=subelement, fric_law=friction, nhat_cap=budd_nhat_cap,
+                    alpha_gl=alpha_gl, c_w0_floor=rc_cw0_floor,
+                    h_visc_floor=rc_hvisc_floor, ocean_drag=ocean_drag,
+                    h_ocean=h_ocean, drag_mask=drag_mask, u_lim=u_lim, k_lim=k_lim,
+                    calving_ids=calving_ids if use_calving_terminus else None,
+                    exact_front=bool(map_exact_front),
+                )
+        else:
+            subelement = None
         F = _build_F()
     else:
         L = (
@@ -1319,6 +1484,10 @@ def setup_model(restart_from=None, *, allow_timing_cache_a_ref=False,
         )
 
     def solve_diagnostic(label, **metadata):
+        if subelement is not None:
+            # the grounded part of each cell follows the live geometry
+            subelement_from_geometry(
+                mesh, h, b, ice=ice_indicator(h, _front_hmin()), sub=subelement)
         """Execute one solve and always emit one compact convergence record."""
         _write_solve_header(label, **metadata)
         work_before = _condensed_work()
@@ -1613,6 +1782,8 @@ def setup_model(restart_from=None, *, allow_timing_cache_a_ref=False,
         "lc_coarse": chk_lc_coarse,
         "buffer_m": chk_buffer_m,
         "raster_sample": chk_raster_sample,
+        "friction_anchor_length": map_anchor_length,
+        "lake_ice_base": map_lake_ice_base,
         # Rescue speed limiter (residual laws): live Constant, 0 = inert.
         "k_lim": k_lim if use_residual else None,
         "k_lim_rescue": k_lim_rescue if use_residual else 0.0,
@@ -1620,8 +1791,15 @@ def setup_model(restart_from=None, *, allow_timing_cache_a_ref=False,
         # is self-contained and rank-count-robust (no recompute from evolved h).
         "theta": theta_f,
         "phi": phi_f,
+        # alpha = sqrt(C) of a sqrt-control MAP (None otherwise): the
+        # residual's friction, carried into every checkpoint so a restart
+        # assembles the same form.
+        "alpha": alpha_f,
+        # C = C_ref exp(alpha) of an exp-control MAP (None otherwise), idem
+        "C_exp": C_exp,
         "C_w0": C_w0,
         "N_ref": N_ref,
+        "subelement": subelement,
         "A_prior": A_prior_f,
         "H_init": H_init,
         # SMB-elevation feedback mode of a forward driver, stamped into every
@@ -1645,40 +1823,34 @@ def setup_model(restart_from=None, *, allow_timing_cache_a_ref=False,
     }
 
 
-class LiveCalvingState:
-    r"""The fields a calving law reads, taken live from the forward's state.
+def calving_front_state(z, h_dg, b, level_set, A=None, n=None, gr_frac=None):
+    r"""The state a calving law reads (:class:`icepack_tools.calving.FrontState`),
+    taken live from the forward.
 
-    hoffmaao/calving's ``laws.Law.rate(model, t)`` reads seven fields from
-    its model: the dual solution ``u``, ``M``, ``tau``, the DG0 thickness
-    ``h``, the height above flotation ``haf`` and the grounded indicator
-    ``chi_gr`` on the cells, and the outward front normal ``nfront``. Here
-    they are the forward's own: ``(u, M, tau)`` are the subfunctions of the
-    mixed solution, ``haf`` and ``chi_gr`` are UFL on the cells so they
-    follow the geometry without an update, and ``nfront`` is the unit
-    gradient of the level set the forward advances, the same object
-    ``calving/antarctic.py`` builds when a law is tuned against the Greene
-    fronts, so the tuned threshold means the same thing here.
-
-    Densities follow that tuning harness (CalvingMIP's 917 / 1028) rather
-    than the forward's 1024, as ``antarctic.AntarcticState`` does: a
-    threshold fitted there is applied under the same flotation test.
+    ``(u, M, tau)`` are the subfunctions of the mixed solution, ``h`` the DG0
+    transport thickness, ``haf`` and ``chi_gr`` UFL on the cells so they
+    follow the geometry without an update, and ``nfront`` the unit gradient of
+    the level set the forward advances. The densities are the forward's own,
+    so a law's floating/grounded split is the forward's grounding test, and
+    ``A`` and ``n`` are the run's fluidity and exponent. ``calving/antarctic.py``
+    builds the same class from a checkpoint when a law is tuned against the
+    Greene fronts, so a tuned threshold means the same thing here.
     """
-    RHO_I = 917.0
-    RHO_W = 1028.0
+    from icepack_tools.calving import FrontState
+    state = FrontState.from_dual(z, h_dg, b, level_set, A=A, n=n,
+                                 rho_i=rho_I, rho_w=rho_W)
+    if gr_frac is not None:
+        # The grounded measure the friction sees (the sub-element grounded
+        # fraction): a law gated on grounded ice reads it instead of the
+        # binary cell indicator, so a front cell at flotation is exactly as
+        # grounded for calving as for sliding and does not toggle between
+        # steps (icepack_tools.calving, gr_frac).
+        state.gr_frac = gr_frac
+    return state
 
-    def __init__(self, z, h_dg, b, level_set):
-        from firedrake import conditional, gt
-        self.u, self.M, self.tau = z.subfunctions
-        self.h = h_dg
-        self.b = b
-        self.Q0 = h_dg.function_space()
-        self.haf = self.h - Constant(self.RHO_W / self.RHO_I) * max_value(
-            -self.b, Constant(0.0))
-        self.chi_gr = conditional(gt(self.haf, Constant(0.0)),
-                                  Constant(1.0), Constant(0.0))
-        self.levelset = level_set
-        self.nfront = level_set.ghat
-        self.front_len = level_set.front_len
+
+MAP_CONFIG_KEYS = ("friction_control", "friction_c_ref", "subelement_friction",
+                   "exact_front", "fluidity_control")
 
 
 def save_model_state(ctx, final_path, t_now, extra_attrs=None):
@@ -1717,6 +1889,10 @@ def save_model_state(ctx, final_path, t_now, extra_attrs=None):
         chk.save_function(ctx["phi_eff"], name="phi_eff")
         if ctx.get("C_w0") is not None:
             chk.save_function(ctx["C_w0"], name="C_w0")
+        if ctx.get("alpha") is not None:
+            chk.save_function(ctx["alpha"], name="sqrt_friction")
+        if ctx.get("C_exp") is not None:
+            chk.save_function(ctx["C_exp"], name="friction_exp")
         if ctx.get("N_ref") is not None:
             chk.save_function(ctx["N_ref"], name="N_ref")
         if ctx.get("A_prior") is not None:
@@ -1770,6 +1946,18 @@ def save_model_state(ctx, final_path, t_now, extra_attrs=None):
             chk.set_attr("/", "buffer_m", float(ctx["buffer_m"]))
         if ctx.get("raster_sample"):
             chk.set_attr("/", "raster_sample", str(ctx["raster_sample"]))
+        # Carried so a restart, and anything reading this state, knows the
+        # anchor and geometry its frozen C_w0 was built under.
+        if ctx.get("friction_anchor_length") is not None:
+            chk.set_attr("/", "friction_anchor_length", float(ctx["friction_anchor_length"]))
+        if ctx.get("lake_ice_base") is not None:
+            chk.set_attr("/", "lake_ice_base", int(ctx["lake_ice_base"]))
+        # The MAP's controls and grounding scheme, so a chained link restarted
+        # from this state rebuilds the same residual.
+        _map_meta = ctx.get("checkpoint_metadata") or {}
+        for name in MAP_CONFIG_KEYS:
+            if name in _map_meta:
+                chk.set_attr("/", name, _map_meta[name])
         if full_state_residual is not None:
             chk.set_attr("/", "full_state_residual", full_state_residual)
         for name, value in (extra_attrs or {}).items():
@@ -1929,17 +2117,11 @@ def run_simulation(
     fixed_front = _fixed_front()
     front_hmin = _front_hmin()
     calving = _calving_law()
-    # An external calving law (ctx["calving_law"], any object with
-    # rate(model, t) -> UFL and describe(); hoffmaao/calving's laws.Law is
-    # the reference) drives the shared level set through its "prescribed"
-    # law, evaluated on the live dual state each transport advance.
-    calving_law_obj = ctx.get("calving_law")
-    if calving_law_obj is not None:
-        if calving != "none":
-            raise ValueError(
-                f"ISMIP7_CALVING={calving} and an external calving law were "
-                f"both requested; leave ISMIP7_CALVING=none for the law object")
-        calving = "prescribed"
+    # The law (icepack_tools.calving, the registry every project that runs a
+    # front selects from) or None. Its rate, evaluated on the live dual state,
+    # drives the level set as the "prescribed" rate; `fixed` freezes it.
+    calving_law_obj = _calving_law_object()
+    ctx["calving_law"] = calving_law_obj
     beyond_front = None
     n_beyond = 0
     cell_area = assemble(fd.TestFunction(Q_dg) * dx).dat.data_ro.copy()
@@ -2009,21 +2191,35 @@ def run_simulation(
     # when no law is configured at all; run_core_matrix.sh exports
     # ISMIP7_FIXED_FRONT=1 unconditionally, which is why the flag may not
     # override an explicit ISMIP7_CALVING choice.
-    legacy_front_sink = fixed_front and calving == "none"
+    legacy_front_sink = fixed_front and calving_law_obj is None
+    # Retreat-only (ISMIP7_FRONT_ADVANCE=none): the law retreats the front
+    # and nothing advances past the t=0 extent, which is removed each step
+    # and booked as calving - the retreat-only front of most ISMIP6 models
+    # and the ISMIP7 submission's. Explicit, so the matrix runner's
+    # unconditional ISMIP7_FIXED_FRONT=1 cannot pin a projection law by
+    # accident (the reason the legacy flag is ignored under a law).
+    front_advance = _front_advance()
+    retreat_only = calving_law_obj is not None and front_advance == "none"
+    if front_advance == "none" and calving_law_obj is None:
+        raise ValueError(
+            "ISMIP7_FRONT_ADVANCE=none needs a level-set law (ISMIP7_CALVING); "
+            "without one ISMIP7_FIXED_FRONT already holds the front")
+    ctx["front_advance"] = front_advance
     # A free law moves the front, so the frozen a_ref must follow the live
     # extent; `fixed` and the legacy flag pin it on purpose and keep the
     # t=0-only mask.
-    free_front = calving not in ("none", "fixed")
+    free_front = (calving_law_obj is not None
+                  and calving_law_obj.front_mode != "fixed")
     if calving_law_obj is not None:
+        # describe() names every parameter at full precision, so this line
+        # (which core_report.py lifts) records the law as the run used it
         front_owner = (
-            f"level-set prescribed law (external: {calving_law_obj.describe()})"
+            f"level-set law {calving_law_obj.describe()} "
+            f"(ISMIP7_CALVING={calving})"
+            + ("; retreat-only: nothing advances past the t=0 extent "
+               "(ISMIP7_FRONT_ADVANCE=none)" if retreat_only else "")
             + ("; ISMIP7_FIXED_FRONT is set but ignored for removal"
-               if fixed_front else ""))
-    elif calving != "none":
-        front_owner = f"level-set {calving} law (ISMIP7_CALVING={calving})" + (
-            "; ISMIP7_FIXED_FRONT is set but ignored for removal"
-            if fixed_front else ""
-        )
+               if fixed_front and not retreat_only else ""))
     elif fixed_front:
         front_owner = "legacy fixed-front mask (ISMIP7_FIXED_FRONT)"
     else:
@@ -2467,11 +2663,7 @@ def run_simulation(
     def _write_csv_row(row, collapse_cells):
         if csv_f is None:
             return
-        csv_f.write(
-            f"{format_year(row[0])},{row[1]:.6f},{row[2]:.2f},"
-            + ",".join(f"{v:.4f}" for v in row[3:])
-            + collapse_csv_fields(csv_head, collapse_cells) + "\n"
-        )
+        csv_f.write(timeseries_csv_line(row, csv_head, collapse_cells))
         csv_f.flush()
 
     # Rescue ladder state: the last CONVERGED mixed state, restored between
@@ -2635,9 +2827,8 @@ def run_simulation(
     phi_entry = None
     last_c_mean = 0.0
     drag_rule = ctx.get("drag_rule")
-    if calving != "none":
+    if calving_law_obj is not None:
         from icepack2_tools.levelset import LevelSet, initial_distance
-        sig_g, sig_f = _calving_sigma_max()
         # `fixed` holds the front at phi0, which LevelSet captures at
         # construction. On a warm restart h_dg is the RESTARTED extent, so
         # anchor phi0 on the t=0 thickness (ctx["H_init"], reloaded from every
@@ -2648,33 +2839,37 @@ def run_simulation(
         # solve reads the thickness of the object it belongs to. Use a scratch
         # Function, NOT h_dg: under DG0 geometry h_dg IS the live geometry.
         phi_init = None
-        if calving == "fixed":
+        if calving_law_obj.front_mode == "fixed":
             _h0 = Function(Q_dg).project(ctx.get("H_init", h))
             phi_init = initial_distance(mesh, _h0, h_min=front_hmin)
         level_set = LevelSet(
-            mesh, h_dg, law=calving, h_min=front_hmin,
-            sigma_max_grounded=sig_g, sigma_max_floating=sig_f,
+            mesh, h_dg, law=calving_law_obj.front_mode, h_min=front_hmin,
             drag_mask=ctx.get("drag_mask"), phi_init=phi_init,
         )
         phi_entry = Function(level_set.Q0)
-    live_calving_state = None
-    if calving_law_obj is not None:
-        live_calving_state = LiveCalvingState(z, h_dg, b, level_set)
-        PETSc.Sys.Print(
-            f"  Calving law (external, on the live dual state): "
-            f"{calving_law_obj.describe()}")
     # save_model_state writes the front and the ISMIP7 year in progress.
     ctx["level_set"] = level_set
     ctx["annual"] = annual
     a_ref_entry = Function(a_ref.function_space()) if a_ref is not None else None
     A_map = ctx.get("A_map")
+    # The law's rate on the live state. Its fields are the forward's own
+    # Functions, so one expression stays current as the run evolves; only a
+    # law with an explicit time dependence is re-evaluated each advance.
+    front_state = None
+    calving_rate = None
+    if calving_law_obj is not None and calving_law_obj.front_mode == "prescribed":
+        front_state = calving_front_state(
+            z, h_dg, b, level_set, A_map, n_flow_val,
+            gr_frac=(ctx["subelement"].fraction
+                     if ctx.get("subelement") is not None else None))
+        calving_rate = calving_law_obj.rate(front_state, t_start)
 
     def _advance(dt_local, label):
         r"""One transport advance of dt_local with the CURRENT velocity
         (transport-first ordering: the velocity was solved at the current
         geometry). Mutates h_dg and the derived CG fields; returns the
         advance's mass tallies [Gt]."""
-        nonlocal last_c_mean
+        nonlocal last_c_mean, calving_rate
         u_vel = z.subfunctions[0]
         if legacy_transport:
             h_dg.project(h)
@@ -2688,12 +2883,11 @@ def run_simulation(
         calv_frac = None
         ls_ice_free = None
         if level_set is not None:
-            ext_rate = (calving_law_obj.rate(live_calving_state, t_yr)
-                        if calving_law_obj is not None else None)
-            last_c_mean = level_set.advance(
-                dt_local, u_vel, h_dg, b, A_map, n_flow_val, rate=ext_rate)
+            if front_state is not None and calving_law_obj.time_dependent:
+                calving_rate = calving_law_obj.rate(front_state, t_yr)
+            last_c_mean = level_set.advance(dt_local, u_vel, rate=calving_rate)
             lsb, calv_frac = level_set.calving_masks()
-            beyond = lsb
+            beyond = front_removal_mask(lsb, beyond_front, retreat_only)
             ls_ice_free = level_set.beyond_front()
             if a_ref is not None and free_front:
                 clear_reference_where_ice_free(a_ref.dat.data, ls_ice_free)

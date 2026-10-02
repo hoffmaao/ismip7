@@ -216,7 +216,6 @@ def test_no_job_script_names_a_cluster_a_person_or_a_resource(name):
 def test_the_score_script_scores_a_map_and_then_its_transferred_state(sandbox):
     r"""map_check_score.script: score_map.py --json on the MAP's own mesh,
     --restart for a prepared cache, the census only when asked for."""
-    root = sandbox / "repo" / "antarctica"
     map_path = sandbox / "map.h5"
     map_path.write_text("map\n")
     status = sandbox / "status.txt"

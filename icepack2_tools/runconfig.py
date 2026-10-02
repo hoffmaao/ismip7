@@ -198,13 +198,20 @@ def n_flow():
     return float(os.environ.get("ISMIP7_N_FLOW", N_FLOW_DEFAULT))
 
 
-# Calving front (icepack2_tools.levelset). ``none`` is the pre-Sep-2026
-# behaviour: on a buffered mesh the front advances freely and never calves.
+# Calving front. ``none`` (the default) runs no level set: on a buffered mesh
+# the front advances freely and never calves, and ISMIP7_FIXED_FRONT decides
+# whether the ice that flows past the t=0 extent is removed. Any other value
+# names a law in icepack_tools.calving, the one registry every project that
+# runs a front selects from (ISMIP7_CALVING_MODULE registers a law from a
+# file first), made with the parameters in ISMIP7_CALVING_PARAMS.
 CALVING_DEFAULT = "none"
-CALVING_LAWS = ("none", "fixed", "vonmises")
-# ISSM defaults for the von Mises thresholds (Morlighem et al. 2016).
-CALVING_SIGMA_MAX_GROUNDED_DEFAULT = "1.0"     # MPa
-CALVING_SIGMA_MAX_FLOATING_DEFAULT = "0.15"    # MPa
+#: Knobs that named one law's parameters before the laws had one home. Their
+#: values now go in ISMIP7_CALVING_PARAMS; set, they are refused rather than
+#: silently ignored.
+RETIRED_CALVING_KNOBS = {
+    "ISMIP7_CALVING_SIGMA_MAX_GROUNDED": "sigma_max_gr",
+    "ISMIP7_CALVING_SIGMA_MAX_FLOATING": "sigma_max_fl",
+}
 
 
 FRACTURE_MODES = ("none", "mask", "mask_front")
@@ -313,12 +320,27 @@ def smb_elevation_feedback():
 
 
 def calving_law():
-    r"""``ISMIP7_CALVING``: ``none``, ``fixed`` or ``vonmises``."""
-    value = os.environ.get("ISMIP7_CALVING", CALVING_DEFAULT).lower()
-    if value not in CALVING_LAWS:
-        raise ValueError(
-            f"ISMIP7_CALVING must be one of {CALVING_LAWS}, got {value!r}"
-        )
+    r"""``ISMIP7_CALVING``, lower-cased: ``none`` or the name of a law in
+    :mod:`icepack_tools.calving`.
+
+    Pure, like the rest of this module: it refuses parameters given for no
+    law and, when a law is configured, the retired per-law knobs, but
+    whether the name is a registered law, and whether its parameters are its
+    own, only :func:`calving_law_object` can say.
+    """
+    value = os.environ.get("ISMIP7_CALVING", CALVING_DEFAULT).strip().lower()
+    if value == "none":
+        if calving_params():
+            raise ValueError(
+                "ISMIP7_CALVING_PARAMS is set but ISMIP7_CALVING is none: the "
+                "parameters would configure no law")
+        return value
+    for knob, key in RETIRED_CALVING_KNOBS.items():
+        if knob in os.environ:
+            raise ValueError(
+                f"{knob} is retired: a law's parameters live with the law "
+                f"(icepack_tools.calving), so set "
+                f"ISMIP7_CALVING_PARAMS={key}=<value> instead")
     return value
 
 
@@ -333,6 +355,74 @@ def front_hmin():
     return float(os.environ.get("ISMIP7_FRONT_HMIN", FRONT_HMIN_DEFAULT))
 
 
+ANCHOR_LENGTH_DEFAULT = "0"    # m: local balance
+
+
+def anchor_length():
+    r"""``ISMIP7_ANCHOR_LENGTH`` [m]: the reach of the driving stress in the
+    inversion's friction anchor (``dual_friction.weertman_anchor``). ``0``
+    keeps the local balance, which vanishes with the surface slope at ice
+    divides; a positive length averages the grounded driving stress over about
+    that distance. The inversion records it in the MAP, and a forward takes it
+    from there, never from this variable."""
+    length = float(os.environ.get("ISMIP7_ANCHOR_LENGTH", ANCHOR_LENGTH_DEFAULT))
+    if length < 0.0:
+        raise ValueError(f"ISMIP7_ANCHOR_LENGTH must be >= 0 m, got {length}")
+    return length
+
+
+def lake_ice_base():
+    r"""``ISMIP7_LAKE_ICE_BASE``: under BedMachine's subglacial-lake mask
+    (``mask == 4``, Lake Vostok) raise the bed to the ice base, so the model
+    surface ``b + H`` is BedMachine's surface rather than a bowl the depth of
+    the lake's water column. On unless set to ``"0"``. The inversion records
+    it in the MAP, and a forward takes it from there, so a MAP inverted without
+    it keeps the geometry it was inverted on."""
+    return os.environ.get("ISMIP7_LAKE_ICE_BASE", "1").strip() != "0"
+
+
+def calving_params():
+    r"""``ISMIP7_CALVING_PARAMS``: the law's parameters as ``key=value``
+    items, from a comma-separated list (``sigma_max_fl=0.2,sigma_max_gr=1``).
+    Parsing and validation are the law's (:func:`calving_law_object`)."""
+    raw = os.environ.get("ISMIP7_CALVING_PARAMS", "")
+    return [item.strip() for item in raw.split(",") if item.strip()]
+
+
+#: Law files already registered in this process, so a second call does not
+#: register the same law twice.
+_CALVING_MODULES_LOADED = set()
+
+
+def calving_law_object():
+    r"""The configured calving law, made with its parameters, or ``None`` for
+    ``none``.
+
+    Raises for an unknown law, a misspelt or impossible parameter, a retired
+    knob or a missing ``ISMIP7_CALVING_MODULE``, so a mistyped front fails at
+    startup rather than after the MAP load. Imports
+    :mod:`icepack_tools.calving`, and with it Firedrake, only when a law is
+    configured: under the default ``none`` this stays pure.
+    """
+    name = calving_law()
+    if name == "none":
+        return None
+    from icepack_tools import calving
+    module = os.environ.get("ISMIP7_CALVING_MODULE")
+    if module:
+        path = os.path.realpath(module)
+        if not os.path.isfile(path):
+            raise ValueError(f"ISMIP7_CALVING_MODULE={module!r} is not a file")
+        if path not in _CALVING_MODULES_LOADED:
+            calving.load_module(path)
+            _CALVING_MODULES_LOADED.add(path)
+    params = calving.parse_params(calving_params())
+    try:
+        return calving.make(name, **params)
+    except ValueError as err:
+        raise ValueError(f"ISMIP7_CALVING={name}: {err}") from None
+
+
 def fixed_front():
     r"""``ISMIP7_FIXED_FRONT``: the legacy pinned front.
 
@@ -341,6 +431,29 @@ def fixed_front():
     way to turn it off from there.
     """
     return os.environ.get("ISMIP7_FIXED_FRONT") not in (None, "0")
+
+
+FRONT_ADVANCE_MODES = ("free", "none")
+
+
+def front_advance():
+    r"""``ISMIP7_FRONT_ADVANCE``: what a level-set law's front may do besides
+    retreat.
+
+    ``free`` (default): the transport advances the front wherever ice reaches
+    an empty cell that the law does not remove (the extent anchor follows the
+    thickness). ``none``: nothing advances past the t=0 extent; ice reaching
+    a cell beyond it is removed each step and booked as calving, while the
+    law still retreats the front inside it. That is the retreat-only front of
+    most ISMIP6 models (Seroussi et al. 2020) and the ISMIP7 submission's
+    (Andrew, 26 Sep 2026). Needs a law: without one ``ISMIP7_FIXED_FRONT``
+    already holds the front.
+    """
+    value = os.environ.get("ISMIP7_FRONT_ADVANCE", "free").strip().lower()
+    if value not in FRONT_ADVANCE_MODES:
+        raise ValueError(
+            f"ISMIP7_FRONT_ADVANCE must be one of {FRONT_ADVANCE_MODES}, got {value!r}")
+    return value
 
 
 # The year the initial geometry is dated (BedMachine v4.1's nominal year, the
@@ -445,16 +558,6 @@ def mesh_build_check():
     name of the ``ISMIP7_MESH`` file and a different triangulation, as two
     sites' builds of the production mesh do. On unless ``0``."""
     return _int_flag("ISMIP7_MESH_BUILD_CHECK", True)
-
-
-def calving_sigma_max():
-    r"""Von Mises thresholds (grounded, floating) [MPa]."""
-    return (
-        float(os.environ.get("ISMIP7_CALVING_SIGMA_MAX_GROUNDED",
-                             CALVING_SIGMA_MAX_GROUNDED_DEFAULT)),
-        float(os.environ.get("ISMIP7_CALVING_SIGMA_MAX_FLOATING",
-                             CALVING_SIGMA_MAX_FLOATING_DEFAULT)),
-    )
 
 
 # ── Roots a second checkout does not carry ──────────────────────────────

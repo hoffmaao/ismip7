@@ -19,7 +19,7 @@ Install and download the rows your column ticks. Sizes are measured.
 | **Firedrake 2026.4** (brings PETSc, MUMPS, mpi4py) | firedrakeproject.org | x | x | x | x |
 | **icepack2** | github.com/icepack/icepack2 | x | x | x | x |
 | **icepack** (raster interpolation onto meshes) | github.com/icepack/icepack | x | x | x | x |
-| **icepack_tools** (`adapt_mesh`, `levelset`, `friction`, `grounding`) | github.com/hoffmaao/icepack_tools | | level-set front | x | |
+| **icepack_tools** (`adapt_mesh`, `levelset`, `calving`, `friction`, `grounding`) | github.com/hoffmaao/icepack_tools | | level-set front and calving laws | x | |
 | **tlm_adjoint** | github.com/jrmaddison/tlm_adjoint | x | | | |
 | `xarray netCDF4 scipy rasterio pyproj shapely gmsh matplotlib` (`geopandas` only to build a mesh, section 3) | pip, into the Firedrake venv | x | x | x | x |
 | `earthaccess` (NSIDC), `globus-sdk` (Globus route only) | pip | x | x | x | |
@@ -27,8 +27,9 @@ Install and download the rows your column ticks. Sizes are measured.
 
 `icepack_tools` is a separate repository. Install it editable into the
 same venv: `pip install -e /path/to/icepack_tools`.
-`icepack2_tools/adapt_mesh.py` and `icepack2_tools/levelset.py` wrap it; the
-rest of the repository runs without it.
+`icepack2_tools/adapt_mesh.py` and `icepack2_tools/levelset.py` wrap it, and a
+calving law (`ISMIP7_CALVING`) comes from its `calving` module; the rest of the
+repository runs without it.
 
 The compliance checker needs Python 3.11 or newer. Check `python -V`; a
 Firedrake venv often carries an older one, in which case give the checker its
@@ -875,21 +876,49 @@ than a cell from the front. Thin cells inside the t=0 extent are damped by
 a free law advances into, `C_w0` comes from the t=0 geometry where `H = 0`, so
 `tau_b = 0` under both laws and the damping is `h_visc_floor` and the collar.
 
-`vonmises` is Morlighem et al. 2016 verbatim:
-`c = |u| sqrt(3) B eps~^(1/n) / sigma_max`, with `eps~` from the tensile
-principal strain rates, `B = A^(-1/n)`, and separate grounded and floating
-thresholds. Those thresholds are the tuning targets: a 2015 control should hold
-the observed front (the obs kit's 24 yearly Greene masks, 1997 to 2021) and
-discharge about 1300 Gt/yr. The level set is checkpointed as `levelset` for
-diagnostics; a restart rebuilds the front from the thickness. The exception is
-`fixed`, which anchors on `H_init` so a resumed run does not re-freeze the
-front where it restarted. The shared implementation's tests are
-`icepack_tools/test/levelset_test.py`; the ISMIP7-side rules (retreat-sliver
-mask, apparent-MB extent masking, the `fixed` law's t=0 anchor) are covered by
-`tests/`. `tests/test_levelset_laws.py` checks each law against closed forms on
-a unit mesh: the `vonmises` rate under both thresholds, the shed fraction and
-its step-size behaviour under the transport's masks, the drag gate, and the
-refusal of an unknown or underspecified law.
+**The laws have one home, `icepack_tools.calving`,** beside the level set that
+moves the front with their rate. The CalvingMIP project runs from the same
+registry and tunes against Antarctic fronts with it (`calving/tune_greene.py`,
+per-Mouginot-basin flux against the Greene et al. 2022 fronts), so a tuned
+parameter means the same thing there and here. `ISMIP7_CALVING` names the law,
+`ISMIP7_CALVING_PARAMS` gives its parameters as `key=value,key=value`, checked
+against the law's own when the forward starts (before the MAP load), and
+`ISMIP7_CALVING_MODULE` registers a law from a file first:
+
+| `ISMIP7_CALVING` | rate `c` [m/yr] | parameters (defaults) |
+|---|---|---|
+| `none` | no level set; `ISMIP7_FIXED_FRONT` decides the removal | |
+| `fixed` | front frozen at the t=0 extent | |
+| `velocity` | `u . n`, the rate that holds a front still | `iv` (`normal`) |
+| `thickness` | `max(0, 1 + (Hc - H)/Hc) |u|` where the bed is below sea level (CalvingMIP experiment 5) | `hc` (375 m), `marine_only` (true) |
+| `vonmises` | `|u| sigma~ / sigma_max`, `sigma~` from the tensile principal deviatoric stresses of the solved `M` | `sigma_max_gr` (1 MPa), `sigma_max_fl` (0.15) |
+| `vonmises_strain` | the same from the strain rate, `sqrt(3) B eps~^(1/n)`, `B = A^(-1/n)` from the run's fluidity (Morlighem et al. 2016) | same |
+| `hfb` | `|u| min(R_xx / R_crit, ratio_max)^p`, the horizontal-force-balance threshold on the front-normal resistive stress | `sigma_max` (0), `rho_c` (`seawater`), `mode`, `stress`, `exponent`, `ratio_max` |
+
+The two von Mises forms differ by up to `2^(1/3)` (uniaxial extension), so a
+threshold tuned for one is not one for the other; `vonmises_strain` is what
+`ISMIP7_CALVING=vonmises` ran before 24 September 2026. A law reads its fields
+off the forward's live state (`simulation.calving_front_state`, an
+`icepack_tools.calving.FrontState`): `u`, `M`, `tau` from the mixed solution,
+the DG0 `h`, the bed, the height above flotation and grounded indicator under
+the forward's own densities, the front normal of the level set it advances,
+and the run's `A` and `n`. Its rate goes to the level set as the `prescribed`
+rate. The `Calving front owner:` line and every checkpoint's `calving_law`
+attribute record the law with every parameter at full precision, and
+`core_report.py` lifts the line into the report.
+
+The level set is checkpointed as `levelset` for diagnostics; a restart
+rebuilds the front from the thickness. The exception is `fixed`, which anchors
+on `H_init` so a resumed run does not re-freeze the front where it restarted.
+The laws and the shared level set are tested in `icepack_tools`
+(`test/calving_test.py`, `test/levelset_test.py`); the ISMIP7-side rules
+(retreat-sliver mask, apparent-MB extent masking, the `fixed` law's t=0
+anchor) are covered by `tests/`. `tests/test_levelset_laws.py` checks the
+configured law driving the front against closed forms on a unit mesh, the
+shed fraction and its step-size behaviour under the transport's masks, the
+drag gate, and the refusal of an unknown, misconfigured or underspecified law;
+`tests/test_calving_front_state.py` checks that the state a law reads is the
+forward's own.
 
 **Control and projection configurations differ.** The protocol's control is an
 unforced constant-climate run with fracture, collapse, calving and GIA held at
@@ -904,44 +933,13 @@ different run: it builds a level set, so ocean drag is gated off near the front
 and the retreat-sliver rule applies inside the t=0 extent, giving a slightly
 different `calv` column and settled front. Both close the budget.
 
-`vonmises` is for projections. A configured law owns the front outright, so the
-legacy `ISMIP7_FIXED_FRONT` mask removes nothing when a law is set and
-`vonmises` is never silently pinned. The apparent-MB reference `a_ref` is
+A law other than `fixed` is for projections. A configured law owns the front
+outright, so the legacy `ISMIP7_FIXED_FRONT` mask removes nothing when a law is
+set and a free law is never silently pinned. The apparent-MB reference `a_ref` is
 defined only on the t=0 ice extent under every law. Under a free law it is also
 cleared each step wherever the level set reports ice-free, irreversibly, so a
 calved cell is not regrown and an advanced-into cell is not re-emptied. The run
 log prints one `Calving front owner:` line naming the mechanism in force.
-
-### A calving law from hoffmaao/calving (`forward_calving.py`)
-
-The laws developed for CalvingMIP (github.com/hoffmaao/calving: `fixed`,
-`velocity`, `position`, `thickness`, `vonmises`, `vonmises_strain`, `hfb`
-and any `--law-module` plugin) run in the forward unchanged. A law reads
-seven fields from its model, and `simulation.LiveCalvingState` supplies
-them from the live dual state: `u`, `M`, `tau` from the mixed solution,
-the DG0 `h`, `haf` and the grounded indicator as UFL on the cells, and the
-front normal from the level set the forward advances. The law's rate goes
-to the shared level set as its `prescribed` law, so the front is retreated
-and the shed mass is tallied exactly as under `ISMIP7_CALVING=vonmises`.
-
-```bash
-CALVING_DIR=/path/to/calving mpiexec -n 16 python antarctica/scripts/forward_calving.py \
-    --law hfb --law-param sigma_max=0.15 --experiment control --tag hfb_test
-```
-
-wraps the experiment driver (`control`, `ocx`, `ssp126|ssp370|ssp585` with
-`--esm`, `hist`), which keeps its own forcing, restart and auto-resume;
-leave `ISMIP7_CALVING` unset. `--tag` (or `ISMIP7_RUN_TAG`) is required, so a
-law-driven run never resumes from or overwrites a stock run's checkpoints. The
-law's `describe()` is written to every checkpoint's `calving_law` attribute and
-to the `Calving front owner:` line, which `core_report.py` lifts into the
-report. Any object with `rate(model, t)` returning a UFL rate on the cells and
-`describe()` can be placed in `ctx["calving_law"]` before `run_simulation` the
-same way. A threshold is fitted on Antarctica
-with `calving/tune_greene.py --experiment vonmises|hfb --state <forward
-checkpoint>` (per-Mouginot-basin flux against the Greene et al. 2022 fronts,
-on the same level-set normal), which is what makes a tuned parameter mean
-the same thing in both places.
 
 ### The whole matrix in one command (`run_core_matrix.sh`)
 
@@ -979,6 +977,10 @@ projection), run in that run's own shell so it captures the environment.
 | `ISMIP7_LOG_VEL_WEIGHT` | weight on the ISSM logarithmic velocity misfit (cost function 103). The chi^2 alone over-weights slow interior ice and leaves discharge-carrying tributaries 40 to 50% too slow; the log term is scale free. `auto` equalises it with the chi^2 term at the state the inversion starts from, and under `auto` a warm start that records a positive weight under the same `ISMIP7_MISFIT_NORM` and `ISMIP7_LOG_VEL_EPS` supplies that weight, so every link of a chain minimises one objective (issue 68). Stamped into the MAP with `log_vel_weight_source`: `requested`, `derived` or `warm_start` | `0` |
 | `ISMIP7_LOG_VEL_EPS` | regularisation speed (m/yr) inside the log | `1.0` |
 | `ISMIP7_WARM_START` | path to a MAP or timing-cache checkpoint used to seed `theta`/`phi` (and, when present, geometry, `fluidity_prior`, and the mixed diagnostic state). Fields are interpolated onto the live mesh, so a 1-core cache can warm-start a multi-rank invert | unset |
+| `ISMIP7_WARM_START_THETA` | how `θ` comes over from the warm start. `θ` is a log-deviation from the friction anchor, so under a different anchor (`ISMIP7_ANCHOR_LENGTH`) the same `θ` is a different friction. `1` takes it as it is and warns when the anchors differ; `physical` rebases it on grounded ice so the friction `C_w0 exp(θ)` is the warm start's and the first solve reproduces the warm start's (from an exp-control MAP the previous anchor is its constant `friction_c_ref`); `0` starts at the new prior mean | `1` |
+| `ISMIP7_WARM_START_GEOMETRY` | `1` takes thickness, bed, surface, `velocity_obs` and the mixed state from the warm start; `0` keeps this mesh's own BedMachine sample. Defaults to `1` on the same mesh, except that a MAP recording a different `lake_ice_base` does not supply its geometry, so an old MAP cannot bring the lake bowl back | `1` on the same mesh, else `0` |
+| `ISMIP7_ANCHOR_LENGTH` | reach (m) of the driving stress in the friction anchor `C_w0 = tau / max(|u_obs|, 1)^(1/m)`, the prior mean of the friction. `0` is the local balance, which vanishes with the surface slope and leaves ice divides with no friction in the prior. A positive length averages the driving-stress magnitude of the grounded ice over about that distance (a screened-Poisson filter with the second moment of a Gaussian of that standard deviation), so floating and ice-free cells neither add to nor dilute it. Stamped into the MAP as `friction_anchor_length`; a forward rebuilds the anchor from the MAP's value and aborts if this variable says otherwise | `0` |
+| `ISMIP7_LAKE_ICE_BASE` | under BedMachine's subglacial-lake mask (4, Lake Vostok) raise the bed to the ice base `s - H`. BedMachine's bed there is the lake floor, so `b + H` sits below its surface by the water column: a bowl a median 266 m and up to 916 m deep over 15,200 km2, with driving stresses near 1 MPa on its walls. Stamped into the MAP as `lake_ice_base`; a forward follows the MAP, so a MAP inverted without it keeps its own geometry | `1` |
 | `ISMIP7_SKIP_CONTINUATION` | `1` skips the cold `n,m: 1→n` ramp on the initial solve and inside each annotated forward eval (single solve at full exponents). Auto-enabled when the warm start supplies a full mixed state | `0` |
 | `ISMIP7_GAMMA_THETA` / `ISMIP7_GAMMA_PHI` | Whittle-Matern prior strength on `θ` and `φ`, coupled to `ISMIP7_MISFIT_NORM` since normalising divides the misfit by about sigma^2. `scripts/lsurface.py` sweeps both on a grid and picks the L-curve corner of each (usage in its docstring) | `1e5` under `sigma`, `1e4` under `none` |
 | `ISMIP7_L_REG` | prior correlation length (m) | `7.5e3` |
@@ -1022,8 +1024,9 @@ redeclare those literals.
 | `ISMIP7_MESH` | mesh path for the inversion and tools. A forward takes its mesh from the checkpoint unless this names another mesh, in which case the MAP is transferred onto it; a file with the checkpoint mesh's name and another triangulation is refused (`ISMIP7_MESH_BUILD_CHECK`). `checkpoint` means the mesh embedded in the MAP or restart file: `site_env.sh` always exports a derived path, so this is how a job submitted through `submit.sh projection` runs MAP-native | `mesh/antarctica_<COARSE>_<LC>_buffered<BUFFER_M>.msh` |
 | `ISMIP7_RASTER_SAMPLE` | how BedMachine lands on a DG0 cell. `vertex` projects the CG1 vertex interpolant; `cell_mean` takes the raster's true cell mean. `cell_mean` measured rougher: neighbouring cells share two of three vertex samples, so `vertex` damps jumps by construction. Cell means raised interior surface jumps 6% and bed and thickness jumps 35%, and at 2 km the momentum solve did not converge within 60 minutes. It does classify flotation better (32 km misclassification 9.1% to 3.2%), so the knob stays. Stamped into the MAP and read back by the forward. Reproduce with `probe_raster_sampling.py` | `vertex` |
 | `ISMIP7_INVERSION` | explicit MAP path for a forward or preflight. The forward checks the MAP's recorded `friction`, `n_flow` and `geometry_space` against the run and aborts on a mismatch, warning only when the MAP predates those attributes; `preflight.py` checks that the file exists. Use it to A/B MAPs on one mesh, or, with `ISMIP7_MESH` also set (the timing matrix, `make map-check`), to run a MAP on a different mesh: its continuous fields are then interpolated onto `ISMIP7_MESH` by strict point location (`icepack2_tools/transfer.py`), and a target dof outside the MAP's outline takes a stated fill (0 for the log controls, the constant baseline for the fluidity prior, the raster sample for `velocity_obs`), counted and printed as `Transfer fill:` lines (`MAP_CHECK.md`) | derived |
-| `ISMIP7_CALVING` | `none`, `fixed` or `vonmises` (see above) | `none` |
-| `ISMIP7_CALVING_SIGMA_MAX_GROUNDED` / `_FLOATING` | von Mises thresholds (MPa) | `1.0` / `0.15` |
+| `ISMIP7_CALVING` | `none`, or a law in `icepack_tools.calving`: `fixed`, `velocity`, `thickness`, `vonmises`, `vonmises_strain`, `hfb` (see above) | `none` |
+| `ISMIP7_CALVING_PARAMS` | the law's parameters, `key=value,key=value` (e.g. `sigma_max_fl=0.2,sigma_max_gr=1`), checked against the law at startup. Replaces `ISMIP7_CALVING_SIGMA_MAX_GROUNDED` / `_FLOATING`, which are refused when a law is set | the law's defaults |
+| `ISMIP7_CALVING_MODULE` | a Python file whose `@icepack_tools.calving.register` laws join the registry before `ISMIP7_CALVING` is looked up | unset |
 | `ISMIP7_FRACTURE` | `mask` applies the ISMIP7 collapse forcing to every floating cell it flags, booked as calving; `mask_front` only to the flagged cells open water has reached, so no hole opens behind a standing front (the two end-members of discussion #30). Masks exist for the SSPs only, so the control, historicals and OCX abort on either. Needs DG0. Every run prints its mode once (`Ice-shelf collapse forcing: ISMIP7_FRACTURE=...`, `none` included). Under a mask mode the timeseries columns `collapse_flagged_cells`, `collapse_removed_cells` and `collapse_held_cells` count the flagged floating cells, the ones the mode has emptied and the ones it leaves standing (always 0 under `mask`), all ranks summed; the budget lines, a closing log line and the core report repeat them | `none` |
 | `ISMIP7_OCX_FORCING` | what core 11 runs on. `protocol` is the ISMIP7 OCX product (RACMO2.3p2-ERA SDBN1 `acabf`, expert-judgment ocean `tf`/`so`), and the run refuses to start without it. `stopgap` is RACMO2.4p1 actual-year SMB with the constant OI ocean climatology, what the core ran on before the product was readable here. K is fitted to the climatology, so read `check_melt_bound.py --ocx` first (discussion #48) | `protocol` |
 | `ISMIP7_OCX_OCEAN` | which expert-judgment OCX ocean scenario to read: `main` (the core one), `cold`, `warm` or `vary`. A member other than `main` writes to `ocx_<member>` | `main` |
@@ -1046,6 +1049,7 @@ redeclare those literals.
 | `ISMIP7_EXPERIMENT_NAME` | the run's identity, used by `adapt_mesh.py` to name adapted meshes and sidecars so parallel experiments cannot overwrite each other. Set by `run_adaptive.py --experiment-name`. See `../ADAPTIVE_MESH.md` | unset |
 | `ISMIP7_APPARENT_MB` | `1` or `balance` zeroes the t=0 thickness tendency; `div` cancels only the flux divergence; `0`, `off`, `none` and empty disable it | unset |
 | `ISMIP7_FIXED_FRONT` | hold the calving front at the t=0 extent, tallying inflow beyond it as calving. `=0` disables. Ignored whenever an `ISMIP7_CALVING` law is configured | unset |
+| `ISMIP7_FRONT_ADVANCE` | `free` (default): a level-set law's front advances wherever the transport carries ice into an empty cell the law does not remove; `none`: retreat-only, nothing advances past the t=0 extent, ice reaching it is removed each step and booked as calving (the ISMIP6 retreat-only scheme; the ISMIP7 submission's front). Needs `ISMIP7_CALVING`. |
 | `ISMIP7_TRIPWIRE_U_MAX` / `ISMIP7_TRIPWIRE_H_MAX` / `ISMIP7_TRIPWIRE_DH_RATE` / `ISMIP7_TRIPWIRE_HMIN` | runaway tripwire: fail the step when max speed exceeds `U_MAX` [m/yr], max thickness exceeds `H_MAX` [m], or a cell that entered the step at least `HMIN` thick thickens at a relative rate `(dh/h)/dt` above `DH_RATE` [1/yr] (a rate so every dt scores the same physics alike; thinner cells are reported, never tripped: buffer cells fill by more than their own thickness); every step prints a `tripwire step-k:` line with the worst cells; unset = off (timing lanes export 2e4 / 5000 / 20 / 100) | _(unset)_ |
 | `ISMIP7_LEGACY_TRANSPORT` | restore the pre-July-2026 CG-projection transport (needs `cg1`) | unset |
 | `ISMIP7_SNES_TYPE` / `ISMIP7_SNES_MAXIT` | diagnostic Newton type and iteration cap | `newtonls` / `200` |

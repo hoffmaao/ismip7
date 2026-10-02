@@ -36,7 +36,7 @@ from icepack2_tools.obs_dhdt import dhdt_source
 from icepack2_tools.climatology import clim_start, clim_end, clim_scenario
 from icepack2_tools.runconfig import (
     obs_data_root,
-    calving_law as _calving_law, calving_sigma_max as _calving_sigma_max,
+    calving_law_object as _calving_law_object,
     friction as _friction, geometry_space as _geometry_space, lc as _lc,
     lc_coarse as _lc_coarse, ocx_forcing as _ocx_forcing, ocx_ocean as _ocx_ocean,
     mesh_override, deltat_per_basin_npz, k_per_basin_npz,
@@ -297,10 +297,11 @@ def shared_missing(warn=None):
     # Front configuration: a mistyped law would otherwise surface only after
     # the forward's MAP load and initial solve.
     try:
-        _calving_law()
-        _calving_sigma_max()
+        _calving_law_object()
     except ValueError as e:
         miss.append(str(e))
+    except ImportError as e:
+        miss.append(f"icepack_tools.calving (ISMIP7_CALVING needs it: {e})")
     # ISMIP7_MESH=checkpoint means the mesh inside the MAP; there is no file
     # to look for and the MAP check below covers it.
     mesh_fn = mesh_override() or mesh_filename(lc_coarse, lc, get_buffer_m())

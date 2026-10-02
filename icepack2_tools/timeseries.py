@@ -15,7 +15,7 @@ rows the restart writes again. Pure Python, so these rules are tested without
 Firedrake.
 """
 
-__all__ = ["YEAR_DECIMALS", "STEP_CHANGE_RTOL", "format_year", "rows_kept_on_resume",
+__all__ = ["YEAR_DECIMALS", "STEP_CHANGE_RTOL", "format_year", "rows_kept_on_resume", "timeseries_csv_line",
            "step_from_years", "row_steps", "resumed_step", "step_changed"]
 
 YEAR_DECIMALS = 6
@@ -115,3 +115,18 @@ def step_changed(prior, dt):
     ``prior``: the larger over the smaller exceeds 1 + :data:`STEP_CHANGE_RTOL`."""
     lo, hi = sorted((float(prior), float(dt)))
     return hi > (1.0 + STEP_CHANGE_RTOL) * lo
+
+
+def timeseries_csv_line(row, header, collapse_cells):
+    r"""One timeseries line for ``row``, newline included.
+
+    ``row`` is ``(year, vaf_mm_sle, mass_gt, *budget_columns)``; the year is
+    written with :func:`format_year`, and ``header`` and ``collapse_cells``
+    go to :func:`icepack2_tools.front.collapse_csv_fields`.
+    """
+    from icepack2_tools.front import collapse_csv_fields
+    return (
+        f"{format_year(row[0])},{row[1]:.6f},{row[2]:.2f},"
+        + ",".join(f"{v:.4f}" for v in row[3:])
+        + collapse_csv_fields(header, collapse_cells) + "\n"
+    )

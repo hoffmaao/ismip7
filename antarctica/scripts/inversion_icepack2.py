@@ -59,6 +59,7 @@ from tlm_adjoint.firedrake import (
     compute_gradient,
     Functional,
     EquationSolver,
+    paused_manager,
 )
 from firedrake.petsc import PETSc
 from scipy.optimize import minimize as scipy_minimize
@@ -111,7 +112,7 @@ from icepack2_tools.runconfig import (
 )
 DATA_DIR = obs_data_root()
 from icepack2_tools.prior import (
-    bilaplacian_aux_residual,
+    BilaplacianAuxSolver,
     bilaplacian_coeffs,
     bilaplacian_energy_form,
     prior_operator_coeffs,
@@ -1609,6 +1610,7 @@ def main():
             "phi": prior_operator_coeffs(GAMMA_PHI, area_val, L_REG),
         }
     _prior_aux = {k: Function(Q, name=f"prior_aux_{k}") for k in ("theta", "phi")}
+    _prior_aux_solver = BilaplacianAuxSolver(Q, form_compiler_parameters=fc_params)
 
     def _prior_energy_form(ctrl, which):
         """``R(ctrl)`` as something ``assemble`` or ``Functional.addto`` takes.
@@ -1616,20 +1618,17 @@ def main():
         Under `bilaplacian` this SOLVES ``M f = A ctrl`` into
         ``_prior_aux[which]`` as a side effect, so :func:`_prior_grad` -- which
         needs that ``f`` -- must be called after this and before the next
-        control changes. EquationSolver annotates when a manager is running
-        (the TAO path needs the solve on the tape for the gradient) and is an
-        ordinary solve when one is not (the scipy path differentiates it by
-        hand below).
+        control changes. The solve back-substitutes with M factored once
+        (prior.BilaplacianAuxSolver). It is recorded while a manager annotates
+        (the TAO path needs it on the tape for the gradient) and is an
+        ordinary solve when one does not (the scipy path differentiates it by
+        hand below, and the TAO monitor only reads the energy).
         """
         d, g = _prior_dg[which]
         if PRIOR_FORM == "laplacian":
             return 0.5 * prior_operator_form(ctrl, ctrl, d, g)
         aux = _prior_aux[which]
-        EquationSolver(
-            bilaplacian_aux_residual(ctrl, aux, _prior_test, d, g) == 0,
-            aux,
-            form_compiler_parameters=fc_params,
-        ).solve()
+        _prior_aux_solver(ctrl, aux, d, g)
         return bilaplacian_energy_form(aux)
 
     def _prior_grad(ctrl, which):
@@ -2623,7 +2622,10 @@ def main():
                 J = forward(theta_ctrl, phi_ctrl)
             f_ref = float(last_good_fnorm[0])
             if np.isfinite(f_ref) and f_ref > 0.0:
-                with spans("residual_norm"):
+                # A check, not part of the objective, so off the tape:
+                # recorded, this one assembly took 4 to 8 s a call at 32 km
+                # and at 4 km, against 0.1 s unrecorded.
+                with spans("residual_norm"), paused_manager():
                     f_now = _residual_norm()
                 if not np.isfinite(f_now) or f_now > _fnorm_ceiling_factor * f_ref:
                     raise fd.ConvergenceError(
@@ -2667,7 +2669,8 @@ def main():
                     "  [!] Forward solve failed at a trial point; re-climbing the "
                     "continuation there")
                 try:
-                    _reramp_at_current_controls()
+                    with spans("reramp"):
+                        _reramp_at_current_controls()
                     reset_manager()
                     start_manager()
                     J = _forward_checked(theta_ctrl, phi_ctrl)

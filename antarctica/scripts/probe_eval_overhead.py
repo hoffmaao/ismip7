@@ -4,31 +4,40 @@ r"""Cost of the inversion's per-evaluation prior work at production sizes.
 Issue 156 measured about 27 s of each 1 km L-BFGS-B evaluation outside the
 forward and the adjoint (13 s at 2 km), the same under full_mumps and
 scpc_gamg and the same on 16, 32 and 64 ranks. The spans
-inversion_icepack2.py now records put that time on the 32 km mesh at 0.12 s,
-too small to say how it grows, so this refines the same mesh uniformly
-(``MeshHierarchy``, four times the vertices a level; level 4 is 1.6 million,
-the 1 km mesh has 1.87 million) and times, per level, the work an evaluation
-does under ``ISMIP7_PRIOR_FORM=bilaplacian`` that is neither solve.
+inversion_icepack2.py records put that time on the 32 km mesh at 0.12 s, too
+small to say how it grows, so this refines the same mesh uniformly
+(``MeshHierarchy``, about four times the vertices a level; level 4 is 1.19
+million, the 1 km mesh has 1.87 million) and times, per level, the prior work
+an evaluation does under ``ISMIP7_PRIOR_FORM=bilaplacian``.
 
-Variants, each run per control (theta, then phi) as an evaluation runs it:
+Off the tape (the L-BFGS-B path, and the TAO monitor), each variant run per
+control as an evaluation runs it, with the energy and the gradient ``A f``:
 
 ``newton``
-    the driver's code: ``clear_caches()``, then ``EquationSolver(M f - A ctrl
-    == 0, f)`` with no solver parameters, so Firedrake's defaults: a Newton
-    solve, MUMPS LU, and MUMPS's default sequential analysis (ICNTL(28)=1).
+    the driver's code before ``prior.BilaplacianAuxSolver``:
+    ``clear_caches()``, then ``EquationSolver(M f - A ctrl == 0, f)`` with no
+    solver parameters, so Firedrake's defaults: a Newton solve, MUMPS LU, and
+    MUMPS's default sequential analysis (ICNTL(28)=1).
 ``newton_pt``
     the same with MUMPS parallel analysis (ICNTL(28)=2, PT-Scotch), which
     the state solves' MUMPS options already set.
 ``factored``
-    ``M`` factored once (MUMPS Cholesky, the options of the driver's
-    ``_prior_metric_solvers``); an evaluation assembles ``A ctrl`` and
-    back-substitutes. The one-time factorisation is reported apart.
+    ``prior.BilaplacianAuxSolver``: ``M`` factored once, then a
+    back-substitution. The first call, which factors, is reported apart.
 ``cg``
     CG with Jacobi on ``M`` to rtol 1e-12, no factorisation.
 
-Each variant also assembles the energy and the gradient ``A f``. The
-replicated gathers of ``objective_and_gradient`` (``func_to_global`` four
-times, ``global_to_func`` twice) are timed as well. Every number is the
+On the tape (TAO's objective): both controls recorded with their energies,
+then ``compute_gradient``, after ``clear_caches()`` as TAOSolver's
+ReducedFunctional does before every evaluation:
+
+``tape_newton``
+    the residual-form ``EquationSolver`` (a Newton LU forward, an LU adjoint).
+``tape_factored``
+    ``prior.BilaplacianAuxSolver`` (a back-substitution each way).
+
+The replicated gathers of ``objective_and_gradient`` (``func_to_global``
+four times, ``global_to_func`` twice) are timed as well. Every number is the
 slowest rank's (``icepack2_tools.profiling.Spans``).
 
 usage:
@@ -43,25 +52,26 @@ import sys
 
 import numpy as np
 
+# tlm_adjoint before any mesh: it patches the function spaces built after it.
+from tlm_adjoint.firedrake import (EquationSolver, Functional, clear_caches,
+                                   compute_gradient, reset_manager,
+                                   start_manager, stop_manager)
 import firedrake as fd
 from firedrake import (COMM_WORLD, Function, FunctionSpace, LinearSolver,
                        MeshHierarchy, SpatialCoordinate, TestFunction,
                        TrialFunction, assemble, cos, dx, inner, sin)
 from firedrake.petsc import PETSc
-from tlm_adjoint.firedrake import EquationSolver, clear_caches
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", ".."))
 from icepack2_tools.prior import (  # noqa: E402
-    bilaplacian_aux_residual, bilaplacian_coeffs, bilaplacian_energy_form,
-    prior_operator_form)
+    BilaplacianAuxSolver, bilaplacian_aux_residual, bilaplacian_coeffs,
+    bilaplacian_energy_form, prior_operator_form)
 from icepack2_tools.profiling import Spans  # noqa: E402
 
 # The driver's settings: fc_params, and the bi-Laplacian prior of the issue
 # 156 runs (sigma 0.3, rho 7500 m for both controls).
 FC = {"quadrature_degree": 4}
 DELTA, GAMMA = bilaplacian_coeffs(0.3, 7500.0)
-CHOLESKY = {"ksp_type": "preonly", "pc_type": "cholesky",
-            "pc_factor_mat_solver_type": "mumps"}
 NEWTON_PT = {"snes_type": "newtonls", "snes_linesearch_type": "basic",
              "ksp_type": "preonly", "pc_type": "lu",
              "pc_factor_mat_solver_type": "mumps",
@@ -69,6 +79,7 @@ NEWTON_PT = {"snes_type": "newtonls", "snes_linesearch_type": "basic",
 CG = {"ksp_type": "cg", "pc_type": "jacobi", "ksp_rtol": 1e-12,
       "ksp_atol": 0.0}
 VARIANTS = ("newton", "newton_pt", "factored", "cg")
+TAPED = ("tape_newton", "tape_factored")
 
 
 # Copies of the driver's MPI helpers (closures in inversion_icepack2.main).
@@ -99,19 +110,38 @@ def probe_level(mesh, repeats):
     shape = {"theta": 0.3 * sin(x / 2.0e5) * cos(y / 3.0e5),
              "phi": 0.3 * cos(x / 2.5e5) * sin(y / 1.5e5)}
     ctrl = {k: Function(Q, name=k) for k in shape}
-    aux = {v: {k: Function(Q) for k in shape} for v in VARIANTS}
+    aux = {v: {k: Function(Q) for k in shape} for v in VARIANTS + TAPED}
     spans = Spans(COMM_WORLD)
 
-    # The two persistent solvers, built and factored once (timed apart).
-    M = assemble(inner(trial, test) * dx, form_compiler_parameters=FC)
-    solvers = {"factored": LinearSolver(M, solver_parameters=CHOLESKY),
-               "cg": LinearSolver(M, solver_parameters=CG)}
-    setup = {}
-    for name, slv in solvers.items():
-        f = Function(Q)
-        with spans(name):
-            slv.solve(f, assemble(inner(Function(Q).assign(1.0), test) * dx))
-        setup.update(spans.reduce())
+    # The persistent solvers, built once; their first solve (which factors,
+    # for `factored`) is timed apart.
+    factored = BilaplacianAuxSolver(Q, form_compiler_parameters=FC)
+    cg = LinearSolver(assemble(inner(trial, test) * dx, form_compiler_parameters=FC),
+                      solver_parameters=CG)
+    one = Function(Q).assign(1.0)
+    with spans("factored"):
+        factored(one, Function(Q), DELTA, GAMMA)
+    with spans("cg"):
+        cg.solve(Function(Q), assemble(inner(one, test) * dx))
+    setup = spans.reduce()
+
+    def aux_solve(v, k):
+        f = aux[v][k]
+        if v in ("newton", "tape_newton"):
+            EquationSolver(
+                bilaplacian_aux_residual(ctrl[k], f, test, DELTA, GAMMA) == 0,
+                f, form_compiler_parameters=FC).solve()
+        elif v == "newton_pt":
+            EquationSolver(
+                bilaplacian_aux_residual(ctrl[k], f, test, DELTA, GAMMA) == 0,
+                f, form_compiler_parameters=FC,
+                solver_parameters=NEWTON_PT).solve()
+        elif v in ("factored", "tape_factored"):
+            factored(ctrl[k], f, DELTA, GAMMA)
+        else:
+            cg.solve(f, assemble(prior_operator_form(ctrl[k], test, DELTA, GAMMA),
+                                 form_compiler_parameters=FC))
+        return f
 
     rows = []
     for r in range(repeats):
@@ -124,24 +154,10 @@ def probe_level(mesh, repeats):
                 clear_caches()  # what forward() does at every evaluation
             energy = 0.0
             for k in ("theta", "phi"):
-                f = aux[v][k]
                 with spans(f"{v}.solve"):
-                    if v == "newton":
-                        EquationSolver(
-                            bilaplacian_aux_residual(ctrl[k], f, test, DELTA, GAMMA) == 0,
-                            f, form_compiler_parameters=FC).solve()
-                    elif v == "newton_pt":
-                        EquationSolver(
-                            bilaplacian_aux_residual(ctrl[k], f, test, DELTA, GAMMA) == 0,
-                            f, form_compiler_parameters=FC,
-                            solver_parameters=NEWTON_PT).solve()
-                    else:
-                        b = assemble(prior_operator_form(ctrl[k], test, DELTA, GAMMA),
-                                     form_compiler_parameters=FC)
-                        solvers[v].solve(f, b)
-                        if v == "cg":
-                            row["cg_iterations"].append(
-                                solvers[v].ksp.getIterationNumber())
+                    f = aux_solve(v, k)
+                if v == "cg":
+                    row["cg_iterations"].append(cg.ksp.getIterationNumber())
                 with spans(f"{v}.energy"):
                     energy += float(assemble(bilaplacian_energy_form(f),
                                              form_compiler_parameters=FC))
@@ -149,6 +165,24 @@ def probe_level(mesh, repeats):
                     assemble(prior_operator_form(f, test, DELTA, GAMMA),
                              form_compiler_parameters=FC)
             row["energy"][v] = energy
+        grad_norm = {}
+        for v in TAPED:
+            clear_caches()
+            reset_manager()
+            with spans(f"{v}.forward"):
+                start_manager()
+                J = Functional(name="R")
+                for k in ("theta", "phi"):
+                    J.addto(bilaplacian_energy_form(aux_solve(v, k)))
+                stop_manager()
+            with spans(f"{v}.adjoint"):
+                dJ = compute_gradient(J, [ctrl["theta"], ctrl["phi"]])
+            row["energy"][v] = float(J)
+            grad_norm[v] = [float(g.dat.norm) for g in dJ]
+            reset_manager()
+        row["taped_gradient_rel_diff"] = max(
+            abs(a - b) / abs(a) for a, b in zip(grad_norm["tape_newton"],
+                                                 grad_norm["tape_factored"]))
         scratch = Function(Q)
         with spans("gather.func_to_global_x4"):
             parts = [func_to_global(ctrl["theta"]), func_to_global(ctrl["phi"]),
@@ -167,7 +201,7 @@ def main():
     ap.add_argument("--levels", type=int, default=4)
     ap.add_argument("--repeats", type=int, default=3)
     ap.add_argument("--json", default="")
-    args = ap.parse_args()
+    args, _ = ap.parse_known_args()
 
     base = fd.Mesh(args.mesh)
     hierarchy = MeshHierarchy(base, args.levels)
@@ -184,18 +218,28 @@ def main():
         e = later[-1]["energy"]
         PETSc.Sys.Print(
             f"level {level}: {res['vertices']} vertices on {COMM_WORLD.size} ranks; "
-            f"setup factored={res['setup_seconds']['factored']:.3f}s "
+            f"first call factored={res['setup_seconds']['factored']:.3f}s "
             f"cg={res['setup_seconds']['cg']:.3f}s; "
             f"cg iterations {later[-1]['cg_iterations']}")
         for v in VARIANTS:
             parts = {s: med[f"{v}.{s}"] for s in ("solve", "energy", "grad")}
             PETSc.Sys.Print(
-                f"  {v:10s} {sum(parts.values()):8.3f}s  "
+                f"  {v:13s} {sum(parts.values()):8.3f}s  "
+                + " ".join(f"{s}={t:.3f}" for s, t in parts.items())
+                + f"  energy rel. diff from newton "
+                f"{abs(e[v] - e['newton']) / abs(e['newton']):.1e}")
+        for v in TAPED:
+            parts = {s: med[f"{v}.{s}"] for s in ("forward", "adjoint")}
+            PETSc.Sys.Print(
+                f"  {v:13s} {sum(parts.values()):8.3f}s  "
                 + " ".join(f"{s}={t:.3f}" for s, t in parts.items())
                 + f"  energy rel. diff from newton "
                 f"{abs(e[v] - e['newton']) / abs(e['newton']):.1e}")
         PETSc.Sys.Print(
-            "  gathers    "
+            f"  taped gradient norms, factored against newton: rel. diff "
+            f"{max(r['taped_gradient_rel_diff'] for r in later):.1e}")
+        PETSc.Sys.Print(
+            "  gathers       "
             + " ".join(f"{k.split('.', 1)[1]}={t:.3f}s"
                        for k, t in med.items() if k.startswith("gather.")))
     if args.json and COMM_WORLD.rank == 0:

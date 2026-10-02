@@ -62,11 +62,17 @@ def objective_mismatches(recorded, current, rel_tol=1e-9):
     ``"key: recorded -> current"`` strings. Keys the record lacks are not
     mismatches (an older checkpoint), keys ``current`` lacks are ignored.
     A sub-element record with no ``subelement_scheme`` was written under
-    SEP2, the only scheme before the record existed."""
+    SEP2, the only scheme before the record existed; the scheme is compared
+    only when both sides use sub-element friction, since otherwise it selects
+    nothing."""
     out = []
     if "subelement_scheme" not in recorded and _truthy(recorded.get("subelement_friction")):
         recorded = {**recorded, "subelement_scheme": "sep2"}
+    both_sub = (_truthy(recorded.get("subelement_friction"))
+                and _truthy(current.get("subelement_friction")))
     for key in OBJECTIVE_KEYS:
+        if key == "subelement_scheme" and not both_sub:
+            continue
         if key in recorded and key in current:
             if not _same(recorded[key], current[key], rel_tol):
                 out.append(f"{key}: {recorded[key]!r} -> {current[key]!r}")

@@ -20,6 +20,12 @@ accepts the state at iteration 0, with no linear solve, and the tape holds
 ``F`` and the converged ``z`` exactly as a recorded solve would. The driver
 already writes ``z`` outside the tape before a recorded solve the same way
 (the startup ramp, and the re-ramp rescue at a failed trial point).
+
+The paused solve's solver (the frozen linearization's state Function,
+Firedrake's solver context and, from its first linear solve, the SCPC context
+GAMG builds its hierarchy under) can outlive the call: ``StateSolverCache``
+keeps it for the next call with the same form. The recorded confirmation and
+the adjoint are tlm_adjoint's own solves and build theirs each time.
 """
 
 import ufl
@@ -64,7 +70,9 @@ def with_quadrature_degree(F, form_compiler_parameters):
 
 def _condensed_work(snes):
     r"""Solves and iterations on the condensed velocity system, from the
-    ISMIP7SCPC counters (SNES's own linear count misses the line search's)."""
+    ISMIP7SCPC counters (SNES's own linear count misses the line search's).
+    The counters run from the PC's first setup, so a reused solver's work
+    is the difference across the call."""
     try:
         ctx = snes.getKSP().getPC().getPythonContext()
     except Exception:
@@ -73,19 +81,97 @@ def _condensed_work(snes):
             getattr(ctx, "condensed_iterations", None))
 
 
+def _since(after, before):
+    return None if after is None else after - (before or 0)
+
+
+class StateSolverCache:
+    r"""The paused ``scpc_*`` Newton solver of the last residual form
+    ``taped_state_solve`` was given, kept for the next call with that form.
+
+    A call reuses it when its form is the same object, with the same state
+    Function, options, form compiler parameters and options prefix; any other
+    call builds a new solver and drops this one, so a caller whose form
+    changes on every call holds one solver at a time. The inversion builds
+    its taped form once for the run (``inversion_icepack2.py``,
+    ``_residual_at``), so one solver serves every evaluation.
+
+    A reused solver reaches the state a new one does, to roundoff. Each
+    Jacobian writes its iterate into the frozen linearization's state before
+    anything reads it; NLEQ-ERR clears its step history at iteration 0 of
+    every SNES solve; SCPC reassembles its condensed matrix on every new
+    Jacobian and starts its Krylov solves from zero. What the condensed
+    preconditioner built at its first setup stays, as it does across the
+    Newton iterations of one solve and across every step of a transient run,
+    which keeps one solver throughout: GAMG redoes its Galerkin products and
+    Chebyshev eigenvalue estimates on its first interpolation
+    (``pc_gamg_reuse_interpolation`` and ``pc_gamg_recompute_esteig``, both
+    true by default), and an LU refactors on its first symbolic analysis
+    (README, "Inversion solver", for what that changed). A solve that raises
+    drops the solver, so a retry starts from a new one, as it did before the
+    cache.
+    """
+
+    def __init__(self):
+        self._entry = None
+
+    def clear(self):
+        self._entry = None
+
+    def get(self, F, z, params, form_compiler_parameters, options_prefix):
+        r"""``(F_q, solver, reused)``: ``F`` with the quadrature degree in its
+        integrals (``with_quadrature_degree``) and the Newton solver of
+        ``F_q(z) = 0`` with its Jacobian frozen at the iterate. Call it with
+        the manager paused."""
+        key = (dict(params), dict(form_compiler_parameters or {}),
+               options_prefix)
+        entry = self._entry
+        if (entry is not None and entry["F"] is F and entry["z"] is z
+                and entry["key"] == key):
+            return entry["F_q"], entry["solver"], True
+        self._entry = None
+        F_q = with_quadrature_degree(F, form_compiler_parameters)
+        J, pre_jacobian = frozen_linearization(F_q, z)
+        solver = NonlinearVariationalSolver(
+            NonlinearVariationalProblem(
+                F_q, z, J=J, form_compiler_parameters=form_compiler_parameters
+            ),
+            solver_parameters=params,
+            options_prefix=options_prefix,
+            pre_jacobian_callback=pre_jacobian,
+        )
+        self._entry = {"F": F, "z": z, "key": key, "F_q": F_q,
+                       "solver": solver, "residual": None}
+        return F_q, solver, False
+
+    def residual_norm(self, form_compiler_parameters):
+        r"""``||F_q(z)||`` of the cached form, assembled into one buffer."""
+        entry = self._entry
+        entry["residual"] = assemble(
+            entry["F_q"], tensor=entry["residual"],
+            form_compiler_parameters=form_compiler_parameters)
+        with entry["residual"].dat.vec_ro as residual:
+            return float(residual.norm())
+
+
 def taped_state_solve(F, z, mode, params, adjoint_params, *,
                       form_compiler_parameters=None,
-                      options_prefix="ismip7_inversion_state_"):
+                      options_prefix="ismip7_inversion_state_",
+                      cache=None):
     r"""Solve ``F(z) = 0`` and record it on the tlm_adjoint tape.
 
     ``params`` are the forward's options under ``mode``
     (``solverconfig.inversion_state_parameters``) and ``adjoint_params`` the
     adjoint's (``solverconfig.inversion_adjoint_parameters``). Under
     ``scpc_*``, ``F`` must carry the SCPC structural-zero blocks
-    (``preconditioners.with_scpc_blocks``). A solve that does not converge
-    raises ``firedrake.ConvergenceError``, as the recorded solve does.
+    (``preconditioners.with_scpc_blocks``), and ``cache``, a
+    ``StateSolverCache``, keeps the paused solver for the next call with the
+    same ``F``; without one each call builds its own. A solve that does not
+    converge raises ``firedrake.ConvergenceError``, as the recorded solve
+    does.
 
-    Returns a dict of the untaped solve's work under ``scpc_*`` (empty under
+    Returns a dict of the untaped solve's work under ``scpc_*``, with
+    ``reused`` saying whether its solver came from ``cache`` (empty under
     ``full_mumps``, whose work happens inside the recorded solve).
     """
     if mode == "full_mumps":
@@ -98,31 +184,29 @@ def taped_state_solve(F, z, mode, params, adjoint_params, *,
         ).solve()
         return {}
 
-    F = with_quadrature_degree(F, form_compiler_parameters)
-    J, pre_jacobian = frozen_linearization(F, z)
+    if cache is None:
+        cache = StateSolverCache()
     with paused_manager():
-        solver = NonlinearVariationalSolver(
-            NonlinearVariationalProblem(
-                F, z, J=J, form_compiler_parameters=form_compiler_parameters
-            ),
-            solver_parameters=params,
-            options_prefix=options_prefix,
-            pre_jacobian_callback=pre_jacobian,
-        )
-        solver.solve()
+        F, solver, reused = cache.get(
+            F, z, params, form_compiler_parameters, options_prefix)
         snes = solver.snes
+        solves_before, iterations_before = _condensed_work(snes)
+        try:
+            solver.solve()
+        except BaseException:
+            cache.clear()
+            raise
         condensed_solves, condensed_iterations = _condensed_work(snes)
         work = {
             "snes_iterations": int(snes.getIterationNumber()),
             "linear_iterations": int(snes.getLinearSolveIterations()),
             "converged_reason": int(snes.getConvergedReason()),
-            "condensed_solves": condensed_solves,
-            "condensed_iterations": condensed_iterations,
+            "condensed_solves": _since(condensed_solves, solves_before),
+            "condensed_iterations": _since(
+                condensed_iterations, iterations_before),
+            "reused": reused,
         }
-        with assemble(
-            F, form_compiler_parameters=form_compiler_parameters
-        ).dat.vec_ro as residual:
-            fnorm = float(residual.norm())
+        fnorm = cache.residual_norm(form_compiler_parameters)
     work["fnorm"] = fnorm
 
     confirm = dict(params)

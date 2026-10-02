@@ -92,7 +92,7 @@ from icepack2_tools.dual_friction import (
 )
 from icepack2_tools.geometry import cg1_lift, raise_bed_to_lake_ice_base, sample_to_geometry
 from icepack2_tools.preconditioners import frozen_linearization, with_scpc_blocks
-from icepack2_tools.taped_solve import taped_state_solve
+from icepack2_tools.taped_solve import StateSolverCache, taped_state_solve
 from icepack2_tools.transfer import (
     interpolate_with_fill, load_checkpoint_mesh, meshes_match,
 )
@@ -664,10 +664,13 @@ def main():
     # asserts it). Resolved now so an invalid environment fails here, not
     # inside the final save after hours of work.
     lane_solver_mode = diagnostic_solver_mode()
-    # Either solver condensing with SCPC needs the (M, tau) structural-zero
-    # blocks in F (preconditioners.with_scpc_blocks).
-    scpc_blocks = (state_solver_mode.startswith("scpc_")
-                   or lane_solver_mode.startswith("scpc_"))
+    # A solver condensing with SCPC needs the (M, tau) structural-zero blocks
+    # in its form (preconditioners.with_scpc_blocks), and an assembled one is
+    # better without them: they are entries of the AIJ sparsity. So the taped
+    # form F carries them under an scpc_* inversion solver and the startup
+    # ramp's form under an scpc_* lane solver, each for its own solver.
+    state_scpc = state_solver_mode.startswith("scpc_")
+    lane_scpc = lane_solver_mode.startswith("scpc_")
     PETSc.Sys.Print(
         f"  Inversion linear solver: {diagnostic_solver_label(state_solver_mode)} "
         f"(ISMIP7_INVERSION_LINEAR_SOLVER={state_solver_mode}); startup ramp: "
@@ -1345,7 +1348,7 @@ def main():
         PETSc.Sys.Print("  Fluidity control: phi acts on floating ice only "
                         "(grounded ice keeps the prior fluidity)")
 
-    def build_F(theta_c, phi_c):
+    def build_F(theta_c, phi_c, *, scpc_blocks=state_scpc):
         F_c = _build_residual(theta_c, phi_c)
         return with_scpc_blocks(F_c, z) if scpc_blocks else F_c
 
@@ -1397,6 +1400,9 @@ def main():
     else:
         PETSc.Sys.Print("  NO calving_terminus BC (buffered mesh, h=0 at front)")
     F = build_F(theta, phi)
+    # The startup ramp's residual, with the blocks its own solver wants.
+    F_ramp = (F if lane_scpc == state_scpc
+              else build_F(theta, phi, scpc_blocks=lane_scpc))
 
     def _untaped_state_solver(F_form, params):
         """An unannotated solve of F_form under the taped solve's mode: under
@@ -1423,10 +1429,10 @@ def main():
     ramp_params.update(_monitor_options)
     ramp_J, ramp_pre_jacobian = None, None
     if linearization_state(lane_solver_mode) == "frozen":
-        ramp_J, ramp_pre_jacobian = frozen_linearization(F, z)
+        ramp_J, ramp_pre_jacobian = frozen_linearization(F_ramp, z)
     ramp_solver = NonlinearVariationalSolver(
         NonlinearVariationalProblem(
-            F, z, J=ramp_J, form_compiler_parameters=fc_params
+            F_ramp, z, J=ramp_J, form_compiler_parameters=fc_params
         ),
         solver_parameters=ramp_params,
         options_prefix="ismip7_inversion_continuation_",
@@ -1945,17 +1951,43 @@ def main():
     # The untaped work of the last evaluation's state solves under scpc_*
     # (taped_state_solve); written into the timing record per evaluation.
     state_work = []
+    # Under scpc_* the paused Newton solver of the last taped form, kept
+    # while the forward keeps solving that form (StateSolverCache).
+    state_solver_cache = StateSolverCache()
 
     def _taped_state_solve(F_ctrl):
         state_work.append(taped_state_solve(
             F_ctrl, z, state_solver_mode, sparams, adjoint_sparams,
-            form_compiler_parameters=fc_params,
+            form_compiler_parameters=fc_params, cache=state_solver_cache,
         ))
+
+    # The taped residual is one form for the run, over Functions that live
+    # as long, so the symbolic work Firedrake caches on a form and, under
+    # scpc_*, the solver state_solver_cache keeps for it serve every
+    # evaluation. The scipy path's controls are the module-level (theta,
+    # phi) F is built over. TAO hands the forward fresh copies of its
+    # controls each evaluation; assignments on the tape carry them into
+    # (theta_eval, phi_eval), and the gradient reaches the copies through
+    # them. This holds because build_F writes the controls into UFL and
+    # evaluates nothing from them: a Function interpolated from theta inside
+    # build_F would keep the first evaluation's values.
+    theta_eval = Function(theta.function_space(), name="theta_eval")
+    phi_eval = Function(phi.function_space(), name="phi_eval")
+    F_eval = []
+
+    def _residual_at(theta_ctrl, phi_ctrl):
+        if theta_ctrl is theta and phi_ctrl is phi:
+            return F
+        theta_eval.assign(theta_ctrl)
+        phi_eval.assign(phi_ctrl)
+        if not F_eval:
+            F_eval.append(build_F(theta_eval, phi_eval))
+        return F_eval[0]
 
     def forward(theta_ctrl, phi_ctrl):
         clear_caches()
         state_work.clear()
-        F_ctrl = build_F(theta_ctrl, phi_ctrl)
+        F_ctrl = _residual_at(theta_ctrl, phi_ctrl)
         if eval_full_n:
             # Stay at the physical exponents so each eval is one Newton solve.
             n_flow.assign(n_flow_val)
@@ -3037,6 +3069,8 @@ def main():
     stop_manager()
     reset_manager()
     clear_caches()
+    # The publishing solve builds its own solver; release the forwards'.
+    state_solver_cache.clear()
     n_flow.assign(n_flow_val)
     m_slide.assign(m_slide_val)
     z.assign(z_backup)

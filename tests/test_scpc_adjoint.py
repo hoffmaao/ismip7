@@ -73,6 +73,7 @@ from icepack2_tools.solverconfig import (                       # noqa: E402
     inversion_state_parameters,
 )
 from icepack2_tools.taped_solve import (                        # noqa: E402
+    StateSolverCache,
     taped_state_solve,
     with_quadrature_degree,
 )
@@ -240,6 +241,127 @@ def test_scpc_gamg_gradient_passes_a_taylor_test(slab, gradients):
     order = taylor_test(forward, theta, J_val=g["J"], dJ=g["dJ"][0], dM=dM,
                         seed=1e-1, size=4)
     assert order > 1.9
+
+
+def _evaluations(f, mode, cache, shifts, *, copies=False):
+    r"""Evaluations at ``theta0 + shift``, each from the same start, through
+    one residual form. As on the scipy path, the form is over the control
+    Functions, whose values change outside the tape. With ``copies``, as on
+    the TAO path: each evaluation's controls are new Functions, which
+    recorded assignments carry into the Functions the form is over."""
+    theta, phi = _controls(f)
+    z = Function(f["Z"])
+    F = _residual(f, z, theta, phi, scpc=True)
+    params = inversion_state_parameters(mode)
+    out = []
+    for shift in shifts:
+        stop_manager()
+        z.assign(f["z0"])
+        if copies:
+            controls = (Function(f["Q"]).interpolate(f["theta0"] + shift),
+                        Function(f["Q"]).assign(f["phi0"]))
+        else:
+            theta.interpolate(f["theta0"] + shift)
+            controls = (theta, phi)
+        reset_manager()
+        start_manager()
+        if copies:
+            theta.assign(controls[0])
+            phi.assign(controls[1])
+        work = taped_state_solve(
+            F, z, mode, params, inversion_adjoint_parameters(params),
+            form_compiler_parameters=FCP, cache=cache,
+        )
+        u = split(z)[0]
+        J = Functional(name="J")
+        J.assign(0.5 * inner(u - f["u_obs"], u - f["u_obs"]) * dx)
+        stop_manager()
+        dJ = compute_gradient(J, list(controls))
+        out.append(dict(J=float(J.value), dJ=dJ, work=work))
+    reset_manager()
+    return out
+
+
+SHIFTS = (0.05, 0.1)
+
+
+@pytest.fixture(scope="module")
+def new_solver_evaluations(slab):
+    # the second evaluation through a solver of its own, as before the cache
+    return {mode: _evaluations(slab, mode, None, SHIFTS[1:])[0]
+            for mode in ("scpc_mumps", "scpc_gamg")}
+
+
+def _assert_as_new(cached, fresh):
+    assert [c["work"]["reused"] for c in cached] == [False, True]
+    assert not fresh["work"]["reused"]
+    c = cached[1]
+    for key in ("snes_iterations", "linear_iterations", "condensed_solves"):
+        assert c["work"][key] == fresh["work"][key]
+    # counted per call: a cumulative count would be about twice
+    assert c["work"]["condensed_iterations"] == pytest.approx(
+        fresh["work"]["condensed_iterations"], rel=0.1)
+    # roundoff: GAMG's interpolation and the LU's symbolic analysis are the
+    # first call's (8e-15 and 1.1e-12 the largest measured)
+    assert c["J"] == pytest.approx(fresh["J"], rel=1e-12)
+    for g, g_ref in zip(c["dJ"], fresh["dJ"]):
+        assert _rel(g, g_ref) < 1e-10
+
+
+@pytest.mark.parametrize("mode", ["scpc_mumps", "scpc_gamg"])
+def test_a_reused_solver_solves_as_a_new_one(slab, new_solver_evaluations, mode):
+    _assert_as_new(_evaluations(slab, mode, StateSolverCache(), SHIFTS),
+                   new_solver_evaluations[mode])
+
+
+def test_assigned_control_copies_keep_the_gradient(slab, new_solver_evaluations):
+    # TAO's path: the gradient reaches each evaluation's control copies
+    # through the recorded assignments, and the solver is still reused
+    _assert_as_new(
+        _evaluations(slab, "scpc_gamg", StateSolverCache(), SHIFTS, copies=True),
+        new_solver_evaluations["scpc_gamg"])
+
+
+def test_another_form_or_a_failed_solve_replaces_the_solver(slab):
+    if slab["law"] != "cellwise":
+        pytest.skip("cache bookkeeping, the same under either law")
+    f = slab
+    mode = "scpc_mumps"
+    params = inversion_state_parameters(mode)
+    adjoint_params = inversion_adjoint_parameters(params)
+    cache = StateSolverCache()
+    theta, phi = _controls(f)
+    z = Function(f["Z"]).assign(f["z0"])
+
+    def reused(form, solver_params, *, nan_start=False):
+        stop_manager()
+        z.assign(f["z0"])
+        if nan_start:
+            for z_i in z.subfunctions:
+                z_i.dat.data[:] = float("nan")
+        reset_manager()
+        start_manager()
+        try:
+            return taped_state_solve(
+                form, z, mode, solver_params, adjoint_params,
+                form_compiler_parameters=FCP, cache=cache)["reused"]
+        finally:
+            stop_manager()
+            reset_manager()
+
+    F = _residual(f, z, theta, phi, scpc=True)
+    assert not reused(F, params)
+    assert reused(F, params)
+    # the same residual built again is another form
+    F = _residual(f, z, theta, phi, scpc=True)
+    assert not reused(F, params)
+    # other option values are other options
+    params = dict(params, snes_rtol=1e-7)
+    assert not reused(F, params)
+    # a solve that raises leaves nothing behind for the retry
+    with pytest.raises(firedrake.ConvergenceError):
+        reused(F, params, nan_start=True)
+    assert not reused(F, params)
 
 
 def test_the_degree_survives_into_the_adjoint_form(slab):

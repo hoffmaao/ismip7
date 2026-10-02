@@ -161,6 +161,10 @@ falling back to `ISMIP7_CONSTRAINT`).
 Optional, for every submission: `ISMIP7_SBATCH_EXTRA`, extra sbatch flags split
 on spaces (a QOS the partition insists on; your own `--mail-type`/`--mail-user`
 in `sites/local.env`). Chain successors are given it again.
+`ISMIP7_SHARED_JIT_CACHE` names a PyOP2 kernel store that every single-node
+job copies to node-local disk, compiles into, and copies its new kernels back
+to (`site_core.sh`), so a chain link starts from the kernels its predecessors
+compiled; the ranks never share the store over NFS directly.
 
 Optional, for the timing campaign: `ISMIP7_CONSTRAINT_TIMING` (the node feature
 `submit.sh script` asks for; defaults to `ISMIP7_CONSTRAINT_FWD`),
@@ -386,7 +390,8 @@ vertex sampling), each named so the converged 2500 m MAP is never touched, with
 partition, constraint and rank count from the site file.
 
 **The chain.** A 2 km inversion can outlast a wall limit. The inversion
-checkpoints `ISMIP7_MAP_OUT` every 20 iterates and warm-starts from it, so each
+checkpoints `ISMIP7_MAP_OUT` every `ISMIP7_CHECKPOINT_EVERY_IT` iterates (default
+1) and warm-starts from it, so each
 job queues its successor first with `--dependency=afterany`, copying partition,
 constraint, memory, time and task layout from `scontrol`. Every link exits at
 once if `<map>.done` exists, meaning the MAP reached disk. The driver writes
@@ -400,7 +405,9 @@ start is read by point location (`transfer.interpolate_with_fill`), so one
 written on another rank count or on another mesh loads correctly. A target
 point outside the warm start's mesh takes the stated fill (theta and phi 0, the
 fluidity prior's constant baseline), and the log counts those points per
-field. Regression test: `tests/test_inversion_chain.py`.
+field. A single-node link copies its warm start to node-local `$TMPDIR` first:
+32 ranks reading a 580 MB 2 km MAP over NFS took more than 45 minutes on NOTS.
+Regression test: `tests/test_inversion_chain.py`.
 
 ### `projection.sbatch`, self-chaining
 

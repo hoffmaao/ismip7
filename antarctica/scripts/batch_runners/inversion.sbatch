@@ -9,9 +9,10 @@
 #     ISMIP7_MESH=... ISMIP7_RASTER_SAMPLE=vertex ISMIP7_MAP_OUT=...
 #
 # CHAIN. A 2 km inversion can outlast a wall limit. The inversion checkpoints
-# ISMIP7_MAP_OUT every 20 iterates and can warm-start from it, so this script
-# queues its own successor FIRST (--dependency=afterany, so it runs whether
-# this job converged, timed out or lost its node), and each link exits at once
+# ISMIP7_MAP_OUT every ISMIP7_CHECKPOINT_EVERY_IT iterates (default 1) and can
+# warm-start from it, so this script queues its own successor FIRST
+# (--dependency=afterany, so it runs whether this job converged, timed out or
+# lost its node), and each link exits at once
 # if the "<map>.done" marker exists. Depth is capped by ISMIP7_CHAIN_MAX. The
 # successor copies this job's partition, constraint, memory, time and task
 # layout from scontrol, so a chain never changes rank count mid-run. The
@@ -117,9 +118,27 @@ if [ -f "$ISMIP7_MAP_OUT" ]; then
     echo "chain: warm-starting theta/phi from the periodic checkpoint $ISMIP7_MAP_OUT"
 fi
 
+# Read the warm start from node-local disk. Every rank reading the MAP over
+# NFS through ROMIO (OMPI_MCA_io=romio321, chosen for the write speed) sits in
+# NFS lock round trips: on NOTS /scratch, 30 Sep 2026, 32 ranks took 45+ min
+# to load a 580 MB 2 km MAP, ~12 KB per rank per 20 s, so a one-hour link
+# never reached its first iteration. A local copy takes a second. Same
+# basename, so the provenance the driver records is unchanged; one node only,
+# since other nodes' ranks cannot see this node's disk.
+_WS_LOCAL=""
+if [ -n "${ISMIP7_WARM_START:-}" ] && [ -f "$ISMIP7_WARM_START" ] \
+        && [ "${SLURM_JOB_NUM_NODES:-1}" = 1 ]; then
+    _WS_DIR="$(mktemp -d "${TMPDIR:-/tmp}/ismip7_ws.XXXXXX")" \
+      && cp "$ISMIP7_WARM_START" "$_WS_DIR/" \
+      && _WS_LOCAL="$_WS_DIR/$(basename "$ISMIP7_WARM_START")" \
+      && echo "warm start: local copy $_WS_LOCAL" \
+      && export ISMIP7_WARM_START="$_WS_LOCAL"
+fi
+
 ismip7_mpirun "${SLURM_NTASKS:-1}" python -u antarctica/scripts/inversion_icepack2.py
 rc=$?
 echo "=== $(date -Is)  inversion exit ${rc} ==="
+[ -n "$_WS_LOCAL" ] && rm -rf "$(dirname "$_WS_LOCAL")"
 
 # Finished for good whenever L-BFGS-B returned AND the MAP reached disk:
 # ISMIP7_MAXITER is the budget of a run, so ITERATIONS REACHED LIMIT is the

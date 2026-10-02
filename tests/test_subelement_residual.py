@@ -166,3 +166,16 @@ def test_ice_free_cells_get_no_grounded_part():
     sub = subelement_from_geometry(f["mesh"], f["H"], f["b"], ice=ice)
     assert np.all(sub.fraction.dat.data_ro[:10] == 0.0)
     assert np.all(sub.fraction.dat.data_ro[10:] == 1.0)
+
+
+def test_sep1_applies_the_friction_control_unscaled_across_the_grounding_line():
+    f = _slab(gl=True)
+    sub = subelement_from_geometry(f["mesh"], f["H"], f["b"])
+    part = (sub.fraction.dat.data_ro > 0.0) & (sub.fraction.dat.data_ro < 1.0)
+    assert part.any()
+    with_theta = _shared(f, subelement=sub, scheme="sep1")
+    folded = dict(f, theta=Function(f["Q"]),
+                  C_w0=f["C_w0"] * __import__("firedrake").exp(f["theta"]))
+    in_coefficient = _shared(folded, subelement=sub, scheme="sep1")
+    for got, want in zip(with_theta, in_coefficient):
+        assert _rel(got, want) < 1e-12

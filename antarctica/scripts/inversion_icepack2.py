@@ -2305,6 +2305,11 @@ def main():
                 chk.save_function(z.subfunctions[0], name="velocity")
                 chk.save_function(z.subfunctions[1], name="membrane_stress")
                 chk.save_function(z.subfunctions[2], name="basal_stress")
+                chk.save_function(H, name="H_init")
+                chk.save_function(phi_eff, name="phi_eff")
+                chk.save_function(_friction_reference(), name="C_w0")
+                if N_ref is not None:
+                    chk.save_function(N_ref, name="N_ref")
             else:
                 # A periodic checkpoint carries the accepted mixed state for
                 # the next chain link only, under names no forward reads: the
@@ -2313,11 +2318,6 @@ def main():
                 chk.save_function(z.subfunctions[0], name="ckpt_velocity")
                 chk.save_function(z.subfunctions[1], name="ckpt_membrane_stress")
                 chk.save_function(z.subfunctions[2], name="ckpt_basal_stress")
-                chk.save_function(H, name="H_init")
-                chk.save_function(phi_eff, name="phi_eff")
-                chk.save_function(_friction_reference(), name="C_w0")
-                if N_ref is not None:
-                    chk.save_function(N_ref, name="N_ref")
             # The .msh this MAP was inverted on. A CheckpointFile mesh is named
             # "firedrake_default", so this is how the forward names its own
             # mesh and picks the matching per-mesh boundary-id sidecar.

@@ -25,7 +25,8 @@ def _settings(**over):
         "geometry_space": "dg0", "friction_anchor_length": 20000.0,
         "lake_ice_base": 1, "fluidity_prior_origin": "thermomechanical",
         "grad_precond": "mass_consistent",
-        "subelement_friction": 0, "exact_front": 0, "fluidity_control": "all",
+        "subelement_friction": 0, "subelement_scheme": "sep1", "exact_front": 0,
+        "fluidity_control": "all",
     }
     base.update(over)
     return base
@@ -52,6 +53,18 @@ def test_numbers_are_compared_as_numbers_and_missing_keys_are_not_mismatches():
     # the auto weight re-derived on a restart is exactly the drift to catch
     out = objective_mismatches(_settings(), _settings(log_vel_weight=56646.35))
     assert out == ["log_vel_weight: 85380.44865839917 -> 56646.35"]
+
+
+def test_a_sub_element_record_without_a_scheme_was_sep2():
+    legacy = _settings(subelement_friction=1)
+    del legacy["subelement_scheme"]
+    out = objective_mismatches(legacy, _settings(subelement_friction=1, subelement_scheme="sep1"))
+    assert out == ["subelement_scheme: 'sep2' -> 'sep1'"]
+    assert objective_mismatches(legacy, _settings(subelement_friction=1,
+                                                  subelement_scheme="sep2")) == []
+    plain = _settings()
+    del plain["subelement_scheme"]
+    assert objective_mismatches(plain, _settings()) == []
 
 
 def test_the_accepted_evaluation_is_the_one_matching_the_objective():

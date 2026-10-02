@@ -1,0 +1,21 @@
+{
+  "id": "test-1km-inversion-eval-spans",
+  "task": "test",
+  "institution": "IU",
+  "title": "1 km inversion cost probe, the time outside the forward and adjoint by span, before and after the factored prior solve (scpc_gamg, 64 ranks)",
+  "status": "queued",
+  "friction": "budd",
+  "mesh": "antarctica_10000_1000_buffered20000 (Rice's .msh on Quartz; 1,869,252 vertices, 3,716,587 cells), DG0 geometry, vertex raster sampling",
+  "initial_state": "warm start from inversion_icepack2_budd_n3_dg0_logvelnet_2000_int5000_bilap_snap20260924_0948.h5 (Rice, controls only), ISMIP7_WARM_START_STRICT=0; the ramp under scpc_mumps, then ISMIP7_EVAL_CONTINUATION=0; the configuration of job 10818449 (test-1km-inversion-cost-scpc-gamg-p64)",
+  "forcing": "MEaSUREs v2 and BedMachine v4.1 from Quartz's antarctica/data; ISMIP7_FLUIDITY_PRIOR=legacy; bi-Laplacian prior; no dH/dt term",
+  "site": "IU Quartz, general partition",
+  "resources": "64 ranks, 480G, 3 h limit, a job each",
+  "jobs": [
+    "10937657",
+    "10937658"
+  ],
+  "code": "10937657 at 2626c71 (the spans only), 10937658 at 4e45164 (the factored prior solve), from worktrees /N/scratch/dlilien/ismip7_evalspans_{base,fix} of the scratch clone; icepack_tools e7b923e",
+  "started": "2026-10-02",
+  "results": "Quartz /N/scratch/dlilien/ismip7_issue156_runs/{timing,maps}/spans1km_{base,fix}_p64.*; submit script /N/scratch/dlilien/q156d_submit.sh, copied to /Volumes/LaCie/Data/antarctica_general/ismip7_runs/inversion_eval_overhead/scripts",
+  "notes": "Attributes the 27 s of a 1 km evaluation outside the forward and adjoint (issue #156) by span, and measures what the factored prior solve leaves. Since 10818449 the scpc_gamg taped forward moved from bt to NLEQ-ERR at Krylov rtol 1e-8 (PR 155), so forward times are not comparable with it"
+}

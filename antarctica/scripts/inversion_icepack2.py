@@ -121,6 +121,7 @@ from icepack2_tools.thermo_model import compute_fluidity_prior
 from icepack2_tools.handoff import (
     OBJECTIVE_KEYS, OBJECTIVE_RECORD_KEYS, accepted_evaluation, frozen_in_control,
     handoff_gap, objective_mismatches)
+from icepack2_tools.profiling import Spans
 from icepack2_tools.optimization import (FunctionalDecreaseStop,
                                          recorded_objective,
                                          resolve_log_vel_weight)
@@ -2332,6 +2333,14 @@ def main():
     timing_history = []
     timing_json = os.environ.get("ISMIP7_INVERSION_TIMING_JSON", "").strip()
     t_opt0 = perf_counter()
+    # What an evaluation spends outside the forward and the adjoint (issue
+    # 156: 27 s of a 43 s 1 km evaluation on Quartz), by span, each the
+    # slowest rank's time. `spans` covers the work inside total_seconds;
+    # `gap_spans` the work between two evaluations: the previous one's report,
+    # term assembly, timing write and checkpoint, and the optimizer's own step.
+    spans = Spans(COMM_WORLD)
+    gap_spans = Spans(COMM_WORLD)
+    t_body_end = [None]
 
     def _eval_terms():
         """Assemble diagnostic term values for the JSON / print line."""
@@ -2403,8 +2412,12 @@ def main():
 
     def objective_and_gradient(x_vec):
         t_iter = perf_counter()
-        global_to_func(x_vec[:global_ndof], theta)
-        global_to_func(x_vec[global_ndof:], phi)
+        spans.clear()
+        if t_body_end[0] is not None:
+            gap_spans.add("gap", t_iter - t_body_end[0])
+        with spans("set_controls"):
+            global_to_func(x_vec[:global_ndof], theta)
+            global_to_func(x_vec[global_ndof:], phi)
 
         t_fwd = perf_counter()
         reset_manager()
@@ -2426,16 +2439,20 @@ def main():
                 )
             PETSc.Sys.Print(
                 f"  [!] Forward solve failed ({exc}), returning large objective")
+            t_body_end[0] = perf_counter()
             return last_good_obj[0] * 10, np.zeros(2 * global_ndof)
         stop_manager()
         J_val = float(J)
         t_fwd = perf_counter() - t_fwd
 
-        z_backup.assign(z)
-        last_good_obj[0] = J_val
-        last_x[0] = np.array(x_vec, copy=True)
-        last_good_vel_chi2[0] = float(assemble(_vel_chi2))
-        last_good_fnorm[0] = _residual_norm()
+        with spans("record_state"):
+            z_backup.assign(z)
+            last_good_obj[0] = J_val
+            last_x[0] = np.array(x_vec, copy=True)
+        with spans("vel_chi2"):
+            last_good_vel_chi2[0] = float(assemble(_vel_chi2))
+        with spans("residual_norm"):
+            last_good_fnorm[0] = _residual_norm()
         last_good_x[0] = np.array(x_vec, copy=True)
 
         t_adj = perf_counter()
@@ -2455,6 +2472,7 @@ def main():
                     "is fragile at <~100 vertices/rank)."
                 )
             PETSc.Sys.Print("  [!] Adjoint solve failed, returning large objective")
+            t_body_end[0] = perf_counter()
             return last_good_obj[0] * 10, np.zeros(2 * global_ndof)
         t_adj = perf_counter() - t_adj
 
@@ -2465,18 +2483,32 @@ def main():
         # prior means it constrains the DEVIATION, not the amplitude.
         # Energy first, then gradient: under `bilaplacian` the energy solves
         # the M f = A theta the gradient reuses (see _prior_energy_form).
-        reg_theta = float(assemble(_prior_energy_form(theta, "theta")))
-        dR_theta = _prior_grad(theta, "theta")
-        reg_phi = float(assemble(_prior_energy_form(phi, "phi")))
-        dR_phi = _prior_grad(phi, "phi")
+        with spans("prior_solve"):
+            _reg_form_theta = _prior_energy_form(theta, "theta")
+        with spans("prior_energy"):
+            reg_theta = float(assemble(_reg_form_theta))
+        with spans("prior_grad"):
+            dR_theta = _prior_grad(theta, "theta")
+        with spans("prior_solve"):
+            _reg_form_phi = _prior_energy_form(phi, "phi")
+        with spans("prior_energy"):
+            reg_phi = float(assemble(_reg_form_phi))
+        with spans("prior_grad"):
+            dR_phi = _prior_grad(phi, "phi")
 
-        g_theta = func_to_global(dJ_dtheta) + func_to_global(dR_theta)
-        g_phi = func_to_global(dJ_dphi) + func_to_global(dR_phi)
+        with spans("gather_gradient"):
+            g_theta = func_to_global(dJ_dtheta) + func_to_global(dR_theta)
+            g_phi = func_to_global(dJ_dphi) + func_to_global(dR_phi)
 
-        total = J_val + reg_theta + reg_phi
-        total_grad = np.concatenate([g_theta, g_phi])
+            total = J_val + reg_theta + reg_phi
+            total_grad = np.concatenate([g_theta, g_phi])
 
-        t_iter = perf_counter() - t_iter
+        t_body_end[0] = perf_counter()
+        t_iter = t_body_end[0] - t_iter
+        # Collective, outside total_seconds: every rank reaches this line once
+        # per successful evaluation.
+        eval_spans = spans.reduce()
+        prev_gap = gap_spans.reduce()
         iteration_count[0] += 1
         # NB: this path records the last EVALUATED point (L-BFGS-B trial
         # points included); the TAO path below records the accepted iterate.
@@ -2484,19 +2516,28 @@ def main():
                              reg_theta=reg_theta, reg_phi=reg_phi)
         if iteration_count[0] == 1:
             _check_handoff(total)
-        PETSc.Sys.Print(
-            f"  iter {iteration_count[0]:3d}: "
-            f"misfit={J_val:.6e}{term_report()} "
-            f"reg_θ={reg_theta:.4e} reg_φ={reg_phi:.4e} "
-            f"total={total:.6e} |grad|={np.linalg.norm(total_grad):.4e} "
-            f"[fwd={t_fwd:.1f}s adj={t_adj:.1f}s total={t_iter:.1f}s]"
-        )
+        _other = t_iter - t_fwd - t_adj
+        with gap_spans("report"):
+            PETSc.Sys.Print(
+                f"  iter {iteration_count[0]:3d}: "
+                f"misfit={J_val:.6e}{term_report()} "
+                f"reg_θ={reg_theta:.4e} reg_φ={reg_phi:.4e} "
+                f"total={total:.6e} |grad|={np.linalg.norm(total_grad):.4e} "
+                f"[fwd={t_fwd:.1f}s adj={t_adj:.1f}s total={t_iter:.1f}s]"
+            )
+            PETSc.Sys.Print(
+                f"    other={_other:.2f}s: "
+                + " ".join(f"{k}={v:.2f}" for k, v in eval_spans.items())
+                + (" | before: " + " ".join(f"{k}={v:.2f}" for k, v in prev_gap.items())
+                   if prev_gap else "")
+            )
 
         if timing_json:
-            try:
-                terms = _eval_terms()
-            except Exception:
-                terms = {"vel": float(last_good_vel_chi2[0])}
+            with gap_spans("eval_terms"):
+                try:
+                    terms = _eval_terms()
+                except Exception:
+                    terms = {"vel": float(last_good_vel_chi2[0])}
             timing_history.append({
                 "eval": iteration_count[0],
                 "misfit": J_val,
@@ -2507,14 +2548,23 @@ def main():
                 "fwd_seconds": t_fwd,
                 "adj_seconds": t_adj,
                 "total_seconds": t_iter,
+                # total_seconds - fwd - adj, by span (slowest rank each);
+                # what the spans leave is "unspanned"
+                "other_spans": {**eval_spans, "unspanned": _other - sum(eval_spans.values())},
+                # since the previous evaluation's body ended: its report,
+                # terms, timing write and checkpoint, then the optimizer's
+                # step ("gap" is the whole interval)
+                "before_spans": prev_gap,
                 "terms": terms,
                 "state_solves": [w for w in state_work if w],
             })
-            _write_timing_json(phase="running", message="in progress")
+            with gap_spans("timing_json"):
+                _write_timing_json(phase="running", message="in progress")
 
         # Periodic checkpoint every 20 iterations
         if iteration_count[0] % 20 == 0:
-            save_map(os.path.join(_map_dir, map_fn))
+            with gap_spans("checkpoint"):
+                save_map(os.path.join(_map_dir, map_fn))
             PETSc.Sys.Print(f"    [checkpoint saved: iter {iteration_count[0]}]")
 
         return total, total_grad
@@ -2551,7 +2601,11 @@ def main():
 
         # The prior COVARIANCE action, from the same operator the objective
         # pays for: A^-1, or A^-1 M A^-1 under `bilaplacian`.
-        _A_inv = _prior_metric_solvers(grad_precond)
+        _A_inv_untimed = _prior_metric_solvers(grad_precond)
+
+        def _A_inv(g_theta, g_phi):
+            with spans("metric_action"):
+                return _A_inv_untimed(g_theta, g_phi)
 
         _nfev = [0]
         _ring = []
@@ -2565,10 +2619,12 @@ def main():
         _fnorm_ceiling_factor = float(os.environ.get("ISMIP7_FNORM_CEILING", "1e4"))
 
         def _forward_checked(theta_ctrl, phi_ctrl):
-            J = forward(theta_ctrl, phi_ctrl)
+            with spans("forward"):
+                J = forward(theta_ctrl, phi_ctrl)
             f_ref = float(last_good_fnorm[0])
             if np.isfinite(f_ref) and f_ref > 0.0:
-                f_now = _residual_norm()
+                with spans("residual_norm"):
+                    f_now = _residual_norm()
                 if not np.isfinite(f_now) or f_now > _fnorm_ceiling_factor * f_ref:
                     raise fd.ConvergenceError(
                         f"forward reported convergence at ||F||={f_now:.3e}, above "
@@ -2625,8 +2681,9 @@ def main():
                     J = Functional(name="J_failed")
                     J.assign(float(10.0 * last_good_obj[0]))
                     return J
-            J.addto(_prior_energy_form(theta_ctrl, "theta"))
-            J.addto(_prior_energy_form(phi_ctrl, "phi"))
+            with spans("prior_taped"):
+                J.addto(_prior_energy_form(theta_ctrl, "theta"))
+                J.addto(_prior_energy_form(phi_ctrl, "phi"))
             # The last few evaluations with their controls: the monitor picks
             # the one TAO accepted, so a checkpoint never holds a rejected
             # line-search trial point.
@@ -2638,12 +2695,13 @@ def main():
             # publishing solve started from a state of other controls,
             # "converged" in 0 iterations at an atol scaled from its own
             # residual (32 km joint Pattyn run, 26 Sep: ||F|| 3e35 published).
-            _ring.append((float(J), theta_ctrl.dat.data_ro.copy(),
-                          phi_ctrl.dat.data_ro.copy(),
-                          [_z.dat.data_ro.copy() for _z in z.subfunctions]))
-            del _ring[:-6]
-            for _zb, _z in zip(z_backup.subfunctions, z.subfunctions):
-                _zb.dat.data[:] = _z.dat.data_ro
+            with spans("record_state"):
+                _ring.append((float(J), theta_ctrl.dat.data_ro.copy(),
+                              phi_ctrl.dat.data_ro.copy(),
+                              [_z.dat.data_ro.copy() for _z in z.subfunctions]))
+                del _ring[:-6]
+                for _zb, _z in zip(z_backup.subfunctions, z.subfunctions):
+                    _zb.dat.data[:] = _z.dat.data_ro
             return J
 
         _accepted_entry = [None]
@@ -2734,7 +2792,8 @@ def main():
             # theta/phi/z mirror the LAST EVALUATION; put the ACCEPTED
             # iterate (controls AND mixed state) there before anything below
             # reads, measures or saves them.
-            _hit = _restore_accepted(f_val)
+            with spans("monitor_restore"):
+                _hit = _restore_accepted(f_val)
             if _hit is None:
                 PETSc.Sys.Print(
                     f"    WARNING: no recent evaluation matches the accepted "
@@ -2745,7 +2804,8 @@ def main():
             # An accepted point identical to the last one is a line search
             # that found no new point (every trial diverged), not a
             # functional decrease of zero: it must not read as convergence.
-            _x_acc = np.concatenate([func_to_global(theta), func_to_global(phi)])
+            with spans("monitor_gather"):
+                _x_acc = np.concatenate([func_to_global(theta), func_to_global(phi)])
             _unchanged = (its > 0 and last_good_x[0] is not None
                           and np.array_equal(_x_acc, last_good_x[0]))
             if _unchanged:
@@ -2754,18 +2814,33 @@ def main():
                     "not a functional-decrease stop)")
             elif _ftol_stop.update(iteration_count[0], f_val):
                 tao.setConvergedReason(PETSc.TAO.ConvergedReason.CONVERGED_USER)
+            # z holds the last evaluated forward, mirrored into z_backup above.
+            last_good_obj[0] = float(f_val)
+            with spans("residual_norm"):
+                last_good_fnorm[0] = _residual_norm()
+            with spans("vel_chi2"):
+                last_good_vel_chi2[0] = float(assemble(_vel_chi2))
+            with spans("monitor_gather"):
+                _x = np.concatenate([func_to_global(theta), func_to_global(phi)])
+                last_x[0] = _x
+                last_good_x[0] = np.array(_x, copy=True)
+            with spans("prior_solve"):
+                _reg_form_theta = _prior_energy_form(theta, "theta")
+            with spans("prior_energy"):
+                reg_theta = float(assemble(_reg_form_theta))
+            with spans("prior_solve"):
+                _reg_form_phi = _prior_energy_form(phi, "phi")
+            with spans("prior_energy"):
+                reg_phi = float(assemble(_reg_form_phi))
+            # One TAO iteration: every evaluation since the last monitor call
+            # (the line search's trials included), the adjoint(s), TAO's own
+            # work and the bookkeeping above. The report, timing write and
+            # checkpoint below land in the next iteration's.
             now = perf_counter()
             t_iter = now - _t_last[0]
             _t_last[0] = now
-            # z holds the last evaluated forward, mirrored into z_backup above.
-            last_good_obj[0] = float(f_val)
-            last_good_fnorm[0] = _residual_norm()
-            last_good_vel_chi2[0] = float(assemble(_vel_chi2))
-            _x = np.concatenate([func_to_global(theta), func_to_global(phi)])
-            last_x[0] = _x
-            last_good_x[0] = np.array(_x, copy=True)
-            reg_theta = float(assemble(_prior_energy_form(theta, "theta")))
-            reg_phi = float(assemble(_prior_energy_form(phi, "phi")))
+            # Collective: TAO calls the monitor on every rank.
+            iter_spans = spans.reduce()
             last_accepted.update(iteration=int(its), total=float(f_val),
                                  misfit=float(f_val) - reg_theta - reg_phi,
                                  reg_theta=reg_theta, reg_phi=reg_phi)
@@ -2777,6 +2852,12 @@ def main():
                 f"dJ/J={_ftol_stop.criterion if _ftol_stop.criterion is not None else 0.0:.1e} "
                 f"[total={t_iter:.1f}s]"
             )
+            # "unspanned" is the adjoint(s) and TAO's own work, which run
+            # inside TAOSolver where no span reaches
+            _unspanned = t_iter - sum(iter_spans.values())
+            PETSc.Sys.Print(
+                "    " + " ".join(f"{k}={v:.2f}" for k, v in iter_spans.items())
+                + f" unspanned={_unspanned:.2f}s")
             if timing_json:
                 timing_history.append({
                     "eval": iteration_count[0],
@@ -2786,12 +2867,15 @@ def main():
                     "total": float(f_val),
                     "grad_norm": float(gnorm),
                     "total_seconds": t_iter,
+                    "iteration_spans": {**iter_spans, "unspanned": _unspanned},
                     "terms": {"vel": float(last_good_vel_chi2[0])},
                     "state_solves": [w for w in state_work if w],
                 })
-                _write_timing_json(phase="running", message="in progress")
+                with spans("timing_json"):
+                    _write_timing_json(phase="running", message="in progress")
             if iteration_count[0] > 0 and iteration_count[0] % 20 == 0:
-                save_map(os.path.join(_map_dir, map_fn))
+                with spans("checkpoint"):
+                    save_map(os.path.join(_map_dir, map_fn))
                 PETSc.Sys.Print(f"    [checkpoint saved: iter {iteration_count[0]}]")
 
         solver.tao.setMonitor(_monitor)

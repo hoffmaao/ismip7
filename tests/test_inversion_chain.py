@@ -43,6 +43,9 @@ import sys
 
 map_out = os.environ["ISMIP7_MAP_OUT"]
 print(f"driver: warm_start={os.environ.get('ISMIP7_WARM_START', 'none')}")
+if "ISMIP7_WARM_START" in os.environ:
+    with open(os.environ["ISMIP7_WARM_START"]) as fh:
+        print(f"driver: warm_start_content={fh.read().strip()}")
 print(f"driver: maxiter={os.environ['ISMIP7_MAXITER']}")
 
 die = os.environ.get("FAKE_DIE_AFTER", "")
@@ -105,6 +108,12 @@ def map_out(sandbox):
     return sandbox / "inversion_map.h5"
 
 
+def node_tmp(sandbox):
+    path = sandbox / "node_tmp"
+    path.mkdir(exist_ok=True)
+    return path
+
+
 def run_job(sandbox, job_id=JOB_ID, **env):
     r"""Submit the runner once. Returns (exit code, job log, resubmits)."""
     log = sandbox / "logs" / f"ismip7_inv_{job_id}.out"
@@ -119,6 +128,8 @@ def run_job(sandbox, job_id=JOB_ID, **env):
         "SLURM_JOB_NUM_NODES": "1",
         "SLURM_JOB_PARTITION": "long",
         "SLURM_SUBMIT_DIR": str(sandbox),
+        # The node-local disk the runner copies a warm start onto.
+        "TMPDIR": str(node_tmp(sandbox)),
         # sites/local.sh takes every setting from this environment, so the
         # runner logic is exercised without a scheduler or a site file.
         "ISMIP7_SITE": "local",
@@ -181,8 +192,29 @@ def test_the_successor_warm_starts_from_an_unfinished_map(sandbox, die):
 
     rc, log, calls = run_job(sandbox, job_id="424244")
     assert rc == 0, log
-    assert f"driver: warm_start={map_out(sandbox)}" in log
+    # The driver reads a node-local copy of the checkpoint under the same
+    # basename, and the copy is gone once the link ends.
+    warm = next(line.split("=", 1)[1] for line in log.splitlines()
+                if line.startswith("driver: warm_start="))
+    assert Path(warm).name == map_out(sandbox).name
+    assert Path(warm).parent.parent == node_tmp(sandbox)
+    assert "driver: warm_start_content=checkpoint" in log
+    assert f"warm start: local copy {warm}" in log
+    assert not Path(warm).parent.exists(), "the local copy must be removed"
     assert calls.count("ARGV:") == 2, "each unfinished link queues a successor"
+
+
+def test_a_multi_node_link_reads_the_warm_start_in_place(sandbox):
+    r"""Ranks on another node cannot see this node's disk, so a multi-node
+    link hands the driver the shared checkpoint itself."""
+    map_out(sandbox).write_text("checkpoint\n")
+    rc, log, _ = run_job(
+        sandbox, SLURM_JOB_NUM_NODES="2", SLURM_NTASKS="64",
+        SLURM_NTASKS_PER_NODE="32")
+    assert rc == 0, log
+    assert f"driver: warm_start={map_out(sandbox)}" in log
+    assert "warm start: local copy" not in log
+    assert list(node_tmp(sandbox).iterdir()) == []
 
 
 def test_the_fallback_marks_a_saved_map_the_driver_could_not(sandbox):

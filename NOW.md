@@ -10,7 +10,7 @@ is an index.
 **Claim the card before you start a run or an inversion.** A card in
 Claimed for more than 24 hours with no comment reads as unclaimed.
 
-Generated: 2026-10-01 19:38 UTC. 10 blocking, 6 owed, 0 after the deadline, 4 unverified.
+Generated: 2026-10-02 06:30 UTC. 10 blocking, 6 owed, 0 after the deadline, 4 unverified.
 
 ## Blocking the submission
 
@@ -50,7 +50,6 @@ Work in flight. Do not duplicate it.
 | [11](https://github.com/icepack/ismip7/issues/11) | melt: run check_melt_bound.py --ocx before core 11 runs on the OCX product | iu | quartz, nots, midway | 2026-09-26 |
 | [24](https://github.com/icepack/ismip7/issues/24) | MAP: 2 km RC and Budd inversions running at Rice under the new prior metric | rice | nots | 2026-09-26 |
 | [153](https://github.com/icepack/ismip7/issues/153) | MAP: IU re-inversion of the 2 km Budd and RC MAPs without the prior mean, then on the 20 km buffered mesh | iu | n/a | 2026-10-01 |
-| [156](https://github.com/icepack/ismip7/issues/156) | solver: measure the inversion on scpc_gamg at 2 km and 1 km (PR 155) | iu | n/a | 2026-10-01 |
 
 ## Unverified
 

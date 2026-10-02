@@ -3,8 +3,10 @@ r"""Wall-clock spans inside one inversion evaluation, reduced across ranks.
 The inversion's timing record splits an evaluation into the forward, the
 adjoint and the rest (issue #156). ``Spans`` names the rest: each span is timed
 with ``perf_counter`` on every rank and reported as the SLOWEST rank's time,
-so the number printed from rank 0 is the critical path and not rank 0's own
-share (AGENTS.md section 3). The reduction is collective; call
+so the number printed from rank 0 describes the communicator's critical path
+(AGENTS.md section 3). Accompanying durations and an unspanned remainder use
+the same convention. The remainder is formed from rank-local measurements
+before its maximum is reduced. The reduction is collective; call
 :meth:`Spans.reduce` on every rank at the same point of the evaluation.
 """
 
@@ -42,18 +44,44 @@ class Spans:
         r"""Drop this rank's spans; local, no communication."""
         self._seconds.clear()
 
-    def reduce(self):
+    def reduce(self, *, durations=None, unspanned_total=None):
         r"""``{name: slowest rank's seconds}`` in sorted name order, then
         clear. Collective. Every rank must hold the same names, which holds
         whenever the code the spans wrap runs the same on every rank; a rank
         that disagrees raises on every rank rather than pairing one rank's
-        span with another's."""
-        names = sorted(self._seconds)
-        if len(set(self.comm.allgather(tuple(names)))) != 1:
+        span with another's.
+
+        ``durations`` supplies rank-local durations reduced by the same
+        maximum. ``unspanned_total`` supplies a rank-local duration containing
+        every accumulated span; its remainder is computed locally, then
+        returned as ``unspanned`` among the reduced durations. Calls using
+        either option return ``(spans, durations)``.
+        """
+        durations_given = durations is not None or unspanned_total is not None
+        local_durations = {
+            name: float(seconds) for name, seconds in (durations or {}).items()
+        }
+        if unspanned_total is not None:
+            if "unspanned" in local_durations:
+                raise ValueError("unspanned is reserved for unspanned_total")
+            local_durations["unspanned"] = (
+                float(unspanned_total) - sum(self._seconds.values())
+            )
+
+        span_names = sorted(self._seconds)
+        duration_names = sorted(local_durations)
+        signature = (tuple(span_names), tuple(duration_names))
+        if len(set(self.comm.allgather(signature))) != 1:
             raise RuntimeError(
-                "Spans.reduce: the ranks timed different spans; the code "
-                "they wrap did not run the same on every rank")
-        out = {name: global_max(np.array([self._seconds[name]]), comm=self.comm)
-               for name in names}
+                "Spans.reduce: the ranks supplied different timing names; "
+                "the timed code did not run the same on every rank")
+        out = {
+            name: global_max(np.array([self._seconds[name]]), comm=self.comm)
+            for name in span_names
+        }
+        reduced_durations = {
+            name: global_max(np.array([local_durations[name]]), comm=self.comm)
+            for name in duration_names
+        }
         self._seconds.clear()
-        return out
+        return (out, reduced_durations) if durations_given else out

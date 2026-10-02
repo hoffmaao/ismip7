@@ -210,7 +210,9 @@ def taped_state_solve(F, z, mode, params, adjoint_params, *,
 
     Returns a dict of the untaped solve's work, with ``reused`` saying
     whether its solver came from ``cache`` (empty under ``full_mumps``
-    without ``direct``, whose work happens inside the recorded solve).
+    without ``direct``, whose work happens inside the recorded solve). Its
+    ``seconds`` member is this rank's untaped solve time. The inversion timing
+    record separately reduces the surrounding forward time across ranks.
     """
     if mode == "full_mumps" and not direct:
         EquationSolver(

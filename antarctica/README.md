@@ -651,13 +651,15 @@ memory stayed between 2.4 and 2.8 GB a rank. Quartz has not measured 2 km and
 
 ### Inversion time outside the forward and the adjoint
 
-The timing record names this time by span, each the slowest rank's
-(`icepack2_tools/profiling.py`), and the log prints the spans under each
-iteration line. An L-BFGS-B evaluation carries `other_spans` (inside
-`total_seconds`) and `before_spans` (the previous evaluation's report, term
-assembly, timing write and checkpoint, and `gap`, the whole interval that
-holds the optimizer's own step). A TAO iteration carries `iteration_spans`
-over all of its evaluations; its `unspanned` is the adjoint and TAO itself.
+The timing record reports `fwd_seconds`, `adj_seconds`, `total_seconds`,
+`optimize_seconds` and each span as the slowest rank's duration
+(`icepack2_tools/profiling.py`). Each `unspanned` duration is the slowest of
+the rank-local remainders. The log prints these durations under each iteration
+line. An L-BFGS-B evaluation carries `other_spans` (inside `total_seconds`) and
+`before_spans` (the previous evaluation's report, term assembly, timing write
+and checkpoint, and `gap`, the whole interval that holds the optimizer's own
+step). A TAO iteration carries `iteration_spans` over all of its evaluations;
+its `unspanned` is the adjoint and TAO itself.
 
 Under the bi-Laplacian prior three spans held that time:
 

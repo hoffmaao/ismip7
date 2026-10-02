@@ -2518,7 +2518,12 @@ def main():
     def _write_timing_json(
         *, phase, message="", nit=None, nfev=None, final_solve=None
     ):
-        if not timing_json or COMM_WORLD.rank != 0:
+        if not timing_json:
+            return
+        optimize_seconds = global_max(
+            np.array([perf_counter() - t_opt0]), comm=COMM_WORLD
+        )
+        if COMM_WORLD.rank != 0:
             return
         written = os.path.realpath(os.path.join(_map_dir, map_fn))
         published = os.environ.get("ISMIP7_MAP_OUT_FINAL", "").strip()
@@ -2535,7 +2540,7 @@ def main():
             "nit": int(nit if nit is not None else iteration_count[0]),
             "nfev": int(nfev if nfev is not None else iteration_count[0]),
             "message": str(message),
-            "optimize_seconds": perf_counter() - t_opt0,
+            "optimize_seconds": optimize_seconds,
             "knobs": {
                 "misfit_norm": MISFIT_NORM,
                 "misfit_scale": float(misfit_scale),
@@ -2675,9 +2680,23 @@ def main():
 
         t_body_end[0] = perf_counter()
         t_iter = t_body_end[0] - t_iter
+        _other = t_iter - t_fwd - t_adj
         # Collective, outside total_seconds: every rank reaches this line once
         # per successful evaluation.
-        eval_spans = spans.reduce()
+        eval_spans, eval_durations = spans.reduce(
+            durations={
+                "fwd_seconds": t_fwd,
+                "adj_seconds": t_adj,
+                "total_seconds": t_iter,
+                "other_seconds": _other,
+            },
+            unspanned_total=_other,
+        )
+        t_fwd = eval_durations["fwd_seconds"]
+        t_adj = eval_durations["adj_seconds"]
+        t_iter = eval_durations["total_seconds"]
+        _other = eval_durations["other_seconds"]
+        _unspanned = eval_durations["unspanned"]
         prev_gap = gap_spans.reduce()
         iteration_count[0] += 1
         # NB: this path records the last EVALUATED point (L-BFGS-B trial
@@ -2686,7 +2705,6 @@ def main():
                              reg_theta=reg_theta, reg_phi=reg_phi)
         if iteration_count[0] == 1:
             _check_handoff(total)
-        _other = t_iter - t_fwd - t_adj
         with gap_spans("report"):
             PETSc.Sys.Print(
                 f"  iter {iteration_count[0]:3d}: "
@@ -2718,9 +2736,7 @@ def main():
                 "fwd_seconds": t_fwd,
                 "adj_seconds": t_adj,
                 "total_seconds": t_iter,
-                # total_seconds - fwd - adj, by span (slowest rank each);
-                # what the spans leave is "unspanned"
-                "other_spans": {**eval_spans, "unspanned": _other - sum(eval_spans.values())},
+                "other_spans": {**eval_spans, "unspanned": _unspanned},
                 # since the previous evaluation's body ended: its report,
                 # terms, timing write and checkpoint, then the optimizer's
                 # step ("gap" is the whole interval)
@@ -3071,7 +3087,12 @@ def main():
             t_iter = now - _t_last[0]
             _t_last[0] = now
             # Collective: TAO calls the monitor on every rank.
-            iter_spans = spans.reduce()
+            iter_spans, iter_durations = spans.reduce(
+                durations={"total_seconds": t_iter},
+                unspanned_total=t_iter,
+            )
+            t_iter = iter_durations["total_seconds"]
+            _unspanned = iter_durations["unspanned"]
             last_accepted.update(iteration=int(its), total=float(f_val),
                                  misfit=float(f_val) - reg_theta - reg_phi,
                                  reg_theta=reg_theta, reg_phi=reg_phi)
@@ -3084,8 +3105,7 @@ def main():
                 f"[total={t_iter:.1f}s]"
             )
             # "unspanned" is the adjoint(s) and TAO's own work, which run
-            # inside TAOSolver where no span reaches
-            _unspanned = t_iter - sum(iter_spans.values())
+            # inside TAOSolver where no span reaches.
             PETSc.Sys.Print(
                 "    " + " ".join(f"{k}={v:.2f}" for k, v in iter_spans.items())
                 + f" unspanned={_unspanned:.2f}s")

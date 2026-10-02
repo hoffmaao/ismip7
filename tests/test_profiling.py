@@ -35,3 +35,20 @@ def test_clear_drops_the_spans_without_reducing():
     spans.add("set_controls", 1.0)
     spans.clear()
     assert spans.reduce() == {}
+
+
+def test_reduce_forms_unspanned_from_rank_local_durations():
+    spans = Spans(MPI.COMM_WORLD)
+    spans.add("prior_solve", 1.5)
+    spans.add("gather", 0.5)
+    reduced, durations = spans.reduce(
+        durations={"fwd_seconds": 3.0, "total_seconds": 7.0},
+        unspanned_total=4.0,
+    )
+    assert reduced == {"gather": 0.5, "prior_solve": 1.5}
+    assert durations == {
+        "fwd_seconds": 3.0,
+        "total_seconds": 7.0,
+        "unspanned": 2.0,
+    }
+    assert spans.reduce() == {}

@@ -372,3 +372,47 @@ def test_the_degree_survives_into_the_adjoint_form(slab):
     for form in (F, derivative(F, z), adjoint(derivative(F, z))):
         degrees = {i.metadata().get("quadrature_degree") for i in form.integrals()}
         assert degrees == {4}
+
+
+def test_a_destroyed_scpc_frees_its_condensed_solver(slab):
+    r"""Issue 159: the condensed KSP and operator go with the PC, and the rest
+    of the context waits for the next SCPC setup, where no PETSc garbage
+    cleanup is running. On one rank nothing is stashed, so this checks the
+    lifetimes; the leak itself needs more than one rank (run records
+    test-32km-inversion-scpc-destroy-*)."""
+    if slab["law"] != "cellwise":
+        pytest.skip("solver lifetime, the same under either law")
+    # Firedrake's adjoint, as tlm_adjoint's: ufl's makes other Arguments
+    from firedrake import (
+        LinearVariationalProblem, LinearVariationalSolver, adjoint as fd_adjoint,
+    )
+
+    from icepack2_tools import preconditioners
+
+    f = slab
+    z = Function(f["Z"]).assign(f["z0"])
+    F = with_quadrature_degree(
+        _residual(f, z, f["theta0"], f["phi0"], scpc=True), FCP)
+    u = split(z)[0]
+    misfit = derivative(0.5 * inner(u - f["u_obs"], u - f["u_obs"]) * dx, z)
+    params = inversion_adjoint_parameters(inversion_state_parameters("scpc_gamg"))
+
+    def adjoint_solver():
+        # tlm_adjoint's matrix-free adjoint solve, with the solver kept
+        solver = LinearVariationalSolver(
+            LinearVariationalProblem(fd_adjoint(derivative(F, z)), misfit,
+                                     Function(f["Z"])),
+            solver_parameters=params)
+        solver.solve()
+        return solver
+
+    solver = adjoint_solver()
+    ctx = solver.snes.getKSP().getPC().getPythonContext()
+    ksp, S = ctx.condensed_ksp, ctx.S.petscmat
+    solver.snes.destroy()
+    assert ksp.handle == 0 and S.handle == 0
+    assert vars(ctx) == {}
+    assert preconditioners._RETIRED_STATE
+    second = adjoint_solver()
+    assert preconditioners._RETIRED_STATE == []
+    second.snes.destroy()

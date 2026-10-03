@@ -227,6 +227,27 @@ reached by the `none` arm's total time.
 * The exp control's cold start climbed the startup ramp on its first rung;
   under SEP2 it diverged near n = 2.1 on every rung (README, "Inversion
   solver").
+
+At 2 km on Quartz under the production settings (`72ac7a1`: the exp control
+from Rice's snapshot 0948 with its log-velocity weight, SEP1, the direct
+forward, 32 ranks), 60 iterations of each arm, under `full_mumps` and under
+`scpc_gamg`, which took the same iterates (README, "Inversion solver"; records
+`test-2km-inversion-final-*`). Best objective from 1.2928e5, and the time and
+evaluations each arm needed under `scpc_gamg` to reach TAO's 60-iteration
+objective:
+
+| arm | evaluations | after 1 h | after 60 iterations | to 8.31e4 |
+|---|---|---|---|---|
+| `none` | 65 | 6.530e4 | 5.820e4 | 0.47 h, 14 evaluations |
+| `mass` | 71 | 8.363e4 | 7.083e4 | 1.05 h, 34 evaluations |
+| `mass_consistent` | 79 | 9.485e4 | 8.308e4 | 2.38 h, 79 evaluations |
+
+* No forward failed and no arm took a rescue.
+* `none` is lowest at every time and every evaluation count, `mass` second;
+  at 32 km `mass` led under every control. An evaluation costs the same on
+  all three paths (106 to 115 s under `scpc_gamg`, 155 to 163 s under
+  `full_mumps`), so the arms differ in progress an evaluation.
+* Every arm was still descending at the 60-iteration cap.
 * Whether the chains change optimizer is the group's call (issue #157).
 
 ## 4. Decisions taken

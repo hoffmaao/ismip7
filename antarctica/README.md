@@ -375,8 +375,8 @@ inversion's defaults. The older one-solve rows predate three changes that move
 each side: `full_mumps` lost the SCPC zero blocks, so its seconds are upper
 bounds; `scpc_gamg` keeps its solver across evaluations; both lost the prior's
 per-call LU. The default deliberately remains `full_mumps`, and the group owns
-the solver choice for Rice's chains. The closing workstation table records the
-SEP1 direct-forward measurements for that decision. Seconds a TAO iteration
+the solver choice for Rice's chains. The closing workstation and Quartz tables
+record the SEP1 direct-forward measurements for that decision. Seconds a TAO iteration
 on 32 ranks of Quartz,
 SEP2 sub-element friction, the exact front push, the mass-consistent metric:
 
@@ -646,8 +646,33 @@ no trial was lost. `scpc_gamg` comes out ahead first at 4 km, through the
 adjoint: one LU factorisation of the whole mixed Jacobian under `full_mumps`,
 one condensed GAMG solve under `scpc_gamg`. On all three meshes and under
 both solvers 4.1 to 4.5 s of each forward lies outside its Newton solve. Peak
-memory stayed between 2.4 and 2.8 GB a rank. Quartz has not measured 2 km and
-1 km under these defaults (`runlog/test-*km-inversion-sep1-*`).
+memory stayed between 2.4 and 2.8 GB a rank (`runlog/test-*km-inversion-sep1-*`).
+
+On Quartz under the same defaults and the production settings (issues #156
+and #157, jobs 10950098 to 10950105 on `72ac7a1`): the exp control, Rice's
+2 km snapshot 0948 as the warm start with its log-velocity weight, 32 ranks,
+the ramp under `scpc_mumps`, 60 iterations at 2 km and 5 at 1 km. Seconds an
+evaluation, the median after the first, with the checkpoint every evaluation
+writes (16 s at 2 km, 13 s at 1 km); the adjoint column holds TAO's own work
+on its rows; GB a rank is sacct's MaxRSS:
+
+| mesh | optimizer | `full_mumps` | `scpc_gamg` | forward | adjoint | GB a rank |
+|---|---|---|---|---|---|---|
+| 2 km | TAO | 155 | 115 | 46 / 80 | 89 / 17 | 4.8 / 2.7 |
+| 2 km | L-BFGS-B, no metric | 155 | 106 | 47 / 72 | 89 / 14 | 5.1 / 2.8 |
+| 2 km | L-BFGS-B, sqrt(M) coordinates | 163 | 109 | 49 / 73 | 95 / 16 | 5.0 / 2.8 |
+| 1 km | TAO | 324 | 70 | 72 / 45 | 230 / 11 | 8.3 / 4.2 |
+
+Each pair took the same Newton iterations in every direct solve and the same
+iterates: TAO within 4.3e-7 over 61 iterations at 2 km and 1.1e-12 at 1 km,
+the L-BFGS-B pairs within 3.6e-7 over their first 37 evaluations, after which
+L-BFGS-B's history amplifies the difference (best objectives 5.819865e4 and
+5.819830e4 without a metric). No forward failed. A condensed solve took 134 to
+136 V-cycles at 2 km and 45 at 1 km. `scpc_gamg` is 1.35 to 1.50 times faster
+at 2 km and 4.6 times at 1 km with half the memory, all of it in the adjoint;
+its forward is the slower one at 2 km. Records
+`runlog/test-*km-inversion-final-*`; the optimizer comparison on the same runs
+is in `INVERSION_PRIORS.md`, issue #157 section.
 
 ### Inversion time outside the forward and the adjoint
 

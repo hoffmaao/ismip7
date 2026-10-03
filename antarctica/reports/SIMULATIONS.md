@@ -9,9 +9,9 @@ gitignored, so these records and the per-core reports beside them are
 the trace a run leaves in the repository. A core experiment also gets
 its full report from `core_report.py`; this is the index.
 
-217 records.
+225 records.
 
-Status: 12 planned, 3 running, 16 stopped, 169 done, 17 superseded.
+Status: 12 planned, 3 running, 16 stopped, 177 done, 17 superseded.
 
 ## Inversion
 
@@ -128,6 +128,8 @@ Status: 12 planned, 3 running, 16 stopped, 169 done, 17 superseded.
 | 1 km inversion cost probe, scpc_gamg (bt) on 32 ranks | done | antarctica_10000_1000_buffered20000 (Rice's .msh on Quartz; 1,869,252 vertices, 3,716,587 cells), DG0 geometry, vertex raster sampling | IU Quartz, general partition | 2026-10-01 | 2026-10-01 | every evaluation's objective within 4.3e-9 of test-1km-inversion-cost-full-mumps-p32, final 4.179544e4; no forward failed; published residual 2.7e-4 |
 | 1 km inversion cost probe, scpc_gamg (bt) on 64 ranks | done | antarctica_10000_1000_buffered20000 (Rice's .msh on Quartz; 1,869,252 vertices, 3,716,587 cells), DG0 geometry, vertex raster sampling | IU Quartz, general partition | 2026-10-01 | 2026-10-01 | objective within 3.8e-5 of the 32-rank runs at every evaluation, 2e-5 at the first (the ramp's state follows the partition; startup scalars identical), final 4.179385e4; no forward failed |
 | 1 km inversion cost probe, the time outside the forward and adjoint by span, before and after the factored prior solve (scpc_gamg, 64 ranks) | done | antarctica_10000_1000_buffered20000 (Rice's .msh on Quartz; 1,869,252 vertices, 3,716,587 cells), DG0 geometry, vertex raster sampling | IU Quartz, general partition | 2026-10-02 | 2026-10-02 | objective within 7.0e-16 and \|grad\| within 2.2e-15 at every evaluation, final 4.179385e4 in both, the same as 10818449; published \|\|F\|\| 2.394e-4 in both; no forward failed. prior_solve was 98 % of the time outside the forward and adjoint at 2626c71. At 4e45164 the largest remaining spans are gather_gradient 0.34 s, set_controls 0.10 s and residual_norm 0.07 s, and L-BFGS-B's own step between evaluations takes 1.0 to 1.2 s |
+| 1 km inversion, 5 iterations of TAO lmvm under full_mumps, production settings, for the final solver and optimizer decision | done | antarctica_10000_1000_buffered20000 (the production mesh, 1,869,252 vertices), the warm start transferred onto it, DG0 geometry, vertex raster sampling | IU Quartz, general partition | 2026-10-03 | 2026-10-03 | 5 iterations, 7 evaluations, objective 6.209388e5 to 3.156258e5; every direct forward converged, no lost trial, no rescue; published residual 1.2e-2; every iterate within 1.1e-12 (objective) and 5.0e-12 (gradient norm) of the other solver's, the same Newton iterations in every direct solve |
+| 1 km inversion, 5 iterations of TAO lmvm under scpc_gamg, production settings, for the final solver and optimizer decision | done | antarctica_10000_1000_buffered20000 (the production mesh, 1,869,252 vertices), the warm start transferred onto it, DG0 geometry, vertex raster sampling | IU Quartz, general partition | 2026-10-03 | 2026-10-03 | 5 iterations, 7 evaluations, objective 6.209388e5 to 3.156258e5; every direct forward converged, no lost trial, no rescue; published residual 1.2e-2; every iterate within 1.1e-12 (objective) and 5.0e-12 (gradient norm) of the other solver's, the same Newton iterations in every direct solve |
 | 1 km inversion, production configuration with one solve an evaluation, full_mumps on 32 ranks | done | antarctica_10000_1000_buffered20000 (Rice's .msh on Quartz; 1,869,252 vertices, 3,716,587 cells), DG0 geometry, vertex raster sampling | IU Quartz, general partition | 2026-10-01 | 2026-10-02 | 3 TAO iterations, objective 8.110678e4 to 6.209233e4; no forward failed; published residual 7.0e-5 |
 | 1 km inversion, production configuration with five-solve evaluations, full_mumps on 32 ranks | done | antarctica_10000_1000_buffered20000 (Rice's .msh on Quartz; 1,869,252 vertices, 3,716,587 cells), DG0 geometry, vertex raster sampling | IU Quartz, general partition | 2026-10-01 | 2026-10-02 | 3 TAO iterations, objective 8.110641e4 to 6.209196e4; no forward failed; published residual 12.3 |
 | 1 km inversion, production configuration with one solve an evaluation, scpc_gamg (NLEQ-ERR, Krylov rtol 1e-8) on 32 ranks | done | antarctica_10000_1000_buffered20000 (Rice's .msh on Quartz; 1,869,252 vertices, 3,716,587 cells), DG0 geometry, vertex raster sampling | IU Quartz, general partition | 2026-10-01 | 2026-10-02 | every iterate within 2.1e-9 of test-1km-inversion-prod-full-mumps-ec0, final 6.209233e4; no forward failed; every recorded solve confirmed with no step; the same cost per iteration as full_mumps |
@@ -145,6 +147,12 @@ Status: 12 planned, 3 running, 16 stopped, 169 done, 17 superseded.
 | 2 km inversion cost probe, scpc_gamg with NLEQ-ERR at Krylov rtol 1e-8 on 32 ranks | done | Rice's antarctica_5000_2000_buffered0, read from the snapshot (ISMIP7_MESH=checkpoint; 925,183 vertices, 1,835,718 cells), DG0 geometry, vertex raster sampling | IU Quartz, general partition | 2026-10-01 | 2026-10-01 | every evaluation's objective within 6.5e-8 of the full_mumps arm, final 4.935180e4; no forward failed |
 | 2 km inversion cost probe, scpc_gamg (bt) on 16 ranks | done | Rice's antarctica_5000_2000_buffered0, read from the snapshot (ISMIP7_MESH=checkpoint; 925,183 vertices, 1,835,718 cells), DG0 geometry, vertex raster sampling | IU Quartz, general partition | 2026-10-01 | 2026-10-01 | the same trajectory as on 32 ranks, every evaluation within 2.6e-6 of it (the ramp's state follows the partition), final 4.935170e4; no forward failed |
 | 2 km inversion cost probe, scpc_gamg (bt) on 32 ranks | done | Rice's antarctica_5000_2000_buffered0, read from the snapshot (ISMIP7_MESH=checkpoint; 925,183 vertices, 1,835,718 cells), DG0 geometry, vertex raster sampling | IU Quartz, general partition | 2026-10-01 | 2026-10-01 | every evaluation's objective within 3.7e-6 of test-2km-inversion-cost-full-mumps-p32 (the largest at the rejected trial, evaluation 4), final 4.935180e4 in both; no forward failed; published residual 1.3e-3 |
+| 2 km inversion, 60 iterations of L-BFGS-B in sqrt(M) coordinates under full_mumps, production settings, for the final solver and optimizer decision | done | antarctica_5000_2000_buffered0 (Rice's build, 925,183 vertices, 1,835,718 cells, read from the warm start: ISMIP7_MESH=checkpoint), DG0 geometry, vertex raster sampling | IU Quartz, general partition | 2026-10-03 | 2026-10-03 | 60 iterations, 71 evaluations, objective 1.292839e5 to 7.093891e4; every direct forward converged, no lost trial, no rescue; published residual 3.8e0; the other solver's evaluations within 1.9e-7 (objective) over the first 38, then drifting apart as L-BFGS-B's history amplifies the difference (1.5e-3 at one trial; best objectives 7.093891e4 and 7.083074e4) |
+| 2 km inversion, 60 iterations of L-BFGS-B in sqrt(M) coordinates under scpc_gamg, production settings, for the final solver and optimizer decision | done | antarctica_5000_2000_buffered0 (Rice's build, 925,183 vertices, 1,835,718 cells, read from the warm start: ISMIP7_MESH=checkpoint), DG0 geometry, vertex raster sampling | IU Quartz, general partition | 2026-10-03 | 2026-10-03 | 60 iterations, 71 evaluations, objective 1.292839e5 to 7.083074e4; every direct forward converged, no lost trial, no rescue; published residual 2.0e0; the other solver's evaluations within 1.9e-7 (objective) over the first 38, then drifting apart as L-BFGS-B's history amplifies the difference (1.5e-3 at one trial; best objectives 7.093891e4 and 7.083074e4) |
+| 2 km inversion, 60 iterations of L-BFGS-B (no metric) under full_mumps, production settings, for the final solver and optimizer decision | done | antarctica_5000_2000_buffered0 (Rice's build, 925,183 vertices, 1,835,718 cells, read from the warm start: ISMIP7_MESH=checkpoint), DG0 geometry, vertex raster sampling | IU Quartz, general partition | 2026-10-03 | 2026-10-03 | 60 iterations, 65 evaluations, objective 1.292839e5 to 5.819865e4; every direct forward converged, no lost trial, no rescue; published residual 6.7e-1; the other solver's evaluations within 3.6e-7 (objective) over the first 37, then drifting apart as L-BFGS-B's history amplifies the difference (4.8e-5 at most; best objectives 5.819865e4 and 5.819830e4) |
+| 2 km inversion, 60 iterations of L-BFGS-B (no metric) under scpc_gamg, production settings, for the final solver and optimizer decision | done | antarctica_5000_2000_buffered0 (Rice's build, 925,183 vertices, 1,835,718 cells, read from the warm start: ISMIP7_MESH=checkpoint), DG0 geometry, vertex raster sampling | IU Quartz, general partition | 2026-10-03 | 2026-10-03 | 60 iterations, 65 evaluations, objective 1.292839e5 to 5.819830e4; every direct forward converged, no lost trial, no rescue; published residual 4.9e-1; the other solver's evaluations within 3.6e-7 (objective) over the first 37, then drifting apart as L-BFGS-B's history amplifies the difference (4.8e-5 at most; best objectives 5.819865e4 and 5.819830e4) |
+| 2 km inversion, 60 iterations of TAO lmvm under full_mumps, production settings, for the final solver and optimizer decision | done | antarctica_5000_2000_buffered0 (Rice's build, 925,183 vertices, 1,835,718 cells, read from the warm start: ISMIP7_MESH=checkpoint), DG0 geometry, vertex raster sampling | IU Quartz, general partition | 2026-10-03 | 2026-10-03 | 60 iterations, 79 evaluations, objective 1.292839e5 to 8.308147e4; every direct forward converged, no lost trial, no rescue; published residual 1.0e-2; every one of 61 iterates within 4.3e-7 (objective) of the other solver's, within 1e-8 over the first 30 |
+| 2 km inversion, 60 iterations of TAO lmvm under scpc_gamg, production settings, for the final solver and optimizer decision | done | antarctica_5000_2000_buffered0 (Rice's build, 925,183 vertices, 1,835,718 cells, read from the warm start: ISMIP7_MESH=checkpoint), DG0 geometry, vertex raster sampling | IU Quartz, general partition | 2026-10-03 | 2026-10-03 | 60 iterations, 79 evaluations, objective 1.292839e5 to 8.308150e4; every direct forward converged, no lost trial, no rescue; published residual 1.0e-2; every one of 61 iterates within 4.3e-7 (objective) of the other solver's, within 1e-8 over the first 30 |
 | 2 km inversion, 15 iterations of L-BFGS-B in sqrt(M) coordinates from Rice's snapshot 0948, for the optimizer comparison | done | Rice's antarctica_5000_2000_buffered0, read from the snapshot (ISMIP7_MESH=checkpoint; 925,183 vertices, 1,835,718 cells), DG0 geometry, vertex raster sampling | IU Quartz, general partition | 2026-10-02 | 2026-10-02 | 15 L-BFGS-B iterations, objective 5.621096e4 to 5.146191e4; the first six evaluations moved the objective by 0.06 percent, each decrease about four times the last; no forward failure; published residual 1.03e-4 |
 | 2 km inversion, 15 iterations of TAO lmvm (mass-consistent metric) from Rice's snapshot 0948, for the optimizer comparison | done | Rice's antarctica_5000_2000_buffered0, read from the snapshot (ISMIP7_MESH=checkpoint; 925,183 vertices, 1,835,718 cells), DG0 geometry, vertex raster sampling | IU Quartz, general partition | 2026-10-02 | 2026-10-02 | 15 TAO iterations, objective 5.621096e4 to 5.380034e4; one trial point failed in iteration 3 and the re-ramp rescue recovered it; iterations 0 to 5 reproduce job 10824069 (test-2km-inversion-prod-full-mumps-ec0) to 7e-15 relative; published residual 1.09e-4 |
 | 2 km inversion, 15 iterations of L-BFGS-B (raw coordinates) from Rice's snapshot 0948, for the optimizer comparison | done | Rice's antarctica_5000_2000_buffered0, read from the snapshot (ISMIP7_MESH=checkpoint; 925,183 vertices, 1,835,718 cells), DG0 geometry, vertex raster sampling | IU Quartz, general partition | 2026-10-02 | 2026-10-02 | 15 L-BFGS-B iterations, objective 5.621096e4 to 5.044395e4; no forward failure; published residual 1.05e-4 |
@@ -3032,6 +3040,46 @@ Core 11 at 32 km without the apparent-MB reference, a cold start on the OCX prot
 - **Audit:** objective within 7.0e-16 and \|grad\| within 2.2e-15 at every evaluation, final 4.179385e4 in both, the same as 10818449; published \|\|F\|\| 2.394e-4 in both; no forward failed. prior_solve was 98 % of the time outside the forward and adjoint at 2626c71. At 4e45164 the largest remaining spans are gather_gradient 0.34 s, set_controls 0.10 s and residual_norm 0.07 s, and L-BFGS-B's own step between evaluations takes 1.0 to 1.2 s
 - **Notes:** Attributes the 27 s of a 1 km evaluation outside the forward and adjoint (issue #156): the bi-Laplacian prior's per-call MUMPS LU. Since 10818449 the scpc_gamg taped forward moved from bt to NLEQ-ERR at Krylov rtol 1e-8 (PR 155), so forward times are not comparable with it; base and fix are
 
+### test-1km-inversion-final-tao-full-mumps
+
+1 km inversion, 5 iterations of TAO lmvm under full_mumps, production settings, for the final solver and optimizer decision (done), IU.
+
+- **Task type:** test
+- **Friction law:** budd
+- **Mesh:** antarctica_10000_1000_buffered20000 (the production mesh, 1,869,252 vertices), the warm start transferred onto it, DG0 geometry, vertex raster sampling
+- **Initial state / MAP:** inversion_icepack2_budd_n3_dg0_logvelnet_2000_int5000_bilap_snap20260924_0948.h5 (release maps-2km-snap-2026-09-24, Rice's chain end, iteration 60), controls and fluidity prior only (the snapshot's lake_ice_base=0 geometry is not taken), ISMIP7_WARM_START_STRICT=0; the n,m 1 to 3 ramp, one rung, then the direct forward
+- **Forcing versions:** observations as in antarctica/data on Quartz; the exp friction control (C_ref and sigma_alpha auto); SEP1 sub-element friction, version 2, with the exact front push; bi-Laplacian prior; the warm start's fluidity prior; log-velocity weight 85380.44865839917 (the snapshot's); no dH/dt term; the direct forward; the startup ramp under scpc_mumps; ISMIP7_INVERSION_LINEAR_SOLVER=full_mumps; TAO lmvm with the mass-consistent metric (ISMIP7_GRAD_PRECOND=mass_consistent)
+- **Site / partition:** IU Quartz, general partition
+- **Ranks / memory:** 32 ranks, one node (c8); peak RSS 8.3 GB a rank (sacct MaxRSS)
+- **Job ids:** 10950104
+- **Code:** 72ac7a1 (PR 155), worktree /N/scratch/dlilien/ismip7_final; icepack_tools e7b923e
+- **Started:** 2026-10-03
+- **Finished:** 2026-10-03
+- **Cost per model year:** 48 min wall; ramp 438 s; first evaluation 446 s; 324 s a TAO iteration (median), of it 71.6 s the forward, 230.4 s the adjoint and TAO's own work and 12.6 s the checkpoint
+- **Results path:** Quartz /N/scratch/dlilien/ismip7_final_runs/maps/1km_tao_full.h5 (sha256 0a772519) and timing/1km_tao_full.json; timing records and logs copied to /Volumes/LaCie/Data/antarctica_general/ismip7_runs/final_decision_quartz; submit script qfinal_submit.sh
+- **Audit:** 5 iterations, 7 evaluations, objective 6.209388e5 to 3.156258e5; every direct forward converged, no lost trial, no rescue; published residual 1.2e-2; every iterate within 1.1e-12 (objective) and 5.0e-12 (gradient norm) of the other solver's, the same Newton iterations in every direct solve
+- **Notes:** issues #156 and #157, the final round on the production settings: the solver pair at 1 km (test-1km-inversion-final-tao-scpc-gamg)
+
+### test-1km-inversion-final-tao-scpc-gamg
+
+1 km inversion, 5 iterations of TAO lmvm under scpc_gamg, production settings, for the final solver and optimizer decision (done), IU.
+
+- **Task type:** test
+- **Friction law:** budd
+- **Mesh:** antarctica_10000_1000_buffered20000 (the production mesh, 1,869,252 vertices), the warm start transferred onto it, DG0 geometry, vertex raster sampling
+- **Initial state / MAP:** inversion_icepack2_budd_n3_dg0_logvelnet_2000_int5000_bilap_snap20260924_0948.h5 (release maps-2km-snap-2026-09-24, Rice's chain end, iteration 60), controls and fluidity prior only (the snapshot's lake_ice_base=0 geometry is not taken), ISMIP7_WARM_START_STRICT=0; the n,m 1 to 3 ramp, one rung, then the direct forward
+- **Forcing versions:** observations as in antarctica/data on Quartz; the exp friction control (C_ref and sigma_alpha auto); SEP1 sub-element friction, version 2, with the exact front push; bi-Laplacian prior; the warm start's fluidity prior; log-velocity weight 85380.44865839917 (the snapshot's); no dH/dt term; the direct forward; the startup ramp under scpc_mumps; ISMIP7_INVERSION_LINEAR_SOLVER=scpc_gamg; TAO lmvm with the mass-consistent metric (ISMIP7_GRAD_PRECOND=mass_consistent)
+- **Site / partition:** IU Quartz, general partition
+- **Ranks / memory:** 32 ranks, one node (c57); peak RSS 4.2 GB a rank (sacct MaxRSS)
+- **Job ids:** 10950105
+- **Code:** 72ac7a1 (PR 155), worktree /N/scratch/dlilien/ismip7_final; icepack_tools e7b923e
+- **Started:** 2026-10-03
+- **Finished:** 2026-10-03
+- **Cost per model year:** 16 min wall; ramp 360 s; first evaluation 84 s; 70 s a TAO iteration (median), of it 44.5 s the forward, 10.9 s the adjoint and TAO's own work and 12.6 s the checkpoint
+- **Results path:** Quartz /N/scratch/dlilien/ismip7_final_runs/maps/1km_tao_gamg.h5 (sha256 87502e9f) and timing/1km_tao_gamg.json; timing records and logs copied to /Volumes/LaCie/Data/antarctica_general/ismip7_runs/final_decision_quartz; submit script qfinal_submit.sh
+- **Audit:** 5 iterations, 7 evaluations, objective 6.209388e5 to 3.156258e5; every direct forward converged, no lost trial, no rescue; published residual 1.2e-2; every iterate within 1.1e-12 (objective) and 5.0e-12 (gradient norm) of the other solver's, the same Newton iterations in every direct solve
+- **Notes:** issues #156 and #157, the final round on the production settings: the solver pair at 1 km (test-1km-inversion-final-tao-full-mumps)
+
 ### test-1km-inversion-prod-full-mumps-ec0
 
 1 km inversion, production configuration with one solve an evaluation, full_mumps on 32 ranks (done), IU.
@@ -3412,6 +3460,126 @@ Core 11 at 32 km without the apparent-MB reference, a cold start on the OCX prot
 - **Results path:** Quartz /N/scratch/dlilien/ismip7_issue156_runs/maps/2km_gamg_p32.h5 (scratch, purged after 30 days); timing record, log and sacct summary copied to /Volumes/LaCie/Data/antarctica_general/ismip7_runs/inversion_solver_quartz
 - **Audit:** every evaluation's objective within 3.7e-6 of test-2km-inversion-cost-full-mumps-p32 (the largest at the rejected trial, evaluation 4), final 4.935180e4 in both; no forward failed; published residual 1.3e-3
 - **Notes:** cost probe for issue #156: no MAP is kept, the objective differs from Rice's (ISMIP7_FLUIDITY_PRIOR=legacy names the prior the warm start overrides; strict handoff off)
+
+### test-2km-inversion-final-mass-full-mumps
+
+2 km inversion, 60 iterations of L-BFGS-B in sqrt(M) coordinates under full_mumps, production settings, for the final solver and optimizer decision (done), IU.
+
+- **Task type:** test
+- **Friction law:** budd
+- **Mesh:** antarctica_5000_2000_buffered0 (Rice's build, 925,183 vertices, 1,835,718 cells, read from the warm start: ISMIP7_MESH=checkpoint), DG0 geometry, vertex raster sampling
+- **Initial state / MAP:** inversion_icepack2_budd_n3_dg0_logvelnet_2000_int5000_bilap_snap20260924_0948.h5 (release maps-2km-snap-2026-09-24, Rice's chain end, iteration 60), controls and fluidity prior only (the snapshot's lake_ice_base=0 geometry is not taken), ISMIP7_WARM_START_STRICT=0; the n,m 1 to 3 ramp, one rung, then the direct forward
+- **Forcing versions:** observations as in antarctica/data on Quartz; the exp friction control (C_ref and sigma_alpha auto); SEP1 sub-element friction, version 2, with the exact front push; bi-Laplacian prior; the warm start's fluidity prior; log-velocity weight 85380.44865839917 (the snapshot's); no dH/dt term; the direct forward; the startup ramp under scpc_mumps; ISMIP7_INVERSION_LINEAR_SOLVER=full_mumps; scipy L-BFGS-B in sqrt(M) coordinates (ISMIP7_GRAD_PRECOND=mass)
+- **Site / partition:** IU Quartz, general partition
+- **Ranks / memory:** 32 ranks, one node (c84); peak RSS 5.0 GB a rank (sacct MaxRSS)
+- **Job ids:** 10950102
+- **Code:** 72ac7a1 (PR 155), worktree /N/scratch/dlilien/ismip7_final; icepack_tools e7b923e
+- **Started:** 2026-10-03
+- **Finished:** 2026-10-03
+- **Cost per model year:** 3 h 25 min wall; ramp 468 s; first evaluation 235 s; 162.9 s an evaluation with its checkpoint (median), of it 48.7 s the forward, 94.5 s the adjoint and 16.9 s the checkpoint
+- **Results path:** Quartz /N/scratch/dlilien/ismip7_final_runs/maps/2km_mass_full.h5 (sha256 02785d92) and timing/2km_mass_full.json; timing records and logs copied to /Volumes/LaCie/Data/antarctica_general/ismip7_runs/final_decision_quartz; submit script qfinal_submit.sh
+- **Audit:** 60 iterations, 71 evaluations, objective 1.292839e5 to 7.093891e4; every direct forward converged, no lost trial, no rescue; published residual 3.8e0; the other solver's evaluations within 1.9e-7 (objective) over the first 38, then drifting apart as L-BFGS-B's history amplifies the difference (1.5e-3 at one trial; best objectives 7.093891e4 and 7.083074e4)
+- **Notes:** issues #156 and #157, the final round on the production settings: the solver pair at 2 km (test-2km-inversion-final-mass-scpc-gamg) and the optimizer arms test-2km-inversion-final-{tao,none,mass}-*
+
+### test-2km-inversion-final-mass-scpc-gamg
+
+2 km inversion, 60 iterations of L-BFGS-B in sqrt(M) coordinates under scpc_gamg, production settings, for the final solver and optimizer decision (done), IU.
+
+- **Task type:** test
+- **Friction law:** budd
+- **Mesh:** antarctica_5000_2000_buffered0 (Rice's build, 925,183 vertices, 1,835,718 cells, read from the warm start: ISMIP7_MESH=checkpoint), DG0 geometry, vertex raster sampling
+- **Initial state / MAP:** inversion_icepack2_budd_n3_dg0_logvelnet_2000_int5000_bilap_snap20260924_0948.h5 (release maps-2km-snap-2026-09-24, Rice's chain end, iteration 60), controls and fluidity prior only (the snapshot's lake_ice_base=0 geometry is not taken), ISMIP7_WARM_START_STRICT=0; the n,m 1 to 3 ramp, one rung, then the direct forward
+- **Forcing versions:** observations as in antarctica/data on Quartz; the exp friction control (C_ref and sigma_alpha auto); SEP1 sub-element friction, version 2, with the exact front push; bi-Laplacian prior; the warm start's fluidity prior; log-velocity weight 85380.44865839917 (the snapshot's); no dH/dt term; the direct forward; the startup ramp under scpc_mumps; ISMIP7_INVERSION_LINEAR_SOLVER=scpc_gamg; scipy L-BFGS-B in sqrt(M) coordinates (ISMIP7_GRAD_PRECOND=mass)
+- **Site / partition:** IU Quartz, general partition
+- **Ranks / memory:** 32 ranks, one node (c57); peak RSS 2.8 GB a rank (sacct MaxRSS)
+- **Job ids:** 10950103
+- **Code:** 72ac7a1 (PR 155), worktree /N/scratch/dlilien/ismip7_final; icepack_tools e7b923e
+- **Started:** 2026-10-03
+- **Finished:** 2026-10-03
+- **Cost per model year:** 2 h 19 min wall; ramp 486 s; first evaluation 99 s; 108.5 s an evaluation with its checkpoint (median), of it 73.2 s the forward, 16.1 s the adjoint and 16.3 s the checkpoint
+- **Results path:** Quartz /N/scratch/dlilien/ismip7_final_runs/maps/2km_mass_gamg.h5 (sha256 ff459a59) and timing/2km_mass_gamg.json; timing records and logs copied to /Volumes/LaCie/Data/antarctica_general/ismip7_runs/final_decision_quartz; submit script qfinal_submit.sh
+- **Audit:** 60 iterations, 71 evaluations, objective 1.292839e5 to 7.083074e4; every direct forward converged, no lost trial, no rescue; published residual 2.0e0; the other solver's evaluations within 1.9e-7 (objective) over the first 38, then drifting apart as L-BFGS-B's history amplifies the difference (1.5e-3 at one trial; best objectives 7.093891e4 and 7.083074e4)
+- **Notes:** issues #156 and #157, the final round on the production settings: the solver pair at 2 km (test-2km-inversion-final-mass-full-mumps) and the optimizer arms test-2km-inversion-final-{tao,none,mass}-*
+
+### test-2km-inversion-final-none-full-mumps
+
+2 km inversion, 60 iterations of L-BFGS-B (no metric) under full_mumps, production settings, for the final solver and optimizer decision (done), IU.
+
+- **Task type:** test
+- **Friction law:** budd
+- **Mesh:** antarctica_5000_2000_buffered0 (Rice's build, 925,183 vertices, 1,835,718 cells, read from the warm start: ISMIP7_MESH=checkpoint), DG0 geometry, vertex raster sampling
+- **Initial state / MAP:** inversion_icepack2_budd_n3_dg0_logvelnet_2000_int5000_bilap_snap20260924_0948.h5 (release maps-2km-snap-2026-09-24, Rice's chain end, iteration 60), controls and fluidity prior only (the snapshot's lake_ice_base=0 geometry is not taken), ISMIP7_WARM_START_STRICT=0; the n,m 1 to 3 ramp, one rung, then the direct forward
+- **Forcing versions:** observations as in antarctica/data on Quartz; the exp friction control (C_ref and sigma_alpha auto); SEP1 sub-element friction, version 2, with the exact front push; bi-Laplacian prior; the warm start's fluidity prior; log-velocity weight 85380.44865839917 (the snapshot's); no dH/dt term; the direct forward; the startup ramp under scpc_mumps; ISMIP7_INVERSION_LINEAR_SOLVER=full_mumps; scipy L-BFGS-B in plain coordinates (ISMIP7_GRAD_PRECOND=none)
+- **Site / partition:** IU Quartz, general partition
+- **Ranks / memory:** 32 ranks, one node (c70); peak RSS 5.1 GB a rank (sacct MaxRSS)
+- **Job ids:** 10950100
+- **Code:** 72ac7a1 (PR 155), worktree /N/scratch/dlilien/ismip7_final; icepack_tools e7b923e
+- **Started:** 2026-10-03
+- **Finished:** 2026-10-03
+- **Cost per model year:** 3 h 06 min wall; ramp 511 s; first evaluation 241 s; 155.2 s an evaluation with its checkpoint (median), of it 47.4 s the forward, 89.1 s the adjoint and 16.5 s the checkpoint
+- **Results path:** Quartz /N/scratch/dlilien/ismip7_final_runs/maps/2km_none_full.h5 (sha256 272e0a66) and timing/2km_none_full.json; timing records and logs copied to /Volumes/LaCie/Data/antarctica_general/ismip7_runs/final_decision_quartz; submit script qfinal_submit.sh
+- **Audit:** 60 iterations, 65 evaluations, objective 1.292839e5 to 5.819865e4; every direct forward converged, no lost trial, no rescue; published residual 6.7e-1; the other solver's evaluations within 3.6e-7 (objective) over the first 37, then drifting apart as L-BFGS-B's history amplifies the difference (4.8e-5 at most; best objectives 5.819865e4 and 5.819830e4)
+- **Notes:** issues #156 and #157, the final round on the production settings: the solver pair at 2 km (test-2km-inversion-final-none-scpc-gamg) and the optimizer arms test-2km-inversion-final-{tao,none,mass}-*
+
+### test-2km-inversion-final-none-scpc-gamg
+
+2 km inversion, 60 iterations of L-BFGS-B (no metric) under scpc_gamg, production settings, for the final solver and optimizer decision (done), IU.
+
+- **Task type:** test
+- **Friction law:** budd
+- **Mesh:** antarctica_5000_2000_buffered0 (Rice's build, 925,183 vertices, 1,835,718 cells, read from the warm start: ISMIP7_MESH=checkpoint), DG0 geometry, vertex raster sampling
+- **Initial state / MAP:** inversion_icepack2_budd_n3_dg0_logvelnet_2000_int5000_bilap_snap20260924_0948.h5 (release maps-2km-snap-2026-09-24, Rice's chain end, iteration 60), controls and fluidity prior only (the snapshot's lake_ice_base=0 geometry is not taken), ISMIP7_WARM_START_STRICT=0; the n,m 1 to 3 ramp, one rung, then the direct forward
+- **Forcing versions:** observations as in antarctica/data on Quartz; the exp friction control (C_ref and sigma_alpha auto); SEP1 sub-element friction, version 2, with the exact front push; bi-Laplacian prior; the warm start's fluidity prior; log-velocity weight 85380.44865839917 (the snapshot's); no dH/dt term; the direct forward; the startup ramp under scpc_mumps; ISMIP7_INVERSION_LINEAR_SOLVER=scpc_gamg; scipy L-BFGS-B in plain coordinates (ISMIP7_GRAD_PRECOND=none)
+- **Site / partition:** IU Quartz, general partition
+- **Ranks / memory:** 32 ranks, one node (c27); peak RSS 2.8 GB a rank (sacct MaxRSS)
+- **Job ids:** 10950101
+- **Code:** 72ac7a1 (PR 155), worktree /N/scratch/dlilien/ismip7_final; icepack_tools e7b923e
+- **Started:** 2026-10-03
+- **Finished:** 2026-10-03
+- **Cost per model year:** 2 h 04 min wall; ramp 417 s; first evaluation 107 s; 106.0 s an evaluation with its checkpoint (median), of it 72.3 s the forward, 14.1 s the adjoint and 16.1 s the checkpoint
+- **Results path:** Quartz /N/scratch/dlilien/ismip7_final_runs/maps/2km_none_gamg.h5 (sha256 6faaad73) and timing/2km_none_gamg.json; timing records and logs copied to /Volumes/LaCie/Data/antarctica_general/ismip7_runs/final_decision_quartz; submit script qfinal_submit.sh
+- **Audit:** 60 iterations, 65 evaluations, objective 1.292839e5 to 5.819830e4; every direct forward converged, no lost trial, no rescue; published residual 4.9e-1; the other solver's evaluations within 3.6e-7 (objective) over the first 37, then drifting apart as L-BFGS-B's history amplifies the difference (4.8e-5 at most; best objectives 5.819865e4 and 5.819830e4)
+- **Notes:** issues #156 and #157, the final round on the production settings: the solver pair at 2 km (test-2km-inversion-final-none-full-mumps) and the optimizer arms test-2km-inversion-final-{tao,none,mass}-*
+
+### test-2km-inversion-final-tao-full-mumps
+
+2 km inversion, 60 iterations of TAO lmvm under full_mumps, production settings, for the final solver and optimizer decision (done), IU.
+
+- **Task type:** test
+- **Friction law:** budd
+- **Mesh:** antarctica_5000_2000_buffered0 (Rice's build, 925,183 vertices, 1,835,718 cells, read from the warm start: ISMIP7_MESH=checkpoint), DG0 geometry, vertex raster sampling
+- **Initial state / MAP:** inversion_icepack2_budd_n3_dg0_logvelnet_2000_int5000_bilap_snap20260924_0948.h5 (release maps-2km-snap-2026-09-24, Rice's chain end, iteration 60), controls and fluidity prior only (the snapshot's lake_ice_base=0 geometry is not taken), ISMIP7_WARM_START_STRICT=0; the n,m 1 to 3 ramp, one rung, then the direct forward
+- **Forcing versions:** observations as in antarctica/data on Quartz; the exp friction control (C_ref and sigma_alpha auto); SEP1 sub-element friction, version 2, with the exact front push; bi-Laplacian prior; the warm start's fluidity prior; log-velocity weight 85380.44865839917 (the snapshot's); no dH/dt term; the direct forward; the startup ramp under scpc_mumps; ISMIP7_INVERSION_LINEAR_SOLVER=full_mumps; TAO lmvm with the mass-consistent metric (ISMIP7_GRAD_PRECOND=mass_consistent)
+- **Site / partition:** IU Quartz, general partition
+- **Ranks / memory:** 32 ranks, one node (c85); peak RSS 4.8 GB a rank (sacct MaxRSS)
+- **Job ids:** 10950098
+- **Code:** 72ac7a1 (PR 155), worktree /N/scratch/dlilien/ismip7_final; icepack_tools e7b923e
+- **Started:** 2026-10-03
+- **Finished:** 2026-10-03
+- **Cost per model year:** 3 h 32 min wall; ramp 444 s; first evaluation 249 s; 154.8 s a TAO iteration of one evaluation (median), 154 s an evaluation on average, of it 46.4 s the forward, 89.3 s the adjoint and TAO's own work and 16.4 s the checkpoint
+- **Results path:** Quartz /N/scratch/dlilien/ismip7_final_runs/maps/2km_tao_full.h5 (sha256 2c0a0e03) and timing/2km_tao_full.json; timing records and logs copied to /Volumes/LaCie/Data/antarctica_general/ismip7_runs/final_decision_quartz; submit script qfinal_submit.sh
+- **Audit:** 60 iterations, 79 evaluations, objective 1.292839e5 to 8.308147e4; every direct forward converged, no lost trial, no rescue; published residual 1.0e-2; every one of 61 iterates within 4.3e-7 (objective) of the other solver's, within 1e-8 over the first 30
+- **Notes:** issues #156 and #157, the final round on the production settings: the solver pair at 2 km (test-2km-inversion-final-tao-scpc-gamg) and the optimizer arms test-2km-inversion-final-{tao,none,mass}-*
+
+### test-2km-inversion-final-tao-scpc-gamg
+
+2 km inversion, 60 iterations of TAO lmvm under scpc_gamg, production settings, for the final solver and optimizer decision (done), IU.
+
+- **Task type:** test
+- **Friction law:** budd
+- **Mesh:** antarctica_5000_2000_buffered0 (Rice's build, 925,183 vertices, 1,835,718 cells, read from the warm start: ISMIP7_MESH=checkpoint), DG0 geometry, vertex raster sampling
+- **Initial state / MAP:** inversion_icepack2_budd_n3_dg0_logvelnet_2000_int5000_bilap_snap20260924_0948.h5 (release maps-2km-snap-2026-09-24, Rice's chain end, iteration 60), controls and fluidity prior only (the snapshot's lake_ice_base=0 geometry is not taken), ISMIP7_WARM_START_STRICT=0; the n,m 1 to 3 ramp, one rung, then the direct forward
+- **Forcing versions:** observations as in antarctica/data on Quartz; the exp friction control (C_ref and sigma_alpha auto); SEP1 sub-element friction, version 2, with the exact front push; bi-Laplacian prior; the warm start's fluidity prior; log-velocity weight 85380.44865839917 (the snapshot's); no dH/dt term; the direct forward; the startup ramp under scpc_mumps; ISMIP7_INVERSION_LINEAR_SOLVER=scpc_gamg; TAO lmvm with the mass-consistent metric (ISMIP7_GRAD_PRECOND=mass_consistent)
+- **Site / partition:** IU Quartz, general partition
+- **Ranks / memory:** 32 ranks, one node (c70); peak RSS 2.7 GB a rank (sacct MaxRSS)
+- **Job ids:** 10950099
+- **Code:** 72ac7a1 (PR 155), worktree /N/scratch/dlilien/ismip7_final; icepack_tools e7b923e
+- **Started:** 2026-10-03
+- **Finished:** 2026-10-03
+- **Cost per model year:** 2 h 34 min wall; ramp 517 s; first evaluation 123 s; 115.0 s a TAO iteration of one evaluation (median), 109 s an evaluation on average, of it 80.2 s the forward, 16.9 s the adjoint and TAO's own work and 16.3 s the checkpoint
+- **Results path:** Quartz /N/scratch/dlilien/ismip7_final_runs/maps/2km_tao_gamg.h5 (sha256 a865856b) and timing/2km_tao_gamg.json; timing records and logs copied to /Volumes/LaCie/Data/antarctica_general/ismip7_runs/final_decision_quartz; submit script qfinal_submit.sh
+- **Audit:** 60 iterations, 79 evaluations, objective 1.292839e5 to 8.308150e4; every direct forward converged, no lost trial, no rescue; published residual 1.0e-2; every one of 61 iterates within 4.3e-7 (objective) of the other solver's, within 1e-8 over the first 30
+- **Notes:** issues #156 and #157, the final round on the production settings: the solver pair at 2 km (test-2km-inversion-final-tao-full-mumps) and the optimizer arms test-2km-inversion-final-{tao,none,mass}-*
 
 ### test-2km-inversion-opt-mass
 

@@ -23,6 +23,7 @@ if _REPO_ROOT not in sys.path:
     sys.path.insert(0, _REPO_ROOT)
 
 from icepack2_tools.runconfig import BUFFER_M_DEFAULT, buffer_m as _buffer_m
+from icepack2_tools.naming import mesh_basename
 
 MESH_DIR = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "mesh")
 
@@ -73,16 +74,6 @@ def next_adapted_mesh_name(reference, experiment=None):
     if experiment and not root.endswith(f"_{experiment}"):
         root = f"{root}_{experiment}"
     return f"{root}_adapt{count + 1}"
-
-
-def buffer_tag(buffer_m):
-    """Return the `_buffered<N>` suffix for a given outline buffer (meters)."""
-    return f"_buffered{int(float(buffer_m))}"
-
-
-def mesh_basename(lc_coarse, lc, buffer_m):
-    """Basename (no extension) of the mesh built with the given resolution/buffer."""
-    return f"antarctica_{lc_coarse}_{lc}{buffer_tag(buffer_m)}"
 
 
 def mesh_filename(lc_coarse, lc, buffer_m):

@@ -27,9 +27,10 @@ import os
 # The launchers name their own: the timing Makefile exports its campaign's
 # solver, and the cluster forward runner (batch_runners/projection.sbatch)
 # exports scpc_gamg for production. This default does not follow them, because
-# it is not only the forward's: the inversion, whose linear solve is
-# full-Jacobian MUMPS whatever is set here, stamps the mode it resolves on its
-# MAP, and redistribute_checkpoint.py fingerprints a published cache with it.
+# it is not only the forward's: the inversion, whose taped solves follow
+# ISMIP7_INVERSION_LINEAR_SOLVER whatever is set here, stamps the mode it
+# resolves on its MAP, and redistribute_checkpoint.py fingerprints a
+# published cache with it.
 DIAGNOSTIC_SOLVER_DEFAULT = "full_mumps"
 DIAGNOSTIC_SOLVER_MODES = (
     "schur_gamg",
@@ -44,6 +45,32 @@ DIAGNOSTIC_SOLVER_ALIASES = {
     "iterative": "schur_gamg",
     "mumps": "schur_mumps",
 }
+# The inversion's taped solves: the annotated forward, the adjoint tlm_adjoint
+# solves against it, and the solve that publishes the MAP's state. A knob of
+# its own, so the scpc_mumps the timing campaign exports for the lane's
+# ISMIP7_DIAGNOSTIC_LINEAR_SOLVER leaves the taped solve where it was. The
+# approximate-Schur modes are out: their selfp preconditioner was never
+# qualified for the mixed system. scpc_gamg is the default since the final
+# Quartz round of issues 156 and 157 (README, "Inversion solver"): under the
+# direct forward it took full_mumps's iterates 1.35 to 1.5 times faster an
+# evaluation at 2 km and 4.6 times at 1 km, with half the memory.
+INVERSION_SOLVER_DEFAULT = "scpc_gamg"
+INVERSION_SOLVER_MODES = ("full_mumps", "scpc_mumps", "scpc_gamg")
+# The inversion's taped forward under scpc_* solves its Newton corrections to
+# a relative 1e-8, not the transient's 1e-6. Each evaluation starts from the
+# last one's state at new controls, as far as ||F|| = 9e10 from the solution
+# at 32 km, and there NLEQ-ERR, which judges a step by the norm of the Newton
+# correction, could not use corrections solved to 1e-6: at a trial point the
+# exact condensation took in 6 Newton iterations it stalled at
+# ||F|| = 7.9e10 for 200. At 1e-8 it took the same 6. Backtracking on ||F||
+# instead (bt) also took 6 there and costs less where it works (64 s an
+# evaluation against 95 s at 2 km), but it damps nearly every step on the
+# synthetic slabs: 113 Newton iterations against 4 under the cell-wise law
+# and 20 against 4 under the sub-element law, with an exact LU as with GAMG
+# (README, "Inversion solver"). ISMIP7_INVERSION_SNES_LINESEARCH and
+# ISMIP7_INVERSION_KSP_RTOL override both. The transient is unchanged: its
+# steps start next to the solution.
+INVERSION_KSP_RTOL_DEFAULT = "1e-8"
 
 SNES_TYPE_DEFAULT = "newtonls"
 SNES_LINESEARCH_DEFAULT = "nleqerr"
@@ -89,6 +116,10 @@ DIRECT_FORWARD_DEFAULT = "1"
 # Successful direct solves took 1-17 Newton iterations on the 2 km and 32 km
 # meshes; one that has not converged by 30 is a lost trial (30 Sep 2026).
 DIRECT_FORWARD_MAXIT_DEFAULT = "30"
+# A direct trial whose residual has grown this many times over its start is
+# lost: fail it and let the line search backtrack rather than run the cap out
+# (2 km SEP2, NOTS 1692389: 50 iterations to ||F|| 5e33, 289 s).
+DIRECT_FORWARD_DTOL_DEFAULT = "1e6"
 # Rungs of the continuation ladder the failed-trial rescue may climb: each
 # failed rung cost 1-3 h on the 2 km mesh and ~80% of rescues failed anyway
 # (2 km chains, 27-30 Sep 2026). 0 disables the rescue.
@@ -377,6 +408,83 @@ def diagnostic_solver_parameters(mode=None):
     return params
 
 
+def inversion_solver_mode(requested=None):
+    r"""``ISMIP7_INVERSION_LINEAR_SOLVER``, canonical: the solver of the
+    inversion's taped forward, its adjoint and its publishing solve."""
+    if requested is None:
+        requested = _env("ISMIP7_INVERSION_LINEAR_SOLVER", INVERSION_SOLVER_DEFAULT)
+    mode = str(requested).strip().lower()
+    if mode not in INVERSION_SOLVER_MODES:
+        raise ValueError(
+            "ISMIP7_INVERSION_LINEAR_SOLVER must be one of "
+            f"{', '.join(INVERSION_SOLVER_MODES)}, not {requested!r}"
+        )
+    return mode
+
+
+def inversion_state_parameters(mode=None):
+    r"""PETSc options of the inversion's taped forward under ``mode``.
+
+    ``full_mumps`` is the inversion's own reference, kept as it was before the
+    knob existed: the shared SNES options around a GMRES-wrapped MUMPS LU of
+    the whole mixed Jacobian, with MUMPS printing its error return (INFOG(1),
+    the workspace or pivot code) so a factorisation that fails is named and
+    does not reach SNES only as DIVERGED_LINEAR_SOLVE (job 1612624).  The
+    scpc_* modes are the forward's own options for that mode with the outer
+    Krylov tolerance ``ISMIP7_INVERSION_KSP_RTOL`` (default 1e-8,
+    INVERSION_KSP_RTOL_DEFAULT; the condensed solve's absolute tolerance
+    follows it as the forward's follows ISMIP7_KSP_RTOL) and the line search
+    ``ISMIP7_INVERSION_SNES_LINESEARCH``, by default the shared one."""
+    mode = inversion_solver_mode(mode)
+    if mode != "full_mumps":
+        params = diagnostic_solver_parameters(mode)
+        rtol = float(_env("ISMIP7_INVERSION_KSP_RTOL", INVERSION_KSP_RTOL_DEFAULT))
+        params["ksp_rtol"] = rtol
+        if "condensed_field_ksp_atol" in params:
+            params["condensed_field_ksp_atol"] = rtol * float(_env(
+                "ISMIP7_CONDENSED_KSP_ATOL_FACTOR",
+                CONDENSED_KSP_ATOL_FACTOR_DEFAULT,
+            ))
+        if mode == "scpc_gamg":
+            # A rung's extra condensed options still come last, as in the
+            # forward (_extra_condensed_options).
+            params.update(_extra_condensed_options("condensed_field_"))
+        params["snes_linesearch_type"] = _env(
+            "ISMIP7_INVERSION_SNES_LINESEARCH", params["snes_linesearch_type"])
+        return params
+    params = _nonlinear_options()
+    params.update({
+        "ksp_type": "gmres",
+        "pc_type": "lu",
+        "pc_factor_mat_solver_type": "mumps",
+        "mat_mumps_icntl_14": 400,  # working memory increase
+        "mat_mumps_icntl_24": 1,  # detect null pivots
+        "mat_mumps_cntl_3": 1e-12,  # null pivot threshold
+        "mat_mumps_icntl_4": 1,
+    })
+    return params
+
+
+def inversion_adjoint_parameters(params):
+    r"""The adjoint's options, from the taped forward's ``params``.
+
+    The adjoint is one linear solve, so every ``snes_*`` entry goes. That
+    matters twice. An absolute tolerance sized for the forward residual lets
+    the adjoint exit at iteration 0 whenever ||dJ/du|| is small, returning a
+    zero adjoint and a gradient that is the prior's alone (job 10432790). And
+    under ``mat_type: matfree`` tlm_adjoint hands these options to a
+    LinearVariationalSolver, whose ``ksponly`` default the forward's
+    ``newtonls`` would replace with a line-searched Newton solve of a linear
+    problem; the assembled path ignores SNES options either way. The outer
+    Krylov tolerance is the forward's relative one, and the condensed solve's
+    absolute tolerance is scale-free here too: FGMRES hands the preconditioner
+    unit vectors."""
+    adjoint = {k: v for k, v in params.items() if not k.startswith("snes_")}
+    if adjoint.get("mat_type") == "matfree":
+        adjoint["snes_type"] = "ksponly"
+    return adjoint
+
+
 def transport_solver_parameters():
     return {
         "ksp_type": "gmres",
@@ -450,8 +558,9 @@ def snes_restart_failure_atol_scale():
 def nonlinear_solver_options():
     r"""Shared SNES options (type, tolerances, line search) for any momentum solve.
 
-    The inversion layers its full-Jacobian MUMPS options on top of these so the
-    ``ISMIP7_SNES_*`` knobs the campaign exports mean one thing everywhere.
+    Diagnostic and inversion solver builders layer their linear options on
+    top. The condensed inversion modes may override the line search through
+    ``ISMIP7_INVERSION_SNES_LINESEARCH``.
     """
     return _nonlinear_options()
 
@@ -464,6 +573,22 @@ def direct_forward_enabled():
 
 def direct_forward_max_it():
     return int(_env("ISMIP7_DIRECT_FORWARD_MAXIT", DIRECT_FORWARD_MAXIT_DEFAULT))
+
+
+def direct_forward_parameters(params):
+    r"""The direct solve's options, from the taped solve's ``params`` under
+    any inversion solver mode: the relative test against the trial's own
+    initial residual (no ``snes_atol``: an absolute floor at the accepted
+    residual stopped small control steps before the state responded), the
+    live step-size exit of ``final_solve_bounds``, at most
+    ``ISMIP7_DIRECT_FORWARD_MAXIT`` Newton iterations, and a lost trial once
+    the residual grows ``ISMIP7_DIRECT_FORWARD_DTOL`` times."""
+    out = {k: v for k, v in params.items() if k != "snes_atol"}
+    out.update(final_solve_bounds())
+    out["snes_max_it"] = direct_forward_max_it()
+    out["snes_divergence_tolerance"] = float(
+        _env("ISMIP7_DIRECT_FORWARD_DTOL", DIRECT_FORWARD_DTOL_DEFAULT))
+    return out
 
 
 def trial_rescue_rungs():

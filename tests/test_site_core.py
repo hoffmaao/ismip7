@@ -104,10 +104,10 @@ def test_naming_another_pair_names_its_mesh(runners):
 
 
 def test_site_env_chooses_no_solver(runners):
-    r"""The inversion sources site_env.sh too. Its linear solve is the full
-    mixed-Jacobian MUMPS by construction, and it stamps the solver it finds in
-    the environment on the MAP it writes, so the production forward solver is
-    projection.sbatch's to name and must not be exported from here."""
+    r"""The site layer supplies no solver policy. ``projection.sbatch`` names
+    the forward's diagnostic solver; the inversion resolves that variable for
+    its startup ramp and lane stamp, and resolves
+    ``ISMIP7_INVERSION_LINEAR_SOLVER`` for its taped solves."""
     rc, out, err = source(runners, "site_env.sh",
                           show("ISMIP7_DIAGNOSTIC_LINEAR_SOLVER"),
                           ISMIP7_SITE="local", ISMIP7_REPO="/repo")

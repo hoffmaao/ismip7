@@ -70,6 +70,7 @@ from icepack2_tools.mpi_stats import (
 from icepack2_tools.boundary import load_boundary_ids
 from icepack2_tools.geometry import raise_bed_to_lake_ice_base, sample_to_geometry
 from icepack2_tools.naming import map_basename
+from icepack2_tools.handoff import check_subelement_record
 from icepack2_tools.front import (
     clamp_thickness, clear_reference_where_ice_free, retreat_slivers,
     front_removal_mask, unforced_cells, applied_forcing,
@@ -415,6 +416,7 @@ def setup_model(restart_from=None, *, allow_timing_cache_a_ref=False,
             # under (icepack2_tools.subelement): a forward follows the MAP.
             "subelement_friction",
             "subelement_scheme",
+            "subelement_scheme_version",
             "exact_front",
             "fluidity_control",
         ):
@@ -620,6 +622,14 @@ def setup_model(restart_from=None, *, allow_timing_cache_a_ref=False,
     map_exact_front = int(checkpoint_metadata.get("exact_front", 0))
     # a MAP from before the record was inverted under SEP2
     map_subelement_scheme = str(checkpoint_metadata.get("subelement_scheme", "sep2"))
+    if map_subelement:
+        # Refuses a MAP of another version of its scheme, and a log-control
+        # SEP1 MAP from before the version was recorded.
+        map_subelement_scheme_version = check_subelement_record(
+            map_subelement_scheme,
+            checkpoint_metadata.get("subelement_scheme_version"),
+            checkpoint_metadata.get("friction_control", "log"),
+            source=os.path.basename(source_chk))
     _env_sub = os.environ.get("ISMIP7_SUBELEMENT_FRICTION")
     if _env_sub is not None and int(_env_sub) != map_subelement:
         raise RuntimeError(
@@ -1367,7 +1377,8 @@ def setup_model(restart_from=None, *, allow_timing_cache_a_ref=False,
                 mesh, h, b, ice=ice_indicator(h, _front_hmin()))
             _fr = subelement.fraction.dat.data_ro
             PETSc.Sys.Print(
-                f"  Sub-element grounding (ISSM {map_subelement_scheme.upper()}) from the MAP: "
+                f"  Sub-element grounding (ISSM {map_subelement_scheme.upper()} version "
+                f"{map_subelement_scheme_version}) from the MAP: "
                 f"{mesh.comm.allreduce(int((_fr == 1.0).sum()))} cells fully grounded, "
                 f"{mesh.comm.allreduce(int(((_fr > 0.0) & (_fr < 1.0)).sum()))} partly; "
                 f"{friction} with N_hat = 1 on the grounded part, so NO effective-pressure "
@@ -1408,17 +1419,18 @@ def setup_model(restart_from=None, *, allow_timing_cache_a_ref=False,
         F = derivative(L, z)
 
     if linear_solver.startswith("scpc_"):
-        # Firedrake's three-field SCPC expects both off-diagonal entries of the
-        # eliminated (M, tau) block to be present in split_form.  These fields
-        # are physically uncoupled, so UFL otherwise omits both structural-zero
-        # blocks and SCPC raises KeyError before assembly.  A runtime Constant
-        # preserves the block metadata while contributing exactly zero to the
-        # residual and Jacobian.  Do not replace it with the literal 0: UFL
-        # simplifies that away and recreates the missing-block failure.
-        scpc_structural_zero = Constant(0.0)
-        F += derivative(
-            scpc_structural_zero * M_s[0, 0] * tau_s[0] * dx, z
-        )
+        # The (M, tau) structural-zero blocks SCPC needs (see the helper), in
+        # this residual and in the builder the context hands a time-dependent
+        # assimilation with these same solver options.
+        from icepack2_tools.preconditioners import with_scpc_blocks
+        F = with_scpc_blocks(F, z)
+        if use_residual:
+            _build_F_unblocked = _build_F
+
+            def _build_F(theta_c=None, phi_c=None, h_c=None, s_c=None, z_c=None):
+                z_b = z_c if z_c is not None else z
+                return with_scpc_blocks(
+                    _build_F_unblocked(theta_c, phi_c, h_c, s_c, z_c), z_b)
 
     # A matrix-free Jacobian follows the state Function, which the line
     # search's residual evaluations overwrite with its trial point; hold it at
@@ -1854,7 +1866,8 @@ def calving_front_state(z, h_dg, b, level_set, A=None, n=None, gr_frac=None):
 
 
 MAP_CONFIG_KEYS = ("friction_control", "friction_c_ref", "subelement_friction",
-                   "subelement_scheme", "exact_front", "fluidity_control")
+                   "subelement_scheme", "subelement_scheme_version", "exact_front",
+                   "fluidity_control")
 
 
 def save_model_state(ctx, final_path, t_now, extra_attrs=None):

@@ -685,6 +685,7 @@ def setup_model(restart_from=None, *, allow_timing_cache_a_ref=False,
     H_init = None
     phi_eff = None
     u_guess = None
+    map_state_name = None   # the MAP's mixed state seeding a cold start
     M_guess = None
     tau_guess = None
     a_ref_mb = None
@@ -933,6 +934,18 @@ def setup_model(restart_from=None, *, allow_timing_cache_a_ref=False,
                 s = load_checkpoint_field(chk, "surface", Q_g)
                 geometry_source = os.path.realpath(source_chk)
                 geometry_source_method = "checkpoint-native-v1"
+                # The mixed state the MAP was accepted at (a final MAP's
+                # velocity/membrane_stress/basal_stress, a periodic
+                # checkpoint's ckpt_* copies) seeds the cold-start solve
+                # below in place of 0.1 u_obs.
+                for _pre in ("", "ckpt_"):
+                    _u = load_checkpoint_field(chk, f"{_pre}velocity", V, optional=True)
+                    _M = load_checkpoint_field(chk, f"{_pre}membrane_stress", Sigma, optional=True)
+                    _tau = load_checkpoint_field(chk, f"{_pre}basal_stress", T, optional=True)
+                    if _u is not None and _M is not None and _tau is not None:
+                        u_guess, M_guess, tau_guess = _u, _M, _tau
+                        map_state_name = f"{_pre}velocity"
+                        break
             _uo = load_checkpoint_field(
                 chk, "velocity_obs", V,
                 fill=u_obs, fill_label="the raster-sampled velocity_obs",
@@ -1292,6 +1305,7 @@ def setup_model(restart_from=None, *, allow_timing_cache_a_ref=False,
 
     z = Function(Z)
     z.sub(0).interpolate(Constant(0.1) * u_obs)
+    z_cold_seed = z.copy(deepcopy=True)
     if u_guess is not None:
         # Warm start: seed the diagnostic solve with the checkpoint velocity
         # (H/s/phi_eff/anchors were already restored in the reference block).
@@ -1649,6 +1663,42 @@ def setup_model(restart_from=None, *, allow_timing_cache_a_ref=False,
                     "loaded state and handing the step to the rescue ladder "
                     f"(atol={restart_atol:.2e})"
                 )
+
+    # Cold start from a MAP carrying its accepted mixed state: one bounded
+    # Newton solve at the full exponents from that state, the restart rule
+    # above. The n=1 first step of the continuation from 0.1 u_obs ran more
+    # than 40 min on the 2 km SEP1 MAP under scpc_gamg (NOTS 1743893, a
+    # one-hour link); from the MAP's own state the solve is a perturbation,
+    # by the backdated geometry at most. A failed solve restores 0.1 u_obs
+    # and runs the continuation as before.
+    if not is_restart and map_state_name is not None:
+        n_flow.assign(n_flow_val)
+        m_slide.assign(m_slide_val)
+        _rtol0, _atol0, _stol0, _max_it0 = slvr.snes.getTolerances()
+        _bounds = final_solve_bounds()
+        slvr.snes.setTolerances(stol=_bounds["snes_stol"],
+                                max_it=_bounds["snes_max_it"])
+        try:
+            solve_diagnostic("cold-start-from-map-state", state=map_state_name)
+            restart_solved = True
+            fnorm_conv = slvr.snes.getFunctionNorm()
+            run_atol = (
+                snes_atol_scale() * fnorm_conv if fnorm_conv > 0.0 else _atol0
+            )
+            slvr.snes.setTolerances(atol=run_atol, stol=_stol0, max_it=_max_it0)
+            PETSc.Sys.Print(
+                f"Initial diagnostic solve: from the MAP's {map_state_name} "
+                f"state at the full exponents (||F|| -> {fnorm_conv:.2e}; "
+                f"run atol={run_atol:.2e}), no continuation"
+            )
+        except fd.ConvergenceError:
+            slvr.snes.setTolerances(atol=_atol0, stol=_stol0, max_it=_max_it0)
+            z.assign(z_cold_seed)
+            z_init.assign(z_cold_seed)
+            PETSc.Sys.Print(
+                f"Initial diagnostic solve from the MAP's {map_state_name} state "
+                "did not converge; continuation from 0.1 u_obs instead"
+            )
 
     if not restart_solved:
         PETSc.Sys.Print(

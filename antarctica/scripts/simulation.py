@@ -59,6 +59,7 @@ RESULTS_DIR = os.path.join(_ROOT, "results")
 sys.path.insert(0, os.path.dirname(_ROOT))
 from mesh_naming import mesh_filename, mesh_stem
 
+from icepack2_tools.staging import node_local_copy
 from icepack2_tools.transfer import interpolate_with_fill, meshes_match
 from icepack2_tools.mpi_stats import (
     global_count,
@@ -348,7 +349,13 @@ def setup_model(restart_from=None, *, allow_timing_cache_a_ref=False,
     # calving BC is preserved.
     source_chk = restart_from if is_restart else inv_fn
     PETSc.Sys.Print(f"Loading mesh + reference state: {source_chk}")
-    with fd.CheckpointFile(source_chk, "r") as _chk:
+    # Read from a node-local copy (icepack2_tools.staging): over NFS through
+    # ROMIO a 2 km MAP took 45+ min to load on NOTS. source_chk stays the
+    # path every message and provenance record names.
+    source_read = node_local_copy(source_chk)
+    if source_read != source_chk:
+        PETSc.Sys.Print(f"  (read from the node-local copy {source_read})")
+    with fd.CheckpointFile(source_read, "r") as _chk:
         source_mesh = _chk.load_mesh()
         # A cold start normally binds itself to a MAP of the right
         # configuration through map_basename, which encodes friction, n and
@@ -724,7 +731,7 @@ def setup_model(restart_from=None, *, allow_timing_cache_a_ref=False,
         }
         return target_field
 
-    with fd.CheckpointFile(source_chk, "r") as chk:
+    with fd.CheckpointFile(source_read, "r") as chk:
         theta_f = load_checkpoint_field(chk, "log_friction", Q)
         theta_f.rename("theta")
         phi_f = load_checkpoint_field(chk, "log_fluidity", Q)

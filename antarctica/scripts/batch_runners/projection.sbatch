@@ -207,8 +207,12 @@ if [ -z "$wall_stop_min" ]; then
     wall_stop_min=$(python - "$tl" <<'PY'
 import sys
 tl = sys.argv[1]
-# Minutes held back for the final checkpoint write and the resubmit below.
-MARGIN_MIN = 25.0
+import os
+# Minutes held back for the final checkpoint write and the resubmit below:
+# ISMIP7_WALL_MARGIN_MIN, default 25, sized for a 1 km final write; a 2 km
+# write takes well under a minute, and a one-hour scavenge link cannot spare
+# 25 of its 60 minutes. Exported values reach every link of the chain.
+MARGIN_MIN = float(os.environ.get("ISMIP7_WALL_MARGIN_MIN", "25"))
 # Slurm renders a limit as [days-]HH:MM:SS or, under one hour, MM:SS.
 days, _, clock = tl.rpartition("-")
 parts = clock.split(":")

@@ -59,7 +59,7 @@ RESULTS_DIR = os.path.join(_ROOT, "results")
 sys.path.insert(0, os.path.dirname(_ROOT))
 from mesh_naming import mesh_filename, mesh_stem
 
-from icepack2_tools.staging import node_local_copy
+from icepack2_tools.staging import node_local_copy, staged_write
 from icepack2_tools.transfer import interpolate_with_fill, meshes_match
 from icepack2_tools.mpi_stats import (
     global_count,
@@ -1934,7 +1934,7 @@ def save_model_state(ctx, final_path, t_now, extra_attrs=None):
             ctx["F"], form_compiler_parameters=ctx.get("fc_params")
         ).dat.vec_ro as _rv:
             full_state_residual = float(_rv.norm())
-    tmp = final_path + ".tmp"
+    tmp, commit = staged_write(final_path, mesh.comm)
     with fd.CheckpointFile(tmp, "w") as chk:
         chk.save_mesh(mesh)
         chk.save_function(ctx["theta"], name="log_friction")
@@ -2025,10 +2025,7 @@ def save_model_state(ctx, final_path, t_now, extra_attrs=None):
             if value is not None:
                 chk.set_attr("/", name, value)
 
-    mesh.comm.barrier()
-    if mesh.comm.rank == 0:
-        os.replace(tmp, final_path)
-    mesh.comm.barrier()
+    commit()
 
 
 def _global_argmax_with_payload(values, xy, payload, comm):

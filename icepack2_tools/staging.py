@@ -20,11 +20,12 @@ from mpi4py import MPI
 _COPIES = {}
 
 
-def staging_enabled():
-    r"""``ISMIP7_STAGE_READS``: ``1`` stages, ``0`` reads in place. The
-    default stages under Slurm (a networked results tree) and reads in place
-    off it (a workstation's own disk)."""
-    value = os.environ.get("ISMIP7_STAGE_READS")
+def staging_enabled(var="ISMIP7_STAGE_READS"):
+    r"""``ISMIP7_STAGE_READS`` (reads) or ``ISMIP7_STAGE_WRITES`` (writes):
+    ``1`` stages, ``0`` goes straight to the networked path. The default
+    stages under Slurm (a networked results tree) and not off it (a
+    workstation's own disk)."""
+    value = os.environ.get(var)
     if value is None:
         return bool(os.environ.get("SLURM_JOB_ID"))
     return value.strip().lower() not in ("", "0", "false", "no", "off")
@@ -64,3 +65,53 @@ def node_local_copy(path, comm=MPI.COMM_WORLD):
         return local
     finally:
         node.Free()
+
+
+def staged_write(final_path, comm=MPI.COMM_WORLD):
+    r"""Where to write ``final_path``, and how to put it in place.
+
+    Collective over ``comm``. Returns ``(path, commit)``: every rank writes
+    and closes the file at ``path``, then every rank calls ``commit()``,
+    which leaves it at ``final_path`` by an atomic rename. Staged (a
+    single-node job with ``ISMIP7_STAGE_WRITES`` on), ``path`` is on node-local
+    disk and ``commit`` copies the closed file beside ``final_path`` before
+    the rename: a 2 km checkpoint written in place over NFS through ROMIO
+    took 9 min of a one-hour link's 8-minute margin on NOTS (3 Oct 2026).
+    Otherwise ``path`` is ``final_path + ".tmp"`` and ``commit`` renames it.
+    A killed write leaves the previous ``final_path`` intact either way.
+    """
+    in_place = final_path + ".tmp"
+    if not staging_enabled("ISMIP7_STAGE_WRITES"):
+        return in_place, _committer(in_place, final_path, None, comm)
+    node = comm.Split_type(MPI.COMM_TYPE_SHARED)
+    single = node.size == comm.size
+    node.Free()
+    if not single:
+        return in_place, _committer(in_place, final_path, None, comm)
+    tmpdir = None
+    if comm.rank == 0:
+        try:
+            tmpdir = tempfile.mkdtemp(prefix="ismip7_write_",
+                                      dir=os.environ.get("TMPDIR") or "/tmp")
+        except OSError:
+            tmpdir = None
+    tmpdir = comm.bcast(tmpdir, root=0)
+    if tmpdir is None:
+        return in_place, _committer(in_place, final_path, None, comm)
+    local = os.path.join(tmpdir, os.path.basename(final_path))
+    return local, _committer(local, final_path, tmpdir, comm)
+
+
+def _committer(path, final_path, tmpdir, comm):
+    def commit():
+        comm.Barrier()
+        if comm.rank == 0:
+            if tmpdir is None:
+                os.replace(path, final_path)
+            else:
+                beside = final_path + ".tmp"
+                shutil.copyfile(path, beside)
+                os.replace(beside, final_path)
+                shutil.rmtree(tmpdir, ignore_errors=True)
+        comm.Barrier()
+    return commit

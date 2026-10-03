@@ -9,9 +9,9 @@ gitignored, so these records and the per-core reports beside them are
 the trace a run leaves in the repository. A core experiment also gets
 its full report from `core_report.py`; this is the index.
 
-214 records.
+217 records.
 
-Status: 12 planned, 3 running, 16 stopped, 166 done, 17 superseded.
+Status: 12 planned, 3 running, 16 stopped, 169 done, 17 superseded.
 
 ## Inversion
 
@@ -154,6 +154,9 @@ Status: 12 planned, 3 running, 16 stopped, 166 done, 17 superseded.
 | 2 km inversion, production configuration with five-solve evaluations, scpc_gamg (NLEQ-ERR, Krylov rtol 1e-8) on 32 ranks | done | Rice's antarctica_5000_2000_buffered0, read from the snapshot (ISMIP7_MESH=checkpoint; 925,183 vertices, 1,835,718 cells), DG0 geometry, vertex raster sampling | IU Quartz, general partition | 2026-10-01 | 2026-10-02 | every iterate within 1.1e-9 of test-2km-inversion-prod-full-mumps-ec1, final 5.570022e4; no forward failed; every recorded solve confirmed with no step; 2.4 times slower than full_mumps |
 | 32 km inversion, the time outside the forward and adjoint by span, before and after the factored prior solve (L-BFGS-B and TAO) | done | antarctica_320000_32000_buffered0 (Quartz's .msh, sha256 fd66fc42; 6,282 vertices, 9,055 cells), DG0 geometry, vertex raster sampling | IU workstation (Mac, 16 cores, 128 GB), data under /Volumes/LaCie/Data/antarctica_general/ismip7_obs; another session's 8-rank jobs shared the machine for most runs (load at each start in its commit.txt) | 2026-10-02 | 2026-10-02 | L-BFGS-B: objective within 1.1e-14 and \|grad\| within 2.6e-13 of the base over 7 evaluations, final 1.320942e4, published \|\|F\|\| 2.941e1 in every run; outside the solves, prior_solve 0.037 to 0.002 s and residual_norm 0.074 s, the rest under 0.002 s. TAO: objective within 2.2e-13 over 5 evaluations, final 1.438882e4, published \|\|F\|\| 1.96e-2; residual_norm 7.86 to 0.23 s an iteration (the fnorm-ceiling check off the tape), prior_solve 0.037 to 0.002 s, prior_taped 0.042 to 0.006 s. Every TAO run failed its forward at the same three trial points and took the re-ramp rescue (reramp span, 2.9 s an iteration at 4e45164) |
 | 32 km inversion cold start with the exp friction control and SEP2 sub-element friction, full_mumps and scpc_gamg | stopped | antarctica_320000_32000_buffered0 (Quartz's .msh, sha256 fd66fc42; 6,282 vertices, 9,055 cells), DG0 geometry, vertex raster sampling | IU workstation (Mac, 16 cores, 128 GB), data under /Volumes/LaCie/Data/antarctica_general/ismip7_obs | 2026-10-01 | 2026-10-01 | the startup ramp (full_mumps in both runs, unannotated, before the solver under test runs) diverged on every rung near n = 2.1 (rung 1 step 5 to \|\|F\|\| 4e37 and 4e20, rung 2 and rung 3 likewise) and the run stopped with ConvergenceError; the solver choice played no part |
+| 32 km inversion continued on its warm start's own mesh (ISMIP7_MESH=checkpoint) with the environment naming the 1 km mesh | done | antarctica_320000_32000_buffered0 (Quartz's .msh, sha256 fd66fc42; 6,282 vertices, 9,055 cells), DG0 geometry, vertex raster sampling | IU workstation (Mac, 16 cores, 128 GB), data under /Volumes/LaCie/Data/antarctica_general/ismip7_obs | 2026-10-02 | 2026-10-02 | 2 iterations, 4 evaluations, objective 1.394425e4 (the warm start's final objective to every printed digit) to 1.394141e4; the MAP and the timing record carry mesh_basename antarctica_320000_32000_buffered0.msh with lc 32000, lc_coarse 320000, buffer_m 0, read from the warm start, and the figure is inversion_icepack2_32000.png, where before 15328b9 they took the environment's 1000, 10000 and 20000; published residual 1.7e0 |
+| 32 km inversion, 3 L-BFGS-B iterations on PR 155's gated head, against the SEP1 study arm | done | antarctica_320000_32000_buffered0 (Quartz's .msh, sha256 fd66fc42; 6,282 vertices, 9,055 cells), DG0 geometry, vertex raster sampling | IU workstation (Mac, 16 cores, 128 GB), data under /Volumes/LaCie/Data/antarctica_general/ismip7_obs | 2026-10-02 | 2026-10-02 | 3 iterations, 4 evaluations, objective 4.923890e4 to 1.946656e4; every evaluation within 4.5e-15 (objective) and 1.4e-14 (gradient norm) of test-32km-inversion-sep1-opt-log-none; unspanned at least 3.5e-5 s in every evaluation; published residual 1.0e1 |
+| 32 km inversion, 3 TAO iterations on PR 155's gated head, against the SEP1 solver pair | done | antarctica_320000_32000_buffered0 (Quartz's .msh, sha256 fd66fc42; 6,282 vertices, 9,055 cells), DG0 geometry, vertex raster sampling | IU workstation (Mac, 16 cores, 128 GB), data under /Volumes/LaCie/Data/antarctica_general/ismip7_obs | 2026-10-02 | 2026-10-02 | 3 TAO iterations, objective 4.923890e4 to 2.050149e4; every iteration within 2.7e-15 (objective) and 6.8e-15 (gradient norm) of test-32km-inversion-sep1-full-mumps; unspanned at least 0.37 s; published residual 1.0e1 |
 | 32 km inversion, 30 L-BFGS-B iterations under full_mumps, the reference for the scpc_gamg trajectory | done | antarctica_320000_32000_buffered0 (Quartz's .msh, sha256 fd66fc42; 6,282 vertices, 9,055 cells), DG0 geometry, vertex raster sampling | IU workstation (Mac, 16 cores, 128 GB), data under /Volumes/LaCie/Data/antarctica_general/ismip7_obs | 2026-10-01 | 2026-10-01 | objective 3.0156e4 to 3.7463e3; published residual 9.99e-4 after a final solve that converged in 0 Newton iterations; no forward failed |
 | 32 km inversion, 30 L-BFGS-B iterations under scpc_gamg (bt line search) | done | antarctica_320000_32000_buffered0 (Quartz's .msh, sha256 fd66fc42; 6,282 vertices, 9,055 cells), DG0 geometry, vertex raster sampling | IU workstation (Mac, 16 cores, 128 GB), data under /Volumes/LaCie/Data/antarctica_general/ismip7_obs | 2026-10-01 | 2026-10-01 | the same 30 iterations and 32 evaluations as test-32km-inversion-lbfgs-full-mumps; every evaluation's objective within 4.3e-7 of it and \|grad\| within 1e-4; published residual 1.20e-3; no forward failed; every recorded solve confirmed the paused solve's state with no step |
 | 32 km inversion, 12 L-BFGS-B iterations on PR 155 after both follow-ups merged, against the issue #157 none arm | done | antarctica_320000_32000_buffered0 (Quartz's .msh, sha256 fd66fc42; 6,282 vertices, 9,055 cells), DG0 geometry, vertex raster sampling | IU workstation (Mac, 16 cores, 128 GB), data under /Volumes/LaCie/Data/antarctica_general/ismip7_obs | 2026-10-02 | 2026-10-02 | 12 L-BFGS-B iterations in 13 evaluations, objective 7.849914e4 to 1.717453e4; every evaluation's objective within 2.8e-14 and gradient norm within 1.3e-12 of test-32km-inversion-opt-none; no forward failure; published residual 23.4 |
@@ -3587,6 +3590,63 @@ Core 11 at 32 km without the apparent-MB reference, a cold start on the OCX prot
 - **Results path:** /Volumes/LaCie/Data/antarctica_general/ismip7_runs/inversion_solver_32km/{prod_full,prod_gamg}/log.txt
 - **Audit:** the startup ramp (full_mumps in both runs, unannotated, before the solver under test runs) diverged on every rung near n = 2.1 (rung 1 step 5 to \|\|F\|\| 4e37 and 4e20, rung 2 and rung 3 likewise) and the run stopped with ConvergenceError; the solver choice played no part
 - **Notes:** ISMIP7_SUBELEMENT_FRICTION=1 ISMIP7_FRICTION_CONTROL=exp ISMIP7_EVAL_CONTINUATION=1 ISMIP7_GRAD_PRECOND=mass_consistent; the follow-up pair test-32km-inversion-subelement-* runs the log control
+
+### test-32km-inversion-gate-check-checkpoint-mesh
+
+32 km inversion continued on its warm start's own mesh (ISMIP7_MESH=checkpoint) with the environment naming the 1 km mesh (done), IU.
+
+- **Task type:** test
+- **Friction law:** budd
+- **Mesh:** antarctica_320000_32000_buffered0 (Quartz's .msh, sha256 fd66fc42; 6,282 vertices, 9,055 cells), DG0 geometry, vertex raster sampling
+- **Initial state / MAP:** warm start /Volumes/LaCie/Data/antarctica_general/ismip7_runs/pr158_merge/B_log_none/map.h5 (test-32km-inversion-sep1-opt-log-none), its mesh, geometry, velocity_obs, state and fluidity prior; ISMIP7_MESH=checkpoint with ISMIP7_LC=1000, ISMIP7_LC_COARSE=10000, ISMIP7_BUFFER_M=20000 set on purpose
+- **Forcing versions:** MEaSUREs v2 450 m (sha256 268be94e) and BedMachine v4.1 (sha256 6bd08dbb), byte-identical to Quartz's antarctica/data; ISMIP7_FLUIDITY_PRIOR=legacy; the log friction control; SEP1 sub-element friction, version 2 (the default), with the exact front push; bi-Laplacian prior (sigma 0.3 on theta and phi, rho 7.5 km); ISMIP7_INVERSION_LINEAR_SOLVER=full_mumps; no dH/dt term; log-speed weight 0; scipy L-BFGS-B in plain coordinates (ISMIP7_GRAD_PRECOND=none)
+- **Site / partition:** IU workstation (Mac, 16 cores, 128 GB), data under /Volumes/LaCie/Data/antarctica_general/ismip7_obs
+- **Ranks / memory:** 4 ranks, the three checks run together, nothing else heavy on the machine (load average 2.55 at the start, 8.5 to 8.9 at the end); peak 2.5 to 2.6 GB a rank
+- **Code:** ecbdd7f (PR 155 after its second no-mistakes gate run, with the gate's fixes 8addc9c and 15328b9; a git archive run from the session scratch); icepack_tools e7b923e
+- **Started:** 2026-10-02
+- **Finished:** 2026-10-02
+- **Cost per model year:** 106 s wall; 4.85 s an evaluation (median after the first) and 1.60 s before each the per-evaluation checkpoint
+- **Results path:** /Volumes/LaCie/Data/antarctica_general/ismip7_runs/pr155_gate_check/G_ckpt/map.h5 (sha256 f43d7744), log.txt, timing.json, code.txt; the wrapper is runm2.sh in pr155_gate_check
+- **Audit:** 2 iterations, 4 evaluations, objective 1.394425e4 (the warm start's final objective to every printed digit) to 1.394141e4; the MAP and the timing record carry mesh_basename antarctica_320000_32000_buffered0.msh with lc 32000, lc_coarse 320000, buffer_m 0, read from the warm start, and the figure is inversion_icepack2_32000.png, where before 15328b9 they took the environment's 1000, 10000 and 20000; published residual 1.7e0
+- **Notes:** checks the gate's checkpoint mesh provenance fix (15328b9) end to end
+
+### test-32km-inversion-gate-check-lbfgs
+
+32 km inversion, 3 L-BFGS-B iterations on PR 155's gated head, against the SEP1 study arm (done), IU.
+
+- **Task type:** test
+- **Friction law:** budd
+- **Mesh:** antarctica_320000_32000_buffered0 (Quartz's .msh, sha256 fd66fc42; 6,282 vertices, 9,055 cells), DG0 geometry, vertex raster sampling
+- **Initial state / MAP:** cold start: u = 0.1 u_obs, theta = phi = 0, the n,m 1 to 3 ramp under full_mumps, then the direct forward (ISMIP7_DIRECT_FORWARD default)
+- **Forcing versions:** MEaSUREs v2 450 m (sha256 268be94e) and BedMachine v4.1 (sha256 6bd08dbb), byte-identical to Quartz's antarctica/data; ISMIP7_FLUIDITY_PRIOR=legacy; the log friction control; SEP1 sub-element friction, version 2 (the default), with the exact front push; bi-Laplacian prior (sigma 0.3 on theta and phi, rho 7.5 km); ISMIP7_INVERSION_LINEAR_SOLVER=full_mumps; no dH/dt term; log-speed weight 0; scipy L-BFGS-B in plain coordinates (ISMIP7_GRAD_PRECOND=none)
+- **Site / partition:** IU workstation (Mac, 16 cores, 128 GB), data under /Volumes/LaCie/Data/antarctica_general/ismip7_obs
+- **Ranks / memory:** 4 ranks, the three checks run together, nothing else heavy on the machine (load average 2.55 at the start, 8.5 to 8.9 at the end); peak 2.5 to 2.6 GB a rank
+- **Code:** ecbdd7f (PR 155 after its second no-mistakes gate run, with the gate's fixes 8addc9c and 15328b9; a git archive run from the session scratch); icepack_tools e7b923e
+- **Started:** 2026-10-02
+- **Finished:** 2026-10-02
+- **Cost per model year:** 105 s wall; 4.86 s an evaluation (median after the first) and 1.59 s before each the per-evaluation checkpoint
+- **Results path:** /Volumes/LaCie/Data/antarctica_general/ismip7_runs/pr155_gate_check/G_lbfgs/map.h5 (sha256 30a4298a), log.txt, timing.json, code.txt; the wrapper is runm2.sh in pr155_gate_check
+- **Audit:** 3 iterations, 4 evaluations, objective 4.923890e4 to 1.946656e4; every evaluation within 4.5e-15 (objective) and 1.4e-14 (gradient norm) of test-32km-inversion-sep1-opt-log-none; unspanned at least 3.5e-5 s in every evaluation; published residual 1.0e1
+- **Notes:** checks the gate's timing reduction (8addc9c) on the scipy path end to end: the driver's new collective reductions complete on 4 ranks and the iterates are unchanged
+
+### test-32km-inversion-gate-check-tao
+
+32 km inversion, 3 TAO iterations on PR 155's gated head, against the SEP1 solver pair (done), IU.
+
+- **Task type:** test
+- **Friction law:** budd
+- **Mesh:** antarctica_320000_32000_buffered0 (Quartz's .msh, sha256 fd66fc42; 6,282 vertices, 9,055 cells), DG0 geometry, vertex raster sampling
+- **Initial state / MAP:** cold start: u = 0.1 u_obs, theta = phi = 0, the n,m 1 to 3 ramp under full_mumps, then the direct forward (ISMIP7_DIRECT_FORWARD default)
+- **Forcing versions:** MEaSUREs v2 450 m (sha256 268be94e) and BedMachine v4.1 (sha256 6bd08dbb), byte-identical to Quartz's antarctica/data; ISMIP7_FLUIDITY_PRIOR=legacy; the log friction control; SEP1 sub-element friction, version 2 (the default), with the exact front push; bi-Laplacian prior (sigma 0.3 on theta and phi, rho 7.5 km); ISMIP7_INVERSION_LINEAR_SOLVER=full_mumps; no dH/dt term; log-speed weight 0; TAO lmvm with the mass-consistent metric (ISMIP7_GRAD_PRECOND=mass_consistent)
+- **Site / partition:** IU workstation (Mac, 16 cores, 128 GB), data under /Volumes/LaCie/Data/antarctica_general/ismip7_obs
+- **Ranks / memory:** 4 ranks, the three checks run together, nothing else heavy on the machine (load average 2.55 at the start, 8.5 to 8.9 at the end); peak 2.5 to 2.6 GB a rank
+- **Code:** ecbdd7f (PR 155 after its second no-mistakes gate run, with the gate's fixes 8addc9c and 15328b9; a git archive run from the session scratch); icepack_tools e7b923e
+- **Started:** 2026-10-02
+- **Finished:** 2026-10-02
+- **Cost per model year:** 112 s wall; 6.87 s a TAO iteration (median after the first), of it 1.50 s the checkpoint
+- **Results path:** /Volumes/LaCie/Data/antarctica_general/ismip7_runs/pr155_gate_check/G_tao/map.h5 (sha256 95d4c1ba), log.txt, timing.json, code.txt; the wrapper is runm2.sh in pr155_gate_check
+- **Audit:** 3 TAO iterations, objective 4.923890e4 to 2.050149e4; every iteration within 2.7e-15 (objective) and 6.8e-15 (gradient norm) of test-32km-inversion-sep1-full-mumps; unspanned at least 0.37 s; published residual 1.0e1
+- **Notes:** checks the gate's timing reduction (8addc9c) on the TAO path end to end
 
 ### test-32km-inversion-lbfgs-full-mumps
 

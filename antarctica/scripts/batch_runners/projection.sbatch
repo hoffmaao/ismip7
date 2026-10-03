@@ -123,7 +123,7 @@ export ISMIP7_INVERSION="${ISMIP7_INVERSION:-$ISMIP7_MAP_DEFAULT}"
 # 64 ranks, outflux equal to 9e-13) in 43 % of the time. Named here and
 # nowhere more general: this variable also selects the inversion's startup
 # ramp and lane stamp. ISMIP7_INVERSION_LINEAR_SOLVER separately selects the
-# taped forwards, adjoints and publishing solve, with full_mumps as its
+# taped forwards, adjoints and publishing solve, with scpc_gamg as its
 # default. ISMIP7_DIAGNOSTIC_LINEAR_SOLVER=full_mumps restores the forward
 # reference.
 export ISMIP7_DIAGNOSTIC_LINEAR_SOLVER="${ISMIP7_DIAGNOSTIC_LINEAR_SOLVER:-scpc_gamg}"

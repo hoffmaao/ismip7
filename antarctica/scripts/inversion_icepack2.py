@@ -673,9 +673,9 @@ def main():
     # that would otherwise reach their real result -- README "Timing
     # benchmark" §7). The linear solve of every annotated forward, of the
     # adjoint tlm_adjoint solves against it, and of the publishing solve
-    # follows ISMIP7_INVERSION_LINEAR_SOLVER: full_mumps (the default) is the
-    # full mixed-Jacobian MUMPS LU, scpc_mumps and scpc_gamg the transient's
-    # condensed modes (icepack2_tools/taped_solve.py). The MAP records it as
+    # follows ISMIP7_INVERSION_LINEAR_SOLVER: full_mumps is the full
+    # mixed-Jacobian MUMPS LU, scpc_mumps and scpc_gamg (the default) the
+    # transient's condensed modes (icepack2_tools/taped_solve.py). The MAP records it as
     # state_solver_mode beside the lane contract diagnostic_solver_mode.
     state_solver_mode = inversion_solver_mode()
     sparams = inversion_state_parameters(state_solver_mode)

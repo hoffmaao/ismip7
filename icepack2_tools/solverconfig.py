@@ -50,8 +50,11 @@ DIAGNOSTIC_SOLVER_ALIASES = {
 # its own, so the scpc_mumps the timing campaign exports for the lane's
 # ISMIP7_DIAGNOSTIC_LINEAR_SOLVER leaves the taped solve where it was. The
 # approximate-Schur modes are out: their selfp preconditioner was never
-# qualified for the mixed system.
-INVERSION_SOLVER_DEFAULT = "full_mumps"
+# qualified for the mixed system. scpc_gamg is the default since the final
+# Quartz round of issues 156 and 157 (README, "Inversion solver"): under the
+# direct forward it took full_mumps's iterates 1.35 to 1.5 times faster an
+# evaluation at 2 km and 4.6 times at 1 km, with half the memory.
+INVERSION_SOLVER_DEFAULT = "scpc_gamg"
 INVERSION_SOLVER_MODES = ("full_mumps", "scpc_mumps", "scpc_gamg")
 # The inversion's taped forward under scpc_* solves its Newton corrections to
 # a relative 1e-8, not the transient's 1e-6. Each evaluation starts from the

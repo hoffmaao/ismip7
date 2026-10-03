@@ -253,7 +253,7 @@ objective:
   same on both paths (69 and 70 s); in the 7 evaluations and 499 s of TAO's
   whole run `none` reached 2.554e5 against TAO's 3.156e5, passing TAO's final
   objective at its sixth evaluation, and 1.497e5 after 13.
-* Whether the chains change optimizer is the group's call (issue #157).
+* 3 October: the chains take `none` (section 4).
 
 ## 4. Decisions taken
 
@@ -273,6 +273,15 @@ objective:
   were stopped. On the same 2 km start SEP1 reached misfit 3.42e9 in 21
   accepted iterations with no failed line-search trial; SEP2 reached 4.21e9
   with nine (read from the NOTS logs).
+* 3 October: the inversion's linear solver defaults to `scpc_gamg`
+  (`ISMIP7_INVERSION_LINEAR_SOLVER`), and the chains run L-BFGS-B without a
+  metric (`ISMIP7_GRAD_PRECOND=none`, the code default) in place of TAO with
+  the mass-consistent metric. On the final Quartz round at 2 km and 1 km
+  (section 3, issue #157; README, "Inversion solver") `scpc_gamg` took the
+  same iterates 1.35 to 1.5 times faster at 2 km and 4.6 times at 1 km, and
+  L-BFGS-B reached TAO's 60-iteration objective in 14 evaluations against 79.
+  A chain switching optimizer mid-way runs one link with
+  `ISMIP7_WARM_START_STRICT=0`: `grad_precond` is an objective key.
 
 ## 5. The forward this hands to: the 2003 chain
 

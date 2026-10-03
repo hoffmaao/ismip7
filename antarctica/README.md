@@ -359,8 +359,8 @@ loud warning. See
 
 `ISMIP7_INVERSION_LINEAR_SOLVER` picks the linear solver of every solve
 `tlm_adjoint` differentiates, and of the solve that publishes the MAP's state.
-`full_mumps`, the default, factors the whole mixed Jacobian. `scpc_gamg` is
-the transient's production solver: Slate eliminates `M` and `τ` cell by cell
+`full_mumps` factors the whole mixed Jacobian. `scpc_gamg`, the default since
+3 October, is the transient's production solver: Slate eliminates `M` and `τ` cell by cell
 and GAMG solves the condensed velocity system. `scpc_mumps` condenses the same
 way and factors the condensed system, which makes it the exact reference for
 `scpc_gamg`.
@@ -374,10 +374,10 @@ PR 158. PR 158 made SEP1 and the direct forward, one solve an evaluation, the
 inversion's defaults. The older one-solve rows predate three changes that move
 each side: `full_mumps` lost the SCPC zero blocks, so its seconds are upper
 bounds; `scpc_gamg` keeps its solver across evaluations; both lost the prior's
-per-call LU. The default deliberately remains `full_mumps`, and the group owns
-the solver choice for Rice's chains. The closing workstation and Quartz tables
-record the SEP1 direct-forward measurements for that decision. Seconds a TAO iteration
-on 32 ranks of Quartz,
+per-call LU. Under SEP1 and the direct forward `scpc_gamg` is the faster at
+every production resolution (the closing workstation and Quartz tables), and
+it is the default since 3 October; `full_mumps` stays available as the exact
+reference. Seconds a TAO iteration on 32 ranks of Quartz,
 SEP2 sub-element friction, the exact front push, the mass-consistent metric:
 
 | evaluations | mesh | `full_mumps` | `scpc_gamg` |
@@ -1383,12 +1383,12 @@ projection), run in that run's own shell so it captures the environment.
 | `ISMIP7_DIRECT_FORWARD_MAXIT` / `_DTOL` | the direct solve's Newton iteration cap, and the residual growth (`snes_divergence_tolerance`) at which it is a lost trial | `30` / `1e6` |
 | `ISMIP7_TRIAL_RESCUE_RUNGS` | rungs of the continuation ladder a failed line-search trial may climb before the trial counts as failed; `0` sends it straight to backtracking | `1` |
 | `ISMIP7_EVAL_CONTINUATION` | with `ISMIP7_DIRECT_FORWARD=0` only: `0` keeps the initial `n,m: 1→n` ramp and then solves each annotated forward eval once at the full exponents, from the previous eval's state; a trial point where that solve fails takes the TAO path's re-ramp rescue. The objective is the same either way, and the MAP records the mode as `eval_continuation` | `1` |
-| `ISMIP7_INVERSION_LINEAR_SOLVER` | linear solver of the annotated forwards, of the adjoint solves against them and of the publishing solve: `full_mumps` (the full mixed-Jacobian MUMPS LU), `scpc_mumps` or `scpc_gamg` (the transient's condensed modes; see "Inversion solver" in section 4). Recorded in the published (full-state) MAP as `state_solver_mode`, with its options as `state_solver_parameters`; the periodic checkpoints carry no solver record. It is outside the objective, so a chain may change it between links. The startup ramp follows `ISMIP7_DIAGNOSTIC_LINEAR_SOLVER` | `full_mumps` |
+| `ISMIP7_INVERSION_LINEAR_SOLVER` | linear solver of the annotated forwards, of the adjoint solves against them and of the publishing solve: `full_mumps` (the full mixed-Jacobian MUMPS LU), `scpc_mumps` or `scpc_gamg` (the transient's condensed modes; see "Inversion solver" in section 4). Recorded in the published (full-state) MAP as `state_solver_mode`, with its options as `state_solver_parameters`; the periodic checkpoints carry no solver record. It is outside the objective, so a chain may change it between links. The startup ramp follows `ISMIP7_DIAGNOSTIC_LINEAR_SOLVER` | `scpc_gamg` (`full_mumps` until 3 October) |
 | `ISMIP7_INVERSION_KSP_RTOL` / `ISMIP7_INVERSION_SNES_LINESEARCH` | `scpc_*` taped forwards only: outer Krylov relative tolerance and Newton line search. The direct forward inherits both through `direct_forward_parameters`; `full_mumps` keeps the shared `ISMIP7_SNES_*` settings | `1e-8` / `ISMIP7_SNES_LINESEARCH` (`nleqerr`) |
 | `ISMIP7_GAMMA_THETA` / `ISMIP7_GAMMA_PHI` | Whittle-Matern prior strength on `θ` and `φ`, coupled to `ISMIP7_MISFIT_NORM` since normalising divides the misfit by about sigma^2. `scripts/lsurface.py` sweeps both on a grid and picks the L-curve corner of each (usage in its docstring) | `1e5` under `sigma`, `1e4` under `none` |
 | `ISMIP7_L_REG` | prior correlation length (m) | `7.5e3` |
 | `ISMIP7_MAXITER` | L-BFGS-B iteration cap | `500` |
-| `ISMIP7_GRAD_PRECOND` | `none` is the raw-dof l2 metric, which is mesh dependent, so fine grounding-line cells converge slowest. `mass` optimises in `u = sqrt(M) x` under scipy, making the rate mesh independent. `mass_consistent` and `prior` run under TAO instead (scipy takes no preconditioner) with the initial inverse Hessian set to `M^-1` or to the prior covariance; `mass_consistent` is the consistent mass Riesz map; `prior`, the prior-preconditioned variant, was not used and is experimental here. Defaults to `none` to keep runs comparable with everything measured so far | `none` |
+| `ISMIP7_GRAD_PRECOND` | `none` is the raw-dof l2 metric, which is mesh dependent, so fine grounding-line cells converge slowest. `mass` optimises in `u = sqrt(M) x` under scipy, making the rate mesh independent. `mass_consistent` and `prior` run under TAO instead (scipy takes no preconditioner) with the initial inverse Hessian set to `M^-1` or to the prior covariance; `mass_consistent` is the consistent mass Riesz map; `prior`, the prior-preconditioned variant, was not used and is experimental here. `none` measured fastest: at 2 km it reached TAO's 60-iteration objective in 14 evaluations against TAO's 79 (`INVERSION_PRIORS.md`, issue #157 section), and the chains take it since 3 October | `none` |
 | `ISMIP7_PRIOR_FORM` | `laplacian` uses `A = delta*M + gamma*K` as the prior precision; `bilaplacian` uses `A M^-1 A`, the squared-operator prior of Villa et al. (2021), the operator that a 2-D Whittle-Matern field needs to be function-valued. Different priors, not two spellings of one: their gammas are not convertible and their MAPs are not comparable, so the MAP stamps `prior_form` | `laplacian` |
 | `ISMIP7_PRIOR_SIGMA_THETA` / `_PHI`, `ISMIP7_PRIOR_RHO` | `bilaplacian` only: the log-deviation scale and correlation length (m), converted to `(delta, gamma)` by the closed forms of Villa et al. (2021), `sigma^2 = 1/(4 pi gamma delta)`, `rho = sqrt(8 gamma/delta)`. The un-squared form has no such closed form, which is why its gamma can only be tuned | `0.3` / `0.3` / `ISMIP7_L_REG` |
 | `ISMIP7_PRECOND_STEP0` | TAO metrics only: the largest change the FIRST step may make to a control, in that control's units, applied per control block. L-BFGS's first step is `-H_0 g` at unit length with no curvature pair to rescale it, and one evaluation outside the region where the forward has a solution returns NaN that every later trial point inherits | `0.15` |
@@ -1658,7 +1658,7 @@ the step, and each `sites/<name>.sh` the rank count (64 on Quartz).
 `ISMIP7_DIAGNOSTIC_LINEAR_SOLVER` owns these transient lanes and the
 inversion's startup ramp. `ISMIP7_INVERSION_LINEAR_SOLVER` separately selects
 the inversion's taped forwards, adjoints and publishing solve, with
-`full_mumps` as its default. Section 4 records the inversion measurements.
+`scpc_gamg` as its default. Section 4 records the inversion measurements.
 
 **Starting state.** The production MAP is inverted on the production mesh: a
 1 km / 10 km Budd inversion, warm-started from the 2 km Budd snapshot 0241,
@@ -1756,8 +1756,8 @@ The stages and contracts are:
    (`…_buffered20000.prepare.h5`: controls, fluidity prior, geometry, and
    mixed diagnostic state) and skips the cold `1→n` continuation. Ranks are 32
    for LC &lt; 2500 m and 16 otherwise; memory follows `INVERSION_MEMORY_BY_LC`,
-   conservatively sized for the default full mixed-Jacobian MUMPS
-   factorisation plus the adjoint tape. **The 500 m meshes are not
+   sized for the full mixed-Jacobian MUMPS factorisation plus the adjoint
+   tape, which leaves room under `scpc_gamg`, the default since 3 October. **The 500 m meshes are not
    re-inverted** (their invert needs ≈430 GB on one node); their lanes start
    from the prepared cache, i.e. the transferred 2.5 km MAP, and
    `TIMING_MATRIX.md` says so per mesh under "Initial states". After L-BFGS

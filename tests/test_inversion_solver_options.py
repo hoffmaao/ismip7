@@ -28,14 +28,14 @@ def _clean_env(monkeypatch):
         monkeypatch.delenv(name, raising=False)
 
 
-def test_default_is_full_mumps_whatever_the_lane_solver(monkeypatch):
-    assert sc.inversion_solver_mode() == "full_mumps"
+def test_default_is_scpc_gamg_whatever_the_lane_solver(monkeypatch):
+    assert sc.inversion_solver_mode() == "scpc_gamg"
     # The timing campaign exports scpc_mumps for the lane; the taped solve
     # has its own knob and stays put.
     monkeypatch.setenv("ISMIP7_DIAGNOSTIC_LINEAR_SOLVER", "scpc_mumps")
-    assert sc.inversion_solver_mode() == "full_mumps"
-    monkeypatch.setenv("ISMIP7_INVERSION_LINEAR_SOLVER", " SCPC_GAMG ")
     assert sc.inversion_solver_mode() == "scpc_gamg"
+    monkeypatch.setenv("ISMIP7_INVERSION_LINEAR_SOLVER", " FULL_MUMPS ")
+    assert sc.inversion_solver_mode() == "full_mumps"
 
 
 @pytest.mark.parametrize("mode", ["schur_gamg", "schur_mumps", "mumps", "lu"])

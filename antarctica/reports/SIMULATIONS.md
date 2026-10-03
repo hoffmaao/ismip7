@@ -9,9 +9,9 @@ gitignored, so these records and the per-core reports beside them are
 the trace a run leaves in the repository. A core experiment also gets
 its full report from `core_report.py`; this is the index.
 
-225 records.
+226 records.
 
-Status: 12 planned, 3 running, 16 stopped, 177 done, 17 superseded.
+Status: 12 planned, 3 running, 16 stopped, 178 done, 17 superseded.
 
 ## Inversion
 
@@ -128,6 +128,7 @@ Status: 12 planned, 3 running, 16 stopped, 177 done, 17 superseded.
 | 1 km inversion cost probe, scpc_gamg (bt) on 32 ranks | done | antarctica_10000_1000_buffered20000 (Rice's .msh on Quartz; 1,869,252 vertices, 3,716,587 cells), DG0 geometry, vertex raster sampling | IU Quartz, general partition | 2026-10-01 | 2026-10-01 | every evaluation's objective within 4.3e-9 of test-1km-inversion-cost-full-mumps-p32, final 4.179544e4; no forward failed; published residual 2.7e-4 |
 | 1 km inversion cost probe, scpc_gamg (bt) on 64 ranks | done | antarctica_10000_1000_buffered20000 (Rice's .msh on Quartz; 1,869,252 vertices, 3,716,587 cells), DG0 geometry, vertex raster sampling | IU Quartz, general partition | 2026-10-01 | 2026-10-01 | objective within 3.8e-5 of the 32-rank runs at every evaluation, 2e-5 at the first (the ramp's state follows the partition; startup scalars identical), final 4.179385e4; no forward failed |
 | 1 km inversion cost probe, the time outside the forward and adjoint by span, before and after the factored prior solve (scpc_gamg, 64 ranks) | done | antarctica_10000_1000_buffered20000 (Rice's .msh on Quartz; 1,869,252 vertices, 3,716,587 cells), DG0 geometry, vertex raster sampling | IU Quartz, general partition | 2026-10-02 | 2026-10-02 | objective within 7.0e-16 and \|grad\| within 2.2e-15 at every evaluation, final 4.179385e4 in both, the same as 10818449; published \|\|F\|\| 2.394e-4 in both; no forward failed. prior_solve was 98 % of the time outside the forward and adjoint at 2626c71. At 4e45164 the largest remaining spans are gather_gradient 0.34 s, set_controls 0.10 s and residual_norm 0.07 s, and L-BFGS-B's own step between evaluations takes 1.0 to 1.2 s |
+| 1 km inversion, 10 iterations of L-BFGS-B (no metric) under scpc_gamg, production settings, for the final solver and optimizer decision | done | antarctica_10000_1000_buffered20000 (the production mesh, 1,869,252 vertices), the warm start transferred onto it, DG0 geometry, vertex raster sampling | IU Quartz, general partition | 2026-10-03 | 2026-10-03 | 10 iterations, 13 evaluations, objective 6.209388e5 (the TAO arm's first evaluation exactly) to 1.496636e5; every direct forward converged, no lost trial, no rescue; published residual 3.3e-2. After 7 evaluations, the whole of test-1km-inversion-final-tao-scpc-gamg in the same 499 s, 2.5535e5 against TAO's 3.1563e5; TAO's final objective reached at evaluation 6 (425 s) |
 | 1 km inversion, 5 iterations of TAO lmvm under full_mumps, production settings, for the final solver and optimizer decision | done | antarctica_10000_1000_buffered20000 (the production mesh, 1,869,252 vertices), the warm start transferred onto it, DG0 geometry, vertex raster sampling | IU Quartz, general partition | 2026-10-03 | 2026-10-03 | 5 iterations, 7 evaluations, objective 6.209388e5 to 3.156258e5; every direct forward converged, no lost trial, no rescue; published residual 1.2e-2; every iterate within 1.1e-12 (objective) and 5.0e-12 (gradient norm) of the other solver's, the same Newton iterations in every direct solve |
 | 1 km inversion, 5 iterations of TAO lmvm under scpc_gamg, production settings, for the final solver and optimizer decision | done | antarctica_10000_1000_buffered20000 (the production mesh, 1,869,252 vertices), the warm start transferred onto it, DG0 geometry, vertex raster sampling | IU Quartz, general partition | 2026-10-03 | 2026-10-03 | 5 iterations, 7 evaluations, objective 6.209388e5 to 3.156258e5; every direct forward converged, no lost trial, no rescue; published residual 1.2e-2; every iterate within 1.1e-12 (objective) and 5.0e-12 (gradient norm) of the other solver's, the same Newton iterations in every direct solve |
 | 1 km inversion, production configuration with one solve an evaluation, full_mumps on 32 ranks | done | antarctica_10000_1000_buffered20000 (Rice's .msh on Quartz; 1,869,252 vertices, 3,716,587 cells), DG0 geometry, vertex raster sampling | IU Quartz, general partition | 2026-10-01 | 2026-10-02 | 3 TAO iterations, objective 8.110678e4 to 6.209233e4; no forward failed; published residual 7.0e-5 |
@@ -3039,6 +3040,26 @@ Core 11 at 32 km without the apparent-MB reference, a cold start on the OCX prot
 - **Results path:** Quartz /N/scratch/dlilien/ismip7_issue156_runs/maps/spans1km_{base,fix}_p64.h5 (sha256 31b963a3, 165899b0; scratch, purged after 30 days) and timing/spans1km_*; timing records, logs and sacct summary copied to /Volumes/LaCie/Data/antarctica_general/ismip7_runs/inversion_eval_overhead/quartz; submit script /N/scratch/dlilien/q156d_submit.sh, copy in /Volumes/LaCie/Data/antarctica_general/ismip7_runs/inversion_eval_overhead/quartz/../scripts
 - **Audit:** objective within 7.0e-16 and \|grad\| within 2.2e-15 at every evaluation, final 4.179385e4 in both, the same as 10818449; published \|\|F\|\| 2.394e-4 in both; no forward failed. prior_solve was 98 % of the time outside the forward and adjoint at 2626c71. At 4e45164 the largest remaining spans are gather_gradient 0.34 s, set_controls 0.10 s and residual_norm 0.07 s, and L-BFGS-B's own step between evaluations takes 1.0 to 1.2 s
 - **Notes:** Attributes the 27 s of a 1 km evaluation outside the forward and adjoint (issue #156): the bi-Laplacian prior's per-call MUMPS LU. Since 10818449 the scpc_gamg taped forward moved from bt to NLEQ-ERR at Krylov rtol 1e-8 (PR 155), so forward times are not comparable with it; base and fix are
+
+### test-1km-inversion-final-none-scpc-gamg
+
+1 km inversion, 10 iterations of L-BFGS-B (no metric) under scpc_gamg, production settings, for the final solver and optimizer decision (done), IU.
+
+- **Task type:** test
+- **Friction law:** budd
+- **Mesh:** antarctica_10000_1000_buffered20000 (the production mesh, 1,869,252 vertices), the warm start transferred onto it, DG0 geometry, vertex raster sampling
+- **Initial state / MAP:** inversion_icepack2_budd_n3_dg0_logvelnet_2000_int5000_bilap_snap20260924_0948.h5 (release maps-2km-snap-2026-09-24, Rice's chain end, iteration 60), controls and fluidity prior only (the snapshot's lake_ice_base=0 geometry is not taken), ISMIP7_WARM_START_STRICT=0; the n,m 1 to 3 ramp, one rung, then the direct forward
+- **Forcing versions:** observations as in antarctica/data on Quartz; the exp friction control (C_ref and sigma_alpha auto); SEP1 sub-element friction, version 2, with the exact front push; bi-Laplacian prior; the warm start's fluidity prior; log-velocity weight 85380.44865839917 (the snapshot's); no dH/dt term; the direct forward; the startup ramp under scpc_mumps; ISMIP7_INVERSION_LINEAR_SOLVER=scpc_gamg; scipy L-BFGS-B in plain coordinates (ISMIP7_GRAD_PRECOND=none)
+- **Site / partition:** IU Quartz, general partition
+- **Ranks / memory:** 32 ranks, one node (c11); peak RSS 5.1 GB a rank (sacct MaxRSS)
+- **Job ids:** 10952185
+- **Code:** 72ac7a1 (PR 155), worktree /N/scratch/dlilien/ismip7_final; icepack_tools e7b923e
+- **Started:** 2026-10-03
+- **Finished:** 2026-10-03
+- **Cost per model year:** 25 min wall; ramp 399 s; 69.0 s an evaluation with its checkpoint (median after the first), of it 41.6 s the forward, 10.4 s the adjoint and 12.7 s the checkpoint
+- **Results path:** Quartz /N/scratch/dlilien/ismip7_final_runs/maps/1km_none_gamg.h5 (sha256 12c5ff6f) and timing/1km_none_gamg.json; timing record and log copied to /Volumes/LaCie/Data/antarctica_general/ismip7_runs/final_decision_quartz; submit script qfinal_submit.sh (1km_none)
+- **Audit:** 10 iterations, 13 evaluations, objective 6.209388e5 (the TAO arm's first evaluation exactly) to 1.496636e5; every direct forward converged, no lost trial, no rescue; published residual 3.3e-2. After 7 evaluations, the whole of test-1km-inversion-final-tao-scpc-gamg in the same 499 s, 2.5535e5 against TAO's 3.1563e5; TAO's final objective reached at evaluation 6 (425 s)
+- **Notes:** issue #157, the final round: L-BFGS-B without a metric at 1 km, against test-1km-inversion-final-tao-scpc-gamg; run on request after the 2 km arms
 
 ### test-1km-inversion-final-tao-full-mumps
 

@@ -651,7 +651,8 @@ memory stayed between 2.4 and 2.8 GB a rank (`runlog/test-*km-inversion-sep1-*`)
 On Quartz under the same defaults and the production settings (issues #156
 and #157, jobs 10950098 to 10950105 on `72ac7a1`): the exp control, Rice's
 2 km snapshot 0948 as the warm start with its log-velocity weight, 32 ranks,
-the ramp under `scpc_mumps`, 60 iterations at 2 km and 5 at 1 km. Seconds an
+the ramp under `scpc_mumps`, 60 iterations at 2 km and 5 at 1 km (10 for the
+1 km L-BFGS-B run, job 10952185, under `scpc_gamg` only). Seconds an
 evaluation, the median after the first, with the checkpoint every evaluation
 writes (16 s at 2 km, 13 s at 1 km); the adjoint column holds TAO's own work
 on its rows; GB a rank is sacct's MaxRSS:
@@ -662,6 +663,7 @@ on its rows; GB a rank is sacct's MaxRSS:
 | 2 km | L-BFGS-B, no metric | 155 | 106 | 47 / 72 | 89 / 14 | 5.1 / 2.8 |
 | 2 km | L-BFGS-B, sqrt(M) coordinates | 163 | 109 | 49 / 73 | 95 / 16 | 5.0 / 2.8 |
 | 1 km | TAO | 324 | 70 | 72 / 45 | 230 / 11 | 8.3 / 4.2 |
+| 1 km | L-BFGS-B, no metric, 10 iterations | | 69 | 42 | 10 | 5.1 |
 
 Each pair took the same Newton iterations in every direct solve and the same
 iterates: TAO within 4.3e-7 over 61 iterations at 2 km and 1.1e-12 at 1 km,

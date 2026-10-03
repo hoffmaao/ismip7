@@ -248,6 +248,11 @@ objective:
   all three paths (106 to 115 s under `scpc_gamg`, 155 to 163 s under
   `full_mumps`), so the arms differ in progress an evaluation.
 * Every arm was still descending at the 60-iteration cap.
+* At 1 km under `scpc_gamg` (from 6.2094e5, records
+  `test-1km-inversion-final-{tao,none}-scpc-gamg`), an evaluation costs the
+  same on both paths (69 and 70 s); in the 7 evaluations and 499 s of TAO's
+  whole run `none` reached 2.554e5 against TAO's 3.156e5, passing TAO's final
+  objective at its sixth evaluation, and 1.497e5 after 13.
 * Whether the chains change optimizer is the group's call (issue #157).
 
 ## 4. Decisions taken

@@ -3297,15 +3297,24 @@ def run_simulation(
                 # the accepted attempt stands for the step.
                 collapse_cells = sub["collapse_cells"]
                 if adapt is not None:
-                    err = adapt.observe(h_before, h_dg.dat.data_ro, dt / m)
+                    err = adapt.observe(h_before, h_dg.dat.data_ro, dt / m,
+                                        h_diag_xy.dat.data_ro)
+                    at = ("" if adapt.err_xy is None else " at (" + ", ".join(
+                        f"{c / 1e3:.0f}" for c in adapt.err_xy) + ") km")
                     if adapt.exceeds(err):
                         PETSc.Sys.Print(
                             f"  Step {k}: substep {_j + 1}/{m} thickness error "
-                            f"{err:.3g} m > {adapt.tol:g} m, rejecting the step"
+                            f"{err:.3g} m{at} > {adapt.tol:g} m, rejecting the step"
                         )
                         ok = False
                         reject_err = err
                         break
+                    if err > adapt.tol:
+                        PETSc.Sys.Print(
+                            f"  Step {k}: substep {_j + 1}/{m} thickness error "
+                            f"{err:.3g} m{at} not reduced by refining "
+                            f"(rejected at {adapt.last_reject:.3g} m), accepting"
+                        )
                 if not _solve_with_rescue(k):
                     ok = False
                     break

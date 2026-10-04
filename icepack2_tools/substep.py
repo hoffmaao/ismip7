@@ -35,6 +35,14 @@ step, which the caller rewinds and repeats with more substeps; a run of quiet
 macro steps halves ``m`` again. Cells thinner than ``hmin`` in any of the
 three states are left out too, so a calving or collapse removal cannot drive
 ``m`` to its ceiling.
+
+Refining has to pay for itself. Some reversals do not shrink with the step
+(a grounding-zone cell flickering across flotation): on the 2 km SEP1 CESM2
+historical at 2004.5 the estimate went 1.37, 1.13, 1.12 m at 4, 8 and 16
+substeps. When a retry's estimate is still above ``ineffective`` times the
+estimate that rejected the previous attempt at this macro step, the retry is
+accepted at its count instead of doubling again. A non-finite thickness
+always rejects, so a real blow-up still climbs to the ceiling and stalls.
 """
 
 import math
@@ -44,7 +52,7 @@ import numpy as np
 
 class SubstepController:
     def __init__(self, *, tol, m_init=1, m_max=64, quiet_steps=20, hmin=10.0,
-                 comm=None):
+                 ineffective=0.7, comm=None):
         if tol <= 0:
             raise ValueError("substep tolerance must be positive")
         if not 1 <= m_init <= m_max:
@@ -56,6 +64,7 @@ class SubstepController:
         self.m_max = int(m_max)
         self.quiet_steps = int(quiet_steps)
         self.hmin = float(hmin)
+        self.ineffective = float(ineffective)
         self.comm = comm
         # last accepted substep: its increment, the cells it was taken over
         # and its length; None until the first substep of the run
@@ -65,10 +74,10 @@ class SubstepController:
         self._saved = None
         self._quiet = 0
         self.err_step = 0.0          # largest estimate in the current attempt
+        self.err_xy = None           # where the latest estimate was largest
+        self.last_reject = None      # estimate that rejected the last attempt
         self.rejections = 0
-
-    def _max(self, value):
-        return self.comm.allreduce(value, op=_mpi_max()) if self.comm is not None else value
+        self.tolerated = 0           # retries accepted above tol (ineffective)
 
     def begin_attempt(self):
         r"""Mark the start of an attempt at a macro step, so a rejection can
@@ -76,14 +85,16 @@ class SubstepController:
         self._saved = (self._dh, self._keep, self._tau)
         self.err_step = 0.0
 
-    def observe(self, h_before, h_after, tau):
+    def observe(self, h_before, h_after, tau, xy=None):
         r"""Record one substep's thickness change and return its error
         estimate (metres, the same on every rank). The first substep of a
-        run has no predecessor and returns 0."""
+        run has no predecessor and returns 0. ``xy`` (one row of coordinates
+        per entry of ``h``) locates the largest estimate in ``err_xy``."""
         h_before = np.asarray(h_before)
         h_after = np.asarray(h_after)
         dh = h_after - h_before
         keep = (h_before >= self.hmin) & (h_after >= self.hmin)
+        where = None
         if not np.all(np.isfinite(h_after[h_before >= self.hmin])):
             err = math.inf                 # a blown-up state, whatever its history
         elif self._dh is None:
@@ -93,18 +104,34 @@ class SubstepController:
             prev = (tau / self._tau) * self._dh
             both = (keep & self._keep & ~(dh * self._dh >= 0)
                     & ~(np.abs(dh) <= np.abs(prev)))
-            diff = dh[both] - prev[both]
-            local = float(np.max(np.abs(diff))) if diff.size else 0.0
+            diff = np.abs(dh[both] - prev[both])
+            local = float(np.max(diff)) if diff.size else 0.0
             if not math.isfinite(local):
                 local = math.inf
+            elif diff.size and xy is not None:
+                where = tuple(float(c) for c in np.asarray(xy)[both][int(np.argmax(diff))])
             err = tau / (tau + self._tau) * local
-        err = self._max(err)
+        if self.comm is not None:
+            pairs = self.comm.allgather((err, where))
+            err, where = max(pairs, key=lambda p: p[0])
+        self.err_xy = where
         self._dh, self._keep, self._tau = dh.copy(), keep, float(tau)
         self.err_step = max(self.err_step, err)
         return err
 
     def exceeds(self, err):
-        return not err <= self.tol         # NaN and inf reject
+        r"""Whether ``err`` rejects the attempt: above the tolerance, unless a
+        refinement already failed to reduce the estimate (see the module
+        docstring). NaN and inf always reject."""
+        if not math.isfinite(err):
+            return True
+        if err <= self.tol:
+            return False
+        if (self.last_reject is not None
+                and err > self.ineffective * self.last_reject):
+            self.tolerated += 1
+            return False
+        return True
 
     def refine(self, err=None):
         r"""Rewind the substep history and return the substep count for the
@@ -116,6 +143,7 @@ class SubstepController:
         self._dh, self._keep, self._tau = self._saved
         self._quiet = 0
         self.rejections += 1
+        self.last_reject = err
         if self.m >= self.m_max:
             return None
         factor = 2
@@ -130,6 +158,7 @@ class SubstepController:
         steps in a row, none rejected and none with an estimate above a
         quarter of the tolerance (what halving m roughly multiplies it by),
         the substep count halves. Returns True when m changed."""
+        self.last_reject = None
         if self.err_step < 0.25 * self.tol:
             self._quiet += 1
         else:
@@ -139,8 +168,3 @@ class SubstepController:
             self._quiet = 0
             return True
         return False
-
-
-def _mpi_max():
-    from mpi4py import MPI
-    return MPI.MAX

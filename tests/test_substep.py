@@ -159,3 +159,36 @@ def test_settings_from_environment(monkeypatch):
     s = substep_settings()
     assert s["tol"] == 0.5 and s["m_init"] == 4 and s["m_max"] == 64
     SubstepController(**s)
+
+
+def test_refinement_that_does_not_help_is_accepted():
+    """A reversal that persists at any step (a grounding-zone cell flickering
+    across flotation): once doubling m fails to cut the estimate by 30 %, the
+    retry is accepted rather than doubled again; a blow-up still rejects."""
+    ctrl = SubstepController(tol=1.0)
+    h = np.full(1, 700.0)
+    ctrl.begin_attempt()
+    ctrl.observe(h, h + 2.0, 0.0125)
+    ctrl.accept()
+    ctrl.begin_attempt()
+    err = ctrl.observe(h + 2.0, h - 0.8, 0.0125)
+    assert ctrl.exceeds(err)
+    ctrl.refine(err)
+    ctrl.begin_attempt()
+    assert not ctrl.exceeds(0.9 * err) and ctrl.tolerated == 1
+    assert ctrl.exceeds(0.5 * err)                   # refining helped: keep going
+    assert ctrl.exceeds(float("inf"))
+    ctrl.accept()
+    assert ctrl.exceeds(0.9 * err)                   # a new macro step starts afresh
+
+
+def test_location_of_the_largest_estimate():
+    ctrl = SubstepController(tol=1.0)
+    h = np.full(3, 500.0)
+    xy = np.array([[0.0, 0.0], [1e3, 2e3], [3e3, 4e3]])
+    ctrl.begin_attempt()
+    ctrl.observe(h, h + np.array([1.0, 1.0, 1.0]), 0.05, xy)
+    ctrl.accept()
+    ctrl.begin_attempt()
+    ctrl.observe(h + 1.0, h + 1.0 + np.array([-1.5, -3.0, 0.5]), 0.05, xy)
+    assert ctrl.err_xy == (1e3, 2e3)

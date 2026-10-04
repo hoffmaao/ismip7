@@ -1,513 +1,289 @@
 #!/usr/bin/env python3
-r"""
-Gauss-Newton Hessian eigendecomposition for dual-control inversion.
+r"""Leading eigenmodes of the prior-preconditioned Gauss-Newton Hessian of a MAP.
 
-Computes leading eigenmodes of A^{-1} H_GN where:
-  H_GN = Gauss-Newton Hessian (PSD via zero-residual trick)
-  A    = delta*M + gamma*K  (Laplacian prior, the convention of Recinos et al. (2023))
+The Laplace approximation of Recinos et al. (2023) and fenics_ice: at the MAP
+the posterior covariance is ``(H_GN + Gamma^-1)^-1`` with ``H_GN`` the
+Gauss-Newton Hessian of the data term and ``Gamma`` the prior covariance.
+Its departure from the prior lives in the generalised eigenpairs
 
-Follows the UQ framework of Recinos et al. (2023):
-  - Prior operator A = delta*M + gamma*K per control
-  - Prior covariance Gamma = A^{-1} M A^{-1} (Isaac et al. 2015)
-  - DOF-vector Euclidean inner product for eigenvector projections
+    H_GN v_i = lambda_i Gamma^-1 v_i,
 
-Modes are stored as MixedFunctions on [Q, Q] (theta, phi components).
+ordered by lambda_i: a mode with lambda_i >> 1 is constrained by the data,
+one with lambda_i << 1 is known no better than the prior. Those pairs are what
+this script computes and saves, and what a forward's QoI sensitivity is
+projected onto (``sigma_Q^2 = sigma_prior^2 - sum_i (g.v_i)^2 lambda_i/(1+lambda_i)``).
 
-The forward is the legacy dual-action Budd law, so the script needs
-ISMIP7_FRICTION=budd_legacy and its MAP: budd and regularized_coulomb MAPs come
-from the residual closure, whose theta and phi sit on other baselines.
+The problem is the MAP's own: ``simulation.setup_model()`` loads the MAP
+(``ISMIP7_INVERSION``) exactly as a forward does -- its mesh, geometry, friction
+control (sqrt, exp or log), sub-element scheme and the mixed state it was
+accepted at -- and the data term is the inversion's (the per-datum chi^2 on
+the MEaSUREs errors with the MAP's recorded ``misfit_scale`` and log-speed
+weight), evaluated against the MAP's own velocity so the residual is zero and
+the Hessian is Gauss-Newton: positive semi-definite by construction. The
+prior is the MAP's recorded bi-Laplacian (sigma, rho per control).
 
-Usage:
-    python scripts/run_eigendec.py
+The tape holds one solve at the physical exponents from the converged state
+(the direct forward of 1 Oct 2026); the n=1->3 ladder inside the tape is what
+made the earlier Hessian indefinite. Run it under the full mixed-Jacobian
+MUMPS the inversion differentiates through:
+
+    ISMIP7_INVERSION=<map.h5> ISMIP7_DIAGNOSTIC_LINEAR_SOLVER=full_mumps \
+        mpiexec -n 4 python antarctica/scripts/run_eigendec.py [--modes 40]
+
+Output beside the MAP's results directory: ``eigendec_<lc>[_<tag>].h5`` (the
+modes as alpha/phi pairs, Gamma^-1-orthonormal), ``eigenvalues_<lc>[_<tag>].txt``
+and ``eigendec_<lc>[_<tag>].json`` (the prior and likelihood the modes belong
+to). The eigensolve is ARPACK on rank 0 over the global control vector; every
+rank serves the collective Hessian and prior actions.
 """
+import argparse
+import json
+import os
+import sys
 
 import numpy as np
 import firedrake as fd
-from firedrake import (
-    Constant,
-    Function,
-    max_value,
-    sqrt,
-    inner,
-    grad,
-    derivative,
-    dx,
-    split,
-    assemble,
-    Mesh,
-    FunctionSpace,
-    VectorFunctionSpace,
-    TensorFunctionSpace,
-    FiniteElement,
-    NonlinearVariationalProblem,
-    NonlinearVariationalSolver,
-    MixedFunctionSpace,
-)
-from tlm_adjoint.firedrake import (
-    reset_manager,
-    start_manager,
-    stop_manager,
-    clear_caches,
-    Functional,
-    EquationSolver,
-    CachedHessian,
-)
+from firedrake import (Constant, Function, TestFunction,
+                       TrialFunction, assemble, dx, inner, ln, max_value, sqrt,
+                       VectorFunctionSpace)
 from firedrake.petsc import PETSc
+from mpi4py import MPI
 from scipy.sparse.linalg import LinearOperator, eigsh
+from tlm_adjoint.firedrake import (CachedHessian, EquationSolver, Functional,
+                                   reset_manager, start_manager, stop_manager)
 
-import rasterio, icepack, glob, os, json
-from icepack2 import model
-from icepack2.constants import (
-    ice_density as rho_I,
-    water_density as rho_W,
-    gravity as g,
-)
+_ROOT = os.path.dirname(os.path.abspath(__file__))
+sys.path.insert(0, _ROOT)
+sys.path.insert(0, os.path.dirname(os.path.dirname(_ROOT)))
 
-_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-MESH_DIR = os.path.join(_ROOT, "mesh")
-RESULTS_DIR = os.path.join(_ROOT, "results")
-
-import sys
-sys.path.insert(0, os.path.dirname(_ROOT))
-from icepack2_tools.boundary import load_boundary_ids
-from icepack2_tools.mpi_stats import global_max
-from icepack2_tools.geometry import sample_to_geometry
-from icepack2_tools.naming import map_basename
-from icepack2_tools.runconfig import (
-    friction as _friction, geometry_space as _geometry_space,
-    obs_data_root, raster_sample as _raster_sample,
-    lc as _lc, lc_coarse as _lc_coarse, n_flow as _n_flow,
-)
-
-DATA_DIR = obs_data_root()
-from mesh_naming import get_buffer_m, mesh_filename
-
-lc = _lc()
-lc_coarse = _lc_coarse()
-buffer_m = get_buffer_m()
-K_LEADING = 40
-
-# Prior hyperparameters (must match inversion regularization)
-# Inversion uses: R = 0.5/A * gamma * ell^2 * |grad(theta)|^2 dx
-# In that convention A = delta*M + gamma*K:
-#   delta = 1/A (mass weight from area normalization)
-#   gamma_eff = GAMMA * ELL^2 / A (stiffness weight)
-# These are computed at runtime from the mesh area.
-GAMMA_THETA = 1.0
-GAMMA_PHI = 1.0
-ELL = 7.5e3
+import icepack  # noqa: E402
+import rasterio  # noqa: E402
+import simulation  # noqa: E402
+from icepack2_tools.prior import (bilaplacian_coeffs,  # noqa: E402
+                                  prior_operator_form)
+from icepack2_tools.runconfig import obs_data_root  # noqa: E402
 
 
-def find_file(d, p):
-    m = glob.glob(os.path.join(d, p))
-    if not m:
-        raise FileNotFoundError(f"No {p} in {d}")
-    return m[0]
+def to_global(f):
+    with f.dat.vec_ro as v:
+        scatter, x_seq = PETSc.Scatter.toAll(v)
+        scatter.scatter(v, x_seq, mode=PETSc.Scatter.Mode.FORWARD)
+        out = x_seq.array.copy()
+        scatter.destroy(); x_seq.destroy()
+    return out
+
+
+def from_global(arr, f):
+    with f.dat.vec_wo as v:
+        x_seq = PETSc.Vec().createSeq(len(arr), comm=PETSc.COMM_SELF)
+        x_seq.array[:] = arr
+        scatter, _ = PETSc.Scatter.toAll(v)
+        scatter.scatter(x_seq, v, mode=PETSc.Scatter.Mode.REVERSE)
+        scatter.destroy(); x_seq.destroy()
 
 
 def main():
-    os.makedirs(RESULTS_DIR, exist_ok=True)
+    ap = argparse.ArgumentParser()
+    ap.add_argument("--modes", type=int, default=int(os.environ.get("ISMIP7_EIG_MODES", "40")))
+    ap.add_argument("--tag", default=os.environ.get("ISMIP7_RUN_TAG", ""))
+    args = ap.parse_args()
+    comm = MPI.COMM_WORLD
 
-    friction = _friction()
-    chk_fn = os.path.join(MESH_DIR, map_basename("budd_legacy", lc))
-    if friction != "budd_legacy":
-        raise RuntimeError(
-            f"run_eigendec.py implements the legacy dual-action Budd law and "
-            f"needs ISMIP7_FRICTION=budd_legacy, but ISMIP7_FRICTION="
-            f"{friction!r} names {map_basename(friction, lc)}. budd and "
-            f"regularized_coulomb MAPs come from the residual closure, where "
-            f"theta is log(C/C_w0) on a Weertman anchor gated to grounded ice "
-            f"and phi is log(A/A_prior) on the thermomechanical prior, so this "
-            f"action would read their controls against the wrong baselines. "
-            f"The MAP this script reads is {chk_fn}."
-        )
-    geometry_space = _geometry_space()
-    raster_sample = _raster_sample()
-    n_flow_val = _n_flow()
-    m_slide_val = float(os.environ.get("ISMIP7_M_SLIDE", "3.0"))
-
-    # ── Load mesh + data ──
-    mesh_fn = os.environ.get("ISMIP7_MESH", mesh_filename(lc_coarse, lc, buffer_m))
-    PETSc.Sys.Print(f"Loading mesh: {mesh_fn}")
-    mesh = Mesh(mesh_fn)
-
-    # Sidecar resolved (per-mesh preferred, parametric fallback) and
-    # HARD-CHECKED against this mesh: an id absent from the mesh makes
-    # ds(id) integrate to zero, i.e. silently wrong physics with no crash.
-    use_calving_terminus = os.environ.get("ISMIP7_NO_CALVING_TERMINUS") is None
-    bnd_ids, calving_ids, bndids_fn = load_boundary_ids(
-        mesh, MESH_DIR, mesh_hint=mesh_fn,
-        print_coverage=use_calving_terminus,
-    )
-
-    Q = FunctionSpace(mesh, "CG", 1)
-    Q_g = FunctionSpace(mesh, "DG", 0) if geometry_space == "dg0" else Q
-    PETSc.Sys.Print(f"  Geometry space: {geometry_space.upper()}, "
-                    f"raster sampling: {raster_sample}, n={n_flow_val:g}, "
-                    f"m_slide={m_slide_val:g}")
-    V = VectorFunctionSpace(mesh, "CG", 1)
-    dg0 = FiniteElement("DG", "triangle", 0)
-    Sigma = TensorFunctionSpace(mesh, dg0, symmetry=True)
-    T = VectorFunctionSpace(mesh, dg0)
-    Z = V * Sigma * T
-
-    bm_fn = find_file(os.path.join(DATA_DIR, "bedmachine"), "*.nc")
-    b = sample_to_geometry(
-        rasterio.open(f"netcdf:{bm_fn}:bed"), Q_g, Q, method=raster_sample)
-    H = sample_to_geometry(
-        rasterio.open(f"netcdf:{bm_fn}:thickness"),
-        Q_g, Q, floor=10.0, method=raster_sample)
-    rho_ratio = Constant(917.0 / 1024.0)
-    s = Function(Q_g).interpolate(max_value(b + H, (Constant(1.0) - rho_ratio) * H))
-    vel_fn = find_file(os.path.join(DATA_DIR, "velocity"), "*.nc")
-    u_obs = icepack.interpolate(
-        (rasterio.open(f"netcdf:{vel_fn}:VX"), rasterio.open(f"netcdf:{vel_fn}:VY")),
-        V,
-        fillvalue=0.0,
-    )
-    phi_eff = Function(Q_g).interpolate(
-        max_value(
-            Constant(1.0) - rho_W * g * max_value(Constant(0.0), -b) / (rho_I * g * H),
-            Constant(0.01),
-        )
-    )
-    A0 = Function(Q).interpolate(Constant(icepack.rate_factor(Constant(260.0))))
-
-    n_glen = Constant(n_flow_val)
-    m_slide = Constant(m_slide_val)
-    tau_c = Constant(0.1)
-    u_c = Constant(100.0)
-    K_base = u_c / (phi_eff * tau_c) ** m_slide
-
-    sparams = {
-        "snes_type": "newtonls",
-        "snes_max_it": 200,
-        "snes_linesearch_type": "nleqerr",
-        "snes_divergence_tolerance": -1,
-        "snes_stol": 0.0,
-        "ksp_type": "gmres",
-        "pc_type": "lu",
-        "pc_factor_mat_solver_type": "mumps",
-    }
+    ctx = simulation.setup_model()
+    mesh, z, sparams = ctx["mesh"], ctx["z"], ctx["sparams"]
+    phi = ctx["phi"]
+    alpha = ctx["alpha"]
+    if alpha is None:
+        raise SystemExit("run_eigendec.py: the MAP must carry the sqrt friction control "
+                         "(alpha); log/exp controls are not wired yet")
+    # The objective and prior the MAP records (setup_model keeps only the
+    # attributes a forward needs; the eigendecomposition needs the rest).
+    with fd.CheckpointFile(os.environ["ISMIP7_INVERSION"], "r") as chk:
+        meta = {k: chk.get_attr("/", k) for k in
+                ("misfit_scale", "log_vel_weight", "log_vel_eps", "prior_form",
+                 "prior_sigma_alpha", "prior_rho_theta", "prior_sigma_phi", "prior_rho")
+                if chk.has_attr("/", k)}
+    if str(meta.get("prior_form", "")) != "bilaplacian":
+        raise SystemExit(f"run_eigendec.py expects a bilaplacian-prior MAP, got "
+                         f"prior_form={meta.get('prior_form')!r}")
+    build_F = ctx["build_F"]
+    if build_F is None:
+        raise SystemExit("run_eigendec.py needs a residual friction law (budd)")
     fc_params = {"quadrature_degree": 4}
+    Q = phi.function_space()
+    V = VectorFunctionSpace(mesh, "CG", 1)
 
-    # ── Load MAP ──
-    PETSc.Sys.Print(f"Loading MAP: {chk_fn}")
-    with fd.CheckpointFile(chk_fn, "r") as chk:
-        chk_mesh = chk.load_mesh()
-        theta_chk = chk.load_function(chk_mesh, name="log_friction")
-        phi_chk = chk.load_function(chk_mesh, name="log_fluidity")
-    # Project onto our mesh's function space
-    theta_map = Function(Q, name="theta_map")
-    theta_map.dat.data[:] = theta_chk.dat.data_ro
-    phi_map = Function(Q, name="phi_map")
-    phi_map.dat.data[:] = phi_chk.dat.data_ro
+    # The data term, as the inversion built it: chi^2 on the MEaSUREs errors,
+    # observed nodes only, times the MAP's recorded misfit scale, plus the
+    # log-speed term at its recorded weight. Residual against u_MAP: zero.
+    vel_fn = simulation.find_file(os.path.join(obs_data_root(), "velocity"), "*.nc")
+    err = icepack.interpolate((rasterio.open(f"netcdf:{vel_fn}:ERRX"),
+                               rasterio.open(f"netcdf:{vel_fn}:ERRY")), V, fillvalue=0.0)
+    emag = Function(Q).interpolate(sqrt(err[0] ** 2 + err[1] ** 2))
+    observed = np.asarray(emag.dat.data_ro > 0.0)
+    obs_mask = Function(Q, name="obs_mask").assign(1.0)
+    obs_mask.dat.data[:] = observed.astype(float)
+    floor = float(os.environ.get("ISMIP7_SIGMA_U_FLOOR", "3.0"))
+    sig_ux = Function(Q).interpolate(max_value(abs(err[0]), Constant(floor)))
+    sig_uy = Function(Q).interpolate(max_value(abs(err[1]), Constant(floor)))
+    sig_ux.dat.data[~observed] = 1e4
+    sig_uy.dat.data[~observed] = 1e4
+    area_val = assemble(obs_mask * dx(mesh))
+    misfit_scale = float(meta.get("misfit_scale", 1.0))
+    log_w = float(meta.get("log_vel_weight", 0.0))
+    log_eps = Constant(float(meta.get("log_vel_eps", 1.0)))
+    u_map = Function(V, name="u_map").assign(z.subfunctions[0])
+    PETSc.Sys.Print(f"Likelihood: misfit_scale {misfit_scale:g}, log-speed weight {log_w:g}, "
+                    f"sigma floor {floor:g} m/yr, {comm.allreduce(int(observed.sum()))} observed nodes")
 
-    # ── Warm start at MAP ──
-    PETSc.Sys.Print("Warm start at MAP...")
-    stop_manager()
-
-    z = Function(Z)
-    z.sub(0).interpolate(Constant(0.1) * u_obs)
-
-    u_s, M_s, tau_s = split(z)
-    flds = {
-        "velocity": u_s,
-        "membrane_stress": M_s,
-        "basal_stress": tau_s,
-        "thickness": H,
-        "surface": s,
-    }
-    rh = {
-        "flow_law_exponent": n_glen,
-        "flow_law_coefficient": A0 * fd.exp(phi_map),
-        "sliding_exponent": m_slide,
-        "sliding_coefficient": K_base * fd.exp(-m_slide * theta_map),
-    }
-    L_map = (
-        model.minimization.viscous_power(**flds, **rh)
-        + model.minimization.friction_power(**flds, **rh)
-        + model.minimization.momentum_balance(**flds)
-    )
-    if use_calving_terminus:
-        L_map += model.minimization.calving_terminus(**flds, outflow_ids=calving_ids)
-    prob = NonlinearVariationalProblem(
-        derivative(L_map, z), z, form_compiler_parameters=fc_params
-    )
-    slvr = NonlinearVariationalSolver(prob, solver_parameters=sparams)
-    for t in np.linspace(0.0, 1.0, 5):
-        n_glen.assign(1.0 + t * (n_flow_val - 1.0))
-        m_slide.assign(1.0 + t * (m_slide_val - 1.0))
-        slvr.solve()
-    PETSc.Sys.Print("  Done")
-
-    # u_MAP comes from the warm start (already converged via continuation)
-    u_MAP = z.subfunctions[0].copy(deepcopy=True)
-    u_MAP_mag = Function(Q).interpolate(sqrt(inner(u_MAP, u_MAP)))
-    PETSc.Sys.Print(f"  u_MAP: max={global_max(u_MAP_mag):.0f} m/yr")
-
-    area_val = assemble(Constant(1.0) * dx(mesh))
-    invA = Constant(1.0 / area_val)
-
-    # ── GN Hessian via zero-residual trick ──
-    # The EquationSolver needs z to already be near the solution.
-    # We ensure this by doing a NonlinearVariationalSolver continuation
-    # BEFORE the annotated solve. The EquationSolver then converges in ~0 steps.
-    def forward_gn(theta, phi):
-        clear_caches()
-        K = K_base * fd.exp(-m_slide * theta)
-        A = A0 * fd.exp(phi)
-        u_s, M_s, tau_s = split(z)
-        flds = {
-            "velocity": u_s,
-            "membrane_stress": M_s,
-            "basal_stress": tau_s,
-            "thickness": H,
-            "surface": s,
-        }
-        rh = {
-            "flow_law_exponent": n_glen,
-            "flow_law_coefficient": A,
-            "sliding_exponent": m_slide,
-            "sliding_coefficient": K,
-        }
-        L = (
-            model.minimization.viscous_power(**flds, **rh)
-            + model.minimization.friction_power(**flds, **rh)
-            + model.minimization.momentum_balance(**flds)
-        )
-        if use_calving_terminus:
-            L += model.minimization.calving_terminus(**flds, outflow_ids=calving_ids)
-        F = derivative(L, z)
-        # Continuation INSIDE annotation — each step recorded on tape
-        for t in np.linspace(0.0, 1.0, 5):
-            n_glen.assign(1.0 + t * (n_flow_val - 1.0))
-            m_slide.assign(1.0 + t * (m_slide_val - 1.0))
-            EquationSolver(
-                F == 0, z, solver_parameters=sparams, form_compiler_parameters=fc_params
-            ).solve()
-        u_sol, _, _ = split(z)
-        J = Functional(name="J")
-        J.assign(
-            0.5 * invA * ((u_sol[0] - u_MAP[0]) ** 2 + (u_sol[1] - u_MAP[1]) ** 2) * dx
-        )
+    def data_term(u):
+        chi2 = (0.5 / area_val * obs_mask
+                * ((u[0] - u_map[0]) ** 2 / sig_ux ** 2 + (u[1] - u_map[1]) ** 2 / sig_uy ** 2))
+        J = Constant(misfit_scale) * chi2 * dx(mesh)
+        if log_w > 0.0:
+            sp = sqrt(u[0] ** 2 + u[1] ** 2 + Constant(1e-12))
+            sp0 = sqrt(u_map[0] ** 2 + u_map[1] ** 2 + Constant(1e-12))
+            J = J + Constant(log_w) * (0.5 / area_val * obs_mask
+                                       * ln((sp + log_eps) / (sp0 + log_eps)) ** 2) * dx(mesh)
         return J
 
-    # Ensure z is at the MAP solution before annotated solve
-    # (warm start already did this, but re-confirm with the UFL expression form)
-    PETSc.Sys.Print("Pre-solving with continuation for EquationSolver...")
-    stop_manager()
-    K_pre = K_base * fd.exp(-m_slide * theta_map)
-    A_pre = A0 * fd.exp(phi_map)
-    u_s, M_s, tau_s = split(z)
-    flds_pre = {
-        "velocity": u_s,
-        "membrane_stress": M_s,
-        "basal_stress": tau_s,
-        "thickness": H,
-        "surface": s,
-    }
-    rh_pre = {
-        "flow_law_exponent": n_glen,
-        "flow_law_coefficient": A_pre,
-        "sliding_exponent": m_slide,
-        "sliding_coefficient": K_pre,
-    }
-    L_pre = (
-        model.minimization.viscous_power(**flds_pre, **rh_pre)
-        + model.minimization.friction_power(**flds_pre, **rh_pre)
-        + model.minimization.momentum_balance(**flds_pre)
-    )
-    if use_calving_terminus:
-        L_pre += model.minimization.calving_terminus(
-            **flds_pre, outflow_ids=calving_ids
-        )
-    prob_pre = NonlinearVariationalProblem(
-        derivative(L_pre, z), z, form_compiler_parameters=fc_params
-    )
-    slvr_pre = NonlinearVariationalSolver(prob_pre, solver_parameters=sparams)
-    for t in np.linspace(0.0, 1.0, 5):
-        n_glen.assign(1.0 + t * (n_flow_val - 1.0))
-        m_slide.assign(1.0 + t * (m_slide_val - 1.0))
-        slvr_pre.solve()
-    PETSc.Sys.Print("  Done (z is at MAP with UFL expressions)")
-
-    PETSc.Sys.Print("Recording forward at MAP for Hessian...")
+    # Record the forward at the MAP: one taped solve from the converged state.
+    adjoint_sparams = {k: v for k, v in sparams.items() if k != "snes_atol"}
+    # z is converged already: the taped solve must exit at iteration 0 on an
+    # absolute tolerance (setup_model set that on its own SNES, not in the
+    # dict) with the step-size exit live, or it grinds 200 iterations at the
+    # residual floor and reports divergence.
+    F = build_F(phi_c=phi)
+    with assemble(F, form_compiler_parameters=fc_params).dat.vec_ro as _rv:
+        fnorm0 = float(_rv.norm())
+    tape_sparams = dict(sparams)
+    tape_sparams.update({"snes_atol": 100.0 * max(fnorm0, 1e-300),
+                         "snes_stol": 1e-8, "snes_max_it": 50})
+    PETSc.Sys.Print(f"Taped solve from the converged state: ||F||={fnorm0:.3e}, "
+                    f"snes_atol={tape_sparams['snes_atol']:.3e}")
     reset_manager()
     start_manager()
-    J_gn = forward_gn(theta_map, phi_map)
+    F = build_F(phi_c=phi)
+    EquationSolver(F == 0, z, solver_parameters=tape_sparams,
+                   adjoint_solver_parameters=adjoint_sparams,
+                   form_compiler_parameters=fc_params).solve()
+    u_s = fd.split(z)[0]
+    J = Functional(name="J")
+    J.assign(data_term(u_s))
     stop_manager()
-    PETSc.Sys.Print(f"  J_GN at MAP = {float(J_gn):.6e} (should be ~0)")
+    PETSc.Sys.Print(f"J at the MAP: {float(J):.3e} (zero residual by construction)")
+    H = CachedHessian(J)
+    controls = [alpha, phi]
 
-    H_gn = CachedHessian(J_gn)
+    # The prior precision A M^-1 A per control from the MAP's own record.
+    test, trial = TestFunction(Q), TrialFunction(Q)
+    coeffs = {
+        "alpha": bilaplacian_coeffs(float(meta["prior_sigma_alpha"]), float(meta["prior_rho_theta"])),
+        "phi": bilaplacian_coeffs(float(meta["prior_sigma_phi"]), float(meta["prior_rho"])),
+    }
+    fac = {"ksp_type": "preonly", "pc_type": "cholesky", "pc_factor_mat_solver_type": "mumps"}
+    A_mat = {k: assemble(prior_operator_form(trial, test, *c)) for k, c in coeffs.items()}
+    A_solver = {k: fd.LinearSolver(m, solver_parameters=fac) for k, m in A_mat.items()}
+    M_solver = fd.LinearSolver(assemble(inner(trial, test) * dx), solver_parameters=fac)
+    PETSc.Sys.Print("Prior (bi-Laplacian A M^-1 A): " + ", ".join(
+        f"{k}: delta {c[0]:.3e} gamma {c[1]:.3e}" for k, c in coeffs.items()))
 
-    def Hv_pair(v_theta, v_phi):
-        _, _, ddJ = H_gn.action([theta_map, phi_map], [v_theta, v_phi])
-        return ddJ[0].riesz_representation("L2"), ddJ[1].riesz_representation("L2")
+    def covariance(g_alpha, g_phi):
+        """Gamma g = A^-1 M A^-1 g for an assembled (dual) pair."""
+        out = []
+        for k, g in (("alpha", g_alpha), ("phi", g_phi)):
+            x = Function(Q); A_solver[k].solve(x, g)
+            y = Function(Q); A_solver[k].solve(y, assemble(inner(x, test) * dx))
+            out.append(y)
+        return out
 
-    # ── Prior A^{-1} M (block-diagonal) ──
-    # A = delta*M + gamma*K where delta = 1/A, gamma = GAMMA*ELL^2/A
-    delta_theta = Constant(1.0 / area_val)
-    gamma_theta_eff = Constant(GAMMA_THETA * ELL**2 / area_val)
-    delta_phi = Constant(1.0 / area_val)
-    gamma_phi_eff = Constant(GAMMA_PHI * ELL**2 / area_val)
-    PETSc.Sys.Print("Prior:")
-    PETSc.Sys.Print(
-        f"  delta_theta={float(delta_theta):.6e}, gamma_theta={float(gamma_theta_eff):.6e}"
-    )
-    PETSc.Sys.Print(
-        f"  delta_phi  ={float(delta_phi):.6e}, gamma_phi  ={float(gamma_phi_eff):.6e}"
-    )
+    def precision(v_alpha, v_phi):
+        """Gamma^-1 v = A M^-1 A v, returned as an assembled dual pair."""
+        out = []
+        for k, v in (("alpha", v_alpha), ("phi", v_phi)):
+            Av = assemble(prior_operator_form(v, test, *coeffs[k]))
+            x = Function(Q); M_solver.solve(x, Av)
+            out.append(assemble(prior_operator_form(x, test, *coeffs[k])))
+        return out
 
-    PETSc.Sys.Print("Building prior A^{-1} M solvers...")
+    n = len(to_global(phi))
+    N = 2 * n
+    va, vp = Function(Q), Function(Q)
+    n_actions = [0]
 
-    def make_prior_solver(delta_c, gamma_c):
-        r"""Build solver for A y = M z, i.e. y = A^{-1} M z."""
-        y = Function(Q)
-        rhs_f = Function(Q)
-        trial_q, test_q = fd.TrialFunction(Q), fd.TestFunction(Q)
-        a = (
-            delta_c * inner(trial_q, test_q)
-            + gamma_c * inner(grad(trial_q), grad(test_q))
-        ) * dx
-        L_form = inner(rhs_f, test_q) * dx
-        prob = fd.LinearVariationalProblem(a, L_form, y)
-        solver = fd.LinearVariationalSolver(
-            prob,
-            solver_parameters={
-                "ksp_type": "cg",
-                "ksp_rtol": 1e-10,
-                "pc_type": "hypre",
-                "pc_hypre_type": "boomeramg",
-            },
-        )
+    def unpack(x):
+        from_global(x[:n], va); from_global(x[n:], vp)
 
-        def apply(v):
-            rhs_f.assign(v)
-            solver.solve()
-            return y.copy(deepcopy=True)
+    def pack(fa, fp):
+        return np.concatenate([to_global(fa), to_global(fp)])
 
-        return apply
+    def serve(op, x=None):
+        """Collective: rank 0 names the operation and the vector; all apply."""
+        op, x = comm.bcast((op, x), root=0)
+        if op == "stop":
+            return None
+        unpack(x)
+        if op == "H_dual":
+            from time import perf_counter
+            t0 = perf_counter()
+            _, _, ddJ = H.action(controls, [va, vp])
+            out = pack(ddJ[0], ddJ[1])
+            n_actions[0] += 1
+            if n_actions[0] % 10 == 1:
+                PETSc.Sys.Print(f"  Hessian action {n_actions[0]}: {perf_counter() - t0:.1f} s")
+        elif op == "Ginv":
+            out = pack(*precision(va, vp))
+        elif op == "G":
+            # the covariance acts on duals (assembled gradients)
+            ga, gp = fd.Cofunction(Q.dual()), fd.Cofunction(Q.dual())
+            from_global(x[:n], ga); from_global(x[n:], gp)
+            out = pack(*covariance(ga, gp))
+        return out
 
-    Ainv_theta = make_prior_solver(delta_theta, gamma_theta_eff)
-    Ainv_phi = make_prior_solver(delta_phi, gamma_phi_eff)
+    k = min(args.modes, N - 2)
+    if comm.rank == 0:
+        PETSc.Sys.Print(f"ARPACK: {k} leading generalised eigenpairs of H_GN v = lambda Gamma^-1 v "
+                        f"({N} control dofs)")
+        H_op = LinearOperator((N, N), matvec=lambda x: serve("H_dual", np.asarray(x, dtype=float)), dtype=float)
+        M_op = LinearOperator((N, N), matvec=lambda x: serve("Ginv", np.asarray(x, dtype=float)), dtype=float)
+        Minv_op = LinearOperator((N, N), matvec=lambda x: serve("G", np.asarray(x, dtype=float)), dtype=float)
+        vals, vecs = eigsh(H_op, k=k, M=M_op, Minv=Minv_op, which="LA")
+        order = np.argsort(-vals)
+        vals, vecs = vals[order], vecs[:, order]
+        serve("stop")
+    else:
+        while serve(None) is not None:
+            pass
+        vals, vecs = None, None
+    vals = comm.bcast(vals, root=0)
+    PETSc.Sys.Print("Leading eigenvalues (lambda): " + " ".join(f"{v:.3e}" for v in vals[:10]))
+    PETSc.Sys.Print(f"  modes with lambda > 1 (data-dominated): {int((vals > 1.0).sum())} of {k}; "
+                    f"min {vals.min():.3e}")
 
-    # ── ARPACK eigensolve on K^{-1} H_GN ──
-    PETSc.Sys.Print(f"ARPACK eigensolve for {K_LEADING} modes...")
-    ndof = Q.dof_dset.size
-
-    def matvec(x):
-        v_theta = Function(Q)
-        v_theta.dat.data[:] = x[:ndof]
-        v_phi = Function(Q)
-        v_phi.dat.data[:] = x[ndof:]
-        h_theta, h_phi = Hv_pair(v_theta, v_phi)
-        y_theta = Ainv_theta(h_theta)
-        y_phi = Ainv_phi(h_phi)
-        return np.concatenate([y_theta.dat.data_ro.copy(), y_phi.dat.data_ro.copy()])
-
-    A_op = LinearOperator((2 * ndof, 2 * ndof), matvec=matvec, dtype=float)
-    vals, vecs = eigsh(A_op, k=min(K_LEADING, 2 * ndof - 2), which="LM")
-
-    idx = np.argsort(-vals)
-    vals = vals[idx]
-    vecs = vecs[:, idx]
-
-    PETSc.Sys.Print(f"  Leading eigenvalues: {vals[:10]}")
-
-    # ── Save modes as MixedFunctions ──
-    QQ = MixedFunctionSpace([Q, Q])
-    eig_fn = os.path.join(MESH_DIR, f"eigendec_{lc}.h5")
+    lc = ctx["lc"]
+    sfx = f"_{args.tag}" if args.tag else ""
+    out_dir = simulation.RESULTS_DIR
+    os.makedirs(out_dir, exist_ok=True)
+    eig_fn = os.path.join(out_dir, f"eigendec_{lc}{sfx}.h5")
     with fd.CheckpointFile(eig_fn, "w") as chk:
         chk.save_mesh(mesh)
-        for i in range(vals.size):
-            mode = Function(QQ, name=f"mode_{i:04d}")
-            mode.sub(0).dat.data[:] = vecs[:ndof, i]
-            mode.sub(1).dat.data[:] = vecs[ndof:, i]
-            chk.save_function(mode)
+        for i in range(k):
+            x = comm.bcast(vecs[:, i] if comm.rank == 0 else None, root=0)
+            ma, mp = Function(Q, name=f"mode_{i:04d}_alpha"), Function(Q, name=f"mode_{i:04d}_phi")
+            from_global(x[:n], ma); from_global(x[n:], mp)
+            chk.save_function(ma); chk.save_function(mp)
+        chk.set_attr("/", "n_modes", k)
+        chk.set_attr("/", "map", os.path.basename(os.environ["ISMIP7_INVERSION"]))
+    if comm.rank == 0:
+        np.savetxt(os.path.join(out_dir, f"eigenvalues_{lc}{sfx}.txt"), vals)
+        with open(os.path.join(out_dir, f"eigendec_{lc}{sfx}.json"), "w") as f:
+            json.dump({"map": os.environ["ISMIP7_INVERSION"], "modes": k,
+                       "misfit_scale": misfit_scale, "log_vel_weight": log_w,
+                       "sigma_floor": floor, "prior": {k_: list(c) for k_, c in coeffs.items()},
+                       "prior_record": {k_: meta.get(k_) for k_ in
+                                        ("prior_sigma_alpha", "prior_rho_theta", "prior_sigma_phi", "prior_rho")},
+                       "eigenvalues": [float(v) for v in vals]}, f, indent=2)
     PETSc.Sys.Print(f"Saved: {eig_fn}")
-
-    eigval_fn = os.path.join(RESULTS_DIR, f"eigenvalues_{lc}.txt")
-    with open(eigval_fn, "w") as f:
-        for i, lam in enumerate(vals):
-            f.write(f"{i} {lam:.16e}\n")
-    PETSc.Sys.Print(f"Saved: {eigval_fn}")
-
-    # Save prior hyperparameters for uq_sensitivity.py
-    prior_fn = os.path.join(RESULTS_DIR, f"prior_params_{lc}.json")
-    with open(prior_fn, "w") as f:
-        json.dump(
-            {
-                "delta_theta": float(delta_theta),
-                "gamma_theta": float(gamma_theta_eff),
-                "delta_phi": float(delta_phi),
-                "gamma_phi": float(gamma_phi_eff),
-                "area": area_val,
-                "GAMMA_THETA": GAMMA_THETA,
-                "GAMMA_PHI": GAMMA_PHI,
-                "ELL": ELL,
-            },
-            f,
-            indent=2,
-        )
-    PETSc.Sys.Print(f"Saved: {prior_fn}")
-
-
-def make_prior_covariance_dual(
-    mesh, Q, *, delta_theta, gamma_theta, delta_phi, gamma_phi
-):
-    r"""Build prior covariance action Gamma = A^{-1} M A^{-1}.
-
-    Following Isaac et al. (2015) / Recinos et al. (2023).
-    Each returned callable applies the covariance operator for one control.
-    """
-
-    v = fd.TrialFunction(Q)
-    w = fd.TestFunction(Q)
-
-    def _build_cov(delta_c, gamma_c):
-        a_form = (delta_c * inner(v, w) + gamma_c * inner(grad(v), grad(w))) * dx
-
-        # Solver 1: A^{-1} (direct solve on A)
-        A_mat = assemble(a_form)
-        ksp = PETSc.KSP().create()
-        ksp.setOperators(A_mat.petscmat)
-        ksp.setType("preonly")
-        pc = ksp.getPC()
-        pc.setType("lu")
-        pc.setFactorSolverType("mumps")
-        ksp.setUp()
-
-        # Solver 2: A^{-1} M (variational solve: A y = M z)
-        y = Function(Q)
-        rhs_f = Function(Q)
-        L_form = inner(rhs_f, w) * dx
-        prob = fd.LinearVariationalProblem(a_form, L_form, y)
-        ainv_m_solver = fd.LinearVariationalSolver(
-            prob,
-            solver_parameters={
-                "ksp_type": "preonly",
-                "pc_type": "lu",
-                "pc_factor_mat_solver_type": "mumps",
-            },
-        )
-
-        def cov_action(x):
-            r"""Compute Gamma x = A^{-1} M A^{-1} x."""
-            # Step 1: tmp = A^{-1} x
-            tmp = Function(Q)
-            with x.dat.vec_ro as xv, tmp.dat.vec as tv:
-                ksp.solve(xv, tv)
-            # Step 2: y = A^{-1} M tmp
-            rhs_f.assign(tmp)
-            ainv_m_solver.solve()
-            return y.copy(deepcopy=True)
-
-        return cov_action
-
-    cov_theta = _build_cov(Constant(delta_theta), Constant(gamma_theta))
-    cov_phi = _build_cov(Constant(delta_phi), Constant(gamma_phi))
-    return cov_theta, cov_phi
 
 
 if __name__ == "__main__":

@@ -50,10 +50,10 @@ def test_flip_flop_is_rejected_and_refined():
     ctrl.observe(h0, h0 + 3.0, 0.05)
     ctrl.accept()
     ctrl.begin_attempt()
-    err = ctrl.observe(h0 + 3.0, h0, 0.05)          # the increment flips sign
-    assert err == pytest.approx(3.0) and ctrl.exceeds(err)
-    assert ctrl.refine(err) == 2                     # sqrt(3)/0.9 = 1.9: double
-    assert ctrl.refine(30.0) == 16                   # sqrt(30)/0.9 = 6.1: x8 (the cap)
+    err = ctrl.observe(h0 + 3.0, h0 - 1.0, 0.05)    # flips sign and grows
+    assert err == pytest.approx(3.5) and ctrl.exceeds(err)
+    assert ctrl.refine(err) == 4                     # sqrt(3.5)/0.9 = 2.1: x4
+    assert ctrl.refine(30.0) == 32                   # sqrt(30)/0.9 = 6.1: x8 (the cap)
 
 
 def test_rejection_rewinds_the_history():
@@ -69,6 +69,17 @@ def test_rejection_rewinds_the_history():
     # measured against the accepted increment (+1 over 0.1), not the rejected one
     err = ctrl.observe(h + 1.0, h - 1.0, 0.05)
     assert err == pytest.approx(0.05 / 0.15 * abs(-2.0 - 0.5 * 1.0))
+
+
+def test_a_damped_reversal_is_accepted():
+    """-1 < g < 0: the increment reverses but shrinks, which is stable."""
+    ctrl = SubstepController(tol=0.1)
+    h = np.full(2, 900.0)
+    ctrl.begin_attempt()
+    ctrl.observe(h, h + 4.0, 0.05)
+    ctrl.accept()
+    ctrl.begin_attempt()
+    assert ctrl.observe(h + 4.0, h + 1.0, 0.05) == 0.0
 
 
 def test_a_rate_jump_without_reversal_is_accepted():
@@ -92,8 +103,8 @@ def test_removed_cells_do_not_count():
     ctrl.observe(h, h - 1.0, 0.05)
     ctrl.accept()
     ctrl.begin_attempt()
-    calved = np.array([799.1, 0.0])                  # cell 1 removed by calving
-    assert ctrl.observe(h - 1.0, calved, 0.05) == pytest.approx(0.55)
+    calved = np.array([800.1, 0.0])                  # cell 1 removed by calving
+    assert ctrl.observe(h - 1.0, calved, 0.05) == pytest.approx(1.05)
 
 
 def test_ceiling_and_nonfinite():

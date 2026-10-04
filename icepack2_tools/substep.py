@@ -17,11 +17,15 @@ budgets are unchanged) and splits it into ``m`` equal substeps, choosing
     err_j = tau_j / (tau_j + tau_{j-1}) * max | dh_j - (tau_j / tau_{j-1}) dh_{j-1} |,
 
 the step-to-step change of the thickness increment, taken only over cells
-whose increment reversed sign. The lagged step's instability is a real
-negative mode stepped past -2/tau, so it shows as a sign reversal every
-substep with a growing amplitude, and there the estimate is about the size
-of the increment itself; a stable smooth evolution keeps it small (it scales
-as tau^2). Cells whose increment keeps its sign are left out because a jump
+whose increment reversed sign AND grew. The lagged step's instability is a
+real negative mode stepped past -2/tau (amplification g = 1 - tau*lam < -1),
+so it shows as a sign reversal every substep with a growing amplitude, and
+there the estimate is about the size of the increment itself. A reversal
+that shrinks (-1 < g < 0) is a damped oscillation the step already handles:
+on the same control, a fixed dt of 0.00625 ran stably through years in which
+a reversal-only test held the controller at 32 substeps of 0.05 (dt 0.0016)
+at four times the cost. Cells whose increment keeps its sign are left out
+because a jump
 in the thinning rate (a cell going afloat, a neighbour calved) makes the
 estimate tau times the jump at any step, and refining only spends substeps
 on it without making the trajectory any more stable: on the 2 km SEP1
@@ -85,9 +89,11 @@ class SubstepController:
         elif self._dh is None:
             err = 0.0
         else:
-            # cells whose increment reversed sign
-            both = keep & self._keep & ~(dh * self._dh >= 0)
-            diff = dh[both] - (tau / self._tau) * self._dh[both]
+            # cells whose increment reversed sign and grew (per unit time)
+            prev = (tau / self._tau) * self._dh
+            both = (keep & self._keep & ~(dh * self._dh >= 0)
+                    & ~(np.abs(dh) <= np.abs(prev)))
+            diff = dh[both] - prev[both]
             local = float(np.max(np.abs(diff))) if diff.size else 0.0
             if not math.isfinite(local):
                 local = math.inf

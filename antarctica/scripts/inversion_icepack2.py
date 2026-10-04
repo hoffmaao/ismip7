@@ -109,7 +109,7 @@ from icepack2_tools.runconfig import (
     friction as _friction, geometry_space as _geometry_space,
     raster_sample as _raster_sample,
     lc as _lc, lc_coarse as _lc_coarse, n_flow as _n_flow,
-    eval_continuation, inversion_mesh_source,
+    eval_continuation, inversion_mesh_source, transfer_fill,
 )
 DATA_DIR = obs_data_root()
 from icepack2_tools.prior import (
@@ -750,24 +750,36 @@ def main():
     # "auto" weight is held to. None without a warm start.
     warm_objective = None
 
-    # What a target dof outside the warm start's mesh takes: the prior for
-    # the log controls (0), and for the fluidity prior mean the constant
-    # baseline the forward fills the same ring with when it loads a MAP from
-    # a smaller mesh (A = A_prior exp(phi) must stay positive there;
-    # transfer.py has the measurement behind that), so the ring of a MAP
-    # inverted on the production mesh is what production already runs.
-    # Same-mesh warm starts miss nothing.
+    # What a target dof outside the warm start's mesh takes, as the forward
+    # does when it loads a MAP from a smaller mesh (ISMIP7_TRANSFER_FILL).
+    # Under `extend` (the default) the controls continue harmonically from
+    # the warm start's outline and the fluidity prior's logarithm does too
+    # (transfer.harmonic_extension), so the bi-Laplacian prior pays nothing
+    # for a step there; the constants below remain only where the extension
+    # cannot reach. Under `constant` they are the fill: the prior for the log
+    # controls (0), and for the fluidity prior mean the constant baseline,
+    # which keeps A = A_prior exp(phi) positive (transfer.py has the
+    # measurement behind that). Same-mesh warm starts miss nothing.
     warm_fill = {"fluidity_prior": float(A0) * a4_factor}
+    warm_fill_mode = transfer_fill()
+    # name -> extend its logarithm
+    warm_extend = ({"log_friction": False, "log_fluidity": False,
+                    "sqrt_friction": False, "fluidity_prior": True}
+                   if warm_fill_mode == "extend" else {})
 
     def _warm_load(chk, source_mesh, name, space):
         source_field = chk.load_function(source_mesh, name=name)
         target = Function(space, name=name)
+        fill = warm_fill.get(name, 0.0)
         n_missing, n_total, n_clamped = interpolate_with_fill(
-            target, source_field, warm_fill.get(name, 0.0))
+            target, source_field, fill,
+            extend=name in warm_extend, log=warm_extend.get(name, False))
         if n_missing or n_clamped:
+            how = (f"a harmonic extension{' of its logarithm' if warm_extend[name] else ''} "
+                   f"({fill:g} where it cannot reach)" if name in warm_extend else f"{fill:g}")
             PETSc.Sys.Print(
                 f"    transfer {name}: {n_missing}/{n_total} target dofs "
-                f"outside the warm start's mesh -> {warm_fill.get(name, 0.0)}; "
+                f"outside the warm start's mesh -> {how}; "
                 f"{n_clamped} clamped to the source range")
         return target
 
@@ -2397,6 +2409,9 @@ def main():
             # forward rebuilds C_w0 from them, so it takes both from here.
             chk.set_attr("/", "friction_anchor_length", float(ANCHOR_LENGTH))
             chk.set_attr("/", "lake_ice_base", int(LAKE_ICE_BASE))
+            # How a warm start from another mesh filled the dofs beyond it
+            # (provenance: ISMIP7_TRANSFER_FILL; same-mesh starts fill none).
+            chk.set_attr("/", "warm_start_fill", warm_fill_mode)
             # Which field the friction is: C_w0 exp(log_friction) on the
             # anchor (log), or sqrt_friction^2 with no anchor (sqrt).
             chk.set_attr("/", "friction_control", FRICTION_CONTROL)

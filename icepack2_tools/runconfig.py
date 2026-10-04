@@ -169,6 +169,25 @@ def eval_continuation():
     return _int_flag("ISMIP7_EVAL_CONTINUATION", True)
 
 
+TRANSFER_FILL_MODES = ("extend", "constant")
+
+
+def transfer_fill():
+    r"""``ISMIP7_TRANSFER_FILL``: what the controls and the fluidity prior
+    take on the dofs of a compute mesh beyond the mesh they were read from (a
+    MAP loaded by a forward, an inversion's warm start). ``extend`` (the
+    default): theta, phi and alpha continue harmonically from the source
+    outline, and the fluidity prior's logarithm does too
+    (``icepack2_tools.transfer.harmonic_extension``). ``constant``: theta =
+    phi = 0 and the constant baseline prior ``A0 * a4_factor``."""
+    mode = os.environ.get("ISMIP7_TRANSFER_FILL", "extend").strip().lower()
+    if mode not in TRANSFER_FILL_MODES:
+        raise ValueError(
+            f"ISMIP7_TRANSFER_FILL must be one of {', '.join(TRANSFER_FILL_MODES)}, "
+            f"not {mode!r}")
+    return mode
+
+
 def lc():
     r"""Target edge length [m] in the refined region of the mesh."""
     return int(os.environ.get("ISMIP7_LC", LC_DEFAULT))

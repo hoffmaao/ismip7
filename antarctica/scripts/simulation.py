@@ -88,7 +88,7 @@ from icepack2_tools.runconfig import (
     BUDD_SHELF_GATE as _BUDD_SHELF_GATE,
     residual_stabilizers,
     friction as _friction, geometry_space as _geometry_space,
-    mesh_override as _mesh_override,
+    mesh_override as _mesh_override, transfer_fill as _transfer_fill,
     lc as _lc, lc_coarse as _lc_coarse, n_flow as _n_flow, buffer_m as _buffer_m,
     TARGET_MESH_GEOMETRY_METHOD,
     calving_law as _calving_law, calving_law_object as _calving_law_object,
@@ -706,9 +706,15 @@ def setup_model(restart_from=None, *, allow_timing_cache_a_ref=False,
     # outside the source mesh and what they were filled with. Printed below
     # and carried in the context for the caches and the map checks.
     transfer_fill = {}
+    # ISMIP7_TRANSFER_FILL=extend (the default): the controls and the
+    # fluidity prior continue harmonically past the MAP's outline, the
+    # prior through its logarithm (icepack2_tools.transfer); `constant`
+    # leaves the stated fills alone.
+    fill_extends = _transfer_fill() == "extend"
 
     def load_checkpoint_field(chk, name, space, optional=False,
-                              fill=0.0, fill_label="0"):
+                              fill=0.0, fill_label="0", extend=False,
+                              log=False):
         """Load a checkpoint field, interpolating it onto the compute mesh.
 
         With ISMIP7_MESH naming another mesh, a target dof outside the source
@@ -716,7 +722,10 @@ def setup_model(restart_from=None, *, allow_timing_cache_a_ref=False,
         sample for velocity_obs). The buffered production mesh reaches 20 km
         past a buffer-0 MAP, so the whole ring is filled; zero there is the
         prior for theta and phi and a singular block for the fluidity prior
-        (icepack2_tools.transfer). Same-mesh loads miss nothing.
+        (icepack2_tools.transfer). ``extend`` (honoured under
+        ISMIP7_TRANSFER_FILL=extend) continues the field harmonically from
+        the source outline instead, ``fill`` kept where that cannot reach;
+        ``log`` extends its logarithm. Same-mesh loads miss nothing.
         """
         try:
             source_field = chk.load_function(source_mesh, name=name)
@@ -725,9 +734,14 @@ def setup_model(restart_from=None, *, allow_timing_cache_a_ref=False,
                 return None
             raise
         target_field = Function(space, name=name)
+        extend = extend and fill_extends
         n_missing, n_total, n_clamped = interpolate_with_fill(
-            target_field, source_field, fill, mesh.comm
+            target_field, source_field, fill, mesh.comm, extend=extend,
+            log=log,
         )
+        if extend:
+            fill_label = (f"a harmonic extension{' of its logarithm' if log else ''} "
+                          f"of the source ({fill_label} where it cannot reach)")
         transfer_fill[name] = {
             "missing": n_missing, "total": n_total, "fill": fill_label,
             "clamped": n_clamped,
@@ -735,16 +749,17 @@ def setup_model(restart_from=None, *, allow_timing_cache_a_ref=False,
         return target_field
 
     with fd.CheckpointFile(source_chk, "r") as chk:
-        theta_f = load_checkpoint_field(chk, "log_friction", Q)
+        theta_f = load_checkpoint_field(chk, "log_friction", Q, extend=True)
         theta_f.rename("theta")
-        phi_f = load_checkpoint_field(chk, "log_fluidity", Q)
+        phi_f = load_checkpoint_field(chk, "log_fluidity", Q, extend=True)
         phi_f.rename("phi")
         # A MAP inverted on the sqrt(C) control (ISMIP7_FRICTION_CONTROL=sqrt)
         # carries alpha = sqrt(C): its friction is alpha^2 outright, with no
         # anchor and a zero log deviation. Restart checkpoints carry that
         # friction as C_w0 with theta = 0, so they take the ordinary path.
         alpha_f = load_checkpoint_field(
-            chk, "sqrt_friction", Q, optional=True, fill=0.0, fill_label="0")
+            chk, "sqrt_friction", Q, optional=True, fill=0.0, fill_label="0",
+            extend=True)
         # A MAP inverted on the exp control (ISMIP7_FRICTION_CONTROL=exp)
         # carries alpha = ln(C / C_ref) as log_friction and C_ref as a
         # constant C_w0. The residual takes C = C_ref exp(alpha) pointwise
@@ -764,6 +779,7 @@ def setup_model(restart_from=None, *, allow_timing_cache_a_ref=False,
             chk, "fluidity_prior", Q, optional=True,
             fill=A_prior_baseline,
             fill_label=f"the constant baseline A0*a4_factor = {A_prior_baseline:.3g}",
+            extend=True, log=True,
         )
         if is_restart:
             # Self-contained restart: evolved geometry, frozen anchors, time.

@@ -132,6 +132,14 @@ MASS_RESIDUAL_TOL_GT_DEFAULT = "5e-5"
 CONTINUATION_STEPS_DEFAULT = "8"
 RESCUE_MAXIT_DEFAULT = "600"
 SUBCYCLES_DEFAULT = "1,4,16"
+# Adaptive substepping (icepack2_tools.substep): off by default. The
+# tolerance is metres of backward-Euler local error in the DG0 thickness.
+SUBSTEP_ADAPT_DEFAULT = "0"
+SUBSTEP_TOL_DEFAULT = "1.0"
+SUBSTEP_INIT_DEFAULT = "1"
+SUBSTEP_MAX_DEFAULT = "64"
+SUBSTEP_QUIET_DEFAULT = "20"
+SUBSTEP_HMIN_DEFAULT = "10"
 RESCUE_ENABLED_DEFAULT = "1"
 
 
@@ -436,6 +444,24 @@ def subcycles():
     return values
 
 
+def substep_settings():
+    r"""Adaptive substepping of each macro step (``ISMIP7_SUBSTEP_ADAPT``), or
+    None when off. With it on, the fixed ``ISMIP7_SUBCYCLES`` retry list is
+    replaced by a substep count chosen from the thickness error estimate:
+    ``ISMIP7_SUBSTEP_TOL`` (m), starting at ``ISMIP7_SUBSTEP_INIT`` substeps,
+    at most ``ISMIP7_SUBSTEP_MAX``, halving after ``ISMIP7_SUBSTEP_QUIET``
+    quiet macro steps, over cells at least ``ISMIP7_SUBSTEP_HMIN`` m thick."""
+    if not _enabled("ISMIP7_SUBSTEP_ADAPT", SUBSTEP_ADAPT_DEFAULT):
+        return None
+    return {
+        "tol": float(_env("ISMIP7_SUBSTEP_TOL", SUBSTEP_TOL_DEFAULT)),
+        "m_init": int(_env("ISMIP7_SUBSTEP_INIT", SUBSTEP_INIT_DEFAULT)),
+        "m_max": int(_env("ISMIP7_SUBSTEP_MAX", SUBSTEP_MAX_DEFAULT)),
+        "quiet_steps": int(_env("ISMIP7_SUBSTEP_QUIET", SUBSTEP_QUIET_DEFAULT)),
+        "hmin": float(_env("ISMIP7_SUBSTEP_HMIN", SUBSTEP_HMIN_DEFAULT)),
+    }
+
+
 def snes_atol_scale():
     return float(_env("ISMIP7_SNES_ATOL_SCALE", SNES_ATOL_SCALE_DEFAULT))
 
@@ -549,6 +575,12 @@ def effective_solver_env():
         "ISMIP7_RESCUE_MAXIT": RESCUE_MAXIT_DEFAULT,
         "ISMIP7_RESCUE_ENABLED": RESCUE_ENABLED_DEFAULT,
         "ISMIP7_SUBCYCLES": SUBCYCLES_DEFAULT,
+        "ISMIP7_SUBSTEP_ADAPT": SUBSTEP_ADAPT_DEFAULT,
+        "ISMIP7_SUBSTEP_TOL": SUBSTEP_TOL_DEFAULT,
+        "ISMIP7_SUBSTEP_INIT": SUBSTEP_INIT_DEFAULT,
+        "ISMIP7_SUBSTEP_MAX": SUBSTEP_MAX_DEFAULT,
+        "ISMIP7_SUBSTEP_QUIET": SUBSTEP_QUIET_DEFAULT,
+        "ISMIP7_SUBSTEP_HMIN": SUBSTEP_HMIN_DEFAULT,
     }
 
 
@@ -574,6 +606,7 @@ def solver_provenance(mode=None):
         "rescue_max_it": rescue_max_it(),
         "rescue_enabled": rescue_enabled(),
         "subcycles": list(subcycles()),
+        "substep_adapt": substep_settings(),
         "snes_atol_policy": {
             "initial": float(_env("ISMIP7_SNES_ATOL", SNES_ATOL_DEFAULT)),
             "post_convergence_scale": snes_atol_scale(),

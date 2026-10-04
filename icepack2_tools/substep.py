@@ -1,0 +1,129 @@
+r"""Adaptive substepping of the forward's thickness/velocity split step.
+
+The forward advances the thickness with the velocity solved at the previous
+geometry, then solves the velocity at the new geometry. That lag makes the
+coupled system explicit in the velocity's response to thickness, so it has a
+stability limit on the step: where the velocity is hypersensitive to the
+thickness (near-flotation grounding zones carrying cell-scale friction
+contrast) a step above the limit amplifies a cell-scale perturbation each
+step, which shows as a period-2 flip-flop of thickness and speed and then a
+blow-up. The limit moves as the geometry evolves, so no fixed step is both
+safe and affordable for a 286-year run.
+
+The controller keeps the macro step ``dt`` (forcing, output, checkpoints and
+budgets are unchanged) and splits it into ``m`` equal substeps, choosing
+``m`` from the backward-Euler local error estimate on the DG0 thickness,
+
+    err_j = tau_j / (tau_j + tau_{j-1}) * max | dh_j - (tau_j / tau_{j-1}) dh_{j-1} |,
+
+the step-to-step change of the thickness increment. Smooth evolution keeps
+it small (it scales as tau^2); a flip-flop makes it about the size of the
+increment itself. A substep whose estimate exceeds the tolerance rejects the
+macro step, which the caller rewinds and repeats with more substeps; a run of
+quiet macro steps halves ``m`` again. Cells thinner than ``hmin`` in any of
+the three states are left out, so a calving or collapse removal (a jump that
+does not shrink with the step) cannot drive ``m`` to its ceiling.
+"""
+
+import math
+
+import numpy as np
+
+
+class SubstepController:
+    def __init__(self, *, tol, m_init=1, m_max=64, quiet_steps=20, hmin=10.0,
+                 comm=None):
+        if tol <= 0:
+            raise ValueError("substep tolerance must be positive")
+        if not 1 <= m_init <= m_max:
+            raise ValueError("need 1 <= initial substeps <= maximum substeps")
+        if quiet_steps < 1:
+            raise ValueError("quiet window must be at least one macro step")
+        self.tol = float(tol)
+        self.m = int(m_init)
+        self.m_max = int(m_max)
+        self.quiet_steps = int(quiet_steps)
+        self.hmin = float(hmin)
+        self.comm = comm
+        # last accepted substep: its increment, the cells it was taken over
+        # and its length; None until the first substep of the run
+        self._dh = None
+        self._keep = None
+        self._tau = None
+        self._saved = None
+        self._quiet = 0
+        self.err_step = 0.0          # largest estimate in the current attempt
+        self.rejections = 0
+
+    def _max(self, value):
+        return self.comm.allreduce(value, op=_mpi_max()) if self.comm is not None else value
+
+    def begin_attempt(self):
+        r"""Mark the start of an attempt at a macro step, so a rejection can
+        rewind the substep history along with the model state."""
+        self._saved = (self._dh, self._keep, self._tau)
+        self.err_step = 0.0
+
+    def observe(self, h_before, h_after, tau):
+        r"""Record one substep's thickness change and return its error
+        estimate (metres, the same on every rank). The first substep of a
+        run has no predecessor and returns 0."""
+        h_before = np.asarray(h_before)
+        h_after = np.asarray(h_after)
+        dh = h_after - h_before
+        keep = (h_before >= self.hmin) & (h_after >= self.hmin)
+        if self._dh is None:
+            err = 0.0
+        else:
+            both = keep & self._keep
+            diff = dh[both] - (tau / self._tau) * self._dh[both]
+            local = float(np.max(np.abs(diff))) if diff.size else 0.0
+            if not math.isfinite(local):
+                local = math.inf
+            err = tau / (tau + self._tau) * local
+        err = self._max(err)
+        self._dh, self._keep, self._tau = dh.copy(), keep, float(tau)
+        self.err_step = max(self.err_step, err)
+        return err
+
+    def exceeds(self, err):
+        return not err <= self.tol         # NaN and inf reject
+
+    def refine(self, err=None):
+        r"""Rewind the substep history and return the substep count for the
+        retry, or None when the ceiling is already reached. ``err`` is the
+        estimate that rejected the attempt; None means the velocity solve
+        failed, which doubles ``m``. An estimate jumps straight to the count
+        that would meet the tolerance if the error scaled as tau^2, at most
+        eightfold at once."""
+        self._dh, self._keep, self._tau = self._saved
+        self._quiet = 0
+        self.rejections += 1
+        if self.m >= self.m_max:
+            return None
+        factor = 2
+        if err is not None and math.isfinite(err) and err > 0:
+            need = math.sqrt(err / self.tol) / 0.9
+            factor = min(8, max(2, 2 ** math.ceil(math.log2(need))))
+        self.m = min(self.m_max, self.m * factor)
+        return self.m
+
+    def accept(self):
+        r"""Close an accepted macro step. After ``quiet_steps`` accepted macro
+        steps in a row, none rejected and none with an estimate above a
+        quarter of the tolerance (what halving m roughly multiplies it by),
+        the substep count halves. Returns True when m changed."""
+        if self.err_step < 0.25 * self.tol:
+            self._quiet += 1
+        else:
+            self._quiet = 0
+        if self._quiet >= self.quiet_steps and self.m > 1:
+            self.m //= 2
+            self._quiet = 0
+            return True
+        return False
+
+
+def _mpi_max():
+    from mpi4py import MPI
+    return MPI.MAX

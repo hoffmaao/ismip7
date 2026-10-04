@@ -119,6 +119,7 @@ from icepack2_tools.solverconfig import (
     snes_restart_failure_atol_scale,
     solver_view_enabled,
     subcycles,
+    substep_settings,
     transport_solver_parameters,
 )
 
@@ -3182,6 +3183,21 @@ def run_simulation(
     # Newton track the branch through the event). Checkpoints improve too:
     # saved (h, u) are now mutually consistent.
     SUBCYCLES = subcycles()
+    # Adaptive substepping replaces the fixed retry list when it is on: the
+    # count follows the thickness error estimate instead of waiting for a
+    # failed solve, because the lagged-velocity instability grows through
+    # steps whose solves all converge (icepack2_tools/substep.py).
+    _substep = substep_settings()
+    adapt = None
+    if _substep is not None:
+        from icepack2_tools.substep import SubstepController
+        adapt = SubstepController(comm=mesh.comm, **_substep)
+        PETSc.Sys.Print(
+            f"  Adaptive substeps: tol {adapt.tol:g} m on the thickness "
+            f"error estimate, {adapt.m}..{adapt.m_max} substeps of dt={dt:g} yr, "
+            f"halving after {adapt.quiet_steps} quiet steps, cells >= "
+            f"{adapt.hmin:g} m"
+        )
 
     # Timing drivers use this marker rather than timing setup_model or the
     # transport-operator construction above.  It is also available after an
@@ -3244,10 +3260,13 @@ def run_simulation(
         if a_ref_entry is not None:
             a_ref_entry.assign(a_ref)
         tallies = None
-        for m in SUBCYCLES:
+        retries = iter(SUBCYCLES[1:])
+        m = SUBCYCLES[0] if adapt is None else adapt.m
+        attempt = 0
+        while m is not None:
             if annual is not None:
                 annual.begin_step()          # a rewound attempt must not double-count
-            if m > 1:
+            if attempt > 0:
                 PETSc.Sys.Print(
                     f"  Step {k}: subcycling x{m} (dt={dt / m:.4g})..."
                 )
@@ -3259,11 +3278,16 @@ def run_simulation(
                 if level_set is not None:
                     level_set.phi.assign(phi_entry)
                     level_set.update_cell_fields()
+            if adapt is not None:
+                adapt.begin_attempt()
             acc = {"out_gt": 0.0, "calv_gt": 0.0, "clamp_gt": 0.0,
                    "limit_gt": 0.0, "amb_gt": 0.0,
                    "smb_gt": 0.0, "melt_gt": 0.0}
             ok = True
+            reject_err = None
             for _j in range(m):
+                h_before = (np.array(h_dg.dat.data_ro)
+                            if adapt is not None else None)
                 sub = _advance(
                     dt / m, f"step-{k}-substep-{_j + 1}/{m}"
                 )
@@ -3272,22 +3296,45 @@ def run_simulation(
                 # A state where the tallies are sums, so the last advance of
                 # the accepted attempt stands for the step.
                 collapse_cells = sub["collapse_cells"]
+                if adapt is not None:
+                    err = adapt.observe(h_before, h_dg.dat.data_ro, dt / m)
+                    if adapt.exceeds(err):
+                        PETSc.Sys.Print(
+                            f"  Step {k}: substep {_j + 1}/{m} thickness error "
+                            f"{err:.3g} m > {adapt.tol:g} m, rejecting the step"
+                        )
+                        ok = False
+                        reject_err = err
+                        break
                 if not _solve_with_rescue(k):
                     ok = False
                     break
             if ok:
-                if m > 1:
+                if m > 1 and adapt is None:
                     PETSc.Sys.Print(f"  Step {k}: completed via x{m} subcycle")
                 tallies = acc
                 if annual is not None:
                     annual.commit_step()
                 break
+            attempt += 1
+            m = next(retries, None) if adapt is None else adapt.refine(reject_err)
+        if adapt is not None and tallies is not None:
+            m_used = adapt.m
+            if adapt.accept():
+                PETSc.Sys.Print(
+                    f"  Step {k}: {adapt.quiet_steps} quiet steps, substeps "
+                    f"{m_used} -> {adapt.m}"
+                )
         if tallies is None:
             ctx["failure"] = {
                 "category": "diagnostic_convergence",
                 "phase": f"step-{k}-rescue-exhausted",
                 "exception_type": "ConvergenceError",
-                "message": "diagnostic rescue ladder and subcycles exhausted",
+                "message": (
+                    "diagnostic rescue ladder and subcycles exhausted"
+                    if adapt is None else
+                    f"adaptive substeps exhausted at {adapt.m_max} substeps"
+                ),
             }
             PETSc.Sys.Print(
                 f"  Step {k}: rescue ladder + subcycles exhausted, "
@@ -3343,6 +3390,8 @@ def run_simulation(
             "amb_gt_per_yr": float(amb_rate),
             "dm_gt": float(dm),
             "resid_gt": float(resid_gt),
+            **({"substeps": int(m_used), "dh_err_m": float(adapt.err_step)}
+               if adapt is not None else {}),
         })
 
         step_stat = _field_diagnostics(f"step-{k}-t={t_yr:.6g}")
@@ -3473,7 +3522,10 @@ def run_simulation(
             _amb_txt = f"amb={amb_rate:+.0f} " if a_ref is not None else ""
             PETSc.Sys.Print(
                 f"  t={t_yr:.1f}  VAF={vaf:.4f} mm SLE  "
-                f"mass={total_mass:.1f} Gt  [{t_elapsed:.1f}s]\n"
+                f"mass={total_mass:.1f} Gt  [{t_elapsed:.1f}s]"
+                + (f"  substeps={m_used} dh_err={adapt.err_step:.2g} m"
+                   if adapt is not None else "")
+                + "\n"
                 f"      budget [Gt/yr]: SMB={smb_rate:+.0f} melt={-melt_rate:+.0f} "
                 f"{_amb_txt}"
                 f"outflux={-out_rate:+.0f} calv={-calv_gt/dt:+.0f} "

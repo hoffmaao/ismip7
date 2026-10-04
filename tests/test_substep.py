@@ -1,0 +1,133 @@
+"""Adaptive substepping controller (icepack2_tools/substep.py)."""
+import numpy as np
+import pytest
+
+from icepack2_tools.solverconfig import substep_settings
+from icepack2_tools.substep import SubstepController
+
+
+def _run(ctrl, h, rate, dt, nsteps):
+    """Drive a macro-step loop the way run_simulation does: each macro step
+    of dt is taken as m substeps; a rejection rewinds the step and repeats it
+    with the refined count. ``rate(h)`` is the lagged tendency (the velocity
+    solved at the previous geometry). Returns the trajectory and the m used."""
+    traj, ms = [h.copy()], []
+    for _ in range(nsteps):
+        entry = h.copy()
+        m = ctrl.m
+        while True:
+            h = entry.copy()
+            ctrl.begin_attempt()
+            ok = True
+            for _j in range(m):
+                before = h.copy()
+                h = h + (dt / m) * rate(h)
+                if ctrl.exceeds(ctrl.observe(before, h, dt / m)):
+                    ok = False
+                    err = ctrl.err_step
+                    break
+            if ok:
+                break
+            m = ctrl.refine(err)
+            assert m is not None, "substeps exhausted"
+        ms.append(m)
+        ctrl.accept()
+        traj.append(h.copy())
+    return np.array(traj), ms
+
+
+def test_smooth_evolution_coarsens_to_one_substep():
+    ctrl = SubstepController(tol=1.0, m_init=8, quiet_steps=3)
+    h = np.full(5, 1000.0)
+    _, ms = _run(ctrl, h, lambda h: np.full_like(h, -2.0), 0.05, 20)
+    assert ms[0] == 8 and ms[-1] == 1
+
+
+def test_flip_flop_is_rejected_and_refined():
+    ctrl = SubstepController(tol=1.0, m_init=1)
+    h0 = np.full(4, 500.0)
+    ctrl.begin_attempt()
+    ctrl.observe(h0, h0 + 3.0, 0.05)
+    ctrl.accept()
+    ctrl.begin_attempt()
+    err = ctrl.observe(h0 + 3.0, h0, 0.05)          # the increment flips sign
+    assert err == pytest.approx(3.0) and ctrl.exceeds(err)
+    assert ctrl.refine(err) == 2                     # sqrt(3)/0.9 = 1.9: double
+    assert ctrl.refine(30.0) == 16                   # sqrt(30)/0.9 = 6.1: x8 (the cap)
+
+
+def test_rejection_rewinds_the_history():
+    ctrl = SubstepController(tol=1.0)
+    h = np.full(3, 100.0)
+    ctrl.begin_attempt()
+    ctrl.observe(h, h + 1.0, 0.1)
+    ctrl.accept()
+    ctrl.begin_attempt()
+    ctrl.observe(h + 1.0, h + 50.0, 0.1)
+    ctrl.refine(ctrl.err_step)
+    ctrl.begin_attempt()
+    # measured against the accepted increment (+1 over 0.1), not the rejected one
+    err = ctrl.observe(h + 1.0, h + 1.5, 0.05)
+    assert err == pytest.approx(0.05 / 0.15 * abs(0.5 - 0.5 * 1.0))
+
+
+def test_removed_cells_do_not_count():
+    ctrl = SubstepController(tol=1.0, hmin=10.0)
+    h = np.array([800.0, 300.0])
+    ctrl.begin_attempt()
+    ctrl.observe(h, h - 1.0, 0.05)
+    ctrl.accept()
+    ctrl.begin_attempt()
+    calved = np.array([797.9, 0.0])                  # cell 1 removed by calving
+    assert ctrl.observe(h - 1.0, calved, 0.05) == pytest.approx(0.05)
+
+
+def test_ceiling_and_nonfinite():
+    ctrl = SubstepController(tol=1.0, m_init=4, m_max=4)
+    ctrl.begin_attempt()
+    assert ctrl.refine(None) is None
+    assert ctrl.exceeds(float("nan")) and ctrl.exceeds(float("inf"))
+
+
+def test_error_estimate_is_second_order():
+    """Backward-Euler local error of exponential decay: halving tau quarters it."""
+    def err_at(tau):
+        ctrl = SubstepController(tol=1e9)
+        h = np.array([1000.0])
+        for _ in range(3):
+            new = h / (1 + tau)
+            ctrl.begin_attempt()
+            e = ctrl.observe(h, new, tau)
+            ctrl.accept()
+            h = new
+        return e
+    assert err_at(0.02) / err_at(0.01) == pytest.approx(4.0, rel=0.05)
+
+
+def test_lagged_coupling_blows_up_fixed_but_not_adaptive():
+    """h relaxes to h* at rate lam with the tendency lagged one step (forward
+    Euler): unstable for dt*lam > 2, the flip-flop the forward shows."""
+    lam, dt, hstar = 100.0, 0.05, 1000.0               # dt*lam = 5
+    rate = lambda h: -lam * (h - hstar)
+    h0 = np.array([hstar + 5.0, hstar - 5.0, hstar])
+    h = h0.copy()
+    for _ in range(40):
+        h = h + dt * rate(h)
+    assert np.abs(h - hstar).max() > 1e6               # the fixed step diverges
+    ctrl = SubstepController(tol=1.0, quiet_steps=1000)
+    traj, ms = _run(ctrl, h0.copy(), rate, dt, 40)
+    assert np.abs(traj[-1] - hstar).max() < 1.0
+    # the run's first substep has no history to compare with; every later
+    # macro step runs with tau*lam < 2, i.e. m > 2.5
+    assert min(ms[1:]) >= 4
+
+
+def test_settings_from_environment(monkeypatch):
+    monkeypatch.delenv("ISMIP7_SUBSTEP_ADAPT", raising=False)
+    assert substep_settings() is None
+    monkeypatch.setenv("ISMIP7_SUBSTEP_ADAPT", "1")
+    monkeypatch.setenv("ISMIP7_SUBSTEP_TOL", "0.5")
+    monkeypatch.setenv("ISMIP7_SUBSTEP_INIT", "4")
+    s = substep_settings()
+    assert s["tol"] == 0.5 and s["m_init"] == 4 and s["m_max"] == 64
+    SubstepController(**s)

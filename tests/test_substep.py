@@ -63,12 +63,26 @@ def test_rejection_rewinds_the_history():
     ctrl.observe(h, h + 1.0, 0.1)
     ctrl.accept()
     ctrl.begin_attempt()
-    ctrl.observe(h + 1.0, h + 50.0, 0.1)
+    ctrl.observe(h + 1.0, h - 50.0, 0.1)
     ctrl.refine(ctrl.err_step)
     ctrl.begin_attempt()
     # measured against the accepted increment (+1 over 0.1), not the rejected one
-    err = ctrl.observe(h + 1.0, h + 1.5, 0.05)
-    assert err == pytest.approx(0.05 / 0.15 * abs(0.5 - 0.5 * 1.0))
+    err = ctrl.observe(h + 1.0, h - 1.0, 0.05)
+    assert err == pytest.approx(0.05 / 0.15 * abs(-2.0 - 0.5 * 1.0))
+
+
+def test_a_rate_jump_without_reversal_is_accepted():
+    """A cell going afloat speeds its thinning by 2500 m/yr: the increment
+    jumps but keeps its sign, which no step size makes smoother."""
+    ctrl = SubstepController(tol=1.0)
+    h = np.full(2, 1500.0)
+    tau = 0.0125
+    ctrl.begin_attempt()
+    ctrl.observe(h, h - 5.0 * tau, tau)
+    ctrl.accept()
+    ctrl.begin_attempt()
+    err = ctrl.observe(h - 5.0 * tau, h - 5.0 * tau - 2505.0 * tau, tau)
+    assert err == 0.0 and not ctrl.exceeds(err)
 
 
 def test_removed_cells_do_not_count():
@@ -78,8 +92,8 @@ def test_removed_cells_do_not_count():
     ctrl.observe(h, h - 1.0, 0.05)
     ctrl.accept()
     ctrl.begin_attempt()
-    calved = np.array([797.9, 0.0])                  # cell 1 removed by calving
-    assert ctrl.observe(h - 1.0, calved, 0.05) == pytest.approx(0.05)
+    calved = np.array([799.1, 0.0])                  # cell 1 removed by calving
+    assert ctrl.observe(h - 1.0, calved, 0.05) == pytest.approx(0.55)
 
 
 def test_ceiling_and_nonfinite():
@@ -87,21 +101,24 @@ def test_ceiling_and_nonfinite():
     ctrl.begin_attempt()
     assert ctrl.refine(None) is None
     assert ctrl.exceeds(float("nan")) and ctrl.exceeds(float("inf"))
+    ctrl = SubstepController(tol=1.0)
+    h = np.full(2, 100.0)
+    ctrl.begin_attempt()
+    ctrl.observe(h, h + 1.0, 0.1)
+    ctrl.begin_attempt()
+    assert ctrl.exceeds(ctrl.observe(h + 1.0, np.array([101.0, np.nan]), 0.1))
 
 
-def test_error_estimate_is_second_order():
-    """Backward-Euler local error of exponential decay: halving tau quarters it."""
-    def err_at(tau):
-        ctrl = SubstepController(tol=1e9)
-        h = np.array([1000.0])
-        for _ in range(3):
-            new = h / (1 + tau)
-            ctrl.begin_attempt()
-            e = ctrl.observe(h, new, tau)
-            ctrl.accept()
-            h = new
-        return e
-    assert err_at(0.02) / err_at(0.01) == pytest.approx(4.0, rel=0.05)
+def test_smooth_decay_never_rejects():
+    """Backward-Euler decay of a thick column at a coarse step: no reversal."""
+    ctrl = SubstepController(tol=1e-6)
+    h = np.array([1000.0, 400.0])
+    for _ in range(10):
+        new = 50.0 + (h - 50.0) / (1 + 0.5)
+        ctrl.begin_attempt()
+        assert ctrl.observe(h, new, 0.5) == 0.0
+        ctrl.accept()
+        h = new
 
 
 def test_lagged_coupling_blows_up_fixed_but_not_adaptive():

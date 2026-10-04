@@ -16,13 +16,21 @@ budgets are unchanged) and splits it into ``m`` equal substeps, choosing
 
     err_j = tau_j / (tau_j + tau_{j-1}) * max | dh_j - (tau_j / tau_{j-1}) dh_{j-1} |,
 
-the step-to-step change of the thickness increment. Smooth evolution keeps
-it small (it scales as tau^2); a flip-flop makes it about the size of the
-increment itself. A substep whose estimate exceeds the tolerance rejects the
-macro step, which the caller rewinds and repeats with more substeps; a run of
-quiet macro steps halves ``m`` again. Cells thinner than ``hmin`` in any of
-the three states are left out, so a calving or collapse removal (a jump that
-does not shrink with the step) cannot drive ``m`` to its ceiling.
+the step-to-step change of the thickness increment, taken only over cells
+whose increment reversed sign. The lagged step's instability is a real
+negative mode stepped past -2/tau, so it shows as a sign reversal every
+substep with a growing amplitude, and there the estimate is about the size
+of the increment itself; a stable smooth evolution keeps it small (it scales
+as tau^2). Cells whose increment keeps its sign are left out because a jump
+in the thinning rate (a cell going afloat, a neighbour calved) makes the
+estimate tau times the jump at any step, and refining only spends substeps
+on it without making the trajectory any more stable: on the 2 km SEP1
+control one such jump of ~2500 m/yr needed 64 substeps to pass a 1 m
+tolerance. A substep whose estimate exceeds the tolerance rejects the macro
+step, which the caller rewinds and repeats with more substeps; a run of quiet
+macro steps halves ``m`` again. Cells thinner than ``hmin`` in any of the
+three states are left out too, so a calving or collapse removal cannot drive
+``m`` to its ceiling.
 """
 
 import math
@@ -72,10 +80,13 @@ class SubstepController:
         h_after = np.asarray(h_after)
         dh = h_after - h_before
         keep = (h_before >= self.hmin) & (h_after >= self.hmin)
-        if self._dh is None:
+        if not np.all(np.isfinite(h_after[h_before >= self.hmin])):
+            err = math.inf                 # a blown-up state, whatever its history
+        elif self._dh is None:
             err = 0.0
         else:
-            both = keep & self._keep
+            # cells whose increment reversed sign
+            both = keep & self._keep & ~(dh * self._dh >= 0)
             diff = dh[both] - (tau / self._tau) * self._dh[both]
             local = float(np.max(np.abs(diff))) if diff.size else 0.0
             if not math.isfinite(local):

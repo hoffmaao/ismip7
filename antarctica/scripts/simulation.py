@@ -984,6 +984,9 @@ def setup_model(restart_from=None, *, allow_timing_cache_a_ref=False,
             d = fld.dat.data
             n_clip += int((np.abs(d) > map_clip).sum())
             np.clip(d, -map_clip, map_clip, out=d)
+        # every rank's count: printed by rank 0, its own share alone was
+        # zero whenever the clipped nodes lay in another rank's partition
+        n_clip = mesh.comm.allreduce(n_clip)
         if n_clip:
             PETSc.Sys.Print(
                 f"  MAP clip: bounded {n_clip} theta/phi node(s) to "

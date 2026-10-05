@@ -1,0 +1,24 @@
+{
+  "id": "test-2km-rc-b20k-eval1-vgf1-exact",
+  "task": "test",
+  "institution": "IU",
+  "title": "RC stage-1 controls on the 20 km buffered 2 km mesh, evaluation 1 only: the vertex gate, a 1 m membrane floor and the exact cliff push",
+  "status": "done",
+  "friction": "regularized_coulomb",
+  "period": "2015 state",
+  "mesh": "antarctica_5000_2000_buffered20000 (IU's build, 969,764 vertices), DG0 geometry, vertex raster sampling, the lake fix",
+  "initial_state": "inversion-2km-rc-nomass-lbfgsb's MAP (RC stage 1 final, sha256 fea8debae9616f18), log-velocity weight 69946.22414285329; the ring filled by the harmonic extension",
+  "forcing": "observations sampled onto this mesh; the stage-1 objective (bilaplacian sigma 30, rho 750 km, no dH/dt term, log friction control, cell-wise friction, L-BFGS-B without a metric, scpc_gamg); ISMIP7_DRAG_GATE=vertex ISMIP7_RC_HVISC_FLOOR=1 ISMIP7_EXACT_FRONT=1",
+  "site": "IU Quartz, general partition",
+  "resources": "32 ranks, 160G, up to 1 h",
+  "jobs": [
+    "10972023"
+  ],
+  "code": "60c0262; Quartz worktree /N/scratch/dlilien/ismip7_reinvert_s4",
+  "started": "2026-10-05",
+  "finished": "2026-10-05",
+  "cost": "28 min with the ramp; ISMIP7_MAXITER=1",
+  "results": "the checkpoint of evaluation 1 copied aside by snap_iter1.sh: Quartz /N/scratch/dlilien/ismip7_reinvert_jobs, plots/film_vgf1_exact_eval1.h5",
+  "audit": "evaluation 1: misfit 3,150.0, velocity chi2 74.3; model minus observed speed on floating ice mean -5.6 m/yr (median ratio -1 %), floating within 25 km of the edge -14.0 m/yr (median ratio -6 %), grounded -1.8 m/yr (shelf_stats.py). Without the push (test-2km-rc-b20k-eval1-vgate-floor1): misfit 3,159.2, -5.6 (-2 %), -13.6 (-7 %), -1.8",
+  "notes": "issue #153: what the exact push at internal grounded marine cliffs (dual_friction.front_cliff_correction) changes on the buffered mesh, where every front is internal: the misfit falls 0.3 %"
+}

@@ -3343,6 +3343,12 @@ def run_simulation(
     fssa_tendency_entry = None
     if fssa_theta_val > 0:
         if fssa_tendency is not None:
+            if not ctx["u_ref_fssa_set"]:
+                # a cold start has no last advance: measured from the starting
+                # velocity with a zero tendency, so a stalled first step
+                # rewinds to a state where the term vanishes
+                ctx["u_ref_fssa"].assign(z.subfunctions[0])
+                ctx["u_ref_fssa_set"] = True
             u_ref_fssa_entry = ctx["u_ref_fssa"].copy(deepcopy=True)
             fssa_tendency_entry = fssa_tendency.copy(deepcopy=True)
             PETSc.Sys.Print(

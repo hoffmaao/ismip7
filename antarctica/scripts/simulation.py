@@ -69,6 +69,10 @@ from icepack2_tools.mpi_stats import (
     global_size,
 )
 from icepack2_tools.boundary import load_boundary_ids
+from icepack2_tools.fssa import (
+    resolve_reference as resolve_fssa_reference,
+    restart_reference_error as fssa_restart_reference_error,
+)
 from icepack2_tools.geometry import raise_bed_to_lake_ice_base, sample_to_geometry
 from icepack2_tools.naming import map_basename
 from icepack2_tools.front import (
@@ -122,6 +126,7 @@ from icepack2_tools.solverconfig import (
     subcycles,
     substep_settings,
     fssa_theta,
+    fssa_reference,
     transport_solver_parameters,
 )
 
@@ -413,8 +418,10 @@ def setup_model(restart_from=None, *, allow_timing_cache_a_ref=False,
             # restart fast path trusts the state only within a factor of it.
             "full_state_residual",
             # The stabilization step that residual was measured at
-            # (icepack2_tools.fssa), restored before the fast-path check.
+            # (icepack2_tools.fssa), restored before the fast-path check,
+            # and the reference it was measured from.
             "fssa_tau",
+            "fssa_reference",
             # The friction anchor theta is a deviation from, and the geometry
             # it was inverted on (dual_friction.weertman_anchor,
             # geometry.raise_bed_to_lake_ice_base): a forward follows the MAP.
@@ -696,6 +703,7 @@ def setup_model(restart_from=None, *, allow_timing_cache_a_ref=False,
     tau_guess = None
     a_ref_mb = None
     u_ref_fssa_ckpt = None
+    fssa_tendency_ckpt = None
     calved_cells_ckpt = None
     phys_div = None
     h_dg_state = None
@@ -812,6 +820,9 @@ def setup_model(restart_from=None, *, allow_timing_cache_a_ref=False,
             )
             u_ref_fssa_ckpt = load_checkpoint_field(
                 chk, "u_ref_fssa", V, optional=True
+            )
+            fssa_tendency_ckpt = load_checkpoint_field(
+                chk, "fssa_tendency", Q_dg, optional=True
             )
             calved_cells_ckpt = load_checkpoint_field(
                 chk, "calved_cells", Q_dg, optional=True
@@ -1376,6 +1387,25 @@ def setup_model(restart_from=None, *, allow_timing_cache_a_ref=False,
     if restart_from is not None and u_ref_fssa_ckpt is not None:
         u_ref_fssa.assign(u_ref_fssa_ckpt)
         u_ref_fssa_loaded = True
+    # The reference the surface change is measured from
+    # (ISMIP7_FSSA_REFERENCE): `start` keeps u_ref fixed, `step` moves it to
+    # the velocity of every advance and adds that advance's tendency as a
+    # load. `auto` follows the apparent mass balance, which a restart
+    # carries, so it resolves the same way on every link of a chain.
+    fssa_ref_mode = None
+    fssa_tendency = None
+    if fssa_theta_val > 0:
+        fssa_ref_mode = resolve_fssa_reference(
+            fssa_reference(), apparent_mb_mode() is not None)
+        if restart_from is not None:
+            _ref_err = fssa_restart_reference_error(
+                checkpoint_metadata, fssa_ref_mode, restart_from)
+            if _ref_err:
+                raise ValueError(_ref_err)
+        if fssa_ref_mode == "step":
+            fssa_tendency = Function(Q_dg, name="fssa_tendency")
+            if restart_from is not None and fssa_tendency_ckpt is not None:
+                fssa_tendency.assign(fssa_tendency_ckpt)
 
     if use_residual:
         # Residual closure on the LIVE prognostic fields (h, s): the grounded
@@ -1413,6 +1443,7 @@ def setup_model(restart_from=None, *, allow_timing_cache_a_ref=False,
                 calving_ids=calving_ids if use_calving_terminus else None,
                 fssa_tau=fssa_tau if fssa_theta_val > 0 else None,
                 u_ref=u_ref_fssa if fssa_theta_val > 0 else None,
+                fssa_tendency=fssa_tendency,
             )
 
         # The closure above is the single definition of this residual: the
@@ -1450,6 +1481,7 @@ def setup_model(restart_from=None, *, allow_timing_cache_a_ref=False,
                     exact_front=bool(map_exact_front),
                     fssa_tau=fssa_tau if fssa_theta_val > 0 else None,
                     u_ref=u_ref_fssa if fssa_theta_val > 0 else None,
+                    fssa_tendency=fssa_tendency,
                 )
         else:
             subelement = None
@@ -1907,12 +1939,16 @@ def setup_model(restart_from=None, *, allow_timing_cache_a_ref=False,
         # Frozen t=0 apparent-MB correction (restart only; else None).
         "a_ref_mb": a_ref_mb,
         # Free-surface stabilization: its theta, the step Constant the forward
-        # sets, the reference velocity (the one a_ref was built from) and
-        # whether the checkpoint carried it.
+        # sets, the reference velocity (under `start` the one a_ref was built
+        # from, under `step` the last advance's) and whether the checkpoint
+        # carried it, the resolved reference, and under `step` the tendency
+        # of the last advance (else None).
         "fssa_theta": fssa_theta_val,
         "fssa_tau": fssa_tau,
         "u_ref_fssa": u_ref_fssa,
         "u_ref_fssa_set": u_ref_fssa_loaded,
+        "fssa_reference": fssa_ref_mode,
+        "fssa_tendency": fssa_tendency,
         # Cells a retreat-only front has emptied (restart only; else None).
         "calved_cells": calved_cells_ckpt,
         "phys_div": phys_div,
@@ -2009,6 +2045,8 @@ def save_model_state(ctx, final_path, t_now, extra_attrs=None):
             chk.save_function(ctx["a_ref_mb"], name="a_ref_mb")
         if ctx.get("u_ref_fssa_set"):
             chk.save_function(ctx["u_ref_fssa"], name="u_ref_fssa")
+        if ctx.get("fssa_tendency") is not None:
+            chk.save_function(ctx["fssa_tendency"], name="fssa_tendency")
         if ctx.get("calved_mask") is not None:
             chk.save_function(ctx["calved_mask"], name="calved_cells")
         if ctx.get("level_set") is not None:
@@ -2074,6 +2112,7 @@ def save_model_state(ctx, final_path, t_now, extra_attrs=None):
             chk.set_attr("/", "full_state_residual", full_state_residual)
         if ctx.get("fssa_theta", 0.0) > 0:
             chk.set_attr("/", "fssa_tau", float(ctx["fssa_tau"]))
+            chk.set_attr("/", "fssa_reference", ctx["fssa_reference"])
         for name, value in (extra_attrs or {}).items():
             if value is not None:
                 chk.set_attr("/", name, value)
@@ -3080,6 +3119,13 @@ def run_simulation(
             }
             raise
 
+        if fssa_tendency is not None:
+            # The advance's own tendency, before the floor and the front
+            # rules: the implicit upwind update makes it source minus the
+            # flux divergence of the new thickness under u_vel, which the
+            # next solve measures its surface change from (fssa, `step`).
+            fssa_tendency.dat.data[:] = (
+                h_dg.dat.data_ro - h_dg_old.dat.data_ro) / dt_local
         if trace_on:
             _h_tr = {i: float(h_dg.dat.data_ro[i]) for _, i in trace_cells}
         out_gt = float(assemble(
@@ -3291,8 +3337,19 @@ def run_simulation(
     trace_on = bool(mesh.comm.allreduce(len(trace_cells)))
     fssa_theta_val = ctx["fssa_theta"]
     fssa_tau = ctx["fssa_tau"]
+    # Under `step` the last advance's velocity and tendency; None otherwise.
+    fssa_tendency = ctx["fssa_tendency"]
+    u_ref_fssa_entry = None
+    fssa_tendency_entry = None
     if fssa_theta_val > 0:
-        if not ctx["u_ref_fssa_set"]:
+        if fssa_tendency is not None:
+            u_ref_fssa_entry = ctx["u_ref_fssa"].copy(deepcopy=True)
+            fssa_tendency_entry = fssa_tendency.copy(deepcopy=True)
+            PETSc.Sys.Print(
+                "  Free-surface stabilization: measured from the velocity of "
+                "the last advance, with that advance's tendency as a load "
+                "(ISMIP7_FSSA_REFERENCE=step)")
+        elif not ctx["u_ref_fssa_set"]:
             # no balanced reference to anchor on: the state at the start of
             # this run is the reference, and the term vanishes there
             ctx["u_ref_fssa"].assign(z.subfunctions[0])
@@ -3377,6 +3434,11 @@ def run_simulation(
         # cell without its balancing reference.
         if a_ref_entry is not None:
             a_ref_entry.assign(a_ref)
+        if fssa_tendency is not None:
+            # the reference the entry state was solved against, for a stall
+            # to checkpoint with it
+            u_ref_fssa_entry.assign(ctx["u_ref_fssa"])
+            fssa_tendency_entry.assign(fssa_tendency)
         calved_entry = calved.copy()
         tallies = None
         retries = iter(SUBCYCLES[1:])
@@ -3439,6 +3501,10 @@ def run_simulation(
                 if fssa_theta_val > 0:
                     # the velocity solved now advances the next substep
                     fssa_tau.assign(fssa_theta_val * dt / m)
+                    if fssa_tendency is not None:
+                        # measured from the velocity the advance just used
+                        ctx["u_ref_fssa"].assign(z.subfunctions[0])
+                        ctx["u_ref_fssa_set"] = True
                 if not _solve_with_rescue(k):
                     ok = False
                     break
@@ -3479,6 +3545,9 @@ def run_simulation(
             z.assign(z_entry)   # checkpoint the last converged pair
             if a_ref_entry is not None:
                 a_ref.assign(a_ref_entry)
+            if fssa_tendency is not None:
+                ctx["u_ref_fssa"].assign(u_ref_fssa_entry)
+                fssa_tendency.assign(fssa_tendency_entry)
             calved[:] = calved_entry
             calved_fn.dat.data[:] = calved
             if level_set is not None:

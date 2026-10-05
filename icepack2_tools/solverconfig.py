@@ -140,8 +140,10 @@ SUBSTEP_INIT_DEFAULT = "1"
 SUBSTEP_MAX_DEFAULT = "64"
 SUBSTEP_QUIET_DEFAULT = "20"
 SUBSTEP_HMIN_DEFAULT = "10"
-# Free-surface stabilization (icepack2_tools.fssa): theta, 0 = off.
+# Free-surface stabilization (icepack2_tools.fssa): theta, 0 = off, and the
+# velocity the surface change is measured from (fssa.REFERENCES).
 FSSA_THETA_DEFAULT = "0"
+FSSA_REFERENCE_DEFAULT = "auto"
 RESCUE_ENABLED_DEFAULT = "1"
 
 
@@ -475,6 +477,14 @@ def fssa_theta():
     return value
 
 
+def fssa_reference():
+    r"""``ISMIP7_FSSA_REFERENCE``: the velocity the stabilization measures the
+    surface change from, ``auto`` (the default), ``start`` or ``step``
+    (icepack2_tools.fssa.resolve_reference, which also checks the value)."""
+    return (_env("ISMIP7_FSSA_REFERENCE", FSSA_REFERENCE_DEFAULT)
+            or FSSA_REFERENCE_DEFAULT).strip().lower()
+
+
 def snes_atol_scale():
     return float(_env("ISMIP7_SNES_ATOL_SCALE", SNES_ATOL_SCALE_DEFAULT))
 
@@ -595,6 +605,7 @@ def effective_solver_env():
         "ISMIP7_SUBSTEP_QUIET": SUBSTEP_QUIET_DEFAULT,
         "ISMIP7_SUBSTEP_HMIN": SUBSTEP_HMIN_DEFAULT,
         "ISMIP7_FSSA_THETA": FSSA_THETA_DEFAULT,
+        "ISMIP7_FSSA_REFERENCE": FSSA_REFERENCE_DEFAULT,
     }
 
 
@@ -622,6 +633,7 @@ def solver_provenance(mode=None):
         "subcycles": list(subcycles()),
         "substep_adapt": substep_settings(),
         "fssa_theta": fssa_theta(),
+        "fssa_reference": fssa_reference(),
         "snes_atol_policy": {
             "initial": float(_env("ISMIP7_SNES_ATOL", SNES_ATOL_DEFAULT)),
             "post_convergence_scale": snes_atol_scale(),

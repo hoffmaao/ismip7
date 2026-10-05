@@ -24,3 +24,18 @@ def test_retreat_only_removes_beyond_the_initial_extent_as_well():
     assert np.array_equal(front_removal_mask(law, init, True),
                           np.array([False, True, True, True]))
     assert np.array_equal(front_removal_mask(law, None, True), law)
+
+
+def test_a_cell_the_front_emptied_stays_empty():
+    from icepack2_tools.front import held_calved
+    calved = np.array([False, False, False, False])
+    h_old = np.array([300.0, 0.5, 0.0, 120.0])       # cell 1 was below the threshold already
+    h_new = np.array([0.0, 0.0, 8.0, 119.0])         # 0 emptied; 2 was ice-free and took inflow
+    calved = held_calved(calved, h_old, h_new, front_hmin=1.0)
+    assert np.array_equal(calved, [True, False, False, False])
+    # once held, the mask only grows, and a retreat-only removal includes it
+    calved = held_calved(calved, np.array([0.0, 0.0, 8.0, 119.0]), np.array([5.0, 0.0, 0.0, 118.0]), 1.0)
+    assert np.array_equal(calved, [True, False, True, False])
+    law = np.array([False, False, False, False])
+    assert np.array_equal(front_removal_mask(law, None, True, calved), calved)
+    assert np.array_equal(front_removal_mask(law, None, False, calved), law)

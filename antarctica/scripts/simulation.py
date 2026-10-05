@@ -72,6 +72,7 @@ from icepack2_tools.boundary import load_boundary_ids
 from icepack2_tools.geometry import raise_bed_to_lake_ice_base, sample_to_geometry
 from icepack2_tools.naming import map_basename
 from icepack2_tools.front import (
+    held_calved,
     clamp_thickness, clear_reference_where_ice_free, retreat_slivers,
     front_removal_mask, unforced_cells, applied_forcing,
     facet_neighbours, front_connected, ocean_drag_cells,
@@ -692,6 +693,7 @@ def setup_model(restart_from=None, *, allow_timing_cache_a_ref=False,
     tau_guess = None
     a_ref_mb = None
     u_ref_fssa_ckpt = None
+    calved_cells_ckpt = None
     phys_div = None
     h_dg_state = None
     t_restart = None
@@ -807,6 +809,9 @@ def setup_model(restart_from=None, *, allow_timing_cache_a_ref=False,
             )
             u_ref_fssa_ckpt = load_checkpoint_field(
                 chk, "u_ref_fssa", V, optional=True
+            )
+            calved_cells_ckpt = load_checkpoint_field(
+                chk, "calved_cells", Q_dg, optional=True
             )
             # An adapted checkpoint carries the transferred PHYSICAL divergence
             # instead of a_ref (icepack2_tools.adapt_mesh); a_ref is rebuilt
@@ -1897,6 +1902,8 @@ def setup_model(restart_from=None, *, allow_timing_cache_a_ref=False,
         "fssa_tau": fssa_tau,
         "u_ref_fssa": u_ref_fssa,
         "u_ref_fssa_set": u_ref_fssa_loaded,
+        # Cells a retreat-only front has emptied (restart only; else None).
+        "calved_cells": calved_cells_ckpt,
         "phys_div": phys_div,
         # DG0 prognostic thickness state (restart only; else None).
         "h_dg_state": h_dg_state,
@@ -1991,6 +1998,8 @@ def save_model_state(ctx, final_path, t_now, extra_attrs=None):
             chk.save_function(ctx["a_ref_mb"], name="a_ref_mb")
         if ctx.get("u_ref_fssa_set"):
             chk.save_function(ctx["u_ref_fssa"], name="u_ref_fssa")
+        if ctx.get("calved_mask") is not None:
+            chk.save_function(ctx["calved_mask"], name="calved_cells")
         if ctx.get("level_set") is not None:
             chk.save_function(ctx["level_set"].phi, name="levelset")
         if not ctx.get("geom_dg", False):
@@ -2294,6 +2303,18 @@ def run_simulation(
             "ISMIP7_FRONT_ADVANCE=none needs a level-set law (ISMIP7_CALVING); "
             "without one ISMIP7_FIXED_FRONT already holds the front")
     ctx["front_advance"] = front_advance
+    # Under a retreat-only front a cell the law has emptied stays ice-free
+    # for the rest of the run (front.held_calved: the refill-and-calve
+    # flicker). The mask travels in the checkpoints as a DG0 indicator.
+    calved_fn = Function(Q_dg, name="calved_cells")
+    if ctx.get("calved_cells") is not None:
+        calved_fn.dat.data[:] = ctx["calved_cells"].dat.data_ro
+    calved = calved_fn.dat.data_ro > 0.5
+    ctx["calved_mask"] = calved_fn if retreat_only else None
+    if retreat_only and calved.any():
+        PETSc.Sys.Print(
+            f"  Retreat-only front: {global_count(calved, mesh.comm)} cells held "
+            "calved from the checkpoint")
     # A free law moves the front, so the frozen a_ref must follow the live
     # extent; `fixed` and the legacy flag pin it on purpose and keep the
     # t=0-only mask.
@@ -2979,8 +3000,10 @@ def run_simulation(
                 calving_rate = calving_law_obj.rate(front_state, t_yr)
             last_c_mean = level_set.advance(dt_local, u_vel, rate=calving_rate)
             lsb, calv_frac = level_set.calving_masks()
-            beyond = front_removal_mask(lsb, beyond_front, retreat_only)
+            beyond = front_removal_mask(lsb, beyond_front, retreat_only, calved)
             ls_ice_free = level_set.beyond_front()
+            if retreat_only:
+                ls_ice_free = ls_ice_free | calved
             if a_ref is not None and free_front:
                 clear_reference_where_ice_free(a_ref.dat.data, ls_ice_free)
 
@@ -3178,6 +3201,9 @@ def run_simulation(
             if annual is not None:
                 annual.book_removal(sliver, data[sliver])
             data[sliver] = 0.0
+            if retreat_only:
+                calved[:] = held_calved(calved, h_dg_old.dat.data_ro, data, front_hmin)
+                calved_fn.dat.data[:] = calved
 
         _lift_h()
         # The ocean-drag gate follows the ice: without a level set (which
@@ -3301,6 +3327,7 @@ def run_simulation(
         # cell without its balancing reference.
         if a_ref_entry is not None:
             a_ref_entry.assign(a_ref)
+        calved_entry = calved.copy()
         tallies = None
         retries = iter(SUBCYCLES[1:])
         m = SUBCYCLES[0] if adapt is None else adapt.m
@@ -3317,6 +3344,8 @@ def run_simulation(
                 z.assign(z_entry)
                 if a_ref_entry is not None:
                     a_ref.assign(a_ref_entry)
+                calved[:] = calved_entry
+                calved_fn.dat.data[:] = calved
                 if level_set is not None:
                     level_set.phi.assign(phi_entry)
                     level_set.update_cell_fields()
@@ -3400,6 +3429,8 @@ def run_simulation(
             z.assign(z_entry)   # checkpoint the last converged pair
             if a_ref_entry is not None:
                 a_ref.assign(a_ref_entry)
+            calved[:] = calved_entry
+            calved_fn.dat.data[:] = calved
             if level_set is not None:
                 level_set.phi.assign(phi_entry)
                 level_set.update_cell_fields()

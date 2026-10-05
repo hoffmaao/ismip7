@@ -11,7 +11,7 @@ its full report from `core_report.py`; this is the index.
 
 229 records.
 
-Status: 12 planned, 5 running, 16 stopped, 179 done, 17 superseded.
+Status: 12 planned, 4 running, 16 stopped, 180 done, 17 superseded.
 
 ## Inversion
 
@@ -24,7 +24,7 @@ Status: 12 planned, 5 running, 16 stopped, 179 done, 17 superseded.
 | 2 km Budd re-inversion without the prior mean, on Rice's mesh (stage 1), restarted on L-BFGS-B and scpc_gamg | running | antarctica_5000_2000_buffered0 (Rice's build, 925,183 vertices, 1,835,718 cells, read from the warm start), DG0 geometry, vertex raster sampling | IU Quartz, general partition | 2026-10-03 | - | running; evaluation 1 reproduces the stopped run's start to every printed digit (misfit 3.302211e4, velocity chi2 1.98e4, total 3.350935e4); by evaluation 6 the misfit was 1.743e4 (velocity chi2 6.84e3) and the total 1.991e4, below the 2.548e4 misfit the stopped run reached in 11 TAO iterations. Evaluation 5 was a line-search trial at misfit 1.371e4 whose smoothness terms rose to 1.7e4, and the next evaluation came back from it |
 | 2 km regularized-Coulomb inversion under the bilaplacian prior | running | antarctica_5000_2000_buffered0, 2 km fine, 5 km interior, no buffer | nots, long partition, sapphirerapids | 2026-09-20 | - | misfit still falling about half a percent per iteration; never reaches gatol, so the chain caps at four links |
 | 2 km regularized-Coulomb re-inversion without the prior mean, on Rice's mesh (stage 1) | stopped | antarctica_5000_2000_buffered0 (Rice's build, 925,183 vertices, 1,835,718 cells, read from the warm start), DG0 geometry, vertex raster sampling | IU Quartz, general partition | 2026-10-01 | 2026-10-01 | stopped at iteration 7 of link 1: misfit 3.315e4 to 3.105e4, 1 trial point rescued; no checkpoint written. Rice's own objective on this file under the current code gives 3.563e4 against the 2.465e4 Rice printed (validation 10818658) |
-| 2 km regularized-Coulomb re-inversion without the prior mean, on Rice's mesh (stage 1), restarted on L-BFGS-B and scpc_gamg | running | antarctica_5000_2000_buffered0 (Rice's build, 925,183 vertices, 1,835,718 cells, read from the warm start), DG0 geometry, vertex raster sampling | IU Quartz, general partition | 2026-10-03 | - | running; evaluation 1 reproduces the stopped run's start (misfit 3.315048e4, velocity chi2 1.94e4, total 3.404559e4) |
+| 2 km regularized-Coulomb re-inversion without the prior mean, on Rice's mesh (stage 1), restarted on L-BFGS-B and scpc_gamg | done | antarctica_5000_2000_buffered0 (Rice's build, 925,183 vertices, 1,835,718 cells, read from the warm start), DG0 geometry, vertex raster sampling | IU Quartz, general partition | 2026-10-03 | 2026-10-04 | ended at ITERATIONS REACHED LIMIT, 1000 iterations, 31 line-search trials that did not lower the objective, no failed forward. Evaluation 1 reproduces the stopped run's start to every printed digit. From evaluation 1 to 1036: misfit 3.315e4 to 2.249e3, velocity chi2 1.94e4 to 35.2, the log term 0.197 to 0.0316, smoothness 354 and 542 to 215 and 130, total 3.405e4 to 2.592e3. phi spans [-13.7, 2.5] (the warm start [-17.4, 0.17]); its 1st percentile fell from -0.95 to -4.57 and its 99th rose from 0.004 to 0.89. theta spans [-2.4, 5.3], 103 nodes above 3 and 6 above 5 |
 
 ## Calibration
 
@@ -422,7 +422,7 @@ Status: 12 planned, 5 running, 16 stopped, 179 done, 17 superseded.
 
 ### inversion-2km-rc-nomass-lbfgsb
 
-2 km regularized-Coulomb re-inversion without the prior mean, on Rice's mesh (stage 1), restarted on L-BFGS-B and scpc_gamg (running), IU.
+2 km regularized-Coulomb re-inversion without the prior mean, on Rice's mesh (stage 1), restarted on L-BFGS-B and scpc_gamg (done), IU.
 
 - **Task type:** inversion
 - **Period (yr):** 2015 state
@@ -431,13 +431,14 @@ Status: 12 planned, 5 running, 16 stopped, 179 done, 17 superseded.
 - **Initial state / MAP:** inversion_icepack2_rc_n3_dg0_logvelnet_2000_int5000_bilap_final20260925.h5 (release maps-2km-final-2026-09-25, Rice's chain end, link 5 iteration 40; md5 a661adc6), its own mesh read from the checkpoint (ISMIP7_MESH=checkpoint), geometry, velocity_obs and fluidity prior taken from it; log-velocity weight 69946.22414285329
 - **Forcing versions:** observations as in the warm start (velocity_obs from the checkpoint); no dH/dt term
 - **Site / partition:** IU Quartz, general partition
-- **Ranks / memory:** 32 ranks, 160G, 48 h links, at most two (ISMIP7_CHAIN_MAX=1); a checkpoint at every accepted iterate
-- **Job ids:** 10953319 10953321
+- **Ranks / memory:** 32 ranks on one node (c92, shared with the Budd link), 160G, one 48 h link; peak RSS 3.5 GB a rank (sacct MaxRSS); the queued successor 10953321 was cancelled once the first link was certain to finish inside its wall
+- **Job ids:** 10953319
 - **Code:** 9683007 (PR #155 head: PR #148 and PR #158 in main, plus ISMIP7_MESH=checkpoint, the direct forward under scpc_gamg, solver reuse and the factored prior); icepack_tools e7b923e; Quartz scratch clone /N/scratch/dlilien/ismip7_reinvert
 - **Started:** 2026-10-03
-- **Cost per model year:** ramp of 8 continuation steps under full_mumps; 97 s for the first evaluation on 32 ranks; on node c92 with the Budd link
-- **Results path:** Quartz /N/project/ice_rheology/ISMIP7/antarctica/results/reinvert_2km/inversion_icepack2_rc_n3_dg0_logvel_2000_int5000_nomass_wsfinal0925.h5 (checkpointed every accepted iterate) and inversion_timing_rc_2000_int5000_nomass_wsfinal0925.json beside it
-- **Audit:** running; evaluation 1 reproduces the stopped run's start (misfit 3.315048e4, velocity chi2 1.94e4, total 3.404559e4)
+- **Finished:** 2026-10-04
+- **Cost per model year:** ramp of 8 continuation steps under full_mumps; 1036 evaluations for 1000 L-BFGS-B iterations in 25.1 h; 67 s an evaluation (median: the forward 55 s, the adjoint 11 s), plus 19 s for the checkpoint each accepted iterate writes; the stopped TAO run took 260 to 320 s an iteration
+- **Results path:** Quartz /N/project/ice_rheology/ISMIP7/antarctica/results/reinvert_2km/inversion_icepack2_rc_n3_dg0_logvel_2000_int5000_nomass_wsfinal0925.h5 (sha256 fea8debae9616f18, the full mixed state, published-state residual 4.06e-4) and inversion_timing_rc_2000_int5000_nomass_wsfinal0925.json beside it
+- **Audit:** ended at ITERATIONS REACHED LIMIT, 1000 iterations, 31 line-search trials that did not lower the objective, no failed forward. Evaluation 1 reproduces the stopped run's start to every printed digit. From evaluation 1 to 1036: misfit 3.315e4 to 2.249e3, velocity chi2 1.94e4 to 35.2, the log term 0.197 to 0.0316, smoothness 354 and 542 to 215 and 130, total 3.405e4 to 2.592e3. phi spans [-13.7, 2.5] (the warm start [-17.4, 0.17]); its 1st percentile fell from -0.95 to -4.57 and its 99th rose from 0.004 to 0.89. theta spans [-2.4, 5.3], 103 nodes above 3 and 6 above 5
 - **Notes:** issue #153, evidence for issue #24. The objective of inversion-2km-rc-nomass, which stopped on 1 October before its first checkpoint: Rice's with the prior's mass term removed (bilaplacian sigma 30 on both controls, rho 750 km) and no dH/dt term; misfit sigma with a 3 m/yr floor, the log-velocity term at the warm start's last-link weight, the log friction control, cell-wise friction (ISMIP7_SUBELEMENT_FRICTION=0, so no exact front push), ISMIP7_LAKE_ICE_BASE=0, the warm start's fluidity prior, ISMIP7_WARM_START_STRICT=0 on link 1 (strict on resume). What changed is how it is minimised: scipy L-BFGS-B without a metric (ISMIP7_GRAD_PRECOND=none) in place of TAO lmvm with the mass-consistent metric, the chains' optimizer since 3 October (INVERSION_PRIORS.md section 4); ISMIP7_INVERSION_LINEAR_SOLVER=scpc_gamg for the taped solves and the adjoint; the direct forward, one untaped Newton solve an evaluation (the default, so ISMIP7_EVAL_CONTINUATION no longer applies). The comparison with Rice's printed misfit carries the same 1.1e4 offset from PR #122's ocean drag gate as the stopped run. Submitted with submit_reinvert.sh stage1_rc from /N/scratch/dlilien/ismip7_reinvert_jobs, with every knob spelled out. Stage 2 moves the result to antarctica_5000_2000_buffered20000.
 
 ### calibration-melt-1km-1067

@@ -388,8 +388,10 @@ MISFIT_SCALE = os.environ.get("ISMIP7_MISFIT_SCALE", "1").strip().lower()
 # grounding line is exact inside a cell instead of a cell-wise staircase.
 # Budd then runs with N_hat = 1 on the grounded part (no N_ref, no delta
 # floor). ISMIP7_EXACT_FRONT adds the exact depth-integrated push on a
-# calving front inside the mesh (on by default under the scheme, since it
-# is the shared residual's default; off otherwise, so nothing else moves).
+# calving front inside the mesh: on by default under the scheme, since it
+# is the shared residual's default, and off by default for cell-wise
+# friction, where =1 adds dual_friction.front_cliff_correction (a grounded
+# marine cliff otherwise gets 15 to 33 % too little push, issue #153).
 SUBELEMENT_FRICTION = os.environ.get("ISMIP7_SUBELEMENT_FRICTION", "0").strip() == "1"
 # ISMIP7_SUBELEMENT_SCHEME: sep1 (ISSM's default: whole-cell quadrature,
 # drag times the grounded fraction; the default here since 1 Oct 2026) or
@@ -1492,9 +1494,14 @@ def main():
                 c0=C0_RC, c_w0_floor=RC_CW0_FLOOR, h_visc_floor=RC_HVISC_FLOOR,
                 k_lim=0.0, **stabilizers, drag_mask=drag_mask,
                 calving_ids=calving_ids if use_calving_terminus else None,
+                exact_front=EXACT_FRONT, front_hmin=front_hmin(),
             )
         return derivative(_build_action(theta_c, phi_c, fields), z)
 
+    if EXACT_FRONT and not SUBELEMENT_FRICTION:
+        PETSc.Sys.Print(
+            "  Exact cliff push on internal fronts (ISMIP7_EXACT_FRONT, "
+            "dual_friction.front_cliff_correction)")
     if use_calving_terminus:
         PETSc.Sys.Print("  Using calving_terminus BC")
     else:

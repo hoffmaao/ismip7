@@ -3217,13 +3217,9 @@ def run_simulation(
                 annual.book_removal(sliver, data[sliver])
             data[sliver] = 0.0
             if retreat_only:
-                removed = sliver.copy()
-                if beyond is not None:
-                    removed |= beyond
-                if calv_frac is not None:
-                    removed |= np.asarray(calv_frac) >= 1.0
                 calved[:] = held_calved(calved, h_dg_old.dat.data_ro, data,
-                                        removed, front_hmin)
+                                        front_hmin, sliver=sliver,
+                                        beyond=beyond, calv_frac=calv_frac)
                 calved_fn.dat.data[:] = calved
         if trace_on:
             _dm = ctx.get("drag_mask")

@@ -303,16 +303,19 @@ def front_removal_mask(law_beyond, initial_beyond, retreat_only, calved=None):
     return out
 
 
-def held_calved(calved, h_old, h_new, removed, front_hmin):
+def held_calved(calved, h_old, h_new, front_hmin, *, sliver, beyond=None,
+                calv_frac=None):
     r"""Grow the mask of cells a retreat-only front has emptied.
 
     ``calved`` is the mask so far, ``h_old`` and ``h_new`` the cell thickness
-    before and after one advance with its front removals applied, and
-    ``removed`` the cells the front rules took ice from in that advance (the
-    law's beyond mask, the retreat slivers, a sub-cell shed of the whole
-    cell). A cell joins when it held ice (``h_old > front_hmin``), a front
-    rule removed it, and it holds none now. A cell that SMB or melt emptied
-    is left out: it is inside the domain and may regrow.
+    before and after one advance with its front removals applied. The front
+    rules of that advance are the law's ``beyond`` mask, its sub-cell shed
+    ``calv_frac`` (nonzero on the front cells) and the retreat ``sliver``
+    mask (:func:`retreat_slivers`). A cell joins when it held ice
+    (``h_old > front_hmin``), holds none now, and a front rule emptied it:
+    it lies beyond the front, the shed took the whole cell, or it is a
+    sliver in a front cell. A cell that SMB or melt thinned or emptied away
+    from the front is left out: it is inside the domain and may regrow.
 
     Why it is kept: the sub-threshold inflow an ice-free cell keeps (see
     :func:`retreat_slivers`) is how a free front advances, but under a
@@ -327,7 +330,12 @@ def held_calved(calved, h_old, h_new, removed, front_hmin):
     removed and booked as calving each step, as beyond the t=0 extent.
     """
     import numpy as np
+    removed = np.zeros(np.shape(h_new), dtype=bool)
+    if beyond is not None:
+        removed |= np.asarray(beyond, dtype=bool)
+    if calv_frac is not None:
+        frac = np.asarray(calv_frac)
+        removed |= (frac >= 1.0) | (np.asarray(sliver, dtype=bool) & (frac > 0.0))
     return np.logical_or(
         np.asarray(calved, dtype=bool),
-        np.asarray(removed, dtype=bool) & (np.asarray(h_old) > front_hmin)
-        & (np.asarray(h_new) <= 0.0))
+        removed & (np.asarray(h_old) > front_hmin) & (np.asarray(h_new) <= 0.0))

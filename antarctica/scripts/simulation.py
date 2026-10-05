@@ -2324,9 +2324,11 @@ def run_simulation(
         calved_fn.dat.data[:] = ctx["calved_cells"].dat.data_ro
     calved = calved_fn.dat.data_ro > 0.5
     ctx["calved_mask"] = calved_fn if retreat_only else None
-    if retreat_only and calved.any():
+    # the count is collective, so every rank takes it before the branch
+    n_held = global_count(calved, mesh.comm) if retreat_only else 0
+    if n_held:
         PETSc.Sys.Print(
-            f"  Retreat-only front: {global_count(calved, mesh.comm)} cells held "
+            f"  Retreat-only front: {n_held} cells held "
             "calved from the checkpoint")
     # A free law moves the front, so the frozen a_ref must follow the live
     # extent; `fixed` and the legacy flag pin it on purpose and keep the

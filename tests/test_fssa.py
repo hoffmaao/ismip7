@@ -199,3 +199,103 @@ def test_a_restart_keeps_the_reference_it_was_stepped_with():
     rec = {"fssa_tau": 0.05, "fssa_reference": "step"}
     assert restart_reference_error(rec, "step", "c.h5") is None
     assert "ISMIP7_FSSA_REFERENCE=step" in restart_reference_error(rec, "start", "c.h5")
+
+
+def _channel(scheme, dt, t_end, length=100e3, width=10e3, dx=2e3):
+    """Thickness after ``t_end`` years of the forward's step on a channel, or
+    None if it ran away.
+
+    The momentum residual is the production one (``build_rc_residual``, with
+    the stabilization under ``scheme`` ``start`` or ``step`` and without it
+    under ``none``); the transport form and the order of operations are
+    ``run_simulation``'s: advance the DG0 thickness with the velocity solved
+    at the current geometry, then set the step and, under ``step``, move the
+    reference to the velocity that advance used and the tendency to its
+    (h_new - h_old) / dt. Free slip on the side walls, u_x = 0 at the divide
+    and 200 m/yr at the outflow, n = m = 1 with the viscosity at 1e12 Pa s
+    and the drag at 1e-4 MPa yr/m on a flat grounded bed, SMB 0.5 m/yr, and
+    a thickness out of balance with 5 m of noise per 2 km column, so the
+    explicit coupling is stiff (unstable above dt 0.043 yr)."""
+    from icepack2_tools.dual_friction import build_rc_residual
+    from icepack2_tools.solverconfig import (
+        diagnostic_solver_parameters, snes_atol_scale, transport_solver_parameters)
+
+    mesh = fd.RectangleMesh(int(length / dx), int(width / dx), length, width)
+    V = VectorFunctionSpace(mesh, "CG", 1)
+    Q0 = FunctionSpace(mesh, "DG", 0)
+    dg0 = fd.FiniteElement("DG", "triangle", 0)
+    Z = V * TensorFunctionSpace(mesh, dg0, symmetry=True) * VectorFunctionSpace(mesh, dg0)
+    xc = Function(VectorFunctionSpace(mesh, "DG", 0)).interpolate(
+        SpatialCoordinate(mesh)).dat.data_ro[:, 0]
+    noise = np.random.default_rng(7).standard_normal(int(length / dx))
+    h = Function(Q0)
+    h.dat.data[:] = (1500.0 - 1000.0 * (xc / length) ** 2
+                     + 5.0 * noise[np.minimum((xc / dx).astype(int), len(noise) - 1)])
+    b, s = Function(Q0), Function(Q0)
+    s.interpolate(fd.max_value(b + h, (1.0 - ice_density / water_density) * h))
+    z = Function(Z)
+    tau, u_ref = Constant(0.0), Function(V)
+    tendency = Function(Q0) if scheme == "step" else None
+    stabilized = scheme != "none"
+    F = build_rc_residual(
+        z, Function(FunctionSpace(mesh, "CG", 1)), Function(FunctionSpace(mesh, "CG", 1)),
+        H=h, s=s, b=b, C_w0=Function(Q0).assign(1e-4), A4_base=Constant(1.0 / 0.06),
+        n_flow=Constant(1.0), n_flow_val=1.0, m_slide=1.0, tau_c=Constant(0.1),
+        alpha=Constant(1e-2), H_ref=Constant(100.0), fric_law="budd", N_ref=None,
+        nhat_floor=0.02, alpha_gl=0.5, fssa_tau=tau if stabilized else None,
+        u_ref=u_ref if stabilized else None, fssa_tendency=tendency)
+    bcs = [fd.DirichletBC(Z.sub(0).sub(0), 0.0, 1),
+           fd.DirichletBC(Z.sub(0).sub(0), 200.0, 2),
+           fd.DirichletBC(Z.sub(0).sub(1), 0.0, (3, 4))]
+    momentum = fd.NonlinearVariationalSolver(
+        fd.NonlinearVariationalProblem(F, z, bcs=bcs),
+        solver_parameters=diagnostic_solver_parameters("full_mumps"))
+    h_old, h_trial, phi = Function(Q0), fd.TrialFunction(Q0), fd.TestFunction(Q0)
+    un = fd.dot(z.subfunctions[0], fd.FacetNormal(mesh))
+    unp = (un + abs(un)) / 2
+    F_tr = ((h_trial - h_old) / Constant(dt) * phi * fd.dx
+            + (unp("+") * h_trial("+") - unp("-") * h_trial("-")) * fd.jump(phi) * fd.dS
+            + unp * h_trial * phi * fd.ds - Constant(0.5) * phi * fd.dx)
+    transport = fd.LinearVariationalSolver(
+        fd.LinearVariationalProblem(fd.lhs(F_tr), fd.rhs(F_tr), h),
+        solver_parameters=transport_solver_parameters())
+
+    momentum.solve()                   # t = 0 at tau = 0
+    momentum.snes.setTolerances(atol=snes_atol_scale() * momentum.snes.getFunctionNorm())
+    u_ref.assign(z.subfunctions[0])
+    for _ in range(int(round(t_end / dt))):
+        h_old.assign(h)
+        transport.solve()
+        if tendency is not None:
+            tendency.dat.data[:] = (h.dat.data_ro - h_old.dat.data_ro) / dt
+        s.interpolate(fd.max_value(b + h, (1.0 - ice_density / water_density) * h))
+        if not np.all(np.isfinite(h.dat.data_ro)) or np.abs(h.dat.data_ro).max() > 2e4:
+            return None
+        if stabilized:
+            tau.assign(dt)             # theta = 1
+            if scheme == "step":
+                u_ref.assign(z.subfunctions[0])
+        try:
+            momentum.solve()
+        except fd.ConvergenceError:
+            return None
+    return h.dat.data_ro.copy()
+
+
+def test_the_step_reference_holds_a_stiff_channel_at_a_large_step():
+    """At dt 0.1 yr, twice the explicit coupling's limit here, the forward
+    without the stabilization runs away within two years (by year 0.9 when
+    measured). Measured from each step, the stabilized forward stays within
+    0.33 m RMS of the unstabilized one at dt 0.01. Measured from the start,
+    which an out-of-balance state does not hold, it is 21 m off, the reason
+    `auto` takes `step` without an apparent mass balance."""
+    reference = _channel("none", 0.01, 2.0)
+    assert reference is not None
+    assert _channel("none", 0.1, 2.0) is None
+    step = _channel("step", 0.1, 2.0)
+    start = _channel("start", 0.1, 2.0)
+    assert step is not None and start is not None
+    err_step = np.sqrt(np.mean((step - reference) ** 2))
+    err_start = np.sqrt(np.mean((start - reference) ** 2))
+    assert err_step < 0.5
+    assert err_start > 10.0 * err_step

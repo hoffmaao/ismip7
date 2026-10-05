@@ -1,0 +1,24 @@
+{
+  "id": "test-2km-budd-b20k-smoke-extension",
+  "task": "test",
+  "institution": "IU",
+  "title": "Stage-2 path smoke on the 20 km buffered mesh from Budd's stage-1 checkpoint, smooth ring extension",
+  "status": "done",
+  "friction": "budd",
+  "period": "2015 state",
+  "mesh": "antarctica_5000_2000_buffered20000 (IU's build, 969,764 vertices), DG0 geometry, vertex raster sampling, the lake fix",
+  "initial_state": "Budd stage-1 checkpoint at about iteration 760; the ring filled by the harmonic extension",
+  "forcing": "the stage-1 objective (bilaplacian sigma 30, rho 750 km, no dH/dt term, log friction control, cell-wise friction, L-BFGS-B without a metric, scpc_gamg); ISMIP7_TRANSFER_FILL=extend",
+  "site": "IU Quartz, debug partition",
+  "resources": "32 ranks, 160G",
+  "jobs": [
+    "10964148"
+  ],
+  "code": "3490914; Quartz worktree /N/scratch/dlilien/ismip7_reinvert_s2",
+  "started": "2026-10-04",
+  "finished": "2026-10-04",
+  "cost": "16 min: load, ramp of 8 steps, 3 evaluations of 32 to 54 s",
+  "results": "Quartz /N/scratch/dlilien/ismip7_reinvert_jobs (submit_reinvert.sh cells, probe/, plots/), probe/smoke2_extend.h5 (records warm_start_fill extend)",
+  "audit": "evaluation 1: smoothness 397 and 756, misfit 6.42e3, total 7.58e3 against 1.52e5 under the constant fill; total 7.04e3 at evaluation 3",
+  "notes": "issue #153"
+}

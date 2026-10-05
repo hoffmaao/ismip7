@@ -9,9 +9,9 @@ gitignored, so these records and the per-core reports beside them are
 the trace a run leaves in the repository. A core experiment also gets
 its full report from `core_report.py`; this is the index.
 
-230 records.
+246 records.
 
-Status: 12 planned, 3 running, 16 stopped, 182 done, 17 superseded.
+Status: 12 planned, 3 running, 16 stopped, 198 done, 17 superseded.
 
 ## Inversion
 
@@ -145,6 +145,8 @@ Status: 12 planned, 3 running, 16 stopped, 182 done, 17 superseded.
 | 25 km rehearsal MAP: t=0 discharge, shelf-gate census and forward self-consistency | done | antarctica_250000_25000_buffered20000, DG0 geometry | IU Quartz, debug partition | 2026-09-27 | 2026-09-27 | grounding-line discharge 2803 Gt/yr against 1848 with the observed velocity (ratio 1.52; observed 2050 plus or minus 100), by observed speed of the source cell 5.61 under 100 m/yr, 0.77 in 100 to 500, 0.38 in 500 to 1500 and 0.32 above 1500. No transfer fill on the MAP's own mesh; the fluidity prior spans 1.0 to 519.9. Under the production HAF gate 0 of 2,884 floating cells carry friction (the old sign test would have put it on 396). The forward re-solve at the MAP's controls matches the MAP's velocity to rel L2 5.9e-8 |
 | 25 km rehearsal probe: the first ten steps of core 1 on production defaults with the apparent mass-balance reference | done | antarctica_250000_25000_buffered20000, DG0 geometry | IU Quartz, general partition | 2026-09-27 | 2026-09-27 | every step converged on its first scpc_gamg direct solve, no rescue, subcycle or tripwire event (speed and thickness bounds armed); a_ref in -438.9 to +609.4 m/yr, net +300.1 Gt/yr; the largest thickness change 1.0 m at step 1 falling to 0.2 m at step 10; dM/dt -143 Gt/yr at step 1 and 0 at step 10; resid 0.00 |
 | 25 km rehearsal probe: the first ten steps of core 1 on production defaults without the apparent mass-balance reference | done | antarctica_250000_25000_buffered20000, DG0 geometry | IU Quartz, general partition (debug refused a third concurrent job) | 2026-09-27 | 2026-09-27 | every step converged on its first scpc_gamg direct solve in 2 to 8 Newton iterations; no rescue, subcycle or tripwire event (speed and thickness bounds armed); mass residual about 1e-8 Gt a step and resid 0.00; speed max 1.65e4 m/yr at step 1, falling to 1.46e4 by step 10; largest relative thickening 1.6 per year in a 112 m floating cell. Budget at step 1: SMB +2435, melt -985, outflux -503, calving -1399, dM/dt -453 Gt/yr |
+| Stage-2 path smoke on the 20 km buffered mesh from Budd's stage-1 checkpoint, constant ring fill | done | antarctica_5000_2000_buffered20000 (IU's build, 969,764 vertices), DG0 geometry, vertex raster sampling, the lake fix | IU Quartz, debug partition | 2026-10-04 | 2026-10-04 | evaluation 1: misfit 5.68e3, smoothness 2.49e4 and 1.21e5, total 1.52e5, against 2.87e3 recorded on Rice's mesh: the step the constant fill puts at the outline. Evaluation 4: smoothness 4.5e3 and 2.5e4, misfit unchanged |
+| Stage-2 path smoke on the 20 km buffered mesh from Budd's stage-1 checkpoint, smooth ring extension | done | antarctica_5000_2000_buffered20000 (IU's build, 969,764 vertices), DG0 geometry, vertex raster sampling, the lake fix | IU Quartz, debug partition | 2026-10-04 | 2026-10-04 | evaluation 1: smoothness 397 and 756, misfit 6.42e3, total 7.58e3 against 1.52e5 under the constant fill; total 7.04e3 at evaluation 3 |
 | 2 km control on the MAP's own mesh, with no transfer | done | antarctica_5000_2000_buffered0 | local workstation | 2026-09-22 | 2026-09-22 | peak speed 17469 m/yr, which is the inversion chain's own warm-start maximum, so the forward reproduces the MAP. Amery reads 5937 m/yr with no transfer at all, against 6041 through the transfer |
 | 2 km control from the transferred Budd snapshot | running | antarctica_20000_2000_buffered20000, 2 km fine, 20 km interior, 20 km buffer | local workstation | 2026-09-22 | - | 3.5 years: VAF drift 0.01 mm, mass balance +2 Gt/yr, residual zero. The Amery cell sits near 6 km/yr without running away |
 | 2 km inversion cost probe, full_mumps on 32 ranks | done | Rice's antarctica_5000_2000_buffered0, read from the snapshot (ISMIP7_MESH=checkpoint; 925,183 vertices, 1,835,718 cells), DG0 geometry, vertex raster sampling | IU Quartz, general partition | 2026-10-01 | 2026-10-01 | 5 L-BFGS-B iterations, 7 evaluations, objective 5.25148e4 to 4.935180e4; published residual 1.0e-4 after a 0-iteration final solve |
@@ -164,6 +166,20 @@ Status: 12 planned, 3 running, 16 stopped, 182 done, 17 superseded.
 | 2 km inversion, production configuration with five-solve evaluations, full_mumps on 32 ranks | done | Rice's antarctica_5000_2000_buffered0, read from the snapshot (ISMIP7_MESH=checkpoint; 925,183 vertices, 1,835,718 cells), DG0 geometry, vertex raster sampling | IU Quartz, general partition | 2026-10-01 | 2026-10-02 | 5 TAO iterations, objective 5.621096e4 to 5.570022e4; no forward failed; published residual 40.9 |
 | 2 km inversion, production configuration with one solve an evaluation, scpc_gamg (NLEQ-ERR, Krylov rtol 1e-8) on 32 ranks | done | Rice's antarctica_5000_2000_buffered0, read from the snapshot (ISMIP7_MESH=checkpoint; 925,183 vertices, 1,835,718 cells), DG0 geometry, vertex raster sampling | IU Quartz, general partition | 2026-10-01 | 2026-10-02 | every iterate within 1.0e-9 of test-2km-inversion-prod-full-mumps-ec0, final 5.570022e4; the same trial point failed in iteration 3 and took the same rescue (795 s); every recorded solve confirmed with no step; 1.3 times faster than full_mumps |
 | 2 km inversion, production configuration with five-solve evaluations, scpc_gamg (NLEQ-ERR, Krylov rtol 1e-8) on 32 ranks | done | Rice's antarctica_5000_2000_buffered0, read from the snapshot (ISMIP7_MESH=checkpoint; 925,183 vertices, 1,835,718 cells), DG0 geometry, vertex raster sampling | IU Quartz, general partition | 2026-10-01 | 2026-10-02 | every iterate within 1.1e-9 of test-2km-inversion-prod-full-mumps-ec1, final 5.570022e4; no forward failed; every recorded solve confirmed with no step; 2.4 times slower than full_mumps |
+| RC stage-1 controls on the 20 km buffered 2 km mesh, evaluation 1 only: as pre2 with the constant fill (ISMIP7_TRANSFER_FILL=constant) | done | antarctica_5000_2000_buffered20000 (IU's build, 969,764 vertices), DG0 geometry, vertex raster sampling, the lake fix | IU Quartz, general partition | 2026-10-04 | 2026-10-04 | evaluation 1: misfit 5296, velocity chi2 457; model minus observed speed on floating ice mean -110 m/yr (median ratio -25 %), floating within 25 km of the edge -130 m/yr, grounded -2.0 m/yr (shelf_stats.py) |
+| RC stage-1 controls on the 20 km buffered 2 km mesh, evaluation 1 only: the constant fill and a 1 m membrane floor | done | antarctica_5000_2000_buffered20000 (IU's build, 969,764 vertices), DG0 geometry, vertex raster sampling, the lake fix | IU Quartz, general partition | 2026-10-04 | 2026-10-04 | evaluation 1: misfit 5199, velocity chi2 450; model minus observed speed on floating ice mean -105 m/yr (median ratio -24 %), floating within 25 km of the edge -124 m/yr, grounded -1.7 m/yr (shelf_stats.py) |
+| RC stage-1 controls on the 20 km buffered 2 km mesh, evaluation 1 only: as pre2 with the ocean drag at 1e-3 MPa yr/m | done | antarctica_5000_2000_buffered20000 (IU's build, 969,764 vertices), DG0 geometry, vertex raster sampling, the lake fix | IU Quartz, general partition | 2026-10-04 | 2026-10-04 | evaluation 1: misfit 4485, velocity chi2 387; model minus observed speed on floating ice mean -100 m/yr (median ratio -23 %), floating within 25 km of the edge -118 m/yr, grounded -2.5 m/yr (shelf_stats.py) |
+| RC stage-1 controls on the 20 km buffered 2 km mesh, evaluation 1 only: as pre2 with the ocean drag at 1e-4 MPa yr/m | done | antarctica_5000_2000_buffered20000 (IU's build, 969,764 vertices), DG0 geometry, vertex raster sampling, the lake fix | IU Quartz, general partition | 2026-10-04 | 2026-10-04 | evaluation 1: misfit 3473, velocity chi2 220; model minus observed speed on floating ice mean -68 m/yr (median ratio -16 %), floating within 25 km of the edge -86 m/yr, grounded -2.3 m/yr (shelf_stats.py) |
+| RC stage-1 controls on the 20 km buffered 2 km mesh, evaluation 1 only: as pre2 with ISMIP7_RC_HVISC_FLOOR=1 | done | antarctica_5000_2000_buffered20000 (IU's build, 969,764 vertices), DG0 geometry, vertex raster sampling, the lake fix | IU Quartz, general partition | 2026-10-04 | 2026-10-04 | evaluation 1: misfit 5509, velocity chi2 478; model minus observed speed on floating ice mean -115 m/yr (median ratio -26 %), floating within 25 km of the edge -132 m/yr, grounded -2.5 m/yr (shelf_stats.py) |
+| RC stage-1 controls on the 20 km buffered 2 km mesh, evaluation 1 only: as pre2 with the ocean drag off | done | antarctica_5000_2000_buffered20000 (IU's build, 969,764 vertices), DG0 geometry, vertex raster sampling, the lake fix | IU Quartz, general partition | 2026-10-04 | 2026-10-04 | evaluation 1: misfit 2672, velocity chi2 56; model minus observed speed on floating ice mean -4.7 m/yr (median ratio -1 %), floating within 25 km of the edge -17 m/yr, grounded -2.0 m/yr (shelf_stats.py) |
+| RC stage-1 controls on the 20 km buffered 2 km mesh, evaluation 1 only: the smooth extension, membrane floor 10 m, the production drag gate | done | antarctica_5000_2000_buffered20000 (IU's build, 969,764 vertices), DG0 geometry, vertex raster sampling, the lake fix | IU Quartz, general partition | 2026-10-04 | 2026-10-04 | evaluation 1: misfit 5755, velocity chi2 500; model minus observed speed on floating ice mean -119 m/yr (median ratio -27 %), floating within 25 km of the edge -138 m/yr, grounded -2.7 m/yr (shelf_stats.py) |
+| RC stage-1 controls on the 20 km buffered 2 km mesh, evaluation 1 only: as pre2 with the drag kept off every node of the ice | done | antarctica_5000_2000_buffered20000 (IU's build, 969,764 vertices), DG0 geometry, vertex raster sampling, the lake fix | IU Quartz, general partition | 2026-10-04 | 2026-10-04 | evaluation 1: misfit 3193, velocity chi2 108; model minus observed speed on floating ice mean -39 m/yr (median ratio -11 %), floating within 25 km of the edge -52 m/yr, grounded -2.1 m/yr (shelf_stats.py) |
+| RC stage-1 controls on the 20 km buffered 2 km mesh, evaluation 1 only: the vertex gate and a 1 m membrane floor | done | antarctica_5000_2000_buffered20000 (IU's build, 969,764 vertices), DG0 geometry, vertex raster sampling, the lake fix | IU Quartz, general partition | 2026-10-04 | 2026-10-04 | evaluation 1: misfit 3159, velocity chi2 76; model minus observed speed on floating ice mean -5.6 m/yr (median ratio -2 %), floating within 25 km of the edge -14 m/yr, grounded -1.8 m/yr (shelf_stats.py) |
+| RC stage 2 on the 20 km buffered mesh with the ocean drag off (300 iterations) | done | antarctica_5000_2000_buffered20000 (IU's build, 969,764 vertices), DG0 geometry, vertex raster sampling, the lake fix | IU Quartz, general partition | 2026-10-04 | 2026-10-05 | evaluation 310: misfit 2,412, velocity chi2 41.5, total 2,741, against 3,074 for the same run with the production drag gate (inversion-2km-rc-nomass-b20k) and 2,249 for stage 1 on Rice's mesh; floating ice mean -7.8 m/yr, median ratio -2 %; no dipole on the shelves |
+| One fresh scpc_gamg solver on Rice's mesh at RC's final stage-1 controls (Krylov iterations a condensed solve) | done | antarctica_5000_2000_buffered0 (Rice's build, 925,183 vertices, read from the warm start: ISMIP7_MESH=checkpoint), DG0 geometry, vertex raster sampling | IU Quartz, debug partition | 2026-10-04 | 2026-10-04 | 152 Krylov iterations a condensed solve with a fresh solver, against 144 for stage 1's reused solver at the same controls and 68 for a fresh solver on the buffered mesh: the buffered setup, not solver reuse, halves stage 2's evaluation cost. Evaluation 1 reproduces stage 1's final objective (total 2.592786e3) |
+| RC continued 150 iterations on Rice's mesh from its stage-1 MAP, curvature x0.01 (rho 7.5 km at sigma 30) | done | antarctica_5000_2000_buffered0 (Rice's build, 925,183 vertices, read from the warm start: ISMIP7_MESH=checkpoint), DG0 geometry, vertex raster sampling | IU Quartz, general partition | 2026-10-04 | 2026-10-05 | evaluation 158: misfit 645 (stage 1 ended at 2,249), velocity chi2 10.7, total 894; mean absolute speed misfit 15.4 m/yr on floating ice and 2.6 m/yr on grounded ice. phi on the shelves shows narrow suture zones and margins, and on grounded ice a grid-scale speckle (2 to 5 km), which is noise; 90th and 99th percentile 14 and 72 m/yr |
+| RC continued 150 iterations on Rice's mesh from its stage-1 MAP, curvature x0.1 (rho 75 km at sigma 30) | done | antarctica_5000_2000_buffered0 (Rice's build, 925,183 vertices, read from the warm start: ISMIP7_MESH=checkpoint), DG0 geometry, vertex raster sampling | IU Quartz, general partition | 2026-10-04 | 2026-10-05 | evaluation 157: misfit 1,200 (stage 1 ended at 2,249), velocity chi2 14.8, total 1,415; mean absolute speed misfit 19.9 m/yr on floating ice and 4.0 m/yr on grounded ice. phi gains flow-aligned bands and shear margins on the shelves and 20 km blobs on grounded ice; 90th and 99th percentile speed misfit 19 and 104 m/yr (34 and 171 at x1) |
+| RC continued 150 iterations on Rice's mesh from its stage-1 MAP, curvature x1 (rho 750 km at sigma 30) | done | antarctica_5000_2000_buffered0 (Rice's build, 925,183 vertices, read from the warm start: ISMIP7_MESH=checkpoint), DG0 geometry, vertex raster sampling | IU Quartz, general partition | 2026-10-04 | 2026-10-05 | evaluation 157: misfit 2,244 (stage 1 ended at 2,249), velocity chi2 34.6, total 2,562; mean absolute speed misfit 34.8 m/yr on floating ice and 6.6 m/yr on grounded ice. phi as stage 1's: no structure under 30 to 50 km. The objective stayed at stage 1's (2,249): converged under this prior |
 | 32 km inversion, 5 L-BFGS-B iterations on the new defaults (no solver or optimizer knob set), against the SEP1 study's exp arm | done | antarctica_320000_32000_buffered0 (Quartz's .msh, sha256 fd66fc42; 6,282 vertices, 9,055 cells), DG0 geometry, vertex raster sampling | IU workstation (Mac, 16 cores, 128 GB), data under /Volumes/LaCie/Data/antarctica_general/ismip7_obs | 2026-10-03 | 2026-10-03 | 5 iterations, 7 evaluations, objective 3.861500e4 to 1.341402e4; every evaluation within 1.6e-10 of test-32km-inversion-sep1-opt-exp-none (full_mumps, the same optimizer); every direct forward converged, no lost trial; published residual 1.3e-3 |
 | 32 km inversion, the time outside the forward and adjoint by span, before and after the factored prior solve (L-BFGS-B and TAO) | done | antarctica_320000_32000_buffered0 (Quartz's .msh, sha256 fd66fc42; 6,282 vertices, 9,055 cells), DG0 geometry, vertex raster sampling | IU workstation (Mac, 16 cores, 128 GB), data under /Volumes/LaCie/Data/antarctica_general/ismip7_obs; another session's 8-rank jobs shared the machine for most runs (load at each start in its commit.txt) | 2026-10-02 | 2026-10-02 | L-BFGS-B: objective within 1.1e-14 and \|grad\| within 2.6e-13 of the base over 7 evaluations, final 1.320942e4, published \|\|F\|\| 2.941e1 in every run; outside the solves, prior_solve 0.037 to 0.002 s and residual_norm 0.074 s, the rest under 0.002 s. TAO: objective within 2.2e-13 over 5 evaluations, final 1.438882e4, published \|\|F\|\| 1.96e-2; residual_norm 7.86 to 0.23 s an iteration (the fnorm-ceiling check off the tape), prior_solve 0.037 to 0.002 s, prior_taped 0.042 to 0.006 s. Every TAO run failed its forward at the same three trial points and took the re-ramp rescue (reramp span, 2.9 s an iteration at 4e45164) |
 | 32 km inversion cold start with the exp friction control and SEP2 sub-element friction, full_mumps and scpc_gamg | stopped | antarctica_320000_32000_buffered0 (Quartz's .msh, sha256 fd66fc42; 6,282 vertices, 9,055 cells), DG0 geometry, vertex raster sampling | IU workstation (Mac, 16 cores, 128 GB), data under /Volumes/LaCie/Data/antarctica_general/ismip7_obs | 2026-10-01 | 2026-10-01 | the startup ramp (full_mumps in both runs, unannotated, before the solver under test runs) diverged on every rung near n = 2.1 (rung 1 step 5 to \|\|F\|\| 4e37 and 4e20, rung 2 and rung 3 likewise) and the run stopped with ConvergenceError; the solver choice played no part |
@@ -3417,6 +3433,48 @@ Core 11 at 32 km without the apparent-MB reference, a cold start on the OCX prot
 - **Audit:** every step converged on its first scpc_gamg direct solve in 2 to 8 Newton iterations; no rescue, subcycle or tripwire event (speed and thickness bounds armed); mass residual about 1e-8 Gt a step and resid 0.00; speed max 1.65e4 m/yr at step 1, falling to 1.46e4 by step 10; largest relative thickening 1.6 per year in a 112 m floating cell. Budget at step 1: SMB +2435, melt -985, outflux -503, calving -1399, dM/dt -453 Gt/yr
 - **Notes:** gate G4c of the rehearsal (issue 138): attempt A of the matrix, without the reference, went ahead on it
 
+### test-2km-budd-b20k-smoke-constant-fill
+
+Stage-2 path smoke on the 20 km buffered mesh from Budd's stage-1 checkpoint, constant ring fill (done), IU.
+
+- **Task type:** test
+- **Period (yr):** 2015 state
+- **Friction law:** budd
+- **Mesh:** antarctica_5000_2000_buffered20000 (IU's build, 969,764 vertices), DG0 geometry, vertex raster sampling, the lake fix
+- **Initial state / MAP:** Budd stage-1 checkpoint at about iteration 740, controls and fluidity prior; theta = phi = 0 and the baseline prior on the 59,159 dofs outside Rice's mesh
+- **Forcing versions:** the stage-1 objective (bilaplacian sigma 30, rho 750 km, no dH/dt term, log friction control, cell-wise friction, L-BFGS-B without a metric, scpc_gamg); ISMIP7_TRANSFER_FILL=constant (before 3490914)
+- **Site / partition:** IU Quartz, debug partition
+- **Ranks / memory:** 32 ranks, 160G
+- **Job ids:** 10963952
+- **Code:** 9683007 with the stage-2 cells; Quartz clone /N/scratch/dlilien/ismip7_reinvert
+- **Started:** 2026-10-04
+- **Finished:** 2026-10-04
+- **Cost per model year:** 16 min: load, ramp of 8 steps, 4 evaluations of 34 to 41 s
+- **Results path:** Quartz /N/scratch/dlilien/ismip7_reinvert_jobs (submit_reinvert.sh cells, probe/, plots/), probe/smoke2.h5
+- **Audit:** evaluation 1: misfit 5.68e3, smoothness 2.49e4 and 1.21e5, total 1.52e5, against 2.87e3 recorded on Rice's mesh: the step the constant fill puts at the outline. Evaluation 4: smoothness 4.5e3 and 2.5e4, misfit unchanged
+- **Notes:** issue #153; the reason for ISMIP7_TRANSFER_FILL=extend (3490914)
+
+### test-2km-budd-b20k-smoke-extension
+
+Stage-2 path smoke on the 20 km buffered mesh from Budd's stage-1 checkpoint, smooth ring extension (done), IU.
+
+- **Task type:** test
+- **Period (yr):** 2015 state
+- **Friction law:** budd
+- **Mesh:** antarctica_5000_2000_buffered20000 (IU's build, 969,764 vertices), DG0 geometry, vertex raster sampling, the lake fix
+- **Initial state / MAP:** Budd stage-1 checkpoint at about iteration 760; the ring filled by the harmonic extension
+- **Forcing versions:** the stage-1 objective (bilaplacian sigma 30, rho 750 km, no dH/dt term, log friction control, cell-wise friction, L-BFGS-B without a metric, scpc_gamg); ISMIP7_TRANSFER_FILL=extend
+- **Site / partition:** IU Quartz, debug partition
+- **Ranks / memory:** 32 ranks, 160G
+- **Job ids:** 10964148
+- **Code:** 3490914; Quartz worktree /N/scratch/dlilien/ismip7_reinvert_s2
+- **Started:** 2026-10-04
+- **Finished:** 2026-10-04
+- **Cost per model year:** 16 min: load, ramp of 8 steps, 3 evaluations of 32 to 54 s
+- **Results path:** Quartz /N/scratch/dlilien/ismip7_reinvert_jobs (submit_reinvert.sh cells, probe/, plots/), probe/smoke2_extend.h5 (records warm_start_fill extend)
+- **Audit:** evaluation 1: smoothness 397 and 756, misfit 6.42e3, total 7.58e3 against 1.52e5 under the constant fill; total 7.04e3 at evaluation 3
+- **Notes:** issue #153
+
 ### test-2km-budd-native
 
 2 km control on the MAP's own mesh, with no transfer (done), Rice.
@@ -3808,6 +3866,300 @@ Core 11 at 32 km without the apparent-MB reference, a cold start on the OCX prot
 - **Results path:** Quartz /N/scratch/dlilien/ismip7_issue156_runs/maps/prod2km_gamg_p32.h5 (scratch, purged after 30 days); timing record and log copied to /Volumes/LaCie/Data/antarctica_general/ismip7_runs/inversion_solver_quartz
 - **Audit:** every iterate within 1.1e-9 of test-2km-inversion-prod-full-mumps-ec1, final 5.570022e4; no forward failed; every recorded solve confirmed with no step; 2.4 times slower than full_mumps
 - **Notes:** issue #156 production-configuration cost probe; no MAP is kept (strict handoff off, the legacy prior name overridden by the warm start's prior)
+
+### test-2km-rc-b20k-eval1-const
+
+RC stage-1 controls on the 20 km buffered 2 km mesh, evaluation 1 only: as pre2 with the constant fill (ISMIP7_TRANSFER_FILL=constant) (done), IU.
+
+- **Task type:** test
+- **Period (yr):** 2015 state
+- **Friction law:** regularized_coulomb
+- **Mesh:** antarctica_5000_2000_buffered20000 (IU's build, 969,764 vertices), DG0 geometry, vertex raster sampling, the lake fix
+- **Initial state / MAP:** inversion-2km-rc-nomass-lbfgsb's MAP (RC stage 1 final, sha256 fea8debae9616f18), log-velocity weight 69946.22414285329; the 59,159 dofs outside Rice's mesh filled as the run states
+- **Forcing versions:** observations sampled onto this mesh; the stage-1 objective (bilaplacian sigma 30, rho 750 km, no dH/dt term, log friction control, cell-wise friction, L-BFGS-B without a metric, scpc_gamg); ISMIP7_TRANSFER_FILL=constant
+- **Site / partition:** IU Quartz, general partition
+- **Ranks / memory:** 32 ranks, 160G, up to 1 h
+- **Job ids:** 10969231
+- **Code:** 3490914; Quartz worktree /N/scratch/dlilien/ismip7_reinvert_s2
+- **Started:** 2026-10-04
+- **Finished:** 2026-10-04
+- **Cost per model year:** ramp of 8 continuation steps, then one evaluation of about 60 s; ISMIP7_MAXITER=1
+- **Results path:** the checkpoint of evaluation 1 copied aside by snap_iter1.sh: Quartz /N/scratch/dlilien/ismip7_reinvert_jobs (submit_reinvert.sh cells, probe/, plots/), plots/
+- **Audit:** evaluation 1: misfit 5296, velocity chi2 457; model minus observed speed on floating ice mean -110 m/yr (median ratio -25 %), floating within 25 km of the edge -130 m/yr, grounded -2.0 m/yr (shelf_stats.py)
+- **Notes:** issue #153: which part of the buffered mesh's ice-free ring slows the shelves. Stage 1's final MAP on Rice's mesh: floating mean -5.8 m/yr, median ratio -2 %. Together the nine runs give the mechanism: the ocean drag reaches the ice through water cells that touch it at one vertex (front.ocean_drag_cells skips only edge neighbours) and, for the rest, through the first water row's 10 m membrane floor
+
+### test-2km-rc-b20k-eval1-const-floor1
+
+RC stage-1 controls on the 20 km buffered 2 km mesh, evaluation 1 only: the constant fill and a 1 m membrane floor (done), IU.
+
+- **Task type:** test
+- **Period (yr):** 2015 state
+- **Friction law:** regularized_coulomb
+- **Mesh:** antarctica_5000_2000_buffered20000 (IU's build, 969,764 vertices), DG0 geometry, vertex raster sampling, the lake fix
+- **Initial state / MAP:** inversion-2km-rc-nomass-lbfgsb's MAP (RC stage 1 final, sha256 fea8debae9616f18), log-velocity weight 69946.22414285329; the 59,159 dofs outside Rice's mesh filled as the run states
+- **Forcing versions:** observations sampled onto this mesh; the stage-1 objective (bilaplacian sigma 30, rho 750 km, no dH/dt term, log friction control, cell-wise friction, L-BFGS-B without a metric, scpc_gamg); ISMIP7_TRANSFER_FILL=constant ISMIP7_RC_HVISC_FLOOR=1
+- **Site / partition:** IU Quartz, general partition
+- **Ranks / memory:** 32 ranks, 160G, up to 1 h
+- **Job ids:** 10969232
+- **Code:** 3490914; Quartz worktree /N/scratch/dlilien/ismip7_reinvert_s2
+- **Started:** 2026-10-04
+- **Finished:** 2026-10-04
+- **Cost per model year:** ramp of 8 continuation steps, then one evaluation of about 60 s; ISMIP7_MAXITER=1
+- **Results path:** the checkpoint of evaluation 1 copied aside by snap_iter1.sh: Quartz /N/scratch/dlilien/ismip7_reinvert_jobs (submit_reinvert.sh cells, probe/, plots/), plots/
+- **Audit:** evaluation 1: misfit 5199, velocity chi2 450; model minus observed speed on floating ice mean -105 m/yr (median ratio -24 %), floating within 25 km of the edge -124 m/yr, grounded -1.7 m/yr (shelf_stats.py)
+- **Notes:** issue #153: which part of the buffered mesh's ice-free ring slows the shelves. Stage 1's final MAP on Rice's mesh: floating mean -5.8 m/yr, median ratio -2 %. Together the nine runs give the mechanism: the ocean drag reaches the ice through water cells that touch it at one vertex (front.ocean_drag_cells skips only edge neighbours) and, for the rest, through the first water row's 10 m membrane floor
+
+### test-2km-rc-b20k-eval1-drag1e3
+
+RC stage-1 controls on the 20 km buffered 2 km mesh, evaluation 1 only: as pre2 with the ocean drag at 1e-3 MPa yr/m (done), IU.
+
+- **Task type:** test
+- **Period (yr):** 2015 state
+- **Friction law:** regularized_coulomb
+- **Mesh:** antarctica_5000_2000_buffered20000 (IU's build, 969,764 vertices), DG0 geometry, vertex raster sampling, the lake fix
+- **Initial state / MAP:** inversion-2km-rc-nomass-lbfgsb's MAP (RC stage 1 final, sha256 fea8debae9616f18), log-velocity weight 69946.22414285329; the 59,159 dofs outside Rice's mesh filled as the run states
+- **Forcing versions:** observations sampled onto this mesh; the stage-1 objective (bilaplacian sigma 30, rho 750 km, no dH/dt term, log friction control, cell-wise friction, L-BFGS-B without a metric, scpc_gamg); ISMIP7_OCEAN_DRAG=1e-3
+- **Site / partition:** IU Quartz, general partition
+- **Ranks / memory:** 32 ranks, 160G, up to 1 h
+- **Job ids:** 10969342
+- **Code:** 3490914; Quartz worktree /N/scratch/dlilien/ismip7_reinvert_s2
+- **Started:** 2026-10-04
+- **Finished:** 2026-10-04
+- **Cost per model year:** ramp of 8 continuation steps, then one evaluation of about 60 s; ISMIP7_MAXITER=1
+- **Results path:** the checkpoint of evaluation 1 copied aside by snap_iter1.sh: Quartz /N/scratch/dlilien/ismip7_reinvert_jobs (submit_reinvert.sh cells, probe/, plots/), plots/
+- **Audit:** evaluation 1: misfit 4485, velocity chi2 387; model minus observed speed on floating ice mean -100 m/yr (median ratio -23 %), floating within 25 km of the edge -118 m/yr, grounded -2.5 m/yr (shelf_stats.py)
+- **Notes:** issue #153: which part of the buffered mesh's ice-free ring slows the shelves. Stage 1's final MAP on Rice's mesh: floating mean -5.8 m/yr, median ratio -2 %. Together the nine runs give the mechanism: the ocean drag reaches the ice through water cells that touch it at one vertex (front.ocean_drag_cells skips only edge neighbours) and, for the rest, through the first water row's 10 m membrane floor
+
+### test-2km-rc-b20k-eval1-drag1e4
+
+RC stage-1 controls on the 20 km buffered 2 km mesh, evaluation 1 only: as pre2 with the ocean drag at 1e-4 MPa yr/m (done), IU.
+
+- **Task type:** test
+- **Period (yr):** 2015 state
+- **Friction law:** regularized_coulomb
+- **Mesh:** antarctica_5000_2000_buffered20000 (IU's build, 969,764 vertices), DG0 geometry, vertex raster sampling, the lake fix
+- **Initial state / MAP:** inversion-2km-rc-nomass-lbfgsb's MAP (RC stage 1 final, sha256 fea8debae9616f18), log-velocity weight 69946.22414285329; the 59,159 dofs outside Rice's mesh filled as the run states
+- **Forcing versions:** observations sampled onto this mesh; the stage-1 objective (bilaplacian sigma 30, rho 750 km, no dH/dt term, log friction control, cell-wise friction, L-BFGS-B without a metric, scpc_gamg); ISMIP7_OCEAN_DRAG=1e-4
+- **Site / partition:** IU Quartz, general partition
+- **Ranks / memory:** 32 ranks, 160G, up to 1 h
+- **Job ids:** 10969343
+- **Code:** 3490914; Quartz worktree /N/scratch/dlilien/ismip7_reinvert_s2
+- **Started:** 2026-10-04
+- **Finished:** 2026-10-04
+- **Cost per model year:** ramp of 8 continuation steps, then one evaluation of about 60 s; ISMIP7_MAXITER=1
+- **Results path:** the checkpoint of evaluation 1 copied aside by snap_iter1.sh: Quartz /N/scratch/dlilien/ismip7_reinvert_jobs (submit_reinvert.sh cells, probe/, plots/), plots/
+- **Audit:** evaluation 1: misfit 3473, velocity chi2 220; model minus observed speed on floating ice mean -68 m/yr (median ratio -16 %), floating within 25 km of the edge -86 m/yr, grounded -2.3 m/yr (shelf_stats.py)
+- **Notes:** issue #153: which part of the buffered mesh's ice-free ring slows the shelves. Stage 1's final MAP on Rice's mesh: floating mean -5.8 m/yr, median ratio -2 %. Together the nine runs give the mechanism: the ocean drag reaches the ice through water cells that touch it at one vertex (front.ocean_drag_cells skips only edge neighbours) and, for the rest, through the first water row's 10 m membrane floor
+
+### test-2km-rc-b20k-eval1-floor1
+
+RC stage-1 controls on the 20 km buffered 2 km mesh, evaluation 1 only: as pre2 with ISMIP7_RC_HVISC_FLOOR=1 (done), IU.
+
+- **Task type:** test
+- **Period (yr):** 2015 state
+- **Friction law:** regularized_coulomb
+- **Mesh:** antarctica_5000_2000_buffered20000 (IU's build, 969,764 vertices), DG0 geometry, vertex raster sampling, the lake fix
+- **Initial state / MAP:** inversion-2km-rc-nomass-lbfgsb's MAP (RC stage 1 final, sha256 fea8debae9616f18), log-velocity weight 69946.22414285329; the 59,159 dofs outside Rice's mesh filled as the run states
+- **Forcing versions:** observations sampled onto this mesh; the stage-1 objective (bilaplacian sigma 30, rho 750 km, no dH/dt term, log friction control, cell-wise friction, L-BFGS-B without a metric, scpc_gamg); ISMIP7_RC_HVISC_FLOOR=1
+- **Site / partition:** IU Quartz, general partition
+- **Ranks / memory:** 32 ranks, 160G, up to 1 h
+- **Job ids:** 10969230
+- **Code:** 3490914; Quartz worktree /N/scratch/dlilien/ismip7_reinvert_s2
+- **Started:** 2026-10-04
+- **Finished:** 2026-10-04
+- **Cost per model year:** ramp of 8 continuation steps, then one evaluation of about 60 s; ISMIP7_MAXITER=1
+- **Results path:** the checkpoint of evaluation 1 copied aside by snap_iter1.sh: Quartz /N/scratch/dlilien/ismip7_reinvert_jobs (submit_reinvert.sh cells, probe/, plots/), plots/
+- **Audit:** evaluation 1: misfit 5509, velocity chi2 478; model minus observed speed on floating ice mean -115 m/yr (median ratio -26 %), floating within 25 km of the edge -132 m/yr, grounded -2.5 m/yr (shelf_stats.py)
+- **Notes:** issue #153: which part of the buffered mesh's ice-free ring slows the shelves. Stage 1's final MAP on Rice's mesh: floating mean -5.8 m/yr, median ratio -2 %. Together the nine runs give the mechanism: the ocean drag reaches the ice through water cells that touch it at one vertex (front.ocean_drag_cells skips only edge neighbours) and, for the rest, through the first water row's 10 m membrane floor
+
+### test-2km-rc-b20k-eval1-nodrag
+
+RC stage-1 controls on the 20 km buffered 2 km mesh, evaluation 1 only: as pre2 with the ocean drag off (done), IU.
+
+- **Task type:** test
+- **Period (yr):** 2015 state
+- **Friction law:** regularized_coulomb
+- **Mesh:** antarctica_5000_2000_buffered20000 (IU's build, 969,764 vertices), DG0 geometry, vertex raster sampling, the lake fix
+- **Initial state / MAP:** inversion-2km-rc-nomass-lbfgsb's MAP (RC stage 1 final, sha256 fea8debae9616f18), log-velocity weight 69946.22414285329; the 59,159 dofs outside Rice's mesh filled as the run states
+- **Forcing versions:** observations sampled onto this mesh; the stage-1 objective (bilaplacian sigma 30, rho 750 km, no dH/dt term, log friction control, cell-wise friction, L-BFGS-B without a metric, scpc_gamg); ISMIP7_OCEAN_DRAG=0
+- **Site / partition:** IU Quartz, general partition
+- **Ranks / memory:** 32 ranks, 160G, up to 1 h
+- **Job ids:** 10969233
+- **Code:** 3490914; Quartz worktree /N/scratch/dlilien/ismip7_reinvert_s2
+- **Started:** 2026-10-04
+- **Finished:** 2026-10-04
+- **Cost per model year:** ramp of 8 continuation steps, then one evaluation of about 60 s; ISMIP7_MAXITER=1
+- **Results path:** the checkpoint of evaluation 1 copied aside by snap_iter1.sh: Quartz /N/scratch/dlilien/ismip7_reinvert_jobs (submit_reinvert.sh cells, probe/, plots/), plots/
+- **Audit:** evaluation 1: misfit 2672, velocity chi2 56; model minus observed speed on floating ice mean -4.7 m/yr (median ratio -1 %), floating within 25 km of the edge -17 m/yr, grounded -2.0 m/yr (shelf_stats.py)
+- **Notes:** issue #153: which part of the buffered mesh's ice-free ring slows the shelves. Stage 1's final MAP on Rice's mesh: floating mean -5.8 m/yr, median ratio -2 %. Together the nine runs give the mechanism: the ocean drag reaches the ice through water cells that touch it at one vertex (front.ocean_drag_cells skips only edge neighbours) and, for the rest, through the first water row's 10 m membrane floor
+
+### test-2km-rc-b20k-eval1-pre2
+
+RC stage-1 controls on the 20 km buffered 2 km mesh, evaluation 1 only: the smooth extension, membrane floor 10 m, the production drag gate (done), IU.
+
+- **Task type:** test
+- **Period (yr):** 2015 state
+- **Friction law:** regularized_coulomb
+- **Mesh:** antarctica_5000_2000_buffered20000 (IU's build, 969,764 vertices), DG0 geometry, vertex raster sampling, the lake fix
+- **Initial state / MAP:** inversion-2km-rc-nomass-lbfgsb's MAP (RC stage 1 final, sha256 fea8debae9616f18), log-velocity weight 69946.22414285329; the 59,159 dofs outside Rice's mesh filled as the run states
+- **Forcing versions:** observations sampled onto this mesh; the stage-1 objective (bilaplacian sigma 30, rho 750 km, no dH/dt term, log friction control, cell-wise friction, L-BFGS-B without a metric, scpc_gamg)
+- **Site / partition:** IU Quartz, general partition
+- **Ranks / memory:** 32 ranks, 160G, up to 1 h
+- **Job ids:** 10968923
+- **Code:** 3490914; Quartz worktree /N/scratch/dlilien/ismip7_reinvert_s2
+- **Started:** 2026-10-04
+- **Finished:** 2026-10-04
+- **Cost per model year:** ramp of 8 continuation steps, then one evaluation of about 60 s; ISMIP7_MAXITER=1
+- **Results path:** the checkpoint of evaluation 1 copied aside by snap_iter1.sh: Quartz /N/scratch/dlilien/ismip7_reinvert_jobs (submit_reinvert.sh cells, probe/, plots/), plots/
+- **Audit:** evaluation 1: misfit 5755, velocity chi2 500; model minus observed speed on floating ice mean -119 m/yr (median ratio -27 %), floating within 25 km of the edge -138 m/yr, grounded -2.7 m/yr (shelf_stats.py)
+- **Notes:** issue #153: which part of the buffered mesh's ice-free ring slows the shelves. Stage 1's final MAP on Rice's mesh: floating mean -5.8 m/yr, median ratio -2 %. Together the nine runs give the mechanism: the ocean drag reaches the ice through water cells that touch it at one vertex (front.ocean_drag_cells skips only edge neighbours) and, for the rest, through the first water row's 10 m membrane floor
+
+### test-2km-rc-b20k-eval1-vgate
+
+RC stage-1 controls on the 20 km buffered 2 km mesh, evaluation 1 only: as pre2 with the drag kept off every node of the ice (done), IU.
+
+- **Task type:** test
+- **Period (yr):** 2015 state
+- **Friction law:** regularized_coulomb
+- **Mesh:** antarctica_5000_2000_buffered20000 (IU's build, 969,764 vertices), DG0 geometry, vertex raster sampling, the lake fix
+- **Initial state / MAP:** inversion-2km-rc-nomass-lbfgsb's MAP (RC stage 1 final, sha256 fea8debae9616f18), log-velocity weight 69946.22414285329; the 59,159 dofs outside Rice's mesh filled as the run states
+- **Forcing versions:** observations sampled onto this mesh; the stage-1 objective (bilaplacian sigma 30, rho 750 km, no dH/dt term, log friction control, cell-wise friction, L-BFGS-B without a metric, scpc_gamg); ISMIP7_DRAG_GATE=vertex (56,913 drag cells against 69,012)
+- **Site / partition:** IU Quartz, general partition
+- **Ranks / memory:** 32 ranks, 160G, up to 1 h
+- **Job ids:** 10969497
+- **Code:** 4e45d18; Quartz worktree /N/scratch/dlilien/ismip7_reinvert_s3
+- **Started:** 2026-10-04
+- **Finished:** 2026-10-04
+- **Cost per model year:** ramp of 8 continuation steps, then one evaluation of about 60 s; ISMIP7_MAXITER=1
+- **Results path:** the checkpoint of evaluation 1 copied aside by snap_iter1.sh: Quartz /N/scratch/dlilien/ismip7_reinvert_jobs (submit_reinvert.sh cells, probe/, plots/), plots/
+- **Audit:** evaluation 1: misfit 3193, velocity chi2 108; model minus observed speed on floating ice mean -39 m/yr (median ratio -11 %), floating within 25 km of the edge -52 m/yr, grounded -2.1 m/yr (shelf_stats.py)
+- **Notes:** issue #153: which part of the buffered mesh's ice-free ring slows the shelves. Stage 1's final MAP on Rice's mesh: floating mean -5.8 m/yr, median ratio -2 %. Together the nine runs give the mechanism: the ocean drag reaches the ice through water cells that touch it at one vertex (front.ocean_drag_cells skips only edge neighbours) and, for the rest, through the first water row's 10 m membrane floor
+
+### test-2km-rc-b20k-eval1-vgate-floor1
+
+RC stage-1 controls on the 20 km buffered 2 km mesh, evaluation 1 only: the vertex gate and a 1 m membrane floor (done), IU.
+
+- **Task type:** test
+- **Period (yr):** 2015 state
+- **Friction law:** regularized_coulomb
+- **Mesh:** antarctica_5000_2000_buffered20000 (IU's build, 969,764 vertices), DG0 geometry, vertex raster sampling, the lake fix
+- **Initial state / MAP:** inversion-2km-rc-nomass-lbfgsb's MAP (RC stage 1 final, sha256 fea8debae9616f18), log-velocity weight 69946.22414285329; the 59,159 dofs outside Rice's mesh filled as the run states
+- **Forcing versions:** observations sampled onto this mesh; the stage-1 objective (bilaplacian sigma 30, rho 750 km, no dH/dt term, log friction control, cell-wise friction, L-BFGS-B without a metric, scpc_gamg); ISMIP7_DRAG_GATE=vertex ISMIP7_RC_HVISC_FLOOR=1
+- **Site / partition:** IU Quartz, general partition
+- **Ranks / memory:** 32 ranks, 160G, up to 1 h
+- **Job ids:** 10969613
+- **Code:** 4e45d18; Quartz worktree /N/scratch/dlilien/ismip7_reinvert_s3
+- **Started:** 2026-10-04
+- **Finished:** 2026-10-04
+- **Cost per model year:** ramp of 8 continuation steps, then one evaluation of about 60 s; ISMIP7_MAXITER=1
+- **Results path:** the checkpoint of evaluation 1 copied aside by snap_iter1.sh: Quartz /N/scratch/dlilien/ismip7_reinvert_jobs (submit_reinvert.sh cells, probe/, plots/), plots/
+- **Audit:** evaluation 1: misfit 3159, velocity chi2 76; model minus observed speed on floating ice mean -5.6 m/yr (median ratio -2 %), floating within 25 km of the edge -14 m/yr, grounded -1.8 m/yr (shelf_stats.py)
+- **Notes:** issue #153: which part of the buffered mesh's ice-free ring slows the shelves. Stage 1's final MAP on Rice's mesh: floating mean -5.8 m/yr, median ratio -2 %. Together the nine runs give the mechanism: the ocean drag reaches the ice through water cells that touch it at one vertex (front.ocean_drag_cells skips only edge neighbours) and, for the rest, through the first water row's 10 m membrane floor
+
+### test-2km-rc-b20k-nodrag
+
+RC stage 2 on the 20 km buffered mesh with the ocean drag off (300 iterations) (done), IU.
+
+- **Task type:** test
+- **Period (yr):** 2015 state
+- **Friction law:** regularized_coulomb
+- **Mesh:** antarctica_5000_2000_buffered20000 (IU's build, 969,764 vertices), DG0 geometry, vertex raster sampling, the lake fix
+- **Initial state / MAP:** inversion-2km-rc-nomass-lbfgsb's MAP (RC stage 1 final, sha256 fea8debae9616f18), log-velocity weight 69946.22414285329; the ring filled by the harmonic extension
+- **Forcing versions:** observations sampled onto this mesh; the stage-1 objective (bilaplacian sigma 30, rho 750 km, no dH/dt term, log friction control, cell-wise friction, L-BFGS-B without a metric, scpc_gamg); ISMIP7_OCEAN_DRAG=0
+- **Site / partition:** IU Quartz, general partition
+- **Ranks / memory:** 32 ranks, 160G, 12 h
+- **Job ids:** 10969345
+- **Code:** 3490914; Quartz worktree /N/scratch/dlilien/ismip7_reinvert_s2
+- **Started:** 2026-10-04
+- **Finished:** 2026-10-05
+- **Cost per model year:** 310 evaluations in 3 h 54 min
+- **Results path:** Quartz /N/project/ice_rheology/ISMIP7/antarctica/results/reinvert_2km/exp/rc_s2x_nodrag.h5
+- **Audit:** evaluation 310: misfit 2,412, velocity chi2 41.5, total 2,741, against 3,074 for the same run with the production drag gate (inversion-2km-rc-nomass-b20k) and 2,249 for stage 1 on Rice's mesh; floating ice mean -7.8 m/yr, median ratio -2 %; no dipole on the shelves
+- **Notes:** issue #153; an experiment, since forwards run with the drag on
+
+### test-2km-rc-fresh-solver-rice-mesh
+
+One fresh scpc_gamg solver on Rice's mesh at RC's final stage-1 controls (Krylov iterations a condensed solve) (done), IU.
+
+- **Task type:** test
+- **Period (yr):** 2015 state
+- **Friction law:** regularized_coulomb
+- **Mesh:** antarctica_5000_2000_buffered0 (Rice's build, 925,183 vertices, read from the warm start: ISMIP7_MESH=checkpoint), DG0 geometry, vertex raster sampling
+- **Initial state / MAP:** inversion-2km-rc-nomass-lbfgsb's MAP (RC stage 1 final, sha256 fea8debae9616f18), log-velocity weight 69946.22414285329 with its mixed state (no ramp)
+- **Forcing versions:** the stage-1 objective (bilaplacian sigma 30, rho 750 km, no dH/dt term, log friction control, cell-wise friction, L-BFGS-B without a metric, scpc_gamg)
+- **Site / partition:** IU Quartz, debug partition
+- **Ranks / memory:** 32 ranks, 160G
+- **Job ids:** 10968526
+- **Code:** 9683007; Quartz clone /N/scratch/dlilien/ismip7_reinvert
+- **Started:** 2026-10-04
+- **Finished:** 2026-10-04
+- **Cost per model year:** three evaluations, 61 s forward and 13 s adjoint (median)
+- **Results path:** Quartz /N/scratch/dlilien/ismip7_reinvert_jobs (submit_reinvert.sh cells, probe/, plots/), probe/fresh_rc_s1.json
+- **Audit:** 152 Krylov iterations a condensed solve with a fresh solver, against 144 for stage 1's reused solver at the same controls and 68 for a fresh solver on the buffered mesh: the buffered setup, not solver reuse, halves stage 2's evaluation cost. Evaluation 1 reproduces stage 1's final objective (total 2.592786e3)
+- **Notes:** issue #153
+
+### test-2km-rc-lcurve-g001
+
+RC continued 150 iterations on Rice's mesh from its stage-1 MAP, curvature x0.01 (rho 7.5 km at sigma 30) (done), IU.
+
+- **Task type:** test
+- **Period (yr):** 2015 state
+- **Friction law:** regularized_coulomb
+- **Mesh:** antarctica_5000_2000_buffered0 (Rice's build, 925,183 vertices, read from the warm start: ISMIP7_MESH=checkpoint), DG0 geometry, vertex raster sampling
+- **Initial state / MAP:** inversion-2km-rc-nomass-lbfgsb's MAP (RC stage 1 final, sha256 fea8debae9616f18), log-velocity weight 69946.22414285329 with its mixed state
+- **Forcing versions:** the stage-1 objective (bilaplacian sigma 30, rho 7.5 km, no dH/dt term, log friction control, cell-wise friction, L-BFGS-B without a metric, scpc_gamg); gamma 24.9; ISMIP7_WARM_START_STRICT=0
+- **Site / partition:** IU Quartz, general partition
+- **Ranks / memory:** 32 ranks, 160G, 8 h
+- **Job ids:** 10969229
+- **Code:** 9683007; Quartz clone /N/scratch/dlilien/ismip7_reinvert
+- **Started:** 2026-10-04
+- **Finished:** 2026-10-05
+- **Cost per model year:** 158 evaluations in 6 h 22 min
+- **Results path:** Quartz /N/project/ice_rheology/ISMIP7/antarctica/results/reinvert_2km/lcurve/rc_lc_rc_g001.h5; maps in Quartz /N/scratch/dlilien/ismip7_reinvert_jobs (submit_reinvert.sh cells, probe/, plots/), plots/lc_g001_*.png
+- **Audit:** evaluation 158: misfit 645 (stage 1 ended at 2,249), velocity chi2 10.7, total 894; mean absolute speed misfit 15.4 m/yr on floating ice and 2.6 m/yr on grounded ice. phi on the shelves shows narrow suture zones and margins, and on grounded ice a grid-scale speckle (2 to 5 km), which is noise; 90th and 99th percentile 14 and 72 m/yr
+- **Notes:** issue #153: is stage 1 over-regularized? gamma 2493 is Rice's curvature, so a 5 km wide, 300 km long soft band at phi +2 costs 1,450 in the prior, eleven times stage 1's whole reg_phi (130)
+
+### test-2km-rc-lcurve-g01
+
+RC continued 150 iterations on Rice's mesh from its stage-1 MAP, curvature x0.1 (rho 75 km at sigma 30) (done), IU.
+
+- **Task type:** test
+- **Period (yr):** 2015 state
+- **Friction law:** regularized_coulomb
+- **Mesh:** antarctica_5000_2000_buffered0 (Rice's build, 925,183 vertices, read from the warm start: ISMIP7_MESH=checkpoint), DG0 geometry, vertex raster sampling
+- **Initial state / MAP:** inversion-2km-rc-nomass-lbfgsb's MAP (RC stage 1 final, sha256 fea8debae9616f18), log-velocity weight 69946.22414285329 with its mixed state
+- **Forcing versions:** the stage-1 objective (bilaplacian sigma 30, rho 75 km, no dH/dt term, log friction control, cell-wise friction, L-BFGS-B without a metric, scpc_gamg); gamma 249; ISMIP7_WARM_START_STRICT=0
+- **Site / partition:** IU Quartz, general partition
+- **Ranks / memory:** 32 ranks, 160G, 8 h
+- **Job ids:** 10969228
+- **Code:** 9683007; Quartz clone /N/scratch/dlilien/ismip7_reinvert
+- **Started:** 2026-10-04
+- **Finished:** 2026-10-05
+- **Cost per model year:** 157 evaluations in 5 h 30 min
+- **Results path:** Quartz /N/project/ice_rheology/ISMIP7/antarctica/results/reinvert_2km/lcurve/rc_lc_rc_g01.h5; maps in Quartz /N/scratch/dlilien/ismip7_reinvert_jobs (submit_reinvert.sh cells, probe/, plots/), plots/lc_g01_*.png
+- **Audit:** evaluation 157: misfit 1,200 (stage 1 ended at 2,249), velocity chi2 14.8, total 1,415; mean absolute speed misfit 19.9 m/yr on floating ice and 4.0 m/yr on grounded ice. phi gains flow-aligned bands and shear margins on the shelves and 20 km blobs on grounded ice; 90th and 99th percentile speed misfit 19 and 104 m/yr (34 and 171 at x1)
+- **Notes:** issue #153: is stage 1 over-regularized? gamma 2493 is Rice's curvature, so a 5 km wide, 300 km long soft band at phi +2 costs 1,450 in the prior, eleven times stage 1's whole reg_phi (130)
+
+### test-2km-rc-lcurve-g1
+
+RC continued 150 iterations on Rice's mesh from its stage-1 MAP, curvature x1 (rho 750 km at sigma 30) (done), IU.
+
+- **Task type:** test
+- **Period (yr):** 2015 state
+- **Friction law:** regularized_coulomb
+- **Mesh:** antarctica_5000_2000_buffered0 (Rice's build, 925,183 vertices, read from the warm start: ISMIP7_MESH=checkpoint), DG0 geometry, vertex raster sampling
+- **Initial state / MAP:** inversion-2km-rc-nomass-lbfgsb's MAP (RC stage 1 final, sha256 fea8debae9616f18), log-velocity weight 69946.22414285329 with its mixed state
+- **Forcing versions:** the stage-1 objective (bilaplacian sigma 30, rho 750 km, no dH/dt term, log friction control, cell-wise friction, L-BFGS-B without a metric, scpc_gamg); gamma 2493; ISMIP7_WARM_START_STRICT=0
+- **Site / partition:** IU Quartz, general partition
+- **Ranks / memory:** 32 ranks, 160G, 8 h
+- **Job ids:** 10969227
+- **Code:** 9683007; Quartz clone /N/scratch/dlilien/ismip7_reinvert
+- **Started:** 2026-10-04
+- **Finished:** 2026-10-05
+- **Cost per model year:** 157 evaluations in 3 h 32 min
+- **Results path:** Quartz /N/project/ice_rheology/ISMIP7/antarctica/results/reinvert_2km/lcurve/rc_lc_rc_g1.h5; maps in Quartz /N/scratch/dlilien/ismip7_reinvert_jobs (submit_reinvert.sh cells, probe/, plots/), plots/lc_g1_*.png
+- **Audit:** evaluation 157: misfit 2,244 (stage 1 ended at 2,249), velocity chi2 34.6, total 2,562; mean absolute speed misfit 34.8 m/yr on floating ice and 6.6 m/yr on grounded ice. phi as stage 1's: no structure under 30 to 50 km. The objective stayed at stage 1's (2,249): converged under this prior
+- **Notes:** issue #153: is stage 1 over-regularized? gamma 2493 is Rice's curvature, so a 5 km wide, 300 km long soft band at phi +2 costs 1,450 in the prior, eleven times stage 1's whole reg_phi (130)
 
 ### test-32km-inversion-defaults-check
 

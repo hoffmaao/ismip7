@@ -3065,7 +3065,7 @@ def run_simulation(
             }
             raise
 
-        if trace_cells:
+        if trace_on:
             _h_tr = {i: float(h_dg.dat.data_ro[i]) for _, i in trace_cells}
         out_gt = float(assemble(
             un_transport_plus * h_dg * ds
@@ -3206,7 +3206,7 @@ def run_simulation(
             if retreat_only:
                 calved[:] = held_calved(calved, h_dg_old.dat.data_ro, data, front_hmin)
                 calved_fn.dat.data[:] = calved
-        if trace_cells:
+        if trace_on:
             _dm = ctx.get("drag_mask")
             _cc = level_set.c_cell.dat.data_ro if level_set is not None else None
             for _lab, _i in trace_cells:
@@ -3269,6 +3269,9 @@ def run_simulation(
             for _i in np.flatnonzero(_r <= 2.3e3):
                 trace_cells.append((f"({_px / 1e3:.0f},{_py / 1e3:.0f})+{_r[_i] / 1e3:.1f}km", int(_i)))
         PETSc.Sys.Print(f"  Substep trace: {global_count(np.ones(len(trace_cells), bool), mesh.comm)} cells near {_trace}")
+    # the flush below is collective: every rank takes the branch, with or
+    # without cells of its own to print
+    trace_on = bool(mesh.comm.allreduce(len(trace_cells)))
     fssa_theta_val = ctx["fssa_theta"]
     fssa_tau = ctx["fssa_tau"]
     if fssa_theta_val > 0:

@@ -109,7 +109,7 @@ from icepack2_tools.runconfig import (
     friction as _friction, geometry_space as _geometry_space,
     raster_sample as _raster_sample,
     lc as _lc, lc_coarse as _lc_coarse, n_flow as _n_flow,
-    eval_continuation, inversion_mesh_source, transfer_fill,
+    eval_continuation, inversion_mesh_source, transfer_fill, drag_gate,
 )
 DATA_DIR = obs_data_root()
 from icepack2_tools.prior import (
@@ -136,7 +136,7 @@ from icepack2_tools.runconfig import (
     lake_ice_base,
     residual_stabilizers,
 )
-from icepack2_tools.front import facet_neighbours, ocean_drag_cells
+from icepack2_tools.front import facet_neighbours, ocean_drag_cells, vertex_neighbours
 from icepack2_tools.continuation import ladder, ramp_exponents
 from icepack2_tools.solverconfig import (
     continuation_steps,
@@ -1411,12 +1411,16 @@ def main():
     # a tenth of its observed speed.
     drag_mask = Function(FunctionSpace(mesh, "DG", 0), name="drag_mask")
     _ice = Function(drag_mask.function_space()).project(H).dat.data_ro >= front_hmin()
+    # ISMIP7_DRAG_GATE=vertex also keeps it off water cells that touch the
+    # ice at a vertex, whose drag acts on the ice's own front nodes.
+    DRAG_GATE = drag_gate()
+    _neighbours = (vertex_neighbours if DRAG_GATE == "vertex" else facet_neighbours)
     drag_mask.dat.data[:] = ocean_drag_cells(
-        _ice, facet_neighbours(drag_mask.function_space()), _ice)
+        _ice, _neighbours(drag_mask.function_space()), _ice)
     PETSc.Sys.Print(
         f"  Ocean drag gate: {COMM_WORLD.allreduce(int(drag_mask.dat.data_ro.sum()))} "
         f"of {COMM_WORLD.allreduce(int(drag_mask.dat.data_ro.size))} cells, open water "
-        f"a cell away from the ice (h < {front_hmin():g} m), as in the forward"
+        f"a cell away from the ice (h < {front_hmin():g} m, ISMIP7_DRAG_GATE={DRAG_GATE})"
     )
 
     subelement = None
@@ -2412,6 +2416,7 @@ def main():
             # How a warm start from another mesh filled the dofs beyond it
             # (provenance: ISMIP7_TRANSFER_FILL; same-mesh starts fill none).
             chk.set_attr("/", "warm_start_fill", warm_fill_mode)
+            chk.set_attr("/", "drag_gate", DRAG_GATE)
             # Which field the friction is: C_w0 exp(log_friction) on the
             # anchor (log), or sqrt_friction^2 with no anchor (sqrt).
             chk.set_attr("/", "friction_control", FRICTION_CONTROL)

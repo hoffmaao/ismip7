@@ -396,6 +396,21 @@ def calving_law():
     return value
 
 
+DRAG_GATES = ("facet", "vertex")
+
+
+def drag_gate():
+    r"""``ISMIP7_DRAG_GATE``: which water cells beside the ice the ocean drag
+    skips (``front.ocean_drag_cells``). ``facet`` (the default) skips the
+    cells sharing an edge with ice; ``vertex`` also skips those sharing only a
+    vertex, whose drag otherwise acts on the ice's own front nodes."""
+    gate = os.environ.get("ISMIP7_DRAG_GATE", "facet").strip().lower()
+    if gate not in DRAG_GATES:
+        raise ValueError(
+            f"ISMIP7_DRAG_GATE must be one of {', '.join(DRAG_GATES)}, not {gate!r}")
+    return gate
+
+
 FRONT_HMIN_DEFAULT = "1.0"    # m
 
 

@@ -10,7 +10,8 @@ import numpy as np
 
 __all__ = ["retreat_slivers", "clear_reference_where_ice_free", "clamp_thickness",
            "front_removal_mask", "unforced_cells", "applied_forcing",
-           "front_connected", "facet_neighbours", "ocean_drag_cells",
+           "front_connected", "facet_neighbours", "vertex_neighbours",
+           "ocean_drag_cells",
            "collapse_cell_counts",
            "collapse_banner", "collapse_csv_fields", "COLLAPSE_MARKER",
            "COLLAPSE_CSV_COLUMNS", "FRONT_OWNER_MARKER"]
@@ -281,6 +282,42 @@ def facet_neighbours(Q_dg):
         # a sum of facet lengths over the neighbours in the mask: exactly
         # zero with none, at least one facet length with any
         return touched.dat.data_ro > 0.0
+
+    return neighbours_of
+
+
+def vertex_neighbours(Q_dg):
+    r"""``neighbours_of`` on the DG0 space ``Q_dg`` that counts a cell sharing
+    only a vertex with a cell of the mask, where :func:`facet_neighbours`
+    counts an edge.
+
+    With :func:`ocean_drag_cells` it keeps the drag off every cell that holds
+    a node of an ice cell. The CG1 velocity's front nodes are such nodes: a
+    water cell that touches the ice at one vertex and carries the drag drags
+    that front node directly. On the 20 km buffered 2 km mesh this held the
+    shelves of RC stage 2 at 27 % below the observed speed at evaluation 1
+    (issue #153), against 1 % with the drag off.
+
+    Assembled as the CG1 test functions against the mask's indicator: a node
+    of a masked cell gets a positive value, every other node exactly zero, and
+    the assembly sums across ranks, so a node on a partition boundary counts.
+    """
+    import firedrake as fd
+
+    mesh = Q_dg.mesh()
+    Q1 = fd.FunctionSpace(mesh, "CG", 1)
+    indicator = fd.Function(Q_dg)
+    form = indicator * fd.TestFunction(Q1) * fd.dx
+    touched = fd.Cofunction(Q1.dual())
+    nodes = fd.Function(Q1)
+    n_cells = Q_dg.dof_dset.size
+    cell_nodes = Q1.cell_node_map().values[:n_cells]
+
+    def neighbours_of(mask):
+        indicator.dat.data[:] = mask
+        fd.assemble(form, tensor=touched)
+        nodes.dat.data[:] = touched.dat.data_ro
+        return (nodes.dat.data_ro_with_halos[cell_nodes] > 0.0).any(axis=1)
 
     return neighbours_of
 

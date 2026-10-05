@@ -74,7 +74,7 @@ from icepack2_tools.handoff import check_subelement_record
 from icepack2_tools.front import (
     clamp_thickness, clear_reference_where_ice_free, retreat_slivers,
     front_removal_mask, unforced_cells, applied_forcing,
-    facet_neighbours, front_connected, ocean_drag_cells,
+    facet_neighbours, front_connected, ocean_drag_cells, vertex_neighbours,
     collapse_banner, collapse_cell_counts, collapse_csv_fields,
     COLLAPSE_CSV_COLUMNS, COLLAPSE_MARKER, FRONT_OWNER_MARKER,
 )
@@ -89,6 +89,7 @@ from icepack2_tools.runconfig import (
     residual_stabilizers,
     friction as _friction, geometry_space as _geometry_space,
     mesh_override as _mesh_override, transfer_fill as _transfer_fill,
+    drag_gate as _drag_gate,
     lc as _lc, lc_coarse as _lc_coarse, n_flow as _n_flow, buffer_m as _buffer_m,
     TARGET_MESH_GEOMETRY_METHOD,
     calving_law as _calving_law, calving_law_object as _calving_law_object,
@@ -1129,7 +1130,8 @@ def setup_model(restart_from=None, *, allow_timing_cache_a_ref=False,
         # and a level-set front, when one runs, writes its own gate instead.
         drag_mask = Function(FunctionSpace(mesh, "DG", 0), name="drag_mask")
         _Q0 = drag_mask.function_space()
-        _drag_neighbours_of = facet_neighbours(_Q0)
+        _drag_neighbours_of = (vertex_neighbours if _drag_gate() == "vertex"
+                               else facet_neighbours)(_Q0)
         _drag_hmin = _front_hmin()
         _drag_extent0 = Function(_Q0).project(
             H if H_init is None else H_init).dat.data_ro >= _drag_hmin

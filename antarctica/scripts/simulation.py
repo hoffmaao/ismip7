@@ -3065,6 +3065,8 @@ def run_simulation(
             }
             raise
 
+        if trace_cells:
+            _h_tr = {i: float(h_dg.dat.data_ro[i]) for _, i in trace_cells}
         out_gt = float(assemble(
             un_transport_plus * h_dg * ds
         )) * rho_gt * dt_local
@@ -3204,6 +3206,20 @@ def run_simulation(
             if retreat_only:
                 calved[:] = held_calved(calved, h_dg_old.dat.data_ro, data, front_hmin)
                 calved_fn.dat.data[:] = calved
+        if trace_cells:
+            _dm = ctx.get("drag_mask")
+            _cc = level_set.c_cell.dat.data_ro if level_set is not None else None
+            for _lab, _i in trace_cells:
+                _ho, _hn = float(h_dg_old.dat.data_ro[_i]), float(h_dg.dat.data_ro[_i])
+                PETSc.Sys.syncPrint(
+                    f"  trace {label} {_lab}: h {_ho:7.1f} -> {_hn:7.1f} m  src {float(src_dg.dat.data_ro[_i]):+8.1f}"
+                    f"  D {float(src_dg.dat.data_ro[_i]) - (_h_tr[_i] - _ho) / dt_local:+8.1f} m/yr"
+                    f"  beyond {int(beyond[_i]) if beyond is not None else '-'}"
+                    f"  frac {float(calv_frac[_i]) if calv_frac is not None else 0.0:.3f}"
+                    f"  c {float(_cc[_i]) if _cc is not None else 0.0:7.0f}"
+                    f"  drag {float(_dm.dat.data_ro[_i]) if _dm is not None else 0.0:.0f}"
+                    f"  calved {int(calved[_i])}", comm=mesh.comm)
+            PETSc.Sys.syncFlush(comm=mesh.comm)
 
         _lift_h()
         # The ocean-drag gate follows the ice: without a level set (which
@@ -3239,6 +3255,20 @@ def run_simulation(
     # Newton track the branch through the event). Checkpoints improve too:
     # saved (h, u) are now mutually consistent.
     SUBCYCLES = subcycles()
+    # ISMIP7_SUBSTEP_TRACE="x,y;x,y" (km): after every transport advance,
+    # print the thickness, applied source, flux divergence, front flags and
+    # calving rate of the cells within 2.3 km of each point, one line per
+    # cell, so a step-size rejection at a front can be read cell by cell.
+    trace_cells = []
+    _trace = os.environ.get("ISMIP7_SUBSTEP_TRACE", "").strip()
+    if _trace:
+        _txy = np.asarray(h_diag_xy.dat.data_ro)
+        for _tok in _trace.split(";"):
+            _px, _py = (1e3 * float(_v) for _v in _tok.split(","))
+            _r = np.hypot(_txy[:, 0] - _px, _txy[:, 1] - _py)
+            for _i in np.flatnonzero(_r <= 2.3e3):
+                trace_cells.append((f"({_px / 1e3:.0f},{_py / 1e3:.0f})+{_r[_i] / 1e3:.1f}km", int(_i)))
+        PETSc.Sys.Print(f"  Substep trace: {global_count(np.ones(len(trace_cells), bool), mesh.comm)} cells near {_trace}")
     fssa_theta_val = ctx["fssa_theta"]
     fssa_tau = ctx["fssa_tau"]
     if fssa_theta_val > 0:

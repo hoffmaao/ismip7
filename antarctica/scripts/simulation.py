@@ -120,6 +120,7 @@ from icepack2_tools.solverconfig import (
     solver_view_enabled,
     subcycles,
     substep_settings,
+    fssa_theta,
     transport_solver_parameters,
 )
 
@@ -690,6 +691,7 @@ def setup_model(restart_from=None, *, allow_timing_cache_a_ref=False,
     M_guess = None
     tau_guess = None
     a_ref_mb = None
+    u_ref_fssa_ckpt = None
     phys_div = None
     h_dg_state = None
     t_restart = None
@@ -802,6 +804,9 @@ def setup_model(restart_from=None, *, allow_timing_cache_a_ref=False,
             # correction, never recompute it from the evolved state.
             a_ref_mb = load_checkpoint_field(
                 chk, "a_ref_mb", Q_dg, optional=True
+            )
+            u_ref_fssa_ckpt = load_checkpoint_field(
+                chk, "u_ref_fssa", V, optional=True
             )
             # An adapted checkpoint carries the transferred PHYSICAL divergence
             # instead of a_ref (icepack2_tools.adapt_mesh); a_ref is rebuilt
@@ -1347,6 +1352,17 @@ def setup_model(restart_from=None, *, allow_timing_cache_a_ref=False,
     fields_reg = dict(fields)
     fields_reg["thickness"] = H_ref
 
+    # Free-surface stabilization (icepack2_tools.fssa, ISMIP7_FSSA_THETA):
+    # the term's step is a Constant the forward sets per substep and keeps at
+    # zero for every steady solve, so the MAP state is reproduced unchanged.
+    fssa_theta_val = fssa_theta()
+    fssa_tau = Constant(0.0)
+    u_ref_fssa = Function(V, name="u_ref_fssa")
+    u_ref_fssa_loaded = False
+    if restart_from is not None and u_ref_fssa_ckpt is not None:
+        u_ref_fssa.assign(u_ref_fssa_ckpt)
+        u_ref_fssa_loaded = True
+
     if use_residual:
         # Residual closure on the LIVE prognostic fields (h, s): the grounded
         # gate, effective pressure, and driving stress all track the evolving
@@ -1381,6 +1397,7 @@ def setup_model(restart_from=None, *, allow_timing_cache_a_ref=False,
                 ocean_drag=ocean_drag, h_ocean=h_ocean, u_lim=u_lim,
                 k_lim=k_lim, drag_mask=drag_mask,
                 calving_ids=calving_ids if use_calving_terminus else None,
+                fssa_tau=fssa_tau, u_ref=u_ref_fssa,
             )
 
         # The closure above is the single definition of this residual: the
@@ -1416,6 +1433,7 @@ def setup_model(restart_from=None, *, allow_timing_cache_a_ref=False,
                     h_ocean=h_ocean, drag_mask=drag_mask, u_lim=u_lim, k_lim=k_lim,
                     calving_ids=calving_ids if use_calving_terminus else None,
                     exact_front=bool(map_exact_front),
+                    fssa_tau=fssa_tau, u_ref=u_ref_fssa,
                 )
         else:
             subelement = None
@@ -1872,6 +1890,13 @@ def setup_model(restart_from=None, *, allow_timing_cache_a_ref=False,
         "smb_elevation_feedback": smb_feedback,
         # Frozen t=0 apparent-MB correction (restart only; else None).
         "a_ref_mb": a_ref_mb,
+        # Free-surface stabilization: its theta, the step Constant the forward
+        # sets, the reference velocity (the one a_ref was built from) and
+        # whether the checkpoint carried it.
+        "fssa_theta": fssa_theta_val,
+        "fssa_tau": fssa_tau,
+        "u_ref_fssa": u_ref_fssa,
+        "u_ref_fssa_set": u_ref_fssa_loaded,
         "phys_div": phys_div,
         # DG0 prognostic thickness state (restart only; else None).
         "h_dg_state": h_dg_state,
@@ -1964,6 +1989,8 @@ def save_model_state(ctx, final_path, t_now, extra_attrs=None):
             chk.save_function(ctx["A_prior"], name="fluidity_prior")
         if ctx.get("a_ref_mb") is not None:
             chk.save_function(ctx["a_ref_mb"], name="a_ref_mb")
+        if ctx.get("u_ref_fssa_set"):
+            chk.save_function(ctx["u_ref_fssa"], name="u_ref_fssa")
         if ctx.get("level_set") is not None:
             chk.save_function(ctx["level_set"].phi, name="levelset")
         if not ctx.get("geom_dg", False):
@@ -2420,6 +2447,9 @@ def run_simulation(
                 + un0p * h_dg * phi_dg * ds
             )
             a_ref.dat.data[:] = flux0.dat.data_ro / cell_area
+            # the velocity this reference cancels: the stabilization's own
+            ctx["u_ref_fssa"].assign(u0)
+            ctx["u_ref_fssa_set"] = True
             if ctx.get("phys_div") is not None:
                 # Remesh: cancel this mesh's discrete divergence net of the
                 # physical divergence the run carried over (adapt_mesh.py).
@@ -3183,6 +3213,18 @@ def run_simulation(
     # Newton track the branch through the event). Checkpoints improve too:
     # saved (h, u) are now mutually consistent.
     SUBCYCLES = subcycles()
+    fssa_theta_val = ctx["fssa_theta"]
+    fssa_tau = ctx["fssa_tau"]
+    if fssa_theta_val > 0:
+        if not ctx["u_ref_fssa_set"]:
+            # no balanced reference to anchor on: the state at the start of
+            # this run is the reference, and the term vanishes there
+            ctx["u_ref_fssa"].assign(z.subfunctions[0])
+            ctx["u_ref_fssa_set"] = True
+            PETSc.Sys.Print("  Free-surface stabilization: reference velocity = the starting state")
+        PETSc.Sys.Print(
+            f"  Free-surface stabilization: theta {fssa_theta_val:g} on the"
+            " lagged thickness-velocity coupling (ISMIP7_FSSA_THETA)")
     # Adaptive substepping replaces the fixed retry list when it is on: the
     # count follows the thickness error estimate instead of waiting for a
     # failed solve, because the lagged-velocity instability grows through
@@ -3315,6 +3357,9 @@ def run_simulation(
                             f"{err:.3g} m{at} not reduced by refining "
                             f"(rejected at {adapt.last_reject:.3g} m), accepting"
                         )
+                if fssa_theta_val > 0:
+                    # the velocity solved now advances the next substep
+                    fssa_tau.assign(fssa_theta_val * dt / m)
                 if not _solve_with_rescue(k):
                     ok = False
                     break

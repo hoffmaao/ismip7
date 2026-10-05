@@ -285,6 +285,8 @@ def build_rc_residual(
     k_lim=1e-3,
     gl_width=GL_WIDTH,
     calving_ids=None,
+    fssa_tau=None,
+    u_ref=None,
 ):
     r"""Assemble the icepack2 dual regularized-Coulomb residual ``F`` for the
     mixed state ``z = (u, M, tau)`` on ``Z = V x Sigma x T``.
@@ -498,6 +500,9 @@ def build_rc_residual(
     nu = FacetNormal(mesh)
     F += (-H_visc * inner(M, sym(grad(v))) + inner(tau - rho_I * g * H * grad(s), v)) * dx
     F += rho_I * g * avg(H) * inner(jump(s, nu), avg(v)) * dS
+    if fssa_tau is not None and u_ref is not None:
+        from icepack2_tools.fssa import fssa_term
+        F += fssa_term(z, u_ref, fssa_tau, H, b, gl_width=gl_width)
     if calving_ids:
         F += model.variational.calving_terminus(
             velocity=u, thickness=H, surface=s, outflow_ids=tuple(calving_ids)

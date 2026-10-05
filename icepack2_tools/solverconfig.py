@@ -140,6 +140,8 @@ SUBSTEP_INIT_DEFAULT = "1"
 SUBSTEP_MAX_DEFAULT = "64"
 SUBSTEP_QUIET_DEFAULT = "20"
 SUBSTEP_HMIN_DEFAULT = "10"
+# Free-surface stabilization (icepack2_tools.fssa): theta, 0 = off.
+FSSA_THETA_DEFAULT = "0"
 RESCUE_ENABLED_DEFAULT = "1"
 
 
@@ -462,6 +464,17 @@ def substep_settings():
     }
 
 
+def fssa_theta():
+    r"""``ISMIP7_FSSA_THETA``: weight of the free-surface stabilization of
+    the forward's lagged thickness-velocity coupling (icepack2_tools.fssa);
+    0 (the default) leaves the momentum balance as it was, 1 makes the lagged
+    step stable at any size."""
+    value = float(_env("ISMIP7_FSSA_THETA", FSSA_THETA_DEFAULT))
+    if value < 0:
+        raise ValueError("ISMIP7_FSSA_THETA must be nonnegative")
+    return value
+
+
 def snes_atol_scale():
     return float(_env("ISMIP7_SNES_ATOL_SCALE", SNES_ATOL_SCALE_DEFAULT))
 
@@ -581,6 +594,7 @@ def effective_solver_env():
         "ISMIP7_SUBSTEP_MAX": SUBSTEP_MAX_DEFAULT,
         "ISMIP7_SUBSTEP_QUIET": SUBSTEP_QUIET_DEFAULT,
         "ISMIP7_SUBSTEP_HMIN": SUBSTEP_HMIN_DEFAULT,
+        "ISMIP7_FSSA_THETA": FSSA_THETA_DEFAULT,
     }
 
 
@@ -607,6 +621,7 @@ def solver_provenance(mode=None):
         "rescue_enabled": rescue_enabled(),
         "subcycles": list(subcycles()),
         "substep_adapt": substep_settings(),
+        "fssa_theta": fssa_theta(),
         "snes_atol_policy": {
             "initial": float(_env("ISMIP7_SNES_ATOL", SNES_ATOL_DEFAULT)),
             "post_convergence_scale": snes_atol_scale(),

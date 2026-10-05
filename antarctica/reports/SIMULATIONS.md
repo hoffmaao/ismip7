@@ -9,9 +9,9 @@ gitignored, so these records and the per-core reports beside them are
 the trace a run leaves in the repository. A core experiment also gets
 its full report from `core_report.py`; this is the index.
 
-270 records.
+273 records.
 
-Status: 12 planned, 7 running, 22 stopped, 212 done, 17 superseded.
+Status: 12 planned, 7 running, 22 stopped, 215 done, 17 superseded.
 
 ## Inversion
 
@@ -139,6 +139,9 @@ Status: 12 planned, 7 running, 22 stopped, 212 done, 17 superseded.
 | 1 km inversion, production configuration with one solve an evaluation, scpc_gamg (NLEQ-ERR, Krylov rtol 1e-8) on 32 ranks | done | antarctica_10000_1000_buffered20000 (Rice's .msh on Quartz; 1,869,252 vertices, 3,716,587 cells), DG0 geometry, vertex raster sampling | IU Quartz, general partition | 2026-10-01 | 2026-10-02 | every iterate within 2.1e-9 of test-1km-inversion-prod-full-mumps-ec0, final 6.209233e4; no forward failed; every recorded solve confirmed with no step; the same cost per iteration as full_mumps |
 | 1 km inversion, production configuration with five-solve evaluations, scpc_gamg on 32 ranks | stopped | antarctica_10000_1000_buffered20000 (Rice's .msh on Quartz; 1,869,252 vertices, 3,716,587 cells), DG0 geometry, vertex raster sampling | IU Quartz, general partition | 2026-10-01 | 2026-10-02 | no evaluation finished; the n = 1 restart steps under GAMG at 1 km dominate, as on 64 ranks |
 | 1 km inversion, production configuration with five-solve evaluations, scpc_gamg on 64 ranks | stopped | antarctica_10000_1000_buffered20000 (Rice's .msh on Quartz; 1,869,252 vertices, 3,716,587 cells), DG0 geometry, vertex raster sampling | IU Quartz, general partition | 2026-10-01 | 2026-10-02 | first objective 8.110449e4 (2.4e-5 off the 32-rank full_mumps run: the ramp's state follows the partition); no forward failed; 2.7 times slower per iteration than full_mumps on 32 ranks, with twice the ranks |
+| Unforced one-year forward on the 1 km production mesh from RC's 2 km vertex-gate stage-2 MAP, apparent mass balance off, membrane floor 10 m | done | antarctica_10000_1000_buffered20000 (1,869,088 vertices), DG0 geometry, BedMachine cell averages on this mesh, the lake fix (from the MAP) | IU Quartz, general partition | 2026-10-05 | 2026-10-05 | start-up ramp (8 continuation steps, scpc_gamg): 117 Newton and 12,396 Krylov iterations, 662 s. 40 steps with every solve converged and no rescue: 164 Newton iterations (at most 9 a step), 42 Krylov iterations a condensed solve, 18.2 s a solve; resid 0.00 every step; calving 425 Gt/yr over 2015; VAF 56,774.07 mm SLE at 2016 from 56,778.64. Against 10 m: 2.5 m costs 1.14x a solve (1.29x the Krylov iterations) and 5 m 1.10x, where the 2 km mesh on 32 ranks gave 1.4 to 1.9x and 1.0 to 1.3x |
+| Unforced one-year forward on the 1 km production mesh from RC's 2 km vertex-gate stage-2 MAP, apparent mass balance off, membrane floor 2.5 m | done | antarctica_10000_1000_buffered20000 (1,869,088 vertices), DG0 geometry, BedMachine cell averages on this mesh, the lake fix (from the MAP) | IU Quartz, general partition | 2026-10-05 | 2026-10-05 | start-up ramp (8 continuation steps, scpc_gamg): 119 Newton and 18,318 Krylov iterations, 1,006 s. 40 steps with every solve converged and no rescue: 141 Newton iterations (at most 11 a step), 54 Krylov iterations a condensed solve, 20.8 s a solve; resid 0.00 every step; calving 523 Gt/yr over 2015; VAF 56,773.97 mm SLE at 2016 from 56,778.64. Against 10 m: 2.5 m costs 1.14x a solve (1.29x the Krylov iterations) and 5 m 1.10x, where the 2 km mesh on 32 ranks gave 1.4 to 1.9x and 1.0 to 1.3x |
+| Unforced one-year forward on the 1 km production mesh from RC's 2 km vertex-gate stage-2 MAP, apparent mass balance off, membrane floor 5 m | done | antarctica_10000_1000_buffered20000 (1,869,088 vertices), DG0 geometry, BedMachine cell averages on this mesh, the lake fix (from the MAP) | IU Quartz, general partition | 2026-10-05 | 2026-10-05 | start-up ramp (8 continuation steps, scpc_gamg): 116 Newton and 15,040 Krylov iterations, 885 s. 40 steps with every solve converged and no rescue: 146 Newton iterations (at most 10 a step), 46 Krylov iterations a condensed solve, 20.0 s a solve; resid 0.00 every step; calving 484 Gt/yr over 2015; VAF 56,774.00 mm SLE at 2016 from 56,778.64. Against 10 m: 2.5 m costs 1.14x a solve (1.29x the Krylov iterations) and 5 m 1.10x, where the 2 km mesh on 32 ranks gave 1.4 to 1.9x and 1.0 to 1.3x |
 | 1 km control from the transferred regularized-Coulomb snapshot | stopped | antarctica_10000_1000_buffered20000, 1 km fine, 10 km interior, 20 km buffer | nots, commons partition | 2026-09-22 | - | year one budget closed; diverged within four of its own steps, same signature as the Budd run |
 | 2.5 km legacy pinned front from the v4 timing cache, the twin of the level-set run (issue #115) | done | antarctica_25000_2500_buffered20000, 2.5 km fine, 25 km interior, 20 km buffer, DG0 geometry | IU Quartz, debug partition | 2026-09-25 | 2026-09-25 | 80 of 80 steps solved directly (5.0 Newton iterations on average, 9 at most), resid at most 1.1e-7 Gt; calving 12.38 to 12.50 Gt/yr after a one-step 8.9 Gt removal of the sub-1 m ice beyond the t=0 front; mass -2 Gt and VAF +0.004 mm SLE over the decade |
 | 2.5 km level-set pinned front (ISMIP7_CALVING=fixed) from the v4 timing cache, option 2 of issue #115 | done | antarctica_25000_2500_buffered20000, 2.5 km fine, 25 km interior, 20 km buffer, DG0 geometry | IU Quartz, debug partition | 2026-09-25 | 2026-09-25 | 80 of 80 steps solved directly (8.8 Newton iterations on average, 16 at most), resid at most 1.2e-7 Gt; calving 2,370 Gt/yr at step 2, 3,534 over 2016 and 2,839 over 2024 against the legacy twin's 12.4; mass -30,908 Gt and VAF -18.8 mm SLE over the decade |
@@ -3307,6 +3310,69 @@ Core 11 at 32 km without the apparent-MB reference, a cold start on the OCX prot
 - **Results path:** Quartz /N/scratch/dlilien/ismip7_issue156_runs/maps/prod1km_gamg_p64.h5 (scratch, purged after 30 days); timing record and log copied to /Volumes/LaCie/Data/antarctica_general/ismip7_runs/inversion_solver_quartz
 - **Audit:** first objective 8.110449e4 (2.4e-5 off the 32-rank full_mumps run: the ramp's state follows the partition); no forward failed; 2.7 times slower per iteration than full_mumps on 32 ranks, with twice the ranks
 - **Notes:** issue #156 production-configuration cost probe; no MAP is kept (strict handoff off, the legacy prior name overridden by the warm start's prior)
+
+### test-1km-rc-forward-floor10-drift
+
+Unforced one-year forward on the 1 km production mesh from RC's 2 km vertex-gate stage-2 MAP, apparent mass balance off, membrane floor 10 m (done), IU.
+
+- **Task type:** test
+- **Period (yr):** 2015-2016
+- **Friction law:** regularized_coulomb
+- **Mesh:** antarctica_10000_1000_buffered20000 (1,869,088 vertices), DG0 geometry, BedMachine cell averages on this mesh, the lake fix (from the MAP)
+- **Initial state / MAP:** test-2km-rc-b20k-vgate-floor1's MAP (rc_s2x_vgf1.h5) transferred onto this mesh as a cold start (ISMIP7_TRANSFER_FILL=extend), vertex gate from the MAP
+- **Forcing versions:** none: run_timing.py passes no forcing callback; ISMIP7_APPARENT_MB=0 ISMIP7_FIXED_FRONT=1 ISMIP7_DT=0.025 scpc_gamg, rescue on; ISMIP7_RC_HVISC_FLOOR=10
+- **Site / partition:** IU Quartz, general partition
+- **Ranks / memory:** 64 ranks, 300G, 6 h
+- **Job ids:** 11142805
+- **Code:** 94d0398; Quartz worktree /N/scratch/dlilien/ismip7_reinvert_s5
+- **Started:** 2026-10-05
+- **Finished:** 2026-10-05
+- **Cost per model year:** 26 min, 40 steps
+- **Results path:** Quartz /N/scratch/dlilien/ismip7_reinvert_jobs/fwd (timing record, status) and the worktree's antarctica/results/fwd2km_rc_vgf1_floor10_amb0_1km_1000_*
+- **Audit:** start-up ramp (8 continuation steps, scpc_gamg): 117 Newton and 12,396 Krylov iterations, 662 s. 40 steps with every solve converged and no rescue: 164 Newton iterations (at most 9 a step), 42 Krylov iterations a condensed solve, 18.2 s a solve; resid 0.00 every step; calving 425 Gt/yr over 2015; VAF 56,774.07 mm SLE at 2016 from 56,778.64. Against 10 m: 2.5 m costs 1.14x a solve (1.29x the Krylov iterations) and 5 m 1.10x, where the 2 km mesh on 32 ranks gave 1.4 to 1.9x and 1.0 to 1.3x
+- **Notes:** issue #153: whether the floor's forward cost on the 2 km mesh (test-2km-rc-b20k-forward-floor*-drift) carries to the 1 km production mesh before the floor is chosen; 1 m left out for its 4.8 h start at 2 km
+
+### test-1km-rc-forward-floor2p5-drift
+
+Unforced one-year forward on the 1 km production mesh from RC's 2 km vertex-gate stage-2 MAP, apparent mass balance off, membrane floor 2.5 m (done), IU.
+
+- **Task type:** test
+- **Period (yr):** 2015-2016
+- **Friction law:** regularized_coulomb
+- **Mesh:** antarctica_10000_1000_buffered20000 (1,869,088 vertices), DG0 geometry, BedMachine cell averages on this mesh, the lake fix (from the MAP)
+- **Initial state / MAP:** test-2km-rc-b20k-vgate-floor1's MAP (rc_s2x_vgf1.h5) transferred onto this mesh as a cold start (ISMIP7_TRANSFER_FILL=extend), vertex gate from the MAP
+- **Forcing versions:** none: run_timing.py passes no forcing callback; ISMIP7_APPARENT_MB=0 ISMIP7_FIXED_FRONT=1 ISMIP7_DT=0.025 scpc_gamg, rescue on; ISMIP7_RC_HVISC_FLOOR=2.5
+- **Site / partition:** IU Quartz, general partition
+- **Ranks / memory:** 64 ranks, 300G, 6 h
+- **Job ids:** 11142801
+- **Code:** 94d0398; Quartz worktree /N/scratch/dlilien/ismip7_reinvert_s5
+- **Started:** 2026-10-05
+- **Finished:** 2026-10-05
+- **Cost per model year:** 33 min, 40 steps
+- **Results path:** Quartz /N/scratch/dlilien/ismip7_reinvert_jobs/fwd (timing record, status) and the worktree's antarctica/results/fwd2km_rc_vgf1_floor2.5_amb0_1km_1000_*
+- **Audit:** start-up ramp (8 continuation steps, scpc_gamg): 119 Newton and 18,318 Krylov iterations, 1,006 s. 40 steps with every solve converged and no rescue: 141 Newton iterations (at most 11 a step), 54 Krylov iterations a condensed solve, 20.8 s a solve; resid 0.00 every step; calving 523 Gt/yr over 2015; VAF 56,773.97 mm SLE at 2016 from 56,778.64. Against 10 m: 2.5 m costs 1.14x a solve (1.29x the Krylov iterations) and 5 m 1.10x, where the 2 km mesh on 32 ranks gave 1.4 to 1.9x and 1.0 to 1.3x
+- **Notes:** issue #153: whether the floor's forward cost on the 2 km mesh (test-2km-rc-b20k-forward-floor*-drift) carries to the 1 km production mesh before the floor is chosen; 1 m left out for its 4.8 h start at 2 km
+
+### test-1km-rc-forward-floor5-drift
+
+Unforced one-year forward on the 1 km production mesh from RC's 2 km vertex-gate stage-2 MAP, apparent mass balance off, membrane floor 5 m (done), IU.
+
+- **Task type:** test
+- **Period (yr):** 2015-2016
+- **Friction law:** regularized_coulomb
+- **Mesh:** antarctica_10000_1000_buffered20000 (1,869,088 vertices), DG0 geometry, BedMachine cell averages on this mesh, the lake fix (from the MAP)
+- **Initial state / MAP:** test-2km-rc-b20k-vgate-floor1's MAP (rc_s2x_vgf1.h5) transferred onto this mesh as a cold start (ISMIP7_TRANSFER_FILL=extend), vertex gate from the MAP
+- **Forcing versions:** none: run_timing.py passes no forcing callback; ISMIP7_APPARENT_MB=0 ISMIP7_FIXED_FRONT=1 ISMIP7_DT=0.025 scpc_gamg, rescue on; ISMIP7_RC_HVISC_FLOOR=5
+- **Site / partition:** IU Quartz, general partition
+- **Ranks / memory:** 64 ranks, 300G, 6 h
+- **Job ids:** 11142802
+- **Code:** 94d0398; Quartz worktree /N/scratch/dlilien/ismip7_reinvert_s5
+- **Started:** 2026-10-05
+- **Finished:** 2026-10-05
+- **Cost per model year:** 31 min, 40 steps
+- **Results path:** Quartz /N/scratch/dlilien/ismip7_reinvert_jobs/fwd (timing record, status) and the worktree's antarctica/results/fwd2km_rc_vgf1_floor5_amb0_1km_1000_*
+- **Audit:** start-up ramp (8 continuation steps, scpc_gamg): 116 Newton and 15,040 Krylov iterations, 885 s. 40 steps with every solve converged and no rescue: 146 Newton iterations (at most 10 a step), 46 Krylov iterations a condensed solve, 20.0 s a solve; resid 0.00 every step; calving 484 Gt/yr over 2015; VAF 56,774.00 mm SLE at 2016 from 56,778.64. Against 10 m: 2.5 m costs 1.14x a solve (1.29x the Krylov iterations) and 5 m 1.10x, where the 2 km mesh on 32 ranks gave 1.4 to 1.9x and 1.0 to 1.3x
+- **Notes:** issue #153: whether the floor's forward cost on the 2 km mesh (test-2km-rc-b20k-forward-floor*-drift) carries to the 1 km production mesh before the floor is chosen; 1 m left out for its 4.8 h start at 2 km
 
 ### test-1km-rc-transfer
 

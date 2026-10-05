@@ -64,6 +64,27 @@ with it the stability above, is the same for every ``u_ref``.
 ``auto``
     ``start`` when the run carries an apparent mass balance, ``step`` when
     it does not.
+
+Measured at 32 km without an apparent mass balance and without forcing, ten
+years from the MAP's mixed state, against the unstabilized forward at dt
+0.0125 (records ``test-32km-fssa-*``):
+
+    ============  =====================  ======================  ========
+    dt (yr)       thickness RMS (m)      worst cell (m)          mass (Gt)
+    ============  =====================  ======================  ========
+    start 0.05    0.47                   177                     -55
+    step 0.05     0.06                   4.5                     +16
+    start 0.1     0.91                   288                     -110
+    step 0.1      0.11                   8.1                     +26
+    start 0.2     1.84                   393                     -211
+    step 0.2      0.20                   14.6                    +43
+    ============  =====================  ======================  ========
+
+The worst ``start`` cell is on the Antarctic Peninsula, at 788 m against the
+reference's 395 m after ten years at dt 0.2; ``step`` leaves it at 399 m.
+The unstabilized forward, stable at this resolution, misses by 0.07 and
+0.15 m RMS at dt 0.1 and 0.2. With the apparent mass balance, ``auto``
+reproduces ``start`` to the run-to-run noise of the same code (9e-13 m).
 """
 from firedrake import Constant, TestFunction, div, dx, split
 

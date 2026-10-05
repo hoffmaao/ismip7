@@ -25,6 +25,8 @@ removes the null space, at a physical variance (gamma ~ 1e4 -> prior std
 the DEVIATION, not the amplitude.
 """
 
+import functools
+
 L_REG = 7500.0  # correlation length (m); the one definition used everywhere
 
 
@@ -144,3 +146,160 @@ def bilaplacian_energy_form(aux):
     field."""
     from firedrake import dx, inner
     return 0.5 * inner(aux, aux) * dx
+
+
+# MUMPS Cholesky, the options the inversion's prior-metric solvers use. M is
+# symmetric positive definite on any mesh.
+MASS_CHOLESKY = {"ksp_type": "preonly", "pc_type": "cholesky",
+                 "pc_factor_mat_solver_type": "mumps"}
+
+
+def _update(vec, other, method):
+    if method == "assign":
+        other.copy(vec)
+    elif method == "add":
+        vec.axpy(1.0, other)
+    elif method == "sub":
+        vec.axpy(-1.0, other)
+    else:
+        raise ValueError(f"unknown method {method!r}")
+
+
+class BilaplacianAuxSolver:
+    r"""``f = M^-1 A theta`` for the bi-Laplacian energy, with ``M`` factored
+    on the first call and every later call a back-substitution.
+
+    ``M`` and the stiffness ``K`` depend on the mesh alone, so one factor and
+    one pair of matrices serve both controls (``A = delta*M + gamma*K``) and
+    every evaluation. Each call is a tlm_adjoint ``LinearEquation``: recorded
+    while a manager annotates (the TAO path's objective, whose adjoint
+    back-substitutes with the same factor, ``M`` being symmetric), an ordinary
+    solve when none does.
+
+    Solving :func:`bilaplacian_aux_residual` instead takes Firedrake's default
+    Newton solve, a fresh MUMPS LU of ``M`` at every call (and a second one in
+    the adjoint), whose analysis MUMPS runs on one rank by default
+    (ICNTL(28)=1). Its cost grows with the vertex count and not with the rank
+    count. For both controls at 1.2 million vertices that was 8.5 to 9.4 s an
+    evaluation on 1 to 8 ranks of a workstation, against 0.12 to 0.23 s for
+    the back-substitution after a 4.2 s factorisation
+    (antarctica/scripts/probe_eval_overhead.py; antarctica/README.md,
+    "Inversion solver"). tlm_adjoint's own caches cannot hold the factor:
+    they are cleared before every evaluation, by the driver's forward and by
+    TAOSolver's ReducedFunctional.
+
+    The answer is the residual solve's to rounding: the same ``M`` and ``A``
+    at the same quadrature, and an exact factorisation. tlm_adjoint must be
+    imported before the mesh is built, as for any tlm_adjoint equation.
+    """
+
+    def __init__(self, space, *, form_compiler_parameters=None):
+        self._space = space
+        self._fcp = dict(form_compiler_parameters or {})
+        self._mats = None
+
+    def _setup(self):
+        from firedrake import (LinearSolver, TestFunction, TrialFunction,
+                               assemble, dx, grad, inner)
+        if self._mats is None:
+            u, v = TrialFunction(self._space), TestFunction(self._space)
+            M = assemble(inner(u, v) * dx, form_compiler_parameters=self._fcp)
+            K = assemble(inner(grad(u), grad(v)) * dx,
+                         form_compiler_parameters=self._fcp)
+            self._mats = (M.petscmat, K.petscmat,
+                          LinearSolver(M, solver_parameters=MASS_CHOLESKY))
+        return self._mats
+
+    def __call__(self, theta, aux, delta, gamma):
+        r"""Solve ``M aux = A theta`` into ``aux``; returns ``aux``."""
+        from tlm_adjoint.firedrake import LinearEquation
+        M, K, solver = self._setup()
+        LinearEquation(
+            aux, _PriorActionRHS(theta, M, K, float(delta), float(gamma)),
+            A=_FactoredMass(self._space, M, solver),
+        ).solve()
+        return aux
+
+
+@functools.lru_cache(maxsize=None)
+def _matrix_classes():
+    # Firedrake and tlm_adjoint are imported lazily everywhere in this
+    # module, so a caller that needs only bilaplacian_coeffs runs without
+    # them.
+    from firedrake import Function
+    from tlm_adjoint.firedrake import Matrix, RHS
+
+    class FactoredMass(Matrix):
+        r"""``M``, solved by back-substitution with a factor held outside
+        tlm_adjoint's caches. Symmetric, so the adjoint solve is the forward
+        one."""
+
+        def __init__(self, space, M, solver):
+            super().__init__(nl_deps=[], ic=False, adj_ic=False)
+            self._space, self._M, self._solver = space, M, solver
+
+        def forward_action(self, nl_deps, x, b, *, method="assign"):
+            with x.dat.vec_ro as xv, b.dat.vec as bv:
+                y = bv.duplicate()
+                self._M.mult(xv, y)
+                _update(bv, y, method)
+
+        def adjoint_action(self, nl_deps, adj_x, b, b_index=0, *, method="assign"):
+            if b_index != 0:
+                raise ValueError("unexpected b_index")
+            self.forward_action(nl_deps, adj_x, b, method=method)
+
+        def forward_solve(self, x, nl_deps, b):
+            self._solver.solve(x, b)
+
+        def adjoint_solve(self, adj_x, nl_deps, b):
+            if adj_x is None:
+                adj_x = Function(self._space)
+            self._solver.solve(adj_x, b)
+            return adj_x
+
+        def tangent_linear_rhs(self, tlm_map, x):
+            return None
+
+    class PriorActionRHS(RHS):
+        r"""``A theta = delta*M theta + gamma*K theta``, linear in ``theta``."""
+
+        def __init__(self, theta, M, K, delta, gamma):
+            super().__init__([theta], nl_deps=[])
+            self._M, self._K, self._dg = M, K, (delta, gamma)
+
+        def _act(self, x, b, method):
+            with x.dat.vec_ro as xv, b.dat.vec as bv:
+                y = bv.duplicate()
+                t = bv.duplicate()
+                self._M.mult(xv, y)
+                self._K.mult(xv, t)
+                y.scale(self._dg[0])
+                y.axpy(self._dg[1], t)
+                _update(bv, y, method)
+
+        def add_forward(self, b, deps):
+            (theta,) = deps
+            self._act(theta, b, "add")
+
+        def subtract_adjoint_derivative_action(self, nl_deps, dep_index, adj_x, b):
+            if dep_index != 0:
+                raise ValueError("unexpected dep_index")
+            # A is symmetric: A^* adj_x = A adj_x
+            self._act(adj_x, b, "sub")
+
+        def tangent_linear_rhs(self, tlm_map):
+            tau = tlm_map[self.dependencies()[0]]
+            if tau is None:
+                return None
+            return PriorActionRHS(tau, self._M, self._K, *self._dg)
+
+    return FactoredMass, PriorActionRHS
+
+
+def _FactoredMass(space, M, solver):
+    return _matrix_classes()[0](space, M, solver)
+
+
+def _PriorActionRHS(theta, M, K, delta, gamma):
+    return _matrix_classes()[1](theta, M, K, delta, gamma)

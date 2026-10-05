@@ -39,6 +39,7 @@ from firedrake import Function, FunctionSpace, SpatialCoordinate, dot
 from mpi4py import MPI
 
 from .mpi_stats import global_count, global_size
+from .naming import parse_mesh_basename
 
 def meshes_match(mesh_a, mesh_b, comm=None):
     r"""Whether two meshes are the same mesh: the same global cell and vertex
@@ -121,6 +122,75 @@ def _source_range(source, comm):
     lo = np.array([comm.allreduce(float(v), op=MPI.MIN) for v in lo])
     hi = np.array([comm.allreduce(float(v), op=MPI.MAX) for v in hi])
     return lo, hi
+
+
+def load_checkpoint_mesh(path):
+    r"""The mesh inside the checkpoint ``path`` and the .msh basename that
+    checkpoint recorded, followed by its ``lc``, ``lc_coarse`` and
+    ``buffer_m`` parameters.
+
+    The inversion solves on it under ``ISMIP7_MESH=checkpoint``
+    (``runconfig.inversion_mesh_source``). The recorded basename picks the
+    mesh's boundary-id sidecar and is stamped into the new MAP, so a file that
+    records none is refused: its sidecar could not be named. Recorded
+    parameters retain their exact values. A standard basename supplies absent
+    parameters, and values available from both sources must agree."""
+    from firedrake import CheckpointFile
+    with CheckpointFile(path, "r") as chk:
+        mesh = chk.load_mesh()
+        basename = (str(chk.get_attr("/", "mesh_basename"))
+                    if chk.has_attr("/", "mesh_basename") else "")
+        parameters = {}
+        for name, convert in (("lc", int), ("lc_coarse", int),
+                              ("buffer_m", float)):
+            if chk.has_attr("/", name):
+                value = chk.get_attr("/", name)
+                try:
+                    parameters[name] = convert(value)
+                except (TypeError, ValueError) as exc:
+                    raise ValueError(
+                        f"{path} records invalid mesh parameter "
+                        f"{name}={value!r}"
+                    ) from exc
+    if not basename:
+        raise ValueError(
+            f"{path} records no mesh_basename, so the boundary-id sidecar of "
+            f"its mesh cannot be named. Name the .msh in ISMIP7_MESH instead.")
+
+    try:
+        named_lc_coarse, named_lc, named_buffer_m = parse_mesh_basename(basename)
+    except ValueError:
+        named = {}
+    else:
+        named = {
+            "lc": named_lc,
+            "lc_coarse": named_lc_coarse,
+            "buffer_m": named_buffer_m,
+        }
+    for name, named_value in named.items():
+        if named_value is None:
+            continue
+        if name in parameters:
+            recorded_value = parameters[name]
+            if int(recorded_value) != int(named_value):
+                raise ValueError(
+                    f"{path} has contradictory mesh identity: {name}="
+                    f"{recorded_value!r}, while mesh_basename {basename!r} "
+                    f"records {named_value!r}"
+                )
+        else:
+            parameters[name] = named_value
+    missing = [
+        name for name in ("lc", "lc_coarse", "buffer_m")
+        if name not in parameters
+    ]
+    if missing:
+        raise ValueError(
+            f"{path} lacks mesh parameters {', '.join(missing)}; "
+            f"mesh_basename {basename!r} does not supply them"
+        )
+    return (mesh, basename, parameters["lc"], parameters["lc_coarse"],
+            parameters["buffer_m"])
 
 
 def interpolate_with_fill(target, source, fill, comm=None):

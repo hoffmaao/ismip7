@@ -355,9 +355,10 @@ def inversion_cores(lc):
     return 32 if int(lc) < 2500 else 16
 
 
-# The per-mesh invert factors the complete mixed (u, M, tau) Jacobian with
-# MUMPS and holds the tlm_adjoint tape, so its footprint is not the scpc_mumps
-# transient's (MEMORY_BY_LC). Measured on Quartz: 2500/25000 on 16 ranks peaks
+# The request is sized for the per-mesh invert's full_mumps solve and its
+# tlm_adjoint tape, which leaves room under scpc_gamg (the default since
+# 3 October, about half the memory), so its footprint differs from the
+# scpc_mumps transient's (MEMORY_BY_LC). Measured on Quartz: 2500/25000 on 16 ranks peaks
 # near 2 GB/rank; both 500 m meshes exceeded 13 GB/rank on 32 ranks and were
 # OOM-killed at 240G before their first evaluation, so 500 m is not inverted.
 INVERSION_MEMORY_BY_LC = {

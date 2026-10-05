@@ -121,10 +121,11 @@ export ISMIP7_INVERSION="${ISMIP7_INVERSION:-$ISMIP7_MAP_DEFAULT}"
 # GAMG on the condensed velocity system. On the production mesh it takes the
 # Newton path scpc_mumps takes (129 iterations over the matrix's ten steps on
 # 64 ranks, outflux equal to 9e-13) in 43 % of the time. Named here and
-# nowhere more general: site_env.sh and solverconfig's own default are read by
-# the inversion too, whose linear solve is the full mixed-Jacobian MUMPS by
-# construction and which stamps the solver it finds in the environment on its
-# MAP. ISMIP7_DIAGNOSTIC_LINEAR_SOLVER=full_mumps restores the reference.
+# nowhere more general: this variable also selects the inversion's startup
+# ramp and lane stamp. ISMIP7_INVERSION_LINEAR_SOLVER separately selects the
+# taped forwards, adjoints and publishing solve, with scpc_gamg as its
+# default. ISMIP7_DIAGNOSTIC_LINEAR_SOLVER=full_mumps restores the forward
+# reference.
 export ISMIP7_DIAGNOSTIC_LINEAR_SOLVER="${ISMIP7_DIAGNOSTIC_LINEAR_SOLVER:-scpc_gamg}"
 # The production step (issue 20), equal to runconfig.DT_DEFAULT, which the
 # drivers fall back to; a test holds the two equal. The matrix's rule

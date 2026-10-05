@@ -1,0 +1,20 @@
+{
+  "id": "test-32km-inversion-scpc-destroy-tao-before",
+  "task": "test",
+  "institution": "IU",
+  "title": "32 km inversion, 10 TAO iterations under scpc_gamg on 8 ranks, SEP2 sub-element friction and five solves an evaluation, before ISMIP7SCPC.destroy: RSS a rank an iteration from the timing record",
+  "status": "done",
+  "friction": "budd",
+  "mesh": "antarctica_320000_32000_buffered0 (Quartz's .msh, sha256 fd66fc42; 6,282 vertices, 9,055 cells), DG0 geometry, vertex raster sampling",
+  "initial_state": "cold start: u = 0.1 u_obs, theta = phi = 0, the n,m 1 to 3 ramp under full_mumps, then ISMIP7_EVAL_CONTINUATION=1 (five annotated solves an evaluation)",
+  "forcing": "MEaSUREs v2 450 m (sha256 268be94e) and BedMachine v4.1 (sha256 6bd08dbb); ISMIP7_FLUIDITY_PRIOR=legacy; bi-Laplacian prior; no dH/dt term",
+  "site": "IU workstation (Mac, 16 cores, 128 GB), data under /Volumes/LaCie/Data/antarctica_general/ismip7_obs; no other session's simulation in its 10 s CPU log (foreign_cpu.txt: Time Machine, WindowServer, Defender and the desktop apps, each at most about one core); this session's serial unit suite took one core for part of it",
+  "resources": "8 ranks; RSS a rank (mean over ranks) 1040.2 MiB after the first iteration, 1067.8 after the 11th record: 6.9 MiB at the second record, then 2.31 MiB an iteration; peak 1954 MiB",
+  "code": "508a9be (the solver cache of 9bc7682 plus the rss_mib field); icepack_tools e7b923e",
+  "started": "2026-10-02",
+  "finished": "2026-10-02",
+  "cost": "811 s wall, 10 iterations (12 evaluations): 63.2 s an iteration (median after the first)",
+  "results": "/Volumes/LaCie/Data/antarctica_general/ismip7_runs/inversion_scpc_destroy_32km/T_before/ (map.h5 sha256 3266b561, log.txt, timing.json, foreign_cpu.txt)",
+  "audit": "objective 2.507499e4 after 10 iterations; published residual 279.6 after a 0-iteration final solve; no forward failed",
+  "notes": "ISMIP7_SUBELEMENT_FRICTION=1 (exact front push on) ISMIP7_GRAD_PRECOND=mass_consistent ISMIP7_PRIOR_FORM=bilaplacian, the configuration of test-32km-inversion-reuse-tao-after-rerun; the TAO path writes rss_mib once an accepted iteration, after that iteration's last adjoint; run with code archived from the commit (git archive), no wrapper"
+}

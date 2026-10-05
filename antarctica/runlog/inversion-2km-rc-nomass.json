@@ -1,0 +1,25 @@
+{
+  "id": "inversion-2km-rc-nomass",
+  "task": "inversion",
+  "institution": "IU",
+  "title": "2 km regularized-Coulomb re-inversion without the prior mean, on Rice's mesh (stage 1)",
+  "status": "stopped",
+  "friction": "regularized_coulomb",
+  "period": "2015 state",
+  "mesh": "antarctica_5000_2000_buffered0 (Rice's build, 925,183 vertices, 1,835,718 cells, read from the warm start), DG0 geometry, vertex raster sampling",
+  "initial_state": "inversion_icepack2_rc_n3_dg0_logvelnet_2000_int5000_bilap_final20260925.h5 (release maps-2km-final-2026-09-25, Rice's chain end, link 5 iteration 40; md5 a661adc6), its own mesh read from the checkpoint (ISMIP7_MESH=checkpoint), geometry, velocity_obs and fluidity prior taken from it; log-velocity weight 69946.22414285329",
+  "forcing": "observations as in the warm start (velocity_obs from the checkpoint); no dH/dt term",
+  "site": "IU Quartz, general partition",
+  "resources": "32 ranks, 200G (3.8 GB a rank measured), 48 h links, at most two (ISMIP7_CHAIN_MAX=1)",
+  "jobs": [
+    "10819920",
+    "10821873"
+  ],
+  "code": "c7205ce (PR #148 with main merged in, plus ISMIP7_MESH=checkpoint and ISMIP7_EVAL_CONTINUATION, PR #154)",
+  "cost": "one annotated solve an evaluation (ISMIP7_EVAL_CONTINUATION=0): 260 to 320 s an iteration on 32 ranks, about 1000 s when a trial point needs the re-ramp rescue; the five-solve default took 1150 to 1220 s for the same iterates, and 64 ranks was 1.2x faster; measured in this run: 1 h 45 min on 32 ranks for the ramp and 8 iterations, about 580 s an iteration",
+  "results": "none kept: the run was stopped before its first checkpoint; the timing record is at Quartz antarctica/results/reinvert_2km/",
+  "audit": "stopped at iteration 7 of link 1: misfit 3.315e4 to 3.105e4, 1 trial point rescued; no checkpoint written. Rice's own objective on this file under the current code gives 3.563e4 against the 2.465e4 Rice printed (validation 10818658)",
+  "notes": "issue #153, evidence for issue #24. Objective: Rice's with the prior's mass term removed and no dH/dt term. Bilaplacian sigma 30 on both controls and rho 750 km (Rice's 0.3 and 7.5 km times 100): the curvature coefficient gamma is unchanged at 2493 and delta falls 1e4, so structure shorter than about 17 km is penalised as before and nothing pulls the controls toward C_w0 or the fluidity prior mean. Misfit sigma with a 3 m/yr floor, the log-velocity term at the warm start's last-link weight, the mass-consistent metric (TAO lmvm), ISMIP7_LAKE_ICE_BASE=0, ISMIP7_WARM_START_STRICT=0 on link 1 (strict on resume). Rice's earlier links used other log-velocity weights (issue #68), so their misfits are not comparable across links. The released fluidity prior is kept as phi's reference; it carries the frictional-heating gate fixed on 26 September (686aec8). Under the current code each release file starts about 1.1e4 above the misfit Rice printed, because PR #122 took the ocean drag off the cells thinner than 10 m (about 18,400 front and margin cells on this mesh) that Rice's controls were fitted with; the prior terms reproduce Rice's to every printed digit (validation jobs 10814568, 10818657, 10818658). Stage 2 moves the result to antarctica_5000_2000_buffered20000. IU cancelled it on 1 October with its successor, to restart on the faster inversion solver of issue #156 once it lands.",
+  "started": "2026-10-01",
+  "finished": "2026-10-01"
+}

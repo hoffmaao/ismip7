@@ -81,6 +81,9 @@ LOG="logs/ismip7_inv_${SLURM_JOB_ID:-manual}.out"
 
 echo "    map out  $ISMIP7_MAP_OUT"
 echo "    sampling $ISMIP7_RASTER_SAMPLE  net sigma $ISMIP7_DHDT_NET_SIGMA  log-vel $ISMIP7_LOG_VEL_WEIGHT  maxiter $ISMIP7_MAXITER"
+# The driver prints the modes it resolves ("Inversion linear solver:"); an
+# unset knob here means the driver's default, which this file does not repeat.
+echo "    solver   ${ISMIP7_INVERSION_LINEAR_SOLVER:-default}  ramp ${ISMIP7_DIAGNOSTIC_LINEAR_SOLVER:-default}"
 
 if [ -f "$DONE" ]; then
     echo "chain: $DONE exists, inversion already finished; nothing to do"
@@ -115,7 +118,13 @@ fi
 # link minimises the objective the first one set (issue 68).
 if [ -f "$ISMIP7_MAP_OUT" ]; then
     export ISMIP7_WARM_START="$ISMIP7_MAP_OUT"
-    echo "chain: warm-starting theta/phi from the periodic checkpoint $ISMIP7_MAP_OUT"
+    # Resuming this chain's own checkpoint is always strict. A first link may
+    # set ISMIP7_WARM_START_STRICT=0 to change the objective of the MAP it
+    # starts from on purpose (another prior), and the successor it queued
+    # inherits that 0 through --export=ALL; here it is held to the one
+    # objective the chain has been minimising.
+    export ISMIP7_WARM_START_STRICT=1
+    echo "chain: warm-starting theta/phi from the periodic checkpoint $ISMIP7_MAP_OUT (strict handoff)"
 fi
 
 # Read the warm start from node-local disk. Every rank reading the MAP over

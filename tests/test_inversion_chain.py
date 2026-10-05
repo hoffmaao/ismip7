@@ -47,6 +47,7 @@ if "ISMIP7_WARM_START" in os.environ:
     with open(os.environ["ISMIP7_WARM_START"]) as fh:
         print(f"driver: warm_start_content={fh.read().strip()}")
 print(f"driver: maxiter={os.environ['ISMIP7_MAXITER']}")
+print(f"driver: strict={os.environ.get('ISMIP7_WARM_START_STRICT', 'unset')}")
 
 die = os.environ.get("FAKE_DIE_AFTER", "")
 print("Optimization finished: CONVERGENCE: REL_REDUCTION_OF_F_<=_FACTR*EPSMCH")
@@ -202,6 +203,35 @@ def test_the_successor_warm_starts_from_an_unfinished_map(sandbox, die):
     assert f"warm start: local copy {warm}" in log
     assert not Path(warm).parent.exists(), "the local copy must be removed"
     assert calls.count("ARGV:") == 2, "each unfinished link queues a successor"
+
+
+def test_a_resumed_link_is_held_to_the_chain_s_objective(sandbox):
+    r"""A first link may warm-start from a MAP of another objective on purpose
+    (IU's re-inversion of Rice's 2 km MAPs without their prior mean) under
+    ISMIP7_WARM_START_STRICT=0. Its successor inherits that 0 through
+    --export=ALL, and resuming the chain's own checkpoint it is strict
+    again."""
+    rice = sandbox / "rice_2km.h5"
+    rice.write_text("checkpoint\n")
+    rc, log, calls = run_job(sandbox, ISMIP7_WARM_START=str(rice),
+                             ISMIP7_WARM_START_STRICT="0",
+                             FAKE_DIE_AFTER="map_write")
+    assert rc == 137, log
+    # the driver reads a node-local copy under the same basename
+    assert Path(_warm_start(log)).name == rice.name
+    assert "driver: strict=0" in log
+    assert "ENV: ISMIP7_WARM_START_STRICT=0" in calls
+
+    rc, log, _ = run_job(sandbox, job_id="424244", ISMIP7_WARM_START=str(rice),
+                         ISMIP7_WARM_START_STRICT="0")
+    assert rc == 0, log
+    assert Path(_warm_start(log)).name == map_out(sandbox).name
+    assert "driver: strict=1" in log
+
+
+def _warm_start(log):
+    return next(line.split("=", 1)[1] for line in log.splitlines()
+                if line.startswith("driver: warm_start="))
 
 
 def test_a_multi_node_link_reads_the_warm_start_in_place(sandbox):

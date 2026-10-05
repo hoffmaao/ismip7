@@ -179,7 +179,37 @@ def test_refinement_that_does_not_help_is_accepted():
     assert ctrl.exceeds(0.5 * err)                   # refining helped: keep going
     assert ctrl.exceeds(float("inf"))
     ctrl.accept()
-    assert ctrl.exceeds(0.9 * err)                   # a new macro step starts afresh
+    assert ctrl.m == 1                               # back to the count it rejected
+    ctrl.begin_attempt()
+    assert not ctrl.exceeds(err)                     # the same estimate is carried
+    assert ctrl.exceeds(1.1 * err)                   # a larger one tests refining again
+    ctrl.accept()
+    ctrl.begin_attempt()
+    ctrl.err_step = 0.5
+    ctrl.accept()                                    # within the tolerance: the rule ends
+    ctrl.begin_attempt()
+    assert ctrl.exceeds(0.9 * err)
+
+
+def test_a_persistent_flicker_keeps_m_bounded():
+    """The 2004.5 flicker: an estimate that refining barely reduces must not
+    ratchet m up one doubling per macro step until the ceiling stops the run."""
+    estimate = lambda m: 1.1 + 1.2 / m               # 1.4, 1.25, 1.175 at 4, 8, 16
+    ctrl = SubstepController(tol=1.0, m_init=4, m_max=64)
+    ms = []
+    for _ in range(30):
+        m = ctrl.m
+        while True:
+            ctrl.begin_attempt()
+            err = estimate(m)
+            ctrl.err_step = err
+            if not ctrl.exceeds(err):
+                break
+            m = ctrl.refine(err)
+            assert m is not None, "substeps exhausted"
+        ms.append(m)
+        ctrl.accept()
+    assert max(ms) == 8 and ms[1:] == [4] * 29 and ctrl.rejections == 1
 
 
 def test_location_of_the_largest_estimate():

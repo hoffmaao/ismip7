@@ -412,6 +412,9 @@ def setup_model(restart_from=None, *, allow_timing_cache_a_ref=False,
             # Residual of the saved mixed state under its writer's F; the
             # restart fast path trusts the state only within a factor of it.
             "full_state_residual",
+            # The stabilization step that residual was measured at
+            # (icepack2_tools.fssa), restored before the fast-path check.
+            "fssa_tau",
             # The friction anchor theta is a deviation from, and the geometry
             # it was inverted on (dual_friction.weertman_anchor,
             # geometry.raise_bed_to_lake_ice_base): a forward follows the MAP.
@@ -1360,8 +1363,14 @@ def setup_model(restart_from=None, *, allow_timing_cache_a_ref=False,
     # Free-surface stabilization (icepack2_tools.fssa, ISMIP7_FSSA_THETA):
     # the term's step is a Constant the forward sets per substep and keeps at
     # zero for every steady solve, so the MAP state is reproduced unchanged.
+    # A restart resumes at the step its checkpoint was solved at, so the
+    # fast path accepts the stabilized state. Off, the term is left out of
+    # the residual altogether.
     fssa_theta_val = fssa_theta()
     fssa_tau = Constant(0.0)
+    if (restart_from is not None and fssa_theta_val > 0
+            and checkpoint_metadata.get("fssa_tau") is not None):
+        fssa_tau.assign(float(checkpoint_metadata["fssa_tau"]))
     u_ref_fssa = Function(V, name="u_ref_fssa")
     u_ref_fssa_loaded = False
     if restart_from is not None and u_ref_fssa_ckpt is not None:
@@ -1402,7 +1411,8 @@ def setup_model(restart_from=None, *, allow_timing_cache_a_ref=False,
                 ocean_drag=ocean_drag, h_ocean=h_ocean, u_lim=u_lim,
                 k_lim=k_lim, drag_mask=drag_mask,
                 calving_ids=calving_ids if use_calving_terminus else None,
-                fssa_tau=fssa_tau, u_ref=u_ref_fssa,
+                fssa_tau=fssa_tau if fssa_theta_val > 0 else None,
+                u_ref=u_ref_fssa if fssa_theta_val > 0 else None,
             )
 
         # The closure above is the single definition of this residual: the
@@ -1438,7 +1448,8 @@ def setup_model(restart_from=None, *, allow_timing_cache_a_ref=False,
                     h_ocean=h_ocean, drag_mask=drag_mask, u_lim=u_lim, k_lim=k_lim,
                     calving_ids=calving_ids if use_calving_terminus else None,
                     exact_front=bool(map_exact_front),
-                    fssa_tau=fssa_tau, u_ref=u_ref_fssa,
+                    fssa_tau=fssa_tau if fssa_theta_val > 0 else None,
+                    u_ref=u_ref_fssa if fssa_theta_val > 0 else None,
                 )
         else:
             subelement = None
@@ -2061,6 +2072,8 @@ def save_model_state(ctx, final_path, t_now, extra_attrs=None):
                 chk.set_attr("/", name, _map_meta[name])
         if full_state_residual is not None:
             chk.set_attr("/", "full_state_residual", full_state_residual)
+        if ctx.get("fssa_theta", 0.0) > 0:
+            chk.set_attr("/", "fssa_tau", float(ctx["fssa_tau"]))
         for name, value in (extra_attrs or {}).items():
             if value is not None:
                 chk.set_attr("/", name, value)
@@ -3204,7 +3217,13 @@ def run_simulation(
                 annual.book_removal(sliver, data[sliver])
             data[sliver] = 0.0
             if retreat_only:
-                calved[:] = held_calved(calved, h_dg_old.dat.data_ro, data, front_hmin)
+                removed = sliver.copy()
+                if beyond is not None:
+                    removed |= beyond
+                if calv_frac is not None:
+                    removed |= np.asarray(calv_frac) >= 1.0
+                calved[:] = held_calved(calved, h_dg_old.dat.data_ro, data,
+                                        removed, front_hmin)
                 calved_fn.dat.data[:] = calved
         if trace_on:
             _dm = ctx.get("drag_mask")
@@ -3417,7 +3436,7 @@ def run_simulation(
                         PETSc.Sys.Print(
                             f"  Step {k}: substep {_j + 1}/{m} thickness error "
                             f"{err:.3g} m{at} not reduced by refining "
-                            f"(rejected at {adapt.last_reject:.3g} m), accepting"
+                            f"(rejected at {adapt.tolerated_against:.3g} m), accepting"
                         )
                 if fssa_theta_val > 0:
                     # the velocity solved now advances the next substep

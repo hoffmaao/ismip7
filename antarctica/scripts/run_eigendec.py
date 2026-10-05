@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 r"""Leading eigenmodes of the prior-preconditioned Gauss-Newton Hessian of a MAP.
 
-The Laplace approximation of Recinos et al. (2023) and fenics_ice: at the MAP
+The Laplace approximation of Recinos et al. (2023): at the MAP
 the posterior covariance is ``(H_GN + Gamma^-1)^-1`` with ``H_GN`` the
 Gauss-Newton Hessian of the data term and ``Gamma`` the prior covariance.
 Its departure from the prior lives in the generalised eigenpairs
@@ -14,9 +14,9 @@ this script computes and saves, and what a forward's QoI sensitivity is
 projected onto (``sigma_Q^2 = sigma_prior^2 - sum_i (g.v_i)^2 lambda_i/(1+lambda_i)``).
 
 The problem is the MAP's own: ``simulation.setup_model()`` loads the MAP
-(``ISMIP7_INVERSION``) exactly as a forward does -- its mesh, geometry, friction
+(``ISMIP7_INVERSION``) exactly as a forward does - its mesh, geometry, friction
 control (sqrt, exp or log), sub-element scheme and the mixed state it was
-accepted at -- and the data term is the inversion's (the per-datum chi^2 on
+accepted at - and the data term is the inversion's (the per-datum chi^2 on
 the MEaSUREs errors with the MAP's recorded ``misfit_scale`` and log-speed
 weight), evaluated against the MAP's own velocity so the residual is zero and
 the Hessian is Gauss-Newton: positive semi-definite by construction. The

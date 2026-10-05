@@ -303,12 +303,16 @@ def front_removal_mask(law_beyond, initial_beyond, retreat_only, calved=None):
     return out
 
 
-def held_calved(calved, h_old, h_new, front_hmin):
+def held_calved(calved, h_old, h_new, removed, front_hmin):
     r"""Grow the mask of cells a retreat-only front has emptied.
 
     ``calved`` is the mask so far, ``h_old`` and ``h_new`` the cell thickness
-    before and after one advance with its front removals applied. A cell
-    joins when it held ice (``h_old > front_hmin``) and holds none now.
+    before and after one advance with its front removals applied, and
+    ``removed`` the cells the front rules took ice from in that advance (the
+    law's beyond mask, the retreat slivers, a sub-cell shed of the whole
+    cell). A cell joins when it held ice (``h_old > front_hmin``), a front
+    rule removed it, and it holds none now. A cell that SMB or melt emptied
+    is left out: it is inside the domain and may regrow.
 
     Why it is kept: the sub-threshold inflow an ice-free cell keeps (see
     :func:`retreat_slivers`) is how a free front advances, but under a
@@ -325,4 +329,5 @@ def held_calved(calved, h_old, h_new, front_hmin):
     import numpy as np
     return np.logical_or(
         np.asarray(calved, dtype=bool),
-        (np.asarray(h_old) > front_hmin) & (np.asarray(h_new) <= 0.0))
+        np.asarray(removed, dtype=bool) & (np.asarray(h_old) > front_hmin)
+        & (np.asarray(h_new) <= 0.0))

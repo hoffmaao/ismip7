@@ -41,8 +41,12 @@ Refining has to pay for itself. Some reversals do not shrink with the step
 historical at 2004.5 the estimate went 1.37, 1.13, 1.12 m at 4, 8 and 16
 substeps. When a retry's estimate is still above ``ineffective`` times the
 estimate that rejected the previous attempt at this macro step, the retry is
-accepted at its count instead of doubling again. A non-finite thickness
-always rejects, so a real blow-up still climbs to the ceiling and stalls.
+accepted at its count instead of doubling again. The refinement bought
+nothing, so the next macro step returns to the count of that rejected attempt
+and accepts an estimate no larger than the one that rejected it; a larger one
+rejects and tests refining again, and a macro step within the tolerance ends
+the rule. A non-finite thickness always rejects, so a real blow-up still
+climbs to the ceiling and stalls.
 """
 
 import math
@@ -76,6 +80,10 @@ class SubstepController:
         self.err_step = 0.0          # largest estimate in the current attempt
         self.err_xy = None           # where the latest estimate was largest
         self.last_reject = None      # estimate that rejected the last attempt
+        self.persistent = None       # estimate refining failed to reduce, carried
+        self.tolerated_against = None  # estimate the latest tolerated one was held to
+        self._m_rejected = None      # count of the last rejected attempt
+        self._tolerated_now = False
         self.rejections = 0
         self.tolerated = 0           # retries accepted above tol (ineffective)
 
@@ -84,6 +92,7 @@ class SubstepController:
         rewind the substep history along with the model state."""
         self._saved = (self._dh, self._keep, self._tau)
         self.err_step = 0.0
+        self._tolerated_now = False
 
     def observe(self, h_before, h_after, tau, xy=None):
         r"""Record one substep's thickness change and return its error
@@ -127,9 +136,16 @@ class SubstepController:
             return True
         if err <= self.tol:
             return False
-        if (self.last_reject is not None
-                and err > self.ineffective * self.last_reject):
+        if self.last_reject is not None:
+            tolerate = err > self.ineffective * self.last_reject
+            ref = self.last_reject
+        else:
+            tolerate = self.persistent is not None and err <= self.persistent
+            ref = self.persistent
+        if tolerate:
             self.tolerated += 1
+            self.tolerated_against = ref
+            self._tolerated_now = True
             return False
         return True
 
@@ -144,6 +160,7 @@ class SubstepController:
         self._quiet = 0
         self.rejections += 1
         self.last_reject = err
+        self._m_rejected = self.m
         if self.m >= self.m_max:
             return None
         factor = 2
@@ -157,8 +174,18 @@ class SubstepController:
         r"""Close an accepted macro step. After ``quiet_steps`` accepted macro
         steps in a row, none rejected and none with an estimate above a
         quarter of the tolerance (what halving m roughly multiplies it by),
-        the substep count halves. Returns True when m changed."""
+        the substep count halves. An attempt accepted because refining did
+        not reduce its estimate returns m to the count of the attempt it
+        rejected and carries that estimate to the next macro steps. Returns
+        True when the quiet steps halved m."""
+        if self._tolerated_now and self.last_reject is not None:
+            self.persistent = self.last_reject
+            self.m = self._m_rejected
+        elif not self._tolerated_now and self.err_step <= self.tol:
+            self.persistent = None
         self.last_reject = None
+        self._m_rejected = None
+        self._tolerated_now = False
         if self.err_step < 0.25 * self.tol:
             self._quiet += 1
         else:

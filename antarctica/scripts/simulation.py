@@ -89,7 +89,8 @@ from icepack2_tools.runconfig import (
     residual_stabilizers,
     friction as _friction, geometry_space as _geometry_space,
     mesh_override as _mesh_override, transfer_fill as _transfer_fill,
-    drag_gate as _drag_gate,
+    forward_drag_gate as _forward_drag_gate,
+    forward_hvisc_floor as _forward_hvisc_floor,
     lc as _lc, lc_coarse as _lc_coarse, n_flow as _n_flow, buffer_m as _buffer_m,
     TARGET_MESH_GEOMETRY_METHOD,
     calving_law as _calving_law, calving_law_object as _calving_law_object,
@@ -420,6 +421,10 @@ def setup_model(restart_from=None, *, allow_timing_cache_a_ref=False,
             "subelement_scheme_version",
             "exact_front",
             "fluidity_control",
+            # The ocean-drag gate and the membrane floor the controls absorbed
+            # (runconfig.forward_drag_gate, forward_hvisc_floor).
+            "drag_gate",
+            "h_visc_floor",
         ):
             if _chk.has_attr("/", _key):
                 checkpoint_metadata[_key] = _chk.get_attr("/", _key)
@@ -621,6 +626,16 @@ def setup_model(restart_from=None, *, allow_timing_cache_a_ref=False,
     map_lake_ice_base = int(checkpoint_metadata.get("lake_ice_base", 0))
     map_subelement = int(checkpoint_metadata.get("subelement_friction", 0))
     map_exact_front = int(checkpoint_metadata.get("exact_front", 0))
+    # The ocean-drag gate and the membrane floor the controls absorbed. The
+    # resolved values go into every state this run writes (MAP_CONFIG_KEYS),
+    # so a restart runs them too.
+    map_drag_gate = _forward_drag_gate(checkpoint_metadata.get("drag_gate"),
+                                       source=os.path.basename(source_chk),
+                                       restart=is_restart)
+    map_hvisc_floor = _forward_hvisc_floor(checkpoint_metadata.get("h_visc_floor"),
+                                           source=os.path.basename(source_chk))
+    checkpoint_metadata["drag_gate"] = map_drag_gate
+    checkpoint_metadata["h_visc_floor"] = map_hvisc_floor
     # a MAP from before the record was inverted under SEP2
     map_subelement_scheme = str(checkpoint_metadata.get("subelement_scheme", "sep2"))
     if map_subelement:
@@ -1092,7 +1107,7 @@ def setup_model(restart_from=None, *, allow_timing_cache_a_ref=False,
             build_rc_residual, weertman_anchor, effective_pressure,
         )
         c0_rc = float(os.environ.get("ISMIP7_RC_C0", "0.5"))
-        rc_hvisc_floor = float(os.environ.get("ISMIP7_RC_HVISC_FLOOR", "10.0"))
+        rc_hvisc_floor = map_hvisc_floor
         rc_cw0_floor = float(os.environ.get("ISMIP7_RC_CW0_FLOOR", "0.0"))
         rc_eps_tauc = float(os.environ.get("ISMIP7_RC_EPS_TAUC", "0.0"))
         # Budd N_hat knobs (used only for fric_law="budd"):
@@ -1122,7 +1137,8 @@ def setup_model(restart_from=None, *, allow_timing_cache_a_ref=False,
         # DG0 gate on the ocean drag, a live Function in the residual so the
         # gate changes without re-assembly. The drag never touches ice,
         # floating or grounded: it acts only in open water outside the t=0
-        # extent that shares no facet with a cell holding ice now
+        # extent that touches no cell holding ice now, at an edge or (under
+        # the vertex gate the MAP was inverted with) at a vertex
         # (front.ocean_drag_cells, which has the measurement of the front it
         # used to pin). The t=0 extent is H_init on a restart and the
         # starting thickness on a cold start, so a restart applies the same
@@ -1130,7 +1146,7 @@ def setup_model(restart_from=None, *, allow_timing_cache_a_ref=False,
         # and a level-set front, when one runs, writes its own gate instead.
         drag_mask = Function(FunctionSpace(mesh, "DG", 0), name="drag_mask")
         _Q0 = drag_mask.function_space()
-        _drag_neighbours_of = (vertex_neighbours if _drag_gate() == "vertex"
+        _drag_neighbours_of = (vertex_neighbours if map_drag_gate == "vertex"
                                else facet_neighbours)(_Q0)
         _drag_hmin = _front_hmin()
         _drag_extent0 = Function(_Q0).project(
@@ -1203,14 +1219,15 @@ def setup_model(restart_from=None, *, allow_timing_cache_a_ref=False,
             PETSc.Sys.Print(
                 f"  Friction: Budd N_hat (N_ref={'none' if N_ref is None else 'reference'}; exact-zero shelf; delta="
                 f"{budd_nhat_floor:.3f}, N_hat_cap={budd_nhat_cap:.1f}, "
-                f"alpha_gl={alpha_gl:.2f}, h_visc_floor={rc_hvisc_floor:.0f}m, "
-                f"ocean_drag={ocean_drag:.0e}@h<{h_ocean:.0f}m, "
+                f"alpha_gl={alpha_gl:.2f}, h_visc_floor={rc_hvisc_floor:g} m, "
+                f"ocean_drag={ocean_drag:.0e}@h<{h_ocean:.0f}m ({map_drag_gate} gate), "
                 f"u_lim={u_lim:.0e})"
             )
         else:
             PETSc.Sys.Print(
                 f"  Friction: regularized Coulomb (c0={c0_rc}, "
-                f"h_visc_floor={rc_hvisc_floor:.0f}m, cw0_floor={rc_cw0_floor:.1e}, "
+                f"h_visc_floor={rc_hvisc_floor:g} m, {map_drag_gate} drag gate, "
+                f"cw0_floor={rc_cw0_floor:.1e}, "
                 f"eps_tauc={rc_eps_tauc:.1e} MPa, alpha={float(alpha_reg):.1e})"
             )
 
@@ -1886,7 +1903,7 @@ def calving_front_state(z, h_dg, b, level_set, A=None, n=None, gr_frac=None):
 
 MAP_CONFIG_KEYS = ("friction_control", "friction_c_ref", "subelement_friction",
                    "subelement_scheme", "subelement_scheme_version", "exact_front",
-                   "fluidity_control")
+                   "fluidity_control", "drag_gate", "h_visc_floor")
 
 
 def save_model_state(ctx, final_path, t_now, extra_attrs=None):

@@ -99,7 +99,7 @@ def test_the_facet_gate_drags_front_vertices_and_the_vertex_gate_does_not():
 
 
 @pytest.mark.parametrize("value, expected",
-                         [(None, "facet"), ("facet", "facet"), (" Vertex ", "vertex")])
+                         [(None, "vertex"), ("facet", "facet"), (" Vertex ", "vertex")])
 def test_the_drag_gate_knob(monkeypatch, value, expected):
     from icepack2_tools.runconfig import drag_gate
     if value is None:
@@ -110,3 +110,30 @@ def test_the_drag_gate_knob(monkeypatch, value, expected):
     monkeypatch.setenv("ISMIP7_DRAG_GATE", "node")
     with pytest.raises(ValueError, match="ISMIP7_DRAG_GATE"):
         drag_gate()
+
+
+def test_a_forward_runs_the_gate_its_map_records(monkeypatch):
+    from icepack2_tools.runconfig import forward_drag_gate
+    monkeypatch.delenv("ISMIP7_DRAG_GATE", raising=False)
+    assert forward_drag_gate("facet") == "facet"
+    assert forward_drag_gate(b"vertex") == "vertex"
+    monkeypatch.setenv("ISMIP7_DRAG_GATE", "facet")
+    assert forward_drag_gate("facet") == "facet"
+    with pytest.raises(RuntimeError, match="follows its MAP"):
+        forward_drag_gate("vertex", source="m.h5")
+    with pytest.raises(RuntimeError, match="drag_gate='node'"):
+        forward_drag_gate("node")
+
+
+def test_a_map_without_a_gate_runs_the_knob(monkeypatch):
+    from icepack2_tools.runconfig import forward_drag_gate
+    monkeypatch.delenv("ISMIP7_DRAG_GATE", raising=False)
+    # no record, or an inversion that dragged no cell: the default
+    assert forward_drag_gate(None) == "vertex"
+    assert forward_drag_gate("none") == "vertex"
+    # a forward state from before the record ran facet
+    assert forward_drag_gate(None, restart=True) == "facet"
+    monkeypatch.setenv("ISMIP7_DRAG_GATE", "facet")
+    assert forward_drag_gate("none") == "facet"
+    monkeypatch.setenv("ISMIP7_DRAG_GATE", "vertex")
+    assert forward_drag_gate(None, restart=True) == "vertex"

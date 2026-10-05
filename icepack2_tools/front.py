@@ -238,14 +238,19 @@ def collapse_csv_fields(header, counts):
 
 def ocean_drag_cells(ice, neighbours_of, extent0):
     r"""The cells the floor-cell ocean drag may act on: open water that holds
-    no ice now, shares no facet with a cell that does, and lies outside the
-    t=0 ice extent.
+    no ice now, is no neighbour of a cell that does, and lies outside the t=0
+    ice extent.
 
     ``ice`` is the per-cell boolean "holds ice now" (thickness at least the
     front threshold), ``extent0`` the same test on the t=0 thickness, and
-    ``neighbours_of(mask)`` the cells sharing a facet with a cell of ``mask``
-    (:func:`facet_neighbours`). Every other cell, floating or grounded, gets
-    no drag.
+    ``neighbours_of(mask)`` the cells touching a cell of ``mask``: at a vertex
+    (:func:`vertex_neighbours`, ``ISMIP7_DRAG_GATE=vertex``, the default) or
+    at a facet (:func:`facet_neighbours`). Every other cell, floating or
+    grounded, gets no drag. Under the facet gate a water cell touching the
+    ice at one vertex drags that front node, since the velocity is
+    continuous: on the 20 km buffered 2 km mesh that held floating ice 27 %
+    below its observed speed, against 11 % under the vertex gate (issue
+    #153).
 
     The drag exists to give the ice-free buffer some velocity coercivity. Left
     on everywhere below ``h_ocean`` it also acted on thin floating ice and on

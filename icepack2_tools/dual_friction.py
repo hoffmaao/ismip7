@@ -393,7 +393,12 @@ def build_rc_residual(
         ``H=0`` driving stress keeps the buffer velocity ~0 (clamping ``H`` in
         the driving term instead fabricates ``rho g H_floor grad s`` and blows
         the buffer velocity up).  Real ice (``H >> floor``) is unaffected.  0
-        disables it (correct when ``H`` is clamped > 0 upstream).
+        disables it (correct when ``H`` is clamped > 0 upstream).  The first
+        row of water cells beside the ice carries the floor too, so it
+        couples the ice front to the ocean drag one cell further out: on the
+        20 km buffered 2 km mesh, with the vertex drag gate, floating ice
+        started 11 % below its observed speed at 10 m and 2 % at 1 m (issue
+        #153; ``runconfig.hvisc_floor``).
     drag_mask : Function or None
         DG0 gate on the ocean drag (1 = drag on). Written each step by the
         level-set front; None keeps the drag everywhere below h_ocean.

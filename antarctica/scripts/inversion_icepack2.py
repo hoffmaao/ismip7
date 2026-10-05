@@ -110,6 +110,7 @@ from icepack2_tools.runconfig import (
     raster_sample as _raster_sample,
     lc as _lc, lc_coarse as _lc_coarse, n_flow as _n_flow,
     eval_continuation, inversion_mesh_source, transfer_fill, drag_gate,
+    DRAG_GATE_NONE, hvisc_floor,
 )
 DATA_DIR = obs_data_root()
 from icepack2_tools.prior import (
@@ -428,9 +429,11 @@ if FRICTION_CONTROL in ("sqrt", "exp") and not USE_RESIDUAL:
                      "law (budd or regularized_coulomb)")
 C0_RC = float(os.environ.get("ISMIP7_RC_C0", "0.5"))
 # Buffer-node (h_clamp=0) coercivity controls; see dual_friction.build_rc_residual.
-# h_visc_floor (membrane-only thickness floor) is the primary, bias-free cure;
-# c_w0_floor is off by default (unnecessary once h_visc_floor is on).
-RC_HVISC_FLOOR = float(os.environ.get("ISMIP7_RC_HVISC_FLOOR", "10.0"))
+# h_visc_floor (membrane-only thickness floor) is the primary cure; at 1 m
+# (runconfig.hvisc_floor) the first water row no longer carries the ocean drag
+# onto the ice front, as it did at 10 m. c_w0_floor is off by default
+# (unnecessary once h_visc_floor is on).
+RC_HVISC_FLOOR = hvisc_floor()
 RC_CW0_FLOOR = float(os.environ.get("ISMIP7_RC_CW0_FLOOR", "0.0"))
 # Budd N_hat knobs (fric_law="budd"): at the reference/inversion geometry
 # N_hat=1 (with the PISM-delta grounded floor), so this inverts the exact-zero
@@ -1121,7 +1124,7 @@ def main():
                     else f"regularized Coulomb (c0={C0_RC})")
         C_w0_lo, C_w0_hi = global_range(C_w0)
         PETSc.Sys.Print(
-            f"  Friction: {law_name}; h_visc_floor={RC_HVISC_FLOOR:.0f}m; "
+            f"  Friction: {law_name}; h_visc_floor={RC_HVISC_FLOOR:g} m; "
             f"C_w0 in [{C_w0_lo:.2e}, {C_w0_hi:.2e}]"
         )
     else:
@@ -1419,11 +1422,16 @@ def main():
     _neighbours = (vertex_neighbours if DRAG_GATE == "vertex" else facet_neighbours)
     drag_mask.dat.data[:] = ocean_drag_cells(
         _ice, _neighbours(drag_mask.function_space()), _ice)
+    _n_drag = COMM_WORLD.allreduce(int(drag_mask.dat.data_ro.sum()))
     PETSc.Sys.Print(
-        f"  Ocean drag gate: {COMM_WORLD.allreduce(int(drag_mask.dat.data_ro.sum()))} "
+        f"  Ocean drag gate: {_n_drag} "
         f"of {COMM_WORLD.allreduce(int(drag_mask.dat.data_ro.size))} cells, open water "
         f"a cell away from the ice (h < {front_hmin():g} m, ISMIP7_DRAG_GATE={DRAG_GATE})"
     )
+    # The gate the controls absorbed, which a forward then runs
+    # (runconfig.forward_drag_gate): none when no cell was dragged.
+    DRAG_RECORD = (DRAG_GATE if _n_drag and stabilizers["ocean_drag"] > 0.0
+                   else DRAG_GATE_NONE)
 
     subelement = None
     if SUBELEMENT_FRICTION:
@@ -2423,7 +2431,11 @@ def main():
             # How a warm start from another mesh filled the dofs beyond it
             # (provenance: ISMIP7_TRANSFER_FILL; same-mesh starts fill none).
             chk.set_attr("/", "warm_start_fill", warm_fill_mode)
-            chk.set_attr("/", "drag_gate", DRAG_GATE)
+            # The ocean-drag gate and the membrane floor the controls
+            # absorbed: a forward runs both (runconfig.forward_drag_gate,
+            # forward_hvisc_floor).
+            chk.set_attr("/", "drag_gate", DRAG_RECORD)
+            chk.set_attr("/", "h_visc_floor", float(RC_HVISC_FLOOR))
             # Which field the friction is: C_w0 exp(log_friction) on the
             # anchor (log), or sqrt_friction^2 with no anchor (sqrt).
             chk.set_attr("/", "friction_control", FRICTION_CONTROL)
@@ -3271,6 +3283,7 @@ def main():
         "subelement_scheme": SUBELEMENT_SCHEME,
         "subelement_scheme_version": int(SUBELEMENT_SCHEME_VERSION),
         "fluidity_control": FLUIDITY_CONTROL,
+        "drag_gate": DRAG_RECORD, "h_visc_floor": float(RC_HVISC_FLOOR),
     })
     if PRIOR_FORM == "bilaplacian":
         run_settings.update({"prior_sigma_theta": float(PRIOR_SIGMA_THETA),

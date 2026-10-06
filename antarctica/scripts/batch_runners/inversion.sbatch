@@ -159,8 +159,14 @@ echo "=== $(date -Is)  inversion exit ${rc} ==="
 # 1339328 finished its 200 iterations and 1339342 started re-inverting the
 # finished MAP, Sep 13 2026.) The driver writes this marker itself as soon as
 # it has saved the MAP, so the rule below is the fallback for a driver that
-# could not write it; touch is idempotent.
-if grep -q 'Saved MAP:' "$LOG"; then
+# could not write it; touch is idempotent. A driver whose optimizer stopped
+# right after failed trial evaluations prints "MAP not final:" before saving
+# and writes no marker: scipy reports such a stop as convergence at a point
+# whose gradient is not small (issue 153, job 11461566), so the successor
+# resumes from the MAP instead.
+if grep -q 'MAP not final:' "$LOG"; then
+    echo "chain: the optimizer stopped on failed trials; no marker, the successor resumes from the MAP"
+elif grep -q 'Saved MAP:' "$LOG"; then
     touch "$DONE"
     echo "chain: finished ($(grep -o 'Saved MAP:.*' "$LOG" | tail -1)); marker $DONE"
 fi

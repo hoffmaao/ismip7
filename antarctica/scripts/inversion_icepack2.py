@@ -126,7 +126,9 @@ from icepack2_tools.handoff import (
     OBJECTIVE_KEYS, OBJECTIVE_RECORD_KEYS, SUBELEMENT_SCHEME_VERSIONS,
     accepted_evaluation, frozen_in_control, handoff_gap, objective_mismatches)
 from icepack2_tools.profiling import Spans
-from icepack2_tools.optimization import (FunctionalDecreaseStop,
+from icepack2_tools.optimization import (NOT_FINAL,
+                                         FunctionalDecreaseStop,
+                                         TrialFailures,
                                          recorded_objective,
                                          resolve_log_vel_weight)
 from icepack2_tools.forcing import (load_racmo_smb_climatology,
@@ -2572,6 +2574,7 @@ def main():
     z_backup = z.copy(deepcopy=True)
     last_good_obj = [np.inf]
     last_x = [None]                      # controls of the last CONVERGED evaluation
+    trial_failures = TrialFailures()
     iteration_count = [0]
     timing_history = []
     timing_json = os.environ.get("ISMIP7_INVERSION_TIMING_JSON", "").strip()
@@ -2697,7 +2700,7 @@ def main():
             PETSc.Sys.Print(
                 f"  [!] Forward solve failed ({exc}), returning large objective")
             t_body_end[0] = perf_counter()
-            return last_good_obj[0] * 10, np.zeros(2 * global_ndof)
+            return trial_failures.failed(last_good_obj[0], 2 * global_ndof)
         stop_manager()
         J_val = float(J)
         t_fwd = perf_counter() - t_fwd
@@ -2730,8 +2733,9 @@ def main():
                 )
             PETSc.Sys.Print("  [!] Adjoint solve failed, returning large objective")
             t_body_end[0] = perf_counter()
-            return last_good_obj[0] * 10, np.zeros(2 * global_ndof)
+            return trial_failures.failed(last_good_obj[0], 2 * global_ndof)
         t_adj = perf_counter() - t_adj
+        trial_failures.succeeded()
 
         # Whittle-Matern prior energy + gradient (icepack2_tools/prior.py):
         # 0.5/area * gamma * (theta^2 + L^2 |grad theta|^2). The theta^2 mass
@@ -3412,6 +3416,18 @@ def main():
     _p_lo, _p_hi = global_range(phi)
     PETSc.Sys.Print(f"  theta range: [{_t_lo:.3f}, {_t_hi:.3f}]")
     PETSc.Sys.Print(f"  phi range:   [{_p_lo:.3f}, {_p_hi:.3f}]")
+    # A stop right after failed trials is no convergence test (TrialFailures),
+    # so the MAP gets no done marker and the chain's next link resumes from
+    # it. Printed before the MAP is saved: the runner reads this line, and a
+    # kill between the two must not leave a "Saved MAP:" line without it.
+    unfinished = trial_failures.stopped_on_failures
+    if unfinished:
+        PETSc.Sys.Print(
+            f"  {NOT_FINAL} the optimizer stopped right after "
+            f"{trial_failures.trailing} failed trial evaluations in a row "
+            f"({trial_failures.total} in this run). The MAP holds the last "
+            "accepted iterate; no done marker, so the chain's next link "
+            "resumes from it.")
 
     # ── Save MAP immediately ──
     chk_fn = os.path.join(_map_dir, map_fn)
@@ -3427,14 +3443,16 @@ def main():
     # the tail below (final solve, summary figure) runs for long enough that
     # the wall clock can kill the job inside it, and the runner's post-srun
     # rule would then never get to write the marker.
-    if map_out and COMM_WORLD.rank == 0:
+    if map_out and COMM_WORLD.rank == 0 and not unfinished:
         with open(map_out + ".done", "w"):
             pass
 
     if timing_json:
         _write_timing_json(
             phase="final_solve",
-            message=str(result.message),
+            message=str(result.message) + (
+                f" ({NOT_FINAL} after {trial_failures.trailing} failed trials)"
+                if unfinished else ""),
             nit=result.nit,
             nfev=result.nfev,
         )

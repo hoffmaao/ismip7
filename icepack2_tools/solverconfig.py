@@ -31,6 +31,11 @@ import os
 # full-Jacobian MUMPS whatever is set here, stamps the mode it resolves on its
 # MAP, and redistribute_checkpoint.py fingerprints a published cache with it.
 DIAGNOSTIC_SOLVER_DEFAULT = "full_mumps"
+# The inversion's untaped forward and its adjoint solve: static condensation of
+# the two DG0 fields with MUMPS on the condensed CG1 system (exact, so the
+# gradient is the full-Jacobian one to the linear tolerance).
+INVERSION_SOLVER_DEFAULT = "scpc_mumps"
+ADJOINT_KSP_RTOL_DEFAULT = "1e-10"
 DIAGNOSTIC_SOLVER_MODES = (
     "schur_gamg",
     "schur_mumps",
@@ -181,6 +186,31 @@ def linearization_state(mode=None):
     return "frozen" if frozen else "live"
 
 
+def inversion_solver_mode():
+    r"""Linear solver of the inversion's direct forward and adjoint solves
+    (``ISMIP7_INVERSION_LINEAR_SOLVER``, default ``scpc_mumps``); any
+    :data:`DIAGNOSTIC_SOLVER_MODES` entry, ``full_mumps`` restoring the
+    assembled mixed-Jacobian LU."""
+    return diagnostic_solver_mode(
+        _env("ISMIP7_INVERSION_LINEAR_SOLVER", INVERSION_SOLVER_DEFAULT))
+
+
+def adjoint_solver_parameters(mode):
+    r"""Linear solver parameters for the adjoint of the mixed diagnostic
+    under ``mode``: the mode's own linear options without the SNES keys, the
+    outer Krylov tolerance tightened to ``ISMIP7_ADJOINT_KSP_RTOL`` (the
+    gradient is only as good as this solve). A matrix-free mode reaches
+    tlm_adjoint's matrix-free adjoint branch, which hands ``adjoint(J)`` to a
+    Firedrake linear solve, so the condensation acts on the transposed
+    operator exactly as on the forward one."""
+    params = {k: v for k, v in diagnostic_solver_parameters(mode).items()
+              if not k.startswith("snes_")}
+    if mode != "full_mumps":
+        params["ksp_rtol"] = float(_env("ISMIP7_ADJOINT_KSP_RTOL", ADJOINT_KSP_RTOL_DEFAULT))
+        params["ksp_atol"] = 0.0
+    return params
+
+
 def diagnostic_solver_mode(requested=None):
     r"""Canonical mode for ``requested`` (default: the environment's)."""
     if requested is None:
@@ -311,14 +341,25 @@ def _condensed_gamg_options(prefix):
     return params
 
 
+def _have_ptscotch():
+    from petsc4py import PETSc
+    return bool(PETSc.Sys.hasExternalPackage("ptscotch"))
+
+
 def _mumps_options(prefix=""):
-    return {
+    opts = {
         f"{prefix}pc_type": "lu",
         f"{prefix}pc_factor_mat_solver_type": "mumps",
-        # Distributed analysis with PT-Scotch nested dissection.
-        f"{prefix}mat_mumps_icntl_28": 2,
-        f"{prefix}mat_mumps_icntl_29": 1,
     }
+    if _have_ptscotch():
+        # Distributed analysis with PT-Scotch nested dissection.
+        opts[f"{prefix}mat_mumps_icntl_28"] = 2
+        opts[f"{prefix}mat_mumps_icntl_29"] = 1
+    # Without PT-Scotch the distributed analysis cannot run: MUMPS fails the
+    # factorization and the condensed preconditioner returns NaN at its first
+    # application (DIVERGED_NANORINF on a PETSc built without it). MUMPS's own
+    # sequential analysis and ordering is then the right default.
+    return opts
 
 
 def diagnostic_solver_parameters(mode=None):

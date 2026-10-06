@@ -138,6 +138,8 @@ from icepack2_tools.solverconfig import (
     direct_forward_max_it,
     diagnostic_solver_mode,
     diagnostic_solver_parameters,
+    adjoint_solver_parameters,
+    inversion_solver_mode,
     final_solve_bounds,
     final_solve_parameters,
     linearization_state,
@@ -148,6 +150,15 @@ from icepack2_tools.solverconfig import (
 )
 from mesh_naming import get_buffer_m, mesh_filename
 from timing_campaign import MATRIX_T_START, atomic_write_json
+
+def with_quadrature_degree(form, degree):
+    r"""``form`` with ``quadrature_degree`` set in every integral's metadata
+    (an integral that already names a degree keeps it)."""
+    import ufl
+    return ufl.Form([
+        itg.reconstruct(metadata={"quadrature_degree": degree, **itg.metadata()})
+        for itg in form.integrals()])
+
 
 # petsc4py returns SNES converged reasons as plain ints on most builds.
 _SNES_REASON_NAMES = {
@@ -679,6 +690,15 @@ def main():
     # asserts it). Resolved now so an invalid environment fails here, not
     # inside the final save after hours of work.
     lane_solver_mode = diagnostic_solver_mode()
+    # The untaped direct forward and the adjoint solve: static condensation
+    # by default (ISMIP7_INVERSION_LINEAR_SOLVER). The taped confirm solve
+    # keeps the assembled sparams: it exits at iteration 0 on the direct
+    # solve's converged state, so it never factors.
+    inv_solver_mode = inversion_solver_mode()
+    _scpc_structural_zero = Constant(0.0)
+    PETSc.Sys.Print(
+        f"  Inversion linear solver (direct forward and adjoint): "
+        f"{diagnostic_solver_label(inv_solver_mode)}")
     fc_params = {"quadrature_degree": 4}
 
     # ── Build form (Kangerd pattern: controls baked into sliding coefficient) ──
@@ -1578,9 +1598,13 @@ def main():
     # is the prior's alone and L-BFGS pulls the controls toward the prior
     # means while the misfit rises (job 10432790, 2026-09-14: adjoint time
     # 25 s -> 0.7 s, |grad| 47 -> 12, misfit +7% in four evaluations).
-    adjoint_sparams = {
-        key: value for key, value in sparams.items() if key != "snes_atol"
-    }
+    adj_solver_mode = diagnostic_solver_mode(
+        os.environ.get("ISMIP7_ADJOINT_LINEAR_SOLVER", inv_solver_mode))
+    adjoint_sparams = (
+        {key: value for key, value in sparams.items() if key != "snes_atol"}
+        if adj_solver_mode == "full_mumps"
+        else adjoint_solver_parameters(adj_solver_mode))
+    PETSc.Sys.Print(f"  Adjoint linear solver: {diagnostic_solver_label(adj_solver_mode)}")
 
     u_init = z.subfunctions[0]
     u_mag = Function(Q).interpolate(sqrt(inner(u_init, u_init)))
@@ -1977,7 +2001,10 @@ def main():
         # absolute floor at the accepted residual stopped such solves before
         # they responded); the live step-size exit ends a solve that starts
         # at the rounding floor, e.g. after the rescue's re-climb.
-        params = {k: v for k, v in sparams.items() if k != "snes_atol"}
+        params = (dict(sparams) if inv_solver_mode == "full_mumps"
+                  else diagnostic_solver_parameters(inv_solver_mode))
+        params.update(_monitor_options)
+        params.pop("snes_atol", None)
         params.update(final_solve_bounds())
         params["snes_max_it"] = direct_forward_max_it()
         # A trial whose residual has grown 1e6x is lost; fail it now and let
@@ -1985,11 +2012,16 @@ def main():
         # NOTS 1692389: 50 iterations to ||F|| 5e33, 289 s).
         params["snes_divergence_tolerance"] = float(
             os.environ.get("ISMIP7_DIRECT_FORWARD_DTOL", "1e6"))
+        J_direct, pre_direct = None, None
+        if linearization_state(inv_solver_mode) == "frozen":
+            from icepack2_tools.preconditioners import frozen_linearization
+            J_direct, pre_direct = frozen_linearization(F_ctrl, z)
         solver = NonlinearVariationalSolver(
             NonlinearVariationalProblem(
-                F_ctrl, z, form_compiler_parameters=fc_params),
+                F_ctrl, z, J=J_direct, form_compiler_parameters=fc_params),
             solver_parameters=params,
             options_prefix="ismip7_inversion_direct_",
+            pre_jacobian_callback=pre_direct,
         )
         t0 = perf_counter()
         with paused_manager():
@@ -2025,6 +2057,23 @@ def main():
     def forward(theta_ctrl, phi_ctrl):
         clear_caches()
         F_ctrl = build_F(theta_ctrl, phi_ctrl)
+        if inv_solver_mode.startswith("scpc_"):
+            # SCPC needs both off-diagonal blocks of the eliminated (M, tau)
+            # pair in the form; they are physically uncoupled, so UFL drops
+            # them and the condensation fails. A runtime Constant keeps the
+            # blocks while adding exactly zero (simulation.py does the same).
+            # It is in the taped residual too: the adjoint is built from it.
+            _, _M_s, _tau_s = split(z)
+            F_ctrl = F_ctrl + derivative(
+                _scpc_structural_zero * _M_s[0, 0] * _tau_s[0] * dx, z)
+        # The quadrature degree goes into the integrals themselves, so the
+        # Jacobian, its adjoint and every matrix-free action built from F_ctrl
+        # carry it whoever assembles them. tlm_adjoint's matrix-free adjoint
+        # solve passes no form-compiler parameters: without this it integrates
+        # adjoint(J) at Firedrake's estimated degree, the transpose of a
+        # different Jacobian, and the condensed gradient failed the Taylor test
+        # (order 0.25 at 32 km) while its solve converged to 4e-10.
+        F_ctrl = with_quadrature_degree(F_ctrl, fc_params["quadrature_degree"])
         # The direct solve unless a timing lane asked for the single taped
         # solve by name: a warm start that loaded its mixed state also sets
         # skip_continuation, and it wants the direct path's rescue route.
@@ -2422,6 +2471,7 @@ def main():
                 # that actually produced the state.
                 chk.set_attr("/", "diagnostic_solver_mode", lane_solver_mode)
                 chk.set_attr("/", "state_solver_mode", state_solver_mode)
+                chk.set_attr("/", "inversion_solver_mode", inv_solver_mode)
                 chk.set_attr(
                     "/", "state_solver_parameters", state_solver_parameters
                 )

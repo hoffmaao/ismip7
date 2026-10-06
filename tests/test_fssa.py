@@ -354,3 +354,41 @@ def test_a_timing_record_carries_the_weight_its_lane_stepped_with():
     assert recorded["fssa_theta"] == 0.0
     assert {k: v for k, v in recorded.items() if k != "fssa_theta"} == {
         k: v for k, v in configuration.items() if k != "fssa_theta"}
+
+
+def test_an_adapted_checkpoint_keeps_the_stabilization_record(tmp_path, monkeypatch):
+    monkeypatch.delenv("ISMIP7_FSSA_THETA", raising=False)
+    from icepack_tools.adapt_mesh import AdaptMeshConfig
+    from icepack2_tools.adapt_mesh import transfer_state
+    from icepack2_tools.solverconfig import forward_fssa_theta
+
+    def write(path, attrs):
+        mesh = fd.RectangleMesh(4, 4, 20e3, 20e3)
+        Q = FunctionSpace(mesh, "DG", 0)
+        with fd.CheckpointFile(str(path), "w") as chk:
+            chk.save_mesh(mesh)
+            chk.save_function(Function(Q, name="thickness").assign(500.0))
+            chk.save_function(Function(Q, name="bed").assign(-100.0))
+            for k, v in attrs.items():
+                chk.set_attr("/", k, v)
+
+    def adapt(path):
+        out = tmp_path / ("adapted_" + path.name)
+        mesh_new = fd.RectangleMesh(6, 6, 20e3, 20e3)
+        cfg = AdaptMeshConfig(geometry="bs-FROM-hBS", front_preserve=False)
+        transfer_state(str(path), mesh_new, cfg, str(out), "new",
+                       lambda Q_g, Qc: Function(Q_g).assign(-100.0),
+                       log=lambda *a: None)
+        with fd.CheckpointFile(str(out), "r") as chk:
+            return {k: chk.get_attr("/", k) for k in ("fssa_tau", "fssa_reference")
+                    if chk.has_attr("/", k)}
+
+    stepped = tmp_path / "stepped.h5"
+    write(stepped, {"geometry_space": "dg0", "t_yr": 2020.0,
+                    "fssa_tau": 0.025, "fssa_reference": "step"})
+    carried = adapt(stepped)
+    assert carried == {"fssa_tau": 0.025, "fssa_reference": "step"}
+    assert forward_fssa_theta(carried) == 1.0
+    unstabilized = tmp_path / "unstabilized.h5"
+    write(unstabilized, {"geometry_space": "dg0", "t_yr": 2020.0})
+    assert adapt(unstabilized) == {}

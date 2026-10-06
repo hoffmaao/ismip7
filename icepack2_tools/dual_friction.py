@@ -347,11 +347,11 @@ def build_rc_residual(
     k_lim=1e-3,
     gl_width=GL_WIDTH,
     calving_ids=None,
+    exact_front=False,
+    front_hmin=1.0,
     fssa_tau=None,
     u_ref=None,
     fssa_tendency=None,
-    exact_front=False,
-    front_hmin=1.0,
 ):
     r"""Assemble the icepack2 dual regularized-Coulomb residual ``F`` for the
     mixed state ``z = (u, M, tau)`` on ``Z = V x Sigma x T``.
@@ -575,15 +575,15 @@ def build_rc_residual(
     nu = FacetNormal(mesh)
     F += (-H_visc * inner(M, sym(grad(v))) + inner(tau - rho_I * g * H * grad(s), v)) * dx
     F += rho_I * g * avg(H) * inner(jump(s, nu), avg(v)) * dS
-    if fssa_tau is not None and u_ref is not None:
-        from icepack2_tools.fssa import fssa_term
-        F += fssa_term(z, u_ref, fssa_tau, H, b, tendency=fssa_tendency,
-                       gl_width=gl_width)
     if exact_front:
         if H.ufl_element().degree() != 0:
             raise ValueError("exact_front needs DG0 geometry: the correction "
                              "completes the facet-jump driving stress")
         F += front_cliff_correction(v, H, s, mesh, h_ice=front_hmin)
+    if fssa_tau is not None and u_ref is not None:
+        from icepack2_tools.fssa import fssa_term
+        F += fssa_term(z, u_ref, fssa_tau, H, b, tendency=fssa_tendency,
+                       gl_width=gl_width)
     if calving_ids:
         F += model.variational.calving_terminus(
             velocity=u, thickness=H, surface=s, outflow_ids=tuple(calving_ids)

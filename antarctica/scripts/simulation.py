@@ -1521,10 +1521,10 @@ def setup_model(restart_from=None, *, allow_timing_cache_a_ref=False,
                 ocean_drag=ocean_drag, h_ocean=h_ocean, u_lim=u_lim,
                 k_lim=k_lim, drag_mask=drag_mask,
                 calving_ids=calving_ids if use_calving_terminus else None,
+                exact_front=bool(map_exact_front), front_hmin=_front_hmin(),
                 fssa_tau=fssa_tau if fssa_theta_val > 0 else None,
                 u_ref=u_ref_fssa if fssa_theta_val > 0 else None,
                 fssa_tendency=fssa_tendency,
-                exact_front=bool(map_exact_front), front_hmin=_front_hmin(),
             )
 
         # The closure above is the single definition of this residual: the

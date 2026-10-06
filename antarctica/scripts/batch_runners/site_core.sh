@@ -382,13 +382,27 @@ ismip7_persistent_jit_cache() {
 # third of the run. ISMIP7_MPI_IO names the component (default romio321; set
 # it empty to leave the MPI's own default); an MPI other than Open MPI ignores
 # the variable.
+#
+# One dead rank ends the step (issue #161). Slurm's default (KillOnBadExit=0,
+# as on IU Quartz) lets the other ranks wait in MPI for the rest of the wall
+# limit: in job 10971250 the OOM killer took one of 32 ranks 4 h 28 min in and
+# the node sat idle for 11.5 h more. --kill-on-bad-exit ends the step when any
+# task exits non-zero or on a signal, an OOM kill included, and
+# --oom-kill-step=1 has slurmstepd end it on an OOM event as well; the second
+# is passed only where this srun lists it (Slurm 24.11 and later), since an
+# unknown option would fail every job. The image's mpiexec on a container site
+# already takes every rank down when one dies.
 ismip7_mpirun() {
     local n="$1"; shift
     if [ -n "${ISMIP7_MPI_IO-romio321}" ]; then
         export OMPI_MCA_io="${ISMIP7_MPI_IO-romio321}"
     fi
     if [ -z "$ISMIP7_CONTAINER" ]; then
-        srun -n "$n" "$@"
+        local kill=(--kill-on-bad-exit=1)
+        case "$(srun --help 2>/dev/null)" in
+            *--oom-kill-step*) kill+=(--oom-kill-step=1) ;;
+        esac
+        srun "${kill[@]}" -n "$n" "$@"
         return
     fi
     if [ "${1:-}" = python ]; then

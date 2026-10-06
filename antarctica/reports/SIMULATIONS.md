@@ -9,9 +9,9 @@ gitignored, so these records and the per-core reports beside them are
 the trace a run leaves in the repository. A core experiment also gets
 its full report from `core_report.py`; this is the index.
 
-277 records.
+278 records.
 
-Status: 12 planned, 5 running, 25 stopped, 218 done, 17 superseded.
+Status: 12 planned, 5 running, 25 stopped, 219 done, 17 superseded.
 
 ## Inversion
 
@@ -276,6 +276,7 @@ Status: 12 planned, 5 running, 25 stopped, 218 done, 17 superseded.
 | 4 km inversion, 10 TAO iterations under scpc_gamg, SEP1 and the direct forward, against full_mumps | done | antarctica_40000_4000_buffered0, the mesh of test-4km-inversion-eval-spans (sha256 b5924123; 117,348 vertices, 226,866 cells), DG0 geometry, vertex raster sampling | IU workstation (Mac, 16 cores, 128 GB), data under /Volumes/LaCie/Data/antarctica_general/ismip7_obs | 2026-10-02 | 2026-10-02 | 10 TAO iterations, objective 9.243682e3 to 6.312668e3; every direct forward converged (2 to 6 Newton iterations), no lost trial, no rescue; published residual 4.8e-4; every iteration's objective within 9.2e-11 and gradient norm within 1.2e-9 of the other solver's |
 | 8 km inversion, 10 TAO iterations under full_mumps, SEP1 and the direct forward, against scpc_gamg | done | antarctica_80000_8000_buffered0, built on this workstation with mesh_antarctica.py --lc 8000 --lc-coarse 80000 --buffer-m 0 (sha256 267a1265; 34,714 vertices, 64,228 cells), DG0 geometry, vertex raster sampling | IU workstation (Mac, 16 cores, 128 GB), data under /Volumes/LaCie/Data/antarctica_general/ismip7_obs | 2026-10-02 | 2026-10-02 | 10 TAO iterations, objective 7.967201e3 to 5.318421e3; every direct forward converged (2 to 7 Newton iterations), no lost trial, no rescue; published residual 2.4e1; every iteration's objective within 7.3e-11 and gradient norm within 3.4e-9 of the other solver's |
 | 8 km inversion, 10 TAO iterations under scpc_gamg, SEP1 and the direct forward, against full_mumps | done | antarctica_80000_8000_buffered0, built on this workstation with mesh_antarctica.py --lc 8000 --lc-coarse 80000 --buffer-m 0 (sha256 267a1265; 34,714 vertices, 64,228 cells), DG0 geometry, vertex raster sampling | IU workstation (Mac, 16 cores, 128 GB), data under /Volumes/LaCie/Data/antarctica_general/ismip7_obs | 2026-10-02 | 2026-10-02 | 10 TAO iterations, objective 7.967201e3 to 5.318421e3; every direct forward converged (2 to 7 Newton iterations), no lost trial, no rescue; published residual 2.4e1; every iteration's objective within 7.3e-11 and gradient norm within 3.4e-9 of the other solver's |
+| One rank of four killed by the OOM killer or raising while the others wait in a barrier, launched by plain srun and by ismip7_mpirun's --kill-on-bad-exit=1 --oom-kill-step=1: does the step end | done | none (a 4-rank mpi4py probe, oom_probe.py) | IU Quartz, general partition, Slurm 25.11.8 with KillOnBadExit=0 and TaskPluginParam unset (no OOMKillStep) | 2026-10-06 | 2026-10-06 | OOM under plain srun: the step was still running 2 min 10 s after Slurm logged the oom_kill event, three ranks waiting in the barrier, as in job 10971250 (cancelled by hand). OOM under ismip7_mpirun: srun printed 'Terminating StepId' and the step ended within the second Slurm logged the oom_kill event, every task Out Of Memory, jobs of 12 and 13 s in all; srun returned 1 (11464621, the first probe's script did not capture it). Raise with Firedrake imported: Firedrake's abort ends the step either way, in 14 s under ismip7_mpirun and 45 s under plain srun (Slurm's 32 s abort wait). Raise without Firedrake: the raising rank never exits (mpi4py blocks in MPI_Finalize), so neither launcher ends the step (both cancelled by hand); every ISMIP7 driver imports Firedrake. |
 | Bi-Laplacian prior solve, per evaluation, on the 32 km mesh refined to 1.19 million vertices (probe_eval_overhead.py) | done | antarctica_320000_32000_buffered0 (sha256 fd66fc42) refined uniformly by MeshHierarchy, levels 0 to 4: 6,282, 21,618, 79,455, 303,789 and 1,187,097 vertices; CG1 controls | IU workstation (Mac, 16 cores, 128 GB), data under /Volumes/LaCie/Data/antarctica_general/ismip7_obs; another session's 8-rank jobs shared the machine for most runs (load at each start in its commit.txt) | 2026-10-02 | 2026-10-02 | At 1,187,097 vertices, seconds an evaluation for both controls on 1 / 2 / 4 / 8 ranks (sweep 2): the residual-form solve the driver used 9.8 / 9.1 / 8.3 / 8.2 (sweep 1: 9.4 / 9.0 / 8.8 / 8.5), with MUMPS parallel analysis 10.1 / 4.7 / 2.9 / 3.0, factored 0.22 / 0.15 / 0.10 / 0.12 after a 4.1 to 4.8 s first call, CG with Jacobi 0.26 / 0.14 / 0.08 / 0.10 (22 iterations); TAO tape forward plus adjoint 15.3 / 13.9 / 12.6 / 12.4 before and 0.40 / 0.27 / 0.18 / 0.21 factored. The old solve grows linearly with the vertex count (6.9 to 8.2 us a vertex at level 4) and does not fall with the rank count. Energies agree to 3e-16 and taped gradients to 2e-16. The replicated gathers took 0.13 s on 1 rank and at most 0.02 s on more |
 
 ## Historical
@@ -6113,6 +6114,24 @@ The p4 ssp585 at 32 km restarted at 2294.0 on main after pull requests 127 and 1
 - **Results path:** /Volumes/LaCie/Data/antarctica_general/ismip7_runs/pr158_merge/C_8km_scpc_gamg/map.h5 (sha256 4f700762), log.txt, timing.json, code.txt; the wrappers are runm.sh, study.sh and study_exp.sh in pr158_merge
 - **Audit:** 10 TAO iterations, objective 7.967201e3 to 5.318421e3; every direct forward converged (2 to 7 Newton iterations), no lost trial, no rescue; published residual 2.4e1; every iteration's objective within 7.3e-11 and gradient norm within 3.4e-9 of the other solver's
 - **Notes:** the solver pair at 8 km: scpc_gamg against full_mumps (test-8km-inversion-sep1-full-mumps)
+
+### test-quartz-srun-dead-rank-issue161
+
+One rank of four killed by the OOM killer or raising while the others wait in a barrier, launched by plain srun and by ismip7_mpirun's --kill-on-bad-exit=1 --oom-kill-step=1: does the step end (done), IU.
+
+- **Task type:** test
+- **Mesh:** none (a 4-rank mpi4py probe, oom_probe.py)
+- **Initial state / MAP:** none
+- **Site / partition:** IU Quartz, general partition, Slurm 25.11.8 with KillOnBadExit=0 and TaskPluginParam unset (no OOMKillStep)
+- **Ranks / memory:** 4 ranks, 4G, 10 min limit; the victim rank allocates 256 MiB blocks until the cgroup OOM-kills it, or raises RuntimeError
+- **Job ids:** 11462592 (OOM, plain srun), 11462594 and 11464621 (OOM, ismip7_mpirun), 11464622 (raise with Firedrake imported, ismip7_mpirun), 11464623 (raise with Firedrake imported, plain srun), 11462595 and 11462596 (raise without Firedrake, plain and ismip7_mpirun)
+- **Code:** 06cb0a9 (site_core.sh ismip7_mpirun); scratch clone /N/scratch/dlilien/ismip7_issue161
+- **Started:** 2026-10-06
+- **Finished:** 2026-10-06
+- **Cost per model year:** under 2 core-hours in all
+- **Results path:** Quartz /N/scratch/dlilien/ismip7_issue161_jobs/ (oom_probe.py, oom_probe.script, logs/probe_<job>.out and .err)
+- **Audit:** OOM under plain srun: the step was still running 2 min 10 s after Slurm logged the oom_kill event, three ranks waiting in the barrier, as in job 10971250 (cancelled by hand). OOM under ismip7_mpirun: srun printed 'Terminating StepId' and the step ended within the second Slurm logged the oom_kill event, every task Out Of Memory, jobs of 12 and 13 s in all; srun returned 1 (11464621, the first probe's script did not capture it). Raise with Firedrake imported: Firedrake's abort ends the step either way, in 14 s under ismip7_mpirun and 45 s under plain srun (Slurm's 32 s abort wait). Raise without Firedrake: the raising rank never exits (mpi4py blocks in MPI_Finalize), so neither launcher ends the step (both cancelled by hand); every ISMIP7 driver imports Firedrake.
+- **Notes:** Issue #161, item 2. Three submissions 11463855-11463857 are discarded: zsh did not split the loop's arguments, so all three ran the raise case without Firedrake under ismip7_mpirun.
 
 ### test-refined-32km-prior-solve-probe
 

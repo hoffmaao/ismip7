@@ -67,7 +67,8 @@ open(map_out + ".done", "w").close()
 '''
 
 STUBS = {
-    "srun": '#!/bin/bash\nexec "$FAKE_PYTHON" "$FAKE_DRIVER"\n',
+    # `srun --help` is the launcher asking which kill options this Slurm has.
+    "srun": '#!/bin/bash\n[ "${1:-}" = --help ] && exit 0\nexec "$FAKE_PYTHON" "$FAKE_DRIVER"\n',
     "sbatch": (
         "#!/bin/bash\n"
         'printf "ARGV: %s\\n" "$*" >> "$SBATCH_CALLS"\n'

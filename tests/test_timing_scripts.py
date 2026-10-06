@@ -38,10 +38,14 @@ sys.exit(int(os.environ.get("FAKE_RC", "0")))
 '''
 
 STUBS = {
-    # `srun -n N python -u script args...`: record N, hand the rest to the driver.
+    # `srun [kill options] -n N python -u script args...`: record the line,
+    # hand the script's arguments to the driver. `srun --help` is the launcher
+    # asking which kill options this Slurm has.
     "srun": ('#!/bin/bash\n'
+             '[ "${1:-}" = --help ] && exit 0\n'
              'echo "SRUN $*" >> "$FAKE_ENV_DUMP"\n'
-             'shift 2; shift 2\n'
+             'while [ "${1:-python}" != python ]; do shift; done\n'
+             'shift 2\n'
              'exec "$FAKE_PYTHON" "$FAKE_DRIVER" "$@"\n'),
     "scontrol": "#!/bin/bash\nexit 0\n",
     "module": "#!/bin/bash\nexit 0\n",
@@ -92,7 +96,7 @@ def test_a_lane_runs_in_the_site_s_environment_with_only_its_own_model_settings(
     proc, seen = run_script(sandbox, "timing_transient.script",
                             ISMIP7_TIMING_STATUS=str(status), ISMIP7_LC="500")
     assert proc.returncode == 0, proc.stderr
-    assert "SRUN -n 16 python -u scripts/run_timing.py" in seen
+    assert "SRUN --kill-on-bad-exit=1 -n 16 python -u scripts/run_timing.py" in seen
     assert "FAKE_VENV_ACTIVE=1" in seen
     assert "OMP_NUM_THREADS=1" in seen and "OPENBLAS_NUM_THREADS=1" in seen
     assert "ISMIP7_LC=500" in seen
@@ -194,8 +198,8 @@ def test_prepare_repacks_on_one_rank_through_the_same_launcher(sandbox):
         ISMIP7_TIMING_CACHE_PRISTINE=str(cache / "state.prepare.h5"))
     assert proc.returncode == 0, proc.stderr
     launches = [line for line in seen if line.startswith("SRUN ")]
-    assert launches[0] == "SRUN -n 16 python -u scripts/prepare_timing_cache.py"
-    assert launches[1].startswith("SRUN -n 1 python -u scripts/redistribute_checkpoint.py --input ")
+    assert launches[0] == "SRUN --kill-on-bad-exit=1 -n 16 python -u scripts/prepare_timing_cache.py"
+    assert launches[1].startswith("SRUN --kill-on-bad-exit=1 -n 1 python -u scripts/redistribute_checkpoint.py --input ")
     assert status.read_text().startswith("finished phase=published exit_code=0 ")
     assert (cache / "state.prepare.h5").exists()
 
@@ -225,7 +229,7 @@ def test_the_score_script_scores_a_map_and_then_its_transferred_state(sandbox):
                             ISMIP7_MAP_CHECK_STATUS=str(status), ISMIP7_MESH="checkpoint",
                             ISMIP7_FRICTION="regularized_coulomb")
     assert proc.returncode == 0, proc.stderr
-    assert f"SRUN -n 16 python -u scripts/score_map.py --json {out} {map_path}" in seen
+    assert f"SRUN --kill-on-bad-exit=1 -n 16 python -u scripts/score_map.py --json {out} {map_path}" in seen
     assert not any("check_budd_map.py" in line for line in seen)
     assert "ISMIP7_MESH=checkpoint" in seen and "ISMIP7_FRICTION=regularized_coulomb" in seen
     assert status.read_text().startswith("finished phase=score exit_code=0 job_id=777 ")
@@ -237,9 +241,9 @@ def test_the_score_script_scores_a_map_and_then_its_transferred_state(sandbox):
                             ISMIP7_MAP_CHECK_RESTART=str(sandbox / "cache.h5"),
                             ISMIP7_MAP_CHECK_CENSUS=str(census), ISMIP7_FRICTION="budd")
     assert proc.returncode == 0, proc.stderr
-    assert (f"SRUN -n 16 python -u scripts/score_map.py --json {out} "
+    assert (f"SRUN --kill-on-bad-exit=1 -n 16 python -u scripts/score_map.py --json {out} "
             f"--restart {sandbox / 'cache.h5'} {map_path}") in seen
-    assert f"SRUN -n 16 python -u scripts/check_budd_map.py {map_path}" in seen
+    assert f"SRUN --kill-on-bad-exit=1 -n 16 python -u scripts/check_budd_map.py {map_path}" in seen
     assert "ISMIP7_CHECK_FRICTION=budd" in seen
     assert census.is_file()
     assert status.read_text().startswith("finished phase=score exit_code=0 ")
@@ -275,7 +279,7 @@ def test_the_audit_script_collects_every_part_whatever_each_returns(sandbox):
     payload = json.loads(out.read_text())
     assert set(payload) == {"track", "overlay", "region_budget"}
     assert payload["track"]["native"]["exit_code"] is not None
-    assert f"SRUN -n 16 python -u scripts/region_budget.py {sandbox / 'native_final.h5'} --csv {sandbox / 'native.csv'}" in seen
+    assert f"SRUN --kill-on-bad-exit=1 -n 16 python -u scripts/region_budget.py {sandbox / 'native_final.h5'} --csv {sandbox / 'native.csv'}" in seen
     assert "ISMIP7_LC=2000" in seen and "ISMIP7_LC=1000" in seen and "ISMIP7_MESH=checkpoint" in seen
     assert status.read_text().startswith("finished phase=collect exit_code=0 ")
 

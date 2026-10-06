@@ -81,8 +81,9 @@ print(f"Saved: {path}")
 
 STUBS = {
     # Slurm's launcher: run the stub driver instead of the real one, with the
-    # environment the runner handed it.
-    "srun": '#!/bin/bash\nexec "$FAKE_PYTHON" "$FAKE_DRIVER"\n',
+    # environment the runner handed it. `srun --help` is the launcher asking
+    # which kill options this Slurm has.
+    "srun": '#!/bin/bash\n[ "${1:-}" = --help ] && exit 0\nexec "$FAKE_PYTHON" "$FAKE_DRIVER"\n',
     # Record the resubmit so the test can see whether one happened and what it
     # carried. --export=ALL means the successor inherits this environment, so
     # dump the ISMIP7 part of it too.

@@ -686,16 +686,14 @@ class AnnualOutput:
         fields["libmassbffl"] = dg(melt / T)
         fields["lifmassbf"] = dg(front / T)
         final_path = self.year_path(self.out_path, yr)
-        tmp = final_path + ".tmp"
+        from icepack2_tools.staging import staged_write
+        tmp, commit = staged_write(final_path, self.comm)
         with fd.CheckpointFile(tmp, "w") as chk:
             chk.save_mesh(self.mesh)
             for name, f in fields.items():
                 chk.save_function(f, name=name)
             chk.set_attr("/", FRONT_MELT_ATTR, FRONT_MELT)                       # every rank
-        self.comm.barrier()
-        if self.comm.rank == 0:
-            os.replace(tmp, final_path)
-        self.comm.barrier()
+        commit()
         self._written_years.append(yr)
         # scalars, from the same fields over true area (kg, m2, kg/s)
         area = self.true_area

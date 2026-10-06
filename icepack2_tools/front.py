@@ -327,14 +327,57 @@ def vertex_neighbours(Q_dg):
     return neighbours_of
 
 
-def front_removal_mask(law_beyond, initial_beyond, retreat_only):
+def front_removal_mask(law_beyond, initial_beyond, retreat_only, calved=None):
     r"""The cells a step empties for the front: the ones the level-set law's
     front has passed (``law_beyond``), and under a retreat-only front
     (``ISMIP7_FRONT_ADVANCE=none``) also every cell beyond the t=0 extent
     (``initial_beyond``), so ice the transport carries past the initial
     outline is removed and booked as calving instead of becoming new
-    extent. ``initial_beyond`` may be None when it was never built."""
+    extent, and every cell the front has emptied before (``calved``, see
+    :func:`held_calved`). ``initial_beyond`` and ``calved`` may be None."""
     import numpy as np
-    if not retreat_only or initial_beyond is None:
+    if not retreat_only:
         return law_beyond
-    return np.logical_or(law_beyond, initial_beyond)
+    out = law_beyond
+    for mask in (initial_beyond, calved):
+        if mask is not None:
+            out = np.logical_or(out, mask)
+    return out
+
+
+def held_calved(calved, h_old, h_new, front_hmin, *, sliver, beyond=None,
+                calv_frac=None):
+    r"""Grow the mask of cells a retreat-only front has emptied.
+
+    ``calved`` is the mask so far, ``h_old`` and ``h_new`` the cell thickness
+    before and after one advance with its front removals applied. The front
+    rules of that advance are the law's ``beyond`` mask, its sub-cell shed
+    ``calv_frac`` (nonzero on the front cells) and the retreat ``sliver``
+    mask (:func:`retreat_slivers`). A cell joins when it held ice
+    (``h_old > front_hmin``), holds none now, and a front rule emptied it:
+    it lies beyond the front, the shed took the whole cell, or it is a
+    sliver in a front cell. A cell that SMB or melt thinned or emptied away
+    from the front is left out: it is inside the domain and may regrow.
+
+    Why it is kept: the sub-threshold inflow an ice-free cell keeps (see
+    :func:`retreat_slivers`) is how a free front advances, but under a
+    retreat-only front it refills a cell the law just calved. Measured on
+    the 2 km SEP1 control (Pine Island, 2041): the emptied cell took 1670
+    m/yr of inflow from its 8.6 km/yr neighbour, crossed the extent
+    threshold within one substep, the extent-anchored level set took it as
+    ice again, the resistive-stress law shed the whole of it, and the
+    neighbour's flux divergence flipped by that 1670 m/yr every step. The
+    flip-flop was what held the adaptive substeps at 0.00625 yr once the
+    grounding zones were stabilized. Held calved, the cell's inflow is
+    removed and booked as calving each step, as beyond the t=0 extent.
+    """
+    import numpy as np
+    removed = np.zeros(np.shape(h_new), dtype=bool)
+    if beyond is not None:
+        removed |= np.asarray(beyond, dtype=bool)
+    if calv_frac is not None:
+        frac = np.asarray(calv_frac)
+        removed |= (frac >= 1.0) | (np.asarray(sliver, dtype=bool) & (frac > 0.0))
+    return np.logical_or(
+        np.asarray(calved, dtype=bool),
+        removed & (np.asarray(h_old) > front_hmin) & (np.asarray(h_new) <= 0.0))

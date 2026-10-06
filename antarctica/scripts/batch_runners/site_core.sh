@@ -290,7 +290,14 @@ ismip7_activate() {
     # not share the store over NFS directly: only rank 0 compiles a miss, and
     # on /projects (NFSv3) the others still saw "File not on disk" after it
     # had written the file (job 1691916, 30 Sep 2026).
+    # The store is kept per CPU model: PyOP2 compiles with -march=native and
+    # keys its cache on the flag string, not on the CPU it resolved to, so a
+    # kernel built on one node type reached another and two ranks of a
+    # Cascade Lake job died with a bus error 14 s in, on a store filled on
+    # Sapphire Rapids (NOTS 1743894, 3 Oct 2026).
     if [ -n "${ISMIP7_SHARED_JIT_CACHE:-}" ] && [ "${SLURM_JOB_NUM_NODES:-1}" = 1 ]; then
+        _ismip7_cpu="$(grep -m1 '^model name' /proc/cpuinfo 2>/dev/null | md5sum | cut -c1-12)"
+        ISMIP7_SHARED_JIT_CACHE="${ISMIP7_SHARED_JIT_CACHE%/}/cpu-${_ismip7_cpu:-unknown}"
         rmdir "$PYOP2_CACHE_DIR" 2>/dev/null || true
         mkdir -p "$ISMIP7_SHARED_JIT_CACHE"
         export PYOP2_CACHE_DIR="${TMPDIR:-/tmp}/ismip7_pyop2_${SLURM_JOB_ID:-$$}"

@@ -164,7 +164,9 @@ in `sites/local.env`). Chain successors are given it again.
 `ISMIP7_SHARED_JIT_CACHE` names a PyOP2 kernel store that every single-node
 job copies to node-local disk, compiles into, and copies its new kernels back
 to (`site_core.sh`), so a chain link starts from the kernels its predecessors
-compiled; the ranks never share the store over NFS directly.
+compiled; the ranks never share the store over NFS directly. The store is kept
+per CPU model (`<store>/cpu-<hash>`), since a kernel compiled with
+`-march=native` on Sapphire Rapids killed a Cascade Lake job with a bus error.
 
 Optional, for the timing campaign: `ISMIP7_CONSTRAINT_TIMING` (the node feature
 `submit.sh script` asks for; defaults to `ISMIP7_CONSTRAINT_FWD`),

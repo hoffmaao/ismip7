@@ -9,9 +9,9 @@ gitignored, so these records and the per-core reports beside them are
 the trace a run leaves in the repository. A core experiment also gets
 its full report from `core_report.py`; this is the index.
 
-297 records.
+303 records.
 
-Status: 12 planned, 5 running, 25 stopped, 238 done, 17 superseded.
+Status: 12 planned, 6 running, 25 stopped, 243 done, 17 superseded.
 
 ## Inversion
 
@@ -155,6 +155,10 @@ Status: 12 planned, 5 running, 25 stopped, 238 done, 17 superseded.
 | Stage-2 path smoke on the 20 km buffered mesh from Budd's stage-1 checkpoint, smooth ring extension | done | antarctica_5000_2000_buffered20000 (IU's build, 969,764 vertices), DG0 geometry, vertex raster sampling, the lake fix | IU Quartz, debug partition | 2026-10-04 | 2026-10-04 | evaluation 1: smoothness 397 and 756, misfit 6.42e3, total 7.58e3 against 1.52e5 under the constant fill; total 7.04e3 at evaluation 3 |
 | 2 km control on the MAP's own mesh, with no transfer | done | antarctica_5000_2000_buffered0 | local workstation | 2026-09-22 | 2026-09-22 | peak speed 17469 m/yr, which is the inversion chain's own warm-start maximum, so the forward reproduces the MAP. Amery reads 5937 m/yr with no transfer at all, against 6041 through the transfer |
 | 2 km control from the transferred Budd snapshot | running | antarctica_20000_2000_buffered20000, 2 km fine, 20 km interior, 20 km buffer | local workstation | 2026-09-22 | - | 3.5 years: VAF drift 0.01 mm, mass balance +2 Gt/yr, residual zero. The Amery cell sits near 6 km/yr without running away |
+| 2 km RC inversion under full_mumps on 32 ranks, 55 L-BFGS-B iterations from the moving start, with and without the solver release, watched without touching Python's collector (a weak-reference count of live Firedrake solvers) | running | antarctica_5000_2000_buffered20000 (969,764 vertices, 1,928,285 cells), DG0 geometry, vertex raster sampling | IU Quartz, general partition, one node each | 2026-10-06 | - | at most 4 Firedrake variational solvers alive after any evaluation in either arm, so Python's collector keeps up with the dropped ones |
+| 2 km RC inversion under full_mumps on 32 ranks, 60 L-BFGS-B iterations from 10971250's last checkpoint: RSS with and without the solver release, and without ScaLAPACK on MUMPS's root (40 iterations) | done | antarctica_5000_2000_buffered20000 (969,764 vertices, 1,928,285 cells), DG0 geometry, vertex raster sampling | IU Quartz, general partition, one node each | 2026-10-06 | 2026-10-06 | objectives agree to 1.3e-14 at evaluation 10 and 8.4e-13 at 20, then drift as roundoff compounds through L-BFGS-B (9.5e-11 at 40, 3.4e-5 at 62, the same Newton iterations at every evaluation); same-code reruns spread alike (2.0e-15 at evaluation 2, 1.6e-11 at 22). PETSc -log_view on rank 0 at exit: 37 of 1,766 matrices alive without the release, 10 with it; every SNES, KSP and PC destroyed in both. |
+| 2 km RC inversion under full_mumps on 32 ranks, 45 L-BFGS-B iterations from a start the rho 75 km objective moves far, with and without the solver release, and 30 iterations reading MUMPS's memory counters for the cached forward solver | done | antarctica_5000_2000_buffered20000 (969,764 vertices, 1,928,285 cells), DG0 geometry, vertex raster sampling | IU Quartz, general partition, one node each | 2026-10-06 | 2026-10-06 | final totals 2.006562430e+03 and 2.006562429e+03 after 45 iterations, the same Newton iterations; PETSc -log_view on rank 0 at exit: 28 of 1,388 matrices alive without the release, 10 with it, every SNES, KSP and PC destroyed. The cached forward solver was built once and its MUMPS instance reported INFO(16) 1,482 to 1,488 MB allocated, INFO(22) 654 to 659 MB used and RINFO(8) 1,552 MB at every evaluation. |
+| 2 km RC inversion under full_mumps on 32 ranks, 20 L-BFGS-B iterations from 10971250's last checkpoint, five probes of where the RSS goes: plain, malloc_trim after every evaluation, a trim and RSS split at every phase boundary, and the solver release on the last two | done | antarctica_5000_2000_buffered20000 (969,764 vertices, 1,928,285 cells), DG0 geometry, vertex raster sampling | IU Quartz, general partition, one node each | 2026-10-06 | 2026-10-06 | objectives within 1.2e-12 at evaluation 20 between every pair, the same spread as same-code reruns (32-rank runs are not bit-identical); PETSc -log_view on rank 0: every SNES, KSP and PC destroyed (49 of 49) in every arm, 10 of 686 matrices alive at exit in every arm but the plain phases probe (28). malloc_trim returned 115 to 226 MiB a rank every evaluation (median 156) and left the trend. Phase medians from evaluation 6 (MiB a rank, after a trim at each boundary): plain forward +63, to the first adjoint solve -60, adjoint +797, to the end of compute_gradient -727, so an evaluation keeps +74, all of it anonymous memory; with the release the same steps are +9, +3, +802, -790, keeping +14. tracemalloc saw Python's own memory flat at 909 to 937 MiB a rank over evaluations 2 to 6. |
 | 2 km inversion cost probe, full_mumps on 32 ranks | done | Rice's antarctica_5000_2000_buffered0, read from the snapshot (ISMIP7_MESH=checkpoint; 925,183 vertices, 1,835,718 cells), DG0 geometry, vertex raster sampling | IU Quartz, general partition | 2026-10-01 | 2026-10-01 | 5 L-BFGS-B iterations, 7 evaluations, objective 5.25148e4 to 4.935180e4; published residual 1.0e-4 after a 0-iteration final solve |
 | 2 km inversion cost probe, scpc_gamg with NLEQ-ERR at Krylov rtol 1e-8 on 32 ranks | done | Rice's antarctica_5000_2000_buffered0, read from the snapshot (ISMIP7_MESH=checkpoint; 925,183 vertices, 1,835,718 cells), DG0 geometry, vertex raster sampling | IU Quartz, general partition | 2026-10-01 | 2026-10-01 | every evaluation's objective within 6.5e-8 of the full_mumps arm, final 4.935180e4; no forward failed |
 | 2 km inversion cost probe, scpc_gamg (bt) on 16 ranks | done | Rice's antarctica_5000_2000_buffered0, read from the snapshot (ISMIP7_MESH=checkpoint; 925,183 vertices, 1,835,718 cells), DG0 geometry, vertex raster sampling | IU Quartz, general partition | 2026-10-01 | 2026-10-01 | the same trajectory as on 32 ranks, every evaluation within 2.6e-6 of it (the ramp's state follows the partition), final 4.935170e4; no forward failed |
@@ -230,6 +234,7 @@ Status: 12 planned, 5 running, 25 stopped, 238 done, 17 superseded.
 | 32 km no-forcing forward, apparent MB off: stabilized (theta 1) from `step`, dt 0.2 (PR 160 FSSA reference probe) | done | antarctica_320000_32000_buffered0 (sha256 fd66fc42; 6,282 vertices), DG0 geometry | IU workstation (Mac, 16 cores), up to five runs at once, load average up to 13.7 | 2026-10-05 | 2026-10-05 | resid 0.0000 on all 50 rows, exit 0; largest \|dh\| in a step 162.9 m, no cell flipping sign step to step; at 2025.0 against ref_t0_dt0125: thickness RMS 0.203 m, max 14.6 m; speed RMS 21.1 m/yr; mass +42.6 Gt, VAF +0.171 mm SLE |
 | 32 km no-forcing forward, apparent MB off: unstabilized at dt 0.1 (PR 160 FSSA reference probe) | done | antarctica_320000_32000_buffered0 (sha256 fd66fc42; 6,282 vertices), DG0 geometry | IU workstation (Mac, 16 cores), up to five runs at once, load average up to 13.7 | 2026-10-05 | 2026-10-05 | resid 0.0000 on all 100 rows, exit 0; largest \|dh\| in a step 91.0 m, no cell flipping sign step to step; at 2025.0 against ref_t0_dt0125: thickness RMS 0.0687 m, max 1.91 m; speed RMS 3.35 m/yr; mass -25.0 Gt, VAF -0.076 mm SLE |
 | 32 km no-forcing forward, apparent MB off: unstabilized at dt 0.2 (PR 160 FSSA reference probe) | done | antarctica_320000_32000_buffered0 (sha256 fd66fc42; 6,282 vertices), DG0 geometry | IU workstation (Mac, 16 cores), up to five runs at once, load average up to 13.7 | 2026-10-05 | 2026-10-05 | resid 0.0000 on all 50 rows, exit 0; largest \|dh\| in a step 162.9 m, no cell flipping sign step to step; at 2025.0 against ref_t0_dt0125: thickness RMS 0.15 m, max 4.17 m; speed RMS 8.31 m/yr; mass -54.9 Gt, VAF -0.167 mm SLE |
+| 32 km inversion under full_mumps on 8 ranks, 30 L-BFGS-B iterations, with a census after every evaluation, and again with gc.collect() and two PETSc garbage cleanups after every evaluation: does the direct forward's full_mumps path lose PETSc objects (issue #161) | done | antarctica_320000_32000_buffered0 (6,282 vertices), DG0 geometry, vertex raster sampling | IU workstation (Mac, 16 cores, 128 GB); the two arms ran together | 2026-10-06 | 2026-10-06 | both arms end on total 1.835776394e+02 after 30 iterations and 35 evaluations; PETSc's -log_view on rank 0: every SNES, KSP and PC destroyed (75 of 75), 1,028 matrices created and 1,019 destroyed (9 alive at exit) without the cleanup, all 1,028 with it, so no evaluation loses a PETSc object; Python's live solver and petsc4py wrapper counts flat from evaluation 6 |
 | 32 km inversion, 5 L-BFGS-B iterations on the new defaults (no solver or optimizer knob set), against the SEP1 study's exp arm | done | antarctica_320000_32000_buffered0 (Quartz's .msh, sha256 fd66fc42; 6,282 vertices, 9,055 cells), DG0 geometry, vertex raster sampling | IU workstation (Mac, 16 cores, 128 GB), data under /Volumes/LaCie/Data/antarctica_general/ismip7_obs | 2026-10-03 | 2026-10-03 | 5 iterations, 7 evaluations, objective 3.861500e4 to 1.341402e4; every evaluation within 1.6e-10 of test-32km-inversion-sep1-opt-exp-none (full_mumps, the same optimizer); every direct forward converged, no lost trial; published residual 1.3e-3 |
 | 32 km inversion, the time outside the forward and adjoint by span, before and after the factored prior solve (L-BFGS-B and TAO) | done | antarctica_320000_32000_buffered0 (Quartz's .msh, sha256 fd66fc42; 6,282 vertices, 9,055 cells), DG0 geometry, vertex raster sampling | IU workstation (Mac, 16 cores, 128 GB), data under /Volumes/LaCie/Data/antarctica_general/ismip7_obs; another session's 8-rank jobs shared the machine for most runs (load at each start in its commit.txt) | 2026-10-02 | 2026-10-02 | L-BFGS-B: objective within 1.1e-14 and \|grad\| within 2.6e-13 of the base over 7 evaluations, final 1.320942e4, published \|\|F\|\| 2.941e1 in every run; outside the solves, prior_solve 0.037 to 0.002 s and residual_norm 0.074 s, the rest under 0.002 s. TAO: objective within 2.2e-13 over 5 evaluations, final 1.438882e4, published \|\|F\|\| 1.96e-2; residual_norm 7.86 to 0.23 s an iteration (the fnorm-ceiling check off the tape), prior_solve 0.037 to 0.002 s, prior_taped 0.042 to 0.006 s. Every TAO run failed its forward at the same three trial points and took the re-ramp rescue (reramp span, 2.9 s an iteration at 4e45164) |
 | 32 km inversion cold start with the exp friction control and SEP2 sub-element friction, full_mumps and scpc_gamg | stopped | antarctica_320000_32000_buffered0 (Quartz's .msh, sha256 fd66fc42; 6,282 vertices, 9,055 cells), DG0 geometry, vertex raster sampling | IU workstation (Mac, 16 cores, 128 GB), data under /Volumes/LaCie/Data/antarctica_general/ismip7_obs | 2026-10-01 | 2026-10-01 | the startup ramp (full_mumps in both runs, unannotated, before the solver under test runs) diverged on every rung near n = 2.1 (rung 1 step 5 to \|\|F\|\| 4e37 and 4e20, rung 2 and rung 3 likewise) and the run stopped with ConvergenceError; the solver choice played no part |
@@ -293,6 +298,7 @@ Status: 12 planned, 5 running, 25 stopped, 238 done, 17 superseded.
 | 4 km inversion, the time outside the forward and adjoint by span, before and after the factored prior solve (L-BFGS-B and TAO) | done | antarctica_40000_4000_buffered0, built here with mesh_antarctica.py --lc 4000 --lc-coarse 40000 --buffer-m 0 (sha256 b5924123; 117,348 vertices, 226,866 cells; .msh, sidecar and build log in /Volumes/LaCie/Data/antarctica_general/ismip7_runs/inversion_eval_overhead/mesh), DG0 geometry, vertex raster sampling | IU workstation (Mac, 16 cores, 128 GB), data under /Volumes/LaCie/Data/antarctica_general/ismip7_obs; another session's 8-rank jobs shared the machine for most runs (load at each start in its commit.txt) | 2026-10-02 | 2026-10-02 | L-BFGS-B (k4_base_b against k4_fix_b): objective within 9.8e-14 and \|grad\| within 6.7e-13 over 5 evaluations, final 5.009727e3; prior_solve 0.75 to 0.008 s, residual_norm 0.12 to 0.13 s. TAO (t4_base_b against t4_fix_b): objective within 9.6e-14 over 5 evaluations, final 6.456046e3, published \|\|F\|\| 1.607e-2 in every TAO run; residual_norm 7.34 to 0.24 s, prior_solve 0.75 to 0.02 s, prior_taped 0.87 to 0.03 s, unspanned (adjoint and TAO) 1.72 to 1.30 s an iteration. No forward failed |
 | 4 km inversion, 10 TAO iterations under full_mumps, SEP1 and the direct forward, against scpc_gamg | done | antarctica_40000_4000_buffered0, the mesh of test-4km-inversion-eval-spans (sha256 b5924123; 117,348 vertices, 226,866 cells), DG0 geometry, vertex raster sampling | IU workstation (Mac, 16 cores, 128 GB), data under /Volumes/LaCie/Data/antarctica_general/ismip7_obs | 2026-10-02 | 2026-10-02 | 10 TAO iterations, objective 9.243682e3 to 6.312668e3; every direct forward converged (2 to 6 Newton iterations), no lost trial, no rescue; published residual 1.1e-4; every iteration's objective within 9.2e-11 and gradient norm within 1.2e-9 of the other solver's |
 | 4 km inversion, 10 TAO iterations under scpc_gamg, SEP1 and the direct forward, against full_mumps | done | antarctica_40000_4000_buffered0, the mesh of test-4km-inversion-eval-spans (sha256 b5924123; 117,348 vertices, 226,866 cells), DG0 geometry, vertex raster sampling | IU workstation (Mac, 16 cores, 128 GB), data under /Volumes/LaCie/Data/antarctica_general/ismip7_obs | 2026-10-02 | 2026-10-02 | 10 TAO iterations, objective 9.243682e3 to 6.312668e3; every direct forward converged (2 to 6 Newton iterations), no lost trial, no rescue; published residual 4.8e-4; every iteration's objective within 9.2e-11 and gradient norm within 1.2e-9 of the other solver's |
+| 8 km inversion under full_mumps on 2 ranks (17,000 vertices a rank, about half the 2 km per-rank size on 32), 30 L-BFGS-B iterations with a census after every evaluation: does RSS grow on macOS (issue #161) | done | antarctica_80000_8000_buffered0 (34,714 vertices), DG0 geometry, vertex raster sampling | IU workstation (Mac, 16 cores, 128 GB) | 2026-10-06 | 2026-10-06 | -log_view on rank 0: every SNES, KSP and PC destroyed, 12 of 1,028 matrices alive at exit |
 | 8 km inversion, 10 TAO iterations under full_mumps, SEP1 and the direct forward, against scpc_gamg | done | antarctica_80000_8000_buffered0, built on this workstation with mesh_antarctica.py --lc 8000 --lc-coarse 80000 --buffer-m 0 (sha256 267a1265; 34,714 vertices, 64,228 cells), DG0 geometry, vertex raster sampling | IU workstation (Mac, 16 cores, 128 GB), data under /Volumes/LaCie/Data/antarctica_general/ismip7_obs | 2026-10-02 | 2026-10-02 | 10 TAO iterations, objective 7.967201e3 to 5.318421e3; every direct forward converged (2 to 7 Newton iterations), no lost trial, no rescue; published residual 2.4e1; every iteration's objective within 7.3e-11 and gradient norm within 3.4e-9 of the other solver's |
 | 8 km inversion, 10 TAO iterations under scpc_gamg, SEP1 and the direct forward, against full_mumps | done | antarctica_80000_8000_buffered0, built on this workstation with mesh_antarctica.py --lc 8000 --lc-coarse 80000 --buffer-m 0 (sha256 267a1265; 34,714 vertices, 64,228 cells), DG0 geometry, vertex raster sampling | IU workstation (Mac, 16 cores, 128 GB), data under /Volumes/LaCie/Data/antarctica_general/ismip7_obs | 2026-10-02 | 2026-10-02 | 10 TAO iterations, objective 7.967201e3 to 5.318421e3; every direct forward converged (2 to 7 Newton iterations), no lost trial, no rescue; published residual 2.4e1; every iteration's objective within 7.3e-11 and gradient norm within 3.4e-9 of the other solver's |
 | One rank of four killed by the OOM killer or raising while the others wait in a barrier, launched by plain srun and by ismip7_mpirun's --kill-on-bad-exit=1 --oom-kill-step=1: does the step end | done | none (a 4-rank mpi4py probe, oom_probe.py) | IU Quartz, general partition, Slurm 25.11.8 with KillOnBadExit=0 and TaskPluginParam unset (no OOMKillStep) | 2026-10-06 | 2026-10-06 | OOM under plain srun: the step was still running 2 min 10 s after Slurm logged the oom_kill event, three ranks waiting in the barrier, as in job 10971250 (cancelled by hand). OOM under ismip7_mpirun: srun printed 'Terminating StepId' and the step ended within the second Slurm logged the oom_kill event, every task Out Of Memory, jobs of 12 and 13 s in all; srun returned 1 (11464621, the first probe's script did not capture it). Raise with Firedrake imported: Firedrake's abort ends the step either way, in 14 s under ismip7_mpirun and 45 s under plain srun (Slurm's 32 s abort wait). Raise without Firedrake: the raising rank never exits (mpi4py blocks in MPI_Finalize), so neither launcher ends the step (both cancelled by hand); every ISMIP7 driver imports Firedrake. |
@@ -3700,6 +3706,85 @@ Stage-2 path smoke on the 20 km buffered mesh from Budd's stage-1 checkpoint, sm
 - **Audit:** 3.5 years: VAF drift 0.01 mm, mass balance +2 Gt/yr, residual zero. The Amery cell sits near 6 km/yr without running away
 - **Notes:** the same state that diverges at 1 km is stable here, which is what the production mesh decision, issue #20, turns on
 
+### test-2km-full-mumps-issue161-gcwatch
+
+2 km RC inversion under full_mumps on 32 ranks, 55 L-BFGS-B iterations from the moving start, with and without the solver release, watched without touching Python's collector (a weak-reference count of live Firedrake solvers) (running), IU.
+
+- **Task type:** test
+- **Friction law:** regularized_coulomb
+- **Mesh:** antarctica_5000_2000_buffered20000 (969,764 vertices, 1,928,285 cells), DG0 geometry, vertex raster sampling
+- **Initial state / MAP:** warm start results/reinvert_2km/exp/rc_s2x_vgf1.h5 (RC stage 2 converged at rho 750 km, 1 m floor, same mesh) under the rho 75 km objective, ISMIP7_WARM_START_STRICT=0, so the controls move far from the first step (misfit 2,833 at the first evaluation; total 2,007 at the 48th)
+- **Forcing versions:** the 10971250 objective (rho 75 km) (cell s2x_rc_g01_vgf1_mumps): bilaplacian prior sigma 30, rho 75 km, log friction control, vertex drag gate, membrane floor 1 m, LAKE_ICE_BASE=1, no dH/dt, log-velocity weight 69946.22, L-BFGS-B without a metric
+- **Site / partition:** IU Quartz, general partition, one node each
+- **Ranks / memory:** 32 ranks, 220G; RSS a rank (mean, rss_mib) at evaluations 10 and 29/30: 2,753 to 3,132 without the release (20.0 MiB an evaluation), 2,635 to 2,782 with it (7.4; within 2,779 to 2,815 from evaluation 20); peak 5,218 and 4,834 MiB so far
+- **Job ids:** 11484846 (without), 11484847 (with the release)
+- **Code:** 06cb0a9 and the release tree of test-2km-full-mumps-issue161-probes; probe161_gcwatch.py
+- **Started:** 2026-10-06
+- **Cost per model year:** 162 and 154 s an evaluation so far (adjoint 107 and 103 s)
+- **Results path:** /N/scratch/dlilien/ismip7_issue161_jobs/probe/q2_before_gcw.*, q2_fix_gcw.*
+- **Audit:** at most 4 Firedrake variational solvers alive after any evaluation in either arm, so Python's collector keeps up with the dropped ones
+- **Notes:** Issue #161. The other 2 km arms took an object census after every evaluation, which walks the collector's lists; this pair does not. Numbers through evaluation 30, run in progress.
+
+### test-2km-full-mumps-issue161-long
+
+2 km RC inversion under full_mumps on 32 ranks, 60 L-BFGS-B iterations from 10971250's last checkpoint: RSS with and without the solver release, and without ScaLAPACK on MUMPS's root (40 iterations) (done), IU.
+
+- **Task type:** test
+- **Friction law:** regularized_coulomb
+- **Mesh:** antarctica_5000_2000_buffered20000 (969,764 vertices, 1,928,285 cells), DG0 geometry, vertex raster sampling
+- **Initial state / MAP:** warm start results/reinvert_2km/exp/rc_s2x_g01_vgf1.h5 (10971250's checkpoint at evaluation 103), ISMIP7_WARM_START_STRICT=0
+- **Forcing versions:** the 10971250 objective (cell s2x_rc_g01_vgf1_mumps): bilaplacian prior sigma 30, rho 75 km, log friction control, vertex drag gate, membrane floor 1 m, LAKE_ICE_BASE=1, no dH/dt, log-velocity weight 69946.22, L-BFGS-B without a metric
+- **Site / partition:** IU Quartz, general partition, one node each
+- **Ranks / memory:** 32 ranks, 220G; RSS a rank (mean, rss_mib) at evaluations 10 and 62: 2,761 to 3,366 without the release (11.6 MiB an evaluation, still rising), 2,657 to 2,804 with it (2.8; flat within 2,739 to 2,809 from evaluation 13); peak 5,543 and 4,915 MiB. ICNTL(13)=1 without the release: 2,735 to 3,009 over evaluations 10 to 42 (8.5 MiB an evaluation)
+- **Job ids:** 11479582 (without), 11479583 (with the release), 11479906 (mat_mumps_icntl_13 1, without)
+- **Code:** 06cb0a9 and the release tree of test-2km-full-mumps-issue161-probes; probe161.py, probe161_extra.py (PROBE_EXTRA_PARAMS)
+- **Started:** 2026-10-06
+- **Finished:** 2026-10-06
+- **Cost per model year:** 2 h 33 min and 2 h 24 min for 62 evaluations (136 and 128 s an evaluation, adjoint 92 and 90 s); 1 h 45 min for 42 evaluations under ICNTL(13)=1
+- **Results path:** /N/scratch/dlilien/ismip7_issue161_jobs/probe/q2_before_long.*, q2_fix_long.*, q2_icntl13.*
+- **Audit:** objectives agree to 1.3e-14 at evaluation 10 and 8.4e-13 at 20, then drift as roundoff compounds through L-BFGS-B (9.5e-11 at 40, 3.4e-5 at 62, the same Newton iterations at every evaluation); same-code reruns spread alike (2.0e-15 at evaluation 2, 1.6e-11 at 22). PETSc -log_view on rank 0 at exit: 37 of 1,766 matrices alive without the release, 10 with it; every SNES, KSP and PC destroyed in both.
+- **Notes:** Issue #161. Turning ScaLAPACK off for the root changed neither the trend nor the adjoint time (95 s).
+
+### test-2km-full-mumps-issue161-moving
+
+2 km RC inversion under full_mumps on 32 ranks, 45 L-BFGS-B iterations from a start the rho 75 km objective moves far, with and without the solver release, and 30 iterations reading MUMPS's memory counters for the cached forward solver (done), IU.
+
+- **Task type:** test
+- **Friction law:** regularized_coulomb
+- **Mesh:** antarctica_5000_2000_buffered20000 (969,764 vertices, 1,928,285 cells), DG0 geometry, vertex raster sampling
+- **Initial state / MAP:** warm start results/reinvert_2km/exp/rc_s2x_vgf1.h5 (RC stage 2 converged at rho 750 km, 1 m floor, same mesh) under the rho 75 km objective, ISMIP7_WARM_START_STRICT=0, so the controls move far from the first step (misfit 2,833 at the first evaluation; total 2,007 at the 48th)
+- **Forcing versions:** the 10971250 objective (rho 75 km) (cell s2x_rc_g01_vgf1_mumps): bilaplacian prior sigma 30, rho 75 km, log friction control, vertex drag gate, membrane floor 1 m, LAKE_ICE_BASE=1, no dH/dt, log-velocity weight 69946.22, L-BFGS-B without a metric
+- **Site / partition:** IU Quartz, general partition, one node each
+- **Ranks / memory:** 32 ranks, 220G; RSS a rank (mean, rss_mib) at evaluations 10 and 48: 2,762 to 3,057 without the release (7.8 MiB an evaluation; 2,884 to 3,121 from evaluation 20), 2,633 to 2,781 with it (3.9; within 2,771 to 2,813 from evaluation 20); peak 5,449 and 4,856 MiB
+- **Job ids:** 11484096 (without), 11484569 (with the release), 11484804 (without, MUMPS counters)
+- **Code:** 06cb0a9 and the release tree of test-2km-full-mumps-issue161-probes; probe161.py, probe161_mumps.py
+- **Started:** 2026-10-06
+- **Finished:** 2026-10-06
+- **Cost per model year:** 2 h 6 min and 2 h 5 min for 48 evaluations (141 and 140 s an evaluation, adjoint 92 and 95 s); 1 h 35 min for 33 evaluations with the counters
+- **Results path:** /N/scratch/dlilien/ismip7_issue161_jobs/probe/q2_before_moving.*, q2_fix_moving.*, q2_before_moving_mumps.*
+- **Audit:** final totals 2.006562430e+03 and 2.006562429e+03 after 45 iterations, the same Newton iterations; PETSc -log_view on rank 0 at exit: 28 of 1,388 matrices alive without the release, 10 with it, every SNES, KSP and PC destroyed. The cached forward solver was built once and its MUMPS instance reported INFO(16) 1,482 to 1,488 MB allocated, INFO(22) 654 to 659 MB used and RINFO(8) 1,552 MB at every evaluation.
+- **Notes:** Issue #161.
+
+### test-2km-full-mumps-issue161-probes
+
+2 km RC inversion under full_mumps on 32 ranks, 20 L-BFGS-B iterations from 10971250's last checkpoint, five probes of where the RSS goes: plain, malloc_trim after every evaluation, a trim and RSS split at every phase boundary, and the solver release on the last two (done), IU.
+
+- **Task type:** test
+- **Friction law:** regularized_coulomb
+- **Mesh:** antarctica_5000_2000_buffered20000 (969,764 vertices, 1,928,285 cells), DG0 geometry, vertex raster sampling
+- **Initial state / MAP:** warm start results/reinvert_2km/exp/rc_s2x_g01_vgf1.h5 (10971250's checkpoint at evaluation 103, same mesh), ISMIP7_WARM_START_STRICT=0
+- **Forcing versions:** the 10971250 objective (cell s2x_rc_g01_vgf1_mumps): bilaplacian prior sigma 30, rho 75 km, log friction control, vertex drag gate, membrane floor 1 m, LAKE_ICE_BASE=1, no dH/dt, log-velocity weight 69946.22, L-BFGS-B without a metric
+- **Site / partition:** IU Quartz, general partition, one node each
+- **Ranks / memory:** 32 ranks, 220G; RSS a rank (mean, the timing record's rss_mib) at evaluations 10 and 22: plain 2,765 to 2,887, with the release 2,666 to 2,780; peak 5,020 and 4,852 MiB
+- **Job ids:** 11472363 (plain), 11469618 (release), 11469617 (malloc_trim), 11472183 (phases), 11475900 (phases with the release); 11479356 and 11481611 (tracemalloc, both stopped by a PyOP2 kernel-cache miss in setup), 11484485 (tracemalloc, cancelled after 6 evaluations)
+- **Code:** 06cb0a9 (taped_solve.py as 90d490e); the release arms the same tree with taped_solve.py sha256 a719cd19, committed in the issue #161 release commit with docstrings changed only; probes probe161.py, probe161_phases.py, probe161_tm.py
+- **Started:** 2026-10-06
+- **Finished:** 2026-10-06
+- **Cost per model year:** 55 to 64 min each, 22 evaluations: 132 to 153 s an evaluation (forward 39 to 44 s, adjoint 91 to 107 s)
+- **Results path:** /N/scratch/dlilien/ismip7_issue161_jobs/probe/<arm>.json (timing), <arm>.jsonl (probe), <arm>_log_view.txt; logs/inv_<job>.out
+- **Audit:** objectives within 1.2e-12 at evaluation 20 between every pair, the same spread as same-code reruns (32-rank runs are not bit-identical); PETSc -log_view on rank 0: every SNES, KSP and PC destroyed (49 of 49) in every arm, 10 of 686 matrices alive at exit in every arm but the plain phases probe (28). malloc_trim returned 115 to 226 MiB a rank every evaluation (median 156) and left the trend. Phase medians from evaluation 6 (MiB a rank, after a trim at each boundary): plain forward +63, to the first adjoint solve -60, adjoint +797, to the end of compute_gradient -727, so an evaluation keeps +74, all of it anonymous memory; with the release the same steps are +9, +3, +802, -790, keeping +14. tracemalloc saw Python's own memory flat at 909 to 937 MiB a rank over evaluations 2 to 6.
+- **Notes:** Issue #161. Python 3.14, Firedrake 2026.04, PETSc 3.25.5, MUMPS 5.8.2, OpenBLAS 0.3.13, Open MPI 4.0.5.
+
 ### test-2km-inversion-cost-full-mumps-p32
 
 2 km inversion cost probe, full_mumps on 32 ranks (done), IU.
@@ -5296,6 +5381,25 @@ RC continued 150 iterations on Rice's mesh from its stage-1 MAP, curvature x1 (r
 - **Audit:** resid 0.0000 on all 50 rows, exit 0; largest \|dh\| in a step 162.9 m, no cell flipping sign step to step; at 2025.0 against ref_t0_dt0125: thickness RMS 0.15 m, max 4.17 m; speed RMS 8.31 m/yr; mass -54.9 Gt, VAF -0.167 mm SLE
 - **Notes:** One run of the ISMIP7_FSSA_REFERENCE probe of PR 160: a no-forcing 32 km forward (forcing_callback None, so no SMB and no melt) from the MAP's mixed state, ISMIP7_FIXED_FRONT=1, tripwire printing only. Driver probe.py, runner run.sh, the list matrix.txt and the comparison compare.py sit in the results directory; the comparison matches cells and vertices by coordinate. Stabilization off (ISMIP7_FSSA_THETA=0). Arguments: t0_dt2 10 0.2 np=2 ISMIP7_FSSA_THETA=0.
 
+### test-32km-full-mumps-issue161-mac
+
+32 km inversion under full_mumps on 8 ranks, 30 L-BFGS-B iterations, with a census after every evaluation, and again with gc.collect() and two PETSc garbage cleanups after every evaluation: does the direct forward's full_mumps path lose PETSc objects (issue #161) (done), IU.
+
+- **Task type:** test
+- **Friction law:** regularized_coulomb
+- **Mesh:** antarctica_320000_32000_buffered0 (6,282 vertices), DG0 geometry, vertex raster sampling
+- **Initial state / MAP:** cold start (u = 0.1 u_obs, theta = phi = 0, the n,m ramp under full_mumps), then the direct forward
+- **Forcing versions:** MEaSUREs v2 450 m and BedMachine v4.1 under ISMIP7_OBS_DATA_ROOT=/Volumes/LaCie/Data/antarctica_general/ismip7_obs; ISMIP7_FLUIDITY_PRIOR=legacy; no dH/dt term
+- **Site / partition:** IU workstation (Mac, 16 cores, 128 GB); the two arms ran together
+- **Ranks / memory:** 8 ranks each; RSS a rank (mean over ranks) after compute_gradient 1,197 at evaluation 11 and 1,210 at 35 (0.51 MiB an evaluation) without the cleanup, 1,070 and 1,072 (0.07) with it; peak 2,156 and 1,830 MiB
+- **Code:** 90d490e (git archive); probe161.py (PROBE_GC=1 for the second arm); bilaplacian prior sigma 30, rho 75 km, LOG friction control, L-BFGS-B without a metric
+- **Started:** 2026-10-06
+- **Finished:** 2026-10-06
+- **Cost per model year:** 534 and 538 s wall, 35 evaluations: 5.3 and 5.4 s an evaluation (median after the first)
+- **Results path:** /Volumes/LaCie/Data/antarctica_general/ismip7_runs/issue161_full_mumps/m32_base_90d490e/ and m32_gc_90d490e/ (map.h5, log.txt, timing.json, probe.jsonl, log_view.txt); probe scripts in /Volumes/LaCie/Data/antarctica_general/ismip7_runs/issue161_full_mumps/scripts/
+- **Audit:** both arms end on total 1.835776394e+02 after 30 iterations and 35 evaluations; PETSc's -log_view on rank 0: every SNES, KSP and PC destroyed (75 of 75), 1,028 matrices created and 1,019 destroyed (9 alive at exit) without the cleanup, all 1,028 with it, so no evaluation loses a PETSc object; Python's live solver and petsc4py wrapper counts flat from evaluation 6
+- **Notes:** Issue #161. The 32 km full_mumps baseline of issue #159 (fb7c32e) predates the direct forward (fa9e96e); this is the current path.
+
 ### test-32km-inversion-defaults-check
 
 32 km inversion, 5 L-BFGS-B iterations on the new defaults (no solver or optimizer knob set), against the SEP1 study's exp arm (done), IU.
@@ -6532,6 +6636,25 @@ The p4 ssp585 at 32 km restarted at 2294.0 on main after pull requests 127 and 1
 - **Results path:** /Volumes/LaCie/Data/antarctica_general/ismip7_runs/pr158_merge/C_4km_scpc_gamg/map.h5 (sha256 1a27220e), log.txt, timing.json, code.txt; the wrappers are runm.sh, study.sh and study_exp.sh in pr158_merge
 - **Audit:** 10 TAO iterations, objective 9.243682e3 to 6.312668e3; every direct forward converged (2 to 6 Newton iterations), no lost trial, no rescue; published residual 4.8e-4; every iteration's objective within 9.2e-11 and gradient norm within 1.2e-9 of the other solver's
 - **Notes:** the solver pair at 4 km: scpc_gamg against full_mumps (test-4km-inversion-sep1-full-mumps)
+
+### test-8km-full-mumps-issue161-mac
+
+8 km inversion under full_mumps on 2 ranks (17,000 vertices a rank, about half the 2 km per-rank size on 32), 30 L-BFGS-B iterations with a census after every evaluation: does RSS grow on macOS (issue #161) (done), IU.
+
+- **Task type:** test
+- **Friction law:** regularized_coulomb
+- **Mesh:** antarctica_80000_8000_buffered0 (34,714 vertices), DG0 geometry, vertex raster sampling
+- **Initial state / MAP:** cold start, the n,m ramp under full_mumps, then the direct forward
+- **Forcing versions:** MEaSUREs v2 450 m and BedMachine v4.1 under ISMIP7_OBS_DATA_ROOT=/Volumes/LaCie/Data/antarctica_general/ismip7_obs; ISMIP7_FLUIDITY_PRIOR=legacy; no dH/dt term
+- **Site / partition:** IU workstation (Mac, 16 cores, 128 GB)
+- **Ranks / memory:** 2 ranks; RSS a rank (mean) 2,797 MiB at evaluation 11 and 2,908 at 35 (4.6 MiB an evaluation, in steps of 20 MiB at evaluations 14, 20, 24, 28 and 29 and flat between); peak 4,505 MiB
+- **Code:** 90d490e (git archive); probe161.py
+- **Started:** 2026-10-06
+- **Finished:** 2026-10-06
+- **Cost per model year:** 443 s wall, 35 evaluations: 6.9 s an evaluation (forward 6.3 s, adjoint 1.6 s at evaluation 10)
+- **Results path:** /Volumes/LaCie/Data/antarctica_general/ismip7_runs/issue161_full_mumps/m8_base_90d490e/
+- **Audit:** -log_view on rank 0: every SNES, KSP and PC destroyed, 12 of 1,028 matrices alive at exit
+- **Notes:** Issue #161. The adjoint takes 1.6 s here against 91 s at 2 km on Quartz.
 
 ### test-8km-inversion-sep1-full-mumps
 

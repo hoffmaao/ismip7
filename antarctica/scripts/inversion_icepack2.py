@@ -695,6 +695,9 @@ def main():
     # by default (ISMIP7_INVERSION_LINEAR_SOLVER). The taped confirm solve
     # keeps the assembled sparams: it exits at iteration 0 on the direct
     # solve's converged state, so it never factors.
+    # The condensed factorizations run MUMPS's own (sequential) analysis unless
+    # the environment says otherwise (solverconfig.mumps_analysis).
+    os.environ.setdefault("ISMIP7_MUMPS_ANALYSIS", "sequential")
     inv_solver_mode = inversion_solver_mode()
     _scpc_structural_zero = Constant(0.0)
     PETSc.Sys.Print(

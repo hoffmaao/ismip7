@@ -61,3 +61,9 @@ def test_quadrature_degree_reaches_every_derived_form():
     kept = ns["with_quadrature_degree"](u * v * fd.dx(degree=7), 4)
     assert kept.integrals()[0].metadata()["quadrature_degree"] == 7
     assert isinstance(F, ufl.Form)
+
+
+def test_mumps_analysis_knob_is_checked(monkeypatch):
+    monkeypatch.setenv("ISMIP7_MUMPS_ANALYSIS", "distributed")
+    with pytest.raises(ValueError):
+        sc.mumps_analysis()

@@ -299,3 +299,19 @@ def test_the_step_reference_holds_a_stiff_channel_at_a_large_step():
     err_start = np.sqrt(np.mean((start - reference) ** 2))
     assert err_step < 0.5
     assert err_start > 10.0 * err_step
+
+
+def test_fssa_is_on_by_default_and_a_restart_keeps_its_checkpoint(monkeypatch):
+    from icepack2_tools import solverconfig
+    monkeypatch.delenv("ISMIP7_FSSA_THETA", raising=False)
+    assert solverconfig.fssa_theta() == 1.0
+    assert solverconfig.forward_fssa_theta() == 1.0
+    # a checkpoint stepped under the stabilization records its step
+    assert solverconfig.forward_fssa_theta({"fssa_tau": 0.05}) == 1.0
+    # one stepped without it keeps it off, unless the knob says otherwise
+    assert solverconfig.forward_fssa_theta({}) == 0.0
+    monkeypatch.setenv("ISMIP7_FSSA_THETA", "1")
+    assert solverconfig.forward_fssa_theta({}) == 1.0
+    monkeypatch.setenv("ISMIP7_FSSA_THETA", "0")
+    assert solverconfig.forward_fssa_theta({"fssa_tau": 0.05}) == 0.0
+    assert solverconfig.effective_solver_env()["ISMIP7_FSSA_THETA"] == "1"

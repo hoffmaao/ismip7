@@ -127,6 +127,7 @@ from icepack2_tools.solverconfig import (
     subcycles,
     substep_settings,
     fssa_theta,
+    forward_fssa_theta,
     fssa_reference,
     transport_solver_parameters,
 )
@@ -1387,7 +1388,12 @@ def setup_model(restart_from=None, *, allow_timing_cache_a_ref=False,
     # A restart resumes at the step its checkpoint was solved at, so the
     # fast path accepts the stabilized state. Off, the term is left out of
     # the residual altogether.
-    fssa_theta_val = fssa_theta()
+    fssa_theta_val = forward_fssa_theta(
+        checkpoint_metadata if restart_from is not None else None)
+    if restart_from is not None and fssa_theta_val == 0.0 and fssa_theta() > 0.0:
+        PETSc.Sys.Print(
+            "  Free-surface stabilization off: the restart checkpoint was stepped "
+            "without it (set ISMIP7_FSSA_THETA to change that)")
     fssa_tau = Constant(0.0)
     if (restart_from is not None and fssa_theta_val > 0
             and checkpoint_metadata.get("fssa_tau") is not None):

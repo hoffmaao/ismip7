@@ -12,8 +12,8 @@ from icepack2_tools.relaxation import (
     END_STATE_ATTR, GEOMETRY_METHOD_RELAXED, RELAX_KEYS, anchor_ratio_counts,
     end_state_problems, inherited_geometry, init_state, is_relaxed,
     relax_backdate_years, relax_dt, relax_environment_problems,
-    relax_experiment_name, relax_forcing, relax_window, relaxation_attrs,
-    relaxed_map_name,
+    describe_relaxation, relax_experiment_name, relax_forcing,
+    relax_fssa_attrs, relax_window, relaxation_attrs, relaxed_map_name,
 )
 
 REPO = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -28,10 +28,11 @@ MAP = {
 
 
 def _attrs(**over):
-    return relaxation_attrs(
+    return {**relaxation_attrs(
         source_map="/maps/inversion_icepack2_rc_n3_dg0_2000.h5", source_sha256="ab12",
         source_attrs={**MAP, **over}, t_start=2014.0, t_end=2015.0, dt=0.0125,
-        backdate_years=1.0, forcing="ocx protocol")
+        backdate_years=1.0, forcing="ocx protocol"),
+        **relax_fssa_attrs(1.0, "step")}
 
 
 def test_the_year_is_2014_to_2015_at_half_the_production_step(monkeypatch):
@@ -91,6 +92,20 @@ def test_the_end_state_carries_the_map_s_objective_and_leaves_its_value_behind()
     assert (out["relax_t_start"], out["relax_t_end"], out["relax_dt"]) == (2014.0, 2015.0, 0.0125)
 
 
+def test_the_end_state_records_the_stabilization_its_year_ran_under():
+    assert relax_fssa_attrs(1, "step") == {
+        "relax_fssa_theta": 1.0, "relax_fssa_reference": "step"}
+    # off: the forward resolves no reference
+    assert relax_fssa_attrs(0.0, None) == {
+        "relax_fssa_theta": 0.0, "relax_fssa_reference": "none"}
+    assert "FSSA theta 1, step reference" in describe_relaxation(_attrs())
+    off = {**_attrs(), **relax_fssa_attrs(0.0, None)}
+    assert "FSSA off" in describe_relaxation(off)
+    # a relaxation made before the record held it
+    older = {k: v for k, v in _attrs().items() if not k.startswith("relax_fssa_")}
+    assert "FSSA unrecorded" in describe_relaxation(older)
+
+
 def test_bytes_and_numpy_attributes_come_through_as_values():
     out = _attrs(misfit_norm=b"logvel", log_vel_weight=np.float64(5.0), lake_ice_base=np.int64(1))
     assert out["misfit_norm"] == "logvel" and type(out["log_vel_weight"]) is float
@@ -141,6 +156,7 @@ def test_a_re_inversion_records_the_end_state_it_took_its_geometry_from():
     assert rec["geometry_source"] == rec["relax_state"] == "relax_x_2000_final.h5"
     assert rec["relax_state_sha256"] == "cd34"
     assert rec["relax_source_sha256"] == "ab12"
+    assert (rec["relax_fssa_theta"], rec["relax_fssa_reference"]) == (1.0, "step")
     assert not set(rec) & set(OBJECTIVE_KEYS)
     # the next link of the chain resumes the re-inversion's own checkpoint
     link2 = inherited_geometry({**rec, "log_vel_weight": 1.0}, geometry_taken=True,

@@ -33,7 +33,7 @@ END_STATE_ATTR = "relaxation_end_state"
 RELAX_KEYS = (
     "relax_source_map", "relax_source_sha256", "relax_t_start", "relax_t_end",
     "relax_dt", "relax_backdate_years", "relax_forcing",
-    "relax_source_objective_total",
+    "relax_source_objective_total", "relax_fssa_theta", "relax_fssa_reference",
 )
 # what a relaxed MAP adds: the end state it was re-inverted from
 RELAX_MAP_KEYS = RELAX_KEYS + ("relax_state", "relax_state_sha256")
@@ -190,6 +190,16 @@ def relaxation_attrs(*, source_map, source_sha256, source_attrs, t_start, t_end,
     return out
 
 
+def relax_fssa_attrs(theta, reference):
+    r"""The free-surface stabilization the year ran under, for the end state's
+    record: the weight and the resolved reference a forward's ``setup_model``
+    returns (``fssa_theta``, ``fssa_reference``). A weight of 0 is off, and
+    its reference is recorded as ``none``."""
+    theta = float(theta)
+    return {"relax_fssa_theta": theta,
+            "relax_fssa_reference": str(reference) if theta > 0 else "none"}
+
+
 def end_state_problems(attrs, *, same_mesh, geometry_taken, map_out):
     r"""Why a relaxation end state cannot seed a re-inversion, as sentences;
     empty when it can. The year has to have reached its end, unstalled, and
@@ -271,9 +281,17 @@ def describe_relaxation(attrs):
     r"""One line naming how a relaxed geometry was made, from its record."""
     def _get(key, default="?"):
         return _value(attrs.get(key, default))
+    if "relax_fssa_theta" not in attrs:
+        fssa = "FSSA unrecorded"
+    elif float(_get("relax_fssa_theta")) > 0:
+        fssa = (f"FSSA theta {float(_get('relax_fssa_theta')):g}, "
+                f"{_get('relax_fssa_reference')} reference")
+    else:
+        fssa = "FSSA off"
     return (f"relaxed {float(_get('relax_t_start', 'nan')):g} to "
             f"{float(_get('relax_t_end', 'nan')):g} at dt "
-            f"{float(_get('relax_dt', 'nan')):g} yr ({_get('relax_forcing')} forcing) "
+            f"{float(_get('relax_dt', 'nan')):g} yr ({_get('relax_forcing')} forcing, "
+            f"{fssa}) "
             f"from {os.path.basename(str(_get('relax_source_map')))}")
 
 

@@ -15,9 +15,9 @@ to 2015.0 at ``ISMIP7_RELAX_DT`` (default half of ``ISMIP7_DT``):
 
 The final checkpoint, ``results/relax_<MAP stem>_<lc>_final.h5``, seeds the
 re-inversion (``ISMIP7_WARM_START`` and ``ISMIP7_MESH=checkpoint``). It records
-the MAP, its sha256, the year, the step and the forcing, and carries the
-MAP's objective settings, so the re-inversion minimises the MAP's objective
-on the relaxed geometry. Everything else the driver needs is a forward's.
+the MAP, its sha256, the year, the step, the forcing and the free-surface
+stabilization the year ran under, and carries the MAP's objective settings,
+so the re-inversion minimises the MAP's objective on the relaxed geometry. Everything else the driver needs is a forward's.
 
 Usage:
     submit.sh projection ISMIP7_EXPERIMENT=relax ISMIP7_INVERSION=<MAP> ISMIP7_MESH=checkpoint
@@ -42,7 +42,7 @@ from icepack2_tools.handoff import OBJECTIVE_KEYS, OBJECTIVE_RECORD_KEYS  # noqa
 from icepack2_tools.relaxation import (  # noqa: E402
     END_STATE_ATTR, describe_relaxation, relax_backdate_years, relax_dt,
     relax_environment_problems, relax_experiment_name, relax_forcing,
-    relax_window, relaxation_attrs,
+    relax_fssa_attrs, relax_window, relaxation_attrs,
 )
 from icepack2_tools.runconfig import (  # noqa: E402
     apparent_mb_mode, calving_law, deltat_per_basin_npz, file_sha256,
@@ -106,7 +106,8 @@ def main():
         PETSc.Sys.Print(f"Auto-resume: {restart}" if restart
                         else "Auto-resume: no prior checkpoint")
     if restart:
-        _rec = _root_attrs(restart, ("relax_source_sha256", END_STATE_ATTR))
+        _rec = _root_attrs(restart, ("relax_source_sha256", END_STATE_ATTR,
+                                     "relax_fssa_theta"))
         _had = _rec.get("relax_source_sha256")
         _had = _had.decode() if isinstance(_had, bytes) else _had
         if _had != sha or not int(_rec.get(END_STATE_ATTR, 0) or 0):
@@ -132,6 +133,13 @@ def main():
             f"the relaxation year runs on the mesh and geometry of {source}, "
             f"and this run built its own geometry on {ctx['mesh_basename']}; "
             f"set ISMIP7_MESH=checkpoint")
+    final_attrs.update(relax_fssa_attrs(ctx["fssa_theta"], ctx["fssa_reference"]))
+    if restart and "relax_fssa_theta" in _rec and (
+            float(_rec["relax_fssa_theta"]) != final_attrs["relax_fssa_theta"]):
+        raise RuntimeError(
+            f"{restart} ran its year so far at FSSA theta "
+            f"{float(_rec['relax_fssa_theta']):g} and this link would step at "
+            f"{final_attrs['relax_fssa_theta']:g}; set ISMIP7_FSSA_THETA to match")
 
     callback, ocean = None, None
     if forcing == "ocx":

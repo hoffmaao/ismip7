@@ -355,7 +355,9 @@ Choices, IU's on 6 October:
   the 2 km mesh.
 
 The record: the end state carries `relaxation_end_state`, the source MAP and
-its sha256, the year, the step and the forcing (`relax_*`), and the MAP's
+its sha256, the year, the step, the forcing and the free-surface
+stabilization the year ran under (`relax_fssa_theta`, 0 when off, and the
+resolved `relax_fssa_reference`, `none` when off) as `relax_*`, and the MAP's
 `handoff.OBJECTIVE_KEYS`, leaving the objective value behind, so the
 re-inversion skips the handoff gap check and logs its first objective
 against the source MAP's. The relaxed MAP records

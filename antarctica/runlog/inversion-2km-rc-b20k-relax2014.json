@@ -1,0 +1,15 @@
+{
+ "task": "inversion",
+ "institution": "IU",
+ "status": "planned",
+ "mesh": "antarctica_5000_2000_buffered20000 (IU's build, 969,764 vertices), DG0 geometry, the production MAP's own mesh (ISMIP7_MESH=checkpoint)",
+ "site": "IU Quartz, general partition",
+ "id": "inversion-2km-rc-b20k-relax2014",
+ "title": "RC re-inversion on the relaxed geometry, 250 iterations",
+ "friction": "regularized_coulomb",
+ "period": "2015 state",
+ "initial_state": "inversion-2km-rc-b20k-relax2014-year's end state; theta kept",
+ "forcing": "inversion-2km-rc-b20k-rho7500-floating's objective, carried by the end state and held by the strict handoff",
+ "resources": "one link sized from the production chain's seconds per evaluation (about 260 evaluations), ISMIP7_MAXITER=250, ISMIP7_CHAIN_MAX=0",
+ "notes": "The MAP is one of the initial-state options the forwards can start from in 2003 (INVERSION_PRIORS.md section 6)"
+}

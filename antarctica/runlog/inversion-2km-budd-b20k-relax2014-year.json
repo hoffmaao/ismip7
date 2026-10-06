@@ -1,0 +1,14 @@
+{
+ "task": "inversion",
+ "institution": "IU",
+ "status": "planned",
+ "mesh": "antarctica_5000_2000_buffered20000 (IU's build, 969,764 vertices), DG0 geometry, the production MAP's own mesh (ISMIP7_MESH=checkpoint)",
+ "site": "IU Quartz, general partition",
+ "id": "inversion-2km-budd-b20k-relax2014-year",
+ "title": "Budd relaxation year of the relaxed initial state: 2014 to 2015 on OCX's 2014 forcing",
+ "friction": "budd",
+ "period": "2014.0 to 2015.0 at dt 0.0125 (80 steps)",
+ "initial_state": "inversion-2km-budd-b20k-rho7500-floating's final MAP, rewound 1 yr with the Smith dH/dt on grounded ice",
+ "forcing": "OCX protocol forcing for 2014 (ISMIP7_EXPERIMENT=relax), apparent MB off, front pinned",
+ "notes": "Runs once the production chain has finished; its end state seeds the re-inversion below. README, \"The relaxed initial state\""
+}

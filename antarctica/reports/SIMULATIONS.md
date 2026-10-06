@@ -9,9 +9,9 @@ gitignored, so these records and the per-core reports beside them are
 the trace a run leaves in the repository. A core experiment also gets
 its full report from `core_report.py`; this is the index.
 
-297 records.
+305 records.
 
-Status: 12 planned, 5 running, 25 stopped, 238 done, 17 superseded.
+Status: 16 planned, 5 running, 25 stopped, 242 done, 17 superseded.
 
 ## Inversion
 
@@ -19,10 +19,14 @@ Status: 12 planned, 5 running, 25 stopped, 238 done, 17 superseded.
 |---|---|---|---|---|---|---|
 | 1 km inversion | planned | antarctica_10000_1000_buffered20000, 1 km fine, 10 km interior, 20 km buffer | nots, long partition | - | - | - |
 | 25 km Budd re-inversion for the rehearsal, warm-started across meshes from the 2 km snapshot 0241 | done | antarctica_250000_25000_buffered20000 (IU's build, 4,509 vertices, 7,615 cells, md5 3e8b44b0), DG0 geometry, vertex raster sampling | IU Quartz, general partition | 2026-09-27 | 2026-09-27 | the PR 123 ramp converged on its first rung (8 steps); the log-velocity weight 85380.4 was held from the warm start across meshes (issue 68; a fresh derivation gives 3.68e4 at the start and 1.77e4 at iteration 50). Objective 3.511e5 to 1.078e5 over 50 iterations; iterations 40 to 50 still lowered it 1.18 percent, so the budget was extended as planned and the second link converged on the relative decrease (ftol 1e-10) at its 88th iteration, total 1.051e5. theta in -0.93 to 4.54, phi in -2.55 to 0.39. Published-state residual 7.48e3 after a final solve that converged in 0 Newton iterations |
+| Budd re-inversion on the relaxed geometry, 250 iterations | planned | antarctica_5000_2000_buffered20000 (IU's build, 969,764 vertices), DG0 geometry, the production MAP's own mesh (ISMIP7_MESH=checkpoint) | IU Quartz, general partition | - | - | - |
+| Budd relaxation year of the relaxed initial state: 2014 to 2015 on OCX's 2014 forcing | planned | antarctica_5000_2000_buffered20000 (IU's build, 969,764 vertices), DG0 geometry, the production MAP's own mesh (ISMIP7_MESH=checkpoint) | IU Quartz, general partition | - | - | - |
 | Budd final-product inversion on the 20 km buffered 2 km mesh: gamma x0.01, fluidity on floating ice only, 2.5 m floor | running | antarctica_5000_2000_buffered20000 (IU's build, 969,764 vertices), DG0 geometry, vertex raster sampling, the lake fix | IU Quartz, general partition | 2026-10-06 | - | first checkpoint (check_phi_grounded.py, job 11469157): phi exactly 0 on all 658,217 held nodes of 969,764 (largest \|phi\| 0.0), and the MAP records fluidity_control=floating, phi_grounded=zero, h_visc_floor=2.5, drag_gate=vertex, exact_front=1; evaluation 1 total 4,329.3 (Budd stage 1 recorded 2,762.5 on Rice's mesh with grounded phi inverted), 37 to 66 s an evaluation |
 | 2 km Budd inversion under the bilaplacian prior | running | antarctica_5000_2000_buffered0, 2 km fine, 5 km interior, no buffer | nots, long partition, sapphirerapids | 2026-09-20 | - | misfit 2.04e4 and falling at link three |
 | 2 km Budd re-inversion without the prior mean, on Rice's mesh (stage 1) | stopped | antarctica_5000_2000_buffered0 (Rice's build, 925,183 vertices, 1,835,718 cells, read from the warm start), DG0 geometry, vertex raster sampling | IU Quartz, general partition | 2026-10-01 | 2026-10-01 | stopped at iteration 11 of link 1: misfit 3.302e4 to 2.548e4 (velocity chi2 1.98e4 at the start), 4 trial points rescued by re-ramping, no failure; no checkpoint written (the first is at iteration 20) |
 | 2 km Budd re-inversion without the prior mean, on Rice's mesh (stage 1), restarted on L-BFGS-B and scpc_gamg | done | antarctica_5000_2000_buffered0 (Rice's build, 925,183 vertices, 1,835,718 cells, read from the warm start), DG0 geometry, vertex raster sampling | IU Quartz, general partition | 2026-10-03 | 2026-10-04 | ended at ITERATIONS REACHED LIMIT, 1000 iterations, 24 line-search trials that did not lower the objective, no failed forward. Evaluation 1 reproduces the stopped run's start to every printed digit. From evaluation 1 to 1031: misfit 3.302e4 to 2.454e3, velocity chi2 1.98e4 to 32.8, the log term 0.154 to 0.0284, smoothness 87 and 400 to 206 and 103, total 3.351e4 to 2.763e3. phi spans [-13.2, 2.3] (the warm start [-17.5, 0.16]); its 1st percentile fell from -0.76 to -3.9. theta spans [-3.3, 4.6], 127 nodes above 3 |
+| RC re-inversion on the relaxed geometry, 250 iterations | planned | antarctica_5000_2000_buffered20000 (IU's build, 969,764 vertices), DG0 geometry, the production MAP's own mesh (ISMIP7_MESH=checkpoint) | IU Quartz, general partition | - | - | - |
+| RC relaxation year of the relaxed initial state: 2014 to 2015 on OCX's 2014 forcing | planned | antarctica_5000_2000_buffered20000 (IU's build, 969,764 vertices), DG0 geometry, the production MAP's own mesh (ISMIP7_MESH=checkpoint) | IU Quartz, general partition | - | - | - |
 | RC final-product inversion on the 20 km buffered 2 km mesh: gamma x0.01, fluidity on floating ice only, 2.5 m floor | running | antarctica_5000_2000_buffered20000 (IU's build, 969,764 vertices), DG0 geometry, vertex raster sampling, the lake fix | IU Quartz, general partition | 2026-10-06 | - | first checkpoint (check_phi_grounded.py, job 11469157): phi exactly 0 on all 658,217 held nodes of 969,764 (largest \|phi\| 0.0), and the MAP records fluidity_control=floating, phi_grounded=zero, h_visc_floor=2.5, drag_gate=vertex, exact_front=1; strict resume reproduced the recorded objective (relative gap 5.6e-12); total 5,546.0 at the resume, 3,572.8 seven evaluations later, 30 to 125 s an evaluation |
 | 2 km regularized-Coulomb inversion under the bilaplacian prior | running | antarctica_5000_2000_buffered0, 2 km fine, 5 km interior, no buffer | nots, long partition, sapphirerapids | 2026-09-20 | - | misfit still falling about half a percent per iteration; never reaches gatol, so the chain caps at four links |
 | 2 km regularized-Coulomb re-inversion without the prior mean, on Rice's mesh (stage 1) | stopped | antarctica_5000_2000_buffered0 (Rice's build, 925,183 vertices, 1,835,718 cells, read from the warm start), DG0 geometry, vertex raster sampling | IU Quartz, general partition | 2026-10-01 | 2026-10-01 | stopped at iteration 7 of link 1: misfit 3.315e4 to 3.105e4, 1 trial point rescued; no checkpoint written. Rice's own objective on this file under the current code gives 3.563e4 against the 2.465e4 Rice printed (validation 10818658) |
@@ -287,6 +291,10 @@ Status: 12 planned, 5 running, 25 stopped, 238 done, 17 superseded.
 | 32 km inversion, 20 TAO lmvm iterations (mass-consistent metric, bi-Laplacian prior) under full_mumps | done | antarctica_320000_32000_buffered0 (Quartz's .msh, sha256 fd66fc42; 6,282 vertices, 9,055 cells), DG0 geometry, vertex raster sampling | IU workstation (Mac, 16 cores, 128 GB), data under /Volumes/LaCie/Data/antarctica_general/ismip7_obs | 2026-10-01 | 2026-10-01 | objective 3.0156e4 to 1.1884e4, published residual 1.493; the forward failed at three trial points and the re-ramp rescue recovered each |
 | 32 km inversion, 20 TAO lmvm iterations (mass-consistent metric, bi-Laplacian prior) under scpc_gamg (bt line search) | done | antarctica_320000_32000_buffered0 (Quartz's .msh, sha256 fd66fc42; 6,282 vertices, 9,055 cells), DG0 geometry, vertex raster sampling | IU workstation (Mac, 16 cores, 128 GB), data under /Volumes/LaCie/Data/antarctica_general/ismip7_obs | 2026-10-01 | 2026-10-01 | every accepted iterate's objective within 1.2e-8 of test-32km-inversion-tao-full-mumps, the same 20 iterations, published residual 1.493; no forward failed |
 | 32 km probe of the tracked K50 melt calibration: core 11's stopgap forcing for 5 model years | done | antarctica_320000_32000_buffered0, DG0 geometry | IU Quartz, general partition | 2026-09-25 | 2026-09-25 | resid 0.0 Gt on all 50 rows and forward exit 0 at both commits, the rerun (job 10644548) passing the thickness-floor check; the provenance line names the file, its sha256, K50 and both meshes, and the raster sampling is the calibration's vertex. The first step books 1069.4891 Gt/yr of melt, the forward total check_melt_bound.py gives on the same mesh (job 10644430, 1069.489), and 1068.9659 at 1984. That check exits 1 by design: at 32 km the offsets fitted on the 1000 m mesh put the basins at 0.33 (basin 6) to 1.74 (basin 10) times their fitted totals |
+| 32 km forward cold-started in 2003 from the relaxed MAP, 2 steps, apparent MB on | done | antarctica_320000_32000_buffered0 (6,282 vertices, 9,055 cells), DG0 geometry, ISMIP7_MESH=checkpoint | IU workstation (Mac, 16 cores), load average about 6 | 2026-10-06 | 2026-10-06 | budget amb +1,882, outflux -1,881 Gt/yr, resid -0.00; the checkpoint records init_state relaxed and the relax_* provenance |
+| 32 km second link of the re-inversion, resumed strictly from its own MAP, 1 iteration | done | antarctica_320000_32000_buffered0 (6,282 vertices, 9,055 cells), DG0 geometry, ISMIP7_MESH=checkpoint | IU workstation (Mac, 16 cores), load average about 6 | 2026-10-06 | 2026-10-06 | settings matched; first objective 1.367913e4 against 1.367913e4 recorded (relative gap 5.3e-16); the MAP inherits relax_state_sha256 f1abe93a and relaxed-forward-v1 |
+| 32 km re-inversion from the relaxation's end state, 3 iterations | done | antarctica_320000_32000_buffered0 (6,282 vertices, 9,055 cells), DG0 geometry, ISMIP7_MESH=checkpoint | IU workstation (Mac, 16 cores), load average about 6 | 2026-10-06 | 2026-10-06 | first attempt with five of the MAP's settings left at their defaults refused before iterating (strict handoff); with them repeated the settings matched. ln R over 4,929 grounded dofs in [-2.258, 2.374], mean \|ln R\| 0.0721, \|ln R\| > 0.1 on 19.68 %, > 0.3 on 5.44 %. First objective 1.403e4 (misfit 9,136) on the relaxed geometry against 1.711e4 (misfit 12,218) the MAP recorded; 1.368e4 after 3 iterations. The MAP records geometry_source_method relaxed-forward-v1 and the end state's name and sha256 |
+| 32 km relaxation year of the relaxed initial state, no forcing (scripts/relaxation/run.py) | done | antarctica_320000_32000_buffered0 (6,282 vertices, 9,055 cells), DG0 geometry, ISMIP7_MESH=checkpoint | IU workstation (Mac, 16 cores), load average about 6 | 2026-10-06 | 2026-10-06 | resid +0.00 on every step, exit 0; outflux 1,768 Gt/yr at the first step and 1,680 at the last; the end state records relaxation_end_state=1, t_yr 2015.0, stalled 0, the relax_* provenance and the MAP's objective settings, and no objective value |
 | The p4 ssp585 at 32 km restarted at 2294.0 on the front-melt branch for five years, booking the melt of emptied marine cells as lifmassbf (issue 109) | done | antarctica_320000_32000, DG0 geometry | IU Quartz, debug partition | 2026-09-25 | 2026-09-25 | resid 0.0000 on all 50 rows, no rescue. Front melt (true area) 3,068, 632, 596, 604 and 716 Gt/yr from 2294 to 2298, with 910 to 1,162 Gt/yr of reference-fed melt left in libmassbffl on the same cells |
 | The p4 ssp585 at 32 km restarted at 2294.0 on main for five years, the control arm of the front-melt booking (issue 109) | done | antarctica_320000_32000, DG0 geometry | IU Quartz, debug partition | 2026-09-25 | 2026-09-25 | resid 0.0000 on all 50 rows, no rescue; dM/dt near -15,000 Gt/yr in 2294 and -10,500 in 2295, as the re-solved state thins |
 | The p4 ssp585 at 32 km restarted at 2294.0 on main after pull requests 127 and 130 for five years, following the frozen reference on emptied cells (issue 136) | done | antarctica_320000_32000, DG0 geometry | IU Quartz, debug partition | 2026-09-26 | 2026-09-26 | resid 0.0000 on all 50 rows, forward exit 0; dM/dt -20,540 Gt/yr at the first step, -20,224 at 2295.0 and -5,432 at 2299.0, as the re-solved state thins |
@@ -384,6 +392,33 @@ Status: 12 planned, 5 running, 25 stopped, 238 done, 17 superseded.
 - **Audit:** the PR 123 ramp converged on its first rung (8 steps); the log-velocity weight 85380.4 was held from the warm start across meshes (issue 68; a fresh derivation gives 3.68e4 at the start and 1.77e4 at iteration 50). Objective 3.511e5 to 1.078e5 over 50 iterations; iterations 40 to 50 still lowered it 1.18 percent, so the budget was extended as planned and the second link converged on the relative decrease (ftol 1e-10) at its 88th iteration, total 1.051e5. theta in -0.93 to 4.54, phi in -2.55 to 0.39. Published-state residual 7.48e3 after a final solve that converged in 0 Newton iterations
 - **Notes:** the rehearsal of issue 138, with the prior and metric of Rice's 2 km chains named explicitly (bilaplacian, sigma 0.3 on both controls, rho 7500 m, the mass-consistent metric), misfit sigma with a 3 m/yr floor, dH/dt weight 1 and net sigma 10. rho 7.5 km is well under the 25 km cells here. 1,857 of 4,509 vertices carry no velocity observation
 
+### inversion-2km-budd-b20k-relax2014
+
+Budd re-inversion on the relaxed geometry, 250 iterations (planned), IU.
+
+- **Task type:** inversion
+- **Period (yr):** 2015 state
+- **Friction law:** budd
+- **Mesh:** antarctica_5000_2000_buffered20000 (IU's build, 969,764 vertices), DG0 geometry, the production MAP's own mesh (ISMIP7_MESH=checkpoint)
+- **Initial state / MAP:** inversion-2km-budd-b20k-relax2014-year's end state; theta kept
+- **Forcing versions:** inversion-2km-budd-b20k-rho7500-floating's objective, carried by the end state and held by the strict handoff
+- **Site / partition:** IU Quartz, general partition
+- **Ranks / memory:** one link sized from the production chain's seconds per evaluation (about 260 evaluations), ISMIP7_MAXITER=250, ISMIP7_CHAIN_MAX=0
+- **Notes:** The MAP is one of the initial-state options the forwards can start from in 2003 (INVERSION_PRIORS.md section 6)
+
+### inversion-2km-budd-b20k-relax2014-year
+
+Budd relaxation year of the relaxed initial state: 2014 to 2015 on OCX's 2014 forcing (planned), IU.
+
+- **Task type:** inversion
+- **Period (yr):** 2014.0 to 2015.0 at dt 0.0125 (80 steps)
+- **Friction law:** budd
+- **Mesh:** antarctica_5000_2000_buffered20000 (IU's build, 969,764 vertices), DG0 geometry, the production MAP's own mesh (ISMIP7_MESH=checkpoint)
+- **Initial state / MAP:** inversion-2km-budd-b20k-rho7500-floating's final MAP, rewound 1 yr with the Smith dH/dt on grounded ice
+- **Forcing versions:** OCX protocol forcing for 2014 (ISMIP7_EXPERIMENT=relax), apparent MB off, front pinned
+- **Site / partition:** IU Quartz, general partition
+- **Notes:** Runs once the production chain has finished; its end state seeds the re-inversion below. README, "The relaxed initial state"
+
 ### inversion-2km-budd-b20k-rho7500-floating
 
 Budd final-product inversion on the 20 km buffered 2 km mesh: gamma x0.01, fluidity on floating ice only, 2.5 m floor (running), IU.
@@ -465,6 +500,33 @@ Budd final-product inversion on the 20 km buffered 2 km mesh: gamma x0.01, fluid
 - **Results path:** Quartz /N/project/ice_rheology/ISMIP7/antarctica/results/reinvert_2km/inversion_icepack2_budd_n3_dg0_logvel_2000_int5000_nomass_ws0948.h5 (sha256 a03b432931b92f32, the full mixed state, published-state residual 0.187) and inversion_timing_budd_2000_int5000_nomass_ws0948.json beside it
 - **Audit:** ended at ITERATIONS REACHED LIMIT, 1000 iterations, 24 line-search trials that did not lower the objective, no failed forward. Evaluation 1 reproduces the stopped run's start to every printed digit. From evaluation 1 to 1031: misfit 3.302e4 to 2.454e3, velocity chi2 1.98e4 to 32.8, the log term 0.154 to 0.0284, smoothness 87 and 400 to 206 and 103, total 3.351e4 to 2.763e3. phi spans [-13.2, 2.3] (the warm start [-17.5, 0.16]); its 1st percentile fell from -0.76 to -3.9. theta spans [-3.3, 4.6], 127 nodes above 3
 - **Notes:** issue #153, evidence for issue #24. The objective of inversion-2km-budd-nomass, which stopped on 1 October before its first checkpoint: Rice's with the prior's mass term removed (bilaplacian sigma 30 on both controls, rho 750 km) and no dH/dt term; misfit sigma with a 3 m/yr floor, the log-velocity term at the warm start's last-link weight, the log friction control, cell-wise friction (ISMIP7_SUBELEMENT_FRICTION=0, so no exact front push), ISMIP7_LAKE_ICE_BASE=0, the warm start's fluidity prior, ISMIP7_WARM_START_STRICT=0 on link 1 (strict on resume). What changed is how it is minimised: scipy L-BFGS-B without a metric (ISMIP7_GRAD_PRECOND=none) in place of TAO lmvm with the mass-consistent metric, the chains' optimizer since 3 October (INVERSION_PRIORS.md section 4); ISMIP7_INVERSION_LINEAR_SOLVER=scpc_gamg for the taped solves and the adjoint; the direct forward, one untaped Newton solve an evaluation (the default, so ISMIP7_EVAL_CONTINUATION no longer applies). The comparison with Rice's printed misfit carries the same 1.1e4 offset from PR #122's ocean drag gate as the stopped run. Submitted with submit_reinvert.sh stage1_budd from /N/scratch/dlilien/ismip7_reinvert_jobs, with every knob spelled out. Stage 2 moves the result to antarctica_5000_2000_buffered20000.
+
+### inversion-2km-rc-b20k-relax2014
+
+RC re-inversion on the relaxed geometry, 250 iterations (planned), IU.
+
+- **Task type:** inversion
+- **Period (yr):** 2015 state
+- **Friction law:** regularized_coulomb
+- **Mesh:** antarctica_5000_2000_buffered20000 (IU's build, 969,764 vertices), DG0 geometry, the production MAP's own mesh (ISMIP7_MESH=checkpoint)
+- **Initial state / MAP:** inversion-2km-rc-b20k-relax2014-year's end state; theta kept
+- **Forcing versions:** inversion-2km-rc-b20k-rho7500-floating's objective, carried by the end state and held by the strict handoff
+- **Site / partition:** IU Quartz, general partition
+- **Ranks / memory:** one link sized from the production chain's seconds per evaluation (about 260 evaluations), ISMIP7_MAXITER=250, ISMIP7_CHAIN_MAX=0
+- **Notes:** The MAP is one of the initial-state options the forwards can start from in 2003 (INVERSION_PRIORS.md section 6)
+
+### inversion-2km-rc-b20k-relax2014-year
+
+RC relaxation year of the relaxed initial state: 2014 to 2015 on OCX's 2014 forcing (planned), IU.
+
+- **Task type:** inversion
+- **Period (yr):** 2014.0 to 2015.0 at dt 0.0125 (80 steps)
+- **Friction law:** regularized_coulomb
+- **Mesh:** antarctica_5000_2000_buffered20000 (IU's build, 969,764 vertices), DG0 geometry, the production MAP's own mesh (ISMIP7_MESH=checkpoint)
+- **Initial state / MAP:** inversion-2km-rc-b20k-rho7500-floating's final MAP, rewound 1 yr with the Smith dH/dt on grounded ice
+- **Forcing versions:** OCX protocol forcing for 2014 (ISMIP7_EXPERIMENT=relax), apparent MB off, front pinned
+- **Site / partition:** IU Quartz, general partition
+- **Notes:** Runs once the production chain has finished; its end state seeds the re-inversion below. README, "The relaxed initial state"
 
 ### inversion-2km-rc-b20k-rho7500-floating
 
@@ -6383,6 +6445,92 @@ RC continued 150 iterations on Rice's mesh from its stage-1 MAP, curvature x1 (r
 - **Results path:** Quartz /N/scratch/dlilien/ismip7_issue26/antarctica/results/ocx_issue26_32000_* and ocx_issue26b_32000_*
 - **Audit:** resid 0.0 Gt on all 50 rows and forward exit 0 at both commits, the rerun (job 10644548) passing the thickness-floor check; the provenance line names the file, its sha256, K50 and both meshes, and the raster sampling is the calibration's vertex. The first step books 1069.4891 Gt/yr of melt, the forward total check_melt_bound.py gives on the same mesh (job 10644430, 1069.489), and 1068.9659 at 1984. That check exits 1 by design: at 32 km the offsets fitted on the 1000 m mesh put the basins at 0.33 (basin 6) to 1.74 (basin 10) times their fitted totals
 - **Notes:** issues #26 and #30: the default calibration read with nothing set, through the forward's own driver, on a mesh other than the one it was fitted on. Run from a scratch clone of claude/issue-26-k50-default without ISMIP7_OUTPUT
+
+### test-32km-relax-forward-smoke
+
+32 km forward cold-started in 2003 from the relaxed MAP, 2 steps, apparent MB on (done), IU.
+
+- **Task type:** test
+- **Period (yr):** 2003.0 to 2003.05, 2 steps, reached 2003.05
+- **Friction law:** budd
+- **Mesh:** antarctica_320000_32000_buffered0 (6,282 vertices, 9,055 cells), DG0 geometry, ISMIP7_MESH=checkpoint
+- **Initial state / MAP:** test-32km-relax-reinvert-smoke's MAP: its own geometry (init_state relaxed), backdated 12 yr on 4,024 grounded cells (+554 Gt)
+- **Forcing versions:** none; MEaSUREs and BedMachine from /Volumes/LaCie/Data/antarctica_general/ismip7_obs, the Smith dH/dt cache of the MIPkit v1.2 copied from Quartz; ISMIP7_FLUIDITY_PRIOR=legacy
+- **Calving front, collapse:** pinned (ISMIP7_FIXED_FRONT=1)
+- **Apparent MB:** balance
+- **dt (yr):** 0.025
+- **Site / partition:** IU workstation (Mac, 16 cores), load average about 6
+- **Ranks / memory:** 4 ranks
+- **Code:** 8b5377f (PR 160 head 7fb5802, IU's production inversion code 1c02aa3, and the relaxed initial state); icepack_tools e7b923e
+- **Started:** 2026-10-06
+- **Finished:** 2026-10-06
+- **Cost per model year:** about 1 min wall
+- **Results path:** /Volumes/LaCie/Data/antarctica_general/ismip7_runs/relaxed_init_smoke/smoke_fwd_relaxed_32000_final.h5, /Volumes/LaCie/Data/antarctica_general/ismip7_runs/relaxed_init_smoke/fwd.log
+- **Audit:** budget amb +1,882, outflux -1,881 Gt/yr, resid -0.00; the checkpoint records init_state relaxed and the relax_* provenance
+- **Notes:** Driver fwd.py (setup_model with backdate_years=12, run_simulation with no forcing), runner fwd.sh
+
+### test-32km-relax-reinvert-link2-smoke
+
+32 km second link of the re-inversion, resumed strictly from its own MAP, 1 iteration (done), IU.
+
+- **Task type:** test
+- **Period (yr):** 2015 state
+- **Friction law:** budd
+- **Mesh:** antarctica_320000_32000_buffered0 (6,282 vertices, 9,055 cells), DG0 geometry, ISMIP7_MESH=checkpoint
+- **Initial state / MAP:** test-32km-relax-reinvert-smoke's MAP (sha256 476bbda8)
+- **Forcing versions:** as test-32km-relax-reinvert-smoke
+- **Site / partition:** IU workstation (Mac, 16 cores), load average about 6
+- **Ranks / memory:** 4 ranks
+- **Code:** 8b5377f (PR 160 head 7fb5802, IU's production inversion code 1c02aa3, and the relaxed initial state); icepack_tools e7b923e
+- **Started:** 2026-10-06
+- **Finished:** 2026-10-06
+- **Cost per model year:** about 1 min wall
+- **Results path:** /Volumes/LaCie/Data/antarctica_general/ismip7_runs/relaxed_init_smoke/map_relax2014_link2.h5, /Volumes/LaCie/Data/antarctica_general/ismip7_runs/relaxed_init_smoke/link2.log
+- **Audit:** settings matched; first objective 1.367913e4 against 1.367913e4 recorded (relative gap 5.3e-16); the MAP inherits relax_state_sha256 f1abe93a and relaxed-forward-v1
+- **Notes:** Checks that a chain link keeps the relaxed geometry's record. Runner link2.sh
+
+### test-32km-relax-reinvert-smoke
+
+32 km re-inversion from the relaxation's end state, 3 iterations (done), IU.
+
+- **Task type:** test
+- **Period (yr):** 2015 state
+- **Friction law:** budd
+- **Mesh:** antarctica_320000_32000_buffered0 (6,282 vertices, 9,055 cells), DG0 geometry, ISMIP7_MESH=checkpoint
+- **Initial state / MAP:** test-32km-relax-year-smoke's end state (sha256 f1abe93a): geometry, velocity_obs, mixed state and theta, phi taken; theta kept
+- **Forcing versions:** MEaSUREs and BedMachine from /Volumes/LaCie/Data/antarctica_general/ismip7_obs, the Smith dH/dt cache of the MIPkit v1.2 copied from Quartz; ISMIP7_FLUIDITY_PRIOR=legacy; the MAP's objective: sigma misfit, log-velocity weight 0, bilaplacian sigma 0.3 rho 7.5 km, SEP1, exact front, mass-consistent metric (TAO), 10 m floor, vertex gate; ISMIP7_WARM_START_STRICT=1
+- **Site / partition:** IU workstation (Mac, 16 cores), load average about 6
+- **Ranks / memory:** 4 ranks
+- **Code:** 8b5377f (PR 160 head 7fb5802, IU's production inversion code 1c02aa3, and the relaxed initial state); icepack_tools e7b923e
+- **Started:** 2026-10-06
+- **Finished:** 2026-10-06
+- **Cost per model year:** about 1.5 min wall, 7 to 45 s an evaluation
+- **Results path:** /Volumes/LaCie/Data/antarctica_general/ismip7_runs/relaxed_init_smoke/map_relax2014.h5 (sha256 476bbda8), /Volumes/LaCie/Data/antarctica_general/ismip7_runs/relaxed_init_smoke/reinvert.log
+- **Audit:** first attempt with five of the MAP's settings left at their defaults refused before iterating (strict handoff); with them repeated the settings matched. ln R over 4,929 grounded dofs in [-2.258, 2.374], mean \|ln R\| 0.0721, \|ln R\| > 0.1 on 19.68 %, > 0.3 on 5.44 %. First objective 1.403e4 (misfit 9,136) on the relaxed geometry against 1.711e4 (misfit 12,218) the MAP recorded; 1.368e4 after 3 iterations. The MAP records geometry_source_method relaxed-forward-v1 and the end state's name and sha256
+- **Notes:** Smoke only: the source MAP is a 10-iteration 32 km MAP, so the drop in misfit says nothing about production. Runner reinvert.sh
+
+### test-32km-relax-year-smoke
+
+32 km relaxation year of the relaxed initial state, no forcing (scripts/relaxation/run.py) (done), IU.
+
+- **Task type:** test
+- **Period (yr):** 2014.0 to 2015.0, 80 steps, reached 2015.0
+- **Friction law:** budd
+- **Mesh:** antarctica_320000_32000_buffered0 (6,282 vertices, 9,055 cells), DG0 geometry, ISMIP7_MESH=checkpoint
+- **Initial state / MAP:** cold start from /Volumes/LaCie/Data/antarctica_general/ismip7_runs/pr158_merge/C_32km_scpc_gamg/map.h5 (sha256 feddedd9), the 32 km Budd SEP1 log-control MAP of 432c831, 1 yr of Smith dH/dt undone on 3,995 grounded cells (+45 Gt)
+- **Forcing versions:** none (ISMIP7_RELAX_FORCING=none); MEaSUREs and BedMachine from /Volumes/LaCie/Data/antarctica_general/ismip7_obs, the Smith dH/dt cache of the MIPkit v1.2 copied from Quartz; ISMIP7_FLUIDITY_PRIOR=legacy
+- **Calving front, collapse:** pinned (ISMIP7_FIXED_FRONT=1, ISMIP7_CALVING=none)
+- **Apparent MB:** off
+- **dt (yr):** 0.0125
+- **Site / partition:** IU workstation (Mac, 16 cores), load average about 6
+- **Ranks / memory:** 4 ranks
+- **Code:** 8b5377f (PR 160 head 7fb5802, IU's production inversion code 1c02aa3, and the relaxed initial state); icepack_tools e7b923e
+- **Started:** 2026-10-06
+- **Finished:** 2026-10-06
+- **Cost per model year:** under 2 min wall
+- **Results path:** /Volumes/LaCie/Data/antarctica_general/ismip7_runs/relaxed_init_smoke/relax_map_32000_final.h5 (sha256 f1abe93a), /Volumes/LaCie/Data/antarctica_general/ismip7_runs/relaxed_init_smoke/relax_map_32000_timeseries.csv, /Volumes/LaCie/Data/antarctica_general/ismip7_runs/relaxed_init_smoke/relax.log
+- **Audit:** resid +0.00 on every step, exit 0; outflux 1,768 Gt/yr at the first step and 1,680 at the last; the end state records relaxation_end_state=1, t_yr 2015.0, stalled 0, the relax_* provenance and the MAP's objective settings, and no objective value
+- **Notes:** Smoke of the relaxed initial state on its default step (half of ISMIP7_DT=0.025). Runner relax.sh with common.sh in the results directory
 
 ### test-32km-ssp585-front-melt-branch
 

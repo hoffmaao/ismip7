@@ -86,6 +86,7 @@ sys.path.insert(0, os.path.dirname(_ROOT))
 from icepack2_tools.boundary import load_boundary_ids
 from icepack2_tools.dual_friction import (
     grounded_mask,
+    floating_control_nodes,
     build_rc_residual,
     effective_pressure,
     rebase_log_friction,
@@ -347,12 +348,23 @@ FLUIDITY_PRIOR = os.environ.get("ISMIP7_FLUIDITY_PRIOR", "pattyn").strip().lower
 # friction inverted; a shelf rheology inverted where there is no friction),
 # and it removes the friction/rheology trade-off on grounded ice that let the
 # data move the friction while the fluidity sat at its prior (Rice, 26 Sep
-# 2026). The prior still smooths phi everywhere; where phi has no effect the
-# prior alone holds it at zero.
+# 2026). phi is held at exactly zero on the nodes where the gate has shut it
+# off (dual_friction.floating_control_nodes): the warm start's values there are
+# zeroed and the gradient is projected out, so the MAP's log_fluidity carries
+# no grounded variation for a reader to pair with this friction (issue #153).
+# The L-BFGS-B path does the projection; the TAO path writes the controls
+# itself, so it is refused.
 FLUIDITY_CONTROL = os.environ.get("ISMIP7_FLUIDITY_CONTROL", "all").strip().lower()
 if FLUIDITY_CONTROL not in ("all", "floating"):
     raise ValueError(
         f"ISMIP7_FLUIDITY_CONTROL must be all|floating, got {FLUIDITY_CONTROL!r}")
+PHI_GROUNDED = "zero" if FLUIDITY_CONTROL == "floating" else "inverted"
+if (FLUIDITY_CONTROL == "floating"
+        and os.environ.get("ISMIP7_GRAD_PRECOND", "none").lower()
+        in ("mass_consistent", "prior")):
+    raise ValueError(
+        "ISMIP7_FLUIDITY_CONTROL=floating holds grounded phi at zero on the "
+        "L-BFGS-B path only (ISMIP7_GRAD_PRECOND=none or mass)")
 
 # ── Which controls move (ISMIP7_INVERT) ──────────────────────────────────
 # `both` (default): theta and phi descend together. `phi` / `theta`: only
@@ -1454,9 +1466,17 @@ def main():
     # fluidity control (UFL on the cell fields; the residual builds its own
     # copy for the friction gate)
     _He_phi = grounded_mask(H, b) if FLUIDITY_CONTROL == "floating" else None
+    # The nodes phi may move on; the rest hold phi = 0 (see FLUIDITY_CONTROL).
+    phi_free = None
     if _He_phi is not None:
-        PETSc.Sys.Print("  Fluidity control: phi acts on floating ice only "
-                        "(grounded ice keeps the prior fluidity)")
+        phi_free = floating_control_nodes(H, b, Q)
+        phi.dat.data[:] = phi.dat.data_ro * phi_free.dat.data_ro
+        _n_free = COMM_WORLD.allreduce(int(phi_free.dat.data_ro.sum()))
+        _n_all = COMM_WORLD.allreduce(int(phi_free.dat.data_ro.size))
+        PETSc.Sys.Print(
+            f"  Fluidity control: phi acts on floating ice only and is held at 0 "
+            f"on {_n_all - _n_free} of {_n_all} nodes (grounded ice keeps the "
+            f"prior fluidity)")
 
     def build_F(theta_c, phi_c, *, scpc_blocks=state_scpc):
         F_c = _build_residual(theta_c, phi_c)
@@ -2260,6 +2280,16 @@ def main():
             scatter.destroy()
             x_seq.destroy()
 
+    # Under a floating-only fluidity control the optimiser sees phi on the
+    # free nodes only: phi is written with the others at zero and its
+    # gradient is zero there, so L-BFGS-B never moves them.
+    _phi_free_global = func_to_global(phi_free) if phi_free is not None else None
+
+    def set_phi(arr):
+        global_to_func(arr, phi)
+        if phi_free is not None:
+            phi.dat.data[:] = phi.dat.data_ro * phi_free.dat.data_ro
+
     # ── Per-term diagnostics ─────────────────────────────────────────────
     # forward() returns ONE functional, so with two terms summed the reported
     # misfit alone cannot say which is being fitted. These re-assemble each
@@ -2441,6 +2471,9 @@ def main():
             # anchor (log), or sqrt_friction^2 with no anchor (sqrt).
             chk.set_attr("/", "friction_control", FRICTION_CONTROL)
             chk.set_attr("/", "fluidity_control", FLUIDITY_CONTROL)
+            # Whether log_fluidity on grounded ice is held at zero (floating)
+            # or inverted (all).
+            chk.set_attr("/", "phi_grounded", PHI_GROUNDED)
             # Which controls this stage moved (provenance only: the objective
             # is the same in every ISMIP7_INVERT mode)
             chk.set_attr("/", "invert_controls", INVERT)
@@ -2641,7 +2674,7 @@ def main():
             gap_spans.add("gap", t_iter - t_body_end[0])
         with spans("set_controls"):
             global_to_func(x_vec[:global_ndof], theta)
-            global_to_func(x_vec[global_ndof:], phi)
+            set_phi(x_vec[global_ndof:])
 
         t_fwd = perf_counter()
         reset_manager()
@@ -2723,6 +2756,8 @@ def main():
         with spans("gather_gradient"):
             g_theta = func_to_global(dJ_dtheta) + func_to_global(dR_theta)
             g_phi = func_to_global(dJ_dphi) + func_to_global(dR_phi)
+            if _phi_free_global is not None:
+                g_phi = g_phi * _phi_free_global
 
             total = J_val + reg_theta + reg_phi
             total_grad = np.concatenate([g_theta, g_phi])
@@ -3285,6 +3320,7 @@ def main():
         "subelement_scheme_version": int(SUBELEMENT_SCHEME_VERSION),
         "fluidity_control": FLUIDITY_CONTROL,
         "drag_gate": DRAG_RECORD, "h_visc_floor": float(RC_HVISC_FLOOR),
+        "phi_grounded": PHI_GROUNDED,
     })
     if PRIOR_FORM == "bilaplacian":
         run_settings.update({"prior_sigma_theta": float(PRIOR_SIGMA_THETA),
@@ -3371,7 +3407,7 @@ def main():
     PETSc.Sys.Print(f"  {result.nit} iterations, {result.nfev} function evaluations")
     _x_final = result.x / _sqrtm if grad_precond == "mass" else result.x
     global_to_func(_x_final[:global_ndof], theta)
-    global_to_func(_x_final[global_ndof:], phi)
+    set_phi(_x_final[global_ndof:])
     _t_lo, _t_hi = global_range(theta)
     _p_lo, _p_hi = global_range(phi)
     PETSc.Sys.Print(f"  theta range: [{_t_lo:.3f}, {_t_hi:.3f}]")

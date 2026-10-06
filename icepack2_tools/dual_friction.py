@@ -41,6 +41,8 @@ n_flow=4 / H_ref composite viscous block.  Companion to
 from firedrake import (
     Constant,
     Function,
+    FunctionSpace,
+    assemble,
     TestFunction,
     FacetNormal,
     split,
@@ -96,6 +98,31 @@ def grounded_mask(H, b, gl_width=GL_WIDTH):
     control ``theta`` to grounded ice (``dJ/dtheta -> 0`` as ``He -> 0``)."""
     haf = height_above_flotation(H, b)
     return smooth_heaviside(haf, kH=1.0 / gl_width)
+
+
+# Below this the floating-only fluidity gate (1 - He) has shut phi off: about
+# 35 m of height above flotation at GL_WIDTH 10 m.
+PHI_GROUNDED_TOL = 1e-3
+
+
+def floating_control_nodes(H, b, Q, tol=PHI_GROUNDED_TOL, gl_width=GL_WIDTH):
+    r"""The nodes of ``Q`` where a floating-only fluidity control acts: 1 on a
+    node that touches a cell with ``1 - He >= tol``, 0 on the rest.
+
+    A floating-only inversion multiplies phi by ``1 - He``, so on the other
+    nodes phi changes the model by less than ``tol`` of itself. The inversion
+    holds phi at exactly zero there, which leaves grounded ice at its prior
+    fluidity in the MAP's ``log_fluidity`` as well as in the model (issue
+    #153). A node touching a cell where the gate is open stays free, so the
+    grounding-line band keeps its control."""
+    mesh = Q.mesh()
+    Q0 = FunctionSpace(mesh, "DG", 0)
+    acts = Function(Q0).interpolate(
+        conditional(ge(1.0 - grounded_mask(H, b, gl_width), tol), 1.0, 0.0))
+    touched = assemble(acts * TestFunction(Q) * dx)
+    nodes = Function(Q, name="phi_free")
+    nodes.dat.data[:] = (touched.dat.data_ro > 0.0).astype(float)
+    return nodes
 
 
 def driving_stress_magnitude(H, s):

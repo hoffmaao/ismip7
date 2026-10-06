@@ -79,7 +79,14 @@ enthalpy model. `ISMIP7_FLUIDITY_CONTROL=floating` lets phi act on floating
 ice only, the split the data-assimilating ISMIP6 groups initialised with
 (Seroussi et al. 2020, Appendix C); the forward masks phi with the grounded
 indicator of the live thickness, in the residual and in the calving law's
-`A_map`, so the shelf rheology follows the grounding line.
+`A_map`, so the shelf rheology follows the grounding line. The inversion holds
+phi at exactly zero on every node whose cells all have `1 - He` below 1e-3
+(`dual_friction.floating_control_nodes`, about 35 m above flotation): it zeroes
+the warm start's values there and projects them out of the gradient, and the
+MAP records `phi_grounded=zero`. Its `log_fluidity` therefore has no grounded
+variation to pair with the friction by mistake, and ice that goes afloat in a
+forward takes the prior fluidity (issue #153). Only the L-BFGS-B path
+(`ISMIP7_GRAD_PRECOND=none` or `mass`) runs it.
 `ISMIP7_INVERT=phi|theta|both` moves one control with the other held as a
 fixed coefficient, the objective unchanged, so a staged inversion
 warm-starts each stage through the handoff check.

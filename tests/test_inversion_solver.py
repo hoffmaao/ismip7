@@ -33,8 +33,11 @@ def test_mumps_ordering_follows_the_petsc_build(monkeypatch):
     opts = sc._mumps_options("x_")
     assert "x_mat_mumps_icntl_29" not in opts and opts["x_pc_factor_mat_solver_type"] == "mumps"
     monkeypatch.setattr(sc, "_have_ptscotch", lambda: True)
+    monkeypatch.delenv("ISMIP7_MUMPS_ANALYSIS", raising=False)
     opts = sc._mumps_options("x_")
     assert opts["x_mat_mumps_icntl_28"] == 2 and opts["x_mat_mumps_icntl_29"] == 1
+    monkeypatch.setenv("ISMIP7_MUMPS_ANALYSIS", "sequential")
+    assert "x_mat_mumps_icntl_28" not in sc._mumps_options("x_")
 
 
 def test_quadrature_degree_reaches_every_derived_form():

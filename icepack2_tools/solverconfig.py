@@ -351,8 +351,9 @@ def _mumps_options(prefix=""):
         f"{prefix}pc_type": "lu",
         f"{prefix}pc_factor_mat_solver_type": "mumps",
     }
-    if _have_ptscotch():
-        # Distributed analysis with PT-Scotch nested dissection.
+    if _have_ptscotch() and _env("ISMIP7_MUMPS_ANALYSIS", "parallel").strip().lower() != "sequential":
+        # Distributed analysis with PT-Scotch nested dissection
+        # (ISMIP7_MUMPS_ANALYSIS=sequential keeps MUMPS's own analysis).
         opts[f"{prefix}mat_mumps_icntl_28"] = 2
         opts[f"{prefix}mat_mumps_icntl_29"] = 1
     # Without PT-Scotch the distributed analysis cannot run: MUMPS fails the

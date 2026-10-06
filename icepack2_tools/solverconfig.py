@@ -172,8 +172,9 @@ SUBSTEP_MAX_DEFAULT = "64"
 SUBSTEP_QUIET_DEFAULT = "20"
 SUBSTEP_HMIN_DEFAULT = "10"
 # Free-surface stabilization (icepack2_tools.fssa): theta, 0 = off, and the
-# velocity the surface change is measured from (fssa.REFERENCES).
-FSSA_THETA_DEFAULT = "0"
+# velocity the surface change is measured from (fssa.REFERENCES). On by
+# default since 6 October 2026.
+FSSA_THETA_DEFAULT = "1"
 FSSA_REFERENCE_DEFAULT = "auto"
 RESCUE_ENABLED_DEFAULT = "1"
 
@@ -577,12 +578,27 @@ def substep_settings():
 def fssa_theta():
     r"""``ISMIP7_FSSA_THETA``: weight of the free-surface stabilization of
     the forward's lagged thickness-velocity coupling (icepack2_tools.fssa);
-    0 (the default) leaves the momentum balance as it was, 1 makes the lagged
-    step stable at any size."""
+    1 (the default) makes the lagged step stable at any size, 0 leaves the
+    term out of the momentum balance."""
     value = float(_env("ISMIP7_FSSA_THETA", FSSA_THETA_DEFAULT))
     if value < 0:
         raise ValueError("ISMIP7_FSSA_THETA must be nonnegative")
     return value
+
+
+def forward_fssa_theta(restart_metadata=None):
+    r"""The stabilization weight a forward steps with: :func:`fssa_theta`,
+    except on a restart from a checkpoint stepped without the stabilization
+    (``restart_metadata`` with no ``fssa_tau`` record), which keeps it off
+    unless ``ISMIP7_FSSA_THETA`` is set, so a chain keeps the momentum balance
+    it began with. A prepared timing or map-check state (one that records a
+    ``timing_cache_role``) was never stepped and starts like a cold start."""
+    if (restart_metadata is not None
+            and restart_metadata.get("timing_cache_role") is None
+            and restart_metadata.get("fssa_tau") is None
+            and "ISMIP7_FSSA_THETA" not in os.environ):
+        return 0.0
+    return fssa_theta()
 
 
 def fssa_reference():

@@ -199,6 +199,10 @@ def test_a_restart_keeps_the_reference_it_was_stepped_with():
     rec = {"fssa_tau": 0.05, "fssa_reference": "step"}
     assert restart_reference_error(rec, "step", "c.h5") is None
     assert "ISMIP7_FSSA_REFERENCE=step" in restart_reference_error(rec, "start", "c.h5")
+    # a prepared cache was never stepped, so it loads under either reference
+    cache = {"fssa_tau": 0.0, "fssa_reference": "step"}
+    assert restart_reference_error(cache, "start", "c.h5") is None
+    assert restart_reference_error(cache, "step", "c.h5") is None
 
 
 def _channel(scheme, dt, t_end, length=100e3, width=10e3, dx=2e3):
@@ -299,3 +303,102 @@ def test_the_step_reference_holds_a_stiff_channel_at_a_large_step():
     err_start = np.sqrt(np.mean((start - reference) ** 2))
     assert err_step < 0.5
     assert err_start > 10.0 * err_step
+
+
+def test_fssa_is_on_by_default_and_a_restart_keeps_its_checkpoint(monkeypatch):
+    from icepack2_tools import solverconfig
+    monkeypatch.delenv("ISMIP7_FSSA_THETA", raising=False)
+    assert solverconfig.fssa_theta() == 1.0
+    assert solverconfig.forward_fssa_theta() == 1.0
+    # a checkpoint stepped under the stabilization records its step
+    assert solverconfig.forward_fssa_theta({"fssa_tau": 0.05}) == 1.0
+    # one stepped without it keeps it off, unless the knob says otherwise
+    assert solverconfig.forward_fssa_theta({}) == 0.0
+    monkeypatch.setenv("ISMIP7_FSSA_THETA", "1")
+    assert solverconfig.forward_fssa_theta({}) == 1.0
+    monkeypatch.setenv("ISMIP7_FSSA_THETA", "0")
+    assert solverconfig.forward_fssa_theta({"fssa_tau": 0.05}) == 0.0
+    assert solverconfig.effective_solver_env()["ISMIP7_FSSA_THETA"] == "1"
+
+
+def test_a_prepared_cache_starts_like_a_cold_start(monkeypatch):
+    from icepack2_tools import solverconfig
+    monkeypatch.delenv("ISMIP7_FSSA_THETA", raising=False)
+    # written before the default changed, or repacked without the record
+    old_cache = {"timing_cache_role": "timing-initial-state"}
+    assert solverconfig.forward_fssa_theta(old_cache) == 1.0
+    new_cache = {"timing_cache_role": "timing-initial-state",
+                 "fssa_tau": 0.0, "fssa_reference": "step"}
+    assert solverconfig.forward_fssa_theta(new_cache) == 1.0
+    monkeypatch.setenv("ISMIP7_FSSA_THETA", "0")
+    assert solverconfig.forward_fssa_theta(old_cache) == 0.0
+
+
+def test_the_banner_states_the_weight_the_forward_steps_with():
+    from icepack2_tools.fssa import FSSA_MARKER, fssa_banner
+    assert fssa_banner(1.0).startswith(FSSA_MARKER)
+    assert "theta 1 " in fssa_banner(1.0)
+    assert fssa_banner(0.0).startswith(FSSA_MARKER)
+    assert "off, theta 0" in fssa_banner(0.0)
+
+
+def test_a_timing_record_carries_the_weight_its_lane_stepped_with():
+    import sys
+    from pathlib import Path
+    sys.path.insert(0, str(Path(__file__).resolve().parents[1]
+                           / "antarctica" / "scripts"))
+    import run_timing
+    from icepack2_tools.solverconfig import solver_provenance
+    configuration = solver_provenance()
+    recorded = run_timing._stepped_configuration(configuration, {"fssa_theta": 0.0})
+    assert recorded["fssa_theta"] == 0.0
+    assert {k: v for k, v in recorded.items() if k != "fssa_theta"} == {
+        k: v for k, v in configuration.items() if k != "fssa_theta"}
+
+
+def test_an_adapted_checkpoint_keeps_the_stabilization_record(tmp_path, monkeypatch):
+    monkeypatch.delenv("ISMIP7_FSSA_THETA", raising=False)
+    from icepack_tools.adapt_mesh import AdaptMeshConfig
+    from icepack2_tools.adapt_mesh import transfer_state
+    from icepack2_tools.solverconfig import forward_fssa_theta
+
+    def write(path, attrs):
+        mesh = fd.RectangleMesh(4, 4, 20e3, 20e3)
+        Q = FunctionSpace(mesh, "DG", 0)
+        with fd.CheckpointFile(str(path), "w") as chk:
+            chk.save_mesh(mesh)
+            chk.save_function(Function(Q, name="thickness").assign(500.0))
+            chk.save_function(Function(Q, name="bed").assign(-100.0))
+            for k, v in attrs.items():
+                chk.set_attr("/", k, v)
+
+    def adapt(path):
+        out = tmp_path / ("adapted_" + path.name)
+        mesh_new = fd.RectangleMesh(6, 6, 20e3, 20e3)
+        cfg = AdaptMeshConfig(geometry="bs-FROM-hBS", front_preserve=False)
+        transfer_state(str(path), mesh_new, cfg, str(out), "new",
+                       lambda Q_g, Qc: Function(Q_g).assign(-100.0),
+                       log=lambda *a: None)
+        with fd.CheckpointFile(str(out), "r") as chk:
+            return {k: chk.get_attr("/", k) for k in ("fssa_tau", "fssa_reference")
+                    if chk.has_attr("/", k)}
+
+    stepped = tmp_path / "stepped.h5"
+    write(stepped, {"geometry_space": "dg0", "t_yr": 2020.0,
+                    "fssa_tau": 0.025, "fssa_reference": "step"})
+    carried = adapt(stepped)
+    assert carried == {"fssa_tau": 0.025, "fssa_reference": "step"}
+    assert forward_fssa_theta(carried) == 1.0
+    unstabilized = tmp_path / "unstabilized.h5"
+    write(unstabilized, {"geometry_space": "dg0", "t_yr": 2020.0})
+    assert adapt(unstabilized) == {}
+
+
+def test_a_restart_resumes_at_its_step_only_with_its_reference_velocity():
+    from icepack2_tools.fssa import restart_step
+    record = {"fssa_tau": 0.025, "fssa_reference": "step"}
+    assert restart_step(record, has_reference=True) == 0.025
+    # an adapted checkpoint: the record without u_ref_fssa
+    assert restart_step(record, has_reference=False) == 0.0
+    assert restart_step({}, has_reference=True) == 0.0
+    assert restart_step({}, has_reference=False) == 0.0

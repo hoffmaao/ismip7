@@ -70,8 +70,10 @@ from icepack2_tools.mpi_stats import (
 )
 from icepack2_tools.boundary import load_boundary_ids
 from icepack2_tools.fssa import (
+    fssa_banner,
     resolve_reference as resolve_fssa_reference,
     restart_reference_error as fssa_restart_reference_error,
+    restart_step as fssa_restart_step,
 )
 from icepack2_tools.geometry import raise_bed_to_lake_ice_base, sample_to_geometry
 from icepack2_tools.naming import map_basename
@@ -132,6 +134,7 @@ from icepack2_tools.solverconfig import (
     subcycles,
     substep_settings,
     fssa_theta,
+    forward_fssa_theta,
     fssa_reference,
     transport_solver_parameters,
 )
@@ -1449,11 +1452,16 @@ def setup_model(restart_from=None, *, allow_timing_cache_a_ref=False,
     # A restart resumes at the step its checkpoint was solved at, so the
     # fast path accepts the stabilized state. Off, the term is left out of
     # the residual altogether.
-    fssa_theta_val = fssa_theta()
+    fssa_theta_val = forward_fssa_theta(
+        checkpoint_metadata if restart_from is not None else None)
+    if restart_from is not None and fssa_theta_val == 0.0 and fssa_theta() > 0.0:
+        PETSc.Sys.Print(
+            "  Free-surface stabilization off: the restart checkpoint was stepped "
+            "without it (set ISMIP7_FSSA_THETA to change that)")
     fssa_tau = Constant(0.0)
-    if (restart_from is not None and fssa_theta_val > 0
-            and checkpoint_metadata.get("fssa_tau") is not None):
-        fssa_tau.assign(float(checkpoint_metadata["fssa_tau"]))
+    if restart_from is not None and fssa_theta_val > 0:
+        fssa_tau.assign(fssa_restart_step(
+            checkpoint_metadata, u_ref_fssa_ckpt is not None))
     u_ref_fssa = Function(V, name="u_ref_fssa")
     u_ref_fssa_loaded = False
     if restart_from is not None and u_ref_fssa_ckpt is not None:
@@ -3446,9 +3454,7 @@ def run_simulation(
             ctx["u_ref_fssa"].assign(z.subfunctions[0])
             ctx["u_ref_fssa_set"] = True
             PETSc.Sys.Print("  Free-surface stabilization: reference velocity = the starting state")
-        PETSc.Sys.Print(
-            f"  Free-surface stabilization: theta {fssa_theta_val:g} on the"
-            " lagged thickness-velocity coupling (ISMIP7_FSSA_THETA)")
+    PETSc.Sys.Print(f"  {fssa_banner(fssa_theta_val)}")
     # Adaptive substepping replaces the fixed retry list when it is on: the
     # count follows the thickness error estimate instead of waiting for a
     # failed solve, because the lagged-velocity instability grows through

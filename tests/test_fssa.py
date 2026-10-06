@@ -392,3 +392,13 @@ def test_an_adapted_checkpoint_keeps_the_stabilization_record(tmp_path, monkeypa
     unstabilized = tmp_path / "unstabilized.h5"
     write(unstabilized, {"geometry_space": "dg0", "t_yr": 2020.0})
     assert adapt(unstabilized) == {}
+
+
+def test_a_restart_resumes_at_its_step_only_with_its_reference_velocity():
+    from icepack2_tools.fssa import restart_step
+    record = {"fssa_tau": 0.025, "fssa_reference": "step"}
+    assert restart_step(record, has_reference=True) == 0.025
+    # an adapted checkpoint: the record without u_ref_fssa
+    assert restart_step(record, has_reference=False) == 0.0
+    assert restart_step({}, has_reference=True) == 0.0
+    assert restart_step({}, has_reference=False) == 0.0

@@ -119,6 +119,18 @@ def resolve_reference(requested, apparent_mb):
     return requested
 
 
+def restart_step(metadata, has_reference):
+    r"""The stabilization step (yr) a restart resumes at: the checkpoint's
+    ``fssa_tau`` when the checkpoint also holds ``u_ref_fssa``, the velocity
+    that step was measured from (``has_reference``), else 0. An adapted
+    checkpoint carries the record without the field, and its state is solved
+    with the term at zero, as a cold start is."""
+    tau = metadata.get("fssa_tau")
+    if tau is None or not has_reference:
+        return 0.0
+    return float(tau)
+
+
 def restart_reference_error(metadata, resolved, source):
     r"""The message refusing a restart from ``source`` whose checkpoint was
     stepped from another reference than ``resolved``, or None.

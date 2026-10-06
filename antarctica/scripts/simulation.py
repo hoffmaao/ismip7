@@ -73,6 +73,7 @@ from icepack2_tools.fssa import (
     fssa_banner,
     resolve_reference as resolve_fssa_reference,
     restart_reference_error as fssa_restart_reference_error,
+    restart_step as fssa_restart_step,
 )
 from icepack2_tools.geometry import raise_bed_to_lake_ice_base, sample_to_geometry
 from icepack2_tools.naming import map_basename
@@ -1396,9 +1397,9 @@ def setup_model(restart_from=None, *, allow_timing_cache_a_ref=False,
             "  Free-surface stabilization off: the restart checkpoint was stepped "
             "without it (set ISMIP7_FSSA_THETA to change that)")
     fssa_tau = Constant(0.0)
-    if (restart_from is not None and fssa_theta_val > 0
-            and checkpoint_metadata.get("fssa_tau") is not None):
-        fssa_tau.assign(float(checkpoint_metadata["fssa_tau"]))
+    if restart_from is not None and fssa_theta_val > 0:
+        fssa_tau.assign(fssa_restart_step(
+            checkpoint_metadata, u_ref_fssa_ckpt is not None))
     u_ref_fssa = Function(V, name="u_ref_fssa")
     u_ref_fssa_loaded = False
     if restart_from is not None and u_ref_fssa_ckpt is not None:

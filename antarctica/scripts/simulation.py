@@ -89,7 +89,7 @@ from icepack2_tools.relaxation import (
     INIT_STATE_ATTR, RELAX_MAP_KEYS, describe_relaxation, init_state as _init_state,
 )
 from icepack2_tools.timeseries import (
-    format_year, resumed_step, rows_kept_on_resume, step_changed,
+    resumed_step, rows_kept_on_resume, step_changed,
     timeseries_csv_line,
 )
 from icepack2_tools.runconfig import (

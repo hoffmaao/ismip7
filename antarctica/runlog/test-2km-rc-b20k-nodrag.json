@@ -1,0 +1,24 @@
+{
+  "id": "test-2km-rc-b20k-nodrag",
+  "task": "test",
+  "institution": "IU",
+  "title": "RC stage 2 on the 20 km buffered mesh with the ocean drag off (300 iterations)",
+  "status": "done",
+  "friction": "regularized_coulomb",
+  "period": "2015 state",
+  "mesh": "antarctica_5000_2000_buffered20000 (IU's build, 969,764 vertices), DG0 geometry, vertex raster sampling, the lake fix",
+  "initial_state": "inversion-2km-rc-nomass-lbfgsb's MAP (RC stage 1 final, sha256 fea8debae9616f18), log-velocity weight 69946.22414285329; the ring filled by the harmonic extension",
+  "forcing": "observations sampled onto this mesh; the stage-1 objective (bilaplacian sigma 30, rho 750 km, no dH/dt term, log friction control, cell-wise friction, L-BFGS-B without a metric, scpc_gamg); ISMIP7_OCEAN_DRAG=0",
+  "site": "IU Quartz, general partition",
+  "resources": "32 ranks, 160G, 12 h",
+  "jobs": [
+    "10969345"
+  ],
+  "code": "3490914; Quartz worktree /N/scratch/dlilien/ismip7_reinvert_s2",
+  "started": "2026-10-04",
+  "finished": "2026-10-05",
+  "cost": "310 evaluations in 3 h 54 min",
+  "results": "Quartz /N/project/ice_rheology/ISMIP7/antarctica/results/reinvert_2km/exp/rc_s2x_nodrag.h5",
+  "audit": "evaluation 310: misfit 2,412, velocity chi2 41.5, total 2,741, against 3,074 for the same run with the production drag gate (inversion-2km-rc-nomass-b20k) and 2,249 for stage 1 on Rice's mesh; floating ice mean -7.8 m/yr, median ratio -2 %; no dipole on the shelves",
+  "notes": "issue #153; an experiment, since forwards run with the drag on"
+}

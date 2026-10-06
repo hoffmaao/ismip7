@@ -47,7 +47,8 @@ def test_state_carries_map_configuration(tmp_path):
     sim = _simulation()
     metadata = {"friction_control": "exp", "friction_c_ref": 0.25,
                 "subelement_friction": 1, "exact_front": 1,
-                "fluidity_control": "floating"}
+                "fluidity_control": "floating", "drag_gate": "vertex",
+                "h_visc_floor": 1.0}
     path = str(tmp_path / "state.h5")
     sim.save_model_state(_ctx(metadata), path, 1.0)
     got = _attrs(path, sim.MAP_CONFIG_KEYS)
@@ -56,6 +57,8 @@ def test_state_carries_map_configuration(tmp_path):
     assert int(got["subelement_friction"]) == 1
     assert int(got["exact_front"]) == 1
     assert got["fluidity_control"] == "floating"
+    assert got["drag_gate"] == "vertex"
+    assert float(got["h_visc_floor"]) == 1.0
 
 
 def test_state_omits_what_the_map_did_not_record(tmp_path):

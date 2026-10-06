@@ -86,6 +86,7 @@ sys.path.insert(0, os.path.dirname(_ROOT))
 from icepack2_tools.boundary import load_boundary_ids
 from icepack2_tools.dual_friction import (
     grounded_mask,
+    floating_control_nodes,
     build_rc_residual,
     effective_pressure,
     rebase_log_friction,
@@ -109,7 +110,8 @@ from icepack2_tools.runconfig import (
     friction as _friction, geometry_space as _geometry_space,
     raster_sample as _raster_sample,
     lc as _lc, lc_coarse as _lc_coarse, n_flow as _n_flow,
-    eval_continuation, inversion_mesh_source,
+    eval_continuation, inversion_mesh_source, transfer_fill, drag_gate,
+    DRAG_GATE_NONE, hvisc_floor,
 )
 DATA_DIR = obs_data_root()
 from icepack2_tools.prior import (
@@ -136,7 +138,7 @@ from icepack2_tools.runconfig import (
     lake_ice_base,
     residual_stabilizers,
 )
-from icepack2_tools.front import facet_neighbours, ocean_drag_cells
+from icepack2_tools.front import facet_neighbours, ocean_drag_cells, vertex_neighbours
 from icepack2_tools.continuation import ladder, ramp_exponents
 from icepack2_tools.solverconfig import (
     continuation_steps,
@@ -346,12 +348,23 @@ FLUIDITY_PRIOR = os.environ.get("ISMIP7_FLUIDITY_PRIOR", "pattyn").strip().lower
 # friction inverted; a shelf rheology inverted where there is no friction),
 # and it removes the friction/rheology trade-off on grounded ice that let the
 # data move the friction while the fluidity sat at its prior (Rice, 26 Sep
-# 2026). The prior still smooths phi everywhere; where phi has no effect the
-# prior alone holds it at zero.
+# 2026). phi is held at exactly zero on the nodes where the gate has shut it
+# off (dual_friction.floating_control_nodes): the warm start's values there are
+# zeroed and the gradient is projected out, so the MAP's log_fluidity carries
+# no grounded variation for a reader to pair with this friction (issue #153).
+# The L-BFGS-B path does the projection; the TAO path writes the controls
+# itself, so it is refused.
 FLUIDITY_CONTROL = os.environ.get("ISMIP7_FLUIDITY_CONTROL", "all").strip().lower()
 if FLUIDITY_CONTROL not in ("all", "floating"):
     raise ValueError(
         f"ISMIP7_FLUIDITY_CONTROL must be all|floating, got {FLUIDITY_CONTROL!r}")
+PHI_GROUNDED = "zero" if FLUIDITY_CONTROL == "floating" else "inverted"
+if (FLUIDITY_CONTROL == "floating"
+        and os.environ.get("ISMIP7_GRAD_PRECOND", "none").lower()
+        in ("mass_consistent", "prior")):
+    raise ValueError(
+        "ISMIP7_FLUIDITY_CONTROL=floating holds grounded phi at zero on the "
+        "L-BFGS-B path only (ISMIP7_GRAD_PRECOND=none or mass)")
 
 # ── Which controls move (ISMIP7_INVERT) ──────────────────────────────────
 # `both` (default): theta and phi descend together. `phi` / `theta`: only
@@ -388,8 +401,10 @@ MISFIT_SCALE = os.environ.get("ISMIP7_MISFIT_SCALE", "1").strip().lower()
 # grounding line is exact inside a cell instead of a cell-wise staircase.
 # Budd then runs with N_hat = 1 on the grounded part (no N_ref, no delta
 # floor). ISMIP7_EXACT_FRONT adds the exact depth-integrated push on a
-# calving front inside the mesh (on by default under the scheme, since it
-# is the shared residual's default; off otherwise, so nothing else moves).
+# calving front inside the mesh: on by default under the scheme, since it
+# is the shared residual's default, and off by default for cell-wise
+# friction, where =1 adds dual_friction.front_cliff_correction (a grounded
+# marine cliff otherwise gets 15 to 33 % too little push, issue #153).
 SUBELEMENT_FRICTION = os.environ.get("ISMIP7_SUBELEMENT_FRICTION", "0").strip() == "1"
 # ISMIP7_SUBELEMENT_SCHEME: sep1 (ISSM's default: whole-cell quadrature,
 # drag times the grounded fraction; the default here since 1 Oct 2026) or
@@ -426,9 +441,12 @@ if FRICTION_CONTROL in ("sqrt", "exp") and not USE_RESIDUAL:
                      "law (budd or regularized_coulomb)")
 C0_RC = float(os.environ.get("ISMIP7_RC_C0", "0.5"))
 # Buffer-node (h_clamp=0) coercivity controls; see dual_friction.build_rc_residual.
-# h_visc_floor (membrane-only thickness floor) is the primary, bias-free cure;
-# c_w0_floor is off by default (unnecessary once h_visc_floor is on).
-RC_HVISC_FLOOR = float(os.environ.get("ISMIP7_RC_HVISC_FLOOR", "10.0"))
+# h_visc_floor (membrane-only thickness floor) is the primary cure. The first
+# water row carries it too and so couples the ice front to the ocean drag one
+# cell out; runconfig.hvisc_floor's 2.5 m keeps a fifth of the 10 m coupling
+# (GEOMETRY_DISCRETIZATION.md). c_w0_floor is off by default (unnecessary once
+# h_visc_floor is on).
+RC_HVISC_FLOOR = hvisc_floor()
 RC_CW0_FLOOR = float(os.environ.get("ISMIP7_RC_CW0_FLOOR", "0.0"))
 # Budd N_hat knobs (fric_law="budd"): at the reference/inversion geometry
 # N_hat=1 (with the PISM-delta grounded floor), so this inverts the exact-zero
@@ -750,24 +768,36 @@ def main():
     # "auto" weight is held to. None without a warm start.
     warm_objective = None
 
-    # What a target dof outside the warm start's mesh takes: the prior for
-    # the log controls (0), and for the fluidity prior mean the constant
-    # baseline the forward fills the same ring with when it loads a MAP from
-    # a smaller mesh (A = A_prior exp(phi) must stay positive there;
-    # transfer.py has the measurement behind that), so the ring of a MAP
-    # inverted on the production mesh is what production already runs.
-    # Same-mesh warm starts miss nothing.
+    # What a target dof outside the warm start's mesh takes, as the forward
+    # does when it loads a MAP from a smaller mesh (ISMIP7_TRANSFER_FILL).
+    # Under `extend` (the default) the controls continue harmonically from
+    # the warm start's outline and the fluidity prior's logarithm does too
+    # (transfer.harmonic_extension), so the bi-Laplacian prior pays nothing
+    # for a step there; the constants below remain only where the extension
+    # cannot reach. Under `constant` they are the fill: the prior for the log
+    # controls (0), and for the fluidity prior mean the constant baseline,
+    # which keeps A = A_prior exp(phi) positive (transfer.py has the
+    # measurement behind that). Same-mesh warm starts miss nothing.
     warm_fill = {"fluidity_prior": float(A0) * a4_factor}
+    warm_fill_mode = transfer_fill()
+    # name -> extend its logarithm
+    warm_extend = ({"log_friction": False, "log_fluidity": False,
+                    "sqrt_friction": False, "fluidity_prior": True}
+                   if warm_fill_mode == "extend" else {})
 
     def _warm_load(chk, source_mesh, name, space):
         source_field = chk.load_function(source_mesh, name=name)
         target = Function(space, name=name)
+        fill = warm_fill.get(name, 0.0)
         n_missing, n_total, n_clamped = interpolate_with_fill(
-            target, source_field, warm_fill.get(name, 0.0))
+            target, source_field, fill,
+            extend=name in warm_extend, log=warm_extend.get(name, False))
         if n_missing or n_clamped:
+            how = (f"a harmonic extension{' of its logarithm' if warm_extend[name] else ''} "
+                   f"({fill:g} where it cannot reach)" if name in warm_extend else f"{fill:g}")
             PETSc.Sys.Print(
                 f"    transfer {name}: {n_missing}/{n_total} target dofs "
-                f"outside the warm start's mesh -> {warm_fill.get(name, 0.0)}; "
+                f"outside the warm start's mesh -> {how}; "
                 f"{n_clamped} clamped to the source range")
         return target
 
@@ -1107,7 +1137,7 @@ def main():
                     else f"regularized Coulomb (c0={C0_RC})")
         C_w0_lo, C_w0_hi = global_range(C_w0)
         PETSc.Sys.Print(
-            f"  Friction: {law_name}; h_visc_floor={RC_HVISC_FLOOR:.0f}m; "
+            f"  Friction: {law_name}; h_visc_floor={RC_HVISC_FLOOR:g} m; "
             f"C_w0 in [{C_w0_lo:.2e}, {C_w0_hi:.2e}]"
         )
     else:
@@ -1399,13 +1429,22 @@ def main():
     # a tenth of its observed speed.
     drag_mask = Function(FunctionSpace(mesh, "DG", 0), name="drag_mask")
     _ice = Function(drag_mask.function_space()).project(H).dat.data_ro >= front_hmin()
+    # ISMIP7_DRAG_GATE=vertex also keeps it off water cells that touch the
+    # ice at a vertex, whose drag acts on the ice's own front nodes.
+    DRAG_GATE = drag_gate()
+    _neighbours = (vertex_neighbours if DRAG_GATE == "vertex" else facet_neighbours)
     drag_mask.dat.data[:] = ocean_drag_cells(
-        _ice, facet_neighbours(drag_mask.function_space()), _ice)
+        _ice, _neighbours(drag_mask.function_space()), _ice)
+    _n_drag = COMM_WORLD.allreduce(int(drag_mask.dat.data_ro.sum()))
     PETSc.Sys.Print(
-        f"  Ocean drag gate: {COMM_WORLD.allreduce(int(drag_mask.dat.data_ro.sum()))} "
+        f"  Ocean drag gate: {_n_drag} "
         f"of {COMM_WORLD.allreduce(int(drag_mask.dat.data_ro.size))} cells, open water "
-        f"a cell away from the ice (h < {front_hmin():g} m), as in the forward"
+        f"a cell away from the ice (h < {front_hmin():g} m, ISMIP7_DRAG_GATE={DRAG_GATE})"
     )
+    # The gate the controls absorbed, which a forward then runs
+    # (runconfig.forward_drag_gate): none when no cell was dragged.
+    DRAG_RECORD = (DRAG_GATE if _n_drag and stabilizers["ocean_drag"] > 0.0
+                   else DRAG_GATE_NONE)
 
     subelement = None
     if SUBELEMENT_FRICTION:
@@ -1427,9 +1466,17 @@ def main():
     # fluidity control (UFL on the cell fields; the residual builds its own
     # copy for the friction gate)
     _He_phi = grounded_mask(H, b) if FLUIDITY_CONTROL == "floating" else None
+    # The nodes phi may move on; the rest hold phi = 0 (see FLUIDITY_CONTROL).
+    phi_free = None
     if _He_phi is not None:
-        PETSc.Sys.Print("  Fluidity control: phi acts on floating ice only "
-                        "(grounded ice keeps the prior fluidity)")
+        phi_free = floating_control_nodes(H, b, Q)
+        phi.dat.data[:] = phi.dat.data_ro * phi_free.dat.data_ro
+        _n_free = COMM_WORLD.allreduce(int(phi_free.dat.data_ro.sum()))
+        _n_all = COMM_WORLD.allreduce(int(phi_free.dat.data_ro.size))
+        PETSc.Sys.Print(
+            f"  Fluidity control: phi acts on floating ice only and is held at 0 "
+            f"on {_n_all - _n_free} of {_n_all} nodes (grounded ice keeps the "
+            f"prior fluidity)")
 
     def build_F(theta_c, phi_c, *, scpc_blocks=state_scpc):
         F_c = _build_residual(theta_c, phi_c)
@@ -1476,9 +1523,14 @@ def main():
                 c0=C0_RC, c_w0_floor=RC_CW0_FLOOR, h_visc_floor=RC_HVISC_FLOOR,
                 k_lim=0.0, **stabilizers, drag_mask=drag_mask,
                 calving_ids=calving_ids if use_calving_terminus else None,
+                exact_front=EXACT_FRONT, front_hmin=front_hmin(),
             )
         return derivative(_build_action(theta_c, phi_c, fields), z)
 
+    if EXACT_FRONT and not SUBELEMENT_FRICTION:
+        PETSc.Sys.Print(
+            "  Exact cliff push on internal fronts (ISMIP7_EXACT_FRONT, "
+            "dual_friction.front_cliff_correction)")
     if use_calving_terminus:
         PETSc.Sys.Print("  Using calving_terminus BC")
     else:
@@ -2228,6 +2280,16 @@ def main():
             scatter.destroy()
             x_seq.destroy()
 
+    # Under a floating-only fluidity control the optimiser sees phi on the
+    # free nodes only: phi is written with the others at zero and its
+    # gradient is zero there, so L-BFGS-B never moves them.
+    _phi_free_global = func_to_global(phi_free) if phi_free is not None else None
+
+    def set_phi(arr):
+        global_to_func(arr, phi)
+        if phi_free is not None:
+            phi.dat.data[:] = phi.dat.data_ro * phi_free.dat.data_ro
+
     # ── Per-term diagnostics ─────────────────────────────────────────────
     # forward() returns ONE functional, so with two terms summed the reported
     # misfit alone cannot say which is being fitted. These re-assemble each
@@ -2397,10 +2459,21 @@ def main():
             # forward rebuilds C_w0 from them, so it takes both from here.
             chk.set_attr("/", "friction_anchor_length", float(ANCHOR_LENGTH))
             chk.set_attr("/", "lake_ice_base", int(LAKE_ICE_BASE))
+            # How a warm start from another mesh filled the dofs beyond it
+            # (provenance: ISMIP7_TRANSFER_FILL; same-mesh starts fill none).
+            chk.set_attr("/", "warm_start_fill", warm_fill_mode)
+            # The ocean-drag gate and the membrane floor the controls
+            # absorbed: a forward runs both (runconfig.forward_drag_gate,
+            # forward_hvisc_floor).
+            chk.set_attr("/", "drag_gate", DRAG_RECORD)
+            chk.set_attr("/", "h_visc_floor", float(RC_HVISC_FLOOR))
             # Which field the friction is: C_w0 exp(log_friction) on the
             # anchor (log), or sqrt_friction^2 with no anchor (sqrt).
             chk.set_attr("/", "friction_control", FRICTION_CONTROL)
             chk.set_attr("/", "fluidity_control", FLUIDITY_CONTROL)
+            # Whether log_fluidity on grounded ice is held at zero (floating)
+            # or inverted (all).
+            chk.set_attr("/", "phi_grounded", PHI_GROUNDED)
             # Which controls this stage moved (provenance only: the objective
             # is the same in every ISMIP7_INVERT mode)
             chk.set_attr("/", "invert_controls", INVERT)
@@ -2601,7 +2674,7 @@ def main():
             gap_spans.add("gap", t_iter - t_body_end[0])
         with spans("set_controls"):
             global_to_func(x_vec[:global_ndof], theta)
-            global_to_func(x_vec[global_ndof:], phi)
+            set_phi(x_vec[global_ndof:])
 
         t_fwd = perf_counter()
         reset_manager()
@@ -2683,6 +2756,8 @@ def main():
         with spans("gather_gradient"):
             g_theta = func_to_global(dJ_dtheta) + func_to_global(dR_theta)
             g_phi = func_to_global(dJ_dphi) + func_to_global(dR_phi)
+            if _phi_free_global is not None:
+                g_phi = g_phi * _phi_free_global
 
             total = J_val + reg_theta + reg_phi
             total_grad = np.concatenate([g_theta, g_phi])
@@ -3244,6 +3319,8 @@ def main():
         "subelement_scheme": SUBELEMENT_SCHEME,
         "subelement_scheme_version": int(SUBELEMENT_SCHEME_VERSION),
         "fluidity_control": FLUIDITY_CONTROL,
+        "drag_gate": DRAG_RECORD, "h_visc_floor": float(RC_HVISC_FLOOR),
+        "phi_grounded": PHI_GROUNDED,
     })
     if PRIOR_FORM == "bilaplacian":
         run_settings.update({"prior_sigma_theta": float(PRIOR_SIGMA_THETA),
@@ -3330,7 +3407,7 @@ def main():
     PETSc.Sys.Print(f"  {result.nit} iterations, {result.nfev} function evaluations")
     _x_final = result.x / _sqrtm if grad_precond == "mass" else result.x
     global_to_func(_x_final[:global_ndof], theta)
-    global_to_func(_x_final[global_ndof:], phi)
+    set_phi(_x_final[global_ndof:])
     _t_lo, _t_hi = global_range(theta)
     _p_lo, _p_hi = global_range(phi)
     PETSc.Sys.Print(f"  theta range: [{_t_lo:.3f}, {_t_hi:.3f}]")

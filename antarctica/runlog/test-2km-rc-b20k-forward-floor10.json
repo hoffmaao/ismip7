@@ -1,0 +1,24 @@
+{
+  "id": "test-2km-rc-b20k-forward-floor10",
+  "task": "test",
+  "institution": "IU",
+  "title": "Unforced, balanced five-year forward from RC's vertex-gate stage-2 MAP on the 20 km buffered 2 km mesh, membrane floor 10 m",
+  "status": "done",
+  "friction": "regularized_coulomb",
+  "period": "2015-2020",
+  "mesh": "antarctica_5000_2000_buffered20000 (IU's build, 969,764 vertices), DG0 geometry, vertex raster sampling, the lake fix (from the MAP: ISMIP7_MESH=checkpoint)",
+  "initial_state": "test-2km-rc-b20k-vgate-floor1's MAP (rc_s2x_vgf1.h5, inverted with the vertex gate and a 1 m floor; drag_gate recorded, h_visc_floor not)",
+  "forcing": "none: run_timing.py passes no forcing callback; ISMIP7_APPARENT_MB=1 ISMIP7_FIXED_FRONT=1 ISMIP7_DT=0.025 scpc_gamg, rescue on; ISMIP7_RC_HVISC_FLOOR=10; vertex gate from the MAP",
+  "site": "IU Quartz, general partition",
+  "resources": "32 ranks, 160G, 6 h",
+  "jobs": [
+    "10972251"
+  ],
+  "code": "94d0398; Quartz worktree /N/scratch/dlilien/ismip7_reinvert_s5",
+  "started": "2026-10-05",
+  "finished": "2026-10-05",
+  "cost": "22 min: start-up ramp 1,010 s, then 200 steps in 194 s of solves",
+  "results": "Quartz /N/scratch/dlilien/ismip7_reinvert_jobs/fwd (timing record, status) and the worktree's antarctica/results/fwd2km_rc_vgf1_floor10_2000_*",
+  "audit": "start-up ramp (8 continuation steps, scpc_gamg): 106 Newton and 18,413 Krylov iterations, 1,010 s (the first, n = 1, step 680 s). 200 steps, every solve converged, no rescue: 71 Newton iterations in all, 21 Krylov iterations a condensed solve, 1.0 s a solve. The state holds: peak speed 4,338 m/yr at (-1607990, -325127) and peak thickness unchanged to seven digits, dM/dt 0, calving 296 Gt/yr against amb 297, resid 0.00 every step",
+  "notes": "issue #153: the start of a forward at the membrane floor the inversion now records (94d0398), against 10 m. Balanced and unforced, the state is a fixed point (dh/dt = 0 at t=0 and nothing moves it), so this times the start-up solve and checks the first step; test-2km-rc-b20k-forward-floor*-drift exercise the fronts"
+}

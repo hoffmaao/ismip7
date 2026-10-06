@@ -1,0 +1,27 @@
+{
+  "id": "inversion-2km-rc-b20k-rho7500-floating",
+  "friction": "regularized_coulomb",
+  "title": "RC final-product inversion on the 20 km buffered 2 km mesh: gamma x0.01, fluidity on floating ice only, 2.5 m floor",
+  "initial_state": "test-2km-rc-b20k-vgate-floor2p5's MAP (rc_s2x_rc_vf2p5.h5, same mesh, gate and floor), its grounded phi zeroed; log-velocity weight 69946.22414285329",
+  "jobs": [
+    "11452512",
+    "11452521",
+    "11461566",
+    "11461580"
+  ],
+  "results": "Quartz /N/project/ice_rheology/ISMIP7/antarctica/results/reinvert_2km/final/inversion_icepack2_rc_n3_dg0_logvel_2000_int5000_b20k_rho7500_floating.h5; evaluation 1 copied to Quartz /N/scratch/dlilien/ismip7_reinvert_jobs/plots/prod_*_eval1.h5",
+  "task": "inversion",
+  "institution": "IU",
+  "status": "running",
+  "period": "2015 state",
+  "mesh": "antarctica_5000_2000_buffered20000 (IU's build, 969,764 vertices), DG0 geometry, vertex raster sampling, the lake fix",
+  "forcing": "observations sampled onto this mesh; bilaplacian prior at sigma 30 and rho 7.5 km (gamma x0.01, no prior-mean term), no dH/dt term, log friction control, cell-wise friction, L-BFGS-B without a metric; ISMIP7_FLUIDITY_CONTROL=floating with grounded phi held at zero (phi_grounded=zero), ISMIP7_EXACT_FRONT=1, ISMIP7_DRAG_GATE=vertex, ISMIP7_RC_HVISC_FLOOR=2.5, ISMIP7_TRANSFER_FILL=extend; scpc_mumps",
+  "site": "IU Quartz, general partition",
+  "resources": "32 ranks, 480G, 8 h links, ISMIP7_MAXITER=500, ISMIP7_CHAIN_MAX=2",
+  "code": "aa06dc8; Quartz worktree /N/scratch/dlilien/ismip7_reinvert_s6",
+  "started": "2026-10-06",
+  "finished": "",
+  "cost": "",
+  "audit": "first checkpoint (check_phi_grounded.py, job 11469157): phi exactly 0 on all 658,217 held nodes of 969,764 (largest |phi| 0.0), and the MAP records fluidity_control=floating, phi_grounded=zero, h_visc_floor=2.5, drag_gate=vertex, exact_front=1; strict resume reproduced the recorded objective (relative gap 5.6e-12); total 5,546.0 at the resume, 3,572.8 seven evaluations later, 30 to 125 s an evaluation",
+  "notes": "issue #153: IU's option set for the final inversion products (Rice prepares its own). Started on full_mumps (jobs 11452512 and 11452521, cancelled after 18 min) and moved to scpc_mumps once test-2km-rc-b20k-rho7500-floating-scpc-mumps showed it 2.4x faster on the same iterates; the scpc_mumps chain resumed strictly from the full_mumps link's iteration-3 checkpoint. 8 h links at 480G"
+}

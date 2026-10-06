@@ -28,6 +28,7 @@ STUBS = {
                '[ "${FAKE_MESH_RC:-0}" = 0 ] || exit "$FAKE_MESH_RC"\n'
                'touch "$FAKE_BUILDS"\n'),
     "srun": ('#!/bin/bash\n'
+             '[ "${1:-}" = --help ] && exit 0\n'
              'echo "SRUN $* MESH=$ISMIP7_MESH" >> "$FAKE_LOG"\n'
              '[ -f "$ISMIP7_MESH" ] || { echo "cannot open $ISMIP7_MESH" >&2; exit 65; }\n'),
     "scontrol": "#!/bin/bash\nexit 0\n",
@@ -78,7 +79,7 @@ def test_a_site_with_no_mesh_builds_the_smoke_mesh_first(sandbox):
     built = sandbox / "repo" / "antarctica" / "mesh" / "antarctica_320000_32000_buffered0.msh"
     assert seen == [
         "PYTHON -u antarctica/scripts/mesh_antarctica.py --lc 32000 --lc-coarse 320000 --buffer-m 0",
-        f"SRUN -n 4 python -u antarctica/scripts/inversion_icepack2.py MESH={built}",
+        f"SRUN --kill-on-bad-exit=1 -n 4 python -u antarctica/scripts/inversion_icepack2.py MESH={built}",
     ]
     assert "building it" in proc.stdout and "smoke exit 0" in proc.stdout
 
@@ -90,7 +91,7 @@ def test_a_mesh_already_there_is_used_as_it_is(sandbox, name):
     mesh.touch()
     proc, seen = run_smoke(sandbox)
     assert proc.returncode == 0, proc.stderr
-    assert seen == [f"SRUN -n 4 python -u antarctica/scripts/inversion_icepack2.py MESH={mesh}"]
+    assert seen == [f"SRUN --kill-on-bad-exit=1 -n 4 python -u antarctica/scripts/inversion_icepack2.py MESH={mesh}"]
 
 
 def test_a_mesh_the_caller_names_is_never_built(sandbox):

@@ -409,6 +409,10 @@ point outside the warm start's mesh takes the stated fill (theta and phi 0, the
 fluidity prior's constant baseline), and the log counts those points per
 field. A single-node link copies its warm start to node-local `$TMPDIR` first:
 32 ranks reading a 580 MB 2 km MAP over NFS took more than 45 minutes on NOTS.
+A link that loses a rank (the OOM killer, a crash) ends at once (below, "One
+dead rank ends the step") with no `Saved MAP:`, and its queued successor
+resumes from the last checkpoint in a fresh process, so an out-of-memory link
+costs one evaluation and a restart.
 Regression test: `tests/test_inversion_chain.py`.
 
 ### `projection.sbatch`, self-chaining
@@ -482,6 +486,16 @@ output file took 1042 s to `/scratch` under ompio and 52 s under romio321
 Before the change the yearly write was a third of a 45-minute model year.
 `ISMIP7_MPI_IO` names the component; set it empty to leave the MPI's own
 default. An MPI other than Open MPI ignores the variable.
+
+**One dead rank ends the step.** `ismip7_mpirun` starts every srun with
+`--kill-on-bad-exit=1`, and with `--oom-kill-step=1` where `srun --help` lists
+it (Slurm 24.11 and later; an older srun would refuse the option). Without
+them a rank that dies leaves the others waiting in MPI until the wall limit,
+under Slurm's default `KillOnBadExit=0`, which IU Quartz runs: in job 10971250
+the OOM killer took one of 32 ranks 4 h 28 min into a 16 h inversion and the
+node sat idle for the remaining 11.5 h (issue #161). A container site's
+`mpiexec` already takes every rank down when one dies. Regression test:
+`tests/test_site_core.py`.
 
 The wall budget is derived per job. Each link reads its own partition's
 `TimeLimit`, holds back 25 minutes and passes the rest as

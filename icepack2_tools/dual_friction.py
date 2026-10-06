@@ -41,6 +41,8 @@ n_flow=4 / H_ref composite viscous block.  Companion to
 from firedrake import (
     Constant,
     Function,
+    FunctionSpace,
+    assemble,
     TestFunction,
     FacetNormal,
     split,
@@ -53,6 +55,7 @@ from firedrake import (
     min_value,
     conditional,
     gt,
+    ge,
     eq,
     exp,
     avg,
@@ -95,6 +98,31 @@ def grounded_mask(H, b, gl_width=GL_WIDTH):
     control ``theta`` to grounded ice (``dJ/dtheta -> 0`` as ``He -> 0``)."""
     haf = height_above_flotation(H, b)
     return smooth_heaviside(haf, kH=1.0 / gl_width)
+
+
+# Below this the floating-only fluidity gate (1 - He) has shut phi off: about
+# 35 m of height above flotation at GL_WIDTH 10 m.
+PHI_GROUNDED_TOL = 1e-3
+
+
+def floating_control_nodes(H, b, Q, tol=PHI_GROUNDED_TOL, gl_width=GL_WIDTH):
+    r"""The nodes of ``Q`` where a floating-only fluidity control acts: 1 on a
+    node that touches a cell with ``1 - He >= tol``, 0 on the rest.
+
+    A floating-only inversion multiplies phi by ``1 - He``, so on the other
+    nodes phi changes the model by less than ``tol`` of itself. The inversion
+    holds phi at exactly zero there, which leaves grounded ice at its prior
+    fluidity in the MAP's ``log_fluidity`` as well as in the model (issue
+    #153). A node touching a cell where the gate is open stays free, so the
+    grounding-line band keeps its control."""
+    mesh = Q.mesh()
+    Q0 = FunctionSpace(mesh, "DG", 0)
+    acts = Function(Q0).interpolate(
+        conditional(ge(1.0 - grounded_mask(H, b, gl_width), tol), 1.0, 0.0))
+    touched = assemble(acts * TestFunction(Q) * dx)
+    nodes = Function(Q, name="phi_free")
+    nodes.dat.data[:] = (touched.dat.data_ro > 0.0).astype(float)
+    return nodes
 
 
 def driving_stress_magnitude(H, s):
@@ -252,6 +280,40 @@ def budd_nhat(N, N_ref, H, b, nhat_floor=0.02, nhat_cap=3.0):
     return conditional(gt(haf, Constant(0.0)), nh, Constant(0.0))
 
 
+def front_cliff_correction(v, H, s, mesh, h_ice=1.0):
+    r"""What the DG0 facet driving stress misses at a grounded marine cliff
+    inside the mesh, as a facet form against the velocity test function ``v``.
+
+    Across a facet between a cell holding ice (``H >= h_ice``) and one holding
+    none, the facet term of :func:`build_rc_residual` pushes with
+    ``rho_I g avg(H) (s - s_other)`` per unit length; the depth-integrated
+    front condition asks for ``g (rho_I H^2 - rho_W d^2) / 2``, ``d`` the
+    ice's depth below sea level (the push ``calving_terminus`` applies where
+    the front is the mesh boundary). The two agree for floating ice and on
+    land; against a grounded cliff in water of depth ``D`` the facet term
+    falls short by ``g D (rho_I H - rho_W D) / 2``: 15 % of the push for
+    1600 m of ice in 300 m of water, 33 % for 800 m in 600 m (issue #153).
+    This adds the difference on those facets and nothing elsewhere. It is
+    icepack_tools.momentum.front_cliff_correction with two changes: a cell
+    holds ice from ``h_ice`` (``ISMIP7_FRONT_HMIN``), so a transport film on
+    the water side does not switch it off, and the facet push it completes
+    is the residual's own ``avg(H)``, so a film's thickness is accounted for.
+    DG0 geometry only: under CG1 the facet jump vanishes and the cell
+    gradient carries the driving stress.
+    """
+    nu = FacetNormal(mesh)
+    ice = conditional(ge(H, h_ice), 1.0, 0.0)
+
+    def gap(side, other):
+        d = max_value(H(side) - s(side), 0.0)              # depth below sea level
+        exact = 0.5 * g * (rho_I * H(side) ** 2 - rho_W * d ** 2)
+        facet = rho_I * g * avg(H) * (s(side) - s(other))
+        return ice(side) * (1.0 - ice(other)) * (exact - facet)
+
+    return (gap("+", "-") * inner(nu("+"), avg(v))
+            + gap("-", "+") * inner(nu("-"), avg(v))) * dS
+
+
 def build_rc_residual(
     z,
     theta,
@@ -288,6 +350,8 @@ def build_rc_residual(
     fssa_tau=None,
     u_ref=None,
     fssa_tendency=None,
+    exact_front=False,
+    front_hmin=1.0,
 ):
     r"""Assemble the icepack2 dual regularized-Coulomb residual ``F`` for the
     mixed state ``z = (u, M, tau)`` on ``Z = V x Sigma x T``.
@@ -359,7 +423,12 @@ def build_rc_residual(
         ``H=0`` driving stress keeps the buffer velocity ~0 (clamping ``H`` in
         the driving term instead fabricates ``rho g H_floor grad s`` and blows
         the buffer velocity up).  Real ice (``H >> floor``) is unaffected.  0
-        disables it (correct when ``H`` is clamped > 0 upstream).
+        disables it (correct when ``H`` is clamped > 0 upstream).  The first
+        row of water cells beside the ice carries the floor too, so it
+        couples the ice front to the ocean drag one cell further out: on the
+        20 km buffered 2 km mesh, with the vertex drag gate, floating ice
+        started 11 % below its observed speed at 10 m, 4 % at 2.5 m and 2 %
+        at 1 m (issue #153; ``runconfig.hvisc_floor``).
     drag_mask : Function or None
         DG0 gate on the ocean drag (1 = drag on). Written each step by the
         level-set front; None keeps the drag everywhere below h_ocean.
@@ -381,6 +450,11 @@ def build_rc_residual(
         pumping wherever the floor-cell pathology sits.  ``u_lim = 0`` off.
     calving_ids : tuple or None
         Outflow boundary ids for the calving-front back-pressure (None to skip).
+    exact_front : bool
+        Add :func:`front_cliff_correction` on the facets between ice
+        (``H >= front_hmin``) and ice-free cells, so a grounded marine cliff
+        inside the mesh gets the depth-integrated push the terminus condition
+        gives a boundary front (``ISMIP7_EXACT_FRONT``). DG0 geometry only.
 
     Returns
     -------
@@ -505,6 +579,11 @@ def build_rc_residual(
         from icepack2_tools.fssa import fssa_term
         F += fssa_term(z, u_ref, fssa_tau, H, b, tendency=fssa_tendency,
                        gl_width=gl_width)
+    if exact_front:
+        if H.ufl_element().degree() != 0:
+            raise ValueError("exact_front needs DG0 geometry: the correction "
+                             "completes the facet-jump driving stress")
+        F += front_cliff_correction(v, H, s, mesh, h_ice=front_hmin)
     if calving_ids:
         F += model.variational.calving_terminus(
             velocity=u, thickness=H, surface=s, outflow_ids=tuple(calving_ids)

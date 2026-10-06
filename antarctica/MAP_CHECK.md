@@ -51,11 +51,17 @@ collar in `dual_friction.build_rc_residual`, all at once. The loader now
 fills each field with a stated value (`icepack2_tools/transfer.py`,
 `interpolate_with_fill`):
 
-| field | fill outside the source mesh |
-|---|---|
-| `log_friction`, `log_fluidity` | 0, the prior |
-| `fluidity_prior` | the constant baseline `A0 * a4_factor`, the value the code uses when a MAP carries no prior at all |
-| `velocity_obs` | the raster sample the forward makes on its own mesh |
+| field | fill outside the source mesh, `ISMIP7_TRANSFER_FILL=extend` (the default) | under `constant` |
+|---|---|---|
+| `log_friction`, `log_fluidity`, `sqrt_friction` | the harmonic extension of the source from its outline | 0, the prior |
+| `fluidity_prior` | the harmonic extension of its logarithm, so it stays positive | the constant baseline `A0 * a4_factor`, the value the code uses when a MAP carries no prior at all |
+| `velocity_obs` | the raster sample the forward makes on its own mesh | the same |
+
+The extension's discrete Laplacian is zero on every filled dof, so a field
+continues past the outline without the step a constant puts there, and the
+ice a front advance brings into the ring takes the controls of the front it
+came from. A filled region the source does not touch keeps the constant.
+Everything measured below was measured under the constant fill.
 
 A second artefact comes with the first. Firedrake locates a target point in a
 source cell up to half a reference cell outside it (`mesh.tolerance`, 0.5 by

@@ -1380,7 +1380,7 @@ R=antarctica/scripts/batch_runners/submit.sh
 MAP=$PWD/antarctica/results/reinvert_2km/final/<production MAP>.h5
 SIZE="ISMIP7_FRICTION=<the MAP's law> ISMIP7_LC=2000 ISMIP7_LC_COARSE=5000 ISMIP7_MESH=checkpoint"
 # the year, on the MAP's own mesh: results/relax_<MAP stem>_2000_final.h5
-relax=$($R projection ISMIP7_EXPERIMENT=relax ISMIP7_INVERSION=$MAP $SIZE | tail -n 1)
+relax=$($R projection --time <the whole year> ISMIP7_EXPERIMENT=relax ISMIP7_INVERSION=$MAP $SIZE | tail -n 1)
 # the re-inversion from it, once it has finished
 $R inversion --dependency afterok:${relax%%;*} --time <one link> $SIZE \
     ISMIP7_WARM_START=$PWD/antarctica/results/relax_<MAP stem>_2000_final.h5 \
@@ -1393,7 +1393,9 @@ the MAP's, and the strict handoff check holds them; give the run the
 inversion knobs the MAP was made under, as for any chain link. Size `--time`
 for one link from the MAP chain's own seconds per evaluation (about 260
 evaluations for 250 iterations): `ISMIP7_MAXITER` counts per process, so a
-second link would start a second 250.
+second link would start a second 250. Give the relaxation's own submission a
+`--time` that covers the whole year in one link: `afterok` waits on its first
+link alone, and a re-inversion started on an unfinished end state is refused.
 
 What each forward does with a relaxed MAP, recorded as `init_state` in every
 checkpoint it writes:
@@ -1412,11 +1414,11 @@ thickness clamp from 119,000 to 256,000 Gt/yr within a few steps.
 
 | Env var | Meaning | Default |
 |---------|---------|---------|
-| `ISMIP7_MAP_OUT` | output path for the MAP, overriding the generated name. Use it for smoke tests and variants so a short run cannot replace a production MAP. A bare filename resolves under `mesh/` | generated |
+| `ISMIP7_MAP_OUT` | output path for the MAP, overriding the generated name. Use it for smoke tests and variants so a short run cannot replace a production MAP. A bare filename resolves under `mesh/`. A re-inversion from a relaxation's end state writes `<MAP stem>_relax<year>.h5` and stops under any other name | generated |
 | `ISMIP7_MISFIT_NORM` | `sigma` divides each residual by its datum's squared error, giving a dimensionless chi^2; `none` is the legacy dimensional misfit. Selects the `ISMIP7_GAMMA_*` defaults | `sigma` |
 | `ISMIP7_LOG_VEL_WEIGHT` | weight on the ISSM logarithmic velocity misfit (cost function 103). The chi^2 alone over-weights slow interior ice and leaves discharge-carrying tributaries 40 to 50% too slow; the log term is scale free. `auto` equalises it with the chi^2 term at the state the inversion starts from, and under `auto` a warm start that records a positive weight under the same `ISMIP7_MISFIT_NORM` and `ISMIP7_LOG_VEL_EPS` supplies that weight, so every link of a chain minimises one objective (issue 68). Stamped into the MAP with `log_vel_weight_source`: `requested`, `derived` or `warm_start` | `0` |
 | `ISMIP7_LOG_VEL_EPS` | regularisation speed (m/yr) inside the log | `1.0` |
-| `ISMIP7_WARM_START` | path to a MAP or timing-cache checkpoint used to seed `theta`/`phi` (and, when present, geometry, `fluidity_prior`, and the mixed diagnostic state). Fields are interpolated onto the live mesh, so a 1-core cache can warm-start a multi-rank invert. A relaxation's end state (`results/relax_*_final.h5`) is a warm start too: the run takes its geometry and keeps its `θ`, holds the MAP objective it carries, logs how far the relaxed geometry moved the friction anchor, and stamps the relaxed geometry's record into every checkpoint; it stops unless the state finished its year on this mesh | unset |
+| `ISMIP7_WARM_START` | path to a MAP or timing-cache checkpoint used to seed `theta`/`phi` (and, when present, geometry, `fluidity_prior`, and the mixed diagnostic state). Fields are interpolated onto the live mesh, so a 1-core cache can warm-start a multi-rank invert. A relaxation's end state (`results/relax_*_final.h5`) is a warm start too: the run takes its geometry and keeps its `θ`, holds the MAP objective it carries, logs how far the relaxed geometry moved the friction anchor, and stamps the relaxed geometry's record into every checkpoint; it stops unless the state finished its year on this mesh and `ISMIP7_MAP_OUT` ends in `<MAP stem>_relax<year>.h5` | unset |
 | `ISMIP7_WARM_START_THETA` | how `θ` comes over from the warm start. `θ` is a log-deviation from the friction anchor, so under a different anchor (`ISMIP7_ANCHOR_LENGTH`) the same `θ` is a different friction. `1` takes it as it is and warns when the anchors differ; `physical` rebases it on grounded ice so the friction `C_w0 exp(θ)` is the warm start's and the first solve reproduces the warm start's (from an exp-control MAP the previous anchor is its constant `friction_c_ref`); `0` starts at the new prior mean | `1` |
 | `ISMIP7_WARM_START_PHI` | how `φ` comes over from the warm start. `1` takes it as it is, a deviation from this run's own fluidity prior; `physical` rebases it onto this run's prior (`ISMIP7_FLUIDITY_PRIOR`) so `A = A_prior exp(φ)` is the warm start's, e.g. a thermal-prior MAP warm-starting a Pattyn-prior run; `0` starts at the prior mean | `1` |
 | `ISMIP7_WARM_START_GEOMETRY` | `1` takes thickness, bed, surface, `velocity_obs` and the mixed state from the warm start; `0` keeps this mesh's own BedMachine sample. Defaults to `1` on the same mesh, except that a MAP recording a different `lake_ice_base` does not supply its geometry, so an old MAP cannot bring the lake bowl back | `1` on the same mesh, else `0` |

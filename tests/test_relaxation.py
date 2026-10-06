@@ -226,3 +226,22 @@ def test_the_driver_refuses_a_relaxed_map_before_the_setup(monkeypatch, tmp_path
     monkeypatch.setenv("ISMIP7_INVERSION", str(relaxed))
     with pytest.raises(ValueError, match="relaxed already"):
         run.main()
+
+
+def test_the_driver_resumes_only_its_own_end_state(monkeypatch, tmp_path):
+    h5py = pytest.importorskip("h5py")
+    from icepack2_tools.runconfig import file_sha256
+    run = _driver()
+    _driver_env(monkeypatch, tmp_path)
+    source = tmp_path / "map.h5"
+    with h5py.File(source, "w") as h:
+        h["/"].attrs["geometry_source_method"] = MAP["geometry_source_method"]
+    monkeypatch.setenv("ISMIP7_INVERSION", str(source))
+    # a MAP re-inverted from a relaxation of this MAP carries its sha256 too
+    relaxed = tmp_path / "map_relax2014.h5"
+    with h5py.File(relaxed, "w") as h:
+        h["/"].attrs["relax_source_sha256"] = file_sha256(str(source))
+        h["/"].attrs["geometry_source_method"] = GEOMETRY_METHOD_RELAXED
+    monkeypatch.setenv("ISMIP7_RESTART", str(relaxed))
+    with pytest.raises(RuntimeError, match="not a relaxation"):
+        run.main()

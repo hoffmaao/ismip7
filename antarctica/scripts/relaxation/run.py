@@ -97,19 +97,23 @@ def main():
     experiment_name = relax_experiment_name(source, os.environ.get("ISMIP7_RUN_TAG", ""))
     # A link the wall clock stopped saves its final state with the record
     # above, so a resume continues the same year of the same MAP; a state
-    # from another MAP under the same name is refused.
+    # from another MAP under the same name is refused, and so is a MAP
+    # re-inverted from this relaxation, which carries its sha256 without
+    # the end-state marker.
     restart = os.environ.get("ISMIP7_RESTART")
     if restart is None and auto_resume():
         restart = auto_resume_checkpoint(experiment_name)
         PETSc.Sys.Print(f"Auto-resume: {restart}" if restart
                         else "Auto-resume: no prior checkpoint")
     if restart:
-        _had = _root_attrs(restart, ("relax_source_sha256",)).get("relax_source_sha256")
+        _rec = _root_attrs(restart, ("relax_source_sha256", END_STATE_ATTR))
+        _had = _rec.get("relax_source_sha256")
         _had = _had.decode() if isinstance(_had, bytes) else _had
-        if _had != sha:
+        if _had != sha or not int(_rec.get(END_STATE_ATTR, 0) or 0):
             raise RuntimeError(
                 f"{restart} is not a relaxation of {source} (sha256 {_had} against "
-                f"{sha}); move it aside to relax this MAP from the start")
+                f"{sha}, {END_STATE_ATTR}={_rec.get(END_STATE_ATTR)}); move it "
+                f"aside to relax this MAP from the start")
 
     readers = None
     feedback = None

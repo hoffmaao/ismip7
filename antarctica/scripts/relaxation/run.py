@@ -17,7 +17,8 @@ The final checkpoint, ``results/relax_<MAP stem>_<lc>_final.h5``, seeds the
 re-inversion (``ISMIP7_WARM_START`` and ``ISMIP7_MESH=checkpoint``). It records
 the MAP, its sha256, the year, the step, the forcing and the free-surface
 stabilization the year ran under, and carries the MAP's objective settings,
-so the re-inversion minimises the MAP's objective on the relaxed geometry. Everything else the driver needs is a forward's.
+so the re-inversion minimises the MAP's objective on the relaxed geometry.
+Everything else the driver needs is a forward's.
 
 Usage:
     submit.sh projection ISMIP7_EXPERIMENT=relax ISMIP7_INVERSION=<MAP> ISMIP7_MESH=checkpoint

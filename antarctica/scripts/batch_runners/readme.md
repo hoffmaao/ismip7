@@ -533,9 +533,11 @@ independent, so a handful of nodes finishes it inside a week.
   reports ghost/owned 0.010 at 32 ranks (max 0.017, halo 1.0 % of owned),
   so the build partitions by locality and rank counts up to a node are
   meaningful there. The forward cost is the Rice row of the table above.
-- An inversion factors the complete mixed Jacobian with MUMPS, which sets its
-  memory; `tlm_adjoint` differentiates through that solve, so no setting
-  changes it. Cluster forwards took the field split this item asked for:
+- An inversion's direct forward and adjoint solves factor only the condensed
+  CG1 velocity system (`ISMIP7_INVERSION_LINEAR_SOLVER`, default
+  `scpc_mumps`); its taped confirm solve still assembles the complete mixed
+  Jacobian, and exits at iteration 0 without factoring. Cluster forwards took
+  the field split this item asked for:
   `projection.sbatch` defaults to `scpc_gamg`, which eliminates the cell-wise
   stress and traction blocks exactly and puts multigrid on the condensed
   velocity operator (section 7 of `antarctica/README.md`).

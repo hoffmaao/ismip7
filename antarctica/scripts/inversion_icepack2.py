@@ -646,10 +646,10 @@ def main():
     # tolerance -3 (PETSC_UNLIMITED; the legacy -1 is PETSC_DETERMINE, which
     # restores PETSc's 1e4 growth cutoff and reports DIVERGED_DTOL on solves
     # that would otherwise reach their real result -- README "Timing
-    # benchmark" §7). The linear solve is the full mixed-Jacobian MUMPS LU:
-    # tlm_adjoint differentiates through it, so this is deliberately NOT the
-    # transient's condensed scpc_mumps mode, and the MAP records that as
-    # state_solver_mode beside the lane contract diagnostic_solver_mode.
+    # benchmark" §7). The taped solve's linear solve is the full
+    # mixed-Jacobian MUMPS LU, and the MAP records that as state_solver_mode
+    # beside the lane contract diagnostic_solver_mode; the untaped direct
+    # forward and the adjoint follow inversion_solver_mode below.
     sparams = nonlinear_solver_options()
     sparams.update({
         "ksp_type": "gmres",
@@ -667,7 +667,7 @@ def main():
     state_solver_parameters = json.dumps(sparams, sort_keys=True)
     # Optional SNES monitoring (ISMIP7_SNES_MONITOR=1, ISMIP7_SNES_LOG=file),
     # the transient runner's convention. Applies to every annotated forward
-    # and, through tlm_adjoint, the adjoint linear solves.
+    # and, through tlm_adjoint, the adjoint linear solves under full_mumps.
     _solver_log = os.environ.get("ISMIP7_SNES_LOG") if snes_monitor_enabled() else None
     if _solver_log:
         os.makedirs(os.path.dirname(os.path.abspath(_solver_log)), exist_ok=True)

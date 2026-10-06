@@ -418,18 +418,19 @@ def drag_gate():
 
 
 # The membrane-only thickness floor [m] (dual_friction.build_rc_residual,
-# h_visc_floor). An inversion runs HVISC_FLOOR_DEFAULT; every MAP inverted
-# before the floor was recorded ran HVISC_FLOOR_UNRECORDED.
-HVISC_FLOOR_DEFAULT = "1.0"
+# h_visc_floor). An inversion runs HVISC_FLOOR_DEFAULT, 2.5 m since 6 October
+# 2026 (GEOMETRY_DISCRETIZATION.md, issue #153); every MAP inverted before the
+# floor was recorded ran HVISC_FLOOR_UNRECORDED.
+HVISC_FLOOR_DEFAULT = "2.5"
 HVISC_FLOOR_UNRECORDED = "10.0"
 
 
 def hvisc_floor():
     r"""``ISMIP7_RC_HVISC_FLOOR`` [m], the inversion's membrane floor: a cell
     thinner than this carries this much ice in the membrane term alone. The
-    first row of water cells beside the ice carries it too, so at 10 m it
-    coupled the ice front to the ocean drag one cell further out (issue
-    #153)."""
+    first row of water cells beside the ice carries it too, coupling the ice
+    front to the ocean drag one cell further out; 2.5 m keeps about a fifth
+    of the 10 m coupling for 14 % more forward time at 1 km (issue #153)."""
     return float(os.environ.get("ISMIP7_RC_HVISC_FLOOR", HVISC_FLOOR_DEFAULT))
 
 

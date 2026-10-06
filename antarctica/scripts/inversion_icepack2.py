@@ -429,10 +429,11 @@ if FRICTION_CONTROL in ("sqrt", "exp") and not USE_RESIDUAL:
                      "law (budd or regularized_coulomb)")
 C0_RC = float(os.environ.get("ISMIP7_RC_C0", "0.5"))
 # Buffer-node (h_clamp=0) coercivity controls; see dual_friction.build_rc_residual.
-# h_visc_floor (membrane-only thickness floor) is the primary cure; at 1 m
-# (runconfig.hvisc_floor) the first water row no longer carries the ocean drag
-# onto the ice front, as it did at 10 m. c_w0_floor is off by default
-# (unnecessary once h_visc_floor is on).
+# h_visc_floor (membrane-only thickness floor) is the primary cure. The first
+# water row carries it too and so couples the ice front to the ocean drag one
+# cell out; runconfig.hvisc_floor's 2.5 m keeps a fifth of the 10 m coupling
+# (GEOMETRY_DISCRETIZATION.md). c_w0_floor is off by default (unnecessary once
+# h_visc_floor is on).
 RC_HVISC_FLOOR = hvisc_floor()
 RC_CW0_FLOOR = float(os.environ.get("ISMIP7_RC_CW0_FLOOR", "0.0"))
 # Budd N_hat knobs (fric_law="budd"): at the reference/inversion geometry

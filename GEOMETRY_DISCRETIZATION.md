@@ -243,6 +243,57 @@ against an acceptance of 7.84, so the restart re-solved the state with the
 drag on, and its first step calved 21.7 Gt/yr where the uninterrupted run
 calved 2,865.
 
+## The drag gate and the membrane floor (issue #153)
+
+On the 20 km buffered 2 km mesh the ocean drag reached the ice front by two
+routes. A water cell touching the ice at one vertex drags that front node,
+since the velocity is CG1, and `front.ocean_drag_cells` skipped only the cells
+sharing an edge with ice (`ISMIP7_DRAG_GATE=facet`). The membrane floor
+`h_visc_floor` (`ISMIP7_RC_HVISC_FLOOR`) gives the first water row that much
+ghost ice, sheared between the moving front and the dragged water one cell
+out. `ISMIP7_DRAG_GATE=vertex`, the default, closes the first route; a lower
+floor narrows the second.
+
+RC's stage-1 controls on that mesh at evaluation 1, model minus observed speed
+(mean; front band: floating ice within 25 km of open water):
+
+| gate, floor | floating ice (median ratio) | front band |
+|---|---|---|
+| facet, 10 m | -119 m/yr (-27 %) | -138 m/yr |
+| vertex, 10 m | -39.2 (-11 %) | -52.2 |
+| vertex, 5 m | -22.9 (-7 %) | -34.0 |
+| vertex, 2.5 m | -12.7 (-4 %) | -22.2 |
+| vertex, 1 m | -5.6 (-2 %) | -13.6 |
+| drag off, 10 m | -4.7 (-1 %) | -17 |
+
+Over 300 stage-2 iterations the inversion absorbs most of this into phi. The
+front band ends at -13.1, -14.0, -15.5 and -18.5 m/yr at 1, 2.5, 5 and 10 m,
+and the total misfit falls with the floor, 2,833 to 2,791. Against the 1 m MAP
+the floating phi is softer by +0.14, +0.34 and +0.64 at its 99th percentile
+(2.5, 5, 10 m), a dipole on Ross and Filchner-Ronne: the shelf interior runs
+faster and the front band slower, by 22, 51 and 95 m/yr at its 1st
+percentile.
+
+Forward cost against 10 m: scpc_gamg, five unforced years drifting by the flux
+divergence (one year at 1 km), every solve converged with no rescue:
+
+| floor | 2 km, 32 ranks, from the MAP state | 2 km, cold start | 1 km, 64 ranks, cold start | 1 km start-up |
+|---|---|---|---|---|
+| 1 m | 2.5x | 1.6x, start-up 4.8 h | 1.53x | 19 min |
+| 2.5 m | 1.9x | 1.4x | 1.14x | 17 min |
+| 5 m | 1.3x | 1.0x | 1.10x | 15 min |
+| 10 m | 14.4 s a solve | 11.4 s | 18.2 s | 11 min |
+
+The inversion runs 2.5 m (`runconfig.HVISC_FLOOR_DEFAULT`, decided 6 October
+2026 for the submission schedule): it keeps about a fifth of the 10 m
+artifact for 14 % more forward time at 1 km, where 1 m takes 53 %. The MAP
+records `drag_gate` and `h_visc_floor`, and a forward runs both
+(`runconfig.forward_drag_gate`, `forward_hvisc_floor`); a MAP older than the
+record was inverted at 10 m and keeps it. At rho 75 km scpc_gamg stalls at
+every floor, so the floor leaves the inversion's solver choice there
+unchanged. Records: `test-2km-rc-b20k-eval1-*`, `test-2km-rc-b20k-vgate-floor*`,
+`test-2km-rc-b20k-forward-floor*`, `test-1km-rc-forward-floor*-drift`.
+
 ## The melt calibration follows the forward's melt path
 
 The calibrations melt on the same `ISMIP7_GEOMETRY_SPACE` as the forward.

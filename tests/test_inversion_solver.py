@@ -1,10 +1,13 @@
 """The inversion's linear solver: static condensation by default, its adjoint options, the
 PT-Scotch fallback, and the quadrature degree stamped into the residual."""
-import os
+import sys
+from pathlib import Path
 
 import pytest
 
 from icepack2_tools import solverconfig as sc
+
+sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "antarctica" / "scripts"))
 
 
 def test_condensation_is_the_inversion_default(monkeypatch):
@@ -45,22 +48,38 @@ def test_quadrature_degree_reaches_every_derived_form():
     so a solve that passes no form-compiler parameters integrates it the same way."""
     fd = pytest.importorskip("firedrake")
     import ufl
-    here = os.path.dirname(os.path.abspath(__file__))
-    path = os.path.join(here, "..", "antarctica", "scripts", "inversion_icepack2.py")
-    src = open(path).read()
-    start = src.index("def with_quadrature_degree(")
-    end = src.index("\n\n\n", start)
-    ns = {}
-    exec(src[start:end], ns)                     # the helper alone, not the script
+    from icepack2_tools.forms import with_quadrature_degree
     mesh = fd.UnitSquareMesh(2, 2)
     V = fd.FunctionSpace(mesh, "CG", 1)
     u, v = fd.Function(V), fd.TestFunction(V)
-    F = ns["with_quadrature_degree"](u ** 3 * v * fd.dx + fd.avg(u) * fd.jump(v) * fd.dS, 4)
+    F = with_quadrature_degree(u ** 3 * v * fd.dx + fd.avg(u) * fd.jump(v) * fd.dS, 4)
     for form in (F, fd.derivative(F, u), fd.adjoint(fd.derivative(F, u))):
         assert {itg.metadata()["quadrature_degree"] for itg in form.integrals()} == {4}
-    kept = ns["with_quadrature_degree"](u * v * fd.dx(degree=7), 4)
+    kept = with_quadrature_degree(u * v * fd.dx(degree=7), 4)
     assert kept.integrals()[0].metadata()["quadrature_degree"] == 7
     assert isinstance(F, ufl.Form)
+
+
+def test_mumps_analysis_leaves_the_cache_fingerprint_alone(monkeypatch):
+    """The analysis follows the build and the knob; the record says which ran,
+    and a cache prepared on one build is accepted on another."""
+    import timing_campaign as tc
+    monkeypatch.delenv("ISMIP7_MUMPS_ANALYSIS", raising=False)
+    monkeypatch.setattr(sc, "_have_ptscotch", lambda: True)
+    parallel = sc.solver_provenance("scpc_mumps")
+    assert parallel["diagnostic_petsc_options"]["condensed_field_mat_mumps_icntl_28"] == 2
+    monkeypatch.setattr(sc, "_have_ptscotch", lambda: False)
+    no_ptscotch = sc.solver_provenance("scpc_mumps")
+    assert "condensed_field_mat_mumps_icntl_28" not in no_ptscotch["diagnostic_petsc_options"]
+    monkeypatch.setattr(sc, "_have_ptscotch", lambda: True)
+    monkeypatch.setenv("ISMIP7_MUMPS_ANALYSIS", "sequential")
+    sequential = sc.solver_provenance("scpc_mumps")
+    assert "condensed_field_mat_mumps_icntl_28" not in sequential["diagnostic_petsc_options"]
+    fingerprints = {tc.solver_configuration_fingerprint(p)
+                    for p in (parallel, no_ptscotch, sequential)}
+    assert len(fingerprints) == 1
+    assert fingerprints != {tc.solver_configuration_fingerprint(
+        sc.solver_provenance("full_mumps"))}
 
 
 def test_mumps_analysis_knob_is_checked(monkeypatch):

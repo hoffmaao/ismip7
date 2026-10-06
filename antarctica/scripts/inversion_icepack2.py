@@ -132,6 +132,7 @@ from icepack2_tools.runconfig import (
 )
 from icepack2_tools.front import facet_neighbours, ocean_drag_cells
 from icepack2_tools.continuation import ladder, ramp_exponents
+from icepack2_tools.forms import with_quadrature_degree
 from icepack2_tools.solverconfig import (
     continuation_steps,
     diagnostic_solver_label,
@@ -151,15 +152,6 @@ from icepack2_tools.solverconfig import (
 )
 from mesh_naming import get_buffer_m, mesh_filename
 from timing_campaign import MATRIX_T_START, atomic_write_json
-
-def with_quadrature_degree(form, degree):
-    r"""``form`` with ``quadrature_degree`` set in every integral's metadata
-    (an integral that already names a degree keeps it)."""
-    import ufl
-    return ufl.Form([
-        itg.reconstruct(metadata={"quadrature_degree": degree, **itg.metadata()})
-        for itg in form.integrals()])
-
 
 # petsc4py returns SNES converged reasons as plain ints on most builds.
 _SNES_REASON_NAMES = {
@@ -1995,7 +1987,8 @@ def main():
     def _inversion_residual(theta_c, phi_c):
         """build_F with what the inversion's solves need on top of it."""
         F_c = build_F(theta_c, phi_c)
-        if inv_solver_mode.startswith("scpc_"):
+        if (inv_solver_mode.startswith("scpc_")
+                or adj_solver_mode.startswith("scpc_")):
             # SCPC needs both off-diagonal blocks of the eliminated (M, tau)
             # pair in the form; they are physically uncoupled, so UFL drops
             # them and the condensation fails. A runtime Constant keeps the

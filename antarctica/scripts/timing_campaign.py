@@ -598,6 +598,12 @@ def sha256_file(path, chunk_size=8 * 1024 * 1024):
     return digest.hexdigest()
 
 
+# MUMPS's analysis and ordering (ICNTL 28 and 29) follow the PETSc build and
+# ISMIP7_MUMPS_ANALYSIS. They change how the factorization is computed and
+# leave the converged state alone, so a cache's identity does not carry them.
+_MUMPS_ANALYSIS_OPTIONS = ("mat_mumps_icntl_28", "mat_mumps_icntl_29")
+
+
 def solver_configuration_fingerprint(configuration):
     """Fingerprint setup-relevant solver settings, excluding recovery policy.
 
@@ -605,13 +611,17 @@ def solver_configuration_fingerprint(configuration):
     transient lanes disable rescue/subcycling.  Those recovery settings must
     differ, so the cache identity covers the nonlinear/linear operators and
     tolerances that define the prepared state, not the transient recovery
-    policy.
+    policy, nor the MUMPS analysis that factored them.
     """
+    petsc_options = configuration.get("diagnostic_petsc_options")
+    if petsc_options is not None:
+        petsc_options = {
+            key: value for key, value in petsc_options.items()
+            if not key.endswith(_MUMPS_ANALYSIS_OPTIONS)
+        }
     selected = {
         "diagnostic_mode": configuration.get("diagnostic_mode"),
-        "diagnostic_petsc_options": configuration.get(
-            "diagnostic_petsc_options"
-        ),
+        "diagnostic_petsc_options": petsc_options,
         "transport_petsc_options": configuration.get(
             "transport_petsc_options"
         ),

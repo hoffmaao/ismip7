@@ -142,6 +142,7 @@ from icepack2_tools.solverconfig import (
     diagnostic_solver_parameters,
     adjoint_solver_parameters,
     inversion_solver_mode,
+    mumps_analysis,
     final_solve_bounds,
     final_solve_parameters,
     linearization_state,
@@ -690,6 +691,7 @@ def main():
     # The condensed factorizations run MUMPS's own (sequential) analysis unless
     # the environment says otherwise (solverconfig.mumps_analysis).
     os.environ.setdefault("ISMIP7_MUMPS_ANALYSIS", "sequential")
+    mumps_analysis()
     inv_solver_mode = inversion_solver_mode()
     _scpc_structural_zero = Constant(0.0)
     PETSc.Sys.Print(

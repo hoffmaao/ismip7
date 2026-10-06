@@ -89,7 +89,14 @@ def test_mumps_analysis_leaves_the_cache_fingerprint_alone(
     assert tc.solver_configuration_fingerprint(provenance) == PREPARED_CACHE_FINGERPRINTS[mode]
 
 
-def test_mumps_analysis_knob_is_checked(monkeypatch):
+@pytest.mark.parametrize("ptscotch", [True, False])
+def test_mumps_analysis_knob_is_checked(monkeypatch, ptscotch):
+    """A bad value is refused on every build, including one without PT-Scotch."""
+    monkeypatch.setattr(sc, "_have_ptscotch", lambda: ptscotch)
     monkeypatch.setenv("ISMIP7_MUMPS_ANALYSIS", "distributed")
     with pytest.raises(ValueError):
         sc.mumps_analysis()
+    with pytest.raises(ValueError):
+        sc._mumps_options("x_")
+    with pytest.raises(ValueError):
+        sc.diagnostic_solver_parameters("scpc_mumps")

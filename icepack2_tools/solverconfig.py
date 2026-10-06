@@ -364,7 +364,9 @@ def _mumps_options(prefix=""):
         f"{prefix}pc_type": "lu",
         f"{prefix}pc_factor_mat_solver_type": "mumps",
     }
-    if _have_ptscotch() and mumps_analysis() == "parallel":
+    # Read the knob first, so a bad value fails on every build.
+    analysis = mumps_analysis()
+    if analysis == "parallel" and _have_ptscotch():
         # Distributed analysis with PT-Scotch nested dissection.
         opts[f"{prefix}mat_mumps_icntl_28"] = 2
         opts[f"{prefix}mat_mumps_icntl_29"] = 1

@@ -404,7 +404,7 @@ Budd re-inversion on the relaxed geometry, 250 iterations (planned), IU.
 - **Forcing versions:** inversion-2km-budd-b20k-rho7500-floating's objective, carried by the end state and held by the strict handoff
 - **Site / partition:** IU Quartz, general partition
 - **Ranks / memory:** one link sized from the production chain's seconds per evaluation (about 260 evaluations), ISMIP7_MAXITER=250, ISMIP7_CHAIN_MAX=0
-- **Notes:** The MAP is one of the initial-state options the forwards can start from in 2003 (INVERSION_PRIORS.md section 6)
+- **Notes:** The MAP is one of the initial-state options the forwards can start from in 2003 (INVERSION_PRIORS.md section 6); issue #162
 
 ### inversion-2km-budd-b20k-relax2014-year
 
@@ -417,7 +417,7 @@ Budd relaxation year of the relaxed initial state: 2014 to 2015 on OCX's 2014 fo
 - **Initial state / MAP:** inversion-2km-budd-b20k-rho7500-floating's final MAP, rewound 1 yr with the Smith dH/dt on grounded ice
 - **Forcing versions:** OCX protocol forcing for 2014 (ISMIP7_EXPERIMENT=relax), apparent MB off, front pinned
 - **Site / partition:** IU Quartz, general partition
-- **Notes:** Runs once the production chain has finished; its end state seeds the re-inversion below. README, "The relaxed initial state"
+- **Notes:** Runs once the production chain has finished; its end state seeds the re-inversion below. README, "The relaxed initial state"; issue #162
 
 ### inversion-2km-budd-b20k-rho7500-floating
 
@@ -513,7 +513,7 @@ RC re-inversion on the relaxed geometry, 250 iterations (planned), IU.
 - **Forcing versions:** inversion-2km-rc-b20k-rho7500-floating's objective, carried by the end state and held by the strict handoff
 - **Site / partition:** IU Quartz, general partition
 - **Ranks / memory:** one link sized from the production chain's seconds per evaluation (about 260 evaluations), ISMIP7_MAXITER=250, ISMIP7_CHAIN_MAX=0
-- **Notes:** The MAP is one of the initial-state options the forwards can start from in 2003 (INVERSION_PRIORS.md section 6)
+- **Notes:** The MAP is one of the initial-state options the forwards can start from in 2003 (INVERSION_PRIORS.md section 6); issue #162
 
 ### inversion-2km-rc-b20k-relax2014-year
 
@@ -526,7 +526,7 @@ RC relaxation year of the relaxed initial state: 2014 to 2015 on OCX's 2014 forc
 - **Initial state / MAP:** inversion-2km-rc-b20k-rho7500-floating's final MAP, rewound 1 yr with the Smith dH/dt on grounded ice
 - **Forcing versions:** OCX protocol forcing for 2014 (ISMIP7_EXPERIMENT=relax), apparent MB off, front pinned
 - **Site / partition:** IU Quartz, general partition
-- **Notes:** Runs once the production chain has finished; its end state seeds the re-inversion below. README, "The relaxed initial state"
+- **Notes:** Runs once the production chain has finished; its end state seeds the re-inversion below. README, "The relaxed initial state"; issue #162
 
 ### inversion-2km-rc-b20k-rho7500-floating
 

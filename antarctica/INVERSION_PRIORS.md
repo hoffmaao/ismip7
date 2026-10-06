@@ -320,10 +320,10 @@ from another control derives its own auto value.
 
 ## 6. The relaxed re-inversion
 
-An initial-state option beside each production MAP (David, 6 October 2026),
-in `icepack2_tools/relaxation.py`, `antarctica/scripts/relaxation/run.py` and
-the inversion's warm start; the commands are in the README, "The relaxed
-initial state".
+An initial-state option beside each production MAP (issue #162), settled
+by David on 6 October 2026, in `icepack2_tools/relaxation.py`,
+`antarctica/scripts/relaxation/run.py` and the inversion's warm start; the
+commands are in the README, "The relaxed initial state".
 
 | step | what | settings |
 |---|---|---|

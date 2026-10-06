@@ -497,6 +497,20 @@ def main():
     PETSc.Sys.Print(f"  {global_size(mesh.coordinates)} vertices, "
                     f"{mesh.comm.allreduce(mesh.cell_set.size)} cells")
 
+    # The MAP name carries BOTH the flow exponent and the geometry space it was
+    # inverted under, so n=3/n=4 and DG0/CG1 MAPs coexist on disk and a forward
+    # cannot silently pair itself with a MAP whose front treatment differs.
+    # Built by the shared helper the forward and the preflight gates use.
+    # ISMIP7_MAP_OUT overrides the full output path: without it, EVERY run --
+    # including a short smoke test -- writes to the production filename, and a
+    # 3-iteration artifact silently replaces a converged MAP (this nearly
+    # happened twice in Aug 2026 validation). Variant MAPs (e.g. the transient
+    # dH/dt-constrained inversion) should also name themselves distinctly here
+    # rather than shadow the velocity-only MAP the forwards auto-load.
+    map_out = os.environ.get("ISMIP7_MAP_OUT")
+    map_fn = (os.path.basename(map_out) if map_out
+              else map_basename(FRICTION, mesh_lc))
+
     use_calving_terminus = os.environ.get("ISMIP7_NO_CALVING_TERMINUS") is None
     # Per-mesh sidecar, hard-checked against this mesh: a stale sidecar leaves
     # most of the front with no terminus back-pressure, and the inversion would
@@ -946,12 +960,13 @@ def main():
             # A relaxed geometry (icepack2_tools.relaxation) comes with the
             # controls fitted to it, so it is taken or the run stops. From a
             # relaxation's end state the re-inversion keeps the MAP's theta
-            # (David, 6 Oct 2026): the friction then follows the relaxed
+            # (IU, 6 Oct 2026, issue #162): the friction then follows the relaxed
             # driving stress through the anchor, and where basal drag carries
             # that stress the starting speed stays the MAP's.
             if warm_end_state:
                 _why = end_state_problems(warm_geometry_attrs, same_mesh=same_mesh,
-                                          geometry_taken=warm_geometry_loaded)
+                                          geometry_taken=warm_geometry_loaded,
+                                          map_out=map_fn)
                 if _theta_mode == "physical":
                     _why.append(
                         "ISMIP7_WARM_START_THETA=physical rebases between anchor "
@@ -1438,19 +1453,6 @@ def main():
             f"    log_fluidity rebased onto this prior (A kept): shift in "
             f"[{_s_lo:.2f}, {_s_hi:.2f}], mean {global_mean(_shift):.3f}")
     A4_base = A_prior
-    # The MAP name carries BOTH the flow exponent and the geometry space it was
-    # inverted under, so n=3/n=4 and DG0/CG1 MAPs coexist on disk and a forward
-    # cannot silently pair itself with a MAP whose front treatment differs.
-    # Built by the shared helper the forward and the preflight gates use.
-    # ISMIP7_MAP_OUT overrides the full output path: without it, EVERY run --
-    # including a short smoke test -- writes to the production filename, and a
-    # 3-iteration artifact silently replaces a converged MAP (this nearly
-    # happened twice in Aug 2026 validation). Variant MAPs (e.g. the transient
-    # dH/dt-constrained inversion) should also name themselves distinctly here
-    # rather than shadow the velocity-only MAP the forwards auto-load.
-    map_out = os.environ.get("ISMIP7_MAP_OUT")
-    map_fn = (os.path.basename(map_out) if map_out
-              else map_basename(FRICTION, mesh_lc))
     # A bare filename (ISMIP7_MAP_OUT=map.h5) has no dirname; resolve it under
     # MESH_DIR like the non-override path rather than silently against the CWD.
     _map_dir = (os.path.dirname(map_out) or MESH_DIR) if map_out else MESH_DIR

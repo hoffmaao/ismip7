@@ -190,11 +190,13 @@ def relaxation_attrs(*, source_map, source_sha256, source_attrs, t_start, t_end,
     return out
 
 
-def end_state_problems(attrs, *, same_mesh, geometry_taken):
+def end_state_problems(attrs, *, same_mesh, geometry_taken, map_out):
     r"""Why a relaxation end state cannot seed a re-inversion, as sentences;
     empty when it can. The year has to have reached its end, unstalled, and
     the re-inversion has to run on its mesh and take its geometry: the
-    controls it fits belong to that geometry."""
+    controls it fits belong to that geometry. ``map_out`` is the MAP the
+    re-inversion writes, which has to carry ``relaxed_map_name``, so it never
+    replaces the production MAP a forward loads by default."""
     problems = []
     t_end = float(_value(attrs.get("relax_t_end", GEOMETRY_YEAR)))
     t_yr = attrs.get("t_yr")
@@ -212,6 +214,13 @@ def end_state_problems(attrs, *, same_mesh, geometry_taken):
         problems.append(
             "its geometry is not taken (ISMIP7_WARM_START_GEOMETRY=0, or a "
             "lake_ice_base other than the run's)")
+    want = relaxed_map_name(str(_value(attrs["relax_source_map"])),
+                            _value(attrs["relax_t_start"]))
+    if os.path.basename(map_out) != want:
+        problems.append(
+            f"it would write {os.path.basename(map_out)}; a MAP re-inverted "
+            f"from it is named {want}, so set ISMIP7_MAP_OUT to a path ending "
+            f"in {want}")
     return problems
 
 

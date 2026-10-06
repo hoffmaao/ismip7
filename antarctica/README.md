@@ -1380,7 +1380,7 @@ R=antarctica/scripts/batch_runners/submit.sh
 MAP=$PWD/antarctica/results/reinvert_2km/final/<production MAP>.h5
 SIZE="ISMIP7_FRICTION=<the MAP's law> ISMIP7_LC=2000 ISMIP7_LC_COARSE=5000 ISMIP7_MESH=checkpoint"
 # the year, on the MAP's own mesh: results/relax_<MAP stem>_2000_final.h5
-relax=$($R projection ISMIP7_EXPERIMENT=relax ISMIP7_INVERSION=$MAP $SIZE)
+relax=$($R projection ISMIP7_EXPERIMENT=relax ISMIP7_INVERSION=$MAP $SIZE | tail -n 1)
 # the re-inversion from it, once it has finished
 $R inversion --dependency afterok:${relax%%;*} --time <one link> $SIZE \
     ISMIP7_WARM_START=$PWD/antarctica/results/relax_<MAP stem>_2000_final.h5 \

@@ -104,16 +104,31 @@ def test_a_relaxed_map_is_not_relaxed_again():
         _attrs(**{END_STATE_ATTR: 1})
 
 
+RELAXED_OUT = "/maps/final/inversion_icepack2_rc_n3_dg0_2000_relax2014.h5"
+
+
 def test_an_end_state_seeds_a_re_inversion_only_finished_and_on_its_mesh():
     state = {**_attrs(), "t_yr": 2015.0, "stalled": 0}
-    assert end_state_problems(state, same_mesh=True, geometry_taken=True) == []
+    ok = dict(same_mesh=True, geometry_taken=True, map_out=RELAXED_OUT)
+    assert end_state_problems(state, **ok) == []
     short = {**state, "t_yr": 2014.6}
-    assert "finish the relaxation" in end_state_problems(short, same_mesh=True, geometry_taken=True)[0]
-    assert "stalled" in end_state_problems({**state, "stalled": 1}, same_mesh=True,
-                                           geometry_taken=True)[0]
-    assert "ISMIP7_MESH=checkpoint" in end_state_problems(state, same_mesh=False,
-                                                          geometry_taken=True)[0]
-    assert "not taken" in end_state_problems(state, same_mesh=True, geometry_taken=False)[0]
+    assert "finish the relaxation" in end_state_problems(short, **ok)[0]
+    assert "stalled" in end_state_problems({**state, "stalled": 1}, **ok)[0]
+    assert "ISMIP7_MESH=checkpoint" in end_state_problems(
+        state, **{**ok, "same_mesh": False})[0]
+    assert "not taken" in end_state_problems(state, **{**ok, "geometry_taken": False})[0]
+
+
+def test_a_re_inversion_writes_only_the_relaxed_map_name():
+    state = {**_attrs(), "t_yr": 2015.0, "stalled": 0}
+    # the production MAP the forwards load by default, which it would replace
+    (why,) = end_state_problems(state, same_mesh=True, geometry_taken=True,
+                                map_out="inversion_icepack2_rc_n3_dg0_2000.h5")
+    assert "ISMIP7_MAP_OUT" in why and "_relax2014.h5" in why
+    # another start year names another MAP
+    assert end_state_problems(
+        state, same_mesh=True, geometry_taken=True,
+        map_out=RELAXED_OUT.replace("relax2014", "relax2013"))
 
 
 def test_a_re_inversion_records_the_end_state_it_took_its_geometry_from():

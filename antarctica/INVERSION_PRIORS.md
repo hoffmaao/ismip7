@@ -321,7 +321,7 @@ from another control derives its own auto value.
 ## 6. The relaxed re-inversion
 
 An initial-state option beside each production MAP (issue #162), settled
-by David on 6 October 2026, in `icepack2_tools/relaxation.py`,
+at IU on 6 October 2026, in `icepack2_tools/relaxation.py`,
 `antarctica/scripts/relaxation/run.py` and the inversion's warm start; the
 commands are in the README, "The relaxed initial state".
 
@@ -331,7 +331,7 @@ commands are in the README, "The relaxed initial state".
 | re-inversion | warm start from the year's end state on the same mesh | 250 L-BFGS-B iterations; the MAP's objective, carried by the end state and held by the strict handoff; the relaxed geometry; the MAP's `θ` and `φ` |
 | forwards | `ISMIP7_INVERSION` names the relaxed MAP | 2003 start backdated 12 years, as from any MAP |
 
-Choices, all David's on 6 October:
+Choices, IU's on 6 October:
 
 * **OCX's 2014 forcing** for the year: observational, the same for every ESM,
   and what OCX itself runs through 2014.

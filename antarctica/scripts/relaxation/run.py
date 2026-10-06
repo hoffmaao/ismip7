@@ -20,7 +20,7 @@ MAP's objective settings, so the re-inversion minimises the MAP's objective
 on the relaxed geometry. Everything else the driver needs is a forward's.
 
 Usage:
-    submit.sh projection ISMIP7_EXPERIMENT=relax ISMIP7_INVERSION=<MAP>
+    submit.sh projection ISMIP7_EXPERIMENT=relax ISMIP7_INVERSION=<MAP> ISMIP7_MESH=checkpoint
     mpiexec -n 24 python scripts/relaxation/run.py
 """
 import os
@@ -123,6 +123,11 @@ def main():
         restart_from=restart,
         backdate_years=0.0 if restart else backdate,
         smb_feedback=feedback_mode(feedback) if forcing == "ocx" else None)
+    if not restart and not ctx["map_geometry_taken"]:
+        raise RuntimeError(
+            f"the relaxation year runs on the mesh and geometry of {source}, "
+            f"and this run built its own geometry on {ctx['mesh_basename']}; "
+            f"set ISMIP7_MESH=checkpoint")
 
     callback, ocean = None, None
     if forcing == "ocx":

@@ -440,9 +440,10 @@ submit.sh projection ISMIP7_EXPERIMENT=control
 | `ssp585_cesm_waccm` / `ssp585_mri_esm2` | 7 / 8 | 2015-2300 |
 | `ocx` | 11 | 2003-2025 |
 | `hist_cesm_waccm` / `hist_mri_esm2` | 1 / 2 | 2003-2014 |
-| `relax` | none: the relaxation year of the relaxed initial state, from `ISMIP7_INVERSION` | 2014 |
+| `relax` | none: the relaxation year of the relaxed initial state, from `ISMIP7_INVERSION` on its own mesh (`ISMIP7_MESH=checkpoint`) | 2014 |
 
-`relax` defaults the apparent MB and the yearly output off, and its end state
+`relax` defaults the apparent MB and the yearly output off and stops unless
+`ISMIP7_MESH=checkpoint` gives it the MAP's mesh and geometry. Its end state
 seeds a re-inversion that waits on it: `submit.sh inversion --dependency
 afterok:<relax job>` (the README, "The relaxed initial state", has the whole
 recipe). `--dependency` is open to `inversion` and `projection` for this; the

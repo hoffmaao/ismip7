@@ -112,38 +112,22 @@ def protocol_forcing(t_start, t_end):
     return atm, ocean
 
 
-def main():
-    forcing = ocx_forcing()
-    experiment_name = "ocx"
-    if forcing == "protocol" and ocx_ocean() != "main":
-        experiment_name += f"_{ocx_ocean()}"          # a sensitivity member is not core 11
-    if os.environ.get("ISMIP7_RUN_TAG"):
-        experiment_name += f"_{os.environ['ISMIP7_RUN_TAG']}"
-    reject_collapse_mask("the OCX experiment")
-    readers = protocol_forcing(T_START, T_END) if forcing == "protocol" else None
-    # Explicit restart, else unattended auto-resume from this experiment's own
-    # newest checkpoint (ISMIP7_AUTO_RESUME=1), the same lookup the control
-    # driver does. A chained batch job depends on it: without it every link
-    # cold-starts and the chain never advances.
-    restart = os.environ.get("ISMIP7_RESTART")
-    if restart is None and auto_resume():
-        restart = auto_resume_checkpoint(experiment_name)
-        PETSc.Sys.Print(
-            f"Auto-resume: {restart}" if restart
-            else "Auto-resume: no prior checkpoint"
-        )
-    dT_npz = deltat_per_basin_npz()
-    # The SMB-elevation feedback reads the OCX gradient in either mode.
-    feedback = build_smb_feedback(
+def ocx_feedback(readers, t_start, t_end):
+    r"""The SMB-elevation feedback on the OCX gradient, which either forcing
+    mode reads, built before the model setup like every driver's."""
+    return build_smb_feedback(
         readers[0] if readers is not None
         else ISMIP7Atmosphere(esm=OCX_ATMOSPHERE_SOURCE, scenario=OCX),
-        int(math.floor(T_START + 1e-9)), forcing_year(T_END), log=PETSc.Sys.Print)
-    # 2003 start (issue #117): the 2015 geometry with the Smith mean thinning
-    # undone on grounded ice; a restart carries its own geometry.
-    ctx = setup_model(
-        restart_from=restart,
-        backdate_years=0.0 if restart else geometry_backdate_years(T_START),
-        smb_feedback=feedback_mode(feedback))
+        int(math.floor(t_start + 1e-9)), forcing_year(t_end), log=PETSc.Sys.Print)
+
+
+def ocx_forcing_callback(ctx, readers, feedback, dT_npz):
+    r"""``(callback, provenance, ocean)`` for the OCX forcing on the model in
+    ``ctx``: the step callback, the lines the run records about what it
+    opens, and the ocean reader to close at the end (None under the stopgap).
+    ``readers`` is :func:`protocol_forcing`'s pair, or None for the stopgap.
+    The relaxation year of the relaxed initial state runs on this too
+    (``scripts/relaxation/run.py``)."""
     # Sample forcing at the geometry dofs, not the mesh vertices: under
     # DG0 geometry those are cell centroids (see forcing.forcing_coords).
     mesh_x, mesh_y = forcing_coords(ctx)
@@ -199,11 +183,44 @@ def main():
             ctx_["accum"].dat.data[:] = smb
             oi_melt(ctx_, t_yr)
 
-    for line in provenance + describe_melt_calibration(dT_npz, K_npz,
-                                                       ctx.get("mesh_basename")):
-        PETSc.Sys.Print(f"  {line}")
-    PETSc.Sys.Print(f"  {smb_feedback_banner(feedback)}")
-    for line in feedback.provenance() if feedback is not None else ():
+    lines = (list(provenance)
+             + list(describe_melt_calibration(dT_npz, K_npz, ctx.get("mesh_basename")))
+             + [smb_feedback_banner(feedback)]
+             + list(feedback.provenance() if feedback is not None else ()))
+    return callback, lines, ocean
+
+
+def main():
+    forcing = ocx_forcing()
+    experiment_name = "ocx"
+    if forcing == "protocol" and ocx_ocean() != "main":
+        experiment_name += f"_{ocx_ocean()}"          # a sensitivity member is not core 11
+    if os.environ.get("ISMIP7_RUN_TAG"):
+        experiment_name += f"_{os.environ['ISMIP7_RUN_TAG']}"
+    reject_collapse_mask("the OCX experiment")
+    readers = protocol_forcing(T_START, T_END) if forcing == "protocol" else None
+    # Explicit restart, else unattended auto-resume from this experiment's own
+    # newest checkpoint (ISMIP7_AUTO_RESUME=1), the same lookup the control
+    # driver does. A chained batch job depends on it: without it every link
+    # cold-starts and the chain never advances.
+    restart = os.environ.get("ISMIP7_RESTART")
+    if restart is None and auto_resume():
+        restart = auto_resume_checkpoint(experiment_name)
+        PETSc.Sys.Print(
+            f"Auto-resume: {restart}" if restart
+            else "Auto-resume: no prior checkpoint"
+        )
+    dT_npz = deltat_per_basin_npz()
+    # The SMB-elevation feedback reads the OCX gradient in either mode.
+    feedback = ocx_feedback(readers, T_START, T_END)
+    # 2003 start (issue #117): the 2015 geometry with the Smith mean thinning
+    # undone on grounded ice; a restart carries its own geometry.
+    ctx = setup_model(
+        restart_from=restart,
+        backdate_years=0.0 if restart else geometry_backdate_years(T_START),
+        smb_feedback=feedback_mode(feedback))
+    callback, lines, ocean = ocx_forcing_callback(ctx, readers, feedback, dT_npz)
+    for line in lines:
         PETSc.Sys.Print(f"  {line}")
 
     PETSc.Sys.Print("\nCore Experiment 11: OCX (observationally constrained)")

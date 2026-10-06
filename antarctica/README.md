@@ -1364,6 +1364,50 @@ Record each completed core with `python scripts/core_report.py --core <N>
 projection), run in that run's own shell so it captures the environment.
 `--superseded "<reason>"` stamps a record when a later run replaces it.
 
+### The relaxed initial state (`scripts/relaxation/run.py`)
+
+An initial-state option beside the production MAP. The relaxation year rewinds
+a MAP's geometry to 2014 with one year of the Smith dH/dt (the issue #117
+backdating), runs it to 2015.0 at half the production step on OCX's 2014
+forcing, with the apparent mass balance off and the front pinned, and an
+inversion of 250 iterations re-fits the controls on the geometry it ends in.
+The forwards then point `ISMIP7_INVERSION` at the relaxed MAP and start in
+2003 as from any MAP. The rules are in `icepack2_tools/relaxation.py`, the
+reasoning in `INVERSION_PRIORS.md` ("The relaxed re-inversion").
+
+```bash
+R=antarctica/scripts/batch_runners/submit.sh
+MAP=$PWD/antarctica/results/reinvert_2km/final/<production MAP>.h5
+SIZE="ISMIP7_FRICTION=<the MAP's law> ISMIP7_LC=2000 ISMIP7_LC_COARSE=5000 ISMIP7_MESH=checkpoint"
+# the year, on the MAP's own mesh: results/relax_<MAP stem>_2000_final.h5
+relax=$($R projection ISMIP7_EXPERIMENT=relax ISMIP7_INVERSION=$MAP $SIZE)
+# the re-inversion from it, once it has finished
+$R inversion --dependency afterok:${relax%%;*} --time <one link> $SIZE \
+    ISMIP7_WARM_START=$PWD/antarctica/results/relax_<MAP stem>_2000_final.h5 \
+    ISMIP7_MAXITER=250 ISMIP7_CHAIN_MAX=0 \
+    ISMIP7_MAP_OUT=$PWD/antarctica/results/reinvert_2km/final/<MAP stem>_relax2014.h5
+```
+
+The re-inversion's objective settings come from the end state, which carries
+the MAP's, and the strict handoff check holds them; give the run the
+inversion knobs the MAP was made under, as for any chain link. Size `--time`
+for one link from the MAP chain's own seconds per evaluation (about 260
+evaluations for 250 iterations): `ISMIP7_MAXITER` counts per process, so a
+second link would start a second 250.
+
+What each forward does with a relaxed MAP, recorded as `init_state` in every
+checkpoint it writes:
+
+| forward | geometry | controls | `init_state` |
+|---|---|---|---|
+| on the MAP's mesh | the relaxed geometry | the re-inverted ones | `relaxed` |
+| on another mesh (1 km from a 2 km MAP) | that mesh's BedMachine sample | the re-inverted ones, transferred | `relaxed-controls` |
+
+Either way the 2003 start backdates the geometry it starts from by 12 years.
+The relaxed thickness stays on the MAP's mesh: carried across meshes it would
+arrive as a DG0 staircase, which `../ADAPTIVE_MESH.md` measured driving the
+thickness clamp from 119,000 to 256,000 Gt/yr within a few steps.
+
 ### Environment knobs (inversion)
 
 | Env var | Meaning | Default |
@@ -1372,7 +1416,7 @@ projection), run in that run's own shell so it captures the environment.
 | `ISMIP7_MISFIT_NORM` | `sigma` divides each residual by its datum's squared error, giving a dimensionless chi^2; `none` is the legacy dimensional misfit. Selects the `ISMIP7_GAMMA_*` defaults | `sigma` |
 | `ISMIP7_LOG_VEL_WEIGHT` | weight on the ISSM logarithmic velocity misfit (cost function 103). The chi^2 alone over-weights slow interior ice and leaves discharge-carrying tributaries 40 to 50% too slow; the log term is scale free. `auto` equalises it with the chi^2 term at the state the inversion starts from, and under `auto` a warm start that records a positive weight under the same `ISMIP7_MISFIT_NORM` and `ISMIP7_LOG_VEL_EPS` supplies that weight, so every link of a chain minimises one objective (issue 68). Stamped into the MAP with `log_vel_weight_source`: `requested`, `derived` or `warm_start` | `0` |
 | `ISMIP7_LOG_VEL_EPS` | regularisation speed (m/yr) inside the log | `1.0` |
-| `ISMIP7_WARM_START` | path to a MAP or timing-cache checkpoint used to seed `theta`/`phi` (and, when present, geometry, `fluidity_prior`, and the mixed diagnostic state). Fields are interpolated onto the live mesh, so a 1-core cache can warm-start a multi-rank invert | unset |
+| `ISMIP7_WARM_START` | path to a MAP or timing-cache checkpoint used to seed `theta`/`phi` (and, when present, geometry, `fluidity_prior`, and the mixed diagnostic state). Fields are interpolated onto the live mesh, so a 1-core cache can warm-start a multi-rank invert. A relaxation's end state (`results/relax_*_final.h5`) is a warm start too: the run takes its geometry and keeps its `θ`, holds the MAP objective it carries, logs how far the relaxed geometry moved the friction anchor, and stamps the relaxed geometry's record into every checkpoint; it stops unless the state finished its year on this mesh | unset |
 | `ISMIP7_WARM_START_THETA` | how `θ` comes over from the warm start. `θ` is a log-deviation from the friction anchor, so under a different anchor (`ISMIP7_ANCHOR_LENGTH`) the same `θ` is a different friction. `1` takes it as it is and warns when the anchors differ; `physical` rebases it on grounded ice so the friction `C_w0 exp(θ)` is the warm start's and the first solve reproduces the warm start's (from an exp-control MAP the previous anchor is its constant `friction_c_ref`); `0` starts at the new prior mean | `1` |
 | `ISMIP7_WARM_START_PHI` | how `φ` comes over from the warm start. `1` takes it as it is, a deviation from this run's own fluidity prior; `physical` rebases it onto this run's prior (`ISMIP7_FLUIDITY_PRIOR`) so `A = A_prior exp(φ)` is the warm start's, e.g. a thermal-prior MAP warm-starting a Pattyn-prior run; `0` starts at the prior mean | `1` |
 | `ISMIP7_WARM_START_GEOMETRY` | `1` takes thickness, bed, surface, `velocity_obs` and the mixed state from the warm start; `0` keeps this mesh's own BedMachine sample. Defaults to `1` on the same mesh, except that a MAP recording a different `lake_ice_base` does not supply its geometry, so an old MAP cannot bring the lake bowl back | `1` on the same mesh, else `0` |
@@ -1447,6 +1491,7 @@ redeclare those literals.
 | `ISMIP7_OBS_DATA_ROOT` | BedMachine, MEaSUREs velocity, RACMO and the dH/dt cache observational-data root; name it in a site file when these files do not live beside the code. Also a write target: with the MIPkit present `obs_dhdt` builds `<root>/dhdt_cache/` here, so staged cache tifs belong under this root, wherever it points | `<repo>/antarctica/data` |
 | `ISMIP7_T_END` / `ISMIP7_DT` | end time and timestep (yr). `t=Y.0` is 1 January of year Y, so a run covering 2015 to 2300 ends at `2301` and a historical covering 2003 to 2014 ends at `2015`. Each driver owns its end (historical `2015`, ssp370 `2101`, other projections and control `2301`, OCX `2026`). The step defaults to `runconfig.DT_DEFAULT`, the production step, which `projection.sbatch` also exports | driver's own / `0.025` |
 | `ISMIP7_GEOMETRY_BACKDATE` | years of the Smith et al. (2020) mean dH/dt a cold start undoes on grounded ice before it runs (issue #117). Unset: `2015 - ISMIP7_T_START` for a start from 2003 up to 2015 (the historicals and OCX start in 2003), none from 2015 on, and a start before 2003 is refused. The friction anchors stay on the 2015 geometry; floating ice keeps its 2015 thickness. `0` turns it off | driver's start |
+| `ISMIP7_RELAX_START` / `ISMIP7_RELAX_DT` / `ISMIP7_RELAX_FORCING` | the relaxation year of the relaxed initial state (`scripts/relaxation/run.py`): its start (from 2003, before 2015), its step, which has to divide the year, and its forcing, `ocx` (OCX's own for the year, as `ISMIP7_OCX_FORCING` selects) or `none` (no SMB or melt, a smoke test needing no forcing data). It refuses `ISMIP7_APPARENT_MB`, `ISMIP7_OUTPUT=1`, a calving law and an unpinned front, and `projection.sbatch` defaults the first two off for it | `2014` / half of `ISMIP7_DT` / `ocx` |
 | `ISMIP7_FRICTION` | `budd`, `regularized_coulomb` or `budd_legacy`; selects the MAP. The set is closed, so a misspelling is rejected at startup | `budd` |
 | `ISMIP7_OUTPUT_INTERVAL` | budget log line every N steps; the timeseries gets a row every step | `10` |
 | `ISMIP7_CHECKPOINT_EVERY_YR` / `ISMIP7_KEEP_CHECKPOINTS` | checkpoint cadence in model years, and how many to keep besides `_final.h5` | `5` / `3` |

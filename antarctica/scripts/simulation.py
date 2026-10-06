@@ -85,6 +85,9 @@ from icepack2_tools.front import (
     COLLAPSE_CSV_COLUMNS, COLLAPSE_MARKER, FRONT_OWNER_MARKER,
 )
 from icepack2_tools.forcing import SMB_FEEDBACK_ATTR, smb_feedback_restart_error
+from icepack2_tools.relaxation import (
+    INIT_STATE_ATTR, RELAX_MAP_KEYS, describe_relaxation, init_state as _init_state,
+)
 from icepack2_tools.timeseries import (
     format_year, resumed_step, rows_kept_on_resume, step_changed,
     timeseries_csv_line,
@@ -445,7 +448,9 @@ def setup_model(restart_from=None, *, allow_timing_cache_a_ref=False,
             # (runconfig.forward_drag_gate, forward_hvisc_floor).
             "drag_gate",
             "h_visc_floor",
-        ):
+            # How a relaxed MAP's geometry was made, and the initial state a
+            # restart's chain began from (icepack2_tools.relaxation).
+        ) + RELAX_MAP_KEYS + (INIT_STATE_ATTR,):
             if _chk.has_attr("/", _key):
                 checkpoint_metadata[_key] = _chk.get_attr("/", _key)
         # The mesh this checkpoint was built on, recorded by the inversion and
@@ -725,6 +730,7 @@ def setup_model(restart_from=None, *, allow_timing_cache_a_ref=False,
     phi_eff = None
     u_guess = None
     map_state_name = None   # the MAP's mixed state seeding a cold start
+    map_geometry_taken = False  # a cold start took the MAP's own geometry
     M_guess = None
     tau_guess = None
     a_ref_mb = None
@@ -1001,6 +1007,7 @@ def setup_model(restart_from=None, *, allow_timing_cache_a_ref=False,
                 s = load_checkpoint_field(chk, "surface", Q_g)
                 geometry_source = os.path.realpath(source_chk)
                 geometry_source_method = "checkpoint-native-v1"
+                map_geometry_taken = True
                 # The mixed state the MAP was accepted at (a final MAP's
                 # velocity/membrane_stress/basal_stress, a periodic
                 # checkpoint's ckpt_* copies) seeds the cold-start solve
@@ -1021,6 +1028,26 @@ def setup_model(restart_from=None, *, allow_timing_cache_a_ref=False,
             if h_clamp_init > 0.0:
                 H.interpolate(max_value(H, Constant(h_clamp_init)))
                 s.interpolate(max_value(b + H, (Constant(1.0) - rho_ratio) * H))
+
+    # The initial state the chain began from (icepack2_tools.relaxation):
+    # a relaxed MAP starts from its own geometry on its own mesh, and gives
+    # only its controls to a forward on another mesh, which builds its
+    # geometry from BedMachine as it does for any MAP. A restart keeps the
+    # record of the run it continues.
+    relax_record = {k: checkpoint_metadata[k] for k in RELAX_MAP_KEYS
+                    if k in checkpoint_metadata}
+    if is_restart:
+        init_state = checkpoint_metadata.get(INIT_STATE_ATTR, "observed")
+        init_state = init_state.decode() if isinstance(init_state, bytes) else str(init_state)
+    else:
+        init_state = _init_state(checkpoint_metadata, other_mesh=not map_geometry_taken)
+        if init_state == "relaxed":
+            PETSc.Sys.Print("  Initial state: the relaxed MAP's own geometry ("
+                            + describe_relaxation(relax_record) + ")")
+        elif init_state == "relaxed-controls":
+            PETSc.Sys.Print("  Initial state: the relaxed MAP's controls on this mesh's "
+                            "BedMachine geometry; the relaxed thickness stays on the "
+                            "MAP's mesh (" + describe_relaxation(relax_record) + ")")
 
     _filled = {k: v for k, v in transfer_fill.items()
                if v["missing"] or v["clamped"]}
@@ -1907,6 +1934,8 @@ def setup_model(restart_from=None, *, allow_timing_cache_a_ref=False,
         "mesh_basename": mesh_basename,
         "geometry_source": geometry_source,
         "geometry_source_method": geometry_source_method,
+        "init_state": init_state,
+        "relax_record": relax_record,
         "transfer_fill": transfer_fill,
         "initial_misfit": misfit0,
         "V": V,
@@ -2157,6 +2186,12 @@ def save_model_state(ctx, final_path, t_now, extra_attrs=None):
         for name in MAP_CONFIG_KEYS:
             if name in _map_meta:
                 chk.set_attr("/", name, _map_meta[name])
+        # The initial state the chain began from, and how a relaxed MAP's
+        # geometry was made (icepack2_tools.relaxation).
+        if ctx.get("init_state"):
+            chk.set_attr("/", INIT_STATE_ATTR, str(ctx["init_state"]))
+        for name, value in (ctx.get("relax_record") or {}).items():
+            chk.set_attr("/", name, value)
         if full_state_residual is not None:
             chk.set_attr("/", "full_state_residual", full_state_residual)
         if ctx.get("fssa_theta", 0.0) > 0:
@@ -3848,7 +3883,9 @@ def run_simulation(
         # chain does not have to infer it from log text or from the year
         # alone: 1 means the solver gave up, and resuming would re-attempt
         # the same years and give up again.
-        extra_attrs={"stalled": int(bool(stalled))},
+        # A driver's own record of the run goes on this state alone, after
+        # the carried attributes (the relaxation's, relaxation/run.py).
+        extra_attrs={"stalled": int(bool(stalled)), **(ctx.get("final_attrs") or {})},
     )
     # Printed on every exit, early stop included. projection.sbatch reads
     # this exact "Saved: <...>_final.h5" line out of its own Slurm log to find

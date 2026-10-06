@@ -120,7 +120,10 @@ without reading the linked rationale and stating why.
   and the friction law into its control fields, so **the t=0 velocity misfit
   cannot validate either one**. MAP filenames are tagged by friction law and
   geometry space for this reason. Driving a DG0 forward with a CG1 MAP at
-  32 km raises the initial misfit from 8.6e3 to 1.5e5.
+  32 km raises the initial misfit from 8.6e3 to 1.5e5. A relaxed MAP's
+  geometry is part of its controls too: it is named `_relax<year>`, records
+  `geometry_source_method = relaxed-forward-v1`, and an inversion warm-started
+  from it stops unless it takes that geometry (`icepack2_tools/relaxation.py`).
 - **The zero-valued `M_s[0,0] * tau_s[0]` term in the SCPC path is structural.**
   Membrane and basal stress are physically uncoupled local fields, so UFL
   normally omits their two zero Jacobian blocks. Firedrake's three-field SCPC

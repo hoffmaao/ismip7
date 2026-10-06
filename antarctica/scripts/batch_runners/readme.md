@@ -440,6 +440,13 @@ submit.sh projection ISMIP7_EXPERIMENT=control
 | `ssp585_cesm_waccm` / `ssp585_mri_esm2` | 7 / 8 | 2015-2300 |
 | `ocx` | 11 | 2003-2025 |
 | `hist_cesm_waccm` / `hist_mri_esm2` | 1 / 2 | 2003-2014 |
+| `relax` | none: the relaxation year of the relaxed initial state, from `ISMIP7_INVERSION` | 2014 |
+
+`relax` defaults the apparent MB and the yearly output off, and its end state
+seeds a re-inversion that waits on it: `submit.sh inversion --dependency
+afterok:<relax job>` (the README, "The relaxed initial state", has the whole
+recipe). `--dependency` is open to `inversion` and `projection` for this; the
+runners' chains queue their own successors.
 
 The runner writes the submission's yearly fields and scalars by default (`ISMIP7_OUTPUT=1`), because every experiment it offers is a core experiment and a projection that reaches 2300 without them has to be run again. `ISMIP7_OUTPUT=0` turns that off for a pipeline exercise.
 

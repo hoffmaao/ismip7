@@ -19,6 +19,9 @@
 #   ocx                antarctica/scripts/projections/ocx.py
 #   hist_cesm_waccm    antarctica/scripts/historical/cesm_waccm.py
 #   hist_mri_esm2      antarctica/scripts/historical/mri_esm2.py
+#   relax              antarctica/scripts/relaxation/run.py, the relaxation
+#                      year of the relaxed initial state; it defaults the
+#                      apparent MB and the ISMIP7 output to off
 #
 # ISMIP7_CHAIN_THEN (space-separated experiments from the same list) queues
 # follow-on runs once THIS run has reached its end year, and only then: a
@@ -98,6 +101,7 @@ driver_for() {
         ocx)               echo antarctica/scripts/projections/ocx.py ;;
         hist_cesm_waccm)   echo antarctica/scripts/historical/cesm_waccm.py ;;
         hist_mri_esm2)     echo antarctica/scripts/historical/mri_esm2.py ;;
+        relax)             echo antarctica/scripts/relaxation/run.py ;;
     esac
 }
 EXPERIMENT="${ISMIP7_EXPERIMENT:-control}"
@@ -164,6 +168,13 @@ export ISMIP7_KEEP_CHECKPOINTS="${ISMIP7_KEEP_CHECKPOINTS:-3}"
 # set and rejects anything else at startup, so normalising here would only
 # hide a typo: an ISMIP7_AUTO_RESUME=off meant to disable resume would become
 # a 1 and silently continue an old trajectory.
+# The relaxation year lets the geometry answer the model's own imbalance and
+# is no ISMIP7 experiment (icepack2_tools.relaxation); its driver refuses
+# either switched on, so an explicit 1 still stops it.
+if [ "$EXPERIMENT" = relax ]; then
+    export ISMIP7_APPARENT_MB="${ISMIP7_APPARENT_MB-0}"
+    export ISMIP7_OUTPUT="${ISMIP7_OUTPUT-0}"
+fi
 export ISMIP7_APPARENT_MB="${ISMIP7_APPARENT_MB-1}"
 export ISMIP7_FIXED_FRONT="${ISMIP7_FIXED_FRONT:-1}"
 # Resume from this experiment's own newest checkpoint. This is what makes the

@@ -125,6 +125,9 @@ from icepack2_tools.thermo_model import compute_fluidity_prior
 from icepack2_tools.handoff import (
     OBJECTIVE_KEYS, OBJECTIVE_RECORD_KEYS, SUBELEMENT_SCHEME_VERSIONS,
     accepted_evaluation, frozen_in_control, handoff_gap, objective_mismatches)
+from icepack2_tools.relaxation import (
+    END_STATE_ATTR, RELAX_MAP_KEYS, anchor_ratio_counts, describe_relaxation,
+    end_state_problems, inherited_geometry, is_relaxed)
 from icepack2_tools.profiling import Spans
 from icepack2_tools.optimization import (FunctionalDecreaseStop,
                                          recorded_objective,
@@ -134,6 +137,7 @@ from icepack2_tools.forcing import (load_racmo_smb_climatology,
 from icepack2_tools.runconfig import (
     TARGET_MESH_GEOMETRY_METHOD,
     anchor_length,
+    file_sha256,
     front_hmin,
     lake_ice_base,
     residual_stabilizers,
@@ -764,6 +768,14 @@ def main():
     # Everything the warm start's writer recorded about ITS objective and the
     # objective value at its checkpointed iterate (icepack2_tools.handoff).
     warm_attrs = {}
+    # Where the warm start's geometry came from (icepack2_tools.relaxation):
+    # its record, whether it is a relaxation's end state, the anchor that
+    # state's year ran with, and the record this run writes when it takes a
+    # relaxed geometry (None: this run's own BedMachine sample).
+    warm_geometry_attrs = {}
+    warm_end_state = False
+    warm_C_w0 = None
+    run_geometry = None
     # The log-velocity term the warm start was minimised under, which an
     # "auto" weight is held to. None without a warm start.
     warm_objective = None
@@ -820,6 +832,11 @@ def main():
             for _key in OBJECTIVE_KEYS + OBJECTIVE_RECORD_KEYS:
                 if chk.has_attr("/", _key):
                     warm_attrs[_key] = chk.get_attr("/", _key)
+            for _key in RELAX_MAP_KEYS + (END_STATE_ATTR, "geometry_source",
+                                          "geometry_source_method", "t_yr", "stalled"):
+                if chk.has_attr("/", _key):
+                    warm_geometry_attrs[_key] = chk.get_attr("/", _key)
+            warm_end_state = bool(int(warm_geometry_attrs.get(END_STATE_ATTR, 0) or 0))
             if "objective_total" in warm_attrs:
                 PETSc.Sys.Print(
                     f"    objective recorded at iteration "
@@ -910,12 +927,14 @@ def main():
                    "(geometry and velocity_obs are this mesh's own)"))
             if not warm_geometry:
                 raise_geometry = KeyError("warm start geometry not taken")
+            warm_geometry_loaded = False
             try:
                 if not warm_geometry:
                     raise raise_geometry
                 H.assign(_warm_load(chk, chk_mesh, "thickness", Q_g))
                 b.assign(_warm_load(chk, chk_mesh, "bed", Q_g))
                 s.assign(_warm_load(chk, chk_mesh, "surface", Q_g))
+                warm_geometry_loaded = True
                 PETSc.Sys.Print(
                     "    geometry: thickness/bed/surface from warm start"
                 )
@@ -924,6 +943,37 @@ def main():
                     "    geometry: keeping BedMachine sample "
                     "(warm start has no thickness/bed/surface)"
                 )
+            # A relaxed geometry (icepack2_tools.relaxation) comes with the
+            # controls fitted to it, so it is taken or the run stops. From a
+            # relaxation's end state the re-inversion keeps the MAP's theta
+            # (David, 6 Oct 2026): the friction then follows the relaxed
+            # driving stress through the anchor, and where basal drag carries
+            # that stress the starting speed stays the MAP's.
+            if warm_end_state:
+                _why = end_state_problems(warm_geometry_attrs, same_mesh=same_mesh,
+                                          geometry_taken=warm_geometry_loaded)
+                if _theta_mode == "physical":
+                    _why.append(
+                        "ISMIP7_WARM_START_THETA=physical rebases between anchor "
+                        "lengths on this run's geometry; a re-inversion keeps the "
+                        "MAP's theta, so leave it unset")
+                if _why:
+                    raise RuntimeError(
+                        f"ISMIP7_WARM_START={warm_chk} is a relaxation's end state "
+                        f"that cannot seed this re-inversion: " + "; ".join(_why))
+                if _warm_fc == "log" and _theta_mode == "1":
+                    try:
+                        warm_C_w0 = _warm_load(chk, chk_mesh, "C_w0", Q_g)
+                    except (KeyError, RuntimeError, ValueError):
+                        warm_C_w0 = None
+            if is_relaxed(warm_geometry_attrs):
+                _sha = COMM_WORLD.bcast(
+                    file_sha256(warm_chk) if (warm_end_state and COMM_WORLD.rank == 0)
+                    else None, root=0)
+                run_geometry = inherited_geometry(
+                    warm_geometry_attrs, geometry_taken=warm_geometry_loaded,
+                    warm_basename=os.path.basename(warm_chk), warm_sha256=_sha)
+                PETSc.Sys.Print("    relaxed geometry: " + describe_relaxation(run_geometry))
             try:
                 if not warm_geometry:
                     raise raise_geometry
@@ -1101,6 +1151,22 @@ def main():
     # inside weertman_anchor (a cell-wise surface has no cell gradient); the
     # anchor is a fixed reference scaling, not a force in the residual.
     C_w0 = weertman_anchor(H, s, u_obs, m_slide_val, Q_g, length=ANCHOR_LENGTH, b=b)
+    if warm_C_w0 is not None:
+        # How far the relaxed geometry moved the anchor from the one the
+        # relaxation year ran with: R = C_w0 here / C_w0 there, on grounded
+        # ice. Under the kept theta the first evaluation's friction is the
+        # MAP's times R on these cells.
+        _haf = Function(Q_g).interpolate(height_above_flotation(H, b))
+        _n, _n1, _n3, _sum, _lo, _hi = anchor_ratio_counts(
+            C_w0.dat.data_ro, warm_C_w0.dat.data_ro, _haf.dat.data_ro > 0.0)
+        _n, _n1, _n3 = (COMM_WORLD.allreduce(v) for v in (_n, _n1, _n3))
+        _sum = COMM_WORLD.allreduce(_sum)
+        _lo, _hi = min(COMM_WORLD.allgather(_lo)), max(COMM_WORLD.allgather(_hi))
+        PETSc.Sys.Print(
+            f"  Anchor on the relaxed geometry: ln R over {_n} grounded dofs in "
+            f"[{_lo:.3f}, {_hi:.3f}], mean |ln R| {_sum / max(_n, 1):.4f}, "
+            f"|ln R| > 0.1 on {_n1} ({100.0 * _n1 / max(_n, 1):.2f} %), "
+            f"> 0.3 on {_n3} ({100.0 * _n3 / max(_n, 1):.2f} %)")
     PETSc.Sys.Print(
         "  Friction anchor: " + ("local driving stress" if ANCHOR_LENGTH == 0.0 else
                                  f"grounded driving stress averaged over {ANCHOR_LENGTH / 1e3:g} km"))
@@ -2532,6 +2598,15 @@ def main():
             # the objective (handoff.OBJECTIVE_KEYS).
             chk.set_attr("/", "eval_continuation", int(not eval_full_n))
             chk.set_attr("/", "eval_mode", eval_mode)
+            # Where the geometry came from, on every checkpoint, so the next
+            # link of a chain and the forward know a relaxed geometry from
+            # this mesh's own BedMachine sample (icepack2_tools.relaxation).
+            if run_geometry is None:
+                chk.set_attr("/", "geometry_source", os.path.realpath(bm_fn))
+                chk.set_attr("/", "geometry_source_method", TARGET_MESH_GEOMETRY_METHOD)
+            else:
+                for _key, _val in run_geometry.items():
+                    chk.set_attr("/", _key, _val)
             if full_state:
                 chk.set_attr("/", "t_yr", float(MATRIX_T_START))
                 chk.set_attr("/", "friction", str(FRICTION))
@@ -2547,12 +2622,6 @@ def main():
                 chk.set_attr("/", "state_solver_mode", state_solver_mode)
                 chk.set_attr(
                     "/", "state_solver_parameters", state_solver_parameters
-                )
-                chk.set_attr(
-                    "/", "geometry_source", os.path.realpath(bm_fn)
-                )
-                chk.set_attr(
-                    "/", "geometry_source_method", TARGET_MESH_GEOMETRY_METHOD
                 )
                 for key, value in full_state_solve.items():
                     chk.set_attr("/", f"full_state_{key}", value)
@@ -3354,6 +3423,15 @@ def main():
             return
         _handoff_checked[0] = True
         if "objective_total" not in warm_attrs:
+            # A relaxation's end state carries the MAP's objective settings
+            # and leaves its value behind, since that value belongs to the
+            # MAP's geometry: the change is the relaxation's, not a gap.
+            if warm_end_state and "relax_source_objective_total" in warm_geometry_attrs:
+                PETSc.Sys.Print(
+                    f"  Handoff: first objective {float(first_total):.6e} on the "
+                    f"relaxed geometry; the source MAP recorded "
+                    f"{float(warm_geometry_attrs['relax_source_objective_total']):.6e} "
+                    f"on its own")
             return
         _rec = float(warm_attrs["objective_total"])
         _gap = handoff_gap(_rec, first_total)

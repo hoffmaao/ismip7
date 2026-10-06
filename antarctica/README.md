@@ -636,7 +636,7 @@ iteration 0, and the adjoint's operator, `LinearSolver` and LU. Firedrake's
 `NonlinearVariationalSolver` sits in a reference cycle, so a dropped one
 lives until Python's cyclic collector runs, and on more than one rank its
 PETSc objects then wait for the next `PetscGarbageCleanup`. Some are never
-freed: the arms below without the release ended with 28 to 37 matrices alive
+freed: the arms below without the release ended with 25 to 37 matrices alive
 in PETSc's count, against 10 (the run's own) with it, while at most four
 Firedrake solvers were alive after any evaluation. That fits issue #159's
 loss of objects released while a cleanup runs, reached here through the
@@ -651,7 +651,7 @@ RSS a rank (mean) from the timing record, MiB:
 |---|---|---|---|
 | converged | 10 to 62 | 2,761 to 3,366 (11.6 an evaluation, still rising) | 2,657 to 2,804 (2.8; flat within 2,739 to 2,809 from evaluation 13) |
 | moving (rho 750 km MAP under the rho 75 km objective) | 10 to 48 | 2,762 to 3,057 (7.8) | 2,633 to 2,781 (3.9; within 2,771 to 2,813 from evaluation 20) |
-| moving, the collector left alone | 10 to 30 | 2,753 to 3,132 (20.0) | 2,635 to 2,782 (7.4; within 2,779 to 2,815 from evaluation 20) |
+| moving, the collector left alone | 10 to 58 | 2,753 to 3,213 (9.6) | 2,635 to 2,798 (3.4; within 2,777 to 2,815 from evaluation 20) |
 
 The peak a rank fell by about 600 MiB at 62 evaluations (5,543 to 4,915).
 Objectives agree with the spread of same-code reruns, which on 32 ranks are

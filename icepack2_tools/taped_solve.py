@@ -48,8 +48,8 @@ freed late, and some never. A Firedrake ``NonlinearVariationalSolver`` sits
 in a reference cycle, so it and its Jacobian live until Python's cyclic
 collector runs, and on more than one rank petsc4py then hands its PETSc
 objects to the next ``PetscGarbageCleanup``. Under ``full_mumps`` on the 2 km
-mesh the resident set climbed 8 to 20 MiB a rank an evaluation that way, and
-28 to 37 matrices were still alive at exit against 10 with the release
+mesh the resident set climbed 8 to 12 MiB a rank an evaluation that way, and
+25 to 37 matrices were still alive at exit against 10 with the release
 (README "Inversion solver", issue #161 run records).
 """
 

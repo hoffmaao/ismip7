@@ -11,7 +11,7 @@ its full report from `core_report.py`; this is the index.
 
 303 records.
 
-Status: 12 planned, 6 running, 25 stopped, 243 done, 17 superseded.
+Status: 12 planned, 5 running, 25 stopped, 244 done, 17 superseded.
 
 ## Inversion
 
@@ -155,7 +155,7 @@ Status: 12 planned, 6 running, 25 stopped, 243 done, 17 superseded.
 | Stage-2 path smoke on the 20 km buffered mesh from Budd's stage-1 checkpoint, smooth ring extension | done | antarctica_5000_2000_buffered20000 (IU's build, 969,764 vertices), DG0 geometry, vertex raster sampling, the lake fix | IU Quartz, debug partition | 2026-10-04 | 2026-10-04 | evaluation 1: smoothness 397 and 756, misfit 6.42e3, total 7.58e3 against 1.52e5 under the constant fill; total 7.04e3 at evaluation 3 |
 | 2 km control on the MAP's own mesh, with no transfer | done | antarctica_5000_2000_buffered0 | local workstation | 2026-09-22 | 2026-09-22 | peak speed 17469 m/yr, which is the inversion chain's own warm-start maximum, so the forward reproduces the MAP. Amery reads 5937 m/yr with no transfer at all, against 6041 through the transfer |
 | 2 km control from the transferred Budd snapshot | running | antarctica_20000_2000_buffered20000, 2 km fine, 20 km interior, 20 km buffer | local workstation | 2026-09-22 | - | 3.5 years: VAF drift 0.01 mm, mass balance +2 Gt/yr, residual zero. The Amery cell sits near 6 km/yr without running away |
-| 2 km RC inversion under full_mumps on 32 ranks, 55 L-BFGS-B iterations from the moving start, with and without the solver release, watched without touching Python's collector (a weak-reference count of live Firedrake solvers) | running | antarctica_5000_2000_buffered20000 (969,764 vertices, 1,928,285 cells), DG0 geometry, vertex raster sampling | IU Quartz, general partition, one node each | 2026-10-06 | - | at most 4 Firedrake variational solvers alive after any evaluation in either arm, so Python's collector keeps up with the dropped ones |
+| 2 km RC inversion under full_mumps on 32 ranks, 55 L-BFGS-B iterations from the moving start, with and without the solver release, watched without touching Python's collector (a weak-reference count of live Firedrake solvers) | done | antarctica_5000_2000_buffered20000 (969,764 vertices, 1,928,285 cells), DG0 geometry, vertex raster sampling | IU Quartz, general partition, one node each | 2026-10-06 | 2026-10-06 | at most 4 Firedrake variational solvers alive after any evaluation in either arm (120 built), so Python's collector keeps up with the dropped ones; final totals 1.976163179e+03 and 1.976163181e+03 after 55 iterations (1.4e-15 at evaluation 10, 8.8e-13 at 40, 1.3e-9 at 58), the same Newton iterations at every evaluation; PETSc -log_view on rank 0 at exit: 25 of 1,658 matrices alive without the release, 10 with it, every SNES, KSP and PC destroyed (121 of 121) |
 | 2 km RC inversion under full_mumps on 32 ranks, 60 L-BFGS-B iterations from 10971250's last checkpoint: RSS with and without the solver release, and without ScaLAPACK on MUMPS's root (40 iterations) | done | antarctica_5000_2000_buffered20000 (969,764 vertices, 1,928,285 cells), DG0 geometry, vertex raster sampling | IU Quartz, general partition, one node each | 2026-10-06 | 2026-10-06 | objectives agree to 1.3e-14 at evaluation 10 and 8.4e-13 at 20, then drift as roundoff compounds through L-BFGS-B (9.5e-11 at 40, 3.4e-5 at 62, the same Newton iterations at every evaluation); same-code reruns spread alike (2.0e-15 at evaluation 2, 1.6e-11 at 22). PETSc -log_view on rank 0 at exit: 37 of 1,766 matrices alive without the release, 10 with it; every SNES, KSP and PC destroyed in both. |
 | 2 km RC inversion under full_mumps on 32 ranks, 45 L-BFGS-B iterations from a start the rho 75 km objective moves far, with and without the solver release, and 30 iterations reading MUMPS's memory counters for the cached forward solver | done | antarctica_5000_2000_buffered20000 (969,764 vertices, 1,928,285 cells), DG0 geometry, vertex raster sampling | IU Quartz, general partition, one node each | 2026-10-06 | 2026-10-06 | final totals 2.006562430e+03 and 2.006562429e+03 after 45 iterations, the same Newton iterations; PETSc -log_view on rank 0 at exit: 28 of 1,388 matrices alive without the release, 10 with it, every SNES, KSP and PC destroyed. The cached forward solver was built once and its MUMPS instance reported INFO(16) 1,482 to 1,488 MB allocated, INFO(22) 654 to 659 MB used and RINFO(8) 1,552 MB at every evaluation. |
 | 2 km RC inversion under full_mumps on 32 ranks, 20 L-BFGS-B iterations from 10971250's last checkpoint, five probes of where the RSS goes: plain, malloc_trim after every evaluation, a trim and RSS split at every phase boundary, and the solver release on the last two | done | antarctica_5000_2000_buffered20000 (969,764 vertices, 1,928,285 cells), DG0 geometry, vertex raster sampling | IU Quartz, general partition, one node each | 2026-10-06 | 2026-10-06 | objectives within 1.2e-12 at evaluation 20 between every pair, the same spread as same-code reruns (32-rank runs are not bit-identical); PETSc -log_view on rank 0: every SNES, KSP and PC destroyed (49 of 49) in every arm, 10 of 686 matrices alive at exit in every arm but the plain phases probe (28). malloc_trim returned 115 to 226 MiB a rank every evaluation (median 156) and left the trend. Phase medians from evaluation 6 (MiB a rank, after a trim at each boundary): plain forward +63, to the first adjoint solve -60, adjoint +797, to the end of compute_gradient -727, so an evaluation keeps +74, all of it anonymous memory; with the release the same steps are +9, +3, +802, -790, keeping +14. tracemalloc saw Python's own memory flat at 909 to 937 MiB a rank over evaluations 2 to 6. |
@@ -3708,7 +3708,7 @@ Stage-2 path smoke on the 20 km buffered mesh from Budd's stage-1 checkpoint, sm
 
 ### test-2km-full-mumps-issue161-gcwatch
 
-2 km RC inversion under full_mumps on 32 ranks, 55 L-BFGS-B iterations from the moving start, with and without the solver release, watched without touching Python's collector (a weak-reference count of live Firedrake solvers) (running), IU.
+2 km RC inversion under full_mumps on 32 ranks, 55 L-BFGS-B iterations from the moving start, with and without the solver release, watched without touching Python's collector (a weak-reference count of live Firedrake solvers) (done), IU.
 
 - **Task type:** test
 - **Friction law:** regularized_coulomb
@@ -3716,14 +3716,15 @@ Stage-2 path smoke on the 20 km buffered mesh from Budd's stage-1 checkpoint, sm
 - **Initial state / MAP:** warm start results/reinvert_2km/exp/rc_s2x_vgf1.h5 (RC stage 2 converged at rho 750 km, 1 m floor, same mesh) under the rho 75 km objective, ISMIP7_WARM_START_STRICT=0, so the controls move far from the first step (misfit 2,833 at the first evaluation; total 2,007 at the 48th)
 - **Forcing versions:** the 10971250 objective (rho 75 km) (cell s2x_rc_g01_vgf1_mumps): bilaplacian prior sigma 30, rho 75 km, log friction control, vertex drag gate, membrane floor 1 m, LAKE_ICE_BASE=1, no dH/dt, log-velocity weight 69946.22, L-BFGS-B without a metric
 - **Site / partition:** IU Quartz, general partition, one node each
-- **Ranks / memory:** 32 ranks, 220G; RSS a rank (mean, rss_mib) at evaluations 10 and 29/30: 2,753 to 3,132 without the release (20.0 MiB an evaluation), 2,635 to 2,782 with it (7.4; within 2,779 to 2,815 from evaluation 20); peak 5,218 and 4,834 MiB so far
+- **Ranks / memory:** 32 ranks, 220G; RSS a rank (mean, rss_mib) at evaluations 10 and 58: 2,753 to 3,213 without the release (9.6 MiB an evaluation; 19.5 over evaluations 10 to 30; 2,996 to 3,220 from evaluation 20), 2,635 to 2,798 with it (3.4; within 2,777 to 2,815 from evaluation 20); peak 5,306 and 4,891 MiB
 - **Job ids:** 11484846 (without), 11484847 (with the release)
 - **Code:** 06cb0a9 and the release tree of test-2km-full-mumps-issue161-probes; probe161_gcwatch.py
 - **Started:** 2026-10-06
-- **Cost per model year:** 162 and 154 s an evaluation so far (adjoint 107 and 103 s)
+- **Finished:** 2026-10-06
+- **Cost per model year:** 2 h 50 min and 2 h 45 min for 58 evaluations (162 and 153 s an evaluation, adjoint 107 and 103 s)
 - **Results path:** /N/scratch/dlilien/ismip7_issue161_jobs/probe/q2_before_gcw.*, q2_fix_gcw.*
-- **Audit:** at most 4 Firedrake variational solvers alive after any evaluation in either arm, so Python's collector keeps up with the dropped ones
-- **Notes:** Issue #161. The other 2 km arms took an object census after every evaluation, which walks the collector's lists; this pair does not. Numbers through evaluation 30, run in progress.
+- **Audit:** at most 4 Firedrake variational solvers alive after any evaluation in either arm (120 built), so Python's collector keeps up with the dropped ones; final totals 1.976163179e+03 and 1.976163181e+03 after 55 iterations (1.4e-15 at evaluation 10, 8.8e-13 at 40, 1.3e-9 at 58), the same Newton iterations at every evaluation; PETSc -log_view on rank 0 at exit: 25 of 1,658 matrices alive without the release, 10 with it, every SNES, KSP and PC destroyed (121 of 121)
+- **Notes:** Issue #161. The other 2 km arms took an object census after every evaluation, which walks the collector's lists; this pair does not.
 
 ### test-2km-full-mumps-issue161-long
 

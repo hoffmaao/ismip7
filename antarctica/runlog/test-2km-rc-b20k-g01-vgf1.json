@@ -3,7 +3,7 @@
   "task": "test",
   "institution": "IU",
   "title": "RC stage 2 on the 20 km buffered mesh from the rho 75 km MAP, with the vertex gate and a 1 m membrane floor",
-  "status": "running",
+  "status": "stopped",
   "friction": "regularized_coulomb",
   "period": "2015 state",
   "mesh": "antarctica_5000_2000_buffered20000 (IU's build, 969,764 vertices), DG0 geometry, vertex raster sampling, the lake fix",
@@ -17,9 +17,9 @@
   ],
   "code": "4e45d18; Quartz worktree /N/scratch/dlilien/ismip7_reinvert_s3",
   "started": "2026-10-05",
-  "finished": "",
-  "cost": "scpc_gamg: forwards of 580 to 940 s (870 Krylov iterations a condensed solve, 150 at rho 750 km), cancelled at evaluation 5; full_mumps: about 145 s an evaluation",
+  "finished": "2026-10-05",
+  "cost": "scpc_gamg: forwards of 580 to 940 s (870 Krylov iterations a condensed solve, 150 at rho 750 km), cancelled at evaluation 5; full_mumps: about 145 s an evaluation; the full_mumps link ran 103 evaluations in 4 h 28 min, then rank 29 was OOM-killed at 220G (09:42 on 5 October) and the job hung until its 16 h limit",
   "results": "Quartz /N/project/ice_rheology/ISMIP7/antarctica/results/reinvert_2km/exp/rc_s2x_g01_vgf1.h5; analysis job 10971251",
-  "audit": "evaluation 93 (full_mumps link): misfit 1,621, velocity chi2 45.2, total 1,854",
+  "audit": "evaluation 103 (checkpoint written just before the OOM kill): misfit 1,604.5, velocity chi2 45.8, total 1,838.2; floating mean -4.9 m/yr (median ratio -1 %), front band -11.5 (-5 %), grounded -0.7; 90th and 99th percentile speed misfit 19 and 114 m/yr (analysis job 10971251). phi reaches -31.8 somewhere in this state, which stalls scpc_gamg at every floor (test-2km-rc-b20k-gamg-g01-*)",
   "notes": "issue #153: the night's two findings together, rho 75 km and the drag kept off the ice"
 }

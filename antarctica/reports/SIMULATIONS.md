@@ -9,9 +9,9 @@ gitignored, so these records and the per-core reports beside them are
 the trace a run leaves in the repository. A core experiment also gets
 its full report from `core_report.py`; this is the index.
 
-273 records.
+274 records.
 
-Status: 12 planned, 7 running, 22 stopped, 215 done, 17 superseded.
+Status: 12 planned, 3 running, 25 stopped, 217 done, 17 superseded.
 
 ## Inversion
 
@@ -139,6 +139,7 @@ Status: 12 planned, 7 running, 22 stopped, 215 done, 17 superseded.
 | 1 km inversion, production configuration with one solve an evaluation, scpc_gamg (NLEQ-ERR, Krylov rtol 1e-8) on 32 ranks | done | antarctica_10000_1000_buffered20000 (Rice's .msh on Quartz; 1,869,252 vertices, 3,716,587 cells), DG0 geometry, vertex raster sampling | IU Quartz, general partition | 2026-10-01 | 2026-10-02 | every iterate within 2.1e-9 of test-1km-inversion-prod-full-mumps-ec0, final 6.209233e4; no forward failed; every recorded solve confirmed with no step; the same cost per iteration as full_mumps |
 | 1 km inversion, production configuration with five-solve evaluations, scpc_gamg on 32 ranks | stopped | antarctica_10000_1000_buffered20000 (Rice's .msh on Quartz; 1,869,252 vertices, 3,716,587 cells), DG0 geometry, vertex raster sampling | IU Quartz, general partition | 2026-10-01 | 2026-10-02 | no evaluation finished; the n = 1 restart steps under GAMG at 1 km dominate, as on 64 ranks |
 | 1 km inversion, production configuration with five-solve evaluations, scpc_gamg on 64 ranks | stopped | antarctica_10000_1000_buffered20000 (Rice's .msh on Quartz; 1,869,252 vertices, 3,716,587 cells), DG0 geometry, vertex raster sampling | IU Quartz, general partition | 2026-10-01 | 2026-10-02 | first objective 8.110449e4 (2.4e-5 off the 32-rank full_mumps run: the ramp's state follows the partition); no forward failed; 2.7 times slower per iteration than full_mumps on 32 ranks, with twice the ranks |
+| Unforced one-year forward on the 1 km production mesh from RC's 2 km vertex-gate stage-2 MAP, apparent mass balance off, membrane floor 1 m | done | antarctica_10000_1000_buffered20000 (1,869,088 vertices), DG0 geometry, BedMachine cell averages on this mesh, the lake fix (from the MAP) | IU Quartz, general partition | 2026-10-06 | 2026-10-06 | start-up ramp (8 continuation steps, scpc_gamg): 94 Newton and 16,628 Krylov iterations, 1,122 s, no failed step (the 2 km cold start's first ramp failed at step 2 and took 4.8 h in all). 40 steps with every solve converged and no rescue: 126 Newton iterations (at most 10 a step), 79 Krylov iterations a condensed solve, 27.9 s a solve; resid 0.00 every step; calving 551 Gt/yr over 2015; VAF 56,773.94 mm SLE at 2016 from 56,778.64. Against 10 m (18.2 s, 42 Krylov): 1.53x a solve, 1.88x the Krylov iterations |
 | Unforced one-year forward on the 1 km production mesh from RC's 2 km vertex-gate stage-2 MAP, apparent mass balance off, membrane floor 10 m | done | antarctica_10000_1000_buffered20000 (1,869,088 vertices), DG0 geometry, BedMachine cell averages on this mesh, the lake fix (from the MAP) | IU Quartz, general partition | 2026-10-05 | 2026-10-05 | start-up ramp (8 continuation steps, scpc_gamg): 117 Newton and 12,396 Krylov iterations, 662 s. 40 steps with every solve converged and no rescue: 164 Newton iterations (at most 9 a step), 42 Krylov iterations a condensed solve, 18.2 s a solve; resid 0.00 every step; calving 425 Gt/yr over 2015; VAF 56,774.07 mm SLE at 2016 from 56,778.64. Against 10 m: 2.5 m costs 1.14x a solve (1.29x the Krylov iterations) and 5 m 1.10x, where the 2 km mesh on 32 ranks gave 1.4 to 1.9x and 1.0 to 1.3x |
 | Unforced one-year forward on the 1 km production mesh from RC's 2 km vertex-gate stage-2 MAP, apparent mass balance off, membrane floor 2.5 m | done | antarctica_10000_1000_buffered20000 (1,869,088 vertices), DG0 geometry, BedMachine cell averages on this mesh, the lake fix (from the MAP) | IU Quartz, general partition | 2026-10-05 | 2026-10-05 | start-up ramp (8 continuation steps, scpc_gamg): 119 Newton and 18,318 Krylov iterations, 1,006 s. 40 steps with every solve converged and no rescue: 141 Newton iterations (at most 11 a step), 54 Krylov iterations a condensed solve, 20.8 s a solve; resid 0.00 every step; calving 523 Gt/yr over 2015; VAF 56,773.97 mm SLE at 2016 from 56,778.64. Against 10 m: 2.5 m costs 1.14x a solve (1.29x the Krylov iterations) and 5 m 1.10x, where the 2 km mesh on 32 ranks gave 1.4 to 1.9x and 1.0 to 1.3x |
 | Unforced one-year forward on the 1 km production mesh from RC's 2 km vertex-gate stage-2 MAP, apparent mass balance off, membrane floor 5 m | done | antarctica_10000_1000_buffered20000 (1,869,088 vertices), DG0 geometry, BedMachine cell averages on this mesh, the lake fix (from the MAP) | IU Quartz, general partition | 2026-10-05 | 2026-10-05 | start-up ramp (8 continuation steps, scpc_gamg): 116 Newton and 15,040 Krylov iterations, 885 s. 40 steps with every solve converged and no rescue: 146 Newton iterations (at most 10 a step), 46 Krylov iterations a condensed solve, 20.0 s a solve; resid 0.00 every step; calving 484 Gt/yr over 2015; VAF 56,774.00 mm SLE at 2016 from 56,778.64. Against 10 m: 2.5 m costs 1.14x a solve (1.29x the Krylov iterations) and 5 m 1.10x, where the 2 km mesh on 32 ranks gave 1.4 to 1.9x and 1.0 to 1.3x |
@@ -190,7 +191,7 @@ Status: 12 planned, 7 running, 22 stopped, 215 done, 17 superseded.
 | Unforced five-year forward from RC's vertex-gate stage-2 MAP on the 20 km buffered 2 km mesh, apparent mass balance off (the ice drifts by its flux divergence), membrane floor 5 m | done | antarctica_5000_2000_buffered20000 (IU's build, 969,764 vertices), DG0 geometry, vertex raster sampling, the lake fix (from the MAP: ISMIP7_MESH=checkpoint) | IU Quartz, general partition | 2026-10-05 | 2026-10-05 | start-up ramp (8 continuation steps, scpc_gamg): 105 Newton and 20,009 Krylov iterations, 1,089 s. 200 steps with every solve converged and no rescue: 421 Newton iterations (at most 6 a step), 48 Krylov iterations a condensed solve, 11.0 s a solve; resid 0.00 every step. The 1 m twin was still in its ramp's second step after 2 h |
 | As test-2km-rc-b20k-forward-floor5-drift, started from the MAP's full mixed state as a restart (no n_flow ramp), membrane floor 5 m | done | antarctica_5000_2000_buffered20000 (IU's build, 969,764 vertices), DG0 geometry, vertex raster sampling, the lake fix (from the MAP: ISMIP7_MESH=checkpoint) | IU Quartz, general partition | 2026-10-05 | 2026-10-05 | restart state re-solved, then 200 steps with every solve converged and no rescue: 652 Newton iterations (at most 9 a step), 54 Krylov iterations a condensed solve, 18.5 s a solve; resid 0.00 every step; VAF 56,701.92 mm SLE at 2020 from 56,723.78 (10 m: 723 Newton, 38 Krylov, 14.4 s a solve, 56,702.18) |
 | RC stage 2 cold start from the rho 75 km MAP with the vertex gate and the 10 m membrane floor under scpc_gamg | stopped | antarctica_5000_2000_buffered20000 (IU's build, 969,764 vertices), DG0 geometry, vertex raster sampling, the lake fix | IU Quartz, general partition | 2026-10-05 | 2026-10-05 | the startup ramp (full_mumps) stalled at its first step, n_flow = m_slide = 1: DIVERGED_MAX_IT after 200 Newton iterations at \|\|F\|\| 2.720e7, at 8 and again at 16 continuation steps (2,232 s and 2,381 s). The same start at a 1 m floor (10971050) converged that step in 39 Newton iterations and the whole ramp in 8 steps |
-| RC stage 2 on the 20 km buffered mesh from the rho 75 km MAP, with the vertex gate and a 1 m membrane floor | running | antarctica_5000_2000_buffered20000 (IU's build, 969,764 vertices), DG0 geometry, vertex raster sampling, the lake fix | IU Quartz, general partition | 2026-10-05 | - | evaluation 93 (full_mumps link): misfit 1,621, velocity chi2 45.2, total 1,854 |
+| RC stage 2 on the 20 km buffered mesh from the rho 75 km MAP, with the vertex gate and a 1 m membrane floor | stopped | antarctica_5000_2000_buffered20000 (IU's build, 969,764 vertices), DG0 geometry, vertex raster sampling, the lake fix | IU Quartz, general partition | 2026-10-05 | 2026-10-05 | evaluation 103 (checkpoint written just before the OOM kill): misfit 1,604.5, velocity chi2 45.8, total 1,838.2; floating mean -4.9 m/yr (median ratio -1 %), front band -11.5 (-5 %), grounded -0.7; 90th and 99th percentile speed misfit 19 and 114 m/yr (analysis job 10971251). phi reaches -31.8 somewhere in this state, which stalls scpc_gamg at every floor (test-2km-rc-b20k-gamg-g01-*) |
 | Three RC iterations under scpc_gamg from a converged rho 75 km state on the 20 km buffered mesh, membrane floor 1 m | stopped | antarctica_5000_2000_buffered20000 (IU's build, 969,764 vertices), DG0 geometry, vertex raster sampling, the lake fix | IU Quartz, general partition | 2026-10-05 | 2026-10-05 | loaded residual \|\|F\|\| 5.9 (converged at this floor). Evaluation 1: forward 616 s, adjoint 561 s; evaluation 2: forward 3,561 s, adjoint 540 s; total 1,838.2 -> 1,837.8. Stopped by the 2 h limit. The starting state, converged at 1 m, holds phi down to -31.8 (fluidity e^-32 of the prior), a contrast that slows scpc_gamg at any floor; at rho 75 km the inversion needs full_mumps whatever the floor (test-2km-rc-b20k-g01-vgf1: about 145 s an evaluation) |
 | Three RC iterations under scpc_gamg from a converged rho 75 km state on the 20 km buffered mesh, membrane floor 10 m | stopped | antarctica_5000_2000_buffered20000 (IU's build, 969,764 vertices), DG0 geometry, vertex raster sampling, the lake fix | IU Quartz, general partition | 2026-10-05 | 2026-10-05 | loaded residual \|\|F\|\| 2.6e8; no evaluation finished in the 2 h limit. The starting state, converged at 1 m, holds phi down to -31.8 (fluidity e^-32 of the prior), a contrast that slows scpc_gamg at any floor; at rho 75 km the inversion needs full_mumps whatever the floor (test-2km-rc-b20k-g01-vgf1: about 145 s an evaluation) |
 | Three RC iterations under scpc_gamg from a converged rho 75 km state on the 20 km buffered mesh, membrane floor 2.5 m | stopped | antarctica_5000_2000_buffered20000 (IU's build, 969,764 vertices), DG0 geometry, vertex raster sampling, the lake fix | IU Quartz, general partition | 2026-10-05 | 2026-10-05 | loaded residual \|\|F\|\| 4.3e7; no evaluation finished in the 2 h limit. The starting state, converged at 1 m, holds phi down to -31.8 (fluidity e^-32 of the prior), a contrast that slows scpc_gamg at any floor; at rho 75 km the inversion needs full_mumps whatever the floor (test-2km-rc-b20k-g01-vgf1: about 145 s an evaluation) |
@@ -200,9 +201,9 @@ Status: 12 planned, 7 running, 22 stopped, 215 done, 17 superseded.
 | RC stage 2 on the 20 km buffered mesh with the drag kept off every node of the ice and a 10 m membrane floor (300 iterations) | done | antarctica_5000_2000_buffered20000 (IU's build, 969,764 vertices), DG0 geometry, vertex raster sampling, the lake fix | IU Quartz, general partition | 2026-10-05 | 2026-10-05 | evaluation 1: misfit 3,192.9, velocity chi2 108.4; floating ice mean -39.2 m/yr (median ratio -11 %), within 25 km of the edge -52.2 m/yr (-17 %), grounded -2 m/yr (shelf_stats.py on the copied evaluation 1); evaluation 1 reproduces test-2km-rc-b20k-eval1-vgate (4e45d18) to every printed digit. Final: misfit 2,790.8, velocity chi2 64.7, total 3,129.7; floating mean -6.2 m/yr (median ratio -2 %), front band mean -18.5 m/yr (median -12.4, ratio -8 %); 90th and 99th percentile speed misfit 35.5 and 179 m/yr. Against the 1 m MAP (plot_floor_diff.py): floating phi 99th percentile +0.64 softer, front-band speed 1st percentile -95 m/yr; no failed forward |
 | RC stage 2 on the 20 km buffered mesh with the drag kept off every node of the ice and a 2.5 m membrane floor (300 iterations) | done | antarctica_5000_2000_buffered20000 (IU's build, 969,764 vertices), DG0 geometry, vertex raster sampling, the lake fix | IU Quartz, general partition | 2026-10-05 | 2026-10-05 | evaluation 1: misfit 3,132.4, velocity chi2 74.4; floating ice mean -12.7 m/yr (median ratio -4 %), within 25 km of the edge -22.2 m/yr (-9 %), grounded -2 m/yr (shelf_stats.py on the copied evaluation 1). Final: misfit 2,820.4, velocity chi2 61.3, total 3,158.4; floating mean -5.8 m/yr (median ratio -2 %), front band mean -14.0 m/yr (median -10.4, ratio -7 %); 90th and 99th percentile speed misfit 34.0 and 174 m/yr. Against the 1 m MAP (plot_floor_diff.py): floating phi 99th percentile +0.14 softer, front-band speed 1st percentile -22 m/yr; no failed forward |
 | RC stage 2 on the 20 km buffered mesh with the drag kept off every node of the ice and a 5 m membrane floor (300 iterations) | done | antarctica_5000_2000_buffered20000 (IU's build, 969,764 vertices), DG0 geometry, vertex raster sampling, the lake fix | IU Quartz, general partition | 2026-10-05 | 2026-10-05 | evaluation 1: misfit 3,121.8, velocity chi2 80.7; floating ice mean -22.9 m/yr (median ratio -7 %), within 25 km of the edge -34.0 m/yr (-12 %), grounded -2 m/yr (shelf_stats.py on the copied evaluation 1). Final: misfit 2,803.6, velocity chi2 62.2, total 3,142.4; floating mean -6.0 m/yr (median ratio -2 %), front band mean -15.5 m/yr (median -11.1, ratio -7 %); 90th and 99th percentile speed misfit 34.5 and 176 m/yr. Against the 1 m MAP (plot_floor_diff.py): floating phi 99th percentile +0.34 softer, front-band speed 1st percentile -51 m/yr; no failed forward |
-| RC continued 150 iterations on Rice's mesh from its stage-1 MAP with the fluidity control on floating ice only and the exact cliff push, rho 7.5 km | running | antarctica_5000_2000_buffered0 (Rice's build, 925,183 vertices, read from the warm start: ISMIP7_MESH=checkpoint), DG0 geometry, vertex raster sampling | IU Quartz, general partition | 2026-10-05 | - | evaluation 1: misfit 5,825 (the stage-1 MAP records 2,249 with phi on all ice): grounded ice back at A_prior loses the speed its fluidity carried |
-| RC continued 150 iterations on Rice's mesh from its stage-1 MAP with the fluidity control on floating ice only and the exact cliff push, rho 75 km | running | antarctica_5000_2000_buffered0 (Rice's build, 925,183 vertices, read from the warm start: ISMIP7_MESH=checkpoint), DG0 geometry, vertex raster sampling | IU Quartz, general partition | 2026-10-05 | - | evaluation 1: misfit 5,825 (the stage-1 MAP records 2,249 with phi on all ice): grounded ice back at A_prior loses the speed its fluidity carried |
-| RC continued 150 iterations on Rice's mesh from its stage-1 MAP with the fluidity control on floating ice only and the exact cliff push, rho 750 km | running | antarctica_5000_2000_buffered0 (Rice's build, 925,183 vertices, read from the warm start: ISMIP7_MESH=checkpoint), DG0 geometry, vertex raster sampling | IU Quartz, general partition | 2026-10-05 | - | evaluation 1: misfit 5,825 (the stage-1 MAP records 2,249 with phi on all ice): grounded ice back at A_prior loses the speed its fluidity carried |
+| RC continued 150 iterations on Rice's mesh from its stage-1 MAP with the fluidity control on floating ice only and the exact cliff push, rho 7.5 km | stopped | antarctica_5000_2000_buffered0 (Rice's build, 925,183 vertices, read from the warm start: ISMIP7_MESH=checkpoint), DG0 geometry, vertex raster sampling | IU Quartz, general partition | 2026-10-05 | 2026-10-05 | evaluation 1: misfit 5,825 (grounded ice back at A_prior). evaluation 46, far from converged: misfit 1,269 (all ice at 158 evaluations: 645), velocity chi2 74; floating mean +1.8 m/yr (median ratio -1 %), front band +2.8 (-3 %); 99th percentile speed misfit 156 m/yr (72) (shelf_stats.py, analysis job 10972024) |
+| RC continued 150 iterations on Rice's mesh from its stage-1 MAP with the fluidity control on floating ice only and the exact cliff push, rho 75 km | stopped | antarctica_5000_2000_buffered0 (Rice's build, 925,183 vertices, read from the warm start: ISMIP7_MESH=checkpoint), DG0 geometry, vertex raster sampling | IU Quartz, general partition | 2026-10-05 | 2026-10-05 | evaluation 1: misfit 5,825 (grounded ice back at A_prior). evaluation 136: misfit 1,697 (all ice: 1,200), velocity chi2 72; floating mean +1.2 m/yr (median ratio -1 %), front band +3.1 (-2 %), grounded mean absolute misfit 6.9 m/yr (4.0 all ice); 99th percentile speed misfit 157 m/yr (104) (shelf_stats.py, analysis job 10972024) |
+| RC continued 150 iterations on Rice's mesh from its stage-1 MAP with the fluidity control on floating ice only and the exact cliff push, rho 750 km | done | antarctica_5000_2000_buffered0 (Rice's build, 925,183 vertices, read from the warm start: ISMIP7_MESH=checkpoint), DG0 geometry, vertex raster sampling | IU Quartz, general partition | 2026-10-05 | 2026-10-05 | evaluation 1: misfit 5,825 (grounded ice back at A_prior). evaluation 155: misfit 3,212 (all-ice fluidity at this gamma, test-2km-rc-lcurve-g1: 2,244), velocity chi2 191; floating ice mean +40.9 m/yr (median ratio +7 %), front band +71.3 (+11 %), grounded mean absolute misfit 11.9 m/yr (6.6 with fluidity on all ice); 99th percentile speed misfit 387 m/yr (171) (shelf_stats.py, analysis job 10972024) |
 | One fresh scpc_gamg solver on Rice's mesh at RC's final stage-1 controls (Krylov iterations a condensed solve) | done | antarctica_5000_2000_buffered0 (Rice's build, 925,183 vertices, read from the warm start: ISMIP7_MESH=checkpoint), DG0 geometry, vertex raster sampling | IU Quartz, debug partition | 2026-10-04 | 2026-10-04 | 152 Krylov iterations a condensed solve with a fresh solver, against 144 for stage 1's reused solver at the same controls and 68 for a fresh solver on the buffered mesh: the buffered setup, not solver reuse, halves stage 2's evaluation cost. Evaluation 1 reproduces stage 1's final objective (total 2.592786e3) |
 | RC continued 150 iterations on Rice's mesh from its stage-1 MAP, curvature x0.01 (rho 7.5 km at sigma 30) | done | antarctica_5000_2000_buffered0 (Rice's build, 925,183 vertices, read from the warm start: ISMIP7_MESH=checkpoint), DG0 geometry, vertex raster sampling | IU Quartz, general partition | 2026-10-04 | 2026-10-05 | evaluation 158: misfit 645 (stage 1 ended at 2,249), velocity chi2 10.7, total 894; mean absolute speed misfit 15.4 m/yr on floating ice and 2.6 m/yr on grounded ice. phi on the shelves shows narrow suture zones and margins, and on grounded ice a grid-scale speckle (2 to 5 km), which is noise; 90th and 99th percentile 14 and 72 m/yr |
 | RC continued 150 iterations on Rice's mesh from its stage-1 MAP, curvature x0.1 (rho 75 km at sigma 30) | done | antarctica_5000_2000_buffered0 (Rice's build, 925,183 vertices, read from the warm start: ISMIP7_MESH=checkpoint), DG0 geometry, vertex raster sampling | IU Quartz, general partition | 2026-10-04 | 2026-10-05 | evaluation 157: misfit 1,200 (stage 1 ended at 2,249), velocity chi2 14.8, total 1,415; mean absolute speed misfit 19.9 m/yr on floating ice and 4.0 m/yr on grounded ice. phi gains flow-aligned bands and shear margins on the shelves and 20 km blobs on grounded ice; 90th and 99th percentile speed misfit 19 and 104 m/yr (34 and 171 at x1) |
@@ -3311,6 +3312,27 @@ Core 11 at 32 km without the apparent-MB reference, a cold start on the OCX prot
 - **Audit:** first objective 8.110449e4 (2.4e-5 off the 32-rank full_mumps run: the ramp's state follows the partition); no forward failed; 2.7 times slower per iteration than full_mumps on 32 ranks, with twice the ranks
 - **Notes:** issue #156 production-configuration cost probe; no MAP is kept (strict handoff off, the legacy prior name overridden by the warm start's prior)
 
+### test-1km-rc-forward-floor1-drift
+
+Unforced one-year forward on the 1 km production mesh from RC's 2 km vertex-gate stage-2 MAP, apparent mass balance off, membrane floor 1 m (done), IU.
+
+- **Task type:** test
+- **Period (yr):** 2015-2016
+- **Friction law:** regularized_coulomb
+- **Mesh:** antarctica_10000_1000_buffered20000 (1,869,088 vertices), DG0 geometry, BedMachine cell averages on this mesh, the lake fix (from the MAP)
+- **Initial state / MAP:** test-2km-rc-b20k-vgate-floor1's MAP (rc_s2x_vgf1.h5) transferred onto this mesh as a cold start (ISMIP7_TRANSFER_FILL=extend), vertex gate from the MAP
+- **Forcing versions:** none: run_timing.py passes no forcing callback; ISMIP7_APPARENT_MB=0 ISMIP7_FIXED_FRONT=1 ISMIP7_DT=0.025 scpc_gamg, rescue on; ISMIP7_RC_HVISC_FLOOR=1
+- **Site / partition:** IU Quartz, general partition
+- **Ranks / memory:** 64 ranks, 300G, 12 h
+- **Job ids:** 11412602
+- **Code:** 94d0398; Quartz worktree /N/scratch/dlilien/ismip7_reinvert_s5
+- **Started:** 2026-10-06
+- **Finished:** 2026-10-06
+- **Cost per model year:** 40 min, 40 steps
+- **Results path:** Quartz /N/scratch/dlilien/ismip7_reinvert_jobs/fwd (timing record, status) and the worktree's antarctica/results/fwd2km_rc_vgf1_floor1_amb0_1km_1000_*
+- **Audit:** start-up ramp (8 continuation steps, scpc_gamg): 94 Newton and 16,628 Krylov iterations, 1,122 s, no failed step (the 2 km cold start's first ramp failed at step 2 and took 4.8 h in all). 40 steps with every solve converged and no rescue: 126 Newton iterations (at most 10 a step), 79 Krylov iterations a condensed solve, 27.9 s a solve; resid 0.00 every step; calving 551 Gt/yr over 2015; VAF 56,773.94 mm SLE at 2016 from 56,778.64. Against 10 m (18.2 s, 42 Krylov): 1.53x a solve, 1.88x the Krylov iterations
+- **Notes:** issue #153: the 1 m point of the 1 km floor check, run before the floor is chosen (at 2 km its cold start took 4.8 h under scpc_gamg)
+
 ### test-1km-rc-forward-floor10-drift
 
 Unforced one-year forward on the 1 km production mesh from RC's 2 km vertex-gate stage-2 MAP, apparent mass balance off, membrane floor 10 m (done), IU.
@@ -3351,7 +3373,7 @@ Unforced one-year forward on the 1 km production mesh from RC's 2 km vertex-gate
 - **Cost per model year:** 33 min, 40 steps
 - **Results path:** Quartz /N/scratch/dlilien/ismip7_reinvert_jobs/fwd (timing record, status) and the worktree's antarctica/results/fwd2km_rc_vgf1_floor2.5_amb0_1km_1000_*
 - **Audit:** start-up ramp (8 continuation steps, scpc_gamg): 119 Newton and 18,318 Krylov iterations, 1,006 s. 40 steps with every solve converged and no rescue: 141 Newton iterations (at most 11 a step), 54 Krylov iterations a condensed solve, 20.8 s a solve; resid 0.00 every step; calving 523 Gt/yr over 2015; VAF 56,773.97 mm SLE at 2016 from 56,778.64. Against 10 m: 2.5 m costs 1.14x a solve (1.29x the Krylov iterations) and 5 m 1.10x, where the 2 km mesh on 32 ranks gave 1.4 to 1.9x and 1.0 to 1.3x
-- **Notes:** issue #153: whether the floor's forward cost on the 2 km mesh (test-2km-rc-b20k-forward-floor*-drift) carries to the 1 km production mesh before the floor is chosen; 1 m left out for its 4.8 h start at 2 km
+- **Notes:** issue #153: whether the floor's forward cost on the 2 km mesh (test-2km-rc-b20k-forward-floor*-drift) carries to the 1 km production mesh before the floor is chosen; the 1 m point is test-1km-rc-forward-floor1-drift
 
 ### test-1km-rc-forward-floor5-drift
 
@@ -4400,7 +4422,7 @@ RC stage 2 cold start from the rho 75 km MAP with the vertex gate and the 10 m m
 
 ### test-2km-rc-b20k-g01-vgf1
 
-RC stage 2 on the 20 km buffered mesh from the rho 75 km MAP, with the vertex gate and a 1 m membrane floor (running), IU.
+RC stage 2 on the 20 km buffered mesh from the rho 75 km MAP, with the vertex gate and a 1 m membrane floor (stopped), IU.
 
 - **Task type:** test
 - **Period (yr):** 2015 state
@@ -4413,9 +4435,10 @@ RC stage 2 on the 20 km buffered mesh from the rho 75 km MAP, with the vertex ga
 - **Job ids:** 10971050 10971250
 - **Code:** 4e45d18; Quartz worktree /N/scratch/dlilien/ismip7_reinvert_s3
 - **Started:** 2026-10-05
-- **Cost per model year:** scpc_gamg: forwards of 580 to 940 s (870 Krylov iterations a condensed solve, 150 at rho 750 km), cancelled at evaluation 5; full_mumps: about 145 s an evaluation
+- **Finished:** 2026-10-05
+- **Cost per model year:** scpc_gamg: forwards of 580 to 940 s (870 Krylov iterations a condensed solve, 150 at rho 750 km), cancelled at evaluation 5; full_mumps: about 145 s an evaluation; the full_mumps link ran 103 evaluations in 4 h 28 min, then rank 29 was OOM-killed at 220G (09:42 on 5 October) and the job hung until its 16 h limit
 - **Results path:** Quartz /N/project/ice_rheology/ISMIP7/antarctica/results/reinvert_2km/exp/rc_s2x_g01_vgf1.h5; analysis job 10971251
-- **Audit:** evaluation 93 (full_mumps link): misfit 1,621, velocity chi2 45.2, total 1,854
+- **Audit:** evaluation 103 (checkpoint written just before the OOM kill): misfit 1,604.5, velocity chi2 45.8, total 1,838.2; floating mean -4.9 m/yr (median ratio -1 %), front band -11.5 (-5 %), grounded -0.7; 90th and 99th percentile speed misfit 19 and 114 m/yr (analysis job 10971251). phi reaches -31.8 somewhere in this state, which stalls scpc_gamg at every floor (test-2km-rc-b20k-gamg-g01-*)
 - **Notes:** issue #153: the night's two findings together, rho 75 km and the drag kept off the ice
 
 ### test-2km-rc-b20k-gamg-g01-floor1
@@ -4609,7 +4632,7 @@ RC stage 2 on the 20 km buffered mesh with the drag kept off every node of the i
 
 ### test-2km-rc-floating-fluidity-g001
 
-RC continued 150 iterations on Rice's mesh from its stage-1 MAP with the fluidity control on floating ice only and the exact cliff push, rho 7.5 km (running), IU.
+RC continued 150 iterations on Rice's mesh from its stage-1 MAP with the fluidity control on floating ice only and the exact cliff push, rho 7.5 km (stopped), IU.
 
 - **Task type:** test
 - **Period (yr):** 2015 state
@@ -4622,14 +4645,15 @@ RC continued 150 iterations on Rice's mesh from its stage-1 MAP with the fluidit
 - **Job ids:** 10972022
 - **Code:** 60c0262; Quartz worktree /N/scratch/dlilien/ismip7_reinvert_s4
 - **Started:** 2026-10-05
-- **Cost per model year:** 100 to 200 s an evaluation over the first ten
+- **Finished:** 2026-10-05
+- **Cost per model year:** 10 h (TIMEOUT), 46 evaluations; forwards up to 936 s
 - **Results path:** Quartz /N/project/ice_rheology/ISMIP7/antarctica/results/reinvert_2km/lcurve/rc_fl_rc_g001.h5; analysis job 10972024 writes plots/fl_*
-- **Audit:** evaluation 1: misfit 5,825 (the stage-1 MAP records 2,249 with phi on all ice): grounded ice back at A_prior loses the speed its fluidity carried
+- **Audit:** evaluation 1: misfit 5,825 (grounded ice back at A_prior). evaluation 46, far from converged: misfit 1,269 (all ice at 158 evaluations: 645), velocity chi2 74; floating mean +1.8 m/yr (median ratio -1 %), front band +2.8 (-3 %); 99th percentile speed misfit 156 m/yr (72) (shelf_stats.py, analysis job 10972024)
 - **Notes:** issue #153: the L-curve of test-2km-rc-lcurve-* with grounded ice at its prior fluidity, since the case against rho 7.5 km was grid-scale phi on grounded ice
 
 ### test-2km-rc-floating-fluidity-g01
 
-RC continued 150 iterations on Rice's mesh from its stage-1 MAP with the fluidity control on floating ice only and the exact cliff push, rho 75 km (running), IU.
+RC continued 150 iterations on Rice's mesh from its stage-1 MAP with the fluidity control on floating ice only and the exact cliff push, rho 75 km (stopped), IU.
 
 - **Task type:** test
 - **Period (yr):** 2015 state
@@ -4642,14 +4666,15 @@ RC continued 150 iterations on Rice's mesh from its stage-1 MAP with the fluidit
 - **Job ids:** 10972021
 - **Code:** 60c0262; Quartz worktree /N/scratch/dlilien/ismip7_reinvert_s4
 - **Started:** 2026-10-05
-- **Cost per model year:** 100 to 200 s an evaluation over the first ten
+- **Finished:** 2026-10-05
+- **Cost per model year:** 10 h (TIMEOUT), 136 evaluations; forwards up to 544 s
 - **Results path:** Quartz /N/project/ice_rheology/ISMIP7/antarctica/results/reinvert_2km/lcurve/rc_fl_rc_g01.h5; analysis job 10972024 writes plots/fl_*
-- **Audit:** evaluation 1: misfit 5,825 (the stage-1 MAP records 2,249 with phi on all ice): grounded ice back at A_prior loses the speed its fluidity carried
+- **Audit:** evaluation 1: misfit 5,825 (grounded ice back at A_prior). evaluation 136: misfit 1,697 (all ice: 1,200), velocity chi2 72; floating mean +1.2 m/yr (median ratio -1 %), front band +3.1 (-2 %), grounded mean absolute misfit 6.9 m/yr (4.0 all ice); 99th percentile speed misfit 157 m/yr (104) (shelf_stats.py, analysis job 10972024)
 - **Notes:** issue #153: the L-curve of test-2km-rc-lcurve-* with grounded ice at its prior fluidity, since the case against rho 7.5 km was grid-scale phi on grounded ice
 
 ### test-2km-rc-floating-fluidity-g1
 
-RC continued 150 iterations on Rice's mesh from its stage-1 MAP with the fluidity control on floating ice only and the exact cliff push, rho 750 km (running), IU.
+RC continued 150 iterations on Rice's mesh from its stage-1 MAP with the fluidity control on floating ice only and the exact cliff push, rho 750 km (done), IU.
 
 - **Task type:** test
 - **Period (yr):** 2015 state
@@ -4662,9 +4687,10 @@ RC continued 150 iterations on Rice's mesh from its stage-1 MAP with the fluidit
 - **Job ids:** 10972020
 - **Code:** 60c0262; Quartz worktree /N/scratch/dlilien/ismip7_reinvert_s4
 - **Started:** 2026-10-05
-- **Cost per model year:** 100 to 200 s an evaluation over the first ten
+- **Finished:** 2026-10-05
+- **Cost per model year:** 5 h 54 min, 155 evaluations
 - **Results path:** Quartz /N/project/ice_rheology/ISMIP7/antarctica/results/reinvert_2km/lcurve/rc_fl_rc_g1.h5; analysis job 10972024 writes plots/fl_*
-- **Audit:** evaluation 1: misfit 5,825 (the stage-1 MAP records 2,249 with phi on all ice): grounded ice back at A_prior loses the speed its fluidity carried
+- **Audit:** evaluation 1: misfit 5,825 (grounded ice back at A_prior). evaluation 155: misfit 3,212 (all-ice fluidity at this gamma, test-2km-rc-lcurve-g1: 2,244), velocity chi2 191; floating ice mean +40.9 m/yr (median ratio +7 %), front band +71.3 (+11 %), grounded mean absolute misfit 11.9 m/yr (6.6 with fluidity on all ice); 99th percentile speed misfit 387 m/yr (171) (shelf_stats.py, analysis job 10972024)
 - **Notes:** issue #153: the L-curve of test-2km-rc-lcurve-* with grounded ice at its prior fluidity, since the case against rho 7.5 km was grid-scale phi on grounded ice
 
 ### test-2km-rc-fresh-solver-rice-mesh

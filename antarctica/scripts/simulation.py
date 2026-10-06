@@ -70,6 +70,7 @@ from icepack2_tools.mpi_stats import (
 )
 from icepack2_tools.boundary import load_boundary_ids
 from icepack2_tools.fssa import (
+    fssa_banner,
     resolve_reference as resolve_fssa_reference,
     restart_reference_error as fssa_restart_reference_error,
 )
@@ -3380,9 +3381,7 @@ def run_simulation(
             ctx["u_ref_fssa"].assign(z.subfunctions[0])
             ctx["u_ref_fssa_set"] = True
             PETSc.Sys.Print("  Free-surface stabilization: reference velocity = the starting state")
-        PETSc.Sys.Print(
-            f"  Free-surface stabilization: theta {fssa_theta_val:g} on the"
-            " lagged thickness-velocity coupling (ISMIP7_FSSA_THETA)")
+    PETSc.Sys.Print(f"  {fssa_banner(fssa_theta_val)}")
     # Adaptive substepping replaces the fixed retry list when it is on: the
     # count follows the thickness error estimate instead of waiting for a
     # failed solve, because the lagged-velocity instability grows through

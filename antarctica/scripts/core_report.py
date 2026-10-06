@@ -46,6 +46,7 @@ from icepack2_tools.forcing import (
     FORCING_PROVENANCE_MARKER, SMB_FEEDBACK_MARKER, melt_slope, sin_alpha_ant,
 )
 from icepack2_tools.front import COLLAPSE_MARKER, FRONT_OWNER_MARKER
+from icepack2_tools.fssa import FSSA_MARKER
 from icepack2_tools.runconfig import (
     MELT_CALIBRATION_DEFAULT, N_FLOW_DEFAULT, dt, fracture, friction,
     geometry_space, lc, lc_coarse, smb_elevation_feedback,
@@ -180,6 +181,17 @@ def smb_feedback_record(log_path):
                   "ran without the feedback")
 
 
+def fssa_record(log_path):
+    r"""The free-surface stabilization weight the run stepped with, and the
+    reference it measured from, lifted out of its log. The env block states
+    the default this shell resolves; a restart from a checkpoint stepped
+    without the stabilization keeps it off (``solverconfig
+    .forward_fssa_theta``), and these lines are the run's own statement."""
+    return lifted(log_path, FSSA_MARKER,
+                  "the run predates the stabilization line, so it ran "
+                  "without the stabilization")
+
+
 def front_owner(log_path):
     r"""The mechanism that owned the calving front, lifted out of its log.
     The env block carries ``ISMIP7_CALVING`` and ``ISMIP7_CALVING_PARAMS``
@@ -291,7 +303,7 @@ def main():
         f.write(f"- observational audit: "
                 f"{verdict(audit_rc, 'ON TRACK', 'OFF TRACK')}\n")
         for line in (climatology_pool(args.log) + forcing_provenance(args.log)
-                     + smb_feedback_record(args.log)
+                     + smb_feedback_record(args.log) + fssa_record(args.log)
                      + collapse_record(args.log) + front_owner(args.log)):
             f.write(f"- {line}\n")
         if ens_rc is not None:

@@ -92,6 +92,18 @@ from icepack_tools.constants import gravity, ice_density, water_density
 from icepack_tools.grounding import grounded_mask
 
 REFERENCES = ("auto", "start", "step")
+# Begins the line every forward prints with the weight it steps with
+# (fssa_banner), which core_report lifts into the run's report.
+FSSA_MARKER = "Free-surface stabilization:"
+
+
+def fssa_banner(theta):
+    r"""The startup line stating the stabilization weight ``theta`` a forward
+    steps with, the value :func:`solverconfig.forward_fssa_theta` resolved."""
+    if theta > 0:
+        return (f"{FSSA_MARKER} theta {theta:g} on the lagged "
+                "thickness-velocity coupling (ISMIP7_FSSA_THETA)")
+    return f"{FSSA_MARKER} off, theta 0 (ISMIP7_FSSA_THETA)"
 
 
 def resolve_reference(requested, apparent_mb):
@@ -114,10 +126,14 @@ def restart_reference_error(metadata, resolved, source):
     ``metadata`` holds the checkpoint's attributes. A checkpoint stepped
     under the stabilization records ``fssa_reference``; one that records only
     ``fssa_tau`` was written before the choice existed, under ``start``; one
-    with neither was stepped without the stabilization, and any reference
-    may start from it."""
+    with neither was stepped without the stabilization, and one whose
+    ``fssa_tau`` is 0 was never stepped (a prepared timing cache), and any
+    reference may start from either."""
+    tau = metadata.get("fssa_tau")
+    if tau is not None and float(tau) == 0.0:
+        return None
     was = metadata.get("fssa_reference")
-    if was is None and metadata.get("fssa_tau") is not None:
+    if was is None and tau is not None:
         was = "start"
     if was is None or str(was) == resolved:
         return None

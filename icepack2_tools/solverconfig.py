@@ -591,8 +591,10 @@ def forward_fssa_theta(restart_metadata=None):
     except on a restart from a checkpoint stepped without the stabilization
     (``restart_metadata`` with no ``fssa_tau`` record), which keeps it off
     unless ``ISMIP7_FSSA_THETA`` is set, so a chain keeps the momentum balance
-    it began with."""
+    it began with. A prepared timing or map-check state (one that records a
+    ``timing_cache_role``) was never stepped and starts like a cold start."""
     if (restart_metadata is not None
+            and restart_metadata.get("timing_cache_role") is None
             and restart_metadata.get("fssa_tau") is None
             and "ISMIP7_FSSA_THETA" not in os.environ):
         return 0.0

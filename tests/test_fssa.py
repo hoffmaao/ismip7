@@ -199,6 +199,10 @@ def test_a_restart_keeps_the_reference_it_was_stepped_with():
     rec = {"fssa_tau": 0.05, "fssa_reference": "step"}
     assert restart_reference_error(rec, "step", "c.h5") is None
     assert "ISMIP7_FSSA_REFERENCE=step" in restart_reference_error(rec, "start", "c.h5")
+    # a prepared cache was never stepped, so it loads under either reference
+    cache = {"fssa_tau": 0.0, "fssa_reference": "step"}
+    assert restart_reference_error(cache, "start", "c.h5") is None
+    assert restart_reference_error(cache, "step", "c.h5") is None
 
 
 def _channel(scheme, dt, t_end, length=100e3, width=10e3, dx=2e3):
@@ -315,3 +319,38 @@ def test_fssa_is_on_by_default_and_a_restart_keeps_its_checkpoint(monkeypatch):
     monkeypatch.setenv("ISMIP7_FSSA_THETA", "0")
     assert solverconfig.forward_fssa_theta({"fssa_tau": 0.05}) == 0.0
     assert solverconfig.effective_solver_env()["ISMIP7_FSSA_THETA"] == "1"
+
+
+def test_a_prepared_cache_starts_like_a_cold_start(monkeypatch):
+    from icepack2_tools import solverconfig
+    monkeypatch.delenv("ISMIP7_FSSA_THETA", raising=False)
+    # written before the default changed, or repacked without the record
+    old_cache = {"timing_cache_role": "timing-initial-state"}
+    assert solverconfig.forward_fssa_theta(old_cache) == 1.0
+    new_cache = {"timing_cache_role": "timing-initial-state",
+                 "fssa_tau": 0.0, "fssa_reference": "step"}
+    assert solverconfig.forward_fssa_theta(new_cache) == 1.0
+    monkeypatch.setenv("ISMIP7_FSSA_THETA", "0")
+    assert solverconfig.forward_fssa_theta(old_cache) == 0.0
+
+
+def test_the_banner_states_the_weight_the_forward_steps_with():
+    from icepack2_tools.fssa import FSSA_MARKER, fssa_banner
+    assert fssa_banner(1.0).startswith(FSSA_MARKER)
+    assert "theta 1 " in fssa_banner(1.0)
+    assert fssa_banner(0.0).startswith(FSSA_MARKER)
+    assert "off, theta 0" in fssa_banner(0.0)
+
+
+def test_a_timing_record_carries_the_weight_its_lane_stepped_with():
+    import sys
+    from pathlib import Path
+    sys.path.insert(0, str(Path(__file__).resolve().parents[1]
+                           / "antarctica" / "scripts"))
+    import run_timing
+    from icepack2_tools.solverconfig import solver_provenance
+    configuration = solver_provenance()
+    recorded = run_timing._stepped_configuration(configuration, {"fssa_theta": 0.0})
+    assert recorded["fssa_theta"] == 0.0
+    assert {k: v for k, v in recorded.items() if k != "fssa_theta"} == {
+        k: v for k, v in configuration.items() if k != "fssa_theta"}

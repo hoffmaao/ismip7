@@ -627,6 +627,47 @@ not measure it.
 and `runlog/test-32km-inversion-scpc-destroy-*` hold the runs, including a
 first round timed beside another session's jobs.
 
+Under `full_mumps` the 2 km inversion's RSS climbed for as long as it ran
+(issue #161): job 10971250 grew 33.7 MiB a rank an evaluation over evaluations
+11 to 103 and lost a rank to the OOM killer at 220G. Each evaluation builds and
+drops two solvers that hold assembled matrices: the recorded solve's Newton
+solver, whose mixed AIJ Jacobian is allocated even when SNES exits at
+iteration 0, and the adjoint's operator, `LinearSolver` and LU. Firedrake's
+`NonlinearVariationalSolver` sits in a reference cycle, so a dropped one
+lives until Python's cyclic collector runs, and on more than one rank its
+PETSc objects then wait for the next `PetscGarbageCleanup`. Some are never
+freed: the arms below without the release ended with 28 to 37 matrices alive
+in PETSc's count, against 10 (the run's own) with it, while at most four
+Firedrake solvers were alive after any evaluation. That fits issue #159's
+loss of objects released while a cleanup runs, reached here through the
+collector; no run here isolated that path. The solvers are now destroyed when dropped
+(`taped_solve.release_solver`, used by `ReleasingEquationSolver` for both
+recorded equations and by `StateSolverCache` for the solver it replaces). On
+Quartz, 32 ranks, 10971250's objective (rho 75 km), from its last checkpoint
+or from a start that objective moves far (`runlog/test-2km-full-mumps-issue161-*`);
+RSS a rank (mean) from the timing record, MiB:
+
+| start | evaluations | without the release | with it |
+|---|---|---|---|
+| converged | 10 to 62 | 2,761 to 3,366 (11.6 an evaluation, still rising) | 2,657 to 2,804 (2.8; flat within 2,739 to 2,809 from evaluation 13) |
+| moving (rho 750 km MAP under the rho 75 km objective) | 10 to 48 | 2,762 to 3,057 (7.8) | 2,633 to 2,781 (3.9; within 2,771 to 2,813 from evaluation 20) |
+| moving, the collector left alone | 10 to 30 | 2,753 to 3,132 (20.0) | 2,635 to 2,782 (7.4; within 2,779 to 2,815 from evaluation 20) |
+
+The peak a rank fell by about 600 MiB at 62 evaluations (5,543 to 4,915).
+Objectives agree with the spread of same-code reruns, which on 32 ranks are
+not bit-identical (2e-15 at evaluation 2, 1e-11 by 22, compounding through
+L-BFGS-B after that), with the same Newton iterations, and the seconds an
+evaluation are unchanged (136 and 128). Ruled out: lost solvers (every SNES,
+KSP and PC is destroyed, here and at 32 km on the workstation); the cached forward
+solver's MUMPS instance holds a constant 1,482 MB (`INFO(16)`); MUMPS's
+ScaLAPACK root (`mat_mumps_icntl_13 1` changed nothing); free heap
+(`malloc_trim` returned about 150 MiB a rank every evaluation and left the
+trend); Python's own memory (tracemalloc flat at about 920 MiB a rank). Below
+2 km the growth is small (0.5 MiB an evaluation at 32 km on 8 ranks, 4.6 at
+8 km on 2, on the workstation).
+`site_core.sh`'s `--kill-on-bad-exit=1` (batch_runners readme) ends a job
+whose rank dies regardless.
+
 Under SEP1 and the direct forward (PR 158's defaults; PR 155 at `432c831`), on
 the workstation with other sessions sharing it: Budd, the `legacy` fluidity
 prior, the log control, a cold start ramped under `full_mumps`, TAO with the

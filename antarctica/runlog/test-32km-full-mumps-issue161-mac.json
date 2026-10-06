@@ -1,0 +1,20 @@
+{
+  "id": "test-32km-full-mumps-issue161-mac",
+  "task": "test",
+  "institution": "IU",
+  "title": "32 km inversion under full_mumps on 8 ranks, 30 L-BFGS-B iterations, with a census after every evaluation, and again with gc.collect() and two PETSc garbage cleanups after every evaluation: does the direct forward's full_mumps path lose PETSc objects (issue #161)",
+  "status": "done",
+  "friction": "regularized_coulomb",
+  "mesh": "antarctica_320000_32000_buffered0 (6,282 vertices), DG0 geometry, vertex raster sampling",
+  "initial_state": "cold start (u = 0.1 u_obs, theta = phi = 0, the n,m ramp under full_mumps), then the direct forward",
+  "forcing": "MEaSUREs v2 450 m and BedMachine v4.1 under ISMIP7_OBS_DATA_ROOT=/Volumes/LaCie/Data/antarctica_general/ismip7_obs; ISMIP7_FLUIDITY_PRIOR=legacy; no dH/dt term",
+  "site": "IU workstation (Mac, 16 cores, 128 GB); the two arms ran together",
+  "resources": "8 ranks each; RSS a rank (mean over ranks) after compute_gradient 1,197 at evaluation 11 and 1,210 at 35 (0.51 MiB an evaluation) without the cleanup, 1,070 and 1,072 (0.07) with it; peak 2,156 and 1,830 MiB",
+  "code": "90d490e (git archive); probe161.py (PROBE_GC=1 for the second arm); bilaplacian prior sigma 30, rho 75 km, LOG friction control, L-BFGS-B without a metric",
+  "started": "2026-10-06",
+  "finished": "2026-10-06",
+  "cost": "534 and 538 s wall, 35 evaluations: 5.3 and 5.4 s an evaluation (median after the first)",
+  "results": "/Volumes/LaCie/Data/antarctica_general/ismip7_runs/issue161_full_mumps/m32_base_90d490e/ and m32_gc_90d490e/ (map.h5, log.txt, timing.json, probe.jsonl, log_view.txt); probe scripts in /Volumes/LaCie/Data/antarctica_general/ismip7_runs/issue161_full_mumps/scripts/",
+  "audit": "both arms end on total 1.835776394e+02 after 30 iterations and 35 evaluations; PETSc's -log_view on rank 0: every SNES, KSP and PC destroyed (75 of 75), 1,028 matrices created and 1,019 destroyed (9 alive at exit) without the cleanup, all 1,028 with it, so no evaluation loses a PETSc object; Python's live solver and petsc4py wrapper counts flat from evaluation 6",
+  "notes": "Issue #161. The 32 km full_mumps baseline of issue #159 (fb7c32e) predates the direct forward (fa9e96e); this is the current path."
+}

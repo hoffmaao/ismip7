@@ -1,0 +1,20 @@
+{
+  "task": "test",
+  "institution": "IU",
+  "friction": "regularized_coulomb",
+  "mesh": "antarctica_5000_2000_buffered20000 (969,764 vertices, 1,928,285 cells), DG0 geometry, vertex raster sampling",
+  "site": "IU Quartz, general partition, one node each",
+  "forcing": "the 10971250 objective (rho 75 km) (cell s2x_rc_g01_vgf1_mumps): bilaplacian prior sigma 30, rho 75 km, log friction control, vertex drag gate, membrane floor 1 m, LAKE_ICE_BASE=1, no dH/dt, log-velocity weight 69946.22, L-BFGS-B without a metric",
+  "id": "test-2km-full-mumps-issue161-gcwatch",
+  "title": "2 km RC inversion under full_mumps on 32 ranks, 55 L-BFGS-B iterations from the moving start, with and without the solver release, watched without touching Python's collector (a weak-reference count of live Firedrake solvers)",
+  "status": "running",
+  "initial_state": "warm start results/reinvert_2km/exp/rc_s2x_vgf1.h5 (RC stage 2 converged at rho 750 km, 1 m floor, same mesh) under the rho 75 km objective, ISMIP7_WARM_START_STRICT=0, so the controls move far from the first step (misfit 2,833 at the first evaluation; total 2,007 at the 48th)",
+  "resources": "32 ranks, 220G; RSS a rank (mean, rss_mib) at evaluations 10 and 29/30: 2,753 to 3,132 without the release (20.0 MiB an evaluation), 2,635 to 2,782 with it (7.4; within 2,779 to 2,815 from evaluation 20); peak 5,218 and 4,834 MiB so far",
+  "jobs": "11484846 (without), 11484847 (with the release)",
+  "code": "06cb0a9 and the release tree of test-2km-full-mumps-issue161-probes; probe161_gcwatch.py",
+  "started": "2026-10-06",
+  "cost": "162 and 154 s an evaluation so far (adjoint 107 and 103 s)",
+  "results": "/N/scratch/dlilien/ismip7_issue161_jobs/probe/q2_before_gcw.*, q2_fix_gcw.*",
+  "audit": "at most 4 Firedrake variational solvers alive after any evaluation in either arm, so Python's collector keeps up with the dropped ones",
+  "notes": "Issue #161. The other 2 km arms took an object census after every evaluation, which walks the collector's lists; this pair does not. Numbers through evaluation 30, run in progress."
+}

@@ -1,0 +1,20 @@
+{
+  "id": "test-8km-full-mumps-issue161-mac",
+  "task": "test",
+  "institution": "IU",
+  "title": "8 km inversion under full_mumps on 2 ranks (17,000 vertices a rank, about half the 2 km per-rank size on 32), 30 L-BFGS-B iterations with a census after every evaluation: does RSS grow on macOS (issue #161)",
+  "status": "done",
+  "friction": "regularized_coulomb",
+  "mesh": "antarctica_80000_8000_buffered0 (34,714 vertices), DG0 geometry, vertex raster sampling",
+  "initial_state": "cold start, the n,m ramp under full_mumps, then the direct forward",
+  "forcing": "MEaSUREs v2 450 m and BedMachine v4.1 under ISMIP7_OBS_DATA_ROOT=/Volumes/LaCie/Data/antarctica_general/ismip7_obs; ISMIP7_FLUIDITY_PRIOR=legacy; no dH/dt term",
+  "site": "IU workstation (Mac, 16 cores, 128 GB)",
+  "resources": "2 ranks; RSS a rank (mean) 2,797 MiB at evaluation 11 and 2,908 at 35 (4.6 MiB an evaluation, in steps of 20 MiB at evaluations 14, 20, 24, 28 and 29 and flat between); peak 4,505 MiB",
+  "code": "90d490e (git archive); probe161.py",
+  "started": "2026-10-06",
+  "finished": "2026-10-06",
+  "cost": "443 s wall, 35 evaluations: 6.9 s an evaluation (forward 6.3 s, adjoint 1.6 s at evaluation 10)",
+  "results": "/Volumes/LaCie/Data/antarctica_general/ismip7_runs/issue161_full_mumps/m8_base_90d490e/",
+  "audit": "-log_view on rank 0: every SNES, KSP and PC destroyed, 12 of 1,028 matrices alive at exit",
+  "notes": "Issue #161. The adjoint takes 1.6 s here against 91 s at 2 km on Quartz."
+}

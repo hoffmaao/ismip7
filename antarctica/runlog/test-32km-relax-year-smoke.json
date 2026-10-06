@@ -19,6 +19,6 @@
  "dt": 0.0125,
  "cost": "under 2 min wall",
  "results": "/Volumes/LaCie/Data/antarctica_general/ismip7_runs/relaxed_init_smoke/relax_map_32000_final.h5 (sha256 f1abe93a), /Volumes/LaCie/Data/antarctica_general/ismip7_runs/relaxed_init_smoke/relax_map_32000_timeseries.csv, /Volumes/LaCie/Data/antarctica_general/ismip7_runs/relaxed_init_smoke/relax.log",
- "audit": "resid +0.00 on every step, exit 0; outflux 1,768 Gt/yr at the first step and 1,680 at the last; the end state records relaxation_end_state=1, t_yr 2015.0, stalled 0, the relax_* provenance and the MAP's objective settings, and no objective value; rerun on 793a04f under PR 160's FSSA default (theta 1, reference step since the apparent MB is off): resid +0.00 on every step, outflux 1,679 Gt/yr at the last step, exit 0 (relax_fssa.log)",
- "notes": "Smoke of the relaxed initial state on its default step (half of ISMIP7_DT=0.025). Runner relax.sh with common.sh in the results directory"
+ "audit": "resid +0.00 on every step, exit 0; outflux 1,768 Gt/yr at the first step and 1,680 at the last; the end state records relaxation_end_state=1, t_yr 2015.0, stalled 0, the relax_* provenance and the MAP's objective settings, and no objective value",
+ "notes": "Smoke of the relaxed initial state on its default step (half of ISMIP7_DT=0.025). The year ran with FSSA off, before the PR 160 default (code 8b5377f); test-32km-relax-year-fssa-smoke reruns it under that default. Runner relax.sh with common.sh in the results directory"
 }

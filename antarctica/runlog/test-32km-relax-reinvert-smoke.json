@@ -12,7 +12,7 @@
  "id": "test-32km-relax-reinvert-smoke",
  "title": "32 km re-inversion from the relaxation's end state, 3 iterations",
  "period": "2015 state",
- "initial_state": "test-32km-relax-year-smoke's end state (sha256 f1abe93a): geometry, velocity_obs, mixed state and theta, phi taken; theta kept",
+ "initial_state": "test-32km-relax-year-smoke's end state (sha256 f1abe93a), whose year ran with FSSA off, before the PR 160 default (code 8b5377f): geometry, velocity_obs, mixed state and theta, phi taken; theta kept",
  "forcing": "MEaSUREs and BedMachine from /Volumes/LaCie/Data/antarctica_general/ismip7_obs, the Smith dH/dt cache of the MIPkit v1.2 copied from Quartz; ISMIP7_FLUIDITY_PRIOR=legacy; the MAP's objective: sigma misfit, log-velocity weight 0, bilaplacian sigma 0.3 rho 7.5 km, SEP1, exact front, mass-consistent metric (TAO), 10 m floor, vertex gate; ISMIP7_WARM_START_STRICT=1",
  "cost": "about 1.5 min wall, 7 to 45 s an evaluation",
  "results": "/Volumes/LaCie/Data/antarctica_general/ismip7_runs/relaxed_init_smoke/map_relax2014.h5 (sha256 476bbda8), /Volumes/LaCie/Data/antarctica_general/ismip7_runs/relaxed_init_smoke/reinvert.log",

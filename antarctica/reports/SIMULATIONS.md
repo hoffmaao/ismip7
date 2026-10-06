@@ -9,9 +9,9 @@ gitignored, so these records and the per-core reports beside them are
 the trace a run leaves in the repository. A core experiment also gets
 its full report from `core_report.py`; this is the index.
 
-305 records.
+306 records.
 
-Status: 16 planned, 5 running, 25 stopped, 242 done, 17 superseded.
+Status: 16 planned, 5 running, 25 stopped, 243 done, 17 superseded.
 
 ## Inversion
 
@@ -294,7 +294,8 @@ Status: 16 planned, 5 running, 25 stopped, 242 done, 17 superseded.
 | 32 km forward cold-started in 2003 from the relaxed MAP, 2 steps, apparent MB on | done | antarctica_320000_32000_buffered0 (6,282 vertices, 9,055 cells), DG0 geometry, ISMIP7_MESH=checkpoint | IU workstation (Mac, 16 cores), load average about 6 | 2026-10-06 | 2026-10-06 | budget amb +1,882, outflux -1,881 Gt/yr, resid -0.00; the checkpoint records init_state relaxed and the relax_* provenance |
 | 32 km second link of the re-inversion, resumed strictly from its own MAP, 1 iteration | done | antarctica_320000_32000_buffered0 (6,282 vertices, 9,055 cells), DG0 geometry, ISMIP7_MESH=checkpoint | IU workstation (Mac, 16 cores), load average about 6 | 2026-10-06 | 2026-10-06 | settings matched; first objective 1.367913e4 against 1.367913e4 recorded (relative gap 5.3e-16); the MAP inherits relax_state_sha256 f1abe93a and relaxed-forward-v1 |
 | 32 km re-inversion from the relaxation's end state, 3 iterations | done | antarctica_320000_32000_buffered0 (6,282 vertices, 9,055 cells), DG0 geometry, ISMIP7_MESH=checkpoint | IU workstation (Mac, 16 cores), load average about 6 | 2026-10-06 | 2026-10-06 | first attempt with five of the MAP's settings left at their defaults refused before iterating (strict handoff); with them repeated the settings matched. ln R over 4,929 grounded dofs in [-2.258, 2.374], mean \|ln R\| 0.0721, \|ln R\| > 0.1 on 19.68 %, > 0.3 on 5.44 %. First objective 1.403e4 (misfit 9,136) on the relaxed geometry against 1.711e4 (misfit 12,218) the MAP recorded; 1.368e4 after 3 iterations. The MAP records geometry_source_method relaxed-forward-v1 and the end state's name and sha256 |
-| 32 km relaxation year of the relaxed initial state, no forcing (scripts/relaxation/run.py) | done | antarctica_320000_32000_buffered0 (6,282 vertices, 9,055 cells), DG0 geometry, ISMIP7_MESH=checkpoint | IU workstation (Mac, 16 cores), load average about 6 | 2026-10-06 | 2026-10-06 | resid +0.00 on every step, exit 0; outflux 1,768 Gt/yr at the first step and 1,680 at the last; the end state records relaxation_end_state=1, t_yr 2015.0, stalled 0, the relax_* provenance and the MAP's objective settings, and no objective value; rerun on 793a04f under PR 160's FSSA default (theta 1, reference step since the apparent MB is off): resid +0.00 on every step, outflux 1,679 Gt/yr at the last step, exit 0 (relax_fssa.log) |
+| 32 km relaxation year of the relaxed initial state under PR 160's FSSA default, no forcing (scripts/relaxation/run.py) | done | antarctica_320000_32000_buffered0 (6,282 vertices, 9,055 cells), DG0 geometry, ISMIP7_MESH=checkpoint | IU workstation (Mac, 16 cores), load average about 6 | 2026-10-06 | 2026-10-06 | FSSA theta 1, reference step (the apparent MB is off); resid +0.00 on every step, exit 0; outflux 1,679 Gt/yr at the last step |
+| 32 km relaxation year of the relaxed initial state, no forcing (scripts/relaxation/run.py) | done | antarctica_320000_32000_buffered0 (6,282 vertices, 9,055 cells), DG0 geometry, ISMIP7_MESH=checkpoint | IU workstation (Mac, 16 cores), load average about 6 | 2026-10-06 | 2026-10-06 | resid +0.00 on every step, exit 0; outflux 1,768 Gt/yr at the first step and 1,680 at the last; the end state records relaxation_end_state=1, t_yr 2015.0, stalled 0, the relax_* provenance and the MAP's objective settings, and no objective value |
 | The p4 ssp585 at 32 km restarted at 2294.0 on the front-melt branch for five years, booking the melt of emptied marine cells as lifmassbf (issue 109) | done | antarctica_320000_32000, DG0 geometry | IU Quartz, debug partition | 2026-09-25 | 2026-09-25 | resid 0.0000 on all 50 rows, no rescue. Front melt (true area) 3,068, 632, 596, 604 and 716 Gt/yr from 2294 to 2298, with 910 to 1,162 Gt/yr of reference-fed melt left in libmassbffl on the same cells |
 | The p4 ssp585 at 32 km restarted at 2294.0 on main for five years, the control arm of the front-melt booking (issue 109) | done | antarctica_320000_32000, DG0 geometry | IU Quartz, debug partition | 2026-09-25 | 2026-09-25 | resid 0.0000 on all 50 rows, no rescue; dM/dt near -15,000 Gt/yr in 2294 and -10,500 in 2295, as the re-solved state thins |
 | The p4 ssp585 at 32 km restarted at 2294.0 on main after pull requests 127 and 130 for five years, following the frozen reference on emptied cells (issue 136) | done | antarctica_320000_32000, DG0 geometry | IU Quartz, debug partition | 2026-09-26 | 2026-09-26 | resid 0.0000 on all 50 rows, forward exit 0; dM/dt -20,540 Gt/yr at the first step, -20,224 at 2295.0 and -5,432 at 2299.0, as the re-solved state thins |
@@ -6497,7 +6498,7 @@ RC continued 150 iterations on Rice's mesh from its stage-1 MAP, curvature x1 (r
 - **Period (yr):** 2015 state
 - **Friction law:** budd
 - **Mesh:** antarctica_320000_32000_buffered0 (6,282 vertices, 9,055 cells), DG0 geometry, ISMIP7_MESH=checkpoint
-- **Initial state / MAP:** test-32km-relax-year-smoke's end state (sha256 f1abe93a): geometry, velocity_obs, mixed state and theta, phi taken; theta kept
+- **Initial state / MAP:** test-32km-relax-year-smoke's end state (sha256 f1abe93a), whose year ran with FSSA off, before the PR 160 default (code 8b5377f): geometry, velocity_obs, mixed state and theta, phi taken; theta kept
 - **Forcing versions:** MEaSUREs and BedMachine from /Volumes/LaCie/Data/antarctica_general/ismip7_obs, the Smith dH/dt cache of the MIPkit v1.2 copied from Quartz; ISMIP7_FLUIDITY_PRIOR=legacy; the MAP's objective: sigma misfit, log-velocity weight 0, bilaplacian sigma 0.3 rho 7.5 km, SEP1, exact front, mass-consistent metric (TAO), 10 m floor, vertex gate; ISMIP7_WARM_START_STRICT=1
 - **Site / partition:** IU workstation (Mac, 16 cores), load average about 6
 - **Ranks / memory:** 4 ranks
@@ -6508,6 +6509,29 @@ RC continued 150 iterations on Rice's mesh from its stage-1 MAP, curvature x1 (r
 - **Results path:** /Volumes/LaCie/Data/antarctica_general/ismip7_runs/relaxed_init_smoke/map_relax2014.h5 (sha256 476bbda8), /Volumes/LaCie/Data/antarctica_general/ismip7_runs/relaxed_init_smoke/reinvert.log
 - **Audit:** first attempt with five of the MAP's settings left at their defaults refused before iterating (strict handoff); with them repeated the settings matched. ln R over 4,929 grounded dofs in [-2.258, 2.374], mean \|ln R\| 0.0721, \|ln R\| > 0.1 on 19.68 %, > 0.3 on 5.44 %. First objective 1.403e4 (misfit 9,136) on the relaxed geometry against 1.711e4 (misfit 12,218) the MAP recorded; 1.368e4 after 3 iterations. The MAP records geometry_source_method relaxed-forward-v1 and the end state's name and sha256
 - **Notes:** Smoke only: the source MAP is a 10-iteration 32 km MAP, so the drop in misfit says nothing about production. Runner reinvert.sh
+
+### test-32km-relax-year-fssa-smoke
+
+32 km relaxation year of the relaxed initial state under PR 160's FSSA default, no forcing (scripts/relaxation/run.py) (done), IU.
+
+- **Task type:** test
+- **Period (yr):** 2014.0 to 2015.0, 80 steps, reached 2015.0
+- **Friction law:** budd
+- **Mesh:** antarctica_320000_32000_buffered0 (6,282 vertices, 9,055 cells), DG0 geometry, ISMIP7_MESH=checkpoint
+- **Initial state / MAP:** cold start from /Volumes/LaCie/Data/antarctica_general/ismip7_runs/pr158_merge/C_32km_scpc_gamg/map.h5 (sha256 feddedd9), the 32 km Budd SEP1 log-control MAP of 432c831, 1 yr of Smith dH/dt undone on 3,995 grounded cells (+45 Gt)
+- **Forcing versions:** none (ISMIP7_RELAX_FORCING=none); MEaSUREs and BedMachine from /Volumes/LaCie/Data/antarctica_general/ismip7_obs, the Smith dH/dt cache of the MIPkit v1.2 copied from Quartz; ISMIP7_FLUIDITY_PRIOR=legacy
+- **Calving front, collapse:** pinned (ISMIP7_FIXED_FRONT=1, ISMIP7_CALVING=none)
+- **Apparent MB:** off
+- **dt (yr):** 0.0125
+- **Site / partition:** IU workstation (Mac, 16 cores), load average about 6
+- **Ranks / memory:** 4 ranks
+- **Code:** 793a04f (PR 160's FSSA default merged into the relaxed initial state); icepack_tools e7b923e
+- **Started:** 2026-10-06
+- **Finished:** 2026-10-06
+- **Cost per model year:** under 2 min wall
+- **Results path:** /Volumes/LaCie/Data/antarctica_general/ismip7_runs/relaxed_init_smoke/relax_map_32000_final_fssa.h5 (sha256 931bde3a), /Volumes/LaCie/Data/antarctica_general/ismip7_runs/relaxed_init_smoke/relax_map_32000_timeseries_fssa.csv, /Volumes/LaCie/Data/antarctica_general/ismip7_runs/relaxed_init_smoke/relax_fssa.log
+- **Audit:** FSSA theta 1, reference step (the apparent MB is off); resid +0.00 on every step, exit 0; outflux 1,679 Gt/yr at the last step
+- **Notes:** Rerun of test-32km-relax-year-smoke under the FSSA default, with the same MAP, step and settings. It predates the relax_fssa_theta and relax_fssa_reference record keys, so its end state records the stabilization only as fssa_tau and fssa_reference, and describe_relaxation reports it as FSSA unrecorded. Archived under the _fssa names; relax_map_32000_final.h5 beside them is test-32km-relax-year-smoke's end state, unchanged
 
 ### test-32km-relax-year-smoke
 
@@ -6529,8 +6553,8 @@ RC continued 150 iterations on Rice's mesh from its stage-1 MAP, curvature x1 (r
 - **Finished:** 2026-10-06
 - **Cost per model year:** under 2 min wall
 - **Results path:** /Volumes/LaCie/Data/antarctica_general/ismip7_runs/relaxed_init_smoke/relax_map_32000_final.h5 (sha256 f1abe93a), /Volumes/LaCie/Data/antarctica_general/ismip7_runs/relaxed_init_smoke/relax_map_32000_timeseries.csv, /Volumes/LaCie/Data/antarctica_general/ismip7_runs/relaxed_init_smoke/relax.log
-- **Audit:** resid +0.00 on every step, exit 0; outflux 1,768 Gt/yr at the first step and 1,680 at the last; the end state records relaxation_end_state=1, t_yr 2015.0, stalled 0, the relax_* provenance and the MAP's objective settings, and no objective value; rerun on 793a04f under PR 160's FSSA default (theta 1, reference step since the apparent MB is off): resid +0.00 on every step, outflux 1,679 Gt/yr at the last step, exit 0 (relax_fssa.log)
-- **Notes:** Smoke of the relaxed initial state on its default step (half of ISMIP7_DT=0.025). Runner relax.sh with common.sh in the results directory
+- **Audit:** resid +0.00 on every step, exit 0; outflux 1,768 Gt/yr at the first step and 1,680 at the last; the end state records relaxation_end_state=1, t_yr 2015.0, stalled 0, the relax_* provenance and the MAP's objective settings, and no objective value
+- **Notes:** Smoke of the relaxed initial state on its default step (half of ISMIP7_DT=0.025). The year ran with FSSA off, before the PR 160 default (code 8b5377f); test-32km-relax-year-fssa-smoke reruns it under that default. Runner relax.sh with common.sh in the results directory
 
 ### test-32km-ssp585-front-melt-branch
 

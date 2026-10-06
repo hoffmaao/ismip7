@@ -20,6 +20,7 @@ Usage:
 """
 
 import numpy as np
+import gc
 import os, sys, glob, json
 from time import perf_counter
 
@@ -1988,7 +1989,36 @@ def main():
 
     _direct_fnorm = [float("nan")]
 
-    def _direct_solve(F_ctrl):
+    def _inversion_residual(theta_c, phi_c):
+        """build_F with what the inversion's solves need on top of it."""
+        F_c = build_F(theta_c, phi_c)
+        if inv_solver_mode.startswith("scpc_"):
+            # SCPC needs both off-diagonal blocks of the eliminated (M, tau)
+            # pair in the form; they are physically uncoupled, so UFL drops
+            # them and the condensation fails. A runtime Constant keeps the
+            # blocks while adding exactly zero (simulation.py does the same).
+            # It is in the taped residual too: the adjoint is built from it.
+            _, _M_s, _tau_s = split(z)
+            F_c = F_c + derivative(
+                _scpc_structural_zero * _M_s[0, 0] * _tau_s[0] * dx, z)
+        # The quadrature degree goes into the integrals themselves, so the
+        # Jacobian, its adjoint and every matrix-free action built from the
+        # residual carry it whoever assembles them. tlm_adjoint's matrix-free
+        # adjoint solve passes no form-compiler parameters: without this it
+        # integrates adjoint(J) at Firedrake's estimated degree, the transpose
+        # of a different Jacobian, and the condensed gradient failed the
+        # Taylor test (order 0.25 at 32 km) while its solve converged to 4e-10.
+        return with_quadrature_degree(F_c, fc_params["quadrature_degree"])
+
+    # The untaped direct solve runs on mirrors of the controls with ONE
+    # solver for the whole job. Built afresh every evaluation, each solver's
+    # condensed MUMPS factorization was freed by the garbage collector and
+    # its communicator recycled; under the distributed PT-Scotch analysis the
+    # next factorization then aborted with "Internal error 1 in
+    # MUMPS_LOAD_RECV_MSGS" (2 km, NOTS, 6 of 10 links within minutes).
+    _direct_state = {}
+
+    def _direct_solve(theta_ctrl, phi_ctrl):
         """One untaped Newton solve at the full exponents from the state z
         holds -- the last converged forward, at controls one line-search step
         away. Returns whether it converged; on failure z is back at its entry
@@ -2012,17 +2042,28 @@ def main():
         # NOTS 1692389: 50 iterations to ||F|| 5e33, 289 s).
         params["snes_divergence_tolerance"] = float(
             os.environ.get("ISMIP7_DIRECT_FORWARD_DTOL", "1e6"))
-        J_direct, pre_direct = None, None
-        if linearization_state(inv_solver_mode) == "frozen":
-            from icepack2_tools.preconditioners import frozen_linearization
-            J_direct, pre_direct = frozen_linearization(F_ctrl, z)
-        solver = NonlinearVariationalSolver(
-            NonlinearVariationalProblem(
-                F_ctrl, z, J=J_direct, form_compiler_parameters=fc_params),
-            solver_parameters=params,
-            options_prefix="ismip7_inversion_direct_",
-            pre_jacobian_callback=pre_direct,
-        )
+        if not _direct_state:
+            with paused_manager():
+                theta_m = Function(theta_ctrl.function_space(), name="theta_direct")
+                phi_m = Function(phi_ctrl.function_space(), name="phi_direct")
+                F_m = _inversion_residual(theta_m, phi_m)
+                J_direct, pre_direct = None, None
+                if linearization_state(inv_solver_mode) == "frozen":
+                    from icepack2_tools.preconditioners import frozen_linearization
+                    J_direct, pre_direct = frozen_linearization(F_m, z)
+                _direct_state.update(
+                    theta=theta_m, phi=phi_m, F=F_m,
+                    solver=NonlinearVariationalSolver(
+                        NonlinearVariationalProblem(
+                            F_m, z, J=J_direct, form_compiler_parameters=fc_params),
+                        solver_parameters=params,
+                        options_prefix="ismip7_inversion_direct_",
+                        pre_jacobian_callback=pre_direct,
+                    ))
+        _direct_state["theta"].dat.data[:] = theta_ctrl.dat.data_ro
+        _direct_state["phi"].dat.data[:] = phi_ctrl.dat.data_ro
+        solver = _direct_state["solver"]
+        F_ctrl = _direct_state["F"]
         t0 = perf_counter()
         with paused_manager():
             try:
@@ -2056,24 +2097,13 @@ def main():
 
     def forward(theta_ctrl, phi_ctrl):
         clear_caches()
-        F_ctrl = build_F(theta_ctrl, phi_ctrl)
-        if inv_solver_mode.startswith("scpc_"):
-            # SCPC needs both off-diagonal blocks of the eliminated (M, tau)
-            # pair in the form; they are physically uncoupled, so UFL drops
-            # them and the condensation fails. A runtime Constant keeps the
-            # blocks while adding exactly zero (simulation.py does the same).
-            # It is in the taped residual too: the adjoint is built from it.
-            _, _M_s, _tau_s = split(z)
-            F_ctrl = F_ctrl + derivative(
-                _scpc_structural_zero * _M_s[0, 0] * _tau_s[0] * dx, z)
-        # The quadrature degree goes into the integrals themselves, so the
-        # Jacobian, its adjoint and every matrix-free action built from F_ctrl
-        # carry it whoever assembles them. tlm_adjoint's matrix-free adjoint
-        # solve passes no form-compiler parameters: without this it integrates
-        # adjoint(J) at Firedrake's estimated degree, the transpose of a
-        # different Jacobian, and the condensed gradient failed the Taylor test
-        # (order 0.25 at 32 km) while its solve converged to 4e-10.
-        F_ctrl = with_quadrature_degree(F_ctrl, fc_params["quadrature_degree"])
+        # Free the previous gradient's solver objects (the adjoint's condensed
+        # factorization among them) here, at a point every rank reaches
+        # together, in one order on all ranks, rather than whenever each
+        # rank's garbage collector gets to them.
+        gc.collect()
+        PETSc.garbage_cleanup(mesh.comm)
+        F_ctrl = _inversion_residual(theta_ctrl, phi_ctrl)
         # The direct solve unless a timing lane asked for the single taped
         # solve by name: a warm start that loaded its mixed state also sets
         # skip_continuation, and it wants the direct path's rescue route.
@@ -2092,7 +2122,7 @@ def main():
                 form_compiler_parameters=fc_params,
             ).solve()
         elif direct_forward_enabled():
-            if not _direct_solve(F_ctrl):
+            if not _direct_solve(theta_ctrl, phi_ctrl):
                 # Straight to the caller's rescue (one untaped rung of the
                 # ladder at these controls, then this direct solve) or its
                 # backtrack. The taped 5-stage ladder restarts at n=1 with

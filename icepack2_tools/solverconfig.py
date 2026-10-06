@@ -163,6 +163,19 @@ MASS_RESIDUAL_TOL_GT_DEFAULT = "5e-5"
 CONTINUATION_STEPS_DEFAULT = "8"
 RESCUE_MAXIT_DEFAULT = "600"
 SUBCYCLES_DEFAULT = "1,4,16"
+# Adaptive substepping (icepack2_tools.substep): off by default. The
+# tolerance is metres of backward-Euler local error in the DG0 thickness.
+SUBSTEP_ADAPT_DEFAULT = "0"
+SUBSTEP_TOL_DEFAULT = "1.0"
+SUBSTEP_INIT_DEFAULT = "1"
+SUBSTEP_MAX_DEFAULT = "64"
+SUBSTEP_QUIET_DEFAULT = "20"
+SUBSTEP_HMIN_DEFAULT = "10"
+# Free-surface stabilization (icepack2_tools.fssa): theta, 0 = off, and the
+# velocity the surface change is measured from (fssa.REFERENCES). On by
+# default since 6 October 2026.
+FSSA_THETA_DEFAULT = "1"
+FSSA_REFERENCE_DEFAULT = "auto"
 RESCUE_ENABLED_DEFAULT = "1"
 
 
@@ -544,6 +557,58 @@ def subcycles():
     return values
 
 
+def substep_settings():
+    r"""Adaptive substepping of each macro step (``ISMIP7_SUBSTEP_ADAPT``), or
+    None when off. With it on, the fixed ``ISMIP7_SUBCYCLES`` retry list is
+    replaced by a substep count chosen from the thickness error estimate:
+    ``ISMIP7_SUBSTEP_TOL`` (m), starting at ``ISMIP7_SUBSTEP_INIT`` substeps,
+    at most ``ISMIP7_SUBSTEP_MAX``, halving after ``ISMIP7_SUBSTEP_QUIET``
+    quiet macro steps, over cells at least ``ISMIP7_SUBSTEP_HMIN`` m thick."""
+    if not _enabled("ISMIP7_SUBSTEP_ADAPT", SUBSTEP_ADAPT_DEFAULT):
+        return None
+    return {
+        "tol": float(_env("ISMIP7_SUBSTEP_TOL", SUBSTEP_TOL_DEFAULT)),
+        "m_init": int(_env("ISMIP7_SUBSTEP_INIT", SUBSTEP_INIT_DEFAULT)),
+        "m_max": int(_env("ISMIP7_SUBSTEP_MAX", SUBSTEP_MAX_DEFAULT)),
+        "quiet_steps": int(_env("ISMIP7_SUBSTEP_QUIET", SUBSTEP_QUIET_DEFAULT)),
+        "hmin": float(_env("ISMIP7_SUBSTEP_HMIN", SUBSTEP_HMIN_DEFAULT)),
+    }
+
+
+def fssa_theta():
+    r"""``ISMIP7_FSSA_THETA``: weight of the free-surface stabilization of
+    the forward's lagged thickness-velocity coupling (icepack2_tools.fssa);
+    1 (the default) makes the lagged step stable at any size, 0 leaves the
+    term out of the momentum balance."""
+    value = float(_env("ISMIP7_FSSA_THETA", FSSA_THETA_DEFAULT))
+    if value < 0:
+        raise ValueError("ISMIP7_FSSA_THETA must be nonnegative")
+    return value
+
+
+def forward_fssa_theta(restart_metadata=None):
+    r"""The stabilization weight a forward steps with: :func:`fssa_theta`,
+    except on a restart from a checkpoint stepped without the stabilization
+    (``restart_metadata`` with no ``fssa_tau`` record), which keeps it off
+    unless ``ISMIP7_FSSA_THETA`` is set, so a chain keeps the momentum balance
+    it began with. A prepared timing or map-check state (one that records a
+    ``timing_cache_role``) was never stepped and starts like a cold start."""
+    if (restart_metadata is not None
+            and restart_metadata.get("timing_cache_role") is None
+            and restart_metadata.get("fssa_tau") is None
+            and "ISMIP7_FSSA_THETA" not in os.environ):
+        return 0.0
+    return fssa_theta()
+
+
+def fssa_reference():
+    r"""``ISMIP7_FSSA_REFERENCE``: the velocity the stabilization measures the
+    surface change from, ``auto`` (the default), ``start`` or ``step``
+    (icepack2_tools.fssa.resolve_reference, which also checks the value)."""
+    return (_env("ISMIP7_FSSA_REFERENCE", FSSA_REFERENCE_DEFAULT)
+            or FSSA_REFERENCE_DEFAULT).strip().lower()
+
+
 def snes_atol_scale():
     return float(_env("ISMIP7_SNES_ATOL_SCALE", SNES_ATOL_SCALE_DEFAULT))
 
@@ -674,6 +739,14 @@ def effective_solver_env():
         "ISMIP7_RESCUE_MAXIT": RESCUE_MAXIT_DEFAULT,
         "ISMIP7_RESCUE_ENABLED": RESCUE_ENABLED_DEFAULT,
         "ISMIP7_SUBCYCLES": SUBCYCLES_DEFAULT,
+        "ISMIP7_SUBSTEP_ADAPT": SUBSTEP_ADAPT_DEFAULT,
+        "ISMIP7_SUBSTEP_TOL": SUBSTEP_TOL_DEFAULT,
+        "ISMIP7_SUBSTEP_INIT": SUBSTEP_INIT_DEFAULT,
+        "ISMIP7_SUBSTEP_MAX": SUBSTEP_MAX_DEFAULT,
+        "ISMIP7_SUBSTEP_QUIET": SUBSTEP_QUIET_DEFAULT,
+        "ISMIP7_SUBSTEP_HMIN": SUBSTEP_HMIN_DEFAULT,
+        "ISMIP7_FSSA_THETA": FSSA_THETA_DEFAULT,
+        "ISMIP7_FSSA_REFERENCE": FSSA_REFERENCE_DEFAULT,
     }
 
 
@@ -699,6 +772,9 @@ def solver_provenance(mode=None):
         "rescue_max_it": rescue_max_it(),
         "rescue_enabled": rescue_enabled(),
         "subcycles": list(subcycles()),
+        "substep_adapt": substep_settings(),
+        "fssa_theta": fssa_theta(),
+        "fssa_reference": fssa_reference(),
         "snes_atol_policy": {
             "initial": float(_env("ISMIP7_SNES_ATOL", SNES_ATOL_DEFAULT)),
             "post_convergence_scale": snes_atol_scale(),

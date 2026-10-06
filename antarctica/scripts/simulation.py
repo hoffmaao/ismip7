@@ -59,6 +59,7 @@ RESULTS_DIR = os.path.join(_ROOT, "results")
 sys.path.insert(0, os.path.dirname(_ROOT))
 from mesh_naming import mesh_filename, mesh_stem
 
+from icepack2_tools.staging import node_local_copy, staged_write
 from icepack2_tools.transfer import interpolate_with_fill, meshes_match
 from icepack2_tools.mpi_stats import (
     global_count,
@@ -68,10 +69,17 @@ from icepack2_tools.mpi_stats import (
     global_size,
 )
 from icepack2_tools.boundary import load_boundary_ids
+from icepack2_tools.fssa import (
+    fssa_banner,
+    resolve_reference as resolve_fssa_reference,
+    restart_reference_error as fssa_restart_reference_error,
+    restart_step as fssa_restart_step,
+)
 from icepack2_tools.geometry import raise_bed_to_lake_ice_base, sample_to_geometry
 from icepack2_tools.naming import map_basename
 from icepack2_tools.handoff import check_subelement_record
 from icepack2_tools.front import (
+    held_calved,
     clamp_thickness, clear_reference_where_ice_free, retreat_slivers,
     front_removal_mask, unforced_cells, applied_forcing,
     facet_neighbours, front_connected, ocean_drag_cells,
@@ -119,6 +127,10 @@ from icepack2_tools.solverconfig import (
     snes_restart_failure_atol_scale,
     solver_view_enabled,
     subcycles,
+    substep_settings,
+    fssa_theta,
+    forward_fssa_theta,
+    fssa_reference,
     transport_solver_parameters,
 )
 
@@ -349,7 +361,13 @@ def setup_model(restart_from=None, *, allow_timing_cache_a_ref=False,
     # calving BC is preserved.
     source_chk = restart_from if is_restart else inv_fn
     PETSc.Sys.Print(f"Loading mesh + reference state: {source_chk}")
-    with fd.CheckpointFile(source_chk, "r") as _chk:
+    # Read from a node-local copy (icepack2_tools.staging): over NFS through
+    # ROMIO a 2 km MAP took 45+ min to load on NOTS. source_chk stays the
+    # path every message and provenance record names.
+    source_read = node_local_copy(source_chk)
+    if source_read != source_chk:
+        PETSc.Sys.Print(f"  (read from the node-local copy {source_read})")
+    with fd.CheckpointFile(source_read, "r") as _chk:
         source_mesh = _chk.load_mesh()
         # A cold start normally binds itself to a MAP of the right
         # configuration through map_basename, which encodes friction, n and
@@ -403,6 +421,11 @@ def setup_model(restart_from=None, *, allow_timing_cache_a_ref=False,
             # Residual of the saved mixed state under its writer's F; the
             # restart fast path trusts the state only within a factor of it.
             "full_state_residual",
+            # The stabilization step that residual was measured at
+            # (icepack2_tools.fssa), restored before the fast-path check,
+            # and the reference it was measured from.
+            "fssa_tau",
+            "fssa_reference",
             # The friction anchor theta is a deviation from, and the geometry
             # it was inverted on (dual_friction.weertman_anchor,
             # geometry.raise_bed_to_lake_ice_base): a forward follows the MAP.
@@ -688,9 +711,13 @@ def setup_model(restart_from=None, *, allow_timing_cache_a_ref=False,
     H_init = None
     phi_eff = None
     u_guess = None
+    map_state_name = None   # the MAP's mixed state seeding a cold start
     M_guess = None
     tau_guess = None
     a_ref_mb = None
+    u_ref_fssa_ckpt = None
+    fssa_tendency_ckpt = None
+    calved_cells_ckpt = None
     phys_div = None
     h_dg_state = None
     t_restart = None
@@ -734,7 +761,7 @@ def setup_model(restart_from=None, *, allow_timing_cache_a_ref=False,
         }
         return target_field
 
-    with fd.CheckpointFile(source_chk, "r") as chk:
+    with fd.CheckpointFile(source_read, "r") as chk:
         theta_f = load_checkpoint_field(chk, "log_friction", Q)
         theta_f.rename("theta")
         phi_f = load_checkpoint_field(chk, "log_fluidity", Q)
@@ -803,6 +830,15 @@ def setup_model(restart_from=None, *, allow_timing_cache_a_ref=False,
             # correction, never recompute it from the evolved state.
             a_ref_mb = load_checkpoint_field(
                 chk, "a_ref_mb", Q_dg, optional=True
+            )
+            u_ref_fssa_ckpt = load_checkpoint_field(
+                chk, "u_ref_fssa", V, optional=True
+            )
+            fssa_tendency_ckpt = load_checkpoint_field(
+                chk, "fssa_tendency", Q_dg, optional=True
+            )
+            calved_cells_ckpt = load_checkpoint_field(
+                chk, "calved_cells", Q_dg, optional=True
             )
             # An adapted checkpoint carries the transferred PHYSICAL divergence
             # instead of a_ref (icepack2_tools.adapt_mesh); a_ref is rebuilt
@@ -936,6 +972,18 @@ def setup_model(restart_from=None, *, allow_timing_cache_a_ref=False,
                 s = load_checkpoint_field(chk, "surface", Q_g)
                 geometry_source = os.path.realpath(source_chk)
                 geometry_source_method = "checkpoint-native-v1"
+                # The mixed state the MAP was accepted at (a final MAP's
+                # velocity/membrane_stress/basal_stress, a periodic
+                # checkpoint's ckpt_* copies) seeds the cold-start solve
+                # below in place of 0.1 u_obs.
+                for _pre in ("", "ckpt_"):
+                    _u = load_checkpoint_field(chk, f"{_pre}velocity", V, optional=True)
+                    _M = load_checkpoint_field(chk, f"{_pre}membrane_stress", Sigma, optional=True)
+                    _tau = load_checkpoint_field(chk, f"{_pre}basal_stress", T, optional=True)
+                    if _u is not None and _M is not None and _tau is not None:
+                        u_guess, M_guess, tau_guess = _u, _M, _tau
+                        map_state_name = f"{_pre}velocity"
+                        break
             _uo = load_checkpoint_field(
                 chk, "velocity_obs", V,
                 fill=u_obs, fill_label="the raster-sampled velocity_obs",
@@ -974,6 +1022,9 @@ def setup_model(restart_from=None, *, allow_timing_cache_a_ref=False,
             d = fld.dat.data
             n_clip += int((np.abs(d) > map_clip).sum())
             np.clip(d, -map_clip, map_clip, out=d)
+        # every rank's count: printed by rank 0, its own share alone was
+        # zero whenever the clipped nodes lay in another rank's partition
+        n_clip = mesh.comm.allreduce(n_clip)
         if n_clip:
             PETSc.Sys.Print(
                 f"  MAP clip: bounded {n_clip} theta/phi node(s) to "
@@ -1295,6 +1346,7 @@ def setup_model(restart_from=None, *, allow_timing_cache_a_ref=False,
 
     z = Function(Z)
     z.sub(0).interpolate(Constant(0.1) * u_obs)
+    z_cold_seed = z.copy(deepcopy=True)
     if u_guess is not None:
         # Warm start: seed the diagnostic solve with the checkpoint velocity
         # (H/s/phi_eff/anchors were already restored in the reference block).
@@ -1332,6 +1384,47 @@ def setup_model(restart_from=None, *, allow_timing_cache_a_ref=False,
     fields_reg = dict(fields)
     fields_reg["thickness"] = H_ref
 
+    # Free-surface stabilization (icepack2_tools.fssa, ISMIP7_FSSA_THETA):
+    # the term's step is a Constant the forward sets per substep and keeps at
+    # zero for every steady solve, so the MAP state is reproduced unchanged.
+    # A restart resumes at the step its checkpoint was solved at, so the
+    # fast path accepts the stabilized state. Off, the term is left out of
+    # the residual altogether.
+    fssa_theta_val = forward_fssa_theta(
+        checkpoint_metadata if restart_from is not None else None)
+    if restart_from is not None and fssa_theta_val == 0.0 and fssa_theta() > 0.0:
+        PETSc.Sys.Print(
+            "  Free-surface stabilization off: the restart checkpoint was stepped "
+            "without it (set ISMIP7_FSSA_THETA to change that)")
+    fssa_tau = Constant(0.0)
+    if restart_from is not None and fssa_theta_val > 0:
+        fssa_tau.assign(fssa_restart_step(
+            checkpoint_metadata, u_ref_fssa_ckpt is not None))
+    u_ref_fssa = Function(V, name="u_ref_fssa")
+    u_ref_fssa_loaded = False
+    if restart_from is not None and u_ref_fssa_ckpt is not None:
+        u_ref_fssa.assign(u_ref_fssa_ckpt)
+        u_ref_fssa_loaded = True
+    # The reference the surface change is measured from
+    # (ISMIP7_FSSA_REFERENCE): `start` keeps u_ref fixed, `step` moves it to
+    # the velocity of every advance and adds that advance's tendency as a
+    # load. `auto` follows the apparent mass balance, which a restart
+    # carries, so it resolves the same way on every link of a chain.
+    fssa_ref_mode = None
+    fssa_tendency = None
+    if fssa_theta_val > 0:
+        fssa_ref_mode = resolve_fssa_reference(
+            fssa_reference(), apparent_mb_mode() is not None)
+        if restart_from is not None:
+            _ref_err = fssa_restart_reference_error(
+                checkpoint_metadata, fssa_ref_mode, restart_from)
+            if _ref_err:
+                raise ValueError(_ref_err)
+        if fssa_ref_mode == "step":
+            fssa_tendency = Function(Q_dg, name="fssa_tendency")
+            if restart_from is not None and fssa_tendency_ckpt is not None:
+                fssa_tendency.assign(fssa_tendency_ckpt)
+
     if use_residual:
         # Residual closure on the LIVE prognostic fields (h, s): the grounded
         # gate, effective pressure, and driving stress all track the evolving
@@ -1366,6 +1459,9 @@ def setup_model(restart_from=None, *, allow_timing_cache_a_ref=False,
                 ocean_drag=ocean_drag, h_ocean=h_ocean, u_lim=u_lim,
                 k_lim=k_lim, drag_mask=drag_mask,
                 calving_ids=calving_ids if use_calving_terminus else None,
+                fssa_tau=fssa_tau if fssa_theta_val > 0 else None,
+                u_ref=u_ref_fssa if fssa_theta_val > 0 else None,
+                fssa_tendency=fssa_tendency,
             )
 
         # The closure above is the single definition of this residual: the
@@ -1402,6 +1498,9 @@ def setup_model(restart_from=None, *, allow_timing_cache_a_ref=False,
                     h_ocean=h_ocean, drag_mask=drag_mask, u_lim=u_lim, k_lim=k_lim,
                     calving_ids=calving_ids if use_calving_terminus else None,
                     exact_front=bool(map_exact_front),
+                    fssa_tau=fssa_tau if fssa_theta_val > 0 else None,
+                    u_ref=u_ref_fssa if fssa_theta_val > 0 else None,
+                    fssa_tendency=fssa_tendency,
                 )
         else:
             subelement = None
@@ -1655,6 +1754,42 @@ def setup_model(restart_from=None, *, allow_timing_cache_a_ref=False,
                     f"(atol={restart_atol:.2e})"
                 )
 
+    # Cold start from a MAP carrying its accepted mixed state: one bounded
+    # Newton solve at the full exponents from that state, the restart rule
+    # above. The n=1 first step of the continuation from 0.1 u_obs ran more
+    # than 40 min on the 2 km SEP1 MAP under scpc_gamg (NOTS 1743893, a
+    # one-hour link); from the MAP's own state the solve is a perturbation,
+    # by the backdated geometry at most. A failed solve restores 0.1 u_obs
+    # and runs the continuation as before.
+    if not is_restart and map_state_name is not None:
+        n_flow.assign(n_flow_val)
+        m_slide.assign(m_slide_val)
+        _rtol0, _atol0, _stol0, _max_it0 = slvr.snes.getTolerances()
+        _bounds = final_solve_bounds()
+        slvr.snes.setTolerances(stol=_bounds["snes_stol"],
+                                max_it=_bounds["snes_max_it"])
+        try:
+            solve_diagnostic("cold-start-from-map-state", state=map_state_name)
+            restart_solved = True
+            fnorm_conv = slvr.snes.getFunctionNorm()
+            run_atol = (
+                snes_atol_scale() * fnorm_conv if fnorm_conv > 0.0 else _atol0
+            )
+            slvr.snes.setTolerances(atol=run_atol, stol=_stol0, max_it=_max_it0)
+            PETSc.Sys.Print(
+                f"Initial diagnostic solve: from the MAP's {map_state_name} "
+                f"state at the full exponents (||F|| -> {fnorm_conv:.2e}; "
+                f"run atol={run_atol:.2e}), no continuation"
+            )
+        except fd.ConvergenceError:
+            slvr.snes.setTolerances(atol=_atol0, stol=_stol0, max_it=_max_it0)
+            z.assign(z_cold_seed)
+            z_init.assign(z_cold_seed)
+            PETSc.Sys.Print(
+                f"Initial diagnostic solve from the MAP's {map_state_name} state "
+                "did not converge; continuation from 0.1 u_obs instead"
+            )
+
     if not restart_solved:
         PETSc.Sys.Print(
             f"Initial diagnostic solve (continuation n_flow 1→{n_flow_val:.1f}, "
@@ -1823,6 +1958,19 @@ def setup_model(restart_from=None, *, allow_timing_cache_a_ref=False,
         "smb_elevation_feedback": smb_feedback,
         # Frozen t=0 apparent-MB correction (restart only; else None).
         "a_ref_mb": a_ref_mb,
+        # Free-surface stabilization: its theta, the step Constant the forward
+        # sets, the reference velocity (under `start` the one a_ref was built
+        # from, under `step` the last advance's) and whether the checkpoint
+        # carried it, the resolved reference, and under `step` the tendency
+        # of the last advance (else None).
+        "fssa_theta": fssa_theta_val,
+        "fssa_tau": fssa_tau,
+        "u_ref_fssa": u_ref_fssa,
+        "u_ref_fssa_set": u_ref_fssa_loaded,
+        "fssa_reference": fssa_ref_mode,
+        "fssa_tendency": fssa_tendency,
+        # Cells a retreat-only front has emptied (restart only; else None).
+        "calved_cells": calved_cells_ckpt,
         "phys_div": phys_div,
         # DG0 prognostic thickness state (restart only; else None).
         "h_dg_state": h_dg_state,
@@ -1890,7 +2038,7 @@ def save_model_state(ctx, final_path, t_now, extra_attrs=None):
             ctx["F"], form_compiler_parameters=ctx.get("fc_params")
         ).dat.vec_ro as _rv:
             full_state_residual = float(_rv.norm())
-    tmp = final_path + ".tmp"
+    tmp, commit = staged_write(final_path, mesh.comm)
     with fd.CheckpointFile(tmp, "w") as chk:
         chk.save_mesh(mesh)
         chk.save_function(ctx["theta"], name="log_friction")
@@ -1916,6 +2064,12 @@ def save_model_state(ctx, final_path, t_now, extra_attrs=None):
             chk.save_function(ctx["A_prior"], name="fluidity_prior")
         if ctx.get("a_ref_mb") is not None:
             chk.save_function(ctx["a_ref_mb"], name="a_ref_mb")
+        if ctx.get("u_ref_fssa_set"):
+            chk.save_function(ctx["u_ref_fssa"], name="u_ref_fssa")
+        if ctx.get("fssa_tendency") is not None:
+            chk.save_function(ctx["fssa_tendency"], name="fssa_tendency")
+        if ctx.get("calved_mask") is not None:
+            chk.save_function(ctx["calved_mask"], name="calved_cells")
         if ctx.get("level_set") is not None:
             chk.save_function(ctx["level_set"].phi, name="levelset")
         if not ctx.get("geom_dg", False):
@@ -1977,14 +2131,14 @@ def save_model_state(ctx, final_path, t_now, extra_attrs=None):
                 chk.set_attr("/", name, _map_meta[name])
         if full_state_residual is not None:
             chk.set_attr("/", "full_state_residual", full_state_residual)
+        if ctx.get("fssa_theta", 0.0) > 0:
+            chk.set_attr("/", "fssa_tau", float(ctx["fssa_tau"]))
+            chk.set_attr("/", "fssa_reference", ctx["fssa_reference"])
         for name, value in (extra_attrs or {}).items():
             if value is not None:
                 chk.set_attr("/", name, value)
 
-    mesh.comm.barrier()
-    if mesh.comm.rank == 0:
-        os.replace(tmp, final_path)
-    mesh.comm.barrier()
+    commit()
 
 
 def _global_argmax_with_payload(values, xy, payload, comm):
@@ -2222,6 +2376,20 @@ def run_simulation(
             "ISMIP7_FRONT_ADVANCE=none needs a level-set law (ISMIP7_CALVING); "
             "without one ISMIP7_FIXED_FRONT already holds the front")
     ctx["front_advance"] = front_advance
+    # Under a retreat-only front a cell the law has emptied stays ice-free
+    # for the rest of the run (front.held_calved: the refill-and-calve
+    # flicker). The mask travels in the checkpoints as a DG0 indicator.
+    calved_fn = Function(Q_dg, name="calved_cells")
+    if ctx.get("calved_cells") is not None:
+        calved_fn.dat.data[:] = ctx["calved_cells"].dat.data_ro
+    calved = calved_fn.dat.data_ro > 0.5
+    ctx["calved_mask"] = calved_fn if retreat_only else None
+    # the count is collective, so every rank takes it before the branch
+    n_held = global_count(calved, mesh.comm) if retreat_only else 0
+    if n_held:
+        PETSc.Sys.Print(
+            f"  Retreat-only front: {n_held} cells held "
+            "calved from the checkpoint")
     # A free law moves the front, so the frozen a_ref must follow the live
     # extent; `fixed` and the legacy flag pin it on purpose and keep the
     # t=0-only mask.
@@ -2375,6 +2543,9 @@ def run_simulation(
                 + un0p * h_dg * phi_dg * ds
             )
             a_ref.dat.data[:] = flux0.dat.data_ro / cell_area
+            # the velocity this reference cancels: the stabilization's own
+            ctx["u_ref_fssa"].assign(u0)
+            ctx["u_ref_fssa_set"] = True
             if ctx.get("phys_div") is not None:
                 # Remesh: cancel this mesh's discrete divergence net of the
                 # physical divergence the run carried over (adapt_mesh.py).
@@ -2904,8 +3075,10 @@ def run_simulation(
                 calving_rate = calving_law_obj.rate(front_state, t_yr)
             last_c_mean = level_set.advance(dt_local, u_vel, rate=calving_rate)
             lsb, calv_frac = level_set.calving_masks()
-            beyond = front_removal_mask(lsb, beyond_front, retreat_only)
+            beyond = front_removal_mask(lsb, beyond_front, retreat_only, calved)
             ls_ice_free = level_set.beyond_front()
+            if retreat_only:
+                ls_ice_free = ls_ice_free | calved
             if a_ref is not None and free_front:
                 clear_reference_where_ice_free(a_ref.dat.data, ls_ice_free)
 
@@ -2967,6 +3140,15 @@ def run_simulation(
             }
             raise
 
+        if fssa_tendency is not None:
+            # The advance's own tendency, before the floor and the front
+            # rules: the implicit upwind update makes it source minus the
+            # flux divergence of the new thickness under u_vel, which the
+            # next solve measures its surface change from (fssa, `step`).
+            fssa_tendency.dat.data[:] = (
+                h_dg.dat.data_ro - h_dg_old.dat.data_ro) / dt_local
+        if trace_on:
+            _h_tr = {i: float(h_dg.dat.data_ro[i]) for _, i in trace_cells}
         out_gt = float(assemble(
             un_transport_plus * h_dg * ds
         )) * rho_gt * dt_local
@@ -3103,6 +3285,25 @@ def run_simulation(
             if annual is not None:
                 annual.book_removal(sliver, data[sliver])
             data[sliver] = 0.0
+            if retreat_only:
+                calved[:] = held_calved(calved, h_dg_old.dat.data_ro, data,
+                                        front_hmin, sliver=sliver,
+                                        beyond=beyond, calv_frac=calv_frac)
+                calved_fn.dat.data[:] = calved
+        if trace_on:
+            _dm = ctx.get("drag_mask")
+            _cc = level_set.c_cell.dat.data_ro if level_set is not None else None
+            for _lab, _i in trace_cells:
+                _ho, _hn = float(h_dg_old.dat.data_ro[_i]), float(h_dg.dat.data_ro[_i])
+                PETSc.Sys.syncPrint(
+                    f"  trace {label} {_lab}: h {_ho:7.1f} -> {_hn:7.1f} m  src {float(src_dg.dat.data_ro[_i]):+8.1f}"
+                    f"  D {float(src_dg.dat.data_ro[_i]) - (_h_tr[_i] - _ho) / dt_local:+8.1f} m/yr"
+                    f"  beyond {int(beyond[_i]) if beyond is not None else '-'}"
+                    f"  frac {float(calv_frac[_i]) if calv_frac is not None else 0.0:.3f}"
+                    f"  c {float(_cc[_i]) if _cc is not None else 0.0:7.0f}"
+                    f"  drag {float(_dm.dat.data_ro[_i]) if _dm is not None else 0.0:.0f}"
+                    f"  calved {int(calved[_i])}", comm=mesh.comm)
+            PETSc.Sys.syncFlush(comm=mesh.comm)
 
         _lift_h()
         # The ocean-drag gate follows the ice: without a level set (which
@@ -3138,6 +3339,65 @@ def run_simulation(
     # Newton track the branch through the event). Checkpoints improve too:
     # saved (h, u) are now mutually consistent.
     SUBCYCLES = subcycles()
+    # ISMIP7_SUBSTEP_TRACE="x,y;x,y" (km): after every transport advance,
+    # print the thickness, applied source, flux divergence, front flags and
+    # calving rate of the cells within 2.3 km of each point, one line per
+    # cell, so a step-size rejection at a front can be read cell by cell.
+    trace_cells = []
+    _trace = os.environ.get("ISMIP7_SUBSTEP_TRACE", "").strip()
+    if _trace:
+        _txy = np.asarray(h_diag_xy.dat.data_ro)
+        for _tok in _trace.split(";"):
+            _px, _py = (1e3 * float(_v) for _v in _tok.split(","))
+            _r = np.hypot(_txy[:, 0] - _px, _txy[:, 1] - _py)
+            for _i in np.flatnonzero(_r <= 2.3e3):
+                trace_cells.append((f"({_px / 1e3:.0f},{_py / 1e3:.0f})+{_r[_i] / 1e3:.1f}km", int(_i)))
+        PETSc.Sys.Print(f"  Substep trace: {global_count(np.ones(len(trace_cells), bool), mesh.comm)} cells near {_trace}")
+    # the flush below is collective: every rank takes the branch, with or
+    # without cells of its own to print
+    trace_on = bool(mesh.comm.allreduce(len(trace_cells)))
+    fssa_theta_val = ctx["fssa_theta"]
+    fssa_tau = ctx["fssa_tau"]
+    # Under `step` the last advance's velocity and tendency; None otherwise.
+    fssa_tendency = ctx["fssa_tendency"]
+    u_ref_fssa_entry = None
+    fssa_tendency_entry = None
+    if fssa_theta_val > 0:
+        if fssa_tendency is not None:
+            if not ctx["u_ref_fssa_set"]:
+                # a cold start has no last advance: measured from the starting
+                # velocity with a zero tendency, so a stalled first step
+                # rewinds to a state where the term vanishes
+                ctx["u_ref_fssa"].assign(z.subfunctions[0])
+                ctx["u_ref_fssa_set"] = True
+            u_ref_fssa_entry = ctx["u_ref_fssa"].copy(deepcopy=True)
+            fssa_tendency_entry = fssa_tendency.copy(deepcopy=True)
+            PETSc.Sys.Print(
+                "  Free-surface stabilization: measured from the velocity of "
+                "the last advance, with that advance's tendency as a load "
+                "(ISMIP7_FSSA_REFERENCE=step)")
+        elif not ctx["u_ref_fssa_set"]:
+            # no balanced reference to anchor on: the state at the start of
+            # this run is the reference, and the term vanishes there
+            ctx["u_ref_fssa"].assign(z.subfunctions[0])
+            ctx["u_ref_fssa_set"] = True
+            PETSc.Sys.Print("  Free-surface stabilization: reference velocity = the starting state")
+    PETSc.Sys.Print(f"  {fssa_banner(fssa_theta_val)}")
+    # Adaptive substepping replaces the fixed retry list when it is on: the
+    # count follows the thickness error estimate instead of waiting for a
+    # failed solve, because the lagged-velocity instability grows through
+    # steps whose solves all converge (icepack2_tools/substep.py).
+    _substep = substep_settings()
+    adapt = None
+    if _substep is not None:
+        from icepack2_tools.substep import SubstepController
+        adapt = SubstepController(comm=mesh.comm, **_substep)
+        PETSc.Sys.Print(
+            f"  Adaptive substeps: tol {adapt.tol:g} m on the thickness "
+            f"error estimate, {adapt.m}..{adapt.m_max} substeps of dt={dt:g} yr, "
+            f"halving after {adapt.quiet_steps} quiet steps, cells >= "
+            f"{adapt.hmin:g} m"
+        )
 
     # Timing drivers use this marker rather than timing setup_model or the
     # transport-operator construction above.  It is also available after an
@@ -3199,11 +3459,20 @@ def run_simulation(
         # cell without its balancing reference.
         if a_ref_entry is not None:
             a_ref_entry.assign(a_ref)
+        if fssa_tendency is not None:
+            # the reference the entry state was solved against, for a stall
+            # to checkpoint with it
+            u_ref_fssa_entry.assign(ctx["u_ref_fssa"])
+            fssa_tendency_entry.assign(fssa_tendency)
+        calved_entry = calved.copy()
         tallies = None
-        for m in SUBCYCLES:
+        retries = iter(SUBCYCLES[1:])
+        m = SUBCYCLES[0] if adapt is None else adapt.m
+        attempt = 0
+        while m is not None:
             if annual is not None:
                 annual.begin_step()          # a rewound attempt must not double-count
-            if m > 1:
+            if attempt > 0:
                 PETSc.Sys.Print(
                     f"  Step {k}: subcycling x{m} (dt={dt / m:.4g})..."
                 )
@@ -3212,14 +3481,21 @@ def run_simulation(
                 z.assign(z_entry)
                 if a_ref_entry is not None:
                     a_ref.assign(a_ref_entry)
+                calved[:] = calved_entry
+                calved_fn.dat.data[:] = calved
                 if level_set is not None:
                     level_set.phi.assign(phi_entry)
                     level_set.update_cell_fields()
+            if adapt is not None:
+                adapt.begin_attempt()
             acc = {"out_gt": 0.0, "calv_gt": 0.0, "clamp_gt": 0.0,
                    "limit_gt": 0.0, "amb_gt": 0.0,
                    "smb_gt": 0.0, "melt_gt": 0.0}
             ok = True
+            reject_err = None
             for _j in range(m):
+                h_before = (np.array(h_dg.dat.data_ro)
+                            if adapt is not None else None)
                 sub = _advance(
                     dt / m, f"step-{k}-substep-{_j + 1}/{m}"
                 )
@@ -3228,22 +3504,61 @@ def run_simulation(
                 # A state where the tallies are sums, so the last advance of
                 # the accepted attempt stands for the step.
                 collapse_cells = sub["collapse_cells"]
+                if adapt is not None:
+                    err = adapt.observe(h_before, h_dg.dat.data_ro, dt / m,
+                                        h_diag_xy.dat.data_ro)
+                    at = ("" if adapt.err_xy is None else " at (" + ", ".join(
+                        f"{c / 1e3:.0f}" for c in adapt.err_xy) + ") km")
+                    if adapt.exceeds(err):
+                        PETSc.Sys.Print(
+                            f"  Step {k}: substep {_j + 1}/{m} thickness error "
+                            f"{err:.3g} m{at} > {adapt.tol:g} m, rejecting the step"
+                        )
+                        ok = False
+                        reject_err = err
+                        break
+                    if err > adapt.tol:
+                        PETSc.Sys.Print(
+                            f"  Step {k}: substep {_j + 1}/{m} thickness error "
+                            f"{err:.3g} m{at} not reduced by refining "
+                            f"(rejected at {adapt.tolerated_against:.3g} m), accepting"
+                        )
+                if fssa_theta_val > 0:
+                    # the velocity solved now advances the next substep
+                    fssa_tau.assign(fssa_theta_val * dt / m)
+                    if fssa_tendency is not None:
+                        # measured from the velocity the advance just used
+                        ctx["u_ref_fssa"].assign(z.subfunctions[0])
+                        ctx["u_ref_fssa_set"] = True
                 if not _solve_with_rescue(k):
                     ok = False
                     break
             if ok:
-                if m > 1:
+                if m > 1 and adapt is None:
                     PETSc.Sys.Print(f"  Step {k}: completed via x{m} subcycle")
                 tallies = acc
                 if annual is not None:
                     annual.commit_step()
                 break
+            attempt += 1
+            m = next(retries, None) if adapt is None else adapt.refine(reject_err)
+        if adapt is not None and tallies is not None:
+            m_used = adapt.m
+            if adapt.accept():
+                PETSc.Sys.Print(
+                    f"  Step {k}: {adapt.quiet_steps} quiet steps, substeps "
+                    f"{m_used} -> {adapt.m}"
+                )
         if tallies is None:
             ctx["failure"] = {
                 "category": "diagnostic_convergence",
                 "phase": f"step-{k}-rescue-exhausted",
                 "exception_type": "ConvergenceError",
-                "message": "diagnostic rescue ladder and subcycles exhausted",
+                "message": (
+                    "diagnostic rescue ladder and subcycles exhausted"
+                    if adapt is None else
+                    f"adaptive substeps exhausted at {adapt.m_max} substeps"
+                ),
             }
             PETSc.Sys.Print(
                 f"  Step {k}: rescue ladder + subcycles exhausted, "
@@ -3255,6 +3570,11 @@ def run_simulation(
             z.assign(z_entry)   # checkpoint the last converged pair
             if a_ref_entry is not None:
                 a_ref.assign(a_ref_entry)
+            if fssa_tendency is not None:
+                ctx["u_ref_fssa"].assign(u_ref_fssa_entry)
+                fssa_tendency.assign(fssa_tendency_entry)
+            calved[:] = calved_entry
+            calved_fn.dat.data[:] = calved
             if level_set is not None:
                 level_set.phi.assign(phi_entry)
                 level_set.update_cell_fields()
@@ -3299,6 +3619,8 @@ def run_simulation(
             "amb_gt_per_yr": float(amb_rate),
             "dm_gt": float(dm),
             "resid_gt": float(resid_gt),
+            **({"substeps": int(m_used), "dh_err_m": float(adapt.err_step)}
+               if adapt is not None else {}),
         })
 
         step_stat = _field_diagnostics(f"step-{k}-t={t_yr:.6g}")
@@ -3429,7 +3751,10 @@ def run_simulation(
             _amb_txt = f"amb={amb_rate:+.0f} " if a_ref is not None else ""
             PETSc.Sys.Print(
                 f"  t={t_yr:.1f}  VAF={vaf:.4f} mm SLE  "
-                f"mass={total_mass:.1f} Gt  [{t_elapsed:.1f}s]\n"
+                f"mass={total_mass:.1f} Gt  [{t_elapsed:.1f}s]"
+                + (f"  substeps={m_used} dh_err={adapt.err_step:.2g} m"
+                   if adapt is not None else "")
+                + "\n"
                 f"      budget [Gt/yr]: SMB={smb_rate:+.0f} melt={-melt_rate:+.0f} "
                 f"{_amb_txt}"
                 f"outflux={-out_rate:+.0f} calv={-calv_gt/dt:+.0f} "

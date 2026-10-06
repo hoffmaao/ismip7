@@ -9,9 +9,9 @@ gitignored, so these records and the per-core reports beside them are
 the trace a run leaves in the repository. A core experiment also gets
 its full report from `core_report.py`; this is the index.
 
-227 records.
+246 records.
 
-Status: 12 planned, 3 running, 16 stopped, 179 done, 17 superseded.
+Status: 12 planned, 3 running, 16 stopped, 198 done, 17 superseded.
 
 ## Inversion
 
@@ -161,6 +161,25 @@ Status: 12 planned, 3 running, 16 stopped, 179 done, 17 superseded.
 | 2 km inversion, production configuration with five-solve evaluations, full_mumps on 32 ranks | done | Rice's antarctica_5000_2000_buffered0, read from the snapshot (ISMIP7_MESH=checkpoint; 925,183 vertices, 1,835,718 cells), DG0 geometry, vertex raster sampling | IU Quartz, general partition | 2026-10-01 | 2026-10-02 | 5 TAO iterations, objective 5.621096e4 to 5.570022e4; no forward failed; published residual 40.9 |
 | 2 km inversion, production configuration with one solve an evaluation, scpc_gamg (NLEQ-ERR, Krylov rtol 1e-8) on 32 ranks | done | Rice's antarctica_5000_2000_buffered0, read from the snapshot (ISMIP7_MESH=checkpoint; 925,183 vertices, 1,835,718 cells), DG0 geometry, vertex raster sampling | IU Quartz, general partition | 2026-10-01 | 2026-10-02 | every iterate within 1.0e-9 of test-2km-inversion-prod-full-mumps-ec0, final 5.570022e4; the same trial point failed in iteration 3 and took the same rescue (795 s); every recorded solve confirmed with no step; 1.3 times faster than full_mumps |
 | 2 km inversion, production configuration with five-solve evaluations, scpc_gamg (NLEQ-ERR, Krylov rtol 1e-8) on 32 ranks | done | Rice's antarctica_5000_2000_buffered0, read from the snapshot (ISMIP7_MESH=checkpoint; 925,183 vertices, 1,835,718 cells), DG0 geometry, vertex raster sampling | IU Quartz, general partition | 2026-10-01 | 2026-10-02 | every iterate within 1.1e-9 of test-2km-inversion-prod-full-mumps-ec1, final 5.570022e4; no forward failed; every recorded solve confirmed with no step; 2.4 times slower than full_mumps |
+| 32 km no-forcing forward, apparent MB on: the prototype on `auto` (resolving to `start`), stabilized (theta 1), dt 0.1 (PR 160 FSSA reference probe) | done | antarctica_320000_32000_buffered0 (sha256 fd66fc42; 6,282 vertices), DG0 geometry | IU workstation (Mac, 16 cores), up to five runs at once, load average up to 13.7 | 2026-10-05 | 2026-10-05 | resid 0.0000 on all 100 rows, exit 0; largest \|dh\| in a step 3.3 m, no cell flipping sign step to step; at 2025.0 against amb_pr_dt1: thickness RMS 0 m, max 0 m; speed RMS 8.75e-20 m/yr; mass +0.0 Gt, VAF +0.000 mm SLE |
+| 32 km no-forcing forward, apparent MB on: the prototype on `auto` again, stabilized (theta 1), dt 0.1 (run-to-run noise) (PR 160 FSSA reference probe) | done | antarctica_320000_32000_buffered0 (sha256 fd66fc42; 6,282 vertices), DG0 geometry | IU workstation (Mac, 16 cores), up to five runs at once, load average up to 13.7 | 2026-10-05 | 2026-10-05 | resid 0.0000 on all 100 rows, exit 0; largest \|dh\| in a step 3.3 m, no cell flipping sign step to step; at 2025.0 against amb_pr_dt1: thickness RMS 1.78e-14 m, max 9.09e-13 m; speed RMS 2.45e-12 m/yr; mass +0.0 Gt, VAF +0.000 mm SLE |
+| 32 km no-forcing forward, apparent MB on: PR 160 head, stabilized (theta 1), dt 0.1 (PR 160 FSSA reference probe) | done | antarctica_320000_32000_buffered0 (sha256 fd66fc42; 6,282 vertices), DG0 geometry | IU workstation (Mac, 16 cores), up to five runs at once, load average up to 13.7 | 2026-10-05 | 2026-10-05 | resid 0.0000 on all 100 rows, exit 0; largest \|dh\| in a step 3.3 m, no cell flipping sign step to step |
+| 32 km no-forcing forward, apparent MB on: PR 160 head again, stabilized (theta 1), dt 0.1 (run-to-run noise) (PR 160 FSSA reference probe) | done | antarctica_320000_32000_buffered0 (sha256 fd66fc42; 6,282 vertices), DG0 geometry | IU workstation (Mac, 16 cores), up to five runs at once, load average up to 13.7 | 2026-10-05 | 2026-10-05 | resid 0.0000 on all 100 rows, exit 0; largest \|dh\| in a step 3.3 m, no cell flipping sign step to step; at 2025.0 against amb_pr_dt1: thickness RMS 0 m, max 0 m; speed RMS 0 m/yr; mass +0.0 Gt, VAF +0.000 mm SLE |
+| 32 km no-forcing forward, apparent MB on: PR 160 head with an unused function and tuple added to fssa.py, stabilized (theta 1), dt 0.1 (run-to-run noise) (PR 160 FSSA reference probe) | done | antarctica_320000_32000_buffered0 (sha256 fd66fc42; 6,282 vertices), DG0 geometry | IU workstation (Mac, 16 cores), up to five runs at once, load average up to 13.7 | 2026-10-05 | 2026-10-05 | resid 0.0000 on all 100 rows, exit 0; largest \|dh\| in a step 3.3 m, no cell flipping sign step to step; at 2025.0 against amb_pr_dt1: thickness RMS 4.32e-14 m, max 5.12e-13 m; speed RMS 4.71e-12 m/yr; mass +0.0 Gt, VAF +0.000 mm SLE |
+| 32 km no-forcing forward, apparent MB on: the prototype on `step`, stabilized (theta 1), dt 0.1 (PR 160 FSSA reference probe) | done | antarctica_320000_32000_buffered0 (sha256 fd66fc42; 6,282 vertices), DG0 geometry | IU workstation (Mac, 16 cores), up to five runs at once, load average up to 13.7 | 2026-10-05 | 2026-10-05 | resid 0.0000 on all 100 rows, exit 0; largest \|dh\| in a step 3.3 m, no cell flipping sign step to step; at 2025.0 against amb_pr_dt1: thickness RMS 0.00249 m, max 0.575 m; speed RMS 0.35 m/yr; mass -0.1 Gt, VAF -0.000 mm SLE |
+| 32 km no-forcing forward, apparent MB off: unstabilized at dt 0.0125: the reference the probe measures against (PR 160 FSSA reference probe) | done | antarctica_320000_32000_buffered0 (sha256 fd66fc42; 6,282 vertices), DG0 geometry | IU workstation (Mac, 16 cores), up to five runs at once, load average up to 13.7 | 2026-10-05 | 2026-10-05 | resid 0.0000 on all 800 rows, exit 0; largest \|dh\| in a step 12.6 m, no cell flipping sign step to step |
+| 32 km no-forcing forward, apparent MB off: `step`, dt 0.1, the first of the two years (restart check) (PR 160 FSSA reference probe) | done | antarctica_320000_32000_buffered0 (sha256 fd66fc42; 6,282 vertices), DG0 geometry | IU workstation (Mac, 16 cores), up to five runs at once, load average up to 13.7 | 2026-10-05 | 2026-10-05 | resid 0.0000 on all 10 rows, exit 0; largest \|dh\| in a step 91.0 m, no cell flipping sign step to step |
+| 32 km no-forcing forward, apparent MB off: `step`, dt 0.1, the second year, restarted from rs_a's final checkpoint (restart check) (PR 160 FSSA reference probe) | done | antarctica_320000_32000_buffered0 (sha256 fd66fc42; 6,282 vertices), DG0 geometry | IU workstation (Mac, 16 cores), up to five runs at once, load average up to 13.7 | 2026-10-05 | 2026-10-05 | resid 0.0000 on all 10 rows, exit 0; largest \|dh\| in a step 18.4 m, no cell flipping sign step to step; at 2017.0 against rs_cont: thickness RMS 1.16e-12 m, max 2.16e-10 m; speed RMS 6.13e-12 m/yr; mass +0.0 Gt, VAF +0.000 mm SLE |
+| 32 km no-forcing forward, apparent MB off: `step`, dt 0.1, two years in one run (restart check) (PR 160 FSSA reference probe) | done | antarctica_320000_32000_buffered0 (sha256 fd66fc42; 6,282 vertices), DG0 geometry | IU workstation (Mac, 16 cores), up to five runs at once, load average up to 13.7 | 2026-10-05 | 2026-10-05 | resid 0.0000 on all 20 rows, exit 0; largest \|dh\| in a step 91.0 m, no cell flipping sign step to step |
+| 32 km no-forcing forward, apparent MB off: `step`, dt 0.1, two steps (smoke) (PR 160 FSSA reference probe) | done | antarctica_320000_32000_buffered0 (sha256 fd66fc42; 6,282 vertices), DG0 geometry | IU workstation (Mac, 16 cores), up to five runs at once, load average up to 13.7 | 2026-10-05 | 2026-10-05 | resid 0.0000 on all 2 rows, exit 0; largest \|dh\| in a step 91.0 m, no cell flipping sign step to step |
+| 32 km no-forcing forward, apparent MB off: stabilized (theta 1) from `start`, dt 0.05 (PR 160 FSSA reference probe) | done | antarctica_320000_32000_buffered0 (sha256 fd66fc42; 6,282 vertices), DG0 geometry | IU workstation (Mac, 16 cores), up to five runs at once, load average up to 13.7 | 2026-10-05 | 2026-10-05 | resid 0.0000 on all 200 rows, exit 0; largest \|dh\| in a step 48.2 m, no cell flipping sign step to step; at 2025.0 against ref_t0_dt0125: thickness RMS 0.468 m, max 177 m; speed RMS 20.4 m/yr; mass -54.7 Gt, VAF -0.202 mm SLE |
+| 32 km no-forcing forward, apparent MB off: stabilized (theta 1) from `start`, dt 0.1 (PR 160 FSSA reference probe) | done | antarctica_320000_32000_buffered0 (sha256 fd66fc42; 6,282 vertices), DG0 geometry | IU workstation (Mac, 16 cores), up to five runs at once, load average up to 13.7 | 2026-10-05 | 2026-10-05 | resid 0.0000 on all 100 rows, exit 0; largest \|dh\| in a step 91.0 m, no cell flipping sign step to step; at 2025.0 against ref_t0_dt0125: thickness RMS 0.91 m, max 288 m; speed RMS 46.9 m/yr; mass -109.7 Gt, VAF -0.405 mm SLE |
+| 32 km no-forcing forward, apparent MB off: stabilized (theta 1) from `start`, dt 0.2 (PR 160 FSSA reference probe) | done | antarctica_320000_32000_buffered0 (sha256 fd66fc42; 6,282 vertices), DG0 geometry | IU workstation (Mac, 16 cores), up to five runs at once, load average up to 13.7 | 2026-10-05 | 2026-10-05 | resid 0.0000 on all 50 rows, exit 0; largest \|dh\| in a step 162.9 m, no cell flipping sign step to step; at 2025.0 against ref_t0_dt0125: thickness RMS 1.84 m, max 393 m; speed RMS 111 m/yr; mass -210.8 Gt, VAF -0.767 mm SLE |
+| 32 km no-forcing forward, apparent MB off: stabilized (theta 1) from `step`, dt 0.05 (PR 160 FSSA reference probe) | done | antarctica_320000_32000_buffered0 (sha256 fd66fc42; 6,282 vertices), DG0 geometry | IU workstation (Mac, 16 cores), up to five runs at once, load average up to 13.7 | 2026-10-05 | 2026-10-05 | resid 0.0000 on all 200 rows, exit 0; largest \|dh\| in a step 48.2 m, no cell flipping sign step to step; at 2025.0 against ref_t0_dt0125: thickness RMS 0.0622 m, max 4.54 m; speed RMS 8.23 m/yr; mass +15.8 Gt, VAF +0.058 mm SLE |
+| 32 km no-forcing forward, apparent MB off: stabilized (theta 1) from `step`, dt 0.1 (PR 160 FSSA reference probe) | done | antarctica_320000_32000_buffered0 (sha256 fd66fc42; 6,282 vertices), DG0 geometry | IU workstation (Mac, 16 cores), up to five runs at once, load average up to 13.7 | 2026-10-05 | 2026-10-05 | resid 0.0000 on all 100 rows, exit 0; largest \|dh\| in a step 91.0 m, no cell flipping sign step to step; at 2025.0 against ref_t0_dt0125: thickness RMS 0.112 m, max 8.06 m; speed RMS 13.9 m/yr; mass +26.1 Gt, VAF +0.100 mm SLE |
+| 32 km no-forcing forward, apparent MB off: stabilized (theta 1) from `step`, dt 0.2 (PR 160 FSSA reference probe) | done | antarctica_320000_32000_buffered0 (sha256 fd66fc42; 6,282 vertices), DG0 geometry | IU workstation (Mac, 16 cores), up to five runs at once, load average up to 13.7 | 2026-10-05 | 2026-10-05 | resid 0.0000 on all 50 rows, exit 0; largest \|dh\| in a step 162.9 m, no cell flipping sign step to step; at 2025.0 against ref_t0_dt0125: thickness RMS 0.203 m, max 14.6 m; speed RMS 21.1 m/yr; mass +42.6 Gt, VAF +0.171 mm SLE |
+| 32 km no-forcing forward, apparent MB off: unstabilized at dt 0.1 (PR 160 FSSA reference probe) | done | antarctica_320000_32000_buffered0 (sha256 fd66fc42; 6,282 vertices), DG0 geometry | IU workstation (Mac, 16 cores), up to five runs at once, load average up to 13.7 | 2026-10-05 | 2026-10-05 | resid 0.0000 on all 100 rows, exit 0; largest \|dh\| in a step 91.0 m, no cell flipping sign step to step; at 2025.0 against ref_t0_dt0125: thickness RMS 0.0687 m, max 1.91 m; speed RMS 3.35 m/yr; mass -25.0 Gt, VAF -0.076 mm SLE |
+| 32 km no-forcing forward, apparent MB off: unstabilized at dt 0.2 (PR 160 FSSA reference probe) | done | antarctica_320000_32000_buffered0 (sha256 fd66fc42; 6,282 vertices), DG0 geometry | IU workstation (Mac, 16 cores), up to five runs at once, load average up to 13.7 | 2026-10-05 | 2026-10-05 | resid 0.0000 on all 50 rows, exit 0; largest \|dh\| in a step 162.9 m, no cell flipping sign step to step; at 2025.0 against ref_t0_dt0125: thickness RMS 0.15 m, max 4.17 m; speed RMS 8.31 m/yr; mass -54.9 Gt, VAF -0.167 mm SLE |
 | 32 km inversion, 5 L-BFGS-B iterations on the new defaults (no solver or optimizer knob set), against the SEP1 study's exp arm | done | antarctica_320000_32000_buffered0 (Quartz's .msh, sha256 fd66fc42; 6,282 vertices, 9,055 cells), DG0 geometry, vertex raster sampling | IU workstation (Mac, 16 cores, 128 GB), data under /Volumes/LaCie/Data/antarctica_general/ismip7_obs | 2026-10-03 | 2026-10-03 | 5 iterations, 7 evaluations, objective 3.861500e4 to 1.341402e4; every evaluation within 1.6e-10 of test-32km-inversion-sep1-opt-exp-none (full_mumps, the same optimizer); every direct forward converged, no lost trial; published residual 1.3e-3 |
 | 32 km inversion, the time outside the forward and adjoint by span, before and after the factored prior solve (L-BFGS-B and TAO) | done | antarctica_320000_32000_buffered0 (Quartz's .msh, sha256 fd66fc42; 6,282 vertices, 9,055 cells), DG0 geometry, vertex raster sampling | IU workstation (Mac, 16 cores, 128 GB), data under /Volumes/LaCie/Data/antarctica_general/ismip7_obs; another session's 8-rank jobs shared the machine for most runs (load at each start in its commit.txt) | 2026-10-02 | 2026-10-02 | L-BFGS-B: objective within 1.1e-14 and \|grad\| within 2.6e-13 of the base over 7 evaluations, final 1.320942e4, published \|\|F\|\| 2.941e1 in every run; outside the solves, prior_solve 0.037 to 0.002 s and residual_norm 0.074 s, the rest under 0.002 s. TAO: objective within 2.2e-13 over 5 evaluations, final 1.438882e4, published \|\|F\|\| 1.96e-2; residual_norm 7.86 to 0.23 s an iteration (the fnorm-ceiling check off the tape), prior_solve 0.037 to 0.002 s, prior_taped 0.042 to 0.006 s. Every TAO run failed its forward at the same three trial points and took the re-ramp rescue (reramp span, 2.9 s an iteration at 4e45164) |
 | 32 km inversion cold start with the exp friction control and SEP2 sub-element friction, full_mumps and scpc_gamg | stopped | antarctica_320000_32000_buffered0 (Quartz's .msh, sha256 fd66fc42; 6,282 vertices, 9,055 cells), DG0 geometry, vertex raster sampling | IU workstation (Mac, 16 cores, 128 GB), data under /Volumes/LaCie/Data/antarctica_general/ismip7_obs | 2026-10-01 | 2026-10-01 | the startup ramp (full_mumps in both runs, unannotated, before the solver under test runs) diverged on every rung near n = 2.1 (rung 1 step 5 to \|\|F\|\| 4e37 and 4e20, rung 2 and rung 3 likewise) and the run stopped with ConvergenceError; the solver choice played no part |
@@ -3742,6 +3761,443 @@ Core 11 at 32 km without the apparent-MB reference, a cold start on the OCX prot
 - **Results path:** Quartz /N/scratch/dlilien/ismip7_issue156_runs/maps/prod2km_gamg_p32.h5 (scratch, purged after 30 days); timing record and log copied to /Volumes/LaCie/Data/antarctica_general/ismip7_runs/inversion_solver_quartz
 - **Audit:** every iterate within 1.1e-9 of test-2km-inversion-prod-full-mumps-ec1, final 5.570022e4; no forward failed; every recorded solve confirmed with no step; 2.4 times slower than full_mumps
 - **Notes:** issue #156 production-configuration cost probe; no MAP is kept (strict handoff off, the legacy prior name overridden by the warm start's prior)
+
+### test-32km-fssa-amb-auto-dt1
+
+32 km no-forcing forward, apparent MB on: the prototype on `auto` (resolving to `start`), stabilized (theta 1), dt 0.1 (PR 160 FSSA reference probe) (done), IU.
+
+- **Task type:** test
+- **Period (yr):** 2015.0 to 2025.0, 100 steps, reached 2025.0
+- **Friction law:** budd
+- **Mesh:** antarctica_320000_32000_buffered0 (sha256 fd66fc42; 6,282 vertices), DG0 geometry
+- **Initial state / MAP:** cold start from the MAP's mixed state, /Volumes/LaCie/Data/antarctica_general/ismip7_runs/pr158_merge/C_32km_scpc_gamg/map.h5 (sha256 feddedd9), the 32 km Budd SEP1 log-control MAP of 432c831
+- **Forcing versions:** none (no SMB, no melt); MEaSUREs and BedMachine from /Volumes/LaCie/Data/antarctica_general/ismip7_obs; ISMIP7_FLUIDITY_PRIOR=legacy
+- **Calving front, collapse:** held fixed (ISMIP7_FIXED_FRONT=1), ice-shelf collapse ISMIP7_FRACTURE=none
+- **Apparent MB:** balance (ISMIP7_APPARENT_MB=1)
+- **dt (yr):** 0.1
+- **Site / partition:** IU workstation (Mac, 16 cores), up to five runs at once, load average up to 13.7
+- **Ranks / memory:** 2 ranks
+- **Code:** 68d2749 (PR 160 head f441df7 plus the ISMIP7_FSSA_REFERENCE prototype), a git archive in the results directory; icepack_tools e7b923e, icepack2 b20e296
+- **Started:** 2026-10-05
+- **Finished:** 2026-10-05
+- **Cost per model year:** about 3 min wall including about 40 s for the first solve
+- **Results path:** /Volumes/LaCie/Data/antarctica_general/ismip7_runs/fssa_reference_probe/snap_step/antarctica/results/amb_auto_dt1_32000_*, /Volumes/LaCie/Data/antarctica_general/ismip7_runs/fssa_reference_probe/out/amb_auto_dt1.log
+- **Audit:** resid 0.0000 on all 100 rows, exit 0; largest \|dh\| in a step 3.3 m, no cell flipping sign step to step; at 2025.0 against amb_pr_dt1: thickness RMS 0 m, max 0 m; speed RMS 8.75e-20 m/yr; mass +0.0 Gt, VAF +0.000 mm SLE
+- **Notes:** One run of the ISMIP7_FSSA_REFERENCE probe of PR 160: a no-forcing 32 km forward (forcing_callback None, so no SMB and no melt) from the MAP's mixed state, ISMIP7_FIXED_FRONT=1, tripwire printing only. Driver probe.py, runner run.sh, the list matrix.txt and the comparison compare.py sit in the results directory; the comparison matches cells and vertices by coordinate. Stabilization ISMIP7_FSSA_THETA=1, reference auto, resolved to start. Arguments: amb_auto_dt1 10 0.1 np=2 ISMIP7_FSSA_THETA=1 ISMIP7_APPARENT_MB=1. The five runs with the apparent mass balance and theta 1 on PR 160's path (amb_pr, amb_pr2, amb_prnull, amb_auto, amb_auto2) write byte-identical timeseries CSVs and agree at 2025.0 to 9.1e-13 m in thickness and 1.5e-10 m/yr in velocity: a rerun of the same snapshot differs by as much as a change of code, so this is the run-to-run noise, and `auto` is indistinguishable from PR 160's head.
+
+### test-32km-fssa-amb-auto2-dt1
+
+32 km no-forcing forward, apparent MB on: the prototype on `auto` again, stabilized (theta 1), dt 0.1 (run-to-run noise) (PR 160 FSSA reference probe) (done), IU.
+
+- **Task type:** test
+- **Period (yr):** 2015.0 to 2025.0, 100 steps, reached 2025.0
+- **Friction law:** budd
+- **Mesh:** antarctica_320000_32000_buffered0 (sha256 fd66fc42; 6,282 vertices), DG0 geometry
+- **Initial state / MAP:** cold start from the MAP's mixed state, /Volumes/LaCie/Data/antarctica_general/ismip7_runs/pr158_merge/C_32km_scpc_gamg/map.h5 (sha256 feddedd9), the 32 km Budd SEP1 log-control MAP of 432c831
+- **Forcing versions:** none (no SMB, no melt); MEaSUREs and BedMachine from /Volumes/LaCie/Data/antarctica_general/ismip7_obs; ISMIP7_FLUIDITY_PRIOR=legacy
+- **Calving front, collapse:** held fixed (ISMIP7_FIXED_FRONT=1), ice-shelf collapse ISMIP7_FRACTURE=none
+- **Apparent MB:** balance (ISMIP7_APPARENT_MB=1)
+- **dt (yr):** 0.1
+- **Site / partition:** IU workstation (Mac, 16 cores), up to five runs at once, load average up to 13.7
+- **Ranks / memory:** 2 ranks
+- **Code:** 68d2749 (PR 160 head f441df7 plus the ISMIP7_FSSA_REFERENCE prototype), a git archive in the results directory; icepack_tools e7b923e, icepack2 b20e296
+- **Started:** 2026-10-05
+- **Finished:** 2026-10-05
+- **Cost per model year:** about 3 min wall including about 40 s for the first solve
+- **Results path:** /Volumes/LaCie/Data/antarctica_general/ismip7_runs/fssa_reference_probe/snap_step/antarctica/results/amb_auto2_dt1_32000_*, /Volumes/LaCie/Data/antarctica_general/ismip7_runs/fssa_reference_probe/out/amb_auto2_dt1.log
+- **Audit:** resid 0.0000 on all 100 rows, exit 0; largest \|dh\| in a step 3.3 m, no cell flipping sign step to step; at 2025.0 against amb_pr_dt1: thickness RMS 1.78e-14 m, max 9.09e-13 m; speed RMS 2.45e-12 m/yr; mass +0.0 Gt, VAF +0.000 mm SLE
+- **Notes:** One run of the ISMIP7_FSSA_REFERENCE probe of PR 160: a no-forcing 32 km forward (forcing_callback None, so no SMB and no melt) from the MAP's mixed state, ISMIP7_FIXED_FRONT=1, tripwire printing only. Driver probe.py, runner run.sh, the list matrix.txt and the comparison compare.py sit in the results directory; the comparison matches cells and vertices by coordinate. Stabilization ISMIP7_FSSA_THETA=1, reference auto, resolved to start. Arguments: amb_auto2_dt1 10 0.1 np=2 ISMIP7_FSSA_THETA=1 ISMIP7_APPARENT_MB=1. The five runs with the apparent mass balance and theta 1 on PR 160's path (amb_pr, amb_pr2, amb_prnull, amb_auto, amb_auto2) write byte-identical timeseries CSVs and agree at 2025.0 to 9.1e-13 m in thickness and 1.5e-10 m/yr in velocity: a rerun of the same snapshot differs by as much as a change of code, so this is the run-to-run noise, and `auto` is indistinguishable from PR 160's head.
+
+### test-32km-fssa-amb-pr-dt1
+
+32 km no-forcing forward, apparent MB on: PR 160 head, stabilized (theta 1), dt 0.1 (PR 160 FSSA reference probe) (done), IU.
+
+- **Task type:** test
+- **Period (yr):** 2015.0 to 2025.0, 100 steps, reached 2025.0
+- **Friction law:** budd
+- **Mesh:** antarctica_320000_32000_buffered0 (sha256 fd66fc42; 6,282 vertices), DG0 geometry
+- **Initial state / MAP:** cold start from the MAP's mixed state, /Volumes/LaCie/Data/antarctica_general/ismip7_runs/pr158_merge/C_32km_scpc_gamg/map.h5 (sha256 feddedd9), the 32 km Budd SEP1 log-control MAP of 432c831
+- **Forcing versions:** none (no SMB, no melt); MEaSUREs and BedMachine from /Volumes/LaCie/Data/antarctica_general/ismip7_obs; ISMIP7_FLUIDITY_PRIOR=legacy
+- **Calving front, collapse:** held fixed (ISMIP7_FIXED_FRONT=1), ice-shelf collapse ISMIP7_FRACTURE=none
+- **Apparent MB:** balance (ISMIP7_APPARENT_MB=1)
+- **dt (yr):** 0.1
+- **Site / partition:** IU workstation (Mac, 16 cores), up to five runs at once, load average up to 13.7
+- **Ranks / memory:** 2 ranks
+- **Code:** f441df7 (PR 160 head), a git archive in the results directory; icepack_tools e7b923e, icepack2 b20e296
+- **Started:** 2026-10-05
+- **Finished:** 2026-10-05
+- **Cost per model year:** about 3 min wall including about 40 s for the first solve
+- **Results path:** /Volumes/LaCie/Data/antarctica_general/ismip7_runs/fssa_reference_probe/snap_pr/antarctica/results/amb_pr_dt1_32000_*, /Volumes/LaCie/Data/antarctica_general/ismip7_runs/fssa_reference_probe/out/amb_pr_dt1.log
+- **Audit:** resid 0.0000 on all 100 rows, exit 0; largest \|dh\| in a step 3.3 m, no cell flipping sign step to step
+- **Notes:** One run of the ISMIP7_FSSA_REFERENCE probe of PR 160: a no-forcing 32 km forward (forcing_callback None, so no SMB and no melt) from the MAP's mixed state, ISMIP7_FIXED_FRONT=1, tripwire printing only. Driver probe.py, runner run.sh, the list matrix.txt and the comparison compare.py sit in the results directory; the comparison matches cells and vertices by coordinate. Stabilization ISMIP7_FSSA_THETA=1, reference start (the only one at f441df7). Arguments: amb_pr_dt1 10 0.1 np=2 ISMIP7_FSSA_THETA=1 ISMIP7_APPARENT_MB=1.
+
+### test-32km-fssa-amb-pr2-dt1
+
+32 km no-forcing forward, apparent MB on: PR 160 head again, stabilized (theta 1), dt 0.1 (run-to-run noise) (PR 160 FSSA reference probe) (done), IU.
+
+- **Task type:** test
+- **Period (yr):** 2015.0 to 2025.0, 100 steps, reached 2025.0
+- **Friction law:** budd
+- **Mesh:** antarctica_320000_32000_buffered0 (sha256 fd66fc42; 6,282 vertices), DG0 geometry
+- **Initial state / MAP:** cold start from the MAP's mixed state, /Volumes/LaCie/Data/antarctica_general/ismip7_runs/pr158_merge/C_32km_scpc_gamg/map.h5 (sha256 feddedd9), the 32 km Budd SEP1 log-control MAP of 432c831
+- **Forcing versions:** none (no SMB, no melt); MEaSUREs and BedMachine from /Volumes/LaCie/Data/antarctica_general/ismip7_obs; ISMIP7_FLUIDITY_PRIOR=legacy
+- **Calving front, collapse:** held fixed (ISMIP7_FIXED_FRONT=1), ice-shelf collapse ISMIP7_FRACTURE=none
+- **Apparent MB:** balance (ISMIP7_APPARENT_MB=1)
+- **dt (yr):** 0.1
+- **Site / partition:** IU workstation (Mac, 16 cores), up to five runs at once, load average up to 13.7
+- **Ranks / memory:** 2 ranks
+- **Code:** f441df7 (PR 160 head), a git archive in the results directory; icepack_tools e7b923e, icepack2 b20e296
+- **Started:** 2026-10-05
+- **Finished:** 2026-10-05
+- **Cost per model year:** about 2 min wall including about 40 s for the first solve
+- **Results path:** /Volumes/LaCie/Data/antarctica_general/ismip7_runs/fssa_reference_probe/snap_pr/antarctica/results/amb_pr2_dt1_32000_*, /Volumes/LaCie/Data/antarctica_general/ismip7_runs/fssa_reference_probe/out/amb_pr2_dt1.log
+- **Audit:** resid 0.0000 on all 100 rows, exit 0; largest \|dh\| in a step 3.3 m, no cell flipping sign step to step; at 2025.0 against amb_pr_dt1: thickness RMS 0 m, max 0 m; speed RMS 0 m/yr; mass +0.0 Gt, VAF +0.000 mm SLE
+- **Notes:** One run of the ISMIP7_FSSA_REFERENCE probe of PR 160: a no-forcing 32 km forward (forcing_callback None, so no SMB and no melt) from the MAP's mixed state, ISMIP7_FIXED_FRONT=1, tripwire printing only. Driver probe.py, runner run.sh, the list matrix.txt and the comparison compare.py sit in the results directory; the comparison matches cells and vertices by coordinate. Stabilization ISMIP7_FSSA_THETA=1, reference start (the only one at f441df7). Arguments: amb_pr2_dt1 10 0.1 np=2 ISMIP7_FSSA_THETA=1 ISMIP7_APPARENT_MB=1. The five runs with the apparent mass balance and theta 1 on PR 160's path (amb_pr, amb_pr2, amb_prnull, amb_auto, amb_auto2) write byte-identical timeseries CSVs and agree at 2025.0 to 9.1e-13 m in thickness and 1.5e-10 m/yr in velocity: a rerun of the same snapshot differs by as much as a change of code, so this is the run-to-run noise, and `auto` is indistinguishable from PR 160's head.
+
+### test-32km-fssa-amb-prnull-dt1
+
+32 km no-forcing forward, apparent MB on: PR 160 head with an unused function and tuple added to fssa.py, stabilized (theta 1), dt 0.1 (run-to-run noise) (PR 160 FSSA reference probe) (done), IU.
+
+- **Task type:** test
+- **Period (yr):** 2015.0 to 2025.0, 100 steps, reached 2025.0
+- **Friction law:** budd
+- **Mesh:** antarctica_320000_32000_buffered0 (sha256 fd66fc42; 6,282 vertices), DG0 geometry
+- **Initial state / MAP:** cold start from the MAP's mixed state, /Volumes/LaCie/Data/antarctica_general/ismip7_runs/pr158_merge/C_32km_scpc_gamg/map.h5 (sha256 feddedd9), the 32 km Budd SEP1 log-control MAP of 432c831
+- **Forcing versions:** none (no SMB, no melt); MEaSUREs and BedMachine from /Volumes/LaCie/Data/antarctica_general/ismip7_obs; ISMIP7_FLUIDITY_PRIOR=legacy
+- **Calving front, collapse:** held fixed (ISMIP7_FIXED_FRONT=1), ice-shelf collapse ISMIP7_FRACTURE=none
+- **Apparent MB:** balance (ISMIP7_APPARENT_MB=1)
+- **dt (yr):** 0.1
+- **Site / partition:** IU workstation (Mac, 16 cores), up to five runs at once, load average up to 13.7
+- **Ranks / memory:** 2 ranks
+- **Code:** f441df7 (PR 160 head) with an unused function and tuple appended to icepack2_tools/fssa.py, a git archive in the results directory; icepack_tools e7b923e, icepack2 b20e296
+- **Started:** 2026-10-05
+- **Finished:** 2026-10-05
+- **Cost per model year:** about 3 min wall including about 40 s for the first solve
+- **Results path:** /Volumes/LaCie/Data/antarctica_general/ismip7_runs/fssa_reference_probe/snap_prnull/antarctica/results/amb_prnull_dt1_32000_*, /Volumes/LaCie/Data/antarctica_general/ismip7_runs/fssa_reference_probe/out/amb_prnull_dt1.log
+- **Audit:** resid 0.0000 on all 100 rows, exit 0; largest \|dh\| in a step 3.3 m, no cell flipping sign step to step; at 2025.0 against amb_pr_dt1: thickness RMS 4.32e-14 m, max 5.12e-13 m; speed RMS 4.71e-12 m/yr; mass +0.0 Gt, VAF +0.000 mm SLE
+- **Notes:** One run of the ISMIP7_FSSA_REFERENCE probe of PR 160: a no-forcing 32 km forward (forcing_callback None, so no SMB and no melt) from the MAP's mixed state, ISMIP7_FIXED_FRONT=1, tripwire printing only. Driver probe.py, runner run.sh, the list matrix.txt and the comparison compare.py sit in the results directory; the comparison matches cells and vertices by coordinate. Stabilization ISMIP7_FSSA_THETA=1, reference start (the only one at f441df7). Arguments: amb_prnull_dt1 10 0.1 np=2 ISMIP7_FSSA_THETA=1 ISMIP7_APPARENT_MB=1. The five runs with the apparent mass balance and theta 1 on PR 160's path (amb_pr, amb_pr2, amb_prnull, amb_auto, amb_auto2) write byte-identical timeseries CSVs and agree at 2025.0 to 9.1e-13 m in thickness and 1.5e-10 m/yr in velocity: a rerun of the same snapshot differs by as much as a change of code, so this is the run-to-run noise, and `auto` is indistinguishable from PR 160's head.
+
+### test-32km-fssa-amb-step-dt1
+
+32 km no-forcing forward, apparent MB on: the prototype on `step`, stabilized (theta 1), dt 0.1 (PR 160 FSSA reference probe) (done), IU.
+
+- **Task type:** test
+- **Period (yr):** 2015.0 to 2025.0, 100 steps, reached 2025.0
+- **Friction law:** budd
+- **Mesh:** antarctica_320000_32000_buffered0 (sha256 fd66fc42; 6,282 vertices), DG0 geometry
+- **Initial state / MAP:** cold start from the MAP's mixed state, /Volumes/LaCie/Data/antarctica_general/ismip7_runs/pr158_merge/C_32km_scpc_gamg/map.h5 (sha256 feddedd9), the 32 km Budd SEP1 log-control MAP of 432c831
+- **Forcing versions:** none (no SMB, no melt); MEaSUREs and BedMachine from /Volumes/LaCie/Data/antarctica_general/ismip7_obs; ISMIP7_FLUIDITY_PRIOR=legacy
+- **Calving front, collapse:** held fixed (ISMIP7_FIXED_FRONT=1), ice-shelf collapse ISMIP7_FRACTURE=none
+- **Apparent MB:** balance (ISMIP7_APPARENT_MB=1)
+- **dt (yr):** 0.1
+- **Site / partition:** IU workstation (Mac, 16 cores), up to five runs at once, load average up to 13.7
+- **Ranks / memory:** 2 ranks
+- **Code:** 68d2749 (PR 160 head f441df7 plus the ISMIP7_FSSA_REFERENCE prototype), a git archive in the results directory; icepack_tools e7b923e, icepack2 b20e296
+- **Started:** 2026-10-05
+- **Finished:** 2026-10-05
+- **Cost per model year:** about 3 min wall including about 40 s for the first solve
+- **Results path:** /Volumes/LaCie/Data/antarctica_general/ismip7_runs/fssa_reference_probe/snap_step/antarctica/results/amb_step_dt1_32000_*, /Volumes/LaCie/Data/antarctica_general/ismip7_runs/fssa_reference_probe/out/amb_step_dt1.log
+- **Audit:** resid 0.0000 on all 100 rows, exit 0; largest \|dh\| in a step 3.3 m, no cell flipping sign step to step; at 2025.0 against amb_pr_dt1: thickness RMS 0.00249 m, max 0.575 m; speed RMS 0.35 m/yr; mass -0.1 Gt, VAF -0.000 mm SLE
+- **Notes:** One run of the ISMIP7_FSSA_REFERENCE probe of PR 160: a no-forcing 32 km forward (forcing_callback None, so no SMB and no melt) from the MAP's mixed state, ISMIP7_FIXED_FRONT=1, tripwire printing only. Driver probe.py, runner run.sh, the list matrix.txt and the comparison compare.py sit in the results directory; the comparison matches cells and vertices by coordinate. Stabilization ISMIP7_FSSA_THETA=1, reference step. Arguments: amb_step_dt1 10 0.1 np=2 ISMIP7_FSSA_THETA=1 ISMIP7_APPARENT_MB=1 ISMIP7_FSSA_REFERENCE=step.
+
+### test-32km-fssa-ref-t0-dt0125
+
+32 km no-forcing forward, apparent MB off: unstabilized at dt 0.0125: the reference the probe measures against (PR 160 FSSA reference probe) (done), IU.
+
+- **Task type:** test
+- **Period (yr):** 2015.0 to 2025.0, 800 steps, reached 2025.0
+- **Friction law:** budd
+- **Mesh:** antarctica_320000_32000_buffered0 (sha256 fd66fc42; 6,282 vertices), DG0 geometry
+- **Initial state / MAP:** cold start from the MAP's mixed state, /Volumes/LaCie/Data/antarctica_general/ismip7_runs/pr158_merge/C_32km_scpc_gamg/map.h5 (sha256 feddedd9), the 32 km Budd SEP1 log-control MAP of 432c831
+- **Forcing versions:** none (no SMB, no melt); MEaSUREs and BedMachine from /Volumes/LaCie/Data/antarctica_general/ismip7_obs; ISMIP7_FLUIDITY_PRIOR=legacy
+- **Calving front, collapse:** held fixed (ISMIP7_FIXED_FRONT=1), ice-shelf collapse ISMIP7_FRACTURE=none
+- **Apparent MB:** off
+- **dt (yr):** 0.0125
+- **Site / partition:** IU workstation (Mac, 16 cores), up to five runs at once, load average up to 13.7
+- **Ranks / memory:** 2 ranks
+- **Code:** 68d2749 (PR 160 head f441df7 plus the ISMIP7_FSSA_REFERENCE prototype), a git archive in the results directory; icepack_tools e7b923e, icepack2 b20e296
+- **Started:** 2026-10-05
+- **Finished:** 2026-10-05
+- **Cost per model year:** about 6 min wall including about 40 s for the first solve
+- **Results path:** /Volumes/LaCie/Data/antarctica_general/ismip7_runs/fssa_reference_probe/snap_step/antarctica/results/ref_t0_dt0125_32000_*, /Volumes/LaCie/Data/antarctica_general/ismip7_runs/fssa_reference_probe/out/ref_t0_dt0125.log
+- **Audit:** resid 0.0000 on all 800 rows, exit 0; largest \|dh\| in a step 12.6 m, no cell flipping sign step to step
+- **Notes:** One run of the ISMIP7_FSSA_REFERENCE probe of PR 160: a no-forcing 32 km forward (forcing_callback None, so no SMB and no melt) from the MAP's mixed state, ISMIP7_FIXED_FRONT=1, tripwire printing only. Driver probe.py, runner run.sh, the list matrix.txt and the comparison compare.py sit in the results directory; the comparison matches cells and vertices by coordinate. Stabilization off (ISMIP7_FSSA_THETA=0). Arguments: ref_t0_dt0125 10 0.0125 np=2 ISMIP7_FSSA_THETA=0.
+
+### test-32km-fssa-rs-a
+
+32 km no-forcing forward, apparent MB off: `step`, dt 0.1, the first of the two years (restart check) (PR 160 FSSA reference probe) (done), IU.
+
+- **Task type:** test
+- **Period (yr):** 2015.0 to 2016.0, 10 steps, reached 2016.0
+- **Friction law:** budd
+- **Mesh:** antarctica_320000_32000_buffered0 (sha256 fd66fc42; 6,282 vertices), DG0 geometry
+- **Initial state / MAP:** cold start from the MAP's mixed state, /Volumes/LaCie/Data/antarctica_general/ismip7_runs/pr158_merge/C_32km_scpc_gamg/map.h5 (sha256 feddedd9), the 32 km Budd SEP1 log-control MAP of 432c831
+- **Forcing versions:** none (no SMB, no melt); MEaSUREs and BedMachine from /Volumes/LaCie/Data/antarctica_general/ismip7_obs; ISMIP7_FLUIDITY_PRIOR=legacy
+- **Calving front, collapse:** held fixed (ISMIP7_FIXED_FRONT=1), ice-shelf collapse ISMIP7_FRACTURE=none
+- **Apparent MB:** off
+- **dt (yr):** 0.1
+- **Site / partition:** IU workstation (Mac, 16 cores), up to five runs at once, load average up to 13.7
+- **Ranks / memory:** 2 ranks
+- **Code:** 68d2749 (PR 160 head f441df7 plus the ISMIP7_FSSA_REFERENCE prototype), a git archive in the results directory; icepack_tools e7b923e, icepack2 b20e296
+- **Started:** 2026-10-05
+- **Finished:** 2026-10-05
+- **Cost per model year:** about 2 min wall including about 40 s for the first solve
+- **Results path:** /Volumes/LaCie/Data/antarctica_general/ismip7_runs/fssa_reference_probe/snap_step/antarctica/results/rs_a_32000_*, /Volumes/LaCie/Data/antarctica_general/ismip7_runs/fssa_reference_probe/out/rs_a.log
+- **Audit:** resid 0.0000 on all 10 rows, exit 0; largest \|dh\| in a step 91.0 m, no cell flipping sign step to step
+- **Notes:** One run of the ISMIP7_FSSA_REFERENCE probe of PR 160: a no-forcing 32 km forward (forcing_callback None, so no SMB and no melt) from the MAP's mixed state, ISMIP7_FIXED_FRONT=1, tripwire printing only. Driver probe.py, runner run.sh, the list matrix.txt and the comparison compare.py sit in the results directory; the comparison matches cells and vertices by coordinate. Stabilization ISMIP7_FSSA_THETA=1, reference step. Arguments: rs_a 1 0.1 np=2 ISMIP7_FSSA_THETA=1.
+
+### test-32km-fssa-rs-b
+
+32 km no-forcing forward, apparent MB off: `step`, dt 0.1, the second year, restarted from rs_a's final checkpoint (restart check) (PR 160 FSSA reference probe) (done), IU.
+
+- **Task type:** test
+- **Period (yr):** 2016.0 to 2017.0, 10 steps, reached 2017.0
+- **Friction law:** budd
+- **Mesh:** antarctica_320000_32000_buffered0 (sha256 fd66fc42; 6,282 vertices), DG0 geometry
+- **Initial state / MAP:** rs_a's final checkpoint, rs_a_32000_final.h5, at 2016.0
+- **Forcing versions:** none (no SMB, no melt); MEaSUREs and BedMachine from /Volumes/LaCie/Data/antarctica_general/ismip7_obs; ISMIP7_FLUIDITY_PRIOR=legacy
+- **Calving front, collapse:** held fixed (ISMIP7_FIXED_FRONT=1), ice-shelf collapse ISMIP7_FRACTURE=none
+- **Apparent MB:** off
+- **dt (yr):** 0.1
+- **Site / partition:** IU workstation (Mac, 16 cores), up to five runs at once, load average up to 13.7
+- **Ranks / memory:** 2 ranks
+- **Code:** 68d2749 (PR 160 head f441df7 plus the ISMIP7_FSSA_REFERENCE prototype), a git archive in the results directory; icepack_tools e7b923e, icepack2 b20e296
+- **Started:** 2026-10-05
+- **Finished:** 2026-10-05
+- **Cost per model year:** about 1 min wall including about 40 s for the first solve
+- **Results path:** /Volumes/LaCie/Data/antarctica_general/ismip7_runs/fssa_reference_probe/snap_step/antarctica/results/rs_b_32000_*, /Volumes/LaCie/Data/antarctica_general/ismip7_runs/fssa_reference_probe/out/rs_b.log
+- **Audit:** resid 0.0000 on all 10 rows, exit 0; largest \|dh\| in a step 18.4 m, no cell flipping sign step to step; at 2017.0 against rs_cont: thickness RMS 1.16e-12 m, max 2.16e-10 m; speed RMS 6.13e-12 m/yr; mass +0.0 Gt, VAF +0.000 mm SLE
+- **Notes:** One run of the ISMIP7_FSSA_REFERENCE probe of PR 160: a no-forcing 32 km forward (forcing_callback None, so no SMB and no melt) from the MAP's mixed state, ISMIP7_FIXED_FRONT=1, tripwire printing only. Driver probe.py, runner run.sh, the list matrix.txt and the comparison compare.py sit in the results directory; the comparison matches cells and vertices by coordinate. Stabilization ISMIP7_FSSA_THETA=1, reference step. Arguments: rs_b 2 0.1 np=2 ISMIP7_FSSA_THETA=1 PROBE_RESTART=/Volumes/LaCie/Data/antarctica_general/ismip7_runs/fssa_reference_probe/snap_step/antarctica/results/rs_a_32000_final.h5. The restart took the fast path (\|\|F\|\| 1.29e-2 against the recorded 9.11e-3, within the factor 100). A second restart from the same checkpoint with ISMIP7_FSSA_REFERENCE=start (rs_bad) stopped at setup with the refusal naming `step`, as intended.
+
+### test-32km-fssa-rs-cont
+
+32 km no-forcing forward, apparent MB off: `step`, dt 0.1, two years in one run (restart check) (PR 160 FSSA reference probe) (done), IU.
+
+- **Task type:** test
+- **Period (yr):** 2015.0 to 2017.0, 20 steps, reached 2017.0
+- **Friction law:** budd
+- **Mesh:** antarctica_320000_32000_buffered0 (sha256 fd66fc42; 6,282 vertices), DG0 geometry
+- **Initial state / MAP:** cold start from the MAP's mixed state, /Volumes/LaCie/Data/antarctica_general/ismip7_runs/pr158_merge/C_32km_scpc_gamg/map.h5 (sha256 feddedd9), the 32 km Budd SEP1 log-control MAP of 432c831
+- **Forcing versions:** none (no SMB, no melt); MEaSUREs and BedMachine from /Volumes/LaCie/Data/antarctica_general/ismip7_obs; ISMIP7_FLUIDITY_PRIOR=legacy
+- **Calving front, collapse:** held fixed (ISMIP7_FIXED_FRONT=1), ice-shelf collapse ISMIP7_FRACTURE=none
+- **Apparent MB:** off
+- **dt (yr):** 0.1
+- **Site / partition:** IU workstation (Mac, 16 cores), up to five runs at once, load average up to 13.7
+- **Ranks / memory:** 2 ranks
+- **Code:** 68d2749 (PR 160 head f441df7 plus the ISMIP7_FSSA_REFERENCE prototype), a git archive in the results directory; icepack_tools e7b923e, icepack2 b20e296
+- **Started:** 2026-10-05
+- **Finished:** 2026-10-05
+- **Cost per model year:** about 3 min wall including about 40 s for the first solve
+- **Results path:** /Volumes/LaCie/Data/antarctica_general/ismip7_runs/fssa_reference_probe/snap_step/antarctica/results/rs_cont_32000_*, /Volumes/LaCie/Data/antarctica_general/ismip7_runs/fssa_reference_probe/out/rs_cont.log
+- **Audit:** resid 0.0000 on all 20 rows, exit 0; largest \|dh\| in a step 91.0 m, no cell flipping sign step to step
+- **Notes:** One run of the ISMIP7_FSSA_REFERENCE probe of PR 160: a no-forcing 32 km forward (forcing_callback None, so no SMB and no melt) from the MAP's mixed state, ISMIP7_FIXED_FRONT=1, tripwire printing only. Driver probe.py, runner run.sh, the list matrix.txt and the comparison compare.py sit in the results directory; the comparison matches cells and vertices by coordinate. Stabilization ISMIP7_FSSA_THETA=1, reference step. Arguments: rs_cont 2 0.1 np=2 ISMIP7_FSSA_THETA=1.
+
+### test-32km-fssa-smoke-step
+
+32 km no-forcing forward, apparent MB off: `step`, dt 0.1, two steps (smoke) (PR 160 FSSA reference probe) (done), IU.
+
+- **Task type:** test
+- **Period (yr):** 2015.0 to 2015.2, 2 steps, reached 2015.2
+- **Friction law:** budd
+- **Mesh:** antarctica_320000_32000_buffered0 (sha256 fd66fc42; 6,282 vertices), DG0 geometry
+- **Initial state / MAP:** cold start from the MAP's mixed state, /Volumes/LaCie/Data/antarctica_general/ismip7_runs/pr158_merge/C_32km_scpc_gamg/map.h5 (sha256 feddedd9), the 32 km Budd SEP1 log-control MAP of 432c831
+- **Forcing versions:** none (no SMB, no melt); MEaSUREs and BedMachine from /Volumes/LaCie/Data/antarctica_general/ismip7_obs; ISMIP7_FLUIDITY_PRIOR=legacy
+- **Calving front, collapse:** held fixed (ISMIP7_FIXED_FRONT=1), ice-shelf collapse ISMIP7_FRACTURE=none
+- **Apparent MB:** off
+- **dt (yr):** 0.1
+- **Site / partition:** IU workstation (Mac, 16 cores), up to five runs at once, load average up to 13.7
+- **Ranks / memory:** 2 ranks
+- **Code:** 68d2749 (PR 160 head f441df7 plus the ISMIP7_FSSA_REFERENCE prototype), a git archive in the results directory; icepack_tools e7b923e, icepack2 b20e296
+- **Started:** 2026-10-05
+- **Finished:** 2026-10-05
+- **Cost per model year:** about 2 min wall including about 40 s for the first solve
+- **Results path:** /Volumes/LaCie/Data/antarctica_general/ismip7_runs/fssa_reference_probe/snap_step/antarctica/results/smoke_step_32000_*, /Volumes/LaCie/Data/antarctica_general/ismip7_runs/fssa_reference_probe/out/smoke_step.log
+- **Audit:** resid 0.0000 on all 2 rows, exit 0; largest \|dh\| in a step 91.0 m, no cell flipping sign step to step
+- **Notes:** One run of the ISMIP7_FSSA_REFERENCE probe of PR 160: a no-forcing 32 km forward (forcing_callback None, so no SMB and no melt) from the MAP's mixed state, ISMIP7_FIXED_FRONT=1, tripwire printing only. Driver probe.py, runner run.sh, the list matrix.txt and the comparison compare.py sit in the results directory; the comparison matches cells and vertices by coordinate. Stabilization ISMIP7_FSSA_THETA=1, reference step. Arguments: smoke_step 0.2 0.1 np=4 ISMIP7_FSSA_THETA=1.
+
+### test-32km-fssa-start-dt05
+
+32 km no-forcing forward, apparent MB off: stabilized (theta 1) from `start`, dt 0.05 (PR 160 FSSA reference probe) (done), IU.
+
+- **Task type:** test
+- **Period (yr):** 2015.0 to 2025.0, 200 steps, reached 2025.0
+- **Friction law:** budd
+- **Mesh:** antarctica_320000_32000_buffered0 (sha256 fd66fc42; 6,282 vertices), DG0 geometry
+- **Initial state / MAP:** cold start from the MAP's mixed state, /Volumes/LaCie/Data/antarctica_general/ismip7_runs/pr158_merge/C_32km_scpc_gamg/map.h5 (sha256 feddedd9), the 32 km Budd SEP1 log-control MAP of 432c831
+- **Forcing versions:** none (no SMB, no melt); MEaSUREs and BedMachine from /Volumes/LaCie/Data/antarctica_general/ismip7_obs; ISMIP7_FLUIDITY_PRIOR=legacy
+- **Calving front, collapse:** held fixed (ISMIP7_FIXED_FRONT=1), ice-shelf collapse ISMIP7_FRACTURE=none
+- **Apparent MB:** off
+- **dt (yr):** 0.05
+- **Site / partition:** IU workstation (Mac, 16 cores), up to five runs at once, load average up to 13.7
+- **Ranks / memory:** 2 ranks
+- **Code:** 68d2749 (PR 160 head f441df7 plus the ISMIP7_FSSA_REFERENCE prototype), a git archive in the results directory; icepack_tools e7b923e, icepack2 b20e296
+- **Started:** 2026-10-05
+- **Finished:** 2026-10-05
+- **Cost per model year:** about 4 min wall including about 40 s for the first solve
+- **Results path:** /Volumes/LaCie/Data/antarctica_general/ismip7_runs/fssa_reference_probe/snap_step/antarctica/results/start_dt05_32000_*, /Volumes/LaCie/Data/antarctica_general/ismip7_runs/fssa_reference_probe/out/start_dt05.log
+- **Audit:** resid 0.0000 on all 200 rows, exit 0; largest \|dh\| in a step 48.2 m, no cell flipping sign step to step; at 2025.0 against ref_t0_dt0125: thickness RMS 0.468 m, max 177 m; speed RMS 20.4 m/yr; mass -54.7 Gt, VAF -0.202 mm SLE
+- **Notes:** One run of the ISMIP7_FSSA_REFERENCE probe of PR 160: a no-forcing 32 km forward (forcing_callback None, so no SMB and no melt) from the MAP's mixed state, ISMIP7_FIXED_FRONT=1, tripwire printing only. Driver probe.py, runner run.sh, the list matrix.txt and the comparison compare.py sit in the results directory; the comparison matches cells and vertices by coordinate. Stabilization ISMIP7_FSSA_THETA=1, reference start. Arguments: start_dt05 10 0.05 np=2 ISMIP7_FSSA_THETA=1 ISMIP7_FSSA_REFERENCE=start.
+
+### test-32km-fssa-start-dt1
+
+32 km no-forcing forward, apparent MB off: stabilized (theta 1) from `start`, dt 0.1 (PR 160 FSSA reference probe) (done), IU.
+
+- **Task type:** test
+- **Period (yr):** 2015.0 to 2025.0, 100 steps, reached 2025.0
+- **Friction law:** budd
+- **Mesh:** antarctica_320000_32000_buffered0 (sha256 fd66fc42; 6,282 vertices), DG0 geometry
+- **Initial state / MAP:** cold start from the MAP's mixed state, /Volumes/LaCie/Data/antarctica_general/ismip7_runs/pr158_merge/C_32km_scpc_gamg/map.h5 (sha256 feddedd9), the 32 km Budd SEP1 log-control MAP of 432c831
+- **Forcing versions:** none (no SMB, no melt); MEaSUREs and BedMachine from /Volumes/LaCie/Data/antarctica_general/ismip7_obs; ISMIP7_FLUIDITY_PRIOR=legacy
+- **Calving front, collapse:** held fixed (ISMIP7_FIXED_FRONT=1), ice-shelf collapse ISMIP7_FRACTURE=none
+- **Apparent MB:** off
+- **dt (yr):** 0.1
+- **Site / partition:** IU workstation (Mac, 16 cores), up to five runs at once, load average up to 13.7
+- **Ranks / memory:** 2 ranks
+- **Code:** 68d2749 (PR 160 head f441df7 plus the ISMIP7_FSSA_REFERENCE prototype), a git archive in the results directory; icepack_tools e7b923e, icepack2 b20e296
+- **Started:** 2026-10-05
+- **Finished:** 2026-10-05
+- **Cost per model year:** about 4 min wall including about 40 s for the first solve
+- **Results path:** /Volumes/LaCie/Data/antarctica_general/ismip7_runs/fssa_reference_probe/snap_step/antarctica/results/start_dt1_32000_*, /Volumes/LaCie/Data/antarctica_general/ismip7_runs/fssa_reference_probe/out/start_dt1.log
+- **Audit:** resid 0.0000 on all 100 rows, exit 0; largest \|dh\| in a step 91.0 m, no cell flipping sign step to step; at 2025.0 against ref_t0_dt0125: thickness RMS 0.91 m, max 288 m; speed RMS 46.9 m/yr; mass -109.7 Gt, VAF -0.405 mm SLE
+- **Notes:** One run of the ISMIP7_FSSA_REFERENCE probe of PR 160: a no-forcing 32 km forward (forcing_callback None, so no SMB and no melt) from the MAP's mixed state, ISMIP7_FIXED_FRONT=1, tripwire printing only. Driver probe.py, runner run.sh, the list matrix.txt and the comparison compare.py sit in the results directory; the comparison matches cells and vertices by coordinate. Stabilization ISMIP7_FSSA_THETA=1, reference start. Arguments: start_dt1 10 0.1 np=2 ISMIP7_FSSA_THETA=1 ISMIP7_FSSA_REFERENCE=start.
+
+### test-32km-fssa-start-dt2
+
+32 km no-forcing forward, apparent MB off: stabilized (theta 1) from `start`, dt 0.2 (PR 160 FSSA reference probe) (done), IU.
+
+- **Task type:** test
+- **Period (yr):** 2015.0 to 2025.0, 50 steps, reached 2025.0
+- **Friction law:** budd
+- **Mesh:** antarctica_320000_32000_buffered0 (sha256 fd66fc42; 6,282 vertices), DG0 geometry
+- **Initial state / MAP:** cold start from the MAP's mixed state, /Volumes/LaCie/Data/antarctica_general/ismip7_runs/pr158_merge/C_32km_scpc_gamg/map.h5 (sha256 feddedd9), the 32 km Budd SEP1 log-control MAP of 432c831
+- **Forcing versions:** none (no SMB, no melt); MEaSUREs and BedMachine from /Volumes/LaCie/Data/antarctica_general/ismip7_obs; ISMIP7_FLUIDITY_PRIOR=legacy
+- **Calving front, collapse:** held fixed (ISMIP7_FIXED_FRONT=1), ice-shelf collapse ISMIP7_FRACTURE=none
+- **Apparent MB:** off
+- **dt (yr):** 0.2
+- **Site / partition:** IU workstation (Mac, 16 cores), up to five runs at once, load average up to 13.7
+- **Ranks / memory:** 2 ranks
+- **Code:** 68d2749 (PR 160 head f441df7 plus the ISMIP7_FSSA_REFERENCE prototype), a git archive in the results directory; icepack_tools e7b923e, icepack2 b20e296
+- **Started:** 2026-10-05
+- **Finished:** 2026-10-05
+- **Cost per model year:** about 3 min wall including about 40 s for the first solve
+- **Results path:** /Volumes/LaCie/Data/antarctica_general/ismip7_runs/fssa_reference_probe/snap_step/antarctica/results/start_dt2_32000_*, /Volumes/LaCie/Data/antarctica_general/ismip7_runs/fssa_reference_probe/out/start_dt2.log
+- **Audit:** resid 0.0000 on all 50 rows, exit 0; largest \|dh\| in a step 162.9 m, no cell flipping sign step to step; at 2025.0 against ref_t0_dt0125: thickness RMS 1.84 m, max 393 m; speed RMS 111 m/yr; mass -210.8 Gt, VAF -0.767 mm SLE
+- **Notes:** One run of the ISMIP7_FSSA_REFERENCE probe of PR 160: a no-forcing 32 km forward (forcing_callback None, so no SMB and no melt) from the MAP's mixed state, ISMIP7_FIXED_FRONT=1, tripwire printing only. Driver probe.py, runner run.sh, the list matrix.txt and the comparison compare.py sit in the results directory; the comparison matches cells and vertices by coordinate. Stabilization ISMIP7_FSSA_THETA=1, reference start. Arguments: start_dt2 10 0.2 np=2 ISMIP7_FSSA_THETA=1 ISMIP7_FSSA_REFERENCE=start.
+
+### test-32km-fssa-step-dt05
+
+32 km no-forcing forward, apparent MB off: stabilized (theta 1) from `step`, dt 0.05 (PR 160 FSSA reference probe) (done), IU.
+
+- **Task type:** test
+- **Period (yr):** 2015.0 to 2025.0, 200 steps, reached 2025.0
+- **Friction law:** budd
+- **Mesh:** antarctica_320000_32000_buffered0 (sha256 fd66fc42; 6,282 vertices), DG0 geometry
+- **Initial state / MAP:** cold start from the MAP's mixed state, /Volumes/LaCie/Data/antarctica_general/ismip7_runs/pr158_merge/C_32km_scpc_gamg/map.h5 (sha256 feddedd9), the 32 km Budd SEP1 log-control MAP of 432c831
+- **Forcing versions:** none (no SMB, no melt); MEaSUREs and BedMachine from /Volumes/LaCie/Data/antarctica_general/ismip7_obs; ISMIP7_FLUIDITY_PRIOR=legacy
+- **Calving front, collapse:** held fixed (ISMIP7_FIXED_FRONT=1), ice-shelf collapse ISMIP7_FRACTURE=none
+- **Apparent MB:** off
+- **dt (yr):** 0.05
+- **Site / partition:** IU workstation (Mac, 16 cores), up to five runs at once, load average up to 13.7
+- **Ranks / memory:** 2 ranks
+- **Code:** 68d2749 (PR 160 head f441df7 plus the ISMIP7_FSSA_REFERENCE prototype), a git archive in the results directory; icepack_tools e7b923e, icepack2 b20e296
+- **Started:** 2026-10-05
+- **Finished:** 2026-10-05
+- **Cost per model year:** about 4 min wall including about 40 s for the first solve
+- **Results path:** /Volumes/LaCie/Data/antarctica_general/ismip7_runs/fssa_reference_probe/snap_step/antarctica/results/step_dt05_32000_*, /Volumes/LaCie/Data/antarctica_general/ismip7_runs/fssa_reference_probe/out/step_dt05.log
+- **Audit:** resid 0.0000 on all 200 rows, exit 0; largest \|dh\| in a step 48.2 m, no cell flipping sign step to step; at 2025.0 against ref_t0_dt0125: thickness RMS 0.0622 m, max 4.54 m; speed RMS 8.23 m/yr; mass +15.8 Gt, VAF +0.058 mm SLE
+- **Notes:** One run of the ISMIP7_FSSA_REFERENCE probe of PR 160: a no-forcing 32 km forward (forcing_callback None, so no SMB and no melt) from the MAP's mixed state, ISMIP7_FIXED_FRONT=1, tripwire printing only. Driver probe.py, runner run.sh, the list matrix.txt and the comparison compare.py sit in the results directory; the comparison matches cells and vertices by coordinate. Stabilization ISMIP7_FSSA_THETA=1, reference step. Arguments: step_dt05 10 0.05 np=2 ISMIP7_FSSA_THETA=1 ISMIP7_FSSA_REFERENCE=step.
+
+### test-32km-fssa-step-dt1
+
+32 km no-forcing forward, apparent MB off: stabilized (theta 1) from `step`, dt 0.1 (PR 160 FSSA reference probe) (done), IU.
+
+- **Task type:** test
+- **Period (yr):** 2015.0 to 2025.0, 100 steps, reached 2025.0
+- **Friction law:** budd
+- **Mesh:** antarctica_320000_32000_buffered0 (sha256 fd66fc42; 6,282 vertices), DG0 geometry
+- **Initial state / MAP:** cold start from the MAP's mixed state, /Volumes/LaCie/Data/antarctica_general/ismip7_runs/pr158_merge/C_32km_scpc_gamg/map.h5 (sha256 feddedd9), the 32 km Budd SEP1 log-control MAP of 432c831
+- **Forcing versions:** none (no SMB, no melt); MEaSUREs and BedMachine from /Volumes/LaCie/Data/antarctica_general/ismip7_obs; ISMIP7_FLUIDITY_PRIOR=legacy
+- **Calving front, collapse:** held fixed (ISMIP7_FIXED_FRONT=1), ice-shelf collapse ISMIP7_FRACTURE=none
+- **Apparent MB:** off
+- **dt (yr):** 0.1
+- **Site / partition:** IU workstation (Mac, 16 cores), up to five runs at once, load average up to 13.7
+- **Ranks / memory:** 2 ranks
+- **Code:** 68d2749 (PR 160 head f441df7 plus the ISMIP7_FSSA_REFERENCE prototype), a git archive in the results directory; icepack_tools e7b923e, icepack2 b20e296
+- **Started:** 2026-10-05
+- **Finished:** 2026-10-05
+- **Cost per model year:** about 4 min wall including about 40 s for the first solve
+- **Results path:** /Volumes/LaCie/Data/antarctica_general/ismip7_runs/fssa_reference_probe/snap_step/antarctica/results/step_dt1_32000_*, /Volumes/LaCie/Data/antarctica_general/ismip7_runs/fssa_reference_probe/out/step_dt1.log
+- **Audit:** resid 0.0000 on all 100 rows, exit 0; largest \|dh\| in a step 91.0 m, no cell flipping sign step to step; at 2025.0 against ref_t0_dt0125: thickness RMS 0.112 m, max 8.06 m; speed RMS 13.9 m/yr; mass +26.1 Gt, VAF +0.100 mm SLE
+- **Notes:** One run of the ISMIP7_FSSA_REFERENCE probe of PR 160: a no-forcing 32 km forward (forcing_callback None, so no SMB and no melt) from the MAP's mixed state, ISMIP7_FIXED_FRONT=1, tripwire printing only. Driver probe.py, runner run.sh, the list matrix.txt and the comparison compare.py sit in the results directory; the comparison matches cells and vertices by coordinate. Stabilization ISMIP7_FSSA_THETA=1, reference step. Arguments: step_dt1 10 0.1 np=2 ISMIP7_FSSA_THETA=1 ISMIP7_FSSA_REFERENCE=step.
+
+### test-32km-fssa-step-dt2
+
+32 km no-forcing forward, apparent MB off: stabilized (theta 1) from `step`, dt 0.2 (PR 160 FSSA reference probe) (done), IU.
+
+- **Task type:** test
+- **Period (yr):** 2015.0 to 2025.0, 50 steps, reached 2025.0
+- **Friction law:** budd
+- **Mesh:** antarctica_320000_32000_buffered0 (sha256 fd66fc42; 6,282 vertices), DG0 geometry
+- **Initial state / MAP:** cold start from the MAP's mixed state, /Volumes/LaCie/Data/antarctica_general/ismip7_runs/pr158_merge/C_32km_scpc_gamg/map.h5 (sha256 feddedd9), the 32 km Budd SEP1 log-control MAP of 432c831
+- **Forcing versions:** none (no SMB, no melt); MEaSUREs and BedMachine from /Volumes/LaCie/Data/antarctica_general/ismip7_obs; ISMIP7_FLUIDITY_PRIOR=legacy
+- **Calving front, collapse:** held fixed (ISMIP7_FIXED_FRONT=1), ice-shelf collapse ISMIP7_FRACTURE=none
+- **Apparent MB:** off
+- **dt (yr):** 0.2
+- **Site / partition:** IU workstation (Mac, 16 cores), up to five runs at once, load average up to 13.7
+- **Ranks / memory:** 2 ranks
+- **Code:** 68d2749 (PR 160 head f441df7 plus the ISMIP7_FSSA_REFERENCE prototype), a git archive in the results directory; icepack_tools e7b923e, icepack2 b20e296
+- **Started:** 2026-10-05
+- **Finished:** 2026-10-05
+- **Cost per model year:** about 3 min wall including about 40 s for the first solve
+- **Results path:** /Volumes/LaCie/Data/antarctica_general/ismip7_runs/fssa_reference_probe/snap_step/antarctica/results/step_dt2_32000_*, /Volumes/LaCie/Data/antarctica_general/ismip7_runs/fssa_reference_probe/out/step_dt2.log
+- **Audit:** resid 0.0000 on all 50 rows, exit 0; largest \|dh\| in a step 162.9 m, no cell flipping sign step to step; at 2025.0 against ref_t0_dt0125: thickness RMS 0.203 m, max 14.6 m; speed RMS 21.1 m/yr; mass +42.6 Gt, VAF +0.171 mm SLE
+- **Notes:** One run of the ISMIP7_FSSA_REFERENCE probe of PR 160: a no-forcing 32 km forward (forcing_callback None, so no SMB and no melt) from the MAP's mixed state, ISMIP7_FIXED_FRONT=1, tripwire printing only. Driver probe.py, runner run.sh, the list matrix.txt and the comparison compare.py sit in the results directory; the comparison matches cells and vertices by coordinate. Stabilization ISMIP7_FSSA_THETA=1, reference step. Arguments: step_dt2 10 0.2 np=2 ISMIP7_FSSA_THETA=1 ISMIP7_FSSA_REFERENCE=step.
+
+### test-32km-fssa-t0-dt1
+
+32 km no-forcing forward, apparent MB off: unstabilized at dt 0.1 (PR 160 FSSA reference probe) (done), IU.
+
+- **Task type:** test
+- **Period (yr):** 2015.0 to 2025.0, 100 steps, reached 2025.0
+- **Friction law:** budd
+- **Mesh:** antarctica_320000_32000_buffered0 (sha256 fd66fc42; 6,282 vertices), DG0 geometry
+- **Initial state / MAP:** cold start from the MAP's mixed state, /Volumes/LaCie/Data/antarctica_general/ismip7_runs/pr158_merge/C_32km_scpc_gamg/map.h5 (sha256 feddedd9), the 32 km Budd SEP1 log-control MAP of 432c831
+- **Forcing versions:** none (no SMB, no melt); MEaSUREs and BedMachine from /Volumes/LaCie/Data/antarctica_general/ismip7_obs; ISMIP7_FLUIDITY_PRIOR=legacy
+- **Calving front, collapse:** held fixed (ISMIP7_FIXED_FRONT=1), ice-shelf collapse ISMIP7_FRACTURE=none
+- **Apparent MB:** off
+- **dt (yr):** 0.1
+- **Site / partition:** IU workstation (Mac, 16 cores), up to five runs at once, load average up to 13.7
+- **Ranks / memory:** 2 ranks
+- **Code:** 68d2749 (PR 160 head f441df7 plus the ISMIP7_FSSA_REFERENCE prototype), a git archive in the results directory; icepack_tools e7b923e, icepack2 b20e296
+- **Started:** 2026-10-05
+- **Finished:** 2026-10-05
+- **Cost per model year:** about 4 min wall including about 40 s for the first solve
+- **Results path:** /Volumes/LaCie/Data/antarctica_general/ismip7_runs/fssa_reference_probe/snap_step/antarctica/results/t0_dt1_32000_*, /Volumes/LaCie/Data/antarctica_general/ismip7_runs/fssa_reference_probe/out/t0_dt1.log
+- **Audit:** resid 0.0000 on all 100 rows, exit 0; largest \|dh\| in a step 91.0 m, no cell flipping sign step to step; at 2025.0 against ref_t0_dt0125: thickness RMS 0.0687 m, max 1.91 m; speed RMS 3.35 m/yr; mass -25.0 Gt, VAF -0.076 mm SLE
+- **Notes:** One run of the ISMIP7_FSSA_REFERENCE probe of PR 160: a no-forcing 32 km forward (forcing_callback None, so no SMB and no melt) from the MAP's mixed state, ISMIP7_FIXED_FRONT=1, tripwire printing only. Driver probe.py, runner run.sh, the list matrix.txt and the comparison compare.py sit in the results directory; the comparison matches cells and vertices by coordinate. Stabilization off (ISMIP7_FSSA_THETA=0). Arguments: t0_dt1 10 0.1 np=2 ISMIP7_FSSA_THETA=0.
+
+### test-32km-fssa-t0-dt2
+
+32 km no-forcing forward, apparent MB off: unstabilized at dt 0.2 (PR 160 FSSA reference probe) (done), IU.
+
+- **Task type:** test
+- **Period (yr):** 2015.0 to 2025.0, 50 steps, reached 2025.0
+- **Friction law:** budd
+- **Mesh:** antarctica_320000_32000_buffered0 (sha256 fd66fc42; 6,282 vertices), DG0 geometry
+- **Initial state / MAP:** cold start from the MAP's mixed state, /Volumes/LaCie/Data/antarctica_general/ismip7_runs/pr158_merge/C_32km_scpc_gamg/map.h5 (sha256 feddedd9), the 32 km Budd SEP1 log-control MAP of 432c831
+- **Forcing versions:** none (no SMB, no melt); MEaSUREs and BedMachine from /Volumes/LaCie/Data/antarctica_general/ismip7_obs; ISMIP7_FLUIDITY_PRIOR=legacy
+- **Calving front, collapse:** held fixed (ISMIP7_FIXED_FRONT=1), ice-shelf collapse ISMIP7_FRACTURE=none
+- **Apparent MB:** off
+- **dt (yr):** 0.2
+- **Site / partition:** IU workstation (Mac, 16 cores), up to five runs at once, load average up to 13.7
+- **Ranks / memory:** 2 ranks
+- **Code:** 68d2749 (PR 160 head f441df7 plus the ISMIP7_FSSA_REFERENCE prototype), a git archive in the results directory; icepack_tools e7b923e, icepack2 b20e296
+- **Started:** 2026-10-05
+- **Finished:** 2026-10-05
+- **Cost per model year:** about 4 min wall including about 40 s for the first solve
+- **Results path:** /Volumes/LaCie/Data/antarctica_general/ismip7_runs/fssa_reference_probe/snap_step/antarctica/results/t0_dt2_32000_*, /Volumes/LaCie/Data/antarctica_general/ismip7_runs/fssa_reference_probe/out/t0_dt2.log
+- **Audit:** resid 0.0000 on all 50 rows, exit 0; largest \|dh\| in a step 162.9 m, no cell flipping sign step to step; at 2025.0 against ref_t0_dt0125: thickness RMS 0.15 m, max 4.17 m; speed RMS 8.31 m/yr; mass -54.9 Gt, VAF -0.167 mm SLE
+- **Notes:** One run of the ISMIP7_FSSA_REFERENCE probe of PR 160: a no-forcing 32 km forward (forcing_callback None, so no SMB and no melt) from the MAP's mixed state, ISMIP7_FIXED_FRONT=1, tripwire printing only. Driver probe.py, runner run.sh, the list matrix.txt and the comparison compare.py sit in the results directory; the comparison matches cells and vertices by coordinate. Stabilization off (ISMIP7_FSSA_THETA=0). Arguments: t0_dt2 10 0.2 np=2 ISMIP7_FSSA_THETA=0.
 
 ### test-32km-inversion-defaults-check
 

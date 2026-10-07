@@ -9,9 +9,9 @@ gitignored, so these records and the per-core reports beside them are
 the trace a run leaves in the repository. A core experiment also gets
 its full report from `core_report.py`; this is the index.
 
-306 records.
+307 records.
 
-Status: 16 planned, 5 running, 25 stopped, 243 done, 17 superseded.
+Status: 14 planned, 5 running, 27 stopped, 244 done, 17 superseded.
 
 ## Inversion
 
@@ -20,13 +20,13 @@ Status: 16 planned, 5 running, 25 stopped, 243 done, 17 superseded.
 | 1 km inversion | planned | antarctica_10000_1000_buffered20000, 1 km fine, 10 km interior, 20 km buffer | nots, long partition | - | - | - |
 | 25 km Budd re-inversion for the rehearsal, warm-started across meshes from the 2 km snapshot 0241 | done | antarctica_250000_25000_buffered20000 (IU's build, 4,509 vertices, 7,615 cells, md5 3e8b44b0), DG0 geometry, vertex raster sampling | IU Quartz, general partition | 2026-09-27 | 2026-09-27 | the PR 123 ramp converged on its first rung (8 steps); the log-velocity weight 85380.4 was held from the warm start across meshes (issue 68; a fresh derivation gives 3.68e4 at the start and 1.77e4 at iteration 50). Objective 3.511e5 to 1.078e5 over 50 iterations; iterations 40 to 50 still lowered it 1.18 percent, so the budget was extended as planned and the second link converged on the relative decrease (ftol 1e-10) at its 88th iteration, total 1.051e5. theta in -0.93 to 4.54, phi in -2.55 to 0.39. Published-state residual 7.48e3 after a final solve that converged in 0 Newton iterations |
 | Budd re-inversion on the relaxed geometry, 250 iterations | planned | antarctica_5000_2000_buffered20000 (IU's build, 969,764 vertices), DG0 geometry, the production MAP's own mesh (ISMIP7_MESH=checkpoint) | IU Quartz, general partition | - | - | - |
-| Budd relaxation year of the relaxed initial state: 2014 to 2015 on OCX's 2014 forcing | planned | antarctica_5000_2000_buffered20000 (IU's build, 969,764 vertices), DG0 geometry, the production MAP's own mesh (ISMIP7_MESH=checkpoint) | IU Quartz, general partition | - | - | - |
+| Budd relaxation year of the relaxed initial state: 2014 to 2015 on OCX's 2014 forcing | stopped | antarctica_5000_2000_buffered20000 (IU's build, 969,764 vertices), DG0 geometry, the production MAP's own mesh (ISMIP7_MESH=checkpoint) | IU Quartz, general partition | 2026-10-06 | 2026-10-07 | timed out at the 6 h limit without a step: the first diagnostic solve from the MAP's state on the backdated geometry diverged under ISMIP7_DIAGNOSTIC_LINEAR_SOLVER=scpc_gamg (50 Newton iterations, \|\|F\|\| 2.0e13), and the fallback cold continuation from 0.1 u_obs sat in its n=1 step 1 for the rest of the job. Nothing was written beside the production MAPs. The production inversions run scpc_mumps or full_mumps because scpc_gamg stalls at this regularization; the forward's solver and the backdate have not been separated. Held by IU on 7 Oct; log /N/scratch/dlilien/ismip7_reinvert_relax/logs/ismip7_fwd_11489435.out |
 | Budd final-product inversion on the 20 km buffered 2 km mesh: gamma x0.01, fluidity on floating ice only, 2.5 m floor | running | antarctica_5000_2000_buffered20000 (IU's build, 969,764 vertices), DG0 geometry, vertex raster sampling, the lake fix | IU Quartz, general partition | 2026-10-06 | - | first checkpoint (check_phi_grounded.py, job 11469157): phi exactly 0 on all 658,217 held nodes of 969,764 (largest \|phi\| 0.0), and the MAP records fluidity_control=floating, phi_grounded=zero, h_visc_floor=2.5, drag_gate=vertex, exact_front=1; evaluation 1 total 4,329.3 (Budd stage 1 recorded 2,762.5 on Rice's mesh with grounded phi inverted), 37 to 66 s an evaluation |
 | 2 km Budd inversion under the bilaplacian prior | running | antarctica_5000_2000_buffered0, 2 km fine, 5 km interior, no buffer | nots, long partition, sapphirerapids | 2026-09-20 | - | misfit 2.04e4 and falling at link three |
 | 2 km Budd re-inversion without the prior mean, on Rice's mesh (stage 1) | stopped | antarctica_5000_2000_buffered0 (Rice's build, 925,183 vertices, 1,835,718 cells, read from the warm start), DG0 geometry, vertex raster sampling | IU Quartz, general partition | 2026-10-01 | 2026-10-01 | stopped at iteration 11 of link 1: misfit 3.302e4 to 2.548e4 (velocity chi2 1.98e4 at the start), 4 trial points rescued by re-ramping, no failure; no checkpoint written (the first is at iteration 20) |
 | 2 km Budd re-inversion without the prior mean, on Rice's mesh (stage 1), restarted on L-BFGS-B and scpc_gamg | done | antarctica_5000_2000_buffered0 (Rice's build, 925,183 vertices, 1,835,718 cells, read from the warm start), DG0 geometry, vertex raster sampling | IU Quartz, general partition | 2026-10-03 | 2026-10-04 | ended at ITERATIONS REACHED LIMIT, 1000 iterations, 24 line-search trials that did not lower the objective, no failed forward. Evaluation 1 reproduces the stopped run's start to every printed digit. From evaluation 1 to 1031: misfit 3.302e4 to 2.454e3, velocity chi2 1.98e4 to 32.8, the log term 0.154 to 0.0284, smoothness 87 and 400 to 206 and 103, total 3.351e4 to 2.763e3. phi spans [-13.2, 2.3] (the warm start [-17.5, 0.16]); its 1st percentile fell from -0.76 to -3.9. theta spans [-3.3, 4.6], 127 nodes above 3 |
 | RC re-inversion on the relaxed geometry, 250 iterations | planned | antarctica_5000_2000_buffered20000 (IU's build, 969,764 vertices), DG0 geometry, the production MAP's own mesh (ISMIP7_MESH=checkpoint) | IU Quartz, general partition | - | - | - |
-| RC relaxation year of the relaxed initial state: 2014 to 2015 on OCX's 2014 forcing | planned | antarctica_5000_2000_buffered20000 (IU's build, 969,764 vertices), DG0 geometry, the production MAP's own mesh (ISMIP7_MESH=checkpoint) | IU Quartz, general partition | - | - | - |
+| RC relaxation year of the relaxed initial state: 2014 to 2015 on OCX's 2014 forcing | stopped | antarctica_5000_2000_buffered20000 (IU's build, 969,764 vertices), DG0 geometry, the production MAP's own mesh (ISMIP7_MESH=checkpoint) | IU Quartz, general partition | 2026-10-06 | 2026-10-06 | timed out at the 6 h limit without a step: the first diagnostic solve from the MAP's state on the backdated geometry diverged under ISMIP7_DIAGNOSTIC_LINEAR_SOLVER=scpc_gamg (50 Newton iterations, \|\|F\|\| 5.9e13), and the fallback cold continuation from 0.1 u_obs sat in its n=1 step 1 for the rest of the job. Nothing was written beside the production MAPs. The production inversions run scpc_mumps or full_mumps because scpc_gamg stalls at this regularization; the forward's solver and the backdate have not been separated. Held by IU on 7 Oct; log /N/scratch/dlilien/ismip7_reinvert_relax/logs/ismip7_fwd_11487501.out |
 | RC final-product inversion on the 20 km buffered 2 km mesh: gamma x0.01, fluidity on floating ice only, 2.5 m floor | running | antarctica_5000_2000_buffered20000 (IU's build, 969,764 vertices), DG0 geometry, vertex raster sampling, the lake fix | IU Quartz, general partition | 2026-10-06 | - | first checkpoint (check_phi_grounded.py, job 11469157): phi exactly 0 on all 658,217 held nodes of 969,764 (largest \|phi\| 0.0), and the MAP records fluidity_control=floating, phi_grounded=zero, h_visc_floor=2.5, drag_gate=vertex, exact_front=1; strict resume reproduced the recorded objective (relative gap 5.6e-12); total 5,546.0 at the resume, 3,572.8 seven evaluations later, 30 to 125 s an evaluation |
 | 2 km regularized-Coulomb inversion under the bilaplacian prior | running | antarctica_5000_2000_buffered0, 2 km fine, 5 km interior, no buffer | nots, long partition, sapphirerapids | 2026-09-20 | - | misfit still falling about half a percent per iteration; never reaches gatol, so the chain caps at four links |
 | 2 km regularized-Coulomb re-inversion without the prior mean, on Rice's mesh (stage 1) | stopped | antarctica_5000_2000_buffered0 (Rice's build, 925,183 vertices, 1,835,718 cells, read from the warm start), DG0 geometry, vertex raster sampling | IU Quartz, general partition | 2026-10-01 | 2026-10-01 | stopped at iteration 7 of link 1: misfit 3.315e4 to 3.105e4, 1 trial point rescued; no checkpoint written. Rice's own objective on this file under the current code gives 3.563e4 against the 2.465e4 Rice printed (validation 10818658) |
@@ -304,6 +304,7 @@ Status: 16 planned, 5 running, 25 stopped, 243 done, 17 superseded.
 | 4 km inversion, 10 TAO iterations under scpc_gamg, SEP1 and the direct forward, against full_mumps | done | antarctica_40000_4000_buffered0, the mesh of test-4km-inversion-eval-spans (sha256 b5924123; 117,348 vertices, 226,866 cells), DG0 geometry, vertex raster sampling | IU workstation (Mac, 16 cores, 128 GB), data under /Volumes/LaCie/Data/antarctica_general/ismip7_obs | 2026-10-02 | 2026-10-02 | 10 TAO iterations, objective 9.243682e3 to 6.312668e3; every direct forward converged (2 to 6 Newton iterations), no lost trial, no rescue; published residual 4.8e-4; every iteration's objective within 9.2e-11 and gradient norm within 1.2e-9 of the other solver's |
 | 8 km inversion, 10 TAO iterations under full_mumps, SEP1 and the direct forward, against scpc_gamg | done | antarctica_80000_8000_buffered0, built on this workstation with mesh_antarctica.py --lc 8000 --lc-coarse 80000 --buffer-m 0 (sha256 267a1265; 34,714 vertices, 64,228 cells), DG0 geometry, vertex raster sampling | IU workstation (Mac, 16 cores, 128 GB), data under /Volumes/LaCie/Data/antarctica_general/ismip7_obs | 2026-10-02 | 2026-10-02 | 10 TAO iterations, objective 7.967201e3 to 5.318421e3; every direct forward converged (2 to 7 Newton iterations), no lost trial, no rescue; published residual 2.4e1; every iteration's objective within 7.3e-11 and gradient norm within 3.4e-9 of the other solver's |
 | 8 km inversion, 10 TAO iterations under scpc_gamg, SEP1 and the direct forward, against full_mumps | done | antarctica_80000_8000_buffered0, built on this workstation with mesh_antarctica.py --lc 8000 --lc-coarse 80000 --buffer-m 0 (sha256 267a1265; 34,714 vertices, 64,228 cells), DG0 geometry, vertex raster sampling | IU workstation (Mac, 16 cores, 128 GB), data under /Volumes/LaCie/Data/antarctica_general/ismip7_obs | 2026-10-02 | 2026-10-02 | 10 TAO iterations, objective 7.967201e3 to 5.318421e3; every direct forward converged (2 to 7 Newton iterations), no lost trial, no rescue; published residual 2.4e1; every iteration's objective within 7.3e-11 and gradient norm within 3.4e-9 of the other solver's |
+| 32 km relaxation year on OCX's 2014 protocol forcing on Quartz, then a 2-iteration re-inversion | done | antarctica_320000_32000_buffered0, DG0 geometry, ISMIP7_MESH=checkpoint | IU Quartz, debug partition | 2026-10-06 | 2026-10-06 | year: resid 0.00 on every step, SMB +2,335, melt -1,034, outflux -1,670 Gt/yr at the last step, chain finished at 2015.0. Re-inversion: 21 evaluations, then a taped solve raised an exception the driver does not catch and the job aborted (exit 137); it ran a deliberately mismatched objective (the issue #153 stage-1 prior on a MAP inverted otherwise, ISMIP7_WARM_START_STRICT=0) |
 | One rank of four killed by the OOM killer or raising while the others wait in a barrier, launched by plain srun and by ismip7_mpirun's --kill-on-bad-exit=1 --oom-kill-step=1: does the step end | done | none (a 4-rank mpi4py probe, oom_probe.py) | IU Quartz, general partition, Slurm 25.11.8 with KillOnBadExit=0 and TaskPluginParam unset (no OOMKillStep) | 2026-10-06 | 2026-10-06 | OOM under plain srun: the step was still running 2 min 10 s after Slurm logged the oom_kill event, three ranks waiting in the barrier, as in job 10971250 (cancelled by hand). OOM under ismip7_mpirun: srun printed 'Terminating StepId' and the step ended within the second Slurm logged the oom_kill event, every task Out Of Memory, jobs of 12 and 13 s in all; srun returned 1 (11464621, the first probe's script did not capture it). Raise with Firedrake imported: Firedrake's abort ends the step either way, in 14 s under ismip7_mpirun and 45 s under plain srun (Slurm's 32 s abort wait). Raise without Firedrake: the raising rank never exits (mpi4py blocks in MPI_Finalize), so neither launcher ends the step (both cancelled by hand); every ISMIP7 driver imports Firedrake. |
 | Bi-Laplacian prior solve, per evaluation, on the 32 km mesh refined to 1.19 million vertices (probe_eval_overhead.py) | done | antarctica_320000_32000_buffered0 (sha256 fd66fc42) refined uniformly by MeshHierarchy, levels 0 to 4: 6,282, 21,618, 79,455, 303,789 and 1,187,097 vertices; CG1 controls | IU workstation (Mac, 16 cores, 128 GB), data under /Volumes/LaCie/Data/antarctica_general/ismip7_obs; another session's 8-rank jobs shared the machine for most runs (load at each start in its commit.txt) | 2026-10-02 | 2026-10-02 | At 1,187,097 vertices, seconds an evaluation for both controls on 1 / 2 / 4 / 8 ranks (sweep 2): the residual-form solve the driver used 9.8 / 9.1 / 8.3 / 8.2 (sweep 1: 9.4 / 9.0 / 8.8 / 8.5), with MUMPS parallel analysis 10.1 / 4.7 / 2.9 / 3.0, factored 0.22 / 0.15 / 0.10 / 0.12 after a 4.1 to 4.8 s first call, CG with Jacobi 0.26 / 0.14 / 0.08 / 0.10 (22 iterations); TAO tape forward plus adjoint 15.3 / 13.9 / 12.6 / 12.4 before and 0.40 / 0.27 / 0.18 / 0.21 factored. The old solve grows linearly with the vertex count (6.9 to 8.2 us a vertex at level 4) and does not fall with the rank count. Energies agree to 3e-16 and taped gradients to 2e-16. The replicated gathers took 0.13 s on 1 rank and at most 0.02 s on more |
 
@@ -404,12 +405,15 @@ Budd re-inversion on the relaxed geometry, 250 iterations (planned), IU.
 - **Initial state / MAP:** inversion-2km-budd-b20k-relax2014-year's end state; theta kept
 - **Forcing versions:** inversion-2km-budd-b20k-rho7500-floating's objective, carried by the end state and held by the strict handoff
 - **Site / partition:** IU Quartz, general partition
-- **Ranks / memory:** one link sized from the production chain's seconds per evaluation (about 260 evaluations), ISMIP7_MAXITER=250, ISMIP7_CHAIN_MAX=0
-- **Notes:** The MAP is one of the initial-state options the forwards can start from in 2003 (INVERSION_PRIORS.md section 6); issue #162
+- **Ranks / memory:** 32 ranks, 240G, 6 h, one link (afterok on the relaxation year): Budd's production chain took 53 s an evaluation over its first 330, so about 3.8 h for 260; ISMIP7_MAXITER=250, ISMIP7_CHAIN_MAX=0; a verify job checks the production MAP's sha256 afterwards
+- **Job ids:** 11489436 11489437
+- **Code:** 8a55a20 (PR 163); Quartz worktree /N/scratch/dlilien/ismip7_reinvert_relax; cells relax_<law> and reinv_relax_<law> of /N/scratch/dlilien/ismip7_reinvert_jobs/submit_reinvert.sh, which shares prod_settings() with the production cells
+- **Results path:** /N/project/ice_rheology/ISMIP7/antarctica/results/reinvert_2km/final/inversion_icepack2_budd_n3_dg0_logvel_2000_int5000_b20k_rho7500_floating_relax2014.h5 beside the production MAP, which is read only
+- **Notes:** First attempt (jobs 11489436 and its verify 11489437) cancelled on 7 Oct without starting: its relaxation year failed. Resubmitted by the trigger once the year runs. The MAP is one of the initial-state options the forwards can start from in 2003 (INVERSION_PRIORS.md section 6); issue #162
 
 ### inversion-2km-budd-b20k-relax2014-year
 
-Budd relaxation year of the relaxed initial state: 2014 to 2015 on OCX's 2014 forcing (planned), IU.
+Budd relaxation year of the relaxed initial state: 2014 to 2015 on OCX's 2014 forcing (stopped), IU.
 
 - **Task type:** inversion
 - **Period (yr):** 2014.0 to 2015.0 at dt 0.0125 (80 steps)
@@ -418,7 +422,14 @@ Budd relaxation year of the relaxed initial state: 2014 to 2015 on OCX's 2014 fo
 - **Initial state / MAP:** inversion-2km-budd-b20k-rho7500-floating's final MAP, rewound 1 yr with the Smith dH/dt on grounded ice
 - **Forcing versions:** OCX protocol forcing for 2014 (ISMIP7_EXPERIMENT=relax), apparent MB off, front pinned
 - **Site / partition:** IU Quartz, general partition
-- **Notes:** Runs once the production chain has finished; its end state seeds the re-inversion below. README, "The relaxed initial state"; issue #162
+- **Ranks / memory:** 32 ranks, 160G, 6 h (projection.sbatch, ISMIP7_EXPERIMENT=relax)
+- **Job ids:** 11487469 11489435
+- **Code:** 8a55a20 (PR 163); Quartz worktree /N/scratch/dlilien/ismip7_reinvert_relax; cells relax_<law> and reinv_relax_<law> of /N/scratch/dlilien/ismip7_reinvert_jobs/submit_reinvert.sh, which shares prod_settings() with the production cells
+- **Started:** 2026-10-06
+- **Finished:** 2026-10-07
+- **Cost per model year:** 6 h of 32 ranks, no step
+- **Audit:** timed out at the 6 h limit without a step: the first diagnostic solve from the MAP's state on the backdated geometry diverged under ISMIP7_DIAGNOSTIC_LINEAR_SOLVER=scpc_gamg (50 Newton iterations, \|\|F\|\| 2.0e13), and the fallback cold continuation from 0.1 u_obs sat in its n=1 step 1 for the rest of the job. Nothing was written beside the production MAPs. The production inversions run scpc_mumps or full_mumps because scpc_gamg stalls at this regularization; the forward's solver and the backdate have not been separated. Held by IU on 7 Oct; log /N/scratch/dlilien/ismip7_reinvert_relax/logs/ismip7_fwd_11489435.out
+- **Notes:** Trigger 11487469 handed off at 18:54 EDT on 6 Oct, after the Budd production chain reached its 500 iterations (\|grad\| 0.13) at 18:51. README, "The relaxed initial state"; issue #162
 
 ### inversion-2km-budd-b20k-rho7500-floating
 
@@ -513,12 +524,15 @@ RC re-inversion on the relaxed geometry, 250 iterations (planned), IU.
 - **Initial state / MAP:** inversion-2km-rc-b20k-relax2014-year's end state; theta kept
 - **Forcing versions:** inversion-2km-rc-b20k-rho7500-floating's objective, carried by the end state and held by the strict handoff
 - **Site / partition:** IU Quartz, general partition
-- **Ranks / memory:** one link sized from the production chain's seconds per evaluation (about 260 evaluations), ISMIP7_MAXITER=250, ISMIP7_CHAIN_MAX=0
-- **Notes:** The MAP is one of the initial-state options the forwards can start from in 2003 (INVERSION_PRIORS.md section 6); issue #162
+- **Ranks / memory:** 32 ranks, 240G, 16 h, one link (afterok on the relaxation year): RC's production chain took 142 s an evaluation over its 107, so about 10.3 h for 260; ISMIP7_MAXITER=250, ISMIP7_CHAIN_MAX=0; 11487503 checks the production MAP's sha256 afterwards
+- **Job ids:** 11487502 11487503
+- **Code:** 8a55a20 (PR 163); Quartz worktree /N/scratch/dlilien/ismip7_reinvert_relax; cells relax_<law> and reinv_relax_<law> of /N/scratch/dlilien/ismip7_reinvert_jobs/submit_reinvert.sh, which shares prod_settings() with the production cells
+- **Results path:** /N/project/ice_rheology/ISMIP7/antarctica/results/reinvert_2km/final/inversion_icepack2_rc_n3_dg0_logvel_2000_int5000_b20k_rho7500_floating_relax2014.h5 beside the production MAP, which is read only
+- **Notes:** First attempt (jobs 11487502 and its verify 11487503) cancelled on 7 Oct without starting: its relaxation year failed. Resubmitted by the trigger once the year runs. The MAP is one of the initial-state options the forwards can start from in 2003 (INVERSION_PRIORS.md section 6); issue #162
 
 ### inversion-2km-rc-b20k-relax2014-year
 
-RC relaxation year of the relaxed initial state: 2014 to 2015 on OCX's 2014 forcing (planned), IU.
+RC relaxation year of the relaxed initial state: 2014 to 2015 on OCX's 2014 forcing (stopped), IU.
 
 - **Task type:** inversion
 - **Period (yr):** 2014.0 to 2015.0 at dt 0.0125 (80 steps)
@@ -527,7 +541,15 @@ RC relaxation year of the relaxed initial state: 2014 to 2015 on OCX's 2014 forc
 - **Initial state / MAP:** inversion-2km-rc-b20k-rho7500-floating's final MAP, rewound 1 yr with the Smith dH/dt on grounded ice
 - **Forcing versions:** OCX protocol forcing for 2014 (ISMIP7_EXPERIMENT=relax), apparent MB off, front pinned
 - **Site / partition:** IU Quartz, general partition
-- **Notes:** Runs once the production chain has finished; its end state seeds the re-inversion below. README, "The relaxed initial state"; issue #162
+- **Ranks / memory:** 32 ranks, 160G, 6 h (projection.sbatch, ISMIP7_EXPERIMENT=relax)
+- **Job ids:** 11487501
+- **Code:** 8a55a20 (PR 163); Quartz worktree /N/scratch/dlilien/ismip7_reinvert_relax; cells relax_<law> and reinv_relax_<law> of /N/scratch/dlilien/ismip7_reinvert_jobs/submit_reinvert.sh, which shares prod_settings() with the production cells
+- **Started:** 2026-10-06
+- **Finished:** 2026-10-06
+- **Cost per model year:** 6 h of 32 ranks, no step
+- **Results path:** /N/scratch/dlilien/ismip7_reinvert_relax/antarctica/results/relax_inversion_icepack2_rc_n3_dg0_logvel_2000_int5000_b20k_rho7500_floating_2000_final.h5, copied after the re-inversion to /N/project/ice_rheology/ISMIP7/antarctica/results/reinvert_2km/final/relax_states/
+- **Audit:** timed out at the 6 h limit without a step: the first diagnostic solve from the MAP's state on the backdated geometry diverged under ISMIP7_DIAGNOSTIC_LINEAR_SOLVER=scpc_gamg (50 Newton iterations, \|\|F\|\| 5.9e13), and the fallback cold continuation from 0.1 u_obs sat in its n=1 step 1 for the rest of the job. Nothing was written beside the production MAPs. The production inversions run scpc_mumps or full_mumps because scpc_gamg stalls at this regularization; the forward's solver and the backdate have not been separated. Held by IU on 7 Oct; log /N/scratch/dlilien/ismip7_reinvert_relax/logs/ismip7_fwd_11487501.out
+- **Notes:** Started from the RC production MAP as it stood at 16:43 EDT on 6 Oct (iteration 95, a stop on failed trial forwards that return a zero gradient, which the production chain has since continued on full_mumps, job 11789630). Trigger 11487488. README, "The relaxed initial state"; issue #162
 
 ### inversion-2km-rc-b20k-rho7500-floating
 
@@ -6742,6 +6764,27 @@ The p4 ssp585 at 32 km restarted at 2294.0 on main after pull requests 127 and 1
 - **Results path:** /Volumes/LaCie/Data/antarctica_general/ismip7_runs/pr158_merge/C_8km_scpc_gamg/map.h5 (sha256 4f700762), log.txt, timing.json, code.txt; the wrappers are runm.sh, study.sh and study_exp.sh in pr158_merge
 - **Audit:** 10 TAO iterations, objective 7.967201e3 to 5.318421e3; every direct forward converged (2 to 7 Newton iterations), no lost trial, no rescue; published residual 2.4e1; every iteration's objective within 7.3e-11 and gradient norm within 3.4e-9 of the other solver's
 - **Notes:** the solver pair at 8 km: scpc_gamg against full_mumps (test-8km-inversion-sep1-full-mumps)
+
+### test-quartz-32km-relax-ocx-smoke
+
+32 km relaxation year on OCX's 2014 protocol forcing on Quartz, then a 2-iteration re-inversion (done), IU.
+
+- **Task type:** test
+- **Period (yr):** 2014.0 to 2015.0, 80 steps, reached 2015.0
+- **Friction law:** budd
+- **Mesh:** antarctica_320000_32000_buffered0, DG0 geometry, ISMIP7_MESH=checkpoint
+- **Initial state / MAP:** /N/project/ice_rheology/ISMIP7/antarctica/mesh/inversion_icepack2_budd_n3_dg0_logvelnet_32000.h5, 1 yr of Smith dH/dt undone on 3,995 grounded cells (+45 Gt)
+- **Forcing versions:** OCX protocol: RACMO2.3p2-ERA SDBN1 acabf and the 'main' ocean with the tracked melt calibration; FSSA theta 1, step reference; apparent MB off; front pinned
+- **Site / partition:** IU Quartz, debug partition
+- **Ranks / memory:** 8 ranks, 48G
+- **Job ids:** 11487461 11487462
+- **Code:** 8a55a20 (PR 163); Quartz worktree /N/scratch/dlilien/ismip7_reinvert_relax; cells relax_smoke32 and reinv_smoke32
+- **Started:** 2026-10-06
+- **Finished:** 2026-10-06
+- **Cost per model year:** 15 min for the year; 14 min for the re-inversion until it failed
+- **Results path:** /N/scratch/dlilien/ismip7_reinvert_relax/antarctica/results/relax_inversion_icepack2_budd_n3_dg0_logvelnet_32000_smoke_32000_final.h5; logs /N/scratch/dlilien/ismip7_reinvert_relax/logs/ismip7_fwd_11487461.out, ismip7_inv_11487462.out
+- **Audit:** year: resid 0.00 on every step, SMB +2,335, melt -1,034, outflux -1,670 Gt/yr at the last step, chain finished at 2015.0. Re-inversion: 21 evaluations, then a taped solve raised an exception the driver does not catch and the job aborted (exit 137); it ran a deliberately mismatched objective (the issue #153 stage-1 prior on a MAP inverted otherwise, ISMIP7_WARM_START_STRICT=0)
+- **Notes:** Checks the relaxation path on Quartz with the real OCX product before the 2 km runs; issue #162
 
 ### test-quartz-srun-dead-rank-issue161
 

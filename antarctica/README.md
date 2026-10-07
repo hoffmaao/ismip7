@@ -1306,7 +1306,8 @@ thickness can therefore be small and nonzero.
 
 Momentum needs no front term: under DG0 geometry the facet term
 `rho g avg(h) jump(s)` at an ice/water face is the terminus water-pressure
-force. The one momentum change is the drag gate: the mask is 1 only where `phi`
+force, and at a grounded marine cliff `ISMIP7_EXACT_FRONT` adds the part it
+misses. The one momentum change is the drag gate: the mask is 1 only where `phi`
 exceeds one cell diameter, so floor-cell ocean drag acts only in water further
 than a cell from the front. Thin cells inside the t=0 extent are damped by
 `h_visc_floor`, the friction law and the `ISMIP7_ALPHA_GL` collar. In the strip

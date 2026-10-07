@@ -412,9 +412,8 @@ default, a link takes the log-velocity weight the checkpoint records, so every
 link of one MAP minimises the objective the first link set (issue 68). A warm
 start is read by point location (`transfer.interpolate_with_fill`), so one
 written on another rank count or on another mesh loads correctly. A target
-point outside the warm start's mesh takes the stated fill (theta and phi 0, the
-fluidity prior's constant baseline), and the log counts those points per
-field. A single-node link copies its warm start to node-local `$TMPDIR` first:
+point outside the warm start's mesh takes the fill `ISMIP7_TRANSFER_FILL`
+names (`MAP_CHECK.md`), and the log counts those points per field. A single-node link copies its warm start to node-local `$TMPDIR` first:
 32 ranks reading a 580 MB 2 km MAP over NFS took more than 45 minutes on NOTS.
 A link that loses a rank (the OOM killer, a crash) ends at once (below, "One
 dead rank ends the step") with no `Saved MAP:`, and its queued successor

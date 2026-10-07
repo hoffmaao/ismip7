@@ -9,9 +9,9 @@ gitignored, so these records and the per-core reports beside them are
 the trace a run leaves in the repository. A core experiment also gets
 its full report from `core_report.py`; this is the index.
 
-303 records.
+308 records.
 
-Status: 12 planned, 5 running, 25 stopped, 244 done, 17 superseded.
+Status: 12 planned, 1 queued, 5 running, 25 stopped, 248 done, 17 superseded.
 
 ## Inversion
 
@@ -20,6 +20,7 @@ Status: 12 planned, 5 running, 25 stopped, 244 done, 17 superseded.
 | 1 km inversion | planned | antarctica_10000_1000_buffered20000, 1 km fine, 10 km interior, 20 km buffer | nots, long partition | - | - | - |
 | 25 km Budd re-inversion for the rehearsal, warm-started across meshes from the 2 km snapshot 0241 | done | antarctica_250000_25000_buffered20000 (IU's build, 4,509 vertices, 7,615 cells, md5 3e8b44b0), DG0 geometry, vertex raster sampling | IU Quartz, general partition | 2026-09-27 | 2026-09-27 | the PR 123 ramp converged on its first rung (8 steps); the log-velocity weight 85380.4 was held from the warm start across meshes (issue 68; a fresh derivation gives 3.68e4 at the start and 1.77e4 at iteration 50). Objective 3.511e5 to 1.078e5 over 50 iterations; iterations 40 to 50 still lowered it 1.18 percent, so the budget was extended as planned and the second link converged on the relative decrease (ftol 1e-10) at its 88th iteration, total 1.051e5. theta in -0.93 to 4.54, phi in -2.55 to 0.39. Published-state residual 7.48e3 after a final solve that converged in 0 Newton iterations |
 | Budd final-product inversion on the 20 km buffered 2 km mesh: gamma x0.01, fluidity on floating ice only, 2.5 m floor | running | antarctica_5000_2000_buffered20000 (IU's build, 969,764 vertices), DG0 geometry, vertex raster sampling, the lake fix | IU Quartz, general partition | 2026-10-06 | - | first checkpoint (check_phi_grounded.py, job 11469157): phi exactly 0 on all 658,217 held nodes of 969,764 (largest \|phi\| 0.0), and the MAP records fluidity_control=floating, phi_grounded=zero, h_visc_floor=2.5, drag_gate=vertex, exact_front=1; evaluation 1 total 4,329.3 (Budd stage 1 recorded 2,762.5 on Rice's mesh with grounded phi inverted), 37 to 66 s an evaluation |
+| IU's final Budd MAP refitted under exact_front version 2 (the push of the face above the neighbour's bed) | queued | antarctica_5000_2000_buffered20000 (IU's build, 969,764 vertices), DG0 geometry, vertex raster sampling, the lake fix | IU Quartz, general partition | 2026-10-07 | - | - |
 | 2 km Budd inversion under the bilaplacian prior | running | antarctica_5000_2000_buffered0, 2 km fine, 5 km interior, no buffer | nots, long partition, sapphirerapids | 2026-09-20 | - | misfit 2.04e4 and falling at link three |
 | 2 km Budd re-inversion without the prior mean, on Rice's mesh (stage 1) | stopped | antarctica_5000_2000_buffered0 (Rice's build, 925,183 vertices, 1,835,718 cells, read from the warm start), DG0 geometry, vertex raster sampling | IU Quartz, general partition | 2026-10-01 | 2026-10-01 | stopped at iteration 11 of link 1: misfit 3.302e4 to 2.548e4 (velocity chi2 1.98e4 at the start), 4 trial points rescued by re-ramping, no failure; no checkpoint written (the first is at iteration 20) |
 | 2 km Budd re-inversion without the prior mean, on Rice's mesh (stage 1), restarted on L-BFGS-B and scpc_gamg | done | antarctica_5000_2000_buffered0 (Rice's build, 925,183 vertices, 1,835,718 cells, read from the warm start), DG0 geometry, vertex raster sampling | IU Quartz, general partition | 2026-10-03 | 2026-10-04 | ended at ITERATIONS REACHED LIMIT, 1000 iterations, 24 line-search trials that did not lower the objective, no failed forward. Evaluation 1 reproduces the stopped run's start to every printed digit. From evaluation 1 to 1031: misfit 3.302e4 to 2.454e3, velocity chi2 1.98e4 to 32.8, the log term 0.154 to 0.0284, smoothness 87 and 400 to 206 and 103, total 3.351e4 to 2.763e3. phi spans [-13.2, 2.3] (the warm start [-17.5, 0.16]); its 1st percentile fell from -0.76 to -3.9. theta spans [-3.3, 4.6], 127 nodes above 3 |
@@ -151,6 +152,10 @@ Status: 12 planned, 5 running, 25 stopped, 244 done, 17 superseded.
 | 25 km rehearsal MAP: t=0 discharge, shelf-gate census and forward self-consistency | done | antarctica_250000_25000_buffered20000, DG0 geometry | IU Quartz, debug partition | 2026-09-27 | 2026-09-27 | grounding-line discharge 2803 Gt/yr against 1848 with the observed velocity (ratio 1.52; observed 2050 plus or minus 100), by observed speed of the source cell 5.61 under 100 m/yr, 0.77 in 100 to 500, 0.38 in 500 to 1500 and 0.32 above 1500. No transfer fill on the MAP's own mesh; the fluidity prior spans 1.0 to 519.9. Under the production HAF gate 0 of 2,884 floating cells carry friction (the old sign test would have put it on 396). The forward re-solve at the MAP's controls matches the MAP's velocity to rel L2 5.9e-8 |
 | 25 km rehearsal probe: the first ten steps of core 1 on production defaults with the apparent mass-balance reference | done | antarctica_250000_25000_buffered20000, DG0 geometry | IU Quartz, general partition | 2026-09-27 | 2026-09-27 | every step converged on its first scpc_gamg direct solve, no rescue, subcycle or tripwire event (speed and thickness bounds armed); a_ref in -438.9 to +609.4 m/yr, net +300.1 Gt/yr; the largest thickness change 1.0 m at step 1 falling to 0.2 m at step 10; dM/dt -143 Gt/yr at step 1 and 0 at step 10; resid 0.00 |
 | 25 km rehearsal probe: the first ten steps of core 1 on production defaults without the apparent mass-balance reference | done | antarctica_250000_25000_buffered20000, DG0 geometry | IU Quartz, general partition (debug refused a third concurrent job) | 2026-09-27 | 2026-09-27 | every step converged on its first scpc_gamg direct solve in 2 to 8 Newton iterations; no rescue, subcycle or tripwire event (speed and thickness bounds armed); mass residual about 1e-8 Gt a step and resid 0.00; speed max 1.65e4 m/yr at step 1, falling to 1.46e4 by step 10; largest relative thickening 1.6 per year in a 112 m floating cell. Budget at step 1: SMB +2435, melt -985, outflux -503, calving -1399, dM/dt -453 Gt/yr |
+| Budd's final MAP at its own controls under exact_front version 1 (the free-cliff push it was inverted with), evaluation 1 | done | antarctica_5000_2000_buffered20000 (IU's build, 969,764 vertices), DG0 geometry, vertex raster sampling, the lake fix | IU Quartz, general partition | 2026-10-07 | 2026-10-07 | evaluation 1: misfit 1,108.24, total 1,388.36, \|grad\| 0.66; first forward 6 Newton iterations. The 7 Oct pre arm on f57b053 gave 1,388.36 / 1,108.2 / 0.66 |
+| Budd's final MAP through the forward's t = 0 solve under exact_front version 1 | done | antarctica_5000_2000_buffered20000 (IU's build, 969,764 vertices), DG0 geometry, vertex raster sampling, the lake fix | IU Quartz, general partition | 2026-10-07 | 2026-10-07 | loaded \|\|F\|\| 6.69e13 re-solved in 15 Newton iterations to 3.87e5; grounded discharge 2,761 Gt/yr against 2,238 with the observed velocity (ratio 1.23) |
+| Budd's final MAP at its own controls under exact_front version 2 (the push of the face above the neighbour's bed), evaluation 1 | done | antarctica_5000_2000_buffered20000 (IU's build, 969,764 vertices), DG0 geometry, vertex raster sampling, the lake fix | IU Quartz, general partition | 2026-10-07 | 2026-10-07 | evaluation 1: misfit 1,113.05 (+0.43 % on version 1), total 1,393.17, \|grad\| 1.70 (2.6 times version 1's); first forward converged in 12 Newton iterations against 6. Restricting the push to ocean facets (2441818, 7 Oct) gave misfit 1,146.8 and \|grad\| 3.28 at the same controls |
+| Budd's final MAP through the forward's t = 0 solve under exact_front version 2 | done | antarctica_5000_2000_buffered20000 (IU's build, 969,764 vertices), DG0 geometry, vertex raster sampling, the lake fix | IU Quartz, general partition | 2026-10-07 | 2026-10-07 | converged in 22 Newton iterations to 1.26e5 (version 1: 15). Grounded discharge 2,758.7 Gt/yr against 2,761.3, -2.6 Gt/yr (-0.09 %); by IMBIE basin at most -0.99 % (basin 6, 48 Gt/yr) and -0.63 % (basin 7, 234 Gt/yr), every other basin within 0.5 %. Speed change by distance to the nearest facet whose push version 2 changes: grounded ice within 2 km p50/p99 0.17/22.9 m/yr, 2 to 6 km 0.06/12.6, 6 to 20 km 0.00/2.6, beyond 20 km 0.00/0.00; floating ice beyond 20 km 0.00/1.9. Grounded area changed by more than 10 m/yr: 494, 1,084, 439 and 0 km^2 in those bands; floating 55, 665, 645 and 39 km^2 |
 | Stage-2 path smoke on the 20 km buffered mesh from Budd's stage-1 checkpoint, constant ring fill | done | antarctica_5000_2000_buffered20000 (IU's build, 969,764 vertices), DG0 geometry, vertex raster sampling, the lake fix | IU Quartz, debug partition | 2026-10-04 | 2026-10-04 | evaluation 1: misfit 5.68e3, smoothness 2.49e4 and 1.21e5, total 1.52e5, against 2.87e3 recorded on Rice's mesh: the step the constant fill puts at the outline. Evaluation 4: smoothness 4.5e3 and 2.5e4, misfit unchanged |
 | Stage-2 path smoke on the 20 km buffered mesh from Budd's stage-1 checkpoint, smooth ring extension | done | antarctica_5000_2000_buffered20000 (IU's build, 969,764 vertices), DG0 geometry, vertex raster sampling, the lake fix | IU Quartz, debug partition | 2026-10-04 | 2026-10-04 | evaluation 1: smoothness 397 and 756, misfit 6.42e3, total 7.58e3 against 1.52e5 under the constant fill; total 7.04e3 at evaluation 3 |
 | 2 km control on the MAP's own mesh, with no transfer | done | antarctica_5000_2000_buffered0 | local workstation | 2026-09-22 | 2026-09-22 | peak speed 17469 m/yr, which is the inversion chain's own warm-start maximum, so the forward reproduces the MAP. Amery reads 5937 m/yr with no transfer at all, against 6041 through the transfer |
@@ -408,6 +413,24 @@ Budd final-product inversion on the 20 km buffered 2 km mesh: gamma x0.01, fluid
 - **Results path:** Quartz /N/project/ice_rheology/ISMIP7/antarctica/results/reinvert_2km/final/inversion_icepack2_budd_n3_dg0_logvel_2000_int5000_b20k_rho7500_floating.h5; evaluation 1 copied to Quartz /N/scratch/dlilien/ismip7_reinvert_jobs/plots/prod_*_eval1.h5
 - **Audit:** first checkpoint (check_phi_grounded.py, job 11469157): phi exactly 0 on all 658,217 held nodes of 969,764 (largest \|phi\| 0.0), and the MAP records fluidity_control=floating, phi_grounded=zero, h_visc_floor=2.5, drag_gate=vertex, exact_front=1; evaluation 1 total 4,329.3 (Budd stage 1 recorded 2,762.5 on Rice's mesh with grounded phi inverted), 37 to 66 s an evaluation
 - **Notes:** issue #153: IU's option set for the final inversion products (Rice prepares its own). Started on full_mumps (jobs 11452513 and 11452520, cancelled after 18 min) and moved to scpc_mumps once test-2km-rc-b20k-rho7500-floating-scpc-mumps showed it 2.4x faster on the same iterates; the full_mumps link had written no checkpoint, so the scpc_mumps chain starts from the warm start. 8 h links at 480G. Memory under scpc_mumps levels off: peak rss_mib 4,271 MiB a rank after 107 evaluations, growing about 1 MiB an evaluation, so about 125 to 135 GB a job; projected to a full link with a 1.3 margin about 200 to 210 GB (mem_project.py)
+
+### inversion-2km-budd-b20k-rho7500-floating-ef2
+
+IU's final Budd MAP refitted under exact_front version 2 (the push of the face above the neighbour's bed) (queued), IU.
+
+- **Task type:** inversion
+- **Period (yr):** 2015 state
+- **Friction law:** budd
+- **Mesh:** antarctica_5000_2000_buffered20000 (IU's build, 969,764 vertices), DG0 geometry, vertex raster sampling, the lake fix
+- **Initial state / MAP:** inversion-2km-budd-b20k-rho7500-floating's final MAP (sha256 1d2e3ae92f91813a), not strict (exact_front 1 -> 2); log-velocity weight 85380.44865839917
+- **Forcing versions:** observations sampled onto this mesh; bilaplacian prior at sigma 30 and rho 7.5 km (gamma x0.01, no prior-mean term), no dH/dt term, log friction control, cell-wise friction, L-BFGS-B without a metric; ISMIP7_FLUIDITY_CONTROL=floating with grounded phi held at zero (phi_grounded=zero), ISMIP7_EXACT_FRONT=2, ISMIP7_DRAG_GATE=vertex, ISMIP7_RC_HVISC_FLOOR=2.5, ISMIP7_TRANSFER_FILL=extend; scpc_mumps
+- **Site / partition:** IU Quartz, general partition
+- **Ranks / memory:** 32 ranks, 240G, ISMIP7_MAXITER=300, ISMIP7_CHAIN_MAX=2, 8 h links
+- **Job ids:** 11828591
+- **Code:** 4426372; Quartz worktree /N/scratch/dlilien/ismip7_reinvert_s10
+- **Started:** 2026-10-07
+- **Results path:** Quartz /N/project/ice_rheology/ISMIP7/antarctica/results/reinvert_2km/final/inversion_icepack2_budd_n3_dg0_logvel_2000_int5000_b20k_rho7500_floating_ef2.h5
+- **Notes:** issue #166: submitted once the Tier-1 check passed (test-2km-budd-b20k-exact-front-v2-eval1 and -t0). At the version 1 controls version 2 gave misfit 1,113.05 against 1,108.24 and \|grad\| 1.70 against 0.66
 
 ### inversion-2km-budd-bilaplacian
 
@@ -3611,6 +3634,90 @@ Unforced one-year forward on the 1 km production mesh from RC's 2 km vertex-gate
 - **Results path:** Quartz antarctica/results/rehearsal_25km/results/hist_cesm2_waccm_r25probenoamb_25000_*
 - **Audit:** every step converged on its first scpc_gamg direct solve in 2 to 8 Newton iterations; no rescue, subcycle or tripwire event (speed and thickness bounds armed); mass residual about 1e-8 Gt a step and resid 0.00; speed max 1.65e4 m/yr at step 1, falling to 1.46e4 by step 10; largest relative thickening 1.6 per year in a 112 m floating cell. Budget at step 1: SMB +2435, melt -985, outflux -503, calving -1399, dM/dt -453 Gt/yr
 - **Notes:** gate G4c of the rehearsal (issue 138): attempt A of the matrix, without the reference, went ahead on it
+
+### test-2km-budd-b20k-exact-front-v1-eval1
+
+Budd's final MAP at its own controls under exact_front version 1 (the free-cliff push it was inverted with), evaluation 1 (done), IU.
+
+- **Task type:** test
+- **Period (yr):** 2015 state
+- **Friction law:** budd
+- **Mesh:** antarctica_5000_2000_buffered20000 (IU's build, 969,764 vertices), DG0 geometry, vertex raster sampling, the lake fix
+- **Initial state / MAP:** inversion-2km-budd-b20k-rho7500-floating's final MAP (sha256 1d2e3ae92f91813a), its controls as the warm start loads them (theta clipped at \|10\|), log-velocity weight 85380.44865839917
+- **Forcing versions:** observations sampled onto this mesh; the final-product objective (bilaplacian sigma 30, rho 7.5 km, no dH/dt term, log friction control, cell-wise friction, L-BFGS-B without a metric); ISMIP7_FLUIDITY_CONTROL=floating ISMIP7_DRAG_GATE=vertex ISMIP7_RC_HVISC_FLOOR=2.5 ISMIP7_TRANSFER_FILL=extend; full_mumps; ISMIP7_EXACT_FRONT=1
+- **Site / partition:** IU Quartz, general partition
+- **Ranks / memory:** 32 ranks, 360G, up to 1 h
+- **Job ids:** 11825453
+- **Code:** 4426372; Quartz worktree /N/scratch/dlilien/ismip7_reinvert_s10
+- **Started:** 2026-10-07
+- **Finished:** 2026-10-07
+- **Cost per model year:** 10 min; ISMIP7_MAXITER=1
+- **Results path:** Quartz /N/scratch/dlilien/ismip7_reinvert_jobs/probe/c166_budd_v1.h5 (one L-BFGS-B iteration past the MAP)
+- **Audit:** evaluation 1: misfit 1,108.24, total 1,388.36, \|grad\| 0.66; first forward 6 Newton iterations. The 7 Oct pre arm on f57b053 gave 1,388.36 / 1,108.2 / 0.66
+- **Notes:** issue #166: the version 1 baseline for test-2km-budd-b20k-exact-front-v2-eval1, rerun on the version 2 code
+
+### test-2km-budd-b20k-exact-front-v1-t0
+
+Budd's final MAP through the forward's t = 0 solve under exact_front version 1 (done), IU.
+
+- **Task type:** test
+- **Period (yr):** 2015 state
+- **Friction law:** budd
+- **Mesh:** antarctica_5000_2000_buffered20000 (IU's build, 969,764 vertices), DG0 geometry, vertex raster sampling, the lake fix
+- **Initial state / MAP:** inversion-2km-budd-b20k-rho7500-floating's final MAP as a restart (sha256 1d2e3ae92f91813a)
+- **Forcing versions:** none: the forward's diagnostic solve at t = 0 through score_map.py --restart (scpc_mumps, ISMIP7_FSSA_THETA=0 so the stabilization's pull toward the MAP velocity is off, ISMIP7_APPARENT_MB=0, the MAP clip at its default 10, which bounds 847 nodes)
+- **Site / partition:** IU Quartz, general partition
+- **Ranks / memory:** 32 ranks, 240G, up to 1 h
+- **Job ids:** 11825457
+- **Code:** 4426372; Quartz worktree /N/scratch/dlilien/ismip7_reinvert_s10
+- **Started:** 2026-10-07
+- **Finished:** 2026-10-07
+- **Cost per model year:** 3 min; the solve 104 s
+- **Results path:** Quartz /N/scratch/dlilien/ismip7_reinvert_jobs/c166/score/inversion_icepack2_budd_n3_dg0_logvel_2000_int5000_b20k_rho7500_floating_t0.h5 and .json
+- **Audit:** loaded \|\|F\|\| 6.69e13 re-solved in 15 Newton iterations to 3.87e5; grounded discharge 2,761 Gt/yr against 2,238 with the observed velocity (ratio 1.23)
+- **Notes:** issue #166: the version 1 reference for test-2km-budd-b20k-exact-front-v2-t0
+
+### test-2km-budd-b20k-exact-front-v2-eval1
+
+Budd's final MAP at its own controls under exact_front version 2 (the push of the face above the neighbour's bed), evaluation 1 (done), IU.
+
+- **Task type:** test
+- **Period (yr):** 2015 state
+- **Friction law:** budd
+- **Mesh:** antarctica_5000_2000_buffered20000 (IU's build, 969,764 vertices), DG0 geometry, vertex raster sampling, the lake fix
+- **Initial state / MAP:** inversion-2km-budd-b20k-rho7500-floating's final MAP (sha256 1d2e3ae92f91813a), its controls as the warm start loads them (theta clipped at \|10\|), log-velocity weight 85380.44865839917; not strict (exact_front 1 -> 2)
+- **Forcing versions:** observations sampled onto this mesh; the final-product objective (bilaplacian sigma 30, rho 7.5 km, no dH/dt term, log friction control, cell-wise friction, L-BFGS-B without a metric); ISMIP7_FLUIDITY_CONTROL=floating ISMIP7_DRAG_GATE=vertex ISMIP7_RC_HVISC_FLOOR=2.5 ISMIP7_TRANSFER_FILL=extend; full_mumps; ISMIP7_EXACT_FRONT=2
+- **Site / partition:** IU Quartz, general partition
+- **Ranks / memory:** 32 ranks, 360G, up to 1 h
+- **Job ids:** 11825454
+- **Code:** 4426372; Quartz worktree /N/scratch/dlilien/ismip7_reinvert_s10
+- **Started:** 2026-10-07
+- **Finished:** 2026-10-07
+- **Cost per model year:** 11 min; ISMIP7_MAXITER=1
+- **Results path:** Quartz /N/scratch/dlilien/ismip7_reinvert_jobs/probe/c166_budd_v2.h5 (one L-BFGS-B iteration past the MAP)
+- **Audit:** evaluation 1: misfit 1,113.05 (+0.43 % on version 1), total 1,393.17, \|grad\| 1.70 (2.6 times version 1's); first forward converged in 12 Newton iterations against 6. Restricting the push to ocean facets (2441818, 7 Oct) gave misfit 1,146.8 and \|grad\| 3.28 at the same controls
+- **Notes:** issue #166: how far the final Budd MAP's controls lean on the free-cliff push into rock above the ice surface
+
+### test-2km-budd-b20k-exact-front-v2-t0
+
+Budd's final MAP through the forward's t = 0 solve under exact_front version 2 (done), IU.
+
+- **Task type:** test
+- **Period (yr):** 2015 state
+- **Friction law:** budd
+- **Mesh:** antarctica_5000_2000_buffered20000 (IU's build, 969,764 vertices), DG0 geometry, vertex raster sampling, the lake fix
+- **Initial state / MAP:** a copy of inversion-2km-budd-b20k-rho7500-floating's final MAP with its exact_front attribute rewritten from 1 to 2 (sha256 2bd58433f458f8ca), as a restart
+- **Forcing versions:** none: the forward's diagnostic solve at t = 0 through score_map.py --restart (scpc_mumps, ISMIP7_FSSA_THETA=0 so the stabilization's pull toward the MAP velocity is off, ISMIP7_APPARENT_MB=0, the MAP clip at its default 10, which bounds 847 nodes)
+- **Site / partition:** IU Quartz, general partition
+- **Ranks / memory:** 32 ranks, 240G, up to 1 h
+- **Job ids:** 11825458 11825459
+- **Code:** 4426372; Quartz worktree /N/scratch/dlilien/ismip7_reinvert_s10
+- **Started:** 2026-10-07
+- **Finished:** 2026-10-07
+- **Cost per model year:** 3 min; the solve 121 s; the comparison (check_cliff_facets.py --compare, 16 ranks) 1.5 min
+- **Results path:** Quartz /N/scratch/dlilien/ismip7_reinvert_jobs/c166/score/inversion_icepack2_budd_n3_dg0_logvel_2000_int5000_b20k_rho7500_floating_ef2_t0.h5 and .json; comparison /N/scratch/dlilien/ismip7_reinvert_jobs/c166/compare_budd.txt; census /N/scratch/dlilien/ismip7_reinvert_jobs/c166/census_budd.txt and census_1km.txt (jobs 11825455, 11825456)
+- **Audit:** converged in 22 Newton iterations to 1.26e5 (version 1: 15). Grounded discharge 2,758.7 Gt/yr against 2,761.3, -2.6 Gt/yr (-0.09 %); by IMBIE basin at most -0.99 % (basin 6, 48 Gt/yr) and -0.63 % (basin 7, 234 Gt/yr), every other basin within 0.5 %. Speed change by distance to the nearest facet whose push version 2 changes: grounded ice within 2 km p50/p99 0.17/22.9 m/yr, 2 to 6 km 0.06/12.6, 6 to 20 km 0.00/2.6, beyond 20 km 0.00/0.00; floating ice beyond 20 km 0.00/1.9. Grounded area changed by more than 10 m/yr: 494, 1,084, 439 and 0 km^2 in those bands; floating 55, 665, 645 and 39 km^2
+- **Notes:** issue #166: the Tier-1 check of version 2 at fixed controls. Census of the MAP's geometry: of 16,359 front facets, version 2 changes the push on 2,756 against rock above the ice surface (7,597 km, edge thickness p50/p90/p99 5/83/271 m), 239 partial walls (697 km) and 123 shoals (300 km), 89, 10 and 1 % of the change; 124 grounded edge cells (424 km^2) had a change larger than their own basal drag. On the 1 km production mesh (the 13 Sep timing cache's t = 0 geometry) the rock-above facets are longer (16,871 km) and thinner at the edge (p90 41 m), with 108 km of changed facets thicker than 200 m against 195 km at 2 km
 
 ### test-2km-budd-b20k-smoke-constant-fill
 

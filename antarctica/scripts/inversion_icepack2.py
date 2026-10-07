@@ -424,6 +424,11 @@ if SUBELEMENT_SCHEME not in ("sep2", "sep1"):
 SUBELEMENT_SCHEME_VERSION = SUBELEMENT_SCHEME_VERSIONS[SUBELEMENT_SCHEME]
 EXACT_FRONT = exact_front_version(os.environ.get(
     "ISMIP7_EXACT_FRONT", "1" if SUBELEMENT_FRICTION else "0"))
+if SUBELEMENT_FRICTION and EXACT_FRONT == 2:
+    raise ValueError(
+        "exact_front version 2 (the exposed-face push, issue #166) is not in "
+        "icepack_tools.momentum.front_cliff_correction; the sub-element scheme "
+        "takes 0 or 1")
 if MISFIT_SCALE != "nodes":
     try:
         float(MISFIT_SCALE)

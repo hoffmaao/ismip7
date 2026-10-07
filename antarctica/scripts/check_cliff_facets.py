@@ -28,7 +28,9 @@ each grounded edge cell's change in push, summed over its front facets, with
 the cell's own basal drag ``|tau_b| A``.
 
 ``--compare OTHER.h5`` names the same MAP solved under the other version, on
-the same mesh (``score_map.py --save-state``). It adds the speed change by
+the same mesh: ``score_map.py --save-state`` on a copy of the MAP whose
+``exact_front`` attribute is rewritten, since a forward refuses an
+``ISMIP7_EXACT_FRONT`` that differs from its MAP. It adds the speed change by
 distance to the nearest facet whose push the version changes, and the
 grounded discharge (``region_budget.discharge``) of each, in total and per
 basin. STATE is the reference the change is taken from.

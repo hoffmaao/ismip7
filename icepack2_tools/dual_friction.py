@@ -464,8 +464,9 @@ def build_rc_residual(
     exact_front : bool
         Add :func:`front_cliff_correction` on the facets between ice
         (``H >= front_hmin``) and ice-free cells on a bed below sea level, so
-        a grounded marine cliff inside the mesh gets the depth-integrated push the terminus condition
-        gives a boundary front (``ISMIP7_EXACT_FRONT``). DG0 geometry only.
+        a grounded marine cliff inside the mesh gets the depth-integrated push
+        the terminus condition gives a boundary front (``ISMIP7_EXACT_FRONT``).
+        DG0 geometry only.
 
     Returns
     -------

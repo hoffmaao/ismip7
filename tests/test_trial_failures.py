@@ -16,22 +16,22 @@ from icepack2_tools.optimization import TrialFailures
 HESSIAN = np.diag(np.linspace(1.0, 50.0, 20))
 
 
-def _minimise(fails, regularisation=0.0):
-    r"""L-BFGS-B on a quadratic, as the driver calls it; ``fails(n, x, x_good)``
-    says whether evaluation ``n`` at ``x`` fails. ``regularisation`` is a
-    constant added to the objective, so the total the failed trial scales from
-    can dwarf the quadratic."""
+def _minimise(fails, regularisation=0.0, scale_from="total"):
+    r"""L-BFGS-B on a quadratic misfit plus a constant ``regularisation``, as
+    the driver calls it; ``fails(n, x, x_good)`` says whether evaluation ``n``
+    at ``x`` fails, and a failed trial scales from the last good
+    ``scale_from`` ("misfit" or "total")."""
     tracker = TrialFailures()
-    good = {"f": None, "x": None, "n": 0}
+    good = {"misfit": None, "total": None, "x": None, "n": 0}
 
     def objective_and_gradient(x):
         good["n"] += 1
         if good["x"] is not None and fails(good["n"], x, good["x"]):
-            return tracker.failed(good["f"], x.size)
-        f = 0.5 * x @ HESSIAN @ x + regularisation
-        good.update(f=f, x=x.copy())
+            return tracker.failed(good[scale_from], x.size)
+        misfit = 0.5 * x @ HESSIAN @ x
+        good.update(misfit=misfit, total=misfit + regularisation, x=x.copy())
         tracker.succeeded()
-        return f, HESSIAN @ x
+        return good["total"], HESSIAN @ x
 
     result = minimize(objective_and_gradient, np.ones(20), jac=True,
                       method="L-BFGS-B",
@@ -68,13 +68,18 @@ def test_a_minimisation_without_failures_is_not_flagged():
 
 
 def test_a_stop_after_failed_trials_holds_the_last_good_point_under_heavy_regularisation():
-    r"""Regularisation a hundred times the misfit at the start: scaled from the
-    total, every failed trial stays above the current objective, L-BFGS-B
-    rejects it and the result is the last point whose forward succeeded."""
-    result, tracker, _grad_norm, x_good = _minimise(
-        lambda n, x, x_good: n > 12, regularisation=100 * 0.5 * np.trace(HESSIAN))
-    assert tracker.stopped_on_failures
-    assert np.array_equal(result.x, x_good)
+    r"""Regularisation a hundred times the starting misfit and every trial
+    failing from evaluation 13 on. Scaled from the misfit alone, a failed
+    trial sits below the current total, L-BFGS-B accepts it and the result is
+    a point whose forward failed; scaled from the total, every failed trial is
+    rejected and the result is the last point whose forward succeeded."""
+    regularisation = 100 * 0.5 * np.trace(HESSIAN)
+    for scale_from, holds in (("misfit", False), ("total", True)):
+        result, tracker, _grad_norm, x_good = _minimise(
+            lambda n, x, x_good: n > 12, regularisation=regularisation,
+            scale_from=scale_from)
+        assert tracker.stopped_on_failures
+        assert np.array_equal(result.x, x_good) == holds, scale_from
 
 
 def test_a_failed_trial_returns_ten_times_the_last_objective_and_no_gradient():

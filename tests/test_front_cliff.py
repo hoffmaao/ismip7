@@ -10,7 +10,6 @@ floating ice and on flat land, falls short at a grounded marine cliff by
 g D (rho_I H - rho_W D) / 2, and beside rock of another height is set by the
 step in bed height; exact_front gives every such edge the terminus push.
 """
-import numpy as np
 import pytest
 
 fd = pytest.importorskip("firedrake")

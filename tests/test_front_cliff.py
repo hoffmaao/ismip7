@@ -6,9 +6,9 @@ ends at x = L with the right side a calving id, the other runs on with
 ice-free cells. The velocity block evaluated at the zero state against
 v = e_x is the net front force (every interior jump vanishes on a uniform
 slab). The facet driving stress alone matches the terminus condition for
-floating ice and on land and falls short at a grounded marine cliff by
-g D (rho_I H - rho_W D) / 2; exact_front adds that and nothing else, and
-nothing at all where the ice-free side is land.
+floating ice and on flat land, falls short at a grounded marine cliff by
+g D (rho_I H - rho_W D) / 2, and beside rock of another height is set by the
+step in bed height; exact_front gives every such edge the terminus push.
 """
 import numpy as np
 import pytest
@@ -91,15 +91,20 @@ def test_a_film_on_the_water_side_keeps_the_correction_exact():
     assert pushed == pytest.approx(_exact(H_ice, b_val), rel=1e-6)
 
 
-@pytest.mark.parametrize("b_rock", [300.0, 700.0])
-def test_a_land_margin_beside_rock_of_another_height_gets_no_correction(b_rock):
-    r"""Ice on a 100 m bed beside bare rock at 300 m, below the ice surface,
-    and at 700 m, above it: the ice-free side is land, so exact_front leaves
-    the facet push as it is."""
+@pytest.mark.parametrize("b_rock", [0.0, 300.0, 700.0])
+def test_a_land_margin_beside_rock_of_another_height_gets_the_cliff_push(b_rock):
+    r"""Ice 500 m thick on a 100 m bed (surface at 600 m) beside bare rock at
+    0 m (the facet push 1.2 times the cliff push outward), at 300 m (0.6 times
+    outward) and at 700 m, above the ice surface (0.2 times back into the
+    ice). exact_front replaces the bed-step push with the free-cliff push in
+    each case; restricting it to ocean facets kept the bed-step push and
+    raised the misfit of IU's final Budd MAP at its own controls by 3.5 %
+    (issue #153). Against rock above the ice surface the cliff push is a known
+    error (issue #166)."""
     H_ice, b_ice = 500.0, 100.0
     facet = _front_force(H_ice, b_ice, buffered=True, exact_front=False, b_water=b_rock)
     pushed = _front_force(H_ice, b_ice, buffered=True, exact_front=True, b_water=b_rock)
-    assert pushed == pytest.approx(facet, rel=1e-12, abs=1e-12 * _exact(H_ice, b_ice))
+    assert pushed == pytest.approx(_exact(H_ice, b_ice), rel=1e-6)
     assert abs(facet - _exact(H_ice, b_ice)) > 0.1 * _exact(H_ice, b_ice)
 
 

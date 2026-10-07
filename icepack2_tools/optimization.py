@@ -15,8 +15,11 @@ class TrialFailures:
     succeeded.
 
     A forward or adjoint that fails at a line-search trial returns
-    ``failed(J_last, n)``: ten times the last good objective and a zero
-    gradient, so L-BFGS-B backtracks. When every trial near the current
+    ``failed(J_last, n)``: ten times the last good total objective (misfit
+    and regularisation, the value scipy minimises) and a zero gradient, so
+    L-BFGS-B backtracks. A misfit alone would sit below the current total
+    wherever regularisation is more than nine times the misfit, and the line
+    search would accept the failed trial. When every trial near the current
     iterate fails, scipy still ends with a CONVERGENCE message (the projected
     gradient below pgtol, read off the zero gradient, or the relative
     reduction below factr) at a point whose gradient is not small: RC's

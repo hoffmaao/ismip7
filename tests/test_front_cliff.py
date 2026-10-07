@@ -7,7 +7,8 @@ ice-free cells. The velocity block evaluated at the zero state against
 v = e_x is the net front force (every interior jump vanishes on a uniform
 slab). The facet driving stress alone matches the terminus condition for
 floating ice and on land and falls short at a grounded marine cliff by
-g D (rho_I H - rho_W D) / 2; exact_front adds that and nothing else.
+g D (rho_I H - rho_W D) / 2; exact_front adds that and nothing else, and
+nothing at all where the ice-free side is land.
 """
 import numpy as np
 import pytest
@@ -21,7 +22,8 @@ from icepack2_tools.dual_friction import build_rc_residual  # noqa: E402
 L, B, W, NX = 20e3, 10e3, 4e3, 10
 
 
-def _front_force(H_ice, b_val, buffered, exact_front, h_water=0.0, cg1_geometry=False):
+def _front_force(H_ice, b_val, buffered, exact_front, h_water=0.0, cg1_geometry=False,
+                 b_water=None):
     mesh = (fd.RectangleMesh(int(NX * (L + B) / L), 2, L + B, W) if buffered
             else fd.RectangleMesh(NX, 2, L, W))
     x, _y = fd.SpatialCoordinate(mesh)
@@ -32,7 +34,8 @@ def _front_force(H_ice, b_val, buffered, exact_front, h_water=0.0, cg1_geometry=
     z = fd.Function(Z)
     Qg = fd.FunctionSpace(mesh, "CG", 1) if cg1_geometry else fd.FunctionSpace(mesh, "DG", 0)
     H = fd.Function(Qg).interpolate(fd.conditional(fd.lt(x, L), H_ice, h_water))
-    b = fd.Function(Qg).assign(b_val)
+    b = fd.Function(Qg).interpolate(
+        fd.conditional(fd.lt(x, L), b_val, b_val if b_water is None else b_water))
     s = fd.Function(Qg).interpolate(fd.max_value(b + H, (1 - rho_I / rho_W) * H))
     Q = fd.FunctionSpace(mesh, "CG", 1)
     one = fd.Function(Q).assign(1.0)
@@ -86,6 +89,18 @@ def test_a_film_on_the_water_side_keeps_the_correction_exact():
     # the film's own facet with the boundary beyond pushes too (0.4 m, zero
     # in practice); everything else is the exact cliff push
     assert pushed == pytest.approx(_exact(H_ice, b_val), rel=1e-6)
+
+
+@pytest.mark.parametrize("b_rock", [300.0, 700.0])
+def test_a_land_margin_beside_rock_of_another_height_gets_no_correction(b_rock):
+    r"""Ice on a 100 m bed beside bare rock at 300 m, below the ice surface,
+    and at 700 m, above it: the ice-free side is land, so exact_front leaves
+    the facet push as it is."""
+    H_ice, b_ice = 500.0, 100.0
+    facet = _front_force(H_ice, b_ice, buffered=True, exact_front=False, b_water=b_rock)
+    pushed = _front_force(H_ice, b_ice, buffered=True, exact_front=True, b_water=b_rock)
+    assert pushed == pytest.approx(facet, rel=1e-12, abs=1e-12 * _exact(H_ice, b_ice))
+    assert abs(facet - _exact(H_ice, b_ice)) > 0.1 * _exact(H_ice, b_ice)
 
 
 def test_exact_front_refuses_cg1_geometry():

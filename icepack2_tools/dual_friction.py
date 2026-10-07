@@ -56,6 +56,7 @@ from firedrake import (
     conditional,
     gt,
     ge,
+    lt,
     eq,
     exp,
     avg,
@@ -280,7 +281,7 @@ def budd_nhat(N, N_ref, H, b, nhat_floor=0.02, nhat_cap=3.0):
     return conditional(gt(haf, Constant(0.0)), nh, Constant(0.0))
 
 
-def front_cliff_correction(v, H, s, mesh, h_ice=1.0):
+def front_cliff_correction(v, H, s, b, mesh, h_ice=1.0):
     r"""What the DG0 facet driving stress misses at a grounded marine cliff
     inside the mesh, as a facet form against the velocity test function ``v``.
 
@@ -293,22 +294,32 @@ def front_cliff_correction(v, H, s, mesh, h_ice=1.0):
     land; against a grounded cliff in water of depth ``D`` the facet term
     falls short by ``g D (rho_I H - rho_W D) / 2``: 15 % of the push for
     1600 m of ice in 300 m of water, 33 % for 800 m in 600 m (issue #153).
-    This adds the difference on those facets and nothing elsewhere. It is
-    icepack_tools.momentum.front_cliff_correction with two changes: a cell
-    holds ice from ``h_ice`` (``ISMIP7_FRONT_HMIN``), so a transport film on
-    the water side does not switch it off, and the facet push it completes
-    is the residual's own ``avg(H)``, so a film's thickness is accounted for.
+    This adds the difference on those facets and nothing elsewhere.
+
+    It acts only where the ice-free side is ocean, a cell whose bed ``b`` lies
+    below sea level. On a land margin the ice-free side is rock whose height
+    ``s_other = b_other`` can differ from the ice's bed, and the free-cliff
+    push would then drive the ice into rock that rises above it; there the
+    facet term stands alone. The gate reads the bed because a transport film
+    on the water side leaves its surface slightly above sea level.
+
+    It is icepack_tools.momentum.front_cliff_correction with three changes: a
+    cell holds ice from ``h_ice`` (``ISMIP7_FRONT_HMIN``), so a transport film
+    on the water side does not switch it off; the facet push it completes is
+    the residual's own ``avg(H)``, so a film's thickness is accounted for; and
+    the marine gate above.
     DG0 geometry only: under CG1 the facet jump vanishes and the cell
     gradient carries the driving stress.
     """
     nu = FacetNormal(mesh)
     ice = conditional(ge(H, h_ice), 1.0, 0.0)
+    ocean = conditional(lt(b, 0.0), 1.0, 0.0)
 
     def gap(side, other):
         d = max_value(H(side) - s(side), 0.0)              # depth below sea level
         exact = 0.5 * g * (rho_I * H(side) ** 2 - rho_W * d ** 2)
         facet = rho_I * g * avg(H) * (s(side) - s(other))
-        return ice(side) * (1.0 - ice(other)) * (exact - facet)
+        return ice(side) * (1.0 - ice(other)) * ocean(other) * (exact - facet)
 
     return (gap("+", "-") * inner(nu("+"), avg(v))
             + gap("-", "+") * inner(nu("-"), avg(v))) * dS
@@ -452,8 +463,8 @@ def build_rc_residual(
         Outflow boundary ids for the calving-front back-pressure (None to skip).
     exact_front : bool
         Add :func:`front_cliff_correction` on the facets between ice
-        (``H >= front_hmin``) and ice-free cells, so a grounded marine cliff
-        inside the mesh gets the depth-integrated push the terminus condition
+        (``H >= front_hmin``) and ice-free cells on a bed below sea level, so
+        a grounded marine cliff inside the mesh gets the depth-integrated push the terminus condition
         gives a boundary front (``ISMIP7_EXACT_FRONT``). DG0 geometry only.
 
     Returns
@@ -579,7 +590,7 @@ def build_rc_residual(
         if H.ufl_element().degree() != 0:
             raise ValueError("exact_front needs DG0 geometry: the correction "
                              "completes the facet-jump driving stress")
-        F += front_cliff_correction(v, H, s, mesh, h_ice=front_hmin)
+        F += front_cliff_correction(v, H, s, b, mesh, h_ice=front_hmin)
     if fssa_tau is not None and u_ref is not None:
         from icepack2_tools.fssa import fssa_term
         F += fssa_term(z, u_ref, fssa_tau, H, b, tendency=fssa_tendency,

@@ -2573,6 +2573,7 @@ def main():
     global_ndof = len(func_to_global(theta))
     z_backup = z.copy(deepcopy=True)
     last_good_obj = [np.inf]
+    last_good_total = [np.inf]
     last_x = [None]                      # controls of the last CONVERGED evaluation
     trial_failures = TrialFailures()
     iteration_count = [0]
@@ -2700,7 +2701,7 @@ def main():
             PETSc.Sys.Print(
                 f"  [!] Forward solve failed ({exc}), returning large objective")
             t_body_end[0] = perf_counter()
-            return trial_failures.failed(last_good_obj[0], 2 * global_ndof)
+            return trial_failures.failed(last_good_total[0], 2 * global_ndof)
         stop_manager()
         J_val = float(J)
         t_fwd = perf_counter() - t_fwd
@@ -2733,7 +2734,7 @@ def main():
                 )
             PETSc.Sys.Print("  [!] Adjoint solve failed, returning large objective")
             t_body_end[0] = perf_counter()
-            return trial_failures.failed(last_good_obj[0], 2 * global_ndof)
+            return trial_failures.failed(last_good_total[0], 2 * global_ndof)
         t_adj = perf_counter() - t_adj
         trial_failures.succeeded()
 
@@ -2764,6 +2765,7 @@ def main():
                 g_phi = g_phi * _phi_free_global
 
             total = J_val + reg_theta + reg_phi
+            last_good_total[0] = total
             total_grad = np.concatenate([g_theta, g_phi])
 
         t_body_end[0] = perf_counter()

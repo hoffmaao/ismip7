@@ -111,7 +111,7 @@ from icepack2_tools.runconfig import (
     raster_sample as _raster_sample,
     lc as _lc, lc_coarse as _lc_coarse, n_flow as _n_flow,
     eval_continuation, inversion_mesh_source, transfer_fill, drag_gate,
-    DRAG_GATE_NONE, hvisc_floor,
+    DRAG_GATE_NONE, hvisc_floor, exact_front_version,
 )
 DATA_DIR = obs_data_root()
 from icepack2_tools.prior import (
@@ -406,7 +406,9 @@ MISFIT_SCALE = os.environ.get("ISMIP7_MISFIT_SCALE", "1").strip().lower()
 # calving front inside the mesh: on by default under the scheme, since it
 # is the shared residual's default, and off by default for cell-wise
 # friction, where =1 adds dual_friction.front_cliff_correction (a grounded
-# marine cliff otherwise gets 15 to 33 % too little push, issue #153).
+# marine cliff otherwise gets 15 to 33 % too little push, issue #153) and =2
+# its exposed-face form, which leaves no push against rock above the ice
+# surface (issue #166; cell-wise friction only). The MAP records the version.
 SUBELEMENT_FRICTION = os.environ.get("ISMIP7_SUBELEMENT_FRICTION", "0").strip() == "1"
 # ISMIP7_SUBELEMENT_SCHEME: sep1 (ISSM's default: whole-cell quadrature,
 # drag times the grounded fraction; the default here since 1 Oct 2026) or
@@ -420,8 +422,8 @@ if SUBELEMENT_SCHEME not in ("sep2", "sep1"):
 # The form of that scheme this code builds, recorded with it in the MAP
 # (icepack2_tools.handoff.SUBELEMENT_SCHEME_VERSIONS).
 SUBELEMENT_SCHEME_VERSION = SUBELEMENT_SCHEME_VERSIONS[SUBELEMENT_SCHEME]
-EXACT_FRONT = os.environ.get(
-    "ISMIP7_EXACT_FRONT", "1" if SUBELEMENT_FRICTION else "0").strip() == "1"
+EXACT_FRONT = exact_front_version(os.environ.get(
+    "ISMIP7_EXACT_FRONT", "1" if SUBELEMENT_FRICTION else "0"))
 if MISFIT_SCALE != "nodes":
     try:
         float(MISFIT_SCALE)
@@ -1461,7 +1463,7 @@ def main():
             f"{SUBELEMENT_SCHEME_VERSION}, icepack_tools): {_n_full} cells fully "
             f"grounded, {_n_part} partly grounded; {FRICTION} runs with N_hat = 1 on the "
             f"grounded part (no N_ref, no delta floor); exact front push "
-            f"{'on' if EXACT_FRONT else 'off'}")
+            f"{f'version {EXACT_FRONT}' if EXACT_FRONT else 'off'}")
 
     _zero_theta = Constant(0.0)
     # the smooth grounded indicator of THIS geometry, for a floating-only
@@ -1531,8 +1533,9 @@ def main():
 
     if EXACT_FRONT and not SUBELEMENT_FRICTION:
         PETSc.Sys.Print(
-            "  Exact cliff push on internal fronts (ISMIP7_EXACT_FRONT, "
-            "dual_friction.front_cliff_correction)")
+            f"  Exact cliff push on internal fronts (ISMIP7_EXACT_FRONT={EXACT_FRONT}, "
+            "dual_friction.front_cliff_correction: "
+            f"{'the free-cliff push' if EXACT_FRONT == 1 else 'the face above the neighbour bed'})")
     if use_calving_terminus:
         PETSc.Sys.Print("  Using calving_terminus BC")
     else:

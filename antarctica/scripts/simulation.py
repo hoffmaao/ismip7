@@ -99,6 +99,7 @@ from icepack2_tools.runconfig import (
     mesh_override as _mesh_override, transfer_fill as _transfer_fill,
     forward_drag_gate as _forward_drag_gate,
     forward_hvisc_floor as _forward_hvisc_floor,
+    forward_exact_front as _forward_exact_front,
     lc as _lc, lc_coarse as _lc_coarse, n_flow as _n_flow, buffer_m as _buffer_m,
     TARGET_MESH_GEOMETRY_METHOD,
     calving_law as _calving_law, calving_law_object as _calving_law_object,
@@ -648,7 +649,9 @@ def setup_model(restart_from=None, *, allow_timing_cache_a_ref=False,
     map_anchor_length = float(checkpoint_metadata.get("friction_anchor_length", 0.0))
     map_lake_ice_base = int(checkpoint_metadata.get("lake_ice_base", 0))
     map_subelement = int(checkpoint_metadata.get("subelement_friction", 0))
-    map_exact_front = int(checkpoint_metadata.get("exact_front", 0))
+    # the version of the cliff push (runconfig.EXACT_FRONT_VERSIONS)
+    map_exact_front = _forward_exact_front(checkpoint_metadata.get("exact_front"),
+                                           source=os.path.basename(source_chk))
     # The ocean-drag gate and the membrane floor the controls absorbed. The
     # resolved values go into every state this run writes (MAP_CONFIG_KEYS),
     # so a restart runs them too.
@@ -674,6 +677,9 @@ def setup_model(restart_from=None, *, allow_timing_cache_a_ref=False,
         raise RuntimeError(
             f"ISMIP7_SUBELEMENT_FRICTION={_env_sub} but the MAP was inverted with "
             f"subelement_friction={map_subelement}: a forward follows its MAP")
+    PETSc.Sys.Print(
+        "  Exact cliff push (from the MAP): "
+        + (f"version {map_exact_front}" if map_exact_front else "off"))
     for _var, _val, _map in (("ISMIP7_ANCHOR_LENGTH", map_anchor_length, map_anchor_length),
                              ("ISMIP7_LAKE_ICE_BASE", map_lake_ice_base, map_lake_ice_base)):
         _env = os.environ.get(_var)
@@ -1494,7 +1500,7 @@ def setup_model(restart_from=None, *, allow_timing_cache_a_ref=False,
                 ocean_drag=ocean_drag, h_ocean=h_ocean, u_lim=u_lim,
                 k_lim=k_lim, drag_mask=drag_mask,
                 calving_ids=calving_ids if use_calving_terminus else None,
-                exact_front=bool(map_exact_front), front_hmin=_front_hmin(),
+                exact_front=map_exact_front, front_hmin=_front_hmin(),
                 fssa_tau=fssa_tau if fssa_theta_val > 0 else None,
                 u_ref=u_ref_fssa if fssa_theta_val > 0 else None,
                 fssa_tendency=fssa_tendency,
@@ -1514,7 +1520,8 @@ def setup_model(restart_from=None, *, allow_timing_cache_a_ref=False,
                 f"{mesh.comm.allreduce(int((_fr == 1.0).sum()))} cells fully grounded, "
                 f"{mesh.comm.allreduce(int(((_fr > 0.0) & (_fr < 1.0)).sum()))} partly; "
                 f"{friction} with N_hat = 1 on the grounded part, so NO effective-pressure "
-                f"feedback; exact front push {'on' if map_exact_front else 'off'}; the "
+                f"feedback; exact front push "
+                f"{f'version {map_exact_front}' if map_exact_front else 'off'}; the "
                 "quadrature follows the geometry before every diagnostic solve")
 
             def _build_F(theta_c=None, phi_c=None, h_c=None, s_c=None, z_c=None):
@@ -1533,7 +1540,7 @@ def setup_model(restart_from=None, *, allow_timing_cache_a_ref=False,
                     h_visc_floor=rc_hvisc_floor, ocean_drag=ocean_drag,
                     h_ocean=h_ocean, drag_mask=drag_mask, u_lim=u_lim, k_lim=k_lim,
                     calving_ids=calving_ids if use_calving_terminus else None,
-                    exact_front=bool(map_exact_front),
+                    exact_front=map_exact_front,
                     fssa_tau=fssa_tau if fssa_theta_val > 0 else None,
                     u_ref=u_ref_fssa if fssa_theta_val > 0 else None,
                     fssa_tendency=fssa_tendency,

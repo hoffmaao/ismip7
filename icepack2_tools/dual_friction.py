@@ -72,6 +72,7 @@ from icepack2.constants import (
 
 from .geometry import surface_slope
 from .grounding import height_above_flotation, smooth_heaviside
+from .runconfig import exact_front_version
 
 # Grounding-zone Heaviside width [m height-above-flotation].  Wider => more
 # sub-element smoothing of the grounded/floating transition that gates theta.
@@ -280,7 +281,25 @@ def budd_nhat(N, N_ref, H, b, nhat_floor=0.02, nhat_cap=3.0):
     return conditional(gt(haf, Constant(0.0)), nh, Constant(0.0))
 
 
-def front_cliff_correction(v, H, s, mesh, h_ice=1.0):
+def cliff_push(H, s, version=1, b_other=None):
+    r"""The depth-integrated push per unit length [MPa m] of an ice face of
+    thickness ``H`` and surface ``s``, under :func:`front_cliff_correction`'s
+    ``version``; ``b_other`` is the ice-free neighbour's bed, which version 2
+    needs. On a facet, pass the ice side's restrictions and the other side's
+    bed. Never negative: the face stands at least ``s`` above sea level."""
+    if version not in (1, 2):
+        raise ValueError(f"the cliff push has versions 1 and 2, not {version!r}")
+    d = max_value(H - s, 0.0)                                  # depth below sea level
+    if version == 1:
+        return 0.5 * g * (rho_I * H ** 2 - rho_W * d ** 2)
+    if b_other is None:
+        raise ValueError("cliff push version 2 needs the neighbour's bed")
+    h_e = min_value(H, max_value(s - b_other, 0.0))           # the face above the rock
+    d_e = min_value(d, max_value(-b_other, 0.0))              # the water against it
+    return 0.5 * g * (rho_I * h_e ** 2 - rho_W * d_e ** 2)
+
+
+def front_cliff_correction(v, H, s, mesh, h_ice=1.0, *, b=None, version=1):
     r"""The free-cliff push at every ice edge inside the mesh, as the facet form
     to add to the DG0 facet driving stress against the velocity test function
     ``v``.
@@ -299,26 +318,51 @@ def front_cliff_correction(v, H, s, mesh, h_ice=1.0):
     free-cliff push outward along the 6,837 km of land edge where the rock
     lies below the ice surface, and 13 times back into the ice along the
     7,624 km where it rises above (issue #153). This adds the difference on
-    every such facet, so each ice edge gets the free-cliff push. That is
-    right at a cliff on water or on lower ground; against rock above the ice
-    surface the rock's reaction should leave about zero, and the free-cliff
-    push drives the ice into the rock instead (issue #166). Restricting the
-    correction to ocean facets put the bed-step push back and raised the
-    misfit of IU's final Budd MAP at its own controls from 1108 to 1147.
+    every such facet. Restricting the correction to ocean facets put the
+    bed-step push back and raised the misfit of IU's final Budd MAP at its
+    own controls from 1108 to 1147.
+
+    ``version`` sets the push it completes to (``exact_front`` in the MAP):
+
+    1. The free-cliff push on every ice edge. Against rock above the ice
+       surface it drives the ice into the rock, where the rock's reaction
+       leaves about zero (issue #166).
+    2. The push of the exposed face, with ``B`` the ice-free neighbour's bed
+       (``b``, required): the face below ``B`` rests on rock, so the ice
+       pushes with ``h_e = min(H, max(s - B, 0))`` of its face, and water
+       stands against ``d_e = min(d, max(-B, 0))`` of it, giving
+       ``g (rho_I h_e^2 - rho_W d_e^2) / 2``.
+
+    =====================================  ================  ==================
+    ice-free neighbour                     version 1         version 2
+    =====================================  ================  ==================
+    bed at or below the ice base           free-cliff push   free-cliff push
+    rock between ice base and surface      free-cliff push   the exposed face
+    rock at or above the ice surface       free-cliff push   0
+    =====================================  ================  ==================
+
+    Ocean and lower ground take the same push under both, a seabed shoaler
+    than the ice base gives the exposed face with its water, and the push
+    moves continuously with ``B`` and ``H``, so a facet passes smoothly from
+    one case to the next as the surface evolves. For 500 m of ice on a 100 m
+    bed, version 2 gives the full push beside rock at 0 m, 0.36 of it beside
+    rock at 300 m and none beside rock at 700 m.
 
     It is icepack_tools.momentum.front_cliff_correction with two changes: a
     cell holds ice from ``h_ice`` (``ISMIP7_FRONT_HMIN``), so a transport film
     on the water side does not switch it off, and the facet push it completes
     is the residual's own ``avg(H)``, so a film's thickness is accounted for.
-    DG0 geometry only: under CG1 the facet jump vanishes and the cell
-    gradient carries the driving stress.
+    icepack_tools has version 1 only. DG0 geometry only: under CG1 the facet
+    jump vanishes and the cell gradient carries the driving stress.
     """
+    if version == 2 and b is None:
+        raise ValueError("front_cliff_correction version 2 needs the bed b")
     nu = FacetNormal(mesh)
     ice = conditional(ge(H, h_ice), 1.0, 0.0)
 
     def gap(side, other):
-        d = max_value(H(side) - s(side), 0.0)              # depth below sea level
-        exact = 0.5 * g * (rho_I * H(side) ** 2 - rho_W * d ** 2)
+        exact = cliff_push(H(side), s(side), version=version,
+                           b_other=b(other) if version == 2 else None)
         facet = rho_I * g * avg(H) * (s(side) - s(other))
         return ice(side) * (1.0 - ice(other)) * (exact - facet)
 
@@ -462,11 +506,12 @@ def build_rc_residual(
         pumping wherever the floor-cell pathology sits.  ``u_lim = 0`` off.
     calving_ids : tuple or None
         Outflow boundary ids for the calving-front back-pressure (None to skip).
-    exact_front : bool
-        Add :func:`front_cliff_correction` on the facets between ice
-        (``H >= front_hmin``) and ice-free cells, so every ice edge inside the
-        mesh gets the depth-integrated push the terminus condition gives a
-        boundary front (``ISMIP7_EXACT_FRONT``). DG0 geometry only.
+    exact_front : int or bool
+        The version of :func:`front_cliff_correction` to add on the facets
+        between ice (``H >= front_hmin``) and ice-free cells
+        (``ISMIP7_EXACT_FRONT``): 0 or False none, 1 or True the free-cliff
+        push on every ice edge, 2 the push of the face above the ice-free
+        neighbour's bed. DG0 geometry only.
 
     Returns
     -------
@@ -587,11 +632,13 @@ def build_rc_residual(
     nu = FacetNormal(mesh)
     F += (-H_visc * inner(M, sym(grad(v))) + inner(tau - rho_I * g * H * grad(s), v)) * dx
     F += rho_I * g * avg(H) * inner(jump(s, nu), avg(v)) * dS
+    exact_front = exact_front_version(exact_front)
     if exact_front:
         if H.ufl_element().degree() != 0:
             raise ValueError("exact_front needs DG0 geometry: the correction "
                              "completes the facet-jump driving stress")
-        F += front_cliff_correction(v, H, s, mesh, h_ice=front_hmin)
+        F += front_cliff_correction(v, H, s, mesh, h_ice=front_hmin, b=b,
+                                    version=exact_front)
     if fssa_tau is not None and u_ref is not None:
         from icepack2_tools.fssa import fssa_term
         F += fssa_term(z, u_ref, fssa_tau, H, b, tendency=fssa_tendency,

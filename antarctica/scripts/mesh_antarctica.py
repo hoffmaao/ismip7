@@ -22,7 +22,7 @@ sys.path.insert(0, _PROJECT)
 
 from icepack2_tools.runconfig import (
     obs_data_root, lc as _lc, lc_coarse as _lc_coarse, buffer_m as _buffer_m,
-    mesh_front as _mesh_front,
+    mesh_front as _mesh_front, MESH_FRONTS,
 )
 
 DATA_DIR = obs_data_root()
@@ -69,14 +69,13 @@ def parse_args():
         ),
     )
     parser.add_argument(
-        "--front-year",
-        type=lambda v: None if v.lower() == "none" else int(v),
-        default=_mesh_front(),
+        "--front",
+        choices=MESH_FRONTS,
+        default=_mesh_front() or "none",
         help=(
-            "Put nodes and edges on the marine front of the Greene et al. "
-            "(2022) ice mask of this year, from the ISMIP7 observations "
-            "MIPkit (issue #167); 'none' follows no front. Names the mesh "
-            "_front<year>. Default ISMIP7_MESH_FRONT"
+            "Put nodes and edges on the marine front of this ice edge: 'bm' "
+            "is BedMachine's own (issue #167), 'none' follows no front. "
+            "Names the mesh _front<edge>. Default ISMIP7_MESH_FRONT"
         ),
     )
     return parser.parse_args()
@@ -169,7 +168,7 @@ def main():
     os.makedirs(MESH_DIR, exist_ok=True)
 
     lc, lc_coarse, buffer_m = args.lc, args.lc_coarse, args.buffer_m
-    front_year = args.front_year
+    front = None if args.front == "none" else args.front
 
     # Mirrored into the environment as well as passed to the outline below,
     # so anything this process reads through runconfig.buffer_m() agrees with
@@ -196,17 +195,16 @@ def main():
     gl_dist, ice_field, float_field = grounding_line_distance()
     cf_dist = calving_front_distance(boundaries, names)
 
-    fn_base = os.path.join(MESH_DIR, mesh_basename(lc_coarse, lc, buffer_m, front_year))
+    fn_base = os.path.join(MESH_DIR, mesh_basename(lc_coarse, lc, buffer_m, front))
 
     # The marine front the mesh follows (issue #167): curves at spacing lc,
     # embedded in pass 2, with an lc band along them in the size field.
     curves = []
-    if front_year is not None:
-        from icepack2_tools.obs_icemask import icemask_tif, read_classes
-        tif = icemask_tif(front_year)
-        print(f"Marine front of {os.path.basename(tif)}...")
-        classes, mask_transform = read_classes(
-            tif, find_file(os.path.join(DATA_DIR, "bedmachine"), "*.nc"))
+    if front == "bm":
+        from icepack2_tools.obs_icemask import bedmachine_classes
+        bm_fn = find_file(os.path.join(DATA_DIR, "bedmachine"), "*.nc")
+        print(f"Marine front of BedMachine's ice ({os.path.basename(bm_fn)})...")
+        classes, mask_transform = bedmachine_classes(bm_fn)
         curves, front_stats = extract_marine_front(
             classes, mask_transform, outline, lc)
         del classes
@@ -349,7 +347,7 @@ def main():
     # BedMachine input + SIMPLIFY_TOL/SUBSAMPLE + outline buffer used), so the
     # solvers never read a stale sidecar built for a different mesh/buffer.
     write_boundary_ids(
-        fn_base + ".msh", bndids_filename(lc_coarse, lc, buffer_m, front_year)
+        fn_base + ".msh", bndids_filename(lc_coarse, lc, buffer_m, front)
     )
 
 

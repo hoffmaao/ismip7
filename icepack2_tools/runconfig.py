@@ -44,11 +44,12 @@ LC_COARSE_DEFAULT = "10000"
 # mesh names defaulted to 20000, so a bare call could build an unbuffered mesh
 # under a buffered name.
 BUFFER_M_DEFAULT = "20000"
-# The year of the Greene et al. (2022) ice mask whose marine front a buffered
-# mesh's nodes and edges lie on (the `_front<year>` of
-# naming.mesh_basename), or "none" for a mesh that follows no front. Issue
-# #167: on a mesh that does not follow it, the BedMachine front crosses
-# cells, and vertex sampling gives them a fraction of its thickness.
+# The ice edge whose marine front a buffered mesh's nodes and edges lie on
+# (the `_front<edge>` of naming.mesh_basename): "bm", BedMachine's own, or
+# "none" for a mesh that follows no front. Issue #167: on a mesh that does
+# not follow it, the front crosses cells, and vertex sampling gives them a
+# fraction of its thickness.
+MESH_FRONTS = ("none", "bm")
 MESH_FRONT_DEFAULT = "none"
 # The production forward step [yr], chosen with the mesh (issue 20). The timing
 # matrix's rule gives 0.05 at 1000 m. At 0.05 a 1 km control from a transferred
@@ -82,9 +83,9 @@ BUDD_SHELF_GATE = "haf"
 # method name stable: it is stamped into cache provenance and changing the
 # construction must invalidate old caches.
 TARGET_MESH_GEOMETRY_METHOD = "target-native-bedmachine-cell-average-v1"
-# The same with the front cells of the year's ice mask (geometry.front_cells,
-# issue #167); target_mesh_geometry_method picks one by raster sampling.
-TARGET_MESH_GEOMETRY_METHOD_FRONT = "target-native-bedmachine-cell-average-front{year}-v1"
+# The same with BedMachine's front cells rebuilt (geometry.front_cells, issue
+# #167); target_mesh_geometry_method picks one by raster sampling.
+TARGET_MESH_GEOMETRY_METHOD_FRONT = "target-native-bedmachine-cell-average-front-v1"
 
 GEOMETRY_SPACES = ("dg0", "cg1")
 
@@ -96,14 +97,16 @@ GEOMETRY_SPACES = ("dg0", "cg1")
 #   cell_mean - the mean of the raster over the cell itself, sampled on an
 #               equal-area sub-triangle lattice at pixel density
 #               (geometry.raster_cell_mean).
-#   greene2015 - vertex, except that the Greene et al. (2022) ice mask of
-#               2015 decides which cells hold ice at the marine front, and the
-#               front cells take BedMachine's thickness and bed over their ice
+#   vertex_front - vertex, except that BedMachine's own mask decides which
+#               cells hold ice at the marine front, and the front cells take
+#               BedMachine's mean thickness and bed over their ice
 #               (geometry.front_cells, issue #167). Vertex sampling alone
 #               gives a cell the front crosses a fraction of the front's
-#               thickness: 40 m against 163 m on the 2 km buffered mesh.
+#               thickness: 40 m against 163 m on the 2 km buffered mesh, and
+#               a vertex on the front of a _frontbm mesh samples a blend.
 # MAPs record the method used; the forward reads it back from the MAP.
-RASTER_SAMPLES = ("vertex", "cell_mean", "greene2015")
+FRONT_RASTER_SAMPLES = ("vertex_front",)
+RASTER_SAMPLES = ("vertex", "cell_mean") + FRONT_RASTER_SAMPLES
 RASTER_SAMPLE_DEFAULT = "vertex"
 
 
@@ -224,15 +227,13 @@ def buffer_m():
 
 
 def mesh_front():
-    r"""``ISMIP7_MESH_FRONT``: the ice-mask year whose marine front the mesh
-    follows (an int), or None for ``none``."""
+    r"""``ISMIP7_MESH_FRONT``: the ice edge whose marine front the mesh
+    follows (``bm``), or None for ``none``."""
     value = os.environ.get("ISMIP7_MESH_FRONT", MESH_FRONT_DEFAULT).strip().lower()
-    if value in ("", "none"):
-        return None
-    if not value.isdigit() or len(value) != 4:
+    if value not in MESH_FRONTS:
         raise ValueError(
-            f"ISMIP7_MESH_FRONT must be a year or none, not {value!r}")
-    return int(value)
+            f"ISMIP7_MESH_FRONT must be one of {MESH_FRONTS}, not {value!r}")
+    return None if value == "none" else value
 
 
 def geometry_space():
@@ -258,20 +259,16 @@ def raster_sample():
     return value
 
 
-def raster_front_year(method):
-    r"""The year of the ice mask that decides front cells under the raster
-    sampling ``method`` (``greene<year>``), None for a sampling without one."""
-    method = str(method).lower()
-    if method.startswith("greene") and method[6:].isdigit():
-        return int(method[6:])
-    return None
+def raster_front(method):
+    r"""Whether the raster sampling ``method`` rebuilds the front cells."""
+    return str(method).lower() in FRONT_RASTER_SAMPLES
 
 
 def raster_base_method(method):
-    r"""How a single raster is put on a cell under ``method``: the front
-    samplings sample every raster by its vertices and change only the front
+    r"""How a single raster is put on a cell under ``method``: a front
+    sampling samples every raster by its vertices and changes only the front
     cells' thickness and bed afterwards."""
-    return "vertex" if raster_front_year(method) is not None else str(method).lower()
+    return "vertex" if raster_front(method) else str(method).lower()
 
 
 def target_mesh_geometry_method(method):
@@ -279,10 +276,9 @@ def target_mesh_geometry_method(method):
     mesh under the raster sampling ``method``: vertex keeps the name its
     caches carry, a front sampling gets its own, so a cache built one way is
     never read as the other."""
-    year = raster_front_year(method)
-    if year is None:
-        return TARGET_MESH_GEOMETRY_METHOD
-    return TARGET_MESH_GEOMETRY_METHOD_FRONT.format(year=year)
+    if raster_front(method):
+        return TARGET_MESH_GEOMETRY_METHOD_FRONT
+    return TARGET_MESH_GEOMETRY_METHOD
 
 
 def forward_raster_sample(recorded, transfer, source="the MAP"):

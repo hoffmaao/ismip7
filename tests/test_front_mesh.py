@@ -25,7 +25,7 @@ from shapely.geometry import LinearRing, Point, Polygon, box  # noqa: E402
 
 from icepack2_tools import mesh as M  # noqa: E402
 from icepack2_tools.naming import (  # noqa: E402
-    mesh_basename, mesh_front_year, parse_mesh_basename,
+    mesh_basename, mesh_front, parse_mesh_basename,
 )
 from icepack2_tools.obs_icemask import ICE, LAND, MARINE, classify  # noqa: E402
 
@@ -143,25 +143,25 @@ def test_save_and_load_front_round_trip(tmp_path):
         np.testing.assert_array_equal(a["xy"], b["xy"])
 
 
-def test_front_meshes_are_named_by_their_mask_year(monkeypatch):
-    name = mesh_basename(10000, 1000, 20000.0, 2015)
-    assert name == "antarctica_10000_1000_buffered20000_front2015"
+def test_front_meshes_are_named_by_their_edge(monkeypatch):
+    name = mesh_basename(10000, 1000, 20000.0, "bm")
+    assert name == "antarctica_10000_1000_buffered20000_frontbm"
     assert parse_mesh_basename(name + ".msh") == (10000, 1000, 20000)
-    assert mesh_front_year(name) == 2015
-    assert mesh_front_year("antarctica_10000_1000_buffered20000") is None
+    assert mesh_front(name) == "bm"
+    assert mesh_front("antarctica_10000_1000_buffered20000") is None
     assert mesh_basename(10000, 1000, 20000.0) == "antarctica_10000_1000_buffered20000"
 
-    from icepack2_tools.runconfig import mesh_front
+    from icepack2_tools.runconfig import mesh_front as knob
     from mesh_naming import bndids_filename, mesh_filename
     monkeypatch.delenv("ISMIP7_MESH_FRONT", raising=False)
-    assert mesh_front() is None
+    assert knob() is None
     assert mesh_filename(10000, 1000, 20000.0).endswith("buffered20000.msh")
-    monkeypatch.setenv("ISMIP7_MESH_FRONT", "2015")
-    assert mesh_front() == 2015
-    assert mesh_filename(10000, 1000, 20000.0).endswith("buffered20000_front2015.msh")
+    monkeypatch.setenv("ISMIP7_MESH_FRONT", "bm")
+    assert knob() == "bm"
+    assert mesh_filename(10000, 1000, 20000.0).endswith("buffered20000_frontbm.msh")
     assert bndids_filename(10000, 1000, 20000.0).endswith(
-        "boundary_ids_antarctica_10000_1000_buffered20000_front2015.json")
+        "boundary_ids_antarctica_10000_1000_buffered20000_frontbm.json")
     assert mesh_filename(10000, 1000, 20000.0, front=None).endswith("buffered20000.msh")
-    monkeypatch.setenv("ISMIP7_MESH_FRONT", "15")
+    monkeypatch.setenv("ISMIP7_MESH_FRONT", "2015")
     with pytest.raises(ValueError):
-        mesh_front()
+        knob()

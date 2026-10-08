@@ -1,11 +1,11 @@
-r"""Front cells by an ice mask (issue #167).
+r"""Front cells from BedMachine's own mask (issue #167).
 
 Vertex sampling gives a cell on the ice front the mean of its vertex samples,
 and a vertex on the front samples a blend of ice and water, so the front cells
 hold a fraction of the front's thickness even when mesh edges follow the
-front. Under ``greene<year>`` sampling the year's ice mask decides which
-cells hold ice at the marine front, and the front cells take BedMachine's own
-thickness and bed over their ice.
+front. Under ``vertex_front`` sampling BedMachine's mask decides which cells
+hold ice at the marine front, and the front cells take its own thickness and
+bed over their ice.
 
 Serial, a 20 km square of 1 km cells on a BedMachine-shaped NetCDF: grounded
 ice on a bed above sea level for x < 6 km, a 200 m floating shelf on a bed at
@@ -16,13 +16,10 @@ ice on a bed above sea level for x < 6 km, a 200 m floating shelf on a bed at
 # before any UFL form is assembled.
 import icepack2_tools.dual_friction  # noqa: F401,E402
 
-import os                                                       # noqa: E402
-
 import numpy as np                                              # noqa: E402
 import netCDF4                                                  # noqa: E402
 import pytest                                                   # noqa: E402
 import rasterio                                                 # noqa: E402
-from rasterio.transform import from_origin                      # noqa: E402
 
 from firedrake import (                                         # noqa: E402
     Function,
@@ -69,17 +66,6 @@ def _bedmachine(path, front_x=12000.0, nunatak=False):
     return str(path)
 
 
-def _mask_tif(path, front_x=12000.0):
-    # all ice up to the front, so a BedMachine nunatak is ice in the mask
-    XX, _ = np.meshgrid(X, Y)
-    ice = XX < front_x
-    with rasterio.open(path, "w", driver="GTiff", height=len(Y), width=len(X),
-                       count=1, dtype="int8", crs="EPSG:3031",
-                       transform=from_origin(X[0] - PX / 2, Y[0] + PX / 2, PX, PX)) as dst:
-        dst.write(ice.astype("i1"), 1)
-    return str(path)
-
-
 def _spaces(offset=0.0):
     mesh = RectangleMesh(20, 20, 20e3, 20e3)
     if offset:
@@ -107,13 +93,12 @@ def test_vertex_sampling_thins_the_front_cells(tmp_path):
     assert H[front].max() < SHELF_H - 1.0
 
 
-def test_front_cells_take_the_shelf_thickness_on_a_mesh_that_follows_the_front(tmp_path):
+def test_front_cells_take_the_shelf_thickness(tmp_path):
     bm = _bedmachine(tmp_path / "bm.nc")
-    tif = _mask_tif(tmp_path / "mask.tif")
     Q, Q0, xc = _spaces()
     b0, H0 = _vertex(bm, Q0, Q)
     b, H, _ = G.sample_bed_thickness(bm, Q0, Q, method="vertex")
-    counts = G.front_cells(H, b, bm, tif)
+    counts = G.front_cells(H, b, bm)
     H, b = H.dat.data_ro, b.dat.data_ro
     front = (xc[:, 0] > 11e3) & (xc[:, 0] < 12e3)
     water = xc[:, 0] > 12e3
@@ -123,8 +108,7 @@ def test_front_cells_take_the_shelf_thickness_on_a_mesh_that_follows_the_front(t
     assert np.all(H[water] == 0.0)
     np.testing.assert_array_equal(H[interior], H0[interior])
     np.testing.assert_array_equal(b[interior], b0[interior])
-    assert counts["front"] == front.sum() and counts["mismatch"] == 0
-    assert counts["water"] == water.sum()
+    assert counts["rebuilt"] == front.sum() and counts["water"] == water.sum()
 
 
 def test_a_cell_holds_ice_when_most_of_it_is_ice(tmp_path):
@@ -133,69 +117,42 @@ def test_a_cell_holds_ice_when_most_of_it_is_ice(tmp_path):
     # column holds 20 % ice, so both its triangles are water, and the column
     # before it is the front.
     bm = _bedmachine(tmp_path / "bm.nc", front_x=12300.0)
-    tif = _mask_tif(tmp_path / "mask.tif", front_x=12300.0)
     Q, Q0, xc = _spaces(offset=50.0)
     b, H, _ = G.sample_bed_thickness(bm, Q0, Q, method="vertex")
-    G.front_cells(H, b, bm, tif)
+    G.front_cells(H, b, bm)
     H = H.dat.data_ro
     assert np.all(H[xc[:, 0] > 12.05e3] == 0.0)
     np.testing.assert_allclose(H[(xc[:, 0] > 11.05e3) & (xc[:, 0] < 12.05e3)], SHELF_H)
-    # moved 550 m west, the 11.45-12.45 km column holds 80 % ice and is the front
+    # moved 550 m west, the 11.45-12.45 km column holds 80 % ice: it holds the
+    # shelf's full thickness, and holds water itself, so it is rebuilt
     Q, Q0, xc = _spaces(offset=-550.0)
     b, H, _ = G.sample_bed_thickness(bm, Q0, Q, method="vertex")
-    G.front_cells(H, b, bm, tif)
+    G.front_cells(H, b, bm)
     H = H.dat.data_ro
     np.testing.assert_allclose(H[(xc[:, 0] > 11.45e3) & (xc[:, 0] < 12.45e3)], SHELF_H)
     assert np.all(H[xc[:, 0] > 12.45e3] == 0.0)
 
 
-def test_mask_ice_beyond_bedmachine_is_emptied_or_filled(tmp_path):
-    # the mask's front is 2 km seaward of BedMachine's ice
-    bm = _bedmachine(tmp_path / "bm.nc", front_x=12000.0)
-    tif = _mask_tif(tmp_path / "mask.tif", front_x=14000.0)
-    Q, Q0, xc = _spaces()
-    gap = (xc[:, 0] > 12e3) & (xc[:, 0] < 14e3)
-
-    b, H, _ = G.sample_bed_thickness(bm, Q0, Q, method="vertex")
-    counts = G.front_cells(H, b, bm, tif, fill="empty")
-    assert counts["mismatch"] == gap.sum() and counts["filled"] == 0
-    assert np.all(H.dat.data_ro[xc[:, 0] > 12e3] == 0.0)
-    np.testing.assert_allclose(H.dat.data_ro[(xc[:, 0] > 11e3) & (xc[:, 0] < 12e3)], SHELF_H)
-
-    b, H, _ = G.sample_bed_thickness(bm, Q0, Q, method="vertex")
-    counts = G.front_cells(H, b, bm, tif, fill="neighbour")
-    assert counts["filled"] == gap.sum()
-    np.testing.assert_allclose(H.dat.data_ro[gap], SHELF_H)
-    assert np.all(H.dat.data_ro[xc[:, 0] > 14e3] == 0.0)
-
-
-def test_a_nunatak_the_mask_calls_ice_is_left_alone(tmp_path):
+def test_a_nunatak_is_left_alone(tmp_path):
     bm = _bedmachine(tmp_path / "bm.nc", nunatak=True)
-    tif = _mask_tif(tmp_path / "mask.tif")
     Q, Q0, xc = _spaces()
     b0, H0 = _vertex(bm, Q0, Q)
     b, H, _ = G.sample_bed_thickness(bm, Q0, Q, method="vertex")
-    counts = G.front_cells(H, b, bm, tif, fill="empty")
+    G.front_cells(H, b, bm)
     near = (np.abs(xc[:, 0] - 3e3) < 2e3) & (np.abs(xc[:, 1] - 10e3) < 2e3)
     np.testing.assert_array_equal(H.dat.data_ro[near], H0[near])
     np.testing.assert_array_equal(b.dat.data_ro[near], b0[near])
-    assert counts["mismatch"] == 0
 
 
-def test_greene_sampling_reads_the_cached_mask(tmp_path, monkeypatch):
+def test_vertex_front_sampling_rebuilds_the_front(tmp_path):
     bm = _bedmachine(tmp_path / "bm.nc")
-    cache = tmp_path / "obs" / "icemask_cache"
-    cache.mkdir(parents=True)
-    _mask_tif(cache / "icemask_greene_2015_AntarcticaObsISMIP7-v1.2.tif")
-    monkeypatch.delenv("ISMIP7_OBS_KIT", raising=False)
-    monkeypatch.setenv("ISMIP7_DATA_ROOT", str(tmp_path / "no_kit"))
-    monkeypatch.setenv("ISMIP7_OBS_DATA_ROOT", str(tmp_path / "obs"))
     Q, Q0, xc = _spaces()
-    b, H, counts = G.sample_bed_thickness(bm, Q0, Q, method="greene2015")
-    assert counts["front"] == ((xc[:, 0] > 11e3) & (xc[:, 0] < 12e3)).sum()
-    np.testing.assert_allclose(H.dat.data_ro[(xc[:, 0] > 11e3) & (xc[:, 0] < 12e3)], SHELF_H)
+    b, H, counts = G.sample_bed_thickness(bm, Q0, Q, method="vertex_front")
+    front = (xc[:, 0] > 11e3) & (xc[:, 0] < 12e3)
+    assert counts["rebuilt"] == front.sum()
+    np.testing.assert_allclose(H.dat.data_ro[front], SHELF_H)
     with pytest.raises(ValueError):
-        G.sample_bed_thickness(bm, Q, Q, method="greene2015")
+        G.sample_bed_thickness(bm, Q, Q, method="vertex_front")
 
 
 def test_the_lattice_mean_of_a_ramp_is_the_cell_centroid(tmp_path):
@@ -213,22 +170,3 @@ def test_the_lattice_mean_of_a_ramp_is_the_cell_centroid(tmp_path):
     Q, Q0, xc = _spaces()
     mean = G.raster_cell_mean(rasterio.open(f"netcdf:{path}:ramp"), Q0)
     assert np.abs(mean.dat.data_ro - xc[:, 0]).max() < PX / 2
-
-
-def test_under_empty_a_cell_straddling_bedmachines_front_counts_its_bedmachine_ice(tmp_path):
-    # The mask runs to 14 km and BedMachine's ice to the pixel edge at
-    # 12.25 km. Moved 50 m east, the 12.05-13.05 km column is mask ice
-    # throughout and holds 20 % BedMachine ice: under "empty" it is water and
-    # the column before it the front; under "neighbour" it is ice with
-    # BedMachine's thickness from its 20 %.
-    bm = _bedmachine(tmp_path / "bm.nc", front_x=12300.0)
-    tif = _mask_tif(tmp_path / "mask.tif", front_x=14000.0)
-    Q, Q0, xc = _spaces(offset=50.0)
-    col = (xc[:, 0] > 12.05e3) & (xc[:, 0] < 13.05e3)
-    b, H, _ = G.sample_bed_thickness(bm, Q0, Q, method="vertex")
-    G.front_cells(H, b, bm, tif, fill="empty")
-    assert np.all(H.dat.data_ro[xc[:, 0] > 12.05e3] == 0.0)
-    np.testing.assert_allclose(H.dat.data_ro[(xc[:, 0] > 11.05e3) & (xc[:, 0] < 12.05e3)], SHELF_H)
-    b, H, _ = G.sample_bed_thickness(bm, Q0, Q, method="vertex")
-    G.front_cells(H, b, bm, tif, fill="neighbour")
-    np.testing.assert_allclose(H.dat.data_ro[col], SHELF_H)

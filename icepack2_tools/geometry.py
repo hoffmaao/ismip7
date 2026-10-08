@@ -228,7 +228,7 @@ def sample_to_geometry(raster, Q_g, Q_cg, floor=None, method="vertex"):
     ``method`` selects the DG0 cell value (``runconfig.RASTER_SAMPLES``):
     ``"vertex"`` projects the CG1 vertex interpolant (three pixels per cell);
     ``"cell_mean"`` is :func:`raster_cell_mean`, the raster's mean over the
-    cell. A front sampling (``"greene<year>"``) samples one raster as
+    cell. The front sampling (``"vertex_front"``) samples one raster as
     ``"vertex"``; its front cells are :func:`sample_bed_thickness`'s. Under
     CG1 geometry there is no cell, so ``method`` is ignored.
 
@@ -347,131 +347,76 @@ def raise_bed_to_lake_ice_base(b, H, bm_fn, Q_g, Q_cg, method="vertex"):
     return Q_g.mesh().comm.allreduce(changed, op=MPI.SUM)
 
 
-# ── Front cells by an ice mask (issue #167) ────────────────────────────────
+# ── Front cells (issue #167) ──────────────────────────────────────────────
 #
 # Vertex sampling gives a cell the BedMachine front crosses the mean of its
 # vertex samples, and an ocean vertex samples zero, so the cell holds a
 # fraction of the front's thickness: on IU's 2 km buffered mesh the front band
 # held 40 m against BedMachine's 163 m floating front and carried 343 of about
-# 1,200 Gt/yr. Even on a mesh whose edges follow the front (the _front<year>
-# meshes) a vertex on the front samples a blend of ice and water. Under a
-# front sampling (``greene<year>``) the ice mask of that year decides which
-# cells hold ice at the marine front, and the front cells take BedMachine's
-# own thickness and bed over their ice.
+# 1,200 Gt/yr. Even on a mesh whose edges follow the front (the _frontbm
+# meshes) a vertex on the front samples a blend of ice and water. Under the
+# front sampling (``vertex_front``) BedMachine's own mask decides which cells
+# hold ice at the marine front, and the front cells take its thickness and
+# bed over their ice.
 
 # A cell holds ice when at least this share of its lattice samples are ice:
 # the area-preserving choice on a mesh that does not follow the front; on one
 # that does the share is about 0 or 1.
 FRONT_ICE_FRACTION = 0.5
-# What a cell the mask calls ice gets when BedMachine holds no ice anywhere
-# in it: "empty" leaves it ice-free, "neighbour" gives it the mean thickness
-# of the held ice cells around it, ring by ring, up to FRONT_FILL_SWEEPS
-# rings. The Greene 2015 front lies up to 20 km seaward of BedMachine's ice
-# (51,373 km2 of mask ice over BedMachine water, 29,459 km2 of it 2 to 20 km
-# out; front_mask_census.py, 8 October 2026), so the rings run until none is
-# left.
-FRONT_FILLS = ("empty", "neighbour")
-FRONT_FILL = "empty"
-FRONT_FILL_SWEEPS = 100
 # Cells whose pixel-density samples are mixed are looked up again on a lattice
-# this many times as fine in each direction.
+# this many times as fine in each direction: at pixel density a 1 km cell gets
+# four samples, too few to tell a cell 64 % ice from one 25 % ice.
 FRONT_LATTICE_DENSITY = 4.0
 
 
-def _vertex_mean(Q_dg, values, defined):
-    r"""Per cell, the area-weighted mean of ``values`` over the ``defined``
-    cells sharing a vertex with it (NaN where there are none). Assembled
-    through CG1 like ``front.vertex_neighbours``, so a neighbour across a
-    partition boundary counts."""
-    import firedrake as fd
+def front_cells(H, b, bm_fn, frac=FRONT_ICE_FRACTION):
+    r"""Rebuild the marine front of the DG0 geometry ``H``, ``b`` from
+    BedMachine's own mask, in place.
 
-    mesh = Q_dg.mesh()
-    Q1 = fd.FunctionSpace(mesh, "CG", 1)
-    v = fd.TestFunction(Q1)
-    w = Function(Q_dg)
-    wv = Function(Q_dg)
-    w.dat.data[:] = defined
-    wv.dat.data[:] = np.where(defined, values, 0.0)
-    num = fd.Function(Q1)
-    den = fd.Function(Q1)
-    num.dat.data[:] = fd.assemble(wv * v * fd.dx).dat.data_ro
-    den.dat.data[:] = fd.assemble(w * v * fd.dx).dat.data_ro
-    cell_nodes = Q1.cell_node_map().values[:Q_dg.dof_dset.size]
-    n = num.dat.data_ro_with_halos[cell_nodes].sum(axis=1)
-    d = den.dat.data_ro_with_halos[cell_nodes].sum(axis=1)
-    with np.errstate(all="ignore"):
-        return np.where(d > 0.0, n / d, np.nan)
-
-
-def front_cells(H, b, bm_fn, mask_tif, fill=FRONT_FILL, frac=FRONT_ICE_FRACTION,
-                sweeps=FRONT_FILL_SWEEPS):
-    r"""Rebuild the marine front of the DG0 geometry ``H``, ``b`` by an ice
-    mask, in place.
-
-    Every owned cell is looked up on the :func:`cell_samples` lattice in the
-    mask (``mask_tif``, :mod:`obs_icemask`) and in BedMachine's mask, bed and
-    thickness, and its samples classified (``obs_icemask.classify``). A
-    sample is advanced where the mask holds ice over what BedMachine calls
-    water with no BedMachine thickness: the mask's front lies seaward of
-    BedMachine's there. Mask ice over BedMachine rock (nunataks) is not
-    advanced, and is left alone. Under ``fill`` (:data:`FRONT_FILLS`):
-
-    * ``empty``: a cell holds ice when at least ``frac`` of its samples are
-      ice and not advanced, so the front stays at BedMachine's ice;
-    * ``neighbour``: a cell holds ice when at least ``frac`` of its samples
-      are ice, and one with no BedMachine ice in it takes the mean thickness
-      of the ice around it, ring by ring (it keeps its bed).
-
-    Then a cell without ice that holds a marine or an advanced sample is
-    water, ``H = 0``; a cell with BedMachine ice that shares a vertex with a
-    water cell, or holds an advanced sample too, is rebuilt: its ``H`` and
-    ``b`` are BedMachine's means over the ice it holds; every other cell is
-    untouched, so interior ice, land margins and the open buffer keep their
-    vertex samples.
+    Every owned cell is looked up on the :func:`cell_samples` lattice in
+    BedMachine's mask, bed and thickness, and its samples classified
+    (``obs_icemask.classify`` of BedMachine's ice). A cell holds ice when at
+    least ``frac`` of its samples are ice. Then a cell without ice that holds
+    a marine sample is water, ``H = 0``; a cell with ice that shares a vertex
+    with a water cell, or holds a marine sample itself, is rebuilt: its
+    ``H`` and ``b`` are BedMachine's means over the ice samples it holds.
+    Every other cell is untouched, so interior ice, land margins and the open
+    buffer keep their vertex samples.
 
     Returns the global counts, collectively.
     """
     import rasterio
     from .front import vertex_neighbours
-    from .obs_icemask import ICE, MARINE, classify
+    from .obs_icemask import ICE, MARINE, _BM_ICE, classify
 
-    if fill not in FRONT_FILLS:
-        raise ValueError(f"front fill must be one of {FRONT_FILLS}, not {fill!r}")
     Q_g = H.function_space()
     if Q_g.ufl_element().degree() != 0:
         raise ValueError("front_cells needs DG0 geometry: a cell is its unit")
     ncell = Q_g.mesh().coordinates.cell_node_map().values.shape[0]
     f_ice = np.zeros(ncell)
-    f_adv = np.zeros(ncell)
     marine = np.zeros(ncell, bool)
     h_ice = np.full(ncell, np.nan)
     b_ice = np.full(ncell, np.nan)
 
     def reduce(idx, values):
-        greene, bm_mask, bed, thk = values
-        cls = classify(greene == 1, bm_mask, bed)
+        bm_mask, bed, thk = values
+        cls = classify(np.isin(bm_mask, _BM_ICE), bm_mask, bed)
         ice = cls == ICE
         held = ice & np.isfinite(thk) & (thk > 0)
         n = held.sum(axis=1)
         f_ice[idx] = ice.mean(axis=1)
         marine[idx] = (cls == MARINE).any(axis=1)
-        f_adv[idx] = (ice & ~held & (classify(np.zeros_like(ice), bm_mask, bed)
-                                     == MARINE)).mean(axis=1)
         with np.errstate(all="ignore"):
             h_ice[idx] = np.where(held, thk, 0.0).sum(axis=1) / n
             b_ice[idx] = np.where(held, bed, 0.0).sum(axis=1) / n
 
-    with rasterio.open(mask_tif) as g, \
-            rasterio.open(f"netcdf:{bm_fn}:mask") as m, \
+    with rasterio.open(f"netcdf:{bm_fn}:mask") as m, \
             rasterio.open(f"netcdf:{bm_fn}:bed") as bd, \
             rasterio.open(f"netcdf:{bm_fn}:thickness") as th:
-        dofs = cell_samples([g, m, bd, th], Q_g, reduce)
-        # At pixel density a 1 km cell gets four samples, too few to tell a
-        # cell 64 % ice from one 25 % ice; look the mixed cells up again on a
-        # lattice FRONT_LATTICE_DENSITY times as fine.
-        mixed = np.flatnonzero(((f_ice > 0.0) & (f_ice < 1.0)) | (marine & (f_ice > 0.0))
-                               | ((f_adv > 0.0) & (f_adv < 1.0)))
-        cell_samples([g, m, bd, th], Q_g, reduce, density=FRONT_LATTICE_DENSITY,
+        dofs = cell_samples([m, bd, th], Q_g, reduce)
+        mixed = np.flatnonzero(((f_ice > 0.0) & (f_ice < 1.0))
+                               | (marine & (f_ice > 0.0)))
+        cell_samples([m, bd, th], Q_g, reduce, density=FRONT_LATTICE_DENSITY,
                      subset=mixed)
 
     n_own = Q_g.dof_dset.size
@@ -482,77 +427,52 @@ def front_cells(H, b, bm_fn, mask_tif, fill=FRONT_FILL, frac=FRONT_ICE_FRACTION,
         return out
 
     F, MAR = per_dof(f_ice, 0.0), per_dof(marine, False)
-    ADV = per_dof(f_adv, 0.0)
     HI, BI = per_dof(h_ice, np.nan), per_dof(b_ice, np.nan)
-    is_ice = (F - ADV >= frac) if fill == "empty" else (F >= frac)
-    held = is_ice & np.isfinite(HI)
-    mismatch = is_ice & ~held & (ADV > 0.0)
-    filled = np.zeros(n_own, bool)
-    comm = Q_g.mesh().comm
-    if fill == "neighbour":
-        for _ in range(sweeps):
-            if not comm.allreduce(bool((mismatch & ~filled).any()), op=MPI.LOR):
-                break
-            have = held | filled
-            mean = _vertex_mean(Q_g, np.where(have, HI, 0.0), have)
-            new = mismatch & ~filled & np.isfinite(mean)
-            HI[new] = mean[new]
-            filled |= new
-    ice = is_ice & ~(mismatch & ~filled)
-    water = ~ice & (MAR | (ADV > 0.0))
-    front = (held | filled) & vertex_neighbours(Q_g)(water)
+    ice = F >= frac
+    held = ice & np.isfinite(HI)
+    water = ~ice & MAR
+    rebuilt = held & (vertex_neighbours(Q_g)(water) | MAR)
 
-    # A cell BedMachine's own front crosses (ice with advanced samples) is
-    # thinned by its vertex samples wherever it lies, so it is rebuilt as a
-    # front cell is, even inside a filled advance.
-    rebuilt = (front | (held & (ADV > 0.0))) & held
     h0 = H.dat.data_ro.copy()
     Hd, bd_ = H.dat.data, b.dat.data
     Hd[water] = 0.0
-    Hd[rebuilt | filled] = HI[rebuilt | filled]
+    Hd[rebuilt] = HI[rebuilt]
     bd_[rebuilt] = BI[rebuilt]
     counts = {
-        "front": int(front.sum()),
+        "rebuilt": int(rebuilt.sum()),
+        "rebuilt_thicker": int((rebuilt & (HI > h0)).sum()),
         "water": int(water.sum()),
         "emptied": int((water & (h0 > 0.0)).sum()),
-        "mismatch": int(((F >= frac) & (ADV > 0.0) & ~held).sum()),
-        "filled": int(filled.sum()),
-        "rebuilt": int(rebuilt.sum()),
-        "front_thicker": int((front & (HI > h0)).sum()),
     }
+    comm = Q_g.mesh().comm
     return {k: comm.allreduce(v, op=MPI.SUM) for k, v in counts.items()}
 
 
-def sample_bed_thickness(bm_fn, Q_g, Q_cg, floor=None, method="vertex", fill=None):
+def sample_bed_thickness(bm_fn, Q_g, Q_cg, floor=None, method="vertex"):
     r"""BedMachine's bed and thickness on the geometry space, as
     ``(b, H, counts)``.
 
     Both are :func:`sample_to_geometry` under ``method``, the thickness
-    floored at ``floor``. Under a front sampling (``greene<year>``) the
-    marine front is then rebuilt by that year's ice mask
-    (:func:`front_cells`, ``fill`` defaulting to :data:`FRONT_FILL`) and the
-    floor applied again; ``counts`` are its global counts, None otherwise.
+    floored at ``floor``. Under the front sampling (``vertex_front``) the
+    marine front cells are then rebuilt (:func:`front_cells`) and the floor
+    applied again; ``counts`` are its global counts, None otherwise.
     Collective.
     """
     import rasterio
-    from .runconfig import raster_front_year
+    from .runconfig import raster_front
 
     b = sample_to_geometry(
         rasterio.open(f"netcdf:{bm_fn}:bed"), Q_g, Q_cg, method=method)
     H = sample_to_geometry(
         rasterio.open(f"netcdf:{bm_fn}:thickness"), Q_g, Q_cg, floor=floor,
         method=method)
-    year = raster_front_year(method)
-    if year is None:
+    if not raster_front(method):
         return b, H, None
     if Q_g.ufl_element() == Q_cg.ufl_element():
         raise ValueError(
             f"raster sampling {method} rebuilds DG0 front cells; this "
             f"geometry is CG1")
-    from .obs_icemask import icemask_tif
-    comm = Q_g.mesh().comm
-    tif = comm.bcast(icemask_tif(year) if comm.rank == 0 else None, root=0)
-    counts = front_cells(H, b, bm_fn, tif, fill=fill or FRONT_FILL)
+    counts = front_cells(H, b, bm_fn)
     if floor is not None:
         H.interpolate(max_value(H, Constant(floor)))
     return b, H, counts

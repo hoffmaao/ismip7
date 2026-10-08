@@ -2,9 +2,8 @@
 """The t = 0 geometry of a mesh under each raster sampling, without a solve
 (issue #167).
 
-For each variant (``vertex``, and ``greene<year>`` with each front fill of
-``geometry.FRONT_FILLS``) the BedMachine bed and thickness are put on the
-mesh's DG0 cells as a cold start puts them (``geometry.sample_bed_thickness``,
+For each raster sampling (``vertex`` and ``vertex_front`` by default) the
+BedMachine bed and thickness are put on the mesh's DG0 cells as a cold start puts them (``geometry.sample_bed_thickness``,
 then the lake rule and the surface from flotation), and a checkpoint is
 written with ``thickness``, ``bed``, ``surface``, ``H_init`` and the
 MEaSUREs ``velocity_obs`` for ``front_flux_check.py``, which then gives the
@@ -13,8 +12,8 @@ prints, per variant, the front-cell counts and the ice it holds: floating and
 grounded area and mass, and the cells the melt falls on.
 
     mpiexec -n 32 python antarctica/scripts/probe_front_cells.py \\
-        --mesh antarctica/mesh/antarctica_5000_2000_buffered20000_front2015.msh \\
-        --out-dir results/i167_probe [--variants vertex greene2015:empty ...]
+        --mesh antarctica/mesh/antarctica_5000_2000_buffered20000_frontbm.msh \\
+        --out-dir results/i167_probe [--variants vertex vertex_front]
 """
 import argparse
 import glob
@@ -38,32 +37,18 @@ from firedrake.petsc import PETSc  # noqa: E402
 
 from icepack2_tools.forcing import melt_receiving  # noqa: E402
 from icepack2_tools.geometry import (  # noqa: E402
-    FRONT_FILLS, raise_bed_to_lake_ice_base, sample_bed_thickness,
+    raise_bed_to_lake_ice_base, sample_bed_thickness,
 )
-from icepack2_tools.runconfig import (  # noqa: E402
-    lake_ice_base, obs_data_root, raster_front_year,
-)
+from icepack2_tools.runconfig import lake_ice_base, obs_data_root  # noqa: E402
 
 RHO_I, RHO_W = 917.0, 1024.0
-
-
-def _variants(names):
-    out = []
-    for v in names:
-        method, _, fill = v.partition(":")
-        if raster_front_year(method) is None:
-            out.append((method, None))
-        else:
-            for f in ([fill] if fill else list(FRONT_FILLS)):
-                out.append((method, f))
-    return out
 
 
 def main():
     p = argparse.ArgumentParser(description=__doc__.split("\n\n")[0])
     p.add_argument("--mesh", required=True)
     p.add_argument("--out-dir", required=True)
-    p.add_argument("--variants", nargs="+", default=["vertex", "greene2015"])
+    p.add_argument("--variants", nargs="+", default=["vertex", "vertex_front"])
     args = p.parse_args()
 
     import icepack
@@ -89,9 +74,9 @@ def main():
     PETSc.Sys.Print(f"{stem}: {n_cells} cells; BedMachine {os.path.basename(bm_fn)}")
 
     rows = []
-    for method, fill in _variants(args.variants):
-        label = method if fill is None else f"{method}_{fill}"
-        b, H, counts = sample_bed_thickness(bm_fn, Q0, Q, floor=0.0, method=method, fill=fill)
+    for method in args.variants:
+        label = method
+        b, H, counts = sample_bed_thickness(bm_fn, Q0, Q, floor=0.0, method=method)
         if lake_ice_base():
             raise_bed_to_lake_ice_base(b, H, bm_fn, Q0, Q, method=method)
         s = Function(Q0, name="surface").interpolate(
@@ -125,7 +110,6 @@ def main():
             for f in (H, b, s, H_init, u_obs):
                 chk.save_function(f)
             chk.set_attr("/", "raster_sample", method)
-            chk.set_attr("/", "front_fill", fill or "none")
             chk.set_attr("/", "mesh_basename", stem)
         PETSc.Sys.Print(f"  wrote {out}")
     if comm.rank == 0:

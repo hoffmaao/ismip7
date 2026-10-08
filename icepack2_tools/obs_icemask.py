@@ -1,19 +1,21 @@
-r"""One year of the Greene et al. (2022) ice mask, the front the buffered
-meshes follow (issue #167).
+r"""Ice masks for the marine front of a buffered mesh (issue #167), and
+the pixel classes the front is drawn from.
 
-The ISMIP7 observations MIPkit (``AntarcticaObsISMIP7-v*.nc``) carries
-``icemask_greene``, a binary ice / no-ice mask on a 500 m grid for 1997 and
-2000 to 2021, dated 15 March. BedMachine's own mask is dated 2007 in the same
-kit. :func:`icemask_tif` cuts one year into a GeoTIFF beside the dH/dt cache
-(``<ISMIP7_OBS_DATA_ROOT>/icemask_cache``), so a site without the 9 GB kit
-stages that one file. The kit's grid has its pixel centres on BedMachine
-v4.1's, which :func:`read_classes` checks.
+The _frontbm meshes and the ``vertex_front`` raster sampling take the front
+from BedMachine itself (:func:`bedmachine_classes`): its ice edge is where
+its thickness ends, so a mesh on that edge gives the front cells BedMachine's
+own thickness with nothing to fill. The ISMIP7 observations MIPkit
+(``AntarcticaObsISMIP7-v*.nc``) also carries ``icemask_greene``, a binary
+ice / no-ice mask on a 500 m grid for 1997 and 2000 to 2021, dated 15 March;
+:func:`icemask_tif` cuts one year into a GeoTIFF beside the dH/dt cache
+(``<ISMIP7_OBS_DATA_ROOT>/icemask_cache``) for comparison
+(front_mask_census.py, bm_front_flux.py --greene-tif). Its 2015 front lies
+seaward of BedMachine's ice over 51,373 km2 where BedMachine holds no
+thickness, up to 20 km out, which is why the front is BedMachine's.
 
-:func:`classify` splits the pixels three ways: ice (Greene), marine (no ice,
-over BedMachine ocean, floating ice or a bed below sea level) and land (the
-rest). A marine front is an edge between ice and marine pixels; the mesh
-builder embeds it (``mesh.extract_marine_front``) and the ``greene<year>``
-raster sampling decides front cells by it (``geometry.front_cells``).
+:func:`classify` splits the pixels three ways: ice, marine (no ice, over
+BedMachine ocean, floating ice or a bed below sea level) and land (the
+rest). A marine front is an edge between ice and marine pixels.
 """
 
 import datetime
@@ -188,3 +190,29 @@ def read_classes(mask_tif, bm_fn, bounds=None):
             f"BedMachine window {bm_mask.shape} does not match the mask's "
             f"{ice.shape} over {snapped}")
     return classify(ice, bm_mask, bed), transform
+
+
+# BedMachine mask values that hold ice: grounded, floating, Lake Vostok.
+_BM_ICE = (2, 3, 4)
+
+
+def bedmachine_classes(bm_fn, bounds=None):
+    r"""``(classes, transform)`` of BedMachine's own ice (mask grounded,
+    floating or lake) on its grid, over ``bounds`` (left, bottom, right, top;
+    the whole raster when None)."""
+    import rasterio
+    from rasterio.windows import from_bounds
+
+    with rasterio.open(f"netcdf:{bm_fn}:mask") as src:
+        if bounds is None:
+            win = rasterio.windows.Window(0, 0, src.width, src.height)
+        else:
+            win = from_bounds(*bounds, transform=src.transform)
+            win = win.round_offsets(op="floor").round_lengths(op="ceil")
+        bm_mask = src.read(1, window=win)
+        transform = src.window_transform(win)
+        snapped = rasterio.windows.bounds(win, src.transform)
+    with rasterio.open(f"netcdf:{bm_fn}:bed") as src:
+        bed = src.read(1, window=_aligned_window(src, snapped))
+    return classify(np.isin(bm_mask, _BM_ICE), bm_mask, bed), transform
+

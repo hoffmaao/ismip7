@@ -120,3 +120,16 @@ def test_bedmachine_off_the_mask_grid_is_refused(kit_env):
     bm = _bedmachine(kit_env / "bm_shifted.nc", shift=250.0)
     with pytest.raises(ValueError, match="pixel grid"):
         OI.read_classes(tif, bm)
+
+
+def test_bedmachines_own_classes(tmp_path):
+    bm = _bedmachine(tmp_path / "bm.nc")
+    classes, transform = OI.bedmachine_classes(bm)
+    assert classes.shape == (49, 49)
+    x = transform.c + 500.0 * (np.arange(49) + 0.5)
+    y = transform.f - 500.0 * (np.arange(49) + 0.5)
+    X, Y = np.meshgrid(x, y)
+    expect = np.where(X < 12000.0, OI.ICE, OI.MARINE)
+    expect = np.where((X >= 12000.0) & (Y > 15000.0), OI.LAND, expect)
+    np.testing.assert_array_equal(classes, expect)
+

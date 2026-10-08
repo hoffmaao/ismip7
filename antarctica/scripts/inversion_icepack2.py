@@ -541,8 +541,8 @@ def main():
     # including h=0 over the buffered ocean region. Composite rheology
     # (added below) keeps the SNES nonsingular where h=0.
     h_clamp = float(os.environ.get("ISMIP7_H_CLAMP", "0.0"))
-    # A front sampling (greene<year>) rebuilds the marine front cells by
-    # that year's ice mask (geometry.front_cells, issue #167).
+    # The front sampling (vertex_front) rebuilds the marine front cells from
+    # BedMachine's own mask (geometry.front_cells, issue #167).
     b, H, front_counts = sample_bed_thickness(
         bm_fn, Q_g, Q, floor=h_clamp, method=raster_sample)
     if front_counts is not None:

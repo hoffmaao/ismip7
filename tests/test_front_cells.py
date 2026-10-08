@@ -213,3 +213,22 @@ def test_the_lattice_mean_of_a_ramp_is_the_cell_centroid(tmp_path):
     Q, Q0, xc = _spaces()
     mean = G.raster_cell_mean(rasterio.open(f"netcdf:{path}:ramp"), Q0)
     assert np.abs(mean.dat.data_ro - xc[:, 0]).max() < PX / 2
+
+
+def test_under_empty_a_cell_straddling_bedmachines_front_counts_its_bedmachine_ice(tmp_path):
+    # The mask runs to 14 km and BedMachine's ice to the pixel edge at
+    # 12.25 km. Moved 50 m east, the 12.05-13.05 km column is mask ice
+    # throughout and holds 20 % BedMachine ice: under "empty" it is water and
+    # the column before it the front; under "neighbour" it is ice with
+    # BedMachine's thickness from its 20 %.
+    bm = _bedmachine(tmp_path / "bm.nc", front_x=12300.0)
+    tif = _mask_tif(tmp_path / "mask.tif", front_x=14000.0)
+    Q, Q0, xc = _spaces(offset=50.0)
+    col = (xc[:, 0] > 12.05e3) & (xc[:, 0] < 13.05e3)
+    b, H, _ = G.sample_bed_thickness(bm, Q0, Q, method="vertex")
+    G.front_cells(H, b, bm, tif, fill="empty")
+    assert np.all(H.dat.data_ro[xc[:, 0] > 12.05e3] == 0.0)
+    np.testing.assert_allclose(H.dat.data_ro[(xc[:, 0] > 11.05e3) & (xc[:, 0] < 12.05e3)], SHELF_H)
+    b, H, _ = G.sample_bed_thickness(bm, Q0, Q, method="vertex")
+    G.front_cells(H, b, bm, tif, fill="neighbour")
+    np.testing.assert_allclose(H.dat.data_ro[col], SHELF_H)

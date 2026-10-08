@@ -410,22 +410,24 @@ def front_cells(H, b, bm_fn, mask_tif, fill=FRONT_FILL, frac=FRONT_ICE_FRACTION,
 
     Every owned cell is looked up on the :func:`cell_samples` lattice in the
     mask (``mask_tif``, :mod:`obs_icemask`) and in BedMachine's mask, bed and
-    thickness, and its samples classified (``obs_icemask.classify``). A cell
-    holds ice when at least ``frac`` of them are ice; BedMachine holds ice
-    in it when some ice sample has BedMachine thickness. Then:
+    thickness, and its samples classified (``obs_icemask.classify``). A
+    sample is advanced where the mask holds ice over what BedMachine calls
+    water with no BedMachine thickness: the mask's front lies seaward of
+    BedMachine's there. Mask ice over BedMachine rock (nunataks) is not
+    advanced, and is left alone. Under ``fill`` (:data:`FRONT_FILLS`):
 
-    * a cell the mask calls ice and BedMachine leaves empty, with mask ice
-      over what BedMachine calls water, is a mismatch: the mask's front lies
-      seaward of BedMachine's there. It is filled by ``fill``
-      (:data:`FRONT_FILLS`) or, failing that, ice-free. Mask ice over
-      BedMachine rock (nunataks) is no mismatch and is left alone;
-    * a cell without ice that holds a marine sample, or an unfilled
-      mismatch, is water: ``H = 0``;
-    * a cell with ice that shares a vertex with a water cell is a front
-      cell: its ``H`` and ``b`` are BedMachine's means over the ice samples
-      it holds; a filled mismatch takes its fill and keeps its bed;
-    * every other cell is untouched, so interior ice, land margins and the
-      open buffer keep their vertex samples.
+    * ``empty``: a cell holds ice when at least ``frac`` of its samples are
+      ice and not advanced, so the front stays at BedMachine's ice;
+    * ``neighbour``: a cell holds ice when at least ``frac`` of its samples
+      are ice, and one with no BedMachine ice in it takes the mean thickness
+      of the ice around it, ring by ring (it keeps its bed).
+
+    Then a cell without ice that holds a marine or an advanced sample is
+    water, ``H = 0``; a cell with BedMachine ice that shares a vertex with a
+    water cell, or holds an advanced sample too, is rebuilt: its ``H`` and
+    ``b`` are BedMachine's means over the ice it holds; every other cell is
+    untouched, so interior ice, land margins and the open buffer keep their
+    vertex samples.
 
     Returns the global counts, collectively.
     """
@@ -440,8 +442,8 @@ def front_cells(H, b, bm_fn, mask_tif, fill=FRONT_FILL, frac=FRONT_ICE_FRACTION,
         raise ValueError("front_cells needs DG0 geometry: a cell is its unit")
     ncell = Q_g.mesh().coordinates.cell_node_map().values.shape[0]
     f_ice = np.zeros(ncell)
+    f_adv = np.zeros(ncell)
     marine = np.zeros(ncell, bool)
-    advanced = np.zeros(ncell, bool)
     h_ice = np.full(ncell, np.nan)
     b_ice = np.full(ncell, np.nan)
 
@@ -453,11 +455,8 @@ def front_cells(H, b, bm_fn, mask_tif, fill=FRONT_FILL, frac=FRONT_ICE_FRACTION,
         n = held.sum(axis=1)
         f_ice[idx] = ice.mean(axis=1)
         marine[idx] = (cls == MARINE).any(axis=1)
-        # mask ice BedMachine has no ice on, over water by its own mask: the
-        # mask's front lies seaward of BedMachine's there. Mask ice over
-        # BedMachine rock (a nunatak the mask counts as ice) is not marine.
-        advanced[idx] = (ice & ~held & (classify(np.zeros_like(ice), bm_mask, bed)
-                                        == MARINE)).any(axis=1)
+        f_adv[idx] = (ice & ~held & (classify(np.zeros_like(ice), bm_mask, bed)
+                                     == MARINE)).mean(axis=1)
         with np.errstate(all="ignore"):
             h_ice[idx] = np.where(held, thk, 0.0).sum(axis=1) / n
             b_ice[idx] = np.where(held, bed, 0.0).sum(axis=1) / n
@@ -470,7 +469,8 @@ def front_cells(H, b, bm_fn, mask_tif, fill=FRONT_FILL, frac=FRONT_ICE_FRACTION,
         # At pixel density a 1 km cell gets four samples, too few to tell a
         # cell 64 % ice from one 25 % ice; look the mixed cells up again on a
         # lattice FRONT_LATTICE_DENSITY times as fine.
-        mixed = np.flatnonzero(((f_ice > 0.0) & (f_ice < 1.0)) | (marine & (f_ice > 0.0)))
+        mixed = np.flatnonzero(((f_ice > 0.0) & (f_ice < 1.0)) | (marine & (f_ice > 0.0))
+                               | ((f_adv > 0.0) & (f_adv < 1.0)))
         cell_samples([g, m, bd, th], Q_g, reduce, density=FRONT_LATTICE_DENSITY,
                      subset=mixed)
 
@@ -482,11 +482,11 @@ def front_cells(H, b, bm_fn, mask_tif, fill=FRONT_FILL, frac=FRONT_ICE_FRACTION,
         return out
 
     F, MAR = per_dof(f_ice, 0.0), per_dof(marine, False)
-    ADV = per_dof(advanced, False)
+    ADV = per_dof(f_adv, 0.0)
     HI, BI = per_dof(h_ice, np.nan), per_dof(b_ice, np.nan)
-    is_ice = F >= frac
+    is_ice = (F - ADV >= frac) if fill == "empty" else (F >= frac)
     held = is_ice & np.isfinite(HI)
-    mismatch = is_ice & ~held & ADV
+    mismatch = is_ice & ~held & (ADV > 0.0)
     filled = np.zeros(n_own, bool)
     comm = Q_g.mesh().comm
     if fill == "neighbour":
@@ -498,22 +498,26 @@ def front_cells(H, b, bm_fn, mask_tif, fill=FRONT_FILL, frac=FRONT_ICE_FRACTION,
             new = mismatch & ~filled & np.isfinite(mean)
             HI[new] = mean[new]
             filled |= new
-    ice = held | filled
-    water = (~is_ice & MAR) | (mismatch & ~filled)
-    front = ice & vertex_neighbours(Q_g)(water)
+    ice = is_ice & ~(mismatch & ~filled)
+    water = ~ice & (MAR | (ADV > 0.0))
+    front = (held | filled) & vertex_neighbours(Q_g)(water)
 
+    # A cell BedMachine's own front crosses (ice with advanced samples) is
+    # thinned by its vertex samples wherever it lies, so it is rebuilt as a
+    # front cell is, even inside a filled advance.
+    rebuilt = (front | (held & (ADV > 0.0))) & held
     h0 = H.dat.data_ro.copy()
     Hd, bd_ = H.dat.data, b.dat.data
     Hd[water] = 0.0
-    Hd[front | filled] = HI[front | filled]
-    rebed = front & held
-    bd_[rebed] = BI[rebed]
+    Hd[rebuilt | filled] = HI[rebuilt | filled]
+    bd_[rebuilt] = BI[rebuilt]
     counts = {
         "front": int(front.sum()),
         "water": int(water.sum()),
         "emptied": int((water & (h0 > 0.0)).sum()),
-        "mismatch": int(mismatch.sum()),
+        "mismatch": int(((F >= frac) & (ADV > 0.0) & ~held).sum()),
         "filled": int(filled.sum()),
+        "rebuilt": int(rebuilt.sum()),
         "front_thicker": int((front & (HI > h0)).sum()),
     }
     return {k: comm.allreduce(v, op=MPI.SUM) for k, v in counts.items()}

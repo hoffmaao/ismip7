@@ -60,7 +60,12 @@ def load(path):
     with fd.CheckpointFile(path, "r") as chk:
         mesh = chk.load_mesh()
         fields = {name: chk.load_function(mesh, name=name)
-                  for name in ("thickness", "H_init", "bed", "velocity")}
+                  for name in ("thickness", "bed", "velocity")}
+        # A MAP carries no H_init; at its own t = 0 the thickness is it.
+        try:
+            fields["H_init"] = chk.load_function(mesh, name="H_init")
+        except Exception:
+            fields["H_init"] = fields["thickness"]
         for name in OPTIONAL:
             try:
                 fields[name] = chk.load_function(mesh, name=name)
@@ -158,6 +163,8 @@ def check(label, path):
         for region, ind in (("floating", fl0), ("grounded", gr0)):
             area = float(fd.assemble(ind * within * fd.dx))
             row[f"{region}_area_km2"] = area / 1e6
+            row[f"{region}_thickness_m"] = (
+                float(fd.assemble(ind * within * h * fd.dx)) / area if area else None)
             for tag, v in (("model", u), ("obs", uo)):
                 if v is None:
                     continue

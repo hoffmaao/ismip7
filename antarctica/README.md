@@ -1442,6 +1442,11 @@ evaluations for 250 iterations): `ISMIP7_MAXITER` counts per process, so a
 second link would start a second 250. Give the relaxation's own submission a
 `--time` that covers the whole year in one link: `afterok` waits on its first
 link alone, and a re-inversion started on an unfinished end state is refused.
+At 2 km the year's first solve from IU's final MAPs diverged under
+`projection.sbatch`'s `scpc_gamg` (runlog
+`inversion-2km-{budd,rc}-b20k-relax2014-year`); the relaxations queued on
+8 October add `ISMIP7_DIAGNOSTIC_LINEAR_SOLVER=scpc_mumps ISMIP7_MAP_CLIP=0`
+to the year's submission, a configuration those runs are the first to test.
 
 What each forward does with a relaxed MAP, recorded as `init_state` in every
 checkpoint it writes:

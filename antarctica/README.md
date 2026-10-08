@@ -1445,8 +1445,12 @@ link alone, and a re-inversion started on an unfinished end state is refused.
 At 2 km the year's first solve from IU's final MAPs diverged under
 `projection.sbatch`'s `scpc_gamg` (runlog
 `inversion-2km-{budd,rc}-b20k-relax2014-year`); the relaxations queued on
-8 October add `ISMIP7_DIAGNOSTIC_LINEAR_SOLVER=scpc_mumps ISMIP7_MAP_CLIP=0`
-to the year's submission, a configuration those runs are the first to test.
+8 October add `ISMIP7_MAP_CLIP=0` and set `ISMIP7_DIAGNOSTIC_LINEAR_SOLVER`
+to `scpc_mumps` for Budd (80 steps in 48 min) and `full_mumps` for RC, whose
+`scpc_mumps` solves took 36 to 84 Newton iterations at up to 34 min a step.
+A year longer than one link chains at the wall, so the re-inversion waits on
+the year reaching 2015 (a trigger job) rather than on `afterok` of its first
+link.
 
 What each forward does with a relaxed MAP, recorded as `init_state` in every
 checkpoint it writes:

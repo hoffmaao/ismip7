@@ -1,0 +1,21 @@
+{
+ "task": "inversion",
+ "institution": "IU",
+ "status": "queued",
+ "mesh": "antarctica_5000_2000_buffered20000 (IU's build, 969,764 vertices), DG0 geometry, the production MAP's own mesh (ISMIP7_MESH=checkpoint)",
+ "site": "IU Quartz, general partition",
+ "id": "inversion-2km-budd-b20k-ef2-relax2014-year",
+ "title": "Budd relaxation year of the relaxed initial state from the version 2 final MAP: 2014 to 2015 on OCX's 2014 forcing",
+ "friction": "budd",
+ "period": "2014.0 to 2015.0 at dt 0.0125 (80 steps)",
+ "initial_state": "inversion-2km-budd-b20k-rho7500-floating-ef2's MAP (inversion_icepack2_budd_n3_dg0_logvel_2000_int5000_b20k_rho7500_floating_ef2.h5, sha256 9492a2451c85c150...), rewound 1 yr with the Smith dH/dt on grounded ice",
+ "forcing": "OCX protocol forcing for 2014 (ISMIP7_EXPERIMENT=relax), apparent MB off, front pinned",
+ "resources": "32 ranks, 240G, 4 h (projection.sbatch, ISMIP7_EXPERIMENT=relax); ISMIP7_DIAGNOSTIC_LINEAR_SOLVER=scpc_mumps, ISMIP7_MAP_CLIP=0",
+ "notes": "IU's choice on 8 Oct: the forward on scpc_mumps without the MAP clip, after the first attempts from the version 1 MAPs (inversion-2km-budd-b20k-relax2014-year) diverged on their first solve under scpc_gamg; from Budd's final MAP with the 1-year backdate scpc_mumps converged that solve in 14 Newton iterations at about 34 s a step. The forward takes exact_front version 2 from the MAP. README, \"The relaxed initial state\"; issue #162",
+ "jobs": [
+  "11838241"
+ ],
+ "code": "e7b7121 (PR 163 with PR 164's head 4dea089 merged, so exact_front version 2); Quartz worktree /N/scratch/dlilien/ismip7_reinvert_relax; cells relax_ef2_<law> and reinv_relax_ef2_<law> of /N/scratch/dlilien/ismip7_reinvert_jobs/submit_reinvert.sh, which take prod_settings() with ISMIP7_EXACT_FRONT=2",
+ "started": "2026-10-08",
+ "results": "/N/scratch/dlilien/ismip7_reinvert_relax/antarctica/results/relax_inversion_icepack2_budd_n3_dg0_logvel_2000_int5000_b20k_rho7500_floating_ef2_2000_final.h5, copied to /N/project/ice_rheology/ISMIP7/antarctica/results/reinvert_2km/final/relax_states/ by the verify job"
+}

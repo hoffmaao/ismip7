@@ -88,7 +88,7 @@ from icepack2_tools.front import (
 )
 from icepack2_tools.forcing import SMB_FEEDBACK_ATTR, smb_feedback_restart_error
 from icepack2_tools.timeseries import (
-    format_year, resumed_step, rows_kept_on_resume, step_changed,
+    resumed_step, rows_kept_on_resume, step_changed,
     timeseries_csv_line,
 )
 from icepack2_tools.runconfig import (

@@ -37,6 +37,20 @@ A direct solve that does not converge leaves ``z`` at its entry state and
 raises, so the driver's failed-trial rescue starts from the last converged
 state. ``full_mumps`` keeps its Newton Jacobian live; the condensed modes
 freeze it as above.
+
+Every solver this module builds and drops is destroyed as it is dropped
+(``release_solver``, issue #161): the recorded equations'
+(``ReleasingEquationSolver``: the Newton solver of the recorded solve, whose
+assembled Jacobian is allocated even when SNES exits at iteration 0, and under
+``full_mumps`` the adjoint's assembled operator, solver and LU) and the paused
+solver a new form or a failed solve replaces. Left to themselves they are
+freed late, and some never. A Firedrake ``NonlinearVariationalSolver`` sits
+in a reference cycle, so it and its Jacobian live until Python's cyclic
+collector runs, and on more than one rank petsc4py then hands its PETSc
+objects to the next ``PetscGarbageCleanup``. Under ``full_mumps`` on the 2 km
+mesh the resident set climbed 8 to 12 MiB a rank an evaluation that way, and
+25 to 37 matrices were still alive at exit against 10 with the release
+(README "Inversion solver", issue #161 run records).
 """
 
 from time import perf_counter
@@ -49,6 +63,7 @@ from firedrake import (
     NonlinearVariationalSolver,
     assemble,
 )
+from firedrake.utils import ScalarType
 from tlm_adjoint.firedrake import EquationSolver, paused_manager
 
 from icepack2_tools.preconditioners import frozen_linearization
@@ -105,6 +120,100 @@ def _since(after, before):
     return None if after is None else after - (before or 0)
 
 
+def release_solver(solver):
+    r"""Destroy what a Firedrake variational solver built, now: its SNES with
+    the KSP, PC and any factor, its context's Jacobian and preconditioning
+    matrices (a matrix-free one's Python context with them), its work vector,
+    and a ``LinearSolver``'s operator. Collective: every rank builds the same
+    solvers, so every rank releases them in the same order. The solver cannot
+    solve again."""
+    ctx = getattr(solver, "_ctx", None)
+    # cached properties, present only once the solver has made them
+    mats = [ctx.__dict__.get(name) for name in ("_jac", "_pjac")] if ctx else []
+    mats.append(getattr(solver, "A", None))
+    solver.snes.destroy()
+    for mat in mats:
+        petscmat = getattr(mat, "petscmat", None)
+        if petscmat is not None:
+            petscmat.destroy()
+    work = getattr(solver, "_work", None)
+    if work is not None:
+        work.destroy()
+
+
+class ReleasingEquationSolver(EquationSolver):
+    r"""tlm_adjoint's ``EquationSolver``, releasing every solver it builds for
+    one solve (``release_solver``) once that solve returns.
+
+    Those are the forward's Newton solver, which tlm_adjoint builds through
+    ``firedrake.solve`` and is built here the same way so it can be kept for
+    release, and the assembled operator and ``LinearSolver`` of an uncached
+    linear forward or adjoint solve. Cached solvers stay tlm_adjoint's, and
+    so does the matrix-free adjoint (``ISMIP7SCPC.destroy`` covers its
+    condensed solver). Nothing numerical differs from the base class: the
+    inversion's objectives and gradients are the same to every printed digit
+    (issue #161 run records)."""
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self._built = []
+
+    def _assemble_linear_solver(self, *args, **kwargs):
+        solver, b_bc = super()._assemble_linear_solver(*args, **kwargs)
+        self._built.append(solver)
+        return solver, b_bc
+
+    def _release_built(self):
+        while self._built:
+            release_solver(self._built.pop(0))
+
+    def forward_solve(self, x, deps=None):
+        try:
+            if (self._linear
+                    and self._solver_parameters.get("mat_type", "aij") != "matfree"):
+                super().forward_solve(x, deps)
+            else:
+                self._newton_solve(x, deps)
+        finally:
+            self._release_built()
+
+    def adjoint_jacobian_solve(self, adj_x, nl_deps, b):
+        try:
+            return super().adjoint_jacobian_solve(adj_x, nl_deps, b)
+        finally:
+            self._release_built()
+
+    def _newton_solve(self, x, deps):
+        # EquationSolver.forward_solve's solve(F == 0, ...) as
+        # tlm_adjoint.firedrake.backend_interface.solve and
+        # firedrake.solving._solve_varproblem carry it out, keeping the solver.
+        # Like them, this adds scalar_type to the equation's own form
+        # compiler parameters, which the adjoint then assembles with.
+        bcs = tuple(self._reconstruct_bcs(deps=deps))
+        J = self._J if self._nl_solve_J is None else self._nl_solve_J
+        params = dict(self._solver_parameters)
+        extra = params.pop("tlm_adjoint", {})
+        if "pre_apply_bcs" in extra:
+            raise TypeError("Cannot pass both pre_apply_bcs argument and "
+                            "solver parameter")
+        fcp = self._form_compiler_parameters
+        fcp["scalar_type"] = ScalarType
+        problem = NonlinearVariationalProblem(
+            self._replace(self._F, deps), x, bcs, self._replace(J, deps), None,
+            form_compiler_parameters=fcp, restrict=False)
+        solver = NonlinearVariationalSolver(
+            problem, solver_parameters=params,
+            nullspace=extra.get("nullspace"),
+            transpose_nullspace=extra.get("transpose_nullspace"),
+            near_nullspace=extra.get("near_nullspace"),
+            options_prefix=extra.get("options_prefix"),
+            appctx={}, pre_apply_bcs=True)
+        try:
+            solver.solve()
+        finally:
+            release_solver(solver)
+
+
 class StateSolverCache:
     r"""The paused Newton solver of the last residual form
     ``taped_state_solve`` was given, kept for the next call with that form.
@@ -129,14 +238,17 @@ class StateSolverCache:
     true by default), and an LU refactors on its first symbolic analysis
     (README, "Inversion solver", for what that changed). A solve that raises
     drops the solver, so a retry starts from a new one, as it did before the
-    cache.
+    cache. A solver dropped for any reason is released (``release_solver``).
     """
 
     def __init__(self):
         self._entry = None
 
     def clear(self):
-        self._entry = None
+        r"""Release the kept solver, if any. Collective."""
+        entry, self._entry = self._entry, None
+        if entry is not None:
+            release_solver(entry["solver"])
 
     def get(self, F, z, params, form_compiler_parameters, options_prefix,
             *, frozen=True):
@@ -151,7 +263,7 @@ class StateSolverCache:
         if (entry is not None and entry["F"] is F and entry["z"] is z
                 and entry["key"] == key):
             return entry["F_q"], entry["solver"], True
-        self._entry = None
+        self.clear()
         F_q = with_quadrature_degree(F, form_compiler_parameters)
         J, pre_jacobian = (frozen_linearization(F_q, z) if frozen
                            else (None, None))
@@ -198,9 +310,9 @@ def taped_state_solve(F, z, mode, params, adjoint_params, *,
     ``scpc_*``, ``F`` must carry the SCPC structural-zero blocks
     (``preconditioners.with_scpc_blocks``), and ``cache``, a
     ``StateSolverCache``, keeps the paused solver for the next call with the
-    same ``F``; without one each call builds its own. A solve that does not
-    converge raises ``firedrake.ConvergenceError``, as the recorded solve
-    does.
+    same ``F``; without one each call builds its own and releases it before
+    returning. A solve that does not converge raises
+    ``firedrake.ConvergenceError``, as the recorded solve does.
 
     With ``direct`` every mode, ``full_mumps`` included, solves untaped under
     ``params``, which are then the direct solve's options
@@ -215,7 +327,7 @@ def taped_state_solve(F, z, mode, params, adjoint_params, *,
     record separately reduces the surrounding forward time across ranks.
     """
     if mode == "full_mumps" and not direct:
-        EquationSolver(
+        ReleasingEquationSolver(
             F == 0,
             z,
             solver_parameters=params,
@@ -224,7 +336,8 @@ def taped_state_solve(F, z, mode, params, adjoint_params, *,
         ).solve()
         return {}
 
-    if cache is None:
+    own_cache = cache is None
+    if own_cache:
         cache = StateSolverCache()
     with paused_manager():
         F, solver, reused = cache.get(
@@ -237,15 +350,16 @@ def taped_state_solve(F, z, mode, params, adjoint_params, *,
         try:
             solver.solve()
         except ConvergenceError as err:
+            # read before the release destroys the SNES
+            failure = (f"direct forward did not converge: SNES reason "
+                       f"{int(snes.getConvergedReason())}, "
+                       f"{int(snes.getIterationNumber())} iterations, "
+                       f"||F|| {snes.getFunctionNorm():.3e}")
             cache.clear()
             if z_entry is None:
                 raise
             z.assign(z_entry)
-            raise ConvergenceError(
-                f"direct forward did not converge: SNES reason "
-                f"{int(snes.getConvergedReason())}, "
-                f"{int(snes.getIterationNumber())} iterations, "
-                f"||F|| {snes.getFunctionNorm():.3e}") from err
+            raise ConvergenceError(failure) from err
         except BaseException:
             cache.clear()
             raise
@@ -262,6 +376,8 @@ def taped_state_solve(F, z, mode, params, adjoint_params, *,
             "seconds": seconds,
         }
         fnorm = cache.residual_norm(form_compiler_parameters)
+        if own_cache:
+            cache.clear()
     work["fnorm"] = fnorm
 
     confirm = dict(params)
@@ -270,7 +386,7 @@ def taped_state_solve(F, z, mode, params, adjoint_params, *,
     )
     with z.dat.vec_ro as v:
         before = v.copy()
-    EquationSolver(
+    ReleasingEquationSolver(
         F == 0,
         z,
         solver_parameters=confirm,

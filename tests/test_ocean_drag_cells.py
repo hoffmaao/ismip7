@@ -1,7 +1,7 @@
 r"""The floor-cell ocean drag acts only in open water outside the t=0 extent
-that no ice cell touches. Under the default facet gate a water cell touching
-the ice at one vertex still carries it, on that front vertex;
-ISMIP7_DRAG_GATE=vertex keeps it off every node of the ice."""
+that no ice cell touches. The default vertex gate keeps it off every node of
+the ice; under ISMIP7_DRAG_GATE=facet a water cell touching the ice at one
+vertex still carries it, on that front vertex."""
 import numpy as np
 import pytest
 

@@ -1,0 +1,25 @@
+{
+  "id": "inversion-2km-budd-b20k-rho7500-floating-ef2",
+  "task": "inversion",
+  "institution": "IU",
+  "status": "done",
+  "friction": "budd",
+  "title": "IU's final Budd MAP refitted under exact_front version 2 (the push of the face above the neighbour's bed)",
+  "period": "2015 state",
+  "mesh": "antarctica_5000_2000_buffered20000 (IU's build, 969,764 vertices), DG0 geometry, vertex raster sampling, the lake fix",
+  "initial_state": "inversion-2km-budd-b20k-rho7500-floating's final MAP (sha256 1d2e3ae92f91813a), not strict (exact_front 1 -> 2); log-velocity weight 85380.44865839917",
+  "forcing": "observations sampled onto this mesh; bilaplacian prior at sigma 30 and rho 7.5 km (gamma x0.01, no prior-mean term), no dH/dt term, log friction control, cell-wise friction, L-BFGS-B without a metric; ISMIP7_FLUIDITY_CONTROL=floating with grounded phi held at zero (phi_grounded=zero), ISMIP7_EXACT_FRONT=2, ISMIP7_DRAG_GATE=vertex, ISMIP7_RC_HVISC_FLOOR=2.5, ISMIP7_TRANSFER_FILL=extend; scpc_mumps",
+  "site": "IU Quartz, general partition",
+  "resources": "32 ranks, 240G, ISMIP7_MAXITER=300, ISMIP7_CHAIN_MAX=2, 8 h links",
+  "jobs": [
+    "11828591",
+    "11828663"
+  ],
+  "code": "4426372; Quartz worktree /N/scratch/dlilien/ismip7_reinvert_s10",
+  "started": "2026-10-07",
+  "finished": "2026-10-07",
+  "cost": "3 h 50 min on 32 ranks for 300 iterations (311 evaluations), 31 to 50 s an evaluation; link 2 (11828663) cancelled before it started, the MAP carrying its marker",
+  "results": "Quartz /N/project/ice_rheology/ISMIP7/antarctica/results/reinvert_2km/final/inversion_icepack2_budd_n3_dg0_logvel_2000_int5000_b20k_rho7500_floating_ef2.h5 (sha256 9492a2451c85c150); control comparison Quartz /N/scratch/dlilien/ismip7_reinvert_jobs/c166/controls_budd.txt and phi_extremes.txt",
+  "audit": "stopped at the iteration limit (STOP: TOTAL NO. OF ITERATIONS REACHED LIMIT), done marker written: total 1,382.48, misfit 1,102.14, reg_theta 182.0, reg_phi 98.3, |grad| 0.15 (evaluation 1, the version 1 controls under version 2: 1,393.17, 1,113.05, 1.70). Change in theta against the version 1 final by distance to a facet whose push version 2 changes: p50/p99 0.057/1.45 within 2 km, 0.027/1.00 at 2 to 6 km, 0.009/0.38 at 6 to 20 km, 0.002/0.18 at 20 to 100 km, 0.001/0.13 beyond; the far field is the optimizer continuing from a MAP that had stopped at its own iteration limit. phi (floating only) moves p99 0.97 within 2 km and 0.43 beyond 100 km; its largest moves (19 nodes above 5) sit in small floating patches whose phi was already outside |10| in the version 1 final (824 such nodes there, 856 here, range -33.8 to 6.9), which the forward's MAP clip bounds",
+  "notes": "issue #166: submitted once the Tier-1 check passed (test-2km-budd-b20k-exact-front-v2-eval1 and -t0). At the version 1 controls version 2 gave misfit 1,113.05 against 1,108.24 and |grad| 1.70 against 0.66"
+}

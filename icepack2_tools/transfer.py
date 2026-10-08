@@ -232,8 +232,8 @@ def harmonic_extension(target, missing, fill, comm=None, *, log=False,
     about 1e4 cells everywhere else. ``log=True`` extends ``log(target)``, so
     a positive field (the fluidity prior) stays positive. ``bounds`` clips the
     extended dofs to that range widened to include ``fill``, the discrete
-    maximum principle being exact only on a mesh without obtuse angles. Collective; a call with nothing missing on any rank
-    returns at once.
+    maximum principle being exact only on a mesh without obtuse angles.
+    Collective; a call with nothing missing on any rank returns at once.
     """
     from firedrake import TestFunction, TrialFunction, assemble, dx, grad, inner
     from petsc4py import PETSc

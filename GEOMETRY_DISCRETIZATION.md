@@ -294,6 +294,68 @@ every floor, so the floor leaves the inversion's solver choice there
 unchanged. Records: `test-2km-rc-b20k-eval1-*`, `test-2km-rc-b20k-vgate-floor*`,
 `test-2km-rc-b20k-forward-floor*`, `test-1km-rc-forward-floor*-drift`.
 
+## The push at an ice edge (issues #153, #166)
+
+On a facet between a cell holding ice and one holding none, the DG0 driving
+stress is the facet term `rho_I g avg(H) (s - s_other)`. It equals the
+depth-integrated front push for floating ice and on flat land, falls short at
+a grounded marine cliff by `g D (rho_I H - rho_W D) / 2`, and on land follows
+the step in bed height. `ISMIP7_EXACT_FRONT` replaces it on every such facet
+with the push of its version (`dual_friction.front_cliff_correction`, the
+push itself in `cliff_push`). The MAP records the version as `exact_front`,
+and the forward runs the MAP's version and refuses a knob that differs.
+
+| ice-free neighbour's bed `B` | version 1 | version 2 |
+|---|---|---|
+| at or below the ice base (ocean, lower ground) | free-cliff push `g (rho_I H^2 - rho_W d^2) / 2` | the same |
+| seabed between the ice base and sea level | free-cliff push | the face above `B`, water down to `B` |
+| land between the ice base and surface | free-cliff push | the face above `B`, `h_e = s - B` |
+| rock at or above the ice surface | free-cliff push, into the rock | 0 |
+
+For 500 m of ice on a 100 m bed, rock at 0, 300 and 700 m: the facet term
+alone pushes 1.2, 0.6 and -0.2 times the free-cliff push, version 1 pushes
+1.0 in each case, and version 2 pushes 1.0, 0.36 and 0.
+
+Census of IU's final Budd MAP (2 km buffered mesh,
+`antarctica/scripts/check_cliff_facets.py`), push in MN/m:
+
+| class | facets | length | edge `H` p50 / p90 / p99 | version 1 push p90 / p99 | version 2 minus version 1, summed |
+|---|---|---|---|---|---|
+| ocean, bed below the ice base | 11,128 | 30,362 km | 40 / 98 / 162 m | 5.0 / 15.5 | 0 |
+| ocean, shoal | 123 | 300 km | 63 / 147 / 231 m | 25.1 / 88.4 | -926 GN |
+| land below the ice base | 2,113 | 6,167 km | 3 / 30 / 87 m | 4.1 / 33.9 | 0 |
+| land, partial wall | 239 | 697 km | 47 / 129 / 273 m | 61.5 / 334.3 | -14,382 GN |
+| rock above the ice surface | 2,756 | 7,597 km | 5 / 83 / 271 m | 30.0 / 315.1 | -122,276 GN |
+
+Most rock walls carry a thin edge, and 288 changed facets with edge ice
+thicker than 100 m (849 km) carry 83 % of the change; the largest lie in the
+Transantarctic and Prince Charles Mountains. In 124 grounded edge cells
+(424 km^2) the change exceeds the cell's own basal drag. On the 1 km
+production mesh the rock walls are longer (16,871 km) and their edges
+thinner (p90 41 m), with 108 km of changed facets thicker than 200 m against
+195 km at 2 km.
+
+At the final Budd MAP's own controls, version 2 against version 1:
+
+| | version 1 | version 2 |
+|---|---|---|
+| inversion: misfit, total, \|grad\| | 1,108.24, 1,388.36, 0.66 | 1,113.05, 1,393.17, 1.70 |
+| inversion: Newton iterations, first forward | 6 | 12 |
+| forward t = 0: Newton iterations (no FSSA) | 15 | 22 |
+| forward t = 0: grounded discharge | 2,761.3 Gt/yr | 2,758.7 Gt/yr |
+
+Restricting version 1 to ocean facets instead (2441818) gave misfit 1,146.8
+and \|grad\| 3.28 at the same controls. By IMBIE basin the discharge changes
+at most 0.99 % (basin 6) and 0.63 % (basin 7). The speed change stays at the
+walls: grounded ice within 2 km of a changed facet moves p99 22.9 m/yr,
+2 to 6 km 12.6, 6 to 20 km 2.6, and beyond 20 km 0.00; floating ice beyond
+20 km 1.9. IU's final Budd MAP was refitted under version 2 from these
+controls (`inversion-2km-budd-b20k-rho7500-floating-ef2`). IU's final RC MAP
+is being refitted under version 2 (`inversion-2km-rc-b20k-rho7500-floating-ef2`),
+with its version 1 chain kept as the fallback. The sub-element path
+(icepack_tools) has version 1 only and refuses 2. Records:
+`test-2km-budd-b20k-exact-front-*`.
+
 ## The melt calibration follows the forward's melt path
 
 The calibrations melt on the same `ISMIP7_GEOMETRY_SPACE` as the forward.

@@ -7,7 +7,10 @@
     "11452512",
     "11452521",
     "11461566",
-    "11461580"
+    "11461580",
+    "11789630",
+    "11789631",
+    "11831163"
   ],
   "results": "Quartz /N/project/ice_rheology/ISMIP7/antarctica/results/reinvert_2km/final/inversion_icepack2_rc_n3_dg0_logvel_2000_int5000_b20k_rho7500_floating.h5; evaluation 1 copied to Quartz /N/scratch/dlilien/ismip7_reinvert_jobs/plots/prod_*_eval1.h5",
   "task": "inversion",
@@ -15,13 +18,13 @@
   "status": "running",
   "period": "2015 state",
   "mesh": "antarctica_5000_2000_buffered20000 (IU's build, 969,764 vertices), DG0 geometry, vertex raster sampling, the lake fix",
-  "forcing": "observations sampled onto this mesh; bilaplacian prior at sigma 30 and rho 7.5 km (gamma x0.01, no prior-mean term), no dH/dt term, log friction control, cell-wise friction, L-BFGS-B without a metric; ISMIP7_FLUIDITY_CONTROL=floating with grounded phi held at zero (phi_grounded=zero), ISMIP7_EXACT_FRONT=1, ISMIP7_DRAG_GATE=vertex, ISMIP7_RC_HVISC_FLOOR=2.5, ISMIP7_TRANSFER_FILL=extend; scpc_mumps",
+  "forcing": "observations sampled onto this mesh; bilaplacian prior at sigma 30 and rho 7.5 km (gamma x0.01, no prior-mean term), no dH/dt term, log friction control, cell-wise friction, L-BFGS-B without a metric; ISMIP7_FLUIDITY_CONTROL=floating with grounded phi held at zero (phi_grounded=zero), ISMIP7_EXACT_FRONT=1, ISMIP7_DRAG_GATE=vertex, ISMIP7_RC_HVISC_FLOOR=2.5, ISMIP7_TRANSFER_FILL=extend; scpc_mumps for link 1 (11461566), full_mumps from 7 Oct (11789630 on)",
   "site": "IU Quartz, general partition",
-  "resources": "32 ranks, ISMIP7_MAXITER=500, ISMIP7_CHAIN_MAX=2, 8 h links; link 1 at 480G, later links at 240G (scontrol on the queued link, which its successors copy)",
-  "code": "aa06dc8; Quartz worktree /N/scratch/dlilien/ismip7_reinvert_s6",
+  "resources": "32 ranks, ISMIP7_MAXITER=500, 8 h links; scpc_mumps link 1 at 480G; full_mumps links 11789630 at 360G and 11789631 at 240G (peak 5.0 GB a rank, mean flat at 2.8 GB)",
+  "code": "aa06dc8 (Quartz worktree _s6) for link 1; f57b053 (worktree _s7) from 11789630",
   "started": "2026-10-06",
   "finished": "",
-  "cost": "",
-  "audit": "first checkpoint (check_phi_grounded.py, job 11469157): phi exactly 0 on all 658,217 held nodes of 969,764 (largest |phi| 0.0), and the MAP records fluidity_control=floating, phi_grounded=zero, h_visc_floor=2.5, drag_gate=vertex, exact_front=1; strict resume reproduced the recorded objective (relative gap 5.6e-12); total 5,546.0 at the resume, 3,572.8 seven evaluations later, 30 to 125 s an evaluation",
-  "notes": "issue #153: IU's option set for the final inversion products (Rice prepares its own). Started on full_mumps (jobs 11452512 and 11452521, cancelled after 18 min) and moved to scpc_mumps once test-2km-rc-b20k-rho7500-floating-scpc-mumps showed it 2.4x faster on the same iterates; the scpc_mumps chain resumed strictly from the full_mumps link's iteration-3 checkpoint. 8 h links at 480G. Memory under scpc_mumps levels off: peak rss_mib 3,796 MiB a rank after 71 evaluations, growing about 1 MiB an evaluation, so about 125 to 135 GB a job; projected to a full link with a 1.3 margin about 200 to 210 GB (mem_project.py)"
+  "cost": "link 1 5 h 08 min (107 evaluations, 95 iterations); 11789630 8 h (147 evaluations); 11789631 running",
+  "audit": "first checkpoint (check_phi_grounded.py, job 11469157): phi exactly 0 on all 658,217 held nodes of 969,764 (largest |phi| 0.0), and the MAP records fluidity_control=floating, phi_grounded=zero, h_visc_floor=2.5, drag_gate=vertex, exact_front=1; strict resume reproduced the recorded objective (relative gap 5.6e-12); total 5,546.0 at the resume, 3,572.8 seven evaluations later, 30 to 125 s an evaluation; link 1 stopped at evaluation 107 (total 1,743.7, misfit 1,399.6, |grad| 1.03, the objective falling about 1 an evaluation): three failed trial forwards in a row, the last two stalled at ||F|| 2.2e-4 and 2.5e-4 for 30 Newton iterations, and scipy's L-BFGS-B then reported CONVERGENCE: NORM OF PROJECTED GRADIENT <= PGTOL, read off the zero gradient a failed trial returns; the runner marked the MAP done. From that MAP full_mumps took 25 evaluations an hour and scpc_mumps stalled the same way (test-2km-rc-b20k-final-solver-probe), so the chain continued on full_mumps (11789630, strict, handoff gap 9.0e-5): 147 evaluations to total 1,662.9, then 11789631 to 1,658.5 by its evaluation 40 (misfit 1,318.2), about 0.1 an evaluation",
+  "notes": "issue #153: IU's option set for the final inversion products (Rice prepares its own). Started on full_mumps (jobs 11452512 and 11452521, cancelled after 18 min) and moved to scpc_mumps once test-2km-rc-b20k-rho7500-floating-scpc-mumps showed it 2.4x faster on the same iterates; the scpc_mumps chain resumed strictly from the full_mumps link's iteration-3 checkpoint. 8 h links at 480G. Memory under scpc_mumps levels off: peak rss_mib 3,796 MiB a rank after 71 evaluations, growing about 1 MiB an evaluation, so about 125 to 135 GB a job; projected to a full link with a 1.3 margin about 200 to 210 GB (mem_project.py). 7 Oct: the false stop led to PR 164's MAP-not-final rule (f57b053); held link 11461580 was cancelled and 11831163 (link 3) cancelled once RC moved to exact_front version 2 (inversion-2km-rc-b20k-rho7500-floating-ef2, issue #166); 11789631 runs to its wall as the version 1 fallback. Each link rewrites the timing JSON, so 11789630's per-evaluation record is in its log only (Quartz _s7/logs/ismip7_inv_11789630.out); link 1's is inversion_timing_rc_..._floating_link1.json"
 }

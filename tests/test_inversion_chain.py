@@ -53,6 +53,12 @@ die = os.environ.get("FAKE_DIE_AFTER", "")
 print("Optimization finished: CONVERGENCE: REL_REDUCTION_OF_F_<=_FACTR*EPSMCH")
 if die == "optimizer":
     sys.exit(137)
+# The driver's line for a stop right after failed trials, printed before the
+# MAP is saved; such a MAP gets no marker.
+unfinished = os.environ.get("FAKE_NOT_FINAL") == "1"
+if unfinished:
+    print("  MAP not final: the optimizer stopped right after 3 failed trial "
+          "evaluations in a row")
 
 with open(map_out, "w") as fh:                   # save_map: mode "w", truncating
     fh.write("checkpoint\n")
@@ -63,7 +69,8 @@ print(f"Saved MAP: {map_out} (misfit_norm=sigma)")
 if die == "marker":
     sys.exit(137)
 
-open(map_out + ".done", "w").close()
+if not unfinished:
+    open(map_out + ".done", "w").close()
 '''
 
 STUBS = {
@@ -181,6 +188,24 @@ def test_a_kill_during_the_map_write_leaves_no_marker(sandbox):
     assert rc == 137, log
     assert "Optimization finished" in log
     assert not (sandbox / "inversion_map.h5.done").exists()
+
+
+def test_a_stop_on_failed_trials_is_not_marked_done_and_the_successor_resumes(sandbox):
+    r"""Issue 153, job 11461566: after three failed trials L-BFGS-B said
+    CONVERGENCE with the gradient norm at 1.03, the driver saved the MAP, and
+    the runner's "Saved MAP:" rule marked it done, ending the chain at
+    evaluation 107. A MAP saved after such a stop stays unmarked, and the
+    successor resumes from it strictly."""
+    rc, log, _ = run_job(sandbox, FAKE_NOT_FINAL="1")
+    assert rc == 0, log
+    assert "Saved MAP:" in log
+    assert not (sandbox / "inversion_map.h5.done").exists()
+
+    rc, log, _ = run_job(sandbox, job_id="424244")
+    assert rc == 0, log
+    assert "driver: warm_start_content=checkpoint" in log
+    assert "driver: strict=1" in log
+    assert (sandbox / "inversion_map.h5.done").exists()
 
 
 @pytest.mark.parametrize("die", ["optimizer", "map_write"])

@@ -10,7 +10,7 @@ is an index.
 **Claim the card before you start a run or an inversion.** A card in
 Claimed for more than 24 hours with no comment reads as unclaimed.
 
-Generated: 2026-10-06 19:51 UTC. 10 blocking, 7 owed, 0 after the deadline, 4 unverified.
+Generated: 2026-10-07 15:24 UTC. 10 blocking, 7 owed, 1 after the deadline, 4 unverified.
 
 ## Blocking the submission
 
@@ -51,7 +51,6 @@ Work in flight. Do not duplicate it.
 | [11](https://github.com/icepack/ismip7/issues/11) | melt: run check_melt_bound.py --ocx before core 11 runs on the OCX product | iu | quartz, nots, midway | 2026-09-26 |
 | [24](https://github.com/icepack/ismip7/issues/24) | MAP: 2 km RC and Budd inversions running at Rice under the new prior metric | rice | nots | 2026-09-26 |
 | [153](https://github.com/icepack/ismip7/issues/153) | MAP: IU re-inversion of the 2 km Budd and RC MAPs without the prior mean, then on the 20 km buffered mesh | iu | n/a | 2026-10-03 |
-| [161](https://github.com/icepack/ismip7/issues/161) | solver: inversion RSS grows about 39 MiB a rank every evaluation under full_mumps at 2 km | iu | n/a | 2026-10-06 |
 | [162](https://github.com/icepack/ismip7/issues/162) | MAP: relaxed initial state for IU's final 2 km MAPs (one forward year, then 250 iterations) | iu | n/a | 2026-10-06 |
 
 ## Unverified
@@ -74,10 +73,10 @@ production run or a group decision.
 | `src:readiness` | 6 |
 | `src:submission-readme` | 7 |
 | `src:matrix-status` | 0 |
-| `src:topic-doc` | 2 |
+| `src:topic-doc` | 3 |
 | `src:runbook` | 1 |
 | `src:open-pr` | 1 |
 
 ## After the deadline
 
-None.
+- [166](https://github.com/icepack/ismip7/issues/166) momentum: ice against rock rising above its surface gets the free-cliff push under ISMIP7_EXACT_FRONT

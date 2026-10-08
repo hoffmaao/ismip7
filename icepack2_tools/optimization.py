@@ -2,6 +2,50 @@ r"""Stopping rules for the inversions, shared by the TAO and scipy paths, and
 the log-velocity weight a warm start carries into an inversion."""
 import math
 
+import numpy as np
+
+# What the driver prints, ahead of its "Saved MAP:" line, when the optimizer
+# stopped right after failed trial evaluations. The chain runner reads it and
+# leaves the MAP without a done marker, so the next link resumes from it.
+NOT_FINAL = "MAP not final:"
+
+
+class TrialFailures:
+    r"""Failed trial evaluations of the scipy path since the last one that
+    succeeded.
+
+    A forward or adjoint that fails at a line-search trial returns
+    ``failed(J_last, n)``: ten times the last good total objective (misfit
+    and regularisation, the value scipy minimises) and a zero gradient, so
+    L-BFGS-B backtracks. A misfit alone would sit below the current total
+    wherever regularisation is more than nine times the misfit, and the line
+    search would accept the failed trial. When every trial near the current
+    iterate fails, scipy still ends with a CONVERGENCE message (the projected
+    gradient below pgtol, read off the zero gradient, or the relative
+    reduction below factr) at a point whose gradient is not small: RC's
+    final-product link 11461566 (issue #153) stopped that way at evaluation
+    107 with a gradient norm of 1.03, its objective still falling about 1 an
+    evaluation. ``stopped_on_failures`` after the optimizer returns says its
+    stop came that way, and the MAP is then the last accepted iterate of an
+    unfinished minimisation."""
+
+    def __init__(self):
+        self.trailing = 0
+        self.total = 0
+
+    def failed(self, last_objective, size):
+        r"""Count a failed trial; the (objective, gradient) to return for it."""
+        self.trailing += 1
+        self.total += 1
+        return last_objective * 10, np.zeros(size)
+
+    def succeeded(self):
+        self.trailing = 0
+
+    @property
+    def stopped_on_failures(self):
+        return self.trailing > 0
+
 
 class FunctionalDecreaseStop:
     r"""Relative-decrease stopping rule, for a TAO monitor to apply.

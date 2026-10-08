@@ -1,0 +1,28 @@
+{
+  "id": "test-2km-budd-b20k-final-forward-diagnostics",
+  "task": "test",
+  "institution": "IU",
+  "status": "done",
+  "friction": "budd",
+  "title": "Forwards from Budd's final MAP: which of the solver, the 1-year backdate and the MAP clip stops the first diagnostic solve",
+  "initial_state": "inversion-2km-budd-b20k-rho7500-floating's final MAP (sha256 1d2e3ae92f91813a), its velocity state as the first guess; ISMIP7_MAP_CLIP at its default 10 bounds 847 theta/phi nodes",
+  "period": "2014 to 2015 (relaxation year) or 2003 on (OCX), one hour each",
+  "mesh": "antarctica_5000_2000_buffered20000 (IU's build, 969,764 vertices), DG0 geometry, vertex raster sampling, the lake fix",
+  "forcing": "the relaxation experiment (ISMIP7_RELAX_START=2014, OCX 2014 forcing, the geometry backdated 1 yr by the Smith dH/dt) or OCX with ISMIP7_GEOMETRY_BACKDATE=0; ISMIP7_APPARENT_MB=0, front pinned, no calving, dt 0.025 yr, exact_front 1 from the MAP",
+  "site": "IU Quartz, general partition",
+  "resources": "32 ranks, 160G to 360G, 1 h each, ISMIP7_CHAIN=0",
+  "code": "8a55a20 (the relaxation code); Quartz worktree /N/scratch/dlilien/ismip7_reinvert_s8",
+  "jobs": [
+    "11789781",
+    "11789782",
+    "11789783",
+    "11789784",
+    "11795931"
+  ],
+  "started": "2026-10-07",
+  "finished": "2026-10-07",
+  "cost": "about 4 node hours",
+  "results": "logs in Quartz /N/scratch/dlilien/ismip7_reinvert_s8/logs/ismip7_fwd_<job>.out",
+  "audit": "first solve, then a time step: scpc_mumps, 1 yr backdate, clip: converged in 14 Newton iterations, 130 s, steps about 34 s, budget residual 0.00; full_mumps, same: 14 iterations, 237 s, steps about 52 s; scpc_gamg, no backdate, clip (11795931): 28 iterations, 1,205 s, a step 867 s; scpc_gamg, 1 yr, no clip (11789783): 10 iterations, 773 s, then the job died of a PyOP2 cache KeyError; scpc_gamg, 12 yr (11789784, OCX starts in 2003 and backdates by default), clip: diverged, 50 iterations to ||F|| 2.3e13, as the relaxation's own scpc_gamg, 1 yr, clip forwards did (11487501, 11489435)",
+  "notes": "issue #153 and the relaxed initial state (issue #162): scpc_gamg, the forward runner's default, is what fails from these MAPs, and where it converges it is about 25 times slower a step than scpc_mumps; the backdate and the clip each move it from slow to divergent. Suggested for forwards from the final MAPs: scpc_mumps and ISMIP7_MAP_CLIP=0 (undecided)"
+}

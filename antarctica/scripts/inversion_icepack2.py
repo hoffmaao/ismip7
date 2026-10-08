@@ -111,7 +111,7 @@ from icepack2_tools.runconfig import (
     raster_sample as _raster_sample,
     lc as _lc, lc_coarse as _lc_coarse, n_flow as _n_flow,
     eval_continuation, inversion_mesh_source, transfer_fill, drag_gate,
-    DRAG_GATE_NONE, hvisc_floor,
+    DRAG_GATE_NONE, hvisc_floor, exact_front_version,
 )
 DATA_DIR = obs_data_root()
 from icepack2_tools.prior import (
@@ -129,7 +129,9 @@ from icepack2_tools.relaxation import (
     END_STATE_ATTR, RELAX_MAP_KEYS, anchor_ratio_counts, describe_relaxation,
     end_state_problems, inherited_geometry, is_relaxed)
 from icepack2_tools.profiling import Spans
-from icepack2_tools.optimization import (FunctionalDecreaseStop,
+from icepack2_tools.optimization import (NOT_FINAL,
+                                         FunctionalDecreaseStop,
+                                         TrialFailures,
                                          recorded_objective,
                                          resolve_log_vel_weight)
 from icepack2_tools.forcing import (load_racmo_smb_climatology,
@@ -408,7 +410,9 @@ MISFIT_SCALE = os.environ.get("ISMIP7_MISFIT_SCALE", "1").strip().lower()
 # calving front inside the mesh: on by default under the scheme, since it
 # is the shared residual's default, and off by default for cell-wise
 # friction, where =1 adds dual_friction.front_cliff_correction (a grounded
-# marine cliff otherwise gets 15 to 33 % too little push, issue #153).
+# marine cliff otherwise gets 15 to 33 % too little push, issue #153) and =2
+# its exposed-face form, which leaves no push against rock above the ice
+# surface (issue #166; cell-wise friction only). The MAP records the version.
 SUBELEMENT_FRICTION = os.environ.get("ISMIP7_SUBELEMENT_FRICTION", "0").strip() == "1"
 # ISMIP7_SUBELEMENT_SCHEME: sep1 (ISSM's default: whole-cell quadrature,
 # drag times the grounded fraction; the default here since 1 Oct 2026) or
@@ -422,8 +426,13 @@ if SUBELEMENT_SCHEME not in ("sep2", "sep1"):
 # The form of that scheme this code builds, recorded with it in the MAP
 # (icepack2_tools.handoff.SUBELEMENT_SCHEME_VERSIONS).
 SUBELEMENT_SCHEME_VERSION = SUBELEMENT_SCHEME_VERSIONS[SUBELEMENT_SCHEME]
-EXACT_FRONT = os.environ.get(
-    "ISMIP7_EXACT_FRONT", "1" if SUBELEMENT_FRICTION else "0").strip() == "1"
+EXACT_FRONT = exact_front_version(os.environ.get(
+    "ISMIP7_EXACT_FRONT", "1" if SUBELEMENT_FRICTION else "0"))
+if SUBELEMENT_FRICTION and EXACT_FRONT == 2:
+    raise ValueError(
+        "exact_front version 2 (the exposed-face push, issue #166) is not in "
+        "icepack_tools.momentum.front_cliff_correction; the sub-element scheme "
+        "takes 0 or 1")
 if MISFIT_SCALE != "nodes":
     try:
         float(MISFIT_SCALE)
@@ -1527,7 +1536,7 @@ def main():
             f"{SUBELEMENT_SCHEME_VERSION}, icepack_tools): {_n_full} cells fully "
             f"grounded, {_n_part} partly grounded; {FRICTION} runs with N_hat = 1 on the "
             f"grounded part (no N_ref, no delta floor); exact front push "
-            f"{'on' if EXACT_FRONT else 'off'}")
+            f"{f'version {EXACT_FRONT}' if EXACT_FRONT else 'off'}")
 
     _zero_theta = Constant(0.0)
     # the smooth grounded indicator of THIS geometry, for a floating-only
@@ -1597,8 +1606,9 @@ def main():
 
     if EXACT_FRONT and not SUBELEMENT_FRICTION:
         PETSc.Sys.Print(
-            "  Exact cliff push on internal fronts (ISMIP7_EXACT_FRONT, "
-            "dual_friction.front_cliff_correction)")
+            f"  Exact cliff push on internal fronts (ISMIP7_EXACT_FRONT={EXACT_FRONT}, "
+            "dual_friction.front_cliff_correction: "
+            f"{'the free-cliff push' if EXACT_FRONT == 1 else 'the face above the neighbour bed'})")
     if use_calving_terminus:
         PETSc.Sys.Print("  Using calving_terminus BC")
     else:
@@ -2642,7 +2652,9 @@ def main():
     global_ndof = len(func_to_global(theta))
     z_backup = z.copy(deepcopy=True)
     last_good_obj = [np.inf]
+    last_good_total = [np.inf]
     last_x = [None]                      # controls of the last CONVERGED evaluation
+    trial_failures = TrialFailures()
     iteration_count = [0]
     timing_history = []
     timing_json = os.environ.get("ISMIP7_INVERSION_TIMING_JSON", "").strip()
@@ -2768,7 +2780,7 @@ def main():
             PETSc.Sys.Print(
                 f"  [!] Forward solve failed ({exc}), returning large objective")
             t_body_end[0] = perf_counter()
-            return last_good_obj[0] * 10, np.zeros(2 * global_ndof)
+            return trial_failures.failed(last_good_total[0], 2 * global_ndof)
         stop_manager()
         J_val = float(J)
         t_fwd = perf_counter() - t_fwd
@@ -2801,8 +2813,9 @@ def main():
                 )
             PETSc.Sys.Print("  [!] Adjoint solve failed, returning large objective")
             t_body_end[0] = perf_counter()
-            return last_good_obj[0] * 10, np.zeros(2 * global_ndof)
+            return trial_failures.failed(last_good_total[0], 2 * global_ndof)
         t_adj = perf_counter() - t_adj
+        trial_failures.succeeded()
 
         # Whittle-Matern prior energy + gradient (icepack2_tools/prior.py):
         # 0.5/area * gamma * (theta^2 + L^2 |grad theta|^2). The theta^2 mass
@@ -2831,6 +2844,7 @@ def main():
                 g_phi = g_phi * _phi_free_global
 
             total = J_val + reg_theta + reg_phi
+            last_good_total[0] = total
             total_grad = np.concatenate([g_theta, g_phi])
 
         t_body_end[0] = perf_counter()
@@ -3492,6 +3506,18 @@ def main():
     _p_lo, _p_hi = global_range(phi)
     PETSc.Sys.Print(f"  theta range: [{_t_lo:.3f}, {_t_hi:.3f}]")
     PETSc.Sys.Print(f"  phi range:   [{_p_lo:.3f}, {_p_hi:.3f}]")
+    # A stop right after failed trials is no convergence test (TrialFailures),
+    # so the MAP gets no done marker and the chain's next link resumes from
+    # it. Printed before the MAP is saved: the runner reads this line, and a
+    # kill between the two must not leave a "Saved MAP:" line without it.
+    unfinished = trial_failures.stopped_on_failures
+    if unfinished:
+        PETSc.Sys.Print(
+            f"  {NOT_FINAL} the optimizer stopped right after "
+            f"{trial_failures.trailing} failed trial evaluations in a row "
+            f"({trial_failures.total} in this run). The MAP holds the last "
+            "accepted iterate; no done marker, so the chain's next link "
+            "resumes from it.")
 
     # ── Save MAP immediately ──
     chk_fn = os.path.join(_map_dir, map_fn)
@@ -3507,14 +3533,16 @@ def main():
     # the tail below (final solve, summary figure) runs for long enough that
     # the wall clock can kill the job inside it, and the runner's post-srun
     # rule would then never get to write the marker.
-    if map_out and COMM_WORLD.rank == 0:
+    if map_out and COMM_WORLD.rank == 0 and not unfinished:
         with open(map_out + ".done", "w"):
             pass
 
     if timing_json:
         _write_timing_json(
             phase="final_solve",
-            message=str(result.message),
+            message=str(result.message) + (
+                f" ({NOT_FINAL} after {trial_failures.trailing} failed trials)"
+                if unfinished else ""),
             nit=result.nit,
             nfev=result.nfev,
         )

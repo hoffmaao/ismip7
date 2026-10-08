@@ -487,3 +487,44 @@ def test_a_destroyed_scpc_frees_its_condensed_solver(slab):
     second = adjoint_solver()
     assert preconditioners._RETIRED_STATE == []
     second.snes.destroy()
+
+
+@pytest.mark.parametrize("direct", [False, True])
+def test_an_evaluation_releases_every_solver_it_builds(slab, monkeypatch, direct):
+    r"""The issue #161 regression. A full_mumps evaluation builds Newton
+    solvers for the forward (the recorded solve, or the direct solve and the
+    recorded confirmation) and an assembled operator and LU for the adjoint,
+    and drops them all. Each is destroyed when it is dropped, with its
+    Jacobian, so none waits for Python's cyclic collector and a PETSc garbage
+    cleanup. This checks the lifetimes; the memory they kept needs the 2 km
+    problem (run records test-2km-*-issue161-*)."""
+    if slab["law"] != "cellwise":
+        pytest.skip("solver lifetime, the same under either law")
+    from icepack2_tools import taped_solve
+
+    released = []
+    release = taped_solve.release_solver
+
+    def record(solver):
+        release(solver)
+        released.append(solver)
+
+    monkeypatch.setattr(taped_solve, "release_solver", record)
+    theta, phi = _controls(slab)
+    reset_manager()
+    start_manager()
+    try:
+        J, _ = _misfit(slab, "full_mumps", theta, phi, direct=direct)
+        stop_manager()
+        forward = [type(s).__name__ for s in released]
+        compute_gradient(J, [theta, phi])
+    finally:
+        stop_manager()
+        reset_manager()
+    newton = 2 if direct else 1
+    assert forward == ["NonlinearVariationalSolver"] * newton
+    assert [type(s).__name__ for s in released[newton:]] == ["LinearSolver"]
+    for solver in released:
+        assert solver.snes.handle == 0
+        assert solver._ctx._jac.petscmat.handle == 0
+    assert released[-1].A.petscmat.handle == 0

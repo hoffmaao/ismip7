@@ -481,6 +481,46 @@ def forward_hvisc_floor(recorded, source="the MAP"):
     return floor
 
 
+# The forms of dual_friction.front_cliff_correction, recorded in the MAP as
+# exact_front (0 off). A change to the push at the same geometry takes a new
+# version.
+#   1: the free-cliff push on every ice edge (60c0262, 5 Oct 2026).
+#   2: the push of the face above the ice-free neighbour's bed (issue #166).
+EXACT_FRONT_VERSIONS = (0, 1, 2)
+
+
+def exact_front_version(value):
+    r"""``ISMIP7_EXACT_FRONT`` or a MAP's ``exact_front`` record as one of
+    :data:`EXACT_FRONT_VERSIONS`. A bool is the version 1 switch it was
+    before version 2 existed; anything else is refused."""
+    raw = _recorded(value)
+    raw = raw.strip() if isinstance(raw, str) else raw
+    try:
+        version = int(raw)
+    except (TypeError, ValueError):
+        version = None
+    if version is not None and not isinstance(raw, str) and version != raw:
+        version = None                                   # 1.5 is no version
+    if version not in EXACT_FRONT_VERSIONS:
+        raise ValueError(
+            f"exact_front must be one of {EXACT_FRONT_VERSIONS}, not {value!r}")
+    return version
+
+
+def forward_exact_front(recorded, source="the MAP"):
+    r"""The cliff push a forward runs: the version its MAP records
+    (``exact_front``), which ``ISMIP7_EXACT_FRONT`` may repeat and may not
+    change. A MAP that predates the record was inverted without one, 0."""
+    recorded = _recorded(recorded)
+    version = exact_front_version(0 if recorded is None else recorded)
+    env = os.environ.get("ISMIP7_EXACT_FRONT")
+    if env is not None and exact_front_version(env) != version:
+        raise RuntimeError(
+            f"ISMIP7_EXACT_FRONT={env} but {source} was inverted with "
+            f"exact_front={version}: a forward follows its MAP")
+    return version
+
+
 FRONT_HMIN_DEFAULT = "1.0"    # m
 
 

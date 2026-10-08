@@ -92,6 +92,13 @@ def main():
             out["mask_ice_bedmachine_empty_bedmap3_km2"] = km2(covered)
             out["bedmap3_thickness_there_m"] = (
                 round(float(np.median(bm3[covered])), 1) if covered.any() else None)
+            water = empty & (bm_mask == 0)
+            cw = water & np.isfinite(bm3) & (bm3 > 0)
+            out["mask_ice_over_bedmachine_ocean_bedmap3"] = {
+                "km2": km2(cw), "of_km2": km2(water),
+                "thickness_median_m": round(float(np.median(bm3[cw])), 1) if cw.any() else None,
+                "thickness_p10_p90_m": ([round(float(v), 1) for v in np.percentile(bm3[cw], [10, 90])]
+                                        if cw.any() else None)}
 
     front = np.zeros_like(ice)
     marine = classes == MARINE

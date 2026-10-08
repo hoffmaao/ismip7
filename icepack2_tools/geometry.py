@@ -130,18 +130,19 @@ def _lattice_windows(datasets, tri):
     return out
 
 
-def cell_samples(datasets, Q_dg, reduce, nmax=64, chunk=2048):
+def cell_samples(datasets, Q_dg, reduce, nmax=64, chunk=2048, density=1.0, subset=None):
     r"""Look rasters up on an equal-area lattice in every owned cell of the
     DG0 space ``Q_dg``.
 
     Each cell is split into ``n**2`` equal-area sub-triangles with
-    ``n = ceil(sqrt(cell_area / pixel_area))`` (capped at ``nmax``; the pixel
-    is the first raster's), and every raster is looked up at each
-    sub-triangle centroid by pixel containment. ``reduce(idx, values)`` is
-    called for groups of cells sharing ``n``: ``idx`` indexes the owned cells
-    and ``values`` holds one ``(len(idx), n*n)`` array per raster. Returns
-    the owned cell -> dof map, the indexing of ``idx``. Rank-local, no
-    collectives.
+    ``n = ceil(density * sqrt(cell_area / pixel_area))`` (capped at
+    ``nmax``; the pixel is the first raster's), and every raster is looked
+    up at each sub-triangle centroid by pixel containment. ``reduce(idx,
+    values)`` is called for groups of cells sharing ``n``: ``idx`` indexes
+    the owned cells and ``values`` holds one ``(len(idx), n*n)`` array per
+    raster. ``subset``, owned cell indices, restricts the cells looked up.
+    Returns the owned cell -> dof map, the indexing of ``idx``. Rank-local,
+    no collectives.
     """
     from rasterio.transform import rowcol
 
@@ -150,18 +151,19 @@ def cell_samples(datasets, Q_dg, reduce, nmax=64, chunk=2048):
     cells = mesh.coordinates.cell_node_map().values          # owned cells -> nodes
     dofs = Q_dg.cell_node_map().values[:, 0]                 # owned cells -> dof
     nc = cells.shape[0]
-    if nc == 0:
+    cell_ids = np.arange(nc) if subset is None else np.asarray(subset, dtype=int)
+    if cell_ids.size == 0:
         return dofs
     tri = X[cells]                                           # (nc, 3, 2)
     v0, v1, v2 = tri[:, 0], tri[:, 1], tri[:, 2]
     area = 0.5 * np.abs((v1[:, 0] - v0[:, 0]) * (v2[:, 1] - v0[:, 1])
                         - (v2[:, 0] - v0[:, 0]) * (v1[:, 1] - v0[:, 1]))
     apix = abs(datasets[0].res[0] * datasets[0].res[1])
-    n = np.clip(np.ceil(np.sqrt(area / apix)).astype(int), 1, nmax)
-    windows = _lattice_windows(datasets, tri)
+    n = np.clip(np.ceil(density * np.sqrt(area / apix)).astype(int), 1, nmax)
+    windows = _lattice_windows(datasets, tri[cell_ids])
 
-    for nn in np.unique(n):
-        sel = np.flatnonzero(n == nn)
+    for nn in np.unique(n[cell_ids]):
+        sel = cell_ids[n[cell_ids] == nn]
         lam = _lattice_bary(int(nn))                         # (k, 3)
         for s0 in range(0, sel.size, chunk):
             idx = sel[s0:s0 + chunk]
@@ -363,10 +365,17 @@ def raise_bed_to_lake_ice_base(b, H, bm_fn, Q_g, Q_cg, method="vertex"):
 FRONT_ICE_FRACTION = 0.5
 # What a cell the mask calls ice gets when BedMachine holds no ice anywhere
 # in it: "empty" leaves it ice-free, "neighbour" gives it the mean thickness
-# of the held ice cells around it, for up to FRONT_FILL_SWEEPS rings.
+# of the held ice cells around it, ring by ring, up to FRONT_FILL_SWEEPS
+# rings. The Greene 2015 front lies up to 20 km seaward of BedMachine's ice
+# (51,373 km2 of mask ice over BedMachine water, 29,459 km2 of it 2 to 20 km
+# out; front_mask_census.py, 8 October 2026), so the rings run until none is
+# left.
 FRONT_FILLS = ("empty", "neighbour")
 FRONT_FILL = "empty"
-FRONT_FILL_SWEEPS = 3
+FRONT_FILL_SWEEPS = 100
+# Cells whose pixel-density samples are mixed are looked up again on a lattice
+# this many times as fine in each direction.
+FRONT_LATTICE_DENSITY = 4.0
 
 
 def _vertex_mean(Q_dg, values, defined):
@@ -414,7 +423,7 @@ def front_cells(H, b, bm_fn, mask_tif, fill=FRONT_FILL, frac=FRONT_ICE_FRACTION,
       mismatch, is water: ``H = 0``;
     * a cell with ice that shares a vertex with a water cell is a front
       cell: its ``H`` and ``b`` are BedMachine's means over the ice samples
-      it holds (a filled mismatch keeps its bed);
+      it holds; a filled mismatch takes its fill and keeps its bed;
     * every other cell is untouched, so interior ice, land margins and the
       open buffer keep their vertex samples.
 
@@ -458,6 +467,12 @@ def front_cells(H, b, bm_fn, mask_tif, fill=FRONT_FILL, frac=FRONT_ICE_FRACTION,
             rasterio.open(f"netcdf:{bm_fn}:bed") as bd, \
             rasterio.open(f"netcdf:{bm_fn}:thickness") as th:
         dofs = cell_samples([g, m, bd, th], Q_g, reduce)
+        # At pixel density a 1 km cell gets four samples, too few to tell a
+        # cell 64 % ice from one 25 % ice; look the mixed cells up again on a
+        # lattice FRONT_LATTICE_DENSITY times as fine.
+        mixed = np.flatnonzero(((f_ice > 0.0) & (f_ice < 1.0)) | (marine & (f_ice > 0.0)))
+        cell_samples([g, m, bd, th], Q_g, reduce, density=FRONT_LATTICE_DENSITY,
+                     subset=mixed)
 
     n_own = Q_g.dof_dset.size
 
@@ -490,7 +505,7 @@ def front_cells(H, b, bm_fn, mask_tif, fill=FRONT_FILL, frac=FRONT_ICE_FRACTION,
     h0 = H.dat.data_ro.copy()
     Hd, bd_ = H.dat.data, b.dat.data
     Hd[water] = 0.0
-    Hd[front] = HI[front]
+    Hd[front | filled] = HI[front | filled]
     rebed = front & held
     bd_[rebed] = BI[rebed]
     counts = {

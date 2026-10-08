@@ -841,6 +841,11 @@ def obs_data_root():
 # the forward checks (forcing.check_melt_contract).
 MELT_CALIBRATION_DEFAULT = os.path.join(
     _ANTARCTICA, "calibration", "deltaT_per_basin_1000_K6.500e-05.npz")
+# The tracked calibration of each raster sampling. A calibration sums melt
+# over the cells its sampling builds, so a run takes the one fitted under its
+# own (forcing.check_melt_contract refuses another); a sampling with no entry
+# needs ISMIP7_DELTAT_PER_BASIN_NPZ.
+MELT_CALIBRATIONS = {"vertex": MELT_CALIBRATION_DEFAULT}
 
 # Knobs that no longer shape a run. They are refused rather than ignored, so
 # a job script written before the change fails at startup.
@@ -989,7 +994,7 @@ def write_melt_calibration_sidecar(npz_path, record):
     return sidecar
 
 
-def deltat_per_basin_npz():
+def deltat_per_basin_npz(raster_sample_of_run=None):
     r"""The per-basin thermal-forcing offsets a run melts with, or None on the
     legacy per-basin K path.
 
@@ -999,8 +1004,10 @@ def deltat_per_basin_npz():
     it. The ocean callbacks add the offset to TF before the melt law and melt
     with the file's K everywhere.
 
-    ``ISMIP7_DELTAT_PER_BASIN_NPZ`` names the file; unset, it is
-    ``MELT_CALIBRATION_DEFAULT``. ``ISMIP7_K_PER_BASIN_NPZ`` selects the legacy
+    ``ISMIP7_DELTAT_PER_BASIN_NPZ`` names the file; unset, it is the tracked
+    calibration of the run's raster sampling (``MELT_CALIBRATIONS``;
+    ``raster_sample_of_run``, else ``ISMIP7_RASTER_SAMPLE``), which for vertex
+    sampling is ``MELT_CALIBRATION_DEFAULT``. ``ISMIP7_K_PER_BASIN_NPZ`` selects the legacy
     per-basin K path instead (``k_per_basin_npz``), and then this returns
     None. Naming both is refused.
 
@@ -1021,7 +1028,15 @@ def deltat_per_basin_npz():
     if legacy is not None:
         return None
     if path is None:
-        path = MELT_CALIBRATION_DEFAULT
+        sampling = (raster_sample() if raster_sample_of_run is None
+                    else str(raster_sample_of_run).lower())
+        if sampling not in MELT_CALIBRATIONS:
+            raise FileNotFoundError(
+                f"No tracked melt calibration was fitted on geometry sampled "
+                f"with {sampling}. Fit one (calibrate_deltaT.py under "
+                f"ISMIP7_RASTER_SAMPLE={sampling}) and name it with "
+                f"ISMIP7_DELTAT_PER_BASIN_NPZ.")
+        path = MELT_CALIBRATIONS[sampling]
         if not os.path.exists(path):
             raise FileNotFoundError(
                 f"The tracked melt calibration {path} is missing from this "

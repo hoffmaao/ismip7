@@ -1563,6 +1563,14 @@ def _deltaT_for_run(cache, npz, mesh_x, mesh_y, ctx=None):
     contract is checked first (`check_melt_contract`)."""
     if "dT" not in cache:
         if ctx is not None:
+            # The tracked calibration is the one fitted under the sampling
+            # this run's geometry was built with, which setup_model settles
+            # (a transfer rebuilds it; issue #167). A named file stays.
+            if (ctx.get("raster_sample")
+                    and not os.environ.get("ISMIP7_DELTAT_PER_BASIN_NPZ")):
+                from .runconfig import deltat_per_basin_npz
+                npz = deltat_per_basin_npz(ctx["raster_sample"]) or npz
+            cache["npz"] = npz
             check_melt_contract(npz, ctx)
         field, K = load_deltaT_per_basin(npz, mesh_x, mesh_y, fill=np.nan)
         cache["fitted"] = np.isfinite(field)

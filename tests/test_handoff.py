@@ -30,7 +30,7 @@ def _settings(**over):
         "subelement_friction": 1, "subelement_scheme": "sep1",
         "subelement_scheme_version": 2, "exact_front": 0,
         "fluidity_control": "all", "drag_gate": "vertex", "h_visc_floor": 1.0,
-        "phi_grounded": "inverted",
+        "phi_grounded": "inverted", "raster_sample": "vertex",
     }
     base.update(over)
     return base

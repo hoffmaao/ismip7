@@ -31,7 +31,7 @@ OBJECTIVE_KEYS = (
     "friction_anchor_length", "lake_ice_base", "fluidity_prior_origin",
     "grad_precond", "subelement_friction", "subelement_scheme",
     "subelement_scheme_version", "exact_front", "fluidity_control",
-    "drag_gate", "h_visc_floor", "phi_grounded",
+    "drag_gate", "h_visc_floor", "phi_grounded", "raster_sample",
 )
 
 # The residual each sub-element scheme builds today (icepack2_tools.subelement),

@@ -31,7 +31,8 @@ from firedrake.petsc import PETSc  # noqa: E402
 from icepack2_tools.adapt_mesh import (AdaptMeshConfig, desired_element_size,  # noqa: E402
                                        remesh_global, transfer_state)
 from icepack2_tools.geometry import sample_to_geometry  # noqa: E402
-from icepack2_tools.runconfig import obs_data_root  # noqa: E402
+from icepack2_tools.naming import mesh_front_year  # noqa: E402
+from icepack2_tools.runconfig import obs_data_root, raster_front_year  # noqa: E402
 from mesh_naming import next_adapted_mesh_name, resolve_outline_buffer  # noqa: E402
 
 HERE = os.path.dirname(os.path.abspath(__file__))
@@ -101,6 +102,12 @@ def main():
     basename = str(attrs.get("mesh_basename", "")).replace(".msh", "")
     if not basename:
         raise RuntimeError("checkpoint has no mesh_basename attribute; cannot find its .msh/sidecar")
+    if mesh_front_year(basename) is not None:
+        # The remesher (adapt_mesh.antarctica_geometry_builder) embeds no
+        # front, so the adapted mesh would lose the one this mesh follows.
+        raise SystemExit(
+            f"adapt: {basename} follows an ice front (issue #167), which the "
+            f"adapted mesh would not; adaptation of a front mesh is not supported")
     old_msh = os.path.join(MESH_DIR, basename + ".msh")
     old_sidecar = os.path.join(MESH_DIR, f"boundary_ids_{basename}.json")
     for f in (old_msh, old_sidecar):
@@ -157,6 +164,13 @@ def main():
 
     bm_fn = sorted(glob.glob(os.path.join(DATA_DIR, "bedmachine", "*.nc")))[0]
     method = str(attrs.get("raster_sample", "vertex"))
+    if raster_front_year(method) is not None:
+        # The front sampling rebuilds thickness and bed together at the
+        # front, and the remesher embeds no front (issue #167).
+        raise SystemExit(
+            f"adapt: the checkpoint's geometry was sampled with {method}, whose "
+            f"front cells the adapted mesh cannot rebuild; adaptation of a "
+            f"front-following state is not supported")
 
     def bed_sampler(Q_g, Qc):
         return sample_to_geometry(rasterio.open(f"netcdf:{bm_fn}:bed"), Q_g, Qc, method=method)

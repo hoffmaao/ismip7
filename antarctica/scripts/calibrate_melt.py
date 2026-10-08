@@ -88,7 +88,7 @@ from icepack2_tools.forcing import (quadratic_mixed_slope, compute_sin_alpha,
                                     SIN_ALPHA_ANT_DEFAULT, _K_PERCENTILES,
                                     _RHO_I, _oi_climatology_path)
 K05, K50, K95 = _K_PERCENTILES
-from icepack2_tools.geometry import sample_to_geometry
+from icepack2_tools.geometry import sample_bed_thickness
 from icepack2_tools.melt_selection import read_melt_table, sample_nearest
 from icepack2_tools.mpi_stats import (global_count, global_mean, global_range,
                                       global_size)
@@ -345,10 +345,11 @@ def forward_cells(mesh):
     Q_g = FunctionSpace(mesh, "DG", 0)
     bm = _bedmachine_path()
     PETSc.Sys.Print(f"  Sampling BedMachine onto DG0 cells ({raster_sample()}): {bm}")
-    b_dg = sample_to_geometry(rasterio.open(f"netcdf:{bm}:bed"), Q_g, Q,
-                              method=raster_sample())
-    h_dg = sample_to_geometry(rasterio.open(f"netcdf:{bm}:thickness"), Q_g, Q,
-                              method=raster_sample())
+    # as the forward's cold start does, the front cells too under a front
+    # sampling (geometry.front_cells, issue #167)
+    b_dg, h_dg, front_counts = sample_bed_thickness(bm, Q_g, Q, method=raster_sample())
+    if front_counts is not None:
+        PETSc.Sys.Print(f"  Front cells ({raster_sample()}): {front_counts}")
     s_dg = Function(Q_g).interpolate(
         fd.max_value(b_dg + h_dg, (1.0 - RHO_RATIO) * h_dg))
     xy = Function(VectorFunctionSpace(mesh, "DG", 0)).interpolate(

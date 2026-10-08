@@ -1,0 +1,24 @@
+{
+  "id": "test-2km-rc-lcurve-g001",
+  "task": "test",
+  "institution": "IU",
+  "title": "RC continued 150 iterations on Rice's mesh from its stage-1 MAP, curvature x0.01 (rho 7.5 km at sigma 30)",
+  "status": "done",
+  "friction": "regularized_coulomb",
+  "period": "2015 state",
+  "mesh": "antarctica_5000_2000_buffered0 (Rice's build, 925,183 vertices, read from the warm start: ISMIP7_MESH=checkpoint), DG0 geometry, vertex raster sampling",
+  "initial_state": "inversion-2km-rc-nomass-lbfgsb's MAP (RC stage 1 final, sha256 fea8debae9616f18), log-velocity weight 69946.22414285329 with its mixed state",
+  "forcing": "the stage-1 objective (bilaplacian sigma 30, rho 7.5 km, no dH/dt term, log friction control, cell-wise friction, L-BFGS-B without a metric, scpc_gamg); gamma 24.9; ISMIP7_WARM_START_STRICT=0",
+  "site": "IU Quartz, general partition",
+  "resources": "32 ranks, 160G, 8 h",
+  "jobs": [
+    "10969229"
+  ],
+  "code": "9683007; Quartz clone /N/scratch/dlilien/ismip7_reinvert",
+  "started": "2026-10-04",
+  "finished": "2026-10-05",
+  "cost": "158 evaluations in 6 h 22 min",
+  "results": "Quartz /N/project/ice_rheology/ISMIP7/antarctica/results/reinvert_2km/lcurve/rc_lc_rc_g001.h5; maps in Quartz /N/scratch/dlilien/ismip7_reinvert_jobs (submit_reinvert.sh cells, probe/, plots/), plots/lc_g001_*.png",
+  "audit": "evaluation 158: misfit 645 (stage 1 ended at 2,249), velocity chi2 10.7, total 894; mean absolute speed misfit 15.4 m/yr on floating ice and 2.6 m/yr on grounded ice. phi on the shelves shows narrow suture zones and margins, and on grounded ice a grid-scale speckle (2 to 5 km), which is noise; 90th and 99th percentile 14 and 72 m/yr",
+  "notes": "issue #153: is stage 1 over-regularized? gamma 2493 is Rice's curvature, so a 5 km wide, 300 km long soft band at phi +2 costs 1,450 in the prior, eleven times stage 1's whole reg_phi (130)"
+}

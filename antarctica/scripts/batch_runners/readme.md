@@ -399,16 +399,26 @@ constraint, memory, time and task layout from `scontrol`. Every link exits at
 once if `<map>.done` exists, meaning the MAP reached disk. The driver writes
 that marker as soon as the checkpoint write returns, so a kill in the tail
 (final solve, summary figure) cannot lose it; the runner's post-`srun` grep for
-the driver's `Saved MAP:` line is the fallback. Depth is capped by
+the driver's `Saved MAP:` line is the fallback. An optimizer that stops right
+after failed trial evaluations leaves the MAP unmarked: scipy's L-BFGS-B
+reports that stop as convergence at a point whose gradient is not small (RC's
+link 11461566 stopped so at evaluation 107 with a gradient norm of 1.03, issue
+#153), so the driver prints `MAP not final:` before saving, writes no marker,
+and the runner writes none either. The successor resumes from the MAP with a
+fresh L-BFGS-B memory, and a run that stalls again at every resume spends its
+links. Depth is capped by
 `ISMIP7_CHAIN_MAX` (4). Under `ISMIP7_LOG_VEL_WEIGHT=auto`, the runner's
 default, a link takes the log-velocity weight the checkpoint records, so every
 link of one MAP minimises the objective the first link set (issue 68). A warm
 start is read by point location (`transfer.interpolate_with_fill`), so one
 written on another rank count or on another mesh loads correctly. A target
-point outside the warm start's mesh takes the stated fill (theta and phi 0, the
-fluidity prior's constant baseline), and the log counts those points per
-field. A single-node link copies its warm start to node-local `$TMPDIR` first:
+point outside the warm start's mesh takes the fill `ISMIP7_TRANSFER_FILL`
+names (`MAP_CHECK.md`), and the log counts those points per field. A single-node link copies its warm start to node-local `$TMPDIR` first:
 32 ranks reading a 580 MB 2 km MAP over NFS took more than 45 minutes on NOTS.
+A link that loses a rank (the OOM killer, a crash) ends at once (below, "One
+dead rank ends the step") with no `Saved MAP:`, and its queued successor
+resumes from the last checkpoint in a fresh process, so an out-of-memory link
+costs one evaluation and a restart.
 Regression test: `tests/test_inversion_chain.py`.
 
 ### `projection.sbatch`, self-chaining
@@ -482,6 +492,16 @@ output file took 1042 s to `/scratch` under ompio and 52 s under romio321
 Before the change the yearly write was a third of a 45-minute model year.
 `ISMIP7_MPI_IO` names the component; set it empty to leave the MPI's own
 default. An MPI other than Open MPI ignores the variable.
+
+**One dead rank ends the step.** `ismip7_mpirun` starts every srun with
+`--kill-on-bad-exit=1`, and with `--oom-kill-step=1` where `srun --help` lists
+it (Slurm 24.11 and later; an older srun would refuse the option). Without
+them a rank that dies leaves the others waiting in MPI until the wall limit,
+under Slurm's default `KillOnBadExit=0`, which IU Quartz runs: in job 10971250
+the OOM killer took one of 32 ranks 4 h 28 min into a 16 h inversion and the
+node sat idle for the remaining 11.5 h (issue #161). A container site's
+`mpiexec` already takes every rank down when one dies. Regression test:
+`tests/test_site_core.py`.
 
 The wall budget is derived per job. Each link reads its own partition's
 `TimeLimit`, holds back 25 minutes and passes the rest as

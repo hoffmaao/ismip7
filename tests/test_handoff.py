@@ -29,7 +29,8 @@ def _settings(**over):
         "grad_precond": "mass_consistent",
         "subelement_friction": 1, "subelement_scheme": "sep1",
         "subelement_scheme_version": 2, "exact_front": 0,
-        "fluidity_control": "all",
+        "fluidity_control": "all", "drag_gate": "vertex", "h_visc_floor": 1.0,
+        "phi_grounded": "inverted",
     }
     base.update(over)
     return base
@@ -149,3 +150,10 @@ def test_auto_weight_frozen_only_within_one_control():
     legacy = {"prior_sigma_alpha": 0.2}
     assert frozen_in_control(legacy, "prior_sigma_alpha", "sqrt") is None
     assert frozen_in_control(_settings(friction_c_ref=0.0), "friction_c_ref", "sqrt") is None
+
+
+def test_a_new_cliff_push_version_is_an_objective_change():
+    r"""A MAP inverted under exact_front 1 warm-starts a version 2 inversion
+    only non-strictly: the push at rock walls changed (issue #166)."""
+    assert objective_mismatches(_settings(exact_front=1), _settings(exact_front=2)) == \
+        ["exact_front: 1 -> 2"]

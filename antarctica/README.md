@@ -627,6 +627,47 @@ not measure it.
 and `runlog/test-32km-inversion-scpc-destroy-*` hold the runs, including a
 first round timed beside another session's jobs.
 
+Under `full_mumps` the 2 km inversion's RSS climbed for as long as it ran
+(issue #161): job 10971250 grew 33.7 MiB a rank an evaluation over evaluations
+11 to 103 and lost a rank to the OOM killer at 220G. Each evaluation builds and
+drops two solvers that hold assembled matrices: the recorded solve's Newton
+solver, whose mixed AIJ Jacobian is allocated even when SNES exits at
+iteration 0, and the adjoint's operator, `LinearSolver` and LU. Firedrake's
+`NonlinearVariationalSolver` sits in a reference cycle, so a dropped one
+lives until Python's cyclic collector runs, and on more than one rank its
+PETSc objects then wait for the next `PetscGarbageCleanup`. Some are never
+freed: the arms below without the release ended with 25 to 37 matrices alive
+in PETSc's count, against 10 (the run's own) with it, while at most four
+Firedrake solvers were alive after any evaluation. That fits issue #159's
+loss of objects released while a cleanup runs, reached here through the
+collector; no run here isolated that path. The solvers are now destroyed when dropped
+(`taped_solve.release_solver`, used by `ReleasingEquationSolver` for both
+recorded equations and by `StateSolverCache` for the solver it replaces). On
+Quartz, 32 ranks, 10971250's objective (rho 75 km), from its last checkpoint
+or from a start that objective moves far (`runlog/test-2km-full-mumps-issue161-*`);
+RSS a rank (mean) from the timing record, MiB:
+
+| start | evaluations | without the release | with it |
+|---|---|---|---|
+| converged | 10 to 62 | 2,761 to 3,366 (11.6 an evaluation, still rising) | 2,657 to 2,804 (2.8; flat within 2,739 to 2,809 from evaluation 13) |
+| moving (rho 750 km MAP under the rho 75 km objective) | 10 to 48 | 2,762 to 3,057 (7.8) | 2,633 to 2,781 (3.9; within 2,771 to 2,813 from evaluation 20) |
+| moving, the collector left alone | 10 to 58 | 2,753 to 3,213 (9.6) | 2,635 to 2,798 (3.4; within 2,777 to 2,815 from evaluation 20) |
+
+The peak a rank fell by about 600 MiB at 62 evaluations (5,543 to 4,915).
+Objectives agree with the spread of same-code reruns, which on 32 ranks are
+not bit-identical (2e-15 at evaluation 2, 1e-11 by 22, compounding through
+L-BFGS-B after that), with the same Newton iterations, and the seconds an
+evaluation are unchanged (136 and 128). Ruled out: lost solvers (every SNES,
+KSP and PC is destroyed, here and at 32 km on the workstation); the cached forward
+solver's MUMPS instance holds a constant 1,482 MB (`INFO(16)`); MUMPS's
+ScaLAPACK root (`mat_mumps_icntl_13 1` changed nothing); free heap
+(`malloc_trim` returned about 150 MiB a rank every evaluation and left the
+trend); Python's own memory (tracemalloc flat at about 920 MiB a rank). Below
+2 km the growth is small (0.5 MiB an evaluation at 32 km on 8 ranks, 4.6 at
+8 km on 2, on the workstation).
+`site_core.sh`'s `--kill-on-bad-exit=1` (batch_runners readme) ends a job
+whose rank dies regardless.
+
 Under SEP1 and the direct forward (PR 158's defaults; PR 155 at `432c831`), on
 the workstation with other sessions sharing it: Budd, the `legacy` fluidity
 prior, the log control, a cold start ramped under `full_mumps`, TAO with the
@@ -1225,7 +1266,8 @@ Read-only diagnostics:
 | `compare_runs.py LABEL=results/<a> ...` | overlays budget timeseries to show where two runs part ways |
 | `plot_movie.py results/<exp>` | thickness change, speed and thickness frames plus an mp4 under `figs/movie_<exp>/` |
 | `region_budget.py <ckpt>.h5 [<later>.h5] [--csv <run>_timeseries.csv]` | splits the budget into grounded and floating ice, so a control that gains volume above flotation is read against the observed 2000 to 2200 Gt/yr of discharge |
-| `score_map.py MAP.h5 [...] [--json OUT] [--restart STATE.h5]` | scores an inversion by `Q(u_model)/Q(u_obs)` across its own grounding line, overall and per speed band; re-solves through `setup_model`, so periodic MAPs without a velocity work. With `ISMIP7_MESH` set the MAP is transferred first, so the same command with and without it compares a transfer; `--restart` scores a prepared state, `--json` writes the numbers with the transfer fill counts (`MAP_CHECK.md`) |
+| `score_map.py MAP.h5 [...] [--json OUT] [--restart STATE.h5] [--save-state DIR]` | scores an inversion by `Q(u_model)/Q(u_obs)` across its own grounding line, overall and per speed band; re-solves through `setup_model`, so periodic MAPs without a velocity work. With `ISMIP7_MESH` set the MAP is transferred first, so the same command with and without it compares a transfer; `--restart` scores a prepared state, `--json` writes the numbers with the transfer fill counts (`MAP_CHECK.md`), `--save-state` writes each solved state as `DIR/<MAP stem>_t0.h5` |
+| `check_cliff_facets.py STATE.h5 [--compare OTHER.h5] [--out PREFIX]` | every facet between ice and an ice-free cell, classed by the neighbour's bed against the ice base and surface, with the push of `ISMIP7_EXACT_FRONT` versions 1 and 2, the change per IMBIE basin, and on a solved state each grounded edge cell's change against its basal drag; `--compare` takes the same MAP solved under the other version (`score_map.py --save-state` on a copy of the MAP whose `exact_front` attribute is rewritten, since a forward refuses an `ISMIP7_EXACT_FRONT` that differs from its MAP) and adds the speed change by distance to the changed facets and the grounded discharge per basin (issue #166) |
 | `plot_map.py MAP.h5 [--diff B.h5]` | model and observed speed and their difference, `θ`, `C = C_w0 exp(θ)` on grounded ice, and `φ`, into `figs/maps/` |
 
 `region_budget.py` and `score_map.py` take the run's environment, which must
@@ -1265,7 +1307,11 @@ thickness can therefore be small and nonzero.
 
 Momentum needs no front term: under DG0 geometry the facet term
 `rho g avg(h) jump(s)` at an ice/water face is the terminus water-pressure
-force. The one momentum change is the drag gate: the mask is 1 only where `phi`
+force for floating ice, and `ISMIP7_EXACT_FRONT` gives every ice edge inside the
+mesh the free-cliff push, a grounded marine cliff and a land margin included
+(version 2: the push of the face above the neighbour's bed, none against rock
+above the ice surface).
+The one momentum change is the drag gate: the mask is 1 only where `phi`
 exceeds one cell diameter, so floor-cell ocean drag acts only in water further
 than a cell from the front. Thin cells inside the t=0 extent are damped by
 `h_visc_floor`, the friction law and the `ISMIP7_ALPHA_GL` collar. In the strip
@@ -1377,6 +1423,9 @@ projection), run in that run's own shell so it captures the environment.
 | `ISMIP7_WARM_START_PHI` | how `φ` comes over from the warm start. `1` takes it as it is, a deviation from this run's own fluidity prior; `physical` rebases it onto this run's prior (`ISMIP7_FLUIDITY_PRIOR`) so `A = A_prior exp(φ)` is the warm start's, e.g. a thermal-prior MAP warm-starting a Pattyn-prior run; `0` starts at the prior mean | `1` |
 | `ISMIP7_WARM_START_GEOMETRY` | `1` takes thickness, bed, surface, `velocity_obs` and the mixed state from the warm start; `0` keeps this mesh's own BedMachine sample. Defaults to `1` on the same mesh, except that a MAP recording a different `lake_ice_base` does not supply its geometry, so an old MAP cannot bring the lake bowl back | `1` on the same mesh, else `0` |
 | `ISMIP7_ANCHOR_LENGTH` | reach (m) of the driving stress in the friction anchor `C_w0 = tau / max(|u_obs|, 1)^(1/m)`, the prior mean of the friction. `0` is the local balance, which vanishes with the surface slope and leaves ice divides with no friction in the prior. A positive length averages the driving-stress magnitude of the grounded ice over about that distance (a screened-Poisson filter with the second moment of a Gaussian of that standard deviation), so floating and ice-free cells neither add to nor dilute it. Stamped into the MAP as `friction_anchor_length`; a forward rebuilds the anchor from the MAP's value and aborts if this variable says otherwise | `0` |
+| `ISMIP7_TRANSFER_FILL` | what the controls and the fluidity prior take on the dofs of the compute mesh beyond the mesh they were read from: a forward loading a MAP from another mesh, and an inversion's warm start. `extend` continues θ, φ and α harmonically from the source outline and the fluidity prior through its logarithm (`icepack2_tools/transfer.py`, `harmonic_extension`), so the bi-Laplacian prior pays almost nothing at the outline; `constant` fills θ = φ = 0 and the baseline prior `A0 * a4_factor`. Under `constant`, Rice's 2 km Budd MAP after stage 1 of issue #153 started on the 20 km buffered mesh at a smoothness cost of 1.46e5, against the 2.9e3 its last iterate recorded. A MAP records the mode of its warm start as `warm_start_fill` | `extend` |
+| `ISMIP7_DRAG_GATE` | which water cells beside the ice the floor-cell ocean drag skips (`front.ocean_drag_cells`), in the inversion and the forward. `vertex` skips every cell touching the ice, at an edge or at one vertex; `facet` skips only those sharing an edge, so a cell touching the ice at one vertex drags the ice's own front node. On the 20 km buffered 2 km mesh RC's stage-1 controls gave floating ice 27 % below the observed speed under `facet`, 11 % under `vertex`, 2 % with `vertex` and a 1 m membrane floor, and 1 % with the drag off (issue #153). The MAP records `drag_gate` (`none` when no cell was dragged), and a forward runs the recorded gate and refuses a different one here; a MAP recording none, or older than the record, runs this knob, and a forward state older than the record restarts under `facet` unless it is set | `vertex` |
+| `ISMIP7_EXACT_FRONT` | give every facet between ice and an ice-free cell inside the mesh the exact depth-integrated push `g (rho_I H^2 - rho_W d^2) / 2`. The DG0 facet driving stress matches it for floating ice and on flat land, falls short at a grounded marine cliff by `g D (rho_I H - rho_W D) / 2` (15 % for 1600 m of ice in 300 m of water), and on land is set mostly by the step in bed height: a median 20 times the push outward where the rock lies below the ice surface, 13 times back into the ice where it rises above (2 km buffered mesh, issue #153). `1` adds the difference (`dual_friction.front_cliff_correction` for cell-wise friction, icepack_tools' under `ISMIP7_SUBELEMENT_FRICTION=1`), which against rock above the ice surface drives the ice into the rock. `2` pushes with the face above the ice-free neighbour's bed `B` only, `g (rho_I h_e^2 - rho_W d_e^2) / 2` with `h_e = min(H, max(s - B, 0))` and `d_e = min(d, max(-B, 0))`: the free-cliff push where `B` is at or below the ice base, none where it is at or above the ice surface (issue #166); cell-wise friction only. An objective key; the MAP records the version as `exact_front` and the forward follows it, refusing an `ISMIP7_EXACT_FRONT` that differs. DG0 geometry only | `1` under the sub-element scheme, else `0` |
 | `ISMIP7_LAKE_ICE_BASE` | under BedMachine's subglacial-lake mask (4, Lake Vostok) raise the bed to the ice base `s - H`. BedMachine's bed there is the lake floor, so `b + H` sits below its surface by the water column: a bowl a median 266 m and up to 916 m deep over 15,200 km2, with driving stresses near 1 MPa on its walls. Stamped into the MAP as `lake_ice_base`; a forward follows the MAP, so a MAP inverted without it keeps its own geometry | `1` |
 | `ISMIP7_SKIP_CONTINUATION` | `1` skips the cold `n,m: 1→n` ramp on the initial solve, and makes each objective evaluation one taped solve at the full exponents in place of the direct forward (timing lanes). A warm start that supplies a full mixed state skips the initial ramp by itself and keeps the direct forward | `0` |
 | `ISMIP7_DIRECT_FORWARD` | each objective evaluation is one untaped Newton solve at the full exponents from the last converged state, then a taped solve that starts converged, under every `ISMIP7_INVERSION_LINEAR_SOLVER` (`icepack2_tools/taped_solve.py`). A direct solve that fails goes to the failed-trial rescue, or to the line search's backtrack. `0` restores the taped 5-stage `n: 1→3` ladder in every evaluation, or one taped solve when the warm start supplied its mixed state or `ISMIP7_EVAL_CONTINUATION=0`. The MAP and the timing record carry the mode as `eval_mode` | `1` |
@@ -1430,6 +1479,7 @@ redeclare those literals.
 | `ISMIP7_MESH` | mesh path for the inversion and tools. A forward takes its mesh from the checkpoint unless this names another mesh, in which case the MAP is transferred onto it; a file with the checkpoint mesh's name and another triangulation is refused (`ISMIP7_MESH_BUILD_CHECK`). `checkpoint` means the mesh embedded in the MAP or restart file: `site_env.sh` always exports a derived path, so this is how a job submitted through `submit.sh projection` runs MAP-native. For the inversion, `checkpoint` is the mesh inside `ISMIP7_WARM_START`, under the `mesh_basename` that file records, so a MAP released without its .msh can be continued on its own mesh. Its recorded `lc`, `lc_coarse` and `buffer_m`, or values derived from a standard basename, supply the output MAP and timing provenance and the derived output names. A contradiction or incomplete mesh identity is refused | `mesh/antarctica_<COARSE>_<LC>_buffered<BUFFER_M>.msh` |
 | `ISMIP7_RASTER_SAMPLE` | how BedMachine lands on a DG0 cell. `vertex` projects the CG1 vertex interpolant; `cell_mean` takes the raster's true cell mean. `cell_mean` measured rougher: neighbouring cells share two of three vertex samples, so `vertex` damps jumps by construction. Cell means raised interior surface jumps 6% and bed and thickness jumps 35%, and at 2 km the momentum solve did not converge within 60 minutes. It does classify flotation better (32 km misclassification 9.1% to 3.2%), so the knob stays. Stamped into the MAP and read back by the forward. Reproduce with `probe_raster_sampling.py` | `vertex` |
 | `ISMIP7_INVERSION` | explicit MAP path for a forward or preflight. The forward checks the MAP's recorded `friction`, `n_flow` and `geometry_space` against the run and aborts on a mismatch, warning only when the MAP predates those attributes; `preflight.py` checks that the file exists. Use it to A/B MAPs on one mesh, or, with `ISMIP7_MESH` also set (the timing matrix, `make map-check`), to run a MAP on a different mesh: its continuous fields are then interpolated onto `ISMIP7_MESH` by strict point location (`icepack2_tools/transfer.py`), and a target dof outside the MAP's outline takes a stated fill (0 for the log controls, the constant baseline for the fluidity prior, the raster sample for `velocity_obs`), counted and printed as `Transfer fill:` lines (`MAP_CHECK.md`) | derived |
+| `ISMIP7_MAP_CLIP` | bound on the absolute value of a MAP's log controls: a forward clips theta and phi to it when it loads a MAP and prints the count as `MAP clip:`, and an inversion clips its warm start's theta to it. `0` disables it. Forwards from IU's final 2 km MAPs (the exact_front version 2 Budd and RC MAPs on the 20 km buffered mesh, issues #153 and #166) run `0`, with `ISMIP7_DIAGNOSTIC_LINEAR_SOLVER` `scpc_mumps` for Budd and `full_mumps` for RC, passed at submission, so the forward runs the controls the inversion fitted: RC's theta reaches 13.0, and 856 floating nodes of Budd's phi lie beyond 10. From Budd's version 1 final, `scpc_gamg` diverged under the clip from a backdated geometry, and without the backdate its step took about 25 times as long as one under `scpc_mumps`; from RC's version 2 final, `scpc_mumps` took 36 to 84 Newton iterations a solve and 13 to 34 min a step (run record `test-2km-budd-b20k-final-forward-diagnostics`). IU expects the regularization to set the solver a MAP needs, so Rice's more strongly regularized MAPs may run `scpc_mumps` or `scpc_gamg`; this is untested, and the membrane floor also moves the start-up cost (a 1 m floor cold start from RC's stage 2 MAP took 4.8 h under `scpc_gamg`, `test-2km-rc-b20k-vgate-floor1`) | `10`, or `6` at `ISMIP7_N_FLOW=4` |
 | `ISMIP7_CALVING` | `none`, or a law in `icepack_tools.calving`: `fixed`, `velocity`, `thickness`, `vonmises`, `vonmises_strain`, `hfb` (see above) | `none` |
 | `ISMIP7_CALVING_PARAMS` | the law's parameters, `key=value,key=value` (e.g. `sigma_max_fl=0.2,sigma_max_gr=1`), checked against the law at startup. Replaces `ISMIP7_CALVING_SIGMA_MAX_GROUNDED` / `_FLOATING`, which are refused when a law is set | the law's defaults |
 | `ISMIP7_CALVING_MODULE` | a Python file whose `@icepack_tools.calving.register` laws join the registry before `ISMIP7_CALVING` is looked up | unset |
@@ -1497,7 +1547,8 @@ redeclare those literals.
 | `ISMIP7_STAGE_READS` / `ISMIP7_STAGE_WRITES` | a single-node job reads its MAP or restart from a node-local copy, and writes checkpoints and yearly output on node-local disk before renaming them into place (`icepack2_tools/staging.py`); over NFS a 2 km MAP took 45 min to read and a checkpoint 9 min to write on NOTS. `0` uses the networked path directly | `1` under Slurm, `0` off it |
 | `ISMIP7_H_OCEAN` / `ISMIP7_K_LIM` | front backstops read by `scripts/simulation.py`: the thickness (m) at which the ice-free ocean drag ramps to zero, and the speed-limiter coefficient the rescue ladder raises for a rescue solve | `10.0` / `1e-3` |
 | `ISMIP7_ALPHA_GL` | grounding-line coercivity, Budd only, read by `scripts/simulation.py` and `scripts/inversion_icepack2.py` | `0.5` (`0` for RC) |
-| `ISMIP7_RC_HVISC_FLOOR` / `ISMIP7_RC_CW0_FLOOR` | RC viscous-thickness and `C_w0` floors, read by `scripts/simulation.py` and `scripts/inversion_icepack2.py` | `10.0` / `0.0` |
+| `ISMIP7_RC_HVISC_FLOOR` | membrane-only thickness floor (m) under both laws (`h_visc_floor`): a cell thinner than this carries this much ice in the membrane term alone. The first water row beside the ice carries it too, coupling the front to the ocean drag one cell out: with the vertex gate on the 20 km buffered 2 km mesh, floating ice started 11 % slow at 10 m, 4 % at 2.5 m and 2 % at 1 m, and 2.5 m costs 14 % more forward time at 1 km (GEOMETRY_DISCRETIZATION.md, issue #153). The inversion records it in the MAP as `h_visc_floor`; a forward runs the recorded floor and refuses a different one here, and a MAP older than the record runs this knob | `2.5` in the inversion; in a forward the MAP's, and `10.0` for a MAP older than the record |
+| `ISMIP7_RC_CW0_FLOOR` | RC `C_w0` floor, read by `scripts/simulation.py` and `scripts/inversion_icepack2.py` | `0.0` |
 | `ISMIP7_M_SLIDE` | sliding exponent, read by `scripts/inversion_icepack2.py`, `scripts/simulation.py`, `scripts/thermo_prior.py`, `scripts/plot_map.py`, `scripts/run_eigendec.py` | `3.0` |
 
 > **dt guidance.** Production runs on the 1000 m mesh use `ISMIP7_DT=0.025`,

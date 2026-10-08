@@ -6,6 +6,7 @@ import os
 import sys
 
 import firedrake as fd
+import pytest
 from firedrake import (Function, FunctionSpace, TensorFunctionSpace,
                        UnitSquareMesh, VectorFunctionSpace, FiniteElement)
 
@@ -43,19 +44,23 @@ def _attrs(path, keys):
         return {k: chk.get_attr("/", k) for k in keys if chk.has_attr("/", k)}
 
 
-def test_state_carries_map_configuration(tmp_path):
+@pytest.mark.parametrize("exact_front", [1, 2])
+def test_state_carries_map_configuration(tmp_path, exact_front):
     sim = _simulation()
     metadata = {"friction_control": "exp", "friction_c_ref": 0.25,
-                "subelement_friction": 1, "exact_front": 1,
-                "fluidity_control": "floating"}
+                "subelement_friction": 1, "exact_front": exact_front,
+                "fluidity_control": "floating", "drag_gate": "vertex",
+                "h_visc_floor": 1.0}
     path = str(tmp_path / "state.h5")
     sim.save_model_state(_ctx(metadata), path, 1.0)
     got = _attrs(path, sim.MAP_CONFIG_KEYS)
     assert got["friction_control"] == "exp"
     assert float(got["friction_c_ref"]) == 0.25
     assert int(got["subelement_friction"]) == 1
-    assert int(got["exact_front"]) == 1
+    assert int(got["exact_front"]) == exact_front
     assert got["fluidity_control"] == "floating"
+    assert got["drag_gate"] == "vertex"
+    assert float(got["h_visc_floor"]) == 1.0
 
 
 def test_state_omits_what_the_map_did_not_record(tmp_path):

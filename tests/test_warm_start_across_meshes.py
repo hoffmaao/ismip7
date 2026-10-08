@@ -125,3 +125,22 @@ def test_eval_continuation_refuses_a_word(monkeypatch):
     monkeypatch.setenv("ISMIP7_EVAL_CONTINUATION", "off")
     with pytest.raises(ValueError):
         eval_continuation()
+
+
+@pytest.mark.parametrize("value, expected", [
+    (None, "extend"), ("extend", "extend"), (" Constant ", "constant"),
+])
+def test_the_transfer_fill_extends_unless_told_otherwise(monkeypatch, value, expected):
+    from icepack2_tools.runconfig import transfer_fill
+    if value is None:
+        monkeypatch.delenv("ISMIP7_TRANSFER_FILL", raising=False)
+    else:
+        monkeypatch.setenv("ISMIP7_TRANSFER_FILL", value)
+    assert transfer_fill() == expected
+
+
+def test_the_transfer_fill_refuses_another_word(monkeypatch):
+    from icepack2_tools.runconfig import transfer_fill
+    monkeypatch.setenv("ISMIP7_TRANSFER_FILL", "nearest")
+    with pytest.raises(ValueError, match="ISMIP7_TRANSFER_FILL"):
+        transfer_fill()

@@ -100,13 +100,23 @@ def build_subelement_residual(z, theta, phi, *, H, s, b, C_w0, A4_base, n_flow,
     Same controls and fields as ``build_rc_residual``; the friction law is
     Budd with ``N_ref=None`` and no floor (or Weertman), which is what the
     scheme supports.  ``exact_front`` adds the exact depth-integrated push on
-    a calving front inside the mesh (``icepack_tools.momentum.front_cliff_correction``).
+    a calving front inside the mesh (``icepack_tools.momentum.front_cliff_correction``),
+    which is :func:`icepack2_tools.dual_friction.front_cliff_correction`'s
+    version 1 only: version 2 is refused until icepack_tools carries it.
     ``scheme`` is ``"sep2"`` (grounded-part quadrature) or ``"sep1"``
     (whole-cell quadrature, drag times the grounded fraction).  ``fssa_tau``
     (a Constant, theta times the step), ``u_ref`` and ``fssa_tendency`` add
     the free-surface stabilization of :func:`icepack2_tools.fssa.fssa_term`.
     """
     from icepack_tools.momentum import dual_residual
+    from icepack2_tools.dual_friction import exact_front_version
+    exact_front = exact_front_version(exact_front)
+    if exact_front == 2:
+        raise ValueError(
+            "exact_front version 2 (the exposed-face push, issue #166) is not in "
+            "icepack_tools.momentum.front_cliff_correction; the sub-element scheme "
+            "takes 0 or 1")
+    exact_front = bool(exact_front)
     if scheme not in SCHEMES:
         raise ValueError(f"sub-element scheme must be one of {SCHEMES}, not {scheme!r}")
     if fric_law not in ("budd", "weertman"):

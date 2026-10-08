@@ -363,3 +363,35 @@ def test_a_job_that_finds_no_module_command_stops(runners, tmp_path):
     # A site that loads no modules needs no module command.
     rc, _, err = source(runners, "site_core.sh", "ismip7_activate", **common)
     assert rc == 0, err
+
+
+OOM_KILL_STEP_HELP = "      --oom-kill-step[=0|1]   set the OOMKillStep behaviour"
+
+
+@pytest.mark.parametrize("help_text, flags", [
+    ("", "--kill-on-bad-exit=1"),
+    (OOM_KILL_STEP_HELP, "--kill-on-bad-exit=1 --oom-kill-step=1"),
+])
+def test_one_dead_rank_ends_the_step(runners, tmp_path, help_text, flags):
+    r"""Job 10971250 (issue #161): the OOM killer took one of 32 ranks and the
+    other 31 waited in MPI for 11.5 h, since IU Quartz runs KillOnBadExit=0.
+    Every srun launch now ends its step when a task dies, and asks slurmstepd
+    to on an OOM event too where this srun lists the option (Slurm 24.11 and
+    later; Quartz's 25.11.8 prints the help line above). An older srun is never
+    handed an option it would refuse. The step's exit status is the call's."""
+    bin_dir = tmp_path / "bin"
+    bin_dir.mkdir()
+    (bin_dir / "srun").write_text(
+        '#!/bin/bash\n'
+        'if [ "${1:-}" = --help ]; then printf "%s\\n" "$FAKE_HELP"; exit 0; fi\n'
+        'echo "$*" >> "$FAKE_LOG"\n'
+        'exit 7\n')
+    (bin_dir / "srun").chmod(0o755)
+    log = tmp_path / "srun.log"
+    rc, out, err = source(
+        runners, "site_core.sh", "ismip7_mpirun 32 python -u x.py --input a; echo rc=$?",
+        ISMIP7_SITE="local", PATH=f"{bin_dir}:{os.environ['PATH']}",
+        FAKE_HELP=help_text, FAKE_LOG=str(log))
+    assert rc == 0, err
+    assert out == "rc=7"
+    assert log.read_text().splitlines() == [f"{flags} -n 32 python -u x.py --input a"]

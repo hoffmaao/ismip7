@@ -169,6 +169,25 @@ def eval_continuation():
     return _int_flag("ISMIP7_EVAL_CONTINUATION", True)
 
 
+TRANSFER_FILL_MODES = ("extend", "constant")
+
+
+def transfer_fill():
+    r"""``ISMIP7_TRANSFER_FILL``: what the controls and the fluidity prior
+    take on the dofs of a compute mesh beyond the mesh they were read from (a
+    MAP loaded by a forward, an inversion's warm start). ``extend`` (the
+    default): theta, phi and alpha continue harmonically from the source
+    outline, and the fluidity prior's logarithm does too
+    (``icepack2_tools.transfer.harmonic_extension``). ``constant``: theta =
+    phi = 0 and the constant baseline prior ``A0 * a4_factor``."""
+    mode = os.environ.get("ISMIP7_TRANSFER_FILL", "extend").strip().lower()
+    if mode not in TRANSFER_FILL_MODES:
+        raise ValueError(
+            f"ISMIP7_TRANSFER_FILL must be one of {', '.join(TRANSFER_FILL_MODES)}, "
+            f"not {mode!r}")
+    return mode
+
+
 def lc():
     r"""Target edge length [m] in the refined region of the mesh."""
     return int(os.environ.get("ISMIP7_LC", LC_DEFAULT))
@@ -375,6 +394,131 @@ def calving_law():
                 f"(icepack_tools.calving), so set "
                 f"ISMIP7_CALVING_PARAMS={key}=<value> instead")
     return value
+
+
+DRAG_GATES = ("facet", "vertex")
+DRAG_GATE_DEFAULT = "vertex"
+# What an inversion records as its drag gate when no cell was dragged (a mesh
+# ending at the ice front, or ISMIP7_OCEAN_DRAG=0): its controls absorbed no
+# gate, so a forward from it runs ISMIP7_DRAG_GATE.
+DRAG_GATE_NONE = "none"
+
+
+def drag_gate():
+    r"""``ISMIP7_DRAG_GATE``: which water cells beside the ice the ocean drag
+    skips (``front.ocean_drag_cells``). ``vertex`` (the default) skips every
+    cell that touches the ice, at an edge or at a single vertex; ``facet``
+    skips only the cells sharing an edge with ice, so the drag of a cell
+    touching it at one vertex acts on the ice's own front node."""
+    gate = os.environ.get("ISMIP7_DRAG_GATE", DRAG_GATE_DEFAULT).strip().lower()
+    if gate not in DRAG_GATES:
+        raise ValueError(
+            f"ISMIP7_DRAG_GATE must be one of {', '.join(DRAG_GATES)}, not {gate!r}")
+    return gate
+
+
+# The membrane-only thickness floor [m] (dual_friction.build_rc_residual,
+# h_visc_floor). An inversion runs HVISC_FLOOR_DEFAULT, 2.5 m since 6 October
+# 2026 (GEOMETRY_DISCRETIZATION.md, issue #153); every MAP inverted before the
+# floor was recorded ran HVISC_FLOOR_UNRECORDED.
+HVISC_FLOOR_DEFAULT = "2.5"
+HVISC_FLOOR_UNRECORDED = "10.0"
+
+
+def hvisc_floor():
+    r"""``ISMIP7_RC_HVISC_FLOOR`` [m], the inversion's membrane floor: a cell
+    thinner than this carries this much ice in the membrane term alone. The
+    first row of water cells beside the ice carries it too, coupling the ice
+    front to the ocean drag one cell further out; 2.5 m keeps about a fifth
+    of the 10 m coupling for 14 % more forward time at 1 km (issue #153)."""
+    return float(os.environ.get("ISMIP7_RC_HVISC_FLOOR", HVISC_FLOOR_DEFAULT))
+
+
+def _recorded(value):
+    if isinstance(value, bytes):
+        value = value.decode()
+    return value
+
+
+def forward_drag_gate(recorded, source="the MAP", restart=False):
+    r"""The drag gate a forward runs: the gate its MAP records
+    (``drag_gate``), which ``ISMIP7_DRAG_GATE`` may repeat and may not
+    change. A MAP whose inversion dragged no cell (``none``) or that predates
+    the record runs ``ISMIP7_DRAG_GATE``. A forward state from before the
+    record (``restart``) ran ``facet`` unless that knob said otherwise, so
+    its restart keeps ``facet`` unless the knob is set."""
+    recorded = _recorded(recorded)
+    if recorded is None and restart and "ISMIP7_DRAG_GATE" not in os.environ:
+        return "facet"
+    if recorded is None or str(recorded).strip().lower() == DRAG_GATE_NONE:
+        return drag_gate()
+    gate = str(recorded).strip().lower()
+    if gate not in DRAG_GATES:
+        raise RuntimeError(f"{source} records drag_gate={gate!r}; this code "
+                           f"builds {', '.join(DRAG_GATES)}")
+    if "ISMIP7_DRAG_GATE" in os.environ and drag_gate() != gate:
+        raise RuntimeError(
+            f"ISMIP7_DRAG_GATE={os.environ['ISMIP7_DRAG_GATE']} but {source} was "
+            f"inverted under the {gate} drag gate: a forward follows its MAP")
+    return gate
+
+
+def forward_hvisc_floor(recorded, source="the MAP"):
+    r"""The membrane floor [m] a forward runs: the floor its MAP records
+    (``h_visc_floor``), which ``ISMIP7_RC_HVISC_FLOOR`` may repeat and may
+    not change. A MAP that predates the record runs
+    ``ISMIP7_RC_HVISC_FLOOR``, by default the 10 m every such MAP was
+    inverted with."""
+    env = os.environ.get("ISMIP7_RC_HVISC_FLOOR")
+    recorded = _recorded(recorded)
+    if recorded is None:
+        return float(env if env is not None else HVISC_FLOOR_UNRECORDED)
+    floor = float(recorded)
+    if env is not None and float(env) != floor:
+        raise RuntimeError(
+            f"ISMIP7_RC_HVISC_FLOOR={env} but {source} was inverted with a "
+            f"{floor:g} m membrane floor: a forward follows its MAP")
+    return floor
+
+
+# The forms of dual_friction.front_cliff_correction, recorded in the MAP as
+# exact_front (0 off). A change to the push at the same geometry takes a new
+# version.
+#   1: the free-cliff push on every ice edge (60c0262, 5 Oct 2026).
+#   2: the push of the face above the ice-free neighbour's bed (issue #166).
+EXACT_FRONT_VERSIONS = (0, 1, 2)
+
+
+def exact_front_version(value):
+    r"""``ISMIP7_EXACT_FRONT`` or a MAP's ``exact_front`` record as one of
+    :data:`EXACT_FRONT_VERSIONS`. A bool is the version 1 switch it was
+    before version 2 existed; anything else is refused."""
+    raw = _recorded(value)
+    raw = raw.strip() if isinstance(raw, str) else raw
+    try:
+        version = int(raw)
+    except (TypeError, ValueError):
+        version = None
+    if version is not None and not isinstance(raw, str) and version != raw:
+        version = None                                   # 1.5 is no version
+    if version not in EXACT_FRONT_VERSIONS:
+        raise ValueError(
+            f"exact_front must be one of {EXACT_FRONT_VERSIONS}, not {value!r}")
+    return version
+
+
+def forward_exact_front(recorded, source="the MAP"):
+    r"""The cliff push a forward runs: the version its MAP records
+    (``exact_front``), which ``ISMIP7_EXACT_FRONT`` may repeat and may not
+    change. A MAP that predates the record was inverted without one, 0."""
+    recorded = _recorded(recorded)
+    version = exact_front_version(0 if recorded is None else recorded)
+    env = os.environ.get("ISMIP7_EXACT_FRONT")
+    if env is not None and exact_front_version(env) != version:
+        raise RuntimeError(
+            f"ISMIP7_EXACT_FRONT={env} but {source} was inverted with "
+            f"exact_front={version}: a forward follows its MAP")
+    return version
 
 
 FRONT_HMIN_DEFAULT = "1.0"    # m

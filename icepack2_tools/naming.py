@@ -18,13 +18,16 @@ from icepack2_tools.runconfig import geometry_space, n_flow
 
 _FRICTION_TAGS = {"regularized_coulomb": "_rc", "budd": "_budd"}
 _MESH_BASENAME_RE = re.compile(
-    r"antarctica_(\d+)_(\d+)(?:_buffered(\d+))?$"
+    r"antarctica_(\d+)_(\d+)(?:_buffered(\d+))?(?:_front(\d{4}))?$"
 )
 
 
-def mesh_basename(lc_coarse, lc, buffer_m):
-    r"""Standard Antarctica mesh basename without its extension."""
-    return f"antarctica_{lc_coarse}_{lc}_buffered{int(float(buffer_m))}"
+def mesh_basename(lc_coarse, lc, buffer_m, front=None):
+    r"""Standard Antarctica mesh basename without its extension. ``front`` is
+    the year of the ice mask whose marine front the mesh's nodes lie on
+    (``_front<year>``, issue #167), None for a mesh that follows none."""
+    name = f"antarctica_{lc_coarse}_{lc}_buffered{int(float(buffer_m))}"
+    return name if front is None else f"{name}_front{int(front)}"
 
 
 def parse_mesh_basename(name):
@@ -39,11 +42,20 @@ def parse_mesh_basename(name):
     if match is None:
         raise ValueError(
             f"Mesh filename {name!r} does not match "
-            "antarctica_<COARSE>_<FINE>[_buffered<BUFFER_M>]"
+            "antarctica_<COARSE>_<FINE>[_buffered<BUFFER_M>][_front<YEAR>]"
         )
     lc_coarse, lc = int(match.group(1)), int(match.group(2))
     buffer_m = None if match.group(3) is None else int(match.group(3))
     return lc_coarse, lc, buffer_m
+
+
+def mesh_front_year(name):
+    r"""The ice-mask year a mesh's ``_front<year>`` tag names, or None. Any
+    stem is accepted (adapted and legacy names carry no tag)."""
+    stem = os.path.basename(str(name))
+    stem = stem[:-len(".msh")] if stem.endswith(".msh") else stem
+    match = re.search(r"_front(\d{4})(?=_|$)", stem)
+    return None if match is None else int(match.group(1))
 
 
 def map_n_tag():

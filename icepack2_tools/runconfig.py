@@ -44,6 +44,12 @@ LC_COARSE_DEFAULT = "10000"
 # mesh names defaulted to 20000, so a bare call could build an unbuffered mesh
 # under a buffered name.
 BUFFER_M_DEFAULT = "20000"
+# The year of the Greene et al. (2022) ice mask whose marine front a buffered
+# mesh's nodes and edges lie on (the `_front<year>` of
+# naming.mesh_basename), or "none" for a mesh that follows no front. Issue
+# #167: on a mesh that does not follow it, the BedMachine front crosses
+# cells, and vertex sampling gives them a fraction of its thickness.
+MESH_FRONT_DEFAULT = "none"
 # The production forward step [yr], chosen with the mesh (issue 20). The timing
 # matrix's rule gives 0.05 at 1000 m. At 0.05 a 1 km control from a transferred
 # 2 km Budd MAP diverged in 2016.1 at Rice, and on Quartz it grew a two-step
@@ -206,6 +212,18 @@ def dt():
 def buffer_m():
     r"""Outline buffer [m] a mesh is built with, and named by."""
     return float(os.environ.get("ISMIP7_BUFFER_M", BUFFER_M_DEFAULT))
+
+
+def mesh_front():
+    r"""``ISMIP7_MESH_FRONT``: the ice-mask year whose marine front the mesh
+    follows (an int), or None for ``none``."""
+    value = os.environ.get("ISMIP7_MESH_FRONT", MESH_FRONT_DEFAULT).strip().lower()
+    if value in ("", "none"):
+        return None
+    if not value.isdigit() or len(value) != 4:
+        raise ValueError(
+            f"ISMIP7_MESH_FRONT must be a year or none, not {value!r}")
+    return int(value)
 
 
 def geometry_space():

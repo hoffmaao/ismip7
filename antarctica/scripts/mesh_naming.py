@@ -22,7 +22,9 @@ _REPO_ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__f
 if _REPO_ROOT not in sys.path:
     sys.path.insert(0, _REPO_ROOT)
 
-from icepack2_tools.runconfig import BUFFER_M_DEFAULT, buffer_m as _buffer_m
+from icepack2_tools.runconfig import (
+    BUFFER_M_DEFAULT, buffer_m as _buffer_m, mesh_front as _mesh_front,
+)
 from icepack2_tools.naming import mesh_basename
 
 MESH_DIR = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "mesh")
@@ -76,14 +78,25 @@ def next_adapted_mesh_name(reference, experiment=None):
     return f"{root}_adapt{count + 1}"
 
 
-def mesh_filename(lc_coarse, lc, buffer_m):
-    """Full path to the .msh file for the given resolution/buffer."""
-    return os.path.join(MESH_DIR, mesh_basename(lc_coarse, lc, buffer_m) + ".msh")
+_FRONT_KNOB = object()
 
 
-def bndids_filename(lc_coarse, lc, buffer_m):
-    """Full path to the boundary_ids sidecar matching the given mesh/buffer."""
-    return os.path.join(MESH_DIR, f"boundary_ids_{mesh_basename(lc_coarse, lc, buffer_m)}.json")
+def mesh_filename(lc_coarse, lc, buffer_m, front=_FRONT_KNOB):
+    """Full path to the .msh file for the given resolution/buffer. ``front``
+    (the `_front<year>` tag) defaults to ISMIP7_MESH_FRONT; pass None to name
+    a mesh that follows no front, whatever the knob says."""
+    if front is _FRONT_KNOB:
+        front = _mesh_front()
+    return os.path.join(MESH_DIR, mesh_basename(lc_coarse, lc, buffer_m, front) + ".msh")
+
+
+def bndids_filename(lc_coarse, lc, buffer_m, front=_FRONT_KNOB):
+    """Full path to the boundary_ids sidecar matching the given mesh/buffer,
+    ``front`` as in :func:`mesh_filename`."""
+    if front is _FRONT_KNOB:
+        front = _mesh_front()
+    return os.path.join(
+        MESH_DIR, f"boundary_ids_{mesh_basename(lc_coarse, lc, buffer_m, front)}.json")
 
 
 def get_buffer_m():

@@ -495,10 +495,12 @@ def setup_model(restart_from=None, *, allow_timing_cache_a_ref=False,
                   if _chk.has_attr("/", "lc") else None)
         if not mesh_basename and chk_lc_coarse is not None \
                 and chk_buffer_m is not None:
+            # Such a checkpoint predates the mesh_basename attribute, and so
+            # every front-following mesh: name the mesh without a front tag.
             mesh_basename = os.path.basename(
                 mesh_filename(chk_lc_coarse,
                               chk_lc if chk_lc is not None else lc,
-                              chk_buffer_m))
+                              chk_buffer_m, front=None))
 
     source_mesh_basename = mesh_basename
     # None for unset, empty and the sentinel `checkpoint`: solve on the mesh

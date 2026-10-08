@@ -349,7 +349,7 @@ and \|grad\| 3.28 at the same controls. By IMBIE basin the discharge changes
 at most 0.99 % (basin 6) and 0.63 % (basin 7). The speed change stays at the
 walls: grounded ice within 2 km of a changed facet moves p99 22.9 m/yr,
 2 to 6 km 12.6, 6 to 20 km 2.6, and beyond 20 km 0.00; floating ice beyond
-20 km 1.9. IU's final Budd MAP is refitted under version 2 from these
+20 km 1.9. IU's final Budd MAP was refitted under version 2 from these
 controls (`inversion-2km-budd-b20k-rho7500-floating-ef2`); the RC MAP keeps
 version 1. The sub-element path (icepack_tools) has version 1 only and
 refuses 2. Records: `test-2km-budd-b20k-exact-front-*`.

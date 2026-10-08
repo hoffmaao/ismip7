@@ -780,6 +780,8 @@ def extract_marine_front(classes, transform, outline, spacing, min_area=None):
             for k in (1.0, 2.0):
                 marine |= _classes_at(classes, inverse, mid + k * px * normal) == MARINE
             marine = smooth_marine(marine, length, 2.0 * spacing, 3.0 * spacing)
+            if not marine.any():
+                continue
             if marine.all():
                 raw.append((LinearRing(xy).simplify(px, preserve_topology=True), True))
                 continue

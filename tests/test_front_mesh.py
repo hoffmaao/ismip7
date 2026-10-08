@@ -79,6 +79,14 @@ def test_a_front_half_on_land_is_one_open_run_on_the_marine_side():
     assert gaps.max() <= 2000.0 + 1e-6
 
 
+def test_ice_bordered_only_by_land_has_no_front():
+    x, y = _centres()
+    classes = np.full((N, N), LAND, dtype="i1")
+    classes[np.hypot(x, y) <= RADIUS] = ICE
+    curves, stats = M.extract_marine_front(classes, TRANSFORM, OUTLINE, 2000.0)
+    assert curves == [] and stats["rings"] == 1
+
+
 def test_small_islands_and_holes_are_cleaned_away():
     classes = _disk_classes(land_west=False)
     x, y = _centres()

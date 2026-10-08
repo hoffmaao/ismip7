@@ -351,8 +351,9 @@ walls: grounded ice within 2 km of a changed facet moves p99 22.9 m/yr,
 2 to 6 km 12.6, 6 to 20 km 2.6, and beyond 20 km 0.00; floating ice beyond
 20 km 1.9. IU's final Budd MAP was refitted under version 2 from these
 controls (`inversion-2km-budd-b20k-rho7500-floating-ef2`). IU's final RC MAP
-is being refitted under version 2 (`inversion-2km-rc-b20k-rho7500-floating-ef2`),
-with its version 1 chain kept as the fallback. The sub-element path
+was refitted under version 2 from its version 1 chain
+(`inversion-2km-rc-b20k-rho7500-floating-ef2`); at the version 1 controls
+version 2 lowered RC's misfit from 1,318.2 to 1,316.8. The sub-element path
 (icepack_tools) has version 1 only and refuses 2. Records:
 `test-2km-budd-b20k-exact-front-*`.
 

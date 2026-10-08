@@ -1,0 +1,21 @@
+{
+  "id": "inversion-2km-rc-b20k-rho7500-floating-ef2-link2",
+  "task": "inversion",
+  "institution": "IU",
+  "status": "running",
+  "friction": "regularized_coulomb",
+  "title": "One more 8 h link of RC's version 2 final-product inversion, written beside its MAP",
+  "initial_state": "inversion-2km-rc-b20k-rho7500-floating-ef2's MAP (sha256 88452d3aead43740), strict (the handoff matched every objective setting); its warm start bounded 12 theta nodes to 10 (ISMIP7_MAP_CLIP at its default), so the first forward started at ||F|| 8.7e5 and converged in 10 Newton iterations, 252 s",
+  "period": "2015 state",
+  "mesh": "antarctica_5000_2000_buffered20000 (IU's build, 969,764 vertices), DG0 geometry, vertex raster sampling, the lake fix",
+  "forcing": "observations sampled onto this mesh; the final-product objective (bilaplacian sigma 30, rho 7.5 km, no dH/dt term, log friction control, cell-wise friction, L-BFGS-B without a metric); ISMIP7_FLUIDITY_CONTROL=floating ISMIP7_DRAG_GATE=vertex ISMIP7_RC_HVISC_FLOOR=2.5 ISMIP7_TRANSFER_FILL=extend; ISMIP7_EXACT_FRONT=2; full_mumps",
+  "site": "IU Quartz, general partition",
+  "resources": "32 ranks, 240G, 8 h; ISMIP7_MAXITER=150 so the link ends inside its wall at about 140 s an evaluation and writes the full MAP, ISMIP7_CHAIN_MAX=0",
+  "code": "9575a74; Quartz worktree /N/scratch/dlilien/ismip7_reinvert_s11",
+  "jobs": [
+    "11837469"
+  ],
+  "started": "2026-10-08",
+  "results": "Quartz /N/project/ice_rheology/ISMIP7/antarctica/results/reinvert_2km/final/inversion_icepack2_rc_n3_dg0_logvel_2000_int5000_b20k_rho7500_floating_ef2_link2.h5 when it finishes",
+  "notes": "IU, 8 Oct: RC's version 2 MAP stopped at its 120-iteration budget still gaining about 0.08 an evaluation (|grad| 0.35 to 0.76, Budd's 0.15), so one more link runs. The relaxation (issue #162) starts from the ef2 MAP and does not wait for this one, since it re-inverts after its forward year; the output goes to its own file so the ef2 MAP stays as it is. Forwards from this MAP run ISMIP7_DIAGNOSTIC_LINEAR_SOLVER=scpc_mumps and ISMIP7_MAP_CLIP=0, passed at submission (IU, 8 Oct; test-2km-budd-b20k-final-forward-diagnostics)"
+}

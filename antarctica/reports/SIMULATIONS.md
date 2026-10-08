@@ -539,7 +539,7 @@ RC final-product inversion under exact_front version 2 (issue #166), beside its 
 - **Job ids:** 11832320 11832359 11832360
 - **Code:** 9575a74; Quartz worktree /N/scratch/dlilien/ismip7_reinvert_s11
 - **Results path:** Quartz /N/project/ice_rheology/ISMIP7/antarctica/results/reinvert_2km/final/inversion_icepack2_rc_n3_dg0_logvel_2000_int5000_b20k_rho7500_floating_ef2.h5
-- **Notes:** issue #166: RC moved to the exposed-face push as Budd was (inversion-2km-budd-b20k-rho7500-floating-ef2: version 2 absorbed within 25 evaluations, then 0.25 % over 243). One link (David, 7 Oct): version 1 gains about 0.1 an evaluation. 11832320 was the same cell at MAXITER 500 and CHAIN_MAX 2, cancelled before it started
+- **Notes:** issue #166: RC moved to the exposed-face push as Budd was (inversion-2km-budd-b20k-rho7500-floating-ef2: version 2 absorbed within 25 evaluations, then 0.25 % over 243). One link (IU, 7 Oct): version 1 gains about 0.1 an evaluation. 11832320 was the same cell at MAXITER 500 and CHAIN_MAX 2, cancelled before it started
 
 ### inversion-2km-rc-bilaplacian
 
@@ -3880,7 +3880,7 @@ The final MAPs under a cliff correction restricted to ocean facets (2441818), an
 - **Cost per model year:** about 0.6 node hours
 - **Results path:** Quartz /N/scratch/dlilien/ismip7_reinvert_jobs/probe/cliff_*.h5; facet count /N/scratch/dlilien/ismip7_reinvert_jobs/plots/cliff_budd.txt and cliff_budd_land.png (cliff_facets.py beside them)
 - **Audit:** Budd at its controls: misfit 1,108.24, total 1,388.36, \|grad\| 0.66 ungated against 1,146.81, 1,426.93, 3.28 gated. RC under the gate: the first forward did not converge in 30 Newton iterations (the ungated code took 6). Land edges where the gate removes the correction: 5,108 facets, 14,461 km; where the rock rises above the ice surface (7,624 km) the facet push alone is a length-weighted median 13 times the free-cliff push back into the ice (p10 148 times), and where it lies below (6,837 km) 20 times outward (p90 153 times)
-- **Notes:** issue #153: on this evidence David reverted the gate (97ac1d0) and filed the push into rock above the ice surface as issue #166, since fixed as exact_front version 2 (4426372)
+- **Notes:** issue #153: on this evidence IU reverted the gate (97ac1d0) and filed the push into rock above the ice surface as issue #166, since fixed as exact_front version 2 (4426372)
 
 ### test-2km-full-mumps-issue161-gcwatch
 

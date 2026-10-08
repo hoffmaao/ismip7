@@ -22,5 +22,5 @@
   "cost": "",
   "results": "Quartz /N/project/ice_rheology/ISMIP7/antarctica/results/reinvert_2km/final/inversion_icepack2_rc_n3_dg0_logvel_2000_int5000_b20k_rho7500_floating_ef2.h5",
   "audit": "",
-  "notes": "issue #166: RC moved to the exposed-face push as Budd was (inversion-2km-budd-b20k-rho7500-floating-ef2: version 2 absorbed within 25 evaluations, then 0.25 % over 243). One link (David, 7 Oct): version 1 gains about 0.1 an evaluation. 11832320 was the same cell at MAXITER 500 and CHAIN_MAX 2, cancelled before it started"
+  "notes": "issue #166: RC moved to the exposed-face push as Budd was (inversion-2km-budd-b20k-rho7500-floating-ef2: version 2 absorbed within 25 evaluations, then 0.25 % over 243). One link (IU, 7 Oct): version 1 gains about 0.1 an evaluation. 11832320 was the same cell at MAXITER 500 and CHAIN_MAX 2, cancelled before it started"
 }

@@ -113,6 +113,35 @@ def main():
                                for name, v in (("ocean", 0), ("land", 1), ("grounded", 2),
                                                ("floating", 3))},
     }
+    # How far the two fronts sit apart: each pixel of mask ice over
+    # BedMachine water from the nearest pixel BedMachine holds ice on, and
+    # each pixel of BedMachine floating ice outside the mask from the
+    # nearest mask ice, binned by area.
+    from scipy.ndimage import distance_transform_edt
+    with rasterio.open(f"netcdf:{bm_fn}:bed") as src:
+        bed = src.read(1, window=_aligned_window(src, window_bounds))
+    from icepack2_tools.obs_icemask import classify
+    over_water = classify(np.zeros_like(ice), bm_mask, bed) == MARINE
+    del bed
+    px_km = abs(tr.a) / 1e3
+    edges_km = [0.0, 0.5, 1.0, 2.0, 5.0, 10.0, 20.0, 50.0, np.inf]
+
+    def binned(dist_km, sel):
+        h, _ = np.histogram(dist_km[sel], bins=edges_km)
+        return {f"{a:g}-{b:g}": round(float(c) * px_km2, 1)
+                for a, b, c in zip(edges_km[:-1], edges_km[1:], h)}
+
+    d_held = distance_transform_edt(~held) * px_km
+    advanced = ice & ~held & over_water
+    out["mask_ice_over_bedmachine_water_km2_by_km_to_bedmachine_ice"] = binned(d_held, advanced)
+    out["marine_front_pixels_without_bedmachine_ice_km2_by_km_to_bedmachine_ice"] = binned(
+        d_held, front & ~held)
+    del d_held
+    d_ice = distance_transform_edt(~ice) * px_km
+    out["bedmachine_floating_outside_mask_km2_by_km_to_mask_ice"] = binned(
+        d_ice, outside & (bm_mask == 3))
+    del d_ice
+
     text = json.dumps(out, indent=1)
     print(text)
     if args.out:

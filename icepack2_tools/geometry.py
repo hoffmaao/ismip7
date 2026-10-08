@@ -104,6 +104,78 @@ def _lattice_bary(n):
     return np.column_stack([a, b, 1.0 - a - b])
 
 
+def _lattice_windows(datasets, tri):
+    r"""For each raster, the window covering the triangles ``tri`` (with a
+    two-pixel margin) as ``(array, row0, col0, transform)``. Masked / nodata
+    pixels of a float raster become NaN; an integer raster is read as is."""
+    from rasterio.windows import from_bounds
+
+    flat = tri.reshape(-1, 2)
+    out = []
+    for dataset in datasets:
+        bnd = dataset.bounds
+        rx, ry = abs(dataset.res[0]), abs(dataset.res[1])
+        win = from_bounds(max(flat[:, 0].min() - 2 * rx, bnd.left),
+                          max(flat[:, 1].min() - 2 * ry, bnd.bottom),
+                          min(flat[:, 0].max() + 2 * rx, bnd.right),
+                          min(flat[:, 1].max() + 2 * ry, bnd.top),
+                          transform=dataset.transform)
+        win = win.round_lengths(op="ceil").round_offsets(op="floor")
+        if np.issubdtype(np.dtype(dataset.dtypes[0]), np.integer):
+            arr = dataset.read(1, window=win)
+        else:
+            arr = dataset.read(1, window=win, masked=True)
+            arr = np.ma.filled(arr.astype("f4"), np.nan)
+        out.append((arr, int(win.row_off), int(win.col_off), dataset.transform))
+    return out
+
+
+def cell_samples(datasets, Q_dg, reduce, nmax=64, chunk=2048):
+    r"""Look rasters up on an equal-area lattice in every owned cell of the
+    DG0 space ``Q_dg``.
+
+    Each cell is split into ``n**2`` equal-area sub-triangles with
+    ``n = ceil(sqrt(cell_area / pixel_area))`` (capped at ``nmax``; the pixel
+    is the first raster's), and every raster is looked up at each
+    sub-triangle centroid by pixel containment. ``reduce(idx, values)`` is
+    called for groups of cells sharing ``n``: ``idx`` indexes the owned cells
+    and ``values`` holds one ``(len(idx), n*n)`` array per raster. Returns
+    the owned cell -> dof map, the indexing of ``idx``. Rank-local, no
+    collectives.
+    """
+    from rasterio.transform import rowcol
+
+    mesh = Q_dg.mesh()
+    X = mesh.coordinates.dat.data_ro_with_halos[:, :2]
+    cells = mesh.coordinates.cell_node_map().values          # owned cells -> nodes
+    dofs = Q_dg.cell_node_map().values[:, 0]                 # owned cells -> dof
+    nc = cells.shape[0]
+    if nc == 0:
+        return dofs
+    tri = X[cells]                                           # (nc, 3, 2)
+    v0, v1, v2 = tri[:, 0], tri[:, 1], tri[:, 2]
+    area = 0.5 * np.abs((v1[:, 0] - v0[:, 0]) * (v2[:, 1] - v0[:, 1])
+                        - (v2[:, 0] - v0[:, 0]) * (v1[:, 1] - v0[:, 1]))
+    apix = abs(datasets[0].res[0] * datasets[0].res[1])
+    n = np.clip(np.ceil(np.sqrt(area / apix)).astype(int), 1, nmax)
+    windows = _lattice_windows(datasets, tri)
+
+    for nn in np.unique(n):
+        sel = np.flatnonzero(n == nn)
+        lam = _lattice_bary(int(nn))                         # (k, 3)
+        for s0 in range(0, sel.size, chunk):
+            idx = sel[s0:s0 + chunk]
+            P = np.einsum("kb,cbd->ckd", lam, tri[idx])      # (c, k, 2)
+            values = []
+            for arr, row0, col0, transform in windows:
+                rows, cols = rowcol(transform, P[..., 0].ravel(), P[..., 1].ravel())
+                r = np.clip(np.asarray(rows) - row0, 0, arr.shape[0] - 1)
+                c = np.clip(np.asarray(cols) - col0, 0, arr.shape[1] - 1)
+                values.append(arr[r, c].reshape(idx.size, -1))
+            reduce(idx, values)
+    return dofs
+
+
 def raster_cell_mean(dataset, Q_dg, floor=None, nmax=64, chunk=2048):
     r"""Mean of a rasterio raster over each cell of a DG0 space.
 
@@ -130,52 +202,16 @@ def raster_cell_mean(dataset, Q_dg, floor=None, nmax=64, chunk=2048):
     Masked / nodata pixels are excluded from the mean; a cell with no valid
     sample is left NaN for the caller to fill.
     """
-    from rasterio.transform import rowcol
-    from rasterio.windows import from_bounds
+    means = np.full(Q_dg.mesh().coordinates.cell_node_map().values.shape[0], np.nan)
 
-    mesh = Q_dg.mesh()
-    X = mesh.coordinates.dat.data_ro_with_halos[:, :2]
-    cells = mesh.coordinates.cell_node_map().values          # owned cells -> nodes
-    dofs = Q_dg.cell_node_map().values[:, 0]                 # owned cells -> dof
+    def reduce(idx, values):
+        with np.errstate(all="ignore"):
+            means[idx] = np.nanmean(values[0], axis=1, dtype="f8")
+
+    dofs = cell_samples([dataset], Q_dg, reduce, nmax=nmax, chunk=chunk)
     out = Function(Q_dg)
-    nc = cells.shape[0]
-    if nc == 0:
+    if means.size == 0:
         return out
-    tri = X[cells]                                           # (nc, 3, 2)
-    v0, v1, v2 = tri[:, 0], tri[:, 1], tri[:, 2]
-    area = 0.5 * np.abs((v1[:, 0] - v0[:, 0]) * (v2[:, 1] - v0[:, 1])
-                        - (v2[:, 0] - v0[:, 0]) * (v1[:, 1] - v0[:, 1]))
-    apix = abs(dataset.res[0] * dataset.res[1])
-    n = np.clip(np.ceil(np.sqrt(area / apix)).astype(int), 1, nmax)
-
-    flat = tri.reshape(-1, 2)
-    bnd = dataset.bounds
-    rx, ry = abs(dataset.res[0]), abs(dataset.res[1])
-    win = from_bounds(max(flat[:, 0].min() - 2 * rx, bnd.left),
-                      max(flat[:, 1].min() - 2 * ry, bnd.bottom),
-                      min(flat[:, 0].max() + 2 * rx, bnd.right),
-                      min(flat[:, 1].max() + 2 * ry, bnd.top),
-                      transform=dataset.transform)
-    win = win.round_lengths(op="ceil").round_offsets(op="floor")
-    arr = dataset.read(1, window=win, masked=True)
-    arr = np.ma.filled(arr.astype("f4"), np.nan)
-    row0, col0 = int(win.row_off), int(win.col_off)
-    H, W = arr.shape
-
-    means = np.full(nc, np.nan)
-    for nn in np.unique(n):
-        sel = np.flatnonzero(n == nn)
-        lam = _lattice_bary(int(nn))                         # (k, 3)
-        for s0 in range(0, sel.size, chunk):
-            idx = sel[s0:s0 + chunk]
-            P = np.einsum("kb,cbd->ckd", lam, tri[idx])      # (c, k, 2)
-            rows, cols = rowcol(dataset.transform,
-                                P[..., 0].ravel(), P[..., 1].ravel())
-            r = np.clip(np.asarray(rows) - row0, 0, H - 1)
-            c = np.clip(np.asarray(cols) - col0, 0, W - 1)
-            vals = arr[r, c].reshape(idx.size, -1)
-            with np.errstate(all="ignore"):
-                means[idx] = np.nanmean(vals, axis=1, dtype="f8")
     if floor is not None:
         means = np.maximum(means, floor)
     out.dat.data[dofs] = means
@@ -190,7 +226,9 @@ def sample_to_geometry(raster, Q_g, Q_cg, floor=None, method="vertex"):
     ``method`` selects the DG0 cell value (``runconfig.RASTER_SAMPLES``):
     ``"vertex"`` projects the CG1 vertex interpolant (three pixels per cell);
     ``"cell_mean"`` is :func:`raster_cell_mean`, the raster's mean over the
-    cell. Under CG1 geometry there is no cell, so ``method`` is ignored.
+    cell. A front sampling (``"greene<year>"``) samples one raster as
+    ``"vertex"``; its front cells are :func:`sample_bed_thickness`'s. Under
+    CG1 geometry there is no cell, so ``method`` is ignored.
 
     For CG1 geometry this is just the nodal interpolant. For DG0 it is NOT the
     obvious ``icepack.interpolate(raster, Q_g)``: a DG0 dof sits at the cell
@@ -234,6 +272,8 @@ def sample_to_geometry(raster, Q_g, Q_cg, floor=None, method="vertex"):
     ``h_clamp_init`` is 10 m.
     """
     import icepack
+    from .runconfig import raster_base_method
+    method = raster_base_method(method)
     dataset = raster
     raster_fn = lambda sp: icepack.interpolate(dataset, sp)  # noqa: E731
 
@@ -303,3 +343,197 @@ def raise_bed_to_lake_ice_base(b, H, bm_fn, Q_g, Q_cg, method="vertex"):
         np.abs(new_b.dat.data_ro - b.dat.data_ro) > 1e-6))
     b.assign(new_b)
     return Q_g.mesh().comm.allreduce(changed, op=MPI.SUM)
+
+
+# ── Front cells by an ice mask (issue #167) ────────────────────────────────
+#
+# Vertex sampling gives a cell the BedMachine front crosses the mean of its
+# vertex samples, and an ocean vertex samples zero, so the cell holds a
+# fraction of the front's thickness: on IU's 2 km buffered mesh the front band
+# held 40 m against BedMachine's 163 m floating front and carried 343 of about
+# 1,200 Gt/yr. Even on a mesh whose edges follow the front (the _front<year>
+# meshes) a vertex on the front samples a blend of ice and water. Under a
+# front sampling (``greene<year>``) the ice mask of that year decides which
+# cells hold ice at the marine front, and the front cells take BedMachine's
+# own thickness and bed over their ice.
+
+# A cell holds ice when at least this share of its lattice samples are ice:
+# the area-preserving choice on a mesh that does not follow the front; on one
+# that does the share is about 0 or 1.
+FRONT_ICE_FRACTION = 0.5
+# What a cell the mask calls ice gets when BedMachine holds no ice anywhere
+# in it: "empty" leaves it ice-free, "neighbour" gives it the mean thickness
+# of the held ice cells around it, for up to FRONT_FILL_SWEEPS rings.
+FRONT_FILLS = ("empty", "neighbour")
+FRONT_FILL = "empty"
+FRONT_FILL_SWEEPS = 3
+
+
+def _vertex_mean(Q_dg, values, defined):
+    r"""Per cell, the area-weighted mean of ``values`` over the ``defined``
+    cells sharing a vertex with it (NaN where there are none). Assembled
+    through CG1 like ``front.vertex_neighbours``, so a neighbour across a
+    partition boundary counts."""
+    import firedrake as fd
+
+    mesh = Q_dg.mesh()
+    Q1 = fd.FunctionSpace(mesh, "CG", 1)
+    v = fd.TestFunction(Q1)
+    w = Function(Q_dg)
+    wv = Function(Q_dg)
+    w.dat.data[:] = defined
+    wv.dat.data[:] = np.where(defined, values, 0.0)
+    num = fd.Function(Q1)
+    den = fd.Function(Q1)
+    num.dat.data[:] = fd.assemble(wv * v * fd.dx).dat.data_ro
+    den.dat.data[:] = fd.assemble(w * v * fd.dx).dat.data_ro
+    cell_nodes = Q1.cell_node_map().values[:Q_dg.dof_dset.size]
+    n = num.dat.data_ro_with_halos[cell_nodes].sum(axis=1)
+    d = den.dat.data_ro_with_halos[cell_nodes].sum(axis=1)
+    with np.errstate(all="ignore"):
+        return np.where(d > 0.0, n / d, np.nan)
+
+
+def front_cells(H, b, bm_fn, mask_tif, fill=FRONT_FILL, frac=FRONT_ICE_FRACTION,
+                sweeps=FRONT_FILL_SWEEPS):
+    r"""Rebuild the marine front of the DG0 geometry ``H``, ``b`` by an ice
+    mask, in place.
+
+    Every owned cell is looked up on the :func:`cell_samples` lattice in the
+    mask (``mask_tif``, :mod:`obs_icemask`) and in BedMachine's mask, bed and
+    thickness, and its samples classified (``obs_icemask.classify``). A cell
+    holds ice when at least ``frac`` of them are ice; BedMachine holds ice
+    in it when some ice sample has BedMachine thickness. Then:
+
+    * a cell the mask calls ice and BedMachine leaves empty, with mask ice
+      over what BedMachine calls water, is a mismatch: the mask's front lies
+      seaward of BedMachine's there. It is filled by ``fill``
+      (:data:`FRONT_FILLS`) or, failing that, ice-free. Mask ice over
+      BedMachine rock (nunataks) is no mismatch and is left alone;
+    * a cell without ice that holds a marine sample, or an unfilled
+      mismatch, is water: ``H = 0``;
+    * a cell with ice that shares a vertex with a water cell is a front
+      cell: its ``H`` and ``b`` are BedMachine's means over the ice samples
+      it holds (a filled mismatch keeps its bed);
+    * every other cell is untouched, so interior ice, land margins and the
+      open buffer keep their vertex samples.
+
+    Returns the global counts, collectively.
+    """
+    import rasterio
+    from .front import vertex_neighbours
+    from .obs_icemask import ICE, MARINE, classify
+
+    if fill not in FRONT_FILLS:
+        raise ValueError(f"front fill must be one of {FRONT_FILLS}, not {fill!r}")
+    Q_g = H.function_space()
+    if Q_g.ufl_element().degree() != 0:
+        raise ValueError("front_cells needs DG0 geometry: a cell is its unit")
+    ncell = Q_g.mesh().coordinates.cell_node_map().values.shape[0]
+    f_ice = np.zeros(ncell)
+    marine = np.zeros(ncell, bool)
+    advanced = np.zeros(ncell, bool)
+    h_ice = np.full(ncell, np.nan)
+    b_ice = np.full(ncell, np.nan)
+
+    def reduce(idx, values):
+        greene, bm_mask, bed, thk = values
+        cls = classify(greene == 1, bm_mask, bed)
+        ice = cls == ICE
+        held = ice & np.isfinite(thk) & (thk > 0)
+        n = held.sum(axis=1)
+        f_ice[idx] = ice.mean(axis=1)
+        marine[idx] = (cls == MARINE).any(axis=1)
+        # mask ice BedMachine has no ice on, over water by its own mask: the
+        # mask's front lies seaward of BedMachine's there. Mask ice over
+        # BedMachine rock (a nunatak the mask counts as ice) is not marine.
+        advanced[idx] = (ice & ~held & (classify(np.zeros_like(ice), bm_mask, bed)
+                                        == MARINE)).any(axis=1)
+        with np.errstate(all="ignore"):
+            h_ice[idx] = np.where(held, thk, 0.0).sum(axis=1) / n
+            b_ice[idx] = np.where(held, bed, 0.0).sum(axis=1) / n
+
+    with rasterio.open(mask_tif) as g, \
+            rasterio.open(f"netcdf:{bm_fn}:mask") as m, \
+            rasterio.open(f"netcdf:{bm_fn}:bed") as bd, \
+            rasterio.open(f"netcdf:{bm_fn}:thickness") as th:
+        dofs = cell_samples([g, m, bd, th], Q_g, reduce)
+
+    n_own = Q_g.dof_dset.size
+
+    def per_dof(a, empty):
+        out = np.full(n_own, empty, dtype=a.dtype)
+        out[dofs] = a
+        return out
+
+    F, MAR = per_dof(f_ice, 0.0), per_dof(marine, False)
+    ADV = per_dof(advanced, False)
+    HI, BI = per_dof(h_ice, np.nan), per_dof(b_ice, np.nan)
+    is_ice = F >= frac
+    held = is_ice & np.isfinite(HI)
+    mismatch = is_ice & ~held & ADV
+    filled = np.zeros(n_own, bool)
+    comm = Q_g.mesh().comm
+    if fill == "neighbour":
+        for _ in range(sweeps):
+            if not comm.allreduce(bool((mismatch & ~filled).any()), op=MPI.LOR):
+                break
+            have = held | filled
+            mean = _vertex_mean(Q_g, np.where(have, HI, 0.0), have)
+            new = mismatch & ~filled & np.isfinite(mean)
+            HI[new] = mean[new]
+            filled |= new
+    ice = held | filled
+    water = (~is_ice & MAR) | (mismatch & ~filled)
+    front = ice & vertex_neighbours(Q_g)(water)
+
+    h0 = H.dat.data_ro.copy()
+    Hd, bd_ = H.dat.data, b.dat.data
+    Hd[water] = 0.0
+    Hd[front] = HI[front]
+    rebed = front & held
+    bd_[rebed] = BI[rebed]
+    counts = {
+        "front": int(front.sum()),
+        "water": int(water.sum()),
+        "emptied": int((water & (h0 > 0.0)).sum()),
+        "mismatch": int(mismatch.sum()),
+        "filled": int(filled.sum()),
+        "front_thicker": int((front & (HI > h0)).sum()),
+    }
+    return {k: comm.allreduce(v, op=MPI.SUM) for k, v in counts.items()}
+
+
+def sample_bed_thickness(bm_fn, Q_g, Q_cg, floor=None, method="vertex", fill=None):
+    r"""BedMachine's bed and thickness on the geometry space, as
+    ``(b, H, counts)``.
+
+    Both are :func:`sample_to_geometry` under ``method``, the thickness
+    floored at ``floor``. Under a front sampling (``greene<year>``) the
+    marine front is then rebuilt by that year's ice mask
+    (:func:`front_cells`, ``fill`` defaulting to :data:`FRONT_FILL`) and the
+    floor applied again; ``counts`` are its global counts, None otherwise.
+    Collective.
+    """
+    import rasterio
+    from .runconfig import raster_front_year
+
+    b = sample_to_geometry(
+        rasterio.open(f"netcdf:{bm_fn}:bed"), Q_g, Q_cg, method=method)
+    H = sample_to_geometry(
+        rasterio.open(f"netcdf:{bm_fn}:thickness"), Q_g, Q_cg, floor=floor,
+        method=method)
+    year = raster_front_year(method)
+    if year is None:
+        return b, H, None
+    if Q_g.ufl_element() == Q_cg.ufl_element():
+        raise ValueError(
+            f"raster sampling {method} rebuilds DG0 front cells; this "
+            f"geometry is CG1")
+    from .obs_icemask import icemask_tif
+    comm = Q_g.mesh().comm
+    tif = comm.bcast(icemask_tif(year) if comm.rank == 0 else None, root=0)
+    counts = front_cells(H, b, bm_fn, tif, fill=fill or FRONT_FILL)
+    if floor is not None:
+        H.interpolate(max_value(H, Constant(floor)))
+    return b, H, counts

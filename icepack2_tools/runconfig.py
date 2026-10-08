@@ -82,6 +82,9 @@ BUDD_SHELF_GATE = "haf"
 # method name stable: it is stamped into cache provenance and changing the
 # construction must invalidate old caches.
 TARGET_MESH_GEOMETRY_METHOD = "target-native-bedmachine-cell-average-v1"
+# The same with the front cells of the year's ice mask (geometry.front_cells,
+# issue #167); target_mesh_geometry_method picks one by raster sampling.
+TARGET_MESH_GEOMETRY_METHOD_FRONT = "target-native-bedmachine-cell-average-front{year}-v1"
 
 GEOMETRY_SPACES = ("dg0", "cg1")
 
@@ -93,8 +96,14 @@ GEOMETRY_SPACES = ("dg0", "cg1")
 #   cell_mean - the mean of the raster over the cell itself, sampled on an
 #               equal-area sub-triangle lattice at pixel density
 #               (geometry.raster_cell_mean).
+#   greene2015 - vertex, except that the Greene et al. (2022) ice mask of
+#               2015 decides which cells hold ice at the marine front, and the
+#               front cells take BedMachine's thickness and bed over their ice
+#               (geometry.front_cells, issue #167). Vertex sampling alone
+#               gives a cell the front crosses a fraction of the front's
+#               thickness: 40 m against 163 m on the 2 km buffered mesh.
 # MAPs record the method used; the forward reads it back from the MAP.
-RASTER_SAMPLES = ("vertex", "cell_mean")
+RASTER_SAMPLES = ("vertex", "cell_mean", "greene2015")
 RASTER_SAMPLE_DEFAULT = "vertex"
 
 
@@ -239,8 +248,7 @@ def geometry_space():
 
 
 def raster_sample():
-    r"""How BedMachine is sampled onto a DG0 cell: ``'vertex'`` or
-    ``'cell_mean'``. See RASTER_SAMPLES."""
+    r"""How BedMachine is sampled onto a DG0 cell, one of RASTER_SAMPLES."""
     value = os.environ.get(
         "ISMIP7_RASTER_SAMPLE", RASTER_SAMPLE_DEFAULT).lower()
     if value not in RASTER_SAMPLES:
@@ -248,6 +256,56 @@ def raster_sample():
             f"ISMIP7_RASTER_SAMPLE must be one of {RASTER_SAMPLES}, got {value!r}"
         )
     return value
+
+
+def raster_front_year(method):
+    r"""The year of the ice mask that decides front cells under the raster
+    sampling ``method`` (``greene<year>``), None for a sampling without one."""
+    method = str(method).lower()
+    if method.startswith("greene") and method[6:].isdigit():
+        return int(method[6:])
+    return None
+
+
+def raster_base_method(method):
+    r"""How a single raster is put on a cell under ``method``: the front
+    samplings sample every raster by its vertices and change only the front
+    cells' thickness and bed afterwards."""
+    return "vertex" if raster_front_year(method) is not None else str(method).lower()
+
+
+def target_mesh_geometry_method(method):
+    r"""The provenance name of geometry rebuilt from BedMachine on a target
+    mesh under the raster sampling ``method``: vertex keeps the name its
+    caches carry, a front sampling gets its own, so a cache built one way is
+    never read as the other."""
+    year = raster_front_year(method)
+    if year is None:
+        return TARGET_MESH_GEOMETRY_METHOD
+    return TARGET_MESH_GEOMETRY_METHOD_FRONT.format(year=year)
+
+
+def forward_raster_sample(recorded, transfer, source="the MAP"):
+    r"""The raster sampling a forward builds its geometry with.
+
+    On the MAP's own mesh the geometry is the MAP's, so the sampling is the
+    one it records (``vertex`` for a MAP older than the record), which an
+    explicitly set ``ISMIP7_RASTER_SAMPLE`` may repeat and may not change. A
+    forward on another mesh (``transfer``) rebuilds the geometry from
+    BedMachine there, with ``ISMIP7_RASTER_SAMPLE`` or its default: a MAP's
+    controls carry over, and the front its new mesh holds is that mesh's own
+    (issue #167)."""
+    if transfer:
+        return raster_sample()
+    recorded = _recorded(recorded)
+    method = "vertex" if recorded is None else str(recorded).lower()
+    env = os.environ.get("ISMIP7_RASTER_SAMPLE")
+    if env and env.lower() != method:
+        raise RuntimeError(
+            f"ISMIP7_RASTER_SAMPLE={env} but {source} was sampled with "
+            f"{method} and its geometry is used as is: a forward on its "
+            f"MAP's mesh follows the MAP")
+    return method
 
 
 def friction():

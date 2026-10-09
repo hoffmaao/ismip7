@@ -26,8 +26,8 @@ def ramp_exponents(solve, z, n_flow, m_slide, n_target, m_target, steps_ladder,
     r"""Ramp ``n_flow`` from 1 and ``m_slide`` from ``m_start`` (1 unless
     given) to their targets, solving after each step, climbing
     ``steps_ladder`` on divergence. ``m_start`` at ``m_target`` holds the
-    sliding exponent fixed (``runconfig.ramp_slide_fixed``), the start IU
-    chose for RC's refit (issue #167).
+    sliding exponent fixed (``runconfig.ramp_slide_fixed``), tried for RC's
+    refit (issue #167).
 
     ``solve(attempt=, step=, steps=, t=)`` performs one solve for the current
     exponents and raises :class:`firedrake.exceptions.ConvergenceError` when

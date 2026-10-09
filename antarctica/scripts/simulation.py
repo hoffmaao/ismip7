@@ -729,7 +729,11 @@ def setup_model(restart_from=None, *, allow_timing_cache_a_ref=False,
         _sample_method = (
             chk_raster_sample if (geometry_transfer or not use_rc)
             else _raster_base_method(chk_raster_sample))
-        PETSc.Sys.Print(f"  Raster sampling onto geometry cells: {_sample_method}")
+        PETSc.Sys.Print(
+            f"  Raster sampling onto geometry cells: {_sample_method}"
+            + ("" if (geometry_transfer or not use_rc) else
+               f" (a placeholder: the MAP's own geometry, sampled "
+               f"{chk_raster_sample}, replaces it)"))
         b, H, _front_counts = sample_bed_thickness(
             bm_fn, Q_g, Q, floor=h_clamp_init, method=_sample_method)
         if _front_counts is not None:

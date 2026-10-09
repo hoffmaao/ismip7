@@ -48,8 +48,8 @@ from icepack2_tools.forcing import (
 from icepack2_tools.front import COLLAPSE_MARKER, FRONT_OWNER_MARKER
 from icepack2_tools.fssa import FSSA_MARKER
 from icepack2_tools.runconfig import (
-    MELT_CALIBRATION_DEFAULT, MELT_CALIBRATIONS, N_FLOW_DEFAULT, dt, fracture,
-    friction, geometry_space, lc, lc_coarse, raster_sample, smb_elevation_feedback,
+    MELT_CALIBRATIONS, N_FLOW_DEFAULT, dt, fracture,
+    friction, geometry_space, lc, lc_coarse, smb_elevation_feedback,
 )
 from icepack2_tools.solverconfig import effective_solver_env, solver_provenance
 
@@ -93,14 +93,18 @@ def effective_env():
         # The melt slope law and the melt calibration: the default flipped
         # from the local slope and K 1.15e-4 to the constant slope and K
         # 8.5e-5, then (issue 26) to the tracked calibration, whose K and
-        # sha256 the run's own provenance line records.
+        # sha256 the run's own provenance line records. The file is the one
+        # of the sampling setup_model settled for the run, which a MAP or a
+        # restart records and this shell cannot see (issue #167).
         "ISMIP7_MELT_SLOPE": melt_slope(),
         "ISMIP7_SIN_ALPHA_ANT": f"{sin_alpha_ant():g}",
         "ISMIP7_DELTAT_PER_BASIN_NPZ": (
             "none, the legacy per-basin K named in ISMIP7_K_PER_BASIN_NPZ"
             if os.environ.get("ISMIP7_K_PER_BASIN_NPZ")
-            else os.path.relpath(MELT_CALIBRATIONS.get(raster_sample(),
-                                                       MELT_CALIBRATION_DEFAULT), _PROJECT)),
+            else "the tracked calibration of the run's raster sampling ("
+            + ", ".join(f"{k}: {os.path.relpath(v, _PROJECT)}"
+                        for k, v in MELT_CALIBRATIONS.items())
+            + "), named with its sha256 in the run's forcing provenance line"),
         # On by default since issue 116, and never exported by the runners.
         "ISMIP7_SMB_ELEVATION_FEEDBACK": "1" if smb_elevation_feedback() else "0",
     }

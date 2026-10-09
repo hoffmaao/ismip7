@@ -1980,7 +1980,7 @@ def make_climatology_ocean_callback(K_field=None, data_root=None):
 
         ctx["ocean_melt"].dat.data[:] = np.where(melt_receiving(s, b, h), melt, 0.0)
         if dT_npz is not None:
-            _announce_deltaT(dT_cache, dT_npz, ctx)
+            _announce_deltaT(dT_cache, dT_cache["npz"], ctx)
 
     return callback
 
@@ -2296,7 +2296,7 @@ def make_forcing_callback(atm=None, ocean=None, fracture=None,
             # the set the calibration was fitted on
             ctx["ocean_melt"].dat.data[:] = np.where(melt_receiving(s, b, h), melt, 0.0)
             if dT_npz is not None:
-                _announce_deltaT(dT_cache, dT_npz, ctx)
+                _announce_deltaT(dT_cache, dT_cache["npz"], ctx)
 
         if fracture is not None and ctx.get("collapse") is not None:
             # The year's ice-shelf collapse mask on the geometry cells; the

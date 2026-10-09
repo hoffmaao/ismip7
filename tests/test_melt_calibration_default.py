@@ -326,3 +326,42 @@ def test_a_named_legacy_K_melts_through_the_forward_s_callback(clean, monkeypatc
     want = forcing.quadratic_mixed_slope(1.5, 34.5, 5.115e-3, K=1.0e-4 * 1.26)
     melt = ctx["ocean_melt"].dat.data_ro
     assert np.allclose(melt[in_9], want) and np.all(melt[~in_9] == 0.0)
+
+
+def test_a_forward_on_a_vertex_map_names_the_vertex_file(clean, monkeypatch, tmp_path, capfd):
+    r"""A MAP or restart recording vertex sampling melts with the vertex file
+    while the shell resolves the default sampling's, and the provenance line
+    and the deltaT announcement name the file it melts with (issue #167)."""
+    fd = pytest.importorskip("firedrake")
+    import icepack2_tools.forcing as forcing
+    monkeypatch.delenv("ISMIP7_RASTER_SAMPLE", raising=False)
+    monkeypatch.syspath_prepend(os.path.join(REPO, "antarctica", "scripts"))
+    ocx = importlib.import_module("projections.ocx")
+    za = np.array([-1000.0, 0.0])
+    monkeypatch.setattr(forcing, "build_oi_climatology_interpolators",
+                        lambda data_root=None: {
+                            "tf": (lambda pts: np.full(len(pts), 1.5), za),
+                            "so": (lambda pts: np.full(len(pts), 34.5), za)})
+    monkeypatch.setattr(forcing, "imbie2_basin_path",
+                        lambda recorded=None: _basins(tmp_path))
+    mesh = fd.RectangleMesh(4, 1, 3.0, 2.0)
+    Q_g = fd.FunctionSpace(mesh, "DG", 0)
+    xy = fd.Function(fd.VectorFunctionSpace(mesh, "DG", 0)).interpolate(
+        fd.SpatialCoordinate(mesh)).dat.data_ro
+    ctx = {"mesh": mesh, "Q": fd.FunctionSpace(mesh, "CG", 1),
+           "V": fd.VectorFunctionSpace(mesh, "CG", 1), "Q_g": Q_g,
+           "geom_xy": (xy[:, 0].copy(), xy[:, 1].copy()),
+           "h": fd.Function(Q_g).assign(100.0),
+           "b": fd.Function(Q_g).assign(-1000.0),
+           "s": fd.Function(Q_g).assign(10.0),
+           "ocean_melt": fd.Function(Q_g), "raster_sample": "vertex"}
+    vertex = MELT_CALIBRATIONS["vertex"]
+    assert deltat_per_basin_npz() == MELT_CALIBRATION_DEFAULT != vertex
+    _, lines, _ = ocx.ocx_forcing_callback(ctx, None, None, deltat_per_basin_npz())
+    provenance, = [ln for ln in lines if "ocean melt calibration" in ln]
+    assert os.path.basename(vertex) in provenance
+    assert file_sha256(vertex) in provenance
+    assert "the tracked calibration of vertex sampling" in provenance
+    capfd.readouterr()
+    forcing.make_climatology_ocean_callback()(ctx, 0.0)
+    assert f"Per-basin deltaT from {vertex}:" in capfd.readouterr().out

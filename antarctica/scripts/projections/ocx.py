@@ -134,8 +134,11 @@ def ocx_forcing_callback(ctx, readers, feedback, dT_npz):
 
     # The melt calibration: per-basin deltaT at one K, the tracked file
     # unless another is named, else a legacy per-basin K named with
-    # ISMIP7_K_PER_BASIN_NPZ, with its optional global scale.
+    # ISMIP7_K_PER_BASIN_NPZ, with its optional global scale. The tracked
+    # file is the one fitted under the sampling setup_model settled for this
+    # run's geometry, which a restart or a MAP can record.
     if dT_npz is not None:
+        dT_npz = deltat_per_basin_npz(ctx.get("raster_sample"))
         K_npz = None
         K_field = None
         melt_what = f"per-basin deltaT at one K ({dT_npz})"

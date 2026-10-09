@@ -1,0 +1,21 @@
+{
+ "id": "inversion-2km-budd-b20k-ef2-vf-relax2014",
+ "task": "inversion",
+ "institution": "IU",
+ "status": "running",
+ "friction": "budd",
+ "title": "Budd re-inversion on the relaxed geometry from the front-cell refit, 250 iterations",
+ "mesh": "antarctica_5000_2000_buffered20000 (IU's build, 969,764 vertices), DG0 geometry, the MAP's own mesh (ISMIP7_MESH=checkpoint), front cells by geometry.front_cells",
+ "site": "IU Quartz, general partition",
+ "period": "2015 state",
+ "initial_state": "inversion-2km-budd-b20k-ef2-vf-relax2014-year's end state (t 2015, not stalled, raster_sample vertex_front, residual 2.0e-3); theta kept",
+ "forcing": "inversion-2km-budd-b20k-ef2-vf's objective (ISMIP7_EXACT_FRONT=2, ISMIP7_RASTER_SAMPLE=vertex_front, the Budd log-velocity weight 85,380), carried by the end state and held by the strict handoff",
+ "resources": "32 ranks, 240G, 6 h, one link; scpc_mumps (the refit took 31 s an evaluation over 311, so about 2.2 h for 260); ISMIP7_MAXITER=250, ISMIP7_CHAIN_MAX=0",
+ "jobs": [
+  "11885313"
+ ],
+ "code": "f910b3a (PR 163's gated head, which wrote the end state); Quartz worktree /N/scratch/dlilien/ismip7_reinvert_s16; cell reinv_relax_vf_budd of /N/scratch/dlilien/ismip7_reinvert_jobs/submit_reinvert.sh",
+ "started": "2026-10-09",
+ "results": "Quartz /N/project/ice_rheology/ISMIP7/antarctica/results/reinvert_2km/final/inversion_icepack2_budd_n3_dg0_logvel_2000_int5000_b20k_rho7500_floating_ef2_vf_relax2014.h5 beside the refit's MAP, which is read only",
+ "notes": "issue #162 and issue #167: the relaxed initial state from the refit under the front-cell rule, whose relaxation year carried 1,420 falling to 1,317 Gt/yr out of the pinned front with dM/dt near zero; it replaces inversion-2km-budd-b20k-ef2-relax2014, stopped on 8 Oct when the ef2 MAP's year carried 343 to 551 Gt/yr. The end state records the refit's objective total, 1,592.3, on the unrelaxed geometry. Submitted by IU on 9 Oct. No result yet."
+}

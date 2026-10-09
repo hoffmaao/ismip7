@@ -44,9 +44,10 @@ mpiexec -n. Run with the same ISMIP7_* melt knobs as the forward.
 The mesh comes from the MAP calibrate_melt.py names (ISMIP7_INV_H5 to name
 another). Point a run at the result with ISMIP7_DELTAT_PER_BASIN_NPZ.
 
-A run that names nothing melts with the tracked calibration,
-antarctica/calibration/deltaT_per_basin_1000_K6.500e-05.npz: K50 of the
-rule-based selection (select_melt_parameters.py) with its offsets, fitted on
+A run that names nothing melts with the tracked calibration of its raster
+sampling (runconfig.MELT_CALIBRATIONS), under the default
+antarctica/calibration/deltaT_per_basin_1000_K6.500e-05_vertex_front.npz: K50
+of the rule-based selection (select_melt_parameters.py) with its offsets, fitted on
 the 1000 m / 10 km production mesh (issue 26). Refitting the offsets for
 another mesh keeps that K: --K 6.5e-5.
 """
@@ -73,7 +74,8 @@ from icepack2_tools.melt_selection import (  # noqa: E402,F401
     DT_WINDOW, N_BASINS, Plausibility, TFRule, fit_deltaT,
 )
 from icepack2_tools.runconfig import (  # noqa: E402
-    MELT_CALIBRATION_DEFAULT, check_melt_calibration_record, geometry_space,
+    MELT_CALIBRATION_DEFAULT, MELT_CALIBRATIONS, check_melt_calibration_record,
+    geometry_space, raster_sample,
     melt_calibration_contract, melt_calibration_sidecar,
     refuse_tracked_calibration_out, write_melt_calibration_sidecar,
 )
@@ -131,7 +133,8 @@ def main():
     # Refitting the tracked calibration's K on another mesh is this script's
     # documented use; such a fit keeps the K's selection, so the provenance
     # line still names it (K50).
-    tracked = melt_calibration_contract(MELT_CALIBRATION_DEFAULT) or {}
+    tracked = melt_calibration_contract(
+        MELT_CALIBRATIONS.get(raster_sample(), MELT_CALIBRATION_DEFAULT)) or {}
 
     os.makedirs(args.out, exist_ok=True)
     for K in args.K:

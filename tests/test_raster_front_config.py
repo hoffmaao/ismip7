@@ -117,6 +117,24 @@ def test_the_front_extend_knob(monkeypatch):
     assert R.warm_start_front_extend()
 
 
+def test_the_front_band_continues_only_a_vertex_warm_start(monkeypatch):
+    r"""The band is found against a vertex sample: a vertex warm start is
+    continued, a cell_mean one refused, and a front-sampled warm start or the
+    knob off does nothing (issue #167)."""
+    on_mesh = dict(same_mesh=True, geometry_taken=False, run_sampling="vertex_front")
+    monkeypatch.setenv("ISMIP7_WARM_START_FRONT_EXTEND", "1")
+    assert R.front_band_extends(warm_sampling="vertex", **on_mesh)
+    with pytest.raises(ValueError, match="cell_mean"):
+        R.front_band_extends(warm_sampling="cell_mean", **on_mesh)
+    assert not R.front_band_extends(warm_sampling="vertex_front", **on_mesh)
+    assert not R.front_band_extends(same_mesh=False, geometry_taken=False,
+                                    run_sampling="vertex_front", warm_sampling="cell_mean")
+    assert not R.front_band_extends(same_mesh=True, geometry_taken=False,
+                                    run_sampling="vertex", warm_sampling="cell_mean")
+    monkeypatch.setenv("ISMIP7_WARM_START_FRONT_EXTEND", "0")
+    assert not R.front_band_extends(warm_sampling="vertex", **on_mesh)
+    assert not R.front_band_extends(warm_sampling="cell_mean", **on_mesh)
+
 
 def test_the_band_keeps_a_fluidity_fitted_under_a_front_sampling():
     r"""The front-band continuation moves theta always, and phi unless phi

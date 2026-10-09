@@ -116,8 +116,7 @@ from icepack2_tools.runconfig import (
     eval_continuation, inversion_mesh_source, transfer_fill, drag_gate,
     DRAG_GATE_NONE, hvisc_floor, exact_front_version, warm_start_geometry,
     warm_start_state, ramp_slide_fixed, warm_start_fluidity,
-    warm_start_state_fluidity, warm_start_front_extend, raster_front,
-    front_band_controls,
+    warm_start_state_fluidity, front_band_controls, front_band_extends,
 )
 DATA_DIR = obs_data_root()
 from icepack2_tools.prior import (
@@ -1008,8 +1007,8 @@ def main():
             # A phi taken from a MAP fitted under a front sampling
             # (ISMIP7_WARM_START_FLUIDITY) already belongs to this front and
             # is kept.
-            if (same_mesh and not warm_geometry and warm_start_front_extend()
-                    and raster_front(raster_sample) and not raster_front(_warm_rs)):
+            if front_band_extends(same_mesh=same_mesh, geometry_taken=warm_geometry,
+                                  run_sampling=raster_sample, warm_sampling=_warm_rs):
                 _H_warm_rs = sample_to_geometry(
                     rasterio.open(f"netcdf:{bm_fn}:thickness"), Q_g, Q,
                     floor=h_clamp, method=_warm_rs)

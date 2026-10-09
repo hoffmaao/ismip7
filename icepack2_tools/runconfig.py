@@ -309,8 +309,34 @@ def warm_start_front_extend():
     (`warm_start_fluidity`) is kept. For RC's refit the continuation left the
     start worse: from the ef2 state the residual began at ||F|| 4.1e14
     against 1.7e14 without it, and the first forward solve failed (job
-    11884485); RC's refit starts from Budd's fluidity and state instead."""
+    11884485); RC's refit starts from Budd's fluidity and state instead. The
+    band is found by comparing this run's thickness with a vertex sample, so
+    only a warm start sampled with vertex is continued; `front_band_extends`
+    refuses any other sampling."""
     return os.environ.get("ISMIP7_WARM_START_FRONT_EXTEND", "0").strip() not in ("", "0")
+
+
+def front_band_extends(*, same_mesh, geometry_taken, run_sampling, warm_sampling):
+    r"""Whether an inversion continues the front band
+    (`warm_start_front_extend`): the knob is on, this run's sampling is a
+    front sampling, and the warm start is on this mesh with its geometry not
+    taken. A warm start already sampled under a front sampling has no band.
+    The band is the cells where this run's thickness differs from a vertex
+    sample, so a warm start sampled any other way (cell_mean, say) would flag
+    interior cells too, and it is refused."""
+    if not (warm_start_front_extend() and raster_front(run_sampling)
+            and same_mesh and not geometry_taken):
+        return False
+    if raster_front(warm_sampling):
+        return False
+    base = raster_base_method(run_sampling)
+    if str(warm_sampling).lower() != base:
+        raise ValueError(
+            f"ISMIP7_WARM_START_FRONT_EXTEND=1 finds the front band by comparing "
+            f"this run's thickness with a {base} sample, and the warm start "
+            f"records raster_sample={warm_sampling}: that comparison would flag "
+            f"interior cells. Unset the knob or warm start from a {base} MAP.")
+    return True
 
 
 

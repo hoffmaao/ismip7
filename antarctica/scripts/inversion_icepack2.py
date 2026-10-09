@@ -92,7 +92,9 @@ from icepack2_tools.dual_friction import (
     rebase_log_friction,
     weertman_anchor,
 )
-from icepack2_tools.geometry import cg1_lift, raise_bed_to_lake_ice_base, sample_to_geometry
+from icepack2_tools.geometry import (
+    cg1_lift, raise_bed_to_lake_ice_base, sample_bed_thickness, sample_to_geometry,
+)
 from icepack2_tools.preconditioners import frozen_linearization, with_scpc_blocks
 from icepack2_tools.taped_solve import StateSolverCache, taped_state_solve
 from icepack2_tools.transfer import (
@@ -553,15 +555,16 @@ def main():
     # Cell average onto the geometry space, NOT a centroid point sample --
     # see geometry.sample_to_geometry for the measurements behind that.
     PETSc.Sys.Print(f"  Raster sampling onto geometry cells: {raster_sample}")
-    b = sample_to_geometry(
-        rasterio.open(f"netcdf:{bm_fn}:bed"), Q_g, Q, method=raster_sample)
     # h_clamp default 0.0: invert against the *true* BedMachine geometry,
     # including h=0 over the buffered ocean region. Composite rheology
     # (added below) keeps the SNES nonsingular where h=0.
     h_clamp = float(os.environ.get("ISMIP7_H_CLAMP", "0.0"))
-    H = sample_to_geometry(
-        rasterio.open(f"netcdf:{bm_fn}:thickness"),
-        Q_g, Q, floor=h_clamp, method=raster_sample)
+    # The front sampling (vertex_front) rebuilds the marine front cells from
+    # BedMachine's own mask (geometry.front_cells, issue #167).
+    b, H, front_counts = sample_bed_thickness(
+        bm_fn, Q_g, Q, floor=h_clamp, method=raster_sample)
+    if front_counts is not None:
+        PETSc.Sys.Print(f"  Front cells ({raster_sample}): {front_counts}")
     PETSc.Sys.Print(f"  H clamp: {h_clamp} m  "
                     f"(nodes h<=1m: "
                     f"{global_count(H.dat.data_ro <= 1.0, mesh.comm)} / "
@@ -852,6 +855,8 @@ def main():
                             if chk.has_attr("/", "friction_anchor_length") else 0.0)
             _warm_lake = (int(chk.get_attr("/", "lake_ice_base"))
                           if chk.has_attr("/", "lake_ice_base") else 0)
+            _warm_rs = (str(chk.get_attr("/", "raster_sample")).lower()
+                        if chk.has_attr("/", "raster_sample") else "vertex")
             for _key in OBJECTIVE_KEYS + OBJECTIVE_RECORD_KEYS:
                 if chk.has_attr("/", _key):
                     warm_attrs[_key] = chk.get_attr("/", _key)
@@ -932,10 +937,20 @@ def main():
             same_mesh = meshes_match(chk_mesh, mesh)
             # A MAP inverted before the lake fix carries the lake bowl in its
             # geometry; taking it would undo the fix, so by default it is not.
-            _geometry_default = "1" if (same_mesh and _warm_lake == int(LAKE_ICE_BASE)) else "0"
+            # Nor does one whose geometry was sampled another way: a front
+            # sampling's cells differ at the front (issue #167), and a refit
+            # from a vertex MAP is how a MAP gets them.
+            _geometry_default = "1" if (same_mesh and _warm_lake == int(LAKE_ICE_BASE)
+                                        and _warm_rs == raster_sample) else "0"
             warm_geometry = os.environ.get(
                 "ISMIP7_WARM_START_GEOMETRY", _geometry_default
             ).strip() != "0"
+            if same_mesh and _warm_rs != raster_sample:
+                PETSc.Sys.Print(
+                    f"    warm start records raster_sample={_warm_rs}, this run "
+                    f"{raster_sample}: its geometry is "
+                    + ("taken anyway (ISMIP7_WARM_START_GEOMETRY)" if warm_geometry
+                       else "not taken"))
             if same_mesh and _warm_lake != int(LAKE_ICE_BASE):
                 PETSc.Sys.Print(
                     f"    warm start records lake_ice_base={_warm_lake}, this run "
@@ -3405,7 +3420,7 @@ def main():
         "subelement_scheme_version": int(SUBELEMENT_SCHEME_VERSION),
         "fluidity_control": FLUIDITY_CONTROL,
         "drag_gate": DRAG_RECORD, "h_visc_floor": float(RC_HVISC_FLOOR),
-        "phi_grounded": PHI_GROUNDED,
+        "phi_grounded": PHI_GROUNDED, "raster_sample": str(raster_sample),
     })
     if PRIOR_FORM == "bilaplacian":
         run_settings.update({"prior_sigma_theta": float(PRIOR_SIGMA_THETA),

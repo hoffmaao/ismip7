@@ -75,7 +75,9 @@ from icepack2_tools.fssa import (
     restart_reference_error as fssa_restart_reference_error,
     restart_step as fssa_restart_step,
 )
-from icepack2_tools.geometry import raise_bed_to_lake_ice_base, sample_to_geometry
+from icepack2_tools.geometry import (
+    raise_bed_to_lake_ice_base, sample_bed_thickness, sample_to_geometry,
+)
 from icepack2_tools.naming import map_basename
 from icepack2_tools.handoff import check_subelement_record
 from icepack2_tools.front import (
@@ -105,6 +107,9 @@ from icepack2_tools.runconfig import (
     forward_exact_front as _forward_exact_front,
     lc as _lc, lc_coarse as _lc_coarse, n_flow as _n_flow, buffer_m as _buffer_m,
     TARGET_MESH_GEOMETRY_METHOD,
+    target_mesh_geometry_method as _target_mesh_geometry_method,
+    forward_raster_sample as _forward_raster_sample,
+    raster_base_method as _raster_base_method,
     calving_law as _calving_law, calving_law_object as _calving_law_object,
     front_advance as _front_advance,
     fracture as _fracture_mode, ismip7_output as _ismip7_output,
@@ -480,17 +485,10 @@ def setup_model(restart_from=None, *, allow_timing_cache_a_ref=False,
         chk_buffer_m = (float(_chk.get_attr("/", "buffer_m"))
                         if _chk.has_attr("/", "buffer_m") else None)
         # Raster sampling the MAP was inverted with. MAPs older than the
-        # attribute were all vertex-sampled. The MAP wins over the
-        # environment: the controls absorbed that bed, so a different one
-        # here would be silently inconsistent.
-        chk_raster_sample = (str(_chk.get_attr("/", "raster_sample"))
-                             if _chk.has_attr("/", "raster_sample") else "vertex")
-        _env_rs = os.environ.get("ISMIP7_RASTER_SAMPLE")
-        if _env_rs and _env_rs.lower() != chk_raster_sample:
-            PETSc.Sys.Print(
-                f"  WARNING: ISMIP7_RASTER_SAMPLE={_env_rs} but the MAP was "
-                f"inverted with {chk_raster_sample}; using the MAP's."
-            )
+        # attribute were all vertex-sampled. Which sampling this run builds
+        # its geometry with is decided once the target mesh is known.
+        map_raster_sample = (str(_chk.get_attr("/", "raster_sample"))
+                             if _chk.has_attr("/", "raster_sample") else None)
         # The FINE resolution is stamped too, and every component of the
         # reconstructed name must come from the checkpoint: falling back to the
         # live ISMIP7_LC here would reintroduce exactly the environment drift
@@ -500,10 +498,12 @@ def setup_model(restart_from=None, *, allow_timing_cache_a_ref=False,
                   if _chk.has_attr("/", "lc") else None)
         if not mesh_basename and chk_lc_coarse is not None \
                 and chk_buffer_m is not None:
+            # Such a checkpoint predates the mesh_basename attribute, and so
+            # every front-following mesh: name the mesh without a front tag.
             mesh_basename = os.path.basename(
                 mesh_filename(chk_lc_coarse,
                               chk_lc if chk_lc is not None else lc,
-                              chk_buffer_m))
+                              chk_buffer_m, front=None))
 
     source_mesh_basename = mesh_basename
     # None for unset, empty and the sentinel `checkpoint`: solve on the mesh
@@ -614,6 +614,17 @@ def setup_model(restart_from=None, *, allow_timing_cache_a_ref=False,
     geometry_space = _geometry_space()
     geom_dg = geometry_space == "dg0"
     Q_g = FunctionSpace(mesh, "DG", 0) if geom_dg else Q
+    # A cold start on another mesh than its MAP's rebuilds the cell-wise
+    # geometry from BedMachine there (below), with this run's raster sampling,
+    # so a transferred MAP gets the front its new mesh holds (issue #167).
+    # Otherwise the checkpoint's geometry is used as is and the sampling it
+    # records stands; an ISMIP7_RASTER_SAMPLE that differs is refused.
+    geometry_transfer = bool(
+        not is_restart and mesh_fn and geom_dg
+        and (not source_mesh_basename
+             or os.path.basename(mesh_fn) != source_mesh_basename))
+    chk_raster_sample = _forward_raster_sample(
+        map_raster_sample, geometry_transfer, source=source_chk)
     PETSc.Sys.Print(
         f"  Geometry space: {geometry_space.upper()}"
         + (" (h, s, b cell-wise; one thickness for force and mass)" if geom_dg
@@ -708,19 +719,23 @@ def setup_model(restart_from=None, *, allow_timing_cache_a_ref=False,
         bm_fn = find_file(os.path.join(DATA_DIR, "bedmachine"), "*.nc")
         geometry_source = os.path.realpath(bm_fn)
         geometry_source_method = (
-            TARGET_MESH_GEOMETRY_METHOD if geom_dg
+            _target_mesh_geometry_method(chk_raster_sample) if geom_dg
             else "target-native-bedmachine-nodal-v1"
         )
         # Cell average onto the geometry space, NOT a centroid point sample --
         # see geometry.sample_to_geometry for the measurements behind that.
-        PETSc.Sys.Print(f"  Raster sampling onto geometry cells: {chk_raster_sample}")
-        b = sample_to_geometry(
-            rasterio.open(f"netcdf:{bm_fn}:bed"), Q_g, Q,
-            method=chk_raster_sample)
+        # RC/Budd on the MAP's own mesh replace this sample with the MAP's
+        # geometry below, so a front sampling's ice mask is read only where
+        # its cells are kept.
+        _sample_method = (
+            chk_raster_sample if (geometry_transfer or not use_rc)
+            else _raster_base_method(chk_raster_sample))
+        PETSc.Sys.Print(f"  Raster sampling onto geometry cells: {_sample_method}")
+        b, H, _front_counts = sample_bed_thickness(
+            bm_fn, Q_g, Q, floor=h_clamp_init, method=_sample_method)
+        if _front_counts is not None:
+            PETSc.Sys.Print(f"  Front cells ({_sample_method}): {_front_counts}")
         b.rename("bed")
-        H = sample_to_geometry(
-            rasterio.open(f"netcdf:{bm_fn}:thickness"),
-            Q_g, Q, floor=h_clamp_init, method=chk_raster_sample)
         H.rename("thickness")
         if map_lake_ice_base:
             _n_lake = raise_bed_to_lake_ice_base(b, H, bm_fn, Q_g, Q, method=chk_raster_sample)

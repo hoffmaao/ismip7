@@ -44,6 +44,13 @@ LC_COARSE_DEFAULT = "10000"
 # mesh names defaulted to 20000, so a bare call could build an unbuffered mesh
 # under a buffered name.
 BUFFER_M_DEFAULT = "20000"
+# The ice edge whose marine front a buffered mesh's nodes and edges lie on
+# (the `_front<edge>` of naming.mesh_basename): "bm", BedMachine's own, or
+# "none" for a mesh that follows no front. Issue #167: on a mesh that does
+# not follow it, the front crosses cells, and vertex sampling gives them a
+# fraction of its thickness.
+MESH_FRONTS = ("none", "bm")
+MESH_FRONT_DEFAULT = "none"
 # The production forward step [yr], chosen with the mesh (issue 20). The timing
 # matrix's rule gives 0.05 at 1000 m. At 0.05 a 1 km control from a transferred
 # 2 km Budd MAP diverged in 2016.1 at Rice, and on Quartz it grew a two-step
@@ -76,6 +83,9 @@ BUDD_SHELF_GATE = "haf"
 # method name stable: it is stamped into cache provenance and changing the
 # construction must invalidate old caches.
 TARGET_MESH_GEOMETRY_METHOD = "target-native-bedmachine-cell-average-v1"
+# The same with BedMachine's front cells rebuilt (geometry.front_cells, issue
+# #167); target_mesh_geometry_method picks one by raster sampling.
+TARGET_MESH_GEOMETRY_METHOD_FRONT = "target-native-bedmachine-cell-average-front-v1"
 
 GEOMETRY_SPACES = ("dg0", "cg1")
 
@@ -87,8 +97,16 @@ GEOMETRY_SPACES = ("dg0", "cg1")
 #   cell_mean - the mean of the raster over the cell itself, sampled on an
 #               equal-area sub-triangle lattice at pixel density
 #               (geometry.raster_cell_mean).
+#   vertex_front - vertex, except that BedMachine's own mask decides which
+#               cells hold ice at the marine front, and the front cells take
+#               BedMachine's mean thickness and bed over their ice
+#               (geometry.front_cells, issue #167). Vertex sampling alone
+#               gives a cell the front crosses a fraction of the front's
+#               thickness: 40 m against 163 m on the 2 km buffered mesh, and
+#               a vertex on the front of a _frontbm mesh samples a blend.
 # MAPs record the method used; the forward reads it back from the MAP.
-RASTER_SAMPLES = ("vertex", "cell_mean")
+FRONT_RASTER_SAMPLES = ("vertex_front",)
+RASTER_SAMPLES = ("vertex", "cell_mean") + FRONT_RASTER_SAMPLES
 RASTER_SAMPLE_DEFAULT = "vertex"
 
 
@@ -208,6 +226,16 @@ def buffer_m():
     return float(os.environ.get("ISMIP7_BUFFER_M", BUFFER_M_DEFAULT))
 
 
+def mesh_front():
+    r"""``ISMIP7_MESH_FRONT``: the ice edge whose marine front the mesh
+    follows (``bm``), or None for ``none``."""
+    value = os.environ.get("ISMIP7_MESH_FRONT", MESH_FRONT_DEFAULT).strip().lower()
+    if value not in MESH_FRONTS:
+        raise ValueError(
+            f"ISMIP7_MESH_FRONT must be one of {MESH_FRONTS}, not {value!r}")
+    return None if value == "none" else value
+
+
 def geometry_space():
     r"""Discretization of h/s/b, ``'dg0'`` or ``'cg1'``. Validated here so
     every reader rejects the same set."""
@@ -221,8 +249,7 @@ def geometry_space():
 
 
 def raster_sample():
-    r"""How BedMachine is sampled onto a DG0 cell: ``'vertex'`` or
-    ``'cell_mean'``. See RASTER_SAMPLES."""
+    r"""How BedMachine is sampled onto a DG0 cell, one of RASTER_SAMPLES."""
     value = os.environ.get(
         "ISMIP7_RASTER_SAMPLE", RASTER_SAMPLE_DEFAULT).lower()
     if value not in RASTER_SAMPLES:
@@ -230,6 +257,51 @@ def raster_sample():
             f"ISMIP7_RASTER_SAMPLE must be one of {RASTER_SAMPLES}, got {value!r}"
         )
     return value
+
+
+def raster_front(method):
+    r"""Whether the raster sampling ``method`` rebuilds the front cells."""
+    return str(method).lower() in FRONT_RASTER_SAMPLES
+
+
+def raster_base_method(method):
+    r"""How a single raster is put on a cell under ``method``: a front
+    sampling samples every raster by its vertices and changes only the front
+    cells' thickness and bed afterwards."""
+    return "vertex" if raster_front(method) else str(method).lower()
+
+
+def target_mesh_geometry_method(method):
+    r"""The provenance name of geometry rebuilt from BedMachine on a target
+    mesh under the raster sampling ``method``: vertex keeps the name its
+    caches carry, a front sampling gets its own, so a cache built one way is
+    never read as the other."""
+    if raster_front(method):
+        return TARGET_MESH_GEOMETRY_METHOD_FRONT
+    return TARGET_MESH_GEOMETRY_METHOD
+
+
+def forward_raster_sample(recorded, transfer, source="the MAP"):
+    r"""The raster sampling a forward builds its geometry with.
+
+    On the MAP's own mesh the geometry is the MAP's, so the sampling is the
+    one it records (``vertex`` for a MAP older than the record), which an
+    explicitly set ``ISMIP7_RASTER_SAMPLE`` may repeat and may not change. A
+    forward on another mesh (``transfer``) rebuilds the geometry from
+    BedMachine there, with ``ISMIP7_RASTER_SAMPLE`` or its default: a MAP's
+    controls carry over, and the front its new mesh holds is that mesh's own
+    (issue #167)."""
+    if transfer:
+        return raster_sample()
+    recorded = _recorded(recorded)
+    method = "vertex" if recorded is None else str(recorded).lower()
+    env = os.environ.get("ISMIP7_RASTER_SAMPLE")
+    if env and env.lower() != method:
+        raise RuntimeError(
+            f"ISMIP7_RASTER_SAMPLE={env} but {source} was sampled with "
+            f"{method} and its geometry is used as is: a forward on its "
+            f"MAP's mesh follows the MAP")
+    return method
 
 
 def friction():
@@ -765,6 +837,11 @@ def obs_data_root():
 # the forward checks (forcing.check_melt_contract).
 MELT_CALIBRATION_DEFAULT = os.path.join(
     _ANTARCTICA, "calibration", "deltaT_per_basin_1000_K6.500e-05.npz")
+# The tracked calibration of each raster sampling. A calibration sums melt
+# over the cells its sampling builds, so a run takes the one fitted under its
+# own (forcing.check_melt_contract refuses another); a sampling with no entry
+# needs ISMIP7_DELTAT_PER_BASIN_NPZ.
+MELT_CALIBRATIONS = {"vertex": MELT_CALIBRATION_DEFAULT}
 
 # Knobs that no longer shape a run. They are refused rather than ignored, so
 # a job script written before the change fails at startup.
@@ -913,7 +990,7 @@ def write_melt_calibration_sidecar(npz_path, record):
     return sidecar
 
 
-def deltat_per_basin_npz():
+def deltat_per_basin_npz(raster_sample_of_run=None):
     r"""The per-basin thermal-forcing offsets a run melts with, or None on the
     legacy per-basin K path.
 
@@ -923,8 +1000,10 @@ def deltat_per_basin_npz():
     it. The ocean callbacks add the offset to TF before the melt law and melt
     with the file's K everywhere.
 
-    ``ISMIP7_DELTAT_PER_BASIN_NPZ`` names the file; unset, it is
-    ``MELT_CALIBRATION_DEFAULT``. ``ISMIP7_K_PER_BASIN_NPZ`` selects the legacy
+    ``ISMIP7_DELTAT_PER_BASIN_NPZ`` names the file; unset, it is the tracked
+    calibration of the run's raster sampling (``MELT_CALIBRATIONS``;
+    ``raster_sample_of_run``, else ``ISMIP7_RASTER_SAMPLE``), which for vertex
+    sampling is ``MELT_CALIBRATION_DEFAULT``. ``ISMIP7_K_PER_BASIN_NPZ`` selects the legacy
     per-basin K path instead (``k_per_basin_npz``), and then this returns
     None. Naming both is refused.
 
@@ -945,7 +1024,15 @@ def deltat_per_basin_npz():
     if legacy is not None:
         return None
     if path is None:
-        path = MELT_CALIBRATION_DEFAULT
+        sampling = (raster_sample() if raster_sample_of_run is None
+                    else str(raster_sample_of_run).lower())
+        if sampling not in MELT_CALIBRATIONS:
+            raise FileNotFoundError(
+                f"No tracked melt calibration was fitted on geometry sampled "
+                f"with {sampling}. Fit one (calibrate_deltaT.py under "
+                f"ISMIP7_RASTER_SAMPLE={sampling}) and name it with "
+                f"ISMIP7_DELTAT_PER_BASIN_NPZ.")
+        path = MELT_CALIBRATIONS[sampling]
         if not os.path.exists(path):
             raise FileNotFoundError(
                 f"The tracked melt calibration {path} is missing from this "

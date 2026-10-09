@@ -223,7 +223,7 @@ def end_state_problems(attrs, *, same_mesh, geometry_taken, map_out):
     if not geometry_taken:
         problems.append(
             "its geometry is not taken (ISMIP7_WARM_START_GEOMETRY=0, or a "
-            "lake_ice_base other than the run's)")
+            "lake_ice_base or a raster_sample other than the run's)")
     want = relaxed_map_name(str(_value(attrs["relax_source_map"])),
                             _value(attrs["relax_t_start"]))
     if os.path.basename(map_out) != want:

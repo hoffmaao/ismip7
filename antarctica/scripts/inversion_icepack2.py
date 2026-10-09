@@ -113,7 +113,7 @@ from icepack2_tools.runconfig import (
     raster_sample as _raster_sample,
     lc as _lc, lc_coarse as _lc_coarse, n_flow as _n_flow,
     eval_continuation, inversion_mesh_source, transfer_fill, drag_gate,
-    DRAG_GATE_NONE, hvisc_floor, exact_front_version,
+    DRAG_GATE_NONE, hvisc_floor, exact_front_version, warm_start_geometry,
 )
 DATA_DIR = obs_data_root()
 from icepack2_tools.prior import (
@@ -940,17 +940,13 @@ def main():
             # Nor does one whose geometry was sampled another way: a front
             # sampling's cells differ at the front (issue #167), and a refit
             # from a vertex MAP is how a MAP gets them.
-            _geometry_default = "1" if (same_mesh and _warm_lake == int(LAKE_ICE_BASE)
-                                        and _warm_rs == raster_sample) else "0"
-            warm_geometry = os.environ.get(
-                "ISMIP7_WARM_START_GEOMETRY", _geometry_default
-            ).strip() != "0"
+            warm_geometry = warm_start_geometry(
+                same_mesh=same_mesh, same_lake=_warm_lake == int(LAKE_ICE_BASE),
+                warm_sampling=_warm_rs, run_sampling=raster_sample)
             if same_mesh and _warm_rs != raster_sample:
                 PETSc.Sys.Print(
                     f"    warm start records raster_sample={_warm_rs}, this run "
-                    f"{raster_sample}: its geometry is "
-                    + ("taken anyway (ISMIP7_WARM_START_GEOMETRY)" if warm_geometry
-                       else "not taken"))
+                    f"{raster_sample}: its geometry is not taken")
             if same_mesh and _warm_lake != int(LAKE_ICE_BASE):
                 PETSc.Sys.Print(
                     f"    warm start records lake_ice_base={_warm_lake}, this run "

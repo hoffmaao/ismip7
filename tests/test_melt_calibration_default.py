@@ -365,3 +365,40 @@ def test_a_forward_on_a_vertex_map_names_the_vertex_file(clean, monkeypatch, tmp
     capfd.readouterr()
     forcing.make_climatology_ocean_callback()(ctx, 0.0)
     assert f"Per-basin deltaT from {vertex}:" in capfd.readouterr().out
+
+
+def test_the_dhdt_score_melts_a_vertex_map_with_the_vertex_file(clean, monkeypatch, tmp_path, capfd):
+    r"""compare_dhdt.py scores a MAP's geometry, so it melts with the tracked
+    calibration of the sampling that MAP records, whatever the shell's."""
+    fd = pytest.importorskip("firedrake")
+    import icepack2_tools.forcing as forcing
+    monkeypatch.delenv("ISMIP7_RASTER_SAMPLE", raising=False)
+    monkeypatch.syspath_prepend(os.path.join(REPO, "antarctica", "scripts"))
+    compare_dhdt = importlib.import_module("compare_dhdt")
+    za = np.array([-1000.0, 0.0])
+    monkeypatch.setattr(forcing, "build_oi_climatology_interpolators",
+                        lambda data_root=None: {
+                            "tf": (lambda pts: np.full(len(pts), 1.5), za),
+                            "so": (lambda pts: np.full(len(pts), 34.5), za)})
+    monkeypatch.setattr(forcing, "imbie2_basin_path",
+                        lambda recorded=None: _basins(tmp_path))
+    monkeypatch.setattr(compare_dhdt, "load_dhdt_obs", lambda Q_g: (
+        fd.Function(Q_g), fd.Function(Q_g).assign(1.0)))
+    monkeypatch.setattr(compare_dhdt, "load_racmo_smb_climatology",
+                        lambda Q_g, **kw: fd.Function(Q_g))
+    mesh = fd.RectangleMesh(4, 1, 3.0, 2.0)
+    Q_g = fd.FunctionSpace(mesh, "DG", 0)
+    path = str(tmp_path / "map.h5")
+    with fd.CheckpointFile(path, "w") as c:
+        c.save_mesh(mesh)
+        c.save_function(fd.Function(fd.VectorFunctionSpace(mesh, "CG", 1),
+                                    name="velocity"))
+        c.save_function(fd.Function(Q_g, name="thickness").assign(100.0))
+        c.save_function(fd.Function(Q_g, name="bed").assign(-1000.0))
+        c.save_function(fd.Function(Q_g, name="surface").assign(10.0))
+        c.set_attr("/", "raster_sample", "vertex")
+    vertex = MELT_CALIBRATIONS["vertex"]
+    assert deltat_per_basin_npz() != vertex
+    capfd.readouterr()
+    compare_dhdt.one_step_dhdt(path)
+    assert f"Per-basin deltaT from {vertex}:" in capfd.readouterr().out

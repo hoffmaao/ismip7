@@ -261,3 +261,26 @@ def test_the_driver_resumes_only_its_own_end_state(monkeypatch, tmp_path):
     monkeypatch.setenv("ISMIP7_RESTART", str(relaxed))
     with pytest.raises(RuntimeError, match="not a relaxation"):
         run.main()
+
+
+def test_a_warm_start_s_geometry_is_taken_only_under_its_own_sampling(monkeypatch):
+    r"""A taken geometry keeps the sampling it was built with and the MAP
+    records the run's, so forcing one sampled another way is refused."""
+    from icepack2_tools.runconfig import warm_start_geometry
+    monkeypatch.delenv("ISMIP7_WARM_START_GEOMETRY", raising=False)
+    same = dict(same_mesh=True, same_lake=True)
+    assert warm_start_geometry(**same, warm_sampling="vertex_front",
+                               run_sampling="vertex_front")
+    assert not warm_start_geometry(**same, warm_sampling="vertex",
+                                   run_sampling="vertex_front")
+    assert not warm_start_geometry(same_mesh=False, same_lake=True,
+                                   warm_sampling="vertex", run_sampling="vertex")
+    monkeypatch.setenv("ISMIP7_WARM_START_GEOMETRY", "1")
+    assert warm_start_geometry(same_mesh=True, same_lake=False,
+                               warm_sampling="vertex", run_sampling="vertex")
+    with pytest.raises(ValueError, match="ISMIP7_RASTER_SAMPLE=vertex"):
+        warm_start_geometry(**same, warm_sampling="vertex",
+                            run_sampling="vertex_front")
+    monkeypatch.setenv("ISMIP7_WARM_START_GEOMETRY", "0")
+    assert not warm_start_geometry(**same, warm_sampling="vertex_front",
+                                   run_sampling="vertex_front")

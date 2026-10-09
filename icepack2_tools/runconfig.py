@@ -261,6 +261,26 @@ def raster_sample():
     return value
 
 
+def warm_start_geometry(*, same_mesh, same_lake, warm_sampling, run_sampling):
+    r"""Whether an inversion takes its warm start's thickness, bed and
+    surface. By default it does on the warm start's mesh when the warm start
+    was built with this run's lake_ice_base and raster sampling;
+    ``ISMIP7_WARM_START_GEOMETRY=0/1`` overrides that. A taken geometry keeps
+    the sampling it was built with and the MAP records the run's
+    (``raster_sample``), so taking one sampled another way is refused."""
+    default = same_mesh and same_lake and warm_sampling == run_sampling
+    take = os.environ.get(
+        "ISMIP7_WARM_START_GEOMETRY", "1" if default else "0").strip() != "0"
+    if take and warm_sampling != run_sampling:
+        raise ValueError(
+            f"ISMIP7_WARM_START_GEOMETRY takes the geometry of a warm start "
+            f"that records raster_sample={warm_sampling}, and this run samples "
+            f"with {run_sampling}. A taken geometry keeps the sampling it was "
+            f"built with and the MAP records the run's: set "
+            f"ISMIP7_RASTER_SAMPLE={warm_sampling}.")
+    return take
+
+
 def raster_front(method):
     r"""Whether the raster sampling ``method`` rebuilds the front cells."""
     return str(method).lower() in FRONT_RASTER_SAMPLES

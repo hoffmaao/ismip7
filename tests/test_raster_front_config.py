@@ -143,6 +143,7 @@ def test_the_band_keeps_a_fluidity_fitted_under_a_front_sampling():
     assert R.front_band_controls("vertex") == ("theta", "phi")
     assert R.front_band_controls("vertex_front") == ("theta",)
 
+
 def test_the_nodes_of_a_changed_cell_are_flagged():
     r"""front_changed_nodes flags every continuous dof of a cell whose
     thickness moved past the tolerance, and nothing else."""

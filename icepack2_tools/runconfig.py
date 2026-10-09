@@ -312,10 +312,11 @@ def warm_start_front_extend():
     (`warm_start_fluidity`) is kept. For RC's refit the continuation left the
     start worse: from the ef2 state the residual began at ||F|| 4.1e14
     against 1.7e14 without it, and the first forward solve failed (job
-    11884485, with the band blended between both sides as above); RC's refit starts from Budd's fluidity and state instead. The
-    band is found by comparing this run's thickness with a vertex sample, so
-    only a warm start sampled with vertex is continued; `front_band_extends`
-    refuses any other sampling."""
+    11884485, with the band blended between both sides as above); RC's
+    refit starts from Budd's fluidity and state instead. The band is found
+    by comparing this run's thickness with a vertex sample, so only a warm
+    start sampled with vertex is continued; `front_band_extends` refuses any
+    other sampling."""
     return os.environ.get("ISMIP7_WARM_START_FRONT_EXTEND", "0").strip() not in ("", "0")
 
 
@@ -342,7 +343,6 @@ def front_band_extends(*, same_mesh, geometry_taken, run_sampling, warm_sampling
     return True
 
 
-
 def front_band_controls(fluidity_sampling=None):
     r"""The controls ``ISMIP7_WARM_START_FRONT_EXTEND`` continues over the
     front band: theta, and phi unless it came from a MAP fitted under a front
@@ -354,6 +354,7 @@ def front_band_controls(fluidity_sampling=None):
     if fluidity_sampling is not None and raster_front(fluidity_sampling):
         return ("theta",)
     return ("theta", "phi")
+
 
 def ramp_slide_fixed():
     r"""``ISMIP7_RAMP_SLIDE_FIXED=1``: the inversion's startup ramp climbs the

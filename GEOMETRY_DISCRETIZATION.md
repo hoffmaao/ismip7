@@ -309,8 +309,12 @@ front at 1,420 to 1,317 Gt/yr with dM/dt near zero
 September, fitted on the buffer-0 mesh, transfers onto the 1 km mesh near
 balance under `vertex` (apparent MB -473 Gt/yr) and with its shelves at three
 times the observed speed under the rule (+9,004 Gt/yr;
-`test-1km-transfer-t0-vertex-front`), so Rice's MAPs are refitted under the
-rule before Rice's buffered-mesh forwards (IU, 9 October).
+`test-1km-transfer-t0-vertex-front`), so a Rice MAP drives a buffered-mesh
+forward only after a refit under the rule (IU, 9 October). The two lines run
+side by side until the submission is chosen on 20 and 21 October: Rice's
+MAPs and forwards on buffer-0 meshes, IU's on the buffered meshes under
+`vertex_front`. On a buffer-0 mesh the rule is unmeasured, and
+`ISMIP7_RASTER_SAMPLE=vertex` keeps a buffer-0 run as it was before it.
 
 ## The drag gate and the membrane floor (issue #153)
 

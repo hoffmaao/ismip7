@@ -93,12 +93,13 @@ from icepack2_tools.dual_friction import (
     weertman_anchor,
 )
 from icepack2_tools.geometry import (
-    cg1_lift, raise_bed_to_lake_ice_base, sample_bed_thickness,
+    cg1_lift, front_changed_nodes, raise_bed_to_lake_ice_base,
+    sample_bed_thickness, sample_to_geometry,
 )
 from icepack2_tools.preconditioners import frozen_linearization, with_scpc_blocks
 from icepack2_tools.taped_solve import StateSolverCache, taped_state_solve
 from icepack2_tools.transfer import (
-    interpolate_with_fill, load_checkpoint_mesh, meshes_match,
+    harmonic_extension, interpolate_with_fill, load_checkpoint_mesh, meshes_match,
 )
 from icepack2_tools.grounding import height_above_flotation
 from icepack2_tools.mpi_stats import (global_mean, global_range,
@@ -115,7 +116,8 @@ from icepack2_tools.runconfig import (
     eval_continuation, inversion_mesh_source, transfer_fill, drag_gate,
     DRAG_GATE_NONE, hvisc_floor, exact_front_version, warm_start_geometry,
     warm_start_state, ramp_slide_fixed, warm_start_fluidity,
-    warm_start_state_fluidity,
+    warm_start_state_fluidity, warm_start_front_extend, raster_front,
+    front_band_controls,
 )
 DATA_DIR = obs_data_root()
 from icepack2_tools.prior import (
@@ -921,6 +923,8 @@ def main():
             _fl_chk = warm_start_fluidity()
             _fl_prior = None
             _fl_origin = None
+            # the fluidity MAP's raster sampling (the front band's controls)
+            _fl_rs = None
             # its mixed state, the first guess under ISMIP7_WARM_START_STATE=fluidity
             _fl_state = None
             if _phi_mode == "0":
@@ -938,6 +942,8 @@ def main():
                             f"ISMIP7_WARM_START_FLUIDITY={_fl_chk} was inverted "
                             f"under fluidity_control={_fl_fc}, this run under "
                             f"{FLUIDITY_CONTROL}")
+                    _fl_rs = (str(_fl.get_attr("/", "raster_sample")).lower()
+                              if _fl.has_attr("/", "raster_sample") else "vertex")
                     _fl_mesh = _fl.load_mesh()
                     phi.assign(_warm_load(_fl, _fl_mesh, "log_fluidity", Q))
                     _fl_prior = _warm_load(_fl, _fl_mesh, "fluidity_prior", Q)
@@ -995,6 +1001,29 @@ def main():
                 PETSc.Sys.Print(
                     f"    warm start records raster_sample={_warm_rs}, this run "
                     f"{raster_sample}: its geometry is not taken")
+            # The warm start's controls were fitted against the front its own
+            # sampling built. Under ISMIP7_WARM_START_FRONT_EXTEND=1 theta and
+            # phi continue from the ice upstream over the cells the front rule
+            # rebuilt or emptied, and the refit sets them afresh (issue #167).
+            # A phi taken from a MAP fitted under a front sampling
+            # (ISMIP7_WARM_START_FLUIDITY) already belongs to this front and
+            # is kept.
+            if (same_mesh and not warm_geometry and warm_start_front_extend()
+                    and raster_front(raster_sample) and not raster_front(_warm_rs)):
+                _H_warm_rs = sample_to_geometry(
+                    rasterio.open(f"netcdf:{bm_fn}:thickness"), Q_g, Q,
+                    floor=h_clamp, method=_warm_rs)
+                _front_nodes = front_changed_nodes(H, _H_warm_rs, Q)
+                _band = front_band_controls(_fl_rs if _fl_chk else None)
+                for _name in _band:
+                    harmonic_extension({"theta": theta, "phi": phi}[_name],
+                                       _front_nodes, 0.0, COMM_WORLD)
+                PETSc.Sys.Print(
+                    f"    front band: {' and '.join(_band)} continued from upstream on "
+                    f"{global_count(_front_nodes, COMM_WORLD)} nodes of the cells "
+                    f"the front rule changed (ISMIP7_WARM_START_FRONT_EXTEND=1)"
+                    + ("; phi is the fluidity MAP's, fitted under "
+                       f"{_fl_rs}" if "phi" not in _band else ""))
             if same_mesh and _warm_lake != int(LAKE_ICE_BASE):
                 PETSc.Sys.Print(
                     f"    warm start records lake_ice_base={_warm_lake}, this run "

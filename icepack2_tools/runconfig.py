@@ -297,6 +297,33 @@ def warm_start_fluidity():
     return path
 
 
+def warm_start_front_extend():
+    r"""``ISMIP7_WARM_START_FRONT_EXTEND=1``: a refit under a front sampling
+    from a warm start sampled without it continues theta and phi from the ice
+    upstream over the cells the front rule rebuilt or emptied, and the
+    inversion sets them afresh there (issue #167). The warm start fitted them
+    against its own front: RC's final MAP left a band stiffer and with more
+    friction than the rest of the ice (log fluidity -1.33 against -0.17, log
+    friction +1.06 against -0.02), which the rule makes four times thicker.
+    A phi taken from a MAP fitted under a front sampling
+    (`warm_start_fluidity`) is kept. For RC's refit the continuation left the
+    start worse: from the ef2 state the residual began at ||F|| 4.1e14
+    against 1.7e14 without it, and the first forward solve failed (job
+    11884485); RC's refit starts from Budd's fluidity and state instead."""
+    return os.environ.get("ISMIP7_WARM_START_FRONT_EXTEND", "0").strip() not in ("", "0")
+
+
+
+def front_band_controls(fluidity_sampling=None):
+    r"""The controls ``ISMIP7_WARM_START_FRONT_EXTEND`` continues over the
+    front band: theta, and phi unless it came from a MAP fitted under a front
+    sampling (``fluidity_sampling``, the raster sampling of the
+    ``ISMIP7_WARM_START_FLUIDITY`` MAP; None without one), whose phi already
+    belongs to the rule's front."""
+    if fluidity_sampling is not None and raster_front(fluidity_sampling):
+        return ("theta",)
+    return ("theta", "phi")
+
 def ramp_slide_fixed():
     r"""``ISMIP7_RAMP_SLIDE_FIXED=1``: the inversion's startup ramp climbs the
     flow exponent from 1 with the sliding exponent held at its target. RC's

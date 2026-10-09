@@ -448,6 +448,18 @@ def front_cells(H, b, bm_fn, frac=FRONT_ICE_FRACTION):
     return {k: comm.allreduce(v, op=MPI.SUM) for k, v in counts.items()}
 
 
+def front_changed_nodes(H_new, H_old, Q_cg, tol=1.0):
+    r"""The owned dofs of the continuous space ``Q_cg`` that touch a cell
+    whose thickness differs between ``H_new`` and ``H_old`` by more than
+    ``tol`` m, as a boolean array: the nodes of the cells a front sampling
+    rebuilt or emptied (issue #167). Collective."""
+    from firedrake import Function, TestFunction, assemble, conditional, dx, gt
+    changed = Function(H_new.function_space()).interpolate(
+        conditional(gt(abs(H_new - H_old), tol), 1.0, 0.0))
+    w = TestFunction(Q_cg)
+    return np.asarray(assemble(w * changed * dx).dat.data_ro > 0.0)
+
+
 def sample_bed_thickness(bm_fn, Q_g, Q_cg, floor=None, method="vertex"):
     r"""BedMachine's bed and thickness on the geometry space, as
     ``(b, H, counts)``.

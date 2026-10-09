@@ -8,6 +8,7 @@ calibration fitted under its own sampling, and a sampling without one is
 refused.
 """
 
+import numpy as np
 import pytest
 
 from icepack2_tools import runconfig as R
@@ -107,3 +108,35 @@ def test_a_state_from_the_fluidity_map_replaces_the_warm_start_s(monkeypatch, tm
         R.warm_start_state_fluidity(same_mesh=False)
     monkeypatch.setenv("ISMIP7_WARM_START_STATE", "1")
     assert not R.warm_start_state_fluidity(same_mesh=False)
+
+
+def test_the_front_extend_knob(monkeypatch):
+    monkeypatch.delenv("ISMIP7_WARM_START_FRONT_EXTEND", raising=False)
+    assert not R.warm_start_front_extend()
+    monkeypatch.setenv("ISMIP7_WARM_START_FRONT_EXTEND", "1")
+    assert R.warm_start_front_extend()
+
+
+
+def test_the_band_keeps_a_fluidity_fitted_under_a_front_sampling():
+    r"""The front-band continuation moves theta always, and phi unless phi
+    came from a MAP fitted under a front sampling (issue #167)."""
+    assert R.front_band_controls() == ("theta", "phi")
+    assert R.front_band_controls("vertex") == ("theta", "phi")
+    assert R.front_band_controls("vertex_front") == ("theta",)
+
+def test_the_nodes_of_a_changed_cell_are_flagged():
+    r"""front_changed_nodes flags every continuous dof of a cell whose
+    thickness moved past the tolerance, and nothing else."""
+    fd = pytest.importorskip("firedrake")
+    from icepack2_tools.geometry import front_changed_nodes
+    mesh = fd.UnitSquareMesh(3, 3)
+    Q_g = fd.FunctionSpace(mesh, "DG", 0)
+    Q = fd.FunctionSpace(mesh, "CG", 1)
+    H_old = fd.Function(Q_g).assign(100.0)
+    H_new = fd.Function(Q_g).assign(100.0)
+    H_new.dat.data[0] = 300.0          # a rebuilt cell
+    H_new.dat.data[1] = 100.5          # under the tolerance
+    flagged = front_changed_nodes(H_new, H_old, Q)
+    cell_nodes = Q.cell_node_map().values
+    assert set(np.flatnonzero(flagged)) == set(cell_nodes[0])

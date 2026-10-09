@@ -1002,8 +1002,10 @@ def main():
                     f"{raster_sample}: its geometry is not taken")
             # The warm start's controls were fitted against the front its own
             # sampling built. Under ISMIP7_WARM_START_FRONT_EXTEND=1 theta and
-            # phi continue from the ice upstream over the cells the front rule
-            # rebuilt or emptied, and the refit sets them afresh (issue #167).
+            # phi over the cells the front rule rebuilt or emptied become a
+            # harmonic blend of the ice upstream and the nodes seaward of the
+            # band, which keep the warm start's values, and the refit sets
+            # them afresh (issue #167).
             # A phi taken from a MAP fitted under a front sampling
             # (ISMIP7_WARM_START_FLUIDITY) already belongs to this front and
             # is kept.
@@ -1018,9 +1020,10 @@ def main():
                     harmonic_extension({"theta": theta, "phi": phi}[_name],
                                        _front_nodes, 0.0, COMM_WORLD)
                 PETSc.Sys.Print(
-                    f"    front band: {' and '.join(_band)} continued from upstream on "
+                    f"    front band: {' and '.join(_band)} continued harmonically on "
                     f"{global_count(_front_nodes, COMM_WORLD)} nodes of the cells "
-                    f"the front rule changed (ISMIP7_WARM_START_FRONT_EXTEND=1)"
+                    f"the front rule changed, between the ice upstream and the "
+                    f"warm start seaward (ISMIP7_WARM_START_FRONT_EXTEND=1)"
                     + ("; phi is the fluidity MAP's, fitted under "
                        f"{_fl_rs}" if "phi" not in _band else ""))
             if same_mesh and _warm_lake != int(LAKE_ICE_BASE):

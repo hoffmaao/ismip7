@@ -299,9 +299,12 @@ def warm_start_fluidity():
 
 def warm_start_front_extend():
     r"""``ISMIP7_WARM_START_FRONT_EXTEND=1``: a refit under a front sampling
-    from a warm start sampled without it continues theta and phi from the ice
-    upstream over the cells the front rule rebuilt or emptied, and the
-    inversion sets them afresh there (issue #167). The warm start fitted them
+    from a warm start sampled without it continues theta and phi harmonically
+    over the cells the front rule rebuilt or emptied, and the inversion sets
+    them afresh there (issue #167). Every other node keeps the warm start's
+    value, so the band becomes a harmonic blend of the ice upstream and the
+    nodes seaward of it; on a synthetic shelf it came out as the linear
+    interpolation between the two sides. The warm start fitted them
     against its own front: RC's final MAP left a band stiffer and with more
     friction than the rest of the ice (log fluidity -1.33 against -0.17, log
     friction +1.06 against -0.02), which the rule makes four times thicker.
@@ -309,7 +312,7 @@ def warm_start_front_extend():
     (`warm_start_fluidity`) is kept. For RC's refit the continuation left the
     start worse: from the ef2 state the residual began at ||F|| 4.1e14
     against 1.7e14 without it, and the first forward solve failed (job
-    11884485); RC's refit starts from Budd's fluidity and state instead. The
+    11884485, with the band blended between both sides as above); RC's refit starts from Budd's fluidity and state instead. The
     band is found by comparing this run's thickness with a vertex sample, so
     only a warm start sampled with vertex is continued; `front_band_extends`
     refuses any other sampling."""
@@ -345,7 +348,9 @@ def front_band_controls(fluidity_sampling=None):
     front band: theta, and phi unless it came from a MAP fitted under a front
     sampling (``fluidity_sampling``, the raster sampling of the
     ``ISMIP7_WARM_START_FLUIDITY`` MAP; None without one), whose phi already
-    belongs to the rule's front."""
+    belongs to the rule's front. Each is a harmonic blend over the band of
+    its values on the ice upstream and on the nodes seaward of the band,
+    which keep the warm start's values."""
     if fluidity_sampling is not None and raster_front(fluidity_sampling):
         return ("theta",)
     return ("theta", "phi")

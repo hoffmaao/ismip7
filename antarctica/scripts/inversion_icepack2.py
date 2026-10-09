@@ -114,7 +114,7 @@ from icepack2_tools.runconfig import (
     lc as _lc, lc_coarse as _lc_coarse, n_flow as _n_flow,
     eval_continuation, inversion_mesh_source, transfer_fill, drag_gate,
     DRAG_GATE_NONE, hvisc_floor, exact_front_version, warm_start_geometry,
-    warm_start_state, ramp_slide_fixed,
+    warm_start_state, ramp_slide_fixed, warm_start_fluidity,
 )
 DATA_DIR = obs_data_root()
 from icepack2_tools.prior import (
@@ -901,8 +901,35 @@ def main():
             if _phi_mode not in ("0", "1", "physical"):
                 raise ValueError(
                     f"ISMIP7_WARM_START_PHI={_phi_mode!r}: use 1, 0 or physical")
+            # ISMIP7_WARM_START_FLUIDITY: phi and the prior it deviates from
+            # come from another MAP, so A = A_prior exp(phi) is that MAP's.
+            _fl_chk = warm_start_fluidity()
+            _fl_prior = None
+            _fl_origin = None
             if _phi_mode == "0":
+                if _fl_chk:
+                    raise ValueError(
+                        "ISMIP7_WARM_START_FLUIDITY names a fluidity to start from "
+                        "and ISMIP7_WARM_START_PHI=0 the prior mean: set one")
                 PETSc.Sys.Print("    log_fluidity: prior mean (ISMIP7_WARM_START_PHI=0)")
+            elif _fl_chk:
+                with fd.CheckpointFile(_fl_chk, "r") as _fl:
+                    _fl_fc = (str(_fl.get_attr("/", "fluidity_control")).lower()
+                              if _fl.has_attr("/", "fluidity_control") else "all")
+                    if _fl_fc != FLUIDITY_CONTROL:
+                        raise ValueError(
+                            f"ISMIP7_WARM_START_FLUIDITY={_fl_chk} was inverted "
+                            f"under fluidity_control={_fl_fc}, this run under "
+                            f"{FLUIDITY_CONTROL}")
+                    _fl_mesh = _fl.load_mesh()
+                    phi.assign(_warm_load(_fl, _fl_mesh, "log_fluidity", Q))
+                    _fl_prior = _warm_load(_fl, _fl_mesh, "fluidity_prior", Q)
+                    _fl_origin = (str(_fl.get_attr("/", "fluidity_prior_origin"))
+                                  if _fl.has_attr("/", "fluidity_prior_origin")
+                                  else f"warm start {os.path.basename(_fl_chk)}")
+                PETSc.Sys.Print(
+                    f"    log_fluidity and fluidity_prior from {_fl_chk} "
+                    f"(ISMIP7_WARM_START_FLUIDITY); log_friction from the warm start")
             else:
                 phi.assign(_warm_load(chk, chk_mesh, "log_fluidity", Q))
             # A MAP inverted on the sqrt(C) control carries alpha itself; its
@@ -1022,7 +1049,8 @@ def main():
             # e.g. after a change to its physics; phi is kept, as a deviation
             # from the new prior mean.
             if _phi_mode == "physical":
-                warm_A_prior_rebase = _warm_load(chk, chk_mesh, "fluidity_prior", Q)
+                warm_A_prior_rebase = (_fl_prior if _fl_prior is not None else
+                                       _warm_load(chk, chk_mesh, "fluidity_prior", Q))
                 warm_A_prior = None
                 PETSc.Sys.Print("    fluidity_prior: recomputed below; log_fluidity "
                                 "rebased onto it (ISMIP7_WARM_START_PHI=physical)")
@@ -1030,6 +1058,9 @@ def main():
                 warm_A_prior = None
                 PETSc.Sys.Print("    fluidity_prior: recomputed below "
                                 "(ISMIP7_WARM_START_PRIOR=0); log_fluidity kept")
+            elif _fl_prior is not None:
+                warm_A_prior = _fl_prior
+                warm_prior_origin = _fl_origin
             else:
                 try:
                     warm_A_prior = _warm_load(

@@ -76,3 +76,14 @@ def test_a_warm_start_state_comes_with_its_geometry_or_as_a_first_guess(monkeypa
         R.warm_start_state(geometry_taken=False, same_mesh=False)
     monkeypatch.setenv("ISMIP7_WARM_START_STATE", "0")
     assert R.warm_start_state(geometry_taken=False, same_mesh=False) == (False, False)
+
+
+def test_the_fluidity_knob_names_an_existing_map(monkeypatch, tmp_path):
+    monkeypatch.delenv("ISMIP7_WARM_START_FLUIDITY", raising=False)
+    assert R.warm_start_fluidity() is None
+    budd = tmp_path / "budd.h5"
+    monkeypatch.setenv("ISMIP7_WARM_START_FLUIDITY", str(budd))
+    with pytest.raises(FileNotFoundError, match="ISMIP7_WARM_START_FLUIDITY"):
+        R.warm_start_fluidity()
+    budd.write_bytes(b"")
+    assert R.warm_start_fluidity() == str(budd)

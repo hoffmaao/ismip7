@@ -281,6 +281,22 @@ def warm_start_geometry(*, same_mesh, same_lake, warm_sampling, run_sampling):
     return take
 
 
+def warm_start_fluidity():
+    r"""``ISMIP7_WARM_START_FLUIDITY=<MAP>``: an inversion warm-started from
+    ``ISMIP7_WARM_START`` takes its log fluidity, and the fluidity prior it
+    is a deviation from, from this other MAP; theta and the state stay the
+    warm start's. Fluidity does not depend on the friction law, so RC's refit
+    under the front-cell rule can start from the fluidity Budd's refit fitted
+    on the same geometry (issue #167). None when unset; a chain link resuming
+    its own checkpoint drops it (inversion.sbatch)."""
+    path = os.environ.get("ISMIP7_WARM_START_FLUIDITY", "").strip()
+    if not path:
+        return None
+    if not os.path.isfile(path):
+        raise FileNotFoundError(f"ISMIP7_WARM_START_FLUIDITY={path}: no such file")
+    return path
+
+
 def ramp_slide_fixed():
     r"""``ISMIP7_RAMP_SLIDE_FIXED=1``: the inversion's startup ramp climbs the
     flow exponent from 1 with the sliding exponent held at its target. This

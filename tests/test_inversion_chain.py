@@ -48,6 +48,7 @@ if "ISMIP7_WARM_START" in os.environ:
         print(f"driver: warm_start_content={fh.read().strip()}")
 print(f"driver: maxiter={os.environ['ISMIP7_MAXITER']}")
 print(f"driver: strict={os.environ.get('ISMIP7_WARM_START_STRICT', 'unset')}")
+print(f"driver: fluidity={os.environ.get('ISMIP7_WARM_START_FLUIDITY', 'unset')}")
 
 die = os.environ.get("FAKE_DIE_AFTER", "")
 print("Optimization finished: CONVERGENCE: REL_REDUCTION_OF_F_<=_FACTR*EPSMCH")
@@ -254,6 +255,26 @@ def test_a_resumed_link_is_held_to_the_chain_s_objective(sandbox):
     assert Path(_warm_start(log)).name == map_out(sandbox).name
     assert "driver: strict=1" in log
 
+
+
+def test_a_resumed_link_keeps_its_own_fluidity(sandbox):
+    r"""A first link may take its fluidity from another MAP
+    (ISMIP7_WARM_START_FLUIDITY, issue #167); its successor inherits the knob
+    through --export=ALL, and resuming the chain's own checkpoint it drops it,
+    so the fluidity the chain has fitted is the one it continues from."""
+    rc_map, budd = sandbox / "rc_2km.h5", sandbox / "budd_2km.h5"
+    rc_map.write_text("checkpoint\n")
+    budd.write_text("checkpoint\n")
+    env = dict(ISMIP7_WARM_START=str(rc_map), ISMIP7_WARM_START_STRICT="0",
+               ISMIP7_WARM_START_FLUIDITY=str(budd))
+    rc, log, _ = run_job(sandbox, FAKE_DIE_AFTER="map_write", **env)
+    assert rc == 137, log
+    assert f"driver: fluidity={budd}" in log
+
+    rc, log, _ = run_job(sandbox, job_id="424244", **env)
+    assert rc == 0, log
+    assert Path(_warm_start(log)).name == map_out(sandbox).name
+    assert "driver: fluidity=unset" in log
 
 def _warm_start(log):
     return next(line.split("=", 1)[1] for line in log.splitlines()

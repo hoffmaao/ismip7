@@ -283,10 +283,13 @@ def warm_start_geometry(*, same_mesh, same_lake, warm_sampling, run_sampling):
 
 def ramp_slide_fixed():
     r"""``ISMIP7_RAMP_SLIDE_FIXED=1``: the inversion's startup ramp climbs the
-    flow exponent from 1 with the sliding exponent held at its target. RC's
-    final controls under the front-cell rule could not take the n = m = 1
-    step on the 2 km mesh: its first linear solve failed under full MUMPS,
-    scpc_gamg and scpc_mumps alike (issue #167)."""
+    flow exponent from 1 with the sliding exponent held at its target. This
+    is the start IU chose for RC's refit under the front-cell rule on the
+    2 km mesh (issue #167). The ramp from n = m = 1 failed there: under full
+    MUMPS (job 11869835) Newton ran 200 iterations at n = m = 1 in each of
+    three rungs and diverged (||F|| 3.0e11 to 5.3e11), and under scpc_gamg
+    and scpc_mumps (jobs 11883518 and 11883519) the first linear solve at
+    n = m = 1 failed (1,000 Krylov iterations from ||F|| 8.9e9)."""
     return os.environ.get("ISMIP7_RAMP_SLIDE_FIXED", "0").strip() not in ("", "0")
 
 

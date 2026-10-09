@@ -1436,6 +1436,7 @@ SIZE="ISMIP7_FRICTION=<the MAP's law> ISMIP7_LC=2000 ISMIP7_LC_COARSE=5000 ISMIP
 relax=$($R projection --time <the whole year> ISMIP7_EXPERIMENT=relax ISMIP7_INVERSION=$MAP $SIZE | tail -n 1)
 # the re-inversion from it, once it has finished
 $R inversion --dependency afterok:${relax%%;*} --time <one link> $SIZE \
+    ISMIP7_RASTER_SAMPLE=<the MAP's raster_sample> \
     ISMIP7_WARM_START=$PWD/antarctica/results/relax_<MAP stem>_2000_final.h5 \
     ISMIP7_MAXITER=250 ISMIP7_CHAIN_MAX=0 \
     ISMIP7_MAP_OUT=$PWD/antarctica/results/reinvert_2km/final/<MAP stem>_relax2014.h5
@@ -1443,7 +1444,11 @@ $R inversion --dependency afterok:${relax%%;*} --time <one link> $SIZE \
 
 The re-inversion's objective settings come from the end state, which carries
 the MAP's, and the strict handoff check holds them; give the run the
-inversion knobs the MAP was made under, as for any chain link. Size `--time`
+inversion knobs the MAP was made under, as for any chain link. That includes
+`ISMIP7_RASTER_SAMPLE`, which `inversion.sbatch` sets to `vertex_front` unless
+told otherwise: the sampling is an objective key, and the end state's geometry
+was built under the MAP's recorded `raster_sample` (`vertex` for every MAP
+inverted before issue #167), which the end state carries. Size `--time`
 for one link from the MAP chain's own seconds per evaluation (about 260
 evaluations for 250 iterations): `ISMIP7_MAXITER` counts per process, so a
 second link would start a second 250. Give the relaxation's own submission a

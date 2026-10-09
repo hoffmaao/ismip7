@@ -299,6 +299,19 @@ current mesh (`test-i167-frontbm-meshes`,
 `test-2km-budd-ef2-vertex-front-eval1`), so the production meshes stay the
 current ones.
 
+The controls absorb the front they were fitted against, so a MAP is refitted
+under the rule before it drives a forward on a buffered mesh. IU's Budd MAP
+refitted under it (`inversion-2km-budd-b20k-ef2-vf`) carries 1,313 Gt/yr out
+of a 191 m front at t = 0, its relaxation year without apparent MB holds the
+front at 1,420 to 1,317 Gt/yr with dM/dt near zero
+(`inversion-2km-budd-b20k-ef2-vf-relax2014-year`), and it transfers onto the
+1 km mesh with an apparent MB of +161 Gt/yr. Rice's Budd snapshot of 24
+September, fitted on the buffer-0 mesh, transfers onto the 1 km mesh near
+balance under `vertex` (apparent MB -473 Gt/yr) and with its shelves at three
+times the observed speed under the rule (+9,004 Gt/yr;
+`test-1km-transfer-t0-vertex-front`), so Rice's MAPs are refitted under the
+rule before Rice's buffered-mesh forwards (IU, 9 October).
+
 ## The drag gate and the membrane floor (issue #153)
 
 On the 20 km buffered 2 km mesh the ocean drag reached the ice front by two

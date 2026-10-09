@@ -2,7 +2,7 @@
  "id": "inversion-2km-rc-b20k-ef2-vf",
  "task": "inversion",
  "institution": "IU",
- "status": "stopped",
+ "status": "running",
  "friction": "regularized_coulomb",
  "title": "RC final MAP refitted under the front-cell rule (ISMIP7_RASTER_SAMPLE=vertex_front) on the 2 km buffered mesh",
  "mesh": "antarctica_5000_2000_buffered20000 (IU's build, 969,764 vertices), DG0 geometry, front cells by geometry.front_cells",
@@ -10,17 +10,19 @@
  "period": "2015 state",
  "initial_state": "inversion-2km-rc-b20k-rho7500-floating-ef2's controls, not strict (its geometry, velocity_obs and state are rebuilt under the rule)",
  "forcing": "inversion-2km-rc-b20k-rho7500-floating-ef2's objective (sigma 30, rho 7.5 km, ISMIP7_EXACT_FRONT=2, ISMIP7_DRAG_GATE=vertex, ISMIP7_RC_HVISC_FLOOR=2.5, ISMIP7_FLUIDITY_CONTROL=floating, the same log-velocity weight) with ISMIP7_RASTER_SAMPLE=vertex_front",
- "resources": "32 ranks, 240G, 8 h links; full_mumps with ISMIP7_DIRECT_FORWARD_MAXIT=100, ISMIP7_MAXITER=120, ISMIP7_CHAIN_MAX=1; from 9 Oct ISMIP7_WARM_START_STATE=1 (a4c79c6)",
+ "resources": "32 ranks, 240G, 8 h links; full_mumps with ISMIP7_DIRECT_FORWARD_MAXIT=100, ISMIP7_MAXITER=120, ISMIP7_CHAIN_MAX=1; ISMIP7_WARM_START_STATE=1 for 11883148 and 11883149 (a4c79c6); ISMIP7_RAMP_SLIDE_FIXED=1 for 11884073 (2400acc)",
  "jobs": [
   "11869835",
   "11869838",
   "11883148",
   "11883149",
   "11883518",
-  "11883519"
+  "11883519",
+  "11884073",
+  "11884074"
  ],
- "code": "9dfb499 (PR 163 with main after PR 164 and issue #167's front cells); Quartz worktree /N/scratch/dlilien/ismip7_reinvert_s15; cell refit_vf_<law> of /N/scratch/dlilien/ismip7_reinvert_jobs/submit_reinvert.sh; from 9 Oct a4c79c6 in /N/scratch/dlilien/ismip7_reinvert_s17",
+ "code": "9dfb499 (PR 163 with main after PR 164 and issue #167's front cells); Quartz worktree /N/scratch/dlilien/ismip7_reinvert_s15; cell refit_vf_<law> of /N/scratch/dlilien/ismip7_reinvert_jobs/submit_reinvert.sh; from 9 Oct a4c79c6, then 2400acc for 11884073, in /N/scratch/dlilien/ismip7_reinvert_s17",
  "started": "2026-10-08",
  "results": "Quartz /N/project/ice_rheology/ISMIP7/antarctica/results/reinvert_2km/final/inversion_icepack2_rc_n3_dg0_logvel_2000_int5000_b20k_rho7500_floating_ef2_vf.h5 beside the ef2 MAP, which is read only",
- "notes": "issue #167: IU chose the front-cell rule on the current meshes (8 Oct). The first link (11869835) diverged at n = 1 in all three rungs of the cold ramp (200 Newton iterations each, ||F|| 3.0e11 to 5.3e11, about an hour a rung) and exited after 2 h 56 min; its successor (11869838) was cancelled, as it would have repeated the ramp. Resubmitted as 11883148 with the ef2 MAP's mixed state as the first guess (ISMIP7_WARM_START_STATE=1). With the ef2 state as the first guess (11883148, its successor 11883149) the residual started at ||F|| 1.7e14 (the MAP's writer recorded 9.3e-3) and the first forward solve failed after 23 min. Two one-evaluation probes ramping under scpc_gamg (11883518) and scpc_mumps (11883519) failed the first linear solve at n = m = 1 (1,000 Krylov iterations from ||F|| 8.9e9) and were cancelled. RC's ef2 controls do not start from n = m = 1 on this mesh, and the old state is too far from the new geometry's solution; the refit is stopped until a start is chosen."
+ "notes": "issue #167: IU chose the front-cell rule on the current meshes (8 Oct). The first link (11869835) diverged at n = 1 in all three rungs of the cold ramp (200 Newton iterations each, ||F|| 3.0e11 to 5.3e11, about an hour a rung) and exited after 2 h 56 min; its successor (11869838) was cancelled, as it would have repeated the ramp. Resubmitted as 11883148 with the ef2 MAP's mixed state as the first guess (ISMIP7_WARM_START_STATE=1). With the ef2 state as the first guess (11883148, its successor 11883149) the residual started at ||F|| 1.7e14 (the MAP's writer recorded 9.3e-3) and the first forward solve failed after 23 min. Two one-evaluation probes ramping under scpc_gamg (11883518) and scpc_mumps (11883519) failed the first linear solve at n = m = 1 (1,000 Krylov iterations from ||F|| 8.9e9) and were cancelled. RC's ef2 controls do not start from n = m = 1 on this mesh, and the old state is too far from the new geometry's solution. IU chose (9 Oct) to ramp n only with m held at 3 (ISMIP7_RAMP_SLIDE_FIXED=1). The refit was submitted as 11884073 (cell refit_vf_rc, code 2400acc), with a one-evaluation probe ramping under scpc_gamg with the sliding exponent fixed (11884074, cell i167_rc_rampn_gamg, writing to /N/scratch/dlilien/ismip7_reinvert_jobs/i167/). No result yet."
 }

@@ -299,9 +299,11 @@ def warm_start_state(*, geometry_taken, same_mesh):
     it on the warm start's own mesh when the geometry is not taken, as the
     first guess on this run's geometry (a warm start sampled another way,
     issue #167). The first evaluation's forward then solves it at the full
-    exponents, where a cold ramp from n = 1 can fail: RC's refit under
-    vertex_front diverged at n = 1 in all three rungs (job 11869835). On
-    another mesh the knob is refused."""
+    exponents. For RC's refit under vertex_front it did not work: from the
+    ef2 state the run started at ||F|| 1.7e14 against the recorded 9.3e-3
+    and the first forward solve failed (jobs 11883148 and 11883149). RC's
+    refit runs with ``ISMIP7_RAMP_SLIDE_FIXED=1`` instead. On another mesh
+    the knob is refused."""
     if geometry_taken:
         return True, False
     want = os.environ.get("ISMIP7_WARM_START_STATE", "0").strip() not in ("", "0")

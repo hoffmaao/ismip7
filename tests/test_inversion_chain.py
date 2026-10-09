@@ -257,7 +257,6 @@ def test_a_resumed_link_is_held_to_the_chain_s_objective(sandbox):
     assert "driver: strict=1" in log
 
 
-
 def test_a_resumed_link_keeps_its_own_fluidity(sandbox):
     r"""A first link may take its fluidity and state from another MAP
     (ISMIP7_WARM_START_FLUIDITY, ISMIP7_WARM_START_STATE=fluidity, issue
@@ -280,6 +279,7 @@ def test_a_resumed_link_keeps_its_own_fluidity(sandbox):
     assert Path(_warm_start(log)).name == map_out(sandbox).name
     assert "driver: fluidity=unset" in log
     assert "driver: state=unset" in log
+
 
 def _warm_start(log):
     return next(line.split("=", 1)[1] for line in log.splitlines()

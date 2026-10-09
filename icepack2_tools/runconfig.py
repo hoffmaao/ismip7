@@ -348,7 +348,6 @@ def warm_start_state(*, geometry_taken, same_mesh):
     return want, want
 
 
-
 def warm_start_state_fluidity(*, same_mesh):
     r"""``ISMIP7_WARM_START_STATE=fluidity``: the first guess is the mixed
     state of the MAP ``ISMIP7_WARM_START_FLUIDITY`` names, the solution under
@@ -366,6 +365,7 @@ def warm_start_state_fluidity(*, same_mesh):
             "ISMIP7_WARM_START_FLUIDITY MAP on its own mesh, and this run's "
             "mesh differs")
     return True
+
 
 def raster_front(method):
     r"""Whether the raster sampling ``method`` rebuilds the front cells."""

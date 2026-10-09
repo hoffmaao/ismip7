@@ -381,7 +381,8 @@ dH/dt term, and the integrated net mass-balance constraint that is off by
 default in the repo. The geometry is sampled with `ISMIP7_RASTER_SAMPLE`,
 `vertex_front` by default since issue #167 (the marine front rebuilt from
 BedMachine's mask); a warm start sampled another way supplies its controls
-and fluidity prior only.
+and fluidity prior, and its mixed state only as a first guess under
+`ISMIP7_WARM_START_STATE=1` (README, the warm start knobs).
 
 `site_env.sh` defaults `ISMIP7_FRICTION` to `regularized_coulomb` everywhere.
 Budd's shelf gate was a sign test on the roundoff residue of the effective

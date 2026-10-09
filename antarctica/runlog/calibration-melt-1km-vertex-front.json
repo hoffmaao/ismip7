@@ -1,0 +1,18 @@
+{
+ "id": "calibration-melt-1km-vertex-front",
+ "task": "calibration",
+ "institution": "IU",
+ "status": "running",
+ "title": "Melt offsets at K 6.5e-5 refitted under the front-cell rule on the 1 km production mesh",
+ "mesh": "antarctica_10000_1000_buffered20000, Rice's build (1,869,252 vertices; sha256 9e2ed33f), DG0 cells under ISMIP7_RASTER_SAMPLE=vertex_front",
+ "site": "IU Quartz, debug partition, serial",
+ "period": "OI climatology",
+ "forcing": "OI climatology 30_sep; observed melt from the Paolo, Davison and Adusumilli table, 1067.4 Gt/yr integrated (sha256 ccea556e)",
+ "jobs": [
+  "11869836"
+ ],
+ "code": "9dfb499; Quartz worktree /N/scratch/dlilien/ismip7_reinvert_s15 (calibrate_deltaT.script, DELTAT_K=6.5e-5)",
+ "started": "2026-10-08",
+ "results": "Quartz /N/scratch/dlilien/ismip7_reinvert_jobs/i167/calib_vf/",
+ "notes": "issue #167 and issue #26: the second calibration, for runs under the front-cell rule; calibration-melt-refit-1km-rice-k50 stays the vertex calibration. The rule shrinks the 1 km melt-receiving area by 2.4 % (test-i167-front-probes)."
+}

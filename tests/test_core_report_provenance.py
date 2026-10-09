@@ -54,7 +54,7 @@ def test_the_report_resolves_the_melt_knobs_left_at_their_defaults(monkeypatch):
     # the tracked calibration, by its path in the repository; the run's own
     # provenance line carries its sha256 and K
     assert env["ISMIP7_DELTAT_PER_BASIN_NPZ"] == (
-        "antarctica/calibration/deltaT_per_basin_1000_K6.500e-05.npz"
+        "antarctica/calibration/deltaT_per_basin_1000_K6.500e-05_vertex_front.npz"
         "    # default (not exported)")
     assert "ISMIP7_K_MELT" not in env
     monkeypatch.setenv("ISMIP7_MELT_SLOPE", "local")

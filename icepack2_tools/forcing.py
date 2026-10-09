@@ -1633,7 +1633,7 @@ def describe_melt_calibration(dT_npz, K_npz=None, mesh_basename=None):
     names is the file the run melted with. ``core_report.py`` lifts the line
     into the run's record, which is how every submitted run can be shown to
     have read the same calibration."""
-    from .runconfig import (MELT_CALIBRATION_DEFAULT, file_sha256,
+    from .runconfig import (MELT_CALIBRATIONS, file_sha256,
                             melt_calibration_contract)
     if dT_npz is None:
         return [f"{FORCING_PROVENANCE_MARKER} ocean melt calibration "
@@ -1647,8 +1647,9 @@ def describe_melt_calibration(dT_npz, K_npz=None, mesh_basename=None):
                     else str(contract.get("selected_as", "")))
     fitted_on = contract.get("mesh", "a mesh its file does not record")
     build = (f" ({contract['mesh_build']})" if contract.get("mesh_build") else "")
-    named = ("the tracked default"
-             if os.path.abspath(dT_npz) == os.path.abspath(MELT_CALIBRATION_DEFAULT)
+    tracked = {os.path.abspath(p): k for k, p in MELT_CALIBRATIONS.items()}
+    named = (f"the tracked calibration of {tracked[os.path.abspath(dT_npz)]} sampling"
+             if os.path.abspath(dT_npz) in tracked
              else "named with ISMIP7_DELTAT_PER_BASIN_NPZ")
     line = (f"{FORCING_PROVENANCE_MARKER} ocean melt calibration "
             f"{os.path.basename(dT_npz)} sha256 {file_sha256(dT_npz)} ({named}): "

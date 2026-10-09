@@ -44,7 +44,7 @@ def test_the_melt_calibration_is_in_this_checkout():
     """A fresh clone melts with the tracked calibration: no results/ directory
     is searched, so a machine holding an old per-basin K file melts the same."""
     assert MELT_CALIBRATION_DEFAULT == os.path.join(
-        ANT, "calibration", "deltaT_per_basin_1000_K6.500e-05.npz")
+        ANT, "calibration", "deltaT_per_basin_1000_K6.500e-05_vertex_front.npz")
     assert deltat_per_basin_npz() == MELT_CALIBRATION_DEFAULT
     assert k_per_basin_npz() is None
 

@@ -11,7 +11,7 @@ its full report from `core_report.py`; this is the index.
 
 334 records.
 
-Status: 12 planned, 6 running, 31 stopped, 264 done, 21 superseded.
+Status: 12 planned, 5 running, 31 stopped, 265 done, 21 superseded.
 
 ## Inversion
 
@@ -47,7 +47,7 @@ Status: 12 planned, 6 running, 31 stopped, 264 done, 21 superseded.
 | Simulation | Status | Mesh | Site | Started | Finished | Headline result |
 |---|---|---|---|---|---|---|
 | Ocean melt: the per-basin thermal-forcing offset on the 1000 m production mesh | done | antarctica_10000_1000_buffered20000, DG0 cells | IU Quartz, debug partition | 2026-09-24 | 2026-09-24 | uncorrected totals 925, 1656 and 2678 Gt/yr at K05, K50 and K95, 2.0 percent above the 2 km mesh; every basin reaches its July total with a root in the toolbox window, and the offsets differ from the 2 km fit by at most 0.12 K (basin 1). The 2 km files applied here put, to first order, 1095, 1085 and 1072 Gt/yr on the fitted basins, with basins 1, 6, 12 and 13 more than 10 percent off at some K and basin 6 44 percent under at K95 |
-| Melt offsets at K 6.5e-5 refitted under the front-cell rule on the 1 km production mesh | running | antarctica_10000_1000_buffered20000, Rice's build (1,869,252 vertices; sha256 9e2ed33f), DG0 cells under ISMIP7_RASTER_SAMPLE=vertex_front | IU Quartz, debug partition, serial | 2026-10-08 | - | - |
+| Melt offsets at K 6.5e-5 refitted under the front-cell rule on the 1 km production mesh | done | antarctica_10000_1000_buffered20000, Rice's build (1,869,252 vertices; sha256 9e2ed33f), DG0 cells under ISMIP7_RASTER_SAMPLE=vertex_front | IU Quartz, debug partition, serial | 2026-10-08 | 2026-10-08 | 1,357,423 floating cells (1,511,859 km2) under the rule, against 1,399,171 under vertex; front cells rebuilt 58,368 and emptied 40,797. Every basin roots inside 3 K and the thermal forcing rule admits the K; the offsets run from -0.720 to +1.224 K (vertex: -0.684 to +1.200), 1,256.8 Gt/yr at zero offset. check_melt_bound.py with the forward's own callback melts 1,067.388 Gt/yr against the 1,067.386 fitted, every basin at ratio 1.0000 or 1.0001, maximum 42.1 m/yr, no cell past the libmassbffl bound; the ice-free cells that pass the flotation test (295,703 open ocean, 9,731 bare land) are left out, as under vertex. |
 | Ocean melt: toolbox K and the per-basin thermal-forcing offset | done | antarctica_5000_2000_buffered0 | local workstation | 2026-09-22 | 2026-09-22 | uncorrected totals 907, 1623 and 2625 Gt/yr at K05, K50 and K95; every basin reaches its observed total with an offset inside 1.3 K, so every basin has a root in the toolbox window |
 | Ocean melt: the per-basin thermal-forcing offset refitted to the July 2026 table | done | antarctica_5000_2000_buffered0, DG0 cells | IU Quartz, debug partition | 2026-09-24 | 2026-09-24 | uncorrected totals 907, 1623 and 2625 Gt/yr at K05, K50 and K95, as calibration-melt-2km measured, which is 0.85, 1.52 and 2.46 times 1067.4; every basin reaches its July total with a root in the toolbox window, offsets -0.55 to +1.72 K at K05, -0.85 to +0.87 K at K50 and -1.17 to +0.30 K at K95, the largest Amundsen (basin 9) at K05; the 865 control needs offsets up to 1.30 K, as calibration-melt-2km found. calibrate_melt.py on the July table: K* 4.46e-5, just under K05; total-match K 5.59e-5; melt at K* 851 Gt/yr; 7 of 16 basin K inside K05 to K95 |
 | Ocean melt: the forward's own callback against the K50 calibration on IU's build of the 1000 m production mesh | done | antarctica_10000_1000_buffered20000, IU's build (1,869,088 vertices), DG0 cells | IU Quartz, debug partition | 2026-09-25 | 2026-09-25 | check_melt_bound.py exit 0 at both commits, with the same table: the forward melts 1067.390 Gt/yr against the 1067.386 its offsets were fitted to, every basin at ratio 1.0000 and the largest difference 0.006 Gt/yr (basin 14, its fit residual); 1 548 666 km2 floating over 1 398 387 cells, maximum 41.7 m/yr, 99th percentile 16.2, area mean 0.75, no cell past the libmassbffl bound. The callbacks' earlier melt set also covered 257 687 ice-free open-ocean cells, where they booked 156.3 Gt/yr of melt and 23.1 Gt/yr of refreezing, 1200.6 Gt/yr in all, and 6 666 cells of bare land, where the climatology melts nothing |
@@ -886,17 +886,20 @@ Ocean melt: the per-basin thermal-forcing offset on the 1000 m production mesh (
 
 ### calibration-melt-1km-vertex-front
 
-Melt offsets at K 6.5e-5 refitted under the front-cell rule on the 1 km production mesh (running), IU.
+Melt offsets at K 6.5e-5 refitted under the front-cell rule on the 1 km production mesh (done), IU.
 
 - **Task type:** calibration
 - **Period (yr):** OI climatology
 - **Mesh:** antarctica_10000_1000_buffered20000, Rice's build (1,869,252 vertices; sha256 9e2ed33f), DG0 cells under ISMIP7_RASTER_SAMPLE=vertex_front
 - **Forcing versions:** OI climatology 30_sep; observed melt from the Paolo, Davison and Adusumilli table, 1067.4 Gt/yr integrated (sha256 ccea556e)
 - **Site / partition:** IU Quartz, debug partition, serial
-- **Job ids:** 11869836
-- **Code:** 9dfb499; Quartz worktree /N/scratch/dlilien/ismip7_reinvert_s15 (calibrate_deltaT.script, DELTAT_K=6.5e-5)
+- **Job ids:** 11869836 11871318 11869845
+- **Code:** 9dfb499 (fit and check); Quartz worktree /N/scratch/dlilien/ismip7_reinvert_s15 (calibrate_deltaT.script, DELTAT_K=6.5e-5; check_melt_bound.py)
 - **Started:** 2026-10-08
-- **Results path:** Quartz /N/scratch/dlilien/ismip7_reinvert_jobs/i167/calib_vf/
+- **Finished:** 2026-10-08
+- **Cost per model year:** serial, 4 min 15 s for the fit (11869836) and 3 min 52 s for the check (11871318); a 3 h backup of the fit on the general partition (11869845) was cancelled once the debug fit finished
+- **Results path:** Quartz /N/scratch/dlilien/ismip7_reinvert_jobs/i167/calib_vf/, tracked as antarctica/calibration/deltaT_per_basin_1000_K6.500e-05_vertex_front.npz (sha256 2ef9fad4) with its sidecar
+- **Audit:** 1,357,423 floating cells (1,511,859 km2) under the rule, against 1,399,171 under vertex; front cells rebuilt 58,368 and emptied 40,797. Every basin roots inside 3 K and the thermal forcing rule admits the K; the offsets run from -0.720 to +1.224 K (vertex: -0.684 to +1.200), 1,256.8 Gt/yr at zero offset. check_melt_bound.py with the forward's own callback melts 1,067.388 Gt/yr against the 1,067.386 fitted, every basin at ratio 1.0000 or 1.0001, maximum 42.1 m/yr, no cell past the libmassbffl bound; the ice-free cells that pass the flotation test (295,703 open ocean, 9,731 bare land) are left out, as under vertex.
 - **Notes:** issue #167 and issue #26: the second calibration, for runs under the front-cell rule; calibration-melt-refit-1km-rice-k50 stays the vertex calibration. The rule shrinks the 1 km melt-receiving area by 2.4 % (test-i167-front-probes).
 
 ### calibration-melt-2km

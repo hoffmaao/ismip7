@@ -378,7 +378,10 @@ Defaults write `inversion_icepack2_rc_n3_dg0_logvelnet_<ISMIP7_LC>.h5` (1000
 on the production mesh) under the settings the 2500 m result came from:
 sigma-normalised velocity misfit with ISSM's logarithmic term, the pointwise
 dH/dt term, and the integrated net mass-balance constraint that is off by
-default in the repo.
+default in the repo. The geometry is sampled with `ISMIP7_RASTER_SAMPLE`,
+`vertex_front` by default since issue #167 (the marine front rebuilt from
+BedMachine's mask); a warm start sampled another way supplies its controls
+and fluidity prior only.
 
 `site_env.sh` defaults `ISMIP7_FRICTION` to `regularized_coulomb` everywhere.
 Budd's shelf gate was a sign test on the roundoff residue of the effective

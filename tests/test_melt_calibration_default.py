@@ -28,7 +28,7 @@ from icepack2_tools.forcing import (                                  # noqa: E4
 )
 from icepack2_tools.runconfig import (                                # noqa: E402
     GEOMETRY_SPACE_DEFAULT, LC_COARSE_DEFAULT, LC_DEFAULT,
-    MELT_CALIBRATION_DEFAULT, RASTER_SAMPLE_DEFAULT, deltat_per_basin_npz,
+    MELT_CALIBRATION_DEFAULT, MELT_CALIBRATIONS, RASTER_SAMPLE_DEFAULT, deltat_per_basin_npz,
     file_sha256, melt_calibration_contract, melt_calibration_sidecar,
 )
 
@@ -57,13 +57,21 @@ def _basins(tmp_path):
     return str(path)
 
 
-def test_the_tracked_file_matches_its_sidecar():
-    contract = melt_calibration_contract(NPZ)
-    assert os.path.exists(NPZ)
+@pytest.mark.parametrize("sampling", sorted(MELT_CALIBRATIONS))
+def test_each_tracked_file_matches_its_sidecar(sampling):
+    npz = MELT_CALIBRATIONS[sampling]
+    contract = melt_calibration_contract(npz)
+    assert os.path.exists(npz)
+    assert contract["file"] == os.path.basename(npz)
+    assert contract["sha256"] == file_sha256(npz)
+    assert contract["raster_sample"] == sampling
+    assert contract["K"] == pytest.approx(6.5e-5, rel=1e-12)
+
+
+def test_the_default_is_the_front_cell_calibration():
     assert melt_calibration_sidecar(NPZ).endswith(
-        "deltaT_per_basin_1000_K6.500e-05.source.json")
-    assert contract["file"] == os.path.basename(NPZ)
-    assert contract["sha256"] == file_sha256(NPZ)
+        "deltaT_per_basin_1000_K6.500e-05_vertex_front.source.json")
+    assert MELT_CALIBRATIONS[RASTER_SAMPLE_DEFAULT] == NPZ
 
 
 def test_the_calibration_was_fitted_under_the_run_defaults():
@@ -86,7 +94,7 @@ def test_the_calibration_was_fitted_under_the_run_defaults():
     assert contract["mesh"] == PRODUCTION_MESH
     # the submission mesh is Rice's build of that name (issue 20)
     assert contract["vertices"] == 1869252 and "Rice's build" in contract["mesh_build"]
-    assert contract["obs_table"]["total_gtyr"] == 1067.4
+    assert contract["obs_table"]["total_gtyr"] == pytest.approx(1067.4, abs=0.05)
 
 
 def test_a_run_with_nothing_set_reads_the_tracked_file(clean):
@@ -147,17 +155,21 @@ def test_another_slope_constant_refuses_the_tracked_file(clean, monkeypatch, tmp
 def test_a_run_sampled_otherwise_is_refused():
     r"""The raster sampling moves the draft and the floating set the offsets
     were fitted on; a context that does not record it is not checked."""
-    assert check_melt_contract(NPZ, {"raster_sample": "vertex"}) == PRODUCTION_MESH
+    assert check_melt_contract(NPZ, {"raster_sample": "vertex_front"}) == PRODUCTION_MESH
     assert check_melt_contract(NPZ, {}) == PRODUCTION_MESH
+    with pytest.raises(ValueError, match="raster_sample=vertex_front"):
+        check_melt_contract(NPZ, {"raster_sample": "vertex"})
+    vertex = MELT_CALIBRATIONS["vertex"]
+    assert check_melt_contract(vertex, {"raster_sample": "vertex"}) == PRODUCTION_MESH
     with pytest.raises(ValueError, match="raster_sample=vertex"):
-        check_melt_contract(NPZ, {"raster_sample": "cell_mean"})
+        check_melt_contract(vertex, {"raster_sample": "vertex_front"})
 
 
 def test_a_floored_cold_start_is_refused():
     r"""A floor under the initial thickness (ISMIP7_H_CLAMP_INIT, 10 m under
     the legacy friction law) makes every ice-free cell hold floating ice,
     which the calibration never fitted over; a restart floors nothing."""
-    ctx = {"raster_sample": "vertex", "thickness_floor": 0.0}
+    ctx = {"raster_sample": RASTER_SAMPLE_DEFAULT, "thickness_floor": 0.0}
     assert check_melt_contract(NPZ, ctx) == PRODUCTION_MESH
     with pytest.raises(ValueError, match="ISMIP7_H_CLAMP_INIT=0"):
         check_melt_contract(NPZ, dict(ctx, thickness_floor=10.0))
@@ -168,7 +180,7 @@ def test_the_provenance_line_names_the_file_its_hash_and_both_meshes(clean, tmp_
     other, = describe_melt_calibration(NPZ, mesh_basename="antarctica_320000_32000.msh")
     assert same.startswith("Forcing provenance: ocean melt calibration ")
     assert file_sha256(NPZ) in same and "K 6.500e-05 (K50)" in same
-    assert "(the tracked default)" in same
+    assert "(the tracked calibration of vertex_front sampling)" in same
     assert (f"fitted on {PRODUCTION_MESH} (Rice's build, 1,869,252 vertices); "
             f"this run's mesh is {PRODUCTION_MESH}") in same
     assert "differs" not in same

@@ -105,9 +105,11 @@ GEOMETRY_SPACES = ("dg0", "cg1")
 #               thickness: 40 m against 163 m on the 2 km buffered mesh, and
 #               a vertex on the front of a _frontbm mesh samples a blend.
 # MAPs record the method used; the forward reads it back from the MAP.
+# vertex_front is the default since 8 October 2026 (IU, issue #167): IU's
+# final MAPs are refitted under it, and it has its own melt calibration.
 FRONT_RASTER_SAMPLES = ("vertex_front",)
 RASTER_SAMPLES = ("vertex", "cell_mean") + FRONT_RASTER_SAMPLES
-RASTER_SAMPLE_DEFAULT = "vertex"
+RASTER_SAMPLE_DEFAULT = "vertex_front"
 
 
 # Floor-cell coercivity drags of the dual-friction residual (dual_friction.py
@@ -834,14 +836,21 @@ def obs_data_root():
 # 1000 m / 10 km production mesh. The file is tracked, so a fresh clone melts
 # with it and nothing is copied or rerun. Its sidecar (<name>.source.json)
 # records the file's sha256 and the conventions the fit holds under, which
-# the forward checks (forcing.check_melt_contract).
-MELT_CALIBRATION_DEFAULT = os.path.join(
+# the forward checks (forcing.check_melt_contract). The offsets were fitted
+# again at that K under the front-cell rule (issue #167, run record
+# calibration-melt-1km-vertex-front), whose melt-receiving area is 2.4 %
+# smaller on the 1 km mesh; that file is the default, the calibration of the
+# default raster sampling.
+MELT_CALIBRATION_VERTEX = os.path.join(
     _ANTARCTICA, "calibration", "deltaT_per_basin_1000_K6.500e-05.npz")
+MELT_CALIBRATION_DEFAULT = os.path.join(
+    _ANTARCTICA, "calibration", "deltaT_per_basin_1000_K6.500e-05_vertex_front.npz")
 # The tracked calibration of each raster sampling. A calibration sums melt
 # over the cells its sampling builds, so a run takes the one fitted under its
 # own (forcing.check_melt_contract refuses another); a sampling with no entry
 # needs ISMIP7_DELTAT_PER_BASIN_NPZ.
-MELT_CALIBRATIONS = {"vertex": MELT_CALIBRATION_DEFAULT}
+MELT_CALIBRATIONS = {"vertex": MELT_CALIBRATION_VERTEX,
+                     "vertex_front": MELT_CALIBRATION_DEFAULT}
 
 # Knobs that no longer shape a run. They are refused rather than ignored, so
 # a job script written before the change fails at startup.
@@ -1002,8 +1011,8 @@ def deltat_per_basin_npz(raster_sample_of_run=None):
 
     ``ISMIP7_DELTAT_PER_BASIN_NPZ`` names the file; unset, it is the tracked
     calibration of the run's raster sampling (``MELT_CALIBRATIONS``;
-    ``raster_sample_of_run``, else ``ISMIP7_RASTER_SAMPLE``), which for vertex
-    sampling is ``MELT_CALIBRATION_DEFAULT``. ``ISMIP7_K_PER_BASIN_NPZ`` selects the legacy
+    ``raster_sample_of_run``, else ``ISMIP7_RASTER_SAMPLE``), which for the
+    default sampling is ``MELT_CALIBRATION_DEFAULT``. ``ISMIP7_K_PER_BASIN_NPZ`` selects the legacy
     per-basin K path instead (``k_per_basin_npz``), and then this returns
     None. Naming both is refused.
 

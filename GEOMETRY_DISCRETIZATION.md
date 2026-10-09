@@ -110,7 +110,9 @@ noise reads as slope. Measured at 32 km:
 
 The centroid version failed to converge in 200 Newton iterations. The cell
 average, meaning the L2 projection of the CG1 interpolant, is 42% smoother and
-much less peaked, lands on BedMachine's front thickness (median 152 m), and
+much less peaked, lands on BedMachine's front thickness (median 152 m) on this
+buffer-0 mesh (a buffered mesh's front is thinned; see "Front cells on a
+buffered mesh"), and
 reproduces the CG1 driving force to 1%. `geometry.sample_to_geometry` does
 this; do not replace it with a direct interpolate onto the DG0 space. Cell
 average here means that L2 projection (`ISMIP7_RASTER_SAMPLE=vertex`, the
@@ -242,6 +244,60 @@ everywhere. From the level-set run's 2024.0 checkpoint that residual was 2.19e10
 against an acceptance of 7.84, so the restart re-solved the state with the
 drag on, and its first step calved 21.7 Gt/yr where the uninterrupted run
 calved 2,865.
+
+## Front cells on a buffered mesh (issue #167)
+
+On a buffered mesh BedMachine's ice front crosses cells. Vertex sampling gives
+each of them the mean of its three vertex samples, and a vertex over open
+water samples zero, so the model's front is a rim of partly covered cells at
+a fraction of the front's thickness. Every cell of 1 m or more counts as ice
+(`ISMIP7_FRONT_HMIN`), and the transport is upwind, so the flux out of the
+front is the rim's thickness times a normal speed the inversion fits to the
+observations. IU's final 2 km MAPs carried 343 Gt/yr out of a front band of
+39.5 m, where BedMachine's own 500 m front is 163 m thick and carries 1,138 to
+1,297 Gt/yr under MEaSUREs v2 (`bm_front_flux.py`). Without apparent MB the
+shelves then gained about 850 Gt/yr (run record
+`inversion-2km-budd-b20k-ef2-relax2014-year`). A buffer-0 mesh puts the front
+on the mesh boundary and keeps 139 m at 2 km.
+
+`ISMIP7_RASTER_SAMPLE=vertex_front` (`geometry.front_cells`) rebuilds the
+marine front from BedMachine's mask, sampled on the `cell_samples` lattice
+and again four times finer in mixed cells:
+
+- a cell holds ice when at least half its samples are BedMachine ice;
+- a cell without ice that holds an ocean sample is water, `H = 0`;
+- a cell with ice that shares a vertex with a water cell, or holds an ocean
+  sample itself, takes BedMachine's mean thickness and bed over its ice
+  samples;
+- every other cell keeps its vertex samples, so interior ice, land margins
+  and the open buffer are unchanged.
+
+It is the default. A MAP records its sampling (`raster_sample`, an objective
+key), a forward on the MAP's own mesh follows that record, a transfer to
+another mesh rebuilds under the run's sampling, and the melt calibration is
+the file fitted under the run's sampling (`runconfig.MELT_CALIBRATIONS`).
+
+The t = 0 floating front under `velocity_obs` (run record
+`test-i167-front-probes`):
+
+| mesh | sampling | front thickness | front band mean | front flux |
+|---|---|---|---|---|
+| BedMachine 500 m | raster | 163 m | | 1,138 to 1,297 Gt/yr |
+| 2 km, 20 km buffer | `vertex` | 47.7 m | 39.5 m | 179 Gt/yr |
+| 2 km, 20 km buffer | `vertex_front` | 190.9 m | 129.5 m | 998 Gt/yr |
+| 1 km, 20 km buffer | `vertex` | 36.3 m | 25.6 m | 179 Gt/yr |
+| 1 km, 20 km buffer | `vertex_front` | 178.4 m | 90.3 m | 1,037 Gt/yr |
+
+On the 2 km mesh the rule rebuilds 27,854 cells and empties 16,637; the
+floating area falls 3.4 % and the floating mass 0.26 %, and the
+melt-receiving area falls 3.6 % (2.4 % at 1 km), which is why the rule has
+its own melt calibration. Meshes whose nodes follow BedMachine's marine front
+(`ISMIP7_MESH_FRONT=bm`, `mesh_antarctica.py --front bm`) carry the same front
+flux within 3 % under the rule at 6 to 8 % more cells, and the final Budd
+controls started their refit at misfit 4,250 there against 1,882 on the
+current mesh (`test-i167-frontbm-meshes`,
+`test-2km-budd-ef2-vertex-front-eval1`), so the production meshes stay the
+current ones.
 
 ## The drag gate and the membrane floor (issue #153)
 

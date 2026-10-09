@@ -22,9 +22,12 @@ def ladder(base_steps):
 
 
 def ramp_exponents(solve, z, n_flow, m_slide, n_target, m_target, steps_ladder,
-                   report=print):
-    r"""Ramp ``n_flow`` and ``m_slide`` from 1 to their targets, solving after
-    each step, climbing ``steps_ladder`` on divergence.
+                   report=print, m_start=1.0):
+    r"""Ramp ``n_flow`` from 1 and ``m_slide`` from ``m_start`` (1 unless
+    given) to their targets, solving after each step, climbing
+    ``steps_ladder`` on divergence. ``m_start`` at ``m_target`` holds the
+    sliding exponent fixed (``runconfig.ramp_slide_fixed``): RC's controls
+    make the m = 1 problem ill-conditioned (issue #167).
 
     ``solve(attempt=, step=, steps=, t=)`` performs one solve for the current
     exponents and raises :class:`firedrake.exceptions.ConvergenceError` when
@@ -40,14 +43,14 @@ def ramp_exponents(solve, z, n_flow, m_slide, n_target, m_target, steps_ladder,
         try:
             for step, t in enumerate(np.linspace(0.0, 1.0, steps), 1):
                 n_flow.assign(1.0 + t * (n_target - 1.0))
-                m_slide.assign(1.0 + t * (m_target - 1.0))
+                m_slide.assign(m_start + t * (m_target - m_start))
                 solve(attempt=attempt, step=step, steps=steps, t=float(t))
             return attempt, steps
         except ConvergenceError as err:
             last_error = err
             z.assign(z_init)
             n_flow.assign(1.0)
-            m_slide.assign(1.0)
+            m_slide.assign(m_start)
             if attempt < len(rungs):
                 report(f"  Continuation diverged at {steps} steps; "
                        f"restarting with {rungs[attempt]}...")

@@ -281,6 +281,15 @@ def warm_start_geometry(*, same_mesh, same_lake, warm_sampling, run_sampling):
     return take
 
 
+def ramp_slide_fixed():
+    r"""``ISMIP7_RAMP_SLIDE_FIXED=1``: the inversion's startup ramp climbs the
+    flow exponent from 1 with the sliding exponent held at its target. RC's
+    final controls under the front-cell rule could not take the n = m = 1
+    step on the 2 km mesh: its first linear solve failed under full MUMPS,
+    scpc_gamg and scpc_mumps alike (issue #167)."""
+    return os.environ.get("ISMIP7_RAMP_SLIDE_FIXED", "0").strip() not in ("", "0")
+
+
 def warm_start_state(*, geometry_taken, same_mesh):
     r"""Whether an inversion loads its warm start's mixed state, and whether
     it is only a first guess: ``(load, guess)``.

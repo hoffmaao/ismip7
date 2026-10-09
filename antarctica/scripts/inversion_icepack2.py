@@ -114,7 +114,7 @@ from icepack2_tools.runconfig import (
     lc as _lc, lc_coarse as _lc_coarse, n_flow as _n_flow,
     eval_continuation, inversion_mesh_source, transfer_fill, drag_gate,
     DRAG_GATE_NONE, hvisc_floor, exact_front_version, warm_start_geometry,
-    warm_start_state,
+    warm_start_state, ramp_slide_fixed,
 )
 DATA_DIR = obs_data_root()
 from icepack2_tools.prior import (
@@ -1670,6 +1670,9 @@ def main():
         pre_jacobian_callback=ramp_pre_jacobian,
     )
     ramp_ladder = ladder(continuation_steps())
+    # The sliding exponent a ramp starts from: 1, or its target under
+    # ISMIP7_RAMP_SLIDE_FIXED=1 (issue #167).
+    ramp_m_start = m_slide_val if ramp_slide_fixed() else 1.0
     def _ramp_solve(attempt, step, steps, t):
         t0 = perf_counter()
         try:
@@ -1697,7 +1700,8 @@ def main():
         try:
             _, steps = ramp_exponents(
                 _ramp_solve, z, n_flow, m_slide, n_flow_val, m_slide_val,
-                ramp_ladder[:trial_rescue_rungs()], report=PETSc.Sys.Print)
+                ramp_ladder[:trial_rescue_rungs()], report=PETSc.Sys.Print,
+                m_start=ramp_m_start)
         finally:
             n_flow.assign(n_flow_val)
             m_slide.assign(m_slide_val)
@@ -1736,7 +1740,7 @@ def main():
         # GAMG had climbed the same ramp on the same mesh and MAP.
         PETSc.Sys.Print(
             f"Warm start (continuation n_flow 1→{n_flow_val:.1f}, "
-            f"m_slide 1→{m_slide_val:.1f}; "
+            f"m_slide {ramp_m_start:g}→{m_slide_val:.1f}; "
             f"{diagnostic_solver_label(lane_solver_mode)}, "
             f"{linearization_state(lane_solver_mode)} linearization, "
             f"steps {'/'.join(str(s) for s in ramp_ladder)})..."
@@ -1744,7 +1748,7 @@ def main():
 
         _, ramp_steps = ramp_exponents(
             _ramp_solve, z, n_flow, m_slide, n_flow_val, m_slide_val,
-            ramp_ladder, report=PETSc.Sys.Print,
+            ramp_ladder, report=PETSc.Sys.Print, m_start=ramp_m_start,
         )
         PETSc.Sys.Print(f"  Done ({ramp_steps} continuation steps)")
 

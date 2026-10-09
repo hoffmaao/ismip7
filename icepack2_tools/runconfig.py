@@ -320,12 +320,21 @@ def warm_start_state(*, geometry_taken, same_mesh):
     issue #167). The first evaluation's forward then solves it at the full
     exponents. For RC's refit under vertex_front it did not work: from the
     ef2 state the run started at ||F|| 1.7e14 against the recorded 9.3e-3
-    and the first forward solve failed (jobs 11883148 and 11883149). RC's
-    refit runs with ``ISMIP7_RAMP_SLIDE_FIXED=1`` instead. On another mesh
-    the knob is refused."""
+    and the first forward solve failed (jobs 11883148 and 11883149). On
+    another mesh the knob is refused. ``ISMIP7_WARM_START_STATE=fluidity``
+    loads no state from the warm start: the first guess is the state of the
+    MAP ``ISMIP7_WARM_START_FLUIDITY`` names (`warm_start_state_fluidity`),
+    which is how RC's refit starts."""
+    mode = os.environ.get("ISMIP7_WARM_START_STATE", "0").strip().lower()
+    if mode == "fluidity":
+        if warm_start_fluidity() is None:
+            raise ValueError(
+                "ISMIP7_WARM_START_STATE=fluidity takes the state of the MAP "
+                "ISMIP7_WARM_START_FLUIDITY names, and that is unset")
+        return False, False
     if geometry_taken:
         return True, False
-    want = os.environ.get("ISMIP7_WARM_START_STATE", "0").strip() not in ("", "0")
+    want = mode not in ("", "0")
     if want and not same_mesh:
         raise ValueError(
             "ISMIP7_WARM_START_STATE=1 loads the warm start's mixed state on "
@@ -333,6 +342,25 @@ def warm_start_state(*, geometry_taken, same_mesh):
             "it.")
     return want, want
 
+
+
+def warm_start_state_fluidity(*, same_mesh):
+    r"""``ISMIP7_WARM_START_STATE=fluidity``: the first guess is the mixed
+    state of the MAP ``ISMIP7_WARM_START_FLUIDITY`` names, the solution under
+    the fluidity this run starts from, on that MAP's own mesh only
+    (``same_mesh``). RC's refit under the front-cell rule takes the state of
+    Budd's refit with its fluidity: RC's own ef2 state started at ||F||
+    1.7e14 with RC's fluidity (job 11883148) and 2.5e21 with Budd's (job
+    11884749), its stresses balanced against the other fluidity
+    (issue #167)."""
+    if os.environ.get("ISMIP7_WARM_START_STATE", "0").strip().lower() != "fluidity":
+        return False
+    if not same_mesh:
+        raise ValueError(
+            "ISMIP7_WARM_START_STATE=fluidity loads the state of the "
+            "ISMIP7_WARM_START_FLUIDITY MAP on its own mesh, and this run's "
+            "mesh differs")
+    return True
 
 def raster_front(method):
     r"""Whether the raster sampling ``method`` rebuilds the front cells."""

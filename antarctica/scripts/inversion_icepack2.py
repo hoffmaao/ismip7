@@ -115,6 +115,7 @@ from icepack2_tools.runconfig import (
     eval_continuation, inversion_mesh_source, transfer_fill, drag_gate,
     DRAG_GATE_NONE, hvisc_floor, exact_front_version, warm_start_geometry,
     warm_start_state, ramp_slide_fixed, warm_start_fluidity,
+    warm_start_state_fluidity,
 )
 DATA_DIR = obs_data_root()
 from icepack2_tools.prior import (
@@ -841,6 +842,20 @@ def main():
                 f"{n_clamped} clamped to the source range")
         return target
 
+    def _warm_state(chk, source_mesh):
+        # a published MAP's state, else a periodic checkpoint's
+        try:
+            pre = ""
+            u_ws = _warm_load(chk, source_mesh, "velocity", V)
+        except (KeyError, RuntimeError, ValueError):
+            pre = "ckpt_"
+            u_ws = _warm_load(chk, source_mesh, "ckpt_velocity", V)
+        M_ws = _warm_load(chk, source_mesh, f"{pre}membrane_stress",
+                          z.subfunctions[1].function_space())
+        tau_ws = _warm_load(chk, source_mesh, f"{pre}basal_stress",
+                            z.subfunctions[2].function_space())
+        return u_ws, M_ws, tau_ws
+
     if warm_chk:
         PETSc.Sys.Print(f"  Loading warm start from {warm_chk}")
         with fd.CheckpointFile(warm_chk, "r") as chk:
@@ -906,6 +921,8 @@ def main():
             _fl_chk = warm_start_fluidity()
             _fl_prior = None
             _fl_origin = None
+            # its mixed state, the first guess under ISMIP7_WARM_START_STATE=fluidity
+            _fl_state = None
             if _phi_mode == "0":
                 if _fl_chk:
                     raise ValueError(
@@ -927,6 +944,8 @@ def main():
                     _fl_origin = (str(_fl.get_attr("/", "fluidity_prior_origin"))
                                   if _fl.has_attr("/", "fluidity_prior_origin")
                                   else f"warm start {os.path.basename(_fl_chk)}")
+                    if warm_start_state_fluidity(same_mesh=meshes_match(_fl_mesh, mesh)):
+                        _fl_state = _warm_state(_fl, _fl_mesh)
                 PETSc.Sys.Print(
                     f"    log_fluidity and fluidity_prior from {_fl_chk} "
                     f"(ISMIP7_WARM_START_FLUIDITY); log_friction from the warm start")
@@ -1075,32 +1094,24 @@ def main():
             _state_load, warm_state_guess = warm_start_state(
                 geometry_taken=warm_geometry, same_mesh=same_mesh)
             try:
-                if not _state_load:
+                if _fl_state is not None:
+                    u_ws, M_ws, tau_ws = _fl_state
+                    warm_state_guess = True
+                    _state_from = f"{_fl_chk} (ISMIP7_WARM_START_STATE=fluidity)"
+                elif not _state_load:
                     raise raise_geometry
-                # a published MAP's state, else a periodic checkpoint's
-                try:
-                    _pre = ""
-                    u_ws = _warm_load(chk, chk_mesh, "velocity", V)
-                except (KeyError, RuntimeError, ValueError):
-                    _pre = "ckpt_"
-                    u_ws = _warm_load(chk, chk_mesh, "ckpt_velocity", V)
-                M_ws = _warm_load(
-                    chk, chk_mesh, f"{_pre}membrane_stress",
-                    z.subfunctions[1].function_space(),
-                )
-                tau_ws = _warm_load(
-                    chk, chk_mesh, f"{_pre}basal_stress",
-                    z.subfunctions[2].function_space(),
-                )
+                else:
+                    u_ws, M_ws, tau_ws = _warm_state(chk, chk_mesh)
+                    _state_from = ("warm start (ISMIP7_WARM_START_STATE=1)"
+                                   if warm_state_guess else "warm start")
                 z.subfunctions[0].assign(u_ws)
                 z.subfunctions[1].assign(M_ws)
                 z.subfunctions[2].assign(tau_ws)
                 warm_loaded_z = True
                 PETSc.Sys.Print(
-                    "    mixed state: velocity/membrane/basal from warm start"
-                    + (", the first guess on this run's geometry "
-                       "(ISMIP7_WARM_START_STATE=1)" if warm_state_guess else "")
-                )
+                    f"    mixed state: velocity/membrane/basal from {_state_from}"
+                    + (", the first guess on this run's geometry"
+                       if warm_state_guess else ""))
             except (KeyError, RuntimeError, ValueError):
                 warm_loaded_z = False
         if warm_loaded_z:

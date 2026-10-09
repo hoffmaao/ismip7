@@ -87,3 +87,23 @@ def test_the_fluidity_knob_names_an_existing_map(monkeypatch, tmp_path):
         R.warm_start_fluidity()
     budd.write_bytes(b"")
     assert R.warm_start_fluidity() == str(budd)
+
+
+def test_a_state_from_the_fluidity_map_replaces_the_warm_start_s(monkeypatch, tmp_path):
+    r"""ISMIP7_WARM_START_STATE=fluidity loads no state from the warm start,
+    whatever its geometry, and the state of the ISMIP7_WARM_START_FLUIDITY MAP
+    on that MAP's own mesh only; without that MAP it is refused."""
+    monkeypatch.setenv("ISMIP7_WARM_START_STATE", "fluidity")
+    monkeypatch.delenv("ISMIP7_WARM_START_FLUIDITY", raising=False)
+    with pytest.raises(ValueError, match="ISMIP7_WARM_START_FLUIDITY"):
+        R.warm_start_state(geometry_taken=False, same_mesh=True)
+    budd = tmp_path / "budd.h5"
+    budd.write_bytes(b"")
+    monkeypatch.setenv("ISMIP7_WARM_START_FLUIDITY", str(budd))
+    for taken in (False, True):
+        assert R.warm_start_state(geometry_taken=taken, same_mesh=True) == (False, False)
+    assert R.warm_start_state_fluidity(same_mesh=True)
+    with pytest.raises(ValueError, match="own mesh"):
+        R.warm_start_state_fluidity(same_mesh=False)
+    monkeypatch.setenv("ISMIP7_WARM_START_STATE", "1")
+    assert not R.warm_start_state_fluidity(same_mesh=False)

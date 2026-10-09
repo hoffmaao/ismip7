@@ -47,7 +47,7 @@ own venv and call it by absolute path.
 | Ocean OI climatology and IMBIE basin numbers | 3 GB | `scripts/download_forcing.py --ocean --calibration` | | x | | |
 | Whole AIS tree (all ESMs, scenarios, `ctrl`, OCX, calibration) | 313 GB | same | | | | |
 | Meshes and MAP checkpoints | 15 MB, 80 MB | sections 3 and 4, or from a colleague | | x | x | |
-| Melt calibration `calibration/deltaT_per_basin_1000_K6.500e-05.npz` | 8 kB | tracked in git (section 5) | | x | | |
+| Melt calibration `calibration/deltaT_per_basin_1000_K6.500e-05_vertex_front.npz` (`vertex` sampling: `deltaT_per_basin_1000_K6.500e-05.npz`) | 8 kB | tracked in git (section 5) | | x | | |
 
 Source Cooperative carries the data-freeze copy and needs no account.
 
@@ -866,7 +866,7 @@ calibrated or copied. The offsets are stamped onto any mesh through the
 IMBIE2 8 km basin grid under `ISMIP7_DATA_ROOT`. A fit records its inputs in
 the npz by basename (`obs_csv`, `imbie2_nc`, `inversion`;
 `calibrate_melt.input_names`), and the grid is found by that name under the
-data root. The tracked file predates that and still names three paths on IU
+data root. The `vertex` file predates that and still names three paths on IU
 Quartz; replacing it is open (issue #150).
 
 The forward applies the melt the file was fitted to:
@@ -1594,7 +1594,7 @@ redeclare those literals.
 | `ISMIP7_TRANSPORT_KSP_RTOL` / `ISMIP7_TRANSPORT_KSP_MAXIT` | GMRES relative tolerance / iteration limit for the persistent DG0 transport solver (`ismip7_transport_` PETSc prefix) | `1e-10` / `500` |
 | `ISMIP7_MASS_RESIDUAL_TOL_GT` | fail-loud absolute tolerance for both the discrete transport identity and the complete step mass budget | `5e-5` Gt |
 | `ISMIP7_RESCUE_ENABLED` | permit a failed direct transient diagnostic solve to enter the continuation/trust-region/subcycle rescue ladder; set to `0` for strict timestep qualification | `1` |
-| `ISMIP7_DELTAT_PER_BASIN_NPZ` | the melt calibration, one K and a TF offset per basin (`select_melt_parameters.py`, `calibrate_deltaT.py`); every ocean callback melts with its K. Refused with `ISMIP7_K_SCALE` other than 1, and when fitted under another slope or geometry than the run's (section 5) | `calibration/deltaT_per_basin_1000_K6.500e-05.npz` |
+| `ISMIP7_DELTAT_PER_BASIN_NPZ` | the melt calibration, one K and a TF offset per basin (`select_melt_parameters.py`, `calibrate_deltaT.py`); every ocean callback melts with its K. Refused with `ISMIP7_K_SCALE` other than 1, and when fitted under another slope or geometry than the run's (section 5) | the tracked file of the run's raster sampling (`runconfig.MELT_CALIBRATIONS`), `calibration/deltaT_per_basin_1000_K6.500e-05_vertex_front.npz` under the default |
 | `ISMIP7_K_PER_BASIN_NPZ` | a legacy per-basin K file from `calibrate_melt.py`, read in place of the offsets; refused together with `ISMIP7_DELTAT_PER_BASIN_NPZ` | unset |
 | `ISMIP7_K_SCALE` | multiplies a legacy per-basin K; refused with an offsets file | `1` |
 | `ISMIP7_K_MELT` | removed with the tracked calibration, and refused when exported | |

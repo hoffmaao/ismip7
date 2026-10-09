@@ -418,7 +418,8 @@ forcing-version audit, the output writer, and the melt calibration above.
    K = 6.5e-5, the K50 of the rule-based toolbox selection on the 1000 m /
    10 km production mesh, with its offsets, fitted through the forward's own
    DG0 melt path and tracked as
-   `calibration/deltaT_per_basin_1000_K6.500e-05.npz` (`README.md` section 5).
+   `calibration/deltaT_per_basin_1000_K6.500e-05.npz`, refitted at the same K
+   for the default `vertex_front` sampling (issue #167; `README.md` section 5).
    The forward melts the cells the fit summed over, floating and holding
    ice, and refuses an offsets file fitted under another slope or geometry.
    The local slope, capped or not, stays as `local` and is tied to the

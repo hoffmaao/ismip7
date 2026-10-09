@@ -93,7 +93,7 @@ from icepack2_tools.dual_friction import (
     weertman_anchor,
 )
 from icepack2_tools.geometry import (
-    cg1_lift, raise_bed_to_lake_ice_base, sample_bed_thickness, sample_to_geometry,
+    cg1_lift, raise_bed_to_lake_ice_base, sample_bed_thickness,
 )
 from icepack2_tools.preconditioners import frozen_linearization, with_scpc_blocks
 from icepack2_tools.taped_solve import StateSolverCache, taped_state_solve

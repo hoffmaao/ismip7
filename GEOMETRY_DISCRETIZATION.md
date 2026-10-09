@@ -115,10 +115,10 @@ buffer-0 mesh (a buffered mesh's front is thinned; see "Front cells on a
 buffered mesh"), and
 reproduces the CG1 driving force to 1%. `geometry.sample_to_geometry` does
 this; do not replace it with a direct interpolate onto the DG0 space. Cell
-average here means that L2 projection (`ISMIP7_RASTER_SAMPLE=vertex`, the
-default). The raster's true cell mean is a separate option (`cell_mean`) and
-measures rougher across exactly these facet jumps, so it is kept for the
-record. See its row in `antarctica/README.md`.
+average here means that L2 projection (`ISMIP7_RASTER_SAMPLE=vertex`, which
+the default `vertex_front` keeps everywhere but the marine front). The
+raster's true cell mean is a separate option (`cell_mean`) and measures
+rougher across exactly these facet jumps, so it is kept for the record. See its row in `antarctica/README.md`.
 
 The same rule applies to the RACMO SMB climatology, which sets the mass budget
 and the `a_ref` balance: `forcing.load_racmo_smb_climatology` cell-averages onto
@@ -502,8 +502,10 @@ vertex-sampled, the 865.0 Gt/yr table, 21 September 2026):
    thermal forcing plausible (`select_melt_parameters.py`): K = 6.5e-5. The
    offsets at that K, from -0.68 to +1.20 K, are refitted on Rice's build of
    the mesh, the submission mesh (issue 20), and tracked as
-   `antarctica/calibration/deltaT_per_basin_1000_K6.500e-05.npz`. Every run
-   reads it unless another file is named. The forward melts
+   `antarctica/calibration/deltaT_per_basin_1000_K6.500e-05.npz`, which a run
+   sampled with `vertex` reads unless another file is named; the default
+   sampling reads the `_vertex_front` file refitted at the same K ("Front
+   cells on a buffered mesh"). The forward melts
    `forcing.melt_receiving`, the set the fit summed over. Measured through
    the forward's own callback on Rice's build (run record
    `calibration-melt-refit-1km-rice-k50`): 1067.389 Gt/yr against the

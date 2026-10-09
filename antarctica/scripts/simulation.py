@@ -76,7 +76,7 @@ from icepack2_tools.fssa import (
     restart_step as fssa_restart_step,
 )
 from icepack2_tools.geometry import (
-    raise_bed_to_lake_ice_base, sample_bed_thickness, sample_to_geometry,
+    raise_bed_to_lake_ice_base, sample_bed_thickness,
 )
 from icepack2_tools.naming import map_basename
 from icepack2_tools.handoff import check_subelement_record
@@ -106,7 +106,6 @@ from icepack2_tools.runconfig import (
     forward_hvisc_floor as _forward_hvisc_floor,
     forward_exact_front as _forward_exact_front,
     lc as _lc, lc_coarse as _lc_coarse, n_flow as _n_flow, buffer_m as _buffer_m,
-    TARGET_MESH_GEOMETRY_METHOD,
     target_mesh_geometry_method as _target_mesh_geometry_method,
     forward_raster_sample as _forward_raster_sample,
     raster_base_method as _raster_base_method,

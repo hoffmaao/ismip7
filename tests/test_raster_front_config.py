@@ -60,3 +60,19 @@ def test_the_sampling_is_part_of_the_objective():
                                 {"raster_sample": "vertex_front"})
     # a warm start older than the record is no mismatch
     assert not objective_mismatches({}, {"raster_sample": "vertex_front"})
+
+
+def test_a_warm_start_state_comes_with_its_geometry_or_as_a_first_guess(monkeypatch):
+    r"""Issue #167: a warm start sampled another way keeps its geometry, and
+    with it by default its mixed state; ISMIP7_WARM_START_STATE=1 loads the
+    state as the first guess on the warm start's own mesh only."""
+    monkeypatch.delenv("ISMIP7_WARM_START_STATE", raising=False)
+    assert R.warm_start_state(geometry_taken=True, same_mesh=True) == (True, False)
+    assert R.warm_start_state(geometry_taken=False, same_mesh=True) == (False, False)
+    monkeypatch.setenv("ISMIP7_WARM_START_STATE", "1")
+    assert R.warm_start_state(geometry_taken=False, same_mesh=True) == (True, True)
+    assert R.warm_start_state(geometry_taken=True, same_mesh=True) == (True, False)
+    with pytest.raises(ValueError, match="own mesh"):
+        R.warm_start_state(geometry_taken=False, same_mesh=False)
+    monkeypatch.setenv("ISMIP7_WARM_START_STATE", "0")
+    assert R.warm_start_state(geometry_taken=False, same_mesh=False) == (False, False)

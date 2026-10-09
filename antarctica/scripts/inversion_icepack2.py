@@ -114,6 +114,7 @@ from icepack2_tools.runconfig import (
     lc as _lc, lc_coarse as _lc_coarse, n_flow as _n_flow,
     eval_continuation, inversion_mesh_source, transfer_fill, drag_gate,
     DRAG_GATE_NONE, hvisc_floor, exact_front_version, warm_start_geometry,
+    warm_start_state,
 )
 DATA_DIR = obs_data_root()
 from icepack2_tools.prior import (
@@ -780,6 +781,7 @@ def main():
     # phi is moved onto this run's prior so A = A_prior exp(phi) is kept.
     warm_A_prior_rebase = None
     warm_loaded_z = False
+    warm_state_guess = False
     # the warm start's anchor length, when its theta is to be rebased onto
     # this run's anchor once that is built (ISMIP7_WARM_START_THETA=physical)
     warm_theta_anchor = None
@@ -1039,8 +1041,10 @@ def main():
                         else f"warm start {os.path.basename(warm_chk)}")
                 except (KeyError, RuntimeError, ValueError):
                     warm_A_prior = None
+            _state_load, warm_state_guess = warm_start_state(
+                geometry_taken=warm_geometry, same_mesh=same_mesh)
             try:
-                if not warm_geometry:
+                if not _state_load:
                     raise raise_geometry
                 # a published MAP's state, else a periodic checkpoint's
                 try:
@@ -1063,6 +1067,8 @@ def main():
                 warm_loaded_z = True
                 PETSc.Sys.Print(
                     "    mixed state: velocity/membrane/basal from warm start"
+                    + (", the first guess on this run's geometry "
+                       "(ISMIP7_WARM_START_STATE=1)" if warm_state_guess else "")
                 )
             except (KeyError, RuntimeError, ValueError):
                 warm_loaded_z = False
@@ -1698,7 +1704,14 @@ def main():
         return steps
 
     if skip_continuation:
-        if warm_loaded_z:
+        if warm_loaded_z and warm_state_guess:
+            PETSc.Sys.Print(
+                f"Warm start: the loaded mixed state is the first guess at full "
+                f"n_flow={n_flow_val:.1f}, m_slide={m_slide_val:.1f}; the first "
+                f"evaluation's forward solves it on this geometry (no 1→n "
+                f"continuation)"
+            )
+        elif warm_loaded_z:
             PETSc.Sys.Print(
                 f"Warm start: accepting loaded mixed state at full "
                 f"n_flow={n_flow_val:.1f}, m_slide={m_slide_val:.1f} "

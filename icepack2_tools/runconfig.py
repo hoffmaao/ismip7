@@ -281,6 +281,29 @@ def warm_start_geometry(*, same_mesh, same_lake, warm_sampling, run_sampling):
     return take
 
 
+def warm_start_state(*, geometry_taken, same_mesh):
+    r"""Whether an inversion loads its warm start's mixed state, and whether
+    it is only a first guess: ``(load, guess)``.
+
+    The state comes with a taken geometry (`warm_start_geometry`), as the
+    solution of the same equations. ``ISMIP7_WARM_START_STATE=1`` also loads
+    it on the warm start's own mesh when the geometry is not taken, as the
+    first guess on this run's geometry (a warm start sampled another way,
+    issue #167). The first evaluation's forward then solves it at the full
+    exponents, where a cold ramp from n = 1 can fail: RC's refit under
+    vertex_front diverged at n = 1 in all three rungs (job 11869835). On
+    another mesh the knob is refused."""
+    if geometry_taken:
+        return True, False
+    want = os.environ.get("ISMIP7_WARM_START_STATE", "0").strip() not in ("", "0")
+    if want and not same_mesh:
+        raise ValueError(
+            "ISMIP7_WARM_START_STATE=1 loads the warm start's mixed state on "
+            "its own mesh as a first guess, and this run's mesh differs: unset "
+            "it.")
+    return want, want
+
+
 def raster_front(method):
     r"""Whether the raster sampling ``method`` rebuilds the front cells."""
     return str(method).lower() in FRONT_RASTER_SAMPLES

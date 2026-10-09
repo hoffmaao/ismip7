@@ -328,7 +328,8 @@ def warm_start_state(*, geometry_taken, same_mesh):
     another mesh the knob is refused. ``ISMIP7_WARM_START_STATE=fluidity``
     loads no state from the warm start: the first guess is the state of the
     MAP ``ISMIP7_WARM_START_FLUIDITY`` names (`warm_start_state_fluidity`),
-    which is how RC's refit starts."""
+    which is how RC's refit starts. A chain link resuming its own checkpoint
+    drops the knob (inversion.sbatch)."""
     mode = os.environ.get("ISMIP7_WARM_START_STATE", "0").strip().lower()
     if mode == "fluidity":
         if warm_start_fluidity() is None:

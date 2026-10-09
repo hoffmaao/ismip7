@@ -124,9 +124,11 @@ if [ -f "$ISMIP7_MAP_OUT" ]; then
     # inherits that 0 through --export=ALL; here it is held to the one
     # objective the chain has been minimising.
     export ISMIP7_WARM_START_STRICT=1
-    # A first link's fluidity from another MAP (ISMIP7_WARM_START_FLUIDITY)
-    # seeds the chain once; a resumed link keeps the checkpoint's own.
-    unset ISMIP7_WARM_START_FLUIDITY
+    # A first link's fluidity and state from another MAP
+    # (ISMIP7_WARM_START_FLUIDITY, ISMIP7_WARM_START_STATE) seed the chain
+    # once; a resumed link takes the fluidity, geometry and state of its own
+    # checkpoint.
+    unset ISMIP7_WARM_START_FLUIDITY ISMIP7_WARM_START_STATE
     echo "chain: warm-starting theta/phi from the periodic checkpoint $ISMIP7_MAP_OUT (strict handoff)"
 fi
 

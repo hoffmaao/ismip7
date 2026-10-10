@@ -941,6 +941,39 @@ cleared each step wherever the level set reports ice-free, irreversibly, so a
 calved cell is not regrown and an advanced-into cell is not re-emptied. The run
 log prints one `Calving front owner:` line naming the mechanism in force.
 
+### A calving campaign (`submit_calving_campaign.sh`, `score_front.py`)
+
+The forward suite run once per calving-law member, each member its own run
+tag, the way the Pine Island study ran its laws. The member table in
+`antarctica/scripts/batch_runners/submit_calving_campaign.sh` is the one knob:
+each line is name, law (any name in `icepack_tools.calving`: `fixed`, `hfb`,
+`vonmises`, `vonmises_strain`, `thickness`, `eigencalving`, `nocalving`), its
+parameters and the front-advance mode. The parameters shipped are the Pine
+Island calibrations against the Greene record where that study fitted them,
+the submission front's own value for `hfb`, and published Antarctic values
+otherwise; `fixed` (the protocol's pinned front) and `nocalving` (free
+advance, nothing removed) bound every law.
+
+```sh
+. ./fwd_env_sep1.sh                                   # the production environment
+antarctica/scripts/batch_runners/submit_calving_campaign.sh screen        # every member: historical 2003-2015, every yearly state kept
+antarctica/scripts/batch_runners/submit_calving_campaign.sh suite vm075 fixed   # named members: historical, then control and projections chained
+```
+
+`score_front.py` scores a run's front against the Greene record: for each
+state checkpoint it reads the level set, takes the Greene mask of the nearest
+epoch from the observations kit as a signed distance, and reports on the
+model's front cells, front-length weighted, the rms distance between the two
+fronts, its bias (positive where the model front lies seaward of the
+observed one), the seaward and inland shares and the share within 1 and 2
+km, in total and per Mouginot basin; a member is judged on the mean front rms
+over the epochs its run covers, against `fixed` and `nocalving`.
+
+```sh
+mpiexec -n 8 python antarctica/scripts/score_front.py --out calv_vm075.json \
+    antarctica/results/hist_cesm2_waccm_calv_vm075_2000_t20*.h5
+```
+
 ### The whole matrix in one command (`run_core_matrix.sh`)
 
 Runs cores 1 to 11 in dependency order (historicals, controls, projections,

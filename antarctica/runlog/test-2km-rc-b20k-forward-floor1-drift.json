@@ -1,0 +1,24 @@
+{
+  "id": "test-2km-rc-b20k-forward-floor1-drift",
+  "task": "test",
+  "institution": "IU",
+  "title": "Unforced five-year forward from RC's vertex-gate stage-2 MAP on the 20 km buffered 2 km mesh, apparent mass balance off (the ice drifts by its flux divergence), membrane floor 1 m",
+  "status": "done",
+  "friction": "regularized_coulomb",
+  "period": "2015-2020",
+  "mesh": "antarctica_5000_2000_buffered20000 (IU's build, 969,764 vertices), DG0 geometry, vertex raster sampling, the lake fix (from the MAP: ISMIP7_MESH=checkpoint)",
+  "initial_state": "test-2km-rc-b20k-vgate-floor1's MAP (rc_s2x_vgf1.h5, inverted with the vertex gate and a 1 m floor; drag_gate recorded, h_visc_floor not)",
+  "forcing": "none: run_timing.py passes no forcing callback; ISMIP7_APPARENT_MB=0 ISMIP7_FIXED_FRONT=1 ISMIP7_DT=0.025 scpc_gamg, rescue on; ISMIP7_RC_HVISC_FLOOR=1; vertex gate from the MAP",
+  "site": "IU Quartz, general partition",
+  "resources": "32 ranks, 160G, 6 h",
+  "jobs": [
+    "10994758"
+  ],
+  "code": "94d0398; Quartz worktree /N/scratch/dlilien/ismip7_reinvert_s5",
+  "started": "2026-10-05",
+  "finished": "2026-10-05",
+  "cost": "5 h 52 min, 200 steps",
+  "results": "Quartz /N/scratch/dlilien/ismip7_reinvert_jobs/fwd (timing record, status) and the worktree's antarctica/results/fwd2km_rc_vgf1_floor1_amb0_2000_*",
+  "audit": "start-up ramp under scpc_gamg: the 8-step ramp's second step (n = 1.29) hit 200 Newton iterations (204,435 Krylov, 12,594 s) and the 16-step retry converged; 18 solves, 379 Newton and 278,123 Krylov iterations, 17,218 s in all (10 m: 1,006 s). Then 200 steps with every solve converged and no rescue: 448 Newton iterations (at most 9 a step), 72 Krylov iterations a condensed solve, 18.6 s a solve; resid 0.00 every step; VAF 56,701.6868 mm SLE at 2020, the restart-started twin's value to every printed digit",
+  "notes": "issue #153: the membrane floor's misfit-vs-cost curve (1, 2.5, 5, 10 m), asked for on 5 October in case the floor has to trade misfit against solver cost. With the apparent mass balance off and no forcing every cell moves at its flux divergence from t=0, which exercises the fronts and thin cells the floor damps; the MAP was inverted at 1 m, so the other floors also start from slightly mismatched speeds"
+}

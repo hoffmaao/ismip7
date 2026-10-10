@@ -265,7 +265,7 @@ def test_the_record_counts_the_mesh_and_names_files_by_basename(
     assert (record["site"], record["partition"], record["ranks"], record["job"]) == (
         "iu_quartz", "debug", 1, "10669722")
     assert (record["raster_sample"], record["geometry_space"], record["melt_slope"],
-            record["oi_version"]) == ("vertex", "dg0", "ant", "30_sep")
+            record["oi_version"]) == ("vertex_front", "dg0", "ant", "30_sep")
     assert record["code"] == "unknown" or len(record["code"]) == 40
     assert str(tmp_path) not in json.dumps(record)
     check_melt_calibration_record(dict(record, K=6.5e-5))

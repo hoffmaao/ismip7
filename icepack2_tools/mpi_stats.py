@@ -22,6 +22,10 @@ reduce in a deterministic order.
 See AGENTS.md section 3.
 """
 
+import os
+import resource
+import sys
+
 import numpy as np
 from mpi4py import MPI
 
@@ -150,3 +154,45 @@ def global_count(mask, comm):
     r"""Number of True entries across ranks. Takes an explicit comm because a
     bare boolean ndarray has no mesh to derive one from."""
     return int(comm.allreduce(int(np.count_nonzero(np.asarray(mask)))))
+
+
+def _rss_bytes():
+    r"""This process's resident set size in bytes, or None where it cannot be
+    read: ``/proc/self/statm`` on Linux, psutil elsewhere if installed."""
+    try:
+        with open("/proc/self/statm") as statm:
+            return int(statm.read().split()[1]) * os.sysconf("SC_PAGE_SIZE")
+    except (OSError, ValueError, IndexError):
+        pass
+    try:
+        import psutil
+    except ImportError:
+        return None
+    return int(psutil.Process().memory_info().rss)
+
+
+def _peak_rss_bytes():
+    r"""This process's peak resident set size in bytes (``ru_maxrss`` is in
+    KiB on Linux and in bytes on macOS)."""
+    peak = resource.getrusage(resource.RUSAGE_SELF).ru_maxrss
+    return int(peak) if sys.platform == "darwin" else int(peak) * 1024
+
+
+def global_rss_mib(comm):
+    r"""Resident set size across the ranks of ``comm``, in MiB:
+    ``{"mean", "max", "peak_max"}``, the last the largest peak any rank has
+    reached (what Slurm's MaxRSS reports). ``mean`` and ``max`` are None when
+    a rank cannot read its own RSS. Collective.
+
+    Each rank's RSS covers memory Python cannot see (PETSc, MUMPS, the
+    allocator), so its change across evaluations is how a leak in a solver
+    shows (issue #159)."""
+    rss = _rss_bytes()
+    readable = comm.allreduce(rss is not None, op=MPI.LAND)
+    rss = float(rss) if readable else 0.0
+    mib = 1.0 / 2**20
+    return {
+        "mean": comm.allreduce(rss, op=MPI.SUM) / comm.size * mib if readable else None,
+        "max": comm.allreduce(rss, op=MPI.MAX) * mib if readable else None,
+        "peak_max": comm.allreduce(float(_peak_rss_bytes()), op=MPI.MAX) * mib,
+    }

@@ -190,6 +190,9 @@ def run_core_experiment(*, core, title, name, esm, scenario,
         restart_from=restart,
         backdate_years=0.0 if restart else geometry_backdate_years(t_start),
         smb_feedback=feedback_mode(feedback))
+    # The tracked file is the one fitted under the sampling setup_model
+    # settled for this run's geometry, which a restart or a MAP can record.
+    dT_npz = deltat_per_basin_npz(ctx.get("raster_sample"))
 
     smb_anomaly, smb_baseline = False, None
     if atm is not None:

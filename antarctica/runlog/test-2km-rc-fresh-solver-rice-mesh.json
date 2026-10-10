@@ -1,0 +1,24 @@
+{
+  "id": "test-2km-rc-fresh-solver-rice-mesh",
+  "task": "test",
+  "institution": "IU",
+  "title": "One fresh scpc_gamg solver on Rice's mesh at RC's final stage-1 controls (Krylov iterations a condensed solve)",
+  "status": "done",
+  "friction": "regularized_coulomb",
+  "period": "2015 state",
+  "mesh": "antarctica_5000_2000_buffered0 (Rice's build, 925,183 vertices, read from the warm start: ISMIP7_MESH=checkpoint), DG0 geometry, vertex raster sampling",
+  "initial_state": "inversion-2km-rc-nomass-lbfgsb's MAP (RC stage 1 final, sha256 fea8debae9616f18), log-velocity weight 69946.22414285329 with its mixed state (no ramp)",
+  "forcing": "the stage-1 objective (bilaplacian sigma 30, rho 750 km, no dH/dt term, log friction control, cell-wise friction, L-BFGS-B without a metric, scpc_gamg)",
+  "site": "IU Quartz, debug partition",
+  "resources": "32 ranks, 160G",
+  "jobs": [
+    "10968526"
+  ],
+  "code": "9683007; Quartz clone /N/scratch/dlilien/ismip7_reinvert",
+  "started": "2026-10-04",
+  "finished": "2026-10-04",
+  "cost": "three evaluations, 61 s forward and 13 s adjoint (median)",
+  "results": "Quartz /N/scratch/dlilien/ismip7_reinvert_jobs (submit_reinvert.sh cells, probe/, plots/), probe/fresh_rc_s1.json",
+  "audit": "152 Krylov iterations a condensed solve with a fresh solver, against 144 for stage 1's reused solver at the same controls and 68 for a fresh solver on the buffered mesh: the buffered setup, not solver reuse, halves stage 2's evaluation cost. Evaluation 1 reproduces stage 1's final objective (total 2.592786e3)",
+  "notes": "issue #153"
+}

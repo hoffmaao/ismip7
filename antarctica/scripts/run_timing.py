@@ -86,6 +86,13 @@ CACHE_MANIFEST = os.environ.get("ISMIP7_TIMING_CACHE_MANIFEST") or None
 STATUS_PATH = os.environ.get("ISMIP7_TIMING_STATUS") or None
 
 
+def _stepped_configuration(configuration, ctx):
+    """The solver configuration with the stabilization weight the lane steps
+    with, which a restart can hold at 0 under a default of 1
+    (solverconfig.forward_fssa_theta)."""
+    return {**configuration, "fssa_theta": ctx["fssa_theta"]}
+
+
 def _validate_map_check_contract():
     """A map-check lane runs the strict contract under a campaign solver, on
     the MAP's own mesh (cold start) or on a prepared map-check cache."""
@@ -474,6 +481,7 @@ def main():
                 LANE_CONTRACT.get("apparent_mb_mode") == "div"
             ),
         )
+        configuration = _stepped_configuration(configuration, ctx)
         activity = "loaded_cache_validation"
         try:
             _validate_loaded_cache(ctx, cache_validation)

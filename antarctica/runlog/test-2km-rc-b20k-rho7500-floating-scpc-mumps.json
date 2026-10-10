@@ -1,0 +1,24 @@
+{
+  "id": "test-2km-rc-b20k-rho7500-floating-scpc-mumps",
+  "task": "test",
+  "institution": "IU",
+  "title": "The RC final-product inversion's first evaluations under scpc_mumps (speed and RSS against full_mumps)",
+  "status": "done",
+  "friction": "regularized_coulomb",
+  "period": "2015 state",
+  "mesh": "antarctica_5000_2000_buffered20000 (IU's build, 969,764 vertices), DG0 geometry, vertex raster sampling, the lake fix",
+  "initial_state": "test-2km-rc-b20k-vgate-floor2p5's MAP (rc_s2x_rc_vf2p5.h5, same mesh, gate and floor), its grounded phi zeroed; log-velocity weight 69946.22414285329",
+  "forcing": "observations sampled onto this mesh; bilaplacian prior at sigma 30 and rho 7.5 km (gamma x0.01, no prior-mean term), no dH/dt term, log friction control, cell-wise friction, L-BFGS-B without a metric; ISMIP7_FLUIDITY_CONTROL=floating with grounded phi held at zero (phi_grounded=zero), ISMIP7_EXACT_FRONT=1, ISMIP7_DRAG_GATE=vertex, ISMIP7_RC_HVISC_FLOOR=2.5, ISMIP7_TRANSFER_FILL=extend; scpc_mumps",
+  "site": "IU Quartz, general partition",
+  "resources": "32 ranks, 480G, 3 h",
+  "jobs": [
+    "11452514"
+  ],
+  "code": "aa06dc8; Quartz worktree /N/scratch/dlilien/ismip7_reinvert_s6",
+  "started": "2026-10-06",
+  "finished": "2026-10-06",
+  "cost": "15 min 31 s, 8 evaluations",
+  "audit": "held phi at 0 on 658,217 of 969,764 nodes; evaluation 1 total 6,643.9 (the warm start records 3,158.4 with grounded phi inverted), 3,780.4 by evaluation 8. The same iterates as full_mumps to every printed digit through evaluation 3. Per evaluation (forward / adjoint, s): scpc_mumps 141/24, 23/8, 89/8 against full_mumps 295/97, 35/91, 147/90, about 5.5 against 9 s a Newton iteration; rss_mib peak a rank 2,573 at evaluation 1 and 3,606 at 8 (full_mumps 4,131 and 4,640 at 3)",
+  "results": "Quartz /N/scratch/dlilien/ismip7_reinvert_jobs, probe/rc_prod_scpc_mumps.h5 and .json",
+  "notes": "issue #153: scpc_mumps had never run an inversion at 2 km; if it is faster or lighter than full_mumps the production links switch to it (the solver is outside the objective)"
+}

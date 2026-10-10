@@ -1,0 +1,20 @@
+{
+  "id": "test-32km-inversion-reuse-tao-after",
+  "task": "test",
+  "institution": "IU",
+  "title": "32 km inversion, 20 TAO iterations under scpc_gamg with SEP2 sub-element friction and five-solve evaluations, one paused solver for the run",
+  "status": "done",
+  "friction": "budd",
+  "mesh": "antarctica_320000_32000_buffered0 (Quartz's .msh, sha256 fd66fc42; 6,282 vertices, 9,055 cells), DG0 geometry, vertex raster sampling",
+  "initial_state": "cold start: u = 0.1 u_obs, theta = phi = 0, the n,m 1 to 3 ramp under full_mumps, then ISMIP7_EVAL_CONTINUATION=1 (five annotated solves an evaluation)",
+  "forcing": "MEaSUREs v2 450 m (sha256 268be94e) and BedMachine v4.1 (sha256 6bd08dbb); ISMIP7_FLUIDITY_PRIOR=legacy; no dH/dt term",
+  "site": "IU workstation (Mac, 16 cores, 128 GB), data under /Volumes/LaCie/Data/antarctica_general/ismip7_obs; ran about 10:20 to 10:48, beside another session's 8-rank 4 km and 4-rank 32 km inversions and 1 to 8-rank probe until 10:46, so its seconds are contended (test-32km-inversion-reuse-tao-after-rerun times the same comparison on a quiet machine); work counts, objectives and RSS do not depend on it",
+  "resources": "8 ranks; RSS a rank (mean over ranks) 1016 MiB after the first taped solve, 1093 MiB after the last; peak 1394 MiB",
+  "code": "9bc7682; icepack_tools e7b923e",
+  "started": "2026-10-02",
+  "finished": "2026-10-02",
+  "cost": "1578 s for 20 iterations (22 evaluations): 62.3 s an evaluation (median after the first); 110 taped solves 1303 s; 23 SCPC setups (one the forward's, the rest the adjoint's) and 247 NonlinearVariationalSolver builds",
+  "results": "/Volumes/LaCie/Data/antarctica_general/ismip7_runs/inversion_solver_reuse_32km/P_new_gamg/ (map.h5 sha256 9db93981, log.txt, timing.json)",
+  "audit": "the same 20 iterations and 22 evaluations as test-32km-inversion-reuse-tao-before, every objective within 1.65e-10 of it, final 2.120453e4; 10.0 Newton iterations and 197 V-cycles a condensed solve (195 before), the n = 1 restart solve 455 on average (460 before); 104 of 105 taped solves reused the solver; published residual 63.3 after a 0-iteration final solve; no forward failed; its startup and first evaluation ran about twice as slow as the baseline's, every ramp rung included, with no kernel compiled (no cache write after 09:42): contention",
+  "notes": "ISMIP7_SUBELEMENT_FRICTION=1 (exact front push on) ISMIP7_GRAD_PRECOND=mass_consistent ISMIP7_PRIOR_FORM=bilaplacian; the configuration of test-32km-inversion-subelement-scpc-gamg; run under a probe wrapper (scratch, not tracked) that times solver construction, SCPC setup and each taped solve and logs each rank's RSS after every taped solve; it changes nothing the driver computes"
+}

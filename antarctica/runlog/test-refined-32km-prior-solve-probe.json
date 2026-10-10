@@ -1,0 +1,20 @@
+{
+  "task": "test",
+  "institution": "IU",
+  "status": "done",
+  "friction": "budd",
+  "forcing": "none (the prior's operators only); sigma 0.3, rho 7500 m, quadrature degree 4 as in the driver",
+  "initial_state": "synthetic smooth controls of amplitude 0.3, scaled by 5 % each repeat; no ice-flow solve",
+  "site": "IU workstation (Mac, 16 cores, 128 GB), data under /Volumes/LaCie/Data/antarctica_general/ismip7_obs; another session's 8-rank jobs shared the machine for most runs (load at each start in its commit.txt)",
+  "started": "2026-10-02",
+  "finished": "2026-10-02",
+  "id": "test-refined-32km-prior-solve-probe",
+  "title": "Bi-Laplacian prior solve, per evaluation, on the 32 km mesh refined to 1.19 million vertices (probe_eval_overhead.py)",
+  "mesh": "antarctica_320000_32000_buffered0 (sha256 fd66fc42) refined uniformly by MeshHierarchy, levels 0 to 4: 6,282, 21,618, 79,455, 303,789 and 1,187,097 vertices; CG1 controls",
+  "resources": "1, 2, 4 and 8 ranks, one sweep at a time; peak 2.4 to 6.8 GB",
+  "code": "sweep 1 on the working tree that became 2626c71 (its factored variant the driver's prior-metric solver options), sweep 2 on 4e45164 (prior.BilaplacianAuxSolver, and the TAO tape)",
+  "cost": "85 to 206 s a sweep",
+  "results": "/Volumes/LaCie/Data/antarctica_general/ismip7_runs/inversion_eval_overhead/probe (sweep 1) and /Volumes/LaCie/Data/antarctica_general/ismip7_runs/inversion_eval_overhead/probe2 (sweep 2): p1 to p8 .json and .log",
+  "audit": "At 1,187,097 vertices, seconds an evaluation for both controls on 1 / 2 / 4 / 8 ranks (sweep 2): the residual-form solve the driver used 9.8 / 9.1 / 8.3 / 8.2 (sweep 1: 9.4 / 9.0 / 8.8 / 8.5), with MUMPS parallel analysis 10.1 / 4.7 / 2.9 / 3.0, factored 0.22 / 0.15 / 0.10 / 0.12 after a 4.1 to 4.8 s first call, CG with Jacobi 0.26 / 0.14 / 0.08 / 0.10 (22 iterations); TAO tape forward plus adjoint 15.3 / 13.9 / 12.6 / 12.4 before and 0.40 / 0.27 / 0.18 / 0.21 factored. The old solve grows linearly with the vertex count (6.9 to 8.2 us a vertex at level 4) and does not fall with the rank count. Energies agree to 3e-16 and taped gradients to 2e-16. The replicated gathers took 0.13 s on 1 rank and at most 0.02 s on more",
+  "notes": "Both sweeps ran beside another session's 8-rank job (load 8 to 17 at the starts)"
+}

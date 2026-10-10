@@ -9,37 +9,15 @@ Usage:
 """
 
 import os
-import re
 import glob
 import firedrake
 import matplotlib.pyplot as plt
 from icepack.plot import subplots
+from icepack2_tools.naming import parse_mesh_basename
 
 _ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 MESH_DIR = os.path.join(_ROOT, "mesh")
 FIG_DIR = os.path.join(_ROOT, "figs")
-
-_BASENAME_RE = re.compile(r"antarctica_(\d+)_(\d+)(?:_buffered(\d+))?$")
-
-
-def parse_mesh_basename(basename):
-    """Split 'antarctica_<COARSE>_<FINE>[_buffered<BUFFER_M>]' into ints.
-
-    The `_buffered<BUFFER_M>` tag postdates most of the meshes on disk, so it
-    is optional; buffer_m is None for a name that doesn't carry it.
-
-    Returns (coarse_m, fine_m, buffer_m).
-    """
-    m = _BASENAME_RE.match(basename)
-    if not m:
-        raise ValueError(
-            f"Mesh filename '{basename}' doesn't match "
-            "antarctica_<COARSE>_<FINE>[_buffered<BUFFER_M>] (see mesh_naming.py)"
-        )
-    coarse_m, fine_m = int(m.group(1)), int(m.group(2))
-    buffer_m = None if m.group(3) is None else int(m.group(3))
-    return coarse_m, fine_m, buffer_m
-
 
 def buffer_label(buffer_m):
     """Buffer tag for a plot title; legacy names carry no buffer."""

@@ -1,0 +1,23 @@
+{
+ "id": "calibration-melt-1km-vertex-front",
+ "task": "calibration",
+ "institution": "IU",
+ "status": "done",
+ "title": "Melt offsets at K 6.5e-5 refitted under the front-cell rule on the 1 km production mesh",
+ "mesh": "antarctica_10000_1000_buffered20000, Rice's build (1,869,252 vertices; sha256 9e2ed33f), DG0 cells under ISMIP7_RASTER_SAMPLE=vertex_front",
+ "site": "IU Quartz, debug partition, serial",
+ "period": "OI climatology",
+ "forcing": "OI climatology 30_sep; observed melt from the Paolo, Davison and Adusumilli table, 1067.4 Gt/yr integrated (sha256 ccea556e)",
+ "jobs": [
+  "11869836",
+  "11871318",
+  "11869845"
+ ],
+ "code": "9dfb499 (fit and check); Quartz worktree /N/scratch/dlilien/ismip7_reinvert_s15 (calibrate_deltaT.script, DELTAT_K=6.5e-5; check_melt_bound.py)",
+ "started": "2026-10-08",
+ "results": "Quartz /N/scratch/dlilien/ismip7_reinvert_jobs/i167/calib_vf/, tracked as antarctica/calibration/deltaT_per_basin_1000_K6.500e-05_vertex_front.npz (sha256 2ef9fad4) with its sidecar",
+ "notes": "issue #167 and issue #26: the second calibration, for runs under the front-cell rule; calibration-melt-refit-1km-rice-k50 stays the vertex calibration. The rule shrinks the 1 km melt-receiving area by 2.4 % (test-i167-front-probes).",
+ "finished": "2026-10-08",
+ "cost": "serial, 4 min 15 s for the fit (11869836) and 3 min 52 s for the check (11871318); a 3 h backup of the fit on the general partition (11869845) was cancelled once the debug fit finished",
+ "audit": "1,357,423 floating cells (1,511,859 km2) under the rule, against 1,399,171 under vertex; front cells rebuilt 58,368 and emptied 40,797. Every basin roots inside 3 K and the thermal forcing rule admits the K; the offsets run from -0.720 to +1.224 K (vertex: -0.684 to +1.200), 1,256.8 Gt/yr at zero offset. check_melt_bound.py with the forward's own callback melts 1,067.388 Gt/yr against the 1,067.386 fitted, every basin at ratio 1.0000 or 1.0001, maximum 42.1 m/yr, no cell past the libmassbffl bound; the ice-free cells that pass the flotation test (295,703 open ocean, 9,731 bare land) are left out, as under vertex."
+}

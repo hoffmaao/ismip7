@@ -157,3 +157,103 @@ def test_the_source_tolerance_is_restored_after_a_transfer():
             assert source.tolerance == STRICT_TOLERANCE
             raise RuntimeError("inside")
     assert source.tolerance == 0.25
+
+
+# ── Smooth extension (ISMIP7_TRANSFER_FILL=extend) ─────────────────────────
+
+def _ring_meshes(n=32):
+    # Target vertices on x <= 1 coincide with the source's, so the ring
+    # 1 < x <= 1.5 is exactly the missing set.
+    source = fd.UnitSquareMesh(n, n)
+    target = fd.RectangleMesh(3 * n // 2, n, 1.5, 1.0)
+    return source, target
+
+
+def test_the_extension_is_the_harmonic_continuation_of_the_outline_values():
+    r"""cos(pi y) on the outline x = 1 continues into the ring 1 < x < 1.5
+    with zero normal derivative on its other sides as
+    cos(pi y) cosh(pi (x - 1.5)) / cosh(pi / 2), which is harmonic."""
+    source, target = _ring_meshes()
+    _x, y = fd.SpatialCoordinate(source)
+    f = fd.Function(fd.FunctionSpace(source, "CG", 1)).interpolate(fd.cos(np.pi * y))
+    g = fd.Function(fd.FunctionSpace(target, "CG", 1), name="theta")
+    n_missing, _n_total, n_clamped = interpolate_with_fill(g, f, 0.0, extend=True)
+    xy = target.coordinates.dat.data_ro
+    ring = xy[:, 0] > 1.0 + 1e-9
+    assert n_missing == int(ring.sum()) and n_clamped == 0
+    exact = (np.cos(np.pi * xy[:, 1]) * np.cosh(np.pi * (xy[:, 0] - 1.5))
+             / np.cosh(np.pi / 2))
+    vals = g.dat.data_ro
+    assert np.abs(vals[ring] - exact[ring]).max() < 2e-3
+    assert np.allclose(vals[~ring], np.cos(np.pi * xy[~ring, 1]), atol=1e-12)
+
+
+def _curvature_energy(g):
+    # (K u)' M_lumped^-1 (K u): the bi-Laplacian's curvature term, with the
+    # mass lumped so no solve is needed.
+    V = g.function_space()
+    u, v = fd.TrialFunction(V), fd.TestFunction(V)
+    K = fd.assemble(fd.inner(fd.grad(u), fd.grad(v)) * fd.dx).petscmat
+    m = fd.assemble(v * fd.dx)
+    with g.dat.vec_ro as gv:
+        ku = K.createVecLeft()
+        K.mult(gv, ku)
+        return float(np.sum(ku.array ** 2 / m.dat.data_ro))
+
+
+def test_the_extension_removes_the_step_a_constant_fill_puts_at_the_outline():
+    r"""The issue 153 case: controls of order one at the outline and zero in
+    the ring. Measured against the source field's own energy, the extension
+    adds 0.34 % of what the constant fill's step adds at n = 32, 0.08 % at
+    n = 64: the step's cost grows as the mesh refines and the extension's
+    does not."""
+    source, target = _ring_meshes()
+    x, y = fd.SpatialCoordinate(source)
+    f = fd.Function(fd.FunctionSpace(source, "CG", 1)).interpolate(
+        2.0 + fd.sin(2 * np.pi * y) * x)
+    Q = fd.FunctionSpace(target, "CG", 1)
+    const, ext = fd.Function(Q), fd.Function(Q)
+    interpolate_with_fill(const, f, 0.0)
+    interpolate_with_fill(ext, f, 0.0, extend=True)
+    e_const, e_ext, e_src = (_curvature_energy(g) for g in (const, ext, f))
+    assert (e_ext - e_src) < 1e-2 * (e_const - e_src)
+
+
+def test_a_log_extension_stays_positive_and_inside_the_source_range():
+    source, target = _ring_meshes(16)
+    _x, y = fd.SpatialCoordinate(source)
+    f = fd.Function(fd.FunctionSpace(source, "CG", 1)).interpolate(1.0 + 782.0 * y ** 4)
+    g = fd.Function(fd.FunctionSpace(target, "CG", 1), name="fluidity_prior")
+    interpolate_with_fill(g, f, 11.1, extend=True, log=True)
+    xy = target.coordinates.dat.data_ro
+    ring = xy[:, 0] > 1.0 + 1e-9
+    vals = g.dat.data_ro
+    assert vals.min() >= 1.0 and vals.max() <= 783.0 + 1e-9
+    # the extension of log(A), not of A: at the far edge of the ring a
+    # geometric mean of the outline values, well below their arithmetic mean
+    assert np.all(vals[ring] > 0.0)
+    far = ring & np.isclose(xy[:, 0], 1.5)
+    assert np.median(vals[far]) < 0.5 * np.mean(1.0 + 782.0 * xy[far, 1] ** 4)
+
+
+def test_a_region_the_source_never_reaches_keeps_the_fill():
+    _source, target = _ring_meshes(8)
+    Q = fd.FunctionSpace(target, "CG", 1)
+    g = fd.Function(Q).assign(5.0)
+    from icepack2_tools.transfer import harmonic_extension
+    harmonic_extension(g, np.ones(g.dat.data_ro.shape[0], dtype=bool), 3.0)
+    # the pure-Neumann block is pinned by a 1e-8 mass term, so rounding
+    # in K x = 0 shows at 1e-8 relative
+    assert np.allclose(g.dat.data_ro, 3.0, rtol=1e-6, atol=0)
+
+
+def test_the_extension_refuses_what_it_cannot_extend():
+    source, target = _ring_meshes(8)
+    f = fd.Function(fd.FunctionSpace(source, "CG", 1)).interpolate(fd.Constant(1.0))
+    g = fd.Function(fd.FunctionSpace(target, "CG", 1))
+    with pytest.raises(ValueError, match="float fill"):
+        interpolate_with_fill(g, f, fd.Function(g.function_space()), extend=True)
+    f_dg = fd.Function(fd.FunctionSpace(source, "DG", 0)).interpolate(fd.Constant(1.0))
+    g_dg = fd.Function(fd.FunctionSpace(target, "DG", 0))
+    with pytest.raises(ValueError, match="scalar continuous"):
+        interpolate_with_fill(g_dg, f_dg, 0.0, extend=True)

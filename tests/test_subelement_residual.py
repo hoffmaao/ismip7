@@ -179,3 +179,11 @@ def test_sep1_applies_the_friction_control_unscaled_across_the_grounding_line():
     in_coefficient = _shared(folded, subelement=sub, scheme="sep1")
     for got, want in zip(with_theta, in_coefficient):
         assert _rel(got, want) < 1e-12
+
+
+def test_the_scheme_refuses_cliff_push_version_2():
+    r"""icepack_tools' front_cliff_correction has version 1 only, so the
+    exposed-face push (issue #166) is refused, never silently version 1."""
+    f = _slab(gl=False)
+    with pytest.raises(ValueError, match="version 2"):
+        _shared(f, exact_front=2)

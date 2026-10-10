@@ -1,0 +1,21 @@
+{
+  "task": "test",
+  "institution": "IU",
+  "friction": "regularized_coulomb",
+  "mesh": "antarctica_5000_2000_buffered20000 (969,764 vertices, 1,928,285 cells), DG0 geometry, vertex raster sampling",
+  "forcing": "the 10971250 objective (cell s2x_rc_g01_vgf1_mumps): bilaplacian prior sigma 30, rho 75 km, log friction control, vertex drag gate, membrane floor 1 m, LAKE_ICE_BASE=1, no dH/dt, log-velocity weight 69946.22, L-BFGS-B without a metric",
+  "site": "IU Quartz, general partition, one node each",
+  "id": "test-2km-full-mumps-issue161-long",
+  "title": "2 km RC inversion under full_mumps on 32 ranks, 60 L-BFGS-B iterations from 10971250's last checkpoint: RSS with and without the solver release, and without ScaLAPACK on MUMPS's root (40 iterations)",
+  "status": "done",
+  "initial_state": "warm start results/reinvert_2km/exp/rc_s2x_g01_vgf1.h5 (10971250's checkpoint at evaluation 103), ISMIP7_WARM_START_STRICT=0",
+  "resources": "32 ranks, 220G; RSS a rank (mean, rss_mib) at evaluations 10 and 62: 2,761 to 3,366 without the release (11.6 MiB an evaluation, still rising), 2,657 to 2,804 with it (2.8; flat within 2,739 to 2,809 from evaluation 13); peak 5,543 and 4,915 MiB. ICNTL(13)=1 without the release: 2,735 to 3,009 over evaluations 10 to 42 (8.5 MiB an evaluation)",
+  "jobs": "11479582 (without), 11479583 (with the release), 11479906 (mat_mumps_icntl_13 1, without)",
+  "code": "06cb0a9 and the release tree of test-2km-full-mumps-issue161-probes; probe161.py, probe161_extra.py (PROBE_EXTRA_PARAMS)",
+  "started": "2026-10-06",
+  "finished": "2026-10-06",
+  "cost": "2 h 33 min and 2 h 24 min for 62 evaluations (136 and 128 s an evaluation, adjoint 92 and 90 s); 1 h 45 min for 42 evaluations under ICNTL(13)=1",
+  "results": "/N/scratch/dlilien/ismip7_issue161_jobs/probe/q2_before_long.*, q2_fix_long.*, q2_icntl13.*",
+  "audit": "objectives agree to 1.3e-14 at evaluation 10 and 8.4e-13 at 20, then drift as roundoff compounds through L-BFGS-B (9.5e-11 at 40, 3.4e-5 at 62, the same Newton iterations at every evaluation); same-code reruns spread alike (2.0e-15 at evaluation 2, 1.6e-11 at 22). PETSc -log_view on rank 0 at exit: 37 of 1,766 matrices alive without the release, 10 with it; every SNES, KSP and PC destroyed in both.",
+  "notes": "Issue #161. Turning ScaLAPACK off for the root changed neither the trend nor the adjoint time (95 s)."
+}

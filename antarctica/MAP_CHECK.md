@@ -41,6 +41,11 @@ solves on `ISMIP7_MESH`: the continuous fields (`log_friction`,
 DG0 geometry is rebuilt from BedMachine cell averages on the target, and the
 frozen anchors (`N_ref`, `C_w0`, `phi_eff`, `H_init`) are rebuilt on the target
 geometry. That is the path the timing matrix's lanes take from the 2.5 km MAP.
+The rebuild follows the run's `ISMIP7_RASTER_SAMPLE`, `vertex_front` by
+default since issue #167, which rebuilds the marine front from BedMachine's
+mask (1 km front 178 m and 1,037 Gt/yr out of it under `velocity_obs`, where
+`vertex` gives 36 m and 179 Gt/yr), and the run melts with the calibration
+fitted under that sampling.
 
 The production mesh carries a 20 km ocean buffer and the 2 km MAPs carry none,
 so every target dof in that ring lies outside the source mesh. Firedrake's
@@ -51,11 +56,17 @@ collar in `dual_friction.build_rc_residual`, all at once. The loader now
 fills each field with a stated value (`icepack2_tools/transfer.py`,
 `interpolate_with_fill`):
 
-| field | fill outside the source mesh |
-|---|---|
-| `log_friction`, `log_fluidity` | 0, the prior |
-| `fluidity_prior` | the constant baseline `A0 * a4_factor`, the value the code uses when a MAP carries no prior at all |
-| `velocity_obs` | the raster sample the forward makes on its own mesh |
+| field | fill outside the source mesh, `ISMIP7_TRANSFER_FILL=extend` (the default) | under `constant` |
+|---|---|---|
+| `log_friction`, `log_fluidity`, `sqrt_friction` | the harmonic extension of the source from its outline | 0, the prior |
+| `fluidity_prior` | the harmonic extension of its logarithm, so it stays positive | the constant baseline `A0 * a4_factor`, the value the code uses when a MAP carries no prior at all |
+| `velocity_obs` | the raster sample the forward makes on its own mesh | the same |
+
+The extension's discrete Laplacian is zero on every filled dof, so a field
+continues past the outline without the step a constant puts there, and the
+ice a front advance brings into the ring takes the controls of the front it
+came from. A filled region the source does not touch keeps the constant.
+Everything measured below was measured under the constant fill.
 
 A second artefact comes with the first. Firedrake locates a target point in a
 source cell up to half a reference cell outside it (`mesh.tolerance`, 0.5 by

@@ -7,9 +7,10 @@ far past the variable request's bound does that melt reach?
         [--ocx [main|cold|warm|vary]] [--ocx-years 2000,2015,2025] [--ocx-tol 0.25]
 
 Without ``--npz`` the calibration is the one a forward reads
-(``runconfig.deltat_per_basin_npz``): the tracked
-``antarctica/calibration/deltaT_per_basin_1000_K6.500e-05.npz`` unless
-another is named. ``--npz`` takes an offsets file or a legacy per-basin K.
+(``runconfig.deltat_per_basin_npz``): the tracked calibration of the
+raster sampling (``runconfig.MELT_CALIBRATIONS``), under the default
+``antarctica/calibration/deltaT_per_basin_1000_K6.500e-05_vertex_front.npz``,
+unless another is named. ``--npz`` takes an offsets file or a legacy per-basin K.
 
 The forward half is the forward's own melt at the reference geometry: bed and
 thickness sampled onto the DG0 cells, the surface from flotation,

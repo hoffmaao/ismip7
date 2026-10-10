@@ -1,0 +1,21 @@
+{
+  "task": "test",
+  "institution": "IU",
+  "friction": "regularized_coulomb",
+  "mesh": "antarctica_5000_2000_buffered20000 (969,764 vertices, 1,928,285 cells), DG0 geometry, vertex raster sampling",
+  "site": "IU Quartz, general partition, one node each",
+  "forcing": "the 10971250 objective (rho 75 km) (cell s2x_rc_g01_vgf1_mumps): bilaplacian prior sigma 30, rho 75 km, log friction control, vertex drag gate, membrane floor 1 m, LAKE_ICE_BASE=1, no dH/dt, log-velocity weight 69946.22, L-BFGS-B without a metric",
+  "id": "test-2km-full-mumps-issue161-gcwatch",
+  "title": "2 km RC inversion under full_mumps on 32 ranks, 55 L-BFGS-B iterations from the moving start, with and without the solver release, watched without touching Python's collector (a weak-reference count of live Firedrake solvers)",
+  "status": "done",
+  "initial_state": "warm start results/reinvert_2km/exp/rc_s2x_vgf1.h5 (RC stage 2 converged at rho 750 km, 1 m floor, same mesh) under the rho 75 km objective, ISMIP7_WARM_START_STRICT=0, so the controls move far from the first step (misfit 2,833 at the first evaluation; total 2,007 at the 48th)",
+  "resources": "32 ranks, 220G; RSS a rank (mean, rss_mib) at evaluations 10 and 58: 2,753 to 3,213 without the release (9.6 MiB an evaluation; 19.5 over evaluations 10 to 30; 2,996 to 3,220 from evaluation 20), 2,635 to 2,798 with it (3.4; within 2,777 to 2,815 from evaluation 20); peak 5,306 and 4,891 MiB",
+  "jobs": "11484846 (without), 11484847 (with the release)",
+  "code": "06cb0a9 and the release tree of test-2km-full-mumps-issue161-probes; probe161_gcwatch.py",
+  "started": "2026-10-06",
+  "cost": "2 h 50 min and 2 h 45 min for 58 evaluations (162 and 153 s an evaluation, adjoint 107 and 103 s)",
+  "results": "/N/scratch/dlilien/ismip7_issue161_jobs/probe/q2_before_gcw.*, q2_fix_gcw.*",
+  "audit": "at most 4 Firedrake variational solvers alive after any evaluation in either arm (120 built), so Python's collector keeps up with the dropped ones; final totals 1.976163179e+03 and 1.976163181e+03 after 55 iterations (1.4e-15 at evaluation 10, 8.8e-13 at 40, 1.3e-9 at 58), the same Newton iterations at every evaluation; PETSc -log_view on rank 0 at exit: 25 of 1,658 matrices alive without the release, 10 with it, every SNES, KSP and PC destroyed (121 of 121)",
+  "notes": "Issue #161. The other 2 km arms took an object census after every evaluation, which walks the collector's lists; this pair does not.",
+  "finished": "2026-10-06"
+}

@@ -1,0 +1,20 @@
+{
+  "id": "test-32km-inversion-ramp-blocks-after",
+  "task": "test",
+  "institution": "IU",
+  "title": "32 km inversion, 30 L-BFGS-B iterations under full_mumps after a scpc_mumps startup ramp: the blocks only in the ramp's form, one taped form for the run",
+  "status": "done",
+  "friction": "budd",
+  "mesh": "antarctica_320000_32000_buffered0 (Quartz's .msh, sha256 fd66fc42; 6,282 vertices, 9,055 cells), DG0 geometry, vertex raster sampling",
+  "initial_state": "cold start: u = 0.1 u_obs, theta = phi = 0, the n,m 1 to 3 ramp under scpc_mumps (ISMIP7_DIAGNOSTIC_LINEAR_SOLVER=scpc_mumps, as every Quartz arm of issue #156), then ISMIP7_EVAL_CONTINUATION=0",
+  "forcing": "MEaSUREs v2 450 m (sha256 268be94e) and BedMachine v4.1 (sha256 6bd08dbb); ISMIP7_FLUIDITY_PRIOR=legacy; no dH/dt term",
+  "site": "IU workstation (Mac, 16 cores, 128 GB), data under /Volumes/LaCie/Data/antarctica_general/ismip7_obs; alone on the machine (no other session's process in a 10 s CPU log)",
+  "resources": "8 ranks; RSS a rank (mean over ranks) 962 MiB after the first taped solve, 1012 MiB after the last; peak 1385 MiB",
+  "code": "9bc7682; icepack_tools e7b923e",
+  "started": "2026-10-02",
+  "finished": "2026-10-02",
+  "cost": "166 s for 30 iterations (32 evaluations): 4.69 s an evaluation (median after the first), 4.23 s forward and 0.33 s adjoint; 140 s in the taped solves",
+  "results": "/Volumes/LaCie/Data/antarctica_general/ismip7_runs/inversion_solver_reuse_32km/R_new_full/ (map.h5 sha256 34f02a6a, log.txt, timing.json)",
+  "audit": "the same 30 iterations and 32 evaluations as test-32km-inversion-ramp-blocks-before, every objective within 2.2e-11 of it; published residual 1.02e-3; no forward failed",
+  "notes": "the taped Jacobian loses 12 nonzeros a cell (15.8 %); the run also solves one form for the run, so test-32km-inversion-reuse-full-mumps-before/after separate the two; run under a probe wrapper (scratch, not tracked) that times solver construction, SCPC setup and each taped solve and logs each rank's RSS after every taped solve; it changes nothing the driver computes"
+}

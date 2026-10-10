@@ -12,12 +12,16 @@ import numpy as np
 import pytest
 
 firedrake = pytest.importorskip("firedrake")
+# Before any mesh: tlm_adjoint patches the function spaces built after it
+# loads, and BilaplacianAuxSolver is a tlm_adjoint equation.
+tlm = pytest.importorskip("tlm_adjoint.firedrake")
 from firedrake import (  # noqa: E402
     Function, FunctionSpace, TestFunction, TrialFunction, UnitSquareMesh,
     assemble, dx, inner, solve,
 )
 
 from icepack2_tools.prior import (  # noqa: E402
+    BilaplacianAuxSolver,
     bilaplacian_aux_residual, bilaplacian_coeffs, bilaplacian_energy_form,
     prior_bilinear_form, prior_operator_coeffs, prior_operator_form,
     regularization_form, regularization_gradient_form,
@@ -90,6 +94,71 @@ def test_the_bilaplacian_gradient_is_A_times_the_solved_field(theta, space):
     got = assemble(prior_operator_form(aux, v, DELTA, GAMMA)).dat.data_ro
     want = A @ np.linalg.solve(M, A @ theta.dat.data_ro)
     assert np.allclose(got, want, rtol=1e-9, atol=1e-12)
+
+
+def test_the_factored_aux_solve_is_the_residual_solve(theta, space):
+    """BilaplacianAuxSolver, which the inversion uses off the tape, against
+    the residual solve it replaces and dense algebra: two controls and two
+    (delta, gamma) pairs through one factor, so a stale right-hand side or a
+    factor of the wrong operator cannot pass on the first call alone."""
+    v = TestFunction(space)
+    solver = BilaplacianAuxSolver(
+        space, form_compiler_parameters={"quadrature_degree": 4})
+    factor = None
+    for scale, (delta, gamma) in ((1.0, (DELTA, GAMMA)), (-2.5, (1.3, 0.2))):
+        A, M = _dense(space, delta, gamma)
+        ctrl = Function(space).assign(scale * theta)
+        ref = Function(space)
+        solve(bilaplacian_aux_residual(ctrl, ref, v, delta, gamma) == 0, ref)
+        got = solver(ctrl, Function(space), delta, gamma)
+        assert np.allclose(got.dat.data_ro, ref.dat.data_ro, rtol=1e-10, atol=1e-12)
+        want = np.linalg.solve(M, A @ ctrl.dat.data_ro)
+        assert np.allclose(got.dat.data_ro, want, rtol=1e-9, atol=1e-12)
+        factor = factor or solver._mats
+        assert solver._mats is factor
+
+
+def test_the_taped_factored_solve_has_the_bilaplacian_gradient(theta, space):
+    """On the tape (the TAO path's objective) the factored solve must give
+    dR/dtheta = A M^-1 A theta, as the residual-form EquationSolver it
+    replaces does, and pass tlm_adjoint's Taylor tests."""
+    A, M = _dense(space, DELTA, GAMMA)
+    solver = BilaplacianAuxSolver(space)
+
+    def energy_factored(ctrl):
+        aux = Function(space)
+        solver(ctrl, aux, DELTA, GAMMA)
+        J = tlm.Functional(name="R")
+        J.assign(bilaplacian_energy_form(aux))
+        return J
+
+    def energy_residual(ctrl):
+        aux = Function(space)
+        tlm.EquationSolver(
+            bilaplacian_aux_residual(ctrl, aux, TestFunction(space), DELTA, GAMMA)
+            == 0, aux).solve()
+        J = tlm.Functional(name="R")
+        J.assign(bilaplacian_energy_form(aux))
+        return J
+
+    grads = {}
+    for name, fwd in (("factored", energy_factored), ("residual", energy_residual)):
+        tlm.reset_manager()
+        tlm.start_manager()
+        J = fwd(theta)
+        tlm.stop_manager()
+        grads[name] = (float(J), tlm.compute_gradient(J, theta))
+    J_val, dJ = grads["factored"]
+    x = theta.dat.data_ro
+    want = A @ np.linalg.solve(M, A @ x)
+    assert J_val == pytest.approx(0.5 * x @ want, rel=1e-10)
+    assert np.allclose(dJ.dat.data_ro, want, rtol=1e-9, atol=1e-12)
+    assert np.allclose(dJ.dat.data_ro, grads["residual"][1].dat.data_ro,
+                       rtol=1e-9, atol=1e-12)
+    # A wrong adjoint gives order 1; the energy is quadratic, so order 2.
+    assert tlm.taylor_test(energy_factored, theta, J_val=J_val, dJ=dJ) > 1.99
+    assert tlm.taylor_test_tlm(energy_factored, theta, tlm_order=1) > 1.99
+    tlm.reset_manager()
 
 
 def test_the_covariance_action_inverts_the_precision(space):

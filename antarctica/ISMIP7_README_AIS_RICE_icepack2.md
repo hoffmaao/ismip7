@@ -83,11 +83,14 @@ shallow-shelf formulation on Firedrake 2026.4.1)
    from -0.68 K to +1.20 K (Amundsen) and bring every basin to its total in
    the July 2026 table (1067.4 Gt/yr). The group chose K50 on 25 September
    2026 (issue 26); the file is tracked as
-   `antarctica/calibration/deltaT_per_basin_1000_K6.500e-05.npz`, and every
-   run reads it unless another is named. The forward applies exactly the
-   melt it was fitted to: the same cells (floating, holding ice, on a bed
-   below sea level), slope and geometry, and it refuses an offsets file
-   fitted under other settings.
+   `antarctica/calibration/deltaT_per_basin_1000_K6.500e-05.npz`. The offsets
+   were refitted at the same K under the front-cell sampling (issue #167,
+   -0.72 K to +1.22 K), tracked as
+   `antarctica/calibration/deltaT_per_basin_1000_K6.500e-05_vertex_front.npz`,
+   which every run under the default sampling reads unless another is
+   named. The forward applies exactly the melt it was fitted to: the same
+   cells (floating, holding ice, on a bed below sea level), slope, geometry
+   and sampling, and it refuses an offsets file fitted under other settings.
    **[confirm #42]** that every submitted run read this calibration: each
    run's provenance line and report name the file and its sha256. Thermal
    forcing (`tf`) and salinity (`so`) are read at the cell's draft from the

@@ -1,0 +1,20 @@
+{
+  "task": "test",
+  "institution": "IU",
+  "status": "done",
+  "friction": "budd",
+  "forcing": "MEaSUREs v2 450 m (sha256 268be94e) and BedMachine v4.1 (sha256 6bd08dbb), byte-identical to Quartz's antarctica/data; ISMIP7_FLUIDITY_PRIOR=legacy; ISMIP7_PRIOR_FORM=bilaplacian (sigma 0.3, rho 7500 m); no dH/dt term",
+  "initial_state": "cold start: u = 0.1 u_obs, theta = phi = 0, the n,m 1 to 3 ramp, then ISMIP7_EVAL_CONTINUATION=0 (one annotated solve at full n an evaluation)",
+  "site": "IU workstation (Mac, 16 cores, 128 GB), data under /Volumes/LaCie/Data/antarctica_general/ismip7_obs; another session's 8-rank jobs shared the machine for most runs (load at each start in its commit.txt)",
+  "started": "2026-10-02",
+  "finished": "2026-10-02",
+  "id": "test-32km-inversion-eval-spans",
+  "title": "32 km inversion, the time outside the forward and adjoint by span, before and after the factored prior solve (L-BFGS-B and TAO)",
+  "mesh": "antarctica_320000_32000_buffered0 (Quartz's .msh, sha256 fd66fc42; 6,282 vertices, 9,055 cells), DG0 geometry, vertex raster sampling",
+  "resources": "4 ranks a run, one at a time; peak 2.3 to 3.0 GB a rank",
+  "code": "base 2626c71 (PR 155 branch plus the spans) against fix 4e45164; icepack_tools e7b923e",
+  "cost": "L-BFGS-B, full_mumps, 6 iterations and 7 evaluations: 5.67 s an evaluation before, 5.68 after, of which 0.115 and 0.080 s outside the forward and adjoint. TAO lmvm (mass-consistent metric), 4 iterations and 5 evaluations: 21.6 s an iteration before, 13.6 after",
+  "results": "/Volumes/LaCie/Data/antarctica_general/ismip7_runs/inversion_eval_overhead/runs/{p4_full,k32_base,k32_fix,k32_fix2,k32_fix3,t32_base,t32_fix,t32_fix2,t32_fix3} (log.txt, timing.json, commit.txt, map.h5); runp.sh and the batch scripts in /Volumes/LaCie/Data/antarctica_general/ismip7_runs/inversion_eval_overhead/scripts",
+  "audit": "L-BFGS-B: objective within 1.1e-14 and |grad| within 2.6e-13 of the base over 7 evaluations, final 1.320942e4, published ||F|| 2.941e1 in every run; outside the solves, prior_solve 0.037 to 0.002 s and residual_norm 0.074 s, the rest under 0.002 s. TAO: objective within 2.2e-13 over 5 evaluations, final 1.438882e4, published ||F|| 1.96e-2; residual_norm 7.86 to 0.23 s an iteration (the fnorm-ceiling check off the tape), prior_solve 0.037 to 0.002 s, prior_taped 0.042 to 0.006 s. Every TAO run failed its forward at the same three trial points and took the re-ramp rescue (reramp span, 2.9 s an iteration at 4e45164)",
+  "notes": "p4_full (the spans uncommitted on 4cf7f0e) and k32_base are the same base code and give the same iterates. k32_fix and t32_fix ran an uncommitted intermediate that factored M off the tape only; k32_fix2 and t32_fix2 ran 4e45164 less the reramp span and one comment. All gave the same iterates as the base; the records above cite k32_fix3 and t32_fix3 (4e45164)"
+}

@@ -101,10 +101,13 @@ def transfer_state(chk_in, mesh_new, cfg, chk_out, new_msh_basename, bed_sampler
         mesh_old = chk.load_mesh()
         # smb_elevation_feedback: the next segment's restart guard reads it
         # (forcing.smb_feedback_restart_error), and an adapted continuation
-        # is the same chain.
+        # is the same chain. fssa_tau and fssa_reference likewise: a restart
+        # with no fssa_tau steps without the stabilization
+        # (solverconfig.forward_fssa_theta, fssa.restart_reference_error).
         attrs = {k: chk.get_attr("/", k) for k in
                  ("t_yr", "friction", "geometry_space", "mesh_basename", "lc", "lc_coarse",
-                  "buffer_m", "raster_sample", "smb_elevation_feedback") if chk.has_attr("/", k)}
+                  "buffer_m", "raster_sample", "smb_elevation_feedback",
+                  "fssa_tau", "fssa_reference") if chk.has_attr("/", k)}
         old = {}
         for name in ("log_friction", "log_fluidity", "fluidity_prior", "thickness", "bed", "surface",
                      "velocity", "membrane_stress", "basal_stress", "H_init", "phi_eff", "C_w0",

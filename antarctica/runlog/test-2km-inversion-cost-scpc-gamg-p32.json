@@ -1,0 +1,23 @@
+{
+  "id": "test-2km-inversion-cost-scpc-gamg-p32",
+  "task": "test",
+  "institution": "IU",
+  "title": "2 km inversion cost probe, scpc_gamg (bt) on 32 ranks",
+  "status": "done",
+  "friction": "budd",
+  "mesh": "Rice's antarctica_5000_2000_buffered0, read from the snapshot (ISMIP7_MESH=checkpoint; 925,183 vertices, 1,835,718 cells), DG0 geometry, vertex raster sampling",
+  "initial_state": "warm start from inversion_icepack2_budd_n3_dg0_logvelnet_2000_int5000_bilap_snap20260924_0948.h5 (Rice, controls only) on its own mesh, ISMIP7_WARM_START_STRICT=0; the n,m 1 to 3 ramp under scpc_mumps, then ISMIP7_EVAL_CONTINUATION=0",
+  "forcing": "MEaSUREs v2 and BedMachine v4.1 from Quartz's antarctica/data; the snapshot's fluidity prior; bi-Laplacian prior; no dH/dt term",
+  "site": "IU Quartz, general partition",
+  "resources": "32 ranks, 240G; AveRSS 3.7 GiB, MaxRSS 4.0 GiB a rank",
+  "jobs": [
+    "10818444"
+  ],
+  "code": "389c642 (PR 155); icepack_tools e7b923e",
+  "started": "2026-10-01",
+  "finished": "2026-10-01",
+  "cost": "19 min wall; 41 s forward, 9.3 s adjoint, 64 s an evaluation; 4.5 Newton iterations and 64 V-cycles a condensed solve",
+  "results": "Quartz /N/scratch/dlilien/ismip7_issue156_runs/maps/2km_gamg_p32.h5 (scratch, purged after 30 days); timing record, log and sacct summary copied to /Volumes/LaCie/Data/antarctica_general/ismip7_runs/inversion_solver_quartz",
+  "audit": "every evaluation's objective within 3.7e-6 of test-2km-inversion-cost-full-mumps-p32 (the largest at the rejected trial, evaluation 4), final 4.935180e4 in both; no forward failed; published residual 1.3e-3",
+  "notes": "cost probe for issue #156: no MAP is kept, the objective differs from Rice's (ISMIP7_FLUIDITY_PRIOR=legacy names the prior the warm start overrides; strict handoff off)"
+}

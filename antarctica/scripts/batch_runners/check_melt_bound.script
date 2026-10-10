@@ -23,8 +23,9 @@
 #
 #       ISMIP7_INV_H5=$PWD/results/<run>_1000_final.h5
 #
-# The calibration is the one a forward reads: the tracked
-# calibration/deltaT_per_basin_1000_K6.500e-05.npz, unless
+# The calibration is the one a forward reads: the tracked calibration of the
+# raster sampling (runconfig.MELT_CALIBRATIONS), under the default
+# calibration/deltaT_per_basin_1000_K6.500e-05_vertex_front.npz, unless
 # ISMIP7_DELTAT_PER_BASIN_NPZ names offsets or ISMIP7_K_PER_BASIN_NPZ a legacy
 # per-basin K. ISMIP7_OCX_OCEAN picks the OCX variant (main), and `none` skips
 # the OCX comparison. The log carries the forcing-provenance lines, which say

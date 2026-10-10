@@ -1,0 +1,25 @@
+{
+ "id": "test-quartz-32km-relax-ocx-smoke",
+ "task": "test",
+ "institution": "IU",
+ "status": "done",
+ "title": "32 km relaxation year on OCX's 2014 protocol forcing on Quartz, then a 2-iteration re-inversion",
+ "period": "2014.0 to 2015.0, 80 steps, reached 2015.0",
+ "friction": "budd",
+ "mesh": "antarctica_320000_32000_buffered0, DG0 geometry, ISMIP7_MESH=checkpoint",
+ "initial_state": "/N/project/ice_rheology/ISMIP7/antarctica/mesh/inversion_icepack2_budd_n3_dg0_logvelnet_32000.h5, 1 yr of Smith dH/dt undone on 3,995 grounded cells (+45 Gt)",
+ "forcing": "OCX protocol: RACMO2.3p2-ERA SDBN1 acabf and the 'main' ocean with the tracked melt calibration; FSSA theta 1, step reference; apparent MB off; front pinned",
+ "site": "IU Quartz, debug partition",
+ "resources": "8 ranks, 48G",
+ "code": "8a55a20 (PR 163); Quartz worktree /N/scratch/dlilien/ismip7_reinvert_relax; cells relax_smoke32 and reinv_smoke32",
+ "jobs": [
+  "11487461",
+  "11487462"
+ ],
+ "started": "2026-10-06",
+ "finished": "2026-10-06",
+ "cost": "15 min for the year; 14 min for the re-inversion until it failed",
+ "results": "/N/scratch/dlilien/ismip7_reinvert_relax/antarctica/results/relax_inversion_icepack2_budd_n3_dg0_logvelnet_32000_smoke_32000_final.h5; logs /N/scratch/dlilien/ismip7_reinvert_relax/logs/ismip7_fwd_11487461.out, ismip7_inv_11487462.out",
+ "audit": "year: resid 0.00 on every step, SMB +2,335, melt -1,034, outflux -1,670 Gt/yr at the last step, chain finished at 2015.0. Re-inversion: 21 evaluations, then a taped solve raised an exception the driver does not catch and the job aborted (exit 137); it ran a deliberately mismatched objective (the issue #153 stage-1 prior on a MAP inverted otherwise, ISMIP7_WARM_START_STRICT=0)",
+ "notes": "Checks the relaxation path on Quartz with the real OCX product before the 2 km runs; issue #162"
+}

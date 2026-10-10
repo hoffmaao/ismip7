@@ -56,6 +56,8 @@ def one_step_dhdt(path):
             rr = 917.0 / 1024.0
             s = Function(H.function_space()).interpolate(
                 fd.max_value(b + H, (Constant(1.0) - rr) * H))
+        raster_sample = (str(c.get_attr("/", "raster_sample")).lower()
+                         if c.has_attr("/", "raster_sample") else "vertex")
 
     Q_g = H.function_space()
     if Q_g.ufl_element().degree() != 0:
@@ -85,7 +87,8 @@ def one_step_dhdt(path):
             K = K * float(os.environ.get("ISMIP7_K_SCALE", "1.0"))
         ctx = {"mesh": mesh, "Q": Q, "V": V, "Q_g": Q_g,
                "geom_xy": (xy[:, 0].copy(), xy[:, 1].copy()),
-               "h": H, "b": b, "s": s, "ocean_melt": melt}
+               "h": H, "b": b, "s": s, "ocean_melt": melt,
+               "raster_sample": raster_sample}
         make_climatology_ocean_callback(K)(ctx, 0.0)
 
     h_next = Function(Q_g)

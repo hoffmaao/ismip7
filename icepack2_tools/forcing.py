@@ -1563,6 +1563,14 @@ def _deltaT_for_run(cache, npz, mesh_x, mesh_y, ctx=None):
     contract is checked first (`check_melt_contract`)."""
     if "dT" not in cache:
         if ctx is not None:
+            # The tracked calibration is the one fitted under the sampling
+            # this run's geometry was built with, which setup_model settles
+            # (a transfer rebuilds it; issue #167). A named file stays.
+            if (ctx.get("raster_sample")
+                    and not os.environ.get("ISMIP7_DELTAT_PER_BASIN_NPZ")):
+                from .runconfig import deltat_per_basin_npz
+                npz = deltat_per_basin_npz(ctx["raster_sample"]) or npz
+            cache["npz"] = npz
             check_melt_contract(npz, ctx)
         field, K = load_deltaT_per_basin(npz, mesh_x, mesh_y, fill=np.nan)
         cache["fitted"] = np.isfinite(field)
@@ -1625,7 +1633,7 @@ def describe_melt_calibration(dT_npz, K_npz=None, mesh_basename=None):
     names is the file the run melted with. ``core_report.py`` lifts the line
     into the run's record, which is how every submitted run can be shown to
     have read the same calibration."""
-    from .runconfig import (MELT_CALIBRATION_DEFAULT, file_sha256,
+    from .runconfig import (MELT_CALIBRATIONS, file_sha256,
                             melt_calibration_contract)
     if dT_npz is None:
         return [f"{FORCING_PROVENANCE_MARKER} ocean melt calibration "
@@ -1639,8 +1647,9 @@ def describe_melt_calibration(dT_npz, K_npz=None, mesh_basename=None):
                     else str(contract.get("selected_as", "")))
     fitted_on = contract.get("mesh", "a mesh its file does not record")
     build = (f" ({contract['mesh_build']})" if contract.get("mesh_build") else "")
-    named = ("the tracked default"
-             if os.path.abspath(dT_npz) == os.path.abspath(MELT_CALIBRATION_DEFAULT)
+    tracked = {os.path.abspath(p): k for k, p in MELT_CALIBRATIONS.items()}
+    named = (f"the tracked calibration of {tracked[os.path.abspath(dT_npz)]} sampling"
+             if os.path.abspath(dT_npz) in tracked
              else "named with ISMIP7_DELTAT_PER_BASIN_NPZ")
     line = (f"{FORCING_PROVENANCE_MARKER} ocean melt calibration "
             f"{os.path.basename(dT_npz)} sha256 {file_sha256(dT_npz)} ({named}): "
@@ -1971,7 +1980,7 @@ def make_climatology_ocean_callback(K_field=None, data_root=None):
 
         ctx["ocean_melt"].dat.data[:] = np.where(melt_receiving(s, b, h), melt, 0.0)
         if dT_npz is not None:
-            _announce_deltaT(dT_cache, dT_npz, ctx)
+            _announce_deltaT(dT_cache, dT_cache["npz"], ctx)
 
     return callback
 
@@ -2287,7 +2296,7 @@ def make_forcing_callback(atm=None, ocean=None, fracture=None,
             # the set the calibration was fitted on
             ctx["ocean_melt"].dat.data[:] = np.where(melt_receiving(s, b, h), melt, 0.0)
             if dT_npz is not None:
-                _announce_deltaT(dT_cache, dT_npz, ctx)
+                _announce_deltaT(dT_cache, dT_cache["npz"], ctx)
 
         if fracture is not None and ctx.get("collapse") is not None:
             # The year's ice-shelf collapse mask on the geometry cells; the

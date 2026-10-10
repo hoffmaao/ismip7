@@ -1,0 +1,20 @@
+{
+  "id": "test-32km-inversion-sep1-opt-log-tao",
+  "task": "test",
+  "institution": "IU",
+  "status": "done",
+  "friction": "budd",
+  "site": "IU workstation (Mac, 16 cores, 128 GB), data under /Volumes/LaCie/Data/antarctica_general/ismip7_obs",
+  "started": "2026-10-02",
+  "finished": "2026-10-02",
+  "code": "432c831 (PR 155 with PR 158 and the sub-element scheme version, a git archive run from the session scratch); icepack_tools e7b923e",
+  "title": "32 km inversion, 40 iterations of TAO lmvm (mass-consistent metric) under SEP1, the direct forward and the log friction control, for the optimizer comparison",
+  "mesh": "antarctica_320000_32000_buffered0 (Quartz's .msh, sha256 fd66fc42; 6,282 vertices, 9,055 cells), DG0 geometry, vertex raster sampling",
+  "initial_state": "cold start: u = 0.1 u_obs, theta = phi = 0, the n,m 1 to 3 ramp under full_mumps, then the direct forward (ISMIP7_DIRECT_FORWARD default)",
+  "forcing": "MEaSUREs v2 450 m (sha256 268be94e) and BedMachine v4.1 (sha256 6bd08dbb), byte-identical to Quartz's antarctica/data; ISMIP7_FLUIDITY_PRIOR=legacy; the log friction control; SEP1 sub-element friction, version 2 (the default), with the exact front push; bi-Laplacian prior (sigma 0.3 on theta and phi, rho 7.5 km); ISMIP7_INVERSION_LINEAR_SOLVER=full_mumps; no dH/dt term; log-speed weight 0; TAO lmvm with the mass-consistent metric (ISMIP7_GRAD_PRECOND=mass_consistent)",
+  "resources": "4 ranks, the three arms of this control run together (load average 4.35 at the start and 13.61 at the end); peak 2.3 GB a rank",
+  "cost": "356 s wall; 303 s optimizing over 41 evaluations, 6.75 s a TAO iteration (median), of it 1.64 s the checkpoint",
+  "results": "/Volumes/LaCie/Data/antarctica_general/ismip7_runs/pr158_merge/B_log_mass_consistent/map.h5 (sha256 b139d3f1), log.txt, timing.json, code.txt; the wrappers are runm.sh, study.sh and study_exp.sh in pr158_merge",
+  "audit": "40 iterations, 41 evaluations, objective 4.923890e4 to 1.402199e4; every direct forward converged (2 to 11 Newton iterations), no lost trial, no rescue; published residual 7.3e-4",
+  "notes": "issue #157 optimizer comparison rerun under SEP1 and the direct forward, the log friction control, arm mass_consistent"
+}

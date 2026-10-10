@@ -29,3 +29,118 @@ def test_a_warm_start_from_a_smaller_mesh_fills_the_prior_with_cold_ice():
     vals = tgt.dat.data_ro
     assert set(np.round(vals, 9)) == {1.0, 40.0}
     assert vals.min() > 0.0
+
+
+def test_checkpoint_mesh_loads_its_recorded_parameters(tmp_path):
+    r"""Rice's 2 km MAPs travel without their .msh, so ISMIP7_MESH=checkpoint
+    solves on the mesh the MAP carries, under the basename it recorded, which
+    names the boundary-id sidecar."""
+    from icepack2_tools.transfer import load_checkpoint_mesh
+    mesh = UnitSquareMesh(4, 4, name="firedrake_default")
+    path = str(tmp_path / "map.h5")
+    with firedrake.CheckpointFile(path, "w") as chk:
+        chk.save_mesh(mesh)
+        chk.set_attr("/", "mesh_basename", "antarctica_5000_2000_buffered0.msh")
+        chk.set_attr("/", "lc", 2000)
+        chk.set_attr("/", "lc_coarse", 5000)
+        chk.set_attr("/", "buffer_m", 0.0)
+    loaded, basename, lc, lc_coarse, buffer_m = load_checkpoint_mesh(path)
+    assert basename == "antarctica_5000_2000_buffered0.msh"
+    assert (lc, lc_coarse, buffer_m) == (2000, 5000, 0.0)
+    assert meshes_match(loaded, mesh)
+
+
+def test_checkpoint_mesh_derives_parameters_from_its_basename(tmp_path):
+    from icepack2_tools.transfer import load_checkpoint_mesh
+    path = str(tmp_path / "map.h5")
+    with firedrake.CheckpointFile(path, "w") as chk:
+        chk.save_mesh(UnitSquareMesh(2, 2, name="firedrake_default"))
+        chk.set_attr(
+            "/", "mesh_basename", "antarctica_10000_1000_buffered20000.msh"
+        )
+    _mesh, basename, lc, lc_coarse, buffer_m = load_checkpoint_mesh(path)
+    assert basename == "antarctica_10000_1000_buffered20000.msh"
+    assert (lc, lc_coarse, buffer_m) == (1000, 10000, 20000.0)
+
+
+def test_checkpoint_mesh_refuses_contradictory_parameters(tmp_path):
+    from icepack2_tools.transfer import load_checkpoint_mesh
+    path = str(tmp_path / "map.h5")
+    with firedrake.CheckpointFile(path, "w") as chk:
+        chk.save_mesh(UnitSquareMesh(2, 2, name="firedrake_default"))
+        chk.set_attr("/", "mesh_basename", "antarctica_5000_2000_buffered0.msh")
+        chk.set_attr("/", "lc", 1000)
+        chk.set_attr("/", "lc_coarse", 5000)
+        chk.set_attr("/", "buffer_m", 0.0)
+    with pytest.raises(ValueError, match="contradictory mesh identity: lc="):
+        load_checkpoint_mesh(path)
+
+
+def test_checkpoint_mesh_refuses_incomplete_identity(tmp_path):
+    from icepack2_tools.transfer import load_checkpoint_mesh
+    path = str(tmp_path / "map.h5")
+    with firedrake.CheckpointFile(path, "w") as chk:
+        chk.save_mesh(UnitSquareMesh(2, 2, name="firedrake_default"))
+        chk.set_attr("/", "mesh_basename", "custom_mesh.msh")
+    with pytest.raises(ValueError, match="lacks mesh parameters"):
+        load_checkpoint_mesh(path)
+
+
+def test_a_checkpoint_that_names_no_mesh_is_refused(tmp_path):
+    from icepack2_tools.transfer import load_checkpoint_mesh
+    path = str(tmp_path / "map.h5")
+    with firedrake.CheckpointFile(path, "w") as chk:
+        chk.save_mesh(UnitSquareMesh(2, 2, name="firedrake_default"))
+    with pytest.raises(ValueError, match="mesh_basename"):
+        load_checkpoint_mesh(path)
+
+
+def test_the_mesh_sentinel_reads_the_warm_start(monkeypatch):
+    from icepack2_tools.runconfig import inversion_mesh_source
+    monkeypatch.delenv("ISMIP7_MESH", raising=False)
+    assert inversion_mesh_source("derived.msh") == ("derived.msh", False)
+    monkeypatch.setenv("ISMIP7_MESH", "other.msh")
+    assert inversion_mesh_source("derived.msh") == ("other.msh", False)
+    monkeypatch.setenv("ISMIP7_MESH", "checkpoint")
+    monkeypatch.setenv("ISMIP7_WARM_START", "rice_2km.h5")
+    assert inversion_mesh_source("derived.msh") == ("rice_2km.h5", True)
+    monkeypatch.delenv("ISMIP7_WARM_START")
+    with pytest.raises(ValueError, match="ISMIP7_WARM_START"):
+        inversion_mesh_source("derived.msh")
+
+
+@pytest.mark.parametrize("value, expected",
+                         [(None, True), ("", True), ("1", True), ("0", False)])
+def test_eval_continuation_is_on_unless_zero(monkeypatch, value, expected):
+    from icepack2_tools.runconfig import eval_continuation
+    if value is None:
+        monkeypatch.delenv("ISMIP7_EVAL_CONTINUATION", raising=False)
+    else:
+        monkeypatch.setenv("ISMIP7_EVAL_CONTINUATION", value)
+    assert eval_continuation() is expected
+
+
+def test_eval_continuation_refuses_a_word(monkeypatch):
+    from icepack2_tools.runconfig import eval_continuation
+    monkeypatch.setenv("ISMIP7_EVAL_CONTINUATION", "off")
+    with pytest.raises(ValueError):
+        eval_continuation()
+
+
+@pytest.mark.parametrize("value, expected", [
+    (None, "extend"), ("extend", "extend"), (" Constant ", "constant"),
+])
+def test_the_transfer_fill_extends_unless_told_otherwise(monkeypatch, value, expected):
+    from icepack2_tools.runconfig import transfer_fill
+    if value is None:
+        monkeypatch.delenv("ISMIP7_TRANSFER_FILL", raising=False)
+    else:
+        monkeypatch.setenv("ISMIP7_TRANSFER_FILL", value)
+    assert transfer_fill() == expected
+
+
+def test_the_transfer_fill_refuses_another_word(monkeypatch):
+    from icepack2_tools.runconfig import transfer_fill
+    monkeypatch.setenv("ISMIP7_TRANSFER_FILL", "nearest")
+    with pytest.raises(ValueError, match="ISMIP7_TRANSFER_FILL"):
+        transfer_fill()

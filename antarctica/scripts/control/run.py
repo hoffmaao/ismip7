@@ -259,6 +259,9 @@ def main():
 
     ctx = setup_model(restart_from=restart_from,
                       smb_feedback=feedback_mode(feedback))
+    # The tracked file is the one fitted under the sampling setup_model
+    # settled for this run's geometry, which a restart or a MAP can record.
+    dT_npz = deltat_per_basin_npz(ctx.get("raster_sample"))
 
     # Forcing fields live on the GEOMETRY space (DG0 by default), whose
     # dofs are cell centroids, not mesh vertices. Sampling climatologies

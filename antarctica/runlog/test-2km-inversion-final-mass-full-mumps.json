@@ -1,0 +1,21 @@
+{
+  "id": "test-2km-inversion-final-mass-full-mumps",
+  "task": "test",
+  "institution": "IU",
+  "title": "2 km inversion, 60 iterations of L-BFGS-B in sqrt(M) coordinates under full_mumps, production settings, for the final solver and optimizer decision",
+  "status": "done",
+  "friction": "budd",
+  "mesh": "antarctica_5000_2000_buffered0 (Rice's build, 925,183 vertices, 1,835,718 cells, read from the warm start: ISMIP7_MESH=checkpoint), DG0 geometry, vertex raster sampling",
+  "initial_state": "inversion_icepack2_budd_n3_dg0_logvelnet_2000_int5000_bilap_snap20260924_0948.h5 (release maps-2km-snap-2026-09-24, Rice's chain end, iteration 60), controls and fluidity prior only (the snapshot's lake_ice_base=0 geometry is not taken), ISMIP7_WARM_START_STRICT=0; the n,m 1 to 3 ramp, one rung, then the direct forward",
+  "forcing": "observations as in antarctica/data on Quartz; the exp friction control (C_ref and sigma_alpha auto); SEP1 sub-element friction, version 2, with the exact front push; bi-Laplacian prior; the warm start's fluidity prior; log-velocity weight 85380.44865839917 (the snapshot's); no dH/dt term; the direct forward; the startup ramp under scpc_mumps; ISMIP7_INVERSION_LINEAR_SOLVER=full_mumps; scipy L-BFGS-B in sqrt(M) coordinates (ISMIP7_GRAD_PRECOND=mass)",
+  "site": "IU Quartz, general partition",
+  "resources": "32 ranks, one node (c84); peak RSS 5.0 GB a rank (sacct MaxRSS)",
+  "jobs": "10950102",
+  "code": "72ac7a1 (PR 155), worktree /N/scratch/dlilien/ismip7_final; icepack_tools e7b923e",
+  "started": "2026-10-03",
+  "finished": "2026-10-03",
+  "cost": "3 h 25 min wall; ramp 468 s; first evaluation 235 s; 162.9 s an evaluation with its checkpoint (median), of it 48.7 s the forward, 94.5 s the adjoint and 16.9 s the checkpoint",
+  "results": "Quartz /N/scratch/dlilien/ismip7_final_runs/maps/2km_mass_full.h5 (sha256 02785d92) and timing/2km_mass_full.json; timing records and logs copied to /Volumes/LaCie/Data/antarctica_general/ismip7_runs/final_decision_quartz; submit script qfinal_submit.sh",
+  "audit": "60 iterations, 71 evaluations, objective 1.292839e5 to 7.093891e4; every direct forward converged, no lost trial, no rescue; published residual 3.8e0; the other solver's evaluations within 1.9e-7 (objective) over the first 38, then drifting apart as L-BFGS-B's history amplifies the difference (1.5e-3 at one trial; best objectives 7.093891e4 and 7.083074e4)",
+  "notes": "issues #156 and #157, the final round on the production settings: the solver pair at 2 km (test-2km-inversion-final-mass-scpc-gamg) and the optimizer arms test-2km-inversion-final-{tao,none,mass}-*"
+}

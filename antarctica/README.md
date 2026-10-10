@@ -983,6 +983,21 @@ mpiexec -n 8 python antarctica/scripts/score_front.py --out calv_vm075.json \
     antarctica/results/hist_cesm2_waccm_calv_vm075_2000_t20*.h5
 ```
 
+`campaign_table.py` puts the members side by side from their time series
+and, where they exist, their front scores: the ice leaving through the mesh
+boundary and the ice a law removed inside the mesh (on a mesh without a
+buffer the boundary is the front, so the first is nearly all of the front
+flux), their sum against the observed 1,138 to 1,297 Gt/yr (BedMachine's
+front under MEaSUREs, icepack/ismip7#167), the mass and VAF rates after the
+first year, the budget residual, and the front rms, bias, reverse rms and
+inland ice-free change from `score_front.py`. A pinned front also removes the
+ice that advances into ice-free cells inside the mesh, which a free front
+keeps, so `fixed` removes more than a weak rate law on the same mesh.
+
+```sh
+python antarctica/scripts/campaign_table.py --tag calv75 --results antarctica/results --scores scores/
+```
+
 ### The whole matrix in one command (`run_core_matrix.sh`)
 
 Runs cores 1 to 11 in dependency order (historicals, controls, projections,

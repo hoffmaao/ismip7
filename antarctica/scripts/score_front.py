@@ -19,9 +19,10 @@ rms is the distance between the two fronts, its bias their net offset, and
 the seaward and inland shares say whether a small rms hides a front that is
 right on average and wrong everywhere. The same is reported the other way,
 from the observed front to the model's (``obs_front``, on the mesh only:
-the islands beyond its buffer are no front the run can have): a shelf the
-model has lost shows in both, ice the model keeps past the record shows
-mainly in the first. Both are given per Mouginot basin. A member of a calving
+the islands beyond its buffer are no front the run can have, and on a
+mesh without a buffer the coast is scored only where it lies within the
+run's extent): a shelf the model has lost shows in both, ice the model
+keeps past the record shows mainly in the first. Both are given per Mouginot basin. A member of a calving
 campaign is judged on the mean front rms over the epochs its run covers,
 against the pinned-front and no-calving baselines. The ice-free area
 inland that the ocean does not reach is reported too: it starts as the

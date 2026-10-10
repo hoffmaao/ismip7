@@ -4,11 +4,14 @@ r"""Write the front-scoring subset of the ISMIP7 observations kit.
 The kit is 9 GB; ``score_front.py`` reads five of its variables (the grid,
 the Greene masks and their dates, the Mouginot basins), which compress to
 9 MB because the masks are binary. The subset travels to a machine that
-holds the forward runs but not the kit (``--kit`` on the scorer).
+holds the forward runs but not the kit (``--kit`` on the scorer). Keep it
+out of ``obs/mipkit/``: the forward's dH/dt reader takes any
+``AntarcticaObsISMIP7*.nc`` there for the full kit, and the subset has no
+dH/dt field.
 
     python antarctica/scripts/make_front_kit.py \
         ISMIP7/AIS/obs/mipkit/AntarcticaObsISMIP7-v1.2.nc \
-        ISMIP7/AIS/obs/mipkit/AntarcticaObsISMIP7-v1.2-front.nc
+        ISMIP7/AIS/obs/front/AntarcticaObsISMIP7-v1.2-front.nc
 """
 import sys
 

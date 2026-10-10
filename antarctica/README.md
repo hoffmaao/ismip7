@@ -973,8 +973,10 @@ from the observed coast to the model's front, in total and per Mouginot
 basin; a member is judged on the mean front rms over the epochs its run
 covers, against `fixed` and `nocalving`. Where the full kit is absent,
 `--kit` takes the front subset (`AntarcticaObsISMIP7-v1.2-front.nc`, 9 MB:
-the Greene masks, their dates and the Mouginot basins; on NOTS beside the
-forcing under `ISMIP7/AIS/obs/mipkit/`).
+the Greene masks, their dates and the Mouginot basins; on NOTS at
+`ISMIP7/AIS/obs/front/`, NOT under `obs/mipkit/`: the forward's dH/dt reader
+takes any `AntarcticaObsISMIP7*.nc` there for the full kit and fails on the
+subset).
 
 ```sh
 mpiexec -n 8 python antarctica/scripts/score_front.py --out calv_vm075.json \

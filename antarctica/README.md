@@ -1447,6 +1447,19 @@ keeps, so `fixed` removes more than a weak rate law on the same mesh.
 python antarctica/scripts/campaign_table.py --tag calv75 --results antarctica/results --scores scores/
 ```
 
+`boundary_front_flux.py` reads a MAP or forward state on a mesh without a
+buffer and assembles the ice flux through the exterior facets holding ice
+under the state's own velocity and under the observed velocity it carries,
+all ice and split floating and grounded, with the front's mean thickness and
+normal speed: the front flux the budget books as outflux, and how far the
+front speed overshoots the observations (BedMachine's front under MEaSUREs
+carries 1,138 to 1,297 Gt/yr).
+
+```sh
+mpiexec -n 4 python antarctica/scripts/boundary_front_flux.py --out flux.json \
+    map=MAP.h5 t2010=antarctica/results/hist_cesm2_waccm_calv75_vm150_2000_t2010.0.h5
+```
+
 ### The whole matrix in one command (`run_core_matrix.sh`)
 
 Runs cores 1 to 11 in dependency order (historicals, controls, projections,

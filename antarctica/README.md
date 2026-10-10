@@ -961,13 +961,20 @@ antarctica/scripts/batch_runners/submit_calving_campaign.sh suite vm075 fixed   
 ```
 
 `score_front.py` scores a run's front against the Greene record: for each
-state checkpoint it reads the level set, takes the Greene mask of the nearest
-epoch from the observations kit as a signed distance, and reports on the
-model's front cells, front-length weighted, the rms distance between the two
-fronts, its bias (positive where the model front lies seaward of the
-observed one), the seaward and inland shares and the share within 1 and 2
-km, in total and per Mouginot basin; a member is judged on the mean front rms
-over the epochs its run covers, against `fixed` and `nocalving`.
+state checkpoint it puts the run's ice extent (the sign of its level set)
+and the Greene mask of the nearest epoch on the kit's grid at 1 km, takes
+the front of each as the edge of its ice against the ocean it is connected
+to (the level set also bounds every rock outcrop and ice-free pocket
+inland, which the record does not draw), and reports on the model's front,
+front-length weighted, the rms distance to the observed coast, its bias
+(positive where the model front lies seaward of the observed one), the
+seaward and inland shares and the share within 1 and 2 km, then the same
+from the observed coast to the model's front, in total and per Mouginot
+basin; a member is judged on the mean front rms over the epochs its run
+covers, against `fixed` and `nocalving`. Where the full kit is absent,
+`--kit` takes the front subset (`AntarcticaObsISMIP7-v1.2-front.nc`, 9 MB:
+the Greene masks, their dates and the Mouginot basins; on NOTS beside the
+forcing under `ISMIP7/AIS/obs/mipkit/`).
 
 ```sh
 mpiexec -n 8 python antarctica/scripts/score_front.py --out calv_vm075.json \

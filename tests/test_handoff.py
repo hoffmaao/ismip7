@@ -6,7 +6,9 @@ import pytest
 
 from icepack2_tools.handoff import (
     OBJECTIVE_KEYS,
+    SUBELEMENT_SCHEME_VERSIONS,
     accepted_evaluation,
+    check_subelement_record,
     frozen_in_control,
     handoff_gap,
     objective_mismatches,
@@ -25,8 +27,10 @@ def _settings(**over):
         "geometry_space": "dg0", "friction_anchor_length": 20000.0,
         "lake_ice_base": 1, "fluidity_prior_origin": "thermomechanical",
         "grad_precond": "mass_consistent",
-        "subelement_friction": 1, "subelement_scheme": "sep1", "exact_front": 0,
-        "fluidity_control": "all",
+        "subelement_friction": 1, "subelement_scheme": "sep1",
+        "subelement_scheme_version": 2, "exact_front": 0,
+        "fluidity_control": "all", "drag_gate": "vertex", "h_visc_floor": 1.0,
+        "phi_grounded": "inverted", "raster_sample": "vertex",
     }
     base.update(over)
     return base
@@ -57,11 +61,13 @@ def test_numbers_are_compared_as_numbers_and_missing_keys_are_not_mismatches():
 
 def test_a_sub_element_record_without_a_scheme_was_sep2():
     legacy = _settings(subelement_friction=1)
-    del legacy["subelement_scheme"]
+    del legacy["subelement_scheme"], legacy["subelement_scheme_version"]
     out = objective_mismatches(legacy, _settings(subelement_friction=1, subelement_scheme="sep1"))
-    assert out == ["subelement_scheme: 'sep2' -> 'sep1'"]
+    assert out == ["subelement_scheme: 'sep2' -> 'sep1'",
+                   "subelement_scheme_version: 1 -> 2"]
     assert objective_mismatches(legacy, _settings(subelement_friction=1,
-                                                  subelement_scheme="sep2")) == []
+                                                  subelement_scheme="sep2",
+                                                  subelement_scheme_version=1)) == []
     # without sub-element friction the scheme selects nothing
     off = dict(subelement_friction=0)
     plain = _settings(**off)
@@ -72,6 +78,52 @@ def test_a_sub_element_record_without_a_scheme_was_sep2():
     no_record = _settings(subelement_scheme="sep2")
     del no_record["subelement_friction"]
     assert objective_mismatches(no_record, _settings(subelement_scheme="sep1", **off)) == []
+
+
+def test_the_versions_are_the_forms_this_code_builds():
+    # bump a scheme's version with any change to its residual at the same
+    # control fields (icepack2_tools.handoff, the comment over the table)
+    assert SUBELEMENT_SCHEME_VERSIONS == {"sep2": 1, "sep1": 2}
+
+
+@pytest.mark.parametrize("scheme, control, stands_for", [
+    ("sep2", "log", 1), ("sep2", "sqrt", 1),
+    # both SEP1 forms agree where theta is zero
+    ("sep1", "sqrt", 2), ("sep1", "exp", 2),
+    # a log-control SEP1 record cannot say which form it was
+    ("sep1", "log", "unrecorded"),
+])
+def test_a_sub_element_record_without_a_version(scheme, control, stands_for):
+    old = _settings(subelement_scheme=scheme, friction_control=control)
+    del old["subelement_scheme_version"]
+    current = _settings(subelement_scheme=scheme, friction_control=control,
+                        subelement_scheme_version=SUBELEMENT_SCHEME_VERSIONS[scheme])
+    out = objective_mismatches(old, current)
+    if stands_for == SUBELEMENT_SCHEME_VERSIONS[scheme]:
+        assert out == []
+    else:
+        assert out == [f"subelement_scheme_version: {stands_for!r} -> "
+                       f"{SUBELEMENT_SCHEME_VERSIONS[scheme]}"]
+    # without sub-element friction on both sides the version selects nothing
+    old["subelement_friction"] = 0
+    assert objective_mismatches(old, dict(current, subelement_friction=0)) == []
+
+
+def test_another_version_of_the_scheme_is_another_objective():
+    out = objective_mismatches(_settings(subelement_scheme_version=1), _settings())
+    assert out == ["subelement_scheme_version: 1 -> 2"]
+
+
+def test_a_forward_rebuilds_only_the_version_this_code_builds():
+    assert check_subelement_record("sep2", None, "log") == 1
+    assert check_subelement_record("sep1", None, "sqrt") == 2
+    assert check_subelement_record("sep1", np.int64(2), "log") == 2
+    with pytest.raises(RuntimeError, match="before the scheme's version was recorded"):
+        check_subelement_record("sep1", None, "log", source="old.h5")
+    with pytest.raises(RuntimeError, match="version 1; this code builds version 2"):
+        check_subelement_record("sep1", 1, "sqrt")
+    with pytest.raises(RuntimeError, match="sub-element scheme 'sep3'"):
+        check_subelement_record("sep3", 1, "log")
 
 
 def test_the_accepted_evaluation_is_the_one_matching_the_objective():
@@ -98,3 +150,10 @@ def test_auto_weight_frozen_only_within_one_control():
     legacy = {"prior_sigma_alpha": 0.2}
     assert frozen_in_control(legacy, "prior_sigma_alpha", "sqrt") is None
     assert frozen_in_control(_settings(friction_c_ref=0.0), "friction_c_ref", "sqrt") is None
+
+
+def test_a_new_cliff_push_version_is_an_objective_change():
+    r"""A MAP inverted under exact_front 1 warm-starts a version 2 inversion
+    only non-strictly: the push at rock walls changed (issue #166)."""
+    assert objective_mismatches(_settings(exact_front=1), _settings(exact_front=2)) == \
+        ["exact_front: 1 -> 2"]

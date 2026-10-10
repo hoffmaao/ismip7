@@ -69,19 +69,31 @@ from icepack2_tools.mpi_stats import (
     global_size,
 )
 from icepack2_tools.boundary import load_boundary_ids
-from icepack2_tools.geometry import raise_bed_to_lake_ice_base, sample_to_geometry
+from icepack2_tools.fssa import (
+    fssa_banner,
+    resolve_reference as resolve_fssa_reference,
+    restart_reference_error as fssa_restart_reference_error,
+    restart_step as fssa_restart_step,
+)
+from icepack2_tools.geometry import (
+    raise_bed_to_lake_ice_base, sample_bed_thickness,
+)
 from icepack2_tools.naming import map_basename
+from icepack2_tools.handoff import check_subelement_record
 from icepack2_tools.front import (
     held_calved,
     clamp_thickness, clear_reference_where_ice_free, retreat_slivers,
     front_removal_mask, unforced_cells, applied_forcing,
-    facet_neighbours, front_connected, ocean_drag_cells,
+    facet_neighbours, front_connected, ocean_drag_cells, vertex_neighbours,
     collapse_banner, collapse_cell_counts, collapse_csv_fields,
     COLLAPSE_CSV_COLUMNS, COLLAPSE_MARKER, FRONT_OWNER_MARKER,
 )
 from icepack2_tools.forcing import SMB_FEEDBACK_ATTR, smb_feedback_restart_error
+from icepack2_tools.relaxation import (
+    INIT_STATE_ATTR, RELAX_MAP_KEYS, describe_relaxation, init_state as _init_state,
+)
 from icepack2_tools.timeseries import (
-    format_year, resumed_step, rows_kept_on_resume, step_changed,
+    resumed_step, rows_kept_on_resume, step_changed,
     timeseries_csv_line,
 )
 from icepack2_tools.runconfig import (
@@ -89,9 +101,14 @@ from icepack2_tools.runconfig import (
     BUDD_SHELF_GATE as _BUDD_SHELF_GATE,
     residual_stabilizers,
     friction as _friction, geometry_space as _geometry_space,
-    mesh_override as _mesh_override,
+    mesh_override as _mesh_override, transfer_fill as _transfer_fill,
+    forward_drag_gate as _forward_drag_gate,
+    forward_hvisc_floor as _forward_hvisc_floor,
+    forward_exact_front as _forward_exact_front,
     lc as _lc, lc_coarse as _lc_coarse, n_flow as _n_flow, buffer_m as _buffer_m,
-    TARGET_MESH_GEOMETRY_METHOD,
+    target_mesh_geometry_method as _target_mesh_geometry_method,
+    forward_raster_sample as _forward_raster_sample,
+    raster_base_method as _raster_base_method,
     calving_law as _calving_law, calving_law_object as _calving_law_object,
     front_advance as _front_advance,
     fracture as _fracture_mode, ismip7_output as _ismip7_output,
@@ -122,6 +139,8 @@ from icepack2_tools.solverconfig import (
     subcycles,
     substep_settings,
     fssa_theta,
+    forward_fssa_theta,
+    fssa_reference,
     transport_solver_parameters,
 )
 
@@ -413,8 +432,10 @@ def setup_model(restart_from=None, *, allow_timing_cache_a_ref=False,
             # restart fast path trusts the state only within a factor of it.
             "full_state_residual",
             # The stabilization step that residual was measured at
-            # (icepack2_tools.fssa), restored before the fast-path check.
+            # (icepack2_tools.fssa), restored before the fast-path check,
+            # and the reference it was measured from.
             "fssa_tau",
+            "fssa_reference",
             # The friction anchor theta is a deviation from, and the geometry
             # it was inverted on (dual_friction.weertman_anchor,
             # geometry.raise_bed_to_lake_ice_base): a forward follows the MAP.
@@ -428,9 +449,16 @@ def setup_model(restart_from=None, *, allow_timing_cache_a_ref=False,
             # under (icepack2_tools.subelement): a forward follows the MAP.
             "subelement_friction",
             "subelement_scheme",
+            "subelement_scheme_version",
             "exact_front",
             "fluidity_control",
-        ):
+            # The ocean-drag gate and the membrane floor the controls absorbed
+            # (runconfig.forward_drag_gate, forward_hvisc_floor).
+            "drag_gate",
+            "h_visc_floor",
+            # How a relaxed MAP's geometry was made, and the initial state a
+            # restart's chain began from (icepack2_tools.relaxation).
+        ) + RELAX_MAP_KEYS + (INIT_STATE_ATTR,):
             if _chk.has_attr("/", _key):
                 checkpoint_metadata[_key] = _chk.get_attr("/", _key)
         # The mesh this checkpoint was built on, recorded by the inversion and
@@ -456,17 +484,10 @@ def setup_model(restart_from=None, *, allow_timing_cache_a_ref=False,
         chk_buffer_m = (float(_chk.get_attr("/", "buffer_m"))
                         if _chk.has_attr("/", "buffer_m") else None)
         # Raster sampling the MAP was inverted with. MAPs older than the
-        # attribute were all vertex-sampled. The MAP wins over the
-        # environment: the controls absorbed that bed, so a different one
-        # here would be silently inconsistent.
-        chk_raster_sample = (str(_chk.get_attr("/", "raster_sample"))
-                             if _chk.has_attr("/", "raster_sample") else "vertex")
-        _env_rs = os.environ.get("ISMIP7_RASTER_SAMPLE")
-        if _env_rs and _env_rs.lower() != chk_raster_sample:
-            PETSc.Sys.Print(
-                f"  WARNING: ISMIP7_RASTER_SAMPLE={_env_rs} but the MAP was "
-                f"inverted with {chk_raster_sample}; using the MAP's."
-            )
+        # attribute were all vertex-sampled. Which sampling this run builds
+        # its geometry with is decided once the target mesh is known.
+        map_raster_sample = (str(_chk.get_attr("/", "raster_sample"))
+                             if _chk.has_attr("/", "raster_sample") else None)
         # The FINE resolution is stamped too, and every component of the
         # reconstructed name must come from the checkpoint: falling back to the
         # live ISMIP7_LC here would reintroduce exactly the environment drift
@@ -476,10 +497,12 @@ def setup_model(restart_from=None, *, allow_timing_cache_a_ref=False,
                   if _chk.has_attr("/", "lc") else None)
         if not mesh_basename and chk_lc_coarse is not None \
                 and chk_buffer_m is not None:
+            # Such a checkpoint predates the mesh_basename attribute, and so
+            # every front-following mesh: name the mesh without a front tag.
             mesh_basename = os.path.basename(
                 mesh_filename(chk_lc_coarse,
                               chk_lc if chk_lc is not None else lc,
-                              chk_buffer_m))
+                              chk_buffer_m, front=None))
 
     source_mesh_basename = mesh_basename
     # None for unset, empty and the sentinel `checkpoint`: solve on the mesh
@@ -590,6 +613,17 @@ def setup_model(restart_from=None, *, allow_timing_cache_a_ref=False,
     geometry_space = _geometry_space()
     geom_dg = geometry_space == "dg0"
     Q_g = FunctionSpace(mesh, "DG", 0) if geom_dg else Q
+    # A cold start on another mesh than its MAP's rebuilds the cell-wise
+    # geometry from BedMachine there (below), with this run's raster sampling,
+    # so a transferred MAP gets the front its new mesh holds (issue #167).
+    # Otherwise the checkpoint's geometry is used as is and the sampling it
+    # records stands; an ISMIP7_RASTER_SAMPLE that differs is refused.
+    geometry_transfer = bool(
+        not is_restart and mesh_fn and geom_dg
+        and (not source_mesh_basename
+             or os.path.basename(mesh_fn) != source_mesh_basename))
+    chk_raster_sample = _forward_raster_sample(
+        map_raster_sample, geometry_transfer, source=source_chk)
     PETSc.Sys.Print(
         f"  Geometry space: {geometry_space.upper()}"
         + (" (h, s, b cell-wise; one thickness for force and mass)" if geom_dg
@@ -630,14 +664,37 @@ def setup_model(restart_from=None, *, allow_timing_cache_a_ref=False,
     map_anchor_length = float(checkpoint_metadata.get("friction_anchor_length", 0.0))
     map_lake_ice_base = int(checkpoint_metadata.get("lake_ice_base", 0))
     map_subelement = int(checkpoint_metadata.get("subelement_friction", 0))
-    map_exact_front = int(checkpoint_metadata.get("exact_front", 0))
+    # the version of the cliff push (runconfig.EXACT_FRONT_VERSIONS)
+    map_exact_front = _forward_exact_front(checkpoint_metadata.get("exact_front"),
+                                           source=os.path.basename(source_chk))
+    # The ocean-drag gate and the membrane floor the controls absorbed. The
+    # resolved values go into every state this run writes (MAP_CONFIG_KEYS),
+    # so a restart runs them too.
+    map_drag_gate = _forward_drag_gate(checkpoint_metadata.get("drag_gate"),
+                                       source=os.path.basename(source_chk),
+                                       restart=is_restart)
+    map_hvisc_floor = _forward_hvisc_floor(checkpoint_metadata.get("h_visc_floor"),
+                                           source=os.path.basename(source_chk))
+    checkpoint_metadata["drag_gate"] = map_drag_gate
+    checkpoint_metadata["h_visc_floor"] = map_hvisc_floor
     # a MAP from before the record was inverted under SEP2
     map_subelement_scheme = str(checkpoint_metadata.get("subelement_scheme", "sep2"))
+    if map_subelement:
+        # Refuses a MAP of another version of its scheme, and a log-control
+        # SEP1 MAP from before the version was recorded.
+        map_subelement_scheme_version = check_subelement_record(
+            map_subelement_scheme,
+            checkpoint_metadata.get("subelement_scheme_version"),
+            checkpoint_metadata.get("friction_control", "log"),
+            source=os.path.basename(source_chk))
     _env_sub = os.environ.get("ISMIP7_SUBELEMENT_FRICTION")
     if _env_sub is not None and int(_env_sub) != map_subelement:
         raise RuntimeError(
             f"ISMIP7_SUBELEMENT_FRICTION={_env_sub} but the MAP was inverted with "
             f"subelement_friction={map_subelement}: a forward follows its MAP")
+    PETSc.Sys.Print(
+        "  Exact cliff push (from the MAP): "
+        + (f"version {map_exact_front}" if map_exact_front else "off"))
     for _var, _val, _map in (("ISMIP7_ANCHOR_LENGTH", map_anchor_length, map_anchor_length),
                              ("ISMIP7_LAKE_ICE_BASE", map_lake_ice_base, map_lake_ice_base)):
         _env = os.environ.get(_var)
@@ -661,19 +718,27 @@ def setup_model(restart_from=None, *, allow_timing_cache_a_ref=False,
         bm_fn = find_file(os.path.join(DATA_DIR, "bedmachine"), "*.nc")
         geometry_source = os.path.realpath(bm_fn)
         geometry_source_method = (
-            TARGET_MESH_GEOMETRY_METHOD if geom_dg
+            _target_mesh_geometry_method(chk_raster_sample) if geom_dg
             else "target-native-bedmachine-nodal-v1"
         )
         # Cell average onto the geometry space, NOT a centroid point sample --
         # see geometry.sample_to_geometry for the measurements behind that.
-        PETSc.Sys.Print(f"  Raster sampling onto geometry cells: {chk_raster_sample}")
-        b = sample_to_geometry(
-            rasterio.open(f"netcdf:{bm_fn}:bed"), Q_g, Q,
-            method=chk_raster_sample)
+        # RC/Budd on the MAP's own mesh replace this sample with the MAP's
+        # geometry below, so a front sampling's ice mask is read only where
+        # its cells are kept.
+        _sample_method = (
+            chk_raster_sample if (geometry_transfer or not use_rc)
+            else _raster_base_method(chk_raster_sample))
+        PETSc.Sys.Print(
+            f"  Raster sampling onto geometry cells: {_sample_method}"
+            + ("" if (geometry_transfer or not use_rc) else
+               f" (a placeholder: the MAP's own geometry, sampled "
+               f"{chk_raster_sample}, replaces it)"))
+        b, H, _front_counts = sample_bed_thickness(
+            bm_fn, Q_g, Q, floor=h_clamp_init, method=_sample_method)
+        if _front_counts is not None:
+            PETSc.Sys.Print(f"  Front cells ({_sample_method}): {_front_counts}")
         b.rename("bed")
-        H = sample_to_geometry(
-            rasterio.open(f"netcdf:{bm_fn}:thickness"),
-            Q_g, Q, floor=h_clamp_init, method=chk_raster_sample)
         H.rename("thickness")
         if map_lake_ice_base:
             _n_lake = raise_bed_to_lake_ice_base(b, H, bm_fn, Q_g, Q, method=chk_raster_sample)
@@ -692,10 +757,12 @@ def setup_model(restart_from=None, *, allow_timing_cache_a_ref=False,
     phi_eff = None
     u_guess = None
     map_state_name = None   # the MAP's mixed state seeding a cold start
+    map_geometry_taken = False  # a cold start took the MAP's own geometry
     M_guess = None
     tau_guess = None
     a_ref_mb = None
     u_ref_fssa_ckpt = None
+    fssa_tendency_ckpt = None
     calved_cells_ckpt = None
     phys_div = None
     h_dg_state = None
@@ -712,9 +779,15 @@ def setup_model(restart_from=None, *, allow_timing_cache_a_ref=False,
     # outside the source mesh and what they were filled with. Printed below
     # and carried in the context for the caches and the map checks.
     transfer_fill = {}
+    # ISMIP7_TRANSFER_FILL=extend (the default): the controls and the
+    # fluidity prior continue harmonically past the MAP's outline, the
+    # prior through its logarithm (icepack2_tools.transfer); `constant`
+    # leaves the stated fills alone.
+    fill_extends = _transfer_fill() == "extend"
 
     def load_checkpoint_field(chk, name, space, optional=False,
-                              fill=0.0, fill_label="0"):
+                              fill=0.0, fill_label="0", extend=False,
+                              log=False):
         """Load a checkpoint field, interpolating it onto the compute mesh.
 
         With ISMIP7_MESH naming another mesh, a target dof outside the source
@@ -722,7 +795,10 @@ def setup_model(restart_from=None, *, allow_timing_cache_a_ref=False,
         sample for velocity_obs). The buffered production mesh reaches 20 km
         past a buffer-0 MAP, so the whole ring is filled; zero there is the
         prior for theta and phi and a singular block for the fluidity prior
-        (icepack2_tools.transfer). Same-mesh loads miss nothing.
+        (icepack2_tools.transfer). ``extend`` (honoured under
+        ISMIP7_TRANSFER_FILL=extend) continues the field harmonically from
+        the source outline instead, ``fill`` kept where that cannot reach;
+        ``log`` extends its logarithm. Same-mesh loads miss nothing.
         """
         try:
             source_field = chk.load_function(source_mesh, name=name)
@@ -731,9 +807,14 @@ def setup_model(restart_from=None, *, allow_timing_cache_a_ref=False,
                 return None
             raise
         target_field = Function(space, name=name)
+        extend = extend and fill_extends
         n_missing, n_total, n_clamped = interpolate_with_fill(
-            target_field, source_field, fill, mesh.comm
+            target_field, source_field, fill, mesh.comm, extend=extend,
+            log=log,
         )
+        if extend:
+            fill_label = (f"a harmonic extension{' of its logarithm' if log else ''} "
+                          f"of the source ({fill_label} where it cannot reach)")
         transfer_fill[name] = {
             "missing": n_missing, "total": n_total, "fill": fill_label,
             "clamped": n_clamped,
@@ -741,16 +822,17 @@ def setup_model(restart_from=None, *, allow_timing_cache_a_ref=False,
         return target_field
 
     with fd.CheckpointFile(source_read, "r") as chk:
-        theta_f = load_checkpoint_field(chk, "log_friction", Q)
+        theta_f = load_checkpoint_field(chk, "log_friction", Q, extend=True)
         theta_f.rename("theta")
-        phi_f = load_checkpoint_field(chk, "log_fluidity", Q)
+        phi_f = load_checkpoint_field(chk, "log_fluidity", Q, extend=True)
         phi_f.rename("phi")
         # A MAP inverted on the sqrt(C) control (ISMIP7_FRICTION_CONTROL=sqrt)
         # carries alpha = sqrt(C): its friction is alpha^2 outright, with no
         # anchor and a zero log deviation. Restart checkpoints carry that
         # friction as C_w0 with theta = 0, so they take the ordinary path.
         alpha_f = load_checkpoint_field(
-            chk, "sqrt_friction", Q, optional=True, fill=0.0, fill_label="0")
+            chk, "sqrt_friction", Q, optional=True, fill=0.0, fill_label="0",
+            extend=True)
         # A MAP inverted on the exp control (ISMIP7_FRICTION_CONTROL=exp)
         # carries alpha = ln(C / C_ref) as log_friction and C_ref as a
         # constant C_w0. The residual takes C = C_ref exp(alpha) pointwise
@@ -770,6 +852,7 @@ def setup_model(restart_from=None, *, allow_timing_cache_a_ref=False,
             chk, "fluidity_prior", Q, optional=True,
             fill=A_prior_baseline,
             fill_label=f"the constant baseline A0*a4_factor = {A_prior_baseline:.3g}",
+            extend=True, log=True,
         )
         if is_restart:
             # Self-contained restart: evolved geometry, frozen anchors, time.
@@ -812,6 +895,9 @@ def setup_model(restart_from=None, *, allow_timing_cache_a_ref=False,
             )
             u_ref_fssa_ckpt = load_checkpoint_field(
                 chk, "u_ref_fssa", V, optional=True
+            )
+            fssa_tendency_ckpt = load_checkpoint_field(
+                chk, "fssa_tendency", Q_dg, optional=True
             )
             calved_cells_ckpt = load_checkpoint_field(
                 chk, "calved_cells", Q_dg, optional=True
@@ -948,6 +1034,7 @@ def setup_model(restart_from=None, *, allow_timing_cache_a_ref=False,
                 s = load_checkpoint_field(chk, "surface", Q_g)
                 geometry_source = os.path.realpath(source_chk)
                 geometry_source_method = "checkpoint-native-v1"
+                map_geometry_taken = True
                 # The mixed state the MAP was accepted at (a final MAP's
                 # velocity/membrane_stress/basal_stress, a periodic
                 # checkpoint's ckpt_* copies) seeds the cold-start solve
@@ -968,6 +1055,26 @@ def setup_model(restart_from=None, *, allow_timing_cache_a_ref=False,
             if h_clamp_init > 0.0:
                 H.interpolate(max_value(H, Constant(h_clamp_init)))
                 s.interpolate(max_value(b + H, (Constant(1.0) - rho_ratio) * H))
+
+    # The initial state the chain began from (icepack2_tools.relaxation):
+    # a relaxed MAP starts from its own geometry on its own mesh, and gives
+    # only its controls to a forward on another mesh, which builds its
+    # geometry from BedMachine as it does for any MAP. A restart keeps the
+    # record of the run it continues.
+    relax_record = {k: checkpoint_metadata[k] for k in RELAX_MAP_KEYS
+                    if k in checkpoint_metadata}
+    if is_restart:
+        init_state = checkpoint_metadata.get(INIT_STATE_ATTR, "observed")
+        init_state = init_state.decode() if isinstance(init_state, bytes) else str(init_state)
+    else:
+        init_state = _init_state(checkpoint_metadata, other_mesh=not map_geometry_taken)
+        if init_state == "relaxed":
+            PETSc.Sys.Print("  Initial state: the relaxed MAP's own geometry ("
+                            + describe_relaxation(relax_record) + ")")
+        elif init_state == "relaxed-controls":
+            PETSc.Sys.Print("  Initial state: the relaxed MAP's controls on this mesh's "
+                            "BedMachine geometry; the relaxed thickness stays on the "
+                            "MAP's mesh (" + describe_relaxation(relax_record) + ")")
 
     _filled = {k: v for k, v in transfer_fill.items()
                if v["missing"] or v["clamped"]}
@@ -1102,7 +1209,7 @@ def setup_model(restart_from=None, *, allow_timing_cache_a_ref=False,
             build_rc_residual, weertman_anchor, effective_pressure,
         )
         c0_rc = float(os.environ.get("ISMIP7_RC_C0", "0.5"))
-        rc_hvisc_floor = float(os.environ.get("ISMIP7_RC_HVISC_FLOOR", "10.0"))
+        rc_hvisc_floor = map_hvisc_floor
         rc_cw0_floor = float(os.environ.get("ISMIP7_RC_CW0_FLOOR", "0.0"))
         rc_eps_tauc = float(os.environ.get("ISMIP7_RC_EPS_TAUC", "0.0"))
         # Budd N_hat knobs (used only for fric_law="budd"):
@@ -1132,7 +1239,8 @@ def setup_model(restart_from=None, *, allow_timing_cache_a_ref=False,
         # DG0 gate on the ocean drag, a live Function in the residual so the
         # gate changes without re-assembly. The drag never touches ice,
         # floating or grounded: it acts only in open water outside the t=0
-        # extent that shares no facet with a cell holding ice now
+        # extent that touches no cell holding ice now, at an edge or (under
+        # the vertex gate the MAP was inverted with) at a vertex
         # (front.ocean_drag_cells, which has the measurement of the front it
         # used to pin). The t=0 extent is H_init on a restart and the
         # starting thickness on a cold start, so a restart applies the same
@@ -1140,7 +1248,8 @@ def setup_model(restart_from=None, *, allow_timing_cache_a_ref=False,
         # and a level-set front, when one runs, writes its own gate instead.
         drag_mask = Function(FunctionSpace(mesh, "DG", 0), name="drag_mask")
         _Q0 = drag_mask.function_space()
-        _drag_neighbours_of = facet_neighbours(_Q0)
+        _drag_neighbours_of = (vertex_neighbours if map_drag_gate == "vertex"
+                               else facet_neighbours)(_Q0)
         _drag_hmin = _front_hmin()
         _drag_extent0 = Function(_Q0).project(
             H if H_init is None else H_init).dat.data_ro >= _drag_hmin
@@ -1212,14 +1321,15 @@ def setup_model(restart_from=None, *, allow_timing_cache_a_ref=False,
             PETSc.Sys.Print(
                 f"  Friction: Budd N_hat (N_ref={'none' if N_ref is None else 'reference'}; exact-zero shelf; delta="
                 f"{budd_nhat_floor:.3f}, N_hat_cap={budd_nhat_cap:.1f}, "
-                f"alpha_gl={alpha_gl:.2f}, h_visc_floor={rc_hvisc_floor:.0f}m, "
-                f"ocean_drag={ocean_drag:.0e}@h<{h_ocean:.0f}m, "
+                f"alpha_gl={alpha_gl:.2f}, h_visc_floor={rc_hvisc_floor:g} m, "
+                f"ocean_drag={ocean_drag:.0e}@h<{h_ocean:.0f}m ({map_drag_gate} gate), "
                 f"u_lim={u_lim:.0e})"
             )
         else:
             PETSc.Sys.Print(
                 f"  Friction: regularized Coulomb (c0={c0_rc}, "
-                f"h_visc_floor={rc_hvisc_floor:.0f}m, cw0_floor={rc_cw0_floor:.1e}, "
+                f"h_visc_floor={rc_hvisc_floor:g} m, {map_drag_gate} drag gate, "
+                f"cw0_floor={rc_cw0_floor:.1e}, "
                 f"eps_tauc={rc_eps_tauc:.1e} MPa, alpha={float(alpha_reg):.1e})"
             )
 
@@ -1366,16 +1476,40 @@ def setup_model(restart_from=None, *, allow_timing_cache_a_ref=False,
     # A restart resumes at the step its checkpoint was solved at, so the
     # fast path accepts the stabilized state. Off, the term is left out of
     # the residual altogether.
-    fssa_theta_val = fssa_theta()
+    fssa_theta_val = forward_fssa_theta(
+        checkpoint_metadata if restart_from is not None else None)
+    if restart_from is not None and fssa_theta_val == 0.0 and fssa_theta() > 0.0:
+        PETSc.Sys.Print(
+            "  Free-surface stabilization off: the restart checkpoint was stepped "
+            "without it (set ISMIP7_FSSA_THETA to change that)")
     fssa_tau = Constant(0.0)
-    if (restart_from is not None and fssa_theta_val > 0
-            and checkpoint_metadata.get("fssa_tau") is not None):
-        fssa_tau.assign(float(checkpoint_metadata["fssa_tau"]))
+    if restart_from is not None and fssa_theta_val > 0:
+        fssa_tau.assign(fssa_restart_step(
+            checkpoint_metadata, u_ref_fssa_ckpt is not None))
     u_ref_fssa = Function(V, name="u_ref_fssa")
     u_ref_fssa_loaded = False
     if restart_from is not None and u_ref_fssa_ckpt is not None:
         u_ref_fssa.assign(u_ref_fssa_ckpt)
         u_ref_fssa_loaded = True
+    # The reference the surface change is measured from
+    # (ISMIP7_FSSA_REFERENCE): `start` keeps u_ref fixed, `step` moves it to
+    # the velocity of every advance and adds that advance's tendency as a
+    # load. `auto` follows the apparent mass balance, which a restart
+    # carries, so it resolves the same way on every link of a chain.
+    fssa_ref_mode = None
+    fssa_tendency = None
+    if fssa_theta_val > 0:
+        fssa_ref_mode = resolve_fssa_reference(
+            fssa_reference(), apparent_mb_mode() is not None)
+        if restart_from is not None:
+            _ref_err = fssa_restart_reference_error(
+                checkpoint_metadata, fssa_ref_mode, restart_from)
+            if _ref_err:
+                raise ValueError(_ref_err)
+        if fssa_ref_mode == "step":
+            fssa_tendency = Function(Q_dg, name="fssa_tendency")
+            if restart_from is not None and fssa_tendency_ckpt is not None:
+                fssa_tendency.assign(fssa_tendency_ckpt)
 
     if use_residual:
         # Residual closure on the LIVE prognostic fields (h, s): the grounded
@@ -1411,8 +1545,10 @@ def setup_model(restart_from=None, *, allow_timing_cache_a_ref=False,
                 ocean_drag=ocean_drag, h_ocean=h_ocean, u_lim=u_lim,
                 k_lim=k_lim, drag_mask=drag_mask,
                 calving_ids=calving_ids if use_calving_terminus else None,
+                exact_front=map_exact_front, front_hmin=_front_hmin(),
                 fssa_tau=fssa_tau if fssa_theta_val > 0 else None,
                 u_ref=u_ref_fssa if fssa_theta_val > 0 else None,
+                fssa_tendency=fssa_tendency,
             )
 
         # The closure above is the single definition of this residual: the
@@ -1424,11 +1560,13 @@ def setup_model(restart_from=None, *, allow_timing_cache_a_ref=False,
                 mesh, h, b, ice=ice_indicator(h, _front_hmin()))
             _fr = subelement.fraction.dat.data_ro
             PETSc.Sys.Print(
-                f"  Sub-element grounding (ISSM {map_subelement_scheme.upper()}) from the MAP: "
+                f"  Sub-element grounding (ISSM {map_subelement_scheme.upper()} version "
+                f"{map_subelement_scheme_version}) from the MAP: "
                 f"{mesh.comm.allreduce(int((_fr == 1.0).sum()))} cells fully grounded, "
                 f"{mesh.comm.allreduce(int(((_fr > 0.0) & (_fr < 1.0)).sum()))} partly; "
                 f"{friction} with N_hat = 1 on the grounded part, so NO effective-pressure "
-                f"feedback; exact front push {'on' if map_exact_front else 'off'}; the "
+                f"feedback; exact front push "
+                f"{f'version {map_exact_front}' if map_exact_front else 'off'}; the "
                 "quadrature follows the geometry before every diagnostic solve")
 
             def _build_F(theta_c=None, phi_c=None, h_c=None, s_c=None, z_c=None):
@@ -1447,9 +1585,10 @@ def setup_model(restart_from=None, *, allow_timing_cache_a_ref=False,
                     h_visc_floor=rc_hvisc_floor, ocean_drag=ocean_drag,
                     h_ocean=h_ocean, drag_mask=drag_mask, u_lim=u_lim, k_lim=k_lim,
                     calving_ids=calving_ids if use_calving_terminus else None,
-                    exact_front=bool(map_exact_front),
+                    exact_front=map_exact_front,
                     fssa_tau=fssa_tau if fssa_theta_val > 0 else None,
                     u_ref=u_ref_fssa if fssa_theta_val > 0 else None,
+                    fssa_tendency=fssa_tendency,
                 )
         else:
             subelement = None
@@ -1467,17 +1606,18 @@ def setup_model(restart_from=None, *, allow_timing_cache_a_ref=False,
         F = derivative(L, z)
 
     if linear_solver.startswith("scpc_"):
-        # Firedrake's three-field SCPC expects both off-diagonal entries of the
-        # eliminated (M, tau) block to be present in split_form.  These fields
-        # are physically uncoupled, so UFL otherwise omits both structural-zero
-        # blocks and SCPC raises KeyError before assembly.  A runtime Constant
-        # preserves the block metadata while contributing exactly zero to the
-        # residual and Jacobian.  Do not replace it with the literal 0: UFL
-        # simplifies that away and recreates the missing-block failure.
-        scpc_structural_zero = Constant(0.0)
-        F += derivative(
-            scpc_structural_zero * M_s[0, 0] * tau_s[0] * dx, z
-        )
+        # The (M, tau) structural-zero blocks SCPC needs (see the helper), in
+        # this residual and in the builder the context hands a time-dependent
+        # assimilation with these same solver options.
+        from icepack2_tools.preconditioners import with_scpc_blocks
+        F = with_scpc_blocks(F, z)
+        if use_residual:
+            _build_F_unblocked = _build_F
+
+            def _build_F(theta_c=None, phi_c=None, h_c=None, s_c=None, z_c=None):
+                z_b = z_c if z_c is not None else z
+                return with_scpc_blocks(
+                    _build_F_unblocked(theta_c, phi_c, h_c, s_c, z_c), z_b)
 
     # A matrix-free Jacobian follows the state Function, which the line
     # search's residual evaluations overwrite with its trial point; hold it at
@@ -1827,6 +1967,9 @@ def setup_model(restart_from=None, *, allow_timing_cache_a_ref=False,
         "mesh_basename": mesh_basename,
         "geometry_source": geometry_source,
         "geometry_source_method": geometry_source_method,
+        "init_state": init_state,
+        "map_geometry_taken": map_geometry_taken,
+        "relax_record": relax_record,
         "transfer_fill": transfer_fill,
         "initial_misfit": misfit0,
         "V": V,
@@ -1907,12 +2050,16 @@ def setup_model(restart_from=None, *, allow_timing_cache_a_ref=False,
         # Frozen t=0 apparent-MB correction (restart only; else None).
         "a_ref_mb": a_ref_mb,
         # Free-surface stabilization: its theta, the step Constant the forward
-        # sets, the reference velocity (the one a_ref was built from) and
-        # whether the checkpoint carried it.
+        # sets, the reference velocity (under `start` the one a_ref was built
+        # from, under `step` the last advance's) and whether the checkpoint
+        # carried it, the resolved reference, and under `step` the tendency
+        # of the last advance (else None).
         "fssa_theta": fssa_theta_val,
         "fssa_tau": fssa_tau,
         "u_ref_fssa": u_ref_fssa,
         "u_ref_fssa_set": u_ref_fssa_loaded,
+        "fssa_reference": fssa_ref_mode,
+        "fssa_tendency": fssa_tendency,
         # Cells a retreat-only front has emptied (restart only; else None).
         "calved_cells": calved_cells_ckpt,
         "phys_div": phys_div,
@@ -1958,7 +2105,8 @@ def calving_front_state(z, h_dg, b, level_set, A=None, n=None, gr_frac=None):
 
 
 MAP_CONFIG_KEYS = ("friction_control", "friction_c_ref", "subelement_friction",
-                   "subelement_scheme", "exact_front", "fluidity_control")
+                   "subelement_scheme", "subelement_scheme_version", "exact_front",
+                   "fluidity_control", "drag_gate", "h_visc_floor")
 
 
 def save_model_state(ctx, final_path, t_now, extra_attrs=None):
@@ -2009,6 +2157,8 @@ def save_model_state(ctx, final_path, t_now, extra_attrs=None):
             chk.save_function(ctx["a_ref_mb"], name="a_ref_mb")
         if ctx.get("u_ref_fssa_set"):
             chk.save_function(ctx["u_ref_fssa"], name="u_ref_fssa")
+        if ctx.get("fssa_tendency") is not None:
+            chk.save_function(ctx["fssa_tendency"], name="fssa_tendency")
         if ctx.get("calved_mask") is not None:
             chk.save_function(ctx["calved_mask"], name="calved_cells")
         if ctx.get("level_set") is not None:
@@ -2070,10 +2220,17 @@ def save_model_state(ctx, final_path, t_now, extra_attrs=None):
         for name in MAP_CONFIG_KEYS:
             if name in _map_meta:
                 chk.set_attr("/", name, _map_meta[name])
+        # The initial state the chain began from, and how a relaxed MAP's
+        # geometry was made (icepack2_tools.relaxation).
+        if ctx.get("init_state"):
+            chk.set_attr("/", INIT_STATE_ATTR, str(ctx["init_state"]))
+        for name, value in (ctx.get("relax_record") or {}).items():
+            chk.set_attr("/", name, value)
         if full_state_residual is not None:
             chk.set_attr("/", "full_state_residual", full_state_residual)
         if ctx.get("fssa_theta", 0.0) > 0:
             chk.set_attr("/", "fssa_tau", float(ctx["fssa_tau"]))
+            chk.set_attr("/", "fssa_reference", ctx["fssa_reference"])
         for name, value in (extra_attrs or {}).items():
             if value is not None:
                 chk.set_attr("/", name, value)
@@ -3080,6 +3237,13 @@ def run_simulation(
             }
             raise
 
+        if fssa_tendency is not None:
+            # The advance's own tendency, before the floor and the front
+            # rules: the implicit upwind update makes it source minus the
+            # flux divergence of the new thickness under u_vel, which the
+            # next solve measures its surface change from (fssa, `step`).
+            fssa_tendency.dat.data[:] = (
+                h_dg.dat.data_ro - h_dg_old.dat.data_ro) / dt_local
         if trace_on:
             _h_tr = {i: float(h_dg.dat.data_ro[i]) for _, i in trace_cells}
         out_gt = float(assemble(
@@ -3291,16 +3455,31 @@ def run_simulation(
     trace_on = bool(mesh.comm.allreduce(len(trace_cells)))
     fssa_theta_val = ctx["fssa_theta"]
     fssa_tau = ctx["fssa_tau"]
+    # Under `step` the last advance's velocity and tendency; None otherwise.
+    fssa_tendency = ctx["fssa_tendency"]
+    u_ref_fssa_entry = None
+    fssa_tendency_entry = None
     if fssa_theta_val > 0:
-        if not ctx["u_ref_fssa_set"]:
+        if fssa_tendency is not None:
+            if not ctx["u_ref_fssa_set"]:
+                # a cold start has no last advance: measured from the starting
+                # velocity with a zero tendency, so a stalled first step
+                # rewinds to a state where the term vanishes
+                ctx["u_ref_fssa"].assign(z.subfunctions[0])
+                ctx["u_ref_fssa_set"] = True
+            u_ref_fssa_entry = ctx["u_ref_fssa"].copy(deepcopy=True)
+            fssa_tendency_entry = fssa_tendency.copy(deepcopy=True)
+            PETSc.Sys.Print(
+                "  Free-surface stabilization: measured from the velocity of "
+                "the last advance, with that advance's tendency as a load "
+                "(ISMIP7_FSSA_REFERENCE=step)")
+        elif not ctx["u_ref_fssa_set"]:
             # no balanced reference to anchor on: the state at the start of
             # this run is the reference, and the term vanishes there
             ctx["u_ref_fssa"].assign(z.subfunctions[0])
             ctx["u_ref_fssa_set"] = True
             PETSc.Sys.Print("  Free-surface stabilization: reference velocity = the starting state")
-        PETSc.Sys.Print(
-            f"  Free-surface stabilization: theta {fssa_theta_val:g} on the"
-            " lagged thickness-velocity coupling (ISMIP7_FSSA_THETA)")
+    PETSc.Sys.Print(f"  {fssa_banner(fssa_theta_val)}")
     # Adaptive substepping replaces the fixed retry list when it is on: the
     # count follows the thickness error estimate instead of waiting for a
     # failed solve, because the lagged-velocity instability grows through
@@ -3377,6 +3556,11 @@ def run_simulation(
         # cell without its balancing reference.
         if a_ref_entry is not None:
             a_ref_entry.assign(a_ref)
+        if fssa_tendency is not None:
+            # the reference the entry state was solved against, for a stall
+            # to checkpoint with it
+            u_ref_fssa_entry.assign(ctx["u_ref_fssa"])
+            fssa_tendency_entry.assign(fssa_tendency)
         calved_entry = calved.copy()
         tallies = None
         retries = iter(SUBCYCLES[1:])
@@ -3439,6 +3623,10 @@ def run_simulation(
                 if fssa_theta_val > 0:
                     # the velocity solved now advances the next substep
                     fssa_tau.assign(fssa_theta_val * dt / m)
+                    if fssa_tendency is not None:
+                        # measured from the velocity the advance just used
+                        ctx["u_ref_fssa"].assign(z.subfunctions[0])
+                        ctx["u_ref_fssa_set"] = True
                 if not _solve_with_rescue(k):
                     ok = False
                     break
@@ -3479,6 +3667,9 @@ def run_simulation(
             z.assign(z_entry)   # checkpoint the last converged pair
             if a_ref_entry is not None:
                 a_ref.assign(a_ref_entry)
+            if fssa_tendency is not None:
+                ctx["u_ref_fssa"].assign(u_ref_fssa_entry)
+                fssa_tendency.assign(fssa_tendency_entry)
             calved[:] = calved_entry
             calved_fn.dat.data[:] = calved
             if level_set is not None:
@@ -3724,7 +3915,9 @@ def run_simulation(
         # chain does not have to infer it from log text or from the year
         # alone: 1 means the solver gave up, and resuming would re-attempt
         # the same years and give up again.
-        extra_attrs={"stalled": int(bool(stalled))},
+        # A driver's own record of the run goes on this state alone, after
+        # the carried attributes (the relaxation's, relaxation/run.py).
+        extra_attrs={"stalled": int(bool(stalled)), **(ctx.get("final_attrs") or {})},
     )
     # Printed on every exit, early stop included. projection.sbatch reads
     # this exact "Saved: <...>_final.h5" line out of its own Slurm log to find

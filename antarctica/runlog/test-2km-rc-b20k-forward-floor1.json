@@ -1,0 +1,24 @@
+{
+  "id": "test-2km-rc-b20k-forward-floor1",
+  "task": "test",
+  "institution": "IU",
+  "title": "Unforced, balanced five-year forward from RC's vertex-gate stage-2 MAP on the 20 km buffered 2 km mesh, membrane floor 1 m",
+  "status": "stopped",
+  "friction": "regularized_coulomb",
+  "period": "2015-2020",
+  "mesh": "antarctica_5000_2000_buffered20000 (IU's build, 969,764 vertices), DG0 geometry, vertex raster sampling, the lake fix (from the MAP: ISMIP7_MESH=checkpoint)",
+  "initial_state": "test-2km-rc-b20k-vgate-floor1's MAP (rc_s2x_vgf1.h5, inverted with the vertex gate and a 1 m floor; drag_gate recorded, h_visc_floor not)",
+  "forcing": "none: run_timing.py passes no forcing callback; ISMIP7_APPARENT_MB=1 ISMIP7_FIXED_FRONT=1 ISMIP7_DT=0.025 scpc_gamg, rescue on; ISMIP7_RC_HVISC_FLOOR=1; vertex gate from the MAP",
+  "site": "IU Quartz, general partition",
+  "resources": "32 ranks, 160G, 6 h",
+  "jobs": [
+    "10972250"
+  ],
+  "code": "94d0398; Quartz worktree /N/scratch/dlilien/ismip7_reinvert_s5",
+  "started": "2026-10-05",
+  "finished": "2026-10-05",
+  "cost": "2 h 05 min in the start-up ramp, cancelled",
+  "results": "Quartz /N/scratch/dlilien/ismip7_reinvert_jobs/fwd (timing record, status) and the worktree's antarctica/results/fwd2km_rc_vgf1_floor1_2000_*",
+  "audit": "start-up ramp under scpc_gamg: step 1 (n = 1) converged in 35 Newton and 20,222 Krylov iterations, 1,140 s (10 m: 680 s, 12,377); step 2 (n = 1.29) had not returned after 1 h 30 min (10 m: 100 s). Cancelled as redundant with test-2km-rc-b20k-forward-floor1-drift, whose start is identical",
+  "notes": "issue #153: the start of a forward at the membrane floor the inversion now records (94d0398), against 10 m. Balanced and unforced, the state is a fixed point (dh/dt = 0 at t=0 and nothing moves it), so this times the start-up solve and checks the first step; test-2km-rc-b20k-forward-floor*-drift exercise the fronts"
+}

@@ -19,6 +19,9 @@
 #   ocx                antarctica/scripts/projections/ocx.py
 #   hist_cesm_waccm    antarctica/scripts/historical/cesm_waccm.py
 #   hist_mri_esm2      antarctica/scripts/historical/mri_esm2.py
+#   relax              antarctica/scripts/relaxation/run.py, the relaxation
+#                      year of the relaxed initial state; it defaults the
+#                      apparent MB and the ISMIP7 output to off
 #
 # ISMIP7_CHAIN_THEN (space-separated experiments from the same list) queues
 # follow-on runs once THIS run has reached its end year, and only then: a
@@ -98,6 +101,7 @@ driver_for() {
         ocx)               echo antarctica/scripts/projections/ocx.py ;;
         hist_cesm_waccm)   echo antarctica/scripts/historical/cesm_waccm.py ;;
         hist_mri_esm2)     echo antarctica/scripts/historical/mri_esm2.py ;;
+        relax)             echo antarctica/scripts/relaxation/run.py ;;
     esac
 }
 EXPERIMENT="${ISMIP7_EXPERIMENT:-control}"
@@ -121,10 +125,11 @@ export ISMIP7_INVERSION="${ISMIP7_INVERSION:-$ISMIP7_MAP_DEFAULT}"
 # GAMG on the condensed velocity system. On the production mesh it takes the
 # Newton path scpc_mumps takes (129 iterations over the matrix's ten steps on
 # 64 ranks, outflux equal to 9e-13) in 43 % of the time. Named here and
-# nowhere more general: site_env.sh and solverconfig's own default are read by
-# the inversion too, whose linear solve is the full mixed-Jacobian MUMPS by
-# construction and which stamps the solver it finds in the environment on its
-# MAP. ISMIP7_DIAGNOSTIC_LINEAR_SOLVER=full_mumps restores the reference.
+# nowhere more general: this variable also selects the inversion's startup
+# ramp and lane stamp. ISMIP7_INVERSION_LINEAR_SOLVER separately selects the
+# taped forwards, adjoints and publishing solve, with scpc_gamg as its
+# default. ISMIP7_DIAGNOSTIC_LINEAR_SOLVER=full_mumps restores the forward
+# reference.
 export ISMIP7_DIAGNOSTIC_LINEAR_SOLVER="${ISMIP7_DIAGNOSTIC_LINEAR_SOLVER:-scpc_gamg}"
 # The production step (issue 20), equal to runconfig.DT_DEFAULT, which the
 # drivers fall back to; a test holds the two equal. The matrix's rule
@@ -163,6 +168,13 @@ export ISMIP7_KEEP_CHECKPOINTS="${ISMIP7_KEEP_CHECKPOINTS:-3}"
 # set and rejects anything else at startup, so normalising here would only
 # hide a typo: an ISMIP7_AUTO_RESUME=off meant to disable resume would become
 # a 1 and silently continue an old trajectory.
+# The relaxation year lets the geometry answer the model's own imbalance and
+# is no ISMIP7 experiment (icepack2_tools.relaxation); its driver refuses
+# either switched on, so an explicit 1 still stops it.
+if [ "$EXPERIMENT" = relax ]; then
+    export ISMIP7_APPARENT_MB="${ISMIP7_APPARENT_MB-0}"
+    export ISMIP7_OUTPUT="${ISMIP7_OUTPUT-0}"
+fi
 export ISMIP7_APPARENT_MB="${ISMIP7_APPARENT_MB-1}"
 export ISMIP7_FIXED_FRONT="${ISMIP7_FIXED_FRONT:-1}"
 # Resume from this experiment's own newest checkpoint. This is what makes the

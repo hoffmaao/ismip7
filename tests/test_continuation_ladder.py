@@ -81,3 +81,25 @@ def test_every_rung_diverging_raises_and_leaves_the_entry_state(state):
     assert np.allclose(z.dat.data_ro, 0.1)
     assert float(n_flow) == 1.0 and float(m_slide) == 1.0
     assert reports[-1] == "  Continuation diverged at 8 steps - giving up."
+
+
+def test_a_fixed_sliding_exponent_stays_at_its_target(state):
+    r"""Issue #167: m_start at the target ramps only the flow exponent, and a
+    diverged rung restores the sliding exponent to that start."""
+    z, n_flow, m_slide = state
+    m_slide.assign(3.0)
+    solve, calls = _recording_solver(z, n_flow, m_slide, diverge_at={(1, 2)})
+    attempt, steps = ramp_exponents(solve, z, n_flow, m_slide, 3.0, 3.0, (2, 4),
+                                    report=lambda *_: None, m_start=3.0)
+    assert (attempt, steps) == (2, 4)
+    assert {c[5] for c in calls} == {3.0}
+    assert [c[4] for c in calls if c[0] == 2] == pytest.approx([1.0, 5 / 3, 7 / 3, 3.0])
+    assert float(m_slide) == 3.0 and float(n_flow) == 3.0
+
+
+def test_the_slide_fixed_knob(monkeypatch):
+    from icepack2_tools.runconfig import ramp_slide_fixed
+    monkeypatch.delenv("ISMIP7_RAMP_SLIDE_FIXED", raising=False)
+    assert not ramp_slide_fixed()
+    monkeypatch.setenv("ISMIP7_RAMP_SLIDE_FIXED", "1")
+    assert ramp_slide_fixed()

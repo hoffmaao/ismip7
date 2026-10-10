@@ -626,6 +626,291 @@ def add_grounding_line_to_gmsh(gl_lines, surface_tag, pt_num, line_num, fine_tar
     return gl_group_tag
 
 
+# ── Marine front of an ice mask (issue #167) ───────────────────────────
+#
+# A buffered mesh puts the ice front inside the domain. Unless mesh edges
+# follow it, the front crosses cells, and vertex sampling gives each of them a
+# fraction of the front's thickness: 40 m against BedMachine's 163 m on the
+# 2 km mesh (issue #167). The functions below take the marine front of an ice
+# mask (obs_icemask: Greene et al. 2022, one year), as curves the mesh
+# embeds, so its nodes and edges lie on the front.
+
+
+def _disk(radius):
+    r = int(radius)
+    yy, xx = np.mgrid[-r:r + 1, -r:r + 1]
+    return (xx * xx + yy * yy) <= r * r
+
+
+def clean_ice(ice, px, spacing, min_area):
+    """The ice a mesh of edge ``spacing`` can follow: channels and spits
+    narrower than ``spacing`` closed and opened away, ice islands smaller than
+    ``min_area`` [m^2] dropped and holes smaller than it filled."""
+    from scipy import ndimage
+
+    disk = _disk(max(1, int(round(spacing / (2.0 * px)))))
+    ice = ndimage.binary_closing(np.asarray(ice, bool), structure=disk)
+    ice = ndimage.binary_opening(ice, structure=disk)
+    npx = float(min_area) / px ** 2
+    lab, _ = ndimage.label(ice)
+    keep = np.bincount(lab.ravel()) >= npx
+    keep[0] = False
+    ice = keep[lab]
+    lab, _ = ndimage.label(~ice)
+    fill = np.bincount(lab.ravel()) < npx
+    fill[0] = False
+    fill[np.unique(np.concatenate([lab[0], lab[-1], lab[:, 0], lab[:, -1]]))] = False
+    return ice | fill[lab]
+
+
+def _classes_at(classes, inverse, xy):
+    """Nearest-pixel classes at points ``xy``; outside the raster is land."""
+    from .obs_icemask import LAND
+    col, row = inverse * (xy[:, 0], xy[:, 1])
+    col = np.floor(np.asarray(col)).astype(int)
+    row = np.floor(np.asarray(row)).astype(int)
+    inside = ((row >= 0) & (row < classes.shape[0])
+              & (col >= 0) & (col < classes.shape[1]))
+    out = np.full(len(xy), LAND, dtype=classes.dtype)
+    out[inside] = classes[row[inside], col[inside]]
+    return out
+
+
+def _runs(flags):
+    """``(value, start, stop)`` of the runs of a cyclic sequence whose first
+    element starts a run."""
+    out, start = [], 0
+    for i in range(1, len(flags) + 1):
+        if i == len(flags) or flags[i] != flags[start]:
+            out.append((bool(flags[start]), start, i))
+            start = i
+    return out
+
+
+def smooth_marine(flags, lengths, gap, min_run):
+    """Edge flags of a closed ring with land runs shorter than ``gap`` turned
+    marine and then marine runs shorter than ``min_run`` turned land, both by
+    length along the ring."""
+    flags = np.asarray(flags, bool).copy()
+    lengths = np.asarray(lengths, float)
+    for value, short in ((False, gap), (True, min_run)):
+        if flags.all() or not flags.any():
+            break
+        # start at a run boundary, so no run wraps around the end
+        shift = int(np.flatnonzero(flags != np.roll(flags, 1))[0])
+        f, ln = np.roll(flags, -shift), np.roll(lengths, -shift)
+        for v, a, b in _runs(f):
+            if v == value and ln[a:b].sum() < short:
+                f[a:b] = not value
+        flags = np.roll(f, shift)
+    return flags
+
+
+def _resample(line, spacing, closed):
+    import shapely
+    n = max(3, int(np.ceil(line.length / spacing)))
+    t = (np.linspace(0.0, line.length, n, endpoint=False) if closed
+         else np.linspace(0.0, line.length, n + 1))
+    return shapely.get_coordinates(shapely.line_interpolate_point(line, t))
+
+
+def _simple(xy, closed):
+    from shapely.geometry import LinearRing
+    if closed:
+        return len(xy) >= 3 and LinearRing(xy).is_simple
+    return LineString(xy).is_simple
+
+
+def extract_marine_front(classes, transform, outline, spacing, min_area=None):
+    """The marine front of a classified ice mask as curves for a mesh with
+    edge ``spacing`` near the front to embed.
+
+    ``classes`` is :func:`obs_icemask.classify` on a grid with ``transform``.
+    The ice is cleaned at the mesh scale (:func:`clean_ice`, ``min_area``
+    16 spacing^2 by default) and vectorized; each ring is split, pixel edge by
+    pixel edge, into the runs whose ice-free side is marine (land gaps
+    shorter than 2 spacing bridged, runs shorter than 3 spacing dropped);
+    each run is simplified at one pixel, clipped to 2 spacing inside the mesh
+    ``outline``, and resampled at ``spacing``. A curve that is not simple even at half the
+    spacing is dropped, and of two curves closer than spacing/2 the shorter
+    is.
+
+    Returns ``(curves, stats)``: ``curves`` a list of ``{"xy": (n, 2) array,
+    "closed": bool}`` and ``stats`` the counts and lengths.
+    """
+    import shapely
+    from shapely.geometry import LinearRing
+    from shapely.geometry.polygon import orient
+    from .obs_icemask import ICE, MARINE
+
+    px = abs(float(transform.a))
+    min_area = 16.0 * spacing ** 2 if min_area is None else float(min_area)
+    ice = clean_ice(classes == ICE, px, spacing, min_area)
+    inverse = ~transform
+    inner = outline.buffer(-2.0 * spacing)
+    stats = dict(spacing=float(spacing), pixel=px, min_area=min_area,
+                 polygons=0, rings=0, runs=0, dropped_not_simple=0,
+                 dropped_too_close=0, length_km=0.0)
+
+    raw = []
+    for geom, value in rio_shapes(ice.astype(np.uint8), mask=ice,
+                                  transform=transform, connectivity=4):
+        poly = shape(geom)
+        if not poly.intersects(inner):
+            continue
+        # classified on the pixel edges themselves, simplified per run below:
+        # a chord of the simplified ring can span several kilometres
+        poly = orient(poly, 1.0)
+        stats["polygons"] += 1
+        for ring in [poly.exterior, *poly.interiors]:
+            # one edge per pixel: shapes() merges collinear pixel edges
+            xy = densify_segment(np.asarray(ring.coords), px)[:-1]
+            if len(xy) < 3:
+                continue
+            stats["rings"] += 1
+            d = np.roll(xy, -1, axis=0) - xy
+            length = np.hypot(d[:, 0], d[:, 1])
+            normal = np.zeros_like(d)
+            ok = length > 0
+            # ice on the left of every ring after orient(), so the right
+            # normal points at the ice-free side
+            normal[ok] = np.column_stack([d[ok, 1], -d[ok, 0]]) / length[ok, None]
+            mid = xy + 0.5 * d
+            marine = np.zeros(len(xy), bool)
+            for k in (1.0, 2.0):
+                marine |= _classes_at(classes, inverse, mid + k * px * normal) == MARINE
+            marine = smooth_marine(marine, length, 2.0 * spacing, 3.0 * spacing)
+            if not marine.any():
+                continue
+            if marine.all():
+                raw.append((LinearRing(xy).simplify(px, preserve_topology=True), True))
+                continue
+            shift = int(np.flatnonzero(marine != np.roll(marine, 1))[0])
+            xy_r, m_r = np.roll(xy, -shift, axis=0), np.roll(marine, -shift)
+            for v, a, b in _runs(m_r):
+                if v:
+                    pts = np.vstack([xy_r[a:b], xy_r[b % len(xy_r)]])
+                    raw.append((LineString(pts).simplify(px, preserve_topology=True), False))
+
+    pieces = []
+    for line, closed in raw:
+        if closed and line.within(inner):
+            pieces.append((line, True))
+            continue
+        clipped = LineString(line.coords).intersection(inner)
+        for part in getattr(clipped, "geoms", [clipped]):
+            if part.geom_type == "LineString" and part.length >= 3.0 * spacing:
+                pieces.append((part, False))
+
+    resampled = []
+    for line, closed in pieces:
+        for h in (spacing, 0.5 * spacing):
+            xy = _resample(line, h, closed)
+            if _simple(xy, closed):
+                resampled.append((xy, closed))
+                break
+        else:
+            stats["dropped_not_simple"] += 1
+
+    geoms = [LinearRing(xy) if closed else LineString(xy) for xy, closed in resampled]
+    order = np.argsort([-g.length for g in geoms])
+    kept = []
+    if geoms:
+        tree = shapely.STRtree(geoms)
+        near = tree.query(geoms, predicate="dwithin", distance=0.5 * spacing)
+        partners = {}
+        for i, j in zip(*near):
+            if i != j:
+                partners.setdefault(int(i), set()).add(int(j))
+        chosen = set()
+        for i in order:
+            if partners.get(int(i), set()) & chosen:
+                stats["dropped_too_close"] += 1
+                continue
+            chosen.add(int(i))
+        kept = [resampled[i] for i in sorted(chosen)]
+    curves = [{"xy": xy, "closed": closed} for xy, closed in kept]
+    stats["runs"] = len(curves)
+    stats["closed"] = sum(c["closed"] for c in curves)
+    stats["points"] = int(sum(len(c["xy"]) for c in curves))
+    stats["length_km"] = float(sum(
+        (LinearRing(c["xy"]) if c["closed"] else LineString(c["xy"])).length
+        for c in curves)) / 1e3
+    return curves, stats
+
+
+def densify_curves(curves, spacing):
+    """Every curve's points with points added so none is more than
+    ``spacing`` from the next, all stacked: the points a distance to the
+    front is measured from."""
+    out = []
+    for c in curves:
+        xy = c["xy"]
+        if c["closed"]:
+            xy = np.vstack([xy, xy[:1]])
+        out.append(densify_segment(xy, spacing))
+    return np.vstack(out) if out else np.zeros((0, 2))
+
+
+def embed_front_in_gmsh(curves, surface_tag, pt_num, line_num, size):
+    """Embed ``curves`` (from :func:`extract_marine_front`) in the surface as
+    interior constraints, with no physical group: the mesh's nodes and edges
+    then follow the front, and the boundary-id sidecar is unchanged (an
+    interior physical line would become a facet marker that
+    ``boundary.load_boundary_ids`` refuses). Every curve point becomes a node.
+
+    Returns ``(pt_num, line_num, points)``, the next free tags and the number
+    of points added.
+    """
+    tags, points = [], 0
+    line_num += 1                 # build_gmsh_geometry's last tag is in use
+    for c in curves:
+        first = pt_num
+        for x, y in c["xy"]:
+            gmsh.model.geo.addPoint(float(x), float(y), 0.0, size, pt_num)
+            pt_num += 1
+        ids = list(range(first, pt_num))
+        if c["closed"]:
+            ids.append(first)
+        for a, b in zip(ids[:-1], ids[1:]):
+            gmsh.model.geo.addLine(a, b, line_num)
+            tags.append(line_num)
+            line_num += 1
+        points += len(c["xy"])
+    gmsh.model.geo.synchronize()
+    if tags:
+        gmsh.model.mesh.embed(1, tags, 2, surface_tag)
+    return pt_num, line_num, points
+
+
+def front_points_off_mesh(curves, nodes_xy, tol=1e-3):
+    """How many curve points are not mesh nodes (within ``tol`` metres)."""
+    from scipy.spatial import cKDTree
+    if not curves:
+        return 0
+    pts = np.vstack([c["xy"] for c in curves])
+    d, _ = cKDTree(np.asarray(nodes_xy)[:, :2]).query(pts)
+    return int((d > tol).sum())
+
+
+def save_front(curves, path, stats=None):
+    """Write curves to an .npz (points stacked, with each curve's start and
+    closed flag), the record of what a mesh was built to follow."""
+    xy = np.vstack([c["xy"] for c in curves]) if curves else np.zeros((0, 2))
+    starts = np.cumsum([0] + [len(c["xy"]) for c in curves])
+    np.savez(path, xy=xy, starts=starts,
+             closed=np.array([c["closed"] for c in curves], bool),
+             stats=np.array(repr(stats or {})))
+
+
+def load_front(path):
+    """Curves written by :func:`save_front`."""
+    with np.load(path) as f:
+        xy, starts, closed = f["xy"], f["starts"], f["closed"]
+    return [{"xy": xy[a:b], "closed": bool(c)}
+            for a, b, c in zip(starts[:-1], starts[1:], closed)]
+
+
 def generate_mesh(fine_targ, boundaries, names, refinement):
     """Generate a mesh at the given resolution using gmsh's two-pass approach.
 

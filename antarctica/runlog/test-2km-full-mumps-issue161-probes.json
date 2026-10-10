@@ -1,0 +1,21 @@
+{
+  "task": "test",
+  "institution": "IU",
+  "friction": "regularized_coulomb",
+  "mesh": "antarctica_5000_2000_buffered20000 (969,764 vertices, 1,928,285 cells), DG0 geometry, vertex raster sampling",
+  "forcing": "the 10971250 objective (cell s2x_rc_g01_vgf1_mumps): bilaplacian prior sigma 30, rho 75 km, log friction control, vertex drag gate, membrane floor 1 m, LAKE_ICE_BASE=1, no dH/dt, log-velocity weight 69946.22, L-BFGS-B without a metric",
+  "site": "IU Quartz, general partition, one node each",
+  "id": "test-2km-full-mumps-issue161-probes",
+  "title": "2 km RC inversion under full_mumps on 32 ranks, 20 L-BFGS-B iterations from 10971250's last checkpoint, five probes of where the RSS goes: plain, malloc_trim after every evaluation, a trim and RSS split at every phase boundary, and the solver release on the last two",
+  "status": "done",
+  "initial_state": "warm start results/reinvert_2km/exp/rc_s2x_g01_vgf1.h5 (10971250's checkpoint at evaluation 103, same mesh), ISMIP7_WARM_START_STRICT=0",
+  "resources": "32 ranks, 220G; RSS a rank (mean, the timing record's rss_mib) at evaluations 10 and 22: plain 2,765 to 2,887, with the release 2,666 to 2,780; peak 5,020 and 4,852 MiB",
+  "jobs": "11472363 (plain), 11469618 (release), 11469617 (malloc_trim), 11472183 (phases), 11475900 (phases with the release); 11479356 and 11481611 (tracemalloc, both stopped by a PyOP2 kernel-cache miss in setup), 11484485 (tracemalloc, cancelled after 6 evaluations)",
+  "code": "06cb0a9 (taped_solve.py as 90d490e); the release arms the same tree with taped_solve.py sha256 a719cd19, committed in the issue #161 release commit with docstrings changed only; probes probe161.py, probe161_phases.py, probe161_tm.py",
+  "started": "2026-10-06",
+  "finished": "2026-10-06",
+  "cost": "55 to 64 min each, 22 evaluations: 132 to 153 s an evaluation (forward 39 to 44 s, adjoint 91 to 107 s)",
+  "results": "/N/scratch/dlilien/ismip7_issue161_jobs/probe/<arm>.json (timing), <arm>.jsonl (probe), <arm>_log_view.txt; logs/inv_<job>.out",
+  "audit": "objectives within 1.2e-12 at evaluation 20 between every pair, the same spread as same-code reruns (32-rank runs are not bit-identical); PETSc -log_view on rank 0: every SNES, KSP and PC destroyed (49 of 49) in every arm, 10 of 686 matrices alive at exit in every arm but the plain phases probe (28). malloc_trim returned 115 to 226 MiB a rank every evaluation (median 156) and left the trend. Phase medians from evaluation 6 (MiB a rank, after a trim at each boundary): plain forward +63, to the first adjoint solve -60, adjoint +797, to the end of compute_gradient -727, so an evaluation keeps +74, all of it anonymous memory; with the release the same steps are +9, +3, +802, -790, keeping +14. tracemalloc saw Python's own memory flat at 909 to 937 MiB a rank over evaluations 2 to 6.",
+  "notes": "Issue #161. Python 3.14, Firedrake 2026.04, PETSc 3.25.5, MUMPS 5.8.2, OpenBLAS 0.3.13, Open MPI 4.0.5."
+}

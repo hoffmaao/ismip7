@@ -51,11 +51,14 @@ def test_the_report_resolves_the_melt_knobs_left_at_their_defaults(monkeypatch):
     env = core_report.effective_env()
     assert env["ISMIP7_MELT_SLOPE"] == "ant    # default (not exported)"
     assert env["ISMIP7_SIN_ALPHA_ANT"] == "0.005115    # default (not exported)"
-    # the tracked calibration, by its path in the repository; the run's own
-    # provenance line carries its sha256 and K
+    # the tracked calibration of each sampling, by its path in the
+    # repository; the run's own provenance line names the one it read
     assert env["ISMIP7_DELTAT_PER_BASIN_NPZ"] == (
-        "antarctica/calibration/deltaT_per_basin_1000_K6.500e-05.npz"
-        "    # default (not exported)")
+        "the tracked calibration of the run's raster sampling ("
+        "vertex: antarctica/calibration/deltaT_per_basin_1000_K6.500e-05.npz, "
+        "vertex_front: antarctica/calibration/"
+        "deltaT_per_basin_1000_K6.500e-05_vertex_front.npz), named with its "
+        "sha256 in the run's forcing provenance line    # default (not exported)")
     assert "ISMIP7_K_MELT" not in env
     monkeypatch.setenv("ISMIP7_MELT_SLOPE", "local")
     assert core_report.effective_env()["ISMIP7_MELT_SLOPE"] == "local"
@@ -95,6 +98,19 @@ def test_the_report_lifts_the_smb_feedback_banner_and_not_its_yearly_lines(tmp_p
     old.write_text("step 1\n")
     (none,) = core_report.smb_feedback_record(str(old))
     assert "ran without the feedback" in none
+
+
+def test_the_report_lifts_the_stabilization_weight_the_run_stepped_with(tmp_path):
+    from icepack2_tools.fssa import fssa_banner
+    log = tmp_path / "run.log"
+    log.write_text("  Free-surface stabilization off: the restart checkpoint "
+                   f"was stepped without it\n  {fssa_banner(0.0)}\nstep 1\n"
+                   f"  {fssa_banner(0.0)}\n")
+    assert core_report.fssa_record(str(log)) == [fssa_banner(0.0)]
+    old = tmp_path / "old.log"
+    old.write_text("step 1\n")
+    (none,) = core_report.fssa_record(str(old))
+    assert "ran without the stabilization" in none
 
 
 def test_the_report_resolves_the_step_left_at_its_default(monkeypatch):

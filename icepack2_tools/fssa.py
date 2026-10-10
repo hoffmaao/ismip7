@@ -30,30 +30,148 @@ viscosity on the divergence, enters with the same minus sign. With it the diffus
 response per step becomes ``tau lambda / (1 + theta tau lambda)`` instead of
 ``tau lambda``, so for ``theta = 1`` the lagged step is stable for every tau.
 
-The term is written on ``div(u - u_ref)`` with ``u_ref`` the velocity the
-run's balanced apparent mass balance was built from: there ``a + a_ref =
-div(u_ref h)`` cell by cell, so the dropped source and the divergence cancel
-exactly at the reference state and the stabilized forward reproduces its MAP
-velocity at t = 0 as before. Away from it the term is the implicit surface
-change the step produces, which is what the method means.
+The term is written on ``div(u - u_ref)``, the surface change linearized
+about a reference velocity ``u_ref``. Linearized about any ``u_ref``, the
+surface a step ahead is
+
+    s + theta tau gamma (T(u_ref) - h div(u - u_ref))
+
+with ``T(u_ref)`` the thickness tendency the transport applies with
+``u_ref``. The reference only sets the right-hand side: the Jacobian, and
+with it the stability above, is the same for every ``u_ref``.
+``ISMIP7_FSSA_REFERENCE`` picks it (:func:`resolve_reference`):
+
+``start``
+    ``u_ref`` is the velocity the run's balanced apparent mass balance was
+    built from: there ``a + a_ref = div(u_ref h)`` cell by cell, so
+    ``T(u_ref) = 0`` at t = 0, the dropped source and the divergence cancel
+    exactly at the reference state, and the stabilized forward reproduces
+    its MAP velocity at t = 0. Later the term omits ``T(u_ref)`` at the
+    evolved thickness and forcing, an O(theta dt) load that stays at a new
+    steady state. Without the apparent mass balance the starting state is
+    out of balance, ``T(u_ref)`` is the full initial imbalance, and the term
+    pulls ``div(u)`` toward the MAP's own divergence for the whole run.
+``step``
+    ``u_ref`` is the velocity the last advance used, and ``T`` that
+    advance's realized tendency, ``(h_new - h_old) / dt``, which the
+    implicit upwind transport makes ``source - div_FV(h_new u_ref)`` to its
+    solver tolerance, with the source as the positivity limiter left it.
+    The load vanishes at every steady state of the transport, whatever the
+    forcing, so the long-run state does not move with dt or theta. Under a
+    balanced apparent mass balance the first advance changes nothing, so
+    ``T = 0`` and ``u_ref`` is the MAP velocity at the first solve, the
+    same residual as ``start``.
+``auto``
+    ``start`` when the run carries an apparent mass balance, ``step`` when
+    it does not.
+
+Measured at 32 km without an apparent mass balance and without forcing, ten
+years from the MAP's mixed state, against the unstabilized forward at dt
+0.0125 (records ``test-32km-fssa-*``):
+
+    ============  =====================  ======================  ========
+    dt (yr)       thickness RMS (m)      worst cell (m)          mass (Gt)
+    ============  =====================  ======================  ========
+    start 0.05    0.47                   177                     -55
+    step 0.05     0.06                   4.5                     +16
+    start 0.1     0.91                   288                     -110
+    step 0.1      0.11                   8.1                     +26
+    start 0.2     1.84                   393                     -211
+    step 0.2      0.20                   14.6                    +43
+    ============  =====================  ======================  ========
+
+The worst ``start`` cell is on the Antarctic Peninsula, at 788 m against the
+reference's 395 m after ten years at dt 0.2; ``step`` leaves it at 399 m.
+The unstabilized forward, stable at this resolution, misses by 0.07 and
+0.15 m RMS at dt 0.1 and 0.2. With the apparent mass balance, ``auto``
+reproduces ``start`` to the run-to-run noise of the same code (9e-13 m).
 """
 from firedrake import Constant, TestFunction, div, dx, split
 
 from icepack_tools.constants import gravity, ice_density, water_density
 from icepack_tools.grounding import grounded_mask
 
+REFERENCES = ("auto", "start", "step")
+# Begins the line every forward prints with the weight it steps with
+# (fssa_banner), which core_report lifts into the run's report.
+FSSA_MARKER = "Free-surface stabilization:"
 
-def fssa_term(z, u_ref, tau, H, b, *, gl_width=10.0, rho_I=ice_density,
-              rho_W=water_density, g=gravity):
+
+def fssa_banner(theta):
+    r"""The startup line stating the stabilization weight ``theta`` a forward
+    steps with, the value :func:`solverconfig.forward_fssa_theta` resolved."""
+    if theta > 0:
+        return (f"{FSSA_MARKER} theta {theta:g} on the lagged "
+                "thickness-velocity coupling (ISMIP7_FSSA_THETA)")
+    return f"{FSSA_MARKER} off, theta 0 (ISMIP7_FSSA_THETA)"
+
+
+def resolve_reference(requested, apparent_mb):
+    r"""The reference ``start`` or ``step`` an ``ISMIP7_FSSA_REFERENCE``
+    value names, ``auto`` resolved by whether the run carries an apparent
+    mass balance (``apparent_mb``)."""
+    if requested not in REFERENCES:
+        raise ValueError(
+            f"ISMIP7_FSSA_REFERENCE must be one of {', '.join(REFERENCES)}, "
+            f"not {requested!r}")
+    if requested == "auto":
+        return "start" if apparent_mb else "step"
+    return requested
+
+
+def restart_step(metadata, has_reference):
+    r"""The stabilization step (yr) a restart resumes at: the checkpoint's
+    ``fssa_tau`` when the checkpoint also holds ``u_ref_fssa``, the velocity
+    that step was measured from (``has_reference``), else 0. An adapted
+    checkpoint carries the record without the field, and its state is solved
+    with the term at zero, as a cold start is."""
+    tau = metadata.get("fssa_tau")
+    if tau is None or not has_reference:
+        return 0.0
+    return float(tau)
+
+
+def restart_reference_error(metadata, resolved, source):
+    r"""The message refusing a restart from ``source`` whose checkpoint was
+    stepped from another reference than ``resolved``, or None.
+
+    ``metadata`` holds the checkpoint's attributes. A checkpoint stepped
+    under the stabilization records ``fssa_reference``; one that records only
+    ``fssa_tau`` was written before the choice existed, under ``start``; one
+    with neither was stepped without the stabilization, and one whose
+    ``fssa_tau`` is 0 was never stepped (a prepared timing cache), and any
+    reference may start from either."""
+    tau = metadata.get("fssa_tau")
+    if tau is not None and float(tau) == 0.0:
+        return None
+    was = metadata.get("fssa_reference")
+    if was is None and tau is not None:
+        was = "start"
+    if was is None or str(was) == resolved:
+        return None
+    return (f"restart checkpoint {source} was stepped with the free-surface "
+            f"stabilization measured from `{was}`, and ISMIP7_FSSA_REFERENCE "
+            f"resolves to `{resolved}` here; set ISMIP7_FSSA_REFERENCE={was} "
+            f"to continue the run")
+
+
+def fssa_term(z, u_ref, tau, H, b, *, tendency=None, gl_width=10.0,
+              rho_I=ice_density, rho_W=water_density, g=gravity):
     r"""The stabilization form, or 0 when ``tau`` or ``u_ref`` is None.
 
     ``tau`` is a Constant holding ``theta * dt`` (yr), so a forward can set it
     per substep and zero it for a steady solve; ``u_ref`` a Function on the
-    velocity space."""
+    velocity space. ``tendency`` (m/yr, a cell field) is ``T(u_ref)``, the
+    thickness tendency at the reference velocity; None leaves it out, which
+    is the ``start`` reference. It adds a load and leaves the Jacobian as it
+    is."""
     if tau is None or u_ref is None:
         return 0
     u = split(z)[0]
     v = split(TestFunction(z.function_space()))[0]
     He = grounded_mask(H, b, gl_width=gl_width, rho_I=rho_I, rho_W=rho_W)
     gamma = He + (Constant(1.0) - He) * Constant(1.0 - rho_I / rho_W)
-    return -tau * Constant(rho_I * g) * gamma * H ** 2 * div(u - u_ref) * div(v) * dx
+    form = -tau * Constant(rho_I * g) * gamma * H ** 2 * div(u - u_ref) * div(v) * dx
+    if tendency is not None:
+        form += tau * Constant(rho_I * g) * gamma * H * tendency * div(v) * dx
+    return form

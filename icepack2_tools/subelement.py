@@ -94,19 +94,29 @@ def build_subelement_residual(z, theta, phi, *, H, s, b, C_w0, A4_base, n_flow,
                               ocean_drag=0.0, h_ocean=10.0, drag_mask=None,
                               u_lim=0.0, k_lim=0.0, gl_width=10.0,
                               calving_ids=None, exact_front=True, u_min=1.0,
-                              fssa_tau=None, u_ref=None):
+                              fssa_tau=None, u_ref=None, fssa_tendency=None):
     r"""The single-layer dual residual with the sub-element grounded friction.
 
     Same controls and fields as ``build_rc_residual``; the friction law is
     Budd with ``N_ref=None`` and no floor (or Weertman), which is what the
     scheme supports.  ``exact_front`` adds the exact depth-integrated push on
-    a calving front inside the mesh (``icepack_tools.momentum.front_cliff_correction``).
+    a calving front inside the mesh (``icepack_tools.momentum.front_cliff_correction``),
+    which is :func:`icepack2_tools.dual_friction.front_cliff_correction`'s
+    version 1 only: version 2 is refused until icepack_tools carries it.
     ``scheme`` is ``"sep2"`` (grounded-part quadrature) or ``"sep1"``
     (whole-cell quadrature, drag times the grounded fraction).  ``fssa_tau``
-    (a Constant, theta times the step) and ``u_ref`` add the free-surface
-    stabilization of :func:`icepack2_tools.fssa.fssa_term`.
+    (a Constant, theta times the step), ``u_ref`` and ``fssa_tendency`` add
+    the free-surface stabilization of :func:`icepack2_tools.fssa.fssa_term`.
     """
     from icepack_tools.momentum import dual_residual
+    from icepack2_tools.dual_friction import exact_front_version
+    exact_front = exact_front_version(exact_front)
+    if exact_front == 2:
+        raise ValueError(
+            "exact_front version 2 (the exposed-face push, issue #166) is not in "
+            "icepack_tools.momentum.front_cliff_correction; the sub-element scheme "
+            "takes 0 or 1")
+    exact_front = bool(exact_front)
     if scheme not in SCHEMES:
         raise ValueError(f"sub-element scheme must be one of {SCHEMES}, not {scheme!r}")
     if fric_law not in ("budd", "weertman"):
@@ -138,7 +148,8 @@ def build_subelement_residual(z, theta, phi, *, H, s, b, C_w0, A4_base, n_flow,
             subelement=None, exact_front=exact_front,
         )
         return (F + ocean_drag_closure(z, H, ocean_drag, h_ocean, drag_mask, u_min=u_min)
-                + fssa_term(z, u_ref, fssa_tau, H, b, gl_width=gl_width))
+                + fssa_term(z, u_ref, fssa_tau, H, b, tendency=fssa_tendency,
+                            gl_width=gl_width))
     F = dual_residual(
         z, theta, phi, H=H, s=s, b=b, h_layers=[H], C_w0=C_w0,
         A_layers=[A_eff], n_consts=[n_flow], n_vals=[n_flow_val],
@@ -151,4 +162,5 @@ def build_subelement_residual(z, theta, phi, *, H, s, b, C_w0, A4_base, n_flow,
         subelement=subelement, exact_front=exact_front,
     )
     return (F + ocean_drag_closure(z, H, ocean_drag, h_ocean, drag_mask, u_min=u_min)
-            + fssa_term(z, u_ref, fssa_tau, H, b, gl_width=gl_width))
+            + fssa_term(z, u_ref, fssa_tau, H, b, tendency=fssa_tendency,
+                        gl_width=gl_width))

@@ -1,5 +1,5 @@
-"""The inversion's linear solver: static condensation by default, its adjoint options, the
-PT-Scotch fallback, and the quadrature degree stamped into the residual."""
+"""MUMPS's analysis under the inversion and the forward: the PT-Scotch fallback, the
+ISMIP7_MUMPS_ANALYSIS knob, and the cache fingerprint it leaves alone."""
 import os
 import sys
 from pathlib import Path
@@ -9,27 +9,6 @@ import pytest
 from icepack2_tools import solverconfig as sc
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "antarctica" / "scripts"))
-
-
-def test_condensation_is_the_inversion_default(monkeypatch):
-    monkeypatch.delenv("ISMIP7_INVERSION_LINEAR_SOLVER", raising=False)
-    assert sc.inversion_solver_mode() == "scpc_mumps"
-    monkeypatch.setenv("ISMIP7_INVERSION_LINEAR_SOLVER", "full_mumps")
-    assert sc.inversion_solver_mode() == "full_mumps"
-    monkeypatch.setenv("ISMIP7_INVERSION_LINEAR_SOLVER", "lu_everything")
-    with pytest.raises(ValueError):
-        sc.inversion_solver_mode()
-
-
-def test_adjoint_options_are_linear_matfree_and_tight(monkeypatch):
-    monkeypatch.delenv("ISMIP7_ADJOINT_KSP_RTOL", raising=False)
-    p = sc.adjoint_solver_parameters("scpc_mumps")
-    assert not any(k.startswith("snes_") for k in p)
-    assert p["mat_type"] == "matfree"        # reaches tlm_adjoint's matrix-free adjoint branch
-    assert p["pc_python_type"] == "icepack2_tools.preconditioners.ISMIP7SCPC"
-    assert p["ksp_rtol"] == 1e-10 and p["ksp_atol"] == 0.0
-    monkeypatch.setenv("ISMIP7_ADJOINT_KSP_RTOL", "1e-12")
-    assert sc.adjoint_solver_parameters("scpc_mumps")["ksp_rtol"] == 1e-12
 
 
 def test_mumps_ordering_follows_the_petsc_build(monkeypatch):
@@ -42,23 +21,6 @@ def test_mumps_ordering_follows_the_petsc_build(monkeypatch):
     assert opts["x_mat_mumps_icntl_28"] == 2 and opts["x_mat_mumps_icntl_29"] == 1
     monkeypatch.setenv("ISMIP7_MUMPS_ANALYSIS", "sequential")
     assert "x_mat_mumps_icntl_28" not in sc._mumps_options("x_")
-
-
-def test_quadrature_degree_reaches_every_derived_form():
-    """The adjoint of the Jacobian of a stamped residual still carries the degree,
-    so a solve that passes no form-compiler parameters integrates it the same way."""
-    fd = pytest.importorskip("firedrake")
-    import ufl
-    from icepack2_tools.forms import with_quadrature_degree
-    mesh = fd.UnitSquareMesh(2, 2)
-    V = fd.FunctionSpace(mesh, "CG", 1)
-    u, v = fd.Function(V), fd.TestFunction(V)
-    F = with_quadrature_degree(u ** 3 * v * fd.dx + fd.avg(u) * fd.jump(v) * fd.dS, 4)
-    for form in (F, fd.derivative(F, u), fd.adjoint(fd.derivative(F, u))):
-        assert {itg.metadata()["quadrature_degree"] for itg in form.integrals()} == {4}
-    kept = with_quadrature_degree(u * v * fd.dx(degree=7), 4)
-    assert kept.integrals()[0].metadata()["quadrature_degree"] == 7
-    assert isinstance(F, ufl.Form)
 
 
 # solver_configuration_fingerprint(solver_provenance(mode)) at 0e267b2, in a

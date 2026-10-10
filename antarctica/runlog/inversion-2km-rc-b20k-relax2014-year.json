@@ -1,0 +1,24 @@
+{
+ "task": "inversion",
+ "institution": "IU",
+ "status": "stopped",
+ "mesh": "antarctica_5000_2000_buffered20000 (IU's build, 969,764 vertices), DG0 geometry, the production MAP's own mesh (ISMIP7_MESH=checkpoint)",
+ "site": "IU Quartz, general partition",
+ "id": "inversion-2km-rc-b20k-relax2014-year",
+ "title": "RC relaxation year of the relaxed initial state: 2014 to 2015 on OCX's 2014 forcing",
+ "friction": "regularized_coulomb",
+ "period": "2014.0 to 2015.0 at dt 0.0125 (80 steps)",
+ "initial_state": "inversion-2km-rc-b20k-rho7500-floating's final MAP, rewound 1 yr with the Smith dH/dt on grounded ice",
+ "forcing": "OCX protocol forcing for 2014 (ISMIP7_EXPERIMENT=relax), apparent MB off, front pinned",
+ "notes": "Started from the RC production MAP as it stood at 16:43 EDT on 6 Oct (iteration 95, a stop on failed trial forwards that return a zero gradient, which the production chain has since continued on full_mumps, job 11789630). Trigger 11487488. README, \"The relaxed initial state\"; issue #162",
+ "jobs": [
+  "11487501"
+ ],
+ "code": "8a55a20 (PR 163); Quartz worktree /N/scratch/dlilien/ismip7_reinvert_relax; cells relax_<law> and reinv_relax_<law> of /N/scratch/dlilien/ismip7_reinvert_jobs/submit_reinvert.sh, which shares prod_settings() with the production cells",
+ "resources": "32 ranks, 160G, 6 h (projection.sbatch, ISMIP7_EXPERIMENT=relax)",
+ "results": "/N/scratch/dlilien/ismip7_reinvert_relax/antarctica/results/relax_inversion_icepack2_rc_n3_dg0_logvel_2000_int5000_b20k_rho7500_floating_2000_final.h5, copied after the re-inversion to /N/project/ice_rheology/ISMIP7/antarctica/results/reinvert_2km/final/relax_states/",
+ "started": "2026-10-06",
+ "finished": "2026-10-06",
+ "cost": "6 h of 32 ranks, no step",
+ "audit": "timed out at the 6 h limit without a step: the first diagnostic solve from the MAP's state on the backdated geometry diverged under ISMIP7_DIAGNOSTIC_LINEAR_SOLVER=scpc_gamg (50 Newton iterations, ||F|| 5.9e13), and the fallback cold continuation from 0.1 u_obs sat in its n=1 step 1 for the rest of the job. Nothing was written beside the production MAPs. The production inversions run scpc_mumps or full_mumps because scpc_gamg stalls at this regularization; the forward's solver and the backdate have not been separated. Held by IU on 7 Oct; log /N/scratch/dlilien/ismip7_reinvert_relax/logs/ismip7_fwd_11487501.out"
+}

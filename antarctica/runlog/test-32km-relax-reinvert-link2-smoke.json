@@ -1,0 +1,21 @@
+{
+ "task": "test",
+ "institution": "IU",
+ "status": "done",
+ "friction": "budd",
+ "mesh": "antarctica_320000_32000_buffered0 (6,282 vertices, 9,055 cells), DG0 geometry, ISMIP7_MESH=checkpoint",
+ "site": "IU workstation (Mac, 16 cores), load average about 6",
+ "resources": "4 ranks",
+ "code": "8b5377f (PR 160 head 7fb5802, IU's production inversion code 1c02aa3, and the relaxed initial state); icepack_tools e7b923e",
+ "started": "2026-10-06",
+ "finished": "2026-10-06",
+ "id": "test-32km-relax-reinvert-link2-smoke",
+ "title": "32 km second link of the re-inversion, resumed strictly from its own MAP, 1 iteration",
+ "period": "2015 state",
+ "initial_state": "test-32km-relax-reinvert-smoke's MAP (sha256 476bbda8)",
+ "forcing": "as test-32km-relax-reinvert-smoke",
+ "cost": "about 1 min wall",
+ "results": "/Volumes/LaCie/Data/antarctica_general/ismip7_runs/relaxed_init_smoke/map_relax2014_link2.h5, /Volumes/LaCie/Data/antarctica_general/ismip7_runs/relaxed_init_smoke/link2.log",
+ "audit": "settings matched; first objective 1.367913e4 against 1.367913e4 recorded (relative gap 5.3e-16); the MAP inherits relax_state_sha256 f1abe93a and relaxed-forward-v1",
+ "notes": "Checks that a chain link keeps the relaxed geometry's record. Runner link2.sh"
+}

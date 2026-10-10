@@ -47,11 +47,20 @@ if "ISMIP7_WARM_START" in os.environ:
     with open(os.environ["ISMIP7_WARM_START"]) as fh:
         print(f"driver: warm_start_content={fh.read().strip()}")
 print(f"driver: maxiter={os.environ['ISMIP7_MAXITER']}")
+print(f"driver: strict={os.environ.get('ISMIP7_WARM_START_STRICT', 'unset')}")
+print(f"driver: fluidity={os.environ.get('ISMIP7_WARM_START_FLUIDITY', 'unset')}")
+print(f"driver: state={os.environ.get('ISMIP7_WARM_START_STATE', 'unset')}")
 
 die = os.environ.get("FAKE_DIE_AFTER", "")
 print("Optimization finished: CONVERGENCE: REL_REDUCTION_OF_F_<=_FACTR*EPSMCH")
 if die == "optimizer":
     sys.exit(137)
+# The driver's line for a stop right after failed trials, printed before the
+# MAP is saved; such a MAP gets no marker.
+unfinished = os.environ.get("FAKE_NOT_FINAL") == "1"
+if unfinished:
+    print("  MAP not final: the optimizer stopped right after 3 failed trial "
+          "evaluations in a row")
 
 with open(map_out, "w") as fh:                   # save_map: mode "w", truncating
     fh.write("checkpoint\n")
@@ -62,11 +71,13 @@ print(f"Saved MAP: {map_out} (misfit_norm=sigma)")
 if die == "marker":
     sys.exit(137)
 
-open(map_out + ".done", "w").close()
+if not unfinished:
+    open(map_out + ".done", "w").close()
 '''
 
 STUBS = {
-    "srun": '#!/bin/bash\nexec "$FAKE_PYTHON" "$FAKE_DRIVER"\n',
+    # `srun --help` is the launcher asking which kill options this Slurm has.
+    "srun": '#!/bin/bash\n[ "${1:-}" = --help ] && exit 0\nexec "$FAKE_PYTHON" "$FAKE_DRIVER"\n',
     "sbatch": (
         "#!/bin/bash\n"
         'printf "ARGV: %s\\n" "$*" >> "$SBATCH_CALLS"\n'
@@ -181,6 +192,24 @@ def test_a_kill_during_the_map_write_leaves_no_marker(sandbox):
     assert not (sandbox / "inversion_map.h5.done").exists()
 
 
+def test_a_stop_on_failed_trials_is_not_marked_done_and_the_successor_resumes(sandbox):
+    r"""Issue 153, job 11461566: after three failed trials L-BFGS-B said
+    CONVERGENCE with the gradient norm at 1.03, the driver saved the MAP, and
+    the runner's "Saved MAP:" rule marked it done, ending the chain at
+    evaluation 107. A MAP saved after such a stop stays unmarked, and the
+    successor resumes from it strictly."""
+    rc, log, _ = run_job(sandbox, FAKE_NOT_FINAL="1")
+    assert rc == 0, log
+    assert "Saved MAP:" in log
+    assert not (sandbox / "inversion_map.h5.done").exists()
+
+    rc, log, _ = run_job(sandbox, job_id="424244")
+    assert rc == 0, log
+    assert "driver: warm_start_content=checkpoint" in log
+    assert "driver: strict=1" in log
+    assert (sandbox / "inversion_map.h5.done").exists()
+
+
 @pytest.mark.parametrize("die", ["optimizer", "map_write"])
 def test_the_successor_warm_starts_from_an_unfinished_map(sandbox, die):
     r"""No marker means the budget is unspent, so the successor hands the
@@ -202,6 +231,59 @@ def test_the_successor_warm_starts_from_an_unfinished_map(sandbox, die):
     assert f"warm start: local copy {warm}" in log
     assert not Path(warm).parent.exists(), "the local copy must be removed"
     assert calls.count("ARGV:") == 2, "each unfinished link queues a successor"
+
+
+def test_a_resumed_link_is_held_to_the_chain_s_objective(sandbox):
+    r"""A first link may warm-start from a MAP of another objective on purpose
+    (IU's re-inversion of Rice's 2 km MAPs without their prior mean) under
+    ISMIP7_WARM_START_STRICT=0. Its successor inherits that 0 through
+    --export=ALL, and resuming the chain's own checkpoint it is strict
+    again."""
+    rice = sandbox / "rice_2km.h5"
+    rice.write_text("checkpoint\n")
+    rc, log, calls = run_job(sandbox, ISMIP7_WARM_START=str(rice),
+                             ISMIP7_WARM_START_STRICT="0",
+                             FAKE_DIE_AFTER="map_write")
+    assert rc == 137, log
+    # the driver reads a node-local copy under the same basename
+    assert Path(_warm_start(log)).name == rice.name
+    assert "driver: strict=0" in log
+    assert "ENV: ISMIP7_WARM_START_STRICT=0" in calls
+
+    rc, log, _ = run_job(sandbox, job_id="424244", ISMIP7_WARM_START=str(rice),
+                         ISMIP7_WARM_START_STRICT="0")
+    assert rc == 0, log
+    assert Path(_warm_start(log)).name == map_out(sandbox).name
+    assert "driver: strict=1" in log
+
+
+def test_a_resumed_link_keeps_its_own_fluidity(sandbox):
+    r"""A first link may take its fluidity and state from another MAP
+    (ISMIP7_WARM_START_FLUIDITY, ISMIP7_WARM_START_STATE=fluidity, issue
+    #167); its successor inherits both knobs through --export=ALL, and
+    resuming the chain's own checkpoint it drops them, so the fluidity and
+    state the chain has fitted are the ones it continues from."""
+    rc_map, budd = sandbox / "rc_2km.h5", sandbox / "budd_2km.h5"
+    rc_map.write_text("checkpoint\n")
+    budd.write_text("checkpoint\n")
+    env = dict(ISMIP7_WARM_START=str(rc_map), ISMIP7_WARM_START_STRICT="0",
+               ISMIP7_WARM_START_FLUIDITY=str(budd),
+               ISMIP7_WARM_START_STATE="fluidity")
+    rc, log, _ = run_job(sandbox, FAKE_DIE_AFTER="map_write", **env)
+    assert rc == 137, log
+    assert f"driver: fluidity={budd}" in log
+    assert "driver: state=fluidity" in log
+
+    rc, log, _ = run_job(sandbox, job_id="424244", **env)
+    assert rc == 0, log
+    assert Path(_warm_start(log)).name == map_out(sandbox).name
+    assert "driver: fluidity=unset" in log
+    assert "driver: state=unset" in log
+
+
+def _warm_start(log):
+    return next(line.split("=", 1)[1] for line in log.splitlines()
+                if line.startswith("driver: warm_start="))
 
 
 def test_a_multi_node_link_reads_the_warm_start_in_place(sandbox):

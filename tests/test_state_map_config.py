@@ -6,6 +6,7 @@ import os
 import sys
 
 import firedrake as fd
+import pytest
 from firedrake import (Function, FunctionSpace, TensorFunctionSpace,
                        UnitSquareMesh, VectorFunctionSpace, FiniteElement)
 
@@ -43,19 +44,23 @@ def _attrs(path, keys):
         return {k: chk.get_attr("/", k) for k in keys if chk.has_attr("/", k)}
 
 
-def test_state_carries_map_configuration(tmp_path):
+@pytest.mark.parametrize("exact_front", [1, 2])
+def test_state_carries_map_configuration(tmp_path, exact_front):
     sim = _simulation()
     metadata = {"friction_control": "exp", "friction_c_ref": 0.25,
-                "subelement_friction": 1, "exact_front": 1,
-                "fluidity_control": "floating"}
+                "subelement_friction": 1, "exact_front": exact_front,
+                "fluidity_control": "floating", "drag_gate": "vertex",
+                "h_visc_floor": 1.0}
     path = str(tmp_path / "state.h5")
     sim.save_model_state(_ctx(metadata), path, 1.0)
     got = _attrs(path, sim.MAP_CONFIG_KEYS)
     assert got["friction_control"] == "exp"
     assert float(got["friction_c_ref"]) == 0.25
     assert int(got["subelement_friction"]) == 1
-    assert int(got["exact_front"]) == 1
+    assert int(got["exact_front"]) == exact_front
     assert got["fluidity_control"] == "floating"
+    assert got["drag_gate"] == "vertex"
+    assert float(got["h_visc_floor"]) == 1.0
 
 
 def test_state_omits_what_the_map_did_not_record(tmp_path):
@@ -63,3 +68,28 @@ def test_state_omits_what_the_map_did_not_record(tmp_path):
     path = str(tmp_path / "state.h5")
     sim.save_model_state(_ctx({}), path, 1.0)
     assert _attrs(path, sim.MAP_CONFIG_KEYS) == {}
+
+
+def test_state_carries_the_initial_state_and_the_relaxation_record(tmp_path):
+    r"""Every forward checkpoint names the initial state its chain began from
+    and, for a relaxed MAP, how the MAP's geometry was made
+    (icepack2_tools.relaxation), so a restart and a report know it."""
+    sim = _simulation()
+    ctx = _ctx({})
+    ctx["init_state"] = "relaxed-controls"
+    ctx["relax_record"] = {"relax_t_start": 2014.0, "relax_forcing": "ocx protocol",
+                           "relax_state": "relax_x_2000_final.h5"}
+    path = str(tmp_path / "state.h5")
+    sim.save_model_state(ctx, path, 2003.0)
+    got = _attrs(path, ("init_state", "relax_t_start", "relax_forcing", "relax_state",
+                        "relaxation_end_state"))
+    assert got["init_state"] == "relaxed-controls"
+    assert float(got["relax_t_start"]) == 2014.0
+    assert got["relax_forcing"] == "ocx protocol"
+    assert got["relax_state"] == "relax_x_2000_final.h5"
+    # only the relaxation driver's own final state marks itself an end state
+    assert "relaxation_end_state" not in got
+    final = str(tmp_path / "final.h5")
+    sim.save_model_state(_ctx({}), final, 2015.0,
+                         extra_attrs={"stalled": 0, "relaxation_end_state": 1})
+    assert int(_attrs(final, ("relaxation_end_state",))["relaxation_end_state"]) == 1

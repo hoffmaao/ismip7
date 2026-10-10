@@ -1,0 +1,20 @@
+{
+  "id": "test-32km-inversion-sep1-scpc-gamg",
+  "task": "test",
+  "institution": "IU",
+  "status": "done",
+  "friction": "budd",
+  "site": "IU workstation (Mac, 16 cores, 128 GB), data under /Volumes/LaCie/Data/antarctica_general/ismip7_obs",
+  "started": "2026-10-02",
+  "finished": "2026-10-02",
+  "code": "432c831 (PR 155 with PR 158 and the sub-element scheme version, a git archive run from the session scratch); icepack_tools e7b923e",
+  "title": "32 km inversion, 10 TAO iterations under scpc_gamg, SEP1 and the direct forward, against full_mumps",
+  "mesh": "antarctica_320000_32000_buffered0 (Quartz's .msh, sha256 fd66fc42; 6,282 vertices, 9,055 cells), DG0 geometry, vertex raster sampling",
+  "initial_state": "cold start: u = 0.1 u_obs, theta = phi = 0, the n,m 1 to 3 ramp under full_mumps, then the direct forward (ISMIP7_DIRECT_FORWARD default)",
+  "forcing": "MEaSUREs v2 450 m (sha256 268be94e) and BedMachine v4.1 (sha256 6bd08dbb), byte-identical to Quartz's antarctica/data; ISMIP7_FLUIDITY_PRIOR=legacy; the log friction control; SEP1 sub-element friction, version 2 (the default), with the exact front push; bi-Laplacian prior (sigma 0.3 on theta and phi, rho 7.5 km); ISMIP7_INVERSION_LINEAR_SOLVER=scpc_gamg; no dH/dt term; log-speed weight 0; TAO lmvm with the mass-consistent metric (ISMIP7_GRAD_PRECOND=mass_consistent)",
+  "resources": "4 ranks, the study's only run at the time, other sessions sharing the machine (load average 6.97 at the start and 8.13 at the end); peak 2.4 GB a rank",
+  "cost": "207 s wall; 8.64 s a TAO iteration (median after the first; the first 43.6 s), of it 6.43 s the forward and 1.41 s the checkpoint",
+  "results": "/Volumes/LaCie/Data/antarctica_general/ismip7_runs/pr158_merge/C_32km_scpc_gamg/map.h5 (sha256 feddedd9), log.txt, timing.json, code.txt; the wrappers are runm.sh, study.sh and study_exp.sh in pr158_merge",
+  "audit": "10 TAO iterations, objective 4.923890e4 to 1.711404e4; every direct forward converged (2 to 11 Newton iterations), no lost trial, no rescue; published residual 9.7e0; every iteration's objective within 4.8e-10 and gradient norm within 2.2e-9 of the other solver's",
+  "notes": "the solver pair at 32 km: scpc_gamg against full_mumps (test-32km-inversion-sep1-full-mumps)"
+}

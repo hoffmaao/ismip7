@@ -6,7 +6,7 @@
 # cluster's site file:
 #   antarctica/scripts/batch_runners/submit.sh inversion \
 #     ISMIP7_LC=2000 ISMIP7_LC_COARSE=5000 ISMIP7_BUFFER_M=0 \
-#     ISMIP7_MESH=... ISMIP7_RASTER_SAMPLE=vertex ISMIP7_MAP_OUT=...
+#     ISMIP7_MESH=... ISMIP7_RASTER_SAMPLE=vertex_front ISMIP7_MAP_OUT=...
 #
 # CHAIN. A 2 km inversion can outlast a wall limit. The inversion checkpoints
 # ISMIP7_MAP_OUT every ISMIP7_CHECKPOINT_EVERY_IT iterates (default 1) and can
@@ -67,7 +67,7 @@ export ISMIP7_MAXITER="${ISMIP7_MAXITER:-200}"
 # A chain link must continue the SAME objective from the accepted iterate
 # (icepack2_tools.handoff); a link that would change it refuses.
 export ISMIP7_WARM_START_STRICT="${ISMIP7_WARM_START_STRICT:-1}"
-export ISMIP7_RASTER_SAMPLE="${ISMIP7_RASTER_SAMPLE:-vertex}"
+export ISMIP7_RASTER_SAMPLE="${ISMIP7_RASTER_SAMPLE:-vertex_front}"
 # Name the output explicitly: without it every run, including a smoke test,
 # writes the production filename and can silently replace a converged map.
 # ISMIP7_MAP_DEFAULT is named from the law, so ISMIP7_FRICTION=budd writes a
@@ -81,6 +81,9 @@ LOG="logs/ismip7_inv_${SLURM_JOB_ID:-manual}.out"
 
 echo "    map out  $ISMIP7_MAP_OUT"
 echo "    sampling $ISMIP7_RASTER_SAMPLE  net sigma $ISMIP7_DHDT_NET_SIGMA  log-vel $ISMIP7_LOG_VEL_WEIGHT  maxiter $ISMIP7_MAXITER"
+# The driver prints the modes it resolves ("Inversion linear solver:"); an
+# unset knob here means the driver's default, which this file does not repeat.
+echo "    solver   ${ISMIP7_INVERSION_LINEAR_SOLVER:-default}  ramp ${ISMIP7_DIAGNOSTIC_LINEAR_SOLVER:-default}"
 
 if [ -f "$DONE" ]; then
     echo "chain: $DONE exists, inversion already finished; nothing to do"
@@ -115,7 +118,18 @@ fi
 # link minimises the objective the first one set (issue 68).
 if [ -f "$ISMIP7_MAP_OUT" ]; then
     export ISMIP7_WARM_START="$ISMIP7_MAP_OUT"
-    echo "chain: warm-starting theta/phi from the periodic checkpoint $ISMIP7_MAP_OUT"
+    # Resuming this chain's own checkpoint is always strict. A first link may
+    # set ISMIP7_WARM_START_STRICT=0 to change the objective of the MAP it
+    # starts from on purpose (another prior), and the successor it queued
+    # inherits that 0 through --export=ALL; here it is held to the one
+    # objective the chain has been minimising.
+    export ISMIP7_WARM_START_STRICT=1
+    # A first link's fluidity and state from another MAP
+    # (ISMIP7_WARM_START_FLUIDITY, ISMIP7_WARM_START_STATE) seed the chain
+    # once; a resumed link takes the fluidity, geometry and state of its own
+    # checkpoint.
+    unset ISMIP7_WARM_START_FLUIDITY ISMIP7_WARM_START_STATE
+    echo "chain: warm-starting theta/phi from the periodic checkpoint $ISMIP7_MAP_OUT (strict handoff)"
 fi
 
 # Read the warm start from node-local disk. Every rank reading the MAP over
@@ -150,8 +164,14 @@ echo "=== $(date -Is)  inversion exit ${rc} ==="
 # 1339328 finished its 200 iterations and 1339342 started re-inverting the
 # finished MAP, Sep 13 2026.) The driver writes this marker itself as soon as
 # it has saved the MAP, so the rule below is the fallback for a driver that
-# could not write it; touch is idempotent.
-if grep -q 'Saved MAP:' "$LOG"; then
+# could not write it; touch is idempotent. A driver whose optimizer stopped
+# right after failed trial evaluations prints "MAP not final:" before saving
+# and writes no marker: scipy reports such a stop as convergence at a point
+# whose gradient is not small (issue 153, job 11461566), so the successor
+# resumes from the MAP instead.
+if grep -q 'MAP not final:' "$LOG"; then
+    echo "chain: the optimizer stopped on failed trials; no marker, the successor resumes from the MAP"
+elif grep -q 'Saved MAP:' "$LOG"; then
     touch "$DONE"
     echo "chain: finished ($(grep -o 'Saved MAP:.*' "$LOG" | tail -1)); marker $DONE"
 fi

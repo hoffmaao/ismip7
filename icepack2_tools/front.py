@@ -10,7 +10,8 @@ import numpy as np
 
 __all__ = ["retreat_slivers", "clear_reference_where_ice_free", "clamp_thickness",
            "front_removal_mask", "unforced_cells", "applied_forcing",
-           "front_connected", "facet_neighbours", "ocean_drag_cells",
+           "front_connected", "facet_neighbours", "vertex_neighbours",
+           "ocean_drag_cells",
            "collapse_cell_counts",
            "collapse_banner", "collapse_csv_fields", "COLLAPSE_MARKER",
            "COLLAPSE_CSV_COLUMNS", "FRONT_OWNER_MARKER"]
@@ -237,14 +238,19 @@ def collapse_csv_fields(header, counts):
 
 def ocean_drag_cells(ice, neighbours_of, extent0):
     r"""The cells the floor-cell ocean drag may act on: open water that holds
-    no ice now, shares no facet with a cell that does, and lies outside the
-    t=0 ice extent.
+    no ice now, is no neighbour of a cell that does, and lies outside the t=0
+    ice extent.
 
     ``ice`` is the per-cell boolean "holds ice now" (thickness at least the
     front threshold), ``extent0`` the same test on the t=0 thickness, and
-    ``neighbours_of(mask)`` the cells sharing a facet with a cell of ``mask``
-    (:func:`facet_neighbours`). Every other cell, floating or grounded, gets
-    no drag.
+    ``neighbours_of(mask)`` the cells touching a cell of ``mask``: at a vertex
+    (:func:`vertex_neighbours`, ``ISMIP7_DRAG_GATE=vertex``, the default) or
+    at a facet (:func:`facet_neighbours`). Every other cell, floating or
+    grounded, gets no drag. Under the facet gate a water cell touching the
+    ice at one vertex drags that front node, since the velocity is
+    continuous: on the 20 km buffered 2 km mesh that held floating ice 27 %
+    below its observed speed, against 11 % under the vertex gate (issue
+    #153).
 
     The drag exists to give the ice-free buffer some velocity coercivity. Left
     on everywhere below ``h_ocean`` it also acted on thin floating ice and on
@@ -281,6 +287,42 @@ def facet_neighbours(Q_dg):
         # a sum of facet lengths over the neighbours in the mask: exactly
         # zero with none, at least one facet length with any
         return touched.dat.data_ro > 0.0
+
+    return neighbours_of
+
+
+def vertex_neighbours(Q_dg):
+    r"""``neighbours_of`` on the DG0 space ``Q_dg`` that counts a cell sharing
+    only a vertex with a cell of the mask, where :func:`facet_neighbours`
+    counts an edge.
+
+    With :func:`ocean_drag_cells` it keeps the drag off every cell that holds
+    a node of an ice cell. The CG1 velocity's front nodes are such nodes: a
+    water cell that touches the ice at one vertex and carries the drag drags
+    that front node directly. On the 20 km buffered 2 km mesh this held the
+    shelves of RC stage 2 at 27 % below the observed speed at evaluation 1
+    (issue #153), against 1 % with the drag off.
+
+    Assembled as the CG1 test functions against the mask's indicator: a node
+    of a masked cell gets a positive value, every other node exactly zero, and
+    the assembly sums across ranks, so a node on a partition boundary counts.
+    """
+    import firedrake as fd
+
+    mesh = Q_dg.mesh()
+    Q1 = fd.FunctionSpace(mesh, "CG", 1)
+    indicator = fd.Function(Q_dg)
+    form = indicator * fd.TestFunction(Q1) * fd.dx
+    touched = fd.Cofunction(Q1.dual())
+    nodes = fd.Function(Q1)
+    n_cells = Q_dg.dof_dset.size
+    cell_nodes = Q1.cell_node_map().values[:n_cells]
+
+    def neighbours_of(mask):
+        indicator.dat.data[:] = mask
+        fd.assemble(form, tensor=touched)
+        nodes.dat.data[:] = touched.dat.data_ro
+        return (nodes.dat.data_ro_with_halos[cell_nodes] > 0.0).any(axis=1)
 
     return neighbours_of
 

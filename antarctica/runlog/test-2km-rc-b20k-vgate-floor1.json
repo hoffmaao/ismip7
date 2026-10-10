@@ -1,0 +1,24 @@
+{
+  "id": "test-2km-rc-b20k-vgate-floor1",
+  "task": "test",
+  "institution": "IU",
+  "title": "RC stage 2 on the 20 km buffered mesh with the drag kept off every node of the ice and a 1 m membrane floor (300 iterations)",
+  "status": "done",
+  "friction": "regularized_coulomb",
+  "period": "2015 state",
+  "mesh": "antarctica_5000_2000_buffered20000 (IU's build, 969,764 vertices), DG0 geometry, vertex raster sampling, the lake fix",
+  "initial_state": "inversion-2km-rc-nomass-lbfgsb's MAP (RC stage 1 final, sha256 fea8debae9616f18); the ring filled by the harmonic extension; log-velocity weight 69946.22414285329",
+  "forcing": "observations sampled onto this mesh; the stage-1 objective (bilaplacian sigma 30, rho 750 km, no dH/dt term, log friction control, cell-wise friction, L-BFGS-B, scpc_gamg); ISMIP7_DRAG_GATE=vertex ISMIP7_RC_HVISC_FLOOR=1",
+  "site": "IU Quartz, general partition",
+  "resources": "32 ranks, 160G, 12 h",
+  "jobs": [
+    "10969700"
+  ],
+  "code": "4e45d18; Quartz worktree /N/scratch/dlilien/ismip7_reinvert_s3",
+  "started": "2026-10-04",
+  "finished": "2026-10-05",
+  "cost": "309 evaluations in 6 h 08 min",
+  "results": "Quartz /N/project/ice_rheology/ISMIP7/antarctica/results/reinvert_2km/exp/rc_s2x_vgf1.h5; maps in /N/scratch/dlilien/ismip7_reinvert_jobs/plots/s2x_vgf1_*.png",
+  "audit": "evaluation 309: misfit 2,833, velocity chi2 61.0, total 3,170; floating ice mean -5.8 m/yr, median ratio -2 %, within 25 km of the edge -13.1 m/yr (stage 1 on Rice's mesh: -5.8, -2 %, -10.9; the production gate: misfit 3,074 and a shelf dipole; the drag off: misfit 2,412); 90th and 99th percentile speed misfit 34 and 173 m/yr (stage 1: 35 and 171); no failed forward",
+  "notes": "issue #153: the forward-compatible fix for the ring's hold on the shelves. The misfit left above the drag-off run (about 420) is outside floating ice, where both match stage 1; not located. Forward runs from this MAP at 1, 2.5, 5 and 10 m (test-2km-rc-b20k-forward-floor*) ran five unforced years with no failed solve; the 1 m cold start took 4.8 h under scpc_gamg"
+}

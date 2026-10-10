@@ -1,0 +1,24 @@
+{
+  "id": "inversion-2km-rc-nomass-b20k",
+  "task": "inversion",
+  "institution": "IU",
+  "title": "2 km regularized-Coulomb re-inversion without the prior mean, on IU's 20 km buffered mesh (stage 2)",
+  "status": "done",
+  "friction": "regularized_coulomb",
+  "period": "2015 state",
+  "mesh": "antarctica_5000_2000_buffered20000 (IU's build, 969,764 vertices, 1,928,285 cells, md5 a1e1febd), DG0 geometry, vertex raster sampling, boundary ids from the tracked sidecar",
+  "initial_state": "inversion-2km-rc-nomass-lbfgsb's MAP (sha256 fea8debae9616f18) on Rice's mesh: controls and fluidity prior only, the 59,159 dofs outside Rice's mesh filled by the harmonic extension (ISMIP7_TRANSFER_FILL=extend, log of the prior); geometry and velocity_obs are this mesh's own BedMachine and raster samples with the lake fix (ISMIP7_LAKE_ICE_BASE=1); log-velocity weight 69946.22414285329",
+  "forcing": "observations sampled onto this mesh; no dH/dt term",
+  "site": "IU Quartz, general partition",
+  "resources": "32 ranks on node c92, 160G, one 24 h link; peak RSS 3.8 GB a rank (sacct MaxRSS)",
+  "jobs": [
+    "10966868"
+  ],
+  "code": "3490914 (PR #155's head plus the run records and ISMIP7_TRANSFER_FILL); icepack_tools e7b923e; Quartz worktree /N/scratch/dlilien/ismip7_reinvert_s2",
+  "cost": "ramp of 8 continuation steps; 311 evaluations for 300 L-BFGS-B iterations in 4.3 h; 41 s an evaluation (median: the forward 32 s, the adjoint 8 s) plus 8 s for the checkpoint. Its linear solves took half the Krylov iterations of stage 1's on Rice's mesh (68 to 85 a condensed solve against 116 to 187; a fresh solver on Rice's mesh took 152, job 10968526)",
+  "results": "Quartz /N/project/ice_rheology/ISMIP7/antarctica/results/reinvert_2km/inversion_icepack2_rc_n3_dg0_logvel_2000_int5000_b20k_nomass_wsfinal0925.h5 (sha256 805b11797319a1d2, published-state residual 3.7e-5) and inversion_timing_rc_2000_int5000_b20k_nomass_wsfinal0925.json beside it",
+  "audit": "ended at ITERATIONS REACHED LIMIT, 300 iterations, 10 line-search trials that did not lower the objective, no failed forward. Evaluation 1: misfit 5.755e3 (velocity chi2 500), smoothness 469 and 1332, total 7.555e3; evaluation 311: misfit 3.074e3, smoothness 219 and 174, total 3.466e3, against stage 1's 2.249e3 on Rice's mesh. At evaluation 1 floating ice ran 27 % below the observed speed (median ratio; mean -119 m/yr) and grounded ice 2 %; the optimizer then sped the inland shelves up and left the fronts slow, a shelf-wide dipole on Ross and Filchner-Ronne",
+  "notes": "issue #153. Superseded as a stage-2 result by its own diagnosis: the shelf slowdown is the ocean drag reaching the ice. Evaluation 1 with the drag off put floating ice at -1 %; front.ocean_drag_cells skips only water cells sharing an edge with ice, so a cell touching it at one vertex drags that front node (ISMIP7_DRAG_GATE=vertex, 4e45d18, takes floating ice to -11 %), and the 10 m membrane floor couples the first water row to the drag beyond it (with the vertex gate and ISMIP7_RC_HVISC_FLOOR=1: -2 %). The floating-front force itself is exact on the buffered mesh (a slab test of the residual: equal to the terminus condition for floating and land fronts; short by g D (rho_I H - rho_W D) / 2 at grounded marine cliffs, where the cell-wise residual lacks icepack_tools' front_cliff_correction)",
+  "started": "2026-10-04",
+  "finished": "2026-10-04"
+}

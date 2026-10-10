@@ -54,7 +54,13 @@ export ISMIP7_LC="${ISMIP7_LC:-1000}"
 export ISMIP7_LC_COARSE="${ISMIP7_LC_COARSE:-10000}"
 # int(float(buffer)), as mesh_naming.buffer_tag writes it.
 _ismip7_buffer="${ISMIP7_BUFFER_M:-20000}"
-export ISMIP7_MESH="${ISMIP7_MESH:-$ISMIP7_REPO/antarctica/mesh/antarctica_${ISMIP7_LC_COARSE}_${ISMIP7_LC}_buffered${_ismip7_buffer%%.*}.msh}"
+# ISMIP7_MESH_FRONT names the ice-mask year a mesh's nodes follow along the
+# marine front (issue #167), runconfig.MESH_FRONT_DEFAULT when unset.
+case "${ISMIP7_MESH_FRONT:-none}" in
+    none|"") _ismip7_front="" ;;
+    *) _ismip7_front="_front${ISMIP7_MESH_FRONT}" ;;
+esac
+export ISMIP7_MESH="${ISMIP7_MESH:-$ISMIP7_REPO/antarctica/mesh/antarctica_${ISMIP7_LC_COARSE}_${ISMIP7_LC}_buffered${_ismip7_buffer%%.*}${_ismip7_front}.msh}"
 # The MAP this configuration writes and reads: named from the law, so switching
 # ISMIP7_FRICTION switches the file and a Budd re-inversion cannot land on the
 # RC MAP. One variable for both halves of the workflow - inversion.sbatch

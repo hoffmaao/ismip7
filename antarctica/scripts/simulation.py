@@ -75,7 +75,9 @@ from icepack2_tools.fssa import (
     restart_reference_error as fssa_restart_reference_error,
     restart_step as fssa_restart_step,
 )
-from icepack2_tools.geometry import raise_bed_to_lake_ice_base, sample_to_geometry
+from icepack2_tools.geometry import (
+    raise_bed_to_lake_ice_base, sample_bed_thickness,
+)
 from icepack2_tools.naming import map_basename
 from icepack2_tools.handoff import check_subelement_record
 from icepack2_tools.front import (
@@ -87,6 +89,9 @@ from icepack2_tools.front import (
     COLLAPSE_CSV_COLUMNS, COLLAPSE_MARKER, FRONT_OWNER_MARKER,
 )
 from icepack2_tools.forcing import SMB_FEEDBACK_ATTR, smb_feedback_restart_error
+from icepack2_tools.relaxation import (
+    INIT_STATE_ATTR, RELAX_MAP_KEYS, describe_relaxation, init_state as _init_state,
+)
 from icepack2_tools.timeseries import (
     resumed_step, rows_kept_on_resume, step_changed,
     timeseries_csv_line,
@@ -101,7 +106,9 @@ from icepack2_tools.runconfig import (
     forward_hvisc_floor as _forward_hvisc_floor,
     forward_exact_front as _forward_exact_front,
     lc as _lc, lc_coarse as _lc_coarse, n_flow as _n_flow, buffer_m as _buffer_m,
-    TARGET_MESH_GEOMETRY_METHOD,
+    target_mesh_geometry_method as _target_mesh_geometry_method,
+    forward_raster_sample as _forward_raster_sample,
+    raster_base_method as _raster_base_method,
     calving_law as _calving_law, calving_law_object as _calving_law_object,
     front_advance as _front_advance,
     fracture as _fracture_mode, ismip7_output as _ismip7_output,
@@ -449,7 +456,9 @@ def setup_model(restart_from=None, *, allow_timing_cache_a_ref=False,
             # (runconfig.forward_drag_gate, forward_hvisc_floor).
             "drag_gate",
             "h_visc_floor",
-        ):
+            # How a relaxed MAP's geometry was made, and the initial state a
+            # restart's chain began from (icepack2_tools.relaxation).
+        ) + RELAX_MAP_KEYS + (INIT_STATE_ATTR,):
             if _chk.has_attr("/", _key):
                 checkpoint_metadata[_key] = _chk.get_attr("/", _key)
         # The mesh this checkpoint was built on, recorded by the inversion and
@@ -475,17 +484,10 @@ def setup_model(restart_from=None, *, allow_timing_cache_a_ref=False,
         chk_buffer_m = (float(_chk.get_attr("/", "buffer_m"))
                         if _chk.has_attr("/", "buffer_m") else None)
         # Raster sampling the MAP was inverted with. MAPs older than the
-        # attribute were all vertex-sampled. The MAP wins over the
-        # environment: the controls absorbed that bed, so a different one
-        # here would be silently inconsistent.
-        chk_raster_sample = (str(_chk.get_attr("/", "raster_sample"))
-                             if _chk.has_attr("/", "raster_sample") else "vertex")
-        _env_rs = os.environ.get("ISMIP7_RASTER_SAMPLE")
-        if _env_rs and _env_rs.lower() != chk_raster_sample:
-            PETSc.Sys.Print(
-                f"  WARNING: ISMIP7_RASTER_SAMPLE={_env_rs} but the MAP was "
-                f"inverted with {chk_raster_sample}; using the MAP's."
-            )
+        # attribute were all vertex-sampled. Which sampling this run builds
+        # its geometry with is decided once the target mesh is known.
+        map_raster_sample = (str(_chk.get_attr("/", "raster_sample"))
+                             if _chk.has_attr("/", "raster_sample") else None)
         # The FINE resolution is stamped too, and every component of the
         # reconstructed name must come from the checkpoint: falling back to the
         # live ISMIP7_LC here would reintroduce exactly the environment drift
@@ -495,10 +497,12 @@ def setup_model(restart_from=None, *, allow_timing_cache_a_ref=False,
                   if _chk.has_attr("/", "lc") else None)
         if not mesh_basename and chk_lc_coarse is not None \
                 and chk_buffer_m is not None:
+            # Such a checkpoint predates the mesh_basename attribute, and so
+            # every front-following mesh: name the mesh without a front tag.
             mesh_basename = os.path.basename(
                 mesh_filename(chk_lc_coarse,
                               chk_lc if chk_lc is not None else lc,
-                              chk_buffer_m))
+                              chk_buffer_m, front=None))
 
     source_mesh_basename = mesh_basename
     # None for unset, empty and the sentinel `checkpoint`: solve on the mesh
@@ -609,6 +613,17 @@ def setup_model(restart_from=None, *, allow_timing_cache_a_ref=False,
     geometry_space = _geometry_space()
     geom_dg = geometry_space == "dg0"
     Q_g = FunctionSpace(mesh, "DG", 0) if geom_dg else Q
+    # A cold start on another mesh than its MAP's rebuilds the cell-wise
+    # geometry from BedMachine there (below), with this run's raster sampling,
+    # so a transferred MAP gets the front its new mesh holds (issue #167).
+    # Otherwise the checkpoint's geometry is used as is and the sampling it
+    # records stands; an ISMIP7_RASTER_SAMPLE that differs is refused.
+    geometry_transfer = bool(
+        not is_restart and mesh_fn and geom_dg
+        and (not source_mesh_basename
+             or os.path.basename(mesh_fn) != source_mesh_basename))
+    chk_raster_sample = _forward_raster_sample(
+        map_raster_sample, geometry_transfer, source=source_chk)
     PETSc.Sys.Print(
         f"  Geometry space: {geometry_space.upper()}"
         + (" (h, s, b cell-wise; one thickness for force and mass)" if geom_dg
@@ -703,19 +718,27 @@ def setup_model(restart_from=None, *, allow_timing_cache_a_ref=False,
         bm_fn = find_file(os.path.join(DATA_DIR, "bedmachine"), "*.nc")
         geometry_source = os.path.realpath(bm_fn)
         geometry_source_method = (
-            TARGET_MESH_GEOMETRY_METHOD if geom_dg
+            _target_mesh_geometry_method(chk_raster_sample) if geom_dg
             else "target-native-bedmachine-nodal-v1"
         )
         # Cell average onto the geometry space, NOT a centroid point sample --
         # see geometry.sample_to_geometry for the measurements behind that.
-        PETSc.Sys.Print(f"  Raster sampling onto geometry cells: {chk_raster_sample}")
-        b = sample_to_geometry(
-            rasterio.open(f"netcdf:{bm_fn}:bed"), Q_g, Q,
-            method=chk_raster_sample)
+        # RC/Budd on the MAP's own mesh replace this sample with the MAP's
+        # geometry below, so a front sampling's ice mask is read only where
+        # its cells are kept.
+        _sample_method = (
+            chk_raster_sample if (geometry_transfer or not use_rc)
+            else _raster_base_method(chk_raster_sample))
+        PETSc.Sys.Print(
+            f"  Raster sampling onto geometry cells: {_sample_method}"
+            + ("" if (geometry_transfer or not use_rc) else
+               f" (a placeholder: the MAP's own geometry, sampled "
+               f"{chk_raster_sample}, replaces it)"))
+        b, H, _front_counts = sample_bed_thickness(
+            bm_fn, Q_g, Q, floor=h_clamp_init, method=_sample_method)
+        if _front_counts is not None:
+            PETSc.Sys.Print(f"  Front cells ({_sample_method}): {_front_counts}")
         b.rename("bed")
-        H = sample_to_geometry(
-            rasterio.open(f"netcdf:{bm_fn}:thickness"),
-            Q_g, Q, floor=h_clamp_init, method=chk_raster_sample)
         H.rename("thickness")
         if map_lake_ice_base:
             _n_lake = raise_bed_to_lake_ice_base(b, H, bm_fn, Q_g, Q, method=chk_raster_sample)
@@ -734,6 +757,7 @@ def setup_model(restart_from=None, *, allow_timing_cache_a_ref=False,
     phi_eff = None
     u_guess = None
     map_state_name = None   # the MAP's mixed state seeding a cold start
+    map_geometry_taken = False  # a cold start took the MAP's own geometry
     M_guess = None
     tau_guess = None
     a_ref_mb = None
@@ -1010,6 +1034,7 @@ def setup_model(restart_from=None, *, allow_timing_cache_a_ref=False,
                 s = load_checkpoint_field(chk, "surface", Q_g)
                 geometry_source = os.path.realpath(source_chk)
                 geometry_source_method = "checkpoint-native-v1"
+                map_geometry_taken = True
                 # The mixed state the MAP was accepted at (a final MAP's
                 # velocity/membrane_stress/basal_stress, a periodic
                 # checkpoint's ckpt_* copies) seeds the cold-start solve
@@ -1030,6 +1055,26 @@ def setup_model(restart_from=None, *, allow_timing_cache_a_ref=False,
             if h_clamp_init > 0.0:
                 H.interpolate(max_value(H, Constant(h_clamp_init)))
                 s.interpolate(max_value(b + H, (Constant(1.0) - rho_ratio) * H))
+
+    # The initial state the chain began from (icepack2_tools.relaxation):
+    # a relaxed MAP starts from its own geometry on its own mesh, and gives
+    # only its controls to a forward on another mesh, which builds its
+    # geometry from BedMachine as it does for any MAP. A restart keeps the
+    # record of the run it continues.
+    relax_record = {k: checkpoint_metadata[k] for k in RELAX_MAP_KEYS
+                    if k in checkpoint_metadata}
+    if is_restart:
+        init_state = checkpoint_metadata.get(INIT_STATE_ATTR, "observed")
+        init_state = init_state.decode() if isinstance(init_state, bytes) else str(init_state)
+    else:
+        init_state = _init_state(checkpoint_metadata, other_mesh=not map_geometry_taken)
+        if init_state == "relaxed":
+            PETSc.Sys.Print("  Initial state: the relaxed MAP's own geometry ("
+                            + describe_relaxation(relax_record) + ")")
+        elif init_state == "relaxed-controls":
+            PETSc.Sys.Print("  Initial state: the relaxed MAP's controls on this mesh's "
+                            "BedMachine geometry; the relaxed thickness stays on the "
+                            "MAP's mesh (" + describe_relaxation(relax_record) + ")")
 
     _filled = {k: v for k, v in transfer_fill.items()
                if v["missing"] or v["clamped"]}
@@ -1922,6 +1967,9 @@ def setup_model(restart_from=None, *, allow_timing_cache_a_ref=False,
         "mesh_basename": mesh_basename,
         "geometry_source": geometry_source,
         "geometry_source_method": geometry_source_method,
+        "init_state": init_state,
+        "map_geometry_taken": map_geometry_taken,
+        "relax_record": relax_record,
         "transfer_fill": transfer_fill,
         "initial_misfit": misfit0,
         "V": V,
@@ -2172,6 +2220,12 @@ def save_model_state(ctx, final_path, t_now, extra_attrs=None):
         for name in MAP_CONFIG_KEYS:
             if name in _map_meta:
                 chk.set_attr("/", name, _map_meta[name])
+        # The initial state the chain began from, and how a relaxed MAP's
+        # geometry was made (icepack2_tools.relaxation).
+        if ctx.get("init_state"):
+            chk.set_attr("/", INIT_STATE_ATTR, str(ctx["init_state"]))
+        for name, value in (ctx.get("relax_record") or {}).items():
+            chk.set_attr("/", name, value)
         if full_state_residual is not None:
             chk.set_attr("/", "full_state_residual", full_state_residual)
         if ctx.get("fssa_theta", 0.0) > 0:
@@ -3861,7 +3915,9 @@ def run_simulation(
         # chain does not have to infer it from log text or from the year
         # alone: 1 means the solver gave up, and resuming would re-attempt
         # the same years and give up again.
-        extra_attrs={"stalled": int(bool(stalled))},
+        # A driver's own record of the run goes on this state alone, after
+        # the carried attributes (the relaxation's, relaxation/run.py).
+        extra_attrs={"stalled": int(bool(stalled)), **(ctx.get("final_attrs") or {})},
     )
     # Printed on every exit, early stop included. projection.sbatch reads
     # this exact "Saved: <...>_final.h5" line out of its own Slurm log to find

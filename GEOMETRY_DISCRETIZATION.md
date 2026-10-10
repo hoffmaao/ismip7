@@ -110,13 +110,15 @@ noise reads as slope. Measured at 32 km:
 
 The centroid version failed to converge in 200 Newton iterations. The cell
 average, meaning the L2 projection of the CG1 interpolant, is 42% smoother and
-much less peaked, lands on BedMachine's front thickness (median 152 m), and
+much less peaked, lands on BedMachine's front thickness (median 152 m) on this
+buffer-0 mesh (a buffered mesh's front is thinned; see "Front cells on a
+buffered mesh"), and
 reproduces the CG1 driving force to 1%. `geometry.sample_to_geometry` does
 this; do not replace it with a direct interpolate onto the DG0 space. Cell
-average here means that L2 projection (`ISMIP7_RASTER_SAMPLE=vertex`, the
-default). The raster's true cell mean is a separate option (`cell_mean`) and
-measures rougher across exactly these facet jumps, so it is kept for the
-record. See its row in `antarctica/README.md`.
+average here means that L2 projection (`ISMIP7_RASTER_SAMPLE=vertex`, which
+the default `vertex_front` keeps everywhere but the marine front). The
+raster's true cell mean is a separate option (`cell_mean`) and measures
+rougher across exactly these facet jumps, so it is kept for the record. See its row in `antarctica/README.md`.
 
 The same rule applies to the RACMO SMB climatology, which sets the mass budget
 and the `a_ref` balance: `forcing.load_racmo_smb_climatology` cell-averages onto
@@ -242,6 +244,77 @@ everywhere. From the level-set run's 2024.0 checkpoint that residual was 2.19e10
 against an acceptance of 7.84, so the restart re-solved the state with the
 drag on, and its first step calved 21.7 Gt/yr where the uninterrupted run
 calved 2,865.
+
+## Front cells on a buffered mesh (issue #167)
+
+On a buffered mesh BedMachine's ice front crosses cells. Vertex sampling gives
+each of them the mean of its three vertex samples, and a vertex over open
+water samples zero, so the model's front is a rim of partly covered cells at
+a fraction of the front's thickness. Every cell of 1 m or more counts as ice
+(`ISMIP7_FRONT_HMIN`), and the transport is upwind, so the flux out of the
+front is the rim's thickness times a normal speed the inversion fits to the
+observations. IU's final 2 km MAPs carried 343 Gt/yr out of a front band of
+39.5 m, where BedMachine's own 500 m front is 163 m thick and carries 1,138 to
+1,297 Gt/yr under MEaSUREs v2 (`bm_front_flux.py`). Without apparent MB the
+shelves then gained about 850 Gt/yr (run record
+`inversion-2km-budd-b20k-ef2-relax2014-year`). A buffer-0 mesh puts the front
+on the mesh boundary and keeps 139 m at 2 km.
+
+`ISMIP7_RASTER_SAMPLE=vertex_front` (`geometry.front_cells`) rebuilds the
+marine front from BedMachine's mask, sampled on the `cell_samples` lattice
+and again four times finer in mixed cells:
+
+- a cell holds ice when at least half its samples are BedMachine ice;
+- a cell without ice that holds an ocean sample is water, `H = 0`;
+- a cell with ice that shares a vertex with a water cell, or holds an ocean
+  sample itself, takes BedMachine's mean thickness and bed over its ice
+  samples;
+- every other cell keeps its vertex samples, so interior ice, land margins
+  and the open buffer are unchanged.
+
+It is the default. A MAP records its sampling (`raster_sample`, an objective
+key), a forward on the MAP's own mesh follows that record, a transfer to
+another mesh rebuilds under the run's sampling, and the melt calibration is
+the file fitted under the run's sampling (`runconfig.MELT_CALIBRATIONS`).
+
+The t = 0 floating front under `velocity_obs` (run record
+`test-i167-front-probes`):
+
+| mesh | sampling | front thickness | front band mean | front flux |
+|---|---|---|---|---|
+| BedMachine 500 m | raster | 163 m | | 1,138 to 1,297 Gt/yr |
+| 2 km, 20 km buffer | `vertex` | 47.7 m | 39.5 m | 179 Gt/yr |
+| 2 km, 20 km buffer | `vertex_front` | 190.9 m | 129.5 m | 998 Gt/yr |
+| 1 km, 20 km buffer | `vertex` | 36.3 m | 25.6 m | 179 Gt/yr |
+| 1 km, 20 km buffer | `vertex_front` | 178.4 m | 90.3 m | 1,037 Gt/yr |
+
+On the 2 km mesh the rule rebuilds 27,854 cells and empties 16,637; the
+floating area falls 3.4 % and the floating mass 0.26 %, and the
+melt-receiving area falls 3.6 % (2.4 % at 1 km), which is why the rule has
+its own melt calibration. Meshes whose nodes follow BedMachine's marine front
+(`ISMIP7_MESH_FRONT=bm`, `mesh_antarctica.py --front bm`) carry the same front
+flux within 3 % under the rule at 6 to 8 % more cells, and the final Budd
+controls started their refit at misfit 4,250 there against 1,882 on the
+current mesh (`test-i167-frontbm-meshes`,
+`test-2km-budd-ef2-vertex-front-eval1`), so the production meshes stay the
+current ones.
+
+The controls absorb the front they were fitted against, so a MAP is refitted
+under the rule before it drives a forward on a buffered mesh. IU's Budd MAP
+refitted under it (`inversion-2km-budd-b20k-ef2-vf`) carries 1,313 Gt/yr out
+of a 191 m front at t = 0, its relaxation year without apparent MB holds the
+front at 1,420 to 1,317 Gt/yr with dM/dt near zero
+(`inversion-2km-budd-b20k-ef2-vf-relax2014-year`), and it transfers onto the
+1 km mesh with an apparent MB of +161 Gt/yr. Rice's Budd snapshot of 24
+September, fitted on the buffer-0 mesh, transfers onto the 1 km mesh near
+balance under `vertex` (apparent MB -473 Gt/yr) and with its shelves at three
+times the observed speed under the rule (+9,004 Gt/yr;
+`test-1km-transfer-t0-vertex-front`), so a Rice MAP drives a buffered-mesh
+forward only after a refit under the rule (IU, 9 October). The two lines run
+side by side until the submission is chosen on 20 and 21 October: Rice's
+MAPs and forwards on buffer-0 meshes, IU's on the buffered meshes under
+`vertex_front`. On a buffer-0 mesh the rule is unmeasured, and
+`ISMIP7_RASTER_SAMPLE=vertex` keeps a buffer-0 run as it was before it.
 
 ## The drag gate and the membrane floor (issue #153)
 
@@ -446,8 +519,10 @@ vertex-sampled, the 865.0 Gt/yr table, 21 September 2026):
    thermal forcing plausible (`select_melt_parameters.py`): K = 6.5e-5. The
    offsets at that K, from -0.68 to +1.20 K, are refitted on Rice's build of
    the mesh, the submission mesh (issue 20), and tracked as
-   `antarctica/calibration/deltaT_per_basin_1000_K6.500e-05.npz`. Every run
-   reads it unless another file is named. The forward melts
+   `antarctica/calibration/deltaT_per_basin_1000_K6.500e-05.npz`, which a run
+   sampled with `vertex` reads unless another file is named; the default
+   sampling reads the `_vertex_front` file refitted at the same K ("Front
+   cells on a buffered mesh"). The forward melts
    `forcing.melt_receiving`, the set the fit summed over. Measured through
    the forward's own callback on Rice's build (run record
    `calibration-melt-refit-1km-rice-k50`): 1067.389 Gt/yr against the

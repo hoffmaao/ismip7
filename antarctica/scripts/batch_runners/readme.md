@@ -378,7 +378,11 @@ Defaults write `inversion_icepack2_rc_n3_dg0_logvelnet_<ISMIP7_LC>.h5` (1000
 on the production mesh) under the settings the 2500 m result came from:
 sigma-normalised velocity misfit with ISSM's logarithmic term, the pointwise
 dH/dt term, and the integrated net mass-balance constraint that is off by
-default in the repo.
+default in the repo. The geometry is sampled with `ISMIP7_RASTER_SAMPLE`,
+`vertex_front` by default since issue #167 (the marine front rebuilt from
+BedMachine's mask); a warm start sampled another way supplies its controls
+and fluidity prior, and its mixed state only as a first guess under
+`ISMIP7_WARM_START_STATE=1` (README, the warm start knobs).
 
 `site_env.sh` defaults `ISMIP7_FRICTION` to `regularized_coulomb` everywhere.
 Budd's shelf gate was a sign test on the roundoff residue of the effective
@@ -446,6 +450,14 @@ submit.sh projection ISMIP7_EXPERIMENT=control
 | `ssp585_cesm_waccm` / `ssp585_mri_esm2` | 7 / 8 | 2015-2300 |
 | `ocx` | 11 | 2003-2025 |
 | `hist_cesm_waccm` / `hist_mri_esm2` | 1 / 2 | 2003-2014 |
+| `relax` | none: the relaxation year of the relaxed initial state, from `ISMIP7_INVERSION` on its own mesh (`ISMIP7_MESH=checkpoint`) | 2014 |
+
+`relax` defaults the apparent MB and the yearly output off and stops unless
+`ISMIP7_MESH=checkpoint` gives it the MAP's mesh and geometry. Its end state
+seeds a re-inversion that waits on it: `submit.sh inversion --dependency
+afterok:<relax job>` (the README, "The relaxed initial state", has the whole
+recipe). `--dependency` is open to `inversion` and `projection` for this; the
+runners' chains queue their own successors.
 
 The runner writes the submission's yearly fields and scalars by default (`ISMIP7_OUTPUT=1`), because every experiment it offers is a core experiment and a projection that reaches 2300 without them has to be run again. `ISMIP7_OUTPUT=0` turns that off for a pipeline exercise.
 

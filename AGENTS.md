@@ -56,7 +56,9 @@ are NOT version controlled:
   `ISMIP7/` and `antarctica/data/`; all `*.h5`.
 - **Tracked, and read by every run:** the melt calibration in
   `antarctica/calibration/` (issue 26), with a `.source.json` sidecar holding
-  its sha256 and the settings it was fitted under. A run on any machine melts
+  its sha256 and the settings it was fitted under. There is one file per raster
+  sampling (`runconfig.MELT_CALIBRATIONS`); the default, `vertex_front`, reads
+  the `_vertex_front` file (issue #167). A run on any machine melts
   with it and nothing is calibrated or copied. Replacing it takes a new file,
   a new sidecar and a new run record.
 - **Therefore:** a run reaches git only as a record. Every simulation has one
@@ -120,7 +122,10 @@ without reading the linked rationale and stating why.
   and the friction law into its control fields, so **the t=0 velocity misfit
   cannot validate either one**. MAP filenames are tagged by friction law and
   geometry space for this reason. Driving a DG0 forward with a CG1 MAP at
-  32 km raises the initial misfit from 8.6e3 to 1.5e5.
+  32 km raises the initial misfit from 8.6e3 to 1.5e5. A relaxed MAP's
+  geometry is part of its controls too: it is named `_relax<year>`, records
+  `geometry_source_method = relaxed-forward-v1`, and an inversion warm-started
+  from it stops unless it takes that geometry (`icepack2_tools/relaxation.py`).
 - **The zero-valued `M_s[0,0] * tau_s[0]` term in the SCPC path is structural.**
   Membrane and basal stress are physically uncoupled local fields, so UFL
   normally omits their two zero Jacobian blocks. Firedrake's three-field SCPC

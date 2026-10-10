@@ -27,7 +27,8 @@
 # everywhere too. It takes these as well:
 #   --queue short|long|debug   the site's partition of that class (short)
 #   --cd DIR        submit from ISMIP7_REPO/DIR; PATH is then relative to it
-#   --dependency D  passed to sbatch as --dependency=D
+#   --dependency D  passed to sbatch as --dependency=D (inversion and
+#                   projection take it too)
 #   --wait          block until the job ends and exit with its status
 # Standard output is sbatch's own (the job id under --parsable); the composed
 # command goes to standard error. A request that one node of this site cannot
@@ -116,7 +117,15 @@ while [ $# -gt 0 ]; do
         --account)    account="$2"; shift 2 ;;
         --name)       name="$2"; shift 2 ;;
         --dry-run)    dry=1; shift ;;
-        --queue|--cd|--dependency|--wait)
+        --dependency)
+            # The runners' own chains queue their successors; this is a
+            # first job waiting on another, as a re-inversion waits on the
+            # relaxation year it starts from.
+            case "$kind" in
+                script|inversion|projection) dependency="$2"; shift 2 ;;
+                *) echo "--dependency belongs to \`submit.sh script\`, inversion and projection" >&2; exit 2 ;;
+            esac ;;
+        --queue|--cd|--wait)
             if [ "$kind" != script ]; then
                 echo "$1 belongs to \`submit.sh script\`" >&2; exit 2
             fi
@@ -130,7 +139,6 @@ while [ $# -gt 0 ]; do
                     esac
                     shift 2 ;;
                 --cd)         subdir="$2"; shift 2 ;;
-                --dependency) dependency="$2"; shift 2 ;;
                 --wait)       wait_flag=1; shift ;;
             esac ;;
         *=*)

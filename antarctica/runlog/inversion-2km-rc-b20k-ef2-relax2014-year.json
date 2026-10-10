@@ -1,0 +1,25 @@
+{
+ "task": "inversion",
+ "institution": "IU",
+ "status": "stopped",
+ "mesh": "antarctica_5000_2000_buffered20000 (IU's build, 969,764 vertices), DG0 geometry, the production MAP's own mesh (ISMIP7_MESH=checkpoint)",
+ "site": "IU Quartz, general partition",
+ "id": "inversion-2km-rc-b20k-ef2-relax2014-year",
+ "title": "RC relaxation year of the relaxed initial state from the version 2 final MAP: 2014 to 2015 on OCX's 2014 forcing",
+ "friction": "regularized_coulomb",
+ "period": "2014.0 to 2015.0 at dt 0.0125 (80 steps)",
+ "initial_state": "inversion-2km-rc-b20k-rho7500-floating-ef2's MAP (inversion_icepack2_rc_n3_dg0_logvel_2000_int5000_b20k_rho7500_floating_ef2.h5, sha256 88452d3aead43740...), the finished MAP of job 11832709, written with its .done marker at 04:17 EDT on 8 Oct after its 120-iteration budget (L-BFGS-B stop 'TOTAL NO. OF ITERATIONS REACHED LIMIT', misfit 1,301.6), rewound 1 yr with the Smith dH/dt on grounded ice",
+ "forcing": "OCX protocol forcing for 2014 (ISMIP7_EXPERIMENT=relax), apparent MB off, front pinned",
+ "resources": "32 ranks, 360G, 4 h links (projection.sbatch, ISMIP7_EXPERIMENT=relax, chained at the wall); ISMIP7_DIAGNOSTIC_LINEAR_SOLVER=full_mumps, ISMIP7_MAP_CLIP=0",
+ "notes": "IU's choice on 8 Oct: the forward on scpc_mumps without the MAP clip, after the first attempts from the version 1 MAPs (inversion-2km-rc-b20k-relax2014-year) diverged on their first solve under scpc_gamg. The evidence for scpc_mumps is test-2km-budd-b20k-final-forward-diagnostics, which converged that solve in 14 Newton iterations at about 34 s a step from the version 1 Budd MAP with the 1-year backdate, the default clip (10) and exact_front 1; these runs are the first to exercise scpc_mumps with the clip off on the version 2 MAPs. The forward takes exact_front version 2 from the MAP. The RC chain continues in an extra production link (job 11837469, cell prod_rc_ef2_link2), which warm-starts strictly from the 120-iteration MAP and writes its own file ..._floating_ef2_link2.h5, so the file the relaxation reads stays unchanged. README, \"The relaxed initial state\"; issue #162. First submitted on scpc_mumps as job 11838244 and cancelled by IU after 73 min and 2 steps: its solves took 36, 84 and 66 Newton iterations at 6 to 11 linear iterations each (13 to 34 min a step), where Budd's took 6 to 12 at 1 each; RC's production inversion uses full_mumps for the same reason. Resubmitted on full_mumps as 11841115 with no checkpoint to resume from; trigger 11841178 (relax_year_trigger.sh) submits the re-inversion once the chain reaches 2015. Stopped by IU on 8 Oct before it ran (11841115 and trigger 11841178 cancelled while queued): Budd's year showed the 2 km front carrying 343 to 551 Gt/yr against about 1,200 observed, and the RC MAP's front is the same at t = 0 (343.4 Gt/yr; its grounding-line flux is 3,290 Gt/yr against 2,236 under velocity_obs).",
+ "jobs": [
+  "11838244",
+  "11841115",
+  "11841178"
+ ],
+ "code": "e7b7121 (PR 163 with PR 164's head 4dea089 merged, so exact_front version 2); Quartz worktree /N/scratch/dlilien/ismip7_reinvert_relax; cells relax_ef2_<law> and reinv_relax_ef2_<law> of /N/scratch/dlilien/ismip7_reinvert_jobs/submit_reinvert.sh, which take prod_settings() with ISMIP7_EXACT_FRONT=2",
+ "started": "2026-10-08",
+ "results": "/N/scratch/dlilien/ismip7_reinvert_relax/antarctica/results/relax_inversion_icepack2_rc_n3_dg0_logvel_2000_int5000_b20k_rho7500_floating_ef2_2000_final.h5, copied to /N/project/ice_rheology/ISMIP7/antarctica/results/reinvert_2km/final/relax_states/ by the verify job",
+ "finished": "2026-10-08",
+ "cost": "73 min of 32 ranks (11838244, scpc_mumps, 2 steps)"
+}

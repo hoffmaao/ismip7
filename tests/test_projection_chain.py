@@ -495,3 +495,22 @@ def test_the_launcher_selects_romio_for_the_ranks(sandbox):
     rc, log, calls = run_job(sandbox, FAKE_T_YR="2050", FAKE_START_YEAR="2000",
                              ISMIP7_MPI_IO="ompio")
     assert "driver: mpi io=ompio" in log
+
+
+def test_the_relaxation_year_runs_without_the_apparent_mb_or_output(sandbox):
+    r"""``ISMIP7_EXPERIMENT=relax`` (icepack2_tools.relaxation) lets the
+    geometry answer the model's own imbalance and writes no ISMIP7 files, so
+    the runner's production defaults of both are off for it."""
+    rc, log, _ = run_job(sandbox, FAKE_T_YR="2301", ISMIP7_EXPERIMENT="relax")
+    assert rc == 0, log
+    assert "experiment relax -> antarctica/scripts/relaxation/run.py" in log
+    assert "driver: auto_resume=True apparent_mb=None ismip7_output=False" in log
+
+
+def test_an_explicit_apparent_mb_still_reaches_the_relaxation(sandbox):
+    r"""The relaxation's default is the runner's; a value given is passed on,
+    and the driver refuses it."""
+    rc, log, _ = run_job(sandbox, FAKE_T_YR="2301", ISMIP7_EXPERIMENT="relax",
+                         ISMIP7_APPARENT_MB="1", ISMIP7_OUTPUT="1")
+    assert rc == 0, log
+    assert "apparent_mb=balance ismip7_output=True" in log

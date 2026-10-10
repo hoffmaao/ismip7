@@ -92,11 +92,14 @@ from icepack2_tools.dual_friction import (
     rebase_log_friction,
     weertman_anchor,
 )
-from icepack2_tools.geometry import cg1_lift, raise_bed_to_lake_ice_base, sample_to_geometry
+from icepack2_tools.geometry import (
+    cg1_lift, front_changed_nodes, raise_bed_to_lake_ice_base,
+    sample_bed_thickness, sample_to_geometry,
+)
 from icepack2_tools.preconditioners import frozen_linearization, with_scpc_blocks
 from icepack2_tools.taped_solve import StateSolverCache, taped_state_solve
 from icepack2_tools.transfer import (
-    interpolate_with_fill, load_checkpoint_mesh, meshes_match,
+    harmonic_extension, interpolate_with_fill, load_checkpoint_mesh, meshes_match,
 )
 from icepack2_tools.grounding import height_above_flotation
 from icepack2_tools.mpi_stats import (global_mean, global_range,
@@ -111,7 +114,9 @@ from icepack2_tools.runconfig import (
     raster_sample as _raster_sample,
     lc as _lc, lc_coarse as _lc_coarse, n_flow as _n_flow,
     eval_continuation, inversion_mesh_source, transfer_fill, drag_gate,
-    DRAG_GATE_NONE, hvisc_floor, exact_front_version,
+    DRAG_GATE_NONE, hvisc_floor, exact_front_version, warm_start_geometry,
+    warm_start_state, ramp_slide_fixed, warm_start_fluidity,
+    warm_start_state_fluidity, front_band_controls, front_band_extends,
 )
 DATA_DIR = obs_data_root()
 from icepack2_tools.prior import (
@@ -125,6 +130,9 @@ from icepack2_tools.thermo_model import compute_fluidity_prior
 from icepack2_tools.handoff import (
     OBJECTIVE_KEYS, OBJECTIVE_RECORD_KEYS, SUBELEMENT_SCHEME_VERSIONS,
     accepted_evaluation, frozen_in_control, handoff_gap, objective_mismatches)
+from icepack2_tools.relaxation import (
+    END_STATE_ATTR, RELAX_MAP_KEYS, anchor_ratio_counts, describe_relaxation,
+    end_state_problems, inherited_geometry, is_relaxed)
 from icepack2_tools.profiling import Spans
 from icepack2_tools.optimization import (NOT_FINAL,
                                          FunctionalDecreaseStop,
@@ -136,6 +144,7 @@ from icepack2_tools.forcing import (load_racmo_smb_climatology,
 from icepack2_tools.runconfig import (
     TARGET_MESH_GEOMETRY_METHOD,
     anchor_length,
+    file_sha256,
     front_hmin,
     lake_ice_base,
     residual_stabilizers,
@@ -502,6 +511,20 @@ def main():
     PETSc.Sys.Print(f"  {global_size(mesh.coordinates)} vertices, "
                     f"{mesh.comm.allreduce(mesh.cell_set.size)} cells")
 
+    # The MAP name carries BOTH the flow exponent and the geometry space it was
+    # inverted under, so n=3/n=4 and DG0/CG1 MAPs coexist on disk and a forward
+    # cannot silently pair itself with a MAP whose front treatment differs.
+    # Built by the shared helper the forward and the preflight gates use.
+    # ISMIP7_MAP_OUT overrides the full output path: without it, EVERY run --
+    # including a short smoke test -- writes to the production filename, and a
+    # 3-iteration artifact silently replaces a converged MAP (this nearly
+    # happened twice in Aug 2026 validation). Variant MAPs (e.g. the transient
+    # dH/dt-constrained inversion) should also name themselves distinctly here
+    # rather than shadow the velocity-only MAP the forwards auto-load.
+    map_out = os.environ.get("ISMIP7_MAP_OUT")
+    map_fn = (os.path.basename(map_out) if map_out
+              else map_basename(FRICTION, mesh_lc))
+
     use_calving_terminus = os.environ.get("ISMIP7_NO_CALVING_TERMINUS") is None
     # Per-mesh sidecar, hard-checked against this mesh: a stale sidecar leaves
     # most of the front with no terminus back-pressure, and the inversion would
@@ -535,15 +558,16 @@ def main():
     # Cell average onto the geometry space, NOT a centroid point sample --
     # see geometry.sample_to_geometry for the measurements behind that.
     PETSc.Sys.Print(f"  Raster sampling onto geometry cells: {raster_sample}")
-    b = sample_to_geometry(
-        rasterio.open(f"netcdf:{bm_fn}:bed"), Q_g, Q, method=raster_sample)
     # h_clamp default 0.0: invert against the *true* BedMachine geometry,
     # including h=0 over the buffered ocean region. Composite rheology
     # (added below) keeps the SNES nonsingular where h=0.
     h_clamp = float(os.environ.get("ISMIP7_H_CLAMP", "0.0"))
-    H = sample_to_geometry(
-        rasterio.open(f"netcdf:{bm_fn}:thickness"),
-        Q_g, Q, floor=h_clamp, method=raster_sample)
+    # The front sampling (vertex_front) rebuilds the marine front cells from
+    # BedMachine's own mask (geometry.front_cells, issue #167).
+    b, H, front_counts = sample_bed_thickness(
+        bm_fn, Q_g, Q, floor=h_clamp, method=raster_sample)
+    if front_counts is not None:
+        PETSc.Sys.Print(f"  Front cells ({raster_sample}): {front_counts}")
     PETSc.Sys.Print(f"  H clamp: {h_clamp} m  "
                     f"(nodes h<=1m: "
                     f"{global_count(H.dat.data_ro <= 1.0, mesh.comm)} / "
@@ -759,6 +783,7 @@ def main():
     # phi is moved onto this run's prior so A = A_prior exp(phi) is kept.
     warm_A_prior_rebase = None
     warm_loaded_z = False
+    warm_state_guess = False
     # the warm start's anchor length, when its theta is to be rebased onto
     # this run's anchor once that is built (ISMIP7_WARM_START_THETA=physical)
     warm_theta_anchor = None
@@ -773,6 +798,14 @@ def main():
     # Everything the warm start's writer recorded about ITS objective and the
     # objective value at its checkpointed iterate (icepack2_tools.handoff).
     warm_attrs = {}
+    # Where the warm start's geometry came from (icepack2_tools.relaxation):
+    # its record, whether it is a relaxation's end state, the anchor that
+    # state's year ran with, and the record this run writes when it takes a
+    # relaxed geometry (None: this run's own BedMachine sample).
+    warm_geometry_attrs = {}
+    warm_end_state = False
+    warm_C_w0 = None
+    run_geometry = None
     # The log-velocity term the warm start was minimised under, which an
     # "auto" weight is held to. None without a warm start.
     warm_objective = None
@@ -810,6 +843,20 @@ def main():
                 f"{n_clamped} clamped to the source range")
         return target
 
+    def _warm_state(chk, source_mesh):
+        # a published MAP's state, else a periodic checkpoint's
+        try:
+            pre = ""
+            u_ws = _warm_load(chk, source_mesh, "velocity", V)
+        except (KeyError, RuntimeError, ValueError):
+            pre = "ckpt_"
+            u_ws = _warm_load(chk, source_mesh, "ckpt_velocity", V)
+        M_ws = _warm_load(chk, source_mesh, f"{pre}membrane_stress",
+                          z.subfunctions[1].function_space())
+        tau_ws = _warm_load(chk, source_mesh, f"{pre}basal_stress",
+                            z.subfunctions[2].function_space())
+        return u_ws, M_ws, tau_ws
+
     if warm_chk:
         PETSc.Sys.Print(f"  Loading warm start from {warm_chk}")
         with fd.CheckpointFile(warm_chk, "r") as chk:
@@ -826,9 +873,16 @@ def main():
                             if chk.has_attr("/", "friction_anchor_length") else 0.0)
             _warm_lake = (int(chk.get_attr("/", "lake_ice_base"))
                           if chk.has_attr("/", "lake_ice_base") else 0)
+            _warm_rs = (str(chk.get_attr("/", "raster_sample")).lower()
+                        if chk.has_attr("/", "raster_sample") else "vertex")
             for _key in OBJECTIVE_KEYS + OBJECTIVE_RECORD_KEYS:
                 if chk.has_attr("/", _key):
                     warm_attrs[_key] = chk.get_attr("/", _key)
+            for _key in RELAX_MAP_KEYS + (END_STATE_ATTR, "geometry_source",
+                                          "geometry_source_method", "t_yr", "stalled"):
+                if chk.has_attr("/", _key):
+                    warm_geometry_attrs[_key] = chk.get_attr("/", _key)
+            warm_end_state = bool(int(warm_geometry_attrs.get(END_STATE_ATTR, 0) or 0))
             if "objective_total" in warm_attrs:
                 PETSc.Sys.Print(
                     f"    objective recorded at iteration "
@@ -863,8 +917,43 @@ def main():
             if _phi_mode not in ("0", "1", "physical"):
                 raise ValueError(
                     f"ISMIP7_WARM_START_PHI={_phi_mode!r}: use 1, 0 or physical")
+            # ISMIP7_WARM_START_FLUIDITY: phi and the prior it deviates from
+            # come from another MAP, so A = A_prior exp(phi) is that MAP's.
+            _fl_chk = warm_start_fluidity()
+            _fl_prior = None
+            _fl_origin = None
+            # the fluidity MAP's raster sampling (the front band's controls)
+            _fl_rs = None
+            # its mixed state, the first guess under ISMIP7_WARM_START_STATE=fluidity
+            _fl_state = None
             if _phi_mode == "0":
+                if _fl_chk:
+                    raise ValueError(
+                        "ISMIP7_WARM_START_FLUIDITY names a fluidity to start from "
+                        "and ISMIP7_WARM_START_PHI=0 the prior mean: set one")
                 PETSc.Sys.Print("    log_fluidity: prior mean (ISMIP7_WARM_START_PHI=0)")
+            elif _fl_chk:
+                with fd.CheckpointFile(_fl_chk, "r") as _fl:
+                    _fl_fc = (str(_fl.get_attr("/", "fluidity_control")).lower()
+                              if _fl.has_attr("/", "fluidity_control") else "all")
+                    if _fl_fc != FLUIDITY_CONTROL:
+                        raise ValueError(
+                            f"ISMIP7_WARM_START_FLUIDITY={_fl_chk} was inverted "
+                            f"under fluidity_control={_fl_fc}, this run under "
+                            f"{FLUIDITY_CONTROL}")
+                    _fl_rs = (str(_fl.get_attr("/", "raster_sample")).lower()
+                              if _fl.has_attr("/", "raster_sample") else "vertex")
+                    _fl_mesh = _fl.load_mesh()
+                    phi.assign(_warm_load(_fl, _fl_mesh, "log_fluidity", Q))
+                    _fl_prior = _warm_load(_fl, _fl_mesh, "fluidity_prior", Q)
+                    _fl_origin = (str(_fl.get_attr("/", "fluidity_prior_origin"))
+                                  if _fl.has_attr("/", "fluidity_prior_origin")
+                                  else f"warm start {os.path.basename(_fl_chk)}")
+                    if warm_start_state_fluidity(same_mesh=meshes_match(_fl_mesh, mesh)):
+                        _fl_state = _warm_state(_fl, _fl_mesh)
+                PETSc.Sys.Print(
+                    f"    log_fluidity and fluidity_prior from {_fl_chk} "
+                    f"(ISMIP7_WARM_START_FLUIDITY); log_friction from the warm start")
             else:
                 phi.assign(_warm_load(chk, chk_mesh, "log_fluidity", Q))
             # A MAP inverted on the sqrt(C) control carries alpha itself; its
@@ -901,10 +990,42 @@ def main():
             same_mesh = meshes_match(chk_mesh, mesh)
             # A MAP inverted before the lake fix carries the lake bowl in its
             # geometry; taking it would undo the fix, so by default it is not.
-            _geometry_default = "1" if (same_mesh and _warm_lake == int(LAKE_ICE_BASE)) else "0"
-            warm_geometry = os.environ.get(
-                "ISMIP7_WARM_START_GEOMETRY", _geometry_default
-            ).strip() != "0"
+            # Nor does one whose geometry was sampled another way: a front
+            # sampling's cells differ at the front (issue #167), and a refit
+            # from a vertex MAP is how a MAP gets them.
+            warm_geometry = warm_start_geometry(
+                same_mesh=same_mesh, same_lake=_warm_lake == int(LAKE_ICE_BASE),
+                warm_sampling=_warm_rs, run_sampling=raster_sample)
+            if same_mesh and _warm_rs != raster_sample:
+                PETSc.Sys.Print(
+                    f"    warm start records raster_sample={_warm_rs}, this run "
+                    f"{raster_sample}: its geometry is not taken")
+            # The warm start's controls were fitted against the front its own
+            # sampling built. Under ISMIP7_WARM_START_FRONT_EXTEND=1 theta and
+            # phi over the cells the front rule rebuilt or emptied become a
+            # harmonic blend of the ice upstream and the nodes seaward of the
+            # band, which keep the warm start's values, and the refit sets
+            # them afresh (issue #167).
+            # A phi taken from a MAP fitted under a front sampling
+            # (ISMIP7_WARM_START_FLUIDITY) already belongs to this front and
+            # is kept.
+            if front_band_extends(same_mesh=same_mesh, geometry_taken=warm_geometry,
+                                  run_sampling=raster_sample, warm_sampling=_warm_rs):
+                _H_warm_rs = sample_to_geometry(
+                    rasterio.open(f"netcdf:{bm_fn}:thickness"), Q_g, Q,
+                    floor=h_clamp, method=_warm_rs)
+                _front_nodes = front_changed_nodes(H, _H_warm_rs, Q)
+                _band = front_band_controls(_fl_rs if _fl_chk else None)
+                for _name in _band:
+                    harmonic_extension({"theta": theta, "phi": phi}[_name],
+                                       _front_nodes, 0.0, COMM_WORLD)
+                PETSc.Sys.Print(
+                    f"    front band: {' and '.join(_band)} continued harmonically on "
+                    f"{global_count(_front_nodes, COMM_WORLD)} nodes of the cells "
+                    f"the front rule changed, between the ice upstream and the "
+                    f"warm start seaward (ISMIP7_WARM_START_FRONT_EXTEND=1)"
+                    + ("; phi is the fluidity MAP's, fitted under "
+                       f"{_fl_rs}" if "phi" not in _band else ""))
             if same_mesh and _warm_lake != int(LAKE_ICE_BASE):
                 PETSc.Sys.Print(
                     f"    warm start records lake_ice_base={_warm_lake}, this run "
@@ -919,12 +1040,14 @@ def main():
                    "(geometry and velocity_obs are this mesh's own)"))
             if not warm_geometry:
                 raise_geometry = KeyError("warm start geometry not taken")
+            warm_geometry_loaded = False
             try:
                 if not warm_geometry:
                     raise raise_geometry
                 H.assign(_warm_load(chk, chk_mesh, "thickness", Q_g))
                 b.assign(_warm_load(chk, chk_mesh, "bed", Q_g))
                 s.assign(_warm_load(chk, chk_mesh, "surface", Q_g))
+                warm_geometry_loaded = True
                 PETSc.Sys.Print(
                     "    geometry: thickness/bed/surface from warm start"
                 )
@@ -933,6 +1056,38 @@ def main():
                     "    geometry: keeping BedMachine sample "
                     "(warm start has no thickness/bed/surface)"
                 )
+            # A relaxed geometry (icepack2_tools.relaxation) comes with the
+            # controls fitted to it, so it is taken or the run stops. From a
+            # relaxation's end state the re-inversion keeps the MAP's theta
+            # (IU, 6 Oct 2026, issue #162): the friction then follows the relaxed
+            # driving stress through the anchor, and where basal drag carries
+            # that stress the starting speed stays the MAP's.
+            if warm_end_state:
+                _why = end_state_problems(warm_geometry_attrs, same_mesh=same_mesh,
+                                          geometry_taken=warm_geometry_loaded,
+                                          map_out=map_fn)
+                if _theta_mode == "physical":
+                    _why.append(
+                        "ISMIP7_WARM_START_THETA=physical rebases between anchor "
+                        "lengths on this run's geometry; a re-inversion keeps the "
+                        "MAP's theta, so leave it unset")
+                if _why:
+                    raise RuntimeError(
+                        f"ISMIP7_WARM_START={warm_chk} is a relaxation's end state "
+                        f"that cannot seed this re-inversion: " + "; ".join(_why))
+                if _warm_fc == "log" and _theta_mode == "1":
+                    try:
+                        warm_C_w0 = _warm_load(chk, chk_mesh, "C_w0", Q_g)
+                    except (KeyError, RuntimeError, ValueError):
+                        warm_C_w0 = None
+            if is_relaxed(warm_geometry_attrs):
+                _sha = COMM_WORLD.bcast(
+                    file_sha256(warm_chk) if (warm_end_state and COMM_WORLD.rank == 0)
+                    else None, root=0)
+                run_geometry = inherited_geometry(
+                    warm_geometry_attrs, geometry_taken=warm_geometry_loaded,
+                    warm_basename=os.path.basename(warm_chk), warm_sha256=_sha)
+                PETSc.Sys.Print("    relaxed geometry: " + describe_relaxation(run_geometry))
             try:
                 if not warm_geometry:
                     raise raise_geometry
@@ -944,7 +1099,8 @@ def main():
             # e.g. after a change to its physics; phi is kept, as a deviation
             # from the new prior mean.
             if _phi_mode == "physical":
-                warm_A_prior_rebase = _warm_load(chk, chk_mesh, "fluidity_prior", Q)
+                warm_A_prior_rebase = (_fl_prior if _fl_prior is not None else
+                                       _warm_load(chk, chk_mesh, "fluidity_prior", Q))
                 warm_A_prior = None
                 PETSc.Sys.Print("    fluidity_prior: recomputed below; log_fluidity "
                                 "rebased onto it (ISMIP7_WARM_START_PHI=physical)")
@@ -952,6 +1108,9 @@ def main():
                 warm_A_prior = None
                 PETSc.Sys.Print("    fluidity_prior: recomputed below "
                                 "(ISMIP7_WARM_START_PRIOR=0); log_fluidity kept")
+            elif _fl_prior is not None:
+                warm_A_prior = _fl_prior
+                warm_prior_origin = _fl_origin
             else:
                 try:
                     warm_A_prior = _warm_load(
@@ -963,31 +1122,27 @@ def main():
                         else f"warm start {os.path.basename(warm_chk)}")
                 except (KeyError, RuntimeError, ValueError):
                     warm_A_prior = None
+            _state_load, warm_state_guess = warm_start_state(
+                geometry_taken=warm_geometry, same_mesh=same_mesh)
             try:
-                if not warm_geometry:
+                if _fl_state is not None:
+                    u_ws, M_ws, tau_ws = _fl_state
+                    warm_state_guess = True
+                    _state_from = f"{_fl_chk} (ISMIP7_WARM_START_STATE=fluidity)"
+                elif not _state_load:
                     raise raise_geometry
-                # a published MAP's state, else a periodic checkpoint's
-                try:
-                    _pre = ""
-                    u_ws = _warm_load(chk, chk_mesh, "velocity", V)
-                except (KeyError, RuntimeError, ValueError):
-                    _pre = "ckpt_"
-                    u_ws = _warm_load(chk, chk_mesh, "ckpt_velocity", V)
-                M_ws = _warm_load(
-                    chk, chk_mesh, f"{_pre}membrane_stress",
-                    z.subfunctions[1].function_space(),
-                )
-                tau_ws = _warm_load(
-                    chk, chk_mesh, f"{_pre}basal_stress",
-                    z.subfunctions[2].function_space(),
-                )
+                else:
+                    u_ws, M_ws, tau_ws = _warm_state(chk, chk_mesh)
+                    _state_from = ("warm start (ISMIP7_WARM_START_STATE=1)"
+                                   if warm_state_guess else "warm start")
                 z.subfunctions[0].assign(u_ws)
                 z.subfunctions[1].assign(M_ws)
                 z.subfunctions[2].assign(tau_ws)
                 warm_loaded_z = True
                 PETSc.Sys.Print(
-                    "    mixed state: velocity/membrane/basal from warm start"
-                )
+                    f"    mixed state: velocity/membrane/basal from {_state_from}"
+                    + (", the first guess on this run's geometry"
+                       if warm_state_guess else ""))
             except (KeyError, RuntimeError, ValueError):
                 warm_loaded_z = False
         if warm_loaded_z:
@@ -1110,6 +1265,22 @@ def main():
     # inside weertman_anchor (a cell-wise surface has no cell gradient); the
     # anchor is a fixed reference scaling, not a force in the residual.
     C_w0 = weertman_anchor(H, s, u_obs, m_slide_val, Q_g, length=ANCHOR_LENGTH, b=b)
+    if warm_C_w0 is not None:
+        # How far the relaxed geometry moved the anchor from the one the
+        # relaxation year ran with: R = C_w0 here / C_w0 there, on grounded
+        # ice. Under the kept theta the first evaluation's friction is the
+        # MAP's times R on these cells.
+        _haf = Function(Q_g).interpolate(height_above_flotation(H, b))
+        _n, _n1, _n3, _sum, _lo, _hi = anchor_ratio_counts(
+            C_w0.dat.data_ro, warm_C_w0.dat.data_ro, _haf.dat.data_ro > 0.0)
+        _n, _n1, _n3 = (COMM_WORLD.allreduce(v) for v in (_n, _n1, _n3))
+        _sum = COMM_WORLD.allreduce(_sum)
+        _lo, _hi = min(COMM_WORLD.allgather(_lo)), max(COMM_WORLD.allgather(_hi))
+        PETSc.Sys.Print(
+            f"  Anchor on the relaxed geometry: ln R over {_n} grounded dofs in "
+            f"[{_lo:.3f}, {_hi:.3f}], mean |ln R| {_sum / max(_n, 1):.4f}, "
+            f"|ln R| > 0.1 on {_n1} ({100.0 * _n1 / max(_n, 1):.2f} %), "
+            f"> 0.3 on {_n3} ({100.0 * _n3 / max(_n, 1):.2f} %)")
     PETSc.Sys.Print(
         "  Friction anchor: " + ("local driving stress" if ANCHOR_LENGTH == 0.0 else
                                  f"grounded driving stress averaged over {ANCHOR_LENGTH / 1e3:g} km"))
@@ -1381,19 +1552,6 @@ def main():
             f"    log_fluidity rebased onto this prior (A kept): shift in "
             f"[{_s_lo:.2f}, {_s_hi:.2f}], mean {global_mean(_shift):.3f}")
     A4_base = A_prior
-    # The MAP name carries BOTH the flow exponent and the geometry space it was
-    # inverted under, so n=3/n=4 and DG0/CG1 MAPs coexist on disk and a forward
-    # cannot silently pair itself with a MAP whose front treatment differs.
-    # Built by the shared helper the forward and the preflight gates use.
-    # ISMIP7_MAP_OUT overrides the full output path: without it, EVERY run --
-    # including a short smoke test -- writes to the production filename, and a
-    # 3-iteration artifact silently replaces a converged MAP (this nearly
-    # happened twice in Aug 2026 validation). Variant MAPs (e.g. the transient
-    # dH/dt-constrained inversion) should also name themselves distinctly here
-    # rather than shadow the velocity-only MAP the forwards auto-load.
-    map_out = os.environ.get("ISMIP7_MAP_OUT")
-    map_fn = (os.path.basename(map_out) if map_out
-              else map_basename(FRICTION, mesh_lc))
     # A bare filename (ISMIP7_MAP_OUT=map.h5) has no dirname; resolve it under
     # MESH_DIR like the non-override path rather than silently against the CWD.
     _map_dir = (os.path.dirname(map_out) or MESH_DIR) if map_out else MESH_DIR
@@ -1585,6 +1743,9 @@ def main():
         pre_jacobian_callback=ramp_pre_jacobian,
     )
     ramp_ladder = ladder(continuation_steps())
+    # The sliding exponent a ramp starts from: 1, or its target under
+    # ISMIP7_RAMP_SLIDE_FIXED=1 (issue #167).
+    ramp_m_start = m_slide_val if ramp_slide_fixed() else 1.0
     def _ramp_solve(attempt, step, steps, t):
         t0 = perf_counter()
         try:
@@ -1612,14 +1773,22 @@ def main():
         try:
             _, steps = ramp_exponents(
                 _ramp_solve, z, n_flow, m_slide, n_flow_val, m_slide_val,
-                ramp_ladder[:trial_rescue_rungs()], report=PETSc.Sys.Print)
+                ramp_ladder[:trial_rescue_rungs()], report=PETSc.Sys.Print,
+                m_start=ramp_m_start)
         finally:
             n_flow.assign(n_flow_val)
             m_slide.assign(m_slide_val)
         return steps
 
     if skip_continuation:
-        if warm_loaded_z:
+        if warm_loaded_z and warm_state_guess:
+            PETSc.Sys.Print(
+                f"Warm start: the loaded mixed state is the first guess at full "
+                f"n_flow={n_flow_val:.1f}, m_slide={m_slide_val:.1f}; the first "
+                f"evaluation's forward solves it on this geometry (no 1→n "
+                f"continuation)"
+            )
+        elif warm_loaded_z:
             PETSc.Sys.Print(
                 f"Warm start: accepting loaded mixed state at full "
                 f"n_flow={n_flow_val:.1f}, m_slide={m_slide_val:.1f} "
@@ -1644,7 +1813,7 @@ def main():
         # GAMG had climbed the same ramp on the same mesh and MAP.
         PETSc.Sys.Print(
             f"Warm start (continuation n_flow 1→{n_flow_val:.1f}, "
-            f"m_slide 1→{m_slide_val:.1f}; "
+            f"m_slide {ramp_m_start:g}→{m_slide_val:.1f}; "
             f"{diagnostic_solver_label(lane_solver_mode)}, "
             f"{linearization_state(lane_solver_mode)} linearization, "
             f"steps {'/'.join(str(s) for s in ramp_ladder)})..."
@@ -1652,7 +1821,7 @@ def main():
 
         _, ramp_steps = ramp_exponents(
             _ramp_solve, z, n_flow, m_slide, n_flow_val, m_slide_val,
-            ramp_ladder, report=PETSc.Sys.Print,
+            ramp_ladder, report=PETSc.Sys.Print, m_start=ramp_m_start,
         )
         PETSc.Sys.Print(f"  Done ({ramp_steps} continuation steps)")
 
@@ -2542,6 +2711,15 @@ def main():
             # the objective (handoff.OBJECTIVE_KEYS).
             chk.set_attr("/", "eval_continuation", int(not eval_full_n))
             chk.set_attr("/", "eval_mode", eval_mode)
+            # Where the geometry came from, on every checkpoint, so the next
+            # link of a chain and the forward know a relaxed geometry from
+            # this mesh's own BedMachine sample (icepack2_tools.relaxation).
+            if run_geometry is None:
+                chk.set_attr("/", "geometry_source", os.path.realpath(bm_fn))
+                chk.set_attr("/", "geometry_source_method", TARGET_MESH_GEOMETRY_METHOD)
+            else:
+                for _key, _val in run_geometry.items():
+                    chk.set_attr("/", _key, _val)
             if full_state:
                 chk.set_attr("/", "t_yr", float(MATRIX_T_START))
                 chk.set_attr("/", "friction", str(FRICTION))
@@ -2557,12 +2735,6 @@ def main():
                 chk.set_attr("/", "state_solver_mode", state_solver_mode)
                 chk.set_attr(
                     "/", "state_solver_parameters", state_solver_parameters
-                )
-                chk.set_attr(
-                    "/", "geometry_source", os.path.realpath(bm_fn)
-                )
-                chk.set_attr(
-                    "/", "geometry_source_method", TARGET_MESH_GEOMETRY_METHOD
                 )
                 for key, value in full_state_solve.items():
                     chk.set_attr("/", f"full_state_{key}", value)
@@ -3334,7 +3506,7 @@ def main():
         "subelement_scheme_version": int(SUBELEMENT_SCHEME_VERSION),
         "fluidity_control": FLUIDITY_CONTROL,
         "drag_gate": DRAG_RECORD, "h_visc_floor": float(RC_HVISC_FLOOR),
-        "phi_grounded": PHI_GROUNDED,
+        "phi_grounded": PHI_GROUNDED, "raster_sample": str(raster_sample),
     })
     if PRIOR_FORM == "bilaplacian":
         run_settings.update({"prior_sigma_theta": float(PRIOR_SIGMA_THETA),
@@ -3368,6 +3540,15 @@ def main():
             return
         _handoff_checked[0] = True
         if "objective_total" not in warm_attrs:
+            # A relaxation's end state carries the MAP's objective settings
+            # and leaves its value behind, since that value belongs to the
+            # MAP's geometry: the change is the relaxation's, not a gap.
+            if warm_end_state and "relax_source_objective_total" in warm_geometry_attrs:
+                PETSc.Sys.Print(
+                    f"  Handoff: first objective {float(first_total):.6e} on the "
+                    f"relaxed geometry; the source MAP recorded "
+                    f"{float(warm_geometry_attrs['relax_source_objective_total']):.6e} "
+                    f"on its own")
             return
         _rec = float(warm_attrs["objective_total"])
         _gap = handoff_gap(_rec, first_total)

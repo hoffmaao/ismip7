@@ -6,7 +6,7 @@
 # cluster's site file:
 #   antarctica/scripts/batch_runners/submit.sh inversion \
 #     ISMIP7_LC=2000 ISMIP7_LC_COARSE=5000 ISMIP7_BUFFER_M=0 \
-#     ISMIP7_MESH=... ISMIP7_RASTER_SAMPLE=vertex ISMIP7_MAP_OUT=...
+#     ISMIP7_MESH=... ISMIP7_RASTER_SAMPLE=vertex_front ISMIP7_MAP_OUT=...
 #
 # CHAIN. A 2 km inversion can outlast a wall limit. The inversion checkpoints
 # ISMIP7_MAP_OUT every ISMIP7_CHECKPOINT_EVERY_IT iterates (default 1) and can
@@ -67,7 +67,7 @@ export ISMIP7_MAXITER="${ISMIP7_MAXITER:-200}"
 # A chain link must continue the SAME objective from the accepted iterate
 # (icepack2_tools.handoff); a link that would change it refuses.
 export ISMIP7_WARM_START_STRICT="${ISMIP7_WARM_START_STRICT:-1}"
-export ISMIP7_RASTER_SAMPLE="${ISMIP7_RASTER_SAMPLE:-vertex}"
+export ISMIP7_RASTER_SAMPLE="${ISMIP7_RASTER_SAMPLE:-vertex_front}"
 # Name the output explicitly: without it every run, including a smoke test,
 # writes the production filename and can silently replace a converged map.
 # ISMIP7_MAP_DEFAULT is named from the law, so ISMIP7_FRICTION=budd writes a
@@ -124,6 +124,11 @@ if [ -f "$ISMIP7_MAP_OUT" ]; then
     # inherits that 0 through --export=ALL; here it is held to the one
     # objective the chain has been minimising.
     export ISMIP7_WARM_START_STRICT=1
+    # A first link's fluidity and state from another MAP
+    # (ISMIP7_WARM_START_FLUIDITY, ISMIP7_WARM_START_STATE) seed the chain
+    # once; a resumed link takes the fluidity, geometry and state of its own
+    # checkpoint.
+    unset ISMIP7_WARM_START_FLUIDITY ISMIP7_WARM_START_STATE
     echo "chain: warm-starting theta/phi from the periodic checkpoint $ISMIP7_MAP_OUT (strict handoff)"
 fi
 

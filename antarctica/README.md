@@ -47,7 +47,7 @@ own venv and call it by absolute path.
 | Ocean OI climatology and IMBIE basin numbers | 3 GB | `scripts/download_forcing.py --ocean --calibration` | | x | | |
 | Whole AIS tree (all ESMs, scenarios, `ctrl`, OCX, calibration) | 313 GB | same | | | | |
 | Meshes and MAP checkpoints | 15 MB, 80 MB | sections 3 and 4, or from a colleague | | x | x | |
-| Melt calibration `calibration/deltaT_per_basin_1000_K6.500e-05.npz` | 8 kB | tracked in git (section 5) | | x | | |
+| Melt calibration `calibration/deltaT_per_basin_1000_K6.500e-05_vertex_front.npz` (`vertex` sampling: `deltaT_per_basin_1000_K6.500e-05.npz`) | 8 kB | tracked in git (section 5) | | x | | |
 
 Source Cooperative carries the data-freeze copy and needs no account.
 
@@ -844,8 +844,15 @@ weight, and `log_vel_weight` is the last link's.
 ### The calibration every run reads
 
 A run melts with one K and a thermal-forcing offset per IMBIE basin, the
-protocol's recommendation, from a tracked file,
-`calibration/deltaT_per_basin_1000_K6.500e-05.npz`:
+protocol's recommendation, from the tracked file fitted under its raster
+sampling (`runconfig.MELT_CALIBRATIONS`). The default sampling,
+`vertex_front`, reads
+`calibration/deltaT_per_basin_1000_K6.500e-05_vertex_front.npz` (issue #167,
+run record `calibration-melt-1km-vertex-front`): the same K, with the offsets
+refitted on the same mesh under the front-cell rule, whose melt-receiving
+area is 2.4 % smaller there; they run from -0.72 K to +1.22 K. `vertex`
+sampling reads `calibration/deltaT_per_basin_1000_K6.500e-05.npz`, the file
+the table describes:
 
 | | |
 |---|---|
@@ -859,7 +866,7 @@ calibrated or copied. The offsets are stamped onto any mesh through the
 IMBIE2 8 km basin grid under `ISMIP7_DATA_ROOT`. A fit records its inputs in
 the npz by basename (`obs_csv`, `imbie2_nc`, `inversion`;
 `calibrate_melt.input_names`), and the grid is found by that name under the
-data root. The tracked file predates that and still names three paths on IU
+data root. The `vertex` file predates that and still names three paths on IU
 Quartz; replacing it is open (issue #150).
 
 The forward applies the melt the file was fitted to:
@@ -1410,18 +1417,82 @@ Record each completed core with `python scripts/core_report.py --core <N>
 projection), run in that run's own shell so it captures the environment.
 `--superseded "<reason>"` stamps a record when a later run replaces it.
 
+### The relaxed initial state (`scripts/relaxation/run.py`)
+
+An initial-state option beside the production MAP. The relaxation year rewinds
+a MAP's geometry to 2014 with one year of the Smith dH/dt (the issue #117
+backdating), runs it to 2015.0 at half the production step on OCX's 2014
+forcing, with the apparent mass balance off and the front pinned, and an
+inversion of 250 iterations re-fits the controls on the geometry it ends in.
+The forwards then point `ISMIP7_INVERSION` at the relaxed MAP and start in
+2003 as from any MAP. The rules are in `icepack2_tools/relaxation.py`, the
+reasoning in `INVERSION_PRIORS.md` ("The relaxed re-inversion").
+
+```bash
+R=antarctica/scripts/batch_runners/submit.sh
+MAP=$PWD/antarctica/results/reinvert_2km/final/<production MAP>.h5
+SIZE="ISMIP7_FRICTION=<the MAP's law> ISMIP7_LC=2000 ISMIP7_LC_COARSE=5000 ISMIP7_MESH=checkpoint"
+# the year, on the MAP's own mesh: results/relax_<MAP stem>_2000_final.h5
+relax=$($R projection --time <the whole year> ISMIP7_EXPERIMENT=relax ISMIP7_INVERSION=$MAP $SIZE | tail -n 1)
+# the re-inversion from it, once it has finished
+$R inversion --dependency afterok:${relax%%;*} --time <one link> $SIZE \
+    ISMIP7_RASTER_SAMPLE=<the MAP's raster_sample> \
+    ISMIP7_WARM_START=$PWD/antarctica/results/relax_<MAP stem>_2000_final.h5 \
+    ISMIP7_MAXITER=250 ISMIP7_CHAIN_MAX=0 \
+    ISMIP7_MAP_OUT=$PWD/antarctica/results/reinvert_2km/final/<MAP stem>_relax2014.h5
+```
+
+The re-inversion's objective settings come from the end state, which carries
+the MAP's, and the strict handoff check holds them; give the run the
+inversion knobs the MAP was made under, as for any chain link. That includes
+`ISMIP7_RASTER_SAMPLE`, which `inversion.sbatch` sets to `vertex_front` unless
+told otherwise: the sampling is an objective key, and the end state's geometry
+was built under the MAP's recorded `raster_sample` (`vertex` for every MAP
+inverted before issue #167), which the end state carries. Size `--time`
+for one link from the MAP chain's own seconds per evaluation (about 260
+evaluations for 250 iterations): `ISMIP7_MAXITER` counts per process, so a
+second link would start a second 250. Give the relaxation's own submission a
+`--time` that covers the whole year in one link: `afterok` waits on its first
+link alone, and a re-inversion started on an unfinished end state is refused.
+At 2 km the year's first solve from IU's final MAPs diverged under
+`projection.sbatch`'s `scpc_gamg` (runlog
+`inversion-2km-{budd,rc}-b20k-relax2014-year`); the relaxations queued on
+8 October add `ISMIP7_MAP_CLIP=0` and set `ISMIP7_DIAGNOSTIC_LINEAR_SOLVER`
+to `scpc_mumps` for Budd (80 steps in 48 min) and `full_mumps` for RC, whose
+`scpc_mumps` solves took 36 to 84 Newton iterations at up to 34 min a step.
+A year longer than one link chains at the wall, so the re-inversion waits on
+the year reaching 2015 (a trigger job) rather than on `afterok` of its first
+link.
+
+What each forward does with a relaxed MAP, recorded as `init_state` in every
+checkpoint it writes:
+
+| forward | geometry | controls | `init_state` |
+|---|---|---|---|
+| on the MAP's mesh | the relaxed geometry | the re-inverted ones | `relaxed` |
+| on another mesh (1 km from a 2 km MAP) | that mesh's BedMachine sample | the re-inverted ones, transferred | `relaxed-controls` |
+
+Either way the 2003 start backdates the geometry it starts from by 12 years.
+The relaxed thickness stays on the MAP's mesh: carried across meshes it would
+arrive as a DG0 staircase, which `../ADAPTIVE_MESH.md` measured driving the
+thickness clamp from 119,000 to 256,000 Gt/yr within a few steps.
+
 ### Environment knobs (inversion)
 
 | Env var | Meaning | Default |
 |---------|---------|---------|
-| `ISMIP7_MAP_OUT` | output path for the MAP, overriding the generated name. Use it for smoke tests and variants so a short run cannot replace a production MAP. A bare filename resolves under `mesh/` | generated |
+| `ISMIP7_MAP_OUT` | output path for the MAP, overriding the generated name. Use it for smoke tests and variants so a short run cannot replace a production MAP. A bare filename resolves under `mesh/`. A re-inversion from a relaxation's end state writes `<MAP stem>_relax<year>.h5` and stops under any other name | generated |
 | `ISMIP7_MISFIT_NORM` | `sigma` divides each residual by its datum's squared error, giving a dimensionless chi^2; `none` is the legacy dimensional misfit. Selects the `ISMIP7_GAMMA_*` defaults | `sigma` |
 | `ISMIP7_LOG_VEL_WEIGHT` | weight on the ISSM logarithmic velocity misfit (cost function 103). The chi^2 alone over-weights slow interior ice and leaves discharge-carrying tributaries 40 to 50% too slow; the log term is scale free. `auto` equalises it with the chi^2 term at the state the inversion starts from, and under `auto` a warm start that records a positive weight under the same `ISMIP7_MISFIT_NORM` and `ISMIP7_LOG_VEL_EPS` supplies that weight, so every link of a chain minimises one objective (issue 68). Stamped into the MAP with `log_vel_weight_source`: `requested`, `derived` or `warm_start` | `0` |
 | `ISMIP7_LOG_VEL_EPS` | regularisation speed (m/yr) inside the log | `1.0` |
-| `ISMIP7_WARM_START` | path to a MAP or timing-cache checkpoint used to seed `theta`/`phi` (and, when present, geometry, `fluidity_prior`, and the mixed diagnostic state). Fields are interpolated onto the live mesh, so a 1-core cache can warm-start a multi-rank invert | unset |
+| `ISMIP7_WARM_START` | path to a MAP or timing-cache checkpoint used to seed `theta`/`phi` (and, when present, geometry, `fluidity_prior`, and the mixed diagnostic state). Fields are interpolated onto the live mesh, so a 1-core cache can warm-start a multi-rank invert. A relaxation's end state (`results/relax_*_final.h5`) is a warm start too: the run takes its geometry and keeps its `θ`, holds the MAP objective it carries, logs how far the relaxed geometry moved the friction anchor, and stamps the relaxed geometry's record into every checkpoint; it stops unless the state finished its year on this mesh and `ISMIP7_MAP_OUT` ends in `<MAP stem>_relax<year>.h5` | unset |
 | `ISMIP7_WARM_START_THETA` | how `θ` comes over from the warm start. `θ` is a log-deviation from the friction anchor, so under a different anchor (`ISMIP7_ANCHOR_LENGTH`) the same `θ` is a different friction. `1` takes it as it is and warns when the anchors differ; `physical` rebases it on grounded ice so the friction `C_w0 exp(θ)` is the warm start's and the first solve reproduces the warm start's (from an exp-control MAP the previous anchor is its constant `friction_c_ref`); `0` starts at the new prior mean | `1` |
 | `ISMIP7_WARM_START_PHI` | how `φ` comes over from the warm start. `1` takes it as it is, a deviation from this run's own fluidity prior; `physical` rebases it onto this run's prior (`ISMIP7_FLUIDITY_PRIOR`) so `A = A_prior exp(φ)` is the warm start's, e.g. a thermal-prior MAP warm-starting a Pattyn-prior run; `0` starts at the prior mean | `1` |
-| `ISMIP7_WARM_START_GEOMETRY` | `1` takes thickness, bed, surface, `velocity_obs` and the mixed state from the warm start; `0` keeps this mesh's own BedMachine sample. Defaults to `1` on the same mesh, except that a MAP recording a different `lake_ice_base` does not supply its geometry, so an old MAP cannot bring the lake bowl back | `1` on the same mesh, else `0` |
+| `ISMIP7_WARM_START_GEOMETRY` | `1` takes thickness, bed, surface, `velocity_obs` and the mixed state from the warm start; `0` keeps this mesh's own BedMachine sample. Defaults to `1` on the same mesh, except that a MAP recording a different `lake_ice_base` or `raster_sample` does not supply its geometry, so an old MAP cannot bring the lake bowl back. `1` on a warm start recording another `raster_sample` stops the run: set `ISMIP7_RASTER_SAMPLE` to the warm start's | `1` on the same mesh, else `0` |
+| `ISMIP7_WARM_START_STATE` | `1` loads the warm start's mixed state on its own mesh as the first guess when its geometry is not taken (a warm start sampled another way, issue #167), and the first evaluation's forward solves it at the full exponents instead of a cold ramp from n = 1. For RC's refit under `vertex_front` it did not work: from the ef2 state the residual norm started at 1.7e14 against the recorded 9.3e-3 and the first forward solve failed (jobs 11883148 and 11883149). `fluidity` loads instead the state of the MAP `ISMIP7_WARM_START_FLUIDITY` names, solved under the fluidity the run starts from, on that MAP's own mesh. RC's refit starts so, from Budd's refit: under Budd's fluidity RC's ef2 state started at ||F|| 2.5e21 and failed (job 11884749), Budd's state at 6.3e9, and its first forward solve converged in 75 Newton iterations (job 11884774). Refused on another mesh (`runconfig.warm_start_state`). A chain link resuming its own checkpoint drops it (`inversion.sbatch`) | `0` |
+| `ISMIP7_WARM_START_FLUIDITY` | Path to another MAP: an inversion warm-started from `ISMIP7_WARM_START` takes `log_fluidity` and the `fluidity_prior` it deviates from out of this one, so the starting fluidity `A_prior exp(phi)` is that MAP's; `log_friction` and the state stay the warm start's. Fluidity does not depend on the friction law: RC's refit under the front-cell rule starts from the fluidity of Budd's refit on the same geometry (the two MAPs' fluidity priors agree to 6e-9; issue #167). The MAP's `fluidity_control` must match the run's. A chain link resuming its own checkpoint drops it (`inversion.sbatch`) | unset |
+| `ISMIP7_WARM_START_FRONT_EXTEND` | `1`: a refit under a front sampling from a warm start sampled without it continues `log_friction` and `log_fluidity` harmonically over the nodes of the cells the front rule rebuilt or emptied (`geometry.front_changed_nodes`, `transfer.harmonic_extension`), and the refit sets them afresh. Every other node keeps the warm start's value, so over the band each becomes a harmonic blend of the ice upstream and the nodes seaward of the band; on a synthetic shelf the band came out as the linear interpolation between the two sides. The warm start fitted them against its own front: RC's final MAP left a band stiffer and with more friction than the rest of the ice (log fluidity -1.33 against -0.17, log friction +1.06 against -0.02), and the rule makes those cells about four times thicker (issue #167). On RC's refit it left the start worse: from the ef2 state as the first guess the residual began at ||F|| 4.1e14 with the band continued over 33,872 nodes, against 1.7e14 without it, and the first forward solve failed (job 11884485). That measurement includes the blend with the seaward nodes. RC's refit starts from the fluidity and state of Budd's refit (`ISMIP7_WARM_START_FLUIDITY`, `ISMIP7_WARM_START_STATE=fluidity`); Budd's refit started from its own controls. A `log_fluidity` taken from a MAP fitted under a front sampling (`ISMIP7_WARM_START_FLUIDITY`) is kept, and only `log_friction` is continued. The band is found by comparing this run's thickness with a vertex sample, so the warm start must be sampled with `vertex`; one sampled any other way (`cell_mean`, say) would flag interior cells and stops the run (`runconfig.front_band_extends`). The knob stays for a refit whose band is what blocks it | `0` |
+| `ISMIP7_RAMP_SLIDE_FIXED` | `1` holds the sliding exponent at its target while the inversion's startup ramp climbs the flow exponent from 1 (`continuation.ramp_exponents`, `m_start`). IU tried it for RC's refit under `vertex_front` on the 2 km mesh (issue #167) and stopped it as too costly: after 2 h 29 min (job 11884073) the ramp stood at n = 1.13, its first step having taken three rungs (37, 34 and 30 min), and under `scpc_gamg` (job 11884074) its first linear solve failed as at n = m = 1. The refit starts from the fluidity and state of Budd's refit instead (`ISMIP7_WARM_START_FLUIDITY`, `ISMIP7_WARM_START_STATE=fluidity`). The ramp from n = m = 1 failed there: under full MUMPS (job 11869835) Newton ran 200 iterations at n = m = 1 in each of three rungs and diverged (residual norm 3.0e11 to 5.3e11), and under `scpc_gamg` and `scpc_mumps` (jobs 11883518 and 11883519) the first linear solve at n = m = 1 failed (1,000 Krylov iterations from a residual norm of 8.9e9) | `0` |
 | `ISMIP7_ANCHOR_LENGTH` | reach (m) of the driving stress in the friction anchor `C_w0 = tau / max(|u_obs|, 1)^(1/m)`, the prior mean of the friction. `0` is the local balance, which vanishes with the surface slope and leaves ice divides with no friction in the prior. A positive length averages the driving-stress magnitude of the grounded ice over about that distance (a screened-Poisson filter with the second moment of a Gaussian of that standard deviation), so floating and ice-free cells neither add to nor dilute it. Stamped into the MAP as `friction_anchor_length`; a forward rebuilds the anchor from the MAP's value and aborts if this variable says otherwise | `0` |
 | `ISMIP7_TRANSFER_FILL` | what the controls and the fluidity prior take on the dofs of the compute mesh beyond the mesh they were read from: a forward loading a MAP from another mesh, and an inversion's warm start. `extend` continues θ, φ and α harmonically from the source outline and the fluidity prior through its logarithm (`icepack2_tools/transfer.py`, `harmonic_extension`), so the bi-Laplacian prior pays almost nothing at the outline; `constant` fills θ = φ = 0 and the baseline prior `A0 * a4_factor`. Under `constant`, Rice's 2 km Budd MAP after stage 1 of issue #153 started on the 20 km buffered mesh at a smoothness cost of 1.46e5, against the 2.9e3 its last iterate recorded. A MAP records the mode of its warm start as `warm_start_fill` | `extend` |
 | `ISMIP7_DRAG_GATE` | which water cells beside the ice the floor-cell ocean drag skips (`front.ocean_drag_cells`), in the inversion and the forward. `vertex` skips every cell touching the ice, at an edge or at one vertex; `facet` skips only those sharing an edge, so a cell touching the ice at one vertex drags the ice's own front node. On the 20 km buffered 2 km mesh RC's stage-1 controls gave floating ice 27 % below the observed speed under `facet`, 11 % under `vertex`, 2 % with `vertex` and a 1 m membrane floor, and 1 % with the drag off (issue #153). The MAP records `drag_gate` (`none` when no cell was dragged), and a forward runs the recorded gate and refuses a different one here; a MAP recording none, or older than the record, runs this knob, and a forward state older than the record restarts under `facet` unless it is set | `vertex` |
@@ -1476,8 +1547,9 @@ redeclare those literals.
 |---------|---------|---------|
 | `ISMIP7_LC` / `ISMIP7_LC_COARSE` | fine and coarse mesh resolution tags, selecting mesh and MAP | `1000` / `10000`, the production pair (`2500` / `64000` until 2026-09-19) |
 | `ISMIP7_BUFFER_M` | outline buffer (m) the mesh is built with and named by (`runconfig.BUFFER_M_DEFAULT`, which the outline extraction and the mesh and sidecar names all read) | `20000` |
+| `ISMIP7_MESH_FRONT` | the ice edge whose marine front the production mesh's nodes follow. `bm` names the `_frontbm` build (`mesh_antarctica.py --front bm`), whose nodes and edges lie on BedMachine's marine front with lc-sized cells along it; built and measured for issue #167 and kept as an option, since under `vertex_front` it carries the current meshes' front flux within 3 % at 6 % (2 km) and 8 % (1 km) more cells (run records `test-i167-frontbm-meshes`, `test-i167-front-probes`). Adaptation refuses a front mesh | `none` |
 | `ISMIP7_MESH` | mesh path for the inversion and tools. A forward takes its mesh from the checkpoint unless this names another mesh, in which case the MAP is transferred onto it; a file with the checkpoint mesh's name and another triangulation is refused (`ISMIP7_MESH_BUILD_CHECK`). `checkpoint` means the mesh embedded in the MAP or restart file: `site_env.sh` always exports a derived path, so this is how a job submitted through `submit.sh projection` runs MAP-native. For the inversion, `checkpoint` is the mesh inside `ISMIP7_WARM_START`, under the `mesh_basename` that file records, so a MAP released without its .msh can be continued on its own mesh. Its recorded `lc`, `lc_coarse` and `buffer_m`, or values derived from a standard basename, supply the output MAP and timing provenance and the derived output names. A contradiction or incomplete mesh identity is refused | `mesh/antarctica_<COARSE>_<LC>_buffered<BUFFER_M>.msh` |
-| `ISMIP7_RASTER_SAMPLE` | how BedMachine lands on a DG0 cell. `vertex` projects the CG1 vertex interpolant; `cell_mean` takes the raster's true cell mean. `cell_mean` measured rougher: neighbouring cells share two of three vertex samples, so `vertex` damps jumps by construction. Cell means raised interior surface jumps 6% and bed and thickness jumps 35%, and at 2 km the momentum solve did not converge within 60 minutes. It does classify flotation better (32 km misclassification 9.1% to 3.2%), so the knob stays. Stamped into the MAP and read back by the forward. Reproduce with `probe_raster_sampling.py` | `vertex` |
+| `ISMIP7_RASTER_SAMPLE` | how BedMachine lands on a DG0 cell. `vertex_front` (issue #167) is `vertex` with the marine front rebuilt from BedMachine's mask (`geometry.front_cells`): a cell holds ice when half its samples are BedMachine ice, an ice-free cell holding ocean is emptied, and the ice cells beside it take BedMachine's mean thickness and bed over their ice. Under `vertex` alone the cells the front crosses hold a fraction of the front's thickness on a buffered mesh (2 km front band 39.5 m against BedMachine's 163 m, 179 against 998 Gt/yr out of the front under `velocity_obs`). `vertex` projects the CG1 vertex interpolant; `cell_mean` takes the raster's true cell mean. `cell_mean` measured rougher: neighbouring cells share two of three vertex samples, so `vertex` damps jumps by construction. Cell means raised interior surface jumps 6% and bed and thickness jumps 35%, and at 2 km the momentum solve did not converge within 60 minutes. It does classify flotation better (32 km misclassification 9.1% to 3.2%), so the knob stays. Stamped into the MAP and read back by a forward on the MAP's mesh; a transfer rebuilds under the run's own. Each sampling melts with the calibration fitted under it (`runconfig.MELT_CALIBRATIONS`). Reproduce with `probe_raster_sampling.py` and `probe_front_cells.py` | `vertex_front` |
 | `ISMIP7_INVERSION` | explicit MAP path for a forward or preflight. The forward checks the MAP's recorded `friction`, `n_flow` and `geometry_space` against the run and aborts on a mismatch, warning only when the MAP predates those attributes; `preflight.py` checks that the file exists. Use it to A/B MAPs on one mesh, or, with `ISMIP7_MESH` also set (the timing matrix, `make map-check`), to run a MAP on a different mesh: its continuous fields are then interpolated onto `ISMIP7_MESH` by strict point location (`icepack2_tools/transfer.py`), and a target dof outside the MAP's outline takes a stated fill (0 for the log controls, the constant baseline for the fluidity prior, the raster sample for `velocity_obs`), counted and printed as `Transfer fill:` lines (`MAP_CHECK.md`) | derived |
 | `ISMIP7_MAP_CLIP` | bound on the absolute value of a MAP's log controls: a forward clips theta and phi to it when it loads a MAP and prints the count as `MAP clip:`, and an inversion clips its warm start's theta to it. `0` disables it. Forwards from IU's final 2 km MAPs (the exact_front version 2 Budd and RC MAPs on the 20 km buffered mesh, issues #153 and #166) run `0`, with `ISMIP7_DIAGNOSTIC_LINEAR_SOLVER` `scpc_mumps` for Budd and `full_mumps` for RC, passed at submission, so the forward runs the controls the inversion fitted: RC's theta reaches 13.0, and 856 floating nodes of Budd's phi lie beyond 10. From Budd's version 1 final, `scpc_gamg` diverged under the clip from a backdated geometry, and without the backdate its step took about 25 times as long as one under `scpc_mumps`; from RC's version 2 final, `scpc_mumps` took 36 to 84 Newton iterations a solve and 13 to 34 min a step (run record `test-2km-budd-b20k-final-forward-diagnostics`). IU expects the regularization to set the solver a MAP needs, so Rice's more strongly regularized MAPs may run `scpc_mumps` or `scpc_gamg`; this is untested, and the membrane floor also moves the start-up cost (a 1 m floor cold start from RC's stage 2 MAP took 4.8 h under `scpc_gamg`, `test-2km-rc-b20k-vgate-floor1`) | `10`, or `6` at `ISMIP7_N_FLOW=4` |
 | `ISMIP7_CALVING` | `none`, or a law in `icepack_tools.calving`: `fixed`, `velocity`, `thickness`, `vonmises`, `vonmises_strain`, `hfb` (see above) | `none` |
@@ -1494,6 +1566,7 @@ redeclare those literals.
 | `ISMIP7_OBS_DATA_ROOT` | BedMachine, MEaSUREs velocity, RACMO and the dH/dt cache observational-data root; name it in a site file when these files do not live beside the code. Also a write target: with the MIPkit present `obs_dhdt` builds `<root>/dhdt_cache/` here, so staged cache tifs belong under this root, wherever it points | `<repo>/antarctica/data` |
 | `ISMIP7_T_END` / `ISMIP7_DT` | end time and timestep (yr). `t=Y.0` is 1 January of year Y, so a run covering 2015 to 2300 ends at `2301` and a historical covering 2003 to 2014 ends at `2015`. Each driver owns its end (historical `2015`, ssp370 `2101`, other projections and control `2301`, OCX `2026`). The step defaults to `runconfig.DT_DEFAULT`, the production step, which `projection.sbatch` also exports | driver's own / `0.025` |
 | `ISMIP7_GEOMETRY_BACKDATE` | years of the Smith et al. (2020) mean dH/dt a cold start undoes on grounded ice before it runs (issue #117). Unset: `2015 - ISMIP7_T_START` for a start from 2003 up to 2015 (the historicals and OCX start in 2003), none from 2015 on, and a start before 2003 is refused. The friction anchors stay on the 2015 geometry; floating ice keeps its 2015 thickness. `0` turns it off | driver's start |
+| `ISMIP7_RELAX_START` / `ISMIP7_RELAX_DT` / `ISMIP7_RELAX_FORCING` | the relaxation year of the relaxed initial state (`scripts/relaxation/run.py`): its start (from 2003, before 2015), its step, which has to divide the year, and its forcing, `ocx` (OCX's own for the year, as `ISMIP7_OCX_FORCING` selects) or `none` (no SMB or melt, a smoke test needing no forcing data). It refuses `ISMIP7_APPARENT_MB`, `ISMIP7_OUTPUT=1`, a calving law and an unpinned front, and `projection.sbatch` defaults the first two off for it | `2014` / half of `ISMIP7_DT` / `ocx` |
 | `ISMIP7_FRICTION` | `budd`, `regularized_coulomb` or `budd_legacy`; selects the MAP. The set is closed, so a misspelling is rejected at startup | `budd` |
 | `ISMIP7_OUTPUT_INTERVAL` | budget log line every N steps; the timeseries gets a row every step | `10` |
 | `ISMIP7_CHECKPOINT_EVERY_YR` / `ISMIP7_KEEP_CHECKPOINTS` | checkpoint cadence in model years, and how many to keep besides `_final.h5` | `5` / `3` |
@@ -1525,7 +1598,7 @@ redeclare those literals.
 | `ISMIP7_TRANSPORT_KSP_RTOL` / `ISMIP7_TRANSPORT_KSP_MAXIT` | GMRES relative tolerance / iteration limit for the persistent DG0 transport solver (`ismip7_transport_` PETSc prefix) | `1e-10` / `500` |
 | `ISMIP7_MASS_RESIDUAL_TOL_GT` | fail-loud absolute tolerance for both the discrete transport identity and the complete step mass budget | `5e-5` Gt |
 | `ISMIP7_RESCUE_ENABLED` | permit a failed direct transient diagnostic solve to enter the continuation/trust-region/subcycle rescue ladder; set to `0` for strict timestep qualification | `1` |
-| `ISMIP7_DELTAT_PER_BASIN_NPZ` | the melt calibration, one K and a TF offset per basin (`select_melt_parameters.py`, `calibrate_deltaT.py`); every ocean callback melts with its K. Refused with `ISMIP7_K_SCALE` other than 1, and when fitted under another slope or geometry than the run's (section 5) | `calibration/deltaT_per_basin_1000_K6.500e-05.npz` |
+| `ISMIP7_DELTAT_PER_BASIN_NPZ` | the melt calibration, one K and a TF offset per basin (`select_melt_parameters.py`, `calibrate_deltaT.py`); every ocean callback melts with its K. Refused with `ISMIP7_K_SCALE` other than 1, and when fitted under another slope or geometry than the run's (section 5) | the tracked file of the run's raster sampling (`runconfig.MELT_CALIBRATIONS`), `calibration/deltaT_per_basin_1000_K6.500e-05_vertex_front.npz` under the default |
 | `ISMIP7_K_PER_BASIN_NPZ` | a legacy per-basin K file from `calibrate_melt.py`, read in place of the offsets; refused together with `ISMIP7_DELTAT_PER_BASIN_NPZ` | unset |
 | `ISMIP7_K_SCALE` | multiplies a legacy per-basin K; refused with an offsets file | `1` |
 | `ISMIP7_K_MELT` | removed with the tracked calibration, and refused when exported | |

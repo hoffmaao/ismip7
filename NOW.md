@@ -10,7 +10,7 @@ is an index.
 **Claim the card before you start a run or an inversion.** A card in
 Claimed for more than 24 hours with no comment reads as unclaimed.
 
-Generated: 2026-10-07 15:24 UTC. 10 blocking, 7 owed, 1 after the deadline, 4 unverified.
+Generated: 2026-10-08 15:58 UTC. 11 blocking, 7 owed, 1 after the deadline, 4 unverified.
 
 ## Blocking the submission
 
@@ -23,6 +23,7 @@ Decisions first: they have the longest lead time and they gate the runs.
 | [38](https://github.com/icepack/ismip7/issues/38) | submission: settle the contributor names, date, source_id, ism_id and PPE participation | needs-decision | group | group | unverifiable-run |
 | [39](https://github.com/icepack/ismip7/issues/39) | submission: request the Globus upload folder | needs-decision | group | group | unverifiable-run |
 | [104](https://github.com/icepack/ismip7/issues/104) | initialisation: whether the production runs keep the apparent mass-balance reference (ISMIP7_APPARENT_MB) is an open decision | needs-decision | group | n/a | verified open |
+| [167](https://github.com/icepack/ismip7/issues/167) | front: on a buffered mesh the DG0 front cells hold a third of the front's thickness, and the front carries 343 of about 1,200 Gt/yr | needs-decision | group | n/a | verified open |
 | [11](https://github.com/icepack/ismip7/issues/11) | melt: run check_melt_bound.py --ocx before core 11 runs on the OCX product | needs-run | iu | quartz, nots, midway | fresh, unverified by design |
 | [13](https://github.com/icepack/ismip7/issues/13) | output: run ismip7-scalar-processing for sla20, slg20 and slvaf | needs-run | iu | local | fresh, unverified by design |
 | [24](https://github.com/icepack/ismip7/issues/24) | MAP: 2 km RC and Budd inversions running at Rice under the new prior metric | needs-run | rice | nots | fresh, unverified by design |
@@ -52,6 +53,7 @@ Work in flight. Do not duplicate it.
 | [24](https://github.com/icepack/ismip7/issues/24) | MAP: 2 km RC and Budd inversions running at Rice under the new prior metric | rice | nots | 2026-09-26 |
 | [153](https://github.com/icepack/ismip7/issues/153) | MAP: IU re-inversion of the 2 km Budd and RC MAPs without the prior mean, then on the 20 km buffered mesh | iu | n/a | 2026-10-03 |
 | [162](https://github.com/icepack/ismip7/issues/162) | MAP: relaxed initial state for IU's final 2 km MAPs (one forward year, then 250 iterations) | iu | n/a | 2026-10-06 |
+| [166](https://github.com/icepack/ismip7/issues/166) | momentum: ice against rock rising above its surface gets the free-cliff push under ISMIP7_EXACT_FRONT | iu | n/a | 2026-10-07 |
 
 ## Unverified
 

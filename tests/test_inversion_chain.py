@@ -48,6 +48,8 @@ if "ISMIP7_WARM_START" in os.environ:
         print(f"driver: warm_start_content={fh.read().strip()}")
 print(f"driver: maxiter={os.environ['ISMIP7_MAXITER']}")
 print(f"driver: strict={os.environ.get('ISMIP7_WARM_START_STRICT', 'unset')}")
+print(f"driver: fluidity={os.environ.get('ISMIP7_WARM_START_FLUIDITY', 'unset')}")
+print(f"driver: state={os.environ.get('ISMIP7_WARM_START_STATE', 'unset')}")
 
 die = os.environ.get("FAKE_DIE_AFTER", "")
 print("Optimization finished: CONVERGENCE: REL_REDUCTION_OF_F_<=_FACTR*EPSMCH")
@@ -253,6 +255,30 @@ def test_a_resumed_link_is_held_to_the_chain_s_objective(sandbox):
     assert rc == 0, log
     assert Path(_warm_start(log)).name == map_out(sandbox).name
     assert "driver: strict=1" in log
+
+
+def test_a_resumed_link_keeps_its_own_fluidity(sandbox):
+    r"""A first link may take its fluidity and state from another MAP
+    (ISMIP7_WARM_START_FLUIDITY, ISMIP7_WARM_START_STATE=fluidity, issue
+    #167); its successor inherits both knobs through --export=ALL, and
+    resuming the chain's own checkpoint it drops them, so the fluidity and
+    state the chain has fitted are the ones it continues from."""
+    rc_map, budd = sandbox / "rc_2km.h5", sandbox / "budd_2km.h5"
+    rc_map.write_text("checkpoint\n")
+    budd.write_text("checkpoint\n")
+    env = dict(ISMIP7_WARM_START=str(rc_map), ISMIP7_WARM_START_STRICT="0",
+               ISMIP7_WARM_START_FLUIDITY=str(budd),
+               ISMIP7_WARM_START_STATE="fluidity")
+    rc, log, _ = run_job(sandbox, FAKE_DIE_AFTER="map_write", **env)
+    assert rc == 137, log
+    assert f"driver: fluidity={budd}" in log
+    assert "driver: state=fluidity" in log
+
+    rc, log, _ = run_job(sandbox, job_id="424244", **env)
+    assert rc == 0, log
+    assert Path(_warm_start(log)).name == map_out(sandbox).name
+    assert "driver: fluidity=unset" in log
+    assert "driver: state=unset" in log
 
 
 def _warm_start(log):

@@ -1,0 +1,27 @@
+{
+ "id": "test-1km-transfer-t0-vertex-front",
+ "task": "test",
+ "institution": "IU",
+ "status": "done",
+ "friction": "budd",
+ "title": "One OCX step on the 1 km production mesh from transferred MAPs under the front-cell rule (issue #167 acceptance)",
+ "mesh": "antarctica_10000_1000_buffered20000, Rice's build (1,869,252 vertices), DG0 geometry rebuilt from BedMachine on the target mesh",
+ "site": "IU Quartz, general partition",
+ "period": "2003.0 to 2003.025 (one step)",
+ "initial_state": "IU's Budd refit (inversion-2km-budd-b20k-ef2-vf) and Rice's Budd snapshot inversion_icepack2_budd_n3_dg0_logvelnet_2000_int5000_bilap_snap20260924_0948.h5, each transferred onto the 1 km mesh",
+ "forcing": "OCX protocol forcing (ISMIP7_EXPERIMENT=ocx), apparent MB at its default, front pinned",
+ "resources": "64 ranks, 400G, 2 h each; ISMIP7_DIAGNOSTIC_LINEAR_SOLVER=scpc_mumps, ISMIP7_MAP_CLIP=0 unless stated",
+ "jobs": [
+  "11878241",
+  "11883140",
+  "11883169",
+  "11883520"
+ ],
+ "code": "f910b3a (PR 163's gated head); Quartz worktree /N/scratch/dlilien/ismip7_reinvert_s16; cells accept_t0_1km_* of /N/scratch/dlilien/ismip7_reinvert_jobs/submit_reinvert.sh",
+ "started": "2026-10-08",
+ "finished": "2026-10-09",
+ "cost": "10 to 15 min of 64 ranks each",
+ "results": "logs in /N/scratch/dlilien/ismip7_reinvert_s16/logs/ismip7_fwd_<job>.out; front_flux_check.py on the Rice state (job 11883151) in /N/scratch/dlilien/ismip7_reinvert_jobs/probe/front/front_rice_vf.json",
+ "audit": "IU's refit (11883140): rebuilt under vertex_front (58,368 front cells rebuilt, 40,797 emptied), the initial continuation converged in 14 Newton iterations (95 s), the melt provenance line names the vertex_front calibration (sha256 2ef9fad4), apparent MB net +161 Gt/yr (a_ref in [-17,137, +34,605] m/yr), first step SMB +2430, melt -1049, front -1822, dM/dt -269, resid 0.00. Rice's Budd snapshot under vertex_front (11878241): the same rebuild and calibration, but apparent MB net +9,004 Gt/yr (a_ref up to +4.1e6 m/yr) and the front at -6,959 Gt/yr; its floating ice ran about three times the observed speed in every distance band (1,080 to 1,675 against 380 to 482 m/yr), 10,317 Gt/yr out of the front, and a land-margin node at (-2,276,604, 967,127) reached 1.5e7 m/yr. With the default clip (11883169, 14 nodes bounded) nothing changed (front -6,974). Under vertex sampling (11883520), with the vertex calibration (sha256 4f525009): apparent MB net -473 Gt/yr (a_ref in [-6,870, +3,918] m/yr), front -1,276, resid 0.00.",
+ "notes": "issue #167: a MAP fitted under the rule transfers cleanly; Rice's snapshot, fitted on its buffer-0 mesh where the front is the boundary, does not, and the front rule is what moves it. Rice's current MAPs were not run."
+}

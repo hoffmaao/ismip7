@@ -41,6 +41,11 @@ solves on `ISMIP7_MESH`: the continuous fields (`log_friction`,
 DG0 geometry is rebuilt from BedMachine cell averages on the target, and the
 frozen anchors (`N_ref`, `C_w0`, `phi_eff`, `H_init`) are rebuilt on the target
 geometry. That is the path the timing matrix's lanes take from the 2.5 km MAP.
+The rebuild follows the run's `ISMIP7_RASTER_SAMPLE`, `vertex_front` by
+default since issue #167, which rebuilds the marine front from BedMachine's
+mask (1 km front 178 m and 1,037 Gt/yr out of it under `velocity_obs`, where
+`vertex` gives 36 m and 179 Gt/yr), and the run melts with the calibration
+fitted under that sampling.
 
 The production mesh carries a 20 km ocean buffer and the 2 km MAPs carry none,
 so every target dof in that ring lies outside the source mesh. Firedrake's

@@ -44,6 +44,13 @@ LC_COARSE_DEFAULT = "10000"
 # mesh names defaulted to 20000, so a bare call could build an unbuffered mesh
 # under a buffered name.
 BUFFER_M_DEFAULT = "20000"
+# The ice edge whose marine front a buffered mesh's nodes and edges lie on
+# (the `_front<edge>` of naming.mesh_basename): "bm", BedMachine's own, or
+# "none" for a mesh that follows no front. Issue #167: on a mesh that does
+# not follow it, the front crosses cells, and vertex sampling gives them a
+# fraction of its thickness.
+MESH_FRONTS = ("none", "bm")
+MESH_FRONT_DEFAULT = "none"
 # The production forward step [yr], chosen with the mesh (issue 20). The timing
 # matrix's rule gives 0.05 at 1000 m. At 0.05 a 1 km control from a transferred
 # 2 km Budd MAP diverged in 2016.1 at Rice, and on Quartz it grew a two-step
@@ -76,6 +83,9 @@ BUDD_SHELF_GATE = "haf"
 # method name stable: it is stamped into cache provenance and changing the
 # construction must invalidate old caches.
 TARGET_MESH_GEOMETRY_METHOD = "target-native-bedmachine-cell-average-v1"
+# The same with BedMachine's front cells rebuilt (geometry.front_cells, issue
+# #167); target_mesh_geometry_method picks one by raster sampling.
+TARGET_MESH_GEOMETRY_METHOD_FRONT = "target-native-bedmachine-cell-average-front-v1"
 
 GEOMETRY_SPACES = ("dg0", "cg1")
 
@@ -87,9 +97,19 @@ GEOMETRY_SPACES = ("dg0", "cg1")
 #   cell_mean - the mean of the raster over the cell itself, sampled on an
 #               equal-area sub-triangle lattice at pixel density
 #               (geometry.raster_cell_mean).
+#   vertex_front - vertex, except that BedMachine's own mask decides which
+#               cells hold ice at the marine front, and the front cells take
+#               BedMachine's mean thickness and bed over their ice
+#               (geometry.front_cells, issue #167). Vertex sampling alone
+#               gives a cell the front crosses a fraction of the front's
+#               thickness: 40 m against 163 m on the 2 km buffered mesh, and
+#               a vertex on the front of a _frontbm mesh samples a blend.
 # MAPs record the method used; the forward reads it back from the MAP.
-RASTER_SAMPLES = ("vertex", "cell_mean")
-RASTER_SAMPLE_DEFAULT = "vertex"
+# vertex_front is the default since 8 October 2026 (IU, issue #167): IU's
+# final MAPs are refitted under it, and it has its own melt calibration.
+FRONT_RASTER_SAMPLES = ("vertex_front",)
+RASTER_SAMPLES = ("vertex", "cell_mean") + FRONT_RASTER_SAMPLES
+RASTER_SAMPLE_DEFAULT = "vertex_front"
 
 
 # Floor-cell coercivity drags of the dual-friction residual (dual_friction.py
@@ -208,6 +228,16 @@ def buffer_m():
     return float(os.environ.get("ISMIP7_BUFFER_M", BUFFER_M_DEFAULT))
 
 
+def mesh_front():
+    r"""``ISMIP7_MESH_FRONT``: the ice edge whose marine front the mesh
+    follows (``bm``), or None for ``none``."""
+    value = os.environ.get("ISMIP7_MESH_FRONT", MESH_FRONT_DEFAULT).strip().lower()
+    if value not in MESH_FRONTS:
+        raise ValueError(
+            f"ISMIP7_MESH_FRONT must be one of {MESH_FRONTS}, not {value!r}")
+    return None if value == "none" else value
+
+
 def geometry_space():
     r"""Discretization of h/s/b, ``'dg0'`` or ``'cg1'``. Validated here so
     every reader rejects the same set."""
@@ -221,8 +251,7 @@ def geometry_space():
 
 
 def raster_sample():
-    r"""How BedMachine is sampled onto a DG0 cell: ``'vertex'`` or
-    ``'cell_mean'``. See RASTER_SAMPLES."""
+    r"""How BedMachine is sampled onto a DG0 cell, one of RASTER_SAMPLES."""
     value = os.environ.get(
         "ISMIP7_RASTER_SAMPLE", RASTER_SAMPLE_DEFAULT).lower()
     if value not in RASTER_SAMPLES:
@@ -230,6 +259,216 @@ def raster_sample():
             f"ISMIP7_RASTER_SAMPLE must be one of {RASTER_SAMPLES}, got {value!r}"
         )
     return value
+
+
+def warm_start_geometry(*, same_mesh, same_lake, warm_sampling, run_sampling):
+    r"""Whether an inversion takes its warm start's thickness, bed and
+    surface. By default it does on the warm start's mesh when the warm start
+    was built with this run's lake_ice_base and raster sampling;
+    ``ISMIP7_WARM_START_GEOMETRY=0/1`` overrides that. A taken geometry keeps
+    the sampling it was built with and the MAP records the run's
+    (``raster_sample``), so taking one sampled another way is refused."""
+    default = same_mesh and same_lake and warm_sampling == run_sampling
+    take = os.environ.get(
+        "ISMIP7_WARM_START_GEOMETRY", "1" if default else "0").strip() != "0"
+    if take and warm_sampling != run_sampling:
+        raise ValueError(
+            f"ISMIP7_WARM_START_GEOMETRY takes the geometry of a warm start "
+            f"that records raster_sample={warm_sampling}, and this run samples "
+            f"with {run_sampling}. A taken geometry keeps the sampling it was "
+            f"built with and the MAP records the run's: set "
+            f"ISMIP7_RASTER_SAMPLE={warm_sampling}.")
+    return take
+
+
+def warm_start_fluidity():
+    r"""``ISMIP7_WARM_START_FLUIDITY=<MAP>``: an inversion warm-started from
+    ``ISMIP7_WARM_START`` takes its log fluidity, and the fluidity prior it
+    is a deviation from, from this other MAP; theta and the state stay the
+    warm start's. Fluidity does not depend on the friction law, so RC's refit
+    under the front-cell rule can start from the fluidity Budd's refit fitted
+    on the same geometry (issue #167). None when unset; a chain link resuming
+    its own checkpoint drops it (inversion.sbatch)."""
+    path = os.environ.get("ISMIP7_WARM_START_FLUIDITY", "").strip()
+    if not path:
+        return None
+    if not os.path.isfile(path):
+        raise FileNotFoundError(f"ISMIP7_WARM_START_FLUIDITY={path}: no such file")
+    return path
+
+
+def warm_start_front_extend():
+    r"""``ISMIP7_WARM_START_FRONT_EXTEND=1``: a refit under a front sampling
+    from a warm start sampled without it continues theta and phi harmonically
+    over the cells the front rule rebuilt or emptied, and the inversion sets
+    them afresh there (issue #167). Every other node keeps the warm start's
+    value, so the band becomes a harmonic blend of the ice upstream and the
+    nodes seaward of it; on a synthetic shelf it came out as the linear
+    interpolation between the two sides. The warm start fitted them
+    against its own front: RC's final MAP left a band stiffer and with more
+    friction than the rest of the ice (log fluidity -1.33 against -0.17, log
+    friction +1.06 against -0.02), which the rule makes four times thicker.
+    A phi taken from a MAP fitted under a front sampling
+    (`warm_start_fluidity`) is kept. For RC's refit the continuation left the
+    start worse: from the ef2 state the residual began at ||F|| 4.1e14
+    against 1.7e14 without it, and the first forward solve failed (job
+    11884485, with the band blended between both sides as above); RC's
+    refit starts from Budd's fluidity and state instead. The band is found
+    by comparing this run's thickness with a vertex sample, so only a warm
+    start sampled with vertex is continued; `front_band_extends` refuses any
+    other sampling."""
+    return os.environ.get("ISMIP7_WARM_START_FRONT_EXTEND", "0").strip() not in ("", "0")
+
+
+def front_band_extends(*, same_mesh, geometry_taken, run_sampling, warm_sampling):
+    r"""Whether an inversion continues the front band
+    (`warm_start_front_extend`): the knob is on, this run's sampling is a
+    front sampling, and the warm start is on this mesh with its geometry not
+    taken. A warm start already sampled under a front sampling has no band.
+    The band is the cells where this run's thickness differs from a vertex
+    sample, so a warm start sampled any other way (cell_mean, say) would flag
+    interior cells too, and it is refused."""
+    if not (warm_start_front_extend() and raster_front(run_sampling)
+            and same_mesh and not geometry_taken):
+        return False
+    if raster_front(warm_sampling):
+        return False
+    base = raster_base_method(run_sampling)
+    if str(warm_sampling).lower() != base:
+        raise ValueError(
+            f"ISMIP7_WARM_START_FRONT_EXTEND=1 finds the front band by comparing "
+            f"this run's thickness with a {base} sample, and the warm start "
+            f"records raster_sample={warm_sampling}: that comparison would flag "
+            f"interior cells. Unset the knob or warm start from a {base} MAP.")
+    return True
+
+
+def front_band_controls(fluidity_sampling=None):
+    r"""The controls ``ISMIP7_WARM_START_FRONT_EXTEND`` continues over the
+    front band: theta, and phi unless it came from a MAP fitted under a front
+    sampling (``fluidity_sampling``, the raster sampling of the
+    ``ISMIP7_WARM_START_FLUIDITY`` MAP; None without one), whose phi already
+    belongs to the rule's front. Each is a harmonic blend over the band of
+    its values on the ice upstream and on the nodes seaward of the band,
+    which keep the warm start's values."""
+    if fluidity_sampling is not None and raster_front(fluidity_sampling):
+        return ("theta",)
+    return ("theta", "phi")
+
+
+def ramp_slide_fixed():
+    r"""``ISMIP7_RAMP_SLIDE_FIXED=1``: the inversion's startup ramp climbs the
+    flow exponent from 1 with the sliding exponent held at its target. RC's
+    refit under the front-cell rule on the 2 km mesh could not ramp from
+    n = m = 1: under full MUMPS (job 11869835) Newton ran 200 iterations at
+    n = m = 1 in each of three rungs and diverged (||F|| 3.0e11 to 5.3e11),
+    and under scpc_gamg and scpc_mumps (jobs 11883518 and 11883519) the
+    first linear solve at n = m = 1 failed (1,000 Krylov iterations from
+    ||F|| 8.9e9). IU tried this ramp there and stopped it as too costly:
+    after 2 h 29 min (job 11884073) it stood at n = 1.13, its first step
+    having taken three rungs (37, 34 and 30 min). The refit starts from the
+    fluidity and state of Budd's refit instead (``ISMIP7_WARM_START_FLUIDITY``,
+    ``ISMIP7_WARM_START_STATE=fluidity``; issue #167)."""
+    return os.environ.get("ISMIP7_RAMP_SLIDE_FIXED", "0").strip() not in ("", "0")
+
+
+def warm_start_state(*, geometry_taken, same_mesh):
+    r"""Whether an inversion loads its warm start's mixed state, and whether
+    it is only a first guess: ``(load, guess)``.
+
+    The state comes with a taken geometry (`warm_start_geometry`), as the
+    solution of the same equations. ``ISMIP7_WARM_START_STATE=1`` also loads
+    it on the warm start's own mesh when the geometry is not taken, as the
+    first guess on this run's geometry (a warm start sampled another way,
+    issue #167). The first evaluation's forward then solves it at the full
+    exponents. For RC's refit under vertex_front it did not work: from the
+    ef2 state the run started at ||F|| 1.7e14 against the recorded 9.3e-3
+    and the first forward solve failed (jobs 11883148 and 11883149). On
+    another mesh the knob is refused. ``ISMIP7_WARM_START_STATE=fluidity``
+    loads no state from the warm start: the first guess is the state of the
+    MAP ``ISMIP7_WARM_START_FLUIDITY`` names (`warm_start_state_fluidity`),
+    which is how RC's refit starts. A chain link resuming its own checkpoint
+    drops the knob (inversion.sbatch)."""
+    mode = os.environ.get("ISMIP7_WARM_START_STATE", "0").strip().lower()
+    if mode == "fluidity":
+        if warm_start_fluidity() is None:
+            raise ValueError(
+                "ISMIP7_WARM_START_STATE=fluidity takes the state of the MAP "
+                "ISMIP7_WARM_START_FLUIDITY names, and that is unset")
+        return False, False
+    if geometry_taken:
+        return True, False
+    want = mode not in ("", "0")
+    if want and not same_mesh:
+        raise ValueError(
+            "ISMIP7_WARM_START_STATE=1 loads the warm start's mixed state on "
+            "its own mesh as a first guess, and this run's mesh differs: unset "
+            "it.")
+    return want, want
+
+
+def warm_start_state_fluidity(*, same_mesh):
+    r"""``ISMIP7_WARM_START_STATE=fluidity``: the first guess is the mixed
+    state of the MAP ``ISMIP7_WARM_START_FLUIDITY`` names, the solution under
+    the fluidity this run starts from, on that MAP's own mesh only
+    (``same_mesh``). RC's refit under the front-cell rule takes the state of
+    Budd's refit with its fluidity: RC's own ef2 state started at ||F||
+    1.7e14 with RC's fluidity (job 11883148) and 2.5e21 with Budd's (job
+    11884749), its stresses balanced against the other fluidity
+    (issue #167)."""
+    if os.environ.get("ISMIP7_WARM_START_STATE", "0").strip().lower() != "fluidity":
+        return False
+    if not same_mesh:
+        raise ValueError(
+            "ISMIP7_WARM_START_STATE=fluidity loads the state of the "
+            "ISMIP7_WARM_START_FLUIDITY MAP on its own mesh, and this run's "
+            "mesh differs")
+    return True
+
+
+def raster_front(method):
+    r"""Whether the raster sampling ``method`` rebuilds the front cells."""
+    return str(method).lower() in FRONT_RASTER_SAMPLES
+
+
+def raster_base_method(method):
+    r"""How a single raster is put on a cell under ``method``: a front
+    sampling samples every raster by its vertices and changes only the front
+    cells' thickness and bed afterwards."""
+    return "vertex" if raster_front(method) else str(method).lower()
+
+
+def target_mesh_geometry_method(method):
+    r"""The provenance name of geometry rebuilt from BedMachine on a target
+    mesh under the raster sampling ``method``: vertex keeps the name its
+    caches carry, a front sampling gets its own, so a cache built one way is
+    never read as the other."""
+    if raster_front(method):
+        return TARGET_MESH_GEOMETRY_METHOD_FRONT
+    return TARGET_MESH_GEOMETRY_METHOD
+
+
+def forward_raster_sample(recorded, transfer, source="the MAP"):
+    r"""The raster sampling a forward builds its geometry with.
+
+    On the MAP's own mesh the geometry is the MAP's, so the sampling is the
+    one it records (``vertex`` for a MAP older than the record), which an
+    explicitly set ``ISMIP7_RASTER_SAMPLE`` may repeat and may not change. A
+    forward on another mesh (``transfer``) rebuilds the geometry from
+    BedMachine there, with ``ISMIP7_RASTER_SAMPLE`` or its default: a MAP's
+    controls carry over, and the front its new mesh holds is that mesh's own
+    (issue #167)."""
+    if transfer:
+        return raster_sample()
+    recorded = _recorded(recorded)
+    method = "vertex" if recorded is None else str(recorded).lower()
+    env = os.environ.get("ISMIP7_RASTER_SAMPLE")
+    if env and env.lower() != method:
+        raise RuntimeError(
+            f"ISMIP7_RASTER_SAMPLE={env} but {source} was sampled with "
+            f"{method} and its geometry is used as is: a forward on its "
+            f"MAP's mesh follows the MAP")
+    return method
 
 
 def friction():
@@ -762,9 +1001,21 @@ def obs_data_root():
 # 1000 m / 10 km production mesh. The file is tracked, so a fresh clone melts
 # with it and nothing is copied or rerun. Its sidecar (<name>.source.json)
 # records the file's sha256 and the conventions the fit holds under, which
-# the forward checks (forcing.check_melt_contract).
-MELT_CALIBRATION_DEFAULT = os.path.join(
+# the forward checks (forcing.check_melt_contract). The offsets were fitted
+# again at that K under the front-cell rule (issue #167, run record
+# calibration-melt-1km-vertex-front), whose melt-receiving area is 2.4 %
+# smaller on the 1 km mesh; that file is the default, the calibration of the
+# default raster sampling.
+MELT_CALIBRATION_VERTEX = os.path.join(
     _ANTARCTICA, "calibration", "deltaT_per_basin_1000_K6.500e-05.npz")
+MELT_CALIBRATION_DEFAULT = os.path.join(
+    _ANTARCTICA, "calibration", "deltaT_per_basin_1000_K6.500e-05_vertex_front.npz")
+# The tracked calibration of each raster sampling. A calibration sums melt
+# over the cells its sampling builds, so a run takes the one fitted under its
+# own (forcing.check_melt_contract refuses another); a sampling with no entry
+# needs ISMIP7_DELTAT_PER_BASIN_NPZ.
+MELT_CALIBRATIONS = {"vertex": MELT_CALIBRATION_VERTEX,
+                     "vertex_front": MELT_CALIBRATION_DEFAULT}
 
 # Knobs that no longer shape a run. They are refused rather than ignored, so
 # a job script written before the change fails at startup.
@@ -913,7 +1164,7 @@ def write_melt_calibration_sidecar(npz_path, record):
     return sidecar
 
 
-def deltat_per_basin_npz():
+def deltat_per_basin_npz(raster_sample_of_run=None):
     r"""The per-basin thermal-forcing offsets a run melts with, or None on the
     legacy per-basin K path.
 
@@ -923,8 +1174,10 @@ def deltat_per_basin_npz():
     it. The ocean callbacks add the offset to TF before the melt law and melt
     with the file's K everywhere.
 
-    ``ISMIP7_DELTAT_PER_BASIN_NPZ`` names the file; unset, it is
-    ``MELT_CALIBRATION_DEFAULT``. ``ISMIP7_K_PER_BASIN_NPZ`` selects the legacy
+    ``ISMIP7_DELTAT_PER_BASIN_NPZ`` names the file; unset, it is the tracked
+    calibration of the run's raster sampling (``MELT_CALIBRATIONS``;
+    ``raster_sample_of_run``, else ``ISMIP7_RASTER_SAMPLE``), which for the
+    default sampling is ``MELT_CALIBRATION_DEFAULT``. ``ISMIP7_K_PER_BASIN_NPZ`` selects the legacy
     per-basin K path instead (``k_per_basin_npz``), and then this returns
     None. Naming both is refused.
 
@@ -945,7 +1198,15 @@ def deltat_per_basin_npz():
     if legacy is not None:
         return None
     if path is None:
-        path = MELT_CALIBRATION_DEFAULT
+        sampling = (raster_sample() if raster_sample_of_run is None
+                    else str(raster_sample_of_run).lower())
+        if sampling not in MELT_CALIBRATIONS:
+            raise FileNotFoundError(
+                f"No tracked melt calibration was fitted on geometry sampled "
+                f"with {sampling}. Fit one (calibrate_deltaT.py under "
+                f"ISMIP7_RASTER_SAMPLE={sampling}) and name it with "
+                f"ISMIP7_DELTAT_PER_BASIN_NPZ.")
+        path = MELT_CALIBRATIONS[sampling]
         if not os.path.exists(path):
             raise FileNotFoundError(
                 f"The tracked melt calibration {path} is missing from this "

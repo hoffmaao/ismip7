@@ -318,7 +318,53 @@ Newton solve per link. An auto `prior_sigma_alpha` (and `friction_c_ref`) is
 reused across a warm start only within one friction control; a warm start
 from another control derives its own auto value.
 
-## 6. Where the chains are (27 September, 22:00 EDT)
+## 6. The relaxed re-inversion
+
+An initial-state option beside each production MAP (issue #162), settled
+at IU on 6 October 2026, in `icepack2_tools/relaxation.py`,
+`antarctica/scripts/relaxation/run.py` and the inversion's warm start; the
+commands are in the README, "The relaxed initial state".
+
+| step | what | settings |
+|---|---|---|
+| relaxation year | cold start from the MAP on its own mesh, 2014.0 to 2015.0 | one year of Smith dH/dt undone on grounded ice; half the production step (0.0125 yr at 0.025); OCX's 2014 forcing; apparent MB off; front pinned |
+| re-inversion | warm start from the year's end state on the same mesh | 250 L-BFGS-B iterations; the MAP's objective, carried by the end state and held by the strict handoff; the relaxed geometry; the MAP's `θ` and `φ` |
+| forwards | `ISMIP7_INVERSION` names the relaxed MAP | 2003 start backdated 12 years, as from any MAP |
+
+Choices, IU's on 6 October:
+
+* **OCX's 2014 forcing** for the year: observational, the same for every ESM,
+  and what OCX itself runs through 2014.
+* **The front stays pinned**, so the re-inversion keeps the MAP's extent.
+* **`θ` stays the MAP's.** On grounded ice `C = C_w0 exp(θ)`, and the
+  anchor `C_w0 = τ_d / |u_obs|^(1/m)` follows the geometry through the
+  driving stress `τ_d`. The re-inversion builds its anchor on the relaxed
+  geometry, so the friction it starts from is the MAP's times
+  `R = τ_d(relaxed) / τ_d(2015)`. Where basal drag carries the driving
+  stress the Weertman speed is `|u_obs| exp(-m θ)`, independent of the
+  geometry, so the starting velocity stays the MAP's. Rebasing `θ` by
+  `ln(1/R)` would hold the MAP's friction instead; at fixed friction that
+  speed scales as `R^m`, and with `m = 3` a 10 % change in driving stress
+  moves it by about 30 %, and the rebased `θ` would carry grid-scale
+  structure the bi-Laplacian prior penalises. Under the exp and sqrt
+  friction controls the friction has no anchor and the two are the same.
+  The re-inversion logs the distribution of `ln R` over grounded dofs.
+* **The re-inversion runs on the MAP's mesh** (2 km), and a 1 km forward
+  takes its controls through the usual transfer onto its own BedMachine
+  geometry (`init_state` `relaxed-controls`); the relaxed thickness stays on
+  the 2 km mesh.
+
+The record: the end state carries `relaxation_end_state`, the source MAP and
+its sha256, the year, the step, the forcing and the free-surface
+stabilization the year ran under (`relax_fssa_theta`, 0 when off, and the
+resolved `relax_fssa_reference`, `none` when off) as `relax_*`, and the MAP's
+`handoff.OBJECTIVE_KEYS`, leaving the objective value behind, so the
+re-inversion skips the handoff gap check and logs its first objective
+against the source MAP's. The relaxed MAP records
+`geometry_source_method = relaxed-forward-v1` and the end state's name and
+sha256 on every checkpoint, and a chain link that resumes it inherits them.
+
+## 7. Where the chains are (27 September, 22:00 EDT)
 
 | job | mesh | control, prior | state |
 |---|---|---|---|

@@ -1460,6 +1460,26 @@ mpiexec -n 4 python antarctica/scripts/boundary_front_flux.py --out flux.json \
     map=MAP.h5 t2010=antarctica/results/hist_cesm2_waccm_calv75_vm150_2000_t2010.0.h5
 ```
 
+`compare_hist_dhdt.py` scores a historical's thickness change (the state's
+`thickness` minus its `H_init`, over the elapsed years; pass `--t0 2003` since
+the states record no start year) against the Smith et al. ICESat dH/dt in the
+observations kit, on the kit's 1 km grid: bias, rms, correlation and the
+implied mass rate over grounded ice and all ice, per Mouginot basin, with
+`--plot` for the observed, modelled and difference maps.
+`tendency_by_basin.py` reads the same state's `a_ref_mb` (the field that
+cancelled the t = 0 tendency), rebuilds the upwind flux divergence under the
+model and the observed velocity, and reports per basin the divergence under
+each and the model's t = 0 imbalance; with the RACMO climatology SMB per
+basin (`forcing.load_racmo_smb_climatology` on the start geometry) that
+separates a gain the forcing causes from one the velocity field causes.
+
+```sh
+mpiexec -n 4 python antarctica/scripts/compare_hist_dhdt.py --t0 2003 --plot dhdt.png --out dhdt.json \
+    amb_on=antarctica/results/hist_cesm2_waccm_lcr75_2000_final.h5
+mpiexec -n 4 python antarctica/scripts/tendency_by_basin.py --smith dhdt.json \
+    antarctica/results/hist_cesm2_waccm_lcr75_2000_final.h5
+```
+
 ### The whole matrix in one command (`run_core_matrix.sh`)
 
 Runs cores 1 to 11 in dependency order (historicals, controls, projections,

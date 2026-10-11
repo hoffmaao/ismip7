@@ -26,6 +26,11 @@ HIST=${ISMIP7_HIST_EXPERIMENT:-hist_cesm_waccm}
 PROJ=${ISMIP7_PROJECTIONS:-"control ssp126_cesm_waccm ssp370_cesm_waccm ssp585_cesm_waccm"}
 TAGBASE=${ISMIP7_CAMPAIGN_TAG:-calv}
 PART=${ISMIP7_PARTITION:-scavenge}; ACCT=${ISMIP7_ACCOUNT:-commons}; CONSTR=${ISMIP7_CONSTRAINT:-sapphirerapids}
+# A link's wall time; the chain's successors inherit it. One step deep in
+# 64x subcycling on 32 Icelake ranks runs past a 1 h link's 8 min margin,
+# and a link killed at the limit cannot resubmit itself (10 Oct: five of
+# eleven screening members stopped that way), so 2 h is the default.
+WALL=${ISMIP7_WALL:-02:00:00}
 MEMBERS="fixed|fixed||none
 hfb015|hfb|sigma_max=0.15|none
 hfb0|hfb|sigma_max=0.0|free
@@ -60,7 +65,7 @@ while IFS='|' read -r name law params advance; do
         fi
         sbatch --parsable -J "fwd_$tag" -p "$PART" -A "$ACCT" -C "$CONSTR" \
             --nodes=1 --ntasks-per-node=32 --cpus-per-task=1 --hint=nomultithread \
-            --mem=240G --time=01:00:00 --export=ALL \
+            --mem=240G --time="$WALL" --export=ALL \
             antarctica/scripts/batch_runners/projection.sbatch)
     printf '%-8s %-15s %-36s advance=%-4s -> %s\n' "$name" "$law" "${params:-(defaults)}" "$advance" "$job"
 done <<EOF

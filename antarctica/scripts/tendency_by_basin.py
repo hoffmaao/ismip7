@@ -48,6 +48,12 @@ BASIN_NAMES = {1: "A-Ap", 2: "Ap-B", 3: "B-C", 4: "C-Cp", 5: "Cp-D", 6: "D-Dp", 
                16: "J-Jpp", 17: "Jpp-K", 18: "K-A"}
 
 
+def chk_thickness(path, mesh):
+    import firedrake as fd
+    with fd.CheckpointFile(path, "r") as chk:
+        return chk.load_function(mesh, name="thickness")
+
+
 def divergence(mesh, H, u):
     r"""Per-cell net outflow [m^3/yr] of the facet-upwind flux of ``H`` by ``u``."""
     from firedrake import (FacetNormal, TestFunction, assemble, conditional, dS, ds, dot, gt)
@@ -77,19 +83,27 @@ def main():
         b = chk.load_function(mesh, name="bed")
         u = chk.load_function(mesh, name="velocity")
         uo = chk.load_function(mesh, name="velocity_obs")
-        aref = chk.load_function(mesh, name="a_ref_mb")
+        try:
+            aref = chk.load_function(mesh, name="a_ref_mb")
+        except Exception:
+            aref = None   # a run without the reference: the divergences alone
     Q0 = H0.function_space()
     area = fd.assemble(fd.TestFunction(Q0) * fd.dx).dat.data_ro
     # the reference was built on the start geometry, so the divergences are
     # evaluated there too
-    div_m = divergence(mesh, H0, u)
-    div_o = divergence(mesh, H0, uo)
+    # the start geometry for a state carrying the reference (it was built
+    # there); the evolved geometry otherwise, so the divergence is the flux
+    # the state's own velocity carries through its own thickness
+    H_div = H0 if aref is not None else chk_thickness(args.state, mesh)
+    div_m = divergence(mesh, H_div, u)
+    div_o = divergence(mesh, H_div, uo)
     xy = fd.Function(fd.VectorFunctionSpace(mesh, "DG", 0)).interpolate(fd.SpatialCoordinate(mesh)).dat.data_ro
     speed_o = fd.Function(Q0).project(fd.sqrt(fd.dot(uo, uo))).dat.data_ro
     hv, bv = H0.dat.data_ro, b.dat.data_ro
     haf = hv + np.where(bv < 0.0, bv, 0.0) * RHO_W / RHO_I
     grounded = (hv > H_MIN) & (haf > 0.0)
-    parts = comm.gather((div_m, div_o, aref.dat.data_ro * area, area.copy(), grounded.copy(),
+    aref_v = aref.dat.data_ro * area if aref is not None else np.zeros_like(area)
+    parts = comm.gather((div_m, div_o, aref_v, area.copy(), grounded.copy(),
                          np.asarray(xy).copy(), (speed_o < 0.5).copy()), root=0)
     if comm.rank != 0:
         return

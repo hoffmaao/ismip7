@@ -120,10 +120,14 @@ def main():
         haf = hv + np.where(bv < 0.0, bv, 0.0) * RHO_W / RHO_I
         grounded = (hv > H_MIN) & (haf > 0.0)
         ice = hv > H_MIN
-        parts = comm.gather((rate.copy(), grounded.copy(), ice.copy(), xy.copy(), area.copy()), root=0)
+        h0v = h0.dat.data_ro
+        grounded0 = (h0v > H_MIN) & (h0v + np.where(bv < 0.0, bv, 0.0) * RHO_W / RHO_I > 0.0)
+        parts = comm.gather((rate.copy(), grounded.copy(), ice.copy(), xy.copy(), area.copy(), grounded0.copy()), root=0)
         if comm.rank != 0:
             continue
-        rate, grounded, ice, pts, ar = (np.concatenate([p[i] for p in parts]) for i in range(5))
+        rate, grounded, ice, pts, ar, grounded0 = (np.concatenate([p[i] for p in parts]) for i in range(6))
+        gl_area0, gl_area1 = float(ar[grounded0].sum() / 1e6), float(ar[grounded].sum() / 1e6)
+        gl_lost, gl_gained = float(ar[grounded0 & ~grounded].sum() / 1e6), float(ar[~grounded0 & grounded].sum() / 1e6)
         from scipy.spatial import cKDTree
         X, Y = np.meshgrid(x, y)
         d, idx = cKDTree(pts).query(np.column_stack([X.ravel(), Y.ravel()]), workers=-1)
@@ -131,8 +135,10 @@ def main():
         idx = idx.reshape(X.shape)
         model = np.where(inside & ice[idx], rate[idx], np.nan)
         gr = inside & grounded[idx]
+        fl = inside & ice[idx] & ~grounded[idx]
         w = abs(float((x[1] - x[0]) * (y[1] - y[0])))
         obs_s, basins_s = obs, basins
+        floating_stats = stats(np.where(fl, model, np.nan), obs, w)
         if args.block > 0:
             # block means of both fields over the pixels where both are
             # finite; a block is grounded where most of its model pixels are
@@ -141,16 +147,21 @@ def main():
             w *= n * n
         res = {"label": label, "file": os.path.basename(path), "t_yr": t, "t0": t0, "block_km": args.block,
                "grounded": stats(np.where(gr, model, np.nan), obs_s, w),
-               "all_ice": stats(model, obs_s, w), "basins": {}}
+               "all_ice": stats(model, obs_s, w), "floating": floating_stats,
+               "grounded_area_km2": {"start": gl_area0, "end": gl_area1, "ungrounded": gl_lost, "grounded": gl_gained},
+               "basins": {}}
         for bsn in np.unique(basins_s[gr]):
             sel = gr & (basins_s == bsn)
             res["basins"][str(int(bsn))] = stats(np.where(sel, model, np.nan), obs_s, w)
         results.append(res)
         panels.append((label, model, obs_s, gr))
-        g = res["grounded"]
+        g, f = res["grounded"], res["floating"]
         PETSc.Sys.Print(f"  {label}: {t0:.0f}-{t:.1f}, grounded vs Smith: bias {g['bias_myr']:+.3f} m/yr, rms {g['rms_myr']:.3f}, "
                         f"corr {g['corr']:.2f}; mass rate model {g['model_gtyr']:+,.0f} vs obs {g['obs_gtyr']:+,.0f} Gt/yr "
                         f"over the {g['n']:,} km2 both cover")
+        PETSc.Sys.Print(f"  {label}: floating ice: model {f.get('model_gtyr', float('nan')):+,.0f} vs obs {f.get('obs_gtyr', float('nan')):+,.0f} Gt/yr "
+                        f"(mean {f.get('model_mean_myr', float('nan')):+.3f} vs {f.get('obs_mean_myr', float('nan')):+.3f} m/yr); "
+                        f"grounded area {gl_area0:,.0f} -> {gl_area1:,.0f} km2 (ungrounded {gl_lost:,.0f}, grounded {gl_gained:,.0f})")
         worst = sorted(res["basins"].items(), key=lambda kv: -abs(kv[1].get("model_gtyr", 0) - kv[1].get("obs_gtyr", 0)))[:5]
         for bsn, s in worst:
             PETSc.Sys.Print(f"    basin {bsn}: model {s['model_gtyr']:+,.0f} vs obs {s['obs_gtyr']:+,.0f} Gt/yr "

@@ -3315,6 +3315,8 @@ def run_simulation(
             f"error estimate, {adapt.m}..{adapt.m_max} substeps of dt={dt:g} yr, "
             f"halving after {adapt.quiet_steps} quiet steps, cells >= "
             f"{adapt.hmin:g} m"
+            + (f", up to {adapt.ceiling:g}x tol accepted at {adapt.m_max} substeps"
+               if adapt.ceiling > 0 else ", stalling at the ceiling")
         )
 
     # Timing drivers use this marker rather than timing setup_model or the
@@ -3342,6 +3344,12 @@ def run_simulation(
     # just under the budget overshoots it by that whole step and gets killed
     # mid-write, which is the outcome the budget exists to avoid.
     step_max_min = 0.0
+    # Longest single substep so far: a step entering with m substeps costs
+    # about m of them, twice that if one rejection doubles m, which the
+    # longest whole step cannot foresee when m has just climbed (the 2 km
+    # screening of 11 October lost two links to steps deep in 64x
+    # subcycling that outran a 20 min margin).
+    substep_max_min = 0.0
     stalled = False
     collapse_cells = (0, 0, 0)
     collapse_held_peak = (0, t_start)      # most cells held at once, and when
@@ -3351,12 +3359,16 @@ def run_simulation(
             mins = (perf_counter() - _T_PROCESS_START) / 60.0
             # Every rank must leave the loop together: the final save is
             # collective, so a rank-local decision would hang the job.
+            m_next = SUBCYCLES[0] if adapt is None else adapt.m
+            step_cost_min = max(step_max_min, 2 * m_next * substep_max_min)
             if mesh.comm.allreduce(
-                    int(mins + step_max_min >= wall_stop_min)) > 0:
+                    int(mins + step_cost_min >= wall_stop_min)) > 0:
                 PETSc.Sys.Print(
                     f"  Wall-clock budget: {mins:.1f} min used of "
-                    f"{wall_stop_min:g}, and the longest step so far took "
-                    f"{step_max_min:.1f} min. Stopping at t_yr={t_start + (k - 1) * dt:.1f} "
+                    f"{wall_stop_min:g}, and the next step could take "
+                    f"{step_cost_min:.1f} min (longest step {step_max_min:.1f}, "
+                    f"{m_next} substeps of up to {substep_max_min:.1f}). "
+                    f"Stopping at t_yr={t_start + (k - 1) * dt:.1f} "
                     f"with the budget intact, for the next job in the chain"
                 )
                 break
@@ -3407,6 +3419,7 @@ def run_simulation(
             ok = True
             reject_err = None
             for _j in range(m):
+                t_sub_start = perf_counter()
                 h_before = (np.array(h_dg.dat.data_ro)
                             if adapt is not None else None)
                 sub = _advance(
@@ -3430,7 +3443,13 @@ def run_simulation(
                         ok = False
                         reject_err = err
                         break
-                    if err > adapt.tol:
+                    if err > adapt.tol and adapt.ceiling_now:
+                        PETSc.Sys.Print(
+                            f"  Step {k}: substep {_j + 1}/{m} thickness error "
+                            f"{err:.3g} m{at} at the ceiling of {adapt.m_max} "
+                            f"substeps (within {adapt.ceiling:g}x tol), accepting"
+                        )
+                    elif err > adapt.tol:
                         PETSc.Sys.Print(
                             f"  Step {k}: substep {_j + 1}/{m} thickness error "
                             f"{err:.3g} m{at} not reduced by refining "
@@ -3442,6 +3461,8 @@ def run_simulation(
                 if not _solve_with_rescue(k):
                     ok = False
                     break
+                substep_max_min = max(substep_max_min,
+                                      (perf_counter() - t_sub_start) / 60.0)
             if ok:
                 if m > 1 and adapt is None:
                     PETSc.Sys.Print(f"  Step {k}: completed via x{m} subcycle")

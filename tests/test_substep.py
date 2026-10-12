@@ -158,7 +158,32 @@ def test_settings_from_environment(monkeypatch):
     monkeypatch.setenv("ISMIP7_SUBSTEP_INIT", "4")
     s = substep_settings()
     assert s["tol"] == 0.5 and s["m_init"] == 4 and s["m_max"] == 64
+    assert s["ceiling"] == 20.0
     SubstepController(**s)
+
+
+def test_a_finite_estimate_at_the_ceiling_is_accepted():
+    # refining helps a little each time but never enough: at m_max a finite
+    # estimate within the ceiling multiple is accepted instead of stalling
+    ctrl = SubstepController(tol=1.0, m_init=2, m_max=4, ceiling=20.0)
+    ctrl.begin_attempt()
+    assert ctrl.exceeds(3.0)
+    assert ctrl.refine(3.0) == 4
+    ctrl.begin_attempt()
+    # 1.5 m: refining halved the estimate (so not the ineffective rule) but it is still above tol
+    assert not ctrl.exceeds(1.5) and ctrl.ceiling_now and ctrl.ceiling_accepted == 1
+    ctrl.accept()
+    assert not ctrl.ceiling_now
+    # beyond the multiple, or non-finite, it still rejects and refine() is exhausted
+    ctrl.begin_attempt()
+    assert ctrl.exceeds(25.0) and ctrl.refine(25.0) is None
+    assert ctrl.exceeds(float("inf"))
+    # ceiling 0 is the old stall
+    ctrl = SubstepController(tol=1.0, m_init=4, m_max=4, ceiling=0.0)
+    ctrl.begin_attempt()
+    assert ctrl.exceeds(2.0) and ctrl.refine(2.0) is None
+    with pytest.raises(ValueError):
+        SubstepController(tol=1.0, ceiling=-1.0)
 
 
 def test_refinement_that_does_not_help_is_accepted():

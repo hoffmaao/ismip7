@@ -3344,12 +3344,13 @@ def run_simulation(
     # just under the budget overshoots it by that whole step and gets killed
     # mid-write, which is the outcome the budget exists to avoid.
     step_max_min = 0.0
-    # Longest single substep so far: a step entering with m substeps costs
-    # about m of them, twice that if one rejection doubles m, which the
-    # longest whole step cannot foresee when m has just climbed (the 2 km
-    # screening of 11 October lost two links to steps deep in 64x
-    # subcycling that outran a 20 min margin).
-    substep_max_min = 0.0
+    # Mean substep of the last completed step: a step entering with m
+    # substeps costs about m of them, which the longest whole step cannot
+    # foresee when m has just climbed (the 2 km screening of 11 October lost
+    # two links to steps deep in 64x subcycling that outran a 20 min margin).
+    # The mean, not the longest substep: one slow substep in 64 made the
+    # prediction 102 min for a 16 min step and stopped links after one step.
+    substep_mean_min = 0.0
     stalled = False
     collapse_cells = (0, 0, 0)
     collapse_held_peak = (0, t_start)      # most cells held at once, and when
@@ -3360,14 +3361,14 @@ def run_simulation(
             # Every rank must leave the loop together: the final save is
             # collective, so a rank-local decision would hang the job.
             m_next = SUBCYCLES[0] if adapt is None else adapt.m
-            step_cost_min = max(step_max_min, 2 * m_next * substep_max_min)
+            step_cost_min = max(step_max_min, 1.25 * m_next * substep_mean_min)
             if mesh.comm.allreduce(
                     int(mins + step_cost_min >= wall_stop_min)) > 0:
                 PETSc.Sys.Print(
                     f"  Wall-clock budget: {mins:.1f} min used of "
                     f"{wall_stop_min:g}, and the next step could take "
                     f"{step_cost_min:.1f} min (longest step {step_max_min:.1f}, "
-                    f"{m_next} substeps of up to {substep_max_min:.1f}). "
+                    f"{m_next} substeps of about {substep_mean_min:.2f}). "
                     f"Stopping at t_yr={t_start + (k - 1) * dt:.1f} "
                     f"with the budget intact, for the next job in the chain"
                 )
@@ -3418,8 +3419,8 @@ def run_simulation(
                    "smb_gt": 0.0, "melt_gt": 0.0}
             ok = True
             reject_err = None
+            t_attempt_start = perf_counter()
             for _j in range(m):
-                t_sub_start = perf_counter()
                 h_before = (np.array(h_dg.dat.data_ro)
                             if adapt is not None else None)
                 sub = _advance(
@@ -3461,9 +3462,8 @@ def run_simulation(
                 if not _solve_with_rescue(k):
                     ok = False
                     break
-                substep_max_min = max(substep_max_min,
-                                      (perf_counter() - t_sub_start) / 60.0)
             if ok:
+                substep_mean_min = (perf_counter() - t_attempt_start) / 60.0 / m
                 if m > 1 and adapt is None:
                     PETSc.Sys.Print(f"  Step {k}: completed via x{m} subcycle")
                 tallies = acc

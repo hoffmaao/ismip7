@@ -781,6 +781,9 @@ def setup_model(restart_from=None, *, allow_timing_cache_a_ref=False,
     # matches by construction (no fragile .msh-vs-checkpoint node comparison).
     C_w0 = None
     N_ref = None
+    # DG1 Budd: the frozen t=0 thickness and surface the reference effective
+    # pressure is evaluated on, point by point (see below); None otherwise.
+    N_ref_fields = None
     H_init = None
     phi_eff = None
     u_guess = None
@@ -949,7 +952,10 @@ def setup_model(restart_from=None, *, allow_timing_cache_a_ref=False,
                     h_dg_state = None
             if use_residual:
                 C_w0 = load_checkpoint_field(chk, "C_w0", Q_g)
-            if friction == "budd":
+            if friction == "budd" and geom_dg1:
+                N_ref_fields = (load_checkpoint_field(chk, "N_ref_thickness", Q_g),
+                                load_checkpoint_field(chk, "N_ref_surface", Q_g))
+            elif friction == "budd":
                 N_ref = load_checkpoint_field(chk, "N_ref", Q_g)
             if chk.has_attr("/", "t_yr"):
                 t_restart = float(chk.get_attr("/", "t_yr"))
@@ -1236,6 +1242,7 @@ def setup_model(restart_from=None, *, allow_timing_cache_a_ref=False,
     if use_residual:
         from icepack2_tools.dual_friction import (
             build_rc_residual, weertman_anchor, effective_pressure,
+            budd_reference_pressure,
         )
         c0_rc = float(os.environ.get("ISMIP7_RC_C0", "0.5"))
         rc_hvisc_floor = map_hvisc_floor
@@ -1319,10 +1326,13 @@ def setup_model(restart_from=None, *, allow_timing_cache_a_ref=False,
             # since a cell-wise surface has no cell gradient.
             C_w0 = weertman_anchor(H, s, u_obs, m_slide_val, Q_g,
                                    length=map_anchor_length, b=b)
-            if friction == "budd":
+            if friction == "budd" and geom_dg1:
+                N_ref_fields = (H.copy(deepcopy=True), s.copy(deepcopy=True))
+                N_ref_fields[0].rename("N_ref_thickness")
+                N_ref_fields[1].rename("N_ref_surface")
+            elif friction == "budd":
                 N_ref = Function(Q_g, name="N_ref").interpolate(
-                    max_value(effective_pressure(H, s), Constant(0.0))
-                )
+                    budd_reference_pressure(H, s))
             if C_exp is not None:
                 C_w0 = Function(Q_g, name="C_w0").project(C_exp)
                 theta_f.assign(0.0)
@@ -1344,6 +1354,14 @@ def setup_model(restart_from=None, *, allow_timing_cache_a_ref=False,
         # from its own geometry via effective_pressure(H, s) and loaded from the
         # checkpoint only on a restart. The two should agree cell-wise under DG0
         # geometry; this knob is how that is checked.
+        if N_ref_fields is not None:
+            # Under DG1 the reference is N itself on the frozen t=0 geometry,
+            # point by point. N has kinks inside a linear cell (the bed at sea
+            # level, the 1 m overburden floor, flotation), so a nodal DG1
+            # interpolant of it put N_hat at 1.04 (median) and up to 1.7 in the
+            # 32 km grounded cells whose bed crosses sea level, and at the cap
+            # near the grounding line, where the inversion's own N_hat is N/N.
+            N_ref = budd_reference_pressure(*N_ref_fields)
         if friction == "budd" and os.environ.get("ISMIP7_BUDD_NREF", "").lower() == "none":
             N_ref = None
         if friction == "budd":
@@ -2086,7 +2104,10 @@ def setup_model(restart_from=None, *, allow_timing_cache_a_ref=False,
         # C = C_ref exp(alpha) of an exp-control MAP (None otherwise), idem
         "C_exp": C_exp,
         "C_w0": C_w0,
-        "N_ref": N_ref,
+        # a Function to checkpoint; under DG1 the expression lives in the
+        # residual and its frozen fields are checkpointed instead
+        "N_ref": N_ref if N_ref_fields is None else None,
+        "N_ref_fields": N_ref_fields,
         "subelement": subelement,
         "A_prior": A_prior_f,
         "H_init": H_init,
@@ -2197,6 +2218,9 @@ def save_model_state(ctx, final_path, t_now, extra_attrs=None):
             chk.save_function(ctx["C_exp"], name="friction_exp")
         if ctx.get("N_ref") is not None:
             chk.save_function(ctx["N_ref"], name="N_ref")
+        if ctx.get("N_ref_fields") is not None:
+            chk.save_function(ctx["N_ref_fields"][0], name="N_ref_thickness")
+            chk.save_function(ctx["N_ref_fields"][1], name="N_ref_surface")
         if ctx.get("A_prior") is not None:
             chk.save_function(ctx["A_prior"], name="fluidity_prior")
         if ctx.get("a_ref_mb") is not None:

@@ -19,6 +19,7 @@ Serial, small rectangle meshes, a synthetic BedMachine-shaped NetCDF.
 from icepack2_tools.dual_friction import (                      # noqa: E402
     budd_nhat,
     budd_nhat_ungated,
+    budd_reference_pressure,
     build_rc_residual,
     effective_pressure,
 )
@@ -503,3 +504,28 @@ def test_the_budd_gate_zeroes_every_point_of_a_floating_dg1_cell():
     assert 2.5e3 < x_gl < 3e3
     assert np.all(gated.dat.data_ro[(xs > 2e3 + 1.0) & (xs < x_gl - 1.0)] > 0.0)
     assert np.all(gated.dat.data_ro[xs > x_gl + 1.0] == 0.0)
+
+
+def test_the_dg1_budd_reference_starts_n_hat_where_the_inversion_does():
+    r"""Grounded DG1 cells whose bed crosses sea level, beside a grounding
+    line: ``N`` has kinks inside these cells, so a nodal interpolant of it as
+    ``N_ref`` moves ``N_hat`` off the inversion's ``N / N`` inside them, and
+    the reference evaluated point by point on the same fields does not."""
+    mesh = RectangleMesh(8, 2, 8e3, 2e3)
+    x, _ = SpatialCoordinate(mesh)
+    Q1 = G.geometry_function_space(mesh, "dg1")
+    b = Function(Q1).interpolate(150.0 - 0.07 * x)          # sea level at 2.1 km
+    H = Function(Q1).interpolate(700.0 - 0.06 * x)
+    s = Function(Q1).interpolate(max_value(b + H, (1 - R) * H))
+    N = effective_pressure(H, s)
+    probe = FunctionSpace(mesh, "DG", 3)
+
+    def nhat(N_ref):
+        return Function(probe).interpolate(
+            budd_nhat(N, N_ref, H, b, nhat_floor=0.02, nhat_cap=3.0)).dat.data_ro
+
+    inversion = nhat(None)
+    pointwise = nhat(budd_reference_pressure(H, s))
+    nodal = nhat(Function(Q1).interpolate(budd_reference_pressure(H, s)))
+    np.testing.assert_array_equal(pointwise, inversion)
+    assert np.abs(nodal - inversion).max() > 0.01

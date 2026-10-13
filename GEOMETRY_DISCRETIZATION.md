@@ -614,7 +614,10 @@ BedMachine's `vertex` sample:
 fixed front's removals (booked at mean times area), the drag gate and the
 tripwire. A DG1 MAP is named `_dg1` and records `geometry_space=dg1`; a DG1
 state seeds only a DG1 run and a DG1 run starts only from one, on every path
-(`runconfig.geometry_space_mismatch`).
+(`runconfig.geometry_space_mismatch`). An inversion is the one exception: it
+may take a warm start's controls and fluidity prior from the other space and
+refit them on its own geometry, never taking the warm start's geometry
+(`runconfig.warm_start_across_spaces`).
 
 **What `dg1` refuses** (`runconfig.dg1_refusals`): SMB and ocean forcing, the
 apparent mass balance, the backdated start, the ISMIP7 output, level-set

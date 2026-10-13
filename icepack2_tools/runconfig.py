@@ -278,6 +278,26 @@ def geometry_space_mismatch(run_space, recorded, source):
             f"at a state written under {run_space} or change the space.")
 
 
+def warm_start_across_spaces(run_space, recorded, source):
+    r"""Whether an inversion's warm start ``source``, recorded under geometry
+    space ``recorded``, comes from another space than the run's, in a
+    mismatch :func:`geometry_space_mismatch` would refuse.
+
+    An inversion may still start from such a warm start's controls and
+    fluidity prior: they are CG1 fields the inversion refits, and a 2 km
+    DG1 MAP started from IU's DG0 controls that way (13 October 2026). Its
+    geometry belongs to the other space, so it is never taken, and
+    ``ISMIP7_WARM_START_GEOMETRY`` asking for it is refused."""
+    refusal = geometry_space_mismatch(run_space, recorded, source)
+    if refusal is None:
+        return False
+    if os.environ.get("ISMIP7_WARM_START_GEOMETRY", "").strip() not in ("", "0"):
+        raise ValueError(
+            f"{refusal} ISMIP7_WARM_START_GEOMETRY asks for its geometry, which "
+            f"belongs to the other space; unset it to take the controls alone.")
+    return True
+
+
 def dg1_refusals(*, legacy_transport=False, subelement=False,
                  apparent_mb=None, calving="none", fracture="none",
                  backdate_years=0.0, ismip7_output=False,

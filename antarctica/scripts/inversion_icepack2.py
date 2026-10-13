@@ -2640,8 +2640,10 @@ def main():
                 out += f" dhdt={float(assemble(_dhdt_chi2)):.4e}"
                 out += (f" net={float(assemble(_net_form)) * 917.0 / 1e12:+.0f}Gt/yr")
             return out
-        except Exception:
-            return ""
+        except Exception as exc:
+            # say why rather than silently dropping the breakdown: the 2 km
+            # transient chain of 12 October printed no vel/dhdt split at all
+            return f" (term report failed: {type(exc).__name__}: {str(exc)[:80]})"
 
     # ── MAP checkpoint writer ────────────────────────────────────────────
     # ONE writer for both the periodic checkpoint and the final save: the two

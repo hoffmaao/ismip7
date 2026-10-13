@@ -717,7 +717,8 @@ def setup_model(restart_from=None, *, allow_timing_cache_a_ref=False,
             calving=_calving_law(), fracture=_fracture_mode(),
             backdate_years=0.0 if is_restart else backdate_years,
             ismip7_output=_ismip7_output(), geometry_transfer=geometry_transfer,
-            forcing=smb_feedback is not None)
+            forcing=smb_feedback is not None,
+            timing_cache=checkpoint_metadata.get("timing_cache_role") is not None)
         if _refusals:
             raise RuntimeError("; ".join(_refusals))
     PETSc.Sys.Print(

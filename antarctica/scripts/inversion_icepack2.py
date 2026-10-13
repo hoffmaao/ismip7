@@ -1337,7 +1337,7 @@ def main():
     # Budd pins N_hat=1 at the inversion geometry; freeze N_ref with the MAP /
     # timing-cache so forwards reproduce the inverted friction at t=0.
     N_ref = None
-    if FRICTION == "budd":
+    if FRICTION == "budd" and not geom_dg1:
         N_ref = Function(Q_g, name="N_ref").interpolate(
             max_value(effective_pressure(H, s), Constant(0.0))
         )
@@ -2640,6 +2640,9 @@ def main():
                 chk.save_function(_friction_reference(), name="C_w0")
                 if N_ref is not None:
                     chk.save_function(N_ref, name="N_ref")
+                elif FRICTION == "budd":
+                    chk.save_function(H, name="N_ref_thickness")
+                    chk.save_function(s, name="N_ref_surface")
             else:
                 # A periodic checkpoint carries the accepted mixed state for
                 # the next chain link only, under names no forward reads: the

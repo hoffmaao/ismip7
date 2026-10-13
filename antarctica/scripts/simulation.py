@@ -2371,6 +2371,11 @@ def run_simulation(
     # back-pressure and the boundary flux then integrate one thickness, so
     # they cannot disagree. Under CG1 geometry h_dg is a separate DG0 carrier
     # bridged by the lumped lift below.
+    # A restart's DG carrier as the checkpoint loaded it (None on a cold
+    # start), taken before ctx["h_dg_state"] is pointed at the live carrier
+    # the checkpoint writer reads: tested after that, a CG1 cold start found
+    # its own empty carrier, "restored" it, and began with no ice.
+    h_dg_restart = ctx.get("h_dg_state")
     h_dg = h if geom_dg else Function(Q_dg, name="h_dg")
     ctx["h_dg_state"] = h_dg
     h_dg_old = Function(Q_dg)
@@ -2573,8 +2578,8 @@ def run_simulation(
             "  DG0 geometry: transport state is the geometry (no lift)"
         )
     elif not legacy_transport:
-        if ctx.get("h_dg_state") is not None:
-            h_dg.dat.data[:] = ctx["h_dg_state"].dat.data_ro
+        if h_dg_restart is not None:
+            h_dg.dat.data[:] = h_dg_restart.dat.data_ro
             PETSc.Sys.Print("  DG thickness state restored from checkpoint")
         else:
             h_dg.project(h)

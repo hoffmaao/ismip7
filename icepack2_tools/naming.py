@@ -72,12 +72,14 @@ def map_geom_tag():
     r"""Filename tag for the geometry discretization a MAP was inverted under.
 
     CG1 keeps the legacy untagged name (every MAP on disk before Aug 2026);
-    DG0 gets `_dg0`. They are NOT interchangeable: the inversion absorbs the
-    front treatment into theta/phi, so a CG1 MAP driven by a DG0 forward has
-    friction tuned to a calving front that the lumped lift made ~2x too thick.
-    Separate names stop that from happening by accident.
+    DG0 gets `_dg0` and DG1 `_dg1`. They are NOT interchangeable: the
+    inversion absorbs the front treatment into theta/phi, so a CG1 MAP driven
+    by a DG0 forward has friction tuned to a calving front that the lumped
+    lift made ~2x too thick. Separate names stop that from happening by
+    accident.
     """
-    return "" if geometry_space() == "cg1" else "_dg0"
+    space = geometry_space()
+    return "" if space == "cg1" else f"_{space}"
 
 
 def map_tag(friction, geometry=True):

@@ -86,8 +86,16 @@ TARGET_MESH_GEOMETRY_METHOD = "target-native-bedmachine-cell-average-v1"
 # The same with BedMachine's front cells rebuilt (geometry.front_cells, issue
 # #167); target_mesh_geometry_method picks one by raster sampling.
 TARGET_MESH_GEOMETRY_METHOD_FRONT = "target-native-bedmachine-cell-average-front-v1"
+# DG1 geometry holds the CG1 vertex interpolant itself (geometry.sample_to_geometry).
+TARGET_MESH_GEOMETRY_METHOD_DG1 = "target-native-bedmachine-vertex-dg1-v1"
+TARGET_MESH_GEOMETRY_METHOD_DG1_FRONT = "target-native-bedmachine-vertex-dg1-front-v1"
 
-GEOMETRY_SPACES = ("dg0", "cg1")
+# dg1 is cell-wise linear and discontinuous, on vertex nodes
+# (geometry.geometry_function_space); see GEOMETRY_DISCRETIZATION.md.
+GEOMETRY_SPACES = ("dg0", "cg1", "dg1")
+# The spaces whose thickness is the transport state itself: a cell-wise field
+# whose facet jumps carry part or all of the driving stress.
+DISCONTINUOUS_GEOMETRY_SPACES = ("dg0", "dg1")
 
 # How a raster (BedMachine) is put onto a DG0 geometry cell.
 #   vertex    - icepack's bilinear sample at the three CG1 vertices, then the
@@ -256,15 +264,65 @@ def mesh_front():
 
 
 def geometry_space():
-    r"""Discretization of h/s/b, ``'dg0'`` or ``'cg1'``. Validated here so
+    r"""Discretization of h/s/b, one of ``GEOMETRY_SPACES``. Validated here so
     every reader rejects the same set."""
     value = os.environ.get(
         "ISMIP7_GEOMETRY_SPACE", GEOMETRY_SPACE_DEFAULT).lower()
     if value not in GEOMETRY_SPACES:
         raise ValueError(
-            f"ISMIP7_GEOMETRY_SPACE must be 'dg0' or 'cg1', got {value!r}"
+            "ISMIP7_GEOMETRY_SPACE must be one of "
+            f"{', '.join(map(repr, GEOMETRY_SPACES))}, got {value!r}"
         )
     return value
+
+
+def geometry_space_mismatch(run_space, recorded, source):
+    r"""Why a MAP, warm start or restart checkpoint recorded under geometry
+    space ``recorded`` (None when it predates the record) cannot seed a run
+    under ``run_space``, or None when it can.
+
+    Only a mismatch that involves ``dg1`` is refused here; dg0 and cg1 keep
+    the rules they always had. A DG1 state seeds a DG1 run alone: its
+    controls absorbed a driving stress with a live cell gradient, and its
+    thickness has slopes a DG0 or CG1 load would silently drop."""
+    recorded = None if recorded is None else str(recorded)
+    if "dg1" not in (run_space, recorded) or recorded == run_space:
+        return None
+    return (f"{source} records geometry_space="
+            f"{recorded if recorded is not None else '(none: dg0 or cg1)'} "
+            f"but this run is ISMIP7_GEOMETRY_SPACE={run_space}. A DG1 state "
+            f"seeds only a DG1 run and a DG1 run starts only from one; point "
+            f"at a state written under {run_space} or change the space.")
+
+
+def dg1_refusals(*, legacy_transport=False, subelement=False,
+                 apparent_mb=None, calving="none", fracture="none",
+                 backdate_years=0.0, ismip7_output=False,
+                 geometry_transfer=False, forcing=False):
+    r"""What a ``dg1`` run does not carry, one line per setting that asks for
+    it; empty when nothing conflicts.
+
+    The DG1 path runs the transport, the driving stress, the fixed front, the
+    drag gate, the inversion and restarts. The forcing, the apparent mass
+    balance, the backdated geometry, the ISMIP7 output, the level-set front,
+    the collapse mask and transfers onto another mesh each decide per cell in
+    ways the DG1 path does not implement (GEOMETRY_DISCRETIZATION.md, "DG1
+    geometry"), so a run asking for one stops at setup."""
+    asked = (
+        (legacy_transport, "ISMIP7_LEGACY_TRANSPORT (a CG1 scheme)"),
+        (subelement, "sub-element friction (ISMIP7_SUBELEMENT_FRICTION)"),
+        (apparent_mb is not None,
+         f"the apparent mass balance (ISMIP7_APPARENT_MB={apparent_mb})"),
+        (calving != "none", f"a level-set calving front (ISMIP7_CALVING={calving})"),
+        (fracture != "none", f"the collapse forcing (ISMIP7_FRACTURE={fracture})"),
+        (backdate_years > 0.0,
+         f"a geometry backdated {backdate_years:g} yr (the start year)"),
+        (ismip7_output, "the ISMIP7 output (ISMIP7_OUTPUT)"),
+        (geometry_transfer, "a geometry rebuilt on another mesh than the MAP's"),
+        (forcing, "SMB and ocean forcing (a forcing callback)"),
+    )
+    return [f"ISMIP7_GEOMETRY_SPACE=dg1 does not carry {what}"
+            for on, what in asked if on]
 
 
 def raster_sample():
@@ -456,11 +514,15 @@ def raster_base_method(method):
     return FRONT_BASE_METHODS.get(method, method)
 
 
-def target_mesh_geometry_method(method):
+def target_mesh_geometry_method(method, space="dg0"):
     r"""The provenance name of geometry rebuilt from BedMachine on a target
     mesh under the raster sampling ``method``: vertex keeps the name its
     caches carry, a front sampling gets its own, so a cache built one way is
-    never read as the other."""
+    never read as the other. DG1 geometry (``space``) has names of its own
+    for the same reason."""
+    if space == "dg1":
+        return (TARGET_MESH_GEOMETRY_METHOD_DG1_FRONT if raster_front(method)
+                else TARGET_MESH_GEOMETRY_METHOD_DG1)
     if raster_front(method):
         return TARGET_MESH_GEOMETRY_METHOD_FRONT
     return TARGET_MESH_GEOMETRY_METHOD

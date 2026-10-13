@@ -159,6 +159,27 @@ ismip7_chain_resources() {
     return 0
 }
 
+# ISMIP7_CHAIN_THEN_CMD: a shell command a chain runs once, in the link that
+# finishes the run it carries (the inversion's MAP marked done, the forward at
+# its end year). The staged initialization routine
+# (antarctica/scripts/initialization_routine.sh) hands itself the next stage
+# with it. Every link inherits it through --export=ALL, since any link may be
+# the one that finishes; a forward's follow-ons (ISMIP7_CHAIN_THEN) start
+# chains of their own and do not. The command's failure is reported and does
+# not change the link's own verdict.
+ismip7_chain_then_cmd() {
+    local rc
+    [ -n "${ISMIP7_CHAIN_THEN_CMD:-}" ] || return 0
+    echo "chain: running the follow-on command: $ISMIP7_CHAIN_THEN_CMD"
+    if ( eval "$ISMIP7_CHAIN_THEN_CMD" ); then
+        echo "chain: follow-on command done"
+    else
+        rc=$?
+        echo "chain: WARNING the follow-on command exited $rc"
+    fi
+    return 0
+}
+
 # The file that defines `module` for a job that arrives without it. A job's
 # environment is the submitting shell's alone (submit.sh passes a bare
 # --export=ALL, so slurmd adds no login environment), and a shell that never

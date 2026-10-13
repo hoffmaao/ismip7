@@ -514,3 +514,40 @@ def test_an_explicit_apparent_mb_still_reaches_the_relaxation(sandbox):
                          ISMIP7_APPARENT_MB="1", ISMIP7_OUTPUT="1")
     assert rc == 0, log
     assert "apparent_mb=balance ismip7_output=True" in log
+
+
+def test_reaching_t_end_runs_the_follow_on_command_once(sandbox):
+    r"""The link that reaches the end year runs ISMIP7_CHAIN_THEN_CMD, after
+    queueing the follow-on runs, which start chains of their own without it."""
+    hook = sandbox / "hook_ran"
+    rc, log, calls = run_job(
+        sandbox, FAKE_T_YR="2015", FAKE_START_YEAR="2010", ISMIP7_T_END="2015",
+        ISMIP7_EXPERIMENT="hist_mri_esm2", ISMIP7_CHAIN_THEN="control",
+        ISMIP7_CHAIN_THEN_CMD=f"touch {hook}")
+    assert rc == 0, log
+    assert hook.exists()
+    assert "chain: follow-on command done" in log
+    submits = _submits(calls)
+    assert len(submits) == 1, calls
+    assert "ISMIP7_CHAIN_THEN_CMD" not in submits[0]
+
+
+def test_a_run_short_of_its_end_carries_the_follow_on_command_on(sandbox):
+    r"""Any link may be the one that finishes, so the successor inherits the
+    command; a link short of the end year does not run it."""
+    hook = sandbox / "hook_ran"
+    rc, log, calls = run_job(
+        sandbox, FAKE_T_YR="2012", FAKE_START_YEAR="2010", ISMIP7_T_END="2015",
+        ISMIP7_CHAIN_THEN_CMD=f"touch {hook}")
+    assert rc == 0, log
+    assert not hook.exists()
+    assert "resubmitting" in log
+    assert f"ENV: ISMIP7_CHAIN_THEN_CMD=touch {hook}\n" in calls
+
+
+def test_a_failing_follow_on_command_does_not_change_the_verdict(sandbox):
+    rc, log, _ = run_job(
+        sandbox, FAKE_T_YR="2015", FAKE_START_YEAR="2010", ISMIP7_T_END="2015",
+        ISMIP7_CHAIN_THEN_CMD="exit 3")
+    assert rc == 0, log
+    assert "WARNING the follow-on command exited 3" in log

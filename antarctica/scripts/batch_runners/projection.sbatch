@@ -34,6 +34,11 @@
 #   ISMIP7_EXPERIMENT=hist_mri_esm2 ISMIP7_ESM=MRI-ESM2-0 \
 #       ISMIP7_CHAIN_THEN="control ssp585_mri_esm2" submit.sh projection
 #
+# ISMIP7_CHAIN_THEN_CMD (site_core.sh) is a shell command the link that
+# reaches the end year runs once, after queueing the follow-ons; the staged
+# initialization routine (initialization_routine.sh) hands itself the next
+# stage with it, under an environment of its own rather than this run's.
+#
 # Sizing at the production step, 0.025 yr (issue 20). Rice measured 22.5 min
 # per simulated year at 1000 m / 10 km on 32 Cascade Lake ranks under
 # scpc_gamg, 62 simulated years per 24 h job. The timing matrix on Quartz
@@ -315,26 +320,35 @@ fi
 done_yet=$(python -c "print(1 if float('$LAST_YEAR') >= float('$T_END') - 1e-6 else 0)")
 if [ "$done_yet" = "1" ]; then
     echo "chain: reached t_end ${T_END} at ${LAST_YEAR}, finished"
+    # The follow-on command belongs to this run alone (site_core.sh); the
+    # follow-on runs below start chains of their own without it.
+    then_cmd="${ISMIP7_CHAIN_THEN_CMD:-}"
+    unset ISMIP7_CHAIN_THEN_CMD
     if [ -n "${ISMIP7_CHAIN_THEN:-}" ]; then
         if [ -z "${SLURM_JOB_ID:-}" ]; then
             echo "chain: no scheduler, so the follow-ons (${ISMIP7_CHAIN_THEN})" \
                  "are not queued; start them by hand"
-            exit 0
+        else
+            then_list="$ISMIP7_CHAIN_THEN"
+            # Each follow-on is a fresh chain: it resumes its own checkpoints,
+            # not this run's restart or wall budget, runs its driver's own
+            # period, not this run's ISMIP7_T_START / ISMIP7_T_END, and
+            # queues nothing further.
+            unset ISMIP7_CHAIN_THEN ISMIP7_WALL_STOP_MIN ISMIP7_RESTART \
+                  ISMIP7_T_START ISMIP7_T_END
+            ismip7_chain_resources
+            for next in $then_list; do
+                echo "chain: queueing the follow-on ${next}"
+                ISMIP7_EXPERIMENT="$next" \
+                    sbatch --dependency=afterok:"${SLURM_JOB_ID}" --export=ALL \
+                           "${ISMIP7_CHAIN_RES[@]}" \
+                           antarctica/scripts/batch_runners/projection.sbatch
+            done
         fi
-        then_list="$ISMIP7_CHAIN_THEN"
-        # Each follow-on is a fresh chain: it resumes its own checkpoints, not
-        # this run's restart or wall budget, runs its driver's own period, not
-        # this run's ISMIP7_T_START / ISMIP7_T_END, and queues nothing further.
-        unset ISMIP7_CHAIN_THEN ISMIP7_WALL_STOP_MIN ISMIP7_RESTART \
-              ISMIP7_T_START ISMIP7_T_END
-        ismip7_chain_resources
-        for next in $then_list; do
-            echo "chain: queueing the follow-on ${next}"
-            ISMIP7_EXPERIMENT="$next" \
-                sbatch --dependency=afterok:"${SLURM_JOB_ID}" --export=ALL \
-                       "${ISMIP7_CHAIN_RES[@]}" \
-                       antarctica/scripts/batch_runners/projection.sbatch
-        done
+    fi
+    if [ -n "$then_cmd" ]; then
+        export ISMIP7_CHAIN_THEN_CMD="$then_cmd"
+        ismip7_chain_then_cmd
     fi
     exit 0
 fi

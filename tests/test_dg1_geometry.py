@@ -128,11 +128,62 @@ def test_dg1_names_each_setting_it_does_not_carry():
     assert dg1_refusals() == []
     asked = dict(legacy_transport=True, subelement=True, apparent_mb="balance",
                  calving="vonmises", fracture="mask", backdate_years=12.0,
-                 ismip7_output=True, geometry_transfer=True, forcing=True)
+                 ismip7_output=True, geometry_transfer=True, forcing=True,
+                 timing_cache=True)
     lines = dg1_refusals(**asked)
     assert len(lines) == len(asked)
     for name in asked:
         assert len(dg1_refusals(**{name: asked[name]})) == 1
+
+
+def _redistribute(monkeypatch, *argv):
+    scripts = str(REPO / "antarctica" / "scripts")
+    monkeypatch.syspath_prepend(scripts)
+    import redistribute_checkpoint
+    monkeypatch.setattr("sys.argv", ["redistribute_checkpoint.py", *argv])
+    redistribute_checkpoint.main()
+
+
+def _dg1_full_state(path):
+    from firedrake import CheckpointFile
+    mesh = RectangleMesh(4, 4, 4e3, 4e3)
+    Q_g = G.geometry_function_space(mesh, "dg1")
+    Q = FunctionSpace(mesh, "CG", 1)
+    x, y = SpatialCoordinate(mesh)
+    H = Function(Q_g).interpolate(500.0 + 0.01 * x)
+    s = Function(Q_g).interpolate(400.0 + 0.002 * y)
+    with CheckpointFile(str(path), "w") as chk:
+        chk.save_mesh(mesh)
+        chk.save_function(Function(Q, name="log_friction"))
+        chk.save_function(Function(Q, name="log_fluidity"))
+        chk.save_function(H, name="N_ref_thickness")
+        chk.save_function(s, name="N_ref_surface")
+        chk.set_attr("/", "friction", "budd")
+        chk.set_attr("/", "geometry_space", "dg1")
+    return H, s
+
+
+def test_a_dg1_rewrite_keeps_the_budd_reference_geometry(tmp_path, monkeypatch):
+    from firedrake import CheckpointFile
+    path = tmp_path / "map_dg1.h5"
+    H, s = _dg1_full_state(path)
+    _redistribute(monkeypatch, "--input", str(path))
+    with CheckpointFile(str(path), "r") as chk:
+        mesh = chk.load_mesh()
+        for name, want in (("N_ref_thickness", H), ("N_ref_surface", s)):
+            got = chk.load_function(mesh, name)
+            assert np.allclose(np.sort(got.dat.data_ro),
+                               np.sort(want.dat.data_ro))
+
+
+def test_dg1_refuses_to_publish_a_timing_cache(tmp_path, monkeypatch):
+    path = tmp_path / "map_dg1.h5"
+    _dg1_full_state(path)
+    manifest = tmp_path / "cache.json"
+    with pytest.raises(ValueError, match="dg1 does not carry timing caches"):
+        _redistribute(monkeypatch, "--input", str(path), "--output",
+                      str(tmp_path / "cache.h5"), "--manifest", str(manifest))
+    assert not manifest.exists() and not (tmp_path / "cache.h5").exists()
 
 
 # ── the cell view and the positivity floor ───────────────────────────────

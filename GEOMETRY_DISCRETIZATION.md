@@ -578,7 +578,17 @@ For floating DG1 ice the two terms are exactly the distributional gradient of
 exact-front push decides which cells hold ice on their cell means
 (`H_cell`), and on piecewise-constant DG1 fields assembles DG0's residual to
 roundoff. The Budd HAF gate is pointwise: zero at every point of a floating
-cell, and a grounding line crossing a cell gates it point by point.
+cell, and a grounding line crossing a cell gates it point by point. The Budd
+reference pressure is pointwise as well: `N_ref` is
+`dual_friction.budd_reference_pressure` evaluated on the frozen t = 0
+thickness and surface, which a restart and a full-state MAP carry as
+`N_ref_thickness` and `N_ref_surface`, so `N_hat` starts at the inversion's
+own `N/N`. A nodal DG1 interpolant of `N` misses the kinks `N` has inside a
+cell (the bed at sea level, the 1 m overburden floor, flotation); on the
+32 km probe's DG1 MAP it put `N_hat` at a median 1.04, up to 1.7 in grounded
+cells whose bed crosses sea level and up to the cap of 3 near the grounding
+line, where clean grounded cells sit at exactly 1. DG0 keeps its per-cell
+`N_ref` Function built from the same expression.
 
 **Transport.** The same backward-Euler upwind solve with the DG volume term
 `-h u.grad(phi)` (`transport.transport_form`); the L2 error of its steady
@@ -611,7 +621,11 @@ apparent mass balance, the backdated start, the ISMIP7 output, level-set
 calving, the collapse mask, sub-element friction, a geometry rebuilt on
 another mesh, adaptive transfer and `ISMIP7_DHDT_WEIGHT`. Each decides per
 cell in a way the DG1 path does not implement, so `dg1` runs unforced
-forwards and inversions on the MAP's own mesh.
+forwards and inversions on the MAP's own mesh. It also refuses timing caches:
+one is prepared on another mesh and its contract
+(`timing_campaign.cache_required_fields`) names the DG0 `N_ref`, so
+`prepare_timing_cache.py`, `redistribute_checkpoint.py --manifest` and a
+forward reading a cache all stop under `dg1`.
 
 **The t = 0 imbalance is the data's.** The cell-scale part of the initial flux
 divergence, which the apparent mass balance cancels, is nearly the same in

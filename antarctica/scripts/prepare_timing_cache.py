@@ -33,7 +33,12 @@ from timing_campaign import (
     sha256_file,
     solver_configuration_fingerprint,
 )
-from icepack2_tools.runconfig import TARGET_MESH_GEOMETRY_METHOD, mesh_override
+from icepack2_tools.runconfig import (
+    TARGET_MESH_GEOMETRY_METHOD,
+    dg1_refusals,
+    geometry_space,
+    mesh_override,
+)
 
 
 def _required(name):
@@ -44,6 +49,8 @@ def _required(name):
 
 
 def main():
+    if geometry_space() == "dg1":
+        raise RuntimeError("; ".join(dg1_refusals(timing_cache=True)))
     inversion = os.path.realpath(_required("ISMIP7_INVERSION"))
     if mesh_override() is None:
         raise RuntimeError(

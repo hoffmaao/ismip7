@@ -298,7 +298,7 @@ def geometry_space_mismatch(run_space, recorded, source):
 def dg1_refusals(*, legacy_transport=False, subelement=False,
                  apparent_mb=None, calving="none", fracture="none",
                  backdate_years=0.0, ismip7_output=False,
-                 geometry_transfer=False, forcing=False):
+                 geometry_transfer=False, forcing=False, timing_cache=False):
     r"""What a ``dg1`` run does not carry, one line per setting that asks for
     it; empty when nothing conflicts.
 
@@ -307,7 +307,9 @@ def dg1_refusals(*, legacy_transport=False, subelement=False,
     balance, the backdated geometry, the ISMIP7 output, the level-set front,
     the collapse mask and transfers onto another mesh each decide per cell in
     ways the DG1 path does not implement (GEOMETRY_DISCRETIZATION.md, "DG1
-    geometry"), so a run asking for one stops at setup."""
+    geometry"), so a run asking for one stops at setup. A timing cache is
+    prepared on another mesh and its contract names the DG0 restart fields,
+    so building, publishing or reading one stops as well."""
     asked = (
         (legacy_transport, "ISMIP7_LEGACY_TRANSPORT (a CG1 scheme)"),
         (subelement, "sub-element friction (ISMIP7_SUBELEMENT_FRICTION)"),
@@ -320,6 +322,8 @@ def dg1_refusals(*, legacy_transport=False, subelement=False,
         (ismip7_output, "the ISMIP7 output (ISMIP7_OUTPUT)"),
         (geometry_transfer, "a geometry rebuilt on another mesh than the MAP's"),
         (forcing, "SMB and ocean forcing (a forcing callback)"),
+        (timing_cache, "timing caches (prepare_timing_cache.py, "
+                       "redistribute_checkpoint.py --manifest, run_timing.py)"),
     )
     return [f"ISMIP7_GEOMETRY_SPACE=dg1 does not carry {what}"
             for on, what in asked if on]

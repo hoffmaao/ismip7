@@ -26,7 +26,7 @@ from firedrake import (And, Function, FunctionSpace, Mesh, assemble, avg,
 from firedrake.petsc import PETSc
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", ".."))
-from icepack2_tools.geometry import sample_to_geometry  # noqa: E402
+from icepack2_tools.geometry import sample_bed_thickness, sample_to_geometry  # noqa: E402, F401
 
 mesh_fn = sys.argv[1]
 bm = os.environ.get("ISMIP7_BEDMACHINE") or sorted(glob.glob(os.path.join(
@@ -96,12 +96,17 @@ _fq.dat.data[:] = np.nan_to_num(P.raster_at(rasterio.open(f"netcdf:{bm}:thicknes
 vol_raster = assemble(_fq * P._measure((_deg, "default"))) / 1e9
 PETSc.Sys.Print(f"  BedMachine thickness over the mesh (quadrature degree {_deg}): {vol_raster:.4e} km3")
 
+# Methods to compare: the base samplings and, with _front, the front rule on
+# top of them (geometry.sample_bed_thickness). Override with a comma list as
+# the second argument.
+methods = (sys.argv[2].split(",") if len(sys.argv) > 2
+           else ["vertex", "cell_mean", "patch", "vertex_front", "patch_front"])
 res = {}
-for method in ("vertex", "cell_mean", "patch"):
+for method in methods:
     t0 = time.time()
-    b = sample_to_geometry(rasterio.open(f"netcdf:{bm}:bed"), Q, Qc, method=method)
-    H = sample_to_geometry(rasterio.open(f"netcdf:{bm}:thickness"), Q, Qc,
-                           floor=0.0, method=method)
+    b, H, counts = sample_bed_thickness(bm, Q, Qc, floor=0.0, method=method)
+    if counts is not None:
+        PETSc.Sys.Print(f"  {method:12s} front cells: {counts}")
     r = stats(b, H)
     r["t"] = time.time() - t0
     # DG0 flotation as the momentum balance sees it, vs BedMachine's fraction
@@ -116,17 +121,19 @@ for method in ("vertex", "cell_mean", "patch"):
     r["b"], r["H"] = b, H
     res[method] = r
     PETSc.Sys.Print(
-        f"  {method:9s}  rms|jump| all: b {r['rms_jb']:7.2f}  s {r['rms_js']:7.2f}  h {r['rms_jh']:7.2f} m"
+        f"  {method:12s}  rms|jump| all: b {r['rms_jb']:7.2f}  s {r['rms_js']:7.2f}  h {r['rms_jh']:7.2f} m"
         f"  | grounded: b {r['rms_jb_g']:7.2f}  s {r['rms_js_g']:7.2f} m"
         f"  | front<h> {r['front_h']:6.1f} m  vol {r['vol_km3']:.4e} km3 "
         f"({100 * (r['vol_km3'] / vol_raster - 1):+.3f}% of the raster)  [{r['t']:.1f}s]")
     PETSc.Sys.Print(
-        f"  {'':9s}  INTERIOR (facets between two >10 km cells, {n_big} such cells): "
+        f"  {'':12s}  INTERIOR (facets between two >10 km cells, {n_big} such cells): "
         f"rms|jump| b {r['rms_jb_i']:7.2f}  s {r['rms_js_i']:7.2f}  h {r['rms_jh_i']:7.2f} m")
     PETSc.Sys.Print(
-        f"  {'':9s}  flotation: grounded {r['ng']} floating {r['nf']} cells of {n_cells}; "
+        f"  {'':12s}  flotation: grounded {r['ng']} floating {r['nf']} cells of {n_cells}; "
         f"grounded-but-BedMachine<50% {r['g_wrong']}, floating-but-BedMachine>50% {r['f_wrong']}")
 
+if not {"vertex", "cell_mean", "patch"} <= set(res):
+    sys.exit(0)
 db = Function(Q).assign(res["cell_mean"]["b"] - res["vertex"]["b"])
 area = assemble(one * dx)
 rms_db = math.sqrt(assemble(db ** 2 * dx) / area)

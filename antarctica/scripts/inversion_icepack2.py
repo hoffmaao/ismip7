@@ -371,12 +371,10 @@ if FLUIDITY_CONTROL not in ("all", "floating"):
     raise ValueError(
         f"ISMIP7_FLUIDITY_CONTROL must be all|floating, got {FLUIDITY_CONTROL!r}")
 PHI_GROUNDED = "zero" if FLUIDITY_CONTROL == "floating" else "inverted"
-if (FLUIDITY_CONTROL == "floating"
-        and os.environ.get("ISMIP7_GRAD_PRECOND", "none").lower()
-        in ("mass_consistent", "prior")):
-    raise ValueError(
-        "ISMIP7_FLUIDITY_CONTROL=floating holds grounded phi at zero on the "
-        "L-BFGS-B path only (ISMIP7_GRAD_PRECOND=none or mass)")
+# On the TAO path (13 Oct 2026) the control phi enters the objective, misfit
+# and prior alike, as phi * phi_free, so the grounded dofs are inert (zero
+# gradient) and the metric action zeroes them in every step; the MAP's
+# log_fluidity carries zeros there, as under L-BFGS-B.
 
 # ── Which controls move (ISMIP7_INVERT) ──────────────────────────────────
 # `both` (default): theta and phi descend together. `phi` / `theta`: only
@@ -577,6 +575,17 @@ def main():
     # sink the surface by the water column (runconfig.lake_ice_base).
     LAKE_ICE_BASE = lake_ice_base()
     ANCHOR_LENGTH = anchor_length()     # read here: the warm start checks it too
+    # ISMIP7_KILL_BERGS=1: ice that no chain of ice cells connects to
+    # grounded ice is removed (geometry.remove_unconnected_ice): a floating
+    # island carries the full terminus push on every facet and no
+    # buttressing, and the momentum balance has nothing to hold it.
+    KILL_BERGS = os.environ.get("ISMIP7_KILL_BERGS", "0").strip() == "1"
+    if KILL_BERGS:
+        from icepack2_tools.geometry import remove_unconnected_ice
+        _n_berg, _a_berg = remove_unconnected_ice(H, b, Q_g)
+        PETSc.Sys.Print(
+            f"  Icebergs: {_n_berg} ice cells unconnected to grounded ice "
+            f"removed ({_a_berg / 1e6:.0f} km2) (ISMIP7_KILL_BERGS)")
     if LAKE_ICE_BASE:
         n_lake = raise_bed_to_lake_ice_base(b, H, bm_fn, Q_g, Q, method=raster_sample)
         PETSc.Sys.Print(f"  Lake ice base: bed raised to BedMachine's ice base on "
@@ -641,6 +650,18 @@ def main():
         observed = np.asarray(emag.dat.data_ro > 0.0)
         PETSc.Sys.Print("  Velocity sampling: point (bilinear at the vertex)")
 
+    # ISMIP7_U_OBS_MAX (m/yr, 0 = off): nodes whose observed speed exceeds
+    # it carry no weight. The fastest MEaSUREs pixels sit on shear margins
+    # and fronts where the product is noisiest; a cap keeps the fit from
+    # being bought there. The nodes stay in the regularisation.
+    U_OBS_MAX = float(os.environ.get("ISMIP7_U_OBS_MAX", "0"))
+    if U_OBS_MAX > 0.0:
+        _speed_obs = np.hypot(u_obs.dat.data_ro[:, 0], u_obs.dat.data_ro[:, 1])
+        _capped = observed & (_speed_obs > U_OBS_MAX)
+        observed = observed & ~_capped
+        PETSc.Sys.Print(
+            f"  Obs speed cap: {COMM_WORLD.allreduce(int(_capped.sum()))} nodes "
+            f"faster than {U_OBS_MAX:g} m/yr carry no weight (ISMIP7_U_OBS_MAX)")
     obs_mask = Function(Q, name="obs_mask").assign(1.0)
     if os.environ.get("ISMIP7_OBS_MASK", "1") != "0":
         obs_mask.dat.data[:] = observed.astype(float)
@@ -1937,6 +1958,33 @@ def main():
     # Normalize by the OBSERVED area so the misfit magnitude stays
     # comparable between masked and unmasked runs.
     area_val = assemble(obs_mask * dx(mesh))
+
+    # ISMIP7_DHDT_REWEIGHT (a, 0 = off): the velocity chi^2 of a node is
+    # multiplied by 1 + a * min(|dH/dt_obs| / ISMIP7_DHDT_REWEIGHT_SCALE, 1)
+    # on grounded ice, so the observed thinning steers where the velocity
+    # fit is spent instead of entering the objective as a tendency to match
+    # (ISMIP7_DHDT_WEIGHT). The two can be combined. The Smith field is
+    # binned to the cells and lifted to the nodes; cells without coverage
+    # weigh 1. Recorded as dhdt_reweight; part of the objective.
+    DHDT_REWEIGHT = float(os.environ.get("ISMIP7_DHDT_REWEIGHT", "0"))
+    DHDT_REWEIGHT_SCALE = float(os.environ.get("ISMIP7_DHDT_REWEIGHT_SCALE", "1.0"))
+    vel_weight = None
+    if DHDT_REWEIGHT > 0.0:
+        from icepack2_tools.obs_dhdt import load_dhdt_obs as _load_dhdt_obs_w
+        _dobs, _dcov = _load_dhdt_obs_w(Q_g)
+        _haf_w = Function(Q_g).interpolate(height_above_flotation(H, b))
+        _k = Function(Q_g)
+        _k.dat.data[:] = np.where(
+            (_dcov.dat.data_ro > 0.5) & (_haf_w.dat.data_ro > 0.0) & (H.dat.data_ro > 1.0),
+            np.minimum(np.abs(_dobs.dat.data_ro) / DHDT_REWEIGHT_SCALE, 1.0), 0.0)
+        _k_cg = cg1_lift(_k) if geom_dg else _k
+        vel_weight = Function(Q, name="vel_weight").interpolate(
+            Constant(1.0) + Constant(DHDT_REWEIGHT) * _k_cg)
+        _wsum = assemble(obs_mask * vel_weight * dx(mesh)) / area_val
+        PETSc.Sys.Print(
+            f"  dH/dt re-weighting: velocity chi^2 x (1 + {DHDT_REWEIGHT:g} "
+            f"min(|dH/dt|/{DHDT_REWEIGHT_SCALE:g} m/yr, 1)) on grounded ice; "
+            f"mean weight over observed nodes {_wsum:.3f}")
     # ISMIP7_MISFIT_SCALE: the multiplier that turns the mean chi^2 into the
     # likelihood the prior is weighed against (see the knob's comment).
     if MISFIT_SCALE == "nodes":
@@ -2569,6 +2617,7 @@ def main():
             0.5
             / area_val
             * obs_mask
+            * (vel_weight if vel_weight is not None else Constant(1.0))
             * (
                 (u_sol[0] - u_obs[0]) ** 2 / sig_ux ** 2
                 + (u_sol[1] - u_obs[1]) ** 2 / sig_uy ** 2
@@ -2943,6 +2992,10 @@ def main():
             # front treatment, so a forward must reproduce it.
             chk.set_attr("/", "raster_sample", raster_sample)
             chk.set_attr("/", "vel_sample", VEL_SAMPLE)
+            chk.set_attr("/", "u_obs_max", float(U_OBS_MAX))
+            chk.set_attr("/", "dhdt_reweight", float(DHDT_REWEIGHT))
+            chk.set_attr("/", "dhdt_reweight_scale", float(DHDT_REWEIGHT_SCALE))
+            chk.set_attr("/", "kill_bergs", int(KILL_BERGS))
             # How each evaluation reached the full exponents: 1 for the
             # five-solve continuation, 0 for one solve. A solver fact, outside
             # the objective (handoff.OBJECTIVE_KEYS).
@@ -3062,6 +3115,10 @@ def main():
                 "dhdt_net_sigma": float(net_sigma_used),
                 "dhdt_filter_l": float(dhdt_filter_l) if use_dhdt else 0.0,
                 "vel_sample": VEL_SAMPLE,
+                "u_obs_max": float(U_OBS_MAX),
+                "dhdt_reweight": float(DHDT_REWEIGHT),
+                "dhdt_reweight_scale": float(DHDT_REWEIGHT_SCALE),
+                "kill_bergs": int(KILL_BERGS),
                 "grad_precond": os.environ.get(
                     "ISMIP7_GRAD_PRECOND", "none"
                 ).lower(),
@@ -3496,9 +3553,27 @@ def main():
             PETSc.Sys.Print("  GRAD_CHECK: stopped after the Taylor test; no MAP written")
             COMM_WORLD.barrier()
             sys.exit(0)
+        # A floating-only fluidity control: the forward already reads
+        # phi * (1 - He) (build_F), so the misfit does not depend on the
+        # grounded dofs; the metric action zeroes their part of every step
+        # and of the gradient norm, so they never leave zero (the prior's
+        # coupling across the grounding line enters the curvature pairs
+        # only through components the step cannot move). A recorded
+        # product of two Functions is not an assignment Firedrake allows,
+        # so the masking is not put on the tape.
+        if phi_free is not None:
+            def _A_inv_phi_masked(g_theta, g_phi):
+                # the action returns one entry per block that is not None,
+                # phi last
+                out = _A_inv(g_theta, g_phi)
+                if g_phi is not None:
+                    out[-1].dat.data[:] = out[-1].dat.data_ro * phi_free.dat.data_ro
+                return out
+        else:
+            _A_inv_phi_masked = _A_inv
         if INVERT == "both":
-            _tao_forward, _tao_spaces, _tao_x, _tao_action = (
-                forward_total, [Q, Q], [theta, phi], _A_inv)
+            _tao_forward = forward_total
+            _tao_spaces, _tao_x, _tao_action = [Q, Q], [theta, phi], _A_inv_phi_masked
         else:
             # One control moves. The other enters the forward as a fixed
             # coefficient (not a control: no gradient, its prior term a
@@ -3511,7 +3586,7 @@ def main():
                     return forward_total(_frozen, phi_ctrl)
 
                 def _tao_action(g_phi):
-                    return _A_inv(None, g_phi)
+                    return _A_inv_phi_masked(None, g_phi)
                 _tao_x = [phi]
             else:
                 def _tao_forward(theta_ctrl):
@@ -3524,10 +3599,21 @@ def main():
             PETSc.Sys.Print(
                 f"  Controls: {INVERT} only (ISMIP7_INVERT); "
                 f"{'phi' if INVERT == 'theta' else 'theta'} frozen at its current field")
+        # ISMIP7_PHI_BOUNDS="lo,hi": box bounds on the fluidity control under
+        # TAO's bounded LMVM (theta unbounded). exp(phi) excursions of 1e6
+        # have been seen on shelves; a bound in log units keeps A inside the
+        # range the temperature of ice allows. Recorded as phi_bounds.
+        _phi_bounds_env = os.environ.get("ISMIP7_PHI_BOUNDS", "").strip()
+        PHI_BOUNDS = (tuple(float(v) for v in _phi_bounds_env.split(",")) if _phi_bounds_env
+                      else None)
+        if PHI_BOUNDS is not None and (len(PHI_BOUNDS) != 2 or PHI_BOUNDS[0] >= PHI_BOUNDS[1]):
+            raise ValueError(f"ISMIP7_PHI_BOUNDS must be 'lo,hi' with lo < hi, got {_phi_bounds_env!r}")
+        if PHI_BOUNDS is not None and INVERT == "theta":
+            PHI_BOUNDS = None
         solver = TAOSolver(
             _tao_forward, _tao_spaces,
             solver_parameters={
-                "tao_type": "lmvm",
+                "tao_type": "blmvm" if PHI_BOUNDS is not None else "lmvm",
                 "tao_max_it": max_iter,
                 # The gradient norm TAO tests is the one M_inv_action defines,
                 # i.e. sqrt(g' A^-1 g) -- mesh independent, unlike the raw l2
@@ -3539,6 +3625,26 @@ def main():
             },
             H_0_action=_tao_action, M_inv_action=_tao_action,
         )
+        if PHI_BOUNDS is not None:
+            # The TAO vector is the concatenation of the controls' owned dofs
+            # in _tao_x order (tlm_adjoint PETScVecInterface); theta's part
+            # is unbounded.
+            _lo_parts, _hi_parts = [], []
+            for _xc in _tao_x:
+                _nloc = _xc.dat.data_ro.size
+                if _xc is phi:
+                    _lo_parts.append(np.full(_nloc, PHI_BOUNDS[0]))
+                    _hi_parts.append(np.full(_nloc, PHI_BOUNDS[1]))
+                else:
+                    _lo_parts.append(np.full(_nloc, PETSc.NINFINITY))
+                    _hi_parts.append(np.full(_nloc, PETSc.INFINITY))
+            _lo_vec = PETSc.Vec().createWithArray(np.concatenate(_lo_parts), comm=solver.tao.comm)
+            _hi_vec = PETSc.Vec().createWithArray(np.concatenate(_hi_parts), comm=solver.tao.comm)
+            solver.tao.setVariableBounds(_lo_vec, _hi_vec)
+            phi.dat.data[:] = np.clip(phi.dat.data_ro, PHI_BOUNDS[0], PHI_BOUNDS[1])
+            PETSc.Sys.Print(
+                f"  Fluidity bounds: {PHI_BOUNDS[0]:g} <= phi <= {PHI_BOUNDS[1]:g} "
+                f"(TAO blmvm; ISMIP7_PHI_BOUNDS)")
 
         _t_last = [perf_counter()]
         _ftol_stop = FunctionalDecreaseStop(ftol, min_iter)
@@ -3747,7 +3853,9 @@ def main():
         "fluidity_control": FLUIDITY_CONTROL,
         "drag_gate": DRAG_RECORD, "h_visc_floor": float(RC_HVISC_FLOOR),
         "phi_grounded": PHI_GROUNDED, "raster_sample": str(raster_sample),
-        "vel_sample": VEL_SAMPLE,
+        "vel_sample": VEL_SAMPLE, "u_obs_max": float(U_OBS_MAX),
+        "dhdt_reweight": float(DHDT_REWEIGHT),
+        "dhdt_reweight_scale": float(DHDT_REWEIGHT_SCALE), "kill_bergs": int(KILL_BERGS),
     })
     if PRIOR_FORM == "bilaplacian":
         run_settings.update({"prior_sigma_theta": float(PRIOR_SIGMA_THETA),

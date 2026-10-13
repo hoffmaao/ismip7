@@ -1686,6 +1686,14 @@ def setup_model(restart_from=None, *, allow_timing_cache_a_ref=False,
             getattr(context, "condensed_iterations", 0),
         )
 
+    _accept_unconverged = os.environ.get("ISMIP7_ACCEPT_UNCONVERGED", "0").strip() == "1"
+    _accepted_unconverged = [0]
+    if _accept_unconverged:
+        PETSc.Sys.Print(
+            "  Diagnostic solves: a solve stopped by the iteration cap or the "
+            "line search with a finite residual is ACCEPTED as it stands "
+            "(ISMIP7_ACCEPT_UNCONVERGED=1); not for a published budget")
+
     def solve_diagnostic(label, **metadata):
         if subelement is not None:
             # the grounded part of each cell follows the live geometry
@@ -1696,7 +1704,22 @@ def setup_model(restart_from=None, *, allow_timing_cache_a_ref=False,
         work_before = _condensed_work()
         t0_solve = perf_counter()
         try:
-            return slvr.solve()
+            try:
+                return slvr.solve()
+            except fd.ConvergenceError:
+                # ISMIP7_ACCEPT_UNCONVERGED=1: a solve that ran out of
+                # iterations or line-search steps with a finite residual is
+                # taken as it stands, the way a fixed-iteration Picard
+                # scheme takes its last iterate. Logged on the result line;
+                # a diverged (NaN/inf) residual is still an error.
+                _reason = int(slvr.snes.getConvergedReason())
+                _fn = float(slvr.snes.getFunctionNorm())
+                if (_accept_unconverged and np.isfinite(_fn)
+                        and _reason in (PETSc.SNES.ConvergedReason.DIVERGED_MAX_IT,
+                                        PETSc.SNES.ConvergedReason.DIVERGED_LINE_SEARCH)):
+                    _accepted_unconverged[0] += 1
+                    return None
+                raise
         finally:
             elapsed = perf_counter() - t0_solve
             reason = slvr.snes.getConvergedReason()
@@ -1709,6 +1732,7 @@ def setup_model(restart_from=None, *, allow_timing_cache_a_ref=False,
                 "linear_iterations": slvr.snes.getLinearSolveIterations(),
                 "function_norm": slvr.snes.getFunctionNorm(),
                 "seconds": elapsed,
+                "accepted_unconverged": int(_accepted_unconverged[0]),
             }
             condensed = ""
             if work_before is not None:

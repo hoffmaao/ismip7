@@ -32,6 +32,8 @@ the MEaSUReS errors are correlated over far more than a cell) and the
 sub-patch variance of the observation reported as the representativeness
 error a point sample incurs.
 """
+import os
+
 import numpy as np
 from mpi4py import MPI
 
@@ -63,12 +65,13 @@ def raster_at(dataset, x, y):
     NaN where the pixel is nodata or outside the raster. One window covering
     the rank's points is read (the whole raster under a scattered
     partition, as ``geometry.raster_cell_mean`` tolerates)."""
-    from rasterio.transform import rowcol
+    import time
     from rasterio.windows import from_bounds
 
     out = np.full(x.shape, np.nan)
     if x.size == 0:
         return out
+    t0 = time.perf_counter()
     bnd = dataset.bounds
     inside = (x >= bnd.left) & (x <= bnd.right) & (y >= bnd.bottom) & (y <= bnd.top)
     if not inside.any():
@@ -82,13 +85,24 @@ def raster_at(dataset, x, y):
     win = win.round_lengths(op="ceil").round_offsets(op="floor")
     arr = dataset.read(1, window=win, masked=True)
     arr = np.ma.filled(arr.astype("f8"), np.nan)
-    rows, cols = rowcol(dataset.transform, x[inside], y[inside])
-    r = np.asarray(rows) - int(win.row_off)
-    c = np.asarray(cols) - int(win.col_off)
+    t1 = time.perf_counter()
+    # pixel containment from the affine transform directly (rasterio's
+    # rowcol loops in Python in some versions; this is 46 M points at 2 km)
+    T = dataset.transform
+    inv = ~T
+    xi, yi = x[inside], y[inside]
+    fc = inv.a * xi + inv.b * yi + inv.c
+    fr = inv.d * xi + inv.e * yi + inv.f
+    r = np.floor(fr).astype(np.int64) - int(win.row_off)
+    c = np.floor(fc).astype(np.int64) - int(win.col_off)
     ok = (r >= 0) & (r < arr.shape[0]) & (c >= 0) & (c < arr.shape[1])
     vals = np.full(r.shape, np.nan)
     vals[ok] = arr[r[ok], c[ok]]
     out[inside] = vals
+    t2 = time.perf_counter()
+    if os.environ.get("ISMIP7_PATCH_TIMING", "0") == "1":
+        print(f"  [patchmean] {dataset.name.split(':')[-1]}: window {arr.shape} read "
+              f"{t1 - t0:.1f}s, {xi.size} lookups {t2 - t1:.1f}s", flush=True)
     return out
 
 

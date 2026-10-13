@@ -32,7 +32,7 @@ OBJECTIVE_KEYS = (
     "grad_precond", "subelement_friction", "subelement_scheme",
     "subelement_scheme_version", "exact_front", "fluidity_control",
     "drag_gate", "h_visc_floor", "phi_grounded", "raster_sample",
-    "vel_sample",
+    "vel_sample", "u_obs_max", "dhdt_reweight", "dhdt_reweight_scale", "kill_bergs",
 )
 
 # The residual each sub-element scheme builds today (icepack2_tools.subelement),

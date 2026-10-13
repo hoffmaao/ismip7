@@ -93,9 +93,10 @@ from icepack2_tools.dual_friction import (
     weertman_anchor,
 )
 from icepack2_tools.geometry import (
-    cg1_lift, front_changed_nodes, raise_bed_to_lake_ice_base,
-    sample_bed_thickness, sample_to_geometry,
+    cg1_lift, front_changed_nodes, geometry_function_space,
+    raise_bed_to_lake_ice_base, sample_bed_thickness, sample_to_geometry,
 )
+from icepack2_tools.cellview import CellView
 from icepack2_tools.preconditioners import frozen_linearization, with_scpc_blocks
 from icepack2_tools.taped_solve import StateSolverCache, taped_state_solve
 from icepack2_tools.transfer import (
@@ -111,6 +112,9 @@ from icepack2_tools.runconfig import (
     obs_data_root,
     BUDD_SHELF_GATE,
     friction as _friction, geometry_space as _geometry_space,
+    geometry_space_mismatch as _geometry_space_mismatch,
+    dg1_refusals as _dg1_refusals, target_mesh_geometry_method,
+    DISCONTINUOUS_GEOMETRY_SPACES,
     raster_sample as _raster_sample,
     lc as _lc, lc_coarse as _lc_coarse, n_flow as _n_flow,
     eval_continuation, inversion_mesh_source, transfer_fill, drag_gate,
@@ -548,10 +552,15 @@ def main():
     # carries the lumped lift's inflated calving-front thickness into the
     # friction field, and the t=0 velocity misfit cannot reveal it.
     geometry_space = _geometry_space()
-    geom_dg = geometry_space == "dg0"
+    geom_dg = geometry_space in DISCONTINUOUS_GEOMETRY_SPACES
+    geom_dg1 = geometry_space == "dg1"
     raster_sample = _raster_sample()
-    Q_g = FunctionSpace(mesh, "DG", 0) if geom_dg else Q
+    Q_g = geometry_function_space(mesh, geometry_space) if geom_dg else Q
     PETSc.Sys.Print(f"  Geometry space: {geometry_space.upper()}")
+    if geom_dg1:
+        _refusals = _dg1_refusals(subelement=SUBELEMENT_FRICTION)
+        if _refusals:
+            raise RuntimeError("; ".join(_refusals))
 
     # ── Load Data ──
     PETSc.Sys.Print("Loading data...")
@@ -887,6 +896,12 @@ def main():
             for _key in OBJECTIVE_KEYS + OBJECTIVE_RECORD_KEYS:
                 if chk.has_attr("/", _key):
                     warm_attrs[_key] = chk.get_attr("/", _key)
+            # a DG1 warm start seeds only a DG1 inversion, and the reverse
+            _space_refusal = _geometry_space_mismatch(
+                geometry_space, warm_attrs.get("geometry_space"),
+                os.path.basename(warm_chk))
+            if _space_refusal:
+                raise RuntimeError(_space_refusal)
             for _key in RELAX_MAP_KEYS + (END_STATE_ATTR, "geometry_source",
                                           "geometry_source_method", "t_yr", "stalled"):
                 if chk.has_attr("/", _key):
@@ -1653,6 +1668,10 @@ def main():
             f"  Fluidity control: phi acts on floating ice only and is held at 0 "
             f"on {_n_all - _n_free} of {_n_all} nodes (grounded ice keeps the "
             f"prior fluidity)")
+    # DG1: the cell means of H, which decide the ice edges of the exact-front
+    # push (dual_friction.front_cliff_correction). None under DG0, where H is
+    # its own cell value.
+    H_cell = CellView(Q_g).mean_function(H) if geom_dg1 else None
 
     def build_F(theta_c, phi_c, *, scpc_blocks=state_scpc):
         F_c = _build_residual(theta_c, phi_c)
@@ -1700,6 +1719,7 @@ def main():
                 k_lim=0.0, **stabilizers, drag_mask=drag_mask,
                 calving_ids=calving_ids if use_calving_terminus else None,
                 exact_front=EXACT_FRONT, front_hmin=front_hmin(),
+                H_cell=H_cell,
             )
         return derivative(_build_action(theta_c, phi_c, fields), z)
 
@@ -2090,7 +2110,7 @@ def main():
     # carries the answer.
     k_npz_used = "none"
     if use_dhdt:
-        if not geom_dg:
+        if geometry_space != "dg0":
             raise RuntimeError(
                 "ISMIP7_DHDT_WEIGHT requires ISMIP7_GEOMETRY_SPACE=dg0: the "
                 "prognostic step is the DG0 upwind FV operator and must act on "
@@ -2725,7 +2745,9 @@ def main():
             # this mesh's own BedMachine sample (icepack2_tools.relaxation).
             if run_geometry is None:
                 chk.set_attr("/", "geometry_source", os.path.realpath(bm_fn))
-                chk.set_attr("/", "geometry_source_method", TARGET_MESH_GEOMETRY_METHOD)
+                chk.set_attr("/", "geometry_source_method",
+                             target_mesh_geometry_method(raster_sample, "dg1")
+                             if geom_dg1 else TARGET_MESH_GEOMETRY_METHOD)
             else:
                 for _key, _val in run_geometry.items():
                     chk.set_attr("/", _key, _val)

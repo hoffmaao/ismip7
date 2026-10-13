@@ -8,6 +8,9 @@ reference `a_ref_mb` is a per-cell transport source and stays DG0 either way.
 - `dg0` (default): cell-wise geometry. The momentum solve and the mass
   transport share one thickness field.
 - `cg1`: the pre-August-2026 behaviour, kept for A/B comparison.
+- `dg1`: cell-wise linear geometry, discontinuous across cells, on vertex
+  nodes. One thickness field as under `dg0`, at second order. See "DG1
+  geometry" below for what it carries and what it refuses.
 
 The control fields (`theta`, `phi`, `fluidity_prior`, `obs_mask`) and the
 velocity stay CG1 in both modes. The controls are regularized by a
@@ -535,6 +538,94 @@ vertex-sampled, the 865.0 Gt/yr table, 21 September 2026):
    missed basins 1 and 7 on Rice's by 0.18 and 0.17 percent, with offsets at
    most 0.0008 K apart. At 32 km the offsets put the basins at 0.33 to 1.74
    times their totals, 1069.5 Gt/yr in all.
+
+## DG1 geometry
+
+`ISMIP7_GEOMETRY_SPACE=dg1` holds `h`, `s` and `b` cell-wise linear, on the
+three vertices of each cell, with jumps across facets. Built for the question
+whether a second-order geometry with sharp fronts removes the cell-scale dH
+streaks of long DG0 forwards.
+
+**Vertex nodes.** The space is `FunctionSpace(mesh, "DG", 1,
+variant="equispaced")` (`geometry.geometry_function_space`). Firedrake's
+default DG1 puts the nodes inside the cell, where a nodal floor does not bound
+the field at the vertices and a vertex sample is not the CG1 interpolant.
+`cellview.CellView` refuses any other DG1.
+
+**Sampling.** `vertex` holds the CG1 vertex interpolant exactly, so a cold
+start's geometry is continuous and its cell means are the DG0 sample: on the
+buffer-0 meshes the means of `h` and `b` differ from DG0's by 9.1e-13 m at
+32 km and 1.4e-12 m at 8 km. `vertex_front` classifies cells as under DG0 and
+writes a rebuilt or water cell at all three nodes, so it is constant and its
+mean is again the DG0 cell's value; every other cell keeps its linear sample.
+`cell_mean` has no DG1 rule and is refused.
+
+**Driving stress.** Both terms of `build_rc_residual` carry force: the cell
+gradient the smooth part, the facet jump the rest. Against a smooth test field
+on an L2-projected surface (`tests/test_dg1_geometry.py`), relative error of
+the driving force:
+
+| n | DG0 | DG1 | CG1 |
+|---|---|---|---|
+| 16 | 1.99e-2 | 7.08e-3 | 7.25e-3 |
+| 32 | 1.21e-2 | 1.80e-3 | 1.79e-3 |
+| 64 | 6.55e-3 | 4.54e-4 | 4.47e-4 |
+| rate, 32 to 64 | 0.88 | 1.99 | 2.00 |
+
+For floating DG1 ice the two terms are exactly the distributional gradient of
+`rho_I g (1 - rho_I/rho_W) H^2 / 2` (cell: `H grad H = grad(H^2) / 2`; facet:
+`avg(H) jump(H) = jump(H^2) / 2`), the balance the terminus traction uses. The
+exact-front push decides which cells hold ice on their cell means
+(`H_cell`), and on piecewise-constant DG1 fields assembles DG0's residual to
+roundoff. The Budd HAF gate is pointwise: zero at every point of a floating
+cell, and a grounding line crossing a cell gates it point by point.
+
+**Transport.** The same backward-Euler upwind solve with the DG volume term
+`-h u.grad(phi)` (`transport.transport_form`); the L2 error of its steady
+solution on a manufactured problem converges at rate 1.96 against DG0's 0.99
+(32 to 64 cells a side). Testing with 1 still leaves only the boundary
+outflow, so the transport residual and `resid` close exactly as under DG0. The
+only limiter is a positivity floor (`cellview.clamp_cells`): a cell whose mean
+falls below the floor is filled to it and booked as clamp, and a cell whose
+lowest vertex does has its slope scaled until that vertex sits on the floor,
+keeping the mean. The slope scaling's mass change is measured every advance
+and held to the transport tolerance. Firedrake's `VertexBasedLimiter` is kept
+out: thickness peaks wherever ice fills a bed trough under a smooth surface,
+and clipping those peaks rebuilds the surface roughness DG1 removes. On
+BedMachine's `vertex` sample:
+
+| buffer-0 mesh | rms jump of `s` over ice facets: DG0 / DG1 / DG1 after `VertexBasedLimiter` | ice cells the limiter moves by more than 1 m |
+|---|---|---|
+| 32 km | 238.4 / 0 / 77.4 m | 6,310 of 9,035 (p99 508 m) |
+| 8 km | 106.1 / 0 / 67.1 m | 38,360 of 64,156 (p99 558 m) |
+
+**Per-cell rules** read cell means (`cellview.CellView`): the forcing mask, the
+fixed front's removals (booked at mean times area), the drag gate and the
+tripwire. A DG1 MAP is named `_dg1` and records `geometry_space=dg1`; a DG1
+state seeds only a DG1 run and a DG1 run starts only from one, on every path
+(`runconfig.geometry_space_mismatch`).
+
+**What `dg1` refuses** (`runconfig.dg1_refusals`): SMB and ocean forcing, the
+apparent mass balance, the backdated start, the ISMIP7 output, level-set
+calving, the collapse mask, sub-element friction, a geometry rebuilt on
+another mesh, adaptive transfer and `ISMIP7_DHDT_WEIGHT`. Each decides per
+cell in a way the DG1 path does not implement, so `dg1` runs unforced
+forwards and inversions on the MAP's own mesh.
+
+**The t = 0 imbalance is the data's.** The cell-scale part of the initial flux
+divergence, which the apparent mass balance cancels, is nearly the same in
+both spaces. Neighbour-scale rms: the area-weighted rms over interior ice of
+a cell's upwind divergence minus the mean of its three facet neighbours',
+BedMachine `vertex` sample:
+
+| velocity | mesh | DG0 | DG1 |
+|---|---|---|---|
+| MEaSUREs v2 | 32 km | 3.81 m/yr | 3.45 m/yr |
+| MEaSUREs v2 | 8 km | 3.73 m/yr | 3.98 m/yr |
+| the 32 km Budd MAP's own | 32 km | 9.95 m/yr | 10.43 m/yr |
+
+DG0's own truncation error accounts for 2.31 m/yr rms of the last row; the rest
+is BedMachine's thickness against the inverted velocity at the cell scale.
 
 ## Incompatibilities
 

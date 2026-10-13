@@ -76,8 +76,10 @@ from icepack2_tools.fssa import (
     restart_step as fssa_restart_step,
 )
 from icepack2_tools.geometry import (
-    raise_bed_to_lake_ice_base, sample_bed_thickness,
+    geometry_function_space, raise_bed_to_lake_ice_base, sample_bed_thickness,
 )
+from icepack2_tools.cellview import CellView, clamp_cells
+from icepack2_tools.transport import transport_form
 from icepack2_tools.naming import map_basename
 from icepack2_tools.handoff import check_subelement_record
 from icepack2_tools.front import (
@@ -101,6 +103,8 @@ from icepack2_tools.runconfig import (
     BUDD_SHELF_GATE as _BUDD_SHELF_GATE,
     residual_stabilizers,
     friction as _friction, geometry_space as _geometry_space,
+    geometry_space_mismatch as _geometry_space_mismatch,
+    dg1_refusals as _dg1_refusals, DISCONTINUOUS_GEOMETRY_SPACES,
     mesh_override as _mesh_override, transfer_fill as _transfer_fill,
     forward_drag_gate as _forward_drag_gate,
     forward_hvisc_floor as _forward_hvisc_floor,
@@ -461,6 +465,13 @@ def setup_model(restart_from=None, *, allow_timing_cache_a_ref=False,
         ) + RELAX_MAP_KEYS + (INIT_STATE_ATTR,):
             if _chk.has_attr("/", _key):
                 checkpoint_metadata[_key] = _chk.get_attr("/", _key)
+        # A DG1 state seeds only a DG1 run, on the derived-name, override and
+        # restart paths alike (runconfig.geometry_space_mismatch).
+        _space_refusal = _geometry_space_mismatch(
+            _geometry_space(), checkpoint_metadata.get("geometry_space"),
+            os.path.basename(source_chk))
+        if _space_refusal:
+            raise RuntimeError(_space_refusal)
         # The mesh this checkpoint was built on, recorded by the inversion and
         # carried through every restart. A CheckpointFile mesh is named
         # "firedrake_default", so this attribute is the only way the run can
@@ -610,9 +621,14 @@ def setup_model(restart_from=None, *, allow_timing_cache_a_ref=False,
     # data error at Antarctic resolutions, and it buys an unbiased front.
     #
     # ISMIP7_GEOMETRY_SPACE=cg1 restores the old behaviour for A/B comparison.
+    #
+    # ISMIP7_GEOMETRY_SPACE=dg1 makes the cells linear and discontinuous, on
+    # vertex nodes: the transport state is still the geometry, and the rules
+    # that decide per cell read cell means (icepack2_tools.cellview).
     geometry_space = _geometry_space()
-    geom_dg = geometry_space == "dg0"
-    Q_g = FunctionSpace(mesh, "DG", 0) if geom_dg else Q
+    geom_dg = geometry_space in DISCONTINUOUS_GEOMETRY_SPACES
+    geom_dg1 = geometry_space == "dg1"
+    Q_g = geometry_function_space(mesh, geometry_space) if geom_dg else Q
     # A cold start on another mesh than its MAP's rebuilds the cell-wise
     # geometry from BedMachine there (below), with this run's raster sampling,
     # so a transferred MAP gets the front its new mesh holds (issue #167).
@@ -626,7 +642,9 @@ def setup_model(restart_from=None, *, allow_timing_cache_a_ref=False,
         map_raster_sample, geometry_transfer, source=source_chk)
     PETSc.Sys.Print(
         f"  Geometry space: {geometry_space.upper()}"
-        + (" (h, s, b cell-wise; one thickness for force and mass)" if geom_dg
+        + (" (h, s, b cell-wise linear on vertex nodes; one thickness for "
+           "force and mass)" if geom_dg1
+           else " (h, s, b cell-wise; one thickness for force and mass)" if geom_dg
            else " (LEGACY: CG1 geometry, lumped lift, front thickness biased high)")
     )
 
@@ -692,6 +710,16 @@ def setup_model(restart_from=None, *, allow_timing_cache_a_ref=False,
         raise RuntimeError(
             f"ISMIP7_SUBELEMENT_FRICTION={_env_sub} but the MAP was inverted with "
             f"subelement_friction={map_subelement}: a forward follows its MAP")
+    if geom_dg1:
+        _refusals = _dg1_refusals(
+            legacy_transport=os.environ.get("ISMIP7_LEGACY_TRANSPORT") is not None,
+            subelement=bool(map_subelement), apparent_mb=apparent_mb_mode(),
+            calving=_calving_law(), fracture=_fracture_mode(),
+            backdate_years=0.0 if is_restart else backdate_years,
+            ismip7_output=_ismip7_output(), geometry_transfer=geometry_transfer,
+            forcing=smb_feedback is not None)
+        if _refusals:
+            raise RuntimeError("; ".join(_refusals))
     PETSc.Sys.Print(
         "  Exact cliff push (from the MAP): "
         + (f"version {map_exact_front}" if map_exact_front else "off"))
@@ -718,8 +746,8 @@ def setup_model(restart_from=None, *, allow_timing_cache_a_ref=False,
         bm_fn = find_file(os.path.join(DATA_DIR, "bedmachine"), "*.nc")
         geometry_source = os.path.realpath(bm_fn)
         geometry_source_method = (
-            _target_mesh_geometry_method(chk_raster_sample) if geom_dg
-            else "target-native-bedmachine-nodal-v1"
+            _target_mesh_geometry_method(chk_raster_sample, geometry_space)
+            if geom_dg else "target-native-bedmachine-nodal-v1"
         )
         # Cell average onto the geometry space, NOT a centroid point sample --
         # see geometry.sample_to_geometry for the measurements behind that.
@@ -897,7 +925,7 @@ def setup_model(restart_from=None, *, allow_timing_cache_a_ref=False,
                 chk, "u_ref_fssa", V, optional=True
             )
             fssa_tendency_ckpt = load_checkpoint_field(
-                chk, "fssa_tendency", Q_dg, optional=True
+                chk, "fssa_tendency", Q_g if geom_dg1 else Q_dg, optional=True
             )
             calved_cells_ckpt = load_checkpoint_field(
                 chk, "calved_cells", Q_dg, optional=True
@@ -1444,6 +1472,14 @@ def setup_model(restart_from=None, *, allow_timing_cache_a_ref=False,
     h = H.copy(deepcopy=True)
     h.rename("thickness")
     A_map = A4_base * exp(_map_phi(h))
+    # DG1: the cell means of h, which decide the ice edges of the exact-front
+    # push; run_simulation refreshes them with the thickness. Under DG0 h is
+    # its own cell value and no copy exists.
+    cell_view = CellView(Q_g) if geom_dg1 else None
+    h_cell = None
+    if geom_dg1:
+        h_cell = cell_view.mean_function(h)
+        h_cell.rename("thickness_cell_mean")
 
     u_s, M_s, tau_s = split(z)
     fields = {
@@ -1507,7 +1543,9 @@ def setup_model(restart_from=None, *, allow_timing_cache_a_ref=False,
             if _ref_err:
                 raise ValueError(_ref_err)
         if fssa_ref_mode == "step":
-            fssa_tendency = Function(Q_dg, name="fssa_tendency")
+            # on the transport space: the DG1 tendency keeps its slopes
+            fssa_tendency = Function(Q_g if geom_dg1 else Q_dg,
+                                     name="fssa_tendency")
             if restart_from is not None and fssa_tendency_ckpt is not None:
                 fssa_tendency.assign(fssa_tendency_ckpt)
 
@@ -1546,6 +1584,7 @@ def setup_model(restart_from=None, *, allow_timing_cache_a_ref=False,
                 k_lim=k_lim, drag_mask=drag_mask,
                 calving_ids=calving_ids if use_calving_terminus else None,
                 exact_front=map_exact_front, front_hmin=_front_hmin(),
+                H_cell=h_cell if h_c is None else None,
                 fssa_tau=fssa_tau if fssa_theta_val > 0 else None,
                 u_ref=u_ref_fssa if fssa_theta_val > 0 else None,
                 fssa_tendency=fssa_tendency,
@@ -1963,6 +2002,12 @@ def setup_model(restart_from=None, *, allow_timing_cache_a_ref=False,
         "Q": Q,
         "Q_g": Q_g,
         "geom_dg": geom_dg,
+        "geom_dg1": geom_dg1,
+        "geometry_space": geometry_space,
+        # DG1: per-cell access to the geometry and the live cell means of h
+        # (icepack2_tools.cellview); None under DG0 and CG1.
+        "cell_view": cell_view,
+        "h_cell": h_cell,
         "geom_xy": geom_xy,
         "mesh_basename": mesh_basename,
         "geometry_source": geometry_source,
@@ -2194,7 +2239,8 @@ def save_model_state(ctx, final_path, t_now, extra_attrs=None):
             # (runconfig.BUDD_SHELF_GATE); timing-cache manifests require it.
             chk.set_attr("/", "friction_gate", _BUDD_SHELF_GATE)
         chk.set_attr(
-            "/", "geometry_space", "dg0" if ctx.get("geom_dg") else "cg1"
+            "/", "geometry_space",
+            ctx.get("geometry_space") or ("dg0" if ctx.get("geom_dg") else "cg1")
         )
         if ctx.get("mesh_basename"):
             chk.set_attr("/", "mesh_basename", str(ctx["mesh_basename"]))
@@ -2354,16 +2400,30 @@ def run_simulation(
 
     Q_dg = FunctionSpace(mesh, "DG", 0)
     geom_dg = ctx.get("geom_dg", False)
+    geom_dg1 = ctx.get("geom_dg1", False)
+    # DG1: per-cell access (icepack2_tools.cellview). The rules below that
+    # decide per cell read cell means, indexed like every DG0 array here.
+    cell_view = ctx.get("cell_view")
+    h_cell = ctx.get("h_cell")
+    if geom_dg1 and forcing_callback is not None:
+        raise RuntimeError("; ".join(_dg1_refusals(forcing=True)))
     # Under DG0 geometry the transport state IS the geometry - the same
     # Function object, not a copy. That is the whole point: the terminus
     # back-pressure and the boundary flux then integrate one thickness, so
     # they cannot disagree. Under CG1 geometry h_dg is a separate DG0 carrier
-    # bridged by the lumped lift below.
+    # bridged by the lumped lift below. Under DG1 the same holds on the DG1
+    # space, which is then the transport space too.
+    Q_tr = Q_g if geom_dg1 else Q_dg
     h_dg = h if geom_dg else Function(Q_dg, name="h_dg")
     ctx["h_dg_state"] = h_dg
-    h_dg_old = Function(Q_dg)
-    phi_dg = fd.TestFunction(Q_dg)
-    h_dg_trial = fd.TrialFunction(Q_dg)
+    h_dg_old = Function(Q_tr)
+    phi_dg = fd.TestFunction(Q_tr)
+    h_dg_trial = fd.TrialFunction(Q_tr)
+
+    def _cells(f):
+        r"""Per-cell values of a transport-space field: the field itself
+        under DG0, its cell means under DG1."""
+        return cell_view.means(f) if geom_dg1 else f.dat.data_ro
 
     n_facet = fd.FacetNormal(mesh)
 
@@ -2528,8 +2588,8 @@ def run_simulation(
         PETSc.Sys.Print("  LEGACY transport: non-conservative volume term + L2 projection")
     m_lump = assemble(fd.TestFunction(Q) * dx)
     proj_rhs = fd.Cofunction(Q.dual())
-    src_dg = Function(Q_dg, name="mass_source")
-    src_cof = fd.Cofunction(Q_dg.dual())
+    src_dg = Function(Q_tr, name="mass_source")
+    src_cof = fd.Cofunction(Q_tr.dual())
     # Where the surface and ocean forcing act: 1 on cells that can hold ice,
     # 0 on open ocean and on cells a front rule holds ice-free
     # (front.unforced_cells). Refreshed at the start of every advance, and at
@@ -2556,7 +2616,12 @@ def run_simulation(
     # Skipping it is not an optimization - applying it would be the bug. At
     # 32 km it moved the calving front from 105 m to 200 m thick and, through
     # the h^2 terminus traction, multiplied the outflux by ~4.7.
-    if geom_dg:
+    if geom_dg1:
+        PETSc.Sys.Print(
+            "  DG1 geometry: transport state is the geometry (no lift), "
+            "upwind DG1 with the cell-wise positivity floor"
+        )
+    elif geom_dg:
         PETSc.Sys.Print(
             "  DG0 geometry: transport state is the geometry (no lift)"
         )
@@ -2705,17 +2770,10 @@ def run_simulation(
     u_transport = z.subfunctions[0]
     un_transport = fd.dot(u_transport, n_facet)
     un_transport_plus = (un_transport + abs(un_transport)) / 2
-    F_transport = (
-        (h_dg_trial - h_dg_old) / dt_c * phi_dg * dx
-        + (
-            un_transport_plus("+") * h_dg_trial("+")
-            - un_transport_plus("-") * h_dg_trial("-")
-        )
-        * fd.jump(phi_dg)
-        * dS
-        + un_transport_plus * h_dg_trial * phi_dg * ds
-        - src_dg * phi_dg * dx
-    )
+    # icepack2_tools.transport: the DG0 finite-volume update, and under DG1
+    # the same with the volume term that completes div(h u).
+    F_transport = transport_form(
+        h_dg_trial, h_dg_old, phi_dg, u_transport, dt_c, src_dg)
     if legacy_transport:
         F_transport += -h_dg_trial * fd.div(
             u_transport * phi_dg
@@ -2740,8 +2798,12 @@ def run_simulation(
     transport_solve_count = 0
     mass_tol_gt = mass_residual_tol_gt()
     h_diag_xy = Function(
-        VectorFunctionSpace(mesh, Q_dg.ufl_element())
+        VectorFunctionSpace(mesh, Q_tr.ufl_element())
     ).interpolate(fd.SpatialCoordinate(mesh))
+    # DG1: the centroids, for the per-cell reports (the tripwire)
+    cell_xy = (Function(VectorFunctionSpace(mesh, Q_dg.ufl_element()))
+               .interpolate(fd.SpatialCoordinate(mesh)) if geom_dg1
+               else h_diag_xy)
     speed_diag = Function(Q, name="speed_diagnostic")
     speed_diag_xy = Function(
         VectorFunctionSpace(mesh, Q.ufl_element())
@@ -3067,7 +3129,7 @@ def run_simulation(
             if k_lim_c is not None:
                 k_lim_c.assign(0.0)
 
-    h_dg_entry = Function(Q_dg)
+    h_dg_entry = Function(Q_tr)
 
     def _lift_h():
         r"""Refresh the geometry derived from the thickness state (s, phi_eff).
@@ -3099,6 +3161,9 @@ def run_simulation(
                 Constant(0.01),
             )
         )
+        if h_cell is not None:
+            # the cell means the exact-front push decides ice edges on
+            cell_view.mean_function(h, out=h_cell)
 
     # Level-set calving front (ISMIP7_CALVING != none): each step the level
     # set is the eikonal distance to the current ice extent, the calving
@@ -3184,7 +3249,7 @@ def run_simulation(
         # would make ice the front removes and books as calving; melt there
         # has nothing to melt (front.unforced_cells has the measured cost).
         forced.dat.data[:] = np.where(
-            unforced_cells(h_dg_old.dat.data_ro, bed_cell, beyond, ls_ice_free),
+            unforced_cells(_cells(h_dg_old), bed_cell, beyond, ls_ice_free),
             0.0, 1.0)
         smb_f, melt_f, ref_f = applied_forcing(forced, accum, ocean_melt, a_ref)
         smb_gt = float(assemble(smb_f * dx)) * rho_gt * dt_local
@@ -3208,17 +3273,31 @@ def run_simulation(
         # cell already below h_clamp (an emptied fixed-front cell) the raw
         # bound is positive and would make the limiter a mandatory SOURCE,
         # injecting h_clamp of ice per step for the mask to re-calve.
-        assemble(src * phi_dg * dx, tensor=src_cof)
-        src_dg.dat.data[:] = src_cof.dat.data_ro / cell_area
-        _src_want = src_dg.dat.data_ro.copy()
-        np.maximum(
-            src_dg.dat.data,
-            np.minimum(-(h_dg.dat.data_ro - h_clamp) / dt_local, 0.0),
-            out=src_dg.dat.data,
-        )
-        limit_gt = mesh.comm.allreduce(float(
-            ((src_dg.dat.data_ro - _src_want) * cell_area).sum()
-        )) * rho_gt * dt_local
+        if geom_dg1:
+            # The source is cell-wise linear (cell-wise forcing, mask and
+            # reference), so it is held exactly. The limit acts on the cell
+            # means and shifts the whole cell, so it moves no slope.
+            src_dg.interpolate(src)
+            _src_want = np.array(cell_view.means(src_dg))
+            _src_lim = np.maximum(
+                _src_want,
+                np.minimum(-(cell_view.means(h_dg) - h_clamp) / dt_local, 0.0))
+            cell_view.add_cells(src_dg, _src_lim - _src_want)
+            limit_gt = mesh.comm.allreduce(float(
+                ((_src_lim - _src_want) * cell_area).sum()
+            )) * rho_gt * dt_local
+        else:
+            assemble(src * phi_dg * dx, tensor=src_cof)
+            src_dg.dat.data[:] = src_cof.dat.data_ro / cell_area
+            _src_want = src_dg.dat.data_ro.copy()
+            np.maximum(
+                src_dg.dat.data,
+                np.minimum(-(h_dg.dat.data_ro - h_clamp) / dt_local, 0.0),
+                out=src_dg.dat.data,
+            )
+            limit_gt = mesh.comm.allreduce(float(
+                ((src_dg.dat.data_ro - _src_want) * cell_area).sum()
+            )) * rho_gt * dt_local
         m0 = float(assemble(h_dg_old * dx)) * rho_gt
         source_gt = float(assemble(src_dg * dx)) * rho_gt * dt_local
         dt_c.assign(dt_local)
@@ -3323,9 +3402,29 @@ def run_simulation(
         # under `none`. `mask` holds nothing by construction, so its held
         # count is zero and says so.
         collapse_cells = collapse_cell_counts(flagged, collapsed, _global_cells)
-        clamp_thickness(h_dg.dat.data, h_clamp, ls_ice_free, beyond, collapsed)
+        if geom_dg1:
+            # The positivity floor (cellview.clamp_cells): a mean below the
+            # floor fills the cell, booked as clamp; a vertex below it scales
+            # the slope, which keeps the mean. That second part must move no
+            # mass, and whatever it moved would land in the clamp column
+            # unseen, so it is measured against the means the floor added.
+            _means_before = np.array(cell_view.means(h_dg))
+            cell_view.write_nodes(h_dg, clamp_cells(
+                cell_view.nodes(h_dg), h_clamp, ls_ice_free, beyond, collapsed))
+            _floor_gt = mesh.comm.allreduce(float(
+                ((cell_view.means(h_dg) - _means_before) * cell_area).sum()
+            )) * rho_gt
+        else:
+            clamp_thickness(h_dg.dat.data, h_clamp, ls_ice_free, beyond, collapsed)
         m2 = float(assemble(h_dg * dx)) * rho_gt
         clamp_gt = m2 - m1                                       # Gt added by DG floor
+        if geom_dg1 and abs(clamp_gt - _floor_gt) > mass_tol_gt:
+            _field_diagnostics(f"{label}-positivity-failed")
+            raise RuntimeError(
+                f"DG1 positivity floor moved {clamp_gt - _floor_gt:+.3e} Gt "
+                f"besides the {_floor_gt:+.3e} Gt it booked (tolerance "
+                f"{mass_tol_gt:.1e} Gt): the slope scaling must keep each "
+                f"cell's mean")
 
         calv_gt = 0.0
         if collapse is not None and _any_rank(collapse.any()):
@@ -3336,7 +3435,14 @@ def run_simulation(
             if annual is not None:
                 annual.book_removal(hit, data[hit])
             data[hit] = 0.0
-        if beyond is not None:
+        if beyond is not None and geom_dg1:
+            # the whole cell goes, booked at its mean
+            _hm = cell_view.means(h_dg)
+            calv_gt += mesh.comm.allreduce(
+                float((_hm[beyond] * cell_area[beyond]).sum())
+            ) * rho_gt
+            cell_view.set_cells(h_dg, beyond, 0.0)
+        elif beyond is not None:
             data = h_dg.dat.data
             calv_gt += mesh.comm.allreduce(
                 float((data[beyond] * cell_area[beyond]).sum())
@@ -3407,7 +3513,7 @@ def run_simulation(
         # writes its own) the next diagnostic solve sees drag only in water
         # outside the t=0 extent that no ice cell now touches.
         if level_set is None and drag_rule is not None:
-            drag_rule(h_dg.dat.data_ro)
+            drag_rule(_cells(h_dg))
         m3 = m2 - calv_gt                                        # ∫h preserved by projection
         mass_now = float(assemble(h * dx)) * _RHO_I_SI / 1e12
         clamp_cg_gt = mass_now - m3          # Gt added by the CG floor after projection
@@ -3442,6 +3548,9 @@ def run_simulation(
     # cell, so a step-size rejection at a front can be read cell by cell.
     trace_cells = []
     _trace = os.environ.get("ISMIP7_SUBSTEP_TRACE", "").strip()
+    if _trace and geom_dg1:
+        raise RuntimeError("ISMIP7_SUBSTEP_TRACE reads one value per cell; "
+                           "ISMIP7_GEOMETRY_SPACE=dg1 does not carry it")
     if _trace:
         _txy = np.asarray(h_diag_xy.dat.data_ro)
         for _tok in _trace.split(";"):
@@ -3723,8 +3832,10 @@ def run_simulation(
         step_stat = _field_diagnostics(f"step-{k}-t={t_yr:.6g}")
 
         if tripwire_on:
-            _h_now = np.asarray(h_dg.dat.data_ro)
-            _h_was = np.asarray(h_dg_entry.dat.data_ro)
+            # per cell, beside the per-cell extent and bed (cell means
+            # under DG1)
+            _h_now = np.asarray(_cells(h_dg))
+            _h_was = np.asarray(_cells(h_dg_entry))
             _dh = _h_now - _h_was
             _eligible = _h_was >= tripwire_hmin
             growth = np.divide(
@@ -3738,7 +3849,7 @@ def run_simulation(
                 "extent": tripwire_cells["extent"],
                 "bed": tripwire_cells["bed"],
             }
-            _xy = np.asarray(h_diag_xy.dat.data_ro)
+            _xy = np.asarray(cell_xy.dat.data_ro)
             growth_max, growth_xy, growth_cell = _global_argmax_with_payload(
                 growth, _xy, _payload, mesh.comm
             )

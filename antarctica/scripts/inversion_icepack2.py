@@ -2079,6 +2079,7 @@ def main():
     # aborting the inversion.
     dhdt_w = float(os.environ.get("ISMIP7_DHDT_WEIGHT", "0.0"))
     use_dhdt = dhdt_w > 0.0
+    dhdt_forcing = "none"
     # Resolved (not merely requested) net-term provenance: ISMIP7_DHDT_NET_SIGMA
     # only reaches the objective when the dH/dt term itself is on, so these stay
     # at their off values unless the term is actually built below. save_map
@@ -2104,7 +2105,28 @@ def main():
         clim1 = int(os.environ.get("ISMIP7_DHDT_CLIM_END", "2019"))
 
         dhdt_obs, dhdt_cov = load_dhdt_obs(Q_g)
-        smb_obs = load_racmo_smb_climatology(Q_g, clim_start=clim0, clim_end=clim1)
+        # The source of the prognostic step: the RACMO2.4p1 climatology SMB
+        # with the OI-climatology melt (``climatology``, the default); the
+        # control experiment's own forcing (``control``: the RACMO2.4p1
+        # climatology over the control's window and the ESM's ctrl ocean
+        # through the forward's callback, averaged over the years it holds
+        # in that window, so the step sees what the control runs on); or the
+        # ISMIP7 OCX product averaged over the window (``ocx``: the
+        # RACMO2.3p2-ERA acabf years and the expert-judgment ocean through
+        # the OCX callback, the forcing core 11 runs on).
+        dhdt_forcing = os.environ.get("ISMIP7_DHDT_FORCING", "climatology").strip().lower()
+        if dhdt_forcing not in ("climatology", "control", "ocx"):
+            raise ValueError(f"ISMIP7_DHDT_FORCING must be climatology, control or ocx, got {dhdt_forcing!r}")
+        if dhdt_forcing == "control":
+            from icepack2_tools.climatology import clim_start as _clim_start, clim_end as _clim_end
+            if "ISMIP7_DHDT_CLIM_START" not in os.environ:
+                clim0 = int(_clim_start())
+            if "ISMIP7_DHDT_CLIM_END" not in os.environ:
+                clim1 = int(_clim_end())
+        if dhdt_forcing == "ocx":
+            smb_obs = Function(Q_g, name="smb_ocx_mean")
+        else:
+            smb_obs = load_racmo_smb_climatology(Q_g, clim_start=clim0, clim_end=clim1)
 
         # Ocean melt for the prognostic step, from the SAME parameterisation
         # and forcing the experiments use: OI-climatology TF/so at draft depth
@@ -2118,7 +2140,84 @@ def main():
         # keeping the single prognostic step consistent with the forward
         # experiment. ISMIP7_DHDT_MELT=0 drops it (SMB-only source).
         melt_ref = Function(Q_g, name="ocean_melt_ref")
-        if os.environ.get("ISMIP7_DHDT_MELT", "1") != "0":
+        if dhdt_forcing == "ocx":
+            # Both fields from the OCX callback the forward and the relaxation
+            # year use, year by year over the window, averaged; the ocean
+            # melt at the frozen reference geometry like the climatology one.
+            _scripts_dir = os.path.dirname(os.path.abspath(__file__))
+            if _scripts_dir not in sys.path:
+                sys.path.insert(0, _scripts_dir)
+            from projections.ocx import protocol_forcing, ocx_forcing_callback
+            _W2 = VectorFunctionSpace(mesh, "DG", 0)
+            _xy = Function(_W2).interpolate(
+                fd.SpatialCoordinate(mesh)).dat.data_ro.reshape(-1, 2)
+            geom_xy = (_xy[:, 0].copy(), _xy[:, 1].copy())
+            readers = protocol_forcing(float(clim0), float(clim1 + 1))
+            dT_npz = deltat_per_basin_npz()
+            k_npz_used = dT_npz or k_per_basin_npz()
+            _ctx = {"mesh": mesh, "Q": Q, "V": V, "Q_g": Q_g, "geom_xy": geom_xy,
+                    "h": H, "b": b, "s": s, "accum": Function(Q_g), "ocean_melt": Function(Q_g),
+                    "raster_sample": os.environ.get("ISMIP7_RASTER_SAMPLE")}
+            if os.environ.get("ISMIP7_DHDT_MELT", "1") == "0":
+                readers = (readers[0], None)
+            _cb, _lines, _ocean = ocx_forcing_callback(_ctx, readers, None, dT_npz)
+            _years = list(range(clim0, clim1 + 1))
+            _smb_acc = np.zeros_like(smb_obs.dat.data_ro)
+            _melt_acc = np.zeros_like(melt_ref.dat.data_ro)
+            for _yr in _years:
+                _cb(_ctx, _yr + 0.5)
+                _smb_acc += _ctx["accum"].dat.data_ro
+                _melt_acc += _ctx["ocean_melt"].dat.data_ro
+            smb_obs.dat.data[:] = _smb_acc / len(_years)
+            melt_ref.dat.data[:] = _melt_acc / len(_years)
+            if _ocean is not None:
+                _ocean.close()
+            for _line in _lines:
+                PETSc.Sys.Print("  " + str(_line))
+            _smb_gt = float(assemble(smb_obs * dx)) * 917.0 / 1e12
+            _melt_gt = float(assemble(melt_ref * dx)) * 917.0 / 1e12
+            PETSc.Sys.Print(
+                f"  dH/dt source: OCX product averaged over {clim0}-{clim1}: SMB {_smb_gt:.0f} Gt/yr, "
+                f"melt {_melt_gt:.0f} Gt/yr at reference geometry (ISMIP7_DHDT_FORCING=ocx)")
+        elif dhdt_forcing == "control" and os.environ.get("ISMIP7_DHDT_MELT", "1") != "0":
+            # The control's ocean: the ESM's ctrl tf/so through the forward's
+            # callback with the run's melt calibration, at the frozen
+            # reference geometry, averaged over the window years the ctrl
+            # ocean holds (it starts in 2015).
+            from icepack2_tools.forcing import ISMIP7Ocean, make_forcing_callback
+            _esm = os.environ.get("ISMIP7_ESM", "CESM2-WACCM")
+            _ocean = ISMIP7Ocean(esm=_esm, scenario="ctrl")
+            _cover = _ocean.coverage("tf")
+            if _cover is None:
+                raise FileNotFoundError(f"no {_esm} ctrl ocean on disk for the dH/dt source")
+            _years = [y for y in range(clim0, clim1 + 1) if _cover[0] <= y <= _cover[1]]
+            if not _years:
+                _years = [_cover[0]]
+            dT_npz = deltat_per_basin_npz()
+            k_npz = None if dT_npz is not None else k_per_basin_npz()
+            k_npz_used = dT_npz or k_npz
+            _W2 = VectorFunctionSpace(mesh, "DG", 0)
+            _xy = Function(_W2).interpolate(
+                fd.SpatialCoordinate(mesh)).dat.data_ro.reshape(-1, 2)
+            geom_xy = (_xy[:, 0].copy(), _xy[:, 1].copy())
+            _ctx = {"mesh": mesh, "Q": Q, "V": V, "Q_g": Q_g, "geom_xy": geom_xy,
+                    "h": H, "b": b, "s": s, "accum": Function(Q_g), "ocean_melt": Function(Q_g),
+                    "raster_sample": os.environ.get("ISMIP7_RASTER_SAMPLE")}
+            _cb = make_forcing_callback(ocean=_ocean, K_per_basin_npz=k_npz)   # melt only: the SMB is the climatology above
+            _melt_acc = np.zeros_like(melt_ref.dat.data_ro)
+            for _yr in _years:
+                _cb(_ctx, _yr + 0.5)
+                _melt_acc += _ctx["ocean_melt"].dat.data_ro
+            melt_ref.dat.data[:] = _melt_acc / len(_years)
+            _ocean.close()
+            _melt_gt = float(assemble(melt_ref * dx)) * 917.0 / 1e12
+            _smb_gt = float(assemble(smb_obs * dx)) * 917.0 / 1e12
+            PETSc.Sys.Print(
+                f"  dH/dt source: the control's forcing, RACMO2.4p1 SMB climatology {clim0}-{clim1} "
+                f"({_smb_gt:.0f} Gt/yr) and the {_esm} ctrl ocean averaged over {_years[0]}-{_years[-1]} "
+                f"({_melt_gt:.0f} Gt/yr melt at reference geometry; {os.path.basename(k_npz_used)}) "
+                f"(ISMIP7_DHDT_FORCING=control)")
+        elif os.environ.get("ISMIP7_DHDT_MELT", "1") != "0":
             from icepack2_tools.forcing import (
                 load_K_per_basin, make_climatology_ocean_callback)
             # The forward's melt calibration: per-basin deltaT at one K, the
@@ -2698,6 +2797,7 @@ def main():
                 chk.set_attr("/", "prior_sigma_phi", float(PRIOR_SIGMA_PHI))
                 chk.set_attr("/", "prior_rho", float(PRIOR_RHO))
             chk.set_attr("/", "dhdt_weight", float(dhdt_w))
+            chk.set_attr("/", "dhdt_forcing", dhdt_forcing if use_dhdt else "none")
             chk.set_attr("/", "dhdt_net_sigma", net_sigma_used)
             # Which per-basin K the dH/dt melt source used, or "none". The
             # fallback is deliberately non-fatal (the misfit is grounded-only

@@ -1242,8 +1242,7 @@ def setup_model(restart_from=None, *, allow_timing_cache_a_ref=False,
     # would clobber the loaded anchors and pass None into build_rc_residual.
     if use_residual:
         from icepack2_tools.dual_friction import (
-            build_rc_residual, weertman_anchor, effective_pressure,
-            budd_reference_pressure,
+            build_rc_residual, weertman_anchor, budd_reference_pressure,
         )
         c0_rc = float(os.environ.get("ISMIP7_RC_C0", "0.5"))
         rc_hvisc_floor = map_hvisc_floor

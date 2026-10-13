@@ -261,6 +261,26 @@ def raster_sample():
     return value
 
 
+VELOCITY_SAMPLES = ("point", "cell_mean")
+VELOCITY_SAMPLE_DEFAULT = "point"
+
+
+def velocity_sample():
+    r"""``ISMIP7_VELOCITY_SAMPLE``: how the inversion puts the observed
+    velocity and its errors on the CG1 nodes. ``point`` (default) samples
+    the raster bilinearly at each node; ``cell_mean`` averages the valid
+    pixels over each cell (:func:`geometry.raster_cell_mean`) and gives each
+    node the area-weighted mean of the observed cells around it
+    (:func:`geometry.raster_patch_mean`), the node analogue of how the Smith
+    dH/dt is binned. A test of whether point sampling feeds the cell-scale
+    imbalance of the initial state; not a production setting."""
+    value = os.environ.get("ISMIP7_VELOCITY_SAMPLE", VELOCITY_SAMPLE_DEFAULT).strip().lower()
+    if value not in VELOCITY_SAMPLES:
+        raise ValueError(
+            f"ISMIP7_VELOCITY_SAMPLE must be one of {VELOCITY_SAMPLES}, got {value!r}")
+    return value
+
+
 def warm_start_geometry(*, same_mesh, same_lake, warm_sampling, run_sampling):
     r"""Whether an inversion takes its warm start's thickness, bed and
     surface. By default it does on the warm start's mesh when the warm start

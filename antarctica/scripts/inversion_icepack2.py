@@ -3479,7 +3479,7 @@ def main():
                                  reg_theta=reg_theta, reg_phi=reg_phi)
             PETSc.Sys.Print(
                 f"  iter {iteration_count[0]:3d}: "
-                f"misfit={f_val - reg_theta - reg_phi:.6e} "
+                f"misfit={f_val - reg_theta - reg_phi:.6e}{term_report()} "
                 f"reg_θ={reg_theta:.4e} reg_φ={reg_phi:.4e} "
                 f"total={f_val:.6e} |grad|_A={gnorm:.4e} "
                 f"dJ/J={_ftol_stop.criterion if _ftol_stop.criterion is not None else 0.0:.1e} "

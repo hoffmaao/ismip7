@@ -21,7 +21,7 @@ vertex-based limiter clips (GEOMETRY_DISCRETIZATION.md, "DG1 geometry").
 import numpy as np
 from firedrake import Function, FunctionSpace
 
-__all__ = ["CellView", "clamp_cells", "geometry_degree"]
+__all__ = ["CellView", "clamp_cells", "floor_fill", "geometry_degree"]
 
 
 def geometry_degree(space):
@@ -117,6 +117,24 @@ class CellView:
         f.dat.data[self.dofs] = values
 
 
+def _cell_floors(ncell, floor, ice_free):
+    floors = np.full(ncell, float(floor))
+    for mask in ice_free:
+        if mask is not None:
+            floors[np.asarray(mask, dtype=bool)] = 0.0
+    return floors
+
+
+def floor_fill(means, floor, *ice_free):
+    r"""The mean each cell gains from :func:`clamp_cells`, read off the cell
+    ``means`` before it: ``max(floor - mean, 0)``, with ``floor`` 0 on the
+    ``ice_free`` cells. The slope scaling keeps the mean, so ``fill x cell
+    area`` is the whole mass the floor adds; any other change is mass the
+    scaling moved."""
+    means = np.asarray(means, dtype=float)
+    return np.maximum(_cell_floors(means.size, floor, ice_free) - means, 0.0)
+
+
 def clamp_cells(v, floor, *ice_free):
     r"""Floor the cell-wise linear thickness ``v``, shape ``(ncell, nnode)``
     (its vertex values), to ``floor`` in place, except where there is no ice.
@@ -133,10 +151,7 @@ def clamp_cells(v, floor, *ice_free):
 
     With one node per cell this is ``clamp_thickness``. Returns ``v``.
     """
-    floors = np.full(v.shape[0], float(floor))
-    for mask in ice_free:
-        if mask is not None:
-            floors[np.asarray(mask, dtype=bool)] = 0.0
+    floors = _cell_floors(v.shape[0], floor, ice_free)
     mean = v.mean(axis=1)
     low_mean = mean < floors
     v[low_mean] = floors[low_mean][:, None]

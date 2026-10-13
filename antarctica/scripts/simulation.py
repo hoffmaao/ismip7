@@ -78,7 +78,7 @@ from icepack2_tools.fssa import (
 from icepack2_tools.geometry import (
     geometry_function_space, raise_bed_to_lake_ice_base, sample_bed_thickness,
 )
-from icepack2_tools.cellview import CellView, clamp_cells
+from icepack2_tools.cellview import CellView, clamp_cells, floor_fill
 from icepack2_tools.transport import transport_form
 from icepack2_tools.naming import map_basename
 from icepack2_tools.handoff import check_subelement_record
@@ -3407,13 +3407,13 @@ def run_simulation(
             # floor fills the cell, booked as clamp; a vertex below it scales
             # the slope, which keeps the mean. That second part must move no
             # mass, and whatever it moved would land in the clamp column
-            # unseen, so it is measured against the means the floor added.
-            _means_before = np.array(cell_view.means(h_dg))
+            # unseen, so the assembled change is held to the fill the
+            # pre-floor means call for (cellview.floor_fill).
+            _floor_gt = mesh.comm.allreduce(float((floor_fill(
+                cell_view.means(h_dg), h_clamp, ls_ice_free, beyond, collapsed)
+                * cell_area).sum())) * rho_gt
             cell_view.write_nodes(h_dg, clamp_cells(
                 cell_view.nodes(h_dg), h_clamp, ls_ice_free, beyond, collapsed))
-            _floor_gt = mesh.comm.allreduce(float(
-                ((cell_view.means(h_dg) - _means_before) * cell_area).sum()
-            )) * rho_gt
         else:
             clamp_thickness(h_dg.dat.data, h_clamp, ls_ice_free, beyond, collapsed)
         m2 = float(assemble(h_dg * dx)) * rho_gt

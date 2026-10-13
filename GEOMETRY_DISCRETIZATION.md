@@ -13,7 +13,7 @@ reference `a_ref_mb` is a per-cell transport source and stays DG0 either way.
   geometry" below for what it carries and what it refuses.
 
 The control fields (`theta`, `phi`, `fluidity_prior`, `obs_mask`) and the
-velocity stay CG1 in both modes. The controls are regularized by a
+velocity stay CG1 in every mode. The controls are regularized by a
 Whittle-Matern prior on `|grad theta|`, which needs a differentiable field;
 the geometry is not differentiated in the residual (see below).
 
@@ -634,4 +634,6 @@ is BedMachine's thickness against the inverted velocity at the cell scale.
   re-projects CG1 `h` <-> DG0 `h_dg` every step; under DG0 they are the same
   Function and the projection would be self-referential). Enforced.
 - A run must not change geometry space mid-trajectory. Restart checkpoints
-  record `geometry_space`; a mismatch projects and warns.
+  record `geometry_space`; a mismatch between `dg0` and `cg1` projects and
+  warns, and one involving `dg1` stops the run
+  (`runconfig.geometry_space_mismatch`).

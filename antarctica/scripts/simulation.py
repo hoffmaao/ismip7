@@ -937,8 +937,9 @@ def setup_model(restart_from=None, *, allow_timing_cache_a_ref=False,
                 chk, "phys_div", Q_dg, optional=True
             )
             # Separate DG0 prognostic thickness (CG1-geometry runs only, where
-            # the stored CG h was its lumped lift). Under DG0 geometry the
-            # thickness IS the transport state, so there is nothing to restore.
+            # the stored CG h was its lumped lift). Under DG0 or DG1 geometry
+            # the thickness IS the transport state, so there is nothing to
+            # restore.
             if not geom_dg:
                 try:
                     h_dg_state = load_checkpoint_field(

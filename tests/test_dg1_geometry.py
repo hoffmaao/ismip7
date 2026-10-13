@@ -75,6 +75,7 @@ from icepack2_tools.runconfig import (                          # noqa: E402
     dg1_refusals,
     geometry_space,
     geometry_space_mismatch,
+    warm_start_across_spaces,
 )
 from icepack2_tools.transport import transport_form, upwind_divergence  # noqa: E402
 
@@ -122,6 +123,23 @@ def test_a_dg1_state_seeds_only_a_dg1_run():
     # dg0 and cg1 keep the rules they had
     for run, recorded in (("dg0", "cg1"), ("cg1", "dg0"), ("dg0", None)):
         assert geometry_space_mismatch(run, recorded, "map.h5") is None
+
+
+def test_an_inversion_takes_another_spaces_controls_alone(monkeypatch):
+    r"""A DG0 MAP's controls may start a DG1 inversion and the reverse; its
+    geometry may not, and asking for it is refused. Within a space, and
+    between DG0 and CG1, nothing changes."""
+    monkeypatch.delenv("ISMIP7_WARM_START_GEOMETRY", raising=False)
+    assert warm_start_across_spaces("dg1", "dg0", "vf.h5") is True
+    assert warm_start_across_spaces("dg0", "dg1", "map.h5") is True
+    for run, recorded in (("dg1", "dg1"), ("dg0", "dg0"), ("dg0", "cg1"), ("cg1", None)):
+        assert warm_start_across_spaces(run, recorded, "map.h5") is False
+    monkeypatch.setenv("ISMIP7_WARM_START_GEOMETRY", "0")
+    assert warm_start_across_spaces("dg1", "dg0", "vf.h5") is True
+    monkeypatch.setenv("ISMIP7_WARM_START_GEOMETRY", "1")
+    with pytest.raises(ValueError, match="ISMIP7_WARM_START_GEOMETRY"):
+        warm_start_across_spaces("dg1", "dg0", "vf.h5")
+    assert warm_start_across_spaces("dg1", "dg1", "map.h5") is False
 
 
 def test_dg1_names_each_setting_it_does_not_carry():

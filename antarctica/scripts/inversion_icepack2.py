@@ -112,7 +112,7 @@ from icepack2_tools.runconfig import (
     obs_data_root,
     BUDD_SHELF_GATE,
     friction as _friction, geometry_space as _geometry_space,
-    geometry_space_mismatch as _geometry_space_mismatch,
+    warm_start_across_spaces as _warm_start_across_spaces,
     dg1_refusals as _dg1_refusals, target_mesh_geometry_method,
     DISCONTINUOUS_GEOMETRY_SPACES,
     raster_sample as _raster_sample,
@@ -982,12 +982,12 @@ def main():
             for _key in OBJECTIVE_KEYS + OBJECTIVE_RECORD_KEYS:
                 if chk.has_attr("/", _key):
                     warm_attrs[_key] = chk.get_attr("/", _key)
-            # a DG1 warm start seeds only a DG1 inversion, and the reverse
-            _space_refusal = _geometry_space_mismatch(
+            # A warm start from another geometry space (DG0 controls for a
+            # DG1 inversion, or the reverse) seeds the controls and the
+            # fluidity prior alone; its geometry is never taken.
+            warm_cross_space = _warm_start_across_spaces(
                 geometry_space, warm_attrs.get("geometry_space"),
                 os.path.basename(warm_chk))
-            if _space_refusal:
-                raise RuntimeError(_space_refusal)
             for _key in RELAX_MAP_KEYS + (END_STATE_ATTR, "geometry_source",
                                           "geometry_source_method", "t_yr", "stalled"):
                 if chk.has_attr("/", _key):
@@ -1106,6 +1106,12 @@ def main():
             warm_geometry = warm_start_geometry(
                 same_mesh=same_mesh, same_lake=_warm_lake == int(LAKE_ICE_BASE),
                 warm_sampling=_warm_rs, run_sampling=raster_sample)
+            if warm_cross_space:
+                warm_geometry = False
+                PETSc.Sys.Print(
+                    f"    warm start records geometry_space="
+                    f"{warm_attrs.get('geometry_space')}, this run "
+                    f"{geometry_space}: its geometry is not taken")
             if geom_dg1 and warm_geometry and not same_mesh:
                 raise RuntimeError(
                     "; ".join(_dg1_refusals(geometry_transfer=True))

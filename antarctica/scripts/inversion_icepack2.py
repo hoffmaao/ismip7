@@ -94,7 +94,8 @@ from icepack2_tools.dual_friction import (
 )
 from icepack2_tools.geometry import (
     cg1_lift, front_changed_nodes, geometry_function_space,
-    raise_bed_to_lake_ice_base, sample_bed_thickness, sample_to_geometry,
+    raise_bed_to_lake_ice_base, raster_patch_mean, sample_bed_thickness,
+    sample_to_geometry,
 )
 from icepack2_tools.cellview import CellView
 from icepack2_tools.preconditioners import frozen_linearization, with_scpc_blocks
@@ -115,7 +116,7 @@ from icepack2_tools.runconfig import (
     warm_start_across_spaces as _warm_start_across_spaces,
     dg1_refusals as _dg1_refusals, target_mesh_geometry_method,
     DISCONTINUOUS_GEOMETRY_SPACES,
-    raster_sample as _raster_sample,
+    raster_sample as _raster_sample, velocity_sample as _velocity_sample,
     lc as _lc, lc_coarse as _lc_coarse, n_flow as _n_flow,
     eval_continuation, inversion_mesh_source, transfer_fill, drag_gate,
     DRAG_GATE_NONE, hvisc_floor, exact_front_version, warm_start_geometry,
@@ -629,6 +630,10 @@ def main():
     VEL_SAMPLE = os.environ.get("ISMIP7_VEL_SAMPLE", "point").strip().lower()
     if VEL_SAMPLE not in ("point", "patch"):
         raise ValueError(f"ISMIP7_VEL_SAMPLE must be point or patch, got {VEL_SAMPLE!r}")
+    VELOCITY_SAMPLE = _velocity_sample()
+    if VEL_SAMPLE == "patch" and VELOCITY_SAMPLE == "cell_mean":
+        raise ValueError("ISMIP7_VEL_SAMPLE=patch and ISMIP7_VELOCITY_SAMPLE=cell_mean "
+                         "each replace the point sample; set one")
     _patch_repr = None
     if VEL_SAMPLE == "patch":
         from icepack2_tools.patchmean import patch_mean_velocity
@@ -647,6 +652,26 @@ def main():
         PETSc.Sys.Print(
             f"  Velocity sampling: patch mean (quadrature degree {_qdeg}; "
             f"a node is observed when over half its patch is)")
+    elif VELOCITY_SAMPLE == "cell_mean":
+        # Patch means of the raster at each node (runconfig.velocity_sample):
+        # nodes with no observed cell around them read 0, as the point
+        # sampling's zero fill does, and are caught by the mask below.
+        _Q_dg = FunctionSpace(mesh, "DG", 0)
+        _patch = {name: raster_patch_mean(rasterio.open(f"netcdf:{vel_fn}:{name}"), _Q_dg, Q)[0]
+                  for name in ("VX", "VY", "ERRX", "ERRY")}
+        u_obs = Function(V)
+        u_obs.dat.data[:, 0] = _patch["VX"].dat.data_ro
+        u_obs.dat.data[:, 1] = _patch["VY"].dat.data_ro
+        # Velocity-observation mask: as for the point sample below, ERR > 0
+        # marks real observations.
+        err = Function(V)
+        err.dat.data[:, 0] = _patch["ERRX"].dat.data_ro
+        err.dat.data[:, 1] = _patch["ERRY"].dat.data_ro
+        emag = Function(Q, name="obs_err_mag").interpolate(
+            sqrt(err[0] ** 2 + err[1] ** 2))
+        observed = np.asarray(emag.dat.data_ro > 0.0)
+        PETSc.Sys.Print("  Velocity obs: cell means of the raster averaged over each "
+                        "node's cells (ISMIP7_VELOCITY_SAMPLE=cell_mean)")
     else:
         u_obs = icepack.interpolate(
             (rasterio.open(f"netcdf:{vel_fn}:VX"), rasterio.open(f"netcdf:{vel_fn}:VY")),
@@ -1211,9 +1236,18 @@ def main():
                     warm_geometry_attrs, geometry_taken=warm_geometry_loaded,
                     warm_basename=os.path.basename(warm_chk), warm_sha256=_sha)
                 PETSc.Sys.Print("    relaxed geometry: " + describe_relaxation(run_geometry))
+            # The warm start's velocity target only if it was sampled the way
+            # this run samples (a MAP without the record sampled points).
+            _warm_vs = (str(chk.get_attr("/", "velocity_sample")).lower()
+                        if chk.has_attr("/", "velocity_sample") else "point")
             try:
                 if not warm_geometry:
                     raise raise_geometry
+                if _warm_vs != VELOCITY_SAMPLE:
+                    PETSc.Sys.Print(
+                        f"    velocity_obs: this run's {VELOCITY_SAMPLE} sample, the warm "
+                        f"start's was {_warm_vs}")
+                    raise KeyError("velocity sampled another way")
                 u_obs.assign(_warm_load(chk, chk_mesh, "velocity_obs", V))
                 PETSc.Sys.Print("    velocity_obs from warm start")
             except (KeyError, RuntimeError, ValueError):
@@ -3048,6 +3082,9 @@ def main():
             chk.set_attr("/", "dhdt_reweight_scale", float(DHDT_REWEIGHT_SCALE))
             chk.set_attr("/", "kill_bergs", int(KILL_BERGS))
             chk.set_attr("/", "phi_bounds", PHI_BOUNDS_RECORD)
+            # How the velocity target was put on the nodes
+            # (runconfig.velocity_sample).
+            chk.set_attr("/", "velocity_sample", VELOCITY_SAMPLE)
             # How each evaluation reached the full exponents: 1 for the
             # five-solve continuation, 0 for one solve. A solver fact, outside
             # the objective (handoff.OBJECTIVE_KEYS).

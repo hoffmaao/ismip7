@@ -93,6 +93,16 @@ def effective_pressure(H, s):
     return max_value(p_I - p_W, Constant(0.0))
 
 
+def budd_reference_pressure(H, s):
+    r"""The Budd law's reference effective pressure ``N_ref`` on the geometry
+    ``H``, ``s``: ``N`` itself, non-negative. A forward evaluates it on its
+    t = 0 geometry, so ``N_hat = N / N_ref`` starts where the inversion's own
+    ``N_ref=None`` puts it. Under DG0 that is one value per cell; under DG1 it
+    stays an expression of the frozen t = 0 fields, because ``N`` has kinks
+    inside a linear cell that a nodal interpolant does not hold."""
+    return max_value(effective_pressure(H, s), Constant(0.0))
+
+
 def grounded_mask(H, b, gl_width=GL_WIDTH):
     r"""Smooth grounded indicator ``He in [0, 1]`` (1 grounded, 0 floating) from
     height-above-flotation, smoothed over ``gl_width`` m HAF.  Gates the friction

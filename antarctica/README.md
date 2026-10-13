@@ -2184,8 +2184,8 @@ Per experiment in `results/`:
 
 - `<exp>_final.h5`, a self-contained restart checkpoint: mesh, geometry,
   inversion fields, the full `(u, M, τ)` state, the frozen apparent-MB
-  reference, and `levelset` when a calving law is configured. Under `dg0` the
-  saved `thickness` is the prognostic state; a `cg1` run also saves
+  reference, and `levelset` when a calving law is configured. Under `dg0` and
+  `dg1` the saved `thickness` is the prognostic state; a `cg1` run also saves
   `thickness_dg`. The `geometry_space` and `mesh_basename` attributes let a
   restart resolve the same sidecar, and `dt_yr` records the step. A resume
   that continues its own series at another step, as a run taken past a crash

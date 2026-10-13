@@ -637,10 +637,42 @@ BedMachine `vertex` sample:
 |---|---|---|---|
 | MEaSUREs v2 | 32 km | 3.81 m/yr | 3.45 m/yr |
 | MEaSUREs v2 | 8 km | 3.73 m/yr | 3.98 m/yr |
-| the 32 km Budd MAP's own | 32 km | 9.95 m/yr | 10.43 m/yr |
+| the 32 km DG0 Budd MAP's, in both | 32 km | 9.95 m/yr | 10.43 m/yr |
 
 DG0's own truncation error accounts for 2.31 m/yr rms of the last row; the rest
 is BedMachine's thickness against the inverted velocity at the cell scale.
+
+**The 32 km probe.** Budd MAPs inverted in each space under one objective
+(`vertex` sampling on the buffer-0 32 km mesh, `exact_front` 2), then 40
+unforced years from each with the fixed front and no apparent mass balance,
+and DG0 again with it as the smooth reference
+(`antarctica/scripts/geometry_noise.py`; run records `inversion-32km-budd-*-dg1probe`
+and `test-32km-dg1probe-*`). Neighbour-scale rms of the cell-mean dH over
+interior ice:
+
+| years | DG0 | DG1 | DG0, apparent MB |
+|---|---|---|---|
+| 1 | 4.1 m | 3.0 m | 0.0007 m |
+| 5 | 12.4 m | 9.3 m | 0.002 m |
+| 15 | 22.2 m | 17.4 m | 0.15 m |
+| 40 | 33.7 m | 27.4 m | 0.36 m |
+
+| | DG0 | DG1 |
+|---|---|---|
+| MAP velocity misfit | 1,919 | 1,368 |
+| correlation with year 1, at 15 / 40 years | 0.81 / 0.67 | 0.75 / 0.62 |
+| outflux 2015 / 2035 / 2054 (Gt/yr) | 1,503 / 1,133 / 1,049 | 1,306 / 1,500 / 1,301 |
+| Newton iterations a solve; rescues | 8.2; 1 | 4.3; 0 |
+| diagnostic solve | 0.53 s | 0.27 s |
+
+`resid` was 0.0000 Gt at every one of the 1,600 steps of each run. The
+apparent mass balance removes 99 % of the cell-scale noise, and in both spaces
+the rest grows where the first year put it (correlation 0.75 to 0.81 at 15
+years): at this resolution the noise is the initial imbalance. DG1 starts with
+27 % less of it, from a MAP that fits the velocity 29 % better, and the gap
+narrows to 19 % by year 40, with the same pattern at the margins. The
+production noise is at cells 16 to 32 times finer; this probe measures the
+32 km cell scale.
 
 ## Incompatibilities
 

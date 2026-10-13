@@ -284,10 +284,13 @@ def warm_start_across_spaces(run_space, recorded, source):
     mismatch :func:`geometry_space_mismatch` would refuse.
 
     An inversion may still start from such a warm start's controls and
-    fluidity prior: they are CG1 fields the inversion refits, and a 2 km
-    DG1 MAP started from IU's DG0 controls that way (13 October 2026). Its
-    geometry belongs to the other space, so it is never taken, and
-    ``ISMIP7_WARM_START_GEOMETRY`` asking for it is refused."""
+    fluidity prior: they are CG1 fields the inversion refits. At 32 km a DG1
+    refit from the DG0 probe MAP's controls started at misfit 6,938, against
+    35,793 cold. Its geometry belongs to the other space, so it is never
+    taken, and ``ISMIP7_WARM_START_GEOMETRY`` asking for it is refused.
+    ``geometry_space`` is an objective key of the handoff, so the refit's
+    first link runs with ``ISMIP7_WARM_START_STRICT=0`` (``inversion.sbatch``
+    exports 1), as any first link that changes the objective does."""
     refusal = geometry_space_mismatch(run_space, recorded, source)
     if refusal is None:
         return False

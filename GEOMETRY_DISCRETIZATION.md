@@ -617,7 +617,11 @@ state seeds only a DG1 run and a DG1 run starts only from one, on every path
 (`runconfig.geometry_space_mismatch`). An inversion is the one exception: it
 may take a warm start's controls and fluidity prior from the other space and
 refit them on its own geometry, never taking the warm start's geometry
-(`runconfig.warm_start_across_spaces`).
+(`runconfig.warm_start_across_spaces`). At 32 km a DG1 refit from the DG0
+probe MAP's controls started at misfit 6,938, against 35,793 cold.
+`geometry_space` is an objective key of the handoff, so the refit's first
+link runs with `ISMIP7_WARM_START_STRICT=0` (`inversion.sbatch` exports 1),
+as any first link that changes the objective does.
 
 **What `dg1` refuses** (`runconfig.dg1_refusals`): SMB and ocean forcing, the
 apparent mass balance, the backdated start, the ISMIP7 output, level-set

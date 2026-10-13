@@ -585,30 +585,61 @@ def main():
     s = Function(Q_g).interpolate(max_value(b + H, (Constant(1.0) - rho_ratio) * H))
 
     vel_fn = find_file(os.path.join(DATA_DIR, "velocity"), "*.nc")
-    u_obs = icepack.interpolate(
-        (rasterio.open(f"netcdf:{vel_fn}:VX"), rasterio.open(f"netcdf:{vel_fn}:VY")),
-        V,
-        fillvalue=0.0,
-    )
+    # ISMIP7_VEL_SAMPLE: how MEaSUREs lands on a node. ``point`` (the
+    # default) is the bilinear value at the vertex, one 450 m pixel standing
+    # for the node's patch, with that pixel's formal error as sigma. ``patch``
+    # (patchmean.py, 13 Oct 2026) is the hat-weighted mean over the patch,
+    # the datum a CG1 nodal value can represent, with the patch rms of the
+    # formal error as sigma (no 1/N reduction: the errors are correlated
+    # over far more than a cell) and the sub-patch spread of the velocity
+    # printed as the representativeness error the point sample carries.
+    VEL_SAMPLE = os.environ.get("ISMIP7_VEL_SAMPLE", "point").strip().lower()
+    if VEL_SAMPLE not in ("point", "patch"):
+        raise ValueError(f"ISMIP7_VEL_SAMPLE must be point or patch, got {VEL_SAMPLE!r}")
+    _patch_repr = None
+    if VEL_SAMPLE == "patch":
+        from icepack2_tools.patchmean import patch_mean_velocity
+        from icepack2_tools.runconfig import patch_qdegree
+        _qdeg = patch_qdegree()
+        u_obs, (_sig_px, _sig_py), _observed_fn, _vel_cov, _patch_repr = patch_mean_velocity(
+            rasterio.open(f"netcdf:{vel_fn}:VX"), rasterio.open(f"netcdf:{vel_fn}:VY"),
+            rasterio.open(f"netcdf:{vel_fn}:ERRX"), rasterio.open(f"netcdf:{vel_fn}:ERRY"),
+            V, Q, degree=_qdeg)
+        observed = np.asarray(_observed_fn.dat.data_ro > 0.5)
+        # err carries the patch sigma so the normalisation below reads one
+        # field whichever sampling produced it.
+        err = Function(V, name="obs_err")
+        err.dat.data[:, 0] = np.nan_to_num(_sig_px.dat.data_ro)
+        err.dat.data[:, 1] = np.nan_to_num(_sig_py.dat.data_ro)
+        PETSc.Sys.Print(
+            f"  Velocity sampling: patch mean (quadrature degree {_qdeg}; "
+            f"a node is observed when over half its patch is)")
+    else:
+        u_obs = icepack.interpolate(
+            (rasterio.open(f"netcdf:{vel_fn}:VX"), rasterio.open(f"netcdf:{vel_fn}:VY")),
+            V,
+            fillvalue=0.0,
+        )
 
-    # Velocity-observation mask. icepack.interpolate zero-fills NODATA, so
-    # without a mask unobserved regions read as "observed stationary" and
-    # the inversion prescribes friction/stiff ice where there is no
-    # constraint (0.7% of grounded area for MEaSUREs 450m v2). MEaSUREs
-    # reports errors only where a velocity was measured, so ERR > 0 marks
-    # real observations. ISMIP7_OBS_MASK=0 reverts to the unmasked misfit.
-    err = icepack.interpolate(
-        (rasterio.open(f"netcdf:{vel_fn}:ERRX"),
-         rasterio.open(f"netcdf:{vel_fn}:ERRY")),
-        V,
-        fillvalue=0.0,
-    )
-    # ONE definition of "this node carries a real velocity observation",
-    # consumed by both the mask below and the sigma normalization further down.
-    # The two used to derive it independently from `err` and could drift apart.
-    emag = Function(Q, name="obs_err_mag").interpolate(
-        sqrt(err[0] ** 2 + err[1] ** 2))
-    observed = np.asarray(emag.dat.data_ro > 0.0)
+        # Velocity-observation mask. icepack.interpolate zero-fills NODATA, so
+        # without a mask unobserved regions read as "observed stationary" and
+        # the inversion prescribes friction/stiff ice where there is no
+        # constraint (0.7% of grounded area for MEaSUREs 450m v2). MEaSUREs
+        # reports errors only where a velocity was measured, so ERR > 0 marks
+        # real observations. ISMIP7_OBS_MASK=0 reverts to the unmasked misfit.
+        err = icepack.interpolate(
+            (rasterio.open(f"netcdf:{vel_fn}:ERRX"),
+             rasterio.open(f"netcdf:{vel_fn}:ERRY")),
+            V,
+            fillvalue=0.0,
+        )
+        # ONE definition of "this node carries a real velocity observation",
+        # consumed by both the mask below and the sigma normalization further down.
+        # The two used to derive it independently from `err` and could drift apart.
+        emag = Function(Q, name="obs_err_mag").interpolate(
+            sqrt(err[0] ** 2 + err[1] ** 2))
+        observed = np.asarray(emag.dat.data_ro > 0.0)
+        PETSc.Sys.Print("  Velocity sampling: point (bilinear at the vertex)")
 
     obs_mask = Function(Q, name="obs_mask").assign(1.0)
     if os.environ.get("ISMIP7_OBS_MASK", "1") != "0":
@@ -674,6 +705,25 @@ def main():
             f"velocity sigma floor {sigma_u_floor:g} m/yr, "
             f"sigma_x median {_sig_med:.2f} p90 {_sig_p90:.2f} m/yr"
         )
+        if _patch_repr is not None:
+            # The sub-patch spread of the observed speed components: what a
+            # point sample is off by, on average, from the patch datum. Where
+            # it exceeds sigma the point-sampled chi^2 was counting
+            # representativeness as model error.
+            _rx = np.asarray(_patch_repr[0].dat.data_ro, dtype="f8")[observed]
+            _parts = COMM_WORLD.gather(_rx, root=0)
+            if COMM_WORLD.rank == 0:
+                _all = np.concatenate(_parts)
+                _all = _all[np.isfinite(_all)]
+                _r = (float(np.median(_all)), float(np.percentile(_all, 90)),
+                      float(np.percentile(_all, 99)))
+            else:
+                _r = None
+            _r = COMM_WORLD.bcast(_r, root=0)
+            PETSc.Sys.Print(
+                f"  Representativeness (sub-patch std of vx, observed nodes): "
+                f"median {_r[0]:.2f} p90 {_r[1]:.2f} p99 {_r[2]:.2f} m/yr "
+                f"(not added to sigma: the datum is the patch mean)")
         PETSc.Sys.Print(
             f"  Unobserved nodes (ERR==0): {_n_unobs} given "
             f"sigma={sigma_u_unobs:g} m/yr so the zero-filled velocity there "
@@ -2892,6 +2942,7 @@ def main():
             # theta/phi absorb the bed representation just as they absorb the
             # front treatment, so a forward must reproduce it.
             chk.set_attr("/", "raster_sample", raster_sample)
+            chk.set_attr("/", "vel_sample", VEL_SAMPLE)
             # How each evaluation reached the full exponents: 1 for the
             # five-solve continuation, 0 for one solve. A solver fact, outside
             # the objective (handoff.OBJECTIVE_KEYS).
@@ -3010,6 +3061,7 @@ def main():
                 "dhdt_weight": float(dhdt_w),
                 "dhdt_net_sigma": float(net_sigma_used),
                 "dhdt_filter_l": float(dhdt_filter_l) if use_dhdt else 0.0,
+                "vel_sample": VEL_SAMPLE,
                 "grad_precond": os.environ.get(
                     "ISMIP7_GRAD_PRECOND", "none"
                 ).lower(),
@@ -3695,6 +3747,7 @@ def main():
         "fluidity_control": FLUIDITY_CONTROL,
         "drag_gate": DRAG_RECORD, "h_visc_floor": float(RC_HVISC_FLOOR),
         "phi_grounded": PHI_GROUNDED, "raster_sample": str(raster_sample),
+        "vel_sample": VEL_SAMPLE,
     })
     if PRIOR_FORM == "bilaplacian":
         run_settings.update({"prior_sigma_theta": float(PRIOR_SIGMA_THETA),

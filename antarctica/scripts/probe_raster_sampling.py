@@ -1,9 +1,11 @@
-r"""A/B the two ways of putting BedMachine onto DG0 geometry cells.
+r"""A/B the ways of putting BedMachine onto DG0 geometry cells.
 
     mpiexec -n 2 python antarctica/scripts/probe_raster_sampling.py MESH.msh
 
 ``vertex``    : icepack bilinear at the 3 vertices, L2-projected (3 px / cell)
 ``cell_mean`` : mean of the raster over the cell (geometry.raster_cell_mean)
+``patch``     : hat-weighted patch mean, the lumped L2 projection onto CG1,
+                projected (patchmean.py); conserves the raster's mass
 
 Reports, for bed b, thickness H and surface s: the rms facet jump over all
 interior facets and over GROUNDED interior facets (the DG0 driving stress is
@@ -83,8 +85,19 @@ def frac_of(pred):
 f_grounded = frac_of(lambda m: (m == 2) | (m == 4))
 n_cells = int(mesh.comm.allreduce(float(one.dat.data_ro.size)))
 
+# The raster's own mass over the mesh, by the patch rule's quadrature: what
+# the patch sampling conserves and the others miss.
+from icepack2_tools import patchmean as P  # noqa: E402
+from icepack2_tools.runconfig import patch_qdegree  # noqa: E402
+_deg = patch_qdegree()
+_Qs, _xq, _yq = P.quadrature_points(mesh, _deg)
+_fq = Function(_Qs)
+_fq.dat.data[:] = np.nan_to_num(P.raster_at(rasterio.open(f"netcdf:{bm}:thickness"), _xq, _yq))
+vol_raster = assemble(_fq * P._measure((_deg, "default"))) / 1e9
+PETSc.Sys.Print(f"  BedMachine thickness over the mesh (quadrature degree {_deg}): {vol_raster:.4e} km3")
+
 res = {}
-for method in ("vertex", "cell_mean"):
+for method in ("vertex", "cell_mean", "patch"):
     t0 = time.time()
     b = sample_to_geometry(rasterio.open(f"netcdf:{bm}:bed"), Q, Qc, method=method)
     H = sample_to_geometry(rasterio.open(f"netcdf:{bm}:thickness"), Q, Qc,
@@ -105,7 +118,8 @@ for method in ("vertex", "cell_mean"):
     PETSc.Sys.Print(
         f"  {method:9s}  rms|jump| all: b {r['rms_jb']:7.2f}  s {r['rms_js']:7.2f}  h {r['rms_jh']:7.2f} m"
         f"  | grounded: b {r['rms_jb_g']:7.2f}  s {r['rms_js_g']:7.2f} m"
-        f"  | front<h> {r['front_h']:6.1f} m  vol {r['vol_km3']:.4e} km3  [{r['t']:.1f}s]")
+        f"  | front<h> {r['front_h']:6.1f} m  vol {r['vol_km3']:.4e} km3 "
+        f"({100 * (r['vol_km3'] / vol_raster - 1):+.3f}% of the raster)  [{r['t']:.1f}s]")
     PETSc.Sys.Print(
         f"  {'':9s}  INTERIOR (facets between two >10 km cells, {n_big} such cells): "
         f"rms|jump| b {r['rms_jb_i']:7.2f}  s {r['rms_js_i']:7.2f}  h {r['rms_jh_i']:7.2f} m")
@@ -128,3 +142,7 @@ v, c = res["vertex"], res["cell_mean"]
 PETSc.Sys.Print(f"  cell_mean - vertex bed: rms {rms_db:.2f} m (interior cells {rms_db_i:.2f}, margin cells {rms_db_m:.2f}), max |diff| {mx:.1f} m")
 PETSc.Sys.Print(f"  grounded rms jump in s: {v['rms_js_g']:.2f} -> {c['rms_js_g']:.2f} m "
                 f"({100*(c['rms_js_g']/v['rms_js_g']-1):+.1f}%)")
+p = res["patch"]
+PETSc.Sys.Print(f"  patch vs vertex: grounded rms jump in s {v['rms_js_g']:.2f} -> {p['rms_js_g']:.2f} m "
+                f"({100*(p['rms_js_g']/v['rms_js_g']-1):+.1f}%), b {v['rms_jb_g']:.2f} -> {p['rms_jb_g']:.2f} m; "
+                f"volume {v['vol_km3']:.4e} -> {p['vol_km3']:.4e} km3 (raster {vol_raster:.4e})")

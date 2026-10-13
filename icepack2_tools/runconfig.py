@@ -107,8 +107,25 @@ GEOMETRY_SPACES = ("dg0", "cg1")
 # MAPs record the method used; the forward reads it back from the MAP.
 # vertex_front is the default since 8 October 2026 (IU, issue #167): IU's
 # final MAPs are refitted under it, and it has its own melt calibration.
-FRONT_RASTER_SAMPLES = ("vertex_front",)
-RASTER_SAMPLES = ("vertex", "cell_mean") + FRONT_RASTER_SAMPLES
+#   patch     - the hat-weighted patch mean (patchmean.py, 13 Oct 2026): the
+#               lumped L2 projection of the raster onto CG1, projected to the
+#               cell. As smooth as vertex (neighbouring cells share two of
+#               three patches) and the DG0 field conserves the raster's mass
+#               exactly. ISMIP7_PATCH_QDEGREE sets the points per cell.
+#   patch_front - patch, with the front cells rebuilt as under vertex_front.
+FRONT_RASTER_SAMPLES = ("vertex_front", "patch_front")
+RASTER_SAMPLES = ("vertex", "cell_mean", "patch") + FRONT_RASTER_SAMPLES
+FRONT_BASE_METHODS = {"vertex_front": "vertex", "patch_front": "patch"}
+PATCH_QDEGREE_DEFAULT = 10
+
+
+def patch_qdegree():
+    r"""``ISMIP7_PATCH_QDEGREE``: the quadrature degree of the patch means
+    (about (d + 2)^2 / 4 raster lookups per cell; 25 at the default 10)."""
+    value = int(os.environ.get("ISMIP7_PATCH_QDEGREE", PATCH_QDEGREE_DEFAULT))
+    if value < 1:
+        raise ValueError("ISMIP7_PATCH_QDEGREE must be >= 1")
+    return value
 RASTER_SAMPLE_DEFAULT = "vertex_front"
 
 
@@ -433,9 +450,10 @@ def raster_front(method):
 
 def raster_base_method(method):
     r"""How a single raster is put on a cell under ``method``: a front
-    sampling samples every raster by its vertices and changes only the front
-    cells' thickness and bed afterwards."""
-    return "vertex" if raster_front(method) else str(method).lower()
+    sampling samples every raster by its base method (``FRONT_BASE_METHODS``)
+    and changes only the front cells' thickness and bed afterwards."""
+    method = str(method).lower()
+    return FRONT_BASE_METHODS.get(method, method)
 
 
 def target_mesh_geometry_method(method):

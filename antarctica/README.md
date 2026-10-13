@@ -1613,6 +1613,7 @@ thickness clamp from 119,000 to 256,000 Gt/yr within a few steps.
 | `ISMIP7_OBS_MASK` | `0` drops the velocity-observation mask | `1` |
 | `ISMIP7_DHDT_WEIGHT` | weight on the dH/dt chi^2; `0` disables the transient constraint. Needs `ISMIP7_GEOMETRY_SPACE=dg0` | `0` |
 | `ISMIP7_DHDT_SIGMA` | assumed dH/dt uncertainty (m/yr), hand set since the MIPkit ships no uncertainty field | `0.1` |
+| `ISMIP7_DHDT_FILTER_L` | Helmholtz length (m) applied to the masked residual before it is scored, normalised by the filtered mask so the grounding line and the coverage edge are not attenuated; kernel std is about 1.4 L per axis. The one-step tendency of a MAP carries cell-scale divergence checkerboard with several times the variance of the Smith field, and the pointwise term spends its budget on it. `0` scores the residual pointwise | `0` |
 | `ISMIP7_DHDT_DT` | timestep of the prognostic step (yr) | `1.0` |
 | `ISMIP7_DHDT_VAR` | `dhdt_smith` (firn corrected, 2003 to 2019) or `dhdt_cpom` (uncorrected, so not interchangeable) | `dhdt_smith` |
 | `ISMIP7_DHDT_MELT` | `0` drops ocean melt from the prognostic source, which otherwise melts with the forward's calibration (section 5); melt is zero on grounded ice | `1` |

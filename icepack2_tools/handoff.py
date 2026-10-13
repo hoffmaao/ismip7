@@ -23,7 +23,7 @@ import math
 # than re-derived, so they appear here as plain values.
 OBJECTIVE_KEYS = (
     "misfit_norm", "misfit_scale", "log_vel_weight", "log_vel_eps",
-    "dhdt_weight", "dhdt_net_sigma",
+    "dhdt_weight", "dhdt_net_sigma", "dhdt_filter_l",
     "prior_form", "gamma_theta", "gamma_phi",
     "prior_sigma_theta", "prior_sigma_phi", "prior_rho",
     "prior_sigma_alpha", "prior_rho_theta", "friction_c_ref",

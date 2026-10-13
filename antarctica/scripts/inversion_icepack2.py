@@ -2281,6 +2281,62 @@ def main():
                 )
         h_next = Function(Q_g, name="h_next")
 
+        # ── Helmholtz filter on the residual (13 Oct 2026) ──────────────
+        # The one-step tendency of a MAP carries cell-scale flux-divergence
+        # checkerboard with ~7x the variance of the Smith field; pointwise,
+        # the term spends its budget on that noise (chi2/node 105 raw vs 18
+        # after a 5 km Gaussian on the 13 Oct dhdtctrl checkpoint). With
+        # ISMIP7_DHDT_FILTER_L = L > 0 (m) the residual r = mask*(model-obs)
+        # is passed through (1 - L^2 Laplacian) r_s = r on CG1 with natural
+        # boundary conditions (kernel std ~ sqrt(2) L per axis) and the term
+        # scores r_s / m_s, where m_s is the same filter applied to the mask,
+        # so the filtered residual is not attenuated by the zeros outside the
+        # grounded+observed cells (normalised convolution). The filter solve
+        # is an EquationSolver, so the adjoint carries it. L = 0 is the
+        # pointwise term.
+        dhdt_filter_l = float(os.environ.get("ISMIP7_DHDT_FILTER_L", "0"))
+        if dhdt_filter_l < 0.0:
+            raise ValueError("ISMIP7_DHDT_FILTER_L must be >= 0 (m)")
+        use_dhdt_filter = dhdt_filter_l > 0.0
+        if use_dhdt_filter:
+            _L2 = Constant(dhdt_filter_l ** 2)
+            _dhdt_filter_sp = {
+                "snes_type": "ksponly",
+                "ksp_type": "cg",
+                "pc_type": "gamg",
+                "ksp_rtol": 1e-12,
+                "ksp_atol": 0.0,
+            }
+
+            def _helmholtz_form(out, src):
+                _v = TestFunction(Q)
+                return (
+                    (out * _v + _L2 * inner(fd.grad(out), fd.grad(_v))) * dx
+                    - src * _v * dx
+                )
+
+            # The filtered mask is a constant of the objective: a plain
+            # solve, outside the tape.
+            dhdt_mask_s = Function(Q, name="dhdt_mask_filtered")
+            fd.solve(_helmholtz_form(dhdt_mask_s, dhdt_mask) == 0, dhdt_mask_s,
+                     solver_parameters=_dhdt_filter_sp)
+            # Floor: the normalisation is only read on masked cells, where
+            # m_s is O(1) already; the floor keeps a stray mesh corner off
+            # the division.
+            dhdt_mask_s.dat.data[:] = np.maximum(dhdt_mask_s.dat.data_ro, 1e-3)
+            dhdt_resid_s = Function(Q, name="dhdt_resid_filtered")
+            # Mean of the filtered mask over the masked cells: 1 would be a
+            # mask with no edge; the shortfall is what the normalisation
+            # restores at the grounding line and the coverage edge.
+            _ms_mean = assemble(dhdt_mask * dhdt_mask_s * dx) / dhdt_area
+            PETSc.Sys.Print(
+                f"  dH/dt filter: Helmholtz L={dhdt_filter_l / 1e3:g} km on the "
+                f"residual (kernel std ~{dhdt_filter_l * 2 ** 0.5 / 1e3:.1f} km); "
+                f"filtered mask averages {_ms_mean:.3f} over the masked cells"
+            )
+        else:
+            PETSc.Sys.Print("  dH/dt filter: none (pointwise residual)")
+
         # ── Net (integral) mass-balance term -- OFF BY DEFAULT ──────────
         # Explored Aug 2026 and mechanically validated (it moves the grounded
         # net tendency from +604 to -54 Gt/yr against an observed -73 at
@@ -2506,12 +2562,25 @@ def main():
                 form_compiler_parameters=fc_params,
             ).solve()
             dhdt_model = (h_next - H) / dt_c
+            if use_dhdt_filter:
+                # Taped: the adjoint of the filter is the filter itself
+                # (self-adjoint operator), applied to the term's gradient.
+                EquationSolver(
+                    _helmholtz_form(dhdt_resid_s,
+                                    dhdt_mask * (dhdt_model - dhdt_obs)) == 0,
+                    dhdt_resid_s,
+                    solver_parameters=_dhdt_filter_sp,
+                    form_compiler_parameters=fc_params,
+                ).solve()
+                _dhdt_scored = dhdt_resid_s / dhdt_mask_s
+            else:
+                _dhdt_scored = dhdt_model - dhdt_obs
             integrand = integrand + (
                 0.5
                 * Constant(dhdt_w)
                 / dhdt_area
                 * dhdt_mask
-                * ((dhdt_model - dhdt_obs) / Constant(dhdt_sigma)) ** 2
+                * (_dhdt_scored / Constant(dhdt_sigma)) ** 2
             )
 
             if use_dhdt_net:
@@ -2593,10 +2662,15 @@ def main():
     if use_dhdt:
         _net_form = (((h_next - H) / Constant(dhdt_dt) - dhdt_obs)
                      * dhdt_mask * dx(mesh))
+        # The scored residual: the filtered one under ISMIP7_DHDT_FILTER_L
+        # (dhdt_resid_s holds the filter of the last trial, like h_next).
+        _dhdt_scored_now = (
+            dhdt_resid_s / dhdt_mask_s if use_dhdt_filter
+            else (h_next - H) / Constant(dhdt_dt) - dhdt_obs
+        )
         _dhdt_chi2 = (
             0.5 / dhdt_area * dhdt_mask
-            * (((h_next - H) / Constant(dhdt_dt) - dhdt_obs)
-               / Constant(dhdt_sigma)) ** 2
+            * (_dhdt_scored_now / Constant(dhdt_sigma)) ** 2
         ) * dx(mesh)
 
     # Velocity chi^2 of the last accepted state, in ITS OWN accumulator. The
@@ -2800,6 +2874,7 @@ def main():
                 chk.set_attr("/", "prior_rho", float(PRIOR_RHO))
             chk.set_attr("/", "dhdt_weight", float(dhdt_w))
             chk.set_attr("/", "dhdt_forcing", dhdt_forcing if use_dhdt else "none")
+            chk.set_attr("/", "dhdt_filter_l", float(dhdt_filter_l) if use_dhdt else 0.0)
             chk.set_attr("/", "dhdt_net_sigma", net_sigma_used)
             # Which per-basin K the dH/dt melt source used, or "none". The
             # fallback is deliberately non-fatal (the misfit is grounded-only
@@ -2934,6 +3009,7 @@ def main():
                 "min_iter": int(min_iter),
                 "dhdt_weight": float(dhdt_w),
                 "dhdt_net_sigma": float(net_sigma_used),
+                "dhdt_filter_l": float(dhdt_filter_l) if use_dhdt else 0.0,
                 "grad_precond": os.environ.get(
                     "ISMIP7_GRAD_PRECOND", "none"
                 ).lower(),
@@ -3605,6 +3681,7 @@ def main():
         "misfit_norm": MISFIT_NORM, "misfit_scale": float(misfit_scale),
         "log_vel_weight": float(log_vel_w), "log_vel_eps": float(LOG_VEL_EPS),
         "dhdt_weight": float(dhdt_w), "dhdt_net_sigma": net_sigma_used,
+        "dhdt_filter_l": float(dhdt_filter_l) if use_dhdt else 0.0,
         "prior_form": PRIOR_FORM, "gamma_theta": float(GAMMA_THETA),
         "gamma_phi": float(GAMMA_PHI), "friction_control": FRICTION_CONTROL,
         "friction": str(FRICTION), "n_flow": float(n_flow_val),

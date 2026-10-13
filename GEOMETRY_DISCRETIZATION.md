@@ -588,8 +588,9 @@ outflow, so the transport residual and `resid` close exactly as under DG0. The
 only limiter is a positivity floor (`cellview.clamp_cells`): a cell whose mean
 falls below the floor is filled to it and booked as clamp, and a cell whose
 lowest vertex does has its slope scaled until that vertex sits on the floor,
-keeping the mean. The slope scaling's mass change is measured every advance
-and held to the transport tolerance. Firedrake's `VertexBasedLimiter` is kept
+keeping the mean. Every advance holds the floor's assembled mass change to
+the fill its pre-floor cell means call for (`cellview.floor_fill`), within the
+transport tolerance, so mass the slope scaling moved stops the run. Firedrake's `VertexBasedLimiter` is kept
 out: thickness peaks wherever ice fills a bed trough under a smooth surface,
 and clipping those peaks rebuilds the surface roughness DG1 removes. On
 BedMachine's `vertex` sample:

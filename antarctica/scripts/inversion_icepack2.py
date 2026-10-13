@@ -1106,6 +1106,13 @@ def main():
             warm_geometry = warm_start_geometry(
                 same_mesh=same_mesh, same_lake=_warm_lake == int(LAKE_ICE_BASE),
                 warm_sampling=_warm_rs, run_sampling=raster_sample)
+            if geom_dg1 and warm_geometry and not same_mesh:
+                raise RuntimeError(
+                    "; ".join(_dg1_refusals(geometry_transfer=True))
+                    + f": {os.path.basename(warm_chk)} is on another mesh, and a "
+                    "dg1 inversion runs only on its own mesh; take the warm "
+                    "start's controls alone by leaving ISMIP7_WARM_START_GEOMETRY "
+                    "unset or 0")
             if same_mesh and _warm_rs != raster_sample:
                 PETSc.Sys.Print(
                     f"    warm start records raster_sample={_warm_rs}, this run "

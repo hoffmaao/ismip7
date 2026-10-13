@@ -67,7 +67,7 @@ from icepack2.constants import (                                # noqa: E402
 )
 
 from icepack2_tools import geometry as G                        # noqa: E402
-from icepack2_tools.cellview import CellView, clamp_cells       # noqa: E402
+from icepack2_tools.cellview import CellView, clamp_cells, floor_fill  # noqa: E402
 from icepack2_tools.front import clamp_thickness                # noqa: E402
 from icepack2_tools.naming import map_geom_tag                  # noqa: E402
 from icepack2_tools.runconfig import (                          # noqa: E402
@@ -203,6 +203,33 @@ def test_the_positivity_floor_keeps_means_and_lifts_vertices():
     scaled = ~low & ~untouched
     assert scaled.any()
     np.testing.assert_allclose(out[scaled].min(axis=1), floors[scaled], atol=1e-12)
+
+
+def test_the_floor_adds_exactly_the_fill_its_means_call_for():
+    rng = np.random.default_rng(3)
+    mesh = _mesh(n=12)
+    Q1 = G.geometry_function_space(mesh, "dg1")
+    view = CellView(Q1)
+    h = Function(Q1)
+    h.dat.data[:] = rng.normal(20.0, 40.0, size=h.dat.data.size)
+    area = assemble(TestFunction(view.Q0) * dx).dat.data_ro
+    exempt = rng.random(area.size) < 0.1
+    floor = 5.0
+    fill = (floor_fill(view.means(h), floor, exempt, None) * area).sum()
+    before = assemble(h * dx)
+    nodes = view.nodes(h)
+    view.write_nodes(h, clamp_cells(nodes.copy(), floor, exempt, None))
+    assert fill > 0.0
+    np.testing.assert_allclose(assemble(h * dx) - before, fill, rtol=1e-12)
+    # a slope scaling that let a scaled cell's mean drop 1 m shows as the gap
+    out = clamp_cells(nodes.copy(), floor, exempt, None)
+    scaled = (nodes.min(axis=1) < np.where(exempt, 0.0, floor)) \
+        & (nodes.mean(axis=1) >= np.where(exempt, 0.0, floor))
+    assert scaled.any()
+    out[scaled] -= 1.0
+    view.write_nodes(h, out)
+    gap = assemble(h * dx) - before - fill
+    np.testing.assert_allclose(gap, -area[scaled].sum(), rtol=1e-9)
 
 
 # ── BedMachine onto DG1 ──────────────────────────────────────────────────

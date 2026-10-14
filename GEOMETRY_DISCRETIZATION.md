@@ -610,25 +610,53 @@ BedMachine's `vertex` sample:
 | 32 km | 238.4 / 0 / 77.4 m | 6,310 of 9,035 (p99 508 m) |
 | 8 km | 106.1 / 0 / 67.1 m | 38,360 of 64,156 (p99 558 m) |
 
-**Per-cell rules** read cell means (`cellview.CellView`): the forcing mask, the
-fixed front's removals (booked at mean times area), the drag gate and the
-tripwire. A DG1 MAP is named `_dg1` and records `geometry_space=dg1`; a DG1
-state seeds only a DG1 run and a DG1 run starts only from one, on every path
-(`runconfig.geometry_space_mismatch`). An inversion is the one exception: it
-may take a warm start's controls and fluidity prior from the other space and
-refit them on its own geometry, never taking the warm start's geometry
+**Per-cell rules** read the cell means of `h` and `b`, with the surface the
+DG0 formula builds from them (`cellview.CellView`, `forcing.forcing_geometry`),
+so each is the DG0 rule applied to those means:
+
+| rule | under `dg1` |
+|---|---|
+| SMB, melt, collapse mask | the forcing lives on the DG0 cells (`forcing.forcing_space`) and reads the cell means; the draft slope of `ISMIP7_MELT_SLOPE=local` is the DG0 slope of the cell-mean draft |
+| melt calibration | a `dg0` file applies as fitted (`runconfig.melt_geometry_space`); the calibration tools run under `dg1` fit and stamp `dg0` |
+| SMB-elevation feedback | the surface change of the cell means since `H_init`'s |
+| grounded cells, forcing mask, drag gate, tripwire | the flotation test and the thresholds on the cell means |
+| level-set front and its law | the level set and the law read the cell means (`h_cell`, the bed's means) |
+| removals (fixed front, level set, slivers, collapse) | whole cells, booked at mean times area; the sub-cell shed scales the whole cell |
+| backdate | the DG0 rule on the cell means; a changed cell moves by its mean's change, keeping its slope, floored by the positivity operator (`obs_dhdt.backdate_cells`) |
+| ISMIP7 output | the per-cell fields are the cell means and their surface; the grounding-line and boundary fluxes are the transport's own, on the DG1 traces |
+
+A t = 0 DG1 geometry has the DG0 cell values as its means to 1e-12 m, so at
+t = 0 every one of these rules sees what it sees under DG0. A forward on
+another mesh than its MAP's rebuilds the DG1 geometry from BedMachine with the
+run's sampling, as DG0 does.
+
+**Apparent mass balance.** The reference lives on the transport space. Under
+DG1 it is the field whose integral against every DG1 basis function is the
+t = 0 upwind divergence, the transport's own volume term included:
+`a_ref = M^-1 R(h0, u0)` with the cell-local P1 mass matrix
+(`cellview.local_mass_inverse`). A transport step from the t = 0 state with
+it as the only source returns that state at every node; a cell-constant
+reference, the DG0 rule on the cell means, cancels each cell's net flux alone
+and lets the slopes move (`tests/test_dg1_cell_rules.py`). The fixed-front and
+free-front masks and `balance`'s forcing act on whole cells.
+
+**Provenance.** A DG1 MAP is named `_dg1` and records `geometry_space=dg1`; a
+DG1 state seeds only a DG1 run and a DG1 run starts only from one, on every
+path (`runconfig.geometry_space_mismatch`). An inversion is the one exception:
+it may take a warm start's controls and fluidity prior from the other space
+and refit them on its own geometry, never taking the warm start's geometry
 (`runconfig.warm_start_across_spaces`). At 32 km a DG1 refit from the DG0
 probe MAP's controls started at misfit 6,938, against 35,793 cold.
 `geometry_space` is an objective key of the handoff, so the refit's first
 link runs with `ISMIP7_WARM_START_STRICT=0` (`inversion.sbatch` exports 1),
 as any first link that changes the objective does.
 
-**What `dg1` refuses** (`runconfig.dg1_refusals`): SMB and ocean forcing, the
-apparent mass balance, the backdated start, the ISMIP7 output, level-set
-calving, the collapse mask, sub-element friction, a geometry rebuilt on
-another mesh, adaptive transfer and `ISMIP7_DHDT_WEIGHT`. Each decides per
-cell in a way the DG1 path does not implement, so `dg1` runs unforced
-forwards and inversions on the MAP's own mesh. It also refuses timing caches:
+**What `dg1` refuses** (`runconfig.dg1_refusals` and the drivers):
+sub-element friction and `ISMIP7_LEGACY_TRANSPORT`, which integrate a
+continuous surface; an inversion taking a warm start's geometry from another
+mesh, where a discontinuous linear field interpolated node by node samples one
+source cell per target node; adaptive transfer; `ISMIP7_DHDT_WEIGHT`;
+`ISMIP7_SUBSTEP_TRACE`, which prints one value per cell; and timing caches:
 one is prepared on another mesh and its contract
 (`timing_campaign.cache_required_fields`) names the DG0 `N_ref`, so
 `prepare_timing_cache.py`, `redistribute_checkpoint.py --manifest` and a

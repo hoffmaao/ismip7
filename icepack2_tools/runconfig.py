@@ -259,6 +259,20 @@ def geometry_space():
     return value
 
 
+def melt_geometry_space(space=None):
+    r"""The geometry space a melt calibration records for a run under
+    ``space`` (this run's, :func:`geometry_space`, by default).
+
+    Under ``dg1`` the forcing lives on the DG0 cells and reads the cell means
+    of the geometry, with the surface rebuilt from them by the DG0 formula
+    (``forcing.forcing_geometry``), so the melt is the DG0 melt of those
+    means. A t=0 DG1 geometry has the DG0 cell values as its means to
+    1e-12 m, so a ``dg0`` calibration applies as fitted and nothing is
+    refitted. ``dg0`` and ``cg1`` are their own."""
+    space = geometry_space() if space is None else space
+    return "dg0" if space == "dg1" else space
+
+
 def geometry_space_mismatch(run_space, recorded, source):
     r"""Why a MAP, warm start or restart checkpoint recorded under geometry
     space ``recorded`` (None when it predates the record) cannot seed a run
@@ -302,32 +316,23 @@ def warm_start_across_spaces(run_space, recorded, source):
 
 
 def dg1_refusals(*, legacy_transport=False, subelement=False,
-                 apparent_mb=None, calving="none", fracture="none",
-                 backdate_years=0.0, ismip7_output=False,
-                 geometry_transfer=False, forcing=False, timing_cache=False):
+                 geometry_transfer=False, timing_cache=False):
     r"""What a ``dg1`` run does not carry, one line per setting that asks for
     it; empty when nothing conflicts.
 
-    The DG1 path runs the transport, the driving stress, the fixed front, the
-    drag gate, the inversion and restarts. The forcing, the apparent mass
-    balance, the backdated geometry, the ISMIP7 output, the level-set front,
-    the collapse mask and transfers onto another mesh each decide per cell in
-    ways the DG1 path does not implement (GEOMETRY_DISCRETIZATION.md, "DG1
-    geometry"), so a run asking for one stops at setup. A timing cache is
-    prepared on another mesh and its contract names the DG0 restart fields,
-    so building, publishing or reading one stops as well."""
+    The legacy transport is a CG1 scheme, and the sub-element friction
+    integrates a grounded fraction of a continuous surface. An inversion
+    takes a warm start's geometry only on the warm start's own mesh: a
+    discontinuous linear field interpolated onto another mesh samples one
+    source cell per target node, which the driving stress reads as slope (a
+    forward on another mesh rebuilds its geometry from BedMachine instead,
+    which DG1 carries). A timing cache is prepared on another mesh and its
+    contract names the DG0 restart fields, so building, publishing or
+    reading one stops as well (GEOMETRY_DISCRETIZATION.md, "DG1 geometry")."""
     asked = (
         (legacy_transport, "ISMIP7_LEGACY_TRANSPORT (a CG1 scheme)"),
         (subelement, "sub-element friction (ISMIP7_SUBELEMENT_FRICTION)"),
-        (apparent_mb is not None,
-         f"the apparent mass balance (ISMIP7_APPARENT_MB={apparent_mb})"),
-        (calving != "none", f"a level-set calving front (ISMIP7_CALVING={calving})"),
-        (fracture != "none", f"the collapse forcing (ISMIP7_FRACTURE={fracture})"),
-        (backdate_years > 0.0,
-         f"a geometry backdated {backdate_years:g} yr (the start year)"),
-        (ismip7_output, "the ISMIP7 output (ISMIP7_OUTPUT)"),
-        (geometry_transfer, "a geometry rebuilt on another mesh than the MAP's"),
-        (forcing, "SMB and ocean forcing (a forcing callback)"),
+        (geometry_transfer, "a warm start's geometry taken onto another mesh"),
         (timing_cache, "timing caches (prepare_timing_cache.py, "
                        "redistribute_checkpoint.py --manifest, run_timing.py)"),
     )

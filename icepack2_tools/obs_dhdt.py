@@ -375,3 +375,29 @@ def backdate_thickness(h, bed, dhdt, observed, years, rho_ratio):
     out = h.copy()
     out[changed] = np.maximum(h[changed] - float(years) * np.asarray(dhdt)[changed], 0.0)
     return out, changed
+
+
+def backdate_cells(view, h, bed, dhdt, observed, years, rho_ratio):
+    r""":func:`backdate_thickness` on the cell means of a DG1 thickness ``h``
+    (a Function, mutated), read through the cell view ``view``
+    (:class:`icepack2_tools.cellview.CellView`); ``bed`` is the DG1 bed and
+    ``dhdt`` and ``observed`` are arrays on the DG0 cells.
+
+    The grounded test reads the cell means, as under DG0, and each changed
+    cell is shifted by the change of its mean, which keeps its slope. Where
+    that shift takes a vertex below zero the positivity floor scales the
+    slope (:func:`icepack2_tools.cellview.clamp_cells`), which keeps the
+    mean, so the backdated cell means are those :func:`backdate_thickness`
+    gives the DG0 cells. Returns the new cell means and the changed mask."""
+    from .cellview import clamp_cells
+    means = np.array(view.means(h))
+    new, changed = backdate_thickness(means, view.means(bed), dhdt, observed,
+                                      years, rho_ratio)
+    view.add_cells(h, np.where(changed, new - means, 0.0))
+    nodes = view.nodes(h)
+    nodes[changed] = clamp_cells(nodes[changed], 0.0)
+    # a cell the backdate empties holds no ice, as under DG0, where the
+    # shift alone would leave a roundoff film
+    nodes[changed & (new <= 0.0)] = 0.0
+    view.write_nodes(h, nodes)
+    return new, changed

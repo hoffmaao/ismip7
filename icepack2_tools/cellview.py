@@ -21,7 +21,8 @@ vertex-based limiter clips (GEOMETRY_DISCRETIZATION.md, "DG1 geometry").
 import numpy as np
 from firedrake import Function, FunctionSpace
 
-__all__ = ["CellView", "clamp_cells", "floor_fill", "geometry_degree"]
+__all__ = ["CellView", "clamp_cells", "floor_fill", "geometry_degree",
+           "local_mass_inverse"]
 
 
 def geometry_degree(space):
@@ -115,6 +116,33 @@ class CellView:
             f.dat.data[:] = values[:, 0]
             return
         f.dat.data[self.dofs] = values
+
+    def solve_mass(self, cof, out, cell_area):
+        r"""Write into ``out`` the field whose integral against every basis
+        function of ``Q_g`` is the assembled ``cof``: ``M^-1 cof`` with the
+        cell-local mass matrix. Under DG0 that is ``cof / cell_area``, the
+        cell mean of the integrand; under DG1 :func:`local_mass_inverse`.
+        ``cell_area`` is in DG0 indexing."""
+        r = cof.dat.data_ro
+        if self.dofs is None:
+            out.dat.data[:] = r / cell_area
+            return out
+        out.dat.data[self.dofs] = local_mass_inverse(r[self.dofs], cell_area)
+        return out
+
+
+def local_mass_inverse(r, area):
+    r"""``M_K^-1 r`` on every cell for the P1 Lagrange basis of a triangle,
+    with ``r`` the ``(ncell, 3)`` integrals of a field against the three
+    vertex basis functions and ``area`` the cell areas.
+
+    The P1 mass matrix is ``M_K = |K| (1 + delta_ij) / 12``, whose inverse is
+    ``(3 / |K|) (4 delta_ij - 1)``, so the coefficients are
+    ``(3 / |K|) (4 r_i - sum_j r_j)``. Their mean is ``sum_j r_j / |K|``, the
+    cell mean of the integrand."""
+    r = np.asarray(r, dtype=float)
+    return (3.0 / np.asarray(area, dtype=float))[:, None] * (
+        4.0 * r - r.sum(axis=1, keepdims=True))
 
 
 def _cell_floors(ncell, floor, ice_free):

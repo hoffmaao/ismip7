@@ -353,6 +353,80 @@ all 480 rows.
    min and 7 h 44 min on 32 at 2 km. One step at 1 km (step 20) peaks at
    9.4e5 m/yr at (346.9, -1,797.1) km, with 2.0e4 at the steps either side.
 
+## The 2 km production suite
+
+IU's Budd suite at 2 km (tag `r2kiurlcnoamb`), started on 11 October from the
+relaxed-controls historicals above: cores 1 and 2 are those runs, every control
+and projection of an ESM branches from its historical's 2015 state, and OCX
+starts from the MAP. It is production grade; the group chooses between this
+line and Rice's buffer-0 line on 20 or 21 October.
+
+| item | value |
+|---|---|
+| code | `c4c9eb8`, Quartz worktree `run2kp` of the rehearsal clone; wrapper `submit_r2kiu.sh proj rlcnoamb <experiment>` and `ocx rlcnoamb` |
+| mesh | `antarctica_5000_2000_buffered20000`, 969,764 vertices and 1,928,285 cells, the MAP's own |
+| MAP | IU's relaxed Budd MAP (md5 `0d9315d5`), its controls alone on BedMachine's 2015 geometry rewound to 2003 |
+| melt | the 2 km vertex_front refit (sha256 `3d2e5348`) |
+| forward | dt 0.025, scpc_mumps on 32 ranks and 96 GiB, `ISMIP7_MAP_CLIP=0`, no reference, fixed front, no collapse, SMB-elevation feedback, lake ice base, FSSA at its default, ISMIP7 output on; five-yearly checkpoints, three kept; 72 h links that resubmit themselves |
+| output | `write_ismip7_output.py` at `c4c9eb8` with source_id IU and ism_id icepack2, isschecker 0.5.1, ismip7-scalars 0.1.0 and `compare_scalars.py`, one job per core |
+
+Before the suite IU tried scpc_gamg on the control's first step (record
+`test-2km-control-scpc-gamg-probe-r2kiurlcnoamb`): the same 9 Newton
+iterations and the same budget as scpc_mumps, but 1,533 s on 32 ranks and
+1,804 s on 64 against 76 s. Every core runs scpc_mumps.
+
+Every annual file stores its cells in the same order, the OCX run, both
+historicals, the controls and both sides of a restart alike (centroids equal
+entrywise, job 12249718), so one overlap operator, built once from OCX's first
+year, regrids every core.
+
+| core | experiment | jobs | status |
+|---|---|---|---|
+| C001, C002 | historicals | 11899766, 11899769 | done (records `core0{1,2}-2km-hist-*-r2kiurlcnoamb`) |
+| C003 | ssp370 CESM2-WACCM | 11912184 | done 14 Oct, 53 h in one link |
+| C004 | ssp370 MRI-ESM2-0 | 11912188 | done 14 Oct, 61 h in one link |
+| C005 | ssp126 CESM2-WACCM | 11912183 | running |
+| C006 | ssp126 MRI-ESM2-0 | 11912187 | running |
+| C007 | ssp585 CESM2-WACCM | 11912185 | running |
+| C008 | ssp585 MRI-ESM2-0 | 11912189, 11981754 | running; moved off a shared node at 2045.4, resumed from the 2045 checkpoint on the same 32 ranks |
+| C009 | control CESM2-WACCM | 11912182 | running |
+| C010 | control MRI-ESM2-0 | 11912186 | running |
+| C011 | OCX | 11912190 | done 12 Oct, 13 h |
+
+C008's first link averaged 89 s a solve over its last 500 steps on a node
+shared with other users; IU cancelled it right after its 2045 checkpoint and
+resubmitted with the same ranks, memory and solver, and the resumed link runs
+52 to 55 s a solve. The resumed series holds no repeated or missing row.
+
+Finished cores, through the writer, the checker and the scalar tool:
+
+| core | VAF change (mm SLE) | resid | rescued steps | track audit | checker | scalars |
+|---|---|---|---|---|---|---|
+| C001 | +15.5 | 0.00 | 1 | ON TRACK | 0 errors | exit 0 |
+| C002 | +14.8 | 0.00 | 1 | ON TRACK | 0 errors | exit 0 |
+| C003 | +53.3 | 0.00 | 0 | OFF TRACK (dM/dt -1,462) | 0 errors | exit 0 |
+| C004 | +120.3 | 0.00 | 0 | ON TRACK | 0 errors | exit 0 |
+| C011 | +40.0 | 0.00 | 1 | ON TRACK | 0 errors | exit 0 |
+
+The projections' VAF change runs from 2015, the historicals' and OCX's from
+2003. Each checker log carries the same two warnings: the non-mandatory
+variables the model does not write, and `strbasemag` above the accepted 1 MPa
+(1.9 to 2.4 MPa on 0.001 to 0.004 percent of values). The scalar tool's slvaf
+residual note reads 2.2 (C004) to 8.6 percent (C003) of its largest value.
+
+**ssp585 by ESM.** By 2100 the CESM2-WACCM ssp585 run gains 54 mm SLE less VAF
+than MRI-ESM2-0's (+69.8 against +124.1 since 2015), and 47.6 mm of that is
+Filchner-Ronne (`dh_pair_r2kiu.py`, job 12250092; figure
+`figs/dh585_2015_2100_v2.png` of the production tree). Filchner-Ronne loses
+21.4 mm under CESM2-WACCM and gains 26.2 under MRI-ESM2-0; every other basin
+differs by under 6 mm. The ice floating there in 2015 thins by 275 m on average
+against 48 m, and the basin's grounded area shrinks by 41,000 against 6,000
+km². The forcing makes the difference: the basin's mean thermal forcing at 200
+to 600 m rises from 0.72 to 2.06 °C (2015 to 2024 against 2095 to 2100) under
+CESM2-WACCM and from 0.55 to 0.94 °C under MRI-ESM2-0 (`tf_basins.py`, job
+12250097), and total melt in the 2090s is 7,076 against 2,847 Gt/yr while
+cumulative SMB differs by 2 percent.
+
 ## Cost
 
 The 25 km rehearsal took 62 jobs and 141 core-hours on IU Quartz through the

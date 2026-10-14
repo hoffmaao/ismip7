@@ -733,6 +733,27 @@ narrows to 19 % by year 40, with the same pattern at the margins. The
 production noise is at cells 16 to 32 times finer; this probe measures the
 32 km cell scale.
 
+**Forced, at 25 km.** IU's 25 km buffered mesh, `vertex_front`, the CESM2-WACCM
+historical from a 12-year backdated start and then ssp585 to 2100 with the
+collapse mask (`mask_front`), the SMB-elevation feedback on, the 25 km melt
+calibration fitted on `dg0` cells, fixed front, from point-velocity MAPs
+refit in each space (records `test-25km-dg1-stage2-*`):
+
+| | DG0 | DG1 | DG1, apparent MB |
+|---|---|---|---|
+| backdate (cells, mass) | 2,992, +566 Gt | 2,992, +566 Gt | |
+| t = 0 melt | 997.8 Gt/yr | 997.8 Gt/yr | |
+| historical VAF, 2003 to 2015 | +30.8 mm | +28.1 mm | +2.0 mm |
+| ssp585 VAF, 2015 to 2100 | +387.6 mm | +334.8 mm | |
+| collapse at 2100 (flagged, removed) | 417, 328 cells | 433, 377 cells | |
+| isschecker 0.5.1, historical | 0 errors | 0 errors | |
+
+`resid` is 0 at every step of every run, with no rescue. The backdate and the
+t = 0 melt are DG0's to the reported digit, as the cell means make them; the
+later differences carry the two MAPs' (velocity misfit 3,339 under DG0, 4,475
+under DG1). The ssp585 output passes the checker's naming, numerical and
+spatial tests and fails only its time axis, which stops at 2100.
+
 ## Incompatibilities
 
 - `ISMIP7_LEGACY_TRANSPORT=1` requires `ISMIP7_GEOMETRY_SPACE=cg1` (it

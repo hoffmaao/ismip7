@@ -3547,6 +3547,7 @@ def main():
         "fluidity_control": FLUIDITY_CONTROL,
         "drag_gate": DRAG_RECORD, "h_visc_floor": float(RC_HVISC_FLOOR),
         "phi_grounded": PHI_GROUNDED, "raster_sample": str(raster_sample),
+        "velocity_sample": VELOCITY_SAMPLE,
     })
     if PRIOR_FORM == "bilaplacian":
         run_settings.update({"prior_sigma_theta": float(PRIOR_SIGMA_THETA),

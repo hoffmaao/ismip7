@@ -17,6 +17,8 @@ import rasterio                                                 # noqa: E402
 from firedrake import FunctionSpace, RectangleMesh              # noqa: E402
 
 from icepack2_tools import geometry as G                        # noqa: E402
+from icepack2_tools.handoff import objective_mismatches         # noqa: E402
+from icepack2_tools.relaxation import relaxation_attrs          # noqa: E402
 from icepack2_tools.runconfig import velocity_sample            # noqa: E402
 
 PX = 500.0
@@ -75,3 +77,29 @@ def test_the_velocity_sample_defaults_to_points_and_refuses_others(monkeypatch):
     monkeypatch.setenv("ISMIP7_VELOCITY_SAMPLE", "bilinear")
     with pytest.raises(ValueError):
         velocity_sample()
+
+
+def _relaxed(**source):
+    return relaxation_attrs(
+        source_map="/maps/inversion_icepack2_rc_n3_dg0_2000.h5", source_sha256="ab12",
+        source_attrs={"misfit_norm": "logvel", **source}, t_start=2014.0,
+        t_end=2015.0, dt=0.0125, backdate_years=1.0, forcing="ocx protocol")
+
+
+def test_a_relaxed_end_state_keeps_the_maps_velocity_sample():
+    end = _relaxed(velocity_sample="cell_mean")
+    assert end["velocity_sample"] == "cell_mean"
+    # a re-inversion from it at the default sampling is a different objective
+    assert objective_mismatches(end, {"misfit_norm": "logvel",
+                                      "velocity_sample": "point"}) == \
+        ["velocity_sample: 'cell_mean' -> 'point'"]
+    assert objective_mismatches(end, {"misfit_norm": "logvel",
+                                      "velocity_sample": "cell_mean"}) == []
+
+
+def test_a_map_without_the_record_still_warm_starts():
+    end = _relaxed()
+    assert "velocity_sample" not in end
+    for run in ("point", "cell_mean"):
+        assert objective_mismatches(end, {"misfit_norm": "logvel",
+                                          "velocity_sample": run}) == []

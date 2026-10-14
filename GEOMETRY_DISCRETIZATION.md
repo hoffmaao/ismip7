@@ -640,6 +640,30 @@ reference, the DG0 rule on the cell means, cancels each cell's net flux alone
 and lets the slopes move (`tests/test_dg1_cell_rules.py`). The fixed-front and
 free-front masks and `balance`'s forcing act on whole cells.
 
+The reference holds a DG1 state less tightly than a DG0 one at a steep front
+cell. On the 32 km probe MAPs (unforced, fixed front, `balance`; run record
+`test-32km-dg1-stage2-amb`) `resid` and `clamp` are 0 at every step, and the
+neighbour-scale rms of the cell-mean dH is:
+
+| years | DG0, apparent MB | DG1, apparent MB | DG1, without |
+|---|---|---|---|
+| 1 | 0.0007 m | 0.0034 m | 3.0 m |
+| 2 | 0.0012 m | 0.0265 m | |
+| 5 | 0.0023 m | 0.0410 m | 9.3 m |
+| 10 | 0.0205 m | 0.2196 m | |
+
+The DG1 excess starts at one floating front cell (2188, -1296 km), whose
+vertices hold 583, 96 and 0 m and which moves at 1,306 m/yr. Without the
+reference that cell refills to 304 m and slows to 115 m/yr within a year, in
+both spaces; with it, DG0 holds the cell exactly for 15 years, and under DG1
+it thins by 35 m over three years, speeds up to 1,600 to 2,000 m/yr, and
+passes the change to its floating neighbours (dh -38 to +51 m by year 10)
+while VAF moves by -0.04 mm. With the slope scaling of the positivity floor
+turned off (an experiment, `test-32km-dg1-stage2-amb-noscale`) the cell holds
+through the first year and then drifts the same way, its zero vertex falling
+to -49 m: the floor brings the onset forward, and the held state itself is
+unstable at that cell under DG1.
+
 **Provenance.** A DG1 MAP is named `_dg1` and records `geometry_space=dg1`; a
 DG1 state seeds only a DG1 run and a DG1 run starts only from one, on every
 path (`runconfig.geometry_space_mismatch`). An inversion is the one exception:

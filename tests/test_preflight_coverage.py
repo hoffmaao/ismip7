@@ -190,12 +190,16 @@ def test_an_1850_start_runs_only_with_the_backdating_named(
     assert ("past the window" in line) == (backdate is None), line
 
 
-def test_a_backdated_start_needs_the_dg0_geometry(monkeypatch, tmp_path, capsys):
+@pytest.mark.parametrize("geom,status", [("dg0", "READY"), ("dg1", "READY"),
+                                         ("cg1", "BLOCKED")])
+def test_a_backdated_start_needs_a_cell_wise_geometry(
+        monkeypatch, tmp_path, capsys, geom, status):
     _run(monkeypatch, tmp_path, range(2003, 2015), scenario="historical",
          ocean_cover=lambda e, s: (2003, 2014),
-         env={"ISMIP7_GEOMETRY_SPACE": "cg1"})
+         env={"ISMIP7_GEOMETRY_SPACE": geom})
     line = _core_line(capsys, "core  1")
-    assert "BLOCKED" in line and "ISMIP7_GEOMETRY_SPACE=dg0" in line, line
+    assert status in line, line
+    assert ("ISMIP7_GEOMETRY_SPACE=dg0 or dg1" in line) == (geom == "cg1"), line
 
 
 # --- cores 9 and 10 melt under the ESM's own ctrl ocean ---------------------

@@ -1693,7 +1693,7 @@ Core 1 at 25 km from the IU rehearsal's relaxed MAP on its relaxed geometry, wit
 - **Cost per model year:** 3 min 56 s
 - **Results path:** Quartz antarctica/results/rehearsal_25km_iu/results/hist_cesm2_waccm_rehiurlxnoamb_25000_*
 - **Audit:** resid at most 0.0000 Gt on 480 rows; 480 of 480 steps converged on their first direct solve, 4.1 Newton iterations on average and 11 at the most, no rescue, no subcycle; VAF +30.0 mm SLE and mass +7,043 Gt over the run, dM/dt +843 Gt/yr in 2014; calving out of the fixed front 1,002 at step 1, 998 at step 2, 896 in 2004 and 769 in 2014 Gt/yr; peak speed 3.7e3 m/yr at t = 2003.03, (-1,601.3, -271.0) km
-- **Notes:** the relaxed line beside the 25 km rehearsal (antarctica/reports/rehearsal_25km_iu.md, section 'The relaxed line'). Against the non-relaxed rehearsal (core01-25km-hist-cesm2waccm-rehiunoamb: +30.3 mm, dM/dt +835, calving 1,251 to 775) the relaxation removes the first-year calving drop and leaves the drift. Final state sha256 13010fbe.
+- **Notes:** the relaxed line beside the 25 km rehearsal (antarctica/reports/rehearsal_25km_iu.md, section 'The relaxed line'). Against the non-relaxed rehearsal (core01-25km-hist-cesm2waccm-rehiunoamb: +30.3 mm, dM/dt +835, calving 1,251 to 775) the relaxation removes the first-step calving drop and leaves the drift. Final state sha256 13010fbe.
 
 ### core01-25km-hist-cesm2waccm-rehnoamb
 

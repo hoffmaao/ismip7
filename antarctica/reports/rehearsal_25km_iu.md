@@ -274,6 +274,85 @@ geometry, which raises the grounding-line flux by about 200 Gt/yr.
 `plot_r2kiu.py` draws the two pairs side by side into the 2 km tree's `figs/`
 (`r2kiu_hist.png`: VAF change, and the calving flux in quarter-year means).
 
+## The relaxed line
+
+On 10 October IU ran the relaxed initial state of issue #162 through the same
+historicals: a relaxation year and a 250-iteration re-inversion at 25 km from
+the rehearsal MAP (records `inversion-25km-budd-rehearsal-iuvf-relax2014-year`
+and `inversion-25km-budd-rehearsal-iuvf-relax2014`), and forwards at 2 km and
+1 km from IU's relaxed 2 km MAPs (`inversion-2km-{budd,rc}-b20k-ef2-vf-relax2014`).
+Under PR 163 a forward on the relaxed MAP's own mesh took the relaxed
+geometry, and on any other mesh the controls alone. Commit `c4c9eb8` (this
+PR) makes the controls alone the rule on every mesh: BedMachine's 2015
+geometry, rewound to 2003, with the relaxed MAP's friction and fluidity. The
+runs from the relaxed geometry stay as evidence; the production suite starts
+from the relaxed controls.
+
+Core 1 (CESM2-WACCM), 2003 to 2015, fluxes in Gt/yr:
+
+| run | wall | VAF change (mm SLE) | dM/dt in 2014 | calving at step 1, step 2 and in 2014 | record |
+|---|---|---|---|---|---|
+| 25 km, rehearsal MAP, without the reference | 7 min | +30.3 | +835 | 1,251, 1,175, 775 | `core01-25km-hist-cesm2waccm-rehiunoamb` |
+| 25 km, relaxed geometry, without | 4 min | +30.0 | +843 | 1,002, 998, 769 | `core01-25km-hist-cesm2waccm-rehiurlxnoamb` |
+| 25 km, relaxed geometry, with (reference net -401) | 3 min | +2.3 | +61 | 1,002, 1,002, 1,005 | `core01-25km-hist-cesm2waccm-rehiurlxamb` |
+| 2 km, vf MAP, without | 8 h 18 min | +15.4 | +338 | 1,668, 1,428, 1,263 | `core01-2km-hist-cesm2waccm-r2kiunoamb` |
+| 2 km, relaxed geometry, without | 7 h 07 min | +13.1 | +302 | 1,447, 1,432, 1,307 | `core01-2km-hist-cesm2waccm-r2kiurlxnoamb` |
+| 2 km, relaxed geometry, with (reference net +25) | 5 h 55 min | +2.4 | +84 | 1,447, 1,436, 1,429 | `core01-2km-hist-cesm2waccm-r2kiurlxamb` |
+| 2 km, relaxed controls, without (production core 1) | 7 h 16 min | +15.5 | +306 | 1,820, 1,514, 1,295 | `core01-2km-hist-cesm2waccm-r2kiurlcnoamb` |
+| 1 km, relaxed controls, without (64 ranks) | 5 h 37 min | +15.7 | +219 | 1,889, 1,474, 1,363 | `core01-1km-hist-cesm2waccm-r1kiurlxnoamb` |
+| 2 km RC, relaxed geometry, without | 34 h 49 min | +5.4 | +195 | 1,513, 1,466, 1,371 | `core01-2km-hist-cesm2waccm-r2kiurcrlxnoamb` |
+| 2 km RC, relaxed geometry, with (reference net +99) | 5 h 13 min | +2.3 | +78 | 1,514, 1,503, 1,501 | `core01-2km-hist-cesm2waccm-r2kiurcrlxamb` |
+| 2 km RC, relaxed controls, without | failed before step 1 | | | | `core01-2km-hist-cesm2waccm-r2kiurcrlcnoamb` |
+
+Core 2 (MRI-ESM2-0) without the reference follows core 1 to within 0.7 mm:
++12.4 mm from the 2 km relaxed geometry, +14.8 (production core 2) and +15.1
+at 1 km from the relaxed controls, +4.8 for RC from its relaxed geometry
+(records `core02-*-r*rl*`). Every run closed its budget to resid 0.00 on
+all 480 rows.
+
+1. **Relaxation removes the first-step calving drop and leaves the drift.**
+   Started from its relaxed geometry, the MAP sheds 15 (2 km) and 4 (25 km)
+   Gt/yr of calving at step 2 where the unrelaxed MAP shed 240 and 76, and
+   still gains 13.1 and 30.0 mm SLE in 12 years against 15.4 and 30.3.
+2. **The relaxed controls on BedMachine geometry drift as the unrelaxed MAP
+   does**, +15.5 and +14.8 mm at 2 km and +15.7 and +15.1 at 1 km. The
+   relaxed geometry itself starts with +0.85 mm SLE of VAF and +72 Gt over
+   BedMachine's. The first step on BedMachine geometry calves 1,820 (2 km)
+   and 1,889 Gt/yr (1 km), against 1,447 from the relaxed geometry. Step 2's
+   direct solve stopped at 200 Newton iterations in both 2 km runs and the
+   rescue continuation completed it; every other step converged directly.
+3. **Against Smith's dH/dt, 2005 to 2015** (`dh_maps_r2kiu.py`, jobs
+   11903960, 11907101 and 11907102; `figs/w2005/` of the 2 km tree), in Gt
+   of grounded mass change:
+
+   | run | all grounded cells | Smith-observed cells | Smith | Amundsen | Peninsula | Amery to Wilkes | cell-scale RMS (m) |
+   |---|---|---|---|---|---|---|---|
+   | 2 km, vf MAP | +4,602 | +3,758 | -776 | -1,288 (Smith -1,320) | +1,309 (-215) | +1,407 (-332) | 5.7 |
+   | 2 km, relaxed geometry | +3,858 | +3,024 | -772 | -1,411 (-1,320) | +1,299 (-215) | +1,238 (-332) | 5.4 |
+   | 2 km, relaxed controls | +4,504 | +3,685 | -778 | -1,611 (-1,321) | +1,315 (-215) | +1,485 (-332) | 5.8 |
+   | 1 km, relaxed controls | +4,294 | +3,192 | -536 | -1,772 (-1,209) | +857 (-150) | +1,525 (-308) | 5.8 |
+
+   Basins are IMBIE2's (basin_numbers_ismip8km_v2.nc) by cell centroid: the
+   Peninsula is 11 to 13 and Amery to Wilkes 2 to 4. The basin columns sum
+   the model over the cells Smith observes, with Smith over the same cells in
+   brackets; Smith covers fewer cells on the 1 km mesh. The
+   excess sits in the Peninsula and East Antarctica from Amery to Wilkes at
+   both resolutions, with Amundsen's loss reproduced; MRI-ESM2-0 gives the
+   same pattern (+3,753 and +3,296 Gt on Smith-observed cells at 2 and 1 km).
+4. **Regularized Coulomb drifts least and costs most.** From its relaxed
+   geometry it gains +5.4 and +4.8 mm without the reference, at 258 and 250 s
+   a solve and 24 Newton iterations on average (181 at the most), against
+   52 s and 9 for Budd; each core took three links across the 11 to 12
+   October maintenance. Its controls on BedMachine geometry never started:
+   the seed from the MAP's velocity diverged (||F|| 5.7e8 after 50
+   iterations) and the continuation from n = 1 stalled three times at 200
+   iterations with ||F|| 1.19e8, so both cores failed after 2 h 12 min. The
+   production suite is Budd alone.
+5. **1 km costs about what 2 km does per model year at twice the ranks**:
+   5 h 37 min and 6 h 37 min on 64 ranks, 40 and 47 s a solve, against 7 h 16
+   min and 7 h 44 min on 32 at 2 km. One step at 1 km (step 20) peaks at
+   9.4e5 m/yr at (346.9, -1,797.1) km, with 2.0e4 at the steps either side.
+
 ## Cost
 
 The 25 km rehearsal took 62 jobs and 141 core-hours on IU Quartz through the

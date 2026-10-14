@@ -423,6 +423,12 @@ A link that loses a rank (the OOM killer, a crash) ends at once (below, "One
 dead rank ends the step") with no `Saved MAP:`, and its queued successor
 resumes from the last checkpoint in a fresh process, so an out-of-memory link
 costs one evaluation and a restart.
+`ISMIP7_MAXITER` counts per process, so each link spends it again.
+`ISMIP7_CHAIN_ITER_BUDGET` caps the accepted iterations across the whole
+chain: each link adds the count its predecessor saved in the checkpoint to
+the sidecar `<map>.iters`, keyed by the checkpoint's mtime and size so a link
+that saved nothing is not counted twice, and runs the remainder as its
+`ISMIP7_MAXITER`; a spent budget marks the MAP done.
 Regression test: `tests/test_inversion_chain.py`.
 
 ### `projection.sbatch`, self-chaining
@@ -490,6 +496,15 @@ driver runs:
 ISMIP7_EXPERIMENT=hist_mri_esm2 ISMIP7_ESM=MRI-ESM2-0 \
     ISMIP7_CHAIN_THEN="control" antarctica/scripts/batch_runners/submit.sh projection
 ```
+
+**A finished chain can run a command.** `ISMIP7_CHAIN_THEN_CMD` is a shell
+command that both runners run once, in the link that finishes the run (the
+inversion's MAP marked done, the forward at its end year, after queueing its
+follow-ons). Every link inherits it; a forward's follow-ons do not. Its
+failure is logged and leaves the link's exit code alone. The staged
+initialization routine (`antarctica/INITIALIZATION_ROUTINE.md`) hands itself
+the next stage this way. Regression tests: `tests/test_inversion_chain.py`,
+`tests/test_projection_chain.py`.
 
 A relaunch from a stalled state has cleared the diagnostic-Newton wall in every
 observed case (see Known issues in `antarctica/README.md`). The chain leaves

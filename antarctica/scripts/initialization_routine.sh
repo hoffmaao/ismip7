@@ -7,6 +7,7 @@
 #   antarctica/scripts/initialization_routine.sh OUTDIR next
 #   antarctica/scripts/initialization_routine.sh OUTDIR status
 #   antarctica/scripts/initialization_routine.sh OUTDIR resume STAGE
+#   antarctica/scripts/initialization_routine.sh OUTDIR watch
 #
 # `init` records the objective (every exported ISMIP7_* knob, the Python path
 # and the MPI and kernel-cache settings of the calling shell, less the knobs
@@ -16,7 +17,10 @@
 # which has not been started, and nothing else, so it can be called any number
 # of times. `status` prints one line per stage. `resume STAGE` submits a stage
 # again (a chain whose links all died); its chain resumes the stage's own
-# checkpoint.
+# checkpoint. `watch` (slurm mode) is the watchdog loop for a login node or a
+# small allocation: it resubmits a started stage whose chain has no job left
+# and cancels a forward link whose log has gone silent (a hung solve), with
+# the node excluded from the stage's next submission.
 #
 # Two launch modes (ISMIP7_ROUTINE_LAUNCH, recorded at init):
 #   mpiexec   every stage runs in the foreground, in order, on
@@ -479,8 +483,11 @@ launch() {
     if [ "$ISMIP7_ROUTINE_LAUNCH" = slurm ]; then
         local jid
         # shellcheck disable=SC2086
+        local excl=""
+        # nodes the watchdog saw a link hang on (OUT/exclude_nodes, one per line)
+        [ -s "$OUT/exclude_nodes" ] && excl="--exclude=$(sort -u "$OUT/exclude_nodes" | paste -sd,)"
         jid=$(cd "$REPO" && eval "$envlines" && export ISMIP7_CHAIN_THEN_CMD="bash $SELF $OUT next" \
-              && sbatch --parsable $res -J "$jobname" --export=ALL "$script") \
+              && sbatch --parsable $res $excl -J "$jobname" --export=ALL "$script") \
             || die "sbatch failed for stage $stage"
         echo "$jid $(date -Is)" >> "$OUT/$stage.jobs"
         log "stage $stage: job $jid ($jobname)"
@@ -589,6 +596,54 @@ cmd_status() {
     return 0
 }
 
+# The watchdog (slurm mode): a chain whose link was killed by the scheduler
+# queues no successor, and a link that hangs in a solve sits silent until the
+# wall limit. Every ISMIP7_ROUTINE_WATCH_SEC (120) it resubmits a started,
+# unfinished stage with no job in the queue, and cancels a RUNNING forward
+# link whose log has been silent for ISMIP7_ROUTINE_STALL_MIN (15) minutes,
+# noting its node in OUT/exclude_nodes so the resubmission avoids it. The
+# inversion links are left alone: an iteration can take minutes and a hung one
+# is bounded by the wall limit, after which its queued successor resumes.
+watch_pass() {
+    local stage jobname rows jid state node elapsed logf age stall
+    stall=${ISMIP7_ROUTINE_STALL_MIN:-15}
+    for stage in $STAGE_LIST; do
+        is_started "$stage" || continue
+        is_done "$stage" && continue
+        jobname="rt_${TAG}_${stage}"
+        rows=$(squeue -h -u "${USER:-$(id -un)}" -n "$jobname" -o "%i %T %N %M" 2>/dev/null || true)
+        if [ -z "$rows" ]; then
+            log "watch: stage $stage has no job in the queue; resubmitting"
+            mv "$OUT/$stage.jobs" "$OUT/$stage.jobs.$(date +%s)"
+            launch "$stage"
+            continue
+        fi
+        is_inversion "$stage" && continue
+        while read -r jid state node elapsed; do
+            [ "$state" = RUNNING ] || continue
+            logf="$REPO/logs/ismip7_fwd_$jid.out"
+            [ -f "$logf" ] || continue
+            age=$(( ($(date +%s) - $(stat -c %Y "$logf")) / 60 ))
+            if [ "$age" -ge "$stall" ]; then
+                log "watch: job $jid ($stage) on $node silent for $age min; cancelling, node excluded"
+                echo "$node" >> "$OUT/exclude_nodes"
+                scancel "$jid"
+            fi
+        done <<< "$rows"
+    done
+}
+
+cmd_watch() {
+    [ "$ISMIP7_ROUTINE_LAUNCH" = slurm ] || die "watch is for slurm mode"
+    local every=${ISMIP7_ROUTINE_WATCH_SEC:-120}
+    log "watch: every $every s, stall after ${ISMIP7_ROUTINE_STALL_MIN:-15} min"
+    while :; do
+        ( with_lock; derive_products; watch_pass; n=$(next_pass); [ "$n" = 0 ] || log "watch: $n stage(s) submitted" ) || log "watch: pass failed ($?)"
+        [ "${ISMIP7_ROUTINE_WATCH_ONCE:-0}" = 1 ] && break
+        sleep "$every"
+    done
+}
+
 cmd_resume() {
     local stage=${1:?resume STAGE}
     in_list "$stage" "$STAGE_LIST" || die "$stage is not a stage of this routine"
@@ -610,5 +665,6 @@ case "$CMD" in
     next)   load_env; cmd_next ;;
     status) load_env; cmd_status ;;
     resume) load_env; cmd_resume "${3:-}" ;;
+    watch)  load_env; cmd_watch ;;
     *) die "unknown command $CMD (init|next|status|resume STAGE)" ;;
 esac

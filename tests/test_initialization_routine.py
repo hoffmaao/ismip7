@@ -397,3 +397,69 @@ def test_a_live_lock_is_waited_for(sandbox):
             env=merged, cwd=str(sandbox), capture_output=True, text=True, timeout=8)
     assert submits(sandbox) == []
     assert (lock / "holder").read_text().split()[0] == str(os.getpid())
+
+
+def test_watch_resubmits_a_dead_chain_and_cancels_a_silent_link(sandbox):
+    r"""A started stage with no job left in the queue is resubmitted (a link
+    killed by the scheduler queues no successor); a running forward link whose
+    log has been silent longer than the stall limit is cancelled and its node
+    excluded from the stage's next submission."""
+    import time
+    (sandbox / "warm.h5").write_text("warm\n")
+    bin_dir = sandbox / "bin"
+    queue = sandbox / "queue.txt"
+    (bin_dir / "squeue").write_text(
+        "#!/bin/bash\n"
+        'name=""; while [ $# -gt 0 ]; do [ "$1" = -n ] && name=$2; shift; done\n'
+        '[ -f "$QUEUE_FILE" ] && grep "^$name " "$QUEUE_FILE" | cut -d" " -f2-\n'
+        "exit 0\n")
+    (bin_dir / "scancel").write_text('#!/bin/bash\necho "scancel $*" >> "$SBATCH_CALLS"\n')
+    for name in ("squeue", "scancel"):
+        (bin_dir / name).chmod(0o755)
+    env = {"ISMIP7_ROUTINE_STAGES": "hist control", "ISMIP7_ROUTINE_ESMS": "CESM2-WACCM",
+           "QUEUE_FILE": str(queue), "ISMIP7_ROUTINE_WATCH_ONCE": "1",
+           "ISMIP7_ROUTINE_STALL_MIN": "15"}
+    rc, log = routine(sandbox, "init", env=env)
+    assert rc == 0, log
+    (h,) = submits(sandbox)
+    assert "-J rt_out_hist_cesm_waccm" in h["argv"]
+
+    # the chain died: nothing queued under the stage's name
+    queue.write_text("")
+    rc, log = routine(sandbox, "watch", env=env)
+    assert rc == 0, log
+    (again,) = submits(sandbox)
+    assert "-J rt_out_hist_cesm_waccm" in again["argv"]
+    assert "--exclude" not in again["argv"]
+    assert "no job in the queue; resubmitting" in log
+
+    # a running link whose log went silent 20 minutes ago
+    logs = sandbox / "logs"
+    logs.mkdir(exist_ok=True)
+    silent = logs / "ismip7_fwd_4242.out"
+    silent.write_text("t=2003.0\n")
+    old = time.time() - 20 * 60
+    os.utime(silent, (old, old))
+    queue.write_text("rt_out_hist_cesm_waccm 4242 RUNNING bb5u20c1 0:30:00\n")
+    rc, log = routine(sandbox, "watch", env=env)
+    assert rc == 0, log
+    assert "silent for 20 min" in log
+    calls = (sandbox / "sbatch_calls.txt").read_text()
+    assert "scancel 4242" in calls
+    assert (sandbox / "out" / "exclude_nodes").read_text().strip() == "bb5u20c1"
+    # the cancelled job is gone on the next pass: the stage is resubmitted
+    # without that node
+    queue.write_text("")
+    (sandbox / "sbatch_calls.txt").unlink()
+    rc, log = routine(sandbox, "watch", env=env)
+    assert rc == 0, log
+    (again,) = submits(sandbox)
+    assert "--exclude=bb5u20c1" in again["argv"]
+
+    # a running link with a fresh log is left alone
+    silent.write_text("t=2004.0\n")
+    queue.write_text("rt_out_hist_cesm_waccm 4243 RUNNING bb5u21c1 0:10:00\n")
+    rc, log = routine(sandbox, "watch", env=env)
+    assert rc == 0, log
+    assert submits(sandbox) == []
+    assert "scancel 4243" not in (sandbox / "sbatch_calls.txt").read_text() if (sandbox / "sbatch_calls.txt").exists() else True

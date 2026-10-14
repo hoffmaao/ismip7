@@ -341,15 +341,15 @@ resid 0.00 on all 480 rows.
    same pattern (+3,753 and +3,296 Gt on Smith-observed cells at 2 and 1 km).
 4. **Without the reference, regularized Coulomb drifts least and costs
    most.** From its relaxed geometry it gains +5.4 and +4.8 mm, at 258 and
-   250 s a solve and 24 Newton iterations on average (181 at the most),
-   about five times Budd's 52 s and 9; each of these two cores took three
-   links across the 11 to 12 October maintenance. With the reference, the
-   RC core took one job (11899126) at 37.0 s a solve and drifted +2.3 mm,
-   level with the other runs that use the reference. Its controls on BedMachine geometry never started:
-   the seed from the MAP's velocity diverged (||F|| 5.7e8 after 50
-   iterations) and the continuation from n = 1 stalled three times at 200
-   iterations with ||F|| 1.19e8, so both cores failed after 2 h 12 min. The
-   production suite is Budd alone.
+   250 s a solve, about five times Budd's 52 s, and 24 Newton iterations on
+   average (181 at the most) against Budd's 9; each of these two cores took
+   three links across the 11 to 12 October maintenance. With the reference,
+   the RC core took one job (11899126) at 37.0 s a solve and drifted
+   +2.3 mm, level with the other runs that use the reference. RC's controls
+   on BedMachine geometry never started: the seed from the MAP's velocity
+   diverged (||F|| 5.7e8 after 50 iterations) and the continuation from
+   n = 1 stalled three times at 200 iterations with ||F|| 1.19e8, so both
+   cores failed after 2 h 12 min. The production suite is Budd alone.
 5. **1 km costs about what 2 km does per model year at twice the ranks**:
    5 h 37 min and 6 h 37 min on 64 ranks, 40 and 47 s a solve, against 7 h 16
    min and 7 h 44 min on 32 at 2 km. One step at 1 km (step 20) peaks at
@@ -371,6 +371,10 @@ line and Rice's buffer-0 line on 20 or 21 October.
 | melt | the 2 km vertex_front refit (sha256 `3d2e5348`) |
 | forward | dt 0.025, scpc_mumps on 32 ranks and 96 GiB, `ISMIP7_MAP_CLIP=0`, no reference, fixed front, no collapse, SMB-elevation feedback, lake ice base, FSSA at its default, ISMIP7 output on; five-yearly checkpoints, three kept; 72 h links that resubmit themselves |
 | output | `write_ismip7_output.py` at `c4c9eb8` with source_id IU and ism_id icepack2, isschecker 0.5.1, ismip7-scalars 0.1.0 and `compare_scalars.py`, one job per core |
+
+The table describes the controls, the projections and OCX. Cores 1 and 2 ran
+the same commit `c4c9eb8` from the worktree `run2kc`, with yearly checkpoints,
+all kept, in one link each.
 
 Before the suite IU tried scpc_gamg on the control's first step (record
 `test-2km-control-scpc-gamg-probe-r2kiurlcnoamb`): the same 9 Newton

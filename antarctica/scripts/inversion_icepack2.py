@@ -3938,6 +3938,7 @@ def main():
         "dhdt_reweight": float(DHDT_REWEIGHT),
         "dhdt_reweight_scale": float(DHDT_REWEIGHT_SCALE), "kill_bergs": int(KILL_BERGS),
         "phi_bounds": PHI_BOUNDS_RECORD,
+        "velocity_sample": VELOCITY_SAMPLE,
     })
     if PRIOR_FORM == "bilaplacian":
         run_settings.update({"prior_sigma_theta": float(PRIOR_SIGMA_THETA),

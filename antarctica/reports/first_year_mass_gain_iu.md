@@ -76,7 +76,7 @@ is the bilinear sample at the node. Each pair re-inverts from the same MAP.
 | year-1 VAF gain, calibrated (mm) | +1.17 | +0.71 | +0.53 | +0.06 |
 | year-1 VAF gain, uniform K (mm) | +1.27 | +0.72 | | |
 
-At 25 km the cell-mean target removes 31 % of the cell-scale tendency (32 %
+At 25 km the cell-mean target removes 31 % of the cell-scale tendency (30 %
 under uniform K). At 2 km it removes 3 % (nb) or 0.7 % (bin): a 2 km cell holds
 about 20 pixels of the 450 m product, so a node's bilinear sample is already
 close to an area mean. The VAF gain falls at both resolutions; section 5 traces
@@ -136,15 +136,18 @@ compound. Results: Quartz `/N/scratch/dlilien/ismip7_dg1/25km/dg1_25km_2x2.json`
 Cell by cell, cell_mean minus point over the forward year
 (`vsdiff_2km.py`, `vsflux_2km.py`):
 
-| distance from the 2003 grounding line | VAF difference (mm) |
+| cells grounded at the start, by distance from the 2003 grounding line | VAF difference (mm) |
 |---|---|
 | 0 to 5 km | -0.24 |
 | 5 to 20 km | -0.21 |
 | 20 to 50 km | -0.06 |
-| beyond 50 km | 0.00 |
+| beyond 50 km | +0.01 |
+| cells floating at the start | +0.02 |
 
-The difference (-0.48 mm, -185 Gt of grounded ice) sits within 20 km of the
-grounding line in every basin; the cells only the cell-mean target observes
+The difference (-0.48 mm, -185 Gt of grounded ice) is taken from the 2003.0
+state, so it differs by 0.01 mm from the year-1 gains in section 2, which start
+at the first timeseries row (2003.025). It sits within 20 km of the grounding
+line in every basin; the cells only the cell-mean target observes
 carry -0.06 mm of it. Over the forward year the grounding-line flux is 1,775
 against 1,949 Gt/yr and calving 1,378 against 1,590 Gt/yr.
 

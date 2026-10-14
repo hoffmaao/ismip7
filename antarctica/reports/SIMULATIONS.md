@@ -9,9 +9,9 @@ gitignored, so these records and the per-core reports beside them are
 the trace a run leaves in the repository. A core experiment also gets
 its full report from `core_report.py`; this is the index.
 
-339 records.
+348 records.
 
-Status: 12 planned, 3 running, 31 stopped, 272 done, 21 superseded.
+Status: 12 planned, 4 running, 32 stopped, 279 done, 21 superseded.
 
 ## Inversion
 
@@ -168,6 +168,11 @@ Status: 12 planned, 3 running, 31 stopped, 272 done, 21 superseded.
 | 2.5 km legacy pinned front from the v4 timing cache, the twin of the level-set run (issue #115) | done | antarctica_25000_2500_buffered20000, 2.5 km fine, 25 km interior, 20 km buffer, DG0 geometry | IU Quartz, debug partition | 2026-09-25 | 2026-09-25 | 80 of 80 steps solved directly (5.0 Newton iterations on average, 9 at most), resid at most 1.1e-7 Gt; calving 12.38 to 12.50 Gt/yr after a one-step 8.9 Gt removal of the sub-1 m ice beyond the t=0 front; mass -2 Gt and VAF +0.004 mm SLE over the decade |
 | 2.5 km level-set pinned front (ISMIP7_CALVING=fixed) from the v4 timing cache, option 2 of issue #115 | done | antarctica_25000_2500_buffered20000, 2.5 km fine, 25 km interior, 20 km buffer, DG0 geometry | IU Quartz, debug partition | 2026-09-25 | 2026-09-25 | 80 of 80 steps solved directly (8.8 Newton iterations on average, 16 at most), resid at most 1.2e-7 Gt; calving 2,370 Gt/yr at step 2, 3,534 over 2016 and 2,839 over 2024 against the legacy twin's 12.4; mass -30,908 Gt and VAF -18.8 mm SLE over the decade |
 | 25 km rehearsal MAP: t=0 discharge, shelf-gate census and forward self-consistency | done | antarctica_250000_25000_buffered20000, DG0 geometry | IU Quartz, debug partition | 2026-09-27 | 2026-09-27 | grounding-line discharge 2803 Gt/yr against 1848 with the observed velocity (ratio 1.52; observed 2050 plus or minus 100), by observed speed of the source cell 5.61 under 100 m/yr, 0.77 in 100 to 500, 0.38 in 500 to 1500 and 0.32 above 1500. No transfer fill on the MAP's own mesh; the fluidity prior spans 1.0 to 519.9. Under the production HAF gate 0 of 2,884 floating cells carry friction (the old sign test would have put it on 396). The forward re-solve at the MAP's controls matches the MAP's velocity to rel L2 5.9e-8 |
+| 25 km Budd re-inversions on a Gaussian-smoothed BedMachine (sigma 12.5 km), point and cell-mean velocity targets | done | antarctica_250000_25000_buffered20000, DG0 geometry | IU Quartz, general partition | 2026-10-13 | 2026-10-13 | Filter: thickness changed 165 m RMS over ice pixels (bed 186, surface 68), ice mean thickness 1,940.4 to 1,941.0 m. Misfit 3,382 (point) and 4,876 (cell_mean). Tendency (nb) 1.67 and 1.14 m/yr calibrated, 1.67 and 1.13 uniform K, against 1.76 / 1.72 and 1.21 / 1.20 unsmoothed. Cell-scale RMS of the sampled thickness 150.6 to 129.9 m and of the surface 104.6 to 97.7 m. Year-1 VAF gain +1.18 / +1.19 (point) and +0.35 / +0.40 mm (cell_mean). The smoothed geometry holds 312 mm more VAF and 33,000 Gt less ice; calibrated melt 897 against 998 Gt/yr |
+| 25 km OCX from DG0 and CG1 MAPs: does the cell-scale pattern belong to DG0? | done | antarctica_250000_25000_buffered20000, DG0 and CG1 geometry | IU Quartz, general partition | 2026-10-13 | 2026-10-13 | Inversion misfits 2,755 (DG0) and 3,041 (CG1). OCX protocol forcing, no backdate, uniform K 6.5e-5 on the legacy path, no apparent MB. nb metric: DG0 first-year tendency 1.73 m/yr, 0.38 in 2026, cell-scale RMS 13.9 m by 2026, correlation with the first year 0.81; CG1 5.05, 1.79, 54.7 m, 0.80 |
+| 25 km Budd re-inversion with BedMachine and MEaSUREs both taken as cell means | stopped | antarctica_250000_25000_buffered20000, DG0 geometry under ISMIP7_RASTER_SAMPLE=cell_mean | IU Quartz, general partition | 2026-10-13 | 2026-10-13 | The startup continuation converged in 8 steps; six forward evaluations then diverged (residual 2.7e14 to 1.2e17) and the optimizer stopped on failed trials after about 17 iterations, with no done marker: published residual 7.6e10, misfit 1.87e5. No forward ran; its gridnoise job (12200304) failed for want of one |
+| 25 km Budd re-inversions under the point and the cell-mean velocity target, with a 1-year historical from each | done | antarctica_250000_25000_buffered20000, DG0 geometry | IU Quartz, general partition | 2026-10-13 | 2026-10-13 | Unobserved nodes 1,857 (point) and 734 (cell_mean) of 4,509; misfit 3,339 and 4,589, \|grad\| 72 and 333. First-year cell-scale tendency (nb) 1.76 and 1.21 m/yr calibrated, 1.72 and 1.20 under uniform K; year-1 VAF gain +1.17 and +0.71 mm calibrated, +1.27 and +0.72 uniform |
+| 25 km point and cell-mean MAPs carried toward convergence in six 250-iteration stages, a 1-year historical from each stage | done | antarctica_250000_25000_buffered20000, DG0 geometry | IU Quartz, general partition (niced) | 2026-10-14 | 2026-10-14 | Misfit point 3,339 to 2,624 and cell_mean 4,589 to 2,597 over about 1,650 iterations, still falling 1 to 2.5 % a stage. Tendency (nb) point 1.70 and cell_mean 1.16 m/yr from stage 1 on (32 % apart, 31 % at 150 iterations). Year-1 VAF gain point +1.17 to +1.31 and cell_mean +0.71 to +0.51 mm. Stage 6: grounding-line flux 1,627 and 1,692 against 1,560 under the point target; calving in the forward year 955 and 1,321 Gt/yr |
 | 25 km rehearsal probe: the first ten steps of core 1 on production defaults with the apparent mass-balance reference | done | antarctica_250000_25000_buffered20000, DG0 geometry | IU Quartz, general partition | 2026-09-27 | 2026-09-27 | every step converged on its first scpc_gamg direct solve, no rescue, subcycle or tripwire event (speed and thickness bounds armed); a_ref in -438.9 to +609.4 m/yr, net +300.1 Gt/yr; the largest thickness change 1.0 m at step 1 falling to 0.2 m at step 10; dM/dt -143 Gt/yr at step 1 and 0 at step 10; resid 0.00 |
 | 25 km rehearsal probe: the first ten steps of core 1 on production defaults without the apparent mass-balance reference | done | antarctica_250000_25000_buffered20000, DG0 geometry | IU Quartz, general partition (debug refused a third concurrent job) | 2026-09-27 | 2026-09-27 | every step converged on its first scpc_gamg direct solve in 2 to 8 Newton iterations; no rescue, subcycle or tripwire event (speed and thickness bounds armed); mass residual about 1e-8 Gt a step and resid 0.00; speed max 1.65e4 m/yr at step 1, falling to 1.46e4 by step 10; largest relative thickening 1.6 per year in a 112 m floating cell. Budget at step 1: SMB +2435, melt -985, outflux -503, calving -1399, dM/dt -453 Gt/yr |
 | Budd's final MAP at its own controls under exact_front version 1 (the free-cliff push it was inverted with), evaluation 1 | done | antarctica_5000_2000_buffered20000 (IU's build, 969,764 vertices), DG0 geometry, vertex raster sampling, the lake fix | IU Quartz, general partition | 2026-10-07 | 2026-10-07 | evaluation 1: misfit 1,108.24, total 1,388.36, \|grad\| 0.66; first forward 6 Newton iterations. The 7 Oct pre arm on f57b053 gave 1,388.36 / 1,108.2 / 0.66 |
@@ -181,6 +186,9 @@ Status: 12 planned, 3 running, 31 stopped, 272 done, 21 superseded.
 | 2 km control on the MAP's own mesh, with no transfer | done | antarctica_5000_2000_buffered0 | local workstation | 2026-09-22 | 2026-09-22 | peak speed 17469 m/yr, which is the inversion chain's own warm-start maximum, so the forward reproduces the MAP. Amery reads 5937 m/yr with no transfer at all, against 6041 through the transfer |
 | 2 km control from the transferred Budd snapshot | running | antarctica_20000_2000_buffered20000, 2 km fine, 20 km interior, 20 km buffer | local workstation | 2026-09-22 | - | 3.5 years: VAF drift 0.01 mm, mass balance +2 Gt/yr, residual zero. The Amery cell sits near 6 km/yr without running away |
 | The final MAPs under a cliff correction restricted to ocean facets (2441818), and the land edges it changes | done | antarctica_5000_2000_buffered20000 (IU's build, 969,764 vertices), DG0 geometry, vertex raster sampling, the lake fix | IU Quartz, general partition | 2026-10-07 | 2026-10-07 | Budd at its controls: misfit 1,108.24, total 1,388.36, \|grad\| 0.66 ungated against 1,146.81, 1,426.93, 3.28 gated. RC under the gate: the first forward did not converge in 30 Newton iterations (the ungated code took 6). Land edges where the gate removes the correction: 5,108 facets, 14,461 km; where the rock rises above the ice surface (7,624 km) the facet push alone is a length-weighted median 13 times the free-cliff push back into the ice (p10 148 times), and where it lies below (6,837 km) 20 times outward (p90 153 times) |
+| Cell-scale noise of the 2 km Budd production historical, control and ssp585 against the first year's tendency | done | antarctica_5000_2000_buffered20000 (IU's build, 969,764 vertices), DG0 geometry | IU Quartz, general partition | 2026-10-13 | 2026-10-13 | CESM2-WACCM: cell-scale RMS of dH since 2003 2.1 m (2004), 8.0 (2015), 12.8 (2040, control), 16.1 (2073, control); 25 km bin-mean RMS 0.7, 5.5, 12.7, 21.5; cell-scale tendency 2.12 m/yr in the first year, 0.40 in 2015, 0.14 in 2070; correlation with the first year's tendency 0.76 (2015), 0.60 (2040), 0.52 (2073). ssp585 follows the control to 2040 and holds its tendency near 0.2 to 0.25 m/yr after 2070 |
+| 2 km Budd re-inversions under the point and the cell-mean velocity target, a 1-year historical from each, and where they differ | done | antarctica_5000_2000_buffered20000 (IU's build, 969,764 vertices), DG0 geometry | IU Quartz, general partition | 2026-10-13 | 2026-10-14 | Unobserved nodes 50,220 and 38,693 of 969,764; misfit 1,271 and 1,960, \|grad\| 0.40 and 1.36. Tendency nb 1.45 and 1.40, bin 1.94 and 1.92 m/yr; year-1 VAF gain +0.53 and +0.06 mm; grounding-line flux over the year 1,775 and 1,949, calving 1,378 and 1,590 Gt/yr. The VAF difference (-0.48 mm, -185 Gt grounded) lies within 20 km of the 2003 grounding line (0 to 5 km -0.24, 5 to 20 km -0.21, 20 to 50 km -0.06 mm). front_flux_check at t=0: grounding line 2,256 and 2,396 against 2,156 (point target) and 2,167 (cell-mean target); floating front 1,320 and 1,518 against 998 and 1,282; grounded front 261 and 1,277 against 81 and 132, of which 151 and 1,101 Gt/yr cross three thin unobserved front facets at Shirase Glacier near (1,385, 1,750) km at up to 2.4e5 and 1.9e6 m/yr |
+| 2 km point and cell-mean MAPs carried toward convergence in 300-iteration stages, a 1-year historical from each stage | running | antarctica_5000_2000_buffered20000 (IU's build, 969,764 vertices), DG0 geometry | IU Quartz, general partition (niced) | 2026-10-14 | - | - |
 | 2 km RC inversion under full_mumps on 32 ranks, 55 L-BFGS-B iterations from the moving start, with and without the solver release, watched without touching Python's collector (a weak-reference count of live Firedrake solvers) | done | antarctica_5000_2000_buffered20000 (969,764 vertices, 1,928,285 cells), DG0 geometry, vertex raster sampling | IU Quartz, general partition, one node each | 2026-10-06 | 2026-10-06 | at most 4 Firedrake variational solvers alive after any evaluation in either arm (120 built), so Python's collector keeps up with the dropped ones; final totals 1.976163179e+03 and 1.976163181e+03 after 55 iterations (1.4e-15 at evaluation 10, 8.8e-13 at 40, 1.3e-9 at 58), the same Newton iterations at every evaluation; PETSc -log_view on rank 0 at exit: 25 of 1,658 matrices alive without the release, 10 with it, every SNES, KSP and PC destroyed (121 of 121) |
 | 2 km RC inversion under full_mumps on 32 ranks, 60 L-BFGS-B iterations from 10971250's last checkpoint: RSS with and without the solver release, and without ScaLAPACK on MUMPS's root (40 iterations) | done | antarctica_5000_2000_buffered20000 (969,764 vertices, 1,928,285 cells), DG0 geometry, vertex raster sampling | IU Quartz, general partition, one node each | 2026-10-06 | 2026-10-06 | objectives agree to 1.3e-14 at evaluation 10 and 8.4e-13 at 20, then drift as roundoff compounds through L-BFGS-B (9.5e-11 at 40, 3.4e-5 at 62, the same Newton iterations at every evaluation); same-code reruns spread alike (2.0e-15 at evaluation 2, 1.6e-11 at 22). PETSc -log_view on rank 0 at exit: 37 of 1,766 matrices alive without the release, 10 with it; every SNES, KSP and PC destroyed in both. |
 | 2 km RC inversion under full_mumps on 32 ranks, 45 L-BFGS-B iterations from a start the rho 75 km objective moves far, with and without the solver release, and 30 iterations reading MUMPS's memory counters for the cached forward solver | done | antarctica_5000_2000_buffered20000 (969,764 vertices, 1,928,285 cells), DG0 geometry, vertex raster sampling | IU Quartz, general partition, one node each | 2026-10-06 | 2026-10-06 | final totals 2.006562430e+03 and 2.006562429e+03 after 45 iterations, the same Newton iterations; PETSc -log_view on rank 0 at exit: 28 of 1,388 matrices alive without the release, 10 with it, every SNES, KSP and PC destroyed. The cached forward solver was built once and its MUMPS instance reported INFO(16) 1,482 to 1,488 MB allocated, INFO(22) 654 to 659 MB used and RINFO(8) 1,552 MB at every evaluation. |
@@ -339,6 +347,7 @@ Status: 12 planned, 3 running, 31 stopped, 272 done, 21 superseded.
 | 32 km relaxation year on OCX's 2014 protocol forcing on Quartz, then a 2-iteration re-inversion | done | antarctica_320000_32000_buffered0, DG0 geometry, ISMIP7_MESH=checkpoint | IU Quartz, debug partition | 2026-10-06 | 2026-10-06 | year: resid 0.00 on every step, SMB +2,335, melt -1,034, outflux -1,670 Gt/yr at the last step, chain finished at 2015.0. Re-inversion: 21 evaluations, then a taped solve raised an exception the driver does not catch and the job aborted (exit 137); it ran a deliberately mismatched objective (the issue #153 stage-1 prior on a MAP inverted otherwise, ISMIP7_WARM_START_STRICT=0) |
 | One rank of four killed by the OOM killer or raising while the others wait in a barrier, launched by plain srun and by ismip7_mpirun's --kill-on-bad-exit=1 --oom-kill-step=1: does the step end | done | none (a 4-rank mpi4py probe, oom_probe.py) | IU Quartz, general partition, Slurm 25.11.8 with KillOnBadExit=0 and TaskPluginParam unset (no OOMKillStep) | 2026-10-06 | 2026-10-06 | OOM under plain srun: the step was still running 2 min 10 s after Slurm logged the oom_kill event, three ranks waiting in the barrier, as in job 10971250 (cancelled by hand). OOM under ismip7_mpirun: srun printed 'Terminating StepId' and the step ended within the second Slurm logged the oom_kill event, every task Out Of Memory, jobs of 12 and 13 s in all; srun returned 1 (11464621, the first probe's script did not capture it). Raise with Firedrake imported: Firedrake's abort ends the step either way, in 14 s under ismip7_mpirun and 45 s under plain srun (Slurm's 32 s abort wait). Raise without Firedrake: the raising rank never exits (mpi4py blocks in MPI_Finalize), so neither launcher ends the step (both cancelled by hand); every ISMIP7 driver imports Firedrake. |
 | Bi-Laplacian prior solve, per evaluation, on the 32 km mesh refined to 1.19 million vertices (probe_eval_overhead.py) | done | antarctica_320000_32000_buffered0 (sha256 fd66fc42) refined uniformly by MeshHierarchy, levels 0 to 4: 6,282, 21,618, 79,455, 303,789 and 1,187,097 vertices; CG1 controls | IU workstation (Mac, 16 cores, 128 GB), data under /Volumes/LaCie/Data/antarctica_general/ismip7_obs; another session's 8-rank jobs shared the machine for most runs (load at each start in its commit.txt) | 2026-10-02 | 2026-10-02 | At 1,187,097 vertices, seconds an evaluation for both controls on 1 / 2 / 4 / 8 ranks (sweep 2): the residual-form solve the driver used 9.8 / 9.1 / 8.3 / 8.2 (sweep 1: 9.4 / 9.0 / 8.8 / 8.5), with MUMPS parallel analysis 10.1 / 4.7 / 2.9 / 3.0, factored 0.22 / 0.15 / 0.10 / 0.12 after a 4.1 to 4.8 s first call, CG with Jacobi 0.26 / 0.14 / 0.08 / 0.10 (22 iterations); TAO tape forward plus adjoint 15.3 / 13.9 / 12.6 / 12.4 before and 0.40 / 0.27 / 0.18 / 0.21 factored. The old solve grows linearly with the vertex count (6.9 to 8.2 us a vertex at level 4) and does not fall with the rank count. Energies agree to 3e-16 and taped gradients to 2e-16. The replicated gathers took 0.13 s on 1 rank and at most 0.02 s on more |
+| icepack.fit against the point and cell-mean velocity targets on synthetic rasters | done | a 40 km square of 2 km cells under a 400 m raster | IU Quartz, general partition | 2026-10-14 | 2026-10-14 | RMS error against the noise-free field: smooth 0.3 (point), 8.9 (cell_mean), 6.7 and 6.0 (fit at alpha 500 m and 2 km); with pixel noise of 30, 15.0, 9.6, 10.9 and 15.4. A 50 to 500 m/yr step: nodes either side 50/500, 205/458, 137/585 and 198/490, overshoot 0, 0, 87 and 17, undershoot 0, 0, 25 and 11. A data gap: point and cell_mean leave its 147 nodes unobserved, the fit fills all of them (RMS error 36) |
 
 ## Historical
 
@@ -3978,6 +3987,96 @@ One OCX step on the 1 km production mesh from transferred MAPs under the front-c
 - **Audit:** grounding-line discharge 2803 Gt/yr against 1848 with the observed velocity (ratio 1.52; observed 2050 plus or minus 100), by observed speed of the source cell 5.61 under 100 m/yr, 0.77 in 100 to 500, 0.38 in 500 to 1500 and 0.32 above 1500. No transfer fill on the MAP's own mesh; the fluidity prior spans 1.0 to 519.9. Under the production HAF gate 0 of 2,884 floating cells carry friction (the old sign test would have put it on 396). The forward re-solve at the MAP's controls matches the MAP's velocity to rel L2 5.9e-8
 - **Notes:** the rehearsal of issue 138. The discharge ratio misses the [0.8, 1.25] target because 25 km cells do not resolve the narrow fast outlets, and the inversion had already converged, so it was recorded and not iterated further
 
+### test-25km-first-year-bedmachine-smoothed
+
+25 km Budd re-inversions on a Gaussian-smoothed BedMachine (sigma 12.5 km), point and cell-mean velocity targets (done), IU.
+
+- **Task type:** test
+- **Friction law:** budd
+- **Mesh:** antarctica_250000_25000_buffered20000, DG0 geometry
+- **Initial state / MAP:** IU's 25 km _wsiu MAP (results/rehearsal_25km_iu/maps)'s controls; geometry sampled afresh from the smoothed raster (ISMIP7_WARM_START_GEOMETRY=0)
+- **Site / partition:** IU Quartz, general partition
+- **Ranks / memory:** filter 1 task 48 GiB 5 min; inversions 8 ranks 64 GiB 11 to 12 min; forwards 8 ranks 32 GiB 2 min
+- **Job ids:** 12202111 12202114 12202115 12206210 12206343 12206802 12206803 12207229 12207230 12207231 12207232
+- **Code:** c62bcf0 (this PR's first commit on PR 168's branch at 74d0b84), Quartz worktree /N/scratch/dlilien/ismip7_rehearsal25iu/runvs; filter bm_gauss.py in Quartz antarctica/results/first_year_mass_gain_iu/scripts
+- **Started:** 2026-10-13
+- **Finished:** 2026-10-13
+- **Results path:** Quartz antarctica/results/first_year_mass_gain_iu/maps_25km/inversion_vs_budd_25km_*_bmg12k.h5, json/gn_vs25km*bmg12k*.json, csv/; the smoothed raster and its obs root on /N/scratch/dlilien/ismip7_vs/obs_bmg12k
+- **Audit:** Filter: thickness changed 165 m RMS over ice pixels (bed 186, surface 68), ice mean thickness 1,940.4 to 1,941.0 m. Misfit 3,382 (point) and 4,876 (cell_mean). Tendency (nb) 1.67 and 1.14 m/yr calibrated, 1.67 and 1.13 uniform K, against 1.76 / 1.72 and 1.21 / 1.20 unsmoothed. Cell-scale RMS of the sampled thickness 150.6 to 129.9 m and of the surface 104.6 to 97.7 m. Year-1 VAF gain +1.18 / +1.19 (point) and +0.35 / +0.40 mm (cell_mean). The smoothed geometry holds 312 mm more VAF and 33,000 Gt less ice; calibrated melt 897 against 998 Gt/yr
+- **Notes:** Section 3 of antarctica/reports/first_year_mass_gain_iu.md. A normalized convolution inside BedMachine's ice mask (mask 2, 3, 4) for thickness, bed and surface, and outside it for the bed; the mask unchanged
+
+### test-25km-first-year-checkerboard-dg0-cg1
+
+25 km OCX from DG0 and CG1 MAPs: does the cell-scale pattern belong to DG0? (done), IU.
+
+- **Task type:** test
+- **Friction law:** budd
+- **Mesh:** antarctica_250000_25000_buffered20000, DG0 and CG1 geometry
+- **Initial state / MAP:** two 300-iteration inversions from the _wsiu controls under ISMIP7_RASTER_SAMPLE=vertex and exact_front 0, one per geometry space
+- **Site / partition:** IU Quartz, general partition
+- **Ranks / memory:** 8 ranks, 64 GiB inversions (about 21 min) and 32 GiB OCX forwards (5 to 6 min); gridnoise serial
+- **Job ids:** 12138738 12138748 12145012 12145013 12147333 12146769 12149401 12149402
+- **Code:** 288382a (PR 163's head); the CG1 rerun 74d0b84, Quartz worktrees run and run25cg
+- **Started:** 2026-10-13
+- **Finished:** 2026-10-13
+- **Results path:** Quartz antarctica/results/first_year_mass_gain_iu/json/gridnoise_{dg0,cg1fix}.json, maps_25km/inversion_gs25_*, csv/
+- **Audit:** Inversion misfits 2,755 (DG0) and 3,041 (CG1). OCX protocol forcing, no backdate, uniform K 6.5e-5 on the legacy path, no apparent MB. nb metric: DG0 first-year tendency 1.73 m/yr, 0.38 in 2026, cell-scale RMS 13.9 m by 2026, correlation with the first year 0.81; CG1 5.05, 1.79, 54.7 m, 0.80
+- **Notes:** Section 1 of antarctica/reports/first_year_mass_gain_iu.md. The first CG1 forward (12145013) lost all its ice at step 1: simulation.py reassigned ctx['h_dg_state'] before the CG1 restore check (since f9afea4), fixed in 74d0b84 (PR 168) and rerun as 12147333
+
+### test-25km-first-year-geometry-cell-mean
+
+25 km Budd re-inversion with BedMachine and MEaSUREs both taken as cell means (stopped), IU.
+
+- **Task type:** test
+- **Friction law:** budd
+- **Mesh:** antarctica_250000_25000_buffered20000, DG0 geometry under ISMIP7_RASTER_SAMPLE=cell_mean
+- **Initial state / MAP:** IU's 25 km _wsiu MAP (results/rehearsal_25km_iu/maps)'s controls (its geometry is not taken under another sampling)
+- **Site / partition:** IU Quartz, general partition
+- **Ranks / memory:** 8 ranks, 64 GiB, 4.5 min
+- **Job ids:** 12197819 12200304
+- **Code:** c62bcf0 (this PR's first commit on PR 168's branch at 74d0b84), Quartz worktree /N/scratch/dlilien/ismip7_rehearsal25iu/runvs
+- **Started:** 2026-10-13
+- **Finished:** 2026-10-13
+- **Results path:** the job log in Quartz antarctica/results/first_year_mass_gain_iu/logs/ismip7_inv_12197819.out
+- **Audit:** The startup continuation converged in 8 steps; six forward evaluations then diverged (residual 2.7e14 to 1.2e17) and the optimizer stopped on failed trials after about 17 iterations, with no done marker: published residual 7.6e10, misfit 1.87e5. No forward ran; its gridnoise job (12200304) failed for want of one
+- **Notes:** Section 3 of antarctica/reports/first_year_mass_gain_iu.md; consistent with the README's 2 km measurement of cell_mean geometry
+
+### test-25km-first-year-velocity-sample
+
+25 km Budd re-inversions under the point and the cell-mean velocity target, with a 1-year historical from each (done), IU.
+
+- **Task type:** test
+- **Friction law:** budd
+- **Mesh:** antarctica_250000_25000_buffered20000, DG0 geometry
+- **Initial state / MAP:** IU's 25 km _wsiu MAP (results/rehearsal_25km_iu/maps), 150 iterations each
+- **Site / partition:** IU Quartz, general partition
+- **Ranks / memory:** 8 ranks, 64 GiB inversions (12 min), 32 GiB forwards (2 min); gridnoise serial
+- **Job ids:** 12187138 12187140 12192699 12192700 12194681 12194682 12197820 12197821 12200302 12200303 12207506
+- **Code:** c62bcf0 (this PR's first commit on PR 168's branch at 74d0b84), Quartz worktree /N/scratch/dlilien/ismip7_rehearsal25iu/runvs
+- **Started:** 2026-10-13
+- **Finished:** 2026-10-13
+- **Results path:** Quartz antarctica/results/first_year_mass_gain_iu/maps_25km/inversion_vs_budd_25km_{point,cell_mean}.h5, json/gn_25km_*.json, json/gn_vs25km*u.json, csv/
+- **Audit:** Unobserved nodes 1,857 (point) and 734 (cell_mean) of 4,509; misfit 3,339 and 4,589, \|grad\| 72 and 333. First-year cell-scale tendency (nb) 1.76 and 1.21 m/yr calibrated, 1.72 and 1.20 under uniform K; year-1 VAF gain +1.17 and +0.71 mm calibrated, +1.27 and +0.72 uniform
+- **Notes:** Section 2 of antarctica/reports/first_year_mass_gain_iu.md. Forwards: calibrated melt from results/rehearsal_25km_iu/calibration/deltaT_per_basin_25000_K6.500e-05.npz (12192699, 12192700) and uniform K 6.5e-5 on the legacy per-basin path (12197820, 12197821)
+
+### test-25km-first-year-velocity-sample-convergence
+
+25 km point and cell-mean MAPs carried toward convergence in six 250-iteration stages, a 1-year historical from each stage (done), IU.
+
+- **Task type:** test
+- **Friction law:** budd
+- **Mesh:** antarctica_250000_25000_buffered20000, DG0 geometry
+- **Initial state / MAP:** test-25km-first-year-velocity-sample's two MAPs, each stage warm-started from the one before
+- **Site / partition:** IU Quartz, general partition (niced)
+- **Ranks / memory:** 8 ranks; inversions 64 GiB, 17 to 22 min a stage; forwards 32 GiB, 2 min; front_flux_check 8 ranks
+- **Job ids:** 12249665-12249700 12252153
+- **Code:** c62bcf0 (this PR's first commit on PR 168's branch at 74d0b84), Quartz worktree /N/scratch/dlilien/ismip7_rehearsal25iu/runvs
+- **Started:** 2026-10-14
+- **Finished:** 2026-10-14
+- **Results path:** Quartz antarctica/results/first_year_mass_gain_iu/maps_25km/inversion_cv_budd_25km_*, json/gn_cv25km*.json, json/ff_cv25km_s6.json, scripts/cv_jobs.txt
+- **Audit:** Misfit point 3,339 to 2,624 and cell_mean 4,589 to 2,597 over about 1,650 iterations, still falling 1 to 2.5 % a stage. Tendency (nb) point 1.70 and cell_mean 1.16 m/yr from stage 1 on (32 % apart, 31 % at 150 iterations). Year-1 VAF gain point +1.17 to +1.31 and cell_mean +0.71 to +0.51 mm. Stage 6: grounding-line flux 1,627 and 1,692 against 1,560 under the point target; calving in the forward year 955 and 1,321 Gt/yr
+- **Notes:** Section 6 of antarctica/reports/first_year_mass_gain_iu.md; stages submitted by cv_submit_all.sh as dependency chains
+
 ### test-25km-hist-cesm2waccm-probe-rehamb
 
 25 km rehearsal probe: the first ten steps of core 1 on production defaults with the apparent mass-balance reference (done), IU.
@@ -4271,6 +4370,58 @@ The final MAPs under a cliff correction restricted to ocean facets (2441818), an
 - **Results path:** Quartz /N/scratch/dlilien/ismip7_reinvert_jobs/probe/cliff_*.h5; facet count /N/scratch/dlilien/ismip7_reinvert_jobs/plots/cliff_budd.txt and cliff_budd_land.png (cliff_facets.py beside them)
 - **Audit:** Budd at its controls: misfit 1,108.24, total 1,388.36, \|grad\| 0.66 ungated against 1,146.81, 1,426.93, 3.28 gated. RC under the gate: the first forward did not converge in 30 Newton iterations (the ungated code took 6). Land edges where the gate removes the correction: 5,108 facets, 14,461 km; where the rock rises above the ice surface (7,624 km) the facet push alone is a length-weighted median 13 times the free-cliff push back into the ice (p10 148 times), and where it lies below (6,837 km) 20 times outward (p90 153 times)
 - **Notes:** issue #153: on this evidence IU reverted the gate (97ac1d0) and filed the push into rock above the ice surface as issue #166, since fixed as exact_front version 2 (4426372)
+
+### test-2km-first-year-cell-scale-noise-production
+
+Cell-scale noise of the 2 km Budd production historical, control and ssp585 against the first year's tendency (done), IU.
+
+- **Task type:** test
+- **Friction law:** budd
+- **Mesh:** antarctica_5000_2000_buffered20000 (IU's build, 969,764 vertices), DG0 geometry
+- **Initial state / MAP:** the r2kiurlcnoamb historicals and the cores branched from them (PR 168)
+- **Site / partition:** IU Quartz, general partition
+- **Ranks / memory:** 1 task, serial gridnoise_r2kiu.py (bin metric); about 2 h each
+- **Job ids:** 12136088 12136089
+- **Code:** 288382a's tree plus the analysis script in Quartz antarctica/results/first_year_mass_gain_iu/scripts
+- **Started:** 2026-10-13
+- **Finished:** 2026-10-13
+- **Results path:** Quartz antarctica/results/first_year_mass_gain_iu/json/gridnoise_prod2km_{cesm2_waccm,mri_esm2_0}.json
+- **Audit:** CESM2-WACCM: cell-scale RMS of dH since 2003 2.1 m (2004), 8.0 (2015), 12.8 (2040, control), 16.1 (2073, control); 25 km bin-mean RMS 0.7, 5.5, 12.7, 21.5; cell-scale tendency 2.12 m/yr in the first year, 0.40 in 2015, 0.14 in 2070; correlation with the first year's tendency 0.76 (2015), 0.60 (2040), 0.52 (2073). ssp585 follows the control to 2040 and holds its tendency near 0.2 to 0.25 m/yr after 2070
+- **Notes:** Section 1 of antarctica/reports/first_year_mass_gain_iu.md. The cell-scale pattern is the first year's imbalance carried forward and decaying
+
+### test-2km-first-year-velocity-sample
+
+2 km Budd re-inversions under the point and the cell-mean velocity target, a 1-year historical from each, and where they differ (done), IU.
+
+- **Task type:** test
+- **Friction law:** budd
+- **Mesh:** antarctica_5000_2000_buffered20000 (IU's build, 969,764 vertices), DG0 geometry
+- **Initial state / MAP:** IU's 2 km _ef2_vf MAP (results/reinvert_2km/final, record inversion-2km-budd-b20k-ef2-vf), 150 iterations each
+- **Site / partition:** IU Quartz, general partition
+- **Ranks / memory:** 32 ranks: inversions 240 GiB (1 h 38 and 2 h 15), forwards 96 GiB (38 min); analyses serial (8 to 14 min) and front_flux_check on 2 ranks
+- **Job ids:** 12187141 12187142 12242353 12242798 12242802 12242805 12242957 12242958 12243533 12243574 12252781 12252803
+- **Code:** c62bcf0 (this PR's first commit on PR 168's branch at 74d0b84), Quartz worktree /N/scratch/dlilien/ismip7_rehearsal25iu/runvs
+- **Started:** 2026-10-13
+- **Finished:** 2026-10-14
+- **Results path:** Quartz antarctica/results/first_year_mass_gain_iu/json/gn_2km_*.json, json/vsdiff_2km.json, vsflux_2km.json, ff_vs2km.json, ffacets_2km.json, figs/vsdiff_2km.png; the MAPs and forward states on /N/scratch/dlilien/ismip7_vs
+- **Audit:** Unobserved nodes 50,220 and 38,693 of 969,764; misfit 1,271 and 1,960, \|grad\| 0.40 and 1.36. Tendency nb 1.45 and 1.40, bin 1.94 and 1.92 m/yr; year-1 VAF gain +0.53 and +0.06 mm; grounding-line flux over the year 1,775 and 1,949, calving 1,378 and 1,590 Gt/yr. The VAF difference (-0.48 mm, -185 Gt grounded) lies within 20 km of the 2003 grounding line (0 to 5 km -0.24, 5 to 20 km -0.21, 20 to 50 km -0.06 mm). front_flux_check at t=0: grounding line 2,256 and 2,396 against 2,156 (point target) and 2,167 (cell-mean target); floating front 1,320 and 1,518 against 998 and 1,282; grounded front 261 and 1,277 against 81 and 132, of which 151 and 1,101 Gt/yr cross three thin unobserved front facets at Shirase Glacier near (1,385, 1,750) km at up to 2.4e5 and 1.9e6 m/yr
+- **Notes:** Sections 2 and 5 of antarctica/reports/first_year_mass_gain_iu.md; calibrated melt from results/rehearsal_2km_iu/calibration/deltaT_per_basin_2000_K6.500e-05.npz
+
+### test-2km-first-year-velocity-sample-convergence
+
+2 km point and cell-mean MAPs carried toward convergence in 300-iteration stages, a 1-year historical from each stage (running), IU.
+
+- **Task type:** test
+- **Friction law:** budd
+- **Mesh:** antarctica_5000_2000_buffered20000 (IU's build, 969,764 vertices), DG0 geometry
+- **Initial state / MAP:** test-2km-first-year-velocity-sample's two MAPs, each stage warm-started from the one before
+- **Site / partition:** IU Quartz, general partition (niced)
+- **Ranks / memory:** 32 ranks; inversions 240 GiB with 6.5 h links, forwards 96 GiB
+- **Job ids:** 12249701-12249716
+- **Code:** c62bcf0 (this PR's first commit on PR 168's branch at 74d0b84), Quartz worktree /N/scratch/dlilien/ismip7_rehearsal25iu/runvs
+- **Started:** 2026-10-14
+- **Results path:** /N/scratch/dlilien/ismip7_vs (maps/inversion_cv_budd_2km_*, gn_cv2km*.json); cv_collect.py tabulates them
+- **Notes:** Section 6 of antarctica/reports/first_year_mass_gain_iu.md. Three stages for cell_mean and one for point, the point MAP being near convergence at 150 iterations
 
 ### test-2km-full-mumps-issue161-gcwatch
 
@@ -7502,6 +7653,23 @@ Bi-Laplacian prior solve, per evaluation, on the 32 km mesh refined to 1.19 mill
 - **Results path:** /Volumes/LaCie/Data/antarctica_general/ismip7_runs/inversion_eval_overhead/probe (sweep 1) and /Volumes/LaCie/Data/antarctica_general/ismip7_runs/inversion_eval_overhead/probe2 (sweep 2): p1 to p8 .json and .log
 - **Audit:** At 1,187,097 vertices, seconds an evaluation for both controls on 1 / 2 / 4 / 8 ranks (sweep 2): the residual-form solve the driver used 9.8 / 9.1 / 8.3 / 8.2 (sweep 1: 9.4 / 9.0 / 8.8 / 8.5), with MUMPS parallel analysis 10.1 / 4.7 / 2.9 / 3.0, factored 0.22 / 0.15 / 0.10 / 0.12 after a 4.1 to 4.8 s first call, CG with Jacobi 0.26 / 0.14 / 0.08 / 0.10 (22 iterations); TAO tape forward plus adjoint 15.3 / 13.9 / 12.6 / 12.4 before and 0.40 / 0.27 / 0.18 / 0.21 factored. The old solve grows linearly with the vertex count (6.9 to 8.2 us a vertex at level 4) and does not fall with the rank count. Energies agree to 3e-16 and taped gradients to 2e-16. The replicated gathers took 0.13 s on 1 rank and at most 0.02 s on more
 - **Notes:** Both sweeps ran beside another session's 8-rank job (load 8 to 17 at the starts)
+
+### test-synthetic-first-year-icepack-fit
+
+icepack.fit against the point and cell-mean velocity targets on synthetic rasters (done), IU.
+
+- **Task type:** test
+- **Mesh:** a 40 km square of 2 km cells under a 400 m raster
+- **Initial state / MAP:** none: four synthetic fields
+- **Site / partition:** IU Quartz, general partition
+- **Ranks / memory:** 1 task, 8 GiB, 17 s; Firedrake 2026.4.2
+- **Job ids:** 12249855
+- **Code:** c62bcf0 (this PR's first commit on PR 168's branch at 74d0b84), Quartz worktree /N/scratch/dlilien/ismip7_rehearsal25iu/runvs; fit_vs_cellmean.py carries icepack master's fit (commits 18b34b42 and c9a29780)
+- **Started:** 2026-10-14
+- **Finished:** 2026-10-14
+- **Results path:** Quartz antarctica/results/first_year_mass_gain_iu/json/fit_vs_cellmean.json
+- **Audit:** RMS error against the noise-free field: smooth 0.3 (point), 8.9 (cell_mean), 6.7 and 6.0 (fit at alpha 500 m and 2 km); with pixel noise of 30, 15.0, 9.6, 10.9 and 15.4. A 50 to 500 m/yr step: nodes either side 50/500, 205/458, 137/585 and 198/490, overshoot 0, 0, 87 and 17, undershoot 0, 0, 25 and 11. A data gap: point and cell_mean leave its 147 nodes unobserved, the fit fills all of them (RMS error 36)
+- **Notes:** Section 7 of antarctica/reports/first_year_mass_gain_iu.md
 
 ### core-c001-historical-cesm2waccm
 

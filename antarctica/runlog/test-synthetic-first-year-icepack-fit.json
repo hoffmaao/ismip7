@@ -1,0 +1,20 @@
+{
+  "id": "test-synthetic-first-year-icepack-fit",
+  "task": "test",
+  "institution": "IU",
+  "title": "icepack.fit against the point and cell-mean velocity targets on synthetic rasters",
+  "status": "done",
+  "mesh": "a 40 km square of 2 km cells under a 400 m raster",
+  "initial_state": "none: four synthetic fields",
+  "site": "IU Quartz, general partition",
+  "resources": "1 task, 8 GiB, 17 s; Firedrake 2026.4.2",
+  "jobs": [
+    "12249855"
+  ],
+  "code": "c62bcf0 (this PR's first commit on PR 168's branch at 74d0b84), Quartz worktree /N/scratch/dlilien/ismip7_rehearsal25iu/runvs; fit_vs_cellmean.py carries icepack master's fit (commits 18b34b42 and c9a29780)",
+  "started": "2026-10-14",
+  "finished": "2026-10-14",
+  "results": "Quartz antarctica/results/first_year_mass_gain_iu/json/fit_vs_cellmean.json",
+  "audit": "RMS error against the noise-free field: smooth 0.3 (point), 8.9 (cell_mean), 6.7 and 6.0 (fit at alpha 500 m and 2 km); with pixel noise of 30, 15.0, 9.6, 10.9 and 15.4. A 50 to 500 m/yr step: nodes either side 50/500, 205/458, 137/585 and 198/490, overshoot 0, 0, 87 and 17, undershoot 0, 0, 25 and 11. A data gap: point and cell_mean leave its 147 nodes unobserved, the fit fills all of them (RMS error 36)",
+  "notes": "Section 7 of antarctica/reports/first_year_mass_gain_iu.md"
+}

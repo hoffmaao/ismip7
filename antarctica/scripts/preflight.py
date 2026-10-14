@@ -42,6 +42,7 @@ from icepack2_tools.runconfig import (
     mesh_override, deltat_per_basin_npz, k_per_basin_npz,
     melt_calibration_contract, geometry_backdate_years,
     smb_elevation_feedback as _smb_elevation_feedback,
+    DISCONTINUOUS_GEOMETRY_SPACES,
 )
 DATA_DIR = obs_data_root()
 from mesh_naming import get_buffer_m, mesh_filename
@@ -405,17 +406,18 @@ def main():
         if scenario == "historical" or core == 11:
             # A cold start from the MAP. A start before 2015 backdates its
             # geometry by the Smith dH/dt (issue 117), which setup_model does
-            # on the DG0 geometry only, reading the MIPkit or its cached
-            # rasters, and the drivers refuse a start before the dH/dt window.
+            # on the cell-wise geometries (dg1 through obs_dhdt.backdate_cells
+            # on cell means), reading the MIPkit or its cached rasters, and
+            # the drivers refuse a start before the dH/dt window.
             try:
                 backdate = geometry_backdate_years(t_start)
             except ValueError as e:
                 miss.append(f"geometry backdating: {e}")
                 backdate = 0.0
             if backdate > 0.0:
-                if geom != "dg0":
+                if geom not in DISCONTINUOUS_GEOMETRY_SPACES:
                     miss.append(f"a start at {t_start:g} backdates the geometry, "
-                                f"which needs ISMIP7_GEOMETRY_SPACE=dg0")
+                                f"which needs ISMIP7_GEOMETRY_SPACE=dg0 or dg1")
                 miss += dhdt_missing()
         if core == 11 and _ocx_forcing() == "protocol":
             # projections/ocx.py refuses to start on anything less, so this

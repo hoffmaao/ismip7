@@ -3094,7 +3094,7 @@ def run_simulation(
     fracture_mode = _fracture_mode()
     if fracture_mode in FRACTURE_MASK_MODES:
         if not geom_dg:
-            raise RuntimeError(f"ISMIP7_FRACTURE={fracture_mode} needs ISMIP7_GEOMETRY_SPACE=dg0 (cell-wise removal)")
+            raise RuntimeError(f"ISMIP7_FRACTURE={fracture_mode} needs ISMIP7_GEOMETRY_SPACE=dg0 or dg1 (cell-wise removal)")
         collapse = np.zeros(len(cell_area), dtype=bool)
         ctx["collapse"] = collapse
         if fracture_mode == "mask_front":

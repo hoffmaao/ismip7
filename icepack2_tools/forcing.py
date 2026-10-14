@@ -1749,6 +1749,13 @@ def forcing_space(ctx):
     return ctx["accum"].function_space()
 
 
+def _cell_values(ctx):
+    r"""A field's values on the forcing dofs: its own under DG0 and CG1,
+    its cell means under DG1 (``ctx["cell_view"]``)."""
+    view = ctx.get("cell_view")
+    return (lambda f: f.dat.data_ro) if view is None else view.means
+
+
 def forcing_geometry(ctx):
     r"""``(h, b, s)`` as rank-local arrays on the forcing dofs, the geometry
     the melt law and the forcing masks read.
@@ -2127,8 +2134,7 @@ class SMBElevationFeedback:
     def surface_change(ctx):
         r"""``s - s_ref`` on the forcing dofs, rank-local: under DG1 both
         surfaces are those of the cell means (:func:`forcing_geometry`)."""
-        view = ctx.get("cell_view")
-        cells = (lambda f: f.dat.data_ro) if view is None else view.means
+        cells = _cell_values(ctx)
         b = np.asarray(cells(ctx["b"]))
         r = float(ctx["rho_ratio"])
         return (flotation_surface(b, np.asarray(cells(ctx["h"])), r)
@@ -2163,8 +2169,8 @@ class SMBElevationFeedback:
         from .front import unforced_cells
         from .mpi_stats import global_range
         comm = ctx["mesh"].comm
-        h, b, _ = forcing_geometry(ctx)
-        forced = ~unforced_cells(h, b)
+        cells = _cell_values(ctx)
+        forced = ~unforced_cells(cells(ctx["h"]), cells(ctx["b"]))
         field = Function(ctx["accum"].function_space())
         field.dat.data[:] = np.where(forced, corr, 0.0)
         net = float(assemble(field * dx)) * _RHO_ICE / 1e12

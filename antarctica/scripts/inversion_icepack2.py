@@ -391,6 +391,21 @@ PHI_GROUNDED = "zero" if FLUIDITY_CONTROL == "floating" else "inverted"
 INVERT = os.environ.get("ISMIP7_INVERT", "both").strip().lower()
 if INVERT not in ("both", "phi", "theta"):
     raise ValueError(f"ISMIP7_INVERT must be both|phi|theta, got {INVERT!r}")
+# ISMIP7_PHI_BOUNDS="lo,hi": box bounds on the fluidity control under TAO's
+# bounded LMVM (theta unbounded). exp(phi) excursions of 1e6 have been seen on
+# shelves; a bound in log units keeps A inside the range the temperature of
+# ice allows. Recorded as phi_bounds ("lo,hi", or "none" where no bound
+# applies: a theta-only stage or the scipy path).
+_phi_bounds_env = os.environ.get("ISMIP7_PHI_BOUNDS", "").strip()
+PHI_BOUNDS = (tuple(float(v) for v in _phi_bounds_env.split(",")) if _phi_bounds_env
+              else None)
+if PHI_BOUNDS is not None and (len(PHI_BOUNDS) != 2 or PHI_BOUNDS[0] >= PHI_BOUNDS[1]):
+    raise ValueError(f"ISMIP7_PHI_BOUNDS must be 'lo,hi' with lo < hi, got {_phi_bounds_env!r}")
+if INVERT == "theta" or os.environ.get("ISMIP7_GRAD_PRECOND", "none").lower() not in (
+        "mass_consistent", "prior"):
+    PHI_BOUNDS = None
+PHI_BOUNDS_RECORD = ("none" if PHI_BOUNDS is None
+                     else f"{PHI_BOUNDS[0]:g},{PHI_BOUNDS[1]:g}")
 
 # ── Likelihood scale (ISMIP7_MISFIT_SCALE) ───────────────────────────────
 # The data terms are normalised by the observed AREA, so the misfit is a mean
@@ -2996,6 +3011,7 @@ def main():
             chk.set_attr("/", "dhdt_reweight", float(DHDT_REWEIGHT))
             chk.set_attr("/", "dhdt_reweight_scale", float(DHDT_REWEIGHT_SCALE))
             chk.set_attr("/", "kill_bergs", int(KILL_BERGS))
+            chk.set_attr("/", "phi_bounds", PHI_BOUNDS_RECORD)
             # How each evaluation reached the full exponents: 1 for the
             # five-solve continuation, 0 for one solve. A solver fact, outside
             # the objective (handoff.OBJECTIVE_KEYS).
@@ -3119,6 +3135,7 @@ def main():
                 "dhdt_reweight": float(DHDT_REWEIGHT),
                 "dhdt_reweight_scale": float(DHDT_REWEIGHT_SCALE),
                 "kill_bergs": int(KILL_BERGS),
+                "phi_bounds": PHI_BOUNDS_RECORD,
                 "grad_precond": os.environ.get(
                     "ISMIP7_GRAD_PRECOND", "none"
                 ).lower(),
@@ -3599,17 +3616,6 @@ def main():
             PETSc.Sys.Print(
                 f"  Controls: {INVERT} only (ISMIP7_INVERT); "
                 f"{'phi' if INVERT == 'theta' else 'theta'} frozen at its current field")
-        # ISMIP7_PHI_BOUNDS="lo,hi": box bounds on the fluidity control under
-        # TAO's bounded LMVM (theta unbounded). exp(phi) excursions of 1e6
-        # have been seen on shelves; a bound in log units keeps A inside the
-        # range the temperature of ice allows. Recorded as phi_bounds.
-        _phi_bounds_env = os.environ.get("ISMIP7_PHI_BOUNDS", "").strip()
-        PHI_BOUNDS = (tuple(float(v) for v in _phi_bounds_env.split(",")) if _phi_bounds_env
-                      else None)
-        if PHI_BOUNDS is not None and (len(PHI_BOUNDS) != 2 or PHI_BOUNDS[0] >= PHI_BOUNDS[1]):
-            raise ValueError(f"ISMIP7_PHI_BOUNDS must be 'lo,hi' with lo < hi, got {_phi_bounds_env!r}")
-        if PHI_BOUNDS is not None and INVERT == "theta":
-            PHI_BOUNDS = None
         solver = TAOSolver(
             _tao_forward, _tao_spaces,
             solver_parameters={
@@ -3856,6 +3862,7 @@ def main():
         "vel_sample": VEL_SAMPLE, "u_obs_max": float(U_OBS_MAX),
         "dhdt_reweight": float(DHDT_REWEIGHT),
         "dhdt_reweight_scale": float(DHDT_REWEIGHT_SCALE), "kill_bergs": int(KILL_BERGS),
+        "phi_bounds": PHI_BOUNDS_RECORD,
     })
     if PRIOR_FORM == "bilaplacian":
         run_settings.update({"prior_sigma_theta": float(PRIOR_SIGMA_THETA),

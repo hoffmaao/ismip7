@@ -60,6 +60,7 @@ def base_env(sandbox):
         "ISMIP7_MESH": "/meshes/antarctica_320000_32000.msh",
         "ISMIP7_MISFIT_SCALE": "14000",
         "ISMIP7_DHDT_WEIGHT": "1",
+        "ISMIP7_GRAD_PRECOND": "mass_consistent",
         "PYTHONPATH": str(sandbox),
         # a stage knob left in the caller's shell must not be recorded
         "ISMIP7_INVERT": "both",
@@ -79,7 +80,7 @@ def routine(sandbox, *args, env=None):
     script = sandbox / "antarctica" / "scripts" / "initialization_routine.sh"
     proc = subprocess.run(
         ["bash", str(script), str(sandbox / "out"), *args], env=merged,
-        cwd=str(sandbox), capture_output=True, text=True)
+        cwd=str(sandbox), capture_output=True, text=True, timeout=120)
     return proc.returncode, proc.stdout + proc.stderr
 
 
@@ -255,6 +256,7 @@ def test_the_routine_runs_itself_stage_by_stage(sandbox):
     assert h["ISMIP7_APPARENT_MB"] == "0" and h["ISMIP7_OUTPUT"] == "1"
     assert h["ISMIP7_CALVING"] == "hfb" and h["ISMIP7_FRONT_ADVANCE"] == "none"
     assert h["ISMIP7_FRACTURE"] == "none"
+    assert h["ISMIP7_GEOMETRY_BACKDATE"] == "12", "the forced 2002 year starts from the 2003 geometry"
     assert "ISMIP7_FIXED_FRONT" not in h and "ISMIP7_T_END" not in h
     assert "ISMIP7_INVERT" not in h and "ISMIP7_FLUIDITY_CONTROL" not in h
 
@@ -271,6 +273,7 @@ def test_the_routine_runs_itself_stage_by_stage(sandbox):
     assert c["ISMIP7_EXPERIMENT"] == "control" and c["ISMIP7_ESM"] == "CESM2-WACCM"
     assert c["ISMIP7_APPARENT_MB"] == "1" and c["ISMIP7_RUN_TAG"] == "out"
     assert c["ISMIP7_FRACTURE"] == "none" and "ISMIP7_T_START" not in c
+    assert "ISMIP7_GEOMETRY_BACKDATE" not in c
     p = by_name(subs, "rt_out_ssp585_cesm_waccm")["env"]
     assert p["ISMIP7_EXPERIMENT"] == "ssp585_cesm_waccm"
     assert p["ISMIP7_APPARENT_MB"] == "1" and p["ISMIP7_FRACTURE"] == "mask_front"
@@ -329,3 +332,68 @@ def test_resume_submits_a_started_stage_again(sandbox):
     assert again["env"]["ISMIP7_CHAIN_ITER_BUDGET"] == "40"
     rc, log = routine(sandbox, "resume", "friction1")
     assert rc != 0 and "not ready" in log
+
+
+def test_a_2003_historical_keeps_the_default_backdate(sandbox):
+    (sandbox / "warm.h5").write_text("warm\n")
+    rc, log = routine(sandbox, "init", env={
+        "ISMIP7_ROUTINE_STAGES": "hist", "ISMIP7_ROUTINE_ESMS": "CESM2-WACCM",
+        "ISMIP7_ROUTINE_HIST_START": "2003"})
+    assert rc == 0, log
+    (h,) = submits(sandbox)
+    assert h["env"]["ISMIP7_T_START"] == "2003"
+    assert "ISMIP7_GEOMETRY_BACKDATE" not in h["env"]
+
+
+@pytest.mark.parametrize("precond", ["none", "mass", ""])
+def test_init_refuses_inversion_stages_off_the_tao_path(sandbox, precond):
+    (sandbox / "warm.h5").write_text("warm\n")
+    env = {"ISMIP7_GRAD_PRECOND": precond}
+    rc, log = routine(sandbox, "init", env=env)
+    assert rc != 0 and "ISMIP7_GRAD_PRECOND" in log, log
+    assert submits(sandbox) == []
+    assert not (sandbox / "out" / "routine.env").exists(), "a refused init records nothing"
+
+
+def test_forwards_alone_need_no_tao_metric(sandbox):
+    (sandbox / "warm.h5").write_text("warm\n")
+    rc, log = routine(sandbox, "init", env={
+        "ISMIP7_GRAD_PRECOND": "none", "ISMIP7_ROUTINE_STAGES": "hist",
+        "ISMIP7_ROUTINE_ESMS": "CESM2-WACCM"})
+    assert rc == 0, log
+    assert len(submits(sandbox)) == 1
+
+
+def test_a_lock_whose_holder_is_gone_is_taken(sandbox):
+    (sandbox / "warm.h5").write_text("warm\n")
+    routine(sandbox, "init")
+    submits(sandbox)
+    dead = subprocess.Popen(["true"])
+    dead.wait()
+    lock = sandbox / "out" / ".routine.lock"
+    lock.mkdir()
+    (lock / "holder").write_text(f"{dead.pid} {os.uname().nodename}\n")
+    finish_inversion(sandbox / "out" / "map_shelf1.h5")
+    rc, log = routine(sandbox, "next")
+    assert rc == 0, log
+    (s,) = submits(sandbox)
+    assert "-J rt_out_friction1" in s["argv"]
+    assert not lock.exists()
+
+
+def test_a_live_lock_is_waited_for(sandbox):
+    (sandbox / "warm.h5").write_text("warm\n")
+    routine(sandbox, "init")
+    submits(sandbox)
+    lock = sandbox / "out" / ".routine.lock"
+    lock.mkdir()
+    (lock / "holder").write_text(f"{os.getpid()} {os.uname().nodename}\n")
+    finish_inversion(sandbox / "out" / "map_shelf1.h5")
+    with pytest.raises(subprocess.TimeoutExpired):
+        merged = base_env(sandbox)
+        subprocess.run(
+            ["bash", str(sandbox / "antarctica" / "scripts" / "initialization_routine.sh"),
+             str(sandbox / "out"), "next"],
+            env=merged, cwd=str(sandbox), capture_output=True, text=True, timeout=8)
+    assert submits(sandbox) == []
+    assert (lock / "holder").read_text().split()[0] == str(os.getpid())

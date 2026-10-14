@@ -44,8 +44,12 @@
 #   hist      one historical per ESM (ISMIP7_ROUTINE_ESMS) from
 #             ISMIP7_ROUTINE_HIST_START (2002) to 2015 with the apparent mass
 #             balance off: its first year is the forced relaxation year of the
-#             document (the jump from climatology to the ESM's forcing), and
-#             the years from 2003 are the core historical
+#             document (the jump from climatology to the ESM's forcing), a
+#             spin-up year, and the years from 2003 are the core historical.
+#             A start before 2003 takes the 2003 geometry
+#             (ISMIP7_GEOMETRY_BACKDATE=12, 2015 - max(start, 2003)) as the
+#             geometry at the start of the forced year, so the historical
+#             proper starts in 2003 from the model's own state
 #   control   the balanced control per ESM from the historical's endpoint
 #   proj      the projections per ESM (ISMIP7_ROUTINE_SCENARIOS, ssp126 ssp370
 #             ssp585) from the same endpoint, apparent mass balance as the
@@ -56,8 +60,11 @@
 #
 # The front of every forward after the relaxation is the submission's
 # (ismip7_front_routine.sh; collapse mask on the projections only); the relax
-# stage pins it. ISMIP7_ROUTINE_FRONT=env leaves the front knobs to the
-# recorded environment instead.
+# stage pins it.
+#
+# An inversion stage moves one control alone, which only the TAO path does:
+# `init` refuses a recorded ISMIP7_GRAD_PRECOND other than mass_consistent or
+# prior when an inversion stage is listed.
 set -euo pipefail
 
 OUT=${1:?usage: initialization_routine.sh OUTDIR init|next|status|resume STAGE}
@@ -85,7 +92,7 @@ STAGE_KNOBS=(ISMIP7_INVERT ISMIP7_PHI_BOUNDS ISMIP7_FLUIDITY_CONTROL
     ISMIP7_ESM ISMIP7_APPARENT_MB ISMIP7_OUTPUT ISMIP7_FIXED_FRONT
     ISMIP7_CALVING ISMIP7_CALVING_PARAMS ISMIP7_FRONT_ADVANCE ISMIP7_FRACTURE
     ISMIP7_CHAIN_THEN ISMIP7_CHAIN_THEN_CMD ISMIP7_WALL_STOP_MIN
-    ISMIP7_AUTO_RESUME ISMIP7_CHAIN ISMIP7_SNES_LOG)
+    ISMIP7_AUTO_RESUME ISMIP7_CHAIN ISMIP7_SNES_LOG ISMIP7_GEOMETRY_BACKDATE)
 
 # ── the recorded environment ─────────────────────────────────────────────
 record_env() {
@@ -107,7 +114,6 @@ record_env() {
         echo "export ISMIP7_ROUTINE_RELAX_START=${ISMIP7_ROUTINE_RELAX_START:-2015}"
         echo "export ISMIP7_ROUTINE_HIST_START=${ISMIP7_ROUTINE_HIST_START:-2002}"
         echo "export ISMIP7_ROUTINE_PROJ_AMB=${ISMIP7_ROUTINE_PROJ_AMB:-1}"
-        echo "export ISMIP7_ROUTINE_FRONT=${ISMIP7_ROUTINE_FRONT:-routine}"
         echo "export ISMIP7_ROUTINE_FLUIDITY_CONTROL=${ISMIP7_ROUTINE_FLUIDITY_CONTROL:-floating}"
         echo "export ISMIP7_ROUTINE_PHI_BOUNDS=${ISMIP7_ROUTINE_PHI_BOUNDS:--2.3,2.3}"
         echo "export ISMIP7_ROUTINE_DHDT_REWEIGHT=${ISMIP7_ROUTINE_DHDT_REWEIGHT:-24}"
@@ -144,6 +150,16 @@ load_env() {
     LC=${ISMIP7_LC:?ISMIP7_LC must be recorded}
     RESULTS="$REPO/antarctica/results"
     STAGE_LIST=$(expand_stages "$ISMIP7_ROUTINE_STAGES")
+}
+
+check_objective() {   # the recorded objective can run every listed stage
+    local s precond=${ISMIP7_GRAD_PRECOND:-none}
+    for s in $STAGE_LIST; do
+        if is_inversion "$s" && [ "$precond" != mass_consistent ] && [ "$precond" != prior ]; then
+            log "ERROR: stage $s inverts one control alone, which needs the TAO path; export ISMIP7_GRAD_PRECOND=mass_consistent or prior (got $precond)"
+            return 1
+        fi
+    done
 }
 
 # ── stage names ──────────────────────────────────────────────────────────
@@ -417,18 +433,19 @@ stage_env_forward() {   # prints `export` lines for a forward stage
         *)
             echo "export ISMIP7_INVERSION=$(forward_map) ISMIP7_RUN_TAG=$TAG ISMIP7_OUTPUT=1"
             case "$stage" in
-                hist_*) echo "export ISMIP7_T_START=$ISMIP7_ROUTINE_HIST_START ISMIP7_APPARENT_MB=0" ;;
+                hist_*)
+                    echo "export ISMIP7_T_START=$ISMIP7_ROUTINE_HIST_START ISMIP7_APPARENT_MB=0"
+                    [ "$ISMIP7_ROUTINE_HIST_START" -lt 2003 ] \
+                        && echo "export ISMIP7_GEOMETRY_BACKDATE=$((2015 - 2003))" ;;
                 ocx)    echo "export ISMIP7_APPARENT_MB=0" ;;
                 control_*) echo "export ISMIP7_APPARENT_MB=1" ;;
                 ssp*_*) echo "export ISMIP7_APPARENT_MB=$ISMIP7_ROUTINE_PROJ_AMB" ;;
             esac
-            if [ "$ISMIP7_ROUTINE_FRONT" = routine ]; then
-                echo ". $REPO/antarctica/scripts/ismip7_front_routine.sh"
-                case "$stage" in
-                    ssp*_*) echo "export ISMIP7_FRACTURE=mask_front" ;;
-                    *)      echo "export ISMIP7_FRACTURE=none" ;;
-                esac
-            fi ;;
+            echo ". $REPO/antarctica/scripts/ismip7_front_routine.sh"
+            case "$stage" in
+                ssp*_*) echo "export ISMIP7_FRACTURE=mask_front" ;;
+                *)      echo "export ISMIP7_FRACTURE=none" ;;
+            esac ;;
     esac
 }
 
@@ -489,16 +506,28 @@ launch() {
 
 # ── the state machine ────────────────────────────────────────────────────
 LOCKDIR=""
+lock_is_stale() {
+    # The holder's PID and host are in the lock. On this host the lock is
+    # stale when its process is gone; another host's lock (or one whose
+    # holder was not yet written) only when it is older than 20 minutes.
+    local pid="" host=""
+    read -r pid host < "$LOCKDIR/holder" 2>/dev/null || true
+    if [ -n "$pid" ] && [ "$host" = "$(hostname)" ]; then
+        ! kill -0 "$pid" 2>/dev/null
+    else
+        [ -n "$(find "$LOCKDIR" -maxdepth 0 -mmin +20 2>/dev/null)" ]
+    fi
+}
 with_lock() {
     local waited=0
     LOCKDIR="$OUT/.routine.lock"
     until mkdir "$LOCKDIR" 2>/dev/null; do
-        # A lock older than 20 minutes belongs to a call that died.
-        if [ -n "$(find "$LOCKDIR" -maxdepth 0 -mmin +20 2>/dev/null)" ]; then rmdir "$LOCKDIR" 2>/dev/null || true; continue; fi
+        if lock_is_stale; then rm -rf "$LOCKDIR"; continue; fi
         sleep 5; waited=$((waited + 5))
         [ "$waited" -lt 1200 ] || die "could not take $LOCKDIR in 20 minutes"
     done
-    trap '[ -n "$LOCKDIR" ] && rmdir "$LOCKDIR" 2>/dev/null || true' EXIT
+    echo "$$ $(hostname)" > "$LOCKDIR/holder"
+    trap '[ -n "$LOCKDIR" ] && rm -rf "$LOCKDIR" || true' EXIT
 }
 
 next_pass() {   # start every ready, unstarted stage; prints how many
@@ -575,6 +604,7 @@ case "$CMD" in
         [ -f "$ENVFILE" ] && die "$ENVFILE exists; use next, status or resume (remove it to record the environment again)"
         record_env
         load_env
+        check_objective || { rm -f "$ENVFILE"; exit 1; }
         log "init: $ENVFILE recorded; stages:$STAGE_LIST"
         cmd_next ;;
     next)   load_env; cmd_next ;;

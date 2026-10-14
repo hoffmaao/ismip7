@@ -23,7 +23,6 @@ balance freezes rather than removes.
 | BedMachine as hat-weighted patch means | `ISMIP7_RASTER_SAMPLE=patch` (`patch_front` on a coarse mesh) | conserves the raster volume and is smoother than the vertex sample (grounded surface jump -11 % at 2 km); the front rule is only needed at 32 km |
 | MEaSUREs as patch means with the patch rms error as sigma | `ISMIP7_VEL_SAMPLE=patch` | the datum a CG1 node can represent; the point sample's representativeness error (23 m/yr median at 32 km, 1.7 at 2 km) no longer scores as model error |
 | detached ice removed | `ISMIP7_KILL_BERGS=1` | a fragment carries the terminus push on every facet and nothing holds it |
-| thickness floor | `ISMIP7_H_CLAMP=10` | ice-free cells that touch ice at a vertex hold 10 m instead of a cliff |
 | subglacial lake base | `ISMIP7_LAKE_ICE_BASE=1` (default) | |
 | speed cap | `ISMIP7_U_OBS_MAX=5000` | the fastest pixels are the noisiest; inert at 32 km, to be measured at 2 km |
 
@@ -65,7 +64,7 @@ iterations, and the dH/dt term 8.4 against 10.1.
 
 ## Stage 4: free relaxation
 
-`control/run.py` with `ISMIP7_APPARENT_MB` unset, `ISMIP7_FIXED_FRONT=1`,
+`control/run.py` with `ISMIP7_APPARENT_MB=0`, `ISMIP7_FIXED_FRONT=1`,
 `ISMIP7_T_END` 20 to 50 years on, the RACMO climatology and the
 climatology ocean with the calibrated melt; or, for a backdated year,
 `relaxation/run.py` (`ISMIP7_RELAX_START`).
@@ -98,20 +97,24 @@ higher. On a MAP this far from converged the relaxation did not pay; the
 ## Stage 6: forced relaxation year
 
 One year under the ESM's own forcing (`experiment.py` historical from the
-relaxed state, `ISMIP7_T_END` one year on, `ISMIP7_APPARENT_MB` unset),
+relaxed state, `ISMIP7_T_END` one year on, `ISMIP7_APPARENT_MB=0`),
 to absorb the jump from constant climatology to time-varying forcing before
 the historical starts. Its endpoint is the historical's start. In the recipe
 this is the first year of the historical itself: the historical driver runs
 from 2002 (`ISMIP7_ROUTINE_HIST_START`) under one run tag, so its 2015
 endpoint is the file the control and the projections look for, and no
-separate restart has to be threaded through the chain.
+separate restart has to be threaded through the chain. The forced year is a
+spin-up year: a start before 2003 runs with
+`ISMIP7_GEOMETRY_BACKDATE=12` (2015 minus the later of the start and 2003),
+so the geometry at the start of the forced year is the 2003 geometry, and
+the historical proper starts in 2003 from the model's own state.
 
 ## Stage 7: historical
 
 `experiment.py` from 2003 (or the relaxed year), the ESM's atmosphere and
 ocean, the elevation feedback on the ESM's own gradient, the observed front
 as a retreat-only level set (`ISMIP7_FRONT_ADVANCE=none`, `ISMIP7_CALVING=hfb`,
-`ISMIP7_FRACTURE=mask_front`), `ISMIP7_APPARENT_MB` unset. Assessment:
+`ISMIP7_FRACTURE=mask_front`), `ISMIP7_APPARENT_MB=0`. Assessment:
 `check_ismip6_track.py` against the IMBIE envelope and
 `compare_hist_dhdt.py` against the Smith field by basin
 (`tendency_by_basin.py`). No regional rescaling of the SMB to match an
@@ -137,7 +140,10 @@ marker, `relaxed_state.h5`, `map_forward.h5`) and the forwards' in the
 checkout's `antarctica/results`. The routine is a state machine over those
 files: `next` starts every stage whose inputs exist and which has not been
 started, `status` lists them, `resume STAGE` restarts a stage whose chain
-died. Two launch modes, chosen at `init`:
+died. The inversion stages move one control at a time, which only the TAO
+path does, so `init` refuses a recorded `ISMIP7_GRAD_PRECOND` other than
+`mass_consistent` or `prior` when an inversion stage is listed. Two launch
+modes, chosen at `init`:
 
 - `ISMIP7_ROUTINE_LAUNCH=mpiexec` runs each stage in the foreground on
   `ISMIP7_ROUTINE_NRANKS` ranks (the 32 km tests);
@@ -165,6 +171,8 @@ from the relaxed geometry.
 
 ## What is deliberately not in the routine
 
+- A thickness floor (`ISMIP7_H_CLAMP`): it would re-introduce the
+  initial-state clamp pollution.
 - A linear sliding law (p = q = 1): it converges in a third of the
   iterations at 32 km (269 against 373) but has no Coulomb limit at the
   grounding line and is a convergence experiment only.

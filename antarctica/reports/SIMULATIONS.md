@@ -9,9 +9,9 @@ gitignored, so these records and the per-core reports beside them are
 the trace a run leaves in the repository. A core experiment also gets
 its full report from `core_report.py`; this is the index.
 
-353 records.
+355 records.
 
-Status: 12 planned, 3 running, 31 stopped, 286 done, 21 superseded.
+Status: 12 planned, 3 running, 31 stopped, 288 done, 21 superseded.
 
 ## Inversion
 
@@ -173,6 +173,8 @@ Status: 12 planned, 3 running, 31 stopped, 286 done, 21 superseded.
 | DG1 stage 2, forced check: the CESM2-WACCM historical at 25 km under DG0 (the reference) | done | antarctica_250000_25000_buffered20000 (IU's build, 4,509 vertices, 7,615 cells), DG0 geometry | IU Quartz, general partition | 2026-10-14 | 2026-10-14 | resid 0 at every one of 480 steps; clamp +0.22 Gt in total; VAF +30.78 mm, mass +6,905 Gt; first year SMB 2,382, melt 985, calving 1,024 Gt/yr, last year 2,595, 982, 753; backdate 2,992 grounded cells, +566 Gt; t = 0 melt 997.8 Gt/yr |
 | DG1 stage 2, forced check: the CESM2-WACCM historical at 25 km under DG1 | done | antarctica_250000_25000_buffered20000 (IU's build, 4,509 vertices, 7,615 cells), DG1 geometry | IU Quartz, general partition | 2026-10-14 | 2026-10-14 | resid 0 at every one of 480 steps; clamp +2.25 Gt in total; VAF +28.14 mm, mass +6,250 Gt; first year SMB 2,382, melt 984, calving 1,040 Gt/yr, last year 2,595, 1,011, 741; backdate 2,992 grounded cells, +566 Gt, and t = 0 melt 997.8 Gt/yr, both DG0's |
 | DG1 stage 2, forced check: the CESM2-WACCM historical at 25 km under DG1 with the apparent mass balance | done | antarctica_250000_25000_buffered20000 (IU's build, 4,509 vertices, 7,615 cells), DG1 geometry | IU Quartz, general partition | 2026-10-14 | 2026-10-14 | resid 0 at every one of 480 steps; clamp +3.50 Gt in total; a_ref in [-226, +314] m/yr, net -312 Gt/yr; VAF +1.96 mm, mass -822 Gt; last year melt 1,140, calving 1,071 Gt/yr |
+| DG1 stage 2, forced check: CESM2-WACCM ssp585 to 2100 at 25 km under DG0 with the collapse mask (the reference) | done | antarctica_250000_25000_buffered20000 (IU's build, 4,509 vertices, 7,615 cells), DG0 geometry | IU Quartz, general partition | 2026-10-14 | 2026-10-14 | resid 0 at every one of 3,400 steps, no rescue; clamp +1,263 Gt in total; VAF +54.8, +137.3, +229.6, +387.6 mm by 2030, 2050, 2070, 2100; mass -83,119 Gt; last year melt 5,251, calving 612 Gt/yr; collapse flagged 417, removed 328, held 89 cells at 2100 |
+| DG1 stage 2, forced check: CESM2-WACCM ssp585 to 2100 at 25 km under DG1 with the collapse mask | done | antarctica_250000_25000_buffered20000 (IU's build, 4,509 vertices, 7,615 cells), DG1 geometry | IU Quartz, general partition | 2026-10-14 | 2026-10-14 | resid 0 at every one of 3,400 steps, no rescue; clamp +1,227 Gt in total; VAF +48.2, +120.8, +199.7, +334.8 mm by 2030, 2050, 2070, 2100; mass -111,953 Gt; last year melt 5,683, calving 914 Gt/yr; collapse flagged 433, removed 377, held 56 cells at 2100 |
 | 25 km rehearsal probe: the first ten steps of core 1 on production defaults with the apparent mass-balance reference | done | antarctica_250000_25000_buffered20000, DG0 geometry | IU Quartz, general partition | 2026-09-27 | 2026-09-27 | every step converged on its first scpc_gamg direct solve, no rescue, subcycle or tripwire event (speed and thickness bounds armed); a_ref in -438.9 to +609.4 m/yr, net +300.1 Gt/yr; the largest thickness change 1.0 m at step 1 falling to 0.2 m at step 10; dM/dt -143 Gt/yr at step 1 and 0 at step 10; resid 0.00 |
 | 25 km rehearsal probe: the first ten steps of core 1 on production defaults without the apparent mass-balance reference | done | antarctica_250000_25000_buffered20000, DG0 geometry | IU Quartz, general partition (debug refused a third concurrent job) | 2026-09-27 | 2026-09-27 | every step converged on its first scpc_gamg direct solve in 2 to 8 Newton iterations; no rescue, subcycle or tripwire event (speed and thickness bounds armed); mass residual about 1e-8 Gt a step and resid 0.00; speed max 1.65e4 m/yr at step 1, falling to 1.46e4 by step 10; largest relative thickening 1.6 per year in a 112 m floating cell. Budget at step 1: SMB +2435, melt -985, outflux -503, calving -1399, dM/dt -453 Gt/yr |
 | Budd's final MAP at its own controls under exact_front version 1 (the free-cliff push it was inverted with), evaluation 1 | done | antarctica_5000_2000_buffered20000 (IU's build, 969,764 vertices), DG0 geometry, vertex raster sampling, the lake fix | IU Quartz, general partition | 2026-10-07 | 2026-10-07 | evaluation 1: misfit 1,108.24, total 1,388.36, \|grad\| 0.66; first forward 6 Newton iterations. The 7 Oct pre arm on f57b053 gave 1,388.36 / 1,108.2 / 0.66 |
@@ -4059,7 +4061,8 @@ DG1 stage 2, forced check: the CESM2-WACCM historical at 25 km under DG0 (the re
 - **Cost per model year:** 5 min 26 s
 - **Results path:** Quartz /N/scratch/dlilien/ismip7_dg1/stage2/results/hist_cesm2_waccm_s2dg0_25000_*
 - **Audit:** resid 0 at every one of 480 steps; clamp +0.22 Gt in total; VAF +30.78 mm, mass +6,905 Gt; first year SMB 2,382, melt 985, calving 1,024 Gt/yr, last year 2,595, 982, 753; backdate 2,992 grounded cells, +566 Gt; t = 0 melt 997.8 Gt/yr
-- **ISMIP7 output written:** 2003 to 2014, annual files and scalars
+- **ISMIP7 output written:** 2003 to 2014, regridded by write_ismip7_output.py (job 12249610) into Quartz /N/scratch/dlilien/ismip7_dg1/stage2/s2dg0/submission
+- **Regridded, isschecker:** isschecker 0.5.1 on C001: 0 errors, 2 warnings
 
 ### test-25km-dg1-stage2-hist-dg1
 
@@ -4088,7 +4091,8 @@ DG1 stage 2, forced check: the CESM2-WACCM historical at 25 km under DG1 (done),
 - **Cost per model year:** 4 min 10 s
 - **Results path:** Quartz /N/scratch/dlilien/ismip7_dg1/stage2/results/hist_cesm2_waccm_s2dg1_25000_*
 - **Audit:** resid 0 at every one of 480 steps; clamp +2.25 Gt in total; VAF +28.14 mm, mass +6,250 Gt; first year SMB 2,382, melt 984, calving 1,040 Gt/yr, last year 2,595, 1,011, 741; backdate 2,992 grounded cells, +566 Gt, and t = 0 melt 997.8 Gt/yr, both DG0's
-- **ISMIP7 output written:** 2003 to 2014, annual files and scalars
+- **ISMIP7 output written:** 2003 to 2014, regridded by write_ismip7_output.py (job 12249611) into Quartz /N/scratch/dlilien/ismip7_dg1/stage2/s2dg1/submission
+- **Regridded, isschecker:** isschecker 0.5.1 on C001: 0 errors, 2 warnings
 - **Notes:** the DG1 and DG0 MAPs differ (misfit 4,475 against 3,339), so the VAF difference is not DG1's alone
 
 ### test-25km-dg1-stage2-hist-dg1amb
@@ -4120,6 +4124,67 @@ DG1 stage 2, forced check: the CESM2-WACCM historical at 25 km under DG1 with th
 - **Audit:** resid 0 at every one of 480 steps; clamp +3.50 Gt in total; a_ref in [-226, +314] m/yr, net -312 Gt/yr; VAF +1.96 mm, mass -822 Gt; last year melt 1,140, calving 1,071 Gt/yr
 - **ISMIP7 output written:** 2003 to 2014, annual files and scalars
 - **Notes:** the September 25 km rehearsal's DG0 historical with the reference (core01-25km-hist-cesm2waccm-rehamb, another MAP and code) gained +2.9 mm and lost 763 Gt
+
+### test-25km-dg1-stage2-ssp585-dg0
+
+DG1 stage 2, forced check: CESM2-WACCM ssp585 to 2100 at 25 km under DG0 with the collapse mask (the reference) (done), IU.
+
+- **Task type:** test
+- **ISMIP7 exp id:** C007
+- **ESM:** CESM2-WACCM
+- **Scenario:** ssp585
+- **Period (yr):** 2015 to 2100, reached 2100.0 (the protocol runs to 2300; this check stops at 2100)
+- **Friction law:** budd
+- **Mesh:** antarctica_250000_25000_buffered20000 (IU's build, 4,509 vertices, 7,615 cells), DG0 geometry
+- **Initial state / MAP:** test-25km-dg1-stage2-hist-dg0's final state
+- **Branch from:** the historical's final state
+- **Forcing versions:** CESM2-WACCM ssp585: atmosphere acabf-anomaly and dacabfdz SDBN1-8000m v2, ocean tf and so v3; the SMB-elevation feedback on
+- **Melt: K, slope, deltaT:** deltaT_per_basin_25000_K6.500e-05.npz (the 25 km rehearsal's, fitted on dg0 vertex_front cells), the constant slope
+- **Calving front, collapse:** held fixed; ice-shelf collapse ISMIP7_FRACTURE=mask_front
+- **Apparent MB:** off
+- **dt (yr):** 0.025
+- **Site / partition:** IU Quartz, general partition
+- **Ranks / memory:** 8 ranks, 32 GiB, scpc_mumps
+- **Job ids:** 12249607 12249610
+- **Code:** b5bb39a (PR 169, DG1 stage 2)
+- **Started:** 2026-10-14
+- **Finished:** 2026-10-14
+- **Cost per model year:** 19 min 12 s; output and checker 6 min 33 s
+- **Results path:** Quartz /N/scratch/dlilien/ismip7_dg1/stage2/results/ssp585_cesm2_waccm_s2dg0_25000_*
+- **Audit:** resid 0 at every one of 3,400 steps, no rescue; clamp +1,263 Gt in total; VAF +54.8, +137.3, +229.6, +387.6 mm by 2030, 2050, 2070, 2100; mass -83,119 Gt; last year melt 5,251, calving 612 Gt/yr; collapse flagged 417, removed 328, held 89 cells at 2100
+- **ISMIP7 output written:** 2015 to 2099, regridded into Quartz /N/scratch/dlilien/ismip7_dg1/stage2/s2dg0/submission
+- **Regridded, isschecker:** isschecker 0.5.1 on C007: 93 errors, all on the time axis (the run stops at 2100, the experiment at 2300: 31 variables x 3); naming, numerical and spatial tests 0 errors
+
+### test-25km-dg1-stage2-ssp585-dg1
+
+DG1 stage 2, forced check: CESM2-WACCM ssp585 to 2100 at 25 km under DG1 with the collapse mask (done), IU.
+
+- **Task type:** test
+- **ISMIP7 exp id:** C007
+- **ESM:** CESM2-WACCM
+- **Scenario:** ssp585
+- **Period (yr):** 2015 to 2100, reached 2100.0 (the protocol runs to 2300; this check stops at 2100)
+- **Friction law:** budd
+- **Mesh:** antarctica_250000_25000_buffered20000 (IU's build, 4,509 vertices, 7,615 cells), DG1 geometry
+- **Initial state / MAP:** test-25km-dg1-stage2-hist-dg1's final state
+- **Branch from:** the historical's final state
+- **Forcing versions:** CESM2-WACCM ssp585: atmosphere acabf-anomaly and dacabfdz SDBN1-8000m v2, ocean tf and so v3; the SMB-elevation feedback on
+- **Melt: K, slope, deltaT:** deltaT_per_basin_25000_K6.500e-05.npz (the 25 km rehearsal's, fitted on dg0 vertex_front cells), the constant slope
+- **Calving front, collapse:** held fixed; ice-shelf collapse ISMIP7_FRACTURE=mask_front
+- **Apparent MB:** off
+- **dt (yr):** 0.025
+- **Site / partition:** IU Quartz, general partition
+- **Ranks / memory:** 8 ranks, 32 GiB, scpc_mumps
+- **Job ids:** 12249609 12249611
+- **Code:** b5bb39a (PR 169, DG1 stage 2)
+- **Started:** 2026-10-14
+- **Finished:** 2026-10-14
+- **Cost per model year:** 16 min 33 s; output and checker 6 min 23 s
+- **Results path:** Quartz /N/scratch/dlilien/ismip7_dg1/stage2/results/ssp585_cesm2_waccm_s2dg1_25000_*
+- **Audit:** resid 0 at every one of 3,400 steps, no rescue; clamp +1,227 Gt in total; VAF +48.2, +120.8, +199.7, +334.8 mm by 2030, 2050, 2070, 2100; mass -111,953 Gt; last year melt 5,683, calving 914 Gt/yr; collapse flagged 433, removed 377, held 56 cells at 2100
+- **ISMIP7 output written:** 2015 to 2099, regridded into Quartz /N/scratch/dlilien/ismip7_dg1/stage2/s2dg1/submission
+- **Regridded, isschecker:** isschecker 0.5.1 on C007: 93 errors, all on the time axis (the run stops at 2100, the experiment at 2300: 31 variables x 3); naming, numerical and spatial tests 0 errors
+- **Notes:** the DG1 and DG0 historicals start from different MAPs, so the difference is not DG1's alone
 
 ### test-25km-hist-cesm2waccm-probe-rehamb
 

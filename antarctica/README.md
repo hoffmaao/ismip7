@@ -987,10 +987,11 @@ is the section 4 name for the configured `ISMIP7_FRICTION`; `ISMIP7_INV_H5`
 names a different one.
 
 The calibration melts on the same `ISMIP7_GEOMETRY_SPACE` as the forward
-(default `dg0`) and with the same `ISMIP7_MELT_SLOPE` (default `ant`, the
-constant `ISMIP7_SIN_ALPHA_ANT` on every shelf): the cells the forward melts,
-through the forward's own path, so the K it writes is the K the forward
-applies. Its per-basin flags compare against the toolbox's July 2026 K05, K50
+(default `dg0`; under `dg1` it fits and stamps `dg0`, the melt a `dg1`
+forward applies, `runconfig.melt_geometry_space`) and with the same
+`ISMIP7_MELT_SLOPE` (default `ant`, the constant `ISMIP7_SIN_ALPHA_ANT` on
+every shelf): the cells the forward melts, through the forward's own path,
+so the K it writes is the K the forward applies. Its per-basin flags compare against the toolbox's July 2026 K05, K50
 and K95. `ISMIP7_GEOMETRY_SPACE=cg1 ISMIP7_MELT_SLOPE=local` is the nodal
 calibration the earlier K files came from, with the slope capped at 5e-3;
 `ISMIP7_SIN_ALPHA_CAP` names a cap on the local slope on either geometry
@@ -1654,7 +1655,7 @@ redeclare those literals.
 | `ISMIP7_CALVING` | `none`, or a law in `icepack_tools.calving`: `fixed`, `velocity`, `thickness`, `vonmises`, `vonmises_strain`, `hfb` (see above) | `none` |
 | `ISMIP7_CALVING_PARAMS` | the law's parameters, `key=value,key=value` (e.g. `sigma_max_fl=0.2,sigma_max_gr=1`), checked against the law at startup. Replaces `ISMIP7_CALVING_SIGMA_MAX_GROUNDED` / `_FLOATING`, which are refused when a law is set | the law's defaults |
 | `ISMIP7_CALVING_MODULE` | a Python file whose `@icepack_tools.calving.register` laws join the registry before `ISMIP7_CALVING` is looked up | unset |
-| `ISMIP7_FRACTURE` | `mask` applies the ISMIP7 collapse forcing to every floating cell it flags, booked as calving; `mask_front` only to the flagged cells open water has reached, so no hole opens behind a standing front (the two end-members of discussion #30). Masks exist for the SSPs only, so the control, historicals and OCX abort on either. Needs DG0. Every run prints its mode once (`Ice-shelf collapse forcing: ISMIP7_FRACTURE=...`, `none` included). Under a mask mode the timeseries columns `collapse_flagged_cells`, `collapse_removed_cells` and `collapse_held_cells` count the flagged floating cells, the ones the mode has emptied and the ones it leaves standing (always 0 under `mask`), all ranks summed; the budget lines, a closing log line and the core report repeat them | `none` |
+| `ISMIP7_FRACTURE` | `mask` applies the ISMIP7 collapse forcing to every floating cell it flags, booked as calving; `mask_front` only to the flagged cells open water has reached, so no hole opens behind a standing front (the two end-members of discussion #30). Masks exist for the SSPs only, so the control, historicals and OCX abort on either. Needs `dg0` or `dg1`. Every run prints its mode once (`Ice-shelf collapse forcing: ISMIP7_FRACTURE=...`, `none` included). Under a mask mode the timeseries columns `collapse_flagged_cells`, `collapse_removed_cells` and `collapse_held_cells` count the flagged floating cells, the ones the mode has emptied and the ones it leaves standing (always 0 under `mask`), all ranks summed; the budget lines, a closing log line and the core report repeat them | `none` |
 | `ISMIP7_OCX_FORCING` | what core 11 runs on. `protocol` is the ISMIP7 OCX product (RACMO2.3p2-ERA SDBN1 `acabf`, expert-judgment ocean `tf`/`so`), and the run refuses to start without it. `stopgap` is RACMO2.4p1 actual-year SMB with the constant OI ocean climatology, what the core ran on before the product was readable here. K is fitted to the climatology, so read `check_melt_bound.py --ocx` first (discussion #48) | `protocol` |
 | `ISMIP7_OCX_OCEAN` | which expert-judgment OCX ocean scenario to read: `main` (the core one), `cold`, `warm` or `vary`. A member other than `main` writes to `ocx_<member>` | `main` |
 | `ISMIP7_SMB_ELEVATION_FEEDBACK` | the SMB-elevation feedback, `dacabfdz` times the surface change since the chain's initial state, added to the SMB every step (section 6). `1` or unset turns it on; `0` or an empty value turns it off, and the value set is closed. With it on a run refuses to start without the gradient it reads, and a resume refuses a checkpoint written in the other mode | `1` |

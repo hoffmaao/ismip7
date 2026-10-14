@@ -9,9 +9,9 @@ gitignored, so these records and the per-core reports beside them are
 the trace a run leaves in the repository. A core experiment also gets
 its full report from `core_report.py`; this is the index.
 
-388 records.
+391 records.
 
-Status: 12 planned, 3 running, 36 stopped, 316 done, 21 superseded.
+Status: 12 planned, 3 running, 36 stopped, 319 done, 21 superseded.
 
 ## Inversion
 
@@ -417,7 +417,9 @@ Status: 12 planned, 3 running, 36 stopped, 316 done, 21 superseded.
 | C006: ssp126 with MRI-ESM2-0 | planned | antarctica_10000_1000_buffered20000 (Rice's build, 1,869,252 vertices), 1 km fine, 10 km interior, 20 km buffer | - | - | - | - |
 | C007: ssp585 with CESM2-WACCM | planned | antarctica_10000_1000_buffered20000 (Rice's build, 1,869,252 vertices), 1 km fine, 10 km interior, 20 km buffer | - | - | - | - |
 | C008: ssp585 with MRI-ESM2-0 | planned | antarctica_10000_1000_buffered20000 (Rice's build, 1,869,252 vertices), 1 km fine, 10 km interior, 20 km buffer | - | - | - | - |
+| Core 3 at 2 km, IU Budd production: ssp370 CESM2-WACCM, relaxed controls, without the apparent mass-balance reference | done | antarctica_5000_2000_buffered20000 (IU's build, 969,764 vertices, 1,928,285 cells), DG0 geometry, the MAP's own mesh (ISMIP7_MESH=checkpoint) | IU Quartz, general partition | 2026-10-11 | 2026-10-14 | OFF TRACK (dM/dt (post-2016) -1461.6 [ -400.0, 200.0] Gt/yr FAIL); resid at most 0.0000 Gt on 3,440 rows; 3,440 of 3,440 steps converged on their first direct solve, 8.4 Newton iterations on average and 17 at the most, no rescue, no subcycle; VAF +53.3 mm SLE and mass -124,560 Gt over the run, dM/dt -3,028 Gt/yr in 2100; calving out of the fixed front 1,292 at step 1, 1,287 in 2016 and 1,066 in 2100 Gt/yr; peak speed 2.7e4 m/yr at t = 2099.25, (-1,761.8, 956.4) km |
 | Core 3: ssp370 with CESM2-WACCM | superseded | antarctica_320000_32000 | - | - | 2026-07-20 | OFF TRACK; the budget residual closes to zero |
+| Core 4 at 2 km, IU Budd production: ssp370 MRI-ESM2-0, relaxed controls, without the apparent mass-balance reference | done | antarctica_5000_2000_buffered20000 (IU's build, 969,764 vertices, 1,928,285 cells), DG0 geometry, the MAP's own mesh (ISMIP7_MESH=checkpoint) | IU Quartz, general partition | 2026-10-11 | 2026-10-14 | ON TRACK; resid at most 0.0000 Gt on 3,440 rows; 3,440 of 3,440 steps converged on their first direct solve, 8.8 Newton iterations on average and 18 at the most, no rescue, no subcycle; VAF +120.3 mm SLE and mass +10,413 Gt over the run, dM/dt -208 Gt/yr in 2100; calving out of the fixed front 1,302 at step 1, 1,290 in 2016 and 1,330 in 2100 Gt/yr; peak speed 1.2e4 m/yr at t = 2053.28, (-1,528.3, -485.6) km |
 | Core 4: ssp370 with MRI-ESM2-0 | superseded | antarctica_320000_32000 | - | - | 2026-07-19 | ON TRACK; the budget residual closes to zero |
 | Core 5: ssp126 with CESM2-WACCM | superseded | antarctica_320000_32000 | - | - | 2026-07-20 | OFF TRACK; the budget residual closes to zero |
 | Core 6: ssp126 with MRI-ESM2-0 | superseded | antarctica_320000_32000 | - | - | 2026-07-20 | ON TRACK; the budget residual closes to zero |
@@ -429,6 +431,7 @@ Status: 12 planned, 3 running, 36 stopped, 316 done, 21 superseded.
 | Simulation | Status | Mesh | Site | Started | Finished | Headline result |
 |---|---|---|---|---|---|---|
 | C011: OCX main with observations | planned | antarctica_10000_1000_buffered20000 (Rice's build, 1,869,252 vertices), 1 km fine, 10 km interior, 20 km buffer | - | - | - | - |
+| Core 11 at 2 km, IU Budd production: OCX on the protocol forcing, relaxed controls, without the apparent mass-balance reference | done | antarctica_5000_2000_buffered20000 (IU's build, 969,764 vertices, 1,928,285 cells), DG0 geometry, the MAP's own mesh (ISMIP7_MESH=checkpoint) | IU Quartz, general partition | 2026-10-11 | 2026-10-12 | ON TRACK; resid at most 0.0000 Gt on 920 rows; 919 of 920 steps converged on their first direct solve, 6.2 Newton iterations on average and 14 at the most; 1 step rescued by the continuation ladder, no subcycle; VAF +40.0 mm SLE and mass +8,645 Gt over the run, dM/dt +575 Gt/yr in 2025; calving out of the fixed front 1,820 at step 1, 1,346 in 2004 and 1,288 in 2025 Gt/yr; peak speed 1.8e4 m/yr at t = 2004.33, (-766.5, 1,157.3) km |
 | Core 11: OCX, observation constrained | superseded | antarctica_320000_32000 | - | - | 2026-07-20 | ON TRACK; the budget residual closes to zero |
 
 ## Output
@@ -8923,6 +8926,9 @@ Core 1 at 2 km, IU Budd production: CESM2-WACCM historical from the relaxed MAP'
 - **Cost per model year:** 7 h 16 min of wall time on 32 ranks for 12 model years, 51.4 s a diagnostic solve on average
 - **Results path:** Quartz antarctica/results/rehearsal_2km_iu/results/hist_cesm2_waccm_r2kiurlcnoamb_2000_*
 - **Audit:** resid at most 0.0000 Gt on 480 rows; 479 of 480 steps converged on their first direct solve, 6.7 Newton iterations on average and 13 at the most; 1 step rescued by the continuation ladder, no subcycle; VAF +15.5 mm SLE and mass +1,094 Gt over the run, dM/dt +306 Gt/yr in 2014; calving out of the fixed front 1,820 at step 1, 1,514 at step 2, 1,346 in 2004 and 1,295 in 2014 Gt/yr; peak speed 1.8e4 m/yr at t = 2004.28, (-766.5, 1,157.3) km
+- **ISMIP7 output written:** 2003 to 2014, 31 files on the 8 km grid in prod_2km_iu/r2kiurlcnoamb/submission/AIS/IU/icepack2/CORE/C001 (source_id IU; contact Rice, the writer's default, kept by IU); writer job 12249909, 22 min; 206 cell-years within 0.01 m of flotation written as grounded; lifmassbf largest -6.5 Gt/yr (2003); -0.8 in 2014
+- **Regridded, isschecker:** isschecker 0.5.1: 0 errors, 2 warnings, the non-mandatory variables the model does not write and strbasemag maximum 1.9 MPa against the accepted 1 MPa on 43 of 2,570,313 values
+- **Scalars processed:** ismip7-scalars 0.1.0 sla20, slg20 and slvaf written (job 12250516); compare_scalars.py exit 0; notes: area factor: the native scalars carry it too (--native-af2), so the area term is zero; the exact sums' worst \|C - N\| is 1.87e-05 of their L1 (tendlifmassbf 2008), against an allowance of 5.93e-04; maximum-extent mask: 0 pixels carry ice or flux outside maxmask1; lim +0.000%, limnsw +0.000%, slvaf +0.000%, slg20 +0.000%; fill convention: acabf and libmassbffl are whole-pixel means (flux_pixel_mean), the tool's own, so nothing is undone and the fill term is zero; tendlibmassbffl: the fill leaves out no melt beyond the exact sums' tolerance in any year (largest difference +0.0 Gt/yr, 2003); tendlifmassbf: the melt booked in cells with no floating ice at year end (issues #109 and #136) is at most -6.5 Gt/yr (2003); slvaf: residual +6.12% of max \|N\| (2014), above 2%; slg20: residual +6.09% of max \|N\| (2014), above 2%; sla20: residual +6.09% of max \|N\| (2014), above 2%
 - **Notes:** the start of IU's 2 km Budd production suite (tag r2kiurlcnoamb; antarctica/reports/rehearsal_25km_iu.md, section 'The relaxed line' and section 'The 2 km production suite'): every control and projection of this ESM branches from this run's 2015 state. Step 2's direct solve stopped at 200 Newton iterations and the rescue continuation completed the step; every later step converged directly. Initial velocity misfit 3.21e3. Final state sha256 56c7b555d2f5ca00099cb0ecda0cce3bc5a1124f08286c09c46d9e400e9f84c8. Report: antarctica/reports/core01_hist_cesm2_waccm_2km_r2kiurlcnoamb.md.
 
 ### core01-32km-hist-cesm2waccm
@@ -8972,6 +8978,9 @@ Core 2 at 2 km, IU Budd production: MRI-ESM2-0 historical from the relaxed MAP's
 - **Cost per model year:** 7 h 44 min of wall time on 32 ranks for 12 model years, 54.9 s a diagnostic solve on average
 - **Results path:** Quartz antarctica/results/rehearsal_2km_iu/results/hist_mri_esm2_0_r2kiurlcnoamb_2000_*
 - **Audit:** resid at most 0.0000 Gt on 480 rows; 479 of 480 steps converged on their first direct solve, 6.6 Newton iterations on average and 16 at the most; 1 step rescued by the continuation ladder, no subcycle; VAF +14.8 mm SLE and mass +1,718 Gt over the run, dM/dt +324 Gt/yr in 2014; calving out of the fixed front 1,820 at step 1, 1,513 at step 2, 1,348 in 2004 and 1,304 in 2014 Gt/yr; peak speed 1.8e4 m/yr at t = 2004.25, (-766.5, 1,157.3) km
+- **ISMIP7 output written:** 2003 to 2014, 31 files on the 8 km grid in prod_2km_iu/r2kiurlcnoamb/submission/AIS/IU/icepack2/CORE/C002 (source_id IU; contact Rice, the writer's default, kept by IU); writer job 12249910, 21 min; 218 cell-years within 0.01 m of flotation written as grounded; lifmassbf largest -6.6 Gt/yr (2003); -0.8 in 2014
+- **Regridded, isschecker:** isschecker 0.5.1: 0 errors, 2 warnings, the non-mandatory variables the model does not write and strbasemag maximum 1.9 MPa against the accepted 1 MPa on 43 of 2,570,284 values
+- **Scalars processed:** ismip7-scalars 0.1.0 sla20, slg20 and slvaf written (job 12250517); compare_scalars.py exit 0; notes: area factor: the native scalars carry it too (--native-af2), so the area term is zero; the exact sums' worst \|C - N\| is 1.54e-05 of their L1 (tendlifmassbf 2010), against an allowance of 5.93e-04; maximum-extent mask: 0 pixels carry ice or flux outside maxmask1; lim +0.000%, limnsw +0.000%, slvaf +0.000%, slg20 +0.000%; fill convention: acabf and libmassbffl are whole-pixel means (flux_pixel_mean), the tool's own, so nothing is undone and the fill term is zero; tendlibmassbffl: the fill leaves out no melt beyond the exact sums' tolerance in any year (largest difference +0.0 Gt/yr, 2003); tendlifmassbf: the melt booked in cells with no floating ice at year end (issues #109 and #136) is at most -6.7 Gt/yr (2003); slvaf: residual +6.00% of max \|N\| (2014), above 2%; slg20: residual +5.96% of max \|N\| (2014), above 2%; sla20: residual +5.96% of max \|N\| (2014), above 2%
 - **Notes:** the start of IU's 2 km Budd production suite (tag r2kiurlcnoamb; antarctica/reports/rehearsal_25km_iu.md, section 'The relaxed line' and section 'The 2 km production suite'): every control and projection of this ESM branches from this run's 2015 state. Step 2's direct solve stopped at 200 Newton iterations and the rescue continuation completed the step; every later step converged directly. Initial velocity misfit 3.21e3. Final state sha256 b427b174908efbfb9dba62d98dc94c95251915588953903c52e97096e785814c. Report: antarctica/reports/core02_hist_mri_esm2_0_2km_r2kiurlcnoamb.md.
 
 ### core02-32km-hist-mriesm20
@@ -9189,6 +9198,38 @@ C008: ssp585 with MRI-ESM2-0 (planned), unassigned.
 - **Apparent MB:** balance
 - **dt (yr):** 0.025
 
+### core03-2km-ssp370-cesm2waccm-r2kiurlcnoamb
+
+Core 3 at 2 km, IU Budd production: ssp370 CESM2-WACCM, relaxed controls, without the apparent mass-balance reference (done), IU.
+
+- **Task type:** projection
+- **ISMIP7 exp id:** C003
+- **ESM:** CESM2-WACCM
+- **Scenario:** ssp370
+- **Period (yr):** 2015 to 2101, reached 2101.0
+- **Friction law:** budd
+- **Mesh:** antarctica_5000_2000_buffered20000 (IU's build, 969,764 vertices, 1,928,285 cells), DG0 geometry, the MAP's own mesh (ISMIP7_MESH=checkpoint)
+- **Initial state / MAP:** inversion-2km-budd-b20k-ef2-vf-relax2014's MAP (inversion_icepack2_budd_n3_dg0_logvel_2000_int5000_b20k_rho7500_floating_ef2_vf_relax2014.h5, md5 0d9315d5), through core01-2km-hist-cesm2waccm-r2kiurlcnoamb's 2015 state
+- **Branch from:** core01-2km-hist-cesm2waccm-r2kiurlcnoamb at 2015.0 (its _final.h5)
+- **Forcing versions:** atmosphere acabf-anomaly, acabf and dacabfdz CESM2-WACCM ssp370 SDBN1-8000m v2 on the RACMO2.4p1 baseline re-referenced to 2000-2029; ocean tf and so CESM2-WACCM ssp370 ocean v3
+- **Melt: K, slope, deltaT:** deltaT_per_basin_2000_K6.500e-05.npz refitted under vertex_front (sha256 3d2e5348; calibration-melt-refit-2km-vertex-front)
+- **Calving front, collapse:** held fixed, ice-shelf collapse ISMIP7_FRACTURE=none
+- **Apparent MB:** off
+- **dt (yr):** 0.025
+- **Site / partition:** IU Quartz, general partition
+- **Ranks / memory:** 32 ranks, 96 GiB, scpc_mumps, ISMIP7_MAP_CLIP=0, ISMIP7_OUTPUT=1; five-yearly checkpoints, three kept; 72 h links that resubmit themselves (projection.sbatch, ISMIP7_AUTO_RESUME=1)
+- **Job ids:** 11912184
+- **Code:** c4c9eb8, Quartz worktree /N/scratch/dlilien/ismip7_rehearsal25iu/run2kp; wrapper submit_r2kiu.sh proj rlcnoamb ssp370_cesm_waccm (CORE=c01)
+- **Started:** 2026-10-11
+- **Finished:** 2026-10-14
+- **Cost per model year:** 52 h 59 min of wall time on 32 ranks for 86 model years in 1 link, 54.6 s a diagnostic solve on average
+- **Results path:** Quartz antarctica/results/prod_2km_iu/results/ssp370_cesm2_waccm_r2kiurlcnoamb_2000_*, moved from scratch by job 12252498 (93 files, 69 GB, each checked by sha256)
+- **Audit:** OFF TRACK (dM/dt (post-2016) -1461.6 [ -400.0, 200.0] Gt/yr FAIL); resid at most 0.0000 Gt on 3,440 rows; 3,440 of 3,440 steps converged on their first direct solve, 8.4 Newton iterations on average and 17 at the most, no rescue, no subcycle; VAF +53.3 mm SLE and mass -124,560 Gt over the run, dM/dt -3,028 Gt/yr in 2100; calving out of the fixed front 1,292 at step 1, 1,287 in 2016 and 1,066 in 2100 Gt/yr; peak speed 2.7e4 m/yr at t = 2099.25, (-1,761.8, 956.4) km
+- **ISMIP7 output written:** 2015 to 2100, 31 files on the 8 km grid in prod_2km_iu/r2kiurlcnoamb/submission/AIS/IU/icepack2/CORE/C003 (source_id IU; contact Rice, the writer's default, kept by IU); writer job 12249911, 145 min; 1223 cell-years within 0.01 m of flotation written as grounded; lifmassbf largest -9.3 Gt/yr (2094); -5.3 in 2100
+- **Regridded, isschecker:** isschecker 0.5.1: 0 errors, 2 warnings, the non-mandatory variables the model does not write and strbasemag maximum 2.2 MPa against the accepted 1 MPa on 751 of 18,415,013 values
+- **Scalars processed:** ismip7-scalars 0.1.0 sla20, slg20 and slvaf written (job 12252472); compare_scalars.py exit 0; notes: area factor: the native scalars carry it too (--native-af2), so the area term is zero; the exact sums' worst \|C - N\| is 1.66e-05 of their L1 (tendlifmassbf 2048), against an allowance of 5.93e-04; maximum-extent mask: 0 pixels carry ice or flux outside maxmask1; lim +0.000%, limnsw +0.000%, slvaf +0.000%, slg20 +0.000%; fill convention: acabf and libmassbffl are whole-pixel means (flux_pixel_mean), the tool's own, so nothing is undone and the fill term is zero; tendlibmassbffl: the fill leaves out no melt beyond the exact sums' tolerance in any year (largest difference +0.0 Gt/yr, 2032); tendlifmassbf: the melt booked in cells with no floating ice at year end (issues #109 and #136) is at most -9.2 Gt/yr (2094); slvaf: residual +8.63% of max \|N\| (2100), above 2%; slg20: residual +9.42% of max \|N\| (2100), above 2%; sla20: residual +9.42% of max \|N\| (2100), above 2%
+- **Notes:** IU's 2 km Budd production suite (antarctica/reports/rehearsal_25km_iu.md, section 'The 2 km production suite'). Production grade; the group chooses the submission line on 20 or 21 October. Final state sha256 5ac592f9f90e0a17ea97809fbc607c094a44ff6de3d8ac664fdcd7c9b6117ead. Report: antarctica/reports/core03_ssp370_cesm2_waccm_2km_r2kiurlcnoamb.md.
+
 ### core03-32km-ssp370-cesm2waccm
 
 Core 3: ssp370 with CESM2-WACCM (superseded), Rice.
@@ -9208,6 +9249,38 @@ Core 3: ssp370 with CESM2-WACCM (superseded), Rice.
 - **Results path:** antarctica/results/ssp370_cesm2_waccm_32000_*
 - **Audit:** OFF TRACK; the budget residual closes to zero
 - **Notes:** superseded by the annual-mean atmosphere-forcing fix fa7230c (the reader applied January as the whole year) and by the two August 2026 ice-front fixes, which need a re-inversion as well as a re-run; issue #28. Full record: antarctica/reports/core03_ssp370_cesm2_waccm_32km.md; status across the matrix: antarctica/reports/MATRIX_STATUS.md
+
+### core04-2km-ssp370-mriesm20-r2kiurlcnoamb
+
+Core 4 at 2 km, IU Budd production: ssp370 MRI-ESM2-0, relaxed controls, without the apparent mass-balance reference (done), IU.
+
+- **Task type:** projection
+- **ISMIP7 exp id:** C004
+- **ESM:** MRI-ESM2-0
+- **Scenario:** ssp370
+- **Period (yr):** 2015 to 2101, reached 2101.0
+- **Friction law:** budd
+- **Mesh:** antarctica_5000_2000_buffered20000 (IU's build, 969,764 vertices, 1,928,285 cells), DG0 geometry, the MAP's own mesh (ISMIP7_MESH=checkpoint)
+- **Initial state / MAP:** inversion-2km-budd-b20k-ef2-vf-relax2014's MAP (inversion_icepack2_budd_n3_dg0_logvel_2000_int5000_b20k_rho7500_floating_ef2_vf_relax2014.h5, md5 0d9315d5), through core02-2km-hist-mriesm20-r2kiurlcnoamb's 2015 state
+- **Branch from:** core02-2km-hist-mriesm20-r2kiurlcnoamb at 2015.0 (its _final.h5)
+- **Forcing versions:** atmosphere acabf-anomaly, acabf and dacabfdz MRI-ESM2-0 ssp370 GEMB-SDBN1-8000m v2 on the RACMO2.4p1 baseline re-referenced to 2000-2029; ocean tf and so MRI-ESM2-0 ssp370 ocean v3
+- **Melt: K, slope, deltaT:** deltaT_per_basin_2000_K6.500e-05.npz refitted under vertex_front (sha256 3d2e5348; calibration-melt-refit-2km-vertex-front)
+- **Calving front, collapse:** held fixed, ice-shelf collapse ISMIP7_FRACTURE=none
+- **Apparent MB:** off
+- **dt (yr):** 0.025
+- **Site / partition:** IU Quartz, general partition
+- **Ranks / memory:** 32 ranks, 96 GiB, scpc_mumps, ISMIP7_MAP_CLIP=0, ISMIP7_OUTPUT=1; five-yearly checkpoints, three kept; 72 h links that resubmit themselves (projection.sbatch, ISMIP7_AUTO_RESUME=1)
+- **Job ids:** 11912188
+- **Code:** c4c9eb8, Quartz worktree /N/scratch/dlilien/ismip7_rehearsal25iu/run2kp; wrapper submit_r2kiu.sh proj rlcnoamb ssp370_mri_esm2 (CORE=c02)
+- **Started:** 2026-10-11
+- **Finished:** 2026-10-14
+- **Cost per model year:** 61 h 10 min of wall time on 32 ranks for 86 model years in 1 link, 62.2 s a diagnostic solve on average
+- **Results path:** Quartz antarctica/results/prod_2km_iu/results/ssp370_mri_esm2_0_r2kiurlcnoamb_2000_*, moved from scratch by job 12252627 (93 files, 71 GB, each checked by sha256)
+- **Audit:** ON TRACK; resid at most 0.0000 Gt on 3,440 rows; 3,440 of 3,440 steps converged on their first direct solve, 8.8 Newton iterations on average and 18 at the most, no rescue, no subcycle; VAF +120.3 mm SLE and mass +10,413 Gt over the run, dM/dt -208 Gt/yr in 2100; calving out of the fixed front 1,302 at step 1, 1,290 in 2016 and 1,330 in 2100 Gt/yr; peak speed 1.2e4 m/yr at t = 2053.28, (-1,528.3, -485.6) km
+- **ISMIP7 output written:** 2015 to 2100, 31 files on the 8 km grid in prod_2km_iu/r2kiurlcnoamb/submission/AIS/IU/icepack2/CORE/C004 (source_id IU; contact Rice, the writer's default, kept by IU); writer job 12250057, 145 min; 1359 cell-years within 0.01 m of flotation written as grounded; lifmassbf largest -2.1 Gt/yr (2100); -2.1 in 2100
+- **Regridded, isschecker:** isschecker 0.5.1: 0 errors, 2 warnings, the non-mandatory variables the model does not write and strbasemag maximum 2.4 MPa against the accepted 1 MPa on 766 of 18,416,762 values
+- **Scalars processed:** ismip7-scalars 0.1.0 sla20, slg20 and slvaf written (job 12252606); compare_scalars.py exit 0; notes: area factor: the native scalars carry it too (--native-af2), so the area term is zero; the exact sums' worst \|C - N\| is 1.67e-05 of their L1 (tendlifmassbf 2021), against an allowance of 5.93e-04; maximum-extent mask: 0 pixels carry ice or flux outside maxmask1; lim +0.000%, limnsw +0.000%, slvaf +0.000%, slg20 +0.000%; fill convention: acabf and libmassbffl are whole-pixel means (flux_pixel_mean), the tool's own, so nothing is undone and the fill term is zero; tendlibmassbffl: the fill leaves out no melt beyond the exact sums' tolerance in any year (largest difference +0.0 Gt/yr, 2032); tendlifmassbf: the melt booked in cells with no floating ice at year end (issues #109 and #136) is at most -2.1 Gt/yr (2100); slvaf: residual +2.20% of max \|N\| (2100), above 2%; slg20: residual +2.19% of max \|N\| (2100), above 2%; sla20: residual +2.19% of max \|N\| (2100), above 2%
+- **Notes:** IU's 2 km Budd production suite (antarctica/reports/rehearsal_25km_iu.md, section 'The 2 km production suite'). Production grade; the group chooses the submission line on 20 or 21 October. Final state sha256 055fd9e61a4baa8005ca11e41c914bca46a686b12c5ea9282202d566461e7e95. Report: antarctica/reports/core04_ssp370_mri_esm2_0_2km_r2kiurlcnoamb.md.
 
 ### core04-32km-ssp370-mriesm20
 
@@ -9324,6 +9397,37 @@ C011: OCX main with observations (planned), unassigned.
 - **Apparent MB:** balance
 - **dt (yr):** 0.025
 - **Notes:** issue #11: run check_melt_bound --ocx first. Issue #19: the OCX ocean is being regenerated upstream
+
+### core11-2km-ocx-r2kiurlcnoamb
+
+Core 11 at 2 km, IU Budd production: OCX on the protocol forcing, relaxed controls, without the apparent mass-balance reference (done), IU.
+
+- **Task type:** ocx
+- **ISMIP7 exp id:** C011
+- **Scenario:** ocx
+- **Period (yr):** 2003 to 2026, reached 2026.0
+- **Friction law:** budd
+- **Mesh:** antarctica_5000_2000_buffered20000 (IU's build, 969,764 vertices, 1,928,285 cells), DG0 geometry, the MAP's own mesh (ISMIP7_MESH=checkpoint)
+- **Initial state / MAP:** inversion-2km-budd-b20k-ef2-vf-relax2014's MAP (inversion_icepack2_budd_n3_dg0_logvel_2000_int5000_b20k_rho7500_floating_ef2_vf_relax2014.h5, md5 0d9315d5), its controls alone on BedMachine's 2015 geometry rewound to 2003 with the Smith dH/dt (c4c9eb8)
+- **Branch from:** cold start from the MAP
+- **Forcing versions:** atmosphere acabf RACMO2.3p2-ERA OCX SDBN1-8000m v1 and dacabfdz RACMO2.3p2-ERA OCX SDBN1-8000m v2; ocean tf and so expert-judgment OCX ocean/main v2
+- **Melt: K, slope, deltaT:** deltaT_per_basin_2000_K6.500e-05.npz refitted under vertex_front (sha256 3d2e5348; calibration-melt-refit-2km-vertex-front)
+- **Calving front, collapse:** held fixed, ice-shelf collapse ISMIP7_FRACTURE=none
+- **Apparent MB:** off
+- **dt (yr):** 0.025
+- **Site / partition:** IU Quartz, general partition
+- **Ranks / memory:** 32 ranks, 96 GiB, scpc_mumps, ISMIP7_MAP_CLIP=0, ISMIP7_OUTPUT=1; five-yearly checkpoints, three kept; 72 h links that resubmit themselves (projection.sbatch, ISMIP7_AUTO_RESUME=1)
+- **Job ids:** 11912190
+- **Code:** c4c9eb8, Quartz worktree /N/scratch/dlilien/ismip7_rehearsal25iu/run2kp; wrapper submit_r2kiu.sh ocx rlcnoamb
+- **Started:** 2026-10-11
+- **Finished:** 2026-10-12
+- **Cost per model year:** 12 h 52 min of wall time on 32 ranks for 23 model years in 1 link, 48.7 s a diagnostic solve on average
+- **Results path:** Quartz antarctica/results/prod_2km_iu/results/ocx_r2kiurlcnoamb_2000_*, moved from scratch by job 12251522 (30 files, 29 GB, each checked by sha256)
+- **Audit:** ON TRACK; resid at most 0.0000 Gt on 920 rows; 919 of 920 steps converged on their first direct solve, 6.2 Newton iterations on average and 14 at the most; 1 step rescued by the continuation ladder, no subcycle; VAF +40.0 mm SLE and mass +8,645 Gt over the run, dM/dt +575 Gt/yr in 2025; calving out of the fixed front 1,820 at step 1, 1,346 in 2004 and 1,288 in 2025 Gt/yr; peak speed 1.8e4 m/yr at t = 2004.33, (-766.5, 1,157.3) km
+- **ISMIP7 output written:** 2003 to 2025, 31 files on the 8 km grid in prod_2km_iu/r2kiurlcnoamb/submission/AIS/IU/icepack2/CORE/C011 (source_id IU; contact Rice, the writer's default, kept by IU); writer job 12249912, 42 min; 431 cell-years within 0.01 m of flotation written as grounded; lifmassbf largest -6.8 Gt/yr (2003); -0.8 in 2025
+- **Regridded, isschecker:** isschecker 0.5.1: 0 errors, 2 warnings, the non-mandatory variables the model does not write and strbasemag maximum 2.1 MPa against the accepted 1 MPa on 68 of 4,926,403 values
+- **Scalars processed:** ismip7-scalars 0.1.0 sla20, slg20 and slvaf written (job 12251491); compare_scalars.py exit 0; notes: area factor: the native scalars carry it too (--native-af2), so the area term is zero; the exact sums' worst \|C - N\| is 1.59e-05 of their L1 (tendlifmassbf 2013), against an allowance of 5.93e-04; maximum-extent mask: 0 pixels carry ice or flux outside maxmask1; lim +0.000%, limnsw +0.000%, slvaf +0.000%, slg20 +0.000%; fill convention: acabf and libmassbffl are whole-pixel means (flux_pixel_mean), the tool's own, so nothing is undone and the fill term is zero; tendlibmassbffl: the fill leaves out no melt beyond the exact sums' tolerance in any year (largest difference +0.0 Gt/yr, 2003); tendlifmassbf: the melt booked in cells with no floating ice at year end (issues #109 and #136) is at most -6.9 Gt/yr (2003); slvaf: residual +4.01% of max \|N\| (2025), above 2%; slg20: residual +3.96% of max \|N\| (2025), above 2%; sla20: residual +3.96% of max \|N\| (2025), above 2%
+- **Notes:** IU's 2 km Budd production suite (antarctica/reports/rehearsal_25km_iu.md, section 'The 2 km production suite'). Production grade; the group chooses the submission line on 20 or 21 October. Final state sha256 a2d9d25673e3398e92caad9c7a7d5aeb20af5516be4668e4e3d947684c5e98fd. Report: antarctica/reports/core11_ocx_2km_r2kiurlcnoamb.md.
 
 ### core11-32km-ocx
 

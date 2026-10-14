@@ -307,8 +307,8 @@ Core 1 (CESM2-WACCM), 2003 to 2015, fluxes in Gt/yr:
 Core 2 (MRI-ESM2-0) without the reference follows core 1 to within 0.7 mm:
 +12.4 mm from the 2 km relaxed geometry, +14.8 (production core 2) and +15.1
 at 1 km from the relaxed controls, +4.8 for RC from its relaxed geometry
-(records `core02-*-r*rl*`). Every run closed its budget to resid 0.00 on
-all 480 rows.
+(records `core02-*-r*rl*`). Every run that stepped closed its budget to
+resid 0.00 on all 480 rows.
 
 1. **Relaxation removes the first-step calving drop and leaves the drift.**
    Started from its relaxed geometry, the MAP sheds 15 (2 km) and 4 (25 km)
@@ -339,11 +339,13 @@ all 480 rows.
    excess sits in the Peninsula and East Antarctica from Amery to Wilkes at
    both resolutions, with Amundsen's loss reproduced; MRI-ESM2-0 gives the
    same pattern (+3,753 and +3,296 Gt on Smith-observed cells at 2 and 1 km).
-4. **Regularized Coulomb drifts least and costs most.** From its relaxed
-   geometry it gains +5.4 and +4.8 mm without the reference, at 258 and 250 s
-   a solve and 24 Newton iterations on average (181 at the most), against
-   52 s and 9 for Budd; each core took three links across the 11 to 12
-   October maintenance. Its controls on BedMachine geometry never started:
+4. **Without the reference, regularized Coulomb drifts least and costs
+   most.** From its relaxed geometry it gains +5.4 and +4.8 mm, at 258 and
+   250 s a solve and 24 Newton iterations on average (181 at the most),
+   about five times Budd's 52 s and 9; each of these two cores took three
+   links across the 11 to 12 October maintenance. With the reference, the
+   RC core took one job (11899126) at 37.0 s a solve and drifted +2.3 mm,
+   level with the other runs that use the reference. Its controls on BedMachine geometry never started:
    the seed from the MAP's velocity diverged (||F|| 5.7e8 after 50
    iterations) and the continuation from n = 1 stalled three times at 200
    iterations with ||F|| 1.19e8, so both cores failed after 2 h 12 min. The

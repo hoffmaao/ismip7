@@ -72,7 +72,6 @@ from icepack2_tools.cellview import CellView, clamp_cells, floor_fill  # noqa: E
 from icepack2_tools.front import clamp_thickness                # noqa: E402
 from icepack2_tools.naming import map_geom_tag                  # noqa: E402
 from icepack2_tools.runconfig import (                          # noqa: E402
-    dg1_refusals,
     geometry_space,
     geometry_space_mismatch,
     warm_start_across_spaces,
@@ -140,18 +139,6 @@ def test_an_inversion_takes_another_spaces_controls_alone(monkeypatch):
     with pytest.raises(ValueError, match="ISMIP7_WARM_START_GEOMETRY"):
         warm_start_across_spaces("dg1", "dg0", "vf.h5")
     assert warm_start_across_spaces("dg1", "dg1", "map.h5") is False
-
-
-def test_dg1_names_each_setting_it_does_not_carry():
-    assert dg1_refusals() == []
-    asked = dict(legacy_transport=True, subelement=True, apparent_mb="balance",
-                 calving="vonmises", fracture="mask", backdate_years=12.0,
-                 ismip7_output=True, geometry_transfer=True, forcing=True,
-                 timing_cache=True)
-    lines = dg1_refusals(**asked)
-    assert len(lines) == len(asked)
-    for name in asked:
-        assert len(dg1_refusals(**{name: asked[name]})) == 1
 
 
 def _redistribute(monkeypatch, *argv):

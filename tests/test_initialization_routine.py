@@ -463,3 +463,21 @@ def test_watch_resubmits_a_dead_chain_and_cancels_a_silent_link(sandbox):
     assert rc == 0, log
     assert submits(sandbox) == []
     assert "scancel 4243" not in (sandbox / "sbatch_calls.txt").read_text() if (sandbox / "sbatch_calls.txt").exists() else True
+
+
+def test_watch_does_nothing_when_the_scheduler_cannot_be_reached(sandbox):
+    r"""An unreachable controller answers nothing; that is not an empty queue.
+    The 14 October 2026 outage resubmitted every stage on top of its live chain."""
+    (sandbox / "warm.h5").write_text("warm\n")
+    bin_dir = sandbox / "bin"
+    (bin_dir / "squeue").write_text('#!/bin/bash\necho "squeue: error: Unable to contact slurm controller" >&2\nexit 1\n')
+    (bin_dir / "squeue").chmod(0o755)
+    env = {"ISMIP7_ROUTINE_STAGES": "hist", "ISMIP7_ROUTINE_ESMS": "CESM2-WACCM",
+           "ISMIP7_ROUTINE_WATCH_ONCE": "1"}
+    rc, log = routine(sandbox, "init", env=env)
+    assert rc == 0, log
+    submits(sandbox)
+    rc, log = routine(sandbox, "watch", env=env)
+    assert rc == 0, log
+    assert "squeue failed; skipping" in log
+    assert submits(sandbox) == [], "nothing may be resubmitted on a scheduler failure"

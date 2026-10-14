@@ -607,11 +607,19 @@ cmd_status() {
 watch_pass() {
     local stage jobname rows jid state node elapsed logf age stall
     stall=${ISMIP7_ROUTINE_STALL_MIN:-15}
+    # A scheduler that cannot be reached answers nothing, which must not read
+    # as "no job": during the NOTS controller outage of 14 October 2026 every
+    # stage was resubmitted on top of its live chain. One probe, then the pass.
+    if ! squeue -h -u "${USER:-$(id -un)}" -o %i >/dev/null 2>&1; then
+        log "watch: squeue failed; skipping this pass"
+        return 0
+    fi
     for stage in $STAGE_LIST; do
         is_started "$stage" || continue
         is_done "$stage" && continue
         jobname="rt_${TAG}_${stage}"
-        rows=$(squeue -h -u "${USER:-$(id -un)}" -n "$jobname" -o "%i %T %N %M" 2>/dev/null || true)
+        rows=$(squeue -h -u "${USER:-$(id -un)}" -n "$jobname" -o "%i %T %N %M" 2>/dev/null) \
+            || { log "watch: squeue failed; skipping the rest of this pass"; return 0; }
         if [ -z "$rows" ]; then
             log "watch: stage $stage has no job in the queue; resubmitting"
             mv "$OUT/$stage.jobs" "$OUT/$stage.jobs.$(date +%s)"

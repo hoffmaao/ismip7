@@ -118,7 +118,11 @@ def transfer_state(chk_in, mesh_new, cfg, chk_out, new_msh_basename, bed_sampler
                 pass
     log(f"  adapt: transferring {sorted(old)} ({cfg.transfer})")
 
-    geom = attrs.get("geometry_space", "dg0")
+    geom = str(attrs.get("geometry_space", "dg0"))
+    if geom not in ("dg0", "cg1"):
+        raise ValueError(
+            f"adaptive transfer moves DG0 or CG1 geometry; this checkpoint "
+            f"records geometry_space={geom}")
     Q_g = FunctionSpace(mesh_new, "DG" if geom == "dg0" else "CG", 0 if geom == "dg0" else 1)
     Qc = FunctionSpace(mesh_new, "CG", 1)
     rr = Constant(RHO_RATIO)

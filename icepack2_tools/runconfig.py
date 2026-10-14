@@ -86,8 +86,16 @@ TARGET_MESH_GEOMETRY_METHOD = "target-native-bedmachine-cell-average-v1"
 # The same with BedMachine's front cells rebuilt (geometry.front_cells, issue
 # #167); target_mesh_geometry_method picks one by raster sampling.
 TARGET_MESH_GEOMETRY_METHOD_FRONT = "target-native-bedmachine-cell-average-front-v1"
+# DG1 geometry holds the CG1 vertex interpolant itself (geometry.sample_to_geometry).
+TARGET_MESH_GEOMETRY_METHOD_DG1 = "target-native-bedmachine-vertex-dg1-v1"
+TARGET_MESH_GEOMETRY_METHOD_DG1_FRONT = "target-native-bedmachine-vertex-dg1-front-v1"
 
-GEOMETRY_SPACES = ("dg0", "cg1")
+# dg1 is cell-wise linear and discontinuous, on vertex nodes
+# (geometry.geometry_function_space); see GEOMETRY_DISCRETIZATION.md.
+GEOMETRY_SPACES = ("dg0", "cg1", "dg1")
+# The spaces whose thickness is the transport state itself: a cell-wise field
+# whose facet jumps carry part or all of the driving stress.
+DISCONTINUOUS_GEOMETRY_SPACES = ("dg0", "dg1")
 
 # How a raster (BedMachine) is put onto a DG0 geometry cell.
 #   vertex    - icepack's bilinear sample at the three CG1 vertices, then the
@@ -239,15 +247,97 @@ def mesh_front():
 
 
 def geometry_space():
-    r"""Discretization of h/s/b, ``'dg0'`` or ``'cg1'``. Validated here so
+    r"""Discretization of h/s/b, one of ``GEOMETRY_SPACES``. Validated here so
     every reader rejects the same set."""
     value = os.environ.get(
         "ISMIP7_GEOMETRY_SPACE", GEOMETRY_SPACE_DEFAULT).lower()
     if value not in GEOMETRY_SPACES:
         raise ValueError(
-            f"ISMIP7_GEOMETRY_SPACE must be 'dg0' or 'cg1', got {value!r}"
+            "ISMIP7_GEOMETRY_SPACE must be one of "
+            f"{', '.join(map(repr, GEOMETRY_SPACES))}, got {value!r}"
         )
     return value
+
+
+def melt_geometry_space(space=None):
+    r"""The geometry space a melt calibration records for a run under
+    ``space`` (this run's, :func:`geometry_space`, by default).
+
+    Under ``dg1`` the forcing lives on the DG0 cells and reads the cell means
+    of the geometry, with the surface rebuilt from them by the DG0 formula
+    (``forcing.forcing_geometry``), so the melt is the DG0 melt of those
+    means. A t=0 DG1 geometry has the DG0 cell values as its means to
+    1e-12 m, so a ``dg0`` calibration applies as fitted and nothing is
+    refitted. ``dg0`` and ``cg1`` are their own."""
+    space = geometry_space() if space is None else space
+    return "dg0" if space == "dg1" else space
+
+
+def geometry_space_mismatch(run_space, recorded, source):
+    r"""Why a MAP, warm start or restart checkpoint recorded under geometry
+    space ``recorded`` (None when it predates the record) cannot seed a run
+    under ``run_space``, or None when it can.
+
+    Only a mismatch that involves ``dg1`` is refused here; dg0 and cg1 keep
+    the rules they always had. A DG1 state seeds a DG1 run alone: its
+    controls absorbed a driving stress with a live cell gradient, and its
+    thickness has slopes a DG0 or CG1 load would silently drop."""
+    recorded = None if recorded is None else str(recorded)
+    if "dg1" not in (run_space, recorded) or recorded == run_space:
+        return None
+    return (f"{source} records geometry_space="
+            f"{recorded if recorded is not None else '(none: dg0 or cg1)'} "
+            f"but this run is ISMIP7_GEOMETRY_SPACE={run_space}. A DG1 state "
+            f"seeds only a DG1 run and a DG1 run starts only from one; point "
+            f"at a state written under {run_space} or change the space.")
+
+
+def warm_start_across_spaces(run_space, recorded, source):
+    r"""Whether an inversion's warm start ``source``, recorded under geometry
+    space ``recorded``, comes from another space than the run's, in a
+    mismatch :func:`geometry_space_mismatch` would refuse.
+
+    An inversion may still start from such a warm start's controls and
+    fluidity prior: they are CG1 fields the inversion refits. At 32 km a DG1
+    refit from the DG0 probe MAP's controls started at misfit 6,938, against
+    35,793 cold. Its geometry belongs to the other space, so it is never
+    taken, and ``ISMIP7_WARM_START_GEOMETRY`` asking for it is refused.
+    ``geometry_space`` is an objective key of the handoff, so the refit's
+    first link runs with ``ISMIP7_WARM_START_STRICT=0`` (``inversion.sbatch``
+    exports 1), as any first link that changes the objective does."""
+    refusal = geometry_space_mismatch(run_space, recorded, source)
+    if refusal is None:
+        return False
+    if os.environ.get("ISMIP7_WARM_START_GEOMETRY", "").strip() not in ("", "0"):
+        raise ValueError(
+            f"{refusal} ISMIP7_WARM_START_GEOMETRY asks for its geometry, which "
+            f"belongs to the other space; unset it to take the controls alone.")
+    return True
+
+
+def dg1_refusals(*, legacy_transport=False, subelement=False,
+                 geometry_transfer=False, timing_cache=False):
+    r"""What a ``dg1`` run does not carry, one line per setting that asks for
+    it; empty when nothing conflicts.
+
+    The legacy transport is a CG1 scheme, and the sub-element friction
+    integrates a grounded fraction of a continuous surface. An inversion
+    takes a warm start's geometry only on the warm start's own mesh: a
+    discontinuous linear field interpolated onto another mesh samples one
+    source cell per target node, which the driving stress reads as slope (a
+    forward on another mesh rebuilds its geometry from BedMachine instead,
+    which DG1 carries). A timing cache is prepared on another mesh and its
+    contract names the DG0 restart fields, so building, publishing or
+    reading one stops as well (GEOMETRY_DISCRETIZATION.md, "DG1 geometry")."""
+    asked = (
+        (legacy_transport, "ISMIP7_LEGACY_TRANSPORT (a CG1 scheme)"),
+        (subelement, "sub-element friction (ISMIP7_SUBELEMENT_FRICTION)"),
+        (geometry_transfer, "a warm start's geometry taken onto another mesh"),
+        (timing_cache, "timing caches (prepare_timing_cache.py, "
+                       "redistribute_checkpoint.py --manifest, run_timing.py)"),
+    )
+    return [f"ISMIP7_GEOMETRY_SPACE=dg1 does not carry {what}"
+            for on, what in asked if on]
 
 
 def raster_sample():
@@ -438,11 +528,15 @@ def raster_base_method(method):
     return "vertex" if raster_front(method) else str(method).lower()
 
 
-def target_mesh_geometry_method(method):
+def target_mesh_geometry_method(method, space="dg0"):
     r"""The provenance name of geometry rebuilt from BedMachine on a target
     mesh under the raster sampling ``method``: vertex keeps the name its
     caches carry, a front sampling gets its own, so a cache built one way is
-    never read as the other."""
+    never read as the other. DG1 geometry (``space``) has names of its own
+    for the same reason."""
+    if space == "dg1":
+        return (TARGET_MESH_GEOMETRY_METHOD_DG1_FRONT if raster_front(method)
+                else TARGET_MESH_GEOMETRY_METHOD_DG1)
     if raster_front(method):
         return TARGET_MESH_GEOMETRY_METHOD_FRONT
     return TARGET_MESH_GEOMETRY_METHOD

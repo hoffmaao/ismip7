@@ -75,7 +75,7 @@ from icepack2_tools.melt_selection import (  # noqa: E402,F401
 )
 from icepack2_tools.runconfig import (  # noqa: E402
     MELT_CALIBRATION_DEFAULT, MELT_CALIBRATIONS, check_melt_calibration_record,
-    geometry_space, raster_sample,
+    melt_geometry_space, raster_sample,
     melt_calibration_contract, melt_calibration_sidecar,
     refuse_tracked_calibration_out, write_melt_calibration_sidecar,
 )
@@ -193,7 +193,7 @@ def main():
                                     else float("nan")),
                      sin_alpha_cap=(cm.SIN_ALPHA_CAP if melt_slope() == "local"
                                     else float("inf")),
-                     geometry_space=geometry_space(), **cm.input_names(),
+                     geometry_space=melt_geometry_space(), **cm.input_names(),
                      dt_window=np.array(DT_WINDOW, dtype=float), **verdict)
             write_melt_calibration_sidecar(fn, sidecar)
         PETSc.Sys.Print(f"  wrote {fn}\n    and {melt_calibration_sidecar(fn)}")

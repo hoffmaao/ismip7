@@ -159,6 +159,12 @@ without reading the linked rationale and stating why.
   was fitted to. `check_melt_bound.py` measures that per basin. Regression
   test: `tests/test_melt_calibration_default.py`.
 
+- **DG1 geometry sits on vertex nodes (`variant="equispaced"`).** Firedrake's
+  default DG1 nodes lie inside the cell, where a nodal floor does not bound
+  the field and a vertex sample is not the CG1 interpolant. Build the space
+  with `geometry.geometry_function_space`; `cellview.CellView` refuses any
+  other DG1.
+
 One line that looks fine and is always a bug:
 
 - **Any statistic taken from `.dat.data_ro` is RANK-LOCAL.** It covers only

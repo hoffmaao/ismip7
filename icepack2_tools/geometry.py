@@ -13,6 +13,11 @@ and the forward cannot drift apart:
 * :func:`cg1_lift` - a bounded, volume-preserving CG1 reconstruction, for the
   few places that genuinely need a pointwise gradient of a cell-wise field.
 * :func:`surface_slope` - ``grad(s)`` that works for CG1 or DG0 surfaces.
+
+Under ``dg1`` the geometry is cell-wise linear on vertex nodes
+(:func:`geometry_function_space`); the vertex sample is then the CG1
+interpolant itself, held in DG1, and the cell rules (the front cells, the lake
+fix) decide on the cell and write all three of its dofs.
 """
 
 import weakref
@@ -30,6 +35,8 @@ from firedrake import (
     grad,
     max_value,
 )
+
+from .cellview import CellView, geometry_degree
 
 
 _LUMPED_MASS = weakref.WeakKeyDictionary()
@@ -80,17 +87,38 @@ def cg1_lift(f):
 
 
 def surface_slope(s):
-    r"""``grad(s)`` valid for a CG1 *or* DG0 surface.
+    r"""``grad(s)`` valid for a CG1, DG0 or DG1 surface.
 
     A DG0 surface has an identically zero cell gradient - UFL folds it away -
     because its slope lives entirely in the inter-cell jumps, which the
     momentum balance picks up weakly through its ``jump(s, nu)`` facet term.
-    Callers that need a POINTWISE slope (a friction anchor, a melt
-    parameterization) get one from a CG1 reconstruction instead.
+    A DG1 surface carries part of its slope in those jumps too. Callers that
+    need a POINTWISE slope (a friction anchor, a melt parameterization) get
+    one from a CG1 reconstruction of any discontinuous surface instead.
     """
-    if s.function_space().ufl_element().degree() == 0:
+    if s.function_space().ufl_element().family() == "Discontinuous Lagrange":
         return grad(cg1_lift(s))
     return grad(s)
+
+
+def geometry_function_space(mesh, space):
+    r"""The function space of the geometry under ``ISMIP7_GEOMETRY_SPACE``
+    ``space``: CG1 for ``cg1``, DG0 for ``dg0``, and for ``dg1`` the DG1
+    space with its nodes on the vertices.
+
+    Firedrake's default DG1 variant puts the three nodes at interior points of
+    the cell, where a nodal floor does not bound the field at the vertices and
+    a vertex sample is not the CG1 interpolant. On the vertices a non-negative
+    nodal vector is a non-negative field, the cell mean is the mean of the
+    three nodal values, and the CG1 interpolant is held exactly.
+    """
+    if space == "cg1":
+        return FunctionSpace(mesh, "CG", 1)
+    if space == "dg0":
+        return FunctionSpace(mesh, "DG", 0)
+    if space == "dg1":
+        return FunctionSpace(mesh, "DG", 1, variant="equispaced")
+    raise ValueError(f"no geometry space {space!r}")
 
 
 def _lattice_bary(n):
@@ -280,6 +308,11 @@ def sample_to_geometry(raster, Q_g, Q_cg, floor=None, method="vertex"):
     raster_fn = lambda sp: icepack.interpolate(dataset, sp)  # noqa: E731
 
     is_dg0 = Q_g.ufl_element() != Q_cg.ufl_element()
+    linear = is_dg0 and geometry_degree(Q_g) == 1
+    if linear and method == "cell_mean":
+        raise ValueError(
+            "raster sampling cell_mean has no DG1 rule; a DG1 geometry samples "
+            "with vertex or vertex_front")
     if is_dg0 and method == "cell_mean":
         out = raster_cell_mean(dataset, Q_g, floor=floor)
         bad = np.isnan(out.dat.data_ro)
@@ -301,6 +334,10 @@ def sample_to_geometry(raster, Q_g, Q_cg, floor=None, method="vertex"):
         field = Function(Q_cg).interpolate(max_value(field, Constant(floor)))
     if not is_dg0:
         return field if isinstance(field, Function) else Function(Q_cg).interpolate(field)
+    if linear:
+        # The CG1 interpolant lies in the vertex-node DG1 space, so it is held
+        # exactly; its cell means are the DG0 cell averages below.
+        return Function(Q_g).interpolate(field)
     return Function(Q_g).project(field)
 
 
@@ -323,9 +360,10 @@ def raise_bed_to_lake_ice_base(b, H, bm_fn, Q_g, Q_cg, method="vertex"):
     A cell takes the ice base when any of its vertices lies on the lake, so the
     correction covers the lake's whole footprint on the mesh; in a cell only
     partly over the lake the cell-averaged ``s - H`` carries only that part of
-    the water column. ``b`` and ``H`` must come from :func:`sample_to_geometry`
-    with the same ``method``. Modifies ``b`` in place and returns the global
-    number of cells (or nodes, under CG1 geometry) it changed.
+    the water column. Under DG1 the whole cell takes it, at each of its nodes.
+    ``b`` and ``H`` must come from :func:`sample_to_geometry` with the same
+    ``method``. Modifies ``b`` in place and returns the global number of cells
+    (or nodes, under CG1 geometry) it changed.
     """
     import icepack
     import rasterio
@@ -339,10 +377,16 @@ def raise_bed_to_lake_ice_base(b, H, bm_fn, Q_g, Q_cg, method="vertex"):
         conditional(lt(abs(mask - LAKE_MASK), 0.5), 1.0, 0.0))
     # Into DG0 the vertex indicator arrives as its vertex mean, positive when
     # any vertex is on the lake; under CG1 geometry it is the indicator itself.
-    touches = Function(Q_g).interpolate(on_lake)
+    # Under DG1 the cell decides, through the same DG0 mean.
+    view = CellView(Q_g) if Q_g.ufl_element() != Q_cg.ufl_element() else None
+    linear = view is not None and view.degree == 1
+    touches = Function(view.Q0 if linear else Q_g).interpolate(on_lake)
     new_b = Function(Q_g).interpolate(conditional(gt(touches, 0.0), s_bm - H, b))
-    changed = int(np.count_nonzero(
-        np.abs(new_b.dat.data_ro - b.dat.data_ro) > 1e-6))
+    if linear:
+        moved = np.abs(view.nodes(new_b) - view.nodes(b)).max(axis=1)
+    else:
+        moved = np.abs(new_b.dat.data_ro - b.dat.data_ro)
+    changed = int(np.count_nonzero(moved > 1e-6))
     b.assign(new_b)
     return Q_g.mesh().comm.allreduce(changed, op=MPI.SUM)
 
@@ -370,7 +414,7 @@ FRONT_LATTICE_DENSITY = 4.0
 
 
 def front_cells(H, b, bm_fn, frac=FRONT_ICE_FRACTION):
-    r"""Rebuild the marine front of the DG0 geometry ``H``, ``b`` from
+    r"""Rebuild the marine front of the DG0 or DG1 geometry ``H``, ``b`` from
     BedMachine's own mask, in place.
 
     Every owned cell is looked up on the :func:`cell_samples` lattice in
@@ -383,15 +427,18 @@ def front_cells(H, b, bm_fn, frac=FRONT_ICE_FRACTION):
     Every other cell is untouched, so interior ice, land margins and the open
     buffer keep their vertex samples.
 
+    Under DG1 the cells are classified the same way and a water or rebuilt
+    cell takes its value at all three nodes, so it is constant and its mean
+    is the DG0 cell's value; every other cell keeps its linear sample.
+
     Returns the global counts, collectively.
     """
     import rasterio
     from .front import vertex_neighbours
     from .obs_icemask import ICE, MARINE, _BM_ICE, classify
 
-    Q_g = H.function_space()
-    if Q_g.ufl_element().degree() != 0:
-        raise ValueError("front_cells needs DG0 geometry: a cell is its unit")
+    view = CellView(H.function_space())
+    Q_g = view.Q0
     ncell = Q_g.mesh().coordinates.cell_node_map().values.shape[0]
     f_ice = np.zeros(ncell)
     marine = np.zeros(ncell, bool)
@@ -433,11 +480,10 @@ def front_cells(H, b, bm_fn, frac=FRONT_ICE_FRACTION):
     water = ~ice & MAR
     rebuilt = held & (vertex_neighbours(Q_g)(water) | MAR)
 
-    h0 = H.dat.data_ro.copy()
-    Hd, bd_ = H.dat.data, b.dat.data
-    Hd[water] = 0.0
-    Hd[rebuilt] = HI[rebuilt]
-    bd_[rebuilt] = BI[rebuilt]
+    h0 = np.array(view.means(H))
+    view.set_cells(H, water, 0.0)
+    view.set_cells(H, rebuilt, HI)
+    view.set_cells(b, rebuilt, BI)
     counts = {
         "rebuilt": int(rebuilt.sum()),
         "rebuilt_thicker": int((rebuilt & (HI > h0)).sum()),

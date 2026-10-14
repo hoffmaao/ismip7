@@ -93,9 +93,10 @@ from icepack2_tools.dual_friction import (
     weertman_anchor,
 )
 from icepack2_tools.geometry import (
-    cg1_lift, front_changed_nodes, raise_bed_to_lake_ice_base,
-    sample_bed_thickness, sample_to_geometry,
+    cg1_lift, front_changed_nodes, geometry_function_space,
+    raise_bed_to_lake_ice_base, sample_bed_thickness, sample_to_geometry,
 )
+from icepack2_tools.cellview import CellView
 from icepack2_tools.preconditioners import frozen_linearization, with_scpc_blocks
 from icepack2_tools.taped_solve import StateSolverCache, taped_state_solve
 from icepack2_tools.transfer import (
@@ -111,6 +112,9 @@ from icepack2_tools.runconfig import (
     obs_data_root,
     BUDD_SHELF_GATE,
     friction as _friction, geometry_space as _geometry_space,
+    warm_start_across_spaces as _warm_start_across_spaces,
+    dg1_refusals as _dg1_refusals, target_mesh_geometry_method,
+    DISCONTINUOUS_GEOMETRY_SPACES,
     raster_sample as _raster_sample,
     lc as _lc, lc_coarse as _lc_coarse, n_flow as _n_flow,
     eval_continuation, inversion_mesh_source, transfer_fill, drag_gate,
@@ -548,10 +552,15 @@ def main():
     # carries the lumped lift's inflated calving-front thickness into the
     # friction field, and the t=0 velocity misfit cannot reveal it.
     geometry_space = _geometry_space()
-    geom_dg = geometry_space == "dg0"
+    geom_dg = geometry_space in DISCONTINUOUS_GEOMETRY_SPACES
+    geom_dg1 = geometry_space == "dg1"
     raster_sample = _raster_sample()
-    Q_g = FunctionSpace(mesh, "DG", 0) if geom_dg else Q
+    Q_g = geometry_function_space(mesh, geometry_space) if geom_dg else Q
     PETSc.Sys.Print(f"  Geometry space: {geometry_space.upper()}")
+    if geom_dg1:
+        _refusals = _dg1_refusals(subelement=SUBELEMENT_FRICTION)
+        if _refusals:
+            raise RuntimeError("; ".join(_refusals))
 
     # ── Load Data ──
     PETSc.Sys.Print("Loading data...")
@@ -887,6 +896,12 @@ def main():
             for _key in OBJECTIVE_KEYS + OBJECTIVE_RECORD_KEYS:
                 if chk.has_attr("/", _key):
                     warm_attrs[_key] = chk.get_attr("/", _key)
+            # A warm start from another geometry space (DG0 controls for a
+            # DG1 inversion, or the reverse) seeds the controls and the
+            # fluidity prior alone; its geometry is never taken.
+            warm_cross_space = _warm_start_across_spaces(
+                geometry_space, warm_attrs.get("geometry_space"),
+                os.path.basename(warm_chk))
             for _key in RELAX_MAP_KEYS + (END_STATE_ATTR, "geometry_source",
                                           "geometry_source_method", "t_yr", "stalled"):
                 if chk.has_attr("/", _key):
@@ -1005,6 +1020,19 @@ def main():
             warm_geometry = warm_start_geometry(
                 same_mesh=same_mesh, same_lake=_warm_lake == int(LAKE_ICE_BASE),
                 warm_sampling=_warm_rs, run_sampling=raster_sample)
+            if warm_cross_space:
+                warm_geometry = False
+                PETSc.Sys.Print(
+                    f"    warm start records geometry_space="
+                    f"{warm_attrs.get('geometry_space')}, this run "
+                    f"{geometry_space}: its geometry is not taken")
+            if geom_dg1 and warm_geometry and not same_mesh:
+                raise RuntimeError(
+                    "; ".join(_dg1_refusals(geometry_transfer=True))
+                    + f": {os.path.basename(warm_chk)} is on another mesh, and a "
+                    "dg1 inversion runs only on its own mesh; take the warm "
+                    "start's controls alone by leaving ISMIP7_WARM_START_GEOMETRY "
+                    "unset or 0")
             if same_mesh and _warm_rs != raster_sample:
                 PETSc.Sys.Print(
                     f"    warm start records raster_sample={_warm_rs}, this run "
@@ -1315,7 +1343,7 @@ def main():
     # Budd pins N_hat=1 at the inversion geometry; freeze N_ref with the MAP /
     # timing-cache so forwards reproduce the inverted friction at t=0.
     N_ref = None
-    if FRICTION == "budd":
+    if FRICTION == "budd" and not geom_dg1:
         N_ref = Function(Q_g, name="N_ref").interpolate(
             max_value(effective_pressure(H, s), Constant(0.0))
         )
@@ -1653,6 +1681,10 @@ def main():
             f"  Fluidity control: phi acts on floating ice only and is held at 0 "
             f"on {_n_all - _n_free} of {_n_all} nodes (grounded ice keeps the "
             f"prior fluidity)")
+    # DG1: the cell means of H, which decide the ice edges of the exact-front
+    # push (dual_friction.front_cliff_correction). None under DG0, where H is
+    # its own cell value.
+    H_cell = CellView(Q_g).mean_function(H) if geom_dg1 else None
 
     def build_F(theta_c, phi_c, *, scpc_blocks=state_scpc):
         F_c = _build_residual(theta_c, phi_c)
@@ -1700,6 +1732,7 @@ def main():
                 k_lim=0.0, **stabilizers, drag_mask=drag_mask,
                 calving_ids=calving_ids if use_calving_terminus else None,
                 exact_front=EXACT_FRONT, front_hmin=front_hmin(),
+                H_cell=H_cell,
             )
         return derivative(_build_action(theta_c, phi_c, fields), z)
 
@@ -2090,7 +2123,7 @@ def main():
     # carries the answer.
     k_npz_used = "none"
     if use_dhdt:
-        if not geom_dg:
+        if geometry_space != "dg0":
             raise RuntimeError(
                 "ISMIP7_DHDT_WEIGHT requires ISMIP7_GEOMETRY_SPACE=dg0: the "
                 "prognostic step is the DG0 upwind FV operator and must act on "
@@ -2613,6 +2646,9 @@ def main():
                 chk.save_function(_friction_reference(), name="C_w0")
                 if N_ref is not None:
                     chk.save_function(N_ref, name="N_ref")
+                elif FRICTION == "budd":
+                    chk.save_function(H, name="N_ref_thickness")
+                    chk.save_function(s, name="N_ref_surface")
             else:
                 # A periodic checkpoint carries the accepted mixed state for
                 # the next chain link only, under names no forward reads: the
@@ -2725,7 +2761,9 @@ def main():
             # this mesh's own BedMachine sample (icepack2_tools.relaxation).
             if run_geometry is None:
                 chk.set_attr("/", "geometry_source", os.path.realpath(bm_fn))
-                chk.set_attr("/", "geometry_source_method", TARGET_MESH_GEOMETRY_METHOD)
+                chk.set_attr("/", "geometry_source_method",
+                             target_mesh_geometry_method(raster_sample, "dg1")
+                             if geom_dg1 else TARGET_MESH_GEOMETRY_METHOD)
             else:
                 for _key, _val in run_geometry.items():
                     chk.set_attr("/", _key, _val)

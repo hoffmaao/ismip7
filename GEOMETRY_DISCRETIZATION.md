@@ -8,9 +8,12 @@ reference `a_ref_mb` is a per-cell transport source and stays DG0 either way.
 - `dg0` (default): cell-wise geometry. The momentum solve and the mass
   transport share one thickness field.
 - `cg1`: the pre-August-2026 behaviour, kept for A/B comparison.
+- `dg1`: cell-wise linear geometry, discontinuous across cells, on vertex
+  nodes. One thickness field as under `dg0`, at second order. See "DG1
+  geometry" below for what it carries and what it refuses.
 
 The control fields (`theta`, `phi`, `fluidity_prior`, `obs_mask`) and the
-velocity stay CG1 in both modes. The controls are regularized by a
+velocity stay CG1 in every mode. The controls are regularized by a
 Whittle-Matern prior on `|grad theta|`, which needs a differentiable field;
 the geometry is not differentiated in the residual (see below).
 
@@ -536,10 +539,227 @@ vertex-sampled, the 865.0 Gt/yr table, 21 September 2026):
    most 0.0008 K apart. At 32 km the offsets put the basins at 0.33 to 1.74
    times their totals, 1069.5 Gt/yr in all.
 
+## DG1 geometry
+
+`ISMIP7_GEOMETRY_SPACE=dg1` holds `h`, `s` and `b` cell-wise linear, on the
+three vertices of each cell, with jumps across facets. Built for the question
+whether a second-order geometry with sharp fronts removes the cell-scale dH
+streaks of long DG0 forwards.
+
+**Vertex nodes.** The space is `FunctionSpace(mesh, "DG", 1,
+variant="equispaced")` (`geometry.geometry_function_space`). Firedrake's
+default DG1 puts the nodes inside the cell, where a nodal floor does not bound
+the field at the vertices and a vertex sample is not the CG1 interpolant.
+`cellview.CellView` refuses any other DG1.
+
+**Sampling.** `vertex` holds the CG1 vertex interpolant exactly, so a cold
+start's geometry is continuous and its cell means are the DG0 sample: on the
+buffer-0 meshes the means of `h` and `b` differ from DG0's by 9.1e-13 m at
+32 km and 1.4e-12 m at 8 km. `vertex_front` classifies cells as under DG0 and
+writes a rebuilt or water cell at all three nodes, so it is constant and its
+mean is again the DG0 cell's value; every other cell keeps its linear sample.
+`cell_mean` has no DG1 rule and is refused.
+
+**Driving stress.** Both terms of `build_rc_residual` carry force: the cell
+gradient the smooth part, the facet jump the rest. Against a smooth test field
+on an L2-projected surface (`tests/test_dg1_geometry.py`), relative error of
+the driving force:
+
+| n | DG0 | DG1 | CG1 |
+|---|---|---|---|
+| 16 | 1.99e-2 | 7.08e-3 | 7.25e-3 |
+| 32 | 1.21e-2 | 1.80e-3 | 1.79e-3 |
+| 64 | 6.55e-3 | 4.54e-4 | 4.47e-4 |
+| rate, 32 to 64 | 0.88 | 1.99 | 2.00 |
+
+For floating DG1 ice the two terms are exactly the distributional gradient of
+`rho_I g (1 - rho_I/rho_W) H^2 / 2` (cell: `H grad H = grad(H^2) / 2`; facet:
+`avg(H) jump(H) = jump(H^2) / 2`), the balance the terminus traction uses. The
+exact-front push decides which cells hold ice on their cell means
+(`H_cell`), and on piecewise-constant DG1 fields assembles DG0's residual to
+roundoff. The Budd HAF gate is pointwise: zero at every point of a floating
+cell, and a grounding line crossing a cell gates it point by point. The Budd
+reference pressure is pointwise as well: `N_ref` is
+`dual_friction.budd_reference_pressure` evaluated on the frozen t = 0
+thickness and surface, which a restart and a full-state MAP carry as
+`N_ref_thickness` and `N_ref_surface`, so `N_hat` starts at the inversion's
+own `N/N`. A nodal DG1 interpolant of `N` misses the kinks `N` has inside a
+cell (the bed at sea level, the 1 m overburden floor, flotation); on the
+32 km probe's DG1 MAP it put `N_hat` at a median 1.04, up to 1.7 in grounded
+cells whose bed crosses sea level and up to the cap of 3 near the grounding
+line, where clean grounded cells sit at exactly 1. DG0 keeps its per-cell
+`N_ref` Function built from the same expression.
+
+**Transport.** The same backward-Euler upwind solve with the DG volume term
+`-h u.grad(phi)` (`transport.transport_form`); the L2 error of its steady
+solution on a manufactured problem converges at rate 1.96 against DG0's 0.99
+(32 to 64 cells a side). Testing with 1 still leaves only the boundary
+outflow, so the transport residual and `resid` close exactly as under DG0. The
+only limiter is a positivity floor (`cellview.clamp_cells`): a cell whose mean
+falls below the floor is filled to it and booked as clamp, and a cell whose
+lowest vertex does has its slope scaled until that vertex sits on the floor,
+keeping the mean. Every advance holds the floor's assembled mass change to
+the fill its pre-floor cell means call for (`cellview.floor_fill`), within the
+transport tolerance, so mass the slope scaling moved stops the run. Firedrake's `VertexBasedLimiter` is kept
+out: thickness peaks wherever ice fills a bed trough under a smooth surface,
+and clipping those peaks rebuilds the surface roughness DG1 removes. On
+BedMachine's `vertex` sample:
+
+| buffer-0 mesh | rms jump of `s` over ice facets: DG0 / DG1 / DG1 after `VertexBasedLimiter` | ice cells the limiter moves by more than 1 m |
+|---|---|---|
+| 32 km | 238.4 / 0 / 77.4 m | 6,310 of 9,035 (p99 508 m) |
+| 8 km | 106.1 / 0 / 67.1 m | 38,360 of 64,156 (p99 558 m) |
+
+**Per-cell rules** read the cell means of `h` and `b`, with the surface the
+DG0 formula builds from them (`cellview.CellView`, `forcing.forcing_geometry`),
+so each is the DG0 rule applied to those means:
+
+| rule | under `dg1` |
+|---|---|
+| SMB, melt, collapse mask | the forcing lives on the DG0 cells (`forcing.forcing_space`) and reads the cell means; the draft slope of `ISMIP7_MELT_SLOPE=local` is the DG0 slope of the cell-mean draft |
+| melt calibration | a `dg0` file applies as fitted (`runconfig.melt_geometry_space`); the calibration tools run under `dg1` fit and stamp `dg0` |
+| SMB-elevation feedback | the surface change of the cell means since `H_init`'s |
+| grounded cells, forcing mask, drag gate, tripwire | the flotation test and the thresholds on the cell means |
+| level-set front and its law | the level set and the law read the cell means (`h_cell`, the bed's means) |
+| removals (fixed front, level set, slivers, collapse) | whole cells, booked at mean times area; the sub-cell shed scales the whole cell |
+| backdate | the DG0 rule on the cell means; a changed cell moves by its mean's change, keeping its slope, floored by the positivity operator (`obs_dhdt.backdate_cells`) |
+| ISMIP7 output | the per-cell fields are the cell means and their surface; the grounding-line and boundary fluxes are the transport's own, on the DG1 traces |
+
+A t = 0 DG1 geometry has the DG0 cell values as its means to 1e-12 m, so at
+t = 0 every one of these rules sees what it sees under DG0. A forward on
+another mesh than its MAP's rebuilds the DG1 geometry from BedMachine with the
+run's sampling, as DG0 does.
+
+**Apparent mass balance.** The reference lives on the transport space. Under
+DG1 it is the field whose integral against every DG1 basis function is the
+t = 0 upwind divergence, the transport's own volume term included:
+`a_ref = M^-1 R(h0, u0)` with the cell-local P1 mass matrix
+(`cellview.local_mass_inverse`). A transport step from the t = 0 state with
+it as the only source returns that state at every node; a cell-constant
+reference, the DG0 rule on the cell means, cancels each cell's net flux alone
+and lets the slopes move (`tests/test_dg1_cell_rules.py`). The fixed-front and
+free-front masks and `balance`'s forcing act on whole cells.
+
+The reference holds a DG1 state less tightly than a DG0 one at a steep front
+cell. On the 32 km probe MAPs (unforced, fixed front, `balance`; run record
+`test-32km-dg1-stage2-amb`) `resid` and `clamp` are 0 at every step, and the
+neighbour-scale rms of the cell-mean dH is:
+
+| years | DG0, apparent MB | DG1, apparent MB | DG1, without |
+|---|---|---|---|
+| 1 | 0.0007 m | 0.0034 m | 3.0 m |
+| 2 | 0.0012 m | 0.0265 m | |
+| 5 | 0.0023 m | 0.0410 m | 9.3 m |
+| 10 | 0.0205 m | 0.2196 m | |
+
+The DG1 excess starts at one floating front cell (2188, -1296 km), whose
+vertices hold 583, 96 and 0 m and which moves at 1,306 m/yr. Without the
+reference that cell refills to 304 m and slows to 115 m/yr within a year, in
+both spaces; with it, DG0 holds the cell exactly for 15 years, and under DG1
+it thins by 35 m over three years, speeds up to 1,600 to 2,000 m/yr, and
+passes the change to its floating neighbours (dh -38 to +51 m by year 10)
+while VAF moves by -0.04 mm. With the slope scaling of the positivity floor
+turned off (an experiment, `test-32km-dg1-stage2-amb-noscale`) the cell holds
+through the first year and then drifts the same way, its zero vertex falling
+to -49 m: the floor brings the onset forward, and the held state itself is
+unstable at that cell under DG1.
+
+**Provenance.** A DG1 MAP is named `_dg1` and records `geometry_space=dg1`; a
+DG1 state seeds only a DG1 run and a DG1 run starts only from one, on every
+path (`runconfig.geometry_space_mismatch`). An inversion is the one exception:
+it may take a warm start's controls and fluidity prior from the other space
+and refit them on its own geometry, never taking the warm start's geometry
+(`runconfig.warm_start_across_spaces`). At 32 km a DG1 refit from the DG0
+probe MAP's controls started at misfit 6,938, against 35,793 cold.
+`geometry_space` is an objective key of the handoff, so the refit's first
+link runs with `ISMIP7_WARM_START_STRICT=0` (`inversion.sbatch` exports 1),
+as any first link that changes the objective does.
+
+**What `dg1` refuses** (`runconfig.dg1_refusals` and the drivers):
+sub-element friction and `ISMIP7_LEGACY_TRANSPORT`, which integrate a
+continuous surface; an inversion taking a warm start's geometry from another
+mesh, where a discontinuous linear field interpolated node by node samples one
+source cell per target node; adaptive transfer; `ISMIP7_DHDT_WEIGHT`;
+`ISMIP7_SUBSTEP_TRACE`, which prints one value per cell; and timing caches:
+one is prepared on another mesh and its contract
+(`timing_campaign.cache_required_fields`) names the DG0 `N_ref`, so
+`prepare_timing_cache.py`, `redistribute_checkpoint.py --manifest` and a
+forward reading a cache all stop under `dg1`.
+
+**The t = 0 imbalance is the data's.** The cell-scale part of the initial flux
+divergence, which the apparent mass balance cancels, is nearly the same in
+both spaces. Neighbour-scale rms: the area-weighted rms over interior ice of
+a cell's upwind divergence minus the mean of its three facet neighbours',
+BedMachine `vertex` sample:
+
+| velocity | mesh | DG0 | DG1 |
+|---|---|---|---|
+| MEaSUREs v2 | 32 km | 3.81 m/yr | 3.45 m/yr |
+| MEaSUREs v2 | 8 km | 3.73 m/yr | 3.98 m/yr |
+| the 32 km DG0 Budd MAP's, in both | 32 km | 9.95 m/yr | 10.43 m/yr |
+
+DG0's own truncation error accounts for 2.31 m/yr rms of the last row; the rest
+is BedMachine's thickness against the inverted velocity at the cell scale.
+
+**The 32 km probe.** Budd MAPs inverted in each space under one objective
+(`vertex` sampling on the buffer-0 32 km mesh, `exact_front` 2), then 40
+unforced years from each with the fixed front and no apparent mass balance,
+and DG0 again with it as the smooth reference
+(`antarctica/scripts/geometry_noise.py`; run records `inversion-32km-budd-*-dg1probe`
+and `test-32km-dg1probe-*`). Neighbour-scale rms of the cell-mean dH over
+interior ice:
+
+| years | DG0 | DG1 | DG0, apparent MB |
+|---|---|---|---|
+| 1 | 4.1 m | 3.0 m | 0.0007 m |
+| 5 | 12.4 m | 9.3 m | 0.002 m |
+| 15 | 22.2 m | 17.4 m | 0.15 m |
+| 40 | 33.7 m | 27.4 m | 0.36 m |
+
+| | DG0 | DG1 |
+|---|---|---|
+| MAP velocity misfit | 1,919 | 1,368 |
+| correlation with year 1, at 15 / 40 years | 0.81 / 0.67 | 0.75 / 0.62 |
+| outflux 2015 / 2035 / 2054 (Gt/yr) | 1,503 / 1,133 / 1,049 | 1,306 / 1,500 / 1,301 |
+| Newton iterations a solve; rescues | 8.2; 1 | 4.3; 0 |
+| diagnostic solve | 0.53 s | 0.27 s |
+
+`resid` was 0.0000 Gt at every one of the 1,600 steps of each run. The
+apparent mass balance removes 99 % of the cell-scale noise, and in both spaces
+the rest grows where the first year put it (correlation 0.75 to 0.81 at 15
+years): at this resolution the noise is the initial imbalance. DG1 starts with
+27 % less of it, from a MAP that fits the velocity 29 % better, and the gap
+narrows to 19 % by year 40, with the same pattern at the margins. The
+production noise is at cells 16 to 32 times finer; this probe measures the
+32 km cell scale.
+
+**Forced, at 25 km.** IU's 25 km buffered mesh, `vertex_front`, the CESM2-WACCM
+historical from a 12-year backdated start and then ssp585 to 2100 with the
+collapse mask (`mask_front`), the SMB-elevation feedback on, the 25 km melt
+calibration fitted on `dg0` cells, fixed front, from point-velocity MAPs
+refit in each space (records `test-25km-dg1-stage2-*`):
+
+| | DG0 | DG1 | DG1, apparent MB |
+|---|---|---|---|
+| backdate (cells, mass) | 2,992, +566 Gt | 2,992, +566 Gt | |
+| t = 0 melt | 997.8 Gt/yr | 997.8 Gt/yr | |
+| historical VAF, 2003 to 2015 | +30.8 mm | +28.1 mm | +2.0 mm |
+| ssp585 VAF, 2015 to 2100 | +387.6 mm | +334.8 mm | |
+| collapse at 2100 (flagged, removed) | 417, 328 cells | 433, 377 cells | |
+| isschecker 0.5.1, historical | 0 errors | 0 errors | |
+
+`resid` is 0 at every step of every run, with no rescue. The backdate and the
+t = 0 melt are DG0's to the reported digit, as the cell means make them; the
+later differences carry the two MAPs' (velocity misfit 3,339 under DG0, 4,475
+under DG1). The ssp585 output passes the checker's naming, numerical and
+spatial tests and fails only its time axis, which stops at 2100.
+
 ## Incompatibilities
 
 - `ISMIP7_LEGACY_TRANSPORT=1` requires `ISMIP7_GEOMETRY_SPACE=cg1` (it
   re-projects CG1 `h` <-> DG0 `h_dg` every step; under DG0 they are the same
   Function and the projection would be self-referential). Enforced.
 - A run must not change geometry space mid-trajectory. Restart checkpoints
-  record `geometry_space`; a mismatch projects and warns.
+  record `geometry_space`; a mismatch between `dg0` and `cg1` projects and
+  warns, and one involving `dg1` stops the run
+  (`runconfig.geometry_space_mismatch`).

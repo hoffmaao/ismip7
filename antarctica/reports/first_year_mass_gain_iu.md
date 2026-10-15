@@ -306,10 +306,13 @@ segments:
 | shelf thins by more than 5 m: grounded ice thins | 40 % | 39 % | 47 % | 55 % | 61 % | 89 % |
 | shelf thins by more than 5 m: grounded ice speeds up | 25 % | 24 % | 23 % | 38 % | 39 % | |
 | mean grounded speed change near the line | -7.8 % | -9.7 % | -9.0 % | -3.4 % | -3.5 % | |
-| grounded area change, end of 2003 to end of 2014 (km²) | +7,600 | +10,700 | +10,900 | -1,500 | -1,700 | |
+| grounded area change from the ISMIP7 annual `sftgrf` field (cell area times grounded fraction), end of 2003 to end of 2014 (km²) | +7,600 | +10,700 | +10,900 | -1,500 | -1,700 | |
+
+Section 8's grounded area changes come from the ISMIP7 scalars' `iareagr`
+(2014 row minus 2003 row), so the DG0 values differ by about 150 to 200 km².
 
 - Under DG0, behind the segments whose shelf thins by more than 5 m, the
-  grounded ice slows in 76 to 77 % and thickens in 53 to 61 %. At Getz the production shelf thins 16 m and the grounded band
+  grounded ice slows in 75 to 77 % and thickens in 53 to 61 %. At Getz the production shelf thins 16 m and the grounded band
   thickens 4.6 m and slows 17 %; DG1 cell_mean thins the band 4.7 m behind a
   12 m shelf thinning (Smith: 20 m and 8.4 m). At Wilkes the production shelf
   thins 9.7 m and the band thickens 5.9 m; under DG1 cell_mean the band thins
@@ -330,8 +333,8 @@ Figures: Quartz `figs/dh_maps_dg1cm_vs_prod.png` and
 
 The DG1 cell_mean historical continues into CESM2-WACCM ssp126 from its 2015
 state (job 12261774, `submit_fymg.sh proj`), with the production ssp126's
-settings but for the geometry space and the MAP, to the driver's 2301. To
-2018.7, against the production ssp126 over the same years:
+settings but for the geometry space and the MAP, to the driver's 2301. Over
+the full years 2015 to 2017, against the production ssp126:
 
 | | 2015 | 2016 | 2017 |
 |---|---|---|---|
@@ -342,10 +345,10 @@ settings but for the geometry space and the MAP, to the driver's 2301. To
 | grounded area, production (km², change from 2015) | 0 | +170 | +380 |
 | grounded area, DG1 cell_mean (km², change from 2015) | 0 | -750 | -1,360 |
 
-By 2018.7 the production chain holds +20.7 mm of VAF since 2003 and DG1
-cell_mean +5.5 mm. SMB is the same in both (2,322 to 2,418 Gt/yr); DG1
+By 2018.0 the production chain holds +19.15 mm of VAF since 2003.025 and DG1
+cell_mean +4.75 mm (measured, +3.69 and +0.54 mm since 2015). SMB is the same in both (2,322 to 2,418 Gt/yr); DG1
 cell_mean melts about 80 Gt/yr more and calves about 190 Gt/yr more. `resid`
-is 0.00 on every row. Figure: Quartz `figs/fymg_vaf_ssp126_to2018.7.png`.
+is 0.00 on every row. Figure: Quartz `figs/fymg_vaf_ssp126_to2018.png`.
 
 ## Findings
 
@@ -367,7 +370,7 @@ is 0.00 on every row. Figure: Quartz `figs/fymg_vaf_ssp126_to2018.7.png`.
    about 1,600 km²; under DG0 the flux falls 14 to 16 % and the grounded area
    grows by about 11,000 km².
 7. Under DG0, behind the segments whose shelf thins by more than 5 m, the
-   grounded ice slows in 76 to 77 % and thickens in 53 to 61 %. DG1 raises the
+   grounded ice slows in 75 to 77 % and thickens in 53 to 61 %. DG1 raises the
    share whose grounded ice thins from 40 % (production) to 55 % (point) and
    61 % (cell_mean), and the share whose grounded ice speeds up from 25 % to
    38 and 39 % (Smith: 89 % thin). The segment correlation of shelf and

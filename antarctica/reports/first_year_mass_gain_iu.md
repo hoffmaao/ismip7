@@ -4,7 +4,7 @@ IU's Budd forwards gain ice from their first step. The 2 km historical from the
 relaxed controls gains 15.5 mm of VAF from 2003 to 2015 (CESM2-WACCM, no
 apparent mass balance), and its control keeps gaining about 1.3 mm a year. The
 same runs carry a cell-scale pattern in dH (the "checkerboard"). This report
-collects the tests IU ran on 13 and 14 October 2026 to find which parts of the
+collects the tests IU ran from 13 to 15 October 2026 to find which parts of the
 initial state drive that first-year imbalance. Run records:
 `antarctica/runlog/test-*-first-year-*.json` and the ones named below.
 
@@ -221,6 +221,53 @@ The fit matches the cell mean's noise reduction at a short alpha, rings at
 jumps, and fills every gap, so as a velocity target it needs an observation
 mask of its own.
 
+## 8. The 2003 to 2015 historical under both targets and both geometry spaces, 2 km
+
+Four CESM2-WACCM historicals from 2003 to 2015, identical but for the geometry
+space and the MAP (`submit_fymg.sh`, `fymg_collect.py`, `plot_fymg.py`). Each
+MAP is 150 iterations of the objective above from IU's 2 km `_ef2_vf` MAP: the
+DG0 pair of section 2, PR 169's DG1 point refit (job 12204198) and a DG1
+cell_mean refit (job 12253651). The forwards take section 2's settings, run to
+2015, on this PR's code merged with main, which carries PR 169's DG1 forcing.
+`resid` is 0.00 on every row. The production historical (relaxed controls) is
+the reference.
+
+| | DG0 point | DG0 cell_mean | DG1 point | DG1 cell_mean | production |
+|---|---|---|---|---|---|
+| MAP misfit at 150 iterations | 1,271 | 1,960 | 1,275 | 1,984 | |
+| VAF change by 2004 (mm) | +0.53 | +0.06 | +0.39 | -0.05 | +0.71 |
+| VAF change by 2008 (mm) | +6.59 | +4.48 | +4.30 | +2.59 | +6.81 |
+| VAF change by 2011 (mm) | +10.99 | +7.83 | +6.61 | +3.98 | +11.10 |
+| VAF change by 2015 (mm) | +15.55 | +11.08 | +7.65 | +4.22 | +15.46 |
+| grounding-line flux, 2003 (Gt/yr) | 1,775 | 1,949 | 1,887 | 2,061 | |
+| grounding-line flux, mean of 2012 to 2014 (Gt/yr) | 1,530 | 1,644 | 1,881 | 1,948 | |
+| grounded area, 2014 minus 2003 (km²) | +10,900 | +11,100 | -1,500 | -1,700 | |
+| calving, mean of 2003 to 2014 (Gt/yr) | 1,275 | 1,387 | 1,416 | 1,499 | 1,320 |
+| total mass change by 2015 (Gt) | +1,616 | +268 | -573 | -1,579 | +1,094 |
+
+VAF changes are taken from the first timeseries row (2003.025); the fluxes and
+the grounded area come from the ISMIP7 scalars. SMB is 2,453 Gt/yr on average
+in every run, and melt 1,043 under DG0 and 1,085 under DG1.
+
+- The DG0 point MAP drifts as the production historical does (+15.55 against
+  +15.46 mm), so the relaxed controls and a 150-iteration refit carry the same
+  drift.
+- The cell-mean target lowers the 2015 gain by 4.5 mm under DG0 (29 %) and
+  3.4 mm under DG1. DG1 lowers it by 7.9 mm from the point MAP (51 %) and
+  6.9 mm from the cell_mean one. Together they take it to 4.2 mm (73 %); the
+  two effects add to within 1.1 mm.
+- Under DG0 the grounding-line flux falls 14 % (point) and 16 % (cell_mean)
+  over the period and the grounded area grows by about 11,000 km². Under DG1
+  it falls 0.3 % and 5.5 %, and the grounded area shrinks by about 1,600 km².
+  DG1 cell_mean holds the flux closest to Rignot et al. (2019), 2,050 plus or
+  minus 100 Gt/yr.
+- From 2011 to 2015 the DG1 runs gain 1.04 mm (point) and 0.23 mm (cell_mean)
+  against 4.56 mm under DG0 point; the gain that remains under DG1 builds up
+  before 2011. Every run gains less in 2011 and 2013 and more in 2014, with
+  the forcing.
+
+Figure: Quartz `figs/fymg_hist2km.png` (cumulative and yearly VAF change).
+
 ## Findings
 
 1. The cell-scale pattern is the first year's imbalance carried forward, and
@@ -234,11 +281,20 @@ mask of its own.
    line the cell_mean MAP overshoots a target that matches the point one.
 5. Thin unobserved front vertices at Shirase Glacier run at 1e5 to 1e6 m/yr in
    both 2 km MAPs.
+6. Over the 2 km CESM2-WACCM historical the cell-mean target lowers the 2003
+   to 2015 VAF gain from 15.6 to 11.1 mm under DG0, DG1 geometry lowers it to
+   7.7 mm, and the two together to 4.2 mm. Under DG1 the grounding-line flux
+   holds within 6 % of its initial value and the grounded area shrinks by
+   about 1,600 km²; under DG0 the flux falls 14 to 16 % and the grounded area
+   grows by about 11,000 km².
 
 ## Cost
 
-About 220 core-hours on IU Quartz for the work above (the 2 km velocity-sampling
-pair about 170 of it), plus the 2 km convergence chain.
+About 220 core-hours on IU Quartz for sections 1 to 7 (the 2 km
+velocity-sampling pair about 170 of it), plus the 2 km convergence chain.
+Section 8 took about 890: the DG1 cell_mean refit 57 (32 ranks, 1 h 47) and the
+four historicals 830 (32 ranks; 6.1 h DG0 point, 5.4 h DG0 cell_mean, 8.2 h DG1
+point, 6.2 h DG1 cell_mean).
 
 ## Artifacts and reproducing
 
@@ -251,4 +307,10 @@ test forwards' timeseries), `maps_25km/` (every 25 km MAP of these tests) and
 is rebuilt by its wrapper. The runs used the Quartz worktree
 `/N/scratch/dlilien/ismip7_rehearsal25iu/runvs` at c62bcf0, which is this PR's
 first commit applied to PR 168's branch at 74d0b84; the checkerboard runs used
-288382a (PR 163's head) and 74d0b84 for the CG1 rerun.
+288382a (PR 163's head) and 74d0b84 for the CG1 rerun. Section 8 ran in the
+Quartz worktree `/N/scratch/dlilien/ismip7_rehearsal25iu/runfymg` at 0220ece,
+this PR at 32b378d merged with main 92b6598, which has the same code as the
+PR's merge of main (47bdfcc). Its scripts, `json/fymg_hist2km.json`,
+`figs/fymg_hist2km.png`, the timeseries and scalars CSVs and the job logs are in
+the artifact tree; the DG1 cell_mean MAP and the forward states stay on
+`/N/scratch/dlilien/ismip7_fymg/`.

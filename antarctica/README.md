@@ -108,9 +108,9 @@ the first year's operator, as the writer did before. On the 2 km production
 mesh, where every year stores one mesh, that took an 86-year core from 2 h
 24 min to 11 min on one core, about 2 min of setup and 6.4 s a model year in
 at most 3.8 GB, with every array and attribute of the files unchanged (IU
-Quartz, October 2026). The checker reads the written NetCDF, a few GB after zlib, so it can stay
-wherever the newer Python is. Rice NOTS carries the writer's dependencies; the
-checker runs here on the workstation.
+Quartz, October 2026). The checker reads the written NetCDF, a few GB after
+zlib, so it can stay wherever the newer Python is. Rice NOTS carries the
+writer's dependencies; the checker runs here on the workstation.
 
 ### 0.4 Accounts
 

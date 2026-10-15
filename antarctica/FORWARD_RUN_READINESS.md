@@ -514,8 +514,9 @@ Forcing data:
 - [x] #32, #33, #41 item 6 OCX: the readers open the real tree and core 11 runs
       on it by default (`ISMIP7_OCX_FORCING`).
 - [~] #48 Cook: the regenerated OCX ocean v2 matches the climatology, and a
-      run refuses the v1 (section 11). `check_melt_bound.py --ocx` is the
-      tripwire. [ ] Run it on v2 at each site. (issue #11)
+      run refuses the v1 (section 11). The `check_melt_bound.py --ocx`
+      tripwire is clean on v2 on Quartz, 15 October.
+      [ ] NOTS and Midway run it on their own meshes. (issue #11)
 - [~] #11 Ross warm stripe: a feature of the climatology. Thermal forcing is
       used unsmoothed, in the README. A perturbed member, not a fix.
 - [x] #25 melt toolbox re-release: recalibrated on 14 September, section 4.
@@ -1174,3 +1175,21 @@ relaxation year on the v1 without a word. `OCEAN_MIN_VERSION` in
 `check_melt_bound.py --ocx`. `audit_forcing_versions.py` is unchanged: a
 v1-only OCX ocean row already reads `BEHIND` and exits 1. The trees at Rice
 NOTS and UChicago Midway were not listed.
+
+**The tripwire on v2, IU Quartz, 15 October** (`check_melt_bound.py --ocx
+main` from `main` at `77515c3`, serial, debug partition). Both meshes compared
+`ocean/main v2` and flagged no basin and no block in 2000, 2015 or 2025:
+
+| | 21 September, v1, 1000 m | 15 October, v2, IU's 2 km production mesh |
+|---|---|---|
+| basin 5, climatology against OCX (Gt/yr) | 93.5 against 47.0, ratio 0.50 | 22.3 against 22.1, ratio 0.99 |
+| Cook block, x +1152 km, y -2176 km (Gt/yr) | 57.2 against 11.0, ratio 0.19 | 11.3 against 11.3, ratio 0.99 |
+| largest departure above 2 Gt/yr | Cook | basin 14, Filchner-Ronne, ratio 0.88 |
+
+The 2 km run (job 12266384, the relaxed MAP's mesh, the 2 km `vertex_front`
+refit that production core 11 read) exits 0. The 1 km run (job 12266388, the
+1 km timing state of 21 September with the tracked calibration) shows the
+same OCX rows and exits 1 on the other half of the check: basins 1 and 7 miss
+the fitted totals by 0.22 and 0.14 percent, because the offsets were fitted
+on Rice's build of the 1 km mesh (1,869,252 vertices) and the state is
+another build (1,869,088). NOTS and Midway owe their own runs.

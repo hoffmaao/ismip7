@@ -268,6 +268,85 @@ in every run, and melt 1,043 under DG0 and 1,085 under DG1.
 
 Figure: Quartz `figs/fymg_hist2km.png` (cumulative and yearly VAF change).
 
+## 9. Shelf thinning and the grounded ice upstream, 2 km
+
+Section 8's historicals and the production historical, against Smith et al.
+(2020) over the same 12 years (`dh_maps_fymg.py`, `shelf_coupling_fymg.py`;
+DG1 fields taken as cell means). Mass change 2003 to 2015 over ice grounded in
+2003, in Gt, the models on the cells Smith observes:
+
+| | DG1 cell_mean | production | Smith |
+|---|---|---|---|
+| all grounded ice | +530 | +3,990 | -936 |
+| Amundsen | -2,956 | -1,875 | -1,582 |
+| Getz | -339 | +2 | -500 |
+| Queen Mary and Wilkes | +472 | +1,169 | -494 |
+| Filchner-Ronne | +492 | +755 | +528 |
+| Dronning Maud Land | +50 | +95 | +432 |
+| floating ice, all cells (models) | -1,734 | -3,741 | |
+
+The two runs differ mostly along the coast and the grounding zones, where DG1
+cell_mean thins more; inland they agree, and both carry flow-aligned streaks
+in their 25 km means where Smith is near zero. Over grounded cells Smith
+observes, each run's cell-by-cell RMS difference from Smith is 8.4 m (DG1
+cell_mean) and 9.5 m (production).
+
+The 2003 grounding line is cut into 50 km segments, each holding the floating
+ice within 20 km seaward of it and the grounded ice within 20 km landward
+(every cell joins the segment of its nearest cell across the line). Per
+segment: each side's mean thickness change 2003 to 2015, and the grounded
+side's change in mean speed from the end of 2003 to the end of 2014 (ISMIP7
+annual fields, so the first year's adjustment is left out). Over 639
+segments:
+
+| | production | DG0 point | DG0 cell_mean | DG1 point | DG1 cell_mean | Smith |
+|---|---|---|---|---|---|---|
+| correlation of shelf and grounded thickness change | +0.08 | +0.18 | +0.17 | +0.10 | +0.12 | +0.62 |
+| grounded thinning per metre of shelf thinning (m) | 0.03 | 0.08 | 0.07 | 0.05 | 0.03 | 0.22 |
+| shelf thins by more than 5 m: grounded ice thins | 40 % | 39 % | 47 % | 55 % | 61 % | 89 % |
+| shelf thins by more than 5 m: grounded ice speeds up | 25 % | 24 % | 23 % | 38 % | 39 % | |
+| mean grounded speed change near the line | -7.8 % | -9.7 % | -9.0 % | -3.4 % | -3.5 % | |
+| grounded area change, end of 2003 to end of 2014 (km²) | +7,600 | +10,700 | +10,900 | -1,500 | -1,700 | |
+
+- Under DG0, behind the segments whose shelf thins by more than 5 m, the
+  grounded ice slows in 76 to 77 % and thickens in 53 to 61 %. At Getz the production shelf thins 16 m and the grounded band
+  thickens 4.6 m and slows 17 %; DG1 cell_mean thins the band 4.7 m behind a
+  12 m shelf thinning (Smith: 20 m and 8.4 m). At Wilkes the production shelf
+  thins 9.7 m and the band thickens 5.9 m; under DG1 cell_mean the band thins
+  8.3 m and speeds up 16 % (Smith: band thins 2.8 m).
+- In Amundsen every run couples shelf and grounded thinning, and DG1
+  overshoots: the band thins 31 to 32 m against 15 m in Smith.
+- Amery, Bellingshausen, the Peninsula and basins 12 and 13 slow by 16 to
+  30 % near the line in every run, and their grounded band thickens by 4 to
+  9 m (basin 13 by at most 1.6 m), where Smith shows little change; the
+  geometry space and the target leave that unchanged.
+- Under either geometry space the point and cell_mean MAPs couple alike; the
+  change comes from DG1.
+
+Figures: Quartz `figs/dh_maps_dg1cm_vs_prod.png` and
+`figs/shelf_coupling_2km.png`.
+
+## 10. DG1 cell_mean into ssp126, 2 km
+
+The DG1 cell_mean historical continues into CESM2-WACCM ssp126 from its 2015
+state (job 12261774, `submit_fymg.sh proj`), with the production ssp126's
+settings but for the geometry space and the MAP, to the driver's 2301. To
+2018.7, against the production ssp126 over the same years:
+
+| | 2015 | 2016 | 2017 |
+|---|---|---|---|
+| VAF change in the year, production (mm) | +1.07 | +1.30 | +1.32 |
+| VAF change in the year, DG1 cell_mean (mm) | +0.05 | +0.25 | +0.24 |
+| grounding-line flux, production (Gt/yr) | 1,545 | 1,553 | 1,558 |
+| grounding-line flux, DG1 cell_mean (Gt/yr) | 1,930 | 1,944 | 1,963 |
+| grounded area, production (km², change from 2015) | 0 | +170 | +380 |
+| grounded area, DG1 cell_mean (km², change from 2015) | 0 | -750 | -1,360 |
+
+By 2018.7 the production chain holds +20.7 mm of VAF since 2003 and DG1
+cell_mean +5.5 mm. SMB is the same in both (2,322 to 2,418 Gt/yr); DG1
+cell_mean melts about 80 Gt/yr more and calves about 190 Gt/yr more. `resid`
+is 0.00 on every row. Figure: Quartz `figs/fymg_vaf_ssp126_to2018.7.png`.
+
 ## Findings
 
 1. The cell-scale pattern is the first year's imbalance carried forward, and
@@ -287,6 +366,16 @@ Figure: Quartz `figs/fymg_hist2km.png` (cumulative and yearly VAF change).
    holds within 6 % of its initial value and the grounded area shrinks by
    about 1,600 km²; under DG0 the flux falls 14 to 16 % and the grounded area
    grows by about 11,000 km².
+7. Under DG0, behind the segments whose shelf thins by more than 5 m, the
+   grounded ice slows in 76 to 77 % and thickens in 53 to 61 %. DG1 raises the
+   share whose grounded ice thins from 40 % (production) to 55 % (point) and
+   61 % (cell_mean), and the share whose grounded ice speeds up from 25 % to
+   38 and 39 % (Smith: 89 % thin). The segment correlation of shelf and
+   grounded change stays at +0.08 to +0.18 in every run, against +0.62 in
+   Smith.
+8. Into ssp126, DG1 cell_mean gains 0.2 mm of VAF a year where the production
+   chain gains 1.3 mm, with a grounding-line flux 400 Gt/yr higher and a
+   grounded area that shrinks.
 
 ## Cost
 
@@ -294,7 +383,9 @@ About 220 core-hours on IU Quartz for sections 1 to 7 (the 2 km
 velocity-sampling pair about 170 of it), plus the 2 km convergence chain.
 Section 8 took about 890: the DG1 cell_mean refit 57 (32 ranks, 1 h 47) and the
 four historicals 830 (32 ranks; 6.1 h DG0 point, 5.4 h DG0 cell_mean, 8.2 h DG1
-point, 6.2 h DG1 cell_mean).
+point, 6.2 h DG1 cell_mean). Sections 9 and 10's analyses took under an hour
+of one core each; the ssp126 run costs about 17 core-hours a model year
+(32 ranks, 0.52 h a year to 2018.7).
 
 ## Artifacts and reproducing
 
@@ -313,4 +404,7 @@ this PR at 32b378d merged with main 92b6598, which has the same code as the
 PR's merge of main (47bdfcc). Its scripts, `json/fymg_hist2km.json`,
 `figs/fymg_hist2km.png`, the timeseries and scalars CSVs and the job logs are in
 the artifact tree; the DG1 cell_mean MAP and the forward states stay on
-`/N/scratch/dlilien/ismip7_fymg/`.
+`/N/scratch/dlilien/ismip7_fymg/`. Sections 9 and 10 add `dh_maps_fymg.py`,
+`shelf_coupling_fymg.py`, `plot_shelf_coupling.py` and `plot_fymg_ext.py` to
+`scripts/`, `dh_basins_dg1cm_vs_prod.json` and `shelf_coupling_2km.json` to
+`json/`, and their figures to `figs/`.

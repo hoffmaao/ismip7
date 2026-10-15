@@ -565,6 +565,11 @@ def compare_with_ocx(a, g):
     # one on disk, and upstream regenerates these files (discussion #48).
     for line in describe_forcing_provenance(ocean):
         PETSc.Sys.Print(f"  {line}")
+    for var in ("tf", "so"):
+        problem = ocean.version_problem(var)
+        if problem:
+            PETSc.Sys.Print(f"  [!] {problem}: a run refuses this file, so the "
+                            f"comparison below describes forcing no run reads")
     status = 0
     for year in years:
         other = melt_with(ocean.get_thermal_forcing(year, g["x"], g["y"], draft=g["draft"]),

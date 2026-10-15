@@ -53,10 +53,11 @@ front positions in `obs/`), ice mask ends 2021. The spatially shifted AIS OCX
 17th to be OCX only; the OCX gradients are v2 on the mirror. Core 11's
 SMB-elevation feedback reads the OCX `dacabfdz` and refuses anything older than
 v2 (`ATMOSPHERE_MIN_VERSION` in `icepack2_tools/forcing.py`). It is also the
-case that showed a re-sync could not see a replaced file, see section 6. Open since 17 September: the OCX `main`
-thermal forcing departs from the Zhou climatology around Mertz (#48). Confirmed
-upstream on 20 September: OCX was built on an earlier extrapolation and is
-being regenerated, with no date set, section 7.
+case that showed a re-sync could not see a replaced file, see section 6. The OCX
+ocean v1 was built on an earlier extrapolation of the climatology and ran cold
+under Cook (#48, section 7). The regenerated v2 of all four variants reached
+the mirror on 25 September and matches the climatology; the readers open it,
+and a run refuses the v1 (`OCEAN_MIN_VERSION`), section 11.
 
 **Fracture masks (#29, #30, #33).** Both ESMs' SSPs (CESM ssp585 at v2.1), none
 for historical or OCX. Floating ice only. The masks light up near the grounding
@@ -512,9 +513,9 @@ Forcing data:
       question 19 names it.
 - [x] #32, #33, #41 item 6 OCX: the readers open the real tree and core 11 runs
       on it by default (`ISMIP7_OCX_FORCING`).
-- [~] #48 Mertz, and Cook by the product author's account: OCX confirmed built
-      on an earlier extrapolation and being regenerated, no date set (section 7).
-      `check_melt_bound.py --ocx` is the tripwire. [ ] Run it. (issue #11)
+- [~] #48 Cook: the regenerated OCX ocean v2 matches the climatology, and a
+      run refuses the v1 (section 11). `check_melt_bound.py --ocx` is the
+      tripwire. [ ] Run it on v2 at each site. (issue #11)
 - [~] #11 Ross warm stripe: a feature of the climatology. Thermal forcing is
       used unsmoothed, in the README. A perturbed member, not a fix.
 - [x] #25 melt toolbox re-release: recalibrated on 14 September, section 4.
@@ -564,12 +565,11 @@ Output and submission:
    timeseries (`collapse_*_cells`), the budget lines and the core report.
    `mask_front` has unit tests for the rule and a 1-against-3
    rank check of the facet sweep, and has not yet run inside a forward. (issue #10)
-9. **Run `check_melt_bound.py --ocx` on the production mesh** before core 11
-   runs on the OCX product, and hold that run until #48 is answered if the
-   Mertz block is flagged. `ISMIP7_OCX_FORCING=stopgap` reproduces the old
-   core 11 meanwhile. The 20 September answer names the cause and promises
-   regenerated files with no date, and places the difference at Cook, so read
-   the Cook block as well as Mertz, section 7. (issue #11)
+9. **Run `check_melt_bound.py --ocx` on the production mesh** against the
+   OCX ocean v2, the regenerated file of #48, and read the Cook block as well
+   as Mertz. The v1 that flagged Cook on 21 September is refused at startup
+   (section 11). `ISMIP7_OCX_FORCING=stopgap` reproduces the old core 11.
+   (issue #11)
 10. **Re-run isschecker** on full-length 32 km control and ssp585 outputs and
     record the version in the README. Done on 23 September at 0.5.1, on IU
     Quartz, and closed as icepack/ismip7#12. The first pass, over the three p2
@@ -1127,3 +1127,50 @@ the one naming error and checked no file, and the patched checker checked all
 the list of non-mandatory variables the model does not write. The
 rehearsal's own output chain, which lives outside the repository, still
 passes `--esm OCX` for core 11, and the writer now refuses that. (issue #18)
+
+## 11. The regenerated OCX ocean, 15 October (issue #11)
+
+The OCX ocean v2 of all four variants (`cold`, `main`, `vary`, `warm`) reached
+the mirror on 25 September (forum thread 40), and the v1 came off it. The
+9 October re-sync changed no OCX file, and on 15 October IU found nothing in
+Globus `OCX/ocean` newer than 21 September. The v2 files name
+`build_contemporary_AIS_ocean_v3.py` in their `history`, the v1 files
+`build_contemporary_AIS_ocean_new.py`.
+
+Thermal forcing of `main` in 2015 against the Zhou `06_nov` v3 climatology,
+over the 579,121 ocean cells of the 8 km grid at each level (IU Quartz,
+15 October, read only):
+
+| level | file | rms (°C) | mean (°C) | cells off by more than 1 °C | Cook box, OCX against climatology (°C) |
+|---|---|---|---|---|---|
+| 390 m | v1 | 0.119 | -0.020 | 4,486 | 0.45 against 1.71 |
+| 390 m | v2 | 0.004 | -0.004 | 0 | 1.71 against 1.71 |
+| 510 m | v1 | 0.127 | -0.025 | 4,448 | 0.60 against 1.95 |
+| 510 m | v2 | 0.008 | -0.008 | 0 | 1.94 against 1.95 |
+
+The Cook box is 80 km square, centred x +1082 km, y -2079 km. Boxes of the
+same size at Mertz (x +1440 km, y -2030 km), Ross, Filchner-Ronne, Amery and
+Pine Island agree across v1, v2 and the climatology to 0.02 °C at both levels.
+The OI climatology the melt calibration is fitted to
+(`meltMIP/OI_Climatology_ismip8km_60m_tf_extrap.nc`) equals Zhou `06_nov` at
+both levels to rms 0.000, so the question section 7 left open, `06_nov`
+against `30_sep`, has no effect.
+
+What read which version, from the runs' provenance lines:
+
+| run | OCX ocean |
+|---|---|
+| IU's 2 km production core 11, `core11-2km-ocx-r2kiurlcnoamb` (job 11912190) | `main` v2 |
+| the relaxation year of its initial state, `inversion-2km-budd-b20k-ef2-vf-relax2014-year` (job 11883141) | `main` v2 |
+| `core11-32km-ocx-i104off`, 24 September, a probe for issue #104 | `main` v1 |
+| `core11-25km-ocx-rehnoamb-oceanv1`, superseded by its v2 rerun | `main` v1 |
+
+The reader asks for `OCEAN_VERSION` (`v3`) and opens the highest version on
+disk, so a tree synced before 25 September would have run core 11 or a
+relaxation year on the v1 without a word. `OCEAN_MIN_VERSION` in
+`icepack2_tools/forcing.py` now refuses an OCX ocean older than v2 in
+`ISMIP7Ocean.require_years`, in `projections/ocx.py`'s `protocol_forcing`
+(core 11 and the relaxation year), in the preflight, and with a `[!]` line in
+`check_melt_bound.py --ocx`. `audit_forcing_versions.py` is unchanged: a
+v1-only OCX ocean row already reads `BEHIND` and exits 1. The trees at Rice
+NOTS and UChicago Midway were not listed.

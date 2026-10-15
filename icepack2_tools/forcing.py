@@ -382,6 +382,21 @@ ATMOSPHERE_MIN_VERSION = {
     (OCX_ATMOSPHERE_SOURCE, OCX, "dacabfdz"): "v2",
 }
 
+# The oldest ocean version a run may read, per (ESM or source, scenario), for
+# every variable and every OCX variant. The ocean reader asks for
+# ``OCEAN_VERSION`` and falls back to the highest version on disk, so a tree
+# synced before 25 September 2026 holds only the OCX ocean v1 and is read
+# without a word. That v1 was built on an earlier extrapolated climatology
+# (discussion #48): thermal forcing at 510 m under Cook is 0.60 degC in v1,
+# 1.94 in v2 and 1.95 in the climatology the melt calibration is fitted to,
+# and v2 departs from that climatology by 0.008 degC rms over every ocean
+# cell at 510 m (Quartz, 15 October 2026; FORWARD_RUN_READINESS.md section
+# 11). ``ISMIP7Ocean.version_problem`` states it, and ``require_years`` and
+# the OCX driver's ``protocol_forcing`` refuse it.
+OCEAN_MIN_VERSION = {
+    (OCX_OCEAN_SOURCE, OCX): "v2",
+}
+
 
 def _scenario_dir(root, esm, scenario):
     r"""``<root>/<esm>/<scenario>``, or ``<root>/OCX/<source>`` for OCX."""
@@ -990,10 +1005,36 @@ class ISMIP7Ocean:
         spans = self.spans(variable)
         return (spans[0][0], max(sp[1] for sp in spans)) if spans else None
 
+    def version_problem(self, variable="tf"):
+        r"""What is wrong with the version of ``variable`` on disk, or None:
+        older than ``OCEAN_MIN_VERSION`` allows for this tree. An absent
+        variable is ``coverage``'s to report."""
+        floor = OCEAN_MIN_VERSION.get((self.esm, self.scenario))
+        vdir = self._var_dir(variable)
+        if floor is None or vdir is None or not os.path.isdir(vdir):
+            return None
+        have = os.path.basename(vdir)
+        key = version_key(have)
+        if key is not None and key >= version_key(floor):
+            return None
+        product = f"ocean/{self.variant}" if self.scenario == OCX else "ocean"
+        return (f"{variable} for {self.esm} {self.scenario} {product} is {have} "
+                f"on disk and a run needs {floor} or newer (OCEAN_MIN_VERSION in "
+                f"icepack2_tools/forcing.py)")
+
+    def mirror_prefix(self, variable="tf"):
+        r"""The ``download_mirror.py`` prefix that fetches ``variable`` into
+        this tree: the mirror's ``data/`` layout is the local one."""
+        vdir = self._var_dir(variable)
+        if vdir is None:
+            return f"data/<tree>/{variable}/"
+        rel = os.path.relpath(os.path.dirname(vdir), self.data_root)
+        return f"data/{rel.replace(os.sep, '/')}/"
+
     def require_years(self, first, last, variables=("tf", "so")):
         r"""Refuse a run that needs years ``first`` to ``last`` from a tree
-        that does not hold them, and return the ``(first, last)`` span every
-        variable covers.
+        that does not hold them at an accepted version, and return the
+        ``(first, last)`` span every variable covers.
 
         A variable with no files at all reads as zero thermal forcing
         (``get_thermal_forcing``), so a run on an absent tree would melt
@@ -1003,6 +1044,12 @@ class ISMIP7Ocean:
         """
         covers = []
         for var in variables:
+            problem = self.version_problem(var)
+            if problem:
+                raise FileNotFoundError(
+                    f"{problem}. Fetch it with `python "
+                    f"antarctica/scripts/download_mirror.py "
+                    f"{self.mirror_prefix(var)}`.")
             cover = self.coverage(var)
             if cover is None:
                 raise FileNotFoundError(

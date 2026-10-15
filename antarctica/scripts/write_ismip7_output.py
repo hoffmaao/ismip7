@@ -20,12 +20,17 @@ mesh is therefore loaded once, from the first year, and a later year is read
 onto it when everything in its file outside the functions' values (the
 topology, labels, distribution, sections and both coordinate vectors) hashes
 equal to the first year's (``mesh_signature``); a year there then takes
-about 6.4 s. A year whose file differs is read onto its own mesh, as
-``--mesh-per-year`` reads every year, and the run names it.
-``CheckpointFile.load_function`` maps a file's fields onto a mesh through
-the topology the file stores, so where two files store the same one the
-arrays read onto the first year's mesh are the ones the year's own mesh
-gives, and the files written are the same.
+about 6.4 s. ``CheckpointFile.load_function`` maps a file's fields onto a
+mesh through the topology the file stores, so where two files store the
+same one the arrays read onto the first year's mesh are the ones the year's
+own mesh gives, and the files written are the same. A year whose file
+stores another mesh is read onto that mesh and regridded through an overlap
+operator built for it, with its own cell areas and af2; each distinct mesh
+is loaded and given its operator once, later years that store it reuse
+both, and the run names every such year. ``--mesh-per-year`` loads every
+year's own mesh and regrids it through the first year's operator, as the
+writer did before; on a series whose years all store one mesh it writes the
+same files.
 
 It writes one NetCDF per variable under
 ``DIR/AIS/<source_id>/<ism_id>/<set_id>/<exp>/``, named
@@ -60,8 +65,10 @@ the policy names: ``forbidden`` (thickness, fractions) over the whole pixel
 with the uncovered part counting as zero, so sums over the grid are the
 model's sums; ``outside_domain`` (elevations) over the covered part, filling
 pixels the model does not cover; ``no_ice`` and friends over the ice part,
-filling pixels without it. The overlap operator is cached next to the input
-(``<annual>.overlap.npz``) because it depends on the mesh only.
+filling pixels without it. The first year's overlap operator is cached next
+to the input (``<annual>.overlap.npz``) because it depends on the mesh only;
+the operator of any other mesh in the series is built in memory and never
+saved.
 
 The ten scalars are the run's CSV as it stands, after one check of the area
 they integrate over. A current forward weights each cell by af2 = (1/k)^2 of
@@ -356,50 +363,74 @@ def mesh_signature(h5):
     return h.hexdigest()
 
 
-class SeriesMesh:
-    r"""The model mesh of a series, loaded once, and each year's fields on it.
+class CellOverlap:
+    r"""A model mesh with its overlap operator ``W`` onto the 8 km grid, and
+    each cell's area (``W``'s column sums) and af2 at its centroid in ``W``'s
+    column order, which tell which area the scalars CSV integrates over."""
 
-    The first year's mesh is loaded from its file. ``read`` loads a later
-    year's fields onto it when the year file's ``mesh_signature`` equals the
-    first year's, and onto a mesh loaded from that year's own file when it
-    does not; ``own_mesh`` lists the years read that way. ``per_year`` reads
-    every year onto its own mesh, the first included."""
+    def __init__(self, mesh, W):
+        self.mesh, self.W = mesh, W
+        self.cell_area = np.asarray(W.sum(axis=0)).ravel()
+        X = fd.SpatialCoordinate(mesh)
+        self.cell_af2 = area_factor(*(fd.Function(fd.FunctionSpace(mesh, "DG", 0)).interpolate(X[i]).dat.data_ro
+                                      for i in (0, 1)))
+
+
+class SeriesMesh:
+    r"""The model meshes of a series, each loaded once with its overlap
+    operator, and each year's fields on the mesh its file stores.
+
+    The first year's mesh is loaded from its file and its operator read from
+    or saved to ``<annual>.overlap.npz``. ``read`` loads a later year's
+    fields onto a mesh already loaded when the year file's
+    ``mesh_signature`` equals that mesh's file's, and otherwise loads the
+    year's own mesh and builds its operator in memory; ``other`` maps every
+    year read onto a mesh other than the first year's to the year its mesh
+    was loaded from. ``per_year`` reads every year onto its own mesh, the
+    first included, and regrids it through the first year's operator."""
 
     def __init__(self, annual, first_year, per_year=False):
         self.annual, self.first_year, self.per_year = annual, first_year, per_year
         with fd.CheckpointFile(AnnualOutput.year_path(annual, first_year), "r") as chk:
-            self.mesh = chk.load_mesh()
+            mesh = chk.load_mesh()
             self.signature = None if per_year else mesh_signature(chk.h5pyfile)
-        self.own_mesh = []
+        self.first = CellOverlap(mesh, overlap_operator(mesh, annual + ".overlap.npz"))
+        self.seen = {self.signature: (first_year, self.first)}
+        self.other = {}
 
     def read(self, yr):
-        r"""The year's banked fields as cell arrays in the order of
-        ``self.mesh``'s cells, and its ``front_melt`` stamp."""
+        r"""The year's banked fields as cell arrays, its ``front_melt``
+        stamp, and the ``CellOverlap`` to regrid them through."""
         with fd.CheckpointFile(AnnualOutput.year_path(self.annual, yr), "r") as chk:
-            if self.per_year or (yr != self.first_year
-                                 and mesh_signature(chk.h5pyfile) != self.signature):
-                mesh = chk.load_mesh()
-                self.own_mesh.append(yr)
-                if not self.per_year:
-                    print(f"  year {yr}: the file's mesh differs from {self.first_year}'s, "
-                          f"so its fields are read onto its own mesh", flush=True)
+            if self.per_year:
+                mesh, on = chk.load_mesh(), self.first
             else:
-                mesh = self.mesh
+                sig = self.signature if yr == self.first_year else mesh_signature(chk.h5pyfile)
+                if sig not in self.seen:
+                    mesh = chk.load_mesh()
+                    self.seen[sig] = (yr, CellOverlap(mesh, overlap_operator(mesh, None)))
+                    print(f"  year {yr}: the file's mesh differs from every one read before, so "
+                          f"it is loaded with its own overlap operator", flush=True)
+                source, on = self.seen[sig]
+                if source != self.first_year:
+                    self.other[yr] = source
+                mesh = on.mesh
             cells = {var: chk.load_function(mesh, name=var).dat.data_ro.copy()
                      for var in VARIABLES_BANKED}
             booking = (str(chk.get_attr("/", FRONT_MELT_ATTR))
                        if chk.has_attr("/", FRONT_MELT_ATTR) else UNSTAMPED_MELT)
-        return cells, booking
+        return cells, booking, on
 
     def summary(self, years):
         r"""The line that says which mesh every year was read onto."""
         if self.per_year:
             return f"  mesh: each of the {len(years)} years read onto its own (--mesh-per-year)"
         line = (f"  mesh: loaded once, from {self.first_year}; "
-                f"{len(years) - len(self.own_mesh)} of {len(years)} years read onto it")
-        if self.own_mesh:
-            line += (f", {len(self.own_mesh)} onto their own, whose files differ: "
-                     + ", ".join(str(y) for y in self.own_mesh))
+                f"{len(years) - len(self.other)} of {len(years)} years read onto it")
+        if self.other:
+            line += (f", {len(self.other)} onto another mesh with its own overlap operator: "
+                     + ", ".join(str(y) if y == src else f"{y} (on {src}'s)"
+                                 for y, src in self.other.items()))
         return line
 
 
@@ -662,8 +693,9 @@ def main():
     ap.add_argument("--scalars", default=None, help="the *_ismip7_scalars.csv (default: next to the annual file)")
     ap.add_argument("--mesh-per-year", action="store_true",
                     help="read every year onto a mesh loaded from its own file, at about "
-                         "95 s a year on the 2 km mesh, instead of onto the first year's "
-                         "wherever the file's mesh matches it; the files written are the same")
+                         "95 s a year on the 2 km mesh, and regrid it through the first "
+                         "year's overlap operator, as the writer did before; on a series "
+                         "whose years all store one mesh the files written are the same")
     a = ap.parse_args()
     try:
         a.esm = forcing_id(a.esm, a.scenario)
@@ -695,18 +727,11 @@ def main():
             f"with {len(missing)} missing ({missing[0]}..{missing[-1]}); a "
             f"submission needs a contiguous series."
         )
-    series = SeriesMesh(a.annual, years[0], per_year=a.mesh_per_year)
-    mesh = series.mesh
     print(f"{os.path.basename(a.annual)}: years {years[0]}-{years[-1]}, "
           f"{len(VARIABLES_2D)} variables", flush=True)
-    W = overlap_operator(mesh, a.annual + ".overlap.npz")
+    series = SeriesMesh(a.annual, years[0], per_year=a.mesh_per_year)
+    W = series.first.W
     print(f"  overlap operator {W.shape}, {W.nnz} entries, pixels covered {int((W.sum(axis=1) > 0).sum())}", flush=True)
-    # each cell's area and af2 at its centroid, in the operator's column
-    # order, to tell which area the scalars CSV integrates over
-    cell_area = np.asarray(W.sum(axis=0)).ravel()
-    X = fd.SpatialCoordinate(mesh)
-    cell_af2 = area_factor(*(fd.Function(fd.FunctionSpace(mesh, "DG", 0)).interpolate(X[i]).dat.data_ro
-                             for i in (0, 1)))
 
     scal = a.scalars or a.annual.replace("_ismip7_annual.h5", "_ismip7_scalars.csv")
     if not os.path.exists(scal):
@@ -759,21 +784,25 @@ def main():
         booking_of = {}
         area_of = {}
         for k, yr in enumerate(years):
-            cells, booking_of[yr] = series.read(yr)
+            cells, booking_of[yr], on = series.read(yr)
             series_front_melt(booking_of)
-            # the overlap operator is built once from the first year's mesh;
-            # a series whose links remeshed cannot be regridded through it
+            W = on.W
+            # a year is regridded through the operator of the mesh it was
+            # read onto, unless --mesh-per-year holds it to the first year's
             if len(cells["lithk"]) != W.shape[1]:
                 raise ValueError(
                     f"year {yr} has {len(cells['lithk'])} cells but the overlap "
-                    f"operator was built from year {years[0]}'s {W.shape[1]}: "
-                    f"the mesh changed inside the series, so one conservative "
-                    f"operator cannot cover it."
+                    f"operator it is regridded through has {W.shape[1]} columns: "
+                    + (f"--mesh-per-year regrids every year through year {years[0]}'s "
+                       f"operator, and the mesh changed inside the series."
+                       if a.mesh_per_year else
+                       f"the operator does not belong to the year's mesh; is "
+                       f"{a.annual}.overlap.npz from another mesh?")
                 )
             # the forward's own masks, before the near-flotation rule below
-            gr, fl = cells["sftgrf"] * cell_area, cells["sftflf"] * cell_area
+            gr, fl = cells["sftgrf"] * on.cell_area, cells["sftflf"] * on.cell_area
             area_of[yr] = scalar_area(rows[yr], {
-                TRUE_AREA: (float((gr * cell_af2).sum()), float((fl * cell_af2).sum())),
+                TRUE_AREA: (float((gr * on.cell_af2).sum()), float((fl * on.cell_af2).sum())),
                 MAP_PLANE: (float(gr.sum()), float(fl.sum()))})
             afloat_before = W @ (cells["sftflf"] > 0.5).astype(float)
             grounded_near += ground_near_flotation(cells)

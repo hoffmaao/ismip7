@@ -160,12 +160,25 @@ def _signature(path):
 
 def test_reading_onto_the_first_years_mesh_writes_what_per_year_meshes_write(
         tmp_path, monkeypatch, capsys):
+    built, real = [], wio.overlap_operator
+
+    def overlap_operator(mesh, cache):
+        if cache is None:
+            built.append(mesh)
+            return _cell_operator(mesh)
+        return real(mesh, cache)
+
+    monkeypatch.setattr(wio, "overlap_operator", overlap_operator)
     out = str(tmp_path / "run")
     _bank(out, _mesh(), [2015, 2016, 2017], seed=1)
     _operator(out, 2015)
     log = _write(out, str(tmp_path / "once"), monkeypatch, capsys)
     assert "mesh: loaded once, from 2015; 3 of 3 years read onto it" in log
-    assert "onto their own" not in log
+    # no year took the per-mesh path: no operator was built in memory, and
+    # the writer named no year as read onto another mesh
+    assert built == []
+    assert "differs from every one read before" not in log
+    assert "onto another mesh" not in log
     log = _write(out, str(tmp_path / "per_year"), monkeypatch, capsys, "--mesh-per-year")
     assert "each of the 3 years read onto its own" in log
     _same_tree(str(tmp_path / "once"), str(tmp_path / "per_year"))

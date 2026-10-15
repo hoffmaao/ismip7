@@ -312,11 +312,12 @@ Section 8's grounded area changes come from the ISMIP7 scalars' `iareagr`
 (2014 row minus 2003 row), so the DG0 values differ by about 150 to 200 km².
 
 - Under DG0, behind the segments whose shelf thins by more than 5 m, the
-  grounded ice slows in 75 to 77 % and thickens in 53 to 61 %. At Getz the production shelf thins 16 m and the grounded band
-  thickens 4.6 m and slows 17 %; DG1 cell_mean thins the band 4.7 m behind a
-  12 m shelf thinning (Smith: 20 m and 8.4 m). At Wilkes the production shelf
-  thins 9.7 m and the band thickens 5.9 m; under DG1 cell_mean the band thins
-  8.3 m and speeds up 16 % (Smith: band thins 2.8 m).
+  grounded ice slows in 75 to 77 % and thickens in 53 to 61 %. At Getz the
+  production shelf thins 16 m and the grounded band thickens 4.6 m and slows
+  17 %; DG1 cell_mean thins the band 4.7 m behind a 12 m shelf thinning
+  (Smith: 20 m and 8.4 m). At Wilkes the production shelf thins 9.7 m and the
+  band thickens 5.9 m; under DG1 cell_mean the band thins 8.3 m and speeds up
+  16 % (Smith: band thins 2.8 m).
 - In Amundsen every run couples shelf and grounded thinning, and DG1
   overshoots: the band thins 31 to 32 m against 15 m in Smith.
 - Amery, Bellingshausen, the Peninsula and basins 12 and 13 slow by 16 to
@@ -346,9 +347,10 @@ the full years 2015 to 2017, against the production ssp126:
 | grounded area, DG1 cell_mean (km², change from 2015) | 0 | -750 | -1,360 |
 
 By 2018.0 the production chain holds +19.15 mm of VAF since 2003.025 and DG1
-cell_mean +4.75 mm (measured, +3.69 and +0.54 mm since 2015). SMB is the same in both (2,322 to 2,418 Gt/yr); DG1
-cell_mean melts about 80 Gt/yr more and calves about 190 Gt/yr more. `resid`
-is 0.00 on every row. Figure: Quartz `figs/fymg_vaf_ssp126_to2018.png`.
+cell_mean +4.75 mm (measured, +3.69 and +0.54 mm since 2015). SMB is the
+same in both (2,322 to 2,418 Gt/yr); DG1 cell_mean melts about 80 Gt/yr
+more and calves about 190 Gt/yr more. `resid` is 0.00 on every row. Figure:
+Quartz `figs/fymg_vaf_ssp126_to2018.png`.
 
 ## Findings
 

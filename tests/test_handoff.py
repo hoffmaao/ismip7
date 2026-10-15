@@ -31,6 +31,7 @@ def _settings(**over):
         "subelement_scheme_version": 2, "exact_front": 0,
         "fluidity_control": "all", "drag_gate": "vertex", "h_visc_floor": 1.0,
         "phi_grounded": "inverted", "raster_sample": "vertex",
+        "velocity_sample": "point",
     }
     base.update(over)
     return base

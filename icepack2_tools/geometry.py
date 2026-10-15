@@ -248,6 +248,29 @@ def raster_cell_mean(dataset, Q_dg, floor=None, nmax=64, chunk=2048):
     return out
 
 
+def raster_patch_mean(dataset, Q_dg, Q_cg):
+    r"""Mean of a raster over the cells around each node of a CG1 space.
+
+    The cell means of :func:`raster_cell_mean` (valid pixels only) are
+    averaged over the cells sharing each node, weighted by area and counting
+    only the cells that hold a valid pixel; a node with none around it gets
+    0. Returns ``(field, observed)``, ``observed`` a boolean array over the
+    node dofs. Assembled, so collective.
+    """
+    cm = raster_cell_mean(dataset, Q_dg)
+    ok = np.isfinite(cm.dat.data_ro)
+    valid = Function(Q_dg)
+    valid.dat.data[:] = ok.astype(float)
+    cm.dat.data[~ok] = 0.0
+    phi = TestFunction(Q_cg)
+    num = assemble(phi * valid * cm * dx).dat.data_ro
+    den = assemble(phi * valid * dx).dat.data_ro
+    observed = den > 0.0
+    out = Function(Q_cg)
+    out.dat.data[:] = np.where(observed, num / np.where(observed, den, 1.0), 0.0)
+    return out, observed
+
+
 def sample_to_geometry(raster, Q_g, Q_cg, floor=None, method="vertex"):
     r"""Sample a raster onto the geometry space ``Q_g`` as a cell average.
 

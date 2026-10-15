@@ -1,0 +1,31 @@
+{
+  "id": "test-25km-first-year-velocity-sample",
+  "task": "test",
+  "institution": "IU",
+  "title": "25 km Budd re-inversions under the point and the cell-mean velocity target, with a 1-year historical from each",
+  "status": "done",
+  "friction": "budd",
+  "mesh": "antarctica_250000_25000_buffered20000, DG0 geometry",
+  "initial_state": "IU's 25 km _wsiu MAP (results/rehearsal_25km_iu/maps), 150 iterations each",
+  "site": "IU Quartz, general partition",
+  "resources": "8 ranks, 64 GiB inversions (12 min), 32 GiB forwards (2 min); gridnoise serial",
+  "jobs": [
+    "12187138",
+    "12187140",
+    "12192699",
+    "12192700",
+    "12194681",
+    "12194682",
+    "12197820",
+    "12197821",
+    "12200302",
+    "12200303",
+    "12207506"
+  ],
+  "code": "c62bcf0 (this PR's first commit on PR 168's branch at 74d0b84), Quartz worktree /N/scratch/dlilien/ismip7_rehearsal25iu/runvs",
+  "started": "2026-10-13",
+  "finished": "2026-10-13",
+  "results": "Quartz antarctica/results/first_year_mass_gain_iu/maps_25km/inversion_vs_budd_25km_{point,cell_mean}.h5, json/gn_25km_*.json, json/gn_vs25km*u.json, csv/",
+  "audit": "Unobserved nodes 1,857 (point) and 734 (cell_mean) of 4,509; misfit 3,339 and 4,589, |grad| 72 and 333. First-year cell-scale tendency (nb) 1.76 and 1.21 m/yr calibrated, 1.72 and 1.20 under uniform K; year-1 VAF gain +1.17 and +0.71 mm calibrated, +1.27 and +0.72 uniform",
+  "notes": "Section 2 of antarctica/reports/first_year_mass_gain_iu.md. Forwards: calibrated melt from results/rehearsal_25km_iu/calibration/deltaT_per_basin_25000_K6.500e-05.npz (12192699, 12192700) and uniform K 6.5e-5 on the legacy per-basin path (12197820, 12197821)"
+}

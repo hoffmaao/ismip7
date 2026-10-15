@@ -1,0 +1,22 @@
+{
+  "id": "test-25km-first-year-geometry-cell-mean",
+  "task": "test",
+  "institution": "IU",
+  "title": "25 km Budd re-inversion with BedMachine and MEaSUREs both taken as cell means",
+  "status": "stopped",
+  "friction": "budd",
+  "mesh": "antarctica_250000_25000_buffered20000, DG0 geometry under ISMIP7_RASTER_SAMPLE=cell_mean",
+  "initial_state": "IU's 25 km _wsiu MAP (results/rehearsal_25km_iu/maps)'s controls (its geometry is not taken under another sampling)",
+  "site": "IU Quartz, general partition",
+  "resources": "8 ranks, 64 GiB, 4.5 min",
+  "jobs": [
+    "12197819",
+    "12200304"
+  ],
+  "code": "c62bcf0 (this PR's first commit on PR 168's branch at 74d0b84), Quartz worktree /N/scratch/dlilien/ismip7_rehearsal25iu/runvs",
+  "started": "2026-10-13",
+  "finished": "2026-10-13",
+  "results": "the job log in Quartz antarctica/results/first_year_mass_gain_iu/logs/ismip7_inv_12197819.out",
+  "audit": "The startup continuation converged in 8 steps; six forward evaluations then diverged (residual 2.7e14 to 1.2e17) and the optimizer stopped on failed trials after about 17 iterations, with no done marker: published residual 7.6e10, misfit 1.87e5. No forward ran; its gridnoise job (12200304) failed for want of one",
+  "notes": "Section 3 of antarctica/reports/first_year_mass_gain_iu.md; consistent with the README's 2 km measurement of cell_mean geometry"
+}

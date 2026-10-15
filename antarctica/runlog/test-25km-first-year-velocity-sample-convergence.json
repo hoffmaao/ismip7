@@ -1,0 +1,22 @@
+{
+  "id": "test-25km-first-year-velocity-sample-convergence",
+  "task": "test",
+  "institution": "IU",
+  "title": "25 km point and cell-mean MAPs carried toward convergence in six 250-iteration stages, a 1-year historical from each stage",
+  "status": "done",
+  "friction": "budd",
+  "mesh": "antarctica_250000_25000_buffered20000, DG0 geometry",
+  "initial_state": "test-25km-first-year-velocity-sample's two MAPs, each stage warm-started from the one before",
+  "site": "IU Quartz, general partition (niced)",
+  "resources": "8 ranks; inversions 64 GiB, 17 to 22 min a stage; forwards 32 GiB, 2 min; front_flux_check 8 ranks",
+  "jobs": [
+    "12249665-12249700",
+    "12252153"
+  ],
+  "code": "c62bcf0 (this PR's first commit on PR 168's branch at 74d0b84), Quartz worktree /N/scratch/dlilien/ismip7_rehearsal25iu/runvs",
+  "started": "2026-10-14",
+  "finished": "2026-10-14",
+  "results": "Quartz antarctica/results/first_year_mass_gain_iu/maps_25km/inversion_cv_budd_25km_*, json/gn_cv25km*.json, json/ff_cv25km_s6.json, scripts/cv_jobs.txt",
+  "audit": "Misfit point 3,339 to 2,624 and cell_mean 4,589 to 2,597 over about 1,650 iterations, still falling 1 to 2.5 % a stage. Tendency (nb) point 1.70 and cell_mean 1.16 m/yr from stage 1 on (32 % apart, 31 % at 150 iterations). Year-1 VAF gain point +1.17 to +1.31 and cell_mean +0.71 to +0.51 mm. Stage 6: grounding-line flux 1,627 and 1,692 against 1,560 under the point target; calving in the forward year 955 and 1,321 Gt/yr",
+  "notes": "Section 6 of antarctica/reports/first_year_mass_gain_iu.md; stages submitted by cv_submit_all.sh as dependency chains"
+}

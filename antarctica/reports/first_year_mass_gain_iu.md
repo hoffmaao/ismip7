@@ -117,8 +117,8 @@ where.
 ## 4. DG1 geometry and the cell-mean target, 25 km
 
 From IU's DG1 runs (PR 169's code at 15c50dc plus this PR's knob; unforced
-1-year forwards, since DG1 refuses forcing, so only the differences between
-columns compare):
+1-year forwards, since DG1 refused forcing at 15c50dc, so only the
+differences between columns compare):
 
 | | DG0 point | DG0 cell_mean | DG1 point | DG1 cell_mean |
 |---|---|---|---|---|

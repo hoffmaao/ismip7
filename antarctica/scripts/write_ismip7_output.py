@@ -5,13 +5,28 @@ in the request's files.
     python antarctica/scripts/write_ismip7_output.py ANNUAL.h5 --out-dir DIR
         --esm CESM2-WACCM --scenario ssp585 [--exp C007]
         [--source-id RICE] [--ism-id icepack2] [--set-id CORE] [--scalars CSV]
+        [--mesh-per-year]
 
 Serial. ANNUAL.h5 is the STEM ``<experiment>_<lc>_ismip7_annual.h5`` that
 ``icepack2_tools.ismip7_output`` names its output after; the years themselves
 are the files ``<experiment>_<lc>_ismip7_annual_<year>.h5`` beside it (one per
 year, each written atomically, so an interrupted run cannot damage the years
-already banked) and this globs them in year order. It writes one NetCDF per
-variable under
+already banked) and this globs them in year order.
+
+Every year file carries the mesh, and loading it is most of the cost of a
+year: 92 to 95 s of about 104 s on the 2 km production mesh (1,928,285
+cells; IU Quartz, October 2026), against about 11 s for the 20 fields. The
+mesh is therefore loaded once, from the first year, and a later year is read
+onto it when everything in its file outside the functions' values (the
+topology, labels, distribution, sections and both coordinate vectors) hashes
+equal to the first year's (``mesh_signature``). A year whose file differs is
+read onto its own mesh, as ``--mesh-per-year`` reads every year, and the run
+names it. ``CheckpointFile.load_function`` maps a file's fields onto a mesh
+through the topology the file stores, so where two files store the same one
+the arrays read onto the first year's mesh are the ones the year's own mesh
+gives, and the files written are the same.
+
+It writes one NetCDF per variable under
 ``DIR/AIS/<source_id>/<ism_id>/<set_id>/<exp>/``, named
 ``<var>_AIS_<source_id>_<ism_id>_m001_<ESM>_f001_<scenario>_<exp>_<y0>-<y1>.nc``.
 OCX takes ``--scenario ocx`` and no ``--esm``: its forcing field is ``ERA5``
@@ -77,6 +92,7 @@ written.
 """
 import argparse
 import csv
+import hashlib
 import os
 import re
 import sys
@@ -276,6 +292,114 @@ def melt_summary(per_year, markers=MELT_MARKERS):
         at = ", ".join(f"{per_year[y][key]:+.1f} in {y}" for y in shown)
         lines.append(f"  {text}: largest {per_year[top][key]:+.1f} Gt/yr ({top}); {at}")
     return lines
+
+
+def _attr_bytes(value):
+    r"""An HDF5 attribute value as bytes, deterministically."""
+    arr = np.asarray(value)
+    if arr.dtype.kind == "O":                    # variable-length strings
+        return repr(arr.tolist()).encode()
+    return arr.dtype.str.encode() + arr.tobytes()
+
+
+def mesh_signature(h5):
+    r"""sha256 over everything an open year file holds except the values of
+    its functions.
+
+    ``h5`` is the file as h5py sees it (``CheckpointFile.h5pyfile``).
+    Firedrake's layout puts a function's values in the vector
+    ``topologies/<topology>/dms/<dm>/vecs/<vec>/<vec>``, and the function's
+    own group under ``firedrake_functions`` names that vector in its
+    ``firedrake_vec`` attribute. Those vectors are left out and everything
+    else under ``topologies`` goes in, path, dtype, shape and bytes of every
+    dataset and every attribute: the topology and its labels, the
+    distribution and permutation, the sections, the plex coordinates
+    (``vecs/coordinates``) and the mesh's coordinate function, which no
+    ``firedrake_functions`` group lists. The root's attributes stay out: they
+    carry the PETSc version and the melt booking, which
+    ``series_front_melt`` holds to one per series.
+
+    Two year files with equal signatures store one mesh in one numbering, so
+    ``CheckpointFile.load_function`` maps the second's fields onto a mesh
+    loaded from the first exactly as onto the second's own.
+    """
+    objects = {"topologies": h5["topologies"]}
+    h5["topologies"].visititems(lambda name, obj: objects.__setitem__("topologies/" + name, obj))
+    function_vecs = set()
+    for path, obj in objects.items():
+        parts = path.split("/")
+        # topologies/<t>/firedrake_meshes/<m>/firedrake_function_spaces/<V>/firedrake_functions/<f>
+        if len(parts) == 8 and parts[6] == "firedrake_functions" and "firedrake_vec" in obj.attrs:
+            vec = obj.attrs["firedrake_vec"]
+            function_vecs.add((parts[1], vec.decode() if isinstance(vec, bytes) else str(vec)))
+
+    def function_values(path):
+        parts = path.split("/")
+        # topologies/<t>/dms/<dm>/vecs/<vec>[/<vec>]
+        return (len(parts) >= 6 and parts[2] == "dms" and parts[4] == "vecs"
+                and (parts[1], parts[5]) in function_vecs)
+
+    h = hashlib.sha256()
+    for path in sorted(objects):
+        if function_values(path):
+            continue
+        obj = objects[path]
+        h.update(path.encode() + b"\0")
+        for key in sorted(obj.attrs):
+            h.update(key.encode() + b"\0" + _attr_bytes(obj.attrs[key]))
+        if hasattr(obj, "dtype"):                # a dataset
+            data = obj[()]
+            h.update(f"{data.dtype.str}{data.shape}".encode())
+            h.update(_attr_bytes(data) if data.dtype.kind == "O"
+                     else np.ascontiguousarray(data).tobytes())
+    return h.hexdigest()
+
+
+class SeriesMesh:
+    r"""The model mesh of a series, loaded once, and each year's fields on it.
+
+    The first year's mesh is loaded from its file. ``read`` loads a later
+    year's fields onto it when the year file's ``mesh_signature`` equals the
+    first year's, and onto a mesh loaded from that year's own file when it
+    does not; ``own_mesh`` lists the years read that way. ``per_year`` reads
+    every year onto its own mesh, the first included."""
+
+    def __init__(self, annual, first_year, per_year=False):
+        self.annual, self.first_year, self.per_year = annual, first_year, per_year
+        with fd.CheckpointFile(AnnualOutput.year_path(annual, first_year), "r") as chk:
+            self.mesh = chk.load_mesh()
+            self.signature = None if per_year else mesh_signature(chk.h5pyfile)
+        self.own_mesh = []
+
+    def read(self, yr):
+        r"""The year's banked fields as cell arrays in the order of
+        ``self.mesh``'s cells, and its ``front_melt`` stamp."""
+        with fd.CheckpointFile(AnnualOutput.year_path(self.annual, yr), "r") as chk:
+            if self.per_year or (yr != self.first_year
+                                 and mesh_signature(chk.h5pyfile) != self.signature):
+                mesh = chk.load_mesh()
+                self.own_mesh.append(yr)
+                if not self.per_year:
+                    print(f"  year {yr}: the file's mesh differs from {self.first_year}'s, "
+                          f"so its fields are read onto its own mesh", flush=True)
+            else:
+                mesh = self.mesh
+            cells = {var: chk.load_function(mesh, name=var).dat.data_ro.copy()
+                     for var in VARIABLES_BANKED}
+            booking = (str(chk.get_attr("/", FRONT_MELT_ATTR))
+                       if chk.has_attr("/", FRONT_MELT_ATTR) else UNSTAMPED_MELT)
+        return cells, booking
+
+    def summary(self, years):
+        r"""The line that says which mesh every year was read onto."""
+        if self.per_year:
+            return f"  mesh: each of the {len(years)} years read onto its own (--mesh-per-year)"
+        line = (f"  mesh: loaded once, from {self.first_year}; "
+                f"{len(years) - len(self.own_mesh)} of {len(years)} years read onto it")
+        if self.own_mesh:
+            line += (f", {len(self.own_mesh)} onto their own, whose files differ: "
+                     + ", ".join(str(y) for y in self.own_mesh))
+        return line
 
 
 def grid_mesh():
@@ -535,6 +659,10 @@ def main():
     ap.add_argument("--contact-name", default=os.environ.get("ISMIP7_CONTACT_NAME", "Andrew Hoffman"))
     ap.add_argument("--contact-email", default=os.environ.get("ISMIP7_CONTACT_EMAIL", "ah301@rice.edu"))
     ap.add_argument("--scalars", default=None, help="the *_ismip7_scalars.csv (default: next to the annual file)")
+    ap.add_argument("--mesh-per-year", action="store_true",
+                    help="read every year onto a mesh loaded from its own file, at about "
+                         "95 s a year on the 2 km mesh, instead of onto the first year's "
+                         "wherever the file's mesh matches it; the files written are the same")
     a = ap.parse_args()
     try:
         a.esm = forcing_id(a.esm, a.scenario)
@@ -566,8 +694,8 @@ def main():
             f"with {len(missing)} missing ({missing[0]}..{missing[-1]}); a "
             f"submission needs a contiguous series."
         )
-    with fd.CheckpointFile(AnnualOutput.year_path(a.annual, years[0]), "r") as chk:
-        mesh = chk.load_mesh()
+    series = SeriesMesh(a.annual, years[0], per_year=a.mesh_per_year)
+    mesh = series.mesh
     print(f"{os.path.basename(a.annual)}: years {years[0]}-{years[-1]}, "
           f"{len(VARIABLES_2D)} variables", flush=True)
     W = overlap_operator(mesh, a.annual + ".overlap.npz")
@@ -630,12 +758,7 @@ def main():
         booking_of = {}
         area_of = {}
         for k, yr in enumerate(years):
-            with fd.CheckpointFile(AnnualOutput.year_path(a.annual, yr), "r") as chk:
-                ymesh = chk.load_mesh()
-                cells = {var: chk.load_function(ymesh, name=var).dat.data_ro.copy()
-                         for var in VARIABLES_BANKED}
-                booking_of[yr] = (str(chk.get_attr("/", FRONT_MELT_ATTR))
-                                  if chk.has_attr("/", FRONT_MELT_ATTR) else UNSTAMPED_MELT)
+            cells, booking_of[yr] = series.read(yr)
             series_front_melt(booking_of)
             # the overlap operator is built once from the first year's mesh;
             # a series whose links remeshed cannot be regridded through it
@@ -682,6 +805,7 @@ def main():
                     st[0] = min(st[0], float(np.min(p_yr[finite])))
                     st[1] = max(st[1], float(np.max(p_yr[finite])))
                 st[2] += int(finite.sum())
+        print(series.summary(years), flush=True)
         print(f"  {grounded_near} cell-years within {FLOTATION_TOLERANCE_M:g} m of "
               f"flotation written as grounded", flush=True)
         print(f"  melt booking: {series_front_melt(booking_of)} in every year", flush=True)

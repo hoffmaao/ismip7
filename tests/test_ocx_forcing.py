@@ -6,12 +6,15 @@ focus groups decided its tree need only be consistent with itself (discussion
 while filenames keep the source before ``OCX``. Its Antarctic ocean cites no
 source at all: four expert-judgment scenarios, each one directory holding
 ``so``, ``tf`` and ``thetao`` side by side, versioned ``v1`` since 28 August
-2026. The readers could address none of it, so core 11 ran on a RACMO2.4p1
-and OI-climatology stopgap with the real product on disk.
+2026 and ``v2`` since 25 September. The readers could address none of it, so
+core 11 ran on a RACMO2.4p1 and OI-climatology stopgap with the real product
+on disk.
 
-Discussion #48 is why reading it needs a tripwire: the OCX ``main`` thermal
-forcing disagrees with the climatology around Mertz, and every K here is
-fitted to the climatology.
+Discussion #48 is why reading it needs a tripwire and a floor: the OCX ocean
+v1 was built on an earlier extrapolated climatology, and its thermal forcing
+under Cook is 1.3 degC below the current one's, to which every K here is
+fitted. The v2 matches it, and a run refuses the v1
+(``forcing.OCEAN_MIN_VERSION``).
 """
 import os
 import sys
@@ -31,6 +34,18 @@ sys.path.insert(0, os.path.join(REPO, "antarctica", "scripts"))
 XY = {"y": np.array([0.0, 8000.0, 16000.0]), "x": np.array([0.0, 8000.0, 16000.0])}
 
 
+def _ocx_ocean(root, version, variant="main"):
+    odir = root / "OCX" / "ocean" / variant / version
+    odir.mkdir(parents=True)
+    years = np.arange(1950, 2026)
+    for var, base in (("tf", 1.0), ("so", 34.0), ("thetao", -1.0)):
+        field = (base + (years - 1950)[:, None, None, None] * 0.01) * np.ones((1, 2, 3, 3))
+        xr.Dataset({var: (("time", "z", "y", "x"), field.astype("float32"))},
+                   coords={"time": np.array([np.datetime64(f"{y}-01-01") for y in years]),
+                           "z": np.array([-30.0, -90.0]), **XY}).to_netcdf(
+            odir / f"{var}_AIS_OCX_ocean_{variant}_{version}_1950-2025.nc")
+
+
 @pytest.fixture
 def ocx_tree(tmp_path):
     adir = tmp_path / "OCX" / OCX_ATMOSPHERE_SOURCE / "SDBN1-8000m" / "acabf" / "v1"
@@ -40,15 +55,21 @@ def ocx_tree(tmp_path):
         xr.Dataset({"acabf": (("time", "y", "x"), np.full((12, 3, 3), value, dtype="float32"))},
                    coords={"time": times, **XY}).to_netcdf(
             adir / f"acabf_AIS_{OCX_ATMOSPHERE_SOURCE}_OCX_SDBN1-8000m_v1_{year}.nc")
-    odir = tmp_path / "OCX" / "ocean" / "main" / "v1"
-    odir.mkdir(parents=True)
-    years = np.arange(1950, 2026)
-    for var, base in (("tf", 1.0), ("so", 34.0), ("thetao", -1.0)):
-        field = (base + (years - 1950)[:, None, None, None] * 0.01) * np.ones((1, 2, 3, 3))
-        xr.Dataset({var: (("time", "z", "y", "x"), field.astype("float32"))},
-                   coords={"time": np.array([np.datetime64(f"{y}-01-01") for y in years]),
-                           "z": np.array([-30.0, -90.0]), **XY}).to_netcdf(
-            odir / f"{var}_AIS_OCX_ocean_main_v1_1950-2025.nc")
+    _ocx_ocean(tmp_path, "v2")
+    return tmp_path
+
+
+@pytest.fixture
+def ocx_tree_v1(tmp_path):
+    r"""A tree synced before 25 September 2026: the OCX ocean at v1 alone."""
+    adir = tmp_path / "OCX" / OCX_ATMOSPHERE_SOURCE / "SDBN1-8000m" / "acabf" / "v1"
+    adir.mkdir(parents=True)
+    for year in (1979, 1980):
+        times = np.array([np.datetime64(f"{year}-{m:02d}-15") for m in range(1, 13)])
+        xr.Dataset({"acabf": (("time", "y", "x"), np.ones((12, 3, 3), dtype="float32"))},
+                   coords={"time": times, **XY}).to_netcdf(
+            adir / f"acabf_AIS_{OCX_ATMOSPHERE_SOURCE}_OCX_SDBN1-8000m_v1_{year}.nc")
+    _ocx_ocean(tmp_path, "v1")
     return tmp_path
 
 
@@ -64,7 +85,7 @@ def test_the_atmosphere_reader_finds_the_scenario_first_tree(ocx_tree):
 def test_the_ocean_reader_takes_one_variable_from_the_shared_directory(ocx_tree):
     ocean = ISMIP7Ocean(data_root=str(ocx_tree), scenario=OCX)
     assert ocean.coverage("tf") == ocean.coverage("so") == (1950, 2025)
-    assert [os.path.basename(p) for _, _, p in ocean.spans("tf")] == ["tf_AIS_OCX_ocean_main_v1_1950-2025.nc"]
+    assert [os.path.basename(p) for _, _, p in ocean.spans("tf")] == ["tf_AIS_OCX_ocean_main_v2_1950-2025.nc"]
     at = (np.array([8000.0]), np.array([8000.0]))
     assert ocean.get_thermal_forcing(2000, *at)[0] == pytest.approx(1.5)
     assert ocean.get_salinity(1950, *at)[0] == pytest.approx(34.0)
@@ -84,8 +105,8 @@ def test_the_report_says_which_ocx_product_a_run_opened(ocx_tree):
     lines = describe_forcing_provenance(atm, ocean, variables={"atmosphere": ("acabf",)})
     assert [ln.split(": ", 1)[1] for ln in lines] == [
         "atmosphere acabf RACMO2.3p2-ERA OCX SDBN1-8000m v1",
-        "ocean tf expert-judgment OCX ocean/main v1",
-        "ocean so expert-judgment OCX ocean/main v1",
+        "ocean tf expert-judgment OCX ocean/main v2",
+        "ocean so expert-judgment OCX ocean/main v2",
     ]
 
 
@@ -161,8 +182,70 @@ def test_the_check_names_the_ocx_version_it_was_measured_on(ocx_tree, monkeypatc
 
     assert cmb.compare_with_ocx(a, g) == 0
     said = capsys.readouterr().out
-    # The tree holds v1 alone, so the reader fell back from its pin, which is
+    # The tree holds v2 alone, so the reader fell back from its pin, which is
     # the case at every site until upstream ships the pinned version.
-    assert OCEAN_VERSION != "v1"
-    assert "ocean tf expert-judgment OCX ocean/main v1" in said
-    assert "ocean so expert-judgment OCX ocean/main v1" in said
+    assert OCEAN_VERSION != "v2"
+    assert "ocean tf expert-judgment OCX ocean/main v2" in said
+    assert "ocean so expert-judgment OCX ocean/main v2" in said
+    assert "[!]" not in said
+
+
+# --- the v1 OCX ocean, built on the earlier climatology (discussion #48) ----
+
+def test_the_v1_ocx_ocean_is_named_and_refused(ocx_tree_v1):
+    ocean = ISMIP7Ocean(data_root=str(ocx_tree_v1), scenario=OCX)
+    assert ocean.coverage("tf") == (1950, 2025)                # it is there to read
+    for var in ("tf", "so"):
+        problem = ocean.version_problem(var)
+        assert "ocean/main is v1 on disk" in problem and "v2 or newer" in problem
+        assert "OCEAN_MIN_VERSION" in problem
+    with pytest.raises(FileNotFoundError, match=r"download_mirror.py data/OCX/ocean/main/"):
+        ocean.require_years(1979, 1981)
+
+
+def test_the_v2_beside_the_v1_is_what_a_run_opens(ocx_tree_v1):
+    _ocx_ocean(ocx_tree_v1, "v2")
+    ocean = ISMIP7Ocean(data_root=str(ocx_tree_v1), scenario=OCX)
+    assert [r["version"] for r in ocean.provenance()] == ["v2", "v2"]
+    assert ocean.version_problem("tf") is None and ocean.version_problem("so") is None
+    assert ocean.require_years(1979, 1981) == (1950, 2025)
+
+
+def test_the_floor_is_the_ocx_oceans_alone(tmp_path):
+    r"""No ESM ocean has a floor: a tree behind the mirror there is the
+    audit's BEHIND."""
+    (tmp_path / "CESM2-WACCM" / "ssp585" / "ocean" / "tf" / "v1").mkdir(parents=True)
+    assert ISMIP7Ocean(data_root=str(tmp_path), scenario="ssp585").version_problem("tf") is None
+
+
+def test_the_driver_refuses_the_v1_ocx_ocean(ocx_tree_v1, monkeypatch):
+    r"""``protocol_forcing`` is core 11's gate and the relaxation year's."""
+    pytest.importorskip("firedrake")
+    monkeypatch.setenv("ISMIP7_DATA_ROOT", str(ocx_tree_v1))
+    monkeypatch.delenv("ISMIP7_OCX_OCEAN", raising=False)
+    import importlib
+    ocx = importlib.import_module("projections.ocx")
+    with pytest.raises(FileNotFoundError, match=r"is v1 on disk(.|\n)*data/OCX/ocean/main/"):
+        ocx.protocol_forcing(1979.0, 1981.0)
+    _ocx_ocean(ocx_tree_v1, "v2")
+    atm, ocean = ocx.protocol_forcing(1979.0, 1981.0)
+    assert ocean.provenance()[0]["version"] == "v2"
+
+
+def test_the_check_says_when_it_compared_the_v1(ocx_tree_v1, monkeypatch, capsys):
+    pytest.importorskip("firedrake")
+    pytest.importorskip("rasterio")
+    import argparse
+    import check_melt_bound as cmb
+    monkeypatch.setenv("ISMIP7_DATA_ROOT", str(ocx_tree_v1))
+    monkeypatch.setattr(cmb.cm, "_grid_interp",
+                        lambda path, var, x, y, draft=None: np.ones(len(x)))
+    n = 3
+    g = {"x": XY["x"], "y": XY["y"], "draft": np.full(n, -60.0),
+         "sin_a": np.full(n, 1e-2), "floating": np.ones(n, dtype=bool),
+         "area": np.full(n, 64e6), "K": np.full(n, 1e-4),
+         "tf": np.full(n, 1.0), "sal": np.full(n, 34.0)}
+    a = argparse.Namespace(ocx="main", ocx_years="1950", ocx_tol=0.25, ocx_floor=0.0)
+    cmb.compare_with_ocx(a, g)
+    said = capsys.readouterr().out
+    assert "[!] tf for expert-judgment OCX ocean/main is v1 on disk" in said

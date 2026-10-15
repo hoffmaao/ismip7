@@ -205,6 +205,13 @@ def ocx_ocean_cover():
     return max(c[0] for c in covers), min(c[1] for c in covers)
 
 
+def ocx_ocean_version_problem():
+    r"""What keeps the OCX ocean on disk below ``OCEAN_MIN_VERSION``, or None:
+    the reader's own rule, the one ``projections/ocx.py`` refuses a run on."""
+    ocean = ISMIP7Ocean(scenario=OCX, variant=_ocx_ocean())
+    return next((p for p in map(ocean.version_problem, ("tf", "so")) if p), None)
+
+
 def ocean_cover(esm, scenario):
     r"""``(first, last)`` ocean forcing year on disk, as the reader sees it."""
     return ISMIP7Ocean(esm=esm, scenario=scenario).coverage("tf")
@@ -431,8 +438,11 @@ def main():
             if oc is None or oc[0] > y0 or oc[1] < y1:
                 miss.append(f"OCX ocean '{_ocx_ocean()}' tf/so"
                             + (f" covers {oc[0]}-{oc[1]}, need {y0}-{y1}" if oc else ": absent"))
-            notes.append("K is fitted to the OI climatology, not to the OCX ocean: "
-                         "read check_melt_bound.py --ocx first (discussion #48)")
+            version = ocx_ocean_version_problem()
+            if version:
+                miss.append(f"OCX ocean: {version}")
+            notes.append("K is fitted to the OI climatology: check_melt_bound.py --ocx "
+                         "compares the OCX ocean with it per basin (discussion #48)")
         elif core == 11:
             notes.append("ISMIP7_OCX_FORCING=stopgap: RACMO2.4p1 + OI climatology, "
                          "not the ISMIP7 OCX product")

@@ -54,10 +54,15 @@
 #             (ISMIP7_GEOMETRY_BACKDATE=12, 2015 - max(start, 2003)) as the
 #             geometry at the start of the forced year, so the historical
 #             proper starts in 2003 from the model's own state
-#   control   the balanced control per ESM from the historical's endpoint
+#   control   the control per ESM from the historical's endpoint
 #   proj      the projections per ESM (ISMIP7_ROUTINE_SCENARIOS, ssp126 ssp370
-#             ssp585) from the same endpoint, apparent mass balance as the
-#             control's (ISMIP7_ROUTINE_PROJ_AMB, 1)
+#             ssp585) from the same endpoint
+#             Neither carries an apparent mass-balance reference: the
+#             historical runs without one, and a reference can only be frozen
+#             at the state a run starts balanced from, never built from an
+#             evolved one (simulation.setup_model refuses), so the control and
+#             the projections drift with the model's own imbalance and their
+#             difference removes it.
 #   ocx       the observed-forcing experiment from map_forward.h5
 # map_forward.h5 is the product of the last inversion stage listed, so a run
 # without `relax`/`reinvert` starts its forwards from the staged MAP.
@@ -117,7 +122,6 @@ record_env() {
         echo "export ISMIP7_ROUTINE_RELAX_YR=${ISMIP7_ROUTINE_RELAX_YR:-20}"
         echo "export ISMIP7_ROUTINE_RELAX_START=${ISMIP7_ROUTINE_RELAX_START:-2015}"
         echo "export ISMIP7_ROUTINE_HIST_START=${ISMIP7_ROUTINE_HIST_START:-2002}"
-        echo "export ISMIP7_ROUTINE_PROJ_AMB=${ISMIP7_ROUTINE_PROJ_AMB:-1}"
         echo "export ISMIP7_ROUTINE_FLUIDITY_CONTROL=${ISMIP7_ROUTINE_FLUIDITY_CONTROL:-floating}"
         echo "export ISMIP7_ROUTINE_PHI_BOUNDS=${ISMIP7_ROUTINE_PHI_BOUNDS:--2.3,2.3}"
         echo "export ISMIP7_ROUTINE_DHDT_REWEIGHT=${ISMIP7_ROUTINE_DHDT_REWEIGHT:-24}"
@@ -442,8 +446,7 @@ stage_env_forward() {   # prints `export` lines for a forward stage
                     [ "$ISMIP7_ROUTINE_HIST_START" -lt 2003 ] \
                         && echo "export ISMIP7_GEOMETRY_BACKDATE=$((2015 - 2003))" ;;
                 ocx)    echo "export ISMIP7_APPARENT_MB=0" ;;
-                control_*) echo "export ISMIP7_APPARENT_MB=1" ;;
-                ssp*_*) echo "export ISMIP7_APPARENT_MB=$ISMIP7_ROUTINE_PROJ_AMB" ;;
+                control_*|ssp*_*) echo "export ISMIP7_APPARENT_MB=0" ;;
             esac
             echo ". $REPO/antarctica/scripts/ismip7_front_routine.sh"
             case "$stage" in
@@ -586,6 +589,7 @@ cmd_status() {
             elif ready "$stage"; then state="ready"
             else state="waiting"; fi
         fi
+        [ -f "$OUT/$stage.blocked" ] && state="BLOCKED ($(cat "$OUT/$stage.blocked")); fix, then resume $stage"
         if [ "$ISMIP7_ROUTINE_LAUNCH" = slurm ] && is_started "$stage" && ! is_done "$stage" && command -v squeue >/dev/null; then
             state="$state; queue: $(squeue -h -u "${USER:-$(id -un)}" -n "rt_${TAG}_${stage}" -o '%i:%T' 2>/dev/null | tr '\n' ' ')"
         fi
@@ -621,6 +625,19 @@ watch_pass() {
         rows=$(squeue -h -u "${USER:-$(id -un)}" -n "$jobname" -o "%i %T %N %M" 2>/dev/null) \
             || { log "watch: squeue failed; skipping the rest of this pass"; return 0; }
         if [ -z "$rows" ]; then
+            # A chain ends without a successor in two ways: the scheduler took
+            # the link (timeout, preemption, node failure, an outage), which a
+            # resubmission resumes, or the driver exited with an error, which
+            # a resubmission repeats. The second parks the stage until
+            # `resume` (OUT/<stage>.blocked holds the reason).
+            [ -f "$OUT/$stage.blocked" ] && continue
+            local why
+            why=$(driver_failure "$stage")
+            if [ -n "$why" ]; then
+                echo "$why" > "$OUT/$stage.blocked"
+                log "watch: ERROR stage $stage stopped on a driver failure, not resubmitting: $why"
+                continue
+            fi
             log "watch: stage $stage has no job in the queue; resubmitting"
             mv "$OUT/$stage.jobs" "$OUT/$stage.jobs.$(date +%s)"
             launch "$stage"
@@ -641,6 +658,24 @@ watch_pass() {
     done
 }
 
+# The driver error that ended a stage's newest link, or nothing when the
+# link ended otherwise (the scheduler took it, it finished, or its log is not
+# there). A forward or inversion link logs "chain: stopping, driver exited N"
+# or "inversion exit N" with N != 0 when the driver itself failed.
+driver_failure() {
+    local jid kind logf err
+    [ -f "$OUT/$1.jobs" ] || return 0
+    jid=$(tail -n 1 "$OUT/$1.jobs" | cut -d' ' -f1)
+    if is_inversion "$1"; then kind=inv; else kind=fwd; fi
+    logf="$REPO/logs/ismip7_${kind}_$jid.out"
+    [ -f "$logf" ] || return 0
+    if grep -qE "chain: stopping, driver exited [1-9]|inversion exit [1-9]" "$logf"; then
+        err=$(grep -hE "^[A-Za-z]*Error: " "${logf%.out}.err" "$logf" 2>/dev/null | tail -n 1 | cut -c1-300)
+        echo "job $jid: ${err:-driver exited non-zero; see $logf}"
+    fi
+    return 0
+}
+
 cmd_watch() {
     [ "$ISMIP7_ROUTINE_LAUNCH" = slurm ] || die "watch is for slurm mode"
     local every=${ISMIP7_ROUTINE_WATCH_SEC:-120}
@@ -659,6 +694,7 @@ cmd_resume() {
     ready "$stage" || die "$stage is not ready"
     with_lock
     [ -f "$OUT/$stage.jobs" ] && mv "$OUT/$stage.jobs" "$OUT/$stage.jobs.$(date +%s)"
+    rm -f "$OUT/$stage.blocked"
     launch "$stage"
 }
 

@@ -271,12 +271,14 @@ def test_the_routine_runs_itself_stage_by_stage(sandbox):
                      "rt_out_ssp370_cesm_waccm", "rt_out_ssp585_cesm_waccm"]
     c = by_name(subs, "rt_out_control_cesm_waccm")["env"]
     assert c["ISMIP7_EXPERIMENT"] == "control" and c["ISMIP7_ESM"] == "CESM2-WACCM"
-    assert c["ISMIP7_APPARENT_MB"] == "1" and c["ISMIP7_RUN_TAG"] == "out"
+    # no reference: the historical carries none and one cannot be built
+    # from its evolved endpoint (simulation.setup_model refuses)
+    assert c["ISMIP7_APPARENT_MB"] == "0" and c["ISMIP7_RUN_TAG"] == "out"
     assert c["ISMIP7_FRACTURE"] == "none" and "ISMIP7_T_START" not in c
     assert "ISMIP7_GEOMETRY_BACKDATE" not in c
     p = by_name(subs, "rt_out_ssp585_cesm_waccm")["env"]
     assert p["ISMIP7_EXPERIMENT"] == "ssp585_cesm_waccm"
-    assert p["ISMIP7_APPARENT_MB"] == "1" and p["ISMIP7_FRACTURE"] == "mask_front"
+    assert p["ISMIP7_APPARENT_MB"] == "0" and p["ISMIP7_FRACTURE"] == "mask_front"
 
     finish_forward(results / "hist_mri_esm2_0_out_32000_final.h5", 2015)
     routine(sandbox, "next")
@@ -481,3 +483,69 @@ def test_watch_does_nothing_when_the_scheduler_cannot_be_reached(sandbox):
     assert rc == 0, log
     assert "squeue failed; skipping" in log
     assert submits(sandbox) == [], "nothing may be resubmitted on a scheduler failure"
+
+
+
+def test_watch_parks_a_stage_whose_driver_failed(sandbox):
+    r"""A link that exits with a driver error ends its chain like a scheduler
+    kill does, but a resubmission only repeats the error: on 15 October 2026
+    each control and projection of two routines was resubmitted about 60
+    times, two minutes apart, on an a_ref refusal. The watchdog parks such a
+    stage with the error, status shows it, and resume clears it."""
+    (sandbox / "warm.h5").write_text("warm\n")
+    bin_dir = sandbox / "bin"
+    queue = sandbox / "queue.txt"
+    (bin_dir / "squeue").write_text(
+        "#!/bin/bash\n"
+        'name=""; while [ $# -gt 0 ]; do [ "$1" = -n ] && name=$2; shift; done\n'
+        '[ -f "$QUEUE_FILE" ] && grep "^$name " "$QUEUE_FILE" | cut -d" " -f2-\n'
+        "exit 0\n")
+    (bin_dir / "squeue").chmod(0o755)
+    env = {"ISMIP7_ROUTINE_STAGES": "hist", "ISMIP7_ROUTINE_ESMS": "CESM2-WACCM",
+           "QUEUE_FILE": str(queue), "ISMIP7_ROUTINE_WATCH_ONCE": "1"}
+    rc, log = routine(sandbox, "init", env=env)
+    assert rc == 0, log
+    submits(sandbox)
+    jid = (sandbox / "out" / "hist_cesm_waccm.jobs").read_text().split()[0]
+    logs = sandbox / "logs"
+    logs.mkdir(exist_ok=True)
+    (logs / f"ismip7_fwd_{jid}.out").write_text(
+        "=== forward exit 1 ===\nchain: stopping, driver exited 1\n")
+    (logs / f"ismip7_fwd_{jid}.err").write_text(
+        "Traceback\nRuntimeError: ISMIP7_APPARENT_MB is set but restart checkpoint x has no a_ref_mb\n")
+    queue.write_text("")
+    rc, log = routine(sandbox, "watch", env=env)
+    assert rc == 0, log
+    assert submits(sandbox) == [], "a driver failure is not resubmitted"
+    assert "stopped on a driver failure" in log
+    blocked = (sandbox / "out" / "hist_cesm_waccm.blocked").read_text()
+    assert "no a_ref_mb" in blocked
+    rc, log = routine(sandbox, "watch", env=env)
+    assert submits(sandbox) == [], "a parked stage stays parked"
+    rc, log = routine(sandbox, "status", env=env)
+    assert "BLOCKED" in log and "no a_ref_mb" in log
+    rc, log = routine(sandbox, "resume", "hist_cesm_waccm", env=env)
+    assert rc == 0, log
+    (again,) = submits(sandbox)
+    assert "-J rt_out_hist_cesm_waccm" in again["argv"]
+    assert not (sandbox / "out" / "hist_cesm_waccm.blocked").exists()
+
+
+def test_a_scheduler_kill_is_still_resubmitted(sandbox):
+    r"""A link the scheduler took (no driver failure in its log) is resubmitted."""
+    (sandbox / "warm.h5").write_text("warm\n")
+    bin_dir = sandbox / "bin"
+    (bin_dir / "squeue").write_text("#!/bin/bash\nexit 0\n")
+    (bin_dir / "squeue").chmod(0o755)
+    env = {"ISMIP7_ROUTINE_STAGES": "hist", "ISMIP7_ROUTINE_ESMS": "CESM2-WACCM",
+           "ISMIP7_ROUTINE_WATCH_ONCE": "1"}
+    routine(sandbox, "init", env=env)
+    submits(sandbox)
+    jid = (sandbox / "out" / "hist_cesm_waccm.jobs").read_text().split()[0]
+    logs = sandbox / "logs"
+    logs.mkdir(exist_ok=True)
+    (logs / f"ismip7_fwd_{jid}.out").write_text("  t=2005.3 ...\n")
+    rc, log = routine(sandbox, "watch", env=env)
+    assert rc == 0, log
+    (again,) = submits(sandbox)
+    assert "-J rt_out_hist_cesm_waccm" in again["argv"]

@@ -13,17 +13,18 @@ are the files ``<experiment>_<lc>_ismip7_annual_<year>.h5`` beside it (one per
 year, each written atomically, so an interrupted run cannot damage the years
 already banked) and this globs them in year order.
 
-Every year file carries the mesh, and loading it is most of the cost of a
+Every year file carries the mesh, and loading it was most of the cost of a
 year: 92 to 95 s of about 104 s on the 2 km production mesh (1,928,285
 cells; IU Quartz, October 2026), against about 11 s for the 20 fields. The
 mesh is therefore loaded once, from the first year, and a later year is read
 onto it when everything in its file outside the functions' values (the
 topology, labels, distribution, sections and both coordinate vectors) hashes
-equal to the first year's (``mesh_signature``). A year whose file differs is
-read onto its own mesh, as ``--mesh-per-year`` reads every year, and the run
-names it. ``CheckpointFile.load_function`` maps a file's fields onto a mesh
-through the topology the file stores, so where two files store the same one
-the arrays read onto the first year's mesh are the ones the year's own mesh
+equal to the first year's (``mesh_signature``); a year there then takes
+about 6.4 s. A year whose file differs is read onto its own mesh, as
+``--mesh-per-year`` reads every year, and the run names it.
+``CheckpointFile.load_function`` maps a file's fields onto a mesh through
+the topology the file stores, so where two files store the same one the
+arrays read onto the first year's mesh are the ones the year's own mesh
 gives, and the files written are the same.
 
 It writes one NetCDF per variable under

@@ -4,11 +4,13 @@ it every year wrote.
 Loading the mesh was most of the writer's cost, 92 to 95 s of about 104 s a
 year on the 2 km production mesh, so ``write_ismip7_output.SeriesMesh``
 loads it from the first year and reads a later year onto it when the year
-file's ``mesh_signature`` matches the first's, and onto the year's own mesh
-when it does not. These run the writer end to end on a series the forward's
-own ``AnnualOutput`` banks on a 32-cell mesh of two by two 8 km pixels,
-once as it runs by default and once with ``--mesh-per-year``, and hold
-every array and attribute of the two trees equal.
+file's ``mesh_signature`` matches the first's. A year whose file stores
+another mesh is read onto that mesh and regridded through its own overlap
+operator. These run the writer end to end on series the forward's own
+``AnnualOutput`` banks on meshes of two by two 8 km pixels: one mesh
+throughout, written by default and with ``--mesh-per-year``, every array
+and attribute of the two trees equal; and a series that changes mesh,
+whose years on the other mesh match a series written on that mesh alone.
 """
 import os
 import sys
@@ -54,15 +56,14 @@ def _mesh(faces=(4, 4), name="firedrake_default"):
     return fd.Mesh(plex, name=name)
 
 
-def _bank(out, mesh, years, seed, uniform=False):
+def _bank(out, mesh, years, seed):
     r"""Years of a forward on ``mesh`` through ``AnnualOutput``: one booked
-    advance per year and its year end. ``uniform`` grounds ice on every
-    cell, whose area sums then hold on any mesh of the four pixels."""
+    advance per year and its year end."""
     Q = fd.FunctionSpace(mesh, "DG", 0)
     V = fd.VectorFunctionSpace(mesh, "CG", 1)
     rng = np.random.default_rng(seed)
     n = Q.dim()
-    bed = rng.uniform(-700.0, 150.0, n) if not uniform else np.full(n, 100.0)
+    bed = rng.uniform(-700.0, 150.0, n)
     annual = AnnualOutput(mesh, Q, os.path.join(out, STEM),
                           os.path.join(out, STEM.replace("_annual.h5", "_scalars.csv")),
                           first_year=years[0], rho_ratio=RHO_RATIO, bed=bed)
@@ -77,10 +78,7 @@ def _bank(out, mesh, years, seed, uniform=False):
     x, y = fd.SpatialCoordinate(mesh)
     for _ in years:
         thick = rng.uniform(0.0, 1500.0, n)
-        if not uniform:
-            thick[rng.choice(n, 4, replace=False)] = 0.0          # ice-free cells
-        else:
-            thick += 10.0
+        thick[rng.choice(n, 4, replace=False)] = 0.0          # ice-free cells
         h = dg(thick)
         grounded = (thick * RHO_RATIO > -bed) | (bed >= 0.0)
         s = dg(np.where(grounded, bed + thick, (1.0 - RHO_RATIO) * thick))
@@ -96,18 +94,23 @@ def _bank(out, mesh, years, seed, uniform=False):
     annual.close()
 
 
-def _operator(out, first_year):
-    r"""The overlap operator of the first year's mesh, cached where the
-    writer looks for it: each cell's area in the pixel holding it."""
-    with fd.CheckpointFile(AnnualOutput.year_path(os.path.join(out, STEM), first_year), "r") as chk:
-        mesh = chk.load_mesh()
+def _cell_operator(mesh):
+    r"""The overlap operator of ``mesh``, each cell's area in the pixel
+    holding it, which is what the supermesh gives where every cell lies
+    inside one pixel."""
     Q = fd.FunctionSpace(mesh, "DG", 0)
     area = fd.assemble(fd.TestFunction(Q) * fd.dx).dat.data_ro
     xc = [fd.Function(Q).interpolate(fd.SpatialCoordinate(mesh)[i]).dat.data_ro for i in (0, 1)]
     i = np.floor((xc[0] - (wio.ISMIP7_X0 - DX / 2)) / DX).astype(int)
     j = np.floor((xc[1] - (wio.ISMIP7_Y0 - DX / 2)) / DX).astype(int)
-    W = sp.csr_matrix((area, (j * wio.ISMIP7_NX + i, np.arange(len(area)))),
-                      shape=(wio.ISMIP7_NX * wio.ISMIP7_NY, len(area)))
+    return sp.csr_matrix((area, (j * wio.ISMIP7_NX + i, np.arange(len(area)))),
+                         shape=(wio.ISMIP7_NX * wio.ISMIP7_NY, len(area)))
+
+
+def _operator(out, first_year):
+    r"""The first year's operator, cached where the writer looks for it."""
+    with fd.CheckpointFile(AnnualOutput.year_path(os.path.join(out, STEM), first_year), "r") as chk:
+        W = _cell_operator(chk.load_mesh())
     np.savez(os.path.join(out, STEM) + ".overlap.npz", data=W.data, indices=W.indices,
              indptr=W.indptr, shape=np.array(W.shape))
 
@@ -178,21 +181,55 @@ def test_reading_onto_the_first_years_mesh_writes_what_per_year_meshes_write(
     assert float(np.abs(v).sum()) == pytest.approx(float(np.abs(four).sum()))
 
 
-def test_a_year_whose_mesh_differs_is_read_onto_its_own(tmp_path, monkeypatch, capsys):
-    r"""2016 comes from a mesh of as many cells under the same names but
-    another topology, so its fields cannot be read through the first year's
-    mesh. It is read onto its own, the run names it, and 2017, on the first
-    year's mesh again, is read onto that."""
-    out = str(tmp_path / "run")
-    _bank(out, _mesh(), [2015], seed=2, uniform=True)
-    _bank(out, _mesh(faces=(2, 8)), [2016], seed=3, uniform=True)
-    _bank(out, _mesh(), [2017], seed=4, uniform=True)
+def _planes(tree):
+    r"""``{variable: its time slices}`` of every gridded file in a tree."""
+    found = {}
+    for name, path in _files(tree).items():
+        var = name.split("_AIS_")[0]
+        if var in wio.VARIABLES_2D:
+            with netCDF4.Dataset(path) as ds:
+                ds.variables[var].set_auto_mask(False)
+                found[var] = np.asarray(ds.variables[var][:])
+    assert sorted(found) == sorted(wio.VARIABLES_2D)
+    return found
+
+
+@pytest.mark.parametrize("faces", [(2, 8), (4, 2)], ids=["same-count", "other-count"])
+def test_a_year_whose_mesh_differs_is_read_onto_its_own(tmp_path, monkeypatch, capsys, faces):
+    r"""2016 and 2017 come from another mesh under the same names, with as
+    many cells or with fewer, and 2018 from the first year's again. Each
+    year is regridded through its own mesh's operator, the other mesh's
+    built once in memory, and the run names the years: 2016 and 2017 write
+    what a series banked on that mesh alone writes."""
+    built, real = [], wio.overlap_operator
+
+    def overlap_operator(mesh, cache):
+        if cache is None:
+            built.append(mesh)
+            return _cell_operator(mesh)
+        return real(mesh, cache)
+
+    monkeypatch.setattr(wio, "overlap_operator", overlap_operator)
+    out, alone = str(tmp_path / "run"), str(tmp_path / "alone")
+    _bank(out, _mesh(), [2015], seed=2)
+    _bank(out, _mesh(faces=faces), [2016, 2017], seed=3)
+    _bank(out, _mesh(), [2018], seed=4)
+    _bank(alone, _mesh(faces=faces), [2016, 2017], seed=3)
     _operator(out, 2015)
-    log = _write(out, str(tmp_path / "once"), monkeypatch, capsys)
-    assert "year 2016: the file's mesh differs from 2015's" in log
-    assert "2 of 3 years read onto it, 1 onto their own, whose files differ: 2016" in log
-    _write(out, str(tmp_path / "per_year"), monkeypatch, capsys, "--mesh-per-year")
-    _same_tree(str(tmp_path / "once"), str(tmp_path / "per_year"))
+    _operator(alone, 2016)
+
+    log = _write(out, str(tmp_path / "mixed"), monkeypatch, capsys)
+    assert "year 2016: the file's mesh differs from every one read before" in log
+    assert "year 2017: the file's mesh differs" not in log
+    assert ("2 of 4 years read onto it, 2 onto another mesh with its own overlap "
+            "operator: 2016, 2017 (on 2016's)") in log
+    assert len(built) == 1
+    _write(alone, str(tmp_path / "alone_tree"), monkeypatch, capsys)
+    assert len(built) == 1
+    mixed, ref = _planes(str(tmp_path / "mixed")), _planes(str(tmp_path / "alone_tree"))
+    for var in wio.VARIABLES_2D:
+        assert mixed[var].shape[0] == 4 and ref[var].shape[0] == 2, var
+        np.testing.assert_allclose(mixed[var][1:3], ref[var], rtol=1.0e-6, atol=0.0, err_msg=var)
 
 
 def test_the_signature_sees_the_mesh_and_not_the_fields(tmp_path):

@@ -99,9 +99,18 @@ sit on different machines. The writer reads the annual checkpoints, which for a
 286-year experiment come to roughly 14 GB, so it belongs where the run is; it
 needs the forward's own environment plus netCDF4, since it reaches icepack2
 through `icepack2_tools.dual_friction` and dates its time axis with cftime.
-The checker reads the written NetCDF, a few GB after zlib, so it can stay
-wherever the newer Python is. Rice NOTS carries the writer's dependencies; the
-checker runs here on the workstation.
+It loads the model mesh once, from the first year, and reads every later year
+whose file stores the same mesh onto it. A year whose file stores another mesh
+is read onto that mesh and regridded through an overlap operator built for it
+in memory, once per distinct mesh, and the run names the year;
+`--mesh-per-year` loads each year's own mesh and regrids every year through
+the first year's operator, as the writer did before. On the 2 km production
+mesh, where every year stores one mesh, that took an 86-year core from 2 h
+24 min to 11 min on one core, about 2 min of setup and 6.4 s a model year in
+at most 3.8 GB, with every array and attribute of the files unchanged (IU
+Quartz, October 2026). The checker reads the written NetCDF, a few GB after
+zlib, so it can stay wherever the newer Python is. Rice NOTS carries the
+writer's dependencies; the checker runs here on the workstation.
 
 ### 0.4 Accounts
 

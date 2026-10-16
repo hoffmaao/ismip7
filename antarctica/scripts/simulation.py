@@ -3323,6 +3323,11 @@ def run_simulation(
     # retreat is already carried in h by the sub-cell shed.
     level_set = None
     front_transport = None
+    # an advected front's calving by its parts, per step attempt [Gt]: the
+    # ice the transport carried across the front without it following,
+    # what the front's rules took from the cells it left, the icebergs;
+    # and the cells of enclosed water filled into the ice
+    front_split = {"crossing": 0.0, "retreat": 0.0, "icebergs": 0.0, "filled": 0}
     phi_entry = None
     last_c_mean = 0.0
     drag_rule = ctx.get("drag_rule")
@@ -3471,7 +3476,10 @@ def run_simulation(
         else:
             h_dg.dat.data[:] += back
         berg = front_transport.icebergs(np.array(_cells(h_dg)), grounded)
-        return gt + _remove_cells(berg)
+        berg_gt = _remove_cells(berg)
+        front_split["retreat"] += gt
+        front_split["icebergs"] += berg_gt
+        return gt + berg_gt
 
     def _advance(dt_local, label):
         r"""One transport advance of dt_local with the CURRENT velocity
@@ -3499,6 +3507,7 @@ def run_simulation(
                 # after the transport (_front_rules), and its sub-cell
                 # position lives in phi itself.
                 last_c_mean = front_transport.advance(dt_local, rate=calving_rate)
+                front_split["filled"] += front_transport.n_filled
             else:
                 last_c_mean = level_set.advance(dt_local, u_vel, rate=calving_rate)
                 lsb, calv_frac = level_set.calving_masks()
@@ -3601,6 +3610,7 @@ def run_simulation(
                 front_transport.outflow(h_dg))) * rho_gt * dt_local
             calv_tr_gt = float(assemble(
                 front_transport.calving(h_dg))) * rho_gt * dt_local
+            front_split["crossing"] += calv_tr_gt
         else:
             out_gt = float(assemble(
                 un_transport_plus * h_dg * ds
@@ -3994,6 +4004,7 @@ def run_simulation(
             acc = {"out_gt": 0.0, "calv_gt": 0.0, "clamp_gt": 0.0,
                    "limit_gt": 0.0, "amb_gt": 0.0,
                    "smb_gt": 0.0, "melt_gt": 0.0}
+            front_split.update(crossing=0.0, retreat=0.0, icebergs=0.0, filled=0)
             ok = True
             reject_err = None
             t_attempt_start = perf_counter()
@@ -4283,6 +4294,12 @@ def run_simulation(
                 + (f"\n      collapse [cells]: flagged={collapse_cells[0]} "
                    f"removed={collapse_cells[1]} held={collapse_cells[2]}"
                    if collapse is not None else "")
+                + (f"\n      front calving [Gt/yr]: crossing="
+                   f"{-front_split['crossing']/dt:+.0f} retreat="
+                   f"{-front_split['retreat']/dt:+.0f} icebergs="
+                   f"{-front_split['icebergs']/dt:+.0f}; enclosed water filled "
+                   f"{front_split['filled']} cells"
+                   if front_transport is not None else "")
             )
 
         if not np.isfinite(resid_gt) or abs(resid_gt) > mass_tol_gt:

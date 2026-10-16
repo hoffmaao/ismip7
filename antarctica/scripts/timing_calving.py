@@ -28,7 +28,10 @@ the geometry space, ``ISMIP7_FRONT_HMIN``, the drag gate of the state.
         --reps 5 --out timing_calving.json
 
 STATE.h5 is any checkpoint a forward wrote (ISMIP7_RESTART semantics: the
-run's environment, mesh and MAP knobs as the forward that wrote it).
+run's environment, mesh and MAP knobs as the forward that wrote it), or
+``cold`` for the state a forward cold-starts from: the MAP that
+ISMIP7_INVERSION names on the mesh ISMIP7_MESH names, as setup_model builds
+it (on another mesh, the transfer and the startup continuation).
 """
 import argparse
 import json
@@ -75,7 +78,7 @@ def _rss_gib(comm):
 def main():
     ap = argparse.ArgumentParser(description=__doc__,
                                  formatter_class=argparse.RawDescriptionHelpFormatter)
-    ap.add_argument("state")
+    ap.add_argument("state", help="a forward checkpoint, or cold")
     ap.add_argument("--laws", nargs="+",
                     default=["fixed", "hfb:sigma_max=0.15",
                              "vonmises:sigma_max_fl=0.275,sigma_max_gr=1.0",
@@ -91,7 +94,8 @@ def main():
     from icepack2_tools.levelset import LevelSet
 
     t0 = perf_counter()
-    ctx = setup_model(restart_from=a.state)
+    cold = a.state == "cold"
+    ctx = setup_model(restart_from=None if cold else a.state)
     t_setup = _slowest(comm, perf_counter() - t0)
     mesh = ctx["mesh"]
     geom_dg1 = bool(ctx.get("geom_dg1", False))
@@ -107,9 +111,9 @@ def main():
     # owned entities, summed: cells from the DG0 space, vertices from the CG1 one
     n_cells = int(comm.allreduce(int(fd.FunctionSpace(mesh, "DG", 0).dof_dset.size)))
     n_vertices = int(comm.allreduce(int(fd.FunctionSpace(mesh, "CG", 1).dof_dset.size)))
-    t_state = float(ctx.get("t_restart") or 0.0)
+    t_state = 2015.0 if cold else float(ctx.get("t_restart") or 0.0)
     PETSc.Sys.Print(
-        f"calving solver timing: {os.path.basename(a.state)} at t={t_state:g}, "
+        f"calving solver timing: {'cold start from ' + os.path.basename(os.environ.get('ISMIP7_INVERSION', '?')) if cold else os.path.basename(a.state)} at t={t_state:g}, "
         f"{n_vertices} vertices, {n_cells} cells, {comm.size} ranks, "
         f"geometry {'DG1 (front on cell means)' if geom_dg1 else 'DG0'}, "
         f"h_min {hmin:g} m, dt {a.dt:g} yr, {a.reps} repetitions; setup {t_setup:.1f} s")
@@ -170,7 +174,9 @@ def main():
             f"{c_front:.1f} m/yr, {n_beyond} cells passed | RSS {row['rss_gib']:.2f} GiB")
     if a.out and comm.rank == 0:
         with open(a.out, "w") as fh:
-            json.dump({"state": os.path.realpath(a.state), "t": t_state,
+            json.dump({"state": "cold" if cold else os.path.realpath(a.state), "t": t_state,
+                       "map": os.environ.get("ISMIP7_INVERSION"),
+                       "mesh": os.environ.get("ISMIP7_MESH"),
                        "ranks": comm.size, "vertices": n_vertices, "cells": n_cells,
                        "geometry_space": "dg1" if geom_dg1 else "dg0", "h_min": hmin,
                        "dt": a.dt, "reps": a.reps, "setup_s": t_setup, "laws": rows},

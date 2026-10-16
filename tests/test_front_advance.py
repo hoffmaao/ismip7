@@ -59,3 +59,18 @@ def test_only_a_sliver_at_the_front_is_held():
     # without a shedding law there is no front cell, so no sliver is held
     assert not held_calved(np.zeros(4, bool), h_old, h_new, 1.0, sliver=sliver,
                            beyond=np.zeros(4, bool)).any()
+
+
+def test_the_front_anchor_defaults_to_extent_and_takes_advect(monkeypatch):
+    r"""ISMIP7_FRONT_ANCHOR: extent by default (the front re-derived from the
+    thickness), advect for a front carried by the ice velocity and the
+    calving rate; anything else is refused at startup."""
+    from icepack2_tools.runconfig import front_anchor
+    monkeypatch.delenv("ISMIP7_FRONT_ANCHOR", raising=False)
+    assert front_anchor() == "extent"
+    monkeypatch.setenv("ISMIP7_FRONT_ANCHOR", " Advect ")
+    assert front_anchor() == "advect"
+    monkeypatch.setenv("ISMIP7_FRONT_ANCHOR", "lagrangian")
+    import pytest
+    with pytest.raises(ValueError, match="ISMIP7_FRONT_ANCHOR"):
+        front_anchor()

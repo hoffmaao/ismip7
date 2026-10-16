@@ -1006,6 +1006,32 @@ def front_advance():
     return value
 
 
+FRONT_ANCHORS = ("extent", "advect")
+
+
+def front_anchor():
+    r"""``ISMIP7_FRONT_ANCHOR``: how a level-set law's front evolves
+    (:mod:`icepack_tools.levelset`, ``anchor``).
+
+    ``extent`` (default): the front is re-solved every advance as the
+    distance to the ice extent the thickness holds, the transport advances
+    it and the law only retreats it by normal flow, with the sub-cell retreat
+    shed from the front cells. ``advect``: the front is a level set carried by
+    the ice velocity and retreated by the calving rate,
+    ``phi_t + u . grad(phi) - c |grad(phi)| = 0`` (the velocity extended
+    harmonically into the water, the rate along the normal), reinitialised
+    every few advances; every cell it leaves is emptied after the transport
+    and booked as calving, so the front is where the level set says. A
+    restart under ``advect`` continues the saved level set, and a state
+    written under one anchor does not restart under the other.
+    """
+    value = os.environ.get("ISMIP7_FRONT_ANCHOR", "extent").strip().lower()
+    if value not in FRONT_ANCHORS:
+        raise ValueError(
+            f"ISMIP7_FRONT_ANCHOR must be one of {FRONT_ANCHORS}, got {value!r}")
+    return value
+
+
 # The year the initial geometry is dated (BedMachine v4.1's nominal year, the
 # year the MAPs are inverted at), and the window of the Smith et al. (2020)
 # mean dH/dt that dates a cold start before it (issue #117).

@@ -115,6 +115,7 @@ from icepack2_tools.runconfig import (
     raster_base_method as _raster_base_method,
     calving_law as _calving_law, calving_law_object as _calving_law_object,
     front_advance as _front_advance,
+    front_anchor as _front_anchor,
     fracture as _fracture_mode, ismip7_output as _ismip7_output,
     FRACTURE_MASK_MODES,
     # auto_resume is re-exported, not used here: every forward driver imports
@@ -805,6 +806,8 @@ def setup_model(restart_from=None, *, allow_timing_cache_a_ref=False,
     u_ref_fssa_ckpt = None
     fssa_tendency_ckpt = None
     calved_cells_ckpt = None
+    levelset_ckpt = None
+    front_anchor_ckpt = None
     phys_div = None
     h_dg_state = None
     t_restart = None
@@ -944,6 +947,14 @@ def setup_model(restart_from=None, *, allow_timing_cache_a_ref=False,
             calved_cells_ckpt = load_checkpoint_field(
                 chk, "calved_cells", Q_dg, optional=True
             )
+            # The advected front (ISMIP7_FRONT_ANCHOR=advect) is state: a
+            # restart continues it. An extent-anchored run re-derives its
+            # front from the thickness and never reads this.
+            levelset_ckpt = load_checkpoint_field(
+                chk, "levelset", Q_dg, optional=True
+            )
+            front_anchor_ckpt = (str(chk.get_attr("/", "front_anchor"))
+                                 if chk.has_attr("/", "front_anchor") else None)
             # An adapted checkpoint carries the transferred PHYSICAL divergence
             # instead of a_ref (icepack2_tools.adapt_mesh); a_ref is rebuilt
             # below with this mesh's own operator.
@@ -2179,6 +2190,9 @@ def setup_model(restart_from=None, *, allow_timing_cache_a_ref=False,
         "fssa_tendency": fssa_tendency,
         # Cells a retreat-only front has emptied (restart only; else None).
         "calved_cells": calved_cells_ckpt,
+        # The saved level set and the anchor it was written under (restart only).
+        "levelset_state": levelset_ckpt,
+        "front_anchor_state": front_anchor_ckpt,
         "phys_div": phys_div,
         # DG0 prognostic thickness state (restart only; else None).
         "h_dg_state": h_dg_state,
@@ -2305,6 +2319,7 @@ def save_model_state(ctx, final_path, t_now, extra_attrs=None):
             chk.set_attr("/", "dt_yr", float(ctx["dt"]))
         if ctx.get("calving_law") is not None:
             chk.set_attr("/", "calving_law", str(ctx["calving_law"].describe()))
+            chk.set_attr("/", "front_anchor", str(ctx.get("front_anchor", "extent")))
         chk.set_attr("/", "friction", str(ctx.get("friction", "budd")))
         if ctx.get("smb_elevation_feedback") is not None:
             chk.set_attr("/", SMB_FEEDBACK_ATTR,
@@ -2628,6 +2643,8 @@ def run_simulation(
     # unconditional ISMIP7_FIXED_FRONT=1 cannot pin a projection law by
     # accident (the reason the legacy flag is ignored under a law).
     front_advance = _front_advance()
+    front_anchor_mode = _front_anchor()
+    ctx["front_anchor"] = front_anchor_mode
     retreat_only = calving_law_obj is not None and front_advance == "none"
     if front_advance == "none" and calving_law_obj is None:
         raise ValueError(
@@ -2661,6 +2678,8 @@ def run_simulation(
             f"(ISMIP7_CALVING={calving})"
             + ("; retreat-only: nothing advances past the t=0 extent "
                "(ISMIP7_FRONT_ADVANCE=none)" if retreat_only else "")
+            + (f"; front carried by advection and the calving rate "
+               f"(ISMIP7_FRONT_ANCHOR=advect)" if front_anchor_mode == "advect" else "")
             + ("; ISMIP7_FIXED_FRONT is set but ignored for removal"
                if fixed_front and not retreat_only else ""))
     elif fixed_front:
@@ -3318,11 +3337,27 @@ def run_simulation(
         if calving_law_obj.front_mode == "fixed":
             _h0 = Function(Q_dg).project(ctx.get("H_init", h))
             phi_init = initial_distance(mesh, _h0, h_min=front_hmin)
+        anchor_was = ctx.get("front_anchor_state")
+        if t_restart is not None and anchor_was is not None and anchor_was != front_anchor_mode:
+            raise RuntimeError(
+                f"the restart state was written with ISMIP7_FRONT_ANCHOR="
+                f"{anchor_was} and this run asks for {front_anchor_mode}: the two "
+                f"anchors carry the front differently, so a run keeps the one it "
+                f"started with (give a new anchor its own ISMIP7_RUN_TAG)")
+        if (front_anchor_mode == "advect" and calving_law_obj.front_mode != "fixed"
+                and t_restart is not None):
+            if ctx.get("levelset_state") is None:
+                raise RuntimeError(
+                    "ISMIP7_FRONT_ANCHOR=advect restarts from the saved level "
+                    "set, and the restart state holds none")
+            phi_init = ctx["levelset_state"]
+            PETSc.Sys.Print("  Front: the advected level set continues from the checkpoint")
         # Under DG1 the level set reads the cell means (h_cell, refreshed
         # with every lift), so its extent is the cells' as under DG0.
         level_set = LevelSet(
             mesh, h_cell if geom_dg1 else h_dg, law=calving_law_obj.front_mode,
             h_min=front_hmin, drag_mask=ctx.get("drag_mask"), phi_init=phi_init,
+            anchor=front_anchor_mode,
         )
         phi_entry = Function(level_set.Q0)
     # save_model_state writes the front and the ISMIP7 year in progress.
@@ -3381,7 +3416,13 @@ def run_simulation(
             if front_state is not None and calving_law_obj.time_dependent:
                 calving_rate = calving_law_obj.rate(front_state, t_yr)
             last_c_mean = level_set.advance(dt_local, u_vel, rate=calving_rate)
-            lsb, calv_frac = level_set.calving_masks()
+            if level_set.anchor == "advect":
+                # The front is the level set's: every cell it has left is
+                # emptied after the transport, whatever the transport carried
+                # into it, and its sub-cell position lives in phi itself.
+                lsb, calv_frac = level_set.beyond_front(), None
+            else:
+                lsb, calv_frac = level_set.calving_masks()
             beyond = front_removal_mask(lsb, beyond_front, retreat_only, calved)
             ls_ice_free = level_set.beyond_front()
             if retreat_only:

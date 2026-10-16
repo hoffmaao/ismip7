@@ -8,9 +8,12 @@ checkpoint and the mesh it was written on (a 2 km buffered state is the
 case it is built for):
 
     construct   building the level set and its solvers (once per run)
-    advance     ``LevelSet.advance``, the whole of one front step
-    masks       the removal masks the forward reads after every advance
-                (``calving_masks`` or ``beyond_front``)
+    advance     one front step: ``LevelSet.advance`` (extent), or
+                ``FrontTransport.advance`` (advect), which is the level set's
+                advance, the barrier and the enclosed-water flood
+    masks       what the forward does to the thickness after every transport:
+                ``calving_masks`` (extent), or the advected front's rules, the
+                band cells' hand-back and the iceberg flood (advect)
 
 and, inside an advance, per anchor (``--anchors``, ISMIP7_FRONT_ANCHOR):
 
@@ -20,7 +23,8 @@ and, inside an advance, per anchor (``--anchors``, ISMIP7_FRONT_ANCHOR):
                 interpolated on the ice cells; the normal-flow solve is the rest
     advect      vext: the velocity's harmonic extension into the water (CG,
                 GAMG); rext: the rate's extension along the normal (direct);
-                adv: the advection solve; reinit: one reinitialisation
+                adv: the advection solve; reinit: one reinitialisation; fill:
+                the enclosed-water flood alone
 
 each the slowest rank's time, over ``--reps`` repetitions on the same state
 (the extent does not change between them, so every repetition does the same
@@ -54,7 +58,6 @@ import numpy as np  # noqa: E402
 from mpi4py import MPI  # noqa: E402
 
 import firedrake as fd  # noqa: E402
-from firedrake import Function, dx  # noqa: E402
 
 from simulation import setup_model, calving_front_state, PETSc  # noqa: E402
 from icepack2_tools.runconfig import front_hmin as _front_hmin  # noqa: E402
@@ -99,6 +102,7 @@ def main():
     comm = MPI.COMM_WORLD
 
     from icepack_tools import calving
+    from icepack_tools.front_transport import FrontTransport
     from icepack2_tools.levelset import LevelSet
 
     t0 = perf_counter()
@@ -120,6 +124,10 @@ def main():
     n_cells = int(comm.allreduce(int(fd.FunctionSpace(mesh, "DG", 0).dof_dset.size)))
     n_vertices = int(comm.allreduce(int(fd.FunctionSpace(mesh, "CG", 1).dof_dset.size)))
     t_state = 2015.0 if cold else float(ctx.get("t_restart") or 0.0)
+    # grounded cells for the iceberg flood: thickness above flotation
+    rho_ratio = 917.0 / 1028.0
+    grounded = (np.asarray(h_front.dat.data_ro)
+                - np.maximum(-np.asarray(b_front.dat.data_ro), 0.0) / rho_ratio) > 0.0
     PETSc.Sys.Print(
         f"calving solver timing: {'cold start from ' + os.path.basename(os.environ.get('ISMIP7_INVERSION', '?')) if cold else os.path.basename(a.state)} at t={t_state:g}, "
         f"{n_vertices} vertices, {n_cells} cells, {comm.size} ranks, "
@@ -141,7 +149,8 @@ def main():
                                         ctx["n_flow_val"])
             rate = law.rate(state, t_state)
         t_eik, t_rate, t_adv, t_mask = [], [], [], []
-        t_vext, t_rext, t_ls, t_re = [], [], [], []
+        t_vext, t_rext, t_ls, t_re, t_fill = [], [], [], [], []
+        ft = FrontTransport(ls, u) if anchor == "advect" else None
         n_front, c_front, n_beyond = 0, 0.0, 0
 
         def _timed(fn, out):
@@ -156,7 +165,10 @@ def main():
                 n_front = _timed(ls.solve_eikonal_from_extent, t_eik)
                 if rate is not None:
                     _timed(lambda: ls.c_cell.interpolate(ls.chi * ls._rate_expr(rate)), t_rate)
-            c_front = _timed(lambda: ls.advance(a.dt, u, rate=rate), t_adv)
+            if anchor == "extent":
+                c_front = _timed(lambda: ls.advance(a.dt, u, rate=rate), t_adv)
+            else:
+                c_front = _timed(lambda: ft.advance(a.dt, rate), t_adv)
             if anchor == "advect" and law.front_mode != "fixed":
                 # the advance's solvers once more on the state it left, each
                 # timed on its own
@@ -164,10 +176,21 @@ def main():
                 _timed(ls._rate_ext_solver.solve, t_rext)
                 _timed(ls._ls_solver.solve, t_ls)
                 _timed(ls.reinitialise, t_re)
+            if anchor == "advect":
+                _timed(ft.fill_enclosed_water, t_fill)
+
+            def _advected_rules():
+                # the forward's sequence on the cell thickness, on a copy
+                keep, band, touch = ft.rules()
+                hc = np.array(h_front.dat.data_ro) * keep
+                ft.excess(hc, band, touch)
+                ft.icebergs(hc, grounded)
+                return ls.beyond_front()
+
             if anchor == "extent":
                 lsb = _timed(lambda: ls.calving_masks()[0], t_mask)
             else:
-                lsb = _timed(ls.beyond_front, t_mask)
+                lsb = _timed(_advected_rules, t_mask)
             ls.beyond_front()
             n_beyond = comm.allreduce(int(np.count_nonzero(lsb)))
         med = (lambda t: float(np.median(t)) if t else 0.0)
@@ -175,7 +198,7 @@ def main():
             "anchor": anchor, "law": spec, "front_mode": law.front_mode,
             "front_facets": int(n_front),
             "vext_s": med(t_vext), "rext_s": med(t_rext), "adv_s": med(t_ls),
-            "reinit_s": med(t_re),
+            "reinit_s": med(t_re), "fill_s": med(t_fill),
             "construct_s": t_construct,
             "eikonal_s": med(t_eik),
             "rate_s": float(np.median(t_rate)) if t_rate else 0.0,
@@ -189,7 +212,8 @@ def main():
         parts = (f"eikonal {row['eikonal_s']:.3f}, rate {row['rate_s']:.3f}"
                  if anchor == "extent" else
                  f"vext {row['vext_s']:.3f}, rext {row['rext_s']:.3f}, adv "
-                 f"{row['adv_s']:.3f}, reinit {row['reinit_s']:.3f}")
+                 f"{row['adv_s']:.3f}, reinit {row['reinit_s']:.3f}, fill "
+                 f"{row['fill_s']:.3f}")
         PETSc.Sys.Print(
             f"  {anchor:6s} {spec:46s} construct {t_construct:6.2f} s | per advance "
             f"{row['per_advance_s']:6.3f} s (advance {row['advance_s']:.3f}: {parts}; "

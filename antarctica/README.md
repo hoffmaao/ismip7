@@ -1335,6 +1335,33 @@ than a cell from the front. Thin cells inside the t=0 extent are damped by
 a free law advances into, `C_w0` comes from the t=0 geometry where `H = 0`, so
 `tau_b = 0` under both laws and the damping is `h_visc_floor` and the collar.
 
+**An advected front (`ISMIP7_FRONT_ANCHOR=advect`).** The level set above is
+anchored at the extent: it is rebuilt from the thickness every step, the
+transport advances the front and the law only retreats it. Under `advect` the
+level set carries the front itself, `phi_t + u . grad(phi) - c |grad(phi)| = 0`,
+and the transport moves the ice with it (`icepack_tools.front_transport`,
+through `icepack2_tools.transport.front_transport_form`):
+
+- only the cells inside the front (`phi <= 0`) export ice. A cell beyond it
+  receives what follows the front's own advance, `h ((u - c n_f) . n)+`, and the
+  rest of the ice crossing the front is calving, booked by the transport;
+- after the solve, a cell beyond the front that shares an edge with the ice
+  keeps what the advance carried into it, or the part of it still behind a
+  front that retreated off it, and hands back any excess over the ice it came
+  from. Every other cell beyond the front is emptied;
+- water the level set encloses in the ice joins the ice (nunataks, lakes: 293
+  cells on the 5 km buffered mesh), and ice that no path through ice connects
+  to grounded ice is an iceberg;
+- under `ISMIP7_FRONT_ADVANCE=none` the front is held at the t=0 extent: it
+  retreats but never advances past it, and the ice reaching it calves. The
+  collapse mask's removals retreat the level set with them.
+
+Every removal is booked in `calv`, and the transport's mass check includes the
+calving flux. The plain transport followed by emptying every cell beyond the
+level set, which the anchor first ran with, booked all the ice reaching the
+front as calving whatever the law: 6,650 Gt/yr in the first step on the 5 km
+buffered mesh, where the extent anchor booked 1,370.
+
 **The laws have one home, `icepack_tools.calving`,** beside the level set that
 moves the front with their rate. The CalvingMIP project runs from the same
 registry and tunes against Antarctic fronts with it (`calving/tune_greene.py`,
@@ -1366,9 +1393,11 @@ rate. The `Calving front owner:` line and every checkpoint's `calving_law`
 attribute record the law with every parameter at full precision, and
 `core_report.py` lifts the line into the report.
 
-The level set is checkpointed as `levelset` for diagnostics; a restart
-rebuilds the front from the thickness. The exception is `fixed`, which anchors
-on `H_init` so a resumed run does not re-freeze the front where it restarted.
+The level set is checkpointed as `levelset`. An extent-anchored restart
+rebuilds the front from the thickness, and an advected one continues from the
+saved field; a restart refuses a state written under the other anchor. The
+exception is `fixed`, which anchors on `H_init` so a resumed run does not
+re-freeze the front where it restarted.
 The laws and the shared level set are tested in `icepack_tools`
 (`test/calving_test.py`, `test/levelset_test.py`); the ISMIP7-side rules
 (retreat-sliver mask, apparent-MB extent masking, the `fixed` law's t=0
@@ -1692,7 +1721,8 @@ redeclare those literals.
 | `ISMIP7_EXPERIMENT_NAME` | the run's identity, used by `adapt_mesh.py` to name adapted meshes and sidecars so parallel experiments cannot overwrite each other. Set by `run_adaptive.py --experiment-name`. See `../ADAPTIVE_MESH.md` | unset |
 | `ISMIP7_APPARENT_MB` | `1` or `balance` zeroes the t=0 thickness tendency; `div` cancels only the flux divergence; `0`, `off`, `none` and empty disable it | unset |
 | `ISMIP7_FIXED_FRONT` | hold the calving front at the t=0 extent, tallying inflow beyond it as calving. `=0` disables. Ignored whenever an `ISMIP7_CALVING` law is configured | unset |
-| `ISMIP7_FRONT_ADVANCE` | `free` (default): a level-set law's front advances wherever the transport carries ice into an empty cell the law does not remove; `none`: retreat-only, nothing advances past the t=0 extent, ice reaching it is removed each step and booked as calving (the ISMIP6 retreat-only scheme; the ISMIP7 submission's front). Under `none` a cell a front rule has emptied (beyond the law's front, shed whole, or a retreat sliver in a front cell) stays ice-free for the rest of the run, its inflow booked as calving; the mask is saved in checkpoints as `calved_cells` (`front.held_calved`, `tests/test_front_advance.py`). Needs `ISMIP7_CALVING`. |
+| `ISMIP7_FRONT_ANCHOR` | where a level-set law's front lives. `extent` (default): rebuilt from the thickness every step, the transport advancing it and the law retreating it, with the sub-cell shed. `advect`: carried by the level set (`phi_t + u . grad(phi) - c |grad(phi)| = 0`), the transport moving the ice with it (only cells inside the front export, the rest of the ice crossing it calves, enclosed water joins the ice, icebergs go; see "An advected front" above). A restart keeps the anchor it started with. Needs `ISMIP7_CALVING` | `extent` |
+| `ISMIP7_FRONT_ADVANCE` | `free` (default): a level-set law's front advances wherever the transport carries ice into an empty cell the law does not remove; `none`: retreat-only, nothing advances past the t=0 extent, ice reaching it is removed each step and booked as calving (the ISMIP6 retreat-only scheme; the ISMIP7 submission's front). Under `none` a cell a front rule has emptied (beyond the law's front, shed whole, or a retreat sliver in a front cell) stays ice-free for the rest of the run, its inflow booked as calving; the mask is saved in checkpoints as `calved_cells` (`front.held_calved`, `tests/test_front_advance.py`). Under `ISMIP7_FRONT_ANCHOR=advect` the advected front's barrier at the t=0 extent does this instead, and no mask is kept. Needs `ISMIP7_CALVING`. |
 | `ISMIP7_TRIPWIRE_U_MAX` / `ISMIP7_TRIPWIRE_H_MAX` / `ISMIP7_TRIPWIRE_DH_RATE` / `ISMIP7_TRIPWIRE_HMIN` | runaway tripwire: fail the step when max speed exceeds `U_MAX` [m/yr], max thickness exceeds `H_MAX` [m], or a cell that entered the step at least `HMIN` thick thickens at a relative rate `(dh/h)/dt` above `DH_RATE` [1/yr] (a rate so every dt scores the same physics alike; thinner cells are reported, never tripped: buffer cells fill by more than their own thickness); every step prints a `tripwire step-k:` line with the worst cells; unset = off (timing lanes export 2e4 / 5000 / 20 / 100) | _(unset)_ |
 | `ISMIP7_LEGACY_TRANSPORT` | restore the pre-July-2026 CG-projection transport (needs `cg1`) | unset |
 | `ISMIP7_SNES_TYPE` / `ISMIP7_SNES_MAXIT` | diagnostic Newton type and iteration cap | `newtonls` / `200` |

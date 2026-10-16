@@ -79,7 +79,8 @@ from icepack2_tools.geometry import (
     geometry_function_space, raise_bed_to_lake_ice_base, sample_bed_thickness,
 )
 from icepack2_tools.cellview import CellView, clamp_cells, floor_fill
-from icepack2_tools.transport import transport_form, upwind_divergence
+from icepack2_tools.transport import (
+    front_transport_form, transport_form, upwind_divergence)
 from icepack2_tools.naming import map_basename
 from icepack2_tools.handoff import check_subelement_record
 from icepack2_tools.front import (
@@ -2678,8 +2679,10 @@ def run_simulation(
             f"(ISMIP7_CALVING={calving})"
             + ("; retreat-only: nothing advances past the t=0 extent "
                "(ISMIP7_FRONT_ADVANCE=none)" if retreat_only else "")
-            + (f"; front carried by advection and the calving rate "
-               f"(ISMIP7_FRONT_ANCHOR=advect)" if front_anchor_mode == "advect" else "")
+            + ("; front carried by advection and the calving rate "
+               "(ISMIP7_FRONT_ANCHOR=advect), the transport moving the ice "
+               "with it (only cells inside the front export ice, enclosed "
+               "water filled, icebergs removed)" if front_anchor_mode == "advect" else "")
             + ("; ISMIP7_FIXED_FRONT is set but ignored for removal"
                if fixed_front and not retreat_only else ""))
     elif fixed_front:
@@ -3319,6 +3322,7 @@ def run_simulation(
     # the current thickness each step, so a restart needs no saved front: the
     # retreat is already carried in h by the sub-cell shed.
     level_set = None
+    front_transport = None
     phi_entry = None
     last_c_mean = 0.0
     drag_rule = ctx.get("drag_rule")
@@ -3360,6 +3364,47 @@ def run_simulation(
             anchor=front_anchor_mode,
         )
         phi_entry = Function(level_set.Q0)
+        if level_set.anchor == "advect":
+            # The transport moves the ice with the advected front
+            # (icepack_tools.front_transport): only the cells inside the front
+            # export ice, a cell beyond it receives what follows the front's
+            # own advance, and the rest of the ice crossing it is the calving
+            # flux, booked by the transport itself. Emptying every cell beyond
+            # the level set after a plain transport instead booked all the ice
+            # reaching the front as calving, whatever the law: 6,650 Gt/yr in
+            # the first step on the 5 km buffered mesh, where the extent
+            # anchor booked 1,370. Water the level set encloses in the ice
+            # (nunataks, lakes) joins the ice, and icebergs are removed. A
+            # retreat-only front is the coupling's barrier at the t=0 extent.
+            if legacy_transport:
+                raise ValueError(
+                    "ISMIP7_FRONT_ANCHOR=advect needs the conservative transport; "
+                    "unset ISMIP7_LEGACY_TRANSPORT")
+            from icepack_tools.front_transport import FrontTransport
+            phi_bar = None
+            if retreat_only:
+                # the t=0 extent, as the `fixed` law takes it: on a restart the
+                # level set's own construction-time field is the restart's front
+                _h0 = Function(Q_dg).project(ctx.get("H_init", h))
+                phi_bar = initial_distance(mesh, _h0, h_min=front_hmin)
+            front_transport = FrontTransport(level_set, u_transport,
+                                             barrier=retreat_only, phi0=phi_bar)
+            if front_transport.n_filled:
+                PETSc.Sys.Print(
+                    f"  Front: {front_transport.n_filled} cells of water the "
+                    f"level set encloses in the ice (nunataks, lakes) join the ice")
+            F_transport = front_transport_form(
+                h_dg_trial, h_dg_old, phi_dg, dt_c, src_dg, front_transport)
+            transport_problem = LinearVariationalProblem(
+                fd.lhs(F_transport), fd.rhs(F_transport), h_dg)
+            transport_solver = LinearVariationalSolver(
+                transport_problem,
+                solver_parameters=transport_solver_parameters(),
+                options_prefix="ismip7_transport_",
+            )
+            # each exporting cell's calving flux, for the ISMIP7 output
+            front_calving_cells = front_transport.calving(h_dg, fd.TestFunction(Q_dg))
+            front_calving_cof = fd.Cofunction(Q_dg.dual())
     # save_model_state writes the front and the ISMIP7 year in progress.
     ctx["level_set"] = level_set
     ctx["annual"] = annual
@@ -3394,6 +3439,40 @@ def run_simulation(
             h_dg.dat.data[mask] = 0.0
         return gt
 
+    def _scale_cells(factor):
+        r"""Scale every cell by its ``factor`` (DG0 indexing): the value
+        under DG0, the whole linear field under DG1, so the slope goes with
+        the mean and a positive cell stays positive."""
+        if geom_dg1:
+            cell_view.write_nodes(h_dg, cell_view.nodes(h_dg) * factor[:, None])
+        else:
+            h_dg.dat.data[:] *= factor
+
+    def _front_rules(grounded):
+        r"""The advected front's rules after the transport
+        (icepack_tools.front_transport), each removal booked as calving and
+        returned in Gt: a cell beyond the front keeps what the front's
+        advance carried into it, or the part of it still behind a front that
+        retreated off it this step, and every other cell beyond the front is
+        emptied; a band cell holding more than the ice it came from hands the
+        excess back to it; ice no path through ice connects to grounded ice
+        is an iceberg. Collective."""
+        keep, band, touch = front_transport.rules()
+        cut = np.array(_cells(h_dg)) * (1.0 - keep)
+        gt = mesh.comm.allreduce(float((cut * cell_area).sum())) * rho_gt
+        if annual is not None:
+            annual.book_removal(slice(None), cut)
+        _scale_cells(keep)
+        give, back, _moved = front_transport.excess(
+            np.array(_cells(h_dg)), band, touch)
+        _scale_cells(1.0 - give)
+        if geom_dg1:
+            cell_view.add_cells(h_dg, back)
+        else:
+            h_dg.dat.data[:] += back
+        berg = front_transport.icebergs(np.array(_cells(h_dg)), grounded)
+        return gt + _remove_cells(berg)
+
     def _advance(dt_local, label):
         r"""One transport advance of dt_local with the CURRENT velocity
         (transport-first ordering: the velocity was solved at the current
@@ -3415,17 +3494,17 @@ def run_simulation(
         if level_set is not None:
             if front_state is not None and calving_law_obj.time_dependent:
                 calving_rate = calving_law_obj.rate(front_state, t_yr)
-            last_c_mean = level_set.advance(dt_local, u_vel, rate=calving_rate)
-            if level_set.anchor == "advect":
-                # The front is the level set's: every cell it has left is
-                # emptied after the transport, whatever the transport carried
-                # into it, and its sub-cell position lives in phi itself.
-                lsb, calv_frac = level_set.beyond_front(), None
+            if front_transport is not None:
+                # The advected front: its own rules empty what it leaves,
+                # after the transport (_front_rules), and its sub-cell
+                # position lives in phi itself.
+                last_c_mean = front_transport.advance(dt_local, rate=calving_rate)
             else:
+                last_c_mean = level_set.advance(dt_local, u_vel, rate=calving_rate)
                 lsb, calv_frac = level_set.calving_masks()
-            beyond = front_removal_mask(lsb, beyond_front, retreat_only, calved)
+                beyond = front_removal_mask(lsb, beyond_front, retreat_only, calved)
             ls_ice_free = level_set.beyond_front()
-            if retreat_only:
+            if retreat_only and front_transport is None:
                 ls_ice_free = ls_ice_free | calved
             if a_ref is not None and free_front:
                 if geom_dg1:
@@ -3514,13 +3593,22 @@ def run_simulation(
                 h_dg.dat.data_ro - h_dg_old.dat.data_ro) / dt_local
         if trace_on:
             _h_tr = {i: float(h_dg.dat.data_ro[i]) for _, i in trace_cells}
-        out_gt = float(assemble(
-            un_transport_plus * h_dg * ds
-        )) * rho_gt * dt_local
+        calv_tr_gt = 0.0
+        if front_transport is not None:
+            # only the inside cells export, across the domain edge as across
+            # the front, where the ice not following the front calves
+            out_gt = float(assemble(
+                front_transport.outflow(h_dg))) * rho_gt * dt_local
+            calv_tr_gt = float(assemble(
+                front_transport.calving(h_dg))) * rho_gt * dt_local
+        else:
+            out_gt = float(assemble(
+                un_transport_plus * h_dg * ds
+            )) * rho_gt * dt_local
         m1 = float(assemble(h_dg * dx)) * rho_gt
         transport_resid_gt = None
         if not legacy_transport:
-            transport_resid_gt = (m1 - m0) - (source_gt - out_gt)
+            transport_resid_gt = (m1 - m0) - (source_gt - out_gt - calv_tr_gt)
         elapsed = perf_counter() - transport_t0
         _transport_stat, transport_reason = _record_transport(
             label, elapsed, transport_resid_gt
@@ -3569,7 +3657,18 @@ def run_simulation(
             # the sources and the withheld sink are cell means.
             annual.book_advance(dt_local, smb_f, melt_f, ref_f,
                                 h_dg, u_vel, grounded,
-                                withheld=_cells(src_dg) - _src_want)
+                                withheld=_cells(src_dg) - _src_want,
+                                exporting=(front_transport.chi_in
+                                           if front_transport is not None else None))
+            if front_transport is not None:
+                # the calving flux the transport moved across the front, to
+                # licalvf in the cell it left; read off the new thickness
+                # before the positivity floor, so a roundoff-negative trace is
+                # dropped as the boundary outflow's is (licalvf stops at zero)
+                assemble(front_calving_cells, tensor=front_calving_cof)
+                annual.book_removal(
+                    slice(None),
+                    np.maximum(front_calving_cof.dat.data_ro, 0.0) / cell_area * dt_local)
 
         # Floor to h_clamp, EXCEPT in the cells the front rules report as
         # holding no ice: see clamp_thickness for why every such rule has to
@@ -3624,8 +3723,13 @@ def run_simulation(
         if collapse is not None and _any_rank(collapse.any()):
             hit = collapsed & (_cells(h_dg) > 0.0)
             calv_gt += _remove_cells(hit)
+            if front_transport is not None:
+                # the collapsed cells are open water now, for the front too
+                front_transport.retreat_from(hit)
         if beyond is not None:
             calv_gt += _remove_cells(beyond)
+        if front_transport is not None:
+            calv_gt += _front_rules(grounded)
         if calv_frac is not None:
             # Sub-cell calving: the front cells shed the fraction of their
             # thickness that a front retreating at rate c removes in dt.
@@ -3663,7 +3767,8 @@ def run_simulation(
             #     under both laws whatever N is.
             sliver = retreat_slivers(_cells(h_dg), _cells(h_dg_old), front_hmin)
             calv_gt += _remove_cells(sliver)
-            if retreat_only:
+            # (the advected front's barrier holds a retreat-only front itself)
+            if retreat_only and front_transport is None:
                 calved[:] = held_calved(calved, _cells(h_dg_old), _cells(h_dg),
                                         front_hmin, sliver=sliver,
                                         beyond=beyond, calv_frac=calv_frac)
@@ -3690,6 +3795,8 @@ def run_simulation(
         if level_set is None and drag_rule is not None:
             drag_rule(_cells(h_dg))
         m3 = m2 - calv_gt                                        # ∫h preserved by projection
+        # the calving flux the front-aware transport moved left before m1
+        calv_gt += calv_tr_gt
         mass_now = float(assemble(h * dx)) * _RHO_I_SI / 1e12
         clamp_cg_gt = mass_now - m3          # Gt added by the CG floor after projection
         return {
@@ -3880,6 +3987,8 @@ def run_simulation(
                 if level_set is not None:
                     level_set.phi.assign(phi_entry)
                     level_set.update_cell_fields()
+                    if front_transport is not None:
+                        front_transport.refresh()
             if adapt is not None:
                 adapt.begin_attempt()
             acc = {"out_gt": 0.0, "calv_gt": 0.0, "clamp_gt": 0.0,
@@ -3980,6 +4089,8 @@ def run_simulation(
             if level_set is not None:
                 level_set.phi.assign(phi_entry)
                 level_set.update_cell_fields()
+                if front_transport is not None:
+                    front_transport.refresh()
             break
 
         t_elapsed = perf_counter() - t_step_start

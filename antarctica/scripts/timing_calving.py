@@ -8,13 +8,19 @@ checkpoint and the mesh it was written on (a 2 km buffered state is the
 case it is built for):
 
     construct   building the level set and its solvers (once per run)
-    eikonal     the exact distance to the front facets of the current extent
-                (every front segment gathered to every rank, then a nearest
-                segment search per cell)
-    rate        the law's rate interpolated on the ice cells
-    advance     ``LevelSet.advance``: the two above plus the normal-flow solve
-    masks       ``calving_masks`` and ``beyond_front``, which the forward reads
-                after every advance
+    advance     ``LevelSet.advance``, the whole of one front step
+    masks       the removal masks the forward reads after every advance
+                (``calving_masks`` or ``beyond_front``)
+
+and, inside an advance, per anchor (``--anchors``, ISMIP7_FRONT_ANCHOR):
+
+    extent      eikonal: the exact distance to the front facets of the
+                current extent (every front segment gathered to every rank,
+                then a nearest-segment search per cell); rate: the law's rate
+                interpolated on the ice cells; the normal-flow solve is the rest
+    advect      vext: the velocity's harmonic extension into the water (CG,
+                GAMG); rext: the rate's extension along the normal (direct);
+                adv: the advection solve; reinit: one reinitialisation
 
 each the slowest rank's time, over ``--reps`` repetitions on the same state
 (the extent does not change between them, so every repetition does the same
@@ -83,6 +89,8 @@ def main():
                     default=["fixed", "hfb:sigma_max=0.15",
                              "vonmises:sigma_max_fl=0.275,sigma_max_gr=1.0",
                              "eigencalving:K=1.1e8", "nocalving"])
+    ap.add_argument("--anchors", nargs="+", default=["extent", "advect"],
+                    choices=["extent", "advect"])
     ap.add_argument("--reps", type=int, default=5)
     ap.add_argument("--dt", type=float, default=0.05 / 4,
                     help="the advance's step [yr]: a 0.05 yr step at 4 substeps by default")
@@ -119,13 +127,13 @@ def main():
         f"h_min {hmin:g} m, dt {a.dt:g} yr, {a.reps} repetitions; setup {t_setup:.1f} s")
 
     rows = []
-    for spec in a.laws:
+    for anchor, spec in [(an, sp) for an in a.anchors for sp in a.laws]:
         name, params = _parse_law(spec)
         law = calving.make(name, **params)
         comm.Barrier()
         t0 = perf_counter()
         ls = LevelSet(mesh, h_front, law=law.front_mode, h_min=hmin,
-                      drag_mask=ctx.get("drag_mask"))
+                      drag_mask=ctx.get("drag_mask"), anchor=anchor)
         t_construct = _slowest(comm, perf_counter() - t0)
         rate = None
         if law.front_mode == "prescribed":
@@ -133,31 +141,43 @@ def main():
                                         ctx["n_flow_val"])
             rate = law.rate(state, t_state)
         t_eik, t_rate, t_adv, t_mask = [], [], [], []
+        t_vext, t_rext, t_ls, t_re = [], [], [], []
         n_front, c_front, n_beyond = 0, 0.0, 0
+
+        def _timed(fn, out):
+            comm.Barrier()
+            t0 = perf_counter()
+            r = fn()
+            out.append(_slowest(comm, perf_counter() - t0))
+            return r
+
         for _ in range(a.reps):
-            comm.Barrier()
-            t0 = perf_counter()
-            n_front = ls.solve_eikonal_from_extent()
-            t_eik.append(_slowest(comm, perf_counter() - t0))
-            if rate is not None:
-                comm.Barrier()
-                t0 = perf_counter()
-                ls.c_cell.interpolate(ls.chi * ls._rate_expr(rate))
-                t_rate.append(_slowest(comm, perf_counter() - t0))
-            comm.Barrier()
-            t0 = perf_counter()
-            c_front = ls.advance(a.dt, u, rate=rate)
-            t_adv.append(_slowest(comm, perf_counter() - t0))
-            comm.Barrier()
-            t0 = perf_counter()
-            lsb, _frac = ls.calving_masks()
-            beyond = ls.beyond_front()
-            t_mask.append(_slowest(comm, perf_counter() - t0))
+            if anchor == "extent":
+                n_front = _timed(ls.solve_eikonal_from_extent, t_eik)
+                if rate is not None:
+                    _timed(lambda: ls.c_cell.interpolate(ls.chi * ls._rate_expr(rate)), t_rate)
+            c_front = _timed(lambda: ls.advance(a.dt, u, rate=rate), t_adv)
+            if anchor == "advect" and law.front_mode != "fixed":
+                # the advance's solvers once more on the state it left, each
+                # timed on its own
+                _timed(ls._ext_solver.solve, t_vext)
+                _timed(ls._rate_ext_solver.solve, t_rext)
+                _timed(ls._ls_solver.solve, t_ls)
+                _timed(ls.reinitialise, t_re)
+            if anchor == "extent":
+                lsb = _timed(lambda: ls.calving_masks()[0], t_mask)
+            else:
+                lsb = _timed(ls.beyond_front, t_mask)
+            ls.beyond_front()
             n_beyond = comm.allreduce(int(np.count_nonzero(lsb)))
+        med = (lambda t: float(np.median(t)) if t else 0.0)
         row = {
-            "law": spec, "front_mode": law.front_mode, "front_facets": int(n_front),
+            "anchor": anchor, "law": spec, "front_mode": law.front_mode,
+            "front_facets": int(n_front),
+            "vext_s": med(t_vext), "rext_s": med(t_rext), "adv_s": med(t_ls),
+            "reinit_s": med(t_re),
             "construct_s": t_construct,
-            "eikonal_s": float(np.median(t_eik)),
+            "eikonal_s": med(t_eik),
             "rate_s": float(np.median(t_rate)) if t_rate else 0.0,
             "advance_s": float(np.median(t_adv)), "advance_max_s": float(np.max(t_adv)),
             "masks_s": float(np.median(t_mask)),
@@ -166,10 +186,13 @@ def main():
             "rss_gib": _rss_gib(comm),
         }
         rows.append(row)
+        parts = (f"eikonal {row['eikonal_s']:.3f}, rate {row['rate_s']:.3f}"
+                 if anchor == "extent" else
+                 f"vext {row['vext_s']:.3f}, rext {row['rext_s']:.3f}, adv "
+                 f"{row['adv_s']:.3f}, reinit {row['reinit_s']:.3f}")
         PETSc.Sys.Print(
-            f"  {spec:46s} construct {t_construct:6.2f} s | per advance "
-            f"{row['per_advance_s']:6.3f} s (eikonal {row['eikonal_s']:.3f}, "
-            f"rate {row['rate_s']:.3f}, advance {row['advance_s']:.3f}, "
+            f"  {anchor:6s} {spec:46s} construct {t_construct:6.2f} s | per advance "
+            f"{row['per_advance_s']:6.3f} s (advance {row['advance_s']:.3f}: {parts}; "
             f"masks {row['masks_s']:.3f}) | {n_front} front facets, mean rate "
             f"{c_front:.1f} m/yr, {n_beyond} cells passed | RSS {row['rss_gib']:.2f} GiB")
     if a.out and comm.rank == 0:

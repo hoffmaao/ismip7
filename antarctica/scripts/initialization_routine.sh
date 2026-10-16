@@ -162,11 +162,16 @@ load_env() {
         [ -n "$ISMIP7_ROUTINE_SBATCH_INV" ] || die "ISMIP7_ROUTINE_SBATCH_INV (sbatch resources of an inversion link) is empty"
         [ -n "$ISMIP7_ROUTINE_SBATCH_FWD" ] || die "ISMIP7_ROUTINE_SBATCH_FWD (sbatch resources of a forward link) is empty"
     fi
-    case "${ISMIP7_ROUTINE_FRONT_ADVANCE:-none}" in
+    # A routine recorded before the calving knobs ran the submission front;
+    # without these its forwards would be handed an empty law.
+    : "${ISMIP7_ROUTINE_CALVING:=hfb}"
+    : "${ISMIP7_ROUTINE_FRONT_ADVANCE:=none}"
+    [ -n "${ISMIP7_ROUTINE_CALVING_PARAMS+set}" ] || ISMIP7_ROUTINE_CALVING_PARAMS=sigma_max=0.15
+    case "$ISMIP7_ROUTINE_FRONT_ADVANCE" in
         free|none) ;;
         *) die "ISMIP7_ROUTINE_FRONT_ADVANCE must be free or none, got $ISMIP7_ROUTINE_FRONT_ADVANCE" ;;
     esac
-    case "${ISMIP7_ROUTINE_CALVING:-hfb} ${ISMIP7_ROUTINE_CALVING_PARAMS:-}" in
+    case "$ISMIP7_ROUTINE_CALVING ${ISMIP7_ROUTINE_CALVING_PARAMS:-}" in
         *" "*" "*) die "ISMIP7_ROUTINE_CALVING and ISMIP7_ROUTINE_CALVING_PARAMS take no spaces (parameters are comma separated)" ;;
     esac
     TAG=$ISMIP7_ROUTINE_TAG
@@ -650,15 +655,16 @@ watch_pass() {
         if [ -z "$rows" ]; then
             # A chain ends without a successor in two ways: the scheduler took
             # the link (timeout, preemption, node failure, an outage), which a
-            # resubmission resumes, or the driver exited with an error, which
-            # a resubmission repeats. The second parks the stage until
-            # `resume` (OUT/<stage>.blocked holds the reason).
+            # resubmission resumes, or the driver exited with an error or the
+            # solver stalled where the link resumed, which a resubmission
+            # repeats. The second parks the stage until `resume`
+            # (OUT/<stage>.blocked holds the reason).
             [ -f "$OUT/$stage.blocked" ] && continue
             local why
             why=$(driver_failure "$stage")
             if [ -n "$why" ]; then
                 echo "$why" > "$OUT/$stage.blocked"
-                log "watch: ERROR stage $stage stopped on a driver failure, not resubmitting: $why"
+                log "watch: ERROR stage $stage stopped on a driver failure or a stall, not resubmitting: $why"
                 continue
             fi
             log "watch: stage $stage has no job in the queue; resubmitting"
@@ -681,17 +687,35 @@ watch_pass() {
     done
 }
 
-# The driver error that ended a stage's newest link, or nothing when the
-# link ended otherwise (the scheduler took it, it finished, or its log is not
-# there). A forward or inversion link logs "chain: stopping, driver exited N"
-# or "inversion exit N" with N != 0 when the driver itself failed.
+# The driver error or solver stall that ended a stage's newest link, or
+# nothing when the link ended otherwise (the scheduler took it, it finished,
+# or its log is not there). A forward or inversion link logs "chain: stopping,
+# driver exited N" or "inversion exit N" with N != 0 when the driver itself
+# failed. A forward whose solver stalled exits 0 with its state saved and
+# logs "chain: the solver stalled", and its chain does not resubmit it.
+# Whether a resubmission helps depends on where the link stalled. A link that
+# advanced and then stalled is resubmitted: the next one starts the substep
+# controller afresh at the stall, and the refinement it climbs through can
+# take the step (on 16 October 2026 a restart of the seq0 ssp585 projection
+# passed the step its link had stalled in at 2021.25). A link that stalled
+# where it resumed made no progress, and another would stall there again (the
+# seq0 ssp126 projection at 2019.95, relaunched link after link): parked.
 driver_failure() {
-    local jid kind logf err
+    local jid kind logf err at from
     [ -f "$OUT/$1.jobs" ] || return 0
     jid=$(tail -n 1 "$OUT/$1.jobs" | cut -d' ' -f1)
     if is_inversion "$1"; then kind=inv; else kind=fwd; fi
     logf="$REPO/logs/ismip7_${kind}_$jid.out"
     [ -f "$logf" ] || return 0
+    if grep -q "^chain: the solver stalled" "$logf"; then
+        at=$(sed -n 's/^chain: the solver stalled.* at \([-0-9.eE+]*\)\.$/\1/p' "$logf" | tail -n 1)
+        from=$(sed -n 's/.*Restart: evolved geometry.*(t_yr=\([-0-9.eE+]*\),.*/\1/p' "$logf" | tail -n 1)
+        if [ -n "$at" ] && [ -n "$from" ] \
+           && awk -v a="$at" -v b="$from" 'BEGIN { exit !(a - b < 1e-6 && b - a < 1e-6) }'; then
+            echo "job $jid: the solver stalled at $at, where the link resumed"
+        fi
+        return 0
+    fi
     if grep -qE "chain: stopping, driver exited [1-9]|inversion exit [1-9]" "$logf"; then
         err=$(grep -hE "^[A-Za-z]*Error: " "${logf%.out}.err" "$logf" 2>/dev/null | tail -n 1 | cut -c1-300)
         echo "job $jid: ${err:-driver exited non-zero; see $logf}"

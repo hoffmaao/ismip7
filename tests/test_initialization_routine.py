@@ -531,6 +531,61 @@ def test_watch_parks_a_stage_whose_driver_failed(sandbox):
     assert not (sandbox / "out" / "hist_cesm_waccm.blocked").exists()
 
 
+def _stalled_link(sandbox, resumed, stalled):
+    r"""A stage whose newest forward link resumed at ``resumed`` and stalled
+    at ``stalled``, as projection.sbatch and the driver log it."""
+    (sandbox / "warm.h5").write_text("warm\n")
+    bin_dir = sandbox / "bin"
+    (bin_dir / "squeue").write_text("#!/bin/bash\nexit 0\n")
+    (bin_dir / "squeue").chmod(0o755)
+    env = {"ISMIP7_ROUTINE_STAGES": "hist", "ISMIP7_ROUTINE_ESMS": "CESM2-WACCM",
+           "ISMIP7_ROUTINE_WATCH_ONCE": "1"}
+    rc, log = routine(sandbox, "init", env=env)
+    assert rc == 0, log
+    submits(sandbox)
+    jid = (sandbox / "out" / "hist_cesm_waccm.jobs").read_text().split()[0]
+    logs = sandbox / "logs"
+    logs.mkdir(exist_ok=True)
+    (logs / f"ismip7_fwd_{jid}.out").write_text(
+        f"  Restart: evolved geometry + frozen anchors loaded (t_yr={resumed}, friction=budd)\n"
+        "  Step 1: rescue ladder + subcycles exhausted, saving and stopping\n"
+        "=== 2026-10-16T12:11:54-05:00  forward exit 0 ===\n"
+        f"chain: the solver stalled (rescue ladder + subcycles exhausted) at {stalled}.\n"
+        "chain: NOT resubmitting. A stall is not a run that needs more time;\n")
+    return env, jid
+
+
+def test_watch_parks_a_stage_that_stalled_where_it_resumed(sandbox):
+    r"""A forward whose solver stalled saves its state, exits 0 and does not
+    chain. The watchdog used to read that as a link the scheduler took and
+    resubmit it; a link that stalls where it resumed makes no progress, and on
+    16 October 2026 the seq0 ssp126 projection was relaunched link after link,
+    each stalling in its first step at 2019.95. Parked, with the year."""
+    env, jid = _stalled_link(sandbox, "2019.95", "2019.95")
+    rc, log = routine(sandbox, "watch", env=env)
+    assert rc == 0, log
+    assert submits(sandbox) == [], "a stall without progress is not resubmitted"
+    blocked = (sandbox / "out" / "hist_cesm_waccm.blocked").read_text()
+    assert blocked.strip() == f"job {jid}: the solver stalled at 2019.95, where the link resumed"
+    rc, log = routine(sandbox, "resume", "hist_cesm_waccm", env=env)
+    assert rc == 0, log
+    (again,) = submits(sandbox)
+    assert "-J rt_out_hist_cesm_waccm" in again["argv"]
+
+
+def test_watch_resubmits_a_stage_that_advanced_before_it_stalled(sandbox):
+    r"""A link that advanced and then stalled is resubmitted: the next link
+    starts the substep controller afresh at the stall, and the seq0 ssp585
+    projection's restart passed the step its link (2015.0 to 2021.25) had
+    stalled in."""
+    env, _ = _stalled_link(sandbox, "2015.0", "2021.25")
+    rc, log = routine(sandbox, "watch", env=env)
+    assert rc == 0, log
+    (again,) = submits(sandbox)
+    assert "-J rt_out_hist_cesm_waccm" in again["argv"]
+    assert not (sandbox / "out" / "hist_cesm_waccm.blocked").exists()
+
+
 def test_a_scheduler_kill_is_still_resubmitted(sandbox):
     r"""A link the scheduler took (no driver failure in its log) is resubmitted."""
     (sandbox / "warm.h5").write_text("warm\n")
@@ -584,6 +639,30 @@ def test_a_law_without_parameters_runs_on_its_defaults(sandbox):
     (h,) = submits(sandbox)
     assert h["env"]["ISMIP7_CALVING"] == "nocalving"
     assert "ISMIP7_CALVING_PARAMS" not in h["env"]
+
+
+def test_a_routine_recorded_before_the_calving_knobs_runs_the_submission_front(sandbox):
+    r"""The routines started on 13-14 October recorded no calving knobs; their
+    forwards ran the submission front (ismip7_front_routine.sh) and must keep
+    it, not be handed an empty law."""
+    (sandbox / "warm.h5").write_text("warm\n")
+    env = {"ISMIP7_ROUTINE_STAGES": "hist", "ISMIP7_ROUTINE_ESMS": "CESM2-WACCM"}
+    rc, log = routine(sandbox, "init", env=env)
+    assert rc == 0, log
+    submits(sandbox)
+    envfile = sandbox / "out" / "routine.env"
+    envfile.write_text("".join(
+        line for line in envfile.read_text().splitlines(keepends=True)
+        if not line.startswith(("export ISMIP7_ROUTINE_CALVING",
+                                "export ISMIP7_ROUTINE_FRONT_ADVANCE"))))
+    rc, log = routine(sandbox, "resume", "hist_cesm_waccm", env=env)
+    assert rc == 0, log
+    (h,) = submits(sandbox)
+    e = h["env"]
+    assert e["ISMIP7_CALVING"] == "hfb"
+    assert e["ISMIP7_CALVING_PARAMS"] == "sigma_max=0.15"
+    assert e["ISMIP7_FRONT_ADVANCE"] == "none"
+    assert "ISMIP7_FIXED_FRONT" not in e
 
 
 def test_an_unknown_advance_rule_is_refused_at_init(sandbox):

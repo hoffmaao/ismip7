@@ -9,9 +9,9 @@ gitignored, so these records and the per-core reports beside them are
 the trace a run leaves in the repository. A core experiment also gets
 its full report from `core_report.py`; this is the index.
 
-366 records.
+367 records.
 
-Status: 12 planned, 5 running, 32 stopped, 296 done, 21 superseded.
+Status: 12 planned, 5 running, 32 stopped, 297 done, 21 superseded.
 
 ## Inversion
 
@@ -170,6 +170,7 @@ Status: 12 planned, 5 running, 32 stopped, 296 done, 21 superseded.
 | 2.5 km legacy pinned front from the v4 timing cache, the twin of the level-set run (issue #115) | done | antarctica_25000_2500_buffered20000, 2.5 km fine, 25 km interior, 20 km buffer, DG0 geometry | IU Quartz, debug partition | 2026-09-25 | 2026-09-25 | 80 of 80 steps solved directly (5.0 Newton iterations on average, 9 at most), resid at most 1.1e-7 Gt; calving 12.38 to 12.50 Gt/yr after a one-step 8.9 Gt removal of the sub-1 m ice beyond the t=0 front; mass -2 Gt and VAF +0.004 mm SLE over the decade |
 | 2.5 km level-set pinned front (ISMIP7_CALVING=fixed) from the v4 timing cache, option 2 of issue #115 | done | antarctica_25000_2500_buffered20000, 2.5 km fine, 25 km interior, 20 km buffer, DG0 geometry | IU Quartz, debug partition | 2026-09-25 | 2026-09-25 | 80 of 80 steps solved directly (8.8 Newton iterations on average, 16 at most), resid at most 1.2e-7 Gt; calving 2,370 Gt/yr at step 2, 3,534 over 2016 and 2,839 over 2024 against the legacy twin's 12.4; mass -30,908 Gt and VAF -18.8 mm SLE over the decade |
 | 25 km rehearsal MAP: t=0 discharge, shelf-gate census and forward self-consistency | done | antarctica_250000_25000_buffered20000, DG0 geometry | IU Quartz, debug partition | 2026-09-27 | 2026-09-27 | grounding-line discharge 2803 Gt/yr against 1848 with the observed velocity (ratio 1.52; observed 2050 plus or minus 100), by observed speed of the source cell 5.61 under 100 m/yr, 0.77 in 100 to 500, 0.38 in 500 to 1500 and 0.32 above 1500. No transfer fill on the MAP's own mesh; the fluidity prior spans 1.0 to 519.9. Under the production HAF gate 0 of 2,884 floating cells carry friction (the old sign test would have put it on 396). The forward re-solve at the MAP's controls matches the MAP's velocity to rel L2 5.9e-8 |
+| The inversion's dH/dt term under DG1, scored on cell means: DG0 regression against main, Taylor test and a 43-evaluation refit at 25 km | done | antarctica_250000_25000_buffered20000 (IU's build, 4,509 vertices, 7,615 cells); DG0 for the regression, DG1 for the rest | IU Quartz, general partition | 2026-10-15 | 2026-10-15 | DG0: main and the branch agree to every printed digit at all 5 evaluations (dH/dt term 137.66, total 5,264.992 at the first). DG1: Taylor test of the full objective, minimum order 2.001. Refit on 2,988 grounded observed cells (11.35 million km^2): dH/dt term 153.0 to 96.0, velocity term 231.8 to 228.0, the net grounded model minus Smith +121 to +229 Gt/yr; the MAP's final solve reproduced its state in 0 Newton iterations |
 | DG1 stage 2, forced check: the CESM2-WACCM historical at 25 km under DG0 (the reference) | done | antarctica_250000_25000_buffered20000 (IU's build, 4,509 vertices, 7,615 cells), DG0 geometry | IU Quartz, general partition | 2026-10-14 | 2026-10-14 | resid 0 at every one of 480 steps; clamp +0.22 Gt in total; VAF +30.78 mm, mass +6,905 Gt; first year SMB 2,382, melt 985, calving 1,024 Gt/yr, last year 2,595, 982, 753; backdate 2,992 grounded cells, +566 Gt; t = 0 melt 997.8 Gt/yr |
 | DG1 stage 2, forced check: the CESM2-WACCM historical at 25 km under DG1 | done | antarctica_250000_25000_buffered20000 (IU's build, 4,509 vertices, 7,615 cells), DG1 geometry | IU Quartz, general partition | 2026-10-14 | 2026-10-14 | resid 0 at every one of 480 steps; clamp +2.25 Gt in total; VAF +28.14 mm, mass +6,250 Gt; first year SMB 2,382, melt 984, calving 1,040 Gt/yr, last year 2,595, 1,011, 741; backdate 2,992 grounded cells, +566 Gt, and t = 0 melt 997.8 Gt/yr, both DG0's |
 | DG1 stage 2, forced check: the CESM2-WACCM historical at 25 km under DG1 with the apparent mass balance | done | antarctica_250000_25000_buffered20000 (IU's build, 4,509 vertices, 7,615 cells), DG1 geometry | IU Quartz, general partition | 2026-10-14 | 2026-10-14 | resid 0 at every one of 480 steps; clamp +3.50 Gt in total; a_ref in [-226, +314] m/yr, net -312 Gt/yr; VAF +1.96 mm, mass -822 Gt; last year melt 1,140, calving 1,071 Gt/yr |
@@ -4044,6 +4045,26 @@ One OCX step on the 1 km production mesh from transferred MAPs under the front-c
 - **Results path:** Quartz antarctica/results/rehearsal_25km/mapcheck/score_native.json, census_native.txt and the job logs
 - **Audit:** grounding-line discharge 2803 Gt/yr against 1848 with the observed velocity (ratio 1.52; observed 2050 plus or minus 100), by observed speed of the source cell 5.61 under 100 m/yr, 0.77 in 100 to 500, 0.38 in 500 to 1500 and 0.32 above 1500. No transfer fill on the MAP's own mesh; the fluidity prior spans 1.0 to 519.9. Under the production HAF gate 0 of 2,884 floating cells carry friction (the old sign test would have put it on 396). The forward re-solve at the MAP's controls matches the MAP's velocity to rel L2 5.9e-8
 - **Notes:** the rehearsal of issue 138. The discharge ratio misses the [0.8, 1.25] target because 25 km cells do not resolve the narrow fast outlets, and the inversion had already converged, so it was recorded and not iterated further
+
+### test-25km-dg1-dhdt-cell-mean
+
+The inversion's dH/dt term under DG1, scored on cell means: DG0 regression against main, Taylor test and a 43-evaluation refit at 25 km (done), IU.
+
+- **Task type:** test
+- **Friction law:** budd
+- **Mesh:** antarctica_250000_25000_buffered20000 (IU's build, 4,509 vertices, 7,615 cells); DG0 for the regression, DG1 for the rest
+- **Initial state / MAP:** DG0: the 25 km cell_mean MAP of the velocity-sampling test (ismip7_vs/maps/inversion_vs_budd_25km_cell_mean.h5); DG1: the 25 km DG1 cell_mean MAP of 13 Oct (ismip7_dg1/25km/maps/inversion_dg1_budd_25km_cell_mean.h5)
+- **Melt: K, slope, deltaT:** the dH/dt step's melt source: deltaT_per_basin_25000_K6.500e-05.npz, the constant slope, 1,067 Gt/yr at the reference geometry
+- **Site / partition:** IU Quartz, general partition
+- **Ranks / memory:** 8 ranks, 64 GiB, scpc_mumps
+- **Job ids:** 12270749 12270750 12270751 12271793 12270752
+- **Code:** ed556a6 (claude/dg1-dhdt-cell-mean), Quartz worktree /N/scratch/dlilien/ismip7_rehearsal25iu/rundhdt; main 77515c3 (worktree runcvdg1) for the DG0 regression
+- **Started:** 2026-10-15
+- **Finished:** 2026-10-15
+- **Cost per model year:** regression 2 min 28 s (main) and 3 min 2 s (branch) for 5 evaluations each; Taylor test 2 min 11 s; refit 5 min 22 s for 43 evaluations
+- **Results path:** Quartz /N/scratch/dlilien/ismip7_dhdtdg1/25km/maps (inversion_dhdt_25km_*); wrapper /N/scratch/dlilien/ismip7_rehearsal25iu/submit_dhdt25.sh
+- **Audit:** DG0: main and the branch agree to every printed digit at all 5 evaluations (dH/dt term 137.66, total 5,264.992 at the first). DG1: Taylor test of the full objective, minimum order 2.001. Refit on 2,988 grounded observed cells (11.35 million km^2): dH/dt term 153.0 to 96.0, velocity term 231.8 to 228.0, the net grounded model minus Smith +121 to +229 Gt/yr; the MAP's final solve reproduced its state in 0 Newton iterations
+- **Notes:** The objective is IU's refit_vf_budd (submit_dg1_25.sh inv) with ISMIP7_DHDT_WEIGHT=1, sigma 0.1 m/yr and ISMIP7_DHDT_NET_SIGMA=0 (inversion.sbatch exports 10 otherwise); the weight is a probe value. The Taylor test runs on the TAO path (ISMIP7_GRAD_CHECK=1, ISMIP7_GRAD_PRECOND=prior), which takes no floating-only fluidity control, so it frees the fluidity everywhere (ISMIP7_FLUIDITY_CONTROL=all); its first submission, 12270751, stopped at startup without that. The pointwise term leaves the integrated grounded imbalance free, and it grew while the cell-scale misfit fell
 
 ### test-25km-dg1-stage2-hist-dg0
 

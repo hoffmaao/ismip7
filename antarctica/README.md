@@ -824,7 +824,8 @@ python scripts/compare_dhdt.py vel=mesh/<velocity-only>.h5 tr=mesh/<transient>.h
 ```
 
 `compare_dhdt.py` is the payoff diagnostic: both MAPs fit `u`, so the thickness
-tendency is the observable that separates them. It drives the step with the
+tendency is the observable that separates them. It reads DG0 MAPs only and
+stops on any other. It drives the step with the
 `velocity` stored in the MAP. The inversion saves that field only when the
 final solve converged at the MAP's own controls and its misfit agrees with the
 last accepted optimization state. MAPs written before that guard can carry a

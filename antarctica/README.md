@@ -1359,7 +1359,13 @@ through `icepack2_tools.transport.front_transport_form`):
   (2.5). The forward advances it at every substep, and every reinitialisation
   costs part of the sub-cell motion since the one before: reinitialised every
   fifth advance, the level set's own default, the front moved about 4 m
-  between them on the 2 km mesh and stood still.
+  between them on the 2 km mesh and stood still;
+- the adaptive substep controller reads the transport's own increment, before
+  the rules above, and leaves out the cells the front crossed in the substep.
+  Read after the rules, the cut of a cell the front retreated off, after a
+  substep of accumulation, is a reversal that grows by tens to hundreds of
+  metres at any substep count: five of the six free members of the 2 km
+  buffered screen of 16 October stalled on it within their first 0.75 yr.
 
 Every removal is booked in `calv`, and the transport's mass check includes the
 calving flux. The plain transport followed by emptying every cell beyond the

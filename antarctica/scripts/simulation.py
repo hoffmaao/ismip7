@@ -3504,6 +3504,7 @@ def run_simulation(
         beyond = beyond_front if legacy_front_sink else None
         calv_frac = None
         ls_ice_free = None
+        front_switched = None
         if level_set is not None:
             if front_state is not None and calving_law_obj.time_dependent:
                 calving_rate = calving_law_obj.rate(front_state, t_yr)
@@ -3513,6 +3514,11 @@ def run_simulation(
                 # position lives in phi itself.
                 last_c_mean = front_transport.advance(dt_local, rate=calving_rate)
                 front_split["filled"] += front_transport.n_filled
+                # The cells whose side of the front this advance changed, for
+                # the substep controller: only the cells inside export, so
+                # their transport changes with the side, not with the step.
+                front_switched = (front_transport.inside_old
+                                  != (front_transport.chi_in.dat.data_ro > 0.5))
             else:
                 last_c_mean = level_set.advance(dt_local, u_vel, rate=calving_rate)
                 lsb, calv_frac = level_set.calving_masks()
@@ -3605,6 +3611,10 @@ def run_simulation(
             # next solve measures its surface change from (fssa, `step`).
             fssa_tendency.dat.data[:] = (
                 h_dg.dat.data_ro - h_dg_old.dat.data_ro) / dt_local
+        # The same state for the substep controller, which sizes the step to
+        # the transport and its lagged velocity; the floor and the front's
+        # removals below are events (icepack2_tools/substep.py).
+        h_transport = np.array(h_dg.dat.data_ro) if adapt is not None else None
         if trace_on:
             _h_tr = {i: float(h_dg.dat.data_ro[i]) for _, i in trace_cells}
         calv_tr_gt = 0.0
@@ -3827,6 +3837,10 @@ def run_simulation(
             "smb_gt": smb_gt,
             "melt_gt": melt_gt,
             "collapse_cells": collapse_cells,
+            "h_transport": h_transport,
+            "front_switched": (None if front_switched is None
+                               else front_switched if cell_view is None
+                               else cell_view.node_mask(front_switched)),
         }
 
     # Time loop, transport-first: each step advances the geometry with the
@@ -4025,8 +4039,9 @@ def run_simulation(
                 # the accepted attempt stands for the step.
                 collapse_cells = sub["collapse_cells"]
                 if adapt is not None:
-                    err = adapt.observe(h_before, h_dg.dat.data_ro, dt / m,
-                                        h_diag_xy.dat.data_ro)
+                    err = adapt.observe(h_before, sub["h_transport"], dt / m,
+                                        h_diag_xy.dat.data_ro,
+                                        skip=sub["front_switched"])
                     at = ("" if adapt.err_xy is None else " at (" + ", ".join(
                         f"{c / 1e3:.0f}" for c in adapt.err_xy) + ") km")
                     if adapt.exceeds(err):

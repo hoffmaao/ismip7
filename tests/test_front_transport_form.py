@@ -32,7 +32,7 @@ LENGTH, WIDTH, NX, NY = 100e3, 20e3, 20, 4
 FRONT0, H0, U, SMB, DT = 50e3, 300.0, 500.0, 0.3, 0.5
 
 
-def _strip(degree):
+def _strip(degree, **level_set):
     mesh = fd.RectangleMesh(NX, NY, LENGTH, WIDTH)
     x = fd.SpatialCoordinate(mesh)
     Q0 = FunctionSpace(mesh, "DG", 0)
@@ -43,7 +43,7 @@ def _strip(degree):
     h0 = Function(Q0).interpolate(
         fd.conditional(x[0] < FRONT0, Constant(H0), Constant(0.0)))
     h = Function(Q).interpolate(h0)
-    ls = LevelSet(mesh, h0, law="prescribed", h_min=1.0, anchor="advect")
+    ls = LevelSet(mesh, h0, law="prescribed", h_min=1.0, anchor="advect", **level_set)
     ls.phi.interpolate(x[0] - Constant(FRONT0))
     ls.update_cell_fields()
     return mesh, Q, u, h, ls
@@ -76,6 +76,58 @@ def test_one_step_closes_the_mass_budget(degree, rate, calves):
     # each exporting cell's share sums to the total
     cells = assemble(front.calving(h, TestFunction(FunctionSpace(mesh, "DG", 0))))
     assert float(cells.dat.data_ro.sum()) * DT == pytest.approx(calving, rel=1e-12, abs=1e-6)
+
+
+@pytest.mark.parametrize("degree", [0, 1])
+def test_a_retreating_front_is_not_a_substep_error(degree):
+    """The substep controller reads the transport's own increment and leaves
+    out the cells the front crossed. Read after the front's rules, the cut of
+    a cell the front retreats off (it keeps the part still behind the front)
+    follows a gain from the accumulation: a reversal that grows, by more than
+    the controller accepts at its ceiling (20 m), at any step. That is how
+    the 2 km buffered calving screen of 16 October stalled within 0.15 yr."""
+    from icepack2_tools.cellview import CellView
+    from icepack2_tools.substep import SubstepController
+    # reinitialised on model time, as the forward does (ISMIP7_FRONT_REINIT_YR)
+    mesh, Q, u, h, ls = _strip(degree, reinit_interval=2.5)
+    front = FrontTransport(ls, u)
+    view = CellView(Q)
+    h_old = Function(Q).assign(h)
+    src = Function(Q)
+    tau = 0.05
+    dt = Constant(tau)
+    F = front_transport_form(TrialFunction(Q), h_old, TestFunction(Q), dt, src, front)
+    solver = fd.LinearVariationalSolver(
+        fd.LinearVariationalProblem(fd.lhs(F), fd.rhs(F), h),
+        solver_parameters={"ksp_type": "preonly", "pc_type": "lu"})
+    rate = Constant(U + 2500.0)                      # retreat at 2.5 km/yr
+    after_rules = SubstepController(tol=1.0)
+    transport = SubstepController(tol=1.0)
+    worst = {"after_rules": 0.0, "transport": 0.0}
+    cut = 0
+    for _ in range(60):                              # 3 yr: the front crosses a cell
+        before = np.array(h.dat.data_ro)
+        front.advance(tau, rate)
+        crossed = front.inside_old != (front.chi_in.dat.data_ro > 0.5)
+        # accumulation on the ice only, as the forward forces it
+        src.interpolate(SMB * front.chi_in)
+        h_old.assign(h)
+        solver.solve()
+        h_transport = np.array(h.dat.data_ro)
+        # the forward's rules (simulation._front_rules), on the whole cell
+        keep, band, touch = front.rules()
+        cut += int(np.count_nonzero((keep > 0.0) & (keep < 1.0)))
+        view.write_nodes(h, view.nodes(h) * keep[:, None])
+        give, back, _ = front.excess(np.array(view.means(h)), band, touch)
+        view.write_nodes(h, view.nodes(h) * (1.0 - give)[:, None])
+        view.add_cells(h, back)
+        worst["after_rules"] = max(worst["after_rules"], after_rules.observe(
+            before, h.dat.data_ro, tau))
+        worst["transport"] = max(worst["transport"], transport.observe(
+            before, h_transport, tau, skip=view.node_mask(crossed)))
+    assert cut > 0, "the front never retreated off a cell"
+    assert worst["after_rules"] > 20.0
+    assert worst["transport"] < 0.1
 
 
 def test_the_output_books_the_outflow_of_the_exporting_cells_only(tmp_path):

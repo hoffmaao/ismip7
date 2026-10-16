@@ -107,6 +107,27 @@ def test_removed_cells_do_not_count():
     assert ctrl.observe(h - 1.0, calved, 0.05) == pytest.approx(1.05)
 
 
+def test_skipped_cells_sit_out_this_comparison_and_the_next():
+    """A cell an advected front crossed changes its transport with its side
+    (only the cells inside export): it is left out of the comparison of the
+    substep that crossed it and of the next one, which measures against it."""
+    ctrl = SubstepController(tol=1.0)
+    h = np.full(2, 400.0)
+    ctrl.begin_attempt()
+    ctrl.observe(h, h + 0.5, 0.05)
+    ctrl.accept()
+    ctrl.begin_attempt()
+    crossed = np.array([False, True])
+    flipped = h + 0.5 + np.array([0.6, -4.0])        # cell 1 stops importing
+    err = ctrl.observe(h + 0.5, flipped, 0.05, skip=crossed)
+    assert err == 0.0
+    # the next comparison is against the skipped increment: still out
+    assert ctrl.observe(flipped, flipped + np.array([0.6, 9.0]), 0.05) == 0.0
+    # and the one after that counts it again
+    later = flipped + np.array([0.6, 9.0])
+    assert ctrl.observe(later, later + np.array([0.6, -20.0]), 0.05) == pytest.approx(14.5)
+
+
 def test_ceiling_and_nonfinite():
     ctrl = SubstepController(tol=1.0, m_init=4, m_max=4)
     ctrl.begin_attempt()

@@ -1,5 +1,6 @@
 # Core 11: ocx_i104off (32 km)
 
+- note: this run read the OCX ocean `main` v1, which was built on an earlier extrapolated climatology (forum thread 48) and which runs now refuse (`OCEAN_MIN_VERSION`, `FORWARD_RUN_READINESS.md` section 11), so its mass verdict is no evidence about core 11 on the current OCX product.
 - date: 2026-09-24
 - git: 700a846
 - log: `../logs/ismip7_fwd_10609749.out`

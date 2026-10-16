@@ -1020,15 +1020,45 @@ def front_anchor():
     the ice velocity and retreated by the calving rate,
     ``phi_t + u . grad(phi) - c |grad(phi)| = 0`` (the velocity extended
     harmonically into the water, the rate along the normal), reinitialised
-    every few advances; every cell it leaves is emptied after the transport
-    and booked as calving, so the front is where the level set says. A
-    restart under ``advect`` continues the saved level set, and a state
-    written under one anchor does not restart under the other.
+    on model time (:func:`front_reinit_interval`), the transport moving the
+    ice with it (:mod:`icepack_tools.front_transport`): only the cells inside
+    the front export ice, the ice crossing it without following it calves,
+    and the cells it leaves are emptied, so the front is where the level set
+    says. A restart under ``advect`` continues the saved level set, and a
+    state written under one anchor does not restart under the other.
     """
     value = os.environ.get("ISMIP7_FRONT_ANCHOR", "extent").strip().lower()
     if value not in FRONT_ANCHORS:
         raise ValueError(
             f"ISMIP7_FRONT_ANCHOR must be one of {FRONT_ANCHORS}, got {value!r}")
+    return value
+
+
+#: Model years between reinitialisations of an advected front: CalvingMIP's
+#: cadence (0.5 yr steps, every fifth reinitialised).
+FRONT_REINIT_YR_DEFAULT = 2.5
+
+
+def front_reinit_interval():
+    r"""``ISMIP7_FRONT_REINIT_YR``: model years between reinitialisations of
+    an advected front (``ISMIP7_FRONT_ANCHOR=advect``), default 2.5.
+
+    The forward advances the front at every adaptive substep, 80 to 1,280
+    times a model year, and every reinitialisation costs part of the sub-cell
+    motion since the one before: reinitialised every fifth advance, as the
+    level set does by default, the front moved 4 m between them on the 2 km
+    mesh and stood still. Counting model time keeps the cadence whatever the
+    substeps. A positive number of years."""
+    raw = os.environ.get("ISMIP7_FRONT_REINIT_YR", "").strip()
+    if not raw:
+        return FRONT_REINIT_YR_DEFAULT
+    try:
+        value = float(raw)
+    except ValueError:
+        value = float("nan")
+    if not value > 0.0:
+        raise ValueError(
+            f"ISMIP7_FRONT_REINIT_YR must be a positive number of years, got {raw!r}")
     return value
 
 

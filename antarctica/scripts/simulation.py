@@ -116,7 +116,7 @@ from icepack2_tools.runconfig import (
     raster_base_method as _raster_base_method,
     calving_law as _calving_law, calving_law_object as _calving_law_object,
     front_advance as _front_advance,
-    front_anchor as _front_anchor,
+    front_anchor as _front_anchor, front_reinit_interval as _front_reinit_interval,
     fracture as _fracture_mode, ismip7_output as _ismip7_output,
     FRACTURE_MASK_MODES,
     # auto_resume is re-exported, not used here: every forward driver imports
@@ -3367,6 +3367,11 @@ def run_simulation(
             mesh, h_cell if geom_dg1 else h_dg, law=calving_law_obj.front_mode,
             h_min=front_hmin, drag_mask=ctx.get("drag_mask"), phi_init=phi_init,
             anchor=front_anchor_mode,
+            # an advected front reinitialises on model time: the forward
+            # advances it at every substep, and reinitialised every fifth
+            # advance it stood still (runconfig.front_reinit_interval)
+            reinit_interval=(_front_reinit_interval()
+                             if front_anchor_mode == "advect" else None),
         )
         phi_entry = Function(level_set.Q0)
         if level_set.anchor == "advect":

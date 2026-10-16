@@ -74,3 +74,19 @@ def test_the_front_anchor_defaults_to_extent_and_takes_advect(monkeypatch):
     import pytest
     with pytest.raises(ValueError, match="ISMIP7_FRONT_ANCHOR"):
         front_anchor()
+
+
+def test_the_advected_front_reinitialises_on_model_time(monkeypatch):
+    r"""ISMIP7_FRONT_REINIT_YR: 2.5 model years by default (every fifth
+    advance stood the forward's front still), a positive number otherwise."""
+    from icepack2_tools.runconfig import front_reinit_interval
+    import pytest
+    monkeypatch.delenv("ISMIP7_FRONT_REINIT_YR", raising=False)
+    assert front_reinit_interval() == 2.5
+    monkeypatch.setenv("ISMIP7_FRONT_REINIT_YR", " 0.5 ")
+    assert front_reinit_interval() == 0.5
+    for bad in ("0", "-1", "yearly", "nan"):
+        monkeypatch.setenv("ISMIP7_FRONT_REINIT_YR", bad)
+        with pytest.raises(ValueError, match="ISMIP7_FRONT_REINIT_YR"):
+            front_reinit_interval()
+

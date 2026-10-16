@@ -1,6 +1,6 @@
 # Core 11: ocx_r2kiurlcnoamb (2 km)
 
-- date: 2026-10-14
+- date: 2026-10-16
 - git: c4c9eb8
 - log: `/N/scratch/dlilien/ismip7_prod2kiu/logs/ismip7_fwd_11912190.out`
 - timeseries: `/N/project/ice_rheology/ISMIP7/antarctica/results/prod_2km_iu/results/ocx_r2kiurlcnoamb_2000_timeseries.csv` (gitignored; this report is the tracked record)
@@ -17,7 +17,7 @@
 - Ice-shelf collapse forcing: ISMIP7_FRACTURE=none (no collapse mask is read and no cell is removed)
 - Calving front owner: legacy fixed-front mask (ISMIP7_FIXED_FRONT)
 
-IU's 2 km Budd production suite (tag r2kiurlcnoamb): the relaxed MAP's controls on BedMachine geometry, no apparent mass-balance reference. Production grade; the group chooses the submission line on 20 or 21 October.
+IU 2 km Budd production suite (tag r2kiurlcnoamb): the relaxed MAP controls on BedMachine geometry, no apparent mass-balance reference. On 16 October the group decided not to submit the IU line.
 
 ## Run environment
 

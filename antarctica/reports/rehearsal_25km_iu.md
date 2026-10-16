@@ -360,8 +360,11 @@ resid 0.00 on all 480 rows.
 IU's Budd suite at 2 km (tag `r2kiurlcnoamb`), started on 11 October from the
 relaxed-controls historicals above: cores 1 and 2 are those runs, every control
 and projection of an ESM branches from its historical's 2015 state, and OCX
-starts from the MAP. It is production grade; the group chooses between this
-line and Rice's buffer-0 line on 20 or 21 October.
+starts from the MAP. On 16 October the group decided not to submit this line.
+IU stopped four of the six 286-year cores that day and kept two running to
+2301: ssp585 CESM2-WACCM, the fastest retreat, to show the forward holds up
+through it, and ssp126 MRI-ESM2-0, the farthest along, for one complete
+projection.
 
 | item | value |
 |---|---|
@@ -391,12 +394,12 @@ year, regrids every core.
 | C001, C002 | historicals | 11899766, 11899769 | done (records `core0{1,2}-2km-hist-*-r2kiurlcnoamb`) |
 | C003 | ssp370 CESM2-WACCM | 11912184 | done 14 Oct, 53 h in one link |
 | C004 | ssp370 MRI-ESM2-0 | 11912188 | done 14 Oct, 61 h in one link |
-| C005 | ssp126 CESM2-WACCM | 11912183 | running |
-| C006 | ssp126 MRI-ESM2-0 | 11912187 | running |
-| C007 | ssp585 CESM2-WACCM | 11912185 | running |
-| C008 | ssp585 MRI-ESM2-0 | 11912189, 11981754 | running; moved off a shared node at 2045.4, resumed from the 2045 checkpoint on the same 32 ranks |
-| C009 | control CESM2-WACCM | 11912182 | running |
-| C010 | control MRI-ESM2-0 | 11912186 | running |
+| C005 | ssp126 CESM2-WACCM | 11912183, 12256684 | stopped 16 Oct at 2205.8 |
+| C006 | ssp126 MRI-ESM2-0 | 11912187, 12256723 | kept, running |
+| C007 | ssp585 CESM2-WACCM | 11912185, 12256677 | kept, running |
+| C008 | ssp585 MRI-ESM2-0 | 11912189, 11981754, 12273375 | stopped 16 Oct at 2180.25; moved off a shared node at 2045.4, resumed from the 2045 checkpoint on the same 32 ranks |
+| C009 | control CESM2-WACCM | 11912182, 12256729 | stopped 16 Oct at 2193.45 |
+| C010 | control MRI-ESM2-0 | 11912186, 12256726 | stopped 16 Oct at 2194.45 |
 | C011 | OCX | 11912190 | done 12 Oct, 13 h |
 
 C008's first link averaged 89 s a solve over its last 500 steps on a node
@@ -413,6 +416,21 @@ Finished cores, through the writer, the checker and the scalar tool:
 | C003 | +53.3 | 0.00 | 0 | OFF TRACK (dM/dt -1,462) | 0 errors | exit 0 |
 | C004 | +120.3 | 0.00 | 0 | ON TRACK | 0 errors | exit 0 |
 | C011 | +40.0 | 0.00 | 1 | ON TRACK | 0 errors | exit 0 |
+
+Stopped cores, through the forward only; their annual files went through no
+writer, checker or scalar tool:
+
+| core | stopped at | VAF change (mm SLE) | mass change (Gt) | resid | rescued steps | track audit |
+|---|---|---|---|---|---|---|
+| C005 | 2205.8 | -84.7 | -193,604 | 0.00 | 0 | OFF TRACK (dM/dt -1,019) |
+| C008 | 2180.25 | -177.3 | -538,204 | 0.00 | 0 | OFF TRACK (shelf basal melt 4,688; dM/dt -3,278) |
+| C009 | 2193.45 | +157.6 | +35,704 | 0.00 | 0 | ON TRACK |
+| C010 | 2194.45 | +172.5 | +52,196 | 0.00 | 0 | ON TRACK |
+
+Each stopped core keeps its three latest five-yearly checkpoints, so it can
+resume. Every finished and stopped core's files sit on Quartz project storage
+under `antarctica/results/prod_2km_iu/results`, moved from scratch with each
+copy checked by sha256.
 
 The projections' VAF change runs from 2015, the historicals' and OCX's from
 2003. Each checker log carries the same two warnings: the non-mandatory

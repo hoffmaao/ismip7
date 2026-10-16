@@ -47,6 +47,48 @@ class TrialFailures:
         return self.trailing > 0
 
 
+class AcceptedIterate:
+    r"""The scipy path's record of the evaluation L-BFGS-B accepted.
+
+    scipy returns the accepted iterate, which is rarely the last evaluation:
+    a line search ends on rejected or failed trials. Over 600 wall-limited
+    quadratics (scipy 1.17, every trial past a wall failing) ``result.x`` was
+    the last evaluation in 5 and the evaluation this record accepts in all
+    600. The driver
+    kept only the last evaluation's mixed state, so its publishing solve
+    started from the state of other controls; after the failed trials of the
+    2 km DG1 velocity-only re-inversion 12286864 (16 Oct 2026) that solve
+    diverged and no velocity was published.
+
+    ``evaluated(x, payload)`` records a successful evaluation at ``x``;
+    ``iterate(xk)`` is the optimiser callback, at which the most recent
+    evaluation is the iterate just accepted; ``at(x)`` is the payload of the
+    evaluation at ``x`` (the accepted one, or the last), None if neither.
+    The first evaluation, at the starting point, is accepted until a callback
+    says otherwise. ``x`` is compared bitwise, and every rank holds the same
+    global vector, so all ranks agree without a reduction.
+    """
+
+    def __init__(self):
+        self.last = None
+        self.accepted = None
+
+    def evaluated(self, x, payload):
+        self.last = (x, payload)
+        if self.accepted is None:
+            self.accepted = self.last
+
+    def iterate(self, xk):
+        if self.last is not None and np.array_equal(xk, self.last[0]):
+            self.accepted = self.last
+
+    def at(self, x):
+        for entry in (self.accepted, self.last):
+            if entry is not None and np.array_equal(entry[0], x):
+                return entry[1]
+        return None
+
+
 class FunctionalDecreaseStop:
     r"""Relative-decrease stopping rule, for a TAO monitor to apply.
 

@@ -145,6 +145,19 @@ failed trial. The fix was verified on a 12-iteration
 joint run (published residual 76). The stage-2 run showed the second half:
 its accepted iterate had a forward that converged only relatively from a
 starting residual of 1e17, hence the ceiling.
+The scipy L-BFGS-B path had the same fault until 16 October 2026: scipy
+returns the accepted iterate, while the driver kept the last evaluation's
+state, and the two differed at 595 of 600 endings on wall-limited
+quadratics (two are kept in `tests/test_trial_failures.py`). The 2 km DG1
+velocity-only re-inversion 12286864 stopped after three failed trials, and
+its publishing
+solve started from the state of evaluation 100, a rejected trial; it
+diverged (`||F||` 4.9e8 to 2.5e32) and no velocity was published.
+`optimization.AcceptedIterate` now keeps the evaluation the L-BFGS-B
+callback accepts, with its mixed state, residual and objective terms; the
+publishing solve starts from that state, and the MAP records that
+objective. The periodic checkpoints still record the last evaluation, with
+its own controls.
 
 **Restart handoff.** Every checkpoint records the objective's settings and
 the objective at the accepted iterate; a warm start freezes the auto weights

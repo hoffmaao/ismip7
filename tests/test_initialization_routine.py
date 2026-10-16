@@ -549,3 +549,45 @@ def test_a_scheduler_kill_is_still_resubmitted(sandbox):
     assert rc == 0, log
     (again,) = submits(sandbox)
     assert "-J rt_out_hist_cesm_waccm" in again["argv"]
+
+
+def test_the_forwards_run_the_routine_s_calving_law(sandbox):
+    r"""The forwards take the routine's calving law, its parameters and its
+    advance rule, recorded at init; the defaults are the submission front
+    (hfb at 150 kPa, retreat-only), the collapse mask stays with the
+    projections, and the legacy pinned front stays off under a law."""
+    (sandbox / "warm.h5").write_text("warm\n")
+    env = {"ISMIP7_ROUTINE_STAGES": "hist", "ISMIP7_ROUTINE_ESMS": "CESM2-WACCM",
+           "ISMIP7_ROUTINE_CALVING": "vonmises",
+           "ISMIP7_ROUTINE_CALVING_PARAMS": "sigma_max_fl=0.275,sigma_max_gr=1.0",
+           "ISMIP7_ROUTINE_FRONT_ADVANCE": "free"}
+    rc, log = routine(sandbox, "init", env=env)
+    assert rc == 0, log
+    (h,) = submits(sandbox)
+    e = h["env"]
+    assert e["ISMIP7_CALVING"] == "vonmises"
+    assert e["ISMIP7_CALVING_PARAMS"] == "sigma_max_fl=0.275,sigma_max_gr=1.0"
+    assert e["ISMIP7_FRONT_ADVANCE"] == "free"
+    assert e["ISMIP7_FRACTURE"] == "none"
+    assert "ISMIP7_FIXED_FRONT" not in e
+    env_text = (sandbox / "out" / "routine.env").read_text()
+    assert "ISMIP7_ROUTINE_CALVING=vonmises" in env_text
+
+
+def test_a_law_without_parameters_runs_on_its_defaults(sandbox):
+    (sandbox / "warm.h5").write_text("warm\n")
+    env = {"ISMIP7_ROUTINE_STAGES": "hist", "ISMIP7_ROUTINE_ESMS": "CESM2-WACCM",
+           "ISMIP7_ROUTINE_CALVING": "nocalving", "ISMIP7_ROUTINE_CALVING_PARAMS": "",
+           "ISMIP7_ROUTINE_FRONT_ADVANCE": "free"}
+    rc, log = routine(sandbox, "init", env=env)
+    assert rc == 0, log
+    (h,) = submits(sandbox)
+    assert h["env"]["ISMIP7_CALVING"] == "nocalving"
+    assert "ISMIP7_CALVING_PARAMS" not in h["env"]
+
+
+def test_an_unknown_advance_rule_is_refused_at_init(sandbox):
+    (sandbox / "warm.h5").write_text("warm\n")
+    rc, log = routine(sandbox, "init", env={"ISMIP7_ROUTINE_FRONT_ADVANCE": "sometimes"})
+    assert rc != 0 and "ISMIP7_ROUTINE_FRONT_ADVANCE" in log
+    assert submits(sandbox) == []

@@ -67,9 +67,14 @@
 # map_forward.h5 is the product of the last inversion stage listed, so a run
 # without `relax`/`reinvert` starts its forwards from the staged MAP.
 #
-# The front of every forward after the relaxation is the submission's
-# (ismip7_front_routine.sh; collapse mask on the projections only); the relax
-# stage pins it.
+# The front of every forward after the relaxation is a level-set calving law
+# from icepack_tools.calving: ISMIP7_ROUTINE_CALVING (hfb), its parameters
+# ISMIP7_ROUTINE_CALVING_PARAMS (sigma_max=0.15) and the advance rule
+# ISMIP7_ROUTINE_FRONT_ADVANCE (none: retreat-only). The defaults are the
+# submission front of ismip7_front_routine.sh; a campaign member
+# (submit_calving_campaign.sh) is run as a full suite by naming its law,
+# parameters and advance here. The collapse mask applies to the projections
+# only; the relax stage pins the front.
 #
 # An inversion stage moves one control alone, which only the TAO path does:
 # `init` refuses a recorded ISMIP7_GRAD_PRECOND other than mass_consistent or
@@ -122,6 +127,9 @@ record_env() {
         echo "export ISMIP7_ROUTINE_RELAX_YR=${ISMIP7_ROUTINE_RELAX_YR:-20}"
         echo "export ISMIP7_ROUTINE_RELAX_START=${ISMIP7_ROUTINE_RELAX_START:-2015}"
         echo "export ISMIP7_ROUTINE_HIST_START=${ISMIP7_ROUTINE_HIST_START:-2002}"
+        echo "export ISMIP7_ROUTINE_CALVING=${ISMIP7_ROUTINE_CALVING:-hfb}"
+        echo "export ISMIP7_ROUTINE_CALVING_PARAMS=${ISMIP7_ROUTINE_CALVING_PARAMS-sigma_max=0.15}"
+        echo "export ISMIP7_ROUTINE_FRONT_ADVANCE=${ISMIP7_ROUTINE_FRONT_ADVANCE:-none}"
         echo "export ISMIP7_ROUTINE_FLUIDITY_CONTROL=${ISMIP7_ROUTINE_FLUIDITY_CONTROL:-floating}"
         echo "export ISMIP7_ROUTINE_PHI_BOUNDS=${ISMIP7_ROUTINE_PHI_BOUNDS:--2.3,2.3}"
         echo "export ISMIP7_ROUTINE_DHDT_REWEIGHT=${ISMIP7_ROUTINE_DHDT_REWEIGHT:-24}"
@@ -154,6 +162,13 @@ load_env() {
         [ -n "$ISMIP7_ROUTINE_SBATCH_INV" ] || die "ISMIP7_ROUTINE_SBATCH_INV (sbatch resources of an inversion link) is empty"
         [ -n "$ISMIP7_ROUTINE_SBATCH_FWD" ] || die "ISMIP7_ROUTINE_SBATCH_FWD (sbatch resources of a forward link) is empty"
     fi
+    case "${ISMIP7_ROUTINE_FRONT_ADVANCE:-none}" in
+        free|none) ;;
+        *) die "ISMIP7_ROUTINE_FRONT_ADVANCE must be free or none, got $ISMIP7_ROUTINE_FRONT_ADVANCE" ;;
+    esac
+    case "${ISMIP7_ROUTINE_CALVING:-hfb} ${ISMIP7_ROUTINE_CALVING_PARAMS:-}" in
+        *" "*" "*) die "ISMIP7_ROUTINE_CALVING and ISMIP7_ROUTINE_CALVING_PARAMS take no spaces (parameters are comma separated)" ;;
+    esac
     TAG=$ISMIP7_ROUTINE_TAG
     LC=${ISMIP7_LC:?ISMIP7_LC must be recorded}
     RESULTS="$REPO/antarctica/results"
@@ -448,7 +463,15 @@ stage_env_forward() {   # prints `export` lines for a forward stage
                 ocx)    echo "export ISMIP7_APPARENT_MB=0" ;;
                 control_*|ssp*_*) echo "export ISMIP7_APPARENT_MB=0" ;;
             esac
-            echo ". $REPO/antarctica/scripts/ismip7_front_routine.sh"
+            # the routine's calving law (see the header); the legacy pinned
+            # front stays off under a law
+            echo "export ISMIP7_CALVING=$ISMIP7_ROUTINE_CALVING ISMIP7_FRONT_ADVANCE=$ISMIP7_ROUTINE_FRONT_ADVANCE"
+            if [ -n "$ISMIP7_ROUTINE_CALVING_PARAMS" ]; then
+                echo "export ISMIP7_CALVING_PARAMS=$ISMIP7_ROUTINE_CALVING_PARAMS"
+            else
+                echo "unset ISMIP7_CALVING_PARAMS"
+            fi
+            echo "unset ISMIP7_FIXED_FRONT"
             case "$stage" in
                 ssp*_*) echo "export ISMIP7_FRACTURE=mask_front" ;;
                 *)      echo "export ISMIP7_FRACTURE=none" ;;

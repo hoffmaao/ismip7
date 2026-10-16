@@ -163,7 +163,7 @@ second), `ISMIP7_ROUTINE_RELAX_YR` (20), `ISMIP7_ROUTINE_WARM_START` (the
 MAP stage 1 starts from; with no inversion stage listed, the MAP the
 forwards run from), `ISMIP7_ROUTINE_ESMS`, `ISMIP7_ROUTINE_SCENARIOS`,
 `ISMIP7_ROUTINE_STAGES` (a subset; `reinvert`, `hist`, `control` and `proj`
-expand). The relaxation's end state is the control driver's final
+expand), and the forwards' calving front: `ISMIP7_ROUTINE_CALVING` (a law of `icepack_tools.calving`, `hfb` by default), `ISMIP7_ROUTINE_CALVING_PARAMS` (`sigma_max=0.15`) and `ISMIP7_ROUTINE_FRONT_ADVANCE` (`none`, retreat-only), so the defaults are the submission front and a calving-campaign member (`submit_calving_campaign.sh`) runs as a full suite by naming its law, parameters and advance here. The relaxation's end state is the control driver's final
 checkpoint stamped with the relaxation record of `icepack2_tools/relaxation.py`
 (the source MAP, its objective settings, the window and the step), so the
 re-inversion takes the path a relaxed state has: it keeps the MAP's controls,

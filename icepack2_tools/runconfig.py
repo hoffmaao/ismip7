@@ -967,10 +967,34 @@ def calving_law_object():
             calving.load_module(path)
             _CALVING_MODULES_LOADED.add(path)
     params = calving.parse_params(calving_params())
+    if front_marine():
+        # a land-terminating front does not calve, whatever the law; a law's
+        # own marine_only in ISMIP7_CALVING_PARAMS stands
+        params.setdefault("marine_only", True)
     try:
         return calving.make(name, **params)
     except ValueError as err:
         raise ValueError(f"ISMIP7_CALVING={name}: {err}") from None
+
+
+def front_marine():
+    r"""``ISMIP7_FRONT_MARINE``: a land-terminating front does not calve.
+
+    On unless set to ``"0"``. A cliff on land deforms under its own weight,
+    the stress imbalance at its face carrying the ice forward, and the ice
+    that reaches the sea calves there (Andrew, 16 October 2026). So the
+    calving law's rate is zero where the bed is at or above sea level (every
+    law's ``marine_only``, :mod:`icepack_tools.calving`), and a retreat-only
+    front (``ISMIP7_FRONT_ADVANCE=none``) is held at the t=0 extent only
+    where the bed is below sea level: a land margin advances with the ice,
+    and what it carries into the sea past the extent calves. On BedMachine
+    Antarctica v4.1 the front facing ice-free land is 129,000 km, three times
+    the ocean-facing front, and carries up to ~90 Gt/yr; the front of every
+    law booked what crossed it as calving. ``0`` restores that. A law whose
+    ``ISMIP7_CALVING_PARAMS`` set ``marine_only`` keeps its own setting for
+    the rate.
+    """
+    return os.environ.get("ISMIP7_FRONT_MARINE", "1").strip() != "0"
 
 
 def fixed_front():

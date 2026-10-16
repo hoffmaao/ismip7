@@ -117,6 +117,7 @@ from icepack2_tools.runconfig import (
     calving_law as _calving_law, calving_law_object as _calving_law_object,
     front_advance as _front_advance,
     front_anchor as _front_anchor, front_reinit_interval as _front_reinit_interval,
+    front_marine as _front_marine,
     fracture as _fracture_mode, ismip7_output as _ismip7_output,
     FRACTURE_MASK_MODES,
     # auto_resume is re-exported, not used here: every forward driver imports
@@ -2647,6 +2648,11 @@ def run_simulation(
     front_anchor_mode = _front_anchor()
     ctx["front_anchor"] = front_anchor_mode
     retreat_only = calving_law_obj is not None and front_advance == "none"
+    # A land-terminating front does not calve and is not held: it deforms
+    # under its own weight and advances with the ice, and what it carries
+    # into the sea calves there (ISMIP7_FRONT_MARINE, runconfig.front_marine;
+    # the law's own marine_only zeroes its rate on land).
+    front_marine = calving_law_obj is not None and _front_marine()
     if front_advance == "none" and calving_law_obj is None:
         raise ValueError(
             "ISMIP7_FRONT_ADVANCE=none needs a level-set law (ISMIP7_CALVING); "
@@ -2679,6 +2685,9 @@ def run_simulation(
             f"(ISMIP7_CALVING={calving})"
             + ("; retreat-only: nothing advances past the t=0 extent "
                "(ISMIP7_FRONT_ADVANCE=none)" if retreat_only else "")
+            + ("; a land-terminating front does not calve and advances with "
+               "the ice" + (", the t=0 extent held only on the sea" if retreat_only else "")
+               + " (ISMIP7_FRONT_MARINE)" if front_marine else "")
             + ("; front carried by advection and the calving rate "
                "(ISMIP7_FRONT_ANCHOR=advect), the transport moving the ice "
                "with it (only cells inside the front export ice, enclosed "
@@ -2720,6 +2729,8 @@ def run_simulation(
     # the budget and the ISMIP7 fields all count the same forcing.
     forced = Function(Q_dg, name="forced")
     bed_cell = Function(Q_dg).project(b).dat.data_ro.copy()
+    # where a front is in the ocean: the cells whose bed is below sea level
+    sea_cells = bed_cell < 0.0 if front_marine else None
 
     # h_dg is the PERSISTENT prognostic state (DG0). The old scheme
     # re-projected CG1 h -> DG0 every step; that roundtrip (L2 project +
@@ -3398,7 +3409,8 @@ def run_simulation(
                 _h0 = Function(Q_dg).project(ctx.get("H_init", h))
                 phi_bar = initial_distance(mesh, _h0, h_min=front_hmin)
             front_transport = FrontTransport(level_set, u_transport,
-                                             barrier=retreat_only, phi0=phi_bar)
+                                             barrier=retreat_only, phi0=phi_bar,
+                                             sea=sea_cells)
             if front_transport.n_filled:
                 PETSc.Sys.Print(
                     f"  Front: {front_transport.n_filled} cells of water the "
@@ -3522,7 +3534,8 @@ def run_simulation(
             else:
                 last_c_mean = level_set.advance(dt_local, u_vel, rate=calving_rate)
                 lsb, calv_frac = level_set.calving_masks()
-                beyond = front_removal_mask(lsb, beyond_front, retreat_only, calved)
+                beyond = front_removal_mask(lsb, beyond_front, retreat_only, calved,
+                                            sea=sea_cells)
             ls_ice_free = level_set.beyond_front()
             if retreat_only and front_transport is None:
                 ls_ice_free = ls_ice_free | calved

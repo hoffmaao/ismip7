@@ -26,6 +26,43 @@ def test_retreat_only_removes_beyond_the_initial_extent_as_well():
     assert np.array_equal(front_removal_mask(law, None, True), law)
 
 
+def test_retreat_only_holds_the_t0_extent_on_the_sea_only():
+    r"""ISMIP7_FRONT_MARINE: a land-terminating front advances with the ice,
+    so a cell beyond the t=0 extent on land keeps the ice that reaches it,
+    and one in the sea is emptied as before."""
+    law = np.array([False, True, False, False])     # the front passed cell 1
+    init = np.array([False, False, True, True])     # cells 2, 3 were ice-free at t=0
+    sea = np.array([True, True, True, False])       # cell 3 is land
+    assert np.array_equal(front_removal_mask(law, init, True, sea=sea),
+                          np.array([False, True, True, False]))
+    # the law's own removals and the held cells are not the extent's
+    calved = np.array([True, False, False, False])
+    assert np.array_equal(front_removal_mask(law, init, True, calved, sea=sea),
+                          np.array([True, True, True, False]))
+    assert np.array_equal(front_removal_mask(law, init, False, sea=sea), law)
+
+
+def test_land_fronts_do_not_calve_by_default(monkeypatch):
+    r"""ISMIP7_FRONT_MARINE: on by default, every law made with marine_only
+    unless its parameters say otherwise; 0 makes the law as it is."""
+    calving = pytest.importorskip("icepack_tools.calving")
+    if "marine_only" not in calving.make("hfb").p:
+        pytest.skip("icepack_tools predates the land gate on every law")
+    monkeypatch.delenv("ISMIP7_FRONT_MARINE", raising=False)
+    monkeypatch.setenv("ISMIP7_CALVING", "hfb")
+    monkeypatch.setenv("ISMIP7_CALVING_PARAMS", "sigma_max=0.15")
+    assert runconfig.front_marine()
+    law = runconfig.calving_law_object()
+    assert law.p["marine_only"] is True
+    assert "land-terminating fronts do not calve" in law.describe()
+    monkeypatch.setenv("ISMIP7_CALVING_PARAMS", "sigma_max=0.15,marine_only=false")
+    assert runconfig.calving_law_object().p["marine_only"] is False
+    monkeypatch.setenv("ISMIP7_FRONT_MARINE", "0")
+    monkeypatch.setenv("ISMIP7_CALVING_PARAMS", "sigma_max=0.15")
+    assert not runconfig.front_marine()
+    assert runconfig.calving_law_object().p["marine_only"] is False
+
+
 def test_a_cell_the_front_emptied_stays_empty():
     from icepack2_tools.front import held_calved
     none = np.zeros(4, bool)

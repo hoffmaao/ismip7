@@ -806,10 +806,15 @@ What an L-BFGS-B evaluation still spends outside the solves is
 A velocity-only inversion fits `u` while leaving `div(h u)` unconstrained, so
 the MAP can carry a flux divergence inconsistent with the observed geometry.
 `ISMIP7_DHDT_WEIGHT > 0` adds one implicit-Euler prognostic step after the
-diagnostic solve, using the model's own DG0 upwind operator, and scores the
-resulting tendency against the observed mean dH/dt
-(`icepack2_tools/obs_dhdt.py`, from the MIPkit). It needs
-`ISMIP7_GEOMETRY_SPACE=dg0` and applies to grounded ice.
+diagnostic solve, using the forward's own upwind operator
+(`icepack2_tools/transport.py`), and scores the resulting tendency against the
+observed mean dH/dt (`icepack2_tools/obs_dhdt.py`, from the MIPkit), binned
+onto the mesh cells. It applies to grounded ice and runs under
+`ISMIP7_GEOMETRY_SPACE=dg0` or `dg1`. Under `dg1` the step is the DG1 upwind
+step, forced on the DG0 cells as the forward forces it, and the term scores the
+cell means of its tendency, which is what the binned field observes
+(`obs_dhdt.cell_mean_form`); the grounded test reads the cell means
+(`obs_dhdt.grounded_cells`).
 
 ```bash
 ISMIP7_DHDT_WEIGHT=1.0 ISMIP7_MAP_OUT=mesh/inversion_transient_2500.h5 \
@@ -1532,7 +1537,7 @@ thickness clamp from 119,000 to 256,000 Gt/yr within a few steps.
 | `ISMIP7_SIGMA_U_FLOOR` | floor on the per-component MEaSUREs error (m/yr), so near-zero errors cannot let a few nodes dominate | `1.0` |
 | `ISMIP7_SIGMA_U_UNOBS` | sigma (m/yr) where MEaSUREs reports no error. Those nodes carry a zero-filled `u_obs`, so they need a large sigma when `ISMIP7_OBS_MASK=0` | `1e4` |
 | `ISMIP7_OBS_MASK` | `0` drops the velocity-observation mask | `1` |
-| `ISMIP7_DHDT_WEIGHT` | weight on the dH/dt chi^2; `0` disables the transient constraint. Needs `ISMIP7_GEOMETRY_SPACE=dg0` | `0` |
+| `ISMIP7_DHDT_WEIGHT` | weight on the dH/dt chi^2; `0` disables the transient constraint. Under `ISMIP7_GEOMETRY_SPACE=dg1` it scores the cell means of the tendency; CG1 geometry is refused | `0` |
 | `ISMIP7_DHDT_SIGMA` | assumed dH/dt uncertainty (m/yr), hand set since the MIPkit ships no uncertainty field | `0.1` |
 | `ISMIP7_DHDT_DT` | timestep of the prognostic step (yr) | `1.0` |
 | `ISMIP7_DHDT_VAR` | `dhdt_smith` (firn corrected, 2003 to 2019) or `dhdt_cpom` (uncorrected, so not interchangeable) | `dhdt_smith` |

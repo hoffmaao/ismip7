@@ -45,11 +45,6 @@ from firedrake import (
     COMM_WORLD,
     exp,
     TestFunction,
-    FacetNormal,
-    dot,
-    jump,
-    ds,
-    dS,
 )
 from tlm_adjoint.firedrake import (
     reset_manager,
@@ -100,6 +95,7 @@ from icepack2_tools.geometry import (
 from icepack2_tools.cellview import CellView
 from icepack2_tools.preconditioners import frozen_linearization, with_scpc_blocks
 from icepack2_tools.taped_solve import StateSolverCache, taped_state_solve
+from icepack2_tools.transport import transport_form
 from icepack2_tools.transfer import (
     harmonic_extension, interpolate_with_fill, load_checkpoint_mesh, meshes_match,
 )
@@ -2133,12 +2129,20 @@ def main():
     #
     # That last point is about the MISFIT, not the source term: the step still
     # applies the shelf melt (below) so the single prognostic solve matches the
-    # forcing the forward experiment uses, but because the DG0 upwind operator
+    # forcing the forward experiment uses, but because the upwind operator
     # couples a cell only to its UPWIND neighbours and the flow runs
     # grounded->shelf, no grounded-cell equation ever sees a shelf value. The
     # melt source therefore cannot move the grounded-only misfit -- which is
     # why a missing per-basin K degrades to an SMB-only source rather than
     # aborting the inversion.
+    #
+    # Under DG1 the step is the forward's DG1 upwind step on the vertex-node
+    # thickness, forced as the forward forces it (SMB and melt on the DG0
+    # cells, from the cell means of the geometry), and the term scores the
+    # CELL MEANS of the tendency against Smith binned onto the same cells
+    # (obs_dhdt.cell_mean_form): the binned field holds one value per cell,
+    # so the slope of the tendency inside a cell is left free. Under DG0 a
+    # cell's value is its mean and every piece below is what it always was.
     dhdt_w = float(os.environ.get("ISMIP7_DHDT_WEIGHT", "0.0"))
     use_dhdt = dhdt_w > 0.0
     # Resolved (not merely requested) net-term provenance: ISMIP7_DHDT_NET_SIGMA
@@ -2152,21 +2156,27 @@ def main():
     # carries the answer.
     k_npz_used = "none"
     if use_dhdt:
-        if geometry_space != "dg0":
+        if geometry_space not in ("dg0", "dg1"):
             raise RuntimeError(
-                "ISMIP7_DHDT_WEIGHT requires ISMIP7_GEOMETRY_SPACE=dg0: the "
-                "prognostic step is the DG0 upwind FV operator and must act on "
-                "the same field the forward transports."
+                "ISMIP7_DHDT_WEIGHT requires ISMIP7_GEOMETRY_SPACE=dg0 or dg1: "
+                "the prognostic step is the forward's upwind transport "
+                "(icepack2_tools.transport) and must act on the same field the "
+                "forward transports."
             )
-        from icepack2_tools.obs_dhdt import load_dhdt_obs
+        from icepack2_tools.obs_dhdt import (
+            CELL_MEAN_SOLVER, cell_mean_form, grounded_cells, load_dhdt_obs)
 
         dhdt_sigma = float(os.environ.get("ISMIP7_DHDT_SIGMA", "0.1"))   # m/yr
         dhdt_dt = float(os.environ.get("ISMIP7_DHDT_DT", "1.0"))          # yr
         clim0 = int(os.environ.get("ISMIP7_DHDT_CLIM_START", "2003"))
         clim1 = int(os.environ.get("ISMIP7_DHDT_CLIM_END", "2019"))
 
-        dhdt_obs, dhdt_cov = load_dhdt_obs(Q_g)
-        smb_obs = load_racmo_smb_climatology(Q_g, clim_start=clim0, clim_end=clim1)
+        # The cells the term is scored on and the forcing lives on: Q_g
+        # itself under DG0, the DG0 cells under DG1.
+        dhdt_view = CellView(Q_g)
+        Q_c = dhdt_view.Q0
+        dhdt_obs, dhdt_cov = load_dhdt_obs(Q_c)
+        smb_obs = load_racmo_smb_climatology(Q_c, clim_start=clim0, clim_end=clim1)
 
         # Ocean melt for the prognostic step, from the SAME parameterisation
         # and forcing the experiments use: OI-climatology TF/so at draft depth
@@ -2179,7 +2189,7 @@ def main():
         # it fixes is the source term the implicit step sees on shelf cells,
         # keeping the single prognostic step consistent with the forward
         # experiment. ISMIP7_DHDT_MELT=0 drops it (SMB-only source).
-        melt_ref = Function(Q_g, name="ocean_melt_ref")
+        melt_ref = Function(Q_c, name="ocean_melt_ref")
         if os.environ.get("ISMIP7_DHDT_MELT", "1") != "0":
             from icepack2_tools.forcing import (
                 load_K_per_basin, make_climatology_ocean_callback)
@@ -2200,9 +2210,13 @@ def main():
                     k_npz, geom_xy[0], geom_xy[1], fill=0.0)
                 K_field = K_field * float(
                     os.environ.get("ISMIP7_K_SCALE", "1.0"))
+            # Under DG1 the callback reads the cell means through the view
+            # (forcing.forcing_geometry), as the forward's does.
             _ctx = {"mesh": mesh, "Q": Q, "V": V, "Q_g": Q_g,
                     "geom_xy": geom_xy, "h": H, "b": b, "s": s,
-                    "ocean_melt": melt_ref}
+                    "ocean_melt": melt_ref, "accum": smb_obs,
+                    "cell_view": dhdt_view if geom_dg1 else None,
+                    "rho_ratio": rho_ratio}
             make_climatology_ocean_callback(K_field)(_ctx, 0.0)
             _melt_gt = float(assemble(melt_ref * dx)) * 917.0 / 1e12
             PETSc.Sys.Print(
@@ -2213,11 +2227,8 @@ def main():
 
         # grounded indicator on the reference geometry, frozen (the control
         # fields move, the classification of where we trust dH/dt should not)
-        haf_ref = Function(Q_g).interpolate(height_above_flotation(H, b))
-        grounded = Function(Q_g)
-        grounded.dat.data[:] = np.where(
-            (haf_ref.dat.data_ro > 0.0) & (H.dat.data_ro > 1.0), 1.0, 0.0)
-        dhdt_mask = Function(Q_g, name="dhdt_mask")
+        grounded = grounded_cells(dhdt_view, H, b)
+        dhdt_mask = Function(Q_c, name="dhdt_mask")
         dhdt_mask.dat.data[:] = dhdt_cov.dat.data_ro * grounded.dat.data_ro
         dhdt_area = assemble(dhdt_mask * dx(mesh))
         if dhdt_area <= 0.0:
@@ -2243,6 +2254,11 @@ def main():
                     "dates DA initial states before 2015; see obs_dhdt.py)"
                 )
         h_next = Function(Q_g, name="h_next")
+        # DG1: the cell means of the step's tendency, the field scored.
+        dhdt_cell = Function(Q_c, name="dhdt_cell_mean") if geom_dg1 else None
+        if geom_dg1:
+            PETSc.Sys.Print("  dH/dt term on DG1: the DG1 upwind step, scored on "
+                            "its cell means against Smith binned onto the cells")
 
         # ── Net (integral) mass-balance term -- OFF BY DEFAULT ──────────
         # Explored Aug 2026 and mechanically validated (it moves the grounded
@@ -2441,21 +2457,15 @@ def main():
             )
 
         if use_dhdt:
-            # ONE prognostic step, using the SAME DG0 upwind FV operator the
-            # forward transports with -- that consistency is the point: the
-            # inversion must be penalised for the divergence its own transport
-            # scheme will produce, not an idealised one.
+            # ONE prognostic step, using the SAME upwind operator the forward
+            # transports with (icepack2_tools.transport: the DG0 finite-volume
+            # update, and under DG1 the same with its volume term) -- that
+            # consistency is the point: the inversion must be penalised for
+            # the divergence its own transport scheme will produce, not an
+            # idealised one.
             w = TestFunction(Q_g)
-            nrm = FacetNormal(mesh)
-            un = dot(u_sol, nrm)
-            unp = (un + abs(un)) / 2
             dt_c = Constant(dhdt_dt)
-            F_h = (
-                (h_next - H) / dt_c * w * dx
-                + (unp("+") * h_next("+") - unp("-") * h_next("-")) * jump(w) * dS
-                + unp * h_next * w * ds
-                - (smb_obs - melt_ref) * w * dx
-            )
+            F_h = transport_form(h_next, H, w, u_sol, dt_c, smb_obs - melt_ref)
             EquationSolver(
                 F_h == 0,
                 h_next,
@@ -2469,6 +2479,14 @@ def main():
                 form_compiler_parameters=fc_params,
             ).solve()
             dhdt_model = (h_next - H) / dt_c
+            if geom_dg1:
+                EquationSolver(
+                    cell_mean_form(dhdt_cell, dhdt_model) == 0,
+                    dhdt_cell,
+                    solver_parameters=CELL_MEAN_SOLVER,
+                    form_compiler_parameters=fc_params,
+                ).solve()
+                dhdt_model = dhdt_cell
             integrand = integrand + (
                 0.5
                 * Constant(dhdt_w)
@@ -2554,12 +2572,13 @@ def main():
     ) * dx(mesh)
     _log_chi2 = (0.5 / area_val * obs_mask * _log_ratio(_u_now) ** 2) * dx(mesh)
     if use_dhdt:
-        _net_form = (((h_next - H) / Constant(dhdt_dt) - dhdt_obs)
-                     * dhdt_mask * dx(mesh))
+        # the tendency the term scores: its cell means under DG1
+        _dhdt_rate = (dhdt_cell if geom_dg1
+                      else (h_next - H) / Constant(dhdt_dt))
+        _net_form = ((_dhdt_rate - dhdt_obs) * dhdt_mask * dx(mesh))
         _dhdt_chi2 = (
             0.5 / dhdt_area * dhdt_mask
-            * (((h_next - H) / Constant(dhdt_dt) - dhdt_obs)
-               / Constant(dhdt_sigma)) ** 2
+            * ((_dhdt_rate - dhdt_obs) / Constant(dhdt_sigma)) ** 2
         ) * dx(mesh)
 
     # Velocity chi^2 of the last accepted state, in ITS OWN accumulator. The

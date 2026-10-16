@@ -7,11 +7,15 @@ a row at evaluation 107 and L-BFGS-B stopped with a CONVERGENCE message at a
 gradient norm of 1.03; the chain then marked the MAP done. The tracker has to
 tell that stop apart from a minimisation that met failed trials along the way
 and recovered.
+
+``optimization.AcceptedIterate`` keeps the evaluation scipy returns, which is
+the accepted iterate and rarely the last evaluation: the publishing solve and
+the MAP's record need that evaluation's state and objective.
 """
 import numpy as np
 from scipy.optimize import minimize
 
-from icepack2_tools.optimization import TrialFailures
+from icepack2_tools.optimization import AcceptedIterate, TrialFailures
 
 HESSIAN = np.diag(np.linspace(1.0, 50.0, 20))
 
@@ -86,3 +90,54 @@ def test_a_failed_trial_returns_ten_times_the_last_objective_and_no_gradient():
     objective, gradient = TrialFailures().failed(3.0, 4)
     assert objective == 30.0
     assert np.array_equal(gradient, np.zeros(4))
+
+
+def _minimise_against_a_wall(wall):
+    r"""The quadratic misfit with every trial past ``x.sum() < wall`` failing,
+    as a forward that stops converging past some controls; the minimiser at
+    0 lies past the wall. Each good evaluation records its objective in an
+    ``AcceptedIterate``, as the driver records its mixed state."""
+    tracker, accepted = TrialFailures(), AcceptedIterate()
+    good = {"total": None, "x": None}
+
+    def objective_and_gradient(x):
+        if good["x"] is not None and x.sum() < wall:
+            return tracker.failed(good["total"], x.size)
+        good.update(total=0.5 * x @ HESSIAN @ x, x=x.copy())
+        accepted.evaluated(good["x"], good["total"])
+        tracker.succeeded()
+        return good["total"], HESSIAN @ x
+
+    result = minimize(objective_and_gradient, np.ones(20), jac=True,
+                      method="L-BFGS-B", callback=accepted.iterate,
+                      options={"maxiter": 300, "ftol": 1e-12, "gtol": 0})
+    return result, tracker, accepted, good["x"]
+
+
+def test_the_returned_controls_are_the_accepted_evaluation_and_not_the_last():
+    r"""Against the wall at 5 L-BFGS-B stops right after a failed trial, at
+    2 it stops ABNORMAL with none trailing. Both times result.x is an earlier
+    evaluation than the last good one, whose state the publishing solve used
+    to start from; after the failure stop result.fun is the failed trial's
+    inflated value. The record holds the accepted evaluation's objective."""
+    for wall, stopped in ((5.0, True), (2.0, False)):
+        result, tracker, accepted, x_last = _minimise_against_a_wall(wall)
+        assert tracker.stopped_on_failures == stopped, wall
+        assert not np.array_equal(result.x, x_last), wall
+        objective = 0.5 * result.x @ HESSIAN @ result.x
+        assert accepted.at(result.x) == objective, wall
+        if stopped:
+            assert result.fun > objective
+
+
+def test_the_starting_point_is_accepted_until_a_callback_moves_it():
+    accepted = AcceptedIterate()
+    x0, x1 = np.zeros(3), np.ones(3)
+    accepted.evaluated(x0, "start")
+    accepted.evaluated(x1, "trial")
+    assert accepted.at(x0) == "start"
+    accepted.iterate(np.full(3, 2.0))
+    assert accepted.at(x0) == "start"
+    accepted.iterate(x1.copy())
+    assert accepted.at(x1) == "trial"
+    assert accepted.at(x0) is None

@@ -26,8 +26,8 @@ class TrialFailures:
     final-product link 11461566 (issue #153) stopped that way at evaluation
     107 with a gradient norm of 1.03, its objective still falling about 1 an
     evaluation. ``stopped_on_failures`` after the optimizer returns says its
-    stop came that way, and the MAP is then the last accepted iterate of an
-    unfinished minimisation."""
+    stop came that way, and the MAP is then an evaluated point of an
+    unfinished minimisation (``AcceptedIterate``)."""
 
     def __init__(self):
         self.trailing = 0
@@ -48,45 +48,54 @@ class TrialFailures:
 
 
 class AcceptedIterate:
-    r"""The scipy path's record of the evaluation L-BFGS-B accepted.
+    r"""The scipy path's record of the evaluations a MAP can be published at.
 
-    scipy returns the accepted iterate, which is rarely the last evaluation:
-    a line search ends on rejected or failed trials. Over 600 wall-limited
-    quadratics (scipy 1.17, every trial past a wall failing) ``result.x`` was
-    the last evaluation in 5 and the evaluation this record accepts in all
-    600. The driver
-    kept only the last evaluation's mixed state, so its publishing solve
-    started from the state of other controls; after the failed trials of the
-    2 km DG1 velocity-only re-inversion 12286864 (16 Oct 2026) that solve
-    diverged and no velocity was published.
+    The driver keeps one mixed state, the last successful evaluation's, and
+    scipy's ``result.x`` is rarely that evaluation. Over 600 wall-limited
+    quadratics (scipy 1.17, every trial past a wall failing) it was the last
+    evaluation in 5 and the iterate the L-BFGS-B callback accepted in all
+    600. At 2 km both failure stops of 16 Oct 2026 (the DG1 velocity-only
+    re-inversions 12286864 and 12291649) returned the last FAILED trial: the
+    publishing solve, started from the same last good state as that trial,
+    diverged as it did (||F|| 1.841e27 at Newton iteration 11 in 12291649),
+    and no velocity was published.
 
-    ``evaluated(x, payload)`` records a successful evaluation at ``x``;
-    ``iterate(xk)`` is the optimiser callback, at which the most recent
-    evaluation is the iterate just accepted; ``at(x)`` is the payload of the
-    evaluation at ``x`` (the accepted one, or the last), None if neither.
-    The first evaluation, at the starting point, is accepted until a callback
-    says otherwise. ``x`` is compared bitwise, and every rank holds the same
-    global vector, so all ranks agree without a reduction.
+    ``evaluated(x, value, payload)`` records a successful evaluation at ``x``
+    with objective ``value``; ``iterate(xk)`` is the optimiser callback, at
+    which the most recent evaluation is the iterate just accepted. The first
+    evaluation, at the starting point, is accepted until a callback says
+    otherwise. ``publish(x)`` is ``(x, payload, how)`` for the evaluation to
+    publish: the one at ``x`` (the accepted, lowest or last evaluation, how
+    "returned"), else the lowest-objective evaluation (how "lowest"), where
+    the publishing solve has that evaluation's converged state to start
+    from; None before any evaluation. ``x`` is compared bitwise, and every
+    rank holds the same global vector, so all ranks agree without a
+    reduction.
     """
 
     def __init__(self):
         self.last = None
         self.accepted = None
+        self.lowest = None
 
-    def evaluated(self, x, payload):
-        self.last = (x, payload)
+    def evaluated(self, x, value, payload):
+        self.last = (x, float(value), payload)
         if self.accepted is None:
             self.accepted = self.last
+        if self.lowest is None or self.last[1] < self.lowest[1]:
+            self.lowest = self.last
 
     def iterate(self, xk):
         if self.last is not None and np.array_equal(xk, self.last[0]):
             self.accepted = self.last
 
-    def at(self, x):
-        for entry in (self.accepted, self.last):
+    def publish(self, x):
+        for entry in (self.accepted, self.lowest, self.last):
             if entry is not None and np.array_equal(entry[0], x):
-                return entry[1]
-        return None
+                return entry[0], entry[2], "returned"
+        if self.lowest is None:
+            return None
+        return self.lowest[0], self.lowest[2], "lowest"
 
 
 class FunctionalDecreaseStop:

@@ -1007,13 +1007,20 @@ def main():
                         if chk.has_attr("/", "friction_control") else "log")
             warm_exp_alpha = _warm_fc == "exp" and _theta_mode != "0"
             if _warm_fc == "log" and _theta_mode != "0":
-                # The band a forward bounds a loaded MAP's log controls to
-                # (simulation.py, ISMIP7_MAP_CLIP: 10 at n=3, 6 at n=4). The
-                # 94-iteration sigma=3 MAP carries ~30 spikes up to theta=19
-                # (C x 1e8) at the grounding line, and from them the first
-                # n=1 solve of a sub-element sqrt run wandered at ||F|| 1e13-1e21.
-                _clip = float(os.environ.get(
-                    "ISMIP7_MAP_CLIP", "6.0" if float(n_flow_val) == 4.0 else "10.0"))
+                # A warm start keeps the controls its writer fitted unless
+                # ISMIP7_MAP_CLIP bounds them (the band a forward bounds a
+                # loaded MAP's log controls to, simulation.py: 10 at n=3, 6 at
+                # n=4). A chain link has to continue the minimisation from the
+                # controls the link before it saved: every warm-started 2 km
+                # DG1 link of 15 and 16 Oct 2026 bounded 49 to 59 nodes at 10,
+                # started from ||F|| 2.8e9 to 4.2e9 where its writer recorded
+                # 4e-5 to 5e2, and missed the recorded objective by up to
+                # 1.1e-2. Set it for a warm start from another configuration:
+                # the 94-iteration sigma=3 MAP carries ~30 spikes up to
+                # theta=19 (C x 1e8) at the grounding line, and from them the
+                # first n=1 solve of a sub-element sqrt run wandered at ||F||
+                # 1e13-1e21.
+                _clip = float(os.environ.get("ISMIP7_MAP_CLIP", "0"))
                 if _clip > 0.0:
                     _d = theta.dat.data
                     _n_clip = COMM_WORLD.allreduce(int((np.abs(_d) > _clip).sum()))

@@ -167,7 +167,13 @@ the objective at the accepted iterate; a warm start freezes the auto weights
 section 5) from the record, refuses a changed
 objective under `ISMIP7_WARM_START_STRICT=1`, and checks that its first
 evaluation reproduces the recorded objective. Verified: the stage-2 handoff
-reproduced 5.2008401e7 to all printed digits.
+reproduced 5.2008401e7 to all printed digits. Until 16 October 2026 the
+warm start also bounded theta to `ISMIP7_MAP_CLIP` (10), which moved every
+2 km DG1 link off the point the link before it saved: 12293274 bounded 29
+nodes, started from `||F||` 3.4e9 against the recorded 3.5e-5 and missed its
+recorded 2300.923 by 1.12e-2. With the clip off the same warm start
+reproduced it to 3.2e-12 (12293346). An inversion now clips only when the
+knob is set.
 
 **Cost.** The sub-element scheme costs nothing per iteration (790 to 860 s
 per iteration at 2 km on 32 ranks, the same as the cell-wise law) but its

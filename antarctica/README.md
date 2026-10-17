@@ -1383,7 +1383,11 @@ per-Mouginot-basin flux against the Greene et al. 2022 fronts), so a tuned
 parameter means the same thing there and here. `ISMIP7_CALVING` names the law,
 `ISMIP7_CALVING_PARAMS` gives its parameters as `key=value,key=value`, checked
 against the law's own when the forward starts (before the MAP load), and
-`ISMIP7_CALVING_MODULE` registers a law from a file first:
+`ISMIP7_CALVING_MODULE` registers a law from a file first. Two parameters
+every law takes: `marine_only` (the land-front rule, `ISMIP7_FRONT_MARINE`)
+and `scale`, a global factor on the law's rate (`c -> scale c`, default 1),
+the knob that turns a law up for the continent as a whole when its fronts
+advance where the record holds them:
 
 | `ISMIP7_CALVING` | rate `c` [m/yr] | parameters (defaults) |
 |---|---|---|
@@ -1454,7 +1458,15 @@ parameters and the front-advance mode. The parameters shipped are the Pine
 Island calibrations against the Greene record where that study fitted them,
 the submission front's own value for `hfb`, and published Antarctic values
 otherwise; `fixed` (the protocol's pinned front) and `nocalving` (free
-advance, nothing removed) bound every law.
+advance, nothing removed) bound every law. The `hfb0x*` and `vm150x*`
+members run the same laws with the rate turned up by a global `scale`
+(1.5 to 3): on the 2 km buffered mesh every free law at its published value
+calved less than the ice reaching the front (hfb 0: 800 Gt/yr, von Mises
+0.15: 630, 0.275: 275, against ~1,190 for the pinned front and ~1,265
+observed), so its fronts advanced and mass piled up at them, while the
+Greene record holds the continent's ice area nearly steady over 2003-2015
+(+0.5 thousand km2/yr on 13.6 million). The scale that holds the area is
+the continent-wide calibration; thresholds per region come after it.
 
 ```sh
 . ./fwd_env_sep1.sh                                   # the production environment
@@ -1473,7 +1485,10 @@ front-length weighted, the rms distance to the observed coast, its bias
 seaward and inland shares and the share within 1 and 2 km, then the same
 from the observed coast to the model's front, in total and per Mouginot
 basin; a member is judged on the mean front rms over the epochs its run
-covers, against `fixed` and `nocalving`. Where the full kit is absent,
+covers, against `fixed` and `nocalving`. Each state also carries the ice
+area of the run and of the record on the kit grid, and the summary their
+change over the scored epochs, the measure a continent-wide `scale` is set
+by. Where the full kit is absent,
 `--kit` takes the front subset (`AntarcticaObsISMIP7-v1.2-front.nc`, 9 MB:
 the Greene masks, their dates and the Mouginot basins; on NOTS at
 `ISMIP7/AIS/obs/front/`, NOT under `obs/mipkit/`: the forward's dH/dt reader

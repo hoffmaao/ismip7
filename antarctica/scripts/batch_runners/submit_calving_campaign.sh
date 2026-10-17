@@ -42,7 +42,12 @@ vms099|vonmises_strain|sigma_max_fl=0.099,sigma_max_gr=1.0|free
 thk450|thickness|hc=450|free
 eig1e8|eigencalving|K=1.1e8|free
 eig3e8|eigencalving|K=3.0e8|free
-nocalv|nocalving||free"
+nocalv|nocalving||free
+hfb0x15|hfb|sigma_max=0.0,scale=1.5|free
+hfb0x2|hfb|sigma_max=0.0,scale=2|free
+hfb0x3|hfb|sigma_max=0.0,scale=3|free
+vm150x2|vonmises|sigma_max_fl=0.15,sigma_max_gr=1.0,scale=2|free
+vm150x3|vonmises|sigma_max_fl=0.15,sigma_max_gr=1.0,scale=3|free"
 # `nocalving` with a free front = the front carried by the ice and nothing
 # removed: the no-calving baseline every law has to beat. `fixed` is the
 # protocol's pinned front. The submission front is hfb015 with FRONT_ADVANCE

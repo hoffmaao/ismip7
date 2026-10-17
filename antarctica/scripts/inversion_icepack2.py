@@ -2622,6 +2622,11 @@ def main():
     # Each data term split by observed speed (the cell's |u_obs| at its
     # centroid), in the units of the per-evaluation report: where the
     # objective's weight sits, and what ISMIP7_DHDT_SPEED_RATIO moves.
+    # The dH/dt step's fields, which hold the last forward's step: a record
+    # keeps them with its state, so the published state's diagnostics are
+    # of its own step (an adjoint that fails leaves its trial's step there).
+    _dhdt_fields = ([h_next] + ([dhdt_cell] if geom_dg1 else [])) if use_dhdt else []
+
     _band_edges = (0.0, 10.0, 30.0, 100.0, 300.0, np.inf)
     _band_speed = Function(FunctionSpace(mesh, "DG", 0)).interpolate(
         sqrt(u_obs[0] ** 2 + u_obs[1] ** 2))
@@ -3157,6 +3162,7 @@ def main():
                 "fnorm": last_good_fnorm[0],
                 "obj": J_val,
                 "vel_chi2": last_good_vel_chi2[0],
+                "dhdt": [_f.dat.data_ro.copy() for _f in _dhdt_fields],
                 "terms": dict(last_accepted),
             })
         if iteration_count[0] == 1:
@@ -3835,6 +3841,8 @@ def main():
             last_good_fnorm[0] = _acc["fnorm"]
             last_good_obj[0] = _acc["obj"]
             last_good_vel_chi2[0] = _acc["vel_chi2"]
+            for _f, _d in zip(_dhdt_fields, _acc["dhdt"]):
+                _f.dat.data[:] = _d
             last_good_x[0] = np.array(_x_final, copy=True)
             last_x[0] = last_good_x[0]
             last_accepted.clear()

@@ -1,0 +1,32 @@
+{
+  "id": "core11-32km-ocx-i104off",
+  "task": "test",
+  "institution": "IU",
+  "title": "Core 11 at 32 km without the apparent-MB reference, a cold start on the OCX protocol forcing",
+  "status": "done",
+  "exp_id": "C011",
+  "esm": "observations",
+  "scenario": "OCX main",
+  "period": "1979 to 2026, reached 2026.0",
+  "friction": "budd",
+  "mesh": "antarctica_320000_32000, DG0 geometry",
+  "initial_state": "inversion_icepack2_budd_n3_dg0_logvelnet_32000.h5, sha256 3b3aefa1c69a5daf87d1db291cae9337e00c2696f412bce147b1f488228ef472",
+  "branch_from": "cold start",
+  "forcing": "the OCX protocol forcing: RACMO2.3p2-ERA SDBN1-8000m v1 acabf year by year and the expert-judgment OCX ocean main v1",
+  "melt": "per-basin K from K_issue11_mesh2500.npz, local slope",
+  "front": "held fixed, ice-shelf collapse ISMIP7_FRACTURE=none",
+  "apparent_mb": "off",
+  "dt": 0.1,
+  "site": "IU Quartz",
+  "resources": "8 ranks, 32 GiB",
+  "jobs": [
+    "10609749"
+  ],
+  "code": "700a846",
+  "started": "2026-09-24",
+  "finished": "2026-09-24",
+  "cost": "one link of 9 min for 47 model years",
+  "results": "antarctica/results/ocx_i104off_32000_*",
+  "audit": "OFF TRACK, with dM/dt FAIL at 603.9 Gt/yr; resid 0.0000 on all 470 rows, 1 rescued step, no subcycle or stall event",
+  "notes": "run for issue #104 from a scratch clone of main at 700a846, with results and logs in the shared checkout. 469 of 470 steps converged on their first direct diagnostic solve, with 6.5 Newton iterations on average and 13 at the most (step 53, t = 1984.3). Step 265 (t = 2005.5) stopped at the 200-iteration Newton limit on its first solve, and the rescue ladder's re-continuation (n from 1 to 3 in 10 stages) recovered it. VAF changes by +157 mm SLE over 1979 to 2026; the peak ice speed on the mesh is 42936 m/yr at t = 2011.3, at (417000, -1689000) m. Run without ISMIP7_OUTPUT. Final state sha256 8e694f69cbb3e6e0ea2331271a85abe3b1cca23ec18c5f50d645036cbc1411f7. Full record: antarctica/reports/core11_ocx_32km_i104off.md."
+}

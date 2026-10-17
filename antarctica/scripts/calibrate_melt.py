@@ -1,9 +1,13 @@
 #!/usr/bin/env python3
-r"""ISMIP7 ocean-melt calibration (Burgard quadratic_mixed_slope, local TF).
+r"""ISMIP7 ocean-melt calibration (Burgard quadratic_mixed_slope, local TF):
+the per-basin K the runs used before issue 26 was decided. A run now melts
+with one K and a thermal-forcing offset per basin, the tracked calibration
+(runconfig.MELT_CALIBRATION_DEFAULT, from select_melt_parameters.py), and
+reads a file written here only when ISMIP7_K_PER_BASIN_NPZ names it.
 
 Mesh: the section 4 MAP for the configured ISMIP7_FRICTION, named by
-`icepack2_tools/naming.py` (ISMIP7_LC; ISMIP7_INV_H5 names a different MAP).
-Only the mesh is read from it.
+`icepack2_tools/naming.py` (ISMIP7_LC; ISMIP7_INV_H5 names a different MAP, a
+forward state or a gmsh .msh). Only the mesh is read from it.
 
 Geometry: the same ISMIP7_GEOMETRY_SPACE the forward reads (default dg0).
 
@@ -11,17 +15,18 @@ Geometry: the same ISMIP7_GEOMETRY_SPACE the forward reads (default dg0).
   bed and thickness sampled onto the cells (ISMIP7_RASTER_SAMPLE), the
   surface from flotation, the slope of `forcing.compute_sin_alpha`,
   thermal forcing and salinity at each centroid and its own draft,
-  the callback's `haf <= 0` floating test on cells holding ice (`h > 0`),
+  the forward's melt set `forcing.melt_receiving` (floating, `h > 0`, on a
+  bed below sea level),
   cell areas. A K fitted here is the K the forward applies, by construction.
-  Ice-free cells with `haf <= 0` are left out: the forward cannot melt ice
-  from a cell holding none, and the observations cover real shelves only.
+  Ice-free cells with `haf <= 0` are left out, as the forward leaves them
+  out: the observations cover real shelves only.
 * `cg1` is the nodal calibration the earlier K files came from: BedMachine
   interpolated onto CG1 nodes with its raster surface and `mask == 3` as
   the floating mask, grad(draft) projected onto CG1 and capped at 5e-3,
   lumped-mass areas. With the same cap the DG0 fit reproduces these within
   about 10 percent per basin, 22 percent in basin 7
-  (GEOMETRY_DISCRETIZATION.md, issue #30); the slope convention is what
-  separates them (issue #26).
+  (GEOMETRY_DISCRETIZATION.md); the slope convention is what separates
+  them.
 
 The K file records the geometry and the slope convention it was fitted
 under, and `load_K_per_basin` warns once when a run melts under another.
@@ -47,11 +52,10 @@ Since melt is linear in K, the Term-1 optimum is closed form:
     K* = sum_b M_obs(b) * M_1(b) / sigma(b)^2
        / sum_b   M_1(b)^2          / sigma(b)^2
 
-Output: antarctica/results/calibrated_K_per_basin_<LC>.npz, the path every
-forward and inversion in this checkout reads its K from
-(`runconfig.k_per_basin_candidates`). ISMIP7_K_OUT names another destination,
-so a calibration made as a check leaves later runs melting with what they had;
-a bare filename resolves under antarctica/results/.
+Output: antarctica/results/calibrated_K_per_basin_<LC>.npz. No run searches
+for it: a forward reads it only when ISMIP7_K_PER_BASIN_NPZ names it.
+ISMIP7_K_OUT names another destination; a bare filename resolves under
+antarctica/results/.
 
 Usage:
     ISMIP7_LC=2500 python antarctica/scripts/calibrate_melt.py
@@ -59,7 +63,8 @@ Usage:
         python antarctica/scripts/calibrate_melt.py
 """
 
-import os, sys, csv, glob
+import os, sys, glob
+import hashlib, subprocess
 import numpy as np
 
 _HERE = os.path.dirname(os.path.abspath(__file__))
@@ -78,16 +83,21 @@ import rasterio
 import icepack
 
 from icepack2_tools.forcing import (quadratic_mixed_slope, compute_sin_alpha,
-                                    is_floating, melt_slope, sin_alpha_ant,
+                                    is_floating, melt_receiving,
+                                    melt_slope, sin_alpha_ant,
                                     SIN_ALPHA_ANT_DEFAULT, _K_PERCENTILES,
-                                    _RHO_I)
+                                    _RHO_I, _oi_climatology_path)
 K05, K50, K95 = _K_PERCENTILES
-from icepack2_tools.geometry import sample_to_geometry
-from icepack2_tools.mpi_stats import global_count, global_mean, global_range
+from icepack2_tools.geometry import sample_bed_thickness
+from icepack2_tools.melt_selection import read_melt_table, sample_nearest
+from icepack2_tools.mpi_stats import (global_count, global_mean, global_range,
+                                      global_size)
 from icepack2_tools.naming import map_basename
 from icepack2_tools.runconfig import (friction as _friction, lc as _lc,
                                       geometry_space as _geometry_space,
-                                      obs_data_root, raster_sample)
+                                      file_sha256, obs_data_root,
+                                      raster_sample)
+from mesh_naming import mesh_basename, mesh_stem
 
 DATA_ROOT = os.environ.get(
     "ISMIP7_DATA_ROOT", os.path.join(_PROJECT, "ISMIP7", "AIS")
@@ -100,8 +110,11 @@ INV_H5 = os.environ.get(
     "ISMIP7_INV_H5", os.path.join(MESH_DIR, map_basename(_friction(), LC))
 )
 
-CLIM_TF = os.path.join(DATA_ROOT, "meltMIP", "OI_Climatology_ismip8km_60m_tf_extrap.nc")
-CLIM_SO = os.path.join(DATA_ROOT, "meltMIP", "OI_Climatology_ismip8km_60m_so_extrap.nc")
+# The OI climatology release the fits read, the 2025-09-30 one under meltMIP/,
+# named here so a calibration sidecar records the release these paths hold.
+OI_VERSION = "30_sep"
+CLIM_TF = _oi_climatology_path(DATA_ROOT, "tf", OI_VERSION)
+CLIM_SO = _oi_climatology_path(DATA_ROOT, "so", OI_VERSION)
 IMBIE2_NC = os.path.join(
     DATA_ROOT, "parameterisations", "ocean", "imbie2",
     "basin_numbers_ismip8km_v2.nc",
@@ -159,14 +172,26 @@ def _announce_obs_table():
     )
 
 
+def input_names():
+    r"""The inputs an offsets file records beside its numbers, by basename:
+    the observation table, the IMBIE2 basin grid and the mesh source. A
+    tracked offsets file carries no cluster path (AGENTS.md section 6), and
+    nothing needs one: ``obs_csv`` is only printed, ``inversion`` is read by
+    nothing, and ``forcing.imbie2_basin_path`` finds the grid ``imbie2_nc``
+    names under ``ISMIP7_DATA_ROOT``. calibrate_deltaT.py and
+    select_melt_parameters.py both write these entries from here."""
+    return {"obs_csv": os.path.basename(OBS_CSV),
+            "imbie2_nc": os.path.basename(IMBIE2_NC),
+            "inversion": os.path.basename(INV_H5)}
+
+
 def _k_out():
     r"""Where the calibration is written.
 
-    The default is the first path `runconfig.k_per_basin_candidates` searches,
-    so every later forward and inversion in this checkout melts with what is
-    written there. ISMIP7_K_OUT names another destination for a calibration
-    made as a check. Like ISMIP7_MAP_OUT, a bare filename resolves under the
-    default directory; no run searches that directory for any other name.
+    The default is ``antarctica/results/calibrated_K_per_basin_<LC>.npz``,
+    which a forward reads only when ISMIP7_K_PER_BASIN_NPZ names it.
+    ISMIP7_K_OUT names another destination. Like ISMIP7_MAP_OUT, a bare
+    filename resolves under the default directory.
     """
     out_dir = os.path.join(_PROJECT, "antarctica", "results")
     named = os.environ.get("ISMIP7_K_OUT")
@@ -206,10 +231,43 @@ RHO_RATIO = 917.0 / 1024.0
 
 
 def _load_mesh():
+    r"""The mesh ``INV_H5`` names: a MAP or forward-state checkpoint, or a
+    gmsh ``.msh``, which serves where two builds of one mesh name differ and
+    no checkpoint on the build in question exists yet (Rice's build of the
+    production mesh against IU's)."""
     PETSc.Sys.Print(f"  Loading mesh from: {INV_H5}")
+    if INV_H5.endswith(".msh"):
+        return fd.Mesh(INV_H5)
     with CheckpointFile(INV_H5, "r") as chk:
         mesh = chk.load_mesh()
     return mesh
+
+
+def mesh_name():
+    r"""The name of the mesh ``INV_H5`` holds, without ``.msh``: the file
+    itself, or the ``mesh_basename`` a MAP or forward state records, rebuilt
+    from its ``lc_coarse``, ``lc`` and ``buffer_m`` where it predates that
+    attribute, as ``simulation.py`` names the mesh a run starts from. It is
+    the ``mesh`` a calibration sidecar records and ``preflight.py`` compares
+    with a core's mesh. A checkpoint recording none of these is refused, so a
+    fit stops before it reads any data. Collective, like opening the
+    checkpoint."""
+    if INV_H5.endswith(".msh"):
+        return mesh_stem(INV_H5)
+    with CheckpointFile(INV_H5, "r") as chk:
+        def attr(name, cast):
+            return cast(chk.get_attr("/", name)) if chk.has_attr("/", name) else None
+        named = attr("mesh_basename", str)
+        lc_coarse, lc, buffer = (attr("lc_coarse", int), attr("lc", int),
+                                 attr("buffer_m", float))
+    if not named and lc_coarse is not None and buffer is not None:
+        named = mesh_basename(lc_coarse, lc if lc is not None else LC, buffer)
+    if not named:
+        raise ValueError(
+            f"{INV_H5} records neither mesh_basename nor the lc_coarse and "
+            f"buffer_m to rebuild it, so a fit on it cannot record the mesh "
+            f"it was fitted on. Name the mesh's .msh with ISMIP7_INV_H5.")
+    return mesh_stem(named)
 
 
 def _bedmachine_path():
@@ -233,66 +291,11 @@ def _grid_interp(nc_path, var, mx, my, draft=None):
     r"""Nearest-neighbour interpolation onto mesh nodes via scipy.
 
     Loads the field once into memory (avoids xarray.interp memory blowups
-    we saw with the 8km mesh) and uses RegularGridInterpolator with
-    method='nearest'.
+    we saw with the 8km mesh); NaN in coverage gaps and points off the grid
+    read as 0, as the forward reads the climatology
+    (``melt_selection.sample_nearest``, which can keep them NaN instead).
     """
-    import xarray as xr
-    from scipy.interpolate import RegularGridInterpolator
-
-    ds = xr.open_dataset(nc_path)
-    da = ds[var]
-    # Sort axes ascending (RegularGridInterpolator requirement)
-    x_arr = np.asarray(ds["x"].values)
-    y_arr = np.asarray(ds["y"].values)
-    if x_arr[0] > x_arr[-1]:
-        x_arr = x_arr[::-1]; flip_x = True
-    else:
-        flip_x = False
-    if y_arr[0] > y_arr[-1]:
-        y_arr = y_arr[::-1]; flip_y = True
-    else:
-        flip_y = False
-
-    zdim = None
-    for d in da.dims:
-        if d.lower() in ("z", "depth", "lev"):
-            zdim = d; break
-
-    if zdim is not None:
-        z_arr = np.asarray(ds[zdim].values)
-        if z_arr[0] > z_arr[-1]:
-            z_arr = z_arr[::-1]; flip_z = True
-        else:
-            flip_z = False
-        # Order axes (z, y, x) and load
-        data = da.transpose(zdim, "y", "x").values.astype(np.float32)
-        if flip_z: data = data[::-1, :, :]
-        if flip_y: data = data[:, ::-1, :]
-        if flip_x: data = data[:, :, ::-1]
-        # Replace NaNs with 0 so nearest-neighbour returns 0 in coverage gaps
-        data = np.nan_to_num(data, nan=0.0)
-        interp = RegularGridInterpolator(
-            (z_arr, y_arr, x_arr), data,
-            method="nearest", bounds_error=False, fill_value=0.0,
-        )
-        # Clip draft into z range
-        z_clipped = np.clip(np.asarray(draft), z_arr[0], z_arr[-1])
-        pts = np.column_stack([z_clipped, my, mx])
-        out = interp(pts)
-    else:
-        data = da.transpose("y", "x").values.astype(np.float32)
-        if flip_y: data = data[::-1, :]
-        if flip_x: data = data[:, ::-1]
-        data = np.nan_to_num(data, nan=0.0)
-        interp = RegularGridInterpolator(
-            (y_arr, x_arr), data,
-            method="nearest", bounds_error=False, fill_value=0.0,
-        )
-        pts = np.column_stack([my, mx])
-        out = interp(pts)
-
-    ds.close()
-    return out
+    return sample_nearest(nc_path, var, mx, my, draft=draft, fill=0.0)
 
 
 def _compute_sin_alpha(mesh, h, s):
@@ -328,32 +331,48 @@ def calibration_geometry(mesh):
     }
 
 
-def forward_geometry(mesh):
-    r"""The melt inputs on DG0 cells, as the forward melts them: bed and
-    thickness sampled onto the cells (``ISMIP7_RASTER_SAMPLE``), the surface
-    from flotation as simulation.py builds it, the cell slope of
-    ``forcing.compute_sin_alpha``, the forcing at each cell centroid and its
-    own draft, the callback's ``haf <= 0`` floating test and cell areas.
+def forward_cells(mesh):
+    r"""The forward's cold-start geometry on the DG0 cells of ``mesh``, as
+    ``simulation.setup_model`` builds it for the budd and regularized_coulomb
+    laws (no thickness floor): bed and thickness sampled onto the cells
+    (``ISMIP7_RASTER_SAMPLE``) and the surface from flotation. The one
+    builder the calibrations and ``check_melt_bound.py`` share, so the cells
+    a fit sums over and the cells a check melts are the same.
 
-    Floating is ``haf <= 0`` on cells with ``h > 0``. An ice-free ocean cell
-    also has ``haf <= 0``, but the forward cannot remove ice from a cell
-    holding none and the observations cover real shelves only, so it is left
-    out of the fit."""
+    Returns ``Q``, ``Q_g`` and ``V``, the Functions ``b``, ``h`` and ``s``,
+    and the centroids ``x`` and ``y``."""
     Q = FunctionSpace(mesh, "CG", 1)
     Q_g = FunctionSpace(mesh, "DG", 0)
     bm = _bedmachine_path()
     PETSc.Sys.Print(f"  Sampling BedMachine onto DG0 cells ({raster_sample()}): {bm}")
-    b_dg = sample_to_geometry(rasterio.open(f"netcdf:{bm}:bed"), Q_g, Q,
-                              method=raster_sample())
-    h_dg = sample_to_geometry(rasterio.open(f"netcdf:{bm}:thickness"), Q_g, Q,
-                              method=raster_sample())
+    # as the forward's cold start does, the front cells too under a front
+    # sampling (geometry.front_cells, issue #167)
+    b_dg, h_dg, front_counts = sample_bed_thickness(bm, Q_g, Q, method=raster_sample())
+    if front_counts is not None:
+        PETSc.Sys.Print(f"  Front cells ({raster_sample()}): {front_counts}")
     s_dg = Function(Q_g).interpolate(
         fd.max_value(b_dg + h_dg, (1.0 - RHO_RATIO) * h_dg))
     xy = Function(VectorFunctionSpace(mesh, "DG", 0)).interpolate(
         fd.SpatialCoordinate(mesh)).dat.data_ro
-    b_np, h_np, s_np = b_dg.dat.data_ro, h_dg.dat.data_ro, s_dg.dat.data_ro
+    return {"Q": Q, "Q_g": Q_g, "V": VectorFunctionSpace(mesh, "CG", 1),
+            "b": b_dg, "h": h_dg, "s": s_dg,
+            "x": xy[:, 0].copy(), "y": xy[:, 1].copy()}
+
+
+def forward_geometry(mesh):
+    r"""The melt inputs on DG0 cells, as the forward melts them: the cells of
+    `forward_cells`, the cell slope of ``forcing.compute_sin_alpha``, the
+    forcing at each cell centroid and its own draft, the forward's melt set
+    and cell areas.
+
+    The melt set is ``forcing.melt_receiving``, ``haf <= 0`` on cells with
+    ``h > 0`` on a bed below sea level, the one the forward's callbacks melt. An ice-free cell also has
+    ``haf <= 0``; the observations cover real shelves only, so it is left out
+    of the fit, and the forward leaves it out of the melt."""
+    c = forward_cells(mesh)
+    b_np, h_np, s_np = c["b"].dat.data_ro, c["h"].dat.data_ro, c["s"].dat.data_ro
     afloat = is_floating(s_np, b_np)
-    floating = afloat & (h_np > 0)
+    floating = melt_receiving(s_np, b_np, h_np)
     comm = mesh.comm
     h_lo, h_hi = global_range(h_np, comm)
     PETSc.Sys.Print(f"  BedMachine on cells: h min={h_lo:.1f}  "
@@ -363,15 +382,112 @@ def forward_geometry(mesh):
                     f"{global_count(afloat & ~(h_np > 0), comm)} ice-free "
                     f"haf <= 0 cells left out")
     return {
-        "x": xy[:, 0],
-        "y": xy[:, 1],
+        "x": c["x"],
+        "y": c["y"],
         "draft": np.minimum(s_np - h_np, 0.0),
-        "sin_a": compute_sin_alpha({"Q": Q, "V": VectorFunctionSpace(mesh, "CG", 1),
-                                    "Q_g": Q_g, "h": h_dg, "s": s_dg}),
+        "sin_a": compute_sin_alpha({"Q": c["Q"], "V": c["V"], "Q_g": c["Q_g"],
+                                    "h": c["h"], "s": c["s"]}),
         "floating": floating,
-        "area": assemble(fd.TestFunction(Q_g) * dx).dat.data_ro,
+        "area": assemble(fd.TestFunction(c["Q_g"]) * dx).dat.data_ro,
         "dofs": "cells",
     }
+
+
+def _file_digests(path):
+    r"""sha256 and md5 of a file in one read (the MAP releases publish md5)."""
+    sha, md5 = hashlib.sha256(), hashlib.md5()
+    with open(path, "rb") as f:
+        for block in iter(lambda: f.read(1 << 20), b""):
+            sha.update(block)
+            md5.update(block)
+    return sha.hexdigest(), md5.hexdigest()
+
+
+def _code_version():
+    r"""The commit of this checkout, with the tracked files it has modified
+    when there are any, or ``unknown`` where git cannot say. Untracked files,
+    a fit's own output among them, do not count."""
+    def git(*args):
+        return subprocess.run(["git", "-C", _PROJECT, *args], capture_output=True,
+                              text=True, check=True).stdout
+    try:
+        sha = git("rev-parse", "HEAD").strip()
+        modified = [line[3:] for line in
+                    git("status", "--porcelain", "--untracked-files=no").splitlines()]
+    except (OSError, subprocess.CalledProcessError):
+        return {"code": "unknown"}
+    return {"code": sha, **({"code_modified": modified} if modified else {})}
+
+
+def calibration_record(mesh, g, name, oi_version=OI_VERSION):
+    r"""What a melt calibration's sidecar records about the fit that wrote it:
+    the mesh ``name`` (`mesh_name`) and its counts, the settings the npz also
+    records, every input by name and sha256, and the site, job and commit.
+    ``g`` is what `forward_geometry` returned for ``mesh``, and
+    ``oi_version`` the climatology release the fit read
+    (select_melt_parameters.py reads ISMIP7_OI_VERSION's). The caller adds
+    each K's fields and writes the sidecar with
+    ``runconfig.write_melt_calibration_sidecar``.
+
+    ``site`` is ``ISMIP7_SITE`` as ``submit.sh`` exports it, and None for a
+    fit started by hand: a workstation's hostname can name a person.
+
+    Collective: every rank reduces the counts; rank 0 alone hashes the inputs
+    and asks git, then broadcasts the record, or the error that stopped it,
+    so every rank returns the same record or raises together."""
+    comm = mesh.comm
+    counts = {"vertices": global_size(mesh.coordinates),
+              "cells": comm.allreduce(int(mesh.cell_set.size)),
+              "floating_cells": global_count(g["floating"], comm)}
+
+    def on_rank_0():
+        sha, md5 = _file_digests(INV_H5)
+        _, M_obs, _ = _load_obs()
+        if MELT_SLOPE == "ant":
+            slope = {"sin_alpha_ant": float(sin_alpha_ant())}
+        else:
+            # No cap, the DG0 default, is infinite, which JSON cannot hold.
+            slope = {"sin_alpha_cap": (float(SIN_ALPHA_CAP)
+                                       if np.isfinite(SIN_ALPHA_CAP) else None)}
+        clim = {v: _oi_climatology_path(DATA_ROOT, v, oi_version)
+                for v in ("tf", "so")}
+        return {
+            "site": os.environ.get("ISMIP7_SITE") or None,
+            "partition": os.environ.get("SLURM_JOB_PARTITION") or None,
+            "ranks": comm.size,
+            "job": os.environ.get("SLURM_JOB_ID") or None,
+            **_code_version(),
+            "mesh": name,
+            **counts,
+            "mesh_file": {"name": os.path.basename(INV_H5), "md5": md5,
+                          "sha256": sha},
+            "lc": int(LC),
+            "geometry_space": GEOMETRY,
+            "raster_sample": raster_sample(),
+            "melt_slope": MELT_SLOPE,
+            **slope,
+            "oi_version": oi_version,
+            "rho_i": float(_RHO_I),
+            "obs_table": {"name": os.path.basename(OBS_CSV),
+                          "sha256": file_sha256(OBS_CSV),
+                          "total_gtyr": round(float(M_obs.sum()), 3)},
+            "bedmachine": os.path.basename(_bedmachine_path()),
+            "inputs_sha256": {key: [os.path.basename(path), file_sha256(path)]
+                              for key, path in (("clim_tf", clim["tf"]),
+                                                ("clim_so", clim["so"]),
+                                                ("imbie2", IMBIE2_NC))},
+        }
+
+    record = None
+    if comm.rank == 0:
+        try:
+            record = on_rank_0()
+        except Exception as e:  # raised on every rank below
+            record = e
+    record = comm.bcast(record, root=0)
+    if isinstance(record, Exception):
+        raise record
+    return record
 
 
 def fit_per_basin_K(basin, melt_1, area, bids_obs, M_obs, sigma_obs):
@@ -394,36 +510,11 @@ def fit_per_basin_K(basin, melt_1, area, bids_obs, M_obs, sigma_obs):
 
 
 def _load_obs():
-    r"""Basin ids, observed melt and its uncertainty, both in Gt/yr.
-
-    The two published tables differ in width: the Paolo+Adusumilli one carries
-    area and per-area columns between melt and its uncertainty, the combined
-    Paolo+Davison+Adusumilli one carries melt and uncertainty alone. Index 3 is
-    the uncertainty in the first and past the end of the second, and any index
-    chosen for one width reads the wrong quantity or nothing at the other.
-    Columns are located by header name so the reader takes either.
+    r"""Basin ids, observed melt and its uncertainty, both in Gt/yr, from
+    the table ``_obs_csv`` resolved (``melt_selection.read_melt_table``
+    locates the columns by header name, so either published layout reads).
     """
-    bids, mobs, sobs = [], [], []
-    with open(OBS_CSV) as f:
-        r = csv.reader(f)
-        header = next(r)
-
-        def column(want):
-            for i, name in enumerate(header):
-                if name.strip().lower() == want:
-                    return i
-            raise ValueError(
-                f"{OBS_CSV}: no {want!r} column in header {header}")
-
-        i_m = column("bmr (gt/yr)")
-        i_s = column("bmr uncert (gt/yr)")
-        for row in r:
-            if not row or not row[i_m]:
-                continue
-            bids.append(int(row[0]))
-            mobs.append(float(row[i_m]))
-            sobs.append(float(row[i_s]))
-    return np.array(bids), np.array(mobs), np.array(sobs)
+    return read_melt_table(OBS_CSV)
 
 
 def main():
@@ -442,8 +533,10 @@ def main():
                     f"over {len(bids_obs)} basins")
 
     mesh = _load_mesh()
-    PETSc.Sys.Print(f"  Mesh: {mesh.num_vertices()} vertices, "
-                    f"{mesh.num_cells()} cells")
+    # num_vertices()/num_cells() count this rank's plex, halo included; the
+    # coordinate dofs and the owned cell set are reduced to global totals.
+    PETSc.Sys.Print(f"  Mesh: {global_size(mesh.coordinates)} vertices, "
+                    f"{mesh.comm.allreduce(mesh.cell_set.size)} cells")
     how = ("the forward's cell by cell melt path" if GEOMETRY == "dg0"
            else "CG1 nodes")
     PETSc.Sys.Print(f"  Geometry: {GEOMETRY} ({how})")

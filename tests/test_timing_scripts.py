@@ -38,10 +38,14 @@ sys.exit(int(os.environ.get("FAKE_RC", "0")))
 '''
 
 STUBS = {
-    # `srun -n N python -u script args...`: record N, hand the rest to the driver.
+    # `srun [kill options] -n N python -u script args...`: record the line,
+    # hand the script's arguments to the driver. `srun --help` is the launcher
+    # asking which kill options this Slurm has.
     "srun": ('#!/bin/bash\n'
+             '[ "${1:-}" = --help ] && exit 0\n'
              'echo "SRUN $*" >> "$FAKE_ENV_DUMP"\n'
-             'shift 2; shift 2\n'
+             'while [ "${1:-python}" != python ]; do shift; done\n'
+             'shift 2\n'
              'exec "$FAKE_PYTHON" "$FAKE_DRIVER" "$@"\n'),
     "scontrol": "#!/bin/bash\nexit 0\n",
     "module": "#!/bin/bash\nexit 0\n",
@@ -92,7 +96,7 @@ def test_a_lane_runs_in_the_site_s_environment_with_only_its_own_model_settings(
     proc, seen = run_script(sandbox, "timing_transient.script",
                             ISMIP7_TIMING_STATUS=str(status), ISMIP7_LC="500")
     assert proc.returncode == 0, proc.stderr
-    assert "SRUN -n 16 python -u scripts/run_timing.py" in seen
+    assert "SRUN --kill-on-bad-exit=1 -n 16 python -u scripts/run_timing.py" in seen
     assert "FAKE_VENV_ACTIVE=1" in seen
     assert "OMP_NUM_THREADS=1" in seen and "OPENBLAS_NUM_THREADS=1" in seen
     assert "ISMIP7_LC=500" in seen
@@ -194,8 +198,8 @@ def test_prepare_repacks_on_one_rank_through_the_same_launcher(sandbox):
         ISMIP7_TIMING_CACHE_PRISTINE=str(cache / "state.prepare.h5"))
     assert proc.returncode == 0, proc.stderr
     launches = [line for line in seen if line.startswith("SRUN ")]
-    assert launches[0] == "SRUN -n 16 python -u scripts/prepare_timing_cache.py"
-    assert launches[1].startswith("SRUN -n 1 python -u scripts/redistribute_checkpoint.py --input ")
+    assert launches[0] == "SRUN --kill-on-bad-exit=1 -n 16 python -u scripts/prepare_timing_cache.py"
+    assert launches[1].startswith("SRUN --kill-on-bad-exit=1 -n 1 python -u scripts/redistribute_checkpoint.py --input ")
     assert status.read_text().startswith("finished phase=published exit_code=0 ")
     assert (cache / "state.prepare.h5").exists()
 
@@ -216,7 +220,6 @@ def test_no_job_script_names_a_cluster_a_person_or_a_resource(name):
 def test_the_score_script_scores_a_map_and_then_its_transferred_state(sandbox):
     r"""map_check_score.script: score_map.py --json on the MAP's own mesh,
     --restart for a prepared cache, the census only when asked for."""
-    root = sandbox / "repo" / "antarctica"
     map_path = sandbox / "map.h5"
     map_path.write_text("map\n")
     status = sandbox / "status.txt"
@@ -226,7 +229,7 @@ def test_the_score_script_scores_a_map_and_then_its_transferred_state(sandbox):
                             ISMIP7_MAP_CHECK_STATUS=str(status), ISMIP7_MESH="checkpoint",
                             ISMIP7_FRICTION="regularized_coulomb")
     assert proc.returncode == 0, proc.stderr
-    assert f"SRUN -n 16 python -u scripts/score_map.py --json {out} {map_path}" in seen
+    assert f"SRUN --kill-on-bad-exit=1 -n 16 python -u scripts/score_map.py --json {out} {map_path}" in seen
     assert not any("check_budd_map.py" in line for line in seen)
     assert "ISMIP7_MESH=checkpoint" in seen and "ISMIP7_FRICTION=regularized_coulomb" in seen
     assert status.read_text().startswith("finished phase=score exit_code=0 job_id=777 ")
@@ -238,9 +241,9 @@ def test_the_score_script_scores_a_map_and_then_its_transferred_state(sandbox):
                             ISMIP7_MAP_CHECK_RESTART=str(sandbox / "cache.h5"),
                             ISMIP7_MAP_CHECK_CENSUS=str(census), ISMIP7_FRICTION="budd")
     assert proc.returncode == 0, proc.stderr
-    assert (f"SRUN -n 16 python -u scripts/score_map.py --json {out} "
+    assert (f"SRUN --kill-on-bad-exit=1 -n 16 python -u scripts/score_map.py --json {out} "
             f"--restart {sandbox / 'cache.h5'} {map_path}") in seen
-    assert f"SRUN -n 16 python -u scripts/check_budd_map.py {map_path}" in seen
+    assert f"SRUN --kill-on-bad-exit=1 -n 16 python -u scripts/check_budd_map.py {map_path}" in seen
     assert "ISMIP7_CHECK_FRICTION=budd" in seen
     assert census.is_file()
     assert status.read_text().startswith("finished phase=score exit_code=0 ")
@@ -276,7 +279,7 @@ def test_the_audit_script_collects_every_part_whatever_each_returns(sandbox):
     payload = json.loads(out.read_text())
     assert set(payload) == {"track", "overlay", "region_budget"}
     assert payload["track"]["native"]["exit_code"] is not None
-    assert f"SRUN -n 16 python -u scripts/region_budget.py {sandbox / 'native_final.h5'} --csv {sandbox / 'native.csv'}" in seen
+    assert f"SRUN --kill-on-bad-exit=1 -n 16 python -u scripts/region_budget.py {sandbox / 'native_final.h5'} --csv {sandbox / 'native.csv'}" in seen
     assert "ISMIP7_LC=2000" in seen and "ISMIP7_LC=1000" in seen and "ISMIP7_MESH=checkpoint" in seen
     assert status.read_text().startswith("finished phase=collect exit_code=0 ")
 
@@ -303,18 +306,166 @@ def test_the_melt_bound_job_ends_with_the_check_s_own_status(sandbox):
     assert f"ISMIP7_INV_H5={state}" in seen and "OMP_NUM_THREADS=1" in seen
     assert "check_melt_bound exit status: 1" in proc.stdout
 
-    # with no override the check resolves results/calibrated_K_per_basin_<lc>.npz itself
-    proc, seen = run_script(sandbox, "check_melt_bound.script", ISMIP7_LC="1000",
+    # with no override the check reads the tracked calibration itself, and an
+    # offsets file is passed on the same way a legacy K is
+    proc, seen = run_script(sandbox, "check_melt_bound.script",
                             ISMIP7_INV_H5=str(state), ISMIP7_OCX_OCEAN="warm")
     assert proc.returncode == 0, proc.stderr
     assert [ln for ln in seen if ln.startswith("ARGV")][-1] == "ARGV --ocx warm"
+    proc, seen = run_script(sandbox, "check_melt_bound.script",
+                            ISMIP7_INV_H5=str(state), ISMIP7_OCX_OCEAN="none",
+                            ISMIP7_DELTAT_PER_BASIN_NPZ=str(k_npz))
+    assert proc.returncode == 0, proc.stderr
+    assert [ln for ln in seen if ln.startswith("ARGV")][-1] == f"ARGV --npz {k_npz}"
+    # with neither, the check runs on its defaults; site_core.sh's set -u must
+    # not trip over the empty argument list (bash before 4.4 did)
+    proc, seen = run_script(sandbox, "check_melt_bound.script",
+                            ISMIP7_INV_H5=str(state), ISMIP7_OCX_OCEAN="none")
+    assert proc.returncode == 0, proc.stderr
+    assert [ln for ln in seen if ln.startswith("ARGV")][-1].rstrip() == "ARGV"
 
-    # a missing mesh source or K file stops the job before the check starts
+    # a missing mesh source or calibration, or two calibrations, stops the
+    # job before the check starts
     n_before = len(seen)
     proc, seen = run_script(sandbox, "check_melt_bound.script", ISMIP7_LC="1000")
     assert proc.returncode != 0 and "ISMIP7_INV_H5 is required" in proc.stderr
-    proc, seen = run_script(sandbox, "check_melt_bound.script", ISMIP7_LC="1000",
+    proc, seen = run_script(sandbox, "check_melt_bound.script",
                             ISMIP7_INV_H5=str(state),
                             ISMIP7_K_PER_BASIN_NPZ=str(sandbox / "absent.npz"))
-    assert proc.returncode == 2 and "K file not found" in proc.stderr
+    assert proc.returncode == 2 and "melt calibration not found" in proc.stderr
+    proc, seen = run_script(sandbox, "check_melt_bound.script",
+                            ISMIP7_INV_H5=str(state),
+                            ISMIP7_K_PER_BASIN_NPZ=str(k_npz),
+                            ISMIP7_DELTAT_PER_BASIN_NPZ=str(k_npz))
+    assert proc.returncode == 2 and "both set" in proc.stderr
     assert len(seen) == n_before
+
+
+def test_the_deltaT_refit_job_passes_its_K_and_output_and_needs_both_inputs(sandbox):
+    r"""calibrate_deltaT.script: one serial fit at the K it is given, written
+    under an absolute DELTAT_OUT; the mesh source, ISMIP7_LC and the output
+    are required before the fit starts."""
+    stub = sandbox / "bin" / "python"
+    stub.write_text('#!/bin/bash\n[ "$1" = -u ] && shift\nshift\n'
+                    'exec "$FAKE_PYTHON" "$FAKE_DRIVER" "$@"\n')
+    stub.chmod(0o755)
+    mesh = sandbox / "rice_build.msh"
+    mesh.write_text("")
+    out = sandbox / "refit"
+
+    proc, seen = run_script(sandbox, "calibrate_deltaT.script", ISMIP7_LC="1000",
+                            ISMIP7_INV_H5=str(mesh), DELTAT_OUT=str(out),
+                            DELTAT_K="6.5e-5")
+    assert proc.returncode == 0, proc.stderr
+    assert [ln for ln in seen if ln.startswith("ARGV")][-1] == (
+        f"ARGV --out {out} --K 6.5e-5")
+    assert "calibrate_deltaT exit status: 0" in proc.stdout
+    # several K, and none, which leaves the script's own default
+    proc, seen = run_script(sandbox, "calibrate_deltaT.script", ISMIP7_LC="1000",
+                            ISMIP7_INV_H5=str(mesh), DELTAT_OUT=str(out),
+                            DELTAT_K="4.75e-5 8.5e-5")
+    assert [ln for ln in seen if ln.startswith("ARGV")][-1] == (
+        f"ARGV --out {out} --K 4.75e-5 8.5e-5")
+    proc, seen = run_script(sandbox, "calibrate_deltaT.script", ISMIP7_LC="1000",
+                            ISMIP7_INV_H5=str(mesh), DELTAT_OUT=str(out))
+    assert [ln for ln in seen if ln.startswith("ARGV")][-1] == f"ARGV --out {out}"
+
+    n_before = len(seen)
+    proc, _ = run_script(sandbox, "calibrate_deltaT.script", ISMIP7_LC="1000",
+                         DELTAT_OUT=str(out))
+    assert proc.returncode != 0 and "ISMIP7_INV_H5 is required" in proc.stderr
+    proc, _ = run_script(sandbox, "calibrate_deltaT.script", ISMIP7_LC="1000",
+                         ISMIP7_INV_H5=str(mesh), DELTAT_OUT="refit")
+    assert proc.returncode == 2 and "must be an absolute directory" in proc.stderr
+    proc, seen = run_script(sandbox, "calibrate_deltaT.script",
+                            ISMIP7_INV_H5=str(mesh), DELTAT_OUT=str(out))
+    assert proc.returncode != 0 and "ISMIP7_LC is required" in proc.stderr
+    assert len(seen) == n_before
+
+
+def test_the_scalar_processing_job_keeps_the_tool_clear_and_ends_with_the_verdict(sandbox):
+    r"""scalar_processing.script: the organisers' tool runs from its own venv
+    with the Firedrake environment's PYTHONPATH scrubbed; it reads params.nc
+    from the tree, as the organisers' run of it will, and the job stops
+    without one; a run that is its own reference has to name its stamped year
+    and a paired run must not; the job ends with the tool's status when that
+    fails and the comparison's otherwise."""
+    venv = sandbox / "tools" / "bin"
+    venv.mkdir(parents=True)
+    fake = ('#!/bin/bash\n'
+            'echo "$(basename "$0") $* PYTHONPATH=${PYTHONPATH-unset}" >> "$FAKE_ENV_DUMP"\n'
+            'case "$(basename "$0")" in\n'
+            '    ismip7-scalars) [ "$1" = --version ] && { echo "ismip7-scalars 0.1.0"; exit 0; }\n'
+            '                    exit "${FAKE_TOOL_RC:-0}" ;;\n'
+            '    python) echo 0.5.1 ;;\n'
+            'esac\n')
+    for name in ("ismip7-scalars", "ismip7-scalars-set-params", "python"):
+        (venv / name).write_text(fake)
+        (venv / name).chmod(0o755)
+    # the comparison runs under the job's own python: drop `-u` and the script
+    # path, hand the rest to the driver
+    stub = sandbox / "bin" / "python"
+    stub.write_text('#!/bin/bash\n[ "$1" = -u ] && shift\nshift\n'
+                    'exec "$FAKE_PYTHON" "$FAKE_DRIVER" "$@"\n')
+    stub.chmod(0o755)
+    tree = sandbox / "tree"
+    (tree / "AIS" / "RICE" / "icepack2" / "CORE" / "C007").mkdir(parents=True)
+    params = tree / "AIS" / "RICE" / "icepack2" / "params.nc"
+    params.write_text("")
+    grids = sandbox / "grids"
+    grids.mkdir()
+    (grids / "af2_AIS_08000m_v1.nc").write_text("")
+    native = sandbox / "run_ismip7_scalars.csv"
+    native.write_text("")
+    env = dict(ISMIP7_TOOLS_VENV=str(sandbox / "tools"), ISMIP7_SCALAR_TREE=str(tree),
+               ISMIP7_SCALAR_EXPERIMENT="ssp585", ISMIP7_SCALAR_CONFIGID="C007",
+               ISMIP7_SCALAR_OUT=str(sandbox / "out"), ISMIP7_SCALAR_DATAPATH=str(grids),
+               PYTHONPATH="/firedrake/site-packages")
+
+    proc, seen = run_script(sandbox, "scalar_processing.script", **env)
+    assert proc.returncode != 0 and "ISMIP7_SCALAR_REFYEAR is required" in proc.stderr
+    proc, seen = run_script(sandbox, "scalar_processing.script", ISMIP7_SCALAR_HIST="historical",
+                            ISMIP7_SCALAR_HIST_CONFIGID="C001", ISMIP7_SCALAR_REFYEAR="2016", **env)
+    assert proc.returncode == 2 and "refused" in proc.stderr
+    assert not [ln for ln in seen if ln.startswith("ismip7-scalars --region")]
+
+    # exit 1 is the comparison's verdict; the job has to end with it
+    proc, seen = run_script(sandbox, "scalar_processing.script", ISMIP7_SCALAR_REFYEAR="2016",
+                            ISMIP7_SCALAR_NATIVE_CSV=str(native), FAKE_RC="1", **env)
+    assert proc.returncode == 1, proc.stderr
+    tool = next(ln for ln in seen if ln.startswith("ismip7-scalars --region"))
+    assert "--hist ssp585 --hist-configid C007 --refyear 2016" in tool
+    assert f"--modelpath {tree}/AIS --outpath {sandbox}/out/tool" in tool
+    assert "--params-path" not in tool and tool.endswith("PYTHONPATH=unset")
+    assert not [ln for ln in seen if ln.startswith("ismip7-scalars-set-params")]
+    argv = next(ln for ln in seen if ln.startswith("ARGV"))
+    assert f"--submission {tree}/AIS/RICE/icepack2/CORE/C007" in argv
+    assert f"--params {params}" in argv
+    assert "--refyear 2016" in argv and f"--native-csv {native}" in argv
+    assert "af2_AIS_08000m_v1.nc sha256" in argv and "--native-af2" not in argv
+    assert "compare_scalars exit status: 1" in proc.stdout
+
+    # a paired run hands the comparison the historical's folder, and a run
+    # whose native scalars carry the area factor says so
+    proc, seen = run_script(sandbox, "scalar_processing.script", ISMIP7_SCALAR_HIST="historical",
+                            ISMIP7_SCALAR_HIST_CONFIGID="C001", ISMIP7_SCALAR_NATIVE_AF2="1", **env)
+    assert proc.returncode == 0, proc.stderr
+    argv = [ln for ln in seen if ln.startswith("ARGV")][-1]
+    assert f"--hist-submission {tree}/AIS/RICE/icepack2/CORE/C001" in argv
+    assert "--native-af2" in argv
+
+    # a failed tool ends the job with its status and no comparison
+    n = len([ln for ln in seen if ln.startswith("ARGV")])
+    proc, seen = run_script(sandbox, "scalar_processing.script", ISMIP7_SCALAR_REFYEAR="2016",
+                            FAKE_TOOL_RC="2", **env)
+    assert proc.returncode == 2 and "ismip7-scalars exit status: 2" in proc.stdout
+    assert len([ln for ln in seen if ln.startswith("ARGV")]) == n
+
+    # a tree without params.nc stops the job before the tool runs, and says
+    # how to write it
+    params.unlink()
+    n = len([ln for ln in seen if ln.startswith("ismip7-scalars --region")])
+    proc, seen = run_script(sandbox, "scalar_processing.script", ISMIP7_SCALAR_REFYEAR="2016", **env)
+    assert proc.returncode == 2 and f"not found: {params}" in proc.stderr
+    assert "ismip7-scalars-set-params --region AIS --group RICE" in proc.stderr
+    assert len([ln for ln in seen if ln.startswith("ismip7-scalars --region")]) == n

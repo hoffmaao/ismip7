@@ -33,21 +33,27 @@ import os
 import sys
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-from icepack2_tools.runconfig import apparent_mb_mode, auto_resume, ismip7_output
+from icepack2_tools.runconfig import (
+    apparent_mb_mode, auto_resume, ismip7_output, smb_elevation_feedback,
+)
 from icepack2_tools.solverconfig import diagnostic_solver_mode
 
 try:
     resume = auto_resume()
     amb = apparent_mb_mode()
     out = ismip7_output()
+    feedback = smb_elevation_feedback()
 except ValueError as exc:
     print(f"driver: {exc}")
     sys.exit(2)
 print(f"driver: auto_resume={resume} apparent_mb={amb} ismip7_output={out}")
+print(f"driver: smb_elevation_feedback={feedback}")
 print(f"driver: solver={diagnostic_solver_mode()} dt={os.environ.get('ISMIP7_DT')}")
 # srun takes SLURM_EXPORT_ENV as its own --export, so a list there would
 # reach the real driver's environment through the launcher.
 print(f"driver: srun export list={os.environ.get('SLURM_EXPORT_ENV', 'none')}")
+# the MPI-IO component the launcher selects (site_core.sh, ismip7_mpirun)
+print(f"driver: mpi io={os.environ.get('OMPI_MCA_io', 'unset')}")
 
 start = os.environ.get("FAKE_START_YEAR", "")
 if start:
@@ -75,8 +81,9 @@ print(f"Saved: {path}")
 
 STUBS = {
     # Slurm's launcher: run the stub driver instead of the real one, with the
-    # environment the runner handed it.
-    "srun": '#!/bin/bash\nexec "$FAKE_PYTHON" "$FAKE_DRIVER"\n',
+    # environment the runner handed it. `srun --help` is the launcher asking
+    # which kill options this Slurm has.
+    "srun": '#!/bin/bash\n[ "${1:-}" = --help ] && exit 0\nexec "$FAKE_PYTHON" "$FAKE_DRIVER"\n',
     # Record the resubmit so the test can see whether one happened and what it
     # carried. --export=ALL means the successor inherits this environment, so
     # dump the ISMIP7 part of it too.
@@ -288,6 +295,31 @@ def test_unset_output_writes_the_submission(sandbox):
     assert "driver: auto_resume=True apparent_mb=balance ismip7_output=True" in log
 
 
+def test_unset_smb_feedback_is_on_in_the_driver(sandbox):
+    r"""The runner exports nothing for the feedback; the driver's own default
+    (runconfig) turns it on."""
+    rc, log, _ = run_job(sandbox, FAKE_T_YR="2301")
+    assert rc == 0, log
+    assert "driver: smb_elevation_feedback=True" in log
+
+
+@pytest.mark.parametrize("value", ["0", ""])
+def test_smb_feedback_off_reaches_the_driver(sandbox, value):
+    r"""``submit.sh projection ISMIP7_SMB_ELEVATION_FEEDBACK=0`` (or empty) is
+    how an A/B run turns the feedback off; the runner passes it through."""
+    rc, log, _ = run_job(sandbox, FAKE_T_YR="2301",
+                         ISMIP7_SMB_ELEVATION_FEEDBACK=value)
+    assert rc == 0, log
+    assert "driver: smb_elevation_feedback=False" in log
+
+
+def test_a_bad_smb_feedback_value_aborts_the_run(sandbox):
+    rc, log, calls = run_job(sandbox, ISMIP7_SMB_ELEVATION_FEEDBACK="yes")
+    assert rc == 2, log
+    assert "ISMIP7_SMB_ELEVATION_FEEDBACK must be 1 to enable" in log
+    assert calls == ""
+
+
 @pytest.mark.parametrize("value", ["0", ""])
 def test_output_off_reaches_the_driver(sandbox, value):
     r"""Both documented off spellings survive the runner's defaulting, so a
@@ -363,10 +395,22 @@ def test_the_runner_names_the_production_solver_and_step(sandbox):
     the environment, so a chain cannot change solver between links."""
     rc, log, calls = run_job(sandbox, FAKE_T_YR="2050", FAKE_START_YEAR="2000")
     assert rc == 0, log
-    assert "driver: solver=scpc_gamg dt=0.05" in log
-    assert "    solver=scpc_gamg dt=0.05 " in log
+    assert "driver: solver=scpc_gamg dt=0.025" in log
+    assert "    solver=scpc_gamg dt=0.025 " in log
     assert "ENV: ISMIP7_DIAGNOSTIC_LINEAR_SOLVER=scpc_gamg" in calls
-    assert "ENV: ISMIP7_DT=0.05" in calls
+    assert "ENV: ISMIP7_DT=0.025" in calls
+
+
+def test_the_runner_exports_the_step_the_drivers_fall_back_to(sandbox):
+    r"""Issue 20 set the production step. The runner exports it, so the job
+    log and every link of the chain carry it, and it is the value a driver run
+    by hand falls back to (runconfig.DT_DEFAULT)."""
+    from icepack2_tools.runconfig import DT_DEFAULT
+    rc, log, calls = run_job(sandbox, FAKE_T_YR="2050", FAKE_START_YEAR="2000")
+    assert rc == 0, log
+    # Whole lines: 0.02 is a prefix of 0.025.
+    assert f"driver: solver=scpc_gamg dt={DT_DEFAULT}" in log.splitlines()
+    assert f"ENV: ISMIP7_DT={DT_DEFAULT}" in calls.splitlines()
 
 
 def test_a_named_solver_and_step_win(sandbox):
@@ -376,3 +420,134 @@ def test_a_named_solver_and_step_win(sandbox):
         ISMIP7_DIAGNOSTIC_LINEAR_SOLVER="full_mumps", ISMIP7_DT="0.1")
     assert rc == 0, log
     assert "driver: solver=full_mumps dt=0.1" in log
+
+
+# ── follow-on experiments (ISMIP7_CHAIN_THEN) ───────────────────────────────
+def _submits(calls):
+    r"""One text block per recorded sbatch call: its ARGV line and ENV lines."""
+    return ["ARGV: " + block for block in calls.split("ARGV: ")[1:]]
+
+
+def test_a_finished_run_queues_its_follow_ons(sandbox):
+    r"""The historical reached 2015, so the control and the projection that
+    branch from its endpoint are queued, each behind this job, each a fresh
+    chain that queues nothing further and runs its own driver's period."""
+    rc, log, calls = run_job(
+        sandbox, FAKE_T_YR="2015", FAKE_START_YEAR="1990", ISMIP7_T_END="2015",
+        ISMIP7_T_START="1990", ISMIP7_EXPERIMENT="hist_mri_esm2",
+        ISMIP7_CHAIN_THEN="control ssp585_mri_esm2")
+    assert rc == 0, log
+    submits = _submits(calls)
+    assert len(submits) == 2, calls
+    for sub, exp in zip(submits, ("control", "ssp585_mri_esm2")):
+        assert f"ENV: ISMIP7_EXPERIMENT={exp}\n" in sub
+        assert "ISMIP7_CHAIN_THEN" not in sub
+        # each follow-on's driver owns its period
+        assert "ISMIP7_T_START" not in sub
+        assert "ISMIP7_T_END" not in sub
+        assert f"--dependency=afterok:{JOB_ID}" in sub
+        assert "-J ismip7_fwd" in sub
+
+
+def test_a_run_short_of_its_end_carries_its_follow_ons_on(sandbox):
+    r"""Stopped by the wall clock at 1950: the historical resubmits itself,
+    still carrying the follow-ons, and queues neither of them yet."""
+    rc, log, calls = run_job(
+        sandbox, FAKE_T_YR="1950", FAKE_START_YEAR="1900", ISMIP7_T_END="2015",
+        ISMIP7_EXPERIMENT="hist_mri_esm2", ISMIP7_CHAIN_THEN="control")
+    assert rc == 0, log
+    submits = _submits(calls)
+    assert len(submits) == 1, calls
+    assert "ENV: ISMIP7_EXPERIMENT=hist_mri_esm2\n" in submits[0]
+    assert "ENV: ISMIP7_CHAIN_THEN=control\n" in submits[0]
+
+
+def test_a_stalled_run_queues_no_follow_on(sandbox):
+    rc, log, calls = run_job(
+        sandbox, FAKE_T_YR="1950", FAKE_STALLED="1", ISMIP7_T_END="2015",
+        ISMIP7_EXPERIMENT="hist_mri_esm2", ISMIP7_CHAIN_THEN="control")
+    assert rc == 1, log
+    assert calls == ""
+
+
+def test_an_unknown_follow_on_is_refused_before_the_run(sandbox):
+    rc, log, calls = run_job(
+        sandbox, ISMIP7_EXPERIMENT="hist_mri_esm2", ISMIP7_CHAIN_THEN="control contrl")
+    assert rc == 2
+    assert "unknown experiment 'contrl' in ISMIP7_CHAIN_THEN" in log
+    assert "driver:" not in log
+    assert calls == ""
+
+
+def test_the_launcher_selects_romio_for_the_ranks(sandbox):
+    r"""Open MPI's default ompio writes a parallel HDF5 file to NFS twenty
+    times slower than romio321 (site_core.sh has the numbers), so the launcher
+    hands every rank OMPI_MCA_io=romio321 unless a site says otherwise."""
+    rc, log, calls = run_job(sandbox, FAKE_T_YR="2050", FAKE_START_YEAR="2000")
+    assert rc == 0, log
+    assert "driver: mpi io=romio321" in log
+    # an empty ISMIP7_MPI_IO leaves the MPI's own default in place
+    rc, log, calls = run_job(sandbox, FAKE_T_YR="2050", FAKE_START_YEAR="2000",
+                             ISMIP7_MPI_IO="")
+    assert rc == 0, log
+    assert "driver: mpi io=unset" in log
+    # and a named component is passed through as given
+    rc, log, calls = run_job(sandbox, FAKE_T_YR="2050", FAKE_START_YEAR="2000",
+                             ISMIP7_MPI_IO="ompio")
+    assert "driver: mpi io=ompio" in log
+
+
+def test_the_relaxation_year_runs_without_the_apparent_mb_or_output(sandbox):
+    r"""``ISMIP7_EXPERIMENT=relax`` (icepack2_tools.relaxation) lets the
+    geometry answer the model's own imbalance and writes no ISMIP7 files, so
+    the runner's production defaults of both are off for it."""
+    rc, log, _ = run_job(sandbox, FAKE_T_YR="2301", ISMIP7_EXPERIMENT="relax")
+    assert rc == 0, log
+    assert "experiment relax -> antarctica/scripts/relaxation/run.py" in log
+    assert "driver: auto_resume=True apparent_mb=None ismip7_output=False" in log
+
+
+def test_an_explicit_apparent_mb_still_reaches_the_relaxation(sandbox):
+    r"""The relaxation's default is the runner's; a value given is passed on,
+    and the driver refuses it."""
+    rc, log, _ = run_job(sandbox, FAKE_T_YR="2301", ISMIP7_EXPERIMENT="relax",
+                         ISMIP7_APPARENT_MB="1", ISMIP7_OUTPUT="1")
+    assert rc == 0, log
+    assert "apparent_mb=balance ismip7_output=True" in log
+
+
+def test_reaching_t_end_runs_the_follow_on_command_once(sandbox):
+    r"""The link that reaches the end year runs ISMIP7_CHAIN_THEN_CMD, after
+    queueing the follow-on runs, which start chains of their own without it."""
+    hook = sandbox / "hook_ran"
+    rc, log, calls = run_job(
+        sandbox, FAKE_T_YR="2015", FAKE_START_YEAR="2010", ISMIP7_T_END="2015",
+        ISMIP7_EXPERIMENT="hist_mri_esm2", ISMIP7_CHAIN_THEN="control",
+        ISMIP7_CHAIN_THEN_CMD=f"touch {hook}")
+    assert rc == 0, log
+    assert hook.exists()
+    assert "chain: follow-on command done" in log
+    submits = _submits(calls)
+    assert len(submits) == 1, calls
+    assert "ISMIP7_CHAIN_THEN_CMD" not in submits[0]
+
+
+def test_a_run_short_of_its_end_carries_the_follow_on_command_on(sandbox):
+    r"""Any link may be the one that finishes, so the successor inherits the
+    command; a link short of the end year does not run it."""
+    hook = sandbox / "hook_ran"
+    rc, log, calls = run_job(
+        sandbox, FAKE_T_YR="2012", FAKE_START_YEAR="2010", ISMIP7_T_END="2015",
+        ISMIP7_CHAIN_THEN_CMD=f"touch {hook}")
+    assert rc == 0, log
+    assert not hook.exists()
+    assert "resubmitting" in log
+    assert f"ENV: ISMIP7_CHAIN_THEN_CMD=touch {hook}\n" in calls
+
+
+def test_a_failing_follow_on_command_does_not_change_the_verdict(sandbox):
+    rc, log, _ = run_job(
+        sandbox, FAKE_T_YR="2015", FAKE_START_YEAR="2010", ISMIP7_T_END="2015",
+        ISMIP7_CHAIN_THEN_CMD="exit 3")
+    assert rc == 0, log
+    assert "WARNING the follow-on command exited 3" in log

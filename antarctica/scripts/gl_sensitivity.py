@@ -64,7 +64,8 @@ _PROJECT = os.path.dirname(_ROOT)
 sys.path.insert(0, _PROJECT)
 sys.path.insert(0, os.path.join(_ROOT, "scripts"))
 from icepack2_tools.boundary import load_boundary_ids
-from icepack2_tools.mpi_stats import global_max, global_range, global_sum
+from icepack2_tools.mpi_stats import (global_max, global_range, global_size,
+                                      global_sum)
 from icepack2_tools.eikonal import identify_grounding_line, solve_eikonal_distance
 import rasterio, icepack
 from icepack2 import model
@@ -150,7 +151,10 @@ def main():
     mesh_fn = os.environ.get("ISMIP7_MESH", mesh_filename(lc_coarse, lc, buffer_m))
     PETSc.Sys.Print(f"Loading mesh: {mesh_fn}")
     mesh = Mesh(mesh_fn)
-    PETSc.Sys.Print(f"  {mesh.num_vertices()} vertices, {mesh.num_cells()} cells")
+    # num_vertices()/num_cells() count this rank's plex, halo included; the
+    # coordinate dofs and the owned cell set are reduced to global totals.
+    PETSc.Sys.Print(f"  {global_size(mesh.coordinates)} vertices, "
+                    f"{mesh.comm.allreduce(mesh.cell_set.size)} cells")
 
     # Sidecar resolved (per-mesh preferred, parametric fallback) and
     # HARD-CHECKED against this mesh: an id absent from the mesh makes

@@ -1,0 +1,24 @@
+{
+  "id": "test-2km-rc-b20k-g01-vg10",
+  "task": "test",
+  "institution": "IU",
+  "title": "RC stage 2 cold start from the rho 75 km MAP with the vertex gate and the 10 m membrane floor under scpc_gamg",
+  "status": "stopped",
+  "friction": "regularized_coulomb",
+  "period": "2015 state",
+  "mesh": "antarctica_5000_2000_buffered20000 (IU's build, 969,764 vertices), DG0 geometry, vertex raster sampling, the lake fix",
+  "initial_state": "test-2km-rc-lcurve-g01's MAP (RC on Rice's mesh at rho 75 km, evaluation 157); the ring filled by the harmonic extension; log-velocity weight 69946.22414285329",
+  "forcing": "observations sampled onto this mesh; the stage-1 objective (bilaplacian sigma 30, rho 75 km, no dH/dt term, log friction control, cell-wise friction, L-BFGS-B without a metric, scpc_gamg); ISMIP7_DRAG_GATE=vertex ISMIP7_RC_HVISC_FLOOR=10",
+  "site": "IU Quartz, general partition",
+  "resources": "32 ranks, 160G, 3 h",
+  "jobs": [
+    "10972101"
+  ],
+  "code": "4e45d18; Quartz worktree /N/scratch/dlilien/ismip7_reinvert_s3",
+  "started": "2026-10-05",
+  "finished": "2026-10-05",
+  "cost": "1 h 50 min in the startup ramp, cancelled",
+  "results": "none (no evaluation)",
+  "audit": "the startup ramp (full_mumps) stalled at its first step, n_flow = m_slide = 1: DIVERGED_MAX_IT after 200 Newton iterations at ||F|| 2.720e7, at 8 and again at 16 continuation steps (2,232 s and 2,381 s). The same start at a 1 m floor (10971050) converged that step in 39 Newton iterations and the whole ramp in 8 steps",
+  "notes": "issue #153: meant to show whether the 1 m floor or the rougher rho 75 km controls slowed scpc_gamg in test-2km-rc-b20k-g01-vgf1; a 10 m floor gives no start from these controls, so test-2km-rc-b20k-gamg-g01-* compare the two floors from one converged state instead"
+}

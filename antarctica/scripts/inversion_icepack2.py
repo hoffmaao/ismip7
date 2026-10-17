@@ -55,6 +55,7 @@ from tlm_adjoint.firedrake import (
     reset_manager,
     start_manager,
     stop_manager,
+    paused_manager,
     clear_caches,
     compute_gradient,
     Functional,
@@ -84,46 +85,89 @@ FIG_DIR = os.path.join(_ROOT, "figs")
 sys.path.insert(0, os.path.dirname(_ROOT))
 from icepack2_tools.boundary import load_boundary_ids
 from icepack2_tools.dual_friction import (
+    grounded_mask,
+    floating_control_nodes,
     build_rc_residual,
     effective_pressure,
+    rebase_log_friction,
     weertman_anchor,
 )
-from icepack2_tools.geometry import cg1_lift, sample_to_geometry
+from icepack2_tools.geometry import (
+    cg1_lift, front_changed_nodes, raise_bed_to_lake_ice_base,
+    sample_bed_thickness, sample_to_geometry,
+)
+from icepack2_tools.preconditioners import frozen_linearization, with_scpc_blocks
+from icepack2_tools.taped_solve import StateSolverCache, taped_state_solve
+from icepack2_tools.transfer import (
+    harmonic_extension, interpolate_with_fill, load_checkpoint_mesh, meshes_match,
+)
 from icepack2_tools.grounding import height_above_flotation
 from icepack2_tools.mpi_stats import (global_mean, global_range,
-                                      global_max, global_size, global_count)
+                                      global_max, global_size, global_count,
+                                      global_rss_mib)
 from icepack2_tools.naming import map_basename
 from icepack2_tools.runconfig import (
-    k_per_basin_candidates,
+    deltat_per_basin_npz, k_per_basin_npz,
     obs_data_root,
     BUDD_SHELF_GATE,
     friction as _friction, geometry_space as _geometry_space,
     raster_sample as _raster_sample,
     lc as _lc, lc_coarse as _lc_coarse, n_flow as _n_flow,
+    eval_continuation, inversion_mesh_source, transfer_fill, drag_gate,
+    DRAG_GATE_NONE, hvisc_floor, exact_front_version, warm_start_geometry,
+    warm_start_state, ramp_slide_fixed, warm_start_fluidity,
+    warm_start_state_fluidity, front_band_controls, front_band_extends,
 )
 DATA_DIR = obs_data_root()
 from icepack2_tools.prior import (
-    bilaplacian_aux_residual,
+    BilaplacianAuxSolver,
     bilaplacian_coeffs,
     bilaplacian_energy_form,
     prior_operator_coeffs,
     prior_operator_form,
 )
 from icepack2_tools.thermo_model import compute_fluidity_prior
-from icepack2_tools.optimization import FunctionalDecreaseStop
+from icepack2_tools.handoff import (
+    OBJECTIVE_KEYS, OBJECTIVE_RECORD_KEYS, SUBELEMENT_SCHEME_VERSIONS,
+    accepted_evaluation, frozen_in_control, handoff_gap, objective_mismatches)
+from icepack2_tools.relaxation import (
+    END_STATE_ATTR, RELAX_MAP_KEYS, anchor_ratio_counts, describe_relaxation,
+    end_state_problems, inherited_geometry, is_relaxed)
+from icepack2_tools.profiling import Spans
+from icepack2_tools.optimization import (NOT_FINAL,
+                                         FunctionalDecreaseStop,
+                                         TrialFailures,
+                                         recorded_objective,
+                                         resolve_log_vel_weight)
 from icepack2_tools.forcing import (load_racmo_smb_climatology,
                                     load_mean_annual_surface_temperature)
 from icepack2_tools.runconfig import (
     TARGET_MESH_GEOMETRY_METHOD,
+    anchor_length,
+    file_sha256,
+    front_hmin,
+    lake_ice_base,
     residual_stabilizers,
 )
+from icepack2_tools.front import facet_neighbours, ocean_drag_cells, vertex_neighbours
+from icepack2_tools.continuation import ladder, ramp_exponents
 from icepack2_tools.solverconfig import (
+    continuation_steps,
+    diagnostic_solver_label,
+    direct_forward_enabled,
+    direct_forward_parameters,
     diagnostic_solver_mode,
+    diagnostic_solver_parameters,
+    mumps_analysis,
     final_solve_bounds,
     final_solve_parameters,
-    nonlinear_solver_options,
+    inversion_adjoint_parameters,
+    inversion_solver_mode,
+    inversion_state_parameters,
+    linearization_state,
     snes_atol_scale,
     snes_monitor_enabled,
+    trial_rescue_rungs,
 )
 from mesh_naming import get_buffer_m, mesh_filename
 from timing_campaign import MATRIX_T_START, atomic_write_json
@@ -211,9 +255,13 @@ GAMMA_DEFAULT = "1e5" if MISFIT_NORM == "sigma" else "1e4"
 # the ice is not moving. Other inversions use relative errors to the same end.
 #
 # ISMIP7_LOG_VEL_WEIGHT: 0 (default, the pre-Sep-2026 objective), a number, or
-# "auto" -- scaled so that at the STARTING state the log term equals the
-# velocity chi^2 term, which is the only weight that means anything before
-# the first iteration. The resolved value is stamped in the MAP.
+# "auto", which scales the log term to equal the velocity chi^2 term at the
+# STARTING state, the only weight that means anything before the first
+# iteration. A chained link starts from its predecessor's checkpoint, so under
+# "auto" a warm start that records a positive weight under the same misfit
+# norm and eps supplies that weight, and every link minimises one objective
+# (issue 68, optimization.resolve_log_vel_weight). The resolved value and its
+# source are stamped in the MAP.
 LOG_VEL_WEIGHT = os.environ.get("ISMIP7_LOG_VEL_WEIGHT", "0")
 LOG_VEL_EPS = float(os.environ.get("ISMIP7_LOG_VEL_EPS", "1.0"))   # m/yr
 GAMMA_THETA = float(os.environ.get("ISMIP7_GAMMA_THETA", GAMMA_DEFAULT))
@@ -248,17 +296,189 @@ PRIOR_SIGMA_THETA = float(os.environ.get("ISMIP7_PRIOR_SIGMA_THETA", "0.3"))
 PRIOR_SIGMA_PHI = float(os.environ.get("ISMIP7_PRIOR_SIGMA_PHI", "0.3"))
 PRIOR_RHO = float(os.environ.get("ISMIP7_PRIOR_RHO", str(L_REG)))
 
+# ── Friction control (ISMIP7_FRICTION_CONTROL) ──────────────────────────
+# `log` (default): theta = log(C / C_w0), a deviation from the balance anchor
+# with prior mean zero, so the prior sets the friction's amplitude wherever
+# the data are weak. `sqrt`: the control is alpha = sqrt(C) itself with a
+# ZERO prior mean (Recinos et al. 2023 / fenics_ice: their mass term is
+# negligible, the prior only smooths, and the data set the amplitude); the
+# anchor is the initial guess only, as their driving-stress initial guess
+# is. Residual laws and the bi-Laplacian prior only. The prior scale
+# ISMIP7_PRIOR_SIGMA_ALPHA is in sqrt(MPa yr^(1/m) m^(-1/m)) (Recinos's
+# m^(-1/6) yr^(1/6) Pa^(1/2) times 1e-3); "auto" takes the grounded median of
+# the initial alpha, so the pointwise prior std is the typical friction and
+# the amplitude is free in practice. ISMIP7_PRIOR_RHO_THETA is the friction
+# correlation length (default ISMIP7_PRIOR_RHO; Recinos's l = sqrt(gamma/delta)
+# is rho / sqrt(8)).
+# `exp` (Rice, 27 Sep 2026: "instead of alpha squared we should use
+# exp(alpha)"): C = C_ref exp(alpha), alpha a zero-mean control as under
+# `sqrt`, but a log parameterisation, so a step in alpha is a multiplicative
+# change of C everywhere: the weak beds under the ice streams, where C must
+# fall by orders of magnitude, are as reachable as the stiff interior (under
+# `sqrt` a step is additive in sqrt(C), small where C is small). C_ref is
+# one scalar (ISMIP7_C_REF: "auto" = grounded median of the friction the
+# start describes; 1 makes it exp(alpha) outright), so the prior mean is
+# "typical friction" with no spatial structure, as Recinos's zero mean is.
+# ISMIP7_PRIOR_SIGMA_ALPHA is then in log units ("auto" = 1, a factor e);
+# the MAP carries alpha as log_friction and C_ref as a constant C_w0, so
+# every consumer reads it as C_w0 exp(log_friction) with no new code.
+FRICTION_CONTROL = os.environ.get("ISMIP7_FRICTION_CONTROL", "log").strip().lower()
+if FRICTION_CONTROL not in ("log", "sqrt", "exp"):
+    raise ValueError(
+        f"ISMIP7_FRICTION_CONTROL must be log|sqrt|exp, got {FRICTION_CONTROL!r}")
+if FRICTION_CONTROL in ("sqrt", "exp") and PRIOR_FORM != "bilaplacian":
+    raise ValueError(
+        f"ISMIP7_FRICTION_CONTROL={FRICTION_CONTROL} needs ISMIP7_PRIOR_FORM=bilaplacian")
+# ISMIP7_GRAD_CHECK=1 runs its Taylor test on the TAO path only. Refused here
+# on the scipy metrics, where it would run an ordinary inversion and write
+# over ISMIP7_MAP_OUT.
+if (os.environ.get("ISMIP7_GRAD_CHECK", "0").strip() == "1"
+        and os.environ.get("ISMIP7_GRAD_PRECOND", "none").lower()
+        not in ("mass_consistent", "prior")):
+    raise ValueError(
+        "ISMIP7_GRAD_CHECK=1 needs the TAO path "
+        "(ISMIP7_GRAD_PRECOND=mass_consistent or prior)")
+PRIOR_SIGMA_ALPHA = os.environ.get("ISMIP7_PRIOR_SIGMA_ALPHA", "auto").strip().lower()
+C_REF = os.environ.get("ISMIP7_C_REF", "auto").strip().lower()
+PRIOR_RHO_THETA = float(os.environ.get("ISMIP7_PRIOR_RHO_THETA", str(PRIOR_RHO)))
+
+# ── Fluidity prior mean (ISMIP7_FLUIDITY_PRIOR) ─────────────────────────
+# `pattyn` (default since 27 Sep 2026, Rice: "focus on the pattyn prior";
+# its shelves start ten times closer to the observed speed than the thermal
+# model's at 2 km): rate_factor of the depth-averaged Pattyn temperature raster
+# (icepack2_tools/rheology_prior.py; ISMIP7_PATTYN_TEMP names the file,
+# default <data root>/temp/Pattyn_2013.tif), the source Recinos et al. (2023)
+# take their rheology prior mean from. Anything else: the constant A0.
+FLUIDITY_PRIOR = os.environ.get("ISMIP7_FLUIDITY_PRIOR", "pattyn").strip().lower()
+
+# ── Where the fluidity control acts (ISMIP7_FLUIDITY_CONTROL) ───────────
+# `all` (default): phi = log(A / A_prior) everywhere. `floating`: phi acts
+# on floating ice only, through the smooth grounded indicator (1 - He); on
+# grounded ice the fluidity is the prior mean (a temperature field), and the
+# velocity there is fitted by the friction alone. That is the split most
+# ISMIP6/7 groups initialise with (a thermal rate factor on grounded ice,
+# friction inverted; a shelf rheology inverted where there is no friction),
+# and it removes the friction/rheology trade-off on grounded ice that let the
+# data move the friction while the fluidity sat at its prior (Rice, 26 Sep
+# 2026). phi is held at exactly zero on the nodes where the gate has shut it
+# off (dual_friction.floating_control_nodes): the warm start's values there are
+# zeroed and the gradient is projected out, so the MAP's log_fluidity carries
+# no grounded variation for a reader to pair with this friction (issue #153).
+# The L-BFGS-B path does the projection; the TAO path writes the controls
+# itself, so it is refused.
+FLUIDITY_CONTROL = os.environ.get("ISMIP7_FLUIDITY_CONTROL", "all").strip().lower()
+if FLUIDITY_CONTROL not in ("all", "floating"):
+    raise ValueError(
+        f"ISMIP7_FLUIDITY_CONTROL must be all|floating, got {FLUIDITY_CONTROL!r}")
+PHI_GROUNDED = "zero" if FLUIDITY_CONTROL == "floating" else "inverted"
+# On the TAO path (13 Oct 2026) the control phi enters the objective, misfit
+# and prior alike, as phi * phi_free, so the grounded dofs are inert (zero
+# gradient) and the metric action zeroes them in every step; the MAP's
+# log_fluidity carries zeros there, as under L-BFGS-B.
+
+# ── Which controls move (ISMIP7_INVERT) ──────────────────────────────────
+# `both` (default): theta and phi descend together. `phi` / `theta`: only
+# that control moves; the other stays at its current value (the prior mean,
+# or the warm start's field) as a fixed coefficient of the forward. The
+# OBJECTIVE is the same in every mode, so a staged inversion warm-starts each
+# stage from the previous stage's MAP and the handoff check still applies.
+# Staging is how the ISSM groups initialised ISMIP6 ("first invert for ice
+# shelf viscosity and then for basal friction under grounded ice", Seroussi
+# et al. 2020 Appendix C9): in the joint descent the friction gradient is
+# ~50x the fluidity gradient per unit control, so L-BFGS fits the friction
+# first and the fluidity sits at its prior for tens of iterations (the 26 Sep
+# 32 km MAPs: phi rms 0.01 after 3 iterations). TAO path only.
+INVERT = os.environ.get("ISMIP7_INVERT", "both").strip().lower()
+if INVERT not in ("both", "phi", "theta"):
+    raise ValueError(f"ISMIP7_INVERT must be both|phi|theta, got {INVERT!r}")
+# ISMIP7_PHI_BOUNDS="lo,hi": box bounds on the fluidity control under TAO's
+# bounded LMVM (theta unbounded). exp(phi) excursions of 1e6 have been seen on
+# shelves; a bound in log units keeps A inside the range the temperature of
+# ice allows. Recorded as phi_bounds ("lo,hi", or "none" where no bound
+# applies: a theta-only stage or the scipy path).
+_phi_bounds_env = os.environ.get("ISMIP7_PHI_BOUNDS", "").strip()
+PHI_BOUNDS = (tuple(float(v) for v in _phi_bounds_env.split(",")) if _phi_bounds_env
+              else None)
+if PHI_BOUNDS is not None and (len(PHI_BOUNDS) != 2 or PHI_BOUNDS[0] >= PHI_BOUNDS[1]):
+    raise ValueError(f"ISMIP7_PHI_BOUNDS must be 'lo,hi' with lo < hi, got {_phi_bounds_env!r}")
+if INVERT == "theta" or os.environ.get("ISMIP7_GRAD_PRECOND", "none").lower() not in (
+        "mass_consistent", "prior"):
+    PHI_BOUNDS = None
+PHI_BOUNDS_RECORD = ("none" if PHI_BOUNDS is None
+                     else f"{PHI_BOUNDS[0]:g},{PHI_BOUNDS[1]:g}")
+
+# ── Likelihood scale (ISMIP7_MISFIT_SCALE) ───────────────────────────────
+# The data terms are normalised by the observed AREA, so the misfit is a mean
+# chi^2 per node (1 at a perfect fit) while the prior energy is a sum over
+# the whole domain; the prior therefore outweighs the data by about the
+# number of observed nodes, and a MAP sits on its prior mean (91-94% of the
+# 2 km MAP within 0.1 of it, Sep 2026). A Gaussian likelihood is the SUM of
+# the per-datum chi^2, which is what fenics_ice assembles (Recinos et al.
+# 2023) and why their zero-mean friction prior can leave the amplitude to the
+# data. `nodes` multiplies every data term by the number of observed nodes
+# (the sum over the control space's nodes); a number is a plain multiplier;
+# 1 (default) keeps the mean. Recorded in the MAP as misfit_scale.
+MISFIT_SCALE = os.environ.get("ISMIP7_MISFIT_SCALE", "1").strip().lower()
+
+# ── Sub-element grounding scheme (ISMIP7_SUBELEMENT_FRICTION) ───────────
+# ISSM's SEP2 through icepack_tools (icepack2_tools/subelement.py): the
+# basal friction is integrated over the grounded part of each cell, so the
+# grounding line is exact inside a cell instead of a cell-wise staircase.
+# Budd then runs with N_hat = 1 on the grounded part (no N_ref, no delta
+# floor). ISMIP7_EXACT_FRONT adds the exact depth-integrated push on a
+# calving front inside the mesh: on by default under the scheme, since it
+# is the shared residual's default, and off by default for cell-wise
+# friction, where =1 adds dual_friction.front_cliff_correction (a grounded
+# marine cliff otherwise gets 15 to 33 % too little push, issue #153) and =2
+# its exposed-face form, which leaves no push against rock above the ice
+# surface (issue #166; cell-wise friction only). The MAP records the version.
+SUBELEMENT_FRICTION = os.environ.get("ISMIP7_SUBELEMENT_FRICTION", "0").strip() == "1"
+# ISMIP7_SUBELEMENT_SCHEME: sep1 (ISSM's default: whole-cell quadrature,
+# drag times the grounded fraction; the default here since 1 Oct 2026) or
+# sep2 (grounded-part quadrature); recorded in the MAP and followed by the
+# forward. On the same 2 km start SEP1 reached misfit 3.42e9 in 21 accepted
+# iterations with no failed line-search trial, SEP2 4.21e9 with nine, at a
+# quarter of SEP1's iterations per hour (NOTS scavenge chains, 1 Oct).
+SUBELEMENT_SCHEME = os.environ.get("ISMIP7_SUBELEMENT_SCHEME", "sep1").strip().lower()
+if SUBELEMENT_SCHEME not in ("sep2", "sep1"):
+    raise ValueError(f"ISMIP7_SUBELEMENT_SCHEME must be sep2 or sep1, not {SUBELEMENT_SCHEME!r}")
+# The form of that scheme this code builds, recorded with it in the MAP
+# (icepack2_tools.handoff.SUBELEMENT_SCHEME_VERSIONS).
+SUBELEMENT_SCHEME_VERSION = SUBELEMENT_SCHEME_VERSIONS[SUBELEMENT_SCHEME]
+EXACT_FRONT = exact_front_version(os.environ.get(
+    "ISMIP7_EXACT_FRONT", "1" if SUBELEMENT_FRICTION else "0"))
+if SUBELEMENT_FRICTION and EXACT_FRONT == 2:
+    raise ValueError(
+        "exact_front version 2 (the exposed-face push, issue #166) is not in "
+        "icepack_tools.momentum.front_cliff_correction; the sub-element scheme "
+        "takes 0 or 1")
+if MISFIT_SCALE != "nodes":
+    try:
+        float(MISFIT_SCALE)
+    except ValueError:
+        raise ValueError(
+            f"ISMIP7_MISFIT_SCALE must be a number or 'nodes', got {MISFIT_SCALE!r}")
+
 # Friction law: "budd" (power-law dual, default) or "regularized_coulomb"
 # (Joughin/Schoof RC residual: grounded-only inference, exact-zero shelves).
 FRICTION = _friction()
 # Exact-zero-shelf residual laws share the C_w0/He/composite structure.
 USE_RESIDUAL = FRICTION in ("regularized_coulomb", "budd")
 USE_RC = USE_RESIDUAL  # geometry/anchor handling is shared
+if SUBELEMENT_FRICTION and (not USE_RESIDUAL or FRICTION not in ("budd", "weertman")):
+    raise ValueError("ISMIP7_SUBELEMENT_FRICTION=1 needs ISMIP7_FRICTION=budd (or "
+                     "weertman): the scheme integrates a velocity-only stress")
+if FRICTION_CONTROL in ("sqrt", "exp") and not USE_RESIDUAL:
+    raise ValueError(f"ISMIP7_FRICTION_CONTROL={FRICTION_CONTROL} needs a residual friction "
+                     "law (budd or regularized_coulomb)")
 C0_RC = float(os.environ.get("ISMIP7_RC_C0", "0.5"))
 # Buffer-node (h_clamp=0) coercivity controls; see dual_friction.build_rc_residual.
-# h_visc_floor (membrane-only thickness floor) is the primary, bias-free cure;
-# c_w0_floor is off by default (unnecessary once h_visc_floor is on).
-RC_HVISC_FLOOR = float(os.environ.get("ISMIP7_RC_HVISC_FLOOR", "10.0"))
+# h_visc_floor (membrane-only thickness floor) is the primary cure. The first
+# water row carries it too and so couples the ice front to the ocean drag one
+# cell out; runconfig.hvisc_floor's 2.5 m keeps a fifth of the 10 m coupling
+# (GEOMETRY_DISCRETIZATION.md). c_w0_floor is off by default (unnecessary once
+# h_visc_floor is on).
+RC_HVISC_FLOOR = hvisc_floor()
 RC_CW0_FLOOR = float(os.environ.get("ISMIP7_RC_CW0_FLOOR", "0.0"))
 # Budd N_hat knobs (fric_law="budd"): at the reference/inversion geometry
 # N_hat=1 (with the PISM-delta grounded floor), so this inverts the exact-zero
@@ -279,10 +499,45 @@ def find_file(d, p):
 def main():
     os.makedirs(FIG_DIR, exist_ok=True)
 
-    mesh_fn = os.environ.get("ISMIP7_MESH", mesh_filename(lc_coarse, lc, buffer_m))
-    PETSc.Sys.Print(f"Loading mesh: {mesh_fn}")
-    mesh = Mesh(mesh_fn)
-    PETSc.Sys.Print(f"  {mesh.num_vertices()} vertices, {mesh.num_cells()} cells")
+    mesh_lc = lc
+    mesh_lc_coarse = lc_coarse
+    mesh_buffer_m = buffer_m
+    mesh_fn, mesh_from_warm = inversion_mesh_source(
+        mesh_filename(mesh_lc_coarse, mesh_lc, mesh_buffer_m))
+    if mesh_from_warm:
+        # The warm start's own mesh. mesh_fn becomes the .msh basename that
+        # checkpoint recorded, which picks the boundary-id sidecar and is
+        # stamped into this run's MAP, so the chain and the forward that loads
+        # the result name the mesh the controls were inverted on.
+        PETSc.Sys.Print(f"Loading mesh from the warm start: {mesh_fn}")
+        (mesh, mesh_fn, mesh_lc, mesh_lc_coarse,
+         mesh_buffer_m) = load_checkpoint_mesh(mesh_fn)
+        PETSc.Sys.Print(
+            f"  recorded mesh: {mesh_fn} "
+            f"(lc={mesh_lc}, lc_coarse={mesh_lc_coarse}, "
+            f"buffer_m={mesh_buffer_m:g})"
+        )
+    else:
+        PETSc.Sys.Print(f"Loading mesh: {mesh_fn}")
+        mesh = Mesh(mesh_fn)
+    # num_vertices()/num_cells() count this rank's plex, halo included; the
+    # coordinate dofs and the owned cell set are reduced to global totals.
+    PETSc.Sys.Print(f"  {global_size(mesh.coordinates)} vertices, "
+                    f"{mesh.comm.allreduce(mesh.cell_set.size)} cells")
+
+    # The MAP name carries BOTH the flow exponent and the geometry space it was
+    # inverted under, so n=3/n=4 and DG0/CG1 MAPs coexist on disk and a forward
+    # cannot silently pair itself with a MAP whose front treatment differs.
+    # Built by the shared helper the forward and the preflight gates use.
+    # ISMIP7_MAP_OUT overrides the full output path: without it, EVERY run --
+    # including a short smoke test -- writes to the production filename, and a
+    # 3-iteration artifact silently replaces a converged MAP (this nearly
+    # happened twice in Aug 2026 validation). Variant MAPs (e.g. the transient
+    # dH/dt-constrained inversion) should also name themselves distinctly here
+    # rather than shadow the velocity-only MAP the forwards auto-load.
+    map_out = os.environ.get("ISMIP7_MAP_OUT")
+    map_fn = (os.path.basename(map_out) if map_out
+              else map_basename(FRICTION, mesh_lc))
 
     use_calving_terminus = os.environ.get("ISMIP7_NO_CALVING_TERMINUS") is None
     # Per-mesh sidecar, hard-checked against this mesh: a stale sidecar leaves
@@ -317,50 +572,111 @@ def main():
     # Cell average onto the geometry space, NOT a centroid point sample --
     # see geometry.sample_to_geometry for the measurements behind that.
     PETSc.Sys.Print(f"  Raster sampling onto geometry cells: {raster_sample}")
-    b = sample_to_geometry(
-        rasterio.open(f"netcdf:{bm_fn}:bed"), Q_g, Q, method=raster_sample)
     # h_clamp default 0.0: invert against the *true* BedMachine geometry,
     # including h=0 over the buffered ocean region. Composite rheology
     # (added below) keeps the SNES nonsingular where h=0.
     h_clamp = float(os.environ.get("ISMIP7_H_CLAMP", "0.0"))
-    H = sample_to_geometry(
-        rasterio.open(f"netcdf:{bm_fn}:thickness"),
-        Q_g, Q, floor=h_clamp, method=raster_sample)
+    # The front sampling (vertex_front) rebuilds the marine front cells from
+    # BedMachine's own mask (geometry.front_cells, issue #167).
+    b, H, front_counts = sample_bed_thickness(
+        bm_fn, Q_g, Q, floor=h_clamp, method=raster_sample)
+    if front_counts is not None:
+        PETSc.Sys.Print(f"  Front cells ({raster_sample}): {front_counts}")
     PETSc.Sys.Print(f"  H clamp: {h_clamp} m  "
                     f"(nodes h<=1m: "
                     f"{global_count(H.dat.data_ro <= 1.0, mesh.comm)} / "
                     f"{global_size(H)})")
-    rho_ratio = Constant(917.0 / 1024.0)
-
+    # Lake Vostok: BedMachine's bed there is the lake floor, so b + H would
+    # sink the surface by the water column (runconfig.lake_ice_base).
+    LAKE_ICE_BASE = lake_ice_base()
+    ANCHOR_LENGTH = anchor_length()     # read here: the warm start checks it too
+    # ISMIP7_KILL_BERGS=1: ice that no chain of ice cells connects to
+    # grounded ice is removed (geometry.remove_unconnected_ice): a floating
+    # island carries the full terminus push on every facet and no
+    # buttressing, and the momentum balance has nothing to hold it.
+    KILL_BERGS = os.environ.get("ISMIP7_KILL_BERGS", "0").strip() == "1"
+    if KILL_BERGS:
+        from icepack2_tools.geometry import remove_unconnected_ice
+        _n_berg, _a_berg = remove_unconnected_ice(H, b, Q_g)
+        PETSc.Sys.Print(
+            f"  Icebergs: {_n_berg} ice cells unconnected to grounded ice "
+            f"removed ({_a_berg / 1e6:.0f} km2) (ISMIP7_KILL_BERGS)")
+    if LAKE_ICE_BASE:
+        n_lake = raise_bed_to_lake_ice_base(b, H, bm_fn, Q_g, Q, method=raster_sample)
+        PETSc.Sys.Print(f"  Lake ice base: bed raised to BedMachine's ice base on "
+                        f"{n_lake} geometry dofs over its subglacial lake")
     rho_ratio = Constant(917.0 / 1024.0)
     s = Function(Q_g).interpolate(max_value(b + H, (Constant(1.0) - rho_ratio) * H))
 
     vel_fn = find_file(os.path.join(DATA_DIR, "velocity"), "*.nc")
-    u_obs = icepack.interpolate(
-        (rasterio.open(f"netcdf:{vel_fn}:VX"), rasterio.open(f"netcdf:{vel_fn}:VY")),
-        V,
-        fillvalue=0.0,
-    )
+    # ISMIP7_VEL_SAMPLE: how MEaSUREs lands on a node. ``point`` (the
+    # default) is the bilinear value at the vertex, one 450 m pixel standing
+    # for the node's patch, with that pixel's formal error as sigma. ``patch``
+    # (patchmean.py, 13 Oct 2026) is the hat-weighted mean over the patch,
+    # the datum a CG1 nodal value can represent, with the patch rms of the
+    # formal error as sigma (no 1/N reduction: the errors are correlated
+    # over far more than a cell) and the sub-patch spread of the velocity
+    # printed as the representativeness error the point sample carries.
+    VEL_SAMPLE = os.environ.get("ISMIP7_VEL_SAMPLE", "point").strip().lower()
+    if VEL_SAMPLE not in ("point", "patch"):
+        raise ValueError(f"ISMIP7_VEL_SAMPLE must be point or patch, got {VEL_SAMPLE!r}")
+    _patch_repr = None
+    if VEL_SAMPLE == "patch":
+        from icepack2_tools.patchmean import patch_mean_velocity
+        from icepack2_tools.runconfig import patch_qdegree
+        _qdeg = patch_qdegree()
+        u_obs, (_sig_px, _sig_py), _observed_fn, _vel_cov, _patch_repr = patch_mean_velocity(
+            rasterio.open(f"netcdf:{vel_fn}:VX"), rasterio.open(f"netcdf:{vel_fn}:VY"),
+            rasterio.open(f"netcdf:{vel_fn}:ERRX"), rasterio.open(f"netcdf:{vel_fn}:ERRY"),
+            V, Q, degree=_qdeg)
+        observed = np.asarray(_observed_fn.dat.data_ro > 0.5)
+        # err carries the patch sigma so the normalisation below reads one
+        # field whichever sampling produced it.
+        err = Function(V, name="obs_err")
+        err.dat.data[:, 0] = np.nan_to_num(_sig_px.dat.data_ro)
+        err.dat.data[:, 1] = np.nan_to_num(_sig_py.dat.data_ro)
+        PETSc.Sys.Print(
+            f"  Velocity sampling: patch mean (quadrature degree {_qdeg}; "
+            f"a node is observed when over half its patch is)")
+    else:
+        u_obs = icepack.interpolate(
+            (rasterio.open(f"netcdf:{vel_fn}:VX"), rasterio.open(f"netcdf:{vel_fn}:VY")),
+            V,
+            fillvalue=0.0,
+        )
 
-    # Velocity-observation mask. icepack.interpolate zero-fills NODATA, so
-    # without a mask unobserved regions read as "observed stationary" and
-    # the inversion prescribes friction/stiff ice where there is no
-    # constraint (0.7% of grounded area for MEaSUREs 450m v2). MEaSUREs
-    # reports errors only where a velocity was measured, so ERR > 0 marks
-    # real observations. ISMIP7_OBS_MASK=0 reverts to the unmasked misfit.
-    err = icepack.interpolate(
-        (rasterio.open(f"netcdf:{vel_fn}:ERRX"),
-         rasterio.open(f"netcdf:{vel_fn}:ERRY")),
-        V,
-        fillvalue=0.0,
-    )
-    # ONE definition of "this node carries a real velocity observation",
-    # consumed by both the mask below and the sigma normalization further down.
-    # The two used to derive it independently from `err` and could drift apart.
-    emag = Function(Q, name="obs_err_mag").interpolate(
-        sqrt(err[0] ** 2 + err[1] ** 2))
-    observed = np.asarray(emag.dat.data_ro > 0.0)
+        # Velocity-observation mask. icepack.interpolate zero-fills NODATA, so
+        # without a mask unobserved regions read as "observed stationary" and
+        # the inversion prescribes friction/stiff ice where there is no
+        # constraint (0.7% of grounded area for MEaSUREs 450m v2). MEaSUREs
+        # reports errors only where a velocity was measured, so ERR > 0 marks
+        # real observations. ISMIP7_OBS_MASK=0 reverts to the unmasked misfit.
+        err = icepack.interpolate(
+            (rasterio.open(f"netcdf:{vel_fn}:ERRX"),
+             rasterio.open(f"netcdf:{vel_fn}:ERRY")),
+            V,
+            fillvalue=0.0,
+        )
+        # ONE definition of "this node carries a real velocity observation",
+        # consumed by both the mask below and the sigma normalization further down.
+        # The two used to derive it independently from `err` and could drift apart.
+        emag = Function(Q, name="obs_err_mag").interpolate(
+            sqrt(err[0] ** 2 + err[1] ** 2))
+        observed = np.asarray(emag.dat.data_ro > 0.0)
+        PETSc.Sys.Print("  Velocity sampling: point (bilinear at the vertex)")
 
+    # ISMIP7_U_OBS_MAX (m/yr, 0 = off): nodes whose observed speed exceeds
+    # it carry no weight. The fastest MEaSUREs pixels sit on shear margins
+    # and fronts where the product is noisiest; a cap keeps the fit from
+    # being bought there. The nodes stay in the regularisation.
+    U_OBS_MAX = float(os.environ.get("ISMIP7_U_OBS_MAX", "0"))
+    if U_OBS_MAX > 0.0:
+        _speed_obs = np.hypot(u_obs.dat.data_ro[:, 0], u_obs.dat.data_ro[:, 1])
+        _capped = observed & (_speed_obs > U_OBS_MAX)
+        observed = observed & ~_capped
+        PETSc.Sys.Print(
+            f"  Obs speed cap: {COMM_WORLD.allreduce(int(_capped.sum()))} nodes "
+            f"faster than {U_OBS_MAX:g} m/yr carry no weight (ISMIP7_U_OBS_MAX)")
     obs_mask = Function(Q, name="obs_mask").assign(1.0)
     if os.environ.get("ISMIP7_OBS_MASK", "1") != "0":
         obs_mask.dat.data[:] = observed.astype(float)
@@ -425,6 +741,25 @@ def main():
             f"velocity sigma floor {sigma_u_floor:g} m/yr, "
             f"sigma_x median {_sig_med:.2f} p90 {_sig_p90:.2f} m/yr"
         )
+        if _patch_repr is not None:
+            # The sub-patch spread of the observed speed components: what a
+            # point sample is off by, on average, from the patch datum. Where
+            # it exceeds sigma the point-sampled chi^2 was counting
+            # representativeness as model error.
+            _rx = np.asarray(_patch_repr[0].dat.data_ro, dtype="f8")[observed]
+            _parts = COMM_WORLD.gather(_rx, root=0)
+            if COMM_WORLD.rank == 0:
+                _all = np.concatenate(_parts)
+                _all = _all[np.isfinite(_all)]
+                _r = (float(np.median(_all)), float(np.percentile(_all, 90)),
+                      float(np.percentile(_all, 99)))
+            else:
+                _r = None
+            _r = COMM_WORLD.bcast(_r, root=0)
+            PETSc.Sys.Print(
+                f"  Representativeness (sub-patch std of vx, observed nodes): "
+                f"median {_r[0]:.2f} p90 {_r[1]:.2f} p99 {_r[2]:.2f} m/yr "
+                f"(not added to sigma: the datum is the patch mean)")
         PETSc.Sys.Print(
             f"  Unobserved nodes (ERR==0): {_n_unobs} given "
             f"sigma={sigma_u_unobs:g} m/yr so the zero-filled velocity there "
@@ -474,20 +809,22 @@ def main():
     # tolerance -3 (PETSC_UNLIMITED; the legacy -1 is PETSC_DETERMINE, which
     # restores PETSc's 1e4 growth cutoff and reports DIVERGED_DTOL on solves
     # that would otherwise reach their real result -- README "Timing
-    # benchmark" §7). The linear solve is the full mixed-Jacobian MUMPS LU:
-    # tlm_adjoint differentiates through it, so this is deliberately NOT the
-    # transient's condensed scpc_mumps mode, and the MAP records that as
+    # benchmark" §7). The linear solve of every annotated forward, of the
+    # adjoint tlm_adjoint solves against it, and of the publishing solve
+    # follows ISMIP7_INVERSION_LINEAR_SOLVER: full_mumps is the full
+    # mixed-Jacobian MUMPS LU, scpc_mumps and scpc_gamg (the default) the
+    # transient's condensed modes (icepack2_tools/taped_solve.py). The MAP records it as
     # state_solver_mode beside the lane contract diagnostic_solver_mode.
-    sparams = nonlinear_solver_options()
-    sparams.update({
-        "ksp_type": "gmres",
-        "pc_type": "lu",
-        "pc_factor_mat_solver_type": "mumps",
-        "mat_mumps_icntl_14": 400,  # working memory increase
-        "mat_mumps_icntl_24": 1,  # detect null pivots
-        "mat_mumps_cntl_3": 1e-12,  # null pivot threshold
-    })
-    state_solver_mode = "full_mumps"
+    # The condensed factorizations (scpc_mumps, and schur_mumps's velocity
+    # block) run MUMPS's own sequential analysis unless the environment names
+    # one (solverconfig.mumps_analysis): under the distributed PT-Scotch
+    # analysis the adjoint factorizations aborted the 2 km chains in
+    # MUMPS_LOAD_RECV_MSGS. Set before the first solver options are resolved
+    # below, and read now so an invalid value fails here.
+    os.environ.setdefault("ISMIP7_MUMPS_ANALYSIS", "sequential")
+    mumps_analysis()
+    state_solver_mode = inversion_solver_mode()
+    sparams = inversion_state_parameters(state_solver_mode)
     state_solver_parameters = json.dumps(sparams, sort_keys=True)
     # Optional SNES monitoring (ISMIP7_SNES_MONITOR=1, ISMIP7_SNES_LOG=file),
     # the transient runner's convention. Applies to every annotated forward
@@ -496,15 +833,29 @@ def main():
     if _solver_log:
         os.makedirs(os.path.dirname(os.path.abspath(_solver_log)), exist_ok=True)
     _viewer = f"ascii:{_solver_log}::append" if _solver_log else None
-    if snes_monitor_enabled():
-        sparams.update({
-            "snes_monitor": _viewer,
-            "snes_converged_reason": _viewer,
-        })
+    _monitor_options = {
+        "snes_monitor": _viewer,
+        "snes_converged_reason": _viewer,
+        # Which way the linear solve went: a failed factorisation
+        # (DIVERGED_PC_FAILED) or an inexact one (DIVERGED_ITS).
+        "ksp_converged_reason": _viewer,
+    } if snes_monitor_enabled() else {}
+    sparams.update(_monitor_options)
     # The mode consumers of the published state must run (validate_cache_manifest
     # asserts it). Resolved now so an invalid environment fails here, not
     # inside the final save after hours of work.
     lane_solver_mode = diagnostic_solver_mode()
+    # A solver condensing with SCPC needs the (M, tau) structural-zero blocks
+    # in its form (preconditioners.with_scpc_blocks), and an assembled one is
+    # better without them: they are entries of the AIJ sparsity. So the taped
+    # form F carries them under an scpc_* inversion solver and the startup
+    # ramp's form under an scpc_* lane solver, each for its own solver.
+    state_scpc = state_solver_mode.startswith("scpc_")
+    lane_scpc = lane_solver_mode.startswith("scpc_")
+    PETSc.Sys.Print(
+        f"  Inversion linear solver: {diagnostic_solver_label(state_solver_mode)} "
+        f"(ISMIP7_INVERSION_LINEAR_SOLVER={state_solver_mode}); startup ramp: "
+        f"{diagnostic_solver_label(lane_solver_mode)}")
     fc_params = {"quadrature_degree": 4}
 
     # ── Build form (Kangerd pattern: controls baked into sliding coefficient) ──
@@ -522,36 +873,276 @@ def main():
         os.environ.get("ISMIP7_SKIP_CONTINUATION", "0").strip() == "1"
     )
     warm_A_prior = None
+    warm_prior_origin = None
+    # The warm start's fluidity prior under ISMIP7_WARM_START_PHI=physical:
+    # phi is moved onto this run's prior so A = A_prior exp(phi) is kept.
+    warm_A_prior_rebase = None
     warm_loaded_z = False
+    warm_state_guess = False
+    # the warm start's anchor length, when its theta is to be rebased onto
+    # this run's anchor once that is built (ISMIP7_WARM_START_THETA=physical)
+    warm_theta_anchor = None
+    # alpha = sqrt(C) of a warm start inverted on the sqrt control
+    warm_alpha = None
+    # theta holds an exp-control warm start's alpha = ln(C / C_ref), a
+    # deviation from the constant C_ref and not from any anchor
+    warm_exp_alpha = False
     # Residual the warm start's writer reached under the shared F (stamped by
     # save_model_state and by save_map): the forwards' absolute tolerance.
     warm_recorded = None
+    # Everything the warm start's writer recorded about ITS objective and the
+    # objective value at its checkpointed iterate (icepack2_tools.handoff).
+    warm_attrs = {}
+    # Where the warm start's geometry came from (icepack2_tools.relaxation):
+    # its record, whether it is a relaxation's end state, the anchor that
+    # state's year ran with, and the record this run writes when it takes a
+    # relaxed geometry (None: this run's own BedMachine sample).
+    warm_geometry_attrs = {}
+    warm_end_state = False
+    warm_C_w0 = None
+    run_geometry = None
+    # The log-velocity term the warm start was minimised under, which an
+    # "auto" weight is held to. None without a warm start.
+    warm_objective = None
+
+    # What a target dof outside the warm start's mesh takes, as the forward
+    # does when it loads a MAP from a smaller mesh (ISMIP7_TRANSFER_FILL).
+    # Under `extend` (the default) the controls continue harmonically from
+    # the warm start's outline and the fluidity prior's logarithm does too
+    # (transfer.harmonic_extension), so the bi-Laplacian prior pays nothing
+    # for a step there; the constants below remain only where the extension
+    # cannot reach. Under `constant` they are the fill: the prior for the log
+    # controls (0), and for the fluidity prior mean the constant baseline,
+    # which keeps A = A_prior exp(phi) positive (transfer.py has the
+    # measurement behind that). Same-mesh warm starts miss nothing.
+    warm_fill = {"fluidity_prior": float(A0) * a4_factor}
+    warm_fill_mode = transfer_fill()
+    # name -> extend its logarithm
+    warm_extend = ({"log_friction": False, "log_fluidity": False,
+                    "sqrt_friction": False, "fluidity_prior": True}
+                   if warm_fill_mode == "extend" else {})
 
     def _warm_load(chk, source_mesh, name, space):
         source_field = chk.load_function(source_mesh, name=name)
         target = Function(space, name=name)
-        target.interpolate(
-            source_field,
-            allow_missing_dofs=True,
-            default_missing_val=0.0,
-        )
+        fill = warm_fill.get(name, 0.0)
+        n_missing, n_total, n_clamped = interpolate_with_fill(
+            target, source_field, fill,
+            extend=name in warm_extend, log=warm_extend.get(name, False))
+        if n_missing or n_clamped:
+            how = (f"a harmonic extension{' of its logarithm' if warm_extend[name] else ''} "
+                   f"({fill:g} where it cannot reach)" if name in warm_extend else f"{fill:g}")
+            PETSc.Sys.Print(
+                f"    transfer {name}: {n_missing}/{n_total} target dofs "
+                f"outside the warm start's mesh -> {how}; "
+                f"{n_clamped} clamped to the source range")
         return target
+
+    def _warm_state(chk, source_mesh):
+        # a published MAP's state, else a periodic checkpoint's
+        try:
+            pre = ""
+            u_ws = _warm_load(chk, source_mesh, "velocity", V)
+        except (KeyError, RuntimeError, ValueError):
+            pre = "ckpt_"
+            u_ws = _warm_load(chk, source_mesh, "ckpt_velocity", V)
+        M_ws = _warm_load(chk, source_mesh, f"{pre}membrane_stress",
+                          z.subfunctions[1].function_space())
+        tau_ws = _warm_load(chk, source_mesh, f"{pre}basal_stress",
+                            z.subfunctions[2].function_space())
+        return u_ws, M_ws, tau_ws
 
     if warm_chk:
         PETSc.Sys.Print(f"  Loading warm start from {warm_chk}")
         with fd.CheckpointFile(warm_chk, "r") as chk:
-            chk_mesh = chk.load_mesh()
+            # Under ISMIP7_MESH=checkpoint the compute mesh IS this file's
+            # mesh, so its fields load onto it directly, with no transfer.
+            chk_mesh = mesh if mesh_from_warm else chk.load_mesh()
             if chk.has_attr("/", "full_state_residual"):
                 try:
                     warm_recorded = float(chk.get_attr("/", "full_state_residual"))
                 except (TypeError, ValueError):
                     warm_recorded = None
-            theta.assign(_warm_load(chk, chk_mesh, "log_friction", Q))
-            phi.assign(_warm_load(chk, chk_mesh, "log_fluidity", Q))
+            warm_objective = recorded_objective(chk)
+            _warm_anchor = (float(chk.get_attr("/", "friction_anchor_length"))
+                            if chk.has_attr("/", "friction_anchor_length") else 0.0)
+            _warm_lake = (int(chk.get_attr("/", "lake_ice_base"))
+                          if chk.has_attr("/", "lake_ice_base") else 0)
+            _warm_rs = (str(chk.get_attr("/", "raster_sample")).lower()
+                        if chk.has_attr("/", "raster_sample") else "vertex")
+            for _key in OBJECTIVE_KEYS + OBJECTIVE_RECORD_KEYS:
+                if chk.has_attr("/", _key):
+                    warm_attrs[_key] = chk.get_attr("/", _key)
+            for _key in RELAX_MAP_KEYS + (END_STATE_ATTR, "geometry_source",
+                                          "geometry_source_method", "t_yr", "stalled"):
+                if chk.has_attr("/", _key):
+                    warm_geometry_attrs[_key] = chk.get_attr("/", _key)
+            warm_end_state = bool(int(warm_geometry_attrs.get(END_STATE_ATTR, 0) or 0))
+            if "objective_total" in warm_attrs:
+                PETSc.Sys.Print(
+                    f"    objective recorded at iteration "
+                    f"{int(float(warm_attrs.get('objective_iteration', -1)))}: "
+                    f"total {float(warm_attrs['objective_total']):.6e}")
+            # theta is a log-deviation from the warm start's anchor. Under a
+            # different anchor the same theta is a different friction:
+            # ISMIP7_WARM_START_THETA=0 starts it at the new prior mean, and
+            # =physical rebases it so the friction C_w0 exp(theta) is the warm
+            # start's (the first solve then reproduces the warm start's).
+            _theta_mode = os.environ.get("ISMIP7_WARM_START_THETA", "1").strip()
+            if _theta_mode not in ("0", "1", "physical"):
+                raise ValueError(
+                    f"ISMIP7_WARM_START_THETA={_theta_mode!r}: use 1, 0 or physical")
+            if _theta_mode == "0":
+                PETSc.Sys.Print("    log_friction: prior mean (ISMIP7_WARM_START_THETA=0)")
+            else:
+                theta.assign(_warm_load(chk, chk_mesh, "log_friction", Q))
+                if _theta_mode == "physical":
+                    warm_theta_anchor = _warm_anchor
+                elif _warm_anchor != ANCHOR_LENGTH:
+                    PETSc.Sys.Print(
+                        f"    WARNING: log_friction taken from a MAP whose anchor "
+                        f"length is {_warm_anchor:g} m, not this run's "
+                        f"{ANCHOR_LENGTH:g} m: the same theta means a different "
+                        f"friction. ISMIP7_WARM_START_THETA=physical keeps the "
+                        f"friction; =0 starts at the prior mean.")
+            # =physical keeps the warm start's fluidity under this run's
+            # own prior mean (ISMIP7_FLUIDITY_PRIOR): phi is rebased once the
+            # prior is built, below.
+            _phi_mode = os.environ.get("ISMIP7_WARM_START_PHI", "1").strip()
+            if _phi_mode not in ("0", "1", "physical"):
+                raise ValueError(
+                    f"ISMIP7_WARM_START_PHI={_phi_mode!r}: use 1, 0 or physical")
+            # ISMIP7_WARM_START_FLUIDITY: phi and the prior it deviates from
+            # come from another MAP, so A = A_prior exp(phi) is that MAP's.
+            _fl_chk = warm_start_fluidity()
+            _fl_prior = None
+            _fl_origin = None
+            # the fluidity MAP's raster sampling (the front band's controls)
+            _fl_rs = None
+            # its mixed state, the first guess under ISMIP7_WARM_START_STATE=fluidity
+            _fl_state = None
+            if _phi_mode == "0":
+                if _fl_chk:
+                    raise ValueError(
+                        "ISMIP7_WARM_START_FLUIDITY names a fluidity to start from "
+                        "and ISMIP7_WARM_START_PHI=0 the prior mean: set one")
+                PETSc.Sys.Print("    log_fluidity: prior mean (ISMIP7_WARM_START_PHI=0)")
+            elif _fl_chk:
+                with fd.CheckpointFile(_fl_chk, "r") as _fl:
+                    _fl_fc = (str(_fl.get_attr("/", "fluidity_control")).lower()
+                              if _fl.has_attr("/", "fluidity_control") else "all")
+                    if _fl_fc != FLUIDITY_CONTROL:
+                        raise ValueError(
+                            f"ISMIP7_WARM_START_FLUIDITY={_fl_chk} was inverted "
+                            f"under fluidity_control={_fl_fc}, this run under "
+                            f"{FLUIDITY_CONTROL}")
+                    _fl_rs = (str(_fl.get_attr("/", "raster_sample")).lower()
+                              if _fl.has_attr("/", "raster_sample") else "vertex")
+                    _fl_mesh = _fl.load_mesh()
+                    phi.assign(_warm_load(_fl, _fl_mesh, "log_fluidity", Q))
+                    _fl_prior = _warm_load(_fl, _fl_mesh, "fluidity_prior", Q)
+                    _fl_origin = (str(_fl.get_attr("/", "fluidity_prior_origin"))
+                                  if _fl.has_attr("/", "fluidity_prior_origin")
+                                  else f"warm start {os.path.basename(_fl_chk)}")
+                    if warm_start_state_fluidity(same_mesh=meshes_match(_fl_mesh, mesh)):
+                        _fl_state = _warm_state(_fl, _fl_mesh)
+                PETSc.Sys.Print(
+                    f"    log_fluidity and fluidity_prior from {_fl_chk} "
+                    f"(ISMIP7_WARM_START_FLUIDITY); log_friction from the warm start")
+            else:
+                phi.assign(_warm_load(chk, chk_mesh, "log_fluidity", Q))
+            # A MAP inverted on the sqrt(C) control carries alpha itself; its
+            # log_friction is zero by construction.
+            _warm_fc = (str(chk.get_attr("/", "friction_control"))
+                        if chk.has_attr("/", "friction_control") else "log")
+            warm_exp_alpha = _warm_fc == "exp" and _theta_mode != "0"
+            if _warm_fc == "log" and _theta_mode != "0":
+                # The band a forward bounds a loaded MAP's log controls to
+                # (simulation.py, ISMIP7_MAP_CLIP: 10 at n=3, 6 at n=4). The
+                # 94-iteration sigma=3 MAP carries ~30 spikes up to theta=19
+                # (C x 1e8) at the grounding line, and from them the first
+                # n=1 solve of a sub-element sqrt run wandered at ||F|| 1e13-1e21.
+                _clip = float(os.environ.get(
+                    "ISMIP7_MAP_CLIP", "6.0" if float(n_flow_val) == 4.0 else "10.0"))
+                if _clip > 0.0:
+                    _d = theta.dat.data
+                    _n_clip = COMM_WORLD.allreduce(int((np.abs(_d) > _clip).sum()))
+                    np.clip(_d, -_clip, _clip, out=_d)
+                    if _n_clip:
+                        PETSc.Sys.Print(
+                            f"    log_friction: {_n_clip} node(s) bounded to "
+                            f"|theta|<={_clip:g} (ISMIP7_MAP_CLIP, as a forward does)")
+            if _warm_fc == "sqrt" and _theta_mode != "0":
+                warm_alpha = _warm_load(chk, chk_mesh, "sqrt_friction", Q)
+                PETSc.Sys.Print("    sqrt_friction (alpha) from warm start")
+            # A warm start on this mesh supplies its geometry, observations
+            # and mixed state as well. One from another mesh (a 2 km MAP
+            # warm-starting a 1 km inversion) supplies the controls and the
+            # fluidity prior only: its cell-wise geometry would arrive
+            # blocky, and this mesh's own BedMachine sample and raster
+            # observations are what the forward that loads the MAP will
+            # use. ISMIP7_WARM_START_GEOMETRY=0/1 overrides the default.
+            same_mesh = meshes_match(chk_mesh, mesh)
+            # A MAP inverted before the lake fix carries the lake bowl in its
+            # geometry; taking it would undo the fix, so by default it is not.
+            # Nor does one whose geometry was sampled another way: a front
+            # sampling's cells differ at the front (issue #167), and a refit
+            # from a vertex MAP is how a MAP gets them.
+            warm_geometry = warm_start_geometry(
+                same_mesh=same_mesh, same_lake=_warm_lake == int(LAKE_ICE_BASE),
+                warm_sampling=_warm_rs, run_sampling=raster_sample)
+            if same_mesh and _warm_rs != raster_sample:
+                PETSc.Sys.Print(
+                    f"    warm start records raster_sample={_warm_rs}, this run "
+                    f"{raster_sample}: its geometry is not taken")
+            # The warm start's controls were fitted against the front its own
+            # sampling built. Under ISMIP7_WARM_START_FRONT_EXTEND=1 theta and
+            # phi over the cells the front rule rebuilt or emptied become a
+            # harmonic blend of the ice upstream and the nodes seaward of the
+            # band, which keep the warm start's values, and the refit sets
+            # them afresh (issue #167).
+            # A phi taken from a MAP fitted under a front sampling
+            # (ISMIP7_WARM_START_FLUIDITY) already belongs to this front and
+            # is kept.
+            if front_band_extends(same_mesh=same_mesh, geometry_taken=warm_geometry,
+                                  run_sampling=raster_sample, warm_sampling=_warm_rs):
+                _H_warm_rs = sample_to_geometry(
+                    rasterio.open(f"netcdf:{bm_fn}:thickness"), Q_g, Q,
+                    floor=h_clamp, method=_warm_rs)
+                _front_nodes = front_changed_nodes(H, _H_warm_rs, Q)
+                _band = front_band_controls(_fl_rs if _fl_chk else None)
+                for _name in _band:
+                    harmonic_extension({"theta": theta, "phi": phi}[_name],
+                                       _front_nodes, 0.0, COMM_WORLD)
+                PETSc.Sys.Print(
+                    f"    front band: {' and '.join(_band)} continued harmonically on "
+                    f"{global_count(_front_nodes, COMM_WORLD)} nodes of the cells "
+                    f"the front rule changed, between the ice upstream and the "
+                    f"warm start seaward (ISMIP7_WARM_START_FRONT_EXTEND=1)"
+                    + ("; phi is the fluidity MAP's, fitted under "
+                       f"{_fl_rs}" if "phi" not in _band else ""))
+            if same_mesh and _warm_lake != int(LAKE_ICE_BASE):
+                PETSc.Sys.Print(
+                    f"    warm start records lake_ice_base={_warm_lake}, this run "
+                    f"{int(LAKE_ICE_BASE)}: its geometry is "
+                    + ("taken anyway (ISMIP7_WARM_START_GEOMETRY)" if warm_geometry
+                       else "not taken"))
+            PETSc.Sys.Print(
+                "    warm start is on " + ("this mesh" if same_mesh else "another mesh")
+                + ("; taking its geometry, velocity_obs and state"
+                   if warm_geometry else
+                   "; taking its controls and fluidity prior only "
+                   "(geometry and velocity_obs are this mesh's own)"))
+            if not warm_geometry:
+                raise_geometry = KeyError("warm start geometry not taken")
+            warm_geometry_loaded = False
             try:
+                if not warm_geometry:
+                    raise raise_geometry
                 H.assign(_warm_load(chk, chk_mesh, "thickness", Q_g))
                 b.assign(_warm_load(chk, chk_mesh, "bed", Q_g))
                 s.assign(_warm_load(chk, chk_mesh, "surface", Q_g))
+                warm_geometry_loaded = True
                 PETSc.Sys.Print(
                     "    geometry: thickness/bed/surface from warm start"
                 )
@@ -560,34 +1151,93 @@ def main():
                     "    geometry: keeping BedMachine sample "
                     "(warm start has no thickness/bed/surface)"
                 )
+            # A relaxed geometry (icepack2_tools.relaxation) comes with the
+            # controls fitted to it, so it is taken or the run stops. From a
+            # relaxation's end state the re-inversion keeps the MAP's theta
+            # (IU, 6 Oct 2026, issue #162): the friction then follows the relaxed
+            # driving stress through the anchor, and where basal drag carries
+            # that stress the starting speed stays the MAP's.
+            if warm_end_state:
+                _why = end_state_problems(warm_geometry_attrs, same_mesh=same_mesh,
+                                          geometry_taken=warm_geometry_loaded,
+                                          map_out=map_fn)
+                if _theta_mode == "physical":
+                    _why.append(
+                        "ISMIP7_WARM_START_THETA=physical rebases between anchor "
+                        "lengths on this run's geometry; a re-inversion keeps the "
+                        "MAP's theta, so leave it unset")
+                if _why:
+                    raise RuntimeError(
+                        f"ISMIP7_WARM_START={warm_chk} is a relaxation's end state "
+                        f"that cannot seed this re-inversion: " + "; ".join(_why))
+                if _warm_fc == "log" and _theta_mode == "1":
+                    try:
+                        warm_C_w0 = _warm_load(chk, chk_mesh, "C_w0", Q_g)
+                    except (KeyError, RuntimeError, ValueError):
+                        warm_C_w0 = None
+            if is_relaxed(warm_geometry_attrs):
+                _sha = COMM_WORLD.bcast(
+                    file_sha256(warm_chk) if (warm_end_state and COMM_WORLD.rank == 0)
+                    else None, root=0)
+                run_geometry = inherited_geometry(
+                    warm_geometry_attrs, geometry_taken=warm_geometry_loaded,
+                    warm_basename=os.path.basename(warm_chk), warm_sha256=_sha)
+                PETSc.Sys.Print("    relaxed geometry: " + describe_relaxation(run_geometry))
             try:
+                if not warm_geometry:
+                    raise raise_geometry
                 u_obs.assign(_warm_load(chk, chk_mesh, "velocity_obs", V))
                 PETSc.Sys.Print("    velocity_obs from warm start")
             except (KeyError, RuntimeError, ValueError):
                 pass
-            try:
-                warm_A_prior = _warm_load(
-                    chk, chk_mesh, "fluidity_prior", Q
-                )
-            except (KeyError, RuntimeError, ValueError):
+            # ISMIP7_WARM_START_PRIOR=0 recomputes the thermal prior instead,
+            # e.g. after a change to its physics; phi is kept, as a deviation
+            # from the new prior mean.
+            if _phi_mode == "physical":
+                warm_A_prior_rebase = (_fl_prior if _fl_prior is not None else
+                                       _warm_load(chk, chk_mesh, "fluidity_prior", Q))
                 warm_A_prior = None
+                PETSc.Sys.Print("    fluidity_prior: recomputed below; log_fluidity "
+                                "rebased onto it (ISMIP7_WARM_START_PHI=physical)")
+            elif os.environ.get("ISMIP7_WARM_START_PRIOR", "1").strip() == "0":
+                warm_A_prior = None
+                PETSc.Sys.Print("    fluidity_prior: recomputed below "
+                                "(ISMIP7_WARM_START_PRIOR=0); log_fluidity kept")
+            elif _fl_prior is not None:
+                warm_A_prior = _fl_prior
+                warm_prior_origin = _fl_origin
+            else:
+                try:
+                    warm_A_prior = _warm_load(
+                        chk, chk_mesh, "fluidity_prior", Q
+                    )
+                    warm_prior_origin = (
+                        str(chk.get_attr("/", "fluidity_prior_origin"))
+                        if chk.has_attr("/", "fluidity_prior_origin")
+                        else f"warm start {os.path.basename(warm_chk)}")
+                except (KeyError, RuntimeError, ValueError):
+                    warm_A_prior = None
+            _state_load, warm_state_guess = warm_start_state(
+                geometry_taken=warm_geometry, same_mesh=same_mesh)
             try:
-                u_ws = _warm_load(chk, chk_mesh, "velocity", V)
-                M_ws = _warm_load(
-                    chk, chk_mesh, "membrane_stress",
-                    z.subfunctions[1].function_space(),
-                )
-                tau_ws = _warm_load(
-                    chk, chk_mesh, "basal_stress",
-                    z.subfunctions[2].function_space(),
-                )
+                if _fl_state is not None:
+                    u_ws, M_ws, tau_ws = _fl_state
+                    warm_state_guess = True
+                    _state_from = f"{_fl_chk} (ISMIP7_WARM_START_STATE=fluidity)"
+                elif not _state_load:
+                    raise raise_geometry
+                else:
+                    u_ws, M_ws, tau_ws = _warm_state(chk, chk_mesh)
+                    _state_from = ("warm start (ISMIP7_WARM_START_STATE=1)"
+                                   if warm_state_guess else "warm start")
                 z.subfunctions[0].assign(u_ws)
                 z.subfunctions[1].assign(M_ws)
                 z.subfunctions[2].assign(tau_ws)
                 warm_loaded_z = True
                 PETSc.Sys.Print(
-                    "    mixed state: velocity/membrane/basal from warm start"
-                )
+                    f"    mixed state: velocity/membrane/basal from {_state_from}"
+                    + (", the first guess on this run's geometry"
+                       if warm_state_guess else ""))
             except (KeyError, RuntimeError, ValueError):
                 warm_loaded_z = False
         if warm_loaded_z:
@@ -709,7 +1359,45 @@ def main():
     # Under DG0 geometry the anchor's |grad s| comes from a CG1 reconstruction
     # inside weertman_anchor (a cell-wise surface has no cell gradient); the
     # anchor is a fixed reference scaling, not a force in the residual.
-    C_w0 = weertman_anchor(H, s, u_obs, m_slide_val, Q_g)
+    C_w0 = weertman_anchor(H, s, u_obs, m_slide_val, Q_g, length=ANCHOR_LENGTH, b=b)
+    if warm_C_w0 is not None:
+        # How far the relaxed geometry moved the anchor from the one the
+        # relaxation year ran with: R = C_w0 here / C_w0 there, on grounded
+        # ice. Under the kept theta the first evaluation's friction is the
+        # MAP's times R on these cells.
+        _haf = Function(Q_g).interpolate(height_above_flotation(H, b))
+        _n, _n1, _n3, _sum, _lo, _hi = anchor_ratio_counts(
+            C_w0.dat.data_ro, warm_C_w0.dat.data_ro, _haf.dat.data_ro > 0.0)
+        _n, _n1, _n3 = (COMM_WORLD.allreduce(v) for v in (_n, _n1, _n3))
+        _sum = COMM_WORLD.allreduce(_sum)
+        _lo, _hi = min(COMM_WORLD.allgather(_lo)), max(COMM_WORLD.allgather(_hi))
+        PETSc.Sys.Print(
+            f"  Anchor on the relaxed geometry: ln R over {_n} grounded dofs in "
+            f"[{_lo:.3f}, {_hi:.3f}], mean |ln R| {_sum / max(_n, 1):.4f}, "
+            f"|ln R| > 0.1 on {_n1} ({100.0 * _n1 / max(_n, 1):.2f} %), "
+            f"> 0.3 on {_n3} ({100.0 * _n3 / max(_n, 1):.2f} %)")
+    PETSc.Sys.Print(
+        "  Friction anchor: " + ("local driving stress" if ANCHOR_LENGTH == 0.0 else
+                                 f"grounded driving stress averaged over {ANCHOR_LENGTH / 1e3:g} km"))
+    if warm_theta_anchor is not None and not (warm_exp_alpha and FRICTION_CONTROL == "exp"):
+        # The warm start's anchor, rebuilt on this run's geometry, and its theta
+        # moved onto this run's anchor: the friction the first solve sees is the
+        # warm start's wherever the geometry is the same. An exp-control MAP's
+        # anchor is its constant C_ref; an exp-control run keeps it as is.
+        if warm_exp_alpha:
+            C_prev = Function(Q_g).assign(Constant(float(warm_attrs["friction_c_ref"])))
+            _from = "the exp control's C_ref"
+        else:
+            C_prev = weertman_anchor(H, s, u_obs, m_slide_val, Q_g,
+                                     length=warm_theta_anchor, b=b)
+            _from = f"a {warm_theta_anchor / 1e3:g} km anchor"
+        theta_prev = theta.copy(deepcopy=True)
+        theta.assign(rebase_log_friction(theta_prev, C_prev, C_w0, H, b))
+        warm_exp_alpha = False
+        _shift = Function(Q).interpolate(abs(theta - theta_prev))
+        PETSc.Sys.Print(
+            f"    log_friction rebased from {_from} onto "
+            f"this run's: |shift| mean {global_mean(_shift):.3f}, max {global_max(_shift):.2f}")
     # Budd pins N_hat=1 at the inversion geometry; freeze N_ref with the MAP /
     # timing-cache so forwards reproduce the inverted friction at t=0.
     N_ref = None
@@ -724,11 +1412,133 @@ def main():
                     else f"regularized Coulomb (c0={C0_RC})")
         C_w0_lo, C_w0_hi = global_range(C_w0)
         PETSc.Sys.Print(
-            f"  Friction: {law_name}; h_visc_floor={RC_HVISC_FLOOR:.0f}m; "
+            f"  Friction: {law_name}; h_visc_floor={RC_HVISC_FLOOR:g} m; "
             f"C_w0 in [{C_w0_lo:.2e}, {C_w0_hi:.2e}]"
         )
     else:
         PETSc.Sys.Print("  Friction: Budd power-law dual (legacy action)")
+
+    # ── sqrt(C) friction control (ISMIP7_FRICTION_CONTROL=sqrt) ───────────
+    # theta now IS alpha = sqrt(C). It starts from the friction the anchor
+    # (and any warm-started log deviation, rebased above) describes, or from
+    # the alpha of a warm start inverted on this control. The prior mean is
+    # zero, so nothing but the start remembers the anchor.
+    sigma_alpha_val = None
+    if (FRICTION_CONTROL in ("sqrt", "exp") and PRIOR_SIGMA_ALPHA == "auto"
+            and "prior_sigma_alpha" in warm_attrs
+            and frozen_in_control(warm_attrs, "prior_sigma_alpha", FRICTION_CONTROL) is None):
+        PETSc.Sys.Print(
+            f"    sigma_alpha of the warm start ({warm_attrs['prior_sigma_alpha']}) is in the "
+            f"{warm_attrs.get('friction_control', 'log')} control's units; not reused")
+    if FRICTION_CONTROL == "sqrt":
+        C_cg = cg1_lift(C_w0) if geom_dg else C_w0
+        if warm_alpha is not None:
+            theta.assign(warm_alpha)
+        elif warm_exp_alpha:
+            theta.interpolate(sqrt(Constant(float(warm_attrs["friction_c_ref"])) * exp(theta)))
+        else:
+            theta.interpolate(sqrt(max_value(C_cg * exp(theta), Constant(0.0))))
+        theta.rename("alpha")
+        H_cg = cg1_lift(H) if geom_dg else H
+        b_cg = cg1_lift(b) if geom_dg else b
+        _haf = Function(Q).interpolate(height_above_flotation(H_cg, b_cg)).dat.data_ro
+        _grounded = (_haf > 0.0) & (H_cg.dat.data_ro > 10.0)
+        _alpha_grounded = np.concatenate(COMM_WORLD.allgather(
+            np.asarray(theta.dat.data_ro[_grounded], dtype=float)))
+        _alpha_median = (float(np.median(_alpha_grounded))
+                         if _alpha_grounded.size else float("nan"))
+        # frozen within one control: re-deriving it from the warm-started
+        # alpha would change the objective between links
+        _warm_sigma = frozen_in_control(warm_attrs, "prior_sigma_alpha", FRICTION_CONTROL)
+        if PRIOR_SIGMA_ALPHA == "auto" and _warm_sigma is not None:
+            sigma_alpha_val = _warm_sigma
+            PETSc.Sys.Print(f"    sigma_alpha frozen from the warm start: {sigma_alpha_val:.4e}")
+        elif PRIOR_SIGMA_ALPHA == "auto":
+            sigma_alpha_val = _alpha_median
+        else:
+            sigma_alpha_val = float(PRIOR_SIGMA_ALPHA)
+        if not sigma_alpha_val > 0.0:
+            raise ValueError(
+                f"the prior sigma for alpha must be positive, got {sigma_alpha_val}")
+        _a_lo, _a_hi = global_range(theta)
+        PETSc.Sys.Print(
+            f"  Friction control: alpha = sqrt(C) with a zero prior mean "
+            f"(Recinos et al. 2023); initial alpha in [{_a_lo:.3e}, {_a_hi:.3e}], "
+            f"grounded median {_alpha_median:.3e}; sigma_alpha={sigma_alpha_val:.3e} "
+            f"({PRIOR_SIGMA_ALPHA}), rho_theta={PRIOR_RHO_THETA:g} m")
+    elif FRICTION_CONTROL == "exp":
+        # theta now IS alpha = ln(C / C_ref). It starts from the friction the
+        # loaded state describes (the anchor with any log deviation, the
+        # alpha^2 of a sqrt-control MAP, or the alpha of an exp-control MAP,
+        # which is already this control) and the prior mean is zero.
+        C_cg = cg1_lift(C_w0) if geom_dg else C_w0
+        if warm_exp_alpha:
+            C_start = Function(Q).interpolate(
+                Constant(float(warm_attrs["friction_c_ref"])) * exp(theta))
+        elif warm_alpha is not None:
+            C_start = Function(Q).interpolate(warm_alpha ** 2)
+        else:
+            C_start = Function(Q).interpolate(C_cg * exp(theta))
+        H_cg = cg1_lift(H) if geom_dg else H
+        b_cg = cg1_lift(b) if geom_dg else b
+        _haf = Function(Q).interpolate(height_above_flotation(H_cg, b_cg)).dat.data_ro
+        _grounded = (_haf > 0.0) & (H_cg.dat.data_ro > 10.0)
+        _C_grounded = np.concatenate(COMM_WORLD.allgather(
+            np.asarray(C_start.dat.data_ro[_grounded], dtype=float)))
+        _C_median = (float(np.median(_C_grounded)) if _C_grounded.size else float("nan"))
+        _warm_c_ref = frozen_in_control(warm_attrs, "friction_c_ref", FRICTION_CONTROL)
+        if _warm_c_ref is not None:
+            # frozen: the control is a deviation from THIS reference
+            c_ref_val = _warm_c_ref
+            PETSc.Sys.Print(f"    C_ref frozen from the warm start: {c_ref_val:.4e}")
+        elif C_REF == "auto":
+            c_ref_val = _C_median
+        else:
+            c_ref_val = float(C_REF)
+        if not c_ref_val > 0.0:
+            raise ValueError(f"the friction reference C_ref must be positive, got {c_ref_val}")
+        # ln floors at 1e-4 C_ref (alpha >= -9.2): the anchor is ~0 under
+        # some grounded nodes, and -inf is not a start. Floating and ice-free
+        # nodes, where the friction is inert, start at the prior mean. A chain
+        # link from an exp-control warm start resumes its alpha unchanged.
+        if not warm_exp_alpha:
+            theta.interpolate(ln(max_value(C_start, Constant(1e-4 * c_ref_val)) / Constant(c_ref_val)))
+            theta.dat.data[~_grounded] = 0.0
+        theta.rename("alpha")
+        _warm_sigma = frozen_in_control(warm_attrs, "prior_sigma_alpha", FRICTION_CONTROL)
+        if PRIOR_SIGMA_ALPHA == "auto" and _warm_sigma is not None:
+            sigma_alpha_val = _warm_sigma
+            PETSc.Sys.Print(f"    sigma_alpha frozen from the warm start: {sigma_alpha_val:.4e}")
+        elif PRIOR_SIGMA_ALPHA == "auto":
+            sigma_alpha_val = 1.0
+        else:
+            sigma_alpha_val = float(PRIOR_SIGMA_ALPHA)
+        if not sigma_alpha_val > 0.0:
+            raise ValueError(
+                f"the prior sigma for alpha must be positive, got {sigma_alpha_val}")
+        _a_lo, _a_hi = global_range(theta)
+        PETSc.Sys.Print(
+            f"  Friction control: C = C_ref exp(alpha) with a zero prior mean on alpha; "
+            f"C_ref={c_ref_val:.3e} ({C_REF}; grounded median of the start {_C_median:.3e}), "
+            f"initial alpha in [{_a_lo:.3f}, {_a_hi:.3f}]; sigma_alpha={sigma_alpha_val:.3g} "
+            f"log units ({PRIOR_SIGMA_ALPHA}), rho_theta={PRIOR_RHO_THETA:g} m")
+    elif warm_exp_alpha:
+        # an exp-control MAP warm-starting a log-control run: its alpha is a
+        # deviation from C_ref; rebase it onto THIS anchor
+        C_cg = cg1_lift(C_w0) if geom_dg else C_w0
+        theta.interpolate(ln(max_value(Constant(float(warm_attrs["friction_c_ref"])) * exp(theta),
+                                       Constant(1e-12))
+                             / max_value(C_cg, Constant(1e-12))))
+        PETSc.Sys.Print("    log_friction rebuilt from the warm start's exp control: "
+                        "theta = ln(C_ref exp(alpha) / C_w0)")
+    elif warm_alpha is not None:
+        # a sqrt-control MAP warm-starting a log-control run: the deviation
+        # from THIS anchor that reproduces its friction on grounded ice
+        C_cg = cg1_lift(C_w0) if geom_dg else C_w0
+        theta.interpolate(ln(max_value(warm_alpha ** 2, Constant(1e-12))
+                             / max_value(C_cg, Constant(1e-12))))
+        PETSc.Sys.Print("    log_friction rebuilt from the warm start's alpha: "
+                        "theta = ln(alpha^2 / C_w0)")
 
     # Physical FLUIDITY PRIOR MEAN A_prior(x): a fixed-velocity thermomechanical
     # (Stefan enthalpy) solve at the observed geometry/velocity, so the control
@@ -739,15 +1549,58 @@ def main():
     # When warm-starting from a prepare cache / MAP that already carries
     # fluidity_prior, reuse it: phi = log(A/A_prior) is meaningless against a
     # freshly recomputed prior.
+    prior_origin = "constant A0*a4_factor"
     if warm_A_prior is not None:
         A_prior = warm_A_prior
+        prior_origin = warm_prior_origin or "warm start"
+        if FLUIDITY_PRIOR != "thermo":
+            PETSc.Sys.Print(
+                f"    WARNING: ISMIP7_FLUIDITY_PRIOR={FLUIDITY_PRIOR} but the warm "
+                "start's fluidity_prior is kept (ISMIP7_WARM_START_PRIOR=0 recomputes)")
         A_prior.rename("fluidity_prior")
         A_prior_lo, A_prior_hi = global_range(A_prior)
         PETSc.Sys.Print(
             f"  Fluidity prior A_prior in [{A_prior_lo:.2f}, "
             f"{A_prior_hi:.2f}] (from warm start)"
         )
-    elif os.environ.get("ISMIP7_FLUIDITY_PRIOR", "thermo") == "thermo":
+    elif FLUIDITY_PRIOR == "pattyn":
+        from icepack2_tools.rheology_prior import (
+            column_fill_temperature, fluidity_prior_from_temperature_raster)
+        _pattyn_fn = os.environ.get(
+            "ISMIP7_PATTYN_TEMP", os.path.join(DATA_DIR, "temp", "Pattyn_2013.tif"))
+        if not os.path.exists(_pattyn_fn):
+            raise FileNotFoundError(
+                f"ISMIP7_FLUIDITY_PRIOR=pattyn: temperature raster {_pattyn_fn} "
+                "not found (ISMIP7_PATTYN_TEMP names it)")
+        # The raster is defined only under BedMachine ice (outside it is an
+        # extrapolation halo); nodes it does not define take a column
+        # temperature from the surface-temperature climatology and the
+        # flotation state, on the same CG1 geometry the thermal prior uses.
+        _H_cg = cg1_lift(H) if geom_dg else H
+        _b_cg = cg1_lift(b) if geom_dg else b
+        _T_fill = column_fill_temperature(
+            load_mean_annual_surface_temperature(Q), _H_cg, _b_cg, Q)
+        A_prior, _pinfo = fluidity_prior_from_temperature_raster(
+            _pattyn_fn, Q, bm_fn=bm_fn, fill=_T_fill)
+        _ice_node = _H_cg.dat.data_ro > 10.0
+        _n_fill = COMM_WORLD.allreduce(int(_pinfo["nodes_filled"]))
+        _n_fill_ice = COMM_WORLD.allreduce(int((_pinfo["filled"] & _ice_node).sum()))
+        _n_ice = COMM_WORLD.allreduce(int(_ice_node.sum()))
+        _n_tot = COMM_WORLD.allreduce(int(_pinfo["nodes_total"]))
+        prior_origin = (
+            "rate_factor of the depth-averaged Pattyn temperature "
+            f"({os.path.basename(_pattyn_fn)}) under BedMachine ice, column "
+            "temperature from the surface climatology where it is undefined; "
+            "no strain heating, geothermal flux or water content of our own")
+        A_prior_lo, A_prior_hi = global_range(A_prior)
+        PETSc.Sys.Print(
+            f"  Fluidity prior A_prior in [{A_prior_lo:.2f}, {A_prior_hi:.2f}] "
+            f"(Pattyn depth-averaged temperature {_pattyn_fn}: "
+            f"{_pinfo['pixels_replaced']} of {_pinfo['pixels_total']} pixels are "
+            "undefined - outside BedMachine ice, missing or outside [200, 273.15] K; "
+            f"{_n_fill} of {_n_tot} nodes took the surface-climatology column "
+            f"temperature, {_n_fill_ice} of the {_n_ice} nodes with more than 10 m of ice)")
+    elif FLUIDITY_PRIOR == "thermo":
         acc_prior = load_racmo_smb_climatology(Q)
         T_srf = load_mean_annual_surface_temperature(Q)
         # The thermal prior is a smooth englacial calculation and it is the
@@ -773,6 +1626,8 @@ def main():
         A_prior = compute_fluidity_prior(
             u_obs, H_th, s_th, b_th, C_th, acc_prior, T_srf
         )
+        prior_origin = ("thermomechanical; over water the base is at the ice-ocean melting point "
+                        "and supplies nothing more (no friction, no geothermal flux, no water content)")
         A_prior.rename("fluidity_prior")
         A_prior_lo, A_prior_hi = global_range(A_prior)
         PETSc.Sys.Print(
@@ -782,19 +1637,16 @@ def main():
     else:
         A_prior = Function(Q, name="fluidity_prior").interpolate(A0 * Constant(a4_factor))
         PETSc.Sys.Print("  Fluidity prior: constant A0*a4_factor (legacy)")
+    if warm_A_prior_rebase is not None:
+        _phi_prev = phi.copy(deepcopy=True)
+        phi.interpolate(phi + ln(max_value(warm_A_prior_rebase, Constant(1e-30))
+                                 / max_value(A_prior, Constant(1e-30))))
+        _shift = Function(Q).interpolate(phi - _phi_prev)
+        _s_lo, _s_hi = global_range(_shift)
+        PETSc.Sys.Print(
+            f"    log_fluidity rebased onto this prior (A kept): shift in "
+            f"[{_s_lo:.2f}, {_s_hi:.2f}], mean {global_mean(_shift):.3f}")
     A4_base = A_prior
-    # The MAP name carries BOTH the flow exponent and the geometry space it was
-    # inverted under, so n=3/n=4 and DG0/CG1 MAPs coexist on disk and a forward
-    # cannot silently pair itself with a MAP whose front treatment differs.
-    # Built by the shared helper the forward and the preflight gates use.
-    # ISMIP7_MAP_OUT overrides the full output path: without it, EVERY run --
-    # including a short smoke test -- writes to the production filename, and a
-    # 3-iteration artifact silently replaces a converged MAP (this nearly
-    # happened twice in Aug 2026 validation). Variant MAPs (e.g. the transient
-    # dH/dt-constrained inversion) should also name themselves distinctly here
-    # rather than shadow the velocity-only MAP the forwards auto-load.
-    map_out = os.environ.get("ISMIP7_MAP_OUT")
-    map_fn = os.path.basename(map_out) if map_out else map_basename(FRICTION, lc)
     # A bare filename (ISMIP7_MAP_OUT=map.h5) has no dirname; resolve it under
     # MESH_DIR like the non-override path rather than silently against the CWD.
     _map_dir = (os.path.dirname(map_out) or MESH_DIR) if map_out else MESH_DIR
@@ -831,38 +1683,207 @@ def main():
         "  Residual stabilizers (shared with the forward): "
         + ", ".join(f"{key}={value:g}" for key, value in stabilizers.items())
     )
+    # The forward's ocean-drag gate (front.ocean_drag_cells) on the geometry
+    # this inversion fits, which is the forward's t=0 extent: the drag acts
+    # only in open water a cell away from the ice, so the controls are fitted
+    # to the same free front, with no drag under any floating ice, that the
+    # forward then runs. Without it the MAP learned a front the drag held at
+    # a tenth of its observed speed.
+    drag_mask = Function(FunctionSpace(mesh, "DG", 0), name="drag_mask")
+    _ice = Function(drag_mask.function_space()).project(H).dat.data_ro >= front_hmin()
+    # ISMIP7_DRAG_GATE=vertex also keeps it off water cells that touch the
+    # ice at a vertex, whose drag acts on the ice's own front nodes.
+    DRAG_GATE = drag_gate()
+    _neighbours = (vertex_neighbours if DRAG_GATE == "vertex" else facet_neighbours)
+    drag_mask.dat.data[:] = ocean_drag_cells(
+        _ice, _neighbours(drag_mask.function_space()), _ice)
+    _n_drag = COMM_WORLD.allreduce(int(drag_mask.dat.data_ro.sum()))
+    PETSc.Sys.Print(
+        f"  Ocean drag gate: {_n_drag} "
+        f"of {COMM_WORLD.allreduce(int(drag_mask.dat.data_ro.size))} cells, open water "
+        f"a cell away from the ice (h < {front_hmin():g} m, ISMIP7_DRAG_GATE={DRAG_GATE})"
+    )
+    # The gate the controls absorbed, which a forward then runs
+    # (runconfig.forward_drag_gate): none when no cell was dragged.
+    DRAG_RECORD = (DRAG_GATE if _n_drag and stabilizers["ocean_drag"] > 0.0
+                   else DRAG_GATE_NONE)
 
-    def build_F(theta_c, phi_c):
+    subelement = None
+    if SUBELEMENT_FRICTION:
+        from icepack2_tools.subelement import ice_indicator, subelement_from_geometry
+        subelement = subelement_from_geometry(
+            mesh, H, b, ice=ice_indicator(H, front_hmin()))
+        _fr = subelement.fraction.dat.data_ro
+        _n_part = COMM_WORLD.allreduce(int(((_fr > 0.0) & (_fr < 1.0)).sum()))
+        _n_full = COMM_WORLD.allreduce(int((_fr == 1.0).sum()))
+        PETSc.Sys.Print(
+            f"  Sub-element grounding (ISSM {SUBELEMENT_SCHEME.upper()} version "
+            f"{SUBELEMENT_SCHEME_VERSION}, icepack_tools): {_n_full} cells fully "
+            f"grounded, {_n_part} partly grounded; {FRICTION} runs with N_hat = 1 on the "
+            f"grounded part (no N_ref, no delta floor); exact front push "
+            f"{f'version {EXACT_FRONT}' if EXACT_FRONT else 'off'}")
+
+    _zero_theta = Constant(0.0)
+    # the smooth grounded indicator of THIS geometry, for a floating-only
+    # fluidity control (UFL on the cell fields; the residual builds its own
+    # copy for the friction gate)
+    _He_phi = grounded_mask(H, b) if FLUIDITY_CONTROL == "floating" else None
+    # The nodes phi may move on; the rest hold phi = 0 (see FLUIDITY_CONTROL).
+    phi_free = None
+    if _He_phi is not None:
+        phi_free = floating_control_nodes(H, b, Q)
+        phi.dat.data[:] = phi.dat.data_ro * phi_free.dat.data_ro
+        _n_free = COMM_WORLD.allreduce(int(phi_free.dat.data_ro.sum()))
+        _n_all = COMM_WORLD.allreduce(int(phi_free.dat.data_ro.size))
+        PETSc.Sys.Print(
+            f"  Fluidity control: phi acts on floating ice only and is held at 0 "
+            f"on {_n_all - _n_free} of {_n_all} nodes (grounded ice keeps the "
+            f"prior fluidity)")
+
+    def build_F(theta_c, phi_c, *, scpc_blocks=state_scpc):
+        F_c = _build_residual(theta_c, phi_c)
+        return with_scpc_blocks(F_c, z) if scpc_blocks else F_c
+
+    def _build_residual(theta_c, phi_c):
         # Residual closure (tau linear, grounded-only theta via exp(theta*He),
         # exact-zero shelves): budd -> N_hat=1 at the reference geometry;
         # regularized_coulomb -> Coulomb cap. Legacy budd -> action derivative.
         if USE_RESIDUAL:
+            if FRICTION_CONTROL == "sqrt":
+                # C = alpha^2 outright; the He-gated log deviation is zero
+                theta_arg, C_arg = _zero_theta, theta_c ** 2
+            elif FRICTION_CONTROL == "exp":
+                # C = C_ref exp(alpha) outright, as the sqrt control passes
+                # alpha^2: the residual's He gate on a log deviation would
+                # otherwise pull the friction to C_ref across the grounding
+                # band, which is the anchor's role under `log` and no one's here
+                theta_arg, C_arg = _zero_theta, Constant(c_ref_val) * exp(theta_c)
+            else:
+                theta_arg, C_arg = theta_c, C_w0
+            if _He_phi is not None:
+                phi_c = phi_c * (Constant(1.0) - _He_phi)
+            if subelement is not None:
+                from icepack2_tools.subelement import build_subelement_residual
+                return build_subelement_residual(
+                    z, theta_arg, phi_c, H=H, s=s, b=b, C_w0=C_arg,
+                    A4_base=A4_base, n_flow=n_flow, n_flow_val=n_flow_val,
+                    m_slide=m_slide_val, tau_c=tau_c, alpha=alpha_reg, H_ref=H_ref,
+                    subelement=subelement, scheme=SUBELEMENT_SCHEME,
+                    fric_law=FRICTION, nhat_cap=BUDD_NHAT_CAP,
+                    alpha_gl=ALPHA_GL, c_w0_floor=RC_CW0_FLOOR,
+                    h_visc_floor=RC_HVISC_FLOOR, k_lim=0.0, **stabilizers,
+                    drag_mask=drag_mask,
+                    calving_ids=calving_ids if use_calving_terminus else None,
+                    exact_front=EXACT_FRONT,
+                )
             return build_rc_residual(
-                z, theta_c, phi_c, H=H, s=s, b=b, C_w0=C_w0,
+                z, theta_arg, phi_c, H=H, s=s, b=b, C_w0=C_arg,
                 A4_base=A4_base, n_flow=n_flow, n_flow_val=n_flow_val,
                 m_slide=m_slide_val, tau_c=tau_c, alpha=alpha_reg, H_ref=H_ref,
                 fric_law=FRICTION, N_ref=None,
                 nhat_floor=BUDD_DELTA, nhat_cap=BUDD_NHAT_CAP, alpha_gl=ALPHA_GL,
                 c0=C0_RC, c_w0_floor=RC_CW0_FLOOR, h_visc_floor=RC_HVISC_FLOOR,
-                k_lim=0.0, **stabilizers,
+                k_lim=0.0, **stabilizers, drag_mask=drag_mask,
                 calving_ids=calving_ids if use_calving_terminus else None,
+                exact_front=EXACT_FRONT, front_hmin=front_hmin(),
             )
         return derivative(_build_action(theta_c, phi_c, fields), z)
 
+    if EXACT_FRONT and not SUBELEMENT_FRICTION:
+        PETSc.Sys.Print(
+            f"  Exact cliff push on internal fronts (ISMIP7_EXACT_FRONT={EXACT_FRONT}, "
+            "dual_friction.front_cliff_correction: "
+            f"{'the free-cliff push' if EXACT_FRONT == 1 else 'the face above the neighbour bed'})")
     if use_calving_terminus:
         PETSc.Sys.Print("  Using calving_terminus BC")
     else:
         PETSc.Sys.Print("  NO calving_terminus BC (buffered mesh, h=0 at front)")
     F = build_F(theta, phi)
+    # The startup ramp's residual, with the blocks its own solver wants.
+    F_ramp = (F if lane_scpc == state_scpc
+              else build_F(theta, phi, scpc_blocks=lane_scpc))
+
+    def _untaped_state_solver(F_form, params):
+        """An unannotated solve of F_form under the taped solve's mode: under
+        scpc_* with the Jacobian frozen at the Newton iterate, as the taped
+        solve and the transient run it (preconditioners.frozen_linearization;
+        tlm_adjoint refuses its callback while annotating, so call this with
+        the manager stopped)."""
+        J_form, pre_jacobian = None, None
+        if state_solver_mode.startswith("scpc_"):
+            J_form, pre_jacobian = frozen_linearization(F_form, z)
+        return NonlinearVariationalSolver(
+            NonlinearVariationalProblem(
+                F_form, z, J=J_form, form_compiler_parameters=fc_params),
+            solver_parameters=params,
+            pre_jacobian_callback=pre_jacobian,
+        )
 
     # ── Warm start ──
     stop_manager()
-    prob = NonlinearVariationalProblem(F, z, form_compiler_parameters=fc_params)
-    slvr = NonlinearVariationalSolver(prob, solver_parameters=sparams)
+    slvr = _untaped_state_solver(F, sparams)
     n_flow.assign(n_flow_val)
     m_slide.assign(m_slide_val)
+    ramp_params = diagnostic_solver_parameters(lane_solver_mode)
+    ramp_params.update(_monitor_options)
+    ramp_J, ramp_pre_jacobian = None, None
+    if linearization_state(lane_solver_mode) == "frozen":
+        ramp_J, ramp_pre_jacobian = frozen_linearization(F_ramp, z)
+    ramp_solver = NonlinearVariationalSolver(
+        NonlinearVariationalProblem(
+            F_ramp, z, J=ramp_J, form_compiler_parameters=fc_params
+        ),
+        solver_parameters=ramp_params,
+        options_prefix="ismip7_inversion_continuation_",
+        pre_jacobian_callback=ramp_pre_jacobian,
+    )
+    ramp_ladder = ladder(continuation_steps())
+    # The sliding exponent a ramp starts from: 1, or its target under
+    # ISMIP7_RAMP_SLIDE_FIXED=1 (issue #167).
+    ramp_m_start = m_slide_val if ramp_slide_fixed() else 1.0
+    def _ramp_solve(attempt, step, steps, t):
+        t0 = perf_counter()
+        try:
+            ramp_solver.solve()
+        finally:
+            snes = ramp_solver.snes
+            PETSc.Sys.Print(
+                f"    rung {attempt} step {step}/{steps} "
+                f"n_flow={float(n_flow):.4g} m_slide={float(m_slide):.4g}: "
+                f"{_snes_reason_name(snes.getConvergedReason())} "
+                f"snes_its={snes.getIterationNumber()} "
+                f"linear_its={snes.getLinearSolveIterations()} "
+                f"fnorm={snes.getFunctionNorm():.3e} "
+                f"{perf_counter() - t0:.1f}s"
+            )
+
+
+    def _reramp_at_current_controls():
+        r"""Re-climb the exponent ladder, unannotated, at the controls the
+        module-level (theta, phi) hold, from the state z holds: the rescue
+        for a line-search trial point where the single Newton solve of the
+        annotated forward diverges (the 32 km sum-likelihood run stopped at
+        iteration 5 on three such trials). Leaves the exponents at their
+        targets whatever happens."""
+        try:
+            _, steps = ramp_exponents(
+                _ramp_solve, z, n_flow, m_slide, n_flow_val, m_slide_val,
+                ramp_ladder[:trial_rescue_rungs()], report=PETSc.Sys.Print,
+                m_start=ramp_m_start)
+        finally:
+            n_flow.assign(n_flow_val)
+            m_slide.assign(m_slide_val)
+        return steps
+
     if skip_continuation:
-        if warm_loaded_z:
+        if warm_loaded_z and warm_state_guess:
+            PETSc.Sys.Print(
+                f"Warm start: the loaded mixed state is the first guess at full "
+                f"n_flow={n_flow_val:.1f}, m_slide={m_slide_val:.1f}; the first "
+                f"evaluation's forward solves it on this geometry (no 1→n "
+                f"continuation)"
+            )
+        elif warm_loaded_z:
             PETSc.Sys.Print(
                 f"Warm start: accepting loaded mixed state at full "
                 f"n_flow={n_flow_val:.1f}, m_slide={m_slide_val:.1f} "
@@ -875,17 +1896,29 @@ def main():
             )
             slvr.solve()
     else:
-        # Ramp n_flow (1 → n_flow_val) and m_slide (1 → m_slide_val) together.
-        # Single solve at full exponents can fail from a cold (u≈0) guess.
+        # Ramp n_flow (1 → n_flow_val) and m_slide (1 → m_slide_val) together:
+        # a single solve at the full exponents can fail from a cold (u≈0)
+        # guess. The ramp is not annotated, so it runs under the lane's
+        # diagnostic solver (ISMIP7_DIAGNOSTIC_LINEAR_SOLVER), the one the
+        # forward that loads this MAP cold-starts with, and climbs the
+        # transient's step ladder. The selected inversion solver takes over at
+        # the converged state. On the 1 km production mesh the full-Jacobian
+        # MUMPS factorisation failed mid-ramp
+        # (DIVERGED_LINEAR_SOLVE, job 1612624) where the forward's condensed
+        # GAMG had climbed the same ramp on the same mesh and MAP.
         PETSc.Sys.Print(
             f"Warm start (continuation n_flow 1→{n_flow_val:.1f}, "
-            f"m_slide 1→{m_slide_val:.1f})..."
+            f"m_slide {ramp_m_start:g}→{m_slide_val:.1f}; "
+            f"{diagnostic_solver_label(lane_solver_mode)}, "
+            f"{linearization_state(lane_solver_mode)} linearization, "
+            f"steps {'/'.join(str(s) for s in ramp_ladder)})..."
         )
-        for t in np.linspace(0.0, 1.0, 5):
-            n_flow.assign(1.0 + t * (n_flow_val - 1.0))
-            m_slide.assign(1.0 + t * (m_slide_val - 1.0))
-            slvr.solve()
-        PETSc.Sys.Print("  Done")
+
+        _, ramp_steps = ramp_exponents(
+            _ramp_solve, z, n_flow, m_slide, n_flow_val, m_slide_val,
+            ramp_ladder, report=PETSc.Sys.Print, m_start=ramp_m_start,
+        )
+        PETSc.Sys.Print(f"  Done ({ramp_steps} continuation steps)")
 
     # Forward-solve tolerance. Now that the stabilizers are shared, a
     # prepared warm start is already a converged solution of THIS F, so the
@@ -927,9 +1960,10 @@ def main():
     # is the prior's alone and L-BFGS pulls the controls toward the prior
     # means while the misfit rises (job 10432790, 2026-09-14: adjoint time
     # 25 s -> 0.7 s, |grad| 47 -> 12, misfit +7% in four evaluations).
-    adjoint_sparams = {
-        key: value for key, value in sparams.items() if key != "snes_atol"
-    }
+    # The same rule drops every SNES option: under scpc_* tlm_adjoint hands
+    # these to a LinearVariationalSolver, which a forward's newtonls would
+    # turn into a line-searched Newton solve (inversion_adjoint_parameters).
+    adjoint_sparams = inversion_adjoint_parameters(sparams)
 
     u_init = z.subfunctions[0]
     u_mag = Function(Q).interpolate(sqrt(inner(u_init, u_init)))
@@ -939,6 +1973,45 @@ def main():
     # Normalize by the OBSERVED area so the misfit magnitude stays
     # comparable between masked and unmasked runs.
     area_val = assemble(obs_mask * dx(mesh))
+
+    # ISMIP7_DHDT_REWEIGHT (a, 0 = off): the velocity chi^2 of a node is
+    # multiplied by 1 + a * min(|dH/dt_obs| / ISMIP7_DHDT_REWEIGHT_SCALE, 1)
+    # on grounded ice, so the observed thinning steers where the velocity
+    # fit is spent instead of entering the objective as a tendency to match
+    # (ISMIP7_DHDT_WEIGHT). The two can be combined. The Smith field is
+    # binned to the cells and lifted to the nodes; cells without coverage
+    # weigh 1. Recorded as dhdt_reweight; part of the objective.
+    DHDT_REWEIGHT = float(os.environ.get("ISMIP7_DHDT_REWEIGHT", "0"))
+    DHDT_REWEIGHT_SCALE = float(os.environ.get("ISMIP7_DHDT_REWEIGHT_SCALE", "1.0"))
+    vel_weight = None
+    if DHDT_REWEIGHT > 0.0:
+        from icepack2_tools.obs_dhdt import load_dhdt_obs as _load_dhdt_obs_w
+        _dobs, _dcov = _load_dhdt_obs_w(Q_g)
+        _haf_w = Function(Q_g).interpolate(height_above_flotation(H, b))
+        _k = Function(Q_g)
+        _k.dat.data[:] = np.where(
+            (_dcov.dat.data_ro > 0.5) & (_haf_w.dat.data_ro > 0.0) & (H.dat.data_ro > 1.0),
+            np.minimum(np.abs(_dobs.dat.data_ro) / DHDT_REWEIGHT_SCALE, 1.0), 0.0)
+        _k_cg = cg1_lift(_k) if geom_dg else _k
+        vel_weight = Function(Q, name="vel_weight").interpolate(
+            Constant(1.0) + Constant(DHDT_REWEIGHT) * _k_cg)
+        _wsum = assemble(obs_mask * vel_weight * dx(mesh)) / area_val
+        PETSc.Sys.Print(
+            f"  dH/dt re-weighting: velocity chi^2 x (1 + {DHDT_REWEIGHT:g} "
+            f"min(|dH/dt|/{DHDT_REWEIGHT_SCALE:g} m/yr, 1)) on grounded ice; "
+            f"mean weight over observed nodes {_wsum:.3f}")
+    # ISMIP7_MISFIT_SCALE: the multiplier that turns the mean chi^2 into the
+    # likelihood the prior is weighed against (see the knob's comment).
+    if MISFIT_SCALE == "nodes":
+        misfit_scale = float(COMM_WORLD.allreduce(
+            int((obs_mask.dat.data_ro > 0.5).sum())))
+    else:
+        misfit_scale = float(MISFIT_SCALE)
+    if not misfit_scale > 0.0:
+        raise ValueError(f"ISMIP7_MISFIT_SCALE resolved to {misfit_scale}, not positive")
+    PETSc.Sys.Print(
+        f"  Misfit scale: {misfit_scale:g} x the mean chi^2 "
+        f"({'sum over observed nodes' if MISFIT_SCALE == 'nodes' else 'ISMIP7_MISFIT_SCALE'})")
 
     # ── Prior operators (ISMIP7_PRIOR_FORM) ──────────────────────────────
     # The single place that answers, for whichever form is active: the prior
@@ -959,15 +2032,18 @@ def main():
     # operator does not possess.
     _prior_test = TestFunction(Q)
     if PRIOR_FORM == "bilaplacian":
+        _sigma_theta = (sigma_alpha_val if FRICTION_CONTROL in ("sqrt", "exp")
+                        else PRIOR_SIGMA_THETA)
         _prior_dg = {
-            "theta": bilaplacian_coeffs(PRIOR_SIGMA_THETA, PRIOR_RHO),
+            "theta": bilaplacian_coeffs(_sigma_theta, PRIOR_RHO_THETA),
             "phi": bilaplacian_coeffs(PRIOR_SIGMA_PHI, PRIOR_RHO),
         }
         PETSc.Sys.Print(
             f"  Prior: bi-Laplacian A M^-1 A; "
-            f"sigma_theta={PRIOR_SIGMA_THETA:g} sigma_phi={PRIOR_SIGMA_PHI:g} "
-            f"rho={PRIOR_RHO:g} m -> "
-            f"delta={_prior_dg['theta'][0]:.4e} gamma={_prior_dg['theta'][1]:.4e}"
+            f"sigma_{'alpha' if FRICTION_CONTROL == 'sqrt' else 'theta'}="
+            f"{_sigma_theta:g} rho_theta={PRIOR_RHO_THETA:g} m, "
+            f"sigma_phi={PRIOR_SIGMA_PHI:g} rho={PRIOR_RHO:g} m -> "
+            f"theta delta={_prior_dg['theta'][0]:.4e} gamma={_prior_dg['theta'][1]:.4e}"
         )
     else:
         _prior_dg = {
@@ -975,6 +2051,7 @@ def main():
             "phi": prior_operator_coeffs(GAMMA_PHI, area_val, L_REG),
         }
     _prior_aux = {k: Function(Q, name=f"prior_aux_{k}") for k in ("theta", "phi")}
+    _prior_aux_solver = BilaplacianAuxSolver(Q, form_compiler_parameters=fc_params)
 
     def _prior_energy_form(ctrl, which):
         """``R(ctrl)`` as something ``assemble`` or ``Functional.addto`` takes.
@@ -982,20 +2059,17 @@ def main():
         Under `bilaplacian` this SOLVES ``M f = A ctrl`` into
         ``_prior_aux[which]`` as a side effect, so :func:`_prior_grad` -- which
         needs that ``f`` -- must be called after this and before the next
-        control changes. EquationSolver annotates when a manager is running
-        (the TAO path needs the solve on the tape for the gradient) and is an
-        ordinary solve when one is not (the scipy path differentiates it by
-        hand below).
+        control changes. The solve back-substitutes with M factored once
+        (prior.BilaplacianAuxSolver). It is recorded while a manager annotates
+        (the TAO path needs it on the tape for the gradient) and is an
+        ordinary solve when one does not (the scipy path differentiates it by
+        hand below, and the TAO monitor only reads the energy).
         """
         d, g = _prior_dg[which]
         if PRIOR_FORM == "laplacian":
             return 0.5 * prior_operator_form(ctrl, ctrl, d, g)
         aux = _prior_aux[which]
-        EquationSolver(
-            bilaplacian_aux_residual(ctrl, aux, _prior_test, d, g) == 0,
-            aux,
-            form_compiler_parameters=fc_params,
-        ).solve()
+        _prior_aux_solver(ctrl, aux, d, g)
         return bilaplacian_energy_form(aux)
 
     def _prior_grad(ctrl, which):
@@ -1055,8 +2129,12 @@ def main():
         _scale = {}
 
         def action(g_theta, g_phi):
+            # a block passed as None is a frozen control (ISMIP7_INVERT): no
+            # solve, no entry in the result
             out = []
             for which, rhs in (("theta", g_theta), ("phi", g_phi)):
+                if rhs is None:
+                    continue
                 x = Function(Q)
                 if metric == "mass_consistent":
                     # The consistent mass Riesz map: the same mass-matrix
@@ -1114,15 +2192,16 @@ def main():
     # aborting the inversion.
     dhdt_w = float(os.environ.get("ISMIP7_DHDT_WEIGHT", "0.0"))
     use_dhdt = dhdt_w > 0.0
+    dhdt_forcing = "none"
     # Resolved (not merely requested) net-term provenance: ISMIP7_DHDT_NET_SIGMA
     # only reaches the objective when the dH/dt term itself is on, so these stay
     # at their off values unless the term is actually built below. save_map
     # stamps net_sigma_used, so a MAP can never claim a constraint it never saw.
     use_dhdt_net = False
     net_sigma_used = 0.0
-    # The per-basin K the dH/dt melt source actually used, stamped into
-    # the MAP: the fallback below is quiet by design, so the artifact has
-    # to carry the answer.
+    # The melt calibration the dH/dt melt source used, stamped into the MAP
+    # under the attribute's original name, dhdt_melt_k_npz, so the artifact
+    # carries the answer.
     k_npz_used = "none"
     if use_dhdt:
         if not geom_dg:
@@ -1139,11 +2218,32 @@ def main():
         clim1 = int(os.environ.get("ISMIP7_DHDT_CLIM_END", "2019"))
 
         dhdt_obs, dhdt_cov = load_dhdt_obs(Q_g)
-        smb_obs = load_racmo_smb_climatology(Q_g, clim_start=clim0, clim_end=clim1)
+        # The source of the prognostic step: the RACMO2.4p1 climatology SMB
+        # with the OI-climatology melt (``climatology``, the default); the
+        # control experiment's own forcing (``control``: the RACMO2.4p1
+        # climatology over the control's window and the ESM's ctrl ocean
+        # through the forward's callback, averaged over the years it holds
+        # in that window, so the step sees what the control runs on); or the
+        # ISMIP7 OCX product averaged over the window (``ocx``: the
+        # RACMO2.3p2-ERA acabf years and the expert-judgment ocean through
+        # the OCX callback, the forcing core 11 runs on).
+        dhdt_forcing = os.environ.get("ISMIP7_DHDT_FORCING", "climatology").strip().lower()
+        if dhdt_forcing not in ("climatology", "control", "ocx"):
+            raise ValueError(f"ISMIP7_DHDT_FORCING must be climatology, control or ocx, got {dhdt_forcing!r}")
+        if dhdt_forcing == "control":
+            from icepack2_tools.climatology import clim_start as _clim_start, clim_end as _clim_end
+            if "ISMIP7_DHDT_CLIM_START" not in os.environ:
+                clim0 = int(_clim_start())
+            if "ISMIP7_DHDT_CLIM_END" not in os.environ:
+                clim1 = int(_clim_end())
+        if dhdt_forcing == "ocx":
+            smb_obs = Function(Q_g, name="smb_ocx_mean")
+        else:
+            smb_obs = load_racmo_smb_climatology(Q_g, clim_start=clim0, clim_end=clim1)
 
         # Ocean melt for the prognostic step, from the SAME parameterisation
         # and forcing the experiments use: OI-climatology TF/so at draft depth
-        # + per-basin calibrated K through the Burgard quadratic-mixed-slope
+        # + the melt calibration through the Burgard quadratic-mixed-slope
         # formula, via the shared make_climatology_ocean_callback -- not a
         # reimplementation. Evaluated ONCE at the frozen reference geometry
         # (the controls move; the reference geometry does not), so it is a
@@ -1153,49 +2253,111 @@ def main():
         # keeping the single prognostic step consistent with the forward
         # experiment. ISMIP7_DHDT_MELT=0 drops it (SMB-only source).
         melt_ref = Function(Q_g, name="ocean_melt_ref")
-        if os.environ.get("ISMIP7_DHDT_MELT", "1") != "0":
+        if dhdt_forcing == "ocx":
+            # Both fields from the OCX callback the forward and the relaxation
+            # year use, year by year over the window, averaged; the ocean
+            # melt at the frozen reference geometry like the climatology one.
+            _scripts_dir = os.path.dirname(os.path.abspath(__file__))
+            if _scripts_dir not in sys.path:
+                sys.path.insert(0, _scripts_dir)
+            from projections.ocx import protocol_forcing, ocx_forcing_callback
+            _W2 = VectorFunctionSpace(mesh, "DG", 0)
+            _xy = Function(_W2).interpolate(
+                fd.SpatialCoordinate(mesh)).dat.data_ro.reshape(-1, 2)
+            geom_xy = (_xy[:, 0].copy(), _xy[:, 1].copy())
+            readers = protocol_forcing(float(clim0), float(clim1 + 1))
+            dT_npz = deltat_per_basin_npz()
+            k_npz_used = dT_npz or k_per_basin_npz()
+            _ctx = {"mesh": mesh, "Q": Q, "V": V, "Q_g": Q_g, "geom_xy": geom_xy,
+                    "h": H, "b": b, "s": s, "accum": Function(Q_g), "ocean_melt": Function(Q_g),
+                    "raster_sample": os.environ.get("ISMIP7_RASTER_SAMPLE")}
+            if os.environ.get("ISMIP7_DHDT_MELT", "1") == "0":
+                readers = (readers[0], None)
+            _cb, _lines, _ocean = ocx_forcing_callback(_ctx, readers, None, dT_npz)
+            _years = list(range(clim0, clim1 + 1))
+            _smb_acc = np.zeros_like(smb_obs.dat.data_ro)
+            _melt_acc = np.zeros_like(melt_ref.dat.data_ro)
+            for _yr in _years:
+                _cb(_ctx, _yr + 0.5)
+                _smb_acc += _ctx["accum"].dat.data_ro
+                _melt_acc += _ctx["ocean_melt"].dat.data_ro
+            smb_obs.dat.data[:] = _smb_acc / len(_years)
+            melt_ref.dat.data[:] = _melt_acc / len(_years)
+            if _ocean is not None:
+                _ocean.close()
+            for _line in _lines:
+                PETSc.Sys.Print("  " + str(_line))
+            _smb_gt = float(assemble(smb_obs * dx)) * 917.0 / 1e12
+            _melt_gt = float(assemble(melt_ref * dx)) * 917.0 / 1e12
+            PETSc.Sys.Print(
+                f"  dH/dt source: OCX product averaged over {clim0}-{clim1}: SMB {_smb_gt:.0f} Gt/yr, "
+                f"melt {_melt_gt:.0f} Gt/yr at reference geometry (ISMIP7_DHDT_FORCING=ocx)")
+        elif dhdt_forcing == "control" and os.environ.get("ISMIP7_DHDT_MELT", "1") != "0":
+            # The control's ocean: the ESM's ctrl tf/so through the forward's
+            # callback with the run's melt calibration, at the frozen
+            # reference geometry, averaged over the window years the ctrl
+            # ocean holds (it starts in 2015).
+            from icepack2_tools.forcing import ISMIP7Ocean, make_forcing_callback
+            _esm = os.environ.get("ISMIP7_ESM", "CESM2-WACCM")
+            _ocean = ISMIP7Ocean(esm=_esm, scenario="ctrl")
+            _cover = _ocean.coverage("tf")
+            if _cover is None:
+                raise FileNotFoundError(f"no {_esm} ctrl ocean on disk for the dH/dt source")
+            _years = [y for y in range(clim0, clim1 + 1) if _cover[0] <= y <= _cover[1]]
+            if not _years:
+                _years = [_cover[0]]
+            dT_npz = deltat_per_basin_npz()
+            k_npz = None if dT_npz is not None else k_per_basin_npz()
+            k_npz_used = dT_npz or k_npz
+            _W2 = VectorFunctionSpace(mesh, "DG", 0)
+            _xy = Function(_W2).interpolate(
+                fd.SpatialCoordinate(mesh)).dat.data_ro.reshape(-1, 2)
+            geom_xy = (_xy[:, 0].copy(), _xy[:, 1].copy())
+            _ctx = {"mesh": mesh, "Q": Q, "V": V, "Q_g": Q_g, "geom_xy": geom_xy,
+                    "h": H, "b": b, "s": s, "accum": Function(Q_g), "ocean_melt": Function(Q_g),
+                    "raster_sample": os.environ.get("ISMIP7_RASTER_SAMPLE")}
+            _cb = make_forcing_callback(ocean=_ocean, K_per_basin_npz=k_npz)   # melt only: the SMB is the climatology above
+            _melt_acc = np.zeros_like(melt_ref.dat.data_ro)
+            for _yr in _years:
+                _cb(_ctx, _yr + 0.5)
+                _melt_acc += _ctx["ocean_melt"].dat.data_ro
+            melt_ref.dat.data[:] = _melt_acc / len(_years)
+            _ocean.close()
+            _melt_gt = float(assemble(melt_ref * dx)) * 917.0 / 1e12
+            _smb_gt = float(assemble(smb_obs * dx)) * 917.0 / 1e12
+            PETSc.Sys.Print(
+                f"  dH/dt source: the control's forcing, RACMO2.4p1 SMB climatology {clim0}-{clim1} "
+                f"({_smb_gt:.0f} Gt/yr) and the {_esm} ctrl ocean averaged over {_years[0]}-{_years[-1]} "
+                f"({_melt_gt:.0f} Gt/yr melt at reference geometry; {os.path.basename(k_npz_used)}) "
+                f"(ISMIP7_DHDT_FORCING=control)")
+        elif os.environ.get("ISMIP7_DHDT_MELT", "1") != "0":
             from icepack2_tools.forcing import (
                 load_K_per_basin, make_climatology_ocean_callback)
-            _k_cands = k_per_basin_candidates(
-                os.path.join(_ROOT, "results"), lc)
-            k_npz = next((c for c in _k_cands if os.path.exists(c)),
-                         _k_cands[-1])
-            if os.path.exists(k_npz):
-                k_npz_used = k_npz
-            if not os.path.exists(k_npz):
-                # Warn, do not abort: the melt source only touches shelf cells
-                # and the misfit is grounded-only, so an absent ocean
-                # calibration cannot change this objective. Making it a hard
-                # prerequisite would fail the whole inversion over an artifact
-                # the term provably does not use.
-                PETSc.Sys.Print(
-                    f"  [!] dH/dt melt source: per-basin K not found at "
-                    f"{k_npz}; falling back to an SMB-only source. The "
-                    f"grounded-only misfit is unaffected (melt is zero on "
-                    f"grounded ice and the DG0 upwind step never carries a "
-                    f"shelf value upstream); shelf cells of the single "
-                    f"prognostic step are no longer forcing-consistent with "
-                    f"the forward. Calibrate K, or set ISMIP7_DHDT_MELT=0 to "
-                    f"silence this."
-                )
-            else:
-                _W2 = VectorFunctionSpace(mesh, "DG", 0)
-                _xy = Function(_W2).interpolate(
-                    fd.SpatialCoordinate(mesh)).dat.data_ro.reshape(-1, 2)
-                geom_xy = (_xy[:, 0].copy(), _xy[:, 1].copy())
+            # The forward's melt calibration: per-basin deltaT at one K, the
+            # tracked file unless another is named, else a legacy per-basin
+            # K named with ISMIP7_K_PER_BASIN_NPZ. The tracked file is in
+            # every checkout, so the source always carries melt.
+            dT_npz = deltat_per_basin_npz()
+            k_npz = None if dT_npz is not None else k_per_basin_npz()
+            k_npz_used = dT_npz or k_npz
+            _W2 = VectorFunctionSpace(mesh, "DG", 0)
+            _xy = Function(_W2).interpolate(
+                fd.SpatialCoordinate(mesh)).dat.data_ro.reshape(-1, 2)
+            geom_xy = (_xy[:, 0].copy(), _xy[:, 1].copy())
+            K_field = None
+            if k_npz is not None:
                 K_field = load_K_per_basin(
                     k_npz, geom_xy[0], geom_xy[1], fill=0.0)
                 K_field = K_field * float(
                     os.environ.get("ISMIP7_K_SCALE", "1.0"))
-                _ctx = {"mesh": mesh, "Q": Q, "V": V, "Q_g": Q_g,
-                        "geom_xy": geom_xy, "h": H, "b": b, "s": s,
-                        "ocean_melt": melt_ref}
-                make_climatology_ocean_callback(K_field)(_ctx, 0.0)
-                _melt_gt = float(assemble(melt_ref * dx)) * 917.0 / 1e12
-                PETSc.Sys.Print(
-                    f"  dH/dt melt source: per-basin K "
-                    f"({os.path.basename(k_npz)}), integrated "
-                    f"{_melt_gt:.0f} Gt/yr at reference geometry")
+            _ctx = {"mesh": mesh, "Q": Q, "V": V, "Q_g": Q_g,
+                    "geom_xy": geom_xy, "h": H, "b": b, "s": s,
+                    "ocean_melt": melt_ref}
+            make_climatology_ocean_callback(K_field)(_ctx, 0.0)
+            _melt_gt = float(assemble(melt_ref * dx)) * 917.0 / 1e12
+            PETSc.Sys.Print(
+                f"  dH/dt melt source: {os.path.basename(k_npz_used)}, "
+                f"integrated {_melt_gt:.0f} Gt/yr at reference geometry")
         else:
             PETSc.Sys.Print("  dH/dt melt source: DISABLED (SMB-only)")
 
@@ -1231,6 +2393,62 @@ def main():
                     "dates DA initial states before 2015; see obs_dhdt.py)"
                 )
         h_next = Function(Q_g, name="h_next")
+
+        # ── Helmholtz filter on the residual (13 Oct 2026) ──────────────
+        # The one-step tendency of a MAP carries cell-scale flux-divergence
+        # checkerboard with ~7x the variance of the Smith field; pointwise,
+        # the term spends its budget on that noise (chi2/node 105 raw vs 18
+        # after a 5 km Gaussian on the 13 Oct dhdtctrl checkpoint). With
+        # ISMIP7_DHDT_FILTER_L = L > 0 (m) the residual r = mask*(model-obs)
+        # is passed through (1 - L^2 Laplacian) r_s = r on CG1 with natural
+        # boundary conditions (kernel std ~ sqrt(2) L per axis) and the term
+        # scores r_s / m_s, where m_s is the same filter applied to the mask,
+        # so the filtered residual is not attenuated by the zeros outside the
+        # grounded+observed cells (normalised convolution). The filter solve
+        # is an EquationSolver, so the adjoint carries it. L = 0 is the
+        # pointwise term.
+        dhdt_filter_l = float(os.environ.get("ISMIP7_DHDT_FILTER_L", "0"))
+        if dhdt_filter_l < 0.0:
+            raise ValueError("ISMIP7_DHDT_FILTER_L must be >= 0 (m)")
+        use_dhdt_filter = dhdt_filter_l > 0.0
+        if use_dhdt_filter:
+            _L2 = Constant(dhdt_filter_l ** 2)
+            _dhdt_filter_sp = {
+                "snes_type": "ksponly",
+                "ksp_type": "cg",
+                "pc_type": "gamg",
+                "ksp_rtol": 1e-12,
+                "ksp_atol": 0.0,
+            }
+
+            def _helmholtz_form(out, src):
+                _v = TestFunction(Q)
+                return (
+                    (out * _v + _L2 * inner(fd.grad(out), fd.grad(_v))) * dx
+                    - src * _v * dx
+                )
+
+            # The filtered mask is a constant of the objective: a plain
+            # solve, outside the tape.
+            dhdt_mask_s = Function(Q, name="dhdt_mask_filtered")
+            fd.solve(_helmholtz_form(dhdt_mask_s, dhdt_mask) == 0, dhdt_mask_s,
+                     solver_parameters=_dhdt_filter_sp)
+            # Floor: the normalisation is only read on masked cells, where
+            # m_s is O(1) already; the floor keeps a stray mesh corner off
+            # the division.
+            dhdt_mask_s.dat.data[:] = np.maximum(dhdt_mask_s.dat.data_ro, 1e-3)
+            dhdt_resid_s = Function(Q, name="dhdt_resid_filtered")
+            # Mean of the filtered mask over the masked cells: 1 would be a
+            # mask with no edge; the shortfall is what the normalisation
+            # restores at the grounding line and the coverage edge.
+            _ms_mean = assemble(dhdt_mask * dhdt_mask_s * dx) / dhdt_area
+            PETSc.Sys.Print(
+                f"  dH/dt filter: Helmholtz L={dhdt_filter_l / 1e3:g} km on the "
+                f"residual (kernel std ~{dhdt_filter_l * 2 ** 0.5 / 1e3:.1f} km); "
+                f"filtered mask averages {_ms_mean:.3f} over the masked cells"
+            )
+        else:
+            PETSc.Sys.Print("  dH/dt filter: none (pointwise residual)")
 
         # ── Net (integral) mass-balance term -- OFF BY DEFAULT ──────────
         # Explored Aug 2026 and mechanically validated (it moves the grounded
@@ -1271,11 +2489,13 @@ def main():
         sp_obs = sqrt(u_obs[0] ** 2 + u_obs[1] ** 2 + Constant(1e-12))
         return ln((sp + _eps_v) / (sp_obs + _eps_v))
 
+    _derived_w = None
     log_vel_w = (0.0 if LOG_VEL_WEIGHT.lower() == "auto"
                  else float(LOG_VEL_WEIGHT))
     if LOG_VEL_WEIGHT.lower() == "auto":
         # Scale so the two velocity terms start out comparable: the ratio of
-        # the chi^2 term to the unweighted log term at the warm-start state.
+        # the chi^2 term to the unweighted log term at the state this run
+        # starts from, used when the warm start holds no weight of its own.
         _u0 = z.subfunctions[0]
         _chi2_0 = float(assemble(
             (0.5 / area_val * obs_mask
@@ -1283,44 +2503,127 @@ def main():
                 + (_u0[1] - u_obs[1]) ** 2 / sig_uy ** 2)) * dx(mesh)))
         _log_0 = float(assemble(
             (0.5 / area_val * obs_mask * _log_ratio(_u0) ** 2) * dx(mesh)))
-        log_vel_w = (_chi2_0 / _log_0) if _log_0 > 0 else 0.0
+        _derived_w = (_chi2_0 / _log_0) if _log_0 > 0 else 0.0
+    log_vel_w, log_vel_source, _log_vel_note = resolve_log_vel_weight(
+        LOG_VEL_WEIGHT, _derived_w, warm_objective,
+        misfit_norm=MISFIT_NORM, eps=LOG_VEL_EPS)
+    if log_vel_source == "warm_start":
+        PETSc.Sys.Print(
+            f"  Log-velocity misfit (ISSM 103): auto weight {log_vel_w:.6g} "
+            f"held from the warm start (chi2 {_chi2_0:.3e} / log "
+            f"{_log_0:.3e} here would give {_derived_w:.4g}), "
+            f"eps={LOG_VEL_EPS:g} m/yr")
+    elif log_vel_source == "derived":
         PETSc.Sys.Print(
             f"  Log-velocity misfit (ISSM 103): auto weight {log_vel_w:.4g} "
             f"= chi2 {_chi2_0:.3e} / log {_log_0:.3e} at "
             f"the start, eps={LOG_VEL_EPS:g} m/yr")
-    elif log_vel_w > 0.0:
+    elif log_vel_w > 0.0 or _log_vel_note:
         PETSc.Sys.Print(
             f"  Log-velocity misfit (ISSM 103): weight {log_vel_w:g}, "
             f"eps={LOG_VEL_EPS:g} m/yr")
+    if _log_vel_note:
+        PETSc.Sys.Print(f"    {_log_vel_note}")
+
+    # How each objective evaluation reaches its state (README, "Inversion
+    # solver"):
+    # - direct (ISMIP7_DIRECT_FORWARD, the default): one untaped Newton solve
+    #   at the full exponents from the last converged state, then a taped
+    #   solve that starts converged; a lost trial goes to the caller's rescue
+    #   or backtrack. The taped 5-stage ladder restarted every evaluation at
+    #   n=1 with ||F|| 1e11-1e13 and failed at the same trial points, at up to
+    #   an hour a try on the 2 km mesh.
+    # - single: one taped solve at the full exponents, for a timing lane that
+    #   asks for it by name (ISMIP7_SKIP_CONTINUATION=1) and, with the direct
+    #   forward off, for a warm start that loaded its mixed state or
+    #   ISMIP7_EVAL_CONTINUATION=0.
+    # - ladder: the taped 5-stage n,m: 1->n ladder in every evaluation.
+    _skip_by_name = os.environ.get("ISMIP7_SKIP_CONTINUATION", "0").strip() == "1"
+    if direct_forward_enabled() and not _skip_by_name:
+        eval_mode = "direct"
+    elif skip_continuation or not eval_continuation():
+        eval_mode = "single"
+    else:
+        eval_mode = "ladder"
+    eval_full_n = eval_mode != "ladder"
+    PETSc.Sys.Print("  Evaluations: " + {
+        "direct": "direct forward, an untaped Newton solve at full n_flow/m_slide "
+                  "from the last converged state, then a taped confirmation "
+                  "(ISMIP7_DIRECT_FORWARD)",
+        "single": "one taped solve at full n_flow/m_slide",
+        "ladder": "1->n continuation in 5 taped solves",
+    }[eval_mode])
+    direct_sparams = direct_forward_parameters(sparams)
+
+    # The untaped work of the last evaluation's state solves (taped_state_solve);
+    # written into the timing record per evaluation.
+    state_work = []
+    # The paused Newton solver of the last taped form, kept while the forward
+    # keeps solving that form (StateSolverCache): under the direct forward for
+    # every inversion solver, otherwise under scpc_*.
+    state_solver_cache = StateSolverCache()
+
+    def _taped_state_solve(F_ctrl, *, direct=False):
+        work = taped_state_solve(
+            F_ctrl, z, state_solver_mode,
+            direct_sparams if direct else sparams, adjoint_sparams,
+            form_compiler_parameters=fc_params, cache=state_solver_cache,
+            direct=direct,
+        )
+        state_work.append(work)
+        if direct:
+            PETSc.Sys.Print(
+                f"    direct forward: "
+                f"{_snes_reason_name(work['converged_reason'])} "
+                f"snes_its={work['snes_iterations']} fnorm={work['fnorm']:.3e} "
+                f"{work['seconds']:.1f}s")
+
+    # The taped residual is one form for the run, over Functions that live
+    # as long, so the symbolic work Firedrake caches on a form and the solver
+    # state_solver_cache keeps for it serve every evaluation. The scipy
+    # path's controls are the module-level (theta, phi) F is built over. TAO
+    # hands the forward fresh copies of its controls each evaluation;
+    # assignments on the tape carry them into (theta_eval, phi_eval), and the
+    # gradient reaches the copies through them. This holds because build_F
+    # writes the controls into UFL and evaluates nothing from them: a
+    # Function interpolated from theta inside build_F would keep the first
+    # evaluation's values.
+    theta_eval = Function(theta.function_space(), name="theta_eval")
+    phi_eval = Function(phi.function_space(), name="phi_eval")
+    F_eval = []
+
+    def _residual_at(theta_ctrl, phi_ctrl):
+        if theta_ctrl is theta and phi_ctrl is phi:
+            return F
+        theta_eval.assign(theta_ctrl)
+        phi_eval.assign(phi_ctrl)
+        if not F_eval:
+            F_eval.append(build_F(theta_eval, phi_eval))
+        return F_eval[0]
 
     def forward(theta_ctrl, phi_ctrl):
         clear_caches()
-        F_ctrl = build_F(theta_ctrl, phi_ctrl)
-        if skip_continuation:
-            # Timing-matrix short invert starts from a full-n prepare cache;
-            # stay at the physical exponents so each eval is one Newton solve.
+        state_work.clear()
+        F_ctrl = _residual_at(theta_ctrl, phi_ctrl)
+        if eval_mode == "direct":
             n_flow.assign(n_flow_val)
             m_slide.assign(m_slide_val)
-            EquationSolver(
-                F_ctrl == 0,
-                z,
-                solver_parameters=sparams,
-                adjoint_solver_parameters=adjoint_sparams,
-                form_compiler_parameters=fc_params,
-            ).solve()
+            # A lost trial raises ConvergenceError with z back at the last
+            # converged state, for the caller's rescue (one untaped rung of
+            # the ladder at these controls, then this solve) or backtrack.
+            _taped_state_solve(F_ctrl, direct=True)
+        elif eval_mode == "single":
+            # Stay at the physical exponents so each eval is one Newton solve.
+            n_flow.assign(n_flow_val)
+            m_slide.assign(m_slide_val)
+            _taped_state_solve(F_ctrl)
         else:
             # Continuation inside annotation for robustness — ramp both
             # n_flow and m_slide on the same [0,1] parameter.
             for t in np.linspace(0.0, 1.0, 5):
                 n_flow.assign(1.0 + t * (n_flow_val - 1.0))
                 m_slide.assign(1.0 + t * (m_slide_val - 1.0))
-                EquationSolver(
-                    F_ctrl == 0,
-                    z,
-                    solver_parameters=sparams,
-                    adjoint_solver_parameters=adjoint_sparams,
-                    form_compiler_parameters=fc_params,
-                ).solve()
+                _taped_state_solve(F_ctrl)
 
         u_sol, _, _ = split(z)
         # chi^2 density: each residual divided by the squared error of its own
@@ -1329,6 +2632,7 @@ def main():
             0.5
             / area_val
             * obs_mask
+            * (vel_weight if vel_weight is not None else Constant(1.0))
             * (
                 (u_sol[0] - u_obs[0]) ** 2 / sig_ux ** 2
                 + (u_sol[1] - u_obs[1]) ** 2 / sig_uy ** 2
@@ -1372,12 +2676,25 @@ def main():
                 form_compiler_parameters=fc_params,
             ).solve()
             dhdt_model = (h_next - H) / dt_c
+            if use_dhdt_filter:
+                # Taped: the adjoint of the filter is the filter itself
+                # (self-adjoint operator), applied to the term's gradient.
+                EquationSolver(
+                    _helmholtz_form(dhdt_resid_s,
+                                    dhdt_mask * (dhdt_model - dhdt_obs)) == 0,
+                    dhdt_resid_s,
+                    solver_parameters=_dhdt_filter_sp,
+                    form_compiler_parameters=fc_params,
+                ).solve()
+                _dhdt_scored = dhdt_resid_s / dhdt_mask_s
+            else:
+                _dhdt_scored = dhdt_model - dhdt_obs
             integrand = integrand + (
                 0.5
                 * Constant(dhdt_w)
                 / dhdt_area
                 * dhdt_mask
-                * ((dhdt_model - dhdt_obs) / Constant(dhdt_sigma)) ** 2
+                * (_dhdt_scored / Constant(dhdt_sigma)) ** 2
             )
 
             if use_dhdt_net:
@@ -1411,7 +2728,7 @@ def main():
                 )
 
         J = Functional(name="J")
-        J.assign(integrand * dx)
+        J.assign(Constant(misfit_scale) * integrand * dx)
         return J
 
     # ── MPI helpers ──
@@ -1433,6 +2750,16 @@ def main():
             scatter.destroy()
             x_seq.destroy()
 
+    # Under a floating-only fluidity control the optimiser sees phi on the
+    # free nodes only: phi is written with the others at zero and its
+    # gradient is zero there, so L-BFGS-B never moves them.
+    _phi_free_global = func_to_global(phi_free) if phi_free is not None else None
+
+    def set_phi(arr):
+        global_to_func(arr, phi)
+        if phi_free is not None:
+            phi.dat.data[:] = phi.dat.data_ro * phi_free.dat.data_ro
+
     # ── Per-term diagnostics ─────────────────────────────────────────────
     # forward() returns ONE functional, so with two terms summed the reported
     # misfit alone cannot say which is being fitted. These re-assemble each
@@ -1449,10 +2776,15 @@ def main():
     if use_dhdt:
         _net_form = (((h_next - H) / Constant(dhdt_dt) - dhdt_obs)
                      * dhdt_mask * dx(mesh))
+        # The scored residual: the filtered one under ISMIP7_DHDT_FILTER_L
+        # (dhdt_resid_s holds the filter of the last trial, like h_next).
+        _dhdt_scored_now = (
+            dhdt_resid_s / dhdt_mask_s if use_dhdt_filter
+            else (h_next - H) / Constant(dhdt_dt) - dhdt_obs
+        )
         _dhdt_chi2 = (
             0.5 / dhdt_area * dhdt_mask
-            * (((h_next - H) / Constant(dhdt_dt) - dhdt_obs)
-               / Constant(dhdt_sigma)) ** 2
+            * (_dhdt_scored_now / Constant(dhdt_sigma)) ** 2
         ) * dx(mesh)
 
     # Velocity chi^2 of the last accepted state, in ITS OWN accumulator. The
@@ -1496,8 +2828,10 @@ def main():
                 out += f" dhdt={float(assemble(_dhdt_chi2)):.4e}"
                 out += (f" net={float(assemble(_net_form)) * 917.0 / 1e12:+.0f}Gt/yr")
             return out
-        except Exception:
-            return ""
+        except Exception as exc:
+            # say why rather than silently dropping the breakdown: the 2 km
+            # transient chain of 12 October printed no vel/dhdt split at all
+            return f" (term report failed: {type(exc).__name__}: {str(exc)[:80]})"
 
     # ── MAP checkpoint writer ────────────────────────────────────────────
     # ONE writer for both the periodic checkpoint and the final save: the two
@@ -1512,10 +2846,46 @@ def main():
     # has been bitten by exactly that class of look-alike MAP before (see
     # ../GEOMETRY_DISCRETIZATION.md on the geometry tag), and MAPs are
     # gitignored, so the checkpoint is the only place this provenance can live.
+    # The objective at the last ACCEPTED iterate (written into every
+    # checkpoint), the resolved run settings (idem), and a handoff failure
+    # raised after TAO returns (its monitor cannot raise through petsc4py).
+    last_accepted = {}
+    run_settings = {}
+    _handoff_failed = [None]
+
+    def _friction_reference():
+        # What a consumer multiplies exp(log_friction) by: the anchor, or
+        # under the sqrt control alpha^2 itself (log_friction is saved as 0).
+        if FRICTION_CONTROL == "sqrt":
+            return Function(Q_g, name="C_w0").project(theta ** 2)
+        if FRICTION_CONTROL == "exp":
+            # the constant reference: C = C_w0 exp(log_friction) reads exactly
+            return Function(Q_g, name="C_w0").interpolate(Constant(c_ref_val))
+        return C_w0
+
     def save_map(path, *, full_state=False):
+        """Write the MAP to ``path`` atomically: into a sibling temporary file,
+        renamed over ``path`` once every rank has closed it, so a link killed
+        mid-write (a wall limit, a preempted scavenge job) leaves the previous
+        checkpoint intact for its successor rather than a truncated file."""
+        tmp = f"{path}.tmp"
+        _write_map(tmp, full_state=full_state)
+        COMM_WORLD.Barrier()
+        if COMM_WORLD.rank == 0:
+            os.replace(tmp, path)
+        COMM_WORLD.Barrier()
+
+    def _write_map(path, *, full_state=False):
         with fd.CheckpointFile(path, "w") as chk:
             chk.save_mesh(mesh)
-            chk.save_function(theta, name="log_friction")
+            if FRICTION_CONTROL == "sqrt":
+                # the control is alpha = sqrt(C): C_w0 (below) is alpha^2 and
+                # the log deviation a consumer applies to it is zero
+                chk.save_function(Function(Q, name="log_friction"),
+                                  name="log_friction")
+                chk.save_function(theta, name="sqrt_friction")
+            else:
+                chk.save_function(theta, name="log_friction")
             chk.save_function(phi, name="log_fluidity")
             chk.save_function(u_obs, name="velocity_obs")
             chk.save_function(obs_mask, name="obs_mask")
@@ -1529,9 +2899,17 @@ def main():
                 chk.save_function(z.subfunctions[2], name="basal_stress")
                 chk.save_function(H, name="H_init")
                 chk.save_function(phi_eff, name="phi_eff")
-                chk.save_function(C_w0, name="C_w0")
+                chk.save_function(_friction_reference(), name="C_w0")
                 if N_ref is not None:
                     chk.save_function(N_ref, name="N_ref")
+            else:
+                # A periodic checkpoint carries the accepted mixed state for
+                # the next chain link only, under names no forward reads: the
+                # link starts from it instead of re-ramping n=1->3 from rest
+                # (~20 min of a one-hour 2 km link, 30 Sep 2026).
+                chk.save_function(z.subfunctions[0], name="ckpt_velocity")
+                chk.save_function(z.subfunctions[1], name="ckpt_membrane_stress")
+                chk.save_function(z.subfunctions[2], name="ckpt_basal_stress")
             # The .msh this MAP was inverted on. A CheckpointFile mesh is named
             # "firedrake_default", so this is how the forward names its own
             # mesh and picks the matching per-mesh boundary-id sidecar.
@@ -1544,9 +2922,9 @@ def main():
             # ds(absent_id) integrates to zero -- silently wrong physics with
             # no crash. The basename covers meshes outside the standard naming
             # pattern; the parameters let bndids_filename() rebuild the name.
-            chk.set_attr("/", "lc", int(lc))
-            chk.set_attr("/", "lc_coarse", int(lc_coarse))
-            chk.set_attr("/", "buffer_m", float(buffer_m))
+            chk.set_attr("/", "lc", int(mesh_lc))
+            chk.set_attr("/", "lc_coarse", int(mesh_lc_coarse))
+            chk.set_attr("/", "buffer_m", float(mesh_buffer_m))
             # The configuration theta/phi only mean anything under. The
             # derived MAP filename encodes all three, but ISMIP7_INVERSION
             # bypasses the name, so the forward needs them recorded to check
@@ -1554,8 +2932,49 @@ def main():
             chk.set_attr("/", "friction", str(FRICTION))
             chk.set_attr("/", "n_flow", float(n_flow_val))
             chk.set_attr("/", "geometry_space", str(geometry_space))
+            # theta is a log-deviation from THIS anchor, on THIS geometry: a
+            # forward rebuilds C_w0 from them, so it takes both from here.
+            chk.set_attr("/", "friction_anchor_length", float(ANCHOR_LENGTH))
+            chk.set_attr("/", "lake_ice_base", int(LAKE_ICE_BASE))
+            # How a warm start from another mesh filled the dofs beyond it
+            # (provenance: ISMIP7_TRANSFER_FILL; same-mesh starts fill none).
+            chk.set_attr("/", "warm_start_fill", warm_fill_mode)
+            # The ocean-drag gate and the membrane floor the controls
+            # absorbed: a forward runs both (runconfig.forward_drag_gate,
+            # forward_hvisc_floor).
+            chk.set_attr("/", "drag_gate", DRAG_RECORD)
+            chk.set_attr("/", "h_visc_floor", float(RC_HVISC_FLOOR))
+            # Which field the friction is: C_w0 exp(log_friction) on the
+            # anchor (log), or sqrt_friction^2 with no anchor (sqrt).
+            chk.set_attr("/", "friction_control", FRICTION_CONTROL)
+            chk.set_attr("/", "fluidity_control", FLUIDITY_CONTROL)
+            # Whether log_fluidity on grounded ice is held at zero (floating)
+            # or inverted (all).
+            chk.set_attr("/", "phi_grounded", PHI_GROUNDED)
+            # Which controls this stage moved (provenance only: the objective
+            # is the same in every ISMIP7_INVERT mode)
+            chk.set_attr("/", "invert_controls", INVERT)
+            # The grounding scheme and the front push the MAP was inverted
+            # under: a forward follows them (icepack2_tools.subelement).
+            chk.set_attr("/", "subelement_friction", int(SUBELEMENT_FRICTION))
+            chk.set_attr("/", "subelement_scheme", SUBELEMENT_SCHEME)
+            chk.set_attr("/", "subelement_scheme_version", int(SUBELEMENT_SCHEME_VERSION))
+            chk.set_attr("/", "exact_front", int(EXACT_FRONT))
+            if FRICTION_CONTROL in ("sqrt", "exp"):
+                chk.set_attr("/", "prior_sigma_alpha", float(sigma_alpha_val))
+                chk.set_attr("/", "prior_rho_theta", float(PRIOR_RHO_THETA))
+            if FRICTION_CONTROL == "exp":
+                chk.set_attr("/", "friction_c_ref", float(c_ref_val))
+            chk.set_attr("/", "fluidity_prior_origin", str(prior_origin))
             chk.set_attr("/", "misfit_norm", MISFIT_NORM)
+            chk.set_attr("/", "misfit_scale", float(misfit_scale))
             chk.set_attr("/", "log_vel_weight", float(log_vel_w))
+            # requested, derived (auto, at this run's start) or warm_start
+            # (auto, held from the MAP this run warm-started from). A MAP
+            # without it predates issue 68: if several chained links wrote it
+            # under auto, each re-derived the weight, and log_vel_weight is
+            # the last link's.
+            chk.set_attr("/", "log_vel_weight_source", log_vel_source)
             chk.set_attr("/", "log_vel_eps", float(LOG_VEL_EPS))
             chk.set_attr("/", "gamma_theta", float(GAMMA_THETA))
             chk.set_attr("/", "gamma_phi", float(GAMMA_PHI))
@@ -1568,16 +2987,45 @@ def main():
                 chk.set_attr("/", "prior_sigma_phi", float(PRIOR_SIGMA_PHI))
                 chk.set_attr("/", "prior_rho", float(PRIOR_RHO))
             chk.set_attr("/", "dhdt_weight", float(dhdt_w))
+            chk.set_attr("/", "dhdt_forcing", dhdt_forcing if use_dhdt else "none")
+            chk.set_attr("/", "dhdt_filter_l", float(dhdt_filter_l) if use_dhdt else 0.0)
             chk.set_attr("/", "dhdt_net_sigma", net_sigma_used)
             # Which per-basin K the dH/dt melt source used, or "none". The
             # fallback is deliberately non-fatal (the misfit is grounded-only
             # and melt is zero there), but a MAP that cannot say whether it
             # had the calibration cannot be told apart from one that did.
             chk.set_attr("/", "dhdt_melt_k_npz", str(k_npz_used))
+            # The optimisation metric and the objective at the checkpointed
+            # iterate, so the next link can verify it continues THIS
+            # minimisation from THIS point (icepack2_tools.handoff).
+            if run_settings.get("grad_precond") is not None:
+                chk.set_attr("/", "grad_precond", str(run_settings["grad_precond"]))
+            for _key, _val in last_accepted.items():
+                chk.set_attr("/", f"objective_{_key}", float(_val))
             # How BedMachine was put onto the cells (runconfig.RASTER_SAMPLES).
             # theta/phi absorb the bed representation just as they absorb the
             # front treatment, so a forward must reproduce it.
             chk.set_attr("/", "raster_sample", raster_sample)
+            chk.set_attr("/", "vel_sample", VEL_SAMPLE)
+            chk.set_attr("/", "u_obs_max", float(U_OBS_MAX))
+            chk.set_attr("/", "dhdt_reweight", float(DHDT_REWEIGHT))
+            chk.set_attr("/", "dhdt_reweight_scale", float(DHDT_REWEIGHT_SCALE))
+            chk.set_attr("/", "kill_bergs", int(KILL_BERGS))
+            chk.set_attr("/", "phi_bounds", PHI_BOUNDS_RECORD)
+            # How each evaluation reached the full exponents: 1 for the
+            # five-solve continuation, 0 for one solve. A solver fact, outside
+            # the objective (handoff.OBJECTIVE_KEYS).
+            chk.set_attr("/", "eval_continuation", int(not eval_full_n))
+            chk.set_attr("/", "eval_mode", eval_mode)
+            # Where the geometry came from, on every checkpoint, so the next
+            # link of a chain and the forward know a relaxed geometry from
+            # this mesh's own BedMachine sample (icepack2_tools.relaxation).
+            if run_geometry is None:
+                chk.set_attr("/", "geometry_source", os.path.realpath(bm_fn))
+                chk.set_attr("/", "geometry_source_method", TARGET_MESH_GEOMETRY_METHOD)
+            else:
+                for _key, _val in run_geometry.items():
+                    chk.set_attr("/", _key, _val)
             if full_state:
                 chk.set_attr("/", "t_yr", float(MATRIX_T_START))
                 chk.set_attr("/", "friction", str(FRICTION))
@@ -1594,12 +3042,6 @@ def main():
                 chk.set_attr(
                     "/", "state_solver_parameters", state_solver_parameters
                 )
-                chk.set_attr(
-                    "/", "geometry_source", os.path.realpath(bm_fn)
-                )
-                chk.set_attr(
-                    "/", "geometry_source_method", TARGET_MESH_GEOMETRY_METHOD
-                )
                 for key, value in full_state_solve.items():
                     chk.set_attr("/", f"full_state_{key}", value)
 
@@ -1608,18 +3050,30 @@ def main():
     # Relative-decrease stopping rule; 0 disables it and the budget above decides.
     ftol = float(os.environ.get("ISMIP7_FTOL", "1e-10"))
     min_iter = int(os.environ.get("ISMIP7_MIN_ITER", "3"))
-    PETSc.Sys.Print("\nStarting L-BFGS-B inversion (theta + phi)...")
+    PETSc.Sys.Print("\nStarting L-BFGS-B inversion ("
+                    + {"both": "theta + phi", "phi": "phi only, theta frozen",
+                       "theta": "theta only, phi frozen"}[INVERT] + ")...")
     PETSc.Sys.Print(f"  maxiter={max_iter} ftol={ftol:g} min_iter={min_iter}, "
                     f"nranks={COMM_WORLD.size}")
 
     global_ndof = len(func_to_global(theta))
     z_backup = z.copy(deepcopy=True)
     last_good_obj = [np.inf]
+    last_good_total = [np.inf]
     last_x = [None]                      # controls of the last CONVERGED evaluation
+    trial_failures = TrialFailures()
     iteration_count = [0]
     timing_history = []
     timing_json = os.environ.get("ISMIP7_INVERSION_TIMING_JSON", "").strip()
     t_opt0 = perf_counter()
+    # What an evaluation spends outside the forward and the adjoint (issue
+    # 156: 27 s of a 43 s 1 km evaluation on Quartz), by span, each the
+    # slowest rank's time. `spans` covers the work inside total_seconds;
+    # `gap_spans` the work between two evaluations: the previous one's report,
+    # term assembly, timing write and checkpoint, and the optimizer's own step.
+    spans = Spans(COMM_WORLD)
+    gap_spans = Spans(COMM_WORLD)
+    t_body_end = [None]
 
     def _eval_terms():
         """Assemble diagnostic term values for the JSON / print line."""
@@ -1636,7 +3090,12 @@ def main():
     def _write_timing_json(
         *, phase, message="", nit=None, nfev=None, final_solve=None
     ):
-        if not timing_json or COMM_WORLD.rank != 0:
+        if not timing_json:
+            return
+        optimize_seconds = global_max(
+            np.array([perf_counter() - t_opt0]), comm=COMM_WORLD
+        )
+        if COMM_WORLD.rank != 0:
             return
         written = os.path.realpath(os.path.join(_map_dir, map_fn))
         published = os.environ.get("ISMIP7_MAP_OUT_FINAL", "").strip()
@@ -1645,31 +3104,50 @@ def main():
             "map_path": os.path.realpath(published) if published else written,
             "map_path_written": written,
             "mesh_basename": os.path.basename(mesh_fn),
-            "lc": int(lc),
-            "lc_coarse": int(lc_coarse),
-            "buffer_m": float(buffer_m),
+            "lc": int(mesh_lc),
+            "lc_coarse": int(mesh_lc_coarse),
+            "buffer_m": float(mesh_buffer_m),
             "ncores": int(COMM_WORLD.size),
             "maxiter": int(max_iter),
             "nit": int(nit if nit is not None else iteration_count[0]),
             "nfev": int(nfev if nfev is not None else iteration_count[0]),
             "message": str(message),
-            "optimize_seconds": perf_counter() - t_opt0,
+            "optimize_seconds": optimize_seconds,
             "knobs": {
                 "misfit_norm": MISFIT_NORM,
+                "misfit_scale": float(misfit_scale),
+                "misfit_scale_requested": MISFIT_SCALE,
                 "log_vel_weight_requested": LOG_VEL_WEIGHT,
                 "log_vel_weight": float(log_vel_w),
+                "log_vel_weight_source": log_vel_source,
                 "log_vel_eps": float(LOG_VEL_EPS),
                 "gamma_theta": float(GAMMA_THETA),
+                "friction_control": FRICTION_CONTROL,
+                "fluidity_prior": FLUIDITY_PRIOR,
                 "gamma_phi": float(GAMMA_PHI),
                 "ftol": float(ftol),
                 "min_iter": int(min_iter),
                 "dhdt_weight": float(dhdt_w),
                 "dhdt_net_sigma": float(net_sigma_used),
+                "dhdt_filter_l": float(dhdt_filter_l) if use_dhdt else 0.0,
+                "vel_sample": VEL_SAMPLE,
+                "u_obs_max": float(U_OBS_MAX),
+                "dhdt_reweight": float(DHDT_REWEIGHT),
+                "dhdt_reweight_scale": float(DHDT_REWEIGHT_SCALE),
+                "kill_bergs": int(KILL_BERGS),
+                "phi_bounds": PHI_BOUNDS_RECORD,
                 "grad_precond": os.environ.get(
                     "ISMIP7_GRAD_PRECOND", "none"
                 ).lower(),
                 "warm_start": bool(warm_chk),
                 "skip_continuation": bool(skip_continuation),
+                "eval_continuation": bool(not eval_full_n),
+                "eval_mode": eval_mode,
+                "inversion_linear_solver": state_solver_mode,
+                "inversion_snes_linesearch": sparams.get("snes_linesearch_type"),
+                # None under full_mumps, whose LU has no Krylov tolerance
+                "inversion_ksp_rtol": sparams.get("ksp_rtol"),
+                "diagnostic_linear_solver": lane_solver_mode,
             },
             "evaluations": list(timing_history),
             # Set only by the "finished" record: how the publishing solve
@@ -1678,17 +3156,29 @@ def main():
         }
         atomic_write_json(timing_json, payload)
 
+    # Periodic checkpoint interval: accepted iterates on the TAO path,
+    # evaluations on the scipy path. A wall-clocked link resumes from the
+    # last one, so every iteration past it is repeated: 2 km link 1643735
+    # lost iterations 21 to 30 (about five hours) to the old interval of 20,
+    # and at five, with iterations of 3-6 h, links 1656863 and 1662734 each
+    # lost four. A 2 km MAP write costs a minute.
+    _ckpt_every = max(1, int(os.environ.get("ISMIP7_CHECKPOINT_EVERY_IT", "1")))
+
     def objective_and_gradient(x_vec):
         t_iter = perf_counter()
-        global_to_func(x_vec[:global_ndof], theta)
-        global_to_func(x_vec[global_ndof:], phi)
+        spans.clear()
+        if t_body_end[0] is not None:
+            gap_spans.add("gap", t_iter - t_body_end[0])
+        with spans("set_controls"):
+            global_to_func(x_vec[:global_ndof], theta)
+            set_phi(x_vec[global_ndof:])
 
         t_fwd = perf_counter()
         reset_manager()
         start_manager()
         try:
             J = forward(theta, phi)
-        except fd.ConvergenceError:
+        except fd.ConvergenceError as exc:
             stop_manager()
             z.assign(z_backup)
             if iteration_count[0] == 0:
@@ -1701,17 +3191,22 @@ def main():
                     "is fragile at <~100 vertices/rank); also check the "
                     "fluidity prior."
                 )
-            PETSc.Sys.Print("  [!] Forward solve failed, returning large objective")
-            return last_good_obj[0] * 10, np.zeros(2 * global_ndof)
+            PETSc.Sys.Print(
+                f"  [!] Forward solve failed ({exc}), returning large objective")
+            t_body_end[0] = perf_counter()
+            return trial_failures.failed(last_good_total[0], 2 * global_ndof)
         stop_manager()
         J_val = float(J)
         t_fwd = perf_counter() - t_fwd
 
-        z_backup.assign(z)
-        last_good_obj[0] = J_val
-        last_x[0] = np.array(x_vec, copy=True)
-        last_good_vel_chi2[0] = float(assemble(_vel_chi2))
-        last_good_fnorm[0] = _residual_norm()
+        with spans("record_state"):
+            z_backup.assign(z)
+            last_good_obj[0] = J_val
+            last_x[0] = np.array(x_vec, copy=True)
+        with spans("vel_chi2"):
+            last_good_vel_chi2[0] = float(assemble(_vel_chi2))
+        with spans("residual_norm"):
+            last_good_fnorm[0] = _residual_norm()
         last_good_x[0] = np.array(x_vec, copy=True)
 
         t_adj = perf_counter()
@@ -1731,8 +3226,10 @@ def main():
                     "is fragile at <~100 vertices/rank)."
                 )
             PETSc.Sys.Print("  [!] Adjoint solve failed, returning large objective")
-            return last_good_obj[0] * 10, np.zeros(2 * global_ndof)
+            t_body_end[0] = perf_counter()
+            return trial_failures.failed(last_good_total[0], 2 * global_ndof)
         t_adj = perf_counter() - t_adj
+        trial_failures.succeeded()
 
         # Whittle-Matern prior energy + gradient (icepack2_tools/prior.py):
         # 0.5/area * gamma * (theta^2 + L^2 |grad theta|^2). The theta^2 mass
@@ -1741,32 +3238,77 @@ def main():
         # prior means it constrains the DEVIATION, not the amplitude.
         # Energy first, then gradient: under `bilaplacian` the energy solves
         # the M f = A theta the gradient reuses (see _prior_energy_form).
-        reg_theta = float(assemble(_prior_energy_form(theta, "theta")))
-        dR_theta = _prior_grad(theta, "theta")
-        reg_phi = float(assemble(_prior_energy_form(phi, "phi")))
-        dR_phi = _prior_grad(phi, "phi")
+        with spans("prior_solve"):
+            _reg_form_theta = _prior_energy_form(theta, "theta")
+        with spans("prior_energy"):
+            reg_theta = float(assemble(_reg_form_theta))
+        with spans("prior_grad"):
+            dR_theta = _prior_grad(theta, "theta")
+        with spans("prior_solve"):
+            _reg_form_phi = _prior_energy_form(phi, "phi")
+        with spans("prior_energy"):
+            reg_phi = float(assemble(_reg_form_phi))
+        with spans("prior_grad"):
+            dR_phi = _prior_grad(phi, "phi")
 
-        g_theta = func_to_global(dJ_dtheta) + func_to_global(dR_theta)
-        g_phi = func_to_global(dJ_dphi) + func_to_global(dR_phi)
+        with spans("gather_gradient"):
+            g_theta = func_to_global(dJ_dtheta) + func_to_global(dR_theta)
+            g_phi = func_to_global(dJ_dphi) + func_to_global(dR_phi)
+            if _phi_free_global is not None:
+                g_phi = g_phi * _phi_free_global
 
-        total = J_val + reg_theta + reg_phi
-        total_grad = np.concatenate([g_theta, g_phi])
+            total = J_val + reg_theta + reg_phi
+            last_good_total[0] = total
+            total_grad = np.concatenate([g_theta, g_phi])
 
-        t_iter = perf_counter() - t_iter
-        iteration_count[0] += 1
-        PETSc.Sys.Print(
-            f"  iter {iteration_count[0]:3d}: "
-            f"misfit={J_val:.6e}{term_report()} "
-            f"reg_θ={reg_theta:.4e} reg_φ={reg_phi:.4e} "
-            f"total={total:.6e} |grad|={np.linalg.norm(total_grad):.4e} "
-            f"[fwd={t_fwd:.1f}s adj={t_adj:.1f}s total={t_iter:.1f}s]"
+        t_body_end[0] = perf_counter()
+        t_iter = t_body_end[0] - t_iter
+        _other = t_iter - t_fwd - t_adj
+        # Collective, outside total_seconds: every rank reaches this line once
+        # per successful evaluation.
+        eval_spans, eval_durations = spans.reduce(
+            durations={
+                "fwd_seconds": t_fwd,
+                "adj_seconds": t_adj,
+                "total_seconds": t_iter,
+                "other_seconds": _other,
+            },
+            unspanned_total=_other,
         )
+        t_fwd = eval_durations["fwd_seconds"]
+        t_adj = eval_durations["adj_seconds"]
+        t_iter = eval_durations["total_seconds"]
+        _other = eval_durations["other_seconds"]
+        _unspanned = eval_durations["unspanned"]
+        prev_gap = gap_spans.reduce()
+        iteration_count[0] += 1
+        # NB: this path records the last EVALUATED point (L-BFGS-B trial
+        # points included); the TAO path below records the accepted iterate.
+        last_accepted.update(iteration=iteration_count[0], total=total, misfit=J_val,
+                             reg_theta=reg_theta, reg_phi=reg_phi)
+        if iteration_count[0] == 1:
+            _check_handoff(total)
+        with gap_spans("report"):
+            PETSc.Sys.Print(
+                f"  iter {iteration_count[0]:3d}: "
+                f"misfit={J_val:.6e}{term_report()} "
+                f"reg_θ={reg_theta:.4e} reg_φ={reg_phi:.4e} "
+                f"total={total:.6e} |grad|={np.linalg.norm(total_grad):.4e} "
+                f"[fwd={t_fwd:.1f}s adj={t_adj:.1f}s total={t_iter:.1f}s]"
+            )
+            PETSc.Sys.Print(
+                f"    other={_other:.2f}s: "
+                + " ".join(f"{k}={v:.2f}" for k, v in eval_spans.items())
+                + (" | before: " + " ".join(f"{k}={v:.2f}" for k, v in prev_gap.items())
+                   if prev_gap else "")
+            )
 
         if timing_json:
-            try:
-                terms = _eval_terms()
-            except Exception:
-                terms = {"vel": float(last_good_vel_chi2[0])}
+            with gap_spans("eval_terms"):
+                try:
+                    terms = _eval_terms()
+                except Exception:
+                    terms = {"vel": float(last_good_vel_chi2[0])}
             timing_history.append({
                 "eval": iteration_count[0],
                 "misfit": J_val,
@@ -1777,13 +3319,23 @@ def main():
                 "fwd_seconds": t_fwd,
                 "adj_seconds": t_adj,
                 "total_seconds": t_iter,
+                "other_spans": {**eval_spans, "unspanned": _unspanned},
+                # since the previous evaluation's body ended: its report,
+                # terms, timing write and checkpoint, then the optimizer's
+                # step ("gap" is the whole interval)
+                "before_spans": prev_gap,
                 "terms": terms,
+                "state_solves": [w for w in state_work if w],
+                # after the adjoint: its growth across evaluations is how a
+                # solver leak shows (issue #159)
+                "rss_mib": global_rss_mib(COMM_WORLD),
             })
-            _write_timing_json(phase="running", message="in progress")
+            with gap_spans("timing_json"):
+                _write_timing_json(phase="running", message="in progress")
 
-        # Periodic checkpoint every 20 iterations
-        if iteration_count[0] % 20 == 0:
-            save_map(os.path.join(_map_dir, map_fn))
+        if iteration_count[0] % _ckpt_every == 0:
+            with gap_spans("checkpoint"):
+                save_map(os.path.join(_map_dir, map_fn))
             PETSc.Sys.Print(f"    [checkpoint saved: iter {iteration_count[0]}]")
 
         return total, total_grad
@@ -1820,9 +3372,42 @@ def main():
 
         # The prior COVARIANCE action, from the same operator the objective
         # pays for: A^-1, or A^-1 M A^-1 under `bilaplacian`.
-        _A_inv = _prior_metric_solvers(grad_precond)
+        _A_inv_untimed = _prior_metric_solvers(grad_precond)
+
+        def _A_inv(g_theta, g_phi):
+            with spans("metric_action"):
+                return _A_inv_untimed(g_theta, g_phi)
 
         _nfev = [0]
+        _ring = []
+
+        # A forward that "converged" by the relative test from a wild initial
+        # residual can sit at ||F|| 1e9 (stage 2 of the 26 Sep staged 32 km
+        # run: accepted iterate at 3.4e9, published as converged). Such a
+        # state is a failed solve for the objective's purposes: it takes the
+        # trial-point rescue path like a diverged one. The ceiling is a
+        # multiple of the residual the last accepted forward reached.
+        _fnorm_ceiling_factor = float(os.environ.get("ISMIP7_FNORM_CEILING", "1e4"))
+
+        def _forward_checked(theta_ctrl, phi_ctrl):
+            with spans("forward"):
+                J = forward(theta_ctrl, phi_ctrl)
+            # Never below the warm start's converged residual: an accepted
+            # forward that began at the converged state ends at the rounding
+            # floor (5e-5 on the 2 km mesh), and 1e4x that rejected an
+            # ordinary relative-test solve at ||F|| 1.8 (NOTS 1691937).
+            f_ref = float(np.nanmax([float(last_good_fnorm[0]), f_warm]))
+            if np.isfinite(f_ref) and f_ref > 0.0:
+                # A check, not part of the objective, so off the tape:
+                # recorded, this one assembly took 4 to 8 s a call at 32 km
+                # and at 4 km, against 0.1 s unrecorded.
+                with spans("residual_norm"), paused_manager():
+                    f_now = _residual_norm()
+                if not np.isfinite(f_now) or f_now > _fnorm_ceiling_factor * f_ref:
+                    raise fd.ConvergenceError(
+                        f"forward reported convergence at ||F||={f_now:.3e}, above "
+                        f"{_fnorm_ceiling_factor:g}x the last accepted {f_ref:.3e}")
+            return J
 
         def forward_total(theta_ctrl, phi_ctrl):
             """The objective TAO differentiates: misfit plus BOTH prior terms.
@@ -1838,12 +3423,89 @@ def main():
             _nfev[0] += 1
             theta.dat.data[:] = theta_ctrl.dat.data_ro
             phi.dat.data[:] = phi_ctrl.dat.data_ro
-            J = forward(theta_ctrl, phi_ctrl)
-            J.addto(_prior_energy_form(theta_ctrl, "theta"))
-            J.addto(_prior_energy_form(phi_ctrl, "phi"))
-            for _zb, _z in zip(z_backup.subfunctions, z.subfunctions):
-                _zb.dat.data[:] = _z.dat.data_ro
+            try:
+                J = _forward_checked(theta_ctrl, phi_ctrl)
+            except fd.ConvergenceError as err:
+                PETSc.Sys.Print(f"    ({str(err).splitlines()[0][:200]})")
+                # A line-search trial point where the single Newton solve
+                # of the forward diverges (the trial is far from the last
+                # converged state). First rescue: re-climb the exponent
+                # ladder at the trial controls, unannotated, from the last
+                # converged state, then take the annotated solve from there.
+                # Failing that, the scipy path's rescue: restore the state
+                # and hand TAO an inflated objective with no control
+                # dependence, so its line search backtracks instead of the
+                # run ending here.
+                z.assign(z_backup)
+                if not np.isfinite(last_good_obj[0]):
+                    raise RuntimeError(
+                        "First forward solve failed - the inversion cannot start "
+                        "(fewer MPI ranks for a small mesh; check the fluidity prior).")
+                stop_manager()
+                try:
+                    if trial_rescue_rungs() == 0:
+                        raise fd.ConvergenceError("trial rescue disabled")
+                    PETSc.Sys.Print(
+                        "  [!] Forward solve failed at a trial point; re-climbing "
+                        "the continuation there")
+                    with spans("reramp"):
+                        _reramp_at_current_controls()
+                    reset_manager()
+                    start_manager()
+                    J = _forward_checked(theta_ctrl, phi_ctrl)
+                except fd.ConvergenceError as err:
+                    PETSc.Sys.Print(f"    ({str(err).splitlines()[0][:200]})")
+                    z.assign(z_backup)
+                    reset_manager()
+                    start_manager()
+                    PETSc.Sys.Print(
+                        "  [!] The continuation failed there too; returning an "
+                        "inflated objective so the line search backtracks")
+                    J = Functional(name="J_failed")
+                    J.assign(float(10.0 * last_good_obj[0]))
+                    return J
+            with spans("prior_taped"):
+                J.addto(_prior_energy_form(theta_ctrl, "theta"))
+                J.addto(_prior_energy_form(phi_ctrl, "phi"))
+            # The last few evaluations with their controls: the monitor picks
+            # the one TAO accepted, so a checkpoint never holds a rejected
+            # line-search trial point.
+            # The mixed state goes in with the controls: the monitor puts
+            # the ACCEPTED evaluation's state back into z, so the state on
+            # record, its residual and the published velocity belong to the
+            # controls the MAP saves. Without it z_backup held the last
+            # EVALUATED trial's state, and after a failed line search the
+            # publishing solve started from a state of other controls,
+            # "converged" in 0 iterations at an atol scaled from its own
+            # residual (32 km joint Pattyn run, 26 Sep: ||F|| 3e35 published).
+            with spans("record_state"):
+                _ring.append((float(J), theta_ctrl.dat.data_ro.copy(),
+                              phi_ctrl.dat.data_ro.copy(),
+                              [_z.dat.data_ro.copy() for _z in z.subfunctions]))
+                del _ring[:-6]
+                for _zb, _z in zip(z_backup.subfunctions, z.subfunctions):
+                    _zb.dat.data[:] = _z.dat.data_ro
             return J
+
+        _accepted_entry = [None]
+
+        def _restore_accepted(f_val):
+            """Put the evaluation TAO accepted at objective ``f_val`` into
+            (theta, phi, z, z_backup); returns the entry or None. The last
+            accepted entry stays pinned so a long run of rejected trials
+            cannot push it out of the ring."""
+            _hit = accepted_evaluation(
+                _ring + ([_accepted_entry[0]] if _accepted_entry[0] is not None else []),
+                float(f_val))
+            if _hit is None:
+                return None
+            _accepted_entry[0] = _hit
+            theta.dat.data[:] = _hit[1]
+            phi.dat.data[:] = _hit[2]
+            for _z, _zb, _d in zip(z.subfunctions, z_backup.subfunctions, _hit[3]):
+                _z.dat.data[:] = _d
+                _zb.dat.data[:] = _d
+            return _hit
 
         gtol = float(os.environ.get("ISMIP7_GTOL", "0.0"))
         _step0_env = float(os.environ.get("ISMIP7_PRECOND_STEP0", "0.15"))
@@ -1860,10 +3522,104 @@ def main():
             f"  Optimization metric: {_desc}; via TAO lmvm; "
             f"gatol={gtol:g} max_it={max_iter} step0={_step0_env:g}"
         )
+        if os.environ.get("ISMIP7_GRAD_CHECK", "0").strip() == "1":
+            # ISMIP7_GRAD_CHECK=1: verify the taped gradient of the FULL
+            # objective by a Taylor test at the start, print the spread of
+            # the metric-scaled first step over the nodes, and stop. Written
+            # for the exp-control question (Rice, 28 Sep 2026): is the
+            # objective or its gradient wrong under C = C_ref exp(alpha)?
+            from tlm_adjoint import taylor_test
+            import time as _time
+            _theta0 = theta.copy(deepcopy=True)
+            _phi0 = phi.copy(deepcopy=True)
+            reset_manager()
+            start_manager()
+            _J0 = forward_total(theta, phi)
+            stop_manager()
+            _dJ = compute_gradient(_J0, [theta, phi])
+            _xt, _xp = _A_inv(_dJ[0], _dJ[1])
+            _Hc = cg1_lift(H) if geom_dg else H
+            _bc = cg1_lift(b) if geom_dg else b
+            _hafc = Function(Q).interpolate(height_above_flotation(_Hc, _bc)).dat.data_ro
+            _gr = (_hafc > 0.0) & (_Hc.dat.data_ro > 10.0)
+            _fl = (_hafc <= 0.0) & (_Hc.dat.data_ro > 10.0)
+
+            def _pct(arr, msk):
+                a = np.concatenate(COMM_WORLD.allgather(
+                    np.abs(np.asarray(arr[msk], dtype=float))))
+                if a.size == 0:
+                    return "n/a"
+                q = np.percentile(a, [50, 90, 99, 100])
+                return (f"median {q[0]:.3e} p90 {q[1]:.3e} p99 {q[2]:.3e} max {q[3]:.3e} "
+                        f"(max/median {q[3] / max(q[0], 1e-300):.1e})")
+            PETSc.Sys.Print(f"  Gradient check: objective {float(_J0):.6e}")
+            PETSc.Sys.Print(f"    raw dJ/dtheta, grounded nodes: {_pct(_dJ[0].dat.data_ro, _gr)}")
+            PETSc.Sys.Print(f"    raw dJ/dphi, floating nodes:   {_pct(_dJ[1].dat.data_ro, _fl)}")
+            PETSc.Sys.Print(f"    first step H0 g, theta grounded: {_pct(_xt.dat.data_ro, _gr)}")
+            PETSc.Sys.Print(f"    first step H0 g, phi floating:   {_pct(_xp.dat.data_ro, _fl)}")
+            _seed = float(os.environ.get("ISMIP7_GRAD_CHECK_SEED", "1e-3"))
+            _t0 = _time.perf_counter()
+            _order = taylor_test(forward_total, [theta, phi], J_val=float(_J0), dJ=_dJ,
+                                 seed=_seed, size=4)
+            PETSc.Sys.Print(
+                f"  Taylor test (seed {_seed:g}, 4 sizes): minimum order {_order:.3f} "
+                f"(2 = the gradient is consistent with the objective; 1 = it is not) "
+                f"[{_time.perf_counter() - _t0:.0f}s]")
+            theta.dat.data[:] = _theta0.dat.data_ro
+            phi.dat.data[:] = _phi0.dat.data_ro
+            PETSc.Sys.Print("  GRAD_CHECK: stopped after the Taylor test; no MAP written")
+            COMM_WORLD.barrier()
+            sys.exit(0)
+        # A floating-only fluidity control: the forward already reads
+        # phi * (1 - He) (build_F), so the misfit does not depend on the
+        # grounded dofs; the metric action zeroes their part of every step
+        # and of the gradient norm, so they never leave zero (the prior's
+        # coupling across the grounding line enters the curvature pairs
+        # only through components the step cannot move). A recorded
+        # product of two Functions is not an assignment Firedrake allows,
+        # so the masking is not put on the tape.
+        if phi_free is not None:
+            def _A_inv_phi_masked(g_theta, g_phi):
+                # the action returns one entry per block that is not None,
+                # phi last
+                out = _A_inv(g_theta, g_phi)
+                if g_phi is not None:
+                    out[-1].dat.data[:] = out[-1].dat.data_ro * phi_free.dat.data_ro
+                return out
+        else:
+            _A_inv_phi_masked = _A_inv
+        if INVERT == "both":
+            _tao_forward = forward_total
+            _tao_spaces, _tao_x, _tao_action = [Q, Q], [theta, phi], _A_inv_phi_masked
+        else:
+            # One control moves. The other enters the forward as a fixed
+            # coefficient (not a control: no gradient, its prior term a
+            # constant), so the objective TAO sees is forward_total's with
+            # that field held where it is.
+            _frozen = Function(Q, name="frozen_control")
+            _frozen.dat.data[:] = (theta if INVERT == "phi" else phi).dat.data_ro
+            if INVERT == "phi":
+                def _tao_forward(phi_ctrl):
+                    return forward_total(_frozen, phi_ctrl)
+
+                def _tao_action(g_phi):
+                    return _A_inv_phi_masked(None, g_phi)
+                _tao_x = [phi]
+            else:
+                def _tao_forward(theta_ctrl):
+                    return forward_total(theta_ctrl, _frozen)
+
+                def _tao_action(g_theta):
+                    return _A_inv(g_theta, None)
+                _tao_x = [theta]
+            _tao_spaces = [Q]
+            PETSc.Sys.Print(
+                f"  Controls: {INVERT} only (ISMIP7_INVERT); "
+                f"{'phi' if INVERT == 'theta' else 'theta'} frozen at its current field")
         solver = TAOSolver(
-            forward_total, [Q, Q],
+            _tao_forward, _tao_spaces,
             solver_parameters={
-                "tao_type": "lmvm",
+                "tao_type": "blmvm" if PHI_BOUNDS is not None else "lmvm",
                 "tao_max_it": max_iter,
                 # The gradient norm TAO tests is the one M_inv_action defines,
                 # i.e. sqrt(g' A^-1 g) -- mesh independent, unlike the raw l2
@@ -1873,37 +3629,107 @@ def main():
                 "tao_grtol": 0.0,
                 "tao_gttol": 0.0,
             },
-            H_0_action=_A_inv, M_inv_action=_A_inv,
+            H_0_action=_tao_action, M_inv_action=_tao_action,
         )
+        if PHI_BOUNDS is not None:
+            # The TAO vector is the concatenation of the controls' owned dofs
+            # in _tao_x order (tlm_adjoint PETScVecInterface); theta's part
+            # is unbounded.
+            _lo_parts, _hi_parts = [], []
+            for _xc in _tao_x:
+                _nloc = _xc.dat.data_ro.size
+                if _xc is phi:
+                    _lo_parts.append(np.full(_nloc, PHI_BOUNDS[0]))
+                    _hi_parts.append(np.full(_nloc, PHI_BOUNDS[1]))
+                else:
+                    _lo_parts.append(np.full(_nloc, PETSc.NINFINITY))
+                    _hi_parts.append(np.full(_nloc, PETSc.INFINITY))
+            _lo_vec = PETSc.Vec().createWithArray(np.concatenate(_lo_parts), comm=solver.tao.comm)
+            _hi_vec = PETSc.Vec().createWithArray(np.concatenate(_hi_parts), comm=solver.tao.comm)
+            solver.tao.setVariableBounds(_lo_vec, _hi_vec)
+            phi.dat.data[:] = np.clip(phi.dat.data_ro, PHI_BOUNDS[0], PHI_BOUNDS[1])
+            PETSc.Sys.Print(
+                f"  Fluidity bounds: {PHI_BOUNDS[0]:g} <= phi <= {PHI_BOUNDS[1]:g} "
+                f"(TAO blmvm; ISMIP7_PHI_BOUNDS)")
 
         _t_last = [perf_counter()]
         _ftol_stop = FunctionalDecreaseStop(ftol, min_iter)
-
         def _monitor(tao):
             its, f_val, gnorm, _cnorm, _xdiff, _reason = tao.getSolutionStatus()
             iteration_count[0] = int(its)
-            if _ftol_stop.update(iteration_count[0], f_val):
+            # theta/phi/z mirror the LAST EVALUATION; put the ACCEPTED
+            # iterate (controls AND mixed state) there before anything below
+            # reads, measures or saves them.
+            with spans("monitor_restore"):
+                _hit = _restore_accepted(f_val)
+            if _hit is None:
+                PETSc.Sys.Print(
+                    f"    WARNING: no recent evaluation matches the accepted "
+                    f"objective {float(f_val):.6e}; the controls on record are "
+                    "the last evaluated point")
+            if its == 0:
+                _check_handoff(float(f_val), tao=tao)
+            # An accepted point identical to the last one is a line search
+            # that found no new point (every trial diverged), not a
+            # functional decrease of zero: it must not read as convergence.
+            with spans("monitor_gather"):
+                _x_acc = np.concatenate([func_to_global(theta), func_to_global(phi)])
+            _unchanged = (its > 0 and last_good_x[0] is not None
+                          and np.array_equal(_x_acc, last_good_x[0]))
+            if _unchanged:
+                PETSc.Sys.Print(
+                    "    (the line search accepted no new point this iteration; "
+                    "not a functional-decrease stop)")
+            elif _ftol_stop.update(iteration_count[0], f_val):
                 tao.setConvergedReason(PETSc.TAO.ConvergedReason.CONVERGED_USER)
+            # z holds the last evaluated forward, mirrored into z_backup above.
+            last_good_obj[0] = float(f_val)
+            with spans("residual_norm"):
+                last_good_fnorm[0] = _residual_norm()
+            with spans("vel_chi2"):
+                last_good_vel_chi2[0] = float(assemble(_vel_chi2))
+            with spans("monitor_gather"):
+                _x = np.concatenate([func_to_global(theta), func_to_global(phi)])
+                last_x[0] = _x
+                last_good_x[0] = np.array(_x, copy=True)
+            with spans("prior_solve"):
+                _reg_form_theta = _prior_energy_form(theta, "theta")
+            with spans("prior_energy"):
+                reg_theta = float(assemble(_reg_form_theta))
+            with spans("prior_solve"):
+                _reg_form_phi = _prior_energy_form(phi, "phi")
+            with spans("prior_energy"):
+                reg_phi = float(assemble(_reg_form_phi))
+            # One TAO iteration: every evaluation since the last monitor call
+            # (the line search's trials included), the adjoint(s), TAO's own
+            # work and the bookkeeping above. The report, timing write and
+            # checkpoint below land in the next iteration's.
             now = perf_counter()
             t_iter = now - _t_last[0]
             _t_last[0] = now
-            # z holds the last evaluated forward, mirrored into z_backup above.
-            last_good_obj[0] = float(f_val)
-            last_good_fnorm[0] = _residual_norm()
-            last_good_vel_chi2[0] = float(assemble(_vel_chi2))
-            _x = np.concatenate([func_to_global(theta), func_to_global(phi)])
-            last_x[0] = _x
-            last_good_x[0] = np.array(_x, copy=True)
-            reg_theta = float(assemble(_prior_energy_form(theta, "theta")))
-            reg_phi = float(assemble(_prior_energy_form(phi, "phi")))
+            # Collective: TAO calls the monitor on every rank.
+            iter_spans, iter_durations = spans.reduce(
+                durations={"total_seconds": t_iter},
+                unspanned_total=t_iter,
+            )
+            t_iter = iter_durations["total_seconds"]
+            _unspanned = iter_durations["unspanned"]
+            last_accepted.update(iteration=int(its), total=float(f_val),
+                                 misfit=float(f_val) - reg_theta - reg_phi,
+                                 reg_theta=reg_theta, reg_phi=reg_phi)
             PETSc.Sys.Print(
                 f"  iter {iteration_count[0]:3d}: "
-                f"misfit={f_val - reg_theta - reg_phi:.6e} "
+                f"misfit={f_val - reg_theta - reg_phi:.6e}{term_report()} "
                 f"reg_θ={reg_theta:.4e} reg_φ={reg_phi:.4e} "
                 f"total={f_val:.6e} |grad|_A={gnorm:.4e} "
                 f"dJ/J={_ftol_stop.criterion if _ftol_stop.criterion is not None else 0.0:.1e} "
                 f"[total={t_iter:.1f}s]"
             )
+            # "unspanned" is the adjoint(s) and TAO's own work, which run
+            # inside TAOSolver where no span reaches.
+            PETSc.Sys.Print(
+                "    " + " ".join(f"{k}={v:.2f}" for k, v in iter_spans.items())
+                + f" unspanned={_unspanned:.2f}s")
             if timing_json:
                 timing_history.append({
                     "eval": iteration_count[0],
@@ -1913,11 +3739,16 @@ def main():
                     "total": float(f_val),
                     "grad_norm": float(gnorm),
                     "total_seconds": t_iter,
+                    "iteration_spans": {**iter_spans, "unspanned": _unspanned},
                     "terms": {"vel": float(last_good_vel_chi2[0])},
+                    "state_solves": [w for w in state_work if w],
+                    "rss_mib": global_rss_mib(COMM_WORLD),
                 })
-                _write_timing_json(phase="running", message="in progress")
-            if iteration_count[0] > 0 and iteration_count[0] % 20 == 0:
-                save_map(os.path.join(_map_dir, map_fn))
+                with spans("timing_json"):
+                    _write_timing_json(phase="running", message="in progress")
+            if iteration_count[0] > 0 and iteration_count[0] % _ckpt_every == 0:
+                with spans("checkpoint"):
+                    save_map(os.path.join(_map_dir, map_fn))
                 PETSc.Sys.Print(f"    [checkpoint saved: iter {iteration_count[0]}]")
 
         solver.tao.setMonitor(_monitor)
@@ -1927,9 +3758,28 @@ def main():
         # production inversion normally ends here, so the cap is read back from
         # TAO rather than treated as a failure.
         try:
-            solver.solve([theta, phi])
+            solver.solve(_tao_x)
         except RuntimeError:
             pass
+        if _handoff_failed[0]:
+            raise RuntimeError(_handoff_failed[0])
+        # TAOSolver writes its current point back into (theta, phi) on exit,
+        # which after an aborted line search is a rejected trial point. The
+        # MAP must hold the last ACCEPTED iterate, which the monitor kept.
+        if last_good_x[0] is not None:
+            _x_now = np.concatenate([func_to_global(theta), func_to_global(phi)])
+            if not np.array_equal(_x_now, last_good_x[0]):
+                global_to_func(last_good_x[0][:global_ndof], theta)
+                global_to_func(last_good_x[0][global_ndof:], phi)
+                PETSc.Sys.Print(
+                    "  TAO exited on a point other than the last accepted iterate; "
+                    "the accepted iterate is what the MAP records")
+            # and its mixed state, evaluated at those controls, is what the
+            # publishing solve starts from
+            if _restore_accepted(last_good_obj[0]) is None:
+                PETSc.Sys.Print(
+                    "    WARNING: the accepted iterate's mixed state is not on "
+                    "record; the publishing solve starts from the last evaluated state")
         reason = int(solver.tao.getConvergedReason())
         message = (
             f"CONVERGED: relative functional decrease <= ftol={ftol:g}"
@@ -1982,6 +3832,97 @@ def main():
             f"ISMIP7_GRAD_PRECOND must be one of {_METRICS}, "
             f"got {grad_precond!r}"
         )
+
+    # ── One objective across restarts (icepack2_tools.handoff) ──────────
+    # What this run minimises, compared with what the warm start's writer
+    # minimised. A chain link that would silently change the objective is a
+    # different inversion; ISMIP7_WARM_START_STRICT=1 (the chain runner's
+    # default) refuses it, otherwise the differences are printed. The first
+    # evaluation must then reproduce the recorded objective to
+    # ISMIP7_WARM_START_OBJ_TOL (relative, default 1e-3: the re-solved state
+    # differs from the writer's by the forward tolerance only).
+    run_settings.update({
+        "misfit_norm": MISFIT_NORM, "misfit_scale": float(misfit_scale),
+        "log_vel_weight": float(log_vel_w), "log_vel_eps": float(LOG_VEL_EPS),
+        "dhdt_weight": float(dhdt_w), "dhdt_net_sigma": net_sigma_used,
+        "dhdt_filter_l": float(dhdt_filter_l) if use_dhdt else 0.0,
+        "prior_form": PRIOR_FORM, "gamma_theta": float(GAMMA_THETA),
+        "gamma_phi": float(GAMMA_PHI), "friction_control": FRICTION_CONTROL,
+        "friction": str(FRICTION), "n_flow": float(n_flow_val),
+        "geometry_space": str(geometry_space),
+        "friction_anchor_length": float(ANCHOR_LENGTH),
+        "lake_ice_base": int(LAKE_ICE_BASE),
+        "fluidity_prior_origin": str(prior_origin), "grad_precond": grad_precond,
+        "subelement_friction": int(SUBELEMENT_FRICTION), "exact_front": int(EXACT_FRONT),
+        "subelement_scheme": SUBELEMENT_SCHEME,
+        "subelement_scheme_version": int(SUBELEMENT_SCHEME_VERSION),
+        "fluidity_control": FLUIDITY_CONTROL,
+        "drag_gate": DRAG_RECORD, "h_visc_floor": float(RC_HVISC_FLOOR),
+        "phi_grounded": PHI_GROUNDED, "raster_sample": str(raster_sample),
+        "vel_sample": VEL_SAMPLE, "u_obs_max": float(U_OBS_MAX),
+        "dhdt_reweight": float(DHDT_REWEIGHT),
+        "dhdt_reweight_scale": float(DHDT_REWEIGHT_SCALE), "kill_bergs": int(KILL_BERGS),
+        "phi_bounds": PHI_BOUNDS_RECORD,
+    })
+    if PRIOR_FORM == "bilaplacian":
+        run_settings.update({"prior_sigma_theta": float(PRIOR_SIGMA_THETA),
+                             "prior_sigma_phi": float(PRIOR_SIGMA_PHI),
+                             "prior_rho": float(PRIOR_RHO)})
+        if FRICTION_CONTROL in ("sqrt", "exp"):
+            run_settings.update({"prior_sigma_alpha": float(sigma_alpha_val),
+                                 "prior_rho_theta": float(PRIOR_RHO_THETA)})
+        if FRICTION_CONTROL == "exp":
+            run_settings["friction_c_ref"] = float(c_ref_val)
+    _strict = os.environ.get("ISMIP7_WARM_START_STRICT", "0").strip() == "1"
+    _obj_tol = float(os.environ.get("ISMIP7_WARM_START_OBJ_TOL", "1e-3"))
+    if warm_attrs:
+        _mism = objective_mismatches(warm_attrs, run_settings)
+        if _mism:
+            PETSc.Sys.Print("  Handoff: this run's objective differs from the warm start's:")
+            for _m in _mism:
+                PETSc.Sys.Print(f"    {_m}")
+            if _strict:
+                raise RuntimeError(
+                    "ISMIP7_WARM_START_STRICT=1: refusing to continue a "
+                    "different objective from the warm start's controls "
+                    f"({len(_mism)} setting(s) differ, listed above)")
+        else:
+            PETSc.Sys.Print("  Handoff: objective settings match the warm start's")
+    _handoff_checked = [False]
+
+    def _check_handoff(first_total, tao=None):
+        """The first evaluation against the recorded objective."""
+        if _handoff_checked[0]:
+            return
+        _handoff_checked[0] = True
+        if "objective_total" not in warm_attrs:
+            # A relaxation's end state carries the MAP's objective settings
+            # and leaves its value behind, since that value belongs to the
+            # MAP's geometry: the change is the relaxation's, not a gap.
+            if warm_end_state and "relax_source_objective_total" in warm_geometry_attrs:
+                PETSc.Sys.Print(
+                    f"  Handoff: first objective {float(first_total):.6e} on the "
+                    f"relaxed geometry; the source MAP recorded "
+                    f"{float(warm_geometry_attrs['relax_source_objective_total']):.6e} "
+                    f"on its own")
+            return
+        _rec = float(warm_attrs["objective_total"])
+        _gap = handoff_gap(_rec, first_total)
+        _msg = (f"  Handoff: first objective {float(first_total):.6e} vs recorded "
+                f"{_rec:.6e} (relative gap {_gap:.2e}, tolerance {_obj_tol:g})")
+        PETSc.Sys.Print(_msg)
+        if _gap > _obj_tol:
+            _why = (f"the warm start's objective is not reproduced (gap {_gap:.2e} "
+                    f"> {_obj_tol:g}): the optimiser would not be continuing the "
+                    "same minimisation")
+            if _strict:
+                _handoff_failed[0] = _why
+                if tao is not None:
+                    tao.setConvergedReason(PETSc.TAO.ConvergedReason.DIVERGED_USER)
+                else:
+                    raise RuntimeError(_why)
+            else:
+                PETSc.Sys.Print(f"    WARNING: {_why}")
     if grad_precond == "mass":
         _mv = assemble(TestFunction(Q) * dx).dat.data_ro
         _mloc = Function(Q); _mloc.dat.data[:] = _mv
@@ -1998,6 +3939,10 @@ def main():
     if grad_precond in ("mass_consistent", "prior"):
         result = _minimize_prior_metric()
     else:
+        if INVERT != "both":
+            raise ValueError(
+                f"ISMIP7_INVERT={INVERT} needs the TAO path "
+                "(ISMIP7_GRAD_PRECOND=mass_consistent or prior)")
         x0 = np.concatenate([func_to_global(theta), func_to_global(phi)])
         if grad_precond == "mass":
             x0 = x0 * _sqrtm
@@ -2013,11 +3958,23 @@ def main():
     PETSc.Sys.Print(f"  {result.nit} iterations, {result.nfev} function evaluations")
     _x_final = result.x / _sqrtm if grad_precond == "mass" else result.x
     global_to_func(_x_final[:global_ndof], theta)
-    global_to_func(_x_final[global_ndof:], phi)
+    set_phi(_x_final[global_ndof:])
     _t_lo, _t_hi = global_range(theta)
     _p_lo, _p_hi = global_range(phi)
     PETSc.Sys.Print(f"  theta range: [{_t_lo:.3f}, {_t_hi:.3f}]")
     PETSc.Sys.Print(f"  phi range:   [{_p_lo:.3f}, {_p_hi:.3f}]")
+    # A stop right after failed trials is no convergence test (TrialFailures),
+    # so the MAP gets no done marker and the chain's next link resumes from
+    # it. Printed before the MAP is saved: the runner reads this line, and a
+    # kill between the two must not leave a "Saved MAP:" line without it.
+    unfinished = trial_failures.stopped_on_failures
+    if unfinished:
+        PETSc.Sys.Print(
+            f"  {NOT_FINAL} the optimizer stopped right after "
+            f"{trial_failures.trailing} failed trial evaluations in a row "
+            f"({trial_failures.total} in this run). The MAP holds the last "
+            "accepted iterate; no done marker, so the chain's next link "
+            "resumes from it.")
 
     # ── Save MAP immediately ──
     chk_fn = os.path.join(_map_dir, map_fn)
@@ -2033,14 +3990,16 @@ def main():
     # the tail below (final solve, summary figure) runs for long enough that
     # the wall clock can kill the job inside it, and the runner's post-srun
     # rule would then never get to write the marker.
-    if map_out and COMM_WORLD.rank == 0:
+    if map_out and COMM_WORLD.rank == 0 and not unfinished:
         with open(map_out + ".done", "w"):
             pass
 
     if timing_json:
         _write_timing_json(
             phase="final_solve",
-            message=str(result.message),
+            message=str(result.message) + (
+                f" ({NOT_FINAL} after {trial_failures.trailing} failed trials)"
+                if unfinished else ""),
             nit=result.nit,
             nfev=result.nfev,
         )
@@ -2067,6 +4026,8 @@ def main():
     stop_manager()
     reset_manager()
     clear_caches()
+    # The publishing solve builds its own solver; release the forwards'.
+    state_solver_cache.clear()
     n_flow.assign(n_flow_val)
     m_slide.assign(m_slide_val)
     z.assign(z_backup)
@@ -2089,10 +4050,7 @@ def main():
             "  WARNING: no converged forward residual on record; the final "
             "solve falls back to the relative test alone"
         )
-    final_solver = NonlinearVariationalSolver(
-        NonlinearVariationalProblem(F, z, form_compiler_parameters=fc_params),
-        solver_parameters=final_sparams,
-    )
+    final_solver = _untaped_state_solver(F, final_sparams)
     final_solve_ok = False
     try:
         final_solver.solve()
@@ -2254,7 +4212,7 @@ def main():
     fig.colorbar(cs, cax=cax1, label="m/yr")
     fig.colorbar(cd, cax=cax2, label="m/yr")
 
-    out_fn = os.path.join(FIG_DIR, f"inversion_icepack2_{lc}.png")
+    out_fn = os.path.join(FIG_DIR, f"inversion_icepack2_{mesh_lc}.png")
     fig.savefig(out_fn, dpi=200, bbox_inches="tight")
     PETSc.Sys.Print(f"Saved: {out_fn}")
 

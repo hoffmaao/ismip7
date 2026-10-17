@@ -9,12 +9,15 @@ they can be exercised without standing up a whole run.
 import numpy as np
 
 __all__ = ["retreat_slivers", "clear_reference_where_ice_free", "clamp_thickness",
-           "front_connected", "facet_neighbours", "collapse_cell_counts",
+           "front_removal_mask", "unforced_cells", "applied_forcing",
+           "front_connected", "facet_neighbours", "vertex_neighbours",
+           "ocean_drag_cells",
+           "collapse_cell_counts",
            "collapse_banner", "collapse_csv_fields", "COLLAPSE_MARKER",
            "COLLAPSE_CSV_COLUMNS", "FRONT_OWNER_MARKER"]
 
 # The prefix of the line a run prints naming the mechanism that owns the
-# calving front (an ISMIP7_CALVING law, an external law with its parameters,
+# calving front (an ISMIP7_CALVING law with every parameter it ran with,
 # or the legacy mask). core_report.py lifts it into the run record.
 FRONT_OWNER_MARKER = "Calving front owner:"
 
@@ -26,6 +29,52 @@ COLLAPSE_MARKER = "Ice-shelf collapse forcing:"
 # The timeseries columns collapse_cell_counts fills, in its return order.
 COLLAPSE_CSV_COLUMNS = ("collapse_flagged_cells", "collapse_removed_cells",
                         "collapse_held_cells")
+
+
+def unforced_cells(h, bed, *ice_free):
+    r"""The cells the surface and ocean forcing must not act on.
+
+    ``h`` is the per-cell thickness at the start of the advance, ``bed`` the
+    per-cell bed elevation, and each ``ice_free`` argument a boolean mask (or
+    ``None``) of cells a front rule holds ice-free. Returns a boolean mask:
+    open ocean (no ice on a bed below sea level) and every such held cell.
+
+    Forcing there has no ice to act on, and the model used to count it anyway.
+    Measured on a 2 km control, the open ocean beyond a fixed front received
+    57 Gt/yr of SMB and 87 to 90 Gt/yr of melt. The positivity limit withheld
+    the melt that had no ice to melt and booked it as ``clamp`` (+64 Gt/yr),
+    while the melt column and the ISMIP7 ``libmassbffl`` field still counted
+    it; where the SMB won, it made ice on open water that the front removed
+    on the next advance and booked as calving, 31 of the 48 Gt/yr the run
+    called calving. None of it touched the ice.
+
+    Ice-free land (a bed at or above sea level) stays forced unless a front
+    rule holds it, so ice can still grow on it as before.
+    """
+    out = (np.asarray(h) <= 0.0) & (np.asarray(bed) < 0.0)
+    for mask in ice_free:
+        if mask is not None:
+            out = out | np.asarray(mask, dtype=bool)
+    return out
+
+
+def applied_forcing(forced, accum, ocean_melt, a_ref=None):
+    r"""The SMB, melt and apparent-MB reference an advance applies.
+
+    ``forced`` is 1 where the forcing acts and 0 on the cells
+    :func:`unforced_cells` names; the other arguments are the raw fields.
+    Works on cell arrays and on UFL expressions alike. Returns
+    ``(smb, melt, ref)``, each masked by ``forced``; ``ref`` is ``None`` when
+    ``a_ref`` is.
+
+    The reference is masked with the forcing. A cell emptied mid-run (a
+    collapsed shelf, or one melted through to h=0) turns into open ocean, and
+    its t=0 reference, about the shelf's t=0 melt, would regrow it every
+    advance for the front to remove and book as calving. ``a_ref`` itself is
+    left as it is, so it applies again if ice returns to the cell.
+    """
+    ref = None if a_ref is None else forced * a_ref
+    return forced * accum, forced * ocean_melt, ref
 
 
 def clamp_thickness(h, h_clamp, *ice_free):
@@ -187,6 +236,34 @@ def collapse_csv_fields(header, counts):
     return "," + ",".join(str(int(c)) for c in counts)
 
 
+def ocean_drag_cells(ice, neighbours_of, extent0):
+    r"""The cells the floor-cell ocean drag may act on: open water that holds
+    no ice now, is no neighbour of a cell that does, and lies outside the t=0
+    ice extent.
+
+    ``ice`` is the per-cell boolean "holds ice now" (thickness at least the
+    front threshold), ``extent0`` the same test on the t=0 thickness, and
+    ``neighbours_of(mask)`` the cells touching a cell of ``mask``: at a vertex
+    (:func:`vertex_neighbours`, ``ISMIP7_DRAG_GATE=vertex``, the default) or
+    at a facet (:func:`facet_neighbours`). Every other cell, floating or
+    grounded, gets no drag. Under the facet gate a water cell touching the
+    ice at one vertex drags that front node, since the velocity is
+    continuous: on the 20 km buffered 2 km mesh that held floating ice 27 %
+    below its observed speed, against 11 % under the vertex gate (issue
+    #153).
+
+    The drag exists to give the ice-free buffer some velocity coercivity. Left
+    on everywhere below ``h_ocean`` it also acted on thin floating ice and on
+    the water row the front's vertices share, and held the front back: at
+    1875 in the 1 km CESM2-WACCM historical the floating front moved at 0.12
+    of the observed speed (median; 0.09 summed), against 0.83 one cell further
+    in, and only 19 Gt/yr crossed into the ice-free cells as calving. Keeping
+    the t=0 extent drag-free as well means a front that retreats inside it
+    meets no drag either, before a restart and after.
+    """
+    return ~ice & ~neighbours_of(ice) & ~extent0
+
+
 def facet_neighbours(Q_dg):
     r"""``neighbours_of`` for :func:`front_connected` on the DG0 space
     ``Q_dg``: the cells sharing an interior facet with a cell of the mask.
@@ -212,3 +289,95 @@ def facet_neighbours(Q_dg):
         return touched.dat.data_ro > 0.0
 
     return neighbours_of
+
+
+def vertex_neighbours(Q_dg):
+    r"""``neighbours_of`` on the DG0 space ``Q_dg`` that counts a cell sharing
+    only a vertex with a cell of the mask, where :func:`facet_neighbours`
+    counts an edge.
+
+    With :func:`ocean_drag_cells` it keeps the drag off every cell that holds
+    a node of an ice cell. The CG1 velocity's front nodes are such nodes: a
+    water cell that touches the ice at one vertex and carries the drag drags
+    that front node directly. On the 20 km buffered 2 km mesh this held the
+    shelves of RC stage 2 at 27 % below the observed speed at evaluation 1
+    (issue #153), against 1 % with the drag off.
+
+    Assembled as the CG1 test functions against the mask's indicator: a node
+    of a masked cell gets a positive value, every other node exactly zero, and
+    the assembly sums across ranks, so a node on a partition boundary counts.
+    """
+    import firedrake as fd
+
+    mesh = Q_dg.mesh()
+    Q1 = fd.FunctionSpace(mesh, "CG", 1)
+    indicator = fd.Function(Q_dg)
+    form = indicator * fd.TestFunction(Q1) * fd.dx
+    touched = fd.Cofunction(Q1.dual())
+    nodes = fd.Function(Q1)
+    n_cells = Q_dg.dof_dset.size
+    cell_nodes = Q1.cell_node_map().values[:n_cells]
+
+    def neighbours_of(mask):
+        indicator.dat.data[:] = mask
+        fd.assemble(form, tensor=touched)
+        nodes.dat.data[:] = touched.dat.data_ro
+        return (nodes.dat.data_ro_with_halos[cell_nodes] > 0.0).any(axis=1)
+
+    return neighbours_of
+
+
+def front_removal_mask(law_beyond, initial_beyond, retreat_only, calved=None):
+    r"""The cells a step empties for the front: the ones the level-set law's
+    front has passed (``law_beyond``), and under a retreat-only front
+    (``ISMIP7_FRONT_ADVANCE=none``) also every cell beyond the t=0 extent
+    (``initial_beyond``), so ice the transport carries past the initial
+    outline is removed and booked as calving instead of becoming new
+    extent, and every cell the front has emptied before (``calved``, see
+    :func:`held_calved`). ``initial_beyond`` and ``calved`` may be None."""
+    import numpy as np
+    if not retreat_only:
+        return law_beyond
+    out = law_beyond
+    for mask in (initial_beyond, calved):
+        if mask is not None:
+            out = np.logical_or(out, mask)
+    return out
+
+
+def held_calved(calved, h_old, h_new, front_hmin, *, sliver, beyond=None,
+                calv_frac=None):
+    r"""Grow the mask of cells a retreat-only front has emptied.
+
+    ``calved`` is the mask so far, ``h_old`` and ``h_new`` the cell thickness
+    before and after one advance with its front removals applied. The front
+    rules of that advance are the law's ``beyond`` mask, its sub-cell shed
+    ``calv_frac`` (nonzero on the front cells) and the retreat ``sliver``
+    mask (:func:`retreat_slivers`). A cell joins when it held ice
+    (``h_old > front_hmin``), holds none now, and a front rule emptied it:
+    it lies beyond the front, the shed took the whole cell, or it is a
+    sliver in a front cell. A cell that SMB or melt thinned or emptied away
+    from the front is left out: it is inside the domain and may regrow.
+
+    Why it is kept: the sub-threshold inflow an ice-free cell keeps (see
+    :func:`retreat_slivers`) is how a free front advances, but under a
+    retreat-only front it refills a cell the law just calved. Measured on
+    the 2 km SEP1 control (Pine Island, 2041): the emptied cell took 1670
+    m/yr of inflow from its 8.6 km/yr neighbour, crossed the extent
+    threshold within one substep, the extent-anchored level set took it as
+    ice again, the resistive-stress law shed the whole of it, and the
+    neighbour's flux divergence flipped by that 1670 m/yr every step. The
+    flip-flop was what held the adaptive substeps at 0.00625 yr once the
+    grounding zones were stabilized. Held calved, the cell's inflow is
+    removed and booked as calving each step, as beyond the t=0 extent.
+    """
+    import numpy as np
+    removed = np.zeros(np.shape(h_new), dtype=bool)
+    if beyond is not None:
+        removed |= np.asarray(beyond, dtype=bool)
+    if calv_frac is not None:
+        frac = np.asarray(calv_frac)
+        removed |= (frac >= 1.0) | (np.asarray(sliver, dtype=bool) & (frac > 0.0))
+    return np.logical_or(
+        np.asarray(calved, dtype=bool),
+        removed & (np.asarray(h_old) > front_hmin) & (np.asarray(h_new) <= 0.0))

@@ -1,0 +1,31 @@
+{
+  "id": "core01-32km-hist-cesm2waccm-p2",
+  "task": "test",
+  "institution": "IU",
+  "title": "Core 1 at 32 km, the p2 historical: branch state of the p2 and p3 runs",
+  "status": "done",
+  "esm": "CESM2-WACCM",
+  "scenario": "historical",
+  "period": "1850 to 2015, reached 2015.0",
+  "friction": "budd",
+  "mesh": "antarctica_320000_32000, DG0 geometry",
+  "initial_state": "inversion_icepack2_budd_n3_dg0_logvelnet_32000.h5, sha256 3b3aefa1c69a5daf87d1db291cae9337e00c2696f412bce147b1f488228ef472",
+  "branch_from": "cold start",
+  "forcing": "CESM2-WACCM historical, atmosphere SDBN1-8000m v2, ocean v3",
+  "melt": "per-basin K from K_issue11_mesh2500.npz, local slope",
+  "front": "held fixed, ice-shelf collapse ISMIP7_FRACTURE=none",
+  "apparent_mb": "balance",
+  "dt": 0.1,
+  "site": "IU Quartz",
+  "resources": "8 ranks",
+  "jobs": [
+    "10568488"
+  ],
+  "code": "a0f92a8",
+  "started": "2026-09-22",
+  "finished": "2026-09-22",
+  "cost": "one link of 27 min for 165 model years",
+  "results": "antarctica/results/hist_cesm2_waccm_p2_32000_*",
+  "audit": "ON TRACK, with dM/dt WARN at 247.7 Gt/yr; resid 0.0000 on all 1650 rows",
+  "notes": "the final state hist_cesm2_waccm_p2_32000_final.h5, sha256 a9552130a0fede0c436684049a7bb29fc5ba68bda03c9fc3c7fce8cfb796a26d, is the 2015.0 state every p2 ssp585 run and both p3 runs restart from. Run without ISMIP7_OUTPUT, which the historical does not need. Full record: antarctica/reports/core01_hist_cesm2_waccm_32km_p2.md"
+}

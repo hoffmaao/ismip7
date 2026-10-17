@@ -29,6 +29,7 @@ import argparse
 import csv
 import json
 import os
+import re
 import subprocess
 import sys
 from datetime import date
@@ -42,11 +43,13 @@ from icepack2_tools.climatology import (
     CLIM_POOL_MARKER, clim_scenario, clim_start, clim_end,
 )
 from icepack2_tools.forcing import (
-    FORCING_PROVENANCE_MARKER, k_melt, melt_slope, sin_alpha_ant,
+    FORCING_PROVENANCE_MARKER, SMB_FEEDBACK_MARKER, melt_slope, sin_alpha_ant,
 )
 from icepack2_tools.front import COLLAPSE_MARKER, FRONT_OWNER_MARKER
+from icepack2_tools.fssa import FSSA_MARKER
 from icepack2_tools.runconfig import (
-    N_FLOW_DEFAULT, fracture, friction, geometry_space, lc, lc_coarse,
+    MELT_CALIBRATIONS, N_FLOW_DEFAULT, dt, fracture,
+    friction, geometry_space, lc, lc_coarse, smb_elevation_feedback,
 )
 from icepack2_tools.solverconfig import effective_solver_env, solver_provenance
 
@@ -75,6 +78,9 @@ def effective_env():
     resolved = {
         "ISMIP7_LC": str(lc()),
         "ISMIP7_LC_COARSE": str(lc_coarse()),
+        # The production step moved from 0.05 to 0.025 (issue 20), and the
+        # drivers' own fallbacks were 0.1 and 1.0 before that.
+        "ISMIP7_DT": f"{dt():g}",
         "ISMIP7_FRICTION": friction(),
         # The collapse mode is the largest stated uncertainty of the
         # submission (issue #10), and its default, `none`, is never exported.
@@ -84,11 +90,23 @@ def effective_env():
         "ISMIP7_CLIM_SCENARIO": clim_scenario(),
         "ISMIP7_CLIM_START": str(clim_start()),
         "ISMIP7_CLIM_END": str(clim_end()),
-        # The melt slope law and K: the default flipped from the local slope
-        # and K 1.15e-4 to the constant slope and K 8.5e-5.
+        # The melt slope law and the melt calibration: the default flipped
+        # from the local slope and K 1.15e-4 to the constant slope and K
+        # 8.5e-5, then (issue 26) to the tracked calibration, whose K and
+        # sha256 the run's own provenance line records. The file is the one
+        # of the sampling setup_model settled for the run, which a MAP or a
+        # restart records and this shell cannot see (issue #167).
         "ISMIP7_MELT_SLOPE": melt_slope(),
         "ISMIP7_SIN_ALPHA_ANT": f"{sin_alpha_ant():g}",
-        "ISMIP7_K_MELT": f"{k_melt():g}",
+        "ISMIP7_DELTAT_PER_BASIN_NPZ": (
+            "none, the legacy per-basin K named in ISMIP7_K_PER_BASIN_NPZ"
+            if os.environ.get("ISMIP7_K_PER_BASIN_NPZ")
+            else "the tracked calibration of the run's raster sampling ("
+            + ", ".join(f"{k}: {os.path.relpath(v, _PROJECT)}"
+                        for k, v in MELT_CALIBRATIONS.items())
+            + "), named with its sha256 in the run's forcing provenance line"),
+        # On by default since issue 116, and never exported by the runners.
+        "ISMIP7_SMB_ELEVATION_FEEDBACK": "1" if smb_elevation_feedback() else "0",
     }
     resolved.update(effective_solver_env())
     canonical_key = "ISMIP7_DIAGNOSTIC_LINEAR_SOLVER_CANONICAL"
@@ -159,11 +177,31 @@ def collapse_record(log_path):
                   "the run predates the collapse banner")
 
 
+def smb_feedback_record(log_path):
+    r"""Whether the run carried the SMB-elevation feedback and which gradient
+    it read, lifted out of its log: the startup line of every forward driver
+    (``forcing.smb_feedback_banner``)."""
+    return lifted(log_path, SMB_FEEDBACK_MARKER,
+                  "the run predates the SMB-elevation feedback banner, so it "
+                  "ran without the feedback")
+
+
+def fssa_record(log_path):
+    r"""The free-surface stabilization weight the run stepped with, and the
+    reference it measured from, lifted out of its log. The env block states
+    the default this shell resolves; a restart from a checkpoint stepped
+    without the stabilization keeps it off (``solverconfig
+    .forward_fssa_theta``), and these lines are the run's own statement."""
+    return lifted(log_path, FSSA_MARKER,
+                  "the run predates the stabilization line, so it ran "
+                  "without the stabilization")
+
+
 def front_owner(log_path):
     r"""The mechanism that owned the calving front, lifted out of its log.
-    An external law (``forward_calving.py``) leaves ``ISMIP7_CALVING`` at
-    ``none`` in the env block, so this line is where the law and its
-    parameters reach the record."""
+    The env block carries ``ISMIP7_CALVING`` and ``ISMIP7_CALVING_PARAMS``
+    only as exported; this line is where the law reaches the record with
+    every parameter at the value the run used, defaults included."""
     return lifted(log_path, FRONT_OWNER_MARKER,
                   "the run predates the front owner line")
 
@@ -171,6 +209,27 @@ def front_owner(log_path):
 def sh(cmd):
     r = subprocess.run(cmd, capture_output=True, text=True)
     return (r.stdout + r.stderr).strip(), r.returncode
+
+
+def verdict(rc, passed, failed):
+    r"""A check's exit status in the report's words. check_ismip6_track.py and
+    compare_ismip6.py both exit 0 on a pass, 1 on a failure and 2 when they
+    could not judge the run (a missing CSV, no ISMIP6 members on disk), and
+    the last is neither verdict."""
+    if rc == 0:
+        return passed
+    if rc == 1:
+        return failed
+    return f"not judged (exit {rc}: missing data or bad input)"
+
+
+def resolution_km(csv_fn):
+    r"""The run's refined resolution in km, as the report's name and title
+    carry it: from the ``_<lc>_timeseries.csv`` suffix every forward writes,
+    else ISMIP7_LC as this process resolves it. 32 for the demonstration
+    matrix, 1 for the production mesh."""
+    m = re.search(r"_(\d+)_timeseries\.csv$", os.path.basename(csv_fn))
+    return f"{(int(m.group(1)) if m else lc()) / 1000:g}"
 
 
 def csv_marker_rows(fn, n=8):
@@ -219,11 +278,12 @@ def main():
                           os.path.join(_SCRIPTS, "compare_ismip6.py"),
                           args.csv, args.ctrl_csv, "--exps", args.exps])
 
+    km = resolution_km(args.csv)
     out = args.out or os.path.join(
-        _ANT, "reports", f"core{args.core:02d}_{args.name}_32km.md")
+        _ANT, "reports", f"core{args.core:02d}_{args.name}_{km}km.md")
     os.makedirs(os.path.dirname(out), exist_ok=True)
     with open(out, "w") as f:
-        f.write(f"# Core {args.core}: {args.name} (32 km)\n\n")
+        f.write(f"# Core {args.core}: {args.name} ({km} km)\n\n")
         # Banner goes directly under the title so a reader cannot miss it.
         # Deliberately a FLAG rather than a hard-coded string: runs made after
         # the ice-front fixes are valid, and a baked-in banner would mislabel
@@ -246,13 +306,14 @@ def main():
         f.write(f"- timeseries: `{args.csv}` (gitignored; this report is "
                 f"the tracked record)\n")
         f.write(f"- observational audit: "
-                f"{'ON TRACK' if audit_rc == 0 else 'OFF TRACK'}\n")
+                f"{verdict(audit_rc, 'ON TRACK', 'OFF TRACK')}\n")
         for line in (climatology_pool(args.log) + forcing_provenance(args.log)
+                     + smb_feedback_record(args.log) + fssa_record(args.log)
                      + collapse_record(args.log) + front_owner(args.log)):
             f.write(f"- {line}\n")
         if ens_rc is not None:
             f.write(f"- ISMIP6 ensemble: "
-                    f"{'inside envelope' if ens_rc == 0 else 'outside envelope'}"
+                    f"{verdict(ens_rc, 'inside envelope', 'outside envelope')}"
                     f" (pool: {args.exps})\n")
         if args.notes:
             f.write(f"\n{args.notes}\n")

@@ -3,16 +3,22 @@ r"""Data preflight for the ISMIP7 core experiments.
 
 Answers "which experiments can run on this machine right now?" in a few
 seconds, checking every input each core needs: mesh, MAP inversion,
-boundary ids, per-basin K, RACMO, OI climatology, and the (ESM,
-scenario) atmosphere/ocean trees over the run period. Honors the same
+boundary ids, the melt calibration, RACMO, the OI climatology (core 11's stopgap),
+the Smith dH/dt that a backdated cold start reads,
+and the (ESM, scenario) atmosphere/ocean trees over the run period, the
+control's `ctrl` ocean among them, and under the SMB-elevation feedback the
+`dacabfdz` gradient each core reads. Honors the same
 environment knobs as the runs (ISMIP7_LC, ISMIP7_FRICTION,
-ISMIP7_OI_VERSION, ...).
+ISMIP7_OI_VERSION, ISMIP7_SMB_ELEVATION_FEEDBACK, ...). The run period is read
+from each core's driver, with ISMIP7_T_START and ISMIP7_T_END applied as that
+driver applies them, and a cold start that the geometry backdating refuses
+(issue 117) is BLOCKED.
 
 Usage:
     python scripts/preflight.py
     ISMIP7_LC=500 ISMIP7_FRICTION=regularized_coulomb python scripts/preflight.py
 """
-import os, sys, glob
+import ast, glob, math, os, sys
 
 _SCRIPTS = os.path.dirname(os.path.abspath(__file__))
 _ANT = os.path.dirname(_SCRIPTS)
@@ -21,24 +27,26 @@ sys.path.insert(0, _PROJECT)
 sys.path.insert(0, _SCRIPTS)
 
 from icepack2_tools.forcing import (
-    ISMIP7Atmosphere, ISMIP7Ocean, OCX, OCX_ATMOSPHERE_SOURCE,
-    _oi_climatology_path, _find_ismip7_data,
+    ISMIP7Atmosphere, ISMIP7Ocean, OCX, OCX_ATMOSPHERE_SOURCE, SMB_GRADIENT,
+    _oi_climatology_path, _find_ismip7_data, imbie2_basin_path, forcing_year,
 )
 from icepack2_tools.boundary import sidecar_path
 from icepack2_tools.naming import map_basename
+from icepack2_tools.obs_dhdt import dhdt_source
 from icepack2_tools.climatology import clim_start, clim_end, clim_scenario
 from icepack2_tools.runconfig import (
     obs_data_root,
-    calving_law as _calving_law, calving_sigma_max as _calving_sigma_max,
+    calving_law_object as _calving_law_object,
     friction as _friction, geometry_space as _geometry_space, lc as _lc,
     lc_coarse as _lc_coarse, ocx_forcing as _ocx_forcing, ocx_ocean as _ocx_ocean,
-    mesh_override,
+    mesh_override, deltat_per_basin_npz, k_per_basin_npz,
+    melt_calibration_contract, geometry_backdate_years,
+    smb_elevation_feedback as _smb_elevation_feedback,
 )
 DATA_DIR = obs_data_root()
 from mesh_naming import get_buffer_m, mesh_filename
 
 MESH_DIR = os.path.join(_ANT, "mesh")
-RESULTS_DIR = os.path.join(_ANT, "results")
 
 lc = _lc()
 lc_coarse = _lc_coarse()
@@ -49,19 +57,78 @@ CLIM_END = clim_end()
 CLIM_SCENARIO = clim_scenario()
 root = _find_ismip7_data()
 
+#: core, title, the driver under scripts/ that runs it, ESM, scenario. The
+#: years a core is checked over come from its driver (driver_period).
 CORES = [
-    (1, "hist CESM2-WACCM", "CESM2-WACCM", "historical", 1850, 2014),
-    (2, "hist MRI-ESM2-0", "MRI-ESM2-0", "historical", 1850, 2014),
-    (3, "ssp370 CESM2-WACCM", "CESM2-WACCM", "ssp370", 2015, 2100),
-    (4, "ssp370 MRI-ESM2-0", "MRI-ESM2-0", "ssp370", 2015, 2100),
-    (5, "ssp126 CESM2-WACCM", "CESM2-WACCM", "ssp126", 2015, 2300),
-    (6, "ssp126 MRI-ESM2-0", "MRI-ESM2-0", "ssp126", 2015, 2300),
-    (7, "ssp585 CESM2-WACCM", "CESM2-WACCM", "ssp585", 2015, 2300),
-    (8, "ssp585 MRI-ESM2-0", "MRI-ESM2-0", "ssp585", 2015, 2300),
-    (9, "CTRL2015 (CESM2-WACCM clim)", "CESM2-WACCM", None, 2015, 2300),
-    (10, "CTRL2015 (MRI-ESM2-0 clim)", "MRI-ESM2-0", None, 2015, 2300),
-    (11, "OCX obs-constrained", None, None, 1979, 2025),
+    (1, "hist CESM2-WACCM", "historical/cesm_waccm.py", "CESM2-WACCM", "historical"),
+    (2, "hist MRI-ESM2-0", "historical/mri_esm2.py", "MRI-ESM2-0", "historical"),
+    (3, "ssp370 CESM2-WACCM", "projections/ssp370_cesm_waccm.py", "CESM2-WACCM", "ssp370"),
+    (4, "ssp370 MRI-ESM2-0", "projections/ssp370_mri_esm2.py", "MRI-ESM2-0", "ssp370"),
+    (5, "ssp126 CESM2-WACCM", "projections/ssp126_cesm_waccm.py", "CESM2-WACCM", "ssp126"),
+    (6, "ssp126 MRI-ESM2-0", "projections/ssp126_mri_esm2.py", "MRI-ESM2-0", "ssp126"),
+    (7, "ssp585 CESM2-WACCM", "projections/ssp585_cesm_waccm.py", "CESM2-WACCM", "ssp585"),
+    (8, "ssp585 MRI-ESM2-0", "projections/ssp585_mri_esm2.py", "MRI-ESM2-0", "ssp585"),
+    (9, "CTRL2015 (CESM2-WACCM clim)", "control/run.py", "CESM2-WACCM", None),
+    (10, "CTRL2015 (MRI-ESM2-0 clim)", "control/run.py", "MRI-ESM2-0", None),
+    (11, "OCX obs-constrained", "projections/ocx.py", None, None),
 ]
+
+
+def _keyword(call, name, driver):
+    r"""The literal a driver passes ``run_core_experiment`` as ``name``."""
+    for k in call.keywords:
+        if k.arg == name:
+            return ast.literal_eval(k.value)
+    raise ValueError(f"{driver} passes run_core_experiment no {name}")
+
+
+def _time(node, env):
+    r"""A start or end time as a driver computes it: a number, or
+    ``float(os.environ.get(knob, default))`` evaluated under ``env``."""
+    if isinstance(node, ast.Constant) and isinstance(node.value, (int, float)):
+        return float(node.value)
+    if (isinstance(node, ast.Call) and ast.unparse(node.func) == "float"
+            and len(node.args) == 1 and isinstance(node.args[0], ast.Call)
+            and ast.unparse(node.args[0].func) == "os.environ.get"
+            and len(node.args[0].args) == 2):
+        knob, default = (ast.literal_eval(a) for a in node.args[0].args)
+        return float(env.get(knob, default))
+    raise ValueError(f"cannot read a time from {ast.unparse(node)}")
+
+
+def driver_period(driver, core=None, env=None):
+    r"""``(t_start, t_end)`` of the run ``driver`` makes under ``env``
+    (``os.environ`` by default), read from its source: importing a driver
+    loads Firedrake and the model, 3 to 19 s on a Mac against 0.1 s for the
+    whole preflight.
+
+    A core-experiment shim passes ``t_start_default`` and ``t_end_default``
+    to ``experiment.run_core_experiment``, where ``ISMIP7_T_START`` and
+    ``ISMIP7_T_END`` replace them. OCX and the control set module-level
+    ``T_START`` and ``T_END``, each a number or ``float(os.environ.get(knob,
+    default))``. Any other form raises ``ValueError``, as does a shim that
+    runs a core other than ``core``, and ``main`` reports that core BLOCKED
+    with the reason.
+    """
+    env = os.environ if env is None else env
+    path = os.path.join(_SCRIPTS, driver)
+    with open(path) as f:
+        tree = ast.parse(f.read(), path)
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Call) and ast.unparse(node.func) == "run_core_experiment":
+            runs = _keyword(node, "core", driver)
+            if core is not None and runs != core:
+                raise ValueError(f"{driver} runs core {runs}, listed here as core {core}")
+            return (float(env.get("ISMIP7_T_START", _keyword(node, "t_start_default", driver))),
+                    float(env.get("ISMIP7_T_END", _keyword(node, "t_end_default", driver))))
+    times = {target.id: _time(node.value, env)
+             for node in tree.body if isinstance(node, ast.Assign)
+             for target in node.targets
+             if isinstance(target, ast.Name) and target.id in ("T_START", "T_END")}
+    if set(times) != {"T_START", "T_END"}:
+        raise ValueError(f"{driver} has no run_core_experiment call and no "
+                         f"module-level T_START and T_END")
+    return times["T_START"], times["T_END"]
 
 
 def atm_years(esm, scenario, var="acabf-anomaly"):
@@ -142,6 +209,87 @@ def ocean_cover(esm, scenario):
     return ISMIP7Ocean(esm=esm, scenario=scenario).coverage("tf")
 
 
+def gradient_problem(esm, scenario, y0, y1):
+    r"""What keeps the SMB gradient the feedback reads from serving ``y0`` to
+    ``y1`` at an accepted version, or None. The reader's own rule
+    (``coverage_problem``, ``version_problem``), the one
+    ``forcing.SMBElevationFeedback.check`` refuses a run on."""
+    atm = ISMIP7Atmosphere(esm=esm, scenario=scenario)
+    problem = (atm.coverage_problem(y0, y1, SMB_GRADIENT)
+               or atm.version_problem(SMB_GRADIENT))
+    if problem is None:
+        return None
+    return (f"{problem} (the SMB-elevation feedback reads it; "
+            f"ISMIP7_SMB_ELEVATION_FEEDBACK=0 runs without it)")
+
+
+def msh_vertex_count(path):
+    r"""The vertex count a gmsh ``.msh`` header gives, or None: the line after
+    ``$Nodes`` holds it in version 2 files and as its second number in
+    version 4."""
+    try:
+        with open(path, errors="replace") as f:
+            for line in f:
+                if line.startswith("$Nodes"):
+                    parts = next(f).split()
+                    return int(parts[1] if len(parts) >= 4 else parts[0])
+    except (OSError, ValueError, StopIteration, IndexError):
+        return None
+    return None
+
+
+def melt_calibration_missing(mesh_fn):
+    r"""What stops a core from melting with its calibration.
+
+    The resolver's own refusals come first: the file missing, a sidecar hash
+    that does not match, a scaled K. Then the IMBIE2 basin grid the offsets
+    are stamped through. Then the mesh: the tracked offsets were fitted on
+    one mesh, the forward stamps them onto any mesh so a coarse probe runs,
+    and this gate keeps a production core on the calibration's mesh. Naming
+    a file with ISMIP7_DELTAT_PER_BASIN_NPZ (a refit on this mesh, or the
+    tracked file itself) clears the mesh check. A legacy per-basin K named
+    with ISMIP7_K_PER_BASIN_NPZ is checked for existence only."""
+    import numpy as np
+    try:
+        npz = deltat_per_basin_npz()
+        if npz is None:
+            k_per_basin_npz()
+            return []
+    except (FileNotFoundError, ValueError) as e:
+        return [f"melt calibration: {e}"]
+    miss = []
+    with np.load(npz) as data:
+        recorded = str(data["imbie2_nc"]) if "imbie2_nc" in data else None
+        K = float(data["K"])
+    basins = imbie2_basin_path(recorded)
+    if not os.path.exists(basins):
+        miss.append(f"IMBIE2 basin grid ({basins}), which the melt "
+                    f"calibration's offsets are stamped through")
+    contract = melt_calibration_contract(npz)
+    stem = os.path.splitext(os.path.basename(mesh_fn))[0]
+    remedy = (f"Refit the offsets on this mesh (calibrate_deltaT.py --K {K:.3e}) "
+              f"and name the file with ISMIP7_DELTAT_PER_BASIN_NPZ, or name the "
+              f"tracked file there to run with its offsets")
+    if contract and not os.environ.get("ISMIP7_DELTAT_PER_BASIN_NPZ"):
+        if contract.get("mesh") != stem:
+            miss.append(
+                f"melt calibration: {os.path.basename(npz)} was fitted on "
+                f"{contract.get('mesh')} and this core runs on {stem}. {remedy}")
+        else:
+            # Two builds of one mesh name differ cell by cell (IU's and
+            # Rice's of the production mesh), and only the vertex count in
+            # the header tells them apart.
+            want = contract.get("vertices")
+            have = msh_vertex_count(mesh_fn) if want else None
+            if want and have is not None and have != int(want):
+                miss.append(
+                    f"melt calibration: {os.path.basename(npz)} was fitted on "
+                    f"{contract.get('mesh_build', 'a build')} of {stem} "
+                    f"({int(want)} vertices), and {mesh_fn} has {have}: "
+                    f"another build of the same mesh. {remedy}")
+    return miss
+
+
 def shared_missing(warn=None):
     r"""Missing shared inputs. Non-fatal caveats are appended to ``warn``."""
     miss = []
@@ -149,10 +297,11 @@ def shared_missing(warn=None):
     # Front configuration: a mistyped law would otherwise surface only after
     # the forward's MAP load and initial solve.
     try:
-        _calving_law()
-        _calving_sigma_max()
+        _calving_law_object()
     except ValueError as e:
         miss.append(str(e))
+    except ImportError as e:
+        miss.append(f"icepack_tools.calving (ISMIP7_CALVING needs it: {e})")
     # ISMIP7_MESH=checkpoint means the mesh inside the MAP; there is no file
     # to look for and the MAP check below covers it.
     mesh_fn = mesh_override() or mesh_filename(lc_coarse, lc, get_buffer_m())
@@ -185,9 +334,7 @@ def shared_missing(warn=None):
             f"{os.path.basename(bnd)} (untracked — restore or regenerate "
             f"with make_boundary_ids.py)"
         )
-    if not (glob.glob(os.path.join(RESULTS_DIR, f"calibrated_K_per_basin_{lc}.npz"))
-            or glob.glob(os.path.join(RESULTS_DIR, "calibrated_K_per_basin_2500.npz"))):
-        miss.append("per-basin K npz")
+    miss += melt_calibration_missing(mesh_fn)
     for d, pat, what in [
         (os.path.join(DATA_DIR, "bedmachine"), "*.nc", "BedMachine"),
         (os.path.join(DATA_DIR, "velocity"), "*.nc", "MEaSUREs velocity"),
@@ -195,6 +342,16 @@ def shared_missing(warn=None):
         if not glob.glob(os.path.join(d, pat)):
             miss.append(what)
     return miss
+
+
+def dhdt_missing():
+    r"""What stops a backdated cold start from reading the dH/dt: the MIPkit,
+    or its two cached rasters, looked for as ``load_dhdt_obs`` looks."""
+    try:
+        dhdt_source()
+    except (FileNotFoundError, ValueError) as e:
+        return [f"dH/dt for the geometry backdating: {e}"]
+    return []
 
 
 def racmo_ok():
@@ -213,15 +370,20 @@ def oi_ok():
 
 def main():
     geom = _geometry_space()
+    feedback = _smb_elevation_feedback()
     print(f"Preflight: lc={lc}, friction={friction}, geometry={geom}, "
           f"OI={oi_version}, climatology=historical+{CLIM_SCENARIO} "
           f"{CLIM_START}-{CLIM_END}")
+    print("  SMB-elevation feedback: "
+          + (f"on, every core needs its {SMB_GRADIENT}" if feedback
+             else "off (ISMIP7_SMB_ELEVATION_FEEDBACK=0)"))
     warn = []
     base_missing = shared_missing(warn)
     if base_missing:
         print(f"  SHARED inputs missing: {', '.join(base_missing)}")
     else:
-        print("  Shared inputs (mesh, MAP, bndids, K, BedMachine, velocity): OK")
+        print("  Shared inputs (mesh, MAP, bndids, melt calibration, BedMachine, "
+              "velocity): OK")
     for w in warn:
         print(f"  WARNING: {w}")
     print(f"  RACMO baseline: {'OK' if racmo_ok() else 'MISSING (acabf fallback)'}")
@@ -229,10 +391,32 @@ def main():
           "but warns and its provenance is degraded; BLOCKED = missing input")
     print()
 
-    for core, title, esm, scenario, y0, y1 in CORES:
+    for core, title, driver, esm, scenario in CORES:
+        try:
+            t_start, t_end = driver_period(driver, core)
+        except ValueError as e:
+            print(f"  core {core:2d}  BLOCKED  {title}  <- period: {e}")
+            continue
+        # the years the driver asks its readers for
+        y0, y1 = int(math.floor(t_start + 1e-9)), forcing_year(t_end)
         miss = list(base_missing)
         degraded = []
         notes = []
+        if scenario == "historical" or core == 11:
+            # A cold start from the MAP. A start before 2015 backdates its
+            # geometry by the Smith dH/dt (issue 117), which setup_model does
+            # on the DG0 geometry only, reading the MIPkit or its cached
+            # rasters, and the drivers refuse a start before the dH/dt window.
+            try:
+                backdate = geometry_backdate_years(t_start)
+            except ValueError as e:
+                miss.append(f"geometry backdating: {e}")
+                backdate = 0.0
+            if backdate > 0.0:
+                if geom != "dg0":
+                    miss.append(f"a start at {t_start:g} backdates the geometry, "
+                                f"which needs ISMIP7_GEOMETRY_SPACE=dg0")
+                miss += dhdt_missing()
         if core == 11 and _ocx_forcing() == "protocol":
             # projections/ocx.py refuses to start on anything less, so this
             # gate asks the same readers the same question.
@@ -255,8 +439,13 @@ def main():
             if not oi_ok():
                 miss.append(f"OI climatology ({oi_version})")
         elif scenario is None:  # CTRL
-            if not oi_ok():
-                miss.append(f"OI climatology ({oi_version})")
+            # the ESM's own ctrl ocean, which control/run.py refuses to start
+            # without (icepack/ismip7#107)
+            oc = ocean_cover(esm, "ctrl")
+            if oc is None:
+                miss.append(f"{esm}/ctrl ocean tf/so")
+            elif oc[0] > y0 or oc[1] < y1 - 1:
+                miss.append(f"ctrl ocean covers {oc[0]}-{oc[1]}, need {y0}-{y1}")
             if not racmo_ok():
                 bucket, detail = pool_status(
                     esm, "acabf",
@@ -288,10 +477,10 @@ def main():
             yrs = atm_years(esm, scenario) or atm_years(esm, scenario, "acabf")
             gaps = sorted(set(range(y0, y1 + 1)) - set(yrs))
             # The last year of a series may be absent: the reader persists
-            # the last year on disk one year past the end (CESM2-WACCM stops
-            # at 2299 and the empty 2300 files were removed, discussion #8),
-            # so that is a note, not a missing input. Any other gap is an
-            # error the reader raises on, so it blocks.
+            # the last year on disk one year past the end (a CESM2-WACCM tree
+            # fetched while the empty 2300 files were withdrawn stops at 2299,
+            # discussion #8), so that is a note, not a missing input. Any
+            # other gap is an error the reader raises on, so it blocks.
             bridged = gaps == [y1] and yrs and yrs[-1] == y1 - 1
             if not yrs:
                 miss.append(f"{esm}/{scenario} atmosphere")
@@ -311,11 +500,19 @@ def main():
                 miss.append(f"{esm}/{scenario} ocean tf/so")
             elif oc[0] > y0 or oc[1] < y1 - 1:
                 miss.append(f"ocean covers {oc[0]}-{oc[1]}, need {y0}-{y1}")
+        if feedback:
+            # the gradient each driver reads: the OCX product's in either OCX
+            # mode, the ESM's ctrl for the control, else the core's own
+            tree = ((OCX_ATMOSPHERE_SOURCE, OCX) if core == 11
+                    else (esm, "ctrl") if scenario is None else (esm, scenario))
+            problem = gradient_problem(*tree, y0, y1)
+            if problem:
+                miss.append(problem)
 
         status = "BLOCKED" if miss else "PARTIAL" if degraded else "READY  "
         shown = miss + degraded + notes
         detail = "" if not shown else "  <- " + "; ".join(shown)
-        print(f"  core {core:2d}  {status}  {title}{detail}")
+        print(f"  core {core:2d}  {status}  {title} {y0}-{y1}{detail}")
 
 
 if __name__ == "__main__":

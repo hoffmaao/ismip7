@@ -32,12 +32,15 @@ AWS tooling.
 MRI-ESM2-0, a name change with the data unchanged. The core experiment uses
 `SDBN1` for CESM2-WACCM and `GEMB-SDBN1` for MRI-ESM2-0; `dEBM2` is the second
 downscaling for perturbed ensembles. Handled: `atmosphere_product` accepts
-whichever exists.
+whichever exists and takes `GEMB-SDBN1` where both do, and the audit asks it
+which one a run opens.
 
 **Control experiment (#28, #15).** ctrlclim is the 2000-2029 climatology of the
 last 15 years of `historical` and the first 15 of `ssp126`, per ESM. Files are
 time varying so the setup matches a projection. Fracture and excess meltwater
-hold at 2015 conditions; SMB-height feedback, calving and GIA stay free.
+hold at 2015 conditions; SMB-height feedback, calving and GIA stay free. The
+control carries the SMB-elevation feedback on its ESM's `ctrl` gradient, which
+is the same in every year (`control/run.py`).
 
 **Historical start is free (#34).** A steady initial state may be assigned to
 1960 or 1975 rather than 1850, with the 1960-1989 anomaly reference driving
@@ -47,9 +50,10 @@ changes from there. This closes the 1 K cooling question at an 1850 start.
 the group's choice, no fracture forcing for historical or OCX (use the observed
 front positions in `obs/`), ice mask ends 2021. The spatially shifted AIS OCX
 `dacabfdz` of #45 was replaced IN PLACE around 8 September, confirmed on the
-17th to be OCX only; the OCX gradients are v2 on the mirror. Nothing here reads
-them (no SMB-height feedback), but it is the case that showed a re-sync could
-not see a replaced file, see section 6. Open since 17 September: the OCX `main`
+17th to be OCX only; the OCX gradients are v2 on the mirror. Core 11's
+SMB-elevation feedback reads the OCX `dacabfdz` and refuses anything older than
+v2 (`ATMOSPHERE_MIN_VERSION` in `icepack2_tools/forcing.py`). It is also the
+case that showed a re-sync could not see a replaced file, see section 6. Open since 17 September: the OCX `main`
 thermal forcing departs from the Zhou climatology around Mertz (#48). Confirmed
 upstream on 20 September: OCX was built on an earlier extrapolation and is
 being regenerated, with no date set, section 7.
@@ -64,11 +68,15 @@ the submission uses is a decision, section 6.
 **NaN forcing outside the downscaled mask (#39)** is intended. Zero, nearest or
 a large melt are all acceptable, stated in the README. Ours fills with zero.
 
-**CESM2-WACCM ends in 2299 (#8).** The empty 2300 atmosphere files were
-removed, and by 22 September 2300 was back as the 2290-2299 mean (#49, section
-8). The ocean stops at 2299, while a 2015-2300 run needs 2300. Handled: the reader
-persists the last year on disk exactly one year past the end and reports it
-once per variable; a gap inside the series stays an error.
+**CESM2-WACCM ends in 2299 (#8, #49).** The empty 2300 atmosphere files were
+removed, and by 22 September 2300 was back as the 2290-2299 mean, which the
+reader opens as given. The ocean stops at 2299, while a 2015-2300 run needs
+2300. Handled: the reader persists the last year on disk exactly one year past
+the end and reports it once per variable; a gap inside the series stays an
+error. The collapse masks end in 2299 too, and 2300 reads the 2299 mask
+(section 6). On 23 September the organisers answered that one forcing year at
+the end makes no significant difference and that duplicating 2299 into 2300 is
+acceptable, so runs end in 2300 (section 8).
 
 **Melt toolbox re-release (#25).** Rerun the calibration notebook with the new
 constraint datasets. No ice-model rerun.
@@ -106,6 +114,14 @@ cores 9 and 10 have their forcing. The 376 absent entries are the 2 km
 atmospheres, `dEBM2`, and the per-scenario fields that only an SMB-height
 feedback or a perturbed member reads.
 
+Every core now reads `dacabfdz` for the SMB-elevation feedback, which is on by
+default (antarctica/README.md, section 6), and the preflight blocks a core
+whose gradient is absent. A listing on Quartz on 25 September 2026 found it
+for both ESMs, at 8 km and 2 km, for `historical`, `ssp126`, `ssp370`,
+`ssp534-over`, `ssp585` and `ctrl`, all at v2 (MRI-ESM2-0 also keeps v1), and
+for OCX at v1 and v2. The trees at Rice NOTS and UChicago Midway were not
+listed.
+
 ## 3. Output and submission
 
 **Status.** `ISMIP7_OUTPUT=1` makes the forward accumulate the yearly flux
@@ -114,16 +130,31 @@ Firedrake checkpoint per year, written atomically).
 `antarctica/scripts/write_ismip7_output.py` regrids conservatively to the 8 km
 grid through a cached supermesh overlap operator, applies the request's fill
 policies and units, encodes time, and writes the 21 gridded and 10 scalar files
-under `AIS/<source_id>/<ism_id>/CORE/<exp>/`. A 2-year control and a 10-year
-ssp585, both at 32 km, pass every content check of
-`ismip7-compliance-checker`: zero naming, numerical, spatial, attribute and
-consistency errors. The experiment-length checks remain.
+under `AIS/<source_id>/<ism_id>/CORE/<exp>/`. At full length, 2015 to 2300,
+a 32 km CESM2-WACCM control and ssp585 pass `ismip7-compliance-checker` 0.5.1
+with zero errors in every test group, the experiment-length checks included
+(run records `core09-32km-ctrl2015-cesm2waccm-p4` and
+`core07-32km-ssp585-cesm2waccm-p4`, 23 September 2026). Two output rules made
+that possible, both found by the first full-length check (action 10).
 
-Conventions chosen: `acabf` is the forcing SMB with the apparent-MB correction
-travelling separately as `acabf_correction`, `ligroundf` is booked into the
-first floating cell and signed positive from grounded to floating (section 9),
-`lithk` is zero where the ice mask is zero, and `base = orog - lithk` on the
-grid.
+Conventions chosen:
+
+- the fluxes are what the transport applied, after the positivity limiter
+  (action 10);
+- `acabf` is that SMB, with the apparent-MB correction travelling separately
+  as `acabf_correction`; on a cell holding no ice at either end of a year the
+  melt and SMB that only cancelled the correction are booked against it, and
+  the snowfall the melt removed there against the melt (action 11);
+- `libmassbffl` is the melt of cells afloat at year end and `lifmassbf` the
+  melt of every other cell, so the fill of `libmassbffl` drops none of it
+  (action 11);
+- `licalvf` is what the front removes and what flows out across the mesh's
+  exterior boundary (action 11);
+- `ligroundf` is booked into the first floating cell and signed positive from
+  grounded to floating (section 9), with a cell on a bed at or above sea level
+  counted as grounded;
+- a floating cell within 1 cm of the bed is written as grounded, `lithk` is
+  zero where the ice mask is zero, and `base = orog - lithk` on the grid.
 
 What a submission needs (#5, #16, #17, #18, #19, #20, #22, #23):
 
@@ -144,14 +175,16 @@ What a submission needs (#5, #16, #17, #18, #19, #20, #22, #23):
   dots or underscores.
 - **Checker:** bounds were relaxed in July (topg to 5500 m). `licalvf` negative
   means loss. `ligroundf` is a specific mass flux booked into the last grounded
-  or first floating cell, small negatives allowed. `topg` and `lithk` must not
+  or first floating cell, bounded to [-10, 10] kg m-2 s-1 at 0.5.1. A wholly
+  floating pixel must sit more than 1 cm above `topg`. `topg` and `lithk` must not
   be masked to the evolving ice sheet, or the scalar tool's sea-level numbers
   break.
 - **Scalars:** the model integrates the ten scalars itself on the native mesh.
   `ismip/ismip7-scalar-processing` also produces them, and the sea-level
   estimates (`sla20`, `slg20`, `slvaf`) which nothing here computes, so it
   still has to be run on the gridded files; 2D fields and scalars share the
-  experiment folder.
+  experiment folder. `scripts/compare_scalars.py` sets its scalars against
+  ours and names every part of the difference.
 - **README:** the template is the Google document from discussion #6, recording
   forcing versions, the NaN rule, the historical start year and the spin-up.
   Drafted in `ISMIP7_README_AIS_RICE_icepack2.md`, which owns those answers;
@@ -255,9 +288,12 @@ within 2% of the 2500 m result that predates it, so the mesh is not what moved.
 `calibrate_melt.py` takes the newer table by default, `ISMIP7_MELT_OBS_CSV`
 names either, and the saved npz records which one produced it.
 
-A forward reads the per-basin `K_basin`, each basin fitted to its own
-observation, so the melt it applies moves basin by basin. The ratio of new to
-old K_b spans 0.86 to 3.58 with a median near 1.15:
+A forward then read the per-basin `K_basin`, each basin fitted to its own
+observation, so the melt it applied moved basin by basin. The ratio of new to
+old K_b spans 0.86 to 3.58 with a median near 1.15. Since 26 September a run
+melts with one K and a thermal-forcing offset per basin from the tracked
+calibration instead (`README.md` section 5); the per-basin K is read only
+when `ISMIP7_K_PER_BASIN_NPZ` names it:
 
 | basin | old K_b | new K_b |
 |---|---|---|
@@ -276,14 +312,14 @@ forcing-version audit, the output writer, and the melt calibration above.
 1. Drive the full-length ssp585 (NOTS 1390452, 2015 to 2301 on the adaptive mesh with
    `ISMIP7_OUTPUT=1`) through the writer and the compliance checker. It is the
    first run at experiment length, so it is what clears the checker's remaining
-   length checks. Record which K calibration it read: a run picks up whichever
-   `calibrated_K_per_basin_*.npz` is staged when it starts. The job is held in
-   the queue until the slope convention shared by calibration and forward is
-   settled, taken up in action 5, since it decides which K the run should read.
-   It no longer waits on MAP self-consistency (section 4, 21 September);
-   its MAP must pass action 3 in the configuration it runs. Once the
-   convention is settled,
-   `scontrol release 1390452` starts it. (issue #27)
+   length checks. The convention it was held for is settled (action 5): runs
+   melt with the tracked calibration, which the held job predates, since it
+   reads whatever calibration its checkout and `results/` offered when it was
+   submitted. Resubmit it from a checkout at or after the merge that made the
+   tracked calibration the default, rather than releasing 1390452. Its mesh
+   is the adaptive one, so the preflight gate asks for the offsets refitted
+   there, or the tracked file named, before it runs.
+   Its MAP must pass action 3 in the configuration it runs. (issue #27)
 2. Settle the `[confirm]` items in the submission README draft with the group. (issue #38)
 3. Run the corrected `check_budd_map.py --forward` on every MAP the matrix
    will use, on its final save, and record the number beside the MAP. A MAP
@@ -313,10 +349,9 @@ forcing-version audit, the output writer, and the melt calibration above.
    quadrature as well, so their totals compare in magnitude.
 
    The rows below predate the seawater flotation test, which landed with
-   issue #66, and the
-   `h > 0` test in the forward half, and are to be re-measured with the DG0
-   melt total (issue #30); the current numbers are in
-   `GEOMETRY_DISCRETIZATION.md`.
+   issue #66, and the `h > 0` test in the forward half. They are the legacy
+   per-basin K files; the forward's melt under the tracked calibration is
+   measured per basin at the end of this action.
 
    | slope | max, m/yr | p99, m/yr | area mean, m/yr | integrated, Gt/yr | past the bound |
    |---|---|---|---|---|---|
@@ -366,19 +401,37 @@ forcing-version audit, the output writer, and the melt calibration above.
    parameterisation itself exceeds it there. Their median area is 3.61 km2
    against 64 km2 for an 8 km pixel, so the gridded value comes from a small
    hot cell filling its pixel under the request's `no_floating_ice` fill
-   policy. The full-length run still has to settle two further contributions:
-   the evolved geometry with its warmer projected thermal forcing, and the
-   bookkeeping, since `book_advance` books the melt REQUESTED of a step while a
-   nearly ice-free floating cell can only lose what it holds.
+   policy. The full-length 32 km runs of 23 September measured the two further
+   contributions (action 10). The bookkeeping was the larger: `book_advance`
+   booked the melt requested of a step while a nearly ice-free floating cell
+   can only lose what it holds, and it now books what the transport applied.
+   With the evolved geometry and its warmer projected thermal forcing the
+   ssp585 then falls below the bound in 0.0382 % of its values, a warning.
+   Since 24 September every flux is a whole-pixel mean, which weights a hot
+   cell by its share of the pixel. The p4 pair regridded that way falls below
+   the bound in 0.00545 % of the ssp585's values, and the control no longer
+   does.
 
-   `calibrate_melt.py` now fits K through the forward's own melt path under
-   `ISMIP7_GEOMETRY_SPACE=dg0` (issue #30). The forward and the calibration
-   default to the ISMIP7 reference slope, one constant `sin(alpha)` =
-   5.115e-3 (`ISMIP7_MELT_SLOPE=ant`); the local slope, capped or not, stays
-   as `local` and is tied to the unsettled upstream local-slope question.
-   `load_K_per_basin` warns once per run when the K file it reads was fitted
-   under another convention, and under `local` when it records a cap the
-   forward does not apply (issue #26, `GEOMETRY_DISCRETIZATION.md`).
+   The convention was settled on 25 September (issue 26). Runs melt with the
+   ISMIP7 reference slope, one constant `sin(alpha)` = 5.115e-3
+   (`ISMIP7_MELT_SLOPE=ant`), one K and a thermal-forcing offset per basin:
+   K = 6.5e-5, the K50 of the rule-based toolbox selection on the 1000 m /
+   10 km production mesh, with its offsets, fitted through the forward's own
+   DG0 melt path and tracked as
+   `calibration/deltaT_per_basin_1000_K6.500e-05.npz`, refitted at the same K
+   for the default `vertex_front` sampling (issue #167; `README.md` section 5).
+   The forward melts the cells the fit summed over, floating and holding
+   ice, and refuses an offsets file fitted under another slope or geometry.
+   The local slope, capped or not, stays as `local` and is tied to the
+   unsettled upstream local-slope question; a legacy per-basin K named with
+   `ISMIP7_K_PER_BASIN_NPZ` keeps its warnings (`GEOMETRY_DISCRETIZATION.md`).
+
+   The offsets at that K are refitted on Rice's build of the production
+   mesh, the submission mesh. Measured there through the forward's own
+   callback (run record `calibration-melt-refit-1km-rice-k50`): 1067.389
+   Gt/yr against the 1067.386 the offsets were fitted to, every basin within
+   0.006 Gt/yr, and no cell past the bound, with a maximum of 41.7 m/yr and a
+   99th percentile of 16.2 m/yr.
 6. Optional: read the provided `ctrl` trees in place of the `ssp126`
    reference-climate pool. Closed as icepack/ismip7#43, not planned for
    September 2026.
@@ -423,7 +476,8 @@ Forcing data:
       cause.
 - [x] #49 (the forum thread) CESM2-WACCM `thetao` ends in 2299 for ssp126 and
       ssp585: the #8 rule, the ocean reader holds 2299 for the single year 2300.
-      [~] Upstream is asked to add 2300; a pre-matrix `download_mirror.py --dry-run` shows it. (issue #41)
+      Upstream will not add 2300, and on 23 September the organisers accepted
+      a 2299 duplicate for 2300, section 8.
 - [x] #9, #24 time stamps and calendars differ between products: the year comes
       from the filename and only the year of a time value is ever read.
 - [x] #10, #39 NaN fill and NaN outside the downscaled mask: zero-filled, in the
@@ -435,22 +489,27 @@ Forcing data:
       `core_report.py` carries that into the committed report.
 - [x] #45, #41 files replaced in place under the same name and version: the
       mirror downloader keeps ETags in `.mirror_manifest.json` and refetches a
-      moved one, the audit reports `REPLACED` and `PINNED` and fails on them,
-      the Globus route has `--resync`.
+      moved one, the audit reports `REPLACED` and `PINNED` and fails on them
+      (a version newer than the mirror's, fetched from Globus first, reads
+      `AHEAD` and passes, and a collapse mask below
+      `forcing.FRACTURE_MIN_VERSION` reads `OUTDATED` and fails), the Globus
+      route has `--resync`.
 - [x] #41 item 9, dotted fracture versions: the Globus downloader no longer
       passes over `v2.1` for `v2`.
 - [x] #41 items 1, 3, 4, 5, 7, 8, 10 to 14: none in a tree that is read. The
       misfiled-scenario case (item 3) is what made `available_years` strict.
 - [~] #37 CESM2-WACCM ssp585 fracture may be re-cut: re-audit before production. (issue #16)
 - [x] #29, #33 no fracture forcing for historical, control or OCX: refused.
-- [x] #15, #28 control definition: window and pool centralised. Reading the
-      provided `ctrl` trees stays optional (action 6).
+- [x] #15, #28 control definition: window and pool centralised. The control
+      reads its ESM's `ctrl` ocean (icepack/ismip7#107); reading the `ctrl`
+      atmosphere in place of the `ssp126` pool stays optional (action 6).
 - [x] #34 1960-1989 anomaly reference: the anomaly is re-referenced to the
       2000-2029 pool and there is no temperature forcing, so no jump at the
-      start of a historical. The README now says the historical starts in 1850
-      from the 2015 state.
-- [x] #35, #36 runoff-gradient sign, which gradient: no SMB-height feedback, and
-      the README names both gradients as unused.
+      start of a historical. The README now says the historicals start in 2003
+      from the 2015 state backdated by the Smith dH/dt (issue 117).
+- [x] #35, #36 runoff-gradient sign, which gradient: the runs carry the
+      SMB-elevation feedback on the SMB gradient `dacabfdz`, and README
+      question 19 names it.
 - [x] #32, #33, #41 item 6 OCX: the readers open the real tree and core 11 runs
       on it by default (`ISMIP7_OCX_FORCING`).
 - [~] #48 Mertz, and Cook by the product author's account: OCX confirmed built
@@ -479,16 +538,20 @@ Output and submission:
 - [x] #16 `licalvf` negative for loss. [x] #22 `ligroundf` sign: settled by
       the group on 22 September with the grounded sheet as the reference,
       positive for grounded ice going afloat, section 9.
-- [x] #23 bounds. [x] #46 the bundled request is 0.5.0's and records its tag;
-      `audit_variable_request.py` finds drift. [ ] Re-run the checker at 0.5.0. (issue #12)
-      Scalars are not range-checked upstream, so the negative `tendlicalvf`
-      against the table's `[0, 1e25]` is a quirk of the table.
-- [x] #19 scalar-tool pitfalls. [ ] Run the tool for the sea-level estimates. (issue #13)
+- [x] #23 bounds. [x] #46 the bundled request is 0.5.1's and records its tag;
+      `audit_variable_request.py` finds drift. [x] The checker at 0.5.1 passes
+      a full-length 32 km control and ssp585, action 10. At 0.5.1 the `tend*`
+      totals are bounded to [-1e9, 1e9] kg s-1, and scalars are still not
+      range-checked upstream.
+- [x] #19 scalar-tool pitfalls. [x] The tool ran on the three 32 km p2 runs and
+      the p4 pair, and its scalars are compared with ours, `reports/scalar_comparison_32km.md`.
+      [ ] Run it on the submitted files and clear the README confirm. (issue #13)
 - [x] #17 names: the core counter follows from the forcing and the ids are
-      validated. [~] What goes in the forcing field of an OCX filename is
-      unsettled: isschecker checks it against CMIP model names and has no `ocx`
-      experiment row, so it rejects the organisers' own GrIS example (`ERA5`,
-      `ocx`), and no AIS example exists, section 7. (issue #18)
+      validated. [x] The forcing field of an OCX filename is `ERA5`, as the
+      organisers' conventions document writes it, and the writer refuses any
+      other value for `ocx`, section 10. [x] `scripts/isschecker_ocx.py`
+      checks core 11 under 0.5.1 with the `ocx` experiment and `ERA5` added;
+      stock 0.5.1 checks no core 11 file. (issue #18)
 - [x] #5, #13, #21, #6, #18, #1, #12, #38.
 
 ### Actions added, continuing section 5
@@ -507,11 +570,135 @@ Output and submission:
    core 11 meanwhile. The 20 September answer names the cause and promises
    regenerated files with no date, and places the difference at Cook, so read
    the Cook block as well as Mertz, section 7. (issue #11)
-10. **Re-run isschecker at 0.5.0** on the 32 km control and ssp585 outputs,
-    record the version in the README, and re-read action 5 in its light: below
-    1 % of values the `libmassbffl` excursion is now a warning. (issue #12)
-11. **Run `ismip7-scalar-processing`** on the same outputs, for `sla20`,
-    `slg20` and `slvaf`, and compare its scalars with the native ones. (issue #13)
+10. **Re-run isschecker** on full-length 32 km control and ssp585 outputs and
+    record the version in the README. Done on 23 September at 0.5.1, on IU
+    Quartz, and closed as icepack/ismip7#12. The first pass, over the three p2
+    ssp585 runs, found two errors the two-year rehearsal could not show:
+
+    | collapse mode | `libmassbffl` below -0.008 kg m-2 s-1 | `base` within 1 cm of `topg`, wholly floating |
+    |---|---|---|
+    | none | 1.43 % of values, an error | 13 pixel-years, an error |
+    | mask | 0.341 %, a warning | 24 pixel-years |
+    | mask_front | 0.35 %, a warning | 17 pixel-years |
+
+    The first came from booking the melt requested of the transport: by 2200
+    the positivity limiter held back 99 % of it. `book_advance` now takes the
+    withheld sink off the SMB, melt and reference in proportion, so the fluxes
+    are what the transport applied. The second is a cell 1.9 to 9.2 mm afloat,
+    inside the checker's `ELEVATION_TOLERANCE`; `write_ismip7_output.py` writes
+    such a cell as grounded. The p4 control and ssp585, run with both, report
+    zero errors. Their warnings are the non-mandatory variables, `strbasemag`
+    in 0.000813 % of the ssp585's values, and the `libmassbffl` excursion of
+    action 5, now 0.00767 % of the control's values and 0.0382 % of the
+    ssp585's. The booked basal melt of the ssp585 peaks near 7600 Gt/yr in
+    2150 and is 3929 Gt/yr in 2300, where the requested booking reported
+    123427.
+11. **Run `ismip7-scalar-processing`** on the submitted files, for `sla20`,
+    `slg20` and `slvaf`, compare its scalars with the native ones, and clear
+    the submission README's confirm. `scripts/batch_runners/scalar_processing.script`
+    runs the tool and `scripts/compare_scalars.py` as one job. Done on
+    23 September on the three 32 km p2 runs and the p4 pair, each its own
+    reference: every identity holds, and T - N is the tool's area factor
+    (+2.2 to +2.6 % on the state scalars), the volume above flotation of
+    partly grounded 8 km pixels (+39 to +44 mm of sea level by 2300 in the p2
+    runs, about 10 % of the signal), the writer's fill conventions for acabf
+    and libmassbffl, and melt and SMB booked where no ice takes them (111,231
+    Gt/yr of melt at 2300 in p2 none, 1,986 with the applied-flux booking of
+    action 10), `reports/scalar_comparison_32km.md`. Each has its issue: the
+    pixel means (issue 96), the area factor (issue 97) and `params.nc` in the
+    upload (issue 98), all three closed on 24 September when PR 101 merged,
+    and the grid VAF (issue #99), which a finer mesh leaves as large: the
+    p2 run's change by 2300, imposed on the 2015 state of each mesh, costs
+    the tool +43 mm at 32 km and +56 mm on the 1 km production layout
+    (`reports/grid_vaf_resolution.md`).
+    The first three were fixed on 24 September on `claude/scalar-output-fixes`,
+    measured on the p4 pair regridded again and a five-year p5 control. Every
+    flux is a whole-pixel mean: the fill term is zero, and the control's shelf
+    melt as the tool reads it is the model's to 0.4 %. The native scalars
+    integrate over true area, the writer stamps the scalar files with it, and
+    with `--native-af2` the area term is zero. `params.nc` sits in the upload
+    beside `CORE/`, where the tool reads it. isschecker 0.5.1 still reports zero
+    errors on the pair. Late in the ssp585 run the tool reads less melt than
+    the model books: 1,771 Gt/yr at 2300 sits in pixels with no floating ice
+    at year end, which the request fills. Nine tenths of it over the run is
+    booked by cells with no ice at either end of the year, and the frozen
+    apparent-MB reference supplies about two thirds of what those cells melt:
+    117,000 of the 198,990 Gt left out over 2016 to 2300, and 1,150 of the
+    model's 3,929 Gt/yr at 2300. Whether the production runs keep the
+    reference is a group decision (issue #104); issue 136 books that part of
+    the melt against the reference (below). The rest, about 82,000 Gt
+    over the run and 620 Gt/yr at 2300, is melt of real ice gone by year end,
+    most of it grounded ice that goes afloat into an empty cell and melts on
+    arrival. The group chose on 25 September, in issue 109, to report that as
+    front melt: the forward books the inflow's share of the melt in marine
+    cells holding no ice at either end of the year as `lifmassbf`, which the
+    request never fills, and leaves the reference's share in `libmassbffl`.
+    Applied to the p4 annual files, the split moves 571 Gt/yr at 2300 out of
+    the pixels the fill blanks and leaves 1,200 there: 1,094 the reference's
+    share on emptied marine cells, 20 the reference melted on emptied land
+    cells, which the melt law of that run counted as afloat at zero
+    thickness, and 87 shelf ice; the submission README states the booking. A main and
+    branch pair restarted from p4 at 2294.0 checked it end to end on Quartz
+    (runlog `test-32km-ssp585-front-melt-main` and `-branch`): the forward's
+    split matches the function applied offline to 1.5e-14 m/yr, the tool's
+    `tendlifmassbf` matches the model's to 0.000 %, and isschecker 0.5.1
+    finds no error outside the length checks of a five-year series. The same
+    restart on the code of 26 September (runlog
+    `test-32km-ssp585-reference-land`) booked 3 Gt/yr of melt on emptied land
+    cells and kept the reference's share on emptied marine cells, 1,334 Gt/yr
+    on average over 2294 to 2298 in the pixels the fill blanks.
+    The 25 km rehearsal of issue 138, whose mesh carries the production
+    layout's 20 km buffer, showed the same on the code of 27 September. Its
+    MRI-ESM2-0 ssp585 with the reference left 1,318.7 Gt/yr out of the gridded
+    `libmassbffl` at 2300, 1,290.7 of it the reference's share on emptied
+    marine cells. It melted land films 1e-19 to 1.4e-14 m thick, where
+    `s - b` rounds to 0 and the flotation test passes, and it booked 18 to 35
+    Gt/yr of ice pushed from land-terminating margins onto ice-free land
+    beyond the front as grounding-line flux as well as calving (8 to 15 at
+    2100 to 2300 without the reference). Its control
+    booked at most 0.6 Gt/yr of the reference as melt; there the negative
+    reference kept the emptied cells empty, removing 157 Gt/yr of inflow at
+    2300 against 4.5 of melt, so clearing the reference would have refilled
+    them and changed the trajectory issue #104 is judging. Issue 136 therefore settled on booking,
+    in two steps. On 27 September: `ismip7_output.net_reference` books the part
+    of the melt and negative SMB that only cancelled the reference against it,
+    on cells holding no ice at either end of a year; `forcing.afloat` keeps the
+    melt law off land; and the booking counts land as grounded, so flow onto
+    ice-free land is calving alone. Both arms rerun on that code (runlog
+    `core08-25km-ssp585-mriesm20-i136on` and `-i136off`) still left shelf ice
+    afloat at the start of a year and gone by its end in the pixels the fill
+    blanks, 694.2 Gt/yr at most (2281) with the reference, and kept the snowfall
+    the melt removed on emptied cells in `acabf`. On 28 September the group
+    booked the melt of every cell with no floating ice at year end as
+    `lifmassbf` (`ismip7_output.split_melt`, on the floating mask the files
+    carry), and that snowfall against the melt (`net_snowfall`, after the
+    reference). The same reruns showed the transport's outflow across the mesh's
+    exterior boundary, about 500 Gt/yr in 2015, in no field and in the budget's
+    residual; `AnnualOutput.book_advance` books it into `licalvf` in the cell it
+    leaves. `check_melt_booking.py` gates all of it on any series, closes each
+    year's budget against `dlithkdt`, and checks `licalvf` against the
+    timeseries' `calv` plus `outflux`. Both arms rerun on the final code
+    (runlog `core08-25km-ssp585-mriesm20-i136con` and `-i136coff`, code a25033c)
+    pass it: nothing of the melt left out of the gridded fields, at most
+    5.6e-15 Gt/yr of the reference and none of the snowfall in the sinks, no
+    melt or `ligroundf` on ice-free land, the annual budget residual at most
+    4.9e-8 Gt/yr, and `licalvf` within 6.3e-4 Gt/yr of the timeseries.
+    `lifmassbf` is 1,314.7 Gt/yr at 2300 with the reference (1,930.5 at most,
+    2281) and 668.3 without (1,131.0 at most, 2295). The submitted 8 km files
+    close the budget over pixel area to 0.012 Gt/yr, the refreezing the fill
+    drops, and over true area to 26.2 Gt/yr, the af2 weighting of a transport
+    that conserves map-plane volume; with the reference they leave out the
+    reference the model applied, 4,065 Gt/yr at 2300 and 4,133 at most (2294),
+    which stays in `acabf_correction` (issue #104). isschecker 0.5.1 reports
+    zero errors on both C008 sets and every gate of `compare_scalars.py` holds.
+    Mass and VAF match the rehearsal's to 1 Gt and 0.01 mm SLE. `tendligroundf`
+    drops by the land booking (17 Gt/yr at 2300 with the reference, 8 without),
+    and the forward's `melt_gtyr` and `clamp_gt` columns drop together by the
+    melt the law had prescribed on land films and the thickness floor returned,
+    at most 95 Gt/yr with the reference and 557 without (both in 2279). Issue 13
+    runs the check on the production ssp585 and fills the README's numbers from
+    its writer log. What is left is the submitted files, paired with their
+    historical. (issue #13)
 12. **Adopt or refetch the forcing that predates the manifest.** Done on 21
     September, and the premise above was wrong. The first
     `audit_forcing_versions.py` run counts none of the Globus-era tree as
@@ -683,7 +870,8 @@ board item about mirror prefixes.
   `ISMIP7Ocean._chunk_for` holds 2299 for the single year 2300 and says so once
   per variable. If the year is added under the same version it shows as
   `fetch` in `download_mirror.py --dry-run` while the audit table stays `ok`;
-  if the version is bumped, the audit reads `BEHIND`. (issue #41)
+  if the version is bumped, the audit reads `BEHIND`. Answered on the 21st
+  and 23rd, section 8. (issue #41)
 - **Unmoved.** #17 since 29 June, #37 since 4 September. isschecker is still
   0.5.0, tagged on 17 September at the head of its default branch, with no open
   pull request and no open issue, so nothing upstream is adding an `ocx` row.
@@ -730,8 +918,8 @@ and six 2300 files were read with h5py.
   when the file is not a scalar). If a later release does check them, a year
   in which the mask removes a Ross-sized shelf (about 1.5e17 kg) would put
   `tendlicalvf` near -5e9 kg s-1, past the new bound. The bundled
-  `icepack2_tools/ismip7_variable_request.csv` is still 0.5.0's.
-  (issue #12)
+  `icepack2_tools/ismip7_variable_request.csv` was still 0.5.0's; it was
+  re-vendored at 0.5.1 on 23 September.
 - **#50, 22 September, open, new.** Are the front and grounding-line fluxes
   given over the face or averaged over the cell? An organiser answered: a
   mass change per unit horizontal cell area, pointing to checker issue 35.
@@ -754,7 +942,20 @@ and six 2300 files were read with h5py.
   1's "the 2300 atmosphere files were removed" and the reader's comment in
   `forcing.py` are stale, and the SMB sentence of the submission README
   claimed the 2299 hold for both. That sentence is corrected in this
-  change. (issues #78, #41)
+  change. Answered on the 23rd, below. (issue #41)
+- **#49, 23 September, answered.** Read that day through the GitHub API. At
+  00:03 UTC a member of the ISMIP7 Antarctica team at Dartmouth College gave
+  the team's answer to the reporting group's question: a single forcing
+  year at the very end should make no significant difference, and
+  duplicating the 2299 data into 2300 is acceptable. The question had been
+  put to the ISMIP7 lead. Runs therefore end in 2300, and the runners, the
+  time axis and the filenames of cores 5 and 7 stand. For 2300 a CESM2-WACCM
+  run reads the distributed atmosphere file, the 2290-2299 mean, for SMB;
+  holds 2299 for the ocean `tf` and `so`, which is the duplicate the reply
+  accepts; and under a mask mode reads the 2299 collapse mask. The v2.1
+  masks for ssp126 and ssp585 end in 2299; their time axes were read on
+  Quartz that day with h5py. No reader changes. Closed as
+  icepack/ismip7#78.
 - **#30, 22 September.** PISM posted its margin-only runs. Under CESM2-WACCM
   ssp585, the mask applied to all floating ice doubles the sea-level
   contribution, 1.25 to 2.48 m of ice above flotation. Applied only at the
@@ -765,6 +966,26 @@ and six 2300 files were read with h5py.
   treat fractured ice inside the shelf, as melange or as a reduced-viscosity
   region rather than open ocean. No one has answered that, and the
   organisers prescribe no mode. (issue #10)
+- **#30, 23 September: the MRI-ESM2-0 ssp585 mask was faulty.** At 00:00 UTC,
+  under the PISM post above, a member of the ISMIP7 Antarctica team at
+  Dartmouth College reported an issue with the MRI-ESM2-0 ssp585 fracture
+  mask and an update on Globus. The update is v2, whose README credits
+  improved wind forcing in the excess meltwater, which changes all three
+  fracture files. IU fetched the MRI-ESM2-0 fracture tree from Globus to
+  Quartz that day, while the mirror still served the 29 August v1 (checked
+  19:30 UTC): v2 arrived for ssp585 and ssp534-over, and the v1 files of
+  ssp126, ssp370 and ssp534-over came back byte-identical, their collapse
+  masks matching the manifest's ETags. Flagged 8 km cells in the ssp585
+  mask, v1 against v2: 428 against 3,449 in 2100, 583 against 20,158 in 2200
+  and 593 against 25,149 in 2250, with every v1 cell flagged in v2 at those
+  years. So PISM's MRI-ESM2-0 result above ran on the faulty mask. Both
+  versions end in 2299, as the CESM2-WACCM masks do. The reader opens v2, and
+  the audit reads the row `AHEAD` and passes. `FRACTURE_MIN_VERSION` in
+  `icepack2_tools/forcing.py` makes v2 the floor for MRI-ESM2-0 ssp585, and
+  v2.1 the floor for CESM2-WACCM ssp126, ssp370 and ssp585: a run under a mask
+  mode refuses an older mask at startup, and the audit reads it `OUTDATED`
+  and fails, whatever the mirror serves. NOTS and Midway therefore need v2
+  from Globus before a mask-mode core 8 can run there. (issue #16)
 - **Unmoved.** #22 since 13:32 UTC on the 21st (the new 0.5.1 bounds stop
   taking a side on the `ligroundf` sign, but the thread prescribes none).
   #48 since the 20th: no date for the regenerated OCX. #17 and #37 as in
@@ -788,7 +1009,121 @@ never booked, and an ice rumple contributed its whole throughput to
 the same flux the DG0 transport moved, signed from grounded to floating and
 still landed in the floating cell. `tests/test_ismip7_annual.py` checks both
 directions on a strip of cells, and the rumple case, whose net is zero.
+The flotation test reads an ice-free land cell as afloat (a height above
+flotation of exactly 0), so ice that a land-terminating margin pushed onto
+ice-free land beyond the pinned front was booked as grounding-line flux as
+well as calving: 8 to 35 Gt/yr in the 25 km rehearsal (issue 138), all of it
+in buffer cells outside the 2015 extent. The booking now counts a cell on a
+bed at or above sea level as grounded (issue 136), and the same test checks
+a land strip.
 Series banked by earlier runs carry the one-sided booking; they differ from
 the new one only in cells with a facet across which ice flowed from floating
 to grounded. The README's `[confirm]` on this convention is cleared and the
 board item for it is closed.
+
+## 10. The OCX filename, 27 September (issue #18)
+
+Read on 27 September: the 52 forum threads through the GitHub API, the
+organisers' shared documents by direct download, other groups' public
+ISMIP7 repositories, and the source.coop listing. isschecker 0.5.1 was
+installed from its tag in a scratch venv on a Mac and run. Nothing was posted
+upstream.
+
+### What the organisers wrote
+
+- **#17** is unchanged since 29 June, and no thread addresses the forcing
+  field of an OCX filename. New since section 8: #51 (uploads go to one
+  source.coop product per group, unlisted during the embargo) and #52 (the
+  `ismip/ismip7-community` repository).
+- **The conventions document** #17 links, "ISMIP7 filenames and
+  conventions" (19 June, revised 27 August), downloads without a sign-in
+  from `https://drive.google.com/uc?export=download&id=1Yfhx-ecnVt6bCeIqhvDKBKIlvA0KMSgn`.
+  Its complete core set gives core 11 as
+  `iareafl_GrIS_NORCE_CISM3_m001_ERA5_f001_ocx_C011_2015-2025.nc`. The
+  ISMIP7 web page, read directly this time, gives the same name ending
+  `2015-2300`. Both are GrIS examples, and no AIS example exists.
+- **The Protocol Overview sheet** (linked from #40) lists the AIS row as
+  counter C011, experiment `ocx`, ESM `-`, start 1990 to 2015, end 2025.
+- **The AIS OCX SMB is forced by ERA5.** The `history` attribute of
+  `acabf_AIS_RACMO2.3p2-ERA_OCX_SDBN1-8000m_v1_<year>.nc` on source.coop
+  names `RACMO2.3p2_ANT27_ERA5_3h` for 1979, 2003 and 2025.
+
+### isschecker 0.5.1, run
+
+0.5.1 (22 September) is still the latest release, and `main` has moved past
+it only by agent instructions. There is no open issue or pull request.
+The experiment table and `VALID_ESM_NAMES` are as in 0.5.0. Run on a
+synthetic AIS 32 km core 11 set from the checker's own generator (27 files,
+2003 to 2025, gridded and scalar):
+
+| forcing field | stock 0.5.1 | with an `ocx` row |
+|---|---|---|
+| `ERA5`, `ERA`, `OCX`, `RACMO2.3p2-ERA` | 1 naming error, 0 files checked | 27 naming errors, one per file on field 5, and no other error |
+| `CESM2-WACCM` | 1 naming error, 0 files checked | no error |
+
+The row, `ocx;1990;2015;2025;-1` from the Protocol Overview, was added to
+the loaded table in-process, leaving the installed package unedited, as
+`isschecker_ocx.py` below does. Stock 0.5.1 therefore checks none of
+a core 11 set's files, and given a row it passes a CMIP model in field 5, so
+no checker catches a core 11 file that claims ESM forcing. The row makes the
+time tests bite: the same set started in 1979, as core 11 did before issue
+#117, draws a second error in all 27 files, "the file name starts at year
+1979, but experiment 'ocx' must be between 1990 and 2015".
+
+### What other groups do
+
+| group | model, ice sheet | core 11 name | source |
+|---|---|---|---|
+| NORCE | CISM, AIS | `<var>_AIS_NORCE_CISM8_m001_ERA_f001_ocx_C011_1990-2025.nc` | `hgoelzer/norce-ismip7-ais-processing`, 26 and 27 September |
+| UAF | PISM, GrIS | `<var>_GrIS_UAF_PISM_m001_OCX_f001_OCX_C011_1990-2024.nc` | `pism/pism-terra`, its tests and changelog |
+
+NORCE, the institution of the author isschecker's `pyproject.toml` lists,
+runs 0.5.1 with `ocx;1990;1990;2025;36` added to its installed table, leaves
+`VALID_ESM_NAMES` alone, and records the 27 `ERA` naming errors on C011 as
+expected for reanalysis forcing. The public ISMIP7 repositories of
+IGE (Elmer/Ice), Monash (ISSM) and WAVI name no core 11 file. source.coop
+shows no submission: the `ismip` account lists only its four forcing and
+observation products. The organisers' synthetic template on Globus
+(`/ISMIP7/Submission_Templates/AIS/ISMIP7/SYNTH1/`) was not listed: the
+collection's HTTPS endpoint serves files anonymously and lists no directory,
+and no Globus CLI was at hand.
+
+### What changed here
+
+The group chose on 27 September to name core 11 as the organisers'
+conventions document does and to check it with a patched checker. The writer
+names it `<var>_AIS_RICE_icepack2_m001_ERA5_f001_ocx_C011_2003-2025.nc`, the
+span being the 2003 start of issue #117. `--scenario ocx` takes `ERA5` as the
+forcing field by default and refuses any other value, and an upper-case
+`OCX` scenario is refused (`forcing_id` in `write_ismip7_output.py`). NORCE
+writes `ERA` there and UAF writes `OCX`.
+
+`antarctica/scripts/isschecker_ocx.py` runs 0.5.1 with the Protocol
+Overview's `ocx` row added and `ERA5` accepted in field 5 of `ocx` files, in
+its own process, the installed package unedited, and names the patch in the
+log's version line. It refuses any release but 0.5.1 and stops once a
+release carries an `ocx` row. Run on synthetic AIS 32 km sets from the
+checker's generator (27 files each):
+
+| set | errors | exit |
+|---|---|---|
+| `ERA5`, `ocx`, 2003 to 2025 | 0 | 0 |
+| `ERA`, `ocx`, 2003 to 2025 | 27 naming, field 5 | 1 |
+| `ERA5`, `ocx`, 1979 to 2025 | 27 time, the start | 1 |
+| `ERA5`, `ocx`, 2003 to 2020 | 81 time | 1 |
+| `ERA5`, `ctrl`, 2015 to 2016 | 27 naming, field 5, and 81 time | 1 |
+
+On a `CESM2-WACCM` `ctrl` set its log differs from stock 0.5.1's in the
+version line alone. Stock 0.5.1, the release the organisers publish, still
+gives any core 11 set, NORCE's included, the one naming error and no file
+check.
+
+Real output: on IU Quartz on 27 September (job 10721768) the core 11 runs of
+the 25 km rehearsal (issue #138), `rehnoamb` and `rehamb` at `b554238`, whose
+writer differs from this branch's in docstrings alone, were written with
+`--esm ERA5`, 31 files each for 2003 to 2025. For each, stock 0.5.1 reported
+the one naming error and checked no file, and the patched checker checked all
+31 files and found 0 errors. Its one warning is the one every core carries,
+the list of non-mandatory variables the model does not write. The
+rehearsal's own output chain, which lives outside the repository, still
+passes `--esm OCX` for core 11, and the writer now refuses that. (issue #18)

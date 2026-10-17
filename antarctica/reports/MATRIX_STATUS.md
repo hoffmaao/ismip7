@@ -75,7 +75,8 @@ did not:
 
 Core 10 points at the known fix for continuous front-emptying eras: the
 monolithic implicit `(u, M, tau, h)` coupling (gia `forward_monolithic` port).
-Whether core 7 still needs it is an open question for the re-run.
+The September re-runs at 32 km crossed both walls without it; item 4 of the
+open items below records them.
 
 ## What this run demonstrates
 
@@ -147,7 +148,13 @@ values fed in.
    2, 3 and 7 pass (one step of 60,446 Gt/yr; one year at 2.4x; two steps
    above 6000 with year medians below 1,800) and cores 1, 5, 8 and 9 still
    fail on sustained growth or a year median of 4,000 to 8,000.
-4. **Monolithic forward** for cores 7 (and the 10 tail) beyond saturation. (issue #32)
+4. **Monolithic forward: a non-blocking feature.** The implicit
+   `(u, M, tau, h)` coupling, a port of gia's `forward_monolithic`, was the
+   named fix for the July walls at front-emptying events. The 32 km re-runs on
+   the current stack crossed both without it, every step solved directly:
+   core 7's 2124.5 in five ssp585 CESM2-WACCM runs, and core 10's 2040.5 in
+   the i32 and i107 controls. A wall of that kind, if it returns, is likely to
+   come in another run or at another time. (issue #113)
 5. **500 m / 2500 m production resolution**: the 2500 m `_budd` MAP on disk
    (`inversion_icepack2_budd_2500.h5`) is the untagged n=4, CG1-geometry one;
    this matrix is the 32 km demonstration. An n=3 production line needs its own

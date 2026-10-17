@@ -1,0 +1,24 @@
+{
+  "id": "test-2km-rc-b20k-forward-floor2p5-drift-restart",
+  "task": "test",
+  "institution": "IU",
+  "title": "As test-2km-rc-b20k-forward-floor2p5-drift, started from the MAP's full mixed state as a restart (no n_flow ramp), membrane floor 2.5 m",
+  "status": "done",
+  "friction": "regularized_coulomb",
+  "period": "2015-2020",
+  "mesh": "antarctica_5000_2000_buffered20000 (IU's build, 969,764 vertices), DG0 geometry, vertex raster sampling, the lake fix (from the MAP: ISMIP7_MESH=checkpoint)",
+  "initial_state": "test-2km-rc-b20k-vgate-floor1's MAP (rc_s2x_vgf1.h5, inverted with the vertex gate and a 1 m floor; drag_gate recorded, h_visc_floor not); read as ISMIP7_RESTART (velocity, membrane and basal stress, H_init, C_w0)",
+  "forcing": "none: run_timing.py passes no forcing callback; ISMIP7_APPARENT_MB=0 ISMIP7_FIXED_FRONT=1 ISMIP7_DT=0.025 scpc_gamg, rescue on; ISMIP7_RC_HVISC_FLOOR=2.5; vertex gate from the MAP",
+  "site": "IU Quartz, general partition",
+  "resources": "32 ranks, 160G, 6 h",
+  "jobs": [
+    "11012471"
+  ],
+  "code": "94d0398; Quartz worktree /N/scratch/dlilien/ismip7_reinvert_s5",
+  "started": "2026-10-05",
+  "finished": "2026-10-05",
+  "cost": "1 h 35 min, 200 steps",
+  "results": "Quartz /N/scratch/dlilien/ismip7_reinvert_jobs/fwd (timing record, status) and the worktree's antarctica/results/fwd2km_rc_vgf1_floor2.5_amb0_rs_2000_*",
+  "audit": "restart state re-solved, then 200 steps with every solve converged and no rescue: 658 Newton iterations (at most 10 a step), 70 Krylov iterations a condensed solve, 27.8 s a solve; resid 0.00 every step; VAF 56,701.78 mm SLE at 2020 from 56,723.78 (10 m: 723 Newton, 38 Krylov, 14.4 s a solve, 56,702.18)",
+  "notes": "issue #153: the membrane floor's misfit-vs-cost curve (1, 2.5, 5, 10 m), asked for on 5 October in case the floor has to trade misfit against solver cost. With the apparent mass balance off and no forcing every cell moves at its flux divergence from t=0, which exercises the fronts and thin cells the floor damps; the MAP was inverted at 1 m, so the other floors also start from slightly mismatched speeds. The restart start separates the per-step cost from the cold start's ramp, which at 1 m took hours under scpc_gamg"
+}

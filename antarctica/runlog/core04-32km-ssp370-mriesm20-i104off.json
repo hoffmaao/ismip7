@@ -1,0 +1,32 @@
+{
+  "id": "core04-32km-ssp370-mriesm20-i104off",
+  "task": "test",
+  "institution": "IU",
+  "title": "Core 4 at 32 km without the apparent-MB reference, branched from the i104off historical",
+  "status": "done",
+  "exp_id": "C004",
+  "esm": "MRI-ESM2-0",
+  "scenario": "ssp370",
+  "period": "2015 to 2101, reached 2101.0",
+  "friction": "budd",
+  "mesh": "antarctica_320000_32000, DG0 geometry",
+  "initial_state": "hist_mri_esm2_0_i104off_32000_final.h5, sha256 5d794657a1bfa9cb6e7d8b7ffeb8496c579b7f776989b48ec0bf5bffe1476cbc",
+  "branch_from": "core02-32km-hist-mriesm20-i104off at 2015.0, from the log's restart lines",
+  "forcing": "MRI-ESM2-0 ssp370, atmosphere GEMB-SDBN1-8000m v2, ocean v3",
+  "melt": "per-basin K from K_issue11_mesh2500.npz, local slope",
+  "front": "held fixed, ice-shelf collapse ISMIP7_FRACTURE=none",
+  "apparent_mb": "off",
+  "dt": 0.1,
+  "site": "IU Quartz",
+  "resources": "8 ranks, 32 GiB",
+  "jobs": [
+    "10609948"
+  ],
+  "code": "700a846",
+  "started": "2026-09-24",
+  "finished": "2026-09-24",
+  "cost": "one link of 24 min for 86 model years",
+  "results": "antarctica/results/ssp370_mri_esm2_0_i104off_32000_*",
+  "audit": "OFF TRACK, with dM/dt FAIL at 999.4 Gt/yr; resid 0.0000 on all 860 rows, no rescue, subcycle or stall event",
+  "notes": "run for issue #104 from a scratch clone of main at 700a846, with results and logs in the shared checkout. 860 of 860 steps converged on their first direct diagnostic solve, with 6.7 Newton iterations on average and 10 at the most (step 125, t = 2027.5). VAF changes by +320 mm SLE over 2015 to 2101; the peak ice speed on the mesh is 18423 m/yr at t = 2092.9, at (-2083000, 783000) m. Run without ISMIP7_OUTPUT. Final state sha256 e1c610ecf053643d809fc456cde89977463a8f2024f49ba8efc885e9297325d0. Full record: antarctica/reports/core04_ssp370_mri_esm2_0_32km_i104off.md."
+}

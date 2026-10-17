@@ -1,0 +1,32 @@
+{
+  "id": "core10-32km-ctrl2015-mriesm20-i116y2003on",
+  "task": "test",
+  "institution": "IU",
+  "title": "Core 10 at 32 km with the SMB-elevation feedback on dacabfdz, branched from the i116y2003on historical of the 2003 start",
+  "status": "done",
+  "exp_id": "C010",
+  "esm": "MRI-ESM2-0",
+  "scenario": "ctrl",
+  "period": "2015 to 2301, reached 2301.0",
+  "friction": "budd",
+  "mesh": "antarctica_320000_32000, DG0 geometry",
+  "initial_state": "hist_mri_esm2_0_i116y2003on_32000_final.h5, sha256 b1a6710e5cfee68529df137dbd2dce145cabde5a0865fb1c6f23f93f65037e69",
+  "branch_from": "core02-32km-hist-mriesm20-i116y2003on at 2015.0, queued by ISMIP7_CHAIN_THEN, from the log's restart lines",
+  "forcing": "RACMO2.4p1 SMB climatology 2000 to 2029 and the MRI-ESM2-0 ctrl ocean v3, the organisers' 2000 to 2029 mean of historical and ssp126, SMB gradient dacabfdz ctrl GEMB-SDBN1-8000m v2 (SMB-elevation feedback on)",
+  "melt": "per-basin K from K_issue11_mesh2500.npz, local slope",
+  "front": "held fixed, ice-shelf collapse ISMIP7_FRACTURE=none",
+  "apparent_mb": "balance",
+  "dt": 0.1,
+  "site": "IU Quartz",
+  "resources": "8 ranks, 32 GiB",
+  "jobs": [
+    "10664430"
+  ],
+  "code": "c6244e6",
+  "started": "2026-09-26",
+  "finished": "2026-09-26",
+  "cost": "one link of 43 min for 286 model years",
+  "results": "antarctica/results/ctrl2015_mri_esm2_0_i116y2003on_32000_*",
+  "audit": "ON TRACK, with dM/dt PASS at 105.4 Gt/yr; resid 0.0000 on all 2860 rows, no rescue, subcycle or stall event",
+  "notes": "run for issue #116 from a scratch clone of claude/dacabfdz-gradient-version-565c93 at c6244e6, with results and logs in the shared checkout. 2860 of 2860 steps converged on their first direct diagnostic solve, with 6.1 Newton iterations on average and 16 at the most (step 710, t = 2086.0). VAF changes by +104 mm SLE over 2015 to 2301; the peak ice speed on the mesh is 228098 m/yr at t = 2061.5, at (-2083000, 783000) m. The core 10 control of the issue #116 feedback comparison, with ISMIP7_SMB_ELEVATION_FEEDBACK=1 against the i116y2003off control on the same code, each queued by ISMIP7_CHAIN_THEN from its own arm's MRI-ESM2-0 historical; both read the MRI-ESM2-0 ctrl ocean. Over 2015 to 2301 mass changes by +30,031 Gt against +30,422 Gt (on minus off -391 Gt) and VAF by +104.5 against +105.4 mm SLE (-0.9). The yearly feedback line reads -0.32, -1.34, -2.63, -3.61, -4.38 and -5.03 Gt/yr at 2050, 2100, 2150, 2200, 2250 and 2300, and each of its 286 lines agrees with the on-minus-off SMB column of its step to 0.05 Gt/yr. The off arm peaks at 2.5e5 m/yr at (-2419000, 1351000) m at t = 2037.4. The final state records smb_elevation_feedback = dacabfdz. Run without ISMIP7_OUTPUT. Final state sha256 4f7395999abe022cef541744bb6184f02306feb3d77f3de9b2af889ded711315. Full record: antarctica/reports/core10_ctrl2015_mri_esm2_0_32km_i116y2003on.md."
+}

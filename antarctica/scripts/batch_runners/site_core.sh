@@ -135,6 +135,15 @@ ismip7_chain_resources() {
     ISMIP7_CHAIN_RES=(-N "${SLURM_JOB_NUM_NODES:-1}" -n "${SLURM_NTASKS:-1}"
                       --cpus-per-task="${SLURM_CPUS_PER_TASK:-1}"
                       --hint=nomultithread)
+    # The link's per-node layout, when it asked for one. Slurm sets
+    # SLURM_NTASKS_PER_NODE only for a job that requested it, --export=ALL
+    # hands the link's value to the successor, and srun reads it there as its
+    # own --ntasks-per-node, so a successor allocated without the same request
+    # is asked for a layout it may not hold: the successor of a 2 x 32 link
+    # (NOTS 1614035) died at srun with "More processors requested than
+    # permitted".
+    [ -n "${SLURM_NTASKS_PER_NODE:-}" ] &&
+        ISMIP7_CHAIN_RES+=(--ntasks-per-node="$SLURM_NTASKS_PER_NODE")
     [ -n "${SLURM_JOB_NAME:-}" ] && ISMIP7_CHAIN_RES+=(-J "$SLURM_JOB_NAME")
     [ -n "${SLURM_JOB_PARTITION:-}" ] && ISMIP7_CHAIN_RES+=(-p "$SLURM_JOB_PARTITION")
     [ -n "$feat" ] && ISMIP7_CHAIN_RES+=(-C "$feat")
@@ -146,6 +155,27 @@ ismip7_chain_resources() {
     if [ -n "${ISMIP7_SBATCH_EXTRA:-}" ]; then
         # shellcheck disable=SC2206
         ISMIP7_CHAIN_RES+=(${ISMIP7_SBATCH_EXTRA})
+    fi
+    return 0
+}
+
+# ISMIP7_CHAIN_THEN_CMD: a shell command a chain runs once, in the link that
+# finishes the run it carries (the inversion's MAP marked done, the forward at
+# its end year). The staged initialization routine
+# (antarctica/scripts/initialization_routine.sh) hands itself the next stage
+# with it. Every link inherits it through --export=ALL, since any link may be
+# the one that finishes; a forward's follow-ons (ISMIP7_CHAIN_THEN) start
+# chains of their own and do not. The command's failure is reported and does
+# not change the link's own verdict.
+ismip7_chain_then_cmd() {
+    local rc
+    [ -n "${ISMIP7_CHAIN_THEN_CMD:-}" ] || return 0
+    echo "chain: running the follow-on command: $ISMIP7_CHAIN_THEN_CMD"
+    if ( eval "$ISMIP7_CHAIN_THEN_CMD" ); then
+        echo "chain: follow-on command done"
+    else
+        rc=$?
+        echo "chain: WARNING the follow-on command exited $rc"
     fi
     return 0
 }
@@ -272,6 +302,36 @@ ismip7_activate() {
     # so a chain link killed mid compile cannot hand its successor a truncated
     # object through --export=ALL.
     export PYOP2_CACHE_DIR="${SCRATCH:-$HOME}/.pyop2_cache/${SLURM_JOB_ID:-manual}"
+    # ISMIP7_SHARED_JIT_CACHE (a site file or the submitting shell) names a
+    # kernel store every single-node job starts from. The job copies it to
+    # node-local disk, compiles into that copy, and copies its new kernels
+    # back (every ten minutes and at exit, rsync --ignore-existing, which
+    # renames each file into place). Without it every 2 km NOTS chain link
+    # recompiled the sub-element kernels into an empty cache. The ranks must
+    # not share the store over NFS directly: only rank 0 compiles a miss, and
+    # on /projects (NFSv3) the others still saw "File not on disk" after it
+    # had written the file (job 1691916, 30 Sep 2026).
+    # The store is kept per CPU model: PyOP2 compiles with -march=native and
+    # keys its cache on the flag string, not on the CPU it resolved to, so a
+    # kernel built on one node type reached another and two ranks of a
+    # Cascade Lake job died with a bus error 14 s in, on a store filled on
+    # Sapphire Rapids (NOTS 1743894, 3 Oct 2026).
+    if [ -n "${ISMIP7_SHARED_JIT_CACHE:-}" ] && [ "${SLURM_JOB_NUM_NODES:-1}" = 1 ]; then
+        _ismip7_cpu="$(grep -m1 '^model name' /proc/cpuinfo 2>/dev/null | md5sum | cut -c1-12)"
+        ISMIP7_SHARED_JIT_CACHE="${ISMIP7_SHARED_JIT_CACHE%/}/cpu-${_ismip7_cpu:-unknown}"
+        rmdir "$PYOP2_CACHE_DIR" 2>/dev/null || true
+        mkdir -p "$ISMIP7_SHARED_JIT_CACHE"
+        export PYOP2_CACHE_DIR="${TMPDIR:-/tmp}/ismip7_pyop2_${SLURM_JOB_ID:-$$}"
+        mkdir -p "$PYOP2_CACHE_DIR"
+        rsync -a --exclude '*.tmp' "$ISMIP7_SHARED_JIT_CACHE/" "$PYOP2_CACHE_DIR/" || true
+        _ismip7_jit_harvest() {
+            rsync -a --ignore-existing --exclude '*.tmp' \
+                "$PYOP2_CACHE_DIR/" "$ISMIP7_SHARED_JIT_CACHE/" 2>/dev/null || true
+        }
+        ( while sleep 600; do _ismip7_jit_harvest; done ) &
+        _ISMIP7_JIT_HARVESTER=$!
+        trap '_ismip7_jit_harvest; kill "$_ISMIP7_JIT_HARVESTER" 2>/dev/null; rm -rf "$PYOP2_CACHE_DIR"' EXIT
+    fi
     # XDG_CACHE_HOME is loopy's knob and also matplotlib's, so pin the font
     # cache where it is already warm and move only loopy.
     export MPLCONFIGDIR="${MPLCONFIGDIR:-${_ISMIP7_SITE_XDG_CACHE_HOME:-$HOME/.cache}/matplotlib}"
@@ -341,10 +401,36 @@ ismip7_persistent_jit_cache() {
 # image's own mpiexec, inside one `exec`: every job here is a single node, and
 # that way the MPI in the image never has to agree with the host's Slurm about
 # PMI. The image has python3 and no python, so that one word is translated.
+#
+# Open MPI's default MPI-IO component (ompio) writes a parallel HDF5 file to an
+# NFS file system at a crawl: on NOTS, measured 24 September 2026 with 32 ranks
+# on the 1000 m mesh, one 1.48 GB yearly output file took 1042 s to /scratch
+# (VAST) under ompio and 52 s under romio321, on a file system that takes a
+# single stream at 600 MB/s. At 45 minutes per model year that write was a
+# third of the run. ISMIP7_MPI_IO names the component (default romio321; set
+# it empty to leave the MPI's own default); an MPI other than Open MPI ignores
+# the variable.
+#
+# One dead rank ends the step (issue #161). Slurm's default (KillOnBadExit=0,
+# as on IU Quartz) lets the other ranks wait in MPI for the rest of the wall
+# limit: in job 10971250 the OOM killer took one of 32 ranks 4 h 28 min in and
+# the node sat idle for 11.5 h more. --kill-on-bad-exit ends the step when any
+# task exits non-zero or on a signal, an OOM kill included, and
+# --oom-kill-step=1 has slurmstepd end it on an OOM event as well; the second
+# is passed only where this srun lists it (Slurm 24.11 and later), since an
+# unknown option would fail every job. The image's mpiexec on a container site
+# already takes every rank down when one dies.
 ismip7_mpirun() {
     local n="$1"; shift
+    if [ -n "${ISMIP7_MPI_IO-romio321}" ]; then
+        export OMPI_MCA_io="${ISMIP7_MPI_IO-romio321}"
+    fi
     if [ -z "$ISMIP7_CONTAINER" ]; then
-        srun -n "$n" "$@"
+        local kill=(--kill-on-bad-exit=1)
+        case "$(srun --help 2>/dev/null)" in
+            *--oom-kill-step*) kill+=(--oom-kill-step=1) ;;
+        esac
+        srun "${kill[@]}" -n "$n" "$@"
         return
     fi
     if [ "${1:-}" = python ]; then

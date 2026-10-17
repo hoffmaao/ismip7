@@ -102,6 +102,6 @@ done
 python - <<'PY'
 import h5py, netCDF4
 print("hdf5: h5py", h5py.version.hdf5_version, "| netCDF4", netCDF4.__hdf5libversion__)
-import icepack, icepack2, tlm_adjoint, icepack_tools, rasterio, xarray, gmsh, geopandas, shapely, scipy
+import icepack, icepack2, tlm_adjoint, icepack_tools, icepack_tools.calving, rasterio, xarray, gmsh, geopandas, shapely, scipy
 print("deps OK: icepack", icepack.__version__)
 PY

@@ -1,0 +1,24 @@
+{
+  "id": "rehearsal-25km-output-chain-rehamb",
+  "task": "output",
+  "institution": "IU",
+  "title": "Rehearsal at 25 km, attempt B: the eleven cores through the writer, the checker and the scalar tool",
+  "status": "done",
+  "exp_id": "C001 to C011",
+  "mesh": "antarctica_250000_25000_buffered20000",
+  "site": "IU Quartz, general partition",
+  "resources": "serial; 3 to 10 min a core for the writer, 1 to 3 min for the checker",
+  "jobs": [
+    "10722220",
+    "10723319",
+    "10723492"
+  ],
+  "code": "dc5fe25, a local merge of b554238 with main 60438f4 (PR 139: core 11's forcing field ERA5 and isschecker_ocx.py); every non-OCX file matches the b554238 writer's",
+  "started": "2026-09-27",
+  "finished": "2026-09-27",
+  "results": "Quartz antarctica/results/rehearsal_25km/rehamb/submission, rehamb/checker, rehamb/scalars",
+  "ismip7_output": "31 files a core on the 8 km grid, AIS/RICE/icepack2/CORE/C001 to C011, with params.nc (917, 1024, 1000)",
+  "checker": "isschecker 0.5.1: 0 errors on every core (core 11 through isschecker_ocx.py, issue 18); 1 warning on each (non-mandatory variables the model does not write); attempt B's C007 adds 13 range warnings from its fast cells (velocities to 0.0133 m/s, strbasemag to 1.05e6 Pa)",
+  "scalars": "ismip7-scalars 0.1.0 sla20, slg20 and slvaf for every core, the historicals and core 11 their own reference (2004), the others paired with their ESM's historical; compare_scalars.py exit 0 on all eleven",
+  "notes": "the rehearsal of issue 138. A regeneration of C001 from the kept annual files (job 10723631) matched all 31 files exactly. This set is the candidate test submission; its ids are the writer's defaults (issue 38)."
+}

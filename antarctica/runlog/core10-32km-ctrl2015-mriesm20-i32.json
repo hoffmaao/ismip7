@@ -1,0 +1,32 @@
+{
+  "id": "core10-32km-ctrl2015-mriesm20-i32",
+  "task": "test",
+  "institution": "IU",
+  "title": "Core 10 at 32 km, branched from the i32 historical: the July 2040.5 wall on the current stack",
+  "status": "done",
+  "exp_id": "C010",
+  "esm": "MRI-ESM2-0",
+  "scenario": "ctrl",
+  "period": "2015 to 2301, reached 2301.0",
+  "friction": "budd",
+  "mesh": "antarctica_320000_32000, DG0 geometry",
+  "initial_state": "hist_mri_esm2_0_i32_32000_final.h5, sha256 75536d1926268539fdb202045e7c6c021d03d36fa1967e13bf3345b779670dee",
+  "branch_from": "core02-32km-hist-mriesm20-i32 at 2015.0, from the log's branch and restart lines",
+  "forcing": "RACMO2.4p1 SMB climatology 2000 to 2029 and the OI ocean climatology (30_sep), constant in time",
+  "melt": "per-basin K from K_issue11_mesh2500.npz, local slope",
+  "front": "held fixed, ice-shelf collapse ISMIP7_FRACTURE=none",
+  "apparent_mb": "balance",
+  "dt": 0.1,
+  "site": "IU Quartz",
+  "resources": "8 ranks",
+  "jobs": [
+    "10604858"
+  ],
+  "code": "6af8a6a",
+  "started": "2026-09-24",
+  "finished": "2026-09-24",
+  "cost": "one link of 48 min for 286 model years",
+  "results": "antarctica/results/ctrl2015_mri_esm2_0_i32_32000_*",
+  "audit": "ON TRACK, with dM/dt WARN at 422.1 Gt/yr; resid 0.0000 on all 2860 rows, no rescue, subcycle or stall event",
+  "notes": "run for issue #32: the July core 10 (core10-32km-ctrl2015-mriesm20) stopped at 2040.5. Every step converged on its first direct diagnostic solve, with 7.6 Newton iterations on average and 17 at the most (step 918, t = 2106.8); steps 250 to 260 (2040.0 to 2041.0) took 5 to 8. VAF gains 359 mm SLE over 2015 to 2301 under the constant climate. Run without ISMIP7_OUTPUT. Final state sha256 85ed6c5c4677f7d7bc3f69c1c97e10b06a7f942caae82004bfef0edbd2127154. Full record: antarctica/reports/core10_ctrl2015_mri_esm2_0_32km_i32.md"
+}

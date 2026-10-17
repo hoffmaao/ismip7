@@ -1,8 +1,9 @@
 r"""ISMIP7's calving front: the shared level set, anchored at the ice extent.
 
 The implementation lives in :mod:`icepack_tools.levelset` and is shared with
-the CalvingMIP project, so a law tuned in one runs unchanged in the other and
-the front is described by one object everywhere:
+the CalvingMIP project, and the calving laws that move it live beside it in
+:mod:`icepack_tools.calving`, so a law tuned in one runs unchanged in the
+other and the front is described by one object everywhere:
 
 * ``phi`` is a DG0 signed distance on the transport's own cells, negative in
   ice;
@@ -10,20 +11,21 @@ the front is described by one object everywhere:
   ``phi = 0`` on the ice/water facets of the current extent -- the boundary
   condition sits INSIDE the mesh, at the ice sheet's own edge, so a buffered
   mesh needs no condition on its outer boundary;
-* the calving rate retreats it by normal flow (Hahn, Mikula & Frolkovic 2025,
+* a calving law's rate retreats it by normal flow (Hahn, Mikula & Frolkovic 2025,
   arXiv:2504.05845), and :meth:`~icepack_tools.levelset.LevelSet.calving_masks`
   reports both the cells the front has passed and the sub-cell mass the front
   cells shed;
 * advance is the thickness transport's job.
 
 Everything ISMIP7 adds is here: the ``extent`` anchor as the default (the
-sheet's thickness is the authority on where ice is), :func:`initial_distance`
-for the t=0 anchor the ``fixed`` law freezes on, and the knob names, which
-come from :mod:`icepack2_tools.runconfig` (``ISMIP7_CALVING``,
-``ISMIP7_CALVING_SIGMA_MAX_GROUNDED`` / ``_FLOATING``).  The shared class's
-tests are ``icepack_tools/test/levelset_test.py``, which cover both anchors
-serially and on three ranks; what this module adds is tested in
-``tests/test_initial_distance.py``.
+sheet's thickness is the authority on where ice is) and :func:`initial_distance`
+for the t=0 anchor the ``fixed`` law freezes on.  Which law runs, and with
+which parameters, comes from :mod:`icepack2_tools.runconfig`
+(``ISMIP7_CALVING``, ``ISMIP7_CALVING_PARAMS``).  The shared classes' tests
+are ``icepack_tools/test/levelset_test.py`` (both anchors, serially and on
+three ranks) and ``icepack_tools/test/calving_test.py``; what this module
+adds is tested in ``tests/test_initial_distance.py``, and the laws as ISMIP7
+configures them in ``tests/test_levelset_laws.py``.
 """
 
 
@@ -40,21 +42,10 @@ class LevelSet(_LevelSet):
     buffered ocean the thickness decides where ice is, and re-solving the
     eikonal problem there each step keeps the front and the mass conservation
     describing the same ice.
-
-    The unit normal ``ghat`` is refreshed with every eikonal solve, so a
-    ``prescribed`` rate that reads it (a calving law's ``nfront``) is
-    evaluated on the normal of the current extent, including at the first
-    advance.
     """
 
     def __init__(self, *args, anchor="extent", **kwargs):
         super().__init__(*args, anchor=anchor, **kwargs)
-
-    def solve_eikonal_from_extent(self):
-        n_seg = super().solve_eikonal_from_extent()
-        if hasattr(self, "_grad_form"):
-            self._update_unit_gradient()
-        return n_seg
 
 
 class _DistanceOnly(LevelSet):

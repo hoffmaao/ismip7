@@ -1,4 +1,4 @@
-r"""The ISMIP7 AIS 8 km output grid.
+r"""The ISMIP7 AIS 8 km output grid, and the area factor of its projection.
 
 Only the grid is defined here. The regridding itself is the conservative
 supermesh remap in ``antarctica/scripts/write_ismip7_output.py``, which takes
@@ -32,3 +32,19 @@ def ismip7_grid_coords():
     x = np.linspace(ISMIP7_X0, ISMIP7_X1, ISMIP7_NX)
     y = np.linspace(ISMIP7_Y0, ISMIP7_Y1, ISMIP7_NY)
     return x, y
+
+
+def area_factor(x, y):
+    r"""af2 = (1/k)^2 of EPSG:3031 at map points ``(x, y)`` in metres.
+
+    k is the scale factor of the polar stereographic projection on the WGS84
+    ellipsoid, true at 71 S, so af2 is the true area of a small patch over its
+    map-plane area: 1.0568 at the pole, 1 at 71 S, 0.843 at the corners of the
+    8 km grid. ``ismip7-scalars`` weights every pixel by it, from
+    ``af2_AIS_08000m_v1.nc`` (after Snyder 1987), which this matches at the
+    pixel centres to the file's float32 rounding (``tests/test_ismip7_output.py``).
+    """
+    import pyproj
+    proj = pyproj.Proj("EPSG:3031")
+    lon, lat = proj(np.asarray(x, dtype=float), np.asarray(y, dtype=float), inverse=True)
+    return 1.0 / np.asarray(proj.get_factors(lon, lat).parallel_scale) ** 2

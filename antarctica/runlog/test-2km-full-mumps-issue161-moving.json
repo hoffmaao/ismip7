@@ -1,0 +1,21 @@
+{
+  "task": "test",
+  "institution": "IU",
+  "friction": "regularized_coulomb",
+  "mesh": "antarctica_5000_2000_buffered20000 (969,764 vertices, 1,928,285 cells), DG0 geometry, vertex raster sampling",
+  "site": "IU Quartz, general partition, one node each",
+  "forcing": "the 10971250 objective (rho 75 km) (cell s2x_rc_g01_vgf1_mumps): bilaplacian prior sigma 30, rho 75 km, log friction control, vertex drag gate, membrane floor 1 m, LAKE_ICE_BASE=1, no dH/dt, log-velocity weight 69946.22, L-BFGS-B without a metric",
+  "id": "test-2km-full-mumps-issue161-moving",
+  "title": "2 km RC inversion under full_mumps on 32 ranks, 45 L-BFGS-B iterations from a start the rho 75 km objective moves far, with and without the solver release, and 30 iterations reading MUMPS's memory counters for the cached forward solver",
+  "status": "done",
+  "initial_state": "warm start results/reinvert_2km/exp/rc_s2x_vgf1.h5 (RC stage 2 converged at rho 750 km, 1 m floor, same mesh) under the rho 75 km objective, ISMIP7_WARM_START_STRICT=0, so the controls move far from the first step (misfit 2,833 at the first evaluation; total 2,007 at the 48th)",
+  "resources": "32 ranks, 220G; RSS a rank (mean, rss_mib) at evaluations 10 and 48: 2,762 to 3,057 without the release (7.8 MiB an evaluation; 2,884 to 3,121 from evaluation 20), 2,633 to 2,781 with it (3.9; within 2,771 to 2,813 from evaluation 20); peak 5,449 and 4,856 MiB",
+  "jobs": "11484096 (without), 11484569 (with the release), 11484804 (without, MUMPS counters)",
+  "code": "06cb0a9 and the release tree of test-2km-full-mumps-issue161-probes; probe161.py, probe161_mumps.py",
+  "started": "2026-10-06",
+  "finished": "2026-10-06",
+  "cost": "2 h 6 min and 2 h 5 min for 48 evaluations (141 and 140 s an evaluation, adjoint 92 and 95 s); 1 h 35 min for 33 evaluations with the counters",
+  "results": "/N/scratch/dlilien/ismip7_issue161_jobs/probe/q2_before_moving.*, q2_fix_moving.*, q2_before_moving_mumps.*",
+  "audit": "final totals 2.006562430e+03 and 2.006562429e+03 after 45 iterations, the same Newton iterations; PETSc -log_view on rank 0 at exit: 28 of 1,388 matrices alive without the release, 10 with it, every SNES, KSP and PC destroyed. The cached forward solver was built once and its MUMPS instance reported INFO(16) 1,482 to 1,488 MB allocated, INFO(22) 654 to 659 MB used and RINFO(8) 1,552 MB at every evaluation.",
+  "notes": "Issue #161."
+}

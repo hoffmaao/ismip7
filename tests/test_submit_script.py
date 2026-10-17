@@ -267,3 +267,22 @@ def test_several_pairs_in_one_argument_are_refused(bin_dir):
                   "ISMIP7_NOTE=--mail-type=FAIL --mail-user=me@example.org",
                   ISMIP7_SITE="iu_quartz")
     assert proc.returncode == 0, proc.stderr
+
+
+def test_a_first_inversion_or_projection_can_wait_on_another_job(bin_dir):
+    r"""A re-inversion waits on the relaxation year it starts from
+    (icepack2_tools.relaxation); the runners' own chains queue their
+    successors themselves."""
+    for kind, script in (("inversion", "inversion.sbatch"),
+                         ("projection", "projection.sbatch")):
+        proc = submit(bin_dir, kind, "--dependency", "afterok:7", "--dry-run",
+                      ISMIP7_SITE="iu_quartz")
+        assert proc.returncode == 0, proc.stderr
+        # the runners' kinds print their dry run on standard output
+        _, argv = printed(proc.stdout)
+        assert "--dependency=afterok:7" in argv
+        assert argv[-1] == f"antarctica/scripts/batch_runners/{script}"
+    proc = submit(bin_dir, "smoke", "--dependency", "afterok:7", "--dry-run",
+                  ISMIP7_SITE="iu_quartz")
+    assert proc.returncode == 2
+    assert "--dependency belongs to" in proc.stderr

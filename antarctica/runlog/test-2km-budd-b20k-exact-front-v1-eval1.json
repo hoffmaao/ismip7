@@ -1,0 +1,24 @@
+{
+  "task": "test",
+  "institution": "IU",
+  "status": "done",
+  "friction": "budd",
+  "period": "2015 state",
+  "mesh": "antarctica_5000_2000_buffered20000 (IU's build, 969,764 vertices), DG0 geometry, vertex raster sampling, the lake fix",
+  "site": "IU Quartz, general partition",
+  "code": "4426372; Quartz worktree /N/scratch/dlilien/ismip7_reinvert_s10",
+  "started": "2026-10-07",
+  "finished": "2026-10-07",
+  "id": "test-2km-budd-b20k-exact-front-v1-eval1",
+  "title": "Budd's final MAP at its own controls under exact_front version 1 (the free-cliff push it was inverted with), evaluation 1",
+  "initial_state": "inversion-2km-budd-b20k-rho7500-floating's final MAP (sha256 1d2e3ae92f91813a), its controls as the warm start loads them (theta clipped at |10|), log-velocity weight 85380.44865839917",
+  "forcing": "observations sampled onto this mesh; the final-product objective (bilaplacian sigma 30, rho 7.5 km, no dH/dt term, log friction control, cell-wise friction, L-BFGS-B without a metric); ISMIP7_FLUIDITY_CONTROL=floating ISMIP7_DRAG_GATE=vertex ISMIP7_RC_HVISC_FLOOR=2.5 ISMIP7_TRANSFER_FILL=extend; full_mumps; ISMIP7_EXACT_FRONT=1",
+  "resources": "32 ranks, 360G, up to 1 h",
+  "jobs": [
+    "11825453"
+  ],
+  "cost": "10 min; ISMIP7_MAXITER=1",
+  "results": "Quartz /N/scratch/dlilien/ismip7_reinvert_jobs/probe/c166_budd_v1.h5 (one L-BFGS-B iteration past the MAP)",
+  "audit": "evaluation 1: misfit 1,108.24, total 1,388.36, |grad| 0.66; first forward 6 Newton iterations. The 7 Oct pre arm on f57b053 gave 1,388.36 / 1,108.2 / 0.66",
+  "notes": "issue #166: the version 1 baseline for test-2km-budd-b20k-exact-front-v2-eval1, rerun on the version 2 code"
+}

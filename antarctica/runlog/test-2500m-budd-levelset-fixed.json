@@ -1,0 +1,30 @@
+{
+ "id": "test-2500m-budd-levelset-fixed",
+ "task": "test",
+ "institution": "IU",
+ "title": "2.5 km level-set pinned front (ISMIP7_CALVING=fixed) from the v4 timing cache, option 2 of issue #115",
+ "status": "done",
+ "period": "2015.0 to 2025.0, 80 steps, reached 2025.0",
+ "friction": "budd",
+ "mesh": "antarctica_25000_2500_buffered20000, 2.5 km fine, 25 km interior, 20 km buffer, DG0 geometry",
+ "initial_state": "v4 timing cache initial_state_scpc_mumps_dg0_logvelnet_v4_2500_25000_buffered20000.h5, sha256 a684a8d592ce7e04614e68fc26b716b84efc39099bfc7b7245534ce22c928424: the 2.5 km 250-iteration Budd n=3 DG0 MAP republished (MAP sha256 bd4f4cd5858f488c4c7523e91377e6520405e3f072e2ffd53c7f971591def95f), inverted with the ocean drag on at the front",
+ "branch_from": "the cache at 2015.0, accepted without a setup solve",
+ "forcing": "none: run_timing.py passes no forcing callback, so SMB and melt are zero",
+ "melt": "none",
+ "front": "level-set fixed law (ISMIP7_CALVING=fixed; ISMIP7_FIXED_FRONT=1 set and ignored for removal), no collapse",
+ "apparent_mb": "div, built from the cached velocity, drag on, before the level set exists; without forcing it equals balance",
+ "dt": 0.125,
+ "site": "IU Quartz, debug partition",
+ "resources": "32 ranks, 128G",
+ "jobs": [
+  "10635651",
+  "10636036"
+ ],
+ "code": "6af8a6a, whose run code matches main 5ffd38e (the one simulation.py hunk books ISMIP7 output, off here); icepack_tools 1a2ed50 (levelset.py md5 36c62b3c0d204eeb5c8efe9bafa1228c)",
+ "started": "2026-09-25",
+ "finished": "2026-09-25",
+ "cost": "9.5 s a step on 32 ranks, 76 s a model year",
+ "results": "antarctica/results/issue115_fixed_a_umaxoff_2500_*, issue115_fixed_umaxoff_2500_* and issue115_fixed_restart_umaxoff_2500_* in the IU Quartz checkout; lane records, logs and front checks in Quartz scratch ismip7_issue115/",
+ "audit": "80 of 80 steps solved directly (8.8 Newton iterations on average, 16 at most), resid at most 1.2e-7 Gt; calving 2,370 Gt/yr at step 2, 3,534 over 2016 and 2,839 over 2024 against the legacy twin's 12.4; mass -30,908 Gt and VAF -18.8 mm SLE over the decade",
+ "notes": "Option 2 of issue #115, with test-2500m-budd-legacy-front as its control arm: the same state and knobs with ISMIP7_CALVING=none. Run through antarctica/scripts/run_timing.py as a cache_probe under the divfront contract (ISMIP7_APPARENT_MB=div, ISMIP7_AMB_CAP=0, ISMIP7_FIXED_FRONT=1), with the rescue ladder on (subcycles 1,4,16) and ISMIP7_OUTPUT=0; records outside the campaign directory. Job 10635651 ran it with the timing speed tripwire at 2e4 m/yr, and both invocations stopped at step 1 on it (runaway_tripwire): the first gated solve converged in 14 Newton iterations to a fastest node of 8.10e4 m/yr at (425813, -2026001) m, a front vertex on the northern Victoria Land coast whose surrounding cells are 16 percent ice and 17 m thick. Job 10636036 repeated it with ISMIP7_TRIPWIRE_U_MAX unset, as the production runners have it: A2 (two steps, a checkpoint each), B2 (the ten years) and C2 (a restart from B2's 2024.0 checkpoint). Step 1 is the legacy transport, since the apparent-MB reference is built from the drag-on velocity before the level set gates the drag, and differs from the twin's only by 0.29 Gt of calving. By antarctica/scripts/front_flux_check.py, the first gated solve (t2015.1) moves the floating t=0 front outward at +768 m/yr and 1,793 Gt/yr (t=0: +3.5 m/yr and 10.5 Gt/yr; velocity_obs on the same facets: +82 m/yr and 168 Gt/yr), floating ice at 1,362 to 1,950 m/yr at every distance band out to 250 km from the front (t=0: 196 to 612; velocity_obs 248 to 486) and the grounding line at 2,599 Gt/yr (t=0: 2,266). Over the decade the grounding-line flux reaches 3,005 (2016), 3,572 (2020) and 4,028 Gt/yr (2025), the front band thickens from 2,960 to 4,047 Gt by 2020 and holds 3,939 Gt in 2025 with 293 of its 11,223 cells at or below 1 m, the positivity clamp grows to 38 Gt/yr, and the fastest node falls to 1.4e4 m/yr at (-840799, 995610) m, a Filchner front vertex. C2: the restart evaluated the loaded state against the drag-on residual, 2.19e10 against an acceptance of 7.84 (100 times the recorded 7.84e-2), re-solved it with the drag on in 10 Newton iterations, and its first step (to 2024.125) calved 21.7 Gt/yr where the uninterrupted run calved 2,865; at 2025.0 it holds 371 Gt more ice than B2. SHA-256: t2015.1 251d59a8ddce21befc024d149c3870a74265529856353136af9673e39a2d59fc, B2 final 838846034a0fe56604555970ab386b5c227502db5ff3c8aedb1179c9d390a45b, C2 final 0f19fe3668c67e5746145607d9153d6319ce22509deb44f546aeee4ff432b029."
+}

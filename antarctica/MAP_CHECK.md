@@ -2,9 +2,11 @@
 
 `make -C antarctica map-check MAP_CHECK_FRICTION=regularized_coulomb|budd`
 takes one released MAP through a fixed ladder of checks and prints where each
-stands. It exists for two open group decisions: the submission mesh and time
-step (issue #20), and the basal friction law, regularized Coulomb or Budd,
-which the 2 km inversions at Rice carry (issue #24). The ladder measures what
+stands. It was built for two group decisions. The submission mesh and time
+step were decided on 25 September 2026 (issue 20):
+`antarctica_10000_1000_buffered20000` at dt 0.025 yr. The basal friction law,
+regularized Coulomb or Budd, which the inversions at Rice carry, is still open
+(issue #24). The ladder measures what
 a forward from the MAP does on the MAP's own mesh and after transfer onto the
 production mesh, so the group can read cost, stability, t = 0 fidelity and
 ten-year drift for each (mesh, law) row side by side. It records evidence; it
@@ -39,6 +41,11 @@ solves on `ISMIP7_MESH`: the continuous fields (`log_friction`,
 DG0 geometry is rebuilt from BedMachine cell averages on the target, and the
 frozen anchors (`N_ref`, `C_w0`, `phi_eff`, `H_init`) are rebuilt on the target
 geometry. That is the path the timing matrix's lanes take from the 2.5 km MAP.
+The rebuild follows the run's `ISMIP7_RASTER_SAMPLE`, `vertex_front` by
+default since issue #167, which rebuilds the marine front from BedMachine's
+mask (1 km front 178 m and 1,037 Gt/yr out of it under `velocity_obs`, where
+`vertex` gives 36 m and 179 Gt/yr), and the run melts with the calibration
+fitted under that sampling.
 
 The production mesh carries a 20 km ocean buffer and the 2 km MAPs carry none,
 so every target dof in that ring lies outside the source mesh. Firedrake's
@@ -49,11 +56,17 @@ collar in `dual_friction.build_rc_residual`, all at once. The loader now
 fills each field with a stated value (`icepack2_tools/transfer.py`,
 `interpolate_with_fill`):
 
-| field | fill outside the source mesh |
-|---|---|
-| `log_friction`, `log_fluidity` | 0, the prior |
-| `fluidity_prior` | the constant baseline `A0 * a4_factor`, the value the code uses when a MAP carries no prior at all |
-| `velocity_obs` | the raster sample the forward makes on its own mesh |
+| field | fill outside the source mesh, `ISMIP7_TRANSFER_FILL=extend` (the default) | under `constant` |
+|---|---|---|
+| `log_friction`, `log_fluidity`, `sqrt_friction` | the harmonic extension of the source from its outline | 0, the prior |
+| `fluidity_prior` | the harmonic extension of its logarithm, so it stays positive | the constant baseline `A0 * a4_factor`, the value the code uses when a MAP carries no prior at all |
+| `velocity_obs` | the raster sample the forward makes on its own mesh | the same |
+
+The extension's discrete Laplacian is zero on every filled dof, so a field
+continues past the outline without the step a constant puts there, and the
+ice a front advance brings into the ring takes the controls of the front it
+came from. A filled region the source does not touch keeps the constant.
+Everything measured below was measured under the constant fill.
 
 A second artefact comes with the first. Firedrake locates a target point in a
 source cell up to half a reference cell outside it (`mesh.tolerance`, 0.5 by
@@ -100,7 +113,10 @@ Native means `ISMIP7_LC=2000 ISMIP7_LC_COARSE=5000 ISMIP7_BUFFER_M=0
 ISMIP7_MESH=checkpoint`, dt 0.1 (the matrix rule `0.125 * LC / 2500`), the
 tracked `boundary_ids_antarctica_5000_2000_buffered0.json`. Transferred means
 `ISMIP7_LC=1000 ISMIP7_LC_COARSE=10000 ISMIP7_BUFFER_M=20000`, the production
-mesh, dt 0.05. Every job carries `ISMIP7_FRICTION=<law>`, DG0, n = 3, and the
+mesh, dt 0.05 for the strict lane (the matrix rule, so the lane compares with
+the matrix row) and the production step, 0.025, for the control. The 22
+September pass recorded below ran its 1 km control at 0.05, before the step
+was chosen. Every job carries `ISMIP7_FRICTION=<law>`, DG0, n = 3, and the
 lanes and controls carry the runaway tripwire defaults of
 `timing_campaign.TRIPWIRE_DEFAULTS`.
 
@@ -114,7 +130,7 @@ lanes and controls carry the runaway tripwire defaults of
 | 5 | `score_transfer` | `map_check_score.script --restart <cache>`: the same discharge score on the transferred state | finite ratio, positive prior minimum |
 | 6 | `lane_transfer` | `timing_transient.script`, kind `map_check`, restart from the cache, 64 ranks under `MAP_CHECK_SOLVER` (`scpc_gamg`), the strict contract, 10 steps of dt 0.05 | the `make qualify` rule (whole interval, no diverged solve, mass residual at or under 5e-5 Gt), no tripwire, rescue off, `initial_state_source` is the release file |
 | 7 | `lane_native` | the same lane on the MAP's mesh, cold start from the MAP inside the lane (setup is timed apart from the steps), 10 steps of dt 0.1 | the same rule |
-| 8 | `control_transfer` | `submit.sh projection ISMIP7_EXPERIMENT=control ISMIP7_T_END=2025 ISMIP7_OUTPUT=1`, the production defaults (`ISMIP7_APPARENT_MB=1`, `ISMIP7_FIXED_FRONT=1`, `scpc_gamg`, self-chaining), cold start from the MAP through the transfer inside the job, the K file `MAP_CHECK_K_NPZ` names, `ISMIP7_RUN_TAG=mapcheck_<law>_<snap>_<lc>` | the timeseries reaches 2025 with `resid` at 0.00 on every row and the final state written |
+| 8 | `control_transfer` | `submit.sh projection ISMIP7_EXPERIMENT=control ISMIP7_T_END=2025 ISMIP7_OUTPUT=1`, the production defaults (`ISMIP7_APPARENT_MB=1`, `ISMIP7_FIXED_FRONT=1`, `scpc_gamg`, dt 0.025, self-chaining), cold start from the MAP through the transfer inside the job, the tracked melt calibration (a legacy K file where `MAP_CHECK_K_NPZ` names one), `ISMIP7_RUN_TAG=mapcheck_<law>_<snap>_<lc>` | the timeseries reaches 2025 with `resid` at 0.00 on every row and the final state written |
 | 9 | `control_native` | the same control on the MAP's mesh | the same |
 | 10 | `audit_controls` | `map_check_audit.script`: `check_ismip6_track.py` on both series (exit codes kept), `compare_runs.py` overlay, `region_budget.py` at each final state under its own mesh triple | the audit JSON and the figure exist |
 | 11 | `summary` | the manager writes `<stem>/summary.md` from whatever JSON exists | always |
@@ -175,10 +191,11 @@ criterion); the snapshots have no velocity to compare against.
 
 Confounders that go with every table: the snapshots are unconverged and at
 different iteration counts under log-velocity weights re-derived per chain
-link (issue #68); Budd carries the `ISMIP7_ALPHA_GL=0.5` grounding-line collar
-and a frozen `N_ref` that regularized Coulomb has no counterpart to; the K
-file was fitted under the local slope on a 2500 m mesh and the forward now
-defaults to the constant Antarctic slope (issues #26, #30); apparent mass
+link (issue 68); Budd carries the `ISMIP7_ALPHA_GL=0.5` grounding-line collar
+and a frozen `N_ref` that regularized Coulomb has no counterpart to; the 22
+September controls melted with `K_issue11_mesh2500.npz`, a per-basin K fitted
+under the local slope on a 2500 m mesh, under the constant Antarctic slope
+(later controls melt with the tracked calibration of issue 26); apparent mass
 balance zeroes the t = 0 tendency, so only the later drift and the size of
 the correction separate rows; the native mesh has no buffer and the
 production mesh 20 km of it, so front bookkeeping differs and the native
@@ -332,9 +349,12 @@ stage settles:
 
 ```bash
 make map-check MAP_CHECK_FRICTION=regularized_coulomb \
-  MAP_CHECK_TARGET_MESH=/N/project/ice_rheology/ISMIP7/antarctica/mesh/antarctica_10000_1000_buffered20000.msh \
-  MAP_CHECK_K_NPZ=/N/project/ice_rheology/ISMIP7/antarctica/results/issue11_melt_check/K_issue11_mesh2500.npz
+  MAP_CHECK_TARGET_MESH=/N/project/ice_rheology/ISMIP7/antarctica/mesh/antarctica_10000_1000_buffered20000.msh
 ```
+
+The controls melt with the tracked calibration (`README.md` section 5). The 22
+September pass named `MAP_CHECK_K_NPZ=.../results/issue11_melt_check/K_issue11_mesh2500.npz`,
+the per-basin K it used; naming it again reproduces those controls.
 
 The whole ladder for one law is about nine to ten hours of wall time and
 roughly 700 core-hours, and the two laws run side by side. On a full

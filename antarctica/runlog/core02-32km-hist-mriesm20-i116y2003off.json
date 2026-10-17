@@ -1,0 +1,31 @@
+{
+  "id": "core02-32km-hist-mriesm20-i116y2003off",
+  "task": "test",
+  "institution": "IU",
+  "title": "Core 2 at 32 km from the 2003 start without the SMB-elevation feedback: branch state of the i116y2003off controls",
+  "status": "done",
+  "esm": "MRI-ESM2-0",
+  "scenario": "historical",
+  "period": "2003 to 2015, reached 2015.0",
+  "friction": "budd",
+  "mesh": "antarctica_320000_32000, DG0 geometry",
+  "initial_state": "inversion_icepack2_budd_n3_dg0_logvelnet_32000.h5, sha256 3b3aefa1c69a5daf87d1db291cae9337e00c2696f412bce147b1f488228ef472, backdated 12 yr by the Smith et al. (2020) dH/dt on grounded ice (issue #117)",
+  "branch_from": "cold start at 2003.0",
+  "forcing": "MRI-ESM2-0 historical, atmosphere GEMB-SDBN1-8000m v2, SMB-elevation feedback off (ISMIP7_SMB_ELEVATION_FEEDBACK=0), ocean v3",
+  "melt": "per-basin K from K_issue11_mesh2500.npz, local slope",
+  "front": "held fixed, ice-shelf collapse ISMIP7_FRACTURE=none",
+  "apparent_mb": "balance",
+  "dt": 0.1,
+  "site": "IU Quartz",
+  "resources": "8 ranks, 32 GiB",
+  "jobs": [
+    "10664222"
+  ],
+  "code": "c6244e6",
+  "started": "2026-09-26",
+  "finished": "2026-09-26",
+  "cost": "one link of 4 min for 12 model years",
+  "results": "antarctica/results/hist_mri_esm2_0_i116y2003off_32000_*",
+  "audit": "ON TRACK, with dM/dt PASS at -110.4 Gt/yr; resid 0.0000 on all 120 rows, no rescue, subcycle or stall event",
+  "notes": "run for issue #116 from a scratch clone of claude/dacabfdz-gradient-version-565c93 at c6244e6, with results and logs in the shared checkout. 120 of 120 steps converged on their first direct diagnostic solve, with 2.4 Newton iterations on average and 9 at the most (step 81, t = 2011.1). VAF changes by -1 mm SLE over 2003 to 2015; the peak ice speed on the mesh is 5986 m/yr at t = 2004.0, at (2653000, -429000) m. The same-code partner of the i116y2003on MRI-ESM2-0 historical, with ISMIP7_SMB_ELEVATION_FEEDBACK=0, which queued core10-32km-ctrl2015-mriesm20-i116y2003off; the comparison is in core02-32km-hist-mriesm20-i116y2003on. The final state records smb_elevation_feedback = off. Run without ISMIP7_OUTPUT. Final state sha256 cce95a39dfd7c022495f6da10b1532c5561f3beb8db483bb149f6345d3e2cf78. Full record: antarctica/reports/core02_hist_mri_esm2_0_32km_i116y2003off.md."
+}

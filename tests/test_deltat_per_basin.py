@@ -83,7 +83,8 @@ def test_the_fit_reduces_basin_totals_across_ranks():
 def clean(monkeypatch):
     import icepack2_tools.forcing as forcing
     for k in ("ISMIP7_MELT_SLOPE", "ISMIP7_SIN_ALPHA_ANT", "ISMIP7_GEOMETRY_SPACE",
-              "ISMIP7_K_SCALE", "ISMIP7_DELTAT_PER_BASIN_NPZ", "ISMIP7_FRACTURE"):
+              "ISMIP7_K_SCALE", "ISMIP7_DELTAT_PER_BASIN_NPZ", "ISMIP7_FRACTURE",
+              "ISMIP7_K_PER_BASIN_NPZ", "ISMIP7_K_MELT"):
         monkeypatch.delenv(k, raising=False)
     monkeypatch.setattr(forcing, "_MELT_SLOPE_WARNED", False)
     monkeypatch.setattr(forcing, "_SLOPE_CAP_WARNED", False)
@@ -121,25 +122,33 @@ def test_the_offset_is_stamped_by_basin(tmp_path, clean, capsys):
     assert "WARNING" not in capsys.readouterr().out
 
 
-def test_another_slope_constant_names_the_deltaT_remedy(tmp_path, clean, capsys):
+def test_another_slope_constant_is_refused_with_the_deltaT_remedy(tmp_path, clean):
+    r"""The forward has to apply the melt its offsets were fitted to, so an
+    offsets file fitted under another slope constant stops the run."""
     from icepack2_tools.forcing import load_deltaT_per_basin
     npz = _offsets(tmp_path, sin_alpha_ant=5.7e-3)
-    load_deltaT_per_basin(npz, np.array([0.4]), np.array([0.1]))
-    out = capsys.readouterr().out
-    assert "sin(alpha) = 0.0057" in out
-    assert "calibrate_deltaT.py" in out and "ISMIP7_DELTAT_PER_BASIN_NPZ" in out
-    assert "calibrate_melt.py" not in out
+    with pytest.raises(ValueError, match=r"sin\(alpha\) 0.0057") as e:
+        load_deltaT_per_basin(npz, np.array([0.4]), np.array([0.1]))
+    said = str(e.value)
+    assert "calibrate_deltaT.py" in said and "ISMIP7_DELTAT_PER_BASIN_NPZ" in said
+    assert "calibrate_melt.py" not in said
 
 
-def test_another_geometry_names_the_deltaT_remedy(tmp_path, clean, capsys):
+def test_another_geometry_is_refused_with_the_deltaT_remedy(tmp_path, clean):
     from icepack2_tools.forcing import load_deltaT_per_basin
     from icepack2_tools.runconfig import geometry_space
     other = "cg1" if geometry_space() == "dg0" else "dg0"
     npz = _offsets(tmp_path, geometry_space=other)
-    load_deltaT_per_basin(npz, np.array([0.4]), np.array([0.1]))
-    out = capsys.readouterr().out
-    assert f"calibrated on {other} geometry" in out
-    assert "calibrate_deltaT.py" in out
+    with pytest.raises(ValueError, match=f"{other} geometry") as e:
+        load_deltaT_per_basin(npz, np.array([0.4]), np.array([0.1]))
+    assert "calibrate_deltaT.py" in str(e.value)
+
+
+def test_another_slope_law_is_refused(tmp_path, clean):
+    from icepack2_tools.forcing import load_deltaT_per_basin
+    npz = _offsets(tmp_path, melt_slope="local")
+    with pytest.raises(ValueError, match="ISMIP7_MELT_SLOPE local"):
+        load_deltaT_per_basin(npz, np.array([0.4]), np.array([0.1]))
 
 
 def test_a_missing_offsets_file_is_refused(tmp_path, clean, monkeypatch):
@@ -184,6 +193,9 @@ def test_a_projection_melts_with_the_offsets_and_never_reads_the_K_file(
     xy = fd.Function(fd.VectorFunctionSpace(mesh, "DG", 0)).interpolate(
         fd.SpatialCoordinate(mesh)).dat.data_ro
     h = fd.Function(Q_g).assign(100.0)
+    # the last cell is open ocean: it floats by the flotation test and holds
+    # no ice, so the forward books no melt there, as the calibration fits none
+    h.dat.data[-1] = 0.0
     ctx = {"mesh": mesh, "geom_xy": (xy[:, 0].copy(), xy[:, 1].copy()),
            "h": h, "b": fd.Function(Q_g).assign(-1000.0),
            "s": fd.Function(Q_g).assign(5.0),
@@ -196,6 +208,50 @@ def test_a_projection_melts_with_the_offsets_and_never_reads_the_K_file(
     dT = np.where(x < 1.5, 0.3, np.where(x <= 3.0, -0.5, 0.0))
     assert (dT == 0.0).any()
     expect = forcing.quadratic_mixed_slope(1.5 + dT, 34.5, 5.115e-3, K=8.5e-5)
+    expect[-1] = 0.0
     assert np.allclose(ctx["ocean_melt"].dat.data_ro, expect)
     out = capsys.readouterr().out
     assert "outside the fitted basins" in out
+
+
+def test_an_offsets_file_names_its_inputs_by_basename(tmp_path, clean, monkeypatch):
+    r"""A fit records its inputs by basename (calibrate_melt.input_names), so
+    an offsets file promoted into git carries no cluster path (AGENTS.md
+    section 6, issue #150), and the forward still stamps it through the
+    IMBIE2 grid it finds by that name under ISMIP7_DATA_ROOT."""
+    xr = pytest.importorskip("xarray")
+    from icepack2_tools.forcing import load_deltaT_per_basin
+    from icepack2_tools.melt_selection import offsets_on_cells, write_offsets
+    from icepack2_tools.runconfig import geometry_space
+    cm = _calibrate_deltaT().cm
+    root = tmp_path / "AIS"
+    grid = root / "parameterisations" / "ocean" / "imbie2" / "basin_numbers_ismip8km_v2.nc"
+    grid.parent.mkdir(parents=True)
+    x = np.array([0.0, 1.0, 2.0, 3.0])
+    bn = np.where(np.arange(4)[None, :] < 2, 3, 9).repeat(4, axis=0)
+    xr.Dataset({"basinNumber": (("y", "x"), bn)},
+               coords={"x": x, "y": x.copy()}).to_netcdf(grid)
+    monkeypatch.setenv("ISMIP7_DATA_ROOT", str(root))
+    # where a fit on a cluster reads its inputs
+    for name, path in (
+            ("OBS_CSV", "/N/project/ISMIP7/meltobs/Melt_Paolo_Davison_Adusumilli_imbie2.csv"),
+            ("IMBIE2_NC", "/N/project/ISMIP7/AIS/parameterisations/ocean/imbie2/"
+                          "basin_numbers_ismip8km_v2.nc"),
+            ("INV_H5", "/N/scratch/someone/mesh/antarctica_10000_1000_buffered20000.msh")):
+        monkeypatch.setattr(cm, name, path)
+    npz = str(tmp_path / "deltaT_per_basin_1000_K6.500e-05.npz")
+    bids, dT = np.array([3, 9]), np.array([0.3, -0.5])
+    write_offsets(npz, bids, dT, 6.5e-5, np.array([10.0, 20.0]),
+                  np.array([8.0, 25.0]), np.zeros(2), np.array([3.0, 4.0]),
+                  melt_slope="ant", sin_alpha_ant=5.115e-3,
+                  geometry_space=geometry_space(), **cm.input_names())
+    with np.load(npz) as d:
+        text = {k: str(d[k]) for k in d.files if d[k].dtype.kind == "U"}
+    assert (text["obs_csv"], text["imbie2_nc"], text["inversion"]) == (
+        "Melt_Paolo_Davison_Adusumilli_imbie2.csv", "basin_numbers_ismip8km_v2.nc",
+        "antarctica_10000_1000_buffered20000.msh")
+    assert not any(os.sep in v for v in text.values())
+    field, K = load_deltaT_per_basin(npz, np.array([0.4, 2.6, 40.0]),
+                                     np.array([0.1, 2.9, 40.0]))
+    assert K == 6.5e-5
+    assert np.array_equal(field, offsets_on_cells(dT, bids, np.array([3, 9, -1])))

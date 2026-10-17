@@ -37,6 +37,8 @@ the relevant subsystem:
 | `COMPOSITE_RHEOLOGY.md` | the composite viscous formulation |
 | `ADAPTIVE_MESH.md` | the adaptive remeshing port, the DG0 transfer rules, and what is validated |
 | `antarctica/N3_FRAMEWORK.md` | the n=3 rheology line |
+| `antarctica/INITIALIZATION_ROUTINE.md` | the staged shelf-then-friction inversion, relaxation, re-inversion and forwards, and the recipe `scripts/initialization_routine.sh` that runs them |
+| `antarctica/INVERSION_PRIORS.md` | the inversion's priors, friction controls and likelihood weight, what was measured, and where the chains are |
 | `antarctica/README.md` | what to install and download, drivers, env knobs, how to run a core experiment |
 | `antarctica/scripts/batch_runners/readme.md` | running on a cluster: site files, the runners, the build recipe, measured costs |
 | `antarctica/FORWARD_RUN_READINESS.md` | the protocol sweep and what still blocks a submission |
@@ -53,6 +55,13 @@ are NOT version controlled:
   per-mesh `boundary_ids_antarctica_*.json` sidecars, which are tracked because
   their names pin them to one exact mesh build; `antarctica/results/`;
   `ISMIP7/` and `antarctica/data/`; all `*.h5`.
+- **Tracked, and read by every run:** the melt calibration in
+  `antarctica/calibration/` (issue 26), with a `.source.json` sidecar holding
+  its sha256 and the settings it was fitted under. There is one file per raster
+  sampling (`runconfig.MELT_CALIBRATIONS`); the default, `vertex_front`, reads
+  the `_vertex_front` file (issue #167). A run on any machine melts
+  with it and nothing is calibrated or copied. Replacing it takes a new file,
+  a new sidecar and a new run record.
 - **Therefore:** a run reaches git only as a record. Every simulation has one
   in `antarctica/runlog/` (below), and a core run also has
   `antarctica/reports/coreNN_*.md`, which carries the env knobs at their
@@ -114,7 +123,10 @@ without reading the linked rationale and stating why.
   and the friction law into its control fields, so **the t=0 velocity misfit
   cannot validate either one**. MAP filenames are tagged by friction law and
   geometry space for this reason. Driving a DG0 forward with a CG1 MAP at
-  32 km raises the initial misfit from 8.6e3 to 1.5e5.
+  32 km raises the initial misfit from 8.6e3 to 1.5e5. A relaxed MAP's
+  geometry is part of its controls too: it is named `_relax<year>`, records
+  `geometry_source_method = relaxed-forward-v1`, and an inversion warm-started
+  from it stops unless it takes that geometry (`icepack2_tools/relaxation.py`).
 - **The zero-valued `M_s[0,0] * tau_s[0]` term in the SCPC path is structural.**
   Membrane and basal stress are physically uncoupled local fields, so UFL
   normally omits their two zero Jacobian blocks. Firedrake's three-field SCPC
@@ -123,6 +135,30 @@ without reading the linked rationale and stating why.
   the block structure without changing the residual; `ISMIP7SCPC` fixes the
   retained-first indexing. Deleting the term or replacing the `Constant` with
   literal zero makes UFL simplify it away and SCPC fails during setup.
+- **The SMB-elevation feedback rebuilds both surfaces from thickness.**
+  `forcing.SMBElevationFeedback` takes the surface change as
+  `max(b + h, (1 - rho_I/rho_W) h)` minus the same formula of `H_init`, and
+  never reads the stored `surface` or a saved reference field. `H_init` and
+  `b` already travel with every checkpoint, branch and adaptation, and one
+  formula on both sides makes the change exactly zero at a cold start, where
+  the `balance` apparent-MB reference folds the first step's SMB into `a_ref`.
+  A cold start's `surface` can come from the MAP file and differ from the
+  formula. Relatedly, the control's callback rewrites `accum` from its fixed
+  climatology every step, where it used to assign it once: adding the
+  feedback onto `accum` itself would compound it step after step.
+- **Melt falls only on floating cells that hold ice on a bed below sea level
+  (`forcing.melt_receiving`).** An ice-free cell passes the flotation test
+  (open ocean at draft 0, bare land at a height above flotation of exactly
+  0), and so does a land cell holding a transport film thinner than the
+  spacing of doubles at its surface, where `b + h` rounds to `b`; the bed
+  test is what keeps the melt law off those films. The melt calibration was
+  fitted over cells holding ice, so the forward melts exactly the set its
+  calibration summed over. An offsets file fitted under another slope law,
+  slope constant, geometry space or raster sampling stops the run instead of
+  warning, and so does a cold start that floors the initial thickness
+  (`ISMIP7_H_CLAMP_INIT`): the forward has to apply the melt its calibration
+  was fitted to. `check_melt_bound.py` measures that per basin. Regression
+  test: `tests/test_melt_calibration_default.py`.
 
 One line that looks fine and is always a bug:
 
@@ -160,8 +196,9 @@ instead, in order of cost:
    `projection - CTRL` sea-level contribution on the real ISMIP6 ensemble.
    Note the ISMIP6 `ctrl_proj` convention: the control and the projection must
    branch from the SAME state or their spin-up drift does not cancel.
-4. **A 32 km probe run.** 32 km is roughly 3k vertices and a few seconds per
-   step, so a targeted 3 to 10 year run is the standard way to localize
+4. **A 32 km probe run.** The 32 km mesh (`antarctica_320000_32000_buffered0`)
+   has 6,282 vertices and takes a few seconds per step, so a targeted 3 to 10
+   year run is the standard way to localize
    behaviour before committing to a production resolution. Prefer this over
    reasoning about the discretization in the abstract.
 
@@ -178,7 +215,10 @@ to split-step coupling, while the cause was a flux-divergence spike in the
 initial state at a single grounding-zone cell, compounded by a thickness
 roundtrip that smoothed `h` by up to 1.4 km. Falsified along the way, and not
 to be re-proposed without new evidence: smaller `dt` (it blows up faster), a
-larger grounding-line collar, and shelf drag alone.
+larger grounding-line collar, and shelf drag alone. The production step was
+halved to 0.025 yr on separate evidence (issue 20): on the 1 km mesh a
+control at 0.05 grew a two-step grounded/floating oscillation at the Lambert
+confluence and diverged, and the same control at 0.025 ran five years.
 
 Useful habits specific to this codebase:
 
@@ -247,7 +287,9 @@ checkouts of the same clone. To keep handoffs clean:
   stay in the topic doc, which carries the issue number as `(issue #NN)`.
   A bare `#NN` in this repository's prose is an ISMIP7 forum thread. The
   board at https://github.com/users/dlilien/projects/1 holds status and the
-  claim, and `NOW.md` is the generated index for a login node with no `gh`.
+  claim, and `NOW.md` is the generated index for a login node with no `gh`,
+  current as of its Generated line: the suite skips the checks against the
+  live board, and `make -C antarctica now` regenerates it.
   `tests/test_now_index.py` fails the suite when a document states something
   open with no issue on it, so filing is the cheapest way past the gate.
 - **Claim the card before you start a run or an inversion.** Move it to Claimed

@@ -1,0 +1,32 @@
+{
+  "id": "core06-32km-ssp126-mriesm20-i104off",
+  "task": "test",
+  "institution": "IU",
+  "title": "Core 6 at 32 km without the apparent-MB reference, branched from the i104off historical",
+  "status": "done",
+  "exp_id": "C006",
+  "esm": "MRI-ESM2-0",
+  "scenario": "ssp126",
+  "period": "2015 to 2301, reached 2301.0",
+  "friction": "budd",
+  "mesh": "antarctica_320000_32000, DG0 geometry",
+  "initial_state": "hist_mri_esm2_0_i104off_32000_final.h5, sha256 5d794657a1bfa9cb6e7d8b7ffeb8496c579b7f776989b48ec0bf5bffe1476cbc",
+  "branch_from": "core02-32km-hist-mriesm20-i104off at 2015.0, from the log's restart lines",
+  "forcing": "MRI-ESM2-0 ssp126, atmosphere GEMB-SDBN1-8000m v2, ocean v3",
+  "melt": "per-basin K from K_issue11_mesh2500.npz, local slope",
+  "front": "held fixed, ice-shelf collapse ISMIP7_FRACTURE=none",
+  "apparent_mb": "off",
+  "dt": 0.1,
+  "site": "IU Quartz",
+  "resources": "8 ranks, 32 GiB",
+  "jobs": [
+    "10609949"
+  ],
+  "code": "700a846",
+  "started": "2026-09-24",
+  "finished": "2026-09-24",
+  "cost": "one link of 63 min for 286 model years",
+  "results": "antarctica/results/ssp126_mri_esm2_0_i104off_32000_*",
+  "audit": "OFF TRACK, with dM/dt FAIL at 1070.1 Gt/yr; resid 0.0000 on all 2860 rows, 1 rescued step, no subcycle or stall event",
+  "notes": "run for issue #104 from a scratch clone of main at 700a846, with results and logs in the shared checkout. 2859 of 2860 steps converged on their first direct diagnostic solve, with 6.7 Newton iterations on average and 12 at the most (step 160, t = 2031.0). Step 157 (t = 2030.7) stopped at the 200-iteration Newton limit on its first solve, and the rescue ladder's re-continuation (n from 1 to 3 in 10 stages) recovered it. VAF changes by +988 mm SLE over 2015 to 2301; the peak ice speed on the mesh is 18361 m/yr at t = 2256.9, at (-2083000, 783000) m. Run without ISMIP7_OUTPUT. Final state sha256 5caabf811be1e85ff353420b837bd7fa2b6ad4127e42b81a5eff9931f0eedeff. Full record: antarctica/reports/core06_ssp126_mri_esm2_0_32km_i104off.md."
+}

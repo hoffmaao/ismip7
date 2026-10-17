@@ -31,8 +31,9 @@ from firedrake.petsc import PETSc  # noqa: E402
 from icepack2_tools.adapt_mesh import (AdaptMeshConfig, desired_element_size,  # noqa: E402
                                        remesh_global, transfer_state)
 from icepack2_tools.geometry import sample_to_geometry  # noqa: E402
-from icepack2_tools.runconfig import obs_data_root  # noqa: E402
-from mesh_naming import next_adapted_mesh_name  # noqa: E402
+from icepack2_tools.naming import mesh_front  # noqa: E402
+from icepack2_tools.runconfig import obs_data_root, raster_front  # noqa: E402
+from mesh_naming import next_adapted_mesh_name, resolve_outline_buffer  # noqa: E402
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 MESH_DIR = os.path.join(HERE, "..", "mesh")
@@ -68,8 +69,7 @@ def main():
         if not (args.mesh_only and args.from_obs):
             raise SystemExit("--source-mesh only makes sense with --mesh-only --from-obs")
         mesh = fd.Mesh(args.source_mesh, name="firedrake_default")
-        attrs = {"mesh_basename": os.path.basename(args.source_mesh),
-                 "buffer_m": float(os.environ.get("ISMIP7_BUFFER_M", "0")), "geometry_space": "dg0"}
+        attrs = {"mesh_basename": os.path.basename(args.source_mesh), "geometry_space": "dg0"}
         H = b = u = None
     else:
         with fd.CheckpointFile(args.checkpoint, "r") as chk:
@@ -102,14 +102,34 @@ def main():
     basename = str(attrs.get("mesh_basename", "")).replace(".msh", "")
     if not basename:
         raise RuntimeError("checkpoint has no mesh_basename attribute; cannot find its .msh/sidecar")
+    if mesh_front(basename) is not None:
+        # The remesher (adapt_mesh.antarctica_geometry_builder) embeds no
+        # front, so the adapted mesh would lose the one this mesh follows.
+        raise SystemExit(
+            f"adapt: {basename} follows an ice front (issue #167), which the "
+            f"adapted mesh would not; adaptation of a front mesh is not supported")
     old_msh = os.path.join(MESH_DIR, basename + ".msh")
     old_sidecar = os.path.join(MESH_DIR, f"boundary_ids_{basename}.json")
     for f in (old_msh, old_sidecar):
         if not os.path.exists(f):
             raise FileNotFoundError(f)
-    # extract_ice_outline() reads ISMIP7_BUFFER_M: the new mesh must use the
-    # old mesh's buffer, not whatever the environment says.
-    os.environ["ISMIP7_BUFFER_M"] = str(float(attrs.get("buffer_m", 0.0)))
+    # extract_ice_outline() reads ISMIP7_BUFFER_M. A scaffold (--source-mesh)
+    # only supplies points, so the new mesh takes the buffer the caller names,
+    # else the scaffold's tag. An adapted checkpoint's mesh keeps the old
+    # mesh's buffer: its record, else its name's tag, and the environment only
+    # for a legacy mesh with neither. Nothing named is an error: 0 and 20000
+    # are each wrong for some legacy mesh.
+    env_buffer = os.environ.get("ISMIP7_BUFFER_M")
+    if args.source_mesh:
+        old_buffer = resolve_outline_buffer(env_buffer, basename)
+    else:
+        old_buffer = resolve_outline_buffer(attrs.get("buffer_m"), basename, env_buffer)
+    if old_buffer is None:
+        raise SystemExit(
+            f"adapt: {basename} records no buffer_m and its name carries no "
+            f"_buffered<N> tag; set ISMIP7_BUFFER_M to the buffer it was built with")
+    os.environ["ISMIP7_BUFFER_M"] = str(old_buffer)
+    PETSc.Sys.Print(f"adapt: outline buffer {old_buffer:g} m")
     out_msh = args.out_mesh or os.path.join(
         MESH_DIR,
         next_adapted_mesh_name(basename, os.environ.get("ISMIP7_EXPERIMENT_NAME")) + ".msh")
@@ -144,6 +164,13 @@ def main():
 
     bm_fn = sorted(glob.glob(os.path.join(DATA_DIR, "bedmachine", "*.nc")))[0]
     method = str(attrs.get("raster_sample", "vertex"))
+    if raster_front(method):
+        # The front sampling rebuilds thickness and bed together at the
+        # front, and the remesher embeds no front (issue #167).
+        raise SystemExit(
+            f"adapt: the checkpoint's geometry was sampled with {method}, whose "
+            f"front cells the adapted mesh cannot rebuild; adaptation of a "
+            f"front-following state is not supported")
 
     def bed_sampler(Q_g, Qc):
         return sample_to_geometry(rasterio.open(f"netcdf:{bm_fn}:bed"), Q_g, Qc, method=method)

@@ -1,0 +1,24 @@
+{
+  "id": "test-2km-budd-b20k-smoke-constant-fill",
+  "task": "test",
+  "institution": "IU",
+  "title": "Stage-2 path smoke on the 20 km buffered mesh from Budd's stage-1 checkpoint, constant ring fill",
+  "status": "done",
+  "friction": "budd",
+  "period": "2015 state",
+  "mesh": "antarctica_5000_2000_buffered20000 (IU's build, 969,764 vertices), DG0 geometry, vertex raster sampling, the lake fix",
+  "initial_state": "Budd stage-1 checkpoint at about iteration 740, controls and fluidity prior; theta = phi = 0 and the baseline prior on the 59,159 dofs outside Rice's mesh",
+  "forcing": "the stage-1 objective (bilaplacian sigma 30, rho 750 km, no dH/dt term, log friction control, cell-wise friction, L-BFGS-B without a metric, scpc_gamg); ISMIP7_TRANSFER_FILL=constant (before 3490914)",
+  "site": "IU Quartz, debug partition",
+  "resources": "32 ranks, 160G",
+  "jobs": [
+    "10963952"
+  ],
+  "code": "9683007 with the stage-2 cells; Quartz clone /N/scratch/dlilien/ismip7_reinvert",
+  "started": "2026-10-04",
+  "finished": "2026-10-04",
+  "cost": "16 min: load, ramp of 8 steps, 4 evaluations of 34 to 41 s",
+  "results": "Quartz /N/scratch/dlilien/ismip7_reinvert_jobs (submit_reinvert.sh cells, probe/, plots/), probe/smoke2.h5",
+  "audit": "evaluation 1: misfit 5.68e3, smoothness 2.49e4 and 1.21e5, total 1.52e5, against 2.87e3 recorded on Rice's mesh: the step the constant fill puts at the outline. Evaluation 4: smoothness 4.5e3 and 2.5e4, misfit unchanged",
+  "notes": "issue #153; the reason for ISMIP7_TRANSFER_FILL=extend (3490914)"
+}

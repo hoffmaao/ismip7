@@ -1,0 +1,24 @@
+{
+  "id": "test-2km-rc-b20k-eval1-vgate",
+  "task": "test",
+  "institution": "IU",
+  "title": "RC stage-1 controls on the 20 km buffered 2 km mesh, evaluation 1 only: as pre2 with the drag kept off every node of the ice",
+  "status": "done",
+  "friction": "regularized_coulomb",
+  "period": "2015 state",
+  "mesh": "antarctica_5000_2000_buffered20000 (IU's build, 969,764 vertices), DG0 geometry, vertex raster sampling, the lake fix",
+  "initial_state": "inversion-2km-rc-nomass-lbfgsb's MAP (RC stage 1 final, sha256 fea8debae9616f18), log-velocity weight 69946.22414285329; the 59,159 dofs outside Rice's mesh filled as the run states",
+  "forcing": "observations sampled onto this mesh; the stage-1 objective (bilaplacian sigma 30, rho 750 km, no dH/dt term, log friction control, cell-wise friction, L-BFGS-B without a metric, scpc_gamg); ISMIP7_DRAG_GATE=vertex (56,913 drag cells against 69,012)",
+  "site": "IU Quartz, general partition",
+  "resources": "32 ranks, 160G, up to 1 h",
+  "jobs": [
+    "10969497"
+  ],
+  "code": "4e45d18; Quartz worktree /N/scratch/dlilien/ismip7_reinvert_s3",
+  "started": "2026-10-04",
+  "finished": "2026-10-04",
+  "cost": "ramp of 8 continuation steps, then one evaluation of about 60 s; ISMIP7_MAXITER=1",
+  "results": "the checkpoint of evaluation 1 copied aside by snap_iter1.sh: Quartz /N/scratch/dlilien/ismip7_reinvert_jobs (submit_reinvert.sh cells, probe/, plots/), plots/",
+  "audit": "evaluation 1: misfit 3193, velocity chi2 108; model minus observed speed on floating ice mean -39 m/yr (median ratio -11 %), floating within 25 km of the edge -52 m/yr, grounded -2.1 m/yr (shelf_stats.py)",
+  "notes": "issue #153: which part of the buffered mesh's ice-free ring slows the shelves. Stage 1's final MAP on Rice's mesh: floating mean -5.8 m/yr, median ratio -2 %. Together the nine runs give the mechanism: the ocean drag reaches the ice through water cells that touch it at one vertex (front.ocean_drag_cells skips only edge neighbours) and, for the rest, through the first water row's 10 m membrane floor"
+}

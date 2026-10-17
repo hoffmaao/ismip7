@@ -20,7 +20,10 @@ _ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 _PROJECT = os.path.dirname(_ROOT)
 sys.path.insert(0, _PROJECT)
 
-from icepack2_tools.runconfig import obs_data_root, lc as _lc, lc_coarse as _lc_coarse
+from icepack2_tools.runconfig import (
+    obs_data_root, lc as _lc, lc_coarse as _lc_coarse, buffer_m as _buffer_m,
+    mesh_front as _mesh_front, MESH_FRONTS,
+)
 
 DATA_DIR = obs_data_root()
 from icepack2_tools.mesh import (
@@ -29,6 +32,11 @@ from icepack2_tools.mesh import (
     classify_boundaries,
     load_velocity_for_sizing,
     build_gmsh_geometry,
+    extract_marine_front,
+    densify_curves,
+    embed_front_in_gmsh,
+    front_points_off_mesh,
+    save_front,
     SUBSAMPLE,
 )
 from make_boundary_ids import write_boundary_ids
@@ -54,10 +62,20 @@ def parse_args():
     parser.add_argument(
         "--buffer-m",
         type=float,
-        default=float(os.environ.get("ISMIP7_BUFFER_M", "20000")),
+        default=_buffer_m(),
         help=(
             "Outline buffer pushed into the ocean before meshing, in meters "
             "(0 disables buffering)"
+        ),
+    )
+    parser.add_argument(
+        "--front",
+        choices=MESH_FRONTS,
+        default=_mesh_front() or "none",
+        help=(
+            "Put nodes and edges on the marine front of this ice edge: 'bm' "
+            "is BedMachine's own (issue #167), 'none' follows no front. "
+            "Names the mesh _front<edge>. Default ISMIP7_MESH_FRONT"
         ),
     )
     return parser.parse_args()
@@ -150,10 +168,11 @@ def main():
     os.makedirs(MESH_DIR, exist_ok=True)
 
     lc, lc_coarse, buffer_m = args.lc, args.lc_coarse, args.buffer_m
+    front = None if args.front == "none" else args.front
 
-    # icepack2_tools.mesh.extract_ice_outline() reads ISMIP7_BUFFER_M itself,
-    # so the CLI override must be mirrored into the environment for the
-    # actual buffering (not just the output filenames) to pick it up.
+    # Mirrored into the environment as well as passed to the outline below,
+    # so anything this process reads through runconfig.buffer_m() agrees with
+    # the file name.
     os.environ["ISMIP7_BUFFER_M"] = str(buffer_m)
     print(f"Mesh: lc={lc} m, lc_coarse={lc_coarse} m, buffer={buffer_m/1e3:.0f} km")
 
@@ -169,14 +188,29 @@ def main():
     cf_decay_buf = max(20e3, 1.25 * lc)
 
     mask, x, y = load_bedmachine_mask(DATA_DIR)
-    outline = extract_ice_outline(mask, x, y)
+    outline = extract_ice_outline(mask, x, y, buffer_m=buffer_m)
     boundaries, names = classify_boundaries(outline, mask, x, y)
     refinement = load_velocity_for_sizing(DATA_DIR)
 
     gl_dist, ice_field, float_field = grounding_line_distance()
     cf_dist = calving_front_distance(boundaries, names)
 
-    fn_base = os.path.join(MESH_DIR, mesh_basename(lc_coarse, lc, buffer_m))
+    fn_base = os.path.join(MESH_DIR, mesh_basename(lc_coarse, lc, buffer_m, front))
+
+    # The marine front the mesh follows (issue #167): curves at spacing lc,
+    # embedded in pass 2, with an lc band along them in the size field.
+    curves = []
+    if front == "bm":
+        from icepack2_tools.obs_icemask import bedmachine_classes
+        bm_fn = find_file(os.path.join(DATA_DIR, "bedmachine"), "*.nc")
+        print(f"Marine front of BedMachine's ice ({os.path.basename(bm_fn)})...")
+        classes, mask_transform = bedmachine_classes(bm_fn)
+        curves, front_stats = extract_marine_front(
+            classes, mask_transform, outline, lc)
+        del classes
+        save_front(curves, fn_base + "_front.npz", front_stats)
+        print("  " + ", ".join(f"{k}={v:.1f}" if isinstance(v, float) else f"{k}={v}"
+                               for k, v in front_stats.items()))
 
     # Pass 1: raw mesh
     print("\nPass 1: raw mesh...")
@@ -240,11 +274,23 @@ def main():
                        np.where(on_ice, size_cf_shelf, size_cf_buf))
 
     target_sizes = np.minimum(np.minimum(size_sr, size_gl), size_cf)
+
+    # 4. The embedded front: lc within front_band of it on both sides,
+    #    grading to lc_coarse over cf_decay_shelf. The pass-1 triangles are
+    #    4 km, so a band narrower than that would not register.
+    if curves:
+        from scipy.spatial import cKDTree
+        fr_d, _ = cKDTree(densify_curves(curves, lc / 4.0)).query(tri_centers[:, :2])
+        front_band = max(4000.0, 2.0 * lc)
+        fr_frac = np.clip((fr_d - front_band) / cf_decay_shelf, 0.0, 1.0)
+        target_sizes = np.minimum(target_sizes, lc + (lc_coarse - lc) * fr_frac)
+        print(f"  Front band: {int((fr_d <= front_band).sum())} pass-1 triangles at lc")
+
     target_sizes = np.clip(target_sizes, lc, lc_coarse)
 
-    n_1k = int((target_sizes <= 1000).sum())
-    n_2k = int((target_sizes <= 2000).sum())
-    print(f"  GL bands: <=1km: {n_1k}, <=2km: {n_2k}")
+    n_fine = int((target_sizes <= lc).sum())
+    n_2fine = int((target_sizes <= 2 * lc).sum())
+    print(f"  GL bands: <={lc / 1e3:g}km: {n_fine}, <={2 * lc / 1e3:g}km: {n_2fine}")
     print(f"  Size range: [{target_sizes.min():.0f}, {target_sizes.max():.0f}] m")
 
     sf_view = gmsh.view.add("size field")
@@ -255,7 +301,10 @@ def main():
     # Pass 2: remesh with background field + Netgen
     print("\nPass 2: remesh...")
     gmsh.model.add(fn_base)
-    build_gmsh_geometry(boundaries, names, lc, lc_coarse)
+    surface_tag, pt_num, line_num = build_gmsh_geometry(boundaries, names, lc, lc_coarse)
+    if curves:
+        _, _, n_front = embed_front_in_gmsh(curves, surface_tag, pt_num, line_num, lc)
+        print(f"  Embedded {len(curves)} front curves, {n_front} points")
 
     bg = gmsh.model.mesh.field.add("PostView")
     gmsh.model.mesh.field.setNumber(bg, "ViewTag", sf_view)
@@ -270,8 +319,16 @@ def main():
     gmsh.model.mesh.optimize("Netgen")
 
     final_tri, _ = gmsh.model.mesh.getElementsByType(2)
-    final_verts, _, _ = gmsh.model.mesh.getNodes()
+    final_verts, final_xyz, _ = gmsh.model.mesh.getNodes()
     print(f"  Final: {len(final_verts)} vertices, {len(final_tri)} cells")
+    if curves:
+        off = front_points_off_mesh(curves, np.asarray(final_xyz).reshape(-1, 3))
+        print(f"  Front points off the mesh: {off}")
+        if off:
+            gmsh.finalize()
+            raise RuntimeError(
+                f"{off} front points are not mesh nodes: the mesh does not "
+                f"follow the front, so it is not written")
 
     gmsh.option.setNumber("Mesh.MshFileVersion", 2.2)
     gmsh.write(fn_base + ".msh")
@@ -290,7 +347,7 @@ def main():
     # BedMachine input + SIMPLIFY_TOL/SUBSAMPLE + outline buffer used), so the
     # solvers never read a stale sidecar built for a different mesh/buffer.
     write_boundary_ids(
-        fn_base + ".msh", bndids_filename(lc_coarse, lc, buffer_m)
+        fn_base + ".msh", bndids_filename(lc_coarse, lc, buffer_m, front)
     )
 
 

@@ -1,25 +1,38 @@
 r"""What each calving law does to the front, and what one step removes.
 
 The level-set unit tests were lost (issue #35). These rebuild the part that
-belongs here: the laws as ISMIP7 configures them through
-``icepack2_tools.levelset`` (the ``extent`` anchoring default, the thresholds
-from ``runconfig``), the masks the transport applies afterwards, the drag gate
-the momentum residual reads, and the step-size behaviour of the retreat. The
-shared class's own operators are tested in ``icepack_tools``; what is checked
-here is the behaviour this repository depends on.
+belongs here: the laws as ISMIP7 configures them (``ISMIP7_CALVING`` naming a
+law in ``icepack_tools.calving``, ``ISMIP7_CALVING_PARAMS`` its parameters,
+``ISMIP7_CALVING_MODULE`` a law of our own) driving ``icepack2_tools.levelset``
+(the ``extent`` anchoring default), the masks the transport applies
+afterwards, the drag gate the momentum residual reads, and the step-size
+behaviour of the retreat. The laws themselves and the shared class's
+operators are tested in ``icepack_tools``; what is checked here is the
+behaviour this repository depends on.
 
 Serial, one small unit mesh, no data files and no momentum solve: a velocity
 and a thickness are imposed, so every number below follows from the law and
 the geometry alone.
 """
 
+import os
+import subprocess
+import sys
+import textwrap
+
 import numpy as np
 import pytest
 
 from firedrake import (Constant, Function, FunctionSpace, SpatialCoordinate,
-                       UnitSquareMesh, VectorFunctionSpace, as_vector)
+                       TensorFunctionSpace, UnitSquareMesh, VectorFunctionSpace,
+                       as_vector)
+from icepack2.constants import ice_density, water_density
+from icepack_tools.calving import FrontState
 
+from icepack2_tools import runconfig
 from icepack2_tools.levelset import LevelSet, initial_distance
+
+REPO = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
 #: Ice on the left half of a unit domain, open water beyond, so the extent has
 #: an interior front. Cells are 1/8 wide; on the default diagonal every front
@@ -48,10 +61,31 @@ def _state(law, bed=BED_FLOATING, **kwargs):
     b = Function(Q0).interpolate(Constant(bed))
     u = Function(VectorFunctionSpace(mesh, "CG", 1)).interpolate(
         as_vector((STRAIN * x, Constant(0.0))))
-    ls = LevelSet(mesh, h, law=law, h_min=HMIN,
-                  sigma_max_grounded=SIGMA_MAX_GROUNDED,
-                  sigma_max_floating=SIGMA_MAX_FLOATING, **kwargs)
+    ls = LevelSet(mesh, h, law=law, h_min=HMIN, **kwargs)
     return mesh, Q0, h, b, u, ls
+
+
+@pytest.fixture
+def calving_env(monkeypatch):
+    r"""A clean calving configuration, set through the environment the way a
+    run is configured."""
+    for knob in ("ISMIP7_CALVING", "ISMIP7_CALVING_PARAMS", "ISMIP7_CALVING_MODULE",
+                 *runconfig.RETIRED_CALVING_KNOBS):
+        monkeypatch.delenv(knob, raising=False)
+    return monkeypatch
+
+
+def _configured_law(env, name, params=""):
+    env.setenv("ISMIP7_CALVING", name)
+    if params:
+        env.setenv("ISMIP7_CALVING_PARAMS", params)
+    return runconfig.calving_law_object()
+
+
+def _front_state(mesh, h, b, u, ls, A=None, n=None):
+    M = Function(TensorFunctionSpace(mesh, "DG", 0, symmetry=True))
+    return FrontState(u, M, None, h, b, ls, A=A, n=n,
+                      rho_i=ice_density, rho_w=water_density)
 
 
 def _xc(mesh):
@@ -82,7 +116,7 @@ def test_fixed_holds_the_front_and_removes_nothing_from_it():
     r"""`fixed` is the control configuration: the front cannot move, so the
     rate is zero and only the cells beyond the t=0 extent are flagged."""
     mesh, Q0, h, b, u, ls = _state("fixed")
-    rate = ls.advance(0.1, u, h, b)
+    rate = ls.advance(0.1, u)
     assert rate == 0.0
     beyond, frac = ls.calving_masks()
     assert frac is None, "a held front sheds no sub-cell mass"
@@ -94,13 +128,20 @@ def test_fixed_holds_the_front_and_removes_nothing_from_it():
     (BED_FLOATING, SIGMA_MAX_FLOATING),
     (BED_GROUNDED, SIGMA_MAX_GROUNDED),
 ])
-def test_vonmises_rate_is_speed_times_stress_over_threshold(bed, sigma_max):
-    r"""``c = |u| sqrt(3) A^(-1/n) e~^(1/n) / sigma_max``. Under uniaxial
+def test_the_configured_law_drives_the_front(calving_env, bed, sigma_max):
+    r"""``ISMIP7_CALVING=vonmises_strain`` with its thresholds in
+    ``ISMIP7_CALVING_PARAMS``, evaluated on the forward's kind of front state
+    and handed to the level set as its rate:
+    ``c = |u| sqrt(3) A^(-1/n) e~^(1/n) / sigma_max``. Under uniaxial
     extension ``e~ = e_xx / sqrt(2)``, and the threshold is the floating one
     over the deep bed and the grounded one over the shallow bed."""
-    mesh, Q0, h, b, u, ls = _state("vonmises", bed=bed)
+    law = _configured_law(calving_env, "vonmises_strain",
+                          f"sigma_max_gr={SIGMA_MAX_GROUNDED}, sigma_max_fl={SIGMA_MAX_FLOATING}")
+    assert law.front_mode == "prescribed"
+    mesh, Q0, h, b, u, ls = _state(law.front_mode, bed=bed)
     A, n, dt = 20.0, 3.0, 0.1
-    rate = ls.advance(dt, u, h, b, Constant(A), n)
+    state = _front_state(mesh, h, b, u, ls, A=Constant(A), n=n)
+    rate = ls.advance(dt, u, rate=law.rate(state, 0.0))
     front = ls.front_len.dat.data_ro > 0.0
     xc = _xc(mesh)
     sigma = np.sqrt(3.0) * A ** (-1.0 / n) * (STRAIN / np.sqrt(2.0)) ** (1.0 / n)
@@ -121,7 +162,7 @@ def test_the_shed_fraction_is_the_swept_area_over_the_cell():
     front cell here has L = 1/8 and A = 1/128, so ``0.05 * 0.5 * 16 = 0.4``."""
     mesh, Q0, h, b, u, ls = _state("prescribed")
     c = Function(Q0).interpolate(Constant(0.05))
-    ls.advance(0.5, u, h, b, rate=c)
+    ls.advance(0.5, u, rate=c)
     beyond, frac = ls.calving_masks()
     front = ls.front_len.dat.data_ro > 0.0
     assert front.sum() == N
@@ -149,7 +190,7 @@ def test_retreat_scales_with_the_step():
         c = Function(Q0).interpolate(Constant(c0))
         total = 0.0
         for _ in range(steps):
-            ls.advance(dt / steps, u, h, b, rate=c)
+            ls.advance(dt / steps, u, rate=c)
             beyond, frac = ls.calving_masks()
             data = h.dat.data
             total += float((data[beyond] * ls.cell_area[beyond]).sum())
@@ -170,7 +211,7 @@ def test_retreat_scales_with_the_step():
 def test_a_zero_rate_law_leaves_the_front_where_it_was():
     mesh, Q0, h, b, u, ls = _state("prescribed")
     before = ls.phi.dat.data_ro.copy()
-    ls.advance(0.1, u, h, b, rate=Function(Q0).interpolate(Constant(0.0)))
+    ls.advance(0.1, u, rate=Function(Q0).interpolate(Constant(0.0)))
     assert np.allclose(ls.phi.dat.data_ro, before, atol=1e-9)
 
 
@@ -178,8 +219,8 @@ def test_the_drag_gate_is_off_at_the_front_and_on_beyond_it():
     r"""The floor-cell ocean drag must not reach the cells the front runs
     through, or it damps the ice rather than the water. The gate is what the
     momentum residual holds, so it is checked against the distance itself."""
-    mesh, Q0, h, b, u, ls = _state("vonmises")
-    ls.advance(0.1, u, h, b, Constant(20.0), 3.0)
+    mesh, Q0, h, b, u, ls = _state("prescribed")
+    ls.advance(0.1, u, rate=Constant(0.02))
     gate = ls.drag_mask.dat.data_ro
     phi = ls.phi.dat.data_ro
     diam = ls.cell_diam.dat.data_ro
@@ -187,20 +228,102 @@ def test_the_drag_gate_is_off_at_the_front_and_on_beyond_it():
     assert np.all(gate[phi > diam] == 1.0)
 
 
-def test_an_unknown_law_is_refused():
+def test_an_unknown_law_is_refused(calving_env):
     with pytest.raises(ValueError, match="front law"):
         _state("nonesuch")
+    with pytest.raises(ValueError, match="ISMIP7_CALVING=nonesuch: unknown calving law"):
+        _configured_law(calving_env, "nonesuch")
 
 
-def test_a_law_without_its_input_is_refused():
+def test_a_law_without_its_input_is_refused(calving_env):
     r"""Both refusals matter: a missing rate or a missing rheology would
     otherwise be read as a zero rate, and the front would silently hold."""
-    _, _, h, b, u, ls = _state("prescribed")
+    mesh, _, h, b, u, ls = _state("prescribed")
     with pytest.raises(ValueError, match="rate"):
-        ls.advance(0.1, u, h, b)
-    _, _, h, b, u, vm = _state("vonmises")
-    with pytest.raises(ValueError, match="vonmises"):
-        vm.advance(0.1, u, h, b)
+        ls.advance(0.1, u)
+    law = _configured_law(calving_env, "vonmises_strain")
+    with pytest.raises(ValueError, match="fluidity"):
+        law.rate(_front_state(mesh, h, b, u, ls), 0.0)
+
+
+def test_the_parameters_are_the_laws_own(calving_env):
+    r"""``ISMIP7_CALVING_PARAMS`` is checked against the law it configures when
+    the law is made, which the forward does before its MAP load: a misspelt
+    or impossible parameter fails in seconds, not after the initial solve."""
+    law = _configured_law(calving_env, "hfb", "sigma_max=0.15,mode=zero_stress")
+    assert (law.p["sigma_max"], law.p["mode"]) == (0.15, "zero_stress")
+    assert "sigma_max=0.15" in law.describe()
+    calving_env.setenv("ISMIP7_CALVING_PARAMS", "sigma_maks=0.15")
+    with pytest.raises(ValueError, match="ISMIP7_CALVING=hfb: .*unknown parameter"):
+        runconfig.calving_law_object()
+    calving_env.setenv("ISMIP7_CALVING_PARAMS", "mode=nye")
+    with pytest.raises(ValueError, match="mode"):
+        runconfig.calving_law_object()
+
+
+def test_no_law_means_no_parameters_and_no_level_set(calving_env):
+    assert runconfig.calving_law() == "none"
+    assert runconfig.calving_law_object() is None
+    calving_env.setenv("ISMIP7_CALVING_PARAMS", "sigma_max_fl=0.2")
+    with pytest.raises(ValueError, match="configure no law"):
+        runconfig.calving_law()
+
+
+def test_the_retired_threshold_knobs_are_refused_under_a_law(calving_env):
+    r"""The von Mises thresholds used to be two knobs of their own. Set with a
+    law configured they would now be ignored, so they are refused with the
+    spelling that replaces them; under ``none`` they never meant anything."""
+    calving_env.setenv("ISMIP7_CALVING_SIGMA_MAX_FLOATING", "0.2")
+    assert runconfig.calving_law() == "none"
+    calving_env.setenv("ISMIP7_CALVING", "vonmises")
+    with pytest.raises(ValueError, match="ISMIP7_CALVING_PARAMS=sigma_max_fl="):
+        runconfig.calving_law()
+
+
+def test_a_law_of_our_own_joins_the_registry_once(calving_env, tmp_path):
+    r"""``ISMIP7_CALVING_MODULE`` registers a law from a file before the name
+    is looked up, and a second lookup in the same process does not register
+    it twice (the forward resolves the law at startup and again in the run)."""
+    path = tmp_path / "undercut_law.py"
+    path.write_text(textwrap.dedent('''
+        from firedrake import Constant
+        from icepack_tools import calving
+
+
+        @calving.register
+        class Undercut(calving.Law):
+            name = "undercut_test"
+            defaults = {"c": 25.0}
+
+            def rate(self, model, t):
+                return Constant(float(self.p["c"]))
+    '''))
+    from icepack_tools import calving
+    try:
+        calving_env.setenv("ISMIP7_CALVING_MODULE", str(path))
+        law = _configured_law(calving_env, "undercut_test", "c=40")
+        assert law.p["c"] == 40
+        assert runconfig.calving_law_object().p["c"] == 40
+        calving_env.setenv("ISMIP7_CALVING_MODULE", str(tmp_path / "missing.py"))
+        with pytest.raises(ValueError, match="not a file"):
+            runconfig.calving_law_object()
+    finally:
+        calving.LAWS.pop("undercut_test", None)
+
+
+def test_resolving_no_law_stays_free_of_firedrake():
+    r"""``runconfig`` is imported by the preflight gate and the core report,
+    which must stay fast; under the default ``none`` resolving the law must
+    not reach the registry, and so not Firedrake."""
+    code = ("import os, sys\n"
+            "os.environ.pop('ISMIP7_CALVING', None)\n"
+            "from icepack2_tools import runconfig\n"
+            "assert runconfig.calving_law_object() is None\n"
+            "assert 'firedrake' not in sys.modules, 'resolving none imported firedrake'\n")
+    r = subprocess.run([sys.executable, "-c", code], cwd=REPO, capture_output=True, text=True,
+                       env=dict(os.environ, PYTHONPATH=REPO + os.pathsep
+                                + os.environ.get("PYTHONPATH", "")))
+    assert r.returncode == 0, r.stderr
 
 
 def test_fixed_anchors_on_the_t0_extent_not_the_restarted_one():
@@ -218,9 +341,8 @@ def test_fixed_anchors_on_the_t0_extent_not_the_restarted_one():
     ls = LevelSet(mesh, h_now, law="fixed", h_min=HMIN, phi_init=phi0)
     # the forward advances before it asks for the masks, and the advance
     # re-solves phi from the current extent, so the bar must survive it
-    b = Function(Q0).interpolate(Constant(BED_FLOATING))
     u = Function(VectorFunctionSpace(mesh, "CG", 1))
-    assert ls.advance(0.1, u, h_now, b) == 0.0
+    assert ls.advance(0.1, u) == 0.0
     beyond, _ = ls.calving_masks()
     xc = _xc(mesh)
     # the bar is the ORIGINAL front, so the band between them is still open

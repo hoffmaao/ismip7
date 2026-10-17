@@ -27,9 +27,10 @@ import os
 # The launchers name their own: the timing Makefile exports its campaign's
 # solver, and the cluster forward runner (batch_runners/projection.sbatch)
 # exports scpc_gamg for production. This default does not follow them, because
-# it is not only the forward's: the inversion, whose linear solve is
-# full-Jacobian MUMPS whatever is set here, stamps the mode it resolves on its
-# MAP, and redistribute_checkpoint.py fingerprints a published cache with it.
+# it is not only the forward's: the inversion, whose taped solves follow
+# ISMIP7_INVERSION_LINEAR_SOLVER whatever is set here, stamps the mode it
+# resolves on its MAP, and redistribute_checkpoint.py fingerprints a
+# published cache with it.
 DIAGNOSTIC_SOLVER_DEFAULT = "full_mumps"
 DIAGNOSTIC_SOLVER_MODES = (
     "schur_gamg",
@@ -44,6 +45,32 @@ DIAGNOSTIC_SOLVER_ALIASES = {
     "iterative": "schur_gamg",
     "mumps": "schur_mumps",
 }
+# The inversion's taped solves: the annotated forward, the adjoint tlm_adjoint
+# solves against it, and the solve that publishes the MAP's state. A knob of
+# its own, so the scpc_mumps the timing campaign exports for the lane's
+# ISMIP7_DIAGNOSTIC_LINEAR_SOLVER leaves the taped solve where it was. The
+# approximate-Schur modes are out: their selfp preconditioner was never
+# qualified for the mixed system. scpc_gamg is the default since the final
+# Quartz round of issues 156 and 157 (README, "Inversion solver"): under the
+# direct forward it took full_mumps's iterates 1.35 to 1.5 times faster an
+# evaluation at 2 km and 4.6 times at 1 km, with half the memory.
+INVERSION_SOLVER_DEFAULT = "scpc_gamg"
+INVERSION_SOLVER_MODES = ("full_mumps", "scpc_mumps", "scpc_gamg")
+# The inversion's taped forward under scpc_* solves its Newton corrections to
+# a relative 1e-8, not the transient's 1e-6. Each evaluation starts from the
+# last one's state at new controls, as far as ||F|| = 9e10 from the solution
+# at 32 km, and there NLEQ-ERR, which judges a step by the norm of the Newton
+# correction, could not use corrections solved to 1e-6: at a trial point the
+# exact condensation took in 6 Newton iterations it stalled at
+# ||F|| = 7.9e10 for 200. At 1e-8 it took the same 6. Backtracking on ||F||
+# instead (bt) also took 6 there and costs less where it works (64 s an
+# evaluation against 95 s at 2 km), but it damps nearly every step on the
+# synthetic slabs: 113 Newton iterations against 4 under the cell-wise law
+# and 20 against 4 under the sub-element law, with an exact LU as with GAMG
+# (README, "Inversion solver"). ISMIP7_INVERSION_SNES_LINESEARCH and
+# ISMIP7_INVERSION_KSP_RTOL override both. The transient is unchanged: its
+# steps start next to the solution.
+INVERSION_KSP_RTOL_DEFAULT = "1e-8"
 
 SNES_TYPE_DEFAULT = "newtonls"
 SNES_LINESEARCH_DEFAULT = "nleqerr"
@@ -77,6 +104,26 @@ FREEZE_LINEARIZATION_DEFAULT = "1"
 FINAL_SNES_STOL_DEFAULT = "1e-8"
 FINAL_SNES_MAXIT_DEFAULT = "50"
 FINAL_KSP_MAXIT_DEFAULT = "50"
+# The inversion's objective evaluations: first one untaped Newton solve at the
+# full exponents from the last converged state, then a taped solve that starts
+# converged; one that fails goes to the failed-trial rescue. The in-tape
+# 5-stage n=1->3 ladder this replaces restarted at n=1 from the n=3 state:
+# every evaluation of the 2 km sub-element chains began at ||F|| 1e11-1e13
+# and took ~200 Newton iterations, and its n=2.5->3 stage is where the
+# failed trials diverged
+# (snes_recinos_sqrtC_pattyn_noprior_subelement_nodhdt.log, 30 Sep 2026).
+DIRECT_FORWARD_DEFAULT = "1"
+# Successful direct solves took 1-17 Newton iterations on the 2 km and 32 km
+# meshes; one that has not converged by 30 is a lost trial (30 Sep 2026).
+DIRECT_FORWARD_MAXIT_DEFAULT = "30"
+# A direct trial whose residual has grown this many times over its start is
+# lost: fail it and let the line search backtrack rather than run the cap out
+# (2 km SEP2, NOTS 1692389: 50 iterations to ||F|| 5e33, 289 s).
+DIRECT_FORWARD_DTOL_DEFAULT = "1e6"
+# Rungs of the continuation ladder the failed-trial rescue may climb: each
+# failed rung cost 1-3 h on the 2 km mesh and ~80% of rescues failed anyway
+# (2 km chains, 27-30 Sep 2026). 0 disables the rescue.
+TRIAL_RESCUE_RUNGS_DEFAULT = "1"
 
 KSP_RTOL_DEFAULT = "1e-6"
 KSP_MAXIT_DEFAULT = "1000"
@@ -116,6 +163,20 @@ MASS_RESIDUAL_TOL_GT_DEFAULT = "5e-5"
 CONTINUATION_STEPS_DEFAULT = "8"
 RESCUE_MAXIT_DEFAULT = "600"
 SUBCYCLES_DEFAULT = "1,4,16"
+# Adaptive substepping (icepack2_tools.substep): off by default. The
+# tolerance is metres of backward-Euler local error in the DG0 thickness.
+SUBSTEP_ADAPT_DEFAULT = "0"
+SUBSTEP_TOL_DEFAULT = "1.0"
+SUBSTEP_INIT_DEFAULT = "1"
+SUBSTEP_MAX_DEFAULT = "64"
+SUBSTEP_QUIET_DEFAULT = "20"
+SUBSTEP_HMIN_DEFAULT = "10"
+SUBSTEP_CEILING_DEFAULT = "20"
+# Free-surface stabilization (icepack2_tools.fssa): theta, 0 = off, and the
+# velocity the surface change is measured from (fssa.REFERENCES). On by
+# default since 6 October 2026.
+FSSA_THETA_DEFAULT = "1"
+FSSA_REFERENCE_DEFAULT = "auto"
 RESCUE_ENABLED_DEFAULT = "1"
 
 
@@ -285,14 +346,40 @@ def _condensed_gamg_options(prefix):
     return params
 
 
+def _have_ptscotch():
+    from petsc4py import PETSc
+    return bool(PETSc.Sys.hasExternalPackage("ptscotch"))
+
+
+def mumps_analysis():
+    r"""``ISMIP7_MUMPS_ANALYSIS``: ``parallel`` (PT-Scotch distributed
+    analysis, where PETSc has it) or ``sequential`` (MUMPS's own). The
+    inversion selects ``sequential`` for its condensed factorizations: under
+    the distributed analysis the per-solve adjoint factorizations aborted the
+    2 km chains in MUMPS_LOAD_RECV_MSGS (7 of 17 links on 6 Oct, none of the
+    links run sequentially)."""
+    value = _env("ISMIP7_MUMPS_ANALYSIS", "parallel").strip().lower()
+    if value not in ("parallel", "sequential"):
+        raise ValueError("ISMIP7_MUMPS_ANALYSIS must be parallel or sequential")
+    return value
+
+
 def _mumps_options(prefix=""):
-    return {
+    opts = {
         f"{prefix}pc_type": "lu",
         f"{prefix}pc_factor_mat_solver_type": "mumps",
-        # Distributed analysis with PT-Scotch nested dissection.
-        f"{prefix}mat_mumps_icntl_28": 2,
-        f"{prefix}mat_mumps_icntl_29": 1,
     }
+    # Read the knob first, so a bad value fails on every build.
+    analysis = mumps_analysis()
+    if analysis == "parallel" and _have_ptscotch():
+        # Distributed analysis with PT-Scotch nested dissection.
+        opts[f"{prefix}mat_mumps_icntl_28"] = 2
+        opts[f"{prefix}mat_mumps_icntl_29"] = 1
+    # Without PT-Scotch the distributed analysis cannot run: MUMPS fails the
+    # factorization and the condensed preconditioner returns NaN at its first
+    # application (DIVERGED_NANORINF on a PETSc built without it). MUMPS's own
+    # sequential analysis and ordering is then the right default.
+    return opts
 
 
 def diagnostic_solver_parameters(mode=None):
@@ -361,6 +448,83 @@ def diagnostic_solver_parameters(mode=None):
     return params
 
 
+def inversion_solver_mode(requested=None):
+    r"""``ISMIP7_INVERSION_LINEAR_SOLVER``, canonical: the solver of the
+    inversion's taped forward, its adjoint and its publishing solve."""
+    if requested is None:
+        requested = _env("ISMIP7_INVERSION_LINEAR_SOLVER", INVERSION_SOLVER_DEFAULT)
+    mode = str(requested).strip().lower()
+    if mode not in INVERSION_SOLVER_MODES:
+        raise ValueError(
+            "ISMIP7_INVERSION_LINEAR_SOLVER must be one of "
+            f"{', '.join(INVERSION_SOLVER_MODES)}, not {requested!r}"
+        )
+    return mode
+
+
+def inversion_state_parameters(mode=None):
+    r"""PETSc options of the inversion's taped forward under ``mode``.
+
+    ``full_mumps`` is the inversion's own reference, kept as it was before the
+    knob existed: the shared SNES options around a GMRES-wrapped MUMPS LU of
+    the whole mixed Jacobian, with MUMPS printing its error return (INFOG(1),
+    the workspace or pivot code) so a factorisation that fails is named and
+    does not reach SNES only as DIVERGED_LINEAR_SOLVE (job 1612624).  The
+    scpc_* modes are the forward's own options for that mode with the outer
+    Krylov tolerance ``ISMIP7_INVERSION_KSP_RTOL`` (default 1e-8,
+    INVERSION_KSP_RTOL_DEFAULT; the condensed solve's absolute tolerance
+    follows it as the forward's follows ISMIP7_KSP_RTOL) and the line search
+    ``ISMIP7_INVERSION_SNES_LINESEARCH``, by default the shared one."""
+    mode = inversion_solver_mode(mode)
+    if mode != "full_mumps":
+        params = diagnostic_solver_parameters(mode)
+        rtol = float(_env("ISMIP7_INVERSION_KSP_RTOL", INVERSION_KSP_RTOL_DEFAULT))
+        params["ksp_rtol"] = rtol
+        if "condensed_field_ksp_atol" in params:
+            params["condensed_field_ksp_atol"] = rtol * float(_env(
+                "ISMIP7_CONDENSED_KSP_ATOL_FACTOR",
+                CONDENSED_KSP_ATOL_FACTOR_DEFAULT,
+            ))
+        if mode == "scpc_gamg":
+            # A rung's extra condensed options still come last, as in the
+            # forward (_extra_condensed_options).
+            params.update(_extra_condensed_options("condensed_field_"))
+        params["snes_linesearch_type"] = _env(
+            "ISMIP7_INVERSION_SNES_LINESEARCH", params["snes_linesearch_type"])
+        return params
+    params = _nonlinear_options()
+    params.update({
+        "ksp_type": "gmres",
+        "pc_type": "lu",
+        "pc_factor_mat_solver_type": "mumps",
+        "mat_mumps_icntl_14": 400,  # working memory increase
+        "mat_mumps_icntl_24": 1,  # detect null pivots
+        "mat_mumps_cntl_3": 1e-12,  # null pivot threshold
+        "mat_mumps_icntl_4": 1,
+    })
+    return params
+
+
+def inversion_adjoint_parameters(params):
+    r"""The adjoint's options, from the taped forward's ``params``.
+
+    The adjoint is one linear solve, so every ``snes_*`` entry goes. That
+    matters twice. An absolute tolerance sized for the forward residual lets
+    the adjoint exit at iteration 0 whenever ||dJ/du|| is small, returning a
+    zero adjoint and a gradient that is the prior's alone (job 10432790). And
+    under ``mat_type: matfree`` tlm_adjoint hands these options to a
+    LinearVariationalSolver, whose ``ksponly`` default the forward's
+    ``newtonls`` would replace with a line-searched Newton solve of a linear
+    problem; the assembled path ignores SNES options either way. The outer
+    Krylov tolerance is the forward's relative one, and the condensed solve's
+    absolute tolerance is scale-free here too: FGMRES hands the preconditioner
+    unit vectors."""
+    adjoint = {k: v for k, v in params.items() if not k.startswith("snes_")}
+    if adjoint.get("mat_type") == "matfree":
+        adjoint["snes_type"] = "ksponly"
+    return adjoint
+
+
 def transport_solver_parameters():
     return {
         "ksp_type": "gmres",
@@ -420,6 +584,61 @@ def subcycles():
     return values
 
 
+def substep_settings():
+    r"""Adaptive substepping of each macro step (``ISMIP7_SUBSTEP_ADAPT``), or
+    None when off. With it on, the fixed ``ISMIP7_SUBCYCLES`` retry list is
+    replaced by a substep count chosen from the thickness error estimate:
+    ``ISMIP7_SUBSTEP_TOL`` (m), starting at ``ISMIP7_SUBSTEP_INIT`` substeps,
+    at most ``ISMIP7_SUBSTEP_MAX``, halving after ``ISMIP7_SUBSTEP_QUIET``
+    quiet macro steps, over cells at least ``ISMIP7_SUBSTEP_HMIN`` m thick;
+    at the maximum an estimate within ``ISMIP7_SUBSTEP_CEILING`` times the
+    tolerance is accepted rather than stalling the run (0 stalls)."""
+    if not _enabled("ISMIP7_SUBSTEP_ADAPT", SUBSTEP_ADAPT_DEFAULT):
+        return None
+    return {
+        "tol": float(_env("ISMIP7_SUBSTEP_TOL", SUBSTEP_TOL_DEFAULT)),
+        "m_init": int(_env("ISMIP7_SUBSTEP_INIT", SUBSTEP_INIT_DEFAULT)),
+        "m_max": int(_env("ISMIP7_SUBSTEP_MAX", SUBSTEP_MAX_DEFAULT)),
+        "quiet_steps": int(_env("ISMIP7_SUBSTEP_QUIET", SUBSTEP_QUIET_DEFAULT)),
+        "hmin": float(_env("ISMIP7_SUBSTEP_HMIN", SUBSTEP_HMIN_DEFAULT)),
+        "ceiling": float(_env("ISMIP7_SUBSTEP_CEILING", SUBSTEP_CEILING_DEFAULT)),
+    }
+
+
+def fssa_theta():
+    r"""``ISMIP7_FSSA_THETA``: weight of the free-surface stabilization of
+    the forward's lagged thickness-velocity coupling (icepack2_tools.fssa);
+    1 (the default) makes the lagged step stable at any size, 0 leaves the
+    term out of the momentum balance."""
+    value = float(_env("ISMIP7_FSSA_THETA", FSSA_THETA_DEFAULT))
+    if value < 0:
+        raise ValueError("ISMIP7_FSSA_THETA must be nonnegative")
+    return value
+
+
+def forward_fssa_theta(restart_metadata=None):
+    r"""The stabilization weight a forward steps with: :func:`fssa_theta`,
+    except on a restart from a checkpoint stepped without the stabilization
+    (``restart_metadata`` with no ``fssa_tau`` record), which keeps it off
+    unless ``ISMIP7_FSSA_THETA`` is set, so a chain keeps the momentum balance
+    it began with. A prepared timing or map-check state (one that records a
+    ``timing_cache_role``) was never stepped and starts like a cold start."""
+    if (restart_metadata is not None
+            and restart_metadata.get("timing_cache_role") is None
+            and restart_metadata.get("fssa_tau") is None
+            and "ISMIP7_FSSA_THETA" not in os.environ):
+        return 0.0
+    return fssa_theta()
+
+
+def fssa_reference():
+    r"""``ISMIP7_FSSA_REFERENCE``: the velocity the stabilization measures the
+    surface change from, ``auto`` (the default), ``start`` or ``step``
+    (icepack2_tools.fssa.resolve_reference, which also checks the value)."""
+    return (_env("ISMIP7_FSSA_REFERENCE", FSSA_REFERENCE_DEFAULT)
+            or FSSA_REFERENCE_DEFAULT).strip().lower()
+
+
 def snes_atol_scale():
     return float(_env("ISMIP7_SNES_ATOL_SCALE", SNES_ATOL_SCALE_DEFAULT))
 
@@ -434,10 +653,46 @@ def snes_restart_failure_atol_scale():
 def nonlinear_solver_options():
     r"""Shared SNES options (type, tolerances, line search) for any momentum solve.
 
-    The inversion layers its full-Jacobian MUMPS options on top of these so the
-    ``ISMIP7_SNES_*`` knobs the campaign exports mean one thing everywhere.
+    Diagnostic and inversion solver builders layer their linear options on
+    top. The condensed inversion modes may override the line search through
+    ``ISMIP7_INVERSION_SNES_LINESEARCH``.
     """
     return _nonlinear_options()
+
+
+def direct_forward_enabled():
+    r"""Whether an inversion forward first tries one Newton solve at the full
+    exponents from the last converged state (``ISMIP7_DIRECT_FORWARD``)."""
+    return _enabled("ISMIP7_DIRECT_FORWARD", DIRECT_FORWARD_DEFAULT)
+
+
+def direct_forward_max_it():
+    return int(_env("ISMIP7_DIRECT_FORWARD_MAXIT", DIRECT_FORWARD_MAXIT_DEFAULT))
+
+
+def direct_forward_parameters(params):
+    r"""The direct solve's options, from the taped solve's ``params`` under
+    any inversion solver mode: the relative test against the trial's own
+    initial residual (no ``snes_atol``: an absolute floor at the accepted
+    residual stopped small control steps before the state responded), the
+    live step-size exit of ``final_solve_bounds``, at most
+    ``ISMIP7_DIRECT_FORWARD_MAXIT`` Newton iterations, and a lost trial once
+    the residual grows ``ISMIP7_DIRECT_FORWARD_DTOL`` times."""
+    out = {k: v for k, v in params.items() if k != "snes_atol"}
+    out.update(final_solve_bounds())
+    out["snes_max_it"] = direct_forward_max_it()
+    out["snes_divergence_tolerance"] = float(
+        _env("ISMIP7_DIRECT_FORWARD_DTOL", DIRECT_FORWARD_DTOL_DEFAULT))
+    return out
+
+
+def trial_rescue_rungs():
+    r"""Rungs of the continuation ladder a failed line-search trial may climb
+    (``ISMIP7_TRIAL_RESCUE_RUNGS``); 0 sends it straight to backtracking."""
+    rungs = int(_env("ISMIP7_TRIAL_RESCUE_RUNGS", TRIAL_RESCUE_RUNGS_DEFAULT))
+    if rungs < 0:
+        raise ValueError("ISMIP7_TRIAL_RESCUE_RUNGS must be >= 0")
+    return rungs
 
 
 def final_solve_bounds():
@@ -514,6 +769,14 @@ def effective_solver_env():
         "ISMIP7_RESCUE_MAXIT": RESCUE_MAXIT_DEFAULT,
         "ISMIP7_RESCUE_ENABLED": RESCUE_ENABLED_DEFAULT,
         "ISMIP7_SUBCYCLES": SUBCYCLES_DEFAULT,
+        "ISMIP7_SUBSTEP_ADAPT": SUBSTEP_ADAPT_DEFAULT,
+        "ISMIP7_SUBSTEP_TOL": SUBSTEP_TOL_DEFAULT,
+        "ISMIP7_SUBSTEP_INIT": SUBSTEP_INIT_DEFAULT,
+        "ISMIP7_SUBSTEP_MAX": SUBSTEP_MAX_DEFAULT,
+        "ISMIP7_SUBSTEP_QUIET": SUBSTEP_QUIET_DEFAULT,
+        "ISMIP7_SUBSTEP_HMIN": SUBSTEP_HMIN_DEFAULT,
+        "ISMIP7_FSSA_THETA": FSSA_THETA_DEFAULT,
+        "ISMIP7_FSSA_REFERENCE": FSSA_REFERENCE_DEFAULT,
     }
 
 
@@ -539,6 +802,9 @@ def solver_provenance(mode=None):
         "rescue_max_it": rescue_max_it(),
         "rescue_enabled": rescue_enabled(),
         "subcycles": list(subcycles()),
+        "substep_adapt": substep_settings(),
+        "fssa_theta": fssa_theta(),
+        "fssa_reference": fssa_reference(),
         "snes_atol_policy": {
             "initial": float(_env("ISMIP7_SNES_ATOL", SNES_ATOL_DEFAULT)),
             "post_convergence_scale": snes_atol_scale(),

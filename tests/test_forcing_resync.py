@@ -8,7 +8,8 @@ skips on size, and an audit that compares version strings, see neither. The
 mirror route keeps each object's ETag in a manifest, the audit reads that
 manifest and judges a version by what the reader would open, and the Globus
 route picks dotted versions and the renamed MRI product and can be told to
-let the checksum sync look at complete groups.
+let the checksum sync look at complete groups. Where a tree holds MRI-ESM2-0
+under both its names, the audit reports the one the reader opens.
 
 Nothing here touches the network: the S3 listing, the object bodies and the
 Globus listing are all faked.
@@ -25,6 +26,7 @@ sys.path.insert(0, os.path.join(REPO, "antarctica", "scripts"))
 import audit_forcing_versions as audit   # noqa: E402
 import download_forcing as globus_route  # noqa: E402
 import download_mirror as mirror         # noqa: E402
+from icepack2_tools.forcing import ISMIP7Atmosphere, atmosphere_path  # noqa: E402
 
 LISTING = b"""<?xml version="1.0"?>
 <ListBucketResult xmlns="http://s3.amazonaws.com/doc/2006-03-01/">
@@ -168,6 +170,103 @@ def test_the_renamed_mri_product_and_the_dotted_fracture_version(tmp_path):
     assert ("ssp585", "", "") not in got                          # a .docx is no forcing product
 
 
+@pytest.mark.parametrize("tree, opens, status", [
+    # a pre-rename copy left beside a re-sync, the tree of the issue #41 hand-over
+    ({"SDBN1-8000m": ["v1"], "GEMB-SDBN1-8000m": ["v1", "v2"]}, ("GEMB-SDBN1-8000m", "v2"), "ok"),
+    # the same tree before the re-sync lands v2
+    ({"SDBN1-8000m": ["v1"], "GEMB-SDBN1-8000m": ["v1"]}, ("GEMB-SDBN1-8000m", "v1"), "BEHIND"),
+    # fetched before the rename and never re-synced
+    ({"SDBN1-8000m": ["v1"]}, ("SDBN1-8000m", "v1"), "BEHIND"),
+])
+def test_the_audit_reports_the_atmosphere_directory_a_run_opens(tmp_path, tree, opens, status):
+    r"""MRI-ESM2-0 staged under both the pre-rename ``SDBN1-8000m`` and the
+    current ``GEMB-SDBN1-8000m`` (IU, 27 September 2026): the reader took
+    ``SDBN1`` first and opened v1, while the audit checked the mirror's name
+    first and reported v2 and ``ok``. Both now take ``GEMB-SDBN1`` through one
+    rule, so the audit's product and version are the directory
+    ``atmosphere_path`` opens and the run's provenance line names, whichever
+    of the two names the mirror lists."""
+    esm, sc, var = "MRI-ESM2-0", "historical", "acabf-anomaly"
+    for product, versions in tree.items():
+        for v in versions:
+            _file(tmp_path / esm / sc / product / var / v / f"{var}_AIS_{esm}_{sc}_{product}_{v}_2000.nc")
+    root = str(tmp_path)
+    opened = atmosphere_path(sc, esm, var, data_root=root)
+    for listed in ("GEMB-SDBN1-8000m", "SDBN1-8000m"):
+        on_disk = audit.local_product(root, esm, sc, listed)
+        resolved = audit.resolved_version(root, esm, sc, on_disk, var)
+        assert os.path.join(root, esm, sc, on_disk, var, resolved) == opened
+    row, = ISMIP7Atmosphere(data_root=root, esm=esm, scenario=sc).provenance((var,))
+    assert (row["product"], row["version"], row["dir"]) == (*opens, opened)
+    current = _key(esm, sc, "GEMB-SDBN1-8000m", var, f"{var}_AIS_{esm}_{sc}_GEMB-SDBN1-8000m_v2_2000.nc")
+    got = _status(tmp_path, [_entry(tmp_path, current, on_disk=False)])
+    assert got[(sc, "GEMB-SDBN1-8000m", var)][:2] == (status, opens[1])
+
+
+def test_a_version_newer_than_the_mirror_is_ahead_and_passes(tmp_path, monkeypatch, capsys):
+    r"""A fix fetched from Globus before the mirror carries it, as the MRI-ESM2-0
+    ssp585 fracture v2 was on 23 September 2026: the reader opens the newer
+    version, so the row reads AHEAD and the exit status stays 0, whether or not
+    the mirror's version sits beside it. A pin to a version older than the
+    mirror's still fails."""
+    mri, cesm, atm = "MRI-ESM2-0", "CESM2-WACCM", "SDBN1-8000m"
+
+    def mask(scenario, version):
+        return f"ice_shelf_collapse_mask_mriesm20_{scenario}_ismip7_8km-{version}.nc"
+
+    both = _key(mri, "ssp585", "fracture", "", mask("ssp585", "v1"))
+    only_new = _key(mri, "ssp534-over", "fracture", "", mask("ssp534-over", "v1"))
+    pinned = _key(cesm, "ssp370", atm, "acabf", f"acabf_AIS_{cesm}_ssp370_{atm}_v3_2015.nc")
+    entries = [_entry(tmp_path, both), _entry(tmp_path, only_new, on_disk=False), _entry(tmp_path, pinned)]
+    for scenario in ("ssp585", "ssp534-over"):
+        _file(tmp_path / mri / scenario / "fracture" / "v2" / mask(scenario, "v2"))
+    _file(tmp_path / cesm / "ssp370" / atm / "acabf" / "v2" / f"acabf_AIS_{cesm}_ssp370_{atm}_v2_2015.nc")
+    got = _status(tmp_path, entries)
+    assert got[("ssp585", "fracture", "")][:2] == ("AHEAD", "v2")
+    assert got[("ssp534-over", "fracture", "")][:2] == ("AHEAD", "v2")   # its v1 absent, and not BEHIND
+    assert got[("ssp370", atm, "acabf")][:2] == ("PINNED", "v2")
+
+    listing = lambda prefix: [e for e in entries if e[0].startswith(prefix)]   # noqa: E731
+    real = audit.mirror_entries
+    monkeypatch.setattr(audit, "mirror_entries", lambda esms, scenarios: real(esms, scenarios, listing))
+
+    def run(scenario):
+        monkeypatch.setattr(sys, "argv", ["audit_forcing_versions.py", "--root", str(tmp_path),
+                                          "--esm", mri, "--esm", cesm, "--scenario", scenario])
+        return audit.main()
+
+    assert run("ssp585") == 0
+    assert "1 ahead of the mirror" in capsys.readouterr().out
+    assert run("ssp370") == 1
+
+
+def test_a_mask_below_the_minimum_is_outdated_whatever_the_mirror_says(tmp_path, monkeypatch, capsys):
+    r"""The mirror still serves the MRI-ESM2-0 ssp585 v1 mask that v2 replaced
+    on Globus, so a tree synced from it matches the mirror and would read
+    ``ok``. The audit holds fracture rows to forcing.FRACTURE_MIN_VERSION
+    instead, and fails; ssp126, which has no fix, stays ``ok``."""
+    mri = "MRI-ESM2-0"
+    stale = _key(mri, "ssp585", "fracture", "", "ice_shelf_collapse_mask_mriesm20_ssp585_ismip7_8km-v1.nc")
+    current = _key(mri, "ssp126", "fracture", "", "ice_shelf_collapse_mask_mriesm20_ssp126_ismip7_8km-v1.nc")
+    entries = [_entry(tmp_path, stale), _entry(tmp_path, current)]
+    got = _status(tmp_path, entries)
+    assert got[("ssp585", "fracture", "")][:2] == ("OUTDATED", "v1")
+    assert got[("ssp126", "fracture", "")][:2] == ("ok", "v1")
+
+    listing = lambda prefix: [e for e in entries if e[0].startswith(prefix)]   # noqa: E731
+    real = audit.mirror_entries
+    monkeypatch.setattr(audit, "mirror_entries", lambda esms, scenarios: real(esms, scenarios, listing))
+
+    def run(scenario):
+        monkeypatch.setattr(sys, "argv", ["audit_forcing_versions.py", "--root", str(tmp_path),
+                                          "--esm", mri, "--scenario", scenario])
+        return audit.main()
+
+    assert run("ssp585") == 1
+    assert "1 outdated" in capsys.readouterr().out
+    assert run("ssp126") == 0
+
+
 def test_the_ocx_tree_is_audited_in_its_own_layout(tmp_path):
     r"""Seen on a cluster tree in September 2026: the OCX ``dacabfdz`` still at
     v1, the spatially shifted file of discussion #45, with v2 on the mirror."""
@@ -280,3 +379,17 @@ def test_the_globus_route_picks_dotted_versions_and_the_renamed_product(monkeypa
     assert globus_route._pick_version(None, f"{base}/fracture") == "v10"
     assert globus_route._atmosphere_dir(None, base) == "GEMB-SDBN1-8000m"
     assert globus_route._pick_version(None, f"{base}/absent") is None
+
+
+def test_the_globus_route_fetches_the_name_a_run_opens(monkeypatch):
+    r"""A share listing MRI-ESM2-0 under both names is fetched from
+    ``GEMB-SDBN1``, the directory the reader then opens; a share listing
+    neither falls back to ``SDBN1``, as the reader does."""
+    both = f"{globus_route.ISMIP7_BASE}/MRI-ESM2-0/historical"
+    neither = f"{globus_route.ISMIP7_BASE}/MRI-ESM2-0/ssp534-over"
+    monkeypatch.setattr(globus_route, "list_remote_files", _share({
+        both: [("SDBN1-8000m", "dir"), ("GEMB-SDBN1-8000m", "dir"), ("ocean", "dir")],
+        neither: [("ocean", "dir")],
+    }))
+    assert globus_route._atmosphere_dir(None, both) == "GEMB-SDBN1-8000m"
+    assert globus_route._atmosphere_dir(None, neither) == "SDBN1-8000m"

@@ -40,7 +40,9 @@ without it is the before/after comparison of a transfer (``make map-check``).
 ``--restart`` scores an already solved state (a prepared map-check cache)
 instead of repeating the cold continuation; ``--json`` writes the numbers
 (ratio, bands, the transfer fill counts, the fluidity prior range, the
-initial misfit) for the stage table.
+initial misfit) for the stage table; ``--save-state DIR`` writes each scored
+state as ``DIR/<MAP stem>_t0.h5`` (``simulation.save_model_state``, at the
+geometry year), which ``check_cliff_facets.py --compare`` reads.
 """
 
 import argparse
@@ -64,10 +66,13 @@ BAND_LABELS = ["< 100", "100 - 500", "500 - 1500", "> 1500"]
 OBSERVED_DISCHARGE = (2050.0, 100.0)
 
 
-def score(path, restart=None):
-    from simulation import setup_model
+def score(path, restart=None, save_dir=None):
+    from simulation import GEOMETRY_YEAR, save_model_state, setup_model
     os.environ["ISMIP7_INVERSION"] = os.path.abspath(path)
     ctx = setup_model(restart_from=os.path.abspath(restart) if restart else None)
+    if save_dir:
+        stem = os.path.splitext(os.path.basename(path))[0]
+        save_model_state(ctx, os.path.join(save_dir, f"{stem}_t0.h5"), GEOMETRY_YEAR)
     mesh, h, b = ctx["mesh"], ctx["h"], ctx["b"]
     u = ctx["z"].subfunctions[0]
     u_obs = ctx["u_obs"]
@@ -109,10 +114,14 @@ def main():
     ap.add_argument("--restart", default=None,
                     help="score this solved state (a prepared cache) instead "
                          "of re-running the cold continuation; one MAP only")
+    ap.add_argument("--save-state", default=None, metavar="DIR",
+                    help="write each scored state as DIR/<MAP stem>_t0.h5")
     args = ap.parse_args()
     if args.restart and len(args.maps) != 1:
         raise SystemExit("--restart scores exactly one MAP")
-    results = [score(p, args.restart) for p in args.maps]
+    if args.save_state:
+        os.makedirs(args.save_state, exist_ok=True)
+    results = [score(p, args.restart, args.save_state) for p in args.maps]
     if args.json and results[0]["comm_size"] and fd.COMM_WORLD.rank == 0:
         payload = [
             dict(r, bands=[{"band": lab, "q_model": m, "q_obs": o, "ratio": ratio}

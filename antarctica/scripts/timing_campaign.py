@@ -355,9 +355,10 @@ def inversion_cores(lc):
     return 32 if int(lc) < 2500 else 16
 
 
-# The per-mesh invert factors the complete mixed (u, M, tau) Jacobian with
-# MUMPS and holds the tlm_adjoint tape, so its footprint is not the scpc_mumps
-# transient's (MEMORY_BY_LC). Measured on Quartz: 2500/25000 on 16 ranks peaks
+# The request is sized for the per-mesh invert's full_mumps solve and its
+# tlm_adjoint tape, which leaves room under scpc_gamg (the default since
+# 3 October, about half the memory), so its footprint differs from the
+# scpc_mumps transient's (MEMORY_BY_LC). Measured on Quartz: 2500/25000 on 16 ranks peaks
 # near 2 GB/rank; both 500 m meshes exceeded 13 GB/rank on 32 ranks and were
 # OOM-killed at 240G before their first evaluation, so 500 m is not inverted.
 INVERSION_MEMORY_BY_LC = {
@@ -598,6 +599,14 @@ def sha256_file(path, chunk_size=8 * 1024 * 1024):
     return digest.hexdigest()
 
 
+# MUMPS's analysis and ordering (ICNTL 28 and 29) follow the PETSc build and
+# ISMIP7_MUMPS_ANALYSIS. They change how the factorization is computed and
+# leave the converged state alone, so a MUMPS-factored block is fingerprinted
+# with the values every cache was prepared under.
+_MUMPS_BLOCK_PREFIXES = ("condensed_field_", "fieldsplit_1_")
+_MUMPS_ANALYSIS_FINGERPRINT = {"mat_mumps_icntl_28": 2, "mat_mumps_icntl_29": 1}
+
+
 def solver_configuration_fingerprint(configuration):
     """Fingerprint setup-relevant solver settings, excluding recovery policy.
 
@@ -605,13 +614,20 @@ def solver_configuration_fingerprint(configuration):
     transient lanes disable rescue/subcycling.  Those recovery settings must
     differ, so the cache identity covers the nonlinear/linear operators and
     tolerances that define the prepared state, not the transient recovery
-    policy.
+    policy, nor the MUMPS analysis that factored them.
     """
+    petsc_options = configuration.get("diagnostic_petsc_options")
+    if petsc_options is not None:
+        petsc_options = dict(petsc_options)
+        for prefix in _MUMPS_BLOCK_PREFIXES:
+            if petsc_options.get(f"{prefix}pc_factor_mat_solver_type") == "mumps":
+                petsc_options.update({
+                    f"{prefix}{key}": value
+                    for key, value in _MUMPS_ANALYSIS_FINGERPRINT.items()
+                })
     selected = {
         "diagnostic_mode": configuration.get("diagnostic_mode"),
-        "diagnostic_petsc_options": configuration.get(
-            "diagnostic_petsc_options"
-        ),
+        "diagnostic_petsc_options": petsc_options,
         "transport_petsc_options": configuration.get(
             "transport_petsc_options"
         ),

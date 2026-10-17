@@ -76,6 +76,26 @@ submit.sh script scripts/batch_runners/check_melt_bound.script --cd antarctica \
     ISMIP7_LC=1000 ISMIP7_INV_H5=$PWD/mesh/<map or forward state>.h5
 ```
 
+`scalar_processing.script` runs the organisers' `ismip7-scalars` over one
+experiment of a tree written by `write_ismip7_output.py`, then
+`compare_scalars.py` against the model's own scalars (issue #13). The tool
+lives in a Python 3.11+ venv of its own, named by `ISMIP7_TOOLS_VENV` (a
+per-user path, so `sites/local.env`; `antarctica/README.md` has the install).
+The tree carries the model's densities in `AIS/<source_id>/<ism_id>/params.nc`,
+written by `ismip7-scalars-set-params`, and the job reads that file and stops
+without it. The job ends with the comparison's status. A run whose native scalars
+integrate over true area, as a current forward writes them, adds
+`ISMIP7_SCALAR_NATIVE_AF2=1`. A 286-year experiment on the 8 km grid took
+3 min and at most 3.7 GiB on one core (IU Quartz, September 2026):
+
+```bash
+submit.sh script scripts/batch_runners/scalar_processing.script --cd antarctica \
+    --queue short --tasks 1 --mem 16G --time 01:00:00 \
+    ISMIP7_TOOLS_VENV=<venv> ISMIP7_SCALAR_TREE=<the writer's --out-dir> \
+    ISMIP7_SCALAR_EXPERIMENT=ssp585 ISMIP7_SCALAR_CONFIGID=C007 \
+    ISMIP7_SCALAR_REFYEAR=2016 ISMIP7_SCALAR_OUT=<dir>
+```
+
 `--queue short|long|debug` names the site's partition by class, `--cd DIR`
 submits from `ISMIP7_REPO/DIR` (the timing scripts run from `antarctica/`),
 `--dependency` and `--wait` pass through. Standard output is sbatch's alone, so
@@ -141,6 +161,12 @@ falling back to `ISMIP7_CONSTRAINT`).
 Optional, for every submission: `ISMIP7_SBATCH_EXTRA`, extra sbatch flags split
 on spaces (a QOS the partition insists on; your own `--mail-type`/`--mail-user`
 in `sites/local.env`). Chain successors are given it again.
+`ISMIP7_SHARED_JIT_CACHE` names a PyOP2 kernel store that every single-node
+job copies to node-local disk, compiles into, and copies its new kernels back
+to (`site_core.sh`), so a chain link starts from the kernels its predecessors
+compiled; the ranks never share the store over NFS directly. The store is kept
+per CPU model (`<store>/cpu-<hash>`), since a kernel compiled with
+`-march=native` on Sapphire Rapids killed a Cascade Lake job with a bus error.
 
 Optional, for the timing campaign: `ISMIP7_CONSTRAINT_TIMING` (the node feature
 `submit.sh script` asks for; defaults to `ISMIP7_CONSTRAINT_FWD`),
@@ -352,7 +378,11 @@ Defaults write `inversion_icepack2_rc_n3_dg0_logvelnet_<ISMIP7_LC>.h5` (1000
 on the production mesh) under the settings the 2500 m result came from:
 sigma-normalised velocity misfit with ISSM's logarithmic term, the pointwise
 dH/dt term, and the integrated net mass-balance constraint that is off by
-default in the repo.
+default in the repo. The geometry is sampled with `ISMIP7_RASTER_SAMPLE`,
+`vertex_front` by default since issue #167 (the marine front rebuilt from
+BedMachine's mask); a warm start sampled another way supplies its controls
+and fluidity prior, and its mixed state only as a first guess under
+`ISMIP7_WARM_START_STATE=1` (README, the warm start knobs).
 
 `site_env.sh` defaults `ISMIP7_FRICTION` to `regularized_coulomb` everywhere.
 Budd's shelf gate was a sign test on the roundoff residue of the effective
@@ -366,28 +396,53 @@ vertex sampling), each named so the converged 2500 m MAP is never touched, with
 partition, constraint and rank count from the site file.
 
 **The chain.** A 2 km inversion can outlast a wall limit. The inversion
-checkpoints `ISMIP7_MAP_OUT` every 20 iterates and warm-starts from it, so each
+checkpoints `ISMIP7_MAP_OUT` every `ISMIP7_CHECKPOINT_EVERY_IT` iterates (default
+1) and warm-starts from it, so each
 job queues its successor first with `--dependency=afterany`, copying partition,
 constraint, memory, time and task layout from `scontrol`. Every link exits at
 once if `<map>.done` exists, meaning the MAP reached disk. The driver writes
 that marker as soon as the checkpoint write returns, so a kill in the tail
 (final solve, summary figure) cannot lose it; the runner's post-`srun` grep for
-the driver's `Saved MAP:` line is the fallback. Depth is capped by
-`ISMIP7_CHAIN_MAX` (4). A warm start whose mesh dof ordering differs from the
-run's own is refused, since a rank-count change mid-chain would scramble theta
-and phi silently. Regression test: `tests/test_inversion_chain.py`.
+the driver's `Saved MAP:` line is the fallback. An optimizer that stops right
+after failed trial evaluations leaves the MAP unmarked: scipy's L-BFGS-B
+reports that stop as convergence at a point whose gradient is not small (RC's
+link 11461566 stopped so at evaluation 107 with a gradient norm of 1.03, issue
+#153), so the driver prints `MAP not final:` before saving, writes no marker,
+and the runner writes none either. The successor resumes from the MAP with a
+fresh L-BFGS-B memory, and a run that stalls again at every resume spends its
+links. Depth is capped by
+`ISMIP7_CHAIN_MAX` (4). Under `ISMIP7_LOG_VEL_WEIGHT=auto`, the runner's
+default, a link takes the log-velocity weight the checkpoint records, so every
+link of one MAP minimises the objective the first link set (issue 68). A warm
+start is read by point location (`transfer.interpolate_with_fill`), so one
+written on another rank count or on another mesh loads correctly. A target
+point outside the warm start's mesh takes the fill `ISMIP7_TRANSFER_FILL`
+names (`MAP_CHECK.md`), and the log counts those points per field. A single-node link copies its warm start to node-local `$TMPDIR` first:
+32 ranks reading a 580 MB 2 km MAP over NFS took more than 45 minutes on NOTS.
+A link that loses a rank (the OOM killer, a crash) ends at once (below, "One
+dead rank ends the step") with no `Saved MAP:`, and its queued successor
+resumes from the last checkpoint in a fresh process, so an out-of-memory link
+costs one evaluation and a restart.
+`ISMIP7_MAXITER` counts per process, so each link spends it again.
+`ISMIP7_CHAIN_ITER_BUDGET` caps the accepted iterations across the whole
+chain: each link adds the count its predecessor saved in the checkpoint to
+the sidecar `<map>.iters`, keyed by the checkpoint's mtime and size so a link
+that saved nothing is not counted twice, and runs the remainder as its
+`ISMIP7_MAXITER`; a spent budget marks the MAP done.
+Regression test: `tests/test_inversion_chain.py`.
 
 ### `projection.sbatch`, self-chaining
 
-A 285-year projection is about two days on the production mesh, so this
+A 285-year projection is about four days on the production mesh, so this
 resubmits itself with `--dependency=afterok` until the run reaches its end
 year, resuming through `ISMIP7_AUTO_RESUME=1`. Each driver owns its end year
 and the runner does not default `ISMIP7_T_END`; the chain reads the value the
-run used from the driver's `Time-stepping: <start>-><end>` line. At 1000 m /
-10 km on 64 ranks under `scpc_gamg`, 24 h buys at most 140 simulated years, so
-a full projection is about three links. At Rice's default of 32 ranks on one
-Cascade Lake node, 31 min a year buys about 46 years a link, so a full
-projection is about seven.
+run used from the driver's `Time-stepping: <start>-><end>` line. At the
+production step, `dt = 0.025` (issue 20), Rice's default of 32 ranks on one
+Cascade Lake node measured 22.5 min a simulated year, 62 years a 24 h link,
+so a full projection is five links, and a historical from 2003 fits in one. On 64 Quartz ranks
+the matrix's 30 s a step would give about 70 years a link, also five links; a
+chain already running keeps the step it started with.
 
 ```bash
 submit.sh projection ISMIP7_EXPERIMENT=control
@@ -399,8 +454,16 @@ submit.sh projection ISMIP7_EXPERIMENT=control
 | `ssp126_cesm_waccm` / `ssp126_mri_esm2` | 5 / 6 | 2015-2300 |
 | `ssp370_cesm_waccm` / `ssp370_mri_esm2` | 3 / 4 | 2015-2100 |
 | `ssp585_cesm_waccm` / `ssp585_mri_esm2` | 7 / 8 | 2015-2300 |
-| `ocx` | 11 | 1979-2025 |
-| `hist_cesm_waccm` / `hist_mri_esm2` | 1 / 2 | 1850-2014 |
+| `ocx` | 11 | 2003-2025 |
+| `hist_cesm_waccm` / `hist_mri_esm2` | 1 / 2 | 2003-2014 |
+| `relax` | none: the relaxation year of the relaxed initial state, from `ISMIP7_INVERSION` on its own mesh (`ISMIP7_MESH=checkpoint`) | 2014 |
+
+`relax` defaults the apparent MB and the yearly output off and stops unless
+`ISMIP7_MESH=checkpoint` gives it the MAP's mesh and geometry. Its end state
+seeds a re-inversion that waits on it: `submit.sh inversion --dependency
+afterok:<relax job>` (the README, "The relaxed initial state", has the whole
+recipe). `--dependency` is open to `inversion` and `projection` for this; the
+runners' chains queue their own successors.
 
 The runner writes the submission's yearly fields and scalars by default (`ISMIP7_OUTPUT=1`), because every experiment it offers is a core experiment and a projection that reaches 2300 without them has to be run again. `ISMIP7_OUTPUT=0` turns that off for a pipeline exercise.
 
@@ -417,9 +480,55 @@ resubmits, unless `ISMIP7_CHAIN=0`, or auto-resume is off (a successor would
 cold-start and repeat the years), or the final checkpoint is unreadable, or the
 job advanced no years at all (setup alone spent the budget).
 
+**A historical can queue what branches from it.** `ISMIP7_CHAIN_THEN` names
+follow-on experiments (space-separated, from the runner's list), and the job
+that brings the chain to its end year queues each one behind itself, as a fresh
+chain with the same environment and allocation, less `ISMIP7_T_START` and
+`ISMIP7_T_END`, since each follow-on's driver owns its period; a job that stops
+short carries the list on to its successor, and a stalled or failed one queues
+nothing. So a
+control and the projections are submitted with their historical and start only
+once it has reached 2015, which is what `simulation.historical_endpoint` then
+checks before they branch. A misspelt follow-on stops the first job before the
+driver runs:
+
+```bash
+ISMIP7_EXPERIMENT=hist_mri_esm2 ISMIP7_ESM=MRI-ESM2-0 \
+    ISMIP7_CHAIN_THEN="control" antarctica/scripts/batch_runners/submit.sh projection
+```
+
+**A finished chain can run a command.** `ISMIP7_CHAIN_THEN_CMD` is a shell
+command that both runners run once, in the link that finishes the run (the
+inversion's MAP marked done, the forward at its end year, after queueing its
+follow-ons). Every link inherits it; a forward's follow-ons do not. Its
+failure is logged and leaves the link's exit code alone. The staged
+initialization routine (`antarctica/INITIALIZATION_ROUTINE.md`) hands itself
+the next stage this way. Regression tests: `tests/test_inversion_chain.py`,
+`tests/test_projection_chain.py`.
+
 A relaunch from a stalled state has cleared the diagnostic-Newton wall in every
 observed case (see Known issues in `antarctica/README.md`). The chain leaves
 that judgement to you: resubmit, and auto-resume picks the run up.
+
+**MPI-IO goes through romio.** Every rank is started with
+`OMPI_MCA_io=romio321` (`ismip7_mpirun` in `site_core.sh`), because Open MPI's
+default ompio component writes a parallel HDF5 file to an NFS file system at
+about 1.5 MB/s: on NOTS, 32 ranks on the 1000 m mesh, one 1.48 GB yearly
+output file took 1042 s to `/scratch` under ompio and 52 s under romio321
+(24 September 2026), on a file system that takes a single stream at 600 MB/s.
+Before the change the yearly write was a third of a 45-minute model year.
+`ISMIP7_MPI_IO` names the component; set it empty to leave the MPI's own
+default. An MPI other than Open MPI ignores the variable.
+
+**One dead rank ends the step.** `ismip7_mpirun` starts every srun with
+`--kill-on-bad-exit=1`, and with `--oom-kill-step=1` where `srun --help` lists
+it (Slurm 24.11 and later; an older srun would refuse the option). Without
+them a rank that dies leaves the others waiting in MPI until the wall limit,
+under Slurm's default `KillOnBadExit=0`, which IU Quartz runs: in job 10971250
+the OOM killer took one of 32 ranks 4 h 28 min into a 16 h inversion and the
+node sat idle for the remaining 11.5 h (issue #161). A container site's
+`mpiexec` already takes every rank down when one dies. Regression test:
+`tests/test_site_core.py`.
 
 The wall budget is derived per job. Each link reads its own partition's
 `TimeLimit`, holds back 25 minutes and passes the rest as
@@ -436,17 +545,25 @@ final checkpoint for the successor.
 | 2 km / 20 km interior inversion | 12 | 120 GB | 1.5 days | 450 |
 | 2 km / 5 km interior inversion | 12 | 255 GB | 2-3 days | 800 |
 | full 11-experiment set at 2500 m | | | | 15,000 |
-| 1000 m / 10 km forward, per simulated year (Quartz, `scpc_gamg`) | 64 | under 70 GB | 10 min | 11 |
-| 1000 m / 10 km projection, 285 years (Quartz, `scpc_gamg`) | 64 | under 70 GB | 2 days | 3,040 |
-| 1000 m / 10 km forward, per simulated year (Rice, `scpc_gamg`) | 32 | under 180 GB | 31 min | 16 |
+| 1000 m / 10 km forward, per simulated year at `dt = 0.025` (Rice, `scpc_gamg`) | 32 | under 180 GB | 22.5 min | 12 |
+| 1000 m / 10 km forward, per simulated year at `dt = 0.025` (Quartz, `scpc_gamg`, estimated) | 64 | under 70 GB | about 20 min | about 21 |
+| 1000 m / 10 km projection, 285 years at `dt = 0.025` (Quartz, `scpc_gamg`, estimated) | 64 | under 70 GB | about 4 days | about 6,100 |
+| 1000 m / 10 km forward, per simulated year at `dt = 0.05` (Quartz, `scpc_gamg`) | 64 | under 70 GB | 10 min | 11 |
+| 1000 m / 10 km projection, 285 years at `dt = 0.05` (Quartz, `scpc_gamg`) | 64 | under 70 GB | 2 days | 3,040 |
+| 1000 m / 10 km forward, per simulated year at `dt = 0.05` (Rice, `scpc_gamg`) | 32 | under 180 GB | 31 min | 16 |
 
-The two Quartz rows are the production configuration, from
+The production step is `dt = 0.025` (issue 20). The Rice row at that step is
+the 1 km historicals the group chose it on, CESM2-WACCM for 78 and
+MRI-ESM2-0 for 66 simulated years with no rescue step, 62 simulated years a
+24 h job. The Quartz rows at `dt = 0.05` are from
 `antarctica/TIMING_MATRIX_QUARTZ_SCPC_GAMG.md`: the transient loop of a
-ten-step lane at `dt = 0.05` under the matrix's strict contract, extrapolated.
-Setup, forcing updates and output are not in them, and the memory is 64 times
-the largest rank's peak. The Rice row is a 1 km control from a transferred
-2 km MAP on one Cascade Lake node (job 1592597), 92 s per `dt = 0.05` step.
-The 2500 m and 2 km rows are whole runs on Cascade Lake under `full_mumps`.
+ten-step lane under the matrix's strict contract, extrapolated. Setup,
+forcing updates and output are not in them, and the memory is 64 times the
+largest rank's peak. The Quartz rows at `dt = 0.025` double their steps at the
+same cost a step, which is not yet measured. The Rice row at `dt = 0.05` is a
+1 km control from a transferred 2 km MAP on one Cascade Lake node (job
+1592597), 92 s a step. The 2500 m and 2 km rows are whole runs on Cascade
+Lake under `full_mumps`.
 
 Per iterate at 2500 m on 12 ranks: forward median 1081 s (p10 932, p90 1365),
 adjoint 92 s, iterate 1174 s. The adjoint is 8% of the iterate, so the cost
@@ -463,9 +580,3 @@ independent, so a handful of nodes finishes it inside a week.
   reports ghost/owned 0.010 at 32 ranks (max 0.017, halo 1.0 % of owned),
   so the build partitions by locality and rank counts up to a node are
   meaningful there. The forward cost is the Rice row of the table above.
-- An inversion factors the complete mixed Jacobian with MUMPS, which sets its
-  memory; `tlm_adjoint` differentiates through that solve, so no setting
-  changes it. Cluster forwards took the field split this item asked for:
-  `projection.sbatch` defaults to `scpc_gamg`, which eliminates the cell-wise
-  stress and traction blocks exactly and puts multigrid on the condensed
-  velocity operator (section 7 of `antarctica/README.md`).

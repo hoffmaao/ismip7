@@ -21,9 +21,9 @@ Depth average temperature,"x,y,t",ST,litempavg,,K,no,Should get standard name la
 Basal temperature beneath grounded ice sheet,"x,y,t",ST,litempbotgr,temperature_at_base_of_ice_sheet_model,K,no,Ice temperature at base of grounded ice sheet,183,290,183,290,error,no_grounded_ice,warning
 Basal temperature beneath floating ice shelf,"x,y,t",ST,litempbotfl,temperature_at_base_of_ice_sheet_model,K,no,Ice temperature at base of floating ice shelf,183,290,183,290,error,no_floating_ice,warning
 Basal drag,"x,y,t",ST,strbasemag,land_ice_basal_drag,Pa,yes,Basal drag,0,1.00E+06,0,1.00E+06,error,no_ice,warning
-Calving flux,"x,y,t",FL,licalvf,land_ice_specific_mass_flux_due_to_calving,kg m-2 s-1,yes,Ice mass change resulting from iceberg calving. Only for grid cells in contact with ocean,-1.00E+11,0,-1.00E+11,0,error,forbidden,
-Grounding line flux,"x,y,t",FL,ligroundf,,kg m-2 s-1,yes,Flux of ice mass across the grounding line. Only for grounding line grid cells. Should get standard name: land_ice_specific_grounding_line_flux,-1.00E+09,1.00E+11,-1.00E+09,1.00E+11,error,forbidden,
-Ice front melt flux,"x,y,t",FL,lifmassbf,,kg m-2 s-1,yes,Ice mass change resulting from ice front melting. Only for grid cells in contact with ocean. Should get standard name: land_ice_specific_mass_flux_due_to_ice_front_melting,-1.00E+11,0,-1.00E+11,0,error,forbidden,
+Calving flux,"x,y,t",FL,licalvf,land_ice_specific_mass_flux_due_to_calving,kg m-2 s-1,yes,Ice mass change resulting from iceberg calving. Only for grid cells in contact with ocean,-10,0,-10,0,error,forbidden,
+Grounding line flux,"x,y,t",FL,ligroundf,,kg m-2 s-1,yes,Flux of ice mass across the grounding line. Only for grounding line grid cells. Should get standard name: land_ice_specific_grounding_line_flux,-10,10,-10,10,error,forbidden,
+Ice front melt flux,"x,y,t",FL,lifmassbf,,kg m-2 s-1,yes,Ice mass change resulting from ice front melting. Only for grid cells in contact with ocean. Should get standard name: land_ice_specific_mass_flux_due_to_ice_front_melting,-10,0,-10,0,error,forbidden,
 Land ice area fraction,"x,y,t",ST,sftgif,land_ice_area_fraction,1,yes,"Fraction of grid cell covered by land ice (ice sheet, ice shelf, ice cap, glacier)",0,1,0,1,error,forbidden,
 Grounded ice sheet area fraction,"x,y,t",ST,sftgrf,grounded_ice_sheet_area_fraction,1,yes,"Fraction of grid cell covered by grounded ice sheet, where grounded indicates that the quantity correspond to the ice sheet that flows over bedrock",0,1,0,1,error,forbidden,
 Floating ice sheet area fraction,"x,y,t",ST,sftflf,floating_ice_shelf_area_fraction,1,yes,Fraction of grid cell covered by ice sheet flowing over seawater,0,1,0,1,error,forbidden,
@@ -35,9 +35,9 @@ Total ice mass,t,ST,lim,land_ice_mass,kg,yes,"spatial integration, volume times 
 Mass above floatation,t,ST,limnsw,land_ice_mass_not_displacing_sea_water,kg,yes,"spatial integration, volume times density",0,1.00E+25,0,1.00E+25,error,forbidden,
 Grounded ice area,t,ST,iareagr,grounded_ice_sheet_area,m^2,yes,spatial integration,0,1.00E+25,0,1.00E+25,error,forbidden,
 Floating ice area,t,ST,iareafl,floating_ice_shelf_area,m^2,yes,spatial integration,0,1.00E+25,0,1.00E+25,error,forbidden,
-Total SMB flux,t,FL,tendacabf,tendency_of_land_ice_mass_due_to_surface_mass_balance,kg s-1,yes,spatial integration,0,1.00E+25,0,1.00E+25,error,forbidden,
-Total BMB flux beneath grounded ice,t,FL,tendlibmassbfgr,tendency_of_land_ice_mass_due_to_basal_mass_balance,kg s-1,yes,spatial integration,0,1.00E+25,0,1.00E+25,error,forbidden,
-Total BMB flux beneath floating ice,t,FL,tendlibmassbffl,tendency_of_land_ice_mass_due_to_basal_mass_balance,kg s-1,yes,spatial integration (computed beneath floating ice only),0,1.00E+25,0,1.00E+25,error,forbidden,
-Total calving flux,t,FL,tendlicalvf,tendency_of_land_ice_mass_due_to_calving,kg s-1,yes,spatial integration,0,1.00E+25,0,1.00E+25,error,forbidden,
-Total ice front melting flux,t,FL,tendlifmassbf,,kg s-1,yes,"spatial integration, should get standard name: tendency_of_land_ice_mass_due_to_ice_front_melting",0,1.00E+25,0,1.00E+25,error,forbidden,
-Total grounding line flux,t,FL,tendligroundf,,kg s-1,yes,"spatial integration, should get a standard name",0,1.00E+25,0,1.00E+25,error,forbidden,
+Total SMB flux,t,FL,tendacabf,tendency_of_land_ice_mass_due_to_surface_mass_balance,kg s-1,yes,spatial integration,-1.00E+09,1.00E+09,-1.00E+09,1.00E+09,error,forbidden,
+Total BMB flux beneath grounded ice,t,FL,tendlibmassbfgr,tendency_of_land_ice_mass_due_to_basal_mass_balance,kg s-1,yes,spatial integration,-1.00E+09,1.00E+09,-1.00E+09,1.00E+09,error,forbidden,
+Total BMB flux beneath floating ice,t,FL,tendlibmassbffl,tendency_of_land_ice_mass_due_to_basal_mass_balance,kg s-1,yes,spatial integration (computed beneath floating ice only),-1.00E+09,1.00E+09,-1.00E+09,1.00E+09,error,forbidden,
+Total calving flux,t,FL,tendlicalvf,tendency_of_land_ice_mass_due_to_calving,kg s-1,yes,spatial integration,-1.00E+09,1.00E+09,-1.00E+09,1.00E+09,error,forbidden,
+Total ice front melting flux,t,FL,tendlifmassbf,,kg s-1,yes,"spatial integration, should get standard name: tendency_of_land_ice_mass_due_to_ice_front_melting",-1.00E+09,1.00E+09,-1.00E+09,1.00E+09,error,forbidden,
+Total grounding line flux,t,FL,tendligroundf,,kg s-1,yes,"spatial integration, should get a standard name",-1.00E+09,1.00E+09,-1.00E+09,1.00E+09,error,forbidden,

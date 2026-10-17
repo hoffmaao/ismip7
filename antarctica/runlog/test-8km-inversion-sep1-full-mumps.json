@@ -1,0 +1,20 @@
+{
+  "id": "test-8km-inversion-sep1-full-mumps",
+  "task": "test",
+  "institution": "IU",
+  "status": "done",
+  "friction": "budd",
+  "site": "IU workstation (Mac, 16 cores, 128 GB), data under /Volumes/LaCie/Data/antarctica_general/ismip7_obs",
+  "started": "2026-10-02",
+  "finished": "2026-10-02",
+  "code": "432c831 (PR 155 with PR 158 and the sub-element scheme version, a git archive run from the session scratch); icepack_tools e7b923e",
+  "title": "8 km inversion, 10 TAO iterations under full_mumps, SEP1 and the direct forward, against scpc_gamg",
+  "mesh": "antarctica_80000_8000_buffered0, built on this workstation with mesh_antarctica.py --lc 8000 --lc-coarse 80000 --buffer-m 0 (sha256 267a1265; 34,714 vertices, 64,228 cells), DG0 geometry, vertex raster sampling",
+  "initial_state": "cold start: u = 0.1 u_obs, theta = phi = 0, the n,m 1 to 3 ramp under full_mumps, then the direct forward (ISMIP7_DIRECT_FORWARD default)",
+  "forcing": "MEaSUREs v2 450 m (sha256 268be94e) and BedMachine v4.1 (sha256 6bd08dbb), byte-identical to Quartz's antarctica/data; ISMIP7_FLUIDITY_PRIOR=legacy; the log friction control; SEP1 sub-element friction, version 2 (the default), with the exact front push; bi-Laplacian prior (sigma 0.3 on theta and phi, rho 7.5 km); ISMIP7_INVERSION_LINEAR_SOLVER=full_mumps; no dH/dt term; log-speed weight 0; TAO lmvm with the mass-consistent metric (ISMIP7_GRAD_PRECOND=mass_consistent)",
+  "resources": "8 ranks, the study's only run at the time, other sessions sharing the machine (load average 8.13 at the start and 14.25 at the end); the unit suite (one serial process) ran alongside from 16:48 to 16:56 EDT; peak 2.8 GB a rank",
+  "cost": "172 s wall; 8.22 s a TAO iteration (median after the first; the first 21.9 s), of it 4.77 s the forward and 1.85 s the checkpoint",
+  "results": "/Volumes/LaCie/Data/antarctica_general/ismip7_runs/pr158_merge/C_8km_full_mumps/map.h5 (sha256 1cb4f39c), log.txt, timing.json, code.txt; the wrappers are runm.sh, study.sh and study_exp.sh in pr158_merge",
+  "audit": "10 TAO iterations, objective 7.967201e3 to 5.318421e3; every direct forward converged (2 to 7 Newton iterations), no lost trial, no rescue; published residual 2.4e1; every iteration's objective within 7.3e-11 and gradient norm within 3.4e-9 of the other solver's",
+  "notes": "the solver pair at 8 km: full_mumps against scpc_gamg (test-8km-inversion-sep1-scpc-gamg)"
+}

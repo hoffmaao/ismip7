@@ -7,11 +7,11 @@
   "exp_id": "C001",
   "esm": "CESM2-WACCM",
   "scenario": "historical",
-  "period": "1850, or a steady 1960 or 1975 start, to 2014",
-  "branch_from": "a steady state",
+  "period": "2003 to 2014",
+  "branch_from": "cold start from the MAP, its geometry backdated to 2003 by the Smith et al. (2020) dH/dt (issue 117)",
   "melt": "one toolbox K with the per-basin offset",
   "apparent_mb": "balance",
-  "dt": 0.05,
-  "mesh": "the production mesh, issue #20",
+  "dt": 0.025,
+  "mesh": "antarctica_10000_1000_buffered20000 (Rice's build, 1,869,252 vertices), 1 km fine, 10 km interior, 20 km buffer",
   "notes": "issue #28: every core needs re-running from the new MAPs. The handoff to the projections is at 2015.0, as issue #34 settled"
 }

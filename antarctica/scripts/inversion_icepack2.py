@@ -2855,8 +2855,9 @@ def main():
     last_good_total = [np.inf]
     last_x = [None]                      # controls of the last CONVERGED evaluation
     trial_failures = TrialFailures()
-    # The scipy path's accepted iterate with its mixed state, residual and
-    # objective terms, for the publishing solve and the MAP's record.
+    # The scipy path's accepted, lowest and last evaluations with their mixed
+    # states, residuals and objective terms, for the publishing solve and
+    # the MAP's record.
     accepted_iterate = AcceptedIterate()
     iteration_count = [0]
     timing_history = []
@@ -3073,13 +3074,13 @@ def main():
         iteration_count[0] += 1
         # NB: this path records the last EVALUATED point (L-BFGS-B trial
         # points included) in the periodic checkpoints, whose controls are
-        # that point's; the final MAP gets the accepted iterate's record back
-        # from accepted_iterate. The TAO path below records the accepted
-        # iterate.
+        # that point's; the final MAP gets the record of the evaluation it is
+        # published at from accepted_iterate. The TAO path below records the
+        # accepted iterate.
         last_accepted.update(iteration=iteration_count[0], total=total, misfit=J_val,
                              reg_theta=reg_theta, reg_phi=reg_phi)
         with spans("record_state"):
-            accepted_iterate.evaluated(last_good_x[0], {
+            accepted_iterate.evaluated(last_good_x[0], total, {
                 "state": [_zb.dat.data_ro.copy() for _zb in z_backup.subfunctions],
                 "fnorm": last_good_fnorm[0],
                 "obj": J_val,
@@ -3720,25 +3721,34 @@ def main():
     PETSc.Sys.Print(f"\nOptimization finished: {result.message}")
     PETSc.Sys.Print(f"  {result.nit} iterations, {result.nfev} function evaluations")
     _x_final = result.x / _sqrtm if grad_precond == "mass" else result.x
-    global_to_func(_x_final[:global_ndof], theta)
-    set_phi(_x_final[global_ndof:])
-    _t_lo, _t_hi = global_range(theta)
-    _p_lo, _p_hi = global_range(phi)
-    PETSc.Sys.Print(f"  theta range: [{_t_lo:.3f}, {_t_hi:.3f}]")
-    PETSc.Sys.Print(f"  phi range:   [{_p_lo:.3f}, {_p_hi:.3f}]")
     if grad_precond not in ("mass_consistent", "prior"):
-        # scipy returns the accepted iterate, and the last evaluation is
-        # usually a rejected or failed trial (AcceptedIterate). Put the
-        # accepted evaluation's mixed state, residual and objective back, so
-        # the publishing solve starts from the state of these controls and
-        # the MAP records their objective.
-        _acc = accepted_iterate.at(_x_final)
-        if _acc is None:
+        # The driver holds the last successful evaluation's mixed state, and
+        # scipy's result.x is rarely that evaluation: usually the accepted
+        # iterate, and after failed trials the last failed trial itself
+        # (AcceptedIterate). Publish at the evaluation at result.x, else at
+        # the lowest-objective evaluation, with that evaluation's mixed
+        # state, residual and objective, so the publishing solve starts from
+        # the state of the controls the MAP saves and the MAP records their
+        # objective.
+        _pub = accepted_iterate.publish(_x_final)
+        if _pub is None:
             PETSc.Sys.Print(
-                "  WARNING: no evaluation on record is at the returned "
-                "controls; the publishing solve starts from the last "
-                "evaluated state")
+                "  WARNING: no evaluation on record; the publishing solve "
+                "starts from the last evaluated state")
         else:
+            _x_pub, _acc, _how = _pub
+            _n_acc, _f_acc = _acc["terms"]["iteration"], _acc["terms"]["total"]
+            if _how == "lowest":
+                PETSc.Sys.Print(
+                    f"  The returned controls match no successful evaluation "
+                    f"(a failed trial); the MAP is published at evaluation "
+                    f"{_n_acc}, the lowest objective evaluated (total "
+                    f"{_f_acc:.6e})")
+                _x_final = np.array(_x_pub, copy=True)
+            else:
+                PETSc.Sys.Print(
+                    f"  Returned controls: evaluation {_n_acc} (total "
+                    f"{_f_acc:.6e})")
             for _z, _zb, _d in zip(z.subfunctions, z_backup.subfunctions,
                                    _acc["state"]):
                 _z.dat.data[:] = _d
@@ -3750,10 +3760,12 @@ def main():
             last_x[0] = last_good_x[0]
             last_accepted.clear()
             last_accepted.update(_acc["terms"])
-            PETSc.Sys.Print(
-                f"  Returned controls: evaluation {_acc['terms']['iteration']} "
-                f"(total {_acc['terms']['total']:.6e}), whose mixed state "
-                "seeds the publishing solve")
+    global_to_func(_x_final[:global_ndof], theta)
+    set_phi(_x_final[global_ndof:])
+    _t_lo, _t_hi = global_range(theta)
+    _p_lo, _p_hi = global_range(phi)
+    PETSc.Sys.Print(f"  theta range: [{_t_lo:.3f}, {_t_hi:.3f}]")
+    PETSc.Sys.Print(f"  phi range:   [{_p_lo:.3f}, {_p_hi:.3f}]")
     # A stop right after failed trials is no convergence test (TrialFailures),
     # so the MAP gets no done marker and the chain's next link resumes from
     # it. Printed before the MAP is saved: the runner reads this line, and a
@@ -3763,9 +3775,9 @@ def main():
         PETSc.Sys.Print(
             f"  {NOT_FINAL} the optimizer stopped right after "
             f"{trial_failures.trailing} failed trial evaluations in a row "
-            f"({trial_failures.total} in this run). The MAP holds the last "
-            "accepted iterate; no done marker, so the chain's next link "
-            "resumes from it.")
+            f"({trial_failures.total} in this run). The MAP holds the "
+            "evaluation named above; no done marker, so the chain's next "
+            "link resumes from it.")
 
     # ── Save MAP immediately ──
     chk_fn = os.path.join(_map_dir, map_fn)

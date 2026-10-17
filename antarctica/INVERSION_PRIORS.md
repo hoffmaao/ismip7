@@ -145,19 +145,21 @@ failed trial. The fix was verified on a 12-iteration
 joint run (published residual 76). The stage-2 run showed the second half:
 its accepted iterate had a forward that converged only relatively from a
 starting residual of 1e17, hence the ceiling.
-The scipy L-BFGS-B path had the same fault until 16 October 2026: scipy
-returns the accepted iterate, while the driver kept the last evaluation's
-state, and the two differed at 595 of 600 endings on wall-limited
-quadratics (two are kept in `tests/test_trial_failures.py`). The 2 km DG1
-velocity-only re-inversion 12286864 stopped after three failed trials, and
-its publishing
-solve started from the state of evaluation 100, a rejected trial; it
-diverged (`||F||` 4.9e8 to 2.5e32) and no velocity was published.
-`optimization.AcceptedIterate` now keeps the evaluation the L-BFGS-B
-callback accepts, with its mixed state, residual and objective terms; the
-publishing solve starts from that state, and the MAP records that
-objective. The periodic checkpoints still record the last evaluation, with
-its own controls.
+The scipy L-BFGS-B path had the same fault until 16 October 2026: the
+driver kept only the last evaluation's state, and scipy's returned controls
+are rarely that evaluation. On wall-limited quadratics they were the
+accepted iterate at 600 of 600 endings and the last evaluation at 5. The
+2 km DG1 velocity-only re-inversions 12286864 and 12291649 each stopped
+after three failed trials and returned the last failed trial itself: the
+publishing solve, started from the same last good state as that trial,
+diverged as it did (`||F||` 1.841e27 at Newton iteration 11 in 12291649,
+2.455e32 at iteration 14 in 12286864), and neither published a velocity. `optimization.AcceptedIterate` keeps the
+accepted (callback), lowest-objective and last evaluations with their mixed
+states, residuals and objective terms. The MAP is published at the
+evaluation at the returned controls, else at the lowest-objective
+evaluation; the publishing solve starts from that evaluation's state and
+the MAP records its objective. The periodic checkpoints still record the
+last evaluation, with its own controls.
 
 **Restart handoff.** Every checkpoint records the objective's settings and
 the objective at the accepted iterate; a warm start freezes the auto weights

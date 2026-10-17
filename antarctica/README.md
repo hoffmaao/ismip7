@@ -1458,15 +1458,21 @@ parameters and the front-advance mode. The parameters shipped are the Pine
 Island calibrations against the Greene record where that study fitted them,
 the submission front's own value for `hfb`, and published Antarctic values
 otherwise; `fixed` (the protocol's pinned front) and `nocalving` (free
-advance, nothing removed) bound every law. The `hfb0x*` and `vm150x*`
-members run the same laws with the rate turned up by a global `scale`
-(1.5 to 3): on the 2 km buffered mesh every free law at its published value
-calved less than the ice reaching the front (hfb 0: 800 Gt/yr, von Mises
-0.15: 630, 0.275: 275, against ~1,190 for the pinned front and ~1,265
-observed), so its fronts advanced and mass piled up at them, while the
-Greene record holds the continent's ice area nearly steady over 2003-2015
-(+0.5 thousand km2/yr on 13.6 million). The scale that holds the area is
-the continent-wide calibration; thresholds per region come after it.
+advance, nothing removed) bound every law. The `vm130`, `vm130g`, `hfb086`,
+`eig5e6`, `eig1e7` and `thk235` members run each law at its own parameter
+fitted to a flux-balance target (calvingMIP's `tune_greene.py --target
+balance` on a yearly state of the `fixed` member): per Mouginot basin, the
+flux a stationary front at the model's own front would remove, less what the
+Greene record says the basin's front did over 2003-2015 (ice density times
+front thickness times the area trend). On the 2 km buffered mesh every free
+law at its published value calved less than the ice reaching the front (hfb
+0: 800 Gt/yr, von Mises 0.15: 630, 0.275: 275, against ~1,190 for the pinned
+front and ~1,265 observed), so its fronts advanced; the fits say von Mises
+0.13 MPa, hfb 0.086 MPa, eigencalving K 4.9e6 m yr and hc 235 m hold the
+basins' fronts as the record did, at the fixed front. The diagnostic flux at
+that front runs ~1.7x what the forwards booked under the same law, so the
+forward members are the test of the fit, scored on ice area and front rms.
+Every law also takes `scale`, a global factor on its rate, kept as a knob.
 
 ```sh
 . ./fwd_env_sep1.sh                                   # the production environment

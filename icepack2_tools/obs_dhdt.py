@@ -360,6 +360,21 @@ CELL_MEAN_SOLVER = {"snes_type": "ksponly", "ksp_type": "preonly",
                     "pc_type": "jacobi"}
 
 
+def speed_weight(speed, ratio, slow, fast):
+    r"""The velocity misfit's weight at observed speed ``speed`` (m/yr) under
+    ``ISMIP7_DHDT_SPEED_RATIO``: 1 at and above ``fast``, ``1/ratio`` at and
+    below ``slow``, and log-linear in speed between, so against the velocity
+    the dH/dt term carries ``ratio`` times the weight in ice slower than
+    ``slow`` that it carries in ice faster than ``fast``. ``ratio`` 1 is 1
+    everywhere."""
+    if not (ratio >= 1.0 and 0.0 < slow < fast):
+        raise ValueError(
+            f"speed weight needs ratio >= 1 and 0 < slow < fast, got ratio "
+            f"{ratio}, slow {slow}, fast {fast}")
+    s = np.clip(np.asarray(speed, dtype=float), slow, fast)
+    return np.exp(-np.log(ratio) * np.log(fast / s) / np.log(fast / slow))
+
+
 def cell_mean_form(mean, f):
     r"""The residual whose root is the cell mean of ``f``, solved for the DG0
     Function ``mean`` under :data:`CELL_MEAN_SOLVER`. The inversion's dH/dt

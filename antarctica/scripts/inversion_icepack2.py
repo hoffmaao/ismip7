@@ -2307,6 +2307,35 @@ def main():
         sp_obs = sqrt(u_obs[0] ** 2 + u_obs[1] ** 2 + Constant(1e-12))
         return ln((sp + _eps_v) / (sp_obs + _eps_v))
 
+    # The velocity terms' weight by observed speed (ISMIP7_DHDT_SPEED_RATIO,
+    # obs_dhdt.speed_weight): 1 at and above ISMIP7_DHDT_SPEED_FAST, 1/ratio
+    # at and below ISMIP7_DHDT_SPEED_SLOW, log-linear between, so the dH/dt
+    # term outweighs the velocity in the slow interior and the coast keeps
+    # the weights it had. It multiplies the chi^2 and the log term alike;
+    # area_val stays the observed area, so fast ice keeps its weight.
+    dhdt_speed_ratio = float(os.environ.get("ISMIP7_DHDT_SPEED_RATIO", "1"))
+    dhdt_speed_slow = float(os.environ.get("ISMIP7_DHDT_SPEED_SLOW", "10"))
+    dhdt_speed_fast = float(os.environ.get("ISMIP7_DHDT_SPEED_FAST", "100"))
+    vel_mask = obs_mask
+    if dhdt_speed_ratio != 1.0:
+        if not use_dhdt:
+            raise RuntimeError(
+                "ISMIP7_DHDT_SPEED_RATIO weights the velocity against the dH/dt "
+                "term, so it needs ISMIP7_DHDT_WEIGHT > 0")
+        from icepack2_tools.obs_dhdt import speed_weight
+        vel_speed_weight = Function(Q, name="velocity_speed_weight").interpolate(
+            sqrt(u_obs[0] ** 2 + u_obs[1] ** 2))
+        vel_speed_weight.dat.data[:] = speed_weight(
+            vel_speed_weight.dat.data_ro, dhdt_speed_ratio, dhdt_speed_slow,
+            dhdt_speed_fast)
+        vel_mask = obs_mask * vel_speed_weight
+        _w_lo, _w_hi = global_range(vel_speed_weight)
+        PETSc.Sys.Print(
+            f"  Velocity weight by observed speed: 1/{dhdt_speed_ratio:g} at and "
+            f"below {dhdt_speed_slow:g} m/yr, 1 at and above {dhdt_speed_fast:g} "
+            f"m/yr, log-linear between (ISMIP7_DHDT_SPEED_RATIO); weight in "
+            f"[{_w_lo:.3g}, {_w_hi:.3g}]")
+
     _derived_w = None
     log_vel_w = (0.0 if LOG_VEL_WEIGHT.lower() == "auto"
                  else float(LOG_VEL_WEIGHT))
@@ -2316,11 +2345,11 @@ def main():
         # starts from, used when the warm start holds no weight of its own.
         _u0 = z.subfunctions[0]
         _chi2_0 = float(assemble(
-            (0.5 / area_val * obs_mask
+            (0.5 / area_val * vel_mask
              * ((_u0[0] - u_obs[0]) ** 2 / sig_ux ** 2
                 + (_u0[1] - u_obs[1]) ** 2 / sig_uy ** 2)) * dx(mesh)))
         _log_0 = float(assemble(
-            (0.5 / area_val * obs_mask * _log_ratio(_u0) ** 2) * dx(mesh)))
+            (0.5 / area_val * vel_mask * _log_ratio(_u0) ** 2) * dx(mesh)))
         _derived_w = (_chi2_0 / _log_0) if _log_0 > 0 else 0.0
     log_vel_w, log_vel_source, _log_vel_note = resolve_log_vel_weight(
         LOG_VEL_WEIGHT, _derived_w, warm_objective,
@@ -2449,7 +2478,7 @@ def main():
         integrand = (
             0.5
             / area_val
-            * obs_mask
+            * vel_mask
             * (
                 (u_sol[0] - u_obs[0]) ** 2 / sig_ux ** 2
                 + (u_sol[1] - u_obs[1]) ** 2 / sig_uy ** 2
@@ -2460,7 +2489,7 @@ def main():
             # ISSM SurfaceLogVelMisfit: a relative (scale-free) error, so the
             # fit is not bought entirely in the slow interior.
             integrand = integrand + (
-                Constant(0.5 * log_vel_w) / area_val * obs_mask
+                Constant(0.5 * log_vel_w) / area_val * vel_mask
                 * _log_ratio(u_sol) ** 2
             )
 
@@ -2573,21 +2602,53 @@ def main():
     # (diagnostic only -- outside the annotated tape, so they do not enter the
     # gradient). Both are dimensionless and directly comparable.
     _u_now = z.subfunctions[0]
-    _vel_chi2 = (
-        0.5 / area_val * obs_mask
+    _vel_density = (
+        0.5 / area_val * vel_mask
         * ((_u_now[0] - u_obs[0]) ** 2 / sig_ux ** 2
-           + (_u_now[1] - u_obs[1]) ** 2 / sig_uy ** 2)
-    ) * dx(mesh)
-    _log_chi2 = (0.5 / area_val * obs_mask * _log_ratio(_u_now) ** 2) * dx(mesh)
+           + (_u_now[1] - u_obs[1]) ** 2 / sig_uy ** 2))
+    _log_density = 0.5 / area_val * vel_mask * _log_ratio(_u_now) ** 2
+    _vel_chi2 = _vel_density * dx(mesh)
+    _log_chi2 = _log_density * dx(mesh)
     if use_dhdt:
         # the tendency the term scores: its cell means under DG1
         _dhdt_rate = (dhdt_cell if geom_dg1
                       else (h_next - H) / Constant(dhdt_dt))
         _net_form = ((_dhdt_rate - dhdt_obs) * dhdt_mask * dx(mesh))
-        _dhdt_chi2 = (
+        _dhdt_density = (
             0.5 / dhdt_area * dhdt_mask
-            * ((_dhdt_rate - dhdt_obs) / Constant(dhdt_sigma)) ** 2
-        ) * dx(mesh)
+            * ((_dhdt_rate - dhdt_obs) / Constant(dhdt_sigma)) ** 2)
+        _dhdt_chi2 = _dhdt_density * dx(mesh)
+
+    # Each data term split by observed speed (the cell's |u_obs| at its
+    # centroid), in the units of the per-evaluation report: where the
+    # objective's weight sits, and what ISMIP7_DHDT_SPEED_RATIO moves.
+    _band_edges = (0.0, 10.0, 30.0, 100.0, 300.0, np.inf)
+    _band_speed = Function(FunctionSpace(mesh, "DG", 0)).interpolate(
+        sqrt(u_obs[0] ** 2 + u_obs[1] ** 2))
+    _band_ind = []
+    for _lo, _hi in zip(_band_edges[:-1], _band_edges[1:]):
+        _ind = Function(_band_speed.function_space())
+        _ind.dat.data[:] = ((_band_speed.dat.data_ro >= _lo)
+                            & (_band_speed.dat.data_ro < _hi))
+        _band_ind.append((f"{_lo:g}-{_hi:g}", _ind))
+
+    def band_report(label):
+        """Collective: the data terms of the state in z by observed speed."""
+        rows = []
+        for name, ind in _band_ind:
+            row = [name, float(assemble(obs_mask * ind * dx(mesh))) / area_val,
+                   float(assemble(_vel_density * ind * dx(mesh)))]
+            row.append(log_vel_w * float(assemble(_log_density * ind * dx(mesh)))
+                       if log_vel_w > 0.0 else 0.0)
+            row.append(float(assemble(_dhdt_density * ind * dx(mesh)))
+                       if use_dhdt else 0.0)
+            rows.append(row)
+        PETSc.Sys.Print(f"  Data terms by observed speed, {label}:")
+        PETSc.Sys.Print(f"    {'m/yr':>9s} {'area':>6s} {'vel':>9s} {'W*log':>9s} {'dhdt':>9s}")
+        for name, frac, vel, wlog, dh in rows:
+            PETSc.Sys.Print(f"    {name:>9s} {frac:6.3f} {vel:9.3f} {wlog:9.3f} {dh:9.3f}")
+        tot = [sum(r[k] for r in rows) for k in range(1, 5)]
+        PETSc.Sys.Print(f"    {'all':>9s} {tot[0]:6.3f} {tot[1]:9.3f} {tot[2]:9.3f} {tot[3]:9.3f}")
 
     # Velocity chi^2 of the last accepted state, in ITS OWN accumulator. The
     # optimizer's J_val is the COMBINED objective under use_dhdt, so it cannot
@@ -2791,6 +2852,10 @@ def main():
                 chk.set_attr("/", "prior_rho", float(PRIOR_RHO))
             chk.set_attr("/", "dhdt_weight", float(dhdt_w))
             chk.set_attr("/", "dhdt_net_sigma", net_sigma_used)
+            chk.set_attr("/", "dhdt_speed_ratio", float(dhdt_speed_ratio))
+            if dhdt_speed_ratio != 1.0:
+                chk.set_attr("/", "dhdt_speed_slow", float(dhdt_speed_slow))
+                chk.set_attr("/", "dhdt_speed_fast", float(dhdt_speed_fast))
             # Which per-basin K the dH/dt melt source used, or "none". The
             # fallback is deliberately non-fatal (the misfit is grounded-only
             # and melt is zero there), but a MAP that cannot say whether it
@@ -3110,6 +3175,9 @@ def main():
                 + (" | before: " + " ".join(f"{k}={v:.2f}" for k, v in prev_gap.items())
                    if prev_gap else "")
             )
+
+        if iteration_count[0] == 1:
+            band_report("evaluation 1")
 
         if timing_json:
             with gap_spans("eval_terms"):
@@ -3630,6 +3698,10 @@ def main():
         "phi_grounded": PHI_GROUNDED, "raster_sample": str(raster_sample),
         "velocity_sample": VELOCITY_SAMPLE,
     })
+    run_settings["dhdt_speed_ratio"] = float(dhdt_speed_ratio)
+    if dhdt_speed_ratio != 1.0:
+        run_settings.update({"dhdt_speed_slow": float(dhdt_speed_slow),
+                             "dhdt_speed_fast": float(dhdt_speed_fast)})
     if PRIOR_FORM == "bilaplacian":
         run_settings.update({"prior_sigma_theta": float(PRIOR_SIGMA_THETA),
                              "prior_sigma_phi": float(PRIOR_SIGMA_PHI),
@@ -3923,6 +3995,7 @@ def main():
     if published:
         save_map(chk_fn, full_state=True)
         PETSc.Sys.Print(f"Saved full mixed-state MAP: {chk_fn}")
+        band_report("published state")
     else:
         PETSc.Sys.Print(
             f"WARNING: NOT saving mixed state -- the final forward solve at "

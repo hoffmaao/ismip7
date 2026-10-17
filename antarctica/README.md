@@ -1541,6 +1541,8 @@ thickness clamp from 119,000 to 256,000 Gt/yr within a few steps.
 | `ISMIP7_DHDT_WEIGHT` | weight on the dH/dt chi^2; `0` disables the transient constraint. Under `ISMIP7_GEOMETRY_SPACE=dg1` it scores the cell means of the tendency; CG1 geometry is refused | `0` |
 | `ISMIP7_DHDT_SIGMA` | assumed dH/dt uncertainty (m/yr), hand set since the MIPkit ships no uncertainty field | `0.1` |
 | `ISMIP7_DHDT_DT` | timestep of the prognostic step (yr) | `1.0` |
+| `ISMIP7_DHDT_SPEED_RATIO` | how many times the weight the dH/dt term carries against the velocity in ice slower than `ISMIP7_DHDT_SPEED_SLOW` that it carries in ice faster than `ISMIP7_DHDT_SPEED_FAST`: both velocity terms (the chi^2 and the log term) are multiplied by `obs_dhdt.speed_weight` of the observed speed, 1 at and above the fast speed, the inverse of the ratio at and below the slow one, log-linear in speed between; the dH/dt term and the prior keep their weights, and the area the velocity terms are normalised by stays the observed area. Needs `ISMIP7_DHDT_WEIGHT > 0`; recorded in the MAP and compared at a warm start's handoff. Each run prints its data terms by observed speed band at its first evaluation and at the published state | `1` (off) |
+| `ISMIP7_DHDT_SPEED_SLOW`, `ISMIP7_DHDT_SPEED_FAST` | the two speeds of `ISMIP7_DHDT_SPEED_RATIO` (m/yr) | `10`, `100` |
 | `ISMIP7_DHDT_VAR` | `dhdt_smith` (firn corrected, 2003 to 2019) or `dhdt_cpom` (uncorrected, so not interchangeable) | `dhdt_smith` |
 | `ISMIP7_DHDT_MELT` | `0` drops ocean melt from the prognostic source, which otherwise melts with the forward's calibration (section 5); melt is zero on grounded ice | `1` |
 | `ISMIP7_DHDT_CLIM_START` / `_END` | RACMO climatology window for that source | `2003` / `2019` |

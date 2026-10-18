@@ -373,7 +373,7 @@ projection.
 | MAP | IU's relaxed Budd MAP (md5 `0d9315d5`), its controls alone on BedMachine's 2015 geometry rewound to 2003 |
 | melt | the 2 km vertex_front refit (sha256 `3d2e5348`) |
 | forward | dt 0.025, scpc_mumps on 32 ranks and 96 GiB, `ISMIP7_MAP_CLIP=0`, no reference, fixed front, no collapse, SMB-elevation feedback, lake ice base, FSSA at its default, ISMIP7 output on; five-yearly checkpoints, three kept; 72 h links that resubmit themselves |
-| output | `write_ismip7_output.py` at `c4c9eb8` with source_id IU and ism_id icepack2, isschecker 0.5.1, ismip7-scalars 0.1.0 and `compare_scalars.py`, one job per core |
+| output | `write_ismip7_output.py` at `c4c9eb8` with source_id IU and ism_id icepack2 (C006 and C007 at `3c4cdba`, PR 171, which loads the mesh once a series), isschecker 0.5.1, ismip7-scalars 0.1.0 and `compare_scalars.py`, one job per core |
 
 The table describes the controls, the projections and OCX. Cores 1 and 2 ran
 the same commit `c4c9eb8` from the worktree `run2kc`, with yearly checkpoints,
@@ -395,8 +395,8 @@ year, regrids every core.
 | C003 | ssp370 CESM2-WACCM | 11912184 | done 14 Oct, 53 h in one link |
 | C004 | ssp370 MRI-ESM2-0 | 11912188 | done 14 Oct, 61 h in one link |
 | C005 | ssp126 CESM2-WACCM | 11912183, 12256684 | stopped 16 Oct at 2205.8 |
-| C006 | ssp126 MRI-ESM2-0 | 11912187, 12256723 | kept, running |
-| C007 | ssp585 CESM2-WACCM | 11912185, 12256677 | kept, running |
+| C006 | ssp126 MRI-ESM2-0 | 11912187, 12256723, 12307231 | done 18 Oct, 154 h in three links |
+| C007 | ssp585 CESM2-WACCM | 11912185, 12256677, 12306581 | kept, running |
 | C008 | ssp585 MRI-ESM2-0 | 11912189, 11981754, 12273375 | stopped 16 Oct at 2180.25; moved off a shared node at 2045.4, resumed from the 2045 checkpoint on the same 32 ranks |
 | C009 | control CESM2-WACCM | 11912182, 12256729 | stopped 16 Oct at 2193.45 |
 | C010 | control MRI-ESM2-0 | 11912186, 12256726 | stopped 16 Oct at 2194.45 |
@@ -415,6 +415,7 @@ Finished cores, through the writer, the checker and the scalar tool:
 | C002 | +14.8 | 0.00 | 1 | ON TRACK | 0 errors | exit 0 |
 | C003 | +53.3 | 0.00 | 0 | OFF TRACK (dM/dt -1,462) | 0 errors | exit 0 |
 | C004 | +120.3 | 0.00 | 0 | ON TRACK | 0 errors | exit 0 |
+| C006 | +305.7 | 0.00 | 0 | ON TRACK | 0 errors | exit 0 |
 | C011 | +40.0 | 0.00 | 1 | ON TRACK | 0 errors | exit 0 |
 
 Stopped cores, through the forward only; their annual files went through no
@@ -435,8 +436,12 @@ copy checked by sha256.
 The projections' VAF change runs from 2015, the historicals' and OCX's from
 2003. Each checker log carries the same two warnings: the non-mandatory
 variables the model does not write, and `strbasemag` above the accepted 1 MPa
-(1.9 to 2.4 MPa on 0.001 to 0.004 percent of values). The scalar tool's slvaf
-residual note reads 2.2 (C004) to 8.6 percent (C003) of its largest value.
+(1.9 to 6.0 MPa on 0.001 to 0.021 percent of values, the most in C006's 286
+years). The scalar tool's slvaf residual note reads 2.2 (C004) to 8.6 percent
+(C003) of its largest value; C006's residual stays under the tool's 2 percent.
+C006's VAF rises 6.2 mm SLE more than its control C010's by 2100 and 23.8 mm
+more by 2194.45, where C010 stopped (+196.3 against +172.5); by 2301 it has
+risen 305.7 mm.
 
 **ssp585 by ESM.** By 2100 the CESM2-WACCM ssp585 run gains 54 mm SLE less VAF
 than MRI-ESM2-0's (+69.8 against +124.1 since 2015), and 47.6 mm of that is

@@ -1534,6 +1534,26 @@ def setup_model(restart_from=None, *, allow_timing_cache_a_ref=False,
     if geom_dg1:
         h_cell = cell_view.mean_function(h)
         h_cell.rename("thickness_cell_mean")
+    # The thickness the momentum balance reads. With an advected front the
+    # transport parks the ice the front's advance deposits in the cells
+    # beyond the level set until the front crosses them
+    # (icepack_tools.front_transport), and the momentum balance must not see
+    # it there: the free-front push belongs on the level-set front, and a
+    # wedge of that ice, 30-80 m at its thick node and pinned through the
+    # vertices it shares with the ocean-drag cells, buttressed every shelf of
+    # the 2 km calving screen to half its speed within a decade (calvdg1h,
+    # 18 Oct 2026), which halved the calving the free laws booked. So the
+    # residual reads a copy that run_simulation zeroes beyond the front after
+    # every advance; without an advected front the copy is h itself.
+    h_dyn, s_dyn, h_cell_dyn = h, s, h_cell
+    if geom_dg and _front_anchor() == "advect":
+        h_dyn = h.copy(deepcopy=True)
+        h_dyn.rename("thickness_dynamic")
+        s_dyn = s.copy(deepcopy=True)
+        s_dyn.rename("surface_dynamic")
+        if geom_dg1:
+            h_cell_dyn = cell_view.mean_function(h_dyn)
+            h_cell_dyn.rename("thickness_dynamic_cell_mean")
 
     u_s, M_s, tau_s = split(z)
     fields = {
@@ -1622,8 +1642,8 @@ def setup_model(restart_from=None, *, allow_timing_cache_a_ref=False,
                 z_c if z_c is not None else z,
                 theta_c if theta_c is not None else theta_f,
                 phi_c if phi_c is not None else _map_phi(h_c if h_c is not None else h),
-                H=h_c if h_c is not None else h,
-                s=s_c if s_c is not None else s,
+                H=h_c if h_c is not None else h_dyn,
+                s=s_c if s_c is not None else s_dyn,
                 # the sqrt control's friction is alpha^2 pointwise (the
                 # inversion's own form), not its cell average
                 b=b, C_w0=(alpha_f ** 2 if alpha_f is not None else C_exp if C_exp is not None else C_w0),
@@ -1638,7 +1658,7 @@ def setup_model(restart_from=None, *, allow_timing_cache_a_ref=False,
                 k_lim=k_lim, drag_mask=drag_mask,
                 calving_ids=calving_ids if use_calving_terminus else None,
                 exact_front=map_exact_front, front_hmin=_front_hmin(),
-                H_cell=h_cell if h_c is None else None,
+                H_cell=h_cell_dyn if h_c is None else None,
                 fssa_tau=fssa_tau if fssa_theta_val > 0 else None,
                 u_ref=u_ref_fssa if fssa_theta_val > 0 else None,
                 fssa_tendency=fssa_tendency,
@@ -2090,6 +2110,11 @@ def setup_model(restart_from=None, *, allow_timing_cache_a_ref=False,
         # (icepack2_tools.cellview); None under DG0 and CG1.
         "cell_view": cell_view,
         "h_cell": h_cell,
+        # the momentum balance's thickness and surface: h and s themselves,
+        # or with an advected front the copy zeroed beyond the level set
+        "h_dyn": h_dyn,
+        "s_dyn": s_dyn,
+        "h_cell_dyn": h_cell_dyn,
         "geom_xy": geom_xy,
         "mesh_basename": mesh_basename,
         "geometry_source": geometry_source,
@@ -2497,6 +2522,13 @@ def run_simulation(
     # decide per cell read cell means, indexed like every DG0 array here.
     cell_view = ctx.get("cell_view")
     h_cell = ctx.get("h_cell")
+    # The momentum balance's thickness: h itself, or with an advected front
+    # a copy that _lift_h zeroes beyond the level set (setup_model,
+    # thickness_dynamic). dyn_front names the level set once it exists.
+    h_dyn = ctx.get("h_dyn", h)
+    s_dyn = ctx.get("s_dyn", s)
+    h_cell_dyn = ctx.get("h_cell_dyn", h_cell)
+    dyn_front = {"level_set": None}
     # Under DG0 geometry the transport state IS the geometry - the same
     # Function object, not a copy. That is the whole point: the terminus
     # back-pressure and the boundary flux then integrate one thickness, so
@@ -3323,6 +3355,22 @@ def run_simulation(
         # the cell means the exact-front push decides ice edges on, and the
         # per-cell rules read
         _refresh_cells()
+        if h_dyn is not h:
+            # the momentum balance's thickness: the live one, zero in the
+            # cells beyond the advected front, where the transport parks the
+            # deposit the front has not yet crossed (setup_model)
+            h_dyn.assign(h)
+            ls_dyn = dyn_front["level_set"]
+            if ls_dyn is not None:
+                beyond_dyn = ls_dyn.beyond_front()
+                if geom_dg1:
+                    cell_view.set_cells(h_dyn, beyond_dyn, 0.0)
+                else:
+                    h_dyn.dat.data[beyond_dyn] = 0.0
+            s_dyn.interpolate(
+                max_value(b + h_dyn, (Constant(1.0) - rho_ratio) * h_dyn))
+            if h_cell_dyn is not None:
+                cell_view.mean_function(h_dyn, out=h_cell_dyn)
 
     # Level-set calving front (ISMIP7_CALVING != none): each step the level
     # set is the eikonal distance to the current ice extent, the calving
@@ -3415,6 +3463,12 @@ def run_simulation(
                 PETSc.Sys.Print(
                     f"  Front: {front_transport.n_filled} cells of water the "
                     f"level set encloses in the ice (nunataks, lakes) join the ice")
+            # from here the momentum balance reads the thickness inside the
+            # front only (thickness_dynamic); a restart's apron beyond it,
+            # written by a forward without this rule, drops out of the
+            # balance at the first solve
+            dyn_front["level_set"] = level_set
+            _lift_h()
             F_transport = front_transport_form(
                 h_dg_trial, h_dg_old, phi_dg, dt_c, src_dg, front_transport)
             transport_problem = LinearVariationalProblem(

@@ -1352,6 +1352,16 @@ through `icepack2_tools.transport.front_transport_form`):
 - water the level set encloses in the ice joins the ice (nunataks, lakes: 293
   cells on the 5 km buffered mesh), and ice that no path through ice connects
   to grounded ice is an iceberg;
+- the momentum balance reads the thickness inside the front only (a copy,
+  `thickness_dynamic`, zeroed beyond the level set after every advance). The
+  ice the advance deposits beyond the front waits there for the front to cross
+  it; seen by the momentum balance it is a wedge 30-80 m at its thick node,
+  pinned through the vertices it shares with the ocean-drag cells, and on the
+  2 km calving screen (calvdg1h, 18 Oct 2026) it buttressed every shelf to
+  half its speed within a decade, halving the calving the free laws booked
+  while the front cells kept their thickness. With the rule the free-front
+  push stays on the level-set front and the deposit has no dynamics until the
+  front claims it, as under the `fixed` law, whose band cells are empty;
 - under `ISMIP7_FRONT_ADVANCE=none` the front is held at the t=0 extent: it
   retreats but never advances past it, and the ice reaching it calves. The
   collapse mask's removals retreat the level set with them. Under

@@ -1564,6 +1564,39 @@ mpiexec -n 4 python antarctica/scripts/tendency_by_basin.py --smith dhdt.json \
     antarctica/results/hist_cesm2_waccm_lcr75_2000_final.h5
 ```
 
+### Figures of a screen (`figures/`)
+
+`scripts/figures/` builds publication figures of a screen in the layout of
+the ISMIP6 Antarctica projection paper (Seroussi et al. 2020) and in the
+house style of `figures/figstyle.py`, which restates the figure grammar of
+Morrow, Ghelichkhan and Kramer (2026) that the group's papers follow: serif
+text, one colour and marker per series with a marker on every point, panel
+letters in grey circles at the top left, one framed legend across the top,
+attached tickless map panels with ten discrete colour bands, and files
+written without timestamps so an unchanged figure gives an empty diff.
+Import it from every new figure script rather than restyling by hand.
+
+The pinned-front member plays the part the control run plays in the
+projections: every relative quantity is member minus pinned front, and
+sea-level contributions are positive for loss. `extract_screen_fields.py`
+runs once per screen on the cluster (serial, one rank, where the states are)
+and writes the cell means and regional volume above flotation of each member
+at one year, the triangulation, and the extent of the members on the
+observations kit's grid against the Greene mask of that year;
+`calving_screen_figures.py` then builds, from those files plus the budget
+time series and `score_front.py` outputs, the budget of every member (SMB,
+basal melt, calving flux against Rignot et al. 2013, VAF), the extent
+agreement and ice area against the record, the contribution relative to the
+pinned front with a thick mean per law and the spread at the end, its
+regional split (Peninsula, West, East by the kit's Mouginot basins), and the
+mean and spread across the free members of the thickness and speed change.
+
+```sh
+python antarctica/scripts/figures/extract_screen_fields.py --kit $KIT --tag calvdg1h --year 2013 \
+    --out screen_data antarctica/results
+python antarctica/scripts/figures/calving_screen_figures.py --data screen_data --tag calvdg1h --out figures/calvdg1h
+```
+
 ### The whole matrix in one command (`run_core_matrix.sh`)
 
 Runs cores 1 to 11 in dependency order (historicals, controls, projections,

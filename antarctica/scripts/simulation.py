@@ -522,6 +522,23 @@ def setup_model(restart_from=None, *, allow_timing_cache_a_ref=False,
     # None for unset, empty and the sentinel `checkpoint`: solve on the mesh
     # the checkpoint carries.
     mesh_fn = _mesh_override()
+    if mesh_fn and meshes_match(source_mesh, Mesh(mesh_fn)):
+        # The named mesh is the triangulation the checkpoint carries, so
+        # solve on the checkpoint's own mesh and load every field exactly.
+        # Interpolating onto a second build of the same mesh evaluates each
+        # field at the target's nodes, and a DG1 thickness is discontinuous
+        # at the front: the node a cell shares with open water read the
+        # water's zero, and every link of a chained run that crossed its
+        # wall limit lost ~3,800 Gt unbooked at the restart, with the ice
+        # the same evaluation put beyond the level set emptied as another
+        # ~550 Gt of calving (calvdg1h, 18 Oct 2026). A cold start from a
+        # MAP on the same mesh takes the same exact path.
+        PETSc.Sys.Print(
+            f"  Compute mesh: {mesh_fn} is the triangulation "
+            f"{os.path.basename(source_chk)} carries; solving on the "
+            f"checkpoint's mesh, every field loaded exactly"
+        )
+        mesh_fn = None
     if mesh_fn:
         # The timing matrix deliberately solves on a mesh different from the
         # MAP mesh. Keep the checkpoint mesh as the interpolation source and
@@ -546,8 +563,7 @@ def setup_model(restart_from=None, *, allow_timing_cache_a_ref=False,
         # refused; a transfer between differently named meshes is the timing
         # matrix's and the MAP check's, and stays allowed.
         if (mesh_stem(mesh_fn) == mesh_stem(source_mesh_basename)
-                and mesh_build_check()
-                and not meshes_match(source_mesh, mesh)):
+                and mesh_build_check()):
             raise RuntimeError(
                 f"ISMIP7_MESH={mesh_fn} ({global_size(mesh.coordinates)} "
                 f"vertices, {mesh.comm.allreduce(mesh.cell_set.size)} cells) "

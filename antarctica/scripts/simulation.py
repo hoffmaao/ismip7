@@ -1960,8 +1960,18 @@ def setup_model(restart_from=None, *, allow_timing_cache_a_ref=False,
             PETSc.Sys.Print(f"Restart state must be re-solved: {why}")
             _rtol0, _atol0, _stol0, _max_it0 = slvr.snes.getTolerances()
             _bounds = final_solve_bounds()
+            # The re-solve targets the residual the writer RECORDED, not the
+            # acceptance limit: until 2026-10-20 it stopped at the limit
+            # (100 x recorded) and the run atol, 100 x the achieved norm, came
+            # out 10^4 x the recorded level. The calvsu no-calving follow-ons
+            # resumed a state recorded at 3.9e3 with run atol 2.7e7, took 278
+            # of 751 momentum solves at iteration zero on a frozen velocity,
+            # and the transport blew up at 2016.55. Converging to the record
+            # keeps the run atol within the acceptance limit; a solve that
+            # bottoms out above it stops on the step-size exit at its floor,
+            # the cold-continuation rule.
             slvr.snes.setTolerances(
-                atol=accept_limit if accept_limit is not None else _atol0,
+                atol=recorded if recorded is not None else _atol0,
                 stol=_bounds["snes_stol"],
                 max_it=_bounds["snes_max_it"],
             )

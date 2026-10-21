@@ -71,21 +71,43 @@ def law_of(member):
     raise KeyError(f"no law grammar for member {member!r}")
 
 
-def member_label(member, law):
-    r"""``hfb015`` -> "resistive stress, 0.15 MPa"; the parameter is read off the name."""
+def law_params(described):
+    r"""The parameters of a law as its ``describe()`` names them, e.g.
+    ``hfb(sigma_max=0.086, ...)`` -> {"sigma_max": 0.086, ...}."""
+    m = re.match(r"\w+\((.*?)\)", described)
+    if not m:
+        raise ValueError(f"not a law description: {described!r}")
+    params = {}
+    for item in filter(None, (p.strip() for p in m.group(1).split(","))):
+        k, v = item.split("=", 1)
+        try:
+            params[k] = float(v)
+        except ValueError:
+            params[k] = v
+    return params
+
+
+def member_label(member, law, described=None):
+    r"""``hfb086`` run as ``hfb(sigma_max=0.086, ...)`` -> "resistive stress,
+    0.086 MPa". The parameter comes from the law the checkpoint recorded
+    (``described``), because the member names use more than one scale; a
+    member without that record is labelled by its name."""
     base = LAWS[law][0]
-    digits = member[len(law):]
-    if law in ("fixed", "nocalv") or not digits:
+    if law in ("fixed", "nocalv"):
         return base
+    if described is None:
+        return f"{base} ({member})"
+    p = law_params(described)
     if law == "hfb":
-        return f"{base}, {int(digits) / 100:g} MPa" if digits != "0" else f"{base}, 0 MPa"
+        return f"{base}, {p['sigma_max']:g} MPa"
     if law == "vm":
-        return f"{base}, {int(digits.rstrip('g')) / 1000:g} MPa" + (" (grounded too)" if digits.endswith("g") else "")
+        grounded = p["sigma_max_gr"] == p["sigma_max_fl"]
+        return f"{base}, {p['sigma_max_fl']:g} MPa" + (" (grounded too)" if grounded else "")
     if law == "eig":
-        return f"{base}, K = {digits.replace('e', 'e')}"
+        return f"{base}, K = " + f"{p['K']:.3g}".replace("e+0", "e").replace("e+", "e")
     if law == "thk":
-        return f"{base}, {digits} m"
-    return f"{base} {digits}"
+        return f"{base}, {p['hc']:g} m"
+    return f"{base} ({member})"
 
 
 class Member:
@@ -99,6 +121,12 @@ class Member:
         self.dt = np.diff(np.concatenate([[self.t0], y]))
         self.score = json.load(open(score_path)) if score_path and os.path.exists(score_path) else None
         self.fields = np.load(fields_path) if fields_path and os.path.exists(fields_path) else None
+
+    def described(self):
+        r"""The law the member's checkpoint recorded, or ``None`` without one."""
+        if self.fields is None or "calving_law" not in self.fields:
+            return None
+        return str(self.fields["calving_law"]) or None
 
     # time series helpers -------------------------------------------------
     def years(self):
@@ -122,7 +150,7 @@ class Member:
         label, colour, marker = LAWS[self.law]
         return dict(color=colour, marker=marker, ls=LINESTYLES[k % len(LINESTYLES)],
                     markevery=max(len(self.ts["year"]) // 12, 1), lw=fs.LW, ms=fs.MS,
-                    markerfacecolor="white" if k else colour, markeredgewidth=0.7, label=member_label(self.name, self.law))
+                    markerfacecolor="white" if k else colour, markeredgewidth=0.7, label=member_label(self.name, self.law, self.described()))
 
 
 def load_members(data, tag):
@@ -238,7 +266,7 @@ def fig_contribution(members, out):
     fs.grid(ax)
     fs.panel_letter(ax, "a")
     ax.set_xlabel("year")
-    ax.set_ylabel("sea-level contribution relative to the pinned front (mm SLE)")
+    ax.set_ylabel("sea-level contribution\nrelative to the pinned front (mm SLE)")
     ax.margins(x=0.02)
     # the spread at the end, one marker per member on a shared axis
     for name, (v, colour, marker, face) in finals.items():

@@ -41,6 +41,7 @@ def load_member(path):
     with fd.CheckpointFile(path, "r") as chk:
         mesh = chk.load_mesh()
         t = float(chk.get_attr("/", "t_yr"))
+        law = str(chk.get_attr("/", "calving_law")) if chk.has_attr("/", "calving_law") else ""
         h = chk.load_function(mesh, name="thickness")
         h0 = chk.load_function(mesh, name="H_init")
         phi = chk.load_function(mesh, name="levelset")
@@ -49,7 +50,7 @@ def load_member(path):
     Q0 = fd.FunctionSpace(mesh, "DG", 0)
     order = cell_order(Q0)
     cm = lambda expr: fd.Function(Q0).interpolate(expr).dat.data_ro[order].astype(np.float32)  # noqa: E731
-    out = dict(t_yr=t, h=cm(h), h0=cm(h0), phi=cm(phi), bed=cm(b), speed=cm(fd.sqrt(fd.inner(u, u))))
+    out = dict(t_yr=t, calving_law=law, h=cm(h), h0=cm(h0), phi=cm(phi), bed=cm(b), speed=cm(fd.sqrt(fd.inner(u, u))))
     geom = None
     if True:
         V = mesh.coordinates.function_space()
@@ -137,7 +138,7 @@ def main():
         count += ice
         dv = vaf_gt(f["h"], f["bed"], geom["area"]) - vaf_gt(f["h0"], f["bed"], geom["area"])
         region_dvaf = np.array([dv[region == r].sum() for r in range(len(REGION_NAMES))])
-        np.savez_compressed(os.path.join(args.out, f"fields_{args.tag}_{name}.npz"), t_yr=f["t_yr"], h=f["h"], h0=f["h0"],
+        np.savez_compressed(os.path.join(args.out, f"fields_{args.tag}_{name}.npz"), t_yr=f["t_yr"], calving_law=f["calving_law"], h=f["h"], h0=f["h0"],
                             phi=f["phi"], speed=f["speed"], region_names=np.array(REGION_NAMES), region_dvaf_gt=region_dvaf,
                             ice_area_km2=float(ice.sum()) * kit.dx ** 2 / 1e6)
         print(f"{name}: t={f['t_yr']:.2f} dVAF by region (Gt) " +

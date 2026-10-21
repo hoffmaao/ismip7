@@ -141,6 +141,8 @@ record_env() {
         echo "export ISMIP7_ROUTINE_SBATCH_INV=\"${ISMIP7_ROUTINE_SBATCH_INV:-}\""
         echo "export ISMIP7_ROUTINE_SBATCH_FWD=\"${ISMIP7_ROUTINE_SBATCH_FWD:-}\""
         echo "export ISMIP7_ROUTINE_CHAIN_MAX=${ISMIP7_ROUTINE_CHAIN_MAX:-200}"
+        echo "export ISMIP7_ROUTINE_STRICT=${ISMIP7_ROUTINE_STRICT:-0}"
+        echo "export ISMIP7_ROUTINE_FROZEN_MAX=${ISMIP7_ROUTINE_FROZEN_MAX:-5}"
     } > "$ENVFILE.tmp"
     mv "$ENVFILE.tmp" "$ENVFILE"
 }
@@ -174,6 +176,8 @@ load_env() {
     case "$ISMIP7_ROUTINE_CALVING ${ISMIP7_ROUTINE_CALVING_PARAMS:-}" in
         *" "*" "*) die "ISMIP7_ROUTINE_CALVING and ISMIP7_ROUTINE_CALVING_PARAMS take no spaces (parameters are comma separated)" ;;
     esac
+    : "${ISMIP7_ROUTINE_STRICT:=0}"
+    : "${ISMIP7_ROUTINE_FROZEN_MAX:=5}"
     TAG=$ISMIP7_ROUTINE_TAG
     LC=${ISMIP7_LC:?ISMIP7_LC must be recorded}
     RESULTS="$REPO/antarctica/results"
@@ -679,6 +683,16 @@ watch_pass() {
                 log "watch: ERROR stage $stage stopped on a driver failure or a stall, not resubmitting: $why"
                 continue
             fi
+            # A strict routine (ISMIP7_ROUTINE_STRICT=1) resubmits a link only
+            # when the scheduler took it; any other end parks the stage.
+            if [ "$ISMIP7_ROUTINE_STRICT" = 1 ]; then
+                why=$(strict_block_reason "$stage")
+                if [ -n "$why" ]; then
+                    echo "$why" > "$OUT/$stage.blocked"
+                    log "watch: ERROR stage $stage parked (strict): $why"
+                    continue
+                fi
+            fi
             log "watch: stage $stage has no job in the queue; resubmitting"
             mv "$OUT/$stage.jobs" "$OUT/$stage.jobs.$(date +%s)"
             launch "$stage"
@@ -689,6 +703,18 @@ watch_pass() {
             [ "$state" = RUNNING ] || continue
             logf="$REPO/logs/ismip7_fwd_$jid.out"
             [ -f "$logf" ] || continue
+            # A momentum solve that "converges" in zero iterations leaves the
+            # velocity where the restart put it (the frozen controls of
+            # 19-21 October 2026); a healthy link logs none. Cancel the link
+            # and park the stage before the frozen state is checkpointed on.
+            local frozen
+            frozen=$(grep -c "snes_its=0 " "$logf" 2>/dev/null || true)
+            if [ "${frozen:-0}" -ge "$ISMIP7_ROUTINE_FROZEN_MAX" ]; then
+                echo "job $jid: $frozen zero-iteration momentum solves in $logf; the velocity is frozen" > "$OUT/$stage.blocked"
+                log "watch: ERROR job $jid ($stage) on $node: $frozen zero-iteration momentum solves; cancelling, stage parked"
+                scancel "$jid"
+                continue
+            fi
             age=$(( ($(date +%s) - $(stat -c %Y "$logf")) / 60 ))
             if [ "$age" -ge "$stall" ]; then
                 log "watch: job $jid ($stage) on $node silent for $age min; cancelling, node excluded"
@@ -733,6 +759,28 @@ driver_failure() {
         echo "job $jid: ${err:-driver exited non-zero; see $logf}"
     fi
     return 0
+}
+
+# The reason a strict routine parks a stage whose newest link ended without a
+# successor: the solver stalled anywhere, or the link ended in a state other
+# than one the scheduler imposes (TIMEOUT, PREEMPTED, NODE_FAIL, CANCELLED,
+# BOOT_FAIL). Nothing when the scheduler took it, which is resubmitted.
+strict_block_reason() {
+    local jid kind logf st at
+    [ -f "$OUT/$1.jobs" ] || return 0
+    jid=$(tail -n 1 "$OUT/$1.jobs" | cut -d' ' -f1)
+    if is_inversion "$1"; then kind=inv; else kind=fwd; fi
+    logf="$REPO/logs/ismip7_${kind}_$jid.out"
+    if [ -f "$logf" ] && grep -q "^chain: the solver stalled" "$logf"; then
+        at=$(sed -n 's/^chain: the solver stalled.* at \([-0-9.eE+]*\)\.$/\1/p' "$logf" | tail -n 1)
+        echo "job $jid: the solver stalled at ${at:-?}"
+        return 0
+    fi
+    st=$(sacct -j "$jid" -X -n -o State 2>/dev/null | head -n 1 | awk '{print $1}')
+    case "${st:-UNKNOWN}" in
+        TIMEOUT|PREEMPTED|NODE_FAIL|CANCELLED|BOOT_FAIL|UNKNOWN|"") return 0 ;;
+        *) echo "job $jid: ended $st without a successor; see $logf" ;;
+    esac
 }
 
 cmd_watch() {

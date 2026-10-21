@@ -1950,6 +1950,19 @@ def setup_model(restart_from=None, *, allow_timing_cache_a_ref=False,
         accept_scale = snes_atol_scale()
         accept_limit = accept_scale * recorded if recorded is not None else None
         have_mixed = M_guess is not None and tau_guess is not None
+        # ISMIP7_RESTART_RESOLVE=cold: a one-off that ignores the writer's
+        # record and re-solves the loaded state to the cold-start tolerance.
+        # A link whose re-solve floored high ran its momentum solves at
+        # iteration zero on a frozen velocity (NOTS seq0 controls, 20 Oct
+        # 2026: 1695 of 1715 solves), and the checkpoints it wrote record
+        # that stale state's own residual, so the fast path would accept the
+        # state and the ordinary re-solve would target garbage. The chain
+        # unsets it for every successor, like ISMIP7_RESTART.
+        cold_resolve = (
+            os.environ.get("ISMIP7_RESTART_RESOLVE", "").strip().lower() == "cold"
+        )
+        if cold_resolve:
+            recorded, accept_limit = None, None
 
         if have_mixed and accept_limit is not None and fnorm0 <= accept_limit:
             restart_solved = True
@@ -1961,7 +1974,10 @@ def setup_model(restart_from=None, *, allow_timing_cache_a_ref=False,
                 f"recorded {recorded:.2e}; run atol={restart_atol:.2e})"
             )
         else:
-            if not have_mixed:
+            if cold_resolve:
+                why = ("ISMIP7_RESTART_RESOLVE=cold, the record is ignored and "
+                       "the state is re-solved to the cold-start tolerance")
+            elif not have_mixed:
                 why = "velocity-only checkpoint"
             elif accept_limit is None:
                 why = "checkpoint records no full_state_residual"

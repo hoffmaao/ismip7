@@ -650,8 +650,20 @@ watch_pass() {
         is_started "$stage" || continue
         is_done "$stage" && continue
         jobname="rt_${TAG}_${stage}"
-        rows=$(squeue -h -u "${USER:-$(id -un)}" -n "$jobname" -o "%i %T %N %M" 2>/dev/null) \
+        rows=$(squeue -h -u "${USER:-$(id -un)}" -n "$jobname" -o "%i %T %N %M %r" 2>/dev/null) \
             || { log "watch: squeue failed; skipping the rest of this pass"; return 0; }
+        # A successor that can never start (its predecessor ended TIMEOUT
+        # after saving, under an afterok dependency) sits PENDING and made
+        # the stage look alive for a day (seq1 control_mri_esm2, 19-20 Oct
+        # 2026). Cancel it; the stage then reads as empty and is resubmitted.
+        local dead
+        dead=$(awk '$2 == "PENDING" && $5 == "DependencyNeverSatisfied" {print $1}' <<< "$rows")
+        if [ -n "$dead" ]; then
+            log "watch: cancelling $(echo $dead) ($stage): dependency never satisfied"
+            # shellcheck disable=SC2086
+            scancel $dead
+            rows=$(awk '!($2 == "PENDING" && $5 == "DependencyNeverSatisfied")' <<< "$rows")
+        fi
         if [ -z "$rows" ]; then
             # A chain ends without a successor in two ways: the scheduler took
             # the link (timeout, preemption, node failure, an outage), which a
@@ -673,7 +685,7 @@ watch_pass() {
             continue
         fi
         is_inversion "$stage" && continue
-        while read -r jid state node elapsed; do
+        while read -r jid state node elapsed _; do
             [ "$state" = RUNNING ] || continue
             logf="$REPO/logs/ismip7_fwd_$jid.out"
             [ -f "$logf" ] || continue

@@ -171,7 +171,7 @@ def test_short_run_chains_once(sandbox):
     assert rc == 0, log
     assert "resubmitting" in log
     assert calls.count("ARGV:") == 1
-    assert "--dependency=afterok:424242" in calls
+    assert "--dependency=afterany:424242" in calls
     assert "ENV: ISMIP7_WALL_STOP_MIN" not in calls
     assert "ENV: ISMIP7_RESTART" not in calls
 
@@ -445,7 +445,7 @@ def test_a_finished_run_queues_its_follow_ons(sandbox):
         # each follow-on's driver owns its period
         assert "ISMIP7_T_START" not in sub
         assert "ISMIP7_T_END" not in sub
-        assert f"--dependency=afterok:{JOB_ID}" in sub
+        assert f"--dependency=afterany:{JOB_ID}" in sub
         assert "-J ismip7_fwd" in sub
 
 

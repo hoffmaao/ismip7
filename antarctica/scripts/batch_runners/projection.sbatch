@@ -220,10 +220,25 @@ echo "    solver=$ISMIP7_DIAGNOSTIC_LINEAR_SOLVER dt=$ISMIP7_DT" \
 wall_stop_min="${ISMIP7_WALL_STOP_MIN:-}"
 tl=$(scontrol show job "$JOB" 2>/dev/null \
      | grep -oE 'TimeLimit=[^ ]+' | cut -d= -f2)
+# Minutes this job has already used before the driver starts: the driver
+# counts its budget from its own process start, but the wall limit counts
+# from the job's. A one-hour scavenge link that spent nine minutes in the
+# queue's node setup and the environment (NOTS 2297586, 21 Oct 2026) then
+# ran its 52-minute budget to the limit, Slurm killed the batch script after
+# the driver had saved and exited 0, and the afterok successor could never
+# start.
+job_start=$(scontrol show job "$JOB" 2>/dev/null \
+     | grep -oE 'StartTime=[^ ]+' | cut -d= -f2)
+used_min=0
+if [ -n "$job_start" ] && [ "$job_start" != Unknown ]; then
+    start_s=$(date -d "$job_start" +%s 2>/dev/null) \
+        && used_min=$(( ($(date +%s) - start_s) / 60 ))
+fi
 if [ -z "$wall_stop_min" ]; then
-    wall_stop_min=$(python - "$tl" <<'PY'
+    wall_stop_min=$(python - "$tl" "$used_min" <<'PY'
 import sys
 tl = sys.argv[1]
+used_min = float(sys.argv[2]) if len(sys.argv) > 2 else 0.0
 import os
 # Minutes held back for the final checkpoint write and the resubmit below:
 # ISMIP7_WALL_MARGIN_MIN, default 25, sized for a 1 km final write; a 2 km
@@ -239,11 +254,11 @@ try:
 except ValueError:
     print(0)                      # UNLIMITED or unparseable: no budget
 else:
-    print(f"{max(total - MARGIN_MIN, 0.0):.1f}")
+    print(f"{max(total - MARGIN_MIN - used_min, 0.0):.1f}")
 PY
 )
 fi
-echo "    wall budget ${wall_stop_min} min (limit ${tl:-?})"
+echo "    wall budget ${wall_stop_min} min (limit ${tl:-?}, ${used_min} min used before the driver)"
 ISMIP7_WALL_STOP_MIN="$wall_stop_min" ismip7_mpirun "${SLURM_NTASKS:-1}" python -u "$DRIVER"
 rc=$?
 echo "=== $(date -Is)  forward exit ${rc} ==="
@@ -335,12 +350,12 @@ if [ "$done_yet" = "1" ]; then
             # period, not this run's ISMIP7_T_START / ISMIP7_T_END, and
             # queues nothing further.
             unset ISMIP7_CHAIN_THEN ISMIP7_WALL_STOP_MIN ISMIP7_RESTART \
-                  ISMIP7_T_START ISMIP7_T_END
+                  ISMIP7_RESTART_RESOLVE ISMIP7_T_START ISMIP7_T_END
             ismip7_chain_resources
             for next in $then_list; do
                 echo "chain: queueing the follow-on ${next}"
                 ISMIP7_EXPERIMENT="$next" \
-                    sbatch --dependency=afterok:"${SLURM_JOB_ID}" --export=ALL \
+                    sbatch --dependency=afterany:"${SLURM_JOB_ID}" --export=ALL \
                            "${ISMIP7_CHAIN_RES[@]}" \
                            antarctica/scripts/batch_runners/projection.sbatch
             done
@@ -393,7 +408,7 @@ echo "chain: at ${LAST_YEAR} of ${T_END}, resubmitting"
 # explicit one-off ISMIP7_RESTART wins over auto-resume in every driver, so
 # inheriting it would send each link back to the same starting checkpoint and
 # the chain would never advance past the first job's end year.
-unset ISMIP7_WALL_STOP_MIN ISMIP7_RESTART
+unset ISMIP7_WALL_STOP_MIN ISMIP7_RESTART ISMIP7_RESTART_RESOLVE
 if [ -z "${SLURM_JOB_ID:-}" ]; then
     echo "chain: no scheduler, so no successor to queue; resume by hand"
     exit 0
@@ -403,6 +418,11 @@ fi
 # wall limit, memory and task layout the link would land on the cluster's
 # defaults, and a default of one task is refused by the guard above.
 ismip7_chain_resources
-sbatch --dependency=afterok:"${SLURM_JOB_ID}" --export=ALL \
+# afterany, not afterok: the successor is queued here only after the driver
+# exited 0 with its checkpoint saved, so the dependency only orders the two
+# links. Under afterok a predecessor that the scheduler then took (TIMEOUT
+# during these last lines) left its successor PENDING for ever on
+# DependencyNeverSatisfied (NOTS seq1 MRI stages, 19-21 Oct 2026).
+sbatch --dependency=afterany:"${SLURM_JOB_ID}" --export=ALL \
        "${ISMIP7_CHAIN_RES[@]}" \
        antarctica/scripts/batch_runners/projection.sbatch

@@ -446,9 +446,9 @@ values, so none is an error. The scalar tool's slvaf residual note reads 2.2 (C0
 (C003) of its largest value; C006's and C007's stay under the tool's 2 percent.
 C006's VAF rises 6.2 mm SLE more than its control C010's by 2100 and 23.8 mm
 more by 2194.45, where C010 stopped (+196.3 against +172.5); by 2301 it has
-risen 305.7 mm. C007's VAF falls 19.0 mm SLE further than its control C009's
-by 2100, 676.1 mm further by 2170 and 1,183.8 mm further by 2193.45, where C009
-stopped; by 2301 it has fallen 4,412.2 mm and the ice sheet has lost 2.98
+risen 305.7 mm. C007's VAF gains 19.0 mm SLE less than its control C009's by
+2100, falls 676.1 mm further by 2170 and 1,183.8 mm further by 2193.45, where
+C009 stopped; by 2301 it has fallen 4,412.2 mm and the ice sheet has lost 2.98
 million Gt.
 
 **ssp585 by ESM.** By 2100 the CESM2-WACCM ssp585 run gains 54 mm SLE less VAF

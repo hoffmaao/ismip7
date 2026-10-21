@@ -98,6 +98,10 @@ def protocol_forcing(t_start, t_end):
     else:
         problem = None
         for var in ("tf", "so"):
+            # the v1 OCX ocean predates the climatology fix (OCEAN_MIN_VERSION)
+            problem = ocean.version_problem(var)
+            if problem:
+                break
             cover = ocean.coverage(var)
             if cover is None or cover[0] > first or cover[1] + 1 < last:
                 problem = (f"ocean {var} covers {cover[0]}-{cover[1]}, need {first}-{last}"

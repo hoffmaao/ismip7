@@ -606,6 +606,50 @@ def test_a_scheduler_kill_is_still_resubmitted(sandbox):
     assert "-J rt_out_hist_cesm_waccm" in again["argv"]
 
 
+def test_a_strict_park_names_the_link_that_actually_ended(sandbox):
+    r"""A chain's own successors are submitted by projection.sbatch, not by
+    the routine, so OUT/<stage>.jobs holds only the first link. The watchdog
+    read that line as the stage's newest link and on 21 October 2026 parked
+    seq0f's MRI historical "COMPLETED without a successor", naming a link
+    that had ended cleanly two links before the one that aborted in MUMPS.
+    The accounting knows every link by job name; the park names the newest
+    and reports its error."""
+    (sandbox / "warm.h5").write_text("warm\n")
+    bin_dir = sandbox / "bin"
+    (bin_dir / "squeue").write_text("#!/bin/bash\nexit 0\n")
+    (bin_dir / "squeue").chmod(0o755)
+    (bin_dir / "sacct").write_text(
+        "#!/bin/bash\n"
+        'for a in "$@"; do case "$a" in --name=*) echo "$FIRST"; echo "9999777"; exit 0 ;; esac; done\n'
+        'echo "FAILED"\n')
+    (bin_dir / "sacct").chmod(0o755)
+    env = {"ISMIP7_ROUTINE_STAGES": "hist", "ISMIP7_ROUTINE_ESMS": "CESM2-WACCM",
+           "ISMIP7_ROUTINE_WATCH_ONCE": "1", "ISMIP7_ROUTINE_STRICT": "1"}
+    rc, log = routine(sandbox, "init", env=env)
+    assert rc == 0, log
+    submits(sandbox)
+    first = (sandbox / "out" / "hist_cesm_waccm.jobs").read_text().split()[0]
+    env["FIRST"] = first
+    logs = sandbox / "logs"
+    logs.mkdir(exist_ok=True)
+    (logs / f"ismip7_fwd_{first}.out").write_text(
+        "  t=2004.2 ...\nhist simulation complete.\n=== forward exit 0 ===\n"
+        "chain: at 2004.25 of 2015.0, resubmitting\nSubmitted batch job 9999777\n")
+    (logs / "ismip7_fwd_9999777.out").write_text(
+        "Restart state must be re-solved: ||F||=1.51e+08\n=== forward exit 137 ===\n"
+        "chain: stopping, driver exited 137\n")
+    (logs / "ismip7_fwd_9999777.err").write_text(
+        "PBLAS ERROR 'Array subscript out of bounds: IY = 1793, DESCY[M_] = 908'\n"
+        "MPI_ABORT was invoked on rank 5 in communicator MPI_COMM_WORLD\n")
+    rc, log = routine(sandbox, "watch", env=env)
+    assert rc == 0, log
+    assert submits(sandbox) == [], "a driver abort is not resubmitted"
+    blocked = (sandbox / "out" / "hist_cesm_waccm.blocked").read_text()
+    assert blocked.startswith("job 9999777:"), blocked
+    assert first not in blocked
+    assert "ismip7_fwd_9999777.out" in blocked
+
+
 def test_the_forwards_run_the_routine_s_calving_law(sandbox):
     r"""The forwards take the routine's calving law, its parameters and its
     advance rule, recorded at init; the defaults are the submission front

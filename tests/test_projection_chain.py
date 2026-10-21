@@ -231,6 +231,29 @@ def test_the_successor_is_given_the_site_s_extra_flags(sandbox):
     assert "--qos=long --mail-type=FAIL" in argv[0], argv[0]
 
 
+def test_the_successor_avoids_the_nodes_the_first_link_was_told_to(sandbox):
+    r"""The routine's watchdog blacklists a node a link hung on and passes
+    --exclude to the links it submits; a chain successor built its flags from
+    scontrol without that list, so on 21 October 2026 successors kept landing
+    on bb6u15g1, where five links had died in MUMPS. scontrol hands the list
+    back as ExcNodeList, or (null) when there is none."""
+    stub = sandbox / "bin" / "scontrol"
+    plain = stub.read_text()
+    stub.write_text(plain.replace("MinMemoryNode=240G", "MinMemoryNode=240G ExcNodeList=bb6u15g1,bb7u13g1"))
+    rc, log, calls = run_job(sandbox, FAKE_T_YR="2050", FAKE_START_YEAR="2000")
+    assert rc == 0, log
+    argv = [line for line in calls.splitlines() if line.startswith("ARGV:")]
+    assert len(argv) == 1, calls
+    assert "--exclude=bb6u15g1,bb7u13g1" in argv[0], argv[0]
+    (sandbox / "sbatch_calls.txt").unlink()
+    stub.write_text(plain.replace("MinMemoryNode=240G", "MinMemoryNode=240G ExcNodeList=(null)"))
+    rc, log, calls = run_job(sandbox, FAKE_T_YR="2050", FAKE_START_YEAR="2000")
+    assert rc == 0, log
+    argv = [line for line in calls.splitlines() if line.startswith("ARGV:")]
+    assert len(argv) == 1, calls
+    assert "--exclude" not in argv[0], argv[0]
+
+
 def test_reaching_t_end_finishes(sandbox):
     r"""At t_end there is nothing left to chain."""
     rc, log, calls = run_job(

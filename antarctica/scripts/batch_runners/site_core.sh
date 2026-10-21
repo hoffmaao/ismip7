@@ -126,12 +126,17 @@ ismip7_site_require() {
 # Both are restated here; submit.sh passes them for the first link.
 # Both chains call this, so the rule lives here once.
 ismip7_chain_resources() {
-    local info feat tlim memn
+    local info feat tlim memn excl
     info="$(scontrol show job "${SLURM_JOB_ID:-}" 2>/dev/null)"
     feat="$(echo "$info" | grep -oE 'Features=[^ ]+' | cut -d= -f2)"
     [ "$feat" = "(null)" ] && feat=""
     tlim="$(echo "$info" | grep -oE 'TimeLimit=[^ ]+' | cut -d= -f2)"
     memn="$(echo "$info" | grep -oE 'MinMemoryNode=[^ ]+' | cut -d= -f2)"
+    # The nodes the first link was told to avoid (the routine's watchdog
+    # blacklist). Dropped here until 21 October 2026, when chain successors
+    # kept landing on bb6u15g1, where five links had died in MUMPS.
+    excl="$(echo "$info" | grep -oE 'ExcNodeList=[^ ]+' | cut -d= -f2)"
+    [ "$excl" = "(null)" ] && excl=""
     ISMIP7_CHAIN_RES=(-N "${SLURM_JOB_NUM_NODES:-1}" -n "${SLURM_NTASKS:-1}"
                       --cpus-per-task="${SLURM_CPUS_PER_TASK:-1}"
                       --hint=nomultithread)
@@ -149,6 +154,7 @@ ismip7_chain_resources() {
     [ -n "$feat" ] && ISMIP7_CHAIN_RES+=(-C "$feat")
     [ -n "$tlim" ] && ISMIP7_CHAIN_RES+=(--time="$tlim")
     [ -n "$memn" ] && ISMIP7_CHAIN_RES+=(--mem="$memn")
+    [ -n "$excl" ] && ISMIP7_CHAIN_RES+=(--exclude="$excl")
     [ -n "${SLURM_JOB_ACCOUNT:-}" ] && ISMIP7_CHAIN_RES+=(-A "$SLURM_JOB_ACCOUNT")
     # A flag the site needs on every submission (a QOS, say) is not something
     # scontrol hands back either, so the successor is given it again.

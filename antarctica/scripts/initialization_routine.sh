@@ -738,10 +738,27 @@ watch_pass() {
 # passed the step its link had stalled in at 2021.25). A link that stalled
 # where it resumed made no progress, and another would stall there again (the
 # seq0 ssp126 projection at 2019.95, relaunched link after link): parked.
+# The newest link of a stage. OUT/<stage>.jobs records the links this script
+# submitted; a chain's own successors (projection.sbatch resubmits itself under
+# the same job name) are not in it, so the file's last line is the chain's
+# first link, and on 21 October 2026 the watchdog parked seq0f's MRI historical
+# naming a link that had ended cleanly two links before the one that aborted.
+# The accounting knows every link by name; the file is the fallback where
+# sacct is absent or answers nothing.
+newest_link() {
+    local first since jid
+    first=$(head -n 1 "$OUT/$1.jobs")
+    since=$(echo "$first" | cut -d' ' -f2 | cut -c1-19)
+    jid=$(sacct -X -n -u "${USER:-$(id -un)}" ${since:+-S "$since"} --name="rt_${TAG}_$1" -o JobID 2>/dev/null \
+          | awk 'NF {print $1}' | sort -n | tail -n 1)
+    [ -n "$jid" ] || jid=$(tail -n 1 "$OUT/$1.jobs" | cut -d' ' -f1)
+    echo "$jid"
+}
+
 driver_failure() {
     local jid kind logf err at from
     [ -f "$OUT/$1.jobs" ] || return 0
-    jid=$(tail -n 1 "$OUT/$1.jobs" | cut -d' ' -f1)
+    jid=$(newest_link "$1")
     if is_inversion "$1"; then kind=inv; else kind=fwd; fi
     logf="$REPO/logs/ismip7_${kind}_$jid.out"
     [ -f "$logf" ] || return 0
@@ -768,7 +785,7 @@ driver_failure() {
 strict_block_reason() {
     local jid kind logf st at
     [ -f "$OUT/$1.jobs" ] || return 0
-    jid=$(tail -n 1 "$OUT/$1.jobs" | cut -d' ' -f1)
+    jid=$(newest_link "$1")
     if is_inversion "$1"; then kind=inv; else kind=fwd; fi
     logf="$REPO/logs/ismip7_${kind}_$jid.out"
     if [ -f "$logf" ] && grep -q "^chain: the solver stalled" "$logf"; then

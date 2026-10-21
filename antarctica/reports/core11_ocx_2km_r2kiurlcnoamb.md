@@ -1,11 +1,11 @@
 # Core 11: ocx_r2kiurlcnoamb (2 km)
 
-- date: 2026-10-16
+- date: 2026-10-21
 - git: c4c9eb8
-- log: `/N/scratch/dlilien/ismip7_prod2kiu/logs/ismip7_fwd_11912190.out`
+- log: `/N/project/ice_rheology/ISMIP7/antarctica/results/prod_2km_iu/logs/ismip7_fwd_11912190.out`
 - timeseries: `/N/project/ice_rheology/ISMIP7/antarctica/results/prod_2km_iu/results/ocx_r2kiurlcnoamb_2000_timeseries.csv` (gitignored; this report is the tracked record)
 - observational audit: ON TRACK
-- SMB climatology pool: none reported in `/N/scratch/dlilien/ismip7_prod2kiu/logs/ismip7_fwd_11912190.out` (expected for a CTRL running on the RACMO climatology, which builds no ESM pool)
+- SMB climatology pool: none reported in `/N/project/ice_rheology/ISMIP7/antarctica/results/prod_2km_iu/logs/ismip7_fwd_11912190.out` (expected for a CTRL running on the RACMO climatology, which builds no ESM pool)
 - Forcing provenance: atmosphere acabf RACMO2.3p2-ERA OCX SDBN1-8000m v1
 - Forcing provenance: ocean tf expert-judgment OCX ocean/main v2
 - Forcing provenance: ocean so expert-judgment OCX ocean/main v2

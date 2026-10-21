@@ -362,9 +362,10 @@ relaxed-controls historicals above: cores 1 and 2 are those runs, every control
 and projection of an ESM branches from its historical's 2015 state, and OCX
 starts from the MAP. On 16 October the group decided not to submit this line.
 IU stopped four of the six 286-year cores that day and kept two running to
-2301: ssp585 CESM2-WACCM, the fastest retreat, to show the forward holds up
-through it, and ssp126 MRI-ESM2-0, the farthest along, for one complete
-projection. Both reached 2301, on 18 and 21 October.
+2301: ssp585 CESM2-WACCM, the fastest retreat, to see whether the forward
+holds up through it, and ssp126 MRI-ESM2-0, the farthest along, for one
+complete projection. ssp126 MRI-ESM2-0 reached 2301 on 18 October and ssp585
+CESM2-WACCM on 21 October.
 
 | item | value |
 |---|---|
@@ -431,8 +432,8 @@ writer, checker or scalar tool:
 
 Each stopped core keeps its three latest five-yearly checkpoints, so it can
 resume. Every finished and stopped core's files sit on Quartz project storage
-under `antarctica/results/prod_2km_iu/results`, moved from scratch with each
-copy checked by sha256.
+under `antarctica/results/prod_2km_iu/results`, and the forwards' logs under
+`prod_2km_iu/logs`, copied from scratch with each copy checked by sha256.
 
 The projections' VAF change runs from 2015, the historicals' and OCX's from
 2003. Each checker log but C007's carries the same two warnings: the
@@ -442,7 +443,7 @@ in C006's 286 years). C007's carries those two, `strbasemag` to 122 MPa on
 0.011 percent, and twelve on the six velocity fields, out of bounds on up to
 0.141 percent of values; isschecker grades a range finding by its share of
 values, so none is an error. The scalar tool's slvaf residual note reads 2.2 (C004) to 8.6 percent
-(C003) of its largest value; C006's residual stays under the tool's 2 percent.
+(C003) of its largest value; C006's and C007's stay under the tool's 2 percent.
 C006's VAF rises 6.2 mm SLE more than its control C010's by 2100 and 23.8 mm
 more by 2194.45, where C010 stopped (+196.3 against +172.5); by 2301 it has
 risen 305.7 mm. C007's VAF falls 19.0 mm SLE further than its control C009's

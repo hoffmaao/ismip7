@@ -1,8 +1,8 @@
 # Core 3: ssp370_cesm2_waccm_r2kiurlcnoamb (2 km)
 
-- date: 2026-10-16
+- date: 2026-10-21
 - git: c4c9eb8
-- log: `/N/scratch/dlilien/ismip7_prod2kiu/logs/ismip7_fwd_11912184.out`
+- log: `/N/project/ice_rheology/ISMIP7/antarctica/results/prod_2km_iu/logs/ismip7_fwd_11912184.out`
 - timeseries: `/N/project/ice_rheology/ISMIP7/antarctica/results/prod_2km_iu/results/ssp370_cesm2_waccm_r2kiurlcnoamb_2000_timeseries.csv` (gitignored; this report is the tracked record)
 - observational audit: OFF TRACK
 - SMB climatology pool: COMPLETE 30/30 yr, 2000-2029 (historical+ssp126, window 2000-2029, acabf-anomaly)

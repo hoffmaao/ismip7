@@ -1,11 +1,11 @@
 # Core 10: ctrl2015_mri_esm2_0_r2kiurlcnoamb (2 km)
 
-- date: 2026-10-16
+- date: 2026-10-21
 - git: c4c9eb8
-- log: `/N/scratch/dlilien/ismip7_prod2kiu/logs/ismip7_fwd_11912186.out`
-- timeseries: `/N/scratch/dlilien/ismip7_prod2kiu/results/ctrl2015_mri_esm2_0_r2kiurlcnoamb_2000_timeseries.csv` (gitignored; this report is the tracked record)
+- log: `/N/project/ice_rheology/ISMIP7/antarctica/results/prod_2km_iu/logs/ismip7_fwd_11912186.out`
+- timeseries: `/N/project/ice_rheology/ISMIP7/antarctica/results/prod_2km_iu/results/ctrl2015_mri_esm2_0_r2kiurlcnoamb_2000_timeseries.csv` (gitignored; this report is the tracked record)
 - observational audit: ON TRACK
-- SMB climatology pool: none reported in `/N/scratch/dlilien/ismip7_prod2kiu/logs/ismip7_fwd_11912186.out` (expected for a CTRL running on the RACMO climatology, which builds no ESM pool)
+- SMB climatology pool: none reported in `/N/project/ice_rheology/ISMIP7/antarctica/results/prod_2km_iu/logs/ismip7_fwd_11912186.out` (expected for a CTRL running on the RACMO climatology, which builds no ESM pool)
 - Forcing provenance: atmosphere RACMO2.4p1 SMB climatology 2000-2029
 - Forcing provenance: atmosphere dacabfdz MRI-ESM2-0 ctrl GEMB-SDBN1-8000m v2
 - Forcing provenance: ocean tf MRI-ESM2-0 ctrl ocean v3

@@ -522,7 +522,8 @@ def setup_model(restart_from=None, *, allow_timing_cache_a_ref=False,
     # None for unset, empty and the sentinel `checkpoint`: solve on the mesh
     # the checkpoint carries.
     mesh_fn = _mesh_override()
-    if mesh_fn and meshes_match(source_mesh, Mesh(mesh_fn)):
+    override_mesh = Mesh(mesh_fn) if mesh_fn else None
+    if override_mesh is not None and meshes_match(source_mesh, override_mesh):
         # The named mesh is the triangulation the checkpoint carries, so
         # solve on the checkpoint's own mesh and load every field exactly.
         # Interpolating onto a second build of the same mesh evaluates each
@@ -539,11 +540,12 @@ def setup_model(restart_from=None, *, allow_timing_cache_a_ref=False,
             f"checkpoint's mesh, every field loaded exactly"
         )
         mesh_fn = None
+        override_mesh = None
     if mesh_fn:
         # The timing matrix deliberately solves on a mesh different from the
         # MAP mesh. Keep the checkpoint mesh as the interpolation source and
         # use the requested mesh only for the target finite-element spaces.
-        mesh = Mesh(mesh_fn)
+        mesh = override_mesh
         target_lc_coarse = lc_coarse
         target_buffer_m = buffer_m
         mesh_basename = os.path.basename(mesh_fn)
@@ -1567,6 +1569,17 @@ def setup_model(restart_from=None, *, allow_timing_cache_a_ref=False,
         h_dyn.rename("thickness_dynamic")
         s_dyn = s.copy(deepcopy=True)
         s_dyn.rename("surface_dynamic")
+        if levelset_ckpt is not None:
+            # The writer recorded full_state_residual on this thickness, zero
+            # beyond its level set; the restart residual check below compares
+            # against it, so it reads the same field.
+            beyond_ckpt = levelset_ckpt.dat.data_ro > 0.0
+            if geom_dg1:
+                cell_view.set_cells(h_dyn, beyond_ckpt, 0.0)
+            else:
+                h_dyn.dat.data[beyond_ckpt] = 0.0
+            s_dyn.interpolate(
+                max_value(b + h_dyn, (Constant(1.0) - rho_ratio) * h_dyn))
         if geom_dg1:
             h_cell_dyn = cell_view.mean_function(h_dyn)
             h_cell_dyn.rename("thickness_dynamic_cell_mean")
@@ -1966,10 +1979,10 @@ def setup_model(restart_from=None, *, allow_timing_cache_a_ref=False,
             # out 10^4 x the recorded level. The calvsu no-calving follow-ons
             # resumed a state recorded at 3.9e3 with run atol 2.7e7, took 278
             # of 751 momentum solves at iteration zero on a frozen velocity,
-            # and the transport blew up at 2016.55. Converging to the record
-            # keeps the run atol within the acceptance limit; a solve that
-            # bottoms out above it stops on the step-size exit at its floor,
-            # the cold-continuation rule.
+            # and the transport blew up at 2016.55. The re-solve converges to
+            # the record, the run atol is capped at the acceptance limit, and
+            # a solve that floors above that limit keeps the loaded state for
+            # the rescue ladder.
             slvr.snes.setTolerances(
                 atol=recorded if recorded is not None else _atol0,
                 stol=_bounds["snes_stol"],
@@ -1981,11 +1994,17 @@ def setup_model(restart_from=None, *, allow_timing_cache_a_ref=False,
                     loaded_fnorm=f"{fnorm0:.3e}",
                     recorded=("none" if recorded is None else f"{recorded:.3e}"),
                 )
-                restart_solved = True
                 fnorm_conv = slvr.snes.getFunctionNorm()
+                if accept_limit is not None and fnorm_conv > accept_limit:
+                    raise fd.ConvergenceError(
+                        f"restart re-solve floored at ||F||={fnorm_conv:.2e}, "
+                        f"above {accept_limit:.2e}")
+                restart_solved = True
                 run_atol = (
                     snes_atol_scale() * fnorm_conv if fnorm_conv > 0.0 else _atol0
                 )
+                if accept_limit is not None:
+                    run_atol = min(run_atol, accept_limit)
                 slvr.snes.setTolerances(atol=run_atol, stol=_stol0, max_it=_max_it0)
                 PETSc.Sys.Print(
                     f"Restart state re-solved (||F|| {fnorm0:.2e} -> "

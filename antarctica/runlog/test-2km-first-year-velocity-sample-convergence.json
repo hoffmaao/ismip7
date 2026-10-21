@@ -1,0 +1,19 @@
+{
+  "id": "test-2km-first-year-velocity-sample-convergence",
+  "task": "test",
+  "institution": "IU",
+  "title": "2 km point and cell-mean MAPs carried toward convergence in 300-iteration stages, a 1-year historical from each stage",
+  "status": "running",
+  "friction": "budd",
+  "mesh": "antarctica_5000_2000_buffered20000 (IU's build, 969,764 vertices), DG0 geometry",
+  "initial_state": "test-2km-first-year-velocity-sample's two MAPs, each stage warm-started from the one before",
+  "site": "IU Quartz, general partition (niced)",
+  "resources": "32 ranks; inversions 240 GiB with 6.5 h links, forwards 96 GiB",
+  "jobs": [
+    "12249701-12249716"
+  ],
+  "code": "c62bcf0 (this PR's first commit on PR 168's branch at 74d0b84), Quartz worktree /N/scratch/dlilien/ismip7_rehearsal25iu/runvs",
+  "started": "2026-10-14",
+  "results": "/N/scratch/dlilien/ismip7_vs (maps/inversion_cv_budd_2km_*, gn_cv2km*.json); cv_collect.py tabulates them",
+  "notes": "Section 6 of antarctica/reports/first_year_mass_gain_iu.md. Three stages for cell_mean and one for point, the point MAP being near convergence at 150 iterations"
+}

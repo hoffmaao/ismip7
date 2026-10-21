@@ -1,0 +1,22 @@
+{
+  "id": "test-2km-first-year-cell-scale-noise-production",
+  "task": "test",
+  "institution": "IU",
+  "title": "Cell-scale noise of the 2 km Budd production historical, control and ssp585 against the first year's tendency",
+  "status": "done",
+  "friction": "budd",
+  "mesh": "antarctica_5000_2000_buffered20000 (IU's build, 969,764 vertices), DG0 geometry",
+  "initial_state": "the r2kiurlcnoamb historicals and the cores branched from them (PR 168)",
+  "site": "IU Quartz, general partition",
+  "resources": "1 task, serial gridnoise_r2kiu.py (bin metric); about 2 h each",
+  "jobs": [
+    "12136088",
+    "12136089"
+  ],
+  "code": "288382a's tree plus the analysis script in Quartz antarctica/results/first_year_mass_gain_iu/scripts",
+  "started": "2026-10-13",
+  "finished": "2026-10-13",
+  "results": "Quartz antarctica/results/first_year_mass_gain_iu/json/gridnoise_prod2km_{cesm2_waccm,mri_esm2_0}.json",
+  "audit": "CESM2-WACCM: cell-scale RMS of dH since 2003 2.1 m (2004), 8.0 (2015), 12.8 (2040, control), 16.1 (2073, control); 25 km bin-mean RMS 0.7, 5.5, 12.7, 21.5; cell-scale tendency 2.12 m/yr in the first year, 0.40 in 2015, 0.14 in 2070; correlation with the first year's tendency 0.76 (2015), 0.60 (2040), 0.52 (2073). ssp585 follows the control to 2040 and holds its tendency near 0.2 to 0.25 m/yr after 2070",
+  "notes": "Section 1 of antarctica/reports/first_year_mass_gain_iu.md. The cell-scale pattern is the first year's imbalance carried forward and decaying"
+}

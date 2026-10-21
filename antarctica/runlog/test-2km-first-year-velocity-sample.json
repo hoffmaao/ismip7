@@ -1,0 +1,32 @@
+{
+  "id": "test-2km-first-year-velocity-sample",
+  "task": "test",
+  "institution": "IU",
+  "title": "2 km Budd re-inversions under the point and the cell-mean velocity target, a 1-year historical from each, and where they differ",
+  "status": "done",
+  "friction": "budd",
+  "mesh": "antarctica_5000_2000_buffered20000 (IU's build, 969,764 vertices), DG0 geometry",
+  "initial_state": "IU's 2 km _ef2_vf MAP (results/reinvert_2km/final, record inversion-2km-budd-b20k-ef2-vf), 150 iterations each",
+  "site": "IU Quartz, general partition",
+  "resources": "32 ranks: inversions 240 GiB (1 h 38 and 2 h 15), forwards 96 GiB (38 min); analyses serial (8 to 14 min) and front_flux_check on 2 ranks",
+  "jobs": [
+    "12187141",
+    "12187142",
+    "12242353",
+    "12242798",
+    "12242802",
+    "12242805",
+    "12242957",
+    "12242958",
+    "12243533",
+    "12243574",
+    "12252781",
+    "12252803"
+  ],
+  "code": "c62bcf0 (this PR's first commit on PR 168's branch at 74d0b84), Quartz worktree /N/scratch/dlilien/ismip7_rehearsal25iu/runvs",
+  "started": "2026-10-13",
+  "finished": "2026-10-14",
+  "results": "Quartz antarctica/results/first_year_mass_gain_iu/json/gn_2km_*.json, json/vsdiff_2km.json, vsflux_2km.json, ff_vs2km.json, ffacets_2km.json, figs/vsdiff_2km.png; the MAPs and forward states on /N/scratch/dlilien/ismip7_vs",
+  "audit": "Unobserved nodes 50,220 and 38,693 of 969,764; misfit 1,271 and 1,960, |grad| 0.40 and 1.36. Tendency nb 1.45 and 1.40, bin 1.94 and 1.92 m/yr; year-1 VAF gain +0.53 and +0.06 mm; grounding-line flux over the year 1,775 and 1,949, calving 1,378 and 1,590 Gt/yr. The VAF difference (-0.48 mm, -185 Gt grounded) lies within 20 km of the 2003 grounding line (0 to 5 km -0.24, 5 to 20 km -0.21, 20 to 50 km -0.06 mm). front_flux_check at t=0: grounding line 2,256 and 2,396 against 2,156 (point target) and 2,167 (cell-mean target); floating front 1,320 and 1,518 against 998 and 1,282; grounded front 261 and 1,277 against 81 and 132, of which 151 and 1,101 Gt/yr cross three thin unobserved front facets at Shirase Glacier near (1,385, 1,750) km at up to 2.4e5 and 1.9e6 m/yr",
+  "notes": "Sections 2 and 5 of antarctica/reports/first_year_mass_gain_iu.md; calibrated melt from results/rehearsal_2km_iu/calibration/deltaT_per_basin_2000_K6.500e-05.npz"
+}

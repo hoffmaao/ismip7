@@ -1485,13 +1485,17 @@ checkpoint it writes:
 
 | forward | geometry | controls | `init_state` |
 |---|---|---|---|
-| on the MAP's mesh | the relaxed geometry | the re-inverted ones | `relaxed` |
+| on the MAP's mesh | that mesh's BedMachine sample, with the MAP's raster sampling | the re-inverted ones | `relaxed-controls` |
 | on another mesh (1 km from a 2 km MAP) | that mesh's BedMachine sample | the re-inverted ones, transferred | `relaxed-controls` |
 
-Either way the 2003 start backdates the geometry it starts from by 12 years.
-The relaxed thickness stays on the MAP's mesh: carried across meshes it would
-arrive as a DG0 staircase, which `../ADAPTIVE_MESH.md` measured driving the
-thickness clamp from 119,000 to 256,000 Gt/yr within a few steps.
+So every resolution starts from the same 2015 geometry, the one a forward from
+the unrelaxed MAP starts from, and the 2003 start backdates it by 12 years.
+The relaxed thickness serves the re-inversion alone. Carried across meshes it
+would arrive as a DG0 staircase, which `../ADAPTIVE_MESH.md` measured driving
+the thickness clamp from 119,000 to 256,000 Gt/yr within a few steps. On the
+MAP's own mesh the MAP's velocity state still seeds the first solve. Forwards
+cold-started before 10 October 2026 took the relaxed geometry on the MAP's
+mesh and record `relaxed`; their restarts keep it.
 
 ### Environment knobs (inversion)
 
@@ -1575,7 +1579,7 @@ redeclare those literals.
 | `ISMIP7_CALVING_PARAMS` | the law's parameters, `key=value,key=value` (e.g. `sigma_max_fl=0.2,sigma_max_gr=1`), checked against the law at startup. Replaces `ISMIP7_CALVING_SIGMA_MAX_GROUNDED` / `_FLOATING`, which are refused when a law is set | the law's defaults |
 | `ISMIP7_CALVING_MODULE` | a Python file whose `@icepack_tools.calving.register` laws join the registry before `ISMIP7_CALVING` is looked up | unset |
 | `ISMIP7_FRACTURE` | `mask` applies the ISMIP7 collapse forcing to every floating cell it flags, booked as calving; `mask_front` only to the flagged cells open water has reached, so no hole opens behind a standing front (the two end-members of discussion #30). Masks exist for the SSPs only, so the control, historicals and OCX abort on either. Needs `dg0` or `dg1`. Every run prints its mode once (`Ice-shelf collapse forcing: ISMIP7_FRACTURE=...`, `none` included). Under a mask mode the timeseries columns `collapse_flagged_cells`, `collapse_removed_cells` and `collapse_held_cells` count the flagged floating cells, the ones the mode has emptied and the ones it leaves standing (always 0 under `mask`), all ranks summed; the budget lines, a closing log line and the core report repeat them | `none` |
-| `ISMIP7_OCX_FORCING` | what core 11 runs on. `protocol` is the ISMIP7 OCX product (RACMO2.3p2-ERA SDBN1 `acabf`, expert-judgment ocean `tf`/`so`), and the run refuses to start without it. `stopgap` is RACMO2.4p1 actual-year SMB with the constant OI ocean climatology, what the core ran on before the product was readable here. K is fitted to the climatology, so read `check_melt_bound.py --ocx` first (discussion #48) | `protocol` |
+| `ISMIP7_OCX_FORCING` | what core 11 runs on. `protocol` is the ISMIP7 OCX product (RACMO2.3p2-ERA SDBN1 `acabf`, expert-judgment ocean `tf`/`so`), and the run refuses to start without it, or on an ocean older than v2: the v1 was built on an earlier extrapolated climatology (discussion #48, `forcing.OCEAN_MIN_VERSION`). `stopgap` is RACMO2.4p1 actual-year SMB with the constant OI ocean climatology, what the core ran on before the product was readable here. K is fitted to the climatology, and `check_melt_bound.py --ocx` compares the OCX ocean with it per basin | `protocol` |
 | `ISMIP7_OCX_OCEAN` | which expert-judgment OCX ocean scenario to read: `main` (the core one), `cold`, `warm` or `vary`. A member other than `main` writes to `ocx_<member>` | `main` |
 | `ISMIP7_SMB_ELEVATION_FEEDBACK` | the SMB-elevation feedback, `dacabfdz` times the surface change since the chain's initial state, added to the SMB every step (section 6). `1` or unset turns it on; `0` or an empty value turns it off, and the value set is closed. With it on a run refuses to start without the gradient it reads, and a resume refuses a checkpoint written in the other mode | `1` |
 | `ISMIP7_OUTPUT` | `1` records the ISMIP7 yearly fields and scalars (`<exp>_<lc>_ismip7_annual_<year>.h5`, `<exp>_<lc>_ismip7_scalars.csv`), regridded afterwards by `write_ismip7_output.py`. The value set is closed, so a typo is rejected at startup. `projection.sbatch` and `run_core_matrix.sh` default it to `1`, and `=0` or an empty value turns it off there. A chained projection must export it on every link; a link that cold-starts mid-year logs the gap and begins at the next 1 January. Resuming continues a series, and a cold start into a populated series is refused | unset (`1` under the core-experiment runners) |

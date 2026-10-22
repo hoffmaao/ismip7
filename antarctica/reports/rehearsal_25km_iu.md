@@ -512,6 +512,20 @@ On IU Quartz under `antarctica/results/rehearsal_25km_iu/`:
 | `figs/` | the two figures of the forced-response section |
 | `scripts/` | the wrapper `submit_r25iu.sh` and every job script and tool the rehearsal ran, with `CODE_VERSIONS.txt` |
 
+The 2 km production suite sits on IU Quartz under
+`antarctica/results/prod_2km_iu/`; its historicals C001 and C002 keep their
+annual files under `rehearsal_2km_iu/results/`.
+
+| path | holds |
+|---|---|
+| `results/` | every core's timeseries, scalars CSV, annual files, final state and latest checkpoints, with `SHA256SUMS` |
+| `logs/` | every forward's log, with `SHA256SUMS` |
+| `r2kiurlcnoamb/submission/AIS/IU/icepack2/` | `params.nc` and `CORE/` C001 to C004, C006, C007 and C011, the writer's 31 files each |
+| `r2kiurlcnoamb/checker/`, `r2kiurlcnoamb/scalars/IU/` | isschecker 0.5.1 logs and the scalar tool's output with `compare_scalars.py`'s comparison, per core |
+| `r2kiurlcnoamb/reports/`, `r2kiurlcnoamb/figs/`, `r2kiurlcnoamb/movies/` | the core reports, the ssp585 thickness-change and VAF figures, and C007's movie |
+| `r2kiurlcnoamb/diagnostics/` | the Beardmore and fast-pixel measurements of C007 with their scripts |
+| `scripts/` | the wrappers and every job script and tool the suite ran, with `CODE_VERSIONS.txt` and `SHA256SUMS` |
+
 ## Reproducing
 
 Every submission went through `submit_r25iu.sh MODE [noamb|amb]` from a

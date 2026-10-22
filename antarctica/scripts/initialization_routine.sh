@@ -698,6 +698,24 @@ watch_pass() {
             launch "$stage"
             continue
         fi
+        # A chain's successor takes its node exclusions from its predecessor
+        # (site_core.sh), so a chain submitted before the watchdog excluded a
+        # node never learns of the exclusion: successors of such chains hung
+        # on the excluded bb6u15g1 and bb6u13g1 on 22 October 2026. Stamp the
+        # current list onto any pending link that carries none; the
+        # scheduler lets a pending job be changed, a running one not.
+        if [ -s "$OUT/exclude_nodes" ] && command -v scontrol >/dev/null; then
+            local excl pend cur
+            excl=$(sort -u "$OUT/exclude_nodes" | paste -sd,)
+            while read -r pend _; do
+                [ -n "$pend" ] || continue
+                cur=$(scontrol show job "$pend" 2>/dev/null | grep -oE 'ExcNodeList=[^ ]+' | cut -d= -f2)
+                [ "$cur" = "(null)" ] || continue
+                if scontrol update JobId="$pend" ExcNodeList="$excl" 2>/dev/null; then
+                    log "watch: job $pend ($stage) pending without node exclusions; now excluding $excl"
+                fi
+            done <<< "$(awk '$2 == "PENDING" {print $1}' <<< "$rows")"
+        fi
         is_inversion "$stage" && continue
         while read -r jid state node elapsed _; do
             [ "$state" = RUNNING ] || continue

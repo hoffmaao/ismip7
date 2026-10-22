@@ -467,6 +467,51 @@ def test_watch_resubmits_a_dead_chain_and_cancels_a_silent_link(sandbox):
     assert "scancel 4243" not in (sandbox / "sbatch_calls.txt").read_text() if (sandbox / "sbatch_calls.txt").exists() else True
 
 
+def test_watch_stamps_the_node_exclusions_onto_a_pending_link_that_has_none(sandbox):
+    r"""A chain submitted before the watchdog excluded a node hands every
+    successor an empty exclusion list (site_core.sh copies the predecessor's),
+    so the watch stamps the stage's current list onto a pending link that
+    carries none and leaves one that already has a list alone."""
+    (sandbox / "warm.h5").write_text("warm\n")
+    bin_dir = sandbox / "bin"
+    queue = sandbox / "queue.txt"
+    (bin_dir / "squeue").write_text(
+        "#!/bin/bash\n"
+        'name=""; while [ $# -gt 0 ]; do [ "$1" = -n ] && name=$2; shift; done\n'
+        '[ -f "$QUEUE_FILE" ] && grep "^$name " "$QUEUE_FILE" | cut -d" " -f2-\n'
+        "exit 0\n")
+    (bin_dir / "scontrol").write_text(
+        "#!/bin/bash\n"
+        'if [ "$1" = show ]; then\n'
+        '  if grep -qx "$3" "$NULL_FILE"; then echo "JobId=$3 ExcNodeList=(null) Features=x"; '
+        'else echo "JobId=$3 ExcNodeList=bb1u1c1 Features=x"; fi\n'
+        'else echo "scontrol $*" >> "$SBATCH_CALLS"; fi\n')
+    for name in ("squeue", "scontrol"):
+        (bin_dir / name).chmod(0o755)
+    nulls = sandbox / "nulls.txt"
+    nulls.write_text("4300\n")
+    env = {"ISMIP7_ROUTINE_STAGES": "hist", "ISMIP7_ROUTINE_ESMS": "CESM2-WACCM",
+           "QUEUE_FILE": str(queue), "NULL_FILE": str(nulls), "ISMIP7_ROUTINE_WATCH_ONCE": "1"}
+    rc, log = routine(sandbox, "init", env=env)
+    assert rc == 0, log
+    (sandbox / "sbatch_calls.txt").unlink(missing_ok=True)
+    queue.write_text("rt_out_hist_cesm_waccm 4300 PENDING (null) 0:00 Priority\n"
+                     "rt_out_hist_cesm_waccm 4301 PENDING (null) 0:00 Priority\n")
+
+    # nothing excluded yet: nothing to stamp
+    rc, log = routine(sandbox, "watch", env=env)
+    assert rc == 0, log
+    assert not (sandbox / "sbatch_calls.txt").exists()
+
+    (sandbox / "out" / "exclude_nodes").write_text("bb6u15g1\nbb6u13g1\nbb6u15g1\n")
+    rc, log = routine(sandbox, "watch", env=env)
+    assert rc == 0, log
+    calls = (sandbox / "sbatch_calls.txt").read_text()
+    assert calls == "scontrol update JobId=4300 ExcNodeList=bb6u13g1,bb6u15g1\n"
+    assert "job 4300 (hist_cesm_waccm) pending without node exclusions" in log
+    assert "4301" not in log
+
+
 def test_watch_does_nothing_when_the_scheduler_cannot_be_reached(sandbox):
     r"""An unreachable controller answers nothing; that is not an empty queue.
     The 14 October 2026 outage resubmitted every stage on top of its live chain."""

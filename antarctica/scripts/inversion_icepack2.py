@@ -2503,7 +2503,7 @@ def main():
         if use_dhdt:
             # ONE prognostic step, using the SAME upwind operator the forward
             # transports with (icepack2_tools.transport: the DG0 finite-volume
-            # update, and under DG1 the same with its volume term) -- that
+            # update, and under DG1 the same with its volume term). That
             # consistency is the point: the inversion must be penalised for
             # the divergence its own transport scheme will produce, not an
             # idealised one.

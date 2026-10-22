@@ -517,7 +517,8 @@ On IU Quartz under `antarctica/results/rehearsal_25km_iu/`:
 The 2 km production suite sits on IU Quartz under
 `antarctica/results/prod_2km_iu/`. Its historicals C001 and C002 keep all
 their forward output, yearly checkpoints included, under
-`antarctica/results/rehearsal_2km_iu/results/`.
+`antarctica/results/rehearsal_2km_iu/results/`, and the logs their core
+reports name under `antarctica/results/rehearsal_2km_iu/logs/`.
 
 | path | holds |
 |---|---|

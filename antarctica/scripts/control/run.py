@@ -52,6 +52,8 @@ from icepack2_tools.forcing import (
     compute_sin_alpha,
     quadratic_mixed_slope,
     forcing_coords,
+    forcing_geometry,
+    forcing_space,
     forcing_year,
     melt_receiving,
     describe_melt_calibration,
@@ -146,9 +148,7 @@ def make_synthetic_ocean_callback(tf_max=1.5, depth_ref=1000.0, K=_K_DEFAULT):
     )
 
     def callback(ctx, t_yr):
-        h = ctx["h"].dat.data_ro
-        b = ctx["b"].dat.data_ro
-        s = ctx["s"].dat.data_ro
+        h, b, s = forcing_geometry(ctx)
         draft = np.minimum(s - h, 0.0)
         tf = np.clip(tf_max * np.abs(draft) / depth_ref, 0.0, tf_max)
         sal = np.full_like(tf, 34.5)
@@ -272,7 +272,7 @@ def main():
     # acabf full-field climatology; refuse to run zero-SMB unless forced.
     try:
         ctx["accum"].assign(
-            load_racmo_smb_climatology(ctx["Q_g"], CLIM_START, CLIM_END)
+            load_racmo_smb_climatology(forcing_space(ctx), CLIM_START, CLIM_END)
         )
         mean_smb = area_weighted_mean(ctx["accum"], ctx["mesh"])
         PETSc.Sys.Print(

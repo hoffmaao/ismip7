@@ -65,6 +65,8 @@ _CHECKPOINT_FIELDS = (
     "phi_eff",
     "C_w0",
     "N_ref",
+    "N_ref_thickness",
+    "N_ref_surface",
     "a_ref_mb",
     "thickness_dg",
 )
@@ -250,6 +252,11 @@ def main():
             "(was it produced by inversion_icepack2.py?)"
         )
     if args.manifest or args.publish_timing_cache:
+        if _json_value(root_attrs.get("geometry_space")) == "dg1":
+            from icepack2_tools.runconfig import dg1_refusals
+            raise ValueError(
+                f"{in_fn} records geometry_space=dg1: "
+                + "; ".join(dg1_refusals(timing_cache=True)))
         law = _json_value(root_attrs.get("friction")) or "budd"
         missing_fields = sorted(set(cache_required_fields(law)) - set(loaded))
         if missing_fields:

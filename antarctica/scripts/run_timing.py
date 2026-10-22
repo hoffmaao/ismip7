@@ -408,7 +408,8 @@ def _validate_loaded_cache(ctx, cache_validation):
         "t_yr": ctx.get("t_restart"),
         "mesh_basename": ctx.get("mesh_basename"),
         "friction": ctx.get("friction"),
-        "geometry_space": "dg0" if ctx.get("geom_dg") else "cg1",
+        "geometry_space": ctx.get("geometry_space")
+        or ("dg0" if ctx.get("geom_dg") else "cg1"),
     }
     for key, expected_value in context_expected.items():
         if context_actual[key] != expected_value:

@@ -77,11 +77,14 @@ climatology and its shelves thin.
 product. Every K here is fitted to the OI climatology, and the OCX ocean is a
 different field: discussion #48 (17 September 2026) reports the OCX ``main``
 thermal forcing so far from the Zhou climatology around Mertz that the
-region's melt halves against a calibration made on the climatology, possibly
-because OCX was built from an older extrapolated climatology. So the forward
-half is melted a second time, uncapped as the forward runs, with thermal
-forcing and salinity from the OCX ocean through the forward's own reader, for
-each of ``--ocx-years``, and the two melts are set side by side per IMBIE2
+region's melt halves against a calibration made on the climatology. That was
+the OCX ocean v1, built on an earlier extrapolated climatology; the
+regenerated v2 matches the climatology, and a run refuses the v1
+(``OCEAN_MIN_VERSION``), which this check still compares under a ``[!]``
+line. So the forward half is melted a second time, uncapped as the forward
+runs, with thermal forcing and salinity from the OCX ocean through the
+forward's own reader, for each of ``--ocx-years``, and the two melts are set
+side by side per IMBIE2
 basin and per 256 km block, the blocks because a basin total dilutes one
 shelf. A basin or block whose OCX melt is off the climatology's by more than
 ``--ocx-tol`` is flagged and the exit status is 1, so a chain can stop on it.
@@ -565,6 +568,11 @@ def compare_with_ocx(a, g):
     # one on disk, and upstream regenerates these files (discussion #48).
     for line in describe_forcing_provenance(ocean):
         PETSc.Sys.Print(f"  {line}")
+    for var in ("tf", "so"):
+        problem = ocean.version_problem(var)
+        if problem:
+            PETSc.Sys.Print(f"  [!] {problem}: a run refuses this file, so the "
+                            f"comparison below describes forcing no run reads")
     status = 0
     for year in years:
         other = melt_with(ocean.get_thermal_forcing(year, g["x"], g["y"], draft=g["draft"]),

@@ -1,0 +1,28 @@
+{
+  "id": "test-25km-first-year-checkerboard-dg0-cg1",
+  "task": "test",
+  "institution": "IU",
+  "title": "25 km OCX from DG0 and CG1 MAPs: does the cell-scale pattern belong to DG0?",
+  "status": "done",
+  "friction": "budd",
+  "mesh": "antarctica_250000_25000_buffered20000, DG0 and CG1 geometry",
+  "initial_state": "two 300-iteration inversions from the _wsiu controls under ISMIP7_RASTER_SAMPLE=vertex and exact_front 0, one per geometry space",
+  "site": "IU Quartz, general partition",
+  "resources": "8 ranks, 64 GiB inversions (about 21 min) and 32 GiB OCX forwards (5 to 6 min); gridnoise serial",
+  "jobs": [
+    "12138738",
+    "12138748",
+    "12145012",
+    "12145013",
+    "12147333",
+    "12146769",
+    "12149401",
+    "12149402"
+  ],
+  "code": "288382a (PR 163's head); the CG1 rerun 74d0b84, Quartz worktrees run and run25cg",
+  "started": "2026-10-13",
+  "finished": "2026-10-13",
+  "results": "Quartz antarctica/results/first_year_mass_gain_iu/json/gridnoise_{dg0,cg1fix}.json, maps_25km/inversion_gs25_*, csv/",
+  "audit": "Inversion misfits 2,755 (DG0) and 3,041 (CG1). OCX protocol forcing, no backdate, uniform K 6.5e-5 on the legacy path, no apparent MB. nb metric: DG0 first-year tendency 1.73 m/yr, 0.38 in 2026, cell-scale RMS 13.9 m by 2026, correlation with the first year 0.81; CG1 5.05, 1.79, 54.7 m, 0.80",
+  "notes": "Section 1 of antarctica/reports/first_year_mass_gain_iu.md. The first CG1 forward (12145013) lost all its ice at step 1: simulation.py reassigned ctx['h_dg_state'] before the CG1 restore check (since f9afea4), fixed in 74d0b84 (PR 168) and rerun as 12147333"
+}

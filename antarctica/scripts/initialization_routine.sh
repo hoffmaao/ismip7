@@ -7,6 +7,7 @@
 #   antarctica/scripts/initialization_routine.sh OUTDIR next
 #   antarctica/scripts/initialization_routine.sh OUTDIR status
 #   antarctica/scripts/initialization_routine.sh OUTDIR resume STAGE
+#   antarctica/scripts/initialization_routine.sh OUTDIR watch
 #
 # `init` records the objective (every exported ISMIP7_* knob, the Python path
 # and the MPI and kernel-cache settings of the calling shell, less the knobs
@@ -16,7 +17,10 @@
 # which has not been started, and nothing else, so it can be called any number
 # of times. `status` prints one line per stage. `resume STAGE` submits a stage
 # again (a chain whose links all died); its chain resumes the stage's own
-# checkpoint.
+# checkpoint. `watch` (slurm mode) is the watchdog loop for a login node or a
+# small allocation: it resubmits a started stage whose chain has no job left
+# and cancels a forward link whose log has gone silent (a hung solve), with
+# the node excluded from the stage's next submission.
 #
 # Two launch modes (ISMIP7_ROUTINE_LAUNCH, recorded at init):
 #   mpiexec   every stage runs in the foreground, in order, on
@@ -50,17 +54,27 @@
 #             (ISMIP7_GEOMETRY_BACKDATE=12, 2015 - max(start, 2003)) as the
 #             geometry at the start of the forced year, so the historical
 #             proper starts in 2003 from the model's own state
-#   control   the balanced control per ESM from the historical's endpoint
+#   control   the control per ESM from the historical's endpoint
 #   proj      the projections per ESM (ISMIP7_ROUTINE_SCENARIOS, ssp126 ssp370
-#             ssp585) from the same endpoint, apparent mass balance as the
-#             control's (ISMIP7_ROUTINE_PROJ_AMB, 1)
+#             ssp585) from the same endpoint
+#             Neither carries an apparent mass-balance reference: the
+#             historical runs without one, and a reference can only be frozen
+#             at the state a run starts balanced from, never built from an
+#             evolved one (simulation.setup_model refuses), so the control and
+#             the projections drift with the model's own imbalance and their
+#             difference removes it.
 #   ocx       the observed-forcing experiment from map_forward.h5
 # map_forward.h5 is the product of the last inversion stage listed, so a run
 # without `relax`/`reinvert` starts its forwards from the staged MAP.
 #
-# The front of every forward after the relaxation is the submission's
-# (ismip7_front_routine.sh; collapse mask on the projections only); the relax
-# stage pins it.
+# The front of every forward after the relaxation is a level-set calving law
+# from icepack_tools.calving: ISMIP7_ROUTINE_CALVING (hfb), its parameters
+# ISMIP7_ROUTINE_CALVING_PARAMS (sigma_max=0.15) and the advance rule
+# ISMIP7_ROUTINE_FRONT_ADVANCE (none: retreat-only). The defaults are the
+# submission front of ismip7_front_routine.sh; a campaign member
+# (submit_calving_campaign.sh) is run as a full suite by naming its law,
+# parameters and advance here. The collapse mask applies to the projections
+# only; the relax stage pins the front.
 #
 # An inversion stage moves one control alone, which only the TAO path does:
 # `init` refuses a recorded ISMIP7_GRAD_PRECOND other than mass_consistent or
@@ -113,7 +127,9 @@ record_env() {
         echo "export ISMIP7_ROUTINE_RELAX_YR=${ISMIP7_ROUTINE_RELAX_YR:-20}"
         echo "export ISMIP7_ROUTINE_RELAX_START=${ISMIP7_ROUTINE_RELAX_START:-2015}"
         echo "export ISMIP7_ROUTINE_HIST_START=${ISMIP7_ROUTINE_HIST_START:-2002}"
-        echo "export ISMIP7_ROUTINE_PROJ_AMB=${ISMIP7_ROUTINE_PROJ_AMB:-1}"
+        echo "export ISMIP7_ROUTINE_CALVING=${ISMIP7_ROUTINE_CALVING:-hfb}"
+        echo "export ISMIP7_ROUTINE_CALVING_PARAMS=${ISMIP7_ROUTINE_CALVING_PARAMS-sigma_max=0.15}"
+        echo "export ISMIP7_ROUTINE_FRONT_ADVANCE=${ISMIP7_ROUTINE_FRONT_ADVANCE:-none}"
         echo "export ISMIP7_ROUTINE_FLUIDITY_CONTROL=${ISMIP7_ROUTINE_FLUIDITY_CONTROL:-floating}"
         echo "export ISMIP7_ROUTINE_PHI_BOUNDS=${ISMIP7_ROUTINE_PHI_BOUNDS:--2.3,2.3}"
         echo "export ISMIP7_ROUTINE_DHDT_REWEIGHT=${ISMIP7_ROUTINE_DHDT_REWEIGHT:-24}"
@@ -146,6 +162,18 @@ load_env() {
         [ -n "$ISMIP7_ROUTINE_SBATCH_INV" ] || die "ISMIP7_ROUTINE_SBATCH_INV (sbatch resources of an inversion link) is empty"
         [ -n "$ISMIP7_ROUTINE_SBATCH_FWD" ] || die "ISMIP7_ROUTINE_SBATCH_FWD (sbatch resources of a forward link) is empty"
     fi
+    # A routine recorded before the calving knobs ran the submission front;
+    # without these its forwards would be handed an empty law.
+    : "${ISMIP7_ROUTINE_CALVING:=hfb}"
+    : "${ISMIP7_ROUTINE_FRONT_ADVANCE:=none}"
+    [ -n "${ISMIP7_ROUTINE_CALVING_PARAMS+set}" ] || ISMIP7_ROUTINE_CALVING_PARAMS=sigma_max=0.15
+    case "$ISMIP7_ROUTINE_FRONT_ADVANCE" in
+        free|none) ;;
+        *) die "ISMIP7_ROUTINE_FRONT_ADVANCE must be free or none, got $ISMIP7_ROUTINE_FRONT_ADVANCE" ;;
+    esac
+    case "$ISMIP7_ROUTINE_CALVING ${ISMIP7_ROUTINE_CALVING_PARAMS:-}" in
+        *" "*" "*) die "ISMIP7_ROUTINE_CALVING and ISMIP7_ROUTINE_CALVING_PARAMS take no spaces (parameters are comma separated)" ;;
+    esac
     TAG=$ISMIP7_ROUTINE_TAG
     LC=${ISMIP7_LC:?ISMIP7_LC must be recorded}
     RESULTS="$REPO/antarctica/results"
@@ -438,10 +466,17 @@ stage_env_forward() {   # prints `export` lines for a forward stage
                     [ "$ISMIP7_ROUTINE_HIST_START" -lt 2003 ] \
                         && echo "export ISMIP7_GEOMETRY_BACKDATE=$((2015 - 2003))" ;;
                 ocx)    echo "export ISMIP7_APPARENT_MB=0" ;;
-                control_*) echo "export ISMIP7_APPARENT_MB=1" ;;
-                ssp*_*) echo "export ISMIP7_APPARENT_MB=$ISMIP7_ROUTINE_PROJ_AMB" ;;
+                control_*|ssp*_*) echo "export ISMIP7_APPARENT_MB=0" ;;
             esac
-            echo ". $REPO/antarctica/scripts/ismip7_front_routine.sh"
+            # the routine's calving law (see the header); the legacy pinned
+            # front stays off under a law
+            echo "export ISMIP7_CALVING=$ISMIP7_ROUTINE_CALVING ISMIP7_FRONT_ADVANCE=$ISMIP7_ROUTINE_FRONT_ADVANCE"
+            if [ -n "$ISMIP7_ROUTINE_CALVING_PARAMS" ]; then
+                echo "export ISMIP7_CALVING_PARAMS=$ISMIP7_ROUTINE_CALVING_PARAMS"
+            else
+                echo "unset ISMIP7_CALVING_PARAMS"
+            fi
+            echo "unset ISMIP7_FIXED_FRONT"
             case "$stage" in
                 ssp*_*) echo "export ISMIP7_FRACTURE=mask_front" ;;
                 *)      echo "export ISMIP7_FRACTURE=none" ;;
@@ -479,8 +514,11 @@ launch() {
     if [ "$ISMIP7_ROUTINE_LAUNCH" = slurm ]; then
         local jid
         # shellcheck disable=SC2086
+        local excl=""
+        # nodes the watchdog saw a link hang on (OUT/exclude_nodes, one per line)
+        [ -s "$OUT/exclude_nodes" ] && excl="--exclude=$(sort -u "$OUT/exclude_nodes" | paste -sd,)"
         jid=$(cd "$REPO" && eval "$envlines" && export ISMIP7_CHAIN_THEN_CMD="bash $SELF $OUT next" \
-              && sbatch --parsable $res -J "$jobname" --export=ALL "$script") \
+              && sbatch --parsable $res $excl -J "$jobname" --export=ALL "$script") \
             || die "sbatch failed for stage $stage"
         echo "$jid $(date -Is)" >> "$OUT/$stage.jobs"
         log "stage $stage: job $jid ($jobname)"
@@ -579,6 +617,7 @@ cmd_status() {
             elif ready "$stage"; then state="ready"
             else state="waiting"; fi
         fi
+        [ -f "$OUT/$stage.blocked" ] && state="BLOCKED ($(cat "$OUT/$stage.blocked")); fix, then resume $stage"
         if [ "$ISMIP7_ROUTINE_LAUNCH" = slurm ] && is_started "$stage" && ! is_done "$stage" && command -v squeue >/dev/null; then
             state="$state; queue: $(squeue -h -u "${USER:-$(id -un)}" -n "rt_${TAG}_${stage}" -o '%i:%T' 2>/dev/null | tr '\n' ' ')"
         fi
@@ -589,6 +628,112 @@ cmd_status() {
     return 0
 }
 
+# The watchdog (slurm mode): a chain whose link was killed by the scheduler
+# queues no successor, and a link that hangs in a solve sits silent until the
+# wall limit. Every ISMIP7_ROUTINE_WATCH_SEC (120) it resubmits a started,
+# unfinished stage with no job in the queue, and cancels a RUNNING forward
+# link whose log has been silent for ISMIP7_ROUTINE_STALL_MIN (15) minutes,
+# noting its node in OUT/exclude_nodes so the resubmission avoids it. The
+# inversion links are left alone: an iteration can take minutes and a hung one
+# is bounded by the wall limit, after which its queued successor resumes.
+watch_pass() {
+    local stage jobname rows jid state node elapsed logf age stall
+    stall=${ISMIP7_ROUTINE_STALL_MIN:-15}
+    # A scheduler that cannot be reached answers nothing, which must not read
+    # as "no job": during the NOTS controller outage of 14 October 2026 every
+    # stage was resubmitted on top of its live chain. One probe, then the pass.
+    if ! squeue -h -u "${USER:-$(id -un)}" -o %i >/dev/null 2>&1; then
+        log "watch: squeue failed; skipping this pass"
+        return 0
+    fi
+    for stage in $STAGE_LIST; do
+        is_started "$stage" || continue
+        is_done "$stage" && continue
+        jobname="rt_${TAG}_${stage}"
+        rows=$(squeue -h -u "${USER:-$(id -un)}" -n "$jobname" -o "%i %T %N %M" 2>/dev/null) \
+            || { log "watch: squeue failed; skipping the rest of this pass"; return 0; }
+        if [ -z "$rows" ]; then
+            # A chain ends without a successor in two ways: the scheduler took
+            # the link (timeout, preemption, node failure, an outage), which a
+            # resubmission resumes, or the driver exited with an error or the
+            # solver stalled where the link resumed, which a resubmission
+            # repeats. The second parks the stage until `resume`
+            # (OUT/<stage>.blocked holds the reason).
+            [ -f "$OUT/$stage.blocked" ] && continue
+            local why
+            why=$(driver_failure "$stage")
+            if [ -n "$why" ]; then
+                echo "$why" > "$OUT/$stage.blocked"
+                log "watch: ERROR stage $stage stopped on a driver failure or a stall, not resubmitting: $why"
+                continue
+            fi
+            log "watch: stage $stage has no job in the queue; resubmitting"
+            mv "$OUT/$stage.jobs" "$OUT/$stage.jobs.$(date +%s)"
+            launch "$stage"
+            continue
+        fi
+        is_inversion "$stage" && continue
+        while read -r jid state node elapsed; do
+            [ "$state" = RUNNING ] || continue
+            logf="$REPO/logs/ismip7_fwd_$jid.out"
+            [ -f "$logf" ] || continue
+            age=$(( ($(date +%s) - $(stat -c %Y "$logf")) / 60 ))
+            if [ "$age" -ge "$stall" ]; then
+                log "watch: job $jid ($stage) on $node silent for $age min; cancelling, node excluded"
+                echo "$node" >> "$OUT/exclude_nodes"
+                scancel "$jid"
+            fi
+        done <<< "$rows"
+    done
+}
+
+# The driver error or solver stall that ended a stage's newest link, or
+# nothing when the link ended otherwise (the scheduler took it, it finished,
+# or its log is not there). A forward or inversion link logs "chain: stopping,
+# driver exited N" or "inversion exit N" with N != 0 when the driver itself
+# failed. A forward whose solver stalled exits 0 with its state saved and
+# logs "chain: the solver stalled", and its chain does not resubmit it.
+# Whether a resubmission helps depends on where the link stalled. A link that
+# advanced and then stalled is resubmitted: the next one starts the substep
+# controller afresh at the stall, and the refinement it climbs through can
+# take the step (on 16 October 2026 a restart of the seq0 ssp585 projection
+# passed the step its link had stalled in at 2021.25). A link that stalled
+# where it resumed made no progress, and another would stall there again (the
+# seq0 ssp126 projection at 2019.95, relaunched link after link): parked.
+driver_failure() {
+    local jid kind logf err at from
+    [ -f "$OUT/$1.jobs" ] || return 0
+    jid=$(tail -n 1 "$OUT/$1.jobs" | cut -d' ' -f1)
+    if is_inversion "$1"; then kind=inv; else kind=fwd; fi
+    logf="$REPO/logs/ismip7_${kind}_$jid.out"
+    [ -f "$logf" ] || return 0
+    if grep -q "^chain: the solver stalled" "$logf"; then
+        at=$(sed -n 's/^chain: the solver stalled.* at \([-0-9.eE+]*\)\.$/\1/p' "$logf" | tail -n 1)
+        from=$(sed -n 's/.*Restart: evolved geometry.*(t_yr=\([-0-9.eE+]*\),.*/\1/p' "$logf" | tail -n 1)
+        if [ -n "$at" ] && [ -n "$from" ] \
+           && awk -v a="$at" -v b="$from" 'BEGIN { exit !(a - b < 1e-6 && b - a < 1e-6) }'; then
+            echo "job $jid: the solver stalled at $at, where the link resumed"
+        fi
+        return 0
+    fi
+    if grep -qE "chain: stopping, driver exited [1-9]|inversion exit [1-9]" "$logf"; then
+        err=$(grep -hE "^[A-Za-z]*Error: " "${logf%.out}.err" "$logf" 2>/dev/null | tail -n 1 | cut -c1-300)
+        echo "job $jid: ${err:-driver exited non-zero; see $logf}"
+    fi
+    return 0
+}
+
+cmd_watch() {
+    [ "$ISMIP7_ROUTINE_LAUNCH" = slurm ] || die "watch is for slurm mode"
+    local every=${ISMIP7_ROUTINE_WATCH_SEC:-120}
+    log "watch: every $every s, stall after ${ISMIP7_ROUTINE_STALL_MIN:-15} min"
+    while :; do
+        ( with_lock; derive_products; watch_pass; n=$(next_pass); [ "$n" = 0 ] || log "watch: $n stage(s) submitted" ) || log "watch: pass failed ($?)"
+        [ "${ISMIP7_ROUTINE_WATCH_ONCE:-0}" = 1 ] && break
+        sleep "$every"
+    done
+}
+
 cmd_resume() {
     local stage=${1:?resume STAGE}
     in_list "$stage" "$STAGE_LIST" || die "$stage is not a stage of this routine"
@@ -596,6 +741,7 @@ cmd_resume() {
     ready "$stage" || die "$stage is not ready"
     with_lock
     [ -f "$OUT/$stage.jobs" ] && mv "$OUT/$stage.jobs" "$OUT/$stage.jobs.$(date +%s)"
+    rm -f "$OUT/$stage.blocked"
     launch "$stage"
 }
 
@@ -610,5 +756,6 @@ case "$CMD" in
     next)   load_env; cmd_next ;;
     status) load_env; cmd_status ;;
     resume) load_env; cmd_resume "${3:-}" ;;
+    watch)  load_env; cmd_watch ;;
     *) die "unknown command $CMD (init|next|status|resume STAGE)" ;;
 esac

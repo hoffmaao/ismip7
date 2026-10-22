@@ -94,7 +94,7 @@ from icepack2_tools.mpi_stats import (global_count, global_mean, global_range,
                                       global_size)
 from icepack2_tools.naming import map_basename
 from icepack2_tools.runconfig import (friction as _friction, lc as _lc,
-                                      geometry_space as _geometry_space,
+                                      melt_geometry_space as _melt_geometry_space,
                                       file_sha256, obs_data_root,
                                       raster_sample)
 from mesh_naming import mesh_basename, mesh_stem
@@ -205,8 +205,10 @@ def _k_out():
 # The geometry the melt is evaluated on, the same knob the forward reads.
 # ``dg0`` fits K through the forward's own cell by cell melt path (section
 # ``forward_geometry``), so the forward applies the melt its K was fitted to;
-# ``cg1`` is the nodal calibration the earlier K files came from.
-GEOMETRY = _geometry_space()
+# ``cg1`` is the nodal calibration the earlier K files came from. A ``dg1``
+# forward melts the DG0 melt of its cell means, so it fits as ``dg0``
+# (runconfig.melt_geometry_space).
+GEOMETRY = _melt_geometry_space()
 
 
 def default_slope_cap(space):

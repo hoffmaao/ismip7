@@ -382,6 +382,21 @@ ATMOSPHERE_MIN_VERSION = {
     (OCX_ATMOSPHERE_SOURCE, OCX, "dacabfdz"): "v2",
 }
 
+# The oldest ocean version a run may read, per (ESM or source, scenario), for
+# every variable and every OCX variant. The ocean reader asks for
+# ``OCEAN_VERSION`` and falls back to the highest version on disk, so a tree
+# synced before 25 September 2026 holds only the OCX ocean v1 and is read
+# without a word. That v1 was built on an earlier extrapolated climatology
+# (discussion #48): thermal forcing at 510 m under Cook is 0.60 degC in v1,
+# 1.94 in v2 and 1.95 in the climatology the melt calibration is fitted to,
+# and v2 departs from that climatology by 0.008 degC rms over every ocean
+# cell at 510 m (Quartz, 15 October 2026; FORWARD_RUN_READINESS.md section
+# 11). ``ISMIP7Ocean.version_problem`` states it, and ``require_years`` and
+# the OCX driver's ``protocol_forcing`` refuse it.
+OCEAN_MIN_VERSION = {
+    (OCX_OCEAN_SOURCE, OCX): "v2",
+}
+
 
 def _scenario_dir(root, esm, scenario):
     r"""``<root>/<esm>/<scenario>``, or ``<root>/OCX/<source>`` for OCX."""
@@ -990,10 +1005,36 @@ class ISMIP7Ocean:
         spans = self.spans(variable)
         return (spans[0][0], max(sp[1] for sp in spans)) if spans else None
 
+    def version_problem(self, variable="tf"):
+        r"""What is wrong with the version of ``variable`` on disk, or None:
+        older than ``OCEAN_MIN_VERSION`` allows for this tree. An absent
+        variable is ``coverage``'s to report."""
+        floor = OCEAN_MIN_VERSION.get((self.esm, self.scenario))
+        vdir = self._var_dir(variable)
+        if floor is None or vdir is None or not os.path.isdir(vdir):
+            return None
+        have = os.path.basename(vdir)
+        key = version_key(have)
+        if key is not None and key >= version_key(floor):
+            return None
+        product = f"ocean/{self.variant}" if self.scenario == OCX else "ocean"
+        return (f"{variable} for {self.esm} {self.scenario} {product} is {have} "
+                f"on disk and a run needs {floor} or newer (OCEAN_MIN_VERSION in "
+                f"icepack2_tools/forcing.py)")
+
+    def mirror_prefix(self, variable="tf"):
+        r"""The ``download_mirror.py`` prefix that fetches ``variable`` into
+        this tree: the mirror's ``data/`` layout is the local one."""
+        vdir = self._var_dir(variable)
+        if vdir is None:
+            return f"data/<tree>/{variable}/"
+        rel = os.path.relpath(os.path.dirname(vdir), self.data_root)
+        return f"data/{rel.replace(os.sep, '/')}/"
+
     def require_years(self, first, last, variables=("tf", "so")):
         r"""Refuse a run that needs years ``first`` to ``last`` from a tree
-        that does not hold them, and return the ``(first, last)`` span every
-        variable covers.
+        that does not hold them at an accepted version, and return the
+        ``(first, last)`` span every variable covers.
 
         A variable with no files at all reads as zero thermal forcing
         (``get_thermal_forcing``), so a run on an absent tree would melt
@@ -1003,6 +1044,12 @@ class ISMIP7Ocean:
         """
         covers = []
         for var in variables:
+            problem = self.version_problem(var)
+            if problem:
+                raise FileNotFoundError(
+                    f"{problem}. Fetch it with `python "
+                    f"antarctica/scripts/download_mirror.py "
+                    f"{self.mirror_prefix(var)}`.")
             cover = self.coverage(var)
             if cover is None:
                 raise FileNotFoundError(
@@ -1432,7 +1479,7 @@ def _check_melt_provenance(npz_path, data, refit, knob, strict=False):
     or one named with ISMIP7_DELTAT_PER_BASIN_NPZ: the forward has to apply
     the melt that file was fitted to, so any difference is refused. A legacy
     per-basin K file keeps the warnings."""
-    from .runconfig import geometry_space
+    from .runconfig import melt_geometry_space
     differences = []
 
     def differs(sentence, warn, *args):
@@ -1457,10 +1504,12 @@ def _check_melt_provenance(npz_path, data, refit, knob, strict=False):
         if np.isfinite(cap) and cap > 0.0:
             differs(f"the draft slope capped at {cap:g}, where this forward "
                     f"applies no cap", _warn_slope_cap, cap)
+    # a dg1 run melts the dg0 melt of its cell means (forcing_geometry)
     fitted_on = str(data["geometry_space"]) if "geometry_space" in data else "cg1"
-    if fitted_on != geometry_space():
-        differs(f"{fitted_on} geometry against this run's {geometry_space()}",
-                _warn_geometry_space, fitted_on, geometry_space(), refit, knob)
+    running_on = melt_geometry_space()
+    if fitted_on != running_on:
+        differs(f"{fitted_on} geometry against this run's {running_on}",
+                _warn_geometry_space, fitted_on, running_on, refit, knob)
     if strict and differences:
         raise ValueError(
             f"{os.path.basename(npz_path)} was fitted under settings this run "
@@ -1740,6 +1789,38 @@ def forcing_coords(ctx):
     return coords[:, 0], coords[:, 1]
 
 
+def forcing_space(ctx):
+    r"""The function space the forcing fields live on: the geometry space,
+    or under DG1 geometry the DG0 cells (:func:`forcing_geometry`). A driver
+    samples a climatology it writes into ``ctx["accum"]`` onto this."""
+    return ctx["accum"].function_space()
+
+
+def _cell_values(ctx):
+    r"""A field's values on the forcing dofs: its own under DG0 and CG1,
+    its cell means under DG1 (``ctx["cell_view"]``)."""
+    view = ctx.get("cell_view")
+    return (lambda f: f.dat.data_ro) if view is None else view.means
+
+
+def forcing_geometry(ctx):
+    r"""``(h, b, s)`` as rank-local arrays on the forcing dofs, the geometry
+    the melt law and the forcing masks read.
+
+    Under DG0 and CG1 these are the geometry's own dofs. Under DG1
+    (``ctx["cell_view"]``) the forcing lives on the DG0 cells and reads the
+    cell means of the thickness and the bed, with the surface rebuilt from
+    them by the forward's flotation formula, so the forcing is the DG0
+    forcing of those means and a DG0 melt calibration applies as fitted
+    (``runconfig.melt_geometry_space``)."""
+    view = ctx.get("cell_view")
+    if view is None:
+        return ctx["h"].dat.data_ro, ctx["b"].dat.data_ro, ctx["s"].dat.data_ro
+    h = np.asarray(view.means(ctx["h"]))
+    b = np.asarray(view.means(ctx["b"]))
+    return h, b, flotation_surface(b, h, float(ctx["rho_ratio"]))
+
+
 def height_above_flotation(s, b, rho_water=_RHO_SW_FLOTATION, rho_ice=_RHO_ICE):
     r"""Height of the surface ``s`` above the flotation surface over bed ``b``,
     ``s - (b + (rho_water / rho_ice) max(-b, 0))``: zero or negative where
@@ -1842,9 +1923,21 @@ def compute_sin_alpha(ctx):
     h = ctx["h"]
     s = ctx["s"]
     Q_g = ctx.get("Q_g", Q)
+    view = ctx.get("cell_view")
+    n = (h.dat.data_ro.shape[0] if view is None
+         else forcing_space(ctx).dof_dset.size)
     if melt_slope() == "ant":
-        return np.full(h.dat.data_ro.shape[0], sin_alpha_ant())
-    if Q_g.ufl_element().degree() == 0:
+        return np.full(n, sin_alpha_ant())
+    if view is not None:
+        # DG1: the DG0 slope of the cell-mean draft (forcing_geometry)
+        h_c, _, s_c = forcing_geometry(ctx)
+        draft = fd.Function(forcing_space(ctx))
+        draft.dat.data[:] = s_c - h_c
+        gd = fd.grad(cg1_lift(draft))
+        gmag = fd.Function(draft.function_space()).interpolate(
+            fd.sqrt(fd.inner(gd, gd))
+        ).dat.data_ro
+    elif Q_g.ufl_element().degree() == 0:
         draft = fd.Function(Q_g).interpolate(s - h)
         gd = fd.grad(cg1_lift(draft))
         gmag = fd.Function(Q_g).interpolate(
@@ -1958,9 +2051,7 @@ def make_climatology_ocean_callback(K_field=None, data_root=None):
 
     def callback(ctx, t_yr):
         mesh_x, mesh_y = forcing_coords(ctx)
-        h = ctx["h"].dat.data_ro
-        b = ctx["b"].dat.data_ro
-        s = ctx["s"].dat.data_ro
+        h, b, s = forcing_geometry(ctx)
         draft = np.minimum(s - h, 0.0)
 
         tf_interp, za_tf = interps["tf"]
@@ -2088,11 +2179,13 @@ class SMBElevationFeedback:
 
     @staticmethod
     def surface_change(ctx):
-        r"""``s - s_ref`` on the geometry dofs, rank-local."""
-        b = ctx["b"].dat.data_ro
+        r"""``s - s_ref`` on the forcing dofs, rank-local: under DG1 both
+        surfaces are those of the cell means (:func:`forcing_geometry`)."""
+        cells = _cell_values(ctx)
+        b = np.asarray(cells(ctx["b"]))
         r = float(ctx["rho_ratio"])
-        return (flotation_surface(b, ctx["h"].dat.data_ro, r)
-                - flotation_surface(b, ctx["H_init"].dat.data_ro, r))
+        return (flotation_surface(b, np.asarray(cells(ctx["h"])), r)
+                - flotation_surface(b, np.asarray(cells(ctx["H_init"])), r))
 
     def correction(self, ctx, yr):
         r"""The feedback in m/yr of ice on the geometry dofs for forcing year
@@ -2123,7 +2216,8 @@ class SMBElevationFeedback:
         from .front import unforced_cells
         from .mpi_stats import global_range
         comm = ctx["mesh"].comm
-        forced = ~unforced_cells(ctx["h"].dat.data_ro, ctx["b"].dat.data_ro)
+        cells = _cell_values(ctx)
+        forced = ~unforced_cells(cells(ctx["h"]), cells(ctx["b"]))
         field = Function(ctx["accum"].function_space())
         field.dat.data[:] = np.where(forced, corr, 0.0)
         net = float(assemble(field * dx)) * _RHO_ICE / 1e12
@@ -2266,9 +2360,7 @@ def make_forcing_callback(atm=None, ocean=None, fracture=None,
             ctx["accum"].dat.data[:] = smb
 
         if ocean is not None and "ocean_melt" in ctx:
-            h = ctx["h"].dat.data_ro
-            b = ctx["b"].dat.data_ro
-            s = ctx["s"].dat.data_ro
+            h, b, s = forcing_geometry(ctx)
             # Ice shelf draft (negative depth below sea level)
             draft = np.minimum(s - h, 0.0)
 

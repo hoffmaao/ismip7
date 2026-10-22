@@ -93,6 +93,16 @@ def effective_pressure(H, s):
     return max_value(p_I - p_W, Constant(0.0))
 
 
+def budd_reference_pressure(H, s):
+    r"""The Budd law's reference effective pressure ``N_ref`` on the geometry
+    ``H``, ``s``: ``N`` itself, non-negative. A forward evaluates it on its
+    t = 0 geometry, so ``N_hat = N / N_ref`` starts where the inversion's own
+    ``N_ref=None`` puts it. Under DG0 that is one value per cell; under DG1 it
+    stays an expression of the frozen t = 0 fields, because ``N`` has kinks
+    inside a linear cell that a nodal interpolant does not hold."""
+    return max_value(effective_pressure(H, s), Constant(0.0))
+
+
 def grounded_mask(H, b, gl_width=GL_WIDTH):
     r"""Smooth grounded indicator ``He in [0, 1]`` (1 grounded, 0 floating) from
     height-above-flotation, smoothed over ``gl_width`` m HAF.  Gates the friction
@@ -299,7 +309,8 @@ def cliff_push(H, s, version=1, b_other=None):
     return 0.5 * g * (rho_I * h_e ** 2 - rho_W * d_e ** 2)
 
 
-def front_cliff_correction(v, H, s, mesh, h_ice=1.0, *, b=None, version=1):
+def front_cliff_correction(v, H, s, mesh, h_ice=1.0, *, b=None, version=1,
+                           H_cell=None):
     r"""The free-cliff push at every ice edge inside the mesh, as the facet form
     to add to the DG0 facet driving stress against the velocity test function
     ``v``.
@@ -352,13 +363,18 @@ def front_cliff_correction(v, H, s, mesh, h_ice=1.0, *, b=None, version=1):
     cell holds ice from ``h_ice`` (``ISMIP7_FRONT_HMIN``), so a transport film
     on the water side does not switch it off, and the facet push it completes
     is the residual's own ``avg(H)``, so a film's thickness is accounted for.
-    icepack_tools has version 1 only. DG0 geometry only: under CG1 the facet
-    jump vanishes and the cell gradient carries the driving stress.
+    icepack_tools has version 1 only. Cell-wise geometry only: under CG1 the
+    facet jump vanishes and the cell gradient carries the driving stress.
+
+    ``H_cell`` decides which cells hold ice, defaulting to ``H``. Under DG1
+    it is the DG0 Function of ``H``'s cell means, so a cell holds ice or does
+    not as a whole, as under DG0; the push and the facet term it replaces
+    still read ``H`` and ``s`` on the facet itself.
     """
     if version == 2 and b is None:
         raise ValueError("front_cliff_correction version 2 needs the bed b")
     nu = FacetNormal(mesh)
-    ice = conditional(ge(H, h_ice), 1.0, 0.0)
+    ice = conditional(ge(H if H_cell is None else H_cell, h_ice), 1.0, 0.0)
 
     def gap(side, other):
         exact = cliff_push(H(side), s(side), version=version,
@@ -405,6 +421,7 @@ def build_rc_residual(
     calving_ids=None,
     exact_front=False,
     front_hmin=1.0,
+    H_cell=None,
     fssa_tau=None,
     u_ref=None,
     fssa_tendency=None,
@@ -511,7 +528,11 @@ def build_rc_residual(
         between ice (``H >= front_hmin``) and ice-free cells
         (``ISMIP7_EXACT_FRONT``): 0 or False none, 1 or True the free-cliff
         push on every ice edge, 2 the push of the face above the ice-free
-        neighbour's bed. DG0 geometry only.
+        neighbour's bed. Cell-wise (DG0 or DG1) geometry only.
+    H_cell : Function or None
+        The DG0 cell means of a DG1 ``H``, which decide the ice edges of the
+        ``exact_front`` correction; required with DG1 geometry. None under
+        DG0, where ``H`` is its own cell value.
 
     Returns
     -------
@@ -619,26 +640,32 @@ def build_rc_residual(
     # ---- momentum balance (hand-written: H_visc on the membrane term, TRUE H on
     # the driving stress and facet term) + calving-front back-pressure ----
     #
-    # Geometry may be CG1 or DG0, and the pair of terms below is correct for
-    # both: they represent the DISTRIBUTIONAL gradient of a possibly
+    # Geometry may be CG1, DG0 or DG1, and the pair of terms below is correct
+    # for all three: they represent the DISTRIBUTIONAL gradient of a possibly
     # discontinuous surface as broken cell gradient + facet jump.  With CG1 s
     # the jump vanishes and the cell term carries everything; with DG0 s the
-    # cell gradient vanishes and the facet term carries everything.  Do not
-    # "fix" the seemingly dead grad(s) under DG0 -- deleting it would break the
-    # CG1 path, and the facet term is not an add-on but the whole driving
-    # stress.  No exterior-boundary counterpart is needed: the distributional
-    # gradient is taken over the open domain, and the terminus traction below
-    # supplies the boundary condition.
+    # cell gradient vanishes and the facet term carries everything; with DG1 s
+    # both carry part of it.  Do not "fix" the seemingly dead grad(s) under
+    # DG0 -- deleting it would break the CG1 and DG1 paths, and the facet term
+    # is not an add-on but the whole DG0 driving stress.  No exterior-boundary
+    # counterpart is needed: the distributional gradient is taken over the
+    # open domain, and the terminus traction below supplies the boundary
+    # condition.
     nu = FacetNormal(mesh)
     F += (-H_visc * inner(M, sym(grad(v))) + inner(tau - rho_I * g * H * grad(s), v)) * dx
     F += rho_I * g * avg(H) * inner(jump(s, nu), avg(v)) * dS
     exact_front = exact_front_version(exact_front)
     if exact_front:
-        if H.ufl_element().degree() != 0:
-            raise ValueError("exact_front needs DG0 geometry: the correction "
-                             "completes the facet-jump driving stress")
+        element = H.ufl_element()
+        if element.family() != "Discontinuous Lagrange":
+            raise ValueError("exact_front needs cell-wise (DG0 or DG1) "
+                             "geometry: the correction completes the "
+                             "facet-jump driving stress")
+        if element.degree() > 0 and H_cell is None:
+            raise ValueError("exact_front on DG1 geometry needs H_cell, the "
+                             "cell means that decide which cells hold ice")
         F += front_cliff_correction(v, H, s, mesh, h_ice=front_hmin, b=b,
-                                    version=exact_front)
+                                    version=exact_front, H_cell=H_cell)
     if fssa_tau is not None and u_ref is not None:
         from icepack2_tools.fssa import fssa_term
         F += fssa_term(z, u_ref, fssa_tau, H, b, tendency=fssa_tendency,

@@ -42,7 +42,24 @@ vms099|vonmises_strain|sigma_max_fl=0.099,sigma_max_gr=1.0|free
 thk450|thickness|hc=450|free
 eig1e8|eigencalving|K=1.1e8|free
 eig3e8|eigencalving|K=3.0e8|free
-nocalv|nocalving||free"
+nocalv|nocalving||free
+vm130|vonmises|sigma_max_fl=0.13,sigma_max_gr=1.0|free
+vm130g|vonmises|sigma_max_fl=0.13,sigma_max_gr=0.13|free
+hfb086|hfb|sigma_max=0.086|free
+eig5e6|eigencalving|K=4.9e6|free
+eig1e7|eigencalving|K=9.3e6|free
+thk235|thickness|hc=235|free"
+# vm130 .. thk235 are the 17 Oct fits of each law's own parameter to the
+# flux-balance target (calvingMIP tune_greene.py --target balance on the
+# calvdg1h fixed member's 2010 state: the model's stationary-front flux per
+# Mouginot basin less the Greene area trend 2003-2015): von Mises 0.13 MPa
+# (per-basin and continent-wide agree; vm130 keeps the 1 MPa grounded
+# threshold, vm130g applies the fit to both), hfb 0.086 MPa per basin (0.062
+# continent-wide), eigencalving K 4.9e6 m yr per basin (9.3e6 continent-wide),
+# thickness hc 235 m. The 2004 state gives the same values within 10 %. The
+# diagnostic flux at the fixed front ran ~1.7x the flux the calvdg1h forwards
+# booked under the same law (an advancing front thins), so vm075 brackets
+# the von Mises fit from below.
 # `nocalving` with a free front = the front carried by the ice and nothing
 # removed: the no-calving baseline every law has to beat. `fixed` is the
 # protocol's pinned front. The submission front is hfb015 with FRONT_ADVANCE

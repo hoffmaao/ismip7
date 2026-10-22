@@ -42,6 +42,7 @@ from icepack2_tools.runconfig import (
     mesh_override, deltat_per_basin_npz, k_per_basin_npz,
     melt_calibration_contract, geometry_backdate_years,
     smb_elevation_feedback as _smb_elevation_feedback,
+    DISCONTINUOUS_GEOMETRY_SPACES,
 )
 DATA_DIR = obs_data_root()
 from mesh_naming import get_buffer_m, mesh_filename
@@ -202,6 +203,13 @@ def ocx_ocean_cover():
     if None in covers:
         return None
     return max(c[0] for c in covers), min(c[1] for c in covers)
+
+
+def ocx_ocean_version_problem():
+    r"""What keeps the OCX ocean on disk below ``OCEAN_MIN_VERSION``, or None:
+    the reader's own rule, the one ``projections/ocx.py`` refuses a run on."""
+    ocean = ISMIP7Ocean(scenario=OCX, variant=_ocx_ocean())
+    return next((p for p in map(ocean.version_problem, ("tf", "so")) if p), None)
 
 
 def ocean_cover(esm, scenario):
@@ -405,17 +413,18 @@ def main():
         if scenario == "historical" or core == 11:
             # A cold start from the MAP. A start before 2015 backdates its
             # geometry by the Smith dH/dt (issue 117), which setup_model does
-            # on the DG0 geometry only, reading the MIPkit or its cached
-            # rasters, and the drivers refuse a start before the dH/dt window.
+            # on the cell-wise geometries (dg1 through obs_dhdt.backdate_cells
+            # on cell means), reading the MIPkit or its cached rasters, and
+            # the drivers refuse a start before the dH/dt window.
             try:
                 backdate = geometry_backdate_years(t_start)
             except ValueError as e:
                 miss.append(f"geometry backdating: {e}")
                 backdate = 0.0
             if backdate > 0.0:
-                if geom != "dg0":
+                if geom not in DISCONTINUOUS_GEOMETRY_SPACES:
                     miss.append(f"a start at {t_start:g} backdates the geometry, "
-                                f"which needs ISMIP7_GEOMETRY_SPACE=dg0")
+                                f"which needs ISMIP7_GEOMETRY_SPACE=dg0 or dg1")
                 miss += dhdt_missing()
         if core == 11 and _ocx_forcing() == "protocol":
             # projections/ocx.py refuses to start on anything less, so this
@@ -429,8 +438,11 @@ def main():
             if oc is None or oc[0] > y0 or oc[1] < y1:
                 miss.append(f"OCX ocean '{_ocx_ocean()}' tf/so"
                             + (f" covers {oc[0]}-{oc[1]}, need {y0}-{y1}" if oc else ": absent"))
-            notes.append("K is fitted to the OI climatology, not to the OCX ocean: "
-                         "read check_melt_bound.py --ocx first (discussion #48)")
+            version = ocx_ocean_version_problem()
+            if version:
+                miss.append(f"OCX ocean: {version}")
+            notes.append("K is fitted to the OI climatology: check_melt_bound.py --ocx "
+                         "compares the OCX ocean with it per basin (discussion #48)")
         elif core == 11:
             notes.append("ISMIP7_OCX_FORCING=stopgap: RACMO2.4p1 + OI climatology, "
                          "not the ISMIP7 OCX product")

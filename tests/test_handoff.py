@@ -33,6 +33,7 @@ def _settings(**over):
         "phi_grounded": "inverted", "raster_sample": "vertex",
         "vel_sample": "point", "u_obs_max": 0.0, "dhdt_reweight": 0.0,
         "dhdt_reweight_scale": 1.0, "kill_bergs": 0,
+        "velocity_sample": "point",
     }
     base.update(over)
     return base

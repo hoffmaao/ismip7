@@ -127,6 +127,8 @@ without reading the linked rationale and stating why.
   geometry is part of its controls too: it is named `_relax<year>`, records
   `geometry_source_method = relaxed-forward-v1`, and an inversion warm-started
   from it stops unless it takes that geometry (`icepack2_tools/relaxation.py`).
+  A forward takes only its controls, onto BedMachine's 2015 geometry on any
+  mesh, its own included, so every resolution starts from the same state.
 - **The zero-valued `M_s[0,0] * tau_s[0]` term in the SCPC path is structural.**
   Membrane and basal stress are physically uncoupled local fields, so UFL
   normally omits their two zero Jacobian blocks. Firedrake's three-field SCPC
@@ -159,6 +161,12 @@ without reading the linked rationale and stating why.
   (`ISMIP7_H_CLAMP_INIT`): the forward has to apply the melt its calibration
   was fitted to. `check_melt_bound.py` measures that per basin. Regression
   test: `tests/test_melt_calibration_default.py`.
+
+- **DG1 geometry sits on vertex nodes (`variant="equispaced"`).** Firedrake's
+  default DG1 nodes lie inside the cell, where a nodal floor does not bound
+  the field and a vertex sample is not the CG1 interpolant. Build the space
+  with `geometry.geometry_function_space`; `cellview.CellView` refuses any
+  other DG1.
 
 One line that looks fine and is always a bug:
 

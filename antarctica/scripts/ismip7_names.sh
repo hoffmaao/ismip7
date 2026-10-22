@@ -24,10 +24,11 @@ ismip7_n_tag() {
 }
 
 # The geometry-space tag, from ISMIP7_GEOMETRY_SPACE. CG1 keeps the legacy
-# untagged name; DG0 gets _dg0.
+# untagged name; DG0 gets _dg0 and DG1 _dg1, as naming.map_geom_tag.
 ismip7_geom_tag() {
     case "$(printf '%s' "${ISMIP7_GEOMETRY_SPACE:-dg0}" | tr '[:upper:]' '[:lower:]')" in
         cg1) printf '' ;;
+        dg1) printf '_dg1' ;;
         *)   printf '_dg0' ;;
     esac
 }

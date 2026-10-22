@@ -27,7 +27,12 @@ campaign is judged on the mean front rms over the epochs its run covers,
 against the pinned-front and no-calving baselines. The ice-free area
 inland that the ocean does not reach is reported too: it starts as the
 outcrops and lakes, and a law whose rate is not gated on grounded ice can
-grow it, since the level set bounds those edges as well.
+grow it, since the level set bounds those edges as well. Each state also
+carries the ice area of the run and of the record on the kit grid (ocean
+filled, so inland rock counts as ice in both), and the summary gives their
+change over the scored epochs: the record's area is nearly steady over
+2003-2015 (+0.5 thousand km2/yr on 13.6 million), so a law tuned to the
+continent as a whole should hold the area as the record does.
 
     mpiexec -n 8 python antarctica/scripts/score_front.py --out score.json \
         results/hist_cesm2_waccm_<tag>_2000_t20*.h5
@@ -194,6 +199,8 @@ def score_state(path, record, raster, tolerance, comm):
     out = {"file": os.path.basename(path), "t_yr": t, "epoch": int(k), "epoch_year": float(record.years[k]),
            "front_km": float(w_m[front_m].sum() / 1e3), "obs_front_km": float(w_o[front_o].sum() / 1e3),
            "inland_ice_free_km2": inland_free / 1e6,
+           "ice_area_km2": float(ice_m.sum()) * record.dx ** 2 / 1e6,
+           "obs_ice_area_km2": float(ice_o.sum()) * record.dx ** 2 / 1e6,
            "front": stats(r_m, w_m[front_m]), "obs_front": stats(r_o, w_o[front_o]), "basins": {}}
     b_m, b_o = record.basins[front_m], record.basins[front_o]
     for b in np.unique(b_m):
@@ -233,7 +240,8 @@ def main():
                                 f"{f['rms_m'] / 1e3:.2f} km, bias {f['bias_m'] / 1e3:+.2f} km, seaward {f['seaward_share']:.2f}, "
                                 f"within 2 km {f['within_2km']:.2f}, front {res['front_km']:.0f} km "
                                 f"(obs {res['obs_front_km']:.0f} km, obs->model rms {g['rms_m'] / 1e3:.2f} km), "
-                                f"inland ice-free {res['inland_ice_free_km2']:.0f} km2")
+                                f"inland ice-free {res['inland_ice_free_km2']:.0f} km2, ice area "
+                                f"{res['ice_area_km2']:.0f} km2 (obs {res['obs_ice_area_km2']:.0f})")
     if comm.rank == 0:
         scored = [r for r in results if r.get("epoch") is not None]
         rms = [r["front"]["rms_m"] for r in scored if r["front"].get("n")]
@@ -241,9 +249,13 @@ def main():
                    "final_rms_m": float(rms[-1]) if rms else None,
                    "mean_bias_m": float(np.mean([r["front"]["bias_m"] for r in scored if r["front"].get("n")])) if rms else None,
                    "mean_obs_rms_m": float(np.mean([r["obs_front"]["rms_m"] for r in scored if r["obs_front"].get("n")])) if rms else None,
-                   "epochs": [r["epoch_year"] for r in scored]}
+                   "epochs": [r["epoch_year"] for r in scored],
+                   "area_change_km2": float(scored[-1]["ice_area_km2"] - scored[0]["ice_area_km2"]) if scored else None,
+                   "obs_area_change_km2": float(scored[-1]["obs_ice_area_km2"] - scored[0]["obs_ice_area_km2"]) if scored else None}
         PETSc.Sys.Print(f"summary: mean front rms {summary['mean_rms_m'] and summary['mean_rms_m'] / 1e3:.2f} km over "
-                        f"{len(scored)} epochs, final {summary['final_rms_m'] and summary['final_rms_m'] / 1e3:.2f} km")
+                        f"{len(scored)} epochs, final {summary['final_rms_m'] and summary['final_rms_m'] / 1e3:.2f} km; "
+                        f"ice area change {summary['area_change_km2'] or 0:+.0f} km2 "
+                        f"(record {summary['obs_area_change_km2'] or 0:+.0f} km2)")
         if args.out:
             with open(args.out, "w") as f:
                 json.dump({"summary": summary, "states": results}, f, indent=1)

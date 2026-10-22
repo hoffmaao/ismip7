@@ -268,7 +268,7 @@ def admitted(K, ens, rule):
 
 def run_mesh(args):
     import calibrate_melt as cm
-    from icepack2_tools.runconfig import (geometry_space, raster_sample,
+    from icepack2_tools.runconfig import (melt_geometry_space, raster_sample,
                                           refuse_tracked_calibration_out)
 
     # per_k writes offsets files with their sidecars (write_selected).
@@ -293,7 +293,7 @@ def run_mesh(args):
     require(inputs.values())
     knobs = {"geometry": "mesh", "lc": cm.LC, "oi_version": version,
              "k_max": float(ms.notebook_K_grid(args.k_max)[-1]),
-             "geometry_space": geometry_space(), "raster_sample": raster_sample(),
+             "geometry_space": melt_geometry_space(), "raster_sample": raster_sample(),
              "melt_slope": melt_slope(),
              "sin_alpha_ant": sin_alpha_ant() if melt_slope() == "ant" else None,
              "sin_alpha_cap": (cm.SIN_ALPHA_CAP if melt_slope() == "local"
@@ -432,7 +432,7 @@ def write_selected(args, cm, headline, K, ens, present, sin_a, x, y, area,
     the thermal forcing rule's verdict at that K. Each file gets the sidecar
     the forward reads, from ``record`` (calibrate_melt.calibration_record)
     and that K's fields."""
-    from icepack2_tools.runconfig import (geometry_space,
+    from icepack2_tools.runconfig import (melt_geometry_space,
                                           write_melt_calibration_sidecar)
     tf, so = present
     chosen = {}
@@ -464,7 +464,7 @@ def write_selected(args, cm, headline, K, ens, present, sin_a, x, y, area,
                            else float("nan")),
             sin_alpha_cap=(cm.SIN_ALPHA_CAP if melt_slope() == "local"
                            else float("inf")),
-            geometry_space=geometry_space(), **cm.input_names(),
+            geometry_space=melt_geometry_space(), **cm.input_names(),
             selected_as=",".join(names),
             toolbox_commit=prov["toolbox"]["commit"],
             selection_commit=prov["commit"],

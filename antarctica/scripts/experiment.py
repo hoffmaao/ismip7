@@ -49,6 +49,7 @@ from simulation import (setup_model, run_simulation, auto_resume_checkpoint,
 from icepack2_tools.forcing import (
     ISMIP7Atmosphere, ISMIP7Ocean, ISMIP7Fracture,
     make_forcing_callback, load_racmo_smb_climatology, forcing_coords,
+    forcing_space,
     describe_forcing_provenance, describe_melt_calibration, forcing_year,
     build_smb_feedback, feedback_mode, smb_feedback_banner,
 )
@@ -91,7 +92,7 @@ def smb_scheme(ctx, esm):
             raise FileNotFoundError(
                 f"no acabf-anomaly years in {CLIM_START}-{CLIM_END}"
             )
-        racmo = load_racmo_smb_climatology(ctx["Q_g"], CLIM_START, CLIM_END)
+        racmo = load_racmo_smb_climatology(forcing_space(ctx), CLIM_START, CLIM_END)
         ref = np.zeros(len(mesh_x))
         for a, y in pool:
             ref += a.get_smb(y, mesh_x, mesh_y, anomaly=True)

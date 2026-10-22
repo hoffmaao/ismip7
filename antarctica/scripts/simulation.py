@@ -76,8 +76,11 @@ from icepack2_tools.fssa import (
     restart_step as fssa_restart_step,
 )
 from icepack2_tools.geometry import (
-    raise_bed_to_lake_ice_base, sample_bed_thickness,
+    geometry_function_space, raise_bed_to_lake_ice_base, sample_bed_thickness,
 )
+from icepack2_tools.cellview import CellView, clamp_cells, floor_fill
+from icepack2_tools.transport import (
+    front_transport_form, transport_form, upwind_divergence)
 from icepack2_tools.naming import map_basename
 from icepack2_tools.handoff import check_subelement_record
 from icepack2_tools.front import (
@@ -101,6 +104,8 @@ from icepack2_tools.runconfig import (
     BUDD_SHELF_GATE as _BUDD_SHELF_GATE,
     residual_stabilizers,
     friction as _friction, geometry_space as _geometry_space,
+    geometry_space_mismatch as _geometry_space_mismatch,
+    dg1_refusals as _dg1_refusals, DISCONTINUOUS_GEOMETRY_SPACES,
     mesh_override as _mesh_override, transfer_fill as _transfer_fill,
     forward_drag_gate as _forward_drag_gate,
     forward_hvisc_floor as _forward_hvisc_floor,
@@ -111,6 +116,8 @@ from icepack2_tools.runconfig import (
     raster_base_method as _raster_base_method,
     calving_law as _calving_law, calving_law_object as _calving_law_object,
     front_advance as _front_advance,
+    front_anchor as _front_anchor, front_reinit_interval as _front_reinit_interval,
+    front_marine as _front_marine,
     fracture as _fracture_mode, ismip7_output as _ismip7_output,
     FRACTURE_MASK_MODES,
     # auto_resume is re-exported, not used here: every forward driver imports
@@ -461,6 +468,13 @@ def setup_model(restart_from=None, *, allow_timing_cache_a_ref=False,
         ) + RELAX_MAP_KEYS + (INIT_STATE_ATTR,):
             if _chk.has_attr("/", _key):
                 checkpoint_metadata[_key] = _chk.get_attr("/", _key)
+        # A DG1 state seeds only a DG1 run, on the derived-name, override and
+        # restart paths alike (runconfig.geometry_space_mismatch).
+        _space_refusal = _geometry_space_mismatch(
+            _geometry_space(), checkpoint_metadata.get("geometry_space"),
+            os.path.basename(source_chk))
+        if _space_refusal:
+            raise RuntimeError(_space_refusal)
         # The mesh this checkpoint was built on, recorded by the inversion and
         # carried through every restart. A CheckpointFile mesh is named
         # "firedrake_default", so this attribute is the only way the run can
@@ -508,11 +522,30 @@ def setup_model(restart_from=None, *, allow_timing_cache_a_ref=False,
     # None for unset, empty and the sentinel `checkpoint`: solve on the mesh
     # the checkpoint carries.
     mesh_fn = _mesh_override()
+    override_mesh = Mesh(mesh_fn) if mesh_fn else None
+    if override_mesh is not None and meshes_match(source_mesh, override_mesh):
+        # The named mesh is the triangulation the checkpoint carries, so
+        # solve on the checkpoint's own mesh and load every field exactly.
+        # Interpolating onto a second build of the same mesh evaluates each
+        # field at the target's nodes, and a DG1 thickness is discontinuous
+        # at the front: the node a cell shares with open water read the
+        # water's zero, and every link of a chained run that crossed its
+        # wall limit lost ~3,800 Gt unbooked at the restart, with the ice
+        # the same evaluation put beyond the level set emptied as another
+        # ~550 Gt of calving (calvdg1h, 18 Oct 2026). A cold start from a
+        # MAP on the same mesh takes the same exact path.
+        PETSc.Sys.Print(
+            f"  Compute mesh: {mesh_fn} is the triangulation "
+            f"{os.path.basename(source_chk)} carries; solving on the "
+            f"checkpoint's mesh, every field loaded exactly"
+        )
+        mesh_fn = None
+        override_mesh = None
     if mesh_fn:
         # The timing matrix deliberately solves on a mesh different from the
         # MAP mesh. Keep the checkpoint mesh as the interpolation source and
         # use the requested mesh only for the target finite-element spaces.
-        mesh = Mesh(mesh_fn)
+        mesh = override_mesh
         target_lc_coarse = lc_coarse
         target_buffer_m = buffer_m
         mesh_basename = os.path.basename(mesh_fn)
@@ -532,8 +565,7 @@ def setup_model(restart_from=None, *, allow_timing_cache_a_ref=False,
         # refused; a transfer between differently named meshes is the timing
         # matrix's and the MAP check's, and stays allowed.
         if (mesh_stem(mesh_fn) == mesh_stem(source_mesh_basename)
-                and mesh_build_check()
-                and not meshes_match(source_mesh, mesh)):
+                and mesh_build_check()):
             raise RuntimeError(
                 f"ISMIP7_MESH={mesh_fn} ({global_size(mesh.coordinates)} "
                 f"vertices, {mesh.comm.allreduce(mesh.cell_set.size)} cells) "
@@ -610,23 +642,41 @@ def setup_model(restart_from=None, *, allow_timing_cache_a_ref=False,
     # data error at Antarctic resolutions, and it buys an unbiased front.
     #
     # ISMIP7_GEOMETRY_SPACE=cg1 restores the old behaviour for A/B comparison.
+    #
+    # ISMIP7_GEOMETRY_SPACE=dg1 makes the cells linear and discontinuous, on
+    # vertex nodes: the transport state is still the geometry, and the rules
+    # that decide per cell read cell means (icepack2_tools.cellview).
     geometry_space = _geometry_space()
-    geom_dg = geometry_space == "dg0"
-    Q_g = FunctionSpace(mesh, "DG", 0) if geom_dg else Q
+    geom_dg = geometry_space in DISCONTINUOUS_GEOMETRY_SPACES
+    geom_dg1 = geometry_space == "dg1"
+    Q_g = geometry_function_space(mesh, geometry_space) if geom_dg else Q
+    # DG1: per-cell access to the geometry (icepack2_tools.cellview). The
+    # rules that decide per cell (forcing, backdate, front, output) read cell
+    # means through it; None under DG0 and CG1.
+    cell_view = CellView(Q_g) if geom_dg1 else None
     # A cold start on another mesh than its MAP's rebuilds the cell-wise
     # geometry from BedMachine there (below), with this run's raster sampling,
     # so a transferred MAP gets the front its new mesh holds (issue #167).
-    # Otherwise the checkpoint's geometry is used as is and the sampling it
-    # records stands; an ISMIP7_RASTER_SAMPLE that differs is refused.
+    # Otherwise the sampling the MAP records stands, for its own geometry or,
+    # under a relaxed MAP, for the BedMachine geometry rebuilt on its mesh; an
+    # ISMIP7_RASTER_SAMPLE that differs is refused.
     geometry_transfer = bool(
         not is_restart and mesh_fn and geom_dg
         and (not source_mesh_basename
              or os.path.basename(mesh_fn) != source_mesh_basename))
     chk_raster_sample = _forward_raster_sample(
         map_raster_sample, geometry_transfer, source=source_chk)
+    # A relaxed MAP gives its controls alone (icepack2_tools.relaxation
+    # .init_state): on its own mesh too the cold start rebuilds the geometry
+    # from BedMachine, sampled as the MAP was, so every resolution starts from
+    # the same 2015 geometry rewound to 2003.
+    relaxed_controls = bool(
+        not is_restart and _init_state(checkpoint_metadata) == "relaxed-controls")
     PETSc.Sys.Print(
         f"  Geometry space: {geometry_space.upper()}"
-        + (" (h, s, b cell-wise; one thickness for force and mass)" if geom_dg
+        + (" (h, s, b cell-wise linear on vertex nodes; one thickness for "
+           "force and mass)" if geom_dg1
+           else " (h, s, b cell-wise; one thickness for force and mass)" if geom_dg
            else " (LEGACY: CG1 geometry, lumped lift, front thickness biased high)")
     )
 
@@ -692,6 +742,13 @@ def setup_model(restart_from=None, *, allow_timing_cache_a_ref=False,
         raise RuntimeError(
             f"ISMIP7_SUBELEMENT_FRICTION={_env_sub} but the MAP was inverted with "
             f"subelement_friction={map_subelement}: a forward follows its MAP")
+    if geom_dg1:
+        _refusals = _dg1_refusals(
+            legacy_transport=os.environ.get("ISMIP7_LEGACY_TRANSPORT") is not None,
+            subelement=bool(map_subelement),
+            timing_cache=checkpoint_metadata.get("timing_cache_role") is not None)
+        if _refusals:
+            raise RuntimeError("; ".join(_refusals))
     PETSc.Sys.Print(
         "  Exact cliff push (from the MAP): "
         + (f"version {map_exact_front}" if map_exact_front else "off"))
@@ -712,26 +769,28 @@ def setup_model(restart_from=None, *, allow_timing_cache_a_ref=False,
                                                  else f"grounded driving stress over {map_anchor_length / 1e3:g} km")
         + f"; lake ice base {'on' if map_lake_ice_base else 'off'}")
     if not is_restart:
-        # Cold start: geometry from BedMachine (RC/Budd overwrites it with the
-        # inversion-time geometry from the MAP only when no target-mesh
-        # override is active; target timing meshes retain this cell average).
+        # Cold start: geometry from BedMachine. RC/Budd on the MAP's own mesh
+        # overwrites it with the inversion-time geometry from the MAP, unless
+        # the MAP is relaxed; target timing meshes and relaxed MAPs retain
+        # this cell average.
         bm_fn = find_file(os.path.join(DATA_DIR, "bedmachine"), "*.nc")
         geometry_source = os.path.realpath(bm_fn)
         geometry_source_method = (
-            _target_mesh_geometry_method(chk_raster_sample) if geom_dg
-            else "target-native-bedmachine-nodal-v1"
+            _target_mesh_geometry_method(chk_raster_sample, geometry_space)
+            if geom_dg else "target-native-bedmachine-nodal-v1"
         )
         # Cell average onto the geometry space, NOT a centroid point sample --
         # see geometry.sample_to_geometry for the measurements behind that.
         # RC/Budd on the MAP's own mesh replace this sample with the MAP's
-        # geometry below, so a front sampling's ice mask is read only where
-        # its cells are kept.
+        # geometry below, unless the MAP is relaxed, so a front sampling's
+        # ice mask is read only where its cells are kept.
+        _bedmachine_kept = geometry_transfer or relaxed_controls or not use_rc
         _sample_method = (
-            chk_raster_sample if (geometry_transfer or not use_rc)
+            chk_raster_sample if _bedmachine_kept
             else _raster_base_method(chk_raster_sample))
         PETSc.Sys.Print(
             f"  Raster sampling onto geometry cells: {_sample_method}"
-            + ("" if (geometry_transfer or not use_rc) else
+            + ("" if _bedmachine_kept else
                f" (a placeholder: the MAP's own geometry, sampled "
                f"{chk_raster_sample}, replaces it)"))
         b, H, _front_counts = sample_bed_thickness(
@@ -753,6 +812,9 @@ def setup_model(restart_from=None, *, allow_timing_cache_a_ref=False,
     # matches by construction (no fragile .msh-vs-checkpoint node comparison).
     C_w0 = None
     N_ref = None
+    # DG1 Budd: the frozen t=0 thickness and surface the reference effective
+    # pressure is evaluated on, point by point (see below); None otherwise.
+    N_ref_fields = None
     H_init = None
     phi_eff = None
     u_guess = None
@@ -764,6 +826,8 @@ def setup_model(restart_from=None, *, allow_timing_cache_a_ref=False,
     u_ref_fssa_ckpt = None
     fssa_tendency_ckpt = None
     calved_cells_ckpt = None
+    levelset_ckpt = None
+    front_anchor_ckpt = None
     phys_div = None
     h_dg_state = None
     t_restart = None
@@ -890,18 +954,27 @@ def setup_model(restart_from=None, *, allow_timing_cache_a_ref=False,
             # Frozen apparent-MB reference (present iff the run used
             # ISMIP7_APPARENT_MB): restarts must reuse the ORIGINAL t=0
             # correction, never recompute it from the evolved state.
+            # on the transport space: the DG1 reference keeps its slopes
             a_ref_mb = load_checkpoint_field(
-                chk, "a_ref_mb", Q_dg, optional=True
+                chk, "a_ref_mb", Q_g if geom_dg1 else Q_dg, optional=True
             )
             u_ref_fssa_ckpt = load_checkpoint_field(
                 chk, "u_ref_fssa", V, optional=True
             )
             fssa_tendency_ckpt = load_checkpoint_field(
-                chk, "fssa_tendency", Q_dg, optional=True
+                chk, "fssa_tendency", Q_g if geom_dg1 else Q_dg, optional=True
             )
             calved_cells_ckpt = load_checkpoint_field(
                 chk, "calved_cells", Q_dg, optional=True
             )
+            # The advected front (ISMIP7_FRONT_ANCHOR=advect) is state: a
+            # restart continues it. An extent-anchored run re-derives its
+            # front from the thickness and never reads this.
+            levelset_ckpt = load_checkpoint_field(
+                chk, "levelset", Q_dg, optional=True
+            )
+            front_anchor_ckpt = (str(chk.get_attr("/", "front_anchor"))
+                                 if chk.has_attr("/", "front_anchor") else None)
             # An adapted checkpoint carries the transferred PHYSICAL divergence
             # instead of a_ref (icepack2_tools.adapt_mesh); a_ref is rebuilt
             # below with this mesh's own operator.
@@ -909,8 +982,9 @@ def setup_model(restart_from=None, *, allow_timing_cache_a_ref=False,
                 chk, "phys_div", Q_dg, optional=True
             )
             # Separate DG0 prognostic thickness (CG1-geometry runs only, where
-            # the stored CG h was its lumped lift). Under DG0 geometry the
-            # thickness IS the transport state, so there is nothing to restore.
+            # the stored CG h was its lumped lift). Under DG0 or DG1 geometry
+            # the thickness IS the transport state, so there is nothing to
+            # restore.
             if not geom_dg:
                 try:
                     h_dg_state = load_checkpoint_field(
@@ -920,7 +994,10 @@ def setup_model(restart_from=None, *, allow_timing_cache_a_ref=False,
                     h_dg_state = None
             if use_residual:
                 C_w0 = load_checkpoint_field(chk, "C_w0", Q_g)
-            if friction == "budd":
+            if friction == "budd" and geom_dg1:
+                N_ref_fields = (load_checkpoint_field(chk, "N_ref_thickness", Q_g),
+                                load_checkpoint_field(chk, "N_ref_surface", Q_g))
+            elif friction == "budd":
                 N_ref = load_checkpoint_field(chk, "N_ref", Q_g)
             if chk.has_attr("/", "t_yr"):
                 t_restart = float(chk.get_attr("/", "t_yr"))
@@ -1006,11 +1083,14 @@ def setup_model(restart_from=None, *, allow_timing_cache_a_ref=False,
                 f"(t_yr={t_restart}, friction={friction})"
             )
         elif use_rc:
-            # Cold RC/Budd normally uses the inversion-time MAP geometry. A
-            # timing mesh override is different: interpolating a discontinuous
-            # source DG0 field directly onto target DG0 samples one source cell
-            # at each target centroid. The resulting aliasing is read as
-            # driving stress because DG0 surface slope lives in facet jumps.
+            # Cold RC/Budd on the MAP's own mesh uses the inversion-time MAP
+            # geometry, unless the MAP is relaxed: a relaxed MAP gives its
+            # controls alone and keeps the BedMachine cell averages built
+            # above. A timing mesh override keeps them too: interpolating a
+            # discontinuous source DG0 field directly onto target DG0 samples
+            # one source cell at each target centroid. The resulting aliasing
+            # is read as driving stress because DG0 surface slope lives in
+            # facet jumps.
             # Retain the target-native BedMachine cell averages constructed
             # above; C_w0, N_ref, phi_eff, and H_init are then built from this
             # exact target geometry below. Continuous controls and u_obs still
@@ -1023,7 +1103,7 @@ def setup_model(restart_from=None, *, allow_timing_cache_a_ref=False,
                     or os.path.basename(mesh_fn) != source_mesh_basename
                 )
             )
-            if target_mesh_differs:
+            if target_mesh_differs or relaxed_controls:
                 PETSc.Sys.Print(
                     "  Target-mesh geometry: cell-averaged BedMachine "
                     f"({os.path.basename(geometry_source)})"
@@ -1035,10 +1115,13 @@ def setup_model(restart_from=None, *, allow_timing_cache_a_ref=False,
                 geometry_source = os.path.realpath(source_chk)
                 geometry_source_method = "checkpoint-native-v1"
                 map_geometry_taken = True
+            if not target_mesh_differs:
                 # The mixed state the MAP was accepted at (a final MAP's
                 # velocity/membrane_stress/basal_stress, a periodic
                 # checkpoint's ckpt_* copies) seeds the cold-start solve
-                # below in place of 0.1 u_obs.
+                # below in place of 0.1 u_obs. On a relaxed MAP's own mesh
+                # it is solved on the relaxed geometry, so from BedMachine's
+                # it is a perturbation, as the backdate is.
                 for _pre in ("", "ckpt_"):
                     _u = load_checkpoint_field(chk, f"{_pre}velocity", V, optional=True)
                     _M = load_checkpoint_field(chk, f"{_pre}membrane_stress", Sigma, optional=True)
@@ -1057,24 +1140,20 @@ def setup_model(restart_from=None, *, allow_timing_cache_a_ref=False,
                 s.interpolate(max_value(b + H, (Constant(1.0) - rho_ratio) * H))
 
     # The initial state the chain began from (icepack2_tools.relaxation):
-    # a relaxed MAP starts from its own geometry on its own mesh, and gives
-    # only its controls to a forward on another mesh, which builds its
-    # geometry from BedMachine as it does for any MAP. A restart keeps the
-    # record of the run it continues.
+    # a relaxed MAP gives only its controls, on any mesh, and the forward
+    # builds its geometry from BedMachine as it does for any MAP. A restart
+    # keeps the record of the run it continues.
     relax_record = {k: checkpoint_metadata[k] for k in RELAX_MAP_KEYS
                     if k in checkpoint_metadata}
     if is_restart:
         init_state = checkpoint_metadata.get(INIT_STATE_ATTR, "observed")
         init_state = init_state.decode() if isinstance(init_state, bytes) else str(init_state)
     else:
-        init_state = _init_state(checkpoint_metadata, other_mesh=not map_geometry_taken)
-        if init_state == "relaxed":
-            PETSc.Sys.Print("  Initial state: the relaxed MAP's own geometry ("
-                            + describe_relaxation(relax_record) + ")")
-        elif init_state == "relaxed-controls":
+        init_state = _init_state(checkpoint_metadata)
+        if init_state == "relaxed-controls":
             PETSc.Sys.Print("  Initial state: the relaxed MAP's controls on this mesh's "
-                            "BedMachine geometry; the relaxed thickness stays on the "
-                            "MAP's mesh (" + describe_relaxation(relax_record) + ")")
+                            "BedMachine geometry; the relaxed thickness served only the "
+                            "re-inversion (" + describe_relaxation(relax_record) + ")")
 
     _filled = {k: v for k, v in transfer_fill.items()
                if v["missing"] or v["clamped"]}
@@ -1206,7 +1285,7 @@ def setup_model(restart_from=None, *, allow_timing_cache_a_ref=False,
     # would clobber the loaded anchors and pass None into build_rc_residual.
     if use_residual:
         from icepack2_tools.dual_friction import (
-            build_rc_residual, weertman_anchor, effective_pressure,
+            build_rc_residual, weertman_anchor, budd_reference_pressure,
         )
         c0_rc = float(os.environ.get("ISMIP7_RC_C0", "0.5"))
         rc_hvisc_floor = map_hvisc_floor
@@ -1290,10 +1369,13 @@ def setup_model(restart_from=None, *, allow_timing_cache_a_ref=False,
             # since a cell-wise surface has no cell gradient.
             C_w0 = weertman_anchor(H, s, u_obs, m_slide_val, Q_g,
                                    length=map_anchor_length, b=b)
-            if friction == "budd":
+            if friction == "budd" and geom_dg1:
+                N_ref_fields = (H.copy(deepcopy=True), s.copy(deepcopy=True))
+                N_ref_fields[0].rename("N_ref_thickness")
+                N_ref_fields[1].rename("N_ref_surface")
+            elif friction == "budd":
                 N_ref = Function(Q_g, name="N_ref").interpolate(
-                    max_value(effective_pressure(H, s), Constant(0.0))
-                )
+                    budd_reference_pressure(H, s))
             if C_exp is not None:
                 C_w0 = Function(Q_g, name="C_w0").project(C_exp)
                 theta_f.assign(0.0)
@@ -1315,6 +1397,14 @@ def setup_model(restart_from=None, *, allow_timing_cache_a_ref=False,
         # from its own geometry via effective_pressure(H, s) and loaded from the
         # checkpoint only on a restart. The two should agree cell-wise under DG0
         # geometry; this knob is how that is checked.
+        if N_ref_fields is not None:
+            # Under DG1 the reference is N itself on the frozen t=0 geometry,
+            # point by point. N has kinks inside a linear cell (the bed at sea
+            # level, the 1 m overburden floor, flotation), so a nodal DG1
+            # interpolant of it put N_hat at 1.04 (median) and up to 1.7 in the
+            # 32 km grounded cells whose bed crosses sea level, and at the cap
+            # near the grounding line, where the inversion's own N_hat is N/N.
+            N_ref = budd_reference_pressure(*N_ref_fields)
         if friction == "budd" and os.environ.get("ISMIP7_BUDD_NREF", "").lower() == "none":
             N_ref = None
         if friction == "budd":
@@ -1336,23 +1426,34 @@ def setup_model(restart_from=None, *, allow_timing_cache_a_ref=False,
     # Issue #117: a cold start dated before the 2015 geometry starts from that
     # geometry with the Smith et al. (2020) mean thinning undone on grounded
     # ice. It comes after the anchors above, so C_w0 and N_ref stay those of
-    # the 2015 geometry the MAP was inverted on, and before the prognostic
+    # the 2015 geometry (the MAP's own, or BedMachine's on this mesh for a
+    # relaxed MAP or a transfer), and before the prognostic
     # thickness is copied from H below, so the initial solve, the transport,
     # H_init and the apparent-MB reference all start from the earlier ice.
     if backdate_years > 0.0 and not is_restart:
         if not geom_dg:
             raise RuntimeError(
-                "backdating the geometry (issue #117) needs the DG0 geometry "
-                "(ISMIP7_GEOMETRY_SPACE=dg0)")
-        from icepack2_tools.obs_dhdt import load_dhdt_obs, backdate_thickness
-        _dhdt, _observed = load_dhdt_obs(Q_g)
-        _h_obs = H.dat.data_ro.copy()
-        _h_new, _changed = backdate_thickness(
-            _h_obs, b.dat.data_ro, _dhdt.dat.data_ro, _observed.dat.data_ro,
-            backdate_years, float(rho_ratio))
-        H.dat.data[:] = _h_new
+                "backdating the geometry (issue #117) needs a cell-wise "
+                "geometry (ISMIP7_GEOMETRY_SPACE=dg0 or dg1)")
+        from icepack2_tools.obs_dhdt import (
+            load_dhdt_obs, backdate_cells, backdate_thickness)
+        # the observed dH/dt is binned onto the DG0 cells in both spaces;
+        # under DG1 each changed cell moves by its mean's change
+        _Q_cells = cell_view.Q0 if geom_dg1 else Q_g
+        _dhdt, _observed = load_dhdt_obs(_Q_cells)
+        if geom_dg1:
+            _h_obs = np.array(cell_view.means(H))
+            _h_new, _changed = backdate_cells(
+                cell_view, H, b, _dhdt.dat.data_ro, _observed.dat.data_ro,
+                backdate_years, float(rho_ratio))
+        else:
+            _h_obs = H.dat.data_ro.copy()
+            _h_new, _changed = backdate_thickness(
+                _h_obs, b.dat.data_ro, _dhdt.dat.data_ro, _observed.dat.data_ro,
+                backdate_years, float(rho_ratio))
+            H.dat.data[:] = _h_new
         s.interpolate(max_value(b + H, (Constant(1.0) - rho_ratio) * H))
-        _area = assemble(fd.TestFunction(Q_g) * dx).dat.data_ro
+        _area = assemble(fd.TestFunction(_Q_cells) * dx).dat.data_ro
         _dm_gt = mesh.comm.allreduce(
             float(((_h_new - _h_obs) * _area).sum())) * 917.0 / 1e12
         PETSc.Sys.Print(
@@ -1444,6 +1545,44 @@ def setup_model(restart_from=None, *, allow_timing_cache_a_ref=False,
     h = H.copy(deepcopy=True)
     h.rename("thickness")
     A_map = A4_base * exp(_map_phi(h))
+    # DG1: the cell means of h, which decide the ice edges of the exact-front
+    # push and the level-set front; run_simulation refreshes them with the
+    # thickness. Under DG0 h is its own cell value and no copy exists.
+    h_cell = None
+    if geom_dg1:
+        h_cell = cell_view.mean_function(h)
+        h_cell.rename("thickness_cell_mean")
+    # The thickness the momentum balance reads. With an advected front the
+    # transport parks the ice the front's advance deposits in the cells
+    # beyond the level set until the front crosses them
+    # (icepack_tools.front_transport), and the momentum balance must not see
+    # it there: the free-front push belongs on the level-set front, and a
+    # wedge of that ice, 30-80 m at its thick node and pinned through the
+    # vertices it shares with the ocean-drag cells, buttressed every shelf of
+    # the 2 km calving screen to half its speed within a decade (calvdg1h,
+    # 18 Oct 2026), which halved the calving the free laws booked. So the
+    # residual reads a copy that run_simulation zeroes beyond the front after
+    # every advance; without an advected front the copy is h itself.
+    h_dyn, s_dyn, h_cell_dyn = h, s, h_cell
+    if geom_dg and _front_anchor() == "advect":
+        h_dyn = h.copy(deepcopy=True)
+        h_dyn.rename("thickness_dynamic")
+        s_dyn = s.copy(deepcopy=True)
+        s_dyn.rename("surface_dynamic")
+        if levelset_ckpt is not None:
+            # The writer recorded full_state_residual on this thickness, zero
+            # beyond its level set; the restart residual check below compares
+            # against it, so it reads the same field.
+            beyond_ckpt = levelset_ckpt.dat.data_ro > 0.0
+            if geom_dg1:
+                cell_view.set_cells(h_dyn, beyond_ckpt, 0.0)
+            else:
+                h_dyn.dat.data[beyond_ckpt] = 0.0
+            s_dyn.interpolate(
+                max_value(b + h_dyn, (Constant(1.0) - rho_ratio) * h_dyn))
+        if geom_dg1:
+            h_cell_dyn = cell_view.mean_function(h_dyn)
+            h_cell_dyn.rename("thickness_dynamic_cell_mean")
 
     u_s, M_s, tau_s = split(z)
     fields = {
@@ -1507,7 +1646,9 @@ def setup_model(restart_from=None, *, allow_timing_cache_a_ref=False,
             if _ref_err:
                 raise ValueError(_ref_err)
         if fssa_ref_mode == "step":
-            fssa_tendency = Function(Q_dg, name="fssa_tendency")
+            # on the transport space: the DG1 tendency keeps its slopes
+            fssa_tendency = Function(Q_g if geom_dg1 else Q_dg,
+                                     name="fssa_tendency")
             if restart_from is not None and fssa_tendency_ckpt is not None:
                 fssa_tendency.assign(fssa_tendency_ckpt)
 
@@ -1530,8 +1671,8 @@ def setup_model(restart_from=None, *, allow_timing_cache_a_ref=False,
                 z_c if z_c is not None else z,
                 theta_c if theta_c is not None else theta_f,
                 phi_c if phi_c is not None else _map_phi(h_c if h_c is not None else h),
-                H=h_c if h_c is not None else h,
-                s=s_c if s_c is not None else s,
+                H=h_c if h_c is not None else h_dyn,
+                s=s_c if s_c is not None else s_dyn,
                 # the sqrt control's friction is alpha^2 pointwise (the
                 # inversion's own form), not its cell average
                 b=b, C_w0=(alpha_f ** 2 if alpha_f is not None else C_exp if C_exp is not None else C_w0),
@@ -1546,6 +1687,7 @@ def setup_model(restart_from=None, *, allow_timing_cache_a_ref=False,
                 k_lim=k_lim, drag_mask=drag_mask,
                 calving_ids=calving_ids if use_calving_terminus else None,
                 exact_front=map_exact_front, front_hmin=_front_hmin(),
+                H_cell=h_cell_dyn if h_c is None else None,
                 fssa_tau=fssa_tau if fssa_theta_val > 0 else None,
                 u_ref=u_ref_fssa if fssa_theta_val > 0 else None,
                 fssa_tendency=fssa_tendency,
@@ -1831,8 +1973,18 @@ def setup_model(restart_from=None, *, allow_timing_cache_a_ref=False,
             PETSc.Sys.Print(f"Restart state must be re-solved: {why}")
             _rtol0, _atol0, _stol0, _max_it0 = slvr.snes.getTolerances()
             _bounds = final_solve_bounds()
+            # The re-solve targets the residual the writer RECORDED, not the
+            # acceptance limit: until 2026-10-20 it stopped at the limit
+            # (100 x recorded) and the run atol, 100 x the achieved norm, came
+            # out 10^4 x the recorded level. The calvsu no-calving follow-ons
+            # resumed a state recorded at 3.9e3 with run atol 2.7e7, took 278
+            # of 751 momentum solves at iteration zero on a frozen velocity,
+            # and the transport blew up at 2016.55. The re-solve converges to
+            # the record, the run atol is capped at the acceptance limit, and
+            # a solve that floors above that limit keeps the loaded state for
+            # the rescue ladder.
             slvr.snes.setTolerances(
-                atol=accept_limit if accept_limit is not None else _atol0,
+                atol=recorded if recorded is not None else _atol0,
                 stol=_bounds["snes_stol"],
                 max_it=_bounds["snes_max_it"],
             )
@@ -1842,11 +1994,17 @@ def setup_model(restart_from=None, *, allow_timing_cache_a_ref=False,
                     loaded_fnorm=f"{fnorm0:.3e}",
                     recorded=("none" if recorded is None else f"{recorded:.3e}"),
                 )
-                restart_solved = True
                 fnorm_conv = slvr.snes.getFunctionNorm()
+                if accept_limit is not None and fnorm_conv > accept_limit:
+                    raise fd.ConvergenceError(
+                        f"restart re-solve floored at ||F||={fnorm_conv:.2e}, "
+                        f"above {accept_limit:.2e}")
+                restart_solved = True
                 run_atol = (
                     snes_atol_scale() * fnorm_conv if fnorm_conv > 0.0 else _atol0
                 )
+                if accept_limit is not None:
+                    run_atol = min(run_atol, accept_limit)
                 slvr.snes.setTolerances(atol=run_atol, stol=_stol0, max_it=_max_it0)
                 PETSc.Sys.Print(
                     f"Restart state re-solved (||F|| {fnorm0:.2e} -> "
@@ -1965,12 +2123,16 @@ def setup_model(restart_from=None, *, allow_timing_cache_a_ref=False,
     # Forcing fields live on the GEOMETRY space: the melt parameterization is
     # evaluated from the local draft (s - h) and must be cell-wise wherever the
     # geometry is, and the transport cell-averages (accum - ocean_melt) anyway.
-    accum = Function(Q_g, name="accumulation").assign(0.0)
-    ocean_melt = Function(Q_g, name="ocean_melt").assign(0.0)
+    # Under DG1 they live on the DG0 cells and read the cell means of the
+    # geometry (forcing.forcing_geometry), so the forcing is the DG0 forcing
+    # of those means and a DG0 melt calibration applies as fitted.
+    Q_forcing = cell_view.Q0 if geom_dg1 else Q_g
+    accum = Function(Q_forcing, name="accumulation").assign(0.0)
+    ocean_melt = Function(Q_forcing, name="ocean_melt").assign(0.0)
 
-    # Coordinates of the geometry dofs, for forcing callbacks that assign into
+    # Coordinates of the forcing dofs, for forcing callbacks that assign into
     # .dat.data directly (they cannot assume mesh vertices any more).
-    _xy = Function(VectorFunctionSpace(mesh, Q_g.ufl_element())).interpolate(
+    _xy = Function(VectorFunctionSpace(mesh, Q_forcing.ufl_element())).interpolate(
         fd.SpatialCoordinate(mesh)
     ).dat.data_ro
     geom_xy = (_xy[:, 0].copy(), _xy[:, 1].copy())
@@ -1987,6 +2149,17 @@ def setup_model(restart_from=None, *, allow_timing_cache_a_ref=False,
         "Q": Q,
         "Q_g": Q_g,
         "geom_dg": geom_dg,
+        "geom_dg1": geom_dg1,
+        "geometry_space": geometry_space,
+        # DG1: per-cell access to the geometry and the live cell means of h
+        # (icepack2_tools.cellview); None under DG0 and CG1.
+        "cell_view": cell_view,
+        "h_cell": h_cell,
+        # the momentum balance's thickness and surface: h and s themselves,
+        # or with an advected front the copy zeroed beyond the level set
+        "h_dyn": h_dyn,
+        "s_dyn": s_dyn,
+        "h_cell_dyn": h_cell_dyn,
         "geom_xy": geom_xy,
         "mesh_basename": mesh_basename,
         "geometry_source": geometry_source,
@@ -2064,7 +2237,10 @@ def setup_model(restart_from=None, *, allow_timing_cache_a_ref=False,
         # C = C_ref exp(alpha) of an exp-control MAP (None otherwise), idem
         "C_exp": C_exp,
         "C_w0": C_w0,
-        "N_ref": N_ref,
+        # a Function to checkpoint; under DG1 the expression lives in the
+        # residual and its frozen fields are checkpointed instead
+        "N_ref": N_ref if N_ref_fields is None else None,
+        "N_ref_fields": N_ref_fields,
         "subelement": subelement,
         "A_prior": A_prior_f,
         "H_init": H_init,
@@ -2086,6 +2262,9 @@ def setup_model(restart_from=None, *, allow_timing_cache_a_ref=False,
         "fssa_tendency": fssa_tendency,
         # Cells a retreat-only front has emptied (restart only; else None).
         "calved_cells": calved_cells_ckpt,
+        # The saved level set and the anchor it was written under (restart only).
+        "levelset_state": levelset_ckpt,
+        "front_anchor_state": front_anchor_ckpt,
         "phys_div": phys_div,
         # DG0 prognostic thickness state (restart only; else None).
         "h_dg_state": h_dg_state,
@@ -2175,6 +2354,9 @@ def save_model_state(ctx, final_path, t_now, extra_attrs=None):
             chk.save_function(ctx["C_exp"], name="friction_exp")
         if ctx.get("N_ref") is not None:
             chk.save_function(ctx["N_ref"], name="N_ref")
+        if ctx.get("N_ref_fields") is not None:
+            chk.save_function(ctx["N_ref_fields"][0], name="N_ref_thickness")
+            chk.save_function(ctx["N_ref_fields"][1], name="N_ref_surface")
         if ctx.get("A_prior") is not None:
             chk.save_function(ctx["A_prior"], name="fluidity_prior")
         if ctx.get("a_ref_mb") is not None:
@@ -2209,6 +2391,7 @@ def save_model_state(ctx, final_path, t_now, extra_attrs=None):
             chk.set_attr("/", "dt_yr", float(ctx["dt"]))
         if ctx.get("calving_law") is not None:
             chk.set_attr("/", "calving_law", str(ctx["calving_law"].describe()))
+            chk.set_attr("/", "front_anchor", str(ctx.get("front_anchor", "extent")))
         chk.set_attr("/", "friction", str(ctx.get("friction", "budd")))
         if ctx.get("smb_elevation_feedback") is not None:
             chk.set_attr("/", SMB_FEEDBACK_ATTR,
@@ -2218,7 +2401,8 @@ def save_model_state(ctx, final_path, t_now, extra_attrs=None):
             # (runconfig.BUDD_SHELF_GATE); timing-cache manifests require it.
             chk.set_attr("/", "friction_gate", _BUDD_SHELF_GATE)
         chk.set_attr(
-            "/", "geometry_space", "dg0" if ctx.get("geom_dg") else "cg1"
+            "/", "geometry_space",
+            ctx.get("geometry_space") or ("dg0" if ctx.get("geom_dg") else "cg1")
         )
         if ctx.get("mesh_basename"):
             chk.set_attr("/", "mesh_basename", str(ctx["mesh_basename"]))
@@ -2378,16 +2562,63 @@ def run_simulation(
 
     Q_dg = FunctionSpace(mesh, "DG", 0)
     geom_dg = ctx.get("geom_dg", False)
+    geom_dg1 = ctx.get("geom_dg1", False)
+    # DG1: per-cell access (icepack2_tools.cellview). The rules below that
+    # decide per cell read cell means, indexed like every DG0 array here.
+    cell_view = ctx.get("cell_view")
+    h_cell = ctx.get("h_cell")
+    # The momentum balance's thickness: h itself, or with an advected front
+    # a copy that _lift_h zeroes beyond the level set (setup_model,
+    # thickness_dynamic). dyn_front names the level set once it exists.
+    h_dyn = ctx.get("h_dyn", h)
+    s_dyn = ctx.get("s_dyn", s)
+    h_cell_dyn = ctx.get("h_cell_dyn", h_cell)
+    dyn_front = {"level_set": None}
     # Under DG0 geometry the transport state IS the geometry - the same
     # Function object, not a copy. That is the whole point: the terminus
     # back-pressure and the boundary flux then integrate one thickness, so
     # they cannot disagree. Under CG1 geometry h_dg is a separate DG0 carrier
-    # bridged by the lumped lift below.
+    # bridged by the lumped lift below. Under DG1 the same holds on the DG1
+    # space, which is then the transport space too.
+    Q_tr = Q_g if geom_dg1 else Q_dg
+    # A restart's DG carrier as the checkpoint loaded it (None on a cold
+    # start), taken before ctx["h_dg_state"] is pointed at the live carrier
+    # the checkpoint writer reads: tested after that, a CG1 cold start found
+    # its own empty carrier, "restored" it, and began with no ice.
+    h_dg_restart = ctx.get("h_dg_state")
     h_dg = h if geom_dg else Function(Q_dg, name="h_dg")
     ctx["h_dg_state"] = h_dg
-    h_dg_old = Function(Q_dg)
-    phi_dg = fd.TestFunction(Q_dg)
-    h_dg_trial = fd.TrialFunction(Q_dg)
+    h_dg_old = Function(Q_tr)
+    phi_dg = fd.TestFunction(Q_tr)
+    h_dg_trial = fd.TrialFunction(Q_tr)
+
+    def _cells(f):
+        r"""Per-cell values of a transport-space field: the field itself
+        under DG0, its cell means under DG1."""
+        return cell_view.means(f) if geom_dg1 else f.dat.data_ro
+
+    # DG1: the bed's cell means, frozen with the bed, and the surface the
+    # DG0 formula builds from the cell means, refreshed with h_cell. The
+    # front law, the grounded cells and the ISMIP7 output read these, so
+    # every per-cell rule sees the geometry the forcing sees
+    # (forcing.forcing_geometry).
+    b_cell = s_cell = s_float_cell = None
+    if geom_dg1:
+        b_cell = cell_view.mean_function(b)
+        b_cell.rename("bed_cell_mean")
+        s_cell = Function(Q_dg, name="surface_cell_mean")
+        s_float_cell = Function(Q_dg).interpolate(
+            b_cell + (rho_W / rho_I) * max_value(-b_cell, Constant(0.0)))
+
+    def _refresh_cells():
+        r"""DG1: the cell means of the live thickness and their surface."""
+        if h_cell is None:
+            return
+        cell_view.mean_function(h, out=h_cell)
+        s_cell.interpolate(
+            max_value(b_cell + h_cell, (Constant(1.0) - rho_ratio) * h_cell))
+
+    _refresh_cells()
 
     n_facet = fd.FacetNormal(mesh)
 
@@ -2491,7 +2722,14 @@ def run_simulation(
     # unconditional ISMIP7_FIXED_FRONT=1 cannot pin a projection law by
     # accident (the reason the legacy flag is ignored under a law).
     front_advance = _front_advance()
+    front_anchor_mode = _front_anchor()
+    ctx["front_anchor"] = front_anchor_mode
     retreat_only = calving_law_obj is not None and front_advance == "none"
+    # A land-terminating front does not calve and is not held: it deforms
+    # under its own weight and advances with the ice, and what it carries
+    # into the sea calves there (ISMIP7_FRONT_MARINE, runconfig.front_marine;
+    # the law's own marine_only zeroes its rate on land).
+    front_marine = calving_law_obj is not None and _front_marine()
     if front_advance == "none" and calving_law_obj is None:
         raise ValueError(
             "ISMIP7_FRONT_ADVANCE=none needs a level-set law (ISMIP7_CALVING); "
@@ -2524,6 +2762,13 @@ def run_simulation(
             f"(ISMIP7_CALVING={calving})"
             + ("; retreat-only: nothing advances past the t=0 extent "
                "(ISMIP7_FRONT_ADVANCE=none)" if retreat_only else "")
+            + ("; a land-terminating front does not calve and advances with "
+               "the ice" + (", the t=0 extent held only on the sea" if retreat_only else "")
+               + " (ISMIP7_FRONT_MARINE)" if front_marine else "")
+            + ("; front carried by advection and the calving rate "
+               "(ISMIP7_FRONT_ANCHOR=advect), the transport moving the ice "
+               "with it (only cells inside the front export ice, enclosed "
+               "water filled, icebergs removed)" if front_anchor_mode == "advect" else "")
             + ("; ISMIP7_FIXED_FRONT is set but ignored for removal"
                if fixed_front and not retreat_only else ""))
     elif fixed_front:
@@ -2552,8 +2797,8 @@ def run_simulation(
         PETSc.Sys.Print("  LEGACY transport: non-conservative volume term + L2 projection")
     m_lump = assemble(fd.TestFunction(Q) * dx)
     proj_rhs = fd.Cofunction(Q.dual())
-    src_dg = Function(Q_dg, name="mass_source")
-    src_cof = fd.Cofunction(Q_dg.dual())
+    src_dg = Function(Q_tr, name="mass_source")
+    src_cof = fd.Cofunction(Q_tr.dual())
     # Where the surface and ocean forcing act: 1 on cells that can hold ice,
     # 0 on open ocean and on cells a front rule holds ice-free
     # (front.unforced_cells). Refreshed at the start of every advance, and at
@@ -2561,6 +2806,8 @@ def run_simulation(
     # the budget and the ISMIP7 fields all count the same forcing.
     forced = Function(Q_dg, name="forced")
     bed_cell = Function(Q_dg).project(b).dat.data_ro.copy()
+    # where a front is in the ocean: the cells whose bed is below sea level
+    sea_cells = bed_cell < 0.0 if front_marine else None
 
     # h_dg is the PERSISTENT prognostic state (DG0). The old scheme
     # re-projected CG1 h -> DG0 every step; that roundtrip (L2 project +
@@ -2580,13 +2827,18 @@ def run_simulation(
     # Skipping it is not an optimization - applying it would be the bug. At
     # 32 km it moved the calving front from 105 m to 200 m thick and, through
     # the h^2 terminus traction, multiplied the outflux by ~4.7.
-    if geom_dg:
+    if geom_dg1:
+        PETSc.Sys.Print(
+            "  DG1 geometry: transport state is the geometry (no lift), "
+            "upwind DG1 with the cell-wise positivity floor"
+        )
+    elif geom_dg:
         PETSc.Sys.Print(
             "  DG0 geometry: transport state is the geometry (no lift)"
         )
     elif not legacy_transport:
-        if ctx.get("h_dg_state") is not None:
-            h_dg.dat.data[:] = ctx["h_dg_state"].dat.data_ro
+        if h_dg_restart is not None:
+            h_dg.dat.data[:] = h_dg_restart.dat.data_ro
             PETSc.Sys.Print("  DG thickness state restored from checkpoint")
         else:
             h_dg.project(h)
@@ -2646,7 +2898,12 @@ def run_simulation(
     apparent_mb = amb_mode is not None
     a_ref = None
     if apparent_mb:
-        a_ref = Function(Q_dg, name="a_ref_mb")
+        # On the transport space. Under DG1 the reference is the DG1 field
+        # whose integral against every basis function is the t=0 divergence
+        # (cellview.CellView.solve_mass), so the t=0 tendency cancels in the
+        # slopes as well as in the means; a cell-constant reference would
+        # cancel the means alone and leave the slopes to grow.
+        a_ref = Function(Q_tr, name="a_ref_mb")
         if ctx.get("a_ref_mb") is not None:
             a_ref.dat.data[:] = ctx["a_ref_mb"].dat.data_ro
             PETSc.Sys.Print("  Apparent MB: frozen a_ref loaded from checkpoint")
@@ -2656,14 +2913,20 @@ def run_simulation(
             u0 = z.subfunctions[0]
             if legacy_transport:
                 h_dg.project(h)
-            un0 = fd.dot(u0, n_facet)
-            un0p = (un0 + abs(un0)) / 2
-            flux0 = assemble(
-                (un0p("+") * h_dg("+") - un0p("-") * h_dg("-"))
-                * fd.jump(phi_dg) * dS
-                + un0p * h_dg * phi_dg * ds
-            )
-            a_ref.dat.data[:] = flux0.dat.data_ro / cell_area
+            if geom_dg1:
+                # the transport's own divergence, its volume term included
+                cell_view.solve_mass(
+                    assemble(upwind_divergence(h_dg, phi_dg, u0)), a_ref,
+                    cell_area)
+            else:
+                un0 = fd.dot(u0, n_facet)
+                un0p = (un0 + abs(un0)) / 2
+                flux0 = assemble(
+                    (un0p("+") * h_dg("+") - un0p("-") * h_dg("-"))
+                    * fd.jump(phi_dg) * dS
+                    + un0p * h_dg * phi_dg * ds
+                )
+                a_ref.dat.data[:] = flux0.dat.data_ro / cell_area
             # the velocity this reference cancels: the stabilization's own
             ctx["u_ref_fssa"].assign(u0)
             ctx["u_ref_fssa_set"] = True
@@ -2682,10 +2945,16 @@ def run_simulation(
                 # does not (open ocean would otherwise be handed a source
                 # equal to the melt it never receives)
                 forced.dat.data[:] = np.where(
-                    unforced_cells(h_dg.dat.data_ro, bed_cell, beyond_front),
+                    unforced_cells(_cells(h_dg), bed_cell, beyond_front),
                     0.0, 1.0)
-                b_smb = assemble(forced * (accum - ocean_melt) * phi_dg * dx)
-                a_ref.dat.data[:] -= b_smb.dat.data_ro / cell_area
+                if geom_dg1:
+                    # the forcing is cell-wise, so its nodes carry its cell
+                    # value
+                    a_ref.dat.data[:] -= Function(Q_tr).interpolate(
+                        forced * (accum - ocean_melt)).dat.data_ro
+                else:
+                    b_smb = assemble(forced * (accum - ocean_melt) * phi_dg * dx)
+                    a_ref.dat.data[:] -= b_smb.dat.data_ro / cell_area
             if beyond_front is not None:
                 # No ice existed outside the t=0 extent, so no balancing
                 # reference belongs there, for ANY front law. Under a pinned
@@ -2693,7 +2962,10 @@ def run_simulation(
                 # cells and must not be absorbed into a_ref; under a free law
                 # (vonmises) a frozen sink here would re-empty every cell the
                 # front advances into, pinning it at t=0 with no error.
-                a_ref.dat.data[beyond_front] = 0.0
+                if geom_dg1:
+                    cell_view.set_cells(a_ref, beyond_front, 0.0)
+                else:
+                    a_ref.dat.data[beyond_front] = 0.0
             # The same rule against the LIVE extent, both directions:
             #   advance - a frozen SINK outside the extent re-empties the
             #     cells a free front advances into (the t=0 mask above);
@@ -2729,17 +3001,10 @@ def run_simulation(
     u_transport = z.subfunctions[0]
     un_transport = fd.dot(u_transport, n_facet)
     un_transport_plus = (un_transport + abs(un_transport)) / 2
-    F_transport = (
-        (h_dg_trial - h_dg_old) / dt_c * phi_dg * dx
-        + (
-            un_transport_plus("+") * h_dg_trial("+")
-            - un_transport_plus("-") * h_dg_trial("-")
-        )
-        * fd.jump(phi_dg)
-        * dS
-        + un_transport_plus * h_dg_trial * phi_dg * ds
-        - src_dg * phi_dg * dx
-    )
+    # icepack2_tools.transport: the DG0 finite-volume update, and under DG1
+    # the same with the volume term that completes div(h u).
+    F_transport = transport_form(
+        h_dg_trial, h_dg_old, phi_dg, u_transport, dt_c, src_dg)
     if legacy_transport:
         F_transport += -h_dg_trial * fd.div(
             u_transport * phi_dg
@@ -2764,8 +3029,12 @@ def run_simulation(
     transport_solve_count = 0
     mass_tol_gt = mass_residual_tol_gt()
     h_diag_xy = Function(
-        VectorFunctionSpace(mesh, Q_dg.ufl_element())
+        VectorFunctionSpace(mesh, Q_tr.ufl_element())
     ).interpolate(fd.SpatialCoordinate(mesh))
+    # DG1: the centroids, for the per-cell reports (the tripwire)
+    cell_xy = (Function(VectorFunctionSpace(mesh, Q_dg.ufl_element()))
+               .interpolate(fd.SpatialCoordinate(mesh)) if geom_dg1
+               else h_diag_xy)
     speed_diag = Function(Q, name="speed_diagnostic")
     speed_diag_xy = Function(
         VectorFunctionSpace(mesh, Q.ufl_element())
@@ -2891,7 +3160,7 @@ def run_simulation(
             # ice a margin pushes onto ice-free land books as calving alone
             bed=bed_cell)
         if annual.h_year_start is None:
-            annual.start_year(h_dg)
+            annual.start_year(h_cell if geom_dg1 else h_dg)
         _stem, _ext = os.path.splitext(annual.out_path)
         PETSc.Sys.Print(
             f"  ISMIP7 output: one checkpoint per year -> {_stem}_<year>{_ext}")
@@ -2929,6 +3198,10 @@ def run_simulation(
     csv_head = mesh.comm.bcast(csv_head, root=0)
 
     def _grounded_cells():
+        if geom_dg1:
+            # the flotation test on the cell means (forcing.forcing_geometry)
+            return Function(Q_dg).interpolate(
+                s_cell - s_float_cell).dat.data_ro > 0.0
         return Function(Q_dg).interpolate(s - s_float).dat.data_ro > 0.0
 
     def _any_rank(local):
@@ -2948,7 +3221,7 @@ def run_simulation(
     fracture_mode = _fracture_mode()
     if fracture_mode in FRACTURE_MASK_MODES:
         if not geom_dg:
-            raise RuntimeError(f"ISMIP7_FRACTURE={fracture_mode} needs ISMIP7_GEOMETRY_SPACE=dg0 (cell-wise removal)")
+            raise RuntimeError(f"ISMIP7_FRACTURE={fracture_mode} needs ISMIP7_GEOMETRY_SPACE=dg0 or dg1 (cell-wise removal)")
         collapse = np.zeros(len(cell_area), dtype=bool)
         ctx["collapse"] = collapse
         if fracture_mode == "mask_front":
@@ -2957,7 +3230,8 @@ def run_simulation(
             # sidecar says which exterior facets those are) a cell faces open
             # water even though no ice-free buffer cell is there to say so.
             collapse_edge = assemble(
-                phi_dg * ds(tuple(ctx["calving_ids"]))).dat.data_ro > 0.0
+                fd.TestFunction(Q_dg) * ds(tuple(ctx["calving_ids"]))
+            ).dat.data_ro > 0.0
     # Under every mode, `none` included, so the mode of a run can be read off
     # its log (issue #10).
     PETSc.Sys.Print(f"  {collapse_banner(fracture_mode)}")
@@ -3091,7 +3365,7 @@ def run_simulation(
             if k_lim_c is not None:
                 k_lim_c.assign(0.0)
 
-    h_dg_entry = Function(Q_dg)
+    h_dg_entry = Function(Q_tr)
 
     def _lift_h():
         r"""Refresh the geometry derived from the thickness state (s, phi_eff).
@@ -3123,6 +3397,25 @@ def run_simulation(
                 Constant(0.01),
             )
         )
+        # the cell means the exact-front push decides ice edges on, and the
+        # per-cell rules read
+        _refresh_cells()
+        if h_dyn is not h:
+            # the momentum balance's thickness: the live one, zero in the
+            # cells beyond the advected front, where the transport parks the
+            # deposit the front has not yet crossed (setup_model)
+            h_dyn.assign(h)
+            ls_dyn = dyn_front["level_set"]
+            if ls_dyn is not None:
+                beyond_dyn = ls_dyn.beyond_front()
+                if geom_dg1:
+                    cell_view.set_cells(h_dyn, beyond_dyn, 0.0)
+                else:
+                    h_dyn.dat.data[beyond_dyn] = 0.0
+            s_dyn.interpolate(
+                max_value(b + h_dyn, (Constant(1.0) - rho_ratio) * h_dyn))
+            if h_cell_dyn is not None:
+                cell_view.mean_function(h_dyn, out=h_cell_dyn)
 
     # Level-set calving front (ISMIP7_CALVING != none): each step the level
     # set is the eikonal distance to the current ice extent, the calving
@@ -3133,6 +3426,12 @@ def run_simulation(
     # the current thickness each step, so a restart needs no saved front: the
     # retreat is already carried in h by the sub-cell shed.
     level_set = None
+    front_transport = None
+    # an advected front's calving by its parts, per step attempt [Gt]: the
+    # ice the transport carried across the front without it following,
+    # what the front's rules took from the cells it left, the icebergs;
+    # and the cells of enclosed water filled into the ice
+    front_split = {"crossing": 0.0, "retreat": 0.0, "icebergs": 0.0, "filled": 0}
     phi_entry = None
     last_c_mean = 0.0
     drag_rule = ctx.get("drag_rule")
@@ -3151,11 +3450,82 @@ def run_simulation(
         if calving_law_obj.front_mode == "fixed":
             _h0 = Function(Q_dg).project(ctx.get("H_init", h))
             phi_init = initial_distance(mesh, _h0, h_min=front_hmin)
+        anchor_was = ctx.get("front_anchor_state")
+        if t_restart is not None and anchor_was is not None and anchor_was != front_anchor_mode:
+            raise RuntimeError(
+                f"the restart state was written with ISMIP7_FRONT_ANCHOR="
+                f"{anchor_was} and this run asks for {front_anchor_mode}: the two "
+                f"anchors carry the front differently, so a run keeps the one it "
+                f"started with (give a new anchor its own ISMIP7_RUN_TAG)")
+        if (front_anchor_mode == "advect" and calving_law_obj.front_mode != "fixed"
+                and t_restart is not None):
+            if ctx.get("levelset_state") is None:
+                raise RuntimeError(
+                    "ISMIP7_FRONT_ANCHOR=advect restarts from the saved level "
+                    "set, and the restart state holds none")
+            phi_init = ctx["levelset_state"]
+            PETSc.Sys.Print("  Front: the advected level set continues from the checkpoint")
+        # Under DG1 the level set reads the cell means (h_cell, refreshed
+        # with every lift), so its extent is the cells' as under DG0.
         level_set = LevelSet(
-            mesh, h_dg, law=calving_law_obj.front_mode, h_min=front_hmin,
-            drag_mask=ctx.get("drag_mask"), phi_init=phi_init,
+            mesh, h_cell if geom_dg1 else h_dg, law=calving_law_obj.front_mode,
+            h_min=front_hmin, drag_mask=ctx.get("drag_mask"), phi_init=phi_init,
+            anchor=front_anchor_mode,
+            # an advected front reinitialises on model time: the forward
+            # advances it at every substep, and reinitialised every fifth
+            # advance it stood still (runconfig.front_reinit_interval)
+            reinit_interval=(_front_reinit_interval()
+                             if front_anchor_mode == "advect" else None),
         )
         phi_entry = Function(level_set.Q0)
+        if level_set.anchor == "advect":
+            # The transport moves the ice with the advected front
+            # (icepack_tools.front_transport): only the cells inside the front
+            # export ice, a cell beyond it receives what follows the front's
+            # own advance, and the rest of the ice crossing it is the calving
+            # flux, booked by the transport itself. Emptying every cell beyond
+            # the level set after a plain transport instead booked all the ice
+            # reaching the front as calving, whatever the law: 6,650 Gt/yr in
+            # the first step on the 5 km buffered mesh, where the extent
+            # anchor booked 1,370. Water the level set encloses in the ice
+            # (nunataks, lakes) joins the ice, and icebergs are removed. A
+            # retreat-only front is the coupling's barrier at the t=0 extent.
+            if legacy_transport:
+                raise ValueError(
+                    "ISMIP7_FRONT_ANCHOR=advect needs the conservative transport; "
+                    "unset ISMIP7_LEGACY_TRANSPORT")
+            from icepack_tools.front_transport import FrontTransport
+            phi_bar = None
+            if retreat_only:
+                # the t=0 extent, as the `fixed` law takes it: on a restart the
+                # level set's own construction-time field is the restart's front
+                _h0 = Function(Q_dg).project(ctx.get("H_init", h))
+                phi_bar = initial_distance(mesh, _h0, h_min=front_hmin)
+            front_transport = FrontTransport(level_set, u_transport,
+                                             barrier=retreat_only, phi0=phi_bar,
+                                             sea=sea_cells)
+            if front_transport.n_filled:
+                PETSc.Sys.Print(
+                    f"  Front: {front_transport.n_filled} cells of water the "
+                    f"level set encloses in the ice (nunataks, lakes) join the ice")
+            # from here the momentum balance reads the thickness inside the
+            # front only (thickness_dynamic); a restart's apron beyond it,
+            # written by a forward without this rule, drops out of the
+            # balance at the first solve
+            dyn_front["level_set"] = level_set
+            _lift_h()
+            F_transport = front_transport_form(
+                h_dg_trial, h_dg_old, phi_dg, dt_c, src_dg, front_transport)
+            transport_problem = LinearVariationalProblem(
+                fd.lhs(F_transport), fd.rhs(F_transport), h_dg)
+            transport_solver = LinearVariationalSolver(
+                transport_problem,
+                solver_parameters=transport_solver_parameters(),
+                options_prefix="ismip7_transport_",
+            )
+            # each exporting cell's calving flux, for the ISMIP7 output
+            front_calving_cells = front_transport.calving(h_dg, fd.TestFunction(Q_dg))
+            front_calving_cof = fd.Cofunction(Q_dg.dual())
     # save_model_state writes the front and the ISMIP7 year in progress.
     ctx["level_set"] = level_set
     ctx["annual"] = annual
@@ -3167,11 +3537,65 @@ def run_simulation(
     front_state = None
     calving_rate = None
     if calving_law_obj is not None and calving_law_obj.front_mode == "prescribed":
+        # the law reads the cell means under DG1, the level set's own cells
         front_state = calving_front_state(
-            z, h_dg, b, level_set, A_map, n_flow_val,
+            z, h_cell if geom_dg1 else h_dg, b_cell if geom_dg1 else b,
+            level_set, A_map, n_flow_val,
             gr_frac=(ctx["subelement"].fraction
                      if ctx.get("subelement") is not None else None))
         calving_rate = calving_law_obj.rate(front_state, t_start)
+
+    def _remove_cells(mask):
+        r"""Empty the cells in ``mask`` and return the Gt removed, booked to
+        the ISMIP7 output as calving: the cell values under DG0, the cell
+        means under DG1, where every node of the cell goes."""
+        removed = np.array(_cells(h_dg))[mask]
+        gt = mesh.comm.allreduce(
+            float((removed * cell_area[mask]).sum())) * rho_gt
+        if annual is not None:
+            annual.book_removal(mask, removed)
+        if geom_dg1:
+            cell_view.set_cells(h_dg, mask, 0.0)
+        else:
+            h_dg.dat.data[mask] = 0.0
+        return gt
+
+    def _scale_cells(factor):
+        r"""Scale every cell by its ``factor`` (DG0 indexing): the value
+        under DG0, the whole linear field under DG1, so the slope goes with
+        the mean and a positive cell stays positive."""
+        if geom_dg1:
+            cell_view.write_nodes(h_dg, cell_view.nodes(h_dg) * factor[:, None])
+        else:
+            h_dg.dat.data[:] *= factor
+
+    def _front_rules(grounded):
+        r"""The advected front's rules after the transport
+        (icepack_tools.front_transport), each removal booked as calving and
+        returned in Gt: a cell beyond the front keeps what the front's
+        advance carried into it, or the part of it still behind a front that
+        retreated off it this step, and every other cell beyond the front is
+        emptied; a band cell holding more than the ice it came from hands the
+        excess back to it; ice no path through ice connects to grounded ice
+        is an iceberg. Collective."""
+        keep, band, touch = front_transport.rules()
+        cut = np.array(_cells(h_dg)) * (1.0 - keep)
+        gt = mesh.comm.allreduce(float((cut * cell_area).sum())) * rho_gt
+        if annual is not None:
+            annual.book_removal(slice(None), cut)
+        _scale_cells(keep)
+        give, back, _moved = front_transport.excess(
+            np.array(_cells(h_dg)), band, touch)
+        _scale_cells(1.0 - give)
+        if geom_dg1:
+            cell_view.add_cells(h_dg, back)
+        else:
+            h_dg.dat.data[:] += back
+        berg = front_transport.icebergs(np.array(_cells(h_dg)), grounded)
+        berg_gt = _remove_cells(berg)
+        front_split["retreat"] += gt
+        front_split["icebergs"] += berg_gt
+        return gt + berg_gt
 
     def _advance(dt_local, label):
         r"""One transport advance of dt_local with the CURRENT velocity
@@ -3191,24 +3615,41 @@ def run_simulation(
         beyond = beyond_front if legacy_front_sink else None
         calv_frac = None
         ls_ice_free = None
+        front_switched = None
         if level_set is not None:
             if front_state is not None and calving_law_obj.time_dependent:
                 calving_rate = calving_law_obj.rate(front_state, t_yr)
-            last_c_mean = level_set.advance(dt_local, u_vel, rate=calving_rate)
-            lsb, calv_frac = level_set.calving_masks()
-            beyond = front_removal_mask(lsb, beyond_front, retreat_only, calved)
+            if front_transport is not None:
+                # The advected front: its own rules empty what it leaves,
+                # after the transport (_front_rules), and its sub-cell
+                # position lives in phi itself.
+                last_c_mean = front_transport.advance(dt_local, rate=calving_rate)
+                front_split["filled"] += front_transport.n_filled
+                # The cells whose side of the front this advance changed, for
+                # the substep controller: only the cells inside export, so
+                # their transport changes with the side, not with the step.
+                front_switched = (front_transport.inside_old
+                                  != (front_transport.chi_in.dat.data_ro > 0.5))
+            else:
+                last_c_mean = level_set.advance(dt_local, u_vel, rate=calving_rate)
+                lsb, calv_frac = level_set.calving_masks()
+                beyond = front_removal_mask(lsb, beyond_front, retreat_only, calved,
+                                            sea=sea_cells)
             ls_ice_free = level_set.beyond_front()
-            if retreat_only:
+            if retreat_only and front_transport is None:
                 ls_ice_free = ls_ice_free | calved
             if a_ref is not None and free_front:
-                clear_reference_where_ice_free(a_ref.dat.data, ls_ice_free)
+                if geom_dg1:
+                    cell_view.set_cells(a_ref, ls_ice_free, 0.0)
+                else:
+                    clear_reference_where_ice_free(a_ref.dat.data, ls_ice_free)
 
         # No forcing where there can be no ice: open ocean at the start of
         # this advance and the cells the front rules hold ice-free. SMB there
         # would make ice the front removes and books as calving; melt there
         # has nothing to melt (front.unforced_cells has the measured cost).
         forced.dat.data[:] = np.where(
-            unforced_cells(h_dg_old.dat.data_ro, bed_cell, beyond, ls_ice_free),
+            unforced_cells(_cells(h_dg_old), bed_cell, beyond, ls_ice_free),
             0.0, 1.0)
         smb_f, melt_f, ref_f = applied_forcing(forced, accum, ocean_melt, a_ref)
         smb_gt = float(assemble(smb_f * dx)) * rho_gt * dt_local
@@ -3232,17 +3673,31 @@ def run_simulation(
         # cell already below h_clamp (an emptied fixed-front cell) the raw
         # bound is positive and would make the limiter a mandatory SOURCE,
         # injecting h_clamp of ice per step for the mask to re-calve.
-        assemble(src * phi_dg * dx, tensor=src_cof)
-        src_dg.dat.data[:] = src_cof.dat.data_ro / cell_area
-        _src_want = src_dg.dat.data_ro.copy()
-        np.maximum(
-            src_dg.dat.data,
-            np.minimum(-(h_dg.dat.data_ro - h_clamp) / dt_local, 0.0),
-            out=src_dg.dat.data,
-        )
-        limit_gt = mesh.comm.allreduce(float(
-            ((src_dg.dat.data_ro - _src_want) * cell_area).sum()
-        )) * rho_gt * dt_local
+        if geom_dg1:
+            # The source is cell-wise linear (cell-wise forcing, mask and
+            # reference), so it is held exactly. The limit acts on the cell
+            # means and shifts the whole cell, so it moves no slope.
+            src_dg.interpolate(src)
+            _src_want = np.array(cell_view.means(src_dg))
+            _src_lim = np.maximum(
+                _src_want,
+                np.minimum(-(cell_view.means(h_dg) - h_clamp) / dt_local, 0.0))
+            cell_view.add_cells(src_dg, _src_lim - _src_want)
+            limit_gt = mesh.comm.allreduce(float(
+                ((_src_lim - _src_want) * cell_area).sum()
+            )) * rho_gt * dt_local
+        else:
+            assemble(src * phi_dg * dx, tensor=src_cof)
+            src_dg.dat.data[:] = src_cof.dat.data_ro / cell_area
+            _src_want = src_dg.dat.data_ro.copy()
+            np.maximum(
+                src_dg.dat.data,
+                np.minimum(-(h_dg.dat.data_ro - h_clamp) / dt_local, 0.0),
+                out=src_dg.dat.data,
+            )
+            limit_gt = mesh.comm.allreduce(float(
+                ((src_dg.dat.data_ro - _src_want) * cell_area).sum()
+            )) * rho_gt * dt_local
         m0 = float(assemble(h_dg_old * dx)) * rho_gt
         source_gt = float(assemble(src_dg * dx)) * rho_gt * dt_local
         dt_c.assign(dt_local)
@@ -3268,15 +3723,29 @@ def run_simulation(
             # next solve measures its surface change from (fssa, `step`).
             fssa_tendency.dat.data[:] = (
                 h_dg.dat.data_ro - h_dg_old.dat.data_ro) / dt_local
+        # The same state for the substep controller, which sizes the step to
+        # the transport and its lagged velocity; the floor and the front's
+        # removals below are events (icepack2_tools/substep.py).
+        h_transport = np.array(h_dg.dat.data_ro) if adapt is not None else None
         if trace_on:
             _h_tr = {i: float(h_dg.dat.data_ro[i]) for _, i in trace_cells}
-        out_gt = float(assemble(
-            un_transport_plus * h_dg * ds
-        )) * rho_gt * dt_local
+        calv_tr_gt = 0.0
+        if front_transport is not None:
+            # only the inside cells export, across the domain edge as across
+            # the front, where the ice not following the front calves
+            out_gt = float(assemble(
+                front_transport.outflow(h_dg))) * rho_gt * dt_local
+            calv_tr_gt = float(assemble(
+                front_transport.calving(h_dg))) * rho_gt * dt_local
+            front_split["crossing"] += calv_tr_gt
+        else:
+            out_gt = float(assemble(
+                un_transport_plus * h_dg * ds
+            )) * rho_gt * dt_local
         m1 = float(assemble(h_dg * dx)) * rho_gt
         transport_resid_gt = None
         if not legacy_transport:
-            transport_resid_gt = (m1 - m0) - (source_gt - out_gt)
+            transport_resid_gt = (m1 - m0) - (source_gt - out_gt - calv_tr_gt)
         elapsed = perf_counter() - transport_t0
         _transport_stat, transport_reason = _record_transport(
             label, elapsed, transport_resid_gt
@@ -3321,9 +3790,22 @@ def run_simulation(
             # the sources as the limiter left them, and only where there can
             # be ice: the withheld sink comes off the booked SMB, melt and
             # reference (ismip7_output)
+            # The fluxes are the transport's own, on the traces of h_dg;
+            # the sources and the withheld sink are cell means.
             annual.book_advance(dt_local, smb_f, melt_f, ref_f,
                                 h_dg, u_vel, grounded,
-                                withheld=src_dg.dat.data_ro - _src_want)
+                                withheld=_cells(src_dg) - _src_want,
+                                exporting=(front_transport.chi_in
+                                           if front_transport is not None else None))
+            if front_transport is not None:
+                # the calving flux the transport moved across the front, to
+                # licalvf in the cell it left; read off the new thickness
+                # before the positivity floor, so a roundoff-negative trace is
+                # dropped as the boundary outflow's is (licalvf stops at zero)
+                assemble(front_calving_cells, tensor=front_calving_cof)
+                annual.book_removal(
+                    slice(None),
+                    np.maximum(front_calving_cof.dat.data_ro, 0.0) / cell_area * dt_local)
 
         # Floor to h_clamp, EXCEPT in the cells the front rules report as
         # holding no ice: see clamp_thickness for why every such rule has to
@@ -3336,7 +3818,7 @@ def run_simulation(
             # among them; after the transport they carry a trace of inflow,
             # so this advance's h cannot say) and the cells the front rules
             # name. Collective, so every rank sweeps or none does.
-            open_water = ~grounded & (h_dg_old.dat.data_ro < front_hmin)
+            open_water = ~grounded & (_cells(h_dg_old) < front_hmin)
             for ice_free in (beyond, ls_ice_free):
                 if ice_free is not None:
                     open_water |= ice_free & ~grounded
@@ -3347,37 +3829,58 @@ def run_simulation(
         # under `none`. `mask` holds nothing by construction, so its held
         # count is zero and says so.
         collapse_cells = collapse_cell_counts(flagged, collapsed, _global_cells)
-        clamp_thickness(h_dg.dat.data, h_clamp, ls_ice_free, beyond, collapsed)
+        if geom_dg1:
+            # The positivity floor (cellview.clamp_cells): a mean below the
+            # floor fills the cell, booked as clamp; a vertex below it scales
+            # the slope, which keeps the mean. That second part must move no
+            # mass, and whatever it moved would land in the clamp column
+            # unseen, so the assembled change is held to the fill the
+            # pre-floor means call for (cellview.floor_fill).
+            _floor_gt = mesh.comm.allreduce(float((floor_fill(
+                cell_view.means(h_dg), h_clamp, ls_ice_free, beyond, collapsed)
+                * cell_area).sum())) * rho_gt
+            cell_view.write_nodes(h_dg, clamp_cells(
+                cell_view.nodes(h_dg), h_clamp, ls_ice_free, beyond, collapsed))
+        else:
+            clamp_thickness(h_dg.dat.data, h_clamp, ls_ice_free, beyond, collapsed)
         m2 = float(assemble(h_dg * dx)) * rho_gt
         clamp_gt = m2 - m1                                       # Gt added by DG floor
+        if geom_dg1 and abs(clamp_gt - _floor_gt) > mass_tol_gt:
+            _field_diagnostics(f"{label}-positivity-failed")
+            raise RuntimeError(
+                f"DG1 positivity floor moved {clamp_gt - _floor_gt:+.3e} Gt "
+                f"besides the {_floor_gt:+.3e} Gt it booked (tolerance "
+                f"{mass_tol_gt:.1e} Gt): the slope scaling must keep each "
+                f"cell's mean")
 
+        # Every removal below empties whole cells, or sheds a fraction of
+        # each, and books the thickness it takes as calving: the cell value
+        # under DG0, the cell mean under DG1, where the whole cell goes.
         calv_gt = 0.0
         if collapse is not None and _any_rank(collapse.any()):
-            data = h_dg.dat.data
-            hit = collapsed & (data > 0.0)
-            calv_gt += mesh.comm.allreduce(
-                float((data[hit] * cell_area[hit]).sum())) * rho_gt
-            if annual is not None:
-                annual.book_removal(hit, data[hit])
-            data[hit] = 0.0
+            hit = collapsed & (_cells(h_dg) > 0.0)
+            calv_gt += _remove_cells(hit)
+            if front_transport is not None:
+                # the collapsed cells are open water now, for the front too
+                front_transport.retreat_from(hit)
         if beyond is not None:
-            data = h_dg.dat.data
-            calv_gt += mesh.comm.allreduce(
-                float((data[beyond] * cell_area[beyond]).sum())
-            ) * rho_gt
-            if annual is not None:
-                annual.book_removal(beyond, data[beyond])
-            data[beyond] = 0.0
+            calv_gt += _remove_cells(beyond)
+        if front_transport is not None:
+            calv_gt += _front_rules(grounded)
         if calv_frac is not None:
             # Sub-cell calving: the front cells shed the fraction of their
             # thickness that a front retreating at rate c removes in dt.
-            data = h_dg.dat.data
-            shed = data * calv_frac
+            shed = np.asarray(_cells(h_dg)) * calv_frac
             calv_gt += mesh.comm.allreduce(
                 float((shed * cell_area).sum())) * rho_gt
             if annual is not None:
                 annual.book_removal(slice(None), shed)
-            data -= shed
+            if geom_dg1:
+                # the whole linear field scales, so the slope goes with it
+                cell_view.write_nodes(h_dg, cell_view.nodes(h_dg)
+                                      * (1.0 - calv_frac)[:, None])
+            else:
+                h_dg.dat.data[:] -= shed
         if level_set is not None:
             # Retreat slivers only: what the sub-cell shed and the melt leave
             # behind in a cell that HELD ice when the advance began is the
@@ -3399,15 +3902,11 @@ def run_simulation(
             #     C_w0 is weertman_anchor at the t=0 geometry, where H = 0,
             #     and c_w0_floor defaults to 0, so tau_W = 0 and tau_b = 0
             #     under both laws whatever N is.
-            data = h_dg.dat.data
-            sliver = retreat_slivers(data, h_dg_old.dat.data_ro, front_hmin)
-            calv_gt += mesh.comm.allreduce(
-                float((data[sliver] * cell_area[sliver]).sum())) * rho_gt
-            if annual is not None:
-                annual.book_removal(sliver, data[sliver])
-            data[sliver] = 0.0
-            if retreat_only:
-                calved[:] = held_calved(calved, h_dg_old.dat.data_ro, data,
+            sliver = retreat_slivers(_cells(h_dg), _cells(h_dg_old), front_hmin)
+            calv_gt += _remove_cells(sliver)
+            # (the advected front's barrier holds a retreat-only front itself)
+            if retreat_only and front_transport is None:
+                calved[:] = held_calved(calved, _cells(h_dg_old), _cells(h_dg),
                                         front_hmin, sliver=sliver,
                                         beyond=beyond, calv_frac=calv_frac)
                 calved_fn.dat.data[:] = calved
@@ -3431,8 +3930,10 @@ def run_simulation(
         # writes its own) the next diagnostic solve sees drag only in water
         # outside the t=0 extent that no ice cell now touches.
         if level_set is None and drag_rule is not None:
-            drag_rule(h_dg.dat.data_ro)
+            drag_rule(_cells(h_dg))
         m3 = m2 - calv_gt                                        # ∫h preserved by projection
+        # the calving flux the front-aware transport moved left before m1
+        calv_gt += calv_tr_gt
         mass_now = float(assemble(h * dx)) * _RHO_I_SI / 1e12
         clamp_cg_gt = mass_now - m3          # Gt added by the CG floor after projection
         return {
@@ -3448,6 +3949,10 @@ def run_simulation(
             "smb_gt": smb_gt,
             "melt_gt": melt_gt,
             "collapse_cells": collapse_cells,
+            "h_transport": h_transport,
+            "front_switched": (None if front_switched is None
+                               else front_switched if cell_view is None
+                               else cell_view.node_mask(front_switched)),
         }
 
     # Time loop, transport-first: each step advances the geometry with the
@@ -3466,6 +3971,9 @@ def run_simulation(
     # cell, so a step-size rejection at a front can be read cell by cell.
     trace_cells = []
     _trace = os.environ.get("ISMIP7_SUBSTEP_TRACE", "").strip()
+    if _trace and geom_dg1:
+        raise RuntimeError("ISMIP7_SUBSTEP_TRACE reads one value per cell; "
+                           "ISMIP7_GEOMETRY_SPACE=dg1 does not carry it")
     if _trace:
         _txy = np.asarray(h_diag_xy.dat.data_ro)
         for _tok in _trace.split(";"):
@@ -3620,11 +4128,14 @@ def run_simulation(
                 if level_set is not None:
                     level_set.phi.assign(phi_entry)
                     level_set.update_cell_fields()
+                    if front_transport is not None:
+                        front_transport.refresh()
             if adapt is not None:
                 adapt.begin_attempt()
             acc = {"out_gt": 0.0, "calv_gt": 0.0, "clamp_gt": 0.0,
                    "limit_gt": 0.0, "amb_gt": 0.0,
                    "smb_gt": 0.0, "melt_gt": 0.0}
+            front_split.update(crossing=0.0, retreat=0.0, icebergs=0.0, filled=0)
             ok = True
             reject_err = None
             t_attempt_start = perf_counter()
@@ -3640,8 +4151,9 @@ def run_simulation(
                 # the accepted attempt stands for the step.
                 collapse_cells = sub["collapse_cells"]
                 if adapt is not None:
-                    err = adapt.observe(h_before, h_dg.dat.data_ro, dt / m,
-                                        h_diag_xy.dat.data_ro)
+                    err = adapt.observe(h_before, sub["h_transport"], dt / m,
+                                        h_diag_xy.dat.data_ro,
+                                        skip=sub["front_switched"])
                     at = ("" if adapt.err_xy is None else " at (" + ", ".join(
                         f"{c / 1e3:.0f}" for c in adapt.err_xy) + ") km")
                     if adapt.exceeds(err):
@@ -3720,6 +4232,8 @@ def run_simulation(
             if level_set is not None:
                 level_set.phi.assign(phi_entry)
                 level_set.update_cell_fields()
+                if front_transport is not None:
+                    front_transport.refresh()
             break
 
         t_elapsed = perf_counter() - t_step_start
@@ -3768,8 +4282,10 @@ def run_simulation(
         step_stat = _field_diagnostics(f"step-{k}-t={t_yr:.6g}")
 
         if tripwire_on:
-            _h_now = np.asarray(h_dg.dat.data_ro)
-            _h_was = np.asarray(h_dg_entry.dat.data_ro)
+            # per cell, beside the per-cell extent and bed (cell means
+            # under DG1)
+            _h_now = np.asarray(_cells(h_dg))
+            _h_was = np.asarray(_cells(h_dg_entry))
             _dh = _h_now - _h_was
             _eligible = _h_was >= tripwire_hmin
             growth = np.divide(
@@ -3783,7 +4299,7 @@ def run_simulation(
                 "extent": tripwire_cells["extent"],
                 "bed": tripwire_cells["bed"],
             }
-            _xy = np.asarray(h_diag_xy.dat.data_ro)
+            _xy = np.asarray(cell_xy.dat.data_ro)
             growth_max, growth_xy, growth_cell = _global_argmax_with_payload(
                 growth, _xy, _payload, mesh.comm
             )
@@ -3886,8 +4402,11 @@ def run_simulation(
                 PETSc.Sys.Print(f"RUNAWAY TRIPWIRE step-{k}: {message}")
                 raise RuntimeError(f"runaway tripwire at step {k}: {message}")
         if annual is not None and abs(t_yr - round(t_yr)) < 1e-6:
-            annual.year_end(h_dg, s, b, z.subfunctions[0], z.subfunctions[2],
-                            _grounded_cells(), h_dg.dat.data_ro > annual.ICE_THICKNESS)
+            # under DG1 the per-cell fields are the cell means and their
+            # surface, the geometry every per-cell rule reads
+            annual.year_end(*((h_cell, s_cell, b_cell) if geom_dg1 else (h_dg, s, b)),
+                            z.subfunctions[0], z.subfunctions[2],
+                            _grounded_cells(), _cells(h_dg) > annual.ICE_THICKNESS)
 
         if k % output_interval == 0 or k == 1:
             _amb_txt = f"amb={amb_rate:+.0f} " if a_ref is not None else ""
@@ -3907,6 +4426,12 @@ def run_simulation(
                 + (f"\n      collapse [cells]: flagged={collapse_cells[0]} "
                    f"removed={collapse_cells[1]} held={collapse_cells[2]}"
                    if collapse is not None else "")
+                + (f"\n      front calving [Gt/yr]: crossing="
+                   f"{-front_split['crossing']/dt:+.0f} retreat="
+                   f"{-front_split['retreat']/dt:+.0f} icebergs="
+                   f"{-front_split['icebergs']/dt:+.0f}; enclosed water filled "
+                   f"{front_split['filled']} cells"
+                   if front_transport is not None else "")
             )
 
         if not np.isfinite(resid_gt) or abs(resid_gt) > mass_tol_gt:

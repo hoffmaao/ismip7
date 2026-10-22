@@ -123,9 +123,12 @@ contaminate the projection anomalies.
 
 ## Stage 8: control, projections, OCX
 
-Controls branch from the historical's 2015 endpoint (`control/run.py`,
-`ISMIP7_APPARENT_MB=1` for the balanced control the protocol asks for), the
-six projections from the same endpoint (`experiment.py`), OCX from the
+Controls branch from the historical's 2015 endpoint (`control/run.py`), the
+six projections from the same endpoint (`experiment.py`), all with
+`ISMIP7_APPARENT_MB=0`: the historical runs without a reference, and a
+reference can only be frozen at the state a run starts balanced from, never
+built from an evolved one (the forward refuses), so the control drifts with
+the model's own imbalance and the projection anomalies remove it. OCX from the
 relaxed year (`projections/ocx.py`). Submission: `ismip7_output.py`, the
 scalar tool, the checker (`README.md`, section on the submission chain).
 
@@ -160,9 +163,7 @@ second), `ISMIP7_ROUTINE_RELAX_YR` (20), `ISMIP7_ROUTINE_WARM_START` (the
 MAP stage 1 starts from; with no inversion stage listed, the MAP the
 forwards run from), `ISMIP7_ROUTINE_ESMS`, `ISMIP7_ROUTINE_SCENARIOS`,
 `ISMIP7_ROUTINE_STAGES` (a subset; `reinvert`, `hist`, `control` and `proj`
-expand), `ISMIP7_ROUTINE_PROJ_AMB` (the projections' apparent mass balance,
-1 like the control's, so the two share the reference built at their common
-2015 state). The relaxation's end state is the control driver's final
+expand), and the forwards' calving front: `ISMIP7_ROUTINE_CALVING` (a law of `icepack_tools.calving`, `hfb` by default), `ISMIP7_ROUTINE_CALVING_PARAMS` (`sigma_max=0.15`) and `ISMIP7_ROUTINE_FRONT_ADVANCE` (`none`, retreat-only), so the defaults are the submission front and a calving-campaign member (`submit_calving_campaign.sh`) runs as a full suite by naming its law, parameters and advance here. The relaxation's end state is the control driver's final
 checkpoint stamped with the relaxation record of `icepack2_tools/relaxation.py`
 (the source MAP, its objective settings, the window and the step), so the
 re-inversion takes the path a relaxed state has: it keeps the MAP's controls,

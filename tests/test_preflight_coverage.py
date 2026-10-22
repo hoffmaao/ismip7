@@ -190,12 +190,16 @@ def test_an_1850_start_runs_only_with_the_backdating_named(
     assert ("past the window" in line) == (backdate is None), line
 
 
-def test_a_backdated_start_needs_the_dg0_geometry(monkeypatch, tmp_path, capsys):
+@pytest.mark.parametrize("geom,status", [("dg0", "READY"), ("dg1", "READY"),
+                                         ("cg1", "BLOCKED")])
+def test_a_backdated_start_needs_a_cell_wise_geometry(
+        monkeypatch, tmp_path, capsys, geom, status):
     _run(monkeypatch, tmp_path, range(2003, 2015), scenario="historical",
          ocean_cover=lambda e, s: (2003, 2014),
-         env={"ISMIP7_GEOMETRY_SPACE": "cg1"})
+         env={"ISMIP7_GEOMETRY_SPACE": geom})
     line = _core_line(capsys, "core  1")
-    assert "BLOCKED" in line and "ISMIP7_GEOMETRY_SPACE=dg0" in line, line
+    assert status in line, line
+    assert ("ISMIP7_GEOMETRY_SPACE=dg0 or dg1" in line) == (geom == "cg1"), line
 
 
 # --- cores 9 and 10 melt under the ESM's own ctrl ocean ---------------------
@@ -256,16 +260,17 @@ def test_the_control_reads_the_ctrl_gradient(monkeypatch, tmp_path, capsys):
 
 # --- core 11 asks for the OCX product the driver will insist on -------------
 
-def _ocx_tree(root, years):
+def _ocx_tree(root, years, ocean_versions=("v2",)):
     from icepack2_tools.forcing import OCX_ATMOSPHERE_SOURCE as SRC
     d = os.path.join(root, "OCX", SRC, "SDBN1-8000m", "acabf", "v1")
     os.makedirs(d, exist_ok=True)
     for y in years:
         open(os.path.join(d, f"acabf_AIS_{SRC}_OCX_SDBN1-8000m_v1_{y}.nc"), "wb").close()
-    d = os.path.join(root, "OCX", "ocean", "main", "v1")
-    os.makedirs(d, exist_ok=True)
-    for var in ("tf", "so"):
-        open(os.path.join(d, f"{var}_AIS_OCX_ocean_main_v1_1950-2025.nc"), "wb").close()
+    for version in ocean_versions:
+        d = os.path.join(root, "OCX", "ocean", "main", version)
+        os.makedirs(d, exist_ok=True)
+        for var in ("tf", "so"):
+            open(os.path.join(d, f"{var}_AIS_OCX_ocean_main_{version}_1950-2025.nc"), "wb").close()
 
 
 def _ocx_gradient(root, years, version):
@@ -278,13 +283,14 @@ def _ocx_gradient(root, years, version):
 
 
 def _run_core_11(monkeypatch, tmp_path, years, forcing="protocol", env=None,
-                 dhdt=False, gradient_versions=("v2",)):
+                 dhdt=False, gradient_versions=("v2",), ocean_versions=("v2",)):
     r"""preflight.main() over an OCX tree, with the ``dacabfdz`` of the
-    SMB-elevation feedback at each of `gradient_versions` over 1979-2025."""
+    SMB-elevation feedback at each of `gradient_versions` over 1979-2025
+    and the ``main`` ocean at each of `ocean_versions`."""
     root = str(tmp_path / "ISMIP7" / "AIS")
     os.makedirs(root, exist_ok=True)
     if years is not None:
-        _ocx_tree(root, years)
+        _ocx_tree(root, years, ocean_versions)
     for version in gradient_versions:
         _ocx_gradient(root, range(1979, 2026), version)
     monkeypatch.delenv("ISMIP7_SMB_ELEVATION_FEEDBACK", raising=False)
@@ -356,6 +362,22 @@ def test_core_11_refuses_the_shifted_ocx_gradient(monkeypatch, tmp_path, capsys)
 
 def test_core_11_reads_the_v2_gradient_beside_the_v1(monkeypatch, tmp_path, capsys):
     _run_core_11(monkeypatch, tmp_path, range(1979, 2026), gradient_versions=("v1", "v2"))
+    line = _core_line(capsys, "core 11")
+    assert "READY" in line, line
+
+
+def test_core_11_refuses_the_v1_ocx_ocean(monkeypatch, tmp_path, capsys):
+    r"""The OCX ocean v1 was built on an earlier extrapolated climatology
+    (discussion #48), and a tree synced before 25 September 2026 holds it
+    alone. projections/ocx.py refuses it, so the gate does too."""
+    _run_core_11(monkeypatch, tmp_path, range(2003, 2026), ocean_versions=("v1",))
+    line = _core_line(capsys, "core 11")
+    assert "BLOCKED" in line and "OCX ocean" in line, line
+    assert "is v1 on disk" in line and "v2 or newer" in line
+
+
+def test_core_11_reads_the_v2_ocean_beside_the_v1(monkeypatch, tmp_path, capsys):
+    _run_core_11(monkeypatch, tmp_path, range(2003, 2026), ocean_versions=("v1", "v2"))
     line = _core_line(capsys, "core 11")
     assert "READY" in line, line
 

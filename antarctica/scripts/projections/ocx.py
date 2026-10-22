@@ -63,7 +63,8 @@ from icepack2_tools.forcing import (
     OCX, OCX_ATMOSPHERE_SOURCE,
     ISMIP7Atmosphere, ISMIP7Ocean, make_forcing_callback,
     make_climatology_ocean_callback, load_racmo_smb_climatology,
-    load_K_per_basin, forcing_coords, reject_collapse_mask, forcing_year,
+    load_K_per_basin, forcing_coords, forcing_space, reject_collapse_mask,
+    forcing_year,
     describe_forcing_provenance, describe_observational_forcing,
     describe_melt_calibration,
     build_smb_feedback, feedback_mode, smb_feedback_banner,
@@ -97,6 +98,10 @@ def protocol_forcing(t_start, t_end):
     else:
         problem = None
         for var in ("tf", "so"):
+            # the v1 OCX ocean predates the climatology fix (OCEAN_MIN_VERSION)
+            problem = ocean.version_problem(var)
+            if problem:
+                break
             cover = ocean.coverage(var)
             if cover is None or cover[0] > first or cover[1] + 1 < last:
                 problem = (f"ocean {var} covers {cover[0]}-{cover[1]}, need {first}-{last}"
@@ -174,7 +179,7 @@ def ocx_forcing_callback(ctx, readers, feedback, dT_npz):
             yr = min(forcing_year(t_yr), RACMO_LAST)
             if yr not in racmo_cache:
                 racmo_cache[yr] = load_racmo_smb_climatology(
-                    ctx_["Q_g"], yr, yr
+                    forcing_space(ctx_), yr, yr
                 ).dat.data_ro.copy()
                 while len(racmo_cache) > 3:
                     racmo_cache.pop(next(iter(racmo_cache)))

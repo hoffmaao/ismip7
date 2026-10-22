@@ -432,7 +432,7 @@ writer, checker or scalar tool:
 
 Each stopped core keeps its three latest five-yearly checkpoints, so it can
 resume. The files of C003 to C011 sit on Quartz project storage under
-`antarctica/results/prod_2km_iu/results`, and the forwards' logs under
+`antarctica/results/prod_2km_iu/results`, and their logs under
 `prod_2km_iu/logs`, copied from scratch with each copy checked by sha256. The
 historicals C001 and C002 keep all their forward output under
 `antarctica/results/rehearsal_2km_iu/results`.
@@ -523,7 +523,7 @@ reports name under `antarctica/results/rehearsal_2km_iu/logs/`.
 | path | holds |
 |---|---|
 | `results/` | C003 to C011's timeseries, scalars CSV, annual files, final state and latest checkpoints, with `SHA256SUMS` |
-| `logs/` | every forward's log, with `SHA256SUMS` |
+| `logs/` | C003 to C011's logs, with `SHA256SUMS` |
 | `r2kiurlcnoamb/submission/AIS/IU/icepack2/` | `params.nc` and `CORE/` C001 to C004, C006, C007 and C011, the writer's 31 files each |
 | `r2kiurlcnoamb/checker/`, `r2kiurlcnoamb/scalars/IU/` | isschecker 0.5.1 logs and the scalar tool's output with `compare_scalars.py`'s comparison, per core |
 | `r2kiurlcnoamb/reports/`, `r2kiurlcnoamb/figs/`, `r2kiurlcnoamb/movies/` | the core reports, the ssp585 thickness-change and VAF figures, and C007's movie |

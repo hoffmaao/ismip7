@@ -172,8 +172,12 @@ warm start also bounded theta to `ISMIP7_MAP_CLIP` (10), which moved every
 2 km DG1 link off the point the link before it saved: 12293274 bounded 29
 nodes, started from `||F||` 3.4e9 against the recorded 3.5e-5 and missed its
 recorded 2300.923 by 1.12e-2. With the clip off the same warm start
-reproduced it to 3.2e-12 (12293346). An inversion now clips only when the
-knob is set.
+reproduced it to 3.2e-12 (12293346), so at 2 km the clip was the cause. An
+inversion now clips only when the knob is set. A DG1 warm start on a
+synthetic cap still misses its recorded objective with no clipping, by 21%
+from `||F||` 4.4e9 against a recorded 3.3e-5, on main as well, while a DG0
+warm start reproduces it to 3.5e-14; that points to the DG1 geometry not
+surviving a write and reload through the MAP.
 
 **Cost.** The sub-element scheme costs nothing per iteration (790 to 860 s
 per iteration at 2 km on 32 ranks, the same as the cell-wise law) but its

@@ -1011,7 +1011,14 @@ def main():
                 # DG1 link of 15 and 16 Oct 2026 bounded 49 to 59 nodes at 10,
                 # started from ||F|| 2.8e9 to 4.2e9 where its writer recorded
                 # 4e-5 to 5e2, and missed the recorded objective by up to
-                # 1.1e-2. Set it for a warm start from another configuration:
+                # 1.1e-2. At 2 km the clip was the cause: with
+                # ISMIP7_MAP_CLIP=0 the warm start of 12293346 reproduced the
+                # recorded 2300.923 to 3.2e-12. A DG1 warm start on a
+                # synthetic cap still misses its recorded objective with no
+                # clipping (21%, from ||F|| 4.4e9 against a recorded 3.3e-5),
+                # on main as well, while DG0 reproduces it; that points to
+                # the DG1 geometry not surviving a write and reload through
+                # the MAP. Set it for a warm start from another configuration:
                 # the 94-iteration sigma=3 MAP carries ~30 spikes up to
                 # theta=19 (C x 1e8) at the grounding line, and from them the
                 # first n=1 solve of a sub-element sqrt run wandered at ||F||

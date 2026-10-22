@@ -431,9 +431,11 @@ writer, checker or scalar tool:
 | C010 | 2194.45 | +172.5 | +52,196 | 0.00 | 0 | ON TRACK |
 
 Each stopped core keeps its three latest five-yearly checkpoints, so it can
-resume. Every finished and stopped core's files sit on Quartz project storage
-under `antarctica/results/prod_2km_iu/results`, and the forwards' logs under
-`prod_2km_iu/logs`, copied from scratch with each copy checked by sha256.
+resume. The files of C003 to C011 sit on Quartz project storage under
+`antarctica/results/prod_2km_iu/results`, and the forwards' logs under
+`prod_2km_iu/logs`, copied from scratch with each copy checked by sha256. The
+historicals C001 and C002 keep all their forward output under
+`antarctica/results/rehearsal_2km_iu/results`.
 
 The projections' VAF change runs from 2015, the historicals' and OCX's from
 2003. Each checker log but C007's carries the same two warnings: the
@@ -513,12 +515,13 @@ On IU Quartz under `antarctica/results/rehearsal_25km_iu/`:
 | `scripts/` | the wrapper `submit_r25iu.sh` and every job script and tool the rehearsal ran, with `CODE_VERSIONS.txt` |
 
 The 2 km production suite sits on IU Quartz under
-`antarctica/results/prod_2km_iu/`; its historicals C001 and C002 keep their
-annual files under `rehearsal_2km_iu/results/`.
+`antarctica/results/prod_2km_iu/`. Its historicals C001 and C002 keep all
+their forward output, yearly checkpoints included, under
+`antarctica/results/rehearsal_2km_iu/results/`.
 
 | path | holds |
 |---|---|
-| `results/` | every core's timeseries, scalars CSV, annual files, final state and latest checkpoints, with `SHA256SUMS` |
+| `results/` | C003 to C011's timeseries, scalars CSV, annual files, final state and latest checkpoints, with `SHA256SUMS` |
 | `logs/` | every forward's log, with `SHA256SUMS` |
 | `r2kiurlcnoamb/submission/AIS/IU/icepack2/` | `params.nc` and `CORE/` C001 to C004, C006, C007 and C011, the writer's 31 files each |
 | `r2kiurlcnoamb/checker/`, `r2kiurlcnoamb/scalars/IU/` | isschecker 0.5.1 logs and the scalar tool's output with `compare_scalars.py`'s comparison, per core |

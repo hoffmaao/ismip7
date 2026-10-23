@@ -279,6 +279,8 @@ def test_the_routine_runs_itself_stage_by_stage(sandbox):
     p = by_name(subs, "rt_out_ssp585_cesm_waccm")["env"]
     assert p["ISMIP7_EXPERIMENT"] == "ssp585_cesm_waccm"
     assert p["ISMIP7_APPARENT_MB"] == "0" and p["ISMIP7_FRACTURE"] == "mask_front"
+    # the law's own grounded rule everywhere unless the routine says otherwise
+    assert "ISMIP7_CALVING_FLOATING_ONLY" not in p and "ISMIP7_CALVING_FLOATING_ONLY" not in c
 
     finish_forward(results / "hist_mri_esm2_0_out_32000_final.h5", 2015)
     routine(sandbox, "next")
@@ -510,6 +512,41 @@ def test_watch_stamps_the_node_exclusions_onto_a_pending_link_that_has_none(sand
     assert calls == "scontrol update JobId=4300 ExcNodeList=bb6u13g1,bb6u15g1\n"
     assert "job 4300 (hist_cesm_waccm) pending without node exclusions" in log
     assert "4301" not in log
+
+
+def test_the_routine_can_confine_the_law_to_floating_ice_on_the_projections(sandbox):
+    r"""``ISMIP7_ROUTINE_CALVING_FLOATING_ONLY=ssp`` hands the projections
+    ``ISMIP7_CALVING_FLOATING_ONLY=1`` and nothing else (the historical and
+    control keep the law's own rule, as their checkpoints record it);
+    ``all`` gates every forward; anything else is refused."""
+    (sandbox / "warm.h5").write_text("warm\n")
+    results = sandbox / "antarctica" / "results"
+    env = {"ISMIP7_ROUTINE_STAGES": "hist control proj",
+           "ISMIP7_ROUTINE_ESMS": "CESM2-WACCM", "ISMIP7_ROUTINE_SCENARIOS": "ssp126",
+           "ISMIP7_ROUTINE_CALVING_FLOATING_ONLY": "ssp"}
+    rc, log = routine(sandbox, "init", env=env)
+    assert rc == 0, log
+    (h,) = submits(sandbox)
+    assert "ISMIP7_CALVING_FLOATING_ONLY" not in h["env"]
+    assert "ISMIP7_ROUTINE_CALVING_FLOATING_ONLY=ssp" in (sandbox / "out" / "routine.env").read_text()
+    finish_forward(results / "hist_cesm2_waccm_out_32000_final.h5", 2015)
+    rc, log = routine(sandbox, "next")
+    assert rc == 0, log
+    subs = submits(sandbox)
+    assert "ISMIP7_CALVING_FLOATING_ONLY" not in by_name(subs, "rt_out_control_cesm_waccm")["env"]
+    assert by_name(subs, "rt_out_ssp126_cesm_waccm")["env"]["ISMIP7_CALVING_FLOATING_ONLY"] == "1"
+
+    env["ISMIP7_ROUTINE_CALVING_FLOATING_ONLY"] = "all"
+    (sandbox / "out" / "routine.env").unlink()
+    (sandbox / "out" / "control_cesm_waccm.jobs").unlink()
+    rc, log = routine(sandbox, "init", env=env)
+    assert rc == 0, log
+    assert by_name(submits(sandbox), "rt_out_control_cesm_waccm")["env"]["ISMIP7_CALVING_FLOATING_ONLY"] == "1"
+
+    env["ISMIP7_ROUTINE_CALVING_FLOATING_ONLY"] = "projections"
+    (sandbox / "out" / "routine.env").unlink()
+    rc, log = routine(sandbox, "init", env=env)
+    assert rc != 0 and "ISMIP7_ROUTINE_CALVING_FLOATING_ONLY must be none, ssp or all" in log
 
 
 def test_watch_does_nothing_when_the_scheduler_cannot_be_reached(sandbox):

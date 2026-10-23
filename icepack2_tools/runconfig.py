@@ -972,9 +972,34 @@ def calving_law_object():
         # own marine_only in ISMIP7_CALVING_PARAMS stands
         params.setdefault("marine_only", True)
     try:
-        return calving.make(name, **params)
+        law = calving.make(name, **params)
     except ValueError as err:
         raise ValueError(f"ISMIP7_CALVING={name}: {err}") from None
+    if calving_floating_only():
+        # The gate is the law's own (Law.gated, through the friction's
+        # grounded measure), so the rate vanishes on grounded ice and the
+        # recorded description says so, which keeps a resume honest.
+        law.grounded_gate = True
+    return law
+
+
+def calving_floating_only():
+    r"""``ISMIP7_CALVING_FLOATING_ONLY``: ``1`` confines the configured law
+    to floating ice (``0`` or unset: the law's own rule).
+
+    A law without a grounded gate calves a marine grounded cliff at up to
+    its rate cap: under ssp370 the hfb front ate 22 km into 1100 m thick
+    grounded ice at Kemp Land in three years (seq0f, October 2026), which
+    is a cliff-failure process the protocol does not ask for and the solver
+    cannot follow. Andrew (22 Oct 2026): gate the hfb law to floating ice.
+    """
+    value = os.environ.get("ISMIP7_CALVING_FLOATING_ONLY", "0").strip()
+    if value in ("", "0"):
+        return False
+    if value == "1":
+        return True
+    raise ValueError(
+        f"ISMIP7_CALVING_FLOATING_ONLY must be 1 or 0/empty, got {value!r}")
 
 
 def front_marine():

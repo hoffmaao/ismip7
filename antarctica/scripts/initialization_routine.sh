@@ -105,6 +105,7 @@ STAGE_KNOBS=(ISMIP7_INVERT ISMIP7_PHI_BOUNDS ISMIP7_FLUIDITY_CONTROL
     ISMIP7_RESTART ISMIP7_T_START ISMIP7_T_END ISMIP7_RUN_TAG ISMIP7_EXPERIMENT
     ISMIP7_ESM ISMIP7_APPARENT_MB ISMIP7_OUTPUT ISMIP7_FIXED_FRONT
     ISMIP7_CALVING ISMIP7_CALVING_PARAMS ISMIP7_FRONT_ADVANCE ISMIP7_FRACTURE
+    ISMIP7_CALVING_FLOATING_ONLY
     ISMIP7_CHAIN_THEN ISMIP7_CHAIN_THEN_CMD ISMIP7_WALL_STOP_MIN
     ISMIP7_AUTO_RESUME ISMIP7_CHAIN ISMIP7_SNES_LOG ISMIP7_GEOMETRY_BACKDATE)
 
@@ -130,6 +131,7 @@ record_env() {
         echo "export ISMIP7_ROUTINE_CALVING=${ISMIP7_ROUTINE_CALVING:-hfb}"
         echo "export ISMIP7_ROUTINE_CALVING_PARAMS=${ISMIP7_ROUTINE_CALVING_PARAMS-sigma_max=0.15}"
         echo "export ISMIP7_ROUTINE_FRONT_ADVANCE=${ISMIP7_ROUTINE_FRONT_ADVANCE:-none}"
+        echo "export ISMIP7_ROUTINE_CALVING_FLOATING_ONLY=${ISMIP7_ROUTINE_CALVING_FLOATING_ONLY:-none}"
         echo "export ISMIP7_ROUTINE_FLUIDITY_CONTROL=${ISMIP7_ROUTINE_FLUIDITY_CONTROL:-floating}"
         echo "export ISMIP7_ROUTINE_PHI_BOUNDS=${ISMIP7_ROUTINE_PHI_BOUNDS:--2.3,2.3}"
         echo "export ISMIP7_ROUTINE_DHDT_REWEIGHT=${ISMIP7_ROUTINE_DHDT_REWEIGHT:-24}"
@@ -172,6 +174,17 @@ load_env() {
     case "$ISMIP7_ROUTINE_FRONT_ADVANCE" in
         free|none) ;;
         *) die "ISMIP7_ROUTINE_FRONT_ADVANCE must be free or none, got $ISMIP7_ROUTINE_FRONT_ADVANCE" ;;
+    esac
+    # Which forwards confine the law to floating ice
+    # (ISMIP7_CALVING_FLOATING_ONLY=1): none (the law's own rule), ssp (the
+    # projections: the hfb front calved grounded cliffs under ssp370, 22 Oct
+    # 2026) or all. A routine's running stages keep the rule their
+    # checkpoints record, so change this only with the affected stages
+    # restarted from scratch.
+    : "${ISMIP7_ROUTINE_CALVING_FLOATING_ONLY:=none}"
+    case "$ISMIP7_ROUTINE_CALVING_FLOATING_ONLY" in
+        none|ssp|all) ;;
+        *) die "ISMIP7_ROUTINE_CALVING_FLOATING_ONLY must be none, ssp or all, got $ISMIP7_ROUTINE_CALVING_FLOATING_ONLY" ;;
     esac
     case "$ISMIP7_ROUTINE_CALVING ${ISMIP7_ROUTINE_CALVING_PARAMS:-}" in
         *" "*" "*) die "ISMIP7_ROUTINE_CALVING and ISMIP7_ROUTINE_CALVING_PARAMS take no spaces (parameters are comma separated)" ;;
@@ -461,7 +474,7 @@ stage_env_forward() {   # prints `export` lines for a forward stage
             echo "export ISMIP7_INVERSION=$(map_path "$(relax_source_stage)")"
             echo "export ISMIP7_RUN_TAG=${TAG}_relax ISMIP7_T_END=$(fwd_t_end relax)"
             echo "export ISMIP7_APPARENT_MB=0 ISMIP7_OUTPUT=0 ISMIP7_FIXED_FRONT=1 ISMIP7_CALVING=none"
-            echo "unset ISMIP7_CALVING_PARAMS ISMIP7_FRONT_ADVANCE ISMIP7_FRACTURE" ;;
+            echo "unset ISMIP7_CALVING_PARAMS ISMIP7_FRONT_ADVANCE ISMIP7_FRACTURE ISMIP7_CALVING_FLOATING_ONLY" ;;
         *)
             echo "export ISMIP7_INVERSION=$(forward_map) ISMIP7_RUN_TAG=$TAG ISMIP7_OUTPUT=1"
             case "$stage" in
@@ -484,6 +497,10 @@ stage_env_forward() {   # prints `export` lines for a forward stage
             case "$stage" in
                 ssp*_*) echo "export ISMIP7_FRACTURE=mask_front" ;;
                 *)      echo "export ISMIP7_FRACTURE=none" ;;
+            esac
+            case "$ISMIP7_ROUTINE_CALVING_FLOATING_ONLY:$stage" in
+                all:*|ssp:ssp*_*) echo "export ISMIP7_CALVING_FLOATING_ONLY=1" ;;
+                *)                echo "unset ISMIP7_CALVING_FLOATING_ONLY" ;;
             esac ;;
     esac
 }

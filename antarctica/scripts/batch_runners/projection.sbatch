@@ -336,9 +336,11 @@ done_yet=$(python -c "print(1 if float('$LAST_YEAR') >= float('$T_END') - 1e-6 e
 if [ "$done_yet" = "1" ]; then
     echo "chain: reached t_end ${T_END} at ${LAST_YEAR}, finished"
     # The follow-on command belongs to this run alone (site_core.sh); the
-    # follow-on runs below start chains of their own without it.
+    # follow-on runs below start chains of their own without it. A cold
+    # re-solve was this run's one-off, and neither the follow-ons nor the
+    # stages the command launches may inherit it.
     then_cmd="${ISMIP7_CHAIN_THEN_CMD:-}"
-    unset ISMIP7_CHAIN_THEN_CMD
+    unset ISMIP7_CHAIN_THEN_CMD ISMIP7_RESTART_RESOLVE
     if [ -n "${ISMIP7_CHAIN_THEN:-}" ]; then
         if [ -z "${SLURM_JOB_ID:-}" ]; then
             echo "chain: no scheduler, so the follow-ons (${ISMIP7_CHAIN_THEN})" \
@@ -350,7 +352,7 @@ if [ "$done_yet" = "1" ]; then
             # period, not this run's ISMIP7_T_START / ISMIP7_T_END, and
             # queues nothing further.
             unset ISMIP7_CHAIN_THEN ISMIP7_WALL_STOP_MIN ISMIP7_RESTART \
-                  ISMIP7_RESTART_RESOLVE ISMIP7_T_START ISMIP7_T_END
+                  ISMIP7_T_START ISMIP7_T_END
             ismip7_chain_resources
             for next in $then_list; do
                 echo "chain: queueing the follow-on ${next}"

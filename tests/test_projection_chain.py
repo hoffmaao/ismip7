@@ -54,6 +54,7 @@ print(f"driver: solver={diagnostic_solver_mode()} dt={os.environ.get('ISMIP7_DT'
 print(f"driver: srun export list={os.environ.get('SLURM_EXPORT_ENV', 'none')}")
 # the MPI-IO component the launcher selects (site_core.sh, ismip7_mpirun)
 print(f"driver: mpi io={os.environ.get('OMPI_MCA_io', 'unset')}")
+print(f"driver: wall_stop_min={os.environ.get('ISMIP7_WALL_STOP_MIN', 'unset')}")
 
 start = os.environ.get("FAKE_START_YEAR", "")
 if start:
@@ -574,3 +575,40 @@ def test_a_failing_follow_on_command_does_not_change_the_verdict(sandbox):
         ISMIP7_CHAIN_THEN_CMD="exit 3")
     assert rc == 0, log
     assert "WARNING the follow-on command exited 3" in log
+
+
+def test_the_wall_budget_counts_from_the_job_s_start(sandbox):
+    r"""The driver counts its budget from its own start, the wall limit from
+    the job's. A one-hour link that spent nine minutes before the driver
+    (NOTS 2297586, 21 October 2026) ran its budget into the limit and its
+    successor never started; the minutes already used come off the budget."""
+    import datetime
+    start = (datetime.datetime.now() - datetime.timedelta(minutes=9, seconds=30))
+    stub = sandbox / "bin" / "scontrol"
+    stub.write_text(stub.read_text().replace(
+        "TimeLimit=1-00:00:00",
+        f"TimeLimit=01:00:00 StartTime={start.strftime('%Y-%m-%dT%H:%M:%S')}"))
+    rc, log, _ = run_job(sandbox, FAKE_T_YR="2050", FAKE_START_YEAR="2000")
+    assert rc == 0, log
+    assert "driver: wall_stop_min=26.0" in log, log
+
+
+@pytest.mark.parametrize("then", [None, "control"])
+def test_a_cold_re_solve_does_not_reach_the_stages_a_finished_run_launches(sandbox, then):
+    r"""ISMIP7_RESTART_RESOLVE=cold is one run's one-off. The run that reaches
+    its end year hands the routine's ``next`` its environment through the
+    follow-on command (a routine stage queues no follow-on runs), and the
+    stages that launches would re-solve their writer's state cold; neither
+    the command nor a follow-on run sees it."""
+    dump = sandbox / "then_env.txt"
+    rc, log, calls = run_job(
+        sandbox, FAKE_T_YR="2015", FAKE_START_YEAR="2010", ISMIP7_T_END="2015",
+        ISMIP7_EXPERIMENT="hist_mri_esm2", ISMIP7_CHAIN_THEN=then,
+        ISMIP7_RESTART_RESOLVE="cold", ISMIP7_CHAIN_THEN_CMD=f"env > {dump}")
+    assert rc == 0, log
+    assert "chain: follow-on command done" in log
+    assert "ISMIP7_RESTART_RESOLVE" not in dump.read_text()
+    follows = _submits(calls)
+    assert len(follows) == (1 if then else 0), calls
+    for follow in follows:
+        assert "ISMIP7_RESTART_RESOLVE" not in follow

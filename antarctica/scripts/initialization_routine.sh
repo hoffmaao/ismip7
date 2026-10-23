@@ -20,7 +20,15 @@
 # checkpoint. `watch` (slurm mode) is the watchdog loop for a login node or a
 # small allocation: it resubmits a started stage whose chain has no job left
 # and cancels a forward link whose log has gone silent (a hung solve), with
-# the node excluded from the stage's next submission.
+# the node excluded from the stage's next submission. It also cancels a
+# RUNNING forward link whose log holds ISMIP7_ROUTINE_FROZEN_MAX (5)
+# zero-iteration momentum solves (`snes_its=0`, a frozen velocity) and parks
+# its stage, in every routine; 0 disables the check, and a negative or
+# non-numeric count is refused. ISMIP7_ROUTINE_STRICT=1 resubmits a chain only
+# when the scheduler ended its newest link (TIMEOUT, PREEMPTED, NODE_FAIL,
+# CANCELLED, BOOT_FAIL) and parks the stage on any other end; a link the
+# accounting still holds live is left for the next pass. `resume STAGE`
+# clears a park.
 #
 # Two launch modes (ISMIP7_ROUTINE_LAUNCH, recorded at init):
 #   mpiexec   every stage runs in the foreground, in order, on
@@ -75,6 +83,9 @@
 # (submit_calving_campaign.sh) is run as a full suite by naming its law,
 # parameters and advance here. The collapse mask applies to the projections
 # only; the relax stage pins the front.
+# ISMIP7_ROUTINE_CALVING_FLOATING_ONLY (none) confines the law to floating ice
+# (ISMIP7_CALVING_FLOATING_ONLY=1) in the projections (ssp) or every forward
+# (all).
 #
 # An inversion stage moves one control alone, which only the TAO path does:
 # `init` refuses a recorded ISMIP7_GRAD_PRECOND other than mass_consistent or
@@ -191,6 +202,9 @@ load_env() {
     esac
     : "${ISMIP7_ROUTINE_STRICT:=0}"
     : "${ISMIP7_ROUTINE_FROZEN_MAX:=5}"
+    case "$ISMIP7_ROUTINE_FROZEN_MAX" in
+        *[!0-9]*) die "ISMIP7_ROUTINE_FROZEN_MAX must be a count of zero-iteration momentum solves (0 disables the check), got $ISMIP7_ROUTINE_FROZEN_MAX" ;;
+    esac
     TAG=$ISMIP7_ROUTINE_TAG
     LC=${ISMIP7_LC:?ISMIP7_LC must be recorded}
     RESULTS="$REPO/antarctica/results"
@@ -703,7 +717,10 @@ watch_pass() {
             # A strict routine (ISMIP7_ROUTINE_STRICT=1) resubmits a link only
             # when the scheduler took it; any other end parks the stage.
             if [ "$ISMIP7_ROUTINE_STRICT" = 1 ]; then
-                why=$(strict_block_reason "$stage")
+                if ! why=$(strict_block_reason "$stage"); then
+                    log "watch: stage $stage has no job in the queue and its newest link has not ended in the accounting; waiting"
+                    continue
+                fi
                 if [ -n "$why" ]; then
                     echo "$why" > "$OUT/$stage.blocked"
                     log "watch: ERROR stage $stage parked (strict): $why"
@@ -744,7 +761,7 @@ watch_pass() {
             # and park the stage before the frozen state is checkpointed on.
             local frozen
             frozen=$(grep -c "snes_its=0 " "$logf" 2>/dev/null || true)
-            if [ "${frozen:-0}" -ge "$ISMIP7_ROUTINE_FROZEN_MAX" ]; then
+            if [ "$ISMIP7_ROUTINE_FROZEN_MAX" -gt 0 ] && [ "${frozen:-0}" -ge "$ISMIP7_ROUTINE_FROZEN_MAX" ]; then
                 echo "job $jid: $frozen zero-iteration momentum solves in $logf; the velocity is frozen" > "$OUT/$stage.blocked"
                 log "watch: ERROR job $jid ($stage) on $node: $frozen zero-iteration momentum solves; cancelling, stage parked"
                 scancel "$jid"
@@ -816,7 +833,11 @@ driver_failure() {
 # The reason a strict routine parks a stage whose newest link ended without a
 # successor: the solver stalled anywhere, or the link ended in a state other
 # than one the scheduler imposes (TIMEOUT, PREEMPTED, NODE_FAIL, CANCELLED,
-# BOOT_FAIL). Nothing when the scheduler took it, which is resubmitted. The
+# BOOT_FAIL). Nothing when the scheduler took it, which is resubmitted. A
+# failure status, and nothing, while the accounting still holds the link live
+# (RUNNING, COMPLETING, PENDING, REQUEUED: squeue has dropped it before
+# slurmdbd records its end, or a requeue is in flight), so the pass neither
+# resubmits nor parks. The
 # accounting prints a cancelled link as "CANCELLED+" (its "by <uid>" is cut
 # off), which read as a driver end and parked dg1f's ssp126 on 22 October
 # 2026 after the watchdog itself had cancelled the hung link.
@@ -834,6 +855,7 @@ strict_block_reason() {
     st=$(sacct -j "$jid" -X -n -o State 2>/dev/null | head -n 1 | awk '{print $1}')
     case "${st:-UNKNOWN}" in
         TIMEOUT|PREEMPTED|NODE_FAIL|CANCELLED*|BOOT_FAIL|UNKNOWN|"") return 0 ;;
+        RUNNING|COMPLETING|PENDING|REQUEUED*) return 1 ;;
         *) echo "job $jid: ended $st without a successor; see $logf" ;;
     esac
 }

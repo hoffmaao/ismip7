@@ -163,12 +163,32 @@ second), `ISMIP7_ROUTINE_RELAX_YR` (20), `ISMIP7_ROUTINE_WARM_START` (the
 MAP stage 1 starts from; with no inversion stage listed, the MAP the
 forwards run from), `ISMIP7_ROUTINE_ESMS`, `ISMIP7_ROUTINE_SCENARIOS`,
 `ISMIP7_ROUTINE_STAGES` (a subset; `reinvert`, `hist`, `control` and `proj`
-expand), and the forwards' calving front: `ISMIP7_ROUTINE_CALVING` (a law of `icepack_tools.calving`, `hfb` by default), `ISMIP7_ROUTINE_CALVING_PARAMS` (`sigma_max=0.15`) and `ISMIP7_ROUTINE_FRONT_ADVANCE` (`none`, retreat-only), so the defaults are the submission front and a calving-campaign member (`submit_calving_campaign.sh`) runs as a full suite by naming its law, parameters and advance here. The relaxation's end state is the control driver's final
+expand), and the forwards' calving front: `ISMIP7_ROUTINE_CALVING` (a law of `icepack_tools.calving`, `hfb` by default), `ISMIP7_ROUTINE_CALVING_PARAMS` (`sigma_max=0.15`) and `ISMIP7_ROUTINE_FRONT_ADVANCE` (`none`, retreat-only), so the defaults are the submission front and a calving-campaign member (`submit_calving_campaign.sh`) runs as a full suite by naming its law, parameters and advance here. `ISMIP7_ROUTINE_CALVING_FLOATING_ONLY` (`none`, `ssp` or `all`; default `none`) sets `ISMIP7_CALVING_FLOATING_ONLY=1` in the projections or in every forward, which gives the law its own grounded gate; the hfb front calved 22 km into 1100 m thick grounded ice at Kemp Land under ssp370 CESM2-WACCM between 2060 and 2063, and the production routines run `ssp` from 22 October 2026. The gate changes the recorded law description, so a stage resumes only under the rule it started with. The relaxation's end state is the control driver's final
 checkpoint stamped with the relaxation record of `icepack2_tools/relaxation.py`
 (the source MAP, its objective settings, the window and the step), so the
 re-inversion takes the path a relaxed state has: it keeps the MAP's controls,
 writes `map_<source>_relax2015.h5`, and a forward on the MAP's mesh starts
 from the relaxed geometry.
+
+The watchdog (`watch`, slurm mode) resubmits a started stage whose chain
+has no job left, cancels a forward link silent for `ISMIP7_ROUTINE_STALL_MIN`
+(15) minutes with its node added to `OUT/exclude_nodes`, stamps that list
+onto any pending link that carries no exclusions, and cancels a pending link
+whose dependency can never be satisfied. A stage is parked (`OUT/<stage>.blocked`,
+cleared by `resume STAGE`) instead of resubmitted when:
+
+| trigger | knob | applies to |
+|---|---|---|
+| the newest link ended on a driver error, or stalled where it resumed | | every routine |
+| a RUNNING forward link has logged `ISMIP7_ROUTINE_FROZEN_MAX` zero-iteration momentum solves (`snes_its=0`, a frozen velocity); the link is cancelled | `ISMIP7_ROUTINE_FROZEN_MAX` (5; `0` disables the check, a negative or non-numeric count is refused) | every routine |
+| the newest link stalled anywhere, or ended in a state the scheduler does not impose (anything but `TIMEOUT`, `PREEMPTED`, `NODE_FAIL`, `CANCELLED`, `BOOT_FAIL`) | `ISMIP7_ROUTINE_STRICT=1` (default `0`) | strict routines |
+
+Under `ISMIP7_ROUTINE_STRICT=1` a link the accounting still reports as
+`RUNNING`, `COMPLETING`, `PENDING` or `REQUEUED` is left for the next pass.
+`ISMIP7_RESTART_RESOLVE=cold` on a `resume` re-solves the restarted momentum
+state to the cold-start tolerance instead of the residual its checkpoint
+records (`antarctica/README.md`); the chain drops it for every successor,
+follow-on and stage it launches.
 
 ## What is deliberately not in the routine
 

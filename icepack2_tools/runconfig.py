@@ -991,7 +991,7 @@ def calving_floating_only():
     its rate cap: under ssp370 the hfb front ate 22 km into 1100 m thick
     grounded ice at Kemp Land in three years (seq0f, October 2026), which
     is a cliff-failure process the protocol does not ask for and the solver
-    cannot follow. Andrew (22 Oct 2026): gate the hfb law to floating ice.
+    cannot follow. Decided 22 Oct 2026: gate the hfb law to floating ice.
     """
     value = os.environ.get("ISMIP7_CALVING_FLOATING_ONLY", "0").strip()
     if value in ("", "0"):

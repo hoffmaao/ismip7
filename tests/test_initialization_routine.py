@@ -765,6 +765,139 @@ def test_a_strict_routine_resubmits_a_link_the_watchdog_cancelled(sandbox):
     assert "no job in the queue; resubmitting" in log
 
 
+
+def _watched_stage(sandbox, sacct_state=None, **extra):
+    r"""A started historical under the watchdog's fakes: ``squeue`` answers
+    from QUEUE_FILE (``<name> <row>`` lines), ``scancel`` records its
+    arguments, and ``sacct``, when a state is given, names the first link as
+    the newest and reports that state for it."""
+    (sandbox / "warm.h5").write_text("warm\n")
+    bin_dir = sandbox / "bin"
+    queue = sandbox / "queue.txt"
+    cancels = sandbox / "scancel_calls.txt"
+    (bin_dir / "squeue").write_text(
+        "#!/bin/bash\n"
+        'name=""; while [ $# -gt 0 ]; do [ "$1" = -n ] && name=$2; shift; done\n'
+        '[ -f "$QUEUE_FILE" ] && grep "^$name " "$QUEUE_FILE" | cut -d" " -f2-\n'
+        "exit 0\n")
+    (bin_dir / "squeue").chmod(0o755)
+    (bin_dir / "scancel").write_text('#!/bin/bash\necho "$*" >> "$SCANCEL_CALLS"\n')
+    (bin_dir / "scancel").chmod(0o755)
+    if sacct_state is not None:
+        (bin_dir / "sacct").write_text(
+            "#!/bin/bash\n"
+            'for a in "$@"; do case "$a" in --name=*) echo "$FIRST"; exit 0 ;; esac; done\n'
+            f'echo "{sacct_state}"\n')
+        (bin_dir / "sacct").chmod(0o755)
+    env = {"ISMIP7_ROUTINE_STAGES": "hist", "ISMIP7_ROUTINE_ESMS": "CESM2-WACCM",
+           "QUEUE_FILE": str(queue), "SCANCEL_CALLS": str(cancels),
+           "ISMIP7_ROUTINE_WATCH_ONCE": "1", **extra}
+    rc, log = routine(sandbox, "init", env=env)
+    assert rc == 0, log
+    submits(sandbox)
+    first = (sandbox / "out" / "hist_cesm_waccm.jobs").read_text().split()[0]
+    env["FIRST"] = first
+    logs = sandbox / "logs"
+    logs.mkdir(exist_ok=True)
+    return env, first, queue, cancels, logs
+
+
+def _frozen_log(logs, jid, zeros):
+    (logs / f"ismip7_fwd_{jid}.out").write_text(
+        "Restart state re-solved\n"
+        + "".join(f"  momentum: snes_its=0 fnorm=1.2e+03 step {k}\n" for k in range(zeros))
+        + "  momentum: snes_its=4 fnorm=3.1e-02 step x\n")
+
+
+def test_watch_parks_a_stage_whose_velocity_is_frozen(sandbox):
+    r"""A link whose momentum solves "converge" in zero iterations carries the
+    restart's velocity forward unchanged (the frozen controls of 19-21 October
+    2026). At ISMIP7_ROUTINE_FROZEN_MAX such solves the watchdog cancels the
+    running link and parks the stage, strict or not; below it, nothing."""
+    env, first, queue, cancels, logs = _watched_stage(sandbox)
+    queue.write_text(f"rt_out_hist_cesm_waccm {first} RUNNING bb6u1g1 10:00 None\n")
+    _frozen_log(logs, first, 4)
+    rc, log = routine(sandbox, "watch", env=env)
+    assert rc == 0, log
+    assert not cancels.exists(), "four zero-iteration solves are below the default of five"
+    assert not (sandbox / "out" / "hist_cesm_waccm.blocked").exists()
+    _frozen_log(logs, first, 5)
+    rc, log = routine(sandbox, "watch", env=env)
+    assert rc == 0, log
+    assert cancels.read_text().split() == [first]
+    blocked = (sandbox / "out" / "hist_cesm_waccm.blocked").read_text()
+    assert blocked.startswith(f"job {first}: 5 zero-iteration momentum solves")
+    queue.write_text("")
+    rc, log = routine(sandbox, "watch", env=env)
+    assert rc == 0, log
+    assert submits(sandbox) == [], "a frozen stage stays parked"
+
+
+def test_a_frozen_count_of_zero_disables_the_check(sandbox):
+    env, first, queue, cancels, logs = _watched_stage(sandbox, ISMIP7_ROUTINE_FROZEN_MAX="0")
+    queue.write_text(f"rt_out_hist_cesm_waccm {first} RUNNING bb6u1g1 10:00 None\n")
+    _frozen_log(logs, first, 0)
+    rc, log = routine(sandbox, "watch", env=env)
+    assert rc == 0, log
+    _frozen_log(logs, first, 50)
+    rc, log = routine(sandbox, "watch", env=env)
+    assert rc == 0, log
+    assert not cancels.exists()
+    assert not (sandbox / "out" / "hist_cesm_waccm.blocked").exists()
+
+
+@pytest.mark.parametrize("value", ["-1", "five", "2.5"])
+def test_a_bad_frozen_count_is_refused(sandbox, value):
+    (sandbox / "warm.h5").write_text("warm\n")
+    rc, log = routine(sandbox, "init", env={"ISMIP7_ROUTINE_FROZEN_MAX": value})
+    assert rc != 0 and "ISMIP7_ROUTINE_FROZEN_MAX" in log
+    assert submits(sandbox) == []
+
+
+@pytest.mark.parametrize("state", ["COMPLETED", "FAILED", "OUT_OF_MEMORY"])
+def test_a_strict_routine_parks_a_link_the_scheduler_did_not_end(sandbox, state):
+    r"""Strict mode resubmits only a link the scheduler ended; a link that
+    ended on its own without queueing a successor is parked with its state,
+    even when its log shows no driver error or stall."""
+    env, first, queue, cancels, logs = _watched_stage(
+        sandbox, state, ISMIP7_ROUTINE_STRICT="1")
+    (logs / f"ismip7_fwd_{first}.out").write_text("  t=2005.3 ...\n")
+    rc, log = routine(sandbox, "watch", env=env)
+    assert rc == 0, log
+    assert submits(sandbox) == []
+    blocked = (sandbox / "out" / "hist_cesm_waccm.blocked").read_text()
+    assert blocked.startswith(f"job {first}: ended {state} without a successor"), blocked
+
+
+@pytest.mark.parametrize("state", ["RUNNING", "COMPLETING", "PENDING", "REQUEUED"])
+def test_a_strict_routine_waits_for_a_link_the_accounting_holds_live(sandbox, state):
+    r"""squeue can drop a link before slurmdbd records its end, and a requeue
+    passes through states that are not an end. Strict mode neither resubmits
+    (a duplicate chain) nor parks such a stage; a later pass decides."""
+    env, first, queue, cancels, logs = _watched_stage(
+        sandbox, state, ISMIP7_ROUTINE_STRICT="1")
+    (logs / f"ismip7_fwd_{first}.out").write_text("  t=2005.3 ...\n")
+    rc, log = routine(sandbox, "watch", env=env)
+    assert rc == 0, log
+    assert submits(sandbox) == []
+    assert not (sandbox / "out" / "hist_cesm_waccm.blocked").exists()
+    assert "has not ended in the accounting" in log
+
+
+def test_watch_cancels_a_successor_that_can_never_start_and_resubmits(sandbox):
+    r"""A successor behind a predecessor that ended in a way its dependency
+    excludes sits PENDING on DependencyNeverSatisfied for ever and made the
+    stage look alive for a day (seq1 control_mri_esm2, 19-20 October 2026).
+    The watchdog cancels it and resubmits the stage."""
+    env, first, queue, cancels, logs = _watched_stage(sandbox)
+    queue.write_text("rt_out_hist_cesm_waccm 7777001 PENDING (null) 0:00 DependencyNeverSatisfied\n")
+    rc, log = routine(sandbox, "watch", env=env)
+    assert rc == 0, log
+    assert cancels.read_text().split() == ["7777001"]
+    (again,) = submits(sandbox)
+    assert "-J rt_out_hist_cesm_waccm" in again["argv"]
+
+
 def test_the_forwards_run_the_routine_s_calving_law(sandbox):
     r"""The forwards take the routine's calving law, its parameters and its
     advance rule, recorded at init; the defaults are the submission front

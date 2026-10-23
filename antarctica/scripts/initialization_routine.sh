@@ -816,7 +816,10 @@ driver_failure() {
 # The reason a strict routine parks a stage whose newest link ended without a
 # successor: the solver stalled anywhere, or the link ended in a state other
 # than one the scheduler imposes (TIMEOUT, PREEMPTED, NODE_FAIL, CANCELLED,
-# BOOT_FAIL). Nothing when the scheduler took it, which is resubmitted.
+# BOOT_FAIL). Nothing when the scheduler took it, which is resubmitted. The
+# accounting prints a cancelled link as "CANCELLED+" (its "by <uid>" is cut
+# off), which read as a driver end and parked dg1f's ssp126 on 22 October
+# 2026 after the watchdog itself had cancelled the hung link.
 strict_block_reason() {
     local jid kind logf st at
     [ -f "$OUT/$1.jobs" ] || return 0
@@ -830,7 +833,7 @@ strict_block_reason() {
     fi
     st=$(sacct -j "$jid" -X -n -o State 2>/dev/null | head -n 1 | awk '{print $1}')
     case "${st:-UNKNOWN}" in
-        TIMEOUT|PREEMPTED|NODE_FAIL|CANCELLED|BOOT_FAIL|UNKNOWN|"") return 0 ;;
+        TIMEOUT|PREEMPTED|NODE_FAIL|CANCELLED*|BOOT_FAIL|UNKNOWN|"") return 0 ;;
         *) echo "job $jid: ended $st without a successor; see $logf" ;;
     esac
 }

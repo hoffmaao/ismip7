@@ -732,6 +732,39 @@ def test_a_strict_park_names_the_link_that_actually_ended(sandbox):
     assert "ismip7_fwd_9999777.out" in blocked
 
 
+def test_a_strict_routine_resubmits_a_link_the_watchdog_cancelled(sandbox):
+    r"""The accounting prints a cancelled link as ``CANCELLED+`` (the "by
+    <uid>" is cut off). A strict routine must read that as the scheduler's
+    doing and resubmit, as it does for ``TIMEOUT``: on 22 October 2026 the
+    watchdog cancelled dg1f's hung ssp126 link and then parked the stage on
+    its own cancellation."""
+    (sandbox / "warm.h5").write_text("warm\n")
+    bin_dir = sandbox / "bin"
+    (bin_dir / "squeue").write_text("#!/bin/bash\nexit 0\n")
+    (bin_dir / "squeue").chmod(0o755)
+    (bin_dir / "sacct").write_text(
+        "#!/bin/bash\n"
+        'for a in "$@"; do case "$a" in --name=*) echo "$FIRST"; exit 0 ;; esac; done\n'
+        'echo "CANCELLED+"\n')
+    (bin_dir / "sacct").chmod(0o755)
+    env = {"ISMIP7_ROUTINE_STAGES": "hist", "ISMIP7_ROUTINE_ESMS": "CESM2-WACCM",
+           "ISMIP7_ROUTINE_WATCH_ONCE": "1", "ISMIP7_ROUTINE_STRICT": "1"}
+    rc, log = routine(sandbox, "init", env=env)
+    assert rc == 0, log
+    submits(sandbox)
+    first = (sandbox / "out" / "hist_cesm_waccm.jobs").read_text().split()[0]
+    env["FIRST"] = first
+    logs = sandbox / "logs"
+    logs.mkdir(exist_ok=True)
+    (logs / f"ismip7_fwd_{first}.out").write_text("Restart state must be re-solved: ||F||=1.5e+08\n")
+    rc, log = routine(sandbox, "watch", env=env)
+    assert rc == 0, log
+    assert not (sandbox / "out" / "hist_cesm_waccm.blocked").exists(), log
+    (again,) = submits(sandbox)
+    assert "-J rt_out_hist_cesm_waccm" in again["argv"]
+    assert "no job in the queue; resubmitting" in log
+
+
 def test_the_forwards_run_the_routine_s_calving_law(sandbox):
     r"""The forwards take the routine's calving law, its parameters and its
     advance rule, recorded at init; the defaults are the submission front

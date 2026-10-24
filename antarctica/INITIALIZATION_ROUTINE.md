@@ -51,7 +51,8 @@ Only the friction control moves. The observed thinning enters as a weight
 on the velocity misfit rather than as a tendency to match
 (`ISMIP7_DHDT_REWEIGHT=24 ISMIP7_DHDT_WEIGHT=0`): where the Smith field
 thins fastest the velocity fit counts 25x. The tendency term
-(`ISMIP7_DHDT_WEIGHT=1` with `ISMIP7_DHDT_FILTER_L`) can be kept instead,
+(`ISMIP7_DHDT_WEIGHT=1` with `ISMIP7_DHDT_FILTER_L`, DG0 geometry only:
+DG1 refuses the filter, `GEOMETRY_DISCRETIZATION.md`) can be kept instead,
 or as well; the re-weighting changes what the MAP fits, the term changes
 what the forward starts from. 40 iterations.
 

@@ -688,49 +688,87 @@ def test_a_scheduler_kill_is_still_resubmitted(sandbox):
     assert "-J rt_out_hist_cesm_waccm" in again["argv"]
 
 
+SACCT_LINKS_STUB = (
+    "#!/bin/bash\n"
+    'for a in "$@"; do case "$a" in --name=*) cat "$LINKS"; exit 0 ;; esac; done\n'
+    'echo "FAILED"\n'
+)
+PBLAS = "PBLAS ERROR 'Illegal IY = 0, IY must be at least 1'\n"
+ABORTED = "=== forward exit 137 ===\nchain: stopping, driver exited 137\n"
+CLEAN = "  t=2004.2 ...\n=== forward exit 0 ===\nchain: at 2004.25 of 2015.0, resubmitting\n"
+
+
+def _solver_abort_stage(sandbox, strict=True, sacct=SACCT_LINKS_STUB):
+    r"""A started historical stage whose accounting lists the job ids in
+    sandbox/links (what sacct answers by job name inside its window), and
+    the stage's first link."""
+    (sandbox / "warm.h5").write_text("warm\n")
+    bin_dir = sandbox / "bin"
+    (bin_dir / "squeue").write_text("#!/bin/bash\nexit 0\n")
+    (bin_dir / "squeue").chmod(0o755)
+    (bin_dir / "sacct").write_text(sacct)
+    (bin_dir / "sacct").chmod(0o755)
+    env = {"ISMIP7_ROUTINE_STAGES": "hist", "ISMIP7_ROUTINE_ESMS": "CESM2-WACCM",
+           "ISMIP7_ROUTINE_WATCH_ONCE": "1", "ISMIP7_ROUTINE_STRICT": "1" if strict else "0",
+           "LINKS": str(sandbox / "links")}
+    rc, log = routine(sandbox, "init", env=env)
+    assert rc == 0, log
+    submits(sandbox)
+    (sandbox / "logs").mkdir(exist_ok=True)
+    return env, _first_link(sandbox)
+
+
+def _first_link(sandbox):
+    return (sandbox / "out" / "hist_cesm_waccm.jobs").read_text().split()[0]
+
+
+def _link(sandbox, jid, out, err=None):
+    logs = sandbox / "logs"
+    (logs / f"ismip7_fwd_{jid}.out").write_text(out)
+    if err is not None:
+        (logs / f"ismip7_fwd_{jid}.err").write_text(err)
+
+
+def _links(sandbox, *jids):
+    (sandbox / "links").write_text("".join(f"{j}\n" for j in jids))
+
+
 def test_a_strict_park_names_the_link_that_actually_ended(sandbox):
     r"""A chain's own successors are submitted by projection.sbatch, not by
     the routine, so OUT/<stage>.jobs holds only the first link. The watchdog
     read that line as the stage's newest link and on 21 October 2026 parked
     seq0f's MRI historical "COMPLETED without a successor", naming a link
     that had ended cleanly two links before the one that aborted in MUMPS.
-    The accounting knows every link by job name; the park names the newest
-    and reports its error."""
-    (sandbox / "warm.h5").write_text("warm\n")
-    bin_dir = sandbox / "bin"
-    (bin_dir / "squeue").write_text("#!/bin/bash\nexit 0\n")
-    (bin_dir / "squeue").chmod(0o755)
-    (bin_dir / "sacct").write_text(
-        "#!/bin/bash\n"
-        'for a in "$@"; do case "$a" in --name=*) echo "$FIRST"; echo "9999777"; exit 0 ;; esac; done\n'
-        'echo "FAILED"\n')
-    (bin_dir / "sacct").chmod(0o755)
-    env = {"ISMIP7_ROUTINE_STAGES": "hist", "ISMIP7_ROUTINE_ESMS": "CESM2-WACCM",
-           "ISMIP7_ROUTINE_WATCH_ONCE": "1", "ISMIP7_ROUTINE_STRICT": "1"}
-    rc, log = routine(sandbox, "init", env=env)
+    The accounting knows every link by job name. The newest link's solver
+    abort is retried once; the retry's own abort, the second in a row, parks
+    the stage naming both links, though the accounting's window (opened at
+    the rotated OUT/<stage>.jobs) no longer lists the first."""
+    env, first = _solver_abort_stage(sandbox)
+    _links(sandbox, first, "9999777")
+    _link(sandbox, first, CLEAN)
+    _link(sandbox, "9999777", "Restart state must be re-solved: ||F||=1.51e+08\n" + ABORTED,
+          PBLAS + "MPI_ABORT was invoked on rank 5 in communicator MPI_COMM_WORLD\n")
+    rc, log = routine(sandbox, "watch", env=env)
     assert rc == 0, log
-    submits(sandbox)
-    first = (sandbox / "out" / "hist_cesm_waccm.jobs").read_text().split()[0]
-    env["FIRST"] = first
-    logs = sandbox / "logs"
-    logs.mkdir(exist_ok=True)
-    (logs / f"ismip7_fwd_{first}.out").write_text(
-        "  t=2004.2 ...\n=== forward exit 137 ===\nchain: stopping, driver exited 137\n")
-    (logs / f"ismip7_fwd_{first}.err").write_text(
-        "PBLAS ERROR 'Illegal IY = 0, IY must be at least 1'\n")
-    (logs / "ismip7_fwd_9999777.out").write_text(
-        "Restart state must be re-solved: ||F||=1.51e+08\n=== forward exit 137 ===\n"
-        "chain: stopping, driver exited 137\n")
-    (logs / "ismip7_fwd_9999777.err").write_text(
-        "PBLAS ERROR 'Array subscript out of bounds: IY = 1793, DESCY[M_] = 908'\n"
-        "MPI_ABORT was invoked on rank 5 in communicator MPI_COMM_WORLD\n")
+    (again,) = submits(sandbox)
+    assert "-J rt_out_hist_cesm_waccm" in again["argv"]
+    assert (sandbox / "out" / "hist_cesm_waccm.solver_retry").read_text().strip() == "9999777"
+
+    retry = _first_link(sandbox)
+    _links(sandbox, retry)
+    _link(sandbox, retry, ABORTED,
+          "PBLAS ERROR 'Array subscript out of bounds: IY = 1793, DESCY[M_] = 908'\n")
     rc, log = routine(sandbox, "watch", env=env)
     assert rc == 0, log
     assert submits(sandbox) == [], "a second solver abort in a row is not resubmitted"
     blocked = (sandbox / "out" / "hist_cesm_waccm.blocked").read_text()
-    assert blocked.startswith("job 9999777:"), blocked
-    assert "twice in a row" in blocked and f"after {first}" in blocked
-    assert "ismip7_fwd_9999777.err" in blocked
+    assert blocked.startswith(f"job {retry}:"), blocked
+    assert "twice in a row" in blocked and "after 9999777" in blocked
+    assert f"ismip7_fwd_{retry}.err" in blocked
+
+    rc, log = routine(sandbox, "resume", "hist_cesm_waccm", env=env)
+    assert rc == 0, log
+    assert not (sandbox / "out" / "hist_cesm_waccm.solver_retry").exists()
 
 
 def test_a_link_that_aborted_in_the_linear_solver_is_resubmitted_once(sandbox):
@@ -739,31 +777,12 @@ def test_a_link_that_aborted_in_the_linear_solver_is_resubmitted_once(sandbox):
     stage is resubmitted once, under strict mode too, and parks only on a
     second such abort in a row (the test above). A driver exit with another
     error still parks at once."""
-    (sandbox / "warm.h5").write_text("warm\n")
-    bin_dir = sandbox / "bin"
-    (bin_dir / "squeue").write_text("#!/bin/bash\nexit 0\n")
-    (bin_dir / "squeue").chmod(0o755)
-    (bin_dir / "sacct").write_text(
-        "#!/bin/bash\n"
-        'for a in "$@"; do case "$a" in --name=*) echo "$FIRST"; echo "9999777"; exit 0 ;; esac; done\n'
-        'echo "FAILED"\n')
-    (bin_dir / "sacct").chmod(0o755)
-    env = {"ISMIP7_ROUTINE_STAGES": "hist", "ISMIP7_ROUTINE_ESMS": "CESM2-WACCM",
-           "ISMIP7_ROUTINE_WATCH_ONCE": "1", "ISMIP7_ROUTINE_STRICT": "1"}
-    rc, log = routine(sandbox, "init", env=env)
-    assert rc == 0, log
-    submits(sandbox)
-    first = (sandbox / "out" / "hist_cesm_waccm.jobs").read_text().split()[0]
-    env["FIRST"] = first
-    logs = sandbox / "logs"
-    logs.mkdir(exist_ok=True)
-    (logs / f"ismip7_fwd_{first}.out").write_text(
-        "  t=2004.2 ...\n=== forward exit 0 ===\nchain: at 2004.25 of 2015.0, resubmitting\n")
-    (logs / "ismip7_fwd_9999777.out").write_text(
-        "=== forward exit 137 ===\nchain: stopping, driver exited 137\n")
-    (logs / "ismip7_fwd_9999777.err").write_text(
-        "[ 6] MUMPS error in solve: INFOG(1)=-3, INFO(2)=3\n"
-        "petsc4py.PETSc.Error: error code 76\n")
+    env, first = _solver_abort_stage(sandbox)
+    _links(sandbox, first, "9999777")
+    _link(sandbox, first, CLEAN)
+    _link(sandbox, "9999777", ABORTED,
+          "[ 6] MUMPS error in solve: INFOG(1)=-3, INFO(2)=3\n"
+          "petsc4py.PETSc.Error: error code 76\n")
     rc, log = routine(sandbox, "watch", env=env)
     assert rc == 0, log
     assert not (sandbox / "out" / "hist_cesm_waccm.blocked").exists(), log
@@ -773,11 +792,56 @@ def test_a_link_that_aborted_in_the_linear_solver_is_resubmitted_once(sandbox):
 
     # the same link ending on an ordinary driver error parks at once
     (sandbox / "out" / "hist_cesm_waccm.jobs").write_text(f"{first} 2026-10-24T10:00:00-05:00\n")
-    (logs / "ismip7_fwd_9999777.err").write_text("RuntimeError: ISMIP7_FRACTURE=mask_front needs a mask\n")
+    (sandbox / "out" / "hist_cesm_waccm.solver_retry").unlink()
+    _link(sandbox, "9999777", ABORTED, "RuntimeError: ISMIP7_FRACTURE=mask_front needs a mask\n")
     rc, log = routine(sandbox, "watch", env=env)
     assert rc == 0, log
     blocked = (sandbox / "out" / "hist_cesm_waccm.blocked").read_text()
     assert blocked.startswith("job 9999777: RuntimeError"), blocked
+
+
+def test_an_abort_after_a_clean_link_gets_its_own_retry(sandbox):
+    r"""The retry is spent only by an abort in a row: once a later link of
+    the stage ended cleanly (the retry chained on to a successor), the next
+    isolated solver abort is resubmitted once again."""
+    env, first = _solver_abort_stage(sandbox, strict=False)
+    _links(sandbox, first)
+    _link(sandbox, first, ABORTED, PBLAS)
+    rc, log = routine(sandbox, "watch", env=env)
+    assert rc == 0, log
+    assert len(submits(sandbox)) == 1
+    marker = sandbox / "out" / "hist_cesm_waccm.solver_retry"
+    assert marker.read_text().strip() == first
+
+    retry = _first_link(sandbox)
+    _links(sandbox, retry, "9999777")
+    _link(sandbox, retry, CLEAN)
+    _link(sandbox, "9999777", ABORTED, "[ 3] MUMPS error in solve: INFOG(1)=-3\n")
+    rc, log = routine(sandbox, "watch", env=env)
+    assert rc == 0, log
+    assert len(submits(sandbox)) == 1, log
+    assert not (sandbox / "out" / "hist_cesm_waccm.blocked").exists(), log
+    assert marker.read_text().strip() == "9999777"
+
+
+def test_a_solver_abort_retry_holds_without_the_accounting(sandbox):
+    r"""Where sacct answers nothing, the newest link is the stage's
+    OUT/<stage>.jobs entry, and the retry is still granted once: the
+    resubmitted link's abort parks the stage naming both links."""
+    env, first = _solver_abort_stage(sandbox, strict=False, sacct="#!/bin/bash\nexit 0\n")
+    _link(sandbox, first, ABORTED, PBLAS)
+    rc, log = routine(sandbox, "watch", env=env)
+    assert rc == 0, log
+    assert len(submits(sandbox)) == 1
+    assert "resubmitting once" in log
+
+    retry = _first_link(sandbox)
+    _link(sandbox, retry, ABORTED, PBLAS)
+    rc, log = routine(sandbox, "watch", env=env)
+    assert rc == 0, log
+    assert submits(sandbox) == []
+    blocked = (sandbox / "out" / "hist_cesm_waccm.blocked").read_text()
+    assert blocked.startswith(f"job {retry}:") and f"after {first}" in blocked, blocked
 
 
 def test_a_strict_routine_resubmits_a_link_the_watchdog_cancelled(sandbox):

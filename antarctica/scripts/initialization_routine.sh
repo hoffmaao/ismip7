@@ -20,7 +20,15 @@
 # checkpoint. `watch` (slurm mode) is the watchdog loop for a login node or a
 # small allocation: it resubmits a started stage whose chain has no job left
 # and cancels a forward link whose log has gone silent (a hung solve), with
-# the node excluded from the stage's next submission.
+# the node excluded from the stage's next submission. It also cancels a
+# RUNNING forward link whose log holds ISMIP7_ROUTINE_FROZEN_MAX (5)
+# zero-iteration momentum solves (`snes_its=0`, a frozen velocity) and parks
+# its stage, in every routine; 0 disables the check, and a negative or
+# non-numeric count is refused. ISMIP7_ROUTINE_STRICT=1 resubmits a chain only
+# when the scheduler ended its newest link (TIMEOUT, PREEMPTED, NODE_FAIL,
+# CANCELLED, BOOT_FAIL) and parks the stage on any other end; a link the
+# accounting still holds live is left for the next pass. `resume STAGE`
+# clears a park.
 #
 # Two launch modes (ISMIP7_ROUTINE_LAUNCH, recorded at init):
 #   mpiexec   every stage runs in the foreground, in order, on
@@ -75,6 +83,9 @@
 # (submit_calving_campaign.sh) is run as a full suite by naming its law,
 # parameters and advance here. The collapse mask applies to the projections
 # only; the relax stage pins the front.
+# ISMIP7_ROUTINE_CALVING_FLOATING_ONLY (none) confines the law to floating ice
+# (ISMIP7_CALVING_FLOATING_ONLY=1) in the projections (ssp) or every forward
+# (all).
 #
 # An inversion stage moves one control alone, which only the TAO path does:
 # `init` refuses a recorded ISMIP7_GRAD_PRECOND other than mass_consistent or
@@ -105,6 +116,7 @@ STAGE_KNOBS=(ISMIP7_INVERT ISMIP7_PHI_BOUNDS ISMIP7_FLUIDITY_CONTROL
     ISMIP7_RESTART ISMIP7_T_START ISMIP7_T_END ISMIP7_RUN_TAG ISMIP7_EXPERIMENT
     ISMIP7_ESM ISMIP7_APPARENT_MB ISMIP7_OUTPUT ISMIP7_FIXED_FRONT
     ISMIP7_CALVING ISMIP7_CALVING_PARAMS ISMIP7_FRONT_ADVANCE ISMIP7_FRACTURE
+    ISMIP7_CALVING_FLOATING_ONLY
     ISMIP7_CHAIN_THEN ISMIP7_CHAIN_THEN_CMD ISMIP7_WALL_STOP_MIN
     ISMIP7_AUTO_RESUME ISMIP7_CHAIN ISMIP7_SNES_LOG ISMIP7_GEOMETRY_BACKDATE)
 
@@ -130,6 +142,7 @@ record_env() {
         echo "export ISMIP7_ROUTINE_CALVING=${ISMIP7_ROUTINE_CALVING:-hfb}"
         echo "export ISMIP7_ROUTINE_CALVING_PARAMS=${ISMIP7_ROUTINE_CALVING_PARAMS-sigma_max=0.15}"
         echo "export ISMIP7_ROUTINE_FRONT_ADVANCE=${ISMIP7_ROUTINE_FRONT_ADVANCE:-none}"
+        echo "export ISMIP7_ROUTINE_CALVING_FLOATING_ONLY=${ISMIP7_ROUTINE_CALVING_FLOATING_ONLY:-none}"
         echo "export ISMIP7_ROUTINE_FLUIDITY_CONTROL=${ISMIP7_ROUTINE_FLUIDITY_CONTROL:-floating}"
         echo "export ISMIP7_ROUTINE_PHI_BOUNDS=${ISMIP7_ROUTINE_PHI_BOUNDS:--2.3,2.3}"
         echo "export ISMIP7_ROUTINE_DHDT_REWEIGHT=${ISMIP7_ROUTINE_DHDT_REWEIGHT:-24}"
@@ -141,6 +154,8 @@ record_env() {
         echo "export ISMIP7_ROUTINE_SBATCH_INV=\"${ISMIP7_ROUTINE_SBATCH_INV:-}\""
         echo "export ISMIP7_ROUTINE_SBATCH_FWD=\"${ISMIP7_ROUTINE_SBATCH_FWD:-}\""
         echo "export ISMIP7_ROUTINE_CHAIN_MAX=${ISMIP7_ROUTINE_CHAIN_MAX:-200}"
+        echo "export ISMIP7_ROUTINE_STRICT=${ISMIP7_ROUTINE_STRICT:-0}"
+        echo "export ISMIP7_ROUTINE_FROZEN_MAX=${ISMIP7_ROUTINE_FROZEN_MAX:-5}"
     } > "$ENVFILE.tmp"
     mv "$ENVFILE.tmp" "$ENVFILE"
 }
@@ -171,8 +186,24 @@ load_env() {
         free|none) ;;
         *) die "ISMIP7_ROUTINE_FRONT_ADVANCE must be free or none, got $ISMIP7_ROUTINE_FRONT_ADVANCE" ;;
     esac
+    # Which forwards confine the law to floating ice
+    # (ISMIP7_CALVING_FLOATING_ONLY=1): none (the law's own rule), ssp (the
+    # projections: the hfb front calved grounded cliffs under ssp370, 22 Oct
+    # 2026) or all. A routine's running stages keep the rule their
+    # checkpoints record, so change this only with the affected stages
+    # restarted from scratch.
+    : "${ISMIP7_ROUTINE_CALVING_FLOATING_ONLY:=none}"
+    case "$ISMIP7_ROUTINE_CALVING_FLOATING_ONLY" in
+        none|ssp|all) ;;
+        *) die "ISMIP7_ROUTINE_CALVING_FLOATING_ONLY must be none, ssp or all, got $ISMIP7_ROUTINE_CALVING_FLOATING_ONLY" ;;
+    esac
     case "$ISMIP7_ROUTINE_CALVING ${ISMIP7_ROUTINE_CALVING_PARAMS:-}" in
         *" "*" "*) die "ISMIP7_ROUTINE_CALVING and ISMIP7_ROUTINE_CALVING_PARAMS take no spaces (parameters are comma separated)" ;;
+    esac
+    : "${ISMIP7_ROUTINE_STRICT:=0}"
+    : "${ISMIP7_ROUTINE_FROZEN_MAX:=5}"
+    case "$ISMIP7_ROUTINE_FROZEN_MAX" in
+        *[!0-9]*) die "ISMIP7_ROUTINE_FROZEN_MAX must be a count of zero-iteration momentum solves (0 disables the check), got $ISMIP7_ROUTINE_FROZEN_MAX" ;;
     esac
     TAG=$ISMIP7_ROUTINE_TAG
     LC=${ISMIP7_LC:?ISMIP7_LC must be recorded}
@@ -457,7 +488,7 @@ stage_env_forward() {   # prints `export` lines for a forward stage
             echo "export ISMIP7_INVERSION=$(map_path "$(relax_source_stage)")"
             echo "export ISMIP7_RUN_TAG=${TAG}_relax ISMIP7_T_END=$(fwd_t_end relax)"
             echo "export ISMIP7_APPARENT_MB=0 ISMIP7_OUTPUT=0 ISMIP7_FIXED_FRONT=1 ISMIP7_CALVING=none"
-            echo "unset ISMIP7_CALVING_PARAMS ISMIP7_FRONT_ADVANCE ISMIP7_FRACTURE" ;;
+            echo "unset ISMIP7_CALVING_PARAMS ISMIP7_FRONT_ADVANCE ISMIP7_FRACTURE ISMIP7_CALVING_FLOATING_ONLY" ;;
         *)
             echo "export ISMIP7_INVERSION=$(forward_map) ISMIP7_RUN_TAG=$TAG ISMIP7_OUTPUT=1"
             case "$stage" in
@@ -480,6 +511,10 @@ stage_env_forward() {   # prints `export` lines for a forward stage
             case "$stage" in
                 ssp*_*) echo "export ISMIP7_FRACTURE=mask_front" ;;
                 *)      echo "export ISMIP7_FRACTURE=none" ;;
+            esac
+            case "$ISMIP7_ROUTINE_CALVING_FLOATING_ONLY:$stage" in
+                all:*|ssp:ssp*_*) echo "export ISMIP7_CALVING_FLOATING_ONLY=1" ;;
+                *)                echo "unset ISMIP7_CALVING_FLOATING_ONLY" ;;
             esac ;;
     esac
 }
@@ -650,8 +685,20 @@ watch_pass() {
         is_started "$stage" || continue
         is_done "$stage" && continue
         jobname="rt_${TAG}_${stage}"
-        rows=$(squeue -h -u "${USER:-$(id -un)}" -n "$jobname" -o "%i %T %N %M" 2>/dev/null) \
+        rows=$(squeue -h -u "${USER:-$(id -un)}" -n "$jobname" -o "%i %T %N %M %r" 2>/dev/null) \
             || { log "watch: squeue failed; skipping the rest of this pass"; return 0; }
+        # A successor that can never start (its predecessor ended TIMEOUT
+        # after saving, under an afterok dependency) sits PENDING and made
+        # the stage look alive for a day (seq1 control_mri_esm2, 19-20 Oct
+        # 2026). Cancel it; the stage then reads as empty and is resubmitted.
+        local dead
+        dead=$(awk '$2 == "PENDING" && $5 == "DependencyNeverSatisfied" {print $1}' <<< "$rows")
+        if [ -n "$dead" ]; then
+            log "watch: cancelling $(echo $dead) ($stage): dependency never satisfied"
+            # shellcheck disable=SC2086
+            scancel $dead
+            rows=$(awk '!($2 == "PENDING" && $5 == "DependencyNeverSatisfied")' <<< "$rows")
+        fi
         if [ -z "$rows" ]; then
             # A chain ends without a successor in two ways: the scheduler took
             # the link (timeout, preemption, node failure, an outage), which a
@@ -667,16 +714,59 @@ watch_pass() {
                 log "watch: ERROR stage $stage stopped on a driver failure or a stall, not resubmitting: $why"
                 continue
             fi
+            # A strict routine (ISMIP7_ROUTINE_STRICT=1) resubmits a link only
+            # when the scheduler took it; any other end parks the stage.
+            if [ "$ISMIP7_ROUTINE_STRICT" = 1 ]; then
+                if ! why=$(strict_block_reason "$stage"); then
+                    log "watch: stage $stage has no job in the queue and its newest link has not ended in the accounting; waiting"
+                    continue
+                fi
+                if [ -n "$why" ]; then
+                    echo "$why" > "$OUT/$stage.blocked"
+                    log "watch: ERROR stage $stage parked (strict): $why"
+                    continue
+                fi
+            fi
             log "watch: stage $stage has no job in the queue; resubmitting"
             mv "$OUT/$stage.jobs" "$OUT/$stage.jobs.$(date +%s)"
             launch "$stage"
             continue
         fi
+        # A chain's successor takes its node exclusions from its predecessor
+        # (site_core.sh), so a chain submitted before the watchdog excluded a
+        # node never learns of the exclusion: successors of such chains hung
+        # on the excluded bb6u15g1 and bb6u13g1 on 22 October 2026. Stamp the
+        # current list onto any pending link that carries none; the
+        # scheduler lets a pending job be changed, a running one not.
+        if [ -s "$OUT/exclude_nodes" ] && command -v scontrol >/dev/null; then
+            local excl pend cur
+            excl=$(sort -u "$OUT/exclude_nodes" | paste -sd,)
+            while read -r pend _; do
+                [ -n "$pend" ] || continue
+                cur=$(scontrol show job "$pend" 2>/dev/null | grep -oE 'ExcNodeList=[^ ]+' | cut -d= -f2)
+                [ "$cur" = "(null)" ] || continue
+                if scontrol update JobId="$pend" ExcNodeList="$excl" 2>/dev/null; then
+                    log "watch: job $pend ($stage) pending without node exclusions; now excluding $excl"
+                fi
+            done <<< "$(awk '$2 == "PENDING" {print $1}' <<< "$rows")"
+        fi
         is_inversion "$stage" && continue
-        while read -r jid state node elapsed; do
+        while read -r jid state node elapsed _; do
             [ "$state" = RUNNING ] || continue
             logf="$REPO/logs/ismip7_fwd_$jid.out"
             [ -f "$logf" ] || continue
+            # A momentum solve that "converges" in zero iterations leaves the
+            # velocity where the restart put it (the frozen controls of
+            # 19-21 October 2026); a healthy link logs none. Cancel the link
+            # and park the stage before the frozen state is checkpointed on.
+            local frozen
+            frozen=$(grep -c "snes_its=0 " "$logf" 2>/dev/null || true)
+            if [ "$ISMIP7_ROUTINE_FROZEN_MAX" -gt 0 ] && [ "${frozen:-0}" -ge "$ISMIP7_ROUTINE_FROZEN_MAX" ]; then
+                echo "job $jid: $frozen zero-iteration momentum solves in $logf; the velocity is frozen" > "$OUT/$stage.blocked"
+                log "watch: ERROR job $jid ($stage) on $node: $frozen zero-iteration momentum solves; cancelling, stage parked"
+                scancel "$jid"
+                continue
+            fi
             age=$(( ($(date +%s) - $(stat -c %Y "$logf")) / 60 ))
             if [ "$age" -ge "$stall" ]; then
                 log "watch: job $jid ($stage) on $node silent for $age min; cancelling, node excluded"
@@ -700,10 +790,27 @@ watch_pass() {
 # passed the step its link had stalled in at 2021.25). A link that stalled
 # where it resumed made no progress, and another would stall there again (the
 # seq0 ssp126 projection at 2019.95, relaunched link after link): parked.
+# The newest link of a stage. OUT/<stage>.jobs records the links this script
+# submitted; a chain's own successors (projection.sbatch resubmits itself under
+# the same job name) are not in it, so the file's last line is the chain's
+# first link, and on 21 October 2026 the watchdog parked seq0f's MRI historical
+# naming a link that had ended cleanly two links before the one that aborted.
+# The accounting knows every link by name; the file is the fallback where
+# sacct is absent or answers nothing.
+newest_link() {
+    local first since jid
+    first=$(head -n 1 "$OUT/$1.jobs")
+    since=$(echo "$first" | cut -d' ' -f2 | cut -c1-19)
+    jid=$(sacct -X -n -u "${USER:-$(id -un)}" ${since:+-S "$since"} --name="rt_${TAG}_$1" -o JobID 2>/dev/null \
+          | awk 'NF {print $1}' | sort -n | tail -n 1)
+    [ -n "$jid" ] || jid=$(tail -n 1 "$OUT/$1.jobs" | cut -d' ' -f1)
+    echo "$jid"
+}
+
 driver_failure() {
     local jid kind logf err at from
     [ -f "$OUT/$1.jobs" ] || return 0
-    jid=$(tail -n 1 "$OUT/$1.jobs" | cut -d' ' -f1)
+    jid=$(newest_link "$1")
     if is_inversion "$1"; then kind=inv; else kind=fwd; fi
     logf="$REPO/logs/ismip7_${kind}_$jid.out"
     [ -f "$logf" ] || return 0
@@ -721,6 +828,36 @@ driver_failure() {
         echo "job $jid: ${err:-driver exited non-zero; see $logf}"
     fi
     return 0
+}
+
+# The reason a strict routine parks a stage whose newest link ended without a
+# successor: the solver stalled anywhere, or the link ended in a state other
+# than one the scheduler imposes (TIMEOUT, PREEMPTED, NODE_FAIL, CANCELLED,
+# BOOT_FAIL). Nothing when the scheduler took it, which is resubmitted. A
+# failure status, and nothing, while the accounting still holds the link live
+# (RUNNING, COMPLETING, PENDING, REQUEUED: squeue has dropped it before
+# slurmdbd records its end, or a requeue is in flight), so the pass neither
+# resubmits nor parks. The
+# accounting prints a cancelled link as "CANCELLED+" (its "by <uid>" is cut
+# off), which read as a driver end and parked dg1f's ssp126 on 22 October
+# 2026 after the watchdog itself had cancelled the hung link.
+strict_block_reason() {
+    local jid kind logf st at
+    [ -f "$OUT/$1.jobs" ] || return 0
+    jid=$(newest_link "$1")
+    if is_inversion "$1"; then kind=inv; else kind=fwd; fi
+    logf="$REPO/logs/ismip7_${kind}_$jid.out"
+    if [ -f "$logf" ] && grep -q "^chain: the solver stalled" "$logf"; then
+        at=$(sed -n 's/^chain: the solver stalled.* at \([-0-9.eE+]*\)\.$/\1/p' "$logf" | tail -n 1)
+        echo "job $jid: the solver stalled at ${at:-?}"
+        return 0
+    fi
+    st=$(sacct -j "$jid" -X -n -o State 2>/dev/null | head -n 1 | awk '{print $1}')
+    case "${st:-UNKNOWN}" in
+        TIMEOUT|PREEMPTED|NODE_FAIL|CANCELLED*|BOOT_FAIL|UNKNOWN|"") return 0 ;;
+        RUNNING|COMPLETING|PENDING|REQUEUED*) return 1 ;;
+        *) echo "job $jid: ended $st without a successor; see $logf" ;;
+    esac
 }
 
 cmd_watch() {

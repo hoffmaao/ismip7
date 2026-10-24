@@ -21,7 +21,7 @@
   "jobs": [
     "11912190"
   ],
-  "code": "c4c9eb8, Quartz worktree /N/scratch/dlilien/ismip7_rehearsal25iu/run2kp; wrapper submit_r2kiu.sh ocx rlcnoamb",
+  "code": "c4c9eb8, Quartz worktree ismip7_rehearsal25iu/run2kp (removed on 22 October 2026; its loose files are in /N/project/ice_rheology/ISMIP7/antarctica/results/quartz_worktree_archive_20261022/ismip7_rehearsal25iu_run2kp.tar.gz); wrapper /N/project/ice_rheology/ISMIP7/antarctica/results/rehearsal_25km_iu/scratch_results/ismip7_rehearsal25iu/submit_r2kiu.sh ocx rlcnoamb",
   "started": "2026-10-11",
   "finished": "2026-10-12",
   "cost": "12 h 52 min of wall time on 32 ranks for 23 model years in 1 link, 48.7 s a diagnostic solve on average",
@@ -30,5 +30,5 @@
   "ismip7_output": "2003 to 2025, 31 files on the 8 km grid in prod_2km_iu/r2kiurlcnoamb/submission/AIS/IU/icepack2/CORE/C011 (source_id IU; contact Rice, the writer's default, kept by IU); writer job 12249912, 42 min; 431 cell-years within 0.01 m of flotation written as grounded; lifmassbf largest -6.8 Gt/yr (2003); -0.8 in 2025",
   "checker": "isschecker 0.5.1: 0 errors, 2 warnings, the non-mandatory variables the model does not write and strbasemag maximum 2.1 MPa against the accepted 1 MPa on 68 of 4,926,403 values",
   "scalars": "ismip7-scalars 0.1.0 sla20, slg20 and slvaf written (job 12251491); compare_scalars.py exit 0; notes: area factor: the native scalars carry it too (--native-af2), so the area term is zero; the exact sums' worst |C - N| is 1.59e-05 of their L1 (tendlifmassbf 2013), against an allowance of 5.93e-04; maximum-extent mask: 0 pixels carry ice or flux outside maxmask1; lim +0.000%, limnsw +0.000%, slvaf +0.000%, slg20 +0.000%; fill convention: acabf and libmassbffl are whole-pixel means (flux_pixel_mean), the tool's own, so nothing is undone and the fill term is zero; tendlibmassbffl: the fill leaves out no melt beyond the exact sums' tolerance in any year (largest difference +0.0 Gt/yr, 2003); tendlifmassbf: the melt booked in cells with no floating ice at year end (issues #109 and #136) is at most -6.9 Gt/yr (2003); slvaf: residual +4.01% of max |N| (2025), above 2%; slg20: residual +3.96% of max |N| (2025), above 2%; sla20: residual +3.96% of max |N| (2025), above 2%",
-  "notes": "IU's 2 km Budd production suite (antarctica/reports/rehearsal_25km_iu.md, section 'The 2 km production suite'). Production grade; the group chooses the submission line on 20 or 21 October. Final state sha256 a2d9d25673e3398e92caad9c7a7d5aeb20af5516be4668e4e3d947684c5e98fd. Report: antarctica/reports/core11_ocx_2km_r2kiurlcnoamb.md."
+  "notes": "IU's 2 km Budd production suite (antarctica/reports/rehearsal_25km_iu.md, section 'The 2 km production suite'). On 16 October the group decided not to submit IU's line. Final state sha256 a2d9d25673e3398e92caad9c7a7d5aeb20af5516be4668e4e3d947684c5e98fd. Report: antarctica/reports/core11_ocx_2km_r2kiurlcnoamb.md."
 }

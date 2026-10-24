@@ -399,7 +399,7 @@ partition, constraint and rank count from the site file.
 checkpoints `ISMIP7_MAP_OUT` every `ISMIP7_CHECKPOINT_EVERY_IT` iterates (default
 1) and warm-starts from it, so each
 job queues its successor first with `--dependency=afterany`, copying partition,
-constraint, memory, time and task layout from `scontrol`. Every link exits at
+constraint, memory, time, task layout and node exclusions from `scontrol`. Every link exits at
 once if `<map>.done` exists, meaning the MAP reached disk. The driver writes
 that marker as soon as the checkpoint write returns, so a kill in the tail
 (final solve, summary figure) cannot lose it; the runner's post-`srun` grep for
@@ -434,8 +434,11 @@ Regression test: `tests/test_inversion_chain.py`.
 ### `projection.sbatch`, self-chaining
 
 A 285-year projection is about four days on the production mesh, so this
-resubmits itself with `--dependency=afterok` until the run reaches its end
-year, resuming through `ISMIP7_AUTO_RESUME=1`. Each driver owns its end year
+resubmits itself with `--dependency=afterany` until the run reaches its end
+year, resuming through `ISMIP7_AUTO_RESUME=1`. A link queues its successor
+only after its driver exits 0 with the checkpoint saved, so the dependency
+orders the links and a link the scheduler takes in its last lines still
+starts its successor. Each driver owns its end year
 and the runner does not default `ISMIP7_T_END`; the chain reads the value the
 run used from the driver's `Time-stepping: <start>-><end>` line. At the
 production step, `dt = 0.025` (issue 20), Rice's default of 32 ranks on one
@@ -531,7 +534,8 @@ node sat idle for the remaining 11.5 h (issue #161). A container site's
 `tests/test_site_core.py`.
 
 The wall budget is derived per job. Each link reads its own partition's
-`TimeLimit`, holds back 25 minutes and passes the rest as
+`TimeLimit`, holds back 25 minutes and the minutes since its `StartTime`
+(queue node setup and the environment), and passes the rest as
 `ISMIP7_WALL_STOP_MIN`, so the model stops a step early and writes a complete
 final checkpoint for the successor.
 

@@ -841,7 +841,7 @@ solver_abort_retry() {
 link_node() { sacct -X -n -j "$1" -o NodeList 2>/dev/null | head -n 1 | awk '{print $1}'; }
 
 driver_failure() {
-    local jid kind logf err at from
+    local jid kind logf err at from node
     [ -f "$OUT/$1.jobs" ] || return 0
     jid=$(newest_link "$1")
     if is_inversion "$1"; then kind=inv; else kind=fwd; fi
@@ -858,7 +858,8 @@ driver_failure() {
     fi
     if grep -qE "chain: stopping, driver exited [1-9]|inversion exit [1-9]" "$logf"; then
         if solver_abort_retry "$1" "$jid"; then
-            log "watch: job $jid ($1) aborted in the linear solver on $(link_node "$jid"); a node fault, resubmitting once"
+            node=$(link_node "$jid")
+            log "watch: job $jid ($1) aborted in the linear solver on ${node:-an unknown node}; a node fault, resubmitting once"
             return 0
         fi
         if solver_abort "$jid"; then

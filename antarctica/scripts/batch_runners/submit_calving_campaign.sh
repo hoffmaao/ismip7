@@ -90,7 +90,7 @@ while IFS='|' read -r name law params advance; do
             --nodes=1 --ntasks-per-node=32 --cpus-per-task=1 --hint=nomultithread \
             --mem=240G --time="$WALL" --export=ALL \
             antarctica/scripts/batch_runners/projection.sbatch)
-    printf '%-8s %-15s %-36s advance=%-4s -> %s\n' "$name" "$law" "${params:-(defaults)}" "$advance" "$job"
+    printf '%-10s %-15s %-36s advance=%-4s -> %s\n' "$name" "$law" "${params:-(defaults)}" "$advance" "$job"
 done <<EOF
 $MEMBERS
 EOF

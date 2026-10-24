@@ -834,6 +834,7 @@ def test_a_solver_abort_retry_holds_without_the_accounting(sandbox):
     assert rc == 0, log
     assert len(submits(sandbox)) == 1
     assert "resubmitting once" in log
+    assert "in the linear solver on an unknown node;" in log, log
 
     retry = _first_link(sandbox)
     _link(sandbox, retry, ABORTED, PBLAS)

@@ -807,6 +807,39 @@ newest_link() {
     echo "$jid"
 }
 
+# A link that aborted inside the linear solver (ScaLAPACK index errors, a
+# MUMPS INFOG(1) < 0, an MPI buffer fault): every one of the October 2026
+# production aborts, 7 of 199 links at 128G, all on nodes shared with other
+# jobs, in the factorizations of a link's first solves. A node fault, not
+# the model's: the next link resumes the same state elsewhere. Such a link
+# is resubmitted ONCE; a second such abort in a row parks the stage
+# (Andrew, 24 Oct 2026).
+SOLVER_ABORT_RE='PBLAS ERROR|MUMPS error in solve|INFOG\(1\)=-|MPI_ERR_BUFFER|error code 98'
+solver_abort() {
+    local e="$REPO/logs/ismip7_fwd_$1.err"
+    [ -n "$1" ] && [ -f "$e" ] && grep -qE "$SOLVER_ABORT_RE" "$e"
+}
+# The link before the newest one, by job name in the accounting; empty for
+# a stage with one link.
+previous_link() {
+    local first since
+    first=$(head -n 1 "$OUT/$1.jobs")
+    since=$(echo "$first" | cut -d' ' -f2 | cut -c1-19)
+    sacct -X -n -u "${USER:-$(id -un)}" ${since:+-S "$since"} --name="rt_${TAG}_$1" -o JobID 2>/dev/null \
+        | awk 'NF {print $1}' | sort -n | tail -n 2 | sed -n '1p' | awk -v j="$2" '$1 != j'
+}
+# 0 when the newest link $2 of stage $1 aborted in the linear solver and the
+# link before it did not: its one retry.
+solver_abort_retry() {
+    local prev
+    is_inversion "$1" && return 1
+    solver_abort "$2" || return 1
+    prev=$(previous_link "$1" "$2")
+    [ -n "$prev" ] && solver_abort "$prev" && return 1
+    return 0
+}
+link_node() { sacct -X -n -j "$1" -o NodeList 2>/dev/null | head -n 1 | awk '{print $1}'; }
+
 driver_failure() {
     local jid kind logf err at from
     [ -f "$OUT/$1.jobs" ] || return 0
@@ -824,6 +857,14 @@ driver_failure() {
         return 0
     fi
     if grep -qE "chain: stopping, driver exited [1-9]|inversion exit [1-9]" "$logf"; then
+        if solver_abort_retry "$1" "$jid"; then
+            log "watch: job $jid ($1) aborted in the linear solver on $(link_node "$jid"); a node fault, resubmitting once"
+            return 0
+        fi
+        if solver_abort "$jid"; then
+            echo "job $jid: aborted in the linear solver twice in a row (after $(previous_link "$1" "$jid")); see ${logf%.out}.err"
+            return 0
+        fi
         err=$(grep -hE "^[A-Za-z]*Error: " "${logf%.out}.err" "$logf" 2>/dev/null | tail -n 1 | cut -c1-300)
         echo "job $jid: ${err:-driver exited non-zero; see $logf}"
     fi
@@ -852,6 +893,8 @@ strict_block_reason() {
         echo "job $jid: the solver stalled at ${at:-?}"
         return 0
     fi
+    # the one retry of a linear-solver abort (driver_failure logged it)
+    solver_abort_retry "$1" "$jid" && return 0
     st=$(sacct -j "$jid" -X -n -o State 2>/dev/null | head -n 1 | awk '{print $1}')
     case "${st:-UNKNOWN}" in
         TIMEOUT|PREEMPTED|NODE_FAIL|CANCELLED*|BOOT_FAIL|UNKNOWN|"") return 0 ;;

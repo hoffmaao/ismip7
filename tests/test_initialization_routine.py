@@ -715,8 +715,9 @@ def test_a_strict_park_names_the_link_that_actually_ended(sandbox):
     logs = sandbox / "logs"
     logs.mkdir(exist_ok=True)
     (logs / f"ismip7_fwd_{first}.out").write_text(
-        "  t=2004.2 ...\nhist simulation complete.\n=== forward exit 0 ===\n"
-        "chain: at 2004.25 of 2015.0, resubmitting\nSubmitted batch job 9999777\n")
+        "  t=2004.2 ...\n=== forward exit 137 ===\nchain: stopping, driver exited 137\n")
+    (logs / f"ismip7_fwd_{first}.err").write_text(
+        "PBLAS ERROR 'Illegal IY = 0, IY must be at least 1'\n")
     (logs / "ismip7_fwd_9999777.out").write_text(
         "Restart state must be re-solved: ||F||=1.51e+08\n=== forward exit 137 ===\n"
         "chain: stopping, driver exited 137\n")
@@ -725,11 +726,58 @@ def test_a_strict_park_names_the_link_that_actually_ended(sandbox):
         "MPI_ABORT was invoked on rank 5 in communicator MPI_COMM_WORLD\n")
     rc, log = routine(sandbox, "watch", env=env)
     assert rc == 0, log
-    assert submits(sandbox) == [], "a driver abort is not resubmitted"
+    assert submits(sandbox) == [], "a second solver abort in a row is not resubmitted"
     blocked = (sandbox / "out" / "hist_cesm_waccm.blocked").read_text()
     assert blocked.startswith("job 9999777:"), blocked
-    assert first not in blocked
-    assert "ismip7_fwd_9999777.out" in blocked
+    assert "twice in a row" in blocked and f"after {first}" in blocked
+    assert "ismip7_fwd_9999777.err" in blocked
+
+
+def test_a_link_that_aborted_in_the_linear_solver_is_resubmitted_once(sandbox):
+    r"""A ScaLAPACK or MUMPS abort in a link's first factorizations is a node
+    fault (every October 2026 production abort was on a shared node), so the
+    stage is resubmitted once, under strict mode too, and parks only on a
+    second such abort in a row (the test above). A driver exit with another
+    error still parks at once."""
+    (sandbox / "warm.h5").write_text("warm\n")
+    bin_dir = sandbox / "bin"
+    (bin_dir / "squeue").write_text("#!/bin/bash\nexit 0\n")
+    (bin_dir / "squeue").chmod(0o755)
+    (bin_dir / "sacct").write_text(
+        "#!/bin/bash\n"
+        'for a in "$@"; do case "$a" in --name=*) echo "$FIRST"; echo "9999777"; exit 0 ;; esac; done\n'
+        'echo "FAILED"\n')
+    (bin_dir / "sacct").chmod(0o755)
+    env = {"ISMIP7_ROUTINE_STAGES": "hist", "ISMIP7_ROUTINE_ESMS": "CESM2-WACCM",
+           "ISMIP7_ROUTINE_WATCH_ONCE": "1", "ISMIP7_ROUTINE_STRICT": "1"}
+    rc, log = routine(sandbox, "init", env=env)
+    assert rc == 0, log
+    submits(sandbox)
+    first = (sandbox / "out" / "hist_cesm_waccm.jobs").read_text().split()[0]
+    env["FIRST"] = first
+    logs = sandbox / "logs"
+    logs.mkdir(exist_ok=True)
+    (logs / f"ismip7_fwd_{first}.out").write_text(
+        "  t=2004.2 ...\n=== forward exit 0 ===\nchain: at 2004.25 of 2015.0, resubmitting\n")
+    (logs / "ismip7_fwd_9999777.out").write_text(
+        "=== forward exit 137 ===\nchain: stopping, driver exited 137\n")
+    (logs / "ismip7_fwd_9999777.err").write_text(
+        "[ 6] MUMPS error in solve: INFOG(1)=-3, INFO(2)=3\n"
+        "petsc4py.PETSc.Error: error code 76\n")
+    rc, log = routine(sandbox, "watch", env=env)
+    assert rc == 0, log
+    assert not (sandbox / "out" / "hist_cesm_waccm.blocked").exists(), log
+    (again,) = submits(sandbox)
+    assert "-J rt_out_hist_cesm_waccm" in again["argv"]
+    assert "aborted in the linear solver" in log and "resubmitting once" in log
+
+    # the same link ending on an ordinary driver error parks at once
+    (sandbox / "out" / "hist_cesm_waccm.jobs").write_text(f"{first} 2026-10-24T10:00:00-05:00\n")
+    (logs / "ismip7_fwd_9999777.err").write_text("RuntimeError: ISMIP7_FRACTURE=mask_front needs a mask\n")
+    rc, log = routine(sandbox, "watch", env=env)
+    assert rc == 0, log
+    blocked = (sandbox / "out" / "hist_cesm_waccm.blocked").read_text()
+    assert blocked.startswith("job 9999777: RuntimeError"), blocked
 
 
 def test_a_strict_routine_resubmits_a_link_the_watchdog_cancelled(sandbox):

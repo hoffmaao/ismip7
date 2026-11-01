@@ -20,7 +20,7 @@
   "site": "Rice NOTS, scavenge partition on cascadelake or sapphirerapids nodes in 1-hour chain links with auto-resume (12-hour commons links on 27 and 28 Oct), under the strict routine watch",
   "resources": "32 ranks, 128G (240G until 23 Oct), scpc_mumps; host-side MUMPS analysis from 28 Oct",
   "jobs": [
-    "2357880",
+    "2357882",
     "2382063",
     "2391089",
     "2394371",

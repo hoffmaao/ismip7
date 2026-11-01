@@ -16,7 +16,7 @@
   "melt": "Burgard quadratic with K 6.5e-5 and the per-basin deltaT of deltaT_per_basin_2000_K6.500e-05.npz, the constant mean-Antarctic slope",
   "front": "resistive-stress law (hfb, sigma_max 0.15 MPa) through icepack_tools, retreat only (ISMIP7_FRONT_ADVANCE=none) against the t=0 extent anchor, confined to floating ice (ISMIP7_CALVING_FLOATING_ONLY, after the Kemp Land cliff of 22 Oct), land fronts never calve, exact front push; the protocol ice-shelf collapse mask applied at the front (ISMIP7_FRACTURE=mask_front)",
   "apparent_mb": "none (ISMIP7_APPARENT_MB=0)",
-  "dt": "0.05 with adaptive substeps to 2107.075, then fixed 0.025 with transport subcycle retries 1, 4, 16 (ISMIP7_SUBCYCLES, David's regime)",
+  "dt": "0.05 with adaptive substeps to 2107.075, then fixed 0.025 with transport subcycle retries 1, 4, 16 (ISMIP7_SUBCYCLES, IU's regime)",
   "site": "Rice NOTS, scavenge partition on cascadelake or sapphirerapids nodes in 1-hour chain links with auto-resume (12-hour commons links on 27 and 28 Oct), under the strict routine watch",
   "resources": "32 ranks, 128G (240G until 23 Oct), scpc_mumps; host-side MUMPS analysis from 28 Oct",
   "jobs": [

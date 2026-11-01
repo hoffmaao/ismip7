@@ -17,8 +17,8 @@
   "front": "resistive-stress law (hfb, sigma_max 0.15 MPa) through icepack_tools, retreat only (ISMIP7_FRONT_ADVANCE=none) against the t=0 extent anchor, land fronts never calve, exact front push; no ice-shelf collapse (ISMIP7_FRACTURE=none)",
   "apparent_mb": "none (ISMIP7_APPARENT_MB=0)",
   "dt": "0.05 with adaptive transport substeps (1 m thickness-error tolerance, 4 to 64 substeps, the diagnostic re-solved per substep)",
-  "site": "Rice NOTS, scavenge partition on cascadelake or sapphirerapids nodes in 1-hour chain links with auto-resume (12-hour commons links on 27 and 28 Oct), under the strict routine watch",
-  "resources": "32 ranks, 128G (240G until 23 Oct), scpc_mumps; host-side MUMPS analysis from 28 Oct",
+  "site": "Rice NOTS, scavenge partition on cascadelake or sapphirerapids nodes in 1-hour chain links with auto-resume, under the strict routine watch",
+  "resources": "32 ranks, 240G, scpc_mumps with the distributed MUMPS analysis",
   "jobs": [
     "2330544"
   ],
@@ -29,7 +29,7 @@
   "results": "NOTS /scratch/ah301/ismip7-routine/antarctica/results/ocx_seq1f_2000_* (final state sha256 3c5db18586fb19b8...)",
   "audit": "resid 0.0000 Gt on all 460 rows; VAF +13.6 mm SLE and mass +352 Gt over 23 years against the observed loss (the discharge deficit of the relaxed MAP)",
   "ismip7_output": "2003 to 2025, 31 files on the 8 km grid (write_submission_line.sbatch with --esm ERA5 --scenario ocx, job 2391553, 24 Oct 2026, /scratch/ah301/ismip7-submit-seq1f/AIS/RICE/icepack2/CORE/C011); local copy ~/projects/ismip7-forward-tests/submit_rice_seq1f_2026-10-24/",
-  "checker": "ismip7-compliance-checker (isschecker 0.5.1) refuses the experiment by name (ocx is not in its list: historical, ssp370, ssp126, ssp585, ctrl), a checker limitation; David's C011 was uploaded the same way. The files follow the C001 recipe, which passes",
-  "uploaded": "Globus from the workstation endpoint icepack2-ismip7 to ccc9bbd2:/ISMIP7_submissions/AIS/icepack/icepack/CORE/C011/, 31 files, task b28a6d29-d01e-11f1-8f30-0effda64b40f SUCCEEDED 24 Oct 2026 (replacing the seq0f files uploaded earlier that day, 20217ea1); the RICE files sit beside David's AIS_IU_icepack2 files",
-  "notes": "stage of the initialization routine seq1f (initialization_routine.sh, /scratch/ah301/ismip7-routine-out/seq1f, started 21 Oct 2026 as the fresh submission line with calving); no 2002 staging was needed since OCX starts in 2003."
+  "checker": "ismip7-compliance-checker (isschecker 0.5.1) refuses the experiment by name (ocx is not in its list: historical, ssp370, ssp126, ssp585, ctrl), a checker limitation; IU's C011 was uploaded the same way. The files follow the C001 recipe, which passes",
+  "uploaded": "Globus from the workstation endpoint icepack2-ismip7 to ccc9bbd2:/ISMIP7_submissions/AIS/icepack/icepack/CORE/C011/, 31 files, task b28a6d29-d01e-11f1-8f30-0effda64b40f SUCCEEDED 24 Oct 2026 (replacing the seq0f files uploaded earlier that day, 20217ea1); the RICE files sit beside the IU AIS_IU_icepack2 files",
+  "notes": "stage of the initialization routine seq1f (initialization_routine.sh, /scratch/ah301/ismip7-routine-out/seq1f, started 21 Oct 2026 as the fresh submission line with calving); no 2002 staging was needed since OCX starts in 2003. The .jobs file of the stage lists only the routine-launched links; the chain successors are found by job name (sacct --name=rt_seq1f_ocx)."
 }

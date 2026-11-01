@@ -16,7 +16,7 @@
   "melt": "Burgard quadratic with K 6.5e-5 and the per-basin deltaT of deltaT_per_basin_2000_K6.500e-05.npz, the constant mean-Antarctic slope",
   "front": "resistive-stress law (hfb, sigma_max 0.15 MPa) through icepack_tools, retreat only (ISMIP7_FRONT_ADVANCE=none) against the t=0 extent anchor, confined to floating ice (ISMIP7_CALVING_FLOATING_ONLY, after the Kemp Land cliff of 22 Oct), land fronts never calve, exact front push; the protocol ice-shelf collapse mask applied at the front (ISMIP7_FRACTURE=mask_front)",
   "apparent_mb": "none (ISMIP7_APPARENT_MB=0)",
-  "dt": "0.05 with adaptive substeps to 2184.05, then fixed 0.025 with transport subcycle retries 1, 4, 16 (ISMIP7_SUBCYCLES, David's regime)",
+  "dt": "0.05 with adaptive substeps to 2184.05, then fixed 0.025 with transport subcycle retries 1, 4, 16 (ISMIP7_SUBCYCLES, IU's regime)",
   "site": "Rice NOTS, scavenge partition on cascadelake or sapphirerapids nodes in 1-hour chain links with auto-resume (12-hour commons links on 27 and 28 Oct), under the strict routine watch",
   "resources": "32 ranks, 128G (240G until 23 Oct), scpc_mumps; host-side MUMPS analysis from 28 Oct",
   "jobs": [
@@ -39,5 +39,5 @@
   "ismip7_output": "2015 to 2300, 31 files on the 8 km grid (write_submission_line.sbatch, job 2468628, /scratch/ah301/ismip7-submit-seq1f/AIS/RICE/icepack2/CORE/C005); local copy ~/projects/ismip7-forward-tests/submit_rice_seq1f_2026-10-29/",
   "checker": "ismip7-compliance-checker (isschecker 0.5.1, --variable-list ismip7): 0 errors in every test group; 2 warnings (strbasemag above the request's 1 MPa in under 0.005 % of the values (up to 6.4 MPa) and the non-mandatory variables)",
   "uploaded": "Globus per-file batch from the workstation endpoint icepack2-ismip7 to ccc9bbd2:/ISMIP7_submissions/AIS/icepack/icepack/CORE/C005/, 31 files, task 3c8b80e7-d5bc-11f1-866c-0affd629e535 SUCCEEDED 1 Nov 2026 01:20 CST (upload_2026-11-01.log in ~/projects/ismip7-forward-tests/submit_rice_seq1f_2026-10-29/)",
-  "notes": "stage of the initialization routine seq1f (initialization_routine.sh, /scratch/ah301/ismip7-routine-out/seq1f, started 21 Oct 2026 as the fresh submission line with calving). Time stepping: adaptive-substep regime to 2184.05 (the state the 28 Oct 23:12 relaunch resumed), fixed 0.025-yr step with subcycle retries from there to 2301 (the fast path Andrew chose on 28 Oct). The .jobs file of the stage lists only the routine-launched links; the chain successors are found by job name (sacct --name=rt_seq1f_ssp126_cesm_waccm)."
+  "notes": "stage of the initialization routine seq1f (initialization_routine.sh, /scratch/ah301/ismip7-routine-out/seq1f, started 21 Oct 2026 as the fresh submission line with calving). Time stepping: adaptive-substep regime to 2184.05 (the state the 28 Oct 23:12 relaunch resumed), fixed 0.025-yr step with subcycle retries from there to 2301 (the fast path chosen on 28 Oct). The .jobs file of the stage lists only the routine-launched links; the chain successors are found by job name (sacct --name=rt_seq1f_ssp126_cesm_waccm)."
 }

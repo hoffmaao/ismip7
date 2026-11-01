@@ -17,8 +17,8 @@
   "front": "resistive-stress law (hfb, sigma_max 0.15 MPa) through icepack_tools, retreat only (ISMIP7_FRONT_ADVANCE=none) against the t=0 extent anchor, land fronts never calve, exact front push; no ice-shelf collapse (ISMIP7_FRACTURE=none)",
   "apparent_mb": "none (ISMIP7_APPARENT_MB=0)",
   "dt": "0.05 with adaptive transport substeps (1 m thickness-error tolerance, 4 to 64 substeps, the diagnostic re-solved per substep)",
-  "site": "Rice NOTS, scavenge partition on cascadelake or sapphirerapids nodes in 1-hour chain links with auto-resume (12-hour commons links on 27 and 28 Oct), under the strict routine watch",
-  "resources": "32 ranks, 128G (240G until 23 Oct), scpc_mumps; host-side MUMPS analysis from 28 Oct",
+  "site": "Rice NOTS, scavenge partition on cascadelake or sapphirerapids nodes in 1-hour chain links with auto-resume, under the strict routine watch",
+  "resources": "32 ranks, 240G, scpc_mumps with the distributed MUMPS analysis",
   "jobs": [
     "2330542",
     "2342971"
@@ -31,6 +31,6 @@
   "audit": "resid 0.0000 Gt on every row of the timeseries; VAF +1.8 mm SLE and mass -1,900 Gt over the run; the finished historical gains volume above flotation as every seq1f historical does (discharge below the observed)",
   "ismip7_output": "2003 to 2014, 31 files on the 8 km grid, written on NOTS by write_ismip7_output.py from the staged 2003 to 2014 year files (write_submission_line.sbatch, job 2391552, 24 Oct 2026, /scratch/ah301/ismip7-submit-seq1f/AIS/RICE/icepack2/CORE/C002); local copy ~/projects/ismip7-forward-tests/submit_rice_seq1f_2026-10-24/",
   "checker": "ismip7-compliance-checker (isschecker 0.5.1, ISMIP7_variable_request.csv, --variable-list ismip7): 0 errors in every test group; 2 warnings (strbasemag above the request's 1 MPa in under 0.005 % of the values (up to 6.4 MPa) and the non-mandatory variables)",
-  "uploaded": "Globus from the workstation endpoint icepack2-ismip7 to ccc9bbd2:/ISMIP7_submissions/AIS/icepack/icepack/CORE/C002/, 31 files, task b1f2ddc0-d01e-11f1-ac33-0affd629e535 SUCCEEDED 24 Oct 2026 (replacing the seq0f files uploaded earlier that day, 1bafe9b1); the RICE files sit beside David's AIS_IU_icepack2 files",
-  "notes": "stage of the initialization routine seq1f (initialization_routine.sh, /scratch/ah301/ismip7-routine-out/seq1f, started 21 Oct 2026 as the fresh submission line with calving); the control, projections and the writer branch from its final state. Watch events: the stage was never parked."
+  "uploaded": "Globus from the workstation endpoint icepack2-ismip7 to ccc9bbd2:/ISMIP7_submissions/AIS/icepack/icepack/CORE/C002/, 31 files, task b1f2ddc0-d01e-11f1-ac33-0affd629e535 SUCCEEDED 24 Oct 2026 (replacing the seq0f files uploaded earlier that day, 1bafe9b1); the RICE files sit beside the IU AIS_IU_icepack2 files",
+  "notes": "stage of the initialization routine seq1f (initialization_routine.sh, /scratch/ah301/ismip7-routine-out/seq1f, started 21 Oct 2026 as the fresh submission line with calving); the control, projections and the writer branch from its final state. Watch events: the stage was never parked. The .jobs file of the stage lists only the routine-launched links; the chain successors are found by job name (sacct --name=rt_seq1f_hist_mri_esm2)."
 }

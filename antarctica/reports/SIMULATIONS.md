@@ -9,9 +9,9 @@ gitignored, so these records and the per-core reports beside them are
 the trace a run leaves in the repository. A core experiment also gets
 its full report from `core_report.py`; this is the index.
 
-426 records.
+437 records.
 
-Status: 12 planned, 5 running, 41 stopped, 347 done, 21 superseded.
+Status: 12 planned, 5 running, 41 stopped, 358 done, 21 superseded.
 
 ## Inversion
 
@@ -421,8 +421,10 @@ Status: 12 planned, 5 running, 41 stopped, 347 done, 21 superseded.
 | C001: historical with CESM2-WACCM | planned | antarctica_10000_1000_buffered20000 (Rice's build, 1,869,252 vertices), 1 km fine, 10 km interior, 20 km buffer | - | - | - | - |
 | C002: historical with MRI-ESM2-0 | planned | antarctica_10000_1000_buffered20000 (Rice's build, 1,869,252 vertices), 1 km fine, 10 km interior, 20 km buffer | - | - | - | - |
 | Core 1 at 2 km, IU Budd production: CESM2-WACCM historical from the relaxed MAP's controls on BedMachine geometry, without the apparent mass-balance reference | done | antarctica_5000_2000_buffered20000 (IU's build, 969,764 vertices), DG0 geometry, the MAP's own mesh (ISMIP7_MESH=checkpoint) | IU Quartz, general partition | 2026-10-10 | 2026-10-10 | resid at most 0.0000 Gt on 480 rows; 479 of 480 steps converged on their first direct solve, 6.7 Newton iterations on average and 13 at the most; 1 step rescued by the continuation ladder, no subcycle; VAF +15.5 mm SLE and mass +1,094 Gt over the run, dM/dt +306 Gt/yr in 2014; calving out of the fixed front 1,820 at step 1, 1,514 at step 2, 1,346 in 2004 and 1,295 in 2014 Gt/yr; peak speed 1.8e4 m/yr at t = 2004.28, (-766.5, 1,157.3) km |
+| Core 1 at 2 km: CESM2-WACCM historical of the submission line seq1f, with the resistive-stress calving law | done | antarctica_5000_2000_buffered0 (Rice's build, 925,183 vertices, 1,835,718 cells, 2 km fine, 5 km interior, no buffer), DG0 geometry, vertex raster sampling, ocean-drag gate on the 1,642 open-water cells beyond the t=0 extent | Rice NOTS, scavenge partition on cascadelake or sapphirerapids nodes in 1-hour chain links with auto-resume, under the strict routine watch | 2026-10-21 | 2026-10-21 | resid 0.0000 Gt on every row of the timeseries; VAF +1.6 mm SLE and mass -2,850 Gt over the run; the finished historical gains volume above flotation as every seq1f historical does (discharge below the observed) |
 | Core 1: historical with CESM2-WACCM | superseded | antarctica_320000_32000 | - | - | 2026-07-19 | OFF TRACK; the budget residual closes to zero |
 | Core 2 at 2 km, IU Budd production: MRI-ESM2-0 historical from the relaxed MAP's controls on BedMachine geometry, without the apparent mass-balance reference | done | antarctica_5000_2000_buffered20000 (IU's build, 969,764 vertices), DG0 geometry, the MAP's own mesh (ISMIP7_MESH=checkpoint) | IU Quartz, general partition | 2026-10-10 | 2026-10-10 | resid at most 0.0000 Gt on 480 rows; 479 of 480 steps converged on their first direct solve, 6.6 Newton iterations on average and 16 at the most; 1 step rescued by the continuation ladder, no subcycle; VAF +14.8 mm SLE and mass +1,718 Gt over the run, dM/dt +324 Gt/yr in 2014; calving out of the fixed front 1,820 at step 1, 1,513 at step 2, 1,348 in 2004 and 1,304 in 2014 Gt/yr; peak speed 1.8e4 m/yr at t = 2004.25, (-766.5, 1,157.3) km |
+| Core 2 at 2 km: MRI-ESM2-0 historical of the submission line seq1f, with the resistive-stress calving law | done | antarctica_5000_2000_buffered0 (Rice's build, 925,183 vertices, 1,835,718 cells, 2 km fine, 5 km interior, no buffer), DG0 geometry, vertex raster sampling, ocean-drag gate on the 1,642 open-water cells beyond the t=0 extent | Rice NOTS, scavenge partition on cascadelake or sapphirerapids nodes in 1-hour chain links with auto-resume, under the strict routine watch | 2026-10-21 | 2026-10-22 | resid 0.0000 Gt on every row of the timeseries; VAF +1.8 mm SLE and mass -1,900 Gt over the run; the finished historical gains volume above flotation as every seq1f historical does (discharge below the observed) |
 | Core 2: historical with MRI-ESM2-0 | superseded | antarctica_320000_32000 | - | - | 2026-07-19 | OFF TRACK; the budget residual closes to zero |
 | 1 km CESM2-WACCM historical at the production step | stopped | antarctica_10000_1000_buffered20000, 1 km fine, 10 km interior, 20 km buffer | nots, cascadelake | - | - | no rescue step in 78 model years |
 | 1 km MRI-ESM2-0 historical at the production step | stopped | antarctica_10000_1000_buffered20000, 1 km fine, 10 km interior, 20 km buffer | nots, cascadelake | - | - | no rescue step in 66 model years |
@@ -434,8 +436,10 @@ Status: 12 planned, 5 running, 41 stopped, 347 done, 21 superseded.
 | C009: ctrl with CESM2-WACCM | planned | antarctica_10000_1000_buffered20000 (Rice's build, 1,869,252 vertices), 1 km fine, 10 km interior, 20 km buffer | - | - | - | - |
 | C010: ctrl with MRI-ESM2-0 | planned | antarctica_10000_1000_buffered20000 (Rice's build, 1,869,252 vertices), 1 km fine, 10 km interior, 20 km buffer | - | - | - | - |
 | Core 9 at 2 km, IU Budd production: control on the CESM2-WACCM ctrl forcing, relaxed controls, without the apparent mass-balance reference | stopped | antarctica_5000_2000_buffered20000 (IU's build, 969,764 vertices, 1,928,285 cells), DG0 geometry, the MAP's own mesh (ISMIP7_MESH=checkpoint) | IU Quartz, general partition | 2026-10-11 | 2026-10-16 | ON TRACK; resid at most 0.0000 Gt on 7,138 rows; 7,138 of 7,138 steps converged on their first direct solve, 9.4 Newton iterations on average and 18 at the most, no rescue, no subcycle; VAF +157.6 mm SLE and mass +35,704 Gt over the run, dM/dt +194 Gt/yr in 2192; calving out of the fixed front 1,292 at step 1, 1,289 in 2016 and 1,331 in 2192 Gt/yr; peak speed 1.2e4 m/yr at t = 2055.05, (-1,528.3, -485.6) km |
+| Core 9 at 2 km: control on the CESM2-WACCM ctrl forcing of the submission line seq1f, with the resistive-stress calving law | done | antarctica_5000_2000_buffered0 (Rice's build, 925,183 vertices, 1,835,718 cells, 2 km fine, 5 km interior, no buffer), DG0 geometry, vertex raster sampling, ocean-drag gate on the 1,642 open-water cells beyond the t=0 extent | Rice NOTS, scavenge partition on cascadelake or sapphirerapids nodes in 1-hour chain links with auto-resume (12-hour commons links on 27 and 28 Oct), under the strict routine watch | 2026-10-21 | 2026-10-28 | resid 0.0000 Gt on all 5720 rows; VAF -65.2 mm SLE and mass -88,090 Gt over 286 years; the control drifts to mass loss under the fixed climatology once the shelves thin |
 | Core 9: CTRL2015 with CESM2-WACCM | superseded | antarctica_320000_32000 | - | - | 2026-07-20 | OFF TRACK; the budget residual closes to zero |
 | Core 10 at 2 km, IU Budd production: control on the MRI-ESM2-0 ctrl forcing, relaxed controls, without the apparent mass-balance reference | stopped | antarctica_5000_2000_buffered20000 (IU's build, 969,764 vertices, 1,928,285 cells), DG0 geometry, the MAP's own mesh (ISMIP7_MESH=checkpoint) | IU Quartz, general partition | 2026-10-11 | 2026-10-16 | ON TRACK; resid at most 0.0000 Gt on 7,178 rows; 7,178 of 7,178 steps converged on their first direct solve, 9.6 Newton iterations on average and 21 at the most, no rescue, no subcycle; VAF +172.5 mm SLE and mass +52,196 Gt over the run, dM/dt +267 Gt/yr in 2193; calving out of the fixed front 1,302 at step 1, 1,290 in 2016 and 1,360 in 2193 Gt/yr; peak speed 1.2e4 m/yr at t = 2055.53, (-1,528.3, -485.6) km |
+| Core 10 at 2 km: control on the MRI-ESM2-0 ctrl forcing of the submission line seq1f, with the resistive-stress calving law | done | antarctica_5000_2000_buffered0 (Rice's build, 925,183 vertices, 1,835,718 cells, 2 km fine, 5 km interior, no buffer), DG0 geometry, vertex raster sampling, ocean-drag gate on the 1,642 open-water cells beyond the t=0 extent | Rice NOTS, scavenge partition on cascadelake or sapphirerapids nodes in 1-hour chain links with auto-resume (12-hour commons links on 27 and 28 Oct), under the strict routine watch | 2026-10-22 | 2026-10-28 | resid 0.0000 Gt on all 5720 rows; VAF -28.9 mm SLE and mass -54,321 Gt over 286 years; the control drifts to mass loss under the fixed climatology once the shelves thin |
 | Core 10: CTRL2015 with MRI-ESM2-0 | superseded | antarctica_320000_32000 | - | - | 2026-07-20 | ON TRACK; the budget residual closes to zero |
 
 ## Projection
@@ -449,16 +453,22 @@ Status: 12 planned, 5 running, 41 stopped, 347 done, 21 superseded.
 | C007: ssp585 with CESM2-WACCM | planned | antarctica_10000_1000_buffered20000 (Rice's build, 1,869,252 vertices), 1 km fine, 10 km interior, 20 km buffer | - | - | - | - |
 | C008: ssp585 with MRI-ESM2-0 | planned | antarctica_10000_1000_buffered20000 (Rice's build, 1,869,252 vertices), 1 km fine, 10 km interior, 20 km buffer | - | - | - | - |
 | Core 3 at 2 km, IU Budd production: ssp370 CESM2-WACCM, relaxed controls, without the apparent mass-balance reference | done | antarctica_5000_2000_buffered20000 (IU's build, 969,764 vertices, 1,928,285 cells), DG0 geometry, the MAP's own mesh (ISMIP7_MESH=checkpoint) | IU Quartz, general partition | 2026-10-11 | 2026-10-14 | OFF TRACK (dM/dt (post-2016) -1461.6 [ -400.0, 200.0] Gt/yr FAIL); resid at most 0.0000 Gt on 3,440 rows; 3,440 of 3,440 steps converged on their first direct solve, 8.4 Newton iterations on average and 17 at the most, no rescue, no subcycle; VAF +53.3 mm SLE and mass -124,560 Gt over the run, dM/dt -3,028 Gt/yr in 2100; calving out of the fixed front 1,292 at step 1, 1,287 in 2016 and 1,066 in 2100 Gt/yr; peak speed 2.7e4 m/yr at t = 2099.25, (-1,761.8, 956.4) km |
+| Core 3 at 2 km: SSP3-7.0 CESM2-WACCM projection of the submission line seq1f, with the resistive-stress calving law and the collapse mask | done | antarctica_5000_2000_buffered0 (Rice's build, 925,183 vertices, 1,835,718 cells, 2 km fine, 5 km interior, no buffer), DG0 geometry, vertex raster sampling, ocean-drag gate on the 1,642 open-water cells beyond the t=0 extent | Rice NOTS, scavenge partition on cascadelake or sapphirerapids nodes in 1-hour chain links with auto-resume (12-hour commons links on 27 and 28 Oct), under the strict routine watch | 2026-10-22 | 2026-10-27 | resid 0.0000 Gt on all 1720 rows; VAF -20.3 mm SLE and mass -205,096 Gt over the run |
 | Core 3: ssp370 with CESM2-WACCM | superseded | antarctica_320000_32000 | - | - | 2026-07-20 | OFF TRACK; the budget residual closes to zero |
 | Core 4 at 2 km, IU Budd production: ssp370 MRI-ESM2-0, relaxed controls, without the apparent mass-balance reference | done | antarctica_5000_2000_buffered20000 (IU's build, 969,764 vertices, 1,928,285 cells), DG0 geometry, the MAP's own mesh (ISMIP7_MESH=checkpoint) | IU Quartz, general partition | 2026-10-11 | 2026-10-14 | ON TRACK; resid at most 0.0000 Gt on 3,440 rows; 3,440 of 3,440 steps converged on their first direct solve, 8.8 Newton iterations on average and 18 at the most, no rescue, no subcycle; VAF +120.3 mm SLE and mass +10,413 Gt over the run, dM/dt -208 Gt/yr in 2100; calving out of the fixed front 1,302 at step 1, 1,290 in 2016 and 1,330 in 2100 Gt/yr; peak speed 1.2e4 m/yr at t = 2053.28, (-1,528.3, -485.6) km |
+| Core 4 at 2 km: SSP3-7.0 MRI-ESM2-0 projection of the submission line seq1f, with the resistive-stress calving law and the collapse mask | done | antarctica_5000_2000_buffered0 (Rice's build, 925,183 vertices, 1,835,718 cells, 2 km fine, 5 km interior, no buffer), DG0 geometry, vertex raster sampling, ocean-drag gate on the 1,642 open-water cells beyond the t=0 extent | Rice NOTS, scavenge partition on cascadelake or sapphirerapids nodes in 1-hour chain links with auto-resume (12-hour commons links on 27 and 28 Oct), under the strict routine watch | 2026-10-22 | 2026-10-26 | resid 0.0000 Gt on all 1720 rows; VAF +31.6 mm SLE and mass -55,674 Gt over the run |
 | Core 4: ssp370 with MRI-ESM2-0 | superseded | antarctica_320000_32000 | - | - | 2026-07-19 | ON TRACK; the budget residual closes to zero |
 | Core 5 at 2 km, IU Budd production: ssp126 CESM2-WACCM, relaxed controls, without the apparent mass-balance reference | stopped | antarctica_5000_2000_buffered20000 (IU's build, 969,764 vertices, 1,928,285 cells), DG0 geometry, the MAP's own mesh (ISMIP7_MESH=checkpoint) | IU Quartz, general partition | 2026-10-11 | 2026-10-16 | OFF TRACK (dM/dt (post-2016) -1019.0 [ -400.0, 200.0] Gt/yr FAIL); resid at most 0.0000 Gt on 7,632 rows; 7,632 of 7,632 steps converged on their first direct solve, 9.0 Newton iterations on average and 18 at the most, no rescue, no subcycle; VAF -84.7 mm SLE and mass -193,604 Gt over the run, dM/dt -1,268 Gt/yr in 2204; calving out of the fixed front 1,292 at step 1, 1,286 in 2016 and 1,170 in 2204 Gt/yr; peak speed 2.5e4 m/yr at t = 2108.93, (-1,761.8, 956.4) km |
+| Core 5 at 2 km: SSP1-2.6 CESM2-WACCM projection of the submission line seq1f, with the resistive-stress calving law and the collapse mask | done | antarctica_5000_2000_buffered0 (Rice's build, 925,183 vertices, 1,835,718 cells, 2 km fine, 5 km interior, no buffer), DG0 geometry, vertex raster sampling, ocean-drag gate on the 1,642 open-water cells beyond the t=0 extent | Rice NOTS, scavenge partition on cascadelake or sapphirerapids nodes in 1-hour chain links with auto-resume (12-hour commons links on 27 and 28 Oct), under the strict routine watch | 2026-10-22 | 2026-10-30 | resid 0.0000 Gt on all 8043 rows; VAF -270.0 mm SLE and mass -486,539 Gt over the run |
 | Core 5: ssp126 with CESM2-WACCM | superseded | antarctica_320000_32000 | - | - | 2026-07-20 | OFF TRACK; the budget residual closes to zero |
 | Core 6 at 2 km, IU Budd production: ssp126 MRI-ESM2-0, relaxed controls, without the apparent mass-balance reference | done | antarctica_5000_2000_buffered20000 (IU's build, 969,764 vertices, 1,928,285 cells), DG0 geometry, the MAP's own mesh (ISMIP7_MESH=checkpoint) | IU Quartz, general partition | 2026-10-11 | 2026-10-18 | ON TRACK; resid at most 0.0000 Gt on 11,440 rows; 11,440 of 11,440 steps converged on their first direct solve, 9.5 Newton iterations on average and 22 at the most, no rescue, no subcycle; VAF +305.7 mm SLE and mass +73,966 Gt over the run, dM/dt -252 Gt/yr in 2300; calving out of the fixed front 1,302 at step 1, 1,290 in 2016 and 1,382 in 2300 Gt/yr; peak speed 1.7e4 m/yr at t = 2201.07, (-114.6, -543.6) km |
+| Core 6 at 2 km: SSP1-2.6 MRI-ESM2-0 projection of the submission line seq1f, with the resistive-stress calving law and the collapse mask | done | antarctica_5000_2000_buffered0 (Rice's build, 925,183 vertices, 1,835,718 cells, 2 km fine, 5 km interior, no buffer), DG0 geometry, vertex raster sampling, ocean-drag gate on the 1,642 open-water cells beyond the t=0 extent | Rice NOTS, scavenge partition on cascadelake or sapphirerapids nodes in 1-hour chain links with auto-resume (12-hour commons links on 27 and 28 Oct), under the strict routine watch | 2026-10-22 | 2026-10-29 | resid 0.0000 Gt on all 6782 rows; VAF +6.7 mm SLE and mass -87,634 Gt over the run |
 | Core 6: ssp126 with MRI-ESM2-0 | superseded | antarctica_320000_32000 | - | - | 2026-07-20 | ON TRACK; the budget residual closes to zero |
 | Core 7 at 2 km, IU Budd production: ssp585 CESM2-WACCM, relaxed controls, without the apparent mass-balance reference | done | antarctica_5000_2000_buffered20000 (IU's build, 969,764 vertices, 1,928,285 cells), DG0 geometry, the MAP's own mesh (ISMIP7_MESH=checkpoint) | IU Quartz, general partition | 2026-10-11 | 2026-10-21 | OFF TRACK (SMB -2138.6 [ 2000.0, 2900.0] Gt/yr FAIL; shelf basal melt 66679.3 [ 600.0, 1800.0] Gt/yr FAIL; dM/dt (post-2016) -10444.6 [ -400.0, 200.0] Gt/yr FAIL; dVAF/dt (post-2016) -15.5 [ -2.0, 2.0] mm SLE/yr FAIL); resid at most 0.0000 Gt on 11,440 rows; 11,426 of 11,440 steps converged on their first direct solve, 11.2 Newton iterations on average and 191 at the most; 14 steps rescued by the continuation ladder, no subcycle; VAF -4,412.2 mm SLE and mass -2,976,705 Gt over the run, dM/dt -18,669 Gt/yr in 2300; calving out of the fixed front 1,292 at step 1, 1,287 in 2016 and 508 in 2300 Gt/yr; peak speed 8.8e8 m/yr at t = 2170.97, (161.7, -720.2) km |
+| Core 7 at 2 km: SSP5-8.5 CESM2-WACCM projection of the submission line seq1f, with the resistive-stress calving law and the collapse mask | done | antarctica_5000_2000_buffered0 (Rice's build, 925,183 vertices, 1,835,718 cells, 2 km fine, 5 km interior, no buffer), DG0 geometry, vertex raster sampling, ocean-drag gate on the 1,642 open-water cells beyond the t=0 extent | Rice NOTS, scavenge partition on cascadelake or sapphirerapids nodes in 1-hour chain links with auto-resume (12-hour commons links on 27 and 28 Oct), under the strict routine watch | 2026-10-22 | 2026-10-31 | resid 0.0000 Gt on all 9599 rows; VAF -2,773.5 mm SLE and mass -2,541,177 Gt over the run |
 | Core 7: ssp585 with CESM2-WACCM | superseded | antarctica_320000_32000 | - | - | 2026-07-20 | OFF TRACK; the budget residual closes to zero |
 | Core 8 at 2 km, IU Budd production: ssp585 MRI-ESM2-0, relaxed controls, without the apparent mass-balance reference | stopped | antarctica_5000_2000_buffered20000 (IU's build, 969,764 vertices, 1,928,285 cells), DG0 geometry, the MAP's own mesh (ISMIP7_MESH=checkpoint) | IU Quartz, general partition | 2026-10-11 | 2026-10-16 | OFF TRACK (shelf basal melt 4688.2 [ 600.0, 1800.0] Gt/yr FAIL; dM/dt (post-2016) -3277.7 [ -400.0, 200.0] Gt/yr FAIL); resid at most 0.0000 Gt on 6,610 rows; 6,626 of 6,626 steps converged on their first direct solve (16 solves repeated after the resume from the 2045 checkpoint), 9.4 Newton iterations on average and 23 at the most, no rescue, no subcycle; VAF -177.3 mm SLE and mass -538,204 Gt over the run, dM/dt -10,847 Gt/yr in 2179; calving out of the fixed front 1,302 at step 1, 1,289 in 2016 and 849 in 2179 Gt/yr; peak speed 2.0e5 m/yr at t = 2148.03, (-210.7, -423.1) km |
+| Core 8 at 2 km: SSP5-8.5 MRI-ESM2-0 projection of the submission line seq1f, with the resistive-stress calving law and the collapse mask | done | antarctica_5000_2000_buffered0 (Rice's build, 925,183 vertices, 1,835,718 cells, 2 km fine, 5 km interior, no buffer), DG0 geometry, vertex raster sampling, ocean-drag gate on the 1,642 open-water cells beyond the t=0 extent | Rice NOTS, scavenge partition on cascadelake or sapphirerapids nodes in 1-hour chain links with auto-resume (12-hour commons links on 27 and 28 Oct), under the strict routine watch | 2026-10-22 | 2026-10-31 | resid 0.0000 Gt on all 9456 rows; VAF -1,588.0 mm SLE and mass -1,926,808 Gt over the run |
 | Core 8: ssp585 with MRI-ESM2-0 | superseded | antarctica_320000_32000 | - | - | 2026-07-20 | OFF TRACK; the budget residual closes to zero |
 
 ## Ocx
@@ -467,6 +477,7 @@ Status: 12 planned, 5 running, 41 stopped, 347 done, 21 superseded.
 |---|---|---|---|---|---|---|
 | C011: OCX main with observations | planned | antarctica_10000_1000_buffered20000 (Rice's build, 1,869,252 vertices), 1 km fine, 10 km interior, 20 km buffer | - | - | - | - |
 | Core 11 at 2 km, IU Budd production: OCX on the protocol forcing, relaxed controls, without the apparent mass-balance reference | done | antarctica_5000_2000_buffered20000 (IU's build, 969,764 vertices, 1,928,285 cells), DG0 geometry, the MAP's own mesh (ISMIP7_MESH=checkpoint) | IU Quartz, general partition | 2026-10-11 | 2026-10-12 | ON TRACK; resid at most 0.0000 Gt on 920 rows; 919 of 920 steps converged on their first direct solve, 6.2 Newton iterations on average and 14 at the most; 1 step rescued by the continuation ladder, no subcycle; VAF +40.0 mm SLE and mass +8,645 Gt over the run, dM/dt +575 Gt/yr in 2025; calving out of the fixed front 1,820 at step 1, 1,346 in 2004 and 1,288 in 2025 Gt/yr; peak speed 1.8e4 m/yr at t = 2004.33, (-766.5, 1,157.3) km |
+| Core 11 at 2 km: observation-forced OCX run of the submission line seq1f, with the resistive-stress calving law | done | antarctica_5000_2000_buffered0 (Rice's build, 925,183 vertices, 1,835,718 cells, 2 km fine, 5 km interior, no buffer), DG0 geometry, vertex raster sampling, ocean-drag gate on the 1,642 open-water cells beyond the t=0 extent | Rice NOTS, scavenge partition on cascadelake or sapphirerapids nodes in 1-hour chain links with auto-resume, under the strict routine watch | 2026-10-21 | 2026-10-21 | resid 0.0000 Gt on all 460 rows; VAF +13.6 mm SLE and mass +352 Gt over 23 years against the observed loss (the discharge deficit of the relaxed MAP) |
 | Core 11: OCX, observation constrained | superseded | antarctica_320000_32000 | - | - | 2026-07-20 | ON TRACK; the budget residual closes to zero |
 
 ## Output
@@ -9595,6 +9606,38 @@ Core 1 at 2 km, IU Budd production: CESM2-WACCM historical from the relaxed MAP'
 - **Scalars processed:** ismip7-scalars 0.1.0 sla20, slg20 and slvaf written (job 12250516); compare_scalars.py exit 0; notes: area factor: the native scalars carry it too (--native-af2), so the area term is zero; the exact sums' worst \|C - N\| is 1.87e-05 of their L1 (tendlifmassbf 2008), against an allowance of 5.93e-04; maximum-extent mask: 0 pixels carry ice or flux outside maxmask1; lim +0.000%, limnsw +0.000%, slvaf +0.000%, slg20 +0.000%; fill convention: acabf and libmassbffl are whole-pixel means (flux_pixel_mean), the tool's own, so nothing is undone and the fill term is zero; tendlibmassbffl: the fill leaves out no melt beyond the exact sums' tolerance in any year (largest difference +0.0 Gt/yr, 2003); tendlifmassbf: the melt booked in cells with no floating ice at year end (issues #109 and #136) is at most -6.5 Gt/yr (2003); slvaf: residual +6.12% of max \|N\| (2014), above 2%; slg20: residual +6.09% of max \|N\| (2014), above 2%; sla20: residual +6.09% of max \|N\| (2014), above 2%
 - **Notes:** the start of IU's 2 km Budd production suite (tag r2kiurlcnoamb; antarctica/reports/rehearsal_25km_iu.md, section 'The relaxed line' and section 'The 2 km production suite'): every control and projection of this ESM branches from this run's 2015 state. Step 2's direct solve stopped at 200 Newton iterations and the rescue continuation completed the step; every later step converged directly. Initial velocity misfit 3.21e3. Final state sha256 56c7b555d2f5ca00099cb0ecda0cce3bc5a1124f08286c09c46d9e400e9f84c8. Report: antarctica/reports/core01_hist_cesm2_waccm_2km_r2kiurlcnoamb.md.
 
+### core01-2km-hist-cesm2waccm-seq1f
+
+Core 1 at 2 km: CESM2-WACCM historical of the submission line seq1f, with the resistive-stress calving law (done), Rice.
+
+- **Task type:** historical
+- **ISMIP7 exp id:** C001
+- **ESM:** CESM2-WACCM
+- **Scenario:** historical
+- **Period (yr):** 2002 to 2015 (a 2002 spin-up year before the 2003 to 2014 core years), reached 2015.0
+- **Friction law:** budd, sub-element (SEP1) with N_hat=1
+- **Mesh:** antarctica_5000_2000_buffered0 (Rice's build, 925,183 vertices, 1,835,718 cells, 2 km fine, 5 km interior, no buffer), DG0 geometry, vertex raster sampling, ocean-drag gate on the 1,642 open-water cells beyond the t=0 extent
+- **Initial state / MAP:** seq1's relaxed re-inverted MAP, /scratch/ah301/ismip7-routine-out/seq1/map_r_friction2.h5 (md5 2dad56d40a1fdd654f909301335946ca, 14 Oct 2026): sequential Budd inversion on the sub-element friction (shelf fluidity then friction, 60/60/30/30 iterations) warm-started from the 13 Oct release MAP map_hf5k_w14k_rho75k_snap20261013b.h5, Pattyn fluidity prior, sqrt friction control, bilaplacian prior with rho 7.5 km for the fluidity and 75 km for the friction, sigma-normalised misfit scaled by 14000, dH/dt term weight 1 under a 5 km Helmholtz filter; then a 20-year relaxation 2015 to 2035 on the control climatology and the same re-inversion on the relaxed geometry with the fluidity control on floating ice only
+- **Branch from:** cold start from the MAP, geometry backdated 12 years with the Smith dH/dt (ISMIP7_ROUTINE_HIST_START=2002)
+- **Forcing versions:** ISMIP7 CESM2-WACCM historical: RACMO2.4p1 baseline with the re-referenced acabf anomaly and dacabfdz, ocean tf and so, from the NOTS data root /scratch/ah301/ismip7-dataroot/AIS
+- **Melt: K, slope, deltaT:** Burgard quadratic with K 6.5e-5 and the per-basin deltaT of deltaT_per_basin_2000_K6.500e-05.npz, the constant mean-Antarctic slope
+- **Calving front, collapse:** resistive-stress law (hfb, sigma_max 0.15 MPa) through icepack_tools, retreat only (ISMIP7_FRONT_ADVANCE=none) against the t=0 extent anchor, land fronts never calve, exact front push; no ice-shelf collapse (ISMIP7_FRACTURE=none)
+- **Apparent MB:** none (ISMIP7_APPARENT_MB=0)
+- **dt (yr):** 0.05 with adaptive transport substeps (1 m thickness-error tolerance, 4 to 64 substeps, the diagnostic re-solved per substep)
+- **Site / partition:** Rice NOTS, scavenge partition on cascadelake or sapphirerapids nodes in 1-hour chain links with auto-resume, under the strict routine watch
+- **Ranks / memory:** 32 ranks, 240G, scpc_mumps with the distributed MUMPS analysis
+- **Job ids:** 2330540
+- **Code:** NOTS checkout /scratch/ah301/ismip7-routine on the fix/routine-restart-budget line at af29fe07 (the 20 to 24 Oct restart, watch and retry fixes cherry-picked while the suite ran; merged as icepack/ismip7 pull requests 176 and 177), icepack_tools on fix/front-face-rate
+- **Started:** 2026-10-21
+- **Finished:** 2026-10-21
+- **Cost per model year:** 5 chain links, 3.7 h of wall time at 32 ranks (118 core-hours), about 17 min per model year
+- **Results path:** NOTS /scratch/ah301/ismip7-routine/antarctica/results/hist_cesm2_waccm_seq1f_2000_* (final state sha256 cb8098e327f55399...)
+- **Audit:** resid 0.0000 Gt on every row of the timeseries; VAF +1.6 mm SLE and mass -2,850 Gt over the run; the finished historical gains volume above flotation as every seq1f historical does (discharge below the observed)
+- **ISMIP7 output written:** 2003 to 2014, 31 files on the 8 km grid, written on NOTS by write_ismip7_output.py from the staged 2003 to 2014 year files (write_submission_line.sbatch, job 2391551, 24 Oct 2026, /scratch/ah301/ismip7-submit-seq1f/AIS/RICE/icepack2/CORE/C001); local copy ~/projects/ismip7-forward-tests/submit_rice_seq1f_2026-10-24/
+- **Regridded, isschecker:** ismip7-compliance-checker (isschecker 0.5.1, ISMIP7_variable_request.csv, --variable-list ismip7): 0 errors in every test group; 2 warnings (strbasemag above the request's 1 MPa in under 0.005 % of the values (up to 6.4 MPa) and the non-mandatory variables)
+- **Uploaded:** Globus from the workstation endpoint icepack2-ismip7 to ccc9bbd2:/ISMIP7_submissions/AIS/icepack/icepack/CORE/C001/, 31 files, task b14e501d-d01e-11f1-88cd-0effda64b40f SUCCEEDED 24 Oct 2026 (replacing the seq0f files uploaded earlier that day, 1ad3b17b); the RICE files sit beside the IU AIS_IU_icepack2 files
+- **Notes:** stage of the initialization routine seq1f (initialization_routine.sh, /scratch/ah301/ismip7-routine-out/seq1f, started 21 Oct 2026 as the fresh submission line with calving); the control, projections and the writer branch from its final state. Watch events: the stage was never parked. The .jobs file of the stage lists only the routine-launched links; the chain successors are found by job name (sacct --name=rt_seq1f_hist_cesm_waccm).
+
 ### core01-32km-hist-cesm2waccm
 
 Core 1: historical with CESM2-WACCM (superseded), Rice.
@@ -9646,6 +9689,38 @@ Core 2 at 2 km, IU Budd production: MRI-ESM2-0 historical from the relaxed MAP's
 - **Regridded, isschecker:** isschecker 0.5.1: 0 errors, 2 warnings, the non-mandatory variables the model does not write and strbasemag maximum 1.9 MPa against the accepted 1 MPa on 43 of 2,570,284 values
 - **Scalars processed:** ismip7-scalars 0.1.0 sla20, slg20 and slvaf written (job 12250517); compare_scalars.py exit 0; notes: area factor: the native scalars carry it too (--native-af2), so the area term is zero; the exact sums' worst \|C - N\| is 1.54e-05 of their L1 (tendlifmassbf 2010), against an allowance of 5.93e-04; maximum-extent mask: 0 pixels carry ice or flux outside maxmask1; lim +0.000%, limnsw +0.000%, slvaf +0.000%, slg20 +0.000%; fill convention: acabf and libmassbffl are whole-pixel means (flux_pixel_mean), the tool's own, so nothing is undone and the fill term is zero; tendlibmassbffl: the fill leaves out no melt beyond the exact sums' tolerance in any year (largest difference +0.0 Gt/yr, 2003); tendlifmassbf: the melt booked in cells with no floating ice at year end (issues #109 and #136) is at most -6.7 Gt/yr (2003); slvaf: residual +6.00% of max \|N\| (2014), above 2%; slg20: residual +5.96% of max \|N\| (2014), above 2%; sla20: residual +5.96% of max \|N\| (2014), above 2%
 - **Notes:** the start of IU's 2 km Budd production suite (tag r2kiurlcnoamb; antarctica/reports/rehearsal_25km_iu.md, section 'The relaxed line' and section 'The 2 km production suite'): every control and projection of this ESM branches from this run's 2015 state. Step 2's direct solve stopped at 200 Newton iterations and the rescue continuation completed the step; every later step converged directly. Initial velocity misfit 3.21e3. Final state sha256 b427b174908efbfb9dba62d98dc94c95251915588953903c52e97096e785814c. Report: antarctica/reports/core02_hist_mri_esm2_0_2km_r2kiurlcnoamb.md.
+
+### core02-2km-hist-mriesm20-seq1f
+
+Core 2 at 2 km: MRI-ESM2-0 historical of the submission line seq1f, with the resistive-stress calving law (done), Rice.
+
+- **Task type:** historical
+- **ISMIP7 exp id:** C002
+- **ESM:** MRI-ESM2-0
+- **Scenario:** historical
+- **Period (yr):** 2002 to 2015 (a 2002 spin-up year before the 2003 to 2014 core years), reached 2015.0
+- **Friction law:** budd, sub-element (SEP1) with N_hat=1
+- **Mesh:** antarctica_5000_2000_buffered0 (Rice's build, 925,183 vertices, 1,835,718 cells, 2 km fine, 5 km interior, no buffer), DG0 geometry, vertex raster sampling, ocean-drag gate on the 1,642 open-water cells beyond the t=0 extent
+- **Initial state / MAP:** seq1's relaxed re-inverted MAP, /scratch/ah301/ismip7-routine-out/seq1/map_r_friction2.h5 (md5 2dad56d40a1fdd654f909301335946ca, 14 Oct 2026): sequential Budd inversion on the sub-element friction (shelf fluidity then friction, 60/60/30/30 iterations) warm-started from the 13 Oct release MAP map_hf5k_w14k_rho75k_snap20261013b.h5, Pattyn fluidity prior, sqrt friction control, bilaplacian prior with rho 7.5 km for the fluidity and 75 km for the friction, sigma-normalised misfit scaled by 14000, dH/dt term weight 1 under a 5 km Helmholtz filter; then a 20-year relaxation 2015 to 2035 on the control climatology and the same re-inversion on the relaxed geometry with the fluidity control on floating ice only
+- **Branch from:** cold start from the MAP, geometry backdated 12 years with the Smith dH/dt (ISMIP7_ROUTINE_HIST_START=2002)
+- **Forcing versions:** ISMIP7 MRI-ESM2-0 historical: RACMO2.4p1 baseline with the re-referenced acabf anomaly and dacabfdz, ocean tf and so, from the NOTS data root /scratch/ah301/ismip7-dataroot/AIS
+- **Melt: K, slope, deltaT:** Burgard quadratic with K 6.5e-5 and the per-basin deltaT of deltaT_per_basin_2000_K6.500e-05.npz, the constant mean-Antarctic slope
+- **Calving front, collapse:** resistive-stress law (hfb, sigma_max 0.15 MPa) through icepack_tools, retreat only (ISMIP7_FRONT_ADVANCE=none) against the t=0 extent anchor, land fronts never calve, exact front push; no ice-shelf collapse (ISMIP7_FRACTURE=none)
+- **Apparent MB:** none (ISMIP7_APPARENT_MB=0)
+- **dt (yr):** 0.05 with adaptive transport substeps (1 m thickness-error tolerance, 4 to 64 substeps, the diagnostic re-solved per substep)
+- **Site / partition:** Rice NOTS, scavenge partition on cascadelake or sapphirerapids nodes in 1-hour chain links with auto-resume, under the strict routine watch
+- **Ranks / memory:** 32 ranks, 240G, scpc_mumps with the distributed MUMPS analysis
+- **Job ids:** 2330542 2342971
+- **Code:** NOTS checkout /scratch/ah301/ismip7-routine on the fix/routine-restart-budget line at af29fe07 (the 20 to 24 Oct restart, watch and retry fixes cherry-picked while the suite ran; merged as icepack/ismip7 pull requests 176 and 177), icepack_tools on fix/front-face-rate
+- **Started:** 2026-10-21
+- **Finished:** 2026-10-22
+- **Cost per model year:** 6 chain links, 3.7 h of wall time at 32 ranks (118 core-hours), about 17 min per model year
+- **Results path:** NOTS /scratch/ah301/ismip7-routine/antarctica/results/hist_mri_esm2_0_seq1f_2000_* (final state sha256 2b59f57716a87147...)
+- **Audit:** resid 0.0000 Gt on every row of the timeseries; VAF +1.8 mm SLE and mass -1,900 Gt over the run; the finished historical gains volume above flotation as every seq1f historical does (discharge below the observed)
+- **ISMIP7 output written:** 2003 to 2014, 31 files on the 8 km grid, written on NOTS by write_ismip7_output.py from the staged 2003 to 2014 year files (write_submission_line.sbatch, job 2391552, 24 Oct 2026, /scratch/ah301/ismip7-submit-seq1f/AIS/RICE/icepack2/CORE/C002); local copy ~/projects/ismip7-forward-tests/submit_rice_seq1f_2026-10-24/
+- **Regridded, isschecker:** ismip7-compliance-checker (isschecker 0.5.1, ISMIP7_variable_request.csv, --variable-list ismip7): 0 errors in every test group; 2 warnings (strbasemag above the request's 1 MPa in under 0.005 % of the values (up to 6.4 MPa) and the non-mandatory variables)
+- **Uploaded:** Globus from the workstation endpoint icepack2-ismip7 to ccc9bbd2:/ISMIP7_submissions/AIS/icepack/icepack/CORE/C002/, 31 files, task b1f2ddc0-d01e-11f1-ac33-0affd629e535 SUCCEEDED 24 Oct 2026 (replacing the seq0f files uploaded earlier that day, 1bafe9b1); the RICE files sit beside the IU AIS_IU_icepack2 files
+- **Notes:** stage of the initialization routine seq1f (initialization_routine.sh, /scratch/ah301/ismip7-routine-out/seq1f, started 21 Oct 2026 as the fresh submission line with calving); the control, projections and the writer branch from its final state. Watch events: the stage was never parked. The .jobs file of the stage lists only the routine-launched links; the chain successors are found by job name (sacct --name=rt_seq1f_hist_mri_esm2).
 
 ### core02-32km-hist-mriesm20
 
@@ -9761,6 +9836,38 @@ Core 9 at 2 km, IU Budd production: control on the CESM2-WACCM ctrl forcing, rel
 - **ISMIP7 output written:** annual files banked to the year before it stopped; not written to the 8 km grid, checked or run through the scalar tool, since the line is not submitted
 - **Notes:** IU's 2 km Budd production suite (antarctica/reports/rehearsal_25km_iu.md, section 'The 2 km production suite'). On 16 October the group decided not to submit IU's line. IU cancelled this core at 2193.45 on 16 October, keeping only ssp585 CESM2-WACCM (the fastest retreat) and ssp126 MRI-ESM2-0 (the farthest along) running; its three latest five-yearly checkpoints are kept, so it can resume. Latest checkpoint ctrl2015_cesm2_waccm_r2kiurlcnoamb_2000_t2193.3.h5, sha256 25eea9c99787a3c5da9cb370759786a20c0b20acc3c33cbf42a81924f39f67b9. Report: antarctica/reports/core09_ctrl2015_cesm2_waccm_2km_r2kiurlcnoamb.md.
 
+### core09-2km-ctrl2015-cesm2waccm-seq1f
+
+Core 9 at 2 km: control on the CESM2-WACCM ctrl forcing of the submission line seq1f, with the resistive-stress calving law (done), Rice.
+
+- **Task type:** control
+- **ISMIP7 exp id:** C009
+- **ESM:** CESM2-WACCM
+- **Scenario:** ctrl
+- **Period (yr):** 2015 to 2301, reached 2301.0
+- **Friction law:** budd, sub-element (SEP1) with N_hat=1
+- **Mesh:** antarctica_5000_2000_buffered0 (Rice's build, 925,183 vertices, 1,835,718 cells, 2 km fine, 5 km interior, no buffer), DG0 geometry, vertex raster sampling, ocean-drag gate on the 1,642 open-water cells beyond the t=0 extent
+- **Initial state / MAP:** seq1's relaxed re-inverted MAP, /scratch/ah301/ismip7-routine-out/seq1/map_r_friction2.h5 (md5 2dad56d40a1fdd654f909301335946ca, 14 Oct 2026): sequential Budd inversion on the sub-element friction (shelf fluidity then friction, 60/60/30/30 iterations) warm-started from the 13 Oct release MAP map_hf5k_w14k_rho75k_snap20261013b.h5, Pattyn fluidity prior, sqrt friction control, bilaplacian prior with rho 7.5 km for the fluidity and 75 km for the friction, sigma-normalised misfit scaled by 14000, dH/dt term weight 1 under a 5 km Helmholtz filter; then a 20-year relaxation 2015 to 2035 on the control climatology and the same re-inversion on the relaxed geometry with the fluidity control on floating ice only
+- **Branch from:** core01-2km-hist-cesm2waccm-seq1f at 2015.0 (hist_cesm2_waccm_seq1f_2000_final.h5), launched by the routine's next hook
+- **Forcing versions:** RACMO2.4p1 SMB climatology 2000 to 2029 with the CESM2-WACCM ctrl dacabfdz; ocean tf and so from the CESM2-WACCM ctrl forcing
+- **Melt: K, slope, deltaT:** Burgard quadratic with K 6.5e-5 and the per-basin deltaT of deltaT_per_basin_2000_K6.500e-05.npz, the constant mean-Antarctic slope
+- **Calving front, collapse:** resistive-stress law (hfb, sigma_max 0.15 MPa) through icepack_tools, retreat only (ISMIP7_FRONT_ADVANCE=none) against the t=0 extent anchor, land fronts never calve, exact front push; no ice-shelf collapse (ISMIP7_FRACTURE=none)
+- **Apparent MB:** none (ISMIP7_APPARENT_MB=0)
+- **dt (yr):** 0.05 with adaptive transport substeps (1 m thickness-error tolerance, 4 to 64 substeps, the diagnostic re-solved per substep)
+- **Site / partition:** Rice NOTS, scavenge partition on cascadelake or sapphirerapids nodes in 1-hour chain links with auto-resume (12-hour commons links on 27 and 28 Oct), under the strict routine watch
+- **Ranks / memory:** 32 ranks, 128G (240G until 23 Oct), scpc_mumps; host-side MUMPS analysis from 28 Oct
+- **Job ids:** 2339211 2357257 2382144 2386661 2397534 2411323 2436562
+- **Code:** NOTS checkout /scratch/ah301/ismip7-routine on the fix/routine-restart-budget line at af29fe07 (the 20 to 24 Oct restart, watch and retry fixes cherry-picked while the suite ran; merged as icepack/ismip7 pull requests 176 and 177), icepack_tools on fix/front-face-rate
+- **Started:** 2026-10-21
+- **Finished:** 2026-10-28
+- **Cost per model year:** 95 chain links (2 failed on node faults and 4 cancelled by the watch for a stall, all resubmitted), 88.3 h of wall time at 32 ranks (2826 core-hours), about 19 min per model year
+- **Results path:** NOTS /scratch/ah301/ismip7-routine/antarctica/results/ctrl2015_cesm2_waccm_seq1f_2000_*
+- **Audit:** resid 0.0000 Gt on all 5720 rows; VAF -65.2 mm SLE and mass -88,090 Gt over 286 years; the control drifts to mass loss under the fixed climatology once the shelves thin
+- **ISMIP7 output written:** 2015 to 2300, 31 files on the 8 km grid (write_submission_line.sbatch, job 2455573, 29 Oct 2026, /scratch/ah301/ismip7-submit-seq1f/AIS/RICE/icepack2/CORE/C009); local copy ~/projects/ismip7-forward-tests/submit_rice_seq1f_2026-10-29/
+- **Regridded, isschecker:** ismip7-compliance-checker (isschecker 0.5.1, --variable-list ismip7): 0 errors in every test group; 2 warnings (strbasemag above the request's 1 MPa in under 0.005 % of the values (up to 6.4 MPa) and the non-mandatory variables)
+- **Uploaded:** Globus per-file batch from the workstation endpoint icepack2-ismip7 to ccc9bbd2:/ISMIP7_submissions/AIS/icepack/icepack/CORE/C009/, 31 files, task 3ebfbbf6-d5bc-11f1-abab-0affd629e535 SUCCEEDED 1 Nov 2026 01:20 CST (upload_2026-11-01.log in ~/projects/ismip7-forward-tests/submit_rice_seq1f_2026-10-29/)
+- **Notes:** stage of the initialization routine seq1f (initialization_routine.sh, /scratch/ah301/ismip7-routine-out/seq1f, started 21 Oct 2026 as the fresh submission line with calving). The 20-year relaxation that preceded the re-inversion ran on this same climatology, so the control starts from a relaxed geometry; it ran entirely in the adaptive-substep regime. The .jobs file of the stage lists only the routine-launched links; the chain successors are found by job name (sacct --name=rt_seq1f_control_cesm_waccm).
+
 ### core09-32km-ctrl2015-cesm2waccm
 
 Core 9: CTRL2015 with CESM2-WACCM (superseded), Rice.
@@ -9810,6 +9917,38 @@ Core 10 at 2 km, IU Budd production: control on the MRI-ESM2-0 ctrl forcing, rel
 - **Audit:** ON TRACK; resid at most 0.0000 Gt on 7,178 rows; 7,178 of 7,178 steps converged on their first direct solve, 9.6 Newton iterations on average and 21 at the most, no rescue, no subcycle; VAF +172.5 mm SLE and mass +52,196 Gt over the run, dM/dt +267 Gt/yr in 2193; calving out of the fixed front 1,302 at step 1, 1,290 in 2016 and 1,360 in 2193 Gt/yr; peak speed 1.2e4 m/yr at t = 2055.53, (-1,528.3, -485.6) km
 - **ISMIP7 output written:** annual files banked to the year before it stopped; not written to the 8 km grid, checked or run through the scalar tool, since the line is not submitted
 - **Notes:** IU's 2 km Budd production suite (antarctica/reports/rehearsal_25km_iu.md, section 'The 2 km production suite'). On 16 October the group decided not to submit IU's line. IU cancelled this core at 2194.45 on 16 October, keeping only ssp585 CESM2-WACCM (the fastest retreat) and ssp126 MRI-ESM2-0 (the farthest along) running; its three latest five-yearly checkpoints are kept, so it can resume. Latest checkpoint ctrl2015_mri_esm2_0_r2kiurlcnoamb_2000_t2191.5.h5, sha256 8a629308bd38ba2e6f4af7256604218eb0acbb0130eb62d6d9ce6449d3e6fbc3. Report: antarctica/reports/core10_ctrl2015_mri_esm2_0_2km_r2kiurlcnoamb.md.
+
+### core10-2km-ctrl2015-mriesm20-seq1f
+
+Core 10 at 2 km: control on the MRI-ESM2-0 ctrl forcing of the submission line seq1f, with the resistive-stress calving law (done), Rice.
+
+- **Task type:** control
+- **ISMIP7 exp id:** C010
+- **ESM:** MRI-ESM2-0
+- **Scenario:** ctrl
+- **Period (yr):** 2015 to 2301, reached 2301.0
+- **Friction law:** budd, sub-element (SEP1) with N_hat=1
+- **Mesh:** antarctica_5000_2000_buffered0 (Rice's build, 925,183 vertices, 1,835,718 cells, 2 km fine, 5 km interior, no buffer), DG0 geometry, vertex raster sampling, ocean-drag gate on the 1,642 open-water cells beyond the t=0 extent
+- **Initial state / MAP:** seq1's relaxed re-inverted MAP, /scratch/ah301/ismip7-routine-out/seq1/map_r_friction2.h5 (md5 2dad56d40a1fdd654f909301335946ca, 14 Oct 2026): sequential Budd inversion on the sub-element friction (shelf fluidity then friction, 60/60/30/30 iterations) warm-started from the 13 Oct release MAP map_hf5k_w14k_rho75k_snap20261013b.h5, Pattyn fluidity prior, sqrt friction control, bilaplacian prior with rho 7.5 km for the fluidity and 75 km for the friction, sigma-normalised misfit scaled by 14000, dH/dt term weight 1 under a 5 km Helmholtz filter; then a 20-year relaxation 2015 to 2035 on the control climatology and the same re-inversion on the relaxed geometry with the fluidity control on floating ice only
+- **Branch from:** core02-2km-hist-mriesm20-seq1f at 2015.0 (hist_mri_esm2_0_seq1f_2000_final.h5), launched by the routine's next hook
+- **Forcing versions:** RACMO2.4p1 SMB climatology 2000 to 2029 with the MRI-ESM2-0 ctrl dacabfdz; ocean tf and so from the MRI-ESM2-0 ctrl forcing
+- **Melt: K, slope, deltaT:** Burgard quadratic with K 6.5e-5 and the per-basin deltaT of deltaT_per_basin_2000_K6.500e-05.npz, the constant mean-Antarctic slope
+- **Calving front, collapse:** resistive-stress law (hfb, sigma_max 0.15 MPa) through icepack_tools, retreat only (ISMIP7_FRONT_ADVANCE=none) against the t=0 extent anchor, land fronts never calve, exact front push; no ice-shelf collapse (ISMIP7_FRACTURE=none)
+- **Apparent MB:** none (ISMIP7_APPARENT_MB=0)
+- **dt (yr):** 0.05 with adaptive transport substeps (1 m thickness-error tolerance, 4 to 64 substeps, the diagnostic re-solved per substep)
+- **Site / partition:** Rice NOTS, scavenge partition on cascadelake or sapphirerapids nodes in 1-hour chain links with auto-resume (12-hour commons links on 27 and 28 Oct), under the strict routine watch
+- **Ranks / memory:** 32 ranks, 128G (240G until 23 Oct), scpc_mumps; host-side MUMPS analysis from 28 Oct
+- **Job ids:** 2349597 2397011 2412832 2436563
+- **Code:** NOTS checkout /scratch/ah301/ismip7-routine on the fix/routine-restart-budget line at af29fe07 (the 20 to 24 Oct restart, watch and retry fixes cherry-picked while the suite ran; merged as icepack/ismip7 pull requests 176 and 177), icepack_tools on fix/front-face-rate
+- **Started:** 2026-10-22
+- **Finished:** 2026-10-28
+- **Cost per model year:** 82 chain links (1 failed on node faults and 2 cancelled by the watch for a stall, all resubmitted), 83.3 h of wall time at 32 ranks (2666 core-hours), about 17 min per model year
+- **Results path:** NOTS /scratch/ah301/ismip7-routine/antarctica/results/ctrl2015_mri_esm2_0_seq1f_2000_*
+- **Audit:** resid 0.0000 Gt on all 5720 rows; VAF -28.9 mm SLE and mass -54,321 Gt over 286 years; the control drifts to mass loss under the fixed climatology once the shelves thin
+- **ISMIP7 output written:** 2015 to 2300, 31 files on the 8 km grid (write_submission_line.sbatch, job 2455574, 29 Oct 2026, /scratch/ah301/ismip7-submit-seq1f/AIS/RICE/icepack2/CORE/C010); local copy ~/projects/ismip7-forward-tests/submit_rice_seq1f_2026-10-29/
+- **Regridded, isschecker:** ismip7-compliance-checker (isschecker 0.5.1, --variable-list ismip7): 0 errors in every test group; 2 warnings (strbasemag above the request's 1 MPa in under 0.005 % of the values (up to 6.4 MPa) and the non-mandatory variables)
+- **Uploaded:** Globus per-file batch from the workstation endpoint icepack2-ismip7 to ccc9bbd2:/ISMIP7_submissions/AIS/icepack/icepack/CORE/C010/, 31 files, task 3f6110f6-d5bc-11f1-9077-02ffc7f41b19 SUCCEEDED 1 Nov 2026 01:20 CST (upload_2026-11-01.log in ~/projects/ismip7-forward-tests/submit_rice_seq1f_2026-10-29/)
+- **Notes:** stage of the initialization routine seq1f (initialization_routine.sh, /scratch/ah301/ismip7-routine-out/seq1f, started 21 Oct 2026 as the fresh submission line with calving). The 20-year relaxation that preceded the re-inversion ran on this same climatology, so the control starts from a relaxed geometry; it ran entirely in the adaptive-substep regime. The .jobs file of the stage lists only the routine-launched links; the chain successors are found by job name (sacct --name=rt_seq1f_control_mri_esm2).
 
 ### core10-32km-ctrl2015-mriesm20
 
@@ -9954,6 +10093,38 @@ Core 3 at 2 km, IU Budd production: ssp370 CESM2-WACCM, relaxed controls, withou
 - **Scalars processed:** ismip7-scalars 0.1.0 sla20, slg20 and slvaf written (job 12252472); compare_scalars.py exit 0; notes: area factor: the native scalars carry it too (--native-af2), so the area term is zero; the exact sums' worst \|C - N\| is 1.66e-05 of their L1 (tendlifmassbf 2048), against an allowance of 5.93e-04; maximum-extent mask: 0 pixels carry ice or flux outside maxmask1; lim +0.000%, limnsw +0.000%, slvaf +0.000%, slg20 +0.000%; fill convention: acabf and libmassbffl are whole-pixel means (flux_pixel_mean), the tool's own, so nothing is undone and the fill term is zero; tendlibmassbffl: the fill leaves out no melt beyond the exact sums' tolerance in any year (largest difference +0.0 Gt/yr, 2032); tendlifmassbf: the melt booked in cells with no floating ice at year end (issues #109 and #136) is at most -9.2 Gt/yr (2094); slvaf: residual +8.63% of max \|N\| (2100), above 2%; slg20: residual +9.42% of max \|N\| (2100), above 2%; sla20: residual +9.42% of max \|N\| (2100), above 2%
 - **Notes:** IU's 2 km Budd production suite (antarctica/reports/rehearsal_25km_iu.md, section 'The 2 km production suite'). On 16 October the group decided not to submit IU's line. Final state sha256 5ac592f9f90e0a17ea97809fbc607c094a44ff6de3d8ac664fdcd7c9b6117ead. Report: antarctica/reports/core03_ssp370_cesm2_waccm_2km_r2kiurlcnoamb.md.
 
+### core03-2km-ssp370-cesm2waccm-seq1f
+
+Core 3 at 2 km: SSP3-7.0 CESM2-WACCM projection of the submission line seq1f, with the resistive-stress calving law and the collapse mask (done), Rice.
+
+- **Task type:** projection
+- **ISMIP7 exp id:** C003
+- **ESM:** CESM2-WACCM
+- **Scenario:** ssp370
+- **Period (yr):** 2015 to 2101, reached 2101.0
+- **Friction law:** budd, sub-element (SEP1) with N_hat=1
+- **Mesh:** antarctica_5000_2000_buffered0 (Rice's build, 925,183 vertices, 1,835,718 cells, 2 km fine, 5 km interior, no buffer), DG0 geometry, vertex raster sampling, ocean-drag gate on the 1,642 open-water cells beyond the t=0 extent
+- **Initial state / MAP:** seq1's relaxed re-inverted MAP, /scratch/ah301/ismip7-routine-out/seq1/map_r_friction2.h5 (md5 2dad56d40a1fdd654f909301335946ca, 14 Oct 2026): sequential Budd inversion on the sub-element friction (shelf fluidity then friction, 60/60/30/30 iterations) warm-started from the 13 Oct release MAP map_hf5k_w14k_rho75k_snap20261013b.h5, Pattyn fluidity prior, sqrt friction control, bilaplacian prior with rho 7.5 km for the fluidity and 75 km for the friction, sigma-normalised misfit scaled by 14000, dH/dt term weight 1 under a 5 km Helmholtz filter; then a 20-year relaxation 2015 to 2035 on the control climatology and the same re-inversion on the relaxed geometry with the fluidity control on floating ice only
+- **Branch from:** core01-2km-hist-cesm2waccm-seq1f at 2015.0 (hist_cesm2_waccm_seq1f_2000_final.h5), launched by the routine's next hook
+- **Forcing versions:** ISMIP7 CESM2-WACCM ssp370: RACMO2.4p1 baseline with the re-referenced acabf anomaly and dacabfdz, ocean tf and so; the protocol ice-shelf collapse mask (v2.1)
+- **Melt: K, slope, deltaT:** Burgard quadratic with K 6.5e-5 and the per-basin deltaT of deltaT_per_basin_2000_K6.500e-05.npz, the constant mean-Antarctic slope
+- **Calving front, collapse:** resistive-stress law (hfb, sigma_max 0.15 MPa) through icepack_tools, retreat only (ISMIP7_FRONT_ADVANCE=none) against the t=0 extent anchor, confined to floating ice (ISMIP7_CALVING_FLOATING_ONLY, after the Kemp Land cliff of 22 Oct), land fronts never calve, exact front push; the protocol ice-shelf collapse mask applied at the front (ISMIP7_FRACTURE=mask_front)
+- **Apparent MB:** none (ISMIP7_APPARENT_MB=0)
+- **dt (yr):** 0.05 with adaptive transport substeps (1 m thickness-error tolerance, 4 to 64 substeps, the diagnostic re-solved per substep)
+- **Site / partition:** Rice NOTS, scavenge partition on cascadelake or sapphirerapids nodes in 1-hour chain links with auto-resume (12-hour commons links on 27 and 28 Oct), under the strict routine watch
+- **Ranks / memory:** 32 ranks, 128G (240G until 23 Oct), scpc_mumps; host-side MUMPS analysis from 28 Oct
+- **Job ids:** 2357882 2382063 2391089 2394371 2409116 2422504 2436564
+- **Code:** NOTS checkout /scratch/ah301/ismip7-routine on the fix/routine-restart-budget line at af29fe07 (the 20 to 24 Oct restart, watch and retry fixes cherry-picked while the suite ran; merged as icepack/ismip7 pull requests 176 and 177), icepack_tools on fix/front-face-rate
+- **Started:** 2026-10-22
+- **Finished:** 2026-10-27
+- **Cost per model year:** 79 chain links (3 failed on node faults or solver aborts, 2 cancelled by the watch for a stall, 2 timed out, all resubmitted), 60.7 h of wall time at 32 ranks (1942 core-hours), about 42 min per model year
+- **Results path:** NOTS /scratch/ah301/ismip7-routine/antarctica/results/ssp370_cesm2_waccm_seq1f_2000_*
+- **Audit:** resid 0.0000 Gt on all 1720 rows; VAF -20.3 mm SLE and mass -205,096 Gt over the run
+- **ISMIP7 output written:** 2015 to 2100, 31 files on the 8 km grid (write_submission_line.sbatch, job 2455571, /scratch/ah301/ismip7-submit-seq1f/AIS/RICE/icepack2/CORE/C003); local copy ~/projects/ismip7-forward-tests/submit_rice_seq1f_2026-10-29/
+- **Regridded, isschecker:** ismip7-compliance-checker (isschecker 0.5.1, --variable-list ismip7): 0 errors in every test group; 2 warnings (strbasemag above the request's 1 MPa in under 0.005 % of the values (up to 6.4 MPa) and the non-mandatory variables)
+- **Uploaded:** Globus per-file batch from the workstation endpoint icepack2-ismip7 to ccc9bbd2:/ISMIP7_submissions/AIS/icepack/icepack/CORE/C003/, 31 files, task 3b665e1d-d5bc-11f1-88f8-0effda64b40f SUCCEEDED 1 Nov 2026 01:20 CST (upload_2026-11-01.log in ~/projects/ismip7-forward-tests/submit_rice_seq1f_2026-10-29/)
+- **Notes:** stage of the initialization routine seq1f (initialization_routine.sh, /scratch/ah301/ismip7-routine-out/seq1f, started 21 Oct 2026 as the fresh submission line with calving). Time stepping: ran entirely in the adaptive-substep regime. The .jobs file of the stage lists only the routine-launched links; the chain successors are found by job name (sacct --name=rt_seq1f_ssp370_cesm_waccm).
+
 ### core03-32km-ssp370-cesm2waccm
 
 Core 3: ssp370 with CESM2-WACCM (superseded), Rice.
@@ -10006,6 +10177,38 @@ Core 4 at 2 km, IU Budd production: ssp370 MRI-ESM2-0, relaxed controls, without
 - **Scalars processed:** ismip7-scalars 0.1.0 sla20, slg20 and slvaf written (job 12252606); compare_scalars.py exit 0; notes: area factor: the native scalars carry it too (--native-af2), so the area term is zero; the exact sums' worst \|C - N\| is 1.67e-05 of their L1 (tendlifmassbf 2021), against an allowance of 5.93e-04; maximum-extent mask: 0 pixels carry ice or flux outside maxmask1; lim +0.000%, limnsw +0.000%, slvaf +0.000%, slg20 +0.000%; fill convention: acabf and libmassbffl are whole-pixel means (flux_pixel_mean), the tool's own, so nothing is undone and the fill term is zero; tendlibmassbffl: the fill leaves out no melt beyond the exact sums' tolerance in any year (largest difference +0.0 Gt/yr, 2032); tendlifmassbf: the melt booked in cells with no floating ice at year end (issues #109 and #136) is at most -2.1 Gt/yr (2100); slvaf: residual +2.20% of max \|N\| (2100), above 2%; slg20: residual +2.19% of max \|N\| (2100), above 2%; sla20: residual +2.19% of max \|N\| (2100), above 2%
 - **Notes:** IU's 2 km Budd production suite (antarctica/reports/rehearsal_25km_iu.md, section 'The 2 km production suite'). On 16 October the group decided not to submit IU's line. Final state sha256 055fd9e61a4baa8005ca11e41c914bca46a686b12c5ea9282202d566461e7e95. Report: antarctica/reports/core04_ssp370_mri_esm2_0_2km_r2kiurlcnoamb.md.
 
+### core04-2km-ssp370-mriesm20-seq1f
+
+Core 4 at 2 km: SSP3-7.0 MRI-ESM2-0 projection of the submission line seq1f, with the resistive-stress calving law and the collapse mask (done), Rice.
+
+- **Task type:** projection
+- **ISMIP7 exp id:** C004
+- **ESM:** MRI-ESM2-0
+- **Scenario:** ssp370
+- **Period (yr):** 2015 to 2101, reached 2101.0
+- **Friction law:** budd, sub-element (SEP1) with N_hat=1
+- **Mesh:** antarctica_5000_2000_buffered0 (Rice's build, 925,183 vertices, 1,835,718 cells, 2 km fine, 5 km interior, no buffer), DG0 geometry, vertex raster sampling, ocean-drag gate on the 1,642 open-water cells beyond the t=0 extent
+- **Initial state / MAP:** seq1's relaxed re-inverted MAP, /scratch/ah301/ismip7-routine-out/seq1/map_r_friction2.h5 (md5 2dad56d40a1fdd654f909301335946ca, 14 Oct 2026): sequential Budd inversion on the sub-element friction (shelf fluidity then friction, 60/60/30/30 iterations) warm-started from the 13 Oct release MAP map_hf5k_w14k_rho75k_snap20261013b.h5, Pattyn fluidity prior, sqrt friction control, bilaplacian prior with rho 7.5 km for the fluidity and 75 km for the friction, sigma-normalised misfit scaled by 14000, dH/dt term weight 1 under a 5 km Helmholtz filter; then a 20-year relaxation 2015 to 2035 on the control climatology and the same re-inversion on the relaxed geometry with the fluidity control on floating ice only
+- **Branch from:** core02-2km-hist-mriesm20-seq1f at 2015.0 (hist_mri_esm2_0_seq1f_2000_final.h5), launched by the routine's next hook
+- **Forcing versions:** ISMIP7 MRI-ESM2-0 ssp370: RACMO2.4p1 baseline with the re-referenced acabf anomaly and dacabfdz, ocean tf and so; the protocol ice-shelf collapse mask (v2.1)
+- **Melt: K, slope, deltaT:** Burgard quadratic with K 6.5e-5 and the per-basin deltaT of deltaT_per_basin_2000_K6.500e-05.npz, the constant mean-Antarctic slope
+- **Calving front, collapse:** resistive-stress law (hfb, sigma_max 0.15 MPa) through icepack_tools, retreat only (ISMIP7_FRONT_ADVANCE=none) against the t=0 extent anchor, confined to floating ice (ISMIP7_CALVING_FLOATING_ONLY, after the Kemp Land cliff of 22 Oct), land fronts never calve, exact front push; the protocol ice-shelf collapse mask applied at the front (ISMIP7_FRACTURE=mask_front)
+- **Apparent MB:** none (ISMIP7_APPARENT_MB=0)
+- **dt (yr):** 0.05 with adaptive transport substeps (1 m thickness-error tolerance, 4 to 64 substeps, ceiling 256 from 25 Oct, the diagnostic re-solved per substep)
+- **Site / partition:** Rice NOTS, scavenge partition on cascadelake or sapphirerapids nodes in 1-hour chain links with auto-resume (12-hour commons links on 27 and 28 Oct), under the strict routine watch
+- **Ranks / memory:** 32 ranks, 128G (240G until 23 Oct), scpc_mumps; host-side MUMPS analysis from 28 Oct
+- **Job ids:** 2357885 2382064 2397421 2408118
+- **Code:** NOTS checkout /scratch/ah301/ismip7-routine on the fix/routine-restart-budget line at af29fe07 (the 20 to 24 Oct restart, watch and retry fixes cherry-picked while the suite ran; merged as icepack/ismip7 pull requests 176 and 177), icepack_tools on fix/front-face-rate
+- **Started:** 2026-10-22
+- **Finished:** 2026-10-26
+- **Cost per model year:** 52 chain links (2 failed on node faults or solver aborts, 1 cancelled by the watch for a stall, 1 timed out, all resubmitted), 53.7 h of wall time at 32 ranks (1718 core-hours), about 37 min per model year
+- **Results path:** NOTS /scratch/ah301/ismip7-routine/antarctica/results/ssp370_mri_esm2_0_seq1f_2000_*
+- **Audit:** resid 0.0000 Gt on all 1720 rows; VAF +31.6 mm SLE and mass -55,674 Gt over the run
+- **ISMIP7 output written:** 2015 to 2100, 31 files on the 8 km grid (write_submission_line.sbatch, job 2455572, /scratch/ah301/ismip7-submit-seq1f/AIS/RICE/icepack2/CORE/C004); local copy ~/projects/ismip7-forward-tests/submit_rice_seq1f_2026-10-29/
+- **Regridded, isschecker:** ismip7-compliance-checker (isschecker 0.5.1, --variable-list ismip7): 0 errors in every test group; 2 warnings (strbasemag above the request's 1 MPa in under 0.005 % of the values (up to 6.4 MPa) and the non-mandatory variables)
+- **Uploaded:** Globus per-file batch from the workstation endpoint icepack2-ismip7 to ccc9bbd2:/ISMIP7_submissions/AIS/icepack/icepack/CORE/C004/, 31 files, task 3bff18fd-d5bc-11f1-b713-0effda64b40f SUCCEEDED 1 Nov 2026 01:20 CST (upload_2026-11-01.log in ~/projects/ismip7-forward-tests/submit_rice_seq1f_2026-10-29/)
+- **Notes:** stage of the initialization routine seq1f (initialization_routine.sh, /scratch/ah301/ismip7-routine-out/seq1f, started 21 Oct 2026 as the fresh submission line with calving). Time stepping: ran entirely in the adaptive-substep regime; the substep ceiling was raised to 256 on 25 Oct to pass the Moscow University Ice Shelf front cell at 2091 to 2092. The .jobs file of the stage lists only the routine-launched links; the chain successors are found by job name (sacct --name=rt_seq1f_ssp370_mri_esm2).
+
 ### core04-32km-ssp370-mriesm20
 
 Core 4: ssp370 with MRI-ESM2-0 (superseded), Rice.
@@ -10055,6 +10258,38 @@ Core 5 at 2 km, IU Budd production: ssp126 CESM2-WACCM, relaxed controls, withou
 - **Audit:** OFF TRACK (dM/dt (post-2016) -1019.0 [ -400.0, 200.0] Gt/yr FAIL); resid at most 0.0000 Gt on 7,632 rows; 7,632 of 7,632 steps converged on their first direct solve, 9.0 Newton iterations on average and 18 at the most, no rescue, no subcycle; VAF -84.7 mm SLE and mass -193,604 Gt over the run, dM/dt -1,268 Gt/yr in 2204; calving out of the fixed front 1,292 at step 1, 1,286 in 2016 and 1,170 in 2204 Gt/yr; peak speed 2.5e4 m/yr at t = 2108.93, (-1,761.8, 956.4) km
 - **ISMIP7 output written:** annual files banked to the year before it stopped; not written to the 8 km grid, checked or run through the scalar tool, since the line is not submitted
 - **Notes:** IU's 2 km Budd production suite (antarctica/reports/rehearsal_25km_iu.md, section 'The 2 km production suite'). On 16 October the group decided not to submit IU's line. IU cancelled this core at 2205.80 on 16 October, keeping only ssp585 CESM2-WACCM (the fastest retreat) and ssp126 MRI-ESM2-0 (the farthest along) running; its three latest five-yearly checkpoints are kept, so it can resume. Latest checkpoint ssp126_cesm2_waccm_r2kiurlcnoamb_2000_t2205.4.h5, sha256 e9a9ed7b8474c1197877ebc46a49fbd949deffbe281c26f6a9f49e4f83bd24ff. Report: antarctica/reports/core05_ssp126_cesm2_waccm_2km_r2kiurlcnoamb.md.
+
+### core05-2km-ssp126-cesm2waccm-seq1f
+
+Core 5 at 2 km: SSP1-2.6 CESM2-WACCM projection of the submission line seq1f, with the resistive-stress calving law and the collapse mask (done), Rice.
+
+- **Task type:** projection
+- **ISMIP7 exp id:** C005
+- **ESM:** CESM2-WACCM
+- **Scenario:** ssp126
+- **Period (yr):** 2015 to 2301, reached 2301.0
+- **Friction law:** budd, sub-element (SEP1) with N_hat=1
+- **Mesh:** antarctica_5000_2000_buffered0 (Rice's build, 925,183 vertices, 1,835,718 cells, 2 km fine, 5 km interior, no buffer), DG0 geometry, vertex raster sampling, ocean-drag gate on the 1,642 open-water cells beyond the t=0 extent
+- **Initial state / MAP:** seq1's relaxed re-inverted MAP, /scratch/ah301/ismip7-routine-out/seq1/map_r_friction2.h5 (md5 2dad56d40a1fdd654f909301335946ca, 14 Oct 2026): sequential Budd inversion on the sub-element friction (shelf fluidity then friction, 60/60/30/30 iterations) warm-started from the 13 Oct release MAP map_hf5k_w14k_rho75k_snap20261013b.h5, Pattyn fluidity prior, sqrt friction control, bilaplacian prior with rho 7.5 km for the fluidity and 75 km for the friction, sigma-normalised misfit scaled by 14000, dH/dt term weight 1 under a 5 km Helmholtz filter; then a 20-year relaxation 2015 to 2035 on the control climatology and the same re-inversion on the relaxed geometry with the fluidity control on floating ice only
+- **Branch from:** core01-2km-hist-cesm2waccm-seq1f at 2015.0 (hist_cesm2_waccm_seq1f_2000_final.h5), launched by the routine's next hook
+- **Forcing versions:** ISMIP7 CESM2-WACCM ssp126: RACMO2.4p1 baseline with the re-referenced acabf anomaly and dacabfdz, ocean tf and so; the protocol ice-shelf collapse mask (v2.1)
+- **Melt: K, slope, deltaT:** Burgard quadratic with K 6.5e-5 and the per-basin deltaT of deltaT_per_basin_2000_K6.500e-05.npz, the constant mean-Antarctic slope
+- **Calving front, collapse:** resistive-stress law (hfb, sigma_max 0.15 MPa) through icepack_tools, retreat only (ISMIP7_FRONT_ADVANCE=none) against the t=0 extent anchor, confined to floating ice (ISMIP7_CALVING_FLOATING_ONLY, after the Kemp Land cliff of 22 Oct), land fronts never calve, exact front push; the protocol ice-shelf collapse mask applied at the front (ISMIP7_FRACTURE=mask_front)
+- **Apparent MB:** none (ISMIP7_APPARENT_MB=0)
+- **dt (yr):** 0.05 with adaptive substeps to 2184.05, then fixed 0.025 with transport subcycle retries 1, 4, 16 (ISMIP7_SUBCYCLES, IU's regime)
+- **Site / partition:** Rice NOTS, scavenge partition on cascadelake or sapphirerapids nodes in 1-hour chain links with auto-resume (12-hour commons links on 27 and 28 Oct), under the strict routine watch
+- **Ranks / memory:** 32 ranks, 128G (240G until 23 Oct), scpc_mumps; host-side MUMPS analysis from 28 Oct
+- **Job ids:** 2357880 2397014 2408258 2408358 2408554 2436635 2436636 2453873 2455570
+- **Code:** NOTS checkout /scratch/ah301/ismip7-routine on the fix/routine-restart-budget line at af29fe07 (the 20 to 24 Oct restart, watch and retry fixes cherry-picked while the suite ran; merged as icepack/ismip7 pull requests 176 and 177), icepack_tools on fix/front-face-rate
+- **Started:** 2026-10-22
+- **Finished:** 2026-10-30
+- **Cost per model year:** 141 chain links (2 failed on node faults or solver aborts, 7 cancelled by the watch for a stall, 1 timed out, all resubmitted), 136.2 h of wall time at 32 ranks (4358 core-hours), about 29 min per model year
+- **Results path:** NOTS /scratch/ah301/ismip7-routine/antarctica/results/ssp126_cesm2_waccm_seq1f_2000_*
+- **Audit:** resid 0.0000 Gt on all 8043 rows; VAF -270.0 mm SLE and mass -486,539 Gt over the run
+- **ISMIP7 output written:** 2015 to 2300, 31 files on the 8 km grid (write_submission_line.sbatch, job 2468628, /scratch/ah301/ismip7-submit-seq1f/AIS/RICE/icepack2/CORE/C005); local copy ~/projects/ismip7-forward-tests/submit_rice_seq1f_2026-10-29/
+- **Regridded, isschecker:** ismip7-compliance-checker (isschecker 0.5.1, --variable-list ismip7): 0 errors in every test group; 2 warnings (strbasemag above the request's 1 MPa in under 0.005 % of the values (up to 6.4 MPa) and the non-mandatory variables)
+- **Uploaded:** Globus per-file batch from the workstation endpoint icepack2-ismip7 to ccc9bbd2:/ISMIP7_submissions/AIS/icepack/icepack/CORE/C005/, 31 files, task 3c8b80e7-d5bc-11f1-866c-0affd629e535 SUCCEEDED 1 Nov 2026 01:20 CST (upload_2026-11-01.log in ~/projects/ismip7-forward-tests/submit_rice_seq1f_2026-10-29/)
+- **Notes:** stage of the initialization routine seq1f (initialization_routine.sh, /scratch/ah301/ismip7-routine-out/seq1f, started 21 Oct 2026 as the fresh submission line with calving). Time stepping: adaptive-substep regime to 2184.05 (the state the 28 Oct 23:12 relaunch resumed), fixed 0.025-yr step with subcycle retries from there to 2301 (the fast path chosen on 28 Oct). The .jobs file of the stage lists only the routine-launched links; the chain successors are found by job name (sacct --name=rt_seq1f_ssp126_cesm_waccm).
 
 ### core05-32km-ssp126-cesm2waccm
 
@@ -10108,6 +10343,38 @@ Core 6 at 2 km, IU Budd production: ssp126 MRI-ESM2-0, relaxed controls, without
 - **Scalars processed:** ismip7-scalars 0.1.0 sla20, slg20 and slvaf written (job 12312758); compare_scalars.py exit 0; notes: area factor: the native scalars carry it too (--native-af2), so the area term is zero; the exact sums' worst \|C - N\| is 1.64e-05 of their L1 (tendlifmassbf 2029), against an allowance of 5.93e-04; maximum-extent mask: 0 pixels carry ice or flux outside maxmask1; lim +0.000%, limnsw +0.000%, slvaf +0.000%, slg20 +0.000%; fill convention: acabf and libmassbffl are whole-pixel means (flux_pixel_mean), the tool's own, so nothing is undone and the fill term is zero; tendlibmassbffl: the fill leaves out no melt beyond the exact sums' tolerance in any year (largest difference +0.0 Gt/yr, 2215); tendlifmassbf: the melt booked in cells with no floating ice at year end (issues #109 and #136) is at most -2.3 Gt/yr (2251)
 - **Notes:** IU's 2 km Budd production suite (antarctica/reports/rehearsal_25km_iu.md, section 'The 2 km production suite'). On 16 October the group decided not to submit IU's line. IU kept this core running to 2301 on 16 October as the farthest along, with ssp585 CESM2-WACCM; its control C010 was stopped at 2194.45. Final state sha256 792b9e7e3560ab03471424facd8ad37024f25e424bfec1915e42b1559aace892. Report: antarctica/reports/core06_ssp126_mri_esm2_0_2km_r2kiurlcnoamb.md.
 
+### core06-2km-ssp126-mriesm20-seq1f
+
+Core 6 at 2 km: SSP1-2.6 MRI-ESM2-0 projection of the submission line seq1f, with the resistive-stress calving law and the collapse mask (done), Rice.
+
+- **Task type:** projection
+- **ISMIP7 exp id:** C006
+- **ESM:** MRI-ESM2-0
+- **Scenario:** ssp126
+- **Period (yr):** 2015 to 2301, reached 2301.0
+- **Friction law:** budd, sub-element (SEP1) with N_hat=1
+- **Mesh:** antarctica_5000_2000_buffered0 (Rice's build, 925,183 vertices, 1,835,718 cells, 2 km fine, 5 km interior, no buffer), DG0 geometry, vertex raster sampling, ocean-drag gate on the 1,642 open-water cells beyond the t=0 extent
+- **Initial state / MAP:** seq1's relaxed re-inverted MAP, /scratch/ah301/ismip7-routine-out/seq1/map_r_friction2.h5 (md5 2dad56d40a1fdd654f909301335946ca, 14 Oct 2026): sequential Budd inversion on the sub-element friction (shelf fluidity then friction, 60/60/30/30 iterations) warm-started from the 13 Oct release MAP map_hf5k_w14k_rho75k_snap20261013b.h5, Pattyn fluidity prior, sqrt friction control, bilaplacian prior with rho 7.5 km for the fluidity and 75 km for the friction, sigma-normalised misfit scaled by 14000, dH/dt term weight 1 under a 5 km Helmholtz filter; then a 20-year relaxation 2015 to 2035 on the control climatology and the same re-inversion on the relaxed geometry with the fluidity control on floating ice only
+- **Branch from:** core02-2km-hist-mriesm20-seq1f at 2015.0 (hist_mri_esm2_0_seq1f_2000_final.h5), launched by the routine's next hook
+- **Forcing versions:** ISMIP7 MRI-ESM2-0 ssp126: RACMO2.4p1 baseline with the re-referenced acabf anomaly and dacabfdz, ocean tf and so; the protocol ice-shelf collapse mask (v2.1)
+- **Melt: K, slope, deltaT:** Burgard quadratic with K 6.5e-5 and the per-basin deltaT of deltaT_per_basin_2000_K6.500e-05.npz, the constant mean-Antarctic slope
+- **Calving front, collapse:** resistive-stress law (hfb, sigma_max 0.15 MPa) through icepack_tools, retreat only (ISMIP7_FRONT_ADVANCE=none) against the t=0 extent anchor, confined to floating ice (ISMIP7_CALVING_FLOATING_ONLY, after the Kemp Land cliff of 22 Oct), land fronts never calve, exact front push; the protocol ice-shelf collapse mask applied at the front (ISMIP7_FRACTURE=mask_front)
+- **Apparent MB:** none (ISMIP7_APPARENT_MB=0)
+- **dt (yr):** 0.05 with adaptive substeps to 2247.9, then fixed 0.025 with transport subcycle retries 1, 4, 16 (ISMIP7_SUBCYCLES, IU's regime)
+- **Site / partition:** Rice NOTS, scavenge partition on cascadelake or sapphirerapids nodes in 1-hour chain links with auto-resume (12-hour commons links on 27 and 28 Oct), under the strict routine watch
+- **Ranks / memory:** 32 ranks, 128G (240G until 23 Oct), scpc_mumps; host-side MUMPS analysis from 28 Oct
+- **Job ids:** 2357884 2372092 2409119 2436642 2453885 2455576
+- **Code:** NOTS checkout /scratch/ah301/ismip7-routine on the fix/routine-restart-budget line at af29fe07 (the 20 to 24 Oct restart, watch and retry fixes cherry-picked while the suite ran; merged as icepack/ismip7 pull requests 176 and 177), icepack_tools on fix/front-face-rate
+- **Started:** 2026-10-22
+- **Finished:** 2026-10-29
+- **Cost per model year:** 97 chain links (6 cancelled by the watch for a stall, all resubmitted), 99.6 h of wall time at 32 ranks (3187 core-hours), about 21 min per model year
+- **Results path:** NOTS /scratch/ah301/ismip7-routine/antarctica/results/ssp126_mri_esm2_0_seq1f_2000_*
+- **Audit:** resid 0.0000 Gt on all 6782 rows; VAF +6.7 mm SLE and mass -87,634 Gt over the run
+- **ISMIP7 output written:** 2015 to 2300, 31 files on the 8 km grid (write_submission_line.sbatch, job 2461799, /scratch/ah301/ismip7-submit-seq1f/AIS/RICE/icepack2/CORE/C006); local copy ~/projects/ismip7-forward-tests/submit_rice_seq1f_2026-10-29/
+- **Regridded, isschecker:** ismip7-compliance-checker (isschecker 0.5.1, --variable-list ismip7): 0 errors in every test group; 2 warnings (strbasemag above the request's 1 MPa in under 0.005 % of the values (up to 6.4 MPa) and the non-mandatory variables)
+- **Uploaded:** Globus per-file batch from the workstation endpoint icepack2-ismip7 to ccc9bbd2:/ISMIP7_submissions/AIS/icepack/icepack/CORE/C006/, 31 files, task 3d25aed1-d5bc-11f1-b930-0affd629e535 SUCCEEDED 1 Nov 2026 01:20 CST (upload_2026-11-01.log in ~/projects/ismip7-forward-tests/submit_rice_seq1f_2026-10-29/)
+- **Notes:** stage of the initialization routine seq1f (initialization_routine.sh, /scratch/ah301/ismip7-routine-out/seq1f, started 21 Oct 2026 as the fresh submission line with calving). Time stepping: adaptive-substep regime to 2247.9, fixed 0.025-yr step with subcycle retries from there to 2301 (the fast path of 28 Oct). The .jobs file of the stage lists only the routine-launched links; the chain successors are found by job name (sacct --name=rt_seq1f_ssp126_mri_esm2).
+
 ### core06-32km-ssp126-mriesm20
 
 Core 6: ssp126 with MRI-ESM2-0 (superseded), Rice.
@@ -10160,6 +10427,38 @@ Core 7 at 2 km, IU Budd production: ssp585 CESM2-WACCM, relaxed controls, withou
 - **Scalars processed:** ismip7-scalars 0.1.0 sla20, slg20 and slvaf written (job 12365669); compare_scalars.py exit 0; notes: area factor: the native scalars carry it too (--native-af2), so the area term is zero; the exact sums' worst \|C - N\| is 1.79e-05 of their L1 (tendlifmassbf 2015), against an allowance of 5.93e-04; maximum-extent mask: 0 pixels carry ice or flux outside maxmask1; lim +0.000%, limnsw +0.000%, slvaf +0.000%, slg20 +0.000%; fill convention: acabf and libmassbffl are whole-pixel means (flux_pixel_mean), the tool's own, so nothing is undone and the fill term is zero; tendlibmassbffl: the fill leaves out no melt beyond the exact sums' tolerance in any year (largest difference -0.0 Gt/yr, 2208); tendlifmassbf: the melt booked in cells with no floating ice at year end (issues #109 and #136) is at most -1040.2 Gt/yr (2194)
 - **Notes:** IU's 2 km Budd production suite (antarctica/reports/rehearsal_25km_iu.md, section 'The 2 km production suite'). On 16 October the group decided not to submit IU's line. IU kept this core running to 2301 on 16 October as the fastest retreat, with ssp126 MRI-ESM2-0, to see whether the forward holds up through it; its control C009 was stopped at 2193.45. Between t = 2170.07 and 2171.3 the Beardmore Glacier grounding zone, about (160, -717) km, failed numerically: vertex speeds there rose from 17 km/yr to 7.5e6 m/yr, the ice of the cells around it converged into a few grounded cells, and from 2171.3 one grounded cell at (157,278, -718,790) m of 1.73 km2 holds it, 53 km thick at 2171.3 and 96 km at 2301 (153 Gt, +0.42 mm SLE of VAF), with vertex speeds near 1e8 m/yr beside it. The budget stays closed and no other cell exceeds 5 km (beardmore_anomaly.py, jobs 12306638 and 12364811, in diagnostics/ of the production tree). The cell sets the extreme of each out-of-range warning in the checker log. Of the other depth-mean speeds above 25 km/yr, 93 percent are West Antarctic flow from 2248 to 2295, and the basal and surface components pass their bound from 2160 on across West Antarctica and the Weddell sector (c007_fastpix.py and c007_fastpix2.py, jobs 12365700 and 12365974). Final state sha256 7748bd8a6a3296adc21fb42e2c5ccbc4c7b92c4381da799aa2a522967edd1377. Report: antarctica/reports/core07_ssp585_cesm2_waccm_2km_r2kiurlcnoamb.md.
 
+### core07-2km-ssp585-cesm2waccm-seq1f
+
+Core 7 at 2 km: SSP5-8.5 CESM2-WACCM projection of the submission line seq1f, with the resistive-stress calving law and the collapse mask (done), Rice.
+
+- **Task type:** projection
+- **ISMIP7 exp id:** C007
+- **ESM:** CESM2-WACCM
+- **Scenario:** ssp585
+- **Period (yr):** 2015 to 2301, reached 2301.0
+- **Friction law:** budd, sub-element (SEP1) with N_hat=1
+- **Mesh:** antarctica_5000_2000_buffered0 (Rice's build, 925,183 vertices, 1,835,718 cells, 2 km fine, 5 km interior, no buffer), DG0 geometry, vertex raster sampling, ocean-drag gate on the 1,642 open-water cells beyond the t=0 extent
+- **Initial state / MAP:** seq1's relaxed re-inverted MAP, /scratch/ah301/ismip7-routine-out/seq1/map_r_friction2.h5 (md5 2dad56d40a1fdd654f909301335946ca, 14 Oct 2026): sequential Budd inversion on the sub-element friction (shelf fluidity then friction, 60/60/30/30 iterations) warm-started from the 13 Oct release MAP map_hf5k_w14k_rho75k_snap20261013b.h5, Pattyn fluidity prior, sqrt friction control, bilaplacian prior with rho 7.5 km for the fluidity and 75 km for the friction, sigma-normalised misfit scaled by 14000, dH/dt term weight 1 under a 5 km Helmholtz filter; then a 20-year relaxation 2015 to 2035 on the control climatology and the same re-inversion on the relaxed geometry with the fluidity control on floating ice only
+- **Branch from:** core01-2km-hist-cesm2waccm-seq1f at 2015.0 (hist_cesm2_waccm_seq1f_2000_final.h5), launched by the routine's next hook
+- **Forcing versions:** ISMIP7 CESM2-WACCM ssp585: RACMO2.4p1 baseline with the re-referenced acabf anomaly and dacabfdz, ocean tf and so; the protocol ice-shelf collapse mask (v2.1)
+- **Melt: K, slope, deltaT:** Burgard quadratic with K 6.5e-5 and the per-basin deltaT of deltaT_per_basin_2000_K6.500e-05.npz, the constant mean-Antarctic slope
+- **Calving front, collapse:** resistive-stress law (hfb, sigma_max 0.15 MPa) through icepack_tools, retreat only (ISMIP7_FRONT_ADVANCE=none) against the t=0 extent anchor, confined to floating ice (ISMIP7_CALVING_FLOATING_ONLY, after the Kemp Land cliff of 22 Oct), land fronts never calve, exact front push; the protocol ice-shelf collapse mask applied at the front (ISMIP7_FRACTURE=mask_front)
+- **Apparent MB:** none (ISMIP7_APPARENT_MB=0)
+- **dt (yr):** 0.05 with adaptive substeps to 2107.075, then fixed 0.025 with transport subcycle retries 1, 4, 16 (ISMIP7_SUBCYCLES, IU's regime)
+- **Site / partition:** Rice NOTS, scavenge partition on cascadelake or sapphirerapids nodes in 1-hour chain links with auto-resume (12-hour commons links on 27 and 28 Oct), under the strict routine watch
+- **Ranks / memory:** 32 ranks, 128G (240G until 23 Oct), scpc_mumps; host-side MUMPS analysis from 28 Oct
+- **Job ids:** 2357883 2419105 2436565 2453880 2455575
+- **Code:** NOTS checkout /scratch/ah301/ismip7-routine on the fix/routine-restart-budget line at af29fe07 (the 20 to 24 Oct restart, watch and retry fixes cherry-picked while the suite ran; merged as icepack/ismip7 pull requests 176 and 177), icepack_tools on fix/front-face-rate
+- **Started:** 2026-10-22
+- **Finished:** 2026-10-31
+- **Cost per model year:** 167 chain links (4 cancelled by the watch for a stall, 1 timed out, all resubmitted), 154.2 h of wall time at 32 ranks (4934 core-hours), about 32 min per model year (the 28 Oct seq1ffix screen links not counted)
+- **Results path:** NOTS /scratch/ah301/ismip7-routine/antarctica/results/ssp585_cesm2_waccm_seq1f_2000_*
+- **Audit:** resid 0.0000 Gt on all 9599 rows; VAF -2,773.5 mm SLE and mass -2,541,177 Gt over the run
+- **ISMIP7 output written:** 2015 to 2300, 31 files on the 8 km grid (write_submission_line.sbatch, job 2484736, /scratch/ah301/ismip7-submit-seq1f/AIS/RICE/icepack2/CORE/C007); local copy ~/projects/ismip7-forward-tests/submit_rice_seq1f_2026-10-29/
+- **Regridded, isschecker:** ismip7-compliance-checker (isschecker 0.5.1, --variable-list ismip7): 0 errors in every test group; 14 warnings: range warnings on flux variables (a few hundred to 3,177 of 55.6 million values outside the request's range, at most 0.0057 %), strbasemag above the request's 1 MPa in under 0.005 % of the values (up to 6.4 MPa), and the non-mandatory variables
+- **Uploaded:** Globus per-file batch from the workstation endpoint icepack2-ismip7 to ccc9bbd2:/ISMIP7_submissions/AIS/icepack/icepack/CORE/C007/, 31 files, task 3dacb3c3-d5bc-11f1-8d6b-0effda64b40f SUCCEEDED 1 Nov 2026 01:20 CST (upload_2026-11-01.log in ~/projects/ismip7-forward-tests/submit_rice_seq1f_2026-10-29/)
+- **Notes:** stage of the initialization routine seq1f (initialization_routine.sh, /scratch/ah301/ismip7-routine-out/seq1f, started 21 Oct 2026 as the fresh submission line with calving). Time stepping: adaptive-substep regime to 2107.075; from there the fixed-step screen seq1ffix (28 Oct, ssp585_cesm2_waccm_seq1ffix_2000_*, 2107.075 to 2131.0) whose state and series were adopted under the seq1f name at 2131.0, then the fixed 0.025-yr step with subcycle retries to 2301 (the fast path of 28 Oct). The 2131.0 handover state is ssp585_cesm2_waccm_seq1f_2000_t2131.0.h5. The .jobs file of the stage lists only the routine-launched links; the chain successors are found by job name (sacct --name=rt_seq1f_ssp585_cesm_waccm).
+
 ### core07-32km-ssp585-cesm2waccm
 
 Core 7: ssp585 with CESM2-WACCM (superseded), Rice.
@@ -10209,6 +10508,38 @@ Core 8 at 2 km, IU Budd production: ssp585 MRI-ESM2-0, relaxed controls, without
 - **Audit:** OFF TRACK (shelf basal melt 4688.2 [ 600.0, 1800.0] Gt/yr FAIL; dM/dt (post-2016) -3277.7 [ -400.0, 200.0] Gt/yr FAIL); resid at most 0.0000 Gt on 6,610 rows; 6,626 of 6,626 steps converged on their first direct solve (16 solves repeated after the resume from the 2045 checkpoint), 9.4 Newton iterations on average and 23 at the most, no rescue, no subcycle; VAF -177.3 mm SLE and mass -538,204 Gt over the run, dM/dt -10,847 Gt/yr in 2179; calving out of the fixed front 1,302 at step 1, 1,289 in 2016 and 849 in 2179 Gt/yr; peak speed 2.0e5 m/yr at t = 2148.03, (-210.7, -423.1) km
 - **ISMIP7 output written:** annual files banked to the year before it stopped; not written to the 8 km grid, checked or run through the scalar tool, since the line is not submitted
 - **Notes:** IU's 2 km Budd production suite (antarctica/reports/rehearsal_25km_iu.md, section 'The 2 km production suite'). On 16 October the group decided not to submit IU's line. IU cancelled this core at 2180.25 on 16 October, keeping only ssp585 CESM2-WACCM (the fastest retreat) and ssp126 MRI-ESM2-0 (the farthest along) running; its three latest five-yearly checkpoints are kept, so it can resume. Latest checkpoint ssp585_mri_esm2_0_r2kiurlcnoamb_2000_t2176.2.h5, sha256 ad577f1de3ffc5fe47aa601bcb388f8bef2d722d8f2216f91348de23b4a11e31. Report: antarctica/reports/core08_ssp585_mri_esm2_0_2km_r2kiurlcnoamb.md.
+
+### core08-2km-ssp585-mriesm20-seq1f
+
+Core 8 at 2 km: SSP5-8.5 MRI-ESM2-0 projection of the submission line seq1f, with the resistive-stress calving law and the collapse mask (done), Rice.
+
+- **Task type:** projection
+- **ISMIP7 exp id:** C008
+- **ESM:** MRI-ESM2-0
+- **Scenario:** ssp585
+- **Period (yr):** 2015 to 2301, reached 2301.0
+- **Friction law:** budd, sub-element (SEP1) with N_hat=1
+- **Mesh:** antarctica_5000_2000_buffered0 (Rice's build, 925,183 vertices, 1,835,718 cells, 2 km fine, 5 km interior, no buffer), DG0 geometry, vertex raster sampling, ocean-drag gate on the 1,642 open-water cells beyond the t=0 extent
+- **Initial state / MAP:** seq1's relaxed re-inverted MAP, /scratch/ah301/ismip7-routine-out/seq1/map_r_friction2.h5 (md5 2dad56d40a1fdd654f909301335946ca, 14 Oct 2026): sequential Budd inversion on the sub-element friction (shelf fluidity then friction, 60/60/30/30 iterations) warm-started from the 13 Oct release MAP map_hf5k_w14k_rho75k_snap20261013b.h5, Pattyn fluidity prior, sqrt friction control, bilaplacian prior with rho 7.5 km for the fluidity and 75 km for the friction, sigma-normalised misfit scaled by 14000, dH/dt term weight 1 under a 5 km Helmholtz filter; then a 20-year relaxation 2015 to 2035 on the control climatology and the same re-inversion on the relaxed geometry with the fluidity control on floating ice only
+- **Branch from:** core02-2km-hist-mriesm20-seq1f at 2015.0 (hist_mri_esm2_0_seq1f_2000_final.h5), launched by the routine's next hook
+- **Forcing versions:** ISMIP7 MRI-ESM2-0 ssp585: RACMO2.4p1 baseline with the re-referenced acabf anomaly and dacabfdz, ocean tf and so; the protocol ice-shelf collapse mask (v2.1)
+- **Melt: K, slope, deltaT:** Burgard quadratic with K 6.5e-5 and the per-basin deltaT of deltaT_per_basin_2000_K6.500e-05.npz, the constant mean-Antarctic slope
+- **Calving front, collapse:** resistive-stress law (hfb, sigma_max 0.15 MPa) through icepack_tools, retreat only (ISMIP7_FRONT_ADVANCE=none) against the t=0 extent anchor, confined to floating ice (ISMIP7_CALVING_FLOATING_ONLY, after the Kemp Land cliff of 22 Oct), land fronts never calve, exact front push; the protocol ice-shelf collapse mask applied at the front (ISMIP7_FRACTURE=mask_front)
+- **Apparent MB:** none (ISMIP7_APPARENT_MB=0)
+- **dt (yr):** 0.05 with adaptive substeps (ceiling 256 from 25 Oct) to 2114.225, then fixed 0.025 with transport subcycle retries 1, 4, 16 (ISMIP7_SUBCYCLES, IU's regime)
+- **Site / partition:** Rice NOTS, scavenge partition on cascadelake or sapphirerapids nodes in 1-hour chain links with auto-resume (12-hour commons links on 27 and 28 Oct), under the strict routine watch
+- **Ranks / memory:** 32 ranks, 128G (240G until 23 Oct), scpc_mumps; host-side MUMPS analysis from 28 Oct
+- **Job ids:** 2357886 2396988 2408119 2455577
+- **Code:** NOTS checkout /scratch/ah301/ismip7-routine on the fix/routine-restart-budget line at af29fe07 (the 20 to 24 Oct restart, watch and retry fixes cherry-picked while the suite ran; merged as icepack/ismip7 pull requests 176 and 177), icepack_tools on fix/front-face-rate
+- **Started:** 2026-10-22
+- **Finished:** 2026-10-31
+- **Cost per model year:** 128 chain links (1 failed on node faults or solver aborts, 2 cancelled by the watch for a stall, 2 timed out, all resubmitted), 159.1 h of wall time at 32 ranks (5091 core-hours), about 33 min per model year (the 28 Oct seq1ffix screen links not counted)
+- **Results path:** NOTS /scratch/ah301/ismip7-routine/antarctica/results/ssp585_mri_esm2_0_seq1f_2000_*
+- **Audit:** resid 0.0000 Gt on all 9456 rows; VAF -1,588.0 mm SLE and mass -1,926,808 Gt over the run
+- **ISMIP7 output written:** 2015 to 2300, 31 files on the 8 km grid (write_submission_line.sbatch, job 2481696, /scratch/ah301/ismip7-submit-seq1f/AIS/RICE/icepack2/CORE/C008); local copy ~/projects/ismip7-forward-tests/submit_rice_seq1f_2026-10-29/
+- **Regridded, isschecker:** ismip7-compliance-checker (isschecker 0.5.1, --variable-list ismip7): 0 errors in every test group; 11 warnings: range warnings on flux variables (2 to 1,920 of 57.4 million values outside the request's range, at most 0.0033 %), strbasemag above the request's 1 MPa in under 0.005 % of the values (up to 6.4 MPa), and the non-mandatory variables
+- **Uploaded:** Globus per-file batch from the workstation endpoint icepack2-ismip7 to ccc9bbd2:/ISMIP7_submissions/AIS/icepack/icepack/CORE/C008/, 31 files, task 3e37f1ca-d5bc-11f1-a32e-0affd629e535 SUCCEEDED 1 Nov 2026 01:20 CST (upload_2026-11-01.log in ~/projects/ismip7-forward-tests/submit_rice_seq1f_2026-10-29/)
+- **Notes:** stage of the initialization routine seq1f (initialization_routine.sh, /scratch/ah301/ismip7-routine-out/seq1f, started 21 Oct 2026 as the fresh submission line with calving). Time stepping: adaptive-substep regime to 2114.225 (substep ceiling 256 from 25 Oct for the Moscow University Ice Shelf front cell at 2091 to 2092); from there the fixed-step screen seq1ffix (28 Oct, ssp585_mri_esm2_0_seq1ffix_2000_*, 2114.225 to 2142.275) whose state and series were adopted under the seq1f name at 2141.725, then the fixed 0.025-yr step with subcycle retries to 2301 (the fast path of 28 Oct). The handover state is ssp585_mri_esm2_0_seq1f_2000_t2141.7.h5. The .jobs file of the stage lists only the routine-launched links; the chain successors are found by job name (sacct --name=rt_seq1f_ssp585_mri_esm2).
 
 ### core08-32km-ssp585-mriesm20
 
@@ -10276,6 +10607,38 @@ Core 11 at 2 km, IU Budd production: OCX on the protocol forcing, relaxed contro
 - **Regridded, isschecker:** isschecker 0.5.1: 0 errors, 2 warnings, the non-mandatory variables the model does not write and strbasemag maximum 2.1 MPa against the accepted 1 MPa on 68 of 4,926,403 values
 - **Scalars processed:** ismip7-scalars 0.1.0 sla20, slg20 and slvaf written (job 12251491); compare_scalars.py exit 0; notes: area factor: the native scalars carry it too (--native-af2), so the area term is zero; the exact sums' worst \|C - N\| is 1.59e-05 of their L1 (tendlifmassbf 2013), against an allowance of 5.93e-04; maximum-extent mask: 0 pixels carry ice or flux outside maxmask1; lim +0.000%, limnsw +0.000%, slvaf +0.000%, slg20 +0.000%; fill convention: acabf and libmassbffl are whole-pixel means (flux_pixel_mean), the tool's own, so nothing is undone and the fill term is zero; tendlibmassbffl: the fill leaves out no melt beyond the exact sums' tolerance in any year (largest difference +0.0 Gt/yr, 2003); tendlifmassbf: the melt booked in cells with no floating ice at year end (issues #109 and #136) is at most -6.9 Gt/yr (2003); slvaf: residual +4.01% of max \|N\| (2025), above 2%; slg20: residual +3.96% of max \|N\| (2025), above 2%; sla20: residual +3.96% of max \|N\| (2025), above 2%
 - **Notes:** IU's 2 km Budd production suite (antarctica/reports/rehearsal_25km_iu.md, section 'The 2 km production suite'). On 16 October the group decided not to submit IU's line. Final state sha256 a2d9d25673e3398e92caad9c7a7d5aeb20af5516be4668e4e3d947684c5e98fd. Report: antarctica/reports/core11_ocx_2km_r2kiurlcnoamb.md.
+
+### core11-2km-ocx-seq1f
+
+Core 11 at 2 km: observation-forced OCX run of the submission line seq1f, with the resistive-stress calving law (done), Rice.
+
+- **Task type:** ocx
+- **ISMIP7 exp id:** C011
+- **ESM:** ERA5 and the observed ocean
+- **Scenario:** ocx
+- **Period (yr):** 2003 to 2026, reached 2026.0
+- **Friction law:** budd, sub-element (SEP1) with N_hat=1
+- **Mesh:** antarctica_5000_2000_buffered0 (Rice's build, 925,183 vertices, 1,835,718 cells, 2 km fine, 5 km interior, no buffer), DG0 geometry, vertex raster sampling, ocean-drag gate on the 1,642 open-water cells beyond the t=0 extent
+- **Initial state / MAP:** seq1's relaxed re-inverted MAP, /scratch/ah301/ismip7-routine-out/seq1/map_r_friction2.h5 (md5 2dad56d40a1fdd654f909301335946ca, 14 Oct 2026): sequential Budd inversion on the sub-element friction (shelf fluidity then friction, 60/60/30/30 iterations) warm-started from the 13 Oct release MAP map_hf5k_w14k_rho75k_snap20261013b.h5, Pattyn fluidity prior, sqrt friction control, bilaplacian prior with rho 7.5 km for the fluidity and 75 km for the friction, sigma-normalised misfit scaled by 14000, dH/dt term weight 1 under a 5 km Helmholtz filter; then a 20-year relaxation 2015 to 2035 on the control climatology and the same re-inversion on the relaxed geometry with the fluidity control on floating ice only
+- **Branch from:** cold start from the MAP, geometry backdated 12 years with the Smith dH/dt
+- **Forcing versions:** the protocol OCX product (ISMIP7_OCX_FORCING=protocol): observed SMB with dacabfdz and the varying observed ocean tf and so, 2003 to 2025
+- **Melt: K, slope, deltaT:** Burgard quadratic with K 6.5e-5 and the per-basin deltaT of deltaT_per_basin_2000_K6.500e-05.npz, the constant mean-Antarctic slope
+- **Calving front, collapse:** resistive-stress law (hfb, sigma_max 0.15 MPa) through icepack_tools, retreat only (ISMIP7_FRONT_ADVANCE=none) against the t=0 extent anchor, land fronts never calve, exact front push; no ice-shelf collapse (ISMIP7_FRACTURE=none)
+- **Apparent MB:** none (ISMIP7_APPARENT_MB=0)
+- **dt (yr):** 0.05 with adaptive transport substeps (1 m thickness-error tolerance, 4 to 64 substeps, the diagnostic re-solved per substep)
+- **Site / partition:** Rice NOTS, scavenge partition on cascadelake or sapphirerapids nodes in 1-hour chain links with auto-resume, under the strict routine watch
+- **Ranks / memory:** 32 ranks, 240G, scpc_mumps with the distributed MUMPS analysis
+- **Job ids:** 2330544
+- **Code:** NOTS checkout /scratch/ah301/ismip7-routine on the fix/routine-restart-budget line at af29fe07 (the 20 to 24 Oct restart, watch and retry fixes cherry-picked while the suite ran; merged as icepack/ismip7 pull requests 176 and 177), icepack_tools on fix/front-face-rate
+- **Started:** 2026-10-21
+- **Finished:** 2026-10-21
+- **Cost per model year:** 7 chain links, 5.7 h of wall time at 32 ranks (182 core-hours), about 15 min per model year
+- **Results path:** NOTS /scratch/ah301/ismip7-routine/antarctica/results/ocx_seq1f_2000_* (final state sha256 3c5db18586fb19b8...)
+- **Audit:** resid 0.0000 Gt on all 460 rows; VAF +13.6 mm SLE and mass +352 Gt over 23 years against the observed loss (the discharge deficit of the relaxed MAP)
+- **ISMIP7 output written:** 2003 to 2025, 31 files on the 8 km grid (write_submission_line.sbatch with --esm ERA5 --scenario ocx, job 2391553, 24 Oct 2026, /scratch/ah301/ismip7-submit-seq1f/AIS/RICE/icepack2/CORE/C011); local copy ~/projects/ismip7-forward-tests/submit_rice_seq1f_2026-10-24/
+- **Regridded, isschecker:** ismip7-compliance-checker (isschecker 0.5.1) refuses the experiment by name (ocx is not in its list: historical, ssp370, ssp126, ssp585, ctrl), a checker limitation; IU's C011 was uploaded the same way. The files follow the C001 recipe, which passes
+- **Uploaded:** Globus from the workstation endpoint icepack2-ismip7 to ccc9bbd2:/ISMIP7_submissions/AIS/icepack/icepack/CORE/C011/, 31 files, task b28a6d29-d01e-11f1-8f30-0effda64b40f SUCCEEDED 24 Oct 2026 (replacing the seq0f files uploaded earlier that day, 20217ea1); the RICE files sit beside the IU AIS_IU_icepack2 files
+- **Notes:** stage of the initialization routine seq1f (initialization_routine.sh, /scratch/ah301/ismip7-routine-out/seq1f, started 21 Oct 2026 as the fresh submission line with calving); no 2002 staging was needed since OCX starts in 2003. The .jobs file of the stage lists only the routine-launched links; the chain successors are found by job name (sacct --name=rt_seq1f_ocx).
 
 ### core11-32km-ocx
 

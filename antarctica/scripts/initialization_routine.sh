@@ -159,7 +159,7 @@ record_env() {
         echo "export ISMIP7_ROUTINE_NRANKS=${ISMIP7_ROUTINE_NRANKS:-1}"
         echo "export ISMIP7_ROUTINE_ESMS=\"${ISMIP7_ROUTINE_ESMS:-CESM2-WACCM MRI-ESM2-0}\""
         echo "export ISMIP7_ROUTINE_SCENARIOS=\"${ISMIP7_ROUTINE_SCENARIOS:-ssp126 ssp370 ssp585}\""
-        echo "export ISMIP7_ROUTINE_HIST_FROM=\"${ISMIP7_ROUTINE_HIST_FROM:-}\""
+        echo "export ISMIP7_ROUTINE_HIST_FROM=\"$( [ -d "${ISMIP7_ROUTINE_HIST_FROM:-}" ] && cd "$ISMIP7_ROUTINE_HIST_FROM" && pwd || echo "${ISMIP7_ROUTINE_HIST_FROM:-}")\""
         echo "export ISMIP7_ROUTINE_HIST_FROM_TAG=\"${ISMIP7_ROUTINE_HIST_FROM_TAG:-}\""
         echo "export ISMIP7_ROUTINE_STAGES=\"${ISMIP7_ROUTINE_STAGES:-shelf1 friction1 shelf2 friction2 relax reinvert hist control proj ocx}\""
         echo "export ISMIP7_ROUTINE_WARM_START=\"${ISMIP7_ROUTINE_WARM_START:-}\""
@@ -223,6 +223,9 @@ load_env() {
     STAGE_LIST=$(expand_stages "$ISMIP7_ROUTINE_STAGES")
     if [ -n "${ISMIP7_ROUTINE_HIST_FROM:-}" ] && [ ! -d "$ISMIP7_ROUTINE_HIST_FROM" ]; then
         die "ISMIP7_ROUTINE_HIST_FROM is not a directory: $ISMIP7_ROUTINE_HIST_FROM"
+    fi
+    if [ -n "${ISMIP7_ROUTINE_HIST_FROM:-}" ]; then
+        ISMIP7_ROUTINE_HIST_FROM=$(cd "$ISMIP7_ROUTINE_HIST_FROM" && pwd)
     fi
 }
 
@@ -573,7 +576,9 @@ driver_for() {
         ocx)               echo antarctica/scripts/projections/ocx.py ;;
         hist_cesm_waccm)   echo antarctica/scripts/historical/cesm_waccm.py ;;
         hist_mri_esm2)     echo antarctica/scripts/historical/mri_esm2.py ;;
-        hist_*|ssp*_*)     echo antarctica/scripts/esm_experiment.py ;;   # the ESM set
+        # the ESM set, for the scenarios of experiment_sets.SCENARIO_PERIODS (keep in step)
+        hist_?*|ssp126_?*|ssp370_?*|ssp534-over_?*|ssp585_?*)
+                           echo antarctica/scripts/esm_experiment.py ;;
         *) die "no driver for experiment $1" ;;
     esac
 }

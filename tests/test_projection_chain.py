@@ -614,6 +614,15 @@ def test_a_cold_re_solve_does_not_reach_the_stages_a_finished_run_launches(sandb
         assert "ISMIP7_RESTART_RESOLVE" not in follow
 
 
+@pytest.mark.parametrize("then", ["ssp245_access_cm2", "ssp37_access_cm2", "ssp370_"])
+def test_a_follow_on_with_a_misspelt_scenario_is_refused_before_the_run(sandbox, then):
+    rc, log, calls = run_job(sandbox, ISMIP7_EXPERIMENT="hist_access_cm2",
+                             ISMIP7_ESM="ACCESS-CM2", ISMIP7_CHAIN_THEN=then)
+    assert rc == 2
+    assert f"unknown experiment '{then}' in ISMIP7_CHAIN_THEN" in log
+    assert calls == ""
+
+
 # --- the ESM set's experiments ----------------------------------------------
 
 def test_an_esm_set_experiment_runs_the_one_driver_with_its_scenario(sandbox):

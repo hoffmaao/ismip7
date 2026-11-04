@@ -1171,6 +1171,30 @@ def test_projections_can_branch_from_another_routine_s_historicals(sandbox):
     assert "ssp534-over_cesm_waccm started, no checkpoint yet" in log
 
 
+def test_a_relative_source_directory_is_linked_by_its_absolute_path(sandbox):
+    r"""A source directory given relative to the caller's directory is
+    recorded and linked absolute, so the link resolves from the results
+    directory and a later ``next`` from anywhere finds the same line."""
+    results = sandbox / "antarctica" / "results"
+    other = sandbox / "other_results"
+    other.mkdir()
+    (sandbox / "warm.h5").write_text("warm\n")
+    rc, log = routine(sandbox, "init", env={
+        "ISMIP7_ROUTINE_STAGES": "proj", "ISMIP7_ROUTINE_ESMS": "CESM2-WACCM",
+        "ISMIP7_ROUTINE_SCENARIOS": "ssp534-over",
+        "ISMIP7_ROUTINE_HIST_FROM": "other_results", "ISMIP7_ROUTINE_HIST_FROM_TAG": "seq1f"})
+    assert rc == 0, log
+    assert f'ISMIP7_ROUTINE_HIST_FROM="{other}"' in (sandbox / "out" / "routine.env").read_text()
+    finish_forward(other / "hist_cesm2_waccm_seq1f_32000_final.h5", 2015)
+    rc, log = routine(sandbox, "next")
+    assert rc == 0, log
+    link = results / "hist_cesm2_waccm_out_32000_final.h5"
+    assert os.readlink(link) == str(other / "hist_cesm2_waccm_seq1f_32000_final.h5")
+    assert link.exists()
+    rc, log = routine(sandbox, "next")
+    assert rc == 0, log
+
+
 def test_a_missing_source_directory_is_refused_at_init(sandbox):
     (sandbox / "warm.h5").write_text("warm\n")
     rc, log = routine(sandbox, "init", env={

@@ -75,6 +75,16 @@
 # map_forward.h5 is the product of the last inversion stage listed, so a run
 # without `relax`/`reinvert` starts its forwards from the staged MAP.
 #
+# The ESM set (icepack2_tools.experiment_sets) runs through the same stages:
+# ISMIP7_ROUTINE_ESMS may name any CMIP model on the forcing share and
+# ISMIP7_ROUTINE_SCENARIOS any scenario it carries; a model without a core
+# shim runs antarctica/scripts/esm_experiment.py under its own name. A routine
+# whose projections branch from another routine's historicals (the overshoot
+# scenario of the core models, from the submission line's C001 and C002)
+# lists no `hist` and names that routine's results directory and run tag in
+# ISMIP7_ROUTINE_HIST_FROM and ISMIP7_ROUTINE_HIST_FROM_TAG: each endpoint is
+# linked under this routine's name once it has reached 2015.
+#
 # The front of every forward after the relaxation is a level-set calving law
 # from icepack_tools.calving: ISMIP7_ROUTINE_CALVING (hfb), its parameters
 # ISMIP7_ROUTINE_CALVING_PARAMS (sigma_max=0.15) and the advance rule
@@ -114,7 +124,7 @@ STAGE_KNOBS=(ISMIP7_INVERT ISMIP7_PHI_BOUNDS ISMIP7_FLUIDITY_CONTROL
     ISMIP7_WARM_START_FLUIDITY ISMIP7_WARM_START_THETA ISMIP7_WARM_START_PHI
     ISMIP7_WARM_START_GEOMETRY ISMIP7_WARM_START_PRIOR ISMIP7_INVERSION
     ISMIP7_RESTART ISMIP7_T_START ISMIP7_T_END ISMIP7_RUN_TAG ISMIP7_EXPERIMENT
-    ISMIP7_ESM ISMIP7_APPARENT_MB ISMIP7_OUTPUT ISMIP7_FIXED_FRONT
+    ISMIP7_ESM ISMIP7_SCENARIO ISMIP7_APPARENT_MB ISMIP7_OUTPUT ISMIP7_FIXED_FRONT
     ISMIP7_CALVING ISMIP7_CALVING_PARAMS ISMIP7_FRONT_ADVANCE ISMIP7_FRACTURE
     ISMIP7_CALVING_FLOATING_ONLY
     ISMIP7_CHAIN_THEN ISMIP7_CHAIN_THEN_CMD ISMIP7_WALL_STOP_MIN
@@ -149,6 +159,8 @@ record_env() {
         echo "export ISMIP7_ROUTINE_NRANKS=${ISMIP7_ROUTINE_NRANKS:-1}"
         echo "export ISMIP7_ROUTINE_ESMS=\"${ISMIP7_ROUTINE_ESMS:-CESM2-WACCM MRI-ESM2-0}\""
         echo "export ISMIP7_ROUTINE_SCENARIOS=\"${ISMIP7_ROUTINE_SCENARIOS:-ssp126 ssp370 ssp585}\""
+        echo "export ISMIP7_ROUTINE_HIST_FROM=\"${ISMIP7_ROUTINE_HIST_FROM:-}\""
+        echo "export ISMIP7_ROUTINE_HIST_FROM_TAG=\"${ISMIP7_ROUTINE_HIST_FROM_TAG:-}\""
         echo "export ISMIP7_ROUTINE_STAGES=\"${ISMIP7_ROUTINE_STAGES:-shelf1 friction1 shelf2 friction2 relax reinvert hist control proj ocx}\""
         echo "export ISMIP7_ROUTINE_WARM_START=\"${ISMIP7_ROUTINE_WARM_START:-}\""
         echo "export ISMIP7_ROUTINE_SBATCH_INV=\"${ISMIP7_ROUTINE_SBATCH_INV:-}\""
@@ -209,6 +221,9 @@ load_env() {
     LC=${ISMIP7_LC:?ISMIP7_LC must be recorded}
     RESULTS="$REPO/antarctica/results"
     STAGE_LIST=$(expand_stages "$ISMIP7_ROUTINE_STAGES")
+    if [ -n "${ISMIP7_ROUTINE_HIST_FROM:-}" ] && [ ! -d "$ISMIP7_ROUTINE_HIST_FROM" ]; then
+        die "ISMIP7_ROUTINE_HIST_FROM is not a directory: $ISMIP7_ROUTINE_HIST_FROM"
+    fi
 }
 
 check_objective() {   # the recorded objective can run every listed stage
@@ -228,14 +243,18 @@ esm_key() {   # the projection.sbatch experiment suffix of an ESM
     case "$1" in
         CESM2-WACCM) echo cesm_waccm ;;
         MRI-ESM2-0)  echo mri_esm2 ;;
-        *) die "no experiment key for ESM $1" ;;
+        *) esm_tag "$1" ;;   # the ESM set: the tag itself (experiment_sets.experiment_key)
     esac
 }
 esm_tag() {   # the experiment.py name element of an ESM
     echo "$1" | tr 'A-Z-' 'a-z_'
 }
-key_esm() {   # the ESM of a stage name's suffix
-    case "$1" in
+key_esm() {   # the ESM of a stage name's suffix, among this routine's ESMs
+    local esm
+    for esm in $ISMIP7_ROUTINE_ESMS; do
+        case "$1" in *"_$(esm_key "$esm")") echo "$esm"; return ;; esac
+    done
+    case "$1" in   # the core pair, for a routine that lists neither
         *_cesm_waccm) echo CESM2-WACCM ;;
         *_mri_esm2)   echo MRI-ESM2-0 ;;
         *) die "no ESM in stage name $1" ;;
@@ -381,6 +400,25 @@ derive_products() {
         ln -s "$ISMIP7_ROUTINE_WARM_START" "$(forward_map)"
         log "forward MAP: $(forward_map) -> $ISMIP7_ROUTINE_WARM_START (no inversion stage listed)"
     fi
+    # Projections of a routine that runs no historical of its own branch from
+    # another routine's (ISMIP7_ROUTINE_HIST_FROM, its results directory;
+    # ISMIP7_ROUTINE_HIST_FROM_TAG, its run tag, this one's by default): the
+    # endpoint is linked under this routine's name once it has reached 2015,
+    # so the readiness rule and the driver's own lookup find it unchanged.
+    if [ -n "${ISMIP7_ROUTINE_HIST_FROM:-}" ]; then
+        local esm from_tag src dst
+        from_tag=${ISMIP7_ROUTINE_HIST_FROM_TAG:-$TAG}
+        for esm in $ISMIP7_ROUTINE_ESMS; do
+            in_list "hist_$(esm_key "$esm")" "$STAGE_LIST" && continue
+            dst=$(fwd_final "hist_$(esm_key "$esm")")
+            [ -e "$dst" ] && continue
+            src="$ISMIP7_ROUTINE_HIST_FROM/hist_$(esm_tag "$esm")_${from_tag}_${LC}_final.h5"
+            if reached "$src" 2015; then
+                ln -s "$src" "$dst"
+                log "historical of $esm: $(basename "$dst") -> $src (ISMIP7_ROUTINE_HIST_FROM)"
+            fi
+        done
+    fi
 }
 
 stamp_relaxed_state() {
@@ -483,6 +521,10 @@ stage_env_forward() {   # prints `export` lines for a forward stage
     esm=$(fwd_esm "$stage")
     echo "export ISMIP7_EXPERIMENT=$(fwd_experiment "$stage") ISMIP7_AUTO_RESUME=1 ISMIP7_CHAIN=1"
     [ -n "$esm" ] && echo "export ISMIP7_ESM=$esm"
+    case "$stage" in   # the ESM set's driver reads its scenario from here
+        hist_*) echo "export ISMIP7_SCENARIO=historical" ;;
+        ssp*_*) echo "export ISMIP7_SCENARIO=${stage%%_*}" ;;
+    esac
     case "$stage" in
         relax)
             echo "export ISMIP7_INVERSION=$(map_path "$(relax_source_stage)")"
@@ -531,6 +573,7 @@ driver_for() {
         ocx)               echo antarctica/scripts/projections/ocx.py ;;
         hist_cesm_waccm)   echo antarctica/scripts/historical/cesm_waccm.py ;;
         hist_mri_esm2)     echo antarctica/scripts/historical/mri_esm2.py ;;
+        hist_*|ssp*_*)     echo antarctica/scripts/esm_experiment.py ;;   # the ESM set
         *) die "no driver for experiment $1" ;;
     esac
 }

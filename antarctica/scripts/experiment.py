@@ -249,7 +249,7 @@ def run_core_experiment(*, core, title, name, esm, scenario,
         smb_feedback=feedback,
     )
 
-    PETSc.Sys.Print(f"\nCore Experiment {core}: {title}")
+    PETSc.Sys.Print(f"\n{'Core Experiment ' + str(core) if isinstance(core, int) else core}: {title}")
     PETSc.Sys.Print(f"  Period: {t_start}-{t_end}, dt={dt}")
 
     results = run_simulation(

@@ -21,8 +21,13 @@ import sys
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
 from icepack2_tools.experiment_sets import (  # noqa: E402
-    esm_set_counter, experiment_name, experiment_names_esm, scenario_period,
+    ESM_SET_MODELS, esm_set_counter, experiment_name, experiment_names_esm,
+    experiment_scenario, scenario_period,
 )
+
+#: The one projection the further models carry on the share, and so the one
+#: scenario their aSMB pool (``ISMIP7_CLIM_SCENARIO``) can pool with.
+FURTHER_MODEL_POOL = "ssp370"
 
 
 def main():
@@ -37,9 +42,26 @@ def main():
     experiment = os.environ.get("ISMIP7_EXPERIMENT")
     if experiment and not experiment_names_esm(experiment, esm):
         sys.exit(f"ISMIP7_EXPERIMENT={experiment} is not a run of ISMIP7_ESM={esm}")
+    if experiment and experiment_scenario(experiment) != scenario:
+        sys.exit(f"ISMIP7_EXPERIMENT={experiment} is not a run of ISMIP7_SCENARIO={scenario}")
+    # A further model has no ssp126 tree, so the shared default pool would
+    # re-reference its aSMB over the historical years alone; the core models
+    # keep the shared default, so E011 and E012 pool as the cores do.
+    pool_note = None
+    if esm in ESM_SET_MODELS:
+        pool = os.environ.get("ISMIP7_CLIM_SCENARIO")
+        if pool is None:
+            os.environ["ISMIP7_CLIM_SCENARIO"] = FURTHER_MODEL_POOL
+            pool_note = f"ISMIP7_CLIM_SCENARIO={FURTHER_MODEL_POOL}: the one projection {esm} carries"
+        elif pool != FURTHER_MODEL_POOL:
+            sys.exit(f"ISMIP7_CLIM_SCENARIO={pool} names a scenario {esm} does not carry; "
+                     f"its aSMB pool is historical + {FURTHER_MODEL_POOL}")
     counter = esm_set_counter(esm, scenario)
     label = f"ESM set {counter}" if counter else "ESM experiment"
     from experiment import run_core_experiment  # noqa: E402  (loads Firedrake)
+    if pool_note:
+        from firedrake.petsc import PETSc
+        PETSc.Sys.Print(pool_note)
     run_core_experiment(
         core=label, title=f"{scenario} with {esm} ({t_start:.0f}-{t_end - 1:.0f})",
         name=experiment_name(esm, scenario), esm=esm, scenario=scenario,

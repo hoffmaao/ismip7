@@ -113,8 +113,10 @@ driver_for() {
         hist_cesm_waccm)   echo antarctica/scripts/historical/cesm_waccm.py ;;
         hist_mri_esm2)     echo antarctica/scripts/historical/mri_esm2.py ;;
         relax)             echo antarctica/scripts/relaxation/run.py ;;
-        # the ESM set: any other <scenario>_<esm key> or hist_<esm key>
-        hist_*|ssp*_*)     echo antarctica/scripts/esm_experiment.py ;;
+        # the ESM set: any other <scenario>_<esm key> or hist_<esm key>, for
+        # the scenarios of experiment_sets.SCENARIO_PERIODS (keep in step)
+        hist_?*|ssp126_?*|ssp370_?*|ssp534-over_?*|ssp585_?*)
+                           echo antarctica/scripts/esm_experiment.py ;;
     esac
 }
 EXPERIMENT="${ISMIP7_EXPERIMENT:-control}"

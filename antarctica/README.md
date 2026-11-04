@@ -1636,9 +1636,10 @@ suffixes `cesm_waccm` and `mri_esm2`, every other model is named by its
 tag), and the staged routine runs the set exactly as it runs the cores:
 `ISMIP7_ROUTINE_ESMS` may name any model on the share and
 `ISMIP7_ROUTINE_SCENARIOS` any scenario it carries. The aSMB pool of a
-further model is `historical` + `ISMIP7_CLIM_SCENARIO`, so a line of the
-five further models runs with `ISMIP7_CLIM_SCENARIO=ssp370`, the one
-projection they have. A routine whose projections branch from another
+further model is `historical` + `ISMIP7_CLIM_SCENARIO`, and
+`esm_experiment.py` sets it to `ssp370`, the one projection those five
+models have, when it is unset and refuses any other value for them; the two
+core models keep the shared default. A routine whose projections branch from another
 line's historicals (E011 and E012 from the submission line's C001 and C002)
 lists no `hist` stage and names that line in `ISMIP7_ROUTINE_HIST_FROM`
 (its results directory) and `ISMIP7_ROUTINE_HIST_FROM_TAG` (its run tag).

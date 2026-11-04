@@ -7,7 +7,7 @@ models and with ``experiment.py``'s results names for every model."""
 import pytest
 
 from icepack2_tools.experiment_sets import (
-    ESM_SET, ESM_SET_MODELS, esm_set_counter, esm_set_members, esm_tag,
+    ESM_SET, ESM_SET_MODELS, clim_scenario_for, esm_set_counter, esm_set_members, esm_tag,
     experiment_key, experiment_name, experiment_names_esm, experiment_scenario,
     scenario_period,
 )
@@ -74,3 +74,13 @@ def test_runner_names_keep_the_core_suffixes_and_tag_the_rest():
     assert experiment_scenario("hist_access_cm2") == "historical"
     assert experiment_scenario("ssp534-over_cesm_waccm") == "ssp534-over"
     assert experiment_scenario("ssp370_mpi_esm1_2_hr") == "ssp370"
+
+
+def test_a_further_model_pools_with_its_one_projection():
+    from icepack2_tools.climatology import CLIM_SCENARIO_DEFAULT
+    assert clim_scenario_for("CanESM5", None) == "ssp370"
+    assert clim_scenario_for("CanESM5", "ssp370") == "ssp370"
+    with pytest.raises(ValueError, match="does not carry"):
+        clim_scenario_for("CanESM5", "ssp126")
+    assert clim_scenario_for("CESM2-WACCM", None) == CLIM_SCENARIO_DEFAULT
+    assert clim_scenario_for("MRI-ESM2-0", "ssp370") == "ssp370"

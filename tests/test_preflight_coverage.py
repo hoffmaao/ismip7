@@ -495,3 +495,44 @@ def test_a_named_deltat_file_that_is_absent_is_reported(monkeypatch, tmp_path):
     missing = _shared(monkeypatch, tmp_path)
     assert any("ISMIP7_DELTAT_PER_BASIN_NPZ" in m and "does not exist" in m
                for m in missing)
+
+
+# --- the ESM set's aSMB pool ------------------------------------------------
+
+def _dEBM2_tree(root, esm, scenario, years):
+    d = os.path.join(root, esm, scenario, "dEBM2-8000m", "acabf-anomaly", "v1")
+    os.makedirs(d, exist_ok=True)
+    for y in years:
+        open(os.path.join(d, f"acabf-anomaly_AIS_{esm}_{scenario}_dEBM2-8000m_v1_{y}.nc"),
+             "wb").close()
+
+
+def _preflight_over(monkeypatch, tmp_path, env=None):
+    root = str(tmp_path / "ISMIP7" / "AIS")
+    _dEBM2_tree(root, "ACCESS-CM2", "historical", range(1990, 2015))
+    _dEBM2_tree(root, "ACCESS-CM2", "ssp370", range(2015, 2101))
+    monkeypatch.setenv("ISMIP7_DATA_ROOT", root)
+    for knob in ("ISMIP7_CLIM_SCENARIO", "ISMIP7_CLIM_START", "ISMIP7_CLIM_END"):
+        monkeypatch.delenv(knob, raising=False)
+    for knob, value in (env or {}).items():
+        monkeypatch.setenv(knob, value)
+    sys.modules.pop("preflight", None)
+    return importlib.import_module("preflight")
+
+
+def test_a_further_model_s_row_reads_the_ssp370_pool_by_default(monkeypatch, tmp_path):
+    r"""The ESM set's driver pools a further model's aSMB with ssp370, the
+    one projection it carries, whatever the shared default; the gate checks
+    the same pool, so a full historical + ssp370 tree is READY."""
+    preflight = _preflight_over(monkeypatch, tmp_path)
+    assert preflight.CLIM_SCENARIO == "ssp126"
+    assert preflight.clim_pool_years("ACCESS-CM2", "acabf-anomaly") == list(range(2000, 2030))
+    assert preflight.pool_status("ACCESS-CM2", "acabf-anomaly", "empty", "partial") == ("ok", None)
+
+
+def test_a_further_model_under_another_pool_is_blocked(monkeypatch, tmp_path):
+    r"""An explicit ISMIP7_CLIM_SCENARIO the model carries no tree for is
+    refused by the driver, so the gate blocks the row."""
+    preflight = _preflight_over(monkeypatch, tmp_path, {"ISMIP7_CLIM_SCENARIO": "ssp126"})
+    bucket, detail = preflight.pool_status("ACCESS-CM2", "acabf-anomaly", "empty", "partial")
+    assert bucket == "empty" and "ISMIP7_CLIM_SCENARIO=ssp126" in detail

@@ -21,13 +21,9 @@ import sys
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
 from icepack2_tools.experiment_sets import (  # noqa: E402
-    ESM_SET_MODELS, esm_set_counter, experiment_name, experiment_names_esm,
-    experiment_scenario, scenario_period,
+    ESM_SET_MODELS, clim_scenario_for, esm_set_counter, experiment_name,
+    experiment_names_esm, experiment_scenario, scenario_period,
 )
-
-#: The one projection the further models carry on the share, and so the one
-#: scenario their aSMB pool (``ISMIP7_CLIM_SCENARIO``) can pool with.
-FURTHER_MODEL_POOL = "ssp370"
 
 
 def main():
@@ -49,13 +45,14 @@ def main():
     # keep the shared default, so E011 and E012 pool as the cores do.
     pool_note = None
     if esm in ESM_SET_MODELS:
-        pool = os.environ.get("ISMIP7_CLIM_SCENARIO")
-        if pool is None:
-            os.environ["ISMIP7_CLIM_SCENARIO"] = FURTHER_MODEL_POOL
-            pool_note = f"ISMIP7_CLIM_SCENARIO={FURTHER_MODEL_POOL}: the one projection {esm} carries"
-        elif pool != FURTHER_MODEL_POOL:
-            sys.exit(f"ISMIP7_CLIM_SCENARIO={pool} names a scenario {esm} does not carry; "
-                     f"its aSMB pool is historical + {FURTHER_MODEL_POOL}")
+        configured = os.environ.get("ISMIP7_CLIM_SCENARIO")
+        try:
+            pool = clim_scenario_for(esm, configured)
+        except ValueError as e:
+            sys.exit(str(e))
+        if configured is None:
+            os.environ["ISMIP7_CLIM_SCENARIO"] = pool
+            pool_note = f"ISMIP7_CLIM_SCENARIO={pool}: the one projection {esm} carries"
     counter = esm_set_counter(esm, scenario)
     label = f"ESM set {counter}" if counter else "ESM experiment"
     from experiment import run_core_experiment  # noqa: E402  (loads Firedrake)

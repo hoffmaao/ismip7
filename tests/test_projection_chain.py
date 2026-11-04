@@ -612,3 +612,44 @@ def test_a_cold_re_solve_does_not_reach_the_stages_a_finished_run_launches(sandb
     assert len(follows) == (1 if then else 0), calls
     for follow in follows:
         assert "ISMIP7_RESTART_RESOLVE" not in follow
+
+
+# --- the ESM set's experiments ----------------------------------------------
+
+def test_an_esm_set_experiment_runs_the_one_driver_with_its_scenario(sandbox):
+    r"""An experiment name with no shim of its own (``ssp370_access_cm2``)
+    is an ESM-set run: the runner names ``esm_experiment.py``, exports the
+    scenario it reads off the name on every link, and its successor carries
+    the model and the name on. A follow-on's own link derives its scenario
+    afresh, so the inherited one is dropped from the follow-on's start."""
+    rc, log, calls = run_job(sandbox, FAKE_T_YR="2050", FAKE_START_YEAR="2020",
+                             ISMIP7_EXPERIMENT="ssp370_access_cm2", ISMIP7_ESM="ACCESS-CM2",
+                             ISMIP7_CHAIN_THEN="control")
+    assert rc == 0, log
+    assert "experiment ssp370_access_cm2 -> antarctica/scripts/esm_experiment.py" in log
+    successor = calls.split("END\n")[0] if "END\n" in calls else calls
+    assert "ENV: ISMIP7_EXPERIMENT=ssp370_access_cm2\n" in successor
+    assert "ENV: ISMIP7_ESM=ACCESS-CM2\n" in successor
+    assert "ENV: ISMIP7_SCENARIO=ssp370\n" in successor
+
+
+def test_a_follow_on_of_an_esm_set_run_derives_its_own_scenario(sandbox):
+    r"""A finished historical queues its projection as a follow-on with this
+    run's environment; the scenario is derived on every link from the name,
+    so the follow-on starts without the historical's."""
+    rc, log, calls = run_job(sandbox, FAKE_T_YR="2015", FAKE_START_YEAR="2002",
+                             ISMIP7_EXPERIMENT="hist_canesm5", ISMIP7_ESM="CanESM5",
+                             ISMIP7_T_END="2015", ISMIP7_CHAIN_THEN="ssp370_canesm5")
+    assert rc == 0, log
+    assert "experiment hist_canesm5 -> antarctica/scripts/esm_experiment.py" in log
+    follow = [b for b in calls.split("END\n") if "ISMIP7_EXPERIMENT=ssp370_canesm5" in b]
+    assert len(follow) == 1, calls
+    assert "ENV: ISMIP7_SCENARIO=" not in follow[0], "the follow-on's link derives its own"
+    assert "ENV: ISMIP7_ESM=CanESM5\n" in follow[0]
+
+
+def test_an_esm_set_experiment_without_its_model_is_refused_before_the_queue(sandbox):
+    rc, log, calls = run_job(sandbox, ISMIP7_EXPERIMENT="ssp370_access_cm2", ISMIP7_ESM=None)
+    assert rc == 2
+    assert "needs ISMIP7_ESM" in log
+    assert calls == ""

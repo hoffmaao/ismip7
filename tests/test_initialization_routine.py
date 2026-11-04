@@ -1075,3 +1075,127 @@ def test_an_unknown_advance_rule_is_refused_at_init(sandbox):
     rc, log = routine(sandbox, "init", env={"ISMIP7_ROUTINE_FRONT_ADVANCE": "sometimes"})
     assert rc != 0 and "ISMIP7_ROUTINE_FRONT_ADVANCE" in log
     assert submits(sandbox) == []
+
+
+# --- the ESM set ------------------------------------------------------------
+
+def test_a_further_model_runs_its_historical_then_its_projection(sandbox):
+    r"""ISMIP7_ROUTINE_ESMS may name any CMIP model on the forcing share: a
+    model without a core shim is keyed by its tag, its stages run the one
+    ESM-set driver (projection.sbatch resolves the name) with the model and
+    the scenario in the environment, and its projection waits for its own
+    historical exactly as a core projection does."""
+    results = sandbox / "antarctica" / "results"
+    (sandbox / "warm.h5").write_text("warm\n")
+    env = {"ISMIP7_ROUTINE_STAGES": "hist proj", "ISMIP7_ROUTINE_ESMS": "ACCESS-CM2 MPI-ESM1-2-HR",
+           "ISMIP7_ROUTINE_SCENARIOS": "ssp370", "ISMIP7_ROUTINE_CALVING_FLOATING_ONLY": "ssp"}
+    rc, log = routine(sandbox, "init", env=env)
+    assert rc == 0, log
+    rc, log = routine(sandbox, "next")
+    assert rc == 0, log
+    subs = submits(sandbox)
+    names = sorted(s["argv"].split(" -J ")[1].split()[0] for s in subs)
+    assert names == ["rt_out_hist_access_cm2", "rt_out_hist_mpi_esm1_2_hr"]
+    h = by_name(subs, "rt_out_hist_access_cm2")["env"]
+    assert h["ISMIP7_EXPERIMENT"] == "hist_access_cm2" and h["ISMIP7_ESM"] == "ACCESS-CM2"
+    assert h["ISMIP7_SCENARIO"] == "historical" and h["ISMIP7_T_START"] == "2002"
+    assert h["ISMIP7_FRACTURE"] == "none" and "ISMIP7_CALVING_FLOATING_ONLY" not in h
+    assert "projection.sbatch" in h.get("ISMIP7_CHAIN_THEN_CMD", "") or "projection.sbatch" in by_name(subs, "rt_out_hist_access_cm2")["argv"]
+
+    # the projection branches from hist_<tag> of this run tag, the name
+    # experiment.py's historical_endpoint looks up
+    finish_forward(results / "hist_access_cm2_out_32000_final.h5", 2015)
+    finish_forward(results / "hist_mpi_esm1_2_hr_out_32000_final.h5", 2012)
+    rc, log = routine(sandbox, "next")
+    assert rc == 0, log
+    subs = submits(sandbox)
+    names = sorted(s["argv"].split(" -J ")[1].split()[0] for s in subs)
+    assert names == ["rt_out_ssp370_access_cm2"]
+    p = subs[0]["env"]
+    assert p["ISMIP7_EXPERIMENT"] == "ssp370_access_cm2" and p["ISMIP7_ESM"] == "ACCESS-CM2"
+    assert p["ISMIP7_SCENARIO"] == "ssp370" and p["ISMIP7_FRACTURE"] == "mask_front"
+    assert p["ISMIP7_CALVING_FLOATING_ONLY"] == "1" and "ISMIP7_T_START" not in p
+    rc, log = routine(sandbox, "status")
+    assert rc == 0, log
+    assert "hist_access_cm2      done (t=2015.0)" in log
+    assert "ssp370_access_cm2    started, no checkpoint yet" in log
+    assert "ssp370_mpi_esm1_2_hr" in log
+
+
+def test_projections_can_branch_from_another_routine_s_historicals(sandbox):
+    r"""The overshoot scenario of the core models branches from the
+    submission line's historicals (C001, C002) rather than re-running them:
+    a routine with no `hist` stage names that line's results directory and
+    run tag, each endpoint is linked under this routine's name once it has
+    reached 2015, and the projection starts from the link."""
+    out = sandbox / "out"
+    results = sandbox / "antarctica" / "results"
+    other = sandbox / "other_results"
+    other.mkdir()
+    (sandbox / "warm.h5").write_text("warm\n")
+    env = {"ISMIP7_ROUTINE_STAGES": "proj", "ISMIP7_ROUTINE_ESMS": "CESM2-WACCM MRI-ESM2-0",
+           "ISMIP7_ROUTINE_SCENARIOS": "ssp534-over",
+           "ISMIP7_ROUTINE_HIST_FROM": str(other), "ISMIP7_ROUTINE_HIST_FROM_TAG": "seq1f"}
+    rc, log = routine(sandbox, "init", env=env)
+    assert rc == 0, log
+    assert f'ISMIP7_ROUTINE_HIST_FROM="{other}"' in (out / "routine.env").read_text()
+
+    # nothing to branch from yet: nothing starts, nothing is linked
+    rc, log = routine(sandbox, "next")
+    assert rc == 0 and submits(sandbox) == [], log
+    assert not (results / "hist_cesm2_waccm_out_32000_final.h5").exists()
+
+    # one source historical at 2015 releases that model's projection alone
+    finish_forward(other / "hist_cesm2_waccm_seq1f_32000_final.h5", 2015)
+    finish_forward(other / "hist_mri_esm2_0_seq1f_32000_final.h5", 2014)
+    rc, log = routine(sandbox, "next")
+    assert rc == 0, log
+    link = results / "hist_cesm2_waccm_out_32000_final.h5"
+    assert os.readlink(link) == str(other / "hist_cesm2_waccm_seq1f_32000_final.h5")
+    assert "ISMIP7_ROUTINE_HIST_FROM" in log
+    subs = submits(sandbox)
+    names = sorted(s["argv"].split(" -J ")[1].split()[0] for s in subs)
+    assert names == ["rt_out_ssp534-over_cesm_waccm"]
+    p = subs[0]["env"]
+    assert p["ISMIP7_EXPERIMENT"] == "ssp534-over_cesm_waccm" and p["ISMIP7_ESM"] == "CESM2-WACCM"
+    assert p["ISMIP7_SCENARIO"] == "ssp534-over" and p["ISMIP7_RUN_TAG"] == "out"
+
+    finish_forward(other / "hist_mri_esm2_0_seq1f_32000_final.h5", 2015)
+    rc, log = routine(sandbox, "next")
+    assert rc == 0, log
+    names = sorted(s["argv"].split(" -J ")[1].split()[0] for s in submits(sandbox))
+    assert names == ["rt_out_ssp534-over_mri_esm2"]
+    rc, log = routine(sandbox, "status")
+    assert rc == 0, log
+    assert "ssp534-over_cesm_waccm started, no checkpoint yet" in log
+
+
+def test_a_relative_source_directory_is_linked_by_its_absolute_path(sandbox):
+    r"""A source directory given relative to the caller's directory is
+    recorded and linked absolute, so the link resolves from the results
+    directory and a later ``next`` from anywhere finds the same line."""
+    results = sandbox / "antarctica" / "results"
+    other = sandbox / "other_results"
+    other.mkdir()
+    (sandbox / "warm.h5").write_text("warm\n")
+    rc, log = routine(sandbox, "init", env={
+        "ISMIP7_ROUTINE_STAGES": "proj", "ISMIP7_ROUTINE_ESMS": "CESM2-WACCM",
+        "ISMIP7_ROUTINE_SCENARIOS": "ssp534-over",
+        "ISMIP7_ROUTINE_HIST_FROM": "other_results", "ISMIP7_ROUTINE_HIST_FROM_TAG": "seq1f"})
+    assert rc == 0, log
+    assert f'ISMIP7_ROUTINE_HIST_FROM="{other}"' in (sandbox / "out" / "routine.env").read_text()
+    finish_forward(other / "hist_cesm2_waccm_seq1f_32000_final.h5", 2015)
+    rc, log = routine(sandbox, "next")
+    assert rc == 0, log
+    link = results / "hist_cesm2_waccm_out_32000_final.h5"
+    assert os.readlink(link) == str(other / "hist_cesm2_waccm_seq1f_32000_final.h5")
+    assert link.exists()
+    rc, log = routine(sandbox, "next")
+    assert rc == 0, log
+
+
+def test_a_missing_source_directory_is_refused_at_init(sandbox):
+    (sandbox / "warm.h5").write_text("warm\n")
+    rc, log = routine(sandbox, "init", env={
+        "ISMIP7_ROUTINE_STAGES": "proj", "ISMIP7_ROUTINE_HIST_FROM": str(sandbox / "nowhere")})
+    assert rc != 0 and "ISMIP7_ROUTINE_HIST_FROM is not a directory" in log

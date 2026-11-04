@@ -162,9 +162,14 @@ modes, chosen at `init`:
 The knobs: `ISMIP7_ROUTINE_ITERS` (40 for the first cycle, half for the
 second), `ISMIP7_ROUTINE_RELAX_YR` (20), `ISMIP7_ROUTINE_WARM_START` (the
 MAP stage 1 starts from; with no inversion stage listed, the MAP the
-forwards run from), `ISMIP7_ROUTINE_ESMS`, `ISMIP7_ROUTINE_SCENARIOS`,
+forwards run from), `ISMIP7_ROUTINE_ESMS` (any CMIP model on the forcing
+share; a model without a core shim runs `scripts/esm_experiment.py` under
+its tag, see the ESM set in the README), `ISMIP7_ROUTINE_SCENARIOS`,
 `ISMIP7_ROUTINE_STAGES` (a subset; `reinvert`, `hist`, `control` and `proj`
-expand), and the forwards' calving front: `ISMIP7_ROUTINE_CALVING` (a law of `icepack_tools.calving`, `hfb` by default), `ISMIP7_ROUTINE_CALVING_PARAMS` (`sigma_max=0.15`) and `ISMIP7_ROUTINE_FRONT_ADVANCE` (`none`, retreat-only), so the defaults are the submission front and a calving-campaign member (`submit_calving_campaign.sh`) runs as a full suite by naming its law, parameters and advance here. `ISMIP7_ROUTINE_CALVING_FLOATING_ONLY` (`none`, `ssp` or `all`; default `none`) sets `ISMIP7_CALVING_FLOATING_ONLY=1` in the projections or in every forward, which gives the law its own grounded gate; the hfb front calved 22 km into 1100 m thick grounded ice at Kemp Land under ssp370 CESM2-WACCM between 2060 and 2063, and the production routines run `ssp` from 22 October 2026. The gate changes the recorded law description, so a stage resumes only under the rule it started with. The relaxation's end state is the control driver's final
+expand), `ISMIP7_ROUTINE_HIST_FROM` and `ISMIP7_ROUTINE_HIST_FROM_TAG` (for
+a routine with no `hist` stage: the results directory and run tag of the
+line whose historical endpoints its projections branch from, each linked
+under this routine's name once it has reached 2015), and the forwards' calving front: `ISMIP7_ROUTINE_CALVING` (a law of `icepack_tools.calving`, `hfb` by default), `ISMIP7_ROUTINE_CALVING_PARAMS` (`sigma_max=0.15`) and `ISMIP7_ROUTINE_FRONT_ADVANCE` (`none`, retreat-only), so the defaults are the submission front and a calving-campaign member (`submit_calving_campaign.sh`) runs as a full suite by naming its law, parameters and advance here. `ISMIP7_ROUTINE_CALVING_FLOATING_ONLY` (`none`, `ssp` or `all`; default `none`) sets `ISMIP7_CALVING_FLOATING_ONLY=1` in the projections or in every forward, which gives the law its own grounded gate; the hfb front calved 22 km into 1100 m thick grounded ice at Kemp Land under ssp370 CESM2-WACCM between 2060 and 2063, and the production routines run `ssp` from 22 October 2026. The gate changes the recorded law description, so a stage resumes only under the rule it started with. The relaxation's end state is the control driver's final
 checkpoint stamped with the relaxation record of `icepack2_tools/relaxation.py`
 (the source MAP, its objective settings, the window and the step), so the
 re-inversion takes the path a relaxed state has: it keeps the MAP's controls,

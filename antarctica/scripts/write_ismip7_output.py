@@ -114,6 +114,7 @@ import icepack2_tools.dual_friction  # noqa: F401,E402  (icepack2 -> irksome imp
 from icepack2_tools.ismip7_output import (AnnualOutput, FLOTATION_TOLERANCE_M,  # noqa: E402
                                           FRONT_MELT_ATTR, RHO_I, SCALARS, SECONDS_PER_YEAR,
                                           VARIABLES_2D, VARIABLES_BANKED, near_flotation)
+from icepack2_tools.experiment_sets import ESM_SET, esm_set_counter  # noqa: E402
 from icepack2_tools.regrid import (ISMIP7_DX, ISMIP7_NX, ISMIP7_NY, ISMIP7_X0, ISMIP7_Y0,  # noqa: E402
                                    area_factor)
 import firedrake as fd  # noqa: E402
@@ -642,16 +643,33 @@ def set_counter(esm, scenario, set_id, given=None):
     r"""The ``<set_counter>`` of a submission, e.g. ``C007``.
 
     For the core set it follows from the forcing, so ``given`` is optional
-    and refused when it names another core experiment. Outside the core set
-    (``ESM``, ``PPE``) nothing here knows the numbering, and ``given`` is
-    required.
+    and refused when it names another core experiment; the ESM set's follows
+    from icepack2_tools.experiment_sets the same way. For ``PPE``, and for an
+    ESM-set member outside that table, nothing here knows the numbering and
+    ``given`` is required.
     """
     if given is not None and not re.fullmatch(r"[CEP]\d{3}", given):
         raise ValueError(f"--exp must look like C007, E041 or P132, got {given!r}")
+    if set_id not in ("CORE", "ESM", "PPE"):
+        raise ValueError(f"--set-id must be CORE, ESM or PPE, got {set_id!r}")
+    if set_id == "ESM":
+        # the set's numbering is icepack2_tools.experiment_sets' (the table's
+        # docstring says why it is fixed in one place)
+        expected = esm_set_counter(esm, scenario)
+        if given is None:
+            if expected is None:
+                raise ValueError(f"{esm} {scenario} is not in the ESM set "
+                                 f"({', '.join(f'{e} {sc}' for _, e, sc in ESM_SET)}); "
+                                 f"pass --exp for a member outside the table")
+            return expected
+        if expected is not None and given != expected:
+            raise ValueError(f"--exp {given} names another experiment: {esm} {scenario} "
+                             f"is {expected} in the ESM set")
+        return given
     if set_id != "CORE":
         if given is None:
-            raise ValueError(f"--exp is required for the {set_id} set: only the core set's "
-                             f"counters follow from the forcing")
+            raise ValueError(f"--exp is required for the {set_id} set: only the core and "
+                             f"ESM sets' counters follow from the forcing")
         return given
     expected = OCX_COUNTER if scenario == "ocx" else CORE_COUNTER.get((esm, scenario))
     if expected is None:

@@ -11,6 +11,7 @@ Usage:
                                        [--scalar-resolution 08000m]
     python scripts/download_forcing.py --scenarios [--esm MRI-ESM2-0]
                                        [--scenario historical,ssp585]
+    python scripts/download_forcing.py --esm-set       # the ESM set's forcing
     python scripts/download_forcing.py
 """
 
@@ -25,6 +26,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 
 from icepack2_tools.forcing import ATMOSPHERE_PRODUCTS, version_key  # noqa: E402
+from icepack2_tools.experiment_sets import esm_set_members  # noqa: E402
 
 # Downloads land directly in the runtime tree that icepack2_tools/forcing.py
 # reads (ISMIP7/AIS/...), mirroring the remote layout — no rename step.
@@ -408,7 +410,8 @@ def _pick_version(tc, var_dir):
 def _atmosphere_dir(tc, base, resolution="8000m"):
     r"""The downscaled-atmosphere directory the share holds under ``base``:
     ``SDBN1-*`` for CESM2-WACCM, ``GEMB-SDBN1-*`` for MRI-ESM2-0 since the
-    August 2026 rename (discussion #37). Where the share holds both, the
+    August 2026 rename (discussion #37), ``dEBM2-*`` alone for the ESM set's
+    further models. Where the share holds both, the
     current name wins, in the reader's order, so the copy fetched is the one a
     run opens. One listing, so an absent name is not probed for and reported
     as an error."""
@@ -560,6 +563,10 @@ def main():
     parser.add_argument("--scenarios", action="store_true",
                         help="Mirror per-(ESM, scenario) runtime sets from the "
                              "new /ISMIP7/AIS tree (cores 1-8 forcing)")
+    parser.add_argument("--esm-set", action="store_true",
+                        help="Mirror the ESM set's runtime sets (icepack2_tools."
+                             "experiment_sets): the five further models' historical "
+                             "and ssp370 trees and the core models' ssp534-over")
     parser.add_argument("--esm", default=",".join(SCENARIO_ESMS),
                         help="comma list of ESMs for --scenarios")
     parser.add_argument("--scenario", default=",".join(SCENARIO_NAMES),
@@ -594,7 +601,14 @@ def main():
 
     dry = args.dry_run
 
-    if args.scenarios:
+    if args.esm_set:
+        by_esm = {}
+        for esm, scen in esm_set_members():
+            by_esm.setdefault(esm, []).append(scen)
+        for esm, scens in by_esm.items():
+            download_scenarios(tc, esms=(esm,), scenarios=tuple(scens),
+                               dry_run=dry, resync=args.resync)
+    elif args.scenarios:
         download_scenarios(
             tc,
             esms=tuple(e.strip() for e in args.esm.split(",") if e.strip()),

@@ -416,8 +416,12 @@ def atmosphere_path(scenario, esm="CESM2-WACCM", variable="acabf-anomaly",
 
 
 # The downscaled-atmosphere product names, in the order the reader takes them
-# when a tree holds more than one (atmosphere_product says why).
-ATMOSPHERE_PRODUCTS = ("GEMB-SDBN1", "SDBN1")
+# when a tree holds more than one (atmosphere_product says why). dEBM2 is the
+# energy-balance downscaling the atmosphere group ran for the ESM set (the
+# five further CMIP models of icepack2_tools.experiment_sets carry it alone);
+# the two core models carry it beside their statistical product, which stays
+# the one a run opens.
+ATMOSPHERE_PRODUCTS = ("GEMB-SDBN1", "SDBN1", "dEBM2")
 
 
 def _atmosphere_product_in(scenario_dir, resolution):
@@ -442,7 +446,10 @@ def atmosphere_product(root, esm, scenario, resolution="8000m"):
     working. Where both exist ``GEMB-SDBN1`` wins: a mirror re-sync lands
     every new version under the current name, so the pre-rename ``SDBN1``
     copy beside it can only fall behind (it holds MRI-ESM2-0 at v1, and the
-    reader pins v2).
+    reader pins v2). The ESM set's further models (ACCESS-CM2, CanESM5,
+    GFDL-ESM4, IPSL-CM6A-LR, MPI-ESM1-2-HR) ship ``dEBM2`` alone, the same
+    file layout, twelve monthly slices a year, and it is read where no
+    statistical product sits beside it.
     """
     return (_atmosphere_product_in(_scenario_dir(root, esm, scenario), resolution)
             or f"SDBN1-{resolution}")

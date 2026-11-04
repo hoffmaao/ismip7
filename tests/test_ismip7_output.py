@@ -141,10 +141,29 @@ def test_the_checker_patch_accepts_the_name_the_writer_writes():
     assert isschecker_ocx.OCX_EXPERIMENT["experiment"] == "ocx"
 
 
-def test_outside_the_core_set_the_counter_has_to_be_given():
-    assert wio.set_counter("IPSL-CM6A-LR", "ssp370", "ESM", "E003") == "E003"
+def test_the_esm_set_s_counter_follows_from_the_forcing_too():
+    r"""The ESM set is numbered in icepack2_tools.experiment_sets, so its
+    counter is optional and a wrong one is refused, as for the core set; a
+    pair outside the table needs --exp, and an ESM-set pair under --set-id
+    CORE is refused as not a core experiment."""
+    assert wio.set_counter("IPSL-CM6A-LR", "ssp370", "ESM") == "E008"
+    assert wio.set_counter("IPSL-CM6A-LR", "ssp370", "ESM", "E008") == "E008"
+    assert wio.set_counter("MRI-ESM2-0", "ssp534-over", "ESM") == "E012"
+    with pytest.raises(ValueError, match="names another experiment.*E008 in the ESM set"):
+        wio.set_counter("IPSL-CM6A-LR", "ssp370", "ESM", "E003")
+    with pytest.raises(ValueError, match="not in the ESM set"):
+        wio.set_counter("CESM2-WACCM", "ssp245", "ESM")
+    assert wio.set_counter("CESM2-WACCM", "ssp245", "ESM", "E013") == "E013"
+    with pytest.raises(ValueError, match="not a core experiment"):
+        wio.set_counter("ACCESS-CM2", "ssp370", "CORE")
+    with pytest.raises(ValueError, match="must be CORE, ESM or PPE"):
+        wio.set_counter("ACCESS-CM2", "ssp370", "esm")
+
+
+def test_outside_the_core_and_esm_sets_the_counter_has_to_be_given():
     with pytest.raises(ValueError, match="required for the PPE set"):
         wio.set_counter("CESM2-WACCM", "ssp585", "PPE")
+    assert wio.set_counter("CESM2-WACCM", "ssp585", "PPE", "P001") == "P001"
     with pytest.raises(ValueError, match="must look like"):
         wio.set_counter("CESM2-WACCM", "ssp585", "CORE", "c7")
 

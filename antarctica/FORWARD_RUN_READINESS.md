@@ -31,7 +31,8 @@ AWS tooling.
 **Renamed MRI atmosphere (#37).** `SDBN1-*` became `GEMB-SDBN1-*` for
 MRI-ESM2-0, a name change with the data unchanged. The core experiment uses
 `SDBN1` for CESM2-WACCM and `GEMB-SDBN1` for MRI-ESM2-0; `dEBM2` is the second
-downscaling for perturbed ensembles. Handled: `atmosphere_product` accepts
+downscaling for perturbed ensembles and the only one the ESM set's five further
+models carry, read where no statistical product sits beside it. Handled: `atmosphere_product` accepts
 whichever exists and takes `GEMB-SDBN1` where both do, and the audit asks it
 which one a run opens.
 

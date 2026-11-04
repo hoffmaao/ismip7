@@ -22,6 +22,12 @@
 #   relax              antarctica/scripts/relaxation/run.py, the relaxation
 #                      year of the relaxed initial state; it defaults the
 #                      apparent MB and the ISMIP7 output to off
+#   hist_<esm>, <scenario>_<esm>
+#                      any other name of that shape is an experiment of the
+#                      ESM set (icepack2_tools.experiment_sets) and runs
+#                      antarctica/scripts/esm_experiment.py, which takes the
+#                      model from ISMIP7_ESM and the scenario from the name:
+#                      ISMIP7_EXPERIMENT=ssp370_access_cm2 ISMIP7_ESM=ACCESS-CM2
 #
 # ISMIP7_CHAIN_THEN (space-separated experiments from the same list) queues
 # follow-on runs once THIS run has reached its end year, and only then: a
@@ -107,12 +113,29 @@ driver_for() {
         hist_cesm_waccm)   echo antarctica/scripts/historical/cesm_waccm.py ;;
         hist_mri_esm2)     echo antarctica/scripts/historical/mri_esm2.py ;;
         relax)             echo antarctica/scripts/relaxation/run.py ;;
+        # the ESM set: any other <scenario>_<esm key> or hist_<esm key>, for
+        # the scenarios of experiment_sets.SCENARIO_PERIODS (keep in step)
+        hist_?*|ssp126_?*|ssp370_?*|ssp534-over_?*|ssp585_?*)
+                           echo antarctica/scripts/esm_experiment.py ;;
     esac
 }
 EXPERIMENT="${ISMIP7_EXPERIMENT:-control}"
 DRIVER=$(driver_for "$EXPERIMENT")
 if [ -z "$DRIVER" ]; then
     echo "ERROR: unknown ISMIP7_EXPERIMENT='$EXPERIMENT'" >&2; exit 2
+fi
+# The ESM set's one driver takes its model from ISMIP7_ESM and its scenario
+# from the experiment name, derived here on every link so that a follow-on
+# never runs under a predecessor's.
+if [ "$DRIVER" = antarctica/scripts/esm_experiment.py ]; then
+    if [ -z "${ISMIP7_ESM:-}" ]; then
+        echo "ERROR: ISMIP7_EXPERIMENT=$EXPERIMENT runs the ESM set's driver," \
+             "which needs ISMIP7_ESM (the CMIP model, e.g. ACCESS-CM2)" >&2; exit 2
+    fi
+    case "$EXPERIMENT" in
+        hist_*) export ISMIP7_SCENARIO=historical ;;
+        *)      export ISMIP7_SCENARIO=${EXPERIMENT%%_*} ;;
+    esac
 fi
 # A misspelt follow-on is found now, not days from now when this run ends.
 for next in ${ISMIP7_CHAIN_THEN:-}; do
@@ -352,7 +375,7 @@ if [ "$done_yet" = "1" ]; then
             # period, not this run's ISMIP7_T_START / ISMIP7_T_END, and
             # queues nothing further.
             unset ISMIP7_CHAIN_THEN ISMIP7_WALL_STOP_MIN ISMIP7_RESTART \
-                  ISMIP7_T_START ISMIP7_T_END
+                  ISMIP7_T_START ISMIP7_T_END ISMIP7_SCENARIO
             ismip7_chain_resources
             for next in $then_list; do
                 echo "chain: queueing the follow-on ${next}"

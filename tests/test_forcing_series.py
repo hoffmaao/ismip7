@@ -368,3 +368,33 @@ def test_the_readers_decode_years_past_2262_without_a_serialization_warning(mri_
         tf, warned = _serialization_warnings(lambda: ocean.get_thermal_forcing(year, *at))
         assert not warned, [str(w.message) for w in warned]
         assert tf[0] == pytest.approx(expect)
+
+
+# --- the ESM set's atmosphere product (dEBM2) -------------------------------
+
+def test_debm2_is_read_where_it_is_the_only_product(tmp_path):
+    r"""The five further models of the ESM set ship ``dEBM2-8000m`` alone
+    (3 November 2026 share listing); the reader opens it, with the same
+    file-name grammar and the same monthly layout as the SDBN1 products."""
+    esm, scenario, product, version = "ACCESS-CM2", "ssp370", "dEBM2-8000m", "v1"
+    vdir = tmp_path / esm / scenario / product / "acabf" / version
+    vdir.mkdir(parents=True)
+    _write_year(str(vdir), esm, scenario, product, version, 2015, 3.0)
+    assert atmosphere_product(str(tmp_path), esm, scenario) == product
+    atm = ISMIP7Atmosphere(data_root=str(tmp_path), esm=esm, scenario=scenario)
+    assert atm.available_years("acabf") == [2015]
+    field = atm._load_year("acabf", 2015)
+    assert field is not None and np.allclose(np.asarray(field), 3.0)
+
+
+def test_the_statistical_product_wins_where_debm2_sits_beside_it(tmp_path):
+    r"""The core models carry dEBM2 beside SDBN1 / GEMB-SDBN1 (the SMB
+    downscaling intercomparison); a core run keeps opening its own product."""
+    esm, scenario = "CESM2-WACCM", "ssp370"
+    for product in ("dEBM2-8000m", "SDBN1-8000m"):
+        (tmp_path / esm / scenario / product / "acabf" / "v1").mkdir(parents=True)
+    assert atmosphere_product(str(tmp_path), esm, scenario) == "SDBN1-8000m"
+    esm = "MRI-ESM2-0"
+    for product in ("dEBM2-8000m", "GEMB-SDBN1-8000m"):
+        (tmp_path / esm / scenario / product / "acabf" / "v1").mkdir(parents=True)
+    assert atmosphere_product(str(tmp_path), esm, scenario) == "GEMB-SDBN1-8000m"

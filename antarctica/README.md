@@ -1603,6 +1603,54 @@ python antarctica/scripts/figures/extract_screen_fields.py --kit $KIT --tag calv
 python antarctica/scripts/figures/calving_screen_figures.py --data screen_data --tag calvdg1h --out figures/calvdg1h
 ```
 
+### The ESM set (`esm_experiment.py`, `icepack2_tools/experiment_sets.py`)
+
+The protocol's optional ESM experiments are the core run under further CMIP
+models, centred on SSP3-7.0. The forcing share carries five of them, each
+with a historical and an ssp370 tree downscaled by the energy-balance
+product dEBM2 (the reader opens `dEBM2-8000m` where no statistical product
+sits beside it), and the overshoot scenario ssp534-over for the two core
+models. `icepack2_tools/experiment_sets.py` fixes the set and its counters,
+which name the experiment in every submission filename:
+
+| counter | ESM | scenario | branches from |
+|---|---|---|---|
+| E001 / E002 | ACCESS-CM2 | historical / ssp370 | the MAP / E001 |
+| E003 / E004 | CanESM5 | historical / ssp370 | the MAP / E003 |
+| E005 / E006 | GFDL-ESM4 | historical / ssp370 | the MAP / E005 |
+| E007 / E008 | IPSL-CM6A-LR | historical / ssp370 | the MAP / E007 |
+| E009 / E010 | MPI-ESM1-2-HR | historical / ssp370 | the MAP / E009 |
+| E011 | CESM2-WACCM | ssp534-over | C001 |
+| E012 | MRI-ESM2-0 | ssp534-over | C002 |
+
+One driver runs every member, `scripts/esm_experiment.py`, which takes the
+model from `ISMIP7_ESM` and the scenario from `ISMIP7_SCENARIO` and is
+otherwise `experiment.run_core_experiment` over the scenario's own period
+(historical 2003 to 2015, ssp370 to 2101, ssp534-over to 2301). Its results
+are named as the core runs are, `hist_<esm tag>` and `<scenario>_<esm tag>`,
+so a projection branches from the historical of the same run tag through
+the lookup the core projections use. The runner `projection.sbatch` names
+this driver for any experiment it has no shim for (`ssp370_access_cm2`,
+`hist_canesm5`, `ssp534-over_cesm_waccm`: the two core models keep the
+suffixes `cesm_waccm` and `mri_esm2`, every other model is named by its
+tag), and the staged routine runs the set exactly as it runs the cores:
+`ISMIP7_ROUTINE_ESMS` may name any model on the share and
+`ISMIP7_ROUTINE_SCENARIOS` any scenario it carries. The aSMB pool of a
+further model is `historical` + `ISMIP7_CLIM_SCENARIO`, and
+`esm_experiment.py` sets it to `ssp370`, the one projection those five
+models have, when it is unset and refuses any other value for them; the two
+core models keep the shared default. A routine whose projections branch from another
+line's historicals (E011 and E012 from the submission line's C001 and C002)
+lists no `hist` stage and names that line in `ISMIP7_ROUTINE_HIST_FROM`
+(its results directory) and `ISMIP7_ROUTINE_HIST_FROM_TAG` (its run tag).
+
+```bash
+python scripts/download_forcing.py --esm-set        # mirror the set's forcing
+python scripts/preflight.py                          # the E001..E012 rows after the cores
+python scripts/write_ismip7_output.py <stem>_ismip7_annual.h5 --out-dir OUT \
+    --esm ACCESS-CM2 --scenario ssp370 --set-id ESM        # named E002
+```
+
 ### The whole matrix in one command (`run_core_matrix.sh`)
 
 Runs cores 1 to 11 in dependency order (historicals, controls, projections,
@@ -1845,7 +1893,8 @@ redeclare those literals.
 | `ISMIP7_SIN_ALPHA_ANT` | the constant under `ant`. The toolbox's K percentiles were sampled with 5.1117e-3, which its own gamma_T conversion gives and the notebook's slope recipe on the 8 km BedMap3 v3 topography reproduces; the default rounds it up by 0.065 percent | `5.115e-3` |
 | `ISMIP7_SIN_ALPHA_CAP` | `local` slope only: cap on `sin(alpha)` in `scripts/calibrate_melt.py`; the forward applies none | none under `dg0`, `5e-3` under `cg1` |
 | `ISMIP7_K_OUT` | output path for `scripts/calibrate_melt.py`, overriding the generated name. A bare filename resolves under `results/` | `results/calibrated_K_per_basin_<lc>.npz` |
-| `ISMIP7_ESM` | ESM for the control | `CESM2-WACCM` |
+| `ISMIP7_ESM` | ESM for the control, and the model of an ESM-set run (`scripts/esm_experiment.py`) | `CESM2-WACCM` |
+| `ISMIP7_SCENARIO` | the scenario of an ESM-set run (`historical`, `ssp370`, `ssp534-over`, ...); `projection.sbatch` and the routine derive it from the experiment name on every link | unset |
 | `ISMIP7_CLIM_SCENARIO` / `_START` / `_END` | reference-climate pool: the scenario pooled with `historical`, and the window, shared by the control's SMB climatology and the projections' aSMB re-reference through `icepack2_tools/climatology.py`. A partial pool warns | `ssp126` / `2000` / `2029` |
 | `ISMIP7_H_CLAMP` | thickness floor (m) | `0` |
 | `ISMIP7_NO_CALVING_TERMINUS` | drop the calving-terminus BC | unset |

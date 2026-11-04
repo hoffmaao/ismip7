@@ -1085,7 +1085,6 @@ def test_a_further_model_runs_its_historical_then_its_projection(sandbox):
     ESM-set driver (projection.sbatch resolves the name) with the model and
     the scenario in the environment, and its projection waits for its own
     historical exactly as a core projection does."""
-    out = sandbox / "out"
     results = sandbox / "antarctica" / "results"
     (sandbox / "warm.h5").write_text("warm\n")
     env = {"ISMIP7_ROUTINE_STAGES": "hist proj", "ISMIP7_ROUTINE_ESMS": "ACCESS-CM2 MPI-ESM1-2-HR",

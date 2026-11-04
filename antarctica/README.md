@@ -1646,7 +1646,7 @@ lists no `hist` stage and names that line in `ISMIP7_ROUTINE_HIST_FROM`
 
 ```bash
 python scripts/download_forcing.py --esm-set        # mirror the set's forcing
-ISMIP7_CLIM_SCENARIO=ssp370 python scripts/preflight.py   # the E001..E012 rows
+python scripts/preflight.py                          # the E001..E012 rows after the cores
 python scripts/write_ismip7_output.py <stem>_ismip7_annual.h5 --out-dir OUT \
     --esm ACCESS-CM2 --scenario ssp370 --set-id ESM        # named E002
 ```

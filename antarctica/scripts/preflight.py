@@ -34,7 +34,9 @@ from icepack2_tools.boundary import sidecar_path
 from icepack2_tools.naming import map_basename
 from icepack2_tools.obs_dhdt import dhdt_source
 from icepack2_tools.climatology import clim_start, clim_end, clim_scenario
-from icepack2_tools.experiment_sets import ESM_SET, scenario_period
+from icepack2_tools.experiment_sets import (
+    ESM_SET, FURTHER_MODEL_POOL, clim_scenario_for, scenario_period,
+)
 from icepack2_tools.runconfig import (
     obs_data_root,
     calving_law_object as _calving_law_object,
@@ -57,6 +59,7 @@ oi_version = os.environ.get("ISMIP7_OI_VERSION", "30_sep")
 CLIM_START = clim_start()
 CLIM_END = clim_end()
 CLIM_SCENARIO = clim_scenario()
+CLIM_SCENARIO_SET = os.environ.get("ISMIP7_CLIM_SCENARIO")
 root = _find_ismip7_data()
 
 #: core, title, the driver under scripts/ that runs it, ESM, scenario. The
@@ -152,7 +155,9 @@ def atm_years(esm, scenario, var="acabf-anomaly"):
 
 def clim_pool_years(esm, var):
     r"""Years the runs actually pool to build the reference climatology:
-    historical + CLIM_SCENARIO, restricted to the CLIM_START-CLIM_END window.
+    historical + the model's pool scenario (``clim_scenario_for``: ssp370 for
+    a further model of the ESM set, CLIM_SCENARIO otherwise), restricted to
+    the CLIM_START-CLIM_END window.
 
     The window filter matters - both the control's ``compute_climatology`` and
     the projections' ``smb_scheme`` keep only years inside it, so an ESM with
@@ -160,7 +165,7 @@ def clim_pool_years(esm, var):
     because a year present in both scenarios is one year of coverage.
     """
     return sorted({y for y in (atm_years(esm, "historical", var)
-                               + atm_years(esm, CLIM_SCENARIO, var))
+                               + atm_years(esm, clim_scenario_for(esm, CLIM_SCENARIO_SET), var))
                    if CLIM_START <= y <= CLIM_END})
 
 
@@ -192,13 +197,17 @@ def pool_status(esm, var, what_empty, what_partial):
     the emptiness test lives in one place and the year list is read from disk
     once per (esm, var) rather than once per caller condition.
     """
+    try:
+        pool = clim_scenario_for(esm, CLIM_SCENARIO_SET)
+    except ValueError as e:
+        return "empty", f"{e}: the driver refuses to start"
     have = clim_pool_years(esm, var)
     gaps = clim_pool_gaps(esm, var, have)
     if not gaps:
         return "ok", None
     span = f"covers {have[0]}-{have[-1]}" if have else "no years"
     return ("partial" if have else "empty",
-            f"{esm} {var} climatology pool (historical+{CLIM_SCENARIO}) "
+            f"{esm} {var} climatology pool (historical+{pool}) "
             f"{span}, {len(gaps)} of {CLIM_START}-{CLIM_END} missing "
             f"({gaps[0]}..{gaps[-1]}): "
             f"{what_partial if have else what_empty}")
@@ -413,9 +422,9 @@ def main():
 
     for row in CORES + [None] + ESM_ROWS:
         if row is None:
-            print(f"\n  ESM set (icepack2_tools.experiment_sets); the aSMB pool is "
-                  f"historical+{CLIM_SCENARIO}, so a model with no {CLIM_SCENARIO} tree "
-                  f"needs ISMIP7_CLIM_SCENARIO=ssp370")
+            print(f"\n  ESM set (icepack2_tools.experiment_sets); the further models' "
+                  f"aSMB pool is historical+{FURTHER_MODEL_POOL} by the driver's rule, "
+                  f"the core models' rows keep historical+{CLIM_SCENARIO}")
             continue
         core, title, driver, esm, scenario = row
         try:

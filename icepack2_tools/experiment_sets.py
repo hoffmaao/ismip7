@@ -22,6 +22,10 @@ write_ismip7_output.py). So it is fixed here and read from here by the writer
 #: The CMIP models of the ESM set that have no core experiment.
 ESM_SET_MODELS = ("ACCESS-CM2", "CanESM5", "GFDL-ESM4", "IPSL-CM6A-LR", "MPI-ESM1-2-HR")
 
+#: The one projection the further models carry on the share, and so the one
+#: scenario their aSMB pool can take beside ``historical``.
+FURTHER_MODEL_POOL = "ssp370"
+
 #: ``(counter, esm, scenario)`` of every ESM-set member, in counter order.
 ESM_SET = (
     ("E001", "ACCESS-CM2", "historical"),
@@ -112,3 +116,21 @@ def experiment_scenario(experiment):
     if experiment.startswith("hist_"):
         return "historical"
     return experiment.split("_", 1)[0]
+
+
+def clim_scenario_for(esm, configured):
+    r"""The scenario pooled with ``historical`` for ``esm``'s aSMB
+    re-reference, given ``configured`` (``ISMIP7_CLIM_SCENARIO``, or None
+    when unset). A further model pools with its one projection; any other
+    value names a tree it does not carry and raises ValueError. The core
+    models keep the shared pool (``icepack2_tools.climatology``)."""
+    if esm in ESM_SET_MODELS:
+        if configured not in (None, FURTHER_MODEL_POOL):
+            raise ValueError(f"ISMIP7_CLIM_SCENARIO={configured} names a scenario {esm} "
+                             f"does not carry; its aSMB pool is historical + "
+                             f"{FURTHER_MODEL_POOL}")
+        return FURTHER_MODEL_POOL
+    if configured is not None:
+        return configured
+    from icepack2_tools.climatology import CLIM_SCENARIO_DEFAULT
+    return CLIM_SCENARIO_DEFAULT

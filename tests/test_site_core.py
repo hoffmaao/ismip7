@@ -395,3 +395,96 @@ def test_one_dead_rank_ends_the_step(runners, tmp_path, help_text, flags):
     assert rc == 0, err
     assert out == "rc=7"
     assert log.read_text().splitlines() == [f"{flags} -n 32 python -u x.py --input a"]
+
+
+# The shared kernel store (ISMIP7_SHARED_JIT_CACHE). A chain link records the
+# environment its successor inherits (sbatch --export=ALL) before it exits, and
+# its exit trap copies the kernels it compiled back to the store.
+
+def _activate_cache(runners, tmp_path, expr, **env):
+    activate = tmp_path / "activate"
+    activate.write_text("")
+    node = tmp_path / "node"
+    node.mkdir(exist_ok=True)
+    base = dict(ISMIP7_SITE="local", ISMIP7_FIREDRAKE=str(activate), TMPDIR=str(node))
+    base.update(env)
+    return source(runners, "site_core.sh", f"ismip7_activate >/dev/null; {expr}", **base)
+
+
+def _cpu_store_name():
+    model = ""
+    try:
+        with open("/proc/cpuinfo") as f:
+            model = next((line for line in f if line.startswith("model name")), "")
+    except OSError:
+        pass
+    import hashlib
+    return "cpu-" + hashlib.md5(model.encode()).hexdigest()[:12]
+
+
+def test_a_chain_successor_starts_from_the_kernels_its_predecessor_compiled(runners, tmp_path):
+    r"""The store must be the same directory on every link of a chain. The
+    per-CPU suffix used to be written back into the exported variable, so each
+    successor appended another one and started from a new, empty store: on NOTS
+    the store nested 113 levels deep and every link recompiled."""
+    store = tmp_path / "store"
+    handed_on = tmp_path / "env_link1"
+    rc, _, err = _activate_cache(
+        runners, tmp_path,
+        f'echo compiled > "$PYOP2_CACHE_DIR/kernel.so"; env -0 > "{handed_on}"',
+        SLURM_JOB_ID="101", SLURM_JOB_NUM_NODES="1", ISMIP7_SHARED_JIT_CACHE=str(store))
+    assert rc == 0, err
+    env = dict(item.split("=", 1) for item in handed_on.read_bytes().decode().split("\0") if "=" in item)
+    env["SLURM_JOB_ID"] = "102"
+    proc = subprocess.run(
+        ["bash", "-c", f'. "{runners / "site_core.sh"}"; ismip7_activate >/dev/null; ls "$PYOP2_CACHE_DIR"'],
+        env=env, capture_output=True, text=True, timeout=120)
+    assert proc.returncode == 0, proc.stderr
+    assert "kernel.so" in proc.stdout.split()
+    assert sorted(p.name for p in store.iterdir()) == [_cpu_store_name()]
+    assert not [p for p in store.rglob("cpu-*") if p.parent != store]
+
+
+def test_a_store_name_an_older_link_suffixed_is_cut_back_to_its_root(runners, tmp_path):
+    r"""Chains already running carry a suffixed value; their next link must
+    find the store's root again rather than nest one level further."""
+    store = tmp_path / "store"
+    (store / _cpu_store_name()).mkdir(parents=True)
+    (store / _cpu_store_name() / "kernel.so").write_text("compiled")
+    nested = store / "cpu-0123456789ab" / "cpu-0123456789ab"
+    rc, out, err = _activate_cache(
+        runners, tmp_path, f'ls "$PYOP2_CACHE_DIR"; {show("ISMIP7_SHARED_JIT_CACHE")}',
+        SLURM_JOB_ID="103", SLURM_JOB_NUM_NODES="1", ISMIP7_SHARED_JIT_CACHE=str(nested))
+    assert rc == 0, err
+    assert "kernel.so" in out.split()
+    assert f"ISMIP7_SHARED_JIT_CACHE={store}" in out.splitlines()
+
+
+def test_the_exit_trap_removes_only_the_node_local_copy(runners, tmp_path):
+    r"""A script that activates and then sources a recorded environment (a
+    routine.env names the store itself as PYOP2_CACHE_DIR) had the exit trap,
+    which read the variable when the shell ended, delete the shared store."""
+    store = tmp_path / "store"
+    store.mkdir()
+    (store / "kept.so").write_text("compiled")
+    rc, out, err = _activate_cache(
+        runners, tmp_path, f'echo "$PYOP2_CACHE_DIR"; export PYOP2_CACHE_DIR="{store}"',
+        SLURM_JOB_ID="104", SLURM_JOB_NUM_NODES="1", ISMIP7_SHARED_JIT_CACHE=str(store))
+    assert rc == 0, err
+    assert (store / "kept.so").exists()
+    assert not Path(out.splitlines()[-1]).exists()
+
+
+def test_a_shell_outside_a_job_keeps_its_own_cache_and_no_exit_trap(runners, tmp_path):
+    r"""Activating in a login shell (to run a helper) copies no store, starts no
+    copy-back loop and leaves no exit trap behind in the caller's shell."""
+    store = tmp_path / "store"
+    rc, out, err = _activate_cache(
+        runners, tmp_path, f'trap -p EXIT; {show("PYOP2_CACHE_DIR", "ISMIP7_SHARED_JIT_CACHE")}',
+        ISMIP7_SHARED_JIT_CACHE=str(store))
+    assert rc == 0, err
+    assert "trap" not in out
+    values = dict(line.split("=", 1) for line in out.splitlines() if "=" in line)
+    assert values["PYOP2_CACHE_DIR"].endswith(".pyop2_cache/manual")
+    assert values["ISMIP7_SHARED_JIT_CACHE"] == str(store)
+    assert not store.exists()

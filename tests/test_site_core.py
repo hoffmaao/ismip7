@@ -426,7 +426,7 @@ def test_a_chain_successor_starts_from_the_kernels_its_predecessor_compiled(runn
     r"""The store must be the same directory on every link of a chain. The
     per-CPU suffix used to be written back into the exported variable, so each
     successor appended another one and started from a new, empty store: on NOTS
-    the store nested 178 levels deep and every link recompiled."""
+    the store nested 113 levels deep and every link recompiled."""
     store = tmp_path / "store"
     handed_on = tmp_path / "env_link1"
     rc, _, err = _activate_cache(

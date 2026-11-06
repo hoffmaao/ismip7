@@ -37,6 +37,7 @@ _ISMIP7_BR_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # The checkout this file belongs to, for a site file to default ISMIP7_REPO
 # to. `cd` and `pwd` stay logical on purpose: a sandbox that reaches this tree
 # through a symlink (the chain tests do) has to resolve to the sandbox.
+# shellcheck disable=SC2034  # read by the site files sourced after this one
 ISMIP7_REPO_SELF="$(cd "$_ISMIP7_BR_DIR/../../.." && pwd)"
 
 _ISMIP7_LOCAL_ENV="${ISMIP7_LOCAL_ENV:-$_ISMIP7_BR_DIR/sites/local.env}"
@@ -322,21 +323,42 @@ ismip7_activate() {
     # kernel built on one node type reached another and two ranks of a
     # Cascade Lake job died with a bus error 14 s in, on a store filled on
     # Sapphire Rapids (NOTS 1743894, 3 Oct 2026).
-    if [ -n "${ISMIP7_SHARED_JIT_CACHE:-}" ] && [ "${SLURM_JOB_NUM_NODES:-1}" = 1 ]; then
+    # Only a Slurm job takes part: a login shell that activates to run a helper
+    # keeps its own cache, and gets no copy-back loop or exit trap.
+    if [ -n "${SLURM_JOB_ID:-}" ] && [ -n "${ISMIP7_SHARED_JIT_CACHE:-}" ] \
+            && [ "${SLURM_JOB_NUM_NODES:-1}" = 1 ]; then
         _ismip7_cpu="$(grep -m1 '^model name' /proc/cpuinfo 2>/dev/null | md5sum | cut -c1-12)"
-        ISMIP7_SHARED_JIT_CACHE="${ISMIP7_SHARED_JIT_CACHE%/}/cpu-${_ismip7_cpu:-unknown}"
+        # The per-CPU store has a name of its own. ISMIP7_SHARED_JIT_CACHE is
+        # exported, and a chain resubmit's --export=ALL hands it to the next
+        # link, so writing the suffix into it made every successor append one
+        # more and start from a new, empty store (NOTS, November 2026: 113
+        # levels deep, every link recompiling after copying the nested tree).
+        # A value an older link already suffixed is cut back to the root.
+        _ismip7_jit_suffix='^(.+)/cpu-([0-9a-f]{12}|unknown)/?$'
+        while [[ "$ISMIP7_SHARED_JIT_CACHE" =~ $_ismip7_jit_suffix ]]; do
+            ISMIP7_SHARED_JIT_CACHE="${BASH_REMATCH[1]}"
+        done
+        _ismip7_jit_store="${ISMIP7_SHARED_JIT_CACHE%/}/cpu-${_ismip7_cpu:-unknown}"
         rmdir "$PYOP2_CACHE_DIR" 2>/dev/null || true
-        mkdir -p "$ISMIP7_SHARED_JIT_CACHE"
-        export PYOP2_CACHE_DIR="${TMPDIR:-/tmp}/ismip7_pyop2_${SLURM_JOB_ID:-$$}"
-        mkdir -p "$PYOP2_CACHE_DIR"
-        rsync -a --exclude '*.tmp' "$ISMIP7_SHARED_JIT_CACHE/" "$PYOP2_CACHE_DIR/" || true
+        mkdir -p "$_ismip7_jit_store"
+        # The node-local copy is named apart from PYOP2_CACHE_DIR too: the exit
+        # trap runs when the shell ends, and a script that sources a recorded
+        # environment after activating (a routine.env names the store itself as
+        # PYOP2_CACHE_DIR) had the trap delete the shared store.
+        _ismip7_jit_local="${TMPDIR:-/tmp}/ismip7_pyop2_${SLURM_JOB_ID}"
+        export PYOP2_CACHE_DIR="$_ismip7_jit_local"
+        mkdir -p "$_ismip7_jit_local"
+        # the store's kernels, not the stores older links nested inside it
+        rsync -a --exclude '*.tmp' --exclude '/cpu-*/' \
+            "$_ismip7_jit_store/" "$_ismip7_jit_local/" || true
         _ismip7_jit_harvest() {
             rsync -a --ignore-existing --exclude '*.tmp' \
-                "$PYOP2_CACHE_DIR/" "$ISMIP7_SHARED_JIT_CACHE/" 2>/dev/null || true
+                "$_ismip7_jit_local/" "$_ismip7_jit_store/" 2>/dev/null || true
         }
-        ( while sleep 600; do _ismip7_jit_harvest; done ) &
+        # off the job's own output, which the loop would otherwise hold open
+        ( while sleep 600; do _ismip7_jit_harvest; done ) </dev/null >/dev/null 2>&1 &
         _ISMIP7_JIT_HARVESTER=$!
-        trap '_ismip7_jit_harvest; kill "$_ISMIP7_JIT_HARVESTER" 2>/dev/null; rm -rf "$PYOP2_CACHE_DIR"' EXIT
+        trap '_ismip7_jit_harvest; kill "$_ISMIP7_JIT_HARVESTER" 2>/dev/null; rm -rf "$_ismip7_jit_local"' EXIT
     fi
     # XDG_CACHE_HOME is loopy's knob and also matplotlib's, so pin the font
     # cache where it is already warm and move only loopy.

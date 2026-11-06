@@ -167,6 +167,8 @@ to (`site_core.sh`), so a chain link starts from the kernels its predecessors
 compiled; the ranks never share the store over NFS directly. The store is kept
 per CPU model (`<store>/cpu-<hash>`), since a kernel compiled with
 `-march=native` on Sapphire Rapids killed a Cascade Lake job with a bus error.
+Only a Slurm job uses the store; a login shell that activates to run a helper
+keeps its own cache.
 
 Optional, for the timing campaign: `ISMIP7_CONSTRAINT_TIMING` (the node feature
 `submit.sh script` asks for; defaults to `ISMIP7_CONSTRAINT_FWD`),

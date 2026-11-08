@@ -46,8 +46,8 @@ def posterior_variance(prior_variance, projections, eigenvalues):
 def is_dg0(space):
     r"""Whether ``space`` is the DG0 space the finite-volume transport moves
     its thickness in: the discharge forms read cell values and their upwind
-    facet fluxes, so they need that space, not the geometry's name in a run's
-    context, which older checkouts spell differently."""
+    facet fluxes, so they need that space. The check reads the element because
+    checkouts name the geometry space differently in a run's context."""
     element = space.ufl_element()
     return element.degree() == 0 and element.family() in ("Discontinuous Lagrange", "DQ", "DG")
 

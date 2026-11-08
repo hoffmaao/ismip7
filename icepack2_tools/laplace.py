@@ -71,13 +71,14 @@ def grounded_discharge_forms(u, h, grounded, weight=None):
 
     ``u`` is the velocity, ``h`` the DG0 thickness, ``grounded`` a DG0
     indicator of the grounded cells (``grounded_indicator``, which counts
-    every cell on a bed at or above sea level as grounded) and ``weight`` an optional DG0 weight on
-    the grounded side (a basin indicator), read where the ice leaves.
+    every cell on a bed at or above sea level as grounded) and ``weight`` an
+    optional DG0 weight on the grounded side (a basin indicator), read where
+    the ice leaves.
 
     The first form is the grounding-line flux: across every facet between a
-    grounded cell and a marine cell that is not grounded, the upwind flux the DG0 transport moves,
-    signed positive from grounded to floating, as the ISMIP7 writer books
-    ``ligroundf``. Ice flowing back onto a pinning point counts negative, so
+    grounded cell and a marine cell that is not grounded, the upwind flux the
+    DG0 transport moves, signed positive from grounded to floating, as the
+    ISMIP7 writer books ``ligroundf``. Ice flowing back onto a pinning point counts negative, so
     an ice rumple's throughput cancels. The second is the upwind outflow of
     grounded cells across the mesh boundary, which a mesh whose edge is the
     ice front carries at grounded margins."""

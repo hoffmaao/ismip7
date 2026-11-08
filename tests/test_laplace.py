@@ -85,3 +85,33 @@ def test_flow_onto_grounded_ice_counts_negative_and_leaves_at_the_edge():
 def test_a_weight_on_the_grounded_side_scales_its_discharge():
     gl, edge = _slab((1.0, 0.0), weight_value=2.0)
     assert gl == pytest.approx(200.0)
+
+
+def _bed_slab(downstream_bed, downstream_thickness):
+    """A 4 x 1 strip, marine grounded ice 100 m thick on a bed at -50 m for
+    x < 2 and the given bed and thickness beyond, under 1 m/yr along x; the
+    grounded mask is built from the geometry."""
+    from icepack2_tools.laplace import grounded_discharge_forms, grounded_indicator
+    rho_ratio = 917.0 / 1028.0
+    mesh = fd.RectangleMesh(4, 1, 4.0, 1.0)
+    x, _ = fd.SpatialCoordinate(mesh)
+    Q0 = fd.FunctionSpace(mesh, "DG", 0)
+    b = fd.Function(Q0).interpolate(fd.conditional(x < 2.0, -50.0, downstream_bed))
+    h = fd.Function(Q0).interpolate(fd.conditional(x < 2.0, 100.0, downstream_thickness))
+    s = fd.Function(Q0).interpolate(fd.max_value(b + h, (1 - rho_ratio) * h))
+    grounded = grounded_indicator(Q0, s, b, rho_ratio)
+    u = fd.Function(fd.VectorFunctionSpace(mesh, "CG", 1)).assign(fd.Constant((1.0, 0.0)))
+    gl, edge = grounded_discharge_forms(u, h, grounded)
+    return fd.assemble(gl), fd.assemble(edge)
+
+
+def test_flow_into_a_floating_marine_cell_is_grounding_line_flux():
+    gl, edge = _bed_slab(downstream_bed=-500.0, downstream_thickness=100.0)
+    assert gl == pytest.approx(100.0)
+    assert edge == pytest.approx(0.0)
+
+
+def test_flow_onto_ice_free_land_books_nowhere():
+    gl, edge = _bed_slab(downstream_bed=10.0, downstream_thickness=0.0)
+    assert gl == pytest.approx(0.0)
+    assert edge == pytest.approx(0.0)

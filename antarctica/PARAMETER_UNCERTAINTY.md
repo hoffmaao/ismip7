@@ -33,7 +33,10 @@ only reductions, so a truncated set of modes bounds the variance from above.
 The quantities are the ice leaving grounded cells at the MAP state: the
 upwind flux across the grounding line into floating cells, signed as the
 ISMIP7 writer books `ligroundf`, plus the outflow of grounded cells across
-the mesh boundary (`icepack2_tools.laplace.grounded_discharge_forms`), in
+the mesh boundary (`icepack2_tools.laplace.grounded_discharge_forms`). As in
+the writer, every cell on a bed at or above sea level counts as grounded
+(`icepack2_tools.laplace.grounded_indicator`), so ice flowing onto bare land
+books nowhere. The totals are in
 Gt/yr, in total, per IMBIE2 basin, and the grounding-line flux alone. Each
 needs one adjoint solve of the momentum balance on the same recorded solve
 the Hessian uses.

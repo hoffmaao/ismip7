@@ -28,7 +28,7 @@ first-order adjoint is then zero and is skipped.) The prior is the MAP's
 recorded bi-Laplacian (sigma, rho per control).
 
 The tape holds one solve at the physical exponents from the converged state
-(the direct forward of 1 Oct 2026)
+(the direct forward of 1 Oct 2026);
 the n=1->3 ladder inside the tape is what
 made the earlier Hessian indefinite. Run it under the full mixed-Jacobian
 MUMPS the inversion differentiates through:
@@ -39,7 +39,7 @@ MUMPS the inversion differentiates through:
 Output beside the MAP's results directory: ``eigendec_<lc>[_<tag>].h5`` (the
 modes as alpha/phi pairs, Gamma^-1-orthonormal), ``eigenvalues_<lc>[_<tag>].txt``
 and ``eigendec_<lc>[_<tag>].json`` (the prior and likelihood the modes belong
-to). The eigensolve is ARPACK on rank 0 over the global control vector
+to). The eigensolve is ARPACK on rank 0 over the global control vector;
 every
 rank serves the collective Hessian and prior actions.
 
@@ -51,7 +51,7 @@ per IMBIE2 basin, and the grounding-line flux alone. Each gets its gradient
 with respect to (alpha, phi) from one adjoint, its prior variance
 ``g . Gamma g`` before the eigensolve and its Laplace posterior variance
 after it (``icepack2_tools.laplace.posterior_variance``), written to
-``uncertainty_<lc>[_<tag>].json``
+``uncertainty_<lc>[_<tag>].json``;
 the prior-weighted sensitivity ``Gamma g``
 of the totals goes into the eigendecomposition file. ``--check``
 compares the total's adjoint gradient with a central difference of two
@@ -91,7 +91,7 @@ import simulation  # noqa: E402
 from icepack2_tools.prior import (bilaplacian_coeffs,  # noqa: E402
                                   prior_operator_form)
 from icepack2_tools.forcing import _basin_on_mesh, imbie2_basin_path  # noqa: E402
-from icepack2_tools.laplace import (grounded_discharge_forms,  # noqa: E402
+from icepack2_tools.laplace import (grounded_discharge_forms, grounded_indicator,  # noqa: E402
                                     posterior_variance)
 from icepack2_tools.runconfig import obs_data_root  # noqa: E402
 
@@ -107,15 +107,15 @@ def dual_dot(g, v):
 def discharge_quantities(ctx, u):
     """(name, UFL form in Gt/yr) for the ice leaving grounded cells at the MAP:
     the total, the grounding-line flux alone and the total per IMBIE2 basin.
-    Grounded cells are the forward's own: surface above the flotation surface."""
+    Grounded cells are those with a surface above the flotation surface, and
+    every cell on a bed at or above sea level, as the ISMIP7 writer books
+    ``ligroundf``, so ice flowing onto bare land is not discharge."""
     h, s, b = ctx["h"], ctx["s"], ctx["b"]
     if ctx.get("geometry_space") != "dg0":
         raise SystemExit("run_eigendec.py --qoi discharge reads the DG0 transport's fluxes; "
                          f"this MAP runs geometry_space={ctx.get('geometry_space')!r}")
     Q0 = h.function_space()
-    s_float = Function(Q0).interpolate(b + max_value(-b, Constant(0.0)) / ctx["rho_ratio"])
-    grounded = Function(Q0, name="grounded")
-    grounded.dat.data[:] = (s.dat.data_ro - s_float.dat.data_ro > 0.0).astype(float)
+    grounded = grounded_indicator(Q0, s, b, ctx["rho_ratio"])
     basin = _basin_on_mesh(ctx["geom_xy"][0], ctx["geom_xy"][1], imbie2_basin_path())
     comm = Q0.mesh().comm
     present = sorted(set().union(*comm.allgather(

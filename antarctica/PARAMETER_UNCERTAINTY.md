@@ -77,11 +77,20 @@ Size the eigensolve to the job's wall-clock limit from that action cost.
 ARPACK takes one Hessian action per Lanczos step, at most
 `1 + ncv + maxiter (ncv - modes)` with `ncv = 2 modes + 1` (`--ncv` changes
 it), so `--maxiter` bounds the run: `--modes 40 --maxiter 2` is at most 164
-actions, under 20 hours at the production MAP's 430 s per action on 32
-ranks (2 km), inside a 24-hour job. When the restarts run out first, the
-modes ARPACK has converged are kept and the json records `converged: false`;
-the spreads they give are still upper bounds. `--tol` (1e-6) is the relative
-accuracy asked of the eigenvalues, far finer than the truncation.
+actions, nine hours at the 190 s per action the production MAP takes on 32
+ranks (2 km; the 40-mode run needed 103 of them). When the restarts run out
+first, the modes ARPACK has converged are kept and the json records
+`converged: false`; the spreads they give are still upper bounds. `--tol`
+(1e-6) is the relative accuracy asked of the eigenvalues, far finer than the
+truncation.
+
+Memory sets the other limit. At 2 km the eigensolve holds about 2.3 GB per
+rank between actions and peaks near 1.4 times that during one, so 32 ranks
+fit a 240 GB node; the log prints the resident set after every action, and
+it must stay level. It did not before `patch_tangent_linear_cleanup`
+(`icepack2_tools/laplace.py`): tlm_adjoint 0.9.1dev leaves each action's
+tangent-linear copies of the forward variables attached to them, 0.6 GB per
+action here, which ended a 100-mode run out of memory after 148 actions.
 
 ## Next steps
 

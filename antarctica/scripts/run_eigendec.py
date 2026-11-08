@@ -64,6 +64,7 @@ uncertainty file records the MAP's ``dhdt_weight`` beside the result.
 import argparse
 import json
 import os
+import resource
 import sys
 import traceback
 
@@ -89,10 +90,21 @@ from icepack2_tools.prior import (bilaplacian_coeffs,  # noqa: E402
                                   prior_operator_form)
 from icepack2_tools.forcing import _basin_on_mesh, imbie2_basin_path  # noqa: E402
 from icepack2_tools.laplace import (arpack_action_bound, arpack_ncv, grounded_discharge_forms,  # noqa: E402
-                                    grounded_indicator, is_dg0, leading_eigenpairs, posterior_variance)
+                                    grounded_indicator, is_dg0, leading_eigenpairs,
+                                    patch_tangent_linear_cleanup, posterior_variance)
 from icepack2_tools.runconfig import obs_data_root  # noqa: E402
 
 RHO_GT = 917.0 / 1e12          # m3 of ice -> Gt
+
+
+def rss_mb():
+    """This rank's resident set in MB: the current one where /proc exists,
+    the peak from getrusage elsewhere."""
+    try:
+        with open("/proc/self/statm") as f:
+            return int(f.read().split()[1]) * resource.getpagesize() / 2 ** 20
+    except OSError:
+        return resource.getrusage(resource.RUSAGE_SELF).ru_maxrss / 1024
 
 
 def dual_dot(g, v):
@@ -272,6 +284,9 @@ def main():
             Jq.assign(form)
             qois.append((name, Jq))
     stop_manager()
+    # Each action's tangent-linear copies of the forward variables must go
+    # when the action ends (see patch_tangent_linear_cleanup).
+    patch_tangent_linear_cleanup()
     H = CachedGaussNewton(z, R_inv_action)
     controls = [alpha, phi]
 
@@ -362,8 +377,11 @@ def main():
             ddJ = H.action(controls, [va, vp])
             out = pack(ddJ[0], ddJ[1])
             n_actions[0] += 1
+            rss = rss_mb()
             PETSc.Sys.Print(f"  Hessian action {n_actions[0]}: {perf_counter() - t0:.1f} s "
-                            f"({(perf_counter() - t_eig) / 3600:.2f} h into the eigensolve)")
+                            f"({(perf_counter() - t_eig) / 3600:.2f} h into the eigensolve); "
+                            f"resident {comm.allreduce(rss, op=MPI.SUM) / 1024:.1f} GB over "
+                            f"{comm.size} ranks, {comm.allreduce(rss, op=MPI.MAX) / 1024:.2f} GB max")
         elif op == "Ginv":
             out = pack(*precision(va, vp))
         elif op == "G":

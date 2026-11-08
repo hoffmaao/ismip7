@@ -181,3 +181,46 @@ def test_the_discharge_space_check_reads_the_element_not_a_context_key():
     assert is_dg0(fd.FunctionSpace(mesh, "DG", 0))
     assert not is_dg0(fd.FunctionSpace(mesh, "DG", 1))
     assert not is_dg0(fd.FunctionSpace(mesh, "CG", 1))
+
+
+def test_gauss_newton_actions_release_their_tangent_linears():
+    """Every Gauss-Newton action makes a tangent-linear copy of each forward
+    variable and keeps it in a dictionary on that variable; tlm_adjoint's map
+    finaliser removes them only for the variables the map registered, and in
+    0.9.1dev a map registers a variable only when it creates the dictionary.
+    With the patch applied, nothing stays behind after any action, and the
+    action's value is unchanged."""
+    import gc
+    tla = pytest.importorskip("tlm_adjoint.firedrake")
+    from icepack2_tools.laplace import patch_tangent_linear_cleanup
+    patch_tangent_linear_cleanup()
+    patch_tangent_linear_cleanup()      # idempotent
+
+    mesh = fd.UnitSquareMesh(4, 4)
+    V = fd.FunctionSpace(mesh, "CG", 1)
+    x, y = fd.SpatialCoordinate(mesh)
+    m = fd.Function(V, name="m").interpolate(0.1 * x)
+    f = fd.Function(V, name="f").interpolate(fd.sin(fd.pi * x) * fd.sin(fd.pi * y))
+    u = fd.Function(V, name="u")
+    v = fd.TestFunction(V)
+    F = fd.inner(fd.grad(u), fd.grad(v)) * fd.dx + fd.exp(m) * u * v * fd.dx - f * v * fd.dx
+    bc = fd.DirichletBC(V, 0.0, "on_boundary")
+    tla.reset_manager()
+    tla.start_manager()
+    tla.EquationSolver(F == 0, u, bc).solve()
+    tla.stop_manager()
+    H = tla.CachedGaussNewton(u, lambda tau: fd.assemble(fd.inner(tau, v) * fd.dx))
+    dm = fd.Function(V, name="dm").assign(1.0)
+
+    def attached():
+        return sum(len(getattr(z, "_tlm_adjoint__tangent_linears", {})) for z in (m, f, u))
+
+    results = []
+    for _ in range(3):
+        ddJ, = H.action([m], [dm])
+        results.append(ddJ.dat.data_ro.copy())
+        del ddJ
+        gc.collect()
+        assert attached() == 0
+    assert np.allclose(results[1], results[0]) and np.allclose(results[2], results[0])
+    assert np.linalg.norm(results[0]) > 0.0

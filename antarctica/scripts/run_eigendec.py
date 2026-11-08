@@ -65,6 +65,7 @@ import argparse
 import json
 import os
 import sys
+import traceback
 
 import numpy as np
 import firedrake as fd
@@ -166,6 +167,8 @@ def main():
                          "against a central difference, and the Gauss-Newton action d.Hd against "
                          "the R^-1 norm of the velocity change a central difference gives along d")
     args = ap.parse_args()
+    if args.maxiter is not None and args.maxiter < 1:
+        ap.error(f"--maxiter must be at least 1, got {args.maxiter}")
     comm = MPI.COMM_WORLD
 
     ctx = simulation.setup_model()
@@ -375,14 +378,19 @@ def main():
     ncv = min(args.ncv or arpack_ncv(k), N)
     if comm.rank == 0:
         budget = (f"at most {arpack_action_bound(k, ncv, args.maxiter)} Hessian actions "
-                  f"({args.maxiter} restarts)" if args.maxiter else "restarts unbounded")
+                  f"({args.maxiter} restarts)" if args.maxiter is not None else "restarts unbounded")
         PETSc.Sys.Print(f"ARPACK: {k} leading generalised eigenpairs of H_GN v = lambda Gamma^-1 v "
                         f"({N} control dofs); {ncv} Lanczos vectors, tol {args.tol:g}, {budget}")
-        vals, vecs, converged = leading_eigenpairs(
-            lambda x: serve("H_dual", np.asarray(x, dtype=float)),
-            lambda x: serve("Ginv", np.asarray(x, dtype=float)),
-            lambda x: serve("G", np.asarray(x, dtype=float)),
-            N, k, tol=args.tol, maxiter=args.maxiter, ncv=ncv)
+        try:
+            vals, vecs, converged = leading_eigenpairs(
+                lambda x: serve("H_dual", np.asarray(x, dtype=float)),
+                lambda x: serve("Ginv", np.asarray(x, dtype=float)),
+                lambda x: serve("G", np.asarray(x, dtype=float)),
+                N, k, tol=args.tol, maxiter=args.maxiter, ncv=ncv)
+        except BaseException:
+            traceback.print_exc()
+            sys.stderr.flush()
+            comm.Abort(1)
         serve("stop")
     else:
         while serve(None) is not None:

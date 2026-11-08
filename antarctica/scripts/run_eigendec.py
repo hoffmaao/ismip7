@@ -73,7 +73,6 @@ from firedrake import (Constant, Function, TestFunction,
                        VectorFunctionSpace)
 from firedrake.petsc import PETSc
 from mpi4py import MPI
-from scipy.sparse.linalg import LinearOperator, eigsh
 from tlm_adjoint.firedrake import (CachedGaussNewton, EquationSolver, Functional,
                                    compute_gradient, reset_manager, start_manager,
                                    stop_manager)
@@ -88,8 +87,8 @@ import simulation  # noqa: E402
 from icepack2_tools.prior import (bilaplacian_coeffs,  # noqa: E402
                                   prior_operator_form)
 from icepack2_tools.forcing import _basin_on_mesh, imbie2_basin_path  # noqa: E402
-from icepack2_tools.laplace import (grounded_discharge_forms, grounded_indicator, is_dg0,  # noqa: E402
-                                    posterior_variance)
+from icepack2_tools.laplace import (arpack_action_bound, arpack_ncv, grounded_discharge_forms,  # noqa: E402
+                                    grounded_indicator, is_dg0, leading_eigenpairs, posterior_variance)
 from icepack2_tools.runconfig import obs_data_root  # noqa: E402
 
 RHO_GT = 917.0 / 1e12          # m3 of ice -> Gt
@@ -152,6 +151,14 @@ def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--modes", type=int, default=int(os.environ.get("ISMIP7_EIG_MODES", "40")))
     ap.add_argument("--tag", default=os.environ.get("ISMIP7_RUN_TAG", ""))
+    ap.add_argument("--tol", type=float, default=1e-6,
+                    help="ARPACK's relative accuracy on the eigenvalues (default 1e-6; 0 is machine precision)")
+    ap.add_argument("--maxiter", type=int, default=None,
+                    help="ARPACK restarts allowed; the solve then takes at most 1 + ncv + maxiter (ncv - modes) "
+                         "Hessian actions and keeps the modes converged by then, so a job can be sized to its "
+                         "wall-clock limit (default: unbounded)")
+    ap.add_argument("--ncv", type=int, default=None,
+                    help="Lanczos vectors per restart cycle (default 2 modes + 1, at least 20)")
     ap.add_argument("--qoi", choices=("discharge", "none"), default="discharge",
                     help="quantities whose posterior spread is computed (default: discharge)")
     ap.add_argument("--check", action="store_true",
@@ -331,6 +338,8 @@ def main():
     N = 2 * n
     va, vp = Function(Q), Function(Q)
     n_actions = [0]
+    from time import perf_counter
+    t_eig = perf_counter()
 
     def unpack(x):
         from_global(x[:n], va)
@@ -346,13 +355,12 @@ def main():
             return None
         unpack(x)
         if op == "H_dual":
-            from time import perf_counter
             t0 = perf_counter()
             ddJ = H.action(controls, [va, vp])
             out = pack(ddJ[0], ddJ[1])
             n_actions[0] += 1
-            if n_actions[0] % 10 == 1:
-                PETSc.Sys.Print(f"  Hessian action {n_actions[0]}: {perf_counter() - t0:.1f} s")
+            PETSc.Sys.Print(f"  Hessian action {n_actions[0]}: {perf_counter() - t0:.1f} s "
+                            f"({(perf_counter() - t_eig) / 3600:.2f} h into the eigensolve)")
         elif op == "Ginv":
             out = pack(*precision(va, vp))
         elif op == "G":
@@ -364,22 +372,29 @@ def main():
         return out
 
     k = min(args.modes, N - 2)
+    ncv = min(args.ncv or arpack_ncv(k), N)
     if comm.rank == 0:
+        budget = (f"at most {arpack_action_bound(k, ncv, args.maxiter)} Hessian actions "
+                  f"({args.maxiter} restarts)" if args.maxiter else "restarts unbounded")
         PETSc.Sys.Print(f"ARPACK: {k} leading generalised eigenpairs of H_GN v = lambda Gamma^-1 v "
-                        f"({N} control dofs)")
-        H_op = LinearOperator((N, N), matvec=lambda x: serve("H_dual", np.asarray(x, dtype=float)), dtype=float)
-        M_op = LinearOperator((N, N), matvec=lambda x: serve("Ginv", np.asarray(x, dtype=float)), dtype=float)
-        Minv_op = LinearOperator((N, N), matvec=lambda x: serve("G", np.asarray(x, dtype=float)), dtype=float)
-        vals, vecs = eigsh(H_op, k=k, M=M_op, Minv=Minv_op, which="LA")
-        order = np.argsort(-vals)
-        vals, vecs = vals[order], vecs[:, order]
+                        f"({N} control dofs); {ncv} Lanczos vectors, tol {args.tol:g}, {budget}")
+        vals, vecs, converged = leading_eigenpairs(
+            lambda x: serve("H_dual", np.asarray(x, dtype=float)),
+            lambda x: serve("Ginv", np.asarray(x, dtype=float)),
+            lambda x: serve("G", np.asarray(x, dtype=float)),
+            N, k, tol=args.tol, maxiter=args.maxiter, ncv=ncv)
         serve("stop")
     else:
         while serve(None) is not None:
             pass
-        vals, vecs = None, None
-    vals = comm.bcast(vals, root=0)
-    PETSc.Sys.Print("Leading eigenvalues (lambda): " + " ".join(f"{v:.3e}" for v in vals[:10]))
+        vals, vecs, converged = None, None, None
+    vals, converged = comm.bcast((vals, converged), root=0)
+    if not converged:
+        PETSc.Sys.Print(f"ARPACK reached its {args.maxiter} restarts with {vals.size} of {k} modes converged; "
+                        f"the spreads below use those (still upper bounds)")
+    k = int(vals.size)
+    PETSc.Sys.Print(f"Leading eigenvalues (lambda), {n_actions[0]} Hessian actions: "
+                    + " ".join(f"{v:.3e}" for v in vals[:10]))
     PETSc.Sys.Print(f"  modes with lambda > 1 (data-dominated): {int((vals > 1.0).sum())} of {k}; "
                     f"min {vals.min():.3e}")
 
@@ -409,6 +424,9 @@ def main():
         np.savetxt(os.path.join(out_dir, f"eigenvalues_{lc}{sfx}.txt"), vals)
         with open(os.path.join(out_dir, f"eigendec_{lc}{sfx}.json"), "w") as f:
             json.dump({"map": os.environ["ISMIP7_INVERSION"], "modes": k,
+                       "modes_requested": args.modes, "converged": bool(converged),
+                       "arpack": {"tol": args.tol, "ncv": ncv, "maxiter": args.maxiter,
+                                  "hessian_actions": n_actions[0]},
                        "misfit_scale": misfit_scale, "log_vel_weight": log_w,
                        "sigma_floor": floor, "prior": {k_: list(c) for k_, c in coeffs.items()},
                        "prior_record": {k_: meta.get(k_) for k_ in
@@ -434,6 +452,7 @@ def main():
         if comm.rank == 0:
             with open(os.path.join(out_dir, f"uncertainty_{lc}{sfx}.json"), "w") as f:
                 json.dump({"map": os.environ["ISMIP7_INVERSION"], "modes": k,
+                           "modes_requested": args.modes, "converged": bool(converged),
                            "likelihood": "velocity",
                            "map_dhdt_weight": dhdt_weight,
                            "note": ("posterior from the velocity likelihood only; with "

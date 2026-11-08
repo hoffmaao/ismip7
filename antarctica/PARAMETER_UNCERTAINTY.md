@@ -60,7 +60,7 @@ the Hessian uses.
 ## Running it
 
     ISMIP7_INVERSION=<map.h5> mpiexec -n 32 python antarctica/scripts/run_eigendec.py \
-        --modes 60 --tag <tag>
+        --modes 40 --maxiter 2 --tag <tag>
 
 under the environment the MAP was inverted in. The gradients and prior
 spreads are printed before the eigensolve; the eigendecomposition file,
@@ -69,8 +69,19 @@ and posterior sigma per quantity, and each mode's share of the reduction) are
 written beside the results. Run once with `--check` first: it compares the
 total discharge's adjoint gradient with a central difference of two untaped
 solves, and the Gauss-Newton action along that direction with the norm of the
-velocity change two more solves give, then stops (the checks move the
-controls, so they cannot share a run with the eigensolve).
+velocity change two more solves give, times one Gauss-Newton action, then
+stops (the checks move the controls, so they cannot share a run with the
+eigensolve).
+
+Size the eigensolve to the job's wall-clock limit from that action cost.
+ARPACK takes one Hessian action per Lanczos step, at most
+`1 + ncv + maxiter (ncv - modes)` with `ncv = 2 modes + 1` (`--ncv` changes
+it), so `--maxiter` bounds the run: `--modes 40 --maxiter 2` is at most 164
+actions, under 20 hours at the production MAP's 430 s per action on 32
+ranks (2 km), inside a 24-hour job. When the restarts run out first, the
+modes ARPACK has converged are kept and the json records `converged: false`;
+the spreads they give are still upper bounds. `--tol` (1e-6) is the relative
+accuracy asked of the eigenvalues, far finer than the truncation.
 
 ## Next steps
 

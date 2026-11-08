@@ -43,6 +43,54 @@ def posterior_variance(prior_variance, projections, eigenvalues):
     return float(prior_variance) - float(np.sum(lam / (1.0 + lam) * p ** 2))
 
 
+def arpack_ncv(k):
+    r"""The number of Lanczos vectors ARPACK keeps per restart cycle when none is
+    given: scipy's default of ``max(2k + 1, 20)``."""
+    return max(2 * k + 1, 20)
+
+
+def arpack_action_bound(k, ncv, maxiter):
+    r"""The most operator actions ARPACK takes for ``k`` pairs with ``ncv``
+    Lanczos vectors and ``maxiter`` restarts: one on the start vector, ``ncv``
+    for the first factorisation and ``ncv - k`` more per restart."""
+    return 1 + ncv + maxiter * (ncv - k)
+
+
+def leading_eigenpairs(H_action, Ginv_action, G_action, N, k, tol=1e-6, maxiter=None, ncv=None):
+    r"""The ``k`` leading generalised eigenpairs ``H v = lambda Gamma^-1 v`` by
+    ARPACK, from three actions on global vectors of length ``N``: the Hessian
+    ``H``, the prior precision ``Gamma^-1`` and the prior covariance ``Gamma``.
+
+    ``tol`` is ARPACK's relative accuracy on the eigenvalues (0 means machine
+    precision). ``maxiter`` bounds the restarts: the solve then takes at most
+    ``arpack_action_bound(k, ncv, maxiter)`` Hessian actions, so a job can be
+    sized to its wall-clock limit. When ARPACK reaches that bound first, the
+    pairs it has converged come back instead of nothing, in which case the
+    third value is ``False``. Returns ``(eigenvalues, eigenvectors,
+    converged)`` with the eigenvalues descending and the eigenvectors, one per
+    column, normalised to ``v_i . Gamma^-1 v_j = delta_ij``; it raises when
+    not one pair converged."""
+    from scipy.sparse.linalg import ArpackNoConvergence, LinearOperator, eigsh
+
+    if ncv is None:
+        ncv = arpack_ncv(k)
+    H_op = LinearOperator((N, N), matvec=H_action, dtype=float)
+    Ginv_op = LinearOperator((N, N), matvec=Ginv_action, dtype=float)
+    G_op = LinearOperator((N, N), matvec=G_action, dtype=float)
+    try:
+        vals, vecs = eigsh(H_op, k=k, M=Ginv_op, Minv=G_op, which="LA",
+                           tol=tol, ncv=ncv, maxiter=maxiter)
+        converged = True
+    except ArpackNoConvergence as e:
+        vals, vecs = np.asarray(e.eigenvalues, dtype=float), np.asarray(e.eigenvectors, dtype=float)
+        converged = False
+        if vals.size == 0:
+            raise RuntimeError(f"ARPACK converged no eigenpair within {maxiter} restarts "
+                               f"({ncv} Lanczos vectors): {e}") from e
+    order = np.argsort(-vals)
+    return vals[order], vecs[:, order], converged
+
+
 def is_dg0(space):
     r"""Whether ``space`` is the DG0 space the finite-volume transport moves
     its thickness in: the discharge forms read cell values and their upwind

@@ -52,6 +52,61 @@ def test_projections_and_eigenvalues_must_pair_up():
         posterior_variance(1.0, [0.1, 0.2, 0.3], [2.0, 1.0])
 
 
+def _diagonal_problem(spectrum, seed=5):
+    """A generalised eigenproblem H v = lambda Gamma^-1 v with diagonal H and
+    Gamma, built to have the given eigenvalues: its eigenvectors are the unit
+    vectors scaled to v . Gamma^-1 v = 1, and every action is counted."""
+    from icepack2_tools.laplace import leading_eigenpairs
+    lam = np.asarray(spectrum, dtype=float)
+    rng = np.random.default_rng(seed)
+    cov = rng.uniform(0.5, 2.0, size=lam.size)      # Gamma
+    hess = lam / cov                                 # Gamma H = diag(lam)
+    counts = {"H": 0}
+
+    def H_action(x):
+        counts["H"] += 1
+        return hess * x
+
+    def solve(k, **kw):
+        return leading_eigenpairs(H_action, lambda x: x / cov, lambda x: cov * x, lam.size, k, **kw)
+
+    return solve, counts, cov
+
+
+def test_separated_leading_eigenpairs_converge_and_come_back_descending():
+    from icepack2_tools.laplace import arpack_action_bound, arpack_ncv
+    top = [1000.0, 500.0, 250.0, 125.0]
+    solve, counts, cov = _diagonal_problem(top + list(1.0 + 1e-3 * np.arange(300)))
+    vals, vecs, converged = solve(4, tol=1e-10, maxiter=20)
+    assert converged
+    assert vals == pytest.approx(top, rel=1e-8)
+    assert counts["H"] <= arpack_action_bound(4, arpack_ncv(4), 20)
+    gram = vecs.T @ (vecs / cov[:, None])            # v_i . Gamma^-1 v_j
+    assert gram == pytest.approx(np.eye(4), abs=1e-6)
+
+
+def test_the_restart_limit_keeps_the_converged_pairs():
+    """Two separated eigenvalues above a dense cluster: one restart cycle
+    converges the two and cannot resolve the cluster to machine precision, so
+    the solve returns those two instead of raising, within its action bound."""
+    from icepack2_tools.laplace import arpack_action_bound
+    solve, counts, cov = _diagonal_problem([100.0, 50.0] + list(1.0 + 1e-3 * np.arange(400)))
+    vals, vecs, converged = solve(6, tol=0.0, maxiter=1, ncv=20)
+    assert not converged
+    assert 2 <= vals.size < 6
+    assert vals[:2] == pytest.approx([100.0, 50.0], rel=1e-8)
+    assert vecs.shape == (402, vals.size)
+    assert counts["H"] <= arpack_action_bound(6, 20, 1)
+    gram = vecs.T @ (vecs / cov[:, None])
+    assert gram == pytest.approx(np.eye(vals.size), abs=1e-6)
+
+
+def test_no_converged_pair_is_an_error():
+    solve, counts, cov = _diagonal_problem(list(1.0 + 1e-4 * np.arange(400)))
+    with pytest.raises(RuntimeError, match="no eigenpair"):
+        solve(3, tol=0.0, maxiter=1, ncv=4)
+
+
 fd = pytest.importorskip("firedrake")
 
 

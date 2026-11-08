@@ -43,6 +43,15 @@ def posterior_variance(prior_variance, projections, eigenvalues):
     return float(prior_variance) - float(np.sum(lam / (1.0 + lam) * p ** 2))
 
 
+def is_dg0(space):
+    r"""Whether ``space`` is the DG0 space the finite-volume transport moves
+    its thickness in: the discharge forms read cell values and their upwind
+    facet fluxes, so they need that space, not the geometry's name in a run's
+    context, which older checkouts spell differently."""
+    element = space.ufl_element()
+    return element.degree() == 0 and element.family() in ("Discontinuous Lagrange", "DQ", "DG")
+
+
 def grounded_indicator(Q0, s, b, rho_ratio):
     r"""The DG0 indicator of the cells the discharge counts as grounded.
 

@@ -88,7 +88,7 @@ import simulation  # noqa: E402
 from icepack2_tools.prior import (bilaplacian_coeffs,  # noqa: E402
                                   prior_operator_form)
 from icepack2_tools.forcing import _basin_on_mesh, imbie2_basin_path  # noqa: E402
-from icepack2_tools.laplace import (grounded_discharge_forms, grounded_indicator,  # noqa: E402
+from icepack2_tools.laplace import (grounded_discharge_forms, grounded_indicator, is_dg0,  # noqa: E402
                                     posterior_variance)
 from icepack2_tools.runconfig import obs_data_root  # noqa: E402
 
@@ -108,10 +108,10 @@ def discharge_quantities(ctx, u):
     every cell on a bed at or above sea level, as the ISMIP7 writer books
     ``ligroundf``, so ice flowing onto bare land is not discharge."""
     h, s, b = ctx["h"], ctx["s"], ctx["b"]
-    if ctx.get("geometry_space") != "dg0":
-        raise SystemExit("run_eigendec.py --qoi discharge reads the DG0 transport's fluxes; "
-                         f"this MAP runs geometry_space={ctx.get('geometry_space')!r}")
     Q0 = h.function_space()
+    if not is_dg0(Q0):
+        raise SystemExit("run_eigendec.py --qoi discharge reads the DG0 transport's fluxes; "
+                         f"this MAP keeps its thickness in {Q0.ufl_element()}")
     grounded = grounded_indicator(Q0, s, b, ctx["rho_ratio"])
     basin = _basin_on_mesh(ctx["geom_xy"][0], ctx["geom_xy"][1], imbie2_basin_path())
     comm = Q0.mesh().comm

@@ -115,3 +115,14 @@ def test_flow_onto_ice_free_land_books_nowhere():
     gl, edge = _bed_slab(downstream_bed=10.0, downstream_thickness=0.0)
     assert gl == pytest.approx(0.0)
     assert edge == pytest.approx(0.0)
+
+
+def test_the_discharge_space_check_reads_the_element_not_a_context_key():
+    """A run's context names its geometry space differently across checkouts
+    (the production line's has no ``geometry_space`` key), so the check on the
+    thickness space reads the element itself."""
+    from icepack2_tools.laplace import is_dg0
+    mesh = fd.UnitSquareMesh(2, 2)
+    assert is_dg0(fd.FunctionSpace(mesh, "DG", 0))
+    assert not is_dg0(fd.FunctionSpace(mesh, "DG", 1))
+    assert not is_dg0(fd.FunctionSpace(mesh, "CG", 1))

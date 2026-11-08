@@ -18,12 +18,18 @@ The problem is the MAP's own: ``simulation.setup_model()`` loads the MAP
 control (sqrt, exp or log), sub-element scheme and the mixed state it was
 accepted at - and the data term is the inversion's (the per-datum chi^2 on
 the MEaSUREs errors with the MAP's recorded ``misfit_scale`` and log-speed
-weight), evaluated against the MAP's own velocity so the residual is zero and
-the Hessian is Gauss-Newton: positive semi-definite by construction. The
-prior is the MAP's recorded bi-Laplacian (sigma, rho per control).
+weight). The Hessian is tlm_adjoint's Gauss-Newton action ``J^T R^-1 J`` on
+the recorded state, ``R^-1`` being that data term's second derivative with
+respect to the velocity: positive semi-definite by construction, with no
+dependence on the residual. (Differentiating the data term itself, evaluated
+against the MAP's own velocity so the residual vanished, gave the same matrix
+in exact arithmetic but an identically zero action in tlm_adjoint, whose
+first-order adjoint is then zero and is skipped.) The prior is the MAP's
+recorded bi-Laplacian (sigma, rho per control).
 
 The tape holds one solve at the physical exponents from the converged state
-(the direct forward of 1 Oct 2026); the n=1->3 ladder inside the tape is what
+(the direct forward of 1 Oct 2026)
+the n=1->3 ladder inside the tape is what
 made the earlier Hessian indefinite. Run it under the full mixed-Jacobian
 MUMPS the inversion differentiates through:
 
@@ -33,8 +39,30 @@ MUMPS the inversion differentiates through:
 Output beside the MAP's results directory: ``eigendec_<lc>[_<tag>].h5`` (the
 modes as alpha/phi pairs, Gamma^-1-orthonormal), ``eigenvalues_<lc>[_<tag>].txt``
 and ``eigendec_<lc>[_<tag>].json`` (the prior and likelihood the modes belong
-to). The eigensolve is ARPACK on rank 0 over the global control vector; every
+to). The eigensolve is ARPACK on rank 0 over the global control vector
+every
 rank serves the collective Hessian and prior actions.
+
+Uncertainty of the discharge (``--qoi discharge``, the default): on the same
+recorded solve, the ice leaving grounded cells at the MAP, across the
+grounding line into floating cells and across the mesh boundary
+(``icepack2_tools.laplace.grounded_discharge_forms``), in Gt/yr, in total and
+per IMBIE2 basin, and the grounding-line flux alone. Each gets its gradient
+with respect to (alpha, phi) from one adjoint, its prior variance
+``g . Gamma g`` before the eigensolve and its Laplace posterior variance
+after it (``icepack2_tools.laplace.posterior_variance``), written to
+``uncertainty_<lc>[_<tag>].json``
+the prior-weighted sensitivity ``Gamma g``
+of the totals goes into the eigendecomposition file. ``--check``
+compares the total's adjoint gradient with a central difference of two
+untaped solves along ``Gamma g``, and the Gauss-Newton action along that
+direction with the norm of the velocity change two more solves give; it
+stops after the checks.
+
+The likelihood is the velocity term only. A MAP whose objective also scored
+dH/dt (``dhdt_weight`` > 0) was constrained by data this Hessian leaves out,
+so its posterior here is wider than the inversion's: an upper bound. The
+uncertainty file records the MAP's ``dhdt_weight`` beside the result.
 """
 import argparse
 import json
@@ -44,13 +72,14 @@ import sys
 import numpy as np
 import firedrake as fd
 from firedrake import (Constant, Function, TestFunction,
-                       TrialFunction, assemble, dx, inner, ln, max_value, sqrt,
+                       TrialFunction, assemble, dx, inner, max_value, sqrt,
                        VectorFunctionSpace)
 from firedrake.petsc import PETSc
 from mpi4py import MPI
 from scipy.sparse.linalg import LinearOperator, eigsh
-from tlm_adjoint.firedrake import (CachedHessian, EquationSolver, Functional,
-                                   reset_manager, start_manager, stop_manager)
+from tlm_adjoint.firedrake import (CachedGaussNewton, EquationSolver, Functional,
+                                   compute_gradient, reset_manager, start_manager,
+                                   stop_manager)
 
 _ROOT = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, _ROOT)
@@ -61,7 +90,45 @@ import rasterio  # noqa: E402
 import simulation  # noqa: E402
 from icepack2_tools.prior import (bilaplacian_coeffs,  # noqa: E402
                                   prior_operator_form)
+from icepack2_tools.forcing import _basin_on_mesh, imbie2_basin_path  # noqa: E402
+from icepack2_tools.laplace import (grounded_discharge_forms,  # noqa: E402
+                                    posterior_variance)
 from icepack2_tools.runconfig import obs_data_root  # noqa: E402
+
+RHO_GT = 917.0 / 1e12          # m3 of ice -> Gt
+
+
+def dual_dot(g, v):
+    """The pairing of an assembled dual with a primal function, over ranks."""
+    with g.dat.vec_ro as gv, v.dat.vec_ro as vv:
+        return gv.dot(vv)
+
+
+def discharge_quantities(ctx, u):
+    """(name, UFL form in Gt/yr) for the ice leaving grounded cells at the MAP:
+    the total, the grounding-line flux alone and the total per IMBIE2 basin.
+    Grounded cells are the forward's own: surface above the flotation surface."""
+    h, s, b = ctx["h"], ctx["s"], ctx["b"]
+    if ctx.get("geometry_space") != "dg0":
+        raise SystemExit("run_eigendec.py --qoi discharge reads the DG0 transport's fluxes; "
+                         f"this MAP runs geometry_space={ctx.get('geometry_space')!r}")
+    Q0 = h.function_space()
+    s_float = Function(Q0).interpolate(b + max_value(-b, Constant(0.0)) / ctx["rho_ratio"])
+    grounded = Function(Q0, name="grounded")
+    grounded.dat.data[:] = (s.dat.data_ro - s_float.dat.data_ro > 0.0).astype(float)
+    basin = _basin_on_mesh(ctx["geom_xy"][0], ctx["geom_xy"][1], imbie2_basin_path())
+    comm = Q0.mesh().comm
+    present = sorted(set().union(*comm.allgather(
+        set(int(v) for v in np.unique(basin[grounded.dat.data_ro > 0.5]) if v >= 0))))
+    gl, edge = grounded_discharge_forms(u, h, grounded)
+    out = [("discharge_total", Constant(RHO_GT) * (gl + edge)),
+           ("grounding_line_flux_total", Constant(RHO_GT) * gl)]
+    for k in present:
+        w = Function(Q0, name=f"basin_{k:02d}")
+        w.dat.data[:] = (basin == k).astype(float)
+        gl_k, edge_k = grounded_discharge_forms(u, h, grounded, w)
+        out.append((f"discharge_basin_{k:02d}", Constant(RHO_GT) * (gl_k + edge_k)))
+    return out
 
 
 def to_global(f):
@@ -69,7 +136,8 @@ def to_global(f):
         scatter, x_seq = PETSc.Scatter.toAll(v)
         scatter.scatter(v, x_seq, mode=PETSc.Scatter.Mode.FORWARD)
         out = x_seq.array.copy()
-        scatter.destroy(); x_seq.destroy()
+        scatter.destroy()
+        x_seq.destroy()
     return out
 
 
@@ -79,13 +147,20 @@ def from_global(arr, f):
         x_seq.array[:] = arr
         scatter, _ = PETSc.Scatter.toAll(v)
         scatter.scatter(x_seq, v, mode=PETSc.Scatter.Mode.REVERSE)
-        scatter.destroy(); x_seq.destroy()
+        scatter.destroy()
+        x_seq.destroy()
 
 
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--modes", type=int, default=int(os.environ.get("ISMIP7_EIG_MODES", "40")))
     ap.add_argument("--tag", default=os.environ.get("ISMIP7_RUN_TAG", ""))
+    ap.add_argument("--qoi", choices=("discharge", "none"), default="discharge",
+                    help="quantities whose posterior spread is computed (default: discharge)")
+    ap.add_argument("--check", action="store_true",
+                    help="check the derivatives and stop: the total discharge's adjoint gradient "
+                         "against a central difference, and the Gauss-Newton action d.Hd against "
+                         "the R^-1 norm of the velocity change a central difference gives along d")
     args = ap.parse_args()
     comm = MPI.COMM_WORLD
 
@@ -136,16 +211,25 @@ def main():
     PETSc.Sys.Print(f"Likelihood: misfit_scale {misfit_scale:g}, log-speed weight {log_w:g}, "
                     f"sigma floor {floor:g} m/yr, {comm.allreduce(int(observed.sum()))} observed nodes")
 
-    def data_term(u):
-        chi2 = (0.5 / area_val * obs_mask
-                * ((u[0] - u_map[0]) ** 2 / sig_ux ** 2 + (u[1] - u_map[1]) ** 2 / sig_uy ** 2))
-        J = Constant(misfit_scale) * chi2 * dx(mesh)
+    # R^-1: the data term's second derivative with respect to the velocity,
+    # as a bilinear form on the mixed state. The term is
+    #   misfit_scale * 0.5 / area * mask * sum_i (u_i - d_i)^2 / sigma_i^2
+    # plus, with a log-speed weight, log_w * 0.5 / area * mask * r^2 with
+    # r = ln((|u| + eps) / (|d| + eps)), whose Gauss-Newton part has the
+    # gradient of r at the MAP velocity in it.
+    Zs = z.function_space()
+    v_u = fd.split(TestFunction(Zs))[0]
+    sp_map = sqrt(u_map[0] ** 2 + u_map[1] ** 2 + Constant(1e-12))
+    dr_map = u_map / (sp_map * (sp_map + log_eps))
+
+    def R_inv_action(tau):
+        t_u = fd.split(tau)[0]
+        form = (Constant(misfit_scale) / area_val * obs_mask
+                * (t_u[0] * v_u[0] / sig_ux ** 2 + t_u[1] * v_u[1] / sig_uy ** 2) * dx(mesh))
         if log_w > 0.0:
-            sp = sqrt(u[0] ** 2 + u[1] ** 2 + Constant(1e-12))
-            sp0 = sqrt(u_map[0] ** 2 + u_map[1] ** 2 + Constant(1e-12))
-            J = J + Constant(log_w) * (0.5 / area_val * obs_mask
-                                       * ln((sp + log_eps) / (sp0 + log_eps)) ** 2) * dx(mesh)
-        return J
+            form = form + (Constant(log_w) / area_val * obs_mask
+                           * inner(dr_map, t_u) * inner(dr_map, v_u) * dx(mesh))
+        return assemble(form, tensor=fd.Cofunction(Zs.dual()))
 
     # Record the forward at the MAP: one taped solve from the converged state.
     adjoint_sparams = {k: v for k, v in sparams.items() if k != "snes_atol"}
@@ -153,7 +237,13 @@ def main():
     # absolute tolerance (setup_model set that on its own SNES, not in the
     # dict) with the step-size exit live, or it grinds 200 iterations at the
     # residual floor and reports divergence.
-    F = build_F(phi_c=phi)
+    # build_F() with no argument is the residual setup_model solved, with the
+    # controls in it as the forward holds them: alpha^2 as the friction and
+    # phi through the MAP's own map (on floating ice only under a floating
+    # fluidity control). Passing phi itself skips that map, so the recorded
+    # equation is one the MAP state does not satisfy and its derivative with
+    # respect to phi is not the inversion's.
+    F = build_F()
     with assemble(F, form_compiler_parameters=fc_params).dat.vec_ro as _rv:
         fnorm0 = float(_rv.norm())
     tape_sparams = dict(sparams)
@@ -163,16 +253,19 @@ def main():
                     f"snes_atol={tape_sparams['snes_atol']:.3e}")
     reset_manager()
     start_manager()
-    F = build_F(phi_c=phi)
+    F = build_F()
     EquationSolver(F == 0, z, solver_parameters=tape_sparams,
                    adjoint_solver_parameters=adjoint_sparams,
                    form_compiler_parameters=fc_params).solve()
     u_s = fd.split(z)[0]
-    J = Functional(name="J")
-    J.assign(data_term(u_s))
+    qois = []
+    if args.qoi == "discharge":
+        for name, form in discharge_quantities(ctx, u_s):
+            Jq = Functional(name=name)
+            Jq.assign(form)
+            qois.append((name, Jq))
     stop_manager()
-    PETSc.Sys.Print(f"J at the MAP: {float(J):.3e} (zero residual by construction)")
-    H = CachedHessian(J)
+    H = CachedGaussNewton(z, R_inv_action)
     controls = [alpha, phi]
 
     # The prior precision A M^-1 A per control from the MAP's own record.
@@ -192,8 +285,10 @@ def main():
         """Gamma g = A^-1 M A^-1 g for an assembled (dual) pair."""
         out = []
         for k, g in (("alpha", g_alpha), ("phi", g_phi)):
-            x = Function(Q); A_solver[k].solve(x, g)
-            y = Function(Q); A_solver[k].solve(y, assemble(inner(x, test) * dx))
+            x = Function(Q)
+            A_solver[k].solve(x, g)
+            y = Function(Q)
+            A_solver[k].solve(y, assemble(inner(x, test) * dx))
             out.append(y)
         return out
 
@@ -202,9 +297,38 @@ def main():
         out = []
         for k, v in (("alpha", v_alpha), ("phi", v_phi)):
             Av = assemble(prior_operator_form(v, test, *coeffs[k]))
-            x = Function(Q); M_solver.solve(x, Av)
+            x = Function(Q)
+            M_solver.solve(x, Av)
             out.append(assemble(prior_operator_form(x, test, *coeffs[k])))
         return out
+
+    # The quantities' gradients and prior variances, before the (long)
+    # eigensolve, so they are on disk even if it does not finish.
+    with fd.CheckpointFile(os.environ["ISMIP7_INVERSION"], "r") as chk:
+        dhdt_weight = float(chk.get_attr("/", "dhdt_weight")) if chk.has_attr("/", "dhdt_weight") else 0.0
+    qoi_rows = []
+    grads = []
+    if qois:
+        values = [float(Jq) for _, Jq in qois]
+        dJs = compute_gradient([Jq for _, Jq in qois], controls)
+        for (name, _), value, (ga, gp) in zip(qois, values, dJs):
+            ya, yp = covariance(ga, gp)
+            prior_var = dual_dot(ga, ya) + dual_dot(gp, yp)
+            grads.append((ga, gp, ya, yp))
+            qoi_rows.append({"name": name, "value_gt_yr": value,
+                             "prior_sigma_gt_yr": float(np.sqrt(max(prior_var, 0.0))),
+                             "prior_variance": prior_var})
+            PETSc.Sys.Print(f"  {name:28s} {value:9.1f} Gt/yr, prior sigma "
+                            f"{np.sqrt(max(prior_var, 0.0)):8.2f} Gt/yr")
+        if args.check:
+            # The Gauss-Newton action first: the checks then move the controls,
+            # and the cached Gauss-Newton refuses to act once they have moved.
+            check_gauss_newton(ctx, z, sparams, alpha, phi, H, controls, grads[0], R_inv_action)
+            check_gradient(ctx, z, sparams, alpha, phi, qois[0], grads[0])
+            PETSc.Sys.Print("Derivative checks done; run without --check for the eigendecomposition.")
+            return
+    elif args.check:
+        raise SystemExit("--check needs the discharge quantities (--qoi discharge)")
 
     n = len(to_global(phi))
     N = 2 * n
@@ -212,7 +336,8 @@ def main():
     n_actions = [0]
 
     def unpack(x):
-        from_global(x[:n], va); from_global(x[n:], vp)
+        from_global(x[:n], va)
+        from_global(x[n:], vp)
 
     def pack(fa, fp):
         return np.concatenate([to_global(fa), to_global(fp)])
@@ -226,7 +351,7 @@ def main():
         if op == "H_dual":
             from time import perf_counter
             t0 = perf_counter()
-            _, _, ddJ = H.action(controls, [va, vp])
+            ddJ = H.action(controls, [va, vp])
             out = pack(ddJ[0], ddJ[1])
             n_actions[0] += 1
             if n_actions[0] % 10 == 1:
@@ -236,7 +361,8 @@ def main():
         elif op == "G":
             # the covariance acts on duals (assembled gradients)
             ga, gp = fd.Cofunction(Q.dual()), fd.Cofunction(Q.dual())
-            from_global(x[:n], ga); from_global(x[n:], gp)
+            from_global(x[:n], ga)
+            from_global(x[n:], gp)
             out = pack(*covariance(ga, gp))
         return out
 
@@ -267,11 +393,19 @@ def main():
     eig_fn = os.path.join(out_dir, f"eigendec_{lc}{sfx}.h5")
     with fd.CheckpointFile(eig_fn, "w") as chk:
         chk.save_mesh(mesh)
+        projections = np.zeros((len(grads), k))
         for i in range(k):
             x = comm.bcast(vecs[:, i] if comm.rank == 0 else None, root=0)
             ma, mp = Function(Q, name=f"mode_{i:04d}_alpha"), Function(Q, name=f"mode_{i:04d}_phi")
-            from_global(x[:n], ma); from_global(x[n:], mp)
-            chk.save_function(ma); chk.save_function(mp)
+            from_global(x[:n], ma)
+            from_global(x[n:], mp)
+            chk.save_function(ma)
+            chk.save_function(mp)
+            for q, (ga, gp, _, _) in enumerate(grads):
+                projections[q, i] = dual_dot(ga, ma) + dual_dot(gp, mp)
+        for (name, _), (_, _, ya, yp) in zip(qois[:2], grads[:2]):
+            chk.save_function(ya, name=f"sensitivity_{name}_alpha")
+            chk.save_function(yp, name=f"sensitivity_{name}_phi")
         chk.set_attr("/", "n_modes", k)
         chk.set_attr("/", "map", os.path.basename(os.environ["ISMIP7_INVERSION"]))
     if comm.rank == 0:
@@ -284,6 +418,99 @@ def main():
                                         ("prior_sigma_alpha", "prior_rho_theta", "prior_sigma_phi", "prior_rho")},
                        "eigenvalues": [float(v) for v in vals]}, f, indent=2)
     PETSc.Sys.Print(f"Saved: {eig_fn}")
+
+    if qoi_rows:
+        lam = np.clip(vals, 0.0, None)
+        PETSc.Sys.Print(f"Discharge uncertainty from the inferred friction and fluidity "
+                        f"({k} modes, velocity likelihood; the MAP's dhdt_weight={dhdt_weight:g}):")
+        for q, row in enumerate(qoi_rows):
+            post_var = posterior_variance(row["prior_variance"], projections[q], lam)
+            share = lam / (1.0 + lam) * projections[q] ** 2
+            row.update({"posterior_sigma_gt_yr": float(np.sqrt(max(post_var, 0.0))),
+                        "posterior_variance": post_var,
+                        "variance_reduction_by_mode": [float(v) for v in share],
+                        "last_mode_share_of_prior": float(share[-1] / row["prior_variance"])
+                        if row["prior_variance"] > 0 else 0.0})
+            PETSc.Sys.Print(f"  {row['name']:28s} {row['value_gt_yr']:9.1f} Gt/yr  sigma prior "
+                            f"{row['prior_sigma_gt_yr']:8.2f} -> posterior "
+                            f"{row['posterior_sigma_gt_yr']:8.2f} Gt/yr")
+        if comm.rank == 0:
+            with open(os.path.join(out_dir, f"uncertainty_{lc}{sfx}.json"), "w") as f:
+                json.dump({"map": os.environ["ISMIP7_INVERSION"], "modes": k,
+                           "likelihood": "velocity",
+                           "map_dhdt_weight": dhdt_weight,
+                           "note": ("posterior from the velocity likelihood only; with "
+                                    "dhdt_weight > 0 the inversion used more data, so these "
+                                    "spreads bound its posterior from above"),
+                           "eigenvalues": [float(v) for v in vals],
+                           "quantities": qoi_rows}, f, indent=2)
+
+
+def _solve_at(ctx, z, sparams, alpha, phi, a0, p0, da, dp, eps):
+    """Re-solve the momentum balance, untaped, at the controls (a0, p0) + eps (da, dp),
+    from the MAP state, on a copy of it: the recorded z is state-locked by the
+    Gauss-Newton object."""
+    params = dict(sparams)
+    params.update({"snes_rtol": 1e-10, "snes_atol": 0.0, "snes_max_it": 100})
+    alpha.assign(a0 + eps * da)
+    phi.assign(p0 + eps * dp)
+    zc = z.copy(deepcopy=True)
+    fd.solve(ctx["build_F"](z_c=zc) == 0, zc, solver_parameters=params,
+             form_compiler_parameters={"quadrature_degree": 4})
+    return zc
+
+
+def check_gauss_newton(ctx, z, sparams, alpha, phi, H, controls, grad, R_inv_action):
+    """d . H_GN d against the R^-1 norm of the velocity change along d from a
+    central difference of two untaped solves, d = Gamma g of the total."""
+    _, _, ya, yp = grad
+    comm = alpha.function_space().mesh().comm
+    scale = max(float(np.max(np.abs(ya.dat.data_ro), initial=0.0)),
+                float(np.max(np.abs(yp.dat.data_ro), initial=0.0)))
+    scale = comm.allreduce(scale, op=MPI.MAX)
+    if scale == 0.0:
+        PETSc.Sys.Print("Gauss-Newton check skipped: zero direction")
+        return
+    da = Function(ya.function_space()).assign(ya / scale)
+    dp = Function(yp.function_space()).assign(yp / scale)
+    from time import perf_counter
+    t0 = perf_counter()
+    Hd = H.action(controls, [da, dp])
+    PETSc.Sys.Print(f"  one Gauss-Newton action: {perf_counter() - t0:.1f} s "
+                    f"(the eigensolve needs about three per mode)")
+    dHd = dual_dot(Hd[0], da) + dual_dot(Hd[1], dp)
+    a0, p0 = alpha.copy(deepcopy=True), phi.copy(deepcopy=True)
+    eps = 1e-3
+    z_plus = _solve_at(ctx, z, sparams, alpha, phi, a0, p0, da, dp, +eps)
+    z_minus = _solve_at(ctx, z, sparams, alpha, phi, a0, p0, da, dp, -eps)
+    alpha.assign(a0)
+    phi.assign(p0)
+    tau = Function(z.function_space()).assign((z_plus - z_minus) / (2.0 * eps))
+    norm_fd = dual_dot(R_inv_action(tau), tau)
+    PETSc.Sys.Print(f"Gauss-Newton check: d.Hd {dHd:.6e}, |J d|^2_R from a central difference "
+                    f"{norm_fd:.6e}, ratio {dHd / norm_fd if norm_fd else float('nan'):.6f}")
+
+
+def check_gradient(ctx, z, sparams, alpha, phi, qoi, grad):
+    """Central difference of the total discharge along Gamma g against the
+    adjoint pairing g . Gamma g, from two untaped solves at alpha +- eps d."""
+    name, _ = qoi
+    ga, gp, ya, yp = grad
+    a0, p0 = alpha.copy(deepcopy=True), phi.copy(deepcopy=True)
+    scale = max(float(np.max(np.abs(ya.dat.data_ro), initial=0.0)),
+                float(np.max(np.abs(yp.dat.data_ro), initial=0.0)))
+    scale = alpha.function_space().mesh().comm.allreduce(scale, op=MPI.MAX)
+    eps = 1e-3 / scale if scale > 0 else 0.0
+    values = []
+    for sign in (+1.0, -1.0):
+        zc = _solve_at(ctx, z, sparams, alpha, phi, a0, p0, ya, yp, sign * eps)
+        values.append(float(assemble(dict(discharge_quantities(ctx, fd.split(zc)[0]))[name])))
+    alpha.assign(a0)
+    phi.assign(p0)
+    fd_slope = (values[0] - values[1]) / (2.0 * eps)
+    adj_slope = dual_dot(ga, ya) + dual_dot(gp, yp)
+    PETSc.Sys.Print(f"Gradient check ({name}): central difference {fd_slope:.6e}, adjoint "
+                    f"{adj_slope:.6e}, ratio {fd_slope / adj_slope if adj_slope else float('nan'):.6f}")
 
 
 if __name__ == "__main__":

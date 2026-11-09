@@ -21,7 +21,8 @@ ismip7/
 - [Firedrake](https://firedrakeproject.org) 2026.4 (brings PETSc, MUMPS, mpi4py)
 - [icepack2](https://github.com/icepack/icepack2) and [icepack](https://github.com/icepack/icepack)
 - [icepack_tools](https://github.com/hoffmaao/icepack_tools) (mesh adaptation and the level-set front)
-- [tlm_adjoint](https://github.com/jrmaddison/tlm_adjoint) (inversions)
+- [tlm_adjoint](https://github.com/hoffmaao/tlm_adjoint) (inversions; our fork's
+  `ismip7` branch, which releases each Gauss-Newton action's tangent-linears)
 - `xarray netCDF4 scipy rasterio pyproj shapely gmsh matplotlib`, `geopandas`
   for mesh generation, plus `earthaccess` and `globus-sdk` for downloads
 - [isschecker](https://github.com/ismip/ISM_SimulationChecker) for submissions

@@ -1,4 +1,5 @@
-r"""`install_deps.sh --check-icepack2`: one known icepack2 tree at every site.
+r"""`install_deps.sh --check-icepack2` and `--check-tlm-adjoint`: one known
+icepack2 tree, and one known tlm_adjoint tree, at every site.
 
 The inversion needs two lines Firedrake 2026 forces on icepack2, and they lived
 as uncommitted edits in one workstation checkout, rsynced to the clusters, so no
@@ -8,10 +9,14 @@ checkout gets the pinned one, a site already on it is left alone, and a site
 carrying anything else is told rather than overwritten, since the rsynced copy
 may be the only place its edits exist.
 
-The pinned default is a real remote, so these run against a local repository
-through the three ICEPACK2_* overrides instead of reaching the network. The
-check needs no venv, but it goes through the site layer, so it is given a site
-and a nominal ISMIP7_FIREDRAKE like the other runner tests.
+tlm_adjoint follows the same route since 8 November 2026: upstream leaves each
+Gauss-Newton action's tangent-linear copies attached to the forward variables,
+our fork releases them, and the pin is the fork's fix commit.
+
+The pinned defaults are real remotes, so these run against a local repository
+through the three ICEPACK2_* or TLM_ADJOINT_* overrides instead of reaching the
+network. The check needs no venv, but it goes through the site layer, so it is
+given a site and a nominal ISMIP7_FIREDRAKE like the other runner tests.
 """
 import os
 import subprocess
@@ -47,37 +52,63 @@ def origin(tmp_path):
     return d, base, git("rev-parse", "HEAD", cwd=d)
 
 
-def check(work, origin_dir, sha, ref="fix/shim"):
+PACKAGES = {"icepack2": ("ICEPACK2", "--check-icepack2"),
+            "tlm_adjoint": ("TLM_ADJOINT", "--check-tlm-adjoint")}
+
+
+def check(work, origin_dir, sha, ref="fix/shim", package="icepack2"):
+    prefix, flag = PACKAGES[package]
     env = dict(os.environ, ISMIP7_SITE="local", ISMIP7_REPO=str(REPO),
                ISMIP7_WORK=str(work), FD_PREFIX=str(work / "sw"),
-               ISMIP7_FIREDRAKE=str(INSTALL),
-               ICEPACK2_REMOTE=str(origin_dir), ICEPACK2_REF=ref,
-               ICEPACK2_SHA=sha)
+               ISMIP7_FIREDRAKE=str(INSTALL))
+    env.update({f"{prefix}_REMOTE": str(origin_dir), f"{prefix}_REF": ref,
+                f"{prefix}_SHA": sha})
     env.pop("VIRTUAL_ENV", None)
-    return subprocess.run(["bash", str(INSTALL), "--check-icepack2"],
+    return subprocess.run(["bash", str(INSTALL), flag],
                           cwd=REPO, env=env, capture_output=True, text=True)
 
 
-def test_a_site_with_no_checkout_gets_the_pinned_commit(tmp_path, origin):
+@pytest.mark.parametrize("package", sorted(PACKAGES))
+def test_a_site_with_no_checkout_gets_the_pinned_commit(tmp_path, origin, package):
     origin_dir, _, sha = origin
-    proc = check(tmp_path, origin_dir, sha)
+    proc = check(tmp_path, origin_dir, sha, package=package)
     assert proc.returncode == 0, proc.stderr
     assert sha in proc.stdout
-    src = tmp_path / "sw" / "src" / "icepack2"
+    src = tmp_path / "sw" / "src" / package
     assert git("rev-parse", "HEAD", cwd=src) == sha
     assert (src / "shim.py").exists()
 
 
-def test_a_checkout_on_another_commit_is_moved_onto_the_pin(tmp_path, origin):
+@pytest.mark.parametrize("package", sorted(PACKAGES))
+def test_a_checkout_on_another_commit_is_moved_onto_the_pin(tmp_path, origin, package):
+    r"""A site holding a clone of upstream (Rice's tlm_adjoint) comes onto the
+    pin by a fetch of the fork's branch and a detached checkout."""
     origin_dir, base, sha = origin
-    src = tmp_path / "sw" / "src" / "icepack2"
+    src = tmp_path / "sw" / "src" / package
     src.parent.mkdir(parents=True)
     subprocess.run(["git", "clone", "--quiet", str(origin_dir), str(src)],
                    check=True)
     git("checkout", "--quiet", "--detach", base, cwd=src)
-    proc = check(tmp_path, origin_dir, sha)
+    proc = check(tmp_path, origin_dir, sha, package=package)
     assert proc.returncode == 0, proc.stderr
     assert git("rev-parse", "HEAD", cwd=src) == sha
+
+
+def test_untracked_files_are_not_local_changes(tmp_path, origin):
+    r"""An editable install leaves its egg-info in the checkout, and tlm_adjoint
+    does not ignore it; that is no reason to refuse the pin."""
+    origin_dir, base, sha = origin
+    src = tmp_path / "sw" / "src" / "tlm_adjoint"
+    src.parent.mkdir(parents=True)
+    subprocess.run(["git", "clone", "--quiet", str(origin_dir), str(src)],
+                   check=True)
+    git("checkout", "--quiet", "--detach", base, cwd=src)
+    (src / "tlm_adjoint.egg-info").mkdir()
+    (src / "tlm_adjoint.egg-info" / "PKG-INFO").write_text("Name: tlm_adjoint\n")
+    proc = check(tmp_path, origin_dir, sha, package="tlm_adjoint")
+    assert proc.returncode == 0, proc.stderr
+    assert git("rev-parse", "HEAD", cwd=src) == sha
+    assert (src / "tlm_adjoint.egg-info" / "PKG-INFO").exists()
 
 
 def test_local_changes_are_reported_and_left_alone(tmp_path, origin):

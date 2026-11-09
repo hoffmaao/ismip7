@@ -20,7 +20,7 @@ Install and download the rows your column ticks. Sizes are measured.
 | **icepack2** | github.com/icepack/icepack2 | x | x | x | x |
 | **icepack** (raster interpolation onto meshes) | github.com/icepack/icepack | x | x | x | x |
 | **icepack_tools** (`adapt_mesh`, `levelset`, `calving`, `friction`, `grounding`) | github.com/hoffmaao/icepack_tools | | level-set front and calving laws | x | |
-| **tlm_adjoint** | github.com/jrmaddison/tlm_adjoint | x | | | |
+| **tlm_adjoint** (our fork, branch `ismip7`) | github.com/hoffmaao/tlm_adjoint | x | | | |
 | `xarray netCDF4 scipy rasterio pyproj shapely gmsh matplotlib` (`geopandas` only to build a mesh, section 3) | pip, into the Firedrake venv | x | x | x | x |
 | `earthaccess` (NSIDC), `globus-sdk` (Globus route only) | pip | x | x | x | |
 | **isschecker** (`ismip7-compliance-checker`) | github.com/ismip/ISM_SimulationChecker | | | | x |

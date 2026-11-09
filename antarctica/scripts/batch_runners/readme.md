@@ -306,9 +306,9 @@ A successful build prints the whole list at the end.
 four editable packages: `icepack`, `icepack2`, `tlm_adjoint`, `icepack_tools`.
 It takes the venv and work filesystem from the site file and expects the
 sources under `$ISMIP7_WORK/sw/src` (`FD_PREFIX` moves that; at Rice it is
-`/projects/ah301/sw/src`). `icepack`, `tlm_adjoint` and `icepack_tools` are
-rsynced from a workstation, `icepack_tools` because it is a local project with
-no remote at all.
+`/projects/ah301/sw/src`). `icepack` and `icepack_tools` are rsynced from a
+workstation, `icepack_tools` because it is a local project with no remote at
+all; `icepack2` and `tlm_adjoint` are cloned at pins (below).
 
 `icepack2` is **cloned at a pin**, and is the one source a site must not rsync.
 The inversion needs two lines that Firedrake 2026 forces on it
@@ -333,6 +333,18 @@ follow `main` and change the defaults in `install_deps.sh` in the same pass;
 `tests/test_icepack2_pin.py` pins them, so that edit is a deliberate one. As of
 22 September 2026 the workstation and Rice carried these edits and Quartz ran a
 clean `40e848b`, which is the disagreement the pin ends.
+
+`tlm_adjoint` is pinned the same way since 8 November 2026
+(`--check-tlm-adjoint`, `TLM_ADJOINT_REMOTE`, `TLM_ADJOINT_REF`,
+`TLM_ADJOINT_SHA`). Upstream `0.9.1dev` leaves each Gauss-Newton action's
+tangent-linear copies of the forward variables attached to them, one copy of
+the forward state per action, which ended a 100-mode eigensolve out of memory
+at Rice (`antarctica/PARAMETER_UNCERTAINTY.md`). The pin is the fix commit on
+the `ismip7` branch of github.com/hoffmaao/tlm_adjoint, upstream `main` plus
+that commit; a site holding a clone of upstream comes onto it by the check
+alone, and `tests/test_laplace.py` fails on an environment that still installs
+upstream. Untracked files in a checkout (an editable install's egg-info) do not
+count as local changes.
 
 Two more gaps surfaced here: `/tmp` is not writable on the login
 nodes (the script sets `TMPDIR`), and the `gmsh` wheel dlopens `libGLU.so.1`.

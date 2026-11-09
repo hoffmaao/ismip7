@@ -310,7 +310,7 @@ sources under `$ISMIP7_WORK/sw/src` (`FD_PREFIX` moves that; at Rice it is
 workstation, `icepack_tools` because it is a local project with no remote at
 all; `icepack2` and `tlm_adjoint` are cloned at pins (below).
 
-`icepack2` is **cloned at a pin**, and is the one source a site must not rsync.
+`icepack2` is **cloned at a pin**, and a site must not rsync it.
 The inversion needs two lines that Firedrake 2026 forces on it
 (`Mesh.geometric_dimension` became an attribute, and `viscous_power` and
 `flow_law` call it). Those lines used to be uncommitted edits in one

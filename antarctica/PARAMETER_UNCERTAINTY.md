@@ -147,8 +147,9 @@ the Bellingshausen Sea (195 to 93), George V Land (204 to 104), Amery (138 to
 to 76, halve Totten (228 to 126) and George V Land (104 to 54), tighten the
 western Peninsula further (149 to 86), constrain the Denman sector for the
 first time (201 to 69) together with the Larsen basin (81 to 51), and add
-nothing for the Bellingshausen Sea (93 at both counts). Only the small western Ronne basin keeps its prior spread (18);
-Victoria Land (44 to 38) and Enderby Land (95 to 81) move least. The prior
+nothing for the Bellingshausen Sea (93 at both counts). Only the small
+western Ronne basin keeps its prior spread (18); Victoria Land (44 to 38)
+and Enderby Land (95 to 81) move least. The prior
 spread exceeds the MAP discharge in most basins, so a prior column measures
 the prior's width: the linearised Gaussian prior does not know the discharge
 is positive. The total's posterior spread, 309 Gt/yr or 16% of the MAP

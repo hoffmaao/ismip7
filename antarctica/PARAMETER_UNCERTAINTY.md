@@ -142,12 +142,12 @@ likelihood, truncated spectrum, see above).
 Within the first 40 modes the spread falls most in the Amundsen Sea (566 to
 89 Gt/yr), Ross (286 to 71), Filchner-Ronne (343 to 132), Getz (234 to 120),
 the Bellingshausen Sea (195 to 93), George V Land (204 to 104), Amery (138 to
-88) and Totten (375 to 228). Modes 41 to 100 tighten the Amundsen Sea to 69,
-Ross to 60, Filchner-Ronne to 100 and Getz to 76, halve Totten (228 to 126)
-and George V Land (104 to 54), constrain the Denman sector for the first time
-(201 to 69) together with the Larsen basin (81 to 51) and the western
-Peninsula (149 to 86), and add nothing for the Bellingshausen Sea (93 at both
-counts). Only the small western Ronne basin keeps its prior spread (18);
+88), the western Peninsula (231 to 149) and Totten (375 to 228). Modes 41 to
+100 tighten the Amundsen Sea to 69, Ross to 60, Filchner-Ronne to 100 and Getz
+to 76, halve Totten (228 to 126) and George V Land (104 to 54), tighten the
+western Peninsula further (149 to 86), constrain the Denman sector for the
+first time (201 to 69) together with the Larsen basin (81 to 51), and add
+nothing for the Bellingshausen Sea (93 at both counts). Only the small western Ronne basin keeps its prior spread (18);
 Victoria Land (44 to 38) and Enderby Land (95 to 81) move least. The prior
 spread exceeds the MAP discharge in most basins, so a prior column measures
 the prior's width: the linearised Gaussian prior does not know the discharge

@@ -104,8 +104,8 @@ fluidity controls, 1 850 366 control dofs) ran twice on one 32-rank node:
 40 modes (103 Hessian actions, six hours) and 100 modes (202 actions, 12.3
 hours). The leading eigenvalue is 8.4e7, the 40th 9.8e5 and the 100th 3.5e5:
 every mode found so far is data-dominated by five orders of magnitude, so
-the truncation, not the prior, still sets the spreads below, and more modes
-would tighten them further. For the total grounded discharge the first 40
+the truncation still sets the spreads below, and more modes would tighten
+them further. For the total grounded discharge the first 40
 modes remove 77% of the prior variance and the next 60 another 14%:
 
 | modes                  | 1   | 5   | 10  | 20  | 40  | 60  | 80  | 100 |
@@ -139,19 +139,21 @@ likelihood, truncated spectrum, see above).
 | 14 Filchner-Ronne                   | 241  | 343   | 132      | 100       |
 | 15 Dronning Maud Land west          | 64   | 105   | 70       | 67        |
 
-The velocity observations constrain the fast West Antarctic basins most:
-the Amundsen Sea sector's spread falls from 566 to 69 Gt/yr, Ross from 286
-to 60, Filchner-Ronne from 343 to 100 and Getz from 234 to 76 within the
-first 40 modes. East Antarctica tightens later in the spectrum: the Denman,
-Totten and George V sectors halve again between 40 and 100 modes, the
-Larsen basin and eastern Dronning Maud Land move only with the later modes,
-and the Bellingshausen Sea, Victoria Land and the small western Ronne basin
-sit at their prior spread after 100 modes. The prior spread exceeds the MAP
-discharge in most basins: the linearised Gaussian prior does not know the
-discharge is positive, so a prior column is a statement about the prior's
-width, not a range the model would produce. The total's posterior spread,
-309 Gt/yr or 16% of the MAP discharge, is the number the projections start
-from before any of the next steps below.
+Within the first 40 modes the spread falls most in the Amundsen Sea (566 to
+89 Gt/yr), Ross (286 to 71), Filchner-Ronne (343 to 132), Getz (234 to 120),
+the Bellingshausen Sea (195 to 93), George V Land (204 to 104), Amery (138 to
+88) and Totten (375 to 228). Modes 41 to 100 tighten the Amundsen Sea to 69,
+Ross to 60, Filchner-Ronne to 100 and Getz to 76, halve Totten (228 to 126)
+and George V Land (104 to 54), constrain the Denman sector for the first time
+(201 to 69) together with the Larsen basin (81 to 51) and the western
+Peninsula (149 to 86), and add nothing for the Bellingshausen Sea (93 at both
+counts). Only the small western Ronne basin keeps its prior spread (18);
+Victoria Land (44 to 38) and Enderby Land (95 to 81) move least. The prior
+spread exceeds the MAP discharge in most basins, so a prior column measures
+the prior's width: the linearised Gaussian prior does not know the discharge
+is positive. The total's posterior spread, 309 Gt/yr or 16% of the MAP
+discharge, is the number the projections start from before any of the next
+steps below.
 
 ## Next steps
 

@@ -77,8 +77,9 @@ Size the eigensolve to the job's wall-clock limit from that action cost.
 ARPACK takes one Hessian action per Lanczos step, at most
 `1 + ncv + maxiter (ncv - modes)` with `ncv = 2 modes + 1` (`--ncv` changes
 it), so `--maxiter` bounds the run: `--modes 40 --maxiter 2` is at most 164
-actions, nine hours at the 190 s per action the production MAP takes on 32
-ranks (2 km; the 40-mode run needed 103 of them). When the restarts run out
+actions, nine hours at the 190 to 220 s per action the production MAP takes
+on 32 ranks (2 km; the 40-mode run needed 103 of them, the 100-mode run 202
+of its 404). When the restarts run out
 first, the modes ARPACK has converged are kept and the json records
 `converged: false`; the spreads they give are still upper bounds. `--tol`
 (1e-6) is the relative accuracy asked of the eigenvalues, far finer than the
@@ -91,8 +92,66 @@ it must stay level. It does not with upstream tlm_adjoint 0.9.1dev, which
 leaves each action's tangent-linear copies of the forward variables attached
 to them, 0.6 GB per action here, which ended a 100-mode run out of memory
 after 148 actions. Our tlm_adjoint (github.com/hoffmaao/tlm_adjoint, branch
-`ismip7`) releases them; `tests/test_laplace.py` fails on an environment
-that still installs upstream.
+`ismip7`) releases them: with it the 100-mode run's resident set rose from
+62 to 66 GB over 202 actions, the growth being the eigensolver's own basis
+on the root rank. `tests/test_laplace.py` fails on an environment that
+still installs upstream.
+
+## Results at 2 km
+
+The production MAP of the seq1 line (`map_r_friction2.h5`: friction and
+fluidity controls, 1 850 366 control dofs) ran twice on one 32-rank node:
+40 modes (103 Hessian actions, six hours) and 100 modes (202 actions, 12.3
+hours). The leading eigenvalue is 8.4e7, the 40th 9.8e5 and the 100th 3.5e5:
+every mode found so far is data-dominated by five orders of magnitude, so
+the truncation, not the prior, still sets the spreads below, and more modes
+would tighten them further. For the total grounded discharge the first 40
+modes remove 77% of the prior variance and the next 60 another 14%:
+
+| modes                  | 1   | 5   | 10  | 20  | 40  | 60  | 80  | 100 |
+|------------------------|-----|-----|-----|-----|-----|-----|-----|-----|
+| prior variance removed | 23% | 36% | 51% | 60% | 77% | 84% | 88% | 90% |
+| sigma (Gt/yr)          | 860 | 785 | 688 | 616 | 475 | 387 | 342 | 309 |
+
+Spreads of the grounded discharge at the MAP state, one standard deviation
+in Gt/yr. The basins are the IMBIE2 basins of the ISMIP7 grid, named by
+their main systems; the posterior columns are upper bounds (velocity
+likelihood, truncated spectrum, see above).
+
+| quantity                            | MAP  | prior | 40 modes | 100 modes |
+|-------------------------------------|------|-------|----------|-----------|
+| total grounded discharge            | 1894 | 979   | 475      | 309       |
+| grounding-line flux                 | 1737 | 934   | 412      | 271       |
+| 0 Dronning Maud Land east           | 103  | 129   | 113      | 94        |
+| 1 Enderby Land                      | 72   | 95    | 91       | 81        |
+| 2 Amery                             | 70   | 138   | 88       | 74        |
+| 3 Wilkes Land west (Denman)         | 127  | 201   | 201      | 69        |
+| 4 Totten (Aurora)                   | 257  | 375   | 228      | 126       |
+| 5 George V Land                     | 113  | 204   | 104      | 54        |
+| 6 Victoria Land                     | 28   | 44    | 44       | 38        |
+| 7 Ross                              | 120  | 286   | 71       | 60        |
+| 8 Getz and Marie Byrd Land          | 146  | 234   | 120      | 76        |
+| 9 Amundsen Sea                      | 287  | 566   | 89       | 69        |
+| 10 Bellingshausen Sea               | 80   | 195   | 93       | 93        |
+| 11 Peninsula west                   | 145  | 231   | 149      | 86        |
+| 12 Larsen                           | 31   | 81    | 81       | 51        |
+| 13 Ronne west                       | 9    | 18    | 18       | 18        |
+| 14 Filchner-Ronne                   | 241  | 343   | 132      | 100       |
+| 15 Dronning Maud Land west          | 64   | 105   | 70       | 67        |
+
+The velocity observations constrain the fast West Antarctic basins most:
+the Amundsen Sea sector's spread falls from 566 to 69 Gt/yr, Ross from 286
+to 60, Filchner-Ronne from 343 to 100 and Getz from 234 to 76 within the
+first 40 modes. East Antarctica tightens later in the spectrum: the Denman,
+Totten and George V sectors halve again between 40 and 100 modes, the
+Larsen basin and eastern Dronning Maud Land move only with the later modes,
+and the Bellingshausen Sea, Victoria Land and the small western Ronne basin
+sit at their prior spread after 100 modes. The prior spread exceeds the MAP
+discharge in most basins: the linearised Gaussian prior does not know the
+discharge is positive, so a prior column is a statement about the prior's
+width, not a range the model would produce. The total's posterior spread,
+309 Gt/yr or 16% of the MAP discharge, is the number the projections start
+from before any of the next steps below.
 
 ## Next steps
 

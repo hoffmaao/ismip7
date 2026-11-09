@@ -91,43 +91,6 @@ def leading_eigenpairs(H_action, Ginv_action, G_action, N, k, tol=1e-6, maxiter=
     return vals[order], vecs[:, order], converged
 
 
-def patch_tangent_linear_cleanup():
-    r"""Make tlm_adjoint release the tangent-linear variables of a finished
-    Gauss-Newton action.
-
-    tlm_adjoint keeps the tangent-linear variable of every forward variable
-    in a dictionary on that variable, keyed by the ``TangentLinearMap`` that
-    made it, and a finaliser of the map removes its entries when the map is
-    collected. In tlm_adjoint 0.9.1dev (April 2026) a map registers a
-    variable for that removal only when it creates the dictionary, so from
-    the second map on, that is from the second ``CachedGaussNewton.action``,
-    the entries stay behind: one copy of every forward variable per action,
-    0.6 GB per action on the 2 km tape, which ended a 100-mode eigensolve out
-    of memory after 148 actions. Registering the variable whenever a map
-    writes an entry lets the finaliser clean up. Idempotent, and a no-op once
-    tlm_adjoint registers the variables itself."""
-    from tlm_adjoint.interface import var_id
-    from tlm_adjoint.tangent_linear import TangentLinearMap
-
-    if getattr(TangentLinearMap, "_icepack2_tools_releases_entries", False):
-        return
-    orig_init, orig_getitem = TangentLinearMap.__init__, TangentLinearMap.__getitem__
-
-    def __init__(self, M, dM):
-        orig_init(self, M, dM)
-        for m in self._M:
-            self._X[var_id(m)] = m
-
-    def __getitem__(self, x):
-        tau_x = orig_getitem(self, x)
-        self._X[var_id(x)] = x
-        return tau_x
-
-    TangentLinearMap.__init__ = __init__
-    TangentLinearMap.__getitem__ = __getitem__
-    TangentLinearMap._icepack2_tools_releases_entries = True
-
-
 def is_dg0(space):
     r"""Whether ``space`` is the DG0 space the finite-volume transport moves
     its thickness in: the discharge forms read cell values and their upwind

@@ -90,8 +90,7 @@ from icepack2_tools.prior import (bilaplacian_coeffs,  # noqa: E402
                                   prior_operator_form)
 from icepack2_tools.forcing import _basin_on_mesh, imbie2_basin_path  # noqa: E402
 from icepack2_tools.laplace import (arpack_action_bound, arpack_ncv, grounded_discharge_forms,  # noqa: E402
-                                    grounded_indicator, is_dg0, leading_eigenpairs,
-                                    patch_tangent_linear_cleanup, posterior_variance)
+                                    grounded_indicator, is_dg0, leading_eigenpairs, posterior_variance)
 from icepack2_tools.runconfig import obs_data_root  # noqa: E402
 
 RHO_GT = 917.0 / 1e12          # m3 of ice -> Gt
@@ -284,9 +283,6 @@ def main():
             Jq.assign(form)
             qois.append((name, Jq))
     stop_manager()
-    # Each action's tangent-linear copies of the forward variables must go
-    # when the action ends (see patch_tangent_linear_cleanup).
-    patch_tangent_linear_cleanup()
     H = CachedGaussNewton(z, R_inv_action)
     controls = [alpha, phi]
 

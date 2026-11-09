@@ -87,10 +87,12 @@ truncation.
 Memory sets the other limit. At 2 km the eigensolve holds about 2.3 GB per
 rank between actions and peaks near 1.4 times that during one, so 32 ranks
 fit a 240 GB node; the log prints the resident set after every action, and
-it must stay level. It did not before `patch_tangent_linear_cleanup`
-(`icepack2_tools/laplace.py`): tlm_adjoint 0.9.1dev leaves each action's
-tangent-linear copies of the forward variables attached to them, 0.6 GB per
-action here, which ended a 100-mode run out of memory after 148 actions.
+it must stay level. It does not with upstream tlm_adjoint 0.9.1dev, which
+leaves each action's tangent-linear copies of the forward variables attached
+to them, 0.6 GB per action here, which ended a 100-mode run out of memory
+after 148 actions. Our tlm_adjoint (github.com/hoffmaao/tlm_adjoint, branch
+`ismip7`) releases them; `tests/test_laplace.py` fails on an environment
+that still installs upstream.
 
 ## Next steps
 

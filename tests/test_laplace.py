@@ -185,16 +185,16 @@ def test_the_discharge_space_check_reads_the_element_not_a_context_key():
 
 def test_gauss_newton_actions_release_their_tangent_linears():
     """Every Gauss-Newton action makes a tangent-linear copy of each forward
-    variable and keeps it in a dictionary on that variable; tlm_adjoint's map
-    finaliser removes them only for the variables the map registered, and in
-    0.9.1dev a map registers a variable only when it creates the dictionary.
-    With the patch applied, nothing stays behind after any action, and the
-    action's value is unchanged."""
+    variable and keeps it in a dictionary on that variable until the map's
+    finaliser removes it. tlm_adjoint 0.9.1dev (April 2026) registers a
+    variable for that removal only when it creates the dictionary, so from
+    the second action on the copies stay attached: one copy of the forward
+    state per action, which ended a 100-mode eigensolve out of memory. Our
+    tlm_adjoint (github.com/hoffmaao/tlm_adjoint, branch ismip7) registers
+    the variable on every write; this test fails on an environment that
+    still installs upstream."""
     import gc
     tla = pytest.importorskip("tlm_adjoint.firedrake")
-    from icepack2_tools.laplace import patch_tangent_linear_cleanup
-    patch_tangent_linear_cleanup()
-    patch_tangent_linear_cleanup()      # idempotent
 
     mesh = fd.UnitSquareMesh(4, 4)
     V = fd.FunctionSpace(mesh, "CG", 1)

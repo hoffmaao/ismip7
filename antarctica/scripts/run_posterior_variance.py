@@ -25,7 +25,8 @@ come from ``eigendec_<lc>_<tag>.h5`` beside the results (``--eigendec``,
 written to ``posterior_<lc>_<tag>.json`` after every step, with the vectors
 to continue from in ``posterior_cg_<lc>_<tag>_<quantity>.npz``; ``--resume``
 continues those, and ``--wall-hours`` stops the job cleanly before its limit.
-The likelihood is the velocity term, as in the eigensolve.
+The likelihood (``--likelihood``, the MAP's own objective by default) must be
+the one the seed modes were computed under; the record beside them is checked.
 """
 import argparse
 import json
@@ -44,7 +45,8 @@ sys.path.insert(0, _ROOT)
 sys.path.insert(0, os.path.dirname(os.path.dirname(_ROOT)))
 
 import run_eigendec  # noqa: E402
-from icepack2_tools.laplace import load_modes, posterior_variance_cg  # noqa: E402
+from icepack2_tools.laplace import (load_modes, posterior_variance_cg,  # noqa: E402
+                                    same_likelihood)
 
 STATE_KEYS = ("x", "r", "p", "alphas", "betas", "rho", "seed", "projections")
 LOWER_EIGENVALUE = 1.0
@@ -86,6 +88,11 @@ def check_operator(meta, P, eig_fn):
     live.update({f"prior {k}": list(c) for k, c in P.coeffs.items()})
     saved = {k: meta.get(k) for k in ("sigma_floor", "misfit_scale", "log_vel_weight")}
     saved.update({f"prior {k}": (meta.get("prior") or {}).get(k) for k in P.coeffs})
+    # an eigendecomposition written before the record existed ran the velocity term alone
+    have_l = meta.get("likelihood") or {"likelihood": "velocity", "terms": ["velocity"]}
+    if not same_likelihood(have_l, P.likelihood):
+        raise SystemExit(f"{eig_fn} was computed under the likelihood {have_l}, "
+                         f"this run has {P.likelihood}")
     for key, want in live.items():
         have = saved[key]
         want_v = np.atleast_1d(np.asarray(want, dtype=float))
@@ -123,6 +130,9 @@ def main():
                     help="the eigendecomposition file (default eigendec_<lc>_<tag>.h5 beside the results)")
     ap.add_argument("--resume", action="store_true",
                     help="continue each quantity from its saved vectors")
+    ap.add_argument("--likelihood", choices=("map", "velocity"), default="map",
+                    help="the data term (run_eigendec.py --likelihood); the seed modes must "
+                         "have been computed under the same one")
     ap.add_argument("--wall-hours", type=float, default=None,
                     help="stop starting steps this long after the script began")
     args = ap.parse_args()
@@ -130,7 +140,7 @@ def main():
         ap.error(f"--iterations must be at least 1, got {args.iterations}")
     t_job = perf_counter()
 
-    P = run_eigendec.build_problem("discharge")
+    P = run_eigendec.build_problem("discharge", args.likelihood)
     comm = P.comm
     root = comm.rank == 0
     S = run_eigendec.make_server(P, label="the posterior solves")
@@ -180,12 +190,13 @@ def main():
         results = or_abort(comm, lambda: read_json(out_fn)).get("quantities", {})
 
     def write(results):
-        doc = {"map": os.environ["ISMIP7_INVERSION"], "likelihood": "velocity",
+        doc = {"map": os.environ["ISMIP7_INVERSION"], "likelihood": P.likelihood,
                "map_dhdt_weight": P.dhdt_weight,
-               "note": ("bracket of the Laplace posterior variance from the velocity "
-                        "likelihood: lower = A-norm of the conjugate-gradient iterate, "
-                        "upper = Gauss-Radau quadrature with its node at 1; the zero-step "
-                        "upper bound is the truncated-spectrum variance of the seed modes"),
+               "note": ("bracket of the Laplace posterior variance under the likelihood terms "
+                        + ", ".join(P.likelihood["terms"]) + ": lower = A-norm of the "
+                        "conjugate-gradient iterate, upper = Gauss-Radau quadrature with its "
+                        "node at 1; the zero-step upper bound is the truncated-spectrum "
+                        "variance of the seed modes"),
                "modes": n_modes,
                "eigendec": eig_fn if lam is not None else None,
                "lower_eigenvalue": LOWER_EIGENVALUE,

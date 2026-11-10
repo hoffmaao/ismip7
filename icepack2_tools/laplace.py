@@ -51,6 +51,19 @@ def posterior_variance(prior_variance, projections, eigenvalues):
     return float(prior_variance) - float(np.sum(lam / (1.0 + lam) * p ** 2))
 
 
+def same_likelihood(a, b):
+    r"""Whether two likelihood records (``run_eigendec.map_objective_terms``:
+    the terms, in order, and the settings of each) describe the same data
+    term, settings compared to a relative 1e-9."""
+    import math
+
+    if list(a.get("terms", [])) != list(b.get("terms", [])):
+        return False
+    keys = (set(a) | set(b)) - {"likelihood", "terms"}
+    return all(k in a and k in b and math.isclose(float(a[k]), float(b[k]), rel_tol=1e-9)
+               for k in keys)
+
+
 def arpack_ncv(k):
     r"""The number of Lanczos vectors ARPACK keeps per restart cycle when none is
     given: scipy's default of ``max(2k + 1, 20)``."""

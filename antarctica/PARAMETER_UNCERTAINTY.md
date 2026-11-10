@@ -13,8 +13,10 @@ projections, per drainage basin.
 At the MAP the posterior is approximated as a Gaussian whose covariance is
 the prior covariance `Gamma` updated by the Gauss-Newton Hessian `H` of the
 data term, `Gamma_post = (H + Gamma^-1)^-1`, following Recinos et al. (2023).
-`H = J^T R^-1 J`, with `J` the derivative of the momentum balance's velocity
-with respect to the controls and `R^-1` the velocity term's own weights.
+`H = J^T R^-1 J`, with `J` the derivative of what the data term observes
+(the momentum balance's velocity, and under the MAP's own objective the
+one-year thickness step and its filtered tendency) with respect to the
+controls, and `R^-1` the data term's own weights.
 `antarctica/scripts/run_eigendec.py` computes the leading generalised
 eigenpairs `H v_i = lambda_i Gamma^-1 v_i`. A mode with `lambda_i >> 1` is
 set by the data; one with `lambda_i << 1` is known no better than the prior.
@@ -46,10 +48,20 @@ the Hessian uses.
 - Controls: the friction control `alpha` (square-root form) and the log
   fluidity `phi` on floating ice, with the bi-Laplacian priors the MAP
   records.
-- Likelihood: the velocity term only. The production MAP's objective also
-  scored dH/dt (`dhdt_weight` 1), so the posterior here is wider than the
-  inversion's: the spreads are upper bounds. The output records the MAP's
-  `dhdt_weight` beside them.
+- Likelihood: the MAP's own objective (`--likelihood map`, the default),
+  rebuilt from the settings the MAP records: the velocity term with its
+  dH/dt re-weighting (`dhdt_reweight`: up to 25 times the weight where the
+  observed thinning reaches 1 m/yr on grounded ice), the dH/dt term through
+  one upwind step of the MAP's transport and its Helmholtz filter
+  (`dhdt_weight`, `dhdt_filter_l`, sigma 0.1 m/yr from the environment, as in
+  the inversion), and the net term (`dhdt_net_sigma`). The step's source and
+  the observed dH/dt stay out: the Gauss-Newton Hessian does not see the
+  residual, and the source moves the stepped thickness the upwind flux
+  carries by about 1e-4 on grounded ice. `--likelihood velocity` keeps the
+  velocity term alone, the likelihood of the 2 km results below, whose
+  spreads therefore bound the inversion's posterior from above. Every
+  output records the terms and their settings, and the posterior solve
+  refuses modes of another likelihood.
 - Geometry: fixed (BedMachine after the relaxation). Thickness is not a
   control of the inversion, so its uncertainty is not part of this posterior.
 - Time: the quantities are snapshots of the momentum balance at the MAP, the
@@ -119,7 +131,7 @@ modes remove 77% of the prior variance and the next 60 another 14%:
 Spreads of the grounded discharge at the MAP state, one standard deviation
 in Gt/yr. The basins are the IMBIE2 basins of the ISMIP7 grid, named by
 their main systems; the posterior columns are upper bounds (velocity
-likelihood, truncated spectrum, see above).
+term alone, truncated spectrum, see above).
 
 | quantity                            | MAP  | prior | 40 modes | 100 modes |
 |-------------------------------------|------|-------|----------|-----------|
@@ -197,12 +209,10 @@ long after the script began, so a 24-hour job ends on its own record. The
 upper bound takes the unresolved residual to sit at the bottom of the
 spectrum, so it tightens only as the solve converges; the lower bound follows
 the quantity's dominant directions early. Both are bounds on the Laplace
-variance from the velocity likelihood; the caveats of the section above
-apply unchanged.
+variance under the likelihood the seed modes were computed with; the
+caveats of the section above apply unchanged.
 
 ## Next steps
 
-1. The dH/dt term in the Hessian, through the inversion's own objective, so
-   the posterior uses every datum the MAP did.
-2. Samples of the posterior run through the forward suite, for the spread
+1. Samples of the posterior run through the forward suite, for the spread
    of the projections themselves under the production physics.

@@ -52,6 +52,20 @@ def test_projections_and_eigenvalues_must_pair_up():
         posterior_variance(1.0, [0.1, 0.2, 0.3], [2.0, 1.0])
 
 
+def test_likelihood_records_match_on_terms_and_settings():
+    from icepack2_tools.laplace import same_likelihood
+    vel = {"likelihood": "velocity", "terms": ["velocity"]}
+    full = {"likelihood": "map", "terms": ["velocity", "dhdt_reweight", "dhdt", "dhdt_net"],
+            "dhdt_reweight": 24.0, "dhdt_reweight_scale": 1.0, "dhdt_weight": 1.0,
+            "dhdt_sigma": 0.1, "dhdt_dt": 1.0, "dhdt_filter_l": 5000.0, "dhdt_net_sigma": 10.0}
+    # a MAP without dH/dt terms gives the velocity term under either name
+    assert same_likelihood(vel, {"likelihood": "map", "terms": ["velocity"]})
+    assert same_likelihood(full, dict(full, likelihood="map"))
+    assert not same_likelihood(vel, full)
+    assert not same_likelihood(full, dict(full, dhdt_sigma=0.2))
+    assert not same_likelihood(full, {k: v for k, v in full.items() if k != "dhdt_net_sigma"})
+
+
 def _diagonal_problem(spectrum, seed=5):
     """A generalised eigenproblem H v = lambda Gamma^-1 v with diagonal H and
     Gamma, built to have the given eigenvalues: its eigenvectors are the unit

@@ -95,6 +95,12 @@ from icepack2_tools.laplace import (arpack_action_bound, arpack_ncv, grounded_di
                                     grounded_indicator, is_dg0, leading_eigenpairs, posterior_variance,
                                     tangent_linear_release_check)
 from icepack2_tools.runconfig import obs_data_root  # noqa: E402
+from icepack2_tools.transport import transport_form  # noqa: E402
+
+TRANSPORT_SP = {"snes_type": "ksponly", "ksp_type": "gmres", "pc_type": "bjacobi",
+                "sub_pc_type": "ilu", "ksp_rtol": 1e-10}           # the inversion's
+FILTER_SP = {"snes_type": "ksponly", "ksp_type": "cg", "pc_type": "gamg",
+             "ksp_rtol": 1e-12, "ksp_atol": 0.0}                   # the inversion's
 
 RHO_GT = 917.0 / 1e12          # m3 of ice -> Gt
 
@@ -162,14 +168,175 @@ def from_global(arr, f):
         x_seq.destroy()
 
 
-def build_problem(qoi="discharge"):
+def map_objective_terms(ctx, meta, Q, likelihood):
+    r"""The likelihood's terms beyond the velocity chi-square, rebuilt as
+    ``inversion_icepack2.py`` built them from the settings the MAP records
+    (``meta``) and the run's environment, for ``likelihood`` ``map``; under
+    ``velocity`` there are none.
+
+    - ``vel_weight``: the dH/dt re-weighting of the velocity chi-square,
+      ``1 + a min(|dH/dt_obs| / scale, 1)`` on grounded observed cells lifted
+      to the nodes (``dhdt_reweight`` a, ``dhdt_reweight_scale``), or None.
+    - ``dhdt``: the dH/dt term (``dhdt_weight`` > 0), or None: one upwind
+      backward-Euler step of ``ISMIP7_DHDT_DT`` years from the MAP thickness
+      with the MAP velocity, its tendency masked to grounded cells Smith
+      covers, the Helmholtz filter of length ``dhdt_filter_l`` normalised by
+      the filtered mask, scored at ``ISMIP7_DHDT_SIGMA``, and the net term
+      on the unfiltered masked tendency at ``dhdt_net_sigma`` Gt/yr.
+
+    The step's source (SMB minus melt) and the observed dH/dt are left out:
+    the Gauss-Newton Hessian does not see the residual, and the source moves
+    the stepped thickness the upwind flux carries by about dt |a| / H, 1e-4
+    on grounded ice. ``record`` lists the terms and their settings, written
+    beside every result so modes and solves of different likelihoods are
+    never combined. Collective."""
+    from icepack2_tools.cellview import CellView
+    from icepack2_tools.geometry import cg1_lift
+    from icepack2_tools.grounding import height_above_flotation
+    from icepack2_tools.obs_dhdt import grounded_cells, load_dhdt_obs
+
+    record = {"likelihood": likelihood, "terms": ["velocity"]}
+    out = SimpleNamespace(vel_weight=None, dhdt=None, record=record)
+    if likelihood == "velocity":
+        return out
+    if likelihood != "map":
+        raise ValueError(f"likelihood must be map or velocity, got {likelihood!r}")
+    w = float(meta.get("dhdt_weight", 0.0))
+    a = float(meta.get("dhdt_reweight", 0.0))
+    if w <= 0.0 and a <= 0.0:
+        return out
+    if float(os.environ.get("ISMIP7_DHDT_SPEED_RATIO", "1")) != 1.0:
+        raise SystemExit("run_eigendec.py --likelihood map: ISMIP7_DHDT_SPEED_RATIO is not "
+                         "wired into the Hessian yet; set it to 1 or use --likelihood velocity")
+    mesh = Q.mesh()
+    H, b = ctx["h"], ctx["b"]
+    Q_g = H.function_space()
+    if not is_dg0(Q_g):
+        raise SystemExit("run_eigendec.py --likelihood map rebuilds the DG0 dH/dt term; "
+                         f"this MAP keeps its thickness in {Q_g.ufl_element()}")
+    dobs, cov = load_dhdt_obs(Q_g)
+    if a > 0.0:
+        scale = float(meta.get("dhdt_reweight_scale", 1.0))
+        haf = Function(Q_g).interpolate(height_above_flotation(H, b))
+        k = Function(Q_g)
+        k.dat.data[:] = np.where(
+            (cov.dat.data_ro > 0.5) & (haf.dat.data_ro > 0.0) & (H.dat.data_ro > 1.0),
+            np.minimum(np.abs(dobs.dat.data_ro) / scale, 1.0), 0.0)
+        out.vel_weight = Function(Q, name="vel_weight").interpolate(
+            Constant(1.0) + Constant(a) * cg1_lift(k))
+        record["terms"].append("dhdt_reweight")
+        record.update({"dhdt_reweight": a, "dhdt_reweight_scale": scale})
+    if w > 0.0:
+        grounded = grounded_cells(CellView(Q_g), H, b)
+        mask = Function(Q_g, name="dhdt_mask")
+        mask.dat.data[:] = cov.dat.data_ro * grounded.dat.data_ro
+        area = assemble(mask * dx(mesh))
+        if area <= 0.0:
+            raise SystemExit("run_eigendec.py --likelihood map: no grounded cell Smith covers")
+        L = float(meta.get("dhdt_filter_l", 0.0))
+        test = TestFunction(Q)
+
+        def filter_form(out_, src):
+            return (out_ * test + Constant(L ** 2) * inner(fd.grad(out_), fd.grad(test))
+                    - src * test) * dx
+
+        mask_s = None
+        if L > 0.0:
+            mask_s = Function(Q, name="dhdt_mask_filtered")
+            fd.solve(filter_form(mask_s, mask) == 0, mask_s, solver_parameters=FILTER_SP)
+            mask_s.dat.data[:] = np.maximum(mask_s.dat.data_ro, 1e-3)
+        out.dhdt = SimpleNamespace(
+            weight=w, sigma=float(os.environ.get("ISMIP7_DHDT_SIGMA", "0.1")),
+            dt=float(os.environ.get("ISMIP7_DHDT_DT", "1.0")), mask=mask, area=area,
+            filter_l=L, filter_form=filter_form, mask_s=mask_s,
+            net_sigma=float(meta.get("dhdt_net_sigma", 0.0)),
+            total_area=assemble(Constant(1.0) * dx(mesh)))
+        record["terms"].append("dhdt")
+        record.update({"dhdt_weight": w, "dhdt_sigma": out.dhdt.sigma, "dhdt_dt": out.dhdt.dt,
+                       "dhdt_filter_l": L})
+        if out.dhdt.net_sigma > 0.0:
+            record["terms"].append("dhdt_net")
+            record["dhdt_net_sigma"] = out.dhdt.net_sigma
+    return out
+
+
+def dhdt_observations(ctx, terms, u, fc_params):
+    r"""The dH/dt term's observed variables at the velocity ``u``: the stepped
+    thickness, and the filtered masked tendency when the term is filtered.
+    Each comes from an EquationSolver, so a recording manager tapes them and
+    the Gauss-Newton action differentiates through them; with the manager
+    stopped they are plain solves on new Functions. Empty without the term."""
+    dh = terms.dhdt
+    if dh is None:
+        return []
+    H = ctx["h"]
+    Q_g = H.function_space()
+    dt = Constant(dh.dt)
+    h_next = Function(Q_g, name="h_next")
+    EquationSolver(transport_form(h_next, H, TestFunction(Q_g), u, dt, Constant(0.0)) == 0,
+                   h_next, solver_parameters=TRANSPORT_SP,
+                   form_compiler_parameters=fc_params).solve()
+    if dh.mask_s is None:
+        return [h_next]
+    r_s = Function(dh.mask_s.function_space(), name="dhdt_resid_filtered")
+    EquationSolver(dh.filter_form(r_s, dh.mask * (h_next - H) / dt) == 0, r_s,
+                   solver_parameters=FILTER_SP, form_compiler_parameters=fc_params).solve()
+    return [r_s, h_next]
+
+
+def dhdt_R_inv(terms, misfit_scale, tau):
+    r"""The dH/dt term's second derivative with respect to its observed
+    variables (``dhdt_observations``), applied to the directions ``tau``:
+    the filtered tendency's weight ``misfit_scale w / area * mask /
+    (m_s sigma)^2``, or the pointwise one on the stepped thickness, and the
+    net term, rank one in the stepped thickness through the masked
+    integral of its tendency."""
+    dh = terms.dhdt
+    out = []
+    c = misfit_scale * dh.weight / dh.area / dh.sigma ** 2
+    if dh.mask_s is not None:
+        t_r, t_h = tau
+        Q = t_r.function_space()
+        out.append(assemble(Constant(c) * dh.mask / dh.mask_s ** 2 * t_r * TestFunction(Q) * dx,
+                            tensor=fd.Cofunction(Q.dual())))
+    else:
+        t_h, = tau
+    Q_g = t_h.function_space()
+    psi = TestFunction(Q_g)
+    form = Constant(0.0) * t_h * psi * dx
+    if dh.mask_s is None:
+        form = Constant(c / dh.dt ** 2) * dh.mask * t_h * psi * dx
+    R_h = assemble(form, tensor=fd.Cofunction(Q_g.dual()))
+    if dh.net_sigma > 0.0:
+        # 0.5 misfit_scale (m c)^2 with m = int(mask (h - H)) / (dt A) and
+        # c = A rho / sigma_net: rank one in the stepped thickness
+        c_net = dh.total_area * RHO_GT / dh.net_sigma
+        k = misfit_scale * c_net ** 2 / (dh.dt * dh.total_area) ** 2
+        R_h.dat.data[:] += (k * float(assemble(dh.mask * t_h * dx))
+                            * assemble(dh.mask * psi * dx).dat.data_ro)
+    out.append(R_h)
+    return out
+
+
+def likelihood_note(record, dhdt_weight):
+    r"""What the spreads computed under the likelihood ``record`` bound."""
+    if "dhdt" in record["terms"] or dhdt_weight <= 0.0:
+        return ("posterior from the MAP's own objective (terms: "
+                + ", ".join(record["terms"]) + "); a truncated spectrum bounds it from above")
+    return ("posterior from the velocity likelihood only; the inversion also scored dH/dt "
+            "(dhdt_weight > 0), so these spreads bound its posterior from above")
+
+
+def build_problem(qoi="discharge", likelihood="map"):
     r"""The posterior's ingredients at the MAP ``ISMIP7_INVERSION`` names: the
     forward loaded as a projection loads it, the inversion's data term, one
     taped solve at the recorded state, the Gauss-Newton action on it, the
     prior's covariance and precision, and the quantities (``qoi``:
     ``discharge`` or ``none``) with their values, gradients and prior
-    variances. Collective; the eigensolve and the direct posterior solve both
-    start from it."""
+    variances. ``likelihood`` ``map`` is the MAP's own objective
+    (``map_objective_terms``), ``velocity`` its velocity chi-square alone.
+    Collective; the eigensolve and the direct posterior solve both start
+    from it."""
     comm = MPI.COMM_WORLD
     # Every Hessian action must leave memory as it found it, or a solve of a
     # few hundred actions ends out of memory hours in (2592549): refuse a
@@ -194,7 +361,9 @@ def build_problem(qoi="discharge"):
     with fd.CheckpointFile(os.environ["ISMIP7_INVERSION"], "r") as chk:
         meta = {k: chk.get_attr("/", k) for k in
                 ("misfit_scale", "log_vel_weight", "log_vel_eps", "prior_form",
-                 "prior_sigma_alpha", "prior_rho_theta", "prior_sigma_phi", "prior_rho")
+                 "prior_sigma_alpha", "prior_rho_theta", "prior_sigma_phi", "prior_rho",
+                 "dhdt_weight", "dhdt_filter_l", "dhdt_net_sigma", "dhdt_reweight",
+                 "dhdt_reweight_scale")
                 if chk.has_attr("/", k)}
     if str(meta.get("prior_form", "")) != "bilaplacian":
         raise SystemExit(f"run_eigendec.py expects a bilaplacian-prior MAP, got "
@@ -240,14 +409,22 @@ def build_problem(qoi="discharge"):
     sp_map = sqrt(u_map[0] ** 2 + u_map[1] ** 2 + Constant(1e-12))
     dr_map = u_map / (sp_map * (sp_map + log_eps))
 
-    def R_inv_action(tau):
-        t_u = fd.split(tau)[0]
-        form = (Constant(misfit_scale) / area_val * obs_mask
+    terms = map_objective_terms(ctx, meta, Q, likelihood)
+    vel_weight = terms.vel_weight if terms.vel_weight is not None else Constant(1.0)
+    PETSc.Sys.Print(f"Likelihood ({likelihood}): " + ", ".join(
+        f"{k_} {v_}" for k_, v_ in terms.record.items() if k_ != "likelihood"))
+
+    def R_inv_action(*tau):
+        t_u = fd.split(tau[0])[0]
+        form = (Constant(misfit_scale) / area_val * obs_mask * vel_weight
                 * (t_u[0] * v_u[0] / sig_ux ** 2 + t_u[1] * v_u[1] / sig_uy ** 2) * dx(mesh))
         if log_w > 0.0:
             form = form + (Constant(log_w) / area_val * obs_mask
                            * inner(dr_map, t_u) * inner(dr_map, v_u) * dx(mesh))
-        return assemble(form, tensor=fd.Cofunction(Zs.dual()))
+        out = [assemble(form, tensor=fd.Cofunction(Zs.dual()))]
+        if terms.dhdt is not None:
+            out += dhdt_R_inv(terms, misfit_scale, tau[1:])
+        return out
 
     # Record the forward at the MAP: one taped solve from the converged state.
     adjoint_sparams = {k: v for k, v in sparams.items() if k != "snes_atol"}
@@ -276,6 +453,7 @@ def build_problem(qoi="discharge"):
                    adjoint_solver_parameters=adjoint_sparams,
                    form_compiler_parameters=fc_params).solve()
     u_s = fd.split(z)[0]
+    X = [z] + dhdt_observations(ctx, terms, u_s, fc_params)
     qois = []
     if qoi == "discharge":
         for name, form in discharge_quantities(ctx, u_s):
@@ -283,7 +461,7 @@ def build_problem(qoi="discharge"):
             Jq.assign(form)
             qois.append((name, Jq))
     stop_manager()
-    H = CachedGaussNewton(z, R_inv_action)
+    H = CachedGaussNewton(X, R_inv_action)
     controls = [alpha, phi]
 
     # The prior precision A M^-1 A per control from the MAP's own record.
@@ -343,7 +521,8 @@ def build_problem(qoi="discharge"):
         controls=controls, R_inv_action=R_inv_action, covariance=covariance, precision=precision,
         qois=qois, grads=grads, qoi_rows=qoi_rows, misfit_scale=misfit_scale, log_w=log_w,
         floor=floor, coeffs=coeffs, meta=meta, dhdt_weight=dhdt_weight, lc=ctx["lc"],
-        out_dir=simulation.RESULTS_DIR)
+        out_dir=simulation.RESULTS_DIR, likelihood=terms.record,
+        observe=lambda zc: [zc] + dhdt_observations(ctx, terms, fd.split(zc)[0], fc_params))
 
 
 def make_server(problem, label="the eigensolve"):
@@ -412,6 +591,10 @@ def main():
                     help="Lanczos vectors per restart cycle (default 2 modes + 1, at least 20)")
     ap.add_argument("--qoi", choices=("discharge", "none"), default="discharge",
                     help="quantities whose posterior spread is computed (default: discharge)")
+    ap.add_argument("--likelihood", choices=("map", "velocity"), default="map",
+                    help="the data term the Hessian is of: map, the MAP's own objective (the "
+                         "velocity chi-square with its recorded dH/dt re-weighting, the dH/dt "
+                         "term and the net term), or velocity, the velocity chi-square alone")
     ap.add_argument("--check", action="store_true",
                     help="check the derivatives and stop: the total discharge's adjoint gradient "
                          "against a central difference, and the Gauss-Newton action d.Hd against "
@@ -419,14 +602,14 @@ def main():
     args = ap.parse_args()
     if args.maxiter is not None and args.maxiter < 1:
         ap.error(f"--maxiter must be at least 1, got {args.maxiter}")
-    P = build_problem(args.qoi)
+    P = build_problem(args.qoi, args.likelihood)
     if args.check:
         if not P.qois:
             raise SystemExit("--check needs the discharge quantities (--qoi discharge)")
         # The Gauss-Newton action first: the checks then move the controls,
         # and the cached Gauss-Newton refuses to act once they have moved.
         check_gauss_newton(P.ctx, P.z, P.sparams, P.alpha, P.phi, P.H, P.controls, P.grads[0],
-                           P.R_inv_action)
+                           P.R_inv_action, P.observe)
         check_gradient(P.ctx, P.z, P.sparams, P.alpha, P.phi, P.qois[0], P.grads[0])
         PETSc.Sys.Print("Derivative checks done; run without --check for the eigendecomposition.")
         return
@@ -497,7 +680,8 @@ def main():
                        "arpack": {"tol": args.tol, "ncv": ncv, "maxiter": args.maxiter,
                                   "hessian_actions": n_actions[0]},
                        "misfit_scale": misfit_scale, "log_vel_weight": log_w,
-                       "sigma_floor": floor, "prior": {k_: list(c) for k_, c in coeffs.items()},
+                       "sigma_floor": floor, "likelihood": P.likelihood,
+                       "prior": {k_: list(c) for k_, c in coeffs.items()},
                        "prior_record": {k_: meta.get(k_) for k_ in
                                         ("prior_sigma_alpha", "prior_rho_theta", "prior_sigma_phi", "prior_rho")},
                        "eigenvalues": [float(v) for v in vals]}, f, indent=2)
@@ -506,7 +690,7 @@ def main():
     if qoi_rows:
         lam = np.clip(vals, 0.0, None)
         PETSc.Sys.Print(f"Discharge uncertainty from the inferred friction and fluidity "
-                        f"({k} modes, velocity likelihood; the MAP's dhdt_weight={dhdt_weight:g}):")
+                        f"({k} modes; likelihood terms {', '.join(P.likelihood['terms'])}):")
         for q, row in enumerate(qoi_rows):
             post_var = posterior_variance(row["prior_variance"], projections[q], lam)
             share = lam / (1.0 + lam) * projections[q] ** 2
@@ -522,11 +706,9 @@ def main():
             with open(os.path.join(out_dir, f"uncertainty_{lc}{sfx}.json"), "w") as f:
                 json.dump({"map": os.environ["ISMIP7_INVERSION"], "modes": k,
                            "modes_requested": args.modes, "converged": bool(converged),
-                           "likelihood": "velocity",
+                           "likelihood": P.likelihood,
                            "map_dhdt_weight": dhdt_weight,
-                           "note": ("posterior from the velocity likelihood only; with "
-                                    "dhdt_weight > 0 the inversion used more data, so these "
-                                    "spreads bound its posterior from above"),
+                           "note": likelihood_note(P.likelihood, dhdt_weight),
                            "eigenvalues": [float(v) for v in vals],
                            "quantities": qoi_rows}, f, indent=2)
 
@@ -545,9 +727,11 @@ def _solve_at(ctx, z, sparams, alpha, phi, a0, p0, da, dp, eps):
     return zc
 
 
-def check_gauss_newton(ctx, z, sparams, alpha, phi, H, controls, grad, R_inv_action):
-    """d . H_GN d against the R^-1 norm of the velocity change along d from a
-    central difference of two untaped solves, d = Gamma g of the total."""
+def check_gauss_newton(ctx, z, sparams, alpha, phi, H, controls, grad, R_inv_action, observe):
+    """d . H_GN d against the R^-1 norm of the change in every observed
+    variable (``observe``: the state, and the dH/dt term's stepped thickness
+    and filtered tendency under the MAP's likelihood) along d, from a central
+    difference of two untaped solves, d = Gamma g of the total."""
     _, _, ya, yp = grad
     comm = alpha.function_space().mesh().comm
     scale = max(float(np.max(np.abs(ya.dat.data_ro), initial=0.0)),
@@ -570,8 +754,10 @@ def check_gauss_newton(ctx, z, sparams, alpha, phi, H, controls, grad, R_inv_act
     z_minus = _solve_at(ctx, z, sparams, alpha, phi, a0, p0, da, dp, -eps)
     alpha.assign(a0)
     phi.assign(p0)
-    tau = Function(z.function_space()).assign((z_plus - z_minus) / (2.0 * eps))
-    norm_fd = dual_dot(R_inv_action(tau), tau)
+    X_plus, X_minus = observe(z_plus), observe(z_minus)
+    tau = [Function(xp.function_space()).assign((xp - xm) / (2.0 * eps))
+           for xp, xm in zip(X_plus, X_minus)]
+    norm_fd = sum(dual_dot(r, t) for r, t in zip(R_inv_action(*tau), tau))
     PETSc.Sys.Print(f"Gauss-Newton check: d.Hd {dHd:.6e}, |J d|^2_R from a central difference "
                     f"{norm_fd:.6e}, ratio {dHd / norm_fd if norm_fd else float('nan'):.6f}")
 

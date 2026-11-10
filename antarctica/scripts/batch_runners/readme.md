@@ -345,8 +345,8 @@ that commit; a site holding a clone of upstream comes onto it by the check
 alone, and `tests/test_laplace.py` fails on an environment that still installs
 upstream. `run_eigendec.py` and `run_posterior_variance.py` run the same check
 before they load the MAP and stop on an environment that leaks, so a job whose
-`PYTHONPATH` loses the pin ends in its first minute. Untracked files in a checkout (an editable install's egg-info) do not
-count as local changes.
+`PYTHONPATH` loses the pin ends in its first minute. Untracked files in a
+checkout (an editable install's egg-info) do not count as local changes.
 
 Two more gaps surfaced here: `/tmp` is not writable on the login
 nodes (the script sets `TMPDIR`), and the `gmsh` wheel dlopens `libGLU.so.1`.

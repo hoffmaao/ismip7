@@ -29,6 +29,7 @@ The likelihood is the velocity term, as in the eigensolve.
 """
 import argparse
 import json
+import math
 import os
 import sys
 import traceback
@@ -46,10 +47,42 @@ import run_eigendec  # noqa: E402
 from icepack2_tools.laplace import load_modes, posterior_variance_cg  # noqa: E402
 
 STATE_KEYS = ("x", "r", "p", "alphas", "betas", "rho", "seed", "projections")
+LOWER_EIGENVALUE = 1.0
 
 
 def sigma(variance):
     return float(np.sqrt(max(float(variance), 0.0)))
+
+
+def check_operator(meta, P, eig_fn):
+    r"""Stop unless the eigensolve that wrote ``meta`` ran the live likelihood
+    and prior, so its modes are eigenvectors of this operator."""
+    live = {"sigma_floor": P.floor, "misfit_scale": P.misfit_scale, "log_vel_weight": P.log_w}
+    live.update({f"prior {k}": list(c) for k, c in P.coeffs.items()})
+    saved = {k: meta.get(k) for k in ("sigma_floor", "misfit_scale", "log_vel_weight")}
+    saved.update({f"prior {k}": (meta.get("prior") or {}).get(k) for k in P.coeffs})
+    for key, want in live.items():
+        have = saved[key]
+        want_v = np.atleast_1d(np.asarray(want, dtype=float))
+        have_v = None if have is None else np.atleast_1d(np.asarray(have, dtype=float))
+        if have_v is None or have_v.shape != want_v.shape or not all(
+                math.isclose(h, w, rel_tol=1e-9, abs_tol=0.0) for h, w in zip(have_v, want_v)):
+            raise SystemExit(f"{eig_fn} was computed with {key} {have}, this run has {want}")
+
+
+def check_resume(z, n_modes, eig_name, lam, state_fn):
+    r"""The reason the saved state ``z`` cannot continue under the live modes,
+    or None when it can."""
+    saved = {k: z[k] if k in z.files else None
+             for k in ("n_modes", "eigendec", "eigenvalues", "lower_eigenvalue")}
+    if saved["n_modes"] is None or int(saved["n_modes"]) != n_modes \
+            or str(saved["eigendec"]) != eig_name \
+            or float(saved["lower_eigenvalue"]) != LOWER_EIGENVALUE \
+            or not np.array_equal(np.asarray(saved["eigenvalues"], dtype=float), lam):
+        return (f"{state_fn} was built from {saved['n_modes']} modes of {saved['eigendec']} "
+                f"(lower eigenvalue {saved['lower_eigenvalue']}), this run seeds with {n_modes} "
+                f"modes of {eig_name!r} (lower eigenvalue {LOWER_EIGENVALUE})")
+    return None
 
 
 def main():
@@ -87,14 +120,23 @@ def main():
     eig_fn = args.eigendec or os.path.join(P.out_dir, f"eigendec_{P.lc}{sfx}.h5")
     V = lam = None
     if args.modes != 0 and os.path.exists(eig_fn):
+        meta_fn = eig_fn[:-3] + ".json"
+        if not os.path.exists(meta_fn):
+            raise SystemExit(f"{eig_fn} has no record {meta_fn}")
         meta = None
         if root:
-            with open(eig_fn[:-3] + ".json") as f:
-                meta = json.load(f)
+            try:
+                with open(meta_fn) as f:
+                    meta = json.load(f)
+            except BaseException:
+                traceback.print_exc()
+                sys.stderr.flush()
+                comm.Abort(1)
         meta = comm.bcast(meta, root=0)
         if os.path.basename(str(meta["map"])) != os.path.basename(os.environ["ISMIP7_INVERSION"]):
             raise SystemExit(f"{eig_fn} holds the modes of {meta['map']}, "
                              f"this MAP is {os.environ['ISMIP7_INVERSION']}")
+        check_operator(meta, P, eig_fn)
         modes, copied = load_modes(eig_fn, P.Q, args.modes)
         lam = np.asarray(meta["eigenvalues"][:len(modes)], dtype=float)
         packed = [S.pack(ma, mp) for ma, mp in modes]
@@ -110,6 +152,9 @@ def main():
     else:
         PETSc.Sys.Print("Solving from the prior (--modes 0)")
 
+    n_modes = int(lam.size) if lam is not None else 0
+    eig_name = os.path.basename(eig_fn) if lam is not None else ""
+    lam_saved = lam if lam is not None else np.zeros(0)
     out_fn = os.path.join(P.out_dir, f"posterior_{P.lc}{sfx}.json")
     results = {}
     if root and args.resume and os.path.exists(out_fn):
@@ -124,9 +169,9 @@ def main():
                                 "likelihood: lower = A-norm of the conjugate-gradient iterate, "
                                 "upper = Gauss-Radau quadrature with its node at 1; the zero-step "
                                 "upper bound is the truncated-spectrum variance of the seed modes"),
-                       "modes": int(lam.size) if lam is not None else 0,
+                       "modes": n_modes,
                        "eigendec": eig_fn if lam is not None else None,
-                       "lower_eigenvalue": 1.0,
+                       "lower_eigenvalue": LOWER_EIGENVALUE,
                        "written": datetime.now(timezone.utc).isoformat(timespec="seconds"),
                        "quantities": results}, f, indent=2)
 
@@ -139,58 +184,69 @@ def main():
         row = P.qoi_rows[q]
         g = S.pack(ga, gp)
         state_fn = os.path.join(P.out_dir, f"posterior_cg_{P.lc}{sfx}_{name}.npz")
-        summary = None
-        if root:
-            state = None
-            if args.resume and os.path.exists(state_fn):
-                with np.load(state_fn) as z:
+        summary = state = refusal = None
+        if root and args.resume and os.path.exists(state_fn):
+            with np.load(state_fn) as z:
+                refusal = check_resume(z, n_modes, eig_name, lam_saved, state_fn)
+                if refusal is None:
                     state = {k: z[k] for k in STATE_KEYS}
+        refusal = comm.bcast(refusal, root=0)
+        if refusal is not None:
+            raise SystemExit(refusal)
+        if root:
+            if state is not None:
                 PETSc.Sys.Print(f"{name}: continuing from {len(state['alphas'])} steps in {state_fn}")
             record = dict(results.get(name, {}))
             record.update({"value_gt_yr": row["value_gt_yr"], "prior_sigma_gt_yr": row["prior_sigma_gt_yr"],
                            "prior_variance": row["prior_variance"]})
             t_q = perf_counter()
 
+            actions_before = int(record.get("hessian_actions", 0)) if state is not None else 0
+
             def callback(step):
+                np.savez(state_fn, n_modes=n_modes, eigendec=eig_name, eigenvalues=lam_saved,
+                         lower_eigenvalue=LOWER_EIGENVALUE,
+                         **{k: np.asarray(step[k]) for k in STATE_KEYS})
+                rho = float(step["rho"][-1])
                 record.update({"iterations": step["iteration"],
+                               "hessian_actions": actions_before + step["actions"],
+                               "truncation_sigma_gt_yr": sigma(step["seed"] + step["rho"][0]),
+                               "seed_variance": step["seed"],
                                "sigma_lower_gt_yr": sigma(step["lower"]),
                                "sigma_upper_gt_yr": sigma(step["upper"]),
-                               "variance_lower": step["lower"], "variance_upper": step["upper"],
-                               "rho": step["rho"], "seconds": perf_counter() - t_q})
-                record.setdefault("lower_by_step", []).append(step["lower"])
-                record.setdefault("upper_by_step", []).append(step["upper"])
-                record.setdefault("rho_by_step", []).append(step["rho"])
+                               "variance_lower": float(step["lower"]),
+                               "variance_upper": float(step["upper"]),
+                               "rho": rho, "seconds": perf_counter() - t_q,
+                               "lower_by_step": [float(v) for v in step["lower_by_step"]],
+                               "upper_by_step": [float(v) for v in step["upper_by_step"]],
+                               "rho_by_step": [float(v) for v in step["rho"]],
+                               "state": state_fn})
                 results[name] = record
                 write(results)
                 PETSc.Sys.Print(f"  {name} step {step['iteration']}: sigma {sigma(step['lower']):.1f} to "
-                                f"{sigma(step['upper']):.1f} Gt/yr, rho {step['rho']:.3e}")
+                                f"{sigma(step['upper']):.1f} Gt/yr, rho {rho:.3e}")
 
             try:
                 out = posterior_variance_cg(
                     lambda x: S.serve("H_dual", np.asarray(x, dtype=float)),
                     lambda x: S.serve("Ginv", np.asarray(x, dtype=float)),
                     lambda x: S.serve("G", np.asarray(x, dtype=float)),
-                    g, args.iterations, modes=V, eigenvalues=lam, state=state, callback=callback,
+                    g, args.iterations, modes=V, eigenvalues=lam, lower_eigenvalue=LOWER_EIGENVALUE,
+                    state=state, callback=callback,
                     stop=lambda k: over_budget())
             except BaseException:
                 traceback.print_exc()
                 sys.stderr.flush()
                 comm.Abort(1)
             S.serve("stop")
-            np.savez(state_fn, **{k: np.asarray(out[k]) for k in STATE_KEYS})
-            if state is None:
-                record["lower_by_step"] = [float(v) for v in out["lower"]]
-                record["upper_by_step"] = [float(v) for v in out["upper"]]
-                record["rho_by_step"] = [float(v) for v in out["rho"]]
             record.update({"iterations": out["iterations"],
-                           "hessian_actions": int(record.get("hessian_actions", 0)) + out["actions"],
+                           "hessian_actions": actions_before + out["actions"],
                            "truncation_sigma_gt_yr": sigma(out["seed"] + out["rho"][0]),
                            "seed_variance": out["seed"],
                            "variance_lower": float(out["lower"][-1]), "variance_upper": float(out["upper"][-1]),
                            "sigma_lower_gt_yr": sigma(out["lower"][-1]),
                            "sigma_upper_gt_yr": sigma(out["upper"][-1]),
-                           "rho": float(out["rho"][-1]), "seconds": perf_counter() - t_q,
-                           "state": state_fn})
+                           "seconds": perf_counter() - t_q, "state": state_fn})
             results[name] = record
             write(results)
             summary = {k: record[k] for k in ("iterations", "sigma_lower_gt_yr", "sigma_upper_gt_yr",

@@ -213,7 +213,10 @@ def posterior_variance_cg(H_action, Ginv_action, G_action, g, iterations, modes=
 
     ``state`` is a returned dictionary to continue from (the same modes must
     be given); ``stop(k)`` ends the loop early when it returns true before
-    step ``k``; ``callback(record)`` sees each step's bounds. Returns a
+    step ``k``; ``callback(record)`` sees the bounds after each step, and
+    after step 0 on a fresh start, with the step histories ``lower_by_step``
+    and ``upper_by_step`` and the vectors and coefficients to continue from
+    (the keys of ``state``), so a record is itself a state. Returns a
     dictionary with ``lower`` and ``upper`` (entry ``k`` after ``k`` steps,
     including the seed), ``rho``, ``alphas``, ``betas``, ``seed``,
     ``projections``, ``actions`` (Hessian actions taken in this call) and the
@@ -233,6 +236,16 @@ def posterior_variance_cg(H_action, Ginv_action, G_action, g, iterations, modes=
     def deflate(r):
         return r - W.T @ (V @ r) if V is not None else r
 
+    def report(step):
+        if callback is None:
+            return
+        lower, upper = quadrature_bounds(alphas, betas, rhos[0], a)
+        callback({"iteration": step, "lower": seed + lower[-1], "upper": seed + upper[-1],
+                  "lower_by_step": seed + lower, "upper_by_step": seed + upper,
+                  "actions": actions, "x": x, "r": r, "p": p, "alphas": list(alphas),
+                  "betas": list(betas), "rho": list(rhos), "seed": seed,
+                  "projections": projections})
+
     if state is None:
         if V is not None:
             projections = V @ g
@@ -250,6 +263,7 @@ def posterior_variance_cg(H_action, Ginv_action, G_action, g, iterations, modes=
         p = np.asarray(G_action(r), dtype=float)
         rho = float(r @ p)
         alphas, betas, rhos = [], [], [rho]
+        report(0)
     else:
         x, r, p = (np.array(state[k_], dtype=float) for k_ in ("x", "r", "p"))
         alphas, betas, rhos = list(state["alphas"]), list(state["betas"]), list(state["rho"])
@@ -276,10 +290,7 @@ def posterior_variance_cg(H_action, Ginv_action, G_action, g, iterations, modes=
         betas.append(beta)
         rhos.append(rho_new)
         rho = rho_new
-        if callback is not None:
-            lower, upper = quadrature_bounds(alphas, betas, rhos[0], a)
-            callback({"iteration": k + 1, "lower": seed + lower[-1], "upper": seed + upper[-1],
-                      "rho": rho_new, "alpha": alpha, "beta": beta, "actions": actions})
+        report(k + 1)
     lower, upper = quadrature_bounds(alphas, betas, rhos[0], a)
     return {"lower": seed + lower, "upper": seed + upper, "rho": rhos, "alphas": alphas,
             "betas": betas, "seed": seed, "projections": projections, "actions": actions,

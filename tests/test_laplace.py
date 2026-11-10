@@ -183,9 +183,14 @@ def test_stop_and_callback_follow_the_steps():
     seen = []
     out = posterior_variance_cg(*P["actions"], P["g"], iterations=8, stop=lambda k: k >= 3,
                                 callback=seen.append)
-    assert out["iterations"] == 3 and [r["iteration"] for r in seen] == [1, 2, 3]
-    assert [r["lower"] for r in seen] == pytest.approx(list(out["lower"][1:]))
-    assert [r["upper"] for r in seen] == pytest.approx(list(out["upper"][1:]))
+    assert out["iterations"] == 3 and [r["iteration"] for r in seen] == [0, 1, 2, 3]
+    assert [r["lower"] for r in seen] == pytest.approx(list(out["lower"]))
+    assert [r["upper"] for r in seen] == pytest.approx(list(out["upper"]))
+    assert list(seen[-1]["lower_by_step"]) == pytest.approx(list(out["lower"]))
+    whole = posterior_variance_cg(*P["actions"], P["g"], iterations=5)
+    rest = posterior_variance_cg(*P["actions"], P["g"], iterations=3, state=seen[2])
+    assert rest["iterations"] == 5
+    assert rest["upper"] == pytest.approx(whole["upper"], rel=1e-8)
 
 
 def test_a_prior_only_direction_keeps_the_bounds_valid():
@@ -362,15 +367,13 @@ def test_saved_modes_come_back_on_the_live_mesh(tmp_path):
     assert np.allclose(modes[1][0].dat.data_ro, want.dat.data_ro)
     assert modes[1][1].name() == "mode_0001_phi"
 
-    other = fd.UnitSquareMesh(4, 4, reorder=True)
+    other = fd.UnitSquareMesh(4, 4, reorder=False)
     Q_other = fd.FunctionSpace(other, "CG", 1)
     modes, copied = load_modes(str(path), Q_other)
-    assert len(modes) == 3
+    assert not copied and len(modes) == 3
     xo, yo = fd.SpatialCoordinate(other)
     want = fd.Function(Q_other).interpolate(6.0 * yo - xo)
     assert np.allclose(modes[2][1].dat.data_ro, want.dat.data_ro, atol=1e-10)
-    if not copied:
-        assert not np.allclose(other.coordinates.dat.data_ro, mesh.coordinates.dat.data_ro)
 
     with pytest.raises(ValueError, match="another mesh"):
         load_modes(str(path), fd.FunctionSpace(fd.UnitSquareMesh(5, 5), "CG", 1))

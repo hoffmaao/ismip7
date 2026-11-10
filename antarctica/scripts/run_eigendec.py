@@ -56,10 +56,11 @@ untaped solves along ``Gamma g``, and the Gauss-Newton action along that
 direction with the norm of the velocity change two more solves give; it
 stops after the checks.
 
-The likelihood is the velocity term only. A MAP whose objective also scored
-dH/dt (``dhdt_weight`` > 0) was constrained by data this Hessian leaves out,
-so its posterior here is wider than the inversion's: an upper bound. The
-uncertainty file records the MAP's ``dhdt_weight`` beside the result.
+``--likelihood map`` (the default) takes the Hessian of the MAP's own
+objective (``map_objective_terms``); ``--likelihood velocity`` keeps the
+velocity term alone, so for a MAP that also scored dH/dt (``dhdt_weight`` > 0
+or ``dhdt_reweight`` > 0) its posterior is wider than the inversion's: an
+upper bound. Every output records the likelihood terms and their settings.
 """
 import argparse
 import json
@@ -201,13 +202,19 @@ def map_objective_terms(ctx, meta, Q, likelihood):
         return out
     if likelihood != "map":
         raise ValueError(f"likelihood must be map or velocity, got {likelihood!r}")
+    if "dhdt_speed_ratio" in meta:
+        ratio, source = float(meta["dhdt_speed_ratio"]), "the MAP's dhdt_speed_ratio"
+    else:
+        ratio = float(os.environ.get("ISMIP7_DHDT_SPEED_RATIO", "1"))
+        source = "ISMIP7_DHDT_SPEED_RATIO (the MAP records no dhdt_speed_ratio)"
+    if ratio != 1.0:
+        raise SystemExit(f"run_eigendec.py --likelihood map: {source} is {ratio:g}; the speed "
+                         "weight of the velocity chi-square is not wired into the Hessian yet, "
+                         "so only a ratio of 1 is accepted; use --likelihood velocity")
     w = float(meta.get("dhdt_weight", 0.0))
     a = float(meta.get("dhdt_reweight", 0.0))
     if w <= 0.0 and a <= 0.0:
         return out
-    if float(os.environ.get("ISMIP7_DHDT_SPEED_RATIO", "1")) != 1.0:
-        raise SystemExit("run_eigendec.py --likelihood map: ISMIP7_DHDT_SPEED_RATIO is not "
-                         "wired into the Hessian yet; set it to 1 or use --likelihood velocity")
     mesh = Q.mesh()
     H, b = ctx["h"], ctx["b"]
     Q_g = H.function_space()
@@ -318,13 +325,18 @@ def dhdt_R_inv(terms, misfit_scale, tau):
     return out
 
 
-def likelihood_note(record, dhdt_weight):
-    r"""What the spreads computed under the likelihood ``record`` bound."""
-    if "dhdt" in record["terms"] or dhdt_weight <= 0.0:
+def likelihood_note(record, meta):
+    r"""What the spreads computed under the likelihood ``record`` bound, for
+    the MAP whose recorded settings are ``meta``."""
+    if record["likelihood"] == "map":
         return ("posterior from the MAP's own objective (terms: "
                 + ", ".join(record["terms"]) + "); a truncated spectrum bounds it from above")
-    return ("posterior from the velocity likelihood only; the inversion also scored dH/dt "
-            "(dhdt_weight > 0), so these spreads bound its posterior from above")
+    note = "posterior from the velocity term alone"
+    if (float(meta.get("dhdt_weight", 0.0)) > 0.0
+            or float(meta.get("dhdt_reweight", 0.0)) > 0.0):
+        note += ("; the inversion also scored dH/dt (dhdt_weight > 0 or dhdt_reweight > 0), "
+                 "so these spreads bound its posterior from above")
+    return note
 
 
 def build_problem(qoi="discharge", likelihood="map"):
@@ -363,7 +375,7 @@ def build_problem(qoi="discharge", likelihood="map"):
                 ("misfit_scale", "log_vel_weight", "log_vel_eps", "prior_form",
                  "prior_sigma_alpha", "prior_rho_theta", "prior_sigma_phi", "prior_rho",
                  "dhdt_weight", "dhdt_filter_l", "dhdt_net_sigma", "dhdt_reweight",
-                 "dhdt_reweight_scale")
+                 "dhdt_reweight_scale", "dhdt_speed_ratio")
                 if chk.has_attr("/", k)}
     if str(meta.get("prior_form", "")) != "bilaplacian":
         raise SystemExit(f"run_eigendec.py expects a bilaplacian-prior MAP, got "
@@ -708,7 +720,7 @@ def main():
                            "modes_requested": args.modes, "converged": bool(converged),
                            "likelihood": P.likelihood,
                            "map_dhdt_weight": dhdt_weight,
-                           "note": likelihood_note(P.likelihood, dhdt_weight),
+                           "note": likelihood_note(P.likelihood, meta),
                            "eigenvalues": [float(v) for v in vals],
                            "quantities": qoi_rows}, f, indent=2)
 

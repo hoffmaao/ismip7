@@ -27,6 +27,8 @@ to continue from in ``posterior_cg_<lc>_<tag>_<quantity>.npz``; ``--resume``
 continues those, and ``--wall-hours`` stops the job cleanly before its limit.
 The likelihood (``--likelihood``, the MAP's own objective by default) must be
 the one the seed modes were computed under; the record beside them is checked.
+A resume must run under the likelihood its saved vectors and bracket were
+computed under, and state saved with no record counts as the velocity term.
 """
 import argparse
 import json
@@ -50,6 +52,8 @@ from icepack2_tools.laplace import (load_modes, posterior_variance_cg,  # noqa: 
 
 STATE_KEYS = ("x", "r", "p", "alphas", "betas", "rho", "seed", "projections")
 LOWER_EIGENVALUE = 1.0
+# the record of output written before the likelihood was recorded, which ran the velocity term alone
+VELOCITY_ONLY = {"likelihood": "velocity", "terms": ["velocity"]}
 
 
 def sigma(variance):
@@ -88,8 +92,7 @@ def check_operator(meta, P, eig_fn):
     live.update({f"prior {k}": list(c) for k, c in P.coeffs.items()})
     saved = {k: meta.get(k) for k in ("sigma_floor", "misfit_scale", "log_vel_weight")}
     saved.update({f"prior {k}": (meta.get("prior") or {}).get(k) for k in P.coeffs})
-    # an eigendecomposition written before the record existed ran the velocity term alone
-    have_l = meta.get("likelihood") or {"likelihood": "velocity", "terms": ["velocity"]}
+    have_l = meta.get("likelihood") or VELOCITY_ONLY
     if not same_likelihood(have_l, P.likelihood):
         raise SystemExit(f"{eig_fn} was computed under the likelihood {have_l}, "
                          f"this run has {P.likelihood}")
@@ -102,9 +105,12 @@ def check_operator(meta, P, eig_fn):
             raise SystemExit(f"{eig_fn} was computed with {key} {have}, this run has {want}")
 
 
-def check_resume(z, n_modes, eig_name, lam, state_fn):
-    r"""The reason the saved state ``z`` cannot continue under the live modes,
-    or None when it can."""
+def check_resume(z, n_modes, eig_name, lam, likelihood, state_fn):
+    r"""The reason the saved state ``z`` cannot continue under the live modes
+    and the live likelihood record, or None when it can."""
+    have_l = json.loads(str(z["likelihood"])) if "likelihood" in z.files else VELOCITY_ONLY
+    if not same_likelihood(have_l, likelihood):
+        return f"{state_fn} was built under the likelihood {have_l}, this run has {likelihood}"
     saved = {k: z[k] if k in z.files else None
              for k in ("n_modes", "eigendec", "eigenvalues", "lower_eigenvalue")}
     if saved["n_modes"] is None or int(saved["n_modes"]) != n_modes \
@@ -186,8 +192,17 @@ def main():
     lam_saved = lam if lam is not None else np.zeros(0)
     out_fn = os.path.join(P.out_dir, f"posterior_{P.lc}{sfx}.json")
     results = {}
+    refusal = None
     if root and args.resume and os.path.exists(out_fn):
-        results = or_abort(comm, lambda: read_json(out_fn)).get("quantities", {})
+        doc = or_abort(comm, lambda: read_json(out_fn))
+        have_l = doc.get("likelihood") or VELOCITY_ONLY
+        if same_likelihood(have_l, P.likelihood):
+            results = doc.get("quantities", {})
+        else:
+            refusal = f"{out_fn} was written under the likelihood {have_l}, this run has {P.likelihood}"
+    refusal = comm.bcast(refusal, root=0)
+    if refusal is not None:
+        raise SystemExit(refusal)
 
     def write(results):
         doc = {"map": os.environ["ISMIP7_INVERSION"], "likelihood": P.likelihood,
@@ -217,7 +232,7 @@ def main():
         if root and args.resume and os.path.exists(state_fn):
             def read_state():
                 with np.load(state_fn) as z:
-                    refusal = check_resume(z, n_modes, eig_name, lam_saved, state_fn)
+                    refusal = check_resume(z, n_modes, eig_name, lam_saved, P.likelihood, state_fn)
                     return refusal, (None if refusal else {k: z[k] for k in STATE_KEYS})
 
             refusal, state = or_abort(comm, read_state)
@@ -237,7 +252,7 @@ def main():
             def callback(step):
                 replace_atomically(state_fn, lambda f: np.savez(
                     f, n_modes=n_modes, eigendec=eig_name, eigenvalues=lam_saved,
-                    lower_eigenvalue=LOWER_EIGENVALUE, **{k: np.asarray(step[k]) for k in STATE_KEYS}))
+                    lower_eigenvalue=LOWER_EIGENVALUE, likelihood=json.dumps(P.likelihood), **{k: np.asarray(step[k]) for k in STATE_KEYS}))
                 rho = float(step["rho"][-1])
                 record.update({"iterations": step["iteration"],
                                "hessian_actions": actions_before + step["actions"],

@@ -92,7 +92,8 @@ from icepack2_tools.prior import (bilaplacian_coeffs,  # noqa: E402
                                   prior_operator_form)
 from icepack2_tools.forcing import _basin_on_mesh, imbie2_basin_path  # noqa: E402
 from icepack2_tools.laplace import (arpack_action_bound, arpack_ncv, grounded_discharge_forms,  # noqa: E402
-                                    grounded_indicator, is_dg0, leading_eigenpairs, posterior_variance)
+                                    grounded_indicator, is_dg0, leading_eigenpairs, posterior_variance,
+                                    tangent_linear_release_check)
 from icepack2_tools.runconfig import obs_data_root  # noqa: E402
 
 RHO_GT = 917.0 / 1e12          # m3 of ice -> Gt
@@ -170,6 +171,16 @@ def build_problem(qoi="discharge"):
     variances. Collective; the eigensolve and the direct posterior solve both
     start from it."""
     comm = MPI.COMM_WORLD
+    # Every Hessian action must leave memory as it found it, or a solve of a
+    # few hundred actions ends out of memory hours in (2592549): refuse a
+    # tlm_adjoint that keeps the actions' tangent-linear copies.
+    attached, _ = tangent_linear_release_check(comm)
+    if max(attached) > 0:
+        raise SystemExit(
+            "the tlm_adjoint this job imports keeps each Gauss-Newton action's tangent-linear "
+            f"copies ({attached} still attached after three actions of a small problem), so "
+            "the solve would run out of memory; install the pin (antarctica/scripts/"
+            "batch_runners/install_deps.sh --check-tlm-adjoint) or put it first on PYTHONPATH")
 
     ctx = simulation.setup_model()
     mesh, z, sparams = ctx["mesh"], ctx["z"], ctx["sparams"]

@@ -306,38 +306,14 @@ def test_gauss_newton_actions_release_their_tangent_linears():
     state per action, which ended a 100-mode eigensolve out of memory. Our
     tlm_adjoint (github.com/hoffmaao/tlm_adjoint, branch ismip7) registers
     the variable on every write; this test fails on an environment that
-    still installs upstream."""
-    import gc
-    tla = pytest.importorskip("tlm_adjoint.firedrake")
-
-    mesh = fd.UnitSquareMesh(4, 4)
-    V = fd.FunctionSpace(mesh, "CG", 1)
-    x, y = fd.SpatialCoordinate(mesh)
-    m = fd.Function(V, name="m").interpolate(0.1 * x)
-    f = fd.Function(V, name="f").interpolate(fd.sin(fd.pi * x) * fd.sin(fd.pi * y))
-    u = fd.Function(V, name="u")
-    v = fd.TestFunction(V)
-    F = fd.inner(fd.grad(u), fd.grad(v)) * fd.dx + fd.exp(m) * u * v * fd.dx - f * v * fd.dx
-    bc = fd.DirichletBC(V, 0.0, "on_boundary")
-    tla.reset_manager()
-    tla.start_manager()
-    tla.EquationSolver(F == 0, u, bc).solve()
-    tla.stop_manager()
-    H = tla.CachedGaussNewton(u, lambda tau: fd.assemble(fd.inner(tau, v) * fd.dx))
-    dm = fd.Function(V, name="dm").assign(1.0)
-
-    def attached():
-        return sum(len(getattr(z, "_tlm_adjoint__tangent_linears", {})) for z in (m, f, u))
-
-    results = []
-    for _ in range(3):
-        ddJ, = H.action([m], [dm])
-        results.append(ddJ.dat.data_ro.copy())
-        del ddJ
-        gc.collect()
-        assert attached() == 0
-    assert np.allclose(results[1], results[0]) and np.allclose(results[2], results[0])
-    assert np.linalg.norm(results[0]) > 0.0
+    still installs upstream, and the posterior scripts run the same check
+    before they start."""
+    pytest.importorskip("tlm_adjoint.firedrake")
+    from icepack2_tools.laplace import tangent_linear_release_check
+    attached, norms = tangent_linear_release_check()
+    assert attached == [0, 0, 0]
+    assert norms[0] > 0.0
+    assert norms[1] == pytest.approx(norms[0]) and norms[2] == pytest.approx(norms[0])
 
 
 def _save_modes(path, mesh, values):

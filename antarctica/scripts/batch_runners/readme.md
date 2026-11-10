@@ -343,7 +343,9 @@ at Rice (`antarctica/PARAMETER_UNCERTAINTY.md`). The pin is the fix commit on
 the `ismip7` branch of github.com/hoffmaao/tlm_adjoint, upstream `main` plus
 that commit; a site holding a clone of upstream comes onto it by the check
 alone, and `tests/test_laplace.py` fails on an environment that still installs
-upstream. Untracked files in a checkout (an editable install's egg-info) do not
+upstream. `run_eigendec.py` and `run_posterior_variance.py` run the same check
+before they load the MAP and stop on an environment that leaks, so a job whose
+`PYTHONPATH` loses the pin ends in its first minute. Untracked files in a checkout (an editable install's egg-info) do not
 count as local changes.
 
 Two more gaps surfaced here: `/tmp` is not writable on the login

@@ -95,7 +95,10 @@ after 148 actions. Our tlm_adjoint (github.com/hoffmaao/tlm_adjoint, branch
 `ismip7`) releases them: with it the 100-mode run's resident set rose from
 62 to 66 GB over 202 actions, the growth being the eigensolver's own basis
 on the root rank. `tests/test_laplace.py` fails on an environment that
-still installs upstream.
+still installs upstream, and both posterior scripts run the same check
+(`icepack2_tools.laplace.tangent_linear_release_check`: three actions on a
+small problem, counting the copies left attached) before they load the MAP,
+and stop when any copy stays.
 
 ## Results at 2 km
 

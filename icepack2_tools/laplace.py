@@ -336,6 +336,54 @@ def load_modes(path, space, count=None):
     return modes, copied
 
 
+def tangent_linear_release_check(comm=None, actions=3):
+    r"""Gauss-Newton actions on a small Poisson problem, counting after each the
+    tangent-linear copies still attached to the forward variables once the
+    action's result is dropped. Returns ``(attached, norms)``, one entry per
+    action: the largest count over ranks, and the norm of the action.
+
+    tlm_adjoint 0.9.1dev (April 2026) registers a variable for the removal of
+    those copies only when it first creates their dictionary, so from the
+    second action on one copy of the forward state stays per action, which
+    ends a long eigensolve or posterior solve out of memory. Our tlm_adjoint
+    (github.com/hoffmaao/tlm_adjoint, branch ``ismip7``) registers it on every
+    write, and every count is zero. Leaves tlm_adjoint's manager reset.
+    Collective."""
+    import gc
+    import firedrake as fd
+    import tlm_adjoint.firedrake as tla
+    from mpi4py import MPI
+
+    comm = comm if comm is not None else MPI.COMM_WORLD
+    mesh = fd.UnitSquareMesh(16, 16, comm=comm)
+    V = fd.FunctionSpace(mesh, "CG", 1)
+    x, y = fd.SpatialCoordinate(mesh)
+    m = fd.Function(V, name="m").interpolate(0.1 * x)
+    f = fd.Function(V, name="f").interpolate(fd.sin(fd.pi * x) * fd.sin(fd.pi * y))
+    u = fd.Function(V, name="u")
+    v = fd.TestFunction(V)
+    F = fd.inner(fd.grad(u), fd.grad(v)) * fd.dx + fd.exp(m) * u * v * fd.dx - f * v * fd.dx
+    bc = fd.DirichletBC(V, 0.0, "on_boundary")
+    tla.reset_manager()
+    tla.start_manager()
+    tla.EquationSolver(F == 0, u, bc).solve()
+    tla.stop_manager()
+    H = tla.CachedGaussNewton(u, lambda tau: fd.assemble(fd.inner(tau, v) * fd.dx))
+    dm = fd.Function(V, name="dm").assign(1.0)
+    attached, norms = [], []
+    for _ in range(actions):
+        ddJ, = H.action([m], [dm])
+        with ddJ.dat.vec_ro as vec:
+            norms.append(float(vec.norm()))
+        del ddJ
+        gc.collect()
+        here = sum(len(getattr(z, "_tlm_adjoint__tangent_linears", {})) for z in (m, f, u))
+        attached.append(comm.allreduce(here, op=MPI.MAX))
+    del H
+    tla.reset_manager()
+    return attached, norms
+
+
 def is_dg0(space):
     r"""Whether ``space`` is the DG0 space the finite-volume transport moves
     its thickness in: the discharge forms read cell values and their upwind

@@ -61,7 +61,8 @@ the Hessian uses.
   velocity term alone, the likelihood of the 2 km results below, whose
   spreads therefore bound the inversion's posterior from above. Every
   output records the terms and their settings, and the posterior solve
-  refuses modes of another likelihood.
+  refuses modes, and a `--resume` of saved state, of another likelihood
+  (output that records none counts as the velocity term).
 - Geometry: fixed (BedMachine after the relaxation). Thickness is not a
   control of the inversion, so its uncertainty is not part of this posterior.
 - Time: the quantities are snapshots of the momentum balance at the MAP, the

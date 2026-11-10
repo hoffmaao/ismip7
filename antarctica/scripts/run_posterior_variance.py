@@ -54,6 +54,31 @@ def sigma(variance):
     return float(np.sqrt(max(float(variance), 0.0)))
 
 
+def or_abort(comm, read):
+    r"""``read()`` on this rank; any failure prints its traceback and aborts
+    every rank, since the others wait in a collective."""
+    try:
+        return read()
+    except BaseException:
+        traceback.print_exc()
+        sys.stderr.flush()
+        comm.Abort(1)
+
+
+def read_json(fn):
+    with open(fn) as f:
+        return json.load(f)
+
+
+def replace_atomically(fn, write):
+    r"""``write(f)`` into a sibling temporary file, then moved onto ``fn``, so a
+    kill mid-write leaves the previous complete file."""
+    tmp = fn + ".tmp"
+    with open(tmp, "wb") as f:
+        write(f)
+    os.replace(tmp, fn)
+
+
 def check_operator(meta, P, eig_fn):
     r"""Stop unless the eigensolve that wrote ``meta`` ran the live likelihood
     and prior, so its modes are eigenvectors of this operator."""
@@ -125,13 +150,7 @@ def main():
             raise SystemExit(f"{eig_fn} has no record {meta_fn}")
         meta = None
         if root:
-            try:
-                with open(meta_fn) as f:
-                    meta = json.load(f)
-            except BaseException:
-                traceback.print_exc()
-                sys.stderr.flush()
-                comm.Abort(1)
+            meta = or_abort(comm, lambda: read_json(meta_fn))
         meta = comm.bcast(meta, root=0)
         if os.path.basename(str(meta["map"])) != os.path.basename(os.environ["ISMIP7_INVERSION"]):
             raise SystemExit(f"{eig_fn} holds the modes of {meta['map']}, "
@@ -158,22 +177,21 @@ def main():
     out_fn = os.path.join(P.out_dir, f"posterior_{P.lc}{sfx}.json")
     results = {}
     if root and args.resume and os.path.exists(out_fn):
-        with open(out_fn) as f:
-            results = json.load(f).get("quantities", {})
+        results = or_abort(comm, lambda: read_json(out_fn)).get("quantities", {})
 
     def write(results):
-        with open(out_fn, "w") as f:
-            json.dump({"map": os.environ["ISMIP7_INVERSION"], "likelihood": "velocity",
-                       "map_dhdt_weight": P.dhdt_weight,
-                       "note": ("bracket of the Laplace posterior variance from the velocity "
-                                "likelihood: lower = A-norm of the conjugate-gradient iterate, "
-                                "upper = Gauss-Radau quadrature with its node at 1; the zero-step "
-                                "upper bound is the truncated-spectrum variance of the seed modes"),
-                       "modes": n_modes,
-                       "eigendec": eig_fn if lam is not None else None,
-                       "lower_eigenvalue": LOWER_EIGENVALUE,
-                       "written": datetime.now(timezone.utc).isoformat(timespec="seconds"),
-                       "quantities": results}, f, indent=2)
+        doc = {"map": os.environ["ISMIP7_INVERSION"], "likelihood": "velocity",
+               "map_dhdt_weight": P.dhdt_weight,
+               "note": ("bracket of the Laplace posterior variance from the velocity "
+                        "likelihood: lower = A-norm of the conjugate-gradient iterate, "
+                        "upper = Gauss-Radau quadrature with its node at 1; the zero-step "
+                        "upper bound is the truncated-spectrum variance of the seed modes"),
+               "modes": n_modes,
+               "eigendec": eig_fn if lam is not None else None,
+               "lower_eigenvalue": LOWER_EIGENVALUE,
+               "written": datetime.now(timezone.utc).isoformat(timespec="seconds"),
+               "quantities": results}
+        replace_atomically(out_fn, lambda f: f.write(json.dumps(doc, indent=2).encode()))
 
     def over_budget():
         return args.wall_hours is not None and perf_counter() - t_job > 3600.0 * args.wall_hours
@@ -186,10 +204,12 @@ def main():
         state_fn = os.path.join(P.out_dir, f"posterior_cg_{P.lc}{sfx}_{name}.npz")
         summary = state = refusal = None
         if root and args.resume and os.path.exists(state_fn):
-            with np.load(state_fn) as z:
-                refusal = check_resume(z, n_modes, eig_name, lam_saved, state_fn)
-                if refusal is None:
-                    state = {k: z[k] for k in STATE_KEYS}
+            def read_state():
+                with np.load(state_fn) as z:
+                    refusal = check_resume(z, n_modes, eig_name, lam_saved, state_fn)
+                    return refusal, (None if refusal else {k: z[k] for k in STATE_KEYS})
+
+            refusal, state = or_abort(comm, read_state)
         refusal = comm.bcast(refusal, root=0)
         if refusal is not None:
             raise SystemExit(refusal)
@@ -204,9 +224,9 @@ def main():
             actions_before = int(record.get("hessian_actions", 0)) if state is not None else 0
 
             def callback(step):
-                np.savez(state_fn, n_modes=n_modes, eigendec=eig_name, eigenvalues=lam_saved,
-                         lower_eigenvalue=LOWER_EIGENVALUE,
-                         **{k: np.asarray(step[k]) for k in STATE_KEYS})
+                replace_atomically(state_fn, lambda f: np.savez(
+                    f, n_modes=n_modes, eigendec=eig_name, eigenvalues=lam_saved,
+                    lower_eigenvalue=LOWER_EIGENVALUE, **{k: np.asarray(step[k]) for k in STATE_KEYS}))
                 rho = float(step["rho"][-1])
                 record.update({"iterations": step["iteration"],
                                "hessian_actions": actions_before + step["actions"],

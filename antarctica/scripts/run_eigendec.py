@@ -67,6 +67,8 @@ import os
 import resource
 import sys
 import traceback
+from time import perf_counter
+from types import SimpleNamespace
 
 import numpy as np
 import firedrake as fd
@@ -159,27 +161,14 @@ def from_global(arr, f):
         x_seq.destroy()
 
 
-def main():
-    ap = argparse.ArgumentParser()
-    ap.add_argument("--modes", type=int, default=int(os.environ.get("ISMIP7_EIG_MODES", "40")))
-    ap.add_argument("--tag", default=os.environ.get("ISMIP7_RUN_TAG", ""))
-    ap.add_argument("--tol", type=float, default=1e-6,
-                    help="ARPACK's relative accuracy on the eigenvalues (default 1e-6; 0 is machine precision)")
-    ap.add_argument("--maxiter", type=int, default=None,
-                    help="ARPACK restarts allowed; the solve then takes at most 1 + ncv + maxiter (ncv - modes) "
-                         "Hessian actions and keeps the modes converged by then, so a job can be sized to its "
-                         "wall-clock limit (default: unbounded)")
-    ap.add_argument("--ncv", type=int, default=None,
-                    help="Lanczos vectors per restart cycle (default 2 modes + 1, at least 20)")
-    ap.add_argument("--qoi", choices=("discharge", "none"), default="discharge",
-                    help="quantities whose posterior spread is computed (default: discharge)")
-    ap.add_argument("--check", action="store_true",
-                    help="check the derivatives and stop: the total discharge's adjoint gradient "
-                         "against a central difference, and the Gauss-Newton action d.Hd against "
-                         "the R^-1 norm of the velocity change a central difference gives along d")
-    args = ap.parse_args()
-    if args.maxiter is not None and args.maxiter < 1:
-        ap.error(f"--maxiter must be at least 1, got {args.maxiter}")
+def build_problem(qoi="discharge"):
+    r"""The posterior's ingredients at the MAP ``ISMIP7_INVERSION`` names: the
+    forward loaded as a projection loads it, the inversion's data term, one
+    taped solve at the recorded state, the Gauss-Newton action on it, the
+    prior's covariance and precision, and the quantities (``qoi``:
+    ``discharge`` or ``none``) with their values, gradients and prior
+    variances. Collective; the eigensolve and the direct posterior solve both
+    start from it."""
     comm = MPI.COMM_WORLD
 
     ctx = simulation.setup_model()
@@ -277,7 +266,7 @@ def main():
                    form_compiler_parameters=fc_params).solve()
     u_s = fd.split(z)[0]
     qois = []
-    if args.qoi == "discharge":
+    if qoi == "discharge":
         for name, form in discharge_quantities(ctx, u_s):
             Jq = Functional(name=name)
             Jq.assign(form)
@@ -338,22 +327,29 @@ def main():
                              "prior_variance": prior_var})
             PETSc.Sys.Print(f"  {name:28s} {value:9.1f} Gt/yr, prior sigma "
                             f"{np.sqrt(max(prior_var, 0.0)):8.2f} Gt/yr")
-        if args.check:
-            # The Gauss-Newton action first: the checks then move the controls,
-            # and the cached Gauss-Newton refuses to act once they have moved.
-            check_gauss_newton(ctx, z, sparams, alpha, phi, H, controls, grads[0], R_inv_action)
-            check_gradient(ctx, z, sparams, alpha, phi, qois[0], grads[0])
-            PETSc.Sys.Print("Derivative checks done; run without --check for the eigendecomposition.")
-            return
-    elif args.check:
-        raise SystemExit("--check needs the discharge quantities (--qoi discharge)")
+    return SimpleNamespace(
+        comm=comm, ctx=ctx, mesh=mesh, z=z, sparams=sparams, alpha=alpha, phi=phi, Q=Q, H=H,
+        controls=controls, R_inv_action=R_inv_action, covariance=covariance, precision=precision,
+        qois=qois, grads=grads, qoi_rows=qoi_rows, misfit_scale=misfit_scale, log_w=log_w,
+        floor=floor, coeffs=coeffs, meta=meta, dhdt_weight=dhdt_weight, lc=ctx["lc"],
+        out_dir=simulation.RESULTS_DIR)
 
-    n = len(to_global(phi))
+
+def make_server(problem, label="the eigensolve"):
+    r"""The operator service: rank 0 names an operation on a global control
+    vector (``alpha`` then ``phi``), every rank applies it. ``H_dual`` is the
+    Gauss-Newton action on a primal vector, ``Ginv`` the prior precision on a
+    primal vector, ``G`` the prior covariance on a dual one; each returns a
+    global vector, ``stop`` ends the other ranks' service loop. Returns the
+    service with ``pack``/``unpack`` between function pairs and global
+    vectors, the vector lengths ``n`` (one control) and ``N`` (both), the
+    Hessian action counter and the clock the action log reads."""
+    comm, Q, H, controls = problem.comm, problem.Q, problem.H, problem.controls
+    n = len(to_global(problem.phi))
     N = 2 * n
     va, vp = Function(Q), Function(Q)
     n_actions = [0]
-    from time import perf_counter
-    t_eig = perf_counter()
+    t_start = perf_counter()
 
     def unpack(x):
         from_global(x[:n], va)
@@ -375,19 +371,59 @@ def main():
             n_actions[0] += 1
             rss = rss_mb()
             PETSc.Sys.Print(f"  Hessian action {n_actions[0]}: {perf_counter() - t0:.1f} s "
-                            f"({(perf_counter() - t_eig) / 3600:.2f} h into the eigensolve); "
+                            f"({(perf_counter() - t_start) / 3600:.2f} h into {label}); "
                             f"resident {comm.allreduce(rss, op=MPI.SUM) / 1024:.1f} GB over "
                             f"{comm.size} ranks, {comm.allreduce(rss, op=MPI.MAX) / 1024:.2f} GB max")
         elif op == "Ginv":
-            out = pack(*precision(va, vp))
+            out = pack(*problem.precision(va, vp))
         elif op == "G":
             # the covariance acts on duals (assembled gradients)
             ga, gp = fd.Cofunction(Q.dual()), fd.Cofunction(Q.dual())
             from_global(x[:n], ga)
             from_global(x[n:], gp)
-            out = pack(*covariance(ga, gp))
+            out = pack(*problem.covariance(ga, gp))
         return out
 
+    return SimpleNamespace(serve=serve, pack=pack, unpack=unpack, n=n, N=N, n_actions=n_actions)
+
+
+def main():
+    ap = argparse.ArgumentParser()
+    ap.add_argument("--modes", type=int, default=int(os.environ.get("ISMIP7_EIG_MODES", "40")))
+    ap.add_argument("--tag", default=os.environ.get("ISMIP7_RUN_TAG", ""))
+    ap.add_argument("--tol", type=float, default=1e-6,
+                    help="ARPACK's relative accuracy on the eigenvalues (default 1e-6; 0 is machine precision)")
+    ap.add_argument("--maxiter", type=int, default=None,
+                    help="ARPACK restarts allowed; the solve then takes at most 1 + ncv + maxiter (ncv - modes) "
+                         "Hessian actions and keeps the modes converged by then, so a job can be sized to its "
+                         "wall-clock limit (default: unbounded)")
+    ap.add_argument("--ncv", type=int, default=None,
+                    help="Lanczos vectors per restart cycle (default 2 modes + 1, at least 20)")
+    ap.add_argument("--qoi", choices=("discharge", "none"), default="discharge",
+                    help="quantities whose posterior spread is computed (default: discharge)")
+    ap.add_argument("--check", action="store_true",
+                    help="check the derivatives and stop: the total discharge's adjoint gradient "
+                         "against a central difference, and the Gauss-Newton action d.Hd against "
+                         "the R^-1 norm of the velocity change a central difference gives along d")
+    args = ap.parse_args()
+    if args.maxiter is not None and args.maxiter < 1:
+        ap.error(f"--maxiter must be at least 1, got {args.maxiter}")
+    P = build_problem(args.qoi)
+    if args.check:
+        if not P.qois:
+            raise SystemExit("--check needs the discharge quantities (--qoi discharge)")
+        # The Gauss-Newton action first: the checks then move the controls,
+        # and the cached Gauss-Newton refuses to act once they have moved.
+        check_gauss_newton(P.ctx, P.z, P.sparams, P.alpha, P.phi, P.H, P.controls, P.grads[0],
+                           P.R_inv_action)
+        check_gradient(P.ctx, P.z, P.sparams, P.alpha, P.phi, P.qois[0], P.grads[0])
+        PETSc.Sys.Print("Derivative checks done; run without --check for the eigendecomposition.")
+        return
+    comm, qois, grads, qoi_rows = P.comm, P.qois, P.grads, P.qoi_rows
+    mesh, Q, dhdt_weight, misfit_scale, log_w, floor, coeffs, meta = (
+        P.mesh, P.Q, P.dhdt_weight, P.misfit_scale, P.log_w, P.floor, P.coeffs, P.meta)
+    S = make_server(P)
+    serve, n, N, n_actions = S.serve, S.n, S.N, S.n_actions
     k = min(args.modes, N - 2)
     ncv = min(args.ncv or arpack_ncv(k), N)
     if comm.rank == 0:
@@ -420,9 +456,9 @@ def main():
     PETSc.Sys.Print(f"  modes with lambda > 1 (data-dominated): {int((vals > 1.0).sum())} of {k}; "
                     f"min {vals.min():.3e}")
 
-    lc = ctx["lc"]
+    lc = P.lc
     sfx = f"_{args.tag}" if args.tag else ""
-    out_dir = simulation.RESULTS_DIR
+    out_dir = P.out_dir
     os.makedirs(out_dir, exist_ok=True)
     eig_fn = os.path.join(out_dir, f"eigendec_{lc}{sfx}.h5")
     with fd.CheckpointFile(eig_fn, "w") as chk:

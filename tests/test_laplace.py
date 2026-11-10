@@ -107,6 +107,115 @@ def test_no_converged_pair_is_an_error():
         solve(3, tol=0.0, maxiter=1, ncv=4)
 
 
+def _dense_problem(n=9, m=11, seed=11):
+    """A small linear-Gaussian problem with dense actions: full-rank data so
+    the preconditioned operator's spectrum lies strictly above 1."""
+    rng = np.random.default_rng(seed)
+    A = rng.normal(size=(n, n))
+    prior_cov = A @ A.T + n * np.eye(n)
+    prior_prec = np.linalg.inv(prior_cov)
+    G = rng.normal(size=(m, n))
+    W = np.diag(rng.uniform(0.5, 4.0, size=m))
+    H = G.T @ W @ G
+    g = rng.normal(size=n)
+    exact = g @ np.linalg.solve(H + prior_prec, g)
+    lam, V = scipy.linalg.eigh(H, prior_prec)               # V^T Gamma^-1 V = I
+    order = np.argsort(-lam)
+    counts = {"H": 0}
+
+    def H_action(x):
+        counts["H"] += 1
+        return H @ x
+
+    actions = (H_action, lambda x: prior_prec @ x, lambda r: prior_cov @ r)
+    return dict(n=n, prior_cov=prior_cov, H=H, g=g, exact=exact, lam=lam[order],
+                V=V[:, order], actions=actions, counts=counts)
+
+
+def test_conjugate_gradients_bracket_the_variance_and_converge():
+    from icepack2_tools.laplace import posterior_variance_cg
+    P = _dense_problem()
+    out = posterior_variance_cg(*P["actions"], P["g"], iterations=P["n"])
+    lower, upper = out["lower"], out["upper"]
+    assert out["iterations"] == P["n"] and P["counts"]["H"] == P["n"]
+    assert np.all(np.diff(lower) >= -1e-9 * P["exact"])
+    assert np.all(lower <= P["exact"] * (1 + 1e-9))
+    assert np.all(upper >= P["exact"] * (1 - 1e-9))
+    assert upper[0] == pytest.approx(P["g"] @ P["prior_cov"] @ P["g"])     # the prior variance
+    assert lower[-1] == pytest.approx(P["exact"], rel=1e-8)
+    assert upper[-1] == pytest.approx(P["exact"], rel=1e-6)
+    assert P["g"] @ out["x"] == pytest.approx(P["exact"], rel=1e-8)
+
+
+def test_the_eigen_seed_starts_at_the_truncated_variance_and_tightens_it():
+    from icepack2_tools.laplace import posterior_variance, posterior_variance_cg
+    P = _dense_problem()
+    k = 3
+    modes, lam = P["V"][:, :k].T, P["lam"][:k]
+    truncated = posterior_variance(P["g"] @ P["prior_cov"] @ P["g"], modes @ P["g"], lam)
+    out = posterior_variance_cg(*P["actions"], P["g"], iterations=P["n"] - k, modes=modes,
+                                eigenvalues=lam)
+    assert out["upper"][0] == pytest.approx(truncated, rel=1e-10)
+    assert out["lower"][0] == pytest.approx(np.sum((modes @ P["g"]) ** 2 / (1 + lam)),
+                                            rel=1e-10)
+    assert out["projections"] == pytest.approx(modes @ P["g"])
+    assert P["counts"]["H"] == P["n"] - k + 1                    # one action seeds
+    assert out["lower"][-1] == pytest.approx(P["exact"], rel=1e-8)
+    assert out["upper"][-1] == pytest.approx(P["exact"], rel=1e-6)
+    assert np.all(out["lower"] <= P["exact"] * (1 + 1e-9))
+    assert np.all(out["upper"] >= P["exact"] * (1 - 1e-9))
+
+
+def test_a_resumed_solve_continues_the_same_bracket():
+    from icepack2_tools.laplace import posterior_variance_cg
+    P = _dense_problem()
+    whole = posterior_variance_cg(*P["actions"], P["g"], iterations=5)
+    first = posterior_variance_cg(*P["actions"], P["g"], iterations=2)
+    rest = posterior_variance_cg(*P["actions"], P["g"], iterations=3, state=first)
+    assert rest["iterations"] == 5 and rest["actions"] == 3
+    assert rest["lower"] == pytest.approx(whole["lower"], rel=1e-10)
+    assert rest["upper"] == pytest.approx(whole["upper"], rel=1e-8)
+
+
+def test_stop_and_callback_follow_the_steps():
+    from icepack2_tools.laplace import posterior_variance_cg
+    P = _dense_problem()
+    seen = []
+    out = posterior_variance_cg(*P["actions"], P["g"], iterations=8, stop=lambda k: k >= 3,
+                                callback=seen.append)
+    assert out["iterations"] == 3 and [r["iteration"] for r in seen] == [1, 2, 3]
+    assert [r["lower"] for r in seen] == pytest.approx(list(out["lower"][1:]))
+    assert [r["upper"] for r in seen] == pytest.approx(list(out["upper"][1:]))
+
+
+def test_a_prior_only_direction_keeps_the_bounds_valid():
+    """Data that leave a direction unobserved put an eigenvalue of exactly 1
+    in the preconditioned operator, the Gauss-Radau node itself; the bracket
+    must survive the resulting near-singular quadrature matrices."""
+    from icepack2_tools.laplace import posterior_variance_cg
+    P = _dense_problem(n=8, m=5)
+    out = posterior_variance_cg(*P["actions"], P["g"], iterations=P["n"])
+    assert np.all(np.isfinite(out["upper"]))
+    assert np.all(out["lower"] <= P["exact"] * (1 + 1e-9))
+    assert np.all(out["upper"] >= P["exact"] * (1 - 1e-9))
+    assert out["lower"][-1] == pytest.approx(P["exact"], rel=1e-8)
+
+
+def test_quadrature_bounds_match_the_iterate_norm_and_refuse_bad_input():
+    from icepack2_tools.laplace import cg_jacobi_matrix, posterior_variance_cg, quadrature_bounds
+    P = _dense_problem()
+    out = posterior_variance_cg(*P["actions"], P["g"], iterations=4)
+    lower, upper = quadrature_bounds(out["alphas"], out["betas"], out["rho"][0])
+    assert lower == pytest.approx(out["lower"]) and upper == pytest.approx(out["upper"])
+    T = cg_jacobi_matrix(out["alphas"], out["betas"])
+    ritz = np.linalg.eigvalsh(T)
+    assert np.all(ritz > 1.0)                       # within the operator's spectrum
+    with pytest.raises(ValueError, match="beta"):
+        quadrature_bounds([1.0, 2.0], [0.5], 1.0)
+    with pytest.raises(ValueError, match="positive"):
+        quadrature_bounds([1.0], [0.5], 1.0, lower_eigenvalue=0.0)
+
+
 fd = pytest.importorskip("firedrake")
 
 
@@ -224,3 +333,44 @@ def test_gauss_newton_actions_release_their_tangent_linears():
         assert attached() == 0
     assert np.allclose(results[1], results[0]) and np.allclose(results[2], results[0])
     assert np.linalg.norm(results[0]) > 0.0
+
+
+def _save_modes(path, mesh, values):
+    Q = fd.FunctionSpace(mesh, "CG", 1)
+    x, y = fd.SpatialCoordinate(mesh)
+    with fd.CheckpointFile(str(path), "w") as chk:
+        chk.save_mesh(mesh)
+        for i, (ca, cp) in enumerate(values):
+            chk.save_function(fd.Function(Q, name=f"mode_{i:04d}_alpha").interpolate(ca * x + y))
+            chk.save_function(fd.Function(Q, name=f"mode_{i:04d}_phi").interpolate(cp * y - x))
+        chk.set_attr("/", "n_modes", len(values))
+    return Q
+
+
+def test_saved_modes_come_back_on_the_live_mesh(tmp_path):
+    """The modes load onto the mesh that saved them by a dof copy, onto the
+    same mesh under another numbering by interpolation, and refuse another
+    mesh altogether."""
+    from icepack2_tools.laplace import load_modes
+    path = tmp_path / "eigendec.h5"
+    mesh = fd.UnitSquareMesh(4, 4)
+    Q = _save_modes(path, mesh, [(1.0, 2.0), (3.0, 4.0), (5.0, 6.0)])
+    modes, copied = load_modes(str(path), Q, count=2)
+    assert copied and len(modes) == 2
+    x, y = fd.SpatialCoordinate(mesh)
+    want = fd.Function(Q).interpolate(3.0 * x + y)
+    assert np.allclose(modes[1][0].dat.data_ro, want.dat.data_ro)
+    assert modes[1][1].name() == "mode_0001_phi"
+
+    other = fd.UnitSquareMesh(4, 4, reorder=True)
+    Q_other = fd.FunctionSpace(other, "CG", 1)
+    modes, copied = load_modes(str(path), Q_other)
+    assert len(modes) == 3
+    xo, yo = fd.SpatialCoordinate(other)
+    want = fd.Function(Q_other).interpolate(6.0 * yo - xo)
+    assert np.allclose(modes[2][1].dat.data_ro, want.dat.data_ro, atol=1e-10)
+    if not copied:
+        assert not np.allclose(other.coordinates.dat.data_ro, mesh.coordinates.dat.data_ro)
+
+    with pytest.raises(ValueError, match="another mesh"):
+        load_modes(str(path), fd.FunctionSpace(fd.UnitSquareMesh(5, 5), "CG", 1))

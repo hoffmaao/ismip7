@@ -156,6 +156,47 @@ is positive. The total's posterior spread, 309 Gt/yr or 16% of the MAP
 discharge, is the number the projections start from before any of the next
 steps below.
 
+## Posterior variance by direct solve
+
+The truncated spread falls with every mode, and the spectrum says it will go
+on falling: over modes 20 to 100 the eigenvalues follow
+`lambda ~ 7.8e7 i^-1.17`, which reaches 1 only near mode 5e6, beyond the
+1.85 million controls. The velocity data dominate the 7.5 km prior in nearly
+every direction (the production MAP's reduced chi-square is about 50 per
+observed node, so a likelihood calibrated to it would still leave some 2e5
+data-dominated modes), and no affordable eigensolve converges the spread.
+
+`antarctica/scripts/run_posterior_variance.py` brackets each quantity's
+variance instead. It solves `(H + Gamma^-1) x = g` by conjugate gradients
+preconditioned with the prior covariance
+(`icepack2_tools.laplace.posterior_variance_cg`). After `k` steps `g . x_k`
+is the A-norm of the iterate, which rises monotonically to the variance: a
+lower bound. Gauss-Radau quadrature on the same recurrence, with its fixed
+node at 1, the bottom of the spectrum of `I + Gamma^1/2 H Gamma^1/2`, gives
+an upper bound (Golub and Meurant, 2010, Sect. 6.2 and 12.2). The saved modes
+seed the solve with the truncated posterior and are deflated from the
+iteration, so the zero-step upper bound is the truncated variance of the
+table above and every step tightens both sides. The seed costs one Hessian
+action and one prior-precision action per mode; each step costs one Hessian
+action at the per-action cost above, plus one precision and one covariance
+action.
+
+    ISMIP7_INVERSION=<map.h5> mpiexec -n 32 python antarctica/scripts/run_posterior_variance.py \
+        --tag <tag> --quantities discharge_total,grounding_line_flux_total \
+        --iterations 200 --wall-hours 22
+
+reads the modes from `eigendec_<lc>_<tag>.h5` (`--eigendec`, `--modes`; 0
+solves from the prior) and writes `posterior_<lc>_<tag>.json` after every
+step: the bracket per quantity as variances and as Gt/yr, the step history,
+and the file of vectors (`posterior_cg_<lc>_<tag>_<quantity>.npz`) that
+`--resume` continues in a later job. `--wall-hours` stops starting steps that
+long after the script began, so a 24-hour job ends on its own record. The
+upper bound takes the unresolved residual to sit at the bottom of the
+spectrum, so it tightens only as the solve converges; the lower bound follows
+the quantity's dominant directions early. Both are bounds on the Laplace
+variance from the velocity likelihood; the caveats of the section above
+apply unchanged.
+
 ## Next steps
 
 1. The dH/dt term in the Hessian, through the inversion's own objective, so

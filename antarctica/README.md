@@ -299,7 +299,7 @@ refinement, sized from BedMachine geometry and MEaSUREs strain rate.
 cd antarctica
 python scripts/mesh_antarctica.py --lc 1000 --lc-coarse 10000 --buffer-m 20000   # the production pair
 ISMIP7_LC=1000 ISMIP7_LC_COARSE=10000 ISMIP7_BUFFER_M=20000 python scripts/mesh_antarctica.py
-# dev mesh for inversion_icepack2.py, diagnostic_solve.py and run_eigendec.py:
+# dev mesh for inversion_icepack2.py, diagnostic_solve.py, run_eigendec.py and run_posterior_variance.py:
 python scripts/mesh_antarctica.py --lc 8000 --lc-coarse 80000 --buffer-m 20000
 # mesh/antarctica_<COARSE>_<FINE>_buffered<BUFFER_M>.msh
 # mesh/boundary_ids_antarctica_<COARSE>_<FINE>_buffered<BUFFER_M>.json
@@ -1910,7 +1910,7 @@ redeclare those literals.
 | `ISMIP7_ALPHA_GL` | grounding-line coercivity, Budd only, read by `scripts/simulation.py` and `scripts/inversion_icepack2.py` | `0.5` (`0` for RC) |
 | `ISMIP7_RC_HVISC_FLOOR` | membrane-only thickness floor (m) under both laws (`h_visc_floor`): a cell thinner than this carries this much ice in the membrane term alone. The first water row beside the ice carries it too, coupling the front to the ocean drag one cell out: with the vertex gate on the 20 km buffered 2 km mesh, floating ice started 11 % slow at 10 m, 4 % at 2.5 m and 2 % at 1 m, and 2.5 m costs 14 % more forward time at 1 km (GEOMETRY_DISCRETIZATION.md, issue #153). The inversion records it in the MAP as `h_visc_floor`; a forward runs the recorded floor and refuses a different one here, and a MAP older than the record runs this knob | `2.5` in the inversion; in a forward the MAP's, and `10.0` for a MAP older than the record |
 | `ISMIP7_RC_CW0_FLOOR` | RC `C_w0` floor, read by `scripts/simulation.py` and `scripts/inversion_icepack2.py` | `0.0` |
-| `ISMIP7_M_SLIDE` | sliding exponent, read by `scripts/inversion_icepack2.py`, `scripts/simulation.py`, `scripts/thermo_prior.py`, `scripts/plot_map.py`, `scripts/run_eigendec.py` | `3.0` |
+| `ISMIP7_M_SLIDE` | sliding exponent, read by `scripts/inversion_icepack2.py`, `scripts/simulation.py`, `scripts/thermo_prior.py`, `scripts/plot_map.py`, `scripts/run_eigendec.py`, `scripts/run_posterior_variance.py` | `3.0` |
 
 > **dt guidance.** Production runs on the 1000 m mesh use `ISMIP7_DT=0.025`,
 > the step the group chose with the mesh on 25 September 2026 (issue 20):

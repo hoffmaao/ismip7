@@ -17,6 +17,14 @@ MAP with gradient ``g = dQ/dm``, has posterior variance
 A truncated set of modes leaves out only reductions, so the variance it
 gives is an upper bound on the full Laplace variance.
 
+When the data dominate the prior in more directions than an eigensolve can
+hold, ``posterior_variance_cg`` brackets the same variance instead: it solves
+``(H + Gamma^-1) x = g`` by conjugate gradients preconditioned with
+``Gamma``, where ``g . x_k`` rises to the variance from below and Gauss-Radau
+quadrature on the same recurrence bounds it from above. The eigenpairs seed
+and deflate that solve, so its zero-iteration upper bound is the truncated
+variance above and every Hessian action tightens both sides.
+
 The quantities here are snapshot quantities of the momentum balance at the
 MAP state: the ice discharged from grounded ice, across the grounding line
 into floating cells and across the mesh boundary, per drainage basin. They
@@ -56,7 +64,8 @@ def arpack_action_bound(k, ncv, maxiter):
     return 1 + ncv + maxiter * (ncv - k)
 
 
-def leading_eigenpairs(H_action, Ginv_action, G_action, N, k, tol=1e-6, maxiter=None, ncv=None):
+def leading_eigenpairs(H_action, Ginv_action, G_action, N, k, tol=1e-6, maxiter=None,
+                       ncv=None):
     r"""The ``k`` leading generalised eigenpairs ``H v = lambda Gamma^-1 v`` by
     ARPACK, from three actions on global vectors of length ``N``: the Hessian
     ``H``, the prior precision ``Gamma^-1`` and the prior covariance ``Gamma``.
@@ -89,6 +98,231 @@ def leading_eigenpairs(H_action, Ginv_action, G_action, N, k, tol=1e-6, maxiter=
                                f"({ncv} Lanczos vectors): {e}") from e
     order = np.argsort(-vals)
     return vals[order], vecs[:, order], converged
+
+
+def cg_jacobi_matrix(alphas, betas):
+    r"""The Lanczos matrix ``k`` conjugate-gradient steps define: tridiagonal,
+    with ``1/alpha_j + beta_{j-1}/alpha_{j-1}`` on the diagonal and
+    ``sqrt(beta_j)/alpha_j`` beside it. Its eigenvalues are the Ritz values of
+    the preconditioned operator on the Krylov space those steps built."""
+    alphas = np.asarray(alphas, dtype=float)
+    betas = np.asarray(betas, dtype=float)
+    k = alphas.size
+    if betas.size < max(k - 1, 0):
+        raise ValueError(f"{k} steps need {k - 1} beta coefficients, got {betas.size}")
+    T = np.zeros((k, k))
+    for j in range(k):
+        T[j, j] = 1.0 / alphas[j] + (betas[j - 1] / alphas[j - 1] if j > 0 else 0.0)
+        if j + 1 < k:
+            T[j, j + 1] = T[j + 1, j] = np.sqrt(betas[j]) / alphas[j]
+    return T
+
+
+def _radau_upper(alphas, betas, rho0, a):
+    r"""Gauss-Radau estimate of ``r_0 . A^-1 r_0`` after ``m`` preconditioned
+    conjugate-gradient steps, with one quadrature node fixed at ``a``: the
+    ``(m+1) x (m+1)`` Lanczos matrix whose last diagonal entry is moved so
+    that ``a`` is an eigenvalue (Golub and Meurant, Matrices, Moments and
+    Quadrature, Sect. 6.2), inverted at its first entry. Returns ``nan`` when
+    the modified matrix is not positive definite (a Ritz value at or below
+    ``a`` through roundoff)."""
+    import scipy.linalg
+
+    m = len(alphas)
+    d = np.array([1.0 / alphas[j] + (betas[j - 1] / alphas[j - 1] if j > 0 else 0.0)
+                  for j in range(m)])
+    e = np.array([np.sqrt(betas[j]) / alphas[j] for j in range(m)])
+    band = np.zeros((3, m))
+    band[1] = d - a
+    band[0, 1:] = e[:m - 1]
+    band[2, :-1] = e[:m - 1]
+    rhs = np.zeros(m)
+    rhs[-1] = e[m - 1] ** 2
+    try:
+        delta = scipy.linalg.solve_banded((1, 1), band, rhs)
+    except (ValueError, np.linalg.LinAlgError):
+        return np.nan
+    omega = a + delta[-1]
+    if not np.isfinite(omega) or omega <= 0.0:
+        return np.nan
+    band = np.zeros((3, m + 1))
+    band[1] = np.append(d, omega)
+    band[0, 1:] = e
+    band[2, :-1] = e
+    unit = np.zeros(m + 1)
+    unit[0] = 1.0
+    try:
+        y = scipy.linalg.solve_banded((1, 1), band, unit)
+    except (ValueError, np.linalg.LinAlgError):
+        return np.nan
+    value = rho0 * y[0]
+    return value if np.isfinite(value) and value >= 0.0 else np.nan
+
+
+def quadrature_bounds(alphas, betas, rho0, lower_eigenvalue=1.0):
+    r"""Bounds on ``r_0 . A^-1 r_0`` from the coefficients of preconditioned
+    conjugate gradients on ``A x = r_0``: ``alphas`` the step lengths,
+    ``betas`` the direction updates, ``rho0 = r_0 . M r_0`` with ``M`` the
+    preconditioner. Entry ``m`` of each array is the bound after ``m`` steps.
+
+    The lower bounds are the Gauss rule, ``sum_{j<m} alpha_j rho_j``, which is
+    the ``A``-norm of the iterate and rises monotonically to the exact value.
+    The upper bounds are the Gauss-Radau rule with a node fixed at
+    ``lower_eigenvalue``, which must lie at or below the spectrum of the
+    preconditioned operator ``M^1/2 A M^1/2``; when roundoff defeats that rule
+    at a step the previous upper bound is kept."""
+    alphas = np.asarray(alphas, dtype=float)
+    betas = np.asarray(betas, dtype=float)
+    k = alphas.size
+    if betas.size < k:
+        raise ValueError(f"{k} steps need {k} beta coefficients, got {betas.size}")
+    if lower_eigenvalue <= 0.0:
+        raise ValueError(f"the lower eigenvalue must be positive, got {lower_eigenvalue}")
+    rhos = rho0 * np.concatenate([[1.0], np.cumprod(betas[:k])])
+    lower = np.concatenate([[0.0], np.cumsum(alphas * rhos[:k])])
+    upper = np.empty(k + 1)
+    upper[0] = rho0 / lower_eigenvalue
+    for m in range(1, k + 1):
+        value = _radau_upper(alphas[:m], betas[:m], rho0, lower_eigenvalue)
+        upper[m] = min(upper[m - 1], value) if np.isfinite(value) else upper[m - 1]
+    return lower, upper
+
+
+def posterior_variance_cg(H_action, Ginv_action, G_action, g, iterations, modes=None,
+                          eigenvalues=None, lower_eigenvalue=1.0, state=None, callback=None,
+                          stop=None):
+    r"""Bracket the Laplace posterior variance ``g . (H + Gamma^-1)^-1 g`` of a
+    quantity with gradient ``g`` (a dual vector) by conjugate gradients on
+    ``(H + Gamma^-1) x = g`` preconditioned with the prior covariance, from
+    the three actions ``leading_eigenpairs`` uses.
+
+    After ``k`` steps ``g . x_k`` is the ``A``-norm of the iterate: it rises
+    monotonically to the variance, a lower bound. Gauss-Radau quadrature on
+    the same recurrence (``quadrature_bounds``) gives an upper bound, with
+    ``lower_eigenvalue`` at or below the spectrum of ``I + Gamma^1/2 H
+    Gamma^1/2``: 1 for a positive semi-definite ``H``.
+
+    ``modes`` (one ``Gamma^-1``-orthonormal eigenvector of ``H v = lambda
+    Gamma^-1 v`` per row) with their ``eigenvalues`` seed the solve with the
+    truncated posterior ``sum_i (g . v_i)^2 / (1 + lambda_i)`` and deflate
+    those directions from the iteration. The upper bound at zero iterations
+    is then the truncated-spectrum variance of ``posterior_variance``, and
+    each iteration tightens both bounds. The seed costs one Hessian action and
+    one prior-precision action per mode; each iteration one Hessian action,
+    one precision action and one covariance action.
+
+    ``state`` is a returned dictionary to continue from (the same modes must
+    be given); ``stop(k)`` ends the loop early when it returns true before
+    step ``k``; ``callback(record)`` sees each step's bounds. Returns a
+    dictionary with ``lower`` and ``upper`` (entry ``k`` after ``k`` steps,
+    including the seed), ``rho``, ``alphas``, ``betas``, ``seed``,
+    ``projections``, ``actions`` (Hessian actions taken in this call) and the
+    vectors ``x``, ``r``, ``p`` to continue from."""
+    g = np.asarray(g, dtype=float)
+    a = float(lower_eigenvalue)
+    actions = 0
+    V = W = None
+    if modes is not None and len(modes) > 0:
+        V = np.asarray(modes, dtype=float)
+        lam = np.asarray(eigenvalues, dtype=float)
+        if V.shape != (lam.size, g.size):
+            raise ValueError(f"{V.shape[0]} modes of length {V.shape[1]} for "
+                             f"{lam.size} eigenvalues and a gradient of length {g.size}")
+        W = np.array([np.asarray(Ginv_action(v), dtype=float) for v in V])
+
+    def deflate(r):
+        return r - W.T @ (V @ r) if V is not None else r
+
+    if state is None:
+        if V is not None:
+            projections = V @ g
+            x = V.T @ (projections / (1.0 + lam))
+            Hx = np.asarray(H_action(x), dtype=float)
+            actions += 1
+            Ax = np.asarray(Ginv_action(x), dtype=float) + Hx
+            seed = float(x @ Ax)
+            r = deflate(g - Ax)
+        else:
+            projections = np.zeros(0)
+            x = np.zeros_like(g)
+            seed = 0.0
+            r = g.copy()
+        p = np.asarray(G_action(r), dtype=float)
+        rho = float(r @ p)
+        alphas, betas, rhos = [], [], [rho]
+    else:
+        x, r, p = (np.array(state[k_], dtype=float) for k_ in ("x", "r", "p"))
+        alphas, betas, rhos = list(state["alphas"]), list(state["betas"]), list(state["rho"])
+        seed, projections = float(state["seed"]), np.asarray(state["projections"], dtype=float)
+        rho = rhos[-1]
+    done = len(alphas)
+    for k in range(done, done + iterations):
+        if (stop is not None and stop(k)) or rho <= 0.0:
+            break
+        q = np.asarray(Ginv_action(p), dtype=float) + np.asarray(H_action(p), dtype=float)
+        actions += 1
+        pq = float(p @ q)
+        if pq <= 0.0:
+            raise RuntimeError(f"conjugate gradients lost positivity at step {k}: "
+                               f"p . A p = {pq:.3e}")
+        alpha = rho / pq
+        x = x + alpha * p
+        r = deflate(r - alpha * q)
+        z = np.asarray(G_action(r), dtype=float)
+        rho_new = float(r @ z)
+        beta = rho_new / rho if rho > 0.0 else 0.0
+        p = z + beta * p
+        alphas.append(alpha)
+        betas.append(beta)
+        rhos.append(rho_new)
+        rho = rho_new
+        if callback is not None:
+            lower, upper = quadrature_bounds(alphas, betas, rhos[0], a)
+            callback({"iteration": k + 1, "lower": seed + lower[-1], "upper": seed + upper[-1],
+                      "rho": rho_new, "alpha": alpha, "beta": beta, "actions": actions})
+    lower, upper = quadrature_bounds(alphas, betas, rhos[0], a)
+    return {"lower": seed + lower, "upper": seed + upper, "rho": rhos, "alphas": alphas,
+            "betas": betas, "seed": seed, "projections": projections, "actions": actions,
+            "iterations": len(alphas), "x": x, "r": r, "p": p}
+
+
+def load_modes(path, space, count=None):
+    r"""The eigenmodes ``run_eigendec.py`` saved in ``path`` (``mode_<i>_alpha``,
+    ``mode_<i>_phi`` on the mesh it saved alongside), as pairs of Functions on
+    ``space``, the first ``count`` of them (all when ``None``).
+
+    The saved mesh must be the live mesh (``transfer.meshes_match``). When
+    every rank holds its coordinates in the saved order the dof arrays are
+    copied; otherwise each mode is interpolated across (same geometry, other
+    numbering). Returns ``(modes, copied)``. Collective."""
+    import firedrake as fd
+    from mpi4py import MPI
+    from icepack2_tools.transfer import interpolate_with_fill, meshes_match
+
+    mesh = space.mesh()
+    comm = mesh.comm
+    with fd.CheckpointFile(path, "r") as chk:
+        n_modes = int(chk.get_attr("/", "n_modes"))
+        k = n_modes if count is None else min(int(count), n_modes)
+        saved = chk.load_mesh()
+        if not meshes_match(saved, mesh, comm):
+            raise ValueError(f"{path} holds modes of another mesh")
+        xa, xb = saved.coordinates.dat.data_ro, mesh.coordinates.dat.data_ro
+        same_order = xa.shape == xb.shape and bool(np.allclose(xa, xb))
+        copied = comm.allreduce(int(same_order), op=MPI.MIN) == 1
+        modes = []
+        for i in range(k):
+            pair = []
+            for control in ("alpha", "phi"):
+                f = chk.load_function(saved, f"mode_{i:04d}_{control}")
+                target = fd.Function(space, name=f.name())
+                if copied:
+                    target.dat.data[:] = f.dat.data_ro
+                else:
+                    interpolate_with_fill(target, f, 0.0, comm)
+                pair.append(target)
+            modes.append(tuple(pair))
+    return modes, copied
 
 
 def is_dg0(space):

@@ -91,6 +91,7 @@ import rasterio  # noqa: E402
 import simulation  # noqa: E402
 from icepack2_tools.prior import (bilaplacian_coeffs,  # noqa: E402
                                   prior_operator_form)
+from icepack2_tools.solverconfig import direct_solver_parameters  # noqa: E402
 from icepack2_tools.forcing import _basin_on_mesh, imbie2_basin_path  # noqa: E402
 from icepack2_tools.laplace import (arpack_action_bound, arpack_ncv, grounded_discharge_forms,  # noqa: E402
                                     grounded_indicator, is_dg0, leading_eigenpairs, posterior_variance,
@@ -482,7 +483,7 @@ def build_problem(qoi="discharge", likelihood="map"):
         "alpha": bilaplacian_coeffs(float(meta["prior_sigma_alpha"]), float(meta["prior_rho_theta"])),
         "phi": bilaplacian_coeffs(float(meta["prior_sigma_phi"]), float(meta["prior_rho"])),
     }
-    fac = {"ksp_type": "preonly", "pc_type": "cholesky", "pc_factor_mat_solver_type": "mumps"}
+    fac = direct_solver_parameters("cholesky")
     A_mat = {k: assemble(prior_operator_form(trial, test, *c)) for k, c in coeffs.items()}
     A_solver = {k: fd.LinearSolver(m, solver_parameters=fac) for k, m in A_mat.items()}
     M_solver = fd.LinearSolver(assemble(inner(trial, test) * dx), solver_parameters=fac)

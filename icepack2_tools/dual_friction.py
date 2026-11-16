@@ -73,6 +73,7 @@ from icepack2.constants import (
 from .geometry import surface_slope
 from .grounding import height_above_flotation, smooth_heaviside
 from .runconfig import exact_front_version
+from .solverconfig import direct_solver_parameters
 
 # Grounding-zone Heaviside width [m height-above-flotation].  Wider => more
 # sub-element smoothing of the grounded/floating transition that gates theta.
@@ -174,8 +175,7 @@ def regional_driving_stress(H, s, b, Q, length):
     # but a direct solve keeps it identical wherever it is rebuilt.
     solver = LinearSolver(
         assemble((f * v + ell2 * inner(grad(f), grad(v))) * dx),
-        solver_parameters={"ksp_type": "preonly", "pc_type": "lu",
-                           "pc_factor_mat_solver_type": "mumps"})
+        solver_parameters=direct_solver_parameters("lu"))
     num = Function(V, name="regional_tau_d_sum")
     den = Function(V, name="regional_grounded_weight")
     solver.solve(num, assemble(grounded * driving_stress_magnitude(H, s) * v * dx))

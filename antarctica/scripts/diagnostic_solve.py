@@ -51,6 +51,7 @@ FIG_DIR = os.path.join(_ROOT, "figs")
 
 sys.path.insert(0, os.path.dirname(_ROOT))
 from mesh_naming import get_buffer_m, mesh_filename
+from icepack2_tools.solverconfig import mumps_workspace
 from icepack2_tools.boundary import load_boundary_ids
 from icepack2_tools.mpi_stats import global_size
 from icepack2_tools.runconfig import obs_data_root, lc as _lc, lc_coarse as _lc_coarse
@@ -196,6 +197,7 @@ def main():
         "ksp_type": "gmres",
         "pc_type": "lu",
         "pc_factor_mat_solver_type": "mumps",
+        **mumps_workspace(),
     }
     pparams = {"form_compiler_parameters": {"quadrature_degree": 4}}
 

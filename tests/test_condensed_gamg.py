@@ -19,6 +19,7 @@ sys.path.insert(0, str(REPO / "antarctica" / "scripts"))
 import timing_campaign as tc  # noqa: E402
 from build_timing_matrix import SNES_COUNT_MARK, _solver_work  # noqa: E402
 from icepack2_tools.solverconfig import (  # noqa: E402
+    MUMPS_WORKSPACE_PERCENT,
     diagnostic_solver_parameters,
     solver_provenance,
 )
@@ -117,6 +118,7 @@ def test_no_gamg_knob_moves_the_cache_solver_s_fingerprint(monkeypatch):
     expected = {
         "mat_type": "aij", "ksp_type": "preonly", "pc_type": "lu",
         "pc_factor_mat_solver_type": "mumps",
+        "mat_mumps_icntl_14": MUMPS_WORKSPACE_PERCENT,
     }
     if _have_ptscotch():
         expected.update({"mat_mumps_icntl_28": 2, "mat_mumps_icntl_29": 1})

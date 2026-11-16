@@ -42,6 +42,7 @@ from icepack.constants import (ice_density as rho_I, heat_capacity as c_heat,
                                melting_temperature as Tm, glen_flow_law as n_glen)
 from icepack.models.viscosity import rate_factor
 from icepack2_tools.mpi_stats import global_range
+from icepack2_tools.solverconfig import direct_solver_parameters
 
 DEFAULTS = dict(kappa=4.0, T_srf=263.15, q_geo=50.0, shear_amp=30.0,
                 duval=181.25, w_max=0.01, friction_exp=3.0, u_scale=1.0)
@@ -168,8 +169,7 @@ def solve_energy(u_adv, h, s, C, A_k, bed, acc, p, with_strain=True,
 
     E_out = fd.Function(QD, name="energy")
     fd.solve(a_adv + a_exch + a_base == L_in + L_exch + L_base + L_src, E_out,
-             solver_parameters={"ksp_type": "preonly", "pc_type": "lu",
-                                "pc_factor_mat_solver_type": "mumps"})
+             solver_parameters=direct_solver_parameters("lu"))
     return E_out
 
 

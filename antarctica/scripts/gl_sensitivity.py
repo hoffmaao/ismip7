@@ -63,6 +63,7 @@ _ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 _PROJECT = os.path.dirname(_ROOT)
 sys.path.insert(0, _PROJECT)
 sys.path.insert(0, os.path.join(_ROOT, "scripts"))
+from icepack2_tools.solverconfig import mumps_workspace
 from icepack2_tools.boundary import load_boundary_ids
 from icepack2_tools.mpi_stats import (global_max, global_range, global_size,
                                       global_sum)
@@ -219,7 +220,7 @@ def main():
         "ksp_type": "gmres",
         "pc_type": "lu",
         "pc_factor_mat_solver_type": "mumps",
-        "mat_mumps_icntl_14": 200,
+        **mumps_workspace(),
         "mat_mumps_icntl_24": 1,
         "mat_mumps_cntl_3": 1e-12,
     }

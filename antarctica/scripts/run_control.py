@@ -54,6 +54,8 @@ MESH_DIR = os.path.join(_ROOT, "mesh")
 RESULTS_DIR = os.path.join(_ROOT, "results")
 
 sys.path.insert(0, os.path.dirname(_ROOT))
+from icepack2_tools.solverconfig import (MUMPS_FULL_JACOBIAN_WORKSPACE_PERCENT,
+                                         direct_solver_parameters, mumps_workspace)
 from icepack2_tools.mpi_stats import global_mean, global_size
 from icepack2_tools.boundary import load_boundary_ids
 from icepack2_tools.runconfig import obs_data_root, lc as _lc, lc_coarse as _lc_coarse
@@ -171,7 +173,7 @@ def main():
         "ksp_type": "gmres",
         "pc_type": "lu",
         "pc_factor_mat_solver_type": "mumps",
-        "mat_mumps_icntl_14": 400,
+        **mumps_workspace(percent=MUMPS_FULL_JACOBIAN_WORKSPACE_PERCENT),
         "mat_mumps_icntl_24": 1,
         "mat_mumps_cntl_3": 1e-12,
     }
@@ -282,11 +284,7 @@ def main():
         fd.solve(
             fd.lhs(F_prog) == fd.rhs(F_prog),
             h_dg,
-            solver_parameters={
-                "ksp_type": "preonly",
-                "pc_type": "lu",
-                "pc_factor_mat_solver_type": "mumps",
-            },
+            solver_parameters=direct_solver_parameters("lu"),
         )
 
         # Clamp and project back to CG1

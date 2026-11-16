@@ -44,6 +44,7 @@ from mpi4py import MPI
 
 from .mpi_stats import global_count, global_size
 from .naming import parse_mesh_basename
+from .solverconfig import MUMPS_WORKSPACE_PERCENT
 
 def meshes_match(mesh_a, mesh_b, comm=None):
     r"""Whether two meshes are the same mesh: the same global cell and vertex
@@ -299,6 +300,8 @@ def harmonic_extension(target, missing, fill, comm=None, *, log=False,
         pc.setType("lu")
         if A.getComm().getSize() > 1 or PETSc.Sys.hasExternalPackage("mumps"):
             pc.setFactorSolverType("mumps")
+            pc.setFactorSetUpSolverType()
+            pc.getFactorMatrix().setMumpsIcntl(14, MUMPS_WORKSPACE_PERCENT)
         ksp.solve(b, d)
         if ksp.getConvergedReason() <= 0:
             raise RuntimeError(

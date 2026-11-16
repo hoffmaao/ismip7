@@ -600,9 +600,10 @@ def sha256_file(path, chunk_size=8 * 1024 * 1024):
 
 
 # MUMPS's analysis and ordering (ICNTL 28 and 29) follow the PETSc build and
-# ISMIP7_MUMPS_ANALYSIS. They change how the factorization is computed and
+# ISMIP7_MUMPS_ANALYSIS, and its workspace margin (ICNTL 14) was added after
+# the caches were prepared. They change how the factorization is computed and
 # leave the converged state alone, so a MUMPS-factored block is fingerprinted
-# with the values every cache was prepared under.
+# with the values every cache was prepared under (no margin).
 _MUMPS_BLOCK_PREFIXES = ("condensed_field_", "fieldsplit_1_")
 _MUMPS_ANALYSIS_FINGERPRINT = {"mat_mumps_icntl_28": 2, "mat_mumps_icntl_29": 1}
 
@@ -625,6 +626,7 @@ def solver_configuration_fingerprint(configuration):
                     f"{prefix}{key}": value
                     for key, value in _MUMPS_ANALYSIS_FINGERPRINT.items()
                 })
+                petsc_options.pop(f"{prefix}mat_mumps_icntl_14", None)
     selected = {
         "diagnostic_mode": configuration.get("diagnostic_mode"),
         "diagnostic_petsc_options": petsc_options,

@@ -27,6 +27,8 @@ the DEVIATION, not the amplitude.
 
 import functools
 
+from .solverconfig import direct_solver_parameters
+
 L_REG = 7500.0  # correlation length (m); the one definition used everywhere
 
 
@@ -150,8 +152,7 @@ def bilaplacian_energy_form(aux):
 
 # MUMPS Cholesky, the options the inversion's prior-metric solvers use. M is
 # symmetric positive definite on any mesh.
-MASS_CHOLESKY = {"ksp_type": "preonly", "pc_type": "cholesky",
-                 "pc_factor_mat_solver_type": "mumps"}
+MASS_CHOLESKY = direct_solver_parameters("cholesky")
 
 
 def _update(vec, other, method):

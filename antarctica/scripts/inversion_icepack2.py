@@ -160,6 +160,7 @@ from icepack2_tools.solverconfig import (
     direct_forward_parameters,
     diagnostic_solver_mode,
     diagnostic_solver_parameters,
+    direct_solver_parameters,
     mumps_analysis,
     final_solve_bounds,
     final_solve_parameters,
@@ -2172,8 +2173,7 @@ def main():
         # A is symmetric positive definite by construction (delta, gamma > 0),
         # so Cholesky; it is constant, so this factors once and every
         # application below is a back-substitution.
-        _fac = {"ksp_type": "preonly", "pc_type": "cholesky",
-                "pc_factor_mat_solver_type": "mumps"}
+        _fac = direct_solver_parameters("cholesky")
         solvers = {
             which: fd.LinearSolver(
                 assemble(prior_operator_form(_tr, _prior_test,

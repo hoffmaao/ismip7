@@ -66,6 +66,7 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", ".."))
 from icepack2_tools.prior import (  # noqa: E402
     BilaplacianAuxSolver, bilaplacian_aux_residual, bilaplacian_coeffs,
     bilaplacian_energy_form, prior_operator_form)
+from icepack2_tools.solverconfig import mumps_workspace  # noqa: E402
 from icepack2_tools.profiling import Spans  # noqa: E402
 
 # The driver's settings: fc_params, and the bi-Laplacian prior of the issue
@@ -75,7 +76,8 @@ DELTA, GAMMA = bilaplacian_coeffs(0.3, 7500.0)
 NEWTON_PT = {"snes_type": "newtonls", "snes_linesearch_type": "basic",
              "ksp_type": "preonly", "pc_type": "lu",
              "pc_factor_mat_solver_type": "mumps",
-             "mat_mumps_icntl_28": 2, "mat_mumps_icntl_29": 1}
+             "mat_mumps_icntl_28": 2, "mat_mumps_icntl_29": 1,
+             **mumps_workspace()}
 CG = {"ksp_type": "cg", "pc_type": "jacobi", "ksp_rtol": 1e-12,
       "ksp_atol": 0.0}
 VARIANTS = ("newton", "newton_pt", "factored", "cg")

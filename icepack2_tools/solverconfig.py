@@ -364,11 +364,50 @@ def mumps_analysis():
     return value
 
 
+# MUMPS's workspace margin, ICNTL(14), in percent of its own estimate of the
+# main work array. MUMPS's default (20-35) is sometimes short in a distributed
+# numeric factorization, which then fails with INFOG(1) = -9 at random from
+# one factorization of the same matrix to the next. Firedrake's own default of
+# 200 never reaches MUMPS: it is written under ``pc_factor_``, and the factor
+# matrix reads its options under the solver's prefix alone (firedrake#5311).
+# On the Greenland 1 km CG1 mass matrix on 32 ranks 13 of 150 Cholesky
+# factorizations failed at MUMPS's default and none of 750 at 100, 200 or 400;
+# 200 costs 1.5 % more factor memory there (16 Nov 2026). The failures ended
+# gris2 inversion links at their first prior-metric solve. The full mixed
+# Jacobian keeps the larger margin it has always run with.
+MUMPS_WORKSPACE_PERCENT = 200
+MUMPS_FULL_JACOBIAN_WORKSPACE_PERCENT = 400
+
+
+def mumps_workspace(prefix="", percent=MUMPS_WORKSPACE_PERCENT):
+    r"""The MUMPS workspace margin under the name MUMPS reads, for a solver
+    (or a sub-solver) with options prefix ``prefix``."""
+    return {f"{prefix}mat_mumps_icntl_14": percent}
+
+
+def direct_solver_parameters(pc_type="lu"):
+    r"""Options for a MUMPS factorization of a constant matrix, applied by
+    back-substitution: ``cholesky`` for a symmetric positive definite one,
+    else ``lu``. A failed factorization raises at its source with MUMPS's
+    INFOG(1) and INFO(2) (``ksp_error_if_not_converged``) instead of
+    surfacing as a diverged linear solve with no MUMPS code."""
+    if pc_type not in ("lu", "cholesky"):
+        raise ValueError(f"pc_type must be lu or cholesky, not {pc_type!r}")
+    return {
+        "ksp_type": "preonly",
+        "pc_type": pc_type,
+        "pc_factor_mat_solver_type": "mumps",
+        **mumps_workspace(),
+        "ksp_error_if_not_converged": None,
+    }
+
+
 def _mumps_options(prefix=""):
     opts = {
         f"{prefix}pc_type": "lu",
         f"{prefix}pc_factor_mat_solver_type": "mumps",
     }
+    opts.update(mumps_workspace(prefix))
     # Read the knob first, so a bad value fails on every build.
     analysis = mumps_analysis()
     if analysis == "parallel" and _have_ptscotch():
@@ -400,7 +439,7 @@ def diagnostic_solver_parameters(mode=None):
             "ksp_type": "gmres",
             "pc_type": "lu",
             "pc_factor_mat_solver_type": "mumps",
-            "mat_mumps_icntl_14": 400,
+            "mat_mumps_icntl_14": MUMPS_FULL_JACOBIAN_WORKSPACE_PERCENT,
             "mat_mumps_icntl_24": 1,
             "mat_mumps_cntl_3": 1e-12,
         })
@@ -497,7 +536,7 @@ def inversion_state_parameters(mode=None):
         "ksp_type": "gmres",
         "pc_type": "lu",
         "pc_factor_mat_solver_type": "mumps",
-        "mat_mumps_icntl_14": 400,  # working memory increase
+        "mat_mumps_icntl_14": MUMPS_FULL_JACOBIAN_WORKSPACE_PERCENT,
         "mat_mumps_icntl_24": 1,  # detect null pivots
         "mat_mumps_cntl_3": 1e-12,  # null pivot threshold
         "mat_mumps_icntl_4": 1,
